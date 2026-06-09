@@ -794,14 +794,36 @@ function showChannelCandidateDialog(keyword, candidates) {
     ?.addEventListener("click", closeChannelCandidateDialog);
   overlay
     .querySelectorAll("[data-channel-candidate-index]")
-    .forEach((button) => {
-      button.addEventListener("click", () => {
-        const index = Number(button.dataset.channelCandidateIndex);
+    .forEach((item) => {
+      item.addEventListener("click", (event) => {
+        if (event.target.closest("[data-channel-candidate-action]")) return;
+        if (item.getAttribute("aria-disabled") === "true") return;
+        const index = Number(item.dataset.channelCandidateIndex);
         const candidate = candidates[index];
         if (candidate) {
           void selectChannelCandidate(candidate, keyword);
         }
       });
+      item.addEventListener("keydown", (event) => {
+        if (item.getAttribute("aria-disabled") === "true") return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        const index = Number(item.dataset.channelCandidateIndex);
+        const candidate = candidates[index];
+        if (candidate) {
+          void selectChannelCandidate(candidate, keyword);
+        }
+      });
+    });
+  overlay
+    .querySelectorAll('[data-channel-candidate-action="toggle-id"]')
+    .forEach((button) => {
+      button.addEventListener("click", toggleChannelCandidateId);
+    });
+  overlay
+    .querySelectorAll('[data-channel-candidate-action="copy-id"]')
+    .forEach((button) => {
+      button.addEventListener("click", copyChannelCandidateId);
     });
   overlay.querySelectorAll("[data-official-badge]").forEach((image) => {
     image.addEventListener("error", () => {
@@ -818,7 +840,7 @@ function showChannelCandidateDialog(keyword, candidates) {
   document.body.append(overlay);
   setTimeout(() => {
     overlay
-      .querySelector("[data-channel-candidate-index]:not(:disabled)")
+      .querySelector('[data-channel-candidate-index][aria-disabled="false"]')
       ?.focus();
   }, CANDIDATE_MIN_SKELETON_MS + 20);
 }
@@ -832,50 +854,59 @@ function renderChannelCandidateButton(candidate, index) {
   const verified = candidate?.verifiedMark
     ? `<span class="popup-channel-candidate-verified-wrap"><img class="popup-channel-candidate-official" data-official-badge src="${escapeAttribute(OFFICIAL_MARK_ICON_URL)}" alt="인증"><em class="popup-channel-candidate-verified" hidden>인증</em></span>`
     : "";
+  const channelId = String(candidate?.channelId || "");
   return `
-    <button type="button" class="popup-channel-candidate-item is-loading${imageUrl ? " is-avatar-pending" : ""}" data-channel-candidate-index="${index}" disabled>
+    <div class="popup-channel-candidate-item is-loading${imageUrl ? " is-avatar-pending" : ""}" data-channel-candidate-index="${index}" role="button" tabindex="-1" aria-disabled="true">
       <span class="popup-channel-candidate-avatar">${avatar}</span>
       <span class="popup-channel-candidate-text">
         <span class="popup-channel-candidate-skeleton-name popup-candidate-shimmer"></span>
         <span class="popup-channel-candidate-skeleton-id popup-candidate-shimmer"></span>
         <strong class="popup-channel-candidate-real"><span>${escapeHtml(name)}</span>${verified}</strong>
-        <code class="popup-channel-candidate-real">${escapeHtml(candidate?.channelId || "")}</code>
+        <span class="popup-channel-candidate-id-row popup-channel-candidate-real">
+          <code class="popup-channel-candidate-id-value" data-channel-candidate-id-value hidden>${escapeHtml(channelId)}</code>
+          <span class="popup-channel-candidate-id-placeholder" data-channel-candidate-id-placeholder>채널 ID 숨김</span>
+          <span class="popup-channel-candidate-id-actions">
+            <button type="button" class="popup-channel-candidate-id-button" data-channel-candidate-action="toggle-id" aria-expanded="false">보이기</button>
+            <button type="button" class="popup-channel-candidate-id-button" data-channel-candidate-action="copy-id" data-channel-id="${escapeAttribute(channelId)}">복사</button>
+          </span>
+        </span>
       </span>
-    </button>
+    </div>
   `;
 }
 
 function hydrateChannelCandidateItems(root) {
-  root.querySelectorAll("[data-channel-candidate-index]").forEach((button) => {
+  root.querySelectorAll("[data-channel-candidate-index]").forEach((item) => {
     const skeletonStartedAt = performance.now();
-    const image = button.querySelector("[data-channel-candidate-avatar-img]");
-    const fallback = button.querySelector(
+    const image = item.querySelector("[data-channel-candidate-avatar-img]");
+    const fallback = item.querySelector(
       "[data-channel-candidate-avatar-fallback]",
     );
-    const avatarShimmer = button.querySelector(
+    const avatarShimmer = item.querySelector(
       ".popup-channel-candidate-avatar-shimmer",
     );
-    const textSkeletons = button.querySelectorAll(
+    const textSkeletons = item.querySelectorAll(
       ".popup-channel-candidate-skeleton-name, .popup-channel-candidate-skeleton-id",
     );
 
     const revealText = () => {
       textSkeletons.forEach((skeleton) => skeleton.remove());
-      button.classList.remove("is-loading");
-      button.disabled = false;
+      item.classList.remove("is-loading");
+      item.setAttribute("aria-disabled", "false");
+      item.tabIndex = 0;
     };
     const revealAvatar = () => {
       if (image) image.hidden = false;
       fallback?.remove();
-      button.classList.remove("is-avatar-pending");
-      button.classList.add("is-avatar-loaded");
+      item.classList.remove("is-avatar-pending");
+      item.classList.add("is-avatar-loaded");
       setTimeout(() => avatarShimmer?.remove(), CANDIDATE_AVATAR_FADE_MS);
     };
     const revealFallback = () => {
       image?.remove();
       if (fallback) fallback.hidden = false;
       avatarShimmer?.remove();
-      button.classList.remove("is-avatar-pending");
+      item.classList.remove("is-avatar-pending");
       revealText();
     };
     const afterMinimumSkeleton = (callback) => {
@@ -924,6 +955,66 @@ function hydrateChannelCandidateItems(root) {
 
     setTimeout(revealText, CANDIDATE_MIN_SKELETON_MS);
   });
+}
+
+function toggleChannelCandidateId(event) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const button = event.currentTarget;
+  const row = button.closest(".popup-channel-candidate-id-row");
+  const value = row?.querySelector("[data-channel-candidate-id-value]");
+  const placeholder = row?.querySelector(
+    "[data-channel-candidate-id-placeholder]",
+  );
+  if (!row || !value || !placeholder) return;
+
+  const willShow = value.hidden;
+  value.hidden = !willShow;
+  placeholder.hidden = willShow;
+  button.textContent = willShow ? "숨기기" : "보이기";
+  button.setAttribute("aria-expanded", String(willShow));
+  row.classList.toggle("is-visible", willShow);
+}
+
+async function copyChannelCandidateId(event) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const button = event.currentTarget;
+  const channelId = String(button.dataset.channelId || "").trim();
+  if (!channelId) return;
+
+  const originalText = button.textContent;
+  try {
+    await copyTextToClipboard(channelId);
+    button.textContent = "복사됨";
+  } catch {
+    button.textContent = "실패";
+  }
+
+  setTimeout(() => {
+    button.textContent = originalText || "복사";
+  }, 1200);
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("copy failed");
 }
 
 async function selectChannelCandidate(candidate, keyword) {
@@ -2003,7 +2094,7 @@ function handleFilterChange() {
 
 function handleCategoryFilterClick(event) {
   const link = event.target.closest("[data-cheese-category-filter]");
-  if (!link || event.ctrlKey) return;
+  if (!link || event.ctrlKey || event.metaKey) return;
   if (!elements.results.contains(link)) return;
 
   event.preventDefault();

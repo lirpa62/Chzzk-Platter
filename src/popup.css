@@ -490,7 +490,7 @@ body[data-content-type="clips"] .popup-controls {
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   overflow-y: auto;
-  padding: 16px 20px 20px;
+  padding: 16px 12px 20px;
 }
 
 .popup-channel-candidate-item {
@@ -503,7 +503,7 @@ body[data-content-type="clips"] .popup-controls {
   display: flex;
   gap: 12px;
   min-width: 0;
-  padding: 12px;
+  padding: 8px;
   text-align: left;
   transition:
     background-color 0.16s,
@@ -511,12 +511,12 @@ body[data-content-type="clips"] .popup-controls {
     box-shadow 0.16s;
 }
 
-.popup-channel-candidate-item:disabled {
+.popup-channel-candidate-item[aria-disabled="true"] {
   cursor: progress;
   opacity: 1;
 }
 
-.popup-channel-candidate-item:hover,
+.popup-channel-candidate-item[aria-disabled="false"]:hover,
 .popup-channel-candidate-item:focus-visible {
   background: var(--popup-help-bg);
   border-color: var(--popup-brand);
@@ -654,16 +654,70 @@ body[data-content-type="clips"] .popup-controls {
   display: none;
 }
 
-.popup-channel-candidate-text code {
+.popup-channel-candidate-id-row {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.popup-channel-candidate-id-value,
+.popup-channel-candidate-id-placeholder {
   color: var(--popup-muted);
   display: block;
+  flex: 1 1 auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 15px;
-  margin-top: 3px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.popup-channel-candidate-id-value[hidden],
+.popup-channel-candidate-id-placeholder[hidden] {
+  display: none !important;
+}
+
+.popup-channel-candidate-id-placeholder {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.popup-channel-candidate-id-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.popup-channel-candidate-id-button {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border-soft);
+  border-radius: 999px;
+  color: var(--popup-muted-strong);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  height: 22px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0 8px;
+}
+
+.popup-channel-candidate-id-button:hover,
+.popup-channel-candidate-id-button:focus-visible {
+  background: var(--popup-help-bg);
+  border-color: var(--popup-brand);
+  color: var(--popup-brand-strong);
+  outline: 0;
 }
 
 .popup-channel-candidate-verified {

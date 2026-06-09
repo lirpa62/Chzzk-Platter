@@ -682,19 +682,6 @@ function getAutoRestoreDisabledKey({ isClipSearch, controls }) {
   return `${AUTO_RESTORE_DISABLED_PREFIX}${state.channelId}:videos`;
 }
 
-function getAutoRestoreDisabledKeyFromRestoreState({
-  isClipSearch,
-  restoreState,
-}) {
-  if (!state.channelId || !restoreState) return "";
-  if (isClipSearch) {
-    const filterType = normalizeClipFilterType(restoreState.filterType);
-    const orderType = normalizeClipOrderType(restoreState.orderType);
-    return `${AUTO_RESTORE_DISABLED_PREFIX}${state.channelId}:clips:${filterType}:${orderType}`;
-  }
-  return `${AUTO_RESTORE_DISABLED_PREFIX}${state.channelId}:videos`;
-}
-
 function getLastAutoRestoreKey({ isClipSearch }) {
   if (!state.channelId) return "";
   return `${LAST_AUTO_RESTORE_PREFIX}${state.channelId}:${isClipSearch ? "clips" : "videos"}`;
@@ -769,24 +756,6 @@ async function clearLastAutoRestoreState({ isClipSearch }) {
 async function isAutoRestoreDisabled({ isClipSearch, controls }) {
   if (!chrome.storage?.local) return false;
   const key = getAutoRestoreDisabledKey({ isClipSearch, controls });
-  if (!key) return false;
-  try {
-    const data = await chrome.storage.local.get(key);
-    return Boolean(data?.[key]);
-  } catch {
-    return false;
-  }
-}
-
-async function isAutoRestoreDisabledForRestoreState({
-  isClipSearch,
-  restoreState,
-}) {
-  if (!chrome.storage?.local) return false;
-  const key = getAutoRestoreDisabledKeyFromRestoreState({
-    isClipSearch,
-    restoreState,
-  });
   if (!key) return false;
   try {
     const data = await chrome.storage.local.get(key);
@@ -1250,7 +1219,7 @@ function handleCategoryResetClick(event) {
 
 function handleCategoryFilterClick(event) {
   const link = event.target.closest("[data-cheese-category-filter]");
-  if (!link || event.ctrlKey) return;
+  if (!link || event.ctrlKey || event.metaKey) return;
   const searchList = link.closest(".cheese-search-results-list");
   if (!searchList) return;
 
@@ -3108,6 +3077,17 @@ async function resumeFromBackgroundOrCache() {
   const resubscribed = await tryResubscribeOngoingFetch();
   if (resubscribed) return;
   if (state.hasLoaded || state.loading) return;
+
+  if (isClipSearch) {
+    const restoreState = await readLastAutoRestoreState({ isClipSearch });
+    if (
+      restoreState &&
+      (await hydrateFromSessionCache({ isClipSearch, controls, restoreState }))
+    ) {
+      return;
+    }
+  }
+
   const isCurrentRestoreDisabled = await isAutoRestoreDisabled({
     isClipSearch,
     controls,
@@ -3116,17 +3096,6 @@ async function resumeFromBackgroundOrCache() {
     ? false
     : await hydrateFromSessionCache({ isClipSearch, controls });
   if (hydrated || !isClipSearch) return;
-  const restoreState = await readLastAutoRestoreState({ isClipSearch });
-  if (!restoreState) return;
-  if (
-    await isAutoRestoreDisabledForRestoreState({
-      isClipSearch,
-      restoreState,
-    })
-  ) {
-    return;
-  }
-  await hydrateFromSessionCache({ isClipSearch, controls, restoreState });
 }
 
 async function tryResubscribeOngoingFetch() {
