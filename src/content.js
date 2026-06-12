@@ -1130,10 +1130,25 @@ function renderProgressClipCards() {
 
   const filtered = getFilteredVideos(controls);
   const visibleResults = filtered.slice(0, state.visibleCount);
+  updateClipSearchingStatus(searchList);
   if (shouldHideClipResultHeader()) {
     removeResultHeader();
   } else {
     updateResultHeader(ensureHeader(searchList), filtered);
+  }
+
+  if (!filtered.length) {
+    searchList.removeAttribute("aria-busy");
+    if (state.loading && !state.fetchInfo) {
+      if (!searchList.querySelector(".cheese-search-status")) {
+        searchList.innerHTML = renderSearchingStatus(getClipSearchingMessage());
+      }
+      updateClipSearchingStatus(searchList);
+      return;
+    }
+    state.renderedClipUIDs = new Set();
+    searchList.innerHTML = renderSearchEmpty(controls.query);
+    return;
   }
 
   const nextItems = visibleResults.filter((clip) => {
@@ -1151,9 +1166,14 @@ function renderProgressClipCards() {
       state.renderedClipUIDs.add(String(clip?.clipUID || "").trim());
     });
     normalizeRenderedClipCards(searchList);
-  } else if (!filtered.length && !searchList.children.length) {
-    searchList.innerHTML = renderSearchingStatus(getClipSearchingMessage());
   }
+  updateClipSearchingStatus(searchList);
+}
+
+function updateClipSearchingStatus(searchList) {
+  const message = searchList?.querySelector("[data-clip-searching-message]");
+  if (!message) return;
+  message.textContent = getClipSearchingMessage();
 }
 
 function handleFilterChange() {
@@ -1500,7 +1520,7 @@ function renderSearchingStatus(message) {
       <div class="cheese-search-loading-visual" aria-hidden="true">
         <img src="${escapeAttribute(SEARCHING_ANIMATION_URL)}" alt="" loading="lazy" decoding="async">
       </div>
-      <strong>${escapeHtml(message)}</strong>
+      <strong data-clip-searching-message>${escapeHtml(message)}</strong>
     </li>
   `;
 }
@@ -1670,7 +1690,7 @@ async function resetSearch() {
   resetCalendarMonthsToCurrent();
   setDurationValue(shell, "all");
   setVideoTypeValue(shell, "all");
-  setSortValue(shell, "latest");
+  setSortValue(shell, getInitialSortValue());
   closeFloatingControls(shell);
 
   const header = document.querySelector(".cheese-search-result-header");

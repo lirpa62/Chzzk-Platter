@@ -285,6 +285,14 @@ async function loadVideos(forceRefresh = false) {
     if (unchangedRevalidation) {
       fetchInfo = result;
       fromCache = Boolean(result.fromCache);
+      if (isClipSearch) {
+        activeFetchRequestId = "";
+        activeFetchSilentRevalidate = false;
+        clearProgressStallTimer();
+        clearFetchProgress();
+        updateRefreshButton();
+        renderProgressClipCards();
+      }
       return;
     }
 
@@ -640,6 +648,21 @@ function renderProgressClipCards() {
   const filtered = getFilteredVideos();
   const visibleResults = filtered.slice(0, visibleCount);
   updateSummary(filtered);
+  updateClipSearchingStatus();
+
+  if (!filtered.length) {
+    elements.results.removeAttribute("aria-busy");
+    if (activeFetchRequestId && !fetchInfo) {
+      if (!elements.results.querySelector(".popup-empty")) {
+        elements.results.innerHTML = renderSearchingStatus();
+      }
+      updateClipSearchingStatus();
+      return;
+    }
+    renderedClipUIDs = new Set();
+    elements.results.innerHTML = renderSearchEmpty(elements.query.value);
+    return;
+  }
 
   const nextItems = visibleResults.filter((clip) => {
     const clipUID = String(clip?.clipUID || "").trim();
@@ -656,9 +679,17 @@ function renderProgressClipCards() {
       renderedClipUIDs.add(String(clip?.clipUID || "").trim());
     });
     normalizeRenderedClipCards(elements.results);
-  } else if (!filtered.length && !elements.results.children.length) {
-    elements.results.innerHTML = renderSearchingStatus();
   }
+  updateClipSearchingStatus();
+}
+
+function updateClipSearchingStatus() {
+  const count = videos.length.toLocaleString("ko-KR");
+  const message = elements.results.querySelector(
+    "[data-clip-searching-count]",
+  );
+  if (!message) return;
+  message.textContent = `현재 ${count}개를 확인했습니다.`;
 }
 
 async function searchStreamer() {
@@ -1282,7 +1313,7 @@ function renderSearchingStatus() {
         <img src="${escapeAttribute(SEARCHING_ANIMATION_URL)}" alt="" loading="lazy" decoding="async">
       </div>
       <strong>클립을 모으며 검색 중입니다.</strong>
-      <p>현재 ${videos.length.toLocaleString("ko-KR")}개를 확인했습니다.</p>
+      <p data-clip-searching-count>현재 ${videos.length.toLocaleString("ko-KR")}개를 확인했습니다.</p>
     </li>
   `;
 }
@@ -2233,7 +2264,7 @@ function resetFilters() {
   resetCalendarMonthsToCurrent();
   setDurationValue("all");
   setVideoTypeValue("all");
-  setSortValue("latest");
+  setSortValue(getInitialSortValue());
   syncFilterUrl();
   closeDurationMenu();
   closeVideoTypeMenu();
