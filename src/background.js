@@ -1,8 +1,14 @@
 const SERVICE_API_BASE = "https://api.chzzk.naver.com/service/v1";
 const API_BASE = `${SERVICE_API_BASE}/channels`;
+const COMMENT_API_BASE = "https://apis.naver.com/nng_main/nng_comment_api/v1";
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
+const COMMENT_TIMESTAMP_CACHE_TTL_MS = 30 * 60 * 1000;
+const COMMENT_TIMESTAMP_CACHE_VERSION = 2;
 const PAGE_SIZE = 50;
 const CLIP_PAGE_SIZE = 50;
+const COMMENT_TIMESTAMP_PAGE_SIZE = 30;
+const COMMENT_TIMESTAMP_MAX_PAGES = 5;
+const COMMENT_TIMESTAMP_CLUSTER_RANGE_SECONDS = 3;
 const SEARCH_CHANNEL_PAGE_SIZE = 33;
 const MAX_CONCURRENT_PAGE_REQUESTS = 3;
 const MAX_CONCURRENT_COLLECTION_TASKS = 2;
@@ -21,6 +27,7 @@ const inFlightFetches = new Map();
 const channelSearchCache = new Map();
 const categoryInfoCache = new Map();
 const categoryInfoInFlight = new Map();
+const commentTimestampCache = new Map();
 const collectionTaskQueue = [];
 let activeCollectionTaskCount = 0;
 let channelSearchQueue = Promise.resolve();
@@ -699,6 +706,315 @@ async function fetchCategoryInfo(key, signal) {
   const payload = await response.json();
   if (Number(payload?.code) !== 200 || !payload.content) return null;
   return payload.content;
+}
+
+async function fetchCommentTimestamps(videoNo) {
+  const normalizedVideoNo = String(videoNo || "").trim();
+  if (!/^\d+$/.test(normalizedVideoNo)) {
+    throw new Error("동영상 번호를 확인할 수 없습니다.");
+  }
+
+  const cached = commentTimestampCache.get(normalizedVideoNo);
+  if (
+    cached &&
+    cached.version === COMMENT_TIMESTAMP_CACHE_VERSION &&
+    Date.now() - Number(cached.createdAt || 0) < COMMENT_TIMESTAMP_CACHE_TTL_MS
+  ) {
+    return cached.value;
+  }
+
+  const entries = [];
+  let totalCount = 0;
+  for (let page = 0; page < COMMENT_TIMESTAMP_MAX_PAGES; page += 1) {
+    const offset = page * COMMENT_TIMESTAMP_PAGE_SIZE;
+    const content = await fetchCommentPage(normalizedVideoNo, offset);
+    if (!content) break;
+
+    if (page === 0) {
+      entries.push(...collectCommentEntries(content.bestComments, "best"));
+    }
+    entries.push(...collectCommentEntries(content.comments?.data, "comment"));
+    totalCount = Number(content.comments?.totalCount || totalCount || 0);
+
+    const fetchedCount = offset + COMMENT_TIMESTAMP_PAGE_SIZE;
+    const hasNextPage =
+      Array.isArray(content.comments?.data) &&
+      content.comments.data.length >= COMMENT_TIMESTAMP_PAGE_SIZE &&
+      (!totalCount || fetchedCount < totalCount);
+    if (!hasNextPage) break;
+  }
+
+  const markers = buildTimestampMarkers(entries);
+  const value = {
+    videoNo: normalizedVideoNo,
+    markers,
+    scannedCommentCount: entries.length,
+    fetchedAt: Date.now(),
+  };
+  commentTimestampCache.set(normalizedVideoNo, {
+    createdAt: Date.now(),
+    version: COMMENT_TIMESTAMP_CACHE_VERSION,
+    value,
+  });
+  return value;
+}
+
+async function fetchCommentPage(videoNo, offset) {
+  const url = new URL(
+    `${COMMENT_API_BASE}/type/STREAMING_VIDEO/id/${encodeURIComponent(videoNo)}/comments`,
+  );
+  url.searchParams.set("limit", String(COMMENT_TIMESTAMP_PAGE_SIZE));
+  url.searchParams.set("offset", String(offset));
+  url.searchParams.set("orderType", "POPULAR");
+  url.searchParams.set("pagingType", "PAGE");
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      accept: "application/json, text/plain, */*",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`댓글 API 요청 실패: HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (Number(payload?.code) !== 200 || !payload.content) {
+    throw new Error(payload?.message || "댓글 API 응답을 읽을 수 없습니다.");
+  }
+  return payload.content;
+}
+
+function collectCommentEntries(items, sourceType = "comment") {
+  if (!Array.isArray(items)) return [];
+  const entries = [];
+  items.forEach((item) => {
+    const entry = toCommentEntry(item, sourceType);
+    if (entry) entries.push(entry);
+    entries.push(...collectCommentEntries(item?.replyComments, "reply"));
+  });
+  return entries;
+}
+
+function toCommentEntry(item, sourceType = "comment") {
+  const comment = item?.comment;
+  if (!comment || comment.deleted || comment.hideByCleanBot) return null;
+  const content = String(comment.content || "").trim();
+  if (!content) return null;
+  return {
+    commentId: String(comment.commentId || ""),
+    content,
+    nickname: String(item?.user?.userNickname || "익명").trim() || "익명",
+    buffCount: Number(item?.buffNerf?.buffCount || 0),
+    createdDate: String(comment.createdDate || ""),
+    sourceType,
+  };
+}
+
+function buildTimestampMarkers(entries) {
+  const candidates = [];
+  entries.forEach((entry) => {
+    extractTimestampDescriptions(entry.content).forEach((item) => {
+      const seconds = item.seconds;
+      if (!Number.isFinite(seconds) || seconds < 0) return;
+      const description = normalizeTimestampDescription(item.description);
+      candidates.push({
+        seconds,
+        description,
+        nickname: entry.nickname,
+        commentId: entry.commentId,
+        buffCount: entry.buffCount,
+        sourceType: entry.sourceType,
+        hasDescription: Boolean(description),
+      });
+    });
+  });
+
+  const clusters = clusterTimestampCandidates(candidates);
+  return clusters
+    .map(buildTimestampMarkerFromCluster)
+    .sort((a, b) => a.seconds - b.seconds)
+    .slice(0, 80);
+}
+
+function clusterTimestampCandidates(candidates) {
+  const sorted = candidates
+    .filter((candidate) => Number.isFinite(candidate.seconds))
+    .sort((a, b) => a.seconds - b.seconds);
+  const clusters = [];
+  sorted.forEach((candidate) => {
+    const cluster = clusters.find((item) =>
+      item.some(
+        (existing) =>
+          Math.abs(existing.seconds - candidate.seconds) <=
+          COMMENT_TIMESTAMP_CLUSTER_RANGE_SECONDS,
+      ),
+    );
+    if (cluster) {
+      cluster.push(candidate);
+      return;
+    }
+    clusters.push([candidate]);
+  });
+  return clusters;
+}
+
+function buildTimestampMarkerFromCluster(cluster) {
+  const primarySorted = [...cluster].sort(compareTimestampCandidatePriority);
+  const displaySorted = [...cluster].sort(compareTimestampCandidateDisplay);
+  const primary = primarySorted[0];
+  const descriptionKeys = new Set();
+  const comments = [];
+  displaySorted.forEach((candidate) => {
+    const descriptionKey =
+      normalizeSearchText(candidate.description) ||
+      `__empty__:${candidate.sourceType}:${candidate.commentId}:${candidate.seconds}`;
+    if (descriptionKeys.has(descriptionKey)) return;
+    descriptionKeys.add(descriptionKey);
+    comments.push({
+      description: candidate.description,
+      nickname: candidate.nickname,
+      commentId: candidate.commentId,
+      buffCount: candidate.buffCount,
+      sourceType: candidate.sourceType,
+    });
+  });
+
+  return {
+    seconds: primary.seconds,
+    timeLabel: formatTimestamp(primary.seconds),
+    comments: comments.slice(0, 4),
+    sourceCount: cluster.length,
+    score: primarySorted.reduce(
+      (total, candidate) =>
+        total +
+        getTimestampCandidatePriority(candidate) +
+        Number(candidate.buffCount || 0),
+      0,
+    ),
+  };
+}
+
+function compareTimestampCandidatePriority(a, b) {
+  return (
+    getTimestampCandidatePriority(b) - getTimestampCandidatePriority(a) ||
+    Number(b.buffCount || 0) - Number(a.buffCount || 0) ||
+    a.seconds - b.seconds
+  );
+}
+
+function compareTimestampCandidateDisplay(a, b) {
+  return (
+    Number(Boolean(b.hasDescription)) - Number(Boolean(a.hasDescription)) ||
+    getTimestampCandidatePriority(b) - getTimestampCandidatePriority(a) ||
+    Number(b.buffCount || 0) - Number(a.buffCount || 0) ||
+    a.seconds - b.seconds
+  );
+}
+
+function getTimestampCandidatePriority(candidate) {
+  const sourceScore =
+    candidate.sourceType === "best"
+      ? 100
+      : candidate.sourceType === "comment"
+        ? 40
+        : 10;
+  const descriptionScore = candidate.hasDescription ? 35 : 0;
+  return sourceScore + descriptionScore;
+}
+
+function extractTimestampDescriptions(content) {
+  return String(content || "")
+    .split(/\r?\n/)
+    .flatMap((line) => extractTimestampDescriptionsFromLine(line));
+}
+
+function extractTimestampDescriptionsFromLine(line) {
+  const trimmedLine = String(line || "").trim();
+  if (!trimmedLine) return [];
+
+  const timestampMatches = Array.from(
+    trimmedLine.matchAll(/(?:\d{1,2}:)?\d{1,2}:\d{2}/g),
+  );
+  if (timestampMatches.length > 1 && isTimestampListLine(trimmedLine)) {
+    return timestampMatches.map((match) => ({
+      seconds: parseTimestamp(match[0]),
+      description: "",
+    }));
+  }
+
+  const match = trimmedLine.match(
+    /^(?:[-*•■▶▷\[\](){}<>〈〉《》「」『』【】（）［］｛｝\s]*)?((?:\d{1,2}:)?\d{1,2}:\d{2})(?:[\])}>\u3009\u300b\u300d\u300f\u3011\uff09\uff3d\uff5d])?(.*)$/u,
+  );
+  if (!match) return [];
+
+  const seconds = parseTimestamp(match[1]);
+  const description = normalizeTimestampDescription(match[2]);
+  return [{ seconds, description }];
+}
+
+function isTimestampListLine(line) {
+  return !String(line || "")
+    .replace(/(?:\d{1,2}:)?\d{1,2}:\d{2}/g, "")
+    .replace(/[\s,/|·ㆍ・‧•\-–—_()[\]{}]+/g, "")
+    .trim();
+}
+
+function normalizeTimestampDescription(description) {
+  const text = String(description || "")
+    .replace(/^[\s\-–—_:|/.,~·▶▷\])}>\u3009\u300b\u300d\u300f\u3011\uff09\uff3d\uff5d]+/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  const withoutTimestamps = text
+    .replace(/(?:\d{1,2}:)?\d{1,2}:\d{2}/g, "")
+    .replace(
+      /[\s\-–—_:|/.,~·()[\]{}<>〈〉《》「」『』【】（）［］｛｝]+/g,
+      "",
+    )
+    .trim();
+  return withoutTimestamps ? text : "";
+}
+
+function parseTimestamp(timestamp) {
+  const parts = String(timestamp || "")
+    .split(":")
+    .map((part) => Number(part));
+  if (parts.some((part) => !Number.isFinite(part))) return NaN;
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    if (seconds > 59) return NaN;
+    return minutes * 60 + seconds;
+  }
+  if (parts.length === 3) {
+    const [hours, minutes, seconds] = parts;
+    if (minutes > 59 || seconds > 59) return NaN;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  return NaN;
+}
+
+function formatTimestamp(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  if (hours > 0) {
+    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${minutes}:${paddedSeconds}`;
+}
+
+function normalizeSearchText(text) {
+  return String(text || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function createProgressReporter(sender, requestId) {
@@ -1611,6 +1927,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHEESE_SEARCH_PEEK_CACHE") {
     const payload = message.payload || {};
     peekCacheValue(payload)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_SEARCH_FETCH_COMMENT_TIMESTAMPS") {
+    fetchCommentTimestamps(message.payload?.videoNo)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) =>
         sendResponse({ ok: false, error: normalizeError(error) }),

@@ -33,6 +33,33 @@ const EMPTY_RESULTS_ANIMATION_URL = chrome.runtime.getURL(
 const SEARCHING_ANIMATION_URL = chrome.runtime.getURL(
   "searching-animation.svg",
 );
+const VIDEO_COMMENT_MARKER_SELECTOR = ".cheese-search-comment-marker";
+const VIDEO_COMMENT_MARKER_LAYER_CLASS = "cheese-search-comment-marker-layer";
+const VIDEO_COMMENT_BUTTON_CLASS = "cheese-search-comment-timestamp-button";
+const VIDEO_COMMENT_BUTTON_DISABLED_CLASS = "comment-timestamp-button-disabled";
+const VIDEO_COMMENT_PANEL_CLASS = "cheese-search-comment-timestamp-panel";
+const VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS =
+  "cheese-search-comment-preview-tooltip";
+const COMMENT_BUTTON_INSERT_COOLDOWN_MS = 2000;
+const COMMENT_MARKER_RENDER_RETRY_LIMIT = 30;
+const COMMENT_PANEL_RIGHT_PX = 22;
+const COMMENT_PANEL_BOTTOM_PX = 60;
+const COMMENT_PANEL_TOP_GAP_PX = 12;
+const COMMENT_PANEL_MAX_HEIGHT_PX = 430;
+const COMMENT_PANEL_MIN_HEIGHT_PX = 120;
+const COMMENT_PANEL_ANCHOR_CHECK_MS = 250;
+const COMMENT_PANEL_AUTO_CLOSE_DELAY_MS = 4000;
+const CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR = [
+  ".cheese-search-shell",
+  ".cheese-search-result-header",
+  ".cheese-search-results-list",
+  ".cheese-search-scroll-top",
+  ".cheese-search-comment-marker-layer",
+  ".cheese-search-comment-marker",
+  ".cheese-search-comment-timestamp-button",
+  ".cheese-search-comment-timestamp-panel",
+  ".cheese-search-comment-preview-tooltip",
+].join(",");
 
 const state = {
   channelId: null,
@@ -66,6 +93,24 @@ const state = {
     dateFrom: getMonthStart(new Date()),
     dateTo: getMonthStart(new Date()),
   },
+};
+
+const commentMarkerState = {
+  videoNo: "",
+  loadingVideoNo: "",
+  markers: [],
+  renderedSignature: "",
+  retryTimer: 0,
+  retryCount: 0,
+  lastButtonInsertAt: 0,
+  activePreviewSeconds: "",
+  previewTooltipTimer: 0,
+  panelAnchorTimer: 0,
+  panelAnchorCloseTimer: 0,
+};
+
+const observerState = {
+  initTimer: 0,
 };
 
 const DURATION_FILTERS = {
@@ -840,8 +885,11 @@ async function readStoredCacheValue(storageKey) {
     merged.push(...chunk);
   }
 
-  const { __chunkCount: _chunkCount, __chunkField: _chunkField, ...rest } =
-    value;
+  const {
+    __chunkCount: _chunkCount,
+    __chunkField: _chunkField,
+    ...rest
+  } = value;
   return { ...rest, [chunkField]: merged };
 }
 
@@ -3011,7 +3059,641 @@ function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
+function initCommentTimestampMarkers() {
+  const videoNo = getCurrentVideoNo();
+  if (!videoNo) {
+    resetCommentTimestampMarkers();
+    return;
+  }
+
+  if (commentMarkerState.videoNo !== videoNo) {
+    resetCommentTimestampMarkers({ keepVideoNo: true });
+    commentMarkerState.videoNo = videoNo;
+    commentMarkerState.loadingVideoNo = videoNo;
+    ensureCommentTimestampButton();
+    void loadCommentTimestampMarkers(videoNo);
+    return;
+  }
+
+  ensureCommentTimestampButton();
+  if (commentMarkerState.markers.length) {
+    scheduleCommentMarkerRender();
+  }
+}
+
+function getCurrentVideoNo() {
+  const match = location.pathname.match(/^\/video\/(\d+)/);
+  return match ? match[1] : "";
+}
+
+function resetCommentTimestampMarkers({ keepVideoNo = false } = {}) {
+  clearCommentMarkerRetryTimer();
+  clearCommentMarkerPreviewTooltipTimer();
+  removeCommentMarkerPreviewTooltip();
+  document
+    .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
+    .forEach((layer) => layer.remove());
+  document
+    .querySelectorAll(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
+    .forEach((button) => button.remove());
+  closeCommentTimestampPanel();
+  commentMarkerState.markers = [];
+  commentMarkerState.loadingVideoNo = "";
+  commentMarkerState.renderedSignature = "";
+  commentMarkerState.retryCount = 0;
+  commentMarkerState.lastButtonInsertAt = 0;
+  commentMarkerState.activePreviewSeconds = "";
+  if (!keepVideoNo) commentMarkerState.videoNo = "";
+}
+
+async function loadCommentTimestampMarkers(videoNo) {
+  try {
+    const result = await sendMessage({
+      type: "CHEESE_SEARCH_FETCH_COMMENT_TIMESTAMPS",
+      payload: { videoNo },
+    });
+    if (commentMarkerState.videoNo !== videoNo) return;
+    commentMarkerState.loadingVideoNo = "";
+    commentMarkerState.markers = Array.isArray(result?.markers)
+      ? result.markers
+      : [];
+    ensureCommentTimestampButton();
+    if (!commentMarkerState.markers.length) {
+      closeCommentTimestampPanel();
+    }
+    renderCommentTimestampPanel();
+    scheduleCommentMarkerRender();
+  } catch (error) {
+    if (commentMarkerState.videoNo !== videoNo) return;
+    commentMarkerState.loadingVideoNo = "";
+    commentMarkerState.markers = [];
+    document
+      .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
+      .forEach((layer) => layer.remove());
+    ensureCommentTimestampButton();
+    closeCommentTimestampPanel();
+    renderCommentTimestampPanel();
+    console.debug(
+      "[ChzzkSearch] 댓글 타임스탬프를 불러오지 못했습니다.",
+      error,
+    );
+  }
+}
+
+function ensureCommentTimestampButton() {
+  if (!getCurrentVideoNo()) return;
+  const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
+  if (!controls) {
+    scheduleCommentMarkerRender(500);
+    return;
+  }
+
+  let button = controls.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+  if (!button) {
+    const now = Date.now();
+    if (
+      commentMarkerState.lastButtonInsertAt &&
+      now - commentMarkerState.lastButtonInsertAt <
+        COMMENT_BUTTON_INSERT_COOLDOWN_MS
+    ) {
+      return;
+    }
+    commentMarkerState.lastButtonInsertAt = now;
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = `${VIDEO_COMMENT_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    button.setAttribute("aria-label", "댓글 타임스탬프");
+    button.setAttribute("aria-expanded", "false");
+    button.innerHTML = `
+      <span class="pzp-button__tooltip pzp-button__tooltip--top">댓글 타임스탬프</span>
+      <span class="pzp-ui-icon cheese-search-comment-timestamp-icon">
+      <svg class="pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g clip-path="url(#clip0_88_32943)">
+        <path d="M7.96094 26.8867C8.41797 26.8867 8.75781 26.6523 9.30859 26.1367L13.5391 22.2695H21.4609C24.9531 22.2695 26.8281 20.3477 26.8281 16.9141V7.9375C26.8281 4.50391 24.9531 2.57031 21.4609 2.57031H6.36719C2.875 2.57031 1 4.49219 1 7.9375V16.9141C1 20.3594 2.875 22.2695 6.36719 22.2695H6.91797V25.6797C6.91797 26.4062 7.29297 26.8867 7.96094 26.8867Z" fill="white"/>
+        <path d="M19.8438 14.1484C18.8828 14.1484 18.1094 13.375 18.1094 12.4141C18.1094 11.4531 18.8828 10.6797 19.8438 10.6797C20.8047 10.6797 21.5781 11.4531 21.5781 12.4141C21.5781 13.375 20.8047 14.1484 19.8438 14.1484Z" fill="black"/>
+        <path d="M13.9258 14.1484C12.9648 14.1484 12.1797 13.375 12.1797 12.4141C12.1797 11.4531 12.9648 10.6797 13.9258 10.6797C14.875 10.6797 15.6602 11.4531 15.6602 12.4141C15.6602 13.375 14.875 14.1484 13.9258 14.1484Z" fill="black"/>
+        <path d="M7.99609 14.1484C7.04688 14.1484 6.26172 13.375 6.26172 12.4141C6.26172 11.4531 7.04688 10.6797 7.99609 10.6797C8.95703 10.6797 9.73047 11.4531 9.73047 12.4141C9.73047 13.375 8.95703 14.1484 7.99609 14.1484Z" fill="black"/>
+        </g>
+        <defs>
+        <clipPath id="clip0_88_32943">
+        <rect width="25.8281" height="25.8867" fill="white" transform="translate(1 1)"/>
+        </clipPath>
+        </defs>
+        </svg>
+      </span>
+      <span class="cheese-search-comment-timestamp-count" aria-hidden="true"></span>
+    `;
+    button.addEventListener("click", handleCommentTimestampButtonClick);
+    const clipButton = controls.querySelector(".custom__clip-button");
+    controls.insertBefore(button, clipButton || controls.firstChild);
+    setTimeout(() => {
+      if (
+        getCurrentVideoNo() &&
+        !document.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
+      ) {
+        ensureCommentTimestampButton();
+      }
+    }, COMMENT_BUTTON_INSERT_COOLDOWN_MS);
+  }
+  updateCommentTimestampButton(button);
+}
+
+function updateCommentTimestampButton(
+  button = document.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`),
+) {
+  if (!button) return;
+  const count = commentMarkerState.markers.length;
+  const isLoading =
+    commentMarkerState.loadingVideoNo &&
+    commentMarkerState.loadingVideoNo === getCurrentVideoNo();
+  const isDisabled = !isLoading && count === 0;
+  button.classList.toggle("is-loading", Boolean(isLoading));
+  button.classList.toggle("has-markers", count > 0);
+  button.classList.toggle(VIDEO_COMMENT_BUTTON_DISABLED_CLASS, isDisabled);
+  button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
+  button.setAttribute(
+    "aria-label",
+    isLoading
+      ? "댓글 타임스탬프를 불러오는 중"
+      : count
+        ? `댓글 타임스탬프 ${count}개`
+        : "댓글 타임스탬프 없음",
+  );
+  const countElement = button.querySelector(
+    ".cheese-search-comment-timestamp-count",
+  );
+  if (countElement) {
+    countElement.textContent = count ? String(Math.min(count, 99)) : "";
+  }
+}
+
+function handleCommentTimestampButtonClick(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (
+    event.currentTarget?.classList?.contains(
+      VIDEO_COMMENT_BUTTON_DISABLED_CLASS,
+    )
+  ) {
+    return;
+  }
+  const panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+  if (panel) {
+    closeCommentTimestampPanel();
+    return;
+  }
+  openCommentTimestampPanel(event.currentTarget);
+}
+
+function openCommentTimestampPanel(anchor) {
+  closeCommentTimestampPanel();
+  const root = getCommentTimestampPanelRoot(anchor);
+  if (!root) return;
+  if (getComputedStyle(root).position === "static") {
+    root.style.position = "relative";
+  }
+  root.style.overflow = "visible";
+  const panel = document.createElement("div");
+  panel.className = VIDEO_COMMENT_PANEL_CLASS;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "댓글 타임스탬프");
+  root.append(panel);
+  renderCommentTimestampPanel(panel);
+  positionCommentTimestampPanel(panel, root);
+  startCommentTimestampPanelAnchorMonitor();
+  anchor?.setAttribute("aria-expanded", "true");
+}
+
+function getCommentTimestampPanelRoot(anchor) {
+  return (
+    anchor?.closest(".pzp-pc") ||
+    anchor?.closest(".webplayer-internal-core") ||
+    anchor?.closest("[class*='player']") ||
+    document.querySelector(".pzp-pc")
+  );
+}
+
+function closeCommentTimestampPanel() {
+  stopCommentTimestampPanelAnchorMonitor();
+  document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)?.remove();
+  document
+    .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
+    ?.setAttribute("aria-expanded", "false");
+}
+
+function startCommentTimestampPanelAnchorMonitor() {
+  stopCommentTimestampPanelAnchorMonitor();
+  commentMarkerState.panelAnchorTimer = setInterval(() => {
+    if (!isCommentTimestampPanelAnchorAvailable()) {
+      scheduleCommentTimestampPanelAnchorClose();
+      return;
+    }
+    clearCommentTimestampPanelAnchorCloseTimer();
+    repositionOpenCommentTimestampPanel();
+  }, COMMENT_PANEL_ANCHOR_CHECK_MS);
+}
+
+function stopCommentTimestampPanelAnchorMonitor() {
+  if (!commentMarkerState.panelAnchorTimer) return;
+  clearInterval(commentMarkerState.panelAnchorTimer);
+  commentMarkerState.panelAnchorTimer = 0;
+  clearCommentTimestampPanelAnchorCloseTimer();
+}
+
+function scheduleCommentTimestampPanelAnchorClose() {
+  if (commentMarkerState.panelAnchorCloseTimer) return;
+  commentMarkerState.panelAnchorCloseTimer = setTimeout(() => {
+    commentMarkerState.panelAnchorCloseTimer = 0;
+    if (isCommentTimestampPanelAnchorAvailable()) return;
+    closeCommentTimestampPanel();
+  }, COMMENT_PANEL_AUTO_CLOSE_DELAY_MS);
+}
+
+function clearCommentTimestampPanelAnchorCloseTimer() {
+  if (!commentMarkerState.panelAnchorCloseTimer) return;
+  clearTimeout(commentMarkerState.panelAnchorCloseTimer);
+  commentMarkerState.panelAnchorCloseTimer = 0;
+}
+
+function isCommentTimestampPanelAnchorAvailable() {
+  const panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+  if (!panel) return false;
+  const button = document.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+  const slider = findPlayerSliderProgressWrap();
+  return isElementRendered(button) && isElementRendered(slider);
+}
+
+function isElementRendered(element) {
+  if (!(element instanceof HTMLElement)) return false;
+  if (!document.documentElement.contains(element)) return false;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  let current = element;
+  while (current && current !== document.documentElement) {
+    const style = getComputedStyle(current);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
+function renderCommentTimestampPanel(
+  panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`),
+) {
+  updateCommentTimestampButton();
+  if (!panel) return;
+  const isLoading =
+    commentMarkerState.loadingVideoNo &&
+    commentMarkerState.loadingVideoNo === getCurrentVideoNo();
+  const markers = commentMarkerState.markers;
+  panel.innerHTML = `
+    <div class="cheese-search-comment-panel-head">
+      <strong>댓글 타임스탬프</strong>
+      <button type="button" data-comment-panel-close aria-label="닫기">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+        </svg>
+      </button>
+    </div>
+    ${
+      isLoading
+        ? `<p class="cheese-search-comment-panel-status">댓글 타임스탬프를 불러오는 중입니다.</p>`
+        : markers.length
+          ? `<ol class="cheese-search-comment-panel-list">
+              ${markers.map(renderCommentTimestampPanelItem).join("")}
+            </ol>`
+          : `<p class="cheese-search-comment-panel-status">표시할 댓글 타임스탬프가 없습니다.</p>`
+    }
+  `;
+  panel
+    .querySelector("[data-comment-panel-close]")
+    ?.addEventListener("click", closeCommentTimestampPanel);
+  panel.querySelectorAll("[data-comment-marker-seek]").forEach((button) => {
+    button.addEventListener("click", handleCommentTimestampPanelSeek);
+  });
+}
+
+function renderCommentTimestampPanelItem(marker) {
+  const comments = Array.isArray(marker.comments) ? marker.comments : [];
+  const description = comments[0]
+    ? getCommentTimestampDescription(comments[0])
+    : "";
+  return `
+    <li>
+      <button type="button" data-comment-marker-seek="${escapeAttribute(marker.seconds)}">
+        <span>${escapeHtml(marker.timeLabel || formatSeconds(marker.seconds))}</span>
+        <strong>${escapeHtml(description)}</strong>
+      </button>
+    </li>
+  `;
+}
+
+function handleCommentTimestampPanelSeek(event) {
+  const seconds = Number(event.currentTarget.dataset.commentMarkerSeek || 0);
+  seekVideoToCommentTimestamp(seconds);
+  closeCommentTimestampPanel();
+}
+
+function positionCommentTimestampPanel(panel, root) {
+  if (!panel || !root) return;
+  const rootRect = root.getBoundingClientRect();
+  const viewportAvailableHeight =
+    window.innerHeight -
+    Math.max(COMMENT_PANEL_TOP_GAP_PX, rootRect.top) -
+    COMMENT_PANEL_BOTTOM_PX -
+    COMMENT_PANEL_TOP_GAP_PX;
+  const rootAvailableHeight =
+    rootRect.height - COMMENT_PANEL_BOTTOM_PX - COMMENT_PANEL_TOP_GAP_PX;
+  const maxHeight = Math.max(
+    COMMENT_PANEL_MIN_HEIGHT_PX,
+    Math.min(
+      COMMENT_PANEL_MAX_HEIGHT_PX,
+      viewportAvailableHeight,
+      rootAvailableHeight,
+    ),
+  );
+
+  panel.style.right = `${COMMENT_PANEL_RIGHT_PX}px`;
+  panel.style.bottom = `${COMMENT_PANEL_BOTTOM_PX}px`;
+  panel.style.setProperty(
+    "--cheese-search-comment-panel-max-height",
+    `${Math.floor(maxHeight)}px`,
+  );
+}
+
+function repositionOpenCommentTimestampPanel() {
+  const panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+  if (!panel) return;
+  const button = document.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+  const root = getCommentTimestampPanelRoot(button);
+  if (!root) return;
+  positionCommentTimestampPanel(panel, root);
+}
+
+function handleCommentTimestampDocumentClick(event) {
+  const panel = event.target.closest(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+  const button = event.target.closest(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+  if (panel || button) return;
+  closeCommentTimestampPanel();
+}
+
+function handleCommentTimestampKeydown(event) {
+  if (event.key !== "Escape") return;
+  closeCommentTimestampPanel();
+}
+
+function scheduleCommentMarkerRender(delay = 120) {
+  clearCommentMarkerRetryTimer();
+  commentMarkerState.retryTimer = setTimeout(() => {
+    commentMarkerState.retryTimer = 0;
+    renderCommentTimestampMarkers();
+  }, delay);
+}
+
+function clearCommentMarkerRetryTimer() {
+  if (!commentMarkerState.retryTimer) return;
+  clearTimeout(commentMarkerState.retryTimer);
+  commentMarkerState.retryTimer = 0;
+}
+
+function renderCommentTimestampMarkers() {
+  const videoNo = getCurrentVideoNo();
+  if (!videoNo || commentMarkerState.videoNo !== videoNo) {
+    resetCommentTimestampMarkers();
+    return;
+  }
+
+  const slider = findPlayerSliderProgressWrap();
+  if (!slider) {
+    retryCommentMarkerRender();
+    return;
+  }
+
+  const duration = getPlayerDuration(slider);
+  if (!duration) {
+    retryCommentMarkerRender();
+    return;
+  }
+  commentMarkerState.retryCount = 0;
+  if (getComputedStyle(slider).position === "static") {
+    slider.style.position = "relative";
+  }
+  slider.style.overflow = "visible";
+  const sliderRoot = slider.closest(".pzp-ui-slider__wrap");
+  if (sliderRoot) sliderRoot.style.overflow = "visible";
+
+  const markers = commentMarkerState.markers.filter(
+    (marker) =>
+      Number.isFinite(Number(marker?.seconds)) &&
+      Number(marker.seconds) > 0 &&
+      Number(marker.seconds) < duration,
+  );
+  const signature = [
+    videoNo,
+    Math.floor(duration),
+    markers
+      .map((marker) => `${marker.seconds}:${marker.comments?.length || 0}`)
+      .join(","),
+  ].join("|");
+
+  let layer = slider.querySelector(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`);
+  if (layer?.dataset.signature === signature) return;
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = VIDEO_COMMENT_MARKER_LAYER_CLASS;
+    slider.append(layer);
+  }
+
+  layer.dataset.signature = signature;
+  layer.innerHTML = markers
+    .map((marker) => renderCommentMarker(marker, duration))
+    .join("");
+  layer.querySelectorAll(VIDEO_COMMENT_MARKER_SELECTOR).forEach((marker) => {
+    marker.addEventListener("click", handleCommentMarkerClick);
+    marker.addEventListener("pointerenter", handleCommentMarkerPreviewShow);
+    marker.addEventListener("pointerleave", handleCommentMarkerPreviewHide);
+    marker.addEventListener("focus", handleCommentMarkerPreviewShow);
+    marker.addEventListener("blur", handleCommentMarkerPreviewHide);
+  });
+}
+
+function retryCommentMarkerRender() {
+  if (commentMarkerState.retryCount >= COMMENT_MARKER_RENDER_RETRY_LIMIT) {
+    return;
+  }
+  commentMarkerState.retryCount += 1;
+  scheduleCommentMarkerRender(500);
+}
+
+function findPlayerSliderProgressWrap() {
+  const wraps = Array.from(
+    document.querySelectorAll(
+      ".pzp-ui-slider__wrap .pzp-ui-progress__wrap.pzp-ui-slider__wrap-first-child",
+    ),
+  );
+  return (
+    wraps.find((wrap) => Number(wrap.getAttribute("max")) > 0) ||
+    wraps.find((wrap) => wrap.querySelector(".pzp-ui-progress__played")) ||
+    null
+  );
+}
+
+function getPlayerDuration(slider) {
+  const fromSlider = Number(slider?.getAttribute("max") || 0);
+  if (Number.isFinite(fromSlider) && fromSlider > 0) return fromSlider;
+  const videoDuration = Number(document.querySelector("video")?.duration || 0);
+  return Number.isFinite(videoDuration) && videoDuration > 0
+    ? videoDuration
+    : 0;
+}
+
+function renderCommentMarker(marker, duration) {
+  const seconds = Number(marker.seconds);
+  const percent = Math.max(0, Math.min(100, (seconds / duration) * 100));
+  const comments = Array.isArray(marker.comments) ? marker.comments : [];
+  const label = marker.timeLabel || formatSeconds(seconds);
+  const primaryDescription = comments[0]
+    ? getCommentTimestampDescription(comments[0])
+    : "댓글 타임스탬프";
+  return `
+    <button type="button" class="cheese-search-comment-marker" style="left:${percent}%" data-seconds="${escapeAttribute(seconds)}" aria-label="${escapeAttribute(
+      `${label} ${primaryDescription}`,
+    )}">
+      <span class="cheese-search-comment-marker-dot" aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function handleCommentMarkerPreviewShow(event) {
+  const markerElement = event.currentTarget;
+  const seconds = markerElement?.dataset?.seconds || "";
+  if (!seconds) return;
+  commentMarkerState.activePreviewSeconds = seconds;
+  removeCommentMarkerPreviewTooltip();
+  renderCommentMarkerPreviewTooltip(seconds);
+}
+
+function handleCommentMarkerPreviewHide(event) {
+  const seconds = event.currentTarget?.dataset?.seconds || "";
+  if (commentMarkerState.activePreviewSeconds !== seconds) return;
+  commentMarkerState.activePreviewSeconds = "";
+  clearCommentMarkerPreviewTooltipTimer();
+  removeCommentMarkerPreviewTooltip();
+}
+
+function renderCommentMarkerPreviewTooltip(seconds, attempt = 0) {
+  clearCommentMarkerPreviewTooltipTimer();
+  if (commentMarkerState.activePreviewSeconds !== String(seconds)) return;
+
+  const description = document.querySelector(
+    ".pzp-pc__seeking-preview .pzp-seeking-preview__description",
+  );
+  const timeElement = description?.querySelector(".pzp-seeking-preview__time");
+  if (!description || !timeElement) {
+    if (attempt < 10) {
+      commentMarkerState.previewTooltipTimer = setTimeout(() => {
+        renderCommentMarkerPreviewTooltip(seconds, attempt + 1);
+      }, 40);
+    }
+    return;
+  }
+
+  const marker = findCommentTimestampMarkerBySeconds(seconds);
+  if (!marker) return;
+
+  removeCommentMarkerPreviewTooltip();
+  timeElement.insertAdjacentHTML(
+    "afterend",
+    buildCommentMarkerPreviewHtml(marker),
+  );
+}
+
+function findCommentTimestampMarkerBySeconds(seconds) {
+  const targetSeconds = Number(seconds);
+  if (!Number.isFinite(targetSeconds)) return null;
+  return commentMarkerState.markers.find(
+    (marker) => Math.abs(Number(marker?.seconds) - targetSeconds) < 0.001,
+  );
+}
+
+function buildCommentMarkerPreviewHtml(marker) {
+  const seconds = Number(marker.seconds);
+  const comments = Array.isArray(marker.comments) ? marker.comments : [];
+  const label = marker.timeLabel || formatSeconds(seconds);
+  return `
+    <div class="${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}" role="tooltip">
+      <strong>${escapeHtml(label)}</strong>
+      ${comments
+        .slice(0, 4)
+        .map(
+          (comment) => `
+            <span class="cheese-search-comment-preview-tooltip-line">
+              ${escapeHtml(getCommentTimestampDescription(comment))}
+            </span>
+          `,
+        )
+        .join("")}
+      ${
+        Number(marker.sourceCount || 0) > comments.length
+          ? `<span class="cheese-search-comment-preview-tooltip-more">외 ${Number(marker.sourceCount) - comments.length}개</span>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function removeCommentMarkerPreviewTooltip() {
+  document
+    .querySelectorAll(`.${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}`)
+    .forEach((tooltip) => tooltip.remove());
+}
+
+function clearCommentMarkerPreviewTooltipTimer() {
+  if (!commentMarkerState.previewTooltipTimer) return;
+  clearTimeout(commentMarkerState.previewTooltipTimer);
+  commentMarkerState.previewTooltipTimer = 0;
+}
+
+function getCommentTimestampDescription(comment) {
+  return String(comment?.description || "").trim();
+}
+
+function handleCommentMarkerClick(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const seconds = Number(event.currentTarget.dataset.seconds || 0);
+  seekVideoToCommentTimestamp(seconds);
+}
+
+function seekVideoToCommentTimestamp(seconds) {
+  const video = document.querySelector("video");
+  if (!video || !Number.isFinite(seconds)) return;
+  video.currentTime = seconds;
+  video.play?.().catch?.(() => {});
+}
+
+function formatSeconds(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  if (hours) {
+    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+  }
+  return `${minutes}:${paddedSeconds}`;
+}
+
 function init() {
+  initCommentTimestampMarkers();
+
   const context = getPageContext();
   if (!context?.channelId) {
     if (state.initializedFor) {
@@ -3251,14 +3933,44 @@ function updateScrollTopButton() {
   button.hidden = window.scrollY < Math.max(1000, window.innerHeight * 1.2);
 }
 
-const observer = new MutationObserver(() => init());
+function scheduleInitFromMutations(mutations) {
+  if (mutations?.length && mutations.every(isCheeseSearchOnlyMutation)) {
+    return;
+  }
+  if (observerState.initTimer) return;
+  observerState.initTimer = setTimeout(() => {
+    observerState.initTimer = 0;
+    init();
+  }, 120);
+}
+
+function isCheeseSearchOnlyMutation(mutation) {
+  const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+  if (!nodes.length) return false;
+  return nodes.every(isCheeseSearchOwnedNode);
+}
+
+function isCheeseSearchOwnedNode(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return true;
+  if (node.matches(CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR)) return true;
+  return Boolean(node.querySelector(CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR));
+}
+
+const observer = new MutationObserver(scheduleInitFromMutations);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
 });
+window.addEventListener(
+  "resize",
+  debounce(repositionOpenCommentTimestampPanel, 120),
+  { passive: true },
+);
 document.addEventListener("click", handleCategoryFilterClick);
 document.addEventListener("click", handleCategoryResetDocumentClick);
+document.addEventListener("click", handleCommentTimestampDocumentClick);
+document.addEventListener("keydown", handleCommentTimestampKeydown);
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "CHEESE_SEARCH_FETCH_PROGRESS") return;
