@@ -270,13 +270,6 @@
   gap: 8px;
 }
 
-.cheese-search-studio-delete-error {
-  margin: 10px 0 0;
-  color: #ff393e;
-  font-size: 13px;
-  line-height: 18px;
-}
-
 [data-cheese-studio-toast] {
   opacity: 1;
   transition: opacity 240ms ease;

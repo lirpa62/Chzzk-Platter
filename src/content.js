@@ -144,6 +144,7 @@ const studioMakeClipState = {
   visibleCount: 120,
   inactive: false,
   deletedClipUIDs: new Set(),
+  needsRefreshBeforeSearch: false,
 };
 
 const DURATION_FILTERS = {
@@ -166,6 +167,9 @@ const RESULT_INITIAL_RENDER_COUNT = 120;
 const RESULT_RENDER_STEP_COUNT = 120;
 const RESULT_SCROLL_THRESHOLD_PX = 2600;
 const STUDIO_MAKE_CLIP_INIT_DELAY_MS = 240;
+const STUDIO_DELETE_VERIFY_ATTEMPTS = 4;
+const STUDIO_DELETE_VERIFY_INTERVAL_MS = 700;
+const STUDIO_DELETE_VERIFY_PAGE_SIZE = 50;
 const PROGRESS_STALL_TIMEOUT_MS = 15000;
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 const CACHE_CHUNK_SEPARATOR = "#chunk:";
@@ -3913,6 +3917,7 @@ function initStudioMakeClips(context) {
     studioMakeClipState.visibleCount = RESULT_INITIAL_RENDER_COUNT;
     studioMakeClipState.inactive = false;
     studioMakeClipState.deletedClipUIDs = new Set();
+    studioMakeClipState.needsRefreshBeforeSearch = false;
   }
 
   const table = document.getElementById("make_clip_panel");
@@ -3947,6 +3952,7 @@ function cleanupStudioMakeClipView({ removeControls = false } = {}) {
   closeStudioMenus();
   closeStudioMoreMenus();
   closeStudioDeleteClipDialog();
+  closeStudioErrorDialog();
   restoreStudioOriginalRows();
   clearStudioRenderedRows(document);
   showStudioOriginalView();
@@ -4179,6 +4185,7 @@ function preloadStudioMakeClips() {
   })
     .then((result) => {
       if (studioMakeClipState.channelId !== channelId) return result;
+      if (studioMakeClipState.needsRefreshBeforeSearch) return result;
       applyStudioMakeClipResult(result);
       studioMakeClipState.preloaded = true;
       updateStudioMakeClipControls();
@@ -4204,7 +4211,10 @@ function preloadStudioMakeClips() {
 }
 
 async function getStudioMakeClipResultForSearch() {
-  if (studioMakeClipState.preloadPromise) {
+  if (
+    !studioMakeClipState.needsRefreshBeforeSearch &&
+    studioMakeClipState.preloadPromise
+  ) {
     try {
       return await studioMakeClipState.preloadPromise;
     } catch {
@@ -4212,7 +4222,10 @@ async function getStudioMakeClipResultForSearch() {
     }
   }
 
-  if (studioMakeClipState.preloaded) {
+  if (
+    !studioMakeClipState.needsRefreshBeforeSearch &&
+    studioMakeClipState.preloaded
+  ) {
     return {
       channelId: studioMakeClipState.channelId,
       contentType: "makeClips",
@@ -4223,10 +4236,12 @@ async function getStudioMakeClipResultForSearch() {
     };
   }
 
-  return sendMessage({
+  const result = await sendMessage({
     type: "CHEESE_SEARCH_FETCH_MAKE_CLIPS",
     payload: getStudioMakeClipPayload(),
   });
+  studioMakeClipState.needsRefreshBeforeSearch = false;
+  return result;
 }
 
 function getStudioSortOptions() {
@@ -4317,6 +4332,8 @@ function handleStudioControlClick(event) {
 }
 
 function handleStudioDocumentClick(event) {
+  closeStudioDatePickersFromOutside(event);
+
   const moreToggle = event.target.closest("[data-studio-more-toggle]");
   if (moreToggle) {
     event.preventDefault();
@@ -4340,6 +4357,18 @@ function handleStudioDocumentClick(event) {
   closeStudioMoreMenus();
 }
 
+function closeStudioDatePickersFromOutside(event) {
+  const shell = document.querySelector(".cheese-search-studio-shell");
+  if (!shell) return;
+  if (!shell.contains(event.target)) {
+    closeAllDatePickers(shell);
+    return;
+  }
+  shell.querySelectorAll("[data-date-picker]").forEach((picker) => {
+    if (!picker.contains(event.target)) closeDatePicker(picker);
+  });
+}
+
 function handleStudioQueryReset() {
   studioMakeClipState.query = "";
   updateStudioMakeClipControls();
@@ -4359,6 +4388,8 @@ function handleStudioReset() {
   studioMakeClipState.error = "";
   studioMakeClipState.resultSignature = "";
   studioMakeClipState.visibleCount = RESULT_INITIAL_RENDER_COUNT;
+  studioMakeClipState.needsRefreshBeforeSearch = true;
+  studioMakeClipState.originalRows = [];
   document.querySelector(".cheese-search-studio-summary")?.remove();
   restoreStudioOriginalRows();
   showStudioOriginalView();
@@ -4543,7 +4574,6 @@ function openStudioDeleteClipDialog({
                 <span class="_label_pykbt_23">삭제된 동영상은 되돌릴 수 없습니다.</span>
               </label>
             </div>
-            <p class="cheese-search-studio-delete-error" data-studio-delete-error hidden></p>
           </div>
         </div>
       </div>
@@ -4574,6 +4604,43 @@ function openStudioDeleteClipDialog({
 
 function closeStudioDeleteClipDialog() {
   document.querySelector(".cheese-search-studio-delete-modal")?.remove();
+}
+
+function openStudioErrorDialog(
+  message = "앗, 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.",
+) {
+  document.querySelector(".cheese-search-studio-error-modal")?.remove();
+  const modal = document.createElement("div");
+  modal.className = "_dimmed_1h6ic_2 cheese-search-studio-error-modal";
+  const lines = String(message || "")
+    .split(/\r?\n/)
+    .map((line) => escapeHtml(line))
+    .join("<br>");
+  modal.innerHTML = `
+    <div class="_container_1h6ic_15" role="alertdialog" aria-modal="true" style="width: 370px;">
+      <strong class="_title_1h6ic_37">안내</strong>
+      <div class="_content_1h6ic_30">
+        <div class="_inner_1h6ic_31">
+          <p class="_text_1h6ic_97">${lines}<br></p>
+        </div>
+      </div>
+      <div class="_footer_1h6ic_129 _default_1h6ic_21">
+        <div class="_box_1h6ic_42"><button type="button" class="_container_1rfm5_2 _largest_1rfm5_27 _dark_1rfm5_47" data-studio-error-close><span class="_inner_1rfm5_116">확인</span></button></div>
+      </div>
+      <button type="button" class="_button_1h6ic_45" data-studio-error-close>
+        <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg" class="_icon_close_1h6ic_169"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.79289 7.79289C8.18342 7.40237 8.81658 7.40237 9.20711 7.79289L22.2071 20.7929C22.5976 21.1834 22.5976 21.8166 22.2071 22.2071C21.8166 22.5976 21.1834 22.5976 20.7929 22.2071L7.79289 9.20711C7.40237 8.81658 7.40237 8.18342 7.79289 7.79289Z" fill="#2E3033"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M7.79289 22.2071C7.40237 21.8166 7.40237 21.1834 7.79289 20.7929L20.7929 7.79289C21.1834 7.40237 21.8166 7.40237 22.2071 7.79289C22.5976 8.18342 22.5976 8.81658 22.2071 9.20711L9.20711 22.2071C8.81658 22.5976 8.18342 22.5976 7.79289 22.2071Z" fill="#2E3033"></path></svg>
+        <span class="blind">팝업 닫기</span>
+      </button>
+    </div>
+  `;
+  document.body.append(modal);
+  modal.querySelectorAll("[data-studio-error-close]").forEach((button) => {
+    button.addEventListener("click", closeStudioErrorDialog);
+  });
+}
+
+function closeStudioErrorDialog() {
+  document.querySelector(".cheese-search-studio-error-modal")?.remove();
 }
 
 async function deleteStudioMakeClip({ channelId, clipUID }) {
@@ -4640,6 +4707,79 @@ async function warmStudioMakeClipSessionFromContent(channelId) {
   }).catch(() => {});
 }
 
+async function confirmStudioMakeClipDeleted({ channelId, clipUID }) {
+  for (let attempt = 0; attempt < STUDIO_DELETE_VERIFY_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await wait(STUDIO_DELETE_VERIFY_INTERVAL_MS);
+    }
+
+    try {
+      const exists = await fetchStudioMakeClipExists({ channelId, clipUID });
+      if (!exists) return true;
+    } catch {
+      // 확인 요청 자체가 실패하면 원래 삭제 오류를 그대로 안내한다.
+    }
+  }
+  return false;
+}
+
+async function fetchStudioMakeClipExists({ channelId, clipUID }) {
+  const normalizedChannelId = String(channelId || "").trim();
+  const normalizedClipUID = String(clipUID || "").trim();
+  if (!normalizedChannelId || !normalizedClipUID) return true;
+
+  let page = 0;
+  let totalPages = 1;
+  while (page < totalPages) {
+    const content = await fetchStudioMakeClipVerifyPage({
+      channelId: normalizedChannelId,
+      page,
+    });
+    const clips = Array.isArray(content?.data) ? content.data : [];
+    if (
+      clips.some(
+        (clip) => String(clip?.clipUID || "").trim() === normalizedClipUID,
+      )
+    ) {
+      return true;
+    }
+    totalPages = Math.max(1, Number(content?.totalPages) || 1);
+    page += 1;
+  }
+
+  return false;
+}
+
+async function fetchStudioMakeClipVerifyPage({ channelId, page }) {
+  const url = new URL(
+    `${STUDIO_MANAGE_API_BASE}/channels/${encodeURIComponent(channelId)}/clips/make-clips`,
+  );
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("size", String(STUDIO_DELETE_VERIFY_PAGE_SIZE));
+  url.searchParams.set("dateFilter", "ALL");
+  url.searchParams.set("orderFilter", "LATEST");
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      accept: "application/json, text/plain, */*",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`CHZZK 클립 삭제 확인 요청 실패: HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (Number(payload?.code) !== 200 || !payload.content) {
+    throw new Error(
+      payload?.message || "CHZZK 클립 삭제 확인 응답을 읽을 수 없습니다.",
+    );
+  }
+  return payload.content;
+}
+
 async function readStudioMutationResponse(response, fallbackMessage) {
   const text = await response.text();
   let payload = null;
@@ -4670,16 +4810,10 @@ async function handleStudioDeleteClipConfirm(event) {
   const button = event.currentTarget;
   const clipUID = String(button.dataset.clipUid || "").trim();
   if (!clipUID || button.disabled) return;
-  const modal = button.closest(".cheese-search-studio-delete-modal");
-  const error = modal?.querySelector("[data-studio-delete-error]");
   button.disabled = true;
   button.classList.add("_is_disabled_1rfm5_24");
   const label = button.querySelector("._inner_1rfm5_116");
   if (label) label.textContent = "삭제 중";
-  if (error) {
-    error.hidden = true;
-    error.textContent = "";
-  }
 
   try {
     await deleteStudioMakeClip({
@@ -4688,17 +4822,26 @@ async function handleStudioDeleteClipConfirm(event) {
     });
     applyStudioMakeClipDeletion(clipUID);
     closeStudioDeleteClipDialog();
+    showStudioGlobalToast("삭제되었습니다.");
   } catch (deleteError) {
-    if (error) {
-      error.textContent =
-        deleteError instanceof Error
-          ? deleteError.message
-          : "클립 삭제에 실패했습니다.";
-      error.hidden = false;
+    if (label) label.textContent = "삭제 확인 중";
+    const deletionConfirmed = await confirmStudioMakeClipDeleted({
+      channelId: studioMakeClipState.channelId,
+      clipUID,
+    });
+    if (deletionConfirmed) {
+      applyStudioMakeClipDeletion(clipUID);
+      closeStudioDeleteClipDialog();
+      showStudioGlobalToast("삭제되었습니다.");
+      return;
     }
-    button.disabled = false;
-    button.classList.remove("_is_disabled_1rfm5_24");
-    if (label) label.textContent = "삭제";
+
+    closeStudioDeleteClipDialog();
+    const message =
+      deleteError instanceof Error
+        ? deleteError.message
+        : "앗, 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.";
+    openStudioErrorDialog(message);
   }
 }
 
@@ -4709,6 +4852,9 @@ function applyStudioMakeClipDeletion(clipUID) {
   studioMakeClipState.clips = studioMakeClipState.clips.filter(
     (clip) => String(clip?.clipUID || "").trim() !== normalizedClipUID,
   );
+  studioMakeClipState.preloaded = false;
+  studioMakeClipState.needsRefreshBeforeSearch = true;
+  studioMakeClipState.resultSignature = "";
   setStudioStreamersFromClips(studioMakeClipState.clips);
   resetStudioVisibleResults();
   updateStudioMakeClipControls();
@@ -4716,6 +4862,24 @@ function applyStudioMakeClipDeletion(clipUID) {
   if (studioMakeClipState.hasLoaded) {
     renderStudioMakeClipResults();
   }
+}
+
+function handleExternalStudioMakeClipDeletion(payload) {
+  const channelId = String(payload?.channelId || "").trim();
+  const clipUID = String(payload?.clipUID || "").trim();
+  if (!clipUID) return;
+  if (
+    studioMakeClipState.channelId &&
+    channelId &&
+    studioMakeClipState.channelId !== channelId
+  ) {
+    return;
+  }
+
+  studioMakeClipState.needsRefreshBeforeSearch = true;
+  studioMakeClipState.preloaded = false;
+  studioMakeClipState.resultSignature = "";
+  applyStudioMakeClipDeletion(clipUID);
 }
 
 async function activateStudioMakeClipSearch() {
@@ -5116,6 +5280,7 @@ function showStudioOriginalRows(
   tbody = document.getElementById("make_clip_panel")?.tBodies?.[0],
 ) {
   const rows = getConnectedStudioOriginalRows(tbody);
+  let visibleOriginalRowCount = 0;
   rows.forEach((row) => {
     const clipUID = getStudioRowClipUID(row);
     if (clipUID && studioMakeClipState.deletedClipUIDs.has(clipUID)) {
@@ -5123,7 +5288,13 @@ function showStudioOriginalRows(
       return;
     }
     showOriginalElement(row);
+    visibleOriginalRowCount += 1;
   });
+  if (!visibleOriginalRowCount) {
+    ensureStudioOriginalEmptyRow(tbody);
+  } else {
+    clearStudioSyntheticEmptyRows(tbody);
+  }
 }
 
 function hideDeletedStudioOriginalRows() {
@@ -5152,13 +5323,47 @@ function getStudioRowClipUID(row) {
 }
 
 function getConnectedStudioOriginalRows(tbody) {
+  const rows = getStudioNativeRows(tbody);
   const rememberedRows = studioMakeClipState.originalRows.filter(
     (row) => row.isConnected && row.parentElement === tbody,
   );
-  if (rememberedRows.length) return rememberedRows;
-  const rows = getStudioNativeRows(tbody);
+  const shouldRefreshRows =
+    !rememberedRows.length ||
+    rows.length !== rememberedRows.length ||
+    rows.some((row) => !rememberedRows.includes(row));
+
+  if (!shouldRefreshRows) return rememberedRows;
   studioMakeClipState.originalRows = rows;
   return rows;
+}
+
+function ensureStudioOriginalEmptyRow(tbody) {
+  if (!tbody) return;
+  if (tbody.querySelector("[data-cheese-studio-empty-row]")) return;
+  const table = tbody.closest("table");
+  const columnCount = Math.max(
+    1,
+    table?.tHead?.rows?.[0]?.cells?.length || 3,
+  );
+  tbody.insertAdjacentHTML(
+    "beforeend",
+    `
+      <tr class="_empty_rynbv_49" data-cheese-studio-row data-cheese-studio-empty-row>
+        <td colspan="${columnCount}">
+          <p class="_text_2e7iu_1">클립이 없습니다.<br>원하는 라이브를 보면서, 지금 클립을 만들어보세요.</p>
+          <a class="_container_1rfm5_2 _large_1rfm5_27 _dark_1rfm5_47" href="https://chzzk.naver.com" target="_self" style="border-radius: 20px;">
+            <span class="_inner_1rfm5_116">라이브 둘러보기</span>
+          </a>
+        </td>
+      </tr>
+    `,
+  );
+}
+
+function clearStudioSyntheticEmptyRows(tbody) {
+  tbody
+    ?.querySelectorAll("[data-cheese-studio-empty-row]")
+    .forEach((row) => row.remove());
 }
 
 function mountStudioHeaderSort(table) {
@@ -5612,6 +5817,10 @@ document.addEventListener("click", handleStudioDocumentClick);
 document.addEventListener("keydown", handleCommentTimestampKeydown);
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "CHEESE_SEARCH_STUDIO_MAKE_CLIP_DELETED") {
+    handleExternalStudioMakeClipDeletion(message.payload);
+    return;
+  }
   if (message?.type !== "CHEESE_SEARCH_FETCH_PROGRESS") return;
   if (
     !state.activeFetchRequestId ||

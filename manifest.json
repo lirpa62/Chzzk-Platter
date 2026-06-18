@@ -10,7 +10,13 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["tabs", "storage", "scripting", "unlimitedStorage"],
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting",
+    "unlimitedStorage",
+    "webRequest"
+  ],
   "host_permissions": [
     "https://chzzk.naver.com/*",
     "https://studio.chzzk.naver.com/*",

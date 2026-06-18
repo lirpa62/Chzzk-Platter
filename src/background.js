@@ -46,6 +46,18 @@ let lastChannelSearchStartedAt = 0;
 const persistentStorage =
   chrome.storage && chrome.storage.local ? chrome.storage.local : null;
 
+if (chrome.webRequest?.onCompleted) {
+  chrome.webRequest.onCompleted.addListener(
+    handleMakeClipDeleteCompleted,
+    {
+      urls: [
+        `${MANAGE_API_BASE}/channels/*/clips/*`,
+      ],
+      types: ["xmlhttprequest"],
+    },
+  );
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason !== "update") return;
 
@@ -1120,6 +1132,45 @@ function applyLikePipelineResults(clips, enrichedByUID) {
     const enriched = uid ? enrichedByUID.get(uid) : null;
     return enriched || clip;
   });
+}
+
+function handleMakeClipDeleteCompleted(details) {
+  if (details.method !== "DELETE") return;
+  if (!Number.isInteger(details.tabId) || details.tabId < 0) return;
+  if (Number(details.statusCode || 0) < 200 || Number(details.statusCode || 0) >= 300) {
+    return;
+  }
+
+  const parsed = parseMakeClipDeleteUrl(details.url);
+  if (!parsed) return;
+
+  chrome.tabs.sendMessage(
+    details.tabId,
+    {
+      type: "CHEESE_SEARCH_STUDIO_MAKE_CLIP_DELETED",
+      payload: parsed,
+    },
+    () => {
+      void chrome.runtime.lastError;
+    },
+  );
+}
+
+function parseMakeClipDeleteUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.origin !== "https://api.chzzk.naver.com") return null;
+    const match = parsedUrl.pathname.match(
+      /^\/manage\/v1\/channels\/([^/]+)\/clips\/([^/]+)$/i,
+    );
+    if (!match) return null;
+    return {
+      channelId: decodeURIComponent(match[1]),
+      clipUID: decodeURIComponent(match[2]),
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchClipLikeCount(clip, signal) {
