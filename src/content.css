@@ -1107,7 +1107,7 @@
 .cheese-search-results-list[data-content-type="clips"]
   .cheese-search-skeleton-card {
   flex: none;
-  width: calc(33.33333% - 16px);
+  width: calc(33.3333% - 9.33333px);
   pointer-events: none;
 }
 
@@ -1241,14 +1241,254 @@
   contain-intrinsic-size: auto 280px;
 }
 
+.cheese-search-results-list:not([data-content-type="clips"])
+  .cheese-search-card {
+  /* 네이티브 그리드와 동일하게 3열(gap 14px → 33.3333% - 9.33333px) */
+  flex: none;
+  width: calc(33.3333% - 9.33333px);
+  min-width: 0;
+  list-style: none;
+}
+
+.cheese-search-results-list .video_card_container__urjO6 {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.cheese-search-results-list .video_card_thumbnail__QXYT8 {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+  color: #fff;
+}
+
+.cheese-search-results-list .video_card_image__yHXqv {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 성인 영상 처리(네이티브 _is_adult_ 복제). 썸네일은 이미 blur 이미지
+   (?type=...blur)이므로 CSS blur는 걸지 않고, :before로 네이티브 공식
+   19금 배지 이미지를 반투명 검정 위에 contain으로 깐다. */
+.cheese-search-results-list .video_card_is_adult__f3RBL::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background:
+    url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png)
+      50% / contain no-repeat;
+  background-color: rgba(0, 0, 0, 0.2);
+  content: "";
+  pointer-events: none;
+}
+
+.cheese-search-results-list .video_card_is_dimmed__9YEzr {
+  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+}
+
+/* dimmed(썸네일 없음) 성인 영상: 네이티브 _is_dimmed_._is_adult_ 복제.
+   배경은 --color-bg-04, 배지는 테마별 light/dark 이미지. */
+.cheese-search-results-list
+  .video_card_is_adult__f3RBL.video_card_is_dimmed__9YEzr::before {
+  background-color: var(--color-bg-04);
+  background-image: url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_light.png);
+}
+
+.theme_dark
+  .cheese-search-results-list
+  .video_card_is_adult__f3RBL.video_card_is_dimmed__9YEzr::before {
+  background-image: url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_dark.png);
+}
+
+.cheese-search-results-list .video_card_description__2sUfw {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+}
+
+.cheese-search-results-list .thumbnail_badge_container__sMIz3 {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.68);
+  color: #fff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.cheese-search-results-list .video_card_time__NAWm6 {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.cheese-search-results-list .video_card_wrapper__M6XT7 {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cheese-search-results-list .video_card_area__FtMQV {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.cheese-search-results-list .video_card_title__Amjk2 {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+  text-decoration: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cheese-search-results-list .video_card_information__1w2l- {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  margin-top: 5px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.cheese-search-results-list .video_card_link__XSQ6l {
+  gap: 6px;
+}
+
+.cheese-search-results-list .video_card_category__xQ15T {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 네이티브 동작 복제: 평상시 배경 없음, 호버 시에만 그라데이션 */
+  background-color: transparent;
+}
+
+.cheese-search-results-list a:hover > .video_card_category__xQ15T,
+.cheese-search-results-list .video_card_category__xQ15T:hover {
+  background-image: linear-gradient(
+    180deg,
+    var(--color-bg-overlay-03),
+    var(--color-bg-overlay-03)
+  );
+}
+
+.cheese-search-results-list .video_card_layer__WHTbQ {
+  flex: none;
+}
+
 .cheese-search-results-list[data-content-type="clips"] {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
+  gap: 14px;
   width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.cheese-search-results-list[data-content-type="clips"] .cheese-search-card {
+  /* 네이티브 그리드와 동일하게 3열(gap 14px → 33.3333% - 9.33333px) */
+  flex: none;
+  width: calc(33.3333% - 9.33333px);
+  min-width: 0;
+  list-style: none;
+}
+
+.cheese-search-results-list[data-content-type="clips"] .clip_card_link__Pxcf6 {
+  display: block;
+  width: 100%;
+}
+
+.cheese-search-results-list[data-content-type="clips"]
+  .clip_card_container__aoMWB {
+  /* 네이티브 _container_lc8jg_ 복제 */
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  padding-top: 149.167%;
+  border-radius: 10px;
+  background: #000 50% / cover no-repeat;
+  color: #fff;
+}
+
+/* 네이티브에는 그라데이션 오버레이가 없다. 다만 우리 카드는 네이티브와 달리
+   조회/좋아요/날짜/카테고리를 썸네일 위에 추가로 표시하므로, 밝은 썸네일에서도
+   흰 글씨 가독성을 확보하기 위해 하단에만 약한 그라데이션을 남긴다. */
+.cheese-search-results-list[data-content-type="clips"]
+  .clip_card_container__aoMWB::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 45%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.cheese-search-results-list[data-content-type="clips"]
+  .clip_card_wrapper__AcHtn {
+  /* 네이티브 _wrapper_lc8jg_ 복제 */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  padding: 15px;
+  letter-spacing: -0.3px;
+}
+
+.cheese-search-results-list[data-content-type="clips"] .clip_card_title__Pc2jc {
+  /* 네이티브 _title_lc8jg_ 복제 */
+  display: -webkit-box;
+  flex: none;
+  width: 100%;
+  overflow: hidden;
+  margin-top: 27px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+  word-break: break-all;
+  word-wrap: break-word;
+  white-space: break-spaces;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .cheese-search-results-list[data-content-type="clips"]
@@ -1377,6 +1617,16 @@
   display: flex;
   gap: 8px;
   min-width: 0;
+  /* 네이티브 정보 줄 타이포 복제. 단 색은 흰색 유지 — 우리 클립 카드는
+     썸네일 위에 그라데이션 오버레이 + 흰 글씨 구조라 네이티브의 어두운
+     색(rgba(--Content-Neutral-Primary-Static-rgb))을 쓰면 안 보인다. */
+  margin-top: 6px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cheese-search-results-list[data-content-type="clips"]

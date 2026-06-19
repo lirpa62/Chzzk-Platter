@@ -1,16 +1,17 @@
 const SELECTORS = {
   tabList: '[role="tablist"][class*="tab_list__"][class*="channel_area__"]',
-  header: '[class*="channel_component_header__"]',
-  list: '[class*="channel_component_list__"]',
+  header: '[class*="channel_component_header__"], [class*="_header_16glw_"]',
+  list: '[class*="channel_component_list__"], ul[class*="_list_16glw_"]',
   noContent: '[class*="no_content_container__"]',
-  pagination: '[class*="pagination_container__"]',
+  pagination: '[class*="pagination_container__"], [class*="_container_pvn19_"]',
 };
 
 const CONTENT_CONFIG = {
   videos: {
     contentType: "videos",
     panelId: "videos-PANEL",
-    itemSelector: '[class*="channel_vod_item__"], .cheese-search-card',
+    itemSelector:
+      '[class*="channel_vod_item__"], .cheese-search-card, a[href^="/video/"], a[href*="chzzk.naver.com/video/"]',
     emptyPattern: /등록된\s*동영상이\s*없습니다/,
     title: "다시보기",
     inputTitle: "제목, 태그, 카테고리를 검색합니다.",
@@ -19,7 +20,8 @@ const CONTENT_CONFIG = {
   clips: {
     contentType: "clips",
     panelId: "clips-PANEL",
-    itemSelector: '[class*="channel_clip_item__"], .cheese-search-card',
+    itemSelector:
+      '[class*="channel_clip_item__"], .cheese-search-card, a[href^="/clips/"], a[href*="chzzk.naver.com/clips/"]',
     emptyPattern: /등록된\s*클립이\s*없습니다/,
     title: "클립",
     inputTitle: "클립 제목과 카테고리를 검색합니다.",
@@ -1548,6 +1550,7 @@ function getPanelElements() {
     `[role="tabpanel"][id="${getContentConfig().panelId}"]`,
   );
   const header =
+    panel?.querySelector(":scope > header") ||
     panel?.querySelector(SELECTORS.header) ||
     document.querySelector(SELECTORS.header);
   const list =
@@ -1562,9 +1565,21 @@ function getPanelElements() {
 function getPaginationElement(panel) {
   return (
     panel?.querySelector(SELECTORS.pagination) ||
+    findPaginationByCurrentPage(panel) ||
     document.querySelector(SELECTORS.pagination) ||
+    findPaginationByCurrentPage(document) ||
     state.originalPaginationElement ||
     null
+  );
+}
+
+function findPaginationByCurrentPage(root) {
+  const currentPage = root?.querySelector?.('button[aria-current="page"]');
+  if (!currentPage) return null;
+  return (
+    currentPage.closest('[class*="_container_pvn19_"]') ||
+    currentPage.closest("nav") ||
+    currentPage.closest("div")
   );
 }
 
@@ -1573,8 +1588,70 @@ function getNativeContentList(panel) {
   return (
     lists.find(
       (list) => !list.classList.contains("cheese-search-results-list"),
-    ) || null
+    ) ||
+    findContentListByItemLinks(panel) ||
+    null
   );
+}
+
+function findContentListByItemLinks(root) {
+  if (!root) return null;
+  const itemLinks = Array.from(root.querySelectorAll(getContentItemSelector()))
+    .filter((element) => element.closest(".cheese-search-shell") == null)
+    .filter((element) => element.closest(".cheese-search-results-list") == null);
+  if (!itemLinks.length) return null;
+
+  const candidates = new Map();
+  itemLinks.forEach((link) => {
+    const container = findContentListContainer(link, root);
+    if (!container || container === root) return;
+    candidates.set(
+      container,
+      (candidates.get(container) || 0) + countContentItems(container),
+    );
+  });
+
+  return (
+    Array.from(candidates.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([container]) => container)[0] || null
+  );
+}
+
+function getContentItemSelector() {
+  return isClipContent()
+    ? 'a[href^="/clips/"], a[href*="chzzk.naver.com/clips/"]'
+    : 'a[href^="/video/"], a[href*="chzzk.naver.com/video/"]';
+}
+
+function findContentListContainer(link, root) {
+  const item = link.closest('li, article, [role="listitem"]');
+  if (item?.parentElement && root.contains(item.parentElement)) {
+    return item.parentElement;
+  }
+
+  const requiredChildCount = Math.min(
+    2,
+    root.querySelectorAll(getContentItemSelector()).length,
+  );
+  let current = link.parentElement;
+  while (current && current !== root && root.contains(current)) {
+    if (countContentItemChildren(current) >= requiredChildCount) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return link.parentElement;
+}
+
+function countContentItemChildren(container) {
+  return Array.from(container?.children || []).filter((child) =>
+    child.querySelector(getContentItemSelector()),
+  ).length;
+}
+
+function countContentItems(container) {
+  return container?.querySelectorAll(getContentItemSelector()).length || 0;
 }
 
 function updateControlsDisabled() {
@@ -1627,9 +1704,10 @@ function ensureSearchList(list) {
   const searchList =
     existing ||
     document.createElement(list.tagName.toLowerCase() === "ol" ? "ol" : "ul");
-  searchList.className = isClipContent()
-    ? "cheese-search-results-list channel_component_list__kCgKT channel_component_type_clip__kt2kT"
-    : "cheese-search-results-list";
+  // 결과 리스트는 전적으로 자체 CSS(.cheese-search-results-list + data-content-type)
+  // 로 그리드/카드를 스타일링한다. 치지직 네이티브 리스트 클래스를 복사하면
+  // 빌드마다 바뀌는 네이티브 CSS가 우리 그리드와 충돌하므로 붙이지 않는다.
+  searchList.className = "cheese-search-results-list";
   searchList.dataset.cheeseSearchActive = "1";
   searchList.dataset.contentType = getContentConfig().contentType;
   if (!existing || searchList.previousElementSibling !== list) {
@@ -1783,6 +1861,7 @@ function renderResults() {
   }
 
   searchList.removeAttribute("aria-busy");
+  harvestNativeCardClasses();
   searchList.innerHTML = visibleResults.map(renderItemCard).join("");
   if (isClipContent()) {
     state.renderedClipUIDs = new Set(
@@ -2920,6 +2999,77 @@ function isAdultVideo(video) {
   );
 }
 
+// 치지직 카드의 CSS 모듈 클래스는 빌드마다 해시가 바뀐다. 카드에는 항상 우리
+// 고정 클래스(video_card_*/clip_card_* — content.css의 fallback 훅)를 부여하고,
+// 추가로 페이지의 실제 네이티브 카드에서 슬롯별 현재 클래스를 채집해 함께 붙인다.
+// → 치지직 네이티브 CSS를 1차 상속받고, 끊기면 우리 CSS가 그대로 받친다.
+// 클립 카드는 우리 자체 디자인(세로 배경+그라데이션 오버레이)이 완결형이라
+// 네이티브 클래스를 붙이지 않는다. 따라서 채집은 동영상(videos)에만 적용한다.
+const nativeCardClassCache = { videos: null };
+
+function harvestNativeCardClasses() {
+  const type = getContentConfig().contentType;
+  if (type !== "videos" || nativeCardClassCache[type]) return;
+  const { panel } = getPanelElements();
+  const nativeList = getNativeContentList(panel);
+  const item = nativeList?.querySelector(":scope > li:not(.cheese-search-card)");
+  if (!item) return;
+  const harvested = harvestVideoCardClasses(item);
+  if (harvested) nativeCardClassCache[type] = harvested;
+}
+
+function readClassName(element) {
+  if (!element) return "";
+  const raw =
+    typeof element.className === "string"
+      ? element.className
+      : (element.getAttribute?.("class") ?? "");
+  return String(raw || "").trim();
+}
+
+function harvestVideoCardClasses(item) {
+  const container = item.querySelector(":scope > div");
+  const thumbnail = container?.querySelector(":scope > a");
+  const image = thumbnail?.querySelector(":scope > img");
+  const description = thumbnail?.querySelector(":scope > div");
+  const badge = description?.querySelector(":scope > em");
+  const time = thumbnail?.querySelector(":scope > span:not(.blind)");
+  const wrapper = container?.querySelector(":scope > div:nth-child(2)");
+  const area = wrapper?.querySelector(":scope > div:first-child");
+  const title = area?.querySelector(":scope > a");
+  const information = area?.querySelector(":scope > div");
+  const infoItem = information?.querySelector(":scope > span");
+  const category = item.querySelector(
+    'a[href*="tags="] span, span[class*="_category_"], span[class*="_tag_"]',
+  );
+  const layer = wrapper?.querySelector(":scope > div:last-child");
+  const moreButton = layer?.querySelector("button");
+
+  return {
+    item: readClassName(item),
+    container: readClassName(container),
+    thumbnail: readClassName(thumbnail),
+    image: readClassName(image),
+    description: readClassName(description),
+    badge: readClassName(badge),
+    time: readClassName(time),
+    wrapper: readClassName(wrapper),
+    area: readClassName(area),
+    title: readClassName(title),
+    information: readClassName(information),
+    infoItem: readClassName(infoItem),
+    category: readClassName(category),
+    layer: readClassName(layer),
+    moreButton: readClassName(moreButton),
+  };
+}
+
+// 현재 콘텐츠 타입의 채집된 네이티브 클래스(없으면 빈 문자열)를 반환한다.
+function nativeCls(slot) {
+  const type = getContentConfig().contentType;
+  return nativeCardClassCache[type]?.[slot] || "";
+}
+
 function renderItemCard(item) {
   return isClipContent() ? renderClipCard(item) : renderVideoCard(item);
 }
@@ -2979,6 +3129,7 @@ function renderClipAdultArea() {
     </div>
   `;
 }
+
 
 function renderClipCategoryLink(clip) {
   const categoryLabel = getClipCategoryLabel(clip);
@@ -3146,27 +3297,30 @@ function renderVideoCard(video) {
     "thumbnail_badge_container__sMIz3",
     "thumbnail_badge_replay__atyb4",
     "thumbnail_badge_bold_font__sH+-P",
+    nativeCls("badge"),
     isUploadVideo ? "cheese-search-upload-badge" : "",
   ]
     .filter(Boolean)
     .join(" ");
   const thumbnailClasses = [
     "video_card_thumbnail__QXYT8",
+    nativeCls("thumbnail"),
     isAdult ? "video_card_is_adult__f3RBL" : "",
     isAdult && !showThumbnail ? "video_card_is_dimmed__9YEzr" : "",
   ]
     .filter(Boolean)
     .join(" ");
   const categoryUrl = getCategoryUrl(video);
+  const nativeCategoryCls = nativeCls("category");
   const categoryHtml = video.videoCategoryValue
     ? categoryUrl
-      ? `<a href="${escapeAttribute(categoryUrl)}" target="_blank" rel="noreferrer" data-cheese-category-filter="${escapeAttribute(video.videoCategoryValue)}"><span class="video_card_category__xQ15T">${escapeHtml(video.videoCategoryValue)}</span></a>`
-      : `<span class="video_card_category__xQ15T">${escapeHtml(video.videoCategoryValue)}</span>`
+      ? `<a href="${escapeAttribute(categoryUrl)}" target="_blank" rel="noreferrer" data-cheese-category-filter="${escapeAttribute(video.videoCategoryValue)}"><span class="video_card_category__xQ15T ${nativeCategoryCls}">${escapeHtml(video.videoCategoryValue)}</span></a>`
+      : `<span class="video_card_category__xQ15T ${nativeCategoryCls}">${escapeHtml(video.videoCategoryValue)}</span>`
     : "";
   const tagHtml = tags
     .map((tag) => {
       const safeTag = escapeHtml(tag);
-      return `<a href="${escapeAttribute(getTagUrl(tag))}" target="_blank" rel="noreferrer"><span class="video_card_category__xQ15T video_card_tag__4NF6R">${safeTag}</span></a>`;
+      return `<a href="${escapeAttribute(getTagUrl(tag))}" target="_blank" rel="noreferrer"><span class="video_card_category__xQ15T video_card_tag__4NF6R ${nativeCategoryCls}">${safeTag}</span></a>`;
     })
     .join("");
   const livePvBadge = video.livePv
@@ -3179,37 +3333,37 @@ function renderVideoCard(video) {
       : "";
   const watchTimelineBar = renderWatchTimelineBar(video, "cheese-search");
 
+  const infoItemCls = nativeCls("infoItem");
   return `
-    <li class="cheese-search-card channel_vod_item__PhCKQ">
-      <div class="video_card_container__urjO6 video_card_vertical__+gTMT">
+    <li class="cheese-search-card channel_vod_item__PhCKQ ${nativeCls("item")}">
+      <div class="video_card_container__urjO6 video_card_vertical__+gTMT ${nativeCls("container")}">
         <a class="${thumbnailClasses}" href="${getVideoUrl(video)}" target="_blank" rel="noreferrer" title="${escapeAttribute(isAdult ? "" : video.videoTitle || "")}">
           ${isAdult ? `<span class="blind">19 연령 제한</span>` : ""}
-          ${isAdult && !showThumbnail ? `<span class="video_card_dimmed__yR1oT"></span>` : ""}
-          ${showThumbnail && thumbnailImageUrl ? `<img width="100%" height="100%" alt="" src="${escapeAttribute(thumbnailImageUrl)}" class="video_card_image__yHXqv" loading="lazy">` : ""}
-          <div class="video_card_description__2sUfw">
+          ${showThumbnail && thumbnailImageUrl ? `<img width="100%" height="100%" alt="" src="${escapeAttribute(thumbnailImageUrl)}" class="video_card_image__yHXqv ${nativeCls("image")}" loading="lazy">` : ""}
+          <div class="video_card_description__2sUfw ${nativeCls("description")}">
             <em class="${videoTypeBadgeClasses}">${videoTypeLabel}</em>
             ${livePvBadge}
           </div>
-          <span class="video_card_time__NAWm6">${formatDuration(video.duration)}</span>
+          <span class="video_card_time__NAWm6 ${nativeCls("time")}">${formatDuration(video.duration)}</span>
           ${watchTimelineBar}
           <span class="blind">${escapeHtml(video.channel?.channelName || "")}동영상 엔드로 이동</span>
         </a>
-        <div class="video_card_wrapper__M6XT7">
-          <div class="video_card_area__FtMQV">
-            <a class="video_card_title__Amjk2" href="${getVideoUrl(video)}" target="_blank" rel="noreferrer">${escapeHtml(video.videoTitle || "제목 없음")}<span class="blind">동영상 엔드로 이동</span></a>
-            <div class="video_card_information__1w2l-">
-              <span class="video_card_item__lOC8Y">조회수 ${formatCount(video.readCount)}회</span>
+        <div class="video_card_wrapper__M6XT7 ${nativeCls("wrapper")}">
+          <div class="video_card_area__FtMQV ${nativeCls("area")}">
+            <a class="video_card_title__Amjk2 ${nativeCls("title")}" href="${getVideoUrl(video)}" target="_blank" rel="noreferrer">${escapeHtml(video.videoTitle || "제목 없음")}<span class="blind">동영상 엔드로 이동</span></a>
+            <div class="video_card_information__1w2l- ${nativeCls("information")}">
+              <span class="video_card_item__lOC8Y ${infoItemCls}">조회수 ${formatCount(video.readCount)}회</span>
               ${commentCountHtml}
               <div class="video_card_time_info">
-                <span class="video_card_item__lOC8Y">${escapeHtml(formatLiveStartDateTime(video))}</span>
-                <span class="video_card_item__lOC8Y">${escapeHtml(formatPublishDateTime(video))}</span>
+                <span class="video_card_item__lOC8Y ${infoItemCls}">${escapeHtml(formatLiveStartDateTime(video))}</span>
+                <span class="video_card_item__lOC8Y ${infoItemCls}">${escapeHtml(formatPublishDateTime(video))}</span>
               </div>
             </div>
-            ${categoryHtml || tagHtml ? `<div class="video_card_information__1w2l- video_card_link__XSQ6l">${categoryHtml}${tagHtml}</div>` : ""}
+            ${categoryHtml || tagHtml ? `<div class="video_card_information__1w2l- video_card_link__XSQ6l ${nativeCls("information")}">${categoryHtml}${tagHtml}</div>` : ""}
           </div>
-          <div class="video_card_layer__WHTbQ">
+          <div class="video_card_layer__WHTbQ ${nativeCls("layer")}">
             <div>
-              <button type="button" class="video_card_more_button__yXWHm" aria-haspopup="true" aria-expanded="false">
+              <button type="button" class="video_card_more_button__yXWHm ${nativeCls("moreButton")}" aria-haspopup="true" aria-expanded="false">
                 <span class="blind">더보기</span>
               </button>
             </div>

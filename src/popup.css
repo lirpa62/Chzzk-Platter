@@ -1840,7 +1840,7 @@ body[data-content-type="clips"] .popup-controls {
 }
 
 .popup-thumb.is-dimmed .popup-age-limit {
-  color: rgba(0, 0, 0, 0.56);
+  color: var(--popup-muted);
 }
 
 .popup-thumb.is-dimmed .popup-age-limit span.age-limit-text {
@@ -1858,8 +1858,8 @@ body[data-content-type="clips"] .popup-controls {
 
 .popup-thumb-badges {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 6px;
+  left: 6px;
   z-index: 3;
   display: flex;
   align-items: center;
