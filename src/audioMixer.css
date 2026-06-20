@@ -294,6 +294,17 @@
   font-size: 12px;
 }
 
+.cheese-mixer-conflict {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 120, 80, 0.4);
+  border-radius: 8px;
+  background: rgba(255, 120, 80, 0.12);
+  color: #ffb59a;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 /* 프리셋 */
 .cheese-mixer-presets {
   display: grid;

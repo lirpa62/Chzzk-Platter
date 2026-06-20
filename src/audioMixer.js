@@ -12,6 +12,7 @@
 
   const PANEL_ID = "cheese-audio-mixer-panel";
   const BUTTON_CLASS = "cheese-audio-mixer-button";
+  const CONTROL_CLASS = "cheese-audio-mixer-control";
   const STATS_PANEL_ID = "cheese-stream-stats-panel";
   const STATS_BUTTON_CLASS = "cheese-stream-stats-button";
   const STATS_REFRESH_MS = 1000;
@@ -341,6 +342,9 @@
     pageKey: "",
     until: 0,
   };
+  // 다른 확장이 같은 video로 MediaElementSource를 선점해 그래프 구성이 불가능한
+  // 충돌 상태. true면 패널에 안내를 띄운다.
+  let graphConflict = false;
 
   // 페이지 식별: 라이브(/live/<channelId>)·다시보기(/video/<videoNo>)에서 URL로
   // 즉시 얻는 raw 키. 채널id 해석(resolveChannelId)의 입력으로 쓴다.
@@ -507,11 +511,19 @@
     restoreSourceToDestination();
     audio.connected = false;
     audio.video = video || null;
+    // 영구 차단해 재시도(무한 루프)를 끊는다. createMediaElementSource는 video당
+    // 1회만 가능하므로, 다른 확장(예: cheese-knife)이 이미 같은 video로 source를
+    // 만들었으면 우리는 절대 만들 수 없다 → 믹서를 끄고 충돌 안내.
     graphRetryBlock = {
       video,
       pageKey: currentPageKey || "",
       until: Number.POSITIVE_INFINITY,
     };
+    state.enabled = false;
+    graphConflict = true;
+    saveState();
+    if (ui?.panel) refreshPanelContent();
+    else syncUI();
   }
 
   function teardownGraph() {
@@ -605,6 +617,7 @@
   function setEnabled(enabled) {
     state.enabled = enabled;
     if (enabled) {
+      graphConflict = false;
       clearGraphRetryBlock();
       const video = findVideo();
       if (!video) {
@@ -612,6 +625,8 @@
         syncUI();
         return;
       }
+      // buildGraph 실패(충돌) 시 handleGraphBuildFailure가 enabled를 다시 false로
+      // 되돌리고 graphConflict를 세운다.
       buildGraph(video);
     } else {
       teardownGraph();
@@ -1017,18 +1032,32 @@
       </svg>`;
   }
 
-  function createButton() {
-    const btn = document.createElement("button");
-    // 댓글 타임스탬프 버튼과 동일하게 native 클래스를 사용한다. 이렇게 해야
-    // 재생 중 bottom-buttons가 자동으로 숨겨질 때 믹서 버튼도 함께 사라진다.
-    btn.className = `${BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
-    btn.type = "button";
-    btn.setAttribute("aria-label", "오디오 믹서");
-    btn.setAttribute("aria-expanded", "false");
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">오디오 믹서</span><span class="pzp-ui-icon">${mixerIcon()}</span>`;
-    // 클릭은 document 레벨 이벤트 위임으로 처리한다(아래 참고). 라이브 플레이어가
-    // 컨트롤 DOM을 재렌더링하며 버튼을 옮기거나 복제해도 클릭이 끊기지 않는다.
-    return btn;
+  const GAIN_MIN = 0.5;
+  const GAIN_MAX = 2;
+  function gainToNorm(g) {
+    const n = (g - GAIN_MIN) / (GAIN_MAX - GAIN_MIN);
+    return Math.max(0, Math.min(1, n));
+  }
+  function normToGain(n) {
+    const g = GAIN_MIN + n * (GAIN_MAX - GAIN_MIN);
+    return Math.round(g * 20) / 20;
+  }
+  // 게인 슬라이더 마크업(치지직 native 볼륨 슬라이더 클래스 그대로 → native CSS
+  // 적용). 게인 0.5~2를 0~1 정규화해 progress/handler에 반영.
+  function gainSliderMarkup() {
+    const n = gainToNorm(state.gain);
+    const pct = Math.round(n * 1000) / 10;
+    return `<div role="slider" tabindex="0" data-master-gain style="display: none;" class="pzp-pc__volume-slider pzp-pc-volume-slider pzp-ui-slider--volume pzp-ui-slider" aria-label="음량" aria-live="polite" aria-valuemin="0" aria-valuenow="${Math.round(n * 100)}" aria-valuemax="100" aria-valuetext="${Math.round(n * 100)}%"><input type="range" max="1" tabindex="-1" class="pzp-ui-slider__aria-range"><div class="pzp-ui-slider__wrap"><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__entire-background" style="--pzp-ui-progress__scale: 1;"></div><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__volume" style="--pzp-ui-progress__scale: ${n};"></div><div class="pzp-ui-slider__handler-wrap" style="left: ${pct}%;"><span role="none presentation" class="pzp-ui-slider__handler"></span></div></div></div>`;
+  }
+
+  // 버튼 + 슬라이더를 native 볼륨 컨트롤(.pzp-pc__volume-control)로 감싼다.
+  // 이렇게 하면 치지직 native CSS가 그대로 적용돼 버튼 옆에 가로 슬라이더가
+  // 펼쳐진다. 별도 CSS 불필요.
+  function createButtonControl() {
+    const wrap = document.createElement("div");
+    wrap.className = `${CONTROL_CLASS} pzp-pc__volume-control`;
+    wrap.innerHTML = `<button class="${BUTTON_CLASS} pzp-pc__volume-button pzp-button pzp-pc-ui-button" type="button" aria-label="오디오 믹서" aria-expanded="false"><span class="pzp-button__tooltip pzp-button__tooltip--top">오디오 믹서</span><span class="pzp-ui-icon">${mixerIcon()}</span><span class="pzp-button__label">오디오 믹서</span></button>${gainSliderMarkup()}`;
+    return wrap;
   }
 
   function ensureButton() {
@@ -1037,25 +1066,26 @@
       document.querySelector(".pzp-pc__bottom-buttons-left") ||
       findPlayer()?.querySelector(".pzp-pc__bottom-buttons-left");
     if (!controls) return;
-    let btn = document.querySelector(`.${BUTTON_CLASS}`);
-    if (!btn) {
-      btn = createButton();
+    let wrap = document.querySelector(`.${CONTROL_CLASS}`);
+    if (!wrap) {
+      wrap = createButtonControl();
     }
-    const volumeControl = controls.querySelector(".pzp-pc__volume-control");
-    if (volumeControl) {
-      if (btn.previousElementSibling === volumeControl) return;
-      volumeControl.insertAdjacentElement("afterend", btn);
+    // native 볼륨 컨트롤(우리 것이 아닌) 뒤에 둔다.
+    const nativeVolume = Array.from(
+      controls.querySelectorAll(".pzp-pc__volume-control"),
+    ).find((el) => !el.classList.contains(CONTROL_CLASS));
+    if (nativeVolume) {
+      if (wrap.previousElementSibling === nativeVolume) return;
+      nativeVolume.insertAdjacentElement("afterend", wrap);
     } else {
-      if (btn.parentElement === controls) return;
-      controls.insertBefore(btn, controls.firstChild);
+      if (wrap.parentElement === controls) return;
+      controls.insertBefore(wrap, controls.firstChild);
     }
     syncUI();
   }
 
   function removeButton() {
-    document
-      .querySelectorAll(`.${BUTTON_CLASS}`)
-      .forEach((button) => button.remove());
+    document.querySelectorAll(`.${CONTROL_CLASS}`).forEach((el) => el.remove());
   }
 
   function togglePanel() {
@@ -1320,6 +1350,11 @@
       <div class="cheese-mixer-head">
         ${renderHeadInner()}
       </div>
+      ${
+        graphConflict
+          ? `<p class="cheese-mixer-conflict">다른 확장 프로그램이 이 영상의 오디오를 이미 사용 중이라 오디오 믹서를 켤 수 없습니다. 해당 확장을 끄거나 컴프레서를 비활성화한 뒤 새로고침해 주세요.</p>`
+          : ""
+      }
       <div class="cheese-mixer-tabs" role="tablist">
         <button type="button" class="cheese-mixer-tab ${activeTab === "presets" ? "is-active" : ""}" data-tab="presets">프리셋</button>
         <button type="button" class="cheese-mixer-tab ${activeTab === "custom" ? "is-active" : ""}" data-tab="custom">커스텀</button>
@@ -1885,6 +1920,7 @@
     applyState();
     syncPresetSelection();
     syncHead();
+    syncMasterGain();
     saveState();
   }
 
@@ -1964,10 +2000,22 @@
     });
   }
 
+  // 버튼의 마스터 음량 슬라이더를 현재 게인과 동기화(드래그 중이면 건드리지 않음).
+  function syncMasterGain() {
+    const slider = document.querySelector(
+      `.${CONTROL_CLASS} [data-master-gain]`,
+    );
+    if (!slider) return;
+    // 슬라이더는 믹서 활성화 시에만 노출(native는 display로 토글).
+    slider.style.display = state.enabled ? "" : "none";
+    if (!gainDragging) updateGainSliderVisual(slider);
+  }
+
   function syncUI() {
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     button?.classList.toggle("is-active", state.enabled);
     button?.setAttribute("aria-pressed", String(state.enabled));
+    syncMasterGain();
 
     const panel = ui?.panel;
     if (!panel) return;
@@ -2012,6 +2060,11 @@
   // DOM을 재렌더링하며 버튼을 옮기거나 복제해도(첫 로드 시 클릭이 안 먹던 원인)
   // 항상 토글이 동작한다.
   document.addEventListener("click", (e) => {
+    // 마스터 음량 슬라이더 클릭은 패널 토글로 이어지지 않게 막는다.
+    if (e.target.closest?.("[data-master-gain]")) {
+      e.stopPropagation();
+      return;
+    }
     const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
     if (btn) {
       e.preventDefault();
@@ -2024,6 +2077,49 @@
     if (panel && !e.target.closest?.(`#${PANEL_ID}`)) {
       closePanel();
     }
+  });
+
+  // 마스터 음량 슬라이더(native div 구조) 드래그 처리. 세로 슬라이더이므로 위쪽이
+  // 큰 값. pointer 위치를 0~1로 정규화해 게인으로 변환.
+  let gainDragging = false;
+  let gainDragTarget = null;
+  function gainFromPointer(slider, clientX) {
+    const wrap = slider.querySelector(".pzp-ui-slider__wrap") || slider;
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    const n = (clientX - rect.left) / rect.width; // 왼=0, 오른=1
+    return normToGain(Math.max(0, Math.min(1, n)));
+  }
+  function applyGainFromPointer(slider, clientX) {
+    const g = gainFromPointer(slider, clientX);
+    if (g == null) return;
+    handleSlider("gain", g);
+    updateGainSliderVisual(slider);
+  }
+  function updateGainSliderVisual(slider) {
+    const n = gainToNorm(state.gain);
+    const vol = slider.querySelector(".pzp-ui-progress__volume");
+    if (vol) vol.style.setProperty("--pzp-ui-progress__scale", String(n));
+    const handle = slider.querySelector(".pzp-ui-slider__handler-wrap");
+    if (handle) handle.style.left = `${Math.round(n * 1000) / 10}%`;
+    slider.setAttribute("aria-valuenow", String(Math.round(n * 100)));
+  }
+  document.addEventListener("pointerdown", (e) => {
+    const slider = e.target.closest?.("[data-master-gain]");
+    if (!slider) return;
+    e.preventDefault();
+    e.stopPropagation();
+    gainDragging = true;
+    gainDragTarget = slider;
+    applyGainFromPointer(slider, e.clientX);
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!gainDragging || !gainDragTarget) return;
+    applyGainFromPointer(gainDragTarget, e.clientX);
+  });
+  document.addEventListener("pointerup", () => {
+    gainDragging = false;
+    gainDragTarget = null;
   });
 
   function handleUserGestureForAudioContext() {
