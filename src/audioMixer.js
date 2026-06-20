@@ -12,6 +12,9 @@
 
   const PANEL_ID = "cheese-audio-mixer-panel";
   const BUTTON_CLASS = "cheese-audio-mixer-button";
+  const STATS_PANEL_ID = "cheese-stream-stats-panel";
+  const STATS_BUTTON_CLASS = "cheese-stream-stats-button";
+  const STATS_REFRESH_MS = 1000;
   const PANEL_RIGHT_PX = 16;
   const PANEL_BOTTOM_PX = 64;
   const PANEL_TOP_GAP_PX = 12;
@@ -2021,6 +2024,425 @@
   window.addEventListener("keypress", stopMixerEditableShortcutLeak, true);
   window.addEventListener("scroll", () => closeInfoPopover(ui?.panel), true);
 
+  // ══ 스트림 정보 (비디오/오디오 통계) ═══════════════════════════════════════
+  // 재생바 우측 버튼 앞에 정보 아이콘을 두고, 클릭 시 해상도/FPS/비트레이트/코덱/
+  // 레이턴시(라이브)와 오디오 정보를 보여준다. 값은 치지직 내부 플레이어 객체
+  // (React fiber의 _corePlayer)에서 얻는다(cheese-knife 검증 패턴).
+  function getReactFiber(node) {
+    if (!node) return null;
+    const key = Object.keys(node).find((k) => k.startsWith("__reactFiber$"));
+    return key ? node[key] : null;
+  }
+
+  function findCorePlayer() {
+    const node =
+      document.getElementById("live_player_layout") ||
+      document.getElementById("player_layout") ||
+      findPlayer();
+    let fiber = getReactFiber(node);
+    if (!fiber) return null;
+    fiber = fiber.return;
+    let guard = 0;
+    while (fiber && guard++ < 2000) {
+      let state = fiber.memoizedState;
+      while (state) {
+        let value = state.memoizedState;
+        if (state.queue?.pending?.hasEagerState) {
+          value = state.queue.pending.eagerState;
+        } else if (state.baseQueue?.hasEagerState) {
+          value = state.baseQueue.eagerState;
+        }
+        if (value && value._corePlayer) return value._corePlayer;
+        state = state.next;
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  }
+
+  // 코덱 문자열에서 사람이 읽기 쉬운 이름 추출(예: avc1.4d401f → H.264, mp4a.40.2 → AAC).
+  function prettyCodec(codec) {
+    if (!codec) return null;
+    const c = String(codec).toLowerCase();
+    if (c.startsWith("avc1") || c.startsWith("avc3")) return "H.264 (AVC)";
+    if (c.startsWith("hev1") || c.startsWith("hvc1")) return "H.265 (HEVC)";
+    if (c.startsWith("av01")) return "AV1";
+    if (c.startsWith("vp9") || c.startsWith("vp09")) return "VP9";
+    if (c.startsWith("vp8")) return "VP8";
+    if (c.startsWith("mp4a")) return "AAC";
+    if (c.startsWith("opus")) return "Opus";
+    if (c.startsWith("ac-3")) return "AC-3";
+    return codec;
+  }
+
+  // 객체에서 여러 후보 키 중 첫 유효 값을 숫자로(문자열 "60"도 60으로) 반환.
+  function pickNum(obj, ...keys) {
+    if (!obj) return null;
+    for (const k of keys) {
+      const n = Number(obj[k]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+  }
+
+  function pickStr(obj, ...keys) {
+    if (!obj) return null;
+    for (const k of keys) {
+      const v = obj[k];
+      if (v != null && v !== "") return v;
+    }
+    return null;
+  }
+
+  // 비트레이트 값을 kbps로 정규화: 100000 이상이면 bps로 보고 1000으로 나눔.
+  function toKbps(n) {
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n >= 100000 ? Math.round(n / 1000) : Math.round(n);
+  }
+
+  // DASH MPD(srcObject._mpd)에서 현재 재생 해상도(video.videoHeight)에 가장
+  // 가까운 비디오 Representation을 찾는다. 다시보기 ABR의 비트레이트/FPS 보강용.
+  function findMpdRepresentation(core, video) {
+    try {
+      const mpd = (core._srcObject || core.srcObject)?._mpd;
+      if (!mpd) return null;
+      const periods = Array.isArray(mpd.Period) ? mpd.Period : [mpd.Period];
+      const reps = [];
+      for (const period of periods) {
+        if (!period) continue;
+        const asets = Array.isArray(period.AdaptationSet)
+          ? period.AdaptationSet
+          : [period.AdaptationSet];
+        for (const as of asets) {
+          if (!as) continue;
+          const list = Array.isArray(as.Representation)
+            ? as.Representation
+            : [as.Representation];
+          for (const r of list) {
+            if (!r || !r["@width"]) continue; // 비디오 표현만(@width 존재)
+            reps.push({
+              width: Number(r["@width"]),
+              height: Number(r["@height"]),
+              bandwidth: r["@bandwidth"],
+              frameRate: r["@frameRate"],
+              codecs: r["@codecs"],
+            });
+          }
+        }
+      }
+      if (!reps.length) return null;
+      const targetH = video?.videoHeight || 0;
+      // 현재 해상도와 height 차이가 가장 작은 표현 선택.
+      return reps.reduce((best, r) =>
+        Math.abs(r.height - targetH) < Math.abs(best.height - targetH)
+          ? r
+          : best,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  // 실제 height를 표준 화질 등급(예: 1080→"1080p")으로 매핑한다. 표준 등급에서
+  // ±32px 이내면 그 등급으로 본다(인코딩 편차 흡수).
+  function heightToGrade(h) {
+    if (!Number.isFinite(h) || h <= 0) return null;
+    const grades = [144, 240, 360, 480, 720, 1080, 1440, 2160];
+    for (const g of grades) {
+      if (Math.abs(h - g) <= 32) return `${g}p`;
+    }
+    return `${h}p`;
+  }
+
+  function collectStreamInfo() {
+    const video = findVideo();
+    const info = {
+      resolution: null,
+      fps: null,
+      videoBitrate: null,
+      videoCodec: null,
+      latency: null,
+      audioBitrate: null,
+      audioCodec: null,
+      audioChannels: null,
+      audioSampleRate: null,
+      isLive: location.pathname.startsWith("/live/"),
+    };
+
+    // 1) <video> 표준 API 폴백
+    if (video?.videoWidth && video?.videoHeight) {
+      info.resolution = `${video.videoWidth}×${video.videoHeight}`;
+    }
+
+    // 2) 치지직 내부 플레이어에서 상세 정보
+    try {
+      const core = findCorePlayer();
+      if (core) {
+        const selected =
+          Array.from(core.videoTracks || []).find((t) => t.selected) ||
+          Array.from(core.videoTracks || []).find((t) => t._selected);
+        // 라이브는 selected.dataset에 정밀한 값들이 들어있다.
+        const ds = selected?.dataset || {};
+
+        if (selected) {
+          // 해상도: width×height를 기본으로, 깨끗한 화질 등급(예: 1080p)을 병기.
+          // label("1080pavc1.64002a")엔 코덱이 섞여 있으니 토큰만 추출하고,
+          // 다시보기 ABR("Auto")처럼 등급을 못 얻으면 실제 height에서 도출한다.
+          const w = pickNum(selected, "width", "_width") || pickNum(ds, "videoWidth");
+          const h =
+            pickNum(selected, "height", "_height") ||
+            pickNum(ds, "videoHeight") ||
+            video?.videoHeight ||
+            null;
+          // 화질 등급 원본(고정이면 "1080p", 자동이면 "Auto").
+          const rawQuality =
+            pickStr(selected, "_videoQuality", "encodingOptionID") ||
+            pickStr(selected, "label") ||
+            "";
+          const isAbr = /^auto$|^abr$/i.test(rawQuality.trim());
+          // 표시용 등급: 고정이면 그 등급, 자동이면 실제 height에서 도출.
+          let grade = String(rawQuality).match(/\d{3,4}p/)?.[0] || null;
+          if (!grade) grade = heightToGrade(h);
+          // 자동이면 "자동 · 1080p", 고정이면 "1080p"로 병기.
+          const tag = grade
+            ? isAbr
+              ? `자동 · ${grade}`
+              : grade
+            : isAbr
+              ? "자동"
+              : null;
+          if (w && h) {
+            info.resolution = tag ? `${w}×${h} (${tag})` : `${w}×${h}`;
+          } else if (!info.resolution && tag) {
+            info.resolution = tag;
+          }
+
+          // FPS: 문자열 "60"도 처리(언더스코어/dataset 포함)
+          const fps =
+            pickNum(selected, "videoFrameRate", "_videoFrameRate") ||
+            pickNum(ds, "videoFrameRate");
+          if (fps) info.fps = `${Math.round(fps)} fps`;
+
+          // 비디오 비트레이트(kbps 정규화)
+          const vbr =
+            pickNum(selected, "videoBitrate", "_videoBitrate") ||
+            pickNum(ds, "videoBitRate");
+          info.videoBitrate = toKbps(vbr)
+            ? `${numberFormat(toKbps(vbr))} kbps`
+            : null;
+
+          // 오디오 비트레이트
+          const abr =
+            pickNum(selected, "audioBitrate", "_audioBitrate") ||
+            pickNum(ds, "audioBitRate");
+          info.audioBitrate = toKbps(abr)
+            ? `${numberFormat(toKbps(abr))} kbps`
+            : null;
+
+          // 오디오 채널/샘플속도: dataset 우선
+          const ch = pickNum(ds, "audioChannel");
+          if (ch) info.audioChannels = `${ch}ch`;
+          const sr = pickNum(ds, "audioSamplingRate");
+          if (sr) info.audioSampleRate = `${(sr / 1000).toFixed(1)} kHz`;
+
+          // 코덱: track의 codec 필드 우선
+          info.videoCodec =
+            prettyCodec(pickStr(selected, "videoCodec", "_videoCodec")) ||
+            info.videoCodec;
+          info.audioCodec =
+            prettyCodec(pickStr(selected, "audioCodec", "_audioCodec")) ||
+            info.audioCodec;
+        }
+
+        // _currentCodecs 폴백 + 채널 보강
+        const codecs = core._currentCodecs;
+        if (codecs) {
+          info.videoCodec = info.videoCodec || prettyCodec(codecs.video);
+          info.audioCodec = info.audioCodec || prettyCodec(codecs.audio);
+          const ch = pickNum(codecs, "audioChannel");
+          if (!info.audioChannels && ch) info.audioChannels = `${ch}ch`;
+        }
+
+        if (info.isLive && typeof core.srcObject?._getLiveLatency === "function") {
+          const lat = core.srcObject._getLiveLatency();
+          if (Number.isFinite(lat))
+            info.latency = `${numberFormat(Math.floor(lat))} ms`;
+        }
+
+        // 다시보기(ABR)는 트랙에 비트레이트/FPS가 없다 → DASH MPD에서 현재 재생
+        // 해상도에 맞는 Representation을 찾아 채운다.
+        if (!info.videoBitrate || !info.fps) {
+          const rep = findMpdRepresentation(core, video);
+          if (rep) {
+            if (!info.fps && pickNum(rep, "frameRate"))
+              info.fps = `${Math.round(pickNum(rep, "frameRate"))} fps`;
+            const bw = pickNum(rep, "bandwidth");
+            if (!info.videoBitrate && toKbps(bw))
+              info.videoBitrate = `${numberFormat(toKbps(bw))} kbps`;
+            // muxed Representation의 codecs는 "video,audio" 형태
+            const repCodecs = String(rep.codecs || "").split(",");
+            if (!info.videoCodec && repCodecs[0])
+              info.videoCodec = prettyCodec(repCodecs[0].trim());
+            if (!info.audioCodec && repCodecs[1])
+              info.audioCodec = prettyCodec(repCodecs[1].trim());
+          }
+        }
+      }
+    } catch {}
+
+    // 3) 폴백 — 샘플속도: AudioContext, 채널: AudioContext 그래프
+    if (!info.audioSampleRate && audio.ctx?.sampleRate) {
+      info.audioSampleRate = `${(audio.ctx.sampleRate / 1000).toFixed(1)} kHz`;
+    }
+    try {
+      if (!info.audioChannels && audio.source?.channelCount)
+        info.audioChannels = `${audio.source.channelCount}ch`;
+    } catch {}
+
+    return info;
+  }
+
+  function numberFormat(n) {
+    return Number(n).toLocaleString("ko-KR");
+  }
+
+  function statsIcon() {
+    return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <circle cx="18" cy="18" r="9.5" stroke="currentColor" stroke-width="2"></circle>
+      <path d="M18 16.4v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+      <circle cx="18" cy="13" r="1.3" fill="currentColor"></circle>
+    </svg>`;
+  }
+
+  function createStatsButton() {
+    const btn = document.createElement("button");
+    btn.className = `${STATS_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    btn.type = "button";
+    btn.setAttribute("aria-label", "스트림 정보");
+    btn.setAttribute("aria-expanded", "false");
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스트림 정보</span><span class="pzp-ui-icon">${statsIcon()}</span>`;
+    return btn;
+  }
+
+  function ensureStatsButton() {
+    const player = findPlayer();
+    if (!player) return;
+    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls || controls.querySelector(`.${STATS_BUTTON_CLASS}`)) return;
+    const btn = createStatsButton();
+    // 라이브: 클립 만들기 버튼 앞 / 다시보기: 댓글 타임스탬프 버튼 앞.
+    // 둘 다 없으면 우측 컨트롤 그룹 맨 앞에 둔다.
+    const anchor =
+      controls.querySelector(".custom__clip-button") ||
+      controls.querySelector(".cheese-search-comment-timestamp-button") ||
+      controls.firstChild;
+    controls.insertBefore(btn, anchor);
+  }
+
+  function removeStatsButton() {
+    document
+      .querySelectorAll(`.${STATS_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
+  }
+
+  let statsTimer = 0;
+
+  function toggleStatsPanel() {
+    if (document.getElementById(STATS_PANEL_ID)) closeStatsPanel();
+    else openStatsPanel();
+  }
+
+  function openStatsPanel() {
+    closeStatsPanel();
+    const button = document.querySelector(`.${STATS_BUTTON_CLASS}`);
+    const root = getPanelRoot(button) || findPlayer();
+    if (!root) return;
+    if (getComputedStyle(root).position === "static") {
+      root.style.position = "relative";
+    }
+    root.style.overflow = "visible";
+    const panel = document.createElement("div");
+    panel.id = STATS_PANEL_ID;
+    panel.className = "cheese-stream-stats-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "스트림 정보");
+    root.appendChild(panel);
+    keepControlsVisible(root);
+    renderStatsPanel(panel);
+    button?.setAttribute("aria-expanded", "true");
+    statsTimer = window.setInterval(() => {
+      const p = document.getElementById(STATS_PANEL_ID);
+      if (!p || !isElementRendered(findVideo())) {
+        closeStatsPanel();
+        return;
+      }
+      renderStatsPanel(p);
+    }, STATS_REFRESH_MS);
+  }
+
+  function closeStatsPanel() {
+    if (statsTimer) {
+      window.clearInterval(statsTimer);
+      statsTimer = 0;
+    }
+    // 오디오 패널이 열려 있지 않을 때만 컨트롤 유지를 해제한다.
+    if (!ui?.panel) releaseControlsVisible();
+    document.getElementById(STATS_PANEL_ID)?.remove();
+    document
+      .querySelector(`.${STATS_BUTTON_CLASS}`)
+      ?.setAttribute("aria-expanded", "false");
+  }
+
+  function statsRow(label, value) {
+    return `<div class="cheese-stats-row"><span>${label}</span><strong>${value ?? "—"}</strong></div>`;
+  }
+
+  function renderStatsPanel(panel) {
+    const i = collectStreamInfo();
+    panel.innerHTML = `
+      <div class="cheese-stats-head">
+        <strong>스트림 정보</strong>
+        <button type="button" class="cheese-mixer-close" data-stats-close aria-label="닫기">✕</button>
+      </div>
+      <div class="cheese-stats-body">
+        <div class="cheese-stats-group-title">비디오</div>
+        ${statsRow("해상도", i.resolution)}
+        ${statsRow("FPS", i.fps)}
+        ${statsRow("비트레이트", i.videoBitrate)}
+        ${statsRow("코덱", i.videoCodec)}
+        ${i.isLive ? statsRow("레이턴시", i.latency) : ""}
+        <div class="cheese-stats-group-title">오디오</div>
+        ${statsRow("비트레이트", i.audioBitrate)}
+        ${statsRow("코덱", i.audioCodec)}
+        ${statsRow("채널", i.audioChannels)}
+        ${statsRow("샘플 속도", i.audioSampleRate)}
+      </div>`;
+    panel
+      .querySelector("[data-stats-close]")
+      ?.addEventListener("click", closeStatsPanel);
+    positionStatsPanel(panel);
+  }
+
+  function positionStatsPanel(panel) {
+    panel.style.right = `${PANEL_RIGHT_PX}px`;
+    panel.style.bottom = `${PANEL_BOTTOM_PX}px`;
+  }
+
+  // 스트림 정보 버튼/패널 클릭 위임(오디오 믹서와 동일하게 document 레벨).
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest?.(`.${STATS_BUTTON_CLASS}`);
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleStatsPanel();
+      return;
+    }
+    const panel = document.getElementById(STATS_PANEL_ID);
+    if (panel && !e.target.closest?.(`#${STATS_PANEL_ID}`)) {
+      closeStatsPanel();
+    }
+  });
+
   // ── 부트스트랩 ────────────────────────────────────────────────────────────
   function tick() {
     const pageKey = getPageKey();
@@ -2030,6 +2452,8 @@
         teardownGraph();
         closePanel();
         removeButton();
+        closeStatsPanel();
+        removeStatsButton();
         clearGraphRetryBlock();
         currentPageKey = null;
         currentMediaId = null;
@@ -2050,6 +2474,7 @@
       resolveAndLoadChannel(pageKey);
     }
     ensureButton();
+    ensureStatsButton();
     ensureEnabledGraph();
   }
 

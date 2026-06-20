@@ -750,3 +750,123 @@
 .cheese-mixer-expert-group {
   margin-bottom: 4px;
 }
+
+/* ── 스트림 정보 버튼/패널 ────────────────────────────────────────────── */
+.cheese-stream-stats-button.is-active,
+.cheese-stream-stats-button[aria-expanded="true"] {
+  color: #00ffa3;
+}
+
+.cheese-stream-stats-button .pzp-ui-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cheese-stream-stats-button .pzp-ui-icon__svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.cheese-stream-stats-panel {
+  position: absolute;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  width: min(280px, calc(100% - 24px));
+  max-height: min(440px, calc(100% - 90px));
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgb(24 30 44 / 97%);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family:
+    system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  font-size: 13px;
+  /* 타임스탬프 패널과 동일한 커스텀 스크롤바 */
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.cheese-stream-stats-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cheese-stream-stats-panel::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+
+.cheese-stream-stats-panel::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+
+.cheese-stream-stats-panel::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
+}
+
+.cheese-stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cheese-stats-head strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.cheese-stats-body {
+  padding: 8px 14px 14px;
+}
+
+.cheese-stats-group-title {
+  margin: 12px 0 6px;
+  color: #00ffa3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.cheese-stats-group-title:first-child {
+  margin-top: 2px;
+}
+
+.cheese-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cheese-stats-row span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+}
+
+.cheese-stats-row strong {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
