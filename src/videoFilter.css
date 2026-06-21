@@ -1,0 +1,792 @@
+/* 치즈 서치 - 비디오 필터 UI
+   오디오 믹서(src/audioMixer.css)와 동일한 레이아웃을 쓰되, 구분을 위해 강조색을
+   민트(#00ffa3) 대신 보라(#b06cff)로 둔다. */
+
+/* 플레이어 하단 버튼 */
+.cheese-video-filter-button.is-active {
+  color: #b06cff;
+}
+
+.cheese-video-filter-button .pzp-ui-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cheese-video-filter-button .pzp-ui-icon__svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.cheese-video-filter-active-dot {
+  fill: #838285;
+  transition: fill 0.12s ease;
+}
+
+.cheese-video-filter-button.is-active .cheese-video-filter-active-dot {
+  fill: #b06cff;
+}
+
+/* 팝업 패널 */
+.cheese-video-filter-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 64px;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  width: min(360px, calc(100% - 24px));
+  max-height: min(520px, calc(100% - 90px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgb(24 30 44 / 97%);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    sans-serif;
+  font-size: 13px;
+}
+
+.cheese-vf-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cheese-vf-head strong {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.cheese-vf-quicksave-button {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid rgba(176, 108, 255, 0.5);
+  border-radius: 999px;
+  background: rgba(176, 108, 255, 0.12);
+  color: #b06cff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.cheese-vf-quicksave-button:hover {
+  border-color: #b06cff;
+  background: rgba(176, 108, 255, 0.2);
+}
+
+.cheese-vf-reset-button {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.cheese-vf-reset-button:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* "프리셋 추가" 모달 */
+.cheese-vf-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
+}
+
+.cheese-vf-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(280px, calc(100% - 48px));
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgb(24 30 44 / 99%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+.cheese-vf-modal strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cheese-vf-modal input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+}
+
+.cheese-vf-modal input:focus {
+  outline: none;
+  border-color: #b06cff;
+}
+
+.cheese-vf-modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cheese-vf-modal-actions .cheese-vf-custom-button {
+  padding: 9px 8px;
+}
+
+/* 전원 토글 */
+.cheese-vf-power {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.cheese-vf-power[data-tooltip]::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 90%;
+  z-index: 30;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(20, 24, 34, 0.96);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  content: attr(data-tooltip);
+  opacity: 0;
+  transform: translateX(-50%) translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+}
+
+.cheese-vf-power[data-tooltip]:hover::after,
+.cheese-vf-power[data-tooltip]:focus-within::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.cheese-vf-power input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cheese-vf-power i {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition:
+    background 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.cheese-vf-power i::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  content: "";
+  transition: transform 0.14s ease;
+}
+
+.cheese-vf-power input:checked + i {
+  background: rgba(176, 108, 255, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(176, 108, 255, 0.46);
+}
+
+.cheese-vf-power input:checked + i::after {
+  transform: translateX(16px);
+  background: #b06cff;
+}
+
+.cheese-vf-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.cheese-vf-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* 탭 */
+.cheese-vf-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+}
+
+.cheese-vf-tab {
+  flex: 1;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-vf-tab:hover {
+  color: #fff;
+}
+
+.cheese-vf-tab.is-active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #b06cff;
+}
+
+.cheese-vf-body {
+  padding: 12px 14px 16px;
+  overflow-y: auto;
+  scrollbar-color: rgba(176, 108, 255, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.cheese-vf-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cheese-vf-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+
+.cheese-vf-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(176, 108, 255, 0.88),
+    rgba(108, 60, 168, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+
+.cheese-vf-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(176, 108, 255, 1),
+    rgba(108, 60, 168, 1)
+  );
+}
+
+.cheese-vf-pane {
+  display: none;
+}
+
+.cheese-vf-pane.is-active {
+  display: block;
+}
+
+.cheese-vf-hint {
+  margin: 0 0 10px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+/* 프리셋 */
+.cheese-vf-presets {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.cheese-vf-preset {
+  padding: 12px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.cheese-vf-preset:hover {
+  border-color: rgba(176, 108, 255, 0.5);
+  background: rgba(176, 108, 255, 0.08);
+}
+
+.cheese-vf-preset.is-active {
+  border-color: #b06cff;
+  background: rgba(176, 108, 255, 0.16);
+  color: #b06cff;
+}
+
+/* 커스텀 버튼 */
+.cheese-vf-custom-button {
+  min-width: 0;
+  padding: 9px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.cheese-vf-custom-button:hover:not(:disabled),
+.cheese-vf-custom-button.is-active {
+  border-color: rgba(176, 108, 255, 0.58);
+  background: rgba(176, 108, 255, 0.12);
+  color: #b06cff;
+}
+
+.cheese-vf-custom-button.is-primary {
+  border-color: rgba(176, 108, 255, 0.5);
+  background: rgba(176, 108, 255, 0.14);
+  color: #b06cff;
+}
+
+.cheese-vf-custom-button.is-danger {
+  border-color: rgba(255, 73, 80, 0.45);
+  background: rgba(255, 73, 80, 0.1);
+  color: #ff6b70;
+}
+
+.cheese-vf-custom-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+/* "조정" 탭의 전체 초기화 버튼 */
+.cheese-vf-reset-all {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.cheese-vf-custom-head {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/* 내보내기/불러오기 공유 패널 */
+.cheese-vf-share {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(176, 108, 255, 0.26);
+  border-radius: 8px;
+  background: rgba(176, 108, 255, 0.06);
+}
+
+.cheese-vf-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cheese-vf-share-head strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cheese-vf-share-selectall {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-vf-share-selectall:hover {
+  border-color: rgba(176, 108, 255, 0.5);
+  color: #b06cff;
+}
+
+.cheese-vf-share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.cheese-vf-share-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.cheese-vf-share-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cheese-vf-share-row input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: #b06cff;
+  cursor: pointer;
+}
+
+.cheese-vf-share-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-vf-share-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.cheese-vf-share-input:focus {
+  outline: none;
+  border-color: #b06cff;
+}
+
+.cheese-vf-share-msg {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cheese-vf-share-msg.is-ok {
+  color: #b06cff;
+}
+
+.cheese-vf-share-msg.is-error {
+  color: #ff6b70;
+}
+
+.cheese-vf-share-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  gap: 8px;
+}
+
+.cheese-vf-custom-creator {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(94px, auto);
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid rgba(176, 108, 255, 0.26);
+  border-radius: 8px;
+  background: rgba(176, 108, 255, 0.06);
+}
+
+.cheese-vf-custom-creator input {
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+}
+
+.cheese-vf-custom-dialog {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cheese-vf-custom-dialog strong {
+  font-size: 12px;
+}
+
+.cheese-vf-custom-dialog p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+}
+
+.cheese-vf-custom-dialog input {
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+}
+
+.cheese-vf-custom-dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.cheese-vf-custom-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.cheese-vf-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  text-align: center;
+}
+
+.cheese-vf-custom-item {
+  min-width: 0;
+}
+
+.cheese-vf-custom-select {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+}
+
+.cheese-vf-custom-apply {
+  min-width: 0;
+  padding: 11px 58px 11px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cheese-vf-custom-apply strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cheese-vf-custom-select:hover,
+.cheese-vf-custom-select.is-active {
+  border-color: rgba(176, 108, 255, 0.58);
+  background: rgba(176, 108, 255, 0.12);
+}
+
+.cheese-vf-custom-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.cheese-vf-custom-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.cheese-vf-custom-icon-button:hover {
+  border-color: rgba(176, 108, 255, 0.45);
+  color: #b06cff;
+}
+
+.cheese-vf-custom-icon-button.is-danger:hover {
+  border-color: rgba(255, 73, 80, 0.55);
+  color: #ff6b70;
+}
+
+.cheese-vf-draft-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid rgba(176, 108, 255, 0.32);
+  border-radius: 8px;
+  background: rgba(176, 108, 255, 0.08);
+}
+
+.cheese-vf-draft-bar strong,
+.cheese-vf-draft-bar span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-vf-draft-bar strong {
+  font-size: 12px;
+}
+
+.cheese-vf-draft-bar span {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+}
+
+/* 슬라이더 행 */
+.cheese-vf-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cheese-vf-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+}
+
+.cheese-vf-row output {
+  text-align: right;
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.cheese-vf-row input[type="range"] {
+  width: 100%;
+  accent-color: #b06cff;
+}
+
+/* info 아이콘 & 설명 팝오버 */
+.cheese-vf-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  flex: none;
+  transition: color 0.12s ease;
+}
+
+.cheese-vf-info:hover,
+.cheese-vf-info[aria-expanded="true"] {
+  color: #b06cff;
+}
+
+.cheese-vf-info-popover {
+  position: fixed;
+  z-index: 2147483647;
+  max-width: 240px;
+  padding: 10px 12px;
+  border: 1px solid rgba(176, 108, 255, 0.35);
+  border-radius: 8px;
+  background: rgb(18 24 36 / 98%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: keep-all;
+}

@@ -6299,3 +6299,50 @@ window.addEventListener("message", (event) => {
     } catch {}
   }
 });
+
+// ── 비디오 필터 설정 저장 브릿지 ─────────────────────────────────────────────
+// 오디오 믹서 브릿지와 동일 패턴. MAIN world의 src/videoFilter.js가 보낸 저장/복원
+// 요청을 여기(격리 월드)에서 chrome.storage로 처리한다. per-media 필터는
+// videoFilter:<mediaId>, 커스텀 프리셋은 전역 videoFilter:presets에 저장한다.
+const VIDEO_FILTER_STORAGE_PREFIX = "videoFilter:";
+const VIDEO_FILTER_PRESETS_KEY = "videoFilter:presets";
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== "cheese-video-filter") return;
+  const channelId = String(data.channelId || "").trim();
+  if (!channelId) return;
+  const key = `${VIDEO_FILTER_STORAGE_PREFIX}${channelId}`;
+
+  if (data.type === "save") {
+    try {
+      const incoming = data.state || {};
+      const { customPresets, ...perMedia } = incoming;
+      const toSet = { [key]: perMedia };
+      if (Array.isArray(customPresets)) {
+        toSet[VIDEO_FILTER_PRESETS_KEY] = customPresets;
+      }
+      chrome.storage.local.set(toSet);
+    } catch {}
+  } else if (data.type === "load") {
+    try {
+      chrome.storage.local.get([key, VIDEO_FILTER_PRESETS_KEY], (result) => {
+        const saved = result?.[key] || null;
+        const presets = result?.[VIDEO_FILTER_PRESETS_KEY] || [];
+        const merged = saved
+          ? { ...saved, customPresets: presets }
+          : { customPresets: presets };
+        window.postMessage(
+          {
+            source: "cheese-video-filter-content",
+            type: "loaded",
+            channelId,
+            state: merged,
+          },
+          location.origin,
+        );
+      });
+    } catch {}
+  }
+});

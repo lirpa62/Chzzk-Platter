@@ -536,7 +536,7 @@
     audio.connected = false;
     audio.video = video || null;
     // 영구 차단해 재시도(무한 루프)를 끊는다. createMediaElementSource는 video당
-    // 1회만 가능하므로, 다른 확장(예: cheese-knife)이 이미 같은 video로 source를
+    // 1회만 가능하므로, 다른 확장이 이미 같은 video로 source를
     // 만들었으면 우리는 절대 만들 수 없다 → 믹서를 끄고 충돌 안내.
     graphRetryBlock = {
       video,
@@ -820,7 +820,8 @@
   // dirtyFromKey가 가리키는 '값 조정 전 프리셋'의 스냅샷. 없으면 null.
   function baseSnapshotForDirty() {
     if (!dirtyFromKey) return null;
-    if (PRESETS[dirtyFromKey]) return builtInPresetSnapshot(PRESETS[dirtyFromKey]);
+    if (PRESETS[dirtyFromKey])
+      return builtInPresetSnapshot(PRESETS[dirtyFromKey]);
     const custom = normalizeCustomPresets(state.customPresets).find(
       (preset) => preset.id === dirtyFromKey,
     );
@@ -839,7 +840,10 @@
       if (!numEq(a.eq[i], b.eq[i])) return false;
     }
     const objEq = (oa, ob) => {
-      const keys = new Set([...Object.keys(oa || {}), ...Object.keys(ob || {})]);
+      const keys = new Set([
+        ...Object.keys(oa || {}),
+        ...Object.keys(ob || {}),
+      ]);
       for (const k of keys) {
         const va = oa?.[k];
         const vb = ob?.[k];
@@ -1071,12 +1075,18 @@
     state.customPresets = normalizeCustomPresets(state.customPresets).filter(
       (preset) => preset.id !== id,
     );
-    if (state.preset === id) state.preset = "custom";
+    const wasActive = state.preset === id;
     if (customDraft?.id === id) {
       customDraft = null;
       draftBackup = null; // 편집 중이던 프리셋이 삭제됨 → 복원 대상 무효
     }
-    saveState();
+    if (wasActive) {
+      // 적용 중이던 커스텀이 삭제됨 → '아무 프리셋도 아닌' 상태로 두면 값 조정 시
+      // 추가/초기화 버튼이 안 뜬다. 기본 프리셋으로 되돌려 다시 dirty 추적이 되게 한다.
+      applyPreset("default");
+    } else {
+      saveState();
+    }
     refreshPanelContent();
   }
 
@@ -1181,7 +1191,10 @@
         text: `${customExportSelected.size}개 프리셋을 복사했어요. 공유할 곳에 붙여넣으세요.`,
       };
     } catch {
-      customShareMsg = { kind: "error", text: "복사에 실패했어요. 다시 시도해 주세요." };
+      customShareMsg = {
+        kind: "error",
+        text: "복사에 실패했어요. 다시 시도해 주세요.",
+      };
     }
     refreshPanelContent();
   }

@@ -41,8 +41,8 @@
       "matches": [
         "https://chzzk.naver.com/*"
       ],
-      "js": ["src/audioMixer.js"],
-      "css": ["src/audioMixer.css"],
+      "js": ["src/audioMixer.js", "src/videoFilter.js"],
+      "css": ["src/audioMixer.css", "src/videoFilter.css"],
       "run_at": "document_idle",
       "world": "MAIN"
     }
