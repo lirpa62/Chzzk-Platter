@@ -444,7 +444,134 @@
 
 .cheese-mixer-custom-head {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+/* 내보내기/불러오기 공유 패널 */
+.cheese-mixer-share {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(0, 255, 163, 0.26);
+  border-radius: 8px;
+  background: rgba(0, 255, 163, 0.06);
+}
+
+.cheese-mixer-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cheese-mixer-share-head strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cheese-mixer-share-selectall {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-mixer-share-selectall:hover {
+  border-color: rgba(0, 255, 163, 0.5);
+  color: #00ffa3;
+}
+
+.cheese-mixer-share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.cheese-mixer-share-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.cheese-mixer-share-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cheese-mixer-share-row input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: #00ffa3;
+  cursor: pointer;
+}
+
+.cheese-mixer-share-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-mixer-share-row-mode {
+  flex: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+}
+
+.cheese-mixer-share-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.cheese-mixer-share-input:focus {
+  outline: none;
+  border-color: #00ffa3;
+}
+
+.cheese-mixer-share-msg {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cheese-mixer-share-msg.is-ok {
+  color: #00ffa3;
+}
+
+.cheese-mixer-share-msg.is-error {
+  color: #ff6b70;
+}
+
+.cheese-mixer-share-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  gap: 8px;
 }
 
 .cheese-mixer-custom-creator {

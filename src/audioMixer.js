@@ -340,6 +340,14 @@
   let draftBackup = null;
   let customCreatorOpen = false;
   let customDialog = null;
+  // 커스텀 프리셋 내보내기/불러오기 패널 상태.
+  let customExportOpen = false; // 내보내기(선택→JSON 복사) UI 열림
+  let customImportOpen = false; // 불러오기(JSON 붙여넣기→검증→추가) UI 열림
+  let customExportSelected = new Set(); // 내보내기로 선택한 프리셋 id들
+  let customImportText = ""; // 불러오기 textarea 내용(재렌더 간 유지)
+  let customShareMsg = null; // { kind: "ok"|"error", text } 안내 메시지
+  const PRESET_SHARE_TYPE = "cheese-audio-mixer-presets"; // 공유 JSON 식별자
+  const PRESET_SHARE_VERSION = 1;
   // 프리셋(내장/커스텀) 적용 후 값을 수정해 벗어난 상태인지. true면 head에
   // "프리셋 추가" 빠른 저장 버튼이 나타난다.
   let presetDirty = false;
@@ -1093,6 +1101,178 @@
     refreshPanelContent();
   }
 
+  // ── 커스텀 프리셋 내보내기/불러오기 ─────────────────────────────────────
+  function openCustomExport() {
+    customImportOpen = false;
+    customCreatorOpen = false;
+    customDialog = null;
+    customShareMsg = null;
+    // 기본으로 전부 선택해 둔다(공유 흐름에서 흔한 케이스).
+    customExportSelected = new Set(
+      normalizeCustomPresets(state.customPresets).map((p) => p.id),
+    );
+    customExportOpen = true;
+    refreshPanelContent();
+  }
+
+  function openCustomImport() {
+    customExportOpen = false;
+    customCreatorOpen = false;
+    customDialog = null;
+    customShareMsg = null;
+    customImportText = "";
+    customImportOpen = true;
+    refreshPanelContent();
+  }
+
+  function closeCustomShare() {
+    customExportOpen = false;
+    customImportOpen = false;
+    customShareMsg = null;
+    refreshPanelContent();
+  }
+
+  function toggleExportPick(id, picked) {
+    if (picked) customExportSelected.add(id);
+    else customExportSelected.delete(id);
+    // 안내 메시지는 선택이 바뀌면 지운다(복사 카운트만 갱신).
+    customShareMsg = null;
+    refreshPanelContent();
+  }
+
+  function toggleExportSelectAll() {
+    const presets = normalizeCustomPresets(state.customPresets);
+    if (customExportSelected.size === presets.length) {
+      customExportSelected = new Set();
+    } else {
+      customExportSelected = new Set(presets.map((p) => p.id));
+    }
+    customShareMsg = null;
+    refreshPanelContent();
+  }
+
+  // 선택한 프리셋을 공유용 JSON으로 직렬화. id는 빼고(불러올 때 새로 발급) name/mode/
+  // snapshot만 담는다.
+  function buildExportJson() {
+    const selected = normalizeCustomPresets(state.customPresets).filter((p) =>
+      customExportSelected.has(p.id),
+    );
+    return JSON.stringify(
+      {
+        type: PRESET_SHARE_TYPE,
+        version: PRESET_SHARE_VERSION,
+        presets: selected.map((p) => ({
+          name: p.name,
+          mode: p.mode,
+          snapshot: p.snapshot,
+        })),
+      },
+      null,
+      2,
+    );
+  }
+
+  async function copyExportJson() {
+    if (!customExportSelected.size) return;
+    try {
+      await copyShareText(buildExportJson());
+      customShareMsg = {
+        kind: "ok",
+        text: `${customExportSelected.size}개 프리셋을 복사했어요. 공유할 곳에 붙여넣으세요.`,
+      };
+    } catch {
+      customShareMsg = { kind: "error", text: "복사에 실패했어요. 다시 시도해 주세요." };
+    }
+    refreshPanelContent();
+  }
+
+  // 클립보드 복사(콘텐츠 스크립트 패턴과 동일: clipboard API → textarea+execCommand 폴백).
+  async function copyShareText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "-9999px";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) throw new Error("copy failed");
+  }
+
+  // 붙여넣은 JSON을 검증해 유효한 프리셋만 커스텀에 추가한다.
+  function confirmCustomImport(panel) {
+    const raw = (
+      panel.querySelector("[data-import-text]")?.value ?? customImportText
+    ).trim();
+    customImportText = raw;
+    if (!raw) {
+      customShareMsg = { kind: "error", text: "붙여넣은 JSON이 비어 있어요." };
+      refreshPanelContent();
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      customShareMsg = { kind: "error", text: "JSON 형식이 올바르지 않아요." };
+      refreshPanelContent();
+      return;
+    }
+    // 공유 봉투({type,version,presets}) 또는 프리셋 배열, 단일 프리셋 객체 모두 허용.
+    let rawPresets;
+    if (Array.isArray(parsed)) {
+      rawPresets = parsed;
+    } else if (parsed && Array.isArray(parsed.presets)) {
+      if (parsed.type && parsed.type !== PRESET_SHARE_TYPE) {
+        customShareMsg = {
+          kind: "error",
+          text: "오디오 믹서 프리셋 형식이 아니에요.",
+        };
+        refreshPanelContent();
+        return;
+      }
+      rawPresets = parsed.presets;
+    } else if (parsed && typeof parsed === "object") {
+      rawPresets = [parsed];
+    } else {
+      customShareMsg = { kind: "error", text: "프리셋을 찾을 수 없어요." };
+      refreshPanelContent();
+      return;
+    }
+    // normalizeCustomPreset이 검증·정규화·클램프까지 한다(유효치 않으면 null). id는
+    // 충돌 방지를 위해 항상 새로 발급한다.
+    const valid = rawPresets
+      .map((p) =>
+        normalizeCustomPreset(
+          p && typeof p === "object" ? { ...p, id: createPresetId() } : p,
+        ),
+      )
+      .filter(Boolean);
+    if (!valid.length) {
+      customShareMsg = {
+        kind: "error",
+        text: "유효한 프리셋이 없어요. JSON을 다시 확인해 주세요.",
+      };
+      refreshPanelContent();
+      return;
+    }
+    const existing = normalizeCustomPresets(state.customPresets);
+    state.customPresets = [...existing, ...valid];
+    saveState();
+    customImportOpen = false;
+    customImportText = "";
+    customShareMsg = {
+      kind: "ok",
+      text: `${valid.length}개 프리셋을 추가했어요.`,
+    };
+    refreshPanelContent();
+  }
+
   function confirmCustomPresetEdit(panel, id) {
     const preset = normalizeCustomPresets(state.customPresets).find(
       (item) => item.id === id,
@@ -1371,7 +1551,7 @@
     const panel = ui?.panel;
     if (!panel) return;
     panel.innerHTML = renderPanel();
-    bindPanelEvents(panel);
+    // 위임 리스너는 panel에 한 번만 붙어 있으므로 재바인딩하지 않는다(중복 누적 방지).
     syncUI();
     repositionOpenPanel();
   }
@@ -1619,13 +1799,71 @@
     const list = presets.length
       ? presets.map(renderCustomPresetItem).join("")
       : `<p class="cheese-mixer-empty">저장된 커스텀 프리셋이 없습니다.</p>`;
+    const hasPresets = presets.length > 0;
     return `
       <div class="cheese-mixer-custom-head">
         <button type="button" class="cheese-mixer-custom-button is-primary" data-action="custom-new">프리셋 추가</button>
+        <button type="button" class="cheese-mixer-custom-button" data-action="custom-export-open" ${hasPresets ? "" : "disabled"} title="${hasPresets ? "선택한 프리셋을 JSON으로 복사" : "내보낼 프리셋이 없습니다"}">내보내기</button>
+        <button type="button" class="cheese-mixer-custom-button" data-action="custom-import-open" title="공유받은 JSON으로 프리셋 추가">불러오기</button>
       </div>
       ${customCreatorOpen ? renderCustomPresetCreator() : ""}
+      ${customExportOpen ? renderCustomExport() : ""}
+      ${customImportOpen ? renderCustomImport() : ""}
       ${customDialog ? renderCustomDialog() : ""}
       <div class="cheese-mixer-custom-list">${list}</div>`;
+  }
+
+  // 내보내기 패널: 프리셋 목록을 체크박스로 선택 → "JSON 복사"로 클립보드 복사.
+  function renderCustomExport() {
+    const presets = normalizeCustomPresets(state.customPresets);
+    const rows = presets
+      .map((preset) => {
+        const checked = customExportSelected.has(preset.id) ? "checked" : "";
+        const modeLabel = preset.mode === "expert" ? "전문가" : "고급";
+        return `
+          <label class="cheese-mixer-share-row">
+            <input type="checkbox" data-export-pick="${escapeAttribute(preset.id)}" ${checked}>
+            <span class="cheese-mixer-share-row-name">${escapeHtml(preset.name)}</span>
+            <span class="cheese-mixer-share-row-mode">${modeLabel}</span>
+          </label>`;
+      })
+      .join("");
+    const count = customExportSelected.size;
+    return `
+      <div class="cheese-mixer-share" role="group" aria-label="프리셋 내보내기">
+        <div class="cheese-mixer-share-head">
+          <strong>내보내기</strong>
+          <button type="button" class="cheese-mixer-share-selectall" data-action="custom-export-selectall">${count === presets.length ? "선택 해제" : "전체 선택"}</button>
+        </div>
+        <div class="cheese-mixer-share-list">${rows}</div>
+        ${customShareMsg ? renderShareMsg() : ""}
+        <div class="cheese-mixer-share-actions">
+          <button type="button" class="cheese-mixer-custom-button is-primary" data-action="custom-export-copy" ${count ? "" : "disabled"}>JSON 복사 (${count})</button>
+          <button type="button" class="cheese-mixer-custom-button" data-action="custom-share-close">닫기</button>
+        </div>
+      </div>`;
+  }
+
+  // 불러오기 패널: JSON 붙여넣기 → 검증 → 유효 프리셋을 커스텀에 추가.
+  function renderCustomImport() {
+    return `
+      <div class="cheese-mixer-share" role="group" aria-label="프리셋 불러오기">
+        <div class="cheese-mixer-share-head">
+          <strong>불러오기</strong>
+        </div>
+        <textarea class="cheese-mixer-share-input" data-import-text placeholder="공유받은 프리셋 JSON을 붙여넣으세요.">${escapeHtml(customImportText)}</textarea>
+        ${customShareMsg ? renderShareMsg() : ""}
+        <div class="cheese-mixer-share-actions">
+          <button type="button" class="cheese-mixer-custom-button is-primary" data-action="custom-import-confirm">불러오기</button>
+          <button type="button" class="cheese-mixer-custom-button" data-action="custom-share-close">닫기</button>
+        </div>
+      </div>`;
+  }
+
+  function renderShareMsg() {
+    if (!customShareMsg) return "";
+    const cls = customShareMsg.kind === "error" ? "is-error" : "is-ok";
+    return `<p class="cheese-mixer-share-msg ${cls}">${escapeHtml(customShareMsg.text)}</p>`;
   }
 
   function renderCustomPresetCreator() {
@@ -1774,13 +2012,23 @@
   }
 
   function bindPanelEvents(panel) {
-    // close/power는 head가 syncHead로 재렌더되므로 위임으로 처리한다(아래
-    // 위임 click/change 핸들러 참고).
-    panel
-      .querySelector(".cheese-mixer-body")
-      ?.addEventListener("scroll", () => closeInfoPopover(panel), {
-        passive: true,
-      });
+    // 위임 리스너는 panel 엘리먼트(재렌더에도 그대로 유지)에 단 한 번만 붙인다.
+    // refreshPanelContent가 innerHTML만 교체하므로, 매 렌더마다 다시 부르면 같은
+    // 핸들러가 누적돼 이벤트가 N배로 실행되며 페이지가 버벅이다 멈춘다.
+    if (panel.dataset.eventsBound === "1") return;
+    panel.dataset.eventsBound = "1";
+
+    // .cheese-mixer-body는 재렌더로 교체되므로 capture 단계로 panel에서 잡는다
+    // (scroll은 버블링하지 않지만 capture로는 전파된다).
+    panel.addEventListener(
+      "scroll",
+      (e) => {
+        if (e.target.classList?.contains("cheese-mixer-body")) {
+          closeInfoPopover(panel);
+        }
+      },
+      { passive: true, capture: true },
+    );
 
     panel.addEventListener(
       "keydown",
@@ -1814,15 +2062,20 @@
       true,
     );
 
-    panel.querySelectorAll(".cheese-mixer-tab").forEach((tab) => {
-      tab.addEventListener("click", () => switchTab(panel, tab.dataset.tab));
-    });
-    panel.querySelectorAll(".cheese-mixer-preset").forEach((b) => {
-      b.addEventListener("click", () => applyPreset(b.dataset.preset));
-    });
-
     // info 아이콘 클릭 → 설명 팝오버 토글
     panel.addEventListener("click", (e) => {
+      // 탭 전환 / 내장 프리셋 적용도 위임으로 처리한다(재렌더로 버튼이 교체돼도
+      // 핸들러가 패널에 한 번만 붙어 있으므로 중복 누적되지 않는다).
+      const tab = e.target.closest(".cheese-mixer-tab");
+      if (tab) {
+        switchTab(panel, tab.dataset.tab);
+        return;
+      }
+      const presetBtn = e.target.closest(".cheese-mixer-preset");
+      if (presetBtn) {
+        applyPreset(presetBtn.dataset.preset);
+        return;
+      }
       // 클릭으로 처리하는 버튼형 액션(체크박스 토글 power/*-toggle은 change에서
       // 처리하므로 제외). 매칭되면 항상 전파를 막아, 패널 재렌더로 e.target이
       // 분리돼 document 바깥클릭 닫기 핸들러가 패널을 닫는 문제를 방지한다.
@@ -1878,7 +2131,10 @@
 
     panel.addEventListener("input", (e) => {
       const t = e.target;
-      if (
+      if (t.dataset.importText != null) {
+        // 재렌더 간 내용 유지(재렌더는 일으키지 않음 — 커서/포커스 보존).
+        customImportText = t.value;
+      } else if (
         t.matches?.(
           "[data-custom-new-name], [data-custom-edit-name], [data-quicksave-name]",
         )
@@ -1901,6 +2157,11 @@
     });
     panel.addEventListener("change", (e) => {
       const t = e.target;
+      if (t.dataset.exportPick) {
+        // 내보내기 선택 체크박스. (다른 토글 분기로 떨어지지 않도록 먼저 처리)
+        toggleExportPick(t.dataset.exportPick, t.checked);
+        return;
+      }
       if (t.dataset.action === "power") {
         setEnabled(t.checked);
       } else if (t.dataset.action === "comp-toggle") {
@@ -1948,6 +2209,30 @@
     const id = button.dataset.customId;
     if (action === "custom-new") {
       openCustomPresetCreator();
+      return true;
+    }
+    if (action === "custom-export-open") {
+      openCustomExport();
+      return true;
+    }
+    if (action === "custom-import-open") {
+      openCustomImport();
+      return true;
+    }
+    if (action === "custom-share-close") {
+      closeCustomShare();
+      return true;
+    }
+    if (action === "custom-export-selectall") {
+      toggleExportSelectAll();
+      return true;
+    }
+    if (action === "custom-export-copy") {
+      copyExportJson();
+      return true;
+    }
+    if (action === "custom-import-confirm") {
+      confirmCustomImport(panel);
       return true;
     }
     if (action === "custom-mode-select") {
@@ -2131,6 +2416,10 @@
     if (!panel || !name) return;
     activeTab = name;
     customDialog = null;
+    // 탭을 떠나면 내보내기/불러오기 UI도 닫는다(상태가 다른 탭으로 따라오지 않게).
+    customExportOpen = false;
+    customImportOpen = false;
+    customShareMsg = null;
     closeInfoPopover(panel);
     panel
       .querySelectorAll(".cheese-mixer-tab")
