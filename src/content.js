@@ -44,6 +44,8 @@ const VIDEO_COMMENT_PANEL_CLASS = "cheese-search-comment-timestamp-panel";
 const VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS =
   "cheese-search-comment-preview-tooltip";
 const COMMENT_BUTTON_INSERT_COOLDOWN_MS = 2000;
+// 재생바 댓글 타임스탬프 마커 표시 on/off(전역, chrome.storage 저장). 디폴트 ON.
+const COMMENT_MARKERS_ENABLED_KEY = "cheeseCommentMarkersEnabled";
 const COMMENT_MARKER_RENDER_RETRY_LIMIT = 30;
 const COMMENT_PANEL_RIGHT_PX = 22;
 const COMMENT_PANEL_BOTTOM_PX = 60;
@@ -120,6 +122,8 @@ const commentMarkerState = {
   panelTimeUpdateVideo: null,
   panelTimeUpdateHandler: null,
   currentPanelMarkerSeconds: "",
+  // 재생바 마커 표시 여부(전역 설정 캐시). 디폴트 ON. 시작 시 storage에서 로드.
+  markersEnabled: true,
 };
 
 // 치지직은 마우스 비활성 시 플레이어 루트(.pzp-pc)에서 `pzp-pc--controls`
@@ -3436,7 +3440,61 @@ function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
+// 마커 표시 설정을 storage에서 1회 로드해 메모리에 캐시한다(없으면 디폴트 ON 유지).
+let commentMarkersEnabledLoaded = false;
+async function loadCommentMarkersEnabled() {
+  if (commentMarkersEnabledLoaded) return;
+  commentMarkersEnabledLoaded = true;
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await chrome.storage.local.get(COMMENT_MARKERS_ENABLED_KEY);
+    const value = data?.[COMMENT_MARKERS_ENABLED_KEY];
+    // 저장값이 명시적으로 false일 때만 끈다(미설정/true는 ON).
+    if (value === false) {
+      commentMarkerState.markersEnabled = false;
+      // 로드 시점에 이미 마커가 그려졌다면 즉시 반영.
+      applyCommentMarkersEnabled();
+    }
+  } catch {
+    // 설정 로드 실패 시 디폴트(ON) 유지.
+  }
+}
+
+function setCommentMarkersEnabled(enabled) {
+  commentMarkerState.markersEnabled = Boolean(enabled);
+  if (chrome.storage?.local) {
+    try {
+      chrome.storage.local.set({
+        [COMMENT_MARKERS_ENABLED_KEY]: commentMarkerState.markersEnabled,
+      });
+    } catch {
+      // 저장 실패해도 이번 세션 동작엔 영향 없음.
+    }
+  }
+  applyCommentMarkersEnabled();
+}
+
+// 현재 설정을 재생바 마커에 반영한다. 끄면 레이어 제거, 켜면 다시 렌더.
+// 패널이 열려 있으면 토글 스위치 상태도 갱신한다.
+function applyCommentMarkersEnabled() {
+  if (commentMarkerState.markersEnabled) {
+    scheduleCommentMarkerRender(0);
+  } else {
+    document
+      .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
+      .forEach((layer) => layer.remove());
+    removeCommentMarkerPreviewTooltip();
+  }
+  syncCommentMarkersToggle();
+}
+
+function syncCommentMarkersToggle() {
+  const input = document.querySelector("[data-comment-markers-toggle]");
+  if (input) input.checked = commentMarkerState.markersEnabled;
+}
+
 function initCommentTimestampMarkers() {
+  void loadCommentMarkersEnabled();
   const videoNo = getCurrentVideoNo();
   if (!videoNo) {
     resetCommentTimestampMarkers();
@@ -3738,6 +3796,10 @@ function renderCommentTimestampPanel(
   panel.innerHTML = `
     <div class="cheese-search-comment-panel-head">
       <strong>댓글 타임스탬프</strong>
+      <label class="cheese-search-comment-markers-switch" data-tooltip="${commentMarkerState.markersEnabled ? "재생바 표시 끄기" : "재생바 표시 켜기"}">
+        <input type="checkbox" data-comment-markers-toggle ${commentMarkerState.markersEnabled ? "checked" : ""} aria-label="재생바에 댓글 마커 표시">
+        <i aria-hidden="true"></i>
+      </label>
       <button type="button" data-comment-panel-close aria-label="닫기">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
@@ -3757,6 +3819,23 @@ function renderCommentTimestampPanel(
   panel
     .querySelector("[data-comment-panel-close]")
     ?.addEventListener("click", closeCommentTimestampPanel);
+  panel
+    .querySelector("[data-comment-markers-toggle]")
+    ?.addEventListener("change", (e) => {
+      setCommentMarkersEnabled(e.currentTarget.checked);
+      // 스위치 라벨 툴팁 갱신.
+      const label = e.currentTarget.closest(
+        ".cheese-search-comment-markers-switch",
+      );
+      if (label) {
+        label.setAttribute(
+          "data-tooltip",
+          commentMarkerState.markersEnabled
+            ? "재생바 표시 끄기"
+            : "재생바 표시 켜기",
+        );
+      }
+    });
   panel.querySelectorAll("[data-comment-marker-seek]").forEach((button) => {
     button.addEventListener("click", handleCommentTimestampPanelSeek);
   });
@@ -3917,6 +3996,13 @@ function renderCommentTimestampMarkers() {
   const videoNo = getCurrentVideoNo();
   if (!videoNo || commentMarkerState.videoNo !== videoNo) {
     resetCommentTimestampMarkers();
+    return;
+  }
+  // 마커 표시가 꺼져 있으면 재생바 마커를 그리지 않는다(패널/목록 기능은 유지).
+  if (!commentMarkerState.markersEnabled) {
+    document
+      .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
+      .forEach((layer) => layer.remove());
     return;
   }
 
