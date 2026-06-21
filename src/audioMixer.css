@@ -44,7 +44,11 @@
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
   color: #fff;
   font-family:
-    system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    sans-serif;
   font-size: 13px;
 }
 
@@ -82,6 +86,28 @@
 .cheese-mixer-quicksave-button:hover {
   border-color: #00ffa3;
   background: rgba(0, 255, 163, 0.2);
+}
+
+/* head의 "↺ 초기화" 버튼: 값 조정 전 프리셋으로 되돌린다(중립 회색) */
+.cheese-mixer-reset-button {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.cheese-mixer-reset-button:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* head 인라인 이름 입력 영역 */
@@ -145,12 +171,41 @@
 }
 
 .cheese-mixer-power {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.78);
   cursor: pointer;
+}
+
+/* 전원 토글 커스텀 툴팁(켜기/끄기). 라벨 텍스트를 없앤 대신 호버 시 노출. */
+.cheese-mixer-power[data-tooltip]::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 90%;
+  z-index: 30;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(20, 24, 34, 0.96);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  content: attr(data-tooltip);
+  opacity: 0;
+  transform: translateX(-50%) translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  pointer-events: none;
+}
+
+.cheese-mixer-power[data-tooltip]:hover::after,
+.cheese-mixer-power[data-tooltip]:focus-within::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .cheese-mixer-power input,
@@ -200,14 +255,18 @@
 }
 
 .cheese-mixer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   width: 26px;
   height: 26px;
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
-  font-size: 14px;
 }
 
 .cheese-mixer-close:hover {
@@ -793,7 +852,11 @@
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
   color: #fff;
   font-family:
-    system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    sans-serif;
   font-size: 13px;
   /* 타임스탬프 패널과 동일한 커스텀 스크롤바 */
   scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
@@ -934,6 +997,20 @@
   opacity: 0.6;
 }
 
+/* 자동 ON + 지연 작음: 정지(■) 아이콘으로 '자동 해제' 버튼 역할.
+   비활성이 아니므로 또렷한 민트로 보여 좌클릭으로 끌 수 있음을 알린다. */
+.cheese-live-sync-button.is-stop .pzp-ui-icon__svg,
+.cheese-live-sync-button.is-stop .pzp-ui-icon__svg path,
+.cheese-live-sync-button.is-stop .pzp-ui-icon__svg rect {
+  color: #00ffa3;
+  fill: #00ffa3;
+  opacity: 1;
+}
+
+.cheese-live-sync-button.is-stop {
+  cursor: pointer;
+}
+
 /* 우클릭 자동 따라잡기 메뉴 */
 .cheese-sync-menu {
   position: absolute;
@@ -946,7 +1023,11 @@
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
   color: #fff;
   font-family:
-    system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    sans-serif;
 }
 
 .cheese-sync-menu-item {

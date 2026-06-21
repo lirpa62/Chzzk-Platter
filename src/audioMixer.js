@@ -20,11 +20,18 @@
   const SYNC_BUTTON_CLASS = "cheese-live-sync-button";
   const SYNC_MENU_ID = "cheese-live-sync-menu";
   const SYNC_CHECK_MS = 1000; // 버튼 활성/비활성 갱신 주기
-  const SYNC_ENABLE_LATENCY_S = 3; // 이 지연(초) 이상이면 버튼 활성화/자동 발동
-  const SYNC_TARGET_LATENCY_S = 1.8; // 따라잡기 목표 지연(초)
+  const SYNC_ENABLE_LATENCY_S = 3; // 이 지연(초) 이상이면 수동 버튼 활성화
+  const SYNC_AUTO_ENABLE_LATENCY_S = 3; // 자동 따라잡기 발동 임계(수동과 동일: 안내문과 일치)
+  const SYNC_TARGET_LATENCY_S = 2; // 따라잡기 목표 지연(초). 발동 임계와 여유를 둬 도달 직후 재발동 방지
   const SYNC_RATE = 1.5; // 따라잡기 배속
   const SYNC_MAX_DURATION_MS = 30000; // 안전: 최대 따라잡기 시간
-  const SYNC_AUTO_COOLDOWN_MS = 5000; // 자동 따라잡기 재발동 쿨다운
+  const SYNC_NO_PROGRESS_MS = 4000; // 이 시간 동안 지연이 의미있게 안 줄면(스톨) 중단
+  const SYNC_PROGRESS_EPS_S = 0.3; // '진전'으로 인정할 최소 지연 감소(초)
+  const SYNC_JUMP_LATENCY_S = 12; // 이 지연(초) 이상이면 1.5배속 대신 라이브로 즉시 점프
+  const SYNC_AUTO_COOLDOWN_MS = 15000; // 자동 따라잡기 재발동 쿨다운(진동 방지로 길게)
+  const SYNC_USER_SEEK_PAUSE_MS = 60000; // 사용자가 과거로 seek하면 이 시간만큼 자동 따라잡기 중단
+  const SYNC_BACK_SEEK_MIN_S = 2; // 이 이상 지연이 늘어난 seek만 '과거 보기'로 간주(앞으로/라이브 복귀는 제외)
+  const SYNC_FRESH_ENTRY_WINDOW_MS = 20000; // 라이브 최초 진입 후 이 시간 안에서만 1회 강제 따라잡기 시도
   const SYNC_AUTO_STORE_KEY = "cheeseAudioMixer.autoSync"; // 전역 저장 키
   const PANEL_RIGHT_PX = 16;
   const PANEL_BOTTOM_PX = 64;
@@ -328,11 +335,20 @@
   let currentMediaId = null; // 해석된 채널id(설정 저장/복원 키)
   let activeTab = "presets";
   let customDraft = null;
+  // 커스텀 추가/편집 드래프트 진입 직전의 믹서 상태(취소 시 복원용).
+  // { snapshot, preset, presetDirty, dirtyFromName, dirtyMode }
+  let draftBackup = null;
   let customCreatorOpen = false;
   let customDialog = null;
   // 프리셋(내장/커스텀) 적용 후 값을 수정해 벗어난 상태인지. true면 head에
   // "프리셋 추가" 빠른 저장 버튼이 나타난다.
   let presetDirty = false;
+  // dirty 진입 직전의 프리셋 이름(수정 전 기준). 버튼 툴팁에 "수정된 OOO"로 쓴다.
+  // state.preset은 dirty 시 "custom"으로 덮여 원래 이름을 잃기 때문에 따로 보관한다.
+  let dirtyFromName = "";
+  // dirty 진입 직전의 프리셋 키(내장 키 또는 커스텀 id). head의 "초기화" 버튼이
+  // 이 프리셋으로 되돌릴 때 쓴다.
+  let dirtyFromKey = "";
   // 수정이 일어난 탭(advanced/expert). 빠른 저장 시 프리셋 mode로 쓴다.
   let dirtyMode = "advanced";
   // head의 인라인 이름 입력창 열림 여부.
@@ -639,28 +655,53 @@
     if (!state.enabled || audio.connected) return;
     const video = findVideo();
     if (!video) return;
-    buildGraph(video);
-    syncUI();
+    // buildGraph가 성공했을 때만 syncUI한다. 실패(사용자 활성화 없음/재시도 차단/충돌)
+    // 시 syncUI가 DOM을 건드리면 전역 MutationObserver→tick→ensureEnabledGraph가
+    // 다시 돌며 무한루프가 된다(audio.connected는 계속 false이므로 매번 재진입).
+    if (buildGraph(video)) syncUI();
+  }
+
+  // 프리셋 선택/값 조정 시 믹서가 꺼져 있어도 자동으로 켠다(꺼진 상태에선 applyState가
+  // audio.connected=false라 값이 실제로 반영되지 않으므로). buildGraph가 충돌 등으로
+  // 실패하면 setEnabled가 enabled를 다시 false로 되돌린다.
+  function ensureMixerEnabled() {
+    if (state.enabled && audio.connected) return;
+    setEnabled(true);
   }
 
   function applyPreset(key) {
     const p = PRESETS[key];
     if (!p) return;
-    const defaultState = DEFAULT_STATE();
+    ensureMixerEnabled();
     state.preset = key;
-    state.gain = p.gain;
-    state.eq = [...p.eq];
-    state.comp = { ...p.comp };
-    state.normalizer = {
-      ...defaultState.normalizer,
-      enabled: Boolean(p.normalizer),
-      target: readFiniteNumber(p.targetLevel, defaultState.normalizer.target),
-    };
-    state.limiter = normalizePresetLimiter(p.limiter, defaultState.limiter);
+    // builtInPresetSnapshot과 같은 정규화로 적용해 '동일여부 비교'와 어긋나지 않게 한다.
+    const snapshot = builtInPresetSnapshot(p);
+    state.gain = snapshot.gain;
+    state.eq = snapshot.eq;
+    state.comp = snapshot.comp;
+    state.normalizer = snapshot.normalizer;
+    state.limiter = snapshot.limiter;
     clearPresetDirty();
     applyState();
     saveState();
     syncUI();
+  }
+
+  // head의 "초기화": 값 조정 전에 적용돼 있던 프리셋 값으로 되돌린다.
+  // dirtyFromKey가 내장 키면 applyPreset, 커스텀 id면 applyCustomPreset이
+  // 스냅샷을 다시 적용하고 dirty를 해제한다.
+  function resetToBasePreset() {
+    if (!presetDirty || !dirtyFromKey) return;
+    const key = dirtyFromKey;
+    if (PRESETS[key]) {
+      applyPreset(key);
+    } else if (isRealPreset(key)) {
+      applyCustomPreset(key);
+    } else {
+      return; // 원본 프리셋이 사라짐(삭제 등) → 아무 것도 하지 않음
+    }
+    // 현재 보고 있는 탭(고급/전문가)을 유지해 되돌려진 값이 슬라이더에 바로 보이게 한다.
+    refreshPanelContent();
   }
 
   function readFiniteNumber(value, fallback) {
@@ -702,10 +743,30 @@
     );
   }
 
+  // 프리셋 키(내장 라벨 또는 커스텀 id) → 표시 이름. 없으면 빈 문자열.
+  function presetDisplayName(key) {
+    if (!key || key === "custom") return "";
+    if (PRESETS[key]) return PRESETS[key].label;
+    const custom = normalizeCustomPresets(state.customPresets).find(
+      (preset) => preset.id === key,
+    );
+    return custom ? custom.name : "";
+  }
+
   // 슬라이더/EQ/토글 수정으로 프리셋에서 벗어날 때 호출. 직전이 실제 프리셋이면
   // dirty로 표시해 head에 "프리셋 추가" 버튼을 띄운다.
   function enterCustomFromEdit() {
-    if (isRealPreset(state.preset)) presetDirty = true;
+    // 꺼진 상태에서 값을 조정하면 자동으로 켠다(꺼져 있으면 applyState가
+    // audio.connected=false라 조정값이 실제로 반영되지 않으므로).
+    ensureMixerEnabled();
+    if (isRealPreset(state.preset)) {
+      presetDirty = true;
+      // 수정 전 프리셋 키/이름을 보관(state.preset이 곧 "custom"으로 덮인다).
+      // 단, 이미 dirty라면 첫 수정 때 잡아둔 원본을 유지한다(state.preset은 이미
+      // "custom"이라 여기 들어오지 않지만, 방어적으로).
+      dirtyFromKey = state.preset;
+      dirtyFromName = presetDisplayName(state.preset);
+    }
     // 저장 mode 판정: 전문가 탭에서 수정한 적이 한 번이라도 있으면 expert로
     // 승격(sticky)하고, 그 외(고급에서만 수정)는 advanced로 둔다. dirtyMode는
     // 프리셋 적용/clear 시 advanced로 리셋된다.
@@ -715,6 +776,8 @@
 
   function clearPresetDirty() {
     presetDirty = false;
+    dirtyFromName = "";
+    dirtyFromKey = "";
     quickSaveOpen = false;
     dirtyMode = "advanced";
   }
@@ -727,6 +790,76 @@
       limiter: { ...state.limiter },
       normalizer: { ...state.normalizer },
     };
+  }
+
+  // 내장 프리셋 정의(p) → 정규화된 믹서 스냅샷. applyPreset과 동일한 변환을 써서
+  // '되돌리기/동일여부 비교'가 실제 적용값과 정확히 일치하게 한다.
+  function builtInPresetSnapshot(p) {
+    const defaultState = DEFAULT_STATE();
+    return cloneMixerSnapshot({
+      gain: p.gain,
+      eq: [...p.eq],
+      comp: { ...p.comp },
+      limiter: normalizePresetLimiter(p.limiter, defaultState.limiter),
+      normalizer: {
+        ...defaultState.normalizer,
+        enabled: Boolean(p.normalizer),
+        target: readFiniteNumber(p.targetLevel, defaultState.normalizer.target),
+      },
+    });
+  }
+
+  // dirtyFromKey가 가리키는 '값 조정 전 프리셋'의 스냅샷. 없으면 null.
+  function baseSnapshotForDirty() {
+    if (!dirtyFromKey) return null;
+    if (PRESETS[dirtyFromKey]) return builtInPresetSnapshot(PRESETS[dirtyFromKey]);
+    const custom = normalizeCustomPresets(state.customPresets).find(
+      (preset) => preset.id === dirtyFromKey,
+    );
+    return custom ? cloneMixerSnapshot(custom.snapshot) : null;
+  }
+
+  // 두 스냅샷이 (부동소수 오차 허용) 같은지. EQ 배열 + 중첩 객체까지 비교.
+  function snapshotsEqual(a, b) {
+    if (!a || !b) return false;
+    const EPS = 1e-4;
+    const numEq = (x, y) => Math.abs((x ?? 0) - (y ?? 0)) <= EPS;
+    if (!numEq(a.gain, b.gain)) return false;
+    if (!Array.isArray(a.eq) || !Array.isArray(b.eq)) return false;
+    if (a.eq.length !== b.eq.length) return false;
+    for (let i = 0; i < a.eq.length; i++) {
+      if (!numEq(a.eq[i], b.eq[i])) return false;
+    }
+    const objEq = (oa, ob) => {
+      const keys = new Set([...Object.keys(oa || {}), ...Object.keys(ob || {})]);
+      for (const k of keys) {
+        const va = oa?.[k];
+        const vb = ob?.[k];
+        if (typeof va === "boolean" || typeof vb === "boolean") {
+          if (Boolean(va) !== Boolean(vb)) return false;
+        } else if (!numEq(va, vb)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    return (
+      objEq(a.comp, b.comp) &&
+      objEq(a.limiter, b.limiter) &&
+      objEq(a.normalizer, b.normalizer)
+    );
+  }
+
+  // 수정 후 호출: 현재 값이 '값 조정 전 프리셋'과 같아졌으면 dirty를 해제하고
+  // state.preset을 그 프리셋으로 되돌린다(추가/초기화 버튼이 사라진다). 같지 않으면
+  // 그대로 두고 false. 같아져서 정리했으면 true를 반환한다.
+  function reconcileDirtyAgainstBase() {
+    if (!presetDirty || !dirtyFromKey) return false;
+    const base = baseSnapshotForDirty();
+    if (!base || !snapshotsEqual(createMixerSnapshot(), base)) return false;
+    state.preset = dirtyFromKey;
+    clearPresetDirty();
+    return true;
   }
 
   function cloneMixerSnapshot(snapshot) {
@@ -793,7 +926,38 @@
       .slice(0, CUSTOM_PRESET_NAME_MAX_LENGTH);
   }
 
+  // 드래프트 진입 전 상태를 저장해 두었다가 취소 시 그대로 되돌린다.
+  function captureDraftBackup() {
+    draftBackup = {
+      snapshot: createMixerSnapshot(),
+      preset: state.preset,
+      presetDirty,
+      dirtyFromName,
+      dirtyFromKey,
+      dirtyMode,
+    };
+  }
+
+  // 드래프트 백업을 state에 복원하고 그래프/표시에 반영한다.
+  function restoreDraftBackup() {
+    if (!draftBackup) return;
+    const { snapshot, preset } = draftBackup;
+    state.gain = snapshot.gain;
+    state.eq = [...snapshot.eq];
+    state.comp = { ...snapshot.comp };
+    state.limiter = { ...snapshot.limiter };
+    state.normalizer = { ...snapshot.normalizer };
+    state.preset = preset;
+    presetDirty = draftBackup.presetDirty;
+    dirtyFromName = draftBackup.dirtyFromName;
+    dirtyFromKey = draftBackup.dirtyFromKey;
+    dirtyMode = draftBackup.dirtyMode;
+    draftBackup = null;
+    applyState();
+  }
+
   function beginCustomPreset(mode, preset = null) {
+    captureDraftBackup();
     const name = normalizePresetName(preset?.name);
     customDraft = {
       id: preset?.id || createPresetId(),
@@ -823,6 +987,7 @@
     state.customPresets = presets;
     state.preset = nextPreset.id;
     customDraft = null;
+    draftBackup = null; // 저장됐으니 복원 불필요
     saveState();
     activeTab = "custom";
     refreshPanelContent();
@@ -830,6 +995,8 @@
 
   function cancelCustomDraft() {
     customDraft = null;
+    // 드래프트 중 바뀐 값을 버리고 진입 전 프리셋/설정으로 되돌린다.
+    restoreDraftBackup();
     activeTab = "custom";
     refreshPanelContent();
   }
@@ -865,6 +1032,8 @@
     state.preset = nextPreset.id;
     quickSaveOpen = false;
     presetDirty = false;
+    dirtyFromName = "";
+    dirtyFromKey = "";
     saveState();
     // 저장된 프리셋이 적용된 상태로 표시 갱신(탭은 그대로 유지).
     refreshPanelContent();
@@ -875,6 +1044,8 @@
       (preset) => preset.id === id,
     );
     if (!saved) return;
+    // 편집 미리보기(keepDraft)가 아닌 실제 선택일 때만 자동으로 켠다.
+    if (!options.keepDraft) ensureMixerEnabled();
     const snapshot = cloneMixerSnapshot(saved.snapshot);
     state.gain = snapshot.gain;
     state.eq = snapshot.eq;
@@ -893,7 +1064,10 @@
       (preset) => preset.id !== id,
     );
     if (state.preset === id) state.preset = "custom";
-    if (customDraft?.id === id) customDraft = null;
+    if (customDraft?.id === id) {
+      customDraft = null;
+      draftBackup = null; // 편집 중이던 프리셋이 삭제됨 → 복원 대상 무효
+    }
     saveState();
     refreshPanelContent();
   }
@@ -1020,6 +1194,12 @@
   let ui = null;
   let panelAnchorTimer = 0;
   let panelAnchorCloseTimer = 0;
+
+  // 닫기(X) 아이콘. 윈도우에서 ✕ 글리프가 OS마다 위치/크기가 달라지는 문제를
+  // 피하려고 텍스트 대신 SVG를 쓴다(댓글 타임스탬프 패널과 동일 path).
+  function closeIcon() {
+    return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>`;
+  }
 
   function mixerIcon() {
     return `
@@ -1308,19 +1488,24 @@
   // head 영역. 프리셋에서 벗어나 수정된 상태(presetDirty)면 "프리셋 추가" 버튼을
   // 보여준다(클릭 시 패널 위 모달로 이름 입력 — renderQuickSaveModal 참고).
   function renderHeadInner() {
+    const canReset = presetDirty && Boolean(dirtyFromKey);
     return `
       <strong>오디오 믹서</strong>
+      ${
+        canReset
+          ? `<button type="button" class="cheese-mixer-reset-button" data-action="preset-reset" title="${escapeAttribute(presetDisplayName(dirtyFromKey))} 값으로 되돌리기">↺ 초기화</button>`
+          : ""
+      }
       ${
         presetDirty
           ? `<button type="button" class="cheese-mixer-quicksave-button" data-action="quicksave-open">+ 프리셋 추가</button>`
           : ""
       }
-      <label class="cheese-mixer-power">
+      <label class="cheese-mixer-power" data-tooltip="${state.enabled ? "끄기" : "켜기"}" aria-label="${state.enabled ? "끄기" : "켜기"}">
         <input type="checkbox" data-action="power" ${state.enabled ? "checked" : ""}>
         <i aria-hidden="true"></i>
-        <span>켜기</span>
       </label>
-      <button type="button" class="cheese-mixer-close" data-action="close" aria-label="닫기">✕</button>`;
+      <button type="button" class="cheese-mixer-close" data-action="close" aria-label="닫기">${closeIcon()}</button>`;
   }
 
   // head만 다시 그린다(슬라이더 드래그 중 전체 재렌더를 피하기 위함).
@@ -1660,6 +1845,10 @@
           closePanel();
           return;
         }
+        if (action === "preset-reset") {
+          resetToBasePreset();
+          return;
+        }
         if (action === "quicksave-open") {
           openQuickSaveModal();
           return;
@@ -1717,18 +1906,21 @@
       } else if (t.dataset.action === "comp-toggle") {
         state.comp.enabled = t.checked;
         enterCustomFromEdit();
+        reconcileDirtyAgainstBase();
         applyState();
         saveState();
         syncUI();
       } else if (t.dataset.action === "limiter-toggle") {
         state.limiter.enabled = t.checked;
         enterCustomFromEdit();
+        reconcileDirtyAgainstBase();
         applyState();
         saveState();
         syncUI();
       } else if (t.dataset.action === "normalizer-toggle") {
         state.normalizer.enabled = t.checked;
         enterCustomFromEdit();
+        reconcileDirtyAgainstBase();
         // 노멀라이저는 rAF 루프가 normGain을 조정한다(applyState 불필요).
         saveState();
         syncUI();
@@ -1917,6 +2109,7 @@
         return;
     }
     enterCustomFromEdit();
+    reconcileDirtyAgainstBase(); // 값이 원래 프리셋과 같아지면 dirty 해제
     applyState();
     syncPresetSelection();
     syncHead();
@@ -1927,6 +2120,7 @@
   function handleEqBand(index, value) {
     state.eq[index] = value;
     enterCustomFromEdit();
+    reconcileDirtyAgainstBase(); // 값이 원래 프리셋과 같아지면 dirty 해제
     applyState();
     syncPresetSelection();
     syncHead();
@@ -2011,10 +2205,38 @@
     if (!gainDragging) updateGainSliderVisual(slider);
   }
 
+  // 버튼 툴팁/aria-label에 적용 중인 프리셋을 병기한다.
+  //  - 꺼짐: "오디오 믹서"
+  //  - 실제 프리셋 적용 중: "오디오 믹서 (OOO)"
+  //  - 프리셋을 수정한 상태(저장 안 함/게인 슬라이더 조절 포함): "오디오 믹서  (수정된 OOO)"
+  //  - 베이스 프리셋 없이 직접 설정한 상태: "오디오 믹서 (사용자 설정)"
+  function mixerButtonLabel() {
+    const base = "오디오 믹서";
+    if (!state.enabled) return base;
+    if (presetDirty) {
+      return dirtyFromName
+        ? `${base} (수정된 ${dirtyFromName})`
+        : `${base} (사용자 설정)`;
+    }
+    const name = presetDisplayName(state.preset);
+    if (name) return `${base} (${name})`;
+    return `${base} (사용자 설정)`;
+  }
+
+  function syncMixerButtonLabel() {
+    const button = document.querySelector(`.${BUTTON_CLASS}`);
+    if (!button) return;
+    const label = mixerButtonLabel();
+    button.setAttribute("aria-label", label);
+    const tip = button.querySelector(".pzp-button__tooltip");
+    if (tip) tip.textContent = label;
+  }
+
   function syncUI() {
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     button?.classList.toggle("is-active", state.enabled);
     button?.setAttribute("aria-pressed", String(state.enabled));
+    syncMixerButtonLabel();
     syncMasterGain();
 
     const panel = ui?.panel;
@@ -2183,6 +2405,32 @@
     } catch {
       return null;
     }
+  }
+
+  // 라이브 엣지로 즉시 점프(타임머신으로 멀리 과거에 있을 때 1.5배속은 비현실적).
+  // corePlayer API → video.seekable.end 순으로 시도. 성공 시 true.
+  function jumpToLiveEdge(core = null, video = null) {
+    const c = core || findCorePlayer();
+    const v = video || findVideo();
+    // corePlayer가 라이브 엣지 이동 API를 노출하면 그걸 우선 사용.
+    try {
+      if (c && typeof c.seekToLive === "function") {
+        c.seekToLive();
+        return true;
+      }
+    } catch {}
+    // 폴백: seekable 끝(라이브 엣지)에서 약간 뒤(목표 지연)로 seek.
+    try {
+      if (v?.seekable?.length) {
+        const end = v.seekable.end(v.seekable.length - 1);
+        if (Number.isFinite(end) && end > 0) {
+          ourSeekUntil = Date.now() + 1500; // 곧 발생할 seeked는 우리 것 → 무시
+          v.currentTime = Math.max(0, end - SYNC_TARGET_LATENCY_S);
+          return true;
+        }
+      }
+    } catch {}
+    return false;
   }
 
   // 코덱 문자열에서 사람이 읽기 쉬운 이름 추출(예: avc1.4d401f → H.264, mp4a.40.2 → AAC).
@@ -2618,7 +2866,7 @@
     panel.innerHTML = `
       <div class="cheese-stats-head">
         <strong>스트림 정보</strong>
-        <button type="button" class="cheese-mixer-close" data-stats-close aria-label="닫기">✕</button>
+        <button type="button" class="cheese-mixer-close" data-stats-close aria-label="닫기">${closeIcon()}</button>
       </div>
       <div class="cheese-stats-body">
         ${i.isLive ? `<div class="cheese-stats-group-title">라이브</div>${statsRow("레이턴시", i.latency)}` : ""}
@@ -2664,6 +2912,16 @@
   // MAIN world에서 페이지 origin localStorage를 그대로 쓴다.
   let autoSyncEnabled = loadAutoSync();
   let lastAutoCatchUpAt = 0; // 자동 발동 쿨다운용
+  let lastUserSeekAt = 0; // 사용자가 직접 seek한 시각(자동 따라잡기 일시 중단용)
+  let syncSeekVideo = null; // seeked 리스너를 건 video(중복 등록 방지)
+  let ourSeekUntil = 0; // 이 시각 이전의 seeked는 우리(jumpToLiveEdge)가 일으킨 것 → 무시
+  let preSeekLatency = NaN; // seek 직전 지연(초). seeked에서 방향 판별에 사용
+  // 라이브 페이지 최초 진입 후 자동 따라잡기를 1회 시도해야 하는 상태. 진입 직후엔
+  // 플레이어 초기화로 seeked가 튀어 lastUserSeekAt이 찍히거나 쿨다운이 남아 자동이
+  // 막힐 수 있으므로, 이 1회는 그 차단을 무시하고 발동시킨다(지연이 임계 미만이면
+  // 발동 없이 플래그만 소진). tick의 페이지 전환에서 true로 세팅.
+  let syncFreshLiveEntry = false;
+  let freshEntryDeadline = 0; // 이 시각까지만 최초-진입 강제 시도(무한 대기 방지)
 
   function loadAutoSync() {
     try {
@@ -2689,12 +2947,29 @@
     </svg>`;
   }
 
+  function syncStopIcon() {
+    // 정지(■) 아이콘 — 자동 따라잡기 해제용
+    return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <rect x="12" y="12" width="12" height="12" rx="2" fill="currentColor"></rect>
+    </svg>`;
+  }
+
+  // 버튼 아이콘을 빨리감기/정지 사이에서 교체(불필요한 재렌더 방지).
+  function setSyncIcon(btn, stop) {
+    const wantStop = Boolean(stop);
+    if (btn.dataset.icon === (wantStop ? "stop" : "play")) return;
+    const wrap = btn.querySelector(".pzp-ui-icon");
+    if (wrap) wrap.innerHTML = wantStop ? syncStopIcon() : syncIcon();
+    btn.dataset.icon = wantStop ? "stop" : "play";
+  }
+
   function createSyncButton() {
     const btn = document.createElement("button");
     btn.className = `${SYNC_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
     btn.type = "button";
     btn.disabled = true;
     btn.setAttribute("aria-label", "실시간 따라잡기");
+    btn.dataset.icon = "play";
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">실시간 따라잡기</span><span class="pzp-ui-icon">${syncIcon()}</span>`;
     return btn;
   }
@@ -2731,6 +3006,42 @@
   }
 
   // 주기적으로 지연을 측정해 버튼 활성/비활성 + 툴팁 갱신.
+  // 사용자가 과거로(뒤로) seek(타임머신 조작)할 때만 그 시각을 기록해 자동 따라잡기를
+  // 잠시 멈춘다. 라이브 쪽(앞으로) seek나 우리가 jumpToLiveEdge로 일으킨
+  // seek(ourSeekUntil)은 제외한다 — 그땐 다시 끌어당겨도 의도와 어긋나지 않는다.
+  function onUserSeeking() {
+    if (Date.now() < ourSeekUntil) return; // 우리가 일으킨 seek → 스냅샷 불필요
+    preSeekLatency = getLiveLatencySeconds();
+  }
+
+  function onUserSeeked() {
+    if (Date.now() < ourSeekUntil) return; // 우리가 일으킨 seek → 무시
+    const after = getLiveLatencySeconds();
+    // 과거로(뒤로) seek = 지연이 의미있게 늘어남. 앞으로/라이브 복귀(지연 감소)는 무시.
+    // 측정 불가(NaN)일 땐 보수적으로 차단해 의도치 않은 끌어당김을 막는다.
+    const movedBack =
+      !Number.isFinite(preSeekLatency) ||
+      !Number.isFinite(after) ||
+      after - preSeekLatency >= SYNC_BACK_SEEK_MIN_S;
+    if (movedBack) lastUserSeekAt = Date.now();
+    preSeekLatency = NaN;
+  }
+
+  // video는 채널 이동/재생성될 수 있으므로 매 체크마다 현재 video에 리스너를 보장한다.
+  function ensureSeekListener() {
+    const video = findVideo();
+    if (video === syncSeekVideo) return;
+    if (syncSeekVideo) {
+      syncSeekVideo.removeEventListener("seeking", onUserSeeking);
+      syncSeekVideo.removeEventListener("seeked", onUserSeeked);
+    }
+    syncSeekVideo = video || null;
+    if (syncSeekVideo) {
+      syncSeekVideo.addEventListener("seeking", onUserSeeking);
+      syncSeekVideo.addEventListener("seeked", onUserSeeked);
+    }
+  }
+
   function startSyncCheck() {
     if (syncCheckTimer) return;
     syncCheckTimer = window.setInterval(updateSyncButtonState, SYNC_CHECK_MS);
@@ -2741,6 +3052,11 @@
     if (syncCheckTimer) {
       window.clearInterval(syncCheckTimer);
       syncCheckTimer = 0;
+    }
+    if (syncSeekVideo) {
+      syncSeekVideo.removeEventListener("seeking", onUserSeeking);
+      syncSeekVideo.removeEventListener("seeked", onUserSeeked);
+      syncSeekVideo = null;
     }
   }
 
@@ -2753,6 +3069,8 @@
       tip.textContent = Number.isFinite(lat)
         ? `따라잡는 중… (지연 ${lat.toFixed(1)}초)`
         : "따라잡는 중…";
+    } else if (Number.isFinite(lat) && lat >= SYNC_JUMP_LATENCY_S) {
+      tip.textContent = `라이브로 이동 (지연 ${formatLatency(lat)})`;
     } else {
       tip.textContent = Number.isFinite(lat)
         ? `실시간 따라잡기 (지연 ${lat.toFixed(1)}초)`
@@ -2760,22 +3078,59 @@
     }
   }
 
+  // 지연을 사람이 읽기 쉽게: 60초 미만은 초, 이상은 분:초.
+  function formatLatency(s) {
+    if (s < 60) return `${s.toFixed(1)}초`;
+    const m = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    return `${m}분 ${sec}초`;
+  }
+
   function updateSyncButtonState() {
     const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
     if (!btn) return;
+    ensureSeekListener();
     // 자동 모드 표시(우클릭 메뉴로 토글). 자동이면 버튼에 표식을 둔다.
     btn.classList.toggle("is-auto", autoSyncEnabled);
     if (syncCatchUp) {
       // 따라잡는 중엔 항상 활성(클릭 시 중단). 툴팁은 rAF 루프가 갱신한다.
       btn.disabled = false;
       btn.classList.add("is-active");
+      setSyncIcon(btn, false);
+      btn.classList.remove("is-stop");
       return;
     }
     const lat = getLiveLatencySeconds();
     const overThreshold = Number.isFinite(lat) && lat >= SYNC_ENABLE_LATENCY_S;
+    // 자동은 수동보다 높은 임계(SYNC_AUTO_ENABLE_LATENCY_S)에서만 발동한다. 목표 지연과
+    // 여유를 둬 '따라잡고-다시늘고' 진동을 막는다. 점프 임계 이상은 '타임머신으로 과거를
+    // 보는 중'으로 간주해 자동 발동하지 않는다(라이브 복귀는 수동 버튼).
+    const autoEligible =
+      Number.isFinite(lat) &&
+      lat >= SYNC_AUTO_ENABLE_LATENCY_S &&
+      lat < SYNC_JUMP_LATENCY_S;
 
-    // 자동 따라잡기: 임계 초과 + 쿨다운 경과 + 안전조건이면 발동.
-    if (autoSyncEnabled && overThreshold && canAutoCatchUp()) {
+    // 라이브 최초 진입 1회: 쿨다운/사용자 seek 차단을 무시하고 따라잡는다. 지연이
+    // 측정되어 판단이 끝나면 플래그를 소진한다(임계 미만이면 발동 없이 소진). 평소
+    // 자동 로직과 달리 점프 임계(SYNC_JUMP_LATENCY_S) 이상도 발동시킨다 — 진입 직후
+    // 큰 지연은 '과거를 보는 중'이 아니라 단순 진입 지연이므로 라이브로 끌어온다.
+    if (autoSyncEnabled && syncFreshLiveEntry) {
+      if (Date.now() > freshEntryDeadline) {
+        syncFreshLiveEntry = false; // 창 만료 → 강제 시도 종료, 평소 자동 로직으로
+      } else if (Number.isFinite(lat) && canFreshEntryCatchUp()) {
+        syncFreshLiveEntry = false; // 측정·판단 완료 → 1회 소진
+        if (lat >= SYNC_AUTO_ENABLE_LATENCY_S) {
+          lastAutoCatchUpAt = Date.now();
+          startSyncCatchUp(); // lat이 크면 내부에서 라이브 엣지로 점프
+          return;
+        }
+        // 임계 미만: 따라잡을 것 없음. 아래 평소 로직으로 버튼 상태만 갱신.
+      }
+      // lat 측정 불가(NaN)이거나 아직 재생 전이면 소진하지 않고 다음 틱에 재시도.
+    }
+
+    // 자동 따라잡기: 임계 초과 + 점프 임계 미만 + 쿨다운 경과 + 안전조건이면 발동.
+    if (autoSyncEnabled && autoEligible && canAutoCatchUp()) {
       lastAutoCatchUpAt = Date.now();
       startSyncCatchUp();
       return;
@@ -2784,13 +3139,45 @@
     // 수동: 활성화(클릭 가능)면 민트색, 비활성화면 흐리게(클릭 불가).
     btn.disabled = !overThreshold;
     btn.classList.toggle("is-active", overThreshold);
-    setSyncTooltip(btn, overThreshold ? lat : null);
+
+    // 자동 ON인데 지연이 작아 수동 버튼이 비활성일 때: 그대로 두면 자동을 끌 방법이
+    // 눈에 띄지 않는다(우클릭 메뉴는 숨겨져 있음). 정지(■) 아이콘 + 활성 상태로 바꿔
+    // 좌클릭으로 자동을 바로 해제할 수 있게 한다. 지연이 커서 수동이 활성일 땐 그
+    // 본래 동작(따라잡기)을 유지한다.
+    const showStop = autoSyncEnabled && !overThreshold;
+    btn.classList.toggle("is-stop", showStop);
+    setSyncIcon(btn, showStop);
+    if (showStop) {
+      btn.disabled = false;
+      const tip = btn.querySelector(".pzp-button__tooltip");
+      if (tip) tip.textContent = "자동 따라잡기 해제";
+    } else {
+      setSyncTooltip(btn, overThreshold ? lat : null);
+    }
+  }
+
+  // 라이브 최초 진입 후 1회 강제 따라잡기를 무장한다(tick의 페이지 전환에서 호출).
+  function armFreshLiveEntry() {
+    syncFreshLiveEntry = true;
+    freshEntryDeadline = Date.now() + SYNC_FRESH_ENTRY_WINDOW_MS;
+  }
+
+  // 최초-진입 강제 시도 발동 가능 조건: 쿨다운/사용자 seek 차단은 무시하되,
+  // 영상이 실제 재생 중이어야 한다(아직 버퍼링/일시정지면 다음 틱에 재시도).
+  function canFreshEntryCatchUp() {
+    const video = findVideo();
+    if (!video) return false;
+    if (video.paused || video.seeking) return false;
+    return true;
   }
 
   // 자동 따라잡기 발동 가능 조건: 쿨다운 경과 + 영상이 재생 중(일시정지/되감기
   // 중이 아님). 사용자가 의도적으로 멈추거나 되감을 땐 자동으로 끌어당기지 않는다.
   function canAutoCatchUp() {
     if (Date.now() - lastAutoCatchUpAt < SYNC_AUTO_COOLDOWN_MS) return false;
+    // 사용자가 직접 과거로 seek했다면(타임머신) 일정 시간 자동 따라잡기를 멈춘다.
+    // 의도적으로 과거를 보는 중인데 계속 라이브로 끌어당기지 않도록.
+    if (Date.now() - lastUserSeekAt < SYNC_USER_SEEK_PAUSE_MS) return false;
     const video = findVideo();
     if (!video) return false;
     if (video.paused || video.seeking) return false;
@@ -2824,10 +3211,24 @@
     const lat = getLiveLatencySeconds(core);
     if (!Number.isFinite(lat) || lat < SYNC_ENABLE_LATENCY_S) return;
 
+    // 지연이 크면(타임머신 등) 1.5배속 대신 라이브 엣지로 즉시 점프한다.
+    if (lat >= SYNC_JUMP_LATENCY_S) {
+      jumpToLiveEdge(core, video);
+      return;
+    }
+
     const originalRate = video.playbackRate || 1;
     setPlaybackRate(core, video, SYNC_RATE);
     if (video.playbackRate !== SYNC_RATE) return; // 배속 적용 실패
-    syncCatchUp = { core, originalRate, startedAt: Date.now(), video };
+    const now = Date.now();
+    syncCatchUp = {
+      core,
+      originalRate,
+      startedAt: now,
+      video,
+      bestLat: lat, // 지금까지 본 최저 지연
+      lastProgressAt: now, // 최저 지연이 의미있게 갱신된 마지막 시각
+    };
     // 따라잡는 동안 재생바가 사라지지 않게 유지(지연 숫자 호버 확인 가능).
     const player = findPlayer();
     if (player) keepControlsVisible(player, "sync");
@@ -2836,12 +3237,23 @@
     const loop = () => {
       if (!syncCatchUp) return;
       const cur = getLiveLatencySeconds(syncCatchUp.core);
-      const elapsed = Date.now() - syncCatchUp.startedAt;
-      // 목표 지연 도달 / 측정 불가 / 안전 시간 초과 / 사용자가 속도 변경 시 종료.
+      const tnow = Date.now();
+      const elapsed = tnow - syncCatchUp.startedAt;
+      // 진전 추적: 최저 지연이 EPS 이상 줄면 진전 시각 갱신. 일정 시간 진전이 없으면
+      // 스톨/버퍼링으로 라이브 엣지가 같이 밀려 따라잡지 못하는 상태 → 중단한다.
+      if (Number.isFinite(cur)) {
+        if (cur < syncCatchUp.bestLat - SYNC_PROGRESS_EPS_S) {
+          syncCatchUp.bestLat = cur;
+          syncCatchUp.lastProgressAt = tnow;
+        }
+      }
+      const stalled = tnow - syncCatchUp.lastProgressAt > SYNC_NO_PROGRESS_MS;
+      // 목표 도달 / 측정 불가 / 안전 시간 초과 / 진전 없음(스톨) / 사용자 속도 변경 시 종료.
       if (
         cur == null ||
         cur <= SYNC_TARGET_LATENCY_S ||
         elapsed > SYNC_MAX_DURATION_MS ||
+        stalled ||
         syncCatchUp.video.playbackRate !== SYNC_RATE
       ) {
         stopSyncCatchUp();
@@ -2894,6 +3306,12 @@
     e.preventDefault();
     e.stopPropagation();
     if (btn.disabled) return;
+    // 정지(■) 모드: 자동 따라잡기 해제 전용(따라잡기 발동 아님).
+    if (btn.classList.contains("is-stop") && !syncCatchUp) {
+      setAutoSync(false);
+      closeSyncMenu();
+      return;
+    }
     toggleSyncCatchUp();
   });
 
@@ -2929,7 +3347,7 @@
         <span class="cheese-sync-menu-check" aria-hidden="true">${autoSyncEnabled ? "✓" : ""}</span>
         <span>자동 따라잡기</span>
       </button>
-      <p class="cheese-sync-menu-hint">지연이 ${SYNC_ENABLE_LATENCY_S}초를 넘으면 자동으로 따라잡습니다.</p>`;
+      <p class="cheese-sync-menu-hint">지연이 ${SYNC_ENABLE_LATENCY_S}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.</p>`;
     root.appendChild(menu);
     // 버튼 위쪽에 배치(재생바 위로 뜨도록). 아이콘 오른쪽 끝 기준에서 조금 더
     // 오른쪽(-12px)·살짝 더 위(+14px)로.
@@ -2975,9 +3393,13 @@
       pendingUserEdit = false;
       state = DEFAULT_STATE();
       customDraft = null;
+      draftBackup = null; // 미디어 전환 → 이전 드래프트 복원 대상 무효
       clearPresetDirty();
       teardownGraph();
       stopSyncCatchUp(); // 미디어 전환 시 따라잡기 중단
+      // 새 페이지 진입 → 라이브면 최초 1회 강제 따라잡기를 무장한다(라이브가 아니면
+      // 따라잡기 버튼이 없어 자연 소진). 진입 직후 seeked/쿨다운 차단을 무시한다.
+      armFreshLiveEntry();
       audio.source = null; // 미디어 전환 시 새 video
       audio.video = null;
       clearGraphRetryBlock();
