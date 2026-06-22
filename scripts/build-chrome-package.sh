@@ -30,6 +30,7 @@ copy_path() {
 copy_path "src"
 copy_path "icons"
 copy_path "popup.html"
+copy_path "settings.html"
 copy_path "manifest.json"
 copy_path "no-search-results-found-animation.svg"
 copy_path "searching-animation.svg"

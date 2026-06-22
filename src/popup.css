@@ -2172,7 +2172,7 @@ body[data-content-type="clips"] .popup-controls {
 
 @media (max-width: 820px) {
   body {
-    min-width: 380px;
+    min-width: 330px;
   }
 }
 

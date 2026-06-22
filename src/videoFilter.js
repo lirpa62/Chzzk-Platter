@@ -17,6 +17,18 @@
   if (window.__cheeseVideoFilterLoaded) return;
   window.__cheeseVideoFilterLoaded = true;
 
+  // 팝업 기능 표시/숨김 플래그(content.js가 chrome.storage에서 읽어 postMessage로 전달).
+  const featureFlags = { videoFilter: false };
+  window.addEventListener("message", (e) => {
+    if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    featureFlags.videoFilter = e.data.flags?.videoFilter === true;
+    if (typeof tick === "function") tick();
+  });
+  window.postMessage(
+    { source: "cheese-feature-flags-request" },
+    location.origin,
+  );
+
   const PANEL_ID = "cheese-video-filter-panel";
   const BUTTON_CLASS = "cheese-video-filter-button";
   const CONTROL_CLASS = "cheese-video-filter-control";
@@ -32,6 +44,20 @@
   const CUSTOM_PRESET_NAME_MAX_LENGTH = 7;
   const PRESET_SHARE_TYPE = "cheese-video-filter-presets";
   const PRESET_SHARE_VERSION = 1;
+  // 선명도가 이 값 이상이면 "무거울 수 있음"으로 보고 하드웨어 가속 안내 토스트를 띄운다.
+  const SHARPEN_HEAVY_THRESHOLD = 30;
+  const TOAST_ID = "cheese-vf-toast";
+  const TOAST_DURATION_MS = 7000;
+  const SETTINGS_URL = "chrome://settings/system";
+  // 선명도 자동 조절(전역 설정, localStorage). 기본 OFF.
+  const AUTO_SHARPEN_KEY = "cheeseVideoFilter.autoSharpen";
+  // 프레임 드롭 감지 파라미터.
+  const FRAME_SAMPLE = 30; // 이 프레임 수 동안의 평균 간격으로 판단
+  const FRAME_BUDGET_MS = 22; // 약 45fps 미만이면 느린 것으로 간주
+  const FRAME_RECOVER_MS = 17; // 약 59fps 이상이면 회복으로 간주
+  const AUTO_STEP = 0.25; // 한 번에 줄이거나 늘리는 effective 배율 폭
+  const AUTO_MIN_SCALE = 0; // 최저(선명도 사실상 0까지 감소 허용)
+  const AUTO_ADJUST_COOLDOWN_MS = 2500; // 조절 간 최소 간격(진동 방지)
 
   // 필터 파라미터 정의. 각 항목은 슬라이더 범위와 기본값(중립). neutral은 "보정 없음".
   // 단위 설명:
@@ -76,15 +102,23 @@
     gamma:
       "중간톤의 밝기 곡선입니다. 낮추면 중간 어두운 부분이 밝아지고, 올리면 어두워집니다. 밝기·대비를 건드리지 않고 톤만 조절합니다.",
     sharpness:
-      "선명도(샤픈)입니다. 가장자리를 또렷하게 만들어 디테일을 살립니다. 과하면 노이즈와 경계선이 거칠어질 수 있어요.",
+      "선명도(샤픈)입니다. 가장자리를 또렷하게 만들어 디테일을 살립니다. 과하면 노이즈와 경계선이 거칠어질 수 있어요. 켰을 때 영상이 버벅이면 브라우저 설정에서 '하드웨어 가속'을 켜 주세요(chrome://settings/system).",
     shadows:
       "어두운 영역의 밝기입니다. 올리면 그림자 속 디테일이 살아나고, 내리면 더 깊고 진한 그림자가 됩니다.",
     highlights:
       "밝은 영역의 밝기입니다. 내리면 하얗게 날아간 밝은 부분을 되살리고, 올리면 더 화사해집니다.",
+    "auto-sharpen":
+      "영상이 끊기는 게 감지되면 선명도를 자동으로 잠깐 낮추고, 부드러워지면 다시 원래대로 올립니다. 선명도가 높을 때만 동작하며, 끊김이 줄어드는 대신 선명도가 잠깐 약해질 수 있어요.",
   };
 
   // 아래 공간이 부족한(패널 하단 근처) 항목은 팝오버를 아이콘 위쪽에 띄운다.
-  const INFO_ABOVE = new Set(["sharpness", "shadows", "highlights", "gamma"]);
+  const INFO_ABOVE = new Set([
+    "sharpness",
+    "shadows",
+    "highlights",
+    "gamma",
+    "auto-sharpen",
+  ]);
 
   function infoIcon(key) {
     return `<button type="button" class="cheese-vf-info" data-info="${key}" aria-label="설명 보기" tabindex="0">
@@ -249,6 +283,24 @@
   let activeTab = "presets";
   let appliedVideo = null; // 현재 필터가 걸린 video(전환 감지용)
 
+  // 하드웨어 가속 안내 토스트를 이번 세션에 이미 띄웠는지.
+  let hwToastShown = false;
+  // 선명도 자동 조절(전역, localStorage). 켜면 프레임 드롭 시 effectiveScale를 낮춘다.
+  let autoSharpenEnabled = loadAutoSharpen();
+  // 자동 조절이 곱하는 선명도 배율(1=원래대로, 0=선명도 없음). 사용자가 설정한
+  // state.filters.sharpness는 건드리지 않고, 적용 단계에서만 이 배율을 곱한다.
+  let autoSharpenScale = 1;
+  // 프레임 간격 측정 상태.
+  let frameMon = { raf: 0, last: 0, acc: 0, count: 0, lastAdjustAt: 0 };
+
+  function loadAutoSharpen() {
+    try {
+      return window.localStorage.getItem(AUTO_SHARPEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
   // ── 커스텀 프리셋/공유 상태 ────────────────────────────────────────────────
   let customDraft = null; // { id, name, editing }
   let draftBackup = null; // 드래프트 진입 직전 상태(취소 복원용)
@@ -381,6 +433,12 @@
     return `0 ${round3(side)} 0 ${round3(side)} ${round3(center)} ${round3(side)} 0 ${round3(side)} 0`;
   }
 
+  // 실제 적용할 선명도 = 사용자 설정 × 자동 조절 배율. 자동 조절이 꺼져 있으면
+  // autoSharpenScale가 1로 고정되어 사용자 설정 그대로다.
+  function effectiveSharpness() {
+    return state.filters.sharpness * autoSharpenScale;
+  }
+
   function ensureSvgFilter() {
     let svg = document.getElementById(SVG_FILTER_ID + "-root");
     if (svg) return svg;
@@ -400,10 +458,10 @@
   // 마지막으로 구성한 SVG 필터 내부 마크업(동일하면 재구성 생략 → 불필요한 리플로우 방지).
   let lastSvgInner = "";
 
-  // SVG 필터를 "중립이 아닌 primitive만" 담아 구성한다. 특히 선명도(feConvolveMatrix)는
-  // GPU 컨볼루션 비용이 커서 라이브 고해상도에서 버벅임을 유발하므로, 선명도가 0이면
-  // 아예 체인에서 뺀다(항등 커널이어도 패스 자체가 비싸다). 색온도/감마/톤도 중립이면
-  // 제외해 필터 패스를 최소화한다.
+  // SVG 필터를 "중립이 아닌 primitive만" 담아 구성한다(색온도/색조/감마/톤/선명도).
+  // 선명도는 feConvolveMatrix로 처리한다 — 브라우저 하드웨어 가속이 켜져 있으면 GPU로
+  // 돌아 충분히 빠르다(꺼져 있으면 무거우므로 패널에서 안내). canvas 오버레이는 전체화면
+  // ·비율 문제를 일으켜 쓰지 않는다.
   function updateSvgFilter() {
     const filter = ensureSvgFilter().querySelector(`#${SVG_FILTER_ID}`);
     if (!filter) return;
@@ -421,8 +479,9 @@
       const table = toneTable(f.shadows, f.highlights);
       inner += `<feComponentTransfer><feFuncR type="table" tableValues="${table}"></feFuncR><feFuncG type="table" tableValues="${table}"></feFuncG><feFuncB type="table" tableValues="${table}"></feFuncB></feComponentTransfer>`;
     }
-    if (f.sharpness !== 0) {
-      inner += `<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="${sharpenKernel(f.sharpness)}"></feConvolveMatrix>`;
+    const sharp = effectiveSharpness();
+    if (sharp > 0) {
+      inner += `<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="${sharpenKernel(sharp)}"></feConvolveMatrix>`;
     }
 
     if (inner !== lastSvgInner) {
@@ -431,7 +490,8 @@
     }
   }
 
-  // CSS filter 함수 문자열. brightness는 밝기·노출을 곱해 합산한다.
+  // CSS filter 함수 문자열. brightness는 밝기·노출을 곱해 합산한다. SVG 보정이
+  // 필요하면 url() 필터를 덧붙인다.
   function buildCssFilter() {
     const f = state.filters;
     const brightness = round3(f.brightness * f.exposure);
@@ -440,25 +500,26 @@
       `contrast(${round3(f.contrast)})`,
       `saturate(${round3(f.saturation)})`,
     ];
-    // SVG 보정이 필요한 항목이 하나라도 중립이 아니면 url() 필터를 덧붙인다.
     if (needsSvgFilter()) parts.push(`url(#${SVG_FILTER_ID})`);
     return parts.join(" ");
   }
 
+  // 색온도/색조/감마/톤/선명도 중 하나라도 중립이 아니면 SVG 필터가 필요하다.
   function needsSvgFilter() {
     const f = state.filters;
     return (
       f.temperature !== 0 ||
       f.tint !== 0 ||
       f.gamma !== 1 ||
-      f.sharpness !== 0 ||
       f.shadows !== 0 ||
-      f.highlights !== 0
+      f.highlights !== 0 ||
+      effectiveSharpness() > 0
     );
   }
 
-  // video 엘리먼트에 필터를 건다. 치지직이 video.style을 덮어쓸 수 있으므로
-  // <style> 규칙(클래스 셀렉터)로도 적용해 둔다.
+  // 필터를 video에 적용한다. 모든 보정을 video에 직접 CSS(밝기/대비/채도) + SVG
+  // (색온도/색조/감마/톤/선명도)로 건다. canvas 오버레이를 쓰지 않으므로 전체화면·
+  // 비율·컨트롤에 영향을 주지 않는다.
   function applyState() {
     const video = findVideo();
     if (!video) return;
@@ -466,7 +527,7 @@
       clearFilter(video);
       return;
     }
-    // SVG 보정이 필요할 때만 필터를 구성한다. 불필요하면 비워 두 빈 필터 패스를 없앤다.
+    // SVG 보정(색온도/감마/톤/선명도)이 필요할 때만 필터를 구성한다(불필요하면 비움).
     if (needsSvgFilter()) updateSvgFilter();
     else clearSvgFilter();
     const css = buildCssFilter();
@@ -474,6 +535,16 @@
     video.classList.add("cheese-vf-target");
     ensureStyleRule(css);
     appliedVideo = video;
+
+    // 선명도가 무거울 수 있는 수준이면 하드웨어 가속 안내(세션 1회) + 자동 조절 모니터.
+    if (state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD) {
+      maybeShowHwToast();
+      if (autoSharpenEnabled) startFrameMonitor();
+      else stopFrameMonitor();
+    } else {
+      stopFrameMonitor();
+      autoSharpenScale = 1; // 무거운 설정이 아니면 자동 감소분 원복
+    }
   }
 
   // SVG 필터 내부를 비운다(primitive 패스 제거 + 캐시 리셋).
@@ -484,7 +555,7 @@
     lastSvgInner = "";
   }
 
-  // 클래스 셀렉터 규칙으로도 필터를 적용(인라인 style이 지워질 때 대비).
+  // 클래스 셀렉터 규칙으로도 video에 필터를 적용(인라인 style이 지워질 때 대비).
   // 내용이 같으면 textContent를 재대입하지 않는다 — 매 tick 재대입하면 그 DOM
   // 변경이 전역 MutationObserver를 깨워 tick 무한 루프가 된다.
   function ensureStyleRule(css) {
@@ -507,7 +578,158 @@
     const style = document.getElementById(STYLE_ID);
     if (style) style.textContent = "";
     clearSvgFilter();
+    stopFrameMonitor();
+    autoSharpenScale = 1;
     appliedVideo = null;
+  }
+
+  // ── 하드웨어 가속 안내 토스트 ───────────────────────────────────────────────
+  // 선명도가 무거울 수 있는 설정일 때 세션당 1회, 플레이어 위에 안내를 띄운다.
+  function maybeShowHwToast() {
+    if (hwToastShown) return;
+    hwToastShown = true;
+    showHwToast();
+  }
+
+  function showHwToast() {
+    document.getElementById(TOAST_ID)?.remove();
+    const toast = document.createElement("div");
+    toast.id = TOAST_ID;
+    toast.className = "cheese-vf-toast";
+    toast.setAttribute("role", "status");
+    toast.innerHTML = `
+      <div class="cheese-vf-toast-body">
+        <strong>선명도가 높은 필터예요</strong>
+        <span>영상이 버벅이면 브라우저 하드웨어 가속을 켜 주세요.<br><code>${SETTINGS_URL}</code></span>
+      </div>
+      <div class="cheese-vf-toast-actions">
+        <button type="button" data-vf-toast-copy>주소 복사</button>
+        <button type="button" data-vf-toast-close aria-label="닫기">✕</button>
+      </div>`;
+    const root = findPlayer() || document.body;
+    if (getComputedStyle(root).position === "static") {
+      root.style.position = "relative";
+    }
+    root.appendChild(toast);
+    const remove = () => toast.remove();
+    toast
+      .querySelector("[data-vf-toast-close]")
+      ?.addEventListener("click", remove);
+    toast.querySelector("[data-vf-toast-copy]")?.addEventListener("click", (e) => {
+      copyText(SETTINGS_URL);
+      const btn = e.currentTarget;
+      btn.textContent = "복사됨!";
+      setTimeout(remove, 800);
+    });
+    window.setTimeout(remove, TOAST_DURATION_MS);
+  }
+
+  function copyText(text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    } catch {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      document.body.append(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    } catch {}
+  }
+
+  // ── 선명도 자동 조절(프레임 드롭 감지) ──────────────────────────────────────
+  // 브라우저 확장은 CPU 사용률을 직접 못 읽으므로, rAF 프레임 간격으로 버벅임을
+  // 추정한다. 느린 상태가 이어지면 autoSharpenScale을 낮춰 선명도를 줄이고, 회복되면
+  // 다시 올린다. 사용자가 설정한 state.filters.sharpness는 그대로 둔다.
+  function setAutoSharpen(enabled) {
+    autoSharpenEnabled = Boolean(enabled);
+    try {
+      window.localStorage.setItem(AUTO_SHARPEN_KEY, enabled ? "1" : "0");
+    } catch {}
+    if (!autoSharpenEnabled) {
+      autoSharpenScale = 1;
+      stopFrameMonitor();
+      applyState(); // 원래 선명도로 복원
+    } else if (
+      state.enabled &&
+      state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD
+    ) {
+      startFrameMonitor();
+    }
+    syncUI();
+  }
+
+  function startFrameMonitor() {
+    if (frameMon.raf) return;
+    frameMon.last = 0;
+    frameMon.acc = 0;
+    frameMon.count = 0;
+    const tick = (ts) => {
+      frameMon.raf = requestAnimationFrame(tick);
+      if (!frameMon.last) {
+        frameMon.last = ts;
+        return;
+      }
+      const dt = ts - frameMon.last;
+      frameMon.last = ts;
+      // 탭 비활성 등으로 생기는 비정상적 큰 간격은 무시(오탐 방지).
+      if (dt > 200) return;
+      frameMon.acc += dt;
+      frameMon.count += 1;
+      if (frameMon.count < FRAME_SAMPLE) return;
+      const avg = frameMon.acc / frameMon.count;
+      frameMon.acc = 0;
+      frameMon.count = 0;
+      evaluateFrameAvg(avg);
+    };
+    frameMon.raf = requestAnimationFrame(tick);
+  }
+
+  function stopFrameMonitor() {
+    if (frameMon.raf) {
+      cancelAnimationFrame(frameMon.raf);
+      frameMon.raf = 0;
+    }
+  }
+
+  function evaluateFrameAvg(avg) {
+    const now = Date.now();
+    if (now - frameMon.lastAdjustAt < AUTO_ADJUST_COOLDOWN_MS) return;
+    if (avg > FRAME_BUDGET_MS && autoSharpenScale > AUTO_MIN_SCALE) {
+      // 느림 → 선명도를 한 단계 줄인다.
+      autoSharpenScale = Math.max(AUTO_MIN_SCALE, autoSharpenScale - AUTO_STEP);
+      frameMon.lastAdjustAt = now;
+      reapplySharpenOnly();
+    } else if (avg < FRAME_RECOVER_MS && autoSharpenScale < 1) {
+      // 회복 → 선명도를 한 단계 되돌린다.
+      autoSharpenScale = Math.min(1, autoSharpenScale + AUTO_STEP);
+      frameMon.lastAdjustAt = now;
+      reapplySharpenOnly();
+    }
+  }
+
+  // 자동 조절로 선명도만 바뀔 때 호출. 전체 applyState 대신 SVG/CSS만 갱신해 가볍게.
+  function reapplySharpenOnly() {
+    if (!state.enabled) return;
+    const video = appliedVideo || findVideo();
+    if (!video) return;
+    if (needsSvgFilter()) updateSvgFilter();
+    else clearSvgFilter();
+    const css = buildCssFilter();
+    video.style.setProperty("filter", css, "important");
+    ensureStyleRule(css);
   }
 
   function setEnabled(enabled) {
@@ -1419,6 +1641,13 @@
         <section class="cheese-vf-pane ${activeTab === "adjust" ? "is-active" : ""}" data-pane="adjust">
           ${renderCustomDraftBar()}
           ${PARAM_KEYS.map(renderParamRow).join("")}
+          <div class="cheese-vf-auto-row">
+            <span class="cheese-vf-auto-label">선명도 자동 조절${INFO_TEXT["auto-sharpen"] ? infoIcon("auto-sharpen") : ""}</span>
+            <label class="cheese-vf-switch">
+              <input type="checkbox" data-action="auto-sharpen-toggle" ${autoSharpenEnabled ? "checked" : ""}>
+              <i aria-hidden="true"></i>
+            </label>
+          </div>
           <button type="button" class="cheese-vf-custom-button cheese-vf-reset-all" data-action="reset-all">모든 값 초기화</button>
         </section>
       </div>
@@ -1766,6 +1995,8 @@
       }
       if (t.dataset.action === "power") {
         setEnabled(t.checked);
+      } else if (t.dataset.action === "auto-sharpen-toggle") {
+        setAutoSharpen(t.checked);
       }
     });
   }
@@ -1911,6 +2142,9 @@
   function handleSlider(key, value) {
     if (!PARAMS[key] || !Number.isFinite(value)) return;
     state.filters[key] = clampParam(key, value);
+    // 사용자가 선명도를 직접 조절하면 자동 감소분을 초기화해 설정값을 그대로 반영한다
+    // (이후에도 느리면 자동 조절이 다시 줄인다).
+    if (key === "sharpness") autoSharpenScale = 1;
     enterCustomFromEdit();
     reconcileDirtyAgainstBase();
     applyState();
@@ -1977,9 +2211,14 @@
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     if (!button) return;
     const label = filterButtonLabel();
-    button.setAttribute("aria-label", label);
+    // 값이 같으면 쓰지 않는다. ensureButton이 매 프레임(tick) 부르는데, 동일 값을
+    // 재대입하면 그 DOM 변경이 documentElement subtree를 보는 모든 MutationObserver
+    // (이 확장 + 다른 확장)를 깨워 tick 자가발화 루프 → 재생 버벅임을 만든다.
+    if (button.getAttribute("aria-label") !== label) {
+      button.setAttribute("aria-label", label);
+    }
     const tip = button.querySelector(".pzp-button__tooltip");
-    if (tip) tip.textContent = label;
+    if (tip && tip.textContent !== label) tip.textContent = label;
   }
 
   // 버튼(플레이어 하단)만 가볍게 동기화. ensureButton이 매 tick 호출하므로
@@ -1988,8 +2227,15 @@
   // tick 경로에서는 이 함수만 부르고, 패널 갱신(syncUI)은 상태 변경 시에만 부른다.
   function syncButton() {
     const button = document.querySelector(`.${BUTTON_CLASS}`);
-    button?.classList.toggle("is-active", state.enabled);
-    button?.setAttribute("aria-pressed", String(state.enabled));
+    if (!button) return;
+    const active = String(state.enabled);
+    // 동일 값 재대입 금지(멱등) — 매 tick 무조건 쓰면 옵저버가 깨어나 자가발화한다.
+    if (button.classList.contains("is-active") !== state.enabled) {
+      button.classList.toggle("is-active", state.enabled);
+    }
+    if (button.getAttribute("aria-pressed") !== active) {
+      button.setAttribute("aria-pressed", active);
+    }
     syncButtonLabel();
   }
 
@@ -2012,6 +2258,9 @@
         ?.querySelector("[data-output]");
       if (out) out.textContent = fmtParam(key, v);
     });
+
+    const autoToggle = panel.querySelector("[data-action='auto-sharpen-toggle']");
+    if (autoToggle) autoToggle.checked = autoSharpenEnabled;
   }
 
   // 버튼 클릭 위임(document 레벨).
@@ -2058,8 +2307,15 @@
       clearPresetDirty();
       resolveAndLoadChannel(pageKey);
     }
-    ensureButton();
-    ensureAppliedFilter();
+    // 팝업 기능 숨김 플래그 반영. 숨김이면 버튼 제거 + 효과 off(state.enabled는 유지).
+    if (featureFlags.videoFilter) {
+      closePanel();
+      removeButton();
+      clearFilter();
+    } else {
+      ensureButton();
+      ensureAppliedFilter();
+    }
   }
 
   async function resolveAndLoadChannel(pageKey) {

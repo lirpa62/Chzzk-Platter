@@ -10,6 +10,28 @@
   if (window.__cheeseAudioMixerLoaded) return;
   window.__cheeseAudioMixerLoaded = true;
 
+  // 팝업 기능 표시/숨김 플래그(content.js가 chrome.storage에서 읽어 postMessage로 전달).
+  const featureFlags = {
+    audioMixer: false,
+    streamStats: false,
+    liveSync: false,
+  };
+  window.addEventListener("message", (e) => {
+    if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    const f = e.data.flags || {};
+    featureFlags.audioMixer = f.audioMixer === true;
+    featureFlags.streamStats = f.streamStats === true;
+    featureFlags.liveSync = f.liveSync === true;
+    // 따라잡기 민감도 프리셋(낮음/보통/높음). content.js가 chrome.storage에서 읽어 전달.
+    if (typeof applySyncPreset === "function") applySyncPreset(e.data.syncPreset);
+    if (typeof tick === "function") tick();
+  });
+  // 로드 직후 현재 플래그를 요청한다(content.js의 초기 송신을 놓쳤을 수 있으므로).
+  window.postMessage(
+    { source: "cheese-feature-flags-request" },
+    location.origin,
+  );
+
   const PANEL_ID = "cheese-audio-mixer-panel";
   const BUTTON_CLASS = "cheese-audio-mixer-button";
   const CONTROL_CLASS = "cheese-audio-mixer-control";
@@ -20,15 +42,27 @@
   const SYNC_BUTTON_CLASS = "cheese-live-sync-button";
   const SYNC_MENU_ID = "cheese-live-sync-menu";
   const SYNC_CHECK_MS = 1000; // 버튼 활성/비활성 갱신 주기
-  const SYNC_ENABLE_LATENCY_S = 3; // 이 지연(초) 이상이면 수동 버튼 활성화
-  const SYNC_AUTO_ENABLE_LATENCY_S = 3; // 자동 따라잡기 발동 임계(수동과 동일: 안내문과 일치)
-  const SYNC_TARGET_LATENCY_S = 2; // 따라잡기 목표 지연(초). 발동 임계와 여유를 둬 도달 직후 재발동 방지
   const SYNC_RATE = 1.5; // 따라잡기 배속
   const SYNC_MAX_DURATION_MS = 30000; // 안전: 최대 따라잡기 시간
   const SYNC_NO_PROGRESS_MS = 4000; // 이 시간 동안 지연이 의미있게 안 줄면(스톨) 중단
   const SYNC_PROGRESS_EPS_S = 0.3; // '진전'으로 인정할 최소 지연 감소(초)
   const SYNC_JUMP_LATENCY_S = 12; // 이 지연(초) 이상이면 1.5배속 대신 라이브로 즉시 점프
-  const SYNC_AUTO_COOLDOWN_MS = 15000; // 자동 따라잡기 재발동 쿨다운(진동 방지로 길게)
+  // 따라잡기 민감도 프리셋(settings에서 선택). enable=발동/버튼활성 임계, target=목표 지연.
+  // 값이 작을수록 라이브에 더 바짝 붙는다(자주 발동). 큰 값은 느슨하게(끊김 적게).
+  const SYNC_PRESETS = {
+    low: { enable: 5, target: 3 }, // 낮음: 느슨하게(끊김 최소)
+    normal: { enable: 3, target: 2 }, // 보통(기본)
+    high: { enable: 2, target: 1.5 }, // 높음: 라이브에 바짝
+  };
+  let syncPresetKey = "normal";
+  // 현재 적용 중인 임계값. enable=수동/자동 발동 임계, target=따라잡기 목표 지연.
+  let syncCfg = { ...SYNC_PRESETS.normal };
+  // 자동 따라잡기 재발동 쿨다운(진동 방지). 지수 백오프로 늘었다 안정 시 리셋.
+  const SYNC_AUTO_COOLDOWN_BASE_MS = 15000; // 기본 쿨다운
+  const SYNC_AUTO_COOLDOWN_MAX_MS = 120000; // 백오프 상한(2분)
+  const SYNC_BACKOFF_RESET_MS = 120000; // 이 시간 동안 안정(임계 아래)이면 백오프 리셋
+  let syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS; // 현재 쿨다운(백오프로 변동)
+  let syncLastUnstableAt = 0; // 마지막으로 임계 이상이었던 시각(백오프 리셋 판단)
   const SYNC_USER_SEEK_PAUSE_MS = 60000; // 사용자가 과거로 seek하면 이 시간만큼 자동 따라잡기 중단
   const SYNC_BACK_SEEK_MIN_S = 2; // 이 이상 지연이 늘어난 seek만 '과거 보기'로 간주(앞으로/라이브 복귀는 제외)
   const SYNC_FRESH_ENTRY_WINDOW_MS = 20000; // 라이브 최초 진입 후 이 시간 안에서만 1회 강제 따라잡기 시도
@@ -2727,7 +2761,7 @@
         const end = v.seekable.end(v.seekable.length - 1);
         if (Number.isFinite(end) && end > 0) {
           ourSeekUntil = Date.now() + 1500; // 곧 발생할 seeked는 우리 것 → 무시
-          v.currentTime = Math.max(0, end - SYNC_TARGET_LATENCY_S);
+          v.currentTime = Math.max(0, end - syncCfg.target);
           return true;
         }
       }
@@ -3403,13 +3437,15 @@
       return;
     }
     const lat = getLiveLatencySeconds();
-    const overThreshold = Number.isFinite(lat) && lat >= SYNC_ENABLE_LATENCY_S;
-    // 자동은 수동보다 높은 임계(SYNC_AUTO_ENABLE_LATENCY_S)에서만 발동한다. 목표 지연과
-    // 여유를 둬 '따라잡고-다시늘고' 진동을 막는다. 점프 임계 이상은 '타임머신으로 과거를
-    // 보는 중'으로 간주해 자동 발동하지 않는다(라이브 복귀는 수동 버튼).
+    const overThreshold = Number.isFinite(lat) && lat >= syncCfg.enable;
+    // 백오프 리셋 판단용: 임계 이상이면 '불안정' 시각을 갱신. 일정 시간 임계 아래로
+    // 안정되면 canAutoCatchUp에서 쿨다운을 기본값으로 되돌린다.
+    if (overThreshold) syncLastUnstableAt = Date.now();
+    // 발동 임계 이상 + 점프 임계 미만이면 자동 발동 대상. 점프 임계 이상은 '타임머신으로
+    // 과거를 보는 중'으로 간주해 자동 발동하지 않는다(라이브 복귀는 수동 버튼).
     const autoEligible =
       Number.isFinite(lat) &&
-      lat >= SYNC_AUTO_ENABLE_LATENCY_S &&
+      lat >= syncCfg.enable &&
       lat < SYNC_JUMP_LATENCY_S;
 
     // 라이브 최초 진입 1회: 쿨다운/사용자 seek 차단을 무시하고 따라잡는다. 지연이
@@ -3421,7 +3457,7 @@
         syncFreshLiveEntry = false; // 창 만료 → 강제 시도 종료, 평소 자동 로직으로
       } else if (Number.isFinite(lat) && canFreshEntryCatchUp()) {
         syncFreshLiveEntry = false; // 측정·판단 완료 → 1회 소진
-        if (lat >= SYNC_AUTO_ENABLE_LATENCY_S) {
+        if (lat >= syncCfg.enable) {
           lastAutoCatchUpAt = Date.now();
           startSyncCatchUp(); // lat이 크면 내부에서 라이브 엣지로 점프
           return;
@@ -3434,6 +3470,13 @@
     // 자동 따라잡기: 임계 초과 + 점프 임계 미만 + 쿨다운 경과 + 안전조건이면 발동.
     if (autoSyncEnabled && autoEligible && canAutoCatchUp()) {
       lastAutoCatchUpAt = Date.now();
+      // 지수 백오프: 발동할 때마다 다음 쿨다운을 2배로(상한까지). 네트워크가 계속
+      // 못 따라가 자주 발동하면 간격을 벌려 1.5배속 끊김 구간을 줄인다. 안정되면
+      // canAutoCatchUp에서 기본값으로 리셋된다.
+      syncAutoCooldownMs = Math.min(
+        SYNC_AUTO_COOLDOWN_MAX_MS,
+        syncAutoCooldownMs * 2,
+      );
       startSyncCatchUp();
       return;
     }
@@ -3458,6 +3501,17 @@
     }
   }
 
+  // 따라잡기 민감도 프리셋 적용(자동·수동 임계/목표 지연 모두). 알 수 없는 값이면 보통.
+  function applySyncPreset(key) {
+    const next = SYNC_PRESETS[key] ? key : "normal";
+    if (next === syncPresetKey) return;
+    syncPresetKey = next;
+    syncCfg = { ...SYNC_PRESETS[next] };
+    // 프리셋이 바뀌면 백오프도 초기화(새 기준으로 다시 판단).
+    syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
+    updateSyncButtonState();
+  }
+
   // 라이브 최초 진입 후 1회 강제 따라잡기를 무장한다(tick의 페이지 전환에서 호출).
   function armFreshLiveEntry() {
     syncFreshLiveEntry = true;
@@ -3476,7 +3530,15 @@
   // 자동 따라잡기 발동 가능 조건: 쿨다운 경과 + 영상이 재생 중(일시정지/되감기
   // 중이 아님). 사용자가 의도적으로 멈추거나 되감을 땐 자동으로 끌어당기지 않는다.
   function canAutoCatchUp() {
-    if (Date.now() - lastAutoCatchUpAt < SYNC_AUTO_COOLDOWN_MS) return false;
+    // 마지막 발동 이후 일정 시간 임계 아래로 안정됐으면 백오프를 기본값으로 리셋
+    // (일시적 네트워크 저하가 끝나면 다시 민첩하게 따라잡도록).
+    if (
+      syncAutoCooldownMs > SYNC_AUTO_COOLDOWN_BASE_MS &&
+      Date.now() - syncLastUnstableAt > SYNC_BACKOFF_RESET_MS
+    ) {
+      syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
+    }
+    if (Date.now() - lastAutoCatchUpAt < syncAutoCooldownMs) return false;
     // 사용자가 직접 과거로 seek했다면(타임머신) 일정 시간 자동 따라잡기를 멈춘다.
     // 의도적으로 과거를 보는 중인데 계속 라이브로 끌어당기지 않도록.
     if (Date.now() - lastUserSeekAt < SYNC_USER_SEEK_PAUSE_MS) return false;
@@ -3511,7 +3573,7 @@
     const video = findVideo();
     if (!core || !video) return;
     const lat = getLiveLatencySeconds(core);
-    if (!Number.isFinite(lat) || lat < SYNC_ENABLE_LATENCY_S) return;
+    if (!Number.isFinite(lat) || lat < syncCfg.enable) return;
 
     // 지연이 크면(타임머신 등) 1.5배속 대신 라이브 엣지로 즉시 점프한다.
     if (lat >= SYNC_JUMP_LATENCY_S) {
@@ -3553,7 +3615,7 @@
       // 목표 도달 / 측정 불가 / 안전 시간 초과 / 진전 없음(스톨) / 사용자 속도 변경 시 종료.
       if (
         cur == null ||
-        cur <= SYNC_TARGET_LATENCY_S ||
+        cur <= syncCfg.target ||
         elapsed > SYNC_MAX_DURATION_MS ||
         stalled ||
         syncCatchUp.video.playbackRate !== SYNC_RATE
@@ -3649,7 +3711,7 @@
         <span class="cheese-sync-menu-check" aria-hidden="true">${autoSyncEnabled ? "✓" : ""}</span>
         <span>자동 따라잡기</span>
       </button>
-      <p class="cheese-sync-menu-hint">지연이 ${SYNC_ENABLE_LATENCY_S}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.</p>`;
+      <p class="cheese-sync-menu-hint">지연이 ${syncCfg.enable}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.</p>`;
     root.appendChild(menu);
     // 버튼 위쪽에 배치(재생바 위로 뜨도록). 아이콘 오른쪽 끝 기준에서 조금 더
     // 오른쪽(-12px)·살짝 더 위(+14px)로.
@@ -3707,10 +3769,27 @@
       clearGraphRetryBlock();
       resolveAndLoadChannel(pageKey);
     }
-    ensureButton();
-    ensureStatsButton();
-    ensureSyncButton();
-    ensureEnabledGraph();
+    // 팝업 기능 숨김 플래그 반영. 숨김이면 버튼 제거 + 효과 off(믹서/따라잡기).
+    if (featureFlags.audioMixer) {
+      closePanel();
+      removeButton();
+      teardownGraph();
+    } else {
+      ensureButton();
+      ensureEnabledGraph();
+    }
+    if (featureFlags.streamStats) {
+      closeStatsPanel();
+      removeStatsButton();
+    } else {
+      ensureStatsButton();
+    }
+    if (featureFlags.liveSync) {
+      stopSyncCatchUp();
+      removeSyncButton();
+    } else {
+      ensureSyncButton();
+    }
   }
 
   // 페이지의 채널id를 비동기로 확보한 뒤 해당 채널 설정을 로드한다. 해석 도중

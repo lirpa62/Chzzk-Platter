@@ -1,0 +1,238 @@
+/* 치즈 서치 - 기능 설정 팝업 스타일 (popup.css 변수 재사용) */
+html {
+  /* Firefox 등 표준 커스텀 스크롤바 색(thumb / track) */
+  scrollbar-color: var(--popup-brand) var(--popup-soft-bg);
+  scrollbar-width: thin;
+}
+
+body {
+  /* popup.css의 검색용 min-width(380px)를 덮어 설정 셸 폭에 맞춘다(우측 여백 제거) */
+  min-width: 0;
+  width: max-content;
+  margin: 0;
+  background: var(--popup-bg);
+  color: var(--popup-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Apple SD Gothic Neo",
+    sans-serif;
+}
+
+/* WebKit 커스텀 스크롤바 */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--popup-soft-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid var(--popup-bg);
+  border-radius: 999px;
+  background: var(--popup-brand);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--popup-brand-strong);
+}
+
+.settings-shell {
+  box-sizing: border-box;
+  width: 340px;
+  max-width: 100vw;
+  padding: 16px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-header-text {
+  min-width: 0;
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.settings-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--popup-muted);
+}
+
+.settings-hint {
+  margin: 12px 0 14px;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: var(--popup-soft-bg);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--popup-text);
+}
+
+.settings-group {
+  margin-bottom: 14px;
+}
+
+.settings-group-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--popup-muted);
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--popup-surface);
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+}
+
+.settings-item + .settings-item {
+  border-top: 1px solid var(--popup-border-soft);
+}
+
+.settings-item > label:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.settings-item-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-item-desc {
+  font-size: 11px;
+  color: var(--popup-muted);
+}
+
+/* 토글 스위치 */
+.settings-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  cursor: pointer;
+}
+
+.settings-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-switch i {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--popup-dimmed-bg);
+  transition: background 0.15s ease;
+}
+
+.settings-switch i::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  content: "";
+  transition: transform 0.15s ease;
+}
+
+.settings-switch input:checked + i {
+  background: var(--popup-brand);
+}
+
+.settings-switch input:checked + i::after {
+  transform: translateX(16px);
+}
+
+.settings-switch input:focus-visible + i {
+  outline: 2px solid var(--popup-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 그룹 설명 문구 */
+.settings-group-desc {
+  margin: 8px 2px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--popup-muted);
+}
+
+/* 세그먼트 컨트롤(따라잡기 민감도 낮음/보통/높음) */
+.settings-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.settings-segmented button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px;
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.settings-segmented button small {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--popup-muted);
+}
+
+.settings-segmented button:hover {
+  border-color: var(--popup-brand);
+}
+
+.settings-segmented button.is-active {
+  border-color: var(--popup-brand);
+  background: var(--popup-help-bg);
+  color: var(--popup-brand-strong);
+}
+
+.settings-segmented button.is-active small {
+  color: var(--popup-brand-strong);
+}

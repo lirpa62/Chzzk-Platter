@@ -44,8 +44,49 @@ const VIDEO_COMMENT_PANEL_CLASS = "cheese-search-comment-timestamp-panel";
 const VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS =
   "cheese-search-comment-preview-tooltip";
 const COMMENT_BUTTON_INSERT_COOLDOWN_MS = 2000;
+// ── seek preview 실제 방송 시각 병기 ────────────────────────────────────────
+// 다시보기 재생바 호버 시 뜨는 seek preview의 시간(.pzp-seeking-preview__time) 아래에
+// 라이브 시작 시각(liveOpenDate) + preview 시간으로 계산한 "실제 그 당시 시각"을 병기.
+const SEEK_PREVIEW_TIME_SELECTOR = ".pzp-seeking-preview__time";
+const SEEK_PREVIEW_REALTIME_CLASS = "cheese-search-seek-realtime";
+// 영상 정보 영역의 등록일/라이브 시작일 툴팁(._label_..._77) 교체 대상.
+const VIDEO_INFO_LABEL_SELECTOR = '[class*="_label_"]';
+const seekPreviewState = {
+  videoNo: "",
+  liveOpenAt: 0, // 라이브 시작 시각(ms). 0이면 미확보/없음
+  publishAt: 0, // 등록일(ms). 0이면 미확보/없음
+  fetching: false,
+  observer: null,
+};
+// ── 기능 표시/숨김 전역 설정(확장 팝업 패널) ────────────────────────────────
+// 키 cheeseFeatureHidden = { <feature>: true(숨김)/false(표시) }. 미설정/false=표시.
+// content.js가 chrome.storage에서 읽어 자기 기능 게이트에 쓰고, MAIN world
+// (audioMixer/videoFilter/clipButtonHide)에는 postMessage로 전달한다.
+const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
+const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
+// 실시간 따라잡기 민감도 프리셋(low/normal/high). audioMixer(MAIN world)에 함께 전달.
+const SYNC_PRESET_KEY = "cheeseSyncPreset";
+let syncPresetValue = "normal";
+const featureFlags = {
+  audioMixer: false,
+  videoFilter: false,
+  liveSync: false,
+  streamStats: false,
+  commentTimestamp: false,
+  searchVideos: false,
+  searchClips: false,
+  sidebar: false,
+  seekPreviewRealtime: false, // 다시보기 seek preview 실제 시각 병기 숨김
+};
+// 사이드바(aside#sidebar) 숨김용 CSS를 토글하는 <style> id.
+const SIDEBAR_HIDE_STYLE_ID = "cheese-sidebar-hide-style";
 // 재생바 댓글 타임스탬프 마커 표시 on/off(전역, chrome.storage 저장). 디폴트 ON.
 const COMMENT_MARKERS_ENABLED_KEY = "cheeseCommentMarkersEnabled";
+// 댓글 타임스탬프 기능 전체 on/off(버튼 우클릭 메뉴로 토글, 전역 저장). 디폴트 ON.
+// off면 버튼 비활성(opacity)+좌클릭 무효+마커 미표시, 우클릭만 가능.
+const COMMENT_FEATURE_ENABLED_KEY = "cheeseCommentFeatureEnabled";
+const COMMENT_FEATURE_OFF_CLASS = "comment-timestamp-feature-off";
+const COMMENT_FEATURE_MENU_CLASS = "cheese-search-comment-feature-menu";
 const COMMENT_MARKER_RENDER_RETRY_LIMIT = 30;
 const COMMENT_PANEL_RIGHT_PX = 22;
 const COMMENT_PANEL_BOTTOM_PX = 60;
@@ -124,6 +165,8 @@ const commentMarkerState = {
   currentPanelMarkerSeconds: "",
   // 재생바 마커 표시 여부(전역 설정 캐시). 디폴트 ON. 시작 시 storage에서 로드.
   markersEnabled: true,
+  // 댓글 타임스탬프 기능 전체 활성 여부(우클릭 메뉴 토글, 전역 설정 캐시). 디폴트 ON.
+  featureEnabled: true,
 };
 
 // 치지직은 마우스 비활성 시 플레이어 루트(.pzp-pc)에서 `pzp-pc--controls`
@@ -3493,8 +3536,68 @@ function syncCommentMarkersToggle() {
   if (input) input.checked = commentMarkerState.markersEnabled;
 }
 
+// ── 댓글 타임스탬프 기능 전체 on/off (버튼 우클릭 메뉴) ──────────────────────
+let commentFeatureEnabledLoaded = false;
+async function loadCommentFeatureEnabled() {
+  if (commentFeatureEnabledLoaded) return;
+  commentFeatureEnabledLoaded = true;
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await chrome.storage.local.get(COMMENT_FEATURE_ENABLED_KEY);
+    if (data?.[COMMENT_FEATURE_ENABLED_KEY] === false) {
+      commentMarkerState.featureEnabled = false;
+      applyCommentFeatureEnabled();
+    }
+  } catch {
+    // 로드 실패 시 디폴트(ON) 유지.
+  }
+}
+
+function setCommentFeatureEnabled(enabled) {
+  commentMarkerState.featureEnabled = Boolean(enabled);
+  if (chrome.storage?.local) {
+    try {
+      chrome.storage.local.set({
+        [COMMENT_FEATURE_ENABLED_KEY]: commentMarkerState.featureEnabled,
+      });
+    } catch {
+      // 저장 실패해도 이번 세션 동작엔 영향 없음.
+    }
+  }
+  applyCommentFeatureEnabled();
+}
+
+// 기능 off면 열린 패널을 닫고 마커를 제거한다. 버튼 비활성 표시/마커는
+// updateCommentTimestampButton·renderCommentTimestampMarkers가 처리한다.
+function applyCommentFeatureEnabled() {
+  if (!commentMarkerState.featureEnabled) {
+    closeCommentTimestampPanel();
+    document
+      .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
+      .forEach((layer) => layer.remove());
+    removeCommentMarkerPreviewTooltip();
+  } else {
+    if (commentMarkerState.markersEnabled) scheduleCommentMarkerRender(0);
+  }
+  updateCommentTimestampButton();
+}
+
+function toggleCommentFeatureEnabled() {
+  setCommentFeatureEnabled(!commentMarkerState.featureEnabled);
+}
+
 function initCommentTimestampMarkers() {
+  // 팝업에서 댓글 타임스탬프를 숨김 처리하면 버튼/마커/패널을 모두 제거하고 끝낸다.
+  if (featureFlags.commentTimestamp) {
+    closeCommentTimestampPanel();
+    resetCommentTimestampMarkers();
+    document
+      .querySelectorAll(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
+    return;
+  }
   void loadCommentMarkersEnabled();
+  void loadCommentFeatureEnabled();
   const videoNo = getCurrentVideoNo();
   if (!videoNo) {
     resetCommentTimestampMarkers();
@@ -3519,6 +3622,165 @@ function initCommentTimestampMarkers() {
 function getCurrentVideoNo() {
   const match = location.pathname.match(/^\/video\/(\d+)/);
   return match ? match[1] : "";
+}
+
+// ── seek preview 실제 방송 시각 병기 ────────────────────────────────────────
+// 다시보기 진입 시 호출. 새 영상이면 liveOpenDate를 확보하고 seek preview 옵저버를
+// (재)설정한다. 다시보기가 아니면 정리.
+function initSeekPreviewRealtime() {
+  const videoNo = getCurrentVideoNo();
+  if (!videoNo) {
+    teardownSeekPreviewObserver();
+    seekPreviewState.videoNo = "";
+    seekPreviewState.liveOpenAt = 0;
+    seekPreviewState.publishAt = 0;
+    return;
+  }
+  if (seekPreviewState.videoNo !== videoNo) {
+    seekPreviewState.videoNo = videoNo;
+    seekPreviewState.liveOpenAt = 0;
+    seekPreviewState.publishAt = 0;
+    void fetchVideoDates(videoNo);
+  }
+  startSeekPreviewObserver();
+}
+
+async function fetchVideoDates(videoNo) {
+  if (seekPreviewState.fetching) return;
+  seekPreviewState.fetching = true;
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/service/v2/videos/${videoNo}`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    );
+    if (!res.ok) return;
+    const json = await res.json();
+    if (seekPreviewState.videoNo !== videoNo) return; // 그새 영상 전환됨
+    const c = json?.content || {};
+    // 라이브 다시보기는 liveOpenDate 보유, 업로드 영상은 publishDate만.
+    seekPreviewState.liveOpenAt = parsePublishDate(c.liveOpenDate) || 0;
+    seekPreviewState.publishAt = parsePublishDate(c.publishDate) || 0;
+    // 이미 떠 있는 seek preview / 정보 툴팁에 즉시 반영.
+    updateSeekPreviewRealtime();
+    updateVideoInfoLabel();
+  } catch {
+    // 실패 시 교체 생략(원래 표기 유지).
+  } finally {
+    seekPreviewState.fetching = false;
+  }
+}
+
+function startSeekPreviewObserver() {
+  if (seekPreviewState.observer) return;
+  // 문서 전체를 보는 옵저버라 라이브/다시보기에서 매우 자주 깨어난다. rAF로 묶어
+  // 프레임당 1회만 갱신해 비용을 줄인다(갱신 자체는 querySelector 1회로 가볍다).
+  let scheduled = false;
+  const obs = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      updateSeekPreviewRealtime();
+      updateVideoInfoLabel();
+    });
+  });
+  obs.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+  seekPreviewState.observer = obs;
+}
+
+function teardownSeekPreviewObserver() {
+  if (seekPreviewState.observer) {
+    seekPreviewState.observer.disconnect();
+    seekPreviewState.observer = null;
+  }
+}
+
+// "3:50:59" / "27:38" → 초. 실패 시 NaN.
+function parseClockToSeconds(text) {
+  const parts = String(text || "")
+    .trim()
+    .split(":")
+    .map((p) => Number(p));
+  if (!parts.length || parts.some((n) => !Number.isFinite(n))) return NaN;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+// ms → "26.06.22. 오후 1:49:59" (12시간제, YY.MM.DD.)
+function formatKstClock(ms) {
+  const d = new Date(ms);
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const h24 = d.getHours();
+  const ampm = h24 < 12 ? "오전" : "오후";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const min = String(d.getMinutes()).padStart(2, "0");
+  const sec = String(d.getSeconds()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}. ${ampm} ${h12}:${min}:${sec}`;
+}
+
+// liveOpenAt(ms) + 초 → "[26.06.22. 오후 1:49:59]"
+function formatBroadcastClock(baseMs, offsetSeconds) {
+  return `[${formatKstClock(baseMs + offsetSeconds * 1000)}]`;
+}
+
+// 현재 떠 있는 seek preview의 시간 아래에 실제 방송 시각을 병기/갱신한다.
+function updateSeekPreviewRealtime() {
+  // 팝업에서 숨김 처리하면 이미 붙은 병기 줄을 제거하고 끝낸다.
+  if (featureFlags.seekPreviewRealtime) {
+    document
+      .querySelectorAll(`.${SEEK_PREVIEW_REALTIME_CLASS}`)
+      .forEach((el) => el.remove());
+    return;
+  }
+  if (!seekPreviewState.liveOpenAt) return;
+  const timeEl = document.querySelector(SEEK_PREVIEW_TIME_SELECTOR);
+  if (!timeEl) return;
+  // 우리가 추가한 줄(있으면)을 제외한 순수 시간 텍스트만 파싱.
+  const existing = timeEl.querySelector(`.${SEEK_PREVIEW_REALTIME_CLASS}`);
+  const baseText = existing
+    ? timeEl.textContent.replace(existing.textContent, "")
+    : timeEl.textContent;
+  const seconds = parseClockToSeconds(baseText);
+  if (!Number.isFinite(seconds)) return;
+  const label = formatBroadcastClock(seekPreviewState.liveOpenAt, seconds);
+  if (existing) {
+    if (existing.textContent !== label) existing.textContent = label;
+    return;
+  }
+  const span = document.createElement("span");
+  span.className = SEEK_PREVIEW_REALTIME_CLASS;
+  span.textContent = label;
+  timeEl.appendChild(span);
+}
+
+// 영상 정보 영역의 등록일/라이브 시작일 툴팁(._label_..._77)을 전체 날짜·시각으로
+// 교체한다. "등록일 : <publishDate>", 라이브 다시보기면 "<br>라이브 시작일 :
+// <liveOpenDate>"를 덧붙인다. 업로드 영상(liveOpenAt 없음)은 등록일만 둔다.
+function updateVideoInfoLabel() {
+  if (!seekPreviewState.publishAt && !seekPreviewState.liveOpenAt) return;
+  // 영상 페이지의 라벨만 대상으로 한다('등록일'을 포함한 _label).
+  const labels = document.querySelectorAll(VIDEO_INFO_LABEL_SELECTOR);
+  labels.forEach((label) => {
+    if (!label.textContent.includes("등록일")) return;
+    const parts = [];
+    if (seekPreviewState.publishAt) {
+      parts.push(`등록일 : ${formatKstClock(seekPreviewState.publishAt)}`);
+    }
+    if (seekPreviewState.liveOpenAt) {
+      parts.push(`라이브 시작일 : ${formatKstClock(seekPreviewState.liveOpenAt)}`);
+    }
+    if (!parts.length) return;
+    const html = parts.join("<br>");
+    // 이미 우리가 쓴 내용과 같으면 건너뛴다(옵저버 루프/불필요한 리플로우 방지).
+    // 치지직이 다시 "06.20"으로 되돌리면 innerHTML이 달라지므로 재적용된다.
+    if (label.innerHTML === html) return;
+    label.innerHTML = html;
+  });
 }
 
 function resetCommentTimestampMarkers({ keepVideoNo = false } = {}) {
@@ -3619,6 +3881,10 @@ function ensureCommentTimestampButton() {
       <span class="cheese-search-comment-timestamp-count" aria-hidden="true"></span>
     `;
     button.addEventListener("click", handleCommentTimestampButtonClick);
+    button.addEventListener(
+      "contextmenu",
+      handleCommentTimestampButtonContextMenu,
+    );
     const clipButton = controls.querySelector(".custom__clip-button");
     controls.insertBefore(button, clipButton || controls.firstChild);
     setTimeout(() => {
@@ -3637,22 +3903,27 @@ function updateCommentTimestampButton(
   button = document.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`),
 ) {
   if (!button) return;
+  const featureOff = !commentMarkerState.featureEnabled;
   const count = commentMarkerState.markers.length;
   const isLoading =
     commentMarkerState.loadingVideoNo &&
     commentMarkerState.loadingVideoNo === getCurrentVideoNo();
-  const isDisabled = !isLoading && count === 0;
-  button.classList.toggle("is-loading", Boolean(isLoading));
-  button.classList.toggle("has-markers", count > 0);
+  // 기능이 꺼져 있으면 마커 수와 무관하게 비활성(좌클릭 무효, opacity 적용).
+  const isDisabled = featureOff || (!isLoading && count === 0);
+  button.classList.toggle("is-loading", Boolean(isLoading) && !featureOff);
+  button.classList.toggle("has-markers", count > 0 && !featureOff);
+  button.classList.toggle(COMMENT_FEATURE_OFF_CLASS, featureOff);
   button.classList.toggle(VIDEO_COMMENT_BUTTON_DISABLED_CLASS, isDisabled);
   button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
   button.setAttribute(
     "aria-label",
-    isLoading
-      ? "댓글 타임스탬프를 불러오는 중"
-      : count
-        ? `댓글 타임스탬프 ${count}개`
-        : "댓글 타임스탬프 없음",
+    featureOff
+      ? "댓글 타임스탬프 꺼짐 (우클릭으로 켜기)"
+      : isLoading
+        ? "댓글 타임스탬프를 불러오는 중"
+        : count
+          ? `댓글 타임스탬프 ${count}개`
+          : "댓글 타임스탬프 없음",
   );
   const countElement = button.querySelector(
     ".cheese-search-comment-timestamp-count",
@@ -3665,6 +3936,8 @@ function updateCommentTimestampButton(
 function handleCommentTimestampButtonClick(event) {
   event.preventDefault();
   event.stopPropagation();
+  // 기능이 꺼져 있으면 좌클릭은 무효(우클릭 메뉴로만 다시 켤 수 있다).
+  if (!commentMarkerState.featureEnabled) return;
   if (
     event.currentTarget?.classList?.contains(
       VIDEO_COMMENT_BUTTON_DISABLED_CLASS,
@@ -3678,6 +3951,64 @@ function handleCommentTimestampButtonClick(event) {
     return;
   }
   openCommentTimestampPanel(event.currentTarget);
+}
+
+// 우클릭 → 기능 켜기/끄기 팝오버. 기능 off 상태에서도 항상 동작한다.
+function handleCommentTimestampButtonContextMenu(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  toggleCommentFeatureMenu(event.currentTarget);
+}
+
+function toggleCommentFeatureMenu(anchor) {
+  const existing = document.querySelector(`.${COMMENT_FEATURE_MENU_CLASS}`);
+  if (existing) {
+    closeCommentFeatureMenu();
+    return;
+  }
+  openCommentFeatureMenu(anchor);
+}
+
+function openCommentFeatureMenu(anchor) {
+  closeCommentFeatureMenu();
+  const root = getCommentTimestampPanelRoot(anchor);
+  if (!root) return;
+  if (getComputedStyle(root).position === "static") {
+    root.style.position = "relative";
+  }
+  root.style.overflow = "visible";
+  const on = commentMarkerState.featureEnabled;
+  const menu = document.createElement("div");
+  menu.className = COMMENT_FEATURE_MENU_CLASS;
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = `
+    <button type="button" class="cheese-search-comment-feature-item" data-comment-feature-toggle role="menuitemcheckbox" aria-checked="${on}">
+      <span class="cheese-search-comment-feature-check" aria-hidden="true">${on ? "✓" : ""}</span>
+      <span>댓글 타임스탬프 ${on ? "켜짐" : "꺼짐"}</span>
+    </button>
+    <p class="cheese-search-comment-feature-hint">끄면 재생바 마커와 목록이 숨겨지고 아이콘이 비활성화됩니다.</p>`;
+  root.append(menu);
+  keepCommentPanelControlsVisible(root);
+  positionCommentFeatureMenu(menu, anchor, root);
+}
+
+function positionCommentFeatureMenu(menu, anchor, root) {
+  const rootRect = root.getBoundingClientRect();
+  const btnRect = (anchor || menu).getBoundingClientRect();
+  menu.style.bottom = `${rootRect.bottom - btnRect.top + 12}px`;
+  let right = rootRect.right - btnRect.right - 40;
+  right = Math.max(8, Math.min(right, root.clientWidth - menu.offsetWidth - 8));
+  menu.style.right = `${right}px`;
+}
+
+function closeCommentFeatureMenu() {
+  const menu = document.querySelector(`.${COMMENT_FEATURE_MENU_CLASS}`);
+  if (!menu) return;
+  menu.remove();
+  // 패널이 닫혀 있으면 컨트롤 유지 해제(패널이 잡고 있으면 그대로 둠).
+  if (!document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)) {
+    releaseCommentPanelControlsVisible();
+  }
 }
 
 function openCommentTimestampPanel(anchor) {
@@ -3908,12 +4239,33 @@ function updateCommentTimestampPanelCurrentMarker({ scroll = false } = {}) {
     if (isCurrent) {
       button.setAttribute("aria-current", "true");
       if (shouldScroll) {
-        button.scrollIntoView({ block: "center", inline: "nearest" });
+        // scrollIntoView는 패널뿐 아니라 페이지 전체를 스크롤시켜(팝오버가 화면 밖
+        // 으로 인식됨) 페이지가 아래로 튄다. 패널 목록 컨테이너의 scrollTop만 직접
+        // 조정해 페이지는 건드리지 않는다.
+        scrollPanelListToButton(panel, button);
       }
     } else {
       button.removeAttribute("aria-current");
     }
   });
+}
+
+// 댓글 패널 목록(.cheese-search-comment-panel-list) 안에서만 현재 항목이 가운데
+// 오도록 scrollTop을 조정한다(getBoundingClientRect 기준이라 offsetParent와 무관,
+// 페이지 스크롤 영향 없음).
+function scrollPanelListToButton(panel, button) {
+  const list = panel.querySelector(".cheese-search-comment-panel-list");
+  if (!list) return;
+  const item = button.closest("li") || button;
+  const listRect = list.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  // 항목 중앙이 리스트 중앙에 오도록 현재 scrollTop에서 보정.
+  const delta =
+    itemRect.top -
+    listRect.top -
+    (list.clientHeight - itemRect.height) / 2;
+  const max = list.scrollHeight - list.clientHeight;
+  list.scrollTop = Math.max(0, Math.min(list.scrollTop + delta, max));
 }
 
 function findCurrentCommentTimestampMarker() {
@@ -3967,14 +4319,28 @@ function repositionOpenCommentTimestampPanel() {
 }
 
 function handleCommentTimestampDocumentClick(event) {
-  const panel = event.target.closest(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+  // 기능 켜기/끄기 메뉴 항목 클릭 → 토글.
+  const featureToggle = event.target.closest("[data-comment-feature-toggle]");
+  if (featureToggle) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleCommentFeatureEnabled();
+    closeCommentFeatureMenu();
+    return;
+  }
+  // 메뉴 바깥 클릭 → 메뉴 닫기(버튼 클릭은 자체 핸들러가 처리).
+  const menu = event.target.closest(`.${COMMENT_FEATURE_MENU_CLASS}`);
   const button = event.target.closest(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+  if (!menu && !button) closeCommentFeatureMenu();
+
+  const panel = event.target.closest(`.${VIDEO_COMMENT_PANEL_CLASS}`);
   if (panel || button) return;
   closeCommentTimestampPanel();
 }
 
 function handleCommentTimestampKeydown(event) {
   if (event.key !== "Escape") return;
+  closeCommentFeatureMenu();
   closeCommentTimestampPanel();
 }
 
@@ -3998,8 +4364,9 @@ function renderCommentTimestampMarkers() {
     resetCommentTimestampMarkers();
     return;
   }
-  // 마커 표시가 꺼져 있으면 재생바 마커를 그리지 않는다(패널/목록 기능은 유지).
-  if (!commentMarkerState.markersEnabled) {
+  // 기능 자체가 꺼졌거나(우클릭 토글) 마커 표시가 꺼져 있으면 재생바 마커를
+  // 그리지 않는다. (기능 off는 목록까지 막지만, 여기선 마커 레이어만 정리)
+  if (!commentMarkerState.featureEnabled || !commentMarkerState.markersEnabled) {
     document
       .querySelectorAll(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`)
       .forEach((layer) => layer.remove());
@@ -5823,8 +6190,91 @@ function formatSeconds(totalSeconds) {
   return `${minutes}:${paddedSeconds}`;
 }
 
+// ── 기능 표시/숨김 플래그 로드 + MAIN world 전달 ────────────────────────────
+// 저장값에 명시된 boolean이면 그 값, 없으면 false(표시)가 기본.
+function applyFeatureFlags(value) {
+  const obj = value && typeof value === "object" ? value : {};
+  for (const k of Object.keys(featureFlags)) {
+    featureFlags[k] = obj[k] === true;
+  }
+  // MAIN world 스크립트(오디오믹서/비디오필터)에 전달.
+  broadcastFeatureFlags();
+  applySidebarHidden();
+  // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
+  updateSeekPreviewRealtime();
+  // 격리 월드 기능 즉시 반영(검색 게이트 + 댓글 타임스탬프; init이 후자도 호출).
+  init();
+}
+
+// 사이드바(aside#sidebar) 숨김을 <style> 규칙으로 토글한다. CSS라 SPA 재렌더에도
+// 유지되고 레이아웃 폭도 함께 회수된다.
+function applySidebarHidden() {
+  let style = document.getElementById(SIDEBAR_HIDE_STYLE_ID);
+  if (!featureFlags.sidebar) {
+    if (style) style.textContent = "";
+    return;
+  }
+  if (!style) {
+    style = document.createElement("style");
+    style.id = SIDEBAR_HIDE_STYLE_ID;
+    (document.head || document.documentElement).appendChild(style);
+  }
+  // 사이드바를 숨기고, 콘텐츠(div#layout-body)의 좌측 패딩을 0으로 만들어
+  // 비워진 사이드바 공간을 메인 콘텐츠가 차지하게 한다.
+  const rule = `aside#sidebar { display: none !important; } div#layout-body { padding-left: 0 !important; }`;
+  if (style.textContent !== rule) style.textContent = rule;
+}
+
+// 기능 플래그 + 따라잡기 프리셋을 MAIN world(오디오믹서 등)에 한 번에 전달.
+function broadcastFeatureFlags() {
+  window.postMessage(
+    {
+      source: FEATURE_FLAGS_MESSAGE,
+      flags: { ...featureFlags },
+      syncPreset: syncPresetValue,
+    },
+    location.origin,
+  );
+}
+
+async function loadFeatureFlags() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await chrome.storage.local.get([
+      FEATURE_HIDDEN_KEY,
+      SYNC_PRESET_KEY,
+    ]);
+    const preset = data?.[SYNC_PRESET_KEY];
+    if (preset === "low" || preset === "normal" || preset === "high") {
+      syncPresetValue = preset;
+    }
+    applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
+  } catch {
+    // 실패 시 전부 표시(기본값) 유지.
+  }
+}
+
+if (chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[SYNC_PRESET_KEY]) {
+      const preset = changes[SYNC_PRESET_KEY].newValue;
+      syncPresetValue =
+        preset === "low" || preset === "normal" || preset === "high"
+          ? preset
+          : "normal";
+    }
+    if (changes[FEATURE_HIDDEN_KEY]) {
+      applyFeatureFlags(changes[FEATURE_HIDDEN_KEY].newValue); // broadcast 포함
+    } else if (changes[SYNC_PRESET_KEY]) {
+      broadcastFeatureFlags(); // 프리셋만 바뀐 경우도 전달
+    }
+  });
+}
+
 function init() {
   initCommentTimestampMarkers();
+  initSeekPreviewRealtime();
 
   cleanupStudioMakeClipViewIfInactive();
 
@@ -5845,7 +6295,14 @@ function init() {
   }
 
   const context = getPageContext();
-  if (!context?.channelId) {
+  // 검색 숨김: 현재 페이지 콘텐츠 타입(다시보기/클립)이 숨김이면 주입하지 않는다.
+  const searchHidden =
+    context?.contentType === "clips"
+      ? featureFlags.searchClips
+      : context?.contentType === "videos"
+        ? featureFlags.searchVideos
+        : false;
+  if (!context?.channelId || searchHidden) {
     if (state.initializedFor) {
       restoreOriginalView();
       document.querySelector(".cheese-search-shell")?.remove();
@@ -6335,6 +6792,14 @@ async function handleProgressStall() {
 }
 
 init();
+void loadFeatureFlags();
+
+// MAIN world 스크립트가 로드 후 플래그를 요청하면 현재 값을 보내준다(레이스 방지).
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  if (event.data?.source !== `${FEATURE_FLAGS_MESSAGE}-request`) return;
+  broadcastFeatureFlags();
+});
 
 // ── 오디오 믹서 설정 저장 브릿지 ─────────────────────────────────────────────
 // MAIN world의 src/audioMixer.js는 chrome.storage에 직접 접근할 수 없으므로,
