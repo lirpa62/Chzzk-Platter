@@ -2280,6 +2280,48 @@
   white-space: nowrap;
 }
 
+/* 라이브 상세 메타(시청자 수/스트리밍 시간) 호버 시 라이브 시작일 툴팁 */
+.cheese-live-start-tooltip-target {
+  position: relative;
+}
+
+.cheese-live-start-tooltip {
+  align-items: center;
+  background-color: var(--Surface-Neutral-Base);
+  border-radius: 6px;
+  box-shadow:
+    0 2px 2px var(--Shadow-Strong),
+    0 2px 6px 2px var(--Shadow-Base);
+  color: var(--Content-Neutral-Cool-Strong);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 400;
+  justify-content: center;
+  left: 50%;
+  letter-spacing: -0.3px;
+  line-height: 17px;
+  opacity: 0;
+  padding: 5px 9px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% - 48px);
+  transform: translateX(-50%) translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0.12s ease;
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 1000;
+}
+
+.cheese-live-start-tooltip-target:hover .cheese-live-start-tooltip,
+.cheese-live-start-tooltip-target:focus-within .cheese-live-start-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
+}
+
 /* 팔로잉 섹션 오프라인 채널 숨김(JS가 _is_live_ 없는 li에 부여) */
 #sidebar li.cheese-sb-offline-hide {
   display: none !important;

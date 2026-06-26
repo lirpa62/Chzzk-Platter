@@ -51,12 +51,20 @@ const SEEK_PREVIEW_TIME_SELECTOR = ".pzp-seeking-preview__time";
 const SEEK_PREVIEW_REALTIME_CLASS = "cheese-search-seek-realtime";
 // 영상 정보 영역의 등록일/라이브 시작일 툴팁(._label_..._77) 교체 대상.
 const VIDEO_INFO_LABEL_SELECTOR = '[class*="_label_"]';
+// 라이브 상세 영역의 시청자/스트리밍 시간 메타에 붙이는 라이브 시작일 툴팁.
+const LIVE_DETAIL_START_TOOLTIP_CLASS = "cheese-live-start-tooltip";
+const LIVE_DETAIL_START_TARGET_CLASS = "cheese-live-start-tooltip-target";
 const seekPreviewState = {
   videoNo: "",
   liveOpenAt: 0, // 라이브 시작 시각(ms). 0이면 미확보/없음
   publishAt: 0, // 등록일(ms). 0이면 미확보/없음
   fetching: false,
   observer: null,
+};
+const liveDetailState = {
+  channelId: "",
+  liveOpenAt: 0,
+  fetching: false,
 };
 // ── 기능 표시/숨김 전역 설정(확장 팝업 패널) ────────────────────────────────
 // 키 cheeseFeatureHidden = { <feature>: true(숨김)/false(표시) }. 미설정/false=표시.
@@ -191,6 +199,7 @@ const CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR = [
   ".cheese-search-comment-timestamp-button",
   ".cheese-search-comment-timestamp-panel",
   ".cheese-search-comment-preview-tooltip",
+  `.${LIVE_DETAIL_START_TOOLTIP_CLASS}`,
 ].join(",");
 
 const state = {
@@ -3866,6 +3875,82 @@ function updateVideoInfoLabel() {
   });
 }
 
+function getCurrentLiveChannelId() {
+  const match = location.pathname.match(/^\/live\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function initLiveDetailStartTooltip() {
+  const channelId = getCurrentLiveChannelId();
+  if (!channelId) {
+    liveDetailState.channelId = "";
+    liveDetailState.liveOpenAt = 0;
+    return;
+  }
+
+  if (liveDetailState.channelId !== channelId) {
+    liveDetailState.channelId = channelId;
+    liveDetailState.liveOpenAt = 0;
+    liveDetailState.fetching = false;
+    void fetchLiveDetailStartDate(channelId);
+    return;
+  }
+
+  if (!liveDetailState.liveOpenAt && !liveDetailState.fetching) {
+    void fetchLiveDetailStartDate(channelId);
+    return;
+  }
+  updateLiveDetailStartTooltip();
+}
+
+async function fetchLiveDetailStartDate(channelId) {
+  if (liveDetailState.fetching) return;
+  liveDetailState.fetching = true;
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    );
+    if (!res.ok) return;
+    const json = await res.json();
+    if (liveDetailState.channelId !== channelId) return;
+    const openAt = parsePublishDate(json?.content?.openDate);
+    liveDetailState.liveOpenAt = Number.isFinite(openAt) ? openAt : 0;
+    updateLiveDetailStartTooltip();
+  } catch {
+    // 실패 시 원본 표시 유지.
+  } finally {
+    liveDetailState.fetching = false;
+  }
+}
+
+function updateLiveDetailStartTooltip() {
+  if (!liveDetailState.liveOpenAt) return;
+  const data = findLiveDetailDataElement();
+  if (!data) return;
+  data.classList.add(LIVE_DETAIL_START_TARGET_CLASS);
+
+  const text = `라이브 시작 시간 : ${formatKstClock(liveDetailState.liveOpenAt)}`;
+  let label = data.querySelector(`.${LIVE_DETAIL_START_TOOLTIP_CLASS}`);
+  if (!label) {
+    label = document.createElement("span");
+    label.className = LIVE_DETAIL_START_TOOLTIP_CLASS;
+    data.appendChild(label);
+  }
+  if (label.textContent !== text) label.textContent = text;
+}
+
+function findLiveDetailDataElement() {
+  const main = document.querySelector("div#layout-body main");
+  if (!main) return null;
+  const candidates = main.querySelectorAll('div[class*="_data_"]');
+  for (const el of candidates) {
+    const text = String(el.textContent || "");
+    if (text.includes("시청 중") && text.includes("스트리밍 중")) return el;
+  }
+  return null;
+}
+
 function resetCommentTimestampMarkers({ keepVideoNo = false } = {}) {
   clearCommentMarkerRetryTimer();
   clearCommentMarkerPreviewTooltipTimer();
@@ -7014,6 +7099,7 @@ if (chrome.storage?.onChanged) {
 function init() {
   initCommentTimestampMarkers();
   initSeekPreviewRealtime();
+  initLiveDetailStartTooltip();
   // 사이드바는 SPA 재렌더로 마커 클래스가 지워질 수 있어 매 init마다 다시 부여한다.
   applySidebarSections();
   ensureSidebarObserver(); // 사이드바 전담 옵저버로 즉시 재적용(깜빡임 최소화)
