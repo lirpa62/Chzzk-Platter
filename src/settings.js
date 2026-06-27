@@ -310,4 +310,88 @@
   });
   followCustomSec?.addEventListener("change", saveFollowCustom);
   loadFollowRefresh();
+
+  // ── 헤더 팔로우 표시 개수(사이드바+주제 탭 숨김 시 헤더 캐러셀) ────────────
+  const HEADER_FOLLOW_COUNT_KEY = "cheeseHeaderFollowCount";
+  const HEADER_FOLLOW_COUNT_PRESETS = [3, 5, 7];
+  const HEADER_FOLLOW_COUNT_DEFAULT = 5;
+  const headerFollowCountButtons = Array.from(
+    document.querySelectorAll("[data-header-follow-count]"),
+  );
+  const headerFollowCountCustomRow = document.getElementById(
+    "headerFollowCountCustomRow",
+  );
+  const headerFollowCountCustom = document.getElementById(
+    "headerFollowCountCustom",
+  );
+
+  function reflectHeaderFollowCount(countRaw) {
+    let count = clamp(countRaw, 1, 10, HEADER_FOLLOW_COUNT_DEFAULT);
+    count = Math.round(count);
+    const isPreset = HEADER_FOLLOW_COUNT_PRESETS.includes(count);
+    const activeKey = isPreset ? String(count) : "custom";
+    headerFollowCountButtons.forEach((btn) => {
+      const active = btn.dataset.headerFollowCount === activeKey;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    if (headerFollowCountCustomRow) {
+      headerFollowCountCustomRow.hidden = activeKey !== "custom";
+    }
+  }
+
+  function saveHeaderFollowCountCustom() {
+    let count = clamp(
+      headerFollowCountCustom?.value,
+      1,
+      10,
+      HEADER_FOLLOW_COUNT_DEFAULT,
+    );
+    count = Math.round(count);
+    if (headerFollowCountCustom) headerFollowCountCustom.value = String(count);
+    try {
+      chrome.storage?.local?.set({ [HEADER_FOLLOW_COUNT_KEY]: count });
+    } catch {}
+  }
+
+  async function loadHeaderFollowCount() {
+    let count = HEADER_FOLLOW_COUNT_DEFAULT;
+    try {
+      const data = await chrome.storage?.local?.get(HEADER_FOLLOW_COUNT_KEY);
+      if (data?.[HEADER_FOLLOW_COUNT_KEY] != null) {
+        count = data[HEADER_FOLLOW_COUNT_KEY];
+      }
+    } catch {}
+    const normalized = clamp(count, 1, 10, HEADER_FOLLOW_COUNT_DEFAULT);
+    const customInit = HEADER_FOLLOW_COUNT_PRESETS.includes(normalized)
+      ? HEADER_FOLLOW_COUNT_DEFAULT
+      : Math.round(normalized);
+    if (headerFollowCountCustom) {
+      headerFollowCountCustom.value = String(customInit);
+    }
+    reflectHeaderFollowCount(normalized);
+  }
+
+  headerFollowCountButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.headerFollowCount;
+      if (key === "custom") {
+        reflectHeaderFollowCount(
+          Number(headerFollowCountCustom?.value) || HEADER_FOLLOW_COUNT_DEFAULT,
+        );
+        saveHeaderFollowCountCustom();
+      } else {
+        const count = Number(key);
+        reflectHeaderFollowCount(count);
+        try {
+          chrome.storage?.local?.set({ [HEADER_FOLLOW_COUNT_KEY]: count });
+        } catch {}
+      }
+    });
+  });
+  headerFollowCountCustom?.addEventListener("change", () => {
+    saveHeaderFollowCountCustom();
+    reflectHeaderFollowCount(headerFollowCountCustom.value);
+  });
+  loadHeaderFollowCount();
 })();

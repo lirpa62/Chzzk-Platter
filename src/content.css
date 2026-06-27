@@ -2327,6 +2327,10 @@
   display: none !important;
 }
 
+#cheese-header-follow li.cheese-sb-offline-hide {
+  display: none !important;
+}
+
 /* 헤더 미니 네비(사이드바 숨김 시 헤더에 주입하는 SVG 아이콘 메뉴) */
 #cheese-header-nav {
   display: inline-flex;
@@ -2397,4 +2401,276 @@
 #cheese-header-nav .cheese-header-nav-item:focus-visible::after {
   opacity: 1;
   visibility: visible;
+}
+
+/* 사이드바와 주제 탭을 함께 숨겼을 때, 주제 탭 자리에 표시하는 팔로우 캐러셀 */
+#cheese-header-follow {
+  display: inline-flex !important;
+  flex: 0 1 auto;
+  align-items: center;
+  width: max-content;
+  min-width: 0;
+  max-width: min(500px, 34vw);
+  gap: 4px;
+  overflow: visible;
+}
+
+#cheese-header-follow .cheese-header-follow-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 32px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--Content-Neutral-Cool-Base);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+#cheese-header-follow .cheese-header-follow-chevron:hover:not(:disabled) {
+  background: rgba(125, 125, 125, 0.16);
+  color: var(--Content-Neutral-Cool-Strong);
+}
+
+#cheese-header-follow .cheese-header-follow-chevron:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+#cheese-header-follow .cheese-header-follow-list {
+  display: inline-flex !important;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  margin: 0 !important;
+  padding: 0 !important;
+  list-style: none;
+  overflow: visible;
+}
+
+#cheese-header-follow .cheese-header-follow-item {
+  position: relative;
+  flex: none;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#cheese-header-follow .cheese-header-follow-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+
+#cheese-header-follow .cheese-header-follow-link:hover {
+  background: rgba(125, 125, 125, 0.16);
+}
+
+#cheese-header-follow .cheese-header-follow-profile {
+  position: relative;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--Surface-Neutral-Subtle);
+}
+
+#cheese-header-follow .cheese-header-follow-profile img {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+#cheese-header-follow .cheese-header-follow-profile.is-live::after {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--Surface-Neutral-Base);
+  border-radius: 50%;
+  background: #00ffa3;
+  content: "";
+}
+
+@media (width <= 1180px) {
+  #cheese-header-follow {
+    max-width: min(260px, 30vw);
+  }
+}
+
+@media (width <= 980px) {
+  #cheese-header-follow {
+    max-width: min(190px, 26vw);
+  }
+}
+
+@media (width <= 820px) {
+  #cheese-header-follow {
+    max-width: 128px;
+  }
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 10002;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 0.12s ease;
+  visibility: hidden;
+}
+
+#cheese-header-follow .cheese-header-follow-item:hover .cheese-header-follow-tooltip,
+#cheese-header-follow .cheese-header-follow-item:focus-within .cheese-header-follow-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-inner {
+  display: block;
+  width: 200px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(--Surface-Neutral-Weaker);
+  color: var(--Content-Neutral-Cool-Strong);
+  box-shadow:
+    0 2px 2px var(--Shadow-Strong),
+    0 2px 6px 2px var(--Shadow-Base);
+  word-break: break-all;
+  word-wrap: break-word;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-group {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-box {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  gap: 4px 8px;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-name {
+  display: inline-flex;
+  flex: none;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  color: var(--Content-Brand-Base, var(--Content-Neutral-Cool-Strong));
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 16px;
+  vertical-align: top;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-name span:first-child {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#cheese-header-follow .cheese-header-follow-official-mark,
+#cheese-header-follow .cheese-header-follow-achievement-badge {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  margin-top: 1px;
+  position: relative;
+  vertical-align: top;
+}
+
+#cheese-header-follow .cheese-header-follow-official-mark {
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+}
+
+#cheese-header-follow .cheese-header-follow-achievement-badge {
+  background-position: 50%;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-category {
+  display: inline-block;
+  height: 20px;
+  max-width: 100%;
+  margin: -2px 0;
+  padding: 0 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  background-color: var(--Surface-Neutral-Subtle);
+  color: var(--Content-Neutral-Cool-Base, var(--Content-Neutral-Cool-Weak));
+  font-size: 11px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--color-content-02, var(--Content-Neutral-Cool-Strong));
+  font-size: 13px;
+  letter-spacing: -0.3px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-count {
+  display: block;
+  position: relative;
+  flex: none;
+  margin: 8px 0 0;
+  padding-left: 8px;
+  color: var(--Content-Accent-Red-Strong, #ff393e);
+  letter-spacing: -0.3px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+#cheese-header-follow .cheese-header-follow-tooltip-count::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: currentColor;
+  content: "";
+  transform: translateY(-50%);
 }

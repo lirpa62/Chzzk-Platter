@@ -360,6 +360,18 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">사이드바 오른쪽 배치</span>
+                  <span class="settings-item-desc"
+                    >채널/메뉴 사이드바를 화면 오른쪽에 표시</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebarRight" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">스튜디오 버튼 숨김</span>
                   <span class="settings-item-desc"
                     >헤더 우측 '스튜디오' 버튼</span
@@ -395,6 +407,72 @@
                 </label>
               </li>
             </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="layout"
+            aria-label="헤더 팔로우"
+          >
+            <h2 class="settings-group-title">헤더 팔로우</h2>
+            <div
+              class="settings-segmented settings-segmented-4"
+              id="headerFollowCount"
+              role="radiogroup"
+            >
+              <button
+                type="button"
+                data-header-follow-count="3"
+                role="radio"
+                aria-checked="false"
+              >
+                3개
+              </button>
+              <button
+                type="button"
+                data-header-follow-count="5"
+                role="radio"
+                aria-checked="true"
+              >
+                5개
+              </button>
+              <button
+                type="button"
+                data-header-follow-count="7"
+                role="radio"
+                aria-checked="false"
+              >
+                7개
+              </button>
+              <button
+                type="button"
+                data-header-follow-count="custom"
+                role="radio"
+                aria-checked="false"
+              >
+                커스텀
+              </button>
+            </div>
+            <div class="settings-custom-row" id="headerFollowCountCustomRow" hidden>
+              <label class="settings-custom-field">
+                <span>표시 개수</span>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="headerFollowCountCustom"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </label>
+            </div>
+            <p class="settings-group-desc">
+              사이드바와 주제 탭을 함께 숨겼을 때 헤더에 한 번에 표시할
+              팔로우 라이브 채널 수를 정합니다.
+            </p>
           </section>
 
           <section

@@ -89,6 +89,7 @@ const featureFlags = {
   searchVideos: false,
   searchClips: false,
   sidebar: false,
+  sidebarRight: false, // 사이드바를 오른쪽에 배치
   headerStudio: false, // 헤더의 '스튜디오' 버튼 숨김
   headerTopicTabs: false, // 헤더의 주제 탭(게임/e스포츠/스포츠/엔터+) 숨김
   headerAutoHide: false, // 헤더 자동 숨김(상단 호버 시 슬라이드 표시)
@@ -119,6 +120,75 @@ const SIDEBAR_HIDE_STYLE_ID = "cheese-sidebar-hide-style";
 // (각 true=표시). 미설정 시 기본 표시 항목은 HEADER_NAV_DEFAULT_SHOWN.
 const HEADER_NAV_KEY = "cheeseHeaderNav";
 const HEADER_NAV_CONTAINER_ID = "cheese-header-nav";
+const HEADER_FOLLOW_CONTAINER_ID = "cheese-header-follow";
+const FOLLOWING_LIVE_API_URL =
+  "https://api.chzzk.naver.com/service/v1/channels/followings/live";
+const HEADER_FOLLOW_COUNT_KEY = "cheeseHeaderFollowCount";
+const HEADER_FOLLOW_DEFAULT_COUNT = 5;
+const HEADER_FOLLOW_MIN_COUNT = 1;
+const HEADER_FOLLOW_MAX_COUNT = 10;
+const ACHIEVEMENT_BADGE_URL_MAP = Object.freeze({
+  "2025chzzkcup_1":
+    "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMjU4/MDAxNzY3MDgxODczNjA2.WSIGn-NlCjbGAKomslHWdyPOADmnaX5cvBfCskSwEsQg.dZDFrMbTTVAPZBBOE6sUOGAk6D_DYvL-dsQK9wKdZbQg.PNG/%EC%9A%B0%EC%8A%B9%ED%8C%80.png",
+  "2025chzzkcup_2":
+    "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMTc2/MDAxNzY3MDgyMDEyNDAw.DmMhs-TROPuxmXoT-fur1EUdbl74UsFGaG4D_0TN9NMg.gaAhW1wR3LsotwdAIn3K8Bx5-7pwZ_-UO39gWYO4NLEg.PNG/2%EC%9C%84.png",
+  "2025chzzkcup_3":
+    "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMjg0/MDAxNzY3MDgyMTQxMjkw.yqUbAh_oHqq4ERj59MXoLakFSNSOL9ov7oN5HG0O9N4g.vDSQBKar0DZ0uxDtQ-4JM_U_xD9t1iaEy6JVxxUHizQg.PNG/3%EC%9C%84.png",
+  chistival_overcooked:
+    "https://nng-phinf.pstatic.net/MjAyNTA4MjVfMjkx/MDAxNzU2MDk4MDg5MTYz.OB6AzJj3XW235D3_RoL-RCc0RIQyMl5HbZmRWJTBwdwg.p2TicS08K052ZCv_VosAn4seKuMu7cNLInBpZJU9jlAg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_5%ED%9A%8C%EC%B0%A8_%EC%98%A4%EB%B2%84%EC%BF%A1%EB%93%9C2_128px.png",
+  chstival_pubg_1:
+    "https://nng-phinf.pstatic.net/MjAyNDEyMjBfMTA1/MDAxNzM0NjY1NTgzOTY4.I-aSeAhhOOvI0dK73_lOpxHr3jVGU2gJvBLO62q89kUg.kEwySFgJnPpyMpT27jNvh0ScEkTI-7l7OkMsEI0L_VAg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_3%ED%9A%8C%EC%B0%A8.png",
+  chstival_head_1:
+    "https://nng-phinf.pstatic.net/MjAyNTA0MDFfMTEw/MDAxNzQzNDk5MzA4Njk4.i5A4Yl4pBKtezupKxWw4sWXKs-IJAi23zE_di9D8lfEg.SGOtQXxQH6LQ78pQlsDEVJOMPSDvrzz9vOvSXuyvvUAg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_4%ED%9A%8C%EC%B0%A8.png",
+  chstival_party_1:
+    "https://nng-phinf.pstatic.net/MjAyNDEyMjBfMTg0/MDAxNzM0NjY1NTI2Mzk4.1--5ZJYhgS5dD6DRZn5RaIIYJ4oNFhNmO8lB5dEDyy0g.SDZuY8dP9egGD0-kiZiLzuZ8wKhUAoOPoxErvvOBh60g.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_2%ED%9A%8C%EC%B0%A8.png",
+  chstival_fall_1:
+    "https://nng-phinf.pstatic.net/MjAyNDEyMjBfMTEx/MDAxNzM0NjY1NDc3Njg1.YaC7hHZb0CzgcMgNpLjpRJgqjMHHAWV16_V8plcXf7sg.sEWIiMWzrNV6C2kBUSCPJwBlFjjqs-Ue7npiN27GG5Eg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_1%ED%9A%8C%EC%B0%A8.png",
+  chistival_sonicracingcrossworld:
+    "https://nng-phinf.pstatic.net/MjAyNjAyMDNfMTMw/MDAxNzcwMDkxMTM1NTQ2.9l3zJeubb3WfOm2a243pWy304a1TN4I0Ss6iPOWM5wIg.GaSsvEn7BqwLkc7C-tVumzF_ImRuLNsApz26y_xxaiEg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_%EC%9A%B0%EC%8A%B9_%EB%B0%B0%EC%A7%80_6%ED%9A%8C%EC%B0%A8_128px.png",
+  fco_teammaster:
+    "https://nng-phinf.pstatic.net/MjAyNTA2MjhfMTYy/MDAxNzUxMDkyNDQ2NDUz.2AyKLN4E3LGHikzPJ1NSP40ZOqAE67wQvDR9WaaPb8sg.gS3TfMGN2ReP3wwbhYb9T75G3Ikwq0zX5Vpdx7rT1jQg.PNG/FCO_%EC%9A%B0%EB%8B%B9%ED%83%95_%EC%B6%95%EA%B5%AC%EB%8B%A8_%EB%B0%B0%EC%A7%80_128px.png",
+  chraksil_dd_1_128:
+    "https://nng-phinf.pstatic.net/MjAyNDEwMzBfNDAg/MDAxNzMwMjc3OTY4NTQw.sjD5L1OayJsWNmL6s903rqcqHWTDeNHWCbgZsElP6Ckg.Va3FHdP1-ZH4DMKf3TyHPJo71HgXr5KLJIHsZOYzazgg.PNG/DD_1%EB%93%B1_h128.png",
+  chraksil_dd_2_128:
+    "https://nng-phinf.pstatic.net/MjAyNDEwMzBfMTM4/MDAxNzMwMjc3OTgzNzYy.RLDp2VQdZ87PHPZL4GkfeL_LCO63LWuBm8Z7z-jUA_0g.031CDAFmE-JaVlyh362zhEkPQXfwwtYDl8mIVuZvWPgg.PNG/DD_2%EB%93%B1_h128.png",
+  chraksil_dd_3_128:
+    "https://nng-phinf.pstatic.net/MjAyNDEwMzBfNDYg/MDAxNzMwMjc4MzEwNDIx.s9sEEWQwOBQoi6UQHzy3arqUjLIXUbZ8I7goGidrLuog.Jh2Ws30-ibxDQYe49K8Euuc-qvYX4X-uEVKLRG4Mve0g.PNG/DD_3%EB%93%B1_h128.png",
+  chraksil_dd_4_128:
+    "https://nng-phinf.pstatic.net/MjAyNDEwMzBfMjIg/MDAxNzMwMjc4Mzk1OTM0.6XPdGEI-VStDumkzDZoo62Dm31wE7jFDf64J4LQmWGgg.pkJnwxoxvjJLk89MQ3eRsbx81y7kYfgSwnQlbsLFTeMg.PNG/DD_4%EB%93%B1-10%EB%93%B1_h128.png",
+  chraksil_dd_5_128:
+    "https://nng-phinf.pstatic.net/MjAyNDEwMzBfMjA4/MDAxNzMwMjc4NDI4MzE3.R3ZswKy5mvqZb5OUmEGFEt2lSxCAXzDWfEjhsmslU7Qg.T88VDfi-M6JKqcwVI-hWyaQMpczIZcWrgCl2vMFygNgg.PNG/DD_%EC%B0%B8%EA%B0%80%EC%83%81_h128.png",
+  chraksil_snowbros_1:
+    "https://nng-phinf.pstatic.net/MjAyNTExMDdfMzAw/MDAxNzYyNTA5MDcyMDQy.T-YnO75xMoS3EFMN2xP2N5oBVayBjzUVhibX8nKl8UAg.dq0jBmfqB_2pMj4A-ZdmDOc0Y05AVcwyt6_yeJoyJVEg.PNG/1%EB%93%B1.png",
+  chraksil_snowbros_2:
+    "https://nng-phinf.pstatic.net/MjAyNTExMDdfMTgg/MDAxNzYyNTA5MDk2Nzcw.ShEg68UNdcykxIEakEocMWTd96rqcIg4j2yyBiILPOgg.H5ZXJzQj-z7rDN-nJcz-zLIi0F4qW38IAxhwKnVwaLwg.PNG/2%EB%93%B1.png",
+  chraksil_snowbros_3:
+    "https://nng-phinf.pstatic.net/MjAyNTExMDdfNDMg/MDAxNzYyNTA5MTE2NzM5.R_vXQmdOQi7y9EhwzpcDOqAUvPAxN_QW4i0GeuVyc_cg.KNvJEnrCaUnb6EFERedTu42wbZEUQoQnvmy-0_Sq-pAg.PNG/3%EB%93%B1.png",
+  chraksil_snowbros_4:
+    "https://nng-phinf.pstatic.net/MjAyNTExMDdfMTU1/MDAxNzYyNTA5MTQyNDI2.4RF6Z72g7l3QAEvI1T7DR_qFhuSDbjE3GAjdD_4OSM4g.s97HxPGhxDoKIYyhYt6zu_Kidct79-Y0mRY8hNXLvuMg.PNG/4%EB%93%B1-10%EB%93%B1.png",
+  chraksil_snowbros_5:
+    "https://nng-phinf.pstatic.net/MjAyNTExMDdfODMg/MDAxNzYyNTA5MTg0NDM0.kGhGOxxutQBbG686OlWm4PouUj14U9e8TwmbkiiSiuYg.FkLaSf7uWY9siO1MxJ098sPGH725VOpFfEpqf2agijog.PNG/%EC%B0%B8%EA%B0%80%EC%83%81.png",
+  chraksil_pacman_1_128:
+    "https://nng-phinf.pstatic.net/MjAyNTAyMTNfMTM0/MDAxNzM5NDU4NjQxMzIw.i6wn8EZPCETxBA8BZJ1trQoCkFYcsUFSNsoz5ixOH1cg.TD3kefULabiF92ii7r2NdqZr2AbCuAEIHMbcgRoNCa8g.PNG/chraksil_pacman_1_128.png",
+  chraksil_pacman_2_128:
+    "https://nng-phinf.pstatic.net/MjAyNTAyMTNfMjk1/MDAxNzM5NDU4NzU1ODIw.VQ3Bv3KKu7sRIwskRJstz5ibpNAgDKrY0Ex6hn7j7N8g.w3SXOkyJt6VDz9PK7ln2Qg8JnBh-r79lSd817wBBruMg.PNG/chraksil_pacman_2_128.png",
+  chraksil_pacman_3_128:
+    "https://nng-phinf.pstatic.net/MjAyNTAyMTRfODUg/MDAxNzM5NDU4ODMyNzIz.YIIBQ5WfjLW6MQRgFwKnBd_mRiuLdSL7LprSEhfk5awg.T8ViM2p0EGgp3WHDAMLegPf66etjLUqm4-QNJUh70R0g.PNG/chraksil_pacman_3_128.png",
+  chraksil_pacman_4_128:
+    "https://nng-phinf.pstatic.net/MjAyNTAyMTRfMTM5/MDAxNzM5NDU4ODc5NDcx.SLyfXq52ne1bQWC3Q_sOT3Iy8wMswkeRvBPsEOlY5z8g.Tlj3EAxaKXGbYoMw-EBq6XgczMTgN5UceH_vNNVe_9og.PNG/chraksil_pacman_4_128.png",
+  chraksil_pacman_5_128:
+    "https://nng-phinf.pstatic.net/MjAyNTAyMTRfMTI5/MDAxNzM5NDU4OTc0OTY1.0C_uz2pQWiXXY-KYhrb8BMA5dx6sV5W1PIvma7mDyiYg.65ed25-goXCeZCi06wUlSENrC9QmKeM-Rabi2neWuv8g.PNG/chraksil_pacman_5_128.png",
+  chraksil_tengai_1_128:
+    "https://nng-phinf.pstatic.net/MjAyNTA3MDRfNTMg/MDAxNzUxNjIxNjMyOTk0.MrNhd7e6Gqnbh5bWL5t7Gma3q8blc0q31Df7bdZ7Ra0g.rN5VoZPCg-xdMi0PZV6B_Q_RF_UhsLWkt2w83rgvl5Ig.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_1%EB%93%B1_128px.png",
+  chraksil_tengai_2_128:
+    "https://nng-phinf.pstatic.net/MjAyNTA3MDRfMTUg/MDAxNzUxNjIxNjgxNjc4.uQyCT3BJwSYOl2rf-9j88OAyiyJwXX8Gd3e15oLU-x8g.JjAesrBJVkWlvsGtUrcTTh4-XniEY6VocCdIR6q4nn4g.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_2%EB%93%B1_128px.png",
+  chraksil_tengai_3_128:
+    "https://nng-phinf.pstatic.net/MjAyNTA3MDRfMzIg/MDAxNzUxNjIxNzEwODA0.EVqMa4g8ekgTMId_aCtf3GBbZ13z8q27Ku1qKw351sYg._vjZqxkCAi97oFs0_M7AvSD2JztPU8enhMlyGYcsWEcg.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_3%EB%93%B1_128px.png",
+  chraksil_tengai_4_128:
+    "https://nng-phinf.pstatic.net/MjAyNTA3MDRfNyAg/MDAxNzUxNjIxNzY1MTU0.W6IT_o0OMLZ8qgf1xE7u_QZWdiho3ti3VJkapgaHw30g.Oq8UpqNYE1et7IVgIjsoBtCvyHkQ30IOTCj70oNOXH0g.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_410%EB%93%B1_128px.png",
+  chraksil_tengai_5_128:
+    "https://nng-phinf.pstatic.net/MjAyNTA3MDRfMjc4/MDAxNzUxNjIxNzk1NjUz.3qqlqb86KvS1bIletC1eMjZ67teJjse-AiVFleZvvWIg.zoiwYobtKUygxwxSewrt4Nn3W-R29uu7LAyM0mBNcaog.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_%EC%B0%B8%EA%B0%80%EC%83%81_128px.png",
+});
 // 미설정 시 기본 표시(전체 방송/인기 클립/카테고리/팔로잉). 편성표·치즈팜은 기본 off.
 const HEADER_NAV_DEFAULT_SHOWN = new Set([
   "hdrLives",
@@ -6389,11 +6459,66 @@ function applySidebarHidden() {
   }
   const rules = [];
   if (featureFlags.sidebar) {
-    // 사이드바 전체를 숨기고, 콘텐츠(div#layout-body) 좌측 패딩을 0으로(공간 회수).
+    // 사이드바 전체를 숨기고, 콘텐츠(div#layout-body) 패딩을 0으로(공간 회수).
     rules.push(
-      `aside#sidebar { display: none !important; } div#layout-body { padding-left: 0 !important; }`,
+      `aside#sidebar { display: none !important; } div#layout-body { padding-left: 0 !important; padding-right: 0 !important; }`,
+      `header#header button[aria-controls="navigation"] { display: none !important; }`,
     );
   } else {
+    if (featureFlags.sidebarRight) {
+      rules.push(
+        `aside#sidebar { left: auto !important; right: 0 !important; }`,
+        `div#layout-body { padding-left: 0 !important; padding-right: 80px !important; }`,
+        `aside#sidebar [class*="_tooltip_"] {
+  left: initial !important;
+  right: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 16px !important;
+}`,
+        `aside#sidebar [class*="_tooltip_inner_"] {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}`,
+        `aside#sidebar [class*="_content_"][class*="_show_tooltip_"] {
+  margin-left: -200px !important;
+  margin-right: 0 !important;
+  padding-left: 216px !important;
+}`,
+        `aside#sidebar[class*="_is_expanded_"] [class*="_content_"] {
+  padding-left: 20px !important;
+  padding-right: 20px !important;
+}`,
+        `aside#sidebar[class*="_is_expanded_"] [class*="_content_"][class*="_show_tooltip_"] {
+  padding-left: 220px !important;
+}`,
+        `header#header { padding-right: 80px !important; }`,
+        `header#header :has(> button[aria-controls="navigation"]) { position: static !important; }`,
+        `header#header button[aria-controls="navigation"] {
+  position: absolute !important;
+  right: 20px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 10001 !important;
+}`,
+        `@media (width <= 1199px) {
+  header#header:has(~ aside#sidebar button[aria-controls="navigation"][aria-expanded="true"]) :has(> button[aria-controls="navigation"]) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+  }
+  aside#sidebar:has(button[aria-controls="navigation"][aria-expanded="true"])::before {
+    background-color: rgba(var(--color-bg-black-fixed-rgb), .7) !important;
+    content: "" !important;
+    height: 100vh !important;
+    left: auto !important;
+    position: fixed !important;
+    right: 0 !important;
+    top: 0 !important;
+    width: 100vw !important;
+  }
+}`,
+      );
+    }
     // 섹션별 숨김은 JS 마커 클래스로(텍스트 식별 필요).
     rules.push(
       `aside#sidebar .${SIDEBAR_HIDE_ITEM_CLASS} { display: none !important; }`,
@@ -6433,7 +6558,7 @@ header#header :has(> form[role="search"])::before { width: 0 !important; }`,
   // 내부 nav와 이벤트 배너만 숨긴다. nav 옆 형제(_banner_ 등)도 함께 가린다.
   if (featureFlags.headerTopicTabs) {
     rules.push(
-      `header#header :has(> nav[aria-label="주제 탭"]) > * { display: none !important; }`,
+      `header#header :has(> nav[aria-label="주제 탭"]) > :not(#${HEADER_FOLLOW_CONTAINER_ID}) { display: none !important; }`,
     );
   }
   // 헤더 자동 숨김 — 평소엔 헤더를 흐름에서 빼서(position:absolute) 그 60px 높이를
@@ -6494,9 +6619,13 @@ div#layout-body [class*="_header_"][style*="top"] {
   padding-top: 0 !important;
 }`,
     );
-    // 좌측 패딩(78→80px)은 사이드바가 보일 때만(사이드바 숨김이면 위 분기가 0 회수).
+    // 사이드바가 보일 때만 본문 여백 보정(숨김이면 위 분기가 0 회수).
     if (!featureFlags.sidebar) {
-      rules.push(`div#layout-body { padding-left: 80px !important; }`);
+      rules.push(
+        featureFlags.sidebarRight
+          ? `div#layout-body { padding-left: 0 !important; padding-right: 80px !important; }`
+          : `div#layout-body { padding-left: 80px !important; }`,
+      );
     }
   }
   const css = rules.join("\n");
@@ -6554,6 +6683,7 @@ function setHeaderPeek(show) {
   if (show === headerPeekShown) return;
   headerPeekShown = show;
   header.classList.toggle(HEADER_PEEK_CLASS, show);
+  if (show) flushHeaderFollowRefreshIfNeeded();
 }
 
 function onHeaderAutoHideMouseMove(e) {
@@ -6679,7 +6809,10 @@ function applyHeaderAutoHide() {
   }
   headerAutoHideOn = on;
   if (on) bindHeaderAutoHide();
-  else unbindHeaderAutoHide();
+  else {
+    unbindHeaderAutoHide();
+    flushHeaderFollowRefreshIfNeeded();
+  }
 }
 
 // SPA 재렌더로 header 요소가 바뀌면 헤더 전용 리스너를 새 요소에 다시 건다.
@@ -6711,10 +6844,7 @@ function applySidebarSections() {
   sections.forEach((nav) => {
     // 제목(_title_)은 접힘 상태에서 없을 수 있다(서비스 바로가기 등). 그땐 blind
     // 텍스트도 함께 본다. 둘을 합쳐 부분 일치로 식별.
-    const titleText =
-      nav.querySelector('[class*="_title_"]')?.textContent || "";
-    const blindText = nav.querySelector(".blind")?.textContent || "";
-    const label = (titleText + " " + blindText).replace(/\s+/g, "");
+    const label = getSidebarNavLabel(nav);
     let hidden = null; // null=대상 아님(건드리지 않음)
     if (label.includes("팔로"))
       hidden = featureFlags.sbFollow; // 팔로우/팔로잉
@@ -6758,6 +6888,369 @@ function isOfflineFollowItem(li) {
   return !/_is_live_/.test(profile.className);
 }
 
+function getSidebarNavLabel(nav) {
+  const titleText = nav.querySelector('[class*="_title_"]')?.textContent || "";
+  const blindText = Array.from(nav.querySelectorAll(".blind"))
+    .map((el) => el.textContent || "")
+    .join(" ");
+  return (titleText + " " + blindText).replace(/\s+/g, "");
+}
+
+function findSidebarFollowNav() {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return null;
+  const navs = sidebar.querySelectorAll('nav[class*="_section_"]');
+  for (const nav of navs) {
+    if (getSidebarNavLabel(nav).includes("팔로")) return nav;
+  }
+  return null;
+}
+
+let headerFollowLiveItems = [];
+let headerFollowLiveInfoLoaded = false;
+let headerFollowLiveInfoVersion = 0;
+let headerFollowLiveInfoPromise = null;
+let headerFollowCarouselPage = 0;
+let headerFollowHovering = false;
+let headerFollowPendingRender = false;
+let headerFollowRefreshPending = false;
+let headerFollowRefreshPendingHasFreshData = false;
+let headerFollowPageSize = HEADER_FOLLOW_DEFAULT_COUNT;
+
+function normalizeHeaderFollowCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return HEADER_FOLLOW_DEFAULT_COUNT;
+  return Math.min(
+    HEADER_FOLLOW_MAX_COUNT,
+    Math.max(HEADER_FOLLOW_MIN_COUNT, Math.round(n)),
+  );
+}
+
+function getHeaderFollowEffectivePageSize() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 0;
+  let responsiveMax = HEADER_FOLLOW_MAX_COUNT;
+  if (width <= 820) responsiveMax = 1;
+  else if (width <= 980) responsiveMax = 2;
+  else if (width <= 1180) responsiveMax = 4;
+  return Math.max(
+    HEADER_FOLLOW_MIN_COUNT,
+    Math.min(headerFollowPageSize, responsiveMax),
+  );
+}
+
+function formatHeaderFollowCount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  return new Intl.NumberFormat("ko-KR").format(n);
+}
+
+function getAchievementBadgeUrls(ids) {
+  if (!Array.isArray(ids)) return [];
+  return ids
+    .map((id) => ACHIEVEMENT_BADGE_URL_MAP[id])
+    .filter((url) => typeof url === "string" && url);
+}
+
+function normalizeHeaderFollowLiveItem(item) {
+  const channelId = item?.channelId || item?.channel?.channelId || "";
+  if (!channelId) return null;
+  return {
+    channelId,
+    channelName: item?.channel?.channelName || "",
+    channelImageUrl: item?.channel?.channelImageUrl || "",
+    verifiedMark: item?.channel?.verifiedMark === true,
+    achievementBadgeUrls: getAchievementBadgeUrls(
+      item?.channel?.activatedChannelBadgeIds,
+    ),
+    category: item?.liveInfo?.liveCategoryValue || "",
+    title: item?.liveInfo?.liveTitle || "",
+    count: formatHeaderFollowCount(item?.liveInfo?.concurrentUserCount),
+  };
+}
+
+async function refreshHeaderFollowLiveInfo() {
+  if (headerFollowLiveInfoPromise) return headerFollowLiveInfoPromise;
+  headerFollowLiveInfoPromise = (async () => {
+    try {
+      const response = await fetch(FOLLOWING_LIVE_API_URL, {
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const list = Array.isArray(payload?.content?.followingList)
+        ? payload.content.followingList
+        : [];
+      const nextItems = [];
+      list.forEach((item) => {
+        const normalized = normalizeHeaderFollowLiveItem(item);
+        if (normalized) {
+          nextItems.push(normalized);
+        }
+      });
+      headerFollowLiveItems = nextItems;
+      headerFollowLiveInfoLoaded = true;
+      headerFollowLiveInfoVersion += 1;
+      if (shouldDeferHeaderFollowRefresh()) {
+        headerFollowRefreshPending = true;
+        headerFollowRefreshPendingHasFreshData = true;
+      } else {
+        ensureHeaderFollowNav();
+      }
+    } catch (error) {
+      console.debug?.(
+        "[CheeseSearch] failed to refresh follow live info",
+        error,
+      );
+    } finally {
+      headerFollowLiveInfoPromise = null;
+    }
+  })();
+  return headerFollowLiveInfoPromise;
+}
+
+function shouldDeferHeaderFollowRefresh() {
+  return featureFlags.headerAutoHide && !headerPeekShown;
+}
+
+function requestHeaderFollowLiveInfoRefresh() {
+  if (shouldDeferHeaderFollowRefresh()) {
+    headerFollowRefreshPending = true;
+    headerFollowRefreshPendingHasFreshData = false;
+    return null;
+  }
+  headerFollowRefreshPending = false;
+  headerFollowRefreshPendingHasFreshData = false;
+  return refreshHeaderFollowLiveInfo();
+}
+
+function flushHeaderFollowRefreshIfNeeded() {
+  if (!headerFollowRefreshPending || shouldDeferHeaderFollowRefresh()) return;
+  if (headerFollowRefreshPendingHasFreshData) {
+    headerFollowRefreshPending = false;
+    headerFollowRefreshPendingHasFreshData = false;
+    ensureHeaderFollowNav();
+    return;
+  }
+  headerFollowRefreshPending = false;
+  headerFollowRefreshPendingHasFreshData = false;
+  void refreshHeaderFollowLiveInfo();
+}
+
+function getHeaderFollowMaxPage() {
+  const pageSize = getHeaderFollowEffectivePageSize();
+  return Math.max(
+    0,
+    Math.ceil(headerFollowLiveItems.length / pageSize) - 1,
+  );
+}
+
+function clampHeaderFollowCarouselPage() {
+  headerFollowCarouselPage = Math.min(
+    Math.max(0, headerFollowCarouselPage),
+    getHeaderFollowMaxPage(),
+  );
+}
+
+function createHeaderFollowTooltipHtml(item, href) {
+  const channelName = item.channelName || "팔로우 채널";
+  const badgeHtml = item.achievementBadgeUrls
+    .map(
+      (url) =>
+        `<i class="cheese-header-follow-achievement-badge" style="background-image:url('${escapeAttribute(url)}')" aria-hidden="true"></i>`,
+    )
+    .join("");
+  return (
+    `<span class="cheese-header-follow-tooltip">` +
+    `<span class="cheese-header-follow-tooltip-inner">` +
+    `<a class="cheese-header-follow-tooltip-group" href="${escapeAttribute(href)}">` +
+    `<span class="cheese-header-follow-tooltip-box">` +
+    `<strong class="cheese-header-follow-tooltip-name">` +
+    `<span>${escapeHtml(channelName)}</span>` +
+    `${item.verifiedMark ? `<i class="cheese-header-follow-official-mark" aria-hidden="true"></i><span class="blind">인증 마크</span>` : ""}` +
+    badgeHtml +
+    `</strong>` +
+    `${item.category ? `<span class="cheese-header-follow-tooltip-category">${escapeHtml(item.category)}</span>` : ""}` +
+    `</span>` +
+    `${item.title ? `<span class="cheese-header-follow-tooltip-title">${escapeHtml(item.title)}</span>` : ""}` +
+    `${item.count ? `<em class="cheese-header-follow-tooltip-count">${escapeHtml(item.count)}</em>` : ""}` +
+    `</a>` +
+    `</span>` +
+    `</span>`
+  );
+}
+
+function createHeaderFollowItemHtml(item) {
+  const href = `/live/${encodeURIComponent(item.channelId)}`;
+  const imageUrl = item.channelImageUrl
+    ? `${item.channelImageUrl}${item.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
+    : "";
+  return (
+    `<li class="cheese-header-follow-item" data-channel-id="${escapeAttribute(item.channelId)}">` +
+    `<a class="cheese-header-follow-link" href="${escapeAttribute(href)}" aria-label="${escapeAttribute(item.channelName || "팔로우 채널")}">` +
+    (imageUrl
+      ? `<span class="cheese-header-follow-profile is-live"><img width="26" height="26" src="${escapeAttribute(imageUrl)}" alt="" loading="lazy" decoding="async"><span class="blind">LIVE</span></span>`
+      : `<span class="cheese-header-follow-profile is-live"><span class="blind">LIVE</span></span>`) +
+    `</a>` +
+    createHeaderFollowTooltipHtml(item, href) +
+    `</li>`
+  );
+}
+
+function updateHeaderFollowVisibleTooltips(container) {
+  const liveByChannelId = new Map(
+    headerFollowLiveItems.map((item) => [item.channelId, item]),
+  );
+  container.querySelectorAll(".cheese-header-follow-item").forEach((li) => {
+    const channelId = li.dataset.channelId || "";
+    const item = liveByChannelId.get(channelId);
+    if (!item) return;
+    const href = `/live/${encodeURIComponent(item.channelId)}`;
+    const currentTooltip = li.querySelector(".cheese-header-follow-tooltip");
+    const next = document.createElement("template");
+    next.innerHTML = createHeaderFollowTooltipHtml(item, href);
+    const nextTooltip = next.content.firstElementChild;
+    if (!nextTooltip) return;
+    if (currentTooltip) {
+      currentTooltip.replaceWith(nextTooltip);
+    } else {
+      li.appendChild(nextTooltip);
+    }
+  });
+}
+
+function renderHeaderFollowCarousel(container) {
+  clampHeaderFollowCarouselPage();
+  const maxPage = getHeaderFollowMaxPage();
+  const pageSize = getHeaderFollowEffectivePageSize();
+  const start = headerFollowCarouselPage * pageSize;
+  const items = headerFollowLiveItems.slice(
+    start,
+    start + pageSize,
+  );
+  container.dataset.sig = [
+    headerFollowLiveInfoVersion,
+    headerFollowCarouselPage,
+    headerFollowPageSize,
+    pageSize,
+    headerFollowLiveItems.map((item) => item.channelId).join(","),
+  ].join(":");
+  delete container.dataset.hoverSig;
+  container.innerHTML =
+    `<button type="button" class="cheese-header-follow-chevron" data-header-follow-action="prev" aria-label="이전 팔로우 채널" ${headerFollowCarouselPage <= 0 ? "disabled" : ""}>` +
+    `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 1 0 1.4L10.4 12l4.3 4.3a1 1 0 1 1-1.4 1.4l-5-5a1 1 0 0 1 0-1.4l5-5a1 1 0 0 1 1.4 0Z" fill="currentColor"/></svg>` +
+    `</button>` +
+    `<ul class="cheese-header-follow-list" aria-label="팔로우 라이브">` +
+    items.map((item) => createHeaderFollowItemHtml(item)).join("") +
+    `</ul>` +
+    `<button type="button" class="cheese-header-follow-chevron" data-header-follow-action="next" aria-label="다음 팔로우 채널" ${headerFollowCarouselPage >= maxPage ? "disabled" : ""}>` +
+    `<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.3 17.7a1 1 0 0 1 0-1.4l4.3-4.3-4.3-4.3a1 1 0 0 1 1.4-1.4l5 5a1 1 0 0 1 0 1.4l-5 5a1 1 0 0 1-1.4 0Z" fill="currentColor"/></svg>` +
+    `</button>`;
+}
+
+function ensureHeaderFollowNav() {
+  const header = document.getElementById("header");
+  if (!header) return;
+
+  const shouldShow =
+    featureFlags.sidebar &&
+    featureFlags.headerTopicTabs &&
+    !featureFlags.sbFollow;
+  let container = header.querySelector(`#${HEADER_FOLLOW_CONTAINER_ID}`);
+
+  if (!shouldShow) {
+    if (container) container.remove();
+    return;
+  }
+
+  const topicNav = header.querySelector('nav[aria-label="주제 탭"]');
+  const topicContainer = topicNav?.parentElement;
+  if (!topicContainer) {
+    if (container) container.remove();
+    return;
+  }
+
+  if (!headerFollowLiveInfoLoaded) void requestHeaderFollowLiveInfoRefresh();
+
+  if (headerFollowLiveInfoLoaded && !headerFollowLiveItems.length) {
+    if (container) container.remove();
+    return;
+  }
+
+  if (!headerFollowLiveInfoLoaded && !container) return;
+
+  if (!container) {
+    container = document.createElement("div");
+    container.id = HEADER_FOLLOW_CONTAINER_ID;
+    container.addEventListener("click", onHeaderFollowClick);
+    container.addEventListener("pointerenter", () => {
+      headerFollowHovering = true;
+    });
+    container.addEventListener("pointerleave", () => {
+      headerFollowHovering = false;
+      if (headerFollowPendingRender) {
+        headerFollowPendingRender = false;
+        ensureHeaderFollowNav();
+      }
+    });
+  }
+
+  if (container.parentElement !== topicContainer) {
+    topicContainer.appendChild(container);
+  }
+
+  clampHeaderFollowCarouselPage();
+  const fullSig = [
+    headerFollowLiveInfoVersion,
+    headerFollowCarouselPage,
+    headerFollowPageSize,
+    getHeaderFollowEffectivePageSize(),
+    headerFollowLiveItems.map((item) => item.channelId).join(","),
+  ].join(":");
+  if (container.dataset.sig === fullSig) return;
+
+  if (headerFollowHovering) {
+    if (container.dataset.hoverSig !== fullSig) {
+      container.dataset.hoverSig = fullSig;
+      updateHeaderFollowVisibleTooltips(container);
+    }
+    headerFollowPendingRender = true;
+    return;
+  }
+
+  renderHeaderFollowCarousel(container);
+}
+
+function onHeaderFollowClick(event) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  )
+    return;
+  const actionButton = event.target.closest("[data-header-follow-action]");
+  if (actionButton) {
+    event.preventDefault();
+    const action = actionButton.dataset.headerFollowAction;
+    const delta = action === "next" ? 1 : action === "prev" ? -1 : 0;
+    if (!delta) return;
+    headerFollowCarouselPage += delta;
+    headerFollowPendingRender = false;
+    const container = document.getElementById(HEADER_FOLLOW_CONTAINER_ID);
+    if (container) renderHeaderFollowCarousel(container);
+    return;
+  }
+  const anchor = event.target.closest("a[href]");
+  if (!anchor) return;
+  const href = anchor.getAttribute("href");
+  if (!href) return;
+  event.preventDefault();
+  spaNavigate(href);
+}
+
 // ── 사이드바 전담 옵저버(섹션 숨김 깜빡임 최소화) ───────────────────────────
 // 전역 init은 120ms 디바운스라 치지직 재렌더~우리 클래스 부여 사이에 항목이 잠깐
 // 보였다 사라진다. 사이드바만 보는 전담 옵저버로 디바운스 없이 즉시 섹션 클래스를
@@ -6773,9 +7266,11 @@ function ensureSidebarObserver() {
   sidebarObserver = new MutationObserver(() => {
     // 동기 즉시 재적용(디바운스 없음). applySidebarSections는 멱등(toggle force).
     applySidebarSections();
+    ensureHeaderFollowNav();
   });
   sidebarObserver.observe(sidebar, { childList: true, subtree: true });
   applySidebarSections();
+  ensureHeaderFollowNav();
 }
 
 // ── 헤더 미니 네비 주입/유지 ──────────────────────────────────────────────
@@ -6890,7 +7385,12 @@ function spaNavigate(href) {
     if (!scope) continue;
     const links = scope.querySelectorAll(`a[href="${href}"]`);
     for (const link of links) {
-      if (link.closest(`#${HEADER_NAV_CONTAINER_ID}`)) continue;
+      if (
+        link.closest(
+          `#${HEADER_NAV_CONTAINER_ID}, #${HEADER_FOLLOW_CONTAINER_ID}`,
+        )
+      )
+        continue;
       link.click();
       return;
     }
@@ -6917,21 +7417,31 @@ function ensureHeaderObserver() {
   headerObserver = new MutationObserver(() => {
     // 우리 컨테이너 변경으로 자가 발화하지 않도록 ensureHeaderNav는 멱등(시그니처 비교).
     ensureHeaderNav();
+    ensureHeaderFollowNav();
   });
   headerObserver.observe(header, { childList: true, subtree: true });
   ensureHeaderNav();
+  ensureHeaderFollowNav();
 }
 
 async function loadHeaderNav() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(HEADER_NAV_KEY);
+    const data = await chrome.storage.local.get([
+      HEADER_NAV_KEY,
+      HEADER_FOLLOW_COUNT_KEY,
+    ]);
     const v = data?.[HEADER_NAV_KEY];
     headerNavConfig = v && typeof v === "object" ? v : {};
+    headerFollowPageSize = normalizeHeaderFollowCount(
+      data?.[HEADER_FOLLOW_COUNT_KEY],
+    );
   } catch {
     headerNavConfig = {};
+    headerFollowPageSize = HEADER_FOLLOW_DEFAULT_COUNT;
   }
   ensureHeaderNav();
+  ensureHeaderFollowNav();
 }
 
 // ── 사이드바 팔로우 채널 주기 갱신(치지직 새로고침 버튼 자동 클릭) ───────────
@@ -6943,6 +7453,13 @@ let followRefreshTimer = 0;
 
 function clickFollowRefresh() {
   if (document.hidden) return;
+  if (
+    featureFlags.sidebar &&
+    featureFlags.headerTopicTabs &&
+    !featureFlags.sbFollow
+  ) {
+    void requestHeaderFollowLiveInfoRefresh();
+  }
   const nav = findFollowNavForRefresh();
   if (!nav) return;
   // 새로고침 버튼은 펼침 상태에만 존재한다 → 접힘 상태에선 버튼이 없어 자동
@@ -6954,16 +7471,7 @@ function clickFollowRefresh() {
 }
 
 function findFollowNavForRefresh() {
-  const sidebar = document.getElementById("sidebar");
-  if (!sidebar) return null;
-  const navs = sidebar.querySelectorAll('nav[class*="_section_"]');
-  for (const nav of navs) {
-    const title = (
-      nav.querySelector('[class*="_title_"]')?.textContent || ""
-    ).replace(/\s+/g, "");
-    if (title.includes("팔로")) return nav;
-  }
-  return null;
+  return findSidebarFollowNav();
 }
 
 // 10초 이하로 짧게 설정하면 연속 호출이 rate-limit에 걸릴 수 있어, '설정값 ↔
@@ -7092,6 +7600,17 @@ if (chrome.storage?.onChanged) {
       const v = changes[HEADER_NAV_KEY].newValue;
       headerNavConfig = v && typeof v === "object" ? v : {};
       ensureHeaderNav();
+      ensureHeaderFollowNav();
+    }
+    if (changes[HEADER_FOLLOW_COUNT_KEY]) {
+      headerFollowPageSize = normalizeHeaderFollowCount(
+        changes[HEADER_FOLLOW_COUNT_KEY].newValue,
+      );
+      clampHeaderFollowCarouselPage();
+      document
+        .getElementById(HEADER_FOLLOW_CONTAINER_ID)
+        ?.removeAttribute("data-sig");
+      ensureHeaderFollowNav();
     }
   });
 }
@@ -7104,6 +7623,7 @@ function init() {
   applySidebarSections();
   ensureSidebarObserver(); // 사이드바 전담 옵저버로 즉시 재적용(깜빡임 최소화)
   ensureHeaderNav(); // 사이드바 숨김 시 헤더 미니 네비 보장
+  ensureHeaderFollowNav(); // 사이드바/주제 탭 숨김 시 팔로우 목록을 헤더에 보장
   ensureHeaderObserver(); // 헤더 재렌더로 사라지면 즉시 복구
   applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
 
@@ -7445,7 +7965,13 @@ window.addEventListener("hashchange", () => {
 });
 window.addEventListener(
   "resize",
-  debounce(repositionOpenCommentTimestampPanel, 120),
+  debounce(() => {
+    repositionOpenCommentTimestampPanel();
+    document
+      .getElementById(HEADER_FOLLOW_CONTAINER_ID)
+      ?.removeAttribute("data-sig");
+    ensureHeaderFollowNav();
+  }, 120),
   { passive: true },
 );
 document.addEventListener("click", handleCategoryFilterClick);
