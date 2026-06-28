@@ -7678,6 +7678,7 @@ const followPreviewState = {
   pinned: false, // 고정 핀(켜면 호버 벗어나도 유지)
   movedPos: null, // 헤더 드래그로 옮긴 좌표 {left,top}(있으면 그 위치 유지)
   elapsedTimer: 0, // 라이브 경과 시간 1초 갱신 타이머
+  viewersTimer: 0, // 시청자수 주기 갱신 타이머
 };
 
 // 팔로잉 li → 32hex 채널id(a[href^="/live/"]). 없으면 null.
@@ -7942,6 +7943,7 @@ async function openFollowPreview(li, channelId) {
     return;
   }
   renderFollowPreviewMeta(el, data.meta);
+  startFollowPreviewViewersTimer(el, channelId); // 시청자수 주기 갱신
   attachFollowPreviewSource(el, data.m3u8, channelId);
 }
 
@@ -8017,6 +8019,47 @@ function stopFollowPreviewElapsedTimer() {
   if (followPreviewState.elapsedTimer) {
     clearInterval(followPreviewState.elapsedTimer);
     followPreviewState.elapsedTimer = 0;
+  }
+}
+
+// 시청자수를 주기적으로 갱신(라이브는 실시간으로 변하므로). live-status 폴링
+// 엔드포인트로 concurrentUserCount만 가볍게 받아 우측 메타의 시청자 텍스트만 교체.
+const FOLLOW_PREVIEW_VIEWERS_MS = 15000;
+function startFollowPreviewViewersTimer(el, channelId) {
+  stopFollowPreviewViewersTimer();
+  followPreviewState.viewersTimer = setInterval(() => {
+    // 탭 비활성이면 스킵(부담↓), 다른 채널로 바뀌었으면 중단.
+    if (document.hidden) return;
+    if (followPreviewState.currentChannelId !== channelId) return;
+    void refreshFollowPreviewViewers(el, channelId);
+  }, FOLLOW_PREVIEW_VIEWERS_MS);
+}
+
+function stopFollowPreviewViewersTimer() {
+  if (followPreviewState.viewersTimer) {
+    clearInterval(followPreviewState.viewersTimer);
+    followPreviewState.viewersTimer = 0;
+  }
+}
+
+async function refreshFollowPreviewViewers(el, channelId) {
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    );
+    if (!res.ok) return;
+    const json = await res.json();
+    if (followPreviewState.currentChannelId !== channelId) return;
+    const n = Number(json?.content?.concurrentUserCount);
+    if (!Number.isFinite(n)) return;
+    const em = el.querySelector(".cheese-follow-preview-meta-viewers");
+    if (em) {
+      const next = `현재 ${new Intl.NumberFormat("ko-KR").format(n)}`;
+      if (em.textContent !== next) em.textContent = next;
+    }
+  } catch {
+    // 실패 시 이전 값 유지.
   }
 }
 
@@ -8113,6 +8156,7 @@ function closeFollowPreview() {
   followPreviewState.pinned = false;
   followPreviewState.movedPos = null;
   stopFollowPreviewElapsedTimer();
+  stopFollowPreviewViewersTimer();
   if (followPreviewState.hoverTimer) {
     clearTimeout(followPreviewState.hoverTimer);
     followPreviewState.hoverTimer = 0;
