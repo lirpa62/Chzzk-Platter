@@ -15,6 +15,7 @@
     audioMixer: false,
     streamStats: false,
     liveSync: false,
+    liveRewind: false,
     tabMute: false,
   };
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
@@ -27,6 +28,7 @@
     featureFlags.audioMixer = f.audioMixer === true;
     featureFlags.streamStats = f.streamStats === true;
     featureFlags.liveSync = f.liveSync === true;
+    featureFlags.liveRewind = f.liveRewind === true;
     featureFlags.tabMute = f.tabMute === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
@@ -70,6 +72,12 @@
   // 음량 슬라이더 조절 시 현재 % 값을 보여주는 툴팁.
   const VOLUME_TOOLTIP_CLASS = "cheese-volume-tooltip";
   const VOLUME_TOOLTIP_HIDE_MS = 700; // 조작 멈춘 뒤 이 시간 후 숨김
+  // 라이브 되감기/앞으로(seekable 윈도우 내) 관련
+  const REWIND_BUTTON_CLASS = "cheese-live-rewind-button";
+  const FORWARD_BUTTON_CLASS = "cheese-live-forward-button";
+  const SEEK_STEP_S = 10; // 한 번에 ±10초
+  const SEEK_EDGE_PAD_S = 2; // 라이브 엣지에 이만큼 못 미치게(엣지 직전까지만 앞으로)
+
   // 라이브 싱크 따라잡기 관련
   const SYNC_BUTTON_CLASS = "cheese-live-sync-button";
   const SYNC_MENU_ID = "cheese-live-sync-menu";
@@ -3070,11 +3078,20 @@
       audioSampleRate: null,
       isLive: location.pathname.startsWith("/live/"),
       audioOnly: false, // 라디오 모드(오디오 전용)
+      hwDecode: null, // 하드웨어 디코딩 가능 여부(mediaCapabilities, 비동기 캐시)
+      // 아래 _접두 필드는 mediaCapabilities.decodingInfo 입력용 원시값(표시 안 함).
+      _rawVideoCodec: null,
+      _w: 0,
+      _h: 0,
+      _fpsNum: 0,
+      _bitrateNum: 0,
     };
 
     // 1) <video> 표준 API 폴백
     if (video?.videoWidth && video?.videoHeight) {
       info.resolution = `${video.videoWidth}×${video.videoHeight}`;
+      info._w = video.videoWidth;
+      info._h = video.videoHeight;
     }
 
     // 2) 치지직 내부 플레이어에서 상세 정보
@@ -3120,17 +3137,23 @@
           } else if (!info.resolution && tag) {
             info.resolution = tag;
           }
+          if (w) info._w = w;
+          if (h) info._h = h;
 
           // FPS: 문자열 "60"도 처리(언더스코어/dataset 포함)
           const fps =
             pickNum(selected, "videoFrameRate", "_videoFrameRate") ||
             pickNum(ds, "videoFrameRate");
-          if (fps) info.fps = `${Math.round(fps)} fps`;
+          if (fps) {
+            info.fps = `${Math.round(fps)} fps`;
+            info._fpsNum = fps;
+          }
 
           // 비디오 비트레이트(kbps 정규화)
           const vbr =
             pickNum(selected, "videoBitrate", "_videoBitrate") ||
             pickNum(ds, "videoBitRate");
+          if (vbr) info._bitrateNum = vbr;
           info.videoBitrate = toKbps(vbr)
             ? `${numberFormat(toKbps(vbr))} kbps`
             : null;
@@ -3150,9 +3173,9 @@
           if (sr) info.audioSampleRate = `${(sr / 1000).toFixed(1)} kHz`;
 
           // 코덱: track의 codec 필드 우선
-          info.videoCodec =
-            prettyCodec(pickStr(selected, "videoCodec", "_videoCodec")) ||
-            info.videoCodec;
+          const rawVCodec = pickStr(selected, "videoCodec", "_videoCodec");
+          if (rawVCodec) info._rawVideoCodec = rawVCodec;
+          info.videoCodec = prettyCodec(rawVCodec) || info.videoCodec;
           info.audioCodec =
             prettyCodec(pickStr(selected, "audioCodec", "_audioCodec")) ||
             info.audioCodec;
@@ -3161,6 +3184,8 @@
         // _currentCodecs 폴백 + 채널 보강.
         const codecs = core._currentCodecs;
         if (codecs) {
+          if (!info._rawVideoCodec && codecs.video)
+            info._rawVideoCodec = codecs.video;
           info.videoCodec = info.videoCodec || prettyCodec(codecs.video);
           info.audioCodec = info.audioCodec || prettyCodec(codecs.audio);
           const ch = pickNum(codecs, "audioChannel");
@@ -3227,7 +3252,65 @@
         info.audioChannels = `${audio.source.channelCount}ch`;
     } catch {}
 
+    // 하드웨어 디코딩 가능 여부(mediaCapabilities). 비동기라 캐시값을 채우고,
+    // 코덱/해상도가 바뀌었으면 백그라운드 재조회를 띄운다(다음 1초 갱신에 반영).
+    if (!info.audioOnly) {
+      info.hwDecode = hwDecodeCache.text;
+      probeHwDecode(info);
+    }
+
     return info;
+  }
+
+  // ── 하드웨어(GPU) 비디오 디코딩 가능 여부 ─────────────────────────────────
+  // navigator.mediaCapabilities.decodingInfo의 powerEfficient로 판정한다.
+  // 주의: "이 코덱/해상도가 이 환경에서 하드웨어 가속될 수 있는가"이지, "지금 이
+  // 프레임이 GPU로 디코딩 중인가"를 100% 확정하진 않는다(브라우저에 그런 API가
+  // 없음). 크롬 하드웨어 가속 OFF면 powerEfficient=false로 떨어진다.
+  const hwDecodeCache = { key: "", text: null, pending: false };
+
+  function probeHwDecode(info) {
+    const codec = info._rawVideoCodec;
+    const w = info._w || 0;
+    const h = info._h || 0;
+    if (!codec || !w || !h) return; // 입력 부족 → 조회 불가
+    if (!navigator.mediaCapabilities?.decodingInfo) {
+      hwDecodeCache.text = "확인 불가 (미지원 브라우저)";
+      return;
+    }
+    const fps = info._fpsNum > 0 ? Math.round(info._fpsNum) : 30;
+    const bitrate = info._bitrateNum > 0 ? Math.round(info._bitrateNum) : 3000000;
+    const key = `${codec}|${w}x${h}|${fps}|${bitrate}`;
+    if (key === hwDecodeCache.key) return; // 동일 입력 → 캐시 유지
+    if (hwDecodeCache.pending) return; // 조회 진행 중
+    hwDecodeCache.pending = true;
+    navigator.mediaCapabilities
+      .decodingInfo({
+        type: "media-source",
+        video: {
+          contentType: `video/mp4; codecs="${codec}"`,
+          width: w,
+          height: h,
+          bitrate,
+          framerate: fps,
+        },
+      })
+      .then((res) => {
+        hwDecodeCache.key = key;
+        if (!res?.supported) {
+          hwDecodeCache.text = "지원 안 함 (코덱 미지원)";
+        } else if (res.powerEfficient) {
+          hwDecodeCache.text = "사용 중 (하드웨어 가속)";
+        } else {
+          hwDecodeCache.text = "미사용 (소프트웨어 디코딩)";
+        }
+      })
+      .catch(() => {
+        hwDecodeCache.text = "확인 불가";
+      })
+      .finally(() => {
+        hwDecodeCache.pending = false;
+      });
   }
 
   function numberFormat(n) {
@@ -3395,7 +3478,8 @@
          ${statsRow("해상도", i.resolution)}
          ${statsRow("FPS", i.fps)}
          ${statsRow("비트레이트", i.videoBitrate)}
-         ${statsRow("코덱", i.videoCodec)}`;
+         ${statsRow("코덱", i.videoCodec)}
+         ${statsRow("하드웨어 가속", i.hwDecode)}`;
     panel.innerHTML = `
       <div class="cheese-stats-head">
         <strong>스트림 정보</strong>
@@ -3449,6 +3533,7 @@
   // 지연이 크면 버튼이 활성화되고, 클릭 시 2배속으로 라이브 엣지까지 따라잡은 뒤
   // 1배속으로 복귀한다. 라이브에서만 동작한다.
   let syncCheckTimer = 0;
+  let seekCheckTimer = 0; // 되감기/앞으로 버튼 활성 갱신(따라잡기와 독립)
   let syncCatchUp = null; // { core, raf, startedAt, originalRate }
   // 자동 따라잡기: 전역 설정(localStorage, 모든 채널 공유). 직접 켠 게 아니므로
   // MAIN world에서 페이지 origin localStorage를 그대로 쓴다.
@@ -3514,6 +3599,132 @@
     btn.dataset.icon = "play";
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">실시간 따라잡기</span><span class="pzp-ui-icon">${syncIcon()}</span>`;
     return btn;
+  }
+
+  // ── 라이브 되감기/앞으로(seekable 윈도우 내) ──────────────────────────────
+  // 치지직 라이브는 seekable.start가 진입 시점에서 거의 고정이고 end만 전진하는
+  // DVR 성격(측정 확인). 그래서 seekable.start ~ (라이브 엣지-여유) 안에서 ±10초
+  // 이동을 제공한다. 과거로 가면 onUserSeeked가 lastUserSeekAt을 기록해 자동
+  // 따라잡기가 잠시 멈춘다(우리가 ourSeekUntil을 설정하지 않으므로 '사용자 seek'로 인식).
+  function rewindIcon() {
+    // 10초 되감기(↺ 화살표 + 10)
+    return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <path d="M18 11a7 7 0 1 1-6.7 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"></path>
+      <path d="M18 7.5 14 11l4 3.5V7.5Z" fill="currentColor"></path>
+      <text x="18" y="21.5" text-anchor="middle" font-size="8" font-weight="700" fill="currentColor">10</text>
+    </svg>`;
+  }
+
+  function forwardIcon() {
+    // 10초 앞으로(↻ 화살표 + 10)
+    return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+      <path d="M18 11a7 7 0 1 0 6.7 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"></path>
+      <path d="M18 7.5 22 11l-4 3.5V7.5Z" fill="currentColor"></path>
+      <text x="18" y="21.5" text-anchor="middle" font-size="8" font-weight="700" fill="currentColor">10</text>
+    </svg>`;
+  }
+
+  function createSeekButton(forward) {
+    const btn = document.createElement("button");
+    const cls = forward ? FORWARD_BUTTON_CLASS : REWIND_BUTTON_CLASS;
+    btn.className = `${cls} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    btn.type = "button";
+    btn.disabled = true;
+    const label = forward ? "10초 앞으로" : "10초 되감기";
+    const tip = forward ? "10초 앞으로 (→)" : "10초 되감기 (←)";
+    btn.setAttribute("aria-label", label);
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${tip}</span><span class="pzp-ui-icon">${forward ? forwardIcon() : rewindIcon()}</span>`;
+    return btn;
+  }
+
+  // 현재 video의 되감기/앞으로 가능 여부를 반환. {video, start, end, cur}
+  function getSeekWindow() {
+    const v = findVideo();
+    if (!v || !v.seekable || !v.seekable.length) return null;
+    const start = v.seekable.start(0);
+    const end = v.seekable.end(v.seekable.length - 1);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return null;
+    return { video: v, start, end, cur: v.currentTime };
+  }
+
+  // ±step초 이동(seekable 윈도우로 클램프). forward=true면 앞으로.
+  function seekBy(forward) {
+    const w = getSeekWindow();
+    if (!w) return;
+    const step = forward ? SEEK_STEP_S : -SEEK_STEP_S;
+    // 앞으로는 라이브 엣지 직전(여유 2초)까지만. 되감기는 윈도우 시작까지.
+    const maxFwd = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+    let target = w.cur + step;
+    target = Math.max(w.start, Math.min(maxFwd, target));
+    if (Math.abs(target - w.cur) < 0.05) return; // 이미 끝/시작
+    // ourSeekUntil은 일부러 설정하지 않는다 → onUserSeeked가 '사용자 seek'로
+    // 인식해 되감기 시 자동 따라잡기를 잠시 멈춘다(의도된 동작).
+    w.video.currentTime = target;
+  }
+
+  // 버튼 활성/비활성 갱신: 윈도우 양 끝이면 해당 방향 버튼 비활성.
+  function updateSeekButtonsState() {
+    const rew = document.querySelector(`.${REWIND_BUTTON_CLASS}`);
+    const fwd = document.querySelector(`.${FORWARD_BUTTON_CLASS}`);
+    if (!rew && !fwd) return;
+    const w = getSeekWindow();
+    if (!w) {
+      if (rew) rew.disabled = true;
+      if (fwd) fwd.disabled = true;
+      return;
+    }
+    const maxFwd = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+    if (rew) rew.disabled = w.cur - w.start < 0.5; // 더 되감을 게 없으면 비활성
+    if (fwd) fwd.disabled = maxFwd - w.cur < 0.5; // 라이브 엣지면 비활성
+  }
+
+  function ensureSeekButtons() {
+    // 라이브에서만, 그리고 되감기 기능이 숨김이 아닐 때만.
+    if (!location.pathname.startsWith("/live/") || featureFlags.liveRewind) {
+      removeSeekButtons();
+      return;
+    }
+    const player = findPlayer();
+    if (!player) return;
+    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls) return;
+    // 되감기 → 따라잡기 → 앞으로 순으로 보이도록 따라잡기 버튼 양옆에 배치.
+    const syncBtn = controls.querySelector(`.${SYNC_BUTTON_CLASS}`);
+    const anchor =
+      syncBtn ||
+      controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
+      controls.querySelector(".custom__clip-button") ||
+      controls.firstChild;
+    if (!controls.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
+      controls.insertBefore(createSeekButton(false), anchor);
+    }
+    if (!controls.querySelector(`.${FORWARD_BUTTON_CLASS}`)) {
+      // 앞으로는 따라잡기 버튼 '다음'에(앵커의 다음 형제).
+      controls.insertBefore(createSeekButton(true), anchor.nextSibling);
+    }
+    startSeekCheck();
+    updateSeekButtonsState();
+  }
+
+  // 되감기/앞으로 버튼 활성 상태를 1초 주기로 갱신(따라잡기 기능과 독립).
+  function startSeekCheck() {
+    if (seekCheckTimer) return;
+    seekCheckTimer = window.setInterval(updateSeekButtonsState, SYNC_CHECK_MS);
+  }
+
+  function stopSeekCheck() {
+    if (seekCheckTimer) {
+      window.clearInterval(seekCheckTimer);
+      seekCheckTimer = 0;
+    }
+  }
+
+  function removeSeekButtons() {
+    stopSeekCheck();
+    document
+      .querySelectorAll(`.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
   }
 
   function ensureSyncButton() {
@@ -3877,6 +4088,73 @@
     updateSyncButtonState();
   }
 
+  // 되감기/앞으로 버튼 클릭 위임.
+  document.addEventListener("click", (e) => {
+    const rew = e.target.closest?.(`.${REWIND_BUTTON_CLASS}`);
+    const fwd = e.target.closest?.(`.${FORWARD_BUTTON_CLASS}`);
+    if (!rew && !fwd) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = rew || fwd;
+    if (btn.disabled) return;
+    seekBy(Boolean(fwd));
+    updateSeekButtonsState();
+  });
+
+  // ── 방향키(←/→) = 10초 되감기/앞으로 ──────────────────────────────────────
+  // 마우스가 플레이어 위에 있거나 포커스가 플레이어 안일 때만 가로챈다(페이지
+  // 스크롤·다른 영역 방향키를 방해하지 않도록). 가로챌 땐 capture+preventDefault+
+  // stopImmediatePropagation으로 치지직 네이티브 방향키 seek 중복 발동을 막는다.
+  let lastPointerOverPlayer = false;
+  document.addEventListener(
+    "pointermove",
+    (e) => {
+      lastPointerOverPlayer = Boolean(
+        e.target?.closest?.(".pzp-pc, .webplayer-internal-core, [class*='player']"),
+      );
+    },
+    true,
+  );
+
+  // 입력/채팅/contentEditable에 포커스가 있으면 단축키 비활성.
+  function isTypingTarget(t) {
+    if (!t) return false;
+    if (t.isContentEditable) return true;
+    const tag = t.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  // 단축키를 받을 상황인가: 라이브 + 되감기 기능 활성 + 타이핑 아님 +
+  // 플레이어에 포커스 또는 마우스가 플레이어 위.
+  function seekHotkeyAllowed(e) {
+    if (featureFlags.liveRewind) return false; // 되감기 기능 숨김 상태
+    if (!location.pathname.startsWith("/live/")) return false;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+      return false;
+    const player = findPlayer();
+    if (!player) return false;
+    const focusInPlayer = player.contains(document.activeElement);
+    return focusInPlayer || lastPointerOverPlayer;
+  }
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.repeat) return; // 길게 눌러도 한 칸씩(연속 점프 방지)
+      if (!seekHotkeyAllowed(e)) return;
+      const w = getSeekWindow();
+      if (!w) return;
+      // 네이티브 ±N초 seek와 중복되지 않도록 우리가 가로채 ±10초로 통일.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      seekBy(e.key === "ArrowRight");
+      updateSeekButtonsState();
+    },
+    true,
+  );
+
   // 따라잡기 버튼 클릭 위임.
   document.addEventListener("click", (e) => {
     // 메뉴 항목 클릭(자동 토글)
@@ -4173,6 +4451,11 @@
       removeSyncButton();
     } else {
       ensureSyncButton();
+    }
+    if (featureFlags.liveRewind) {
+      removeSeekButtons();
+    } else {
+      ensureSeekButtons();
     }
     if (featureFlags.tabMute) {
       removeTabMuteButton();

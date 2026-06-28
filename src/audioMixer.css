@@ -1117,6 +1117,32 @@
   opacity: 0.35;
 }
 
+/* 라이브 되감기/앞으로 버튼 — 따라잡기 버튼과 동일한 아이콘 사이즈/정렬·비활성 처리.
+   text 라벨(10)도 currentColor를 따르도록 fill 상속. */
+.cheese-live-rewind-button .pzp-ui-icon,
+.cheese-live-forward-button .pzp-ui-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cheese-live-rewind-button .pzp-ui-icon__svg,
+.cheese-live-forward-button .pzp-ui-icon__svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.cheese-live-rewind-button:disabled,
+.cheese-live-forward-button:disabled {
+  cursor: default;
+}
+
+.cheese-live-rewind-button:disabled .pzp-ui-icon__svg,
+.cheese-live-forward-button:disabled .pzp-ui-icon__svg {
+  opacity: 0.35;
+}
+
 /* 자동 따라잡기 ON 표식: 비활성이어도 약하게 민트 점등 */
 .cheese-live-sync-button.is-auto .pzp-ui-icon__svg,
 .cheese-live-sync-button.is-auto .pzp-ui-icon__svg path {

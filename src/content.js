@@ -102,6 +102,7 @@ const featureFlags = {
   audioMixer: false,
   videoFilter: false,
   liveSync: false,
+  liveRewind: false, // 플레이어 컨트롤의 라이브 되감기/앞으로 버튼 숨김
   streamStats: false,
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
   commentTimestamp: false,
