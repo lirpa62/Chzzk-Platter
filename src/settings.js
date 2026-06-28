@@ -28,7 +28,9 @@
     applyTheme(next);
   }
 
-  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light");
+  applyTheme(
+    localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light",
+  );
   themeToggle?.addEventListener("click", toggleTheme);
 
   // ── 카테고리 탭(좌측 탭 → 우측 패널 전환) ─────────────────────────────────
@@ -195,7 +197,9 @@
   async function loadChannelLiveButtonEnd() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(CHANNEL_LIVE_BUTTON_END_KEY);
+      const data = await chrome.storage?.local?.get(
+        CHANNEL_LIVE_BUTTON_END_KEY,
+      );
       on = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
     } catch {}
     if (channelLiveButtonEndInput) channelLiveButtonEndInput.checked = on;
@@ -232,6 +236,66 @@
   });
   loadFollowPreview();
 
+  // ── 미리보기 자동 종료 시간(30/60/120/180/300초, 상한 5분) ─────────────────
+  const FOLLOW_PREVIEW_MAXLIFE_KEY = "cheeseFollowPreviewMaxLifeSec";
+  const FOLLOW_PREVIEW_MAXLIFE_ALLOWED = [30, 60, 120, 180, 300];
+  const FOLLOW_PREVIEW_MAXLIFE_DEFAULT = 120;
+  // 3분 이상은 '장시간 시청' 소지가 있어 고지(차단은 안 함).
+  const FOLLOW_PREVIEW_MAXLIFE_NOTICE_AT = 180;
+  const maxLifeButtons = Array.from(
+    document.querySelectorAll("[data-follow-maxlife]"),
+  );
+  const maxLifeGroup = document.getElementById("followPreviewMaxLife");
+
+  function showMaxLifeNotice(sec) {
+    let el = document.getElementById("followPreviewMaxLifeNotice");
+    if (sec < FOLLOW_PREVIEW_MAXLIFE_NOTICE_AT) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("p");
+      el.id = "followPreviewMaxLifeNotice";
+      el.className = "settings-notice";
+      maxLifeGroup?.insertAdjacentElement("afterend", el);
+    }
+    const min = Math.round(sec / 60);
+    el.textContent = `미리보기는 짧은 확인용입니다. ${min}분처럼 길게 두면 본방 시청 대체가 될 수 있으니 오래 보려면 라이브 채널을 이용해 주세요.`;
+  }
+
+  function reflectMaxLife(sec) {
+    const v = FOLLOW_PREVIEW_MAXLIFE_ALLOWED.includes(Number(sec))
+      ? Number(sec)
+      : FOLLOW_PREVIEW_MAXLIFE_DEFAULT;
+    maxLifeButtons.forEach((btn) => {
+      const active = Number(btn.dataset.followMaxlife) === v;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    showMaxLifeNotice(v);
+  }
+
+  async function loadMaxLife() {
+    let sec = FOLLOW_PREVIEW_MAXLIFE_DEFAULT;
+    try {
+      const data = await chrome.storage?.local?.get(FOLLOW_PREVIEW_MAXLIFE_KEY);
+      const v = Number(data?.[FOLLOW_PREVIEW_MAXLIFE_KEY]);
+      if (FOLLOW_PREVIEW_MAXLIFE_ALLOWED.includes(v)) sec = v;
+    } catch {}
+    reflectMaxLife(sec);
+  }
+
+  maxLifeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sec = Number(btn.dataset.followMaxlife);
+      reflectMaxLife(sec);
+      try {
+        chrome.storage?.local?.set({ [FOLLOW_PREVIEW_MAXLIFE_KEY]: sec });
+      } catch {}
+    });
+  });
+  loadMaxLife();
+
   // ── 카드 미리보기 음량(라이브 탐색 카드 호버 video, 전역 기본 ON) ──────────
   const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
   const cardPreviewAudioInput = document.querySelector(
@@ -260,7 +324,9 @@
   const SYNC_PRESET_KEY = "cheeseSyncPreset";
   const SYNC_CUSTOM_KEY = "cheeseSyncCustom"; // {enable, target}
   const SYNC_CUSTOM_DEFAULT = { enable: 3, target: 2 };
-  const syncButtons = Array.from(document.querySelectorAll("[data-sync-preset]"));
+  const syncButtons = Array.from(
+    document.querySelectorAll("[data-sync-preset]"),
+  );
   const syncCustomRow = document.getElementById("syncCustomRow");
   const syncCustomEnable = document.getElementById("syncCustomEnable");
   const syncCustomTarget = document.getElementById("syncCustomTarget");
@@ -289,8 +355,18 @@
 
   // 커스텀 입력값을 정규화(목표 1~10, 시작 2~30, 시작 > 목표)하고 저장.
   function saveSyncCustom() {
-    let target = clamp(syncCustomTarget?.value, 1, 10, SYNC_CUSTOM_DEFAULT.target);
-    let enable = clamp(syncCustomEnable?.value, 2, 30, SYNC_CUSTOM_DEFAULT.enable);
+    let target = clamp(
+      syncCustomTarget?.value,
+      1,
+      10,
+      SYNC_CUSTOM_DEFAULT.target,
+    );
+    let enable = clamp(
+      syncCustomEnable?.value,
+      2,
+      30,
+      SYNC_CUSTOM_DEFAULT.enable,
+    );
     if (enable <= target) enable = Math.min(30, target + 0.5);
     if (syncCustomTarget) syncCustomTarget.value = String(target);
     if (syncCustomEnable) syncCustomEnable.value = String(enable);
@@ -392,7 +468,9 @@
     btn.addEventListener("click", () => {
       const key = btn.dataset.followRefresh;
       if (key === "custom") {
-        reflectFollowRefresh(Number(followCustomSec?.value) || FOLLOW_CUSTOM_DEFAULT);
+        reflectFollowRefresh(
+          Number(followCustomSec?.value) || FOLLOW_CUSTOM_DEFAULT,
+        );
         saveFollowCustom();
       } else {
         const sec = Number(key);

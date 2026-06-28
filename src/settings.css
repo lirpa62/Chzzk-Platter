@@ -281,6 +281,31 @@ body {
   grid-template-columns: repeat(4, 1fr);
 }
 
+/* 5칸 세그먼트(미리보기 자동 종료 30초~5분) */
+.settings-segmented-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* 그룹 내 소제목(예: 자동 종료) */
+.settings-subgroup-title {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--popup-muted);
+}
+
+/* 고지 문구(긴 자동 종료 시간 선택 시) */
+.settings-notice {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--popup-warn-border, rgba(255, 170, 60, 0.5));
+  background: var(--popup-warn-bg, rgba(255, 170, 60, 0.12));
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--popup-text);
+}
+
 /* 커스텀 입력 행(따라잡기/팔로우 갱신) */
 .settings-custom-row {
   display: flex;

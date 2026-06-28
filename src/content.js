@@ -89,7 +89,11 @@ let channelLiveButtonEnd = true;
 // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
 const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
 const FOLLOW_PREVIEW_SIZE_KEY = "cheeseFollowPreviewSize"; // {w} (height는 16:9)
+// 자동 종료 시간(초). 광고 우회 방지 상한 300초(5분). 허용: 30/60/120/180/300.
+const FOLLOW_PREVIEW_MAXLIFE_KEY = "cheeseFollowPreviewMaxLifeSec";
+const FOLLOW_PREVIEW_MAXLIFE_ALLOWED = [30, 60, 120, 180, 300];
 let followPreviewOn = true;
+let followPreviewMaxLifeSec = 120; // 기본 2분
 // 라이브 탐색 카드 호버 미리보기(치지직 자체 video)에 음량 버튼/우클릭 음소거 토글
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
@@ -7679,7 +7683,10 @@ const followPreviewState = {
   movedPos: null, // 헤더 드래그로 옮긴 좌표 {left,top}(있으면 그 위치 유지)
   elapsedTimer: 0, // 라이브 경과 시간 1초 갱신 타이머
   viewersTimer: 0, // 시청자수 주기 갱신 타이머
+  maxLifeTimer: 0, // 자동 종료 타이머(고정/호버 무관, 장시간 시청 방지)
 };
+// 미리보기 최대 지속 시간은 followPreviewMaxLifeSec(초, settings에서 조절, 상한 5분).
+// 광고 우회로 '본방 대체 시청'이 되지 않도록 고정이든 계속 호버든 이 시간 뒤 강제 종료.
 
 // 팔로잉 li → 32hex 채널id(a[href^="/live/"]). 없으면 null.
 function getFollowItemChannelId(li) {
@@ -7927,6 +7934,7 @@ async function openFollowPreview(li, channelId) {
   if (!followPreviewOn || document.hidden) return;
   followPreviewState.currentChannelId = channelId;
   followPreviewState.retried = false;
+  startFollowPreviewMaxLifeTimer(); // 자동 종료(장시간 시청 방지)
   // 새 호버로 여는 것이므로 이전에 드래그로 옮긴 위치는 버리고 앵커 기준으로 재배치
   // 한다(고정 중엔 호버로 안 열리니 movedPos가 안 남는다 — 이건 호버 신규 진입).
   followPreviewState.movedPos = null;
@@ -8039,6 +8047,28 @@ function stopFollowPreviewViewersTimer() {
   if (followPreviewState.viewersTimer) {
     clearInterval(followPreviewState.viewersTimer);
     followPreviewState.viewersTimer = 0;
+  }
+}
+
+// 자동 종료 타이머: 고정/호버 여부와 무관하게 일정 시간 뒤 강제로 닫는다(미리보기를
+// 본방 대체 시청으로 쓰지 못하게). 채널 전환 시 openFollowPreview에서 재시작된다.
+function startFollowPreviewMaxLifeTimer() {
+  stopFollowPreviewMaxLifeTimer();
+  followPreviewState.maxLifeTimer = setTimeout(() => {
+    followPreviewState.maxLifeTimer = 0;
+    // 자동 종료 후 같은 채널에 계속 호버 중이어도 바로 다시 안 열리도록 억제한다.
+    // (그 li를 벗어나면 onFollowPreviewMouseOut에서 억제 해제.)
+    followPreviewSuppressedChannelId = followPreviewState.currentChannelId;
+    closeFollowPreview();
+  }, followPreviewMaxLifeSec * 1000);
+}
+// 자동 종료된 채널: 같은 li에 계속 호버 중일 때 즉시 재오픈 방지(벗어나면 해제).
+let followPreviewSuppressedChannelId = "";
+
+function stopFollowPreviewMaxLifeTimer() {
+  if (followPreviewState.maxLifeTimer) {
+    clearTimeout(followPreviewState.maxLifeTimer);
+    followPreviewState.maxLifeTimer = 0;
   }
 }
 
@@ -8157,6 +8187,7 @@ function closeFollowPreview() {
   followPreviewState.movedPos = null;
   stopFollowPreviewElapsedTimer();
   stopFollowPreviewViewersTimer();
+  stopFollowPreviewMaxLifeTimer();
   if (followPreviewState.hoverTimer) {
     clearTimeout(followPreviewState.hoverTimer);
     followPreviewState.hoverTimer = 0;
@@ -8283,6 +8314,8 @@ function onFollowPreviewMouseOver(e) {
   const found = getFollowPreviewAnchor(e.target);
   if (!found) return;
   if (found.channelId === followPreviewState.currentChannelId) return; // 이미 표시 중
+  // 방금 자동 종료된 같은 채널이면 재오픈 억제(li를 벗어나야 풀림).
+  if (found.channelId === followPreviewSuppressedChannelId) return;
   if (followPreviewState.hoverTimer)
     clearTimeout(followPreviewState.hoverTimer);
   followPreviewState.hoverTimer = setTimeout(() => {
@@ -8295,7 +8328,15 @@ function onFollowPreviewMouseOut(e) {
   // 앵커를 벗어나 패널/외부로 가면 닫기 예약(패널 진입은 mouseenter가 취소).
   const toEl = e.relatedTarget;
   if (toEl && toEl.closest?.(`#${FOLLOW_PREVIEW_ID}`)) return; // 패널로 이동
-  if (!getFollowPreviewAnchor(e.target)) return;
+  const found = getFollowPreviewAnchor(e.target);
+  if (!found) return;
+  // 그 앵커(li) 밖으로 나가면 자동종료 억제 해제(다시 호버하면 미리보기 가능).
+  const toFound = getFollowPreviewAnchor(toEl);
+  if (!toFound || toFound.anchor !== found.anchor) {
+    if (followPreviewSuppressedChannelId === found.channelId) {
+      followPreviewSuppressedChannelId = "";
+    }
+  }
   scheduleCloseFollowPreview();
 }
 
@@ -8325,6 +8366,7 @@ async function loadFollowPreview() {
     const data = await chrome.storage.local.get([
       FOLLOW_PREVIEW_KEY,
       FOLLOW_PREVIEW_SIZE_KEY,
+      FOLLOW_PREVIEW_MAXLIFE_KEY,
     ]);
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
     const size = data?.[FOLLOW_PREVIEW_SIZE_KEY];
@@ -8334,6 +8376,10 @@ async function loadFollowPreview() {
         FOLLOW_PREVIEW_MIN_W,
         Math.min(FOLLOW_PREVIEW_MAX_W, w),
       );
+    }
+    const sec = Number(data?.[FOLLOW_PREVIEW_MAXLIFE_KEY]);
+    if (FOLLOW_PREVIEW_MAXLIFE_ALLOWED.includes(sec)) {
+      followPreviewMaxLifeSec = sec;
     }
   } catch {}
   if (followPreviewOn) bindFollowPreviewHover();
@@ -8706,6 +8752,12 @@ if (chrome.storage?.onChanged) {
       followPreviewOn = changes[FOLLOW_PREVIEW_KEY].newValue !== false;
       if (followPreviewOn) bindFollowPreviewHover();
       else closeFollowPreview();
+    }
+    if (changes[FOLLOW_PREVIEW_MAXLIFE_KEY]) {
+      const sec = Number(changes[FOLLOW_PREVIEW_MAXLIFE_KEY].newValue);
+      if (FOLLOW_PREVIEW_MAXLIFE_ALLOWED.includes(sec)) {
+        followPreviewMaxLifeSec = sec;
+      }
     }
     if (changes[CARD_PREVIEW_AUDIO_KEY]) {
       cardPreviewAudioOn = changes[CARD_PREVIEW_AUDIO_KEY].newValue !== false;

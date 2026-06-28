@@ -119,6 +119,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="preview"
+            role="tab"
+            aria-selected="false"
+          >
+            미리보기
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="clip"
             role="tab"
             aria-selected="false"
@@ -205,21 +214,6 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="tabMute" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >카드 미리보기 음소거·음량</span
-                  >
-                  <span class="settings-item-desc"
-                    >라이브 카드 미리보기 위에서 우클릭=음소거 / 토글, 휠=음량
-                    조절(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-card-preview-audio />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -791,7 +785,7 @@
 
           <section
             class="settings-group"
-            data-panel="sidebar"
+            data-panel="preview"
             aria-label="팔로잉 미리보기"
           >
             <h2 class="settings-group-title">팔로잉 라이브 미리보기</h2>
@@ -810,8 +804,52 @@
                 </label>
               </li>
             </ul>
+            <h3 class="settings-subgroup-title">자동 종료</h3>
+            <div
+              class="settings-segmented settings-segmented-5"
+              id="followPreviewMaxLife"
+              role="radiogroup"
+              aria-label="미리보기 자동 종료 시간"
+            >
+              <button type="button" data-follow-maxlife="30" role="radio" aria-checked="false">30초</button>
+              <button type="button" data-follow-maxlife="60" role="radio" aria-checked="false">1분</button>
+              <button type="button" data-follow-maxlife="120" role="radio" aria-checked="true">2분</button>
+              <button type="button" data-follow-maxlife="180" role="radio" aria-checked="false">3분</button>
+              <button type="button" data-follow-maxlife="300" role="radio" aria-checked="false">5분</button>
+            </div>
             <p class="settings-group-desc">
-              미리보기 우하단을 드래그해 크기를 조절할 수 있습니다.
+              미리보기 우하단을 드래그해 크기를 조절할 수 있습니다. 미리보기는
+              짧은 확인용이므로 설정한 시간이 지나면 자동으로 닫힙니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="preview"
+            aria-label="카드 미리보기"
+          >
+            <h2 class="settings-group-title">카드 미리보기</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >카드 미리보기 음소거·음량</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브 카드 미리보기 위에서 우클릭=음소거 / 토글, 휠=음량
+                    조절(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-card-preview-audio />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              탐색 페이지의 라이브 카드에 마우스를 올리면 치지직이 음소거 미리보기를
+              잠깐 재생합니다. 이 위에서 우클릭으로 음소거를 끄거나 휠로 음량을
+              조절할 수 있습니다.
             </p>
           </section>
 
