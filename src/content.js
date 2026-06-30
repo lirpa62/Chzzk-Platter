@@ -117,6 +117,9 @@ const featureFlags = {
   chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
   chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
   streamStats: false,
+  fillScreen: false, // 화면 채우기: main 높이를 조절해 영상 좌우 레터박스 최소화
+  vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
+  vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
   commentTimestamp: false,
   searchVideos: false,
@@ -7507,6 +7510,19 @@ function clampChatWidth(value, maxWidth) {
 // 채팅창이 영상 아래로 세로로 쌓인 레이아웃인지(이때 폭 조절은 영상과 어긋남).
 function isChatStackedLayout(aside) {
   if (!(aside instanceof HTMLElement)) return false;
+  // 채팅의 '직접 부모'가 flex row면 채팅이 영상과 좌우로 놓인 것이므로 stacked 아님.
+  // (다시보기는 _wrapper_가 column이지만 채팅[vod-aside]은 _player_[row] 안에서 영상과
+  // 좌우다. 조상에 column wrapper가 있다고 stacked로 오판하면 안 된다.)
+  const parent = aside.parentElement;
+  if (parent instanceof HTMLElement) {
+    const ps = getComputedStyle(parent);
+    if (
+      ps.display.includes("flex") &&
+      String(ps.flexDirection || "").startsWith("row")
+    ) {
+      return false;
+    }
+  }
   let node = aside.parentElement;
   while (node instanceof HTMLElement && node !== document.documentElement) {
     const cls = String(node.className || "");
@@ -7562,12 +7578,27 @@ function getMaxChatWidth(aside) {
 
 function setChatAsideWidth(aside, width, maxWidth) {
   const w = clampChatWidth(width, maxWidth);
-  aside.style.setProperty("width", `${w}px`, "important");
-  aside.style.setProperty("flex-basis", `${w}px`, "important");
-  aside.style.setProperty("min-width", `${CHAT_MIN_WIDTH}px`, "important");
+  const value = `${w}px`;
+  const root = document.documentElement;
+  // 다시보기(vod-aside)는 치지직이 인라인 style.width를 즉시 지워 핑퐁이 난다. 그래서
+  // 인라인을 주지 않고 --cheese-chat-resized-width 변수만 설정한다(updateChatTweakStyle의
+  // <style> 규칙이 그 변수로 vod-aside 너비를 강제 — 치지직이 못 지움). 라이브
+  // (aside-chatting)는 치지직이 안 건드리니 기존대로 인라인 + 변수.
+  const isVod = aside.id === "vod-aside";
+  if (!isVod) {
+    // 멱등: 이미 같은 너비면 다시 쓰지 않는다(매번 setProperty하면 옵저버 핑퐁).
+    if (
+      aside.style.getPropertyValue("width") !== value ||
+      aside.style.getPropertyValue("flex-basis") !== value
+    ) {
+      aside.style.setProperty("width", value, "important");
+      aside.style.setProperty("flex-basis", value, "important");
+      aside.style.setProperty("min-width", `${CHAT_MIN_WIDTH}px`, "important");
+    }
+  }
   // 프로필 다이얼로그/닉네임 메뉴 팝오버가 채팅 너비에 맞게 줄어들도록 CSS 변수 설정
   // (배지 모아 챗 syncChatResizeCssVars 동일: 다이얼로그=너비-20, 팝오버=너비-16).
-  const root = document.documentElement;
+  // vod-aside 너비도 이 변수로 적용된다(위 <style> 규칙).
   root.style.setProperty("--cheese-chat-resized-width", `${w}px`);
   root.style.setProperty(
     "--cheese-chat-profile-popup-width",
@@ -7654,12 +7685,21 @@ function applyChatLayout() {
   }
   const maxWidth = getMaxChatWidth(aside);
   const saved = chatWidthValue >= CHAT_MIN_WIDTH ? chatWidthValue : 0;
-  const current = aside.getBoundingClientRect().width;
-  const applied = setChatAsideWidth(
-    aside,
-    saved > 0 ? saved : current,
-    maxWidth,
-  );
+  // 저장된 조절값이 있을 때만 너비를 강제한다. 없으면(조절 전) 기본 너비를 유지하고
+  // 리사이저만 단다. ← current(현재 측정 폭)로 강제하면 다시보기 진동 중 측정된
+  // 220/353 같은 오염값에 고착돼 깜빡임이 났다.
+  let applied = saved;
+  if (saved > 0) {
+    applied = setChatAsideWidth(aside, saved, maxWidth);
+  } else {
+    // 강제 안 함 → 혹시 남아있을 인라인/변수 정리(라이브 aside만; vod는 변수 기반).
+    if (aside.id !== "vod-aside") {
+      aside.style.removeProperty("width");
+      aside.style.removeProperty("flex-basis");
+    }
+    document.documentElement.style.removeProperty("--cheese-chat-resized-width");
+    applied = Math.round(aside.getBoundingClientRect().width);
+  }
   ensureChatResizer(aside, applied, maxWidth);
 }
 
@@ -7703,6 +7743,7 @@ function bindChatResizer(handle, aside) {
     const next = clampChatWidth(startW + deltaX * direction, maxWidth);
     chatWidthValue = next;
     setChatAsideWidth(aside, next, maxWidth);
+    applyFillScreen(); // 채팅 너비가 바뀌면 영상 폭도 바뀌니 main 높이 재계산
     handle.setAttribute("aria-valuenow", String(next));
     if (Number.isFinite(maxWidth)) {
       handle.setAttribute("aria-valuemax", String(Math.floor(maxWidth)));
@@ -7763,6 +7804,225 @@ function applyChatStackedClass() {
   const aside = findResizableChatAside();
   const stacked = !!aside && isChatStackedLayout(aside);
   document.documentElement.classList.toggle("cheese-chat-stacked", stacked);
+}
+
+// ── 화면 채우기(영상 좌우 레터박스 최소화) ──────────────────────────────────
+// 측정: videoBox(#live_player_layout) 폭은 채팅/사이드바가 정해 고정이고, main 높이를
+// 키우면 videoBox 높이가 폭×9/16(영상 비율)까지 따라 커진다. main을 '폭×9/16 +
+// overhead(컨트롤바 등 main−videoBox 차)'로 맞추면 영상이 폭을 꽉 채워 좌우 레터박스가
+// 사라진다(이 값까지 키워도 페이지 세로 스크롤은 안 생김 — section/wrapper가 흡수).
+// stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용으로 깜빡임 방지.
+let fillScreenOverhead = 90; // 타겟−videoBox 높이 차(자연 상태에서 측정해 갱신)
+// 라이브/다시보기에서 화면 채우기 대상(영상 영역 컨테이너)과 videoBox를 찾는다.
+// 라이브: div#layout-body main + #live_player_layout. 다시보기: _player_(부모 _wrapper_)
+// + #player_layout. 다시보기 _player_는 max-height: calc(100%-85px) 제약이 있어 높이를
+// 키우려면 그 max-height도 함께 풀어야 한다.
+function getFillScreenTarget() {
+  if (location.pathname.startsWith("/live/")) {
+    const main = document.querySelector("div#layout-body main");
+    if (main instanceof HTMLElement) {
+      return { el: main, box: main.querySelector("#live_player_layout"), capMaxH: false };
+    }
+  }
+  // 다시보기: #player_layout을 감싸는 _player_(부모가 _wrapper_).
+  const box = document.querySelector("div#layout-body #player_layout");
+  if (box instanceof HTMLElement) {
+    let el = box.closest('[class*="_player_"]');
+    // _player_가 영상+채팅 묶음(부모가 _wrapper_)인 그 레벨이어야 한다.
+    while (el && !String(el.parentElement?.className || "").includes("_wrapper_")) {
+      const up = el.parentElement?.closest('[class*="_player_"]');
+      if (!up || up === el) break;
+      el = up;
+    }
+    if (el instanceof HTMLElement) return { el, box, capMaxH: true };
+  }
+  return null;
+}
+
+function applyFillScreen() {
+  const t = getFillScreenTarget();
+  const aside = findResizableChatAside();
+  const on =
+    featureFlags.fillScreen &&
+    !!t &&
+    !(aside && isChatStackedLayout(aside));
+  if (!on) {
+    if (t) {
+      t.el.style.removeProperty("height");
+      if (t.capMaxH) t.el.style.removeProperty("max-height");
+    }
+    return;
+  }
+  const { el, box, capMaxH } = t;
+  const videoBox = box instanceof HTMLElement ? box : el;
+  // 영상 폭(boxW)은 우리가 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
+  const boxW = videoBox.getBoundingClientRect().width;
+  if (!(boxW > 0)) return;
+  // overhead(타겟−videoBox 높이; 컨트롤바 등)는 강제 적용 중이면 오염되므로 자연
+  // 상태일 때만 측정해 캐시.
+  const styledNow = !!el.style.height;
+  if (!styledNow) {
+    const mh = el.getBoundingClientRect().height;
+    const bh = videoBox.getBoundingClientRect().height;
+    fillScreenOverhead = Math.max(0, Math.round(mh - bh));
+  }
+  const idealH = Math.round((boxW * 9) / 16) + fillScreenOverhead;
+  const value = `${idealH}px`;
+  // 다시보기 _player_는 max-height 제약을 풀어야 높이가 먹는다.
+  if (capMaxH && el.style.maxHeight !== "none") {
+    el.style.setProperty("max-height", "none", "important");
+  }
+  // 멱등: 이미 같은 값이면 다시 쓰지 않는다(mutation/깜빡임 방지).
+  if (el.style.height === value) return;
+  el.style.setProperty("height", value, "important");
+}
+
+// ── 다시보기 '영상 더보기'(_content_right_ 우측 사이드 정보) 배치/숨김 ─────────
+// 다시보기 영상 아래 _content_ 안: _content_left_(영상정보+댓글) | _content_right_(우측
+// 사이드 정보). 옵션: (1) _content_right_를 _content_left_ 안 댓글(_container_1i0ef_)
+// 앞으로 이동, (2) _content_right_ 숨김. 숨김 우선. 이동은 DOM move라 SPA 재렌더에
+// 풀릴 수 있어 전용 경량 옵저버로 재이동(우리 변경은 무시해 무한루프 방지).
+const VOD_MORE_STYLE_ID = "cheese-vod-more-style";
+const VOD_MORE_MOVED_ATTR = "data-cheese-vod-more-moved";
+let vodMoreObserver = null;
+let vodMoreObserveRaf = 0;
+// _content_right_의 원래 위치(off 시 복원용): 원래 부모 + 원래 다음 형제.
+let vodMoreOrigParent = null;
+let vodMoreOrigNextSibling = null;
+
+function findVodContentRight() {
+  return document.querySelector('div#layout-body [class*="_content_right_"]');
+}
+function findVodCommentBox() {
+  return document.querySelector('div#layout-body [class*="_container_1i0ef_"]');
+}
+
+// '영상 더보기' 안 '자동 재생 사용 설정' 스위치가 켜져 있으면 끈다(숨기면 못 누르므로).
+// 스위치는 _content_right_ 안 label._switch_ + 내부 input[checkbox]. React 상태라
+// checked 직접 변경이 아닌 클릭으로 토글한다. 한 번만 시도(이미 끄면 no-op).
+let vodAutoplayTurnedOff = false;
+function turnOffVodAutoplay() {
+  if (vodAutoplayTurnedOff) return;
+  const right = findVodContentRight();
+  if (!right) return;
+  // '자동 재생' 라벨/스위치 찾기.
+  const labels = right.querySelectorAll(
+    'label[class*="_switch_"], [class*="_switch_"]',
+  );
+  for (const label of labels) {
+    const input = label.querySelector('input[type="checkbox"]');
+    if (!input) continue;
+    if (input.checked) input.click(); // React onChange 발화 → 자동 재생 off
+    vodAutoplayTurnedOff = true; // 토글을 찾았으면(껐든 이미 꺼졌든) 재시도 중단
+    return; // 첫 스위치(자동 재생)만 처리
+  }
+}
+
+// _content_right_를 댓글 앞으로 이동(아래 배치). 이미 그 위치면 no-op(멱등).
+function moveVodMoreBelow() {
+  const right = findVodContentRight();
+  const comment = findVodCommentBox();
+  if (!right || !comment) return;
+  const commentParent = comment.parentElement; // _content_left_
+  if (!commentParent) return;
+  // 이미 댓글 바로 앞이면 건드리지 않는다(멱등 → 옵저버 핑퐁 방지).
+  if (comment.previousElementSibling === right) return;
+  // 처음 이동할 때 원래 위치를 저장(복원용). 이미 우리가 옮긴 상태면 저장 안 함.
+  if (!right.hasAttribute(VOD_MORE_MOVED_ATTR)) {
+    vodMoreOrigParent = right.parentElement;
+    vodMoreOrigNextSibling = right.nextElementSibling;
+  }
+  right.setAttribute(VOD_MORE_MOVED_ATTR, "1");
+  commentParent.insertBefore(right, comment);
+}
+
+// off 시 _content_right_를 원래 위치(저장해 둔 부모/형제)로 되돌린다.
+function restoreVodMorePosition() {
+  const right = document.querySelector(`[${VOD_MORE_MOVED_ATTR}]`);
+  if (!right) return;
+  if (vodMoreOrigParent instanceof HTMLElement && vodMoreOrigParent.isConnected) {
+    // 저장한 다음 형제가 아직 같은 부모에 있으면 그 앞에, 아니면 맨 끝에.
+    if (
+      vodMoreOrigNextSibling instanceof HTMLElement &&
+      vodMoreOrigNextSibling.parentElement === vodMoreOrigParent
+    ) {
+      vodMoreOrigParent.insertBefore(right, vodMoreOrigNextSibling);
+    } else {
+      vodMoreOrigParent.appendChild(right);
+    }
+  }
+  right.removeAttribute(VOD_MORE_MOVED_ATTR);
+  vodMoreOrigParent = null;
+  vodMoreOrigNextSibling = null;
+}
+
+function applyVodMoreLayout() {
+  const below = featureFlags.vodMoreBelow;
+  const hide = featureFlags.vodMoreHide;
+  // 숨김(우선): <style>로 _content_right_ 숨김. 이동은 불필요.
+  let style = document.getElementById(VOD_MORE_STYLE_ID);
+  if (hide) {
+    // 숨기기 전에 '자동 재생 사용 설정'이 켜져 있으면 끈다(숨기면 못 누르므로).
+    turnOffVodAutoplay();
+    if (!style) {
+      style = document.createElement("style");
+      style.id = VOD_MORE_STYLE_ID;
+      (document.head || document.documentElement).appendChild(style);
+    }
+    const css = `div#layout-body [class*="_content_right_"] { display: none !important; }`;
+    if (style.textContent !== css) style.textContent = css;
+    stopVodMoreObserver(); // 숨김이면 이동 옵저버 불필요
+    return;
+  }
+  // 여기 도달 = 숨김이 꺼진 상태. 다음에 다시 숨길 때 자동 재생을 또 끌 수 있도록
+  // 플래그를 리셋한다(그 사이 사용자가 자동 재생을 다시 켰을 수 있음).
+  vodAutoplayTurnedOff = false;
+  // 아래 배치: 이동 + 재렌더 시 재이동 옵저버 + _content_right_ 스타일.
+  if (below) {
+    if (!style) {
+      style = document.createElement("style");
+      style.id = VOD_MORE_STYLE_ID;
+      (document.head || document.documentElement).appendChild(style);
+    }
+    // 댓글 앞으로 옮긴 _content_right_가 댓글 위에 자연스럽게 보이도록 스타일.
+    const css = `div#layout-body [class*="_content_right_"] {
+      margin-top: auto !important; width: auto !important;
+      max-height: 360px !important; overflow: scroll !important;
+    }`;
+    if (style.textContent !== css) style.textContent = css;
+    moveVodMoreBelow();
+    ensureVodMoreObserver();
+  } else {
+    style?.remove(); // 아래배치/숨김 모두 해제 → 스타일 제거
+    stopVodMoreObserver();
+    restoreVodMorePosition(); // 이동했던 _content_right_를 원위치로 복원
+  }
+}
+
+// _content_right_/댓글이 든 _content_ 영역만 좁게 감시(전체 감시 금지 — 과거 6GB 교훈).
+function ensureVodMoreObserver() {
+  const target =
+    document.querySelector('div#layout-body [class*="_content_"]') ||
+    document.querySelector("div#layout-body");
+  if (!target) return;
+  if (vodMoreObserver && vodMoreObserver._target === target) return;
+  stopVodMoreObserver();
+  vodMoreObserver = new MutationObserver(() => {
+    if (vodMoreObserveRaf) return;
+    vodMoreObserveRaf = requestAnimationFrame(() => {
+      vodMoreObserveRaf = 0;
+      if (!featureFlags.vodMoreBelow || featureFlags.vodMoreHide) return;
+      moveVodMoreBelow(); // 풀렸으면 재이동(이미 맞으면 no-op)
+    });
+  });
+  vodMoreObserver._target = target;
+  vodMoreObserver.observe(target, { childList: true, subtree: true });
+}
+function stopVodMoreObserver() {
+  if (vodMoreObserver) {
+    vodMoreObserver.disconnect();
+    vodMoreObserver = null;
+  }
 }
 
 function applyChatFontScale() {
@@ -7838,7 +8098,16 @@ function updateChatTweakStyle() {
     .${CHAT_HIDE_CLASSES.chatHideRanking},
     .${CHAT_HIDE_CLASSES.chatHideMission},
     .${CHAT_HIDE_CLASSES.chatHidePrediction} { display: none !important; }
-    html.cheese-chat-left-position aside#aside-chatting { order: -1 !important; }
+    html.cheese-chat-left-position aside#aside-chatting,
+    html.cheese-chat-left-position aside#vod-aside { order: -1 !important; }
+    /* 다시보기: 채팅이 왼쪽 배치되면 그 아래 영상정보(_details_/_container_1nl77_)가
+       채팅 너비만큼 왼쪽이 비어 어긋난다. 채팅 너비(--cheese-chat-resized-width, 미조절
+       시 기본 353px)만큼 margin-left를 줘 정렬을 맞춘다. 채팅이 없으면 이 규칙은
+       적용 대상이 없어 자동 무효(margin 없음). */
+    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_details_"],
+    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_container_1nl77_"] {
+      margin-left: var(--cheese-chat-resized-width, 353px) !important;
+    }
     /* 왼쪽 배치 시 뷰포트 고정형 프로필 카드가 오른쪽에 뜨는 것을 좌측으로 보정
        (인라인 _is_bottom_/_is_top_ 변형은 자체 위치라 제외). */
     html.cheese-chat-left-position
@@ -7852,7 +8121,8 @@ function updateChatTweakStyle() {
       width: 8px; z-index: 2147482500;
       cursor: col-resize; pointer-events: auto; touch-action: none;
     }
-    html.cheese-chat-left-position aside#aside-chatting .${CHAT_RESIZER_CLASS} {
+    html.cheese-chat-left-position aside#aside-chatting .${CHAT_RESIZER_CLASS},
+    html.cheese-chat-left-position aside#vod-aside .${CHAT_RESIZER_CLASS} {
       left: auto; right: 0;
     }
     aside#aside-chatting .${CHAT_RESIZER_CLASS}::before,
@@ -7862,7 +8132,8 @@ function updateChatTweakStyle() {
       background: rgba(93, 191, 255, 0);
       transition: background-color 0.16s ease;
     }
-    html.cheese-chat-left-position aside#aside-chatting .${CHAT_RESIZER_CLASS}::before {
+    html.cheese-chat-left-position aside#aside-chatting .${CHAT_RESIZER_CLASS}::before,
+    html.cheese-chat-left-position aside#vod-aside .${CHAT_RESIZER_CLASS}::before {
       left: auto; right: 0;
     }
     aside#aside-chatting .${CHAT_RESIZER_CLASS}:hover::before,
@@ -7884,6 +8155,15 @@ function updateChatTweakStyle() {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    /* 다시보기(vod-aside)는 치지직이 우리 인라인 style.width를 즉시 제거해 너비가
+       무한 깜빡인다. 그래서 vod-aside 너비는 인라인이 아니라 이 <style> 규칙 +
+       --cheese-chat-resized-width 변수로 강제한다(치지직이 못 지움). 변수가 없으면
+       (조절 전) 규칙이 무효라 기본 너비 유지. */
+    html.cheese-chat-width-resize-enabled aside#vod-aside {
+      width: var(--cheese-chat-resized-width) !important;
+      flex-basis: var(--cheese-chat-resized-width) !important;
+      min-width: ${CHAT_MIN_WIDTH}px !important;
     }`;
 }
 
@@ -7932,12 +8212,23 @@ function startChatObserver() {
 let chatTweakRaf = 0;
 let chatHtmlClassObserver = null;
 
+let chatTweakDebounce = 0;
 function scheduleChatTweak() {
-  if (chatTweakRaf) return;
-  chatTweakRaf = requestAnimationFrame(() => {
-    chatTweakRaf = 0;
-    applyChatTweaksLight(); // moa 등장/퇴장·stacked 전환도 여기서 반영됨
-  });
+  // 즉시 1회(rAF) 적용 — 새 채팅 행 숨김 마커 등은 빨리 반영돼야 한다.
+  if (!chatTweakRaf) {
+    chatTweakRaf = requestAnimationFrame(() => {
+      chatTweakRaf = 0;
+      applyChatTweaksLight();
+    });
+  }
+  // 추가로, 치지직이 다시보기 진입 시 채팅 DOM을 연속 재렌더하며 우리 너비를 리셋해
+  // 깜빡인다. 마지막 변화 후 120ms 안정되면 한 번 더 적용해 최종 너비를 확정한다
+  // (멱등이라 안정 상태면 no-op).
+  if (chatTweakDebounce) clearTimeout(chatTweakDebounce);
+  chatTweakDebounce = window.setTimeout(() => {
+    chatTweakDebounce = 0;
+    applyChatTweaksLight();
+  }, 120);
 }
 
 function stopChatObserver() {
@@ -7948,6 +8239,10 @@ function stopChatObserver() {
   if (chatHtmlClassObserver) {
     chatHtmlClassObserver.disconnect();
     chatHtmlClassObserver = null;
+  }
+  if (chatTweakDebounce) {
+    clearTimeout(chatTweakDebounce);
+    chatTweakDebounce = 0;
   }
   window.removeEventListener("resize", scheduleChatTweak);
 }
@@ -10343,6 +10638,8 @@ function init() {
   applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
   ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
+  applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
+  applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
   applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
   applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)
 
@@ -10674,10 +10971,15 @@ function isCheeseSearchOwnedNode(node) {
 
 const observer = new MutationObserver(scheduleInitFromMutations);
 observer.observe(document.documentElement, { childList: true, subtree: true });
-// 창 너비 변화로 상하 분할(stacked) 전환 → 채팅 입력창 높이 제한 클래스 갱신.
-window.addEventListener("resize", debounce(applyChatStackedClass, 150), {
-  passive: true,
-});
+// 창 크기 변화 → 상하 분할(stacked) 클래스 + 화면 채우기 main 높이 재계산.
+window.addEventListener(
+  "resize",
+  debounce(() => {
+    applyChatStackedClass();
+    applyFillScreen();
+  }, 150),
+  { passive: true },
+);
 ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
