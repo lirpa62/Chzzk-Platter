@@ -9984,7 +9984,7 @@ async function openFollowPreview(li, channelId) {
     );
     showFollowPreviewThumb(el, data.thumb, channelId);
   } else {
-    attachFollowPreviewSource(el, data.m3u8, channelId);
+    attachFollowPreviewSource(el, data.m3u8, channelId, data.thumb);
   }
 }
 
@@ -10152,7 +10152,7 @@ async function refreshFollowPreviewViewers(el, channelId) {
   }
 }
 
-function attachFollowPreviewSource(el, m3u8, channelId) {
+function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
   const video = el.querySelector(".cheese-follow-preview-video");
   if (!video) return;
   teardownFollowPreviewMedia(video); // 이전 연결 정리
@@ -10165,16 +10165,30 @@ function attachFollowPreviewSource(el, m3u8, channelId) {
       el.classList.add("is-ready");
     }
   };
+  // 영상 로드가 끝내 실패하면 썸네일로 대체해 보여준다(빈 검은 화면 방지).
+  const fallbackToThumb = () => {
+    if (followPreviewState.currentChannelId !== channelId) return;
+    teardownFollowPreviewMedia(video);
+    el.classList.add("is-thumb-only"); // 영상 숨기고 썸네일 이미지 표시
+    showFollowPreviewThumb(el, thumb, channelId);
+  };
   const onError = () => {
-    // 토큰 만료 등 → 캐시 무효화 후 1회 재시도.
-    if (followPreviewState.retried) return;
+    // 토큰 만료 등 → 캐시 무효화 후 1회 재시도. 재시도도 실패하면 썸네일 폴백.
+    if (followPreviewState.retried) {
+      fallbackToThumb();
+      return;
+    }
     followPreviewState.retried = true;
     followPreviewState.playbackCache.delete(channelId);
     void (async () => {
       const fresh = await fetchLivePreviewData(channelId);
-      if (fresh?.m3u8 && followPreviewState.currentChannelId === channelId) {
+      if (followPreviewState.currentChannelId !== channelId) return;
+      if (fresh?.m3u8) {
         renderFollowPreviewMeta(el, fresh.meta);
-        attachFollowPreviewSource(el, fresh.m3u8, channelId);
+        attachFollowPreviewSource(el, fresh.m3u8, channelId, fresh.thumb || thumb);
+      } else {
+        // 재요청도 실패 → 썸네일로 대체.
+        fallbackToThumb();
       }
     })();
   };
@@ -10221,7 +10235,8 @@ function attachFollowPreviewSource(el, m3u8, channelId) {
     video.src = m3u8;
     video.play?.().catch(() => {});
   } else {
-    closeFollowPreview();
+    // 재생 불가 환경 → 닫지 않고 썸네일로 대체.
+    fallbackToThumb();
   }
 }
 
