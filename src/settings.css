@@ -441,17 +441,28 @@ body {
 }
 
 .settings-custom-input input {
-  box-sizing: border-box;
-  width: 5.5ch;
-  min-width: 5.5ch;
+  width: 100%;
   border: 0;
   background: transparent;
   color: var(--popup-text);
   font-size: 14px;
   font-weight: 700;
-  text-align: right;
   outline: none;
   -moz-appearance: textfield;
+}
+
+#followHeaderFontInput {
+  box-sizing: border-box;
+  width: 5.5ch;
+  min-width: 5.5ch;
+  text-align: right;
+}
+
+#chatFontScaleInput {
+  box-sizing: border-box;
+  width: 5.5ch;
+  min-width: 5.5ch;
+  text-align: right;
 }
 
 .settings-custom-input input::-webkit-outer-spin-button,

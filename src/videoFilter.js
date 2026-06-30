@@ -51,7 +51,7 @@
   // 선명도가 이 값 이상이면 "무거울 수 있음"으로 보고 하드웨어 가속 안내 토스트를 띄운다.
   const SHARPEN_HEAVY_THRESHOLD = 30;
   const TOAST_ID = "cheese-vf-toast";
-  const TOAST_DURATION_MS = 7000;
+  const TOAST_DURATION_MS = 3500; // 프리셋 선택 시 짧게만 안내
   const SETTINGS_URL = "chrome://settings/system";
   // 선명도 자동 조절(전역 설정, localStorage). 기본 OFF.
   const AUTO_SHARPEN_KEY = "cheeseVideoFilter.autoSharpen";
@@ -288,8 +288,6 @@
   let activeTab = "presets";
   let appliedVideo = null; // 현재 필터가 걸린 video(전환 감지용)
 
-  // 하드웨어 가속 안내 토스트를 이번 세션에 이미 띄웠는지.
-  let hwToastShown = false;
   // 선명도 자동 조절(전역, localStorage). 켜면 프레임 드롭 시 effectiveScale를 낮춘다.
   let autoSharpenEnabled = loadAutoSharpen();
   // 자동 조절이 곱하는 선명도 배율(1=원래대로, 0=선명도 없음). 사용자가 설정한
@@ -541,9 +539,10 @@
     ensureStyleRule(css);
     appliedVideo = video;
 
-    // 선명도가 무거울 수 있는 수준이면 하드웨어 가속 안내(세션 1회) + 자동 조절 모니터.
+    // 선명도가 무거울 수 있는 수준이면 자동 조절 모니터를 켠다. 하드웨어 가속 안내는
+    // 더 이상 필터 적용마다 세션 1회로 띄우지 않고, 사용자가 선명한 프리셋을 직접
+    // 선택할 때만(applyPreset의 userSelected) 짧게 띄운다.
     if (state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD) {
-      maybeShowHwToast();
       if (autoSharpenEnabled) startFrameMonitor();
       else stopFrameMonitor();
     } else {
@@ -589,13 +588,7 @@
   }
 
   // ── 하드웨어 가속 안내 토스트 ───────────────────────────────────────────────
-  // 선명도가 무거울 수 있는 설정일 때 세션당 1회, 플레이어 위에 안내를 띄운다.
-  function maybeShowHwToast() {
-    if (hwToastShown) return;
-    hwToastShown = true;
-    showHwToast();
-  }
-
+  // 사용자가 선명도 높은 프리셋을 직접 선택할 때만 짧게 1회 띄운다(applyPreset).
   function showHwToast() {
     document.getElementById(TOAST_ID)?.remove();
     const toast = document.createElement("div");
@@ -782,7 +775,7 @@
     return { ...neutralFilters(), ...(p?.filters || {}) };
   }
 
-  function applyPreset(key) {
+  function applyPreset(key, userSelected = false) {
     const p = PRESETS[key];
     if (!p) return;
     ensureFilterEnabled();
@@ -792,6 +785,11 @@
     applyState();
     saveState();
     syncUI();
+    // 사용자가 직접 고른 프리셋이 선명도 높은 설정이면, 그때만 하드웨어 가속 안내를
+    // 짧게 1회 띄운다(세션마다 자동으로 띄우지 않음).
+    if (userSelected && state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD) {
+      showHwToast();
+    }
   }
 
   function resetToBasePreset() {
@@ -1934,7 +1932,7 @@
       }
       const presetBtn = e.target.closest(".cheese-vf-preset");
       if (presetBtn) {
-        applyPreset(presetBtn.dataset.preset);
+        applyPreset(presetBtn.dataset.preset, true); // 사용자 직접 선택
         return;
       }
       const actionButton = e.target.closest(

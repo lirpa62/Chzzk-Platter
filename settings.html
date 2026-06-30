@@ -223,6 +223,19 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">넓은 화면 자동 적용</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기 진입 시 플레이어 '넓은 화면'을 자동으로
+                    켭니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-wide-screen-auto />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">실시간 따라잡기 숨김</span>
                   <span class="settings-item-desc"
                     >라이브 지연 따라잡기 버튼</span
@@ -237,7 +250,7 @@
                 <label>
                   <span class="settings-item-name">라이브 되감기 숨김</span>
                   <span class="settings-item-desc"
-                    >라이브 10초 되감기·앞으로 버튼</span
+                    >라이브 되감기·앞으로 버튼</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -249,14 +262,14 @@
                 <label for="seekStepInput">
                   <span class="settings-item-name">되감기·앞으로 간격</span>
                   <span class="settings-item-desc"
-                    >되감기/앞으로 버튼·방향키 한 번에 이동(1~60초)</span
+                    >되감기/앞으로 버튼·방향키 한 번에 이동(3~60초)</span
                   >
                 </label>
                 <span class="settings-custom-input">
                   <input
                     type="number"
                     id="seekStepInput"
-                    min="1"
+                    min="3"
                     max="60"
                     step="1"
                     inputmode="numeric"
@@ -277,6 +290,9 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <!-- 화면 채우기: 동작하지 않는 엣지 케이스·스타일 오류로 배포 전 임시
+                   숨김. 수정 후 이 주석을 풀고 content.js의 강제 off 게이트도 함께
+                   되돌릴 것.
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">화면 채우기</span>
@@ -289,6 +305,8 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              -->
+
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">탭 음소거 숨김</span>

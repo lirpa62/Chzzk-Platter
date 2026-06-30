@@ -21,6 +21,7 @@
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
   let mixerAlwaysOn = false;
+  let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
@@ -32,13 +33,16 @@
     featureFlags.tabMute = f.tabMute === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
+    // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
+    wideScreenAuto = e.data.wideScreenAuto === true;
+    if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
     // 따라잡기 민감도 프리셋(낮음/보통/높음/커스텀). content.js가 chrome.storage에서
     // 읽어 전달. custom이면 syncCustom={enable,target}을 함께 받는다.
     if (typeof applySyncPreset === "function")
       applySyncPreset(e.data.syncPreset, e.data.syncCustom);
-    // 되감기 간격(1~60초). 바뀌면 이미 떠 있는 버튼 라벨/아이콘 갱신.
+    // 되감기 간격(3~60초). 바뀌면 이미 떠 있는 버튼 라벨/아이콘 갱신.
     const ns = Number(e.data.seekStepS);
-    if (Number.isFinite(ns) && ns >= 1 && ns <= 60) {
+    if (Number.isFinite(ns) && ns >= 3 && ns <= 60) {
       const changed = ns !== seekStepS;
       seekStepS = Math.round(ns);
       if (changed && typeof refreshSeekButtonLabels === "function")
@@ -83,7 +87,7 @@
   // 라이브 되감기/앞으로(seekable 윈도우 내) 관련
   const REWIND_BUTTON_CLASS = "cheese-live-rewind-button";
   const FORWARD_BUTTON_CLASS = "cheese-live-forward-button";
-  let seekStepS = 10; // 한 번에 ±N초(settings에서 1~60 조절). content.js가 전달.
+  let seekStepS = 10; // 한 번에 ±N초(settings에서 3~60 조절). content.js가 전달.
   const SEEK_EDGE_PAD_S = 2; // 라이브 엣지에 이만큼 못 미치게(엣지 직전까지만 앞으로)
 
   // 라이브 싱크 따라잡기 관련
@@ -112,6 +116,10 @@
   let syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS; // 현재 쿨다운(백오프로 변동)
   let syncLastUnstableAt = 0; // 마지막으로 임계 이상이었던 시각(백오프 리셋 판단)
   const SYNC_USER_SEEK_PAUSE_MS = 60000; // 사용자가 과거로 seek하면 이 시간만큼 자동 따라잡기 중단
+  // 되감기 버튼으로 10초 이내(±여유)만 되감았을 땐 60초나 멈출 필요 없이 짧게만
+  // 멈췄다 다시 따라잡는다(잠깐 놓친 부분 확인용). 작은 되감기에 한해 적용.
+  const SYNC_SHORT_REWIND_MAX_S = 10; // 이 이하의 되감기는 '짧은 되감기'로 간주
+  const SYNC_SHORT_REWIND_PAUSE_MS = 10000; // 짧은 되감기 시 자동 따라잡기 중단 시간
   const SYNC_BACK_SEEK_MIN_S = 2; // 이 이상 지연이 늘어난 seek만 '과거 보기'로 간주(앞으로/라이브 복귀는 제외)
   const SYNC_FRESH_ENTRY_WINDOW_MS = 20000; // 라이브 최초 진입 후 이 시간 안에서만 1회 강제 따라잡기 시도
   const SYNC_AUTO_STORE_KEY = "cheeseAudioMixer.autoSync"; // 전역 저장 키
@@ -419,6 +427,8 @@
   let state = DEFAULT_STATE();
   let currentPageKey = null; // 현재 페이지 raw 키(live:<id>|video:<no>)
   let currentMediaId = null; // 해석된 채널id(설정 저장/복원 키)
+  let wideScreenAppliedForPage = null; // 넓은 화면 자동 적용을 끝낸 pageKey(미디어당 1회)
+  let wideScreenRetryUntil = 0; // viewmode 버튼이 늦게 뜰 수 있어 잠깐 재시도하는 마감 시각
   // 현재 미디어의 저장 설정(프리셋 등) 로드 완료 여부. '항상 켜기' 자동 활성화는
   // 이게 true일 때만 시도해, 저장된 프리셋이 적용되기 전에 기본 프리셋으로 켜지는
   // 레이스를 막는다.
@@ -3660,6 +3670,8 @@
   let autoSyncEnabled = loadAutoSync();
   let lastAutoCatchUpAt = 0; // 자동 발동 쿨다운용
   let lastUserSeekAt = 0; // 사용자가 직접 seek한 시각(자동 따라잡기 일시 중단용)
+  let autoCatchUpPauseUntil = 0; // 이 시각까지 자동 따라잡기 중단(seek 크기에 따라 길이 가변)
+  let rewindButtonSeekUntil = 0; // 되감기 버튼이 일으킨 seek의 seeked까지 유효(짧은 되감기 판별)
   let syncSeekVideo = null; // seeked 리스너를 건 video(중복 등록 방지)
   let ourSeekUntil = 0; // 이 시각 이전의 seeked는 우리(jumpToLiveEdge)가 일으킨 것 → 무시
   let preSeekLatency = NaN; // seek 직전 지연(초). seeked에서 방향 판별에 사용
@@ -3797,6 +3809,11 @@
     if (Math.abs(target - w.cur) < 0.05) return; // 이미 끝/시작
     // ourSeekUntil은 일부러 설정하지 않는다 → onUserSeeked가 '사용자 seek'로
     // 인식해 되감기 시 자동 따라잡기를 잠시 멈춘다(의도된 동작).
+    // 되감기 버튼으로 10초 이내만 되감았으면 '짧은 되감기'로 표시해 onUserSeeked가
+    // 60초 대신 짧은(10초) 일시정지를 적용하게 한다(잠깐 놓친 부분 확인용).
+    if (!forward && Math.abs(target - w.cur) <= SYNC_SHORT_REWIND_MAX_S + 0.5) {
+      rewindButtonSeekUntil = Date.now() + 3000; // seeked가 곧 도착(여유 3초)
+    }
     w.video.currentTime = target;
   }
 
@@ -3905,6 +3922,8 @@
   }
 
   function onUserSeeked() {
+    const shortRewind = Date.now() < rewindButtonSeekUntil;
+    rewindButtonSeekUntil = 0; // 1회성 소비
     if (Date.now() < ourSeekUntil) return; // 우리가 일으킨 seek → 무시
     const after = getLiveLatencySeconds();
     // 과거로(뒤로) seek = 지연이 의미있게 늘어남. 앞으로/라이브 복귀(지연 감소)는 무시.
@@ -3913,7 +3932,14 @@
       !Number.isFinite(preSeekLatency) ||
       !Number.isFinite(after) ||
       after - preSeekLatency >= SYNC_BACK_SEEK_MIN_S;
-    if (movedBack) lastUserSeekAt = Date.now();
+    if (movedBack) {
+      lastUserSeekAt = Date.now();
+      // 되감기 버튼으로 10초 이내만 되감았으면 짧게(10초)만 멈춘다. 그 외(재생바를
+      // 크게 끌어 과거를 보는 등)는 기존대로 60초 멈춘다.
+      autoCatchUpPauseUntil =
+        Date.now() +
+        (shortRewind ? SYNC_SHORT_REWIND_PAUSE_MS : SYNC_USER_SEEK_PAUSE_MS);
+    }
     preSeekLatency = NaN;
   }
 
@@ -4118,8 +4144,9 @@
     }
     if (Date.now() - lastAutoCatchUpAt < syncAutoCooldownMs) return false;
     // 사용자가 직접 과거로 seek했다면(타임머신) 일정 시간 자동 따라잡기를 멈춘다.
-    // 의도적으로 과거를 보는 중인데 계속 라이브로 끌어당기지 않도록.
-    if (Date.now() - lastUserSeekAt < SYNC_USER_SEEK_PAUSE_MS) return false;
+    // 의도적으로 과거를 보는 중인데 계속 라이브로 끌어당기지 않도록. 중단 길이는
+    // seek 크기에 따라 가변(짧은 되감기=10초, 큰 seek=60초; onUserSeeked가 설정).
+    if (Date.now() < autoCatchUpPauseUntil) return false;
     const video = findVideo();
     if (!video) return false;
     if (video.paused || video.seeking) return false;
@@ -4551,6 +4578,9 @@
     if (pageKey !== currentPageKey) {
       currentPageKey = pageKey;
       currentMediaId = null; // 채널id는 아래에서 비동기로 해석
+      // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
+      wideScreenAppliedForPage = null;
+      wideScreenRetryUntil = Date.now() + 8000;
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
       state = DEFAULT_STATE();
@@ -4605,6 +4635,57 @@
     // '항상 켜기' 자동 활성화(첫 제스처 이후, 미디어 준비되면). 미디어 전환 시
     // graphConflict는 tick의 페이지 전환 분기에서 초기화되므로 새 영상엔 다시 시도.
     maybeAutoEnableMixer();
+    // 넓은 화면 자동 적용(미디어당 1회). viewmode 버튼이 늦게 떠도 잠깐 재시도.
+    maybeAutoWideScreen();
+  }
+
+  // 치지직 플레이어의 '넓은 화면'(viewmode) 버튼. 라이브/다시보기 공통.
+  // (aria-label은 상태에 따라 '넓은 화면'/'좁은 화면'으로 바뀌므로 클래스로 찾는다.)
+  function findViewModeButton() {
+    const player = findPlayer();
+    const root = player || document;
+    return (
+      root.querySelector(".pzp-pc__viewmode-button") ||
+      root.querySelector(".pzp-pc-viewmode-button") ||
+      root.querySelector(".pzp-viewmode-button") ||
+      root.querySelector(
+        "button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+      )
+    );
+  }
+
+  // 넓은 화면이 이미 켜져 있는지 판정. pzp-button--clicked는 두 상태 모두 붙어 있어
+  // 쓸 수 없다. 켜지면 checked 속성이 붙고 aria-label이 '좁은 화면'(누르면 좁아짐)
+  // 으로 바뀐다 — 이 둘로 판정한다.
+  function isWideScreenOn(btn) {
+    if (!btn) return false;
+    return (
+      btn.hasAttribute("checked") ||
+      btn.getAttribute("aria-label") === "좁은 화면"
+    );
+  }
+
+  // '넓은 화면 자동 적용'이 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다. 이미
+  // 켜져 있으면 클릭하지 않는다(토글 무한루프 방지). 버튼이 아직 없으면 재시도
+  // 마감 시각까지 다음 tick에서 다시 시도한다. 미디어당 1회만 적용한다.
+  function maybeAutoWideScreen() {
+    if (!wideScreenAuto) return;
+    if (!currentPageKey) return; // 라이브/다시보기 페이지에서만
+    if (wideScreenAppliedForPage === currentPageKey) return; // 이미 이 미디어에 적용함
+    const btn = findViewModeButton();
+    if (!btn || !isElementRendered(btn)) {
+      // 버튼이 아직 없음 — 재시도 마감 전이면 다음 tick에서 다시 시도.
+      if (Date.now() > wideScreenRetryUntil) {
+        wideScreenAppliedForPage = currentPageKey; // 마감 → 더 시도 안 함
+      }
+      return;
+    }
+    if (!isWideScreenOn(btn)) {
+      try {
+        btn.click();
+      } catch {}
+    }
+    wideScreenAppliedForPage = currentPageKey; // 1회 적용 완료(켜져 있었어도 소진)
   }
 
   // 페이지의 채널id를 비동기로 확보한 뒤 해당 채널 설정을 로드한다. 해석 도중

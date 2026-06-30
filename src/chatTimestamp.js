@@ -10,6 +10,7 @@
   let showChatTimestamp = false;
   let restoreBlindedChat = false;
   let chatRowObserver = null;
+  let observedChatContainers = []; // 현재 감시 중인 채팅 컨테이너(교체 감지용)
   let retryTimer = 0;
 
   // 가려진 채팅 복원용 상태.
@@ -410,7 +411,18 @@
     containers.forEach((c) =>
       chatRowObserver.observe(c, { childList: true, subtree: true }),
     );
+    observedChatContainers = containers;
     sweepExistingRows();
+  }
+
+  // 감시 중인 컨테이너가 모두 아직 문서에 연결돼 있는지(교체되지 않았는지).
+  // 현재 찾아지는 컨테이너 집합과 달라졌으면(개수 변화 포함) 건강하지 않다고 본다.
+  function isChatObserverHealthy() {
+    if (!chatRowObserver || observedChatContainers.length === 0) return false;
+    if (observedChatContainers.some((c) => !c.isConnected)) return false;
+    const current = findChatListContainers();
+    if (current.length !== observedChatContainers.length) return false;
+    return current.every((c) => observedChatContainers.includes(c));
   }
 
   function scheduleRetry() {
@@ -433,6 +445,7 @@
       chatRowObserver.disconnect();
       chatRowObserver = null;
     }
+    observedChatContainers = [];
     clearRetry();
   }
 
@@ -468,18 +481,42 @@
   }
 
   // content.js(격리)가 보내는 기능 플래그 수신.
+  let flagsReceived = false;
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    flagsReceived = true;
+    stopFlagRequestRetry();
     const f = e.data.flags || {};
     // 체크=표시(true)면 각 기능 ON. (data-feature지만 '숨김'이 아니라 '켬' 의미)
     setShowChatTimestamp(f.chatShowTime === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
   });
-  // 로드 직후 현재 플래그 요청(초기 송신을 놓쳤을 수 있음).
-  window.postMessage(
-    { source: "cheese-feature-flags-request" },
-    location.origin,
-  );
+  // 로드 직후 현재 플래그 요청. content.js(격리 월드)와 로드 순서가 보장되지 않아
+  // 첫 요청이 유실될 수 있으므로, 플래그를 받을 때까지 짧게 재시도한다(서로의 첫
+  // 메시지를 놓치는 경쟁 방지 — 설정이 켜져 있어도 가끔 적용 안 되던 원인).
+  let flagRequestTimer = 0;
+  let flagRequestTries = 0;
+  function requestFlagsOnce() {
+    window.postMessage(
+      { source: "cheese-feature-flags-request" },
+      location.origin,
+    );
+  }
+  function stopFlagRequestRetry() {
+    if (flagRequestTimer) {
+      clearInterval(flagRequestTimer);
+      flagRequestTimer = 0;
+    }
+  }
+  requestFlagsOnce();
+  flagRequestTimer = window.setInterval(() => {
+    flagRequestTries += 1;
+    if (flagsReceived || flagRequestTries > 20) {
+      stopFlagRequestRetry();
+      return;
+    }
+    requestFlagsOnce();
+  }, 300);
 
   // moa의 enabled 클래스가 <html>에서 켜졌다/꺼졌다 하면 양보 상태를 재평가한다.
   // moa가 켜지면 우리가 적용한 시간/복원을 거두고, 꺼지면 다시 적용한다.
@@ -505,11 +542,19 @@
   });
 
   // SPA 네비게이션(라이브↔다시보기↔채널)으로 채팅 컨테이너가 바뀌면 재부착.
+  // 추가로, 경로 변화 없이 React 재렌더로 채팅 컨테이너가 교체(detach)된 경우에도
+  // 감시 컨테이너가 죽으면(observer가 죽은 노드를 봄) 재부착한다 — 설정이 켜져
+  // 있어도 가끔 시간/복원이 안 나타나던 또 다른 원인.
   let lastPath = location.pathname;
   setInterval(() => {
-    if (location.pathname === lastPath) return;
-    lastPath = location.pathname;
-    removeAllTimestamps();
-    if (anyChatEnhanceOn()) ensureChatRowObserver();
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname;
+      removeAllTimestamps();
+      if (anyChatEnhanceOn()) ensureChatRowObserver();
+      return;
+    }
+    if (!anyChatEnhanceOn()) return;
+    // 감시 중인 컨테이너가 더 이상 문서에 없으면(교체됨) 새 컨테이너에 재부착.
+    if (!isChatObserverHealthy()) ensureChatRowObserver();
   }, 1000);
 })();

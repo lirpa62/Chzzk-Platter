@@ -82,12 +82,14 @@ const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
 let mixerAlwaysOn = false;
 const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
 let videoFilterAlwaysOn = false;
-const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 1~60, 기본 10)
+const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
+let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
+const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
 function normalizeSeekStep(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 10;
-  return Math.min(60, Math.max(1, Math.round(n)));
+  return Math.min(60, Math.max(3, Math.round(n)));
 }
 // 채널 홈 탭리스트 끝에 라이브 바로가기 버튼 표시(전역, 기본 ON). content.js 전용.
 const CHANNEL_LIVE_BUTTON_KEY = "cheeseChannelLiveButton";
@@ -4258,7 +4260,6 @@ async function refreshLogPowerBadge() {
   // 3) 값이 있을 때만 텍스트 갱신(con-chzzk: amt != null).
   if (amount != null) {
     renderLogPowerBadge(amount);
-    startWatchRewardTracking(channelId);
   }
   updateLogPowerIndicators();
 }
@@ -4379,12 +4380,16 @@ function applyLogPowerBadge() {
       stopWatchHourTimer(true);
     }
     logPowerChannelId = channelId;
+    // 이전 채널 적립 표시 상태 초기화(새 채널 status가 올 때까지 끔).
+    logPowerWatchActive = false;
+    logPowerWatchActiveChannelId = "";
     refreshLogPowerBadge();
     restoreWatchHourTimer(channelId);
-    restoreWatchRewardStatus(channelId); // background 적립 상태 복원
+    startWatchRewardTracking(channelId); // background 추적 시작 + 즉시 status 반영
   } else if (!document.getElementById(LOGPOWER_BADGE_ID)) {
     // 채널은 같지만 배지가 없음(토글을 방금 켬/다른 탭 동기화 등) → 값+DOM 생성.
     refreshLogPowerBadge();
+    restoreWatchRewardStatus(channelId); // background 적립 상태 다시 반영
   } else {
     // 배지가 이미 있으면 위치만 보장(값은 폴링이 갱신).
     ensureLogPowerBadge();
@@ -4581,8 +4586,12 @@ async function restoreWatchRewardStatus(channelId) {
 }
 
 // background broadcast(또는 즉시 응답) status를 표시 상태에 반영.
+// broadcast는 모든 치지직 탭에 가고, 한 탭이 여러 채널을 거치며 추적할 수 있으므로
+// '현재 보고 있는 채널'의 status만 반영한다. 다른 채널 status로 표시 채널을
+// 덮어쓰면 적립 표시가 깜빡이거나 사라진다(동작했다 안 했다 하던 원인).
 function applyWatchRewardStatus(status) {
   if (!status || !status.channelId) return;
+  if (status.channelId !== getCurrentLiveChannelId()) return;
   logPowerWatchActiveChannelId = status.channelId;
   logPowerWatchActive = !!status.active;
   updateLogPowerIndicators();
@@ -7822,11 +7831,19 @@ function getFillScreenTarget() {
   return null;
 }
 
+// 화면 채우기는 동작하지 않는 엣지 케이스·스타일 오류로 배포 전 임시 비활성화한다.
+// settings UI도 숨겨 둠. 저장값(fillScreen:true)이 남아 있어도 적용하지 않고, 이미
+// 적용돼 있던 인라인 스타일은 정리해 원복한다. 수정 후 이 상수를 true로 되돌릴 것.
+const FILL_SCREEN_ENABLED = false;
+
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
   const on =
-    featureFlags.fillScreen && !!t && !(aside && isChatStackedLayout(aside));
+    FILL_SCREEN_ENABLED &&
+    featureFlags.fillScreen &&
+    !!t &&
+    !(aside && isChatStackedLayout(aside));
   if (!on) {
     if (t) {
       t.el.style.removeProperty("height");
@@ -10691,6 +10708,7 @@ function broadcastFeatureFlags() {
       syncCustom: syncCustomValue, // {enable,target} 또는 null
       mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
       videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
+      wideScreenAuto, // 넓은 화면 자동 적용(전역)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
     },
     location.origin,
@@ -10706,6 +10724,7 @@ async function loadFeatureFlags() {
       SYNC_CUSTOM_KEY,
       MIXER_ALWAYS_ON_KEY,
       VIDEO_FILTER_ALWAYS_ON_KEY,
+      WIDE_SCREEN_AUTO_KEY,
       SEEK_STEP_KEY,
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
@@ -10715,6 +10734,7 @@ async function loadFeatureFlags() {
     syncCustomValue = custom && typeof custom === "object" ? custom : null;
     mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
     videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
+    wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
     seekStepValue = normalizeSeekStep(data?.[SEEK_STEP_KEY]);
     const cw = Number(data?.[CHAT_WIDTH_KEY]);
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
@@ -10743,6 +10763,9 @@ if (chrome.storage?.onChanged) {
     if (changes[VIDEO_FILTER_ALWAYS_ON_KEY]) {
       videoFilterAlwaysOn =
         changes[VIDEO_FILTER_ALWAYS_ON_KEY].newValue === true;
+    }
+    if (changes[WIDE_SCREEN_AUTO_KEY]) {
+      wideScreenAuto = changes[WIDE_SCREEN_AUTO_KEY].newValue === true;
     }
     if (changes[SEEK_STEP_KEY]) {
       seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
@@ -10822,9 +10845,10 @@ if (chrome.storage?.onChanged) {
       changes[SYNC_CUSTOM_KEY] ||
       changes[MIXER_ALWAYS_ON_KEY] ||
       changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
+      changes[WIDE_SCREEN_AUTO_KEY] ||
       changes[SEEK_STEP_KEY]
     ) {
-      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/되감기간격만 바뀐 경우도 전달
+      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기간격만 바뀐 경우도 전달
     }
     if (changes[FOLLOW_REFRESH_KEY]) {
       applyFollowRefresh(changes[FOLLOW_REFRESH_KEY].newValue);

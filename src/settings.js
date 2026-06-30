@@ -267,13 +267,33 @@
   });
   loadVideoFilterAlwaysOn();
 
-  // ── 되감기·앞으로 간격(1~60초, 기본 10) ──────────────────────────────────
+  // ── 넓은 화면 자동 적용(전역, 진입 시 viewmode 자동 켜기) ──────────────────
+  const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
+  const wideScreenAutoInput = document.querySelector("[data-wide-screen-auto]");
+  async function loadWideScreenAuto() {
+    let on = false;
+    try {
+      const data = await chrome.storage?.local?.get(WIDE_SCREEN_AUTO_KEY);
+      on = data?.[WIDE_SCREEN_AUTO_KEY] === true;
+    } catch {}
+    if (wideScreenAutoInput) wideScreenAutoInput.checked = on;
+  }
+  wideScreenAutoInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [WIDE_SCREEN_AUTO_KEY]: wideScreenAutoInput.checked,
+      });
+    } catch {}
+  });
+  loadWideScreenAuto();
+
+  // ── 되감기·앞으로 간격(3~60초, 기본 10) ──────────────────────────────────
   const SEEK_STEP_KEY = "cheeseSeekStepS";
   const seekStepInput = document.querySelector("[data-seek-step]");
   function clampSeekStep(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return 10;
-    return Math.min(60, Math.max(1, Math.round(n)));
+    return Math.min(60, Math.max(3, Math.round(n)));
   }
   if (seekStepInput) {
     (async () => {

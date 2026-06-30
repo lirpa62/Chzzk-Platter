@@ -2612,6 +2612,9 @@ const LP_WATCH_STATE_PREFIX = "logpower_watch_reward_state:";
 const LP_WATCH_ALARM_PREFIX = "logpower:watch-reward:";
 const LP_WATCH_INTERVAL_MIN = 1;
 const LP_WATCH_ACTIVE_TTL_MS = 6 * 60 * 1000; // 적립 활성 6분
+const LP_WATCH_MISS_LIMIT = Math.ceil(
+  LP_WATCH_ACTIVE_TTL_MS / (LP_WATCH_INTERVAL_MIN * 60 * 1000),
+);
 const LP_WATCH_MAX_MS = 75 * 60 * 1000; // 최대 추적 75분
 const LP_WATCH_AMOUNTS = [10, 12, 20]; // tier0/1/2 시청 보상액
 const LP_SUBSCRIBE_URL =
@@ -2773,7 +2776,7 @@ async function lpStartTracking({ channelId, initialAmount }) {
   return lpStateToStatus(state);
 }
 
-// 5분 알람 — 보유량 delta로 적립 판정.
+// 주기 알람 — 보유량 delta로 적립 판정.
 async function lpCheckProgress(channelId) {
   const state = await lpGetWatchState(channelId);
   if (!state) {
@@ -2811,7 +2814,7 @@ async function lpCheckProgress(channelId) {
     return;
   }
   next.misses = Number(state.misses || 0) + 1;
-  if (next.misses >= 2) next.activeUntil = 0;
+  if (next.misses >= LP_WATCH_MISS_LIMIT) next.activeUntil = 0;
   await lpSetWatchState(channelId, next);
   if (wasActive && Number(next.activeUntil || 0) <= now) {
     lpBroadcast(lpStateToStatus(next, false));
