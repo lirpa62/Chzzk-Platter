@@ -485,6 +485,13 @@
     return null;
   }
 
+  // 라이브/다시보기 페이지를 벗어나(팔로잉·전체 방송 등으로 이동) 플레이어가 PIP
+  // (미니플레이어)로 떠 있는 상태인지. 이때 video는 계속 재생 중이라 오디오 믹서
+  // 그래프를 teardown하면 안 된다(PIP에서 믹서가 꺼지던 원인).
+  function isPipActive() {
+    return !!document.querySelector("[class*='_type_pip_'], .pzp-pc.pzp-pc--pip");
+  }
+
   // 설정은 채널id로 통일 저장한다(라이브·다시보기 공유). 다시보기 URL엔 채널id가
   // 없는데, 페이지 DOM엔 추천 채널 링크가 섞여 있어 DOM 추출은 신뢰할 수 없다.
   // 따라서 video API로 본 영상의 채널id를 확보한다(videoNo당 1회 캐시).
@@ -765,9 +772,23 @@
   }
 
   function ensureEnabledGraph() {
-    if (!state.enabled || audio.connected) return;
+    if (!state.enabled) return;
     const video = findVideo();
     if (!video) return;
+    // 이미 연결돼 있어도, 화면의 video가 우리가 연결한 video와 '다르면' 재연결한다.
+    // PIP(미니플레이어) 전환·플레이어 재렌더로 video 요소가 교체되면 audio.connected는
+    // true인데 그래프는 옛 video에 붙어 있어 소리에 효과가 안 걸린다(클릭해야 재적용
+    // 되던 원인). video가 바뀌었으면 teardown 후 새 video로 다시 잇는다.
+    if (audio.connected) {
+      if (audio.video === video) {
+        // 같은 video인데 컨텍스트가 멈춰 있으면(PIP 전환 등) 재개 시도.
+        if (audio.ctx && audio.ctx.state !== "running") {
+          audio.ctx.resume().catch(() => {});
+        }
+        return;
+      }
+      teardownGraph(); // 옛 video 그래프 정리 → 아래에서 새로 연결
+    }
     // buildGraph가 성공했을 때만 syncUI한다. 실패(사용자 활성화 없음/재시도 차단/충돌)
     // 시 syncUI가 DOM을 건드리면 전역 MutationObserver→tick→ensureEnabledGraph가
     // 다시 돌며 무한루프가 된다(audio.connected는 계속 false이므로 매번 재진입).
@@ -2947,8 +2968,17 @@
       userGestureSeen = true;
       window.setTimeout(() => maybeAutoEnableMixer(), 0);
     }
-    if (!state.enabled || audio.connected) return;
-    window.setTimeout(() => ensureEnabledGraph(), 0);
+    if (!state.enabled) return;
+    // 제스처가 있는 지금이 AudioContext를 만들/재개할 유일한 기회다. 이미 연결돼
+    // 있어도 컨텍스트가 멈췄으면 재개하고, 연결이 끊겼으면(재진입·PIP 등) 재연결한다.
+    // (audio.connected면 조기 return하던 것을 완화 — 그래서 컨텍스트가 죽은 채로
+    // 남아 음소거/해제를 한 번 더 해야 걸리던 문제를 줄인다.)
+    if (audio.connected && audio.ctx && audio.ctx.state !== "running") {
+      audio.ctx.resume().catch(() => {});
+    }
+    if (!audio.connected) {
+      window.setTimeout(() => ensureEnabledGraph(), 0);
+    }
   }
 
   document.addEventListener(
@@ -4787,7 +4817,26 @@
   function tick() {
     const pageKey = getPageKey();
     if (!pageKey) {
-      // 라이브/다시보기 페이지를 벗어남
+      // 라이브/다시보기 URL을 벗어남. 단, 플레이어가 PIP(미니플레이어)로 떠 계속
+      // 재생 중이면 오디오 믹서 그래프를 유지해야 한다(teardown하면 PIP 소리에
+      // 효과가 빠졌다가 클릭해야 복구되던 문제).
+      //
+      // 핵심: MediaElementSourceNode는 video 요소에 '영구 바인딩'된다.
+      // 한 번 연결하면 PIP·페이지 이동으로 video가 DOM에서 옮겨져도
+      // 연결이 안 끊긴다. 그러니 이미 그래프가 붙어 있고(audio.connected) 그 video가
+      // 아직 살아 있으면 절대 teardown하지 않는다 — 재연결(제스처 필요)을 아예
+      // 없애 PIP·재진입에서 소리가 원음으로 새는 문제를 막는다.
+      const liveVideo = audio.video || findVideo();
+      const videoAlive =
+        liveVideo instanceof HTMLVideoElement &&
+        liveVideo.isConnected &&
+        !liveVideo.ended;
+      const keepGraph =
+        currentPageKey && (isPipActive() || (audio.connected && videoAlive) || videoAlive);
+      if (keepGraph) {
+        if (!featureFlags.audioMixer) ensureEnabledGraph();
+        return;
+      }
       if (currentPageKey) {
         teardownGraph();
         closePanel();
