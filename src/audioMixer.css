@@ -1279,3 +1279,111 @@
   left: 50%;
   bottom: 55px;
 }
+
+/* ── 라이브 되감기 바(seekable 표시 + 드래그 seek) ──────────────────────────
+   라이브 프로그레스 슬라이더는 0x0로 접혀 실체가 없으므로, 플레이어(.pzp-pc)에
+   붙여 하단 컨트롤 바 바로 위에 배치한다. 치지직 라이브는 되감기 가능 범위를 안
+   보여주므로 seekable 구간과 현재 위치를 표시하고 드래그로 seek. 컨트롤 보일 때만. */
+.cheese-live-seek-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 60px;
+  height: 16px;
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.cheese-live-seek-bar.is-visible {
+  opacity: 1;
+}
+.cheese-live-seek-bar.is-visible .cheese-live-seek-bar__track {
+  pointer-events: auto;
+}
+.cheese-live-seek-bar.is-empty {
+  opacity: 0;
+}
+
+/* 트랙 = 되감기 가능 영역(seekable) 전체를 감싸는 반투명 막대. 치지직 프로그레스바
+   위에 얹혀, '이 범위 안에서 되감기 가능'을 시각화한다. */
+.cheese-live-seek-bar__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: height 0.1s ease;
+}
+.cheese-live-seek-bar.is-dragging .cheese-live-seek-bar__track,
+.cheese-live-seek-bar__track:hover {
+  height: 10px;
+}
+
+/* __range = 되감기 가능 영역 중 이미 지나온(현재 이전) 부분 강조(그린). */
+.cheese-live-seek-bar__range {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 3px 0 0 3px;
+  background: rgba(0, 255, 163, 0.5);
+  pointer-events: none;
+}
+
+/* playhead: 세로 막대 + 위쪽에 아래를 가리키는 삼각형 포인터(첨부의 원형 노브와
+   다른 형태). 현재 재생 위치를 뾰족하게 지시한다. */
+.cheese-live-seek-bar__playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 0;
+  width: 2px;
+  background: #00ffa3;
+  transform: translateX(-1px);
+  box-shadow: 0 0 6px #00ffa3;
+  pointer-events: none;
+}
+.cheese-live-seek-bar__playhead::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #00ffa3;
+  filter: drop-shadow(0 0 3px rgba(0, 255, 163, 0.8));
+  transition: border-top-width 0.1s, top 0.1s;
+}
+.cheese-live-seek-bar__track:hover .cheese-live-seek-bar__playhead::after,
+.cheese-live-seek-bar.is-dragging .cheese-live-seek-bar__playhead::after {
+  top: -8px;
+  border-left-width: 6px;
+  border-right-width: 6px;
+  border-top-width: 9px;
+}
+
+.cheese-live-seek-bar__tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}

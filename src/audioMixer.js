@@ -22,6 +22,7 @@
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
   let mixerAlwaysOn = false;
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
+  let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
@@ -36,6 +37,9 @@
     // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
     wideScreenAuto = e.data.wideScreenAuto === true;
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
+    // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
+    liveSeekBarOn = e.data.liveSeekBar !== false;
+    if (typeof applyLiveSeekBar === "function") applyLiveSeekBar();
     // 따라잡기 민감도 프리셋(낮음/보통/높음/커스텀). content.js가 chrome.storage에서
     // 읽어 전달. custom이면 syncCustom={enable,target}을 함께 받는다.
     if (typeof applySyncPreset === "function")
@@ -87,6 +91,7 @@
   // 라이브 되감기/앞으로(seekable 윈도우 내) 관련
   const REWIND_BUTTON_CLASS = "cheese-live-rewind-button";
   const FORWARD_BUTTON_CLASS = "cheese-live-forward-button";
+  const SEEK_BAR_CLASS = "cheese-live-seek-bar"; // 되감기 가능 영역 표시 + 드래그 seek 바
   let seekStepS = 10; // 한 번에 ±N초(settings에서 3~60 조절). content.js가 전달.
   const SEEK_EDGE_PAD_S = 2; // 라이브 엣지에 이만큼 못 미치게(엣지 직전까지만 앞으로)
 
@@ -3857,6 +3862,7 @@
       // 앞으로는 따라잡기 버튼 '다음'에(앵커의 다음 형제).
       controls.insertBefore(createSeekButton(true), anchor.nextSibling);
     }
+    ensureSeekBar(); // 되감기 가능 영역 표시 + 드래그 seek 바
     startSeekCheck();
     updateSeekButtonsState();
   }
@@ -3879,6 +3885,227 @@
     document
       .querySelectorAll(`.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`)
       .forEach((b) => b.remove());
+    removeSeekBar();
+  }
+
+  // ── 라이브 되감기 바(seekable 구간 표시 + 드래그 seek) ──────────────────────
+  // 치지직 라이브 프로그레스바는 현재를 항상 100%로 두고 되감기 가능 범위(seekable
+  // 윈도우)를 시각적으로 보여주지 않으며, 그 슬라이더는 0x0로 접혀 실체가 없다.
+  // 그래서 하단 컨트롤 바(.pzp-pc__bottom) 바로 위에 우리 바를 띄워 seekable 구간과
+  // 현재 위치(playhead)를 표시하고, 드래그해 임의 지점으로 seek 한다. 컨트롤이
+  // 보일 때만 나타난다. 자동 따라잡기 연동은 seekBy와 동일('사용자 seek' 인식).
+  let seekBarRaf = 0;
+  let seekBarDragging = false;
+  let seekBarClsObs = null;
+  let seekBarHovered = false; // 바 위에 마우스가 있는지(컨트롤 강제 유지용)
+
+  // 라이브 프로그레스 슬라이더(.pzp-pc__progress-slider)는 라이브에선 0x0로 접혀
+  // 실체가 없다(현재를 항상 100%로 두는 구조). 그래서 실제 폭을 가진 하단 컨트롤
+  // 바(.pzp-pc__bottom)를 앵커로 삼아 그 위에 오버레이를 띄운다.
+  function findSeekBarAnchor() {
+    const player = findPlayer();
+    return player?.querySelector(".pzp-pc__bottom") || null;
+  }
+
+  function seekBarTimeAt(clientX, barEl, w) {
+    const r = barEl.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (clientX - r.left) / (r.width || 1)));
+    // 앞으로는 라이브 엣지 직전(여유)까지만 허용.
+    const maxT = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+    return Math.max(w.start, Math.min(maxT, w.start + frac * (w.end - w.start)));
+  }
+
+  // 드래그/클릭으로 target 시각으로 seek. 되감기(과거로)면 자동 따라잡기 pause 표시.
+  function seekBarSeekTo(target, w) {
+    if (!w || !w.video) return;
+    if (Math.abs(target - w.video.currentTime) < 0.05) return;
+    const back = target < w.video.currentTime;
+    if (back && w.video.currentTime - target <= SYNC_SHORT_REWIND_MAX_S + 0.5) {
+      rewindButtonSeekUntil = Date.now() + 3000; // 짧은 되감기 → 짧은 pause
+    }
+    try {
+      w.video.currentTime = target;
+    } catch {}
+  }
+
+  function ensureSeekBar() {
+    // 되감기 바 토글이 꺼졌거나, 라이브 되감기 자체가 숨김이면 바를 두지 않는다.
+    if (!liveSeekBarOn || featureFlags.liveRewind) {
+      removeSeekBar();
+      return;
+    }
+    const player = findPlayer();
+    if (!player) return;
+    const anchor = findSeekBarAnchor();
+    if (!anchor) return; // 컨트롤 바가 아직 없으면 다음 기회에
+    let bar = player.querySelector(`:scope > .${SEEK_BAR_CLASS}`);
+    if (!bar) {
+      // 오버레이는 player(.pzp-pc)에 붙이고, 위치는 컨트롤 바 바로 위로 CSS가 잡는다.
+      if (getComputedStyle(player).position === "static") {
+        player.style.position = "relative";
+      }
+      bar = document.createElement("div");
+      bar.className = SEEK_BAR_CLASS;
+      bar.innerHTML =
+        `<div class="${SEEK_BAR_CLASS}__track">` +
+        `<div class="${SEEK_BAR_CLASS}__range"></div>` +
+        `<div class="${SEEK_BAR_CLASS}__playhead"></div>` +
+        `<div class="${SEEK_BAR_CLASS}__tip" style="display:none"></div>` +
+        `</div>`;
+      const track = bar.querySelector(`.${SEEK_BAR_CLASS}__track`);
+      const tip = bar.querySelector(`.${SEEK_BAR_CLASS}__tip`);
+
+      const onMove = (e) => {
+        if (!seekBarDragging) return;
+        e.preventDefault();
+        const w = getSeekWindow();
+        if (!w) return;
+        seekBarSeekTo(seekBarTimeAt(e.clientX, track, w), w);
+      };
+      const onUp = () => {
+        if (!seekBarDragging) return;
+        seekBarDragging = false;
+        bar.classList.remove("is-dragging");
+        document.removeEventListener("mousemove", onMove, true);
+        document.removeEventListener("mouseup", onUp, true);
+      };
+      // 오버레이 자체에서 mousedown을 잡아 치지직 슬라이더로 이벤트가 새지 않게 한다.
+      track.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const w = getSeekWindow();
+        if (!w) return;
+        seekBarDragging = true;
+        bar.classList.add("is-dragging");
+        seekBarSeekTo(seekBarTimeAt(e.clientX, track, w), w);
+        document.addEventListener("mousemove", onMove, true);
+        document.addEventListener("mouseup", onUp, true);
+      });
+      // 호버 툴팁: 라이브 엣지 대비 지연(-N초). 호버 지점이 현재 라이브보다 얼마나
+      // 과거인지 보여준다(예 -1:20). 엣지 근처(여유 이내)면 'LIVE'.
+      track.addEventListener("mousemove", (e) => {
+        const w = getSeekWindow();
+        if (!w) return;
+        const r = track.getBoundingClientRect();
+        const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)));
+        const hoverT = w.start + frac * (w.end - w.start);
+        const behind = w.end - hoverT; // 라이브 엣지 대비 지연(초)
+        tip.textContent =
+          behind <= SEEK_EDGE_PAD_S ? "LIVE" : `-${formatSeekBarTime(behind)}`;
+        tip.style.left = `${frac * 100}%`;
+        tip.style.display = "";
+      });
+      track.addEventListener("mouseleave", () => {
+        tip.style.display = "none";
+      });
+
+      // 바 위에 마우스가 있는 동안 컨트롤이 자동 숨김되지 않게 유지한다. 치지직이
+      // pzp-pc--controls를 떼려 하면(mousemove 합성으로는 안 먹었다) 아래 클래스
+      // 옵저버가 즉시 다시 붙여 컨트롤을 강제로 유지한다. 나가면 해제한다.
+      bar.addEventListener("mouseenter", () => {
+        seekBarHovered = true;
+        if (!player.classList.contains(CONTROLS_CLASS)) {
+          player.classList.add(CONTROLS_CLASS);
+        }
+      });
+      bar.addEventListener("mouseleave", () => {
+        seekBarHovered = false;
+      });
+
+      player.appendChild(bar);
+
+      // 컨트롤 표시(pzp-pc--controls)와 동기화. 바 호버 중엔 치지직이 클래스를 떼도
+      // 즉시 다시 붙여 컨트롤을 유지한다(호버 keep-alive).
+      const syncVisible = () => {
+        if (
+          seekBarHovered &&
+          !player.classList.contains(CONTROLS_CLASS)
+        ) {
+          player.classList.add(CONTROLS_CLASS); // 옵저버 재진입 → 아래 on 계산
+          return;
+        }
+        const on = seekBarDragging || player.classList.contains(CONTROLS_CLASS);
+        bar.classList.toggle("is-visible", on);
+      };
+      seekBarClsObs?.disconnect();
+      seekBarClsObs = new MutationObserver(syncVisible);
+      seekBarClsObs.observe(player, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+      syncVisible();
+    }
+    startSeekBarRender();
+  }
+
+  function formatSeekBarTime(sec) {
+    if (!Number.isFinite(sec) || sec < 0) sec = 0;
+    sec = Math.floor(sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor(sec / 60) % 60;
+    const s = sec % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${p(m)}:${p(s)}` : `${m}:${p(s)}`;
+  }
+
+  function startSeekBarRender() {
+    if (seekBarRaf) return;
+    const loop = () => {
+      renderSeekBar();
+      seekBarRaf = requestAnimationFrame(loop);
+    };
+    seekBarRaf = requestAnimationFrame(loop);
+  }
+
+  function stopSeekBarRender() {
+    if (seekBarRaf) {
+      cancelAnimationFrame(seekBarRaf);
+      seekBarRaf = 0;
+    }
+  }
+
+  function renderSeekBar() {
+    const bar = document.querySelector(`.${SEEK_BAR_CLASS}`);
+    if (!bar) return;
+    // 안 보이면(컨트롤 숨김·드래그 아님) 갱신 스킵(부담↓). 표시되면 다시 갱신.
+    if (!bar.classList.contains("is-visible") && !seekBarDragging) return;
+    const range = bar.querySelector(`.${SEEK_BAR_CLASS}__range`);
+    const playhead = bar.querySelector(`.${SEEK_BAR_CLASS}__playhead`);
+    const w = getSeekWindow();
+    if (!w) {
+      bar.classList.add("is-empty");
+      return;
+    }
+    bar.classList.remove("is-empty");
+    // 오버레이 폭 전체 = seekable(start~라이브 엣지). playhead는 현재 재생 위치 비율.
+    const span = w.end - w.start || 1;
+    const p = Math.min(1, Math.max(0, (w.video.currentTime - w.start) / span));
+    // __range: 되감기 가능 영역 중 '이미 지나온(현재 이전)' 부분을 채워 강조.
+    if (range) range.style.width = `${p * 100}%`;
+    if (playhead) playhead.style.left = `${p * 100}%`;
+  }
+
+  function removeSeekBar() {
+    stopSeekBarRender();
+    seekBarHovered = false;
+    seekBarDragging = false;
+    if (seekBarClsObs) {
+      seekBarClsObs.disconnect();
+      seekBarClsObs = null;
+    }
+    document
+      .querySelectorAll(`.${SEEK_BAR_CLASS}`)
+      .forEach((b) => b.remove());
+  }
+
+  // 토글 변경 시 즉시 반영: 켜졌고 라이브면 바 보장, 꺼졌으면 제거.
+  function applyLiveSeekBar() {
+    if (liveSeekBarOn && location.pathname.startsWith("/live/")) {
+      ensureSeekBar();
+    } else {
+      removeSeekBar();
+    }
   }
 
   function ensureSyncButton() {

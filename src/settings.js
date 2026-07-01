@@ -287,6 +287,50 @@
   });
   loadWideScreenAuto();
 
+  // ── 라이브 되감기 바 표시(전역, 기본 ON) ─────────────────────────────────
+  const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
+  const liveSeekBarInput = document.querySelector("[data-live-seek-bar]");
+  async function loadLiveSeekBar() {
+    let on = true; // 미설정=기본 ON
+    try {
+      const data = await chrome.storage?.local?.get(LIVE_SEEK_BAR_KEY);
+      on = data?.[LIVE_SEEK_BAR_KEY] !== false;
+    } catch {}
+    if (liveSeekBarInput) liveSeekBarInput.checked = on;
+  }
+  liveSeekBarInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [LIVE_SEEK_BAR_KEY]: liveSeekBarInput.checked,
+      });
+    } catch {}
+  });
+  loadLiveSeekBar();
+
+  // 라이브 되감기가 '숨김'이면 되감기 바도 의미가 없으므로 이 토글을 비활성화한다.
+  // (data-feature="liveRewind"는 체크=숨김.)
+  const liveRewindInput = document.querySelector('[data-feature="liveRewind"]');
+  function setLiveSeekBarLock(hidden) {
+    if (!liveSeekBarInput) return;
+    liveSeekBarInput.disabled = hidden;
+    liveSeekBarInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", hidden);
+  }
+  // 사용자가 이 화면에서 되감기 숨김을 토글하면 즉시 반영.
+  liveRewindInput?.addEventListener("change", () =>
+    setLiveSeekBarLock(!!liveRewindInput.checked),
+  );
+  // 초기값은 storage에서 직접 읽어 확정(load()의 비동기 완료 타이밍에 의존하지 않게).
+  (async () => {
+    let hidden = false;
+    try {
+      const d = await chrome.storage?.local?.get(FEATURE_HIDDEN_KEY);
+      hidden = d?.[FEATURE_HIDDEN_KEY]?.liveRewind === true;
+    } catch {}
+    setLiveSeekBarLock(hidden);
+  })();
+
   // ── 되감기·앞으로 간격(3~60초, 기본 10) ──────────────────────────────────
   const SEEK_STEP_KEY = "cheeseSeekStepS";
   const seekStepInput = document.querySelector("[data-seek-step]");

@@ -84,6 +84,8 @@ const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
 let videoFilterAlwaysOn = false;
 const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
 let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
+const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
+let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
 const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
 function normalizeSeekStep(v) {
@@ -4385,6 +4387,7 @@ function applyLogPowerBadge() {
     // 이전 채널 적립 표시 상태 초기화(새 채널 status가 올 때까지 끔).
     logPowerWatchActive = false;
     logPowerWatchActiveChannelId = "";
+    logPowerWatchActiveUntil = 0;
     refreshLogPowerBadge();
     restoreWatchHourTimer(channelId);
     startWatchRewardTracking(channelId); // background 추적 시작 + 즉시 status 반영
@@ -4606,6 +4609,7 @@ let logPowerClaimedLabelTimer = 0; // '획득' 라벨 숨김 타이머
 // 적립 활성 상태(background status 반영). 현재 채널 일치 시에만 표시.
 let logPowerWatchActiveChannelId = ""; // 적립 활성으로 보고된 채널
 let logPowerWatchActive = false; // 그 채널이 현재 적립 중인지
+let logPowerWatchActiveUntil = 0; // 적립 활성 만료 시각(ms). 지나면 스스로 끔
 let logPowerHourEndsAt = 0; // 현재 채널 1시간 타이머 종료 시각(0=없음)
 let logPowerHourChannelId = "";
 let logPowerHourLiveCheckAt = 0; // 1시간 타이머 도는 동안 라이브 종료 확인 시각
@@ -4648,9 +4652,11 @@ async function restoreWatchRewardStatus(channelId) {
 // 덮어쓰면 적립 표시가 깜빡이거나 사라진다(동작했다 안 했다 하던 원인).
 function applyWatchRewardStatus(status) {
   if (!status || !status.channelId) return;
-  if (status.channelId !== getCurrentLiveChannelId()) return;
+  const here = getCurrentLiveChannelId();
+  if (status.channelId !== here) return; // 다른 채널 status는 이 탭에 반영 안 함
   logPowerWatchActiveChannelId = status.channelId;
   logPowerWatchActive = !!status.active;
+  logPowerWatchActiveUntil = Number(status.activeUntil || 0);
   updateLogPowerIndicators();
 }
 
@@ -4798,8 +4804,14 @@ function updateLogPowerIndicators() {
   const timer = badge.querySelector(".cheese-logpower-timer");
   const hourVisible =
     logPowerHourChannelId === channelId && logPowerHourEndsAt > Date.now();
+  // 자연 만료(activeUntil 경과) 시엔 background가 매번 broadcast하지 않으므로
+  // content가 스스로 만료를 확인해 '적립 중'을 끈다.
+  const notExpired =
+    logPowerWatchActiveUntil === 0 || logPowerWatchActiveUntil > Date.now();
   const active =
-    logPowerWatchActive && logPowerWatchActiveChannelId === channelId;
+    logPowerWatchActive &&
+    logPowerWatchActiveChannelId === channelId &&
+    notExpired;
   if (timer) timer.hidden = !hourVisible;
   if (progress) progress.hidden = !(active && !hourVisible);
 }
@@ -10944,6 +10956,7 @@ function broadcastFeatureFlags() {
       mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
       videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
       wideScreenAuto, // 넓은 화면 자동 적용(전역)
+      liveSeekBar, // 라이브 되감기 바 표시(전역)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
     },
     location.origin,
@@ -10960,6 +10973,7 @@ async function loadFeatureFlags() {
       MIXER_ALWAYS_ON_KEY,
       VIDEO_FILTER_ALWAYS_ON_KEY,
       WIDE_SCREEN_AUTO_KEY,
+      LIVE_SEEK_BAR_KEY,
       SEEK_STEP_KEY,
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
@@ -10970,6 +10984,7 @@ async function loadFeatureFlags() {
     mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
     videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
     wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
+    liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] !== false; // 미설정=기본 ON
     seekStepValue = normalizeSeekStep(data?.[SEEK_STEP_KEY]);
     const cw = Number(data?.[CHAT_WIDTH_KEY]);
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
@@ -11001,6 +11016,9 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[WIDE_SCREEN_AUTO_KEY]) {
       wideScreenAuto = changes[WIDE_SCREEN_AUTO_KEY].newValue === true;
+    }
+    if (changes[LIVE_SEEK_BAR_KEY]) {
+      liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
     }
     if (changes[SEEK_STEP_KEY]) {
       seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
@@ -11081,9 +11099,10 @@ if (chrome.storage?.onChanged) {
       changes[MIXER_ALWAYS_ON_KEY] ||
       changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
       changes[WIDE_SCREEN_AUTO_KEY] ||
+      changes[LIVE_SEEK_BAR_KEY] ||
       changes[SEEK_STEP_KEY]
     ) {
-      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기간격만 바뀐 경우도 전달
+      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기바/되감기간격만 바뀐 경우도 전달
     }
     if (changes[FOLLOW_REFRESH_KEY]) {
       applyFollowRefresh(changes[FOLLOW_REFRESH_KEY].newValue);

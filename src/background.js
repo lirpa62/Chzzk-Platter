@@ -2724,6 +2724,9 @@ function lpStateToStatus(state, activeOverride) {
     type: "LOG_POWER_WATCH_REWARD_STATUS",
     channelId: state?.channelId || "",
     active,
+    // 적립 활성 만료 시각(ms). content가 이 시각 이후엔 스스로 '적립 중'을 끈다
+    // (자연 만료 시 background가 매번 broadcast하지 않으므로).
+    activeUntil: active ? Number(state?.activeUntil || 0) : 0,
     expectedAmount: state?.expectedAmount || null,
   };
 }
@@ -2776,6 +2779,37 @@ async function lpStartTracking({ channelId, initialAmount }) {
   return lpStateToStatus(state);
 }
 
+// 통나무파워 적립은 계정당 한 번에 '한 채널'에서만 가능하다. 그래서 어떤 채널에서
+// 적립이 감지되면(활성 채널 확정), 다른 채널들의 적립 추적 state와 1시간 타이머를
+// 모두 정리하고 각 탭에 LOG_POWER_LIVE_ENDED를 보내 표시를 지운다(다른 채널의
+// 적립 중·1시간 타이머가 남아 사용자를 헷갈리게 하지 않도록).
+const LP_HOUR_TIMER_PREFIX = "cheeseLogPowerHourTimer:";
+async function lpClearOtherChannels(activeChannelId) {
+  try {
+    // 1) 다른 채널의 적립 추적 state(session) 정리 + 알람 해제.
+    const sess = await chrome.storage.session.get(null);
+    for (const key of Object.keys(sess || {})) {
+      if (!key.startsWith(LP_WATCH_STATE_PREFIX)) continue;
+      const cid = key.slice(LP_WATCH_STATE_PREFIX.length);
+      if (!cid || cid === activeChannelId) continue;
+      await lpClearWatchState(cid);
+      lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId: cid });
+    }
+    // 2) 다른 채널의 1시간 타이머(local) 제거. content가 이 키로 복원하므로 지우면
+    //    재진입해도 안 뜬다. LOG_POWER_LIVE_ENDED가 현재 떠 있는 표시도 지운다.
+    const loc = await chrome.storage.local.get(null);
+    const toRemove = [];
+    for (const key of Object.keys(loc || {})) {
+      if (!key.startsWith(LP_HOUR_TIMER_PREFIX)) continue;
+      const cid = key.slice(LP_HOUR_TIMER_PREFIX.length);
+      if (!cid || cid === activeChannelId) continue;
+      toRemove.push(key);
+      lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId: cid });
+    }
+    if (toRemove.length) await chrome.storage.local.remove(toRemove);
+  } catch {}
+}
+
 // 주기 알람 — 보유량 delta로 적립 판정.
 async function lpCheckProgress(channelId) {
   const state = await lpGetWatchState(channelId);
@@ -2810,6 +2844,8 @@ async function lpCheckProgress(channelId) {
     next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
     next.misses = 0;
     await lpSetWatchState(channelId, next);
+    // 이 채널이 활성 적립 채널로 확정됨 → 다른 채널의 적립·1시간 타이머 정리.
+    await lpClearOtherChannels(channelId);
     lpBroadcast(lpStateToStatus(next, true));
     return;
   }
