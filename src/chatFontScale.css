@@ -513,13 +513,53 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
       ),
     [class*="_floating_"]
   )
-  :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis2_dtc6c_"]) {
+  :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis2_dtc6c_"]):not(
+    [class*="_has_highlight_dtc6c_"]
+  ) {
   display: inline-flex !important;
   align-items: center !important;
   min-width: 0 !important;
   max-width: 100% !important;
   overflow: hidden !important;
   vertical-align: top !important;
+}
+
+/* 하이라이트(검색어 강조 등) 닉네임(_has_highlight_)은 네이티브가 하이라이트 배경
+   패딩만큼 max-width 여유(calc(100% + 4px))를 주고 말줄임을 걸지 않는다. 우리 규칙이
+   max-width:100% + text-overflow:ellipsis 로 덮으면 폰트 조절 시 잘려 말줄임표가
+   생긴다 → 하이라이트일 땐 네이티브 동작을 유지한다. */
+html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    :is(
+        [class*="_item_"],
+        [class*="live_chatting_list_item"],
+        [class*="vod_chatting_item"]
+      ),
+    [class*="_floating_"]
+  )
+  [class*="_has_highlight_dtc6c_"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  vertical-align: top !important;
+  max-width: calc(100% + 4px) !important;
+  overflow: visible !important;
+}
+html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    :is(
+        [class*="_item_"],
+        [class*="live_chatting_list_item"],
+        [class*="vod_chatting_item"]
+      ),
+    [class*="_floating_"]
+  )
+  [class*="_has_highlight_dtc6c_"]
+  > [class*="_text_dtc6c_"] {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
 }
 
 html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready

@@ -65,8 +65,8 @@
       </header>
 
       <p class="settings-hint">
-        체크하면 해당 기능을 끄고 아이콘/UI를 숨깁니다. '스트림 정보'는 체크를
-        해제하면 기능까지 다시 켜집니다.
+        체크하면 해당 기능을 끄고 아이콘/UI를 숨기며, 체크를 해제하면 다시
+        켜집니다.
       </p>
 
       <div class="settings-layout">
@@ -196,6 +196,21 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >믹서 버튼 클릭 시 바로 켜기</span
+                  >
+                  <span class="settings-item-desc"
+                    >믹서 버튼을 누르면 즉시 활성화하며 패널을 열고, 다시 누르면
+                    비활성화(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-mixer-click-activate />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name"
@@ -235,6 +250,42 @@
                   </div>
                 </div>
               </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name"
+                    >오디오 믹서 전역 기본값 재방문 동작</span
+                  >
+                  <span class="settings-item-desc"
+                    >전역 기본값이 켜진 채널을 다시 방문했을 때: '전역값 우선'은
+                    항상 전역값을, '직접 선택 우선'은 그 채널에서 직접 고른
+                    프리셋을 적용</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-mixer-global-default-mode
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="global"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    전역값 우선
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="channel"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    직접 선택 우선
+                  </button>
+                </div>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">비디오 필터 숨김</span>
@@ -257,6 +308,21 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-video-filter-always-on />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >필터 버튼 클릭 시 바로 켜기</span
+                  >
+                  <span class="settings-item-desc"
+                    >필터 버튼을 누르면 즉시 활성화하며 패널을 열고, 다시 누르면
+                    비활성화(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-video-filter-click-activate />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -300,6 +366,42 @@
                       hidden
                     ></ul>
                   </div>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name"
+                    >비디오 필터 전역 기본값 재방문 동작</span
+                  >
+                  <span class="settings-item-desc"
+                    >전역 기본값이 켜진 채널을 다시 방문했을 때: '전역값 우선'은
+                    항상 전역값을, '직접 선택 우선'은 그 채널에서 직접 고른
+                    프리셋을 적용</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-video-filter-global-default-mode
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-vf-mode-value="global"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    전역값 우선
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-vf-mode-value="channel"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    직접 선택 우선
+                  </button>
                 </div>
               </li>
               <li class="settings-item">
@@ -371,6 +473,114 @@
                   <input type="checkbox" data-live-seek-bar />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">볼륨 % 표시</span>
+                  <span class="settings-item-desc"
+                    >볼륨 조절 시 화면에 백분율 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-volume-pct />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">게인 % 표시</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 조절 시 백분율 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-gain-pct />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">게인 슬라이더 최소</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 슬라이더가 내려갈 수 있는 하한(100%=원본
+                    음량)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-mixer-gain-min
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.5"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.25"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.1"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    10%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    0%
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">게인 슬라이더 최대</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 슬라이더가 올라갈 수 있는 상한(음량
+                    증폭)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-mixer-gain-max
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-max-value="2"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    200%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-max-value="3"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    300%
+                  </button>
+                </div>
               </li>
               <li class="settings-item">
                 <label>
@@ -621,6 +831,21 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="sidebarRight" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >사이드바 펼침 시 밀어내기</span
+                  >
+                  <span class="settings-item-desc"
+                    >펼쳐진 사이드바가 콘텐츠 위를 덮지 않고 옆으로 밀어내 채팅·
+                    플레이어를 가리지 않음</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebarPush" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -900,6 +1125,20 @@
                 ></label>
               </li>
               <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">팔로잉 자동 펼치기</span>
+                  <span class="settings-item-desc"
+                    >팔로잉 '더보기'를 클릭하지 않아도 목록을 모두 펼침(직접
+                    '접기'를 누르면 그 세션은 유지)</span
+                  >
+                </label>
+                <label class="settings-switch"
+                  ><input type="checkbox" data-feature="sbFollowAutoExpand" /><i
+                    aria-hidden="true"
+                  ></i
+                ></label>
+              </li>
+              <li class="settings-item">
                 <label
                   ><span class="settings-item-name">인기 카테고리</span></label
                 >
@@ -1048,6 +1287,37 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">미리보기 볼륨</span>
+                  <span class="settings-item-desc"
+                    >음소거 해제 상태에서 재생할 볼륨(0~100%)</span
+                  >
+                </div>
+                <div class="settings-volume-row">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    class="settings-volume-slider"
+                    data-follow-preview-volume-slider
+                    aria-label="미리보기 볼륨 슬라이더"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      inputmode="numeric"
+                      data-follow-preview-volume
+                      aria-label="미리보기 볼륨"
+                    />
+                    <small>%</small>
+                  </span>
+                </div>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">썸네일로만 보기</span>
@@ -1159,11 +1429,27 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >다시보기 카드 날짜 툴팁</span
+                  >
+                  <span class="settings-item-desc"
+                    >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
+                    라이브 시작일을 정확한 날짜·시각으로 표시(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-card-date-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
             </ul>
             <p class="settings-group-desc">
               탐색 페이지의 라이브 카드에 마우스를 올리면 치지직이 음소거
               미리보기를 잠깐 재생합니다. 이 위에서 우클릭으로 음소거를 끄거나
-              휠로 음량을 조절할 수 있습니다.
+              휠로 음량을 조절할 수 있습니다. 채널 다시보기 목록에서는 카드 정보
+              줄 호버로 정확한 등록일·라이브 시작일을 볼 수 있습니다.
             </p>
           </section>
 
@@ -1369,6 +1655,11 @@
                 </label>
               </li>
             </ul>
+            <p class="settings-notice">
+              다른 확장이 채팅창에 이미 통나무파워를 표시 중이면 중복을 막기
+              위해 이 통나무파워 표시가 자동으로 양보합니다(상대 확장이 켜진
+              동안 우리 배지는 나타나지 않음). 상대 확장을 끄면 다시 표시됩니다.
+            </p>
             <h3 class="settings-subgroup-title">배지 클릭 동작</h3>
             <div
               class="settings-segmented settings-segmented-3"

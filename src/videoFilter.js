@@ -21,10 +21,14 @@
   const featureFlags = { videoFilter: false };
   // 비디오 필터 항상 켜기(전역). 켜져 있으면 채널 설정 로드 후 자동 활성화한다.
   let videoFilterAlwaysOn = false;
+  let vfClickActivate = false; // 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
+    vfClickActivate = e.data.videoFilterClickActivate === true;
+    globalDefaultMode =
+      e.data.videoFilterGlobalDefaultMode === "channel" ? "channel" : "global";
     if (typeof tick === "function") tick();
     if (typeof maybeAutoEnableFilter === "function") maybeAutoEnableFilter();
   });
@@ -280,6 +284,7 @@
     filters: neutralFilters(),
     customPresets: [],
     userDisabled: false, // 이 채널에서 사용자가 직접 끔(항상 켜기 opt-out)
+    userPickedPreset: false, // 이 채널에서 사용자가 프리셋을 직접 고름
   });
 
   let state = DEFAULT_STATE();
@@ -315,6 +320,10 @@
   let customImportText = "";
   let customShareMsg = null; // { kind, text }
   let globalDefaultPreset = { enabled: false, preset: "default" };
+  // 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선, 기본 global).
+  let globalDefaultMode = "global";
+  // 채널의 '원래 선택'(전역 적용 전) 스냅샷 — 전역값이 채널 저장을 덮어쓰지 않게.
+  let channelBaseState = null;
 
   // 프리셋에서 벗어나 수정된 상태인지(head에 "프리셋 추가"/"초기화" 표시).
   let presetDirty = false;
@@ -782,6 +791,10 @@
     ensureFilterEnabled();
     state.preset = key;
     state.filters = presetSnapshot(p);
+    // 사용자가 직접 고른 프리셋 → 채널의 '원래 선택'으로 확정(전역값이 켜져 있어도
+    // 이 선택이 채널 저장·'직접 선택 우선' 재방문의 기준이 된다).
+    state.userPickedPreset = true;
+    channelBaseState = snapshotChannelPreset();
     clearPresetDirty();
     applyState();
     saveState();
@@ -838,6 +851,11 @@
       (preset) => preset.id === key,
     );
     return custom ? cloneFilters(custom.filters) : null;
+  }
+
+  // 현재 채널 선택(프리셋 + 필터값)의 스냅샷.
+  function snapshotChannelPreset() {
+    return { preset: state.preset, filters: cloneFilters(state.filters) };
   }
 
   function applyGlobalDefaultPreset() {
@@ -1037,6 +1055,12 @@
     if (!options.keepDraft) ensureFilterEnabled();
     state.filters = cloneFilters(saved.filters);
     state.preset = saved.id;
+    // 사용자가 직접 커스텀 프리셋을 확정 적용한 경우만 채널 원본으로 기록(드래프트
+    // 미리보기 중(keepDraft)은 아직 확정 아님).
+    if (!options.keepDraft) {
+      state.userPickedPreset = true;
+      channelBaseState = snapshotChannelPreset();
+    }
     clearPresetDirty();
     applyState();
     if (!options.keepDraft) saveState();
@@ -1306,12 +1330,20 @@
   }
 
   function serializeState() {
+    // 전역 기본값이 켜져 있으면 현재 state.preset/filters는 '전역값'이므로, 채널
+    // 저장엔 채널의 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮어쓰지
+    // 않게). enabled/userDisabled/customPresets 등 나머지는 현재 state를 저장한다.
+    const base =
+      globalDefaultPreset.enabled && channelBaseState
+        ? channelBaseState
+        : snapshotChannelPreset();
     return {
       enabled: state.enabled,
-      preset: state.preset,
-      filters: { ...state.filters },
+      preset: base.preset,
+      filters: { ...base.filters },
       customPresets: normalizeCustomPresets(state.customPresets),
       userDisabled: state.userDisabled === true,
+      userPickedPreset: state.userPickedPreset === true,
     };
   }
 
@@ -1335,7 +1367,13 @@
           customPresets: normalizeCustomPresets(saved.customPresets),
         };
         globalDefaultPreset = normalizeGlobalDefaultPreset(saved.globalDefault);
-        applyGlobalDefaultPreset();
+        // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 해제 시 이 값으로 복원.
+        channelBaseState = snapshotChannelPreset();
+        // 전역 기본값 적용 여부: 'channel'(직접 선택 우선) 모드이고 이 채널에서
+        // 사용자가 프리셋을 직접 골랐으면(userPickedPreset) 채널값 유지, 그 외엔 전역값.
+        const useChannelPick =
+          globalDefaultMode === "channel" && state.userPickedPreset === true;
+        if (!useChannelPick) applyGlobalDefaultPreset();
         if (state.enabled) applyState();
         else clearFilter();
         syncUI();
@@ -1447,6 +1485,23 @@
     if (ui?.panel && document.body.contains(ui.panel)) {
       closePanel();
     } else {
+      openPanel();
+    }
+  }
+
+  // 필터 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
+  // 클릭 = 필터 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
+  function handleButtonClick() {
+    if (!vfClickActivate) {
+      togglePanel();
+      return;
+    }
+    const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
+    if (panelOpen) {
+      if (state.enabled) setEnabled(false);
+      closePanel();
+    } else {
+      if (!state.enabled) setEnabled(true);
       openPanel();
     }
   }
@@ -1590,12 +1645,21 @@
   function isPanelAnchorAvailable() {
     const panel = document.getElementById(PANEL_ID);
     const button = document.querySelector(`.${BUTTON_CLASS}`);
+    // 영상이 DOM에 '붙어 있으면' 유지. 렌더 가시성(opacity/rect)까지 보면 컨트롤
+    // 전환·전체화면 토글·버퍼링 등 일시적 비가시 상태에서 오탐으로 패널이 저절로
+    // 닫혀버린다(가만둬도 사라지는 문제). 그래서 탈착(navigation)만 판정한다.
     return (
       Boolean(panel) &&
       button instanceof HTMLElement &&
       document.documentElement.contains(button) &&
-      isElementRendered(findVideo())
+      isVideoAttached()
     );
+  }
+
+  // 영상이 DOM에 붙어 있는지만 본다(가시성 무관). 페이지 이동으로 제거되면 false.
+  function isVideoAttached() {
+    const v = findVideo();
+    return v instanceof HTMLElement && document.documentElement.contains(v);
   }
 
   function isElementRendered(element) {
@@ -2335,9 +2399,12 @@
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
-      togglePanel();
+      handleButtonClick();
       return;
     }
+    // 합성 클릭(isTrusted=false)은 무시 — 코드가 쏘는 .click()이 전파돼 패널이
+    // 저절로 닫히던 문제 방지(사용자 바깥 클릭일 때만 닫는다).
+    if (!e.isTrusted) return;
     const panel = ui?.panel;
     if (panel && !e.target.closest?.(`#${PANEL_ID}`)) {
       closePanel();

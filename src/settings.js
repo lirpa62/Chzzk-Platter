@@ -711,6 +711,235 @@
   });
   loadLiveSeekBar();
 
+  // ── 볼륨/게인 % 표시(전역, 기본 ON) ───────────────────────────────────────
+  // 체크=표시. 미설정 시 ON. 각각 독립.
+  function bindPctToggle(selector, key) {
+    const input = document.querySelector(selector);
+    if (!input) return;
+    (async () => {
+      let on = true;
+      try {
+        const d = await chrome.storage?.local?.get(key);
+        on = d?.[key] !== false;
+      } catch {}
+      input.checked = on;
+    })();
+    input.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({ [key]: input.checked });
+      } catch {}
+    });
+  }
+  bindPctToggle("[data-volume-pct]", "cheeseVolumePct");
+  bindPctToggle("[data-gain-pct]", "cheeseGainPct");
+
+  // ── 믹서 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
+  const mixerClickActivateInput = document.querySelector(
+    "[data-mixer-click-activate]",
+  );
+  if (mixerClickActivateInput) {
+    const KEY = "cheeseMixerClickActivate";
+    (async () => {
+      let on = false; // 기본 OFF
+      try {
+        const d = await chrome.storage?.local?.get(KEY);
+        on = d?.[KEY] === true;
+      } catch {}
+      mixerClickActivateInput.checked = on;
+    })();
+    mixerClickActivateInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({ [KEY]: mixerClickActivateInput.checked });
+      } catch {}
+    });
+
+    // '오디오 믹서 항상 켜기'가 켜져 있으면 믹서는 이미 자동 활성화되므로 '클릭 시
+    // 바로 켜기'는 의미가 없다 → 이 토글을 비활성화(잠금)한다.
+    function setMixerClickActivateLock(alwaysOn) {
+      mixerClickActivateInput.disabled = alwaysOn;
+      mixerClickActivateInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", alwaysOn);
+    }
+    // 항상 켜기 토글을 이 화면에서 바꾸면 즉시 반영.
+    mixerAlwaysOnInput?.addEventListener("change", () =>
+      setMixerClickActivateLock(!!mixerAlwaysOnInput.checked),
+    );
+    // 초기값은 storage에서 직접 읽어 확정(load 비동기 완료 타이밍에 의존하지 않게).
+    (async () => {
+      let alwaysOn = false;
+      try {
+        const d = await chrome.storage?.local?.get(MIXER_ALWAYS_ON_KEY);
+        alwaysOn = d?.[MIXER_ALWAYS_ON_KEY] === true;
+      } catch {}
+      setMixerClickActivateLock(alwaysOn);
+    })();
+  }
+
+  // ── 필터 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
+  const vfClickActivateInput = document.querySelector(
+    "[data-video-filter-click-activate]",
+  );
+  if (vfClickActivateInput) {
+    const KEY = "cheeseVideoFilterClickActivate";
+    (async () => {
+      let on = false; // 기본 OFF
+      try {
+        const d = await chrome.storage?.local?.get(KEY);
+        on = d?.[KEY] === true;
+      } catch {}
+      vfClickActivateInput.checked = on;
+    })();
+    vfClickActivateInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({ [KEY]: vfClickActivateInput.checked });
+      } catch {}
+    });
+
+    // '비디오 필터 항상 켜기'가 켜져 있으면 필터는 이미 자동 활성화되므로 '클릭 시
+    // 바로 켜기'는 의미가 없다 → 이 토글을 비활성화(잠금)한다.
+    function setVfClickActivateLock(alwaysOn) {
+      vfClickActivateInput.disabled = alwaysOn;
+      vfClickActivateInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", alwaysOn);
+    }
+    videoFilterAlwaysOnInput?.addEventListener("change", () =>
+      setVfClickActivateLock(!!videoFilterAlwaysOnInput.checked),
+    );
+    (async () => {
+      let alwaysOn = false;
+      try {
+        const d = await chrome.storage?.local?.get(VIDEO_FILTER_ALWAYS_ON_KEY);
+        alwaysOn = d?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
+      } catch {}
+      setVfClickActivateLock(alwaysOn);
+    })();
+  }
+
+  // ── 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선) ─────
+  const mixerGlobalDefaultModeGroup = document.querySelector(
+    "[data-mixer-global-default-mode]",
+  );
+  if (mixerGlobalDefaultModeGroup) {
+    const MODE_KEY = "cheeseMixerGlobalDefaultMode";
+    const modeButtons = Array.from(
+      mixerGlobalDefaultModeGroup.querySelectorAll("[data-mode-value]"),
+    );
+    function reflectMode(mode) {
+      const v = mode === "channel" ? "channel" : "global";
+      modeButtons.forEach((btn) => {
+        const active = btn.dataset.modeValue === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "global"; // 기본: 전역값 우선
+      try {
+        const d = await chrome.storage?.local?.get(MODE_KEY);
+        if (d?.[MODE_KEY] === "channel") mode = "channel";
+      } catch {}
+      reflectMode(mode);
+    })();
+    modeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.dataset.modeValue === "channel" ? "channel" : "global";
+        reflectMode(mode);
+        try {
+          chrome.storage?.local?.set({ [MODE_KEY]: mode });
+        } catch {}
+      });
+    });
+  }
+
+  // ── 비디오 필터 전역 기본값 재방문 동작(오디오 믹서와 동일, 별도 키) ──────────
+  const vfGlobalDefaultModeGroup = document.querySelector(
+    "[data-video-filter-global-default-mode]",
+  );
+  if (vfGlobalDefaultModeGroup) {
+    const MODE_KEY = "cheeseVideoFilterGlobalDefaultMode";
+    const modeButtons = Array.from(
+      vfGlobalDefaultModeGroup.querySelectorAll("[data-vf-mode-value]"),
+    );
+    function reflectVfMode(mode) {
+      const v = mode === "channel" ? "channel" : "global";
+      modeButtons.forEach((btn) => {
+        const active = btn.dataset.vfModeValue === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "global"; // 기본: 전역값 우선
+      try {
+        const d = await chrome.storage?.local?.get(MODE_KEY);
+        if (d?.[MODE_KEY] === "channel") mode = "channel";
+      } catch {}
+      reflectVfMode(mode);
+    })();
+    modeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode =
+          btn.dataset.vfModeValue === "channel" ? "channel" : "global";
+        reflectVfMode(mode);
+        try {
+          chrome.storage?.local?.set({ [MODE_KEY]: mode });
+        } catch {}
+      });
+    });
+  }
+
+  // ── 게인 슬라이더 최소/최대(숫자 세그먼티드, 배율값 저장) ─────────────────────
+  // group: [data-*] 컨테이너, dataAttr: 버튼의 data-* 키(camelCase), storageKey,
+  // allowed: 허용 배율 목록, def: 기본 배율.
+  function bindGainRangeSegmented(group, dataAttr, storageKey, allowed, def) {
+    if (!group) return;
+    const buttons = Array.from(group.querySelectorAll(`[data-${dataAttr}]`));
+    const toKey = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    function reflect(val) {
+      const v = allowed.includes(val) ? val : def;
+      buttons.forEach((btn) => {
+        const active = Number(btn.dataset[toKey]) === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let v = def;
+      try {
+        const d = await chrome.storage?.local?.get(storageKey);
+        const n = Number(d?.[storageKey]);
+        if (allowed.includes(n)) v = n;
+      } catch {}
+      reflect(v);
+    })();
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const v = Number(btn.dataset[toKey]);
+        const val = allowed.includes(v) ? v : def;
+        reflect(val);
+        try {
+          chrome.storage?.local?.set({ [storageKey]: val });
+        } catch {}
+      });
+    });
+  }
+  bindGainRangeSegmented(
+    document.querySelector("[data-mixer-gain-min]"),
+    "gain-min-value",
+    "cheeseMixerGainMin",
+    [0.5, 0.25, 0.1, 0],
+    0.5,
+  );
+  bindGainRangeSegmented(
+    document.querySelector("[data-mixer-gain-max]"),
+    "gain-max-value",
+    "cheeseMixerGainMax",
+    [2, 3],
+    2,
+  );
+
   // 라이브 되감기가 '숨김'이면 되감기 바도 의미가 없으므로 이 토글을 비활성화한다.
   // (data-feature="liveRewind"는 체크=숨김.)
   const liveRewindInput = document.querySelector('[data-feature="liveRewind"]');
@@ -858,6 +1087,53 @@
   });
   loadFollowPreviewMuted();
 
+  // ── 미리보기 볼륨(0~100%, 저장은 0~1 배율) — 슬라이더 ↔ 숫자 입력 동기화 ─────
+  const FOLLOW_PREVIEW_VOLUME_KEY = "cheeseFollowPreviewVolume";
+  const followVolumeSlider = document.querySelector(
+    "[data-follow-preview-volume-slider]",
+  );
+  const followVolumeInput = document.querySelector(
+    "[data-follow-preview-volume]",
+  );
+  function clampFollowVolumePct(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 100;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  }
+  if (followVolumeSlider || followVolumeInput) {
+    const reflect = (pct) => {
+      const v = clampFollowVolumePct(pct);
+      if (followVolumeSlider) followVolumeSlider.value = String(v);
+      if (followVolumeInput) followVolumeInput.value = String(v);
+    };
+    (async () => {
+      let pct = 100;
+      try {
+        const d = await chrome.storage?.local?.get(FOLLOW_PREVIEW_VOLUME_KEY);
+        const scale = Number(d?.[FOLLOW_PREVIEW_VOLUME_KEY]);
+        pct = Number.isFinite(scale) ? scale * 100 : 100;
+      } catch {}
+      reflect(pct);
+    })();
+    const save = (pct) => {
+      const v = clampFollowVolumePct(pct);
+      reflect(v);
+      try {
+        chrome.storage?.local?.set({ [FOLLOW_PREVIEW_VOLUME_KEY]: v / 100 });
+      } catch {}
+    };
+    // 슬라이더는 드래그 중(input) 실시간 반영, 숫자는 change/blur 시 저장.
+    followVolumeSlider?.addEventListener("input", () =>
+      save(followVolumeSlider.value),
+    );
+    followVolumeInput?.addEventListener("change", () =>
+      save(followVolumeInput.value),
+    );
+    followVolumeInput?.addEventListener("blur", () =>
+      save(followVolumeInput.value),
+    );
+  }
+
   // ── 미리보기 썸네일로만 보기(체크=영상 대신 썸네일 이미지) ─────────────────
   const FOLLOW_PREVIEW_THUMB_KEY = "cheeseFollowPreviewThumbOnly";
   const followPreviewThumbInput = document.querySelector(
@@ -997,6 +1273,30 @@
     } catch {}
   });
   loadCardPreviewAudio();
+
+  // ── 다시보기 카드 날짜 툴팁(채널 다시보기 목록 카드 호버, 전역 기본 ON) ──────
+  const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
+  const cardDateTooltipInput = document.querySelector(
+    "[data-card-date-tooltip]",
+  );
+
+  async function loadCardDateTooltip() {
+    let on = true;
+    try {
+      const data = await chrome.storage?.local?.get(CARD_DATE_TOOLTIP_KEY);
+      on = data?.[CARD_DATE_TOOLTIP_KEY] !== false; // 미설정/true=사용
+    } catch {}
+    if (cardDateTooltipInput) cardDateTooltipInput.checked = on;
+  }
+
+  cardDateTooltipInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [CARD_DATE_TOOLTIP_KEY]: cardDateTooltipInput.checked,
+      });
+    } catch {}
+  });
+  loadCardDateTooltip();
 
   // ── 실시간 따라잡기 민감도 프리셋(low/normal/high/custom) ──────────────────
   const SYNC_PRESET_KEY = "cheeseSyncPreset";

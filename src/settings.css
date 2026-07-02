@@ -281,7 +281,7 @@ body {
 }
 
 .settings-preset-picker {
-  width: 150px;
+  width: 140px;
 }
 
 .settings-preset-picker .settings-popover-trigger {
@@ -447,6 +447,11 @@ body {
   gap: 6px;
 }
 
+/* 2칸 세그먼트(전역값 우선 / 직접 선택 우선 등) */
+.settings-segmented-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 /* 3칸 세그먼트(기본과 동일하지만 의도 명시) */
 .settings-segmented-3 {
   grid-template-columns: repeat(3, 1fr);
@@ -499,6 +504,35 @@ body {
   font-size: 11px;
   font-weight: 700;
   color: var(--popup-muted);
+}
+
+.settings-item:has([data-mixer-global-default-mode]),
+.settings-item:has([data-video-filter-global-default-mode]),
+.settings-item:has([data-mixer-gain-min]) {
+  flex-direction: column;
+}
+
+.settings-item [data-mixer-global-default-mode],
+.settings-item [data-video-filter-global-default-mode],
+.settings-item:has([data-mixer-gain-min]) [data-mixer-gain-min] {
+  margin-left: auto;
+}
+
+.settings-item:has(.settings-volume-row) {
+  flex-direction: column;
+}
+
+/* 미리보기 볼륨: 슬라이더 + 숫자 입력을 한 줄에(stacked item 오른쪽 정렬) */
+.settings-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.settings-volume-slider {
+  width: 180px;
+  accent-color: var(--popup-brand);
+  cursor: pointer;
 }
 
 .settings-custom-input {

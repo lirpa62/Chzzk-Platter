@@ -23,6 +23,9 @@
   let mixerAlwaysOn = false;
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
+  let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
+  let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
+  let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
@@ -38,6 +41,17 @@
     // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
     wideScreenAuto = e.data.wideScreenAuto === true;
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
+    // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
+    volumePctOn = e.data.volumePct !== false;
+    gainPctOn = e.data.gainPct !== false;
+    // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
+    mixerClickActivate = e.data.mixerClickActivate === true;
+    // 전역 기본값 재방문 동작(global | channel, 기본 global).
+    globalDefaultMode =
+      e.data.mixerGlobalDefaultMode === "channel" ? "channel" : "global";
+    // 게인 슬라이더 범위(전역). 기본 0.5~2. 값이 바뀌면 현재 게인을 새 범위로
+    // 클램프하고 슬라이더/패널을 다시 그려 즉시 반영한다.
+    updateGainRange(e.data.mixerGainMin, e.data.mixerGainMax);
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
     liveSeekBarOn = e.data.liveSeekBar !== false;
     if (typeof applyLiveSeekBar === "function") applyLiveSeekBar();
@@ -405,6 +419,9 @@
     enabled: false,
     // 사용자가 이 채널에서 믹서를 직접 끔 → '항상 켜기' 자동 활성화 제외(opt-out).
     userDisabled: false,
+    // 사용자가 이 채널에서 프리셋을 직접 골랐는지. '직접 선택 우선' 모드에서
+    // true인 채널은 전역 기본값 대신 채널 저장값을 쓴다.
+    userPickedPreset: false,
     preset: "default",
     gain: 1,
     eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -459,6 +476,12 @@
   const PRESET_SHARE_VERSION = 1;
   // settings 플레이어 탭에서 지정하는 채널 무관 전역 기본 프리셋.
   let globalDefaultPreset = { enabled: false, preset: "default" };
+  // 전역 기본값 재방문 동작: "global"=재진입 시 항상 전역값, "channel"=채널에서 직접
+  // 고른 게 있으면 그걸(없으면 전역값). settings에서 선택(기본 global).
+  let globalDefaultMode = "global";
+  // 채널의 '원래 선택'(전역 기본값 적용 전) 스냅샷. 전역 기본값이 켜진 동안엔 이 값을
+  // 채널 저장에 쓴다(전역값이 채널 저장을 덮어쓰지 않게). 전역 해제 시 이 값으로 복원.
+  let channelBaseState = null;
   // 프리셋(내장/커스텀) 적용 후 값을 수정해 벗어난 상태인지. true면 head에
   // "프리셋 추가" 빠른 저장 버튼이 나타난다.
   let presetDirty = false;
@@ -842,6 +865,8 @@
         state.limiter = snapshot.limiter;
         state.normalizer = snapshot.normalizer;
         clearPresetDirty();
+        state.userPickedPreset = true; // 사용자가 직접 고름
+        channelBaseState = snapshotChannelPreset(); // 사용자 선택 → 채널 원본 갱신
         applyState();
         saveState();
         syncUI();
@@ -858,6 +883,11 @@
     state.normalizer = snapshot.normalizer;
     state.limiter = snapshot.limiter;
     clearPresetDirty();
+    // 사용자가 직접 프리셋을 골랐으므로 채널의 '원래 선택'을 이 값으로 갱신하고
+    // userPickedPreset을 세운다(전역 기본값이 켜져 있어도, 이 선택이 채널 저장·전역
+    // 해제 시 복원값이 되고, '직접 선택 우선' 모드에선 재진입 시 이 값이 적용되게).
+    state.userPickedPreset = true;
+    channelBaseState = snapshotChannelPreset();
     applyState();
     saveState();
     syncUI();
@@ -1594,16 +1624,36 @@
     );
   }
 
-  function serializeState() {
+  // 현재 state에서 '채널이 저장할 프리셋/값' 부분만 스냅샷.
+  function snapshotChannelPreset() {
     return {
-      enabled: state.enabled,
-      userDisabled: state.userDisabled === true,
       preset: state.preset,
       gain: state.gain,
       eq: [...state.eq],
       comp: { ...state.comp },
       limiter: { ...state.limiter },
       normalizer: { ...state.normalizer },
+    };
+  }
+
+  function serializeState() {
+    // 전역 기본값이 켜져 있으면 현재 state.preset/값은 '전역값'이므로, 채널 저장엔
+    // 채널의 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮어쓰지 않게).
+    // enabled/userDisabled/customPresets 등 나머지는 현재 state를 저장한다.
+    const preset =
+      globalDefaultPreset.enabled && channelBaseState
+        ? channelBaseState
+        : snapshotChannelPreset();
+    return {
+      enabled: state.enabled,
+      userDisabled: state.userDisabled === true,
+      userPickedPreset: state.userPickedPreset === true,
+      preset: preset.preset,
+      gain: preset.gain,
+      eq: [...preset.eq],
+      comp: { ...preset.comp },
+      limiter: { ...preset.limiter },
+      normalizer: { ...preset.normalizer },
       customPresets: normalizeCustomPresets(state.customPresets),
       defaultCustomId: String(state.defaultCustomId || ""),
     };
@@ -1656,9 +1706,15 @@
             state.normalizer = snapshot.normalizer;
           }
         }
-        // 전역 기본값이 켜져 있으면 채널별 프리셋/값보다 우선 적용한다. enabled와
-        // userDisabled는 채널 저장값을 유지해 '항상 켜기'·직접 끔 의사는 보존한다.
-        applyGlobalDefaultPreset();
+        // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 기본값이 켜진 동안 채널
+        // 저장이 전역값으로 덮어써지지 않게 하고, 전역 해제 시 이 값으로 복원한다.
+        channelBaseState = snapshotChannelPreset();
+        // 전역 기본값 적용 여부: 'channel'(직접 선택 우선) 모드이고 이 채널에서 사용자가
+        // 프리셋을 직접 골랐으면(userPickedPreset) 채널값을 유지, 그 외엔 전역값 적용.
+        // (기본 'global' 모드는 항상 전역값.) enabled/userDisabled는 채널값 유지.
+        const useChannelPick =
+          globalDefaultMode === "channel" && state.userPickedPreset === true;
+        if (!useChannelPick) applyGlobalDefaultPreset();
         // userDisabled 채널인데 로드 전 자동 활성화가 먼저 켰을 수 있다(레이스).
         // 저장된 의사를 존중해 확실히 끈다.
         if (state.userDisabled && audio.connected) {
@@ -1719,8 +1775,13 @@
       </svg>`;
   }
 
-  const GAIN_MIN = 0.5;
-  const GAIN_MAX = 2;
+  // 게인 범위는 설정에서 조절 가능(전역). 기본 0.5~2(50%~200%). content.js가
+  // feature-flags 브리지로 mixerGainMin/mixerGainMax를 전달하면 갱신한다.
+  let GAIN_MIN = 0.5;
+  let GAIN_MAX = 2;
+  function clampGain(g) {
+    return Math.max(GAIN_MIN, Math.min(GAIN_MAX, g));
+  }
   function gainToNorm(g) {
     const n = (g - GAIN_MIN) / (GAIN_MAX - GAIN_MIN);
     return Math.max(0, Math.min(1, n));
@@ -1728,6 +1789,32 @@
   function normToGain(n) {
     const g = GAIN_MIN + n * (GAIN_MAX - GAIN_MIN);
     return Math.round(g * 20) / 20;
+  }
+  // 설정에서 받은 게인 범위를 반영한다. 유효값만 채택하고(min<max, 상식 범위),
+  // 실제로 바뀐 경우에만 현재 게인을 새 범위로 클램프 후 슬라이더/패널을 갱신한다.
+  function updateGainRange(rawMin, rawMax) {
+    let min = Number(rawMin);
+    let max = Number(rawMax);
+    if (!Number.isFinite(min) || min < 0 || min > 1) min = 0.5; // 0~100%
+    if (!Number.isFinite(max) || max < 1 || max > 4) max = 2; // 100~400%
+    if (max <= min) {
+      min = 0.5;
+      max = 2;
+    } // 잘못된 조합이면 기본값
+    if (min === GAIN_MIN && max === GAIN_MAX) return; // 변화 없음
+    GAIN_MIN = min;
+    GAIN_MAX = max;
+    // 현재 게인이 새 범위를 벗어나면 클램프하고 적용(그래프에도 반영).
+    const clamped = clampGain(state.gain);
+    if (clamped !== state.gain) {
+      state.gain = clamped;
+      if (typeof applyState === "function") applyState();
+    }
+    // 컴팩트 슬라이더 채움/툴팁 + 열려 있는 패널(고급 슬라이더 min/max)을 갱신.
+    if (typeof syncMasterGain === "function") syncMasterGain();
+    if (typeof refreshPanelContent === "function" && ui?.panel) {
+      refreshPanelContent();
+    }
   }
   // 게인 슬라이더 마크업(치지직 native 볼륨 슬라이더 클래스 그대로 → native CSS
   // 적용). 게인 0.5~2를 0~1 정규화해 progress/handler에 반영.
@@ -1783,6 +1870,25 @@
     if (ui?.panel && document.body.contains(ui.panel)) {
       closePanel();
     } else {
+      openPanel();
+    }
+  }
+
+  // 믹서 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
+  // 클릭 = 믹서 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
+  function handleMixerButtonClick() {
+    if (!mixerClickActivate) {
+      togglePanel();
+      return;
+    }
+    const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
+    if (panelOpen) {
+      // 열려 있으면 끄고 닫는다. (믹서 숨김 기능이 아니라 효과 비활성)
+      if (state.enabled) setEnabled(false);
+      closePanel();
+    } else {
+      // 닫혀 있으면 켜고 연다. 클릭은 사용자 제스처라 AudioContext 활성화 가능.
+      if (!state.enabled && !graphConflict) setEnabled(true);
       openPanel();
     }
   }
@@ -1934,14 +2040,22 @@
     const panel = document.getElementById(PANEL_ID);
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     // 버튼이 잠시 숨겨져도(컨트롤 자동 숨김) 패널은 닫지 않는다. 버튼이 DOM에
-    // 존재하고 영상이 렌더 중이면 유지한다. (패널 열림 동안엔 컨트롤을 강제
-    // 표시하므로 버튼도 보이지만, 전체화면 전환 등 일시적 깜빡임에 대비.)
+    // 존재하고 영상이 '있으면' 유지한다. 렌더 가시성(opacity/rect)까지 따지면
+    // 컨트롤 전환·전체화면 토글·버퍼링 등 일시적 비가시 상태에서 오탐으로 패널이
+    // 저절로 닫혀버린다(가만둬도 사라지는 문제). 그래서 '탈착(navigation)'만 본다.
     return (
       Boolean(panel) &&
       button instanceof HTMLElement &&
       document.documentElement.contains(button) &&
-      isElementRendered(findVideo())
+      isVideoAttached()
     );
+  }
+
+  // 영상이 DOM에 붙어 있는지만 본다(가시성 무관). 페이지 이동으로 플레이어/영상이
+  // 제거되면 false → 그때만 패널을 자동으로 닫는다.
+  function isVideoAttached() {
+    const v = findVideo();
+    return v instanceof HTMLElement && document.documentElement.contains(v);
   }
 
   function isElementRendered(element) {
@@ -2067,7 +2181,7 @@
         </section>
         <section class="cheese-mixer-pane ${activeTab === "advanced" ? "is-active" : ""}" data-pane="advanced">
           ${renderCustomDraftBar("advanced")}
-          ${renderAdvancedRow("음량 (게인)", "gain", 0.5, 2, 0.05, state.gain)}
+          ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, 0.05, state.gain)}
           ${renderAdvancedRow("저음", "bass", -12, 12, 0.1, state.eq[0])}
           ${renderAdvancedRow("고음", "treble", -12, 12, 0.1, state.eq[8])}
           ${renderAdvancedRow("음성 선명도", "clarity", -12, 12, 0.1, state.eq[4])}
@@ -2082,7 +2196,7 @@
 
           ${groupHeading("음량", "group-gain")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("음량 (게인)", "gain", 0.5, 2, 0.05, state.gain)}
+            ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, 0.05, state.gain)}
           </div>
 
           ${groupHeading("컴프레서", "group-comp")}
@@ -2705,7 +2819,7 @@
   function handleSlider(key, value) {
     switch (key) {
       case "gain":
-        state.gain = value;
+        state.gain = clampGain(value);
         break;
       case "bass":
         applyEqGroup("bass", value);
@@ -2930,10 +3044,13 @@
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
-      togglePanel();
+      handleMixerButtonClick();
       return;
     }
-    // 패널이 열려 있고, 버튼·패널 바깥을 클릭하면 닫는다.
+    // 패널이 열려 있고, 버튼·패널 바깥을 '사용자가' 클릭하면 닫는다. 합성 클릭
+    // (isTrusted=false)은 무시한다 — 팔로잉 자동 새로고침 등 코드가 쏘는 .click()이
+    // document로 전파돼 패널이 저절로 닫히던 문제를 막는다.
+    if (!e.isTrusted) return;
     const panel = ui?.panel;
     if (panel && !e.target.closest?.(`#${PANEL_ID}`)) {
       closePanel();
@@ -2984,7 +3101,12 @@
   function showGainTooltip(slider) {
     const tip = gainTooltipOf(slider);
     if (!tip) return;
-    updateGainSliderVisual(slider); // 텍스트 최신화
+    updateGainSliderVisual(slider); // 텍스트(슬라이더 채움 등) 최신화는 유지
+    if (!gainPctOn) {
+      // % 표시 끔 → 툴팁만 숨긴다(슬라이더 시각은 위에서 갱신됨).
+      tip.classList.remove("is-visible");
+      return;
+    }
     if (!tip.classList.contains("is-visible")) tip.classList.add("is-visible");
     scheduleGainTooltipHide(tip);
   }
@@ -3687,12 +3809,21 @@
     keepControlsVisible(root, "stats");
     renderStatsPanel(panel);
     button?.setAttribute("aria-expanded", "true");
+    // 영상이 잠깐(재렌더로 교체되는 한두 틱) 안 잡혀도 바로 닫지 않는다. 연속으로
+    // 확실히 사라졌을 때(=페이지 이동)만 닫아 '저절로 사라짐'을 막는다.
+    let statsMissStreak = 0;
     statsTimer = window.setInterval(() => {
       const p = document.getElementById(STATS_PANEL_ID);
-      if (!p || !isElementRendered(findVideo())) {
+      if (!p) {
         closeStatsPanel();
         return;
       }
+      if (!isVideoAttached()) {
+        statsMissStreak += 1;
+        if (statsMissStreak >= 3) closeStatsPanel(); // 약 3초 연속 부재 시에만
+        return;
+      }
+      statsMissStreak = 0;
       renderStatsPanel(p);
     }, STATS_REFRESH_MS);
   }
@@ -3767,6 +3898,9 @@
       toggleStatsPanel();
       return;
     }
+    // 합성 클릭(isTrusted=false)은 무시 — 코드가 쏘는 .click()이 전파돼 패널이
+    // 저절로 닫히던 문제 방지(사용자 바깥 클릭일 때만 닫는다).
+    if (!e.isTrusted) return;
     const panel = document.getElementById(STATS_PANEL_ID);
     if (panel && !e.target.closest?.(`#${STATS_PANEL_ID}`)) {
       closeStatsPanel();
@@ -4782,9 +4916,19 @@
 
   // 우리 게인 컨트롤이 아닌 native 볼륨 컨트롤 래퍼를 찾는다(이벤트 target 기준).
   function nativeVolumeWrapOf(target) {
-    const wrap = target?.closest?.(".pzp-pc__volume-control");
-    if (!wrap || wrap.classList.contains(CONTROL_CLASS)) return null;
-    if (!findPlayer()?.contains(wrap)) return null;
+    // document 위임(capture)으로 모든 pointer/wheel/key 이벤트에서 불린다. target이
+    // Element가 아니거나(문서/텍스트노드) closest가 없을 수 있어 전부 방어한다 —
+    // 여기서 throw하면 capture 리스너가 깨져 다른 동작까지 영향을 준다.
+    const el =
+      target instanceof Element
+        ? target
+        : target?.parentElement instanceof Element
+          ? target.parentElement
+          : null;
+    const wrap = el?.closest?.(".pzp-pc__volume-control") || null;
+    if (!wrap || wrap.classList?.contains?.(CONTROL_CLASS)) return null;
+    const player = findPlayer();
+    if (!player || !player.contains(wrap)) return null;
     return wrap;
   }
 
@@ -4811,6 +4955,11 @@
   function showVolumeTooltip(wrap) {
     const tip = volumeTipOf(wrap);
     if (!tip) return;
+    if (!volumePctOn) {
+      // 표시 끔 → 떠 있으면 즉시 숨기고 종료.
+      tip.classList.remove("is-visible");
+      return;
+    }
     setVolumeTooltipText(wrap);
     if (!tip.classList.contains("is-visible")) tip.classList.add("is-visible");
     scheduleVolumeTooltipHide(tip);

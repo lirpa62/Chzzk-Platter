@@ -86,6 +86,33 @@ const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
 let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
 const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
 let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
+const VOLUME_PCT_KEY = "cheeseVolumePct";
+let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
+const GAIN_PCT_KEY = "cheeseGainPct";
+let gainPct = true; // 게인 조절 % 표시(전역, 기본 ON)
+const MIXER_CLICK_ACTIVATE_KEY = "cheeseMixerClickActivate";
+let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+const VIDEO_FILTER_CLICK_ACTIVATE_KEY = "cheeseVideoFilterClickActivate";
+let videoFilterClickActivate = false; // 필터 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
+let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
+const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY = "cheeseVideoFilterGlobalDefaultMode";
+let videoFilterGlobalDefaultMode = "global"; // 필터 전역 기본값 재방문 동작
+// 오디오 믹서 게인 슬라이더 범위(전역). 기본 0.5~2(50%~200%).
+const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
+const MIXER_GAIN_MAX_KEY = "cheeseMixerGainMax";
+let mixerGainMin = 0.5;
+let mixerGainMax = 2;
+// 게인 최소(배율): 0~1(0~100%) 범위만 허용, 미설정/이상값은 기본 0.5.
+function normalizeGainMin(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.5;
+}
+// 게인 최대(배율): 1~4(100~400%) 범위만 허용, 미설정/이상값은 기본 2.
+function normalizeGainMax(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 && n <= 4 ? n : 2;
+}
 const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
 function normalizeSeekStep(v) {
@@ -108,6 +135,16 @@ const FOLLOW_PREVIEW_MAXLIFE_ALLOWED = [30, 60, 120, 180, 300];
 // 미리보기 소리: true=항상 음소거(기본), false=항상 소리 켬. controls로 켜도
 // 다음 미리보기에선 이 값으로 강제해 일관성 유지.
 const FOLLOW_PREVIEW_MUTED_KEY = "cheeseFollowPreviewMuted";
+// 미리보기 볼륨(0~1, 기본 1). 음소거 해제 상태에서 이 값으로 재생.
+const FOLLOW_PREVIEW_VOLUME_KEY = "cheeseFollowPreviewVolume";
+let followPreviewVolume = 1;
+let followPreviewGuardBound = false; // volumechange 재해제 리스너 1회 등록 여부
+let followPreviewVolumeGuard = false; // 우리가 muted/volume 되돌리는 중(재진입 방지)
+function normalizeFollowPreviewVolume(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1, Math.max(0, n));
+}
 // 미리보기 헤더(메타바) 폰트 배율(0.75~1.75, 기본 1). 헤더 전체가 함께 스케일.
 const FOLLOW_PREVIEW_HEADER_FONT_KEY = "cheeseFollowPreviewHeaderFont";
 const FOLLOW_PREVIEW_HEADER_FONT_MIN = 0.75;
@@ -124,6 +161,10 @@ let followPreviewMaxLifeSec = 120; // 기본 2분
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
 let cardPreviewAudioOn = true;
+// 채널 다시보기 목록 카드(_information_) 호버 시 등록일/라이브 시작일 툴팁(전역, 기본
+// ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
+const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
+let cardDateTooltipOn = true;
 const featureFlags = {
   audioMixer: false,
   videoFilter: false,
@@ -169,6 +210,8 @@ const featureFlags = {
   sbPartner: false, // 파트너
   sbServices: false, // 서비스 바로가기(게임/e스포츠/오리지널/PC게임/라운지)
   sbFollowOffline: false, // 팔로잉 섹션의 오프라인 채널 숨김
+  sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
+  sidebarPush: false, // 사이드바 펼침 시 오버레이 대신 콘텐츠를 밀어내 공간 차지
 };
 // 사이드바(aside#sidebar) 숨김용 CSS를 토글하는 <style> id.
 const SIDEBAR_HIDE_STYLE_ID = "cheese-sidebar-hide-style";
@@ -4018,6 +4061,17 @@ function getCurrentLiveChannelId() {
 const LOGPOWER_CHANNEL_BASE = "https://api.chzzk.naver.com/service/v1/channels";
 const LOGPOWER_BADGE_ID = "cheese-logpower-badge";
 const LOGPOWER_REFRESH_MS = 60000; // 1분마다 갱신
+// 다른 확장이 이미 채팅창에 통나무파워 배지를 넣고 있으면 우리는 양보한다(중복 방지).
+// con-chzzk 등 알려진 배지 셀렉터. 우리 배지(#cheese-logpower-badge)는 제외.
+const FOREIGN_LOGPOWER_SELECTOR =
+  "#conchzzk-live-logpower, button.chzzk_power_badge, button.chzzk_clock_badge";
+function hasForeignLogPowerBadge() {
+  const aside = document.querySelector("aside#aside-chatting");
+  const scope = aside || document;
+  const el = scope.querySelector(FOREIGN_LOGPOWER_SELECTOR);
+  // 혹시 우리 배지가 위 셀렉터에 걸리는 일은 없지만, 방어적으로 자기 배지는 제외.
+  return !!el && el.id !== LOGPOWER_BADGE_ID;
+}
 // 배지 클릭 동작: "popup"(상위 N개 보유량 팝업) | "navigate"(통나무파워 페이지) |
 // "none"(동작 안 함). 기본 popup.
 const LOGPOWER_CLICK_ACTION_KEY = "cheeseLogPowerClickAction";
@@ -4483,6 +4537,12 @@ function showLogPowerBalancesPopup() {
 }
 
 function ensureLogPowerBadge() {
+  // 다른 확장이 이미 통나무파워 배지를 넣고 있으면 양보 — 우리 배지를 만들지 않고,
+  // 이미 만든 게 있으면 정리한다(중복 표시 방지).
+  if (hasForeignLogPowerBadge()) {
+    removeLogPowerBadge();
+    return null;
+  }
   const host = findLogPowerHost();
   if (!host) return null;
   let badge = document.getElementById(LOGPOWER_BADGE_ID);
@@ -4676,6 +4736,15 @@ function applyLogPowerBadge() {
     stopLogPowerBadgeObserver();
     removeLogPowerBadge();
     logPowerChannelId = "";
+    return;
+  }
+  // 다른 확장이 이미 통나무파워 배지를 넣고 있으면 우리 배지는 양보한다. 배지만 접고,
+  // 재렌더/재확인 대비 옵저버·폴링 타이머는 유지해 상대 배지가 사라지면 다시 붙인다.
+  if (hasForeignLogPowerBadge()) {
+    removeLogPowerBadge();
+    logPowerChannelId = channelId;
+    ensureLogPowerBadgeObserver();
+    startLogPowerTimer();
     return;
   }
   // 채널이 바뀌었으면 즉시 갱신 + 적립 추적 시작 + 1시간 타이머 복원.
@@ -7661,6 +7730,11 @@ function applyFeatureFlags(value) {
   updateSeekPreviewRealtime();
   // 격리 월드 기능 즉시 반영(검색 게이트 + 댓글 타임스탬프; init이 후자도 호출).
   init();
+  // 팔로잉 자동 펼치기: 옵션이 켜져 있으면(그리고 이번 세션에 직접 접지 않았으면)
+  // 클릭 없이 즉시 펼침 시작. 꺼져 있고 진행 중인 드라이버가 있으면 멈춘다(이미
+  // 펼쳐진 목록은 그대로 두고 더 이상 자동 펼침만 안 함).
+  if (featureFlags.sbFollowAutoExpand) ensureFollowExpansion();
+  else if (!followExpandWanted) stopFollowAutoExpand();
 }
 
 // ══ 채팅창 정리(랭킹/미션/승부예측 숨김 · 너비 · 왼쪽 배치) ══════════════════
@@ -8772,12 +8846,26 @@ function updateChatTweakStyle() {
     html.cheese-chat-left-position div#layout-body [class*="_banner_"] {
       right: auto !important;
       left: 0 !important;
+      width: var(--cheese-chat-resized-width, 353px) !important;
       max-width: var(--cheese-chat-resized-width, 353px) !important;
     }
     /* 오른쪽(기본) 배치라도 채팅 너비를 조절했으면 배너 폭을 조절된 채팅 폭에 맞춘다
-       (변수가 없으면=미조절 규칙 무효 → 치지직 기본 353px 유지). */
+       (변수가 없으면=미조절 규칙 무효 → 치지직 기본 353px 유지). width도 함께 줘야
+       한다 — max-width만 키우면 배너 자체 width(치지직 기본 353px)에 막혀 채팅을 넓혀도
+       배너가 안 커진다(max-width는 상한만, 실제 폭은 width가 정함). */
     html.cheese-chat-width-resize-enabled:not(.cheese-chat-left-position) div#layout-body [class*="_banner_"] {
+      width: var(--cheese-chat-resized-width, 353px) !important;
       max-width: var(--cheese-chat-resized-width, 353px) !important;
+    }
+    /* 채팅 너비를 좁게 조절하면 입력창 도구 줄(_tools_)/후원 컨테이너(_donation_)가
+       한 줄에 다 안 들어가 잘리거나 넘친다. 너비 조절이 활성일 때 이 두 줄에
+       flex-wrap:wrap을 줘 좁아지면 자연스럽게 줄바꿈되게 한다(해시 접미사는 바뀔 수
+       있어 부분 일치로 지정). */
+    html.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_tools_"],
+    html.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_donation_"]:not([class*="_is_donation_"]),
+    html.cheese-chat-width-resize-enabled aside#vod-aside [class*="_tools_"],
+    html.cheese-chat-width-resize-enabled aside#vod-aside [class*="_donation_"]:not([class*="_is_donation_"]) {
+      flex-wrap: wrap !important;
     }
     /* 배너 내부 광고(iframe)가 배너 폭보다 넓어 채팅창 밖으로 튀어나오는 것을 메인
        문서 CSS로 막는다(iframe 내부 스타일 주입은 로드 타이밍에 취약 → 이 규칙이
@@ -9142,6 +9230,61 @@ div#layout-body [class*="_header_"][style*="top"] {
   const css = rules.join("\n");
   if (style.textContent !== css) style.textContent = css;
   applySidebarSections();
+  applySidebarPush();
+}
+
+// ── 사이드바 펼침 밀어내기(오버레이 대신 콘텐츠 공간 차지) ────────────────────
+// 치지직 사이드바는 fixed라, 펼치면 콘텐츠 위로 겹쳐 채팅/플레이어를 가린다.
+// 옵션(sidebarPush)이 켜지고 사이드바가 펼쳐지면(_is_expanded_), 펼친 실제 폭을
+// 측정해 div#layout-body의 좌측(우측 배치면 우측) 패딩을 그만큼 늘려 콘텐츠를 밀어낸다.
+// 접히면 인라인 패딩을 제거해 치지직 기본(좁은 아이콘 폭)으로 복원한다. CSS로는 펼친
+// 폭을 알 수 없어 JS 측정 + 인라인 스타일로 처리한다.
+const SIDEBAR_PUSH_STYLE_ID = "cheese-sidebar-push-style";
+let sidebarPushSettleTimer = 0;
+// 펼침은 애니메이션이라 class 변경 순간엔 폭이 중간값일 수 있다. 잠깐 뒤 몇 번 더
+// 재측정해 최종 폭에 맞춘다(과하지 않게 짧게).
+function scheduleSidebarPushSettle() {
+  if (sidebarPushSettleTimer) return;
+  let tries = 0;
+  const tick = () => {
+    applySidebarPush();
+    tries += 1;
+    if (tries < 4) {
+      sidebarPushSettleTimer = window.setTimeout(tick, 80);
+    } else {
+      sidebarPushSettleTimer = 0;
+    }
+  };
+  sidebarPushSettleTimer = window.setTimeout(tick, 80);
+}
+function applySidebarPush() {
+  let style = document.getElementById(SIDEBAR_PUSH_STYLE_ID);
+  const sidebar = document.getElementById("sidebar");
+  const on =
+    featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar; // 숨김이면 무의미
+  const expanded = on && isSidebarExpanded(sidebar);
+  if (!expanded) {
+    // 조건 불충족(옵션 off/숨김/접힘) → 규칙 제거해 치지직 기본 레이아웃 복원.
+    if (style) style.textContent = "";
+    return;
+  }
+  const width = Math.round(sidebar.getBoundingClientRect().width);
+  // 측정값이 비정상(0 또는 좁은 아이콘 폭 이하)이면 아직 펼침 전이므로 건너뛴다.
+  if (!width || width <= 80) {
+    if (style) style.textContent = "";
+    return;
+  }
+  if (!style) {
+    style = document.createElement("style");
+    style.id = SIDEBAR_PUSH_STYLE_ID;
+    (document.head || document.documentElement).appendChild(style);
+  }
+  const side = featureFlags.sidebarRight ? "padding-right" : "padding-left";
+  // transition으로 밀어내기를 부드럽게(펼침/접힘 애니메이션과 어울리게).
+  const css =
+    `div#layout-body { ${side}: ${width}px !important;` +
+    ` transition: padding 0.2s ease !important; }`;
+  if (style.textContent !== css) style.textContent = css;
 }
 
 // ── 헤더 자동 숨김(상단 호버존에서 슬라이드 표시) ───────────────────────────
@@ -9424,6 +9567,16 @@ function findSidebarFollowNav() {
 let followExpandWanted = false; // 사용자가 '모두 펼침'을 원하는 상태
 let followAutoExpandTimer = 0; // 반복 클릭 드라이버 타이머
 let followAutoExpandTries = 0; // 안전: 무한 반복 방지
+// 자동 펼치기 옵션(sbFollowAutoExpand)이 켜져 있어도, 사용자가 이번 세션에서 직접
+// '접기'를 눌렀으면 재펼침을 멈춘다(사용자 의사 우선). 페이지 이동/새로고침 시 초기화.
+let followUserCollapsed = false;
+
+// 팔로잉 '모두 펼침'을 원하는 상태인지: 사용자가 직접 더보기를 눌렀거나(followExpandWanted),
+// 자동 펼치기 옵션이 켜졌고 이번 세션에 직접 접지 않았으면 true.
+function shouldExpandFollow() {
+  if (followExpandWanted) return true;
+  return featureFlags.sbFollowAutoExpand && !followUserCollapsed;
+}
 
 // 팔로잉 nav의 더보기/접기 버튼을 찾는다(_more_button_ 클래스, aria-label로 구분).
 function findFollowMoreButton(nav) {
@@ -9447,7 +9600,7 @@ function stopFollowAutoExpand() {
 // 더보기 버튼 등장을 기다려 다시 클릭. 접기가 보이거나 더보기가 사라지면 종료.
 function driveFollowAutoExpand() {
   followAutoExpandTimer = 0;
-  if (!followExpandWanted) return;
+  if (!shouldExpandFollow()) return;
   const nav = findSidebarFollowNav();
   if (!nav) return;
   if (findFollowCollapseButton(nav)) {
@@ -9475,7 +9628,7 @@ function driveFollowAutoExpand() {
 // 사용자가 펼침을 원하는데(followExpandWanted) 현재 접힌 상태(더보기 버튼 존재)면
 // 자동 펼침을 (재)시작한다. 사이드바 옵저버/갱신 후 호출 → 재렌더로 접혀도 복원.
 function ensureFollowExpansion() {
-  if (!followExpandWanted) return;
+  if (!shouldExpandFollow()) return;
   const nav = findSidebarFollowNav();
   if (!nav) return;
   // 접기 버튼이 있으면 이미 펼쳐진 상태 → 아무것도 안 함.
@@ -9501,12 +9654,15 @@ function onFollowMoreClickCapture(e) {
     // 사용자가 펼침 시작 → 모두 펼치고 싶다는 의사. 치지직이 1차 로드한 뒤
     // 우리가 접기 나올 때까지 이어서 클릭한다(이 클릭은 그대로 진행).
     followExpandWanted = true;
+    followUserCollapsed = false; // 직접 펼침 → 자동 펼치기 억제 해제
     followAutoExpandTries = 0;
     if (followAutoExpandTimer) clearTimeout(followAutoExpandTimer);
     followAutoExpandTimer = setTimeout(driveFollowAutoExpand, 250);
   } else {
-    // '접기' → 펼침 의사 해제(이후 갱신에도 다시 안 펼침).
+    // '접기' → 펼침 의사 해제(이후 갱신에도 다시 안 펼침). 자동 펼치기 옵션이
+    // 켜져 있어도 이번 세션은 사용자 의사를 존중해 재펼침하지 않는다.
     followExpandWanted = false;
+    followUserCollapsed = true;
     stopFollowAutoExpand();
   }
 }
@@ -9857,22 +10013,63 @@ function onHeaderFollowClick(event) {
 // 다시 부여해 깜빡임 창을 최소화한다.
 let sidebarObserver = null;
 let sidebarObservedRoot = null;
+// 사이드바 확장 상태(_is_expanded_ 클래스) 직전 값. 접힘→펼침 전환 감지용.
+let sidebarWasExpanded = false;
+
+// 사이드바가 펼쳐진 상태인지(aside#sidebar에 _is_expanded_ 클래스).
+function isSidebarExpanded(sidebar) {
+  const el = sidebar || document.getElementById("sidebar");
+  return !!el && /(^|\s|_)is_expanded(_|\s|$)/.test(el.className);
+}
+
+// 사이드바 접힘→펼침 전환을 감지해 처리한다. 다시 펼칠 때는 사용자가 이전에 누른
+// '접기' 의사를 초기화해(followUserCollapsed=false) 자동 펼치기가 다시 걸리게 한다.
+function handleSidebarExpandTransition(sidebar) {
+  const expanded = isSidebarExpanded(sidebar);
+  if (expanded !== sidebarWasExpanded) {
+    if (expanded) {
+      // 접힌 상태에서 방금 펼침 → '접기' 의사 리셋(자동 펼치기 재적용).
+      followUserCollapsed = false;
+    }
+    // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
+    scheduleSidebarPushSettle();
+  }
+  sidebarWasExpanded = expanded;
+}
+
 function ensureSidebarObserver() {
   const sidebar = document.getElementById("sidebar");
   if (!sidebar) return;
   if (sidebarObservedRoot === sidebar && sidebarObserver) return;
   if (sidebarObserver) sidebarObserver.disconnect();
   sidebarObservedRoot = sidebar;
+  sidebarWasExpanded = isSidebarExpanded(sidebar);
   sidebarObserver = new MutationObserver(() => {
     // 동기 즉시 재적용(디바운스 없음). applySidebarSections는 멱등(toggle force).
     applySidebarSections();
     ensureHeaderFollowNav();
+    // 사이드바 접힘→펼침 전환이면 '접기' 의사 리셋 + 밀어내기 폭 갱신을 예약한다.
+    // (밀어내기 폭 측정은 여기서 매번 하지 않는다 — 옵저버 콜백은 사이드바 재렌더마다
+    //  자주 도는데, 매 콜백 getBoundingClientRect()는 강제 reflow라 스래싱이 된다.
+    //  펼침/접힘 '상태가 실제로 바뀐 경우'에만 handleSidebarExpandTransition이
+    //  scheduleSidebarPushSettle()로 재측정을 예약하므로 그걸로 충분하다.)
+    handleSidebarExpandTransition(sidebar);
     ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
   });
-  sidebarObserver.observe(sidebar, { childList: true, subtree: true });
+  // childList/subtree + attributes(class): 사이드바 확장/축소는 #sidebar의 class만
+  // 바뀔 수 있어 attributeFilter로 class 변화도 감지한다.
+  sidebarObserver.observe(sidebar, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class"],
+  });
   applySidebarSections();
   ensureHeaderFollowNav();
   ensureFollowExpansion();
+  // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
+  // 있다 → 여기서 1회만 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
+  applySidebarPush();
 }
 
 // ── 헤더 미니 네비 주입/유지 ──────────────────────────────────────────────
@@ -10642,13 +10839,43 @@ async function refreshFollowPreviewViewers(el, channelId) {
   }
 }
 
+// 현재 떠 있는 미리보기 video에 음소거/볼륨 설정을 즉시 반영(settings 변경 시).
+function applyFollowPreviewVolumeNow() {
+  const v = document.querySelector(".cheese-follow-preview-video");
+  if (!v) return;
+  followPreviewVolumeGuard = true;
+  try {
+    v.muted = followPreviewMuted;
+    v.volume = followPreviewMuted ? 0 : followPreviewVolume;
+  } catch {}
+  followPreviewVolumeGuard = false;
+}
+
 function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
   const video = el.querySelector(".cheese-follow-preview-video");
   if (!video) return;
   teardownFollowPreviewMedia(video); // 이전 연결 정리
   // 소리 상태를 설정값으로 강제(controls로 사용자가 바꿔도 다음 미리보기에선 일관).
   video.muted = followPreviewMuted;
-  if (!followPreviewMuted) video.volume = 1;
+  video.volume = followPreviewMuted ? 0 : followPreviewVolume;
+  // '소리 켜기 고정'인데도 hls attach/자동재생 정책으로 video 가 다시 음소거되는 일이
+  // 잦다. volumechange 를 감시해, 소리 켜기 설정이면 muted 로 돌아갈 때마다 즉시
+  // 재해제하고 저장 볼륨을 복구한다(guard 로 우리 변경이 콜백을 재트리거하지 않게).
+  if (!followPreviewGuardBound) {
+    followPreviewGuardBound = true;
+    video.addEventListener("volumechange", () => {
+      if (followPreviewVolumeGuard) return;
+      if (followPreviewMuted) return; // 음소거 고정이면 개입 안 함
+      if (video.muted || video.volume === 0) {
+        followPreviewVolumeGuard = true;
+        try {
+          video.muted = false;
+          video.volume = followPreviewVolume;
+        } catch {}
+        followPreviewVolumeGuard = false;
+      }
+    });
+  }
   const onReady = () => {
     if (followPreviewState.currentChannelId === channelId) {
       el.classList.remove("is-loading");
@@ -10940,11 +11167,15 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_SIZE_KEY,
       FOLLOW_PREVIEW_MAXLIFE_KEY,
       FOLLOW_PREVIEW_MUTED_KEY,
+      FOLLOW_PREVIEW_VOLUME_KEY,
       FOLLOW_PREVIEW_HEADER_FONT_KEY,
       FOLLOW_PREVIEW_THUMB_KEY,
     ]);
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
     followPreviewMuted = data?.[FOLLOW_PREVIEW_MUTED_KEY] !== false; // 미설정/true=음소거
+    followPreviewVolume = normalizeFollowPreviewVolume(
+      data?.[FOLLOW_PREVIEW_VOLUME_KEY],
+    );
     followPreviewHeaderFont = normalizeFollowPreviewHeaderFont(
       data?.[FOLLOW_PREVIEW_HEADER_FONT_KEY],
     );
@@ -11140,6 +11371,134 @@ async function loadCardPreviewAudio() {
   else unbindCardPreviewAudio();
 }
 
+// ══ 채널 다시보기 목록 카드 날짜 툴팁 ════════════════════════════════════════
+// 채널 다시보기 목록 카드의 정보 줄(_information_, 조회수/상대날짜)에 호버하면
+// 등록일 + (지난 방송이면) 라이브 시작일을 정확한 날짜·시각으로 보여준다. 카드
+// videoNo로 /service/v2/videos/<no>를 fetch해 캐시하고, 다시보기 시청 툴팁과 같은
+// 커스텀 CSS 툴팁(cheese-live-start-tooltip)을 붙인다.
+const CARD_DATE_TOOLTIP_CLASS = "cheese-live-start-tooltip"; // 시청 툴팁과 CSS 재사용
+const CARD_DATE_TARGET_CLASS = "cheese-live-start-tooltip-target";
+// 정보 줄만 대상(태그 줄 _link_ 변형 제외). 카드에 /video/ 앵커가 있어야 한다.
+const CARD_INFO_SEL = '[class*="_information_"]:not([class*="_link_"])';
+let cardDateTooltipBound = false;
+const cardDateCache = new Map(); // videoNo → {publishAt, liveOpenAt} (null=실패/없음)
+const cardDateFetching = new Set(); // 중복 요청 방지
+
+// 정보 줄 요소가 속한 카드에서 videoNo를 추출한다(_information_은 /video/ 앵커의
+// 형제라 카드 컨테이너로 올라가 앵커를 찾는다). 못 찾으면 "".
+function cardVideoNoFromInfo(info) {
+  const card = info.closest("li, [class*='_container_']") || info.parentElement;
+  const anchor =
+    card?.querySelector?.('a[href^="/video/"], a[href*="/video/"]') || null;
+  const href = anchor?.getAttribute("href") || "";
+  const m = href.match(/\/video\/(\d+)/);
+  return m ? m[1] : "";
+}
+
+async function fetchCardVideoDates(videoNo) {
+  if (cardDateCache.has(videoNo) || cardDateFetching.has(videoNo)) return;
+  cardDateFetching.add(videoNo);
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/service/v2/videos/${videoNo}`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    );
+    if (!res.ok) {
+      cardDateCache.set(videoNo, null);
+      return;
+    }
+    const json = await res.json();
+    const c = json?.content || {};
+    cardDateCache.set(videoNo, {
+      publishAt: parsePublishDate(c.publishDate) || 0,
+      liveOpenAt: parsePublishDate(c.liveOpenDate) || 0,
+    });
+  } catch {
+    cardDateCache.set(videoNo, null);
+  } finally {
+    cardDateFetching.delete(videoNo);
+    // 방금 이 카드에 호버 중이면 즉시 반영.
+    if (cardDateHoverInfo && cardDateHoverVideoNo === videoNo) {
+      renderCardDateTooltip(cardDateHoverInfo, videoNo);
+    }
+  }
+}
+
+// 현재 호버 중인 정보 줄/videoNo(fetch 완료 시 지연 반영용).
+let cardDateHoverInfo = null;
+let cardDateHoverVideoNo = "";
+
+function renderCardDateTooltip(info, videoNo) {
+  const dates = cardDateCache.get(videoNo);
+  if (!dates) return; // 미확보/실패 → 툴팁 없음
+  const parts = [];
+  if (dates.publishAt) parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
+  if (dates.liveOpenAt) {
+    parts.push(`라이브 시작일 : ${formatKstClock(dates.liveOpenAt)}`);
+  }
+  if (!parts.length) return;
+  // 시청 화면 툴팁과 CSS(표시 로직)는 공유하되, 위치는 카드 전용 마커로 오버라이드.
+  info.classList.add(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
+  let label = info.querySelector(`:scope > .${CARD_DATE_TOOLTIP_CLASS}`);
+  if (!label) {
+    label = document.createElement("span");
+    label.className = CARD_DATE_TOOLTIP_CLASS;
+    info.appendChild(label);
+  }
+  const html = parts.map((p) => escapeHtml(p)).join("<br>");
+  if (label.innerHTML !== html) label.innerHTML = html;
+}
+
+function onCardDateMouseOver(e) {
+  if (!cardDateTooltipOn) return;
+  const info = e.target?.closest?.(CARD_INFO_SEL);
+  if (!info) {
+    cardDateHoverInfo = null;
+    cardDateHoverVideoNo = "";
+    return;
+  }
+  const videoNo = cardVideoNoFromInfo(info);
+  if (!videoNo) return;
+  cardDateHoverInfo = info;
+  cardDateHoverVideoNo = videoNo;
+  if (cardDateCache.has(videoNo)) {
+    renderCardDateTooltip(info, videoNo); // 캐시 있으면 즉시
+  } else {
+    void fetchCardVideoDates(videoNo); // 없으면 fetch 후 finally에서 반영
+  }
+}
+
+function bindCardDateTooltip() {
+  if (cardDateTooltipBound) return;
+  cardDateTooltipBound = true;
+  document.addEventListener("mouseover", onCardDateMouseOver, { passive: true });
+}
+
+function unbindCardDateTooltip() {
+  cardDateTooltipBound = false;
+  document.removeEventListener("mouseover", onCardDateMouseOver);
+  cardDateHoverInfo = null;
+  cardDateHoverVideoNo = "";
+  // 이미 붙인 툴팁 정리.
+  document
+    .querySelectorAll(`.${CARD_DATE_TARGET_CLASS} > .${CARD_DATE_TOOLTIP_CLASS}`)
+    .forEach((el) => {
+      const target = el.parentElement;
+      el.remove();
+      target?.classList.remove(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
+    });
+}
+
+async function loadCardDateTooltip() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await chrome.storage.local.get(CARD_DATE_TOOLTIP_KEY);
+    cardDateTooltipOn = data?.[CARD_DATE_TOOLTIP_KEY] !== false; // 미설정/true=ON
+  } catch {}
+  if (cardDateTooltipOn) bindCardDateTooltip();
+  else unbindCardDateTooltip();
+}
+
 // 헤더 전담 옵저버(미니 네비가 React 재렌더로 사라지면 즉시 복구).
 let headerObserver = null;
 let headerObservedRoot = null;
@@ -11283,6 +11642,14 @@ function broadcastFeatureFlags() {
       videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
       wideScreenAuto, // 넓은 화면 자동 적용(전역)
       liveSeekBar, // 라이브 되감기 바 표시(전역)
+      volumePct, // 볼륨 조절 % 표시(전역)
+      gainPct, // 게인 조절 % 표시(전역)
+      mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
+      videoFilterClickActivate, // 필터 버튼 클릭 시 즉시 활성/비활성(전역)
+      mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
+      videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
+      mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
+      mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
     },
     location.origin,
@@ -11300,6 +11667,14 @@ async function loadFeatureFlags() {
       VIDEO_FILTER_ALWAYS_ON_KEY,
       WIDE_SCREEN_AUTO_KEY,
       LIVE_SEEK_BAR_KEY,
+      VOLUME_PCT_KEY,
+      GAIN_PCT_KEY,
+      MIXER_CLICK_ACTIVATE_KEY,
+      VIDEO_FILTER_CLICK_ACTIVATE_KEY,
+      MIXER_GLOBAL_DEFAULT_MODE_KEY,
+      VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
+      MIXER_GAIN_MIN_KEY,
+      MIXER_GAIN_MAX_KEY,
       SEEK_STEP_KEY,
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
@@ -11309,6 +11684,21 @@ async function loadFeatureFlags() {
     logPowerClickAction = normalizeLogPowerClickAction(
       data?.[LOGPOWER_CLICK_ACTION_KEY],
     );
+    volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
+    gainPct = data?.[GAIN_PCT_KEY] !== false;
+    mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
+    videoFilterClickActivate =
+      data?.[VIDEO_FILTER_CLICK_ACTIVATE_KEY] === true;
+    mixerGlobalDefaultMode =
+      data?.[MIXER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
+        ? "channel"
+        : "global";
+    videoFilterGlobalDefaultMode =
+      data?.[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
+        ? "channel"
+        : "global";
+    mixerGainMin = normalizeGainMin(data?.[MIXER_GAIN_MIN_KEY]);
+    mixerGainMax = normalizeGainMax(data?.[MIXER_GAIN_MAX_KEY]);
     syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
     const custom = data?.[SYNC_CUSTOM_KEY];
     syncCustomValue = custom && typeof custom === "object" ? custom : null;
@@ -11351,6 +11741,37 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[LIVE_SEEK_BAR_KEY]) {
       liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
+    }
+    if (changes[VOLUME_PCT_KEY]) {
+      volumePct = changes[VOLUME_PCT_KEY].newValue !== false;
+    }
+    if (changes[GAIN_PCT_KEY]) {
+      gainPct = changes[GAIN_PCT_KEY].newValue !== false;
+    }
+    if (changes[MIXER_CLICK_ACTIVATE_KEY]) {
+      mixerClickActivate = changes[MIXER_CLICK_ACTIVATE_KEY].newValue === true;
+    }
+    if (changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY]) {
+      videoFilterClickActivate =
+        changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY].newValue === true;
+    }
+    if (changes[MIXER_GLOBAL_DEFAULT_MODE_KEY]) {
+      mixerGlobalDefaultMode =
+        changes[MIXER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
+          ? "channel"
+          : "global";
+    }
+    if (changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY]) {
+      videoFilterGlobalDefaultMode =
+        changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
+          ? "channel"
+          : "global";
+    }
+    if (changes[MIXER_GAIN_MIN_KEY]) {
+      mixerGainMin = normalizeGainMin(changes[MIXER_GAIN_MIN_KEY].newValue);
+    }
+    if (changes[MIXER_GAIN_MAX_KEY]) {
+      mixerGainMax = normalizeGainMax(changes[MIXER_GAIN_MAX_KEY].newValue);
     }
     if (changes[SEEK_STEP_KEY]) {
       seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
@@ -11398,12 +11819,13 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[FOLLOW_PREVIEW_MUTED_KEY]) {
       followPreviewMuted = changes[FOLLOW_PREVIEW_MUTED_KEY].newValue !== false;
-      // 현재 떠 있는 미리보기에도 즉시 반영.
-      const v = document.querySelector(".cheese-follow-preview-video");
-      if (v) {
-        v.muted = followPreviewMuted;
-        if (!followPreviewMuted) v.volume = 1;
-      }
+      applyFollowPreviewVolumeNow();
+    }
+    if (changes[FOLLOW_PREVIEW_VOLUME_KEY]) {
+      followPreviewVolume = normalizeFollowPreviewVolume(
+        changes[FOLLOW_PREVIEW_VOLUME_KEY].newValue,
+      );
+      applyFollowPreviewVolumeNow();
     }
     if (changes[FOLLOW_PREVIEW_HEADER_FONT_KEY]) {
       followPreviewHeaderFont = normalizeFollowPreviewHeaderFont(
@@ -11424,6 +11846,11 @@ if (chrome.storage?.onChanged) {
       if (cardPreviewAudioOn) bindCardPreviewAudio();
       else unbindCardPreviewAudio();
     }
+    if (changes[CARD_DATE_TOOLTIP_KEY]) {
+      cardDateTooltipOn = changes[CARD_DATE_TOOLTIP_KEY].newValue !== false;
+      if (cardDateTooltipOn) bindCardDateTooltip();
+      else unbindCardDateTooltip();
+    }
     if (changes[FOLLOW_PREVIEW_SIZE_KEY]) {
       const w = Number(changes[FOLLOW_PREVIEW_SIZE_KEY].newValue?.w);
       if (Number.isFinite(w)) {
@@ -11442,9 +11869,17 @@ if (chrome.storage?.onChanged) {
       changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
       changes[WIDE_SCREEN_AUTO_KEY] ||
       changes[LIVE_SEEK_BAR_KEY] ||
+      changes[VOLUME_PCT_KEY] ||
+      changes[GAIN_PCT_KEY] ||
+      changes[MIXER_CLICK_ACTIVATE_KEY] ||
+      changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY] ||
+      changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
+      changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
+      changes[MIXER_GAIN_MIN_KEY] ||
+      changes[MIXER_GAIN_MAX_KEY] ||
       changes[SEEK_STEP_KEY]
     ) {
-      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기바/되감기간격만 바뀐 경우도 전달
+      broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기바/볼륨·게인%/되감기간격만 바뀐 경우도 전달
     }
     if (changes[FOLLOW_REFRESH_KEY]) {
       applyFollowRefresh(changes[FOLLOW_REFRESH_KEY].newValue);
@@ -12032,6 +12467,7 @@ void loadHeaderNav();
 void loadChannelLiveButton();
 void loadFollowPreview();
 void loadCardPreviewAudio();
+void loadCardDateTooltip();
 
 // MAIN world 스크립트가 로드 후 플래그를 요청하면 현재 값을 보내준다(레이스 방지).
 window.addEventListener("message", (event) => {

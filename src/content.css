@@ -2322,6 +2322,22 @@
   visibility: visible;
 }
 
+/* 채널 다시보기 목록 카드용: 정보 줄이 작아 시청 화면 기준값(top: 100%-48px)을
+   쓰면 카드 위로 겹친다. 카드에선 정보 줄 바로 아래·왼쪽 정렬로 띄운다. */
+.cheese-card-date-target .cheese-live-start-tooltip {
+  left: 0;
+  top: calc(100% + 4px);
+  transform: translateX(0) translateY(2px);
+  justify-content: flex-start;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.cheese-card-date-target:hover .cheese-live-start-tooltip,
+.cheese-card-date-target:focus-within .cheese-live-start-tooltip {
+  transform: translateX(0) translateY(0);
+}
+
 /* 팔로잉 섹션 오프라인 채널 숨김(JS가 _is_live_ 없는 li에 부여) */
 #sidebar li.cheese-sb-offline-hide {
   display: none !important;
