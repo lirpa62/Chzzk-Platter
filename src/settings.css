@@ -447,6 +447,11 @@ body {
   gap: 6px;
 }
 
+/* 3칸 세그먼트(기본과 동일하지만 의도 명시) */
+.settings-segmented-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 /* 4칸 세그먼트(프리셋 3개 + 커스텀) */
 .settings-segmented-4 {
   grid-template-columns: repeat(4, 1fr);
@@ -535,6 +540,10 @@ body {
   width: 5.5ch;
   min-width: 5.5ch;
   text-align: right;
+}
+
+#logPowerClickAction {
+  margin-bottom: 5px;
 }
 
 .settings-custom-input input::-webkit-outer-spin-button,

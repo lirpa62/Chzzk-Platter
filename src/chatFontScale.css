@@ -807,3 +807,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   [class*="_wrapper_o04z9_"] > [class*="_icon_o04z9_"] {
   margin-right: calc(4px * var(--cheese-chat-font-scale)) !important;
 }
+
+/* (E) 미션 메시지 정보 행(_information_y1pxo_: 금액 + 시간)은 폰트가 커지면 금액과
+   시간 배지의 높이 차로 세로 정렬이 어긋난다 → align-items: center 로 중앙 정렬. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_information_y1pxo_"] {
+  align-items: center !important;
+}

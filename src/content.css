@@ -3176,7 +3176,7 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
 /* 툴팁("통나무 파워") — hover 시 위쪽에 표시. con-chzzk 동일. */
 #cheese-logpower-badge .tooltip-text {
   visibility: hidden;
-  width: 80px;
+  width: 120px;
   background-color: var(--Surface-Neutral-Base);
   color: var(--Content-Neutral-Cool-Stronger);
   box-shadow:
@@ -3191,9 +3191,22 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   z-index: 9999;
   left: 50%;
   bottom: 116%;
-  margin-left: -42px;
+  margin-left: -60px;
   opacity: 0;
   transition: opacity 0.2s;
+}
+
+/* 툴팁에 보유량(천단위 콤마)을 '통나무 파워' 아래 줄로 병기. */
+#cheese-logpower-badge .cheese-logpower-tooltip-value {
+  display: block;
+  margin-top: 2px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--Content-Neutral-Primary);
+}
+/* 값이 없으면(로드 전) 빈 줄이 생기지 않게 숨김. */
+#cheese-logpower-badge .cheese-logpower-tooltip-value:empty {
+  display: none;
 }
 
 #cheese-logpower-badge:hover .tooltip-text {
@@ -3378,4 +3391,263 @@ html.cheese-chat-width-resize-enabled
   max-width: 100% !important;
   min-width: 0 !important;
   height: 100% !important;
+}
+
+/* ── 통나무파워 상위 N개 보유량 팝업(con-chzzk 이식, cheese- 접두사) ──────────
+   배지 클릭 시 채팅 aside 안에 뜬다. 채팅 aside 기준 절대 배치라 채팅 너비를
+   조절해도 팝업이 그 폭 안에 맞춰진다(max-width 로 상한만). */
+.cheese-logpower-popup-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+.cheese-logpower-popup-container {
+  position: relative;
+  width: 94%;
+  max-width: 460px;
+  min-height: 150px;
+  max-height: calc(100% - 90px);
+  box-sizing: border-box;
+  margin-bottom: 70px;
+  border-radius: 12px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  color: var(--Content-Neutral-Cool-Strong);
+  background: var(--Background-Neutral-Base, #16161a);
+  box-shadow:
+    0 4px 4px 0 var(--Shadow-Strong, rgba(0, 0, 0, 0.4)),
+    0 4px 12px 4px var(--Shadow-Base, rgba(0, 0, 0, 0.3));
+}
+.cheese-logpower-popup-action {
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding: 5px;
+  position: absolute;
+  top: 0;
+  z-index: 1;
+}
+.cheese-logpower-popup-close {
+  background: none;
+  border: none;
+  width: 25px;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--Content-Neutral-Cool-Weak);
+  cursor: pointer;
+}
+.cheese-logpower-popup-close svg {
+  width: 18px;
+  height: 18px;
+}
+.cheese-logpower-popup-refresh {
+  background: none;
+  border: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--Content-Neutral-Cool-Weak);
+  flex: none;
+}
+.cheese-logpower-popup-refresh svg {
+  fill: currentColor;
+}
+.cheese-logpower-popup-close:hover,
+.cheese-logpower-popup-refresh:hover {
+  background: var(
+    --Surface-Interaction-Lighten-Hovered,
+    rgba(255, 255, 255, 0.08)
+  );
+}
+.cheese-logpower-popup-loading,
+.cheese-logpower-popup-error {
+  padding: 40px 0;
+  font-size: 14px;
+}
+.cheese-logpower-popup-error {
+  color: #f66;
+}
+.cheese-logpower-popup-table {
+  width: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  max-height: 100%;
+  display: block;
+  /* 상단 패딩을 넉넉히 — 닫기 버튼(우상단 절대배치)이 '전체 합계' 줄과 겹치지 않게. */
+  padding: 34px 15px 8px;
+}
+.cheese-logpower-popup-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.cheese-logpower-popup-total > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 0 4px;
+  border: 1px solid
+    var(--Border-Neutral-Strong-Static, rgba(255, 255, 255, 0.2));
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cheese-logpower-popup-total svg {
+  flex: none;
+}
+/* '채널별 통나무 파워' 링크(좌) + 새로고침(우)를 한 줄 양끝 배치. */
+.cheese-logpower-popup-pagerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 6px 0 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.cheese-logpower-popup-pagelink {
+  font-weight: 700;
+  font-size: 13px;
+  padding: 1px 3px;
+  border-radius: 5px;
+  color: inherit;
+  text-decoration: none;
+}
+.cheese-logpower-popup-pagelink:hover {
+  background: var(
+    --Surface-Interaction-Lighten-Hovered,
+    rgba(255, 255, 255, 0.08)
+  );
+}
+.cheese-logpower-popup-notice,
+.cheese-logpower-popup-info {
+  color: #9aa;
+  font-size: 10px;
+}
+.cheese-logpower-popup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  transition: opacity 0.15s ease;
+}
+/* 새로고침 재요청 중 살짝 흐리게 */
+.cheese-logpower-popup-rows.is-reloading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.cheese-logpower-popup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+.cheese-logpower-popup-row-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.cheese-logpower-popup-rank {
+  font-weight: 700;
+  width: 22px;
+  text-align: right;
+  font-size: 16px;
+  flex: none;
+}
+.cheese-logpower-popup-channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+.cheese-logpower-popup-channel img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  user-select: none;
+}
+.cheese-logpower-popup-name {
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+}
+img.cheese-logpower-popup-verified {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  margin-left: 2px;
+  flex: none;
+}
+.cheese-logpower-popup-amount {
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+/* 채팅창이 좁을 때(narrow) 요소 축소 — 채팅 너비 조절 대응. */
+.cheese-logpower-popup-container {
+  container-type: inline-size;
+}
+@container (max-width: 300px) {
+  .cheese-logpower-popup-channel img {
+    width: 28px;
+    height: 28px;
+  }
+  img.cheese-logpower-popup-verified {
+    width: 14px;
+    height: 14px;
+  }
+  /* 좁으면 채널(row-left)과 보유량(amount)을 세로로 배치. 보유량은 채널명과 맞춰
+     들여쓰기(순위+이미지 폭만큼) 없이 왼쪽 정렬. */
+  .cheese-logpower-popup-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+  .cheese-logpower-popup-amount {
+    align-self: flex-start;
+    padding-left: 32px;
+  }
+}
+@container (max-width: 240px) {
+  .cheese-logpower-popup-total {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

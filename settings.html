@@ -1369,11 +1369,65 @@
                 </label>
               </li>
             </ul>
+            <h3 class="settings-subgroup-title">배지 클릭 동작</h3>
+            <div
+              class="settings-segmented settings-segmented-3"
+              id="logPowerClickAction"
+              role="radiogroup"
+              aria-label="통나무파워 배지 클릭 동작"
+            >
+              <button
+                type="button"
+                data-logpower-click="popup"
+                role="radio"
+                aria-checked="true"
+              >
+                상위 보유 팝업
+              </button>
+              <button
+                type="button"
+                data-logpower-click="navigate"
+                role="radio"
+                aria-checked="false"
+              >
+                파워 페이지
+              </button>
+              <button
+                type="button"
+                data-logpower-click="none"
+                role="radio"
+                aria-checked="false"
+              >
+                동작 안 함
+              </button>
+            </div>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label for="logPowerPopupLimitInput">
+                  <span class="settings-item-name">팝업 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >상위 보유 팝업에 보여줄 채널 수(5~99)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="logPowerPopupLimitInput"
+                    min="5"
+                    max="99"
+                    step="1"
+                    inputmode="numeric"
+                    data-logpower-popup-limit
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+            </ul>
             <p class="settings-group-desc">
               라이브 페이지에서 동작합니다. 보유 표시는 채팅 입력창 옆에 현재
               채널의 보유량을 보여주고, 자동 획득은 시청 보상(1시간 시청 등)을
               자동으로 받습니다. 획득 토스트는 1시간 보상을 받았을 때 알림을
-              띄웁니다.
+              띄웁니다. 배지를 클릭하면 위에서 고른 동작을 실행합니다.
             </p>
           </section>
 

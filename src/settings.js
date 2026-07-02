@@ -538,6 +538,80 @@
   }
 
   loadGlobalDefaults();
+
+  // ── 통나무파워 배지 클릭 동작(popup | navigate | none, 기본 popup) ──────────
+  const LOGPOWER_CLICK_ACTION_KEY = "cheeseLogPowerClickAction";
+  const logPowerClickButtons = Array.from(
+    document.querySelectorAll("[data-logpower-click]"),
+  );
+  function normalizeLpClick(v) {
+    return v === "navigate" || v === "none" ? v : "popup";
+  }
+  function reflectLpClick(action) {
+    const v = normalizeLpClick(action);
+    logPowerClickButtons.forEach((btn) => {
+      const active = btn.dataset.logpowerClick === v;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  (async () => {
+    let action = "popup";
+    try {
+      const d = await chrome.storage?.local?.get(LOGPOWER_CLICK_ACTION_KEY);
+      action = normalizeLpClick(d?.[LOGPOWER_CLICK_ACTION_KEY]);
+    } catch {}
+    reflectLpClick(action);
+  })();
+  logPowerClickButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = normalizeLpClick(btn.dataset.logpowerClick);
+      reflectLpClick(action);
+      try {
+        chrome.storage?.local?.set({ [LOGPOWER_CLICK_ACTION_KEY]: action });
+      } catch {}
+    });
+  });
+
+  // ── 팝업 표시 개수(5~99, 기본 5) ──────────────────────────────────────────
+  const LOGPOWER_POPUP_LIMIT_KEY = "cheeseLogPowerPopupLimit";
+  const logPowerPopupLimitInput = document.querySelector(
+    "[data-logpower-popup-limit]",
+  );
+  function clampPopupLimit(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 5;
+    return Math.min(99, Math.max(5, Math.floor(n)));
+  }
+  if (logPowerPopupLimitInput) {
+    (async () => {
+      try {
+        const d = await chrome.storage?.local?.get(LOGPOWER_POPUP_LIMIT_KEY);
+        logPowerPopupLimitInput.value = String(
+          clampPopupLimit(d?.[LOGPOWER_POPUP_LIMIT_KEY] ?? 5),
+        );
+      } catch {
+        logPowerPopupLimitInput.value = "5";
+      }
+    })();
+    const savePopupLimit = () => {
+      const v = clampPopupLimit(logPowerPopupLimitInput.value);
+      logPowerPopupLimitInput.value = String(v);
+      try {
+        chrome.storage?.local?.set({ [LOGPOWER_POPUP_LIMIT_KEY]: v });
+      } catch {}
+    };
+    logPowerPopupLimitInput.addEventListener("change", savePopupLimit);
+    logPowerPopupLimitInput.addEventListener("blur", savePopupLimit);
+    // 팝업에서 개수를 바꾸면 이 입력도 동기화.
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || !changes[LOGPOWER_POPUP_LIMIT_KEY]) return;
+      logPowerPopupLimitInput.value = String(
+        clampPopupLimit(changes[LOGPOWER_POPUP_LIMIT_KEY].newValue ?? 5),
+      );
+    });
+  }
+
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[AUDIO_MIXER_PRESETS_KEY]) {

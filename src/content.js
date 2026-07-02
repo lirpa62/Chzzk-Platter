@@ -4018,6 +4018,46 @@ function getCurrentLiveChannelId() {
 const LOGPOWER_CHANNEL_BASE = "https://api.chzzk.naver.com/service/v1/channels";
 const LOGPOWER_BADGE_ID = "cheese-logpower-badge";
 const LOGPOWER_REFRESH_MS = 60000; // 1분마다 갱신
+// 배지 클릭 동작: "popup"(상위 N개 보유량 팝업) | "navigate"(통나무파워 페이지) |
+// "none"(동작 안 함). 기본 popup.
+const LOGPOWER_CLICK_ACTION_KEY = "cheeseLogPowerClickAction";
+let logPowerClickAction = "popup";
+const LOGPOWER_PAGE_URL = "https://game.naver.com/profile#channel_power";
+function normalizeLogPowerClickAction(v) {
+  return v === "navigate" || v === "none" ? v : "popup";
+}
+// 상위 N개 보유량 팝업 관련(con-chzzk showLogPowerBalancesPopup 이식).
+const LOGPOWER_POPUP_LIMIT_KEY = "cheeseLogPowerPopupLimit";
+const LOGPOWER_POPUP_DEFAULT_LIMIT = 5;
+const LOGPOWER_POPUP_BALANCES_URL =
+  "https://api.chzzk.naver.com/service/v1/log-power/balances";
+let logPowerPopupEscHandler = null;
+let logPowerPopupOutsideHandler = null;
+let logPowerPopupRetryTimer = 0;
+function clampLogPowerPopupLimit(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return LOGPOWER_POPUP_DEFAULT_LIMIT;
+  return Math.min(99, Math.max(5, Math.floor(n)));
+}
+function getStoredLogPowerPopupLimit() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(
+        { [LOGPOWER_POPUP_LIMIT_KEY]: LOGPOWER_POPUP_DEFAULT_LIMIT },
+        (data) => {
+          void chrome.runtime.lastError;
+          resolve(clampLogPowerPopupLimit(data?.[LOGPOWER_POPUP_LIMIT_KEY]));
+        },
+      );
+    } catch {
+      resolve(LOGPOWER_POPUP_DEFAULT_LIMIT);
+    }
+  });
+}
+// 파워 아이콘 SVG(con-chzzk 팝업 합계 표시용).
+function logPowerPopupIcon() {
+  return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><mask id="cheese-lp-popup-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16" style="mask-type:alpha"><path d="M6.79453 2.43359C7.09254 2.43374 7.36838 2.58075 7.53476 2.82161L7.59921 2.93099L8.91692 5.56641H5.98333L5.82643 5.25326L5.06796 3.73568C4.76891 3.13737 5.20381 2.43379 5.87265 2.43359H6.79453Z" fill="currentColor"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M12.1484 4.43359C13.0053 4.43359 13.6561 5.0624 14.0599 5.80273C14.4754 6.5645 14.7148 7.57802 14.7148 8.66667C14.7148 9.75531 14.4754 10.7688 14.0599 11.5306C13.6561 12.2709 13.0053 12.8997 12.1484 12.8997H4C3.14314 12.8997 2.49236 12.2709 2.08854 11.5306C1.67304 10.7688 1.43359 9.75531 1.43359 8.66667C1.43359 7.57802 1.67304 6.5645 2.08854 5.80273C2.49236 5.0624 3.14314 4.43359 4 4.43359H12.1484ZM4 5.56641C3.75232 5.56641 3.40334 5.75848 3.08333 6.34505C2.77498 6.91036 2.56641 7.73027 2.56641 8.66667C2.56641 9.60306 2.77498 10.423 3.08333 10.9883C3.40334 11.5749 3.75232 11.7669 4 11.7669C4.24767 11.7669 4.59666 11.5749 4.91667 10.9883C5.22502 10.423 5.43359 9.60306 5.43359 8.66667C5.43359 7.73027 5.22502 6.91036 4.91667 6.34505C4.59666 5.75848 4.24767 5.56641 4 5.56641ZM6.52604 9.43359C6.48364 9.83162 6.40829 10.2124 6.30404 10.5664H11.6667L11.7246 10.5638C12.0104 10.5348 12.2331 10.2934 12.2331 10C12.2331 9.7066 12.0104 9.46522 11.7246 9.4362L11.6667 9.43359H6.52604ZM6.28385 6.70052C6.39253 7.05354 6.47186 7.43444 6.51823 7.83333H7.33333L7.39128 7.83073C7.67694 7.80172 7.89962 7.56022 7.89974 7.26693C7.89974 6.97353 7.67701 6.73215 7.39128 6.70312L7.33333 6.70052H6.28385ZM9.60026 6.70052C9.2873 6.70052 9.0332 6.95397 9.0332 7.26693C9.03333 7.57978 9.28738 7.83333 9.60026 7.83333H13.5228C13.4637 7.41061 13.3619 7.02765 13.2298 6.70052H9.60026Z" fill="currentColor"></path></mask><g mask="url(#cheese-lp-popup-mask)"><rect width="15.9998" height="16" fill="currentColor"></rect></g></svg>`;
+}
 let logPowerTimer = 0;
 let logPowerChannelId = "";
 // 보유량 적응형 캐시(con-chzzk fetchChannelLogPower 동일). 캐시가 유효하면 네트워크
@@ -4185,6 +4225,263 @@ async function fetchLogPowerAmountRaw(channelId) {
 // host가 바뀌었으면(채팅 재렌더로 도구 줄 교체) 새 host로 이동. 반환=배지 또는 null.
 // 치지직이 _donation_/_tools_를 통째 새 노드로 교체해 배지가 detach되는 경우를
 // 매번 현재 host 기준으로 재부착해 '사라짐'을 막는다.
+// 통나무파워 배지 클릭 → 설정된 동작 실행.
+function onLogPowerBadgeClick(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (logPowerClickAction === "none") return;
+  if (logPowerClickAction === "navigate") {
+    try {
+      window.open(LOGPOWER_PAGE_URL, "_blank", "noopener");
+    } catch {}
+    return;
+  }
+  // 기본: popup — 상위 N개 보유량 팝업(본체는 showLogPowerBalancesPopup).
+  showLogPowerBalancesPopup();
+}
+
+const LOGPOWER_POPUP_LAYER_CLASS = "cheese-logpower-popup-layer";
+
+// 열려 있는 팝업 + 리스너·타이머를 정리한다.
+function removeLogPowerBalancesPopup() {
+  document
+    .querySelectorAll(`.${LOGPOWER_POPUP_LAYER_CLASS}`)
+    .forEach((el) => el.remove());
+  if (logPowerPopupEscHandler) {
+    window.removeEventListener("keydown", logPowerPopupEscHandler);
+    logPowerPopupEscHandler = null;
+  }
+  if (logPowerPopupOutsideHandler) {
+    document.removeEventListener(
+      "pointerdown",
+      logPowerPopupOutsideHandler,
+      true,
+    );
+    logPowerPopupOutsideHandler = null;
+  }
+  if (logPowerPopupRetryTimer) {
+    clearTimeout(logPowerPopupRetryTimer);
+    logPowerPopupRetryTimer = 0;
+  }
+}
+
+// 상위 N개 통나무파워 보유량 팝업(con-chzzk showLogPowerBalancesPopup 이식).
+// log-power/balances 로 전체 보유량을 받아 내림차순 상위 N개 표시 + N 조절. 채팅
+// aside 안에 부착하고, ESC·바깥 클릭·닫기 버튼으로 닫는다.
+function showLogPowerBalancesPopup() {
+  // 이미 열려 있으면 토글로 닫는다.
+  if (document.querySelector(`.${LOGPOWER_POPUP_LAYER_CLASS}`)) {
+    removeLogPowerBalancesPopup();
+    return;
+  }
+  if (logPowerPopupRetryTimer) {
+    clearTimeout(logPowerPopupRetryTimer);
+    logPowerPopupRetryTimer = 0;
+  }
+
+  const tryCreate = () => {
+    const aside =
+      document.querySelector("aside#aside-chatting") ||
+      document.querySelector("aside#vod-aside");
+    if (!aside) {
+      logPowerPopupRetryTimer = window.setTimeout(tryCreate, 1500);
+      return;
+    }
+
+    const layer = document.createElement("div");
+    layer.className = LOGPOWER_POPUP_LAYER_CLASS;
+    layer.setAttribute("role", "dialog");
+
+    const container = document.createElement("div");
+    container.className = "cheese-logpower-popup-container";
+    container.setAttribute("role", "alertdialog");
+    container.setAttribute("aria-modal", "true");
+
+    const action = document.createElement("div");
+    action.className = "cheese-logpower-popup-action";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "cheese-logpower-popup-close";
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "팝업 닫기");
+    closeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none"><path fill="currentColor" d="M16.6 4.933A1.083 1.083 0 1 0 15.066 3.4L10 8.468 4.933 3.4A1.083 1.083 0 0 0 3.4 4.933L8.468 10 3.4 15.067A1.083 1.083 0 1 0 4.933 16.6L10 11.532l5.067 5.067a1.083 1.083 0 1 0 1.532-1.532L11.532 10l5.067-5.067Z"/></svg>`;
+    closeBtn.addEventListener("click", removeLogPowerBalancesPopup);
+    action.appendChild(closeBtn);
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "cheese-logpower-popup-refresh";
+    refreshBtn.type = "button";
+    refreshBtn.setAttribute("aria-label", "새로고침");
+    refreshBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" height="18" width="18" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
+    // 클릭 핸들러는 데이터/render 준비 후(fetch then 내부)에서 붙인다 → reloadRows.
+
+    const loading = document.createElement("div");
+    loading.className = "cheese-logpower-popup-loading";
+    loading.textContent = "불러오는 중…";
+
+    container.append(action, loading);
+    layer.appendChild(container);
+    aside.appendChild(layer);
+
+    // 닫기: ESC + 바깥(팝업 컨테이너 밖) 클릭.
+    logPowerPopupEscHandler = (ev) => {
+      if (ev.key === "Escape") removeLogPowerBalancesPopup();
+    };
+    window.addEventListener("keydown", logPowerPopupEscHandler);
+    logPowerPopupOutsideHandler = (ev) => {
+      // 배지 클릭(토글)과 팝업 내부 클릭은 무시.
+      if (container.contains(ev.target)) return;
+      if (ev.target.closest?.(`#${LOGPOWER_BADGE_ID}`)) return;
+      removeLogPowerBalancesPopup();
+    };
+    document.addEventListener("pointerdown", logPowerPopupOutsideHandler, true);
+
+    Promise.all([
+      fetch(LOGPOWER_POPUP_BALANCES_URL, { credentials: "include" }).then((r) =>
+        r.json(),
+      ),
+      getStoredLogPowerPopupLimit(),
+    ])
+      .then(([data, initialLimit]) => {
+        loading.remove();
+        const toSorted = (d) =>
+          (Array.isArray(d?.content?.data) ? d.content.data : [])
+            .slice()
+            .sort((a, b) => (b.amount || 0) - (a.amount || 0));
+        // 새로고침으로 재할당하므로 let. (data → sorted/totalPower)
+        let sorted = toSorted(data);
+        let totalPower = sorted.reduce((s, x) => s + (x.amount || 0), 0);
+        let currentLimit = clampLogPowerPopupLimit(initialLimit);
+
+        const limitedData = () => sorted.slice(0, currentLimit);
+        const limitedTotal = () =>
+          limitedData().reduce((s, x) => s + (x.amount || 0), 0);
+
+        const defaultImg =
+          "https://ssl.pstatic.net/cmstatic/nng/img/img_anonymous_square_gray_opacity2x.png?type=f120_120_na";
+        const renderRows = (rows) =>
+          rows
+            .map((x, i) => {
+              const active = x.active !== false;
+              const nameColor = active ? "inherit" : "#888";
+              const verified = x.verifiedMark
+                ? `<img src="https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png" alt="인증" class="cheese-logpower-popup-verified">`
+                : "";
+              return (
+                `<div class="cheese-logpower-popup-row">` +
+                `<div class="cheese-logpower-popup-row-left">` +
+                `<span class="cheese-logpower-popup-rank" style="color:${active ? "var(--Content-Brand-Strong)" : "#888"}">${i + 1}</span>` +
+                `<a href="https://chzzk.naver.com/${escapeAttribute(String(x.channelId || ""))}" target="_blank" rel="noreferrer" class="cheese-logpower-popup-channel">` +
+                `<img src="${escapeAttribute(x.channelImageUrl || defaultImg)}" alt="" style="opacity:${active ? "1" : "0.5"}">` +
+                `<span class="cheese-logpower-popup-name" style="color:${nameColor}" title="${escapeAttribute(String(x.channelName || ""))}">${escapeHtml(String(x.channelName || ""))}${verified}</span>` +
+                `</a></div>` +
+                `<span class="cheese-logpower-popup-amount" style="color:${nameColor}">${(x.amount || 0).toLocaleString("ko-KR")}</span>` +
+                `</div>`
+              );
+            })
+            .join("");
+
+        const table = document.createElement("div");
+        table.className = "cheese-logpower-popup-table";
+        table.innerHTML =
+          `<div class="cheese-logpower-popup-total">전체 합계 ` +
+          `<span class="cheese-logpower-popup-all-value">${logPowerPopupIcon()} ${totalPower.toLocaleString("ko-KR")}</span></div>` +
+          `<div class="cheese-logpower-popup-total cheese-logpower-popup-top-total">` +
+          `<b class="cheese-logpower-popup-top-label">TOP ${currentLimit} 통나무 파워 합계 </b>` +
+          `<span class="cheese-logpower-popup-top-value">${logPowerPopupIcon()} ${limitedTotal().toLocaleString("ko-KR")}</span></div>` +
+          `<div class="cheese-logpower-popup-pagerow">` +
+          `<a href="${LOGPOWER_PAGE_URL}" target="_blank" rel="noreferrer" class="cheese-logpower-popup-pagelink">채널별 통나무 파워</a>` +
+          `</div>` +
+          `<div class="cheese-logpower-popup-notice"></div>` +
+          `<div class="cheese-logpower-popup-info">100 파워 이상 보유한 채널만 표시합니다.<br>비활성화된 채널은 회색으로 표시됩니다.<br>표시 개수는 설정의 통나무파워 탭에서 조절할 수 있습니다.</div>` +
+          `<div class="cheese-logpower-popup-rows"></div>`;
+
+        const topLabel = table.querySelector(
+          ".cheese-logpower-popup-top-label",
+        );
+        const topValue = table.querySelector(
+          ".cheese-logpower-popup-top-value",
+        );
+        const allValue = table.querySelector(
+          ".cheese-logpower-popup-all-value",
+        );
+        const notice = table.querySelector(".cheese-logpower-popup-notice");
+        const rowsBox = table.querySelector(".cheese-logpower-popup-rows");
+        // 새로고침 버튼은 '채널별 통나무 파워' 링크와 같은 줄 오른쪽 끝에 둔다.
+        table
+          .querySelector(".cheese-logpower-popup-pagerow")
+          ?.appendChild(refreshBtn);
+
+        // 표시 개수는 settings 에서만 조절한다. 여기선 현재 limit/데이터로 렌더만 한다.
+        const render = () => {
+          const rows = limitedData();
+          if (allValue)
+            allValue.innerHTML = `${logPowerPopupIcon()} ${totalPower.toLocaleString("ko-KR")}`;
+          if (topLabel) topLabel.textContent = `TOP ${currentLimit} 합계 `;
+          if (topValue)
+            topValue.innerHTML = `${logPowerPopupIcon()} ${limitedTotal().toLocaleString("ko-KR")}`;
+          if (notice) {
+            notice.textContent =
+              sorted.length > currentLimit
+                ? `상위 ${currentLimit}개 채널만 표시합니다.`
+                : `표시 가능한 ${rows.length}개 채널을 모두 표시합니다.`;
+          }
+          if (rowsBox) rowsBox.innerHTML = renderRows(rows);
+        };
+
+        // 새로고침: 팝업 전체가 아니라 balances 만 다시 받아 합계·행만 갱신한다.
+        let reloading = false;
+        const reloadRows = () => {
+          if (reloading || !rowsBox) return;
+          reloading = true;
+          refreshBtn.disabled = true;
+          rowsBox.classList.add("is-reloading");
+          fetch(LOGPOWER_POPUP_BALANCES_URL, { credentials: "include" })
+            .then((r) => r.json())
+            .then((fresh) => {
+              sorted = toSorted(fresh);
+              totalPower = sorted.reduce((s, x) => s + (x.amount || 0), 0);
+              render();
+            })
+            .catch(() => {})
+            .finally(() => {
+              reloading = false;
+              refreshBtn.disabled = false;
+              rowsBox.classList.remove("is-reloading");
+            });
+        };
+        refreshBtn.addEventListener("click", reloadRows);
+
+        // settings 에서 개수 변경 시 반영(팝업이 살아 있는 동안만). 팝업이 닫히면
+        // layer 가 사라지므로 리스너에서 스스로 정리한다.
+        const onLimitChanged = (changes, area) => {
+          if (area !== "local" || !changes[LOGPOWER_POPUP_LIMIT_KEY]) return;
+          if (!layer.isConnected) {
+            chrome.storage.onChanged.removeListener(onLimitChanged);
+            return;
+          }
+          currentLimit = clampLogPowerPopupLimit(
+            changes[LOGPOWER_POPUP_LIMIT_KEY].newValue,
+          );
+          render();
+        };
+        try {
+          chrome.storage.onChanged.addListener(onLimitChanged);
+        } catch {}
+
+        render();
+        container.appendChild(table);
+      })
+      .catch(() => {
+        loading.remove();
+        const err = document.createElement("div");
+        err.className = "cheese-logpower-popup-error";
+        err.textContent = "통나무 파워 정보를 불러오지 못했습니다.";
+        container.appendChild(err);
+      });
+  };
+  tryCreate();
+}
+
 function ensureLogPowerBadge() {
   const host = findLogPowerHost();
   if (!host) return null;
@@ -4199,7 +4496,9 @@ function ensureLogPowerBadge() {
       `${logPowerIcon()}<b class="cheese-logpower-text">-</b>` +
       `<span class="cheese-logpower-progress" hidden>${clockSvg}<span>적립 중</span></span>` +
       `<span class="cheese-logpower-timer" hidden>${clockSvg}<span class="cheese-logpower-claimed" hidden>획득</span><span class="cheese-logpower-time">60:00</span></span>` +
-      `<span class="tooltip-text">통나무 파워</span>`;
+      `<span class="tooltip-text">통나무 파워<span class="cheese-logpower-tooltip-value"></span></span>`;
+    badge.style.cursor = "pointer";
+    badge.addEventListener("click", onLogPowerBadgeClick);
   }
   // detach됐거나, 다른 host거나, host의 마지막 자식이 아니면 끝으로 (재)부착한다.
   // (con-chzzk upsertBadge와 동일: 항상 후원 버튼 옆 맨 끝에 두어 위치도 보장.)
@@ -4226,8 +4525,13 @@ function renderLogPowerBadge(amount) {
       }
     } else {
       textEl.textContent = formatCompactPower(amount);
-      textEl.title = (Number(amount) || 0).toLocaleString("ko-KR");
+      textEl.removeAttribute("title"); // 값은 툴팁에 표시(네이티브 title 중복 제거)
     }
+  }
+  // 툴팁에 정확한 보유량을 천단위 콤마로 병기('통나무 파워' 아래 줄).
+  const tipValue = badge.querySelector(".cheese-logpower-tooltip-value");
+  if (tipValue && amount != null) {
+    tipValue.textContent = `(${(Number(amount) || 0).toLocaleString("ko-KR")})`;
   }
 }
 
@@ -4472,7 +4776,8 @@ function findLogPowerRewardButton(root) {
   for (const btn of scope.querySelectorAll("button")) {
     const t = (btn.textContent || "").trim();
     const hasRewardText =
-      (t.includes("받기") && (t.includes("통나무 파워") || t.includes("배달"))) ||
+      (t.includes("받기") &&
+        (t.includes("통나무 파워") || t.includes("배달"))) ||
       t.includes("배달 완료");
     const hasPowerIcon = !!btn.querySelector("[class*='_icon_power_']");
     if (hasRewardText || (t.includes("받기") && hasPowerIcon)) return btn;
@@ -8225,7 +8530,9 @@ function setChatPeek(show) {
 }
 
 function getChatPeekEdge() {
-  return document.documentElement.classList.contains("cheese-chat-left-position")
+  return document.documentElement.classList.contains(
+    "cheese-chat-left-position",
+  )
     ? "left"
     : "right";
 }
@@ -8280,7 +8587,10 @@ function unbindChatAutoHide() {
 }
 
 function bindChatAutoHideArea(aside) {
-  if (!(aside instanceof HTMLElement) || aside.dataset.cheeseChatAutoHideBound) {
+  if (
+    !(aside instanceof HTMLElement) ||
+    aside.dataset.cheeseChatAutoHideBound
+  ) {
     return;
   }
   aside.dataset.cheeseChatAutoHideBound = "1";
@@ -8363,7 +8673,9 @@ function applyBannerAdWidth() {
   if (!(banner instanceof HTMLElement)) return;
   const w = Math.round(banner.getBoundingClientRect().width);
   if (!(w > 0)) return;
-  const iframe = banner.querySelector('iframe[title="AD"], iframe[id*="banner"]');
+  const iframe = banner.querySelector(
+    'iframe[title="AD"], iframe[id*="banner"]',
+  );
   if (!(iframe instanceof HTMLIFrameElement)) return;
   // iframe에 load 리스너를 1회만 부착: 광고가 로드/재렌더될 때마다 현재 배너 폭으로
   // 다시 주입한다.
@@ -10363,7 +10675,12 @@ function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
       if (followPreviewState.currentChannelId !== channelId) return;
       if (fresh?.m3u8) {
         renderFollowPreviewMeta(el, fresh.meta);
-        attachFollowPreviewSource(el, fresh.m3u8, channelId, fresh.thumb || thumb);
+        attachFollowPreviewSource(
+          el,
+          fresh.m3u8,
+          channelId,
+          fresh.thumb || thumb,
+        );
       } else {
         // 재요청도 실패 → 썸네일로 대체.
         fallbackToThumb();
@@ -10987,7 +11304,11 @@ async function loadFeatureFlags() {
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
       CHAT_FONT_SCALE_SPECIAL_KEY,
+      LOGPOWER_CLICK_ACTION_KEY,
     ]);
+    logPowerClickAction = normalizeLogPowerClickAction(
+      data?.[LOGPOWER_CLICK_ACTION_KEY],
+    );
     syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
     const custom = data?.[SYNC_CUSTOM_KEY];
     syncCustomValue = custom && typeof custom === "object" ? custom : null;
@@ -11046,8 +11367,14 @@ if (chrome.storage?.onChanged) {
       applyChatTweaks(); // 폰트 배율 변경 → 전체 재적용(옵저버 가동 포함)
     }
     if (changes[CHAT_FONT_SCALE_SPECIAL_KEY]) {
-      chatFontScaleSpecial = changes[CHAT_FONT_SCALE_SPECIAL_KEY].newValue === true;
+      chatFontScaleSpecial =
+        changes[CHAT_FONT_SCALE_SPECIAL_KEY].newValue === true;
       applyChatFontScale(); // 특수 메시지 스케일 클래스 즉시 토글
+    }
+    if (changes[LOGPOWER_CLICK_ACTION_KEY]) {
+      logPowerClickAction = normalizeLogPowerClickAction(
+        changes[LOGPOWER_CLICK_ACTION_KEY].newValue,
+      );
     }
     if (changes[CHANNEL_LIVE_BUTTON_KEY]) {
       channelLiveButtonOn = changes[CHANNEL_LIVE_BUTTON_KEY].newValue !== false;
