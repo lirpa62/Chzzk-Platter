@@ -128,6 +128,29 @@
     chatFontScaleInput.addEventListener("blur", saveChatFontScale);
   }
 
+  // ── 후원·구독 등 특수 메시지도 폰트 크기 조절(기본 OFF) ─────────────────────
+  const CHAT_FONT_SCALE_SPECIAL_KEY = "cheeseChatFontScaleSpecial";
+  const chatFontScaleSpecialInput = document.querySelector(
+    "[data-chat-font-scale-special]",
+  );
+  if (chatFontScaleSpecialInput) {
+    (async () => {
+      let on = false;
+      try {
+        const d = await chrome.storage?.local?.get(CHAT_FONT_SCALE_SPECIAL_KEY);
+        on = d?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
+      } catch {}
+      chatFontScaleSpecialInput.checked = on;
+    })();
+    chatFontScaleSpecialInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({
+          [CHAT_FONT_SCALE_SPECIAL_KEY]: chatFontScaleSpecialInput.checked,
+        });
+      } catch {}
+    });
+  }
+
   // ── 채팅 기능: 배지 모아 챗이 제어 중이면 해당 토글/셀렉트를 비활성화 ─────────
   // content.js가 페이지에서 moa 제어 상태를 cheeseChatMoaActive(배열)로 기록한다.
   const CHAT_MOA_ACTIVE_KEY = "cheeseChatMoaActive";

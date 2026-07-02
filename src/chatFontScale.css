@@ -218,6 +218,16 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   vertical-align: middle !important;
 }
 
+/* 1-3b. 닉네임 컨테이너(_container_o04z9_)가 _is_ellipsis_ 변형이면 치지직 네이티브가
+   vertical-align: top 을 줘서, 폰트를 키우면 닉네임만 위로 어긋난다(일반·특수 메시지
+   공통). baseline 으로 맞춰 배지·닉네임·텍스트가 같은 기준선에 오게 한다. 단 프로필
+   다이얼로그([role="alertdialog"]) 내부는 조절 대상이 아니므로 건드리지 않는다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_o04z9_"][class*="_is_ellipsis_"] {
+  vertical-align: baseline !important;
+}
+
 /* 2. 닉네임 영역(_container_o04z9_) + 닉네임 텍스트 노드(_text_dtc6c_).
    닉네임 텍스트도 치지직 자체 font-size 가 있어 컨테이너에서 직접 지정한다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
@@ -560,4 +570,240 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   [class*="_wrapper_o04z9_"] {
   align-items: center !important;
   gap: calc(5px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* === 특수 메시지(후원·구독·같이보기+·고정)도 함께 크기 조절 ===================
+   기본적으로 위 규칙들은 특수 메시지를 :not()/행 클래스 게이트로 제외한다. settings
+   채팅 탭의 '후원·구독 등 메시지도 조절' 토글을 켜면 <html>에 아래 클래스가 붙어
+   특수 메시지의 글자·아이콘(svg/img)도 같은 배율(--cheese-chat-font-scale)로 키운다.
+   클래스 해시는 빌드마다 바뀌므로 부분 매칭으로 잡는다. 폰트 스케일이 켜진(-enabled)
+   상태에서만 유효하다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  ) {
+  /* 컨테이너 자체 폰트 기준을 배율로(하위가 상속하도록). 절대 px 지정 요소는 아래에서 개별 처리. */
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 특수 메시지 내부 텍스트/닉네임/금액/설명/헤더/버튼 폰트 */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_text_1f5gx_"],
+    [class*="_text_shuts_"],
+    [class*="_text_1685p_"],
+    [class*="_header_1685p_"],
+    [class*="_message_dba1a_"],
+    [class*="_profile_button_1f5gx_"],
+    [class*="_button_shuts_"],
+    [class*="_word_shuts_"],
+    [class*="_money_1f5gx_"],
+    [class*="_description_1f5gx_"],
+    [class*="_button_1685p_"],
+    [class*="_text_185hr_"],
+    [class*="_detail_185hr_"],
+    [class*="_word_185hr_"],
+    [class*="_profile_button_185hr_"],
+    [class*="_text_1fnc6_"],
+    [class*="_word_1fnc6_"],
+    [class*="_button_1fnc6_"],
+    [class*="_text_y1pxo_"],
+    [class*="_mark_y1pxo_"],
+    [class*="_username_y1pxo_"],
+    [class*="_money_y1pxo_"],
+    [class*="_time_y1pxo_"],
+    [class*="_profile_button_y1pxo_"]
+  ) {
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(19px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 특수 메시지 내부 닉네임 텍스트 노드(_text_dtc6c_)도 배율 */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  )
+  [class*="_text_dtc6c_"] {
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 특수 메시지 내부 아이콘(svg·img) 크기 — width/height 를 배율로. 인라인 width/height
+   속성이 있는 이미지(구독 배지 등)도 덮어쓴다. */
+/* 특수 메시지 내부 '일반' 아이콘(미션 마크·금액·시간 svg 등)은 16px 기준으로 스케일.
+   단 닉네임 배지 아이콘(_icon_o04z9_ 안의 img/svg)은 네이티브가 18px 이므로 여기서
+   제외하고 아래에서 18px 기준(--cheese-chat-badge-icon-size)으로 따로 처리한다.
+   (16px 기준으로 잡으면 배율<1.125 일 때 네이티브 18px보다 작아져, 100%로 되돌릴 때
+   오히려 커지는 것처럼 보였다.) */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  )
+  :is(svg, img) {
+  width: calc(16px * var(--cheese-chat-font-scale)) !important;
+  height: calc(16px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 특수 메시지 닉네임 배지 아이콘(_icon_o04z9_)은 18px 기준으로 스케일(규칙 6 과 동일
+   기준). 배지 컨테이너·내부 img/svg 모두 처리. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  )
+  [class*="_wrapper_o04z9_"] > [class*="_icon_o04z9_"] {
+  width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  height: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  min-width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+}
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  )
+  [class*="_icon_o04z9_"]
+  :is([class*="_container_"], img, svg) {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+}
+
+/* 금액 배지의 치즈 아이콘(:before background) 크기 — 인라인으로 못 잡으므로 min-height로
+   배지 높이만 배율 반영(아이콘은 배지 안에서 상대적으로 유지). */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_money_1f5gx_"] {
+  min-height: calc(25px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* === 특수 메시지 스케일 세부 보정 ============================================ */
+
+/* (A) 프로필 다이얼로그([role="alertdialog"]) 내부는 폰트 크기 조절에서 제외한다
+   (원래 동작). 프로필 다이얼로그는 채팅 행(_item_) 안의 [role="alertdialog"] 로
+   렌더돼 위 스케일 규칙들(배지 크기·gap·margin·폰트)에 함께 걸린다. 규칙마다
+   특이도로 제외하려 하면 계속 밀리므로, 다이얼로그 서브트리에서 배율 변수를 1로
+   리셋한다. 우리 모든 규칙이 --cheese-chat-font-scale 를 곱하므로 변수가 1이면
+   자동으로 '조절 없음'(네이티브 기준값 × 1)이 된다. gap/margin 등 소수 절대값 규칙만
+   추가로 initial 처리한다. */
+html.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"] {
+  --cheese-chat-font-scale: 1;
+  --cheese-chat-badge-icon-size: 18px;
+  --cheese-chat-nickname-mark-size: 14px;
+}
+/* 변수로 안 잡히는 고정 절대값 규칙(gap 5px·margin 4px·img/svg 100%)은 initial 로. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"]
+  [class*="_wrapper_o04z9_"] {
+  /* 네이티브값(gap 4px·margin-right 4px)으로 명시 — initial 은 gap 을 0으로 만들어
+     배지 사이 간격이 사라진다. */
+  gap: 4px !important;
+  margin-right: 4px !important;
+  align-items: initial !important;
+}
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"]
+  [class*="_icon_o04z9_"]
+  :is([class*="_container_"], img, svg) {
+  width: auto !important;
+  height: auto !important;
+}
+
+/* (B) 닉네임 어긋남은 위 규칙 1-3b 에서 일반·특수 공통으로 처리한다. */
+
+/* (C) 특수 메시지 내부 닉네임 마크(_icon_dtc6c_)와 고정 메시지 단어(_word_dba1a_)도
+   배율로 함께 조절. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_1f5gx_"],
+    [class*="_container_shuts_"],
+    [class*="_container_1685p_"],
+    [class*="_container_dba1a_"],
+    [class*="_container_185hr_"],
+    [class*="_container_1fnc6_"],
+    [class*="_container_y1pxo_"]
+  )
+  [class*="_icon_dtc6c_"] {
+  width: calc(
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  height: calc(
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  min-width: calc(
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
+  ) !important;
+}
+/* 고정 메시지(_container_dba1a_)의 닉네임 인증 마크(_icon_dtc6c_)는 네이티브가 13px
+   (다른 메시지의 14px 과 다름) → 그 컨테이너 한정으로 13px 기준으로 스케일한다.
+   _container_dba1a_ 가 셀렉터에 더 있어 특이도가 위 (C) 보다 높아 덮어쓴다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_dba1a_"]
+  [class*="_icon_dtc6c_"] {
+  width: calc(13px * var(--cheese-chat-font-scale)) !important;
+  height: calc(13px * var(--cheese-chat-font-scale)) !important;
+  min-width: calc(13px * var(--cheese-chat-font-scale)) !important;
+}
+
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_word_dba1a_"] {
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* (D) 배지-닉네임 간격: 기존 방식대로 배지 아이콘(_icon_o04z9_)에 margin-right 를
+   배율로 붙인다. 고정 메시지(_container_dba1a_)에서만 필요하므로 그 컨테이너로만
+   한정한다(다른 특수/일반 메시지·프로필 다이얼로그엔 적용 안 함). */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_dba1a_"]
+  [class*="_wrapper_o04z9_"] > [class*="_icon_o04z9_"] {
+  margin-right: calc(4px * var(--cheese-chat-font-scale)) !important;
 }

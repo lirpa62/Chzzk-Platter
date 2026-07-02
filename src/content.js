@@ -7374,6 +7374,10 @@ const CHAT_FONT_SCALE_MIN = 0.8;
 const CHAT_FONT_SCALE_MAX = 2;
 const CHAT_FONT_SCALE_DEFAULT = 1;
 let chatFontScaleValue = CHAT_FONT_SCALE_DEFAULT;
+// 특수 메시지(후원·구독·같이보기+·고정 등)도 폰트/아이콘 크기를 함께 조절할지.
+// 기본 false=제외(일반 메시지만 조절). 켜면 특수 메시지도 배율 적용.
+const CHAT_FONT_SCALE_SPECIAL_KEY = "cheeseChatFontScaleSpecial";
+let chatFontScaleSpecial = false;
 // 우리 숨김 마커(요소에 부착) — moa의 chzzk-badge-moa-hidden-* 와 분리.
 const CHAT_HIDE_CLASSES = {
   chatHideRanking: "cheese-chat-hidden-ranking",
@@ -8156,6 +8160,11 @@ function applyChatFontScale() {
     root.classList.remove("cheese-chat-font-scale-enabled");
     root.classList.remove("cheese-chat-font-scale-ready");
   }
+  // 특수 메시지도 조절: 폰트 스케일이 켜져 있고 토글 ON일 때만 클래스 부착.
+  root.classList.toggle(
+    "cheese-chat-font-scale-special",
+    on && chatFontScaleSpecial,
+  );
 }
 
 // <html>에 왼쪽 배치 클래스를 토글(CSS로 order 처리). 단 영상/채팅이 세로로
@@ -10977,6 +10986,7 @@ async function loadFeatureFlags() {
       SEEK_STEP_KEY,
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
+      CHAT_FONT_SCALE_SPECIAL_KEY,
     ]);
     syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
     const custom = data?.[SYNC_CUSTOM_KEY];
@@ -10989,6 +10999,7 @@ async function loadFeatureFlags() {
     const cw = Number(data?.[CHAT_WIDTH_KEY]);
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
     chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
+    chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
     applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
   } catch {
     // 실패 시 전부 표시(기본값) 유지.
@@ -11033,6 +11044,10 @@ if (chrome.storage?.onChanged) {
         changes[CHAT_FONT_SCALE_KEY].newValue,
       );
       applyChatTweaks(); // 폰트 배율 변경 → 전체 재적용(옵저버 가동 포함)
+    }
+    if (changes[CHAT_FONT_SCALE_SPECIAL_KEY]) {
+      chatFontScaleSpecial = changes[CHAT_FONT_SCALE_SPECIAL_KEY].newValue === true;
+      applyChatFontScale(); // 특수 메시지 스케일 클래스 즉시 토글
     }
     if (changes[CHANNEL_LIVE_BUTTON_KEY]) {
       channelLiveButtonOn = changes[CHANNEL_LIVE_BUTTON_KEY].newValue !== false;
