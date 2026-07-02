@@ -428,11 +428,10 @@
   function saveGlobalDefault(type) {
     const config = globalDefaultConfig(type);
     config.enabled = globalDefaultEnabledInput(type)?.checked === true;
-    const root = globalDefaultRoot(type);
-    const value = root
-      ?.querySelector("[data-global-default-trigger]")
-      ?.getAttribute("data-value");
-    config.preset = value || config.preset || "default";
+    // preset은 이미 config.preset에 반영돼 있다(옵션 클릭/로드 시 설정). 트리거의
+    // data-value는 render 이후에야 갱신되므로 여기서 읽으면 '이전 선택값'으로
+    // 덮어써 방금 고른 프리셋이 무시된다 → config.preset을 신뢰한다.
+    config.preset = config.preset || "default";
     renderGlobalDefaultPicker(type);
     syncGlobalDefaultUI(type);
     try {
