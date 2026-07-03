@@ -2976,6 +2976,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // 비동기 응답
   }
 
+  // 통나무 파워 지우개(game.naver.com/profile): 전체 보유 목록을 background 로 fetch.
+  // content 는 game.naver.com 도메인이라 api.chzzk.naver.com 직접 fetch 대신 위임한다.
+  if (message.type === "GET_LOG_POWER_BALANCES") {
+    fetch("https://api.chzzk.naver.com/service/v1/log-power/balances", {
+      method: "GET",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((e) => sendResponse({ success: false, error: String(e) }));
+    return true; // 비동기 응답
+  }
+
   if (message.type === "START_LOG_POWER_WATCH_REWARD_TRACKING") {
     lpStartTracking({
       channelId: message.channelId,

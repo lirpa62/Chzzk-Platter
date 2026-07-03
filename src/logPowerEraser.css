@@ -1,0 +1,253 @@
+/* 헤더에 추가될 버튼 스타일 */
+.cheese-log-eraser-btn {
+  margin-left: 10px;
+  padding: 5px 10px;
+  background-color: #1bb373;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.cheese-log-eraser-btn:hover {
+  background-color: #00cc82;
+}
+
+/* 팝업(모달) 배경 */
+.cheese-eraser-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 팝업 창 */
+.cheese-eraser-modal-content {
+  background: white;
+  width: 450px;
+  height: 580px;
+  max-height: 80vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cheese-eraser-modal-header {
+  padding: 15px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+/* 안내 문구 영역 */
+.cheese-eraser-modal-notice {
+  padding: 10px 15px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+  text-align: center;
+  word-break: keep-all;
+}
+
+/* 강조할 단어가 있다면 */
+.cheese-eraser-modal-notice strong {
+  color: #ff4d4f;
+  font-weight: normal;
+}
+
+.cheese-eraser-close-btn {
+  background: none;
+  border: none;
+  width: 25px;
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #6d6e70;
+  cursor: pointer;
+}
+.cheese-eraser-close-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.cheese-eraser-close-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* 리스트 영역 */
+.cheese-eraser-list {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.cheese-eraser-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.cheese-eraser-item.disabled {
+  background-color: #f2f2f2;
+  opacity: 0.6;
+}
+
+.cheese-eraser-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cheese-eraser-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.cheese-eraser-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.verified-mark {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  display: inline-block;
+  margin-left: 3px;
+  background: url(https://ssl.pstatic.net/static/nng/resource/p/static/media/icon_official.0fac5d40.png)
+    no-repeat 50% / cover;
+  vertical-align: top;
+}
+
+/* 통나무 파워 수치 스타일 */
+.cheese-eraser-amount {
+  margin-left: auto;
+  margin-right: 15px;
+  font-size: 13px;
+  color: #222;
+  font-weight: 900;
+  min-width: 60px;
+  text-align: right;
+}
+
+/* 지우기 버튼 */
+.cheese-eraser-delete-btn {
+  width: 60px;
+  padding: 5px 10px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+
+.cheese-eraser-delete-btn:hover {
+  background: #ffebeb;
+  color: red;
+  border-color: red;
+}
+
+/* 복구 버튼 스타일 */
+.cheese-eraser-delete-btn.restore {
+  border-color: #52c41a;
+  color: #52c41a;
+}
+
+.cheese-eraser-delete-btn.restore:hover {
+  background: #52c41a;
+  color: white;
+}
+
+/* 비활성화된 행 스타일 */
+.cheese-eraser-item.disabled {
+  background-color: #f9f9f9;
+  opacity: 1;
+}
+
+.cheese-eraser-item.disabled .cheese-eraser-info,
+.cheese-eraser-item.disabled .cheese-eraser-amount {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+/* --- 빈 상태 (Empty State) 스타일 --- */
+.cheese-eraser-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+  font-size: 14px;
+  text-align: center;
+}
+
+.cheese-eraser-empty-icon {
+  font-size: 40px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+/* --- 스켈레톤 UI (Skeleton UI) 스타일 --- */
+.cheese-eraser-item.skeleton {
+  pointer-events: none;
+}
+
+/* 뼈대 애니메이션 (반짝거리는 효과) */
+@keyframes skeleton-pulse {
+  0% {
+    background-color: #f0f0f0;
+  }
+  50% {
+    background-color: #e0e0e0;
+  }
+  100% {
+    background-color: #f0f0f0;
+  }
+}
+
+/* 동그라미 (프로필 이미지 자리) */
+.skeleton-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  animation: skeleton-pulse 1.5s infinite ease-in-out;
+}
+
+/* 텍스트 바 (이름 자리) */
+.skeleton-text {
+  height: 14px;
+  width: 120px;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s infinite ease-in-out;
+}
+
+/* 버튼 자리 */
+.skeleton-btn {
+  width: 60px;
+  height: 28px;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s infinite ease-in-out;
+}

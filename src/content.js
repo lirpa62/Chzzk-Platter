@@ -4127,6 +4127,23 @@ function getStoredLogPowerPopupLimit() {
     }
   });
 }
+// 통나무 파워 지우개로 지운 채널 목록(hiddenChannels: 채널ID 배열). 통나무 파워
+// 지우개(이식본/원본)와 storage 키를 공유해, 상위 보유 팝업에서도 지운 채널을 뺀다.
+function getStoredHiddenLogPowerChannels() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get({ hiddenChannels: [] }, (data) => {
+        void chrome.runtime.lastError;
+        const list = Array.isArray(data?.hiddenChannels)
+          ? data.hiddenChannels.map((id) => String(id))
+          : [];
+        resolve(list);
+      });
+    } catch {
+      resolve([]);
+    }
+  });
+}
 // 파워 아이콘 SVG(con-chzzk 팝업 합계 표시용).
 function logPowerPopupIcon() {
   return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><mask id="cheese-lp-popup-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16" style="mask-type:alpha"><path d="M6.79453 2.43359C7.09254 2.43374 7.36838 2.58075 7.53476 2.82161L7.59921 2.93099L8.91692 5.56641H5.98333L5.82643 5.25326L5.06796 3.73568C4.76891 3.13737 5.20381 2.43379 5.87265 2.43359H6.79453Z" fill="currentColor"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M12.1484 4.43359C13.0053 4.43359 13.6561 5.0624 14.0599 5.80273C14.4754 6.5645 14.7148 7.57802 14.7148 8.66667C14.7148 9.75531 14.4754 10.7688 14.0599 11.5306C13.6561 12.2709 13.0053 12.8997 12.1484 12.8997H4C3.14314 12.8997 2.49236 12.2709 2.08854 11.5306C1.67304 10.7688 1.43359 9.75531 1.43359 8.66667C1.43359 7.57802 1.67304 6.5645 2.08854 5.80273C2.49236 5.0624 3.14314 4.43359 4 4.43359H12.1484ZM4 5.56641C3.75232 5.56641 3.40334 5.75848 3.08333 6.34505C2.77498 6.91036 2.56641 7.73027 2.56641 8.66667C2.56641 9.60306 2.77498 10.423 3.08333 10.9883C3.40334 11.5749 3.75232 11.7669 4 11.7669C4.24767 11.7669 4.59666 11.5749 4.91667 10.9883C5.22502 10.423 5.43359 9.60306 5.43359 8.66667C5.43359 7.73027 5.22502 6.91036 4.91667 6.34505C4.59666 5.75848 4.24767 5.56641 4 5.56641ZM6.52604 9.43359C6.48364 9.83162 6.40829 10.2124 6.30404 10.5664H11.6667L11.7246 10.5638C12.0104 10.5348 12.2331 10.2934 12.2331 10C12.2331 9.7066 12.0104 9.46522 11.7246 9.4362L11.6667 9.43359H6.52604ZM6.28385 6.70052C6.39253 7.05354 6.47186 7.43444 6.51823 7.83333H7.33333L7.39128 7.83073C7.67694 7.80172 7.89962 7.56022 7.89974 7.26693C7.89974 6.97353 7.67701 6.73215 7.39128 6.70312L7.33333 6.70052H6.28385ZM9.60026 6.70052C9.2873 6.70052 9.0332 6.95397 9.0332 7.26693C9.03333 7.57978 9.28738 7.83333 9.60026 7.83333H13.5228C13.4637 7.41061 13.3619 7.02765 13.2298 6.70052H9.60026Z" fill="currentColor"></path></mask><g mask="url(#cheese-lp-popup-mask)"><rect width="15.9998" height="16" fill="currentColor"></rect></g></svg>`;
@@ -4413,11 +4430,19 @@ function showLogPowerBalancesPopup() {
         r.json(),
       ),
       getStoredLogPowerPopupLimit(),
+      getStoredHiddenLogPowerChannels(),
     ])
-      .then(([data, initialLimit]) => {
+      .then(([data, initialLimit, hiddenChannels]) => {
         loading.remove();
+        // hiddenSet 은 다른 페이지에서 채널을 지우거나 새로고침 시 갱신되므로 let.
+        // toSorted 는 클로저로 최신 hiddenSet 을 참조한다.
+        let hiddenSet = new Set(hiddenChannels);
+        // 새로고침/필터 재적용에 쓰려고 원본 balances 응답을 보관한다(let: 재할당).
+        let latestData = data;
         const toSorted = (d) =>
           (Array.isArray(d?.content?.data) ? d.content.data : [])
+            // 통나무 파워 지우개로 지운 채널(hiddenChannels)은 상위 보유 팝업에서 제외.
+            .filter((x) => !hiddenSet.has(String(x?.channelId || "")))
             .slice()
             .sort((a, b) => (b.amount || 0) - (a.amount || 0));
         // 새로고침으로 재할당하므로 let. (data → sorted/totalPower)
@@ -4501,16 +4526,23 @@ function showLogPowerBalancesPopup() {
           if (rowsBox) rowsBox.innerHTML = renderRows(rows);
         };
 
-        // 새로고침: 팝업 전체가 아니라 balances 만 다시 받아 합계·행만 갱신한다.
+        // 새로고침: balances + 지운 채널(hiddenChannels)을 함께 다시 받아 반영한다.
+        // (hiddenChannels 를 안 다시 읽으면 그새 지운 채널이 팝업에 남는다.)
         let reloading = false;
         const reloadRows = () => {
           if (reloading || !rowsBox) return;
           reloading = true;
           refreshBtn.disabled = true;
           rowsBox.classList.add("is-reloading");
-          fetch(LOGPOWER_POPUP_BALANCES_URL, { credentials: "include" })
-            .then((r) => r.json())
-            .then((fresh) => {
+          Promise.all([
+            fetch(LOGPOWER_POPUP_BALANCES_URL, { credentials: "include" }).then(
+              (r) => r.json(),
+            ),
+            getStoredHiddenLogPowerChannels(),
+          ])
+            .then(([fresh, hiddenChannels]) => {
+              latestData = fresh;
+              hiddenSet = new Set(hiddenChannels);
               sorted = toSorted(fresh);
               totalPower = sorted.reduce((s, x) => s + (x.amount || 0), 0);
               render();
@@ -4523,6 +4555,24 @@ function showLogPowerBalancesPopup() {
             });
         };
         refreshBtn.addEventListener("click", reloadRows);
+
+        // 다른 페이지(통나무 파워 지우개)에서 채널을 지우면 hiddenChannels 가 바뀐다.
+        // 팝업이 열려 있는 동안 실시간으로 반영한다(닫히면 리스너 스스로 정리).
+        const onHiddenChanged = (changes, area) => {
+          if (area !== "local" || !changes.hiddenChannels) return;
+          if (!layer.isConnected) {
+            chrome.storage.onChanged.removeListener(onHiddenChanged);
+            return;
+          }
+          const next = Array.isArray(changes.hiddenChannels.newValue)
+            ? changes.hiddenChannels.newValue.map((id) => String(id))
+            : [];
+          hiddenSet = new Set(next);
+          sorted = toSorted(latestData);
+          totalPower = sorted.reduce((s, x) => s + (x.amount || 0), 0);
+          render();
+        };
+        chrome.storage.onChanged.addListener(onHiddenChanged);
 
         // settings 에서 개수 변경 시 반영(팝업이 살아 있는 동안만). 팝업이 닫히면
         // layer 가 사라지므로 리스너에서 스스로 정리한다.

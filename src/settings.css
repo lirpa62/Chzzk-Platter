@@ -635,10 +635,11 @@ body {
   color: var(--popup-brand-strong);
 }
 
-/* 잠긴 세그먼트(예: 적립 중 색 변경 ON으로 위치 선택 비활성) — 부모 .is-locked가
-   opacity를 낮추고, 여기서 커서/호버를 막는다. */
+/* 비활성 세그먼트 버튼(예: 적립 중 색 변경 ON으로 '배지'만 비활성) — 흐리게 + 커서/
+   호버 차단. 그룹 전체 잠금(.is-locked)이 아니라 개별 버튼만 막힐 때도 흐려지게 한다. */
 .settings-segmented button:disabled {
   cursor: not-allowed;
+  opacity: 0.4;
 }
 .settings-segmented button:disabled:hover {
   border-color: var(--popup-border);

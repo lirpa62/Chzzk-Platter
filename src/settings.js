@@ -710,9 +710,16 @@
           chrome.storage?.local?.set({ [key]: norm(mode) });
         } catch {}
       },
-      setDisabled: (disabled) => {
-        buttons.forEach((b) => (b.disabled = disabled));
-        group.closest(".settings-item")?.classList.toggle("is-locked", disabled);
+      // 특정 모드 버튼(예: "badge")만 비활성화한다. 그룹 전체 잠금(is-locked)은
+      // 걸지 않아 나머지 버튼은 계속 고를 수 있다.
+      setModeDisabled: (modeValue, disabled) => {
+        const v = norm(modeValue);
+        buttons.forEach((b) => {
+          if (norm(b.dataset[toCamel(btnAttr)]) === v) {
+            b.disabled = disabled;
+            b.classList.toggle("is-disabled", disabled);
+          }
+        });
       },
     };
   }
@@ -733,15 +740,16 @@
     "cheeseLogPowerTimerMode",
   );
 
-  // '적립 중 색 변경'을 켜면 '적립 중 표시'는 색으로 대체되므로 위치를 '끔'으로
-  // 자동 설정하고 세그먼트를 잠근다. 끄면 잠금 해제(값은 사용자가 다시 고름).
+  // '적립 중 색 변경'을 켜면 배지 텍스트 색으로 적립 중을 표현하므로, '적립 중 표시
+  // 위치'에서 '배지' 옵션만 비활성화한다(끔/툴팁은 계속 고를 수 있다). 현재 '배지'가
+  // 선택돼 있으면 '끔'으로 옮긴다(색과 중복 방지). 색 변경을 끄면 '배지' 잠금 해제.
   function reflectEarningColorLink() {
     const colorOn = !!lpEarningColorInput?.checked;
     if (!lpProgressSeg) return;
-    if (colorOn && lpProgressSeg.get() !== "off") {
-      lpProgressSeg.set("off"); // storage에도 반영
+    if (colorOn && lpProgressSeg.get() === "badge") {
+      lpProgressSeg.set("off"); // 배지 → 끔(색으로 대체). 이후 툴팁 선택 가능.
     }
-    lpProgressSeg.setDisabled(colorOn);
+    lpProgressSeg.setModeDisabled("badge", colorOn);
   }
   const lpEarningColorInput = (() => {
     const input = document.querySelector("[data-logpower-earning-color]");
@@ -1506,6 +1514,25 @@
     cafeNowInput.addEventListener("change", () => {
       try {
         chrome.storage?.local?.set({ [CAFE_NOW_KEY]: cafeNowInput.checked });
+      } catch {}
+    });
+  }
+
+  // ── 통나무 파워 지우개(game.naver.com 통나무파워 관리, 기본 ON) ───────────────
+  const LOG_ERASER_KEY = "cheeseLogPowerEraser";
+  const logEraserInput = document.querySelector("[data-log-eraser]");
+  if (logEraserInput) {
+    (async () => {
+      let on = true; // 기본 ON
+      try {
+        const d = await chrome.storage?.local?.get(LOG_ERASER_KEY);
+        on = d?.[LOG_ERASER_KEY] !== false; // 미설정/true=사용
+      } catch {}
+      logEraserInput.checked = on;
+    })();
+    logEraserInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({ [LOG_ERASER_KEY]: logEraserInput.checked });
       } catch {}
     });
   }
