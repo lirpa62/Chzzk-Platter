@@ -23,10 +23,7 @@
   --cheese-chat-badge-icon-size: 18px;
   --cheese-chat-nickname-mark-size: 14px;
   --cheese-chat-emoji-size: 24px;
-  --cheese-chat-emoji-gap: max(
-    1px,
-    calc(2px * var(--cheese-chat-font-scale))
-  );
+  --cheese-chat-emoji-gap: max(1px, calc(2px * var(--cheese-chat-font-scale)));
 }
 
 /* 스케일 대상 스코프:
@@ -52,13 +49,28 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"]) {
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"]) {
+  line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
+}
+
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  )
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"]):has([class*="_button_"] img) {
   line-height: calc(
-    14px * var(--cheese-chat-font-scale) * 1.4
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale) + 2px
   ) !important;
 }
 
@@ -69,48 +81,27 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"]):has(
-    [class*="_button_"] img
-  ) {
-  line-height: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale) + 2px
-  ) !important;
-}
-
-html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
-  :is(aside#aside-chatting, aside#vod-aside)
-  :is(
-    [class*="_item_"],
-    [class*="live_chatting_list_item"],
-    [class*="vod_chatting_item"]
-  )  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   > [class*="_text_"],
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_floating_"]
-  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   > [class*="_text_"],
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_floating_"]
   [class*="_message_dswob_"] {
   font-size: calc(14px * var(--cheese-chat-font-scale)) !important;
-  line-height: calc(
-    14px * var(--cheese-chat-font-scale) * 1.4
-  ) !important;
+  line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
 /* 1-0b. 이모티콘이 포함된 메시지의 텍스트 노드(_text_)도 컨테이너와 동일하게 이모티콘
@@ -122,15 +113,14 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   > [class*="_text_"]:has([class*="_button_"] img) {
   line-height: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale) + 2px
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale) + 2px
   ) !important;
 }
 
@@ -151,7 +141,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_floating_"]
-  [class*="_button_chatting_dswob_"]  [class*="_username_dswob_"] {
+  [class*="_button_chatting_dswob_"]
+  [class*="_username_dswob_"] {
   display: inline-flex !important;
   align-items: center !important;
   min-width: 0 !important;
@@ -160,7 +151,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_floating_"]
-  [class*="_button_chatting_dswob_"]  [class*="_username_dswob_"]
+  [class*="_button_chatting_dswob_"]
+  [class*="_username_dswob_"]
   [class*="_container_o04z9_"] {
   align-items: center !important;
   margin-top: 0 !important;
@@ -173,7 +165,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_floating_"]
-  [class*="_button_chatting_dswob_"]  [class*="_icon_dswob_"] {
+  [class*="_button_chatting_dswob_"]
+  [class*="_icon_dswob_"] {
   width: calc(22px * var(--cheese-chat-font-scale)) !important;
   height: calc(22px * var(--cheese-chat-font-scale)) !important;
   flex: 0 0 calc(22px * var(--cheese-chat-font-scale)) !important;
@@ -187,17 +180,17 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_chatting_message_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   > :is([class*="_nickname_1s877_"], [class*="_text_1s877_"]) {
   vertical-align: middle !important;
 }
@@ -208,13 +201,14 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_nickname_1s877_"]  > [class*="_container_o04z9_"] {
+  [class*="_nickname_1s877_"]
+  > [class*="_container_o04z9_"] {
   vertical-align: middle !important;
 }
 
@@ -234,37 +228,35 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_container_o04z9_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"]),
+  [class*="_container_o04z9_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"]),
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_container_o04z9_"]:not(
-    [class*="_is_mission_"]
-  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  [class*="_container_o04z9_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   [class*="_text_dtc6c_"] {
   font-size: calc(14px * var(--cheese-chat-font-scale)) !important;
-  line-height: calc(
-    14px * var(--cheese-chat-font-scale) * 1.2
-  ) !important;
+  line-height: calc(14px * var(--cheese-chat-font-scale) * 1.2) !important;
 }
 
 /* 3. 환영/필터/안내(_default_) 시스템 메시지 — 치지직과 동일하게 스케일(기준 13px) */
@@ -276,9 +268,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="_default_"]
   ) {
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
-  line-height: calc(
-    13px * var(--cheese-chat-font-scale) * 1.4
-  ) !important;
+  line-height: calc(13px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
 /* 3-0. 안내 메시지(_default_)의 제목/설명 문단 — 치지직이 _title_/_description_ 에 자체
@@ -290,11 +280,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="_welcome_"],
     [class*="_filter_"],
     [class*="_default_"]
-  )  [class*="_title_1fbww_"] {
+  )
+  [class*="_title_1fbww_"] {
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
-  line-height: calc(
-    13px * var(--cheese-chat-font-scale) * 1.4
-  ) !important;
+  line-height: calc(13px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
@@ -303,11 +292,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     [class*="_welcome_"],
     [class*="_filter_"],
     [class*="_default_"]
-  )  [class*="_description_1fbww_"] {
+  )
+  [class*="_description_1fbww_"] {
   font-size: calc(12px * var(--cheese-chat-font-scale)) !important;
-  line-height: calc(
-    12px * var(--cheese-chat-font-scale) * 1.4
-  ) !important;
+  line-height: calc(12px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
 /* 3-1. 필터/공지 시스템 메시지 아이콘(_icon_1fbww_59) — 치지직 네이티브는 폰트 배율에
@@ -328,22 +316,21 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_chatting_message_"]  [class*="_text_"]
+  [class*="_chatting_message_"]
+  [class*="_text_"]
   button[class*="_button_"] {
   width: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale) +
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale) +
       var(--cheese-chat-emoji-gap)
   ) !important;
   height: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale)
   ) !important;
   margin-right: 0 !important;
 }
@@ -354,13 +341,14 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_chatting_message_"]  [class*="_text_"]
+  [class*="_chatting_message_"]
+  [class*="_text_"]
   img,
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
@@ -368,12 +356,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   [class*="_message_dswob_"]
   > img {
   width: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale)
   ) !important;
   height: calc(
-    var(--cheese-chat-emoji-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-emoji-size) * var(--cheese-chat-font-scale)
   ) !important;
   margin-right: var(--cheese-chat-emoji-gap) !important;
   transform: none !important;
@@ -386,20 +372,16 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_chatting_message_"]
   .cheese-chat-time {
-  font-size: calc(
-    14px * 0.85 * var(--cheese-chat-font-scale)
-  ) !important;
-  line-height: calc(
-    14px * var(--cheese-chat-font-scale) * 1.4
-  ) !important;
+  font-size: calc(14px * 0.85 * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
 /* 6. 배지 아이콘 컨테이너(_icon_o04z9_) */
@@ -407,30 +389,25 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_wrapper_o04z9_"]  > [class*="_icon_o04z9_"] {
+  [class*="_wrapper_o04z9_"]
+  > [class*="_icon_o04z9_"] {
   width: calc(
-    var(--cheese-chat-badge-icon-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
   ) !important;
   height: calc(
-    var(--cheese-chat-badge-icon-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
   ) !important;
   min-width: calc(
-    var(--cheese-chat-badge-icon-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
   ) !important;
   flex: 0 0
-    calc(
-      var(--cheese-chat-badge-icon-size) *
-        var(--cheese-chat-font-scale)
-    ) !important;
+    calc(var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)) !important;
   transform: none !important;
 }
 
@@ -439,13 +416,14 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
-  [class*="_wrapper_o04z9_"]  > [class*="_icon_o04z9_"]
+  [class*="_wrapper_o04z9_"]
+  > [class*="_icon_o04z9_"]
   :is([class*="_container_"], img, svg) {
   width: 100% !important;
   height: 100% !important;
@@ -460,30 +438,24 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_icon_dtc6c_"]:not([style*="width"]) {
   width: calc(
-    var(--cheese-chat-nickname-mark-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
   ) !important;
   height: calc(
-    var(--cheese-chat-nickname-mark-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
   ) !important;
   min-width: calc(
-    var(--cheese-chat-nickname-mark-size) *
-      var(--cheese-chat-font-scale)
+    var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)
   ) !important;
   flex: 0 0
-    calc(
-      var(--cheese-chat-nickname-mark-size) *
-        var(--cheese-chat-font-scale)
-    ) !important;
+    calc(var(--cheese-chat-nickname-mark-size) * var(--cheese-chat-font-scale)) !important;
   margin-left: calc(4px * var(--cheese-chat-font-scale)) !important;
   margin-top: calc(2px * var(--cheese-chat-font-scale)) !important;
   transform: none !important;
@@ -499,10 +471,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_icon_dtc6c_"][style*="width"] {
@@ -515,10 +487,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_nickname_o04z9_"] {
@@ -530,10 +502,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis2_dtc6c_"]):not(
@@ -555,10 +527,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_has_highlight_dtc6c_"] {
@@ -572,10 +544,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_has_highlight_dtc6c_"]
@@ -589,10 +561,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis2_dtc6c_"])
@@ -609,10 +581,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   :is([class*="_container_o04z9_"], [class*="_wrapper_o04z9_"]) {
@@ -624,10 +596,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
     :is(
-        [class*="_item_"],
-        [class*="live_chatting_list_item"],
-        [class*="vod_chatting_item"]
-      ),
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
     [class*="_floating_"]
   )
   [class*="_wrapper_o04z9_"] {
@@ -650,7 +622,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   ) {
   /* 컨테이너 자체 폰트 기준을 배율로(하위가 상속하도록). 절대 px 지정 요소는 아래에서 개별 처리. */
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
@@ -700,7 +673,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   )
   [class*="_text_dtc6c_"] {
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
@@ -723,11 +697,33 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   )
-  :is(svg, img) {
+  :is(svg, img):not([class*="_image_y391b_"]) {
   width: calc(16px * var(--cheese-chat-font-scale)) !important;
   height: calc(16px * var(--cheese-chat-font-scale)) !important;
+}
+/* 축하 메시지(_container_y391b_)의 장식 이미지(_image_y391b_: 96×64 치어링)는 16px
+   배지가 아니므로 위 규칙에서 제외한다(인라인 96×64 유지 — 배율 조절 안 함). */
+
+/* 축하 메시지 제목(_title_y391b_)의 line-height 를 배율로(폰트 배율과 함께 커지게). */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_y391b_"]
+  [class*="_title_y391b_"] {
+  line-height: calc(17px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 후원 유도 버튼(_button_y391b_)은 네이티브 font-size 12px, line-height 14px 를 배율로 조절한다.
+   폰트가 커지면 고정 폭에서 텍스트가 잘릴 수 있어 width: 140% 로 내용에 맞춘다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_y391b_"]
+  [class*="_button_y391b_"] {
+  font-size: calc(12px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(14px * var(--cheese-chat-font-scale)) !important;
+  width: 140% !important;
 }
 
 /* 특수 메시지 닉네임 배지 아이콘(_icon_o04z9_)은 18px 기준으로 스케일(규칙 6 과 동일
@@ -741,9 +737,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   )
-  [class*="_wrapper_o04z9_"] > [class*="_icon_o04z9_"] {
+  [class*="_wrapper_o04z9_"]
+  > [class*="_icon_o04z9_"] {
   width: calc(
     var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
   ) !important;
@@ -763,7 +761,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   )
   [class*="_icon_o04z9_"]
   :is([class*="_container_"], img, svg) {
@@ -844,7 +843,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_dba1a_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
-    [class*="_container_y1pxo_"]
+    [class*="_container_y1pxo_"],
+    [class*="_container_y391b_"]
   )
   [class*="_icon_dtc6c_"] {
   width: calc(
@@ -882,7 +882,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
   [class*="_container_dba1a_"]
-  [class*="_wrapper_o04z9_"] > [class*="_icon_o04z9_"] {
+  [class*="_wrapper_o04z9_"]
+  > [class*="_icon_o04z9_"] {
   margin-right: calc(4px * var(--cheese-chat-font-scale)) !important;
 }
 
