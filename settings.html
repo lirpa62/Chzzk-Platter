@@ -114,7 +114,7 @@
             role="tab"
             aria-selected="false"
           >
-            레이아웃
+            헤더
           </button>
           <button
             type="button"
@@ -426,6 +426,20 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">화면 채우기</span>
+                  <span class="settings-item-desc"
+                    >영상 높이를 조절해 좌우 레터박스를 최소화(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="fillScreen" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">실시간 따라잡기 숨김</span>
@@ -600,18 +614,6 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="streamStats" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">화면 채우기</span>
-                  <span class="settings-item-desc"
-                    >영상 높이를 조절해 좌우 레터박스를 최소화(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="fillScreen" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -839,52 +841,9 @@
             </ul>
           </section>
 
-          <section
-            class="settings-group"
-            data-panel="layout"
-            aria-label="레이아웃"
-          >
-            <h2 class="settings-group-title">레이아웃</h2>
+          <section class="settings-group" data-panel="layout" aria-label="헤더">
+            <h2 class="settings-group-title">헤더</h2>
             <ul class="settings-list">
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">사이드바 숨김</span>
-                  <span class="settings-item-desc"
-                    >왼쪽 채널/메뉴 사이드바 전체</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="sidebar" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">사이드바 오른쪽 배치</span>
-                  <span class="settings-item-desc"
-                    >채널/메뉴 사이드바를 화면 오른쪽에 표시</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="sidebarRight" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >사이드바 펼침 시 밀어내기</span
-                  >
-                  <span class="settings-item-desc"
-                    >펼쳐진 사이드바가 콘텐츠 위를 덮지 않고 옆으로 밀어내 채팅·
-                    플레이어를 가리지 않음</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="sidebarPush" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">스튜디오 버튼 숨김</span>
@@ -1080,6 +1039,55 @@
               사이드바를 숨기면 선택한 항목을 헤더에 아이콘으로 표시해 바로
               이동할 수 있습니다. 체크하면 표시됩니다.
             </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="sidebar"
+            aria-label="사이드바 배치"
+          >
+            <h2 class="settings-group-title">사이드바</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">사이드바 숨김</span>
+                  <span class="settings-item-desc"
+                    >왼쪽 채널/메뉴 사이드바 전체</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebar" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">사이드바 오른쪽 배치</span>
+                  <span class="settings-item-desc"
+                    >채널/메뉴 사이드바를 화면 오른쪽에 표시</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebarRight" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >사이드바 펼침 시 밀어내기</span
+                  >
+                  <span class="settings-item-desc"
+                    >펼쳐진 사이드바가 콘텐츠 위를 덮지 않고 옆으로 밀어내 채팅·
+                    플레이어를 가리지 않음</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebarPush" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
           </section>
 
           <section
@@ -1895,8 +1903,9 @@
                 <label>
                   <span class="settings-item-name">통나무 파워 지우개</span>
                   <span class="settings-item-desc"
-                    >game.naver.com 통나무 파워 관리 페이지에서 원하지 않는 채널을
-                    목록에서 지우고, 상위 보유 팝업에서도 제외(체크=사용)</span
+                    >game.naver.com 통나무 파워 관리 페이지에서 원하지 않는
+                    채널을 목록에서 지우고, 상위 보유 팝업에서도
+                    제외(체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">

@@ -8429,6 +8429,28 @@ function getFillScreenTarget() {
 
 const FILL_SCREEN_ENABLED = true;
 
+// 중간광고 진입/종료 시 #live_player_layout 의 class 에 miniplayer 가 붙었다 빠진다.
+// 전역 옵저버는 childList 만 감시해 class 만 바뀌면 놓칠 수 있으므로, 영상 박스의 class
+// 변화를 직접 감시해 화면 채우기를 즉시 원복/재적용한다(광고 종료 후 원래 크기로 복귀).
+let fillScreenPlayerObserver = null;
+let fillScreenObservedBox = null;
+function ensureFillScreenPlayerObserver() {
+  const box = document.querySelector("div#layout-body #live_player_layout");
+  if (fillScreenObservedBox === box && box?.isConnected) return; // 이미 감시 중
+  if (fillScreenPlayerObserver) {
+    fillScreenPlayerObserver.disconnect();
+    fillScreenPlayerObserver = null;
+    fillScreenObservedBox = null;
+  }
+  if (!(box instanceof HTMLElement)) return;
+  fillScreenPlayerObserver = new MutationObserver(() => applyFillScreen());
+  fillScreenPlayerObserver.observe(box, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  fillScreenObservedBox = box;
+}
+
 // 영상 영역(_player_1qjld_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
 // 꽉 채우게 한다(레터박스 제거, 하단 안 잘림). main 은 건드리지 않으므로 main 의
 // overflow-y 스크롤은 그대로 유지된다. 다시보기(capMaxH:true)는 아직 적용하지 않는다.
@@ -8438,10 +8460,16 @@ function applyFillScreen() {
   const aside = findResizableChatAside();
   // 다시보기(capMaxH)는 일단 제외 — 라이브 영상 컨테이너만 대상.
   const isLive = !!t && !t.capMaxH;
+  // 중간광고 시 원래 영상은 #live_player_layout.miniplayer 로 축소돼 채팅쪽으로 이동한다.
+  // 이때 미니플레이어의 작은 폭으로 높이를 잡으면 안 되므로 적용을 끄고 원복한다(광고가
+  // 끝나 miniplayer 클래스가 빠지면 다음 applyFillScreen 호출에서 자동 재적용).
+  const isMini =
+    t?.box instanceof HTMLElement && t.box.classList.contains("miniplayer");
   const on =
     FILL_SCREEN_ENABLED &&
     featureFlags.fillScreen &&
     isLive &&
+    !isMini &&
     !(aside && isChatStackedLayout(aside));
   if (!on) {
     if (t) {
@@ -9061,8 +9089,10 @@ function updateChatTweakStyle() {
     }
     /* 채팅창 위 배너 광고(_banner_)는 position:absolute; right:0; max-width:353px 라
        왼쪽 배치를 해도 오른쪽에 남는다. 왼쪽 배치 시 좌측으로 옮기고, 채팅 너비를
-       조절했으면 그 폭(--cheese-chat-resized-width)에 max-width를 맞춘다. */
-    html.cheese-chat-left-position div#layout-body [class*="_banner_"] {
+       조절했으면 그 폭(--cheese-chat-resized-width)에 max-width를 맞춘다.
+       단 영상 하단 정보영역의 배너(_box_..._banner_ > #live_end_banner)는 채팅과 무관해
+       폭을 건드리면 안 되므로 :not(:has(> #live_end_banner))로 제외한다. */
+    html.cheese-chat-left-position div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) {
       right: auto !important;
       left: 0 !important;
       width: var(--cheese-chat-resized-width, 353px) !important;
@@ -9072,7 +9102,7 @@ function updateChatTweakStyle() {
        (변수가 없으면=미조절 규칙 무효 → 치지직 기본 353px 유지). width도 함께 줘야
        한다 — max-width만 키우면 배너 자체 width(치지직 기본 353px)에 막혀 채팅을 넓혀도
        배너가 안 커진다(max-width는 상한만, 실제 폭은 width가 정함). */
-    html.cheese-chat-width-resize-enabled:not(.cheese-chat-left-position) div#layout-body [class*="_banner_"] {
+    html.cheese-chat-width-resize-enabled:not(.cheese-chat-left-position) div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) {
       width: var(--cheese-chat-resized-width, 353px) !important;
       max-width: var(--cheese-chat-resized-width, 353px) !important;
     }
@@ -9090,14 +9120,14 @@ function updateChatTweakStyle() {
        문서 CSS로 막는다(iframe 내부 스타일 주입은 로드 타이밍에 취약 → 이 규칙이
        타이밍 무관하게 바깥에서 잘라낸다). 배너 기능이 켜졌을 때(왼쪽 배치 또는
        너비 조절 활성)만 적용해 회귀를 피한다. */
-    html.cheese-chat-left-position div#layout-body [class*="_banner_"],
-    html.cheese-chat-left-position div#layout-body [class*="_banner_"] [class*="_content_"],
-    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"],
-    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"] [class*="_content_"] {
+    html.cheese-chat-left-position div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)),
+    html.cheese-chat-left-position div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) [class*="_content_"],
+    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)),
+    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) [class*="_content_"] {
       overflow: hidden !important;
     }
-    html.cheese-chat-left-position div#layout-body [class*="_banner_"] iframe,
-    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"] iframe {
+    html.cheese-chat-left-position div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) iframe,
+    html.cheese-chat-width-resize-enabled div#layout-body [class*="_banner_"]:not(:has(> #live_end_banner)) iframe {
       max-width: 100% !important;
     }
     /* 왼쪽 배치 시 뷰포트 고정형 프로필 카드가 오른쪽에 뜨는 것을 좌측으로 보정
@@ -12417,6 +12447,7 @@ function init() {
   applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
   ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
+  ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
   applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
