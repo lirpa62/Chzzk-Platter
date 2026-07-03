@@ -5,7 +5,7 @@
     module.exports = api;
   }
 
-  root.ChzzkCafeNow = Object.assign(root.ChzzkCafeNow || {}, api);
+  root.CheeseCafeClipApi = Object.assign(root.CheeseCafeClipApi || {}, api);
 })(typeof globalThis !== "undefined" ? globalThis : this, function createApi() {
   const CHZZK_MEDIA_PATTERNS = [
     {

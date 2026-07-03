@@ -1,5 +1,5 @@
 (function initializeChzzkCafeNow() {
-  const api = globalThis.ChzzkCafeNow;
+  const api = globalThis.CheeseCafeClipApi;
   if (!api) return;
 
   const OGLINK_SELECTOR = "div.se-component.se-oglink";
@@ -7,11 +7,11 @@
   const OGLINK_TITLE_SELECTOR = ".se-oglink-title";
   const CANDIDATE_SELECTOR = "a[href], [data-url], [data-link-url], [data-href]";
   const PLAYER_CONTAINER_SELECTOR =
-    ".chzzk-cafe-now-standalone, .chzzk-cafe-now-oglink";
+    ".cheese-cafe-standalone, .cheese-cafe-oglink";
   const TEXT_COMPONENT_SELECTOR = "div.se-component.se-text";
   const TEXT_PARAGRAPH_SELECTOR = ".se-text-paragraph";
-  const PLAYER_SELECTOR = "[data-chzzk-cafe-now-player]";
-  const STANDALONE_PLAYER_SELECTOR = "[data-chzzk-cafe-now-standalone]";
+  const PLAYER_SELECTOR = "[data-cheese-cafe-player]";
+  const STANDALONE_PLAYER_SELECTOR = "[data-cheese-cafe-standalone]";
   const CHZZK_ICON_URL = "https://chzzk.naver.com/favicon.ico";
 
   const OBSERVED_ATTRIBUTES = ["href", "data-url", "data-link-url", "data-href"];
@@ -75,16 +75,16 @@
   function createPlayer(media) {
     const mediaKey = api.getMediaKey(media);
     const wrapper = document.createElement("div");
-    wrapper.className = "chzzk-cafe-now-player";
-    wrapper.dataset.chzzkCafeNowPlayer = mediaKey;
-    wrapper.dataset.chzzkCafeNowMediaType = media.type;
-    wrapper.dataset.chzzkCafeNowMediaId = media.id;
+    wrapper.className = "cheese-cafe-player";
+    wrapper.dataset.cheeseCafePlayer = mediaKey;
+    wrapper.dataset.cheeseCafeMediaType = media.type;
+    wrapper.dataset.cheeseCafeMediaId = media.id;
 
     const frameWrap = document.createElement("div");
-    frameWrap.className = "chzzk-cafe-now-player__frame-wrap";
+    frameWrap.className = "cheese-cafe-player__frame-wrap";
 
     const frame = document.createElement("iframe");
-    frame.className = "chzzk-cafe-now-player__frame";
+    frame.className = "cheese-cafe-player__frame";
     frame.src = api.getEmbedUrl(media);
     frame.title = "CHZZK Player";
     frame.frameBorder = "0";
@@ -128,13 +128,13 @@
     const orientation = isPortrait ? "portrait" : "landscape";
     getPlayers(root).forEach((player) => {
       if (!player.isConnected) return;
-      player.classList.toggle("chzzk-cafe-now-player--portrait", isPortrait);
-      player.dataset.chzzkCafeNowOrientation = orientation;
+      player.classList.toggle("cheese-cafe-player--portrait", isPortrait);
+      player.dataset.cheeseCafeOrientation = orientation;
 
       const container = player.closest(PLAYER_CONTAINER_SELECTOR);
       if (container) {
-        container.classList.toggle("chzzk-cafe-now-portrait", isPortrait);
-        container.dataset.chzzkCafeNowOrientation = orientation;
+        container.classList.toggle("cheese-cafe-portrait", isPortrait);
+        container.dataset.cheeseCafeOrientation = orientation;
       }
     });
   }
@@ -187,9 +187,24 @@
   }
 
   function replaceOrInsertOglinkPlayer(oglink, media, thumbnail) {
-    if (oglink.querySelector("[data-chzzk-cafe-now-player]")) return;
+    // 우리 플레이어 또는 원본 확장(data-chzzk-cafe-now-player)이 이미 이 오글링크에
+    // 있으면 건드리지 않는다 — 원본이 늦게 부팅해 같은 오글링크를 처리한 경우에도
+    // title 을 서로 덮어쓰는 핑퐁을 막는다.
+    if (
+      oglink.querySelector(
+        "[data-cheese-cafe-player], [data-chzzk-cafe-now-player]",
+      )
+    )
+      return;
 
     const player = createPlayer(media);
+    // 삽입 직전 다시 한 번 확인(레이스 방어).
+    if (
+      oglink.querySelector(
+        "[data-cheese-cafe-player], [data-chzzk-cafe-now-player]",
+      )
+    )
+      return;
     if (thumbnail) {
       thumbnail.replaceWith(player);
       return;
@@ -248,7 +263,7 @@
 
   function removeStandaloneClipComponents(mediaKey) {
     document
-      .querySelectorAll(`[data-chzzk-cafe-now-standalone="${mediaKey}"]`)
+      .querySelectorAll(`[data-cheese-cafe-standalone="${mediaKey}"]`)
       .forEach((component) => component.remove());
 
     document.querySelectorAll(TEXT_COMPONENT_SELECTOR).forEach((component) => {
@@ -281,8 +296,8 @@
     );
     updatePlayerLayout(card, cachedMetadata);
 
-    if (card.dataset.chzzkCafeNowMetadataRequested === "true") return;
-    card.dataset.chzzkCafeNowMetadataRequested = "true";
+    if (card.dataset.cheeseCafeMetadataRequested === "true") return;
+    card.dataset.cheeseCafeMetadataRequested = "true";
 
     requestMediaMetadata(mediaInfo.media).then((metadata) => {
       if (!metadata || !card.isConnected) return;
@@ -324,9 +339,9 @@
 
     const component = document.createElement("div");
     component.className =
-      "se-component se-oglink se-l-large_image __se-component chzzk-cafe-now-standalone";
+      "se-component se-oglink se-l-large_image __se-component cheese-cafe-standalone";
     component.id = componentId;
-    component.dataset.chzzkCafeNowStandalone = mediaInfo.mediaKey;
+    component.dataset.cheeseCafeStandalone = mediaInfo.mediaKey;
 
     const content = document.createElement("div");
     content.className = "se-component-content";
@@ -411,45 +426,52 @@
   }
 
   function getFallbackTitle(title) {
-    if (title.dataset.chzzkCafeNowFallbackTitle) {
-      return title.dataset.chzzkCafeNowFallbackTitle;
+    if (title.dataset.cheeseCafeFallbackTitle) {
+      return title.dataset.cheeseCafeFallbackTitle;
     }
 
     const fallbackTitle = (title.textContent || "")
       .replace(/\s*-\s*CHZZK\s*$/i, "")
       .trim();
 
-    title.dataset.chzzkCafeNowFallbackTitle = fallbackTitle;
+    title.dataset.cheeseCafeFallbackTitle = fallbackTitle;
     return fallbackTitle;
   }
 
   function renderOglinkTitle(title, clipUrl, metadata) {
+    // 원본 확장이 이미 이 제목을 렌더했으면 건드리지 않는다(서로 덮어쓰는 핑퐁 방지).
+    if (
+      title.dataset.chzzkCafeNowTitle != null ||
+      title.classList.contains("chzzk-cafe-now-title")
+    ) {
+      return;
+    }
     const fallbackTitle = getFallbackTitle(title);
     const streamerName = metadata?.streamerName || "";
     const clipTitle = metadata?.title || fallbackTitle;
     const label = streamerName ? `${streamerName} - ${clipTitle}` : clipTitle;
     const renderKey = `${label}\n${clipUrl}`;
-    if (title.dataset.chzzkCafeNowTitle === renderKey) return;
+    if (title.dataset.cheeseCafeTitle === renderKey) return;
 
     const icon = document.createElement("img");
-    icon.className = "chzzk-cafe-now-title__icon";
+    icon.className = "cheese-cafe-title__icon";
     icon.src = CHZZK_ICON_URL;
     icon.alt = "";
 
     const text = document.createElement("span");
-    text.className = "chzzk-cafe-now-title__text";
+    text.className = "cheese-cafe-title__text";
     text.textContent = label;
 
     const labelWrapper = document.createElement("div");
-    labelWrapper.className = "chzzk-cafe-now-title__label";
+    labelWrapper.className = "cheese-cafe-title__label";
     labelWrapper.append(icon, text);
 
     const url = document.createElement("span");
-    url.className = "chzzk-cafe-now-title__url";
+    url.className = "cheese-cafe-title__url";
     url.textContent = ` (${clipUrl})`;
 
-    title.classList.add("chzzk-cafe-now-title");
-    title.dataset.chzzkCafeNowTitle = renderKey;
+    title.classList.add("cheese-cafe-title");
+    title.dataset.cheeseCafeTitle = renderKey;
     title.replaceChildren(labelWrapper, url);
   }
 
@@ -508,7 +530,7 @@
 
   function replaceOglinkThumbnail(oglink) {
     if (!oglink.isConnected) return;
-    if (oglink.dataset.chzzkCafeNowStandalone) return;
+    if (oglink.dataset.cheeseCafeStandalone) return;
 
     const thumbnail = findOglinkThumbnail(oglink);
     for (const candidate of oglink.querySelectorAll(CANDIDATE_SELECTOR)) {
@@ -530,7 +552,7 @@
         .querySelectorAll(".se-oglink-summary, .se-oglink-url")
         .forEach((element) => element.remove());
 
-      oglink.classList.add("chzzk-cafe-now-oglink");
+      oglink.classList.add("cheese-cafe-oglink");
       removeStandaloneClipComponents(mediaInfo.mediaKey);
       updateOglinkTitle(oglink, state);
 
@@ -608,6 +630,25 @@
     });
   }
 
+  // 원본 '치즈 카페 나우' 확장이 함께 설치돼 동작 중인지 감지한다. 우리는 고유
+  // 마커(data-cheese-cafe-*)로 격리됐지만, 원본은 data-chzzk-cafe-now-* 마커와
+  // globalThis.ChzzkCafeNow 전역을 쓴다. 둘이 동시에 같은 카페 오글링크를 처리하면
+  // 서로의 title 변경을 감지해 무한 렌더 핑퐁 → 페이지가 멈춘다. 원본이 감지되면
+  // 우리는 완전히 양보한다(부팅 안 함).
+  function isOriginalCafeNowPresent() {
+    try {
+      if (globalThis.ChzzkCafeNow) return true; // 원본 clip-url 전역
+      if (
+        document.querySelector(
+          "[data-chzzk-cafe-now-player], [data-chzzk-cafe-now-standalone], .chzzk-cafe-now-player",
+        )
+      ) {
+        return true; // 원본이 이미 삽입한 플레이어
+      }
+    } catch {}
+    return false;
+  }
+
   // 설정 토글(cheeseCafeNow, 기본 ON)이 켜져 있을 때만 동작한다. 카페는 iframe 구조라
   // all_frames 로 여러 프레임에서 이 스크립트가 돌지만, storage 는 확장 전역이라 각
   // 프레임이 같은 값을 읽는다. 토글을 끄면 새로고침 시 실행 안 함(동적 해제는 복잡해서
@@ -616,6 +657,7 @@
   let started = false;
   function bootIfEnabled() {
     if (started) return;
+    if (isOriginalCafeNowPresent()) return; // 원본 확장이 있으면 양보
     started = true;
     if (document.documentElement) {
       start();

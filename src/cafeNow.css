@@ -2,7 +2,7 @@
   max-width: 800px !important;
 }
 
-.chzzk-cafe-now-player {
+.cheese-cafe-player {
   box-sizing: border-box;
   position: relative;
   display: block !important;
@@ -13,7 +13,7 @@
   background: #000;
 }
 
-.chzzk-cafe-now-player--portrait {
+.cheese-cafe-player--portrait {
   width: 473px !important;
   max-width: 100%;
   aspect-ratio: 473 / 841;
@@ -21,18 +21,18 @@
   margin-left: auto;
 }
 
-.chzzk-cafe-now-portrait > .se-component-content {
+.cheese-cafe-portrait > .se-component-content {
   max-width: 473px !important;
 }
 
-.chzzk-cafe-now-standalone {
+.cheese-cafe-standalone {
   box-sizing: border-box;
   width: 100%;
   max-width: 800px;
   margin: 12px 0;
 }
 
-.chzzk-cafe-now-standalone .se-module-oglink {
+.cheese-cafe-standalone .se-module-oglink {
   box-sizing: border-box;
   display: block;
   overflow: hidden;
@@ -41,8 +41,8 @@
   background: #fff;
 }
 
-.chzzk-cafe-now-oglink .se-oglink-container,
-.chzzk-cafe-now-oglink .se-module-oglink {
+.cheese-cafe-oglink .se-oglink-container,
+.cheese-cafe-oglink .se-module-oglink {
   overflow: hidden;
   border-radius: 8px;
 }
@@ -53,7 +53,7 @@
  * content.js before replaceOrInsertOglinkPlayer runs, so the thumbnail (and
  * any pre-swap placeholder) already occupies the final player dimensions.
  */
-.chzzk-cafe-now-oglink .se-oglink-thumbnail {
+.cheese-cafe-oglink .se-oglink-thumbnail {
   box-sizing: border-box;
   display: block;
   width: 100% !important;
@@ -63,14 +63,14 @@
   background: #000;
 }
 
-.chzzk-cafe-now-oglink .se-oglink-thumbnail img {
+.cheese-cafe-oglink .se-oglink-thumbnail img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.chzzk-cafe-now-standalone .se-oglink-info {
+.cheese-cafe-standalone .se-oglink-info {
   box-sizing: border-box;
   display: block;
   padding: 12px 14px;
@@ -78,11 +78,11 @@
   text-decoration: none;
 }
 
-.chzzk-cafe-now-standalone .se-oglink-info-container {
+.cheese-cafe-standalone .se-oglink-info-container {
   min-width: 0;
 }
 
-.chzzk-cafe-now-player__frame-wrap {
+.cheese-cafe-player__frame-wrap {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -90,7 +90,7 @@
   background: #000;
 }
 
-.chzzk-cafe-now-player__frame {
+.cheese-cafe-player__frame {
   position: absolute;
   inset: 0;
   display: block;
@@ -99,19 +99,19 @@
   border: 0;
 }
 
-.chzzk-cafe-now-title {
+.cheese-cafe-title {
   display: flex !important;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.chzzk-cafe-now-portrait .chzzk-cafe-now-title {
+.cheese-cafe-portrait .cheese-cafe-title {
   flex-direction: column;
   align-items: flex-start;
 }
 
-.chzzk-cafe-now-title__label {
+.cheese-cafe-title__label {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -119,19 +119,19 @@
   max-width: 100%;
 }
 
-.chzzk-cafe-now-title__icon {
+.cheese-cafe-title__icon {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
 }
 
-.chzzk-cafe-now-title__text {
+.cheese-cafe-title__text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chzzk-cafe-now-title__url {
+.cheese-cafe-title__url {
   flex: 0 0 auto;
   color: #aeb4ba;
   font-size: 12px !important;
