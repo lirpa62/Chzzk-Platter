@@ -1491,6 +1491,25 @@
   });
   loadCardDateTooltip();
 
+  // ── 카페 클립 인라인 재생(네이버 카페, 기본 ON) ───────────────────────────
+  const CAFE_NOW_KEY = "cheeseCafeNow";
+  const cafeNowInput = document.querySelector("[data-cafe-now]");
+  if (cafeNowInput) {
+    (async () => {
+      let on = true; // 기본 ON
+      try {
+        const d = await chrome.storage?.local?.get(CAFE_NOW_KEY);
+        on = d?.[CAFE_NOW_KEY] !== false; // 미설정/true=사용
+      } catch {}
+      cafeNowInput.checked = on;
+    })();
+    cafeNowInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({ [CAFE_NOW_KEY]: cafeNowInput.checked });
+      } catch {}
+    });
+  }
+
   // ── 다시보기 자동 재생 사용 설정 끄기(체크=끄기, 기본 OFF) ──────────────────
   const VOD_AUTOPLAY_OFF_KEY = "cheeseVodAutoplayOff";
   const vodAutoplayOffInput = document.querySelector("[data-vod-autoplay-off]");

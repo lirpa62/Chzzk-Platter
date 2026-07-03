@@ -25,7 +25,9 @@
     "https://api.chzzk.naver.com/*",
     "https://creatorhub-api.naver.com/*",
     "https://apis.naver.com/*",
-    "https://*.navercdn.com/*"
+    "https://*.navercdn.com/*",
+    "https://cafe.naver.com/*",
+    "https://*.cafe.naver.com/*"
   ],
   "background": {
     "service_worker": "src/background.js"
@@ -51,6 +53,13 @@
       "matches": ["https://chzzk.naver.com/*", "https://m.naver.com/shorts/*"],
       "js": ["src/clipButtonHide.js"],
       "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://cafe.naver.com/*", "https://*.cafe.naver.com/*"],
+      "js": ["src/cafeClipUrl.js", "src/cafeNow.js"],
+      "css": ["src/cafeNow.css"],
+      "run_at": "document_idle",
       "all_frames": true
     }
   ],

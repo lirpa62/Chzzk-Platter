@@ -2904,9 +2904,76 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (channelId) void lpCheckProgress(channelId);
 });
 
+// ── 카페 나우: 치지직 클립 메타데이터(스트리머/제목/썸네일) ─────────────────────
+// cafe.naver.com 게시글의 클립 링크를 인라인 재생할 때, 오글링크 제목/썸네일 보정용
+// 메타를 받아온다(치즈 카페 나우 이식). content 는 확장 도메인이 달라 직접 fetch 대신
+// background 로 요청한다.
+const CAFE_CLIP_PLAY_INFO_PREFIX =
+  "https://api.chzzk.naver.com/service/v1/play-info/clip/";
+const CAFE_CLIP_DETAIL_PREFIX = "https://api.chzzk.naver.com/service/v1/clips/";
+
+function cafeNormalizeClipPlayInfo(payload) {
+  const content = payload?.content;
+  if (Number(payload?.code) !== 200 || !content) return null;
+  return {
+    streamerName: String(content.ownerChannel?.channelName || "").trim(),
+    title: String(content.contentTitle || "").trim(),
+  };
+}
+function cafeNormalizeClipDetail(payload) {
+  const content = payload?.content;
+  if (Number(payload?.code) !== 200 || !content) return null;
+  return {
+    thumbnailImageUrl: String(content.thumbnailImageUrl || "").trim(),
+    title: String(content.clipTitle || "").trim(),
+  };
+}
+async function cafeFetchClipPlayInfo(clipId) {
+  const res = await fetch(
+    `${CAFE_CLIP_PLAY_INFO_PREFIX}${encodeURIComponent(clipId)}`,
+    { credentials: "include", headers: { accept: "application/json" } },
+  );
+  if (!res.ok) throw new Error(`clip play-info HTTP ${res.status}`);
+  return cafeNormalizeClipPlayInfo(await res.json());
+}
+async function cafeFetchClipDetail(clipId) {
+  const res = await fetch(
+    `${CAFE_CLIP_DETAIL_PREFIX}${encodeURIComponent(clipId)}/detail`,
+    { credentials: "include", headers: { accept: "application/json" } },
+  );
+  if (!res.ok) throw new Error(`clip detail HTTP ${res.status}`);
+  return cafeNormalizeClipDetail(await res.json());
+}
+async function cafeFetchClipMetadata(clipId) {
+  const [playInfo, detail] = await Promise.allSettled([
+    cafeFetchClipPlayInfo(clipId),
+    cafeFetchClipDetail(clipId),
+  ]);
+  const p = playInfo.status === "fulfilled" ? playInfo.value : null;
+  const d = detail.status === "fulfilled" ? detail.value : null;
+  if (!p && !d) return null;
+  return {
+    streamerName: p?.streamerName || "",
+    title: p?.title || d?.title || "",
+    thumbnailImageUrl: d?.thumbnailImageUrl || "",
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (message.type === "CHZZK_CAFE_NOW_GET_CLIP_METADATA") {
+    const clipId = message.clipId || message.mediaId || "";
+    if (!clipId) {
+      sendResponse({ metadata: null });
+      return false;
+    }
+    cafeFetchClipMetadata(clipId)
+      .then((metadata) => sendResponse({ metadata }))
+      .catch(() => sendResponse({ metadata: null }));
+    return true; // 비동기 응답
   }
 
   if (message.type === "START_LOG_POWER_WATCH_REWARD_TRACKING") {

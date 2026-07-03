@@ -161,6 +161,15 @@
           >
             클립
           </button>
+          <button
+            type="button"
+            class="settings-tab"
+            data-tab="cafe"
+            role="tab"
+            aria-selected="false"
+          >
+            카페
+          </button>
         </nav>
 
         <div class="settings-panels">
@@ -750,9 +759,9 @@
                     >자동 재생 사용 설정 끄기</span
                   >
                   <span class="settings-item-desc"
-                    >영상 더보기의 '자동 재생 사용 설정'을 자동으로 끔(영상 더보기
-                    숨김이 아닐 때만, 체크=끄기). 해제해도 자동 재생이 다시
-                    켜지지는 않습니다</span
+                    >영상 더보기의 '자동 재생 사용 설정'을 자동으로 끔(영상
+                    더보기 숨김이 아닐 때만, 체크=끄기). 해제해도 자동 재생이
+                    다시 켜지지는 않습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1527,7 +1536,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채팅창 후원 메시지 숨김</span>
+                  <span class="settings-item-name"
+                    >채팅창 후원 메시지 숨김</span
+                  >
                   <span class="settings-item-desc"
                     >채팅 스트림에 흐르는 후원(치즈) 메시지(체크=숨김)</span
                   >
@@ -1539,7 +1550,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채팅창 구독 메시지 숨김</span>
+                  <span class="settings-item-name"
+                    >채팅창 구독 메시지 숨김</span
+                  >
                   <span class="settings-item-desc"
                     >채팅 스트림에 흐르는 구독 메시지(체크=숨김)</span
                   >
@@ -1551,7 +1564,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채팅창 미션 메시지 숨김</span>
+                  <span class="settings-item-name"
+                    >채팅창 미션 메시지 숨김</span
+                  >
                   <span class="settings-item-desc"
                     >채팅 스트림에 흐르는 미션 메시지(체크=숨김)</span
                   >
@@ -1734,8 +1749,8 @@
                 <div>
                   <span class="settings-item-name">‘적립 중’ 표시 위치</span>
                   <span class="settings-item-desc"
-                    >적립되는 동안 ‘적립 중’을 어디에 보일지: 끔 / 배지(인라인) /
-                    호버 툴팁</span
+                    >적립되는 동안 ‘적립 중’을 어디에 보일지: 끔 / 배지(인라인)
+                    / 호버 툴팁</span
                   >
                 </div>
                 <div
@@ -1773,8 +1788,8 @@
                 <div>
                   <span class="settings-item-name">1시간 타이머 표시 위치</span>
                   <span class="settings-item-desc"
-                    >1시간 보상까지 남은 시간을 어디에 보일지: 끔 / 배지(인라인) /
-                    호버 툴팁</span
+                    >1시간 보상까지 남은 시간을 어디에 보일지: 끔 / 배지(인라인)
+                    / 호버 툴팁</span
                   >
                 </div>
                 <div
@@ -1915,6 +1930,34 @@
                 </label>
               </li>
             </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="cafe"
+            aria-label="카페 기능"
+          >
+            <h2 class="settings-group-title">네이버 카페</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">카페 클립 인라인 재생</span>
+                  <span class="settings-item-desc"
+                    >네이버 카페 게시글의 치지직 클립 링크를 글 안에서 바로
+                    재생(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-cafe-now />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              cafe.naver.com 게시글에 붙은 치지직 클립 링크(OG링크)를 감지해 글
+              안에서 바로 재생합니다. 설정 변경은 카페 페이지를 새로고침하면
+              적용됩니다.
+            </p>
           </section>
         </div>
       </div>
