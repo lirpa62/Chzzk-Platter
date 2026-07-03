@@ -2347,6 +2347,18 @@
   display: none !important;
 }
 
+/* 팔로잉 헤더에 주입한 '목록 접기' 버튼 — 크기/모양/패딩은 치지직 하단 '접기' 버튼의
+   클래스를 harvest 해 그대로 쓴다(JS). 우리 CSS 로 세로 크기/패딩을 강제하면 헤더
+   높이를 밀어 재렌더마다 헤더가 커지며 움직였다 → 배치 여백만 남기고 나머지는 네이티브
+   클래스에 맡긴다. */
+#sidebar .cheese-follow-header-collapse {
+  margin-right: 8px;
+  height: 16px;
+  padding: 1px 2px 1px 6px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
 /* 헤더 미니 네비(사이드바 숨김 시 헤더에 주입하는 SVG 아이콘 메뉴) */
 #cheese-header-nav {
   display: inline-flex;
@@ -2564,6 +2576,14 @@
   .cheese-header-follow-tooltip {
   opacity: 1;
   visibility: visible;
+}
+
+/* 클릭 이동 직후 억제: hover 여도 툴팁을 숨긴다(마우스가 벗어났다 다시 오면 풀림). */
+#cheese-header-follow
+  .cheese-header-follow-item.cheese-header-follow-suppress-tooltip
+  .cheese-header-follow-tooltip {
+  opacity: 0 !important;
+  visibility: hidden !important;
 }
 
 #cheese-header-follow .cheese-header-follow-tooltip-inner {
@@ -2933,7 +2953,7 @@
   text-align: right;
 }
 
-/* 패널이 좁으면(320px 미만) 우측 메타(시청자/경과시간) 숨김 */
+/* 패널이 좁으면(350px 미만) 우측 메타(시청자/경과시간) 숨김 */
 #cheese-follow-preview.is-narrow .cheese-follow-preview-meta-side {
   display: none;
 }

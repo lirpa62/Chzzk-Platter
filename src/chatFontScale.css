@@ -453,7 +453,9 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   transform: none !important;
 }
 
-/* 8. 닉네임 마크(_icon_dtc6c_) */
+/* 8. 닉네임 마크(_icon_dtc6c_) — 인라인 크기가 '없는' 기본 마크(네이티브 14px 기준)
+   만 대상. 인라인 width 가 있는 마크(파트너 인증·우승 배지 등 21px 등 다양한 크기)는
+   여기서 제외하고 아래 8-1 에서 transform 으로 배율만 적용한다(인라인 값 존중). */
 html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
@@ -464,7 +466,7 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
       ),
     [class*="_floating_"]
   )
-  [class*="_icon_dtc6c_"] {
+  [class*="_icon_dtc6c_"]:not([style*="width"]) {
   width: calc(
     var(--cheese-chat-nickname-mark-size) *
       var(--cheese-chat-font-scale)
@@ -484,6 +486,27 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
     ) !important;
   margin-left: calc(4px * var(--cheese-chat-font-scale)) !important;
   margin-top: calc(2px * var(--cheese-chat-font-scale)) !important;
+  transform: none !important;
+}
+
+/* 8-1. 인라인 크기가 '있는' 닉네임 마크(파트너 인증·우승 배지 등). 네이티브가 마크마다
+   다른 px(16·21px 등 가변)를 인라인으로 지정하므로 14px 기준으로 덮으면 크기가 틀어진다.
+   인라인 width/height 는 그대로 두고 zoom 으로 배율만 곱한다(인라인 값 존중).
+   ⚠ transform: scale 은 레이아웃 공간을 안 늘려, 닉네임 말줄임(_ellipsis_dtc6c_)의
+   overflow: hidden 에 커진 부분이 잘렸다. zoom 은 배율만큼 '차지 공간까지' 함께 키워
+   overflow 에 안 잘리고 인라인 값도 존중한다(Chromium·최신 Firefox 지원). */
+html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    :is(
+        [class*="_item_"],
+        [class*="live_chatting_list_item"],
+        [class*="vod_chatting_item"]
+      ),
+    [class*="_floating_"]
+  )
+  [class*="_icon_dtc6c_"][style*="width"] {
+  zoom: var(--cheese-chat-font-scale) !important;
   transform: none !important;
 }
 
@@ -759,13 +782,12 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
 
 /* === 특수 메시지 스케일 세부 보정 ============================================ */
 
-/* (A) 프로필 다이얼로그([role="alertdialog"]) 내부는 폰트 크기 조절에서 제외한다
-   (원래 동작). 프로필 다이얼로그는 채팅 행(_item_) 안의 [role="alertdialog"] 로
-   렌더돼 위 스케일 규칙들(배지 크기·gap·margin·폰트)에 함께 걸린다. 규칙마다
-   특이도로 제외하려 하면 계속 밀리므로, 다이얼로그 서브트리에서 배율 변수를 1로
-   리셋한다. 우리 모든 규칙이 --cheese-chat-font-scale 를 곱하므로 변수가 1이면
-   자동으로 '조절 없음'(네이티브 기준값 × 1)이 된다. gap/margin 등 소수 절대값 규칙만
-   추가로 initial 처리한다. */
+/* (A) 채팅 안 다이얼로그성 UI([role="alertdialog"]) 내부는 폰트 크기 조절에서
+   제외한다. 대상은 두 가지 모두: 프로필 '편집' 다이얼로그(_container_8x1lk_,
+   _preview_ 보유)와 닉네임 클릭 시 뜨는 프로필 '카드'(_container_1hyev_, _badge_1hyev_
+   보유). 둘 다 채팅 행(_item_) 안에 role="alertdialog" 로 렌더돼 스케일 규칙에 함께
+   걸리므로, role 서브트리에서 배율 변수를 1로 리셋해 모든 스케일 규칙(--cheese-chat-
+   font-scale 곱)을 자동 무력화하고, gap/margin/img 등 절대값 규칙만 아래에서 되돌린다. */
 html.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [role="alertdialog"] {
@@ -784,13 +806,29 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   margin-right: 4px !important;
   align-items: initial !important;
 }
+/* 버튼형 배지 래퍼(_is_button_badge_)는 네이티브가 gap 을 갖지 않는다(체크박스형
+   배지 선택 UI). 위 4px 을 initial 로 되돌려 다이얼로그 배지 선택 영역이 벌어지지
+   않게 한다. 특이도를 위해 셀렉터에 클래스를 하나 더 붙였다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [role="alertdialog"]
-  [class*="_icon_o04z9_"]
+  [class*="_wrapper_o04z9_"][class*="_is_button_badge_"] {
+  gap: initial !important;
+}
+/* 배지 아이콘(_icon_o04z9_) 내부 img/svg/container 는 부모(_icon_o04z9_)를 채운다.
+   부모는 변수 리셋(1)으로 네이티브 18px 이므로 100% = 18px 이 된다.
+   ⚠ auto 로 두면 img 가 CSS width 를 잃고 '원본 파일 픽셀 크기'(예: 72px)로 렌더돼
+   인라인 width="18" 속성을 무시하고 커진다(진단으로 확인). 그래서 auto 가 아니라
+   100% 로 부모에 맞춘다(규칙 7 과 동일). */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"]
+  [class*="_wrapper_o04z9_"]
+  > [class*="_icon_o04z9_"]
   :is([class*="_container_"], img, svg) {
-  width: auto !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
 }
 
 /* (B) 닉네임 어긋남은 위 규칙 1-3b 에서 일반·특수 공통으로 처리한다. */

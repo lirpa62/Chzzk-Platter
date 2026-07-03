@@ -746,6 +746,22 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name"
+                    >자동 재생 사용 설정 끄기</span
+                  >
+                  <span class="settings-item-desc"
+                    >영상 더보기의 '자동 재생 사용 설정'을 자동으로 끔(영상 더보기
+                    숨김이 아닐 때만, 체크=끄기). 해제해도 자동 재생이 다시
+                    켜지지는 않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-autoplay-off />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">댓글 타임스탬프 숨김</span>
                   <span class="settings-item-desc">재생바 댓글 마커·목록</span>
                 </label>
@@ -1494,6 +1510,54 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatHidePrediction" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅창 파티 후원 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅 상단 '파티 후원 진행 중' 패널(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideParty" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅창 후원 메시지 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅 스트림에 흐르는 후원(치즈) 메시지(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideDonation" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅창 구독 메시지 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅 스트림에 흐르는 구독 메시지(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideSubscription" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅창 미션 메시지 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅 스트림에 흐르는 미션 메시지(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideMissionMsg" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

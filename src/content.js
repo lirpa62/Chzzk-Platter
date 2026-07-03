@@ -175,6 +175,10 @@ const featureFlags = {
   chatHideRanking: false,
   chatHideMission: false,
   chatHidePrediction: false,
+  chatHideParty: false, // 채팅 상단 고정 '파티 후원' 진행 패널 숨김
+  chatHideDonation: false, // 채팅 스트림의 후원(치즈) 메시지 숨김
+  chatHideSubscription: false, // 채팅 스트림의 구독 메시지 숨김
+  chatHideMissionMsg: false, // 채팅 스트림의 미션 메시지 숨김
   chatWidthResize: false,
   chatLeftPosition: false,
   chatAutoHide: false,
@@ -3905,6 +3909,9 @@ function initSeekPreviewRealtime() {
     seekPreviewState.videoNo = videoNo;
     seekPreviewState.liveOpenAt = 0;
     seekPreviewState.publishAt = 0;
+    // 새 영상 진입 → 자동 재생 끄기 재적용 허용(영상마다 스위치가 새로 렌더됨).
+    vodAutoplaySettingApplied = false;
+    vodAutoplayTurnedOff = false;
     void fetchVideoDates(videoNo);
   }
   startSeekPreviewObserver();
@@ -7798,6 +7805,7 @@ const CHAT_HIDE_CLASSES = {
   chatHideRanking: "cheese-chat-hidden-ranking",
   chatHideMission: "cheese-chat-hidden-mission",
   chatHidePrediction: "cheese-chat-hidden-prediction",
+  chatHideParty: "cheese-chat-hidden-party",
 };
 let chatObserver = null;
 let chatWidthValue = 0; // 0이면 미설정(기본 너비)
@@ -7818,6 +7826,8 @@ function moaHasChat(feature) {
       return cl.contains("chzzk-badge-moa-hide-chat-mission");
     case "chatHidePrediction":
       return cl.contains("chzzk-badge-moa-hide-chat-prediction");
+    case "chatHideDonation":
+      return cl.contains("chzzk-badge-moa-hide-chat-donation");
     case "chatLeftPosition":
       return cl.contains("chzzk-badge-moa-chat-left-position");
     case "chatWidthResize":
@@ -7855,6 +7865,7 @@ const CHAT_MOA_KEYS = [
   "chatHideRanking",
   "chatHideMission",
   "chatHidePrediction",
+  "chatHideDonation",
   "chatWidthResize",
   "chatLeftPosition",
   "chatFontScale",
@@ -7880,6 +7891,10 @@ function anyChatTweakOn() {
     featureFlags.chatHideRanking ||
     featureFlags.chatHideMission ||
     featureFlags.chatHidePrediction ||
+    featureFlags.chatHideParty ||
+    featureFlags.chatHideDonation ||
+    featureFlags.chatHideSubscription ||
+    featureFlags.chatHideMissionMsg ||
     featureFlags.chatWidthResize ||
     featureFlags.chatLeftPosition ||
     featureFlags.chatAutoHide ||
@@ -7938,7 +7953,33 @@ function applyChatHideMarkers() {
         }
       });
     }
+    if (chatFeatureActive("chatHideParty")) {
+      // 파티 후원 헤더 고유 아이콘(_icon_party_)에서 그 파티 패널 컨테이너로 올라가
+      // 부착한다. 파티 패널과 미션 패널은 _fixed_ 안에서 형제라 미션은 안 숨겨진다.
+      aside.querySelectorAll("[class*='_icon_party_']").forEach((icon) => {
+        icon
+          .closest("[class*='_container_']")
+          ?.classList.add(CHAT_HIDE_CLASSES.chatHideParty);
+      });
+    }
   });
+  // 후원(치즈) 메시지 숨김은 JS 마커가 아니라 순수 CSS :has() 규칙으로 처리한다
+  // (채팅 스트림 메시지는 폭주할 수 있어, 새 행마다 JS가 개입하면 부하가 크다).
+  // 여기선 <html> 게이트 클래스만 토글하고 실제 규칙은 updateChatTweakStyle이 건다.
+  document.documentElement.classList.toggle(
+    "cheese-chat-hide-donation",
+    chatFeatureActive("chatHideDonation"),
+  );
+  // 구독·미션 메시지도 동일 방식(순수 CSS :has()). moa엔 이 두 '메시지' 전용
+  // 숨김이 없어 양보 대상이 아니다 → featureFlags를 직접 본다.
+  document.documentElement.classList.toggle(
+    "cheese-chat-hide-subscription",
+    chatFeatureActive("chatHideSubscription"),
+  );
+  document.documentElement.classList.toggle(
+    "cheese-chat-hide-mission-msg",
+    chatFeatureActive("chatHideMissionMsg"),
+  );
 }
 
 // 채팅창 너비 조절(배지 모아 챗과 동일한 방식). aside의 width/flex-basis/min-width를
@@ -8406,19 +8447,37 @@ function findVodPlayerBox() {
 // 과도하게 작아진다. 영상 더보기 배치/숨김을 적용할 때(채팅 없을 때만) _player_ 폭을
 // 100%로 덮어써 영상이 전체 폭을 쓰게 한다. off/채팅 있을 땐 우리 인라인을 제거해 원복.
 const VOD_PLAYER_WIDTH_ATTR = "data-cheese-vod-player-fullwidth";
+// 우리가 100%로 덮기 전, 치지직이 인라인으로 준 원래 width(예: calc(100% - 353px))를
+// 보관한다. 해제 시 이 값으로 '복원'해야 한다 — 단순 removeProperty 는 width 인라인을
+// 아예 없애 영상 더보기가 영상 위로 오버레이되던 문제가 있었다(채팅 없는 다시보기).
+const VOD_PLAYER_ORIG_WIDTH_ATTR = "data-cheese-vod-player-origwidth";
 function applyVodPlayerFullWidth(on) {
   const player = findVodPlayerBox();
   if (!(player instanceof HTMLElement)) return;
   const hasChat = !!findResizableChatAside();
   if (on && !hasChat) {
     if (player.style.getPropertyValue("width") !== "100%") {
+      // 원래 인라인 width 를 1회 보관(이미 우리가 덮은 상태면 보관 안 함).
+      if (!player.hasAttribute(VOD_PLAYER_WIDTH_ATTR)) {
+        player.setAttribute(
+          VOD_PLAYER_ORIG_WIDTH_ATTR,
+          player.style.getPropertyValue("width") || "",
+        );
+      }
       player.style.setProperty("width", "100%", "important");
       player.setAttribute(VOD_PLAYER_WIDTH_ATTR, "1");
     }
   } else if (player.hasAttribute(VOD_PLAYER_WIDTH_ATTR)) {
-    // 우리가 건 것만 제거(치지직 인라인은 우리가 attr로 표시한 경우에만 지움).
-    player.style.removeProperty("width");
+    // 우리가 덮은 것 해제: 원래 width 로 복원한다(제거가 아니라). 원래가 빈 값이었으면
+    // 그때만 인라인을 제거해 치지직 CSS 기본값에 맡긴다.
+    const orig = player.getAttribute(VOD_PLAYER_ORIG_WIDTH_ATTR) || "";
+    if (orig) {
+      player.style.setProperty("width", orig);
+    } else {
+      player.style.removeProperty("width");
+    }
     player.removeAttribute(VOD_PLAYER_WIDTH_ATTR);
+    player.removeAttribute(VOD_PLAYER_ORIG_WIDTH_ATTR);
   }
 }
 
@@ -8428,19 +8487,34 @@ function applyVodPlayerFullWidth(on) {
 let vodAutoplayTurnedOff = false;
 function turnOffVodAutoplay() {
   if (vodAutoplayTurnedOff) return;
+  if (findVodAutoplayInput()?.checked) {
+    findVodAutoplayInput().click(); // React onChange 발화 → 자동 재생 off
+  }
+  if (findVodAutoplayInput()) vodAutoplayTurnedOff = true; // 스위치 찾았으면 재시도 중단
+}
+
+// '영상 더보기'의 첫 스위치(자동 재생 사용 설정)의 input[checkbox]를 찾는다.
+function findVodAutoplayInput() {
   const right = findVodContentRight();
-  if (!right) return;
-  // '자동 재생' 라벨/스위치 찾기.
-  const labels = right.querySelectorAll(
+  if (!right) return null;
+  const label = right.querySelector(
     'label[class*="_switch_"], [class*="_switch_"]',
   );
-  for (const label of labels) {
-    const input = label.querySelector('input[type="checkbox"]');
-    if (!input) continue;
-    if (input.checked) input.click(); // React onChange 발화 → 자동 재생 off
-    vodAutoplayTurnedOff = true; // 토글을 찾았으면(껐든 이미 꺼졌든) 재시도 중단
-    return; // 첫 스위치(자동 재생)만 처리
-  }
+  return label?.querySelector('input[type="checkbox"]') || null;
+}
+
+// 설정 '자동 재생 사용 설정 끄기'(체크=끄기, 기본 OFF). 영상 더보기가 '숨김'이 아닐
+// 때만 의미가 있다(숨기면 스위치를 못 봄). 설정이 켜져 있으면 자동 재생 스위치를
+// 끄고, 꺼져 있으면 우리가 강제하지 않는다(치지직 기본/사용자 조작에 맡김).
+const VOD_AUTOPLAY_OFF_KEY = "cheeseVodAutoplayOff";
+let vodAutoplayOff = false;
+let vodAutoplaySettingApplied = false; // 진입당 1회만 적용(사용자 재조작 존중)
+function applyVodAutoplaySetting() {
+  if (!vodAutoplayOff || vodAutoplaySettingApplied) return;
+  const input = findVodAutoplayInput();
+  if (!input) return; // 아직 렌더 전 → 다음 tick/옵저버에서 재시도
+  if (input.checked) input.click(); // 자동 재생 off
+  vodAutoplaySettingApplied = true;
 }
 
 // _content_right_를 댓글 앞으로 이동(아래 배치). 이미 그 위치면 no-op(멱등).
@@ -8506,6 +8580,8 @@ function applyVodMoreLayout() {
   // 여기 도달 = 숨김이 꺼진 상태. 다음에 다시 숨길 때 자동 재생을 또 끌 수 있도록
   // 플래그를 리셋한다(그 사이 사용자가 자동 재생을 다시 켰을 수 있음).
   vodAutoplayTurnedOff = false;
+  // 숨김이 아니면 '자동 재생 사용 설정 끄기' 옵션을 반영한다(설정 켜진 경우만 끔).
+  applyVodAutoplaySetting();
   // 아래 배치: 이동 + 재렌더 시 재이동 옵저버 + _content_right_ 스타일.
   if (below) {
     if (!style) {
@@ -8730,6 +8806,9 @@ function applyChatTweaks() {
       "cheese-chat-width-resize-enabled",
     );
     document.documentElement.classList.remove("cheese-chat-button-wrap");
+    document.documentElement.classList.remove("cheese-chat-hide-donation");
+    document.documentElement.classList.remove("cheese-chat-hide-subscription");
+    document.documentElement.classList.remove("cheese-chat-hide-mission-msg");
     applyChatFontScale(); // 배율 1 → 게이트 클래스 제거
     updateChatTweakStyle();
     if (document.querySelector(CHAT_ASIDE_SEL)) startChatObserver();
@@ -8850,7 +8929,25 @@ function updateChatTweakStyle() {
   style.textContent = `
     .${CHAT_HIDE_CLASSES.chatHideRanking},
     .${CHAT_HIDE_CLASSES.chatHideMission},
-    .${CHAT_HIDE_CLASSES.chatHidePrediction} { display: none !important; }
+    .${CHAT_HIDE_CLASSES.chatHidePrediction},
+    .${CHAT_HIDE_CLASSES.chatHideParty} { display: none !important; }
+    /* 후원(치즈)/구독/미션 메시지 숨김 — 순수 CSS :has()로 배지 래퍼의 타입 클래스
+       (_is_donation_/_is_subscription_/_is_mission_)를 가진 채팅 행(_item_)을 숨긴다.
+       JS 마커가 아니라 렌더 엔진이 처리해 채팅 폭주에도 부하가 낮다. 범위를 채팅
+       aside로 좁혀 :has 재평가 대상을 최소화한다. 타입 클래스는 배지 래퍼에만 붙어
+       일반 메시지(_is_message_)와 확실히 구분된다. */
+    html.cheese-chat-hide-donation aside#aside-chatting [class*="_item_"]:has(> [class*="_container_"] [class*="_is_donation_"]),
+    html.cheese-chat-hide-donation aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_donation_"]) {
+      display: none !important;
+    }
+    html.cheese-chat-hide-subscription aside#aside-chatting [class*="_item_"]:has(> [class*="_container_"] [class*="_is_subscription_"]),
+    html.cheese-chat-hide-subscription aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_subscription_"]) {
+      display: none !important;
+    }
+    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
+    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]) {
+      display: none !important;
+    }
     html.cheese-chat-left-position aside#aside-chatting,
     html.cheese-chat-left-position aside#vod-aside { order: -1 !important; }
     html.cheese-chat-auto-hide:not(.cheese-chat-stacked):not(.cheese-chat-popup) aside#aside-chatting,
@@ -9575,13 +9672,23 @@ function applyFollowOffline(followNav) {
 
 // 팔로잉 li가 오프라인인지 판정. blind 텍스트("오프라인"/"LIVE")를 1순위(해시 무관),
 // _is_live_ 클래스를 폴백으로 본다. 둘 다 애매하면 라이브로 간주(숨기지 않음=보수적).
+// ⚠ 파티 li 는 바깥 래퍼(_type_profile_)와 실제 프로필(_profile_ _is_live_)이 중첩돼
+// 있고 blind 도 "파티 진행중"이 먼저 온다. 그래서 '첫 프로필/첫 blind'만 보면 라이브
+// 파티를 오프라인으로 오판한다 → li 전체 기준으로 본다.
 function isOfflineFollowItem(li) {
+  // 1순위: li 전체 blind 텍스트. "LIVE"가 하나라도 있으면 라이브(파티 진행중 라이브 포함).
+  const blinds = Array.from(li.querySelectorAll(".blind")).map((b) =>
+    (b.textContent || "").trim(),
+  );
+  if (blinds.some((t) => t === "LIVE")) return false;
+  if (blinds.some((t) => t === "오프라인")) return true;
+  // 폴백: li 전체에서 _is_live_ 클래스를 가진 프로필이 하나라도 있으면 라이브.
+  if (li.querySelector('[class*="_profile_"][class*="_is_live_"]'))
+    return false;
+  // 프로필이 있는데 _is_live_ 가 하나도 없으면 오프라인으로 본다.
   const profile = li.querySelector('[class*="_profile_"]');
-  if (!profile) return false;
-  const blind = (profile.querySelector(".blind")?.textContent || "").trim();
-  if (blind === "오프라인") return true;
-  if (blind === "LIVE") return false;
-  return !/_is_live_/.test(profile.className);
+  if (!profile) return false; // 프로필 자체가 없으면 애매 → 보수적으로 라이브(안 숨김).
+  return true;
 }
 
 function getSidebarNavLabel(nav) {
@@ -9609,15 +9716,22 @@ function findSidebarFollowNav() {
 let followExpandWanted = false; // 사용자가 '모두 펼침'을 원하는 상태
 let followAutoExpandTimer = 0; // 반복 클릭 드라이버 타이머
 let followAutoExpandTries = 0; // 안전: 무한 반복 방지
+let followAutoExpandPrevCount = -1; // 직전 라운드 목록 항목 수(진전 없으면 조기 중단)
 // 자동 펼치기 옵션(sbFollowAutoExpand)이 켜져 있어도, 사용자가 이번 세션에서 직접
 // '접기'를 눌렀으면 재펼침을 멈춘다(사용자 의사 우선). 페이지 이동/새로고침 시 초기화.
 let followUserCollapsed = false;
 
 // 팔로잉 '모두 펼침'을 원하는 상태인지: 사용자가 직접 더보기를 눌렀거나(followExpandWanted),
 // 자동 펼치기 옵션이 켜졌고 이번 세션에 직접 접지 않았으면 true.
+// 단 사이드바 숨김(featureFlags.sidebar) 상태면 팔로잉 목록이 안 보이므로 자동 펼치기는
+// 의미가 없고, 숨겨진 사이드바의 '더보기'를 프로그램적으로 계속 클릭하는 낭비도 막는다.
 function shouldExpandFollow() {
+  if (featureFlags.sidebar) return false; // 사이드바 숨김 → 펼칠 대상이 안 보임
+  // 자동 펼치기 옵션이 꺼져 있으면 어떤 경우에도 강제 펼치지 않는다. followExpandWanted
+  // 가 과거(옵션 ON 시절)에 켜진 채 남아 있어도, 옵션이 꺼졌으면 무시한다.
+  if (!featureFlags.sbFollowAutoExpand) return false;
   if (followExpandWanted) return true;
-  return featureFlags.sbFollowAutoExpand && !followUserCollapsed;
+  return !followUserCollapsed;
 }
 
 // 팔로잉 nav의 더보기/접기 버튼을 찾는다(_more_button_ 클래스, aria-label로 구분).
@@ -9636,10 +9750,20 @@ function stopFollowAutoExpand() {
     followAutoExpandTimer = 0;
   }
   followAutoExpandTries = 0;
+  followAutoExpandPrevCount = -1; // 다음 펼치기 세션이 깨끗이 시작되도록 리셋
+}
+
+// 팔로잉 nav의 현재 목록 항목 수.
+function countFollowItems(nav) {
+  const ul = nav?.querySelector('ul[class*="_list_"]');
+  return ul ? ul.querySelectorAll(":scope > li").length : 0;
 }
 
 // '접기'가 나올 때까지 더보기를 반복 클릭한다. 클릭→React 추가 로드(비동기)→다음
 // 더보기 버튼 등장을 기다려 다시 클릭. 접기가 보이거나 더보기가 사라지면 종료.
+// ⚠ 더보기 클릭 후 목록 항목 수가 '안 늘면' 더 로드할 게 없거나 실패한 것이므로 즉시
+// 중단한다(치즈나이프 아이디어). 무한 반복(최대 50회 × 250ms)으로 대량 로드가 지속돼
+// 방송이 렉 걸리던 문제를 줄인다.
 function driveFollowAutoExpand() {
   followAutoExpandTimer = 0;
   if (!shouldExpandFollow()) return;
@@ -9656,11 +9780,18 @@ function driveFollowAutoExpand() {
     stopFollowAutoExpand();
     return;
   }
+  // 직전 클릭으로 항목이 늘지 않았으면(진전 없음) 중단 — 더 로드할 게 없거나 실패.
+  const count = countFollowItems(nav);
+  if (followAutoExpandTries > 0 && count <= followAutoExpandPrevCount) {
+    stopFollowAutoExpand();
+    return;
+  }
   if (followAutoExpandTries >= 50) {
     // 안전장치: 비정상적으로 많이 반복되면 중단(rate-limit/루프 방지).
     stopFollowAutoExpand();
     return;
   }
+  followAutoExpandPrevCount = count;
   followAutoExpandTries += 1;
   more.click();
   // 추가 로드 렌더를 기다렸다 다음 라운드(없어질 때까지).
@@ -9685,6 +9816,10 @@ function ensureFollowExpansion() {
 // 팔로잉 더보기/접기 버튼 클릭을 가로채 사용자 의사를 기록하고 자동 펼침을 건다.
 // capture 단계로 치지직 React 핸들러보다 먼저 의사만 기록(클릭 자체는 막지 않음).
 function onFollowMoreClickCapture(e) {
+  // 프로그램적 클릭(.click())은 무시한다 — 자동 새로고침이 하단 버튼을 누르거나
+  // 재렌더로 버튼이 순간 바뀌는 등, 사용자가 아닌 클릭이 followExpandWanted 를 켜서
+  // 옵션과 무관하게 목록이 강제로 끝까지 펼쳐지던 문제를 막는다(방송 렉 유발).
+  if (!e.isTrusted) return;
   const btn = e.target?.closest?.(
     'button[aria-label="더보기"], button[aria-label="접기"]',
   );
@@ -9693,8 +9828,10 @@ function onFollowMoreClickCapture(e) {
   const nav = btn.closest('nav[class*="_section_"]');
   if (!nav || !getSidebarNavLabel(nav).includes("팔로")) return;
   if (btn.getAttribute("aria-label") === "더보기") {
-    // 사용자가 펼침 시작 → 모두 펼치고 싶다는 의사. 치지직이 1차 로드한 뒤
-    // 우리가 접기 나올 때까지 이어서 클릭한다(이 클릭은 그대로 진행).
+    // '자동 펼치기' 옵션이 꺼져 있으면 사용자의 '더보기' 클릭을 가로채 끝까지 강제
+    // 펼치지 않는다 — 사용자는 한 단계만 더 보려던 것일 수 있고, 강제 전체 펼침은
+    // 팔로우가 많을 때 대량 로드로 렉을 유발한다. 옵션이 켜진 경우에만 이어서 펼친다.
+    if (!featureFlags.sbFollowAutoExpand) return;
     followExpandWanted = true;
     followUserCollapsed = false; // 직접 펼침 → 자동 펼치기 억제 해제
     followAutoExpandTries = 0;
@@ -9709,6 +9846,96 @@ function onFollowMoreClickCapture(e) {
   }
 }
 document.addEventListener("click", onFollowMoreClickCapture, true);
+
+// ── 팔로잉 헤더에 '접기' 버튼 주입 ─────────────────────────────────────────
+// 자동 펼치기로 목록이 길어지면 하단 '접기' 버튼까지 스크롤하기 번거롭다. 팔로잉
+// 섹션 헤더(_header_)에 '접기' 버튼을 넣어, 누르면 하단 '접기'를 대신 눌러 스크롤
+// 없이 목록을 접는다. 목록이 펼쳐진 상태(하단 접기 버튼 존재)에서만 보인다.
+const FOLLOW_HEADER_COLLAPSE_CLASS = "cheese-follow-header-collapse";
+let followCollapseRemoveTimer = 0;
+function ensureFollowCollapseHeaderButton() {
+  const nav = findSidebarFollowNav();
+  if (!nav) return;
+  const header = nav.querySelector('[class*="_header_"]');
+  if (!header) return;
+  // 사이드바가 접힘(좁은 아이콘 모드, _is_expanded_ 없음)이면 팔로잉 헤더/목록이
+  // 안 보이므로 우리 '접기' 버튼도 숨긴다(이미 있으면 제거).
+  if (!isSidebarExpanded()) {
+    header.querySelector(`.${FOLLOW_HEADER_COLLAPSE_CLASS}`)?.remove();
+    return;
+  }
+  const collapseBtn = findFollowCollapseButton(nav); // 하단 '접기'(펼침 상태에만 존재)
+  const moreBtn = findFollowMoreButton(nav); // 하단 '더보기'(접힌 상태에만 존재)
+  let btn = header.querySelector(`.${FOLLOW_HEADER_COLLAPSE_CLASS}`);
+  // 하단 버튼은 자동 새로고침마다 '접기'→'더보기'→'접기'로 바뀐다(치지직이 새로고침 시
+  // 목록을 일정 수로 줄였다가, 우리 자동 펼치기가 다시 끝까지 펼침). 이 더보기 구간이
+  // 수백 ms 지속되므로, 그때마다 헤더 버튼을 제거하면 깜빡인다.
+  if (moreBtn) {
+    // 자동 펼치기로 곧 다시 펼쳐질 상태(shouldExpandFollow)면 목록은 결국 펼침으로
+    // 수렴하므로 헤더 버튼을 '유지'한다(제거 예약도 취소). 진짜 접힘(사용자가 접어
+    // 자동 펼치기가 억제된 상태)일 때만 지연 후 제거한다.
+    if (shouldExpandFollow()) {
+      if (followCollapseRemoveTimer) {
+        clearTimeout(followCollapseRemoveTimer);
+        followCollapseRemoveTimer = 0;
+      }
+      return;
+    }
+    if (btn && !followCollapseRemoveTimer) {
+      followCollapseRemoveTimer = window.setTimeout(() => {
+        followCollapseRemoveTimer = 0;
+        // 지연 후에도 여전히 접힘(더보기)이고 자동 펼치기도 안 걸릴 상태면 제거.
+        const stillCollapsed =
+          findFollowMoreButton() && !findFollowCollapseButton();
+        if (stillCollapsed && !shouldExpandFollow()) {
+          document
+            .querySelector(`.${FOLLOW_HEADER_COLLAPSE_CLASS}`)
+            ?.remove();
+        }
+      }, 600);
+    }
+    return;
+  }
+  // 접기가 보이면(펼침 상태) 예약된 제거를 취소한다.
+  if (followCollapseRemoveTimer) {
+    clearTimeout(followCollapseRemoveTimer);
+    followCollapseRemoveTimer = 0;
+  }
+  // 이미 우리 버튼이 있으면 '그대로 둔다'(재렌더마다 harvest 재실행 방지 → 헤더 흔들림
+  // 방지). 하단 '접기'가 순간 없어도 유지한다(위에서 진짜 접힘만 걸러냈다).
+  if (btn) return;
+  // 새로 만들 때는 하단 '접기' 버튼이 있어야 클래스/내용을 harvest 할 수 있다. 재렌더
+  // 중이라 아직 없으면 이번엔 만들지 않고 다음 호출(옵저버)에서 만든다.
+  if (!collapseBtn) return;
+  btn = document.createElement("button");
+  btn.type = "button";
+  // 치지직 하단 '접기' 버튼의 클래스('접기' 텍스트 + svg 포함)를 harvest 해 동일
+  // 스타일로 보이게 한다(우리 마커 클래스 추가).
+  btn.className = `${collapseBtn.className} ${FOLLOW_HEADER_COLLAPSE_CLASS}`;
+  btn.innerHTML = collapseBtn.innerHTML; // '접기' 텍스트 + svg 동일
+  btn.setAttribute("aria-label", "목록 접기");
+  btn.title = "목록 접기";
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // 사용자가 접기를 원함 → 자동 펼치기 억제 의사를 직접 기록한다. (하단 '접기'를
+    // .click()으로 누르지만 그건 isTrusted=false 라 onFollowMoreClickCapture 가
+    // 무시하므로, 여기서 followUserCollapsed 를 직접 켜야 자동 펼치기가 재펼침하지
+    // 않는다.)
+    followExpandWanted = false;
+    followUserCollapsed = true;
+    stopFollowAutoExpand();
+    // 하단 '접기'를 눌러 실제로 목록을 접는다.
+    findFollowCollapseButton()?.click();
+  });
+  // 제목 바로 뒤(새로고침 등 우측 버튼 앞)에 둔다.
+  const title = header.querySelector('[class*="_title_"]');
+  if (title && title.nextSibling) {
+    header.insertBefore(btn, title.nextSibling);
+  } else {
+    header.appendChild(btn);
+  }
+}
 
 let headerFollowLiveItems = [];
 let headerFollowLiveInfoLoaded = false;
@@ -10046,7 +10273,32 @@ function onHeaderFollowClick(event) {
   const href = anchor.getAttribute("href");
   if (!href) return;
   event.preventDefault();
+  // 이동 시 미리보기/커스텀 툴팁을 정리한다. 헤더 자동 숨김 상태에서 팔로우 채널을
+  // 클릭해 이동하면 헤더가 숨겨지는데, 마우스는 그대로라 hover 기반 툴팁과 body 에
+  // fixed 로 뜬 미리보기가 남았다.
+  dismissHeaderFollowHover(event.target.closest(".cheese-header-follow-item"));
   spaNavigate(href);
+}
+
+// 헤더 팔로우 아이템의 미리보기·커스텀 툴팁을 즉시 정리한다.
+function dismissHeaderFollowHover(li) {
+  closeFollowPreview(); // body fixed 미리보기 닫기(hover 무관하게 남던 것)
+  // 이동 직후 잠깐은 미리보기 재오픈을 억제한다(헤더 재렌더로 mouseover 가 다시 나
+  // 미리보기가 마우스를 따라 새로 뜨는 것 방지).
+  followPreviewOpenSuppressUntil = Date.now() + FOLLOW_PREVIEW_CLICK_SUPPRESS_MS;
+  // 커스텀 툴팁은 :hover/:focus-within CSS 로 뜬다. 클릭 후 마우스가 그대로면 hover 가
+  // 유지돼 툴팁이 남으므로, 억제 클래스를 잠깐 부여해 강제로 숨긴다(마우스가 벗어났다
+  // 다시 올라오면 자연히 풀린다).
+  const item = li || document.querySelector(".cheese-header-follow-item:hover");
+  if (item) {
+    item.classList.add("cheese-header-follow-suppress-tooltip");
+    // 다음에 이 아이템을 벗어나면 억제를 해제한다(다시 호버 시 툴팁 정상 표시).
+    const clear = () => {
+      item.classList.remove("cheese-header-follow-suppress-tooltip");
+      item.removeEventListener("mouseleave", clear);
+    };
+    item.addEventListener("mouseleave", clear);
+  }
 }
 
 // ── 사이드바 전담 옵저버(섹션 숨김 깜빡임 최소화) ───────────────────────────
@@ -10097,6 +10349,7 @@ function ensureSidebarObserver() {
     //  scheduleSidebarPushSettle()로 재측정을 예약하므로 그걸로 충분하다.)
     handleSidebarExpandTransition(sidebar);
     ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
+    ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
   });
   // childList/subtree + attributes(class): 사이드바 확장/축소는 #sidebar의 class만
   // 바뀔 수 있어 attributeFilter로 class 변화도 감지한다.
@@ -10109,6 +10362,7 @@ function ensureSidebarObserver() {
   applySidebarSections();
   ensureHeaderFollowNav();
   ensureFollowExpansion();
+  ensureFollowCollapseHeaderButton();
   // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
   // 있다 → 여기서 1회만 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
   applySidebarPush();
@@ -10399,10 +10653,14 @@ async function loadChannelLiveButton() {
 // 안 되면 hls.js로 재생. 우리 자체 fixed 패널이라 React에 개입하지 않는다.
 const FOLLOW_PREVIEW_ID = "cheese-follow-preview";
 const FOLLOW_PREVIEW_HOVER_DELAY_MS = 250;
+// 사이드바 팔로잉 목록을 스크롤하는 동안엔 마우스가 여러 항목을 스쳐 미리보기가 바로
+// 뜨는 게 거슬린다. 마지막 스크롤 후 이 시간이 지나야 미리보기를 연다(스크롤 정지 대기).
+const FOLLOW_PREVIEW_SCROLL_QUIET_MS = 400;
+let followPreviewLastScrollAt = 0;
 const FOLLOW_PREVIEW_DEFAULT_W = 320; // 16:9 → 180h
 const FOLLOW_PREVIEW_MIN_W = 200;
 const FOLLOW_PREVIEW_MAX_W = 1080; // 더 크게 조절 가능
-const FOLLOW_PREVIEW_NARROW_W = 320; // 이 폭 미만이면 우측 메타(시청자/경과시간) 숨김
+const FOLLOW_PREVIEW_NARROW_W = 350; // 이 폭 미만이면 우측 메타(시청자/경과시간) 숨김
 
 // 폭에 따라 좁음 클래스 토글(is-narrow면 CSS가 우측 메타를 숨긴다). 멱등.
 function applyFollowPreviewWidthClass(el, w) {
@@ -10715,8 +10973,12 @@ async function openFollowPreview(li, channelId) {
   el.classList.remove("is-ready");
 
   const data = await fetchLivePreviewData(channelId);
-  // 그새 호버가 바뀌었으면 중단.
+  // 그새 호버가 바뀌었거나(채널 불일치) 클릭 이동 억제 창에 들어갔으면 중단.
   if (followPreviewState.currentChannelId !== channelId) return;
+  if (Date.now() < followPreviewOpenSuppressUntil) {
+    closeFollowPreview();
+    return;
+  }
   if (!data?.m3u8) {
     closeFollowPreview();
     return;
@@ -10869,6 +11131,11 @@ function startFollowPreviewMaxLifeTimer() {
 }
 // 자동 종료된 채널: 같은 li에 계속 호버 중일 때 즉시 재오픈 방지(벗어나면 해제).
 let followPreviewSuppressedChannelId = "";
+// 클릭 이동 직후 잠깐 미리보기 오픈을 전면 억제할 만료 시각(ms). 헤더 팔로우 채널을
+// 클릭해 이동하면 헤더가 숨겨졌다 재렌더되며 mouseover 가 다시 발생해 미리보기가
+// 마우스를 따라 새로 뜨는 것을 막는다.
+let followPreviewOpenSuppressUntil = 0;
+const FOLLOW_PREVIEW_CLICK_SUPPRESS_MS = 800;
 
 function stopFollowPreviewMaxLifeTimer() {
   if (followPreviewState.maxLifeTimer) {
@@ -11167,6 +11434,8 @@ function getFollowPreviewAnchor(target) {
 // 위임 호버. 라이브 팔로잉(사이드바/헤더) 진입 → 디바운스 후 미리보기.
 function onFollowPreviewMouseOver(e) {
   if (!followPreviewOn || document.hidden) return;
+  // 클릭 이동 직후 억제 창 동안엔 미리보기를 열지 않는다(마우스 따라 잔존 방지).
+  if (Date.now() < followPreviewOpenSuppressUntil) return;
   // 드래그/고정 중엔 다른 채널로 전환하지 않는다.
   if (followPreviewState.resizing || followPreviewState.pinned) return;
   const found = getFollowPreviewAnchor(e.target);
@@ -11176,10 +11445,24 @@ function onFollowPreviewMouseOver(e) {
   if (found.channelId === followPreviewSuppressedChannelId) return;
   if (followPreviewState.hoverTimer)
     clearTimeout(followPreviewState.hoverTimer);
-  followPreviewState.hoverTimer = setTimeout(() => {
+  const tryOpen = () => {
     followPreviewState.hoverTimer = 0;
+    // 스크롤 중/직후면 아직 열지 않고, 스크롤이 멈춰 조용해질 때까지 재확인한다.
+    const sinceScroll = Date.now() - followPreviewLastScrollAt;
+    if (sinceScroll < FOLLOW_PREVIEW_SCROLL_QUIET_MS) {
+      // 마우스가 아직 같은 앵커 위에 있을 때만 재시도(벗어났으면 mouseout이 정리).
+      followPreviewState.hoverTimer = setTimeout(
+        tryOpen,
+        FOLLOW_PREVIEW_SCROLL_QUIET_MS - sinceScroll,
+      );
+      return;
+    }
     openFollowPreview(found.anchor, found.channelId);
-  }, FOLLOW_PREVIEW_HOVER_DELAY_MS);
+  };
+  followPreviewState.hoverTimer = setTimeout(
+    tryOpen,
+    FOLLOW_PREVIEW_HOVER_DELAY_MS,
+  );
 }
 
 function onFollowPreviewMouseOut(e) {
@@ -11194,12 +11477,22 @@ function onFollowPreviewMouseOut(e) {
     if (followPreviewSuppressedChannelId === found.channelId) {
       followPreviewSuppressedChannelId = "";
     }
+    // 아직 안 열린(대기 중) 오픈 타이머가 있으면 취소한다 — 앵커를 벗어났으므로
+    // 나중에 엉뚱한 채널이 열리는 것을 막는다(스크롤 억제로 대기가 길어질 때 특히).
+    if (followPreviewState.hoverTimer) {
+      clearTimeout(followPreviewState.hoverTimer);
+      followPreviewState.hoverTimer = 0;
+    }
   }
   scheduleCloseFollowPreview();
 }
 
-// 고정된 미리보기는 패널 밖을 클릭하면 닫는다(호버 외 닫기 수단).
+// 고정된 미리보기는 패널 밖을 '사용자가' 클릭하면 닫는다(호버 외 닫기 수단).
 function onFollowPreviewDocClick(e) {
+  // 프로그램적 클릭(.click())은 무시한다 — 자동 새로고침이 사이드바 새로고침 버튼을
+  // .click()으로 누르는데, 그게 '패널 밖 클릭'으로 잡혀 고정한 미리보기가 풀리며
+  // 사라지던 문제를 막는다(사용자 실제 클릭일 때만 닫는다).
+  if (!e.isTrusted) return;
   if (!followPreviewState.pinned) return;
   if (e.target?.closest?.(`#${FOLLOW_PREVIEW_ID}`)) return; // 패널 내부 클릭은 유지
   if (getFollowPreviewAnchor(e.target)) return; // 팔로우 아이템 클릭(이동)은 그대로
@@ -11216,6 +11509,21 @@ function bindFollowPreviewHover() {
     passive: true,
   });
   document.addEventListener("click", onFollowPreviewDocClick, true);
+  // 사이드바 내부 스크롤은 버블하지 않으므로 capture 로 document 에서 감지한다.
+  // 스크롤 중/직후엔 미리보기 오픈을 미룬다(onFollowPreviewMouseOver 참고).
+  document.addEventListener("scroll", onFollowPreviewScroll, {
+    passive: true,
+    capture: true,
+  });
+}
+
+// 사이드바(팔로잉 목록 포함) 안에서 일어난 스크롤만 기록한다. 페이지 다른 스크롤은
+// 무시해 불필요하게 미리보기를 막지 않는다.
+function onFollowPreviewScroll(e) {
+  const t = e.target;
+  if (t === document || (t?.closest && t.closest("aside#sidebar"))) {
+    followPreviewLastScrollAt = Date.now();
+  }
 }
 
 async function loadFollowPreview() {
@@ -11621,6 +11929,10 @@ function clickFollowRefresh() {
   ) {
     void requestHeaderFollowLiveInfoRefresh();
   }
+  // 사이드바 숨김 상태면 사이드바 팔로잉 목록이 안 보이므로, 숨겨진 사이드바의
+  // '새로고침' 버튼을 프로그램적으로 계속 클릭하지 않는다(불필요한 API 호출 방지).
+  // 헤더 팔로잉 갱신은 위 분기에서 이미 처리한다.
+  if (featureFlags.sidebar) return;
   const nav = findFollowNavForRefresh();
   if (!nav) return;
   // 새로고침 버튼은 펼침 상태에만 존재한다 → 접힘 상태에선 버튼이 없어 자동
@@ -11751,7 +12063,9 @@ async function loadFeatureFlags() {
       LOGPOWER_PROGRESS_MODE_KEY,
       LOGPOWER_TIMER_MODE_KEY,
       LOGPOWER_EARNING_COLOR_KEY,
+      VOD_AUTOPLAY_OFF_KEY,
     ]);
+    vodAutoplayOff = data?.[VOD_AUTOPLAY_OFF_KEY] === true; // 기본 OFF
     logPowerClickAction = normalizeLogPowerClickAction(
       data?.[LOGPOWER_CLICK_ACTION_KEY],
     );
@@ -11878,6 +12192,11 @@ if (chrome.storage?.onChanged) {
       logPowerClickAction = normalizeLogPowerClickAction(
         changes[LOGPOWER_CLICK_ACTION_KEY].newValue,
       );
+    }
+    if (changes[VOD_AUTOPLAY_OFF_KEY]) {
+      vodAutoplayOff = changes[VOD_AUTOPLAY_OFF_KEY].newValue === true;
+      vodAutoplaySettingApplied = false; // 재적용 허용
+      applyVodMoreLayout(); // 자동 재생 설정 즉시 반영(숨김 아닐 때)
     }
     if (
       changes[LOGPOWER_PROGRESS_MODE_KEY] ||

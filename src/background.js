@@ -7,7 +7,7 @@ const CLIP_LIKE_API_BASE =
   "https://apis.naver.com/clip-viewer-web/like/v1/services/CHZZK/contents";
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 const COMMENT_TIMESTAMP_CACHE_TTL_MS = 30 * 60 * 1000;
-const COMMENT_TIMESTAMP_CACHE_VERSION = 3;
+const COMMENT_TIMESTAMP_CACHE_VERSION = 4;
 const SORT_METRIC_CACHE_TTL_MS = 30 * 60 * 1000;
 const PAGE_SIZE = 50;
 const CLIP_PAGE_SIZE = 50;
@@ -1427,25 +1427,67 @@ function extractTimestampDescriptionsFromLine(line) {
     }));
   }
 
-  return timestampMatches.map((match, index) => {
-    const timestamp = match[0];
-    const timestampIndex = Number(match.index || 0);
-    const nextTimestampIndex =
+  // 설명이 타임스탬프 '뒤'(02:22 오프닝)인지 '앞'(오프닝스킵 02:22)인지 줄 단위로
+  // 판정한다. 첫 타임스탬프 앞에 텍스트가 있고 마지막 타임스탬프 뒤가 비어 있으면
+  // '레이블 먼저' 형식으로 보고 각 타임스탬프의 앞 세그먼트를 레이블로 쓴다. 그 외엔
+  // 기존대로 뒤 세그먼트를 쓴다(대부분의 "02:22 설명" 형식).
+  const segmentBounds = timestampMatches.map((match, index) => {
+    const start = Number(match.index || 0);
+    const end = start + match[0].length;
+    const prevEnd =
+      index > 0
+        ? Number(timestampMatches[index - 1].index || 0) +
+          timestampMatches[index - 1][0].length
+        : 0;
+    const nextStart =
       index + 1 < timestampMatches.length
         ? Number(timestampMatches[index + 1].index || trimmedLine.length)
         : trimmedLine.length;
-    const description = trimTimestampSegmentDescription(
-      trimmedLine,
-      timestampIndex,
-      timestamp.length,
-      nextTimestampIndex,
-    );
+    return { start, end, prevEnd, nextStart };
+  });
+
+  const firstPrefix = trimTimestampPrefixDescription(
+    trimmedLine,
+    segmentBounds[0].prevEnd,
+    segmentBounds[0].start,
+  );
+  const last = segmentBounds[segmentBounds.length - 1];
+  const lastSuffix = trimTimestampSegmentDescription(
+    trimmedLine,
+    last.start,
+    last.end - last.start,
+    last.nextStart,
+  );
+  const labelBefore = Boolean(firstPrefix) && !lastSuffix;
+
+  return timestampMatches.map((match, index) => {
+    const timestamp = match[0];
+    const { start, end, prevEnd, nextStart } = segmentBounds[index];
+    const description = labelBefore
+      ? trimTimestampPrefixDescription(trimmedLine, prevEnd, start)
+      : trimTimestampSegmentDescription(
+          trimmedLine,
+          start,
+          end - start,
+          nextStart,
+        );
 
     return {
       seconds: parseTimestamp(timestamp),
       description,
     };
   });
+}
+
+// 타임스탬프 '앞'에 오는 레이블(오프닝스킵 02:22)을 추출한다. 이전 타임스탬프 끝
+// (prevEnd)부터 이 타임스탬프 시작(timestampIndex)까지의 텍스트에서 앞뒤 구분자를
+// 정리한다.
+function trimTimestampPrefixDescription(line, prevEnd, timestampIndex) {
+  let description = line.slice(prevEnd, timestampIndex);
+  // 앞쪽 구분자/여는 괄호 제거, 뒤쪽(타임스탬프 바로 앞) 구분자 제거.
+  return description
+    .replace(/^[\s\-–—_:|/.,~·▶▷([{<〈《「『【（［｛]+/u, "")
+    .replace(/[\s\-–—_:|/.,~·)\]}>〉》」』】）］｝]+$/u, "");
 }
 
 function isTimestampListLine(line) {

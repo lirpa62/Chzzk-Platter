@@ -1491,6 +1491,27 @@
   });
   loadCardDateTooltip();
 
+  // ── 다시보기 자동 재생 사용 설정 끄기(체크=끄기, 기본 OFF) ──────────────────
+  const VOD_AUTOPLAY_OFF_KEY = "cheeseVodAutoplayOff";
+  const vodAutoplayOffInput = document.querySelector("[data-vod-autoplay-off]");
+  if (vodAutoplayOffInput) {
+    (async () => {
+      let on = false; // 기본 OFF
+      try {
+        const d = await chrome.storage?.local?.get(VOD_AUTOPLAY_OFF_KEY);
+        on = d?.[VOD_AUTOPLAY_OFF_KEY] === true;
+      } catch {}
+      vodAutoplayOffInput.checked = on;
+    })();
+    vodAutoplayOffInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({
+          [VOD_AUTOPLAY_OFF_KEY]: vodAutoplayOffInput.checked,
+        });
+      } catch {}
+    });
+  }
+
   // ── 실시간 따라잡기 민감도 프리셋(low/normal/high/custom) ──────────────────
   const SYNC_PRESET_KEY = "cheeseSyncPreset";
   const SYNC_CUSTOM_KEY = "cheeseSyncCustom"; // {enable, target}
