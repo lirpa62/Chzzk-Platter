@@ -508,12 +508,16 @@ body {
 
 .settings-item:has([data-mixer-global-default-mode]),
 .settings-item:has([data-video-filter-global-default-mode]),
+.settings-item:has([data-logpower-progress-mode]),
+.settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
   flex-direction: column;
 }
 
 .settings-item [data-mixer-global-default-mode],
 .settings-item [data-video-filter-global-default-mode],
+.settings-item [data-logpower-progress-mode],
+.settings-item [data-logpower-timer-mode],
 .settings-item:has([data-mixer-gain-min]) [data-mixer-gain-min] {
   margin-left: auto;
 }
@@ -629,4 +633,13 @@ body {
 
 .settings-segmented button.is-active small {
   color: var(--popup-brand-strong);
+}
+
+/* 잠긴 세그먼트(예: 적립 중 색 변경 ON으로 위치 선택 비활성) — 부모 .is-locked가
+   opacity를 낮추고, 여기서 커서/호버를 막는다. */
+.settings-segmented button:disabled {
+  cursor: not-allowed;
+}
+.settings-segmented button:disabled:hover {
+  border-color: var(--popup-border);
 }

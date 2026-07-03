@@ -3150,6 +3150,14 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   text-align: left;
 }
 
+/* '적립 중 색 변경' 옵션 ON + 적립 중이면 배지 텍스트(보유량 숫자)와 통나무파워
+   아이콘 SVG를 적립 색으로. 아이콘 svg는 currentColor라 배지 직속 svg의 color만
+   바꾸면 함께 물든다(progress/timer 시계 svg는 이미 적립 색이라 무관). */
+#cheese-logpower-badge.is-earning .cheese-logpower-text,
+#cheese-logpower-badge.is-earning > svg {
+  color: var(--Content-Brand-Strong);
+}
+
 /* 적립 중(progress) / 1시간 타이머(timer) — con-chzzk 동일. 적립 추적 로직이
    채우기 전엔 hidden. */
 .cheese-logpower-timer,
@@ -3222,6 +3230,20 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
 }
 /* 값이 없으면(로드 전) 빈 줄이 생기지 않게 숨김. */
 #cheese-logpower-badge .cheese-logpower-tooltip-value:empty {
+  display: none;
+}
+
+/* 툴팁 모드일 때 적립 중/1시간 타이머 줄(‘통나무 파워’ 아래). hidden이면 숨김. */
+#cheese-logpower-badge .cheese-logpower-tip-progress,
+#cheese-logpower-badge .cheese-logpower-tip-timer {
+  display: block;
+  margin-top: 3px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--Content-Brand-Strong);
+}
+#cheese-logpower-badge .cheese-logpower-tip-progress[hidden],
+#cheese-logpower-badge .cheese-logpower-tip-timer[hidden] {
   display: none;
 }
 

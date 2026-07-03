@@ -768,6 +768,21 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >다시보기 카드 날짜 툴팁</span
+                  >
+                  <span class="settings-item-desc"
+                    >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
+                    라이브 시작일을 정확한 날짜·시각으로 표시(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-card-date-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
             </ul>
           </section>
 
@@ -1429,27 +1444,11 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >다시보기 카드 날짜 툴팁</span
-                  >
-                  <span class="settings-item-desc"
-                    >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
-                    라이브 시작일을 정확한 날짜·시각으로 표시(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-card-date-tooltip />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
             </ul>
             <p class="settings-group-desc">
               탐색 페이지의 라이브 카드에 마우스를 올리면 치지직이 음소거
               미리보기를 잠깐 재생합니다. 이 위에서 우클릭으로 음소거를 끄거나
-              휠로 음량을 조절할 수 있습니다. 채널 다시보기 목록에서는 카드 정보
-              줄 호버로 정확한 등록일·라이브 시작일을 볼 수 있습니다.
+              휠로 음량을 조절할 수 있습니다.
             </p>
           </section>
 
@@ -1507,6 +1506,19 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatWidthResize" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅 버튼 줄바꿈</span>
+                  <span class="settings-item-desc"
+                    >너비를 좁게 조절하면 채팅 버튼이 후원 버튼 다음 줄로
+                    줄바꿈됩니다(끄면 한 줄 유지, 체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-button-wrap />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -1651,6 +1663,97 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatLogPowerToast" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">‘적립 중’ 표시 위치</span>
+                  <span class="settings-item-desc"
+                    >적립되는 동안 ‘적립 중’을 어디에 보일지: 끔 / 배지(인라인) /
+                    호버 툴팁</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-logpower-progress-mode
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-lp-progress-mode="off"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    끔
+                  </button>
+                  <button
+                    type="button"
+                    data-lp-progress-mode="badge"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    배지
+                  </button>
+                  <button
+                    type="button"
+                    data-lp-progress-mode="tooltip"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    툴팁
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">1시간 타이머 표시 위치</span>
+                  <span class="settings-item-desc"
+                    >1시간 보상까지 남은 시간을 어디에 보일지: 끔 / 배지(인라인) /
+                    호버 툴팁</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-logpower-timer-mode
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-lp-timer-mode="off"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    끔
+                  </button>
+                  <button
+                    type="button"
+                    data-lp-timer-mode="badge"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    배지
+                  </button>
+                  <button
+                    type="button"
+                    data-lp-timer-mode="tooltip"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    툴팁
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">적립 중 배지 색 변경</span>
+                  <span class="settings-item-desc"
+                    >적립 중일 때 배지의 통나무파워 숫자 색을 적립 색으로
+                    강조(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-logpower-earning-color />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

@@ -151,6 +151,27 @@
     });
   }
 
+  // ── 채팅 버튼 줄바꿈(너비 조절 시 도구/후원 줄 wrap, 기본 ON) ───────────────
+  const CHAT_BUTTON_WRAP_KEY = "cheeseChatButtonWrap";
+  const chatButtonWrapInput = document.querySelector("[data-chat-button-wrap]");
+  if (chatButtonWrapInput) {
+    (async () => {
+      let on = true; // 기본 ON
+      try {
+        const d = await chrome.storage?.local?.get(CHAT_BUTTON_WRAP_KEY);
+        on = d?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=사용
+      } catch {}
+      chatButtonWrapInput.checked = on;
+    })();
+    chatButtonWrapInput.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({
+          [CHAT_BUTTON_WRAP_KEY]: chatButtonWrapInput.checked,
+        });
+      } catch {}
+    });
+  }
+
   // ── 채팅 기능: 배지 모아 챗이 제어 중이면 해당 토글/셀렉트를 비활성화 ─────────
   // content.js가 페이지에서 moa 제어 상태를 cheeseChatMoaActive(배열)로 기록한다.
   const CHAT_MOA_ACTIVE_KEY = "cheeseChatMoaActive";
@@ -235,10 +256,78 @@
     } catch {}
   }
 
-  headerNavInputs.forEach((input) =>
-    input.addEventListener("change", saveHeaderNav),
+  // ── 헤더 바로가기 3개 제한(스튜디오 버튼을 숨기지 않을 때) ──────────────────
+  // 스튜디오 버튼이 보이면 헤더 우측 공간이 좁아 바로가기를 3개까지만 허용한다.
+  // 3개가 켜지면 나머지(체크 안 된 것)를 비활성화하고 안내를 표시한다. 이미 3개
+  // 초과가 저장돼 있어도 그 값은 건드리지 않고, 추가로 더 켜는 것만 막는다.
+  const HEADER_NAV_MAX_WITH_STUDIO = 3;
+  const headerStudioInput = document.querySelector(
+    '[data-feature="headerStudio"]',
   );
-  loadHeaderNav();
+  const headerNavList = headerNavInputs[0]?.closest(".settings-list") || null;
+  const headerNavGroupDesc =
+    headerNavList?.parentElement?.querySelector(".settings-group-desc") || null;
+
+  // 스튜디오 버튼이 '보이는' 상태인지(체크=숨김이므로 !checked=보임). data-feature
+  // 체크박스는 loadHeaderNav 시점엔 아직 로드 전일 수 있어 storage에서 직접 읽는다.
+  function isStudioVisible() {
+    return !(headerStudioInput && headerStudioInput.checked);
+  }
+
+  function showHeaderNavLimitNotice(show) {
+    let el = document.getElementById("headerNavLimitNotice");
+    if (!show) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("p");
+      el.id = "headerNavLimitNotice";
+      el.className = "settings-notice";
+      if (headerNavGroupDesc) {
+        headerNavGroupDesc.insertAdjacentElement("beforebegin", el);
+      } else {
+        headerNavList?.insertAdjacentElement("afterend", el);
+      }
+    }
+    el.textContent =
+      "‘스튜디오 버튼 숨김’이 꺼져 있어 헤더 공간이 좁습니다. 바로가기는 최대 3개까지만 선택할 수 있어요(스튜디오 버튼을 숨기면 제한이 풀립니다).";
+  }
+
+  function refreshHeaderNavLimit() {
+    const limited = isStudioVisible();
+    const checkedCount = headerNavInputs.filter((i) => i.checked).length;
+    const atMax = checkedCount >= HEADER_NAV_MAX_WITH_STUDIO;
+    headerNavInputs.forEach((input) => {
+      // 스튜디오 보임 + 이미 3개 이상 체크 시, 체크 안 된 항목만 비활성화(끄기는 허용).
+      const disable = limited && atMax && !input.checked;
+      input.disabled = disable;
+      input.closest(".settings-item")?.classList.toggle("is-locked", disable);
+    });
+    // 안내는 '제한 활성(스튜디오 보임)'일 때만 표시.
+    showHeaderNavLimitNotice(limited);
+  }
+
+  headerNavInputs.forEach((input) =>
+    input.addEventListener("change", () => {
+      saveHeaderNav();
+      refreshHeaderNavLimit();
+    }),
+  );
+  // 스튜디오 버튼 숨김 토글을 바꾸면 제한 상태도 즉시 갱신.
+  headerStudioInput?.addEventListener("change", refreshHeaderNavLimit);
+  // 초기: 저장값 로드 후 제한 상태를 확정한다(체크박스 상태가 채워진 뒤).
+  (async () => {
+    await loadHeaderNav();
+    // headerStudio 체크박스 초기 상태를 storage에서 직접 읽어 확정.
+    try {
+      const d = await chrome.storage?.local?.get(FEATURE_HIDDEN_KEY);
+      if (headerStudioInput) {
+        headerStudioInput.checked = d?.[FEATURE_HIDDEN_KEY]?.headerStudio === true;
+      }
+    } catch {}
+    refreshHeaderNavLimit();
+  })();
 
   // ── 오디오 믹서 항상 켜기(전역) ───────────────────────────────────────────
   // data-feature와 별개 키. 체크=항상 켜기(첫 제스처 후 자동 활성화).
@@ -572,6 +661,110 @@
       } catch {}
     });
   });
+
+  // ── 배지 '적립 중'/'1시간 타이머' 표시 위치(끔|배지|툴팁) + 적립 중 색 변경 ────
+  // group: [data-*] 컨테이너, btnAttr: 버튼 data-* 키(camelCase), key: storage 키,
+  // onChange: 값 반영 후 콜백. 반환: { group, get, set }.
+  function bindLogPowerModeSeg(groupSel, btnAttr, key, onChange) {
+    const group = document.querySelector(groupSel);
+    if (!group) return null;
+    const buttons = Array.from(group.querySelectorAll(`[data-${btnAttr}]`));
+    const norm = (v) => (v === "off" || v === "tooltip" ? v : "badge");
+    function reflect(mode) {
+      const v = norm(mode);
+      buttons.forEach((btn) => {
+        const active = btn.dataset[toCamel(btnAttr)] === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "badge";
+      try {
+        const d = await chrome.storage?.local?.get(key);
+        mode = norm(d?.[key]);
+      } catch {}
+      reflect(mode);
+      onChange?.();
+    })();
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const mode = norm(btn.dataset[toCamel(btnAttr)]);
+        reflect(mode);
+        try {
+          chrome.storage?.local?.set({ [key]: mode });
+        } catch {}
+        onChange?.();
+      });
+    });
+    return {
+      group,
+      get: () => {
+        const on = buttons.find((b) => b.classList.contains("is-active"));
+        return on ? norm(on.dataset[toCamel(btnAttr)]) : "badge";
+      },
+      set: (mode) => {
+        reflect(mode);
+        try {
+          chrome.storage?.local?.set({ [key]: norm(mode) });
+        } catch {}
+      },
+      setDisabled: (disabled) => {
+        buttons.forEach((b) => (b.disabled = disabled));
+        group.closest(".settings-item")?.classList.toggle("is-locked", disabled);
+      },
+    };
+  }
+  // data-* kebab → dataset camelCase 키 변환.
+  function toCamel(kebab) {
+    return kebab.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+
+  const lpProgressSeg = bindLogPowerModeSeg(
+    "[data-logpower-progress-mode]",
+    "lp-progress-mode",
+    "cheeseLogPowerProgressMode",
+    () => reflectEarningColorLink(),
+  );
+  bindLogPowerModeSeg(
+    "[data-logpower-timer-mode]",
+    "lp-timer-mode",
+    "cheeseLogPowerTimerMode",
+  );
+
+  // '적립 중 색 변경'을 켜면 '적립 중 표시'는 색으로 대체되므로 위치를 '끔'으로
+  // 자동 설정하고 세그먼트를 잠근다. 끄면 잠금 해제(값은 사용자가 다시 고름).
+  function reflectEarningColorLink() {
+    const colorOn = !!lpEarningColorInput?.checked;
+    if (!lpProgressSeg) return;
+    if (colorOn && lpProgressSeg.get() !== "off") {
+      lpProgressSeg.set("off"); // storage에도 반영
+    }
+    lpProgressSeg.setDisabled(colorOn);
+  }
+  const lpEarningColorInput = (() => {
+    const input = document.querySelector("[data-logpower-earning-color]");
+    if (!input) return null;
+    (async () => {
+      let on = false;
+      try {
+        const d = await chrome.storage?.local?.get("cheeseLogPowerEarningColor");
+        on = d?.cheeseLogPowerEarningColor === true;
+      } catch {}
+      input.checked = on;
+      reflectEarningColorLink();
+    })();
+    input.addEventListener("change", () => {
+      try {
+        chrome.storage?.local?.set({
+          cheeseLogPowerEarningColor: input.checked,
+        });
+      } catch {}
+      reflectEarningColorLink();
+    });
+    return input;
+  })();
 
   // ── 팝업 표시 개수(5~99, 기본 5) ──────────────────────────────────────────
   const LOGPOWER_POPUP_LIMIT_KEY = "cheeseLogPowerPopupLimit";

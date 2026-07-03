@@ -96,7 +96,8 @@ const VIDEO_FILTER_CLICK_ACTIVATE_KEY = "cheeseVideoFilterClickActivate";
 let videoFilterClickActivate = false; // 필터 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
 const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
 let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
-const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY = "cheeseVideoFilterGlobalDefaultMode";
+const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
+  "cheeseVideoFilterGlobalDefaultMode";
 let videoFilterGlobalDefaultMode = "global"; // 필터 전역 기본값 재방문 동작
 // 오디오 믹서 게인 슬라이더 범위(전역). 기본 0.5~2(50%~200%).
 const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
@@ -4076,6 +4077,17 @@ function hasForeignLogPowerBadge() {
 // "none"(동작 안 함). 기본 popup.
 const LOGPOWER_CLICK_ACTION_KEY = "cheeseLogPowerClickAction";
 let logPowerClickAction = "popup";
+// 배지의 '적립 중'/'1시간 타이머'를 어디에 표시할지: "off"|"badge"|"tooltip"(각 기본
+// "badge"=인라인). + 적립 중일 때 배지 텍스트 색을 적립 색으로 바꿀지(기본 OFF).
+const LOGPOWER_PROGRESS_MODE_KEY = "cheeseLogPowerProgressMode";
+const LOGPOWER_TIMER_MODE_KEY = "cheeseLogPowerTimerMode";
+const LOGPOWER_EARNING_COLOR_KEY = "cheeseLogPowerEarningColor";
+let logPowerProgressMode = "badge";
+let logPowerTimerMode = "badge";
+let logPowerEarningColor = false;
+function normalizeLogPowerIndicatorMode(v) {
+  return v === "off" || v === "tooltip" ? v : "badge";
+}
 const LOGPOWER_PAGE_URL = "https://game.naver.com/profile#channel_power";
 function normalizeLogPowerClickAction(v) {
   return v === "navigate" || v === "none" ? v : "popup";
@@ -4556,7 +4568,11 @@ function ensureLogPowerBadge() {
       `${logPowerIcon()}<b class="cheese-logpower-text">-</b>` +
       `<span class="cheese-logpower-progress" hidden>${clockSvg}<span>적립 중</span></span>` +
       `<span class="cheese-logpower-timer" hidden>${clockSvg}<span class="cheese-logpower-claimed" hidden>획득</span><span class="cheese-logpower-time">60:00</span></span>` +
-      `<span class="tooltip-text">통나무 파워<span class="cheese-logpower-tooltip-value"></span></span>`;
+      `<span class="tooltip-text">통나무 파워<span class="cheese-logpower-tooltip-value"></span>` +
+      // 툴팁 모드일 때만 표시되는 적립 중/타이머 줄(updateLogPowerIndicators가 토글).
+      `<span class="cheese-logpower-tip-progress" hidden>적립 중</span>` +
+      `<span class="cheese-logpower-tip-timer" hidden><span class="cheese-logpower-tip-time">60:00</span></span>` +
+      `</span>`;
     badge.style.cursor = "pointer";
     badge.addEventListener("click", onLogPowerBadgeClick);
   }
@@ -5105,8 +5121,11 @@ function renderWatchHourTimer() {
     updateLogPowerIndicators();
     return;
   }
+  const timeStr = formatTimer(remaining);
   const timeEl = badge?.querySelector(".cheese-logpower-time");
-  if (timeEl) timeEl.textContent = formatTimer(remaining);
+  if (timeEl) timeEl.textContent = timeStr;
+  const tipTimeEl = badge?.querySelector(".cheese-logpower-tip-time");
+  if (tipTimeEl) tipTimeEl.textContent = timeStr;
   updateLogPowerIndicators();
   // 1시간 타이머가 도는 동안 1분마다 라이브 종료를 확인한다(5분 적립 체크보다 빠른
   // 감지). 종료면 적립·타이머 모두 정리. 탭이 숨김이면 건너뛴다.
@@ -5186,8 +5205,21 @@ function updateLogPowerIndicators() {
     logPowerWatchActive &&
     logPowerWatchActiveChannelId === channelId &&
     notExpired;
-  if (timer) timer.hidden = !hourVisible;
-  if (progress) progress.hidden = !(active && !hourVisible);
+  // 표시 조건(위치 무관): 타이머는 hourVisible, 적립 중은 active이고 타이머가 아닐 때.
+  const timerOn = hourVisible;
+  const progressOn = active && !hourVisible;
+  // 위치별 반영: badge=인라인 span, tooltip=툴팁 안 줄. off면 둘 다 숨김.
+  const tipProgress = badge.querySelector(".cheese-logpower-tip-progress");
+  const tipTimer = badge.querySelector(".cheese-logpower-tip-timer");
+  if (progress)
+    progress.hidden = !(progressOn && logPowerProgressMode === "badge");
+  if (tipProgress)
+    tipProgress.hidden = !(progressOn && logPowerProgressMode === "tooltip");
+  if (timer) timer.hidden = !(timerOn && logPowerTimerMode === "badge");
+  if (tipTimer) tipTimer.hidden = !(timerOn && logPowerTimerMode === "tooltip");
+  // '적립 중 색 변경' 옵션이 켜져 있고 실제 적립 중(타이머/진행 무관하게 active)이면
+  // 배지 텍스트 색을 적립 색으로 바꾼다(is-earning 클래스 → CSS 처리).
+  badge.classList.toggle("is-earning", logPowerEarningColor && active);
 }
 
 // ── 1시간 보상 획득 토스트 ──────────────────────────────────────────────────
@@ -7757,6 +7789,10 @@ let chatFontScaleValue = CHAT_FONT_SCALE_DEFAULT;
 // 기본 false=제외(일반 메시지만 조절). 켜면 특수 메시지도 배율 적용.
 const CHAT_FONT_SCALE_SPECIAL_KEY = "cheeseChatFontScaleSpecial";
 let chatFontScaleSpecial = false;
+// 채팅 너비 조절 시 입력창 도구/후원 줄(_tools_/_donation_)을 좁아지면 줄바꿈할지.
+// 기본 true(줄바꿈 on). 끄면 한 줄 유지(넘치면 잘림) — 치지직 기본 동작.
+const CHAT_BUTTON_WRAP_KEY = "cheeseChatButtonWrap";
+let chatButtonWrap = true;
 // 우리 숨김 마커(요소에 부착) — moa의 chzzk-badge-moa-hidden-* 와 분리.
 const CHAT_HIDE_CLASSES = {
   chatHideRanking: "cheese-chat-hidden-ranking",
@@ -8693,6 +8729,7 @@ function applyChatTweaks() {
     document.documentElement.classList.remove(
       "cheese-chat-width-resize-enabled",
     );
+    document.documentElement.classList.remove("cheese-chat-button-wrap");
     applyChatFontScale(); // 배율 1 → 게이트 클래스 제거
     updateChatTweakStyle();
     if (document.querySelector(CHAT_ASIDE_SEL)) startChatObserver();
@@ -8701,6 +8738,12 @@ function applyChatTweaks() {
   }
   // 각 기능은 chatFeatureActive로 moa 겹침을 개별 판정해 양보한다.
   updateChatTweakStyle();
+  // 버튼 줄바꿈 게이트 클래스(기본 ON). 실제 규칙은 width-resize-enabled와 AND라
+  // 너비 조절이 활성일 때만 적용된다.
+  document.documentElement.classList.toggle(
+    "cheese-chat-button-wrap",
+    chatButtonWrap,
+  );
   clearChatHideMarkers();
   applyChatHideMarkers();
   applyChatLayout();
@@ -8858,13 +8901,13 @@ function updateChatTweakStyle() {
       max-width: var(--cheese-chat-resized-width, 353px) !important;
     }
     /* 채팅 너비를 좁게 조절하면 입력창 도구 줄(_tools_)/후원 컨테이너(_donation_)가
-       한 줄에 다 안 들어가 잘리거나 넘친다. 너비 조절이 활성일 때 이 두 줄에
-       flex-wrap:wrap을 줘 좁아지면 자연스럽게 줄바꿈되게 한다(해시 접미사는 바뀔 수
-       있어 부분 일치로 지정). */
-    html.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_tools_"],
-    html.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_donation_"]:not([class*="_is_donation_"]),
-    html.cheese-chat-width-resize-enabled aside#vod-aside [class*="_tools_"],
-    html.cheese-chat-width-resize-enabled aside#vod-aside [class*="_donation_"]:not([class*="_is_donation_"]) {
+       한 줄에 다 안 들어가 잘리거나 넘친다. 너비 조절이 활성이고 '버튼 줄바꿈' 옵션이
+       켜졌을 때(html.cheese-chat-button-wrap) 이 두 줄에 flex-wrap:wrap을 줘 좁아지면
+       자연스럽게 줄바꿈되게 한다(해시 접미사는 바뀔 수 있어 부분 일치로 지정). */
+    html.cheese-chat-button-wrap.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_tools_"],
+    html.cheese-chat-button-wrap.cheese-chat-width-resize-enabled aside#aside-chatting [class*="_donation_"]:not([class*="_is_donation_"]),
+    html.cheese-chat-button-wrap.cheese-chat-width-resize-enabled aside#vod-aside [class*="_tools_"],
+    html.cheese-chat-button-wrap.cheese-chat-width-resize-enabled aside#vod-aside [class*="_donation_"]:not([class*="_is_donation_"]) {
       flex-wrap: wrap !important;
     }
     /* 배너 내부 광고(iframe)가 배너 폭보다 넓어 채팅창 밖으로 튀어나오는 것을 메인
@@ -9260,8 +9303,7 @@ function scheduleSidebarPushSettle() {
 function applySidebarPush() {
   let style = document.getElementById(SIDEBAR_PUSH_STYLE_ID);
   const sidebar = document.getElementById("sidebar");
-  const on =
-    featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar; // 숨김이면 무의미
+  const on = featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar; // 숨김이면 무의미
   const expanded = on && isSidebarExpanded(sidebar);
   if (!expanded) {
     // 조건 불충족(옵션 off/숨김/접힘) → 규칙 제거해 치지직 기본 레이아웃 복원.
@@ -10079,6 +10121,18 @@ function isHeaderNavShown(key) {
   return typeof v === "boolean" ? v : HEADER_NAV_DEFAULT_SHOWN.has(key);
 }
 
+// 스튜디오 버튼을 숨기지 않으면(=버튼이 보임) 헤더 우측 공간이 좁아 바로가기를
+// 최대 3개까지만 표시한다. 스튜디오 버튼 숨김(headerStudio=true)이면 제한 없음.
+const HEADER_NAV_MAX_WITH_STUDIO = 3;
+function getShownHeaderNavItems() {
+  const shown = HEADER_NAV_ITEMS.filter((it) => isHeaderNavShown(it.key));
+  // headerStudio=true는 '스튜디오 버튼 숨김'. 숨기지 않을 때만 개수를 제한한다.
+  if (!featureFlags.headerStudio) {
+    return shown.slice(0, HEADER_NAV_MAX_WITH_STUDIO);
+  }
+  return shown;
+}
+
 // 사이드바 숨김 + 표시 항목이 하나라도 있으면 헤더에 미니 네비를 보장한다.
 // 스튜디오 버튼을 감싼 박스(_box_) 앞에 두며, 없으면 헤더 첫 section 앞에 둔다.
 // React 재렌더로 사라질 수 있어 init/옵저버에서 멱등 재호출.
@@ -10131,13 +10185,13 @@ function ensureHeaderNav() {
   }
 
   // 항목 시그니처(표시 항목 key 순서)로 변경 시에만 재구성 → 불필요한 리플로우 방지.
-  const sig = HEADER_NAV_ITEMS.filter((it) => isHeaderNavShown(it.key))
-    .map((it) => it.key)
-    .join(",");
+  // 스튜디오 버튼이 보이면 최대 3개로 캡(getShownHeaderNavItems).
+  const shownItems = getShownHeaderNavItems();
+  const sig = shownItems.map((it) => it.key).join(",");
   if (container.dataset.sig === sig) return;
   container.dataset.sig = sig;
 
-  const html = HEADER_NAV_ITEMS.filter((it) => isHeaderNavShown(it.key))
+  const html = shownItems
     .map(
       (it) =>
         `<a class="cheese-header-nav-item" href="${it.href}" aria-label="${it.label}" data-label="${it.label}">` +
@@ -10612,8 +10666,13 @@ function positionFollowPreview(el, anchor) {
   // 배치 쪽 판단은 **저장 너비가 아니라 '최소 너비가 들어가는가'** 기준.
   // (큰 저장 너비로 판단하면, 우측을 줄여 넣을 수 있는데도 좌측=사이드바 위로 잘못 감.)
   // 기본 우측, sidebarRight거나 우측에 최소폭도 안 들어가고 좌측이 더 넓을 때만 좌측.
+  // 단, **헤더 팔로잉 탭** 미리보기는 앵커가 사이드바가 아니라 헤더에 있으므로
+  // 사이드바 위치(sidebarRight)로 좌우를 정하지 않는다 — 항상 우측(리사이즈 핸들
+  // 오른쪽) 우선, 우측이 좁을 때만 넓은 쪽으로 둔다.
+  const isHeaderFollow =
+    anchor.classList?.contains?.("cheese-header-follow-item") === true;
   let side; // true=좌측(is-left)
-  if (featureFlags.sidebarRight) side = true;
+  if (!isHeaderFollow && featureFlags.sidebarRight) side = true;
   else if (rightSpace >= FOLLOW_PREVIEW_MIN_W)
     side = false; // 우측에 최소폭 들어가면 우측
   else side = leftSpace > rightSpace; // 우측 너무 좁으면 더 넓은 쪽
@@ -11432,7 +11491,8 @@ function renderCardDateTooltip(info, videoNo) {
   const dates = cardDateCache.get(videoNo);
   if (!dates) return; // 미확보/실패 → 툴팁 없음
   const parts = [];
-  if (dates.publishAt) parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
+  if (dates.publishAt)
+    parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
   if (dates.liveOpenAt) {
     parts.push(`라이브 시작일 : ${formatKstClock(dates.liveOpenAt)}`);
   }
@@ -11471,7 +11531,9 @@ function onCardDateMouseOver(e) {
 function bindCardDateTooltip() {
   if (cardDateTooltipBound) return;
   cardDateTooltipBound = true;
-  document.addEventListener("mouseover", onCardDateMouseOver, { passive: true });
+  document.addEventListener("mouseover", onCardDateMouseOver, {
+    passive: true,
+  });
 }
 
 function unbindCardDateTooltip() {
@@ -11481,11 +11543,16 @@ function unbindCardDateTooltip() {
   cardDateHoverVideoNo = "";
   // 이미 붙인 툴팁 정리.
   document
-    .querySelectorAll(`.${CARD_DATE_TARGET_CLASS} > .${CARD_DATE_TOOLTIP_CLASS}`)
+    .querySelectorAll(
+      `.${CARD_DATE_TARGET_CLASS} > .${CARD_DATE_TOOLTIP_CLASS}`,
+    )
     .forEach((el) => {
       const target = el.parentElement;
       el.remove();
-      target?.classList.remove(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
+      target?.classList.remove(
+        CARD_DATE_TARGET_CLASS,
+        "cheese-card-date-target",
+      );
     });
 }
 
@@ -11679,16 +11746,26 @@ async function loadFeatureFlags() {
       CHAT_WIDTH_KEY,
       CHAT_FONT_SCALE_KEY,
       CHAT_FONT_SCALE_SPECIAL_KEY,
+      CHAT_BUTTON_WRAP_KEY,
       LOGPOWER_CLICK_ACTION_KEY,
+      LOGPOWER_PROGRESS_MODE_KEY,
+      LOGPOWER_TIMER_MODE_KEY,
+      LOGPOWER_EARNING_COLOR_KEY,
     ]);
     logPowerClickAction = normalizeLogPowerClickAction(
       data?.[LOGPOWER_CLICK_ACTION_KEY],
     );
+    logPowerProgressMode = normalizeLogPowerIndicatorMode(
+      data?.[LOGPOWER_PROGRESS_MODE_KEY],
+    );
+    logPowerTimerMode = normalizeLogPowerIndicatorMode(
+      data?.[LOGPOWER_TIMER_MODE_KEY],
+    );
+    logPowerEarningColor = data?.[LOGPOWER_EARNING_COLOR_KEY] === true; // 기본 OFF
     volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
     gainPct = data?.[GAIN_PCT_KEY] !== false;
     mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
-    videoFilterClickActivate =
-      data?.[VIDEO_FILTER_CLICK_ACTIVATE_KEY] === true;
+    videoFilterClickActivate = data?.[VIDEO_FILTER_CLICK_ACTIVATE_KEY] === true;
     mixerGlobalDefaultMode =
       data?.[MIXER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
         ? "channel"
@@ -11711,6 +11788,7 @@ async function loadFeatureFlags() {
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
     chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
     chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
+    chatButtonWrap = data?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=ON
     applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
   } catch {
     // 실패 시 전부 표시(기본값) 유지.
@@ -11792,10 +11870,35 @@ if (chrome.storage?.onChanged) {
         changes[CHAT_FONT_SCALE_SPECIAL_KEY].newValue === true;
       applyChatFontScale(); // 특수 메시지 스케일 클래스 즉시 토글
     }
+    if (changes[CHAT_BUTTON_WRAP_KEY]) {
+      chatButtonWrap = changes[CHAT_BUTTON_WRAP_KEY].newValue !== false;
+      applyChatTweaks(); // 버튼 줄바꿈 게이트 클래스 즉시 반영
+    }
     if (changes[LOGPOWER_CLICK_ACTION_KEY]) {
       logPowerClickAction = normalizeLogPowerClickAction(
         changes[LOGPOWER_CLICK_ACTION_KEY].newValue,
       );
+    }
+    if (
+      changes[LOGPOWER_PROGRESS_MODE_KEY] ||
+      changes[LOGPOWER_TIMER_MODE_KEY] ||
+      changes[LOGPOWER_EARNING_COLOR_KEY]
+    ) {
+      if (changes[LOGPOWER_PROGRESS_MODE_KEY]) {
+        logPowerProgressMode = normalizeLogPowerIndicatorMode(
+          changes[LOGPOWER_PROGRESS_MODE_KEY].newValue,
+        );
+      }
+      if (changes[LOGPOWER_TIMER_MODE_KEY]) {
+        logPowerTimerMode = normalizeLogPowerIndicatorMode(
+          changes[LOGPOWER_TIMER_MODE_KEY].newValue,
+        );
+      }
+      if (changes[LOGPOWER_EARNING_COLOR_KEY]) {
+        logPowerEarningColor =
+          changes[LOGPOWER_EARNING_COLOR_KEY].newValue === true;
+      }
+      updateLogPowerIndicators(); // 배지 표시/색 즉시 반영
     }
     if (changes[CHANNEL_LIVE_BUTTON_KEY]) {
       channelLiveButtonOn = changes[CHANNEL_LIVE_BUTTON_KEY].newValue !== false;
