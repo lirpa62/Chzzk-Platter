@@ -1218,6 +1218,26 @@
   });
   loadChannelLiveButton();
 
+  // 중간광고 중 미니플레이어(원래 방송) 음소거 해제. 기본 OFF(광고 소리와 겹칠 수 있음).
+  const AD_MINI_UNMUTE_KEY = "cheeseAdMiniplayerUnmute";
+  const adMiniUnmuteInput = document.querySelector("[data-ad-mini-unmute]");
+  async function loadAdMiniUnmute() {
+    let on = false;
+    try {
+      const data = await chrome.storage?.local?.get(AD_MINI_UNMUTE_KEY);
+      on = data?.[AD_MINI_UNMUTE_KEY] === true; // 미설정=기본 OFF
+    } catch {}
+    if (adMiniUnmuteInput) adMiniUnmuteInput.checked = on;
+  }
+  adMiniUnmuteInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [AD_MINI_UNMUTE_KEY]: adMiniUnmuteInput.checked,
+      });
+    } catch {}
+  });
+  loadAdMiniUnmute();
+
   // 라이브 바로가기 버튼 배치(끝/탭 뒤). 기본 ON(끝).
   const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
   const channelLiveButtonEndInput = document.querySelector(

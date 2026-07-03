@@ -127,6 +127,10 @@ let channelLiveButtonOn = true;
 // 라이브 바로가기 버튼을 탭리스트 '끝(우측)'에 둘지(true) 탭들 바로 뒤(false)에 둘지.
 const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
 let channelLiveButtonEnd = true;
+// 중간광고 중 원래 방송이 미니플레이어로 축소되며 음소거되는데, 이를 해제해 방송 소리를
+// 계속 듣는다(전역, 기본 OFF — 광고 소리와 겹칠 수 있어 명시적 opt-in). content.js 전용.
+const AD_MINI_UNMUTE_KEY = "cheeseAdMiniplayerUnmute";
+let adMiniplayerUnmute = false;
 // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
 const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
 const FOLLOW_PREVIEW_SIZE_KEY = "cheeseFollowPreviewSize"; // {w} (height는 16:9)
@@ -4825,9 +4829,10 @@ function applyLogPowerBadge() {
     // 채널 전환 → 보유량 캐시 무효화(이전 채널 값이 잠깐 보이지 않게).
     logPowerCachedAmount = null;
     logPowerCacheHref = "";
-    // 이전 채널 1시간 타이머 인터벌 정리(state는 채널별 storage라 보존).
+    // 이전 채널을 떠났으므로 1시간 타이머를 일시정지(남은 시간+이탈 시각 저장). 다시
+    // 들어오면 그 시점 남은 시간부터 재개하고, 이탈 30분 초과면 종료한다.
     if (logPowerHourChannelId && logPowerHourChannelId !== channelId) {
-      stopWatchHourTimer(true);
+      pauseWatchHourTimer(logPowerHourChannelId);
     }
     logPowerChannelId = channelId;
     // 이전 채널 적립 표시 상태 초기화(새 채널 status가 올 때까지 끔).
@@ -5051,6 +5056,9 @@ function stopLogPowerClaimTimer() {
 const LOGPOWER_HOUR_MS = 3600000; // 1시간
 const LOGPOWER_HOUR_CLAIMED_MS = 5000; // '획득' 라벨 표시 시간
 const LOGPOWER_HOUR_TIMER_KEY_PREFIX = "cheeseLogPowerHourTimer:";
+// 페이지/채널을 떠나면 타이머를 '일시정지'(남은 시간 보존)하고, 다시 진입하면 그 시점의
+// 남은 시간부터 재개한다. 단 이탈 시간이 이 값을 넘으면 타이머를 종료한다.
+const LOGPOWER_HOUR_AWAY_LIMIT_MS = 30 * 60 * 1000; // 이탈 허용 30분
 let logPowerHourInterval = 0; // 1초 카운트다운 인터벌
 let logPowerClaimedLabelTimer = 0; // '획득' 라벨 숨김 타이머
 // 적립 활성 상태(background status 반영). 현재 채널 일치 시에만 표시.
@@ -5133,10 +5141,10 @@ function startWatchHourTimer(
   showClaimed = true,
 ) {
   if (!channelId) return;
-  // storage엔 항상 저장(표시를 나중에 켜도 복원되게).
+  // storage엔 항상 저장(표시를 나중에 켜도 복원되게). leftAt:0 = 진행 중(일시정지 아님).
   try {
     chrome.storage?.local?.set({
-      [`${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`]: endsAt,
+      [`${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`]: { endsAt, leftAt: 0 },
     });
   } catch {}
   // 표시 토글이 꺼져 있으면 카운트다운 인터벌은 돌리지 않는다(저장만). 표시를 켜면
@@ -5226,18 +5234,73 @@ function clearWatchHourTimer(channelId) {
   }
 }
 
-// 새로고침/채널 진입 시 저장된 1시간 타이머 잔여를 복원.
+// 저장값을 { endsAt, leftAt } 형태로 정규화(구버전은 number(endsAt)만 저장했으므로
+// leftAt:0 진행중으로 취급). 유효하지 않으면 null.
+function parseWatchHourStored(raw) {
+  if (raw && typeof raw === "object") {
+    const endsAt = Number(raw.endsAt);
+    const leftAt = Number(raw.leftAt) || 0;
+    if (Number.isFinite(endsAt) && endsAt > 0) return { endsAt, leftAt };
+    return null;
+  }
+  const endsAt = Number(raw); // 구버전 하위호환
+  if (Number.isFinite(endsAt) && endsAt > 0) return { endsAt, leftAt: 0 };
+  return null;
+}
+
+// 페이지/채널을 떠날 때 현재 남은 시간을 보존하고 이탈 시각(leftAt)을 찍는다. 재진입 시
+// restoreWatchHourTimer가 이 leftAt으로 이탈 시간을 계산해 재개/종료를 결정한다.
+// 인터벌은 멈추지만 storage state(잔여+leftAt)는 남긴다.
+function pauseWatchHourTimer(channelId) {
+  if (!channelId || logPowerHourChannelId !== channelId) return;
+  const remaining = logPowerHourEndsAt - Date.now();
+  if (!(remaining > 0)) {
+    clearWatchHourTimer(channelId); // 이미 만료면 정리
+    return;
+  }
+  const now = Date.now();
+  try {
+    chrome.storage?.local?.set({
+      // endsAt은 '재개 시각(now) + 남은 시간' 기준으로 저장해 두면, 복원 때
+      // remaining = endsAt - leftAt 으로 바로 남은 시간을 얻는다.
+      [`${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`]: {
+        endsAt: now + remaining,
+        leftAt: now,
+      },
+    });
+  } catch {}
+  stopWatchHourTimer(true); // 인터벌 정지 + 현재 채널 state 비움(storage는 위에서 보존)
+}
+
+// 새로고침/채널 진입 시 저장된 1시간 타이머를 복원. 일시정지 상태(leftAt>0)면 이탈 시간을
+// 계산해 30분 이하면 그 시점 남은 시간부터 재개, 초과면 종료한다.
 async function restoreWatchHourTimer(channelId) {
   if (!channelId) return;
   if (logPowerHourChannelId === channelId && logPowerHourEndsAt) return;
   try {
     const key = `${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`;
     const data = await chrome.storage?.local?.get(key);
-    const endsAt = Number(data?.[key]);
+    const stored = parseWatchHourStored(data?.[key]);
     if (channelId !== getCurrentLiveChannelId()) return;
-    if (Number.isFinite(endsAt) && endsAt > Date.now()) {
-      startWatchHourTimer(channelId, endsAt, false); // 복원이라 '획득' 라벨 없음
-    } else if (endsAt) {
+    if (!stored) {
+      if (data?.[key] != null) clearWatchHourTimer(channelId); // 잘못된/만료 키 정리
+      return;
+    }
+    const now = Date.now();
+    if (stored.leftAt > 0) {
+      // 일시정지(이탈) 상태 → 이탈 시간 판정.
+      const awayMs = now - stored.leftAt;
+      const remaining = stored.endsAt - stored.leftAt; // 이탈 시점의 남은 시간
+      if (awayMs > LOGPOWER_HOUR_AWAY_LIMIT_MS || !(remaining > 0)) {
+        clearWatchHourTimer(channelId); // 30분 초과 이탈 → 종료
+      } else {
+        // 이탈 시점 남은 시간부터 재개(새 endsAt = 지금 + remaining).
+        startWatchHourTimer(channelId, now + remaining, false);
+      }
+    } else if (stored.endsAt > now) {
+      // 진행 중이던 타이머(구버전 또는 미저장 이탈) → 절대시각 그대로 이어감.
+      startWatchHourTimer(channelId, stored.endsAt, false);
+    } else {
       clearWatchHourTimer(channelId); // 만료된 키 정리
     }
   } catch {}
@@ -8443,12 +8506,52 @@ function ensureFillScreenPlayerObserver() {
     fillScreenObservedBox = null;
   }
   if (!(box instanceof HTMLElement)) return;
-  fillScreenPlayerObserver = new MutationObserver(() => applyFillScreen());
+  fillScreenPlayerObserver = new MutationObserver(() => {
+    applyFillScreen();
+    applyAdMiniplayerUnmute(); // 미니플레이어 전환 시 음소거 해제 옵션 반영
+  });
   fillScreenPlayerObserver.observe(box, {
     attributes: true,
     attributeFilter: ["class"],
   });
   fillScreenObservedBox = box;
+}
+
+// 중간광고 중 미니플레이어(원래 방송)의 음소거를 해제한다(옵션 ON일 때만). 치지직이
+// 재생 중 다시 muted 를 걸 수 있어, 방송 video 의 volumechange 를 감시해 미니플레이어인
+// 동안에는 muted 를 계속 false 로 되돌린다. 옵션 OFF/미니플레이어 아님이면 아무것도 안 한다
+// (원래 음소거 동작 유지 — 우리가 켠 적 없으면 되돌리지도 않는다).
+let adUnmuteObservedVideo = null;
+function onAdMiniplayerVolumeChange(e) {
+  if (!adMiniplayerUnmute) return;
+  const v = e.currentTarget;
+  if (!(v instanceof HTMLVideoElement)) return;
+  // 미니플레이어(광고 중)일 때만, 그리고 우리가 아직 muted 인 걸 발견하면 해제.
+  if (v.closest("#live_player_layout.miniplayer") && v.muted) {
+    v.muted = false;
+  }
+}
+function applyAdMiniplayerUnmute() {
+  const box = document.querySelector("div#layout-body #live_player_layout");
+  // 미니플레이어 안 원래 방송 video(광고 video 는 title="Advertisement" 라 제외).
+  const video =
+    box instanceof HTMLElement && box.classList.contains("miniplayer")
+      ? box.querySelector("video.webplayer-internal-video")
+      : null;
+  // 감시 대상이 바뀌면 이전 리스너 정리.
+  if (adUnmuteObservedVideo && adUnmuteObservedVideo !== video) {
+    adUnmuteObservedVideo.removeEventListener(
+      "volumechange",
+      onAdMiniplayerVolumeChange,
+    );
+    adUnmuteObservedVideo = null;
+  }
+  if (!adMiniplayerUnmute || !(video instanceof HTMLVideoElement)) return;
+  if (adUnmuteObservedVideo !== video) {
+    video.addEventListener("volumechange", onAdMiniplayerVolumeChange);
+    adUnmuteObservedVideo = video;
+  }
+  if (video.muted) video.muted = false; // 즉시 1회 해제
 }
 
 // 영상 영역(_player_1qjld_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
@@ -12173,7 +12276,9 @@ async function loadFeatureFlags() {
       LOGPOWER_TIMER_MODE_KEY,
       LOGPOWER_EARNING_COLOR_KEY,
       VOD_AUTOPLAY_OFF_KEY,
+      AD_MINI_UNMUTE_KEY,
     ]);
+    adMiniplayerUnmute = data?.[AD_MINI_UNMUTE_KEY] === true; // 기본 OFF
     vodAutoplayOff = data?.[VOD_AUTOPLAY_OFF_KEY] === true; // 기본 OFF
     logPowerClickAction = normalizeLogPowerClickAction(
       data?.[LOGPOWER_CLICK_ACTION_KEY],
@@ -12232,6 +12337,10 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[MIXER_ALWAYS_ON_KEY]) {
       mixerAlwaysOn = changes[MIXER_ALWAYS_ON_KEY].newValue === true;
+    }
+    if (changes[AD_MINI_UNMUTE_KEY]) {
+      adMiniplayerUnmute = changes[AD_MINI_UNMUTE_KEY].newValue === true;
+      applyAdMiniplayerUnmute(); // 즉시 반영(켜면 해제·감시, 끄면 리스너 정리)
     }
     if (changes[VIDEO_FILTER_ALWAYS_ON_KEY]) {
       videoFilterAlwaysOn =
@@ -12449,6 +12558,7 @@ function init() {
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
+  applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
   applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
   applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)
@@ -12797,6 +12907,11 @@ window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
 window.addEventListener("hashchange", () => {
   cleanupStudioMakeClipViewIfInactive();
   init();
+});
+// 새로고침·탭 닫기·다른 페이지 이동 = 페이지 이탈. 도는 1시간 타이머를 일시정지(남은
+// 시간+이탈 시각 저장)해, 다시 들어오면 그 시점부터 재개하고 30분 초과면 종료되게 한다.
+window.addEventListener("pagehide", () => {
+  if (logPowerHourChannelId) pauseWatchHourTimer(logPowerHourChannelId);
 });
 window.addEventListener(
   "resize",
