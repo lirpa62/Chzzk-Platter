@@ -8371,26 +8371,42 @@ function applyChatStackedClass() {
   document.documentElement.classList.toggle("cheese-chat-stacked", stacked);
 }
 
-// ── 화면 채우기(영상 좌우 레터박스 최소화) ──────────────────────────────────
-// 측정: videoBox(#live_player_layout) 폭은 채팅/사이드바가 정해 고정이고, main 높이를
-// 키우면 videoBox 높이가 폭×9/16(영상 비율)까지 따라 커진다. main을 '폭×9/16 +
-// overhead(컨트롤바 등 main−videoBox 차)'로 맞추면 영상이 폭을 꽉 채워 좌우 레터박스가
-// 사라진다(이 값까지 키워도 페이지 세로 스크롤은 안 생김 — section/wrapper가 흡수).
-// stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용으로 깜빡임 방지.
-let fillScreenOverhead = 90; // 타겟−videoBox 높이 차(자연 상태에서 측정해 갱신)
+// ── 화면 채우기(영상 레터박스 최소화) ──────────────────────────────────────
+// 라이브 영상 영역(_player_1qjld_)은 height 고정 + overflow:hidden 이라 폭이 그보다 넓으면
+// 영상이 세로로 못 커져 잘리거나 레터박스가 생긴다. 이 '자르는 층'의 높이를 '폭×9/16'으로
+// 키우면 영상이 폭을 꽉 채운다(레터박스 제거, 하단 안 잘림). main 은 건드리지 않아 main 의
+// overflow-y 스크롤이 그대로 유지된다. stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용.
 // 라이브/다시보기에서 화면 채우기 대상(영상 영역 컨테이너)과 videoBox를 찾는다.
 // 라이브: div#layout-body main + #live_player_layout. 다시보기: _player_(부모 _wrapper_)
 // + #player_layout. 다시보기 _player_는 max-height: calc(100%-85px) 제약이 있어 높이를
 // 키우려면 그 max-height도 함께 풀어야 한다.
 function getFillScreenTarget() {
   if (location.pathname.startsWith("/live/")) {
-    const main = document.querySelector("div#layout-body main");
-    if (main instanceof HTMLElement) {
-      return {
-        el: main,
-        box: main.querySelector("#live_player_layout"),
-        capMaxH: false,
-      };
+    // 영상 박스(#live_player_layout) 위쪽에 height 고정 + overflow:hidden 인 영상 영역
+    // (_player_1qjld_)이 있어, 이 층이 영상을 자른다. 이 '자르는 층'의 높이를 키워야
+    // 영상 하단이 안 잘린다. 해시(_player_1qjld_)에 의존하지 않도록, box 에서 위로
+    // 올라가며 overflow-y 가 hidden/clip 인 첫 조상(단, main 이전까지)을 타겟으로 잡는다.
+    // main 은 건드리지 않아 main 의 overflow-y 스크롤은 유지된다.
+    const box = document.querySelector("div#layout-body #live_player_layout");
+    if (box instanceof HTMLElement) {
+      const main = box.closest("main");
+      let el = box.parentElement;
+      let clip = null;
+      while (el && el !== main) {
+        const oy = getComputedStyle(el).overflowY;
+        if (oy === "hidden" || oy === "clip") {
+          clip = el;
+          break;
+        }
+        el = el.parentElement;
+      }
+      if (clip instanceof HTMLElement) {
+        // clip(_player_)의 부모(_contents_, flex column, max-height:100%)는 영상을 키우면
+        // 콘텐츠가 넘쳐도 overflow:visible 이라 형제(_details_/_area_/_footer_ 등)가 영상을
+        // 침범한다. 이 부모의 max-height 제약을 풀어 넘침을 main 스크롤로 흘려보낸다.
+        const contents = clip.parentElement;
+        return { el: clip, box, capMaxH: false, contents };
+      }
     }
   }
   // 다시보기: #player_layout을 감싸는 _player_(부모가 _wrapper_).
@@ -8411,44 +8427,57 @@ function getFillScreenTarget() {
   return null;
 }
 
-// 화면 채우기는 동작하지 않는 엣지 케이스·스타일 오류로 배포 전 임시 비활성화한다.
-// settings UI도 숨겨 둠. 저장값(fillScreen:true)이 남아 있어도 적용하지 않고, 이미
-// 적용돼 있던 인라인 스타일은 정리해 원복한다. 수정 후 이 상수를 true로 되돌릴 것.
-const FILL_SCREEN_ENABLED = false;
+const FILL_SCREEN_ENABLED = true;
 
+// 영상 영역(_player_1qjld_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
+// 꽉 채우게 한다(레터박스 제거, 하단 안 잘림). main 은 건드리지 않으므로 main 의
+// overflow-y 스크롤은 그대로 유지된다. 다시보기(capMaxH:true)는 아직 적용하지 않는다.
+// stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용으로 깜빡임 방지.
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
+  // 다시보기(capMaxH)는 일단 제외 — 라이브 영상 컨테이너만 대상.
+  const isLive = !!t && !t.capMaxH;
   const on =
     FILL_SCREEN_ENABLED &&
     featureFlags.fillScreen &&
-    !!t &&
+    isLive &&
     !(aside && isChatStackedLayout(aside));
   if (!on) {
     if (t) {
       t.el.style.removeProperty("height");
+      t.el.style.removeProperty("min-height"); // 과거 버전이 남긴 인라인 정리
+      t.el.style.removeProperty("flex-shrink");
       if (t.capMaxH) t.el.style.removeProperty("max-height");
+      if (t.contents instanceof HTMLElement) {
+        t.contents.style.removeProperty("max-height");
+        t.contents.style.removeProperty("flex-shrink");
+      }
     }
     return;
   }
-  const { el, box, capMaxH } = t;
+  const { el, box } = t;
+  // 영상 층 부모(_contents_)의 max-height:100% 제약을 풀고 flex-shrink 를 막아, 영상을
+  // 키워 콘텐츠가 넘치면 형제가 침범하지 않고 main 의 overflow-y 스크롤로 흘러가게 한다.
+  if (t.contents instanceof HTMLElement) {
+    if (t.contents.style.maxHeight !== "none") {
+      t.contents.style.setProperty("max-height", "none", "important");
+    }
+    if (t.contents.style.flexShrink !== "0") {
+      t.contents.style.setProperty("flex-shrink", "0", "important");
+    }
+  }
   const videoBox = box instanceof HTMLElement ? box : el;
-  // 영상 폭(boxW)은 우리가 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
+  // 영상 폭(boxW)은 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
   const boxW = videoBox.getBoundingClientRect().width;
   if (!(boxW > 0)) return;
-  // overhead(타겟−videoBox 높이; 컨트롤바 등)는 강제 적용 중이면 오염되므로 자연
-  // 상태일 때만 측정해 캐시.
-  const styledNow = !!el.style.height;
-  if (!styledNow) {
-    const mh = el.getBoundingClientRect().height;
-    const bh = videoBox.getBoundingClientRect().height;
-    fillScreenOverhead = Math.max(0, Math.round(mh - bh));
-  }
-  const idealH = Math.round((boxW * 9) / 16) + fillScreenOverhead;
+  const idealH = Math.round((boxW * 9) / 16);
   const value = `${idealH}px`;
-  // 다시보기 _player_는 max-height 제약을 풀어야 높이가 먹는다.
-  if (capMaxH && el.style.maxHeight !== "none") {
-    el.style.setProperty("max-height", "none", "important");
+  // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
+  // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
+  // 높이를 유지시킨다(넘치는 분량은 main 의 overflow-y 스크롤이 흡수).
+  if (el.style.flexShrink !== "0") {
+    el.style.setProperty("flex-shrink", "0", "important");
   }
   // 멱등: 이미 같은 값이면 다시 쓰지 않는다(mutation/깜빡임 방지).
   if (el.style.height === value) return;
