@@ -2772,12 +2772,12 @@ function lpStateToStatus(state, activeOverride) {
     expectedAmount: state?.expectedAmount || null,
   };
 }
-function lpBroadcast(message) {
+function lpBroadcast(message, exceptTabId) {
   try {
     chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, (tabs) => {
       void chrome.runtime.lastError;
       for (const t of tabs || []) {
-        if (t.id != null) {
+        if (t.id != null && t.id !== exceptTabId) {
           chrome.tabs.sendMessage(t.id, message, () => {
             void chrome.runtime.lastError;
           });
@@ -3012,6 +3012,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // 통나무파워 1시간 획득을 다른 치지직 탭에도 알린다. 획득한 탭(sender)은 이미 자기
+  // 토스트를 띄웠으므로 제외하고, 나머지 탭에 broadcast한다(수신 탭이 '보이는 탭 +
+  // claimId 처음'일 때만 실제로 띄운다).
+  if (message.type === "CHEESE_LOG_POWER_CLAIMED") {
+    lpBroadcast(
+      {
+        type: "LOG_POWER_CLAIMED_TOAST",
+        claimId: message.claimId,
+        amount: message.amount,
+        channelName: message.channelName,
+      },
+      sender?.tab?.id,
+    );
+    return false;
+  }
+
   // 탭 음소거 토글/조회 — 콘텐츠는 chrome.tabs.update를 못 쓰므로 background에서
   // sender.tab.id로 처리한다. action: "toggle" | "query". muted 상태를 응답.
   if (message.type === "CHEESE_TAB_MUTE") {
@@ -3042,16 +3058,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // saveAs:false 로 브라우저 '저장 위치 확인' 설정과 무관하게 바로 저장하고, 실제
   // 완료/취소(state)를 downloads.onChanged로 감지해 정확히 응답한다.
   if (message.type === "CHEESE_SCREENSHOT_SAVE") {
-    const { dataURL, filename } = message;
+    const { url, filename } = message;
     const saveAs = message.saveAs === true; // 기본 false=바로 저장
-    if (typeof dataURL !== "string" || !dataURL.startsWith("data:image")) {
+    // data:(바로 저장용) 또는 blob:(대화상자용, content가 변환) URL만 허용.
+    if (
+      typeof url !== "string" ||
+      !(url.startsWith("data:image") || url.startsWith("blob:"))
+    ) {
       sendResponse({ ok: false, reason: "invalid" });
       return false;
     }
     try {
-      chrome.downloads.download(
-        { url: dataURL, filename, saveAs },
-        (downloadId) => {
+      chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
           if (chrome.runtime.lastError || downloadId == null) {
             sendResponse({ ok: false, reason: "start-failed" });
             return;
@@ -3074,8 +3092,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse(result);
           };
           chrome.downloads.onChanged.addListener(onChanged);
-          // 혹시 onChanged가 안 오는 환경 대비 타임아웃(다운로드는 시작됨).
-          setTimeout(() => finish({ ok: true, saved: true }), 15000);
+          // 혹시 onChanged가 안 오는 환경 대비 타임아웃. saveAs(대화상자)는 사용자가
+          // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
+          // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
+          const timeoutMs = saveAs ? 300000 : 15000;
+          setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
         },
       );
     } catch {

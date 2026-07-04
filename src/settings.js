@@ -1229,14 +1229,47 @@
     } catch {}
     if (adMiniUnmuteInput) adMiniUnmuteInput.checked = on;
   }
+  // '원래 음소거였으면 유지' 하위 옵션(기본 ON). 위 음소거 해제가 꺼져 있으면 의미가
+  // 없으므로 비활성화(흐림)한다.
+  const AD_MINI_KEEP_MUTED_KEY = "cheeseAdMiniplayerKeepMuted";
+  const adMiniKeepMutedInput = document.querySelector(
+    "[data-ad-mini-keep-muted]",
+  );
+  function reflectAdMiniKeepMutedEnabled() {
+    const parentOn = !!adMiniUnmuteInput?.checked;
+    if (!adMiniKeepMutedInput) return;
+    adMiniKeepMutedInput.disabled = !parentOn;
+    adMiniKeepMutedInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", !parentOn);
+  }
+  async function loadAdMiniKeepMuted() {
+    let on = true;
+    try {
+      const data = await chrome.storage?.local?.get(AD_MINI_KEEP_MUTED_KEY);
+      on = data?.[AD_MINI_KEEP_MUTED_KEY] !== false; // 미설정=기본 ON
+    } catch {}
+    if (adMiniKeepMutedInput) adMiniKeepMutedInput.checked = on;
+    reflectAdMiniKeepMutedEnabled();
+  }
+  adMiniKeepMutedInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [AD_MINI_KEEP_MUTED_KEY]: adMiniKeepMutedInput.checked,
+      });
+    } catch {}
+  });
+
   adMiniUnmuteInput?.addEventListener("change", () => {
     try {
       chrome.storage?.local?.set({
         [AD_MINI_UNMUTE_KEY]: adMiniUnmuteInput.checked,
       });
     } catch {}
+    reflectAdMiniKeepMutedEnabled(); // 부모 토글 변화 시 하위 활성/비활성 갱신
   });
   loadAdMiniUnmute();
+  loadAdMiniKeepMuted();
 
   // 스크린샷 저장 전 미리보기(저장/취소 확인). 기본 OFF(바로 저장).
   const SCREENSHOT_PREVIEW_KEY = "cheeseScreenshotPreview";

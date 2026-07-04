@@ -139,6 +139,10 @@ let channelLiveButtonEnd = true;
 // 계속 듣는다(전역, 기본 OFF — 광고 소리와 겹칠 수 있어 명시적 opt-in). content.js 전용.
 const AD_MINI_UNMUTE_KEY = "cheeseAdMiniplayerUnmute";
 let adMiniplayerUnmute = false;
+// 위 옵션이 켜져도, 광고 진입 전 원래 방송이 음소거 상태였으면 그대로 음소거를 유지한다
+// (전역, 기본 ON — 종속: adMiniplayerUnmute ON일 때만 의미). content.js 전용.
+const AD_MINI_KEEP_MUTED_KEY = "cheeseAdMiniplayerKeepMuted";
+let adMiniplayerKeepMuted = true;
 // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
 const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
 const FOLLOW_PREVIEW_SIZE_KEY = "cheeseFollowPreviewSize"; // {w} (height는 16:9)
@@ -199,6 +203,7 @@ const featureFlags = {
   chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
   chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
   chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
+  chatLogPowerToastOtherTabs: false, // 다른 치지직 탭에서 획득해도 현재 보는 탭에 토스트
   streamStats: false,
   fillScreen: false, // 화면 채우기: main 높이를 조절해 영상 좌우 레터박스 최소화
   vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
@@ -2447,6 +2452,31 @@ function getCurrentChannelName() {
     if (text) return text;
   }
 
+  return "";
+}
+
+// 채널명을 DOM에서 먼저 찾고, 없으면(진입 초기/재렌더 등) 채널 API로 조회한다.
+// 1시간 보상 토스트가 DOM 준비 전에 떠서 '이 채널'로 나오던 문제 보완용.
+const channelNameCache = new Map(); // channelId → name
+async function resolveChannelName(channelId) {
+  const fromDom = getCurrentChannelName();
+  if (fromDom) return fromDom;
+  if (!channelId) return "";
+  if (channelNameCache.has(channelId)) return channelNameCache.get(channelId);
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}`,
+      { credentials: "include" },
+    );
+    if (res.ok) {
+      const json = await res.json();
+      const name = String(json?.content?.channelName || "").trim();
+      if (name) {
+        channelNameCache.set(channelId, name);
+        return name;
+      }
+    }
+  } catch {}
   return "";
 }
 
@@ -4779,7 +4809,11 @@ function ensureLogPowerBadgeObserver() {
   // 입력 영역이 아직 없으면(진입 직후 등) 나타날 때까지 짧게 폴링.
   if (!logPowerAreaWaitTimer) {
     logPowerAreaWaitTimer = window.setInterval(() => {
-      if (!featureFlags.chatLogPower || !getCurrentLiveChannelId()) {
+      // 배지 표시 또는 자동 획득 중 하나라도 켜져 있으면 옵저버가 필요하다(자동 획득은
+      // 보상 버튼 등장 즉시 claim하기 위해 배지 표시 없이도 이 옵저버를 쓴다).
+      const wantObserver =
+        featureFlags.chatLogPower || featureFlags.chatLogPowerAuto;
+      if (!wantObserver || !getCurrentLiveChannelId()) {
         clearInterval(logPowerAreaWaitTimer);
         logPowerAreaWaitTimer = 0;
         return;
@@ -4789,13 +4823,18 @@ function ensureLogPowerBadgeObserver() {
         clearInterval(logPowerAreaWaitTimer);
         logPowerAreaWaitTimer = 0;
         attachLogPowerObserverTo(a);
-        // 영역이 막 나타났으면 배지가 없을 테니 값+DOM 생성, 있으면 위치만 보장.
-        if (!document.getElementById(LOGPOWER_BADGE_ID)) {
-          refreshLogPowerBadge();
-        } else {
-          ensureLogPowerBadge();
+        // 배지 표시가 켜졌을 때만 배지 DOM을 만든다(자동 획득만 켠 경우엔 옵저버만
+        // 필요하고 배지는 만들지 않는다). 영역 등장 즉시 보상 버튼이 있으면 handle이
+        // 처리하도록 한 번 확인한다.
+        if (featureFlags.chatLogPower) {
+          if (!document.getElementById(LOGPOWER_BADGE_ID)) {
+            refreshLogPowerBadge();
+          } else {
+            ensureLogPowerBadge();
+          }
+          updateLogPowerIndicators();
         }
-        updateLogPowerIndicators();
+        handleLogPowerRewardPopup(); // 이미 떠 있는 보상 버튼 즉시 처리
       }
     }, 1000);
   }
@@ -4820,7 +4859,11 @@ function applyLogPowerBadge() {
   if (!on) {
     stopLogPowerTimer();
     stopWatchHourTimer(true);
-    stopLogPowerBadgeObserver();
+    // 자동 획득이 켜져 있으면 옵저버는 그쪽(보상 버튼 즉시 감지)에서 계속 필요하므로
+    // 끄지 않는다. 둘 다 꺼졌을 때만 옵저버를 정리한다.
+    if (!(featureFlags.chatLogPowerAuto && channelId)) {
+      stopLogPowerBadgeObserver();
+    }
     removeLogPowerBadge();
     logPowerChannelId = "";
     return;
@@ -4906,16 +4949,17 @@ async function fetchLogPowerClaims(channelId) {
   }
 }
 
-// 적격 claim PUT(멱등). 성공/실패 무관하게 seen에 기록해 반복 PUT을 줄인다.
+// 적격 claim PUT(멱등). {ok, status}를 반환한다. status로 재시도할지(일시 오류) 포기할지
+// (영구 오류: 만료·권한 등 4xx) 호출부에서 판단한다. 네트워크 예외는 status:0.
 async function putLogPowerClaim(channelId, claimId) {
   try {
     const res = await fetch(
       `${LOGPOWER_CLAIM_BASE}/${channelId}/log-power/claims/${claimId}`,
       { method: "PUT", credentials: "include" },
     );
-    return res.ok;
+    return { ok: res.ok, status: res.status };
   } catch {
-    return false;
+    return { ok: false, status: 0 };
   }
 }
 
@@ -4994,9 +5038,15 @@ async function claimLogPowerForCurrentChannel() {
   );
   let gained = 0;
   let hourRewardAmount = 0; // WATCH_1_HOUR로 획득한 양(토스트 표시용)
+  let hourClaimId = ""; // 다른 탭 토스트 중복 방지용 대표 claimId
   for (const c of eligible) {
-    seen.add(c.claimId); // 미리 기록(중복 PUT 방지)
-    const ok = await putLogPowerClaim(channelId, c.claimId);
+    const { ok, status } = await putLogPowerClaim(channelId, c.claimId);
+    // seen 기록 정책: 성공(획득 완료)이거나 4xx(만료·권한 등 재시도해도 소용없는 영구
+    // 오류)면 기록해 더 안 시도한다. 5xx/네트워크(status 0)는 일시 오류로 보고 기록하지
+    // 않아 다음 폴링에서 재시도한다. (예전엔 성공/실패 무관 미리 기록해, 한 번 실패한
+    // claim이 seen에 박혀 '배달 완료' 팝업이 계속 떠도 자동 획득이 안 되던 문제가 있었다.)
+    const permanent = status >= 400 && status < 500;
+    if (ok || permanent) seen.add(c.claimId);
     if (ok) {
       gained += Number(c.amount) || 0;
       // 1시간 시청 보상이면 60분 카운트다운 타이머 시작.
@@ -5006,6 +5056,7 @@ async function claimLogPowerForCurrentChannel() {
           .includes("WATCH_1_HOUR")
       ) {
         hourRewardAmount += Number(c.amount) || 0;
+        if (!hourClaimId) hourClaimId = c.claimId;
       }
     }
   }
@@ -5013,10 +5064,22 @@ async function claimLogPowerForCurrentChannel() {
     startWatchHourTimer(channelId);
     // 토스트(토글 켜졌을 때만): 획득량 + 채널명 + 현재 보유량(획득 반영된 최신값).
     if (featureFlags.chatLogPowerToast) {
-      const channelName = getCurrentChannelName();
+      const channelName = await resolveChannelName(channelId);
       const total = await fetchLogPowerBalance(channelId);
       if (channelId === getCurrentLiveChannelId()) {
         showLogPowerToast(hourRewardAmount, channelName, total);
+      }
+      // 다른 탭에도 알림 옵션이 켜져 있으면 background로 보내 다른 탭에 broadcast한다.
+      // (수신 탭은 '보이는 탭 + 이 claimId 처음'일 때만 토스트를 띄운다.)
+      if (featureFlags.chatLogPowerToastOtherTabs) {
+        try {
+          chrome.runtime.sendMessage({
+            type: "CHEESE_LOG_POWER_CLAIMED",
+            claimId: hourClaimId,
+            amount: hourRewardAmount,
+            channelName,
+          });
+        } catch {}
       }
     }
   }
@@ -5039,7 +5102,11 @@ function applyLogPowerAutoClaim() {
     logPowerClaimChannelId = channelId;
     claimLogPowerForCurrentChannel();
   }
-  startLogPowerClaimTimer();
+  // 보상 버튼이 DOM에 뜨는 즉시 claim하도록 채팅 입력영역 옵저버를 보장한다(배지 표시가
+  // 꺼져 있어도 자동 획득만으로 이 옵저버가 필요하다). 옵저버 콜백이 handleLogPowerReward
+  // Popup을 호출해 폴링(1분)을 기다리지 않고 즉시 처리한다.
+  ensureLogPowerBadgeObserver();
+  startLogPowerClaimTimer(); // 옵저버가 놓치는 경우 대비 폴링도 유지(안전망)
 }
 
 function startLogPowerClaimTimer() {
@@ -5359,7 +5426,33 @@ const LOGPOWER_TOAST_ID = "cheese-logpower-toast";
 const LOGPOWER_TOAST_MS = 6000;
 let logPowerToastTimer = 0;
 
-function showLogPowerToast(gainedAmount, channelName, totalAmount) {
+// 다른 탭에서 온 1시간 획득 broadcast 처리. 현재 화면에 보이는(visible) 탭에서만, 같은
+// claimId는 1회만 토스트를 띄운다(옵션 둘 다 켜졌을 때). 중복/백그라운드 스팸 방지.
+const otherTabToastSeen = new Set();
+function handleOtherTabLogPowerToast(message) {
+  if (!featureFlags.chatLogPowerToast || !featureFlags.chatLogPowerToastOtherTabs)
+    return;
+  if (document.visibilityState !== "visible") return; // 보고 있는 탭에서만
+  const claimId = message?.claimId;
+  if (claimId) {
+    if (otherTabToastSeen.has(claimId)) return; // 이미 이 claim 알림함
+    otherTabToastSeen.add(claimId);
+    // 메모리 누수 방지: 오래된 항목이 쌓이지 않게 상한만 관리.
+    if (otherTabToastSeen.size > 200) {
+      otherTabToastSeen.clear();
+      otherTabToastSeen.add(claimId);
+    }
+  }
+  showLogPowerToast(message.amount, null, null, message.channelName || "");
+}
+
+// fromChannelName이 있으면 '다른 탭에서 온 알림'이라 어느 채널에서 획득했는지 명시한다.
+function showLogPowerToast(
+  gainedAmount,
+  channelName,
+  totalAmount,
+  fromChannelName,
+) {
   document.getElementById(LOGPOWER_TOAST_ID)?.remove();
   if (logPowerToastTimer) {
     clearTimeout(logPowerToastTimer);
@@ -5378,11 +5471,16 @@ function showLogPowerToast(gainedAmount, channelName, totalAmount) {
     totalAmount == null
       ? ""
       : (Number(totalAmount) || 0).toLocaleString("ko-KR");
+  const fromLine = fromChannelName
+    ? `<br><span class="cheese-logpower-toast-sub"><span class="cheese-logpower-toast-ch">${escapeHtml(fromChannelName)}</span> 채널</span>`
+    : totalStr
+      ? `<br><span class="cheese-logpower-toast-sub">현재 <span class="cheese-logpower-toast-ch">${escapeHtml(name)}</span> 채널의 통나무 파워 ${escapeHtml(totalStr)}</span>`
+      : "";
   toast.innerHTML = `
     <span class="cheese-logpower-toast-ico" aria-hidden="true">${logPowerIcon()}</span>
     <span class="cheese-logpower-toast-body">
       <b>1시간 시청 보상</b>으로 통나무 파워 <b>${escapeHtml(gainStr)}</b> 획득
-      ${totalStr ? `<br><span class="cheese-logpower-toast-sub">현재 ${escapeHtml(name)} 채널의 통나무 파워 ${escapeHtml(totalStr)}</span>` : ""}
+      ${fromLine}
     </span>`;
   document.body.appendChild(toast);
   // 다음 프레임에 진입 애니메이션(transform 0).
@@ -8534,40 +8632,75 @@ function ensureFillScreenPlayerObserver() {
 }
 
 // 중간광고 중 미니플레이어(원래 방송)의 음소거를 해제한다(옵션 ON일 때만). 치지직이
-// 재생 중 다시 muted 를 걸 수 있어, 방송 video 의 volumechange 를 감시해 미니플레이어인
-// 동안에는 muted 를 계속 false 로 되돌린다. 옵션 OFF/미니플레이어 아님이면 아무것도 안 한다
-// (원래 음소거 동작 유지 — 우리가 켠 적 없으면 되돌리지도 않는다).
+// 재생 중 다시 muted 를 걸 수 있어 volumechange 를 감시하는데, 사용자가 직접 음소거한
+// 경우는 존중해 자동 해제를 멈춘다(그 미니플레이어 세션 동안). 우리가 해제한 직후의
+// volumechange 는 우리 변경이므로 무시하고, 그 외 muted=true 는 외부(사용자/치지직)로
+// 보고 이후 자동 해제를 중단한다. 미니플레이어를 벗어났다 재진입하면 세션이 리셋된다.
 let adUnmuteObservedVideo = null;
+let adUnmuteSelfChanging = false; // 우리가 v.muted 를 바꾸는 중(우리발 volumechange 무시)
+let adUnmuteSuppressed = false; // 사용자/외부가 음소거함 → 이 세션 동안 자동 해제 중단
+let adUnmuteSettleUntil = 0; // 진입 직후 유예 종료 시각(치지직 초기 음소거 토글 흡수용)
+// 진입 직후 잠깐은 치지직이 muted 를 자체적으로 토글하므로, 이 구간의 muted 는 사용자
+// 의도가 아니라 초기화로 보고 그대로 되돌린다. 이 시간이 지난 뒤의 muted 만 사용자
+// 직접 음소거로 존중한다.
+const AD_UNMUTE_SETTLE_MS = 1500;
+function setAdUnmuteMutedFalse(v) {
+  adUnmuteSelfChanging = true;
+  v.muted = false;
+  adUnmuteSelfChanging = false;
+}
 function onAdMiniplayerVolumeChange(e) {
   if (!adMiniplayerUnmute) return;
+  if (adUnmuteSelfChanging) return; // 우리가 유발한 변경 — 무시
   const v = e.currentTarget;
   if (!(v instanceof HTMLVideoElement)) return;
-  // 미니플레이어(광고 중)일 때만, 그리고 우리가 아직 muted 인 걸 발견하면 해제.
-  if (v.closest("#live_player_layout.miniplayer") && v.muted) {
-    v.muted = false;
+  if (!v.closest("#live_player_layout.miniplayer")) return; // 미니플레이어 아님
+  if (!v.muted) return;
+  // 이미 억제 상태(사용자 직접 음소거 또는 '원래 음소거였으면 유지')면 되돌리지 않는다.
+  if (adUnmuteSuppressed) return;
+  if (Date.now() < adUnmuteSettleUntil) {
+    // 진입 유예 구간: 치지직 초기 음소거 → 되돌린다(사용자 의도 아님).
+    setAdUnmuteMutedFalse(v);
+    return;
   }
+  // 유예 이후 외부 음소거 → 사용자 의도로 보고 자동 해제 중단.
+  adUnmuteSuppressed = true;
 }
+let adPreMuteState = false; // 광고 진입 직전(일반 재생) 방송의 음소거 상태
 function applyAdMiniplayerUnmute() {
   const box = document.querySelector("div#layout-body #live_player_layout");
+  const isMini = box instanceof HTMLElement && box.classList.contains("miniplayer");
+  // 미니플레이어가 아닐 때(일반 재생)의 방송 video muted 를 추적해 둔다 — 광고 진입 시
+  // '원래 음소거였는지' 판단에 쓴다(진입 시엔 이미 치지직이 muted 로 바꾼 뒤라 그 값으로는
+  // 원래 상태를 알 수 없다).
+  if (!isMini && box instanceof HTMLElement) {
+    const liveVideo = box.querySelector("video.webplayer-internal-video");
+    if (liveVideo instanceof HTMLVideoElement) adPreMuteState = liveVideo.muted;
+  }
   // 미니플레이어 안 원래 방송 video(광고 video 는 title="Advertisement" 라 제외).
-  const video =
-    box instanceof HTMLElement && box.classList.contains("miniplayer")
-      ? box.querySelector("video.webplayer-internal-video")
-      : null;
-  // 감시 대상이 바뀌면 이전 리스너 정리.
+  const video = isMini
+    ? box.querySelector("video.webplayer-internal-video")
+    : null;
+  // 감시 대상이 바뀌면(미니플레이어 벗어남/다른 video) 이전 리스너 정리 + 세션 리셋.
   if (adUnmuteObservedVideo && adUnmuteObservedVideo !== video) {
     adUnmuteObservedVideo.removeEventListener(
       "volumechange",
       onAdMiniplayerVolumeChange,
     );
     adUnmuteObservedVideo = null;
+    adUnmuteSuppressed = false; // 새 미니플레이어 세션에서는 다시 자동 해제
   }
   if (!adMiniplayerUnmute || !(video instanceof HTMLVideoElement)) return;
   if (adUnmuteObservedVideo !== video) {
     video.addEventListener("volumechange", onAdMiniplayerVolumeChange);
     adUnmuteObservedVideo = video;
+    // '원래 음소거였으면 유지' 옵션 ON + 진입 전 음소거였으면, 이 세션은 자동 해제하지
+    // 않고 음소거를 그대로 둔다(사용자 직접 음소거처럼 suppressed 로 시작).
+    adUnmuteSuppressed = adMiniplayerKeepMuted && adPreMuteState === true;
+    adUnmuteSettleUntil = Date.now() + AD_UNMUTE_SETTLE_MS; // 진입 유예 시작
   }
-  if (video.muted) video.muted = false; // 즉시 1회 해제
+  // 자동 해제가 억제되지 않았고 아직 muted 면 해제한다.
+  if (!adUnmuteSuppressed && video.muted) setAdUnmuteMutedFalse(video);
 }
 
 // 영상 영역(_player_1qjld_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
@@ -12294,12 +12427,14 @@ async function loadFeatureFlags() {
       LOGPOWER_EARNING_COLOR_KEY,
       VOD_AUTOPLAY_OFF_KEY,
       AD_MINI_UNMUTE_KEY,
+      AD_MINI_KEEP_MUTED_KEY,
       SCREENSHOT_PREVIEW_KEY,
       SCREENSHOT_DIRECT_SAVE_KEY,
     ]);
     screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     adMiniplayerUnmute = data?.[AD_MINI_UNMUTE_KEY] === true; // 기본 OFF
+    adMiniplayerKeepMuted = data?.[AD_MINI_KEEP_MUTED_KEY] !== false; // 기본 ON
     vodAutoplayOff = data?.[VOD_AUTOPLAY_OFF_KEY] === true; // 기본 OFF
     logPowerClickAction = normalizeLogPowerClickAction(
       data?.[LOGPOWER_CLICK_ACTION_KEY],
@@ -12362,6 +12497,9 @@ if (chrome.storage?.onChanged) {
     if (changes[AD_MINI_UNMUTE_KEY]) {
       adMiniplayerUnmute = changes[AD_MINI_UNMUTE_KEY].newValue === true;
       applyAdMiniplayerUnmute(); // 즉시 반영(켜면 해제·감시, 끄면 리스너 정리)
+    }
+    if (changes[AD_MINI_KEEP_MUTED_KEY]) {
+      adMiniplayerKeepMuted = changes[AD_MINI_KEEP_MUTED_KEY].newValue !== false;
     }
     if (changes[VIDEO_FILTER_ALWAYS_ON_KEY]) {
       videoFilterAlwaysOn =
@@ -12969,6 +13107,11 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.channelId) clearLogPowerLiveStates(message.channelId);
     return;
   }
+  // 다른 탭에서 1시간 획득 → 이 탭에도 토스트(현재 보고 있는 탭에서만, claimId 1회).
+  if (message?.type === "LOG_POWER_CLAIMED_TOAST") {
+    handleOtherTabLogPowerToast(message);
+    return;
+  }
   if (message?.type === "CHEESE_SEARCH_STUDIO_MAKE_CLIP_DELETED") {
     handleExternalStudioMakeClipDeletion(message.payload);
     return;
@@ -13291,40 +13434,66 @@ window.addEventListener("message", (event) => {
 
 // ── 스크린샷 저장 브릿지 ─────────────────────────────────────────────────────
 // MAIN world(audioMixer.js)가 만든 스크린샷 dataURL을 background로 넘겨
-// chrome.downloads(saveAs:false)로 대화상자 없이 바로 저장한다. 실제 저장/취소
-// 결과(saved)를 요청 id와 함께 MAIN으로 돌려준다.
+// chrome.downloads로 저장한다. 실제 저장/취소 결과(saved)를 요청 id와 함께 MAIN으로
+// 돌려준다.
+// 주의: Chromium은 data: URL 다운로드 시 saveAs:true(대화상자)를 무시하고 바로 저장한다.
+// 그래서 대화상자가 필요한 경우(directSave OFF)에는 data URL을 Blob URL로 바꿔 넘긴다
+// (Blob URL은 saveAs:true가 정상 동작). Blob URL은 문서 컨텍스트에서만 만들 수 있어
+// 여기(격리 월드)에서 생성하고, 다운로드가 끝나면 revoke 한다.
+function dataURLToBlobURL(dataURL) {
+  try {
+    const [head, b64] = dataURL.split(",");
+    const mime = /data:(.*?)(;base64)?$/.exec(head)?.[1] || "image/png";
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  } catch {
+    return null;
+  }
+}
+
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== "cheese-screenshot-save") return;
   const reqId = data.reqId;
+  const saveAs = !screenshotDirectSave; // 바로 저장 OFF면 '다른 이름으로 저장' 대화상자
+  // 대화상자가 필요하면 Blob URL로(그래야 saveAs가 먹는다), 아니면 data URL 그대로.
+  const blobURL = saveAs ? dataURLToBlobURL(data.dataURL) : null;
+  const url = blobURL || data.dataURL;
+  const replyAndCleanup = (payload) => {
+    if (blobURL) {
+      // 다운로드가 시작된 뒤 revoke(너무 일찍 지우면 다운로드가 깨질 수 있어 지연).
+      setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
+    }
+    window.postMessage(payload, location.origin);
+  };
   try {
     chrome.runtime.sendMessage(
       {
         type: "CHEESE_SCREENSHOT_SAVE",
-        dataURL: data.dataURL,
+        url,
         filename: data.filename,
-        // 바로 저장 OFF면 '다른 이름으로 저장' 대화상자를 띄운다.
-        saveAs: !screenshotDirectSave,
+        saveAs,
       },
       (resp) => {
         const ok = !chrome.runtime.lastError && resp?.ok === true;
-        window.postMessage(
-          {
-            source: "cheese-screenshot-save-result",
-            reqId,
-            ok,
-            saved: ok ? resp.saved !== false : false,
-          },
-          location.origin,
-        );
+        replyAndCleanup({
+          source: "cheese-screenshot-save-result",
+          reqId,
+          ok,
+          saved: ok ? resp.saved !== false : false,
+        });
       },
     );
   } catch {
-    window.postMessage(
-      { source: "cheese-screenshot-save-result", reqId, ok: false, saved: false },
-      location.origin,
-    );
+    replyAndCleanup({
+      source: "cheese-screenshot-save-result",
+      reqId,
+      ok: false,
+      saved: false,
+    });
   }
 });
 

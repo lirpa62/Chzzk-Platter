@@ -3415,6 +3415,12 @@ html.cheese-chat-width-resize-enabled
   font-size: 12px;
 }
 
+/* 하위 문구 안 채널명 강조(주변 흐린 회색보다 밝은 브랜드색 + 굵게). */
+.cheese-logpower-toast-ch {
+  color: var(--Content-Brand-Strong, #00ffa3);
+  font-weight: 700;
+}
+
 /* 채팅 너비 조절 중 미니플레이어로 전환되면, 미니플레이어도 조절된 채팅 너비에
    맞춘다(배지 모아 챗 동일). 높이는 16:9 비율 변수, 내부 video 요소는 100% 채움. */
 html.cheese-chat-width-resize-enabled #live_player_layout.miniplayer {

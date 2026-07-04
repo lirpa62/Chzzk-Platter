@@ -634,7 +634,8 @@
                 <label>
                   <span class="settings-item-name">스크린샷 버튼 숨김</span>
                   <span class="settings-item-desc"
-                    >현재 재생 화면을 PNG로 저장하는 버튼(체크=숨김)</span
+                    >현재 재생 화면을 PNG로 저장하는 버튼(단축키 Shift+S,
+                    체크=숨김)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -683,6 +684,21 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-ad-mini-unmute />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >└ 원래 음소거였으면 유지</span
+                  >
+                  <span class="settings-item-desc"
+                    >위 옵션이 켜져 있어도, 광고 진입 전 방송을 음소거로 보고
+                    있었다면 광고 중에도 음소거를 유지합니다(체크=유지)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-ad-mini-keep-muted />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -1815,6 +1831,24 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatLogPowerToast" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >다른 탭 획득도 알림</span
+                  >
+                  <span class="settings-item-desc"
+                    >다른 치지직 탭에서 1시간 보상을 획득하면 지금 보고 있는 탭에도
+                    알림 표시(‘획득 토스트 알림’이 켜져 있어야 함, 체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="chatLogPowerToastOtherTabs"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

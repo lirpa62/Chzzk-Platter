@@ -3788,7 +3788,7 @@
     btn.className = `${SCREENSHOT_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
     btn.type = "button";
     btn.setAttribute("aria-label", "스크린샷");
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스크린샷</span><span class="pzp-ui-icon">${screenshotIcon()}</span>`;
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스크린샷 (Shift+S)</span><span class="pzp-ui-icon">${screenshotIcon()}</span>`;
     return btn;
   }
 
@@ -4003,9 +4003,10 @@
     win.querySelector(".cheese-screenshot-win-close").addEventListener("click", () =>
       closeScreenshotPreview(),
     );
-    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () =>
-      closeScreenshotPreview(),
-    );
+    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () => {
+      closeScreenshotPreview();
+      showScreenshotToast(false, "저장을 취소했어요");
+    });
     win.querySelector(".cheese-screenshot-save").addEventListener("click", () => {
       downloadScreenshot(dataURL, name, onScreenshotSaved);
       closeScreenshotPreview();
@@ -4204,6 +4205,27 @@
     e.stopPropagation();
     takeScreenshot();
   });
+
+  // 스크린샷 단축키(Shift+S). 스크린샷 버튼이 표시된 상태에서, 채팅/입력 타이핑 중이
+  // 아닐 때만 동작한다(치지직 기본 단축키와 겹치지 않게 Shift 조합 사용).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      // Shift+S 만(다른 조합키가 섞이면 무시 — Ctrl/Alt/Meta 조합은 브라우저/OS용).
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyS" && e.key !== "S" && e.key !== "s") return;
+      if (featureFlags.screenshotButton) return; // 버튼 숨김=기능 끔
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      // 플레이어가 있어야(라이브/다시보기) 캡처할 영상이 있다.
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      takeScreenshot();
+    },
+    true,
+  );
 
   document.addEventListener("click", (e) => {
     const btn = e.target.closest?.(`.${STATS_BUTTON_CLASS}`);
