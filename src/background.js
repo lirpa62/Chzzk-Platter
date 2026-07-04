@@ -3038,6 +3038,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // 비동기 응답
   }
 
+  // 스크린샷 저장 — 콘텐츠/MAIN은 chrome.downloads를 못 쓰므로 background에서 처리한다.
+  // saveAs:false 로 브라우저 '저장 위치 확인' 설정과 무관하게 바로 저장하고, 실제
+  // 완료/취소(state)를 downloads.onChanged로 감지해 정확히 응답한다.
+  if (message.type === "CHEESE_SCREENSHOT_SAVE") {
+    const { dataURL, filename } = message;
+    const saveAs = message.saveAs === true; // 기본 false=바로 저장
+    if (typeof dataURL !== "string" || !dataURL.startsWith("data:image")) {
+      sendResponse({ ok: false, reason: "invalid" });
+      return false;
+    }
+    try {
+      chrome.downloads.download(
+        { url: dataURL, filename, saveAs },
+        (downloadId) => {
+          if (chrome.runtime.lastError || downloadId == null) {
+            sendResponse({ ok: false, reason: "start-failed" });
+            return;
+          }
+          // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
+          let settled = false;
+          const onChanged = (delta) => {
+            if (delta.id !== downloadId || !delta.state) return;
+            const s = delta.state.current;
+            if (s === "complete") {
+              finish({ ok: true, saved: true });
+            } else if (s === "interrupted") {
+              finish({ ok: true, saved: false }); // 사용자가 취소 등
+            }
+          };
+          const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            chrome.downloads.onChanged.removeListener(onChanged);
+            sendResponse(result);
+          };
+          chrome.downloads.onChanged.addListener(onChanged);
+          // 혹시 onChanged가 안 오는 환경 대비 타임아웃(다운로드는 시작됨).
+          setTimeout(() => finish({ ok: true, saved: true }), 15000);
+        },
+      );
+    } catch {
+      sendResponse({ ok: false, reason: "exception" });
+    }
+    return true; // 비동기 응답
+  }
+
   if (message.type === "CHEESE_SEARCH_FETCH_VIDEOS") {
     fetchAllVideosShared(message.payload, sender)
       .then((result) => sendResponse({ ok: true, result }))

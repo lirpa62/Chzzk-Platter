@@ -1238,6 +1238,63 @@
   });
   loadAdMiniUnmute();
 
+  // 스크린샷 저장 전 미리보기(저장/취소 확인). 기본 OFF(바로 저장).
+  const SCREENSHOT_PREVIEW_KEY = "cheeseScreenshotPreview";
+  const screenshotPreviewInput = document.querySelector(
+    "[data-screenshot-preview]",
+  );
+  async function loadScreenshotPreview() {
+    let on = false;
+    try {
+      const data = await chrome.storage?.local?.get(SCREENSHOT_PREVIEW_KEY);
+      on = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 미설정=기본 OFF
+    } catch {}
+    if (screenshotPreviewInput) screenshotPreviewInput.checked = on;
+  }
+  screenshotPreviewInput?.addEventListener("change", () => {
+    try {
+      chrome.storage?.local?.set({
+        [SCREENSHOT_PREVIEW_KEY]: screenshotPreviewInput.checked,
+      });
+    } catch {}
+  });
+  loadScreenshotPreview();
+
+  // 스크린샷 대화상자 없이 바로 저장(saveAs 반대). 기본 ON. 단 Whale은 자체 다운로드
+  // 확인창이 있어 이 옵션으로 못 없애므로, Whale이면 토글을 비활성화하고 안내한다.
+  const SCREENSHOT_DIRECT_SAVE_KEY = "cheeseScreenshotDirectSave";
+  const screenshotDirectInput = document.querySelector(
+    "[data-screenshot-direct-save]",
+  );
+  const isWhale = /Whale/i.test(navigator.userAgent);
+  async function loadScreenshotDirectSave() {
+    let on = true;
+    try {
+      const data = await chrome.storage?.local?.get(SCREENSHOT_DIRECT_SAVE_KEY);
+      on = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 미설정=기본 ON
+    } catch {}
+    if (screenshotDirectInput) screenshotDirectInput.checked = on;
+    if (isWhale && screenshotDirectInput) {
+      // Whale: 이 옵션으로 브라우저 확인창을 없앨 수 없으므로 비활성화 + 안내.
+      screenshotDirectInput.disabled = true;
+      screenshotDirectInput.closest(".settings-item")?.classList.add("is-locked");
+      const desc = document.querySelector("[data-screenshot-direct-save-desc]");
+      if (desc) {
+        desc.textContent =
+          "웨일(Whale)은 브라우저 자체 다운로드 확인창이 있어 이 옵션으로 끌 수 없습니다. 웨일 설정 > 다운로드에서 변경하세요.";
+      }
+    }
+  }
+  screenshotDirectInput?.addEventListener("change", () => {
+    if (isWhale) return; // 비활성 상태
+    try {
+      chrome.storage?.local?.set({
+        [SCREENSHOT_DIRECT_SAVE_KEY]: screenshotDirectInput.checked,
+      });
+    } catch {}
+  });
+  loadScreenshotDirectSave();
+
   // 라이브 바로가기 버튼 배치(끝/탭 뒤). 기본 ON(끝).
   const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
   const channelLiveButtonEndInput = document.querySelector(

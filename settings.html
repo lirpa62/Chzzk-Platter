@@ -632,6 +632,46 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">스크린샷 버튼 숨김</span>
+                  <span class="settings-item-desc"
+                    >현재 재생 화면을 PNG로 저장하는 버튼(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="screenshotButton" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">스크린샷 저장 전 미리보기</span>
+                  <span class="settings-item-desc"
+                    >스크린샷을 찍으면 미리보기 창에서 저장/취소를 확인(끄면 바로
+                    저장, 체크=미리보기)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-screenshot-preview />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >스크린샷 대화상자 없이 바로 저장</span
+                  >
+                  <span class="settings-item-desc" data-screenshot-direct-save-desc
+                    >켜면 저장 대화상자 없이 다운로드 폴더에 바로 저장(끄면 '다른
+                    이름으로 저장' 대화상자 표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-screenshot-direct-save />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name"
                     >중간광고 중 방송 음소거 해제</span
                   >
@@ -851,6 +891,19 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="searchClips" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">차단한 유저 카드 숨김</span>
+                  <span class="settings-item-desc"
+                    >라이브·카테고리·동영상 탐색에서 '차단한 유저' 카드를
+                    자리표시 없이 완전히 숨김(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="hideBlockedCards" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

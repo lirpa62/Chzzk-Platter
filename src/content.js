@@ -90,6 +90,14 @@ const VOLUME_PCT_KEY = "cheeseVolumePct";
 let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
 const GAIN_PCT_KEY = "cheeseGainPct";
 let gainPct = true; // 게인 조절 % 표시(전역, 기본 ON)
+// 스크린샷 저장 전 미리보기(저장/취소 확인) 표시 여부(전역, 기본 OFF=즉시 다운로드).
+const SCREENSHOT_PREVIEW_KEY = "cheeseScreenshotPreview";
+let screenshotPreview = false;
+// 스크린샷을 브라우저 다운로드 대화상자 없이 바로 저장할지(전역, 기본 ON=바로 저장).
+// OFF면 '다른 이름으로 저장' 대화상자를 띄운다(saveAs). Whale은 자체 확인창이 있어
+// 이 옵션과 무관하며 settings에서 비활성화된다.
+const SCREENSHOT_DIRECT_SAVE_KEY = "cheeseScreenshotDirectSave";
+let screenshotDirectSave = true;
 const MIXER_CLICK_ACTIVATE_KEY = "cheeseMixerClickActivate";
 let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
 const VIDEO_FILTER_CLICK_ACTIVATE_KEY = "cheeseVideoFilterClickActivate";
@@ -196,6 +204,8 @@ const featureFlags = {
   vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
   vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
+  screenshotButton: false, // 플레이어 컨트롤의 '스크린샷' 버튼 숨김(true=숨김, 기본 표시)
+  hideBlockedCards: false, // 차단한 유저 카드(_is_block_)를 탐색/검색 목록에서 완전히 숨김
   commentTimestamp: false,
   searchVideos: false,
   searchClips: false,
@@ -7877,6 +7887,12 @@ function applyFeatureFlags(value) {
   broadcastFeatureFlags();
   applySidebarHidden();
   applyHeaderAutoHide();
+  // 차단한 유저 카드 숨김: <html>에 게이트 클래스만 토글, 실제 숨김은 content.css의
+  // 순수 CSS(:has(_is_block_)) 규칙이 처리한다(목록이 커도 부하 없음).
+  document.documentElement.classList.toggle(
+    "cheese-hide-blocked-cards",
+    featureFlags.hideBlockedCards === true,
+  );
   applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
   // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
   updateSeekPreviewRealtime();
@@ -12235,6 +12251,7 @@ function broadcastFeatureFlags() {
       liveSeekBar, // 라이브 되감기 바 표시(전역)
       volumePct, // 볼륨 조절 % 표시(전역)
       gainPct, // 게인 조절 % 표시(전역)
+      screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
       mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
       videoFilterClickActivate, // 필터 버튼 클릭 시 즉시 활성/비활성(전역)
       mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
@@ -12277,7 +12294,11 @@ async function loadFeatureFlags() {
       LOGPOWER_EARNING_COLOR_KEY,
       VOD_AUTOPLAY_OFF_KEY,
       AD_MINI_UNMUTE_KEY,
+      SCREENSHOT_PREVIEW_KEY,
+      SCREENSHOT_DIRECT_SAVE_KEY,
     ]);
+    screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
+    screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     adMiniplayerUnmute = data?.[AD_MINI_UNMUTE_KEY] === true; // 기본 OFF
     vodAutoplayOff = data?.[VOD_AUTOPLAY_OFF_KEY] === true; // 기본 OFF
     logPowerClickAction = normalizeLogPowerClickAction(
@@ -12357,6 +12378,12 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[GAIN_PCT_KEY]) {
       gainPct = changes[GAIN_PCT_KEY].newValue !== false;
+    }
+    if (changes[SCREENSHOT_PREVIEW_KEY]) {
+      screenshotPreview = changes[SCREENSHOT_PREVIEW_KEY].newValue === true;
+    }
+    if (changes[SCREENSHOT_DIRECT_SAVE_KEY]) {
+      screenshotDirectSave = changes[SCREENSHOT_DIRECT_SAVE_KEY].newValue !== false;
     }
     if (changes[MIXER_CLICK_ACTIVATE_KEY]) {
       mixerClickActivate = changes[MIXER_CLICK_ACTIVATE_KEY].newValue === true;
@@ -12511,6 +12538,7 @@ if (chrome.storage?.onChanged) {
       changes[LIVE_SEEK_BAR_KEY] ||
       changes[VOLUME_PCT_KEY] ||
       changes[GAIN_PCT_KEY] ||
+      changes[SCREENSHOT_PREVIEW_KEY] ||
       changes[MIXER_CLICK_ACTIVATE_KEY] ||
       changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY] ||
       changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
@@ -13259,6 +13287,45 @@ window.addEventListener("message", (event) => {
   if (!data || data.source !== "cheese-tab-mute") return;
   // type: "toggle" | "query"
   sendTabMute(data.type === "query" ? "query" : "toggle");
+});
+
+// ── 스크린샷 저장 브릿지 ─────────────────────────────────────────────────────
+// MAIN world(audioMixer.js)가 만든 스크린샷 dataURL을 background로 넘겨
+// chrome.downloads(saveAs:false)로 대화상자 없이 바로 저장한다. 실제 저장/취소
+// 결과(saved)를 요청 id와 함께 MAIN으로 돌려준다.
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== "cheese-screenshot-save") return;
+  const reqId = data.reqId;
+  try {
+    chrome.runtime.sendMessage(
+      {
+        type: "CHEESE_SCREENSHOT_SAVE",
+        dataURL: data.dataURL,
+        filename: data.filename,
+        // 바로 저장 OFF면 '다른 이름으로 저장' 대화상자를 띄운다.
+        saveAs: !screenshotDirectSave,
+      },
+      (resp) => {
+        const ok = !chrome.runtime.lastError && resp?.ok === true;
+        window.postMessage(
+          {
+            source: "cheese-screenshot-save-result",
+            reqId,
+            ok,
+            saved: ok ? resp.saved !== false : false,
+          },
+          location.origin,
+        );
+      },
+    );
+  } catch {
+    window.postMessage(
+      { source: "cheese-screenshot-save-result", reqId, ok: false, saved: false },
+      location.origin,
+    );
+  }
 });
 
 // ── 비디오 필터 설정 저장 브릿지 ─────────────────────────────────────────────

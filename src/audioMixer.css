@@ -10,6 +10,140 @@
   color: #ff5454;
 }
 
+/* ── 스크린샷: 결과 토스트 + 저장 전 미리보기 모달 ────────────────────────── */
+/* 결과 토스트(화면 하단 중앙에서 떠오름). 성공=초록, 실패=빨강 강조. */
+.cheese-screenshot-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translate(-50%, 12px);
+  z-index: 2147483000;
+  max-width: 80vw;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(20, 22, 26, 0.94);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.cheese-screenshot-toast.is-shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.cheese-screenshot-toast.is-ok {
+  border-color: rgba(0, 255, 163, 0.5);
+}
+.cheese-screenshot-toast.is-fail {
+  border-color: rgba(255, 84, 84, 0.6);
+}
+
+/* 미리보기 팝오버 창(배경 덮개 없음, 드래그 이동 + 리사이즈). 위치·크기는 JS가 인라인
+   left/top/width/height로 지정하고 localStorage에 기억한다. */
+.cheese-screenshot-win {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  width: 520px;
+  height: 400px;
+  min-width: 280px;
+  min-height: 220px;
+  max-width: 96vw;
+  max-height: 92vh;
+  border-radius: 12px;
+  background: #1b1d22;
+  color: #fff;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden; /* 리사이즈 핸들이 라운드 밖으로 안 나가게 */
+  resize: both; /* 우하단 드래그로 크기 조절 */
+}
+.cheese-screenshot-win-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: move;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cheese-screenshot-win-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.cheese-screenshot-win-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: #cfd4dc;
+  background: transparent;
+  cursor: pointer;
+}
+.cheese-screenshot-win-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+.cheese-screenshot-win-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #000;
+}
+.cheese-screenshot-win-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.cheese-screenshot-win-actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cheese-screenshot-win-actions button {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.cheese-screenshot-cancel {
+  color: #dfe3ea;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.cheese-screenshot-cancel:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.cheese-screenshot-save {
+  color: #06121a;
+  background: #00ffa3;
+}
+.cheese-screenshot-save:hover {
+  background: #4dffc1;
+}
+
 .cheese-audio-mixer-button .pzp-ui-icon {
   display: flex;
   align-items: center;

@@ -3709,3 +3709,14 @@ img.cheese-logpower-popup-verified {
     align-items: flex-start;
   }
 }
+
+/* 차단한 유저 카드 완전 숨김(옵션). 치지직은 차단 유저의 라이브/동영상을 '차단한
+   유저의 라이브입니다.' 같은 플레이스홀더 카드(_is_block_ 컨테이너)로 표시하는데,
+   게이트 클래스(cheese-hide-blocked-cards)가 켜지면 그 카드를 담은 목록 아이템을
+   통째로 숨긴다. 순수 CSS :has()라 목록이 커도 부하가 없다. _item_/_is_block_ 의
+   해시 접미사는 빌드마다 바뀌므로 부분 일치로 지정한다. 검색 '채널' 결과처럼
+   _is_block_ 마커가 없는 카드는 대상이 아니다. */
+html.cheese-hide-blocked-cards
+  [class*="_item_"]:has(> [class*="_is_block_"]) {
+  display: none !important;
+}

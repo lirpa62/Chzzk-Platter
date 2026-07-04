@@ -16,7 +16,8 @@
     "scripting",
     "unlimitedStorage",
     "webRequest",
-    "alarms"
+    "alarms",
+    "downloads"
   ],
   "host_permissions": [
     "https://chzzk.naver.com/*",

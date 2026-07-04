@@ -17,6 +17,7 @@
     liveSync: false,
     liveRewind: false,
     tabMute: false,
+    screenshotButton: false, // 스크린샷 버튼 숨김(true=숨김, 기본 표시)
   };
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
@@ -25,6 +26,7 @@
   let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
+  let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
@@ -36,6 +38,7 @@
     featureFlags.liveSync = f.liveSync === true;
     featureFlags.liveRewind = f.liveRewind === true;
     featureFlags.tabMute = f.tabMute === true;
+    featureFlags.screenshotButton = f.screenshotButton === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
     // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
@@ -44,6 +47,8 @@
     // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
     volumePctOn = e.data.volumePct !== false;
     gainPctOn = e.data.gainPct !== false;
+    // 스크린샷 저장 전 미리보기(전역, 기본 OFF). 켜면 모달로 저장/취소 확인.
+    screenshotPreviewOn = e.data.screenshotPreview === true;
     // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
     mixerClickActivate = e.data.mixerClickActivate === true;
     // 전역 기본값 재방문 동작(global | channel, 기본 global).
@@ -103,6 +108,8 @@
   // 탭 음소거 버튼(브라우저 탭 전체 음소거 토글, background 경유).
   const TAB_MUTE_BUTTON_CLASS = "cheese-tab-mute-button";
   let tabMutedState = false; // content.js 응답으로 동기화되는 현재 탭 음소거 상태
+  // 스크린샷 버튼(현재 재생 프레임을 PNG로 저장). 표준 canvas.drawImage 기법.
+  const SCREENSHOT_BUTTON_CLASS = "cheese-screenshot-button";
   // 음량 슬라이더 조절 시 현재 % 값을 보여주는 툴팁.
   const VOLUME_TOOLTIP_CLASS = "cheese-volume-tooltip";
   const VOLUME_TOOLTIP_HIDE_MS = 700; // 조작 멈춘 뒤 이 시간 후 숨김
@@ -3768,6 +3775,305 @@
       .forEach((b) => b.remove());
   }
 
+  // ── 스크린샷 버튼 ──────────────────────────────────────────────────────────
+  // 현재 재생 중인 프레임(.webplayer-internal-video)을 canvas에 그려 PNG로 저장한다.
+  // 표준 canvas.drawImage/toDataURL 기법(브라우저·OS 캡처와 동등한 행위). DRM(EME)
+  // 영상이면 canvas가 taint되어 실패할 수 있으나, 치지직 라이브/다시보기는 대상 아님.
+  function screenshotIcon() {
+    return `<svg class="pzp-ui-icon__svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M13 12l1.2-2h7.6l1.2 2H26a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none"/><circle cx="18" cy="18.5" r="3.5" stroke="currentColor" stroke-width="2" fill="none"/></svg>`;
+  }
+
+  function createScreenshotButton() {
+    const btn = document.createElement("button");
+    btn.className = `${SCREENSHOT_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    btn.type = "button";
+    btn.setAttribute("aria-label", "스크린샷");
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스크린샷</span><span class="pzp-ui-icon">${screenshotIcon()}</span>`;
+    return btn;
+  }
+
+  function ensureScreenshotButton() {
+    const player = findPlayer();
+    if (!player) return;
+    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls || controls.querySelector(`.${SCREENSHOT_BUTTON_CLASS}`)) return;
+    const btn = createScreenshotButton();
+    // 스트림 정보/탭 음소거 버튼 앞(있으면), 없으면 우측 그룹 맨 앞.
+    const anchor =
+      controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
+      controls.querySelector(`.${TAB_MUTE_BUTTON_CLASS}`) ||
+      controls.querySelector(".custom__clip-button") ||
+      controls.querySelector(".cheese-search-comment-timestamp-button") ||
+      controls.firstChild;
+    controls.insertBefore(btn, anchor);
+  }
+
+  function removeScreenshotButton() {
+    document
+      .querySelectorAll(`.${SCREENSHOT_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
+  }
+
+  // 파일명에 못 쓰는 문자 정리 + 길이 제한.
+  function sanitizeScreenshotName(name) {
+    return String(name || "chzzk")
+      .replace(/[\\/:*?"<>|]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120);
+  }
+
+  // document.title(치지직: "제목 - 채널명" 등)에서 접미사를 걷어내 기본 파일명으로 쓴다.
+  function screenshotBaseName() {
+    const t = (document.title || "").replace(/\s*-\s*치지직\s*$/, "").trim();
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    return sanitizeScreenshotName(`${t || "chzzk"}_${ts}`);
+  }
+
+  // 저장 결과 콜백을 reqId로 매칭(content 브릿지 → background chrome.downloads).
+  const screenshotSaveCallbacks = new Map();
+  let screenshotReqSeq = 0;
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d.source !== "cheese-screenshot-save-result") return;
+    const cb = screenshotSaveCallbacks.get(d.reqId);
+    if (cb) {
+      screenshotSaveCallbacks.delete(d.reqId);
+      cb({ ok: d.ok === true, saved: d.saved === true });
+    }
+  });
+
+  // dataURL을 파일로 저장한다. background의 chrome.downloads(saveAs:false)로 대화상자
+  // 없이 바로 저장하고, 실제 완료/취소 결과를 done(result)로 알려준다. done은 선택.
+  function downloadScreenshot(dataURL, name, done) {
+    const reqId = ++screenshotReqSeq;
+    if (typeof done === "function") {
+      screenshotSaveCallbacks.set(reqId, done);
+      // 브릿지/응답이 유실될 경우 대비 타임아웃(20초).
+      window.setTimeout(() => {
+        if (screenshotSaveCallbacks.has(reqId)) {
+          screenshotSaveCallbacks.delete(reqId);
+          done({ ok: false, saved: false, timeout: true });
+        }
+      }, 20000);
+    }
+    window.postMessage(
+      {
+        source: "cheese-screenshot-save",
+        reqId,
+        dataURL,
+        filename: `${name}.png`,
+      },
+      location.origin,
+    );
+  }
+
+  function takeScreenshot() {
+    const video = document.querySelector(".webplayer-internal-video");
+    if (!(video instanceof HTMLVideoElement) || !video.videoWidth) {
+      showScreenshotToast(false, "재생 중인 화면이 없어요");
+      return;
+    }
+    let dataURL;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      dataURL = canvas.toDataURL("image/png"); // taint면 여기서 throw
+    } catch (err) {
+      showScreenshotToast(false, "스크린샷을 만들 수 없어요");
+      return;
+    }
+    const name = screenshotBaseName();
+    if (screenshotPreviewOn) {
+      openScreenshotPreview(dataURL, name); // 저장/취소 확인 팝오버
+    } else {
+      downloadScreenshot(dataURL, name, onScreenshotSaved);
+    }
+  }
+
+  // 저장 결과에 따라 정확한 토스트. saved=true만 '저장했어요', 취소/실패는 그에 맞게.
+  function onScreenshotSaved(result) {
+    if (result.saved) {
+      showScreenshotToast(true, "스크린샷을 저장했어요");
+    } else if (result.ok) {
+      showScreenshotToast(false, "저장을 취소했어요"); // 다운로드 대화상자에서 취소 등
+    } else {
+      showScreenshotToast(false, "저장하지 못했어요");
+    }
+  }
+
+  // ── 저장 전 미리보기 팝오버(드래그 이동 + 리사이즈, 위치·크기 기억) ───────────
+  // 배경을 덮지 않는 플로팅 창이라 뒤 페이지와 계속 상호작용할 수 있다. 위치·크기는
+  // 페이지 origin localStorage에 저장해 다음에 같은 자리·크기로 뜬다(MAIN world라 직접 접근).
+  const SCREENSHOT_MODAL_ID = "cheese-screenshot-modal";
+  const SCREENSHOT_RECT_KEY = "cheese-screenshot-preview-rect";
+
+  function loadScreenshotRect() {
+    try {
+      const raw = window.localStorage.getItem(SCREENSHOT_RECT_KEY);
+      const r = raw ? JSON.parse(raw) : null;
+      if (r && Number.isFinite(r.w) && Number.isFinite(r.h)) return r;
+    } catch {}
+    return null;
+  }
+  function saveScreenshotRect(el) {
+    try {
+      const r = el.getBoundingClientRect();
+      // 레이아웃이 아직 안 잡혔거나 제거 직후면 0이 나온다 — 그 값을 저장하면 다음에
+      // 0px 창으로 뜨므로 유효한 크기일 때만 저장한다.
+      if (!(r.width > 0) || !(r.height > 0)) return;
+      window.localStorage.setItem(
+        SCREENSHOT_RECT_KEY,
+        JSON.stringify({
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+        }),
+      );
+    } catch {}
+  }
+  // 저장된 위치가 화면 밖이면 보이도록 되돌린다.
+  function clampToViewport(left, top, w, h) {
+    const maxLeft = Math.max(0, window.innerWidth - Math.min(w, window.innerWidth));
+    const maxTop = Math.max(0, window.innerHeight - 40);
+    return {
+      left: Math.min(Math.max(0, left), maxLeft),
+      top: Math.min(Math.max(0, top), maxTop),
+    };
+  }
+
+  function closeScreenshotPreview() {
+    const el = document.getElementById(SCREENSHOT_MODAL_ID);
+    if (el) {
+      saveScreenshotRect(el); // 닫을 때 마지막 위치·크기 보존
+      el.remove();
+    }
+    document.removeEventListener("keydown", onScreenshotModalKey);
+  }
+  function onScreenshotModalKey(e) {
+    if (e.key === "Escape") closeScreenshotPreview();
+  }
+
+  function closeIcon() {
+    return `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path fill="currentColor" d="M16.6 4.933A1.083 1.083 0 1 0 15.066 3.4L10 8.468 4.933 3.4A1.083 1.083 0 0 0 3.4 4.933L8.468 10 3.4 15.067A1.083 1.083 0 1 0 4.933 16.6L10 11.532l5.067 5.067a1.083 1.083 0 1 0 1.532-1.532L11.532 10l5.067-5.067Z"></path></svg>`;
+  }
+
+  function openScreenshotPreview(dataURL, name) {
+    closeScreenshotPreview();
+    const win = document.createElement("div");
+    win.id = SCREENSHOT_MODAL_ID;
+    win.className = "cheese-screenshot-win";
+    win.setAttribute("role", "dialog");
+    win.setAttribute("aria-label", "스크린샷 미리보기");
+    win.innerHTML = `
+      <div class="cheese-screenshot-win-header">
+        <span class="cheese-screenshot-win-title">스크린샷 미리보기</span>
+        <button type="button" class="cheese-screenshot-win-close" aria-label="닫기">${closeIcon()}</button>
+      </div>
+      <div class="cheese-screenshot-win-body">
+        <img class="cheese-screenshot-win-img" alt="스크린샷 미리보기" />
+      </div>
+      <div class="cheese-screenshot-win-actions">
+        <button type="button" class="cheese-screenshot-cancel">취소</button>
+        <button type="button" class="cheese-screenshot-save">저장</button>
+      </div>`;
+    win.querySelector(".cheese-screenshot-win-img").src = dataURL;
+
+    // 위치·크기 복원(없으면 중앙 근처 기본).
+    const saved = loadScreenshotRect();
+    if (saved) {
+      const { left, top } = clampToViewport(saved.left, saved.top, saved.w, saved.h);
+      win.style.left = `${left}px`;
+      win.style.top = `${top}px`;
+      win.style.width = `${saved.w}px`;
+      win.style.height = `${saved.h}px`;
+    } else {
+      win.style.left = `${Math.round(window.innerWidth / 2 - 260)}px`;
+      win.style.top = `${Math.round(window.innerHeight / 2 - 200)}px`;
+    }
+
+    win.querySelector(".cheese-screenshot-win-close").addEventListener("click", () =>
+      closeScreenshotPreview(),
+    );
+    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () =>
+      closeScreenshotPreview(),
+    );
+    win.querySelector(".cheese-screenshot-save").addEventListener("click", () => {
+      downloadScreenshot(dataURL, name, onScreenshotSaved);
+      closeScreenshotPreview();
+    });
+
+    document.body.appendChild(win);
+    bindScreenshotDrag(win, win.querySelector(".cheese-screenshot-win-header"));
+    // CSS resize:both 로 크기를 바꾼 뒤 마우스를 놓는 순간(pointerup) 크기 저장.
+    // (ResizeObserver는 appendChild 직후 0 크기로 발화해 0px가 저장되던 문제가 있어 안 씀.)
+    win.addEventListener("pointerup", () => saveScreenshotRect(win));
+    document.addEventListener("keydown", onScreenshotModalKey);
+  }
+
+  // 헤더를 잡아 창을 이동. 이동 종료 시 위치 저장.
+  function bindScreenshotDrag(win, handle) {
+    handle.addEventListener("pointerdown", (e) => {
+      // 닫기 버튼 위에서 시작한 드래그는 무시(버튼 클릭 우선).
+      if (e.target.closest(".cheese-screenshot-win-close")) return;
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const rect = win.getBoundingClientRect();
+      const offX = e.clientX - rect.left;
+      const offY = e.clientY - rect.top;
+      handle.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const { left, top } = clampToViewport(
+          ev.clientX - offX,
+          ev.clientY - offY,
+          rect.width,
+          rect.height,
+        );
+        win.style.left = `${left}px`;
+        win.style.top = `${top}px`;
+      };
+      const up = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        saveScreenshotRect(win);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+  }
+
+  // ── 결과 토스트(성공/실패를 화면에 명확히 표시) ──────────────────────────────
+  const SCREENSHOT_TOAST_ID = "cheese-screenshot-toast";
+  let screenshotToastTimer = 0;
+  function showScreenshotToast(ok, message) {
+    document.getElementById(SCREENSHOT_TOAST_ID)?.remove();
+    if (screenshotToastTimer) {
+      clearTimeout(screenshotToastTimer);
+      screenshotToastTimer = 0;
+    }
+    const toast = document.createElement("div");
+    toast.id = SCREENSHOT_TOAST_ID;
+    toast.className = `cheese-screenshot-toast ${ok ? "is-ok" : "is-fail"}`;
+    toast.setAttribute("role", "status");
+    toast.textContent = `${ok ? "📸 " : "⚠️ "}${message}`;
+    document.body.appendChild(toast);
+    // 진입 애니메이션 트리거.
+    requestAnimationFrame(() => toast.classList.add("is-shown"));
+    screenshotToastTimer = window.setTimeout(() => {
+      toast.classList.remove("is-shown");
+      window.setTimeout(() => toast.remove(), 250);
+      screenshotToastTimer = 0;
+    }, 2200);
+  }
+
   // 아이콘/라벨을 현재 상태로 맞춘다. 멱등(변경 시만 갱신, 옵저버 자가발화 방지).
   function syncTabMuteButton() {
     const btn = document.querySelector(`.${TAB_MUTE_BUTTON_CLASS}`);
@@ -3888,6 +4194,15 @@
     e.preventDefault();
     e.stopPropagation();
     requestTabMuteToggle(); // 응답(cheese-tab-mute-content)으로 상태/아이콘 갱신
+  });
+
+  // 스크린샷 버튼 클릭(document 위임 — 플레이어 재렌더로 버튼이 교체돼도 동작).
+  document.addEventListener("click", (e) => {
+    const shotBtn = e.target.closest?.(`.${SCREENSHOT_BUTTON_CLASS}`);
+    if (!shotBtn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    takeScreenshot();
   });
 
   document.addEventListener("click", (e) => {
@@ -5068,6 +5383,13 @@
     // 탭 음소거
     if (featureFlags.tabMute ? has(TAB_MUTE_BUTTON_CLASS) : !has(TAB_MUTE_BUTTON_CLASS))
       return false;
+    // 스크린샷
+    if (
+      featureFlags.screenshotButton
+        ? has(SCREENSHOT_BUTTON_CLASS)
+        : !has(SCREENSHOT_BUTTON_CLASS)
+    )
+      return false;
     // 라이브 전용: 따라잡기 / 되감기 버튼
     if (isLive) {
       if (featureFlags.liveSync ? has(SYNC_BUTTON_CLASS) : !has(SYNC_BUTTON_CLASS))
@@ -5187,6 +5509,11 @@
       removeTabMuteButton();
     } else {
       ensureTabMuteButton();
+    }
+    if (featureFlags.screenshotButton) {
+      removeScreenshotButton();
+    } else {
+      ensureScreenshotButton();
     }
     // 음량 % 툴팁은 믹서 on/off와 무관하게 항상 부착(기본 볼륨 조작 보조).
     bindVolumeTooltipDelegation(); // 위임 리스너 1회 등록
