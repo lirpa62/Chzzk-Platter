@@ -21,6 +21,38 @@
   let blindRestoreWriting = false; // 우리가 DOM 쓸 때 observer 재반응 무한루프 방지
   // 행 → { placeholder, nickname }: OFF 시 원래 가림 문구로 되돌리기 위함.
   const restoredRowInfo = new WeakMap();
+  // 원문 캐시(uid|messageTime → {text, emojis}). 치지직이 블라인드 처리 시 그 행의
+  // React chatMessage.content 를 비워버리면, 가려진 뒤 읽으면 원문이 없어 복원이 안 된다
+  // (같은 유저의 여러 메시지 중 일부만 복원되던 문제). 그래서 행이 아직 안 가려진 동안
+  // 미리 원문을 캐시해 두고, 복원 시 props 에 원문이 없으면 이 캐시에서 꺼낸다.
+  const originalMsgCache = new Map();
+  const ORIGINAL_CACHE_MAX = 800; // 오래된 항목은 순서대로 버려 메모리 상한 유지
+
+  function chatCacheKey(chatMessage) {
+    if (!chatMessage || typeof chatMessage !== "object") return "";
+    const uid =
+      chatMessage.userId ||
+      chatMessage.uid ||
+      chatMessage.userIdHash ||
+      chatMessage.senderId ||
+      "";
+    const t = readChatEpochMs(chatMessage);
+    if (!uid || !t) return "";
+    return `${uid}|${t}`;
+  }
+
+  function cacheOriginalMessage(chatMessage) {
+    const key = chatCacheKey(chatMessage);
+    if (!key || originalMsgCache.has(key)) return;
+    const original = readChatOriginal(chatMessage);
+    if (!original || !original.text) return;
+    originalMsgCache.set(key, original);
+    if (originalMsgCache.size > ORIGINAL_CACHE_MAX) {
+      // 가장 오래된 항목 하나 제거(Map 은 삽입 순서 유지).
+      const firstKey = originalMsgCache.keys().next().value;
+      if (firstKey !== undefined) originalMsgCache.delete(firstKey);
+    }
+  }
 
   // ── React 내부 접근 ──────────────────────────────────────────────────────
   function getReactProps(node) {
@@ -303,7 +335,11 @@
     const current = String(span.textContent || "").trim();
     if (BLIND_PLACEHOLDER_TEXTS.includes(current)) {
       const chatMessage = getChatMessage(row);
-      const original = chatMessage ? readChatOriginal(chatMessage) : null;
+      const original = chatMessage
+        ? readChatOriginal(chatMessage) ||
+          originalMsgCache.get(chatCacheKey(chatMessage)) ||
+          null
+        : null;
       if (original) applyRestore(row, original);
     }
   }
@@ -320,10 +356,20 @@
       if (epoch) applyTimestamp(row, epoch);
     }
 
+    // 복원 기능이 켜져 있으면, 아직 안 가려진 행의 원문을 미리 캐시해 둔다(가려진 뒤엔
+    // props 의 원문이 비워질 수 있어 늦다).
+    if (restoreBlindedChat && !moaRestoring() && !isHiddenRow(row)) {
+      cacheOriginalMessage(chatMessage);
+    }
+
     if (restoreBlindedChat && !moaRestoring() && isHiddenRow(row)) {
       const span = getRowMessageSpan(row);
       if (span && !span.classList.contains("cheese-blind-restored-text")) {
-        const original = readChatOriginal(chatMessage);
+        // props 에 원문이 있으면 그걸, 없으면(치지직이 비웠으면) 캐시에서 꺼낸다.
+        const original =
+          readChatOriginal(chatMessage) ||
+          originalMsgCache.get(chatCacheKey(chatMessage)) ||
+          null;
         if (original) applyRestore(row, original);
       }
     }

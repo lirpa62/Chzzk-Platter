@@ -3947,12 +3947,15 @@ function initSeekPreviewRealtime() {
     seekPreviewState.videoNo = "";
     seekPreviewState.liveOpenAt = 0;
     seekPreviewState.publishAt = 0;
+    hideVideoInfoTooltip(); // 다시보기 이탈 → 우리 툴팁 숨김
     return;
   }
   if (seekPreviewState.videoNo !== videoNo) {
     seekPreviewState.videoNo = videoNo;
     seekPreviewState.liveOpenAt = 0;
     seekPreviewState.publishAt = 0;
+    hideVideoInfoTooltip(); // 영상 전환 → 이전 영상 툴팁 숨김
+    videoInfoHoverTrigger = null;
     // 새 영상 진입 → 자동 재생 끄기 재적용 허용(영상마다 스위치가 새로 렌더됨).
     vodAutoplaySettingApplied = false;
     vodAutoplayTurnedOff = false;
@@ -4074,31 +4077,119 @@ function updateSeekPreviewRealtime() {
   timeEl.appendChild(span);
 }
 
-// 영상 정보 영역의 등록일/라이브 시작일 툴팁(._label_..._77)을 전체 날짜·시각으로
-// 교체한다. "등록일 : <publishDate>", 라이브 다시보기면 "<br>라이브 시작일 :
-// <liveOpenDate>"를 덧붙인다. 업로드 영상(liveOpenAt 없음)은 등록일만 둔다.
+// 영상 정보 영역의 등록일/라이브 시작일 호버 툴팁(_label_, position:absolute)을 전체
+// 날짜·시각으로 보여준다.
+// ⚠️ 과거엔 이 _label_(React 관리 노드)의 innerHTML을 통째로 교체했는데, 영상 더보기
+// 카드 클릭으로 SPA 전환 시 React가 이 노드를 재조정하다 우리 변경과 불일치해 앱이
+// 크래시하고 에러 페이지가 떴다. 그래서 React DOM(라벨의 innerHTML/자식)은 절대 건드리지
+// 않고, 원본 라벨엔 마커 클래스만 붙여 CSS로 숨긴 뒤 우리 툴팁을 body 에 fixed 로 띄운다.
+const VIDEO_INFO_LABEL_HIDDEN_CLASS = "cheese-video-info-label-hidden";
+const VIDEO_INFO_TOOLTIP_ID = "cheese-video-info-tooltip";
+let videoInfoLabelBound = false;
+let videoInfoHoverTrigger = null; // 현재 호버 중인 트리거(_data_ 컨테이너)
+
+function videoInfoDatesHtml() {
+  const parts = [];
+  if (seekPreviewState.publishAt) {
+    parts.push(`등록일 : ${escapeHtml(formatKstClock(seekPreviewState.publishAt))}`);
+  }
+  if (seekPreviewState.liveOpenAt) {
+    parts.push(
+      `라이브 시작일 : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
+    );
+  }
+  return parts.join("<br>");
+}
+
+// 원본 _label_(등록일 툴팁)을 찾아 우리 마커 클래스만 붙인다(텍스트/자식은 안 건드림 →
+// React 안전). CSS가 이 클래스로 원본 툴팁을 숨긴다.
+function markVideoInfoLabels() {
+  document.querySelectorAll(VIDEO_INFO_LABEL_SELECTOR).forEach((label) => {
+    if (!label.textContent.includes("등록일")) return;
+    if (!label.classList.contains(VIDEO_INFO_LABEL_HIDDEN_CLASS)) {
+      label.classList.add(VIDEO_INFO_LABEL_HIDDEN_CLASS);
+    }
+  });
+}
+
+function positionVideoInfoTooltip(tip, trigger) {
+  const r = trigger.getBoundingClientRect();
+  tip.style.left = `${Math.round(r.left)}px`;
+  // 트리거 위에 띄운다(공간 부족하면 아래).
+  const belowSpace = window.innerHeight - r.bottom;
+  const h = tip.offsetHeight || 44;
+  if (r.top > h + 12) {
+    tip.style.top = `${Math.round(r.top - h - 6)}px`;
+  } else {
+    tip.style.top = `${Math.round(r.bottom + 6)}px`;
+    void belowSpace;
+  }
+}
+
+function showVideoInfoTooltip(trigger) {
+  const html = videoInfoDatesHtml();
+  if (!html) return;
+  let tip = document.getElementById(VIDEO_INFO_TOOLTIP_ID);
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = VIDEO_INFO_TOOLTIP_ID;
+    tip.className = "cheese-video-info-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+  }
+  if (tip.innerHTML !== html) tip.innerHTML = html;
+  tip.classList.add("is-visible");
+  positionVideoInfoTooltip(tip, trigger);
+}
+
+function hideVideoInfoTooltip() {
+  document
+    .getElementById(VIDEO_INFO_TOOLTIP_ID)
+    ?.classList.remove("is-visible");
+}
+
+// 등록일 툴팁의 트리거(_label_을 자식으로 가진 _data_ 컨테이너)를 찾는다.
+function videoInfoTriggerFromTarget(target) {
+  const label = target?.closest?.(VIDEO_INFO_LABEL_SELECTOR);
+  // 라벨 자신 또는 그 부모(_data_)에 호버하면 트리거로 본다.
+  const host =
+    (label && label.textContent.includes("등록일") && label.parentElement) ||
+    target?.closest?.('[class*="_data_"]');
+  if (!host) return null;
+  // 이 컨테이너 안에 '등록일' 라벨이 있어야 대상.
+  const hasDateLabel = [...host.querySelectorAll(VIDEO_INFO_LABEL_SELECTOR)].some(
+    (l) => l.textContent.includes("등록일"),
+  );
+  return hasDateLabel ? host : null;
+}
+
+function onVideoInfoMouseOver(e) {
+  const trigger = videoInfoTriggerFromTarget(e.target);
+  if (!trigger) return;
+  videoInfoHoverTrigger = trigger;
+  showVideoInfoTooltip(trigger);
+}
+function onVideoInfoMouseOut(e) {
+  if (!videoInfoHoverTrigger) return;
+  // 트리거 내부 이동은 무시.
+  if (videoInfoHoverTrigger.contains(e.relatedTarget)) return;
+  videoInfoHoverTrigger = null;
+  hideVideoInfoTooltip();
+}
+
+function bindVideoInfoLabel() {
+  if (videoInfoLabelBound) return;
+  videoInfoLabelBound = true;
+  document.addEventListener("mouseover", onVideoInfoMouseOver, { passive: true });
+  document.addEventListener("mouseout", onVideoInfoMouseOut, { passive: true });
+}
+
+// seek preview 옵저버가 매 프레임 호출. 날짜 확보 시 원본 라벨을 숨김 처리만 하고(안전),
+// 실제 표시는 호버 트리거 + body-fixed 툴팁이 담당한다.
 function updateVideoInfoLabel() {
   if (!seekPreviewState.publishAt && !seekPreviewState.liveOpenAt) return;
-  // 영상 페이지의 라벨만 대상으로 한다('등록일'을 포함한 _label).
-  const labels = document.querySelectorAll(VIDEO_INFO_LABEL_SELECTOR);
-  labels.forEach((label) => {
-    if (!label.textContent.includes("등록일")) return;
-    const parts = [];
-    if (seekPreviewState.publishAt) {
-      parts.push(`등록일 : ${formatKstClock(seekPreviewState.publishAt)}`);
-    }
-    if (seekPreviewState.liveOpenAt) {
-      parts.push(
-        `라이브 시작일 : ${formatKstClock(seekPreviewState.liveOpenAt)}`,
-      );
-    }
-    if (!parts.length) return;
-    const html = parts.join("<br>");
-    // 이미 우리가 쓴 내용과 같으면 건너뛴다(옵저버 루프/불필요한 리플로우 방지).
-    // 치지직이 다시 "06.20"으로 되돌리면 innerHTML이 달라지므로 재적용된다.
-    if (label.innerHTML === html) return;
-    label.innerHTML = html;
-  });
+  bindVideoInfoLabel();
+  markVideoInfoLabels();
 }
 
 function getCurrentLiveChannelId() {
@@ -8607,8 +8698,9 @@ function getFillScreenTarget() {
 const FILL_SCREEN_ENABLED = true;
 
 // 중간광고 진입/종료 시 #live_player_layout 의 class 에 miniplayer 가 붙었다 빠진다.
-// 전역 옵저버는 childList 만 감시해 class 만 바뀌면 놓칠 수 있으므로, 영상 박스의 class
-// 변화를 직접 감시해 화면 채우기를 즉시 원복/재적용한다(광고 종료 후 원래 크기로 복귀).
+// PIP 전환은 상위 section 의 class(_type_pip_)로 나타난다. 전역 옵저버는 childList 만
+// 감시해 class 만 바뀌면 놓칠 수 있으므로, 영상 박스 + 그 상위 section 의 class 변화를
+// 직접 감시해 화면 채우기를 즉시 원복/재적용한다(광고·PIP 종료 후 원래 크기로 복귀).
 let fillScreenPlayerObserver = null;
 let fillScreenObservedBox = null;
 function ensureFillScreenPlayerObserver() {
@@ -8624,10 +8716,18 @@ function ensureFillScreenPlayerObserver() {
     applyFillScreen();
     applyAdMiniplayerUnmute(); // 미니플레이어 전환 시 음소거 해제 옵션 반영
   });
+  // 영상 박스(miniplayer class) + 상위 section(_type_pip_ class) 둘 다 class 만 감시.
   fillScreenPlayerObserver.observe(box, {
     attributes: true,
     attributeFilter: ["class"],
   });
+  const section = box.closest("div#layout-body section");
+  if (section instanceof HTMLElement) {
+    fillScreenPlayerObserver.observe(section, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
   fillScreenObservedBox = box;
 }
 
@@ -8707,6 +8807,24 @@ function applyAdMiniplayerUnmute() {
 // 꽉 채우게 한다(레터박스 제거, 하단 안 잘림). main 은 건드리지 않으므로 main 의
 // overflow-y 스크롤은 그대로 유지된다. 다시보기(capMaxH:true)는 아직 적용하지 않는다.
 // stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용으로 깜빡임 방지.
+// 우리가 실제로 스타일을 넣은 요소를 기억해 둔다. 원복은 '지금 타겟을 다시 찾아서'가
+// 아니라 '기억해 둔 요소'에서 하므로, PIP/미니플레이어로 DOM 구조가 바뀌어 타겟 재탐색이
+// 실패/변경돼도 확실히 지워진다(스타일이 요소에 남아 스크롤을 유발하던 문제 해결).
+let fillScreenStyledEl = null; // height/flex-shrink 를 건 영상 층(_player_)
+let fillScreenStyledContents = null; // max-height/flex-shrink 를 건 부모(_contents_)
+function clearFillScreenStyles() {
+  if (fillScreenStyledEl instanceof HTMLElement) {
+    fillScreenStyledEl.style.removeProperty("height");
+    fillScreenStyledEl.style.removeProperty("min-height");
+    fillScreenStyledEl.style.removeProperty("flex-shrink");
+  }
+  if (fillScreenStyledContents instanceof HTMLElement) {
+    fillScreenStyledContents.style.removeProperty("max-height");
+    fillScreenStyledContents.style.removeProperty("flex-shrink");
+  }
+  fillScreenStyledEl = null;
+  fillScreenStyledContents = null;
+}
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
@@ -8717,26 +8835,32 @@ function applyFillScreen() {
   // 끝나 miniplayer 클래스가 빠지면 다음 applyFillScreen 호출에서 자동 재적용).
   const isMini =
     t?.box instanceof HTMLElement && t.box.classList.contains("miniplayer");
+  // 페이지 전환 등으로 PIP(_type_pip_ section)로 축소되면 플레이어 구조가 달라, 우리가
+  // 높이를 강제하면 PIP 안에서 스크롤이 생긴다. PIP 상태면 적용을 끄고 원복한다.
+  // (box 뿐 아니라 _player_ 자체가 PIP section 안에 들어가는 경우도 있어 el 기준도 본다.)
+  const pipSel = 'section[class*="_type_pip_"], [class*="_type_pip_"]';
+  const isPip = !!(
+    (t?.box instanceof HTMLElement && t.box.closest(pipSel)) ||
+    (t?.el instanceof HTMLElement && t.el.closest(pipSel)) ||
+    document.querySelector(`div#layout-body ${pipSel} #live_player_layout`)
+  );
   const on =
     FILL_SCREEN_ENABLED &&
     featureFlags.fillScreen &&
     isLive &&
     !isMini &&
+    !isPip &&
     !(aside && isChatStackedLayout(aside));
   if (!on) {
-    if (t) {
-      t.el.style.removeProperty("height");
-      t.el.style.removeProperty("min-height"); // 과거 버전이 남긴 인라인 정리
-      t.el.style.removeProperty("flex-shrink");
-      if (t.capMaxH) t.el.style.removeProperty("max-height");
-      if (t.contents instanceof HTMLElement) {
-        t.contents.style.removeProperty("max-height");
-        t.contents.style.removeProperty("flex-shrink");
-      }
-    }
+    // 타겟 재탐색과 무관하게, 우리가 스타일을 건 요소를 직접 원복(PIP/미니플레이어에서
+    // 구조가 바뀌어도 확실히 지운다). 다시보기 max-height(capMaxH)도 함께 정리.
+    if (t && t.capMaxH) t.el.style.removeProperty("max-height");
+    clearFillScreenStyles();
     return;
   }
   const { el, box } = t;
+  // 적용 대상이 바뀌었으면(다른 영상 층) 이전 것 먼저 원복.
+  if (fillScreenStyledEl && fillScreenStyledEl !== el) clearFillScreenStyles();
   // 영상 층 부모(_contents_)의 max-height:100% 제약을 풀고 flex-shrink 를 막아, 영상을
   // 키워 콘텐츠가 넘치면 형제가 침범하지 않고 main 의 overflow-y 스크롤로 흘러가게 한다.
   if (t.contents instanceof HTMLElement) {
@@ -8746,6 +8870,7 @@ function applyFillScreen() {
     if (t.contents.style.flexShrink !== "0") {
       t.contents.style.setProperty("flex-shrink", "0", "important");
     }
+    fillScreenStyledContents = t.contents;
   }
   const videoBox = box instanceof HTMLElement ? box : el;
   // 영상 폭(boxW)은 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
@@ -8753,6 +8878,7 @@ function applyFillScreen() {
   if (!(boxW > 0)) return;
   const idealH = Math.round((boxW * 9) / 16);
   const value = `${idealH}px`;
+  fillScreenStyledEl = el; // 원복 대상 기억
   // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
   // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
   // 높이를 유지시킨다(넘치는 분량은 main 의 overflow-y 스크롤이 흡수).

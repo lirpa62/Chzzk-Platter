@@ -1736,6 +1736,8 @@
       // 이미 state에 반영돼 있으므로 자동으로 켜도 그 프리셋이 적용된다).
       stateLoaded = true;
       maybeAutoEnableMixer();
+      // 저장된 enabled 채널도 클릭 없이 복원되도록 재생 기반 resume 을 시도한다.
+      bindVideoAutoEnable();
     } else if (e.data.type === "globals-changed") {
       const prevEnabled = globalDefaultPreset.enabled;
       const next = e.data.state || {};
@@ -2632,6 +2634,7 @@
         enterCustomFromEdit();
         reconcileDirtyAgainstBase();
         applyState();
+        commitUserEditToChannelBase();
         saveState();
         syncUI();
       } else if (t.dataset.action === "limiter-toggle") {
@@ -2639,6 +2642,7 @@
         enterCustomFromEdit();
         reconcileDirtyAgainstBase();
         applyState();
+        commitUserEditToChannelBase();
         saveState();
         syncUI();
       } else if (t.dataset.action === "normalizer-toggle") {
@@ -2646,6 +2650,7 @@
         enterCustomFromEdit();
         reconcileDirtyAgainstBase();
         // 노멀라이저는 rAF 루프가 normGain을 조정한다(applyState 불필요).
+        commitUserEditToChannelBase();
         saveState();
         syncUI();
       }
@@ -2870,7 +2875,16 @@
     syncPresetSelection();
     syncHead();
     syncMasterGain();
+    commitUserEditToChannelBase(); // 직접 조절 = 이 채널의 새 원본
     saveState();
+  }
+
+  // 사용자가 슬라이더/EQ를 직접 조절하면, 그 값이 '이 채널의 원본 선택'이 된다.
+  // 전역 기본값이 켜져 있으면 serializeState가 channelBaseState를 저장하므로, 여기서
+  // 갱신하지 않으면 직접 조절한 값이 저장되지 않고 유실된다(전역값/이전값으로 덮임).
+  function commitUserEditToChannelBase() {
+    channelBaseState = snapshotChannelPreset();
+    state.userPickedPreset = true; // 이 채널은 사용자가 직접 정함(전역값에 안 덮이게)
   }
 
   function handleEqBand(index, value) {
@@ -2880,6 +2894,7 @@
     applyState();
     syncPresetSelection();
     syncHead();
+    commitUserEditToChannelBase(); // 직접 조절 = 이 채널의 새 원본
     saveState();
   }
 
@@ -3195,6 +3210,67 @@
     true,
   );
   document.addEventListener("keydown", handleUserGestureForAudioContext, true);
+
+  // 클릭/키 제스처 없이 진입해도(직전 페이지 클릭으로 자동재생 허용된 경우 등) 방송이
+  // 재생되면 AudioContext resume 을 시도한다. 자동재생 정책이 허용하면 resume 이 성공해
+  // (state=running) 클릭 없이도 '항상 켜기' 믹서가 걸리고, 허용 안 되면 조용히 실패해
+  // 기존처럼 첫 클릭을 기다린다(무해). SPA 로 video 가 교체돼도 매번 새로 바인딩한다.
+  // 클릭 없이 자동 활성이 필요한 상황: '항상 켜기'(mixerAlwaysOn) 또는 이 채널에 저장된
+  // enabled=true(사용자가 예전에 켠 채널). 둘 다 저장 프리셋 로드(stateLoaded) 후 판단.
+  function wantsAutoEnable() {
+    if (userGestureSeen) return false;
+    if (state.userDisabled) return false; // 이 채널은 직접 끔
+    if (mixerAlwaysOn) return true;
+    return stateLoaded && state.enabled === true; // 저장된 켠 상태
+  }
+  const boundAutoEnableVideos = new WeakSet();
+  // 자동재생이 이미 허용됐는지 추정: video가 소리를 내며 재생 중이거나 navigator의
+  // 사용자 활성화가 있으면 AudioContext가 running 으로 생성돼 콘솔 경고가 안 뜬다.
+  function autoplayLikelyAllowed(video) {
+    if (navigator.userActivation?.isActive) return true;
+    return !!(video && !video.paused && !video.muted && video.volume > 0);
+  }
+  function tryAutoEnableFromPlayback(video) {
+    if (!wantsAutoEnable()) return;
+    if (state.enabled && audio.connected) return;
+    // 제스처 없이 AudioContext를 '새로' 만들면 자동재생 정책 경고가 콘솔에 찍힌다.
+    // 이미 컨텍스트가 있으면 resume만 시도하고, 없으면 '자동재생이 허용된 것으로
+    // 보일 때'(소리 재생 중/사용자 활성화)만 생성한다 → 실패할 환경에선 만들지 않아
+    // 경고가 안 남고, 첫 클릭의 handleUserGestureForAudioContext가 생성/resume한다.
+    if (!audio.ctx) {
+      if (!autoplayLikelyAllowed(video)) return;
+      try {
+        audio.ctx = new AudioContext();
+      } catch {
+        return;
+      }
+    }
+    try {
+      const proceed = () => {
+        if (audio.ctx && audio.ctx.state === "running") {
+          userGestureSeen = true; // resume 성공 = 오디오 시작 가능 상태
+          // 항상 켜기면 maybeAutoEnableMixer, 저장된 enabled면 그래프만 복원.
+          if (mixerAlwaysOn) maybeAutoEnableMixer();
+          if (state.enabled && !audio.connected) ensureEnabledGraph();
+        }
+      };
+      if (audio.ctx.state === "running") {
+        proceed();
+      } else {
+        audio.ctx.resume().then(proceed).catch(() => {});
+      }
+    } catch {}
+  }
+  function bindVideoAutoEnable() {
+    if (!wantsAutoEnable()) return;
+    const video = findVideo();
+    if (!(video instanceof HTMLVideoElement)) return;
+    if (!boundAutoEnableVideos.has(video)) {
+      boundAutoEnableVideos.add(video);
+      video.addEventListener("playing", () => tryAutoEnableFromPlayback(video));
+    }
+    if (!video.paused && video.readyState >= 2) tryAutoEnableFromPlayback(video);
+  }
   window.addEventListener("keydown", stopMixerEditableShortcutLeak, true);
   window.addEventListener("keyup", stopMixerEditableShortcutLeak, true);
   window.addEventListener("keypress", stopMixerEditableShortcutLeak, true);
@@ -3950,11 +4026,14 @@
     };
   }
 
-  function closeScreenshotPreview() {
+  // savedByUser=true(저장 버튼으로 닫음)면 취소 토스트를 띄우지 않는다. 그 외(취소 버튼/
+  // ESC/X 닫기)엔 '저장을 취소했어요' 토스트를 띄운다.
+  function closeScreenshotPreview(savedByUser) {
     const el = document.getElementById(SCREENSHOT_MODAL_ID);
     if (el) {
       saveScreenshotRect(el); // 닫을 때 마지막 위치·크기 보존
       el.remove();
+      if (!savedByUser) showScreenshotToast(false, "저장을 취소했어요");
     }
     document.removeEventListener("keydown", onScreenshotModalKey);
   }
@@ -3967,7 +4046,7 @@
   }
 
   function openScreenshotPreview(dataURL, name) {
-    closeScreenshotPreview();
+    closeScreenshotPreview(true); // 이전 미리보기 교체는 취소 아님 → 토스트 안 띄움
     const win = document.createElement("div");
     win.id = SCREENSHOT_MODAL_ID;
     win.className = "cheese-screenshot-win";
@@ -4003,13 +4082,12 @@
     win.querySelector(".cheese-screenshot-win-close").addEventListener("click", () =>
       closeScreenshotPreview(),
     );
-    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () => {
-      closeScreenshotPreview();
-      showScreenshotToast(false, "저장을 취소했어요");
-    });
+    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () =>
+      closeScreenshotPreview(),
+    );
     win.querySelector(".cheese-screenshot-save").addEventListener("click", () => {
       downloadScreenshot(dataURL, name, onScreenshotSaved);
-      closeScreenshotPreview();
+      closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
     });
 
     document.body.appendChild(win);
@@ -5540,6 +5618,9 @@
     // 음량 % 툴팁은 믹서 on/off와 무관하게 항상 부착(기본 볼륨 조작 보조).
     bindVolumeTooltipDelegation(); // 위임 리스너 1회 등록
     ensureVolumeTooltip();
+    // 제스처 없이 진입해도 방송 재생 시 resume 을 시도하도록 video 에 바인딩(자동재생
+    // 허용 환경에서 클릭 없이 믹서가 걸리게).
+    bindVideoAutoEnable();
     // '항상 켜기' 자동 활성화(첫 제스처 이후, 미디어 준비되면). 미디어 전환 시
     // graphConflict는 tick의 페이지 전환 분기에서 초기화되므로 새 영상엔 다시 시도.
     maybeAutoEnableMixer();
