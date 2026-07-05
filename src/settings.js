@@ -10,12 +10,74 @@
   // 수십 번의 IPC 가 몰려 콜드 스타트에서 렌더가 버벅였다. 팝업 시작 시 get(null) 로
   // 전체를 1회만 읽어 캐시하고, 각 옵션의 로드는 이 캐시에서 즉시 값을 꺼낸다.
   // set 시 캐시도 함께 갱신하고, 외부 변경(onChanged)은 캐시에 반영한다.
+  // 설정 팝업이 쓰는 키만 프리페치한다. get(null) 로 전체를 읽으면 background 가 저장한
+  // 대용량 캐시(cache:* 청크 등)까지 역직렬화해 팝업이 오히려 느려진다(캐시가 쌓일수록
+  // 심해짐). 아래 목록은 설정 관련 키(cheese*/audioMixer:*/videoFilter:*)만 담는다.
+  // 새 옵션을 추가하면 이 배열에도 그 키를 넣어야 로드된다(누락 시 그 옵션만 기본값으로
+  // 뜰 뿐, 다른 값은 안전).
+  const SETTINGS_STORAGE_KEYS = [
+    "cheeseFeatureHidden", // 모든 data-feature 토글 통합
+    "cheeseSearchTheme",
+    "cheeseAdMiniplayerKeepMuted",
+    "cheeseAdMiniplayerUnmute",
+    "cheeseCafeNow",
+    "cheeseCardDateTooltip",
+    "cheeseCardPreviewAudio",
+    "cheeseChannelLiveButton",
+    "cheeseChannelLiveButtonEnd",
+    "cheeseChatButtonWrap",
+    "cheeseChatFontScale",
+    "cheeseChatFontScaleSpecial",
+    "cheeseChatMoaActive",
+    "cheeseFollowPreview",
+    "cheeseFollowPreviewHeaderFont",
+    "cheeseFollowPreviewMaxLifeSec",
+    "cheeseFollowPreviewMuted",
+    "cheeseFollowPreviewThumbOnly",
+    "cheeseFollowPreviewVolume",
+    "cheeseFollowRefreshSec",
+    "cheeseHeaderFollowCount",
+    "cheeseHeaderNav",
+    "cheeseLiveSeekBar",
+    "cheeseLogPowerClickAction",
+    "cheeseLogPowerEarningColor",
+    "cheeseLogPowerPopupLimit",
+    "cheeseLogPowerProgressMode",
+    "cheeseLogPowerTimerMode",
+    "cheeseLogPowerEraser",
+    "cheeseMixerAlwaysOn",
+    "cheeseMaxQuality",
+    "cheeseMaxQualityRespectManual",
+    "cheeseMixerClickActivate",
+    "cheeseMixerGainMin",
+    "cheeseMixerGainMax",
+    "cheeseMixerGlobalDefaultMode",
+    "cheeseScreenshotDirectSave",
+    "cheeseScreenshotPreview",
+    "cheeseSeekStepS",
+    "cheeseSyncCustom",
+    "cheeseSyncPreset",
+    "cheeseVideoFilterAlwaysOn",
+    "cheeseVideoFilterClickActivate",
+    "cheeseVideoFilterGlobalDefaultMode",
+    "cheeseVodAutoplayOff",
+    "cheeseVolumePct",
+    "cheeseGainPct",
+    "cheeseWideScreenAuto",
+    "audioMixer:presets",
+    "audioMixer:globalDefault",
+    "audioMixer:defaultCustomId",
+    "videoFilter:presets",
+    "videoFilter:globalDefault",
+    "hiddenChannels",
+  ];
   let storageCacheData = null;
   const storagePrefetch = (async () => {
     try {
-      // 프리페치는 반드시 실제 IPC(chrome.storage.local.get(null))로 전체를 읽는다.
+      // 반드시 실제 IPC(chrome.storage.local.get)로 필요한 키만 읽는다.
       // (cachedStorageGet 을 쓰면 자기 자신 Promise 를 await 해 데드락에 빠진다.)
-      storageCacheData = (await chrome.storage?.local?.get(null)) || {};
+      storageCacheData =
+        (await chrome.storage?.local?.get(SETTINGS_STORAGE_KEYS)) || {};
     } catch {
       storageCacheData = {};
     }
@@ -949,6 +1011,55 @@
     } catch {}
   });
   loadWideScreenAuto();
+
+  // ── 최대 화질 자동 고정(전역, 기본 OFF) ──────────────────────────────────
+  const MAX_QUALITY_KEY = "cheeseMaxQuality";
+  const maxQualityInput = document.querySelector("[data-max-quality]");
+  async function loadMaxQuality() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(MAX_QUALITY_KEY);
+      on = data?.[MAX_QUALITY_KEY] === true;
+    } catch {}
+    if (maxQualityInput) maxQualityInput.checked = on;
+  }
+  // 수동 화질 변경 존중(하위, 기본 ON). 위 최대 화질 고정이 꺼져 있으면 비활성화(흐림).
+  const MAX_QUALITY_RESPECT_KEY = "cheeseMaxQualityRespectManual";
+  const maxQualityRespectInput = document.querySelector(
+    "[data-max-quality-respect]",
+  );
+  function reflectMaxQualityRespectEnabled() {
+    const parentOn = !!maxQualityInput?.checked;
+    if (!maxQualityRespectInput) return;
+    maxQualityRespectInput.disabled = !parentOn;
+    maxQualityRespectInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", !parentOn);
+  }
+  async function loadMaxQualityRespect() {
+    let on = true;
+    try {
+      const data = await cachedStorageGet(MAX_QUALITY_RESPECT_KEY);
+      on = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 미설정=기본 ON
+    } catch {}
+    if (maxQualityRespectInput) maxQualityRespectInput.checked = on;
+    reflectMaxQualityRespectEnabled();
+  }
+  maxQualityRespectInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [MAX_QUALITY_RESPECT_KEY]: maxQualityRespectInput.checked,
+      });
+    } catch {}
+  });
+  maxQualityInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [MAX_QUALITY_KEY]: maxQualityInput.checked });
+    } catch {}
+    reflectMaxQualityRespectEnabled(); // 부모 변화 시 하위 활성/비활성 갱신
+  });
+  loadMaxQuality();
+  loadMaxQualityRespect();
 
   // ── 라이브 되감기 바 표시(전역, 기본 ON) ─────────────────────────────────
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";

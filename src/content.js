@@ -80,6 +80,12 @@ let syncCustomValue = null; // {enable, target} 또는 null
 // 오디오 믹서 '항상 켜기'(전역). MAIN world(audioMixer)에 함께 전달.
 const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
 let mixerAlwaysOn = false;
+// 시청 시 최대 화질 자동 고정(전역, 기본 OFF). MAIN world(audioMixer.js)가 corePlayer로 적용.
+const MAX_QUALITY_KEY = "cheeseMaxQuality";
+let maxQualityAuto = false;
+// 최대 화질 고정 중 사용자가 수동으로 화질을 바꾸면 존중(그 영상 동안 안 되돌림, 기본 ON).
+const MAX_QUALITY_RESPECT_KEY = "cheeseMaxQualityRespectManual";
+let maxQualityRespectManual = true;
 const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
 let videoFilterAlwaysOn = false;
 const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
@@ -8825,6 +8831,24 @@ function clearFillScreenStyles() {
   fillScreenStyledEl = null;
   fillScreenStyledContents = null;
 }
+// 치지직 '넓은 화면'(viewmode)이 켜져 있는지 판정. 넓은 화면이면 영상 레이아웃이 달라져
+// 화면 채우기(영상 층 높이 강제)가 오히려 방해하므로 적용하지 않는다. viewmode 버튼은
+// 켜지면 checked 속성이 붙고 aria-label 이 '좁은 화면'(누르면 좁아짐)으로 바뀐다.
+function isWideScreenModeOn() {
+  const btn =
+    document.querySelector(".pzp-pc__viewmode-button") ||
+    document.querySelector(".pzp-pc-viewmode-button") ||
+    document.querySelector(".pzp-viewmode-button") ||
+    document.querySelector(
+      "button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+    );
+  if (!btn) return false;
+  return (
+    btn.hasAttribute("checked") ||
+    btn.getAttribute("aria-label") === "좁은 화면"
+  );
+}
+
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
@@ -8844,12 +8868,15 @@ function applyFillScreen() {
     (t?.el instanceof HTMLElement && t.el.closest(pipSel)) ||
     document.querySelector(`div#layout-body ${pipSel} #live_player_layout`)
   );
+  // 넓은 화면(viewmode)이면 영상 레이아웃이 달라 화면 채우기가 방해된다 → 적용 안 함.
+  const isWide = isWideScreenModeOn();
   const on =
     FILL_SCREEN_ENABLED &&
     featureFlags.fillScreen &&
     isLive &&
     !isMini &&
     !isPip &&
+    !isWide &&
     !(aside && isChatStackedLayout(aside));
   if (!on) {
     // 타겟 재탐색과 무관하게, 우리가 스타일을 건 요소를 직접 원복(PIP/미니플레이어에서
@@ -12505,6 +12532,8 @@ function broadcastFeatureFlags() {
       syncPreset: syncPresetValue,
       syncCustom: syncCustomValue, // {enable,target} 또는 null
       mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
+      maxQualityAuto, // 최대 화질 자동 고정(전역)
+      maxQualityRespectManual, // 수동 화질 변경 존중(전역)
       videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
       wideScreenAuto, // 넓은 화면 자동 적용(전역)
       liveSeekBar, // 라이브 되감기 바 표시(전역)
@@ -12531,6 +12560,8 @@ async function loadFeatureFlags() {
       SYNC_PRESET_KEY,
       SYNC_CUSTOM_KEY,
       MIXER_ALWAYS_ON_KEY,
+      MAX_QUALITY_KEY,
+      MAX_QUALITY_RESPECT_KEY,
       VIDEO_FILTER_ALWAYS_ON_KEY,
       WIDE_SCREEN_AUTO_KEY,
       LIVE_SEEK_BAR_KEY,
@@ -12590,6 +12621,8 @@ async function loadFeatureFlags() {
     const custom = data?.[SYNC_CUSTOM_KEY];
     syncCustomValue = custom && typeof custom === "object" ? custom : null;
     mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
+    maxQualityAuto = data?.[MAX_QUALITY_KEY] === true;
+    maxQualityRespectManual = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 기본 ON
     videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
     wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
     liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] !== false; // 미설정=기본 ON
@@ -12619,6 +12652,13 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[MIXER_ALWAYS_ON_KEY]) {
       mixerAlwaysOn = changes[MIXER_ALWAYS_ON_KEY].newValue === true;
+    }
+    if (changes[MAX_QUALITY_KEY]) {
+      maxQualityAuto = changes[MAX_QUALITY_KEY].newValue === true;
+    }
+    if (changes[MAX_QUALITY_RESPECT_KEY]) {
+      maxQualityRespectManual =
+        changes[MAX_QUALITY_RESPECT_KEY].newValue !== false;
     }
     if (changes[AD_MINI_UNMUTE_KEY]) {
       adMiniplayerUnmute = changes[AD_MINI_UNMUTE_KEY].newValue === true;
@@ -12797,6 +12837,8 @@ if (chrome.storage?.onChanged) {
       changes[SYNC_PRESET_KEY] ||
       changes[SYNC_CUSTOM_KEY] ||
       changes[MIXER_ALWAYS_ON_KEY] ||
+      changes[MAX_QUALITY_KEY] ||
+      changes[MAX_QUALITY_RESPECT_KEY] ||
       changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
       changes[WIDE_SCREEN_AUTO_KEY] ||
       changes[LIVE_SEEK_BAR_KEY] ||
@@ -13191,6 +13233,20 @@ window.addEventListener(
     applyFillScreen();
   }, 150),
   { passive: true },
+);
+// 넓은 화면(viewmode) 버튼 클릭 → 상태 전환 후 화면 채우기 재평가(넓은 화면이면 원복,
+// 좁은 화면으로 돌아오면 재적용). 클릭 직후엔 아직 상태가 안 바뀌었을 수 있어 rAF 대기.
+document.addEventListener(
+  "click",
+  (e) => {
+    const btn = e.target?.closest?.(
+      ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+    );
+    if (!btn) return;
+    requestAnimationFrame(() => applyFillScreen());
+    setTimeout(() => applyFillScreen(), 200); // 늦게 반영되는 경우 대비 한 번 더
+  },
+  true,
 );
 ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {

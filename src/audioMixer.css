@@ -194,7 +194,7 @@
 .cheese-mixer-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -1496,7 +1496,9 @@
   border-right: 5px solid transparent;
   border-top: 7px solid #00ffa3;
   filter: drop-shadow(0 0 3px rgba(0, 255, 163, 0.8));
-  transition: border-top-width 0.1s, top 0.1s;
+  transition:
+    border-top-width 0.1s,
+    top 0.1s;
 }
 .cheese-live-seek-bar__track:hover .cheese-live-seek-bar__playhead::after,
 .cheese-live-seek-bar.is-dragging .cheese-live-seek-bar__playhead::after {

@@ -2698,6 +2698,33 @@ async function lpClearWatchState(channelId) {
   } catch {}
 }
 
+// 적립 '표시'만 끄되 추적(state+알람)은 유지한다. 치지직 적립 채널은 동적으로 바뀌므로
+// (탭 A=채널X 적립 → 판정이 탭 B=채널Y로 이동), 다른 채널을 완전 삭제하면 나중에 그
+// 채널이 실제 적립 채널이 돼도 재추적되지 않아 적립 중이 영영 안 뜬다. 그래서 activeUntil
+// 을 0으로(표시 끔), misses 를 리셋하고, lastAmount 는 최신값으로 재기준(다음 delta 가
+// 이 채널로 옮겨온 적립을 정확히 잡게). 알람은 유지해 다음 주기에 계속 감지한다.
+// broadcast 는 status(active:false)로 — '적립 중' 표시만 끄고 1시간 타이머는 건드리지
+// 않는다(LOG_POWER_LIVE_ENDED 는 라이브 종료용이라 1시간 타이머까지 지운다).
+async function lpDeactivateWatchState(channelId) {
+  const state = await lpGetWatchState(channelId);
+  if (!state) return;
+  const fresh = await lpFetchAmount(channelId);
+  const next = {
+    ...state,
+    activeUntil: 0,
+    misses: 0,
+    lastAmount: Number.isFinite(fresh) ? fresh : state.lastAmount,
+  };
+  await lpSetWatchState(channelId, next);
+  try {
+    chrome.alarms.create(lpWatchAlarmName(channelId), {
+      delayInMinutes: LP_WATCH_INTERVAL_MIN,
+      periodInMinutes: LP_WATCH_INTERVAL_MIN,
+    });
+  } catch {}
+  lpBroadcast(lpStateToStatus(next, false)); // 적립 중 표시만 끔(타이머 유지)
+}
+
 function lpTierToAmount(tier) {
   const n = Number(tier);
   if (n === 2) return 20;
@@ -2828,14 +2855,15 @@ async function lpStartTracking({ channelId, initialAmount }) {
 const LP_HOUR_TIMER_PREFIX = "cheeseLogPowerHourTimer:";
 async function lpClearOtherChannels(activeChannelId) {
   try {
-    // 1) 다른 채널의 적립 추적 state(session) 정리 + 알람 해제.
+    // 1) 다른 채널의 적립 '표시'만 끄고 추적은 유지한다(삭제하면 판정이 이 채널로
+    //    옮겨와도 재추적되지 않음). LOG_POWER_LIVE_ENDED 로 현재 떠 있는 적립 중 표시를
+    //    지우되, background 추적/알람은 살려 다음 주기에 이 채널의 적립을 계속 감지한다.
     const sess = await chrome.storage.session.get(null);
     for (const key of Object.keys(sess || {})) {
       if (!key.startsWith(LP_WATCH_STATE_PREFIX)) continue;
       const cid = key.slice(LP_WATCH_STATE_PREFIX.length);
       if (!cid || cid === activeChannelId) continue;
-      await lpClearWatchState(cid);
-      lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId: cid });
+      await lpDeactivateWatchState(cid); // 내부에서 status(active:false) broadcast
     }
     // 2) 다른 채널의 1시간 타이머(local) 제거. content가 이 키로 복원하므로 지우면
     //    재진입해도 안 뜬다. LOG_POWER_LIVE_ENDED가 현재 떠 있는 표시도 지운다.

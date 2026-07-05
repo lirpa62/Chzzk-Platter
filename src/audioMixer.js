@@ -28,6 +28,8 @@
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+  let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
+  let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
@@ -51,6 +53,12 @@
     screenshotPreviewOn = e.data.screenshotPreview === true;
     // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
     mixerClickActivate = e.data.mixerClickActivate === true;
+    // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
+    maxQualityAuto = e.data.maxQualityAuto === true;
+    maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
+    if (maxQualityAuto && typeof applyMaxQuality === "function") {
+      applyMaxQuality();
+    }
     // 전역 기본값 재방문 동작(global | channel, 기본 global).
     globalDefaultMode =
       e.data.mixerGlobalDefaultMode === "channel" ? "channel" : "global";
@@ -3312,6 +3320,69 @@
     return null;
   }
 
+  // ── 최대 화질 자동 고정 ────────────────────────────────────────────────────
+  // corePlayer.videoTracks 에서 고정 화질(abr/자동 제외) 중 가장 높은 height 트랙에
+  // selected=true 를 직접 설정한다(공개 setQuality API 가 없어 이 방식이 유효함을 확인).
+  // 이미 그 화질이 선택돼 있으면 아무것도 안 한다(멱등 → 불필요한 개입/재요청 방지).
+  function trackHeight(t) {
+    const h = Number(t?.height ?? t?._height);
+    return Number.isFinite(h) ? h : 0;
+  }
+  function trackIsAbr(t) {
+    const q = String(
+      t?._videoQuality || t?.encodingOptionID || t?.label || "",
+    ).toLowerCase();
+    return q.includes("abr") || q.includes("auto") || q.includes("자동");
+  }
+  function trackSelected(t) {
+    return !!(t?.selected || t?._selected);
+  }
+  // 수동 화질 존중: 사용자가 이 미디어에서 직접 낮은 고정 화질을 고르면 그 뒤론 다시
+  // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
+  let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
+  let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
+  function applyMaxQuality() {
+    if (!maxQualityAuto) return;
+    const core = findCorePlayer();
+    if (!core) return;
+    const tracks = Array.from(core.videoTracks || []);
+    if (!tracks.length) return;
+    // 고정 화질(abr 제외) 중 최고 height. 없으면(전부 abr) 개입 안 함.
+    const fixed = tracks.filter((t) => !trackIsAbr(t) && trackHeight(t) > 0);
+    if (!fixed.length) return;
+    let best = fixed[0];
+    for (const t of fixed) if (trackHeight(t) > trackHeight(best)) best = t;
+    const bestH = trackHeight(best);
+    const selected = tracks.find((t) => trackSelected(t));
+    const selH = selected && !trackIsAbr(selected) ? trackHeight(selected) : 0;
+
+    // '수동 변경 존중' 옵션: 우리가 최고로 올려둔 상태(maxQualitySetHeight)에서 선택이
+    // '더 낮은 고정 화질'로 바뀌었으면 = 사용자가 직접 낮춤 → 이 미디어 동안 존중.
+    if (
+      maxQualityRespectManual &&
+      maxQualitySetHeight > 0 &&
+      selected &&
+      !trackIsAbr(selected) &&
+      selH > 0 &&
+      selH < maxQualitySetHeight
+    ) {
+      maxQualityRespectedPage = currentPageKey;
+    }
+    if (maxQualityRespectManual && maxQualityRespectedPage === currentPageKey) {
+      return; // 이 미디어는 사용자가 고른 화질을 존중
+    }
+
+    // 이미 최고 고정 화질이면 손대지 않는다(멱등).
+    if (selH >= bestH) {
+      maxQualitySetHeight = bestH;
+      return;
+    }
+    try {
+      best.selected = true;
+      maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
+    } catch {}
+  }
+
   // 라이브 지연(초). _getLiveLatency()는 ms를 반환한다. core를 받으면 재사용.
   function getLiveLatencySeconds(core = null) {
     try {
@@ -3736,30 +3807,38 @@
       navigator.mediaCapabilities
         .decodingInfo({ type, video: videoConfig })
         .catch(() => null);
-    Promise.all([probe("media-source"), probe("file")])
-      .then((results) => {
+    // .finally()에 의존하지 않는다 — 치지직 페이지(MAIN world)의 Promise 구현이
+    // .finally 를 안 갖는 경우가 있어 "finally is not a function" 에러가 났다.
+    // 성공/실패 콜백 양쪽에서 pending 을 직접 내린다.
+    const done = () => {
+      hwDecodeCache.pending = false;
+    };
+    Promise.all([probe("media-source"), probe("file")]).then(
+      (results) => {
         hwDecodeCache.key = key;
         const valid = results.filter((r) => r); // 조회 성공한 것만
         if (valid.length === 0) {
           hwDecodeCache.text = "확인 불가";
-          return;
-        }
-        const anySupported = valid.some((r) => r.supported);
-        const anyEfficient = valid.some((r) => r.supported && r.powerEfficient);
-        if (!anySupported) {
-          hwDecodeCache.text = "지원 안 함 (코덱 미지원)";
-        } else if (anyEfficient) {
-          hwDecodeCache.text = "사용 중 (하드웨어 가속)";
         } else {
-          hwDecodeCache.text = "미사용 (소프트웨어 디코딩)";
+          const anySupported = valid.some((r) => r.supported);
+          const anyEfficient = valid.some(
+            (r) => r.supported && r.powerEfficient,
+          );
+          if (!anySupported) {
+            hwDecodeCache.text = "지원 안 함 (코덱 미지원)";
+          } else if (anyEfficient) {
+            hwDecodeCache.text = "사용 중 (하드웨어 가속)";
+          } else {
+            hwDecodeCache.text = "미사용 (소프트웨어 디코딩)";
+          }
         }
-      })
-      .catch(() => {
+        done();
+      },
+      () => {
         hwDecodeCache.text = "확인 불가";
-      })
-      .finally(() => {
-        hwDecodeCache.pending = false;
-      });
+        done();
+      },
+    );
   }
 
   function numberFormat(n) {
@@ -5554,6 +5633,10 @@
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
       wideScreenAppliedForPage = null;
       wideScreenRetryUntil = Date.now() + 8000;
+      // 새 미디어 → 최대 화질 자동 고정 상태 리셋(이전 영상의 수동 존중을 새 영상까지
+      // 끌고 가지 않는다).
+      maxQualitySetHeight = 0;
+      maxQualityRespectedPage = null;
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
       state = DEFAULT_STATE();
@@ -5626,6 +5709,8 @@
     maybeAutoEnableMixer();
     // 넓은 화면 자동 적용(미디어당 1회). viewmode 버튼이 늦게 떠도 잠깐 재시도.
     maybeAutoWideScreen();
+    // 최대 화질 자동 고정(켜져 있으면). 멱등이라 이미 최고 화질이면 즉시 return.
+    applyMaxQuality();
   }
 
   // 치지직 플레이어의 '넓은 화면'(viewmode) 버튼. 라이브/다시보기 공통.
