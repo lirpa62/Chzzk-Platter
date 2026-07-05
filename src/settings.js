@@ -5,6 +5,55 @@
 (() => {
   "use strict";
 
+  // ── storage 일괄 프리페치 + 캐시 ──────────────────────────────────────────
+  // 예전엔 각 옵션이 chrome.storage.local.get(단일키) 를 개별 호출해, 팝업을 열 때
+  // 수십 번의 IPC 가 몰려 콜드 스타트에서 렌더가 버벅였다. 팝업 시작 시 get(null) 로
+  // 전체를 1회만 읽어 캐시하고, 각 옵션의 로드는 이 캐시에서 즉시 값을 꺼낸다.
+  // set 시 캐시도 함께 갱신하고, 외부 변경(onChanged)은 캐시에 반영한다.
+  let storageCacheData = null;
+  const storagePrefetch = (async () => {
+    try {
+      // 프리페치는 반드시 실제 IPC(chrome.storage.local.get(null))로 전체를 읽는다.
+      // (cachedStorageGet 을 쓰면 자기 자신 Promise 를 await 해 데드락에 빠진다.)
+      storageCacheData = (await chrome.storage?.local?.get(null)) || {};
+    } catch {
+      storageCacheData = {};
+    }
+    return storageCacheData;
+  })();
+
+  // chrome.storage.local.get 대체: 키(문자열/배열)만 지원(옵션 로드용). 프리페치가
+  // 끝났으면 IPC 없이 캐시에서, 아직이면 프리페치를 기다린 뒤 캐시에서 반환한다.
+  async function cachedStorageGet(keys) {
+    const data = storageCacheData || (await storagePrefetch) || {};
+    if (keys == null) return { ...data };
+    const list = Array.isArray(keys) ? keys : [keys];
+    const out = {};
+    for (const k of list) {
+      if (k in data) out[k] = data[k];
+    }
+    return out;
+  }
+
+  // set 래퍼: 실제 저장 + 로컬 캐시 동기화(이후 재조회가 최신값을 보게).
+  function cachedStorageSet(obj) {
+    if (storageCacheData) Object.assign(storageCacheData, obj);
+    try {
+      chrome.storage?.local?.set(obj);
+    } catch {}
+  }
+
+  // 외부(치지직 탭 등)에서 값이 바뀌면 캐시에 반영.
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || !storageCacheData) return;
+      for (const [k, { newValue }] of Object.entries(changes)) {
+        if (newValue === undefined) delete storageCacheData[k];
+        else storageCacheData[k] = newValue;
+      }
+    });
+  } catch {}
+
   // ── 테마(검색 팝업과 localStorage 키 공유) ────────────────────────────────
   const THEME_STORAGE_KEY = "cheeseSearchTheme";
   const themeToggle = document.getElementById("themeToggleButton");
@@ -66,29 +115,38 @@
   const DEFAULT_HIDDEN = new Set(["clipLiveButton"]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
 
+  // 로드가 성공적으로 끝나기 전엔 save() 로 전체(cheeseFeatureHidden)를 덮어쓰지 않는다.
+  // 로드 실패/미완료 상태에서 저장하면 모든 토글이 기본값(unchecked)으로 확정돼 기존
+  // 설정 전체가 유실되기 때문이다(과거 이 사고가 있었다). 로드가 확실히 끝난 뒤에만 true.
+  let featureFlagsLoaded = false;
   async function load() {
     let saved = {};
+    let ok = false;
     try {
-      const data = await chrome.storage?.local?.get(FEATURE_HIDDEN_KEY);
+      const data = await cachedStorageGet(FEATURE_HIDDEN_KEY);
+      ok = true; // get 이 예외 없이 완료됨 = 저장값을 정상적으로 읽음(값 없으면 {}).
       const value = data?.[FEATURE_HIDDEN_KEY];
       if (value && typeof value === "object") saved = value;
     } catch {
-      // 로드 실패 시 기본값으로 둔다.
+      // 로드 실패 → ok=false 로 저장을 잠근다(전체 덮어쓰기 사고 방지).
     }
     inputs.forEach((input) => {
       const key = input.dataset.feature;
       const v = saved[key];
       input.checked = typeof v === "boolean" ? v : DEFAULT_HIDDEN.has(key);
     });
+    if (ok) featureFlagsLoaded = true;
   }
 
   function save() {
+    // 로드 완료 전에는 저장하지 않는다(기본값 전체 덮어쓰기 사고 방지).
+    if (!featureFlagsLoaded) return;
     const flags = {};
     inputs.forEach((input) => {
       flags[input.dataset.feature] = input.checked;
     });
     try {
-      chrome.storage?.local?.set({ [FEATURE_HIDDEN_KEY]: flags });
+      cachedStorageSet({ [FEATURE_HIDDEN_KEY]: flags });
     } catch {
       // 저장 실패는 무시(다음 변경 때 재시도됨).
     }
@@ -109,7 +167,7 @@
   if (chatFontScaleInput) {
     (async () => {
       try {
-        const d = await chrome.storage?.local?.get(CHAT_FONT_SCALE_KEY);
+        const d = await cachedStorageGet(CHAT_FONT_SCALE_KEY);
         const scale = Number(d?.[CHAT_FONT_SCALE_KEY]);
         const pct = Number.isFinite(scale) && scale > 0 ? scale * 100 : 100;
         chatFontScaleInput.value = String(clampChatFontPct(pct));
@@ -121,7 +179,7 @@
       const pct = clampChatFontPct(chatFontScaleInput.value);
       chatFontScaleInput.value = String(pct);
       try {
-        chrome.storage?.local?.set({ [CHAT_FONT_SCALE_KEY]: pct / 100 });
+        cachedStorageSet({ [CHAT_FONT_SCALE_KEY]: pct / 100 });
       } catch {}
     };
     chatFontScaleInput.addEventListener("change", saveChatFontScale);
@@ -137,14 +195,14 @@
     (async () => {
       let on = false;
       try {
-        const d = await chrome.storage?.local?.get(CHAT_FONT_SCALE_SPECIAL_KEY);
+        const d = await cachedStorageGet(CHAT_FONT_SCALE_SPECIAL_KEY);
         on = d?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
       } catch {}
       chatFontScaleSpecialInput.checked = on;
     })();
     chatFontScaleSpecialInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({
+        cachedStorageSet({
           [CHAT_FONT_SCALE_SPECIAL_KEY]: chatFontScaleSpecialInput.checked,
         });
       } catch {}
@@ -158,14 +216,14 @@
     (async () => {
       let on = true; // 기본 ON
       try {
-        const d = await chrome.storage?.local?.get(CHAT_BUTTON_WRAP_KEY);
+        const d = await cachedStorageGet(CHAT_BUTTON_WRAP_KEY);
         on = d?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=사용
       } catch {}
       chatButtonWrapInput.checked = on;
     })();
     chatButtonWrapInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({
+        cachedStorageSet({
           [CHAT_BUTTON_WRAP_KEY]: chatButtonWrapInput.checked,
         });
       } catch {}
@@ -207,7 +265,7 @@
   }
   (async () => {
     try {
-      const d = await chrome.storage?.local?.get(CHAT_MOA_ACTIVE_KEY);
+      const d = await cachedStorageGet(CHAT_MOA_ACTIVE_KEY);
       applyChatMoaLock(d?.[CHAT_MOA_ACTIVE_KEY]);
     } catch {}
   })();
@@ -234,7 +292,7 @@
   async function loadHeaderNav() {
     let saved = {};
     try {
-      const data = await chrome.storage?.local?.get(HEADER_NAV_KEY);
+      const data = await cachedStorageGet(HEADER_NAV_KEY);
       const value = data?.[HEADER_NAV_KEY];
       if (value && typeof value === "object") saved = value;
     } catch {}
@@ -252,7 +310,7 @@
       cfg[input.dataset.headerNav] = input.checked;
     });
     try {
-      chrome.storage?.local?.set({ [HEADER_NAV_KEY]: cfg });
+      cachedStorageSet({ [HEADER_NAV_KEY]: cfg });
     } catch {}
   }
 
@@ -321,7 +379,7 @@
     await loadHeaderNav();
     // headerStudio 체크박스 초기 상태를 storage에서 직접 읽어 확정.
     try {
-      const d = await chrome.storage?.local?.get(FEATURE_HIDDEN_KEY);
+      const d = await cachedStorageGet(FEATURE_HIDDEN_KEY);
       if (headerStudioInput) {
         headerStudioInput.checked = d?.[FEATURE_HIDDEN_KEY]?.headerStudio === true;
       }
@@ -337,7 +395,7 @@
   async function loadMixerAlwaysOn() {
     let on = false;
     try {
-      const data = await chrome.storage?.local?.get(MIXER_ALWAYS_ON_KEY);
+      const data = await cachedStorageGet(MIXER_ALWAYS_ON_KEY);
       on = data?.[MIXER_ALWAYS_ON_KEY] === true;
     } catch {}
     if (mixerAlwaysOnInput) mixerAlwaysOnInput.checked = on;
@@ -345,7 +403,7 @@
 
   mixerAlwaysOnInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [MIXER_ALWAYS_ON_KEY]: mixerAlwaysOnInput.checked,
       });
     } catch {}
@@ -547,7 +605,7 @@
     renderGlobalDefaultPicker(type);
     syncGlobalDefaultUI(type);
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [globalDefaultStorageKey(type)]: { ...config },
       });
     } catch {}
@@ -598,7 +656,7 @@
 
   async function loadGlobalDefaults() {
     try {
-      const data = await chrome.storage?.local?.get([
+      const data = await cachedStorageGet([
         AUDIO_MIXER_PRESETS_KEY,
         AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
         VIDEO_FILTER_PRESETS_KEY,
@@ -647,7 +705,7 @@
   (async () => {
     let action = "popup";
     try {
-      const d = await chrome.storage?.local?.get(LOGPOWER_CLICK_ACTION_KEY);
+      const d = await cachedStorageGet(LOGPOWER_CLICK_ACTION_KEY);
       action = normalizeLpClick(d?.[LOGPOWER_CLICK_ACTION_KEY]);
     } catch {}
     reflectLpClick(action);
@@ -657,7 +715,7 @@
       const action = normalizeLpClick(btn.dataset.logpowerClick);
       reflectLpClick(action);
       try {
-        chrome.storage?.local?.set({ [LOGPOWER_CLICK_ACTION_KEY]: action });
+        cachedStorageSet({ [LOGPOWER_CLICK_ACTION_KEY]: action });
       } catch {}
     });
   });
@@ -681,7 +739,7 @@
     (async () => {
       let mode = "badge";
       try {
-        const d = await chrome.storage?.local?.get(key);
+        const d = await cachedStorageGet(key);
         mode = norm(d?.[key]);
       } catch {}
       reflect(mode);
@@ -693,7 +751,7 @@
         const mode = norm(btn.dataset[toCamel(btnAttr)]);
         reflect(mode);
         try {
-          chrome.storage?.local?.set({ [key]: mode });
+          cachedStorageSet({ [key]: mode });
         } catch {}
         onChange?.();
       });
@@ -707,7 +765,7 @@
       set: (mode) => {
         reflect(mode);
         try {
-          chrome.storage?.local?.set({ [key]: norm(mode) });
+          cachedStorageSet({ [key]: norm(mode) });
         } catch {}
       },
       // 특정 모드 버튼(예: "badge")만 비활성화한다. 그룹 전체 잠금(is-locked)은
@@ -757,7 +815,7 @@
     (async () => {
       let on = false;
       try {
-        const d = await chrome.storage?.local?.get("cheeseLogPowerEarningColor");
+        const d = await cachedStorageGet("cheeseLogPowerEarningColor");
         on = d?.cheeseLogPowerEarningColor === true;
       } catch {}
       input.checked = on;
@@ -765,7 +823,7 @@
     })();
     input.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({
+        cachedStorageSet({
           cheeseLogPowerEarningColor: input.checked,
         });
       } catch {}
@@ -787,7 +845,7 @@
   if (logPowerPopupLimitInput) {
     (async () => {
       try {
-        const d = await chrome.storage?.local?.get(LOGPOWER_POPUP_LIMIT_KEY);
+        const d = await cachedStorageGet(LOGPOWER_POPUP_LIMIT_KEY);
         logPowerPopupLimitInput.value = String(
           clampPopupLimit(d?.[LOGPOWER_POPUP_LIMIT_KEY] ?? 5),
         );
@@ -799,7 +857,7 @@
       const v = clampPopupLimit(logPowerPopupLimitInput.value);
       logPowerPopupLimitInput.value = String(v);
       try {
-        chrome.storage?.local?.set({ [LOGPOWER_POPUP_LIMIT_KEY]: v });
+        cachedStorageSet({ [LOGPOWER_POPUP_LIMIT_KEY]: v });
       } catch {}
     };
     logPowerPopupLimitInput.addEventListener("change", savePopupLimit);
@@ -855,7 +913,7 @@
   async function loadVideoFilterAlwaysOn() {
     let on = false;
     try {
-      const data = await chrome.storage?.local?.get(
+      const data = await cachedStorageGet(
         VIDEO_FILTER_ALWAYS_ON_KEY,
       );
       on = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
@@ -865,7 +923,7 @@
 
   videoFilterAlwaysOnInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [VIDEO_FILTER_ALWAYS_ON_KEY]: videoFilterAlwaysOnInput.checked,
       });
     } catch {}
@@ -878,14 +936,14 @@
   async function loadWideScreenAuto() {
     let on = false;
     try {
-      const data = await chrome.storage?.local?.get(WIDE_SCREEN_AUTO_KEY);
+      const data = await cachedStorageGet(WIDE_SCREEN_AUTO_KEY);
       on = data?.[WIDE_SCREEN_AUTO_KEY] === true;
     } catch {}
     if (wideScreenAutoInput) wideScreenAutoInput.checked = on;
   }
   wideScreenAutoInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [WIDE_SCREEN_AUTO_KEY]: wideScreenAutoInput.checked,
       });
     } catch {}
@@ -898,14 +956,14 @@
   async function loadLiveSeekBar() {
     let on = true; // 미설정=기본 ON
     try {
-      const data = await chrome.storage?.local?.get(LIVE_SEEK_BAR_KEY);
+      const data = await cachedStorageGet(LIVE_SEEK_BAR_KEY);
       on = data?.[LIVE_SEEK_BAR_KEY] !== false;
     } catch {}
     if (liveSeekBarInput) liveSeekBarInput.checked = on;
   }
   liveSeekBarInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [LIVE_SEEK_BAR_KEY]: liveSeekBarInput.checked,
       });
     } catch {}
@@ -920,14 +978,14 @@
     (async () => {
       let on = true;
       try {
-        const d = await chrome.storage?.local?.get(key);
+        const d = await cachedStorageGet(key);
         on = d?.[key] !== false;
       } catch {}
       input.checked = on;
     })();
     input.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({ [key]: input.checked });
+        cachedStorageSet({ [key]: input.checked });
       } catch {}
     });
   }
@@ -943,14 +1001,14 @@
     (async () => {
       let on = false; // 기본 OFF
       try {
-        const d = await chrome.storage?.local?.get(KEY);
+        const d = await cachedStorageGet(KEY);
         on = d?.[KEY] === true;
       } catch {}
       mixerClickActivateInput.checked = on;
     })();
     mixerClickActivateInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({ [KEY]: mixerClickActivateInput.checked });
+        cachedStorageSet({ [KEY]: mixerClickActivateInput.checked });
       } catch {}
     });
 
@@ -970,7 +1028,7 @@
     (async () => {
       let alwaysOn = false;
       try {
-        const d = await chrome.storage?.local?.get(MIXER_ALWAYS_ON_KEY);
+        const d = await cachedStorageGet(MIXER_ALWAYS_ON_KEY);
         alwaysOn = d?.[MIXER_ALWAYS_ON_KEY] === true;
       } catch {}
       setMixerClickActivateLock(alwaysOn);
@@ -986,14 +1044,14 @@
     (async () => {
       let on = false; // 기본 OFF
       try {
-        const d = await chrome.storage?.local?.get(KEY);
+        const d = await cachedStorageGet(KEY);
         on = d?.[KEY] === true;
       } catch {}
       vfClickActivateInput.checked = on;
     })();
     vfClickActivateInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({ [KEY]: vfClickActivateInput.checked });
+        cachedStorageSet({ [KEY]: vfClickActivateInput.checked });
       } catch {}
     });
 
@@ -1011,7 +1069,7 @@
     (async () => {
       let alwaysOn = false;
       try {
-        const d = await chrome.storage?.local?.get(VIDEO_FILTER_ALWAYS_ON_KEY);
+        const d = await cachedStorageGet(VIDEO_FILTER_ALWAYS_ON_KEY);
         alwaysOn = d?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
       } catch {}
       setVfClickActivateLock(alwaysOn);
@@ -1038,7 +1096,7 @@
     (async () => {
       let mode = "global"; // 기본: 전역값 우선
       try {
-        const d = await chrome.storage?.local?.get(MODE_KEY);
+        const d = await cachedStorageGet(MODE_KEY);
         if (d?.[MODE_KEY] === "channel") mode = "channel";
       } catch {}
       reflectMode(mode);
@@ -1048,7 +1106,7 @@
         const mode = btn.dataset.modeValue === "channel" ? "channel" : "global";
         reflectMode(mode);
         try {
-          chrome.storage?.local?.set({ [MODE_KEY]: mode });
+          cachedStorageSet({ [MODE_KEY]: mode });
         } catch {}
       });
     });
@@ -1074,7 +1132,7 @@
     (async () => {
       let mode = "global"; // 기본: 전역값 우선
       try {
-        const d = await chrome.storage?.local?.get(MODE_KEY);
+        const d = await cachedStorageGet(MODE_KEY);
         if (d?.[MODE_KEY] === "channel") mode = "channel";
       } catch {}
       reflectVfMode(mode);
@@ -1085,7 +1143,7 @@
           btn.dataset.vfModeValue === "channel" ? "channel" : "global";
         reflectVfMode(mode);
         try {
-          chrome.storage?.local?.set({ [MODE_KEY]: mode });
+          cachedStorageSet({ [MODE_KEY]: mode });
         } catch {}
       });
     });
@@ -1109,7 +1167,7 @@
     (async () => {
       let v = def;
       try {
-        const d = await chrome.storage?.local?.get(storageKey);
+        const d = await cachedStorageGet(storageKey);
         const n = Number(d?.[storageKey]);
         if (allowed.includes(n)) v = n;
       } catch {}
@@ -1121,7 +1179,7 @@
         const val = allowed.includes(v) ? v : def;
         reflect(val);
         try {
-          chrome.storage?.local?.set({ [storageKey]: val });
+          cachedStorageSet({ [storageKey]: val });
         } catch {}
       });
     });
@@ -1159,7 +1217,7 @@
   (async () => {
     let hidden = false;
     try {
-      const d = await chrome.storage?.local?.get(FEATURE_HIDDEN_KEY);
+      const d = await cachedStorageGet(FEATURE_HIDDEN_KEY);
       hidden = d?.[FEATURE_HIDDEN_KEY]?.liveRewind === true;
     } catch {}
     setLiveSeekBarLock(hidden);
@@ -1176,7 +1234,7 @@
   if (seekStepInput) {
     (async () => {
       try {
-        const d = await chrome.storage?.local?.get(SEEK_STEP_KEY);
+        const d = await cachedStorageGet(SEEK_STEP_KEY);
         seekStepInput.value = String(clampSeekStep(d?.[SEEK_STEP_KEY] ?? 10));
       } catch {
         seekStepInput.value = "10";
@@ -1186,7 +1244,7 @@
       const v = clampSeekStep(seekStepInput.value);
       seekStepInput.value = String(v); // 범위 밖 입력 보정
       try {
-        chrome.storage?.local?.set({ [SEEK_STEP_KEY]: v });
+        cachedStorageSet({ [SEEK_STEP_KEY]: v });
       } catch {}
     };
     seekStepInput.addEventListener("change", save);
@@ -1203,7 +1261,7 @@
   async function loadChannelLiveButton() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(CHANNEL_LIVE_BUTTON_KEY);
+      const data = await cachedStorageGet(CHANNEL_LIVE_BUTTON_KEY);
       on = data?.[CHANNEL_LIVE_BUTTON_KEY] !== false; // 미설정/true=표시
     } catch {}
     if (channelLiveButtonInput) channelLiveButtonInput.checked = on;
@@ -1211,7 +1269,7 @@
 
   channelLiveButtonInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [CHANNEL_LIVE_BUTTON_KEY]: channelLiveButtonInput.checked,
       });
     } catch {}
@@ -1224,7 +1282,7 @@
   async function loadAdMiniUnmute() {
     let on = false;
     try {
-      const data = await chrome.storage?.local?.get(AD_MINI_UNMUTE_KEY);
+      const data = await cachedStorageGet(AD_MINI_UNMUTE_KEY);
       on = data?.[AD_MINI_UNMUTE_KEY] === true; // 미설정=기본 OFF
     } catch {}
     if (adMiniUnmuteInput) adMiniUnmuteInput.checked = on;
@@ -1246,7 +1304,7 @@
   async function loadAdMiniKeepMuted() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(AD_MINI_KEEP_MUTED_KEY);
+      const data = await cachedStorageGet(AD_MINI_KEEP_MUTED_KEY);
       on = data?.[AD_MINI_KEEP_MUTED_KEY] !== false; // 미설정=기본 ON
     } catch {}
     if (adMiniKeepMutedInput) adMiniKeepMutedInput.checked = on;
@@ -1254,7 +1312,7 @@
   }
   adMiniKeepMutedInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [AD_MINI_KEEP_MUTED_KEY]: adMiniKeepMutedInput.checked,
       });
     } catch {}
@@ -1262,7 +1320,7 @@
 
   adMiniUnmuteInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [AD_MINI_UNMUTE_KEY]: adMiniUnmuteInput.checked,
       });
     } catch {}
@@ -1279,14 +1337,14 @@
   async function loadScreenshotPreview() {
     let on = false;
     try {
-      const data = await chrome.storage?.local?.get(SCREENSHOT_PREVIEW_KEY);
+      const data = await cachedStorageGet(SCREENSHOT_PREVIEW_KEY);
       on = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 미설정=기본 OFF
     } catch {}
     if (screenshotPreviewInput) screenshotPreviewInput.checked = on;
   }
   screenshotPreviewInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [SCREENSHOT_PREVIEW_KEY]: screenshotPreviewInput.checked,
       });
     } catch {}
@@ -1303,7 +1361,7 @@
   async function loadScreenshotDirectSave() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(SCREENSHOT_DIRECT_SAVE_KEY);
+      const data = await cachedStorageGet(SCREENSHOT_DIRECT_SAVE_KEY);
       on = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 미설정=기본 ON
     } catch {}
     if (screenshotDirectInput) screenshotDirectInput.checked = on;
@@ -1321,7 +1379,7 @@
   screenshotDirectInput?.addEventListener("change", () => {
     if (isWhale) return; // 비활성 상태
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [SCREENSHOT_DIRECT_SAVE_KEY]: screenshotDirectInput.checked,
       });
     } catch {}
@@ -1337,7 +1395,7 @@
   async function loadChannelLiveButtonEnd() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(
+      const data = await cachedStorageGet(
         CHANNEL_LIVE_BUTTON_END_KEY,
       );
       on = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
@@ -1347,7 +1405,7 @@
 
   channelLiveButtonEndInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [CHANNEL_LIVE_BUTTON_END_KEY]: channelLiveButtonEndInput.checked,
       });
     } catch {}
@@ -1361,7 +1419,7 @@
   async function loadFollowPreview() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(FOLLOW_PREVIEW_KEY);
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_KEY);
       on = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=표시
     } catch {}
     if (followPreviewInput) followPreviewInput.checked = on;
@@ -1369,7 +1427,7 @@
 
   followPreviewInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [FOLLOW_PREVIEW_KEY]: followPreviewInput.checked,
       });
     } catch {}
@@ -1384,14 +1442,14 @@
   async function loadFollowPreviewMuted() {
     let muted = true; // 기본 음소거
     try {
-      const data = await chrome.storage?.local?.get(FOLLOW_PREVIEW_MUTED_KEY);
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_MUTED_KEY);
       muted = data?.[FOLLOW_PREVIEW_MUTED_KEY] !== false;
     } catch {}
     if (followPreviewMutedInput) followPreviewMutedInput.checked = muted;
   }
   followPreviewMutedInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [FOLLOW_PREVIEW_MUTED_KEY]: followPreviewMutedInput.checked,
       });
     } catch {}
@@ -1420,7 +1478,7 @@
     (async () => {
       let pct = 100;
       try {
-        const d = await chrome.storage?.local?.get(FOLLOW_PREVIEW_VOLUME_KEY);
+        const d = await cachedStorageGet(FOLLOW_PREVIEW_VOLUME_KEY);
         const scale = Number(d?.[FOLLOW_PREVIEW_VOLUME_KEY]);
         pct = Number.isFinite(scale) ? scale * 100 : 100;
       } catch {}
@@ -1430,7 +1488,7 @@
       const v = clampFollowVolumePct(pct);
       reflect(v);
       try {
-        chrome.storage?.local?.set({ [FOLLOW_PREVIEW_VOLUME_KEY]: v / 100 });
+        cachedStorageSet({ [FOLLOW_PREVIEW_VOLUME_KEY]: v / 100 });
       } catch {}
     };
     // 슬라이더는 드래그 중(input) 실시간 반영, 숫자는 change/blur 시 저장.
@@ -1453,14 +1511,14 @@
   async function loadFollowPreviewThumb() {
     let on = false; // 기본 영상
     try {
-      const data = await chrome.storage?.local?.get(FOLLOW_PREVIEW_THUMB_KEY);
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_THUMB_KEY);
       on = data?.[FOLLOW_PREVIEW_THUMB_KEY] === true;
     } catch {}
     if (followPreviewThumbInput) followPreviewThumbInput.checked = on;
   }
   followPreviewThumbInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [FOLLOW_PREVIEW_THUMB_KEY]: followPreviewThumbInput.checked,
       });
     } catch {}
@@ -1480,7 +1538,7 @@
   if (followHeaderFontInput) {
     (async () => {
       try {
-        const d = await chrome.storage?.local?.get(FOLLOW_PREVIEW_HEADER_FONT_KEY);
+        const d = await cachedStorageGet(FOLLOW_PREVIEW_HEADER_FONT_KEY);
         const scale = Number(d?.[FOLLOW_PREVIEW_HEADER_FONT_KEY]);
         const pct = Number.isFinite(scale) && scale > 0 ? scale * 100 : 100;
         followHeaderFontInput.value = String(clampHeaderFontPct(pct));
@@ -1492,7 +1550,7 @@
       const pct = clampHeaderFontPct(followHeaderFontInput.value);
       followHeaderFontInput.value = String(pct);
       try {
-        chrome.storage?.local?.set({
+        cachedStorageSet({
           [FOLLOW_PREVIEW_HEADER_FONT_KEY]: pct / 100,
         });
       } catch {}
@@ -1543,7 +1601,7 @@
   async function loadMaxLife() {
     let sec = FOLLOW_PREVIEW_MAXLIFE_DEFAULT;
     try {
-      const data = await chrome.storage?.local?.get(FOLLOW_PREVIEW_MAXLIFE_KEY);
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_MAXLIFE_KEY);
       const v = Number(data?.[FOLLOW_PREVIEW_MAXLIFE_KEY]);
       if (FOLLOW_PREVIEW_MAXLIFE_ALLOWED.includes(v)) sec = v;
     } catch {}
@@ -1555,7 +1613,7 @@
       const sec = Number(btn.dataset.followMaxlife);
       reflectMaxLife(sec);
       try {
-        chrome.storage?.local?.set({ [FOLLOW_PREVIEW_MAXLIFE_KEY]: sec });
+        cachedStorageSet({ [FOLLOW_PREVIEW_MAXLIFE_KEY]: sec });
       } catch {}
     });
   });
@@ -1570,7 +1628,7 @@
   async function loadCardPreviewAudio() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(CARD_PREVIEW_AUDIO_KEY);
+      const data = await cachedStorageGet(CARD_PREVIEW_AUDIO_KEY);
       on = data?.[CARD_PREVIEW_AUDIO_KEY] !== false; // 미설정/true=표시
     } catch {}
     if (cardPreviewAudioInput) cardPreviewAudioInput.checked = on;
@@ -1578,7 +1636,7 @@
 
   cardPreviewAudioInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [CARD_PREVIEW_AUDIO_KEY]: cardPreviewAudioInput.checked,
       });
     } catch {}
@@ -1594,7 +1652,7 @@
   async function loadCardDateTooltip() {
     let on = true;
     try {
-      const data = await chrome.storage?.local?.get(CARD_DATE_TOOLTIP_KEY);
+      const data = await cachedStorageGet(CARD_DATE_TOOLTIP_KEY);
       on = data?.[CARD_DATE_TOOLTIP_KEY] !== false; // 미설정/true=사용
     } catch {}
     if (cardDateTooltipInput) cardDateTooltipInput.checked = on;
@@ -1602,7 +1660,7 @@
 
   cardDateTooltipInput?.addEventListener("change", () => {
     try {
-      chrome.storage?.local?.set({
+      cachedStorageSet({
         [CARD_DATE_TOOLTIP_KEY]: cardDateTooltipInput.checked,
       });
     } catch {}
@@ -1616,14 +1674,14 @@
     (async () => {
       let on = true; // 기본 ON
       try {
-        const d = await chrome.storage?.local?.get(CAFE_NOW_KEY);
+        const d = await cachedStorageGet(CAFE_NOW_KEY);
         on = d?.[CAFE_NOW_KEY] !== false; // 미설정/true=사용
       } catch {}
       cafeNowInput.checked = on;
     })();
     cafeNowInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({ [CAFE_NOW_KEY]: cafeNowInput.checked });
+        cachedStorageSet({ [CAFE_NOW_KEY]: cafeNowInput.checked });
       } catch {}
     });
   }
@@ -1635,14 +1693,14 @@
     (async () => {
       let on = true; // 기본 ON
       try {
-        const d = await chrome.storage?.local?.get(LOG_ERASER_KEY);
+        const d = await cachedStorageGet(LOG_ERASER_KEY);
         on = d?.[LOG_ERASER_KEY] !== false; // 미설정/true=사용
       } catch {}
       logEraserInput.checked = on;
     })();
     logEraserInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({ [LOG_ERASER_KEY]: logEraserInput.checked });
+        cachedStorageSet({ [LOG_ERASER_KEY]: logEraserInput.checked });
       } catch {}
     });
   }
@@ -1654,14 +1712,14 @@
     (async () => {
       let on = false; // 기본 OFF
       try {
-        const d = await chrome.storage?.local?.get(VOD_AUTOPLAY_OFF_KEY);
+        const d = await cachedStorageGet(VOD_AUTOPLAY_OFF_KEY);
         on = d?.[VOD_AUTOPLAY_OFF_KEY] === true;
       } catch {}
       vodAutoplayOffInput.checked = on;
     })();
     vodAutoplayOffInput.addEventListener("change", () => {
       try {
-        chrome.storage?.local?.set({
+        cachedStorageSet({
           [VOD_AUTOPLAY_OFF_KEY]: vodAutoplayOffInput.checked,
         });
       } catch {}
@@ -1719,7 +1777,7 @@
     if (syncCustomTarget) syncCustomTarget.value = String(target);
     if (syncCustomEnable) syncCustomEnable.value = String(enable);
     try {
-      chrome.storage?.local?.set({ [SYNC_CUSTOM_KEY]: { enable, target } });
+      cachedStorageSet({ [SYNC_CUSTOM_KEY]: { enable, target } });
     } catch {}
   }
 
@@ -1727,7 +1785,7 @@
     let value = "normal";
     let custom = { ...SYNC_CUSTOM_DEFAULT };
     try {
-      const data = await chrome.storage?.local?.get([
+      const data = await cachedStorageGet([
         SYNC_PRESET_KEY,
         SYNC_CUSTOM_KEY,
       ]);
@@ -1750,7 +1808,7 @@
       const value = btn.dataset.syncPreset;
       reflectSyncPreset(value);
       try {
-        chrome.storage?.local?.set({ [SYNC_PRESET_KEY]: value });
+        cachedStorageSet({ [SYNC_PRESET_KEY]: value });
       } catch {}
       // 커스텀 선택 시 현재 입력값도 함께 저장(이전 값이 없으면 기본값 기록).
       if (value === "custom") saveSyncCustom();
@@ -1792,14 +1850,14 @@
     sec = Math.round(sec);
     if (followCustomSec) followCustomSec.value = String(sec);
     try {
-      chrome.storage?.local?.set({ [FOLLOW_REFRESH_KEY]: sec });
+      cachedStorageSet({ [FOLLOW_REFRESH_KEY]: sec });
     } catch {}
   }
 
   async function loadFollowRefresh() {
     let sec = 0;
     try {
-      const data = await chrome.storage?.local?.get(FOLLOW_REFRESH_KEY);
+      const data = await cachedStorageGet(FOLLOW_REFRESH_KEY);
       if (data?.[FOLLOW_REFRESH_KEY] != null) sec = data[FOLLOW_REFRESH_KEY];
     } catch {}
     // 커스텀 입력칸 초기값: 저장값이 커스텀 범위면 그 값, 아니면 기본.
@@ -1824,7 +1882,7 @@
         const sec = Number(key);
         reflectFollowRefresh(sec);
         try {
-          chrome.storage?.local?.set({ [FOLLOW_REFRESH_KEY]: sec });
+          cachedStorageSet({ [FOLLOW_REFRESH_KEY]: sec });
         } catch {}
       }
     });
@@ -1871,14 +1929,14 @@
     count = Math.round(count);
     if (headerFollowCountCustom) headerFollowCountCustom.value = String(count);
     try {
-      chrome.storage?.local?.set({ [HEADER_FOLLOW_COUNT_KEY]: count });
+      cachedStorageSet({ [HEADER_FOLLOW_COUNT_KEY]: count });
     } catch {}
   }
 
   async function loadHeaderFollowCount() {
     let count = HEADER_FOLLOW_COUNT_DEFAULT;
     try {
-      const data = await chrome.storage?.local?.get(HEADER_FOLLOW_COUNT_KEY);
+      const data = await cachedStorageGet(HEADER_FOLLOW_COUNT_KEY);
       if (data?.[HEADER_FOLLOW_COUNT_KEY] != null) {
         count = data[HEADER_FOLLOW_COUNT_KEY];
       }
@@ -1905,7 +1963,7 @@
         const count = Number(key);
         reflectHeaderFollowCount(count);
         try {
-          chrome.storage?.local?.set({ [HEADER_FOLLOW_COUNT_KEY]: count });
+          cachedStorageSet({ [HEADER_FOLLOW_COUNT_KEY]: count });
         } catch {}
       }
     });
