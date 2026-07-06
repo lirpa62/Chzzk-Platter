@@ -106,8 +106,12 @@ const SCREENSHOT_DIRECT_SAVE_KEY = "cheeseScreenshotDirectSave";
 let screenshotDirectSave = true;
 const MIXER_CLICK_ACTIVATE_KEY = "cheeseMixerClickActivate";
 let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+const MIXER_CLICK_NO_PANEL_KEY = "cheeseMixerClickNoPanel";
+let mixerClickNoPanel = false; // 클릭 시 바로 켜기에서 패널 안 열기(전역, 기본 OFF)
 const VIDEO_FILTER_CLICK_ACTIVATE_KEY = "cheeseVideoFilterClickActivate";
 let videoFilterClickActivate = false; // 필터 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+const VIDEO_FILTER_CLICK_NO_PANEL_KEY = "cheeseVideoFilterClickNoPanel";
+let videoFilterClickNoPanel = false; // 클릭 시 바로 켜기에서 패널 안 열기(전역, 기본 OFF)
 const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
 let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
 const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
@@ -12541,7 +12545,9 @@ function broadcastFeatureFlags() {
       gainPct, // 게인 조절 % 표시(전역)
       screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
       mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
+      mixerClickNoPanel, // 믹서 클릭 시 바로 켜기 - 패널 안 열기(전역)
       videoFilterClickActivate, // 필터 버튼 클릭 시 즉시 활성/비활성(전역)
+      videoFilterClickNoPanel, // 필터 클릭 시 바로 켜기 - 패널 안 열기(전역)
       mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
       videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
       mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
@@ -12568,7 +12574,9 @@ async function loadFeatureFlags() {
       VOLUME_PCT_KEY,
       GAIN_PCT_KEY,
       MIXER_CLICK_ACTIVATE_KEY,
+      MIXER_CLICK_NO_PANEL_KEY,
       VIDEO_FILTER_CLICK_ACTIVATE_KEY,
+      VIDEO_FILTER_CLICK_NO_PANEL_KEY,
       MIXER_GLOBAL_DEFAULT_MODE_KEY,
       VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
       MIXER_GAIN_MIN_KEY,
@@ -12606,7 +12614,9 @@ async function loadFeatureFlags() {
     volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
     gainPct = data?.[GAIN_PCT_KEY] !== false;
     mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
+    mixerClickNoPanel = data?.[MIXER_CLICK_NO_PANEL_KEY] === true;
     videoFilterClickActivate = data?.[VIDEO_FILTER_CLICK_ACTIVATE_KEY] === true;
+    videoFilterClickNoPanel = data?.[VIDEO_FILTER_CLICK_NO_PANEL_KEY] === true;
     mixerGlobalDefaultMode =
       data?.[MIXER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
         ? "channel"
@@ -12692,9 +12702,16 @@ if (chrome.storage?.onChanged) {
     if (changes[MIXER_CLICK_ACTIVATE_KEY]) {
       mixerClickActivate = changes[MIXER_CLICK_ACTIVATE_KEY].newValue === true;
     }
+    if (changes[MIXER_CLICK_NO_PANEL_KEY]) {
+      mixerClickNoPanel = changes[MIXER_CLICK_NO_PANEL_KEY].newValue === true;
+    }
     if (changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY]) {
       videoFilterClickActivate =
         changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY].newValue === true;
+    }
+    if (changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY]) {
+      videoFilterClickNoPanel =
+        changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY].newValue === true;
     }
     if (changes[MIXER_GLOBAL_DEFAULT_MODE_KEY]) {
       mixerGlobalDefaultMode =
@@ -12846,7 +12863,9 @@ if (chrome.storage?.onChanged) {
       changes[GAIN_PCT_KEY] ||
       changes[SCREENSHOT_PREVIEW_KEY] ||
       changes[MIXER_CLICK_ACTIVATE_KEY] ||
+      changes[MIXER_CLICK_NO_PANEL_KEY] ||
       changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY] ||
+      changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY] ||
       changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
       changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
       changes[MIXER_GAIN_MIN_KEY] ||

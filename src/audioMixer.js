@@ -28,6 +28,7 @@
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+  let mixerClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
@@ -53,6 +54,7 @@
     screenshotPreviewOn = e.data.screenshotPreview === true;
     // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
     mixerClickActivate = e.data.mixerClickActivate === true;
+    mixerClickNoPanel = e.data.mixerClickNoPanel === true;
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
@@ -246,21 +248,24 @@
   // - targetLevel: 노멀라이저 목표 RMS, limiter: 리미터 threshold(dB)
   const PRESETS = {
     default: {
+      // 기본은 노멀라이저/리미터를 끄고 컴프레서만 쓴다. 낮은 threshold(-50) + 높은
+      // ratio(12)로 조용한~큰 소리를 강하게 평준화하고, 강한 압축으로 줄어든 음량은
+      // makeup 으로 되살려 체감 음량을 유지한다(makeup 없으면 소리가 매우 작아짐).
       label: "기본",
       gain: 1,
       eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      normalizer: true,
+      normalizer: false,
       targetLevel: 0.12,
       comp: {
         enabled: true,
-        threshold: -24,
-        knee: 30,
-        ratio: 3,
-        attack: 0.003,
+        threshold: -50,
+        knee: 40,
+        ratio: 12,
+        attack: 0,
         release: 0.25,
-        makeup: 0,
+        makeup: 12,
       },
-      limiter: -1,
+      limiter: false,
     },
     voice: {
       // 저챗·라디오: 말소리는 앞으로 두되, 배경음악이 너무 얇아지지 않게
@@ -770,6 +775,28 @@
       } catch {}
     }
   }
+
+  // 탭이 백그라운드(alt+tab 등)로 가면 requestAnimationFrame 이 멈춘다. 그 순간 노멀라이저
+  // normGain 이 '감쇠된 값'(큰 소리 구간에서 최소 0.25까지)에 고정되면, 백그라운드에서
+  // 소리가 작아진 채로 남는다('종종 소리 작아진다' 피드백의 원인). 백그라운드가 되면
+  // normGain 을 중립(1)로 되돌려 원음이 그대로 나오게 하고, 다시 포그라운드가 되면 루프가
+  // rAF 로 재개돼 자연스럽게 재조정한다. ctx 가 멈춰 있으면 재개도 시도한다.
+  document.addEventListener("visibilitychange", () => {
+    if (!audio.connected || !audio.ctx) return;
+    if (document.hidden) {
+      // 백그라운드: 노멀라이저 감쇠/증폭을 풀어 원음 유지(루프는 어차피 rAF 로 멈춤).
+      if (audio.normGain) {
+        try {
+          audio.normGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.15);
+        } catch {}
+      }
+    } else {
+      // 포그라운드 복귀: 컨텍스트가 suspended 면 재개(rAF 루프가 다시 조정 시작).
+      if (audio.ctx.state !== "running") {
+        audio.ctx.resume().catch(() => {});
+      }
+    }
+  });
 
   function applyState() {
     if (!audio.connected) return;
@@ -1896,6 +1923,13 @@
   function handleMixerButtonClick() {
     if (!mixerClickActivate) {
       togglePanel();
+      return;
+    }
+    // '패널 안 열기' 하위 옵션: 패널은 건드리지 않고 효과 enabled 만 토글한다(판정도
+    // 패널 열림이 아니라 state.enabled 기준). 클릭은 사용자 제스처라 AudioContext 활성화 가능.
+    if (mixerClickNoPanel) {
+      if (state.enabled) setEnabled(false);
+      else if (!graphConflict) setEnabled(true);
       return;
     }
     const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));

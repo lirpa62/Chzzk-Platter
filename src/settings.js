@@ -49,6 +49,7 @@
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
     "cheeseMixerClickActivate",
+    "cheeseMixerClickNoPanel",
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
     "cheeseMixerGlobalDefaultMode",
@@ -59,6 +60,7 @@
     "cheeseSyncPreset",
     "cheeseVideoFilterAlwaysOn",
     "cheeseVideoFilterClickActivate",
+    "cheeseVideoFilterClickNoPanel",
     "cheeseVideoFilterGlobalDefaultMode",
     "cheeseVodAutoplayOff",
     "cheeseVolumePct",
@@ -1144,6 +1146,38 @@
       } catch {}
       setMixerClickActivateLock(alwaysOn);
     })();
+
+    // 하위: '패널은 열지 않기'. 부모('클릭 시 바로 켜기')가 켜져 있을 때만 의미 있으므로,
+    // 부모가 꺼져 있으면 비활성화한다.
+    const noPanelInput = document.querySelector("[data-mixer-click-no-panel]");
+    if (noPanelInput) {
+      const NP_KEY = "cheeseMixerClickNoPanel";
+      function reflectNoPanelEnabled() {
+        const parentOn =
+          !!mixerClickActivateInput.checked &&
+          !mixerClickActivateInput.disabled;
+        noPanelInput.disabled = !parentOn;
+        noPanelInput
+          .closest(".settings-item")
+          ?.classList.toggle("is-locked", !parentOn);
+      }
+      (async () => {
+        let on = false;
+        try {
+          const d = await cachedStorageGet(NP_KEY);
+          on = d?.[NP_KEY] === true;
+        } catch {}
+        noPanelInput.checked = on;
+        reflectNoPanelEnabled();
+      })();
+      noPanelInput.addEventListener("change", () => {
+        try {
+          cachedStorageSet({ [NP_KEY]: noPanelInput.checked });
+        } catch {}
+      });
+      mixerClickActivateInput.addEventListener("change", reflectNoPanelEnabled);
+      mixerAlwaysOnInput?.addEventListener("change", reflectNoPanelEnabled);
+    }
   }
 
   // ── 필터 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
@@ -1185,6 +1219,41 @@
       } catch {}
       setVfClickActivateLock(alwaysOn);
     })();
+
+    // 하위: '패널은 열지 않기'. 부모가 켜져 있을 때만 활성.
+    const vfNoPanelInput = document.querySelector(
+      "[data-video-filter-click-no-panel]",
+    );
+    if (vfNoPanelInput) {
+      const NP_KEY = "cheeseVideoFilterClickNoPanel";
+      function reflectVfNoPanelEnabled() {
+        const parentOn =
+          !!vfClickActivateInput.checked && !vfClickActivateInput.disabled;
+        vfNoPanelInput.disabled = !parentOn;
+        vfNoPanelInput
+          .closest(".settings-item")
+          ?.classList.toggle("is-locked", !parentOn);
+      }
+      (async () => {
+        let on = false;
+        try {
+          const d = await cachedStorageGet(NP_KEY);
+          on = d?.[NP_KEY] === true;
+        } catch {}
+        vfNoPanelInput.checked = on;
+        reflectVfNoPanelEnabled();
+      })();
+      vfNoPanelInput.addEventListener("change", () => {
+        try {
+          cachedStorageSet({ [NP_KEY]: vfNoPanelInput.checked });
+        } catch {}
+      });
+      vfClickActivateInput.addEventListener("change", reflectVfNoPanelEnabled);
+      videoFilterAlwaysOnInput?.addEventListener(
+        "change",
+        reflectVfNoPanelEnabled,
+      );
+    }
   }
 
   // ── 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선) ─────

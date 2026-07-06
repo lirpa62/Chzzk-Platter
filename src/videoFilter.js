@@ -22,11 +22,13 @@
   // 비디오 필터 항상 켜기(전역). 켜져 있으면 채널 설정 로드 후 자동 활성화한다.
   let videoFilterAlwaysOn = false;
   let vfClickActivate = false; // 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
+  let vfClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
     vfClickActivate = e.data.videoFilterClickActivate === true;
+    vfClickNoPanel = e.data.videoFilterClickNoPanel === true;
     globalDefaultMode =
       e.data.videoFilterGlobalDefaultMode === "channel" ? "channel" : "global";
     if (typeof tick === "function") tick();
@@ -1494,6 +1496,11 @@
   function handleButtonClick() {
     if (!vfClickActivate) {
       togglePanel();
+      return;
+    }
+    // '패널 안 열기' 하위 옵션: 패널은 건드리지 않고 효과 enabled 만 토글한다.
+    if (vfClickNoPanel) {
+      setEnabled(!state.enabled);
       return;
     }
     const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
