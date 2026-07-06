@@ -3819,7 +3819,7 @@ async function loadCommentMarkersEnabled() {
   commentMarkersEnabledLoaded = true;
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(COMMENT_MARKERS_ENABLED_KEY);
+    const data = await getBootData([COMMENT_MARKERS_ENABLED_KEY]);
     const value = data?.[COMMENT_MARKERS_ENABLED_KEY];
     // 저장값이 명시적으로 false일 때만 끈다(미설정/true는 ON).
     if (value === false) {
@@ -3872,7 +3872,7 @@ async function loadCommentFeatureEnabled() {
   commentFeatureEnabledLoaded = true;
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(COMMENT_FEATURE_ENABLED_KEY);
+    const data = await getBootData([COMMENT_FEATURE_ENABLED_KEY]);
     if (data?.[COMMENT_FEATURE_ENABLED_KEY] === false) {
       commentMarkerState.featureEnabled = false;
       applyCommentFeatureEnabled();
@@ -11178,7 +11178,7 @@ function ensureChannelLiveButton() {
 async function loadChannelLiveButton() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get([
+    const data = await getBootData([
       CHANNEL_LIVE_BUTTON_KEY,
       CHANNEL_LIVE_BUTTON_END_KEY,
     ]);
@@ -12070,7 +12070,7 @@ function onFollowPreviewScroll(e) {
 async function loadFollowPreview() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get([
+    const data = await getBootData([
       FOLLOW_PREVIEW_KEY,
       FOLLOW_PREVIEW_SIZE_KEY,
       FOLLOW_PREVIEW_MAXLIFE_KEY,
@@ -12319,7 +12319,7 @@ function normalizeCardPreviewWheelDelay(v) {
 async function loadCardPreviewAudio() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get([
+    const data = await getBootData([
       CARD_PREVIEW_AUDIO_KEY,
       CARD_PREVIEW_WHEEL_DELAY_KEY,
     ]);
@@ -12461,7 +12461,7 @@ function unbindCardDateTooltip() {
 async function loadCardDateTooltip() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(CARD_DATE_TOOLTIP_KEY);
+    const data = await getBootData([CARD_DATE_TOOLTIP_KEY]);
     cardDateTooltipOn = data?.[CARD_DATE_TOOLTIP_KEY] !== false; // 미설정/true=ON
   } catch {}
   if (cardDateTooltipOn) bindCardDateTooltip();
@@ -12490,7 +12490,7 @@ function ensureHeaderObserver() {
 async function loadHeaderNav() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get([
+    const data = await getBootData([
       HEADER_NAV_KEY,
       HEADER_FOLLOW_COUNT_KEY,
     ]);
@@ -12591,7 +12591,7 @@ function applyFollowRefresh(secRaw) {
 async function loadFollowRefresh() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(FOLLOW_REFRESH_KEY);
+    const data = await getBootData([FOLLOW_REFRESH_KEY]);
     applyFollowRefresh(data?.[FOLLOW_REFRESH_KEY]);
   } catch {}
 }
@@ -12634,44 +12634,121 @@ function broadcastFeatureFlags() {
   );
 }
 
+// ── 부트스트랩 배치 프리페치 ─────────────────────────────────────────────────
+// 최초 로딩 시 여러 load*() 가 각자 chrome.storage.local.get 을 호출하면 MV3에서
+// 호출마다 서비스워커 IPC 왕복(콜드 스타트 시 특히 큼)이 걸려, 9회면 그 지연이 9배로
+// 쌓인다(계측: 각 ~22ms × 9 ≈ 200ms). 이 키들을 한 번의 get([...]) 으로 미리 읽어
+// 각 load* 가 그 결과를 참조하게 해 IPC를 1회로 줄인다.
+const FEATURE_FLAGS_KEYS = [
+  FEATURE_HIDDEN_KEY,
+  SYNC_PRESET_KEY,
+  SYNC_CUSTOM_KEY,
+  MIXER_ALWAYS_ON_KEY,
+  MAX_QUALITY_KEY,
+  MAX_QUALITY_RESPECT_KEY,
+  VIDEO_FILTER_ALWAYS_ON_KEY,
+  WIDE_SCREEN_AUTO_KEY,
+  LIVE_SEEK_BAR_KEY,
+  VOLUME_PCT_KEY,
+  GAIN_PCT_KEY,
+  MIXER_CLICK_ACTIVATE_KEY,
+  MIXER_CLICK_NO_PANEL_KEY,
+  VIDEO_FILTER_CLICK_ACTIVATE_KEY,
+  VIDEO_FILTER_CLICK_NO_PANEL_KEY,
+  MIXER_GLOBAL_DEFAULT_MODE_KEY,
+  VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
+  MIXER_GAIN_MIN_KEY,
+  MIXER_GAIN_MAX_KEY,
+  SEEK_STEP_KEY,
+  CHAT_WIDTH_KEY,
+  CHAT_FONT_SCALE_KEY,
+  CHAT_FONT_SCALE_SPECIAL_KEY,
+  CHAT_BUTTON_WRAP_KEY,
+  LOGPOWER_CLICK_ACTION_KEY,
+  LOGPOWER_PROGRESS_MODE_KEY,
+  LOGPOWER_TIMER_MODE_KEY,
+  LOGPOWER_EARNING_COLOR_KEY,
+  VOD_AUTOPLAY_OFF_KEY,
+  AD_MINI_UNMUTE_KEY,
+  AD_MINI_KEEP_MUTED_KEY,
+  SCREENSHOT_PREVIEW_KEY,
+  SCREENSHOT_DIRECT_SAVE_KEY,
+];
+
+// 부트스트랩에서 실제로 도는 load* 들이 읽는 전체 키 집합(중복 제거).
+const BOOT_PREFETCH_KEYS = [
+  ...new Set([
+    ...FEATURE_FLAGS_KEYS,
+    FOLLOW_REFRESH_KEY,
+    HEADER_NAV_KEY,
+    HEADER_FOLLOW_COUNT_KEY,
+    CHANNEL_LIVE_BUTTON_KEY,
+    CHANNEL_LIVE_BUTTON_END_KEY,
+    FOLLOW_PREVIEW_KEY,
+    FOLLOW_PREVIEW_SIZE_KEY,
+    FOLLOW_PREVIEW_MAXLIFE_KEY,
+    FOLLOW_PREVIEW_MUTED_KEY,
+    FOLLOW_PREVIEW_VOLUME_KEY,
+    FOLLOW_PREVIEW_HEADER_FONT_KEY,
+    FOLLOW_PREVIEW_THUMB_KEY,
+    CARD_PREVIEW_AUDIO_KEY,
+    CARD_PREVIEW_WHEEL_DELAY_KEY,
+    CARD_DATE_TOOLTIP_KEY,
+    COMMENT_MARKERS_ENABLED_KEY,
+    COMMENT_FEATURE_ENABLED_KEY,
+  ]),
+];
+const BOOT_PREFETCH_KEY_SET = new Set(BOOT_PREFETCH_KEYS);
+
+let bootPrefetchData = null; // 프리페치 결과(성공 시 {key: value})
+let bootPrefetchPromise = null;
+
+// 프리페치를 1회 시작(부트스트랩에서 호출). 실패해도 각 load* 가 개별 get 으로 폴백.
+function startBootPrefetch() {
+  if (bootPrefetchPromise || !chrome.storage?.local) return;
+  bootPrefetchPromise = chrome.storage.local
+    .get(BOOT_PREFETCH_KEYS)
+    .then((data) => {
+      bootPrefetchData = data || {};
+      return bootPrefetchData;
+    })
+    .catch(() => {
+      bootPrefetchData = null; // 폴백 유도
+      return null;
+    });
+}
+
+// load* 들이 storage.local.get 대신 호출. 요청 키가 프리페치 대상(BOOT_PREFETCH_KEYS)
+// 에 속하면 프리페치 결과를(IPC 없이) 반환하고, 아니면 실제 get 으로 폴백한다.
+// 주의: chrome.storage.get 은 '저장된 적 없는(미설정) 키'를 결과 객체에 넣지 않는다.
+// 따라서 'k in bootPrefetchData' 로 판정하면 미설정 키가 하나라도 있는 순간 폴백해버려
+// 프리페치가 무력화된다(대부분 설정은 기본값=미설정). 대신 요청 키가 프리페치 '대상
+// 집합'에 포함되는지로 판정하고, 미설정 키는 undefined 로 자연 반환한다(실제 get 도
+// 미설정 키를 결과에서 빼므로 data?.[KEY] 가 동일하게 undefined 라 동작 불변).
+async function getBootData(keys) {
+  if (!chrome.storage?.local) return {};
+  const list = Array.isArray(keys) ? keys : [keys];
+  if (bootPrefetchPromise) {
+    await bootPrefetchPromise;
+    if (bootPrefetchData && list.every((k) => BOOT_PREFETCH_KEY_SET.has(k))) {
+      const out = {};
+      for (const k of list) {
+        if (k in bootPrefetchData) out[k] = bootPrefetchData[k];
+      }
+      return out;
+    }
+  }
+  try {
+    return await chrome.storage.local.get(keys);
+  } catch {
+    return {};
+  }
+}
+
 async function loadFeatureFlags() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get([
-      FEATURE_HIDDEN_KEY,
-      SYNC_PRESET_KEY,
-      SYNC_CUSTOM_KEY,
-      MIXER_ALWAYS_ON_KEY,
-      MAX_QUALITY_KEY,
-      MAX_QUALITY_RESPECT_KEY,
-      VIDEO_FILTER_ALWAYS_ON_KEY,
-      WIDE_SCREEN_AUTO_KEY,
-      LIVE_SEEK_BAR_KEY,
-      VOLUME_PCT_KEY,
-      GAIN_PCT_KEY,
-      MIXER_CLICK_ACTIVATE_KEY,
-      MIXER_CLICK_NO_PANEL_KEY,
-      VIDEO_FILTER_CLICK_ACTIVATE_KEY,
-      VIDEO_FILTER_CLICK_NO_PANEL_KEY,
-      MIXER_GLOBAL_DEFAULT_MODE_KEY,
-      VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
-      MIXER_GAIN_MIN_KEY,
-      MIXER_GAIN_MAX_KEY,
-      SEEK_STEP_KEY,
-      CHAT_WIDTH_KEY,
-      CHAT_FONT_SCALE_KEY,
-      CHAT_FONT_SCALE_SPECIAL_KEY,
-      CHAT_BUTTON_WRAP_KEY,
-      LOGPOWER_CLICK_ACTION_KEY,
-      LOGPOWER_PROGRESS_MODE_KEY,
-      LOGPOWER_TIMER_MODE_KEY,
-      LOGPOWER_EARNING_COLOR_KEY,
-      VOD_AUTOPLAY_OFF_KEY,
-      AD_MINI_UNMUTE_KEY,
-      AD_MINI_KEEP_MUTED_KEY,
-      SCREENSHOT_PREVIEW_KEY,
-      SCREENSHOT_DIRECT_SAVE_KEY,
-    ]);
+    const data = await getBootData(FEATURE_FLAGS_KEYS);
     screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     adMiniplayerUnmute = data?.[AD_MINI_UNMUTE_KEY] === true; // 기본 OFF
@@ -13560,6 +13637,8 @@ async function handleProgressStall() {
   loadVideos({ forceRefresh: false });
 }
 
+// 배치 프리페치를 가장 먼저 시작해, 이후 load*() 들이 개별 IPC 없이 결과를 공유한다.
+startBootPrefetch();
 init();
 void loadFeatureFlags();
 void loadFollowRefresh();
@@ -13568,6 +13647,17 @@ void loadChannelLiveButton();
 void loadFollowPreview();
 void loadCardPreviewAudio();
 void loadCardDateTooltip();
+// 부트스트랩 load* 들이 프리페치를 모두 소비한 뒤 캐시를 비워, 이후 재로드(설정 변경
+// 반영 등)는 실제 get 으로 신선한 값을 읽게 한다. 다시보기 tick 에서 나중에 도는
+// comment 로더까지 여유를 주려고 프리페치 완료 후 한 텀 뒤에 무효화한다.
+if (bootPrefetchPromise) {
+  bootPrefetchPromise.then(() => {
+    setTimeout(() => {
+      bootPrefetchData = null;
+      bootPrefetchPromise = null;
+    }, 3000);
+  });
+}
 
 // MAIN world 스크립트가 로드 후 플래그를 요청하면 현재 값을 보내준다(레이스 방지).
 window.addEventListener("message", (event) => {

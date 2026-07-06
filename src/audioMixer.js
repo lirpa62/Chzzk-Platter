@@ -776,27 +776,24 @@
     }
   }
 
-  // 탭이 백그라운드(alt+tab 등)로 가면 requestAnimationFrame 이 멈춘다. 그 순간 노멀라이저
-  // normGain 이 '감쇠된 값'(큰 소리 구간에서 최소 0.25까지)에 고정되면, 백그라운드에서
-  // 소리가 작아진 채로 남는다('종종 소리 작아진다' 피드백의 원인). 백그라운드가 되면
-  // normGain 을 중립(1)로 되돌려 원음이 그대로 나오게 하고, 다시 포그라운드가 되면 루프가
-  // rAF 로 재개돼 자연스럽게 재조정한다. ctx 가 멈춰 있으면 재개도 시도한다.
-  document.addEventListener("visibilitychange", () => {
+  // 탭이 백그라운드로 가거나(다른 탭/최소화) 창이 포커스를 잃으면(alt+tab) 브라우저가
+  // requestAnimationFrame 을 throttle/정지시켜 노멀라이저 루프가 멈춘다. 이때 normGain 은
+  // '멈추기 직전 마지막 보정값'에 고정되는데, 그 값은 그 순간 소리에 맞는 올바른 보정이라
+  // 그대로 두면 소리 크기가 유지된다. (계측 결과: 조용한 구간이면 normGain 이 최대 4배까지
+  // 증폭 중이었고, 이를 억지로 1로 되돌리면 오히려 소리가 확 작아졌다 — '소리 작아짐'의
+  // 실제 원인은 백그라운드에서 normGain 을 1로 리셋하던 로직 자체였다.) 따라서 백그라운드/
+  // blur 시엔 normGain 을 건드리지 않는다. 복귀 시엔 ctx 가 suspend 됐으면 재개만 하고,
+  // 루프는 rAF 가 자연히 재개돼 이어서 조정한다.
+  function resumeAudioForForeground() {
     if (!audio.connected || !audio.ctx) return;
-    if (document.hidden) {
-      // 백그라운드: 노멀라이저 감쇠/증폭을 풀어 원음 유지(루프는 어차피 rAF 로 멈춤).
-      if (audio.normGain) {
-        try {
-          audio.normGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.15);
-        } catch {}
-      }
-    } else {
-      // 포그라운드 복귀: 컨텍스트가 suspended 면 재개(rAF 루프가 다시 조정 시작).
-      if (audio.ctx.state !== "running") {
-        audio.ctx.resume().catch(() => {});
-      }
+    if (audio.ctx.state !== "running") {
+      audio.ctx.resume().catch(() => {});
     }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resumeAudioForForeground();
   });
+  window.addEventListener("focus", resumeAudioForForeground);
 
   function applyState() {
     if (!audio.connected) return;
