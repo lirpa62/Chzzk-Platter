@@ -188,6 +188,12 @@ let followPreviewMaxLifeSec = 120; // 기본 2분
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
 let cardPreviewAudioOn = true;
+// 카드에 마우스가 이 시간(초) 이상 머문 뒤에만 휠을 음량 조절로 가로챈다. 그 전엔 페이지
+// 스크롤을 통과시켜, 스크롤로 카드를 스칠 때 스크롤이 걸리지 않게 한다(전역, 기본 1초).
+// 0이면 즉시(기존 동작). content.js 전용.
+const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
+let cardPreviewWheelDelaySec = 1;
+let cardPreviewHoverEnteredAt = 0; // 현재 카드에 진입한 시각(ms)
 // 채널 다시보기 목록 카드(_information_) 호버 시 등록일/라이브 시작일 툴팁(전역, 기본
 // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
 const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
@@ -5009,6 +5015,7 @@ function applyLogPowerBadge() {
   updateLogPowerIndicators(); // 배지 재생성 시 슬롯 상태 복구
 }
 
+let logPowerWatchRecoverTick = 0;
 function startLogPowerTimer() {
   if (logPowerTimer) return;
   logPowerTimer = window.setInterval(() => {
@@ -5016,6 +5023,13 @@ function startLogPowerTimer() {
     // 입력 영역이 교체됐으면(좁은 옵저버가 죽은 영역을 봄) 재부착하고, 배지도 보장.
     ensureLogPowerBadgeObserver();
     refreshLogPowerBadge();
+    // 5주기(≈5분)마다 background 추적 세션 생존을 점검한다. 백그라운드 장시간
+    // 등으로 세션이 사라졌으면 restoreWatchRewardStatus가 라이브 확인 후 재시작한다.
+    logPowerWatchRecoverTick = (logPowerWatchRecoverTick + 1) % 5;
+    if (logPowerWatchRecoverTick === 0) {
+      const channelId = getCurrentLiveChannelId();
+      if (channelId) restoreWatchRewardStatus(channelId);
+    }
   }, LOGPOWER_REFRESH_MS);
 }
 
@@ -5266,6 +5280,10 @@ async function startWatchRewardTracking(channelId) {
 }
 
 // background에 현재 적립 상태를 물어 복원(SPA 재진입/배지 재생성 시).
+// 세션(status)이 없으면(브라우저 재시작·백그라운드 장시간으로 background가 세션을
+// 정리한 뒤 등) 라이브 시청 중일 때 추적을 자동 재시작한다 — content는 채널 진입
+// 시에만 START를 보내므로, 한 채널에 계속 머무는 탭은 이 복구가 없으면 세션이 한 번
+// 사라진 뒤 영영 추적되지 않는다.
 async function restoreWatchRewardStatus(channelId) {
   if (!channelId) return;
   try {
@@ -5275,7 +5293,12 @@ async function restoreWatchRewardStatus(channelId) {
         channelId,
       })
       .catch(() => null);
-    if (res?.status) applyWatchRewardStatus(res.status);
+    if (res?.status) {
+      applyWatchRewardStatus(res.status);
+    } else if (channelId === getCurrentLiveChannelId()) {
+      // 세션 없음 + 여전히 이 채널 라이브 시청 중 → 추적 재시작(복구).
+      startWatchRewardTracking(channelId);
+    }
   } catch {}
 }
 
@@ -12130,6 +12153,18 @@ function onCardPreviewWheelCapture(e) {
   if (!cardPreviewAudioOn) return;
   const video = cardPreviewVideoAtEvent(e);
   if (!video) return;
+  // 카드에 충분히 머문 뒤에만 휠을 음량 조절로 가로챈다. 그 전엔 스크롤을 통과시켜
+  // 스크롤로 카드를 스칠 때 걸리지 않게 한다(스크롤로 카드가 바뀌면 진입 시각 리셋됨).
+  const delayMs = Math.max(0, cardPreviewWheelDelaySec) * 1000;
+  if (delayMs > 0) {
+    const card = e.target?.closest?.('a[href^="/live/"]');
+    // 현재 휠이 발생한 카드가 우리가 추적 중인 호버 카드와 같고, 머문 시간이 지연 이상일 때만.
+    const dwell =
+      card && card === cardPreviewHoverCard && cardPreviewHoverEnteredAt
+        ? Date.now() - cardPreviewHoverEnteredAt
+        : 0;
+    if (dwell < delayMs) return; // 아직 안 머묾 → 페이지 스크롤 통과
+  }
   e.preventDefault(); // 페이지 스크롤 차단
   e.stopPropagation();
   e.stopImmediatePropagation();
@@ -12149,8 +12184,12 @@ function onCardPreviewWheelCapture(e) {
 // 안 닫힘). body 직속 div(pointer-events:none)라 마우스 이벤트를 안 가로채 미리보기가
 // 안 멈춘다. 미리보기 video가 실제 있는 카드에만, 세션당 1회, N초 뒤 페이드아웃.
 const CARD_HINT_ID = "cheese-card-hint";
-const CARD_HINT_TEXT = "우클릭: 음소거 / 토글 · 마우스 휠: 음량 조절";
+const CARD_HINT_TEXT = "우클릭: 음소거 켜기/끄기 · 마우스 휠: 음량 조절";
 const CARD_HINT_SHOW_MS = 3000; // 표시 후 이 시간 뒤 사라짐
+// 스크롤 중엔 힌트를 숨기고, 스크롤이 멎은 뒤 이 시간이 지나야 다시 띄운다(스크롤 시
+// 카드가 이동하는데 힌트가 따라다니던 문제 방지).
+const CARD_HINT_SCROLL_QUIET_MS = 350;
+let cardHintLastScrollAt = 0;
 let cardPreviewHoverCard = null; // 현재 호버 중인 카드(세션당 1회)
 let cardHintPollTimer = 0; // video 생성 폴링
 let cardHintHideTimer = 0; // 자동 숨김
@@ -12182,6 +12221,18 @@ function tryShowCardHint(card, tries) {
   cardHintPollTimer = 0;
   if (!cardPreviewAudioOn || !card.isConnected || card !== cardPreviewHoverCard)
     return;
+  // 스크롤 중/직후엔 힌트를 띄우지 않는다(카드가 이동해 힌트가 따라다니는 문제 방지).
+  // 스크롤이 멎으면 quiet 시간 뒤 다시 시도.
+  const sinceScroll = Date.now() - cardHintLastScrollAt;
+  if (sinceScroll < CARD_HINT_SCROLL_QUIET_MS) {
+    if (tries > 0) {
+      cardHintPollTimer = setTimeout(
+        () => tryShowCardHint(card, tries),
+        CARD_HINT_SCROLL_QUIET_MS - sinceScroll,
+      );
+    }
+    return;
+  }
   const v = card.querySelector(CARD_PREVIEW_VIDEO_SEL);
   if (v && isCardPreviewVideo(v)) {
     const el = ensureCardHintEl();
@@ -12211,6 +12262,7 @@ function onCardPreviewMouseOver(e) {
   if (card === cardPreviewHoverCard) return; // 같은 카드 계속 호버 → 그대로
   hideCardHint(); // 다른 카드/이탈 → 이전 툴팁·타이머 정리
   cardPreviewHoverCard = card || null;
+  cardPreviewHoverEnteredAt = card ? Date.now() : 0; // 진입 시각(휠 지연 판정용)
   if (card) tryShowCardHint(card, 10); // ~1.5초 폴링 후 표시
 }
 
@@ -12228,6 +12280,17 @@ function bindCardPreviewAudio() {
   document.addEventListener("mouseover", onCardPreviewMouseOver, {
     passive: true,
   });
+  // 스크롤 시 힌트를 즉시 숨기고(따라다님 방지) 스크롤 시각 기록. capture 로 어떤
+  // 스크롤 컨테이너의 스크롤이든 잡는다.
+  document.addEventListener("scroll", onCardHintScroll, {
+    capture: true,
+    passive: true,
+  });
+}
+
+function onCardHintScroll() {
+  cardHintLastScrollAt = Date.now();
+  document.getElementById(CARD_HINT_ID)?.classList.remove("is-visible");
 }
 
 function unbindCardPreviewAudio() {
@@ -12241,16 +12304,29 @@ function unbindCardPreviewAudio() {
     capture: true,
   });
   document.removeEventListener("mouseover", onCardPreviewMouseOver);
+  document.removeEventListener("scroll", onCardHintScroll, { capture: true });
   hideCardHint();
   document.getElementById(CARD_HINT_ID)?.remove();
   cardPreviewHoverCard = null;
 }
 
+function normalizeCardPreviewWheelDelay(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1; // 미설정=기본 1초
+  return Math.min(5, Math.max(0, Math.round(n * 10) / 10)); // 0~5초
+}
+
 async function loadCardPreviewAudio() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await chrome.storage.local.get(CARD_PREVIEW_AUDIO_KEY);
+    const data = await chrome.storage.local.get([
+      CARD_PREVIEW_AUDIO_KEY,
+      CARD_PREVIEW_WHEEL_DELAY_KEY,
+    ]);
     cardPreviewAudioOn = data?.[CARD_PREVIEW_AUDIO_KEY] !== false; // 미설정/true=ON
+    cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
+      data?.[CARD_PREVIEW_WHEEL_DELAY_KEY],
+    );
   } catch {}
   if (cardPreviewAudioOn) bindCardPreviewAudio();
   else unbindCardPreviewAudio();
@@ -12833,6 +12909,11 @@ if (chrome.storage?.onChanged) {
       cardPreviewAudioOn = changes[CARD_PREVIEW_AUDIO_KEY].newValue !== false;
       if (cardPreviewAudioOn) bindCardPreviewAudio();
       else unbindCardPreviewAudio();
+    }
+    if (changes[CARD_PREVIEW_WHEEL_DELAY_KEY]) {
+      cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
+        changes[CARD_PREVIEW_WHEEL_DELAY_KEY].newValue,
+      );
     }
     if (changes[CARD_DATE_TOOLTIP_KEY]) {
       cardDateTooltipOn = changes[CARD_DATE_TOOLTIP_KEY].newValue !== false;

@@ -23,6 +23,7 @@
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
     "cheeseCardPreviewAudio",
+    "cheeseCardPreviewWheelDelaySec",
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
     "cheeseChatButtonWrap",
@@ -1814,14 +1815,55 @@
     if (cardPreviewAudioInput) cardPreviewAudioInput.checked = on;
   }
 
+  // 휠 음량 활성 지연(초). 부모(카드 미리보기 음량)가 꺼져 있으면 비활성화.
+  const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
+  const cardWheelDelayInput = document.querySelector(
+    "[data-card-preview-wheel-delay]",
+  );
+  function clampCardWheelDelay(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(5, Math.max(0, Math.round(n * 2) / 2)); // 0~5, 0.5 단위
+  }
+  function reflectCardWheelDelayEnabled() {
+    const parentOn = !!cardPreviewAudioInput?.checked;
+    if (!cardWheelDelayInput) return;
+    cardWheelDelayInput.disabled = !parentOn;
+    cardWheelDelayInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", !parentOn);
+  }
+  async function loadCardWheelDelay() {
+    let v = 1;
+    try {
+      const d = await cachedStorageGet(CARD_PREVIEW_WHEEL_DELAY_KEY);
+      v = clampCardWheelDelay(d?.[CARD_PREVIEW_WHEEL_DELAY_KEY] ?? 1);
+    } catch {}
+    if (cardWheelDelayInput) cardWheelDelayInput.value = String(v);
+    reflectCardWheelDelayEnabled();
+  }
+  if (cardWheelDelayInput) {
+    const saveDelay = () => {
+      const v = clampCardWheelDelay(cardWheelDelayInput.value);
+      cardWheelDelayInput.value = String(v);
+      try {
+        cachedStorageSet({ [CARD_PREVIEW_WHEEL_DELAY_KEY]: v });
+      } catch {}
+    };
+    cardWheelDelayInput.addEventListener("change", saveDelay);
+    cardWheelDelayInput.addEventListener("blur", saveDelay);
+  }
+
   cardPreviewAudioInput?.addEventListener("change", () => {
     try {
       cachedStorageSet({
         [CARD_PREVIEW_AUDIO_KEY]: cardPreviewAudioInput.checked,
       });
     } catch {}
+    reflectCardWheelDelayEnabled();
   });
   loadCardPreviewAudio();
+  loadCardWheelDelay();
 
   // ── 다시보기 카드 날짜 툴팁(채널 다시보기 목록 카드 호버, 전역 기본 ON) ──────
   const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";

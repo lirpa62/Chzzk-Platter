@@ -2890,16 +2890,28 @@ async function lpCheckProgress(channelId) {
     return;
   }
   const now = Date.now();
-  if (now - Number(state.startedAt || now) > LP_WATCH_MAX_MS) {
-    await lpClearWatchState(channelId);
-    lpBroadcast(lpStateToStatus(state, false));
-    return;
-  }
   // 라이브 종료면 정리(null=불확실은 계속 진행).
   const live = await lpIsChannelLive(channelId);
   if (live === false) {
     await lpClearWatchState(channelId);
     lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId });
+    return;
+  }
+  // 라이브가 살아있으면(true) 추적 상한(startedAt)을 리셋한다. LP_WATCH_MAX_MS 는
+  // '라이브 종료를 못 감지한 채 무한 추적'을 막는 안전장치일 뿐인데, 라이브가 계속
+  // 켜져 있으면 실제 시청 중이므로 끊으면 안 된다(75분 넘게 보면 적립 추적이 세션에서
+  // 사라지던 원인). live===null(불확실)일 때만 상한을 유지해, 라이브 상태를 계속
+  // 확인 못 하는 상황에서만 최대 75분 뒤 정리한다.
+  if (live === true) {
+    if (now - Number(state.startedAt || now) > LP_WATCH_MAX_MS / 2) {
+      // 상한의 절반이 지나면 startedAt 을 당겨(리셋) 라이브 동안엔 안 끊기게.
+      state.startedAt = now;
+      await lpSetWatchState(channelId, state);
+    }
+  } else if (now - Number(state.startedAt || now) > LP_WATCH_MAX_MS) {
+    // live 불확실(null)한 상태로 상한 초과 → 안전상 정리.
+    await lpClearWatchState(channelId);
+    lpBroadcast(lpStateToStatus(state, false));
     return;
   }
   const amount = await lpFetchAmount(channelId);
