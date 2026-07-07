@@ -20,8 +20,10 @@
     "cheeseSearchTheme",
     "cheeseAdMiniplayerKeepMuted",
     "cheeseAdMiniplayerUnmute",
+    "cheeseAutoReloadOnError",
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
+    "cheeseCardLivePreview",
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewWheelDelaySec",
     "cheeseChannelLiveButton",
@@ -30,8 +32,10 @@
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatMoaActive",
+    "cheeseFollowChannelTooltip",
     "cheeseFollowPreview",
     "cheeseFollowPreviewHeaderFont",
+    "cheeseFollowPreviewLiveEdge",
     "cheeseFollowPreviewMaxLifeSec",
     "cheeseFollowPreviewMuted",
     "cheeseFollowPreviewThumbOnly",
@@ -54,9 +58,11 @@
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
     "cheeseMixerGlobalDefaultMode",
+    "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
     "cheeseSeekStepS",
+    "cheeseSubscribeBadgeProgress",
     "cheeseSyncCustom",
     "cheeseSyncPreset",
     "cheeseVideoFilterAlwaysOn",
@@ -1706,6 +1712,28 @@
   });
   loadFollowPreviewThumb();
 
+  // ── 미리보기 라이브 최신 재생(엣지, 기본 ON) ───────────────────────────────
+  const FOLLOW_PREVIEW_LIVE_EDGE_KEY = "cheeseFollowPreviewLiveEdge";
+  const followPreviewLiveEdgeInput = document.querySelector(
+    "[data-follow-preview-live-edge]",
+  );
+  async function loadFollowPreviewLiveEdge() {
+    let on = true; // 기본 최신 재생
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_LIVE_EDGE_KEY);
+      on = data?.[FOLLOW_PREVIEW_LIVE_EDGE_KEY] !== false; // 미설정/true=ON
+    } catch {}
+    if (followPreviewLiveEdgeInput) followPreviewLiveEdgeInput.checked = on;
+  }
+  followPreviewLiveEdgeInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_PREVIEW_LIVE_EDGE_KEY]: followPreviewLiveEdgeInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowPreviewLiveEdge();
+
   // ── 미리보기 헤더 폰트 크기(입력 75~175%, 저장 배율 0.75~1.75) ──────────────
   const FOLLOW_PREVIEW_HEADER_FONT_KEY = "cheeseFollowPreviewHeaderFont";
   const followHeaderFontInput = document.querySelector(
@@ -1801,6 +1829,50 @@
   loadMaxLife();
 
   // ── 카드 미리보기 음량(라이브 탐색 카드 호버 video, 전역 기본 ON) ──────────
+  // 카드 호버 플레이어 미리보기(팔로잉 미리보기 인프라 재사용, 기본 OFF).
+  const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
+  const cardLivePreviewInput = document.querySelector(
+    "[data-card-live-preview]",
+  );
+  async function loadCardLivePreview() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(CARD_LIVE_PREVIEW_KEY);
+      on = data?.[CARD_LIVE_PREVIEW_KEY] === true;
+    } catch {}
+    if (cardLivePreviewInput) cardLivePreviewInput.checked = on;
+  }
+  cardLivePreviewInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CARD_LIVE_PREVIEW_KEY]: cardLivePreviewInput.checked,
+      });
+    } catch {}
+  });
+  loadCardLivePreview();
+
+  // 팔로잉 채널 호버 정보 툴팁(기본 OFF).
+  const FOLLOW_CHANNEL_TOOLTIP_KEY = "cheeseFollowChannelTooltip";
+  const followChannelTooltipInput = document.querySelector(
+    "[data-follow-channel-tooltip]",
+  );
+  async function loadFollowChannelTooltip() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(FOLLOW_CHANNEL_TOOLTIP_KEY);
+      on = data?.[FOLLOW_CHANNEL_TOOLTIP_KEY] === true;
+    } catch {}
+    if (followChannelTooltipInput) followChannelTooltipInput.checked = on;
+  }
+  followChannelTooltipInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_CHANNEL_TOOLTIP_KEY]: followChannelTooltipInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowChannelTooltip();
+
   const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
   const cardPreviewAudioInput = document.querySelector(
     "[data-card-preview-audio]",
@@ -1888,6 +1960,103 @@
     } catch {}
   });
   loadCardDateTooltip();
+
+  // ── 구독 배지 다음 등급까지 남은 기간(구독권 관리 팝업, 전역 기본 ON) ────────
+  const SUBSCRIBE_BADGE_PROGRESS_KEY = "cheeseSubscribeBadgeProgress";
+  const subscribeBadgeInput = document.querySelector(
+    "[data-subscribe-badge-progress]",
+  );
+
+  async function loadSubscribeBadgeProgress() {
+    let on = true;
+    try {
+      const data = await cachedStorageGet(SUBSCRIBE_BADGE_PROGRESS_KEY);
+      on = data?.[SUBSCRIBE_BADGE_PROGRESS_KEY] !== false; // 미설정/true=사용
+    } catch {}
+    if (subscribeBadgeInput) subscribeBadgeInput.checked = on;
+  }
+
+  subscribeBadgeInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [SUBSCRIBE_BADGE_PROGRESS_KEY]: subscribeBadgeInput.checked,
+      });
+    } catch {}
+  });
+  loadSubscribeBadgeProgress();
+
+  // ── 오류 시 자동 새로고침(리방/네트워크·미디어 오류, 기본 OFF) ─────────────
+  const AUTO_RELOAD_ON_ERROR_KEY = "cheeseAutoReloadOnError";
+  const autoReloadInput = document.querySelector("[data-auto-reload-on-error]");
+  async function loadAutoReloadOnError() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(AUTO_RELOAD_ON_ERROR_KEY);
+      on = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 미설정=꺼짐
+    } catch {}
+    if (autoReloadInput) autoReloadInput.checked = on;
+  }
+  autoReloadInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [AUTO_RELOAD_ON_ERROR_KEY]: autoReloadInput.checked,
+      });
+    } catch {}
+  });
+  loadAutoReloadOnError();
+
+  // ── 플레이어 하단 버튼 좌/우 배치(버튼별 left|right, 기본 right) ────────────
+  const PLAYER_BUTTON_SIDE_KEY = "cheesePlayerButtonSide";
+  const PLAYER_BUTTON_SIDE_DEFAULT = {
+    streamStats: "right",
+    tabMute: "right",
+    screenshot: "right",
+    seek: "right",
+    sync: "right",
+  };
+  const buttonSideRoot = document.querySelector("[data-player-button-side]");
+  if (buttonSideRoot) {
+    let sideState = { ...PLAYER_BUTTON_SIDE_DEFAULT };
+    const groups = Array.from(
+      buttonSideRoot.querySelectorAll("[data-btn-side]"),
+    );
+    function reflectSide() {
+      groups.forEach((group) => {
+        const key = group.dataset.btnSide;
+        const v = sideState[key] === "left" ? "left" : "right";
+        group.querySelectorAll("[data-side-value]").forEach((btn) => {
+          const active = btn.dataset.sideValue === v;
+          btn.classList.toggle("is-active", active);
+          btn.setAttribute("aria-checked", String(active));
+        });
+      });
+    }
+    (async () => {
+      try {
+        const d = await cachedStorageGet(PLAYER_BUTTON_SIDE_KEY);
+        const saved = d?.[PLAYER_BUTTON_SIDE_KEY];
+        if (saved && typeof saved === "object") {
+          for (const k of Object.keys(PLAYER_BUTTON_SIDE_DEFAULT)) {
+            if (saved[k] === "left" || saved[k] === "right")
+              sideState[k] = saved[k];
+          }
+        }
+      } catch {}
+      reflectSide();
+    })();
+    groups.forEach((group) => {
+      const key = group.dataset.btnSide;
+      group.querySelectorAll("[data-side-value]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          sideState[key] = btn.dataset.sideValue === "left" ? "left" : "right";
+          reflectSide();
+          try {
+            cachedStorageSet({ [PLAYER_BUTTON_SIDE_KEY]: { ...sideState } });
+          } catch {}
+        });
+      });
+    });
+  }
 
   // ── 카페 클립 인라인 재생(네이버 카페, 기본 ON) ───────────────────────────
   const CAFE_NOW_KEY = "cheeseCafeNow";

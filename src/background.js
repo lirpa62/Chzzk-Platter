@@ -2769,14 +2769,16 @@ async function lpFetchAmount(channelId) {
 
 async function lpIsChannelLive(channelId) {
   try {
-    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}/live-status`, {
+    // 채널 기본 정보 API 의 content.openLive 로 방송 여부 판단(가볍고 확실).
+    // 과거 /live-status 경로는 Not Found 를 반환해 항상 null(불확실)이 나왔다.
+    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}`, {
       credentials: "include",
     });
     if (!res.ok) return null; // 불확실
     const json = await res.json();
     const c = json?.content;
-    if (!c) return null;
-    return c.status === "OPEN" && !c.closeDate;
+    if (!c || typeof c.openLive !== "boolean") return null;
+    return c.openLive;
   } catch {
     return null;
   }
@@ -3002,6 +3004,25 @@ async function cafeFetchClipMetadata(clipId) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  // 팔로우 미리보기가 hls.js 를 처음 필요로 할 때 요청. 이 탭의 ISOLATED world 에
+  // 지연 주입한다(상시 로드 안 해 모든 페이지 LCP 개선). content.js 스코프에 Hls 정의됨.
+  if (message.type === "CHEESE_LOAD_HLS") {
+    const tabId = sender?.tab?.id;
+    if (tabId == null) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        files: ["src/hls.min.js"],
+        world: "ISOLATED",
+      })
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true; // 비동기 응답
   }
 
   if (message.type === "CHZZK_CAFE_NOW_GET_CLIP_METADATA") {

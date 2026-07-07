@@ -2423,6 +2423,57 @@
   window.addEventListener("keypress", stopEditableShortcutLeak, true);
   window.addEventListener("scroll", () => closeInfoPopover(ui?.panel), true);
 
+  // 채팅/일반 입력창에 타이핑 중인지(단축키가 새지 않게). isEditableTarget 은 필터
+  // 패널 내부 입력만 보므로, 단축키 게이트에는 페이지 전체 입력을 보는 이 판정을 쓴다.
+  const isTypingAnywhere = (t) =>
+    !!t &&
+    (t.isContentEditable ||
+      t.tagName === "INPUT" ||
+      t.tagName === "TEXTAREA" ||
+      t.tagName === "SELECT");
+
+  // 비디오 필터 단축키(Shift+V). 필터 버튼이 표시된 상태에서 타이핑 중이 아닐 때만,
+  // 버튼 클릭과 동일하게 동작(패널 토글 또는 즉시 활성화 옵션 반영).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyV" && e.key !== "V" && e.key !== "v") return;
+      if (featureFlags.videoFilter) return; // 필터 기능 숨김이면 끔
+      if (isTypingAnywhere(e.target) || isTypingAnywhere(document.activeElement))
+        return;
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleButtonClick();
+    },
+    true,
+  );
+
+  // ESC로 열린 비디오 필터 패널 닫기. 패널 내부 모달(빠른 저장/커스텀 편집·내보내기·
+  // 불러오기)이 열려 있으면 그 모달만 취소되도록 여기선 건드리지 않는다(모달 취소는
+  // 패널 내부 리스너/각 모달 로직이 처리).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Escape") return;
+      const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
+      if (!panelOpen) return;
+      const modalOpen =
+        quickSaveOpen ||
+        customCreatorOpen ||
+        customExportOpen ||
+        customImportOpen ||
+        !!customDialog;
+      if (modalOpen) return; // 모달이 있으면 패널은 유지(모달만 닫힘)
+      e.preventDefault();
+      e.stopPropagation();
+      closePanel();
+    },
+    true,
+  );
+
   // ── 부트스트랩 ────────────────────────────────────────────────────────────
   function tick() {
     const pageKey = getPageKey();

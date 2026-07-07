@@ -59,12 +59,16 @@ body {
   min-height: 0;
 }
 
-/* 좌측 탭 + 우측 패널 분리 레이아웃 — 남은 높이를 채우고, 패널만 스크롤 */
+/* 좌측 탭 + 우측 패널 분리 레이아웃 — 남은 높이를 채우고, 탭/패널 각자 스크롤 */
 .settings-layout {
   display: grid;
   grid-template-columns: 128px 1fr;
+  /* 행 높이를 그리드 셀(남은 높이)로 고정한다. align-items:start 로 두면 탭 목록이
+     길어질 때(탭이 많아짐) 컬럼이 셀 높이를 넘어 아래로 밀려나 하단이 잘렸다.
+     minmax(0,1fr) 로 단일 행이 셀을 정확히 채우고 자식 overflow 를 허용한다. */
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
   gap: 14px;
-  align-items: start;
   flex: 1;
   min-height: 0;
 }
@@ -73,6 +77,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 탭이 셀 높이보다 많아지면 탭 목록 자체가 세로 스크롤(하단 탭 잘림 방지). */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .settings-tab {
@@ -277,6 +285,29 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+  flex: none;
+}
+
+/* 플레이어 하단 버튼 좌/우 배치 — 버튼 이름 + 좌/우 세그먼트 행들 */
+.settings-button-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
+.settings-button-side-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-button-side-row > span {
+  font-size: 12px;
+  color: var(--popup-text);
+}
+.settings-button-side-row .settings-segmented {
+  width: 132px;
   flex: none;
 }
 
@@ -507,6 +538,7 @@ body {
 }
 
 .settings-item:has([data-mixer-global-default-mode]),
+.settings-item:has([data-player-button-side]),
 .settings-item:has([data-video-filter-global-default-mode]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),

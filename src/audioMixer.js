@@ -31,6 +31,15 @@
   let mixerClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
+  // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
+  // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
+  const playerButtonSide = {
+    streamStats: "right",
+    tabMute: "right",
+    screenshot: "right",
+    seek: "right",
+    sync: "right",
+  };
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
@@ -81,6 +90,22 @@
       seekStepS = Math.round(ns);
       if (changed && typeof refreshSeekButtonLabels === "function")
         refreshSeekButtonLabels();
+    }
+    // 하단 버튼 좌/우 배치(전역). 값이 바뀌면 기존 버튼을 제거해 다음 tick에서 새 위치로
+    // 다시 주입되게 한다(ensure*Button 이 목표 컨테이너에 없으면 만들고, 있으면 유지).
+    const side = e.data.playerButtonSide;
+    if (side && typeof side === "object") {
+      let sideChanged = false;
+      for (const k of Object.keys(playerButtonSide)) {
+        const v = side[k] === "left" || side[k] === "right" ? side[k] : null;
+        if (v && v !== playerButtonSide[k]) {
+          playerButtonSide[k] = v;
+          sideChanged = true;
+        }
+      }
+      if (sideChanged && typeof relocatePlayerButtons === "function") {
+        relocatePlayerButtons();
+      }
     }
     // 플래그가 바뀌었으니 다음 tick은 fast-path를 건너뛰고 반드시 full로 돌려
     // 버튼 숨김/표시를 즉시 반영한다(안 그러면 컨트롤 재렌더가 있을 때까지 지연됨).
@@ -735,13 +760,18 @@
 
   function startNormalizerLoop() {
     stopNormalizerLoop();
+    // 노멀라이저가 꺼져 있으면 루프를 아예 돌리지 않는다(믹서만 켜도 노멀라이저 미사용
+    // 프리셋에서 60fps rAF 가 헛돌며 메인스레드/영상 렌더와 경쟁하던 부하 제거).
+    // 노멀라이저를 켜면 applyState 가 이 함수를 다시 불러 루프를 시작한다.
+    if (!audio.connected || !state.normalizer?.enabled) return;
     const buf = new Float32Array(audio.analyser.fftSize);
     const loop = () => {
-      if (!audio.connected) return;
-      if (!state.normalizer?.enabled) {
-        // 꺼져 있으면 게인 1로 복귀시키고 루프만 유지
-        audio.normGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.2);
-        audio.normTimer = requestAnimationFrame(loop);
+      if (!audio.connected || !state.normalizer?.enabled) {
+        // 실행 중 꺼졌으면 게인 1로 복귀시키고 루프 종료(재개는 applyState 가).
+        try {
+          audio.normGain?.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.2);
+        } catch {}
+        audio.normTimer = 0;
         return;
       }
       audio.analyser.getFloatTimeDomainData(buf);
@@ -816,6 +846,12 @@
       ? state.limiter.threshold
       : 0;
     audio.limiter.ratio.value = state.limiter.enabled ? 20 : 1;
+    // 노멀라이저 on/off 에 맞춰 분석 루프를 시작/정지(꺼지면 rAF 부하 0).
+    if (state.normalizer?.enabled) {
+      if (!audio.normTimer) startNormalizerLoop();
+    } else if (audio.normTimer) {
+      stopNormalizerLoop();
+    }
   }
 
   function setEnabled(enabled) {
@@ -3617,8 +3653,7 @@
       audioSampleRate: null,
       isLive: location.pathname.startsWith("/live/"),
       audioOnly: false, // 라디오 모드(오디오 전용)
-      hwDecode: null, // 하드웨어 디코딩 가능 여부(mediaCapabilities, 비동기 캐시)
-      // 아래 _접두 필드는 mediaCapabilities.decodingInfo 입력용 원시값(표시 안 함).
+      // 아래 _접두 필드는 내부 계산용 원시값(표시 안 함).
       _rawVideoCodec: null,
       _w: 0,
       _h: 0,
@@ -3791,85 +3826,7 @@
         info.audioChannels = `${audio.source.channelCount}ch`;
     } catch {}
 
-    // 하드웨어 디코딩 가능 여부(mediaCapabilities). 비동기라 캐시값을 채우고,
-    // 코덱/해상도가 바뀌었으면 백그라운드 재조회를 띄운다(다음 1초 갱신에 반영).
-    if (!info.audioOnly) {
-      info.hwDecode = hwDecodeCache.text;
-      probeHwDecode(info);
-    }
-
     return info;
-  }
-
-  // ── 하드웨어(GPU) 비디오 디코딩 가능 여부 ─────────────────────────────────
-  // navigator.mediaCapabilities.decodingInfo의 powerEfficient로 판정한다.
-  // 주의: "이 코덱/해상도가 이 환경에서 하드웨어 가속될 수 있는가"이지, "지금 이
-  // 프레임이 GPU로 디코딩 중인가"를 100% 확정하진 않는다(브라우저에 그런 API가
-  // 없음). 크롬 하드웨어 가속 OFF면 powerEfficient=false로 떨어진다.
-  const hwDecodeCache = { key: "", text: null, pending: false };
-
-  function probeHwDecode(info) {
-    const codec = info._rawVideoCodec;
-    const w = info._w || 0;
-    const h = info._h || 0;
-    if (!codec || !w || !h) return; // 입력 부족 → 조회 불가
-    if (!navigator.mediaCapabilities?.decodingInfo) {
-      hwDecodeCache.text = "확인 불가 (미지원 브라우저)";
-      return;
-    }
-    const fps = info._fpsNum > 0 ? Math.round(info._fpsNum) : 30;
-    const bitrate = info._bitrateNum > 0 ? Math.round(info._bitrateNum) : 3000000;
-    const key = `${codec}|${w}x${h}|${fps}|${bitrate}`;
-    if (key === hwDecodeCache.key) return; // 동일 입력 → 캐시 유지
-    if (hwDecodeCache.pending) return; // 조회 진행 중
-    hwDecodeCache.pending = true;
-    // media-source(MSE)와 file 두 경로를 모두 조회한다. Windows 크롬은 media-source
-    // 경로에서 H.264가 실제 HW 디코딩 중이어도 powerEfficient:false로 자주 반환하는데,
-    // file 경로는 더 정확한 경우가 많다. 둘 중 하나라도 powerEfficient면 '사용 중'으로
-    // 본다(가능성 판정이므로 보수적으로 OR).
-    const videoConfig = {
-      contentType: `video/mp4; codecs="${codec}"`,
-      width: w,
-      height: h,
-      bitrate,
-      framerate: fps,
-    };
-    const probe = (type) =>
-      navigator.mediaCapabilities
-        .decodingInfo({ type, video: videoConfig })
-        .catch(() => null);
-    // .finally()에 의존하지 않는다 — 치지직 페이지(MAIN world)의 Promise 구현이
-    // .finally 를 안 갖는 경우가 있어 "finally is not a function" 에러가 났다.
-    // 성공/실패 콜백 양쪽에서 pending 을 직접 내린다.
-    const done = () => {
-      hwDecodeCache.pending = false;
-    };
-    Promise.all([probe("media-source"), probe("file")]).then(
-      (results) => {
-        hwDecodeCache.key = key;
-        const valid = results.filter((r) => r); // 조회 성공한 것만
-        if (valid.length === 0) {
-          hwDecodeCache.text = "확인 불가";
-        } else {
-          const anySupported = valid.some((r) => r.supported);
-          const anyEfficient = valid.some(
-            (r) => r.supported && r.powerEfficient,
-          );
-          if (!anySupported) {
-            hwDecodeCache.text = "지원 안 함 (코덱 미지원)";
-          } else if (anyEfficient) {
-            hwDecodeCache.text = "사용 중 (하드웨어 가속)";
-          } else {
-            hwDecodeCache.text = "미사용 (소프트웨어 디코딩)";
-          }
-        }
-        done();
-      },
-      () => {
-        hwDecodeCache.text = "확인 불가";
-        done();
-      },
-    );
   }
 
   function numberFormat(n) {
@@ -3890,23 +3847,75 @@
     btn.type = "button";
     btn.setAttribute("aria-label", "스트림 정보");
     btn.setAttribute("aria-expanded", "false");
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스트림 정보</span><span class="pzp-ui-icon">${statsIcon()}</span>`;
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">스트림 정보 (Shift+I)</span><span class="pzp-ui-icon">${statsIcon()}</span>`;
     return btn;
+  }
+
+  // 버튼 key 의 배치 설정("left"|"right")에 맞는 컨트롤 컨테이너를 반환.
+  function sideControls(player, key) {
+    const side = playerButtonSide[key] === "left" ? "left" : "right";
+    return (
+      player.querySelector(`.pzp-pc__bottom-buttons-${side}`) ||
+      player.querySelector(".pzp-pc__bottom-buttons-right") ||
+      player.querySelector(".pzp-pc__bottom-buttons-left")
+    );
+  }
+
+  // 버튼이 왼쪽으로 배치될 때의 삽입 앵커: 우리 오디오 믹서/비디오 필터 컨트롤 '뒤'에
+  // 넣는다(볼륨 컨트롤 다음). left 컨테이너가 아니거나 앵커 기준이 없으면 null(=맨 끝
+  // append). 이렇게 하면 왼쪽으로 옮긴 버튼들이 믹서·필터 뒤에 순서대로 붙는다.
+  function leftInsertAnchor(controls) {
+    if (!controls || !controls.classList.contains("pzp-pc__bottom-buttons-left"))
+      return null;
+    // 우리 컨트롤(믹서/필터) 중 DOM상 가장 뒤에 있는 것의 다음 형제를 앵커로.
+    const ours = controls.querySelectorAll(
+      ".cheese-audio-mixer-control, .cheese-video-filter-control",
+    );
+    const last = ours.length ? ours[ours.length - 1] : null;
+    return last ? last.nextSibling : null;
+  }
+
+  // key 버튼의 최종 삽입 앵커. left면 leftInsertAnchor, right면 호출부가 준 rightAnchor.
+  function insertAnchorFor(controls, key, rightAnchor) {
+    if (playerButtonSide[key] === "left") return leftInsertAnchor(controls);
+    return rightAnchor;
+  }
+
+  // 배치 설정이 바뀌면 우리 하단 버튼 5종을 '전부 제거'하고 다음 tick 에서 ensure*Button
+  // 이 정해진 순서·컨테이너로 다시 그린다. (반대쪽에 있는 것만 골라 제거하면, 남아 있던
+  // 버튼들 사이 순서가 어긋나 '왼쪽 갔다 오른쪽 오면 원래 순서로 안 돌아오는' 문제가
+  // 생긴다. 전부 새로 그리면 순서가 항상 일관된다. relocate 는 설정 변경 시에만 드물게
+  // 일어나므로 잠깐의 재생성은 무해하다.)
+  function relocatePlayerButtons() {
+    [
+      STATS_BUTTON_CLASS,
+      TAB_MUTE_BUTTON_CLASS,
+      SCREENSHOT_BUTTON_CLASS,
+      REWIND_BUTTON_CLASS,
+      FORWARD_BUTTON_CLASS,
+      SYNC_BUTTON_CLASS,
+    ].forEach((cls) => {
+      document.querySelectorAll(`.${cls}`).forEach((btn) => btn.remove());
+    });
+    if (typeof tick === "function") {
+      forceFullTick = true;
+      tick();
+    }
   }
 
   function ensureStatsButton() {
     const player = findPlayer();
     if (!player) return;
-    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    const controls = sideControls(player, "streamStats");
     if (!controls || controls.querySelector(`.${STATS_BUTTON_CLASS}`)) return;
     const btn = createStatsButton();
     // 라이브: 클립 만들기 버튼 앞 / 다시보기: 댓글 타임스탬프 버튼 앞.
-    // 둘 다 없으면 우측 컨트롤 그룹 맨 앞에 둔다.
-    const anchor =
+    // 둘 다 없으면 우측 컨트롤 그룹 맨 앞에 둔다. 왼쪽 배치면 믹서/필터 뒤.
+    const rightAnchor =
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, anchor);
+    controls.insertBefore(btn, insertAnchorFor(controls, "streamStats", rightAnchor));
   }
 
   function removeStatsButton() {
@@ -3931,27 +3940,27 @@
     const label = tabMutedState ? "탭 음소거 해제" : "탭 음소거";
     btn.setAttribute("aria-label", label);
     btn.setAttribute("aria-pressed", String(tabMutedState));
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${label}</span><span class="pzp-ui-icon">${tabMuteIcon(tabMutedState)}</span>`;
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${label} (Shift+M)</span><span class="pzp-ui-icon">${tabMuteIcon(tabMutedState)}</span>`;
     return btn;
   }
 
   function ensureTabMuteButton() {
     const player = findPlayer();
     if (!player) return;
-    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    const controls = sideControls(player, "tabMute");
     if (!controls) return;
     if (controls.querySelector(`.${TAB_MUTE_BUTTON_CLASS}`)) {
       syncTabMuteButton();
       return;
     }
     const btn = createTabMuteButton();
-    // 스트림 정보 버튼 앞(있으면), 없으면 우측 그룹 맨 앞.
-    const anchor =
+    // 스트림 정보 버튼 앞(있으면), 없으면 우측 그룹 맨 앞. 왼쪽 배치면 믹서/필터 뒤.
+    const rightAnchor =
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, anchor);
+    controls.insertBefore(btn, insertAnchorFor(controls, "tabMute", rightAnchor));
     requestTabMuteQuery(); // 현재 탭 음소거 상태를 받아 아이콘 동기화
   }
 
@@ -3981,17 +3990,18 @@
   function ensureScreenshotButton() {
     const player = findPlayer();
     if (!player) return;
-    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    const controls = sideControls(player, "screenshot");
     if (!controls || controls.querySelector(`.${SCREENSHOT_BUTTON_CLASS}`)) return;
     const btn = createScreenshotButton();
-    // 스트림 정보/탭 음소거 버튼 앞(있으면), 없으면 우측 그룹 맨 앞.
-    const anchor =
+    // 스트림 정보/탭 음소거 버튼 앞(같은 컨테이너에 있을 때만), 없으면 우측 그룹 맨 앞.
+    // 왼쪽 배치면 믹서/필터 뒤.
+    const rightAnchor =
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(`.${TAB_MUTE_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, anchor);
+    controls.insertBefore(btn, insertAnchorFor(controls, "screenshot", rightAnchor));
   }
 
   function removeScreenshotButton() {
@@ -4348,8 +4358,7 @@
          ${statsRow("해상도", i.resolution)}
          ${statsRow("FPS", i.fps)}
          ${statsRow("비트레이트", i.videoBitrate)}
-         ${statsRow("코덱", i.videoCodec)}
-         ${statsRow("하드웨어 가속", i.hwDecode)}`;
+         ${statsRow("코덱", i.videoCodec)}`;
     panel.innerHTML = `
       <div class="cheese-stats-head">
         <strong>스트림 정보</strong>
@@ -4371,7 +4380,16 @@
   }
 
   function positionStatsPanel(panel) {
-    panel.style.right = `${PANEL_RIGHT_PX}px`;
+    // 버튼이 왼쪽 컨트롤 그룹에 있으면 패널도 왼쪽 정렬(원래 오른쪽에 뜨던 문제 수정).
+    const btn = document.querySelector(`.${STATS_BUTTON_CLASS}`);
+    const onLeft = !!btn?.closest(".pzp-pc__bottom-buttons-left");
+    if (onLeft) {
+      panel.style.left = `${PANEL_RIGHT_PX}px`;
+      panel.style.right = "auto";
+    } else {
+      panel.style.right = `${PANEL_RIGHT_PX}px`;
+      panel.style.left = "auto";
+    }
     panel.style.bottom = `${PANEL_BOTTOM_PX}px`;
   }
 
@@ -4411,6 +4429,99 @@
       e.preventDefault();
       e.stopPropagation();
       takeScreenshot();
+    },
+    true,
+  );
+
+  // 탭 음소거 단축키(Shift+M). 탭 음소거 버튼이 표시된 상태에서, 타이핑 중이 아닐 때만
+  // 브라우저 탭 전체 음소거를 토글한다(스크린샷 Shift+S와 동일한 게이트).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyM" && e.key !== "M" && e.key !== "m") return;
+      if (featureFlags.tabMute) return; // 버튼 숨김=기능 끔
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      // 플레이어(라이브/다시보기)가 있을 때만.
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      requestTabMuteToggle(); // 응답으로 상태/아이콘 갱신
+    },
+    true,
+  );
+
+  // 오디오 믹서 단축키(Shift+A). 믹서 버튼이 표시된 상태에서 타이핑 중이 아닐 때만,
+  // 버튼 클릭과 동일하게 동작(패널 토글 또는 즉시 활성화 옵션 반영).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyA" && e.key !== "A" && e.key !== "a") return;
+      if (featureFlags.audioMixer) return; // 믹서 기능 숨김이면 끔
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleMixerButtonClick();
+    },
+    true,
+  );
+
+  // 스트림 정보 단축키(Shift+I). 스트림 정보 버튼이 표시된 상태에서 타이핑 중이
+  // 아닐 때만 패널을 토글한다.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyI" && e.key !== "I" && e.key !== "i") return;
+      if (featureFlags.streamStats) return; // 스트림 정보 숨김이면 끔
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleStatsPanel();
+    },
+    true,
+  );
+
+  // ESC로 열린 패널 닫기(오디오 믹서 패널 / 스트림 정보 패널). 믹서 패널 내부의 빠른
+  // 저장 이름 입력 모달이 열려 있으면 그 모달만 취소되도록 여기선 건드리지 않는다
+  // (모달 취소는 패널 내부 keydown 리스너가 처리). 타이핑 중에도 ESC는 허용해야
+  // 하지만, 모달/편집 입력의 ESC와 겹치지 않게 아래 순서로 판정한다.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Escape") return;
+      const mixerPanelOpen = !!(ui?.panel && document.body.contains(ui.panel));
+      const statsPanelOpen = !!document.getElementById(STATS_PANEL_ID);
+      // 스트림 정보 패널이 열려 있으면 우선 닫는다.
+      if (statsPanelOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeStatsPanel();
+        return;
+      }
+      if (mixerPanelOpen) {
+        // 패널 내부 모달(빠른 저장/커스텀 편집·내보내기·불러오기)이 열려 있으면 그
+        // 모달만 취소되도록 여기선 건드리지 않는다(모달 취소는 내부 리스너/모달 로직).
+        const modalOpen =
+          quickSaveOpen ||
+          customCreatorOpen ||
+          customExportOpen ||
+          customImportOpen ||
+          !!customDialog;
+        if (modalOpen) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closePanel();
+      }
     },
     true,
   );
@@ -4614,21 +4725,30 @@
     }
     const player = findPlayer();
     if (!player) return;
-    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    const controls = sideControls(player, "seek");
     if (!controls) return;
-    // 되감기 → 따라잡기 → 앞으로 순으로 보이도록 따라잡기 버튼 양옆에 배치.
+    // 배치 규칙:
+    //  - 따라잡기가 '같은 컨테이너'에 있으면: 되감기 → 따라잡기 → 앞으로 (양옆에).
+    //  - 따라잡기가 없거나 다른 쪽이면: 되감기·앞으로를 '서로 붙여서' 배치.
     const syncBtn = controls.querySelector(`.${SYNC_BUTTON_CLASS}`);
-    const anchor =
-      syncBtn ||
+    const rightAnchor =
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.firstChild;
+    const baseAnchor = syncBtn || insertAnchorFor(controls, "seek", rightAnchor);
     if (!controls.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
-      controls.insertBefore(createSeekButton(false), anchor);
+      controls.insertBefore(createSeekButton(false), baseAnchor);
     }
     if (!controls.querySelector(`.${FORWARD_BUTTON_CLASS}`)) {
-      // 앞으로는 따라잡기 버튼 '다음'에(앵커의 다음 형제).
-      controls.insertBefore(createSeekButton(true), anchor.nextSibling);
+      // 따라잡기가 앵커면 그 다음(되감기·따라잡기·앞으로). 아니면 되감기 바로 다음
+      // (되감기·앞으로가 붙게).
+      const rewindBtn = controls.querySelector(`.${REWIND_BUTTON_CLASS}`);
+      const fwdAnchor = syncBtn
+        ? syncBtn.nextSibling
+        : rewindBtn
+          ? rewindBtn.nextSibling
+          : baseAnchor;
+      controls.insertBefore(createSeekButton(true), fwdAnchor);
     }
     ensureSeekBar(); // 되감기 가능 영역 표시 + 드래그 seek 바
     startSeekCheck();
@@ -4746,6 +4866,7 @@
         if (!w) return;
         seekBarDragging = true;
         bar.classList.add("is-dragging");
+        startSeekBarRender(); // 드래그 중 playhead 갱신 보장(중복 시작은 무시됨)
         seekBarSeekTo(seekBarTimeAt(e.clientX, track, w), w);
         document.addEventListener("mousemove", onMove, true);
         document.addEventListener("mouseup", onUp, true);
@@ -4795,6 +4916,10 @@
         }
         const on = seekBarDragging || player.classList.contains(CONTROLS_CLASS);
         bar.classList.toggle("is-visible", on);
+        // 바가 실제로 보일 때만 60fps 렌더 루프를 돌린다. 컨트롤이 숨겨진 대부분의
+        // 시청 시간엔 rAF 를 아예 멈춰 메인스레드 부하를 없앤다(지연/버벅임 완화).
+        if (on) startSeekBarRender();
+        else stopSeekBarRender();
       };
       seekBarClsObs?.disconnect();
       seekBarClsObs = new MutationObserver(syncVisible);
@@ -4804,7 +4929,6 @@
       });
       syncVisible();
     }
-    startSeekBarRender();
   }
 
   function formatSeekBarTime(sec) {
@@ -4884,18 +5008,18 @@
     }
     const player = findPlayer();
     if (!player) return;
-    const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
+    const controls = sideControls(player, "sync");
     if (!controls || controls.querySelector(`.${SYNC_BUTTON_CLASS}`)) {
       startSyncCheck();
       return;
     }
     const btn = createSyncButton();
-    // 스트림 정보 버튼 앞(클립 만들기 앞쪽)에 둔다.
-    const anchor =
+    // 스트림 정보 버튼 앞(클립 만들기 앞쪽)에 둔다. 왼쪽 배치면 믹서/필터 뒤.
+    const rightAnchor =
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, anchor);
+    controls.insertBefore(btn, insertAnchorFor(controls, "sync", rightAnchor));
     startSyncCheck();
   }
 

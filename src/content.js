@@ -134,6 +134,27 @@ function normalizeGainMax(v) {
 }
 const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
+
+// 플레이어 하단 버튼의 좌/우 배치(우측에 몰리는 것을 완화). 버튼별 "left"|"right".
+// 기본값은 현재 배치와 동일(믹서/필터=left, 나머지=right).
+const PLAYER_BUTTON_SIDE_KEY = "cheesePlayerButtonSide";
+const PLAYER_BUTTON_SIDE_DEFAULT = {
+  streamStats: "right",
+  tabMute: "right",
+  screenshot: "right",
+  seek: "right",
+  sync: "right",
+};
+let playerButtonSide = { ...PLAYER_BUTTON_SIDE_DEFAULT };
+function normalizePlayerButtonSide(v) {
+  const out = { ...PLAYER_BUTTON_SIDE_DEFAULT };
+  if (v && typeof v === "object") {
+    for (const k of Object.keys(PLAYER_BUTTON_SIDE_DEFAULT)) {
+      if (v[k] === "left" || v[k] === "right") out[k] = v[k];
+    }
+  }
+  return out;
+}
 function normalizeSeekStep(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 10;
@@ -179,11 +200,17 @@ const FOLLOW_PREVIEW_HEADER_FONT_MAX = 1.75;
 const FOLLOW_PREVIEW_HEADER_FONT_DEFAULT = 1;
 // 미리보기를 영상 대신 썸네일 이미지로만 표시(true=썸네일, 기본 false=영상).
 const FOLLOW_PREVIEW_THUMB_KEY = "cheeseFollowPreviewThumbOnly";
+const FOLLOW_PREVIEW_LIVE_EDGE_KEY = "cheeseFollowPreviewLiveEdge";
 let followPreviewOn = true;
 let followPreviewMuted = true; // 기본 음소거
 let followPreviewHeaderFont = FOLLOW_PREVIEW_HEADER_FONT_DEFAULT;
 let followPreviewThumbOnly = false; // 기본 영상
+let followPreviewLiveEdge = true; // 라이브 최신(엣지)부터 재생, 기본 ON
 let followPreviewMaxLifeSec = 120; // 기본 2분
+// 리방(재방송)/네트워크·미디어 재생 오류로 플레이어 오류 다이얼로그가 뜨면 자동
+// 새로고침(기본 OFF — 부작용 우려로 명시 선택). content.js 전용.
+const AUTO_RELOAD_ON_ERROR_KEY = "cheeseAutoReloadOnError";
+let autoReloadOnError = false;
 // 라이브 탐색 카드 호버 미리보기(치지직 자체 video)에 음량 버튼/우클릭 음소거 토글
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
@@ -194,10 +221,18 @@ let cardPreviewAudioOn = true;
 const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
 let cardPreviewWheelDelaySec = 1;
 let cardPreviewHoverEnteredAt = 0; // 현재 카드에 진입한 시각(ms)
+// 라이브 탐색 카드 호버 시 별도 플레이어(팔로잉 미리보기 인프라 재사용)로 미리보기(전역,
+// 기본 OFF). 켜면 카드 호버가 팔로잉 미리보기와 동일한 패널을 띄운다. content.js 전용.
+const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
+let cardLivePreviewOn = false;
 // 채널 다시보기 목록 카드(_information_) 호버 시 등록일/라이브 시작일 툴팁(전역, 기본
 // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
 const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
 let cardDateTooltipOn = true;
+// 팔로잉 목록(following?tab=CHANNEL) 채널 아이템 호버 시 커스텀 툴팁으로 최근 방송일·
+// 팔로우 시작일·첫 방송일·총 방송 시간 표시(전역, 기본 OFF). content.js 전용.
+const FOLLOW_CHANNEL_TOOLTIP_KEY = "cheeseFollowChannelTooltip";
+let followChannelTooltipOn = false;
 const featureFlags = {
   audioMixer: false,
   videoFilter: false,
@@ -8876,6 +8911,107 @@ function isWideScreenModeOn() {
   );
 }
 
+// ── 리방/오류 시 자동 새로고침 ───────────────────────────────────────────────
+// 스트리머 리방(방송 종료 후 재개) 또는 네트워크·미디어 재생 오류로 치지직 플레이어에
+// 오류 다이얼로그(.pzp-pc__error-dialog)가 뜨면 자동으로 페이지를 새로고침한다.
+// 오류 메시지는 치지직이 쓰는 3종을 확인해 '일시적 오류'만 대상으로 한다.
+// 안전장치: (1) 오류가 보이는 상태(display/offsetParent)인지 확인, (2) 최초 감지 후
+// 바로 리로드하지 않고 확인 지연(리방 자동 재연결 여지), (3) sessionStorage 로 리로드
+// 시각·횟수를 추적해 짧은 시간에 반복 리로드(무한 루프)를 막는다.
+const AUTO_RELOAD_ERROR_MESSAGES = [
+  "미디어 재생이 실패했습니다",
+  "네트워크 오류가 발생했습니다",
+  "문제가 발생했습니다", // "죄송합니다. 문제가 발생했습니다. 다시 시도해 주세요."
+];
+const AUTO_RELOAD_CONFIRM_MS = 6000; // 오류 최초 감지 후 이 시간 지나도 오류면 리로드
+const AUTO_RELOAD_POLL_MS = 3000; // 오류 폴링 주기
+const AUTO_RELOAD_WINDOW_MS = 90000; // 이 시간 안에
+const AUTO_RELOAD_MAX = 2; // 최대 이 횟수까지만 자동 리로드(무한 루프 방지)
+const AUTO_RELOAD_SS_KEY = "cheeseAutoReloadLog"; // sessionStorage: {times:[ms,...]}
+
+let autoReloadTimer = 0;
+let autoReloadErrorSince = 0; // 오류를 처음 감지한 시각(0=오류 없음)
+
+// 오류 다이얼로그가 '보이고' 메시지가 대상 오류 중 하나인지.
+function isPlayerErrorVisible() {
+  const dialog = document.querySelector(".pzp-pc__error-dialog");
+  if (!dialog) return false;
+  // 화면에 실제로 보이는지(정상 재생 중엔 DOM에 있어도 숨겨져 있음).
+  if (dialog.offsetParent === null) return false;
+  try {
+    if (getComputedStyle(dialog).display === "none") return false;
+  } catch {}
+  const msg =
+    document
+      .querySelector(".pzp-pc-ui-error-dialog__message")
+      ?.textContent?.trim() || "";
+  if (!msg) return false;
+  return AUTO_RELOAD_ERROR_MESSAGES.some((m) => msg.includes(m));
+}
+
+// sessionStorage 기반 최근 리로드 횟수(윈도 내). 무한 루프 방지 게이트.
+function autoReloadRecentCount() {
+  try {
+    const raw = sessionStorage.getItem(AUTO_RELOAD_SS_KEY);
+    const log = raw ? JSON.parse(raw) : null;
+    const now = Date.now();
+    const times = Array.isArray(log?.times)
+      ? log.times.filter((t) => now - t < AUTO_RELOAD_WINDOW_MS)
+      : [];
+    return times.length;
+  } catch {
+    return 0;
+  }
+}
+function autoReloadRecordReload() {
+  try {
+    const raw = sessionStorage.getItem(AUTO_RELOAD_SS_KEY);
+    const log = raw ? JSON.parse(raw) : null;
+    const now = Date.now();
+    const times = (Array.isArray(log?.times) ? log.times : []).filter(
+      (t) => now - t < AUTO_RELOAD_WINDOW_MS,
+    );
+    times.push(now);
+    sessionStorage.setItem(AUTO_RELOAD_SS_KEY, JSON.stringify({ times }));
+  } catch {}
+}
+
+function autoReloadPoll() {
+  if (!autoReloadOnError) return;
+  const errored = isPlayerErrorVisible();
+  if (!errored) {
+    autoReloadErrorSince = 0; // 오류 해소(자동 복구됨) → 리셋
+    return;
+  }
+  const now = Date.now();
+  if (!autoReloadErrorSince) {
+    autoReloadErrorSince = now; // 최초 감지 → 확인 지연 시작
+    return;
+  }
+  // 확인 지연이 지나도 여전히 오류면 리로드(단, 무한 루프 게이트 통과 시).
+  if (now - autoReloadErrorSince < AUTO_RELOAD_CONFIRM_MS) return;
+  if (autoReloadRecentCount() >= AUTO_RELOAD_MAX) return; // 반복 리로드 차단
+  autoReloadRecordReload();
+  location.reload();
+}
+
+function startAutoReloadWatch() {
+  if (autoReloadTimer) return;
+  autoReloadTimer = window.setInterval(autoReloadPoll, AUTO_RELOAD_POLL_MS);
+}
+function stopAutoReloadWatch() {
+  if (autoReloadTimer) {
+    window.clearInterval(autoReloadTimer);
+    autoReloadTimer = 0;
+  }
+  autoReloadErrorSince = 0;
+}
+// 옵션 상태에 맞춰 감시 시작/중지. init/onChanged 에서 호출.
+function applyAutoReloadOnError() {
+  if (autoReloadOnError) startAutoReloadWatch();
+  else stopAutoReloadWatch();
+}
+
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
@@ -9644,30 +9780,55 @@ function isOwnChatMutation(mutation) {
 }
 
 function startChatObserver() {
-  if (chatObserver) return;
-  // (1) 채팅 컨테이너 구조 변화(새 채팅 행 = 마커 붙일 대상)만 본다. class 속성은
-  //     보지 않는다 — 우리가 마커 클래스를 추가하면 그게 또 옵저버를 깨워 무한
-  //     루프(깜빡임)가 됐다. moa도 childList/subtree만 본다.
-  chatObserver = new MutationObserver((mutations) => {
-    // 우리 마커 추가만으로 일어난 변경이면(타 변경 없음) 무시한다.
-    if (mutations.every(isOwnChatMutation)) return;
-    scheduleChatTweak();
-  });
-  chatObserver.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-  // (2) <html> 자기 자신의 class만 본다(subtree 없음) — moa enabled 클래스
-  //     토글을 감지하기 위함. 채팅 행 마커는 여기 안 걸린다.
+  // (2) <html> 자기 자신의 class 만 보는 경량 옵저버(subtree 없음) — moa enabled
+  //     클래스 토글 감지용. 채팅 기능 on/off 와 무관하게 항상 유지해도 부하가 없다
+  //     (문서 전체가 아니라 <html> 속성 하나만 봄).
   if (!chatHtmlClassObserver) {
     chatHtmlClassObserver = new MutationObserver(() => scheduleChatTweak());
     chatHtmlClassObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class"],
     });
+    window.addEventListener("resize", scheduleChatTweak);
   }
-  // 창 리사이즈로 세로(stacked) 배치 전환·동적 최대폭이 바뀌므로 재적용.
-  window.addEventListener("resize", scheduleChatTweak);
+  // (1) 채팅 행 변화를 보는 '무거운' 문서 subtree 옵저버는 채팅 기능이 하나라도
+  //     켜졌을 때만 붙인다. 아무 기능도 안 켜졌으면 새 채팅마다 콜백이 깨어나며
+  //     메인스레드를 갉아먹어 영상 프레임을 떨어뜨린다(채팅 폭주 시 버벅임 원인).
+  //     또한 문서 전체가 아니라 '채팅 컨테이너'만 관찰해 채팅 외 DOM 변경을 배제한다.
+  if (!anyChatTweakOn()) {
+    stopHeavyChatObserver();
+    return;
+  }
+  // 관찰 대상: 채팅 aside(들). SPA 재렌더로 aside 가 교체되면 재부착해야 하므로,
+  // 이미 옵저버가 있어도 관찰 중이던 aside 가 모두 DOM 에서 떨어졌으면 다시 붙인다.
+  const containers = [...document.querySelectorAll(CHAT_ASIDE_SEL)];
+  if (chatObserver) {
+    const stillConnected = chatObservedTargets.some(
+      (t) => t.isConnected && containers.includes(t),
+    );
+    if (stillConnected || !containers.length) return; // 유효하면 유지
+    stopHeavyChatObserver(); // aside 교체됨 → 아래에서 재부착
+  }
+  const targets = containers.length ? containers : [document.documentElement];
+  chatObserver = new MutationObserver((mutations) => {
+    // 우리 마커 추가만으로 일어난 변경이면(타 변경 없음) 무시한다.
+    if (mutations.every(isOwnChatMutation)) return;
+    scheduleChatTweak();
+  });
+  for (const t of targets) {
+    chatObserver.observe(t, { childList: true, subtree: true });
+  }
+  chatObservedTargets = targets;
+}
+let chatObservedTargets = [];
+
+// 무거운 채팅 문서 옵저버만 해제(경량 html-class 옵저버는 유지).
+function stopHeavyChatObserver() {
+  if (chatObserver) {
+    chatObserver.disconnect();
+    chatObserver = null;
+  }
+  chatObservedTargets = [];
 }
 let chatTweakRaf = 0;
 let chatHtmlClassObserver = null;
@@ -9696,6 +9857,7 @@ function stopChatObserver() {
     chatObserver.disconnect();
     chatObserver = null;
   }
+  chatObservedTargets = [];
   if (chatHtmlClassObserver) {
     chatHtmlClassObserver.disconnect();
     chatHtmlClassObserver = null;
@@ -11499,7 +11661,7 @@ function positionFollowPreview(el, anchor) {
 
 // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
 async function openFollowPreview(li, channelId) {
-  if (!followPreviewOn || document.hidden) return;
+  if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
   followPreviewState.currentChannelId = channelId;
   followPreviewState.retried = false;
   startFollowPreviewMaxLifeTimer(); // 자동 종료(장시간 시청 방지)
@@ -11718,6 +11880,36 @@ function applyFollowPreviewVolumeNow() {
   followPreviewVolumeGuard = false;
 }
 
+// hls.js(415KB)는 팔로우 미리보기에서만 쓰므로 상시 로드하지 않고(모든 페이지 LCP
+// 지연 원인), 미리보기가 처음 필요할 때 background 가 이 탭의 ISOLATED world 에 주입한다.
+// 주입되면 content.js 스코프에 전역 Hls 가 정의된다. 로드 완료/실패를 promise 로 반환.
+let hlsLoadPromise = null;
+function ensureHlsLoaded() {
+  if (typeof Hls !== "undefined") return Promise.resolve(true);
+  if (hlsLoadPromise) return hlsLoadPromise;
+  hlsLoadPromise = new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "CHEESE_LOAD_HLS" }, () => {
+        void chrome.runtime.lastError;
+        // 주입 후 Hls 가 스코프에 나타날 때까지 짧게 폴링(최대 ~3초).
+        let tries = 0;
+        const t = setInterval(() => {
+          if (typeof Hls !== "undefined") {
+            clearInterval(t);
+            resolve(true);
+          } else if (++tries > 60) {
+            clearInterval(t);
+            resolve(false); // 실패 → 네이티브 폴백
+          }
+        }, 50);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+  return hlsLoadPromise;
+}
+
 function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
   const video = el.querySelector(".cheese-follow-preview-video");
   if (!video) return;
@@ -11756,9 +11948,12 @@ function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
     el.classList.add("is-thumb-only"); // 영상 숨기고 썸네일 이미지 표시
     showFollowPreviewThumb(el, thumb, channelId);
   };
-  const onError = () => {
-    // 토큰 만료 등 → 캐시 무효화 후 1회 재시도. 재시도도 실패하면 썸네일 폴백.
-    if (followPreviewState.retried) {
+  const onError = (opts) => {
+    // 실패한 hls 인스턴스를 먼저 파괴한다(안 그러면 죽은 스트림이 403 등을 계속
+    // 재시도하며 부하를 만든다).
+    teardownFollowPreviewMedia(video);
+    // 암호화 스트림 키 실패 등 '재시도해도 소용없는' 에러는 바로 썸네일 폴백.
+    if (opts?.noRetry || followPreviewState.retried) {
       fallbackToThumb();
       return;
     }
@@ -11786,18 +11981,50 @@ function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
 
   // hls.js 우선: 네이티브 HLS는 ABR이 144p→점진 상승이라 초반 저화질이 오래간다.
   // hls.js는 startLevel을 최고로 두면 처음부터 1080p로 시작한다(UX↑). hls.js가
-  // 불가능한 환경(드묾)에서만 네이티브 폴백.
-  if (typeof Hls !== "undefined" && Hls.isSupported()) {
+  // 불가능한 환경(드묾)에서만 네이티브 폴백. hls.js 는 지연 로드하므로 먼저 await.
+  void (async () => {
+    await ensureHlsLoaded();
+    // 로드 중 미리보기가 다른 채널로 바뀌었으면 중단(오래된 attach 방지).
+    if (followPreviewState.currentChannelId !== channelId) return;
+    if (typeof Hls !== "undefined" && Hls.isSupported()) {
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
       startLevel: -1, // MANIFEST_PARSED에서 최고 레벨로 직접 지정
       autoStartLoad: true,
       capLevelToPlayerSize: false, // 작은 미리보기라도 고화질 시작 허용
+      // '라이브 최신 재생' 옵션이 켜져 있으면 라이브 엣지에 최대한 붙인다(기본 3세그먼트
+      // 뒤 → 세그먼트가 길면 20~30초 지연되던 '30초 전부터 나온다' 피드백 대응).
+      // 1세그먼트만 뒤로 두고, 지연이 커지면 자동으로 엣지로 따라잡게 최대 지연도 낮춘다.
+      // 옵션이 꺼져 있으면 hls.js 기본값(안정적이나 지연 큼)을 쓴다.
+      ...(followPreviewLiveEdge
+        ? {
+            liveSyncDurationCount: 1,
+            liveMaxLatencyDurationCount: 4,
+            liveDurationInfinity: true,
+          }
+        : {}),
     });
     followPreviewState.hls = hls;
+    // 에러 처리: fatal 은 즉시 폴백. 암호화 스트림 키(aes_key) 로드 실패나 반복되는
+    // 네트워크 에러는 non-fatal 로 와도 hls.js 가 무한 재시도해 403 이 계속 찍히고
+    // 부하(LCP/INP 악화)를 만든다 → 키 에러이거나 non-fatal 이 누적되면 중단·폴백한다.
+    let hlsErrCount = 0;
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data?.fatal) onError();
+      const detail = String(data?.details || "");
+      const isKeyError =
+        detail.includes("KEY") || detail.includes("keyLoad");
+      // 키 에러는 재시도해도 소용없으니(암호화 스트림) 재시도 없이 바로 폴백.
+      if (isKeyError) {
+        onError({ noRetry: true });
+        return;
+      }
+      if (data?.fatal) {
+        onError();
+        return;
+      }
+      // non-fatal 이라도 짧은 시간에 여러 번 누적되면(재시도 루프) 중단.
+      if (++hlsErrCount >= 5) onError({ noRetry: true });
     });
     hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
       // 가장 높은 화질로 시작(레벨 인덱스가 클수록 보통 고화질).
@@ -11817,16 +12044,51 @@ function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
       }
       video.play?.().catch(() => {});
     });
+    // 최초 플레이리스트 로드 시 '한 번만' 라이브 엣지로 점프(seekable 끝). 이후엔
+    // liveSyncDurationCount/liveMaxLatencyDurationCount 설정에 따라 hls.js 가 알아서
+    // 엣지 근처를 유지하므로, 매 세그먼트마다 seek 하지 않는다(버벅임 방지).
+    let jumpedToEdge = false;
+    const jumpToLiveEdge = () => {
+      if (jumpedToEdge) return;
+      try {
+        const target =
+          typeof hls.liveSyncPosition === "number" && hls.liveSyncPosition > 0
+            ? hls.liveSyncPosition
+            : video.seekable?.length
+              ? video.seekable.end(video.seekable.length - 1)
+              : NaN;
+        if (Number.isFinite(target) && target - (video.currentTime || 0) > 2) {
+          video.currentTime = target;
+        }
+        jumpedToEdge = true;
+      } catch {}
+    };
+    if (followPreviewLiveEdge) hls.on(Hls.Events.LEVEL_LOADED, jumpToLiveEdge);
     hls.loadSource(m3u8);
     hls.attachMedia(video);
   } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    // 네이티브 폴백(화질 제어 제한 — ABR이 점진 상승할 수 있음).
+    // 네이티브 폴백(화질 제어 제한 — ABR이 점진 상승할 수 있음). '라이브 최신 재생'이
+    // 켜져 있으면 재생 시작 시 라이브 엣지(seekable 끝)로 점프해 최신 지점부터 나오게 한다.
     video.src = m3u8;
+    if (followPreviewLiveEdge) {
+      const nativeJumpEdge = () => {
+        try {
+          if (video.seekable?.length) {
+            const end = video.seekable.end(video.seekable.length - 1);
+            if (Number.isFinite(end) && end - (video.currentTime || 0) > 2) {
+              video.currentTime = end;
+            }
+          }
+        } catch {}
+      };
+      video.addEventListener("loadeddata", nativeJumpEdge, { once: true });
+    }
     video.play?.().catch(() => {});
-  } else {
-    // 재생 불가 환경 → 닫지 않고 썸네일로 대체.
-    fallbackToThumb();
-  }
+    } else {
+      // 재생 불가 환경 → 닫지 않고 썸네일로 대체.
+      fallbackToThumb();
+    }
+  })();
 }
 
 // video/hls 연결 해제(스트림 끊기).
@@ -11955,6 +12217,22 @@ function saveFollowPreviewSize() {
 //  1) 사이드바 팔로잉 섹션의 라이브 li
 //  2) 헤더 미니 팔로우 네비 아이템(li.cheese-header-follow-item[data-channel-id])
 function getFollowPreviewAnchor(target) {
+  // 라이브 탐색 카드 플레이어 미리보기(옵션 ON). 카드 링크 href=/live/<채널ID>.
+  // 사이드바/헤더 팔로우 아이템보다 먼저 검사하되, 그것들 안의 링크는 아래 로직으로
+  // 넘겨야 하므로 사이드바/헤더 범위 밖의 라이브 카드만 여기서 처리한다.
+  if (cardLivePreviewOn) {
+    const card = target?.closest?.('a[href^="/live/"]');
+    if (
+      card &&
+      !card.closest("aside#sidebar") &&
+      !card.closest(".cheese-header-follow-item")
+    ) {
+      const m = card.getAttribute("href")?.match(/^\/live\/([a-f0-9]{32})/i);
+      if (m) return { anchor: card, channelId: m[1] };
+    }
+  }
+  // 사이드바/헤더 팔로우 아이템 미리보기는 팔로잉 미리보기 옵션이 켜졌을 때만.
+  if (!followPreviewOn) return null;
   const t = target?.closest?.(
     'aside#sidebar nav[class*="_section_"] li, .cheese-header-follow-item',
   );
@@ -11974,7 +12252,7 @@ function getFollowPreviewAnchor(target) {
 
 // 위임 호버. 라이브 팔로잉(사이드바/헤더) 진입 → 디바운스 후 미리보기.
 function onFollowPreviewMouseOver(e) {
-  if (!followPreviewOn || document.hidden) return;
+  if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
   // 클릭 이동 직후 억제 창 동안엔 미리보기를 열지 않는다(마우스 따라 잔존 방지).
   if (Date.now() < followPreviewOpenSuppressUntil) return;
   // 드래그/고정 중엔 다른 채널로 전환하지 않는다.
@@ -12078,8 +12356,11 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_VOLUME_KEY,
       FOLLOW_PREVIEW_HEADER_FONT_KEY,
       FOLLOW_PREVIEW_THUMB_KEY,
+      FOLLOW_PREVIEW_LIVE_EDGE_KEY,
+      CARD_LIVE_PREVIEW_KEY,
     ]);
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
+    cardLivePreviewOn = data?.[CARD_LIVE_PREVIEW_KEY] === true; // 기본 OFF
     followPreviewMuted = data?.[FOLLOW_PREVIEW_MUTED_KEY] !== false; // 미설정/true=음소거
     followPreviewVolume = normalizeFollowPreviewVolume(
       data?.[FOLLOW_PREVIEW_VOLUME_KEY],
@@ -12088,6 +12369,7 @@ async function loadFollowPreview() {
       data?.[FOLLOW_PREVIEW_HEADER_FONT_KEY],
     );
     followPreviewThumbOnly = data?.[FOLLOW_PREVIEW_THUMB_KEY] === true; // 기본 영상
+    followPreviewLiveEdge = data?.[FOLLOW_PREVIEW_LIVE_EDGE_KEY] !== false; // 미설정/true=엣지
     const size = data?.[FOLLOW_PREVIEW_SIZE_KEY];
     const w = Number(size?.w);
     if (Number.isFinite(w)) {
@@ -12101,7 +12383,9 @@ async function loadFollowPreview() {
       followPreviewMaxLifeSec = sec;
     }
   } catch {}
-  if (followPreviewOn) bindFollowPreviewHover();
+  // 팔로잉 미리보기 또는 카드 플레이어 미리보기 중 하나라도 켜져 있으면 호버 감지를
+  // 바인딩한다(둘이 같은 인프라를 공유). 둘 다 꺼지면 미리보기를 닫는다.
+  if (followPreviewOn || cardLivePreviewOn) bindFollowPreviewHover();
   else closeFollowPreview();
 }
 
@@ -12458,6 +12742,209 @@ function unbindCardDateTooltip() {
     });
 }
 
+// ── 팔로잉 목록 채널 호버 정보 툴팁 ──────────────────────────────────────────
+// following?tab=CHANNEL 의 채널 아이템(_wrapper_) 호버 시, 최근 방송일·팔로우 시작일·
+// 첫 방송일·총 방송 시간을 body-fixed 커스텀 툴팁으로 보여준다. 3개 API 를 병렬 호출·
+// 캐시한다(같은 채널 재호버 시 재요청 없음). 영상 정보 툴팁의 CSS/위치 로직을 재사용.
+const FOLLOW_CHANNEL_TOOLTIP_ID = "cheese-follow-channel-tooltip";
+const FOLLOW_CHANNEL_TOOLTIP_TTL_MS = 5 * 60 * 1000; // 채널 데이터 캐시 5분
+const followChannelTooltipCache = new Map(); // channelId → {data, at}
+const followChannelTooltipState = {
+  bound: false,
+  hoverAnchor: null,
+  currentChannelId: "",
+  fetching: "",
+};
+
+// 툴팁 대상(썸네일/이름) 호버 요소와 채널ID를 찾는다. 두 페이지를 지원한다.
+//  1) 팔로잉 목록(following?tab=CHANNEL): 썸네일/이름 wrapper 링크. href=/<채널ID>.
+//  2) 채널 홈(/<채널ID>[/...]): 프로필 헤더의 썸네일(_thumbnail_18tzy_)/이름(_name_18tzy_).
+//     썸네일 href 는 game.naver.com/profile/<채널ID>, 이름은 링크가 아니므로 현재 페이지
+//     URL(채널 홈 = 곧 채널ID)에서 채널ID를 얻는다.
+function followChannelAnchorFromTarget(target) {
+  // 1) 팔로잉 목록.
+  const listAnchor = target?.closest?.(
+    'a[class*="_wrapper_asbvn_"], a[class*="_thumbnail_asbvn_"]',
+  );
+  if (listAnchor) {
+    const m = listAnchor.getAttribute("href")?.match(/^\/([a-f0-9]{32})/i);
+    if (m) return { anchor: listAnchor, channelId: m[1] };
+  }
+  // 2) 채널 홈 프로필 헤더(썸네일 또는 이름).
+  const homeAnchor = target?.closest?.(
+    'a[class*="_thumbnail_18tzy_"], [class*="_name_18tzy_"]',
+  );
+  if (homeAnchor) {
+    // 썸네일 href(game.naver.com/profile/<id>) 우선, 없으면(이름) 페이지 URL.
+    const href = homeAnchor.getAttribute?.("href") || "";
+    const hm = href.match(/profile\/([a-f0-9]{32})/i);
+    const pm = location.pathname.match(/^\/([a-f0-9]{32})(?:\/|$)/i);
+    const channelId = hm?.[1] || pm?.[1];
+    if (channelId) return { anchor: homeAnchor, channelId };
+  }
+  return null;
+}
+
+async function fetchFollowChannelData(channelId) {
+  const cached = followChannelTooltipCache.get(channelId);
+  if (cached && Date.now() - cached.at < FOLLOW_CHANNEL_TOOLTIP_TTL_MS)
+    return cached.data;
+  if (followChannelTooltipState.fetching === channelId) return null;
+  followChannelTooltipState.fetching = channelId;
+  const base = "https://api.chzzk.naver.com";
+  const getJson = (url) =>
+    fetch(url, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  try {
+    const [history, myInfo, liveStatus] = await Promise.all([
+      getJson(`${base}/service/v1/channels/${channelId}/data?fields=channelHistory`),
+      getJson(`${base}/service/v1.1/channels/${channelId}/my-info`),
+      getJson(`${base}/polling/v3.1/channels/${channelId}/live-status`),
+    ]);
+    const data = {
+      firstLiveDate: history?.content?.channelHistory?.firstLiveDate || null,
+      totalLiveHours: history?.content?.channelHistory?.totalLiveHours ?? null,
+      followDate: myInfo?.content?.following?.following
+        ? myInfo?.content?.following?.followDate || null
+        : null,
+      liveStatus: liveStatus?.content?.status || null, // OPEN | CLOSE
+      openDate: liveStatus?.content?.openDate || null,
+    };
+    followChannelTooltipCache.set(channelId, { data, at: Date.now() });
+    return data;
+  } finally {
+    followChannelTooltipState.fetching = "";
+  }
+}
+
+// "2023-12-26 20:02:15" → "2023.12.26" (시각 생략).
+function fmtFollowChannelDate(s) {
+  if (!s || typeof s !== "string") return "—";
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : "—";
+}
+// 총 시간(시간 단위) → "N,NNN시간" (없으면 —).
+function fmtFollowChannelHours(h) {
+  if (!Number.isFinite(Number(h))) return "—";
+  return `${Number(h).toLocaleString("ko-KR")}시간`;
+}
+
+function followChannelTooltipHtml(data) {
+  if (!data) return "";
+  // 최근 방송일: 라이브 중이면 '방송 중', 아니면 마지막 방송 시작일(openDate).
+  const recent =
+    data.liveStatus === "OPEN"
+      ? `방송 중 (${fmtFollowChannelDate(data.openDate)}~)`
+      : fmtFollowChannelDate(data.openDate);
+  const row = (label, value) =>
+    `<div class="cheese-fct-row"><span>${label}</span><strong>${value}</strong></div>`;
+  return (
+    row("최근 방송일", recent) +
+    row("팔로우 시작일", data.followDate ? fmtFollowChannelDate(data.followDate) : "—") +
+    row("첫 방송일", fmtFollowChannelDate(data.firstLiveDate)) +
+    row("총 방송 시간", fmtFollowChannelHours(data.totalLiveHours))
+  );
+}
+
+function positionFollowChannelTooltip(tip, anchor) {
+  // 이름(_name_ = h2 블록)은 부모 폭 전체를 차지해 오른쪽이 텍스트 끝보다 멀다. 내부
+  // 텍스트 span(_text_)이 있으면 그 실제 텍스트 폭을 기준으로 삼아 툴팁이 이름 바로
+  // 옆에 붙게 한다(썸네일 등 다른 앵커는 그대로).
+  const textEl = anchor.querySelector?.('[class*="_text_dtc6c_"]');
+  const ref = textEl || anchor;
+  const r = ref.getBoundingClientRect();
+  const w = tip.offsetWidth || 200;
+  const h = tip.offsetHeight || 90;
+  // 앵커 오른쪽에 띄우되 화면 밖이면 왼쪽/아래로 보정.
+  let left = r.right + 8;
+  if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 8);
+  let top = r.top;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
+}
+
+function ensureFollowChannelTooltipEl() {
+  let tip = document.getElementById(FOLLOW_CHANNEL_TOOLTIP_ID);
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = FOLLOW_CHANNEL_TOOLTIP_ID;
+    tip.className = "cheese-follow-channel-tooltip";
+    tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+  }
+  return tip;
+}
+
+function hideFollowChannelTooltip() {
+  document
+    .getElementById(FOLLOW_CHANNEL_TOOLTIP_ID)
+    ?.classList.remove("is-visible");
+}
+
+async function showFollowChannelTooltip(anchor, channelId) {
+  followChannelTooltipState.currentChannelId = channelId;
+  const data = await fetchFollowChannelData(channelId);
+  // 그새 호버가 바뀌었으면 중단.
+  if (followChannelTooltipState.currentChannelId !== channelId) return;
+  if (!data) return;
+  // 앵커가 아직 호버 중인지 확인(마우스가 벗어났으면 표시 안 함).
+  if (followChannelTooltipState.hoverAnchor !== anchor) return;
+  const tip = ensureFollowChannelTooltipEl();
+  const html = followChannelTooltipHtml(data);
+  if (tip.innerHTML !== html) tip.innerHTML = html;
+  tip.classList.add("is-visible");
+  positionFollowChannelTooltip(tip, anchor);
+}
+
+function onFollowChannelMouseOver(e) {
+  if (!followChannelTooltipOn) return;
+  const found = followChannelAnchorFromTarget(e.target);
+  if (!found) return;
+  followChannelTooltipState.hoverAnchor = found.anchor;
+  void showFollowChannelTooltip(found.anchor, found.channelId);
+}
+
+function onFollowChannelMouseOut(e) {
+  if (!followChannelTooltipState.hoverAnchor) return;
+  // 앵커 내부 이동은 무시.
+  if (followChannelTooltipState.hoverAnchor.contains(e.relatedTarget)) return;
+  followChannelTooltipState.hoverAnchor = null;
+  followChannelTooltipState.currentChannelId = "";
+  hideFollowChannelTooltip();
+}
+
+function bindFollowChannelTooltip() {
+  if (followChannelTooltipState.bound) return;
+  followChannelTooltipState.bound = true;
+  document.addEventListener("mouseover", onFollowChannelMouseOver, {
+    passive: true,
+  });
+  document.addEventListener("mouseout", onFollowChannelMouseOut, {
+    passive: true,
+  });
+}
+
+function unbindFollowChannelTooltip() {
+  followChannelTooltipState.bound = false;
+  document.removeEventListener("mouseover", onFollowChannelMouseOver);
+  document.removeEventListener("mouseout", onFollowChannelMouseOut);
+  followChannelTooltipState.hoverAnchor = null;
+  followChannelTooltipState.currentChannelId = "";
+  document.getElementById(FOLLOW_CHANNEL_TOOLTIP_ID)?.remove();
+}
+
+async function loadFollowChannelTooltip() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([FOLLOW_CHANNEL_TOOLTIP_KEY]);
+    followChannelTooltipOn = data?.[FOLLOW_CHANNEL_TOOLTIP_KEY] === true; // 기본 OFF
+  } catch {}
+  if (followChannelTooltipOn) bindFollowChannelTooltip();
+  else unbindFollowChannelTooltip();
+}
+
 async function loadCardDateTooltip() {
   if (!chrome.storage?.local) return;
   try {
@@ -12629,6 +13116,7 @@ function broadcastFeatureFlags() {
       mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
       mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
+      playerButtonSide: { ...playerButtonSide }, // 하단 버튼 좌/우 배치
     },
     location.origin,
   );
@@ -12673,6 +13161,8 @@ const FEATURE_FLAGS_KEYS = [
   AD_MINI_KEEP_MUTED_KEY,
   SCREENSHOT_PREVIEW_KEY,
   SCREENSHOT_DIRECT_SAVE_KEY,
+  AUTO_RELOAD_ON_ERROR_KEY,
+  PLAYER_BUTTON_SIDE_KEY,
 ];
 
 // 부트스트랩에서 실제로 도는 load* 들이 읽는 전체 키 집합(중복 제거).
@@ -12691,9 +13181,12 @@ const BOOT_PREFETCH_KEYS = [
     FOLLOW_PREVIEW_VOLUME_KEY,
     FOLLOW_PREVIEW_HEADER_FONT_KEY,
     FOLLOW_PREVIEW_THUMB_KEY,
+    FOLLOW_PREVIEW_LIVE_EDGE_KEY,
+    CARD_LIVE_PREVIEW_KEY,
     CARD_PREVIEW_AUDIO_KEY,
     CARD_PREVIEW_WHEEL_DELAY_KEY,
     CARD_DATE_TOOLTIP_KEY,
+    FOLLOW_CHANNEL_TOOLTIP_KEY,
     COMMENT_MARKERS_ENABLED_KEY,
     COMMENT_FEATURE_ENABLED_KEY,
   ]),
@@ -12751,6 +13244,8 @@ async function loadFeatureFlags() {
     const data = await getBootData(FEATURE_FLAGS_KEYS);
     screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
+    autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
+    playerButtonSide = normalizePlayerButtonSide(data?.[PLAYER_BUTTON_SIDE_KEY]);
     adMiniplayerUnmute = data?.[AD_MINI_UNMUTE_KEY] === true; // 기본 OFF
     adMiniplayerKeepMuted = data?.[AD_MINI_KEEP_MUTED_KEY] !== false; // 기본 ON
     vodAutoplayOff = data?.[VOD_AUTOPLAY_OFF_KEY] === true; // 기본 OFF
@@ -12827,6 +13322,16 @@ if (chrome.storage?.onChanged) {
       adMiniplayerUnmute = changes[AD_MINI_UNMUTE_KEY].newValue === true;
       applyAdMiniplayerUnmute(); // 즉시 반영(켜면 해제·감시, 끄면 리스너 정리)
     }
+    if (changes[AUTO_RELOAD_ON_ERROR_KEY]) {
+      autoReloadOnError = changes[AUTO_RELOAD_ON_ERROR_KEY].newValue === true;
+      applyAutoReloadOnError(); // 즉시 반영(켜면 감시 시작, 끄면 중지)
+    }
+    if (changes[PLAYER_BUTTON_SIDE_KEY]) {
+      playerButtonSide = normalizePlayerButtonSide(
+        changes[PLAYER_BUTTON_SIDE_KEY].newValue,
+      );
+      broadcastFeatureFlags(); // MAIN world(믹서/필터)로 즉시 전달 → 버튼 재배치
+    }
     if (changes[AD_MINI_KEEP_MUTED_KEY]) {
       adMiniplayerKeepMuted = changes[AD_MINI_KEEP_MUTED_KEY].newValue !== false;
     }
@@ -12839,6 +13344,11 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[LIVE_SEEK_BAR_KEY]) {
       liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
+    }
+    if (changes[FOLLOW_PREVIEW_LIVE_EDGE_KEY]) {
+      // 다음 미리보기 열 때 반영되도록 상태만 갱신(진행 중 미리보기는 재생 방식 유지).
+      followPreviewLiveEdge =
+        changes[FOLLOW_PREVIEW_LIVE_EDGE_KEY].newValue !== false;
     }
     if (changes[VOLUME_PCT_KEY]) {
       volumePct = changes[VOLUME_PCT_KEY].newValue !== false;
@@ -12992,10 +13502,22 @@ if (chrome.storage?.onChanged) {
         changes[CARD_PREVIEW_WHEEL_DELAY_KEY].newValue,
       );
     }
+    if (changes[CARD_LIVE_PREVIEW_KEY]) {
+      cardLivePreviewOn = changes[CARD_LIVE_PREVIEW_KEY].newValue === true;
+      // 켜지면 호버 감지 바인딩 보장, 꺼지고 팔로잉 미리보기도 꺼졌으면 닫기.
+      if (cardLivePreviewOn || followPreviewOn) bindFollowPreviewHover();
+      else closeFollowPreview();
+    }
     if (changes[CARD_DATE_TOOLTIP_KEY]) {
       cardDateTooltipOn = changes[CARD_DATE_TOOLTIP_KEY].newValue !== false;
       if (cardDateTooltipOn) bindCardDateTooltip();
       else unbindCardDateTooltip();
+    }
+    if (changes[FOLLOW_CHANNEL_TOOLTIP_KEY]) {
+      followChannelTooltipOn =
+        changes[FOLLOW_CHANNEL_TOOLTIP_KEY].newValue === true;
+      if (followChannelTooltipOn) bindFollowChannelTooltip();
+      else unbindFollowChannelTooltip();
     }
     if (changes[FOLLOW_PREVIEW_SIZE_KEY]) {
       const w = Number(changes[FOLLOW_PREVIEW_SIZE_KEY].newValue?.w);
@@ -13070,6 +13592,7 @@ function init() {
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
+  applyAutoReloadOnError(); // 리방/오류 시 자동 새로고침 감시(옵션 시)
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
   applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
   applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)
@@ -13647,6 +14170,7 @@ void loadChannelLiveButton();
 void loadFollowPreview();
 void loadCardPreviewAudio();
 void loadCardDateTooltip();
+void loadFollowChannelTooltip();
 // 부트스트랩 load* 들이 프리페치를 모두 소비한 뒤 캐시를 비워, 이후 재로드(설정 변경
 // 반영 등)는 실제 get 으로 신선한 값을 읽게 한다. 다시보기 tick 에서 나중에 도는
 // comment 로더까지 여유를 주려고 프리페치 완료 후 한 텀 뒤에 무효화한다.

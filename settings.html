@@ -92,6 +92,24 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="mixer"
+            role="tab"
+            aria-selected="false"
+          >
+            오디오 믹서
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
+            data-tab="filter"
+            role="tab"
+            aria-selected="false"
+          >
+            비디오 필터
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="vod"
             role="tab"
             aria-selected="false"
@@ -155,20 +173,20 @@
           <button
             type="button"
             class="settings-tab"
-            data-tab="clip"
+            data-tab="subscribe"
             role="tab"
             aria-selected="false"
           >
-            클립
+            구독
           </button>
           <button
             type="button"
             class="settings-tab"
-            data-tab="cafe"
+            data-tab="clipcafe"
             role="tab"
             aria-selected="false"
           >
-            카페
+            클립&카페
           </button>
         </nav>
 
@@ -179,6 +197,403 @@
             aria-label="플레이어 기능"
           >
             <h2 class="settings-group-title">플레이어</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">넓은 화면 자동 적용</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기 진입 시 플레이어 '넓은 화면'을 자동으로
+                    켭니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-wide-screen-auto />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">최대 화질 자동 고정</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기 시청 시 가장 높은 화질로 자동
+                    고정합니다(자동 화질이 낮아지는 것 방지, 체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-max-quality />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >└ 수동으로 화질을 바꾸면 존중</span
+                  >
+                  <span class="settings-item-desc"
+                    >위 옵션이 켜져 있어도, 시청 중 직접 화질을 낮추면 그 영상
+                    동안은 다시 최고로 올리지 않습니다(체크=존중)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-max-quality-respect />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">화면 채우기</span>
+                  <span class="settings-item-desc"
+                    >라이브 영상 높이를 조절해 좌우 레터박스를
+                    최소화(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="fillScreen" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">실시간 따라잡기 숨김</span>
+                  <span class="settings-item-desc"
+                    >라이브 지연 따라잡기 버튼</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="liveSync" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">라이브 되감기 숨김</span>
+                  <span class="settings-item-desc"
+                    >라이브 되감기·앞으로 버튼</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="liveRewind" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label for="seekStepInput">
+                  <span class="settings-item-name">되감기·앞으로 간격</span>
+                  <span class="settings-item-desc"
+                    >되감기/앞으로 버튼·방향키 한 번에 이동(3~60초)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="seekStepInput"
+                    min="3"
+                    max="60"
+                    step="1"
+                    inputmode="numeric"
+                    data-seek-step
+                  />
+                  <small>초</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">되감기 바 표시</span>
+                  <span class="settings-item-desc"
+                    >라이브 컨트롤 위에 되감기 가능 구간 바를 표시하고 드래그로
+                    이동(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-live-seek-bar />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">버튼 위치</span>
+                  <span class="settings-item-desc"
+                    >플레이어 하단 버튼을 재생 버튼이 있는 왼쪽 또는 오른쪽으로
+                    배치합니다(우측에 몰리는 것을 완화)</span
+                  >
+                </div>
+                <div class="settings-button-side" data-player-button-side>
+                  <div class="settings-button-side-row">
+                    <span>스트림 정보</span>
+                    <div
+                      class="settings-segmented settings-segmented-2"
+                      data-btn-side="streamStats"
+                      role="radiogroup"
+                    >
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="left"
+                        role="radio"
+                        aria-checked="false"
+                      >
+                        왼쪽
+                      </button>
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="right"
+                        role="radio"
+                        aria-checked="true"
+                      >
+                        오른쪽
+                      </button>
+                    </div>
+                  </div>
+                  <div class="settings-button-side-row">
+                    <span>탭 음소거</span>
+                    <div
+                      class="settings-segmented settings-segmented-2"
+                      data-btn-side="tabMute"
+                      role="radiogroup"
+                    >
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="left"
+                        role="radio"
+                        aria-checked="false"
+                      >
+                        왼쪽
+                      </button>
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="right"
+                        role="radio"
+                        aria-checked="true"
+                      >
+                        오른쪽
+                      </button>
+                    </div>
+                  </div>
+                  <div class="settings-button-side-row">
+                    <span>스크린샷</span>
+                    <div
+                      class="settings-segmented settings-segmented-2"
+                      data-btn-side="screenshot"
+                      role="radiogroup"
+                    >
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="left"
+                        role="radio"
+                        aria-checked="false"
+                      >
+                        왼쪽
+                      </button>
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="right"
+                        role="radio"
+                        aria-checked="true"
+                      >
+                        오른쪽
+                      </button>
+                    </div>
+                  </div>
+                  <div class="settings-button-side-row">
+                    <span>되감기·앞으로</span>
+                    <div
+                      class="settings-segmented settings-segmented-2"
+                      data-btn-side="seek"
+                      role="radiogroup"
+                    >
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="left"
+                        role="radio"
+                        aria-checked="false"
+                      >
+                        왼쪽
+                      </button>
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="right"
+                        role="radio"
+                        aria-checked="true"
+                      >
+                        오른쪽
+                      </button>
+                    </div>
+                  </div>
+                  <div class="settings-button-side-row">
+                    <span>실시간 따라잡기</span>
+                    <div
+                      class="settings-segmented settings-segmented-2"
+                      data-btn-side="sync"
+                      role="radiogroup"
+                    >
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="left"
+                        role="radio"
+                        aria-checked="false"
+                      >
+                        왼쪽
+                      </button>
+                      <button
+                        type="button"
+                        class="settings-segmented-btn"
+                        data-side-value="right"
+                        role="radio"
+                        aria-checked="true"
+                      >
+                        오른쪽
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">볼륨 % 표시</span>
+                  <span class="settings-item-desc"
+                    >볼륨 조절 시 화면에 백분율 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-volume-pct />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">스트림 정보 숨김</span>
+                  <span class="settings-item-desc"
+                    >해상도·비트레이트·코덱 정보</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="streamStats" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">탭 음소거 숨김</span>
+                  <span class="settings-item-desc"
+                    >브라우저 탭 전체를 음소거하는 버튼</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="tabMute" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">스크린샷 버튼 숨김</span>
+                  <span class="settings-item-desc"
+                    >현재 재생 화면을 PNG로 저장하는 버튼(단축키 Shift+S,
+                    체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="screenshotButton" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >스크린샷 저장 전 미리보기</span
+                  >
+                  <span class="settings-item-desc"
+                    >스크린샷을 찍으면 미리보기 창에서 저장/취소를 확인(끄면
+                    바로 저장, 체크=미리보기)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-screenshot-preview />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >스크린샷 대화상자 없이 바로 저장</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-screenshot-direct-save-desc
+                    >켜면 저장 대화상자 없이 다운로드 폴더에 바로 저장(끄면
+                    '다른 이름으로 저장' 대화상자 표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-screenshot-direct-save />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >중간광고 중 방송 음소거 해제</span
+                  >
+                  <span class="settings-item-desc"
+                    >중간광고가 나올 때 미니플레이어로 축소된 방송의 음소거를
+                    풀어 소리를 계속 듣습니다(광고 소리와 겹칠 수 있음,
+                    체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-ad-mini-unmute />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >└ 원래 음소거였으면 유지</span
+                  >
+                  <span class="settings-item-desc"
+                    >위 옵션이 켜져 있어도, 광고 진입 전 방송을 음소거로 보고
+                    있었다면 광고 중에도 음소거를 유지합니다(체크=유지)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-ad-mini-keep-muted />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">오류 시 자동 새로고침</span>
+                  <span class="settings-item-desc"
+                    >스트리머 리방이나 네트워크·미디어 재생 오류로 플레이어 오류
+                    창이 뜨면 자동으로 페이지를 새로고침합니다. 잠깐 기다려도
+                    복구되지 않을 때만 동작하며 짧은 시간에 반복 새로고침되지
+                    않도록 제한합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-auto-reload-on-error />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="mixer"
+            aria-label="오디오 믹서 기능"
+          >
+            <h2 class="settings-group-title">오디오 믹서</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -310,6 +725,112 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">게인 % 표시</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 조절 시 백분율 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-gain-pct />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">게인 슬라이더 최소</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 슬라이더가 내려갈 수 있는 하한(100%=원본
+                    음량)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-mixer-gain-min
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.5"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.25"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0.1"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    10%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-min-value="0"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    0%
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">게인 슬라이더 최대</span>
+                  <span class="settings-item-desc"
+                    >오디오 믹서 게인 슬라이더가 올라갈 수 있는 상한(음량
+                    증폭)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-mixer-gain-max
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-max-value="2"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    200%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-gain-max-value="3"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    300%
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="filter"
+            aria-label="비디오 필터 기능"
+          >
+            <h2 class="settings-group-title">비디오 필터</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">비디오 필터 숨김</span>
                   <span class="settings-item-desc"
                     >밝기·대비·선명도 등 화면 보정</span
@@ -439,325 +960,30 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">넓은 화면 자동 적용</span>
-                  <span class="settings-item-desc"
-                    >라이브·다시보기 진입 시 플레이어 '넓은 화면'을 자동으로
-                    켭니다(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-wide-screen-auto />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">최대 화질 자동 고정</span>
-                  <span class="settings-item-desc"
-                    >라이브·다시보기 시청 시 가장 높은 화질로 자동 고정합니다(자동
-                    화질이 낮아지는 것 방지, 체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-max-quality />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >└ 수동으로 화질을 바꾸면 존중</span
-                  >
-                  <span class="settings-item-desc"
-                    >위 옵션이 켜져 있어도, 시청 중 직접 화질을 낮추면 그 영상
-                    동안은 다시 최고로 올리지 않습니다(체크=존중)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-max-quality-respect />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
+            </ul>
+          </section>
 
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">화면 채우기</span>
-                  <span class="settings-item-desc"
-                    >라이브 영상 높이를 조절해 좌우 레터박스를
-                    최소화(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="fillScreen" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">실시간 따라잡기 숨김</span>
-                  <span class="settings-item-desc"
-                    >라이브 지연 따라잡기 버튼</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="liveSync" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">라이브 되감기 숨김</span>
-                  <span class="settings-item-desc"
-                    >라이브 되감기·앞으로 버튼</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="liveRewind" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label for="seekStepInput">
-                  <span class="settings-item-name">되감기·앞으로 간격</span>
-                  <span class="settings-item-desc"
-                    >되감기/앞으로 버튼·방향키 한 번에 이동(3~60초)</span
-                  >
-                </label>
-                <span class="settings-custom-input">
-                  <input
-                    type="number"
-                    id="seekStepInput"
-                    min="3"
-                    max="60"
-                    step="1"
-                    inputmode="numeric"
-                    data-seek-step
-                  />
-                  <small>초</small>
-                </span>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">되감기 바 표시</span>
-                  <span class="settings-item-desc"
-                    >라이브 컨트롤 위에 되감기 가능 구간 바를 표시하고 드래그로
-                    이동(체크=표시)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-live-seek-bar />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">볼륨 % 표시</span>
-                  <span class="settings-item-desc"
-                    >볼륨 조절 시 화면에 백분율 표시(체크=표시)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-volume-pct />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">게인 % 표시</span>
-                  <span class="settings-item-desc"
-                    >오디오 믹서 게인 조절 시 백분율 표시(체크=표시)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-gain-pct />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item settings-item-stacked">
-                <div>
-                  <span class="settings-item-name">게인 슬라이더 최소</span>
-                  <span class="settings-item-desc"
-                    >오디오 믹서 게인 슬라이더가 내려갈 수 있는 하한(100%=원본
-                    음량)</span
-                  >
-                </div>
-                <div
-                  class="settings-segmented settings-segmented-4"
-                  data-mixer-gain-min
-                  role="radiogroup"
-                >
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-min-value="0.5"
-                    role="radio"
-                    aria-checked="true"
-                  >
-                    50%
-                  </button>
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-min-value="0.25"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    25%
-                  </button>
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-min-value="0.1"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    10%
-                  </button>
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-min-value="0"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    0%
-                  </button>
-                </div>
-              </li>
-              <li class="settings-item settings-item-stacked">
-                <div>
-                  <span class="settings-item-name">게인 슬라이더 최대</span>
-                  <span class="settings-item-desc"
-                    >오디오 믹서 게인 슬라이더가 올라갈 수 있는 상한(음량
-                    증폭)</span
-                  >
-                </div>
-                <div
-                  class="settings-segmented settings-segmented-2"
-                  data-mixer-gain-max
-                  role="radiogroup"
-                >
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-max-value="2"
-                    role="radio"
-                    aria-checked="true"
-                  >
-                    200%
-                  </button>
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-gain-max-value="3"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    300%
-                  </button>
-                </div>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">스트림 정보 숨김</span>
-                  <span class="settings-item-desc"
-                    >해상도·비트레이트·코덱 정보</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="streamStats" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">탭 음소거 숨김</span>
-                  <span class="settings-item-desc"
-                    >브라우저 탭 전체를 음소거하는 버튼</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="tabMute" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">스크린샷 버튼 숨김</span>
-                  <span class="settings-item-desc"
-                    >현재 재생 화면을 PNG로 저장하는 버튼(단축키 Shift+S,
-                    체크=숨김)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="screenshotButton" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
+          <section
+            class="settings-group"
+            data-panel="subscribe"
+            aria-label="구독 기능"
+          >
+            <h2 class="settings-group-title">구독</h2>
+            <ul class="settings-list">
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
-                    >스크린샷 저장 전 미리보기</span
+                    >구독 배지 진행·전체보기</span
                   >
                   <span class="settings-item-desc"
-                    >스크린샷을 찍으면 미리보기 창에서 저장/취소를 확인(끄면
-                    바로 저장, 체크=미리보기)</span
+                    >구독권 관리 팝업의 '내 구독 배지'에 다음 배지까지 남은
+                    기간과 구독 만료까지 남은 기간, 게이지 눈금, 다음 배지 잠금
+                    표시를 추가하고, '전체보기'로 모든 티어의 배지를 볼 수
+                    있습니다(체크=사용, 설정 즉시 반영)</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-screenshot-preview />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >스크린샷 대화상자 없이 바로 저장</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-screenshot-direct-save-desc
-                    >켜면 저장 대화상자 없이 다운로드 폴더에 바로 저장(끄면
-                    '다른 이름으로 저장' 대화상자 표시)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-screenshot-direct-save />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >중간광고 중 방송 음소거 해제</span
-                  >
-                  <span class="settings-item-desc"
-                    >중간광고가 나올 때 미니플레이어로 축소된 방송의 음소거를
-                    풀어 소리를 계속 듣습니다(광고 소리와 겹칠 수 있음,
-                    체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-ad-mini-unmute />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >└ 원래 음소거였으면 유지</span
-                  >
-                  <span class="settings-item-desc"
-                    >위 옵션이 켜져 있어도, 광고 진입 전 방송을 음소거로 보고
-                    있었다면 광고 중에도 음소거를 유지합니다(체크=유지)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-ad-mini-keep-muted />
+                  <input type="checkbox" data-subscribe-badge-progress />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -1520,6 +1746,20 @@
                 </label>
               </li>
               <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">라이브 최신 재생</span>
+                  <span class="settings-item-desc"
+                    >미리보기를 라이브 최신(엣지) 지점부터 재생하고, 지연이
+                    벌어지면 자동으로 따라잡습니다. 끄면 안정적이나 다소 이전
+                    지점부터 재생될 수 있습니다(체크=최신 재생)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-preview-live-edge />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
                 <label for="followHeaderFontInput">
                   <span class="settings-item-name">헤더 폰트 크기</span>
                   <span class="settings-item-desc"
@@ -1593,6 +1833,11 @@
               미리보기 우하단을 드래그해 크기를 조절할 수 있습니다. 미리보기는
               짧은 확인용이므로 설정한 시간이 지나면 자동으로 닫힙니다.
             </p>
+            <p class="settings-notice">
+              최초 크기의 미리보기에서는 <strong>라이브 시청자 수</strong>와
+              <strong>라이브 시간</strong>이 숨겨져 있으며, 미리보기 크기를
+              키우면 표시됩니다.
+            </p>
           </section>
 
           <section
@@ -1602,6 +1847,23 @@
           >
             <h2 class="settings-group-title">카드 미리보기</h2>
             <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >카드 호버 플레이어 미리보기</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브 탐색 카드에 마우스를 올리면 팔로잉 미리보기와 같은
+                    별도 플레이어로 방송을 미리 봅니다. 크기 조절·고정·자동 종료
+                    등 팔로잉 미리보기 설정을 함께 따릅니다(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-card-live-preview />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
@@ -1619,9 +1881,7 @@
               </li>
               <li class="settings-item">
                 <label for="cardPreviewWheelDelayInput">
-                  <span class="settings-item-name"
-                    >└ 휠 음량 활성 지연</span
-                  >
+                  <span class="settings-item-name">└ 휠 음량 활성 지연</span>
                   <span class="settings-item-desc"
                     >카드에 마우스를 이 시간만큼 올려둔 뒤에만 휠이 음량 조절로
                     동작합니다(그 전엔 스크롤 통과, 0=즉시, 0~5초)</span
@@ -1647,6 +1907,30 @@
               휠로 음량을 조절할 수 있습니다. 스크롤 중 휠이 음량으로 걸리는 게
               불편하면 위 '휠 음량 활성 지연'을 늘리세요.
             </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="preview"
+            aria-label="팔로잉 채널 정보"
+          >
+            <h2 class="settings-group-title">팔로잉 채널 정보</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채널 호버 정보 툴팁</span>
+                  <span class="settings-item-desc"
+                    >팔로잉 목록, 채널, 검색에서 채널 이미지 또는 이름 영역에
+                    마우스를 올리면 최근 방송일·팔로우 시작일·첫 방송일·총 방송
+                    시간을 툴팁으로 보여줍니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-channel-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
           </section>
 
           <section
@@ -2109,7 +2393,7 @@
 
           <section
             class="settings-group"
-            data-panel="clip"
+            data-panel="clipcafe"
             aria-label="클립 기능"
           >
             <h2 class="settings-group-title">클립</h2>
@@ -2137,7 +2421,7 @@
 
           <section
             class="settings-group"
-            data-panel="cafe"
+            data-panel="clipcafe"
             aria-label="카페 기능"
           >
             <h2 class="settings-group-title">네이버 카페</h2>
