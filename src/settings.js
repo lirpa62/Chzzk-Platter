@@ -29,11 +29,14 @@
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
     "cheeseChatButtonWrap",
+    "cheeseChatFoldPersist",
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
+    "cheeseFollowCleanup",
     "cheeseFollowPreview",
+    "cheeseFollowPreviewFullTitle",
     "cheeseFollowPreviewHeaderFont",
     "cheeseFollowPreviewLiveEdge",
     "cheeseFollowPreviewMaxLifeSec",
@@ -160,9 +163,11 @@
   const panels = Array.from(document.querySelectorAll("[data-panel]"));
   const panelsScroll = document.querySelector(".settings-panels");
 
+  let activeTab = "all"; // 검색 종료 시 복귀할 현재 탭
   function selectTab(tab) {
     const valid = tabButtons.some((b) => b.dataset.tab === tab);
     const active = valid ? tab : "all";
+    activeTab = active;
     tabButtons.forEach((btn) => {
       const on = btn.dataset.tab === active;
       btn.classList.toggle("is-active", on);
@@ -177,9 +182,115 @@
   }
 
   tabButtons.forEach((btn) =>
-    btn.addEventListener("click", () => selectTab(btn.dataset.tab)),
+    btn.addEventListener("click", () => {
+      // 탭을 누르면 검색을 종료하고 그 탭으로 전환.
+      if (searchInput && searchInput.value) {
+        searchInput.value = "";
+        applySettingsSearch("");
+      }
+      selectTab(btn.dataset.tab);
+    }),
   );
   selectTab("all");
+
+  // ── 설정 검색: 이름+설명 텍스트로 항목을 필터링(검색 중엔 전체 탭에서 찾는다). ──
+  const searchInput = document.querySelector("[data-settings-search]");
+  const searchClear = document.querySelector("[data-settings-search-clear]");
+  const searchEmpty = document.querySelector("[data-settings-search-empty]");
+  const searchItems = Array.from(document.querySelectorAll(".settings-item"));
+  const searchGroups = Array.from(document.querySelectorAll(".settings-group"));
+  // 하이라이트 대상: 각 항목의 이름/설명 요소. 원본 텍스트를 보존해 검색 종료 시 복원.
+  const searchHighlightEls = Array.from(
+    document.querySelectorAll(".settings-item-name, .settings-item-desc"),
+  ).map((el) => ({ el, text: el.textContent || "" }));
+
+  function escapeHtml(s) {
+    return s.replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
+  }
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  // 요소 텍스트에서 q(대소문자 무시) 매칭 부분을 <mark>로 감싼다(원본은 이스케이프).
+  function highlightEl(el, original, q) {
+    if (!q) {
+      el.textContent = original;
+      return;
+    }
+    const re = new RegExp(escapeRegExp(q), "gi");
+    el.innerHTML = escapeHtml(original).replace(
+      re,
+      (m) => `<mark class="settings-search-mark">${m}</mark>`,
+    );
+  }
+  function clearHighlights() {
+    searchHighlightEls.forEach(({ el, text }) => {
+      el.textContent = text;
+    });
+  }
+
+  function applySettingsSearch(rawQuery) {
+    const q = rawQuery.trim().toLowerCase();
+    if (searchClear) searchClear.hidden = q === "";
+    if (q === "") {
+      // 검색 종료: 하이라이트 제거 + 항목/그룹 표시 원복 + 현재 탭 필터 복귀.
+      clearHighlights();
+      searchItems.forEach((el) => (el.hidden = false));
+      if (searchEmpty) searchEmpty.hidden = true;
+      selectTab(activeTab);
+      return;
+    }
+    // 검색 중: 탭바는 모두 비활성, 매칭 항목만 표시.
+    tabButtons.forEach((btn) => {
+      btn.classList.remove("is-active");
+      btn.setAttribute("aria-selected", "false");
+    });
+    let anyMatch = false;
+    searchItems.forEach((item) => {
+      const text = (item.textContent || "").toLowerCase();
+      const hit = text.includes(q);
+      item.hidden = !hit;
+      if (hit) anyMatch = true;
+    });
+    // 이름/설명에 하이라이트 적용(보이는 항목만; 숨긴 항목은 원본 유지).
+    searchHighlightEls.forEach(({ el, text }) => {
+      const inHidden = el.closest(".settings-item")?.hidden;
+      highlightEl(el, text, inHidden ? "" : q);
+    });
+    // 항목이 하나도 안 남은 그룹(그리고 그 그룹 제목)은 통째로 숨긴다.
+    searchGroups.forEach((group) => {
+      const hasVisible = group.querySelector(".settings-item:not([hidden])");
+      group.hidden = !hasVisible;
+    });
+    if (searchEmpty) searchEmpty.hidden = anyMatch;
+    if (panelsScroll) panelsScroll.scrollTop = 0;
+  }
+
+  searchInput?.addEventListener("input", () =>
+    applySettingsSearch(searchInput.value),
+  );
+  searchInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && searchInput.value) {
+      e.preventDefault();
+      searchInput.value = "";
+      applySettingsSearch("");
+    }
+  });
+  searchClear?.addEventListener("click", () => {
+    if (!searchInput) return;
+    searchInput.value = "";
+    applySettingsSearch("");
+    searchInput.focus();
+  });
 
   const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
   // 미설정 시 기본 체크(숨김)인 항목. clipLiveButton은 기본적으로 숨긴다.
@@ -1734,6 +1845,28 @@
   });
   loadFollowPreviewLiveEdge();
 
+  // ── 미리보기 제목 전체 표시(줄바꿈, 기본 OFF) ──────────────────────────────
+  const FOLLOW_PREVIEW_FULL_TITLE_KEY = "cheeseFollowPreviewFullTitle";
+  const followPreviewFullTitleInput = document.querySelector(
+    "[data-follow-preview-full-title]",
+  );
+  async function loadFollowPreviewFullTitle() {
+    let on = false; // 기본 자름
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_FULL_TITLE_KEY);
+      on = data?.[FOLLOW_PREVIEW_FULL_TITLE_KEY] === true;
+    } catch {}
+    if (followPreviewFullTitleInput) followPreviewFullTitleInput.checked = on;
+  }
+  followPreviewFullTitleInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_PREVIEW_FULL_TITLE_KEY]: followPreviewFullTitleInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowPreviewFullTitle();
+
   // ── 미리보기 헤더 폰트 크기(입력 75~175%, 저장 배율 0.75~1.75) ──────────────
   const FOLLOW_PREVIEW_HEADER_FONT_KEY = "cheeseFollowPreviewHeaderFont";
   const followHeaderFontInput = document.querySelector(
@@ -1872,6 +2005,46 @@
     } catch {}
   });
   loadFollowChannelTooltip();
+
+  // 팔로잉 정리 버튼(기본 ON).
+  const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
+  const followCleanupInput = document.querySelector("[data-follow-cleanup]");
+  async function loadFollowCleanup() {
+    let on = true; // 미설정/true=ON
+    try {
+      const data = await cachedStorageGet(FOLLOW_CLEANUP_KEY);
+      on = data?.[FOLLOW_CLEANUP_KEY] !== false;
+    } catch {}
+    if (followCleanupInput) followCleanupInput.checked = on;
+  }
+  followCleanupInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [FOLLOW_CLEANUP_KEY]: followCleanupInput.checked });
+    } catch {}
+  });
+  loadFollowCleanup();
+
+  // 채팅창 접힘 상태 유지(기본 OFF).
+  const CHAT_FOLD_PERSIST_KEY = "cheeseChatFoldPersist";
+  const chatFoldPersistInput = document.querySelector(
+    "[data-chat-fold-persist]",
+  );
+  async function loadChatFoldPersist() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(CHAT_FOLD_PERSIST_KEY);
+      on = data?.[CHAT_FOLD_PERSIST_KEY] === true;
+    } catch {}
+    if (chatFoldPersistInput) chatFoldPersistInput.checked = on;
+  }
+  chatFoldPersistInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CHAT_FOLD_PERSIST_KEY]: chatFoldPersistInput.checked,
+      });
+    } catch {}
+  });
+  loadChatFoldPersist();
 
   const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
   const cardPreviewAudioInput = document.querySelector(

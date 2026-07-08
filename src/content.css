@@ -2568,22 +2568,15 @@
   visibility: hidden;
 }
 
+/* 툴팁 표시는 :hover 가 아니라 JS 가 부여하는 show 클래스로 제어한다. :hover 는 클릭
+   이동 후 마우스가 그대로 남거나 헤더 재렌더·자동숨김 복귀 시 툴팁이 의도치 않게
+   떠버리는 엣지 케이스가 많았다. JS 가 pointer 위치로 '현재 실제로 가리키는 아이템'
+   하나에만 show 를 부여해, 두 툴팁이 겹치거나 유령 툴팁이 뜨는 문제를 없앤다. */
 #cheese-header-follow
-  .cheese-header-follow-item:hover
-  .cheese-header-follow-tooltip,
-#cheese-header-follow
-  .cheese-header-follow-item:focus-within
+  .cheese-header-follow-item.cheese-header-follow-item-show-tooltip
   .cheese-header-follow-tooltip {
   opacity: 1;
   visibility: visible;
-}
-
-/* 클릭 이동 직후 억제: hover 여도 툴팁을 숨긴다(마우스가 벗어났다 다시 오면 풀림). */
-#cheese-header-follow
-  .cheese-header-follow-item.cheese-header-follow-suppress-tooltip
-  .cheese-header-follow-tooltip {
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 
 #cheese-header-follow .cheese-header-follow-tooltip-inner {
@@ -2900,6 +2893,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 제목 전체 표시 옵션(cheese-fp-full-title): 자르지 않고 여러 줄로 전부 보여준다. */
+#cheese-follow-preview.cheese-fp-full-title .cheese-follow-preview-meta-title {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
 }
 
 #cheese-follow-preview .cheese-follow-preview-meta-sub {
@@ -3296,6 +3296,35 @@ img.cheese-blind-emoji {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* 채팅창 접힘 상태 복원 마스킹: 저장된 상태가 '접힘'인데 치지직이 로드 시 자체
+   초기화로 채팅창을 잠깐 펼쳤다가 우리가 다시 접는 동안(복원 기간)의 깜빡임을 가린다.
+   자동 숨김과 동일하게 채팅 aside 를 화면 밖으로(translateX) 밀어내 영상 폭은 그대로
+   유지하면서 채팅창만 매끄럽게 사라지게 한다(opacity/width:0 방식은 치지직이 펼치면
+   깜빡임이 더 잦았다). 복원이 굳으면 클래스를 제거한다. */
+html.cheese-chat-fold-restoring:not(.cheese-chat-stacked):not(
+    .cheese-chat-popup
+  )
+  aside#aside-chatting {
+  position: relative !important;
+  margin-left: calc(var(--cheese-chat-resized-width, 353px) * -1) !important;
+  margin-right: 0 !important;
+  transform: translateX(100%) !important;
+  /* 자동 숨김과 동일한 슬라이드 전환 — 치지직이 잠깐 펼쳐 채팅창이 나타났다 다시
+     마스킹될 때 '뚝' 끊기지 않고 부드럽게 밀려나게 한다. */
+  transition: transform 0.22s ease !important;
+  will-change: transform;
+  z-index: 30;
+}
+/* 초기 로드 순간의 마스킹은 transition 없이 즉시 숨긴다. transition 이 있으면 페이지
+   로드 때 채팅창이 원위치→화면밖으로 '슬라이드 인'하며 잠깐 보이는데(UX 불편), 초기엔
+   이미 숨겨진 상태로 시작해야 자연스럽다. 이후 재교정/해제는 위 규칙(부드러움)이 담당. */
+html.cheese-chat-fold-restoring-instant:not(.cheese-chat-stacked):not(
+    .cheese-chat-popup
+  )
+  aside#aside-chatting {
+  transition: none !important;
 }
 
 /* 채팅 너비 조절 시: 프로필 다이얼로그([role="alertdialog"])와 닉네임 메뉴 팝오버가
@@ -3793,4 +3822,406 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
 }
 .cheese-follow-channel-tooltip .cheese-fct-row strong {
   font-weight: 700;
+}
+
+/* ══ 팔로잉 채널 정리 도구 ══════════════════════════════════════════════════ */
+/* 목록 앞 '팔로잉 정리' 버튼 바 */
+.cheese-follow-cleanup-bar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 4px 0 12px;
+}
+.cheese-follow-cleanup-open {
+  padding: 8px 16px;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  background-color: var(--Surface-Neutral-Base, #e1e1e5);
+  color: var(--Content-Neutral-Primary, #0e0f10);
+  border-radius: 17px;
+  font-size: 15px !important;
+  line-height: 1 !important;
+}
+.cheese-follow-cleanup-open:hover {
+  filter: brightness(0.96);
+}
+
+/* 배경 스크롤 잠금 */
+html.cheese-fcln-lock,
+html.cheese-fcln-lock body {
+  overflow: hidden !important;
+}
+
+/* 딤머 + 모달 */
+.cheese-follow-cleanup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.cheese-follow-cleanup-dialog {
+  width: min(560px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--color-bg-01, #fff);
+  color: var(--Content-Neutral-Warm-Strong, #151515);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.cheese-fcln-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+}
+.cheese-fcln-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+.cheese-fcln-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  padding: 4px;
+  border-radius: 6px;
+}
+.cheese-fcln-close:hover {
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.06));
+}
+.cheese-fcln-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+}
+.cheese-fcln-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+/* 커스텀 필터 팝오버 */
+.cheese-fcln-filter-picker {
+  position: relative;
+}
+.cheese-fcln-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
+  background: var(--color-bg-01, #fff);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cheese-fcln-filter-caret {
+  flex: none;
+  opacity: 0.7;
+  transition: transform 0.18s ease;
+}
+.cheese-fcln-filter-trigger.is-open .cheese-fcln-filter-caret {
+  transform: rotate(180deg);
+}
+.cheese-fcln-filter-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  min-width: 160px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--color-bg-01, #fff);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.1));
+  /* 열림/닫힘 애니메이션: 기본은 숨김(투명·살짝 위·클릭 불가), .is-open 이면 표시. */
+  opacity: 0;
+  transform: translateY(-6px);
+  visibility: hidden;
+  pointer-events: none;
+  transform-origin: top left;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s;
+}
+.cheese-fcln-filter-pop.is-open {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+.cheese-fcln-filter-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cheese-fcln-filter-option:not(:last-child) {
+  margin-bottom: 5px;
+}
+.cheese-fcln-filter-option:hover {
+  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+}
+.cheese-fcln-filter-option.is-active {
+  font-weight: 800;
+  color: var(--Content-Brand-Weaker, #32bb81);
+  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+}
+.cheese-fcln-summary {
+  font-size: 12px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+}
+/* 전체 선택 바(목록 위) */
+.cheese-fcln-selectbar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 18px 8px;
+}
+.cheese-fcln-selectall {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cheese-fcln-selectall:hover {
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.06));
+}
+.cheese-fcln-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+.cheese-fcln-empty {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+}
+.cheese-fcln-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+.cheese-fcln-row:not(:last-child) {
+  margin-bottom: 5px;
+}
+.cheese-fcln-row:hover {
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.04));
+}
+/* 언팔로우 대상으로 선택된 행 강조 */
+.cheese-fcln-row.is-selected,
+.cheese-fcln-row.is-selected:hover {
+  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+}
+.cheese-fcln-check input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.cheese-fcln-prof img,
+.cheese-fcln-noimg {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.1));
+}
+.cheese-fcln-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cheese-fcln-date {
+  flex: none;
+  font-size: 12px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  min-width: 68px;
+  text-align: right;
+}
+.cheese-fcln-row-unfollow {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.1));
+  color: var(--Content-Neutral-Warm-Stronger, #151515);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cheese-fcln-row-unfollow:hover {
+  background: #e0413e;
+  color: #fff;
+}
+/* 목록 로드 전 스켈레톤 행 */
+.cheese-fcln-row.cheese-fcln-skeleton {
+  pointer-events: none;
+}
+/* 다시보기/클립 검색 스켈레톤(.cheese-search-skeleton-shimmer)과 동일 방식·색으로
+   맞춰 라이트/다크 모두에서 잘 보이게 한다: 베이스 Surface-Neutral-Weak + ::after 로
+   흰색 하이라이트가 좌→우로 흐르는 shimmer. */
+.cheese-fcln-sk {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+}
+.cheese-fcln-sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.38),
+    transparent
+  );
+  animation: cheese-search-skeleton 1.25s infinite;
+}
+.cheese-fcln-sk-check {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+.cheese-fcln-sk-prof {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.cheese-fcln-sk-name {
+  flex: 1;
+  min-width: 0;
+  height: 13px;
+}
+.cheese-fcln-sk-date {
+  flex: none;
+  width: 60px;
+  height: 12px;
+}
+.cheese-fcln-sk-btn {
+  flex: none;
+  width: 58px;
+  height: 26px;
+  border-radius: 6px;
+}
+.cheese-fcln-progress {
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+}
+.cheese-fcln-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+}
+.cheese-fcln-actions button {
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.cheese-fcln-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* 선택 언팔로우: 강조(주황계) — '선택 해제=체크 해제' 오해 방지용 배경. */
+.cheese-fcln-unfollow-selected {
+  background: #ff7a29;
+  color: #fff;
+}
+/* 필터 전체 언팔로우: 위험(빨강) */
+.cheese-fcln-unfollow-filtered {
+  background: #e0413e;
+  color: #fff;
+}
+.cheese-fcln-actions button:disabled {
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
+  color: inherit;
+}
+
+/* 커스텀 확인 팝업(모달 위) */
+.cheese-fcln-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.cheese-fcln-confirm {
+  width: min(340px, calc(100% - 40px));
+  padding: 22px 20px 16px;
+  border-radius: 12px;
+  background: var(--color-bg-01, #fff);
+  color: var(--Content-Neutral-Warm-Strong, #151515);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+.cheese-fcln-confirm-msg {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.cheese-fcln-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.cheese-fcln-confirm-actions button {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.cheese-fcln-confirm-cancel {
+  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+  color: inherit;
+}
+.cheese-fcln-confirm-ok {
+  background: #e0413e;
+  color: #fff;
 }

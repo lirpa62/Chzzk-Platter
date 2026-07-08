@@ -127,6 +127,38 @@
   }
 
   // chatMessage에서 원문 텍스트와 이모티콘 맵을 읽는다(객체/JSON 문자열 모두).
+  // 채팅 content 를 문자열로 정규화한다. 보통 문자열이지만, 관리자 전용 전환 타이밍과의
+  // 레이스 등으로 content 가 세그먼트 '객체 배열'로 올 때가 있다. 그대로 String() 하면
+  // "[object Object],[object Object]..." 가 되므로, 배열이면 각 세그먼트에서 텍스트를
+  // 뽑아 잇는다(객체는 text/value/content/message/msg 순, 문자열 요소는 그대로).
+  function normalizeChatContent(content) {
+    if (content == null) return "";
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .map((seg) => {
+          if (typeof seg === "string") return seg;
+          if (seg && typeof seg === "object") {
+            const t =
+              seg.text ?? seg.value ?? seg.content ?? seg.message ?? seg.msg;
+            return typeof t === "string" ? t : "";
+          }
+          return "";
+        })
+        .join("");
+    }
+    if (typeof content === "object") {
+      const t =
+        content.text ??
+        content.value ??
+        content.content ??
+        content.message ??
+        content.msg;
+      return typeof t === "string" ? t : "";
+    }
+    return String(content);
+  }
+
   function readChatOriginal(chatMessage) {
     if (!chatMessage || typeof chatMessage !== "object") return null;
     const msgTypeCode =
@@ -134,7 +166,9 @@
     if (msgTypeCode === 30 || msgTypeCode === 11 || msgTypeCode === 12) {
       return null; // 시스템/구독 합성 메시지 제외
     }
-    const text = String(chatMessage.content || chatMessage.msg || "");
+    const text =
+      normalizeChatContent(chatMessage.content) ||
+      normalizeChatContent(chatMessage.msg);
     if (!text) return null;
     let extras = chatMessage.extras;
     if (typeof extras === "string") extras = parseJsonSafe(extras);
@@ -224,7 +258,10 @@
   // {:emojiKey:} 토큰을 텍스트 노드 + <img>로 조립.
   function buildRestoredMessageFragment(text, emojiMap) {
     const fragment = document.createDocumentFragment();
-    const messageText = String(text || "");
+    // text 는 보통 문자열이지만, 방어적으로 정규화(배열/객체 → 텍스트)해 절대
+    // "[object Object]" 가 표시되지 않게 한다.
+    const messageText =
+      typeof text === "string" ? text : normalizeChatContent(text);
     if (!messageText) return fragment;
     const hasEmojis =
       emojiMap &&

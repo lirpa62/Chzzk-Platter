@@ -322,6 +322,11 @@
   let customImportText = "";
   let customShareMsg = null; // { kind, text }
   let globalDefaultPreset = { enabled: false, preset: "default" };
+  // 전역 커스텀 프리셋을 storage 에서 한 번이라도 받아왔는지. 이 값이 false 인 채로
+  // 저장하면(부팅 직후 로드 전 save 등) 아직 빈 state.customPresets 로 전역 프리셋을
+  // 덮어써 전부 삭제될 수 있다(사용자 프리셋 자동 삭제 버그). 로드 전 저장에서는
+  // customPresets 를 아예 보내지 않아, content.js 가 전역 프리셋을 유지하게 한다.
+  let presetsLoaded = false;
   // 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선, 기본 global).
   let globalDefaultMode = "global";
   // 채널의 '원래 선택'(전역 적용 전) 스냅샷 — 전역값이 채널 저장을 덮어쓰지 않게.
@@ -1339,14 +1344,20 @@
       globalDefaultPreset.enabled && channelBaseState
         ? channelBaseState
         : snapshotChannelPreset();
-    return {
+    const out = {
       enabled: state.enabled,
       preset: base.preset,
       filters: { ...base.filters },
-      customPresets: normalizeCustomPresets(state.customPresets),
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
     };
+    // 전역 프리셋을 아직 수신하지 못했으면(로드 전 저장) customPresets 를 보내지 않는다.
+    // 안 그러면 아직 빈 배열인 state.customPresets 로 저장된 전역 프리셋을 덮어써
+    // 사용자 커스텀 프리셋이 통째로 사라진다(부팅/새 탭 직후 발생하던 자동 삭제 버그).
+    if (presetsLoaded) {
+      out.customPresets = normalizeCustomPresets(state.customPresets);
+    }
+    return out;
   }
 
   function requestState(mediaId) {
@@ -1362,6 +1373,7 @@
     if (e.data.type === "loaded" && e.data.channelId === currentMediaId) {
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
+        presetsLoaded = true; // 전역 프리셋 수신 완료 → 이후 저장은 customPresets 포함 가능
         state = {
           ...DEFAULT_STATE(),
           ...saved,
@@ -1383,6 +1395,7 @@
         maybeAutoEnableFilter();
       }
     } else if (e.data.type === "globals-changed") {
+      presetsLoaded = true; // 전역 프리셋 수신 완료
       const prevEnabled = globalDefaultPreset.enabled;
       const next = e.data.state || {};
       state.customPresets = normalizeCustomPresets(next.customPresets);

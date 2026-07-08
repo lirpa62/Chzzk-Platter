@@ -69,6 +69,52 @@
         켜집니다.
       </p>
 
+      <div class="settings-search">
+        <svg
+          class="settings-search-icon"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="4.5"
+            stroke="currentColor"
+            stroke-width="1.6"
+          />
+          <path
+            d="M11 11L14 14"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+        </svg>
+        <input
+          type="text"
+          class="settings-search-input"
+          data-settings-search
+          placeholder="설정 검색 (예: 미리보기, 채팅, 사이드바)"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="설정 검색"
+        />
+        <button
+          type="button"
+          class="settings-search-clear"
+          data-settings-search-clear
+          aria-label="검색 지우기"
+          hidden
+        >
+          ✕
+        </button>
+      </div>
+      <p class="settings-search-empty" data-settings-search-empty hidden>
+        검색 결과가 없습니다.
+      </p>
+
       <div class="settings-layout">
         <nav class="settings-tabs" aria-label="설정 카테고리" role="tablist">
           <button
@@ -151,6 +197,15 @@
             aria-selected="false"
           >
             미리보기
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
+            data-tab="following"
+            role="tab"
+            aria-selected="false"
+          >
+            팔로잉
           </button>
           <button
             type="button"
@@ -1760,6 +1815,19 @@
                 </label>
               </li>
               <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">제목 전체 표시</span>
+                  <span class="settings-item-desc"
+                    >방송 제목을 한 줄로 자르지 않고 여러 줄로 전부 표시합니다.
+                    긴 제목이 잘려 불편할 때 켜세요(체크=전체 표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-preview-full-title />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
                 <label for="followHeaderFontInput">
                   <span class="settings-item-name">헤더 폰트 크기</span>
                   <span class="settings-item-desc"
@@ -1911,10 +1979,10 @@
 
           <section
             class="settings-group"
-            data-panel="preview"
-            aria-label="팔로잉 채널 정보"
+            data-panel="following"
+            aria-label="팔로잉"
           >
-            <h2 class="settings-group-title">팔로잉 채널 정보</h2>
+            <h2 class="settings-group-title">팔로잉</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -1927,6 +1995,20 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-follow-channel-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">팔로잉 정리 버튼</span>
+                  <span class="settings-item-desc"
+                    >팔로잉 목록(팔로잉 탭) 위에 '팔로잉 정리' 버튼을
+                    추가합니다. 최근 방송일 기준으로 채널을 모아 개별·선택·필터
+                    전체 언팔로우할 수 있습니다(체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-cleanup />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2079,6 +2161,20 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatAutoHide" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅창 접힘 상태 유지</span>
+                  <span class="settings-item-desc"
+                    >치지직 '채팅 접기' 버튼으로 채팅창을 접으면 그 상태를
+                    기억해, 새로고침·재접속 후 라이브에 들어올 때 자동으로 접힌
+                    상태로 복원합니다(트위치처럼, 체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-fold-persist />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

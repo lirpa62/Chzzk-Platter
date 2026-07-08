@@ -765,7 +765,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_y391b_"]
   )
   [class*="_icon_o04z9_"]
-  :is([class*="_container_"], img, svg) {
+  :is([class*="_container_"], img, svg):not(
+    [class*="_tooltip_"] *,
+    [class*="_tooltip_"],
+    [class*="_tail_"]
+  ) {
   width: 100% !important;
   height: 100% !important;
   min-width: 0 !important;
@@ -824,7 +828,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   [role="alertdialog"]
   [class*="_wrapper_o04z9_"]
   > [class*="_icon_o04z9_"]
-  :is([class*="_container_"], img, svg) {
+  :is([class*="_container_"], img, svg):not(
+    [class*="_tooltip_"] *,
+    [class*="_tooltip_"],
+    [class*="_tail_"]
+  ) {
   width: 100% !important;
   height: 100% !important;
   min-width: 0 !important;

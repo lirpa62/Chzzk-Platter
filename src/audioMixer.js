@@ -5389,12 +5389,14 @@
   // 스크롤·다른 영역 방향키를 방해하지 않도록). 가로챌 땐 capture+preventDefault+
   // stopImmediatePropagation으로 치지직 네이티브 방향키 seek 중복 발동을 막는다.
   let lastPointerOverPlayer = false;
+  // 플레이어 또는 채팅 영역 위인지. 채팅창을 클릭/호버만 해도(타이핑 아님) 방향키
+  // seek 가 막히던 문제 때문에, 채팅 영역(aside)도 허용 범위에 포함한다.
+  const SEEK_ALLOW_SEL =
+    ".pzp-pc, .webplayer-internal-core, [class*='player'], aside#aside-chatting, aside#vod-aside, [class*='chatting']";
   document.addEventListener(
     "pointermove",
     (e) => {
-      lastPointerOverPlayer = Boolean(
-        e.target?.closest?.(".pzp-pc, .webplayer-internal-core, [class*='player']"),
-      );
+      lastPointerOverPlayer = Boolean(e.target?.closest?.(SEEK_ALLOW_SEL));
     },
     true,
   );
@@ -5417,7 +5419,12 @@
     const player = findPlayer();
     if (!player) return false;
     const focusInPlayer = player.contains(document.activeElement);
-    return focusInPlayer || lastPointerOverPlayer;
+    // 포커스가 채팅 영역(aside)에 있어도 허용 — 채팅창을 클릭만 한 상태(타이핑 아님)
+    // 에서 방향키 seek 가 막히던 문제 해결. 채팅 입력창 타이핑은 위 isTypingTarget 제외.
+    const focusInChat = !!document.activeElement?.closest?.(
+      "aside#aside-chatting, aside#vod-aside, [class*='chatting']",
+    );
+    return focusInPlayer || focusInChat || lastPointerOverPlayer;
   }
 
   document.addEventListener(
