@@ -23,14 +23,25 @@
   let videoFilterAlwaysOn = false;
   let vfClickActivate = false; // 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
   let vfClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
+  let vfBeginner = false; // 초보자용 원클릭: 클릭 시 패널 없이 '화질 향상' 프리셋으로 바로 on/off
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
     vfClickActivate = e.data.videoFilterClickActivate === true;
     vfClickNoPanel = e.data.videoFilterClickNoPanel === true;
+    const vfBeginnerPrev = vfBeginner;
+    vfBeginner = e.data.videoFilterBeginner === true;
     globalDefaultMode =
       e.data.videoFilterGlobalDefaultMode === "channel" ? "channel" : "global";
+    // 옵션을 방금 '켠' 순간, 필터가 이미 켜져 있으면(다른 프리셋 사용 중) 즉시 '화질
+    // 향상' 프리셋 + auto-sharpen 으로 교체한다. 꺼져 있으면 다음 버튼 클릭 시 적용.
+    if (vfBeginner && !vfBeginnerPrev && state.enabled) {
+      if (typeof applyPreset === "function") applyPreset("beginner");
+      if (typeof setAutoSharpen === "function" && !autoSharpenEnabled) {
+        setAutoSharpen(true);
+      }
+    }
     if (typeof tick === "function") tick();
     if (typeof maybeAutoEnableFilter === "function") maybeAutoEnableFilter();
   });
@@ -153,6 +164,19 @@
     // 모든 값이 중립(보정 없음)인 원본 상태. 켜도 화면 변화가 없는 게 정상이며,
     // 다른 프리셋에서 보정 없는 상태로 되돌리는 기준점이다.
     default: { label: "원본", filters: {} },
+    // 초보자용 원클릭 전용: 전반적 화질 향상(선명도·대비·채도·그림자 소폭↑). 장르 특화가
+    // 아니라 어떤 방송에도 무난하게 또렷해지는 정도로 잡는다(game/sports 사이 수준). 이
+    // 프리셋을 적용할 때 auto-sharpen 도 함께 켜 저사양에서 끊기면 선명도가 자동 저감된다.
+    beginner: {
+      label: "화질 향상",
+      filters: {
+        sharpness: 30,
+        contrast: 1.06,
+        saturation: 1.08,
+        shadows: 15,
+        brightness: 1.02,
+      },
+    },
     fps: {
       // FPS 게임: 어두운 구석의 적 식별이 핵심. 그림자를 끌어올리고 감마를 낮춰
       // 암부 디테일을 살리고, 선명도·대비로 윤곽을 또렷하게.
@@ -255,6 +279,17 @@
         sharpness: 12,
         temperature: 6,
         contrast: 0.99,
+      },
+    },
+    anime: {
+      // 애니·2D: 만화·애니메이션·일러스트. 이미 또렷한 라인아트라 채도·선명도를 강조해
+      // 색을 화사하게, 선을 또렷하게. 대비를 살짝 올려 색면을 선명하게 구분한다.
+      label: "애니·2D",
+      filters: {
+        saturation: 1.18,
+        sharpness: 22,
+        contrast: 1.05,
+        brightness: 1.02,
       },
     },
     night: {
@@ -866,6 +901,7 @@
   }
 
   function applyGlobalDefaultPreset() {
+    if (vfBeginner) return false; // 초보자 모드는 화질 향상 프리셋 고정 → 전역 기본값 무시
     if (!globalDefaultPreset.enabled) return false;
     const key = globalDefaultPreset.preset || "default";
     const snapshot = snapshotForPresetKey(key);
@@ -1507,6 +1543,18 @@
   // 필터 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
   // 클릭 = 필터 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
   function handleButtonClick() {
+    // 초보자용 원클릭(최우선): clickActivate/noPanel/전역기본값과 무관하게 패널 없이
+    // '화질 향상' 프리셋 + auto-sharpen 으로 바로 on/off.
+    if (vfBeginner) {
+      if (state.enabled) {
+        setEnabled(false);
+      } else {
+        applyPreset("beginner"); // 화질 향상 프리셋 고정
+        if (!autoSharpenEnabled) setAutoSharpen(true); // 끊김 시 자동 선명도 저감
+        setEnabled(true);
+      }
+      return;
+    }
     if (!vfClickActivate) {
       togglePanel();
       return;
@@ -2489,6 +2537,8 @@
 
   // ── 부트스트랩 ────────────────────────────────────────────────────────────
   function tick() {
+    // 클립 만들기(클립 에디터)에선 비디오 필터를 개입시키지 않는다(seeker 드래그 버벅임 방지).
+    if (location.pathname.startsWith("/clip-editor")) return;
     const pageKey = getPageKey();
     if (!pageKey) {
       if (currentPageKey) {

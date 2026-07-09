@@ -205,7 +205,7 @@
             role="tab"
             aria-selected="false"
           >
-            팔로잉
+            팔로잉&구독
           </button>
           <button
             type="button"
@@ -224,15 +224,6 @@
             aria-selected="false"
           >
             통나무파워
-          </button>
-          <button
-            type="button"
-            class="settings-tab"
-            data-tab="subscribe"
-            role="tab"
-            aria-selected="false"
-          >
-            구독
           </button>
           <button
             type="button"
@@ -677,6 +668,20 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">초보자용 원클릭</span>
+                  <span class="settings-item-desc"
+                    >버튼 한 번으로 '기본 프리셋'을 바로 켜고/끕니다(패널은 열지
+                    않음). 켜면 아래 세부 옵션(바로 켜기·패널 안 열기·전역
+                    기본값·재방문 동작)은 잠깁니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-mixer-beginner />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name"
                     >믹서 버튼 클릭 시 바로 켜기</span
                   >
@@ -911,6 +916,21 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">초보자용 원클릭</span>
+                  <span class="settings-item-desc"
+                    >버튼 한 번으로 '화질 향상' 프리셋(선명도·대비·채도 자동
+                    조절)을 바로 켜고/끕니다(패널은 열지 않음). 켜면 아래 세부
+                    옵션(바로 켜기·패널 안 열기·전역 기본값·재방문 동작)은
+                    잠깁니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-video-filter-beginner />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name"
                     >필터 버튼 클릭 시 바로 켜기</span
                   >
@@ -1020,7 +1040,7 @@
 
           <section
             class="settings-group"
-            data-panel="subscribe"
+            data-panel="following"
             aria-label="구독 기능"
           >
             <h2 class="settings-group-title">구독</h2>
@@ -1302,30 +1322,6 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="headerAutoHide" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">채널 라이브 바로가기</span>
-                  <span class="settings-item-desc"
-                    >채널 홈 탭에 라이브로 가는 버튼 표시(체크=표시)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-channel-live-button />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 탭 끝(우측)에 배치</span>
-                  <span class="settings-item-desc"
-                    >체크 해제 시 탭 바로 뒤에 배치</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-channel-live-button-end />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2009,6 +2005,40 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-follow-cleanup />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="following"
+            aria-label="채널"
+          >
+            <h2 class="settings-group-title">채널</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채널 라이브 바로가기</span>
+                  <span class="settings-item-desc"
+                    >채널 홈 탭에 라이브로 가는 버튼 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-channel-live-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 탭 끝(우측)에 배치</span>
+                  <span class="settings-item-desc"
+                    >체크 해제 시 탭 바로 뒤에 배치</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-channel-live-button-end />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

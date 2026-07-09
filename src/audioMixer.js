@@ -29,6 +29,7 @@
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
   let mixerClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
+  let mixerBeginner = false; // 초보자용 원클릭: 클릭 시 패널 없이 기본 프리셋으로 바로 on/off
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
@@ -64,6 +65,21 @@
     // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
     mixerClickActivate = e.data.mixerClickActivate === true;
     mixerClickNoPanel = e.data.mixerClickNoPanel === true;
+    // 초보자용 원클릭(전역, 기본 OFF). 켜지면 위 옵션·전역기본값과 무관하게 클릭 시
+    // 패널 없이 기본 프리셋으로 바로 on/off 한다.
+    const mixerBeginnerPrev = mixerBeginner;
+    mixerBeginner = e.data.mixerBeginner === true;
+    // 옵션을 방금 '켠' 순간, 믹서가 이미 켜져 있으면(다른 프리셋 사용 중) 즉시 기본
+    // 프리셋으로 교체한다(끄기 전까진 초보자 모드가 프리셋을 고정하므로). 꺼져 있으면
+    // 그대로 두고 다음 버튼 클릭 시 적용.
+    if (
+      mixerBeginner &&
+      !mixerBeginnerPrev &&
+      state.enabled &&
+      typeof applyPreset === "function"
+    ) {
+      applyPreset("default");
+    }
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
@@ -273,9 +289,12 @@
   // - targetLevel: 노멀라이저 목표 RMS, limiter: 리미터 threshold(dB)
   const PRESETS = {
     default: {
-      // 기본은 노멀라이저/리미터를 끄고 컴프레서만 쓴다. 낮은 threshold(-50) + 높은
-      // ratio(12)로 조용한~큰 소리를 강하게 평준화하고, 강한 압축으로 줄어든 음량은
-      // makeup 으로 되살려 체감 음량을 유지한다(makeup 없으면 소리가 매우 작아짐).
+      // 기본: 적당한 컴프로 큰 소리를 억제하고 makeup 으로 체감 음량을 키운다. 예전
+      // 기본(threshold -50 / ratio 12 / makeup 12dB)은 조용한 소리까지 과증폭돼 찢어졌고,
+      // 그 반동으로 너무 약하게(makeup 2dB) 낮췄더니 믹서 on/off 차이가 거의 없었다.
+      // 큰 소리만 적당히 압축(threshold -24, ratio 4)해 다이내믹을 살리고, 음량은
+      // makeup 8dB(≈2.5배)로 키운다(음량 키우기는 threshold/ratio 가 아니라 makeup 담당).
+      // 리미터로 클리핑(찢어짐)을 막는다.
       label: "기본",
       gain: 1,
       eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -283,14 +302,14 @@
       targetLevel: 0.12,
       comp: {
         enabled: true,
-        threshold: -50,
-        knee: 40,
-        ratio: 12,
-        attack: 0,
+        threshold: -24,
+        knee: 24,
+        ratio: 4,
+        attack: 0.003,
         release: 0.25,
-        makeup: 12,
+        makeup: 8,
       },
-      limiter: false,
+      limiter: -1,
     },
     voice: {
       // 저챗·라디오: 말소리는 앞으로 두되, 배경음악이 너무 얇아지지 않게
@@ -491,7 +510,7 @@
     outputGain: null,
     video: null,
     connected: false,
-    normTimer: 0, // 노멀라이저 분석 루프(rAF) id
+    normTimer: 0, // 노멀라이저 분석 루프(setInterval) id
   };
   const mediaSourceCache = new WeakMap();
 
@@ -616,8 +635,9 @@
     return player?.querySelector("video") || document.querySelector("video");
   }
 
-  // 그래프: source → inputGain → normGain → [EQ peaking ×10] → comp → limiter → outputGain → destination
+  // 그래프: source → inputGain → normGain → [EQ peaking ×10] → comp → outputGain(makeup) → limiter → destination
   //         analyser는 normGain 입력(inputGain 출력)에서 RMS를 측정해 normGain을 자동 조정한다.
+  //         리미터는 makeup 뒤(최종단)에 둬 makeup·게인으로 키운 신호의 클리핑을 막는다.
   function buildGraph(video) {
     if (audio.connected && audio.video === video) return true;
     if (isGraphRetryBlocked(video)) return false;
@@ -669,9 +689,13 @@
         node = f;
       });
       node.connect(audio.comp);
-      audio.comp.connect(audio.limiter);
-      audio.limiter.connect(audio.outputGain);
-      audio.outputGain.connect(audio.ctx.destination);
+      // 리미터를 makeup(outputGain) '뒤'에 둔다. makeup 으로 키운 최종 신호를 리미터가
+      // 제한해야 클리핑(찢어짐)을 실제로 막는다. (이전엔 comp→limiter→outputGain 순이라
+      // 리미터가 makeup 앞에 있어, makeup 배율이 리미터 뒤에서 곱해져 최종 출력이 리미터
+      // threshold 를 넘어 찢어졌다 — 게인/​makeup 을 올릴수록 심해짐.)
+      audio.comp.connect(audio.outputGain);
+      audio.outputGain.connect(audio.limiter);
+      audio.limiter.connect(audio.ctx.destination);
 
       audio.connected = true;
       applyState();
@@ -765,13 +789,14 @@
     // 노멀라이저를 켜면 applyState 가 이 함수를 다시 불러 루프를 시작한다.
     if (!audio.connected || !state.normalizer?.enabled) return;
     const buf = new Float32Array(audio.analyser.fftSize);
-    const loop = () => {
+    // 백그라운드 탭에선 requestAnimationFrame 이 완전히 멈춰(계측: 최대 19초 정지) 노멀라이저
+    // 게인이 '멈추기 직전 낮은 값'에 얼어붙어 소리가 절반으로 줄었다(탭 전환 시 소리 작아짐
+    // 의 실제 원인). setInterval 은 백그라운드에서도 계속 돌아 게인이 얼지 않는다. 노멀라이저
+    // 는 느린 스무딩이라 100ms 간격으로 충분하다.
+    const NORM_INTERVAL_MS = 100;
+    const step = () => {
       if (!audio.connected || !state.normalizer?.enabled) {
-        // 실행 중 꺼졌으면 게인 1로 복귀시키고 루프 종료(재개는 applyState 가).
-        try {
-          audio.normGain?.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.2);
-        } catch {}
-        audio.normTimer = 0;
+        stopNormalizerLoop(); // 내부에서 게인 1 복귀 + 타이머 정리
         return;
       }
       audio.analyser.getFloatTimeDomainData(buf);
@@ -789,14 +814,13 @@
           NORM_SMOOTH,
         );
       }
-      audio.normTimer = requestAnimationFrame(loop);
     };
-    audio.normTimer = requestAnimationFrame(loop);
+    audio.normTimer = setInterval(step, NORM_INTERVAL_MS);
   }
 
   function stopNormalizerLoop() {
     if (audio.normTimer) {
-      cancelAnimationFrame(audio.normTimer);
+      clearInterval(audio.normTimer);
       audio.normTimer = 0;
     }
     if (audio.normGain && audio.ctx) {
@@ -1027,6 +1051,7 @@
   }
 
   function applyGlobalDefaultPreset() {
+    if (mixerBeginner) return false; // 초보자 모드는 기본 프리셋 고정 → 전역 기본값 무시
     if (!globalDefaultPreset.enabled) return false;
     const key = globalDefaultPreset.preset || "default";
     const snapshot = snapshotForPresetKey(key);
@@ -1954,6 +1979,17 @@
   // 믹서 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
   // 클릭 = 믹서 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
   function handleMixerButtonClick() {
+    // 초보자용 원클릭(최우선): clickActivate/noPanel/전역기본값과 무관하게 패널 없이
+    // '기본 프리셋으로 바로 on/off'. 켤 때 기본 프리셋을 강제 적용해 항상 동일 동작.
+    if (mixerBeginner) {
+      if (state.enabled) {
+        setEnabled(false);
+      } else if (!graphConflict) {
+        applyPreset("default"); // 프리셋 고정(초보자 모드는 기본 프리셋만)
+        setEnabled(true);
+      }
+      return;
+    }
     if (!mixerClickActivate) {
       togglePanel();
       return;
@@ -5753,6 +5789,9 @@
   }
 
   function tick() {
+    // 클립 만들기(클립 에디터)에선 오디오 믹서를 개입시키지 않는다. seeker 드래그로
+    // DOM 이 매 프레임 바뀌는데 여기서 video 탐색/그래프 판정을 돌리면 영상이 버벅인다.
+    if (location.pathname.startsWith("/clip-editor")) return;
     const pageKey = getPageKey();
     if (!pageKey) {
       // 라이브/다시보기 URL을 벗어남. 단, 플레이어가 PIP(미니플레이어)로 떠 계속

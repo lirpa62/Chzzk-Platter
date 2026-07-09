@@ -117,6 +117,13 @@ let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(glob
 const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
   "cheeseVideoFilterGlobalDefaultMode";
 let videoFilterGlobalDefaultMode = "global"; // 필터 전역 기본값 재방문 동작
+// 초보자용 원클릭(전역, 기본 OFF). 켜지면 버튼 클릭 시 패널 없이 바로 켜기 + 프리셋 고정
+// (믹서=기본, 필터=화질 향상)으로 동작하고, 관련 세부 옵션(바로켜기·패널안열기·전역기본값·
+// 재방문동작)은 무시된다. 설정에서 그 옵션들은 잠금(disabled) 처리된다.
+const MIXER_BEGINNER_KEY = "cheeseMixerBeginner";
+let mixerBeginner = false;
+const VIDEO_FILTER_BEGINNER_KEY = "cheeseVideoFilterBeginner";
+let videoFilterBeginner = false;
 // 오디오 믹서 게인 슬라이더 범위(전역). 기본 0.5~2(50%~200%).
 const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
 const MIXER_GAIN_MAX_KEY = "cheeseMixerGainMax";
@@ -8960,6 +8967,7 @@ function isWideScreenModeOn() {
 const AUTO_RELOAD_ERROR_MESSAGES = [
   "미디어 재생이 실패했습니다",
   "네트워크 오류가 발생했습니다",
+  "라이브 재생 중 문제가 발생했습니다",
   "문제가 발생했습니다", // "죄송합니다. 문제가 발생했습니다. 다시 시도해 주세요."
 ];
 const AUTO_RELOAD_CONFIRM_MS = 6000; // 오류 최초 감지 후 이 시간 지나도 오류면 리로드
@@ -8971,21 +8979,50 @@ const AUTO_RELOAD_SS_KEY = "cheeseAutoReloadLog"; // sessionStorage: {times:[ms,
 let autoReloadTimer = 0;
 let autoReloadErrorSince = 0; // 오류를 처음 감지한 시각(0=오류 없음)
 
-// 오류 다이얼로그가 '보이고' 메시지가 대상 오류 중 하나인지.
-function isPlayerErrorVisible() {
-  const dialog = document.querySelector(".pzp-pc__error-dialog");
-  if (!dialog) return false;
-  // 화면에 실제로 보이는지(정상 재생 중엔 DOM에 있어도 숨겨져 있음).
-  if (dialog.offsetParent === null) return false;
+// 요소가 화면에 실제로 보이는지(정상 재생 중엔 DOM에 있어도 숨겨져 있을 수 있음).
+function isElementActuallyVisible(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.offsetParent === null) return false;
   try {
-    if (getComputedStyle(dialog).display === "none") return false;
+    if (getComputedStyle(el).display === "none") return false;
   } catch {}
-  const msg =
-    document
-      .querySelector(".pzp-pc-ui-error-dialog__message")
-      ?.textContent?.trim() || "";
-  if (!msg) return false;
-  return AUTO_RELOAD_ERROR_MESSAGES.some((m) => msg.includes(m));
+  return true;
+}
+// 텍스트가 대상 오류 문구 중 하나를 포함하는지.
+function isAutoReloadErrorText(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  return AUTO_RELOAD_ERROR_MESSAGES.some((m) => t.includes(m));
+}
+
+// 플레이어 오류가 '보이고' 메시지가 대상 오류 중 하나인지. 두 형태를 모두 감지한다:
+//  1) pzp 플레이어 오류 다이얼로그(.pzp-pc__error-dialog + __message).
+//  2) 치지직 자체 오류 화면(플레이어 자리에 뜨는 _player_ 영역의 _title_ 문구,
+//     예: 'main ... ._player_ ._wrapper_ strong._title_' 에 '라이브 재생 중 문제가...').
+function isPlayerErrorVisible() {
+  // 1) pzp 오류 다이얼로그.
+  const dialog = document.querySelector(".pzp-pc__error-dialog");
+  if (dialog && isElementActuallyVisible(dialog)) {
+    const msg =
+      document
+        .querySelector(".pzp-pc-ui-error-dialog__message")
+        ?.textContent?.trim() || "";
+    if (isAutoReloadErrorText(msg)) return true;
+  }
+  // 2) 치지직 자체 오류 화면(pzp 플레이어가 아예 없이 플레이어 자리에 뜨는 오류 UI).
+  //    사용자가 준 구조: main ... ._player_ ._wrapper_ strong._title_ 에 오류 문구.
+  //    pzp 다이얼로그가 없을 수 있으므로 이 경로가 별도로 필요하다. 오탐 방지를 위해
+  //    플레이어 영역(_player_) 안의 _title_ 로 한정하되, 실제로 '오류 문구' 텍스트일
+  //    때만 참으로 본다(방송 제목 등 정상 _title_ 은 문구가 달라 통과 못 함).
+  const titleEls = document.querySelectorAll(
+    'main [class*="_player_"] [class*="_title_"], #layout-body [class*="_player_"] [class*="_title_"]',
+  );
+  for (const el of titleEls) {
+    if (isElementActuallyVisible(el) && isAutoReloadErrorText(el.textContent)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // sessionStorage 기반 최근 리로드 횟수(윈도 내). 무한 루프 방지 게이트.
@@ -11758,10 +11795,19 @@ function ensureChannelLiveButton() {
   const label =
     phase === "loading" ? "확인 중" : phase === "live" ? "라이브" : "오프라인";
 
+  // 채널 프로필 헤더의 이름(_name_18tzy_ 등, 해시는 빌드마다 변함) 클래스를 harvest 해
+  // 우리 버튼에도 부여한다 → 채널명과 동일한 글자 스타일. 못 찾으면 폴백 _title_ 클래스.
+  const nativeTitleCls =
+    document
+      .querySelector('div[class*="_information_18tzy_"] [class*="_name_18tzy_"]')
+      ?.className?.split(/\s+/)
+      .filter((c) => c.startsWith("_name_18tzy_"))
+      .join(" ") || "_title_zqwl4_24";
+
   let btn = list.querySelector(`.${CHANNEL_LIVE_BUTTON_CLASS}`);
   if (!btn) {
     btn = document.createElement("a");
-    btn.className = CHANNEL_LIVE_BUTTON_CLASS;
+    btn.className = `${CHANNEL_LIVE_BUTTON_CLASS} ${nativeTitleCls}`;
     btn.addEventListener("click", (e) => {
       if (
         e.defaultPrevented ||
@@ -14288,6 +14334,8 @@ function broadcastFeatureFlags() {
       videoFilterClickNoPanel, // 필터 클릭 시 바로 켜기 - 패널 안 열기(전역)
       mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
       videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
+      mixerBeginner, // 오디오 믹서 초보자용 원클릭(전역)
+      videoFilterBeginner, // 비디오 필터 초보자용 원클릭(전역)
       mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
       mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
@@ -14320,6 +14368,8 @@ const FEATURE_FLAGS_KEYS = [
   VIDEO_FILTER_CLICK_NO_PANEL_KEY,
   MIXER_GLOBAL_DEFAULT_MODE_KEY,
   VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
+  MIXER_BEGINNER_KEY,
+  VIDEO_FILTER_BEGINNER_KEY,
   MIXER_GAIN_MIN_KEY,
   MIXER_GAIN_MAX_KEY,
   SEEK_STEP_KEY,
@@ -14453,6 +14503,8 @@ async function loadFeatureFlags() {
       data?.[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
         ? "channel"
         : "global";
+    mixerBeginner = data?.[MIXER_BEGINNER_KEY] === true;
+    videoFilterBeginner = data?.[VIDEO_FILTER_BEGINNER_KEY] === true;
     mixerGainMin = normalizeGainMin(data?.[MIXER_GAIN_MIN_KEY]);
     mixerGainMax = normalizeGainMax(data?.[MIXER_GAIN_MAX_KEY]);
     syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
@@ -14569,6 +14621,12 @@ if (chrome.storage?.onChanged) {
         changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
           ? "channel"
           : "global";
+    }
+    if (changes[MIXER_BEGINNER_KEY]) {
+      mixerBeginner = changes[MIXER_BEGINNER_KEY].newValue === true;
+    }
+    if (changes[VIDEO_FILTER_BEGINNER_KEY]) {
+      videoFilterBeginner = changes[VIDEO_FILTER_BEGINNER_KEY].newValue === true;
     }
     if (changes[MIXER_GAIN_MIN_KEY]) {
       mixerGainMin = normalizeGainMin(changes[MIXER_GAIN_MIN_KEY].newValue);
@@ -14763,6 +14821,8 @@ if (chrome.storage?.onChanged) {
       changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY] ||
       changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
       changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
+      changes[MIXER_BEGINNER_KEY] ||
+      changes[VIDEO_FILTER_BEGINNER_KEY] ||
       changes[MIXER_GAIN_MIN_KEY] ||
       changes[MIXER_GAIN_MAX_KEY] ||
       changes[SEEK_STEP_KEY]
@@ -14791,7 +14851,15 @@ if (chrome.storage?.onChanged) {
   });
 }
 
+// 클립 만들기(클립 에디터) 페이지인지. 이 페이지는 우리 기능 대상이 아니고, seeker
+// 드래그 시 DOM/스타일이 매 프레임 바뀌는데 init 의 사이드바/헤더 재적용·측정이 매번
+// 돌면 영상/미리보기가 버벅인다. 여기선 아무 작업도 하지 않는다.
+function isClipEditorPage() {
+  return location.pathname.startsWith("/clip-editor");
+}
+
 function init() {
+  if (isClipEditorPage()) return; // 클립 에디터: 확장 개입 없음(드래그 버벅임 방지)
   initCommentTimestampMarkers();
   initSeekPreviewRealtime();
   initLiveDetailStartTooltip();

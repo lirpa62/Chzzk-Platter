@@ -1076,6 +1076,7 @@
 }
 
 .cheese-search-skeleton-title {
+  margin-top: 7px;
   width: 92%;
 }
 
@@ -2714,11 +2715,11 @@
   align-items: center;
   gap: 5px;
   padding: 6px 12px;
-  height: 35px;
+  height: 30px;
   margin-top: auto;
   margin-bottom: auto;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 15px !important;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;

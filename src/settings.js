@@ -56,6 +56,7 @@
     "cheeseMixerAlwaysOn",
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
+    "cheeseMixerBeginner",
     "cheeseMixerClickActivate",
     "cheeseMixerClickNoPanel",
     "cheeseMixerGainMin",
@@ -69,6 +70,7 @@
     "cheeseSyncCustom",
     "cheeseSyncPreset",
     "cheeseVideoFilterAlwaysOn",
+    "cheeseVideoFilterBeginner",
     "cheeseVideoFilterClickActivate",
     "cheeseVideoFilterClickNoPanel",
     "cheeseVideoFilterGlobalDefaultMode",
@@ -115,6 +117,54 @@
     try {
       chrome.storage?.local?.set(obj);
     } catch {}
+  }
+
+  // '초보자용 원클릭' 토글 바인딩: 로드/저장 + 켜지면 관련 세부 옵션(lockSels)을 잠근다.
+  // 잠금은 별도 클래스(is-beginner-locked)로 표시하고, 초보자가 켜질 때 요소의 '원래
+  // disabled 값'을 dataset 에 저장했다가 해제 시 복원한다(항상 켜기 등 기존 잠금과 공존).
+  function bindBeginnerOneClick({ inputSel, key, lockSels }) {
+    const input = document.querySelector(inputSel);
+    if (!input) return;
+    const lockEls = lockSels
+      .map((s) => document.querySelector(s))
+      .filter(Boolean);
+    function applyLock(on) {
+      lockEls.forEach((el) => {
+        const item = el.closest(".settings-item");
+        if (on) {
+          // 원래 disabled 값 1회 저장(중복 저장 방지) 후 강제 잠금.
+          if (el.dataset.preBeginnerDisabled === undefined) {
+            el.dataset.preBeginnerDisabled = el.disabled ? "1" : "0";
+          }
+          el.disabled = true;
+          item?.classList.add("is-locked", "is-beginner-locked");
+        } else {
+          // 초보자 잠금 해제: 원래 disabled 로 복원.
+          if (el.dataset.preBeginnerDisabled !== undefined) {
+            el.disabled = el.dataset.preBeginnerDisabled === "1";
+            delete el.dataset.preBeginnerDisabled;
+          }
+          item?.classList.remove("is-beginner-locked");
+          // 다른 이유(항상 켜기 등)로 잠겨 있지 않으면 is-locked 도 해제.
+          if (!el.disabled) item?.classList.remove("is-locked");
+        }
+      });
+    }
+    (async () => {
+      let on = false; // 기본 OFF
+      try {
+        const d = await cachedStorageGet(key);
+        on = d?.[key] === true;
+      } catch {}
+      input.checked = on;
+      applyLock(on);
+    })();
+    input.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [key]: input.checked });
+      } catch {}
+      applyLock(input.checked);
+    });
   }
 
   // 외부(치지직 탭 등)에서 값이 바뀌면 캐시에 반영.
@@ -1298,6 +1348,19 @@
     }
   }
 
+  // ── 오디오 믹서 초보자용 원클릭(전역, 기본 OFF) ───────────────────────────
+  // 켜지면 관련 세부 옵션(바로 켜기·패널 안 열기·전역 기본값·재방문 동작)을 잠근다.
+  bindBeginnerOneClick({
+    inputSel: "[data-mixer-beginner]",
+    key: "cheeseMixerBeginner",
+    lockSels: [
+      "[data-mixer-click-activate]",
+      "[data-mixer-click-no-panel]",
+      "[data-mixer-global-default-enabled]",
+      "[data-mixer-global-default-mode]",
+    ],
+  });
+
   // ── 필터 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
   const vfClickActivateInput = document.querySelector(
     "[data-video-filter-click-activate]",
@@ -1373,6 +1436,18 @@
       );
     }
   }
+
+  // ── 비디오 필터 초보자용 원클릭(전역, 기본 OFF) ───────────────────────────
+  bindBeginnerOneClick({
+    inputSel: "[data-video-filter-beginner]",
+    key: "cheeseVideoFilterBeginner",
+    lockSels: [
+      "[data-video-filter-click-activate]",
+      "[data-video-filter-click-no-panel]",
+      "[data-video-filter-global-default-enabled]",
+      "[data-video-filter-global-default-mode]",
+    ],
+  });
 
   // ── 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선) ─────
   const mixerGlobalDefaultModeGroup = document.querySelector(
