@@ -13962,13 +13962,26 @@ function openFollowCleanupModal() {
     if (!e.target.closest?.(".cheese-fcln-filter-picker")) closePop();
   });
 
-  // 목록 위임: 체크박스/개별 언팔로우.
+  // 목록 위임: 체크박스/개별 언팔로우/프로필·이름 클릭(새 탭 채널 이동).
   overlay.querySelector(".cheese-fcln-list")?.addEventListener("click", (e) => {
     const row = e.target.closest?.("[data-cid]");
     if (!row) return;
     const cid = row.dataset.cid;
     if (e.target.closest(".cheese-fcln-row-unfollow")) {
       runUnfollow([cid]);
+      return;
+    }
+    // 프로필 이미지·채널명 클릭 → 새 탭으로 해당 채널 홈 이동.
+    if (
+      cid &&
+      (e.target.closest(".cheese-fcln-prof") ||
+        e.target.closest(".cheese-fcln-name"))
+    ) {
+      window.open(
+        `https://chzzk.naver.com/${encodeURIComponent(cid)}`,
+        "_blank",
+        "noopener",
+      );
       return;
     }
     if (e.target.closest("input[type=checkbox]")) {

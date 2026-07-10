@@ -4057,6 +4057,13 @@ html.cheese-fcln-lock body {
   display: block;
   background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.1));
 }
+/* 프로필·이름 클릭 시 새 탭으로 채널 이동 → 클릭 가능함을 커서/호버로 표시 */
+.cheese-fcln-prof {
+  cursor: pointer;
+}
+.cheese-fcln-prof:hover img {
+  opacity: 0.85;
+}
 .cheese-fcln-name {
   flex: 1;
   min-width: 0;
@@ -4065,6 +4072,10 @@ html.cheese-fcln-lock body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+.cheese-fcln-name:hover {
+  text-decoration: underline;
 }
 .cheese-fcln-date {
   flex: none;
