@@ -602,6 +602,7 @@ body {
 .settings-item:has([data-mixer-global-default-mode]),
 .settings-item:has([data-player-button-side]),
 .settings-item:has([data-video-filter-global-default-mode]),
+.settings-item:has([data-player-button-order]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -737,4 +738,100 @@ body {
 }
 .settings-segmented button:disabled:hover {
   border-color: var(--popup-border);
+}
+
+/* 플레이어 하단 버튼 순서·위치: 좌/우 드래그 목록 */
+.settings-button-order {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.settings-button-order[data-player-button-order] {
+  width: 100%;
+}
+.settings-order-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.settings-order-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--popup-muted);
+  margin-bottom: 6px;
+  text-align: center;
+}
+.settings-order-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  min-height: 44px;
+  border: 1px dashed var(--popup-border);
+  border-radius: 8px;
+  background: var(--popup-soft-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--popup-bg);
+  border: 1px solid var(--popup-border);
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+}
+.settings-order-item:active {
+  cursor: grabbing;
+}
+.settings-order-item.is-dragging {
+  opacity: 0.5;
+}
+.settings-order-grip {
+  color: var(--popup-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+.settings-order-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 네이티브(이동 불가) 고정 칩: 회색·점선·grip 없음. 우리 버튼을 이 칩들 사이로 끼운다. */
+.settings-order-item.settings-order-native {
+  cursor: default;
+  color: var(--popup-muted);
+  background: var(--popup-soft-bg);
+  border-style: dashed;
+  opacity: 0.85;
+}
+.settings-order-item.settings-order-native:active {
+  cursor: default;
+}
+.settings-order-item.settings-order-native .settings-order-label {
+  font-size: 12px;
+}
+/* 위치 초기화 버튼 행 */
+.settings-order-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.settings-order-reset {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--popup-border);
+  background: var(--popup-bg);
+  color: var(--popup-muted);
+  cursor: pointer;
+}
+.settings-order-reset:hover {
+  color: var(--popup-fg, inherit);
+  border-color: var(--popup-muted);
 }

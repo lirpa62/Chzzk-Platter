@@ -145,22 +145,144 @@ let seekStepValue = 10;
 // 플레이어 하단 버튼의 좌/우 배치(우측에 몰리는 것을 완화). 버튼별 "left"|"right".
 // 기본값은 현재 배치와 동일(믹서/필터=left, 나머지=right).
 const PLAYER_BUTTON_SIDE_KEY = "cheesePlayerButtonSide";
+// 우리 하단 버튼 6종. 되감기(rewind)/앞으로(forward)는 각각 독립 이동.
+// 배열 순서 = 기본(초기화) 순서: 되감기·따라잡기·앞으로·탭음소거·스크린샷·스트림정보.
+const PLAYER_BUTTON_KEYS = [
+  "rewind",
+  "sync",
+  "forward",
+  "tabMute",
+  "screenshot",
+  "streamStats",
+];
 const PLAYER_BUTTON_SIDE_DEFAULT = {
   streamStats: "right",
   tabMute: "right",
   screenshot: "right",
-  seek: "right",
+  rewind: "right",
+  forward: "right",
   sync: "right",
 };
-let playerButtonSide = { ...PLAYER_BUTTON_SIDE_DEFAULT };
-function normalizePlayerButtonSide(v) {
-  const out = { ...PLAYER_BUTTON_SIDE_DEFAULT };
-  if (v && typeof v === "object") {
-    for (const k of Object.keys(PLAYER_BUTTON_SIDE_DEFAULT)) {
-      if (v[k] === "left" || v[k] === "right") out[k] = v[k];
+// 우리 버튼을 '어떤 네이티브 버튼 뒤'에 끼울지 정하는 앵커(슬롯). 그룹별 허용 앵커 클래스.
+// "START" 는 그룹 맨 앞(첫 네이티브 앞). 좌측은 볼륨 뒤(=믹서/필터 뒤)를 기본 지점으로.
+// 오디오 믹서는 앵커에서 제외 → 믹서와 필터 '사이'에는 버튼을 놓을 수 없다(필터 뒤만 허용).
+const PLAYER_BTN_ANCHORS = {
+  left: [
+    "START",
+    "pzp-playback-switch",
+    "pzp-pc__volume-control",
+    "cheese-video-filter-control",
+    "live_time",
+  ],
+  right: [
+    "START",
+    "custom__shop-button",
+    "custom__clip-button",
+    "pzp-pip-button",
+    "pzp-setting-button",
+    "pzp-viewmode-button",
+    "pzp-pc__fullscreen-button",
+  ],
+};
+// 기본 슬롯: 현재 배치 재현. 우측=클립 버튼 앞(=샵 뒤), 좌측=볼륨 뒤.
+const PLAYER_BUTTON_SLOT_DEFAULT = {
+  streamStats: { grp: "right", after: "custom__shop-button" },
+  tabMute: { grp: "right", after: "custom__shop-button" },
+  screenshot: { grp: "right", after: "custom__shop-button" },
+  rewind: { grp: "right", after: "custom__shop-button" },
+  forward: { grp: "right", after: "custom__shop-button" },
+  sync: { grp: "right", after: "custom__shop-button" },
+};
+// 확장 구조: { side:{key:"left"|"right"}, order:{left:[key...], right:[key...]},
+//   slot:{key:{grp,after}} }. side=소속 그룹, order=같은 앵커 내 상대순서,
+// slot=우리 버튼이 붙는 네이티브 앵커. 저장/브로드캐스트는 이 형태.
+let playerButtonSide = normalizePlayerButtonSide(null);
+
+// 구형 저장값의 seek(되감기+앞으로 통합) key 를 rewind/forward 로 확장한다.
+// side/slot 은 seek 값을 두 key 에 복제, order 는 seek 자리를 rewind→forward 로 치환.
+function migrateSeekKey(v) {
+  if (!v || typeof v !== "object") return v;
+  const out = { ...v };
+  const cloneWithSeek = (obj, seekVal) => {
+    const o = { ...obj };
+    if (o.seek !== undefined) {
+      if (o.rewind === undefined) o.rewind = seekVal(o.seek);
+      if (o.forward === undefined) o.forward = seekVal(o.seek);
+      delete o.seek;
     }
+    return o;
+  };
+  const srcSide = v.side && typeof v.side === "object" ? v.side : null;
+  if (srcSide) out.side = cloneWithSeek(srcSide, (x) => x);
+  else out.side = cloneWithSeek(v, (x) => x); // side-only 형태
+  if (v.slot && typeof v.slot === "object")
+    out.slot = cloneWithSeek(v.slot, (x) => (x && typeof x === "object" ? { ...x } : x));
+  if (v.order && typeof v.order === "object") {
+    const ord = {};
+    for (const grp of ["left", "right"]) {
+      const arr = Array.isArray(v.order[grp]) ? v.order[grp] : [];
+      ord[grp] = arr.flatMap((k) => (k === "seek" ? ["rewind", "forward"] : [k]));
+    }
+    out.order = ord;
   }
   return out;
+}
+
+// side 만 있는 값·확장 값·미설정 모두를 { side, order, slot } 로 정규화한다. order 는
+// side 와 정합되게 재계산(각 그룹에 속한 key 만, 정의 순서 유지, 저장 order 순서 우선).
+function normalizePlayerButtonSide(vRaw) {
+  const v = migrateSeekKey(vRaw); // 구형 seek → rewind/forward
+  const side = { ...PLAYER_BUTTON_SIDE_DEFAULT };
+  // 하위호환: v 가 side-only({key:"left"|"right"})거나 v.side 형태 둘 다 흡수.
+  const srcSide =
+    v && typeof v === "object"
+      ? v.side && typeof v.side === "object"
+        ? v.side
+        : v
+      : null;
+  if (srcSide) {
+    for (const k of PLAYER_BUTTON_KEYS) {
+      if (srcSide[k] === "left" || srcSide[k] === "right") side[k] = srcSide[k];
+    }
+  }
+  // slot: 각 key 가 붙는 네이티브 앵커 { grp, after }. 저장값 우선, 없거나 앵커가
+  // 그룹 허용 목록 밖이면 기본으로 보정. grp 는 side 와 일치하도록 강제(정합성).
+  const savedSlot = v && typeof v === "object" ? v.slot : null;
+  const slot = {};
+  for (const k of PLAYER_BUTTON_KEYS) {
+    const grp = side[k] === "left" ? "left" : "right";
+    const def = PLAYER_BUTTON_SLOT_DEFAULT[k];
+    let after = def && def.after ? def.after : "START";
+    const sv = savedSlot && typeof savedSlot === "object" ? savedSlot[k] : null;
+    if (sv && typeof sv === "object" && typeof sv.after === "string") {
+      // 저장된 앵커가 이 그룹의 허용 앵커면 채택, 아니면 기본 유지.
+      if (PLAYER_BTN_ANCHORS[grp].includes(sv.after)) after = sv.after;
+    }
+    // 기본 앵커가 이 그룹에 없으면(side 가 뒤집힌 경우) START 로 폴백.
+    if (!PLAYER_BTN_ANCHORS[grp].includes(after)) after = "START";
+    slot[k] = { grp, after };
+  }
+  // order: 저장된 순서가 있으면 그 순서를 우선, 없으면 PLAYER_BUTTON_KEYS 정의 순서.
+  // 같은 앵커를 공유하는 우리 버튼들 사이의 상대 순서로 쓰인다.
+  const savedOrder = v && typeof v === "object" ? v.order : null;
+  const order = { left: [], right: [] };
+  for (const grp of ["left", "right"]) {
+    const wanted = PLAYER_BUTTON_KEYS.filter((k) => side[k] === grp);
+    const savedArr =
+      savedOrder && Array.isArray(savedOrder[grp]) ? savedOrder[grp] : [];
+    // 저장 순서 중 이 그룹에 실제 속한 key 만, 그 순서대로. 빠진 건 정의 순서로 뒤에 붙임.
+    const seen = new Set();
+    for (const k of savedArr) {
+      if (wanted.includes(k) && !seen.has(k)) {
+        order[grp].push(k);
+        seen.add(k);
+      }
+    }
+    for (const k of wanted) {
+      if (!seen.has(k)) order[grp].push(k);
+    }
+  }
+  return { side, order, slot };
 }
 function normalizeSeekStep(v) {
   const n = Number(v);
@@ -290,6 +412,7 @@ const featureFlags = {
   headerStudio: false, // 헤더의 '스튜디오' 버튼 숨김
   headerTopicTabs: false, // 헤더의 주제 탭(게임/e스포츠/스포츠/엔터+) 숨김
   headerAutoHide: false, // 헤더 자동 숨김(상단 호버 시 슬라이드 표시)
+  headerStaticLogo: false, // 헤더 GIF 로고를 정적 로고로 고정(애니메이션 끔)
   seekPreviewRealtime: false, // 다시보기 seek preview 실제 시각 병기 숨김
   // 사이드바 메뉴 항목별 숨김(첫 nav 섹션의 개별 메뉴)
   sbLives: false, // 전체 방송
@@ -10523,6 +10646,37 @@ div#layout-body [class*="_header_"][style*="top"] {
       );
     }
   }
+  // 헤더 GIF 로고 정적화 — 움직이는 GIF(_logo_chzzk_)를 숨기고, 그 자리에 치지직 정적
+  // 로고(SVG mask, 흰색/테마색)를 그려 애니메이션을 멈춘다. img 는 visibility:hidden 로
+  // 공간을 유지하고, 부모 <a>의 ::after 로 정적 로고를 얹는다(치지직 클래스명 해시 무관
+  // 하게 _logo_chzzk_ 부분일치로 잡음).
+  if (featureFlags.headerStaticLogo) {
+    const logoMask =
+      "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='70' height='26'%3E%3Cpath d='m19.847 6.156-2.444 13.688h4.9l2.44-13.688h-4.896ZM26.433 6.156l-.654 3.66h5.971l-7.761 10.028h5.568l4.227-5.463-.974 5.463h4.895l1.222-6.842h-4.075l5.298-6.846H26.433ZM18.157 6.156h-5.565l2.83-3.656h-5.564L4.56 9.342h5.569L2 19.844h5.569l4.226-5.463-.974 5.463h4.896l1.222-6.842h-4.076l5.294-6.846ZM41.84 6.156l-2.445 13.688h4.896l2.444-13.688H41.84ZM48.421 6.156l-.65 3.66h5.937L45.98 19.844h5.565l4.176-5.421-.966 5.421h4.9l1.221-6.842h-4.056l5.275-6.846H48.42ZM66.833 16.184l1.79-10.028h-4.895l-2.445 13.688h3.168l-.654 3.656h4.9L70 16.184h-3.167Z'/%3E%3C/svg%3E\")";
+    rules.push(
+      // GIF img 는 숨기되(공간 유지) 부모 링크는 상대 위치로.
+      `header#header h1 [class*="_logo_chzzk_"] { visibility: hidden !important; }`,
+      `header#header h1 a { position: relative; }`,
+      // ::after 로 정적 로고를 img 자리에 겹쳐 그린다(85x27 img 안에 mask 중앙 정렬).
+      `header#header h1 a:has([class*="_logo_chzzk_"])::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  width: 85px;
+  height: 27px;
+  background-color: currentColor;
+  -webkit-mask: ${logoMask};
+  mask: ${logoMask};
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  pointer-events: none;
+}`,
+    );
+  }
   const css = rules.join("\n");
   if (style.textContent !== css) style.textContent = css;
   applySidebarSections();
@@ -11799,7 +11953,9 @@ function ensureChannelLiveButton() {
   // 우리 버튼에도 부여한다 → 채널명과 동일한 글자 스타일. 못 찾으면 폴백 _title_ 클래스.
   const nativeTitleCls =
     document
-      .querySelector('div[class*="_information_18tzy_"] [class*="_name_18tzy_"]')
+      .querySelector(
+        'div[class*="_information_18tzy_"] [class*="_name_18tzy_"]',
+      )
       ?.className?.split(/\s+/)
       .filter((c) => c.startsWith("_name_18tzy_"))
       .join(" ") || "_title_zqwl4_24";
@@ -12874,7 +13030,14 @@ function bindFollowPreviewHover() {
 
 // 사이드바(팔로잉 목록 포함) 안에서 일어난 스크롤만 기록한다. 페이지 다른 스크롤은
 // 무시해 불필요하게 미리보기를 막지 않는다.
+// 단, 카드 호버 플레이어 미리보기(cardLivePreviewOn)가 켜져 있으면 라이브 탐색 목록은
+// 메인 콘텐츠 영역(내부 스크롤 컨테이너)이라 사이드바 밖이므로, 이 옵션에선 모든 스크롤을
+// 기록해 '스크롤 중 카드를 스치면 미리보기가 바로 뜨는' 것을 막는다(휠 음량 지연과 유사).
 function onFollowPreviewScroll(e) {
+  if (cardLivePreviewOn) {
+    followPreviewLastScrollAt = Date.now();
+    return;
+  }
   const t = e.target;
   if (t === document || (t?.closest && t.closest("aside#sidebar"))) {
     followPreviewLastScrollAt = Date.now();
@@ -14339,7 +14502,21 @@ function broadcastFeatureFlags() {
       mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
       mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
-      playerButtonSide: { ...playerButtonSide }, // 하단 버튼 좌/우 배치
+      // 하단 버튼 좌/우 배치 + 순서 + 네이티브 앵커 슬롯
+      // { side:{...}, order:{left,right}, slot:{key:{grp,after}} }
+      playerButtonSide: {
+        side: { ...playerButtonSide.side },
+        order: {
+          left: [...playerButtonSide.order.left],
+          right: [...playerButtonSide.order.right],
+        },
+        slot: Object.fromEntries(
+          Object.entries(playerButtonSide.slot).map(([k, v]) => [
+            k,
+            { grp: v.grp, after: v.after },
+          ]),
+        ),
+      },
     },
     location.origin,
   );
@@ -14626,7 +14803,8 @@ if (chrome.storage?.onChanged) {
       mixerBeginner = changes[MIXER_BEGINNER_KEY].newValue === true;
     }
     if (changes[VIDEO_FILTER_BEGINNER_KEY]) {
-      videoFilterBeginner = changes[VIDEO_FILTER_BEGINNER_KEY].newValue === true;
+      videoFilterBeginner =
+        changes[VIDEO_FILTER_BEGINNER_KEY].newValue === true;
     }
     if (changes[MIXER_GAIN_MIN_KEY]) {
       mixerGainMin = normalizeGainMin(changes[MIXER_GAIN_MIN_KEY].newValue);

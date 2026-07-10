@@ -1043,7 +1043,7 @@
     state.preset = nextPreset.id;
     customDraft = null;
     draftBackup = null;
-    saveState();
+    saveState({ forcePresets: true }); // 커스텀 추가/수정 → 반드시 저장
     activeTab = "custom";
     refreshPanelContent();
   }
@@ -1086,7 +1086,7 @@
     presetDirty = false;
     dirtyFromName = "";
     dirtyFromKey = "";
-    saveState();
+    saveState({ forcePresets: true }); // 커스텀 빠른 저장 → 반드시 저장
     refreshPanelContent();
   }
 
@@ -1123,9 +1123,10 @@
       // 적용 중이던 커스텀이 삭제됨 → '아무 프리셋도 아닌' 상태로 두면 값 조정 시
       // 추가/초기화 버튼이 안 뜬다. 기본 프리셋으로 되돌려 다시 dirty 추적이 되게 한다.
       applyPreset("default");
-    } else {
-      saveState();
     }
+    // 삭제는 항상 customPresets 를 저장해야 한다(applyPreset 의 저장은 forcePresets 가
+    // 아니므로 로드 전이면 삭제가 반영 안 될 수 있어, 여기서 강제 저장으로 확정).
+    saveState({ forcePresets: true });
     refreshPanelContent();
   }
 
@@ -1343,7 +1344,7 @@
     }
     const existing = normalizeCustomPresets(state.customPresets);
     state.customPresets = [...existing, ...valid];
-    saveState();
+    saveState({ forcePresets: true }); // 커스텀 가져오기 → 반드시 저장
     customImportOpen = false;
     customImportText = "";
     customShareMsg = {
@@ -1356,7 +1357,10 @@
   // ── 설정 저장/복원 (content script에 위임) ───────────────────────────────
   let pendingUserEdit = false;
 
-  function saveState() {
+  // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 customPresets
+  // 를 함께 저장해야 함). 그 외 자동 저장(채널 전환 직후 등)은 로드 전이면 customPresets 를
+  // 생략해 빈 배열로 전역 프리셋을 덮어쓰지 않는다.
+  function saveState(opts) {
     if (!currentMediaId) {
       pendingUserEdit = true;
       return;
@@ -1366,13 +1370,13 @@
         source: "cheese-video-filter",
         type: "save",
         channelId: currentMediaId,
-        state: serializeState(),
+        state: serializeState(opts),
       },
       location.origin,
     );
   }
 
-  function serializeState() {
+  function serializeState(opts) {
     // 전역 기본값이 켜져 있으면 현재 state.preset/filters는 '전역값'이므로, 채널
     // 저장엔 채널의 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮어쓰지
     // 않게). enabled/userDisabled/customPresets 등 나머지는 현재 state를 저장한다.
@@ -1387,10 +1391,10 @@
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
     };
-    // 전역 프리셋을 아직 수신하지 못했으면(로드 전 저장) customPresets 를 보내지 않는다.
-    // 안 그러면 아직 빈 배열인 state.customPresets 로 저장된 전역 프리셋을 덮어써
-    // 사용자 커스텀 프리셋이 통째로 사라진다(부팅/새 탭 직후 발생하던 자동 삭제 버그).
-    if (presetsLoaded) {
+    // customPresets 저장 조건: 사용자가 직접 커스텀을 변경(forcePresets)했거나, 전역
+    // 프리셋을 이미 수신(presetsLoaded)한 뒤. 채널 전환 직후 로드 전 자동 저장에서만
+    // 생략해, 빈 배열로 전역 프리셋(videoFilter:presets)을 지우는 것을 막는다.
+    if (opts?.forcePresets || presetsLoaded) {
       out.customPresets = normalizeCustomPresets(state.customPresets);
     }
     return out;
@@ -2556,6 +2560,12 @@
       pendingUserEdit = false;
       clearFilter();
       state = DEFAULT_STATE();
+      // ⚠ state 를 리셋하면 state.customPresets 가 []가 된다. presetsLoaded 를 false 로
+      // 되돌리지 않으면, 새 채널의 loaded 가 오기 전에 saveState 가 나갈 때 serializeState
+      // 가 빈 customPresets 를 전역 프리셋(videoFilter:presets)에 저장해 통째로 지운다.
+      // (채널 3~4번 이동 중 커스텀 프리셋이 사라지던 버그.) 새 loaded/globals-changed 가
+      // 오면 다시 true 가 된다.
+      presetsLoaded = false;
       customDraft = null;
       draftBackup = null;
       clearPresetDirty();
@@ -2579,12 +2589,15 @@
     if (currentPageKey !== pageKey) return;
     if (!channelId) return;
     currentMediaId = channelId;
+    // 채널 id 확보 전 대기 중이던 사용자 변경이 있으면 먼저 저장하되, 로드는 '항상' 한다.
+    // (예전엔 pendingUserEdit 이면 저장만 하고 requestState 를 건너뛰어, 새 채널의 저장값·
+    //  커스텀 프리셋·전역 기본값을 못 불러와 패널 커스텀 목록이 비고 전역값이 원본으로
+    //  나타났다.) 저장과 로드는 별개다.
     if (pendingUserEdit) {
       pendingUserEdit = false;
       saveState();
-    } else {
-      requestState(channelId);
     }
+    requestState(channelId);
   }
 
   // observer 콜백에서 tick을 직접 부르면, tick이 일으킨 DOM 변경(버튼 삽입/

@@ -34,12 +34,59 @@
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
+  // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
+  // { side, order, slot } 형태로 브로드캐스트한다. 되감기/앞으로는 각각 독립 이동.
+  // 배열 순서 = 기본(초기화) 순서: 되감기·따라잡기·앞으로·탭음소거·스크린샷·스트림정보.
+  const PLAYER_BTN_KEYS = [
+    "rewind",
+    "sync",
+    "forward",
+    "tabMute",
+    "screenshot",
+    "streamStats",
+  ];
   const playerButtonSide = {
-    streamStats: "right",
-    tabMute: "right",
-    screenshot: "right",
-    seek: "right",
-    sync: "right",
+    side: {
+      streamStats: "right",
+      tabMute: "right",
+      screenshot: "right",
+      rewind: "right",
+      forward: "right",
+      sync: "right",
+    },
+    order: {
+      left: [],
+      right: ["rewind", "sync", "forward", "tabMute", "screenshot", "streamStats"],
+    },
+    // 각 우리 버튼이 붙는 네이티브 앵커(그 뒤에 배치). "START"=그룹 맨 앞. 기본은
+    // 우측 샵 버튼 뒤(=클립 버튼 앞, 기존 배치 재현).
+    slot: {
+      streamStats: { grp: "right", after: "custom__shop-button" },
+      tabMute: { grp: "right", after: "custom__shop-button" },
+      screenshot: { grp: "right", after: "custom__shop-button" },
+      rewind: { grp: "right", after: "custom__shop-button" },
+      forward: { grp: "right", after: "custom__shop-button" },
+      sync: { grp: "right", after: "custom__shop-button" },
+    },
+  };
+  // 그룹별 네이티브 앵커 클래스(DOM 순서). arrangePlayerButtons 가 이 순서로 앵커를
+  // 처리하고, 저장 slot 의 앵커가 현재 DOM 에 없으면 다음 존재하는 앵커로 폴백한다.
+  // 오디오 믹서는 앵커 제외(믹서·필터 사이 배치 금지) — 필터만 앵커.
+  const PLAYER_BTN_ANCHOR_ORDER = {
+    left: [
+      "pzp-playback-switch",
+      "pzp-pc__volume-control",
+      "cheese-video-filter-control",
+      "live_time",
+    ],
+    right: [
+      "custom__shop-button",
+      "custom__clip-button",
+      "pzp-pip-button",
+      "pzp-setting-button",
+      "pzp-viewmode-button",
+      "pzp-pc__fullscreen-button",
+    ],
   };
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
@@ -107,19 +154,43 @@
       if (changed && typeof refreshSeekButtonLabels === "function")
         refreshSeekButtonLabels();
     }
-    // 하단 버튼 좌/우 배치(전역). 값이 바뀌면 기존 버튼을 제거해 다음 tick에서 새 위치로
-    // 다시 주입되게 한다(ensure*Button 이 목표 컨테이너에 없으면 만들고, 있으면 유지).
-    const side = e.data.playerButtonSide;
-    if (side && typeof side === "object") {
-      let sideChanged = false;
-      for (const k of Object.keys(playerButtonSide)) {
-        const v = side[k] === "left" || side[k] === "right" ? side[k] : null;
-        if (v && v !== playerButtonSide[k]) {
-          playerButtonSide[k] = v;
-          sideChanged = true;
+    // 하단 버튼 좌/우 배치 + 그룹 내 순서(전역). { side, order } 를 받아 반영하고, 값이
+    // 바뀌면 버튼을 재배치한다.
+    const pbs = e.data.playerButtonSide;
+    if (pbs && typeof pbs === "object" && pbs.side && pbs.order) {
+      const prev = JSON.stringify(playerButtonSide);
+      for (const k of PLAYER_BTN_KEYS) {
+        if (pbs.side[k] === "left" || pbs.side[k] === "right") {
+          playerButtonSide.side[k] = pbs.side[k];
         }
       }
-      if (sideChanged && typeof relocatePlayerButtons === "function") {
+      for (const grp of ["left", "right"]) {
+        if (Array.isArray(pbs.order[grp])) {
+          playerButtonSide.order[grp] = pbs.order[grp].filter((k) =>
+            PLAYER_BTN_KEYS.includes(k),
+          );
+        }
+      }
+      // 네이티브 앵커 슬롯 반영. grp 는 side 와 일치, after 는 그 그룹 허용 앵커거나 START.
+      if (pbs.slot && typeof pbs.slot === "object") {
+        for (const k of PLAYER_BTN_KEYS) {
+          const sv = pbs.slot[k];
+          if (!sv || typeof sv !== "object") continue;
+          const grp = playerButtonSide.side[k] === "left" ? "left" : "right";
+          let after =
+            typeof sv.after === "string" ? sv.after : "START";
+          if (
+            after !== "START" &&
+            !PLAYER_BTN_ANCHOR_ORDER[grp].includes(after)
+          )
+            after = "START";
+          playerButtonSide.slot[k] = { grp, after };
+        }
+      }
+      if (
+        JSON.stringify(playerButtonSide) !== prev &&
+        typeof relocatePlayerButtons === "function"
+      ) {
         relocatePlayerButtons();
       }
     }
@@ -1066,14 +1137,14 @@
     );
     if (!exists) return;
     state.defaultCustomId = id;
-    saveState();
+    saveState({ forcePresets: true });
     refreshPanelContent();
   }
 
   function unsetDefaultCustomPreset() {
     if (!state.defaultCustomId) return;
     state.defaultCustomId = "";
-    saveState();
+    saveState({ forcePresets: true });
     refreshPanelContent();
   }
 
@@ -1382,7 +1453,7 @@
     state.preset = nextPreset.id;
     customDraft = null;
     draftBackup = null; // 저장됐으니 복원 불필요
-    saveState();
+    saveState({ forcePresets: true });
     activeTab = "custom";
     refreshPanelContent();
   }
@@ -1428,7 +1499,7 @@
     presetDirty = false;
     dirtyFromName = "";
     dirtyFromKey = "";
-    saveState();
+    saveState({ forcePresets: true });
     // 저장된 프리셋이 적용된 상태로 표시 갱신(탭은 그대로 유지).
     refreshPanelContent();
   }
@@ -1469,9 +1540,9 @@
       // 적용 중이던 커스텀이 삭제됨 → '아무 프리셋도 아닌' 상태로 두면 값 조정 시
       // 추가/초기화 버튼이 안 뜬다. 기본 프리셋으로 되돌려 다시 dirty 추적이 되게 한다.
       applyPreset("default");
-    } else {
-      saveState();
     }
+    // 삭제는 항상 customPresets 를 저장(applyPreset 의 저장은 forcePresets 가 아니므로).
+    saveState({ forcePresets: true });
     refreshPanelContent();
   }
 
@@ -1661,7 +1732,7 @@
     }
     const existing = normalizeCustomPresets(state.customPresets);
     state.customPresets = [...existing, ...valid];
-    saveState();
+    saveState({ forcePresets: true }); // 커스텀 가져오기 → 반드시 저장
     customImportOpen = false;
     customImportText = "";
     customShareMsg = {
@@ -1707,7 +1778,10 @@
   // 로드해 현재 변경을 덮어쓰지 않는다.
   let pendingUserEdit = false;
 
-  function saveState() {
+  // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 customPresets
+  // 를 함께 저장). 그 외 자동 저장은 로드 전이면 customPresets 를 생략(빈 배열로 전역
+  // 프리셋 덮어쓰기 방지).
+  function saveState(opts) {
     if (!currentMediaId) {
       // 채널id 확보 전 변경 — 확보되면 그때 저장한다.
       pendingUserEdit = true;
@@ -1718,7 +1792,7 @@
         source: "cheese-audio-mixer",
         type: "save",
         channelId: currentMediaId,
-        state: serializeState(),
+        state: serializeState(opts),
       },
       location.origin,
     );
@@ -1736,7 +1810,7 @@
     };
   }
 
-  function serializeState() {
+  function serializeState(opts) {
     // 전역 기본값이 켜져 있으면 현재 state.preset/값은 '전역값'이므로, 채널 저장엔
     // 채널의 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮어쓰지 않게).
     // enabled/userDisabled/customPresets 등 나머지는 현재 state를 저장한다.
@@ -1744,7 +1818,7 @@
       globalDefaultPreset.enabled && channelBaseState
         ? channelBaseState
         : snapshotChannelPreset();
-    return {
+    const out = {
       enabled: state.enabled,
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
@@ -1754,9 +1828,15 @@
       comp: { ...preset.comp },
       limiter: { ...preset.limiter },
       normalizer: { ...preset.normalizer },
-      customPresets: normalizeCustomPresets(state.customPresets),
-      defaultCustomId: String(state.defaultCustomId || ""),
     };
+    // customPresets 저장 조건: 사용자가 직접 커스텀 변경(forcePresets)했거나 이미 로드
+    // 완료(stateLoaded). 채널 전환 직후 로드 전 자동 저장에서만 생략해, DEFAULT_STATE 로
+    // 비워진 빈 customPresets 가 전역 프리셋(audioMixer:presets)을 지우지 않게 한다.
+    if (opts?.forcePresets || stateLoaded) {
+      out.customPresets = normalizeCustomPresets(state.customPresets);
+      out.defaultCustomId = String(state.defaultCustomId || "");
+    }
+    return out;
   }
 
   function requestState(mediaId) {
@@ -3440,10 +3520,78 @@
   function trackSelected(t) {
     return !!(t?.selected || t?._selected);
   }
+  // 화질 항목(li) prefix 텍스트에서 height 파싱(예: "1080p(원본)"→1080, "720p"→720).
+  // "자동/ABR" 항목은 0 반환(최고값 후보에서 제외).
+  function qualityItemHeight(li) {
+    const txt = String(
+      li?.querySelector?.(".pzp-ui-setting-quality-item__prefix")?.textContent ||
+        "",
+    );
+    if (/auto|자동|abr/i.test(txt)) return 0;
+    const m = txt.match(/(\d{3,4})\s*p/i);
+    return m ? Number(m[1]) : 0;
+  }
+  let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
+  // 치지직 플레이어는 Vue 로 구현돼 화질 메뉴 항목(li)이 네이티브 .click() 에 반응한다.
+  // (React 아님 — __reactProps$ 없음.) 설정을 열지 않아도 화질 목록 DOM 은 상시 존재하므로,
+  // 최고 화질 li 를 .click() 하면 치지직의 정상 화질 변경 경로(그리드/P2P 초기화 포함)를
+  // 탄다. selected=true 직접 설정과 달리 그리드가 정상 실행된다.
+  //
+  // 클론 교체 트릭: 원본 li 를 DOM 에서 잠깐 빼고(클론으로 대체) DOM 밖 원본을 클릭한 뒤
+  // 다음 프레임에 원복한다. 클릭은 처리되지만 화질 메뉴 UI 가 열리거나 깜빡이는 부작용을
+  // 감춘다. 이미 최고 항목이 선택(--checked)돼 있으면 클릭하지 않는다(멱등). 성공 시 true.
+  function clickMaxQualityMenuItem() {
+    const list = document.querySelector(
+      ".pzp-setting-quality-pane__list-container",
+    );
+    if (!list) return false;
+    const items = Array.from(
+      list.querySelectorAll("li.pzp-ui-setting-quality-item"),
+    );
+    if (!items.length) return false;
+    // 최고 height 항목(자동 제외). height 동률이면 먼저 나온(상단) 항목.
+    let bestLi = null;
+    let bestLiH = 0;
+    for (const li of items) {
+      const h = qualityItemHeight(li);
+      if (h > bestLiH) {
+        bestLiH = h;
+        bestLi = li;
+      }
+    }
+    if (!bestLi || bestLiH <= 0) return false;
+    // 이미 최고 항목이 체크돼 있으면 클릭하지 않는다(멱등).
+    if (bestLi.classList.contains("pzp-ui-setting-pane-item--checked"))
+      return true;
+    // 클릭 직후~--checked 반영 전 사이에 tick 이 또 클릭하지 않도록 짧게 억제.
+    if (Date.now() - maxQualityMenuClickAt < 1500) return true;
+    try {
+      const parent = bestLi.parentElement;
+      if (parent) {
+        // 클론으로 원본을 잠깐 대체 → DOM 밖 원본 클릭(메뉴 UI 노출 방지) → 다음 프레임 원복.
+        const clone = bestLi.cloneNode(true);
+        parent.replaceChild(clone, bestLi);
+        bestLi.click();
+        requestAnimationFrame(() => {
+          try {
+            if (clone.parentElement === parent) parent.replaceChild(bestLi, clone);
+          } catch {}
+        });
+      } else {
+        bestLi.click();
+      }
+      maxQualityMenuClickAt = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // 수동 화질 존중: 사용자가 이 미디어에서 직접 낮은 고정 화질을 고르면 그 뒤론 다시
   // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
   let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
+  let maxQualityMenuTriedAt = 0; // 메뉴 클릭 첫 시도 시각(폴백 유예 판정용)
   function applyMaxQuality() {
     if (!maxQualityAuto) return;
     const core = findCorePlayer();
@@ -3478,8 +3626,21 @@
     // 이미 최고 고정 화질이면 손대지 않는다(멱등).
     if (selH >= bestH) {
       maxQualitySetHeight = bestH;
+      maxQualityMenuTriedAt = 0; // 다음 미디어/하락 대비 리셋
       return;
     }
+    // 하이브리드: 먼저 실제 화질 메뉴 항목을 클릭해 정상 경로(그리드/P2P 포함)를 유도한다.
+    // 메뉴 클릭은 비동기라 즉시 화질이 안 바뀔 수 있으니, 클릭 후 일정 시간(MENU_GRACE_MS)
+    // 동안은 반영을 기다린다. 그 시간이 지나도 최고 화질이 아니면(무반응) selected=true
+    // 직접 설정으로 폴백해 화질만이라도 보장한다.
+    const MENU_GRACE_MS = 2500;
+    const clicked = clickMaxQualityMenuItem();
+    if (clicked) {
+      if (!maxQualityMenuTriedAt) maxQualityMenuTriedAt = Date.now();
+      // 클릭 반영 대기 중이면 폴백을 미룬다(그리드 정상 실행 기회 확보).
+      if (Date.now() - maxQualityMenuTriedAt < MENU_GRACE_MS) return;
+    }
+    // 메뉴 클릭이 없었거나(메뉴 미발견) 유예시간이 지나도 안 바뀌면 직접 설정 폴백.
     try {
       best.selected = true;
       maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
@@ -3888,8 +4049,18 @@
   }
 
   // 버튼 key 의 배치 설정("left"|"right")에 맞는 컨트롤 컨테이너를 반환.
+  // 버튼 key → 그 key 를 이루는 버튼 클래스들. 되감기/앞으로는 각각 독립 key.
+  const PLAYER_BTN_KEY_CLASSES = {
+    streamStats: [STATS_BUTTON_CLASS],
+    tabMute: [TAB_MUTE_BUTTON_CLASS],
+    screenshot: [SCREENSHOT_BUTTON_CLASS],
+    rewind: [REWIND_BUTTON_CLASS],
+    forward: [FORWARD_BUTTON_CLASS],
+    sync: [SYNC_BUTTON_CLASS],
+  };
+
   function sideControls(player, key) {
-    const side = playerButtonSide[key] === "left" ? "left" : "right";
+    const side = playerButtonSide.side[key] === "left" ? "left" : "right";
     return (
       player.querySelector(`.pzp-pc__bottom-buttons-${side}`) ||
       player.querySelector(".pzp-pc__bottom-buttons-right") ||
@@ -3911,17 +4082,93 @@
     return last ? last.nextSibling : null;
   }
 
-  // key 버튼의 최종 삽입 앵커. left면 leftInsertAnchor, right면 호출부가 준 rightAnchor.
+  // key 버튼의 최초 삽입 앵커(대략 위치). 정확한 그룹 내 순서는 arrangePlayerButtons 가
+  // 마무리한다. left면 믹서/필터 뒤, right면 호출부가 준 rightAnchor.
   function insertAnchorFor(controls, key, rightAnchor) {
-    if (playerButtonSide[key] === "left") return leftInsertAnchor(controls);
+    if (playerButtonSide.side[key] === "left") return leftInsertAnchor(controls);
     return rightAnchor;
   }
 
-  // 배치 설정이 바뀌면 우리 하단 버튼 5종을 '전부 제거'하고 다음 tick 에서 ensure*Button
-  // 이 정해진 순서·컨테이너로 다시 그린다. (반대쪽에 있는 것만 골라 제거하면, 남아 있던
-  // 버튼들 사이 순서가 어긋나 '왼쪽 갔다 오른쪽 오면 원래 순서로 안 돌아오는' 문제가
-  // 생긴다. 전부 새로 그리면 순서가 항상 일관된다. relocate 는 설정 변경 시에만 드물게
-  // 일어나므로 잠깐의 재생성은 무해하다.)
+  // grp 그룹에서 slot.after 앵커의 '기준 엘리먼트'를 반환한다(그 '뒤'에 우리 버튼을 붙인다).
+  // - 네이티브 앵커: 그 엘리먼트. 현재 DOM 에 없으면 앵커 순서상 다음으로 존재하는 앵커로 폴백.
+  //   (믹서/필터 앵커는 기능이 꺼져 있으면 DOM 에 없어 다음 앵커로 폴백.)
+  // - START(또는 폴백 앵커도 없음): null = 그룹 맨 앞.
+  function resolveAnchorEl(controls, grp, after) {
+    const order = PLAYER_BTN_ANCHOR_ORDER[grp];
+    if (after && after !== "START") {
+      const startIdx = order.indexOf(after);
+      if (startIdx >= 0) {
+        for (let i = startIdx; i < order.length; i++) {
+          const el = controls.querySelector(`:scope > .${order[i]}`);
+          if (el) return el; // 이 네이티브 뒤에 붙인다
+        }
+      }
+    }
+    return null; // START: 그룹 맨 앞
+  }
+
+  // slot(네이티브 앵커) + order(같은 앵커 내 상대순서)에 따라 각 그룹 내 '우리 버튼'을
+  // 재배치한다. 네이티브 버튼은 절대 이동하지 않고(우리 버튼만 insertBefore) React 트리
+  // 불변. 앵커는 DOM 순서로 처리하고, 같은 앵커에 매핑된 우리 버튼은 order 상대순서대로
+  // 그 앵커 바로 뒤에 붙인다. seek 은 되감기→앞으로 쌍을 인접·순서 유지. 앵커가 없으면
+  // 다음 앵커로 폴백. 이미 목표 배치면 DOM 변경 없이 반환(부하·옵저버 자가발화 억제).
+  //
+  // 핵심: 각 앵커의 '기준 네이티브 엘리먼트' 뒤에 nextSibling 을 삽입 커서로 삼아 순서대로
+  // 넣는다. 커서를 매 삽입마다 그 엘리먼트의 nextSibling 으로 갱신하므로, 같은 앵커에
+  // 여러 버튼이 있어도 '앵커→버튼1→버튼2→...' 안정적으로 정렬된다(무한 스왑 방지).
+  function arrangePlayerButtons() {
+    const player = findPlayer();
+    if (!player) return;
+    for (const grp of ["left", "right"]) {
+      const controls = player.querySelector(`.pzp-pc__bottom-buttons-${grp}`);
+      if (!controls) continue;
+      // 이 그룹에 속한 우리 버튼 key 를 order(상대순서)대로 나열.
+      const keys = playerButtonSide.order[grp].filter(
+        (k) => playerButtonSide.side[k] === grp,
+      );
+      if (keys.length === 0) continue;
+      // 앵커별 그룹핑: after 앵커 → 그 앵커에 붙을 key 목록(order 순서 유지).
+      const byAnchor = new Map(); // after → [key...]
+      for (const key of keys) {
+        const slot = playerButtonSide.slot[key];
+        const after = slot && slot.after ? slot.after : "START";
+        if (!byAnchor.has(after)) byAnchor.set(after, []);
+        byAnchor.get(after).push(key);
+      }
+      // 앵커 처리 순서: START 먼저, 그다음 네이티브 앵커 DOM 순서.
+      const anchorSeq = ["START", ...PLAYER_BTN_ANCHOR_ORDER[grp]];
+      for (const after of anchorSeq) {
+        const anchorKeys = byAnchor.get(after);
+        if (!anchorKeys || anchorKeys.length === 0) continue;
+        // 이 앵커에 붙일 우리 버튼 엘리먼트(존재하는 것만, seek=되감기→앞으로 쌍 유지).
+        const ordered = [];
+        for (const key of anchorKeys) {
+          for (const cls of PLAYER_BTN_KEY_CLASSES[key] || []) {
+            const el = controls.querySelector(`:scope > .${cls}`);
+            if (el) ordered.push(el);
+          }
+        }
+        if (ordered.length === 0) continue;
+        // 기준: 네이티브 앵커 엘리먼트(뒤에 붙임) / START 면 그룹 시작 지점(leftInsertAnchor).
+        const anchorEl = resolveAnchorEl(controls, grp, after);
+        // 목표 위치를 순서대로 확인·삽입. prev = 직전 형제(앵커 or 방금 배치한 우리 버튼).
+        // el 이 이미 prev 바로 뒤면 건드리지 않고, 아니면 prev.nextSibling 앞에 삽입.
+        let prev = anchorEl; // null 이면 그룹 맨 앞부터
+        for (const el of ordered) {
+          const shouldFollow = prev ? prev.nextSibling : controls.firstChild;
+          if (el !== shouldFollow) {
+            if (prev) controls.insertBefore(el, prev.nextSibling);
+            else controls.insertBefore(el, controls.firstChild);
+          }
+          prev = el; // 다음 버튼은 이 버튼 뒤에
+        }
+      }
+    }
+  }
+
+  // 배치 설정이 바뀌면 우리 하단 버튼 5종을 '전부 제거'하고 tick 으로 재생성한 뒤 order
+  // 대로 정렬한다. (반대쪽만 골라 제거하면 순서가 어긋나므로 전부 새로 그린다. relocate 는
+  // 설정 변경 시에만 드물게 일어나 잠깐의 재생성은 무해.)
   function relocatePlayerButtons() {
     [
       STATS_BUTTON_CLASS,
@@ -3937,6 +4184,7 @@
       forceFullTick = true;
       tick();
     }
+    arrangePlayerButtons(); // tick 이 버튼을 다시 만들면 그 순서를 order 대로 정리
   }
 
   function ensureStatsButton() {
@@ -4320,7 +4568,8 @@
     btn.setAttribute("aria-label", label);
     btn.classList.toggle("is-muted", tabMutedState);
     const tip = btn.querySelector(".pzp-button__tooltip");
-    if (tip && tip.textContent !== label) tip.textContent = label;
+    const tipText = `${label} (Shift+M)`; // 단축키 유지(생성 시와 동일)
+    if (tip && tip.textContent !== tipText) tip.textContent = tipText;
     const icon = btn.querySelector(".pzp-ui-icon");
     if (icon) icon.innerHTML = tabMuteIcon(tabMutedState);
   }
@@ -4761,17 +5010,16 @@
     }
     const player = findPlayer();
     if (!player) return;
-    const controls = sideControls(player, "seek");
+    const controls = sideControls(player, "rewind");
     if (!controls) return;
-    // 배치 규칙:
-    //  - 따라잡기가 '같은 컨테이너'에 있으면: 되감기 → 따라잡기 → 앞으로 (양옆에).
-    //  - 따라잡기가 없거나 다른 쪽이면: 되감기·앞으로를 '서로 붙여서' 배치.
+    // 여기서는 '존재 보장'만 한다(초기 대략 위치). 최종 위치는 arrangePlayerButtons 가
+    // rewind/forward 각각의 slot 대로 재배치한다.
     const syncBtn = controls.querySelector(`.${SYNC_BUTTON_CLASS}`);
     const rightAnchor =
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.firstChild;
-    const baseAnchor = syncBtn || insertAnchorFor(controls, "seek", rightAnchor);
+    const baseAnchor = syncBtn || insertAnchorFor(controls, "rewind", rightAnchor);
     if (!controls.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
       controls.insertBefore(createSeekButton(false), baseAnchor);
     }
@@ -4786,7 +5034,6 @@
           : baseAnchor;
       controls.insertBefore(createSeekButton(true), fwdAnchor);
     }
-    ensureSeekBar(); // 되감기 가능 영역 표시 + 드래그 seek 바
     startSeekCheck();
     updateSeekButtonsState();
   }
@@ -4809,7 +5056,9 @@
     document
       .querySelectorAll(`.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`)
       .forEach((b) => b.remove());
-    removeSeekBar();
+    // 되감기 바는 버튼과 독립(applyLiveSeekBar 가 관리) — 여기서 지우지 않는다. 예전엔
+    // removeSeekBar() 를 불렀는데, 되감기 숨김 시 tick 이 removeSeekButtons(바 제거)→
+    // applyLiveSeekBar(바 생성)를 반복해 전역 옵저버가 무한 발화하며 바가 진동했다.
   }
 
   // ── 라이브 되감기 바(seekable 구간 표시 + 드래그 seek) ──────────────────────
@@ -4853,8 +5102,10 @@
   }
 
   function ensureSeekBar() {
-    // 되감기 바 토글이 꺼졌거나, 라이브 되감기 자체가 숨김이면 바를 두지 않는다.
-    if (!liveSeekBarOn || featureFlags.liveRewind) {
+    // 되감기 바는 '되감기 바 표시' 토글(liveSeekBarOn)만 따른다. '라이브 되감기 숨김'
+    // (featureFlags.liveRewind)은 플레이어의 되감기/앞으로 '버튼'만 숨기는 것이고, 바는
+    // 별개다 — 버튼을 숨겨도 바로 seek 하고 싶다는 요청에 따라 바는 유지한다.
+    if (!liveSeekBarOn) {
       removeSeekBar();
       return;
     }
@@ -5445,10 +5696,12 @@
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
   }
 
-  // 단축키를 받을 상황인가: 라이브 + 되감기 기능 활성 + 타이핑 아님 +
+  // 단축키를 받을 상황인가: 라이브 + 되감기 바 표시 + 타이핑 아님 +
   // 플레이어에 포커스 또는 마우스가 플레이어 위.
   function seekHotkeyAllowed(e) {
-    if (featureFlags.liveRewind) return false; // 되감기 기능 숨김 상태
+    // 방향키 seek 는 '되감기 바 표시'(liveSeekBarOn)를 따른다. '되감기 숨김'은 버튼만
+    // 숨기므로, 버튼이 없어도 바가 켜져 있으면 방향키 seek 를 허용한다(바 드래그와 일관).
+    if (!liveSeekBarOn) return false;
     if (!location.pathname.startsWith("/live/")) return false;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
       return false;
@@ -5838,6 +6091,7 @@
       // 끌고 가지 않는다).
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
+      maxQualityMenuTriedAt = 0;
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
       state = DEFAULT_STATE();
@@ -5889,6 +6143,9 @@
     } else {
       ensureSeekButtons();
     }
+    // 되감기 바는 되감기/앞으로 '버튼'(liveRewind)과 독립 — 버튼을 숨겨도 바는 유지한다.
+    // 그래서 버튼 분기 밖에서 항상 재평가한다(내부는 liveSeekBarOn 만 따름).
+    applyLiveSeekBar();
     if (featureFlags.tabMute) {
       removeTabMuteButton();
     } else {
@@ -5899,6 +6156,9 @@
     } else {
       ensureScreenshotButton();
     }
+    // 우리 버튼들을 order 대로 정렬(순서 이미 맞으면 no-op). 재렌더로 순서가 흐트러져도
+    // 다음 tick 에서 복구된다.
+    arrangePlayerButtons();
     // 음량 % 툴팁은 믹서 on/off와 무관하게 항상 부착(기본 볼륨 조작 보조).
     bindVolumeTooltipDelegation(); // 위임 리스너 1회 등록
     ensureVolumeTooltip();
@@ -5975,16 +6235,16 @@
       return;
     }
     currentMediaId = channelId;
+    // 채널id 확보 전 대기 중이던 사용자 변경이 있으면 먼저 저장(그 값이 storage 에 반영)
+    // 하되, 로드는 '항상' 한다. 저장 직후 loaded 로 그 값(+전역 커스텀/기본값)을 다시
+    // 받으므로 덮어쓰기 문제 없이 커스텀 프리셋·전역 기본값을 정상 복원한다. (예전엔
+    // pendingUserEdit 이면 로드를 건너뛰어, 새 채널에서 커스텀 목록이 비고 전역값이
+    // 원본으로 나타났다.)
     if (pendingUserEdit) {
-      // 채널id 확보 전 사용자가 바꾼 설정이 있으면 로드 대신 저장한다(덮어쓰기 방지).
-      // 이미 현재 state가 사용자 의도 → 자동 활성화 허용.
       pendingUserEdit = false;
-      saveState();
-      stateLoaded = true;
-      maybeAutoEnableMixer();
-    } else {
-      requestState(channelId); // loaded 수신 시 stateLoaded=true
+      saveState({ forcePresets: true }); // 대기 변경엔 커스텀 편집도 있을 수 있어 강제 저장
     }
+    requestState(channelId); // loaded 수신 시 stateLoaded=true
   }
 
   // documentElement 전체(subtree childList)를 감시하므로 라이브 채팅·재생 UI 변이가

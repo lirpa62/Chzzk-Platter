@@ -355,20 +355,26 @@
       });
   }
 
-  // React 재렌더로 다시 가림 문구가 된 복원행을 재복원.
+  // 가림 문구가 된 행을 (재)복원. 두 경우 모두 처리:
+  //  - 이미 복원했다가 React 재렌더로 다시 가려진 행(restoredRowInfo 존재)
+  //  - 정상으로 왔다가 '처음' 가려진 행(restoredRowInfo 없음). 이 경우도 캐시 원문이
+  //    있으면 즉시 복원한다. (예전엔 info 없으면 바로 반환해, 최초 블라인드는 복원되지
+  //    않고 토글 재활성화(sweep) 후에야 복원되던 문제.)
   function reapplyRestoreForTarget(target) {
     if (!restoreBlindedChat || blindRestoreWriting || moaRestoring()) return;
     if (!(target instanceof Element)) return;
     const row = target.closest("[class*='_item_']");
     if (!(row instanceof HTMLElement)) return;
+    if (!row.querySelector("[class*='_chatting_message_']")) return;
     const info = restoredRowInfo.get(row);
-    if (!info) return;
-    if (getRowNickname(row) !== info.nickname) {
-      restoredRowInfo.delete(row); // 노드 재활용 가드
+    // 이미 복원 이력이 있으면 노드 재활용 가드(닉네임 불일치 시 폐기).
+    if (info && getRowNickname(row) !== info.nickname) {
+      restoredRowInfo.delete(row);
       return;
     }
     const span = getRowMessageSpan(row);
     if (!(span instanceof HTMLElement)) return;
+    if (span.classList.contains("cheese-blind-restored-text")) return;
     const current = String(span.textContent || "").trim();
     if (BLIND_PLACEHOLDER_TEXTS.includes(current)) {
       const chatMessage = getChatMessage(row);

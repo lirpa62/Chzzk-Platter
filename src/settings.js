@@ -119,52 +119,92 @@
     } catch {}
   }
 
+  // 요소를 강제 잠금/해제(초보자 원클릭 기준). 원래 disabled 값을 dataset 에 보관했다가
+  // 해제 시 복원해 항상 켜기 등 기존 잠금과 공존한다.
+  function setBeginnerLock(el, on) {
+    if (!el) return;
+    const item = el.closest(".settings-item");
+    if (on) {
+      if (el.dataset.preBeginnerDisabled === undefined) {
+        el.dataset.preBeginnerDisabled = el.disabled ? "1" : "0";
+      }
+      el.disabled = true;
+      item?.classList.add("is-locked", "is-beginner-locked");
+    } else {
+      if (el.dataset.preBeginnerDisabled !== undefined) {
+        el.disabled = el.dataset.preBeginnerDisabled === "1";
+        delete el.dataset.preBeginnerDisabled;
+      }
+      item?.classList.remove("is-beginner-locked");
+      if (!el.disabled) item?.classList.remove("is-locked");
+    }
+  }
+
   // '초보자용 원클릭' 토글 바인딩: 로드/저장 + 켜지면 관련 세부 옵션(lockSels)을 잠근다.
-  // 잠금은 별도 클래스(is-beginner-locked)로 표시하고, 초보자가 켜질 때 요소의 '원래
-  // disabled 값'을 dataset 에 저장했다가 해제 시 복원한다(항상 켜기 등 기존 잠금과 공존).
-  function bindBeginnerOneClick({ inputSel, key, lockSels }) {
+  // exclusiveSel(항상 켜기)과는 상호 배타 — 초보자 ON 이면 항상 켜기를 끄고 잠그고,
+  // 항상 켜기 ON 이면 초보자를 끄고 잠근다(둘 다 켜면 패널을 못 여는 충돌 방지).
+  function bindBeginnerOneClick({
+    inputSel,
+    key,
+    lockSels,
+    exclusiveSel,
+    exclusiveKey,
+  }) {
     const input = document.querySelector(inputSel);
     if (!input) return;
     const lockEls = lockSels
       .map((s) => document.querySelector(s))
       .filter(Boolean);
-    function applyLock(on) {
-      lockEls.forEach((el) => {
-        const item = el.closest(".settings-item");
-        if (on) {
-          // 원래 disabled 값 1회 저장(중복 저장 방지) 후 강제 잠금.
-          if (el.dataset.preBeginnerDisabled === undefined) {
-            el.dataset.preBeginnerDisabled = el.disabled ? "1" : "0";
-          }
-          el.disabled = true;
-          item?.classList.add("is-locked", "is-beginner-locked");
-        } else {
-          // 초보자 잠금 해제: 원래 disabled 로 복원.
-          if (el.dataset.preBeginnerDisabled !== undefined) {
-            el.disabled = el.dataset.preBeginnerDisabled === "1";
-            delete el.dataset.preBeginnerDisabled;
-          }
-          item?.classList.remove("is-beginner-locked");
-          // 다른 이유(항상 켜기 등)로 잠겨 있지 않으면 is-locked 도 해제.
-          if (!el.disabled) item?.classList.remove("is-locked");
-        }
-      });
+    const exclusiveEl = exclusiveSel
+      ? document.querySelector(exclusiveSel)
+      : null;
+
+    // 초보자 ON → 하위 옵션 + 항상 켜기 잠금.
+    function applyBeginnerLock(on) {
+      lockEls.forEach((el) => setBeginnerLock(el, on));
+      if (exclusiveEl) setBeginnerLock(exclusiveEl, on);
     }
     (async () => {
       let on = false; // 기본 OFF
+      let alwaysOn = false;
       try {
-        const d = await cachedStorageGet(key);
+        const d = await cachedStorageGet([key, exclusiveKey].filter(Boolean));
         on = d?.[key] === true;
+        alwaysOn = exclusiveKey ? d?.[exclusiveKey] === true : false;
       } catch {}
+      // 상호 배타: 항상 켜기가 이미 켜져 있으면 초보자는 강제로 꺼진 상태 + 잠금.
+      // (과거에 둘 다 켜둔 사용자 정리 — storage 에도 off 를 반영해 MAIN 과 일치.)
+      if (alwaysOn && on) {
+        on = false;
+        try {
+          cachedStorageSet({ [key]: false });
+        } catch {}
+      }
       input.checked = on;
-      applyLock(on);
+      applyBeginnerLock(on);
+      if (exclusiveEl) setBeginnerLock(input, alwaysOn); // 항상 켜기 ON → 초보자 잠금
     })();
     input.addEventListener("change", () => {
       try {
         cachedStorageSet({ [key]: input.checked });
       } catch {}
-      applyLock(input.checked);
+      applyBeginnerLock(input.checked);
     });
+
+    // 반대 방향: 항상 켜기 ON → 초보자 원클릭을 끄고 잠근다. 항상 켜기 OFF → 초보자 잠금 해제.
+    if (exclusiveEl) {
+      exclusiveEl.addEventListener("change", () => {
+        const alwaysOn = !!exclusiveEl.checked;
+        if (alwaysOn && input.checked) {
+          input.checked = false;
+          try {
+            cachedStorageSet({ [key]: false });
+          } catch {}
+          applyBeginnerLock(false); // 초보자 꺼짐 → 하위 잠금 해제
+        }
+        setBeginnerLock(input, alwaysOn);
+      });
+    }
   }
 
   // 외부(치지직 탭 등)에서 값이 바뀌면 캐시에 반영.
@@ -1359,6 +1399,8 @@
       "[data-mixer-global-default-enabled]",
       "[data-mixer-global-default-mode]",
     ],
+    exclusiveSel: "[data-mixer-always-on]",
+    exclusiveKey: "cheeseMixerAlwaysOn",
   });
 
   // ── 필터 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
@@ -1447,6 +1489,8 @@
       "[data-video-filter-global-default-enabled]",
       "[data-video-filter-global-default-mode]",
     ],
+    exclusiveSel: "[data-video-filter-always-on]",
+    exclusiveKey: "cheeseVideoFilterAlwaysOn",
   });
 
   // ── 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선) ─────
@@ -1572,29 +1616,9 @@
     2,
   );
 
-  // 라이브 되감기가 '숨김'이면 되감기 바도 의미가 없으므로 이 토글을 비활성화한다.
-  // (data-feature="liveRewind"는 체크=숨김.)
-  const liveRewindInput = document.querySelector('[data-feature="liveRewind"]');
-  function setLiveSeekBarLock(hidden) {
-    if (!liveSeekBarInput) return;
-    liveSeekBarInput.disabled = hidden;
-    liveSeekBarInput
-      .closest(".settings-item")
-      ?.classList.toggle("is-locked", hidden);
-  }
-  // 사용자가 이 화면에서 되감기 숨김을 토글하면 즉시 반영.
-  liveRewindInput?.addEventListener("change", () =>
-    setLiveSeekBarLock(!!liveRewindInput.checked),
-  );
-  // 초기값은 storage에서 직접 읽어 확정(load()의 비동기 완료 타이밍에 의존하지 않게).
-  (async () => {
-    let hidden = false;
-    try {
-      const d = await cachedStorageGet(FEATURE_HIDDEN_KEY);
-      hidden = d?.[FEATURE_HIDDEN_KEY]?.liveRewind === true;
-    } catch {}
-    setLiveSeekBarLock(hidden);
-  })();
+  // 되감기 바는 '라이브 되감기 숨김'과 독립적으로 표시할 수 있다. 되감기 숨김은
+  // 되감기/앞으로 '버튼'만 숨기고, 바(드래그·방향키 seek)는 이 토글만 따른다. 그래서
+  // 되감기 숨김이 켜져 있어도 이 토글을 잠그지 않는다(예전에는 잠갔던 것을 해제).
 
   // ── 되감기·앞으로 간격(3~60초, 기본 10) ──────────────────────────────────
   const SEEK_STEP_KEY = "cheeseSeekStepS";
@@ -2254,56 +2278,328 @@
   loadAutoReloadOnError();
 
   // ── 플레이어 하단 버튼 좌/우 배치(버튼별 left|right, 기본 right) ────────────
+  // ── 플레이어 하단 버튼 순서·위치(좌/우 그룹 + 드래그 순서) ──────────────────
   const PLAYER_BUTTON_SIDE_KEY = "cheesePlayerButtonSide";
-  const PLAYER_BUTTON_SIDE_DEFAULT = {
-    streamStats: "right",
-    tabMute: "right",
-    screenshot: "right",
-    seek: "right",
-    sync: "right",
+  // 배열 순서 = 기본(초기화) 순서: 되감기·따라잡기·앞으로·탭음소거·스크린샷·스트림정보.
+  const PLAYER_BTN_KEYS = [
+    "rewind",
+    "sync",
+    "forward",
+    "tabMute",
+    "screenshot",
+    "streamStats",
+  ];
+  const PLAYER_BTN_LABELS = {
+    streamStats: "스트림 정보",
+    tabMute: "탭 음소거",
+    screenshot: "스크린샷",
+    rewind: "되감기",
+    forward: "앞으로",
+    sync: "실시간 따라잡기",
   };
-  const buttonSideRoot = document.querySelector("[data-player-button-side]");
-  if (buttonSideRoot) {
-    let sideState = { ...PLAYER_BUTTON_SIDE_DEFAULT };
-    const groups = Array.from(
-      buttonSideRoot.querySelectorAll("[data-btn-side]"),
-    );
-    function reflectSide() {
-      groups.forEach((group) => {
-        const key = group.dataset.btnSide;
-        const v = sideState[key] === "left" ? "left" : "right";
-        group.querySelectorAll("[data-side-value]").forEach((btn) => {
-          const active = btn.dataset.sideValue === v;
-          btn.classList.toggle("is-active", active);
-          btn.setAttribute("aria-checked", String(active));
+  // 네이티브(이동 불가) 칩: [클래스, 라벨, noAnchor?]. 우리 버튼을 이 칩들 사이로 끼운다.
+  // 믹서/필터는 우리 버튼이지만 볼륨 래핑·좌측 고정이라 이동 불가 칩으로만 노출.
+  // 오디오 믹서는 noAnchor=true → 표시만 하고 그 뒤로는 드롭 불가(믹서·필터 사이 배치 금지).
+  const PLAYER_BTN_NATIVE = {
+    left: [
+      ["pzp-playback-switch", "재생"],
+      ["pzp-pc__volume-control", "볼륨"],
+      ["cheese-audio-mixer-control", "오디오 믹서", true],
+      ["cheese-video-filter-control", "비디오 필터"],
+      ["live_time", "실시간"],
+    ],
+    right: [
+      ["custom__shop-button", "샵"],
+      ["custom__clip-button", "클립"],
+      ["pzp-pip-button", "PIP"],
+      ["pzp-setting-button", "설정"],
+      ["pzp-viewmode-button", "넓은 화면"],
+      ["pzp-pc__fullscreen-button", "전체 화면"],
+    ],
+  };
+  const buttonOrderRoot = document.querySelector("[data-player-button-order]");
+  if (buttonOrderRoot) {
+    const listLeft = buttonOrderRoot.querySelector('[data-order-list="left"]');
+    const listRight = buttonOrderRoot.querySelector('[data-order-list="right"]');
+    // order: { left:[key...], right:[key...] } — 5 key 를 좌/우로 분배 + 상대순서.
+    // slot: { key:{grp,after} } — 각 우리 버튼이 붙는 네이티브 앵커.
+    let order = { left: [], right: [...PLAYER_BTN_KEYS] }; // 기본 전부 오른쪽
+    let slot = {};
+    for (const k of PLAYER_BTN_KEYS) slot[k] = { grp: "right", after: "START" };
+
+    // 그룹의 '앵커로 쓸 수 있는' 네이티브 클래스 화이트리스트(noAnchor 칩 제외).
+    function nativeClasses(grp) {
+      return PLAYER_BTN_NATIVE[grp].filter((n) => !n[2]).map((n) => n[0]);
+    }
+
+    // 구형 seek(되감기+앞으로 통합) key 를 rewind/forward 로 확장.
+    function migrateSeek(v) {
+      if (!v || typeof v !== "object") return v;
+      const out = { ...v };
+      const clone = (obj, dup) => {
+        const o = { ...obj };
+        if (o.seek !== undefined) {
+          if (o.rewind === undefined) o.rewind = dup(o.seek);
+          if (o.forward === undefined) o.forward = dup(o.seek);
+          delete o.seek;
+        }
+        return o;
+      };
+      const srcSide = v.side && typeof v.side === "object" ? v.side : null;
+      out.side = srcSide ? clone(srcSide, (x) => x) : clone(v, (x) => x);
+      if (v.slot && typeof v.slot === "object")
+        out.slot = clone(v.slot, (x) =>
+          x && typeof x === "object" ? { ...x } : x,
+        );
+      if (v.order && typeof v.order === "object") {
+        const ord = {};
+        for (const grp of ["left", "right"]) {
+          const arr = Array.isArray(v.order[grp]) ? v.order[grp] : [];
+          ord[grp] = arr.flatMap((k) =>
+            k === "seek" ? ["rewind", "forward"] : [k],
+          );
+        }
+        out.order = ord;
+      }
+      return out;
+    }
+
+    // 저장값(확장 {side,order,slot} 또는 구형 side-only)을 order/slot 으로 정규화.
+    function toState(savedRaw) {
+      const saved = migrateSeek(savedRaw);
+      const side = {};
+      for (const k of PLAYER_BTN_KEYS) side[k] = "right";
+      const srcSide =
+        saved && typeof saved === "object"
+          ? saved.side && typeof saved.side === "object"
+            ? saved.side
+            : saved
+          : null;
+      if (srcSide) {
+        for (const k of PLAYER_BTN_KEYS) {
+          if (srcSide[k] === "left" || srcSide[k] === "right")
+            side[k] = srcSide[k];
+        }
+      }
+      const savedOrder =
+        saved && typeof saved === "object" ? saved.order : null;
+      const outOrder = { left: [], right: [] };
+      for (const grp of ["left", "right"]) {
+        const wanted = PLAYER_BTN_KEYS.filter((k) => side[k] === grp);
+        const arr =
+          savedOrder && Array.isArray(savedOrder[grp]) ? savedOrder[grp] : [];
+        const seen = new Set();
+        for (const k of arr) {
+          if (wanted.includes(k) && !seen.has(k)) {
+            outOrder[grp].push(k);
+            seen.add(k);
+          }
+        }
+        for (const k of wanted) if (!seen.has(k)) outOrder[grp].push(k);
+      }
+      // slot: 저장값 우선, 없거나 앵커가 그룹 허용 밖이면 기본(우측=샵 뒤, 좌측=START).
+      const savedSlot =
+        saved && typeof saved === "object" ? saved.slot : null;
+      const outSlot = {};
+      for (const k of PLAYER_BTN_KEYS) {
+        const grp = side[k] === "left" ? "left" : "right";
+        let after = grp === "right" ? "custom__shop-button" : "START";
+        const sv =
+          savedSlot && typeof savedSlot === "object" ? savedSlot[k] : null;
+        if (sv && typeof sv === "object" && typeof sv.after === "string") {
+          if (sv.after === "START" || nativeClasses(grp).includes(sv.after))
+            after = sv.after;
+        }
+        if (after !== "START" && !nativeClasses(grp).includes(after))
+          after = "START";
+        outSlot[k] = { grp, after };
+      }
+      return { order: outOrder, slot: outSlot };
+    }
+
+    function makeItem(key) {
+      const li = document.createElement("li");
+      li.className = "settings-order-item";
+      li.draggable = true;
+      li.dataset.btnKey = key;
+      li.innerHTML =
+        `<span class="settings-order-grip" aria-hidden="true">⠿</span>` +
+        `<span class="settings-order-label">${PLAYER_BTN_LABELS[key]}</span>`;
+      return li;
+    }
+
+    // 네이티브 고정 칩(이동 불가). noAnchor 면 표시만 하고 앵커로 쓰지 않는다
+    // (data-native-anchor 미부여 → saveFromDom 이 앵커로 인식하지 않음).
+    function makeNativeChip(cls, label, noAnchor) {
+      const li = document.createElement("li");
+      li.className = "settings-order-item settings-order-native";
+      li.draggable = false;
+      if (noAnchor) li.dataset.nativeNoanchor = cls;
+      else li.dataset.nativeAnchor = cls;
+      li.setAttribute("aria-disabled", "true");
+      li.innerHTML = `<span class="settings-order-label">${label}</span>`;
+      return li;
+    }
+
+    // 목록 구성: START 위치의 우리 버튼 → [네이티브 칩 → 그 칩 뒤의 우리 버튼]* 순서.
+    // noAnchor 칩(믹서) 뒤엔 우리 버튼을 배치하지 않는다(그런 slot 은 정규화에서 배제됨).
+    function renderList(ul, grp) {
+      ul.innerHTML = "";
+      const appendKeysAfter = (anchor) => {
+        for (const k of order[grp]) {
+          if (slot[k] && slot[k].after === anchor) ul.appendChild(makeItem(k));
+        }
+      };
+      appendKeysAfter("START"); // START 앵커(그룹 맨 앞)에 붙은 우리 버튼
+      for (const [cls, label, noAnchor] of PLAYER_BTN_NATIVE[grp]) {
+        ul.appendChild(makeNativeChip(cls, label, noAnchor));
+        if (!noAnchor) appendKeysAfter(cls);
+      }
+    }
+
+    function render() {
+      renderList(listLeft, "left");
+      renderList(listRight, "right");
+    }
+
+    // 현재 DOM 순서를 읽어 order/slot 으로 반영 후 저장. 각 우리 버튼의 앵커 =
+    // 그 위(앞)에 마지막으로 등장한 네이티브 칩(없으면 START). side 는 그룹에서 유도.
+    function saveFromDom() {
+      const side = {};
+      const newOrder = { left: [], right: [] };
+      const newSlot = {};
+      for (const grp of ["left", "right"]) {
+        const ul = grp === "left" ? listLeft : listRight;
+        let lastAnchor = "START";
+        for (const li of Array.from(ul.children)) {
+          if (li.dataset.nativeAnchor) {
+            lastAnchor = li.dataset.nativeAnchor;
+            continue;
+          }
+          const key = li.dataset.btnKey;
+          if (!key || !PLAYER_BTN_KEYS.includes(key)) continue;
+          newOrder[grp].push(key);
+          side[key] = grp;
+          newSlot[key] = { grp, after: lastAnchor };
+        }
+      }
+      // 누락 방지(이론상 없음): 5 key 를 모두 채운다.
+      for (const k of PLAYER_BTN_KEYS) {
+        if (!side[k]) {
+          side[k] = "right";
+          newOrder.right.push(k);
+          newSlot[k] = { grp: "right", after: "START" };
+        }
+      }
+      order = newOrder;
+      slot = newSlot;
+      try {
+        cachedStorageSet({
+          [PLAYER_BUTTON_SIDE_KEY]: { side, order, slot },
         });
+      } catch {}
+    }
+
+    // ── HTML5 드래그: 목록 내 재정렬 + 좌↔우 이동 ──
+    let dragEl = null;
+    buttonOrderRoot.addEventListener("dragstart", (e) => {
+      const li = e.target.closest?.(".settings-order-item");
+      // 네이티브 고정 칩은 드래그 불가(우리 버튼만 이동).
+      if (!li || li.dataset.nativeAnchor) {
+        e.preventDefault?.();
+        return;
+      }
+      dragEl = li;
+      li.classList.add("is-dragging");
+      try {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", li.dataset.btnKey);
+      } catch {}
+    });
+    buttonOrderRoot.addEventListener("dragend", () => {
+      dragEl?.classList.remove("is-dragging");
+      dragEl = null;
+      buttonOrderRoot
+        .querySelectorAll(".is-drop-over")
+        .forEach((el) => el.classList.remove("is-drop-over"));
+    });
+    // 드롭 지점(항목 위/아래 또는 빈 목록) 계산해 미리 삽입 위치를 잡는다.
+    // 오디오 믹서·비디오 필터는 '한 묶음'이라 그 사이에는 놓을 수 없다: 삽입 후보가
+    // 묶음 사이(=필터 칩 앞)면 묶음 앞(믹서 칩 앞)으로 스냅한다.
+    function dragOverList(ul, e) {
+      e.preventDefault();
+      if (!dragEl) return;
+      let after = getDragAfterElement(ul, e.clientY);
+      after = snapPastMixerFilter(ul, after);
+      if (after == null) ul.appendChild(dragEl);
+      else ul.insertBefore(dragEl, after);
+    }
+    // 삽입 후보 anchor 가 '비디오 필터 칩 바로 앞'(=믹서·필터 사이)이면, 그 묶음 앞
+    // (오디오 믹서 칩)으로 당겨 사이 삽입을 막는다. dragEl 자신은 건너뛰고 판정.
+    function snapPastMixerFilter(ul, after) {
+      if (!after || !after.dataset) return after;
+      if (after.dataset.nativeAnchor !== "cheese-video-filter-control")
+        return after;
+      // 필터 칩의 직전 형제(드래그 중인 dragEl 은 건너뜀)가 믹서 칩이면 사이로 판정.
+      let prev = after.previousElementSibling;
+      if (prev === dragEl) prev = prev.previousElementSibling;
+      const prevIsMixer =
+        prev &&
+        prev.dataset &&
+        prev.dataset.nativeNoanchor === "cheese-audio-mixer-control";
+      // 믹서 칩 앞으로 스냅(dragEl 이 믹서와 필터 사이면 믹서 앞으로 이동).
+      return prevIsMixer ? prev : after;
+    }
+    function getDragAfterElement(ul, y) {
+      const items = [
+        ...ul.querySelectorAll(".settings-order-item:not(.is-dragging)"),
+      ];
+      let closest = { offset: -Infinity, el: null };
+      for (const child of items) {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset)
+          closest = { offset, el: child };
+      }
+      return closest.el;
+    }
+    [listLeft, listRight].forEach((ul) => {
+      ul.addEventListener("dragover", (e) => dragOverList(ul, e));
+      ul.addEventListener("drop", (e) => {
+        e.preventDefault();
+        saveFromDom();
+      });
+    });
+
+    // 위치 초기화: 기본값(전부 오른쪽·샵 뒤)으로 되돌리고 저장·재렌더.
+    const resetBtn = buttonOrderRoot.parentElement?.querySelector(
+      "[data-player-button-reset]",
+    );
+    if (resetBtn) {
+      resetBtn.addEventListener("click", () => {
+        const st = toState(null); // 기본 order/slot
+        order = st.order;
+        slot = st.slot;
+        const side = {};
+        for (const k of PLAYER_BTN_KEYS)
+          side[k] = slot[k] && slot[k].grp === "left" ? "left" : "right";
+        try {
+          cachedStorageSet({ [PLAYER_BUTTON_SIDE_KEY]: { side, order, slot } });
+        } catch {}
+        render();
       });
     }
+
+    // 초기 로드.
     (async () => {
       try {
         const d = await cachedStorageGet(PLAYER_BUTTON_SIDE_KEY);
-        const saved = d?.[PLAYER_BUTTON_SIDE_KEY];
-        if (saved && typeof saved === "object") {
-          for (const k of Object.keys(PLAYER_BUTTON_SIDE_DEFAULT)) {
-            if (saved[k] === "left" || saved[k] === "right")
-              sideState[k] = saved[k];
-          }
-        }
+        const st = toState(d?.[PLAYER_BUTTON_SIDE_KEY]);
+        order = st.order;
+        slot = st.slot;
       } catch {}
-      reflectSide();
+      render();
     })();
-    groups.forEach((group) => {
-      const key = group.dataset.btnSide;
-      group.querySelectorAll("[data-side-value]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          sideState[key] = btn.dataset.sideValue === "left" ? "left" : "right";
-          reflectSide();
-          try {
-            cachedStorageSet({ [PLAYER_BUTTON_SIDE_KEY]: { ...sideState } });
-          } catch {}
-        });
-      });
-    });
   }
 
   // ── 카페 클립 인라인 재생(네이버 카페, 기본 ON) ───────────────────────────

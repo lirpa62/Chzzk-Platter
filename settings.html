@@ -359,148 +359,39 @@
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
-                  <span class="settings-item-name">버튼 위치</span>
+                  <span class="settings-item-name">버튼 순서·위치</span>
                   <span class="settings-item-desc"
-                    >플레이어 하단 버튼을 재생 버튼이 있는 왼쪽 또는 오른쪽으로
-                    배치합니다(우측에 몰리는 것을 완화)</span
+                    >플레이어 하단 버튼을 왼쪽/오른쪽 그룹으로 나누고, 드래그로
+                    순서를 바꿉니다. 회색 칩은 이동할 수 없는 기본 버튼(재생·볼륨·클립·PIP·설정
+                    등)으로, 내 버튼을 그 사이사이로 끌어 넣을 수 있습니다</span
                   >
                 </div>
-                <div class="settings-button-side" data-player-button-side>
-                  <div class="settings-button-side-row">
-                    <span>스트림 정보</span>
-                    <div
-                      class="settings-segmented settings-segmented-2"
-                      data-btn-side="streamStats"
-                      role="radiogroup"
-                    >
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="left"
-                        role="radio"
-                        aria-checked="false"
-                      >
-                        왼쪽
-                      </button>
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="right"
-                        role="radio"
-                        aria-checked="true"
-                      >
-                        오른쪽
-                      </button>
-                    </div>
+                <div class="settings-button-order" data-player-button-order>
+                  <div class="settings-order-col">
+                    <div class="settings-order-title">왼쪽</div>
+                    <ul
+                      class="settings-order-list"
+                      data-order-list="left"
+                      aria-label="왼쪽 버튼 목록"
+                    ></ul>
                   </div>
-                  <div class="settings-button-side-row">
-                    <span>탭 음소거</span>
-                    <div
-                      class="settings-segmented settings-segmented-2"
-                      data-btn-side="tabMute"
-                      role="radiogroup"
-                    >
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="left"
-                        role="radio"
-                        aria-checked="false"
-                      >
-                        왼쪽
-                      </button>
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="right"
-                        role="radio"
-                        aria-checked="true"
-                      >
-                        오른쪽
-                      </button>
-                    </div>
+                  <div class="settings-order-col">
+                    <div class="settings-order-title">오른쪽</div>
+                    <ul
+                      class="settings-order-list"
+                      data-order-list="right"
+                      aria-label="오른쪽 버튼 목록"
+                    ></ul>
                   </div>
-                  <div class="settings-button-side-row">
-                    <span>스크린샷</span>
-                    <div
-                      class="settings-segmented settings-segmented-2"
-                      data-btn-side="screenshot"
-                      role="radiogroup"
-                    >
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="left"
-                        role="radio"
-                        aria-checked="false"
-                      >
-                        왼쪽
-                      </button>
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="right"
-                        role="radio"
-                        aria-checked="true"
-                      >
-                        오른쪽
-                      </button>
-                    </div>
-                  </div>
-                  <div class="settings-button-side-row">
-                    <span>되감기·앞으로</span>
-                    <div
-                      class="settings-segmented settings-segmented-2"
-                      data-btn-side="seek"
-                      role="radiogroup"
-                    >
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="left"
-                        role="radio"
-                        aria-checked="false"
-                      >
-                        왼쪽
-                      </button>
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="right"
-                        role="radio"
-                        aria-checked="true"
-                      >
-                        오른쪽
-                      </button>
-                    </div>
-                  </div>
-                  <div class="settings-button-side-row">
-                    <span>실시간 따라잡기</span>
-                    <div
-                      class="settings-segmented settings-segmented-2"
-                      data-btn-side="sync"
-                      role="radiogroup"
-                    >
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="left"
-                        role="radio"
-                        aria-checked="false"
-                      >
-                        왼쪽
-                      </button>
-                      <button
-                        type="button"
-                        class="settings-segmented-btn"
-                        data-side-value="right"
-                        role="radio"
-                        aria-checked="true"
-                      >
-                        오른쪽
-                      </button>
-                    </div>
-                  </div>
+                </div>
+                <div class="settings-order-actions">
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-player-button-reset
+                  >
+                    위치 초기화
+                  </button>
                 </div>
               </li>
               <li class="settings-item">
@@ -1322,6 +1213,19 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="headerAutoHide" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">정적 로고</span>
+                  <span class="settings-item-desc"
+                    >헤더의 움직이는 GIF 로고를 멈춰 정적 로고로
+                    표시(체크=정적)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="headerStaticLogo" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

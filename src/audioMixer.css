@@ -1523,3 +1523,16 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* 툴팁 화면 밖 잘림 방지: 왼쪽 그룹에 배치된 우리 버튼(재생 옆 등 왼쪽 가장자리)은
+   중앙정렬(translateX(-50%)) 툴팁이 화면 왼쪽으로 넘쳐 잘리므로 왼쪽 정렬로 clamp.
+   버튼 왼쪽 가장자리에서 시작해 오른쪽으로 뻗게 한다. */
+.pzp-pc__bottom-buttons-left .cheese-stream-stats-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-tab-mute-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-screenshot-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-live-rewind-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-live-forward-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-live-sync-button .pzp-button__tooltip {
+  left: 0;
+  transform: none;
+}
