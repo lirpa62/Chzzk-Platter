@@ -216,12 +216,16 @@ function migrateSeekKey(v) {
   if (srcSide) out.side = cloneWithSeek(srcSide, (x) => x);
   else out.side = cloneWithSeek(v, (x) => x); // side-only 형태
   if (v.slot && typeof v.slot === "object")
-    out.slot = cloneWithSeek(v.slot, (x) => (x && typeof x === "object" ? { ...x } : x));
+    out.slot = cloneWithSeek(v.slot, (x) =>
+      x && typeof x === "object" ? { ...x } : x,
+    );
   if (v.order && typeof v.order === "object") {
     const ord = {};
     for (const grp of ["left", "right"]) {
       const arr = Array.isArray(v.order[grp]) ? v.order[grp] : [];
-      ord[grp] = arr.flatMap((k) => (k === "seek" ? ["rewind", "forward"] : [k]));
+      ord[grp] = arr.flatMap((k) =>
+        k === "seek" ? ["rewind", "forward"] : [k],
+      );
     }
     out.order = ord;
   }
@@ -343,6 +347,18 @@ let followPreviewMaxLifeSec = 120; // 기본 2분
 // 새로고침(기본 OFF — 부작용 우려로 명시 선택). content.js 전용.
 const AUTO_RELOAD_ON_ERROR_KEY = "cheeseAutoReloadOnError";
 let autoReloadOnError = false;
+// 방종(방송 종료, '다음 라이브를 기대해주세요!' 종료 화면)이 뜬 상태에서 같은 채널이
+// 다시 라이브를 켜면(뱅온) 자동 새로고침(기본 OFF). content.js 전용.
+const AUTO_RELOAD_ON_RELIVE_KEY = "cheeseAutoReloadOnRelive";
+let autoReloadOnRelive = false;
+// 종료 화면이 이 시간 이상 지속되면 폴링을 멈춘다(무기한 폴링 방지). 시간(hour) 단위로
+// 저장하며 6/12/24 중 하나. 잘못된 값은 6으로. content.js 전용.
+const AUTO_RELIVE_MAX_HOURS_KEY = "cheeseAutoReliveMaxHours";
+let autoReliveMaxHours = 6;
+function normalizeAutoReliveMaxHours(v) {
+  const n = Number(v);
+  return n === 6 || n === 12 || n === 24 ? n : 6;
+}
 // 라이브 탐색 카드 호버 미리보기(치지직 자체 video)에 음량 버튼/우클릭 음소거 토글
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
@@ -9211,6 +9227,107 @@ function applyAutoReloadOnError() {
   else stopAutoReloadWatch();
 }
 
+// ── 방종 후 뱅온 자동 새로고침 ───────────────────────────────────────────────
+// 방송이 종료되면 플레이어 자리에 '다음 라이브를 기대해주세요!' 종료 화면(추천 목록)이
+// 뜬다. 이 상태에서 스트리머가 다시 방송을 켜도(뱅온) 페이지는 그대로라 자동으로
+// 재생되지 않는다. 이 옵션을 켜면 종료 화면이 떠 있는 동안 해당 채널의 live-status 를
+// 폴링하고, 다시 OPEN 되면(뱅온) 페이지를 새로고침해 방송을 이어서 본다.
+// 안전장치: 오류 자동 새로고침과 같은 sessionStorage 루프 가드를 공유한다.
+const RELIVE_END_TEXTS = ["다음 라이브를 기대해주세요"];
+const AUTO_RELIVE_POLL_MS = 15000; // 종료 화면 동안 live-status 폴링 주기
+// 종료 화면 지속 상한(ms). autoReliveMaxHours(6/12/24) 설정값에서 계산. 이 시간 이상
+// 지속되면 폴링을 멈추고, 그 뒤 새 종료 화면(SPA 이동 등)이 뜨면 다시 시작된다.
+function autoReliveMaxWatchMs() {
+  return normalizeAutoReliveMaxHours(autoReliveMaxHours) * 60 * 60 * 1000;
+}
+let autoReliveTimer = 0;
+let autoReliveChecking = false;
+let autoReliveEndSince = 0; // 종료 화면을 처음 감지한 시각(0=없음)
+
+// 현재 /live/<channelId> 경로에서 채널 ID 추출(없으면 "").
+function currentLiveChannelId() {
+  const m = location.pathname.match(/^\/live\/([0-9a-f]{32})/i);
+  return m ? m[1] : "";
+}
+
+// 방종 종료 화면이 실제로 '보이는지'. 클래스 해시는 바뀔 수 있어 텍스트로 감지한다.
+// 플레이어 영역(_player_) 안의 문구가 종료 안내 문구면 참.
+function isReliveEndScreenVisible() {
+  const els = document.querySelectorAll(
+    'main [class*="_player_"] p, #layout-body [class*="_player_"] p, main [class*="_player_"] [class*="_text_"], #layout-body [class*="_player_"] [class*="_text_"]',
+  );
+  for (const el of els) {
+    if (!isElementActuallyVisible(el)) continue;
+    const t = String(el.textContent || "");
+    if (RELIVE_END_TEXTS.some((m) => t.includes(m))) return true;
+  }
+  return false;
+}
+
+async function autoRelivePoll() {
+  if (!autoReloadOnRelive || autoReliveChecking) return;
+  if (!currentLiveChannelId()) return; // 라이브 페이지가 아님
+  if (!isReliveEndScreenVisible()) {
+    autoReliveEndSince = 0; // 종료 화면 사라짐(뱅온/이동) → 상한 타이머 리셋
+    return;
+  }
+  // 숨겨진 탭(백그라운드)에선 API 를 때리지 않는다. 사용자가 보고 있지 않으니 폴링을
+  // 미루고, 탭을 다시 활성화하면 재개한다(밤새 백그라운드 폴링 방지).
+  if (document.hidden) return;
+  // 종료 화면이 너무 오래(상한) 지속되면 폴링을 멈춘다(무기한 폴링 방지).
+  const now = Date.now();
+  if (!autoReliveEndSince) autoReliveEndSince = now;
+  if (now - autoReliveEndSince > autoReliveMaxWatchMs()) return;
+  if (autoReloadRecentCount() >= AUTO_RELOAD_MAX) return; // 반복 리로드 차단(공유 가드)
+  const channelId = currentLiveChannelId();
+  autoReliveChecking = true;
+  try {
+    const res = await fetch(
+      `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+      { credentials: "include" },
+    );
+    if (!res.ok) return;
+    const json = await res.json();
+    const c = json?.content;
+    // 다시 OPEN(뱅온)이면 새로고침. 종료 화면이 여전히 보이는지 재확인해 오탐 방지.
+    if (
+      c?.status === "OPEN" &&
+      !c.closeDate &&
+      isReliveEndScreenVisible() &&
+      currentLiveChannelId() === channelId
+    ) {
+      autoReloadRecordReload();
+      location.reload();
+    }
+  } catch {
+  } finally {
+    autoReliveChecking = false;
+  }
+}
+
+// 숨겨져 있던 탭이 다시 보이면 즉시 1회 확인(15초 안 기다리고 바로 뱅온 감지).
+function onAutoReliveVisible() {
+  if (autoReloadOnRelive && !document.hidden) autoRelivePoll();
+}
+
+function startAutoReliveWatch() {
+  if (autoReliveTimer) return;
+  autoReliveTimer = window.setInterval(autoRelivePoll, AUTO_RELIVE_POLL_MS);
+  document.addEventListener("visibilitychange", onAutoReliveVisible);
+}
+function stopAutoReliveWatch() {
+  if (autoReliveTimer) {
+    window.clearInterval(autoReliveTimer);
+    autoReliveTimer = 0;
+  }
+  document.removeEventListener("visibilitychange", onAutoReliveVisible);
+  autoReliveEndSince = 0;
+}
+function applyAutoReloadOnRelive() {
+  if (autoReloadOnRelive) startAutoReliveWatch();
+  else stopAutoReliveWatch();
+}
+
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
@@ -14577,6 +14694,8 @@ const FEATURE_FLAGS_KEYS = [
   SCREENSHOT_PREVIEW_KEY,
   SCREENSHOT_DIRECT_SAVE_KEY,
   AUTO_RELOAD_ON_ERROR_KEY,
+  AUTO_RELOAD_ON_RELIVE_KEY,
+  AUTO_RELIVE_MAX_HOURS_KEY,
   PLAYER_BUTTON_SIDE_KEY,
 ];
 
@@ -14663,6 +14782,10 @@ async function loadFeatureFlags() {
     screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
+    autoReloadOnRelive = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true; // 기본 OFF
+    autoReliveMaxHours = normalizeAutoReliveMaxHours(
+      data?.[AUTO_RELIVE_MAX_HOURS_KEY],
+    );
     playerButtonSide = normalizePlayerButtonSide(
       data?.[PLAYER_BUTTON_SIDE_KEY],
     );
@@ -14747,6 +14870,16 @@ if (chrome.storage?.onChanged) {
     if (changes[AUTO_RELOAD_ON_ERROR_KEY]) {
       autoReloadOnError = changes[AUTO_RELOAD_ON_ERROR_KEY].newValue === true;
       applyAutoReloadOnError(); // 즉시 반영(켜면 감시 시작, 끄면 중지)
+    }
+    if (changes[AUTO_RELOAD_ON_RELIVE_KEY]) {
+      autoReloadOnRelive = changes[AUTO_RELOAD_ON_RELIVE_KEY].newValue === true;
+      applyAutoReloadOnRelive(); // 즉시 반영(켜면 감시 시작, 끄면 중지)
+    }
+    if (changes[AUTO_RELIVE_MAX_HOURS_KEY]) {
+      autoReliveMaxHours = normalizeAutoReliveMaxHours(
+        changes[AUTO_RELIVE_MAX_HOURS_KEY].newValue,
+      );
+      // 다음 폴링에서 새 상한이 자동 반영됨(감시 재시작 불필요).
     }
     if (changes[PLAYER_BUTTON_SIDE_KEY]) {
       playerButtonSide = normalizePlayerButtonSide(
@@ -15069,6 +15202,7 @@ function init() {
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
   applyAutoReloadOnError(); // 리방/오류 시 자동 새로고침 감시(옵션 시)
+  applyAutoReloadOnRelive(); // 방종 후 뱅온 자동 새로고침 감시(옵션 시)
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
   applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
   applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)

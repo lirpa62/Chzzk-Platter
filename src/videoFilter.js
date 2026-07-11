@@ -639,6 +639,41 @@
     appliedVideo = null;
   }
 
+  // ── 하드웨어(GPU) 가속 감지 ────────────────────────────────────────────────
+  // chrome://gpu 상태를 읽는 확장 API 는 없으므로, WebGL 실제 렌더러 문자열로
+  // 소프트웨어 렌더러(=가속 꺼짐) 여부를 판정한다. 세션 중 안 바뀌어 1회 캐시.
+  // 반환: true(가속)/false(소프트웨어)/null(판정 불가).
+  let gpuAcceleratedCache; // undefined=미조회
+  function isGpuAccelerated() {
+    if (gpuAcceleratedCache !== undefined) return gpuAcceleratedCache;
+    let result = null;
+    try {
+      const canvas = document.createElement("canvas");
+      const gl =
+        canvas.getContext("webgl") ||
+        canvas.getContext("experimental-webgl");
+      if (gl) {
+        const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+        const renderer = dbg
+          ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "")
+          : "";
+        if (renderer) {
+          result =
+            !/swiftshader|llvmpipe|software|basic render|microsoft basic/i.test(
+              renderer,
+            );
+        }
+        gl.getExtension("WEBGL_lose_context")?.loseContext?.();
+      } else {
+        result = false; // WebGL 자체 불가 → 가속 꺼짐일 가능성 높음
+      }
+    } catch {
+      result = null;
+    }
+    gpuAcceleratedCache = result;
+    return result;
+  }
+
   // ── 하드웨어 가속 안내 토스트 ───────────────────────────────────────────────
   // 사용자가 선명도 높은 프리셋을 직접 선택할 때만 짧게 1회 띄운다(applyPreset).
   function showHwToast() {
@@ -841,9 +876,14 @@
     applyState();
     saveState();
     syncUI();
-    // 사용자가 직접 고른 프리셋이 선명도 높은 설정이면, 그때만 하드웨어 가속 안내를
-    // 짧게 1회 띄운다(세션마다 자동으로 띄우지 않음).
-    if (userSelected && state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD) {
+    // 사용자가 직접 고른 프리셋이 선명도 높은 설정이면 하드웨어 가속 안내를 1회 띄운다.
+    // 단, WebGL 렌더러로 가속이 '이미 켜져 있음'이 확인되면 불필요하므로 생략한다.
+    // (가속 꺼짐이거나 판정 불가일 때만 안내 — 가속 켜진 사용자에게 헛 안내 방지.)
+    if (
+      userSelected &&
+      state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD &&
+      isGpuAccelerated() !== true
+    ) {
       showHwToast();
     }
   }

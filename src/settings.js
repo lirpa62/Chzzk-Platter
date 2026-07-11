@@ -21,6 +21,8 @@
     "cheeseAdMiniplayerKeepMuted",
     "cheeseAdMiniplayerUnmute",
     "cheeseAutoReloadOnError",
+    "cheeseAutoReloadOnRelive",
+    "cheeseAutoReliveMaxHours",
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
     "cheeseCardLivePreview",
@@ -2276,6 +2278,60 @@
     } catch {}
   });
   loadAutoReloadOnError();
+
+  // ── 방종 후 뱅온 자동 새로고침(기본 OFF) ───────────────────────────────────
+  const AUTO_RELOAD_ON_RELIVE_KEY = "cheeseAutoReloadOnRelive";
+  const autoReliveInput = document.querySelector("[data-auto-reload-on-relive]");
+  async function loadAutoReloadOnRelive() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(AUTO_RELOAD_ON_RELIVE_KEY);
+      on = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true;
+    } catch {}
+    if (autoReliveInput) autoReliveInput.checked = on;
+  }
+  autoReliveInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [AUTO_RELOAD_ON_RELIVE_KEY]: autoReliveInput.checked,
+      });
+    } catch {}
+  });
+  loadAutoReloadOnRelive();
+
+  // 뱅온 감시 최대 시간(6/12/24시간, 기본 6).
+  const AUTO_RELIVE_MAX_HOURS_KEY = "cheeseAutoReliveMaxHours";
+  const AUTO_RELIVE_MAX_HOURS_ALLOWED = [6, 12, 24];
+  const reliveHoursButtons = Array.from(
+    document.querySelectorAll("[data-relive-max-hours]"),
+  );
+  function reflectReliveHours(h) {
+    const v = AUTO_RELIVE_MAX_HOURS_ALLOWED.includes(Number(h)) ? Number(h) : 6;
+    reliveHoursButtons.forEach((btn) => {
+      const active = Number(btn.dataset.reliveMaxHours) === v;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  async function loadReliveHours() {
+    let h = 6;
+    try {
+      const data = await cachedStorageGet(AUTO_RELIVE_MAX_HOURS_KEY);
+      const v = Number(data?.[AUTO_RELIVE_MAX_HOURS_KEY]);
+      if (AUTO_RELIVE_MAX_HOURS_ALLOWED.includes(v)) h = v;
+    } catch {}
+    reflectReliveHours(h);
+  }
+  reliveHoursButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const h = Number(btn.dataset.reliveMaxHours);
+      reflectReliveHours(h);
+      try {
+        cachedStorageSet({ [AUTO_RELIVE_MAX_HOURS_KEY]: h });
+      } catch {}
+    });
+  });
+  loadReliveHours();
 
   // ── 플레이어 하단 버튼 좌/우 배치(버튼별 left|right, 기본 right) ────────────
   // ── 플레이어 하단 버튼 순서·위치(좌/우 그룹 + 드래그 순서) ──────────────────

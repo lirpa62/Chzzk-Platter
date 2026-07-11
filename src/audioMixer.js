@@ -4026,6 +4026,52 @@
     return info;
   }
 
+  // ── 하드웨어(GPU) 가속 감지 ────────────────────────────────────────────────
+  // chrome://gpu 의 가속 상태를 읽는 확장 API 는 없다. 대신 WebGL 의 실제 렌더러
+  // 문자열(WEBGL_debug_renderer_info)을 읽어 '소프트웨어 렌더러'인지로 가속 여부를
+  // 판정한다(chrome://gpu 결론과 대부분 일치). 렌더러는 세션 중 안 바뀌므로 1회만
+  // 조회해 캐시한다(작은 canvas 1개 생성 후 폐기 — 지속 부하 없음).
+  let gpuAccelCache = null;
+  function getGpuAccelInfo() {
+    if (gpuAccelCache) return gpuAccelCache;
+    let renderer = "";
+    let accelerated = null; // true/false/null(판정 불가)
+    try {
+      const canvas = document.createElement("canvas");
+      const gl =
+        canvas.getContext("webgl") ||
+        canvas.getContext("experimental-webgl");
+      if (gl) {
+        const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+        renderer = dbg
+          ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "")
+          : "";
+        // 소프트웨어 렌더러 = 가속 꺼짐(거의 확정). 그 외 실제 GPU = 켜짐.
+        const sw = /swiftshader|llvmpipe|software|basic render|microsoft basic/i.test(
+          renderer,
+        );
+        if (renderer) accelerated = !sw;
+        // 컨텍스트 즉시 정리(리소스 남기지 않음).
+        gl.getExtension("WEBGL_lose_context")?.loseContext?.();
+      } else {
+        // WebGL 자체가 없으면 가속이 꺼졌을 가능성이 높지만 확정은 못 함.
+        accelerated = false;
+        renderer = "no-webgl";
+      }
+    } catch {
+      accelerated = null;
+    }
+    gpuAccelCache = { accelerated, renderer };
+    return gpuAccelCache;
+  }
+  // 스트림 정보 패널용 표시 문자열. 켜짐/꺼짐/불명.
+  function gpuAccelLabel() {
+    const { accelerated } = getGpuAccelInfo();
+    if (accelerated === true) return "사용 중";
+    if (accelerated === false) return "꺼짐";
+    return null; // 불명 → 행에서 "—"
+  }
+
   function numberFormat(n) {
     return Number(n).toLocaleString("ko-KR");
   }
@@ -4643,7 +4689,8 @@
          ${statsRow("해상도", i.resolution)}
          ${statsRow("FPS", i.fps)}
          ${statsRow("비트레이트", i.videoBitrate)}
-         ${statsRow("코덱", i.videoCodec)}`;
+         ${statsRow("코덱", i.videoCodec)}
+         ${statsRow("하드웨어 가속", gpuAccelLabel())}`;
     panel.innerHTML = `
       <div class="cheese-stats-head">
         <strong>스트림 정보</strong>

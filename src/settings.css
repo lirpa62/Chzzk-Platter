@@ -617,8 +617,13 @@ body {
   margin-left: auto;
 }
 
-.settings-item:has(.settings-volume-row) {
+.settings-item:has(.settings-volume-row),
+.settings-item:has(#autoReliveMaxHours) {
   flex-direction: column;
+}
+
+.settings-item #autoReliveMaxHours {
+  margin-left: auto;
 }
 
 /* 미리보기 볼륨: 슬라이더 + 숫자 입력을 한 줄에(stacked item 오른쪽 정렬) */

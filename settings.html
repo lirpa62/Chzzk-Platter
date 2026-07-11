@@ -362,8 +362,9 @@
                   <span class="settings-item-name">버튼 순서·위치</span>
                   <span class="settings-item-desc"
                     >플레이어 하단 버튼을 왼쪽/오른쪽 그룹으로 나누고, 드래그로
-                    순서를 바꿉니다. 회색 칩은 이동할 수 없는 기본 버튼(재생·볼륨·클립·PIP·설정
-                    등)으로, 내 버튼을 그 사이사이로 끌어 넣을 수 있습니다</span
+                    순서를 바꿉니다. 회색 칩은 이동할 수 없는 기본
+                    버튼(재생·볼륨·클립·PIP·설정 등)으로, 내 버튼을 그
+                    사이사이로 끌어 넣을 수 있습니다</span
                   >
                 </div>
                 <div class="settings-button-order" data-player-button-order>
@@ -521,6 +522,65 @@
                   <input type="checkbox" data-auto-reload-on-error />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >방종 후 뱅온 자동 새로고침</span
+                  >
+                  <span class="settings-item-desc"
+                    >방송이 종료되어 '다음 라이브를 기대해주세요!' 화면이 뜬
+                    상태에서 같은 채널이 다시 방송을 켜면 자동으로 페이지를
+                    새로고침해 방송을 이어서 봅니다. 종료 화면이 떠 있는
+                    동안에만 라이브 상태를 확인하며 반복 새로고침되지 않도록
+                    제한합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-auto-reload-on-relive />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 뱅온 감시 최대 시간</span>
+                  <span class="settings-item-desc"
+                    >방종 화면이 이 시간 이상 지속되면 뱅온 감시를
+                    멈춥니다(불필요한 장기 확인 방지). 이 시간이 지나기 전에
+                    다시 방송을 켜면 새로고침합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="autoReliveMaxHours"
+                  role="radiogroup"
+                  aria-label="뱅온 감시 최대 시간"
+                >
+                  <button
+                    type="button"
+                    data-relive-max-hours="6"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    6시간
+                  </button>
+                  <button
+                    type="button"
+                    data-relive-max-hours="12"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    12시간
+                  </button>
+                  <button
+                    type="button"
+                    data-relive-max-hours="24"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    24시간
+                  </button>
+                </div>
               </li>
             </ul>
           </section>
