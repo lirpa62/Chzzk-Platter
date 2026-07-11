@@ -991,33 +991,6 @@
 
           <section
             class="settings-group"
-            data-panel="following"
-            aria-label="구독 기능"
-          >
-            <h2 class="settings-group-title">구독</h2>
-            <ul class="settings-list">
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >구독 배지 진행·전체보기</span
-                  >
-                  <span class="settings-item-desc"
-                    >구독권 관리 팝업의 '내 구독 배지'에 다음 배지까지 남은
-                    기간과 구독 만료까지 남은 기간, 게이지 눈금, 다음 배지 잠금
-                    표시를 추가하고, '전체보기'로 모든 티어의 배지를 볼 수
-                    있습니다(체크=사용, 설정 즉시 반영)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-subscribe-badge-progress />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-            </ul>
-          </section>
-
-          <section
-            class="settings-group"
             data-panel="player"
             aria-label="실시간 따라잡기"
           >
@@ -1940,6 +1913,40 @@
           <section
             class="settings-group"
             data-panel="following"
+            aria-label="채널"
+          >
+            <h2 class="settings-group-title">채널</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채널 라이브 바로가기</span>
+                  <span class="settings-item-desc"
+                    >채널 홈 탭에 라이브로 가는 버튼 표시(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-channel-live-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 탭 끝(우측)에 배치</span>
+                  <span class="settings-item-desc"
+                    >체크 해제 시 탭 바로 뒤에 배치</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-channel-live-button-end />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="following"
             aria-label="팔로잉"
           >
             <h2 class="settings-group-title">팔로잉</h2>
@@ -1972,37 +1979,86 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >메인 진입 시 팔로우로 이동</span
+                  >
+                  <span class="settings-item-desc"
+                    >치지직 메인(chzzk.naver.com) 진입 시 팔로우 화면으로 자동
+                    이동합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-root-to-following />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 로고 클릭 시 이동</span>
+                  <span class="settings-item-desc"
+                    >헤더 로고 클릭 시 팔로우로 이동할지 선택합니다. `포함`은 진입과
+                    로고 모두, `제외`는 진입만(로고 제외), `단독`은 로고만 이동하며
+                    위의 '메인 진입 시 이동'은 적용하지 않습니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="rootToFollowingLogoMode"
+                  role="radiogroup"
+                  aria-label="로고 클릭 시 이동"
+                >
+                  <button
+                    type="button"
+                    data-root-logo-mode="include"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    포함
+                  </button>
+                  <button
+                    type="button"
+                    data-root-logo-mode="exclude"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    제외
+                  </button>
+                  <button
+                    type="button"
+                    data-root-logo-mode="only"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    단독
+                  </button>
+                </div>
+              </li>
             </ul>
           </section>
 
           <section
             class="settings-group"
             data-panel="following"
-            aria-label="채널"
+            aria-label="구독 기능"
           >
-            <h2 class="settings-group-title">채널</h2>
+            <h2 class="settings-group-title">구독</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채널 라이브 바로가기</span>
+                  <span class="settings-item-name"
+                    >구독 배지 진행·전체보기</span
+                  >
                   <span class="settings-item-desc"
-                    >채널 홈 탭에 라이브로 가는 버튼 표시(체크=표시)</span
+                    >구독권 관리 팝업의 '내 구독 배지'에 다음 배지까지 남은
+                    기간과 구독 만료까지 남은 기간, 게이지 눈금, 다음 배지 잠금
+                    표시를 추가하고, '전체보기'로 모든 티어의 배지를 볼 수
+                    있습니다(체크=사용, 설정 즉시 반영)</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-channel-live-button />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 탭 끝(우측)에 배치</span>
-                  <span class="settings-item-desc"
-                    >체크 해제 시 탭 바로 뒤에 배치</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-channel-live-button-end />
+                  <input type="checkbox" data-subscribe-badge-progress />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

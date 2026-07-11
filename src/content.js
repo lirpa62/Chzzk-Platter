@@ -359,6 +359,31 @@ function normalizeAutoReliveMaxHours(v) {
   const n = Number(v);
   return n === 6 || n === 12 || n === 24 ? n : 6;
 }
+// 치지직 루트(메인) 진입 시 팔로우 화면(following?tab=ALL)으로 자동 이동(기본 OFF).
+// content.js 전용.
+const ROOT_TO_FOLLOWING_KEY = "cheeseRootToFollowing";
+let rootToFollowing = false;
+// 로고 클릭 이동 모드: "include"(진입+로고)|"exclude"(진입만)|"only"(로고만·진입 제외).
+// - include: 상위 토글 ON 이면 진입 O + 로고 O
+// - exclude: 상위 토글 ON 이면 진입 O + 로고 X
+// - only:    상위 토글 무시. 진입 X + 로고 O (로고만 이동)
+// 기본 "exclude"(=예전 로고 옵션 OFF 와 동일: 진입만). content.js 전용.
+const ROOT_TO_FOLLOWING_LOGO_KEY = "cheeseRootToFollowingLogoMode";
+let rootToFollowingLogoMode = "exclude";
+function normalizeRootLogoMode(v) {
+  return v === "include" || v === "only" ? v : "exclude";
+}
+// 실제 동작 판정.
+function rootEntryToFollowingActive() {
+  // 진입 시 이동: 단독(only)이면 상위 무시하고 OFF. 그 외엔 상위 토글을 따른다.
+  return rootToFollowing && rootToFollowingLogoMode !== "only";
+}
+function logoClickToFollowingActive() {
+  // 로고 이동: 단독이면 상위 무관 ON. 포함이면 상위 ON 일 때 ON. 제외면 OFF.
+  if (rootToFollowingLogoMode === "only") return true;
+  if (rootToFollowingLogoMode === "include") return rootToFollowing;
+  return false;
+}
 // 라이브 탐색 카드 호버 미리보기(치지직 자체 video)에 음량 버튼/우클릭 음소거 토글
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
@@ -12024,6 +12049,58 @@ function spaNavigate(href) {
   }
 }
 
+// ── 루트(메인) 진입/로고 클릭 시 팔로우 화면으로 자동 이동 ───────────────────
+// 상위 rootToFollowing(진입 시) + 로고 모드(rootToFollowingLogoMode: 포함/제외/단독)의
+// 조합으로 진입 이동·로고 이동을 판정한다(rootEntryToFollowingActive / logoClickToFollowingActive).
+// following?tab=ALL 로 보내되 location.replace 로 히스토리에 루트를 안 남긴다(뒤로가기
+// 시 루트로 안 돌아와 무한 리다이렉트 없음).
+const ROOT_FOLLOWING_URL = "/following?tab=ALL";
+let rootToFollowingLoadDone = false; // 초기 로드 1회 처리 가드
+function isChzzkRootPath() {
+  const p = location.pathname;
+  return p === "/" || p === "";
+}
+function goToFollowing() {
+  try {
+    location.replace(ROOT_FOLLOWING_URL);
+  } catch {
+    location.href = ROOT_FOLLOWING_URL;
+  }
+}
+// 상위 옵션: 페이지가 루트로 '로드'된 최초 1회에만 이동한다. init 이 SPA 전환마다
+// 불려도 loadDone 가드로 재실행하지 않는다(로고 클릭 등 SPA 이동은 하위 옵션 담당).
+function applyRootToFollowing() {
+  if (rootToFollowingLoadDone) return;
+  rootToFollowingLoadDone = true;
+  if (!rootEntryToFollowingActive()) return; // 단독(only)이면 진입 이동 안 함
+  if (!isChzzkRootPath()) return;
+  goToFollowing();
+}
+// 로고 클릭을 capture 로 가로채 팔로우로 보낸다(1회 바인딩). 동작 여부는 로고 모드로 판정.
+let rootToFollowingLogoBound = false;
+function bindLogoClickToFollowing() {
+  if (rootToFollowingLogoBound) return;
+  rootToFollowingLogoBound = true;
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (!logoClickToFollowingActive()) return;
+      const a = e.target?.closest?.("header#header h1 a");
+      if (!a) return;
+      // 로고 링크가 루트로 가는 것일 때만(다른 곳이면 건드리지 않음).
+      const href = a.getAttribute("href") || "";
+      if (href !== "/" && href !== "") {
+        // href 로 판단이 안 되면 로고(_logo_chzzk_) 포함 여부로 보강.
+        if (!a.querySelector("[class*='_logo_chzzk_']")) return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      goToFollowing();
+    },
+    true,
+  );
+}
+
 // ── 채널 홈 라이브 바로가기 버튼 ───────────────────────────────────────────
 // 채널 페이지(chzzk.naver.com/<32hex>/...) 탭리스트(div[class*="_tab_"] 안
 // [role="tablist"]) 끝에 /live/<id>로 가는 버튼을 추가한다. 라이브 상태(OPEN/CLOSE)를
@@ -14721,6 +14798,8 @@ const FEATURE_FLAGS_KEYS = [
   AUTO_RELOAD_ON_ERROR_KEY,
   AUTO_RELOAD_ON_RELIVE_KEY,
   AUTO_RELIVE_MAX_HOURS_KEY,
+  ROOT_TO_FOLLOWING_KEY,
+  ROOT_TO_FOLLOWING_LOGO_KEY,
   PLAYER_BUTTON_SIDE_KEY,
 ];
 
@@ -14811,6 +14890,12 @@ async function loadFeatureFlags() {
     autoReliveMaxHours = normalizeAutoReliveMaxHours(
       data?.[AUTO_RELIVE_MAX_HOURS_KEY],
     );
+    rootToFollowing = data?.[ROOT_TO_FOLLOWING_KEY] === true; // 기본 OFF
+    rootToFollowingLogoMode = normalizeRootLogoMode(
+      data?.[ROOT_TO_FOLLOWING_LOGO_KEY],
+    );
+    applyRootToFollowing(); // 루트로 로드됐으면 즉시 팔로우로(최초 1회)
+    bindLogoClickToFollowing(); // 로고 클릭 가로채기(옵션 시 동작)
     playerButtonSide = normalizePlayerButtonSide(
       data?.[PLAYER_BUTTON_SIDE_KEY],
     );
@@ -14905,6 +14990,18 @@ if (chrome.storage?.onChanged) {
         changes[AUTO_RELIVE_MAX_HOURS_KEY].newValue,
       );
       // 다음 폴링에서 새 상한이 자동 반영됨(감시 재시작 불필요).
+    }
+    if (changes[ROOT_TO_FOLLOWING_KEY]) {
+      rootToFollowing = changes[ROOT_TO_FOLLOWING_KEY].newValue === true;
+      // 방금 켰고 지금 루트면 즉시 이동(단독 모드가 아닐 때만).
+      if (rootEntryToFollowingActive() && isChzzkRootPath()) goToFollowing();
+    }
+    if (changes[ROOT_TO_FOLLOWING_LOGO_KEY]) {
+      rootToFollowingLogoMode = normalizeRootLogoMode(
+        changes[ROOT_TO_FOLLOWING_LOGO_KEY].newValue,
+      );
+      // 로고 바인딩은 1회(값만 갱신해도 핸들러가 최신 모드를 읽음). 단독으로 바꾸면서
+      // 지금 루트에 있으면(진입은 이제 제외) 아무 것도 안 함 — 다음 로고 클릭부터 반영.
     }
     if (changes[PLAYER_BUTTON_SIDE_KEY]) {
       playerButtonSide = normalizePlayerButtonSide(
@@ -15226,6 +15323,8 @@ function init() {
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
+  applyRootToFollowing(); // 루트로 로드됐으면 팔로우로 이동(옵션 시, 최초 1회)
+  bindLogoClickToFollowing(); // 로고 클릭 가로채기(하위 옵션 시)
   applyAutoReloadOnError(); // 리방/오류 시 자동 새로고침 감시(옵션 시)
   applyAutoReloadOnRelive(); // 방종 후 뱅온 자동 새로고침 감시(옵션 시)
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김

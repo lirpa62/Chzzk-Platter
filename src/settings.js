@@ -23,6 +23,8 @@
     "cheeseAutoReloadOnError",
     "cheeseAutoReloadOnRelive",
     "cheeseAutoReliveMaxHours",
+    "cheeseRootToFollowing",
+    "cheeseRootToFollowingLogoMode",
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
     "cheeseCardLivePreview",
@@ -2334,6 +2336,70 @@
     });
   });
   loadReliveHours();
+
+  // ── 메인 진입 시 팔로우로 이동(기본 OFF) ──────────────────────────────────
+  const ROOT_TO_FOLLOWING_KEY = "cheeseRootToFollowing";
+  const rootToFollowingInput = document.querySelector(
+    "[data-root-to-following]",
+  );
+  async function loadRootToFollowing() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(ROOT_TO_FOLLOWING_KEY);
+      on = data?.[ROOT_TO_FOLLOWING_KEY] === true;
+    } catch {}
+    if (rootToFollowingInput) rootToFollowingInput.checked = on;
+  }
+  rootToFollowingInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [ROOT_TO_FOLLOWING_KEY]: rootToFollowingInput.checked,
+      });
+    } catch {}
+  });
+  loadRootToFollowing();
+
+  // 하위: 로고 클릭 시 이동 모드(포함/제외/단독, 기본 제외).
+  const ROOT_TO_FOLLOWING_LOGO_KEY = "cheeseRootToFollowingLogoMode";
+  const ROOT_LOGO_MODE_ALLOWED = ["include", "exclude", "only"];
+  const rootLogoModeButtons = Array.from(
+    document.querySelectorAll("[data-root-logo-mode]"),
+  );
+  function reflectRootLogoMode(mode) {
+    const v = ROOT_LOGO_MODE_ALLOWED.includes(mode) ? mode : "exclude";
+    rootLogoModeButtons.forEach((btn) => {
+      const active = btn.dataset.rootLogoMode === v;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    // '단독'이면 진입 이동을 무시하므로 상위 '메인 진입 시 이동' 토글을 회색 비활성화한다.
+    if (rootToFollowingInput) {
+      const lock = v === "only";
+      rootToFollowingInput.disabled = lock;
+      rootToFollowingInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", lock);
+    }
+  }
+  async function loadRootLogoMode() {
+    let mode = "exclude";
+    try {
+      const data = await cachedStorageGet(ROOT_TO_FOLLOWING_LOGO_KEY);
+      const v = data?.[ROOT_TO_FOLLOWING_LOGO_KEY];
+      if (ROOT_LOGO_MODE_ALLOWED.includes(v)) mode = v;
+    } catch {}
+    reflectRootLogoMode(mode);
+  }
+  rootLogoModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.rootLogoMode;
+      reflectRootLogoMode(mode);
+      try {
+        cachedStorageSet({ [ROOT_TO_FOLLOWING_LOGO_KEY]: mode });
+      } catch {}
+    });
+  });
+  loadRootLogoMode();
 
   // ── 플레이어 하단 버튼 좌/우 배치(버튼별 left|right, 기본 right) ────────────
   // ── 플레이어 하단 버튼 순서·위치(좌/우 그룹 + 드래그 순서) ──────────────────

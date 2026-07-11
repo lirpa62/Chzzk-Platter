@@ -505,7 +505,10 @@
     svg.style.width = "0";
     svg.style.height = "0";
     svg.style.pointerEvents = "none";
-    svg.innerHTML = `<defs><filter id="${SVG_FILTER_ID}" color-interpolation-filters="sRGB"></filter></defs>`;
+    // 필터 영역을 영상에 정확히 맞춘다(x/y=0, w/h=100%). 기본값(-10%~120%)은 영상보다
+    // 넓은 영역을 처리해 가장자리에 여백 테두리가 보일 수 있다. filterUnits 는 기본
+    // objectBoundingBox 라 %가 영상 크기 기준이다.
+    svg.innerHTML = `<defs><filter id="${SVG_FILTER_ID}" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"></filter></defs>`;
     document.body.appendChild(svg);
     return svg;
   }
@@ -536,7 +539,10 @@
     }
     const sharp = effectiveSharpness();
     if (sharp > 0) {
-      inner += `<feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix="${sharpenKernel(sharp)}"></feConvolveMatrix>`;
+      // edgeMode="duplicate": 가장자리 픽셀을 복제해 컨볼루션 샘플링한다. 지정하지 않으면
+      // 일부 브라우저가 필터 영역 밖을 투명(none)으로 확장해, 영상 가장자리에 얇은 테두리
+      // (검은/밝은 선)가 생긴다. duplicate 로 그 테두리를 없앤다.
+      inner += `<feConvolveMatrix order="3" edgeMode="duplicate" preserveAlpha="true" kernelMatrix="${sharpenKernel(sharp)}"></feConvolveMatrix>`;
     }
 
     if (inner !== lastSvgInner) {

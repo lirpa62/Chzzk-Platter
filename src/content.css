@@ -2714,8 +2714,8 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 12px;
-  height: 30px;
+  padding: 6px 14px 6px 12px;
+  height: 33px;
   margin-top: auto;
   margin-bottom: auto;
   border-radius: 999px;

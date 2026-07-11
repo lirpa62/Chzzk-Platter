@@ -3557,6 +3557,33 @@
     return m ? Number(m[1]) : 0;
   }
   let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
+  // 화질 메뉴에서 '최고 화질 항목이 이미 선택(--checked)돼 있는지' 판정한다.
+  // core.videoTracks 의 selected 반영이 늦어도, 메뉴상 최고가 이미 체크면 메뉴 클릭이
+  // 성공한 것 → selected=true 폴백을 실행하면 화질 전환이 '두 번' 일어나(로그 2회) 므로
+  // 이 판정으로 중복 폴백을 막는다.
+  function isMaxQualityMenuChecked() {
+    const list = document.querySelector(
+      ".pzp-setting-quality-pane__list-container",
+    );
+    if (!list) return false;
+    const items = Array.from(
+      list.querySelectorAll("li.pzp-ui-setting-quality-item"),
+    );
+    if (!items.length) return false;
+    let bestLi = null;
+    let bestLiH = 0;
+    for (const li of items) {
+      const h = qualityItemHeight(li);
+      if (h > bestLiH) {
+        bestLiH = h;
+        bestLi = li;
+      }
+    }
+    return (
+      !!bestLi &&
+      bestLi.classList.contains("pzp-ui-setting-pane-item--checked")
+    );
+  }
   // 치지직 플레이어는 Vue 로 구현돼 화질 메뉴 항목(li)이 네이티브 .click() 에 반응한다.
   // (React 아님 — __reactProps$ 없음.) 설정을 열지 않아도 화질 목록 DOM 은 상시 존재하므로,
   // 최고 화질 li 를 .click() 하면 치지직의 정상 화질 변경 경로(그리드/P2P 초기화 포함)를
@@ -3671,7 +3698,15 @@
       // 클릭 반영 대기 중이면 폴백을 미룬다(그리드 정상 실행 기회 확보).
       if (Date.now() - maxQualityMenuTriedAt < MENU_GRACE_MS) return;
     }
-    // 메뉴 클릭이 없었거나(메뉴 미발견) 유예시간이 지나도 안 바뀌면 직접 설정 폴백.
+    // 유예가 지났어도, 화질 메뉴상 '최고 항목이 이미 선택'이면 메뉴 클릭이 성공한 것이다.
+    // core.videoTracks 의 selected 반영만 늦은 상태이므로, selected=true 폴백을 실행하면
+    // 화질 전환이 한 번 더 일어난다(로그 2회·불필요한 재초기화). 이 경우 폴백을 건너뛰고
+    // 반영을 계속 기다린다.
+    if (isMaxQualityMenuChecked()) {
+      maxQualitySetHeight = bestH;
+      return;
+    }
+    // 메뉴 클릭이 없었거나(메뉴 미발견) 유예 후에도 최고가 아니면 직접 설정 폴백.
     try {
       best.selected = true;
       maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
