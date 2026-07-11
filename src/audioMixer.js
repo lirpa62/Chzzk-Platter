@@ -775,7 +775,7 @@
       return true;
     } catch (err) {
       console.warn("[치즈 서치 오디오 믹서] 그래프 구성 실패:", err);
-      handleGraphBuildFailure(video);
+      handleGraphBuildFailure(video, err);
       return false;
     }
   }
@@ -811,21 +811,41 @@
     graphRetryBlock.until = 0;
   }
 
-  function handleGraphBuildFailure(video) {
+  function handleGraphBuildFailure(video, err) {
     stopNormalizerLoop();
     restoreSourceToDestination();
     audio.connected = false;
     audio.video = video || null;
-    // 영구 차단해 재시도(무한 루프)를 끊는다. createMediaElementSource는 video당
-    // 1회만 가능하므로, 다른 확장이 이미 같은 video로 source를
-    // 만들었으면 우리는 절대 만들 수 없다 → 믹서를 끄고 충돌 안내.
-    graphRetryBlock = {
-      video,
-      pageKey: currentPageKey || "",
-      until: Number.POSITIVE_INFINITY,
-    };
     state.enabled = false;
-    graphConflict = true;
+    // 실패를 두 종류로 구분한다:
+    //  1) 진짜 충돌(InvalidStateError): createMediaElementSource는 video당 1회만 가능.
+    //     다른 확장이 이미 같은 video로 source를 만들었으면 우리는 절대 만들 수 없다
+    //     → 영구 차단 + 충돌 안내(무한 재시도 방지).
+    //  2) 일시적 실패(그 외): userActivation 창 놓침·video 미준비 등. 이땐 영구 차단하면
+    //     재클릭해도 계속 실패("되다 안되다"의 원인)하므로, 짧게만 차단해 재시도를 허용한다.
+    const isConflict =
+      err &&
+      (err.name === "InvalidStateError" ||
+        // 일부 브라우저는 이름 대신 메시지로만 알린다.
+        /already connected|InvalidStateError|createMediaElementSource/i.test(
+          String(err && err.message),
+        ));
+    if (isConflict) {
+      graphRetryBlock = {
+        video,
+        pageKey: currentPageKey || "",
+        until: Number.POSITIVE_INFINITY,
+      };
+      graphConflict = true;
+    } else {
+      // 일시적 실패: 1.5초만 차단(연타 폭주 방지) 후 재시도 허용. 충돌 아님.
+      graphRetryBlock = {
+        video,
+        pageKey: currentPageKey || "",
+        until: Date.now() + 1500,
+      };
+      graphConflict = false;
+    }
     saveState();
     if (ui?.panel) refreshPanelContent();
     else syncUI();
@@ -2016,7 +2036,7 @@
     const wrap = document.createElement("div");
     wrap.className = `${CONTROL_CLASS} pzp-pc__volume-control`;
     const gainPct = Math.round(state.gain * 100);
-    wrap.innerHTML = `<button class="${BUTTON_CLASS} pzp-pc__volume-button pzp-button pzp-pc-ui-button" type="button" aria-label="오디오 믹서" aria-expanded="false"><span class="pzp-button__tooltip pzp-button__tooltip--top">오디오 믹서</span><span class="pzp-ui-icon">${mixerIcon()}</span><span class="pzp-button__label">오디오 믹서</span></button>${gainSliderMarkup()}<span class="${VOLUME_TOOLTIP_CLASS} cheese-gain-tooltip" data-gain-tooltip>${gainPct}%</span>`;
+    wrap.innerHTML = `<button class="${BUTTON_CLASS} pzp-pc__volume-button pzp-button pzp-pc-ui-button" type="button" aria-label="오디오 믹서 (Shift+A)" aria-expanded="false"><span class="pzp-button__tooltip pzp-button__tooltip--top">오디오 믹서 (Shift+A)</span><span class="pzp-ui-icon">${mixerIcon()}</span><span class="pzp-button__label">오디오 믹서</span></button>${gainSliderMarkup()}<span class="${VOLUME_TOOLTIP_CLASS} cheese-gain-tooltip" data-gain-tooltip>${gainPct}%</span>`;
     return wrap;
   }
 
@@ -2062,11 +2082,15 @@
     // 초보자용 원클릭(최우선): clickActivate/noPanel/전역기본값과 무관하게 패널 없이
     // '기본 프리셋으로 바로 on/off'. 켤 때 기본 프리셋을 강제 적용해 항상 동일 동작.
     if (mixerBeginner) {
-      if (state.enabled) {
+      if (state.enabled && audio.connected) {
         setEnabled(false);
       } else if (!graphConflict) {
-        applyPreset("default"); // 프리셋 고정(초보자 모드는 기본 프리셋만)
+        // 그래프를 '먼저' 켠다(클릭 직후 = 사용자 활성화가 살아 있을 때 buildGraph 성공률↑).
+        // 그다음 기본 프리셋 값을 반영한다(connected 면 값만 적용). 순서를 뒤집으면
+        // applyPreset 내부 처리 뒤에 buildGraph 가 불려 userActivation 창을 놓쳐 '되다
+        // 안되다' 하던 문제를 줄인다.
         setEnabled(true);
+        if (state.enabled && audio.connected) applyPreset("default");
       }
       return;
     }
@@ -3178,7 +3202,8 @@
   //  - 베이스 프리셋 없이 직접 설정한 상태: "오디오 믹서 (사용자 설정)"
   function mixerButtonLabel() {
     const base = "오디오 믹서";
-    if (!state.enabled) return base;
+    // 꺼짐 상태에는 단축키를 병기해 기능(과 토글 방법)이 있음을 알린다.
+    if (!state.enabled) return `${base} (Shift+A)`;
     if (presetDirty) {
       return dirtyFromName
         ? `${base} (수정된 ${dirtyFromName})`
@@ -3594,6 +3619,12 @@
   let maxQualityMenuTriedAt = 0; // 메뉴 클릭 첫 시도 시각(폴백 유예 판정용)
   function applyMaxQuality() {
     if (!maxQualityAuto) return;
+    // 재생이 아직 시작되지 않았거나(자동재생 대기/사용자 제스처 전) 준비 전이면 개입하지
+    // 않는다. 이 시점에 화질 메뉴를 클릭(스트림 전환)하면 라이브 입장 자동재생이 깨질 수
+    // 있다. 실제로 재생이 진행(readyState 충분 + 현재 시간 진행)된 뒤에만 화질을 고정한다.
+    const video = findVideo();
+    if (!video || video.paused || video.readyState < 3 || !(video.currentTime > 0))
+      return;
     const core = findCorePlayer();
     if (!core) return;
     const tracks = Array.from(core.videoTracks || []);
@@ -4138,7 +4169,9 @@
   // grp 그룹에서 slot.after 앵커의 '기준 엘리먼트'를 반환한다(그 '뒤'에 우리 버튼을 붙인다).
   // - 네이티브 앵커: 그 엘리먼트. 현재 DOM 에 없으면 앵커 순서상 다음으로 존재하는 앵커로 폴백.
   //   (믹서/필터 앵커는 기능이 꺼져 있으면 DOM 에 없어 다음 앵커로 폴백.)
-  // - START(또는 폴백 앵커도 없음): null = 그룹 맨 앞.
+  // - START: 우측 그룹은 null(맨 앞). 좌측 그룹은 '재생 버튼 앞'에 끼우면 안 되므로(믹서
+  //   슬라이더 호버 등으로 DOM 이 흔들려 우리 버튼이 매 tick 재삽입=무한 깜빡임) 볼륨/믹서/
+  //   필터 등 좌측 네이티브 앵커 중 '실제 존재하는 마지막' 엘리먼트 뒤에 놓는다.
   function resolveAnchorEl(controls, grp, after) {
     const order = PLAYER_BTN_ANCHOR_ORDER[grp];
     if (after && after !== "START") {
@@ -4150,7 +4183,21 @@
         }
       }
     }
-    return null; // START: 그룹 맨 앞
+    // START. 우측은 맨 앞(null). 좌측은 '재생 버튼 앞'에 끼우면 안 되므로(무한 깜빡임)
+    // 볼륨/믹서/필터 뒤에 놓는다. 믹서/필터가 있으면 그중 마지막 뒤, 없으면 볼륨 뒤,
+    // 그것도 없으면 재생 버튼 뒤. (live_time '실시간' 배지는 START 기준에서 제외.)
+    if (grp === "left") {
+      const ours = controls.querySelectorAll(
+        ".cheese-audio-mixer-control, .cheese-video-filter-control",
+      );
+      if (ours.length) return ours[ours.length - 1];
+      return (
+        controls.querySelector(":scope > .pzp-pc__volume-control") ||
+        controls.querySelector(":scope > .pzp-playback-switch") ||
+        null
+      );
+    }
+    return null; // 우측 START(맨 앞) 또는 좌측에 기준 앵커가 없을 때
   }
 
   // slot(네이티브 앵커) + order(같은 앵커 내 상대순서)에 따라 각 그룹 내 '우리 버튼'을
@@ -5719,21 +5766,10 @@
   });
 
   // ── 방향키(←/→) = 10초 되감기/앞으로 ──────────────────────────────────────
-  // 마우스가 플레이어 위에 있거나 포커스가 플레이어 안일 때만 가로챈다(페이지
-  // 스크롤·다른 영역 방향키를 방해하지 않도록). 가로챌 땐 capture+preventDefault+
-  // stopImmediatePropagation으로 치지직 네이티브 방향키 seek 중복 발동을 막는다.
-  let lastPointerOverPlayer = false;
-  // 플레이어 또는 채팅 영역 위인지. 채팅창을 클릭/호버만 해도(타이핑 아님) 방향키
-  // seek 가 막히던 문제 때문에, 채팅 영역(aside)도 허용 범위에 포함한다.
-  const SEEK_ALLOW_SEL =
-    ".pzp-pc, .webplayer-internal-core, [class*='player'], aside#aside-chatting, aside#vod-aside, [class*='chatting']";
-  document.addEventListener(
-    "pointermove",
-    (e) => {
-      lastPointerOverPlayer = Boolean(e.target?.closest?.(SEEK_ALLOW_SEL));
-    },
-    true,
-  );
+  // 라이브 + 되감기 바 표시 상태에서, 타이핑/방향키소비 UI(슬라이더 등)가 아니면
+  // 가로챈다(영상 아래·사이드바·헤더를 클릭해 포커스가 옮겨가도 동작). 가로챌 땐
+  // capture+preventDefault+stopImmediatePropagation으로 치지직 네이티브 방향키 seek
+  // 중복 발동을 막는다.
 
   // 입력/채팅/contentEditable에 포커스가 있으면 단축키 비활성.
   function isTypingTarget(t) {
@@ -5743,8 +5779,33 @@
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
   }
 
-  // 단축키를 받을 상황인가: 라이브 + 되감기 바 표시 + 타이핑 아님 +
-  // 플레이어에 포커스 또는 마우스가 플레이어 위.
+  // 방향키를 '자체 조작'에 쓰는 요소에 포커스가 있으면 양보한다(슬라이더/라디오/탭 등).
+  // 예: 볼륨/음량 슬라이더, 화질 라디오, 캐러셀 등. 이런 곳에선 우리가 가로채면 안 된다.
+  function isArrowConsumingTarget(t) {
+    if (!(t instanceof Element)) return false;
+    const role = t.getAttribute?.("role");
+    if (
+      role === "slider" ||
+      role === "radio" ||
+      role === "radiogroup" ||
+      role === "tab" ||
+      role === "tablist" ||
+      role === "listbox" ||
+      role === "menu" ||
+      role === "menubar" ||
+      role === "spinbutton"
+    )
+      return true;
+    // 치지직 자체 슬라이더/우리 슬라이더.
+    if (t.closest?.("[class*='slider'], .pzp-ui-slider, [role='slider']"))
+      return true;
+    return false;
+  }
+
+  // 단축키를 받을 상황인가: 라이브 + 되감기 바 표시 + 타이핑/방향키소비 UI 아님.
+  // 영상 아래·사이드바·헤더 등을 클릭해 포커스가 플레이어 밖으로 가도(마우스를 안
+  // 움직여도) 방향키 seek 가 먹히도록, 포커스/포인터 위치 조건은 두지 않는다. 대신
+  // 타이핑 중이거나 방향키를 자체로 쓰는 요소(슬라이더/라디오 등)일 때만 양보한다.
   function seekHotkeyAllowed(e) {
     // 방향키 seek 는 '되감기 바 표시'(liveSeekBarOn)를 따른다. '되감기 숨김'은 버튼만
     // 숨기므로, 버튼이 없어도 바가 켜져 있으면 방향키 seek 를 허용한다(바 드래그와 일관).
@@ -5752,15 +5813,13 @@
     if (!location.pathname.startsWith("/live/")) return false;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
       return false;
-    const player = findPlayer();
-    if (!player) return false;
-    const focusInPlayer = player.contains(document.activeElement);
-    // 포커스가 채팅 영역(aside)에 있어도 허용 — 채팅창을 클릭만 한 상태(타이핑 아님)
-    // 에서 방향키 seek 가 막히던 문제 해결. 채팅 입력창 타이핑은 위 isTypingTarget 제외.
-    const focusInChat = !!document.activeElement?.closest?.(
-      "aside#aside-chatting, aside#vod-aside, [class*='chatting']",
-    );
-    return focusInPlayer || focusInChat || lastPointerOverPlayer;
+    if (
+      isArrowConsumingTarget(e.target) ||
+      isArrowConsumingTarget(document.activeElement)
+    )
+      return false;
+    if (!findPlayer()) return false; // 플레이어가 있는 라이브 화면일 때만
+    return true;
   }
 
   document.addEventListener(

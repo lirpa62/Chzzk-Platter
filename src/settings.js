@@ -703,6 +703,7 @@
   ];
   const VIDEO_FILTER_BUILT_IN_PRESETS = [
     ["default", "원본"],
+    ["beginner", "화질 향상"],
     ["fps", "FPS 게임"],
     ["moba", "롤·AOS"],
     ["game", "게임 일반"],
@@ -712,6 +713,7 @@
     ["food", "먹방·쿡방"],
     ["cam", "캠방송"],
     ["vtuber", "버츄얼"],
+    ["anime", "애니·2D"],
     ["night", "야간 시청"],
     ["cinema", "시네마틱"],
   ];
@@ -2587,8 +2589,19 @@
       if (!dragEl) return;
       let after = getDragAfterElement(ul, e.clientY);
       after = snapPastMixerFilter(ul, after);
+      after = snapAfterPlayback(ul, after);
       if (after == null) ul.appendChild(dragEl);
       else ul.insertBefore(dragEl, after);
+    }
+    // 재생 버튼 앞에는 놓을 수 없다(재생 앞은 무한 깜빡임 위험으로 런타임에서 볼륨/필터
+    // 뒤로 강제되므로, UI 도 재생 칩 위 드롭을 막아 표시와 실제 배치를 일치시킨다).
+    // 삽입 후보 after 가 '재생 칩'(=재생 앞에 놓임)이면 재생 칩 다음으로 밀어낸다.
+    function snapAfterPlayback(ul, after) {
+      if (!after || !after.dataset) return after;
+      if (after.dataset.nativeAnchor !== "pzp-playback-switch") return after;
+      let next = after.nextElementSibling;
+      if (next === dragEl) next = next.nextElementSibling;
+      return next; // 재생 칩 '뒤'로. next 가 null 이면 append(재생 바로 뒤).
     }
     // 삽입 후보 anchor 가 '비디오 필터 칩 바로 앞'(=믹서·필터 사이)이면, 그 묶음 앞
     // (오디오 믹서 칩)으로 당겨 사이 삽입을 막는다. dragEl 자신은 건너뛰고 판정.

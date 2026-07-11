@@ -590,7 +590,7 @@
             data-panel="mixer"
             aria-label="오디오 믹서 기능"
           >
-            <h2 class="settings-group-title">오디오 믹서</h2>
+            <h2 class="settings-group-title">오디오 믹서 (Shift+A)</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -838,7 +838,7 @@
             data-panel="filter"
             aria-label="비디오 필터 기능"
           >
-            <h2 class="settings-group-title">비디오 필터</h2>
+            <h2 class="settings-group-title">비디오 필터 (Shift+V)</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -2018,13 +2018,30 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채팅창 랭킹 숨김</span>
+                  <span class="settings-item-name">채팅창 후원 랭킹 숨김</span>
                   <span class="settings-item-desc"
                     >치즈/후원 랭킹 버튼 영역(체크=숨김)</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatHideRanking" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >채팅창 통나무 파워 랭킹 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >통나무 파워 랭킹 버튼 영역(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="chatHideLogPowerRanking"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

@@ -1521,9 +1521,9 @@
     const btn = document.createElement("button");
     btn.className = `${CONTROL_CLASS} ${BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
     btn.type = "button";
-    btn.setAttribute("aria-label", "비디오 필터");
+    btn.setAttribute("aria-label", "비디오 필터 (Shift+V)");
     btn.setAttribute("aria-expanded", "false");
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">비디오 필터</span><span class="pzp-ui-icon">${filterIcon()}</span>`;
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">비디오 필터 (Shift+V)</span><span class="pzp-ui-icon">${filterIcon()}</span>`;
     return btn;
   }
 
@@ -2438,7 +2438,8 @@
 
   function filterButtonLabel() {
     const base = "비디오 필터";
-    if (!state.enabled) return base;
+    // 꺼짐 상태에는 단축키를 병기해 기능(과 토글 방법)이 있음을 알린다.
+    if (!state.enabled) return `${base} (Shift+V)`;
     if (presetDirty) {
       return dirtyFromName
         ? `${base} (수정된 ${dirtyFromName})`

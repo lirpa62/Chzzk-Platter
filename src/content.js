@@ -397,7 +397,8 @@ const featureFlags = {
   liveSync: false,
   liveRewind: false, // 플레이어 컨트롤의 라이브 되감기/앞으로 버튼 숨김
   // 채팅창 정리(체크=적용. 다른 기능들과 달리 '숨김'이 아니라 '기능 켬').
-  chatHideRanking: false,
+  chatHideRanking: false, // 후원(치즈) 랭킹만
+  chatHideLogPowerRanking: false, // 통나무파워 랭킹만
   chatHideMission: false,
   chatHidePrediction: false,
   chatHideParty: false, // 채팅 상단 고정 '파티 후원' 진행 패널 숨김
@@ -8373,6 +8374,7 @@ let chatButtonWrap = true;
 // 우리 숨김 마커(요소에 부착) — moa의 chzzk-badge-moa-hidden-* 와 분리.
 const CHAT_HIDE_CLASSES = {
   chatHideRanking: "cheese-chat-hidden-ranking",
+  chatHideLogPowerRanking: "cheese-chat-hidden-lp-ranking",
   chatHideMission: "cheese-chat-hidden-mission",
   chatHidePrediction: "cheese-chat-hidden-prediction",
   chatHideParty: "cheese-chat-hidden-party",
@@ -8392,6 +8394,8 @@ function moaHasChat(feature) {
   switch (feature) {
     case "chatHideRanking":
       return cl.contains("chzzk-badge-moa-hide-chat-ranking");
+    case "chatHideLogPowerRanking":
+      return false; // moa에 통나무파워 랭킹 전용 기능이 없어 항상 우리가 처리
     case "chatHideMission":
       return cl.contains("chzzk-badge-moa-hide-chat-mission");
     case "chatHidePrediction":
@@ -8459,6 +8463,7 @@ function reportChatMoaState() {
 function anyChatTweakOn() {
   return (
     featureFlags.chatHideRanking ||
+    featureFlags.chatHideLogPowerRanking ||
     featureFlags.chatHideMission ||
     featureFlags.chatHidePrediction ||
     featureFlags.chatHideParty ||
@@ -8493,17 +8498,36 @@ function clearInactiveChatHideMarkers() {
   }
 }
 
+// 랭킹 버튼이 '통나무파워 랭킹'인지 판정. 버튼 내부에 통나무파워 아이콘(_icon_power_)
+// /숫자(_power_) 클래스나 '통나무 파워' 텍스트가 있으면 통나무파워, 없으면 후원(치즈).
+function isLogPowerRankingButton(btn) {
+  if (!btn) return false;
+  if (btn.querySelector("[class*='_icon_power_'], [class*='_power_']"))
+    return true;
+  // 폴백: blind 텍스트로 판정(클래스 해시가 바뀌어도 안전).
+  return /통나무\s*파워/.test(btn.textContent || "");
+}
+
 // 랭킹/미션/승부예측 패널에 숨김 마커를 부착(moa와 동일 셀렉터).
 function applyChatHideMarkers() {
   const asides = document.querySelectorAll(CHAT_ASIDE_SEL);
   asides.forEach((aside) => {
-    if (chatFeatureActive("chatHideRanking")) {
+    // 랭킹 버튼은 '후원(치즈) 랭킹'과 '통나무파워 랭킹' 두 종류가 있다. 버튼 내부에
+    // 통나무파워 표시(_power_ 클래스나 '통나무 파워' 텍스트)가 있으면 통나무파워 랭킹.
+    const rankHideDonation = chatFeatureActive("chatHideRanking");
+    const rankHideLogPower = chatFeatureActive("chatHideLogPowerRanking");
+    if (rankHideDonation || rankHideLogPower) {
       aside
         .querySelectorAll("button[class*='_ranking_button_']")
         .forEach((btn) => {
-          btn
-            .closest("[class*='_container_']")
-            ?.classList.add(CHAT_HIDE_CLASSES.chatHideRanking);
+          const isLogPower = isLogPowerRankingButton(btn);
+          const container = btn.closest("[class*='_container_']");
+          if (!container) return;
+          if (isLogPower && rankHideLogPower) {
+            container.classList.add(CHAT_HIDE_CLASSES.chatHideLogPowerRanking);
+          } else if (!isLogPower && rankHideDonation) {
+            container.classList.add(CHAT_HIDE_CLASSES.chatHideRanking);
+          }
         });
     }
     if (chatFeatureActive("chatHideMission")) {
@@ -10296,6 +10320,7 @@ function updateChatTweakStyle() {
   }
   style.textContent = `
     .${CHAT_HIDE_CLASSES.chatHideRanking},
+    .${CHAT_HIDE_CLASSES.chatHideLogPowerRanking},
     .${CHAT_HIDE_CLASSES.chatHideMission},
     .${CHAT_HIDE_CLASSES.chatHidePrediction},
     .${CHAT_HIDE_CLASSES.chatHideParty} { display: none !important; }
