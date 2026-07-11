@@ -15323,8 +15323,10 @@ function init() {
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
-  applyRootToFollowing(); // 루트로 로드됐으면 팔로우로 이동(옵션 시, 최초 1회)
-  bindLogoClickToFollowing(); // 로고 클릭 가로채기(하위 옵션 시)
+  // applyRootToFollowing 은 여기서 부르지 않는다 — init 은 저장값 로드(비동기)보다 먼저
+  // 실행될 수 있어, 기본값(false)으로 loadDone 가드를 잘못 세워 이후 진짜 값으로도 이동이
+  // 안 되던 버그가 있었다. 진입 이동은 저장 로드 완료 지점에서만 호출한다.
+  bindLogoClickToFollowing(); // 로고 클릭 가로채기(하위 옵션 시, 값은 나중에 읽힘)
   applyAutoReloadOnError(); // 리방/오류 시 자동 새로고침 감시(옵션 시)
   applyAutoReloadOnRelive(); // 방종 후 뱅온 자동 새로고침 감시(옵션 시)
   applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
