@@ -307,6 +307,11 @@ let adMiniplayerUnmute = false;
 // (전역, 기본 ON — 종속: adMiniplayerUnmute ON일 때만 의미). content.js 전용.
 const AD_MINI_KEEP_MUTED_KEY = "cheeseAdMiniplayerKeepMuted";
 let adMiniplayerKeepMuted = true;
+// 방송 시청 중(/live/ 페이지) 사이드바·헤더 팔로잉 채널 클릭 시 새 탭으로 방송 열기
+// (전역, 기본 OFF). content.js 전용. ON이면 SPA 이동 대신 window.open("_blank").
+const FOLLOW_OPEN_NEW_TAB_KEY = "cheeseFollowOpenNewTab";
+let followOpenNewTabOn = false;
+let followOpenNewTabBound = false;
 // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
 const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
 const FOLLOW_PREVIEW_SIZE_KEY = "cheeseFollowPreviewSize"; // {w} (height는 16:9)
@@ -979,6 +984,11 @@ function mountControls(list) {
   shell
     .querySelector('[data-action="reset"]')
     .addEventListener("click", resetSearch);
+  // 이 리스너는 shell(요소)이 아니라 document(항속)에 붙는다. shell 은 채널/페이지 전환
+  // 마다 제거→재생성되고 그때마다 이 함수가 다시 실행되므로, 먼저 remove 해 중복 누적을
+  // 막는다(named 함수라 remove 가능). remove 없이 add 만 하면 이동 횟수만큼 리스너가
+  // 쌓여 클릭마다 전부 실행되고 클로저가 남아 긴 세션에서 메모리·클릭 지연이 커진다.
+  document.removeEventListener("click", closeFloatingControlsFromOutside);
   document.addEventListener("click", closeFloatingControlsFromOutside);
   shell.querySelectorAll("[data-date-picker]").forEach(renderCalendar);
   setSortValue(shell, getInitialSortValue());
@@ -1082,6 +1092,20 @@ function debounce(fn, wait) {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), wait);
   };
+}
+
+// Map 에 key→value 를 넣되 최대 크기를 넘으면 가장 오래 전에 삽입된 항목부터 제거한다
+// (Map 은 삽입 순서를 유지하므로 keys().next() 가 가장 오래된 키). 긴 세션에서 채널/영상
+// 상태 캐시가 무한히 커지지 않도록 상한을 둔다(간단한 FIFO eviction).
+function mapSetCapped(map, key, value, maxSize) {
+  // 이미 있으면 최신 순서로 올리기 위해 먼저 지웠다가 다시 넣는다(LRU 유사).
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > maxSize) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
 }
 
 function sendMessage(payload) {
@@ -11186,6 +11210,26 @@ function findSidebarFollowNav() {
   return null;
 }
 
+// 제목 라벨에 keyword 를 포함하는 사이드바 섹션 nav 를 찾는다(공백 제거 비교).
+function findSidebarNavByLabel(keyword) {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return null;
+  const navs = sidebar.querySelectorAll('nav[class*="_section_"]');
+  for (const nav of navs) {
+    if (getSidebarNavLabel(nav).includes(keyword)) return nav;
+  }
+  return null;
+}
+
+// 제목으로 찾은 섹션의 '새로고침' 버튼을 클릭한다(펼침 상태에만 버튼 존재 → 접힘이면
+// no-op). 팔로우 갱신과 동일 방식(치지직 React 가 스스로 갱신).
+function clickSectionRefreshByLabel(keyword) {
+  const nav = findSidebarNavByLabel(keyword);
+  if (!nav) return;
+  const btn = nav.querySelector('button[aria-label="새로고침"]');
+  if (btn) btn.click();
+}
+
 // ── 팔로잉 '더보기' 한 번에 모두 펼치기 + 갱신 후 펼침 복원 ──────────────────
 // 치지직 더보기는 클릭당 일부만 추가 로드한다. 사용자가 한 번 클릭하면 '접기'가
 // 나올 때까지(=전부 로드) 자동 반복 클릭한다. 또 자동 갱신/오프라인 숨김의 재렌더로
@@ -11193,7 +11237,8 @@ function findSidebarFollowNav() {
 let followExpandWanted = false; // 사용자가 '모두 펼침'을 원하는 상태
 let followAutoExpandTimer = 0; // 반복 클릭 드라이버 타이머
 let followAutoExpandTries = 0; // 안전: 무한 반복 방지
-let followAutoExpandPrevCount = -1; // 직전 라운드 목록 항목 수(진전 없으면 조기 중단)
+let followAutoExpandPrevCount = -1; // 직전 라운드 목록 항목 수(진전 판정용)
+let followAutoExpandNoProgress = 0; // 연속으로 항목이 안 늘어난 라운드 수(느린 로드 허용)
 // 자동 펼치기 옵션(sbFollowAutoExpand)이 켜져 있어도, 사용자가 이번 세션에서 직접
 // '접기'를 눌렀으면 재펼침을 멈춘다(사용자 의사 우선). 페이지 이동/새로고침 시 초기화.
 let followUserCollapsed = false;
@@ -11228,6 +11273,7 @@ function stopFollowAutoExpand() {
   }
   followAutoExpandTries = 0;
   followAutoExpandPrevCount = -1; // 다음 펼치기 세션이 깨끗이 시작되도록 리셋
+  followAutoExpandNoProgress = 0;
 }
 
 // 팔로잉 nav의 현재 목록 항목 수.
@@ -11257,12 +11303,23 @@ function driveFollowAutoExpand() {
     stopFollowAutoExpand();
     return;
   }
-  // 직전 클릭으로 항목이 늘지 않았으면(진전 없음) 중단 — 더 로드할 게 없거나 실패.
+  // 진전 판정: 더보기 클릭 후 항목 수가 안 늘면 무진전. 단, React 추가 로드가 비동기라
+  // 250ms 안에 안 끝나면(느린 네트워크/큰 목록) 한 라운드 count 가 그대로일 수 있다.
+  // 이때 '즉시 중단'하면 로드가 느린 환경에서 펼치기가 조기 종료된다(재현 잘 안 되는
+  // 원인). 그래서 '연속 3회' 무진전일 때만 중단하고, 그 사이엔 계속 기다린다(더보기
+  // 버튼이 아직 있으므로 로드 대기 중일 뿐). 무한 반복은 아래 50회 캡으로 방어.
   const count = countFollowItems(nav);
   if (followAutoExpandTries > 0 && count <= followAutoExpandPrevCount) {
-    stopFollowAutoExpand();
+    followAutoExpandNoProgress += 1;
+    if (followAutoExpandNoProgress >= 3) {
+      stopFollowAutoExpand();
+      return;
+    }
+    // 무진전이지만 아직 여유가 있으면 클릭하지 않고(중복 클릭 방지) 로드를 더 기다린다.
+    followAutoExpandTimer = setTimeout(driveFollowAutoExpand, 400);
     return;
   }
+  followAutoExpandNoProgress = 0; // 진전 있음 → 무진전 카운터 리셋
   if (followAutoExpandTries >= 50) {
     // 안전장치: 비정상적으로 많이 반복되면 중단(rate-limit/루프 방지).
     stopFollowAutoExpand();
@@ -11283,9 +11340,12 @@ function ensureFollowExpansion() {
   if (!nav) return;
   // 접기 버튼이 있으면 이미 펼쳐진 상태 → 아무것도 안 함.
   if (findFollowCollapseButton(nav)) return;
-  // 더보기 버튼이 있고 드라이버가 안 돌고 있으면 시작.
+  // 더보기 버튼이 있고 드라이버가 안 돌고 있으면 시작. 새 펼침 세션이므로 진전/무진전
+  // 카운터를 함께 리셋한다(직전 세션 잔여값이 새 세션의 조기 중단을 유발하지 않게).
   if (findFollowMoreButton(nav) && !followAutoExpandTimer) {
     followAutoExpandTries = 0;
+    followAutoExpandNoProgress = 0;
+    followAutoExpandPrevCount = -1;
     driveFollowAutoExpand();
   }
 }
@@ -11835,6 +11895,7 @@ function dismissHeaderFollowHover() {
 // 다시 부여해 깜빡임 창을 최소화한다.
 let sidebarObserver = null;
 let sidebarObservedRoot = null;
+let sidebarObserverTimer = 0; // 사이드바 옵저버 콜백 디바운스 타이머
 // 사이드바 확장 상태(_is_expanded_ 클래스) 직전 값. 접힘→펼침 전환 감지용.
 let sidebarWasExpanded = false;
 
@@ -11864,20 +11925,29 @@ function ensureSidebarObserver() {
   if (!sidebar) return;
   if (sidebarObservedRoot === sidebar && sidebarObserver) return;
   if (sidebarObserver) sidebarObserver.disconnect();
+  if (sidebarObserverTimer) {
+    clearTimeout(sidebarObserverTimer);
+    sidebarObserverTimer = 0;
+  }
   sidebarObservedRoot = sidebar;
   sidebarWasExpanded = isSidebarExpanded(sidebar);
   sidebarObserver = new MutationObserver(() => {
-    // 동기 즉시 재적용(디바운스 없음). applySidebarSections는 멱등(toggle force).
-    applySidebarSections();
-    ensureHeaderFollowNav();
-    // 사이드바 접힘→펼침 전환이면 '접기' 의사 리셋 + 밀어내기 폭 갱신을 예약한다.
-    // (밀어내기 폭 측정은 여기서 매번 하지 않는다 — 옵저버 콜백은 사이드바 재렌더마다
-    //  자주 도는데, 매 콜백 getBoundingClientRect()는 강제 reflow라 스래싱이 된다.
-    //  펼침/접힘 '상태가 실제로 바뀐 경우'에만 handleSidebarExpandTransition이
-    //  scheduleSidebarPushSettle()로 재측정을 예약하므로 그걸로 충분하다.)
-    handleSidebarExpandTransition(sidebar);
-    ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
-    ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
+    // 짧은 디바운스로 묶는다(30ms). subtree:true 라 사이드바 재렌더·라이브 채팅 등으로
+    // 초당 수십 번 콜백이 올 수 있는데, 각 함수가 멱등이어도 매 콜백 실행은 낭비다. 한
+    // 프레임 남짓 모아 1회만 재적용한다. 접힘↔펼침 전환은 최종 상태만 보면 되므로
+    // (sidebarWasExpanded 비교) 디바운스로 놓치지 않는다.
+    if (sidebarObserverTimer) return;
+    sidebarObserverTimer = window.setTimeout(() => {
+      sidebarObserverTimer = 0;
+      // 디바운스 사이 사이드바가 교체됐을 수 있으니 현재 것을 다시 잡는다.
+      const cur = document.getElementById("sidebar");
+      if (!cur) return;
+      applySidebarSections();
+      ensureHeaderFollowNav();
+      handleSidebarExpandTransition(cur);
+      ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
+      ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
+    }, 30);
   });
   // childList/subtree + attributes(class): 사이드바 확장/축소는 #sidebar의 class만
   // 바뀔 수 있어 attributeFilter로 class 변화도 감지한다.
@@ -12130,7 +12200,7 @@ async function fetchChannelLiveStatus(channelId) {
     if (!res.ok) return;
     const json = await res.json();
     const live = json?.content?.status === "OPEN";
-    channelLiveStatus.set(channelId, { live, at: Date.now() });
+    mapSetCapped(channelLiveStatus, channelId, { live, at: Date.now() }, 200);
     ensureChannelLiveButton(); // 상태 반영해 라벨 갱신
   } catch {
     // 실패 시 캐시 없음 → 라벨은 보수적으로 '라이브'(이동은 가능).
@@ -12316,6 +12386,54 @@ function getFollowItemChannelId(li) {
 // 팔로잉 li가 라이브 중인지(오프라인 판정의 역). isOfflineFollowItem 재사용.
 function isLiveFollowItem(li) {
   return !isOfflineFollowItem(li);
+}
+
+// 클릭 대상이 "팔로잉 채널 이동 링크"면 /live/<32hex> 채널ID 반환(아니면 null).
+// 대상 2곳: (1) 사이드바 팔로잉 섹션 li, (2) 헤더 미니 팔로우 li.cheese-header-follow-item.
+function getFollowNavClickChannelId(target) {
+  const headerItem = target?.closest?.(".cheese-header-follow-item");
+  if (headerItem) {
+    return headerItem.dataset.channelId || null;
+  }
+  const li = target?.closest?.('aside#sidebar nav[class*="_section_"] li');
+  if (!li) return null;
+  const nav = li.closest('nav[class*="_section_"]');
+  if (!nav || !getSidebarNavLabel(nav).includes("팔로")) return null;
+  return getFollowItemChannelId(li);
+}
+
+// 방송 시청 중(/live/) 팔로잉 클릭을 가로채 새 탭으로 방송을 연다. React 라우터가
+// 같은 클릭을 처리해 SPA 이동하기 전에 캡처 단계에서 preventDefault+stopPropagation.
+function onFollowOpenNewTabClick(e) {
+  if (!followOpenNewTabOn) return;
+  // 시청 중일 때만 — /live/ 페이지가 아니면 기존 SPA 이동 유지.
+  if (!location.pathname.startsWith("/live/")) return;
+  // 좌클릭(주 버튼)만. 보조/휠 클릭·수식키(새 탭·다운로드 등)는 브라우저 기본에 맡김.
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const channelId = getFollowNavClickChannelId(e.target);
+  if (!channelId) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  window.open(`/live/${encodeURIComponent(channelId)}`, "_blank", "noopener");
+}
+
+function bindFollowOpenNewTab() {
+  if (followOpenNewTabBound) return;
+  followOpenNewTabBound = true;
+  // 캡처 단계로 React 위임 핸들러(document/root)보다 먼저 받는다.
+  document.addEventListener("click", onFollowOpenNewTabClick, true);
+}
+
+async function loadFollowOpenNewTab() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([FOLLOW_OPEN_NEW_TAB_KEY]);
+    followOpenNewTabOn = data?.[FOLLOW_OPEN_NEW_TAB_KEY] === true; // 기본 OFF
+  } catch {}
+  if (followOpenNewTabOn) bindFollowOpenNewTab();
 }
 
 // live-detail → livePlaybackJson → HLS m3u8. 캐시(30초)+in-flight 가드.
@@ -14043,7 +14161,12 @@ async function fetchChannelLastLive(channelId, openLive) {
   } catch {
     info = { status: "NONE" };
   }
-  followCleanupLastLiveCache.set(channelId, { info, at: Date.now() });
+  mapSetCapped(
+    followCleanupLastLiveCache,
+    channelId,
+    { info, at: Date.now() },
+    1000,
+  );
   return info;
 }
 
@@ -14616,6 +14739,13 @@ async function loadHeaderNav() {
 const FOLLOW_REFRESH_KEY = "cheeseFollowRefreshSec";
 let followRefreshSec = 0;
 let followRefreshTimer = 0;
+// 팔로우 갱신 주기에 얹어, 사이드바의 '인기 카테고리'/'다가오는 방송 일정' 섹션도 함께
+// 자동 새로고침한다(각각 개별 토글, 기본 OFF). 팔로우 갱신과 같은 방식으로 해당 섹션의
+// '새로고침' 버튼을 프로그램적으로 클릭한다. content.js 전용.
+const SECTION_REFRESH_CATEGORY_KEY = "cheeseSectionRefreshCategory";
+const SECTION_REFRESH_SCHEDULE_KEY = "cheeseSectionRefreshSchedule";
+let sectionRefreshCategory = false;
+let sectionRefreshSchedule = false;
 
 function clickFollowRefresh() {
   if (document.hidden) return;
@@ -14638,6 +14768,10 @@ function clickFollowRefresh() {
   //  쓰지 않는다.)
   const btn = nav.querySelector('button[aria-label="새로고침"]');
   if (btn) btn.click();
+  // 같은 주기에 '인기 카테고리'/'다가오는 방송 일정' 섹션도 옵션이 켜져 있으면 새로고침.
+  // (사이드바 숨김이면 위에서 이미 return 됐으므로 여기선 사이드바가 보이는 상태.)
+  if (sectionRefreshCategory) clickSectionRefreshByLabel("인기카테고리");
+  if (sectionRefreshSchedule) clickSectionRefreshByLabel("다가오는방송일정");
 }
 
 function findFollowNavForRefresh() {
@@ -14694,7 +14828,13 @@ function applyFollowRefresh(secRaw) {
 async function loadFollowRefresh() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await getBootData([FOLLOW_REFRESH_KEY]);
+    const data = await getBootData([
+      FOLLOW_REFRESH_KEY,
+      SECTION_REFRESH_CATEGORY_KEY,
+      SECTION_REFRESH_SCHEDULE_KEY,
+    ]);
+    sectionRefreshCategory = data?.[SECTION_REFRESH_CATEGORY_KEY] === true;
+    sectionRefreshSchedule = data?.[SECTION_REFRESH_SCHEDULE_KEY] === true;
     applyFollowRefresh(data?.[FOLLOW_REFRESH_KEY]);
   } catch {}
 }
@@ -14812,6 +14952,7 @@ const BOOT_PREFETCH_KEYS = [
     HEADER_FOLLOW_COUNT_KEY,
     CHANNEL_LIVE_BUTTON_KEY,
     CHANNEL_LIVE_BUTTON_END_KEY,
+    FOLLOW_OPEN_NEW_TAB_KEY,
     FOLLOW_PREVIEW_KEY,
     FOLLOW_PREVIEW_SIZE_KEY,
     FOLLOW_PREVIEW_MAXLIFE_KEY,
@@ -15143,6 +15284,11 @@ if (chrome.storage?.onChanged) {
         changes[CHANNEL_LIVE_BUTTON_END_KEY].newValue !== false;
       ensureChannelLiveButton();
     }
+    if (changes[FOLLOW_OPEN_NEW_TAB_KEY]) {
+      followOpenNewTabOn = changes[FOLLOW_OPEN_NEW_TAB_KEY].newValue === true;
+      if (followOpenNewTabOn) bindFollowOpenNewTab();
+      // OFF면 리스너는 남겨두되 followOpenNewTabOn 게이트로 무동작(핸들러 최상단 체크).
+    }
     if (changes[FOLLOW_PREVIEW_KEY]) {
       followPreviewOn = changes[FOLLOW_PREVIEW_KEY].newValue !== false;
       if (followPreviewOn) bindFollowPreviewHover();
@@ -15277,6 +15423,14 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[FOLLOW_REFRESH_KEY]) {
       applyFollowRefresh(changes[FOLLOW_REFRESH_KEY].newValue);
+    }
+    if (changes[SECTION_REFRESH_CATEGORY_KEY]) {
+      sectionRefreshCategory =
+        changes[SECTION_REFRESH_CATEGORY_KEY].newValue === true;
+    }
+    if (changes[SECTION_REFRESH_SCHEDULE_KEY]) {
+      sectionRefreshSchedule =
+        changes[SECTION_REFRESH_SCHEDULE_KEY].newValue === true;
     }
     if (changes[HEADER_NAV_KEY]) {
       const v = changes[HEADER_NAV_KEY].newValue;
@@ -15904,6 +16058,7 @@ void loadFollowRefresh();
 void loadHeaderNav();
 void loadChannelLiveButton();
 void loadFollowPreview();
+void loadFollowOpenNewTab();
 void loadCardPreviewAudio();
 void loadCardDateTooltip();
 void loadFollowChannelTooltip();

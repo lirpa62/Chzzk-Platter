@@ -685,7 +685,16 @@
       const videoNo = pageKey.slice(6);
       if (videoChannelCache.has(videoNo)) return videoChannelCache.get(videoNo);
       const fromApi = await fetchChannelIdFromApi(videoNo);
-      if (fromApi) videoChannelCache.set(videoNo, fromApi);
+      if (fromApi) {
+        videoChannelCache.set(videoNo, fromApi);
+        // 무한 증가 방지: 상한 초과 시 가장 오래된 항목부터 제거(FIFO). videoNo→channelId
+        // 는 불변 매핑이라 순서 기반 제거로 충분(긴 시청 세션의 캐시 누적 방지).
+        while (videoChannelCache.size > 300) {
+          const oldest = videoChannelCache.keys().next().value;
+          if (oldest === undefined) break;
+          videoChannelCache.delete(oldest);
+        }
+      }
       return fromApi;
     }
     return null;
@@ -5842,9 +5851,12 @@
   // 움직여도) 방향키 seek 가 먹히도록, 포커스/포인터 위치 조건은 두지 않는다. 대신
   // 타이핑 중이거나 방향키를 자체로 쓰는 요소(슬라이더/라디오 등)일 때만 양보한다.
   function seekHotkeyAllowed(e) {
-    // 방향키 seek 는 '되감기 바 표시'(liveSeekBarOn)를 따른다. '되감기 숨김'은 버튼만
-    // 숨기므로, 버튼이 없어도 바가 켜져 있으면 방향키 seek 를 허용한다(바 드래그와 일관).
-    if (!liveSeekBarOn) return false;
+    // 방향키 seek 는 '되감기 바'(liveSeekBarOn) 또는 '되감기/앞으로 버튼'(featureFlags.
+    // liveRewind=true 면 버튼 숨김) 중 하나라도 켜져 있으면 허용한다. 둘 다 꺼졌을 때만
+    // 차단(바 없이 버튼만 켜도 방향키가 먹히도록 — 피드백 반영).
+    const seekBarOn = liveSeekBarOn;
+    const seekButtonsOn = !featureFlags.liveRewind;
+    if (!seekBarOn && !seekButtonsOn) return false;
     if (!location.pathname.startsWith("/live/")) return false;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
       return false;

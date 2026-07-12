@@ -39,6 +39,7 @@
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowCleanup",
+    "cheeseFollowOpenNewTab",
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
     "cheeseFollowPreviewHeaderFont",
@@ -48,6 +49,8 @@
     "cheeseFollowPreviewThumbOnly",
     "cheeseFollowPreviewVolume",
     "cheeseFollowRefreshSec",
+    "cheeseSectionRefreshCategory",
+    "cheeseSectionRefreshSchedule",
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
@@ -1815,6 +1818,28 @@
   });
   loadChannelLiveButtonEnd();
 
+  // ── 방송 시청 중 팔로잉 새 탭으로 열기(전역, 기본 OFF) ──────────────────────
+  const FOLLOW_OPEN_NEW_TAB_KEY = "cheeseFollowOpenNewTab";
+  const followOpenNewTabInput = document.querySelector(
+    "[data-follow-open-new-tab]",
+  );
+  async function loadFollowOpenNewTab() {
+    let on = false; // 기본 꺼짐
+    try {
+      const data = await cachedStorageGet(FOLLOW_OPEN_NEW_TAB_KEY);
+      on = data?.[FOLLOW_OPEN_NEW_TAB_KEY] === true;
+    } catch {}
+    if (followOpenNewTabInput) followOpenNewTabInput.checked = on;
+  }
+  followOpenNewTabInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_OPEN_NEW_TAB_KEY]: followOpenNewTabInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowOpenNewTab();
+
   // ── 팔로잉 라이브 미리보기(전역, 기본 ON) ─────────────────────────────────
   const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
   const followPreviewInput = document.querySelector("[data-follow-preview]");
@@ -2959,6 +2984,33 @@
   });
   followCustomSec?.addEventListener("change", saveFollowCustom);
   loadFollowRefresh();
+
+  // 인기 카테고리 / 다가오는 방송 일정도 함께 갱신(기본 OFF). 팔로우 갱신 주기에 얹힘.
+  function bindSectionRefreshToggle(sel, key) {
+    const input = document.querySelector(sel);
+    if (!input) return;
+    (async () => {
+      let on = false;
+      try {
+        const d = await cachedStorageGet(key);
+        on = d?.[key] === true;
+      } catch {}
+      input.checked = on;
+    })();
+    input.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [key]: input.checked });
+      } catch {}
+    });
+  }
+  bindSectionRefreshToggle(
+    "[data-section-refresh-category]",
+    "cheeseSectionRefreshCategory",
+  );
+  bindSectionRefreshToggle(
+    "[data-section-refresh-schedule]",
+    "cheeseSectionRefreshSchedule",
+  );
 
   // ── 헤더 팔로우 표시 개수(사이드바+주제 탭 숨김 시 헤더 캐러셀) ────────────
   const HEADER_FOLLOW_COUNT_KEY = "cheeseHeaderFollowCount";

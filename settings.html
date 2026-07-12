@@ -1654,6 +1654,66 @@
               않습니다). 커스텀은 3~600초이며, 10초 이하로 설정하면 호출 제한을
               피해 설정값과 설정값~10초 랜덤을 번갈아 호출합니다.
             </p>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >인기 카테고리도 함께 갱신</span
+                  >
+                  <span class="settings-item-desc"
+                    >위 갱신 주기에 맞춰 사이드바 '인기 카테고리' 섹션도 함께
+                    새로고침합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-section-refresh-category />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >다가오는 방송 일정도 함께 갱신</span
+                  >
+                  <span class="settings-item-desc"
+                    >위 갱신 주기에 맞춰 사이드바 '다가오는 방송 일정' 섹션도
+                    함께 새로고침합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-section-refresh-schedule />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="sidebar"
+            aria-label="팔로잉 새 탭"
+          >
+            <h2 class="settings-group-title">
+              팔로잉 새 탭으로 열기 (Ctrl/CMD + 클릭)
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >방송 시청 중 팔로잉을 새 탭에서 열기</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브 시청 페이지에서 사이드바·헤더 팔로잉 채널을 클릭하면
+                    현재 탭에서 이동하지 않고 새 탭으로 방송을 엽니다(체크=사용,
+                    기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-open-new-tab />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
           </section>
 
           <section
@@ -1998,9 +2058,10 @@
                 <div>
                   <span class="settings-item-name">└ 로고 클릭 시 이동</span>
                   <span class="settings-item-desc"
-                    >헤더 로고 클릭 시 팔로우로 이동할지 선택합니다. `포함`은 진입과
-                    로고 모두, `제외`는 진입만(로고 제외), `단독`은 로고만 이동하며
-                    위의 '메인 진입 시 이동'은 적용하지 않습니다</span
+                    >헤더 로고 클릭 시 팔로우로 이동할지 선택합니다. `포함`은
+                    진입과 로고 모두, `제외`는 진입만(로고 제외), `단독`은
+                    로고만 이동하며 위의 '메인 진입 시 이동'은 적용하지
+                    않습니다</span
                   >
                 </div>
                 <div
