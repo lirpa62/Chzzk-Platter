@@ -409,6 +409,39 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">휠로 볼륨 조절</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기 영상 위에서 마우스 휠로 볼륨을
+                    조절합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-wheel-volume />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label for="wheelVolumeStepInput">
+                  <span class="settings-item-name">휠 볼륨 조절 간격</span>
+                  <span class="settings-item-desc"
+                    >휠 한 칸에 조절할 볼륨 크기(1~10%)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="wheelVolumeStepInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-wheel-volume-step
+                  />
+                  <small>%</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">스트림 정보 숨김</span>
                   <span class="settings-item-desc"
                     >해상도·비트레이트·코덱 정보</span
@@ -1204,6 +1237,22 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="hideBlockedCards" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >탭 복귀 시 검색 자동 초기화</span
+                  >
+                  <span class="settings-item-desc"
+                    >동영상·클립 검색 결과가 있는 상태에서 다른 탭·창에 갔다가
+                    돌아오면 검색을 자동으로 초기화합니다(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-search-reset-on-return />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

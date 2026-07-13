@@ -72,6 +72,7 @@
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
+    "cheeseSearchResetOnReturn",
     "cheeseSeekStepS",
     "cheeseSubscribeBadgeProgress",
     "cheeseSyncCustom",
@@ -83,6 +84,8 @@
     "cheeseVideoFilterGlobalDefaultMode",
     "cheeseVodAutoplayOff",
     "cheeseVolumePct",
+    "cheeseWheelVolume",
+    "cheeseWheelVolumeStep",
     "cheeseGainPct",
     "cheeseWideScreenAuto",
     "audioMixer:presets",
@@ -1322,6 +1325,54 @@
   bindPctToggle("[data-volume-pct]", "cheeseVolumePct");
   bindPctToggle("[data-gain-pct]", "cheeseGainPct");
 
+  // ── 휠로 볼륨 조절(전역, 기본 OFF) ────────────────────────────────────────
+  const WHEEL_VOLUME_KEY = "cheeseWheelVolume";
+  const wheelVolumeInput = document.querySelector("[data-wheel-volume]");
+  if (wheelVolumeInput) {
+    (async () => {
+      let on = false; // 기본 꺼짐
+      try {
+        const d = await cachedStorageGet(WHEEL_VOLUME_KEY);
+        on = d?.[WHEEL_VOLUME_KEY] === true;
+      } catch {}
+      wheelVolumeInput.checked = on;
+    })();
+    wheelVolumeInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [WHEEL_VOLUME_KEY]: wheelVolumeInput.checked });
+      } catch {}
+    });
+  }
+  // 휠 볼륨 조절 간격(1~10%, 기본 5).
+  const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
+  const wheelVolumeStepInput = document.querySelector("[data-wheel-volume-step]");
+  function clampWheelVolumeStep(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 5;
+    return Math.min(10, Math.max(1, Math.round(n)));
+  }
+  if (wheelVolumeStepInput) {
+    (async () => {
+      try {
+        const d = await cachedStorageGet(WHEEL_VOLUME_STEP_KEY);
+        wheelVolumeStepInput.value = String(
+          clampWheelVolumeStep(d?.[WHEEL_VOLUME_STEP_KEY] ?? 5),
+        );
+      } catch {
+        wheelVolumeStepInput.value = "5";
+      }
+    })();
+    const save = () => {
+      const v = clampWheelVolumeStep(wheelVolumeStepInput.value);
+      wheelVolumeStepInput.value = String(v); // 범위 밖 입력 보정
+      try {
+        cachedStorageSet({ [WHEEL_VOLUME_STEP_KEY]: v });
+      } catch {}
+    };
+    wheelVolumeStepInput.addEventListener("change", save);
+    wheelVolumeStepInput.addEventListener("blur", save);
+  }
+
   // ── 믹서 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
   const mixerClickActivateInput = document.querySelector(
     "[data-mixer-click-activate]",
@@ -1655,6 +1706,29 @@
     };
     seekStepInput.addEventListener("change", save);
     seekStepInput.addEventListener("blur", save);
+  }
+
+  // ── 탭 복귀 시 검색 자동 초기화(전역, 기본 OFF) ───────────────────────────
+  const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
+  const searchResetInput = document.querySelector(
+    "[data-search-reset-on-return]",
+  );
+  if (searchResetInput) {
+    (async () => {
+      let on = false; // 기본 꺼짐
+      try {
+        const d = await cachedStorageGet(SEARCH_RESET_ON_RETURN_KEY);
+        on = d?.[SEARCH_RESET_ON_RETURN_KEY] === true;
+      } catch {}
+      searchResetInput.checked = on;
+    })();
+    searchResetInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [SEARCH_RESET_ON_RETURN_KEY]: searchResetInput.checked,
+        });
+      } catch {}
+    });
   }
 
   // ── 채널 라이브 바로가기 버튼(전역, 기본 ON) ──────────────────────────────

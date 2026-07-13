@@ -94,6 +94,17 @@ const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
 let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
 const VOLUME_PCT_KEY = "cheeseVolumePct";
 let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
+// 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF). MAIN world(audioMixer.js)가 처리.
+const WHEEL_VOLUME_KEY = "cheeseWheelVolume";
+let wheelVolume = false;
+// 휠 볼륨 조절 간격(%, 1~10, 기본 5). MAIN world(audioMixer.js)가 사용.
+const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
+let wheelVolumeStep = 5;
+function normalizeWheelVolumeStep(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 5;
+  return Math.min(10, Math.max(1, Math.round(n)));
+}
 const GAIN_PCT_KEY = "cheeseGainPct";
 let gainPct = true; // 게인 조절 % 표시(전역, 기본 ON)
 // 스크린샷 저장 전 미리보기(저장/취소 확인) 표시 여부(전역, 기본 OFF=즉시 다운로드).
@@ -356,6 +367,10 @@ let autoReloadOnError = false;
 // 다시 라이브를 켜면(뱅온) 자동 새로고침(기본 OFF). content.js 전용.
 const AUTO_RELOAD_ON_RELIVE_KEY = "cheeseAutoReloadOnRelive";
 let autoReloadOnRelive = false;
+// 동영상/클립 검색 결과가 있는 상태에서 탭을 벗어났다 돌아오면(다시 보임) 검색을 자동
+// 초기화(기본 OFF). content.js 전용.
+const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
+let searchResetOnReturn = false;
 // 종료 화면이 이 시간 이상 지속되면 폴링을 멈춘다(무기한 폴링 방지). 시간(hour) 단위로
 // 저장하며 6/12/24 중 하나. 잘못된 값은 6으로. content.js 전용.
 const AUTO_RELIVE_MAX_HOURS_KEY = "cheeseAutoReliveMaxHours";
@@ -2595,6 +2610,36 @@ async function resetSearch() {
       // The page already returned to the original CHZZK view.
     }
   }
+}
+
+// 탭 복귀(다시 보임) 시 검색 결과 자동 초기화(옵션, 기본 OFF). 검색 shell 이 있고 실제로
+// 결과가 로드된 상태(hasLoaded && 결과 있음)일 때만 초기화한다 — 결과가 없거나 검색 화면이
+// 아니면 아무 것도 하지 않는다. 로딩 중이면 건너뛴다(진행 중 검색을 끊지 않음).
+// 탭이 백그라운드로 갔었는지 추적한다. 복귀(다시 보임/포커스) 시 '이전에 숨겨진 적이
+// 있을 때만' 초기화한다 — 같은 탭 안에서의 포커스 이동(주소창 등)엔 반응하지 않도록.
+let searchWasHidden = false;
+function maybeResetSearchOnReturn() {
+  if (!searchResetOnReturn) return;
+  if (document.hidden) return; // 아직 숨겨진 상태면 무시
+  if (!searchWasHidden) return; // 백그라운드로 간 적 없으면(단순 포커스) 무시
+  searchWasHidden = false;
+  if (!document.querySelector(".cheese-search-shell")) return;
+  if (state.loading) return;
+  if (!state.hasLoaded || !state.videos.length) return;
+  void resetSearch();
+}
+// visibilitychange 가 SPA/환경에 따라 발화하지 않는 경우가 있어(실측: 이 페이지에서 미발화)
+// window focus/blur 도 함께 사용해 탭/창 복귀를 견고하게 감지한다(둘 다 발화해도
+// searchWasHidden 소모로 1회만 초기화).
+function onSearchVisibilityChange() {
+  if (document.hidden) searchWasHidden = true;
+  else maybeResetSearchOnReturn();
+}
+function onSearchWindowBlur() {
+  searchWasHidden = true;
+}
+function onSearchWindowFocus() {
+  maybeResetSearchOnReturn();
 }
 
 function restoreOriginalView() {
@@ -14861,6 +14906,8 @@ function broadcastFeatureFlags() {
       wideScreenAuto, // 넓은 화면 자동 적용(전역)
       liveSeekBar, // 라이브 되감기 바 표시(전역)
       volumePct, // 볼륨 조절 % 표시(전역)
+      wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
+      wheelVolumeStep, // 휠 볼륨 조절 간격(%, 1~10)
       gainPct, // 게인 조절 % 표시(전역)
       screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
       mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
@@ -14910,6 +14957,8 @@ const FEATURE_FLAGS_KEYS = [
   WIDE_SCREEN_AUTO_KEY,
   LIVE_SEEK_BAR_KEY,
   VOLUME_PCT_KEY,
+  WHEEL_VOLUME_KEY,
+  WHEEL_VOLUME_STEP_KEY,
   GAIN_PCT_KEY,
   MIXER_CLICK_ACTIVATE_KEY,
   MIXER_CLICK_NO_PANEL_KEY,
@@ -14937,6 +14986,7 @@ const FEATURE_FLAGS_KEYS = [
   SCREENSHOT_DIRECT_SAVE_KEY,
   AUTO_RELOAD_ON_ERROR_KEY,
   AUTO_RELOAD_ON_RELIVE_KEY,
+  SEARCH_RESET_ON_RETURN_KEY,
   AUTO_RELIVE_MAX_HOURS_KEY,
   ROOT_TO_FOLLOWING_KEY,
   ROOT_TO_FOLLOWING_LOGO_KEY,
@@ -15028,6 +15078,7 @@ async function loadFeatureFlags() {
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
     autoReloadOnRelive = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true; // 기본 OFF
+    searchResetOnReturn = data?.[SEARCH_RESET_ON_RETURN_KEY] === true; // 기본 OFF
     autoReliveMaxHours = normalizeAutoReliveMaxHours(
       data?.[AUTO_RELIVE_MAX_HOURS_KEY],
     );
@@ -15054,6 +15105,8 @@ async function loadFeatureFlags() {
     );
     logPowerEarningColor = data?.[LOGPOWER_EARNING_COLOR_KEY] === true; // 기본 OFF
     volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
+    wheelVolume = data?.[WHEEL_VOLUME_KEY] === true; // 미설정=기본 OFF
+    wheelVolumeStep = normalizeWheelVolumeStep(data?.[WHEEL_VOLUME_STEP_KEY]);
     gainPct = data?.[GAIN_PCT_KEY] !== false;
     mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
     mixerClickNoPanel = data?.[MIXER_CLICK_NO_PANEL_KEY] === true;
@@ -15126,6 +15179,9 @@ if (chrome.storage?.onChanged) {
       autoReloadOnRelive = changes[AUTO_RELOAD_ON_RELIVE_KEY].newValue === true;
       applyAutoReloadOnRelive(); // 즉시 반영(켜면 감시 시작, 끄면 중지)
     }
+    if (changes[SEARCH_RESET_ON_RETURN_KEY]) {
+      searchResetOnReturn = changes[SEARCH_RESET_ON_RETURN_KEY].newValue === true;
+    }
     if (changes[AUTO_RELIVE_MAX_HOURS_KEY]) {
       autoReliveMaxHours = normalizeAutoReliveMaxHours(
         changes[AUTO_RELIVE_MAX_HOURS_KEY].newValue,
@@ -15171,6 +15227,14 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[VOLUME_PCT_KEY]) {
       volumePct = changes[VOLUME_PCT_KEY].newValue !== false;
+    }
+    if (changes[WHEEL_VOLUME_KEY]) {
+      wheelVolume = changes[WHEEL_VOLUME_KEY].newValue === true;
+    }
+    if (changes[WHEEL_VOLUME_STEP_KEY]) {
+      wheelVolumeStep = normalizeWheelVolumeStep(
+        changes[WHEEL_VOLUME_STEP_KEY].newValue,
+      );
     }
     if (changes[GAIN_PCT_KEY]) {
       gainPct = changes[GAIN_PCT_KEY].newValue !== false;
@@ -15405,6 +15469,8 @@ if (chrome.storage?.onChanged) {
       changes[WIDE_SCREEN_AUTO_KEY] ||
       changes[LIVE_SEEK_BAR_KEY] ||
       changes[VOLUME_PCT_KEY] ||
+      changes[WHEEL_VOLUME_KEY] ||
+      changes[WHEEL_VOLUME_STEP_KEY] ||
       changes[GAIN_PCT_KEY] ||
       changes[SCREENSHOT_PREVIEW_KEY] ||
       changes[MIXER_CLICK_ACTIVATE_KEY] ||
@@ -15597,6 +15663,10 @@ async function resumeFromBackgroundOrCache() {
   const resubscribed = await tryResubscribeOngoingFetch();
   if (resubscribed) return;
   if (state.hasLoaded || state.loading) return;
+  // '탭 복귀 시 검색 자동 초기화' 옵션이 켜져 있으면 세션 캐시 복원을 건너뛴다 —
+  // 페이지 이동·새로고침 후 검색 결과가 되살아나는 것 자체가 이 옵션이 없애려는
+  // 동작이다(진행 중 fetch 재구독은 위에서 이미 처리 — 방금 시작한 검색은 유지).
+  if (searchResetOnReturn) return;
 
   if (isClipSearch) {
     const restoreState = await readLastAutoRestoreState({ isClipSearch });
@@ -15868,6 +15938,9 @@ document.addEventListener("click", handleCommentTimestampDocumentClick);
 document.addEventListener("click", handleStudioMoreCaptureClick, true);
 document.addEventListener("click", handleStudioDocumentClick);
 document.addEventListener("keydown", handleCommentTimestampKeydown);
+document.addEventListener("visibilitychange", onSearchVisibilityChange);
+window.addEventListener("blur", onSearchWindowBlur);
+window.addEventListener("focus", onSearchWindowFocus);
 
 chrome.runtime.onMessage.addListener((message) => {
   // 통나무파워 적립 추적(background) broadcast.

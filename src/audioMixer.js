@@ -25,6 +25,8 @@
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
+  let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
+  let wheelVolumeStep = 0.05; // 휠 한 칸당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
@@ -56,7 +58,14 @@
     },
     order: {
       left: [],
-      right: ["rewind", "sync", "forward", "tabMute", "screenshot", "streamStats"],
+      right: [
+        "rewind",
+        "sync",
+        "forward",
+        "tabMute",
+        "screenshot",
+        "streamStats",
+      ],
     },
     // 각 우리 버튼이 붙는 네이티브 앵커(그 뒤에 배치). "START"=그룹 맨 앞. 기본은
     // 우측 샵 버튼 뒤(=클립 버튼 앞, 기존 배치 재현).
@@ -91,7 +100,8 @@
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
   window.addEventListener("message", (e) => {
-    if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    if (e.source !== window || e.data?.source !== "cheese-feature-flags")
+      return;
     const f = e.data.flags || {};
     featureFlags.audioMixer = f.audioMixer === true;
     featureFlags.streamStats = f.streamStats === true;
@@ -106,6 +116,14 @@
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
     // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
     volumePctOn = e.data.volumePct !== false;
+    wheelVolumeOn = e.data.wheelVolume === true; // 기본 OFF
+    // 휠 볼륨 조절 간격(% 1~10 → 0.01~0.10). 범위 밖/미설정이면 5%.
+    {
+      const s = Number(e.data.wheelVolumeStep);
+      wheelVolumeStep = Number.isFinite(s)
+        ? Math.min(10, Math.max(1, Math.round(s))) / 100
+        : 0.05;
+    }
     gainPctOn = e.data.gainPct !== false;
     // 스크린샷 저장 전 미리보기(전역, 기본 OFF). 켜면 모달로 저장/취소 확인.
     screenshotPreviewOn = e.data.screenshotPreview === true;
@@ -131,6 +149,9 @@
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
     if (maxQualityAuto && typeof applyMaxQuality === "function") {
+      // 옵션을 방금 켠 경우 현재 video 에 이벤트를 바인딩해 두면, 다음 재생/전환에서
+      // 곧바로 최고화질이 걸린다. 이미 재생 중이면 applyMaxQuality 가 즉시 처리.
+      if (typeof bindMaxQualityEvents === "function") bindMaxQualityEvents();
       applyMaxQuality();
     }
     // 전역 기본값 재방문 동작(global | channel, 기본 global).
@@ -177,8 +198,7 @@
           const sv = pbs.slot[k];
           if (!sv || typeof sv !== "object") continue;
           const grp = playerButtonSide.side[k] === "left" ? "left" : "right";
-          let after =
-            typeof sv.after === "string" ? sv.after : "START";
+          let after = typeof sv.after === "string" ? sv.after : "START";
           if (
             after !== "START" &&
             !PLAYER_BTN_ANCHOR_ORDER[grp].includes(after)
@@ -215,10 +235,16 @@
   });
   // 탭 음소거 토글/조회 요청을 content.js로 보낸다.
   function requestTabMuteToggle() {
-    window.postMessage({ source: "cheese-tab-mute", type: "toggle" }, location.origin);
+    window.postMessage(
+      { source: "cheese-tab-mute", type: "toggle" },
+      location.origin,
+    );
   }
   function requestTabMuteQuery() {
-    window.postMessage({ source: "cheese-tab-mute", type: "query" }, location.origin);
+    window.postMessage(
+      { source: "cheese-tab-mute", type: "query" },
+      location.origin,
+    );
   }
 
   const PANEL_ID = "cheese-audio-mixer-panel";
@@ -653,7 +679,9 @@
   // (미니플레이어)로 떠 있는 상태인지. 이때 video는 계속 재생 중이라 오디오 믹서
   // 그래프를 teardown하면 안 된다(PIP에서 믹서가 꺼지던 원인).
   function isPipActive() {
-    return !!document.querySelector("[class*='_type_pip_'], .pzp-pc.pzp-pc--pip");
+    return !!document.querySelector(
+      "[class*='_type_pip_'], .pzp-pc.pzp-pc--pip",
+    );
   }
 
   // 설정은 채널id로 통일 저장한다(라이브·다시보기 공유). 다시보기 URL엔 채널id가
@@ -3482,7 +3510,10 @@
       if (audio.ctx.state === "running") {
         proceed();
       } else {
-        audio.ctx.resume().then(proceed).catch(() => {});
+        audio.ctx
+          .resume()
+          .then(proceed)
+          .catch(() => {});
       }
     } catch {}
   }
@@ -3494,7 +3525,8 @@
       boundAutoEnableVideos.add(video);
       video.addEventListener("playing", () => tryAutoEnableFromPlayback(video));
     }
-    if (!video.paused && video.readyState >= 2) tryAutoEnableFromPlayback(video);
+    if (!video.paused && video.readyState >= 2)
+      tryAutoEnableFromPlayback(video);
   }
   window.addEventListener("keydown", stopMixerEditableShortcutLeak, true);
   window.addEventListener("keyup", stopMixerEditableShortcutLeak, true);
@@ -3554,8 +3586,8 @@
   function trackSelected(t) {
     return !!(t?.selected || t?._selected);
   }
-  // 화질 항목(li) prefix 텍스트에서 height 파싱(예: "1080p(원본)"→1080, "720p"→720).
-  // "자동/ABR" 항목은 0 반환(최고값 후보에서 제외).
+
+  // 화질 메뉴 항목(li) prefix 텍스트에서 height 파싱("1080p(원본)"→1080, "자동"→0).
   function qualityItemHeight(li) {
     const txt = String(
       li?.querySelector?.(".pzp-ui-setting-quality-item__prefix")?.textContent ||
@@ -3565,77 +3597,65 @@
     const m = txt.match(/(\d{3,4})\s*p/i);
     return m ? Number(m[1]) : 0;
   }
-  let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
-  // 화질 메뉴에서 '최고 화질 항목이 이미 선택(--checked)돼 있는지' 판정한다.
-  // core.videoTracks 의 selected 반영이 늦어도, 메뉴상 최고가 이미 체크면 메뉴 클릭이
-  // 성공한 것 → selected=true 폴백을 실행하면 화질 전환이 '두 번' 일어나(로그 2회) 므로
-  // 이 판정으로 중복 폴백을 막는다.
+  // 화질 메뉴에서 '최고 화질 항목이 이미 선택(--checked)돼 있는지'.
   function isMaxQualityMenuChecked() {
     const list = document.querySelector(
       ".pzp-setting-quality-pane__list-container",
     );
     if (!list) return false;
-    const items = Array.from(
-      list.querySelectorAll("li.pzp-ui-setting-quality-item"),
-    );
-    if (!items.length) return false;
     let bestLi = null;
-    let bestLiH = 0;
-    for (const li of items) {
+    let bestH = 0;
+    for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
       const h = qualityItemHeight(li);
-      if (h > bestLiH) {
-        bestLiH = h;
+      if (h > bestH) {
+        bestH = h;
         bestLi = li;
       }
     }
     return (
-      !!bestLi &&
-      bestLi.classList.contains("pzp-ui-setting-pane-item--checked")
+      !!bestLi && bestLi.classList.contains("pzp-ui-setting-pane-item--checked")
     );
   }
-  // 치지직 플레이어는 Vue 로 구현돼 화질 메뉴 항목(li)이 네이티브 .click() 에 반응한다.
-  // (React 아님 — __reactProps$ 없음.) 설정을 열지 않아도 화질 목록 DOM 은 상시 존재하므로,
-  // 최고 화질 li 를 .click() 하면 치지직의 정상 화질 변경 경로(그리드/P2P 초기화 포함)를
-  // 탄다. selected=true 직접 설정과 달리 그리드가 정상 실행된다.
+  let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
+  // 최고 화질 메뉴 항목(li)을 클릭해 치지직의 정상 화질 변경 경로를 태운다. 이 경로만이
+  // 그리드(P2P) 초기화를 정상 실행한다(실측: selected=true 직접 설정은 그리드가 안 붙어
+  // Windows 지연 8~10초, 클론 교체 클릭은 그리드 정상+화질 전환+컨트롤바 유지 모두 확인).
   //
-  // 클론 교체 트릭: 원본 li 를 DOM 에서 잠깐 빼고(클론으로 대체) DOM 밖 원본을 클릭한 뒤
-  // 다음 프레임에 원복한다. 클릭은 처리되지만 화질 메뉴 UI 가 열리거나 깜빡이는 부작용을
-  // 감춘다. 이미 최고 항목이 선택(--checked)돼 있으면 클릭하지 않는다(멱등). 성공 시 true.
+  // 클론 교체 트릭: 원본 li 를 클론으로 잠깐 대체해 DOM 에서 빼고, DOM 밖 원본을 .click()
+  // 한 뒤 다음 프레임에 원복한다. 이렇게 해야 (a) 치지직이 이 합성 클릭을 정상 화질 변경
+  // 으로 처리하고(그리드 포함), (b) 화질 메뉴 UI 가 열리는 부작용을 감춘다. 메뉴를 열고
+  // 붙어있는 li 를 그냥 .click() 하면 무반응이다(실측) — 클론 교체가 핵심.
+  // 성공(클릭 실행/이미 최고) 시 true.
   function clickMaxQualityMenuItem() {
     const list = document.querySelector(
       ".pzp-setting-quality-pane__list-container",
     );
     if (!list) return false;
-    const items = Array.from(
-      list.querySelectorAll("li.pzp-ui-setting-quality-item"),
-    );
-    if (!items.length) return false;
-    // 최고 height 항목(자동 제외). height 동률이면 먼저 나온(상단) 항목.
     let bestLi = null;
-    let bestLiH = 0;
-    for (const li of items) {
+    let bestH = 0;
+    for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
       const h = qualityItemHeight(li);
-      if (h > bestLiH) {
-        bestLiH = h;
+      if (h > bestH) {
+        bestH = h;
         bestLi = li;
       }
     }
-    if (!bestLi || bestLiH <= 0) return false;
+    if (!bestLi || bestH <= 0) return false;
     // 이미 최고 항목이 체크돼 있으면 클릭하지 않는다(멱등).
     if (bestLi.classList.contains("pzp-ui-setting-pane-item--checked"))
       return true;
-    // 클릭 직후~--checked 반영 전 사이에 tick 이 또 클릭하지 않도록 짧게 억제.
+    // 클릭 직후~--checked 반영 전 사이에 tick/이벤트가 또 클릭하지 않도록 짧게 억제.
     if (Date.now() - maxQualityMenuClickAt < 1500) return true;
     try {
       const parent = bestLi.parentElement;
       if (parent) {
-        // 클론으로 원본을 잠깐 대체 → DOM 밖 원본 클릭(메뉴 UI 노출 방지) → 다음 프레임 원복.
         const clone = bestLi.cloneNode(true);
-        parent.replaceChild(clone, bestLi);
-        bestLi.click();
+        parent.replaceChild(clone, bestLi); // 원본을 클론으로 대체(원본은 DOM 밖)
+        bestLi.click(); // DOM 밖 원본 클릭 → 정상 화질 변경 경로(그리드 포함)
         requestAnimationFrame(() => {
           try {
-            if (clone.parentElement === parent) parent.replaceChild(bestLi, clone);
+            if (clone.parentElement === parent)
+              parent.replaceChild(bestLi, clone); // 원복
           } catch {}
         });
       } else {
@@ -3652,15 +3672,41 @@
   // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
   let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
-  let maxQualityMenuTriedAt = 0; // 메뉴 클릭 첫 시도 시각(폴백 유예 판정용)
   function applyMaxQuality() {
     if (!maxQualityAuto) return;
     // 재생이 아직 시작되지 않았거나(자동재생 대기/사용자 제스처 전) 준비 전이면 개입하지
-    // 않는다. 이 시점에 화질 메뉴를 클릭(스트림 전환)하면 라이브 입장 자동재생이 깨질 수
-    // 있다. 실제로 재생이 진행(readyState 충분 + 현재 시간 진행)된 뒤에만 화질을 고정한다.
+    // 않는다. 이 시점에 화질을 전환(스트림 재초기화)하면 플레이어 초기화가 깨진다.
+    //
+    // 안전 게이트: paused=false + readyState>=3 + currentTime>=안정시간 + 플레이어가
+    // 'beforeplay/loading 국면이 아님'.
+    //  1) currentTime=0(첫 playing 직후)에 전환하면 재생 파이프라인이 끊겨 video 가
+    //     readyState=0 으로 죽는다.
+    //  2) 결정적: 라이브 입장 시 치지직 플레이어는 재생이 진행돼도(currentTime≈28,
+    //     readyState=4) 한동안 루트(.pzp-pc)에 `pzp-pc--beforeplay`/`--loading` 클래스를
+    //     유지한다. 이 국면에서 화질을 전환하면(selected=true 든 메뉴 클릭이든) 플레이어가
+    //     통째로 재초기화되며 video 가 죽고(readyState=0) 컨트롤바가 사라진다(후킹 로그로
+    //     확정: 1080p selected=true 시점 before 가 beforeplay:true·loading:true, 100ms 뒤
+    //     readyState=0). currentTime 임계만으론 이 국면을 못 걸러냈다 → beforeplay/loading
+    //     클래스가 사라진(=플레이어가 재생 안정 상태) 뒤에만 전환한다.
+    // 이벤트(timeupdate)로 계속 재시도하므로, 이 조건을 만족하는 첫 순간 바로 걸린다.
+    const MAX_QUALITY_MIN_PLAYED = 1.5;
     const video = findVideo();
-    if (!video || video.paused || video.readyState < 3 || !(video.currentTime > 0))
+    if (
+      !video ||
+      video.paused ||
+      video.readyState < 3 ||
+      !(video.currentTime >= MAX_QUALITY_MIN_PLAYED)
+    )
       return;
+    // 플레이어가 아직 입장 로딩 국면(beforeplay/loading)이면 전환을 미룬다.
+    const pzp = findPlayer();
+    if (
+      pzp &&
+      (pzp.classList.contains("pzp-pc--beforeplay") ||
+        pzp.classList.contains("pzp-pc--loading"))
+    ) {
+      return;
+    }
     const core = findCorePlayer();
     if (!core) return;
     const tracks = Array.from(core.videoTracks || []);
@@ -3690,36 +3736,117 @@
       return; // 이 미디어는 사용자가 고른 화질을 존중
     }
 
-    // 이미 최고 고정 화질이면 손대지 않는다(멱등).
-    if (selH >= bestH) {
-      maxQualitySetHeight = bestH;
-      maxQualityMenuTriedAt = 0; // 다음 미디어/하락 대비 리셋
-      return;
-    }
-    // 하이브리드: 먼저 실제 화질 메뉴 항목을 클릭해 정상 경로(그리드/P2P 포함)를 유도한다.
-    // 메뉴 클릭은 비동기라 즉시 화질이 안 바뀔 수 있으니, 클릭 후 일정 시간(MENU_GRACE_MS)
-    // 동안은 반영을 기다린다. 그 시간이 지나도 최고 화질이 아니면(무반응) selected=true
-    // 직접 설정으로 폴백해 화질만이라도 보장한다.
-    const MENU_GRACE_MS = 2500;
-    const clicked = clickMaxQualityMenuItem();
-    if (clicked) {
-      if (!maxQualityMenuTriedAt) maxQualityMenuTriedAt = Date.now();
-      // 클릭 반영 대기 중이면 폴백을 미룬다(그리드 정상 실행 기회 확보).
-      if (Date.now() - maxQualityMenuTriedAt < MENU_GRACE_MS) return;
-    }
-    // 유예가 지났어도, 화질 메뉴상 '최고 항목이 이미 선택'이면 메뉴 클릭이 성공한 것이다.
-    // core.videoTracks 의 selected 반영만 늦은 상태이므로, selected=true 폴백을 실행하면
-    // 화질 전환이 한 번 더 일어난다(로그 2회·불필요한 재초기화). 이 경우 폴백을 건너뛰고
-    // 반영을 계속 기다린다.
-    if (isMaxQualityMenuChecked()) {
+    // 이미 최고 고정 화질이면 손대지 않는다(멱등). 트랙 selected 반영이 늦어도, 화질
+    // 메뉴상 최고 항목이 이미 체크돼 있으면 전환된 것이니 중복 클릭하지 않는다.
+    if (selH >= bestH || isMaxQualityMenuChecked()) {
       maxQualitySetHeight = bestH;
       return;
     }
-    // 메뉴 클릭이 없었거나(메뉴 미발견) 유예 후에도 최고가 아니면 직접 설정 폴백.
-    try {
-      best.selected = true;
-      maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
-    } catch {}
+    // 화질 전환: 화질 메뉴 최고 항목을 '클론 교체 트릭'으로 클릭한다.
+    //
+    // 검증 히스토리(모두 실측):
+    //  - 클론 교체 .click(): 치지직의 정상 화질 변경 경로를 타 그리드(P2P)까지 초기화되고,
+    //    화질 전환·컨트롤바 유지도 정상(수동 1회 실행으로 확인: 480p→1080p, beforeplay=false,
+    //    controls=true, 그리드 실행). 1.18.0 에서 쓰던 방식.
+    //  - 붙어있는 li 를 그냥 .click()(클론 교체 없이): 무반응(화질 안 바뀜). 클론 교체가 핵심.
+    //  - selected=true 직접 설정: 화질은 바뀌지만 정상 경로를 우회해 그리드가 안 붙고 지연이
+    //    8~10초 남는다 → 클릭 실패 시의 폴백으로만 쓴다.
+    //
+    // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
+    // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
+    // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
+    if (!clickMaxQualityMenuItem()) {
+      // 폴백: 메뉴를 못 찾는 등 클릭 실패 시 트랙 selected 직접 설정(그리드 미보장).
+      try {
+        best.selected = true;
+      } catch {}
+    }
+    maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
+    // 화질 전환은 스트림을 재초기화한다. 입장 후 480p 로 재생되던 중 전환하면 재초기화가
+    // 라이브 엣지가 아니라 과거 지점에서 재개돼 지연이 남을 수 있다(실측). 라이브 페이지에
+    // 한해 전환 뒤 따라잡기로 엣지에 복귀시킨다.
+    if (currentPageKey && currentPageKey.startsWith("live:")) {
+      scheduleMaxQualityLiveEdgeCatchup();
+    }
+  }
+
+  // 화질 전환 뒤 라이브 엣지 복귀. 전환 직후엔 스트림이 아직 재초기화 중이라 seek 이
+  // 안 먹을 수 있어, 짧은 간격으로 몇 번 재시도하며 '지연이 충분히 줄면' 종료한다.
+  // 미디어 전환/기능 해제 시 다음 tick 의 currentPageKey 검사로 자연 소진된다.
+  let maxQualityCatchupTimer = 0;
+  // 화질 전환 뒤 라이브 엣지 복귀.
+  //
+  // 계측 로그로 확인한 사실: 화질 전환(스트림 재초기화)은 새 타임라인을 currentTime≈0
+  // 으로 다시 시작하는데, 그 시작점이 '현재 라이브 엣지'가 아니라 '수십 초 전 버퍼
+  // 시작점'일 수 있다(비결정적: 5번 중 3번은 지연 ~30초, 2번은 3~4초).
+  //
+  // 처리: 재초기화가 안정돼 지연이 관측되기 시작하면, 기존 라이브 따라잡기(startSyncCatchUp)
+  // 를 한 번 발동시킨다. 이 함수가 '큰 지연(SYNC_JUMP_LATENCY_S=12초 이상)이면 라이브 엣지로
+  // 즉시 점프, 그 미만이면 1.5배속으로 목표(syncCfg.target)까지 부드럽게 따라잡기'를 이미
+  // 다 한다(스톨 감지·안전 시간·컨트롤 유지 포함). 직접 seek 을 만들지 않고 검증된 경로를
+  // 재사용한다 → 큰 지연만 점프, 중간 지연은 배속으로 자연스럽게(화면 급전환 최소화).
+  //
+  // 주의: 전환 직후엔 재초기화 중이라 currentTime/seekable/_getLiveLatency 가 null·0·출렁이는
+  // 과도 상태다. 이 구간에 개입하면 무의미/역효과이므로, '재생이 진행 중이고 지연이 실제로
+  // 관측될 때'까지 기다렸다가 발동한다.
+  function scheduleMaxQualityLiveEdgeCatchup() {
+    if (maxQualityCatchupTimer) return; // 이미 진행 중
+    const startedPageKey = currentPageKey;
+    let tries = 0;
+    const MAX_TRIES = 16; // 재초기화 안정까지 넉넉히(약 12초)
+    const FIRST_DELAY = 1500; // 재초기화가 끝나 지연이 관측되기 시작할 시간
+    const RETRY_INTERVAL = 700;
+    const step = () => {
+      maxQualityCatchupTimer = 0;
+      // 페이지가 바뀌었거나 기능이 꺼졌으면 중단.
+      if (!maxQualityAuto || currentPageKey !== startedPageKey) return;
+      const video = findVideo();
+      const lat = getLiveLatencySeconds();
+      // 아직 재초기화 과도 상태(지연 미관측/재생 정지/seekable 없음)면 기다린다.
+      if (
+        lat == null ||
+        !video ||
+        video.paused ||
+        video.readyState < 3 ||
+        !video.seekable?.length
+      ) {
+        if (++tries < MAX_TRIES) {
+          maxQualityCatchupTimer = window.setTimeout(step, RETRY_INTERVAL);
+        }
+        return;
+      }
+      // 지연이 관측됨 → 따라잡기 발동(내부에서 점프/배속을 지연 크기에 따라 선택). 이미
+      // 엣지 근처(lat < syncCfg.enable)면 startSyncCatchUp 이 스스로 no-op 한다.
+      startSyncCatchUp();
+      // 발동은 한 번이면 충분(startSyncCatchUp 이 목표까지 자체 루프로 따라잡는다).
+    };
+    maxQualityCatchupTimer = window.setTimeout(step, FIRST_DELAY);
+  }
+
+  // 최대 화질 고정을 '재생이 안정되는 즉시' 걸기 위해 video 이벤트에 바인딩한다.
+  // 폴링 tick(주기적) 만 의존하면 최고화질 전환이 늦어 저화질 구간이 길어진다.
+  // 핵심은 timeupdate — currentTime 이 0을 벗어나는 첫 순간(applyMaxQuality 의 안전
+  // 게이트를 통과하는 가장 이른 시점)에 곧바로 호출돼 전환이 빨리 걸린다. playing/
+  // loadeddata 는 게이트(currentTime>0)에 대부분 막히지만, 이미 진행 중인 영상에 늦게
+  // 바인딩된 경우를 위한 보조 트리거로 함께 둔다. applyMaxQuality 는 멱등이라 이미
+  // 최고화질이면 no-op(timeupdate 가 자주 와도 비용 미미).
+  const boundMaxQualityVideos = new WeakSet();
+  function bindMaxQualityEvents() {
+    if (!maxQualityAuto) return;
+    const video = findVideo();
+    if (!(video instanceof HTMLVideoElement)) return;
+    if (!boundMaxQualityVideos.has(video)) {
+      boundMaxQualityVideos.add(video);
+      const onProgress = () => applyMaxQuality();
+      video.addEventListener("timeupdate", onProgress);
+      video.addEventListener("playing", onProgress);
+      video.addEventListener("loadeddata", onProgress);
+    }
+    // 이미 안정 재생 중(이벤트를 놓친 뒤 바인딩됐을 수 있음)이면 즉시 1회 시도.
+    // 실제 임계 판정은 applyMaxQuality 내부 게이트가 하므로 여기선 대략만 거른다.
+    if (!video.paused && video.readyState >= 3 && video.currentTime > 0) {
+      applyMaxQuality();
+    }
   }
 
   // 라이브 지연(초). _getLiveLatency()는 ms를 반환한다. core를 받으면 재사용.
@@ -3763,14 +3890,22 @@
   function prettyCodec(codec) {
     if (!codec) return null;
     const c = String(codec).toLowerCase();
-    if (c.startsWith("avc1") || c.startsWith("avc3")) return "H.264 (AVC)";
-    if (c.startsWith("hev1") || c.startsWith("hvc1")) return "H.265 (HEVC)";
-    if (c.startsWith("av01")) return "AV1";
-    if (c.startsWith("vp9") || c.startsWith("vp09")) return "VP9";
-    if (c.startsWith("vp8")) return "VP8";
-    if (c.startsWith("mp4a")) return "AAC";
-    if (c.startsWith("opus")) return "Opus";
-    if (c.startsWith("ac-3")) return "AC-3";
+    // 치지직이 '알 수 없음'으로 넘기는 값(UNK 등)은 코덱 미상으로 취급 → null 반환해
+    // 상위 폴백(오디오 프로파일/audioOnly 트랙/MPD)이 채우게 하고, 그래도 없으면 —(대시)로
+    // 표시한다(사용자가 UNK 같은 원문 노출을 보지 않도록).
+    if (c === "unk" || c === "unknown" || c === "none" || c === "-") return null;
+    // 표준 코덱 문자열(avc1.xxx, mp4a.40.2 등)과 함께, 치지직이 720p/1080p(그리드 경유)에서
+    // 주는 사람이 읽는 축약형("H264","h264" 등)도 인식한다.
+    if (c.startsWith("avc1") || c.startsWith("avc3") || c === "h264" || c === "avc")
+      return "H.264 (AVC)";
+    if (c.startsWith("hev1") || c.startsWith("hvc1") || c === "h265" || c === "hevc")
+      return "H.265 (HEVC)";
+    if (c.startsWith("av01") || c === "av1") return "AV1";
+    if (c.startsWith("vp9") || c.startsWith("vp09") || c === "vp9") return "VP9";
+    if (c.startsWith("vp8") || c === "vp8") return "VP8";
+    if (c.startsWith("mp4a") || c === "aac") return "AAC";
+    if (c.startsWith("opus") || c === "opus") return "Opus";
+    if (c.startsWith("ac-3") || c === "ac3") return "AC-3";
     return codec;
   }
 
@@ -4025,6 +4160,16 @@
           info.audioCodec =
             prettyCodec(pickStr(selected, "audioCodec", "_audioCodec")) ||
             info.audioCodec;
+          // 치지직이 720p/1080p(그리드 경유)에서 audioCodec 을 "UNK"로 주는 경우
+          // prettyCodec 이 null 이 된다. 이때 audioProfile 로 코덱을 추론한다: "LC"/"HE"
+          // 등은 AAC 프로파일이므로 AAC 로 표시(로그 확인: audioCodec=UNK 여도
+          // audioProfile=LC, audioSamplingRate=48000, 같은 스트림 audioOnly 트랙=AAC).
+          if (!info.audioCodec) {
+            const ap = pickStr(selected, "audioProfile", "_audioProfile");
+            if (ap && /^(lc|he|hev2|main|ltp|ld|eld|aac)/i.test(ap)) {
+              info.audioCodec = "AAC";
+            }
+          }
         }
 
         // _currentCodecs 폴백 + 채널 보강.
@@ -4036,6 +4181,29 @@
           info.audioCodec = info.audioCodec || prettyCodec(codecs.audio);
           const ch = pickNum(codecs, "audioChannel");
           if (!info.audioChannels && ch) info.audioChannels = `${ch}ch`;
+        }
+
+        // 오디오 코덱 폴백: 아직 못 얻었으면(선택 트랙·_currentCodecs 모두 UNK) 같은
+        // 스트림의 audioOnly 트랙 코덱을 쓴다. 로그상 media[].encodingTrack 의
+        // audioOnly 트랙은 실제 오디오 코덱(AAC)을 정상 값으로 담고 있다.
+        if (!info.audioCodec) {
+          try {
+            const mediaList = core.srcObject?.data?.media;
+            if (Array.isArray(mediaList)) {
+              for (const m of mediaList) {
+                const at = (m?.encodingTrack || []).find((t) =>
+                  /audio/i.test(t?.encodingTrackId || ""),
+                );
+                const ac = prettyCodec(
+                  pickStr(at, "audioCodec", "_audioCodec"),
+                );
+                if (ac) {
+                  info.audioCodec = ac;
+                  break;
+                }
+              }
+            }
+          } catch {}
         }
 
         // 라디오 모드(오디오 전용) 감지: 비디오 코덱이 없고 오디오만 있으며 실제
@@ -4114,17 +4282,17 @@
     try {
       const canvas = document.createElement("canvas");
       const gl =
-        canvas.getContext("webgl") ||
-        canvas.getContext("experimental-webgl");
+        canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
       if (gl) {
         const dbg = gl.getExtension("WEBGL_debug_renderer_info");
         renderer = dbg
           ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || "")
           : "";
         // 소프트웨어 렌더러 = 가속 꺼짐(거의 확정). 그 외 실제 GPU = 켜짐.
-        const sw = /swiftshader|llvmpipe|software|basic render|microsoft basic/i.test(
-          renderer,
-        );
+        const sw =
+          /swiftshader|llvmpipe|software|basic render|microsoft basic/i.test(
+            renderer,
+          );
         if (renderer) accelerated = !sw;
         // 컨텍스트 즉시 정리(리소스 남기지 않음).
         gl.getExtension("WEBGL_lose_context")?.loseContext?.();
@@ -4193,7 +4361,10 @@
   // 넣는다(볼륨 컨트롤 다음). left 컨테이너가 아니거나 앵커 기준이 없으면 null(=맨 끝
   // append). 이렇게 하면 왼쪽으로 옮긴 버튼들이 믹서·필터 뒤에 순서대로 붙는다.
   function leftInsertAnchor(controls) {
-    if (!controls || !controls.classList.contains("pzp-pc__bottom-buttons-left"))
+    if (
+      !controls ||
+      !controls.classList.contains("pzp-pc__bottom-buttons-left")
+    )
       return null;
     // 우리 컨트롤(믹서/필터) 중 DOM상 가장 뒤에 있는 것의 다음 형제를 앵커로.
     const ours = controls.querySelectorAll(
@@ -4206,7 +4377,8 @@
   // key 버튼의 최초 삽입 앵커(대략 위치). 정확한 그룹 내 순서는 arrangePlayerButtons 가
   // 마무리한다. left면 믹서/필터 뒤, right면 호출부가 준 rightAnchor.
   function insertAnchorFor(controls, key, rightAnchor) {
-    if (playerButtonSide.side[key] === "left") return leftInsertAnchor(controls);
+    if (playerButtonSide.side[key] === "left")
+      return leftInsertAnchor(controls);
     return rightAnchor;
   }
 
@@ -4336,7 +4508,10 @@
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, insertAnchorFor(controls, "streamStats", rightAnchor));
+    controls.insertBefore(
+      btn,
+      insertAnchorFor(controls, "streamStats", rightAnchor),
+    );
   }
 
   function removeStatsButton() {
@@ -4381,7 +4556,10 @@
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, insertAnchorFor(controls, "tabMute", rightAnchor));
+    controls.insertBefore(
+      btn,
+      insertAnchorFor(controls, "tabMute", rightAnchor),
+    );
     requestTabMuteQuery(); // 현재 탭 음소거 상태를 받아 아이콘 동기화
   }
 
@@ -4412,7 +4590,8 @@
     const player = findPlayer();
     if (!player) return;
     const controls = sideControls(player, "screenshot");
-    if (!controls || controls.querySelector(`.${SCREENSHOT_BUTTON_CLASS}`)) return;
+    if (!controls || controls.querySelector(`.${SCREENSHOT_BUTTON_CLASS}`))
+      return;
     const btn = createScreenshotButton();
     // 스트림 정보/탭 음소거 버튼 앞(같은 컨테이너에 있을 때만), 없으면 우측 그룹 맨 앞.
     // 왼쪽 배치면 믹서/필터 뒤.
@@ -4422,7 +4601,10 @@
       controls.querySelector(".custom__clip-button") ||
       controls.querySelector(".cheese-search-comment-timestamp-button") ||
       controls.firstChild;
-    controls.insertBefore(btn, insertAnchorFor(controls, "screenshot", rightAnchor));
+    controls.insertBefore(
+      btn,
+      insertAnchorFor(controls, "screenshot", rightAnchor),
+    );
   }
 
   function removeScreenshotButton() {
@@ -4559,7 +4741,10 @@
   }
   // 저장된 위치가 화면 밖이면 보이도록 되돌린다.
   function clampToViewport(left, top, w, h) {
-    const maxLeft = Math.max(0, window.innerWidth - Math.min(w, window.innerWidth));
+    const maxLeft = Math.max(
+      0,
+      window.innerWidth - Math.min(w, window.innerWidth),
+    );
     const maxTop = Math.max(0, window.innerHeight - 40);
     return {
       left: Math.min(Math.max(0, left), maxLeft),
@@ -4610,7 +4795,12 @@
     // 위치·크기 복원(없으면 중앙 근처 기본).
     const saved = loadScreenshotRect();
     if (saved) {
-      const { left, top } = clampToViewport(saved.left, saved.top, saved.w, saved.h);
+      const { left, top } = clampToViewport(
+        saved.left,
+        saved.top,
+        saved.w,
+        saved.h,
+      );
       win.style.left = `${left}px`;
       win.style.top = `${top}px`;
       win.style.width = `${saved.w}px`;
@@ -4620,16 +4810,18 @@
       win.style.top = `${Math.round(window.innerHeight / 2 - 200)}px`;
     }
 
-    win.querySelector(".cheese-screenshot-win-close").addEventListener("click", () =>
-      closeScreenshotPreview(),
-    );
-    win.querySelector(".cheese-screenshot-cancel").addEventListener("click", () =>
-      closeScreenshotPreview(),
-    );
-    win.querySelector(".cheese-screenshot-save").addEventListener("click", () => {
-      downloadScreenshot(dataURL, name, onScreenshotSaved);
-      closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
-    });
+    win
+      .querySelector(".cheese-screenshot-win-close")
+      .addEventListener("click", () => closeScreenshotPreview());
+    win
+      .querySelector(".cheese-screenshot-cancel")
+      .addEventListener("click", () => closeScreenshotPreview());
+    win
+      .querySelector(".cheese-screenshot-save")
+      .addEventListener("click", () => {
+        downloadScreenshot(dataURL, name, onScreenshotSaved);
+        closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
+      });
 
     document.body.appendChild(win);
     bindScreenshotDrag(win, win.querySelector(".cheese-screenshot-win-header"));
@@ -5073,7 +5265,9 @@
     btn.type = "button";
     btn.disabled = true;
     const label = forward ? `${seekStepS}초 앞으로` : `${seekStepS}초 되감기`;
-    const tip = forward ? `${seekStepS}초 앞으로 (→)` : `${seekStepS}초 되감기 (←)`;
+    const tip = forward
+      ? `${seekStepS}초 앞으로 (→)`
+      : `${seekStepS}초 되감기 (←)`;
     btn.setAttribute("aria-label", label);
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${tip}</span><span class="pzp-ui-icon">${forward ? forwardIcon() : rewindIcon()}</span>`;
     return btn;
@@ -5157,7 +5351,8 @@
       controls.querySelector(`.${STATS_BUTTON_CLASS}`) ||
       controls.querySelector(".custom__clip-button") ||
       controls.firstChild;
-    const baseAnchor = syncBtn || insertAnchorFor(controls, "rewind", rightAnchor);
+    const baseAnchor =
+      syncBtn || insertAnchorFor(controls, "rewind", rightAnchor);
     if (!controls.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
       controls.insertBefore(createSeekButton(false), baseAnchor);
     }
@@ -5223,7 +5418,10 @@
     const frac = Math.min(1, Math.max(0, (clientX - r.left) / (r.width || 1)));
     // 앞으로는 라이브 엣지 직전(여유)까지만 허용.
     const maxT = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
-    return Math.max(w.start, Math.min(maxT, w.start + frac * (w.end - w.start)));
+    return Math.max(
+      w.start,
+      Math.min(maxT, w.start + frac * (w.end - w.start)),
+    );
   }
 
   // 드래그/클릭으로 target 시각으로 seek. 되감기(과거로)면 자동 따라잡기 pause 표시.
@@ -5302,7 +5500,10 @@
         const w = getSeekWindow();
         if (!w) return;
         const r = track.getBoundingClientRect();
-        const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)));
+        const frac = Math.min(
+          1,
+          Math.max(0, (e.clientX - r.left) / (r.width || 1)),
+        );
         const hoverT = w.start + frac * (w.end - w.start);
         const behind = w.end - hoverT; // 라이브 엣지 대비 지연(초)
         tip.textContent =
@@ -5332,10 +5533,7 @@
       // 컨트롤 표시(pzp-pc--controls)와 동기화. 바 호버 중엔 치지직이 클래스를 떼도
       // 즉시 다시 붙여 컨트롤을 유지한다(호버 keep-alive).
       const syncVisible = () => {
-        if (
-          seekBarHovered &&
-          !player.classList.contains(CONTROLS_CLASS)
-        ) {
+        if (seekBarHovered && !player.classList.contains(CONTROLS_CLASS)) {
           player.classList.add(CONTROLS_CLASS); // 옵저버 재진입 → 아래 on 계산
           return;
         }
@@ -5411,9 +5609,7 @@
       seekBarClsObs.disconnect();
       seekBarClsObs = null;
     }
-    document
-      .querySelectorAll(`.${SEEK_BAR_CLASS}`)
-      .forEach((b) => b.remove());
+    document.querySelectorAll(`.${SEEK_BAR_CLASS}`).forEach((b) => b.remove());
   }
 
   // 토글 변경 시 즉시 반영: 켜졌고 라이브면 바 보장, 꺼졌으면 제거.
@@ -6031,13 +6227,16 @@
   }
 
   function volumeTipOf(wrap) {
-    return wrap?.querySelector?.(`.${VOLUME_TOOLTIP_CLASS}:not(.cheese-gain-tooltip)`) || null;
+    return (
+      wrap?.querySelector?.(
+        `.${VOLUME_TOOLTIP_CLASS}:not(.cheese-gain-tooltip)`,
+      ) || null
+    );
   }
   function sliderOf(wrap) {
     return (
-      wrap?.querySelector?.(
-        ".pzp-pc__volume-slider:not([data-master-gain])",
-      ) || null
+      wrap?.querySelector?.(".pzp-pc__volume-slider:not([data-master-gain])") ||
+      null
     );
   }
 
@@ -6096,7 +6295,10 @@
     const obs = new MutationObserver(() => {
       if (tip.classList.contains("is-visible")) setVolumeTooltipText(anchor);
     });
-    obs.observe(slider, { attributes: true, attributeFilter: ["aria-valuenow"] });
+    obs.observe(slider, {
+      attributes: true,
+      attributeFilter: ["aria-valuenow"],
+    });
   }
 
   // ── document 위임 리스너(1회 등록) ──────────────────────────────────────────
@@ -6126,6 +6328,52 @@
     ensureVolumeTooltip();
     showVolumeTooltip(wrap);
   }
+
+  // ── 영상 위 마우스 휠로 볼륨 조절(전역 옵션, 기본 OFF) ──────────────────────
+  // 조절 간격(한 틱당 변화량)은 wheelVolumeStep(설정, 1~10% → 0.01~0.10).
+  // 이벤트 target 이 플레이어 영상 영역 안인지(볼륨 컨트롤/설정 패널 등 UI 위는 제외).
+  function isOverVideoArea(target) {
+    const el = target instanceof Element ? target : target?.parentElement;
+    if (!(el instanceof Element)) return null;
+    const player = findPlayer();
+    if (!player || !player.contains(el)) return null;
+    // 컨트롤/설정/볼륨 등 상호작용 UI 위에서는 페이지 기본 동작을 방해하지 않는다.
+    if (
+      el.closest(
+        ".pzp-pc__volume-control, .pzp-pc__bottom, [class*='setting'], [class*='pzp-pc__control'], button, input, [role='slider']",
+      )
+    ) {
+      return null;
+    }
+    // 영상 영역(.pzp-pc__video) 우선, 없으면 플레이어 루트 안이면 허용.
+    return el.closest(".pzp-pc__video") || player;
+  }
+  // 조절 후 볼륨 % 툴팁을 잠깐 띄워 피드백(native 볼륨 컨트롤 위치에 표시).
+  function flashVolumeTooltip() {
+    const slider = findNativeVolumeSlider();
+    if (!slider) return;
+    const wrap = slider.closest(".pzp-pc__volume-control");
+    if (!wrap) return;
+    ensureVolumeTooltip();
+    showVolumeTooltip(wrap);
+  }
+  function onVideoWheelVolume(e) {
+    if (!wheelVolumeOn) return;
+    if (!isOverVideoArea(e.target)) return;
+    const video = findVideo();
+    if (!(video instanceof HTMLVideoElement)) return;
+    // 페이지 스크롤 대신 볼륨을 조절한다(영상 위에서만).
+    e.preventDefault();
+    // deltaY<0(위로) = 볼륨↑, deltaY>0(아래로) = 볼륨↓.
+    const dir = e.deltaY < 0 ? 1 : -1;
+    let v = video.volume + dir * wheelVolumeStep;
+    v = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+    // 올릴 때 음소거 상태면 해제(직관적). 0으로 내려가면 자연히 무음.
+    if (dir > 0 && video.muted) video.muted = false;
+    video.volume = v; // UI 슬라이더(aria-valuenow)는 이 값으로 자동 동기화됨(실측)
+    flashVolumeTooltip();
+  }
+
   let volumeDelegationBound = false;
   function bindVolumeTooltipDelegation() {
     if (volumeDelegationBound) return;
@@ -6138,6 +6386,12 @@
       passive: true,
     });
     document.addEventListener("keydown", onVolumeWheelOrKey, true);
+    // 영상 위 휠 볼륨 조절: preventDefault 가 필요하므로 non-passive 로 별도 등록.
+    // wheelVolumeOn 게이트로 옵션이 꺼져 있으면 즉시 반환한다.
+    document.addEventListener("wheel", onVideoWheelVolume, {
+      capture: true,
+      passive: false,
+    });
   }
 
   // tick fast-path 판정: 같은 페이지에서 우리 버튼·효과가 이미 모두 안정 상태인가.
@@ -6161,10 +6415,18 @@
       if (!state.enabled && audio.connected) return false;
     }
     // 스트림 정보
-    if (featureFlags.streamStats ? has(STATS_BUTTON_CLASS) : !has(STATS_BUTTON_CLASS))
+    if (
+      featureFlags.streamStats
+        ? has(STATS_BUTTON_CLASS)
+        : !has(STATS_BUTTON_CLASS)
+    )
       return false;
     // 탭 음소거
-    if (featureFlags.tabMute ? has(TAB_MUTE_BUTTON_CLASS) : !has(TAB_MUTE_BUTTON_CLASS))
+    if (
+      featureFlags.tabMute
+        ? has(TAB_MUTE_BUTTON_CLASS)
+        : !has(TAB_MUTE_BUTTON_CLASS)
+    )
       return false;
     // 스크린샷
     if (
@@ -6175,7 +6437,9 @@
       return false;
     // 라이브 전용: 따라잡기 / 되감기 버튼
     if (isLive) {
-      if (featureFlags.liveSync ? has(SYNC_BUTTON_CLASS) : !has(SYNC_BUTTON_CLASS))
+      if (
+        featureFlags.liveSync ? has(SYNC_BUTTON_CLASS) : !has(SYNC_BUTTON_CLASS)
+      )
         return false;
       if (
         featureFlags.liveRewind
@@ -6185,10 +6449,18 @@
         return false;
     }
     // 자동 넓은 화면 적용이 아직 남아 있으면(이 미디어에 미적용) full tick 필요.
-    if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey) return false;
+    if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey)
+      return false;
     // '항상 켜기'가 켜졌는데 아직 자동 활성화 전이면 full tick.
-    if (mixerAlwaysOn && userGestureSeen && stateLoaded && !audio.connected &&
-        !state.userDisabled && !featureFlags.audioMixer && !graphConflict) {
+    if (
+      mixerAlwaysOn &&
+      userGestureSeen &&
+      stateLoaded &&
+      !audio.connected &&
+      !state.userDisabled &&
+      !featureFlags.audioMixer &&
+      !graphConflict
+    ) {
       return false;
     }
     return true;
@@ -6215,7 +6487,8 @@
         liveVideo.isConnected &&
         !liveVideo.ended;
       const keepGraph =
-        currentPageKey && (isPipActive() || (audio.connected && videoAlive) || videoAlive);
+        currentPageKey &&
+        (isPipActive() || (audio.connected && videoAlive) || videoAlive);
       if (keepGraph) {
         if (!featureFlags.audioMixer) ensureEnabledGraph();
         return;
@@ -6244,7 +6517,11 @@
       // 끌고 가지 않는다).
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
-      maxQualityMenuTriedAt = 0;
+      maxQualityMenuClickAt = 0;
+      if (maxQualityCatchupTimer) {
+        clearTimeout(maxQualityCatchupTimer);
+        maxQualityCatchupTimer = 0;
+      }
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
       state = DEFAULT_STATE();
@@ -6323,7 +6600,9 @@
     maybeAutoEnableMixer();
     // 넓은 화면 자동 적용(미디어당 1회). viewmode 버튼이 늦게 떠도 잠깐 재시도.
     maybeAutoWideScreen();
-    // 최대 화질 자동 고정(켜져 있으면). 멱등이라 이미 최고 화질이면 즉시 return.
+    // 최대 화질 자동 고정(켜져 있으면). 이벤트 바인딩으로 재생 시작 즉시 걸고, tick 에서도
+    // 멱등 재확인(이미 최고면 no-op, 사용자 하락 존중 등 상태 추적).
+    bindMaxQualityEvents();
     applyMaxQuality();
   }
 
