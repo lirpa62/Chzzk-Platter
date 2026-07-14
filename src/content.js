@@ -386,7 +386,8 @@ function normalizeSearchRerankPoolMax(v) {
   return Math.min(1000, Math.max(50, Math.round(n)));
 }
 // 추천순 점수 비중(각 0~100). rel=제목 관련도, read=조회수, pv=라이브 시청자,
-// verified=인증 채널, recent=최신성. 기본 40/30/15/10/5.
+// verified=인증 채널, recent=최신성. 기본 40/30/15/10/5이며, 모두 0이면 기본값으로
+// 폴백해 모든 추천 점수가 같아지는 상황을 막는다.
 const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
 const SEARCH_RERANK_WEIGHTS_DEFAULT = {
   rel: 40,
@@ -401,10 +402,13 @@ function normalizeSearchRerankWeights(v) {
   if (v && typeof v === "object") {
     for (const k of Object.keys(out)) {
       const n = Number(v[k]);
-      if (Number.isFinite(n)) out[k] = Math.min(100, Math.max(0, Math.round(n)));
+      if (Number.isFinite(n))
+        out[k] = Math.min(100, Math.max(0, Math.round(n)));
     }
   }
-  return out;
+  return Object.values(out).every((weight) => weight === 0)
+    ? { ...SEARCH_RERANK_WEIGHTS_DEFAULT }
+    : out;
 }
 // 검색 시 기본 정렬(score|read|pv|recent|original, 기본 score=추천순).
 const SEARCH_RERANK_DEFAULT_SORT_KEY = "cheeseSearchRerankDefaultSort";
@@ -12517,7 +12521,9 @@ function scoreSearchRerankItem(item, tokens, phrase) {
   const rec = Math.max(0, Math.min(1, (30 - days) / 30));
   // 비중은 설정에서 커스텀 가능(기본 40/30/15/10/5).
   const w = searchRerankWeights;
-  return w.rel * rel + w.read * pop + w.pv * pv + w.verified * ver + w.recent * rec;
+  return (
+    w.rel * rel + w.read * pop + w.pv * pv + w.verified * ver + w.recent * rec
+  );
 }
 
 function buildSearchRerankScores(items, keyword) {
@@ -12602,9 +12608,9 @@ function setSearchRerankLiveBadge(thumbA, livePv) {
     'div[class*="_description_"] span[class*="_container_1o5pg_"]',
   );
   const descCls =
-    document
-      .querySelector('a[class*="_thumbnail_"] div[class*="_description_"]')
-      ?.className || "_description_ul5zy_432";
+    document.querySelector(
+      'a[class*="_thumbnail_"] div[class*="_description_"]',
+    )?.className || "_description_ul5zy_432";
   const badgeCls = sampleBadge?.className || "_container_1o5pg_2";
   const overlay = document.createElement("div");
   overlay.className = descCls;
@@ -12616,6 +12622,132 @@ function setSearchRerankLiveBadge(thumbA, livePv) {
   const timeEl = thumbA.querySelector('span[class*="_time_"]');
   if (timeEl) timeEl.before(overlay);
   else thumbA.appendChild(overlay);
+}
+
+// 검색 카드의 채널명 뒤 인증/업적 배지를 원본과 같은 <i> 구조로 채운다. React가
+// 채널명보다 배지를 늦게 붙이는 경우가 있어, blind+tooltip까지 완성된 원본만 URL별로
+// 캐시한다. 원본을 찾지 못한 배지는 이름/툴팁을 추측해 만들지 않는다.
+const searchRerankAchievementIconTemplates = new Map();
+let searchRerankVerifiedIconTemplate = null;
+let searchRerankIconTemplateRevision = 0;
+
+function getSearchRerankNativeChannelIcons() {
+  return [
+    ...document.querySelectorAll(
+      'a[class*="_channel_"] span[class*="_text_"] ~ i[class*="_icon_"]',
+    ),
+  ].filter((icon) => !icon.closest(".cheese-search-rerank-list"));
+}
+
+function getSearchRerankDirectChild(icon, predicate) {
+  return [...(icon?.children || [])].find(predicate) || null;
+}
+
+function getSearchRerankIconBlind(icon) {
+  return getSearchRerankDirectChild(icon, (child) =>
+    child.classList.contains("blind"),
+  );
+}
+
+function getSearchRerankIconTooltip(icon) {
+  return getSearchRerankDirectChild(
+    icon,
+    (child) =>
+      child.tagName === "SPAN" &&
+      [...child.classList].some((name) => name.includes("_tooltip_")),
+  );
+}
+
+function normalizeSearchRerankBadgeUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^url\((?:["']?)(.*?)(?:["']?)\)$/i);
+  const url = match ? match[1] : raw;
+  try {
+    return new URL(url, location.href).href;
+  } catch {
+    return url;
+  }
+}
+
+function harvestSearchRerankNativeChannelIcons() {
+  let changed = false;
+  for (const icon of getSearchRerankNativeChannelIcons()) {
+    const blind = getSearchRerankIconBlind(icon);
+    const label = blind?.textContent.trim() || "";
+    const backgroundUrl = normalizeSearchRerankBadgeUrl(
+      icon.style.backgroundImage,
+    );
+    if (!backgroundUrl) {
+      if (label === "인증 마크" && !searchRerankVerifiedIconTemplate) {
+        searchRerankVerifiedIconTemplate = icon.cloneNode(true);
+        changed = true;
+      }
+      continue;
+    }
+    // 원본 업적 배지는 blind와 내부 tooltip을 모두 갖는다. 둘 중 하나라도 아직 없으면
+    // React가 완성하기 전이므로 이번 렌더에서는 건너뛰고 다음 DOM 변경 때 다시 수집한다.
+    const tooltip = getSearchRerankIconTooltip(icon);
+    const badgeName = tooltip?.querySelector('span[class*="_badge_name_"]');
+    if (!label || !tooltip || !badgeName) continue;
+    if (!searchRerankAchievementIconTemplates.has(backgroundUrl)) {
+      const template = icon.cloneNode(true);
+      // 툴팁 이름은 원본 i의 blind를 단일 기준으로 맞춘다.
+      template.querySelector('span[class*="_badge_name_"]').textContent = label;
+      searchRerankAchievementIconTemplates.set(backgroundUrl, template);
+      changed = true;
+    }
+  }
+  if (changed) searchRerankIconTemplateRevision++;
+}
+
+function createSearchRerankChannelIcon({ type, url = "" }) {
+  const template =
+    type === "verified"
+      ? searchRerankVerifiedIconTemplate
+      : searchRerankAchievementIconTemplates.get(
+          normalizeSearchRerankBadgeUrl(url),
+        );
+  if (!template) return null;
+  const icon = template.cloneNode(true);
+  icon.classList.add(
+    "cheese-search-rerank-channel-icon",
+    `is-${type}`,
+  );
+  return icon;
+}
+
+function setSearchRerankChannelNameAndBadges(name, channel) {
+  if (!name) return;
+  const iconHost = name.parentElement || name;
+  // li 클론에 남은 템플릿 채널의 배지를 먼저 제거한다. 원본 구조에서 배지는
+  // _text_ span의 자식이 아니라 같은 부모 아래의 다음 형제 <i>다.
+  [...iconHost.children].forEach((child) => {
+    if (
+      child.tagName === "I" &&
+      (child.matches('[class*="_icon_"]') ||
+        child.classList.contains("cheese-search-rerank-channel-icon"))
+    ) {
+      child.remove();
+    }
+  });
+  name.textContent = channel.channelName || "";
+  if (channel.verifiedMark === true) {
+    const verifiedIcon = createSearchRerankChannelIcon({ type: "verified" });
+    if (verifiedIcon) iconHost.appendChild(verifiedIcon);
+  }
+  const badgeIds = Array.isArray(channel.activatedChannelBadgeIds)
+    ? channel.activatedChannelBadgeIds
+    : [];
+  for (const badgeId of badgeIds) {
+    const url = ACHIEVEMENT_BADGE_URL_MAP[badgeId];
+    if (!url) continue;
+    const achievementIcon = createSearchRerankChannelIcon({
+      type: "achievement",
+      url,
+    });
+    if (achievementIcon) iconHost.appendChild(achievementIcon);
+  }
 }
 
 // 네이티브 li 클론에 항목 데이터를 채운다(클래스는 클론이 그대로 보존 → 스타일 동일).
@@ -12657,7 +12789,7 @@ function fillSearchRerankCard(li, item) {
       pimg.src = `${ch.channelImageUrl}${ch.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`;
     }
     const name = chA.querySelector('span[class*="_text_"]');
-    if (name) name.textContent = ch.channelName || "";
+    setSearchRerankChannelNameAndBadges(name, ch);
   }
   const infoDivs = li.querySelectorAll('div[class*="_information_"]');
   const meta = infoDivs[0];
@@ -12762,6 +12894,10 @@ function renderSearchRerank() {
   const listWrap = section.querySelector('div[class*="_wrapper_"]');
   const templateLi = listWrap?.querySelector("ul li");
   if (!listWrap || !templateLi) return; // 네이티브 결과 없음 → 개입 안 함
+  // 네이티브 카드가 가진 완성된 인증/업적 <i>를 먼저 수집한다. 배지가 React에 의해
+  // 늦게 추가되면 전역 DOM 옵저버가 ensureSearchRerank를 다시 호출하고 revision이 올라
+  // 같은 검색 결과라도 배지를 포함해 다시 렌더된다.
+  harvestSearchRerankNativeChannelIcons();
   // 네이티브 더보기 래퍼: '더보기' 텍스트 버튼의 부모 div.
   const nativeMoreBtn = [...section.querySelectorAll("button")].find((b) =>
     b.textContent.includes("더보기"),
@@ -12775,7 +12911,7 @@ function renderSearchRerank() {
 
   const items = sortedSearchRerankItems();
   const visible = Math.min(searchRerankState.visible, items.length);
-  const sig = `${searchRerankState.fetchedFor}|${searchRerankState.sort}|${visible}|${items.length}`;
+  const sig = `${searchRerankState.fetchedFor}|${searchRerankState.sort}|${visible}|${items.length}|icons:${searchRerankIconTemplateRevision}`;
 
   // 정렬 피커 바(제목 아래, 리스트 위). 다시보기/클립 검색과 동일한 커스텀 피커
   // 클래스(.cheese-search-sort-picker/-trigger/-menu — 전역 CSS)를 재사용해 스타일 통일.
@@ -12855,7 +12991,8 @@ function renderSearchRerank() {
       btn.type = "button";
       btn.removeAttribute("aria-haspopup");
       btn.addEventListener("click", () => {
-        const hasMore = searchRerankState.visible < searchRerankState.items.length;
+        const hasMore =
+          searchRerankState.visible < searchRerankState.items.length;
         searchRerankState.visible = hasMore
           ? searchRerankState.visible + SEARCH_RERANK_STEP
           : SEARCH_RERANK_INITIAL;

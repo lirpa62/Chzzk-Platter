@@ -1776,7 +1776,7 @@
       savePool(rerankPoolInput.value),
     );
   }
-  // 추천순 점수 비중(각 0~100, 기본 40/30/15/10/5).
+  // 추천순 점수 비중(각 0~100, 기본 40/30/15/10/5, 모두 0이면 기본값 폴백).
   const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
   const RERANK_WEIGHT_DEFAULTS = {
     rel: 40,
@@ -1797,7 +1797,23 @@
     if (!Number.isFinite(n)) return fallback;
     return Math.min(100, Math.max(0, Math.round(n)));
   }
+  function normalizeRerankWeights(weights) {
+    const out = {};
+    for (const k of Object.keys(RERANK_WEIGHT_DEFAULTS)) {
+      out[k] = clampRerankWeight(weights?.[k], RERANK_WEIGHT_DEFAULTS[k]);
+    }
+    return Object.values(out).every((weight) => weight === 0)
+      ? { ...RERANK_WEIGHT_DEFAULTS }
+      : out;
+  }
   if (Object.values(rerankWeightInputs).some(Boolean)) {
+    const reflectWeights = (weights) => {
+      const normalized = normalizeRerankWeights(weights);
+      for (const [k, input] of Object.entries(rerankWeightInputs)) {
+        if (input) input.value = String(normalized[k]);
+      }
+      return normalized;
+    };
     (async () => {
       let saved = {};
       try {
@@ -1806,27 +1822,29 @@
           saved = d[SEARCH_RERANK_WEIGHTS_KEY];
         }
       } catch {}
-      for (const [k, input] of Object.entries(rerankWeightInputs)) {
-        if (!input) continue;
-        input.value = String(
-          clampRerankWeight(saved[k], RERANK_WEIGHT_DEFAULTS[k]),
-        );
-      }
+      reflectWeights(saved);
     })();
-    const saveWeights = () => {
-      const out = {};
-      for (const [k, input] of Object.entries(rerankWeightInputs)) {
-        out[k] = clampRerankWeight(input?.value, RERANK_WEIGHT_DEFAULTS[k]);
-        if (input) input.value = String(out[k]); // 범위 밖 입력 보정
-      }
+    const saveWeights = (weights = null) => {
+      const raw =
+        weights ||
+        Object.fromEntries(
+          Object.entries(rerankWeightInputs).map(([k, input]) => [
+            k,
+            input?.value,
+          ]),
+        );
+      const out = reflectWeights(raw); // 범위 밖·모두 0 입력 보정
       try {
         cachedStorageSet({ [SEARCH_RERANK_WEIGHTS_KEY]: out });
       } catch {}
     };
     for (const input of Object.values(rerankWeightInputs)) {
-      input?.addEventListener("change", saveWeights);
-      input?.addEventListener("blur", saveWeights);
+      input?.addEventListener("change", () => saveWeights());
+      input?.addEventListener("blur", () => saveWeights());
     }
+    document
+      .querySelector("[data-search-rerank-weights-reset]")
+      ?.addEventListener("click", () => saveWeights(RERANK_WEIGHT_DEFAULTS));
   }
   // 기본 정렬(score|read|pv|recent|original, 기본 score).
   const SEARCH_RERANK_DEFAULT_SORT_KEY = "cheeseSearchRerankDefaultSort";

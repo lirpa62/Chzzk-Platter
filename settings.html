@@ -1293,9 +1293,10 @@
                 <div>
                   <span class="settings-item-name">추천순 점수 비중</span>
                   <span class="settings-item-desc"
-                    >추천순 정렬 점수의 항목별 비중(각 0~100). 기본값은 제목
-                    관련도 40 · 조회수 30 · 라이브 시청자 15 · 파트너 채널 10 ·
-                    최신성 5</span
+                    >추천순 정렬 점수의 항목별 비중(각 0~100). 모든 항목이
+                    0이면 기본값으로 자동 적용됩니다. 기본값: 제목 관련도 40 ·
+                    조회수 30 · 라이브 시청자 15 · 파트너 채널 10 · 최신성
+                    5</span
                   >
                 </div>
                 <div class="settings-custom-row">
@@ -1364,6 +1365,15 @@
                       />
                     </span>
                   </label>
+                </div>
+                <div class="settings-order-actions">
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-search-rerank-weights-reset
+                  >
+                    기본값으로 초기화
+                  </button>
                 </div>
               </li>
               <li class="settings-item settings-item-stacked">
