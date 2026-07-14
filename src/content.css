@@ -528,6 +528,7 @@
   color: var(--Content-Neutral-Warm-Strong);
   font: inherit;
   font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -906,6 +907,7 @@
   border-radius: 8px;
   background: var(--color-bg-01, #fff);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  font-weight: 600;
 }
 
 .cheese-search-duration-menu {
@@ -4236,4 +4238,72 @@ html.cheese-fcln-lock body {
 .cheese-fcln-confirm-ok {
   background: #e0413e;
   color: #fff;
+}
+
+/* ── 통합검색(/search) 동영상 섹션 재랭킹 ─────────────────────────────────────
+   네이티브 리스트/더보기를 숨기고 우리 리스트(네이티브 클래스 클론)를 같은 자리에
+   렌더한다. 바(정렬 셀렉터)는 치지직 톤에 맞춰 절제된 스타일만 부여. */
+.cheese-search-rerank-native-hidden {
+  display: none !important;
+}
+.cheese-search-rerank-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 14px;
+}
+.cheese-search-rerank-label {
+  color: var(--Content-Brand-Base, #168f5c) !important;
+  font-size: 14px !important;
+  font-weight: 700;
+}
+/* 더보기/접기 버튼 화살표: 접기(aria-expanded=true) 상태면 위로 회전(원본과 동일). */
+.cheese-search-rerank-more button svg {
+  transition: transform 0.15s ease;
+}
+.cheese-search-rerank-more button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+/* 재정렬 안내 정보 아이콘 + 호버/포커스 툴팁. */
+.cheese-search-rerank-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--Content-Neutral-Warm-Base, #888);
+  cursor: help;
+}
+.cheese-search-rerank-info:hover,
+.cheese-search-rerank-info:focus-visible {
+  color: var(--Content-Brand-Base, #168f5c);
+}
+.cheese-search-rerank-info-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -8px;
+  z-index: 40;
+  width: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--Border-Neutral-Base, rgba(128, 128, 128, 0.35));
+  border-radius: 8px;
+  background: var(--color-bg-01, #fff);
+  color: var(--Content-Neutral-Warm-Strong, inherit);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  word-break: keep-all;
+}
+.cheese-search-rerank-info:hover .cheese-search-rerank-info-tip,
+.cheese-search-rerank-info:focus-visible .cheese-search-rerank-info-tip {
+  display: block;
 }

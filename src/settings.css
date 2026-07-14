@@ -603,6 +603,7 @@ body {
 .settings-item:has([data-player-button-side]),
 .settings-item:has([data-video-filter-global-default-mode]),
 .settings-item:has([data-player-button-order]),
+.settings-item:has(.settings-custom-row [data-search-rerank-w-rel]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -618,6 +619,7 @@ body {
 }
 
 .settings-item:has(.settings-volume-row),
+.settings-item:has(#searchRerankDefaultSort),
 .settings-item:has(#autoReliveMaxHours),
 .settings-item:has(#rootToFollowingLogoMode) {
   flex-direction: column;
@@ -626,6 +628,10 @@ body {
 .settings-item #autoReliveMaxHours,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;
+}
+
+#searchRerankDefaultSort [data-search-rerank-sort] {
+  justify-content: center;
 }
 
 /* 미리보기 볼륨: 슬라이더 + 숫자 입력을 한 줄에(stacked item 오른쪽 정렬) */

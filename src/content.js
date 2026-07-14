@@ -371,6 +371,49 @@ let autoReloadOnRelive = false;
 // 초기화(기본 OFF). content.js 전용.
 const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
 let searchResetOnReturn = false;
+// 통합검색(/search) 동영상 섹션 재랭킹(전역, 기본 OFF). 치지직 검색 API는 정렬 기준이
+// 모호해(관련도 낮은 저조회 영상이 상위에 옴), 같은 API를 size=50 × 3페이지로 넓게 받아
+// 제목 관련도·조회수·livePv·인증마크·최신성 점수로 재정렬해 보여준다. content.js 전용.
+const SEARCH_RERANK_KEY = "cheeseSearchRerank";
+let searchRerank = false;
+// 재정렬 후보 풀 최대 개수(50~1000, 기본 200). 클수록 관련 영상을 더 잘 찾지만
+// API 호출(50개/페이지)이 늘어 검색 시간이 오래 걸린다.
+const SEARCH_RERANK_POOL_KEY = "cheeseSearchRerankPoolMax";
+let searchRerankPoolMax = 200;
+function normalizeSearchRerankPoolMax(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 200;
+  return Math.min(1000, Math.max(50, Math.round(n)));
+}
+// 추천순 점수 비중(각 0~100). rel=제목 관련도, read=조회수, pv=라이브 시청자,
+// verified=인증 채널, recent=최신성. 기본 40/30/15/10/5.
+const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
+const SEARCH_RERANK_WEIGHTS_DEFAULT = {
+  rel: 40,
+  read: 30,
+  pv: 15,
+  verified: 10,
+  recent: 5,
+};
+let searchRerankWeights = { ...SEARCH_RERANK_WEIGHTS_DEFAULT };
+function normalizeSearchRerankWeights(v) {
+  const out = { ...SEARCH_RERANK_WEIGHTS_DEFAULT };
+  if (v && typeof v === "object") {
+    for (const k of Object.keys(out)) {
+      const n = Number(v[k]);
+      if (Number.isFinite(n)) out[k] = Math.min(100, Math.max(0, Math.round(n)));
+    }
+  }
+  return out;
+}
+// 검색 시 기본 정렬(score|read|pv|recent|original, 기본 score=추천순).
+const SEARCH_RERANK_DEFAULT_SORT_KEY = "cheeseSearchRerankDefaultSort";
+let searchRerankDefaultSort = "score";
+function normalizeSearchRerankSort(v) {
+  return ["score", "read", "pv", "recent", "original"].includes(v)
+    ? v
+    : "score";
+}
 // 종료 화면이 이 시간 이상 지속되면 폴링을 멈춘다(무기한 폴링 방지). 시간(hour) 단위로
 // 저장하며 6/12/24 중 하나. 잘못된 값은 6으로. content.js 전용.
 const AUTO_RELIVE_MAX_HOURS_KEY = "cheeseAutoReliveMaxHours";
@@ -8614,6 +8657,8 @@ function applyChatHideMarkers() {
       aside
         .querySelectorAll("button[class*='_ranking_button_']")
         .forEach((btn) => {
+          // 후원 팝업(dialog) 안의 랭킹 관련 버튼은 제외(팝업 전체가 숨겨지는 것 방지).
+          if (btn.closest('[role="dialog"], [role="alertdialog"]')) return;
           const isLogPower = isLogPowerRankingButton(btn);
           const container = btn.closest("[class*='_container_']");
           if (!container) return;
@@ -8628,6 +8673,11 @@ function applyChatHideMarkers() {
       aside
         .querySelectorAll("button[class*='_mission_button_']")
         .forEach((btn) => {
+          // 미션 후원 팝업(role=dialog/alertdialog) 안에도 '진행 중인 미션 보러 가기'
+          // 버튼(_mission_button_)이 있다. 그 버튼의 조상 컨테이너를 숨기면 후원 팝업
+          // 전체가 사라져 후원이 불가능해진다 → 팝업 내부 버튼은 제외한다. 우리가
+          // 숨기려는 건 채팅창 상단의 상시 '진행 중인 미션' 패널뿐이다.
+          if (btn.closest('[role="dialog"], [role="alertdialog"]')) return;
           btn
             .closest("[class*='_container_']")
             ?.classList.add(CHAT_HIDE_CLASSES.chatHideMission);
@@ -8635,6 +8685,8 @@ function applyChatHideMarkers() {
     }
     if (chatFeatureActive("chatHidePrediction")) {
       aside.querySelectorAll("[class*='_status_']").forEach((status) => {
+        // 후원 팝업(dialog) 안의 요소는 제외(팝업 전체가 숨겨지는 것 방지).
+        if (status.closest('[role="dialog"], [role="alertdialog"]')) return;
         const container = status.closest("[class*='_container_']");
         if (container && container.querySelector("button[class*='_title_']")) {
           container.classList.add(CHAT_HIDE_CLASSES.chatHidePrediction);
@@ -8645,6 +8697,8 @@ function applyChatHideMarkers() {
       // 파티 후원 헤더 고유 아이콘(_icon_party_)에서 그 파티 패널 컨테이너로 올라가
       // 부착한다. 파티 패널과 미션 패널은 _fixed_ 안에서 형제라 미션은 안 숨겨진다.
       aside.querySelectorAll("[class*='_icon_party_']").forEach((icon) => {
+        // 후원 팝업(dialog) 안의 파티 요소는 제외(팝업 전체가 숨겨지는 것 방지).
+        if (icon.closest('[role="dialog"], [role="alertdialog"]')) return;
         icon
           .closest("[class*='_container_']")
           ?.classList.add(CHAT_HIDE_CLASSES.chatHideParty);
@@ -10431,9 +10485,21 @@ function updateChatTweakStyle() {
     html.cheese-chat-hide-subscription aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_subscription_"]) {
       display: none !important;
     }
+    /* 미션 메시지 숨김: 채팅 리스트의 미션 '메시지' 행만 숨긴다. */
     html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
     html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]) {
       display: none !important;
+    }
+    /* 미션 '메시지' 숨김이 미션 '패널'까지 숨기지 않도록 되살린다(실측). 미션 패널 항목의
+       후원자 닉네임 래퍼에도 _is_mission_ 이 있어 위 숨김 규칙에 잡히기 때문이다. 되살릴
+       대상은 두 종류 — (1) 상단/하단 고정 '진행 중인 미션' 패널(_fixed_ 안), (2) 그 패널의
+       '진행 중인 미션'을 클릭하면 뜨는 상세 패널(_area_ 안, 미션 목록). 둘 다 채팅 메시지
+       리스트가 아니라 미션 패널 전용 컨테이너 안에 있어 이 조상으로 구분된다. */
+    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_fixed_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
+    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_fixed_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
+    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_area_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
+    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_area_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]) {
+      display: revert !important;
     }
     html.cheese-chat-left-position aside#aside-chatting,
     html.cheese-chat-left-position aside#vod-aside { order: -1 !important; }
@@ -12362,6 +12428,510 @@ async function loadChannelLiveButton() {
   ensureChannelLiveButton();
 }
 
+// ── 통합검색(/search) 동영상 섹션 재랭킹 ──────────────────────────────────────
+// 치지직 검색 API(service/v1/search/videos)는 정렬 기준이 모호해 관련도 낮은 저조회
+// 영상이 상위에 오고, 인증 채널·고조회 영상이 뒤에 묻힌다. 옵션이 켜져 있으면 같은
+// API를 size=50 × 4페이지로 넓게 받아(중복 videoNo 제거, 최대 200개) 제목 관련도·
+// 조회수·livePv·인증마크·최신성 점수로 재정렬한다.
+//
+// 표시: React가 관리하는 네이티브 리스트를 재정렬하지 않는다(재렌더로 되돌아감 +
+// 충돌). 대신 네이티브 동영상 리스트/더보기를 CSS 로 숨기고, 숨긴 li 를 클론 템플릿
+// 삼아(네이티브 클래스 그대로 → 스타일 동일) 우리 리스트를 같은 자리에 렌더한다.
+// React 재렌더로 우리 노드가 지워지거나 숨김 클래스가 벗겨져도 init tick 의
+// ensureSearchRerank 가 멱등 복구한다.
+const SEARCH_RERANK_HIDDEN_CLASS = "cheese-search-rerank-native-hidden";
+const SEARCH_RERANK_INITIAL = 6; // 처음 표시 개수(네이티브와 동일)
+const SEARCH_RERANK_STEP = 12; // 더보기 1회당 추가 개수
+const searchRerankState = {
+  keyword: "", // 현재 fetch 대상 검색어
+  fetchedFor: "", // fetch 완료된 검색어
+  fetching: false,
+  items: [], // fetch+dedupe 풀(각 항목에 __score/__origIndex 부여)
+  sort: "score", // score(추천) | read(조회수) | recent(최신) | original(원본)
+  visible: SEARCH_RERANK_INITIAL,
+};
+
+// /search 페이지의 검색어(query 파라미터). 아니면 "".
+function getSearchRerankKeyword() {
+  if (location.pathname !== "/search") return "";
+  try {
+    return new URLSearchParams(location.search).get("query")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+// 통합검색 결과에서 '동영상' 섹션(제목 strong 의 조상 section)을 찾는다.
+function findSearchVideoSection() {
+  const titles = document.querySelectorAll(
+    '#layout-body section strong[class*="_title_"]',
+  );
+  for (const t of titles) {
+    if (t.textContent.trim() === "동영상") return t.closest("section");
+  }
+  return null;
+}
+
+// 검색 API 를 size=50 × 최대 4페이지 호출해 풀을 만든다(videoNo 중복 제거).
+async function fetchSearchRerankPool(keyword) {
+  const out = [];
+  const seen = new Set();
+  // 최대 개수는 설정(50~1000, 기본 200). 페이지당 50개씩 필요한 만큼만 호출한다.
+  const poolMax = normalizeSearchRerankPoolMax(searchRerankPoolMax);
+  const maxPages = Math.ceil(poolMax / 50);
+  for (let page = 0; page < maxPages; page++) {
+    if (out.length >= poolMax) break;
+    const res = await fetch(
+      `https://api.chzzk.naver.com/service/v1/search/videos?keyword=${encodeURIComponent(keyword)}&offset=${page * 50}&size=50`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    );
+    if (!res.ok) break;
+    const json = await res.json();
+    const data = json?.content?.data;
+    if (!Array.isArray(data) || !data.length) break;
+    for (const it of data) {
+      const no = it?.video?.videoNo;
+      if (!no || seen.has(no)) continue;
+      seen.add(no);
+      out.push(it);
+    }
+    if (!json?.content?.page?.next) break; // 다음 페이지 없음
+  }
+  return out.slice(0, poolMax);
+}
+
+// 점수: 제목 관련도(40) + 조회수 로그(30) + livePv 로그(15) + 인증마크(10) + 최신성(5).
+// 로그 스케일이라 5,486 vs 79 차이는 크게, 5,486 vs 4,836 차이는 작게 반영된다.
+function scoreSearchRerankItem(item, tokens, phrase) {
+  const v = item?.video || {};
+  const ch = item?.channel || {};
+  const title = String(v.videoTitle || "").toLowerCase();
+  let matched = 0;
+  for (const t of tokens) if (title.includes(t)) matched++;
+  let rel = tokens.length ? matched / tokens.length : 0;
+  if (phrase && title.includes(phrase)) rel += 0.3; // 구문 그대로 포함 보너스
+  const pop = Math.min(1, Math.log10(1 + (Number(v.readCount) || 0)) / 6);
+  const pv = Math.min(1, Math.log10(1 + (Number(v.livePv) || 0)) / 5);
+  const ver = ch.verifiedMark ? 1 : 0;
+  const days = (Date.now() - (Number(v.publishDateAt) || 0)) / 86400000;
+  const rec = Math.max(0, Math.min(1, (30 - days) / 30));
+  // 비중은 설정에서 커스텀 가능(기본 40/30/15/10/5).
+  const w = searchRerankWeights;
+  return w.rel * rel + w.read * pop + w.pv * pv + w.verified * ver + w.recent * rec;
+}
+
+function buildSearchRerankScores(items, keyword) {
+  const norm = keyword.toLowerCase().replace(/\s+/g, " ").trim();
+  const tokens = norm.split(" ").filter(Boolean);
+  items.forEach((it, i) => {
+    it.__origIndex = i;
+    it.__score = scoreSearchRerankItem(it, tokens, norm);
+  });
+}
+
+// 재랭킹 정렬 옵션. score(추천)는 __score(제목 관련도 40 + 조회수 로그 30 +
+// livePv 로그 15 + 인증마크 10 + 최신성 5) 내림차순.
+const SEARCH_RERANK_SORTS = [
+  { value: "score", label: "추천순" },
+  { value: "read", label: "인기순" },
+  { value: "pv", label: "라이브 시청순" },
+  { value: "recent", label: "최신순" },
+  { value: "original", label: "치지직 원본순" },
+];
+
+function sortedSearchRerankItems() {
+  const items = searchRerankState.items.slice();
+  const s = searchRerankState.sort;
+  if (s === "read") {
+    items.sort((a, b) => (b.video?.readCount || 0) - (a.video?.readCount || 0));
+  } else if (s === "pv") {
+    items.sort((a, b) => (b.video?.livePv || 0) - (a.video?.livePv || 0));
+  } else if (s === "recent") {
+    items.sort(
+      (a, b) => (b.video?.publishDateAt || 0) - (a.video?.publishDateAt || 0),
+    );
+  } else if (s === "original") {
+    items.sort((a, b) => a.__origIndex - b.__origIndex);
+  } else {
+    items.sort((a, b) => b.__score - a.__score);
+  }
+  return items;
+}
+
+function formatSearchRerankDuration(sec) {
+  const n = Math.max(0, Math.floor(Number(sec) || 0));
+  const h = Math.floor(n / 3600);
+  const m = Math.floor(n / 60) % 60;
+  const s = n % 60;
+  const p = (x) => String(x).padStart(2, "0");
+  return h ? `${p(h)}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+}
+
+function formatSearchRerankDate(v) {
+  // publishDate "2026-07-12 16:02:42" → "07.12"
+  const m = String(v?.publishDate || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}.${m[2]}` : "";
+}
+
+// 썸네일 오버레이(_description_)의 'N회 시청된 라이브' 배지를 livePv 로 채운다.
+// livePv<=0 이면 오버레이 자체를 제거(업로드 영상 등). thumbA = 썸네일 <a>.
+function setSearchRerankLiveBadge(thumbA, livePv) {
+  const desc = thumbA.querySelector('div[class*="_description_"]');
+  if (livePv <= 0) {
+    desc?.remove();
+    return;
+  }
+  const text = `${formatCompactCount(livePv)}회 시청된 라이브`;
+  if (desc) {
+    // 원본 배지 span(_container_1o5pg_2). '다시보기' em 등 다른 자식은 항목 데이터가
+    // 없으니 제거하고 시청 배지만 남긴다.
+    const badge = desc.querySelector('span[class*="_container_1o5pg_"]');
+    if (badge) {
+      badge.textContent = text;
+      desc.querySelectorAll("em").forEach((el) => el.remove());
+      // 배지 span 만 남기고 나머지 텍스트/노드 정리(중복 방지).
+      [...desc.children].forEach((c) => {
+        if (c !== badge) c.remove();
+      });
+      return;
+    }
+  }
+  // 클론 템플릿에 오버레이가 없었던 카드 → 원본 클래스로 새로 만든다. 페이지 어딘가의
+  // 실제 배지 클래스를 하베스트하고, 못 찾으면 알려진 클래스로 폴백.
+  const sampleBadge = document.querySelector(
+    'div[class*="_description_"] span[class*="_container_1o5pg_"]',
+  );
+  const descCls =
+    document
+      .querySelector('a[class*="_thumbnail_"] div[class*="_description_"]')
+      ?.className || "_description_ul5zy_432";
+  const badgeCls = sampleBadge?.className || "_container_1o5pg_2";
+  const overlay = document.createElement("div");
+  overlay.className = descCls;
+  const span = document.createElement("span");
+  span.className = badgeCls;
+  span.textContent = text;
+  overlay.appendChild(span);
+  // 썸네일 이미지 다음, _time_ 앞에 삽입(원본 순서와 동일).
+  const timeEl = thumbA.querySelector('span[class*="_time_"]');
+  if (timeEl) timeEl.before(overlay);
+  else thumbA.appendChild(overlay);
+}
+
+// 네이티브 li 클론에 항목 데이터를 채운다(클래스는 클론이 그대로 보존 → 스타일 동일).
+function fillSearchRerankCard(li, item) {
+  const v = item?.video || {};
+  const ch = item?.channel || {};
+  const href = `/video/${encodeURIComponent(String(v.videoNo || ""))}`;
+  const thumbA = li.querySelector('a[class*="_thumbnail_"]');
+  if (thumbA) {
+    thumbA.setAttribute("href", href);
+    const img = thumbA.querySelector("img");
+    if (img) {
+      if (v.thumbnailImageUrl) img.src = v.thumbnailImageUrl;
+      else img.removeAttribute("src");
+    }
+    const time = thumbA.querySelector('span[class*="_time_"]');
+    if (time) time.textContent = formatSearchRerankDuration(v.duration);
+    // 썸네일 오버레이(_description_): livePv > 0 이면 'N회 시청된 라이브' 배지를 채우고,
+    // 아니면(업로드 영상 등 livePv 없음) 오버레이를 제거한다. 원본 구조는
+    // _description_ > span._container_1o5pg_2 (배지 텍스트). 클론 템플릿이 어떤 카드였든
+    // (배지 유무·다시보기 em 유무) 이 규칙으로 통일한다.
+    setSearchRerankLiveBadge(thumbA, Number(v.livePv) || 0);
+    const blind = thumbA.querySelector("span.blind");
+    if (blind) blind.textContent = `${ch.channelName || ""}동영상 엔드로 이동`;
+  }
+  const titleA = li.querySelector('a[class*="_title_"]');
+  if (titleA) {
+    titleA.setAttribute("href", href);
+    titleA.innerHTML = `${escapeHtml(String(v.videoTitle || "").trim())}<span class="blind">동영상 엔드로 이동</span>`;
+  }
+  const chA = li.querySelector('a[class*="_channel_"]');
+  if (chA) {
+    chA.setAttribute(
+      "href",
+      `/${encodeURIComponent(String(ch.channelId || ""))}`,
+    );
+    const pimg = chA.querySelector("img");
+    if (pimg && ch.channelImageUrl) {
+      pimg.src = `${ch.channelImageUrl}${ch.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`;
+    }
+    const name = chA.querySelector('span[class*="_text_"]');
+    if (name) name.textContent = ch.channelName || "";
+  }
+  const infoDivs = li.querySelectorAll('div[class*="_information_"]');
+  const meta = infoDivs[0];
+  if (meta) {
+    const spans = meta.querySelectorAll('span[class*="_item_"]');
+    if (spans[0]) {
+      // 조회수: svg·blind 는 유지하고 숫자 텍스트 노드만 교체.
+      [...spans[0].childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .forEach((n) => n.remove());
+      spans[0].appendChild(
+        document.createTextNode(
+          (Number(v.readCount) || 0).toLocaleString("ko-KR"),
+        ),
+      );
+    }
+    if (spans[1]) spans[1].textContent = formatSearchRerankDate(v);
+  }
+  // 카테고리/태그 줄: 템플릿 클래스를 하베스트해 항목 데이터로 재구성.
+  const linkDiv = infoDivs[1];
+  if (linkDiv) {
+    const aCls = linkDiv.querySelector("a")?.className || "";
+    const spanEls = linkDiv.querySelectorAll("a > span");
+    let catCls = "";
+    let tagCls = "";
+    for (const s of spanEls) {
+      if (/_tag_/.test(s.className)) tagCls = tagCls || s.className;
+      else catCls = catCls || s.className;
+    }
+    if (!tagCls) tagCls = catCls;
+    linkDiv.textContent = "";
+    if (v.videoCategoryValue && v.videoCategory && catCls) {
+      linkDiv.insertAdjacentHTML(
+        "beforeend",
+        `<a class="${escapeAttribute(aCls)}" href="/category/${encodeURIComponent(String(v.categoryType || "ETC"))}/${encodeURIComponent(String(v.videoCategory))}/videos"><span class="${escapeAttribute(catCls)}">${escapeHtml(String(v.videoCategoryValue))}</span></a>`,
+      );
+    }
+    for (const tag of (Array.isArray(v.tags) ? v.tags : []).slice(0, 5)) {
+      if (!tagCls) break;
+      linkDiv.insertAdjacentHTML(
+        "beforeend",
+        `<a href="/videos?tags=${encodeURIComponent(String(tag))}"><span class="${escapeAttribute(tagCls)}">${escapeHtml(String(tag))}</span></a>`,
+      );
+    }
+  }
+}
+
+// 우리 리스트/컨트롤을 제거하고 네이티브를 원복한다.
+function cleanupSearchRerank() {
+  document
+    .querySelectorAll(
+      ".cheese-search-rerank-list, .cheese-search-rerank-bar, .cheese-search-rerank-more",
+    )
+    .forEach((el) => el.remove());
+  document
+    .querySelectorAll(`.${SEARCH_RERANK_HIDDEN_CLASS}`)
+    .forEach((el) => el.classList.remove(SEARCH_RERANK_HIDDEN_CLASS));
+  searchRerankState.fetchedFor = "";
+  searchRerankState.keyword = "";
+  searchRerankState.items = [];
+  searchRerankState.visible = SEARCH_RERANK_INITIAL;
+}
+
+// 피커 라벨/선택 표시를 현재 정렬 값으로 동기화.
+function updateSearchRerankPicker(bar) {
+  const cur =
+    SEARCH_RERANK_SORTS.find((o) => o.value === searchRerankState.sort) ||
+    SEARCH_RERANK_SORTS[0];
+  const label = bar.querySelector("[data-rerank-sort-label]");
+  if (label) label.textContent = cur.label;
+  bar.querySelectorAll("[data-rerank-sort]").forEach((opt) => {
+    opt.setAttribute(
+      "aria-selected",
+      String(opt.dataset.rerankSort === cur.value),
+    );
+  });
+}
+
+// 피커 밖 클릭 시 메뉴 닫기(문서 위임, 1회 등록).
+let searchRerankPickerCloseBound = false;
+function bindSearchRerankPickerClose() {
+  if (searchRerankPickerCloseBound) return;
+  searchRerankPickerCloseBound = true;
+  document.addEventListener("click", (e) => {
+    const menu = document.querySelector(
+      ".cheese-search-rerank-bar .cheese-search-sort-menu:not([hidden])",
+    );
+    if (!menu) return;
+    if (e.target.closest?.("[data-rerank-sort-picker]")) return; // 피커 내부 클릭
+    menu.hidden = true;
+    menu
+      .closest("[data-rerank-sort-picker]")
+      ?.querySelector(".cheese-search-sort-trigger")
+      ?.setAttribute("aria-expanded", "false");
+  });
+}
+
+// 렌더(멱등): 네이티브 리스트/더보기 숨김 + 우리 바/리스트/더보기 보장.
+function renderSearchRerank() {
+  const section = findSearchVideoSection();
+  if (!section) return;
+  const listWrap = section.querySelector('div[class*="_wrapper_"]');
+  const templateLi = listWrap?.querySelector("ul li");
+  if (!listWrap || !templateLi) return; // 네이티브 결과 없음 → 개입 안 함
+  // 네이티브 더보기 래퍼: '더보기' 텍스트 버튼의 부모 div.
+  const nativeMoreBtn = [...section.querySelectorAll("button")].find((b) =>
+    b.textContent.includes("더보기"),
+  );
+  const nativeMoreWrap =
+    nativeMoreBtn && !nativeMoreBtn.closest(".cheese-search-rerank-more")
+      ? nativeMoreBtn.parentElement
+      : null;
+  listWrap.classList.add(SEARCH_RERANK_HIDDEN_CLASS);
+  nativeMoreWrap?.classList.add(SEARCH_RERANK_HIDDEN_CLASS);
+
+  const items = sortedSearchRerankItems();
+  const visible = Math.min(searchRerankState.visible, items.length);
+  const sig = `${searchRerankState.fetchedFor}|${searchRerankState.sort}|${visible}|${items.length}`;
+
+  // 정렬 피커 바(제목 아래, 리스트 위). 다시보기/클립 검색과 동일한 커스텀 피커
+  // 클래스(.cheese-search-sort-picker/-trigger/-menu — 전역 CSS)를 재사용해 스타일 통일.
+  let bar = section.querySelector(".cheese-search-rerank-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "cheese-search-rerank-bar";
+    bar.innerHTML =
+      `<span class="cheese-search-rerank-label _title_51mq8_11">치즈 플래터 재정렬</span>` +
+      `<div class="cheese-search-sort-picker" data-rerank-sort-picker>` +
+      `<button type="button" class="cheese-search-control cheese-search-sort-trigger" aria-haspopup="listbox" aria-expanded="false"><span data-rerank-sort-label></span></button>` +
+      `<div class="cheese-search-sort-menu" role="listbox" aria-label="동영상 정렬 선택" hidden>` +
+      SEARCH_RERANK_SORTS.map(
+        (o) =>
+          `<button type="button" role="option" aria-selected="false" data-rerank-sort="${o.value}">${o.label}</button>`,
+      ).join("") +
+      `</div></div>` +
+      // 재정렬 최대 개수 트레이드오프 안내(호버/포커스 시 툴팁).
+      `<button type="button" class="cheese-search-rerank-info" aria-label="재정렬 안내">` +
+      `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M7 6.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="3.9" r="0.9" fill="currentColor"/></svg>` +
+      `<span class="cheese-search-rerank-info-tip" role="tooltip">재정렬 최대 개수(설정에서 50~1,000개 조절)를 늘리면 간단한 검색어로도 관련 영상을 찾을 확률이 높아지지만 검색 시간이 오래 걸립니다. 줄이면 검색은 빨라지지만 간단한 검색어로는 관련 영상을 놓칠 수 있어 좀 더 상세한 검색어가 필요할 수 있습니다.</span>` +
+      `</button>`;
+    const trigger = bar.querySelector(".cheese-search-sort-trigger");
+    const menu = bar.querySelector(".cheese-search-sort-menu");
+    trigger.addEventListener("click", () => {
+      const open = menu.hidden;
+      menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+    });
+    menu.addEventListener("click", (e) => {
+      const opt = e.target.closest("[data-rerank-sort]");
+      if (!opt) return;
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      searchRerankState.sort = opt.dataset.rerankSort;
+      searchRerankState.visible = SEARCH_RERANK_INITIAL;
+      renderSearchRerank();
+    });
+    listWrap.before(bar);
+    bindSearchRerankPickerClose();
+  }
+  updateSearchRerankPicker(bar);
+
+  // 우리 리스트(네이티브 ul 클래스 재사용). 시그니처 동일하면 재렌더 생략(멱등).
+  let ourList = section.querySelector("ul.cheese-search-rerank-list");
+  if (ourList && ourList.dataset.sig === sig) return;
+  if (!ourList) {
+    ourList = document.createElement("ul");
+    ourList.className = `${listWrap.querySelector("ul")?.className || ""} cheese-search-rerank-list`;
+    listWrap.after(ourList);
+  }
+  ourList.dataset.sig = sig;
+  ourList.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const item of items.slice(0, visible)) {
+    const li = templateLi.cloneNode(true);
+    fillSearchRerankCard(li, item);
+    frag.appendChild(li);
+  }
+  ourList.appendChild(frag);
+
+  // 더보기/접기 버튼. 네이티브 버튼을 클론해(svg 화살표·클래스 그대로) 스타일 통일.
+  // - 남은 항목 있음 → '더보기'(aria-expanded=false), 클릭 시 STEP 만큼 더 표시.
+  // - 다 펼쳐짐(항목이 INITIAL 초과) → '접기'(aria-expanded=true), 클릭 시 INITIAL 로 축소.
+  //   원본과 동일하게 svg 화살표는 aria-expanded 로 회전(CSS 로 보정).
+  // - 항목이 INITIAL 이하(더보기 자체가 불필요) → 버튼 없음.
+  let moreWrap = section.querySelector(".cheese-search-rerank-more");
+  const expandable = items.length > SEARCH_RERANK_INITIAL;
+  if (expandable) {
+    if (!moreWrap) {
+      moreWrap = document.createElement("div");
+      moreWrap.className = `${nativeMoreWrap?.className?.replace(SEARCH_RERANK_HIDDEN_CLASS, "").trim() || "_container_k1gn9_1"} cheese-search-rerank-more`;
+      // 네이티브 버튼을 클론해 svg 등 내부 구조를 그대로 가져온다(없으면 빈 버튼).
+      const btn = nativeMoreBtn
+        ? nativeMoreBtn.cloneNode(true)
+        : document.createElement("button");
+      btn.type = "button";
+      btn.removeAttribute("aria-haspopup");
+      btn.addEventListener("click", () => {
+        const hasMore = searchRerankState.visible < searchRerankState.items.length;
+        searchRerankState.visible = hasMore
+          ? searchRerankState.visible + SEARCH_RERANK_STEP
+          : SEARCH_RERANK_INITIAL;
+        renderSearchRerank();
+        // 접기 시 리스트 상단이 화면 밖이면 재정렬 바로 스크롤(원본 UX와 유사).
+        if (!hasMore) {
+          section
+            .querySelector(".cheese-search-rerank-bar")
+            ?.scrollIntoView({ block: "nearest" });
+        }
+      });
+      moreWrap.appendChild(btn);
+      ourList.after(moreWrap);
+    }
+    const btn = moreWrap.querySelector("button");
+    if (btn) {
+      const collapsed = visible >= items.length; // 다 펼쳐진 상태
+      btn.setAttribute("aria-expanded", String(collapsed));
+      // blind span + svg 는 유지하고, 사이의 텍스트 노드(라벨)만 교체.
+      [...btn.childNodes]
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .forEach((n) => n.remove());
+      const svg = btn.querySelector("svg");
+      // 더보기 상태면 라벨 뒤(svg 앞)에 남은 개수를 함께 표시. 접기 상태는 '접기'만.
+      const remaining = items.length - visible;
+      const labelText = collapsed ? "접기" : `더보기 (${remaining}개)`;
+      if (svg) btn.insertBefore(document.createTextNode(labelText), svg);
+      else btn.appendChild(document.createTextNode(labelText));
+    }
+  } else {
+    moreWrap?.remove();
+  }
+}
+
+// init tick 마다 호출되는 멱등 보장 함수. 옵션 off/검색 페이지 아님 → 원복.
+function ensureSearchRerank() {
+  const keyword = searchRerank ? getSearchRerankKeyword() : "";
+  if (!keyword || !findSearchVideoSection()) {
+    if (
+      document.querySelector(".cheese-search-rerank-list") ||
+      document.querySelector(`.${SEARCH_RERANK_HIDDEN_CLASS}`)
+    ) {
+      cleanupSearchRerank();
+    }
+    return;
+  }
+  if (searchRerankState.fetchedFor === keyword) {
+    renderSearchRerank(); // React 재렌더로 지워졌으면 복구(시그니처로 멱등)
+    return;
+  }
+  if (searchRerankState.fetching && searchRerankState.keyword === keyword) {
+    return; // 같은 검색어 fetch 진행 중
+  }
+  // 새 검색어 → 이전 렌더 정리 후 fetch.
+  cleanupSearchRerank();
+  searchRerankState.keyword = keyword;
+  searchRerankState.fetching = true;
+  fetchSearchRerankPool(keyword)
+    .then((items) => {
+      searchRerankState.fetching = false;
+      if (searchRerankState.keyword !== keyword) return; // 그새 검색어 변경
+      if (!items.length) return; // 결과 없음 → 네이티브 그대로
+      buildSearchRerankScores(items, keyword);
+      searchRerankState.items = items;
+      searchRerankState.fetchedFor = keyword;
+      searchRerankState.sort = normalizeSearchRerankSort(
+        searchRerankDefaultSort,
+      );
+      searchRerankState.visible = SEARCH_RERANK_INITIAL;
+      renderSearchRerank();
+    })
+    .catch(() => {
+      searchRerankState.fetching = false;
+    });
+}
+
 // ── 사이드바 팔로잉 채널 호버 라이브 영상 미리보기 ─────────────────────────────
 // 라이브 중인 팔로잉 채널 li에 호버하면 치지직 툴팁 위치에 음소거 라이브 영상을
 // 띄운다. live-detail API의 livePlaybackJson에서 HLS m3u8을 받아 네이티브 우선,
@@ -12454,7 +13024,8 @@ function onFollowOpenNewTabClick(e) {
   // 시청 중일 때만 — /live/ 페이지가 아니면 기존 SPA 이동 유지.
   if (!location.pathname.startsWith("/live/")) return;
   // 좌클릭(주 버튼)만. 보조/휠 클릭·수식키(새 탭·다운로드 등)는 브라우저 기본에 맡김.
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)
+    return;
   const channelId = getFollowNavClickChannelId(e.target);
   if (!channelId) return;
   e.preventDefault();
@@ -14987,6 +15558,10 @@ const FEATURE_FLAGS_KEYS = [
   AUTO_RELOAD_ON_ERROR_KEY,
   AUTO_RELOAD_ON_RELIVE_KEY,
   SEARCH_RESET_ON_RETURN_KEY,
+  SEARCH_RERANK_KEY,
+  SEARCH_RERANK_POOL_KEY,
+  SEARCH_RERANK_WEIGHTS_KEY,
+  SEARCH_RERANK_DEFAULT_SORT_KEY,
   AUTO_RELIVE_MAX_HOURS_KEY,
   ROOT_TO_FOLLOWING_KEY,
   ROOT_TO_FOLLOWING_LOGO_KEY,
@@ -15079,6 +15654,16 @@ async function loadFeatureFlags() {
     autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
     autoReloadOnRelive = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true; // 기본 OFF
     searchResetOnReturn = data?.[SEARCH_RESET_ON_RETURN_KEY] === true; // 기본 OFF
+    searchRerank = data?.[SEARCH_RERANK_KEY] === true; // 기본 OFF
+    searchRerankPoolMax = normalizeSearchRerankPoolMax(
+      data?.[SEARCH_RERANK_POOL_KEY],
+    );
+    searchRerankWeights = normalizeSearchRerankWeights(
+      data?.[SEARCH_RERANK_WEIGHTS_KEY],
+    );
+    searchRerankDefaultSort = normalizeSearchRerankSort(
+      data?.[SEARCH_RERANK_DEFAULT_SORT_KEY],
+    );
     autoReliveMaxHours = normalizeAutoReliveMaxHours(
       data?.[AUTO_RELIVE_MAX_HOURS_KEY],
     );
@@ -15180,7 +15765,44 @@ if (chrome.storage?.onChanged) {
       applyAutoReloadOnRelive(); // 즉시 반영(켜면 감시 시작, 끄면 중지)
     }
     if (changes[SEARCH_RESET_ON_RETURN_KEY]) {
-      searchResetOnReturn = changes[SEARCH_RESET_ON_RETURN_KEY].newValue === true;
+      searchResetOnReturn =
+        changes[SEARCH_RESET_ON_RETURN_KEY].newValue === true;
+    }
+    if (changes[SEARCH_RERANK_KEY]) {
+      searchRerank = changes[SEARCH_RERANK_KEY].newValue === true;
+      ensureSearchRerank(); // 끄면 즉시 원복, 켜면 즉시 적용
+    }
+    if (changes[SEARCH_RERANK_POOL_KEY]) {
+      searchRerankPoolMax = normalizeSearchRerankPoolMax(
+        changes[SEARCH_RERANK_POOL_KEY].newValue,
+      );
+      // 검색 페이지에 결과가 떠 있으면 새 풀 크기로 다시 받아 재정렬.
+      if (searchRerank && searchRerankState.fetchedFor) {
+        searchRerankState.fetchedFor = "";
+        ensureSearchRerank();
+      }
+    }
+    if (changes[SEARCH_RERANK_WEIGHTS_KEY]) {
+      searchRerankWeights = normalizeSearchRerankWeights(
+        changes[SEARCH_RERANK_WEIGHTS_KEY].newValue,
+      );
+      // 이미 받아둔 풀이 있으면 새 비중으로 점수만 재계산해 즉시 재정렬.
+      if (searchRerank && searchRerankState.items.length) {
+        buildSearchRerankScores(
+          searchRerankState.items,
+          searchRerankState.fetchedFor || searchRerankState.keyword,
+        );
+        document
+          .querySelector("ul.cheese-search-rerank-list")
+          ?.removeAttribute("data-sig"); // 시그니처 무효화(비중은 sig에 없음)
+        renderSearchRerank();
+      }
+    }
+    if (changes[SEARCH_RERANK_DEFAULT_SORT_KEY]) {
+      searchRerankDefaultSort = normalizeSearchRerankSort(
+        changes[SEARCH_RERANK_DEFAULT_SORT_KEY].newValue,
+      );
+      // 기본 정렬은 다음 검색부터 적용(현재 화면의 수동 선택은 존중).
     }
     if (changes[AUTO_RELIVE_MAX_HOURS_KEY]) {
       autoReliveMaxHours = normalizeAutoReliveMaxHours(
@@ -15538,6 +16160,7 @@ function init() {
   applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
   ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
   ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
+  ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
   applyChatFoldPersist(); // 채팅창 접힘 상태 유지(옵션 시, 라이브 진입 1회 복원)
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)

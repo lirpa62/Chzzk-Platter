@@ -72,6 +72,10 @@
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
+    "cheeseSearchRerank",
+    "cheeseSearchRerankPoolMax",
+    "cheeseSearchRerankWeights",
+    "cheeseSearchRerankDefaultSort",
     "cheeseSearchResetOnReturn",
     "cheeseSeekStepS",
     "cheeseSubscribeBadgeProgress",
@@ -1706,6 +1710,157 @@
     };
     seekStepInput.addEventListener("change", save);
     seekStepInput.addEventListener("blur", save);
+  }
+
+  // ── 통합검색 동영상 재정렬(전역, 기본 OFF) ────────────────────────────────
+  const SEARCH_RERANK_KEY = "cheeseSearchRerank";
+  const searchRerankInput = document.querySelector("[data-search-rerank]");
+  if (searchRerankInput) {
+    (async () => {
+      let on = false; // 기본 꺼짐
+      try {
+        const d = await cachedStorageGet(SEARCH_RERANK_KEY);
+        on = d?.[SEARCH_RERANK_KEY] === true;
+      } catch {}
+      searchRerankInput.checked = on;
+    })();
+    searchRerankInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [SEARCH_RERANK_KEY]: searchRerankInput.checked });
+      } catch {}
+    });
+  }
+  // 재정렬 최대 개수(50~1000, 기본 200): 슬라이더 + 숫자 입력 동기화.
+  const SEARCH_RERANK_POOL_KEY = "cheeseSearchRerankPoolMax";
+  const rerankPoolSlider = document.querySelector(
+    "[data-search-rerank-pool-slider]",
+  );
+  const rerankPoolInput = document.querySelector("[data-search-rerank-pool]");
+  function clampRerankPool(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 200;
+    return Math.min(1000, Math.max(50, Math.round(n)));
+  }
+  if (rerankPoolSlider || rerankPoolInput) {
+    const reflectPool = (v) => {
+      const n = clampRerankPool(v);
+      if (rerankPoolSlider) rerankPoolSlider.value = String(n);
+      if (rerankPoolInput) rerankPoolInput.value = String(n);
+      return n;
+    };
+    (async () => {
+      let v = 200;
+      try {
+        const d = await cachedStorageGet(SEARCH_RERANK_POOL_KEY);
+        v = clampRerankPool(d?.[SEARCH_RERANK_POOL_KEY] ?? 200);
+      } catch {}
+      reflectPool(v);
+    })();
+    const savePool = (v) => {
+      const n = reflectPool(v);
+      try {
+        cachedStorageSet({ [SEARCH_RERANK_POOL_KEY]: n });
+      } catch {}
+    };
+    rerankPoolSlider?.addEventListener("input", () => {
+      // 드래그 중엔 숫자만 따라가고, 놓을 때(change) 저장.
+      if (rerankPoolInput) rerankPoolInput.value = rerankPoolSlider.value;
+    });
+    rerankPoolSlider?.addEventListener("change", () =>
+      savePool(rerankPoolSlider.value),
+    );
+    rerankPoolInput?.addEventListener("change", () =>
+      savePool(rerankPoolInput.value),
+    );
+    rerankPoolInput?.addEventListener("blur", () =>
+      savePool(rerankPoolInput.value),
+    );
+  }
+  // 추천순 점수 비중(각 0~100, 기본 40/30/15/10/5).
+  const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
+  const RERANK_WEIGHT_DEFAULTS = {
+    rel: 40,
+    read: 30,
+    pv: 15,
+    verified: 10,
+    recent: 5,
+  };
+  const rerankWeightInputs = {
+    rel: document.querySelector("[data-search-rerank-w-rel]"),
+    read: document.querySelector("[data-search-rerank-w-read]"),
+    pv: document.querySelector("[data-search-rerank-w-pv]"),
+    verified: document.querySelector("[data-search-rerank-w-verified]"),
+    recent: document.querySelector("[data-search-rerank-w-recent]"),
+  };
+  function clampRerankWeight(v, fallback) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(100, Math.max(0, Math.round(n)));
+  }
+  if (Object.values(rerankWeightInputs).some(Boolean)) {
+    (async () => {
+      let saved = {};
+      try {
+        const d = await cachedStorageGet(SEARCH_RERANK_WEIGHTS_KEY);
+        if (d?.[SEARCH_RERANK_WEIGHTS_KEY] && typeof d[SEARCH_RERANK_WEIGHTS_KEY] === "object") {
+          saved = d[SEARCH_RERANK_WEIGHTS_KEY];
+        }
+      } catch {}
+      for (const [k, input] of Object.entries(rerankWeightInputs)) {
+        if (!input) continue;
+        input.value = String(
+          clampRerankWeight(saved[k], RERANK_WEIGHT_DEFAULTS[k]),
+        );
+      }
+    })();
+    const saveWeights = () => {
+      const out = {};
+      for (const [k, input] of Object.entries(rerankWeightInputs)) {
+        out[k] = clampRerankWeight(input?.value, RERANK_WEIGHT_DEFAULTS[k]);
+        if (input) input.value = String(out[k]); // 범위 밖 입력 보정
+      }
+      try {
+        cachedStorageSet({ [SEARCH_RERANK_WEIGHTS_KEY]: out });
+      } catch {}
+    };
+    for (const input of Object.values(rerankWeightInputs)) {
+      input?.addEventListener("change", saveWeights);
+      input?.addEventListener("blur", saveWeights);
+    }
+  }
+  // 기본 정렬(score|read|pv|recent|original, 기본 score).
+  const SEARCH_RERANK_DEFAULT_SORT_KEY = "cheeseSearchRerankDefaultSort";
+  const rerankSortButtons = Array.from(
+    document.querySelectorAll("[data-search-rerank-sort]"),
+  );
+  if (rerankSortButtons.length) {
+    const reflectSort = (value) => {
+      rerankSortButtons.forEach((btn) => {
+        const active = btn.dataset.searchRerankSort === value;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    };
+    (async () => {
+      let v = "score";
+      try {
+        const d = await cachedStorageGet(SEARCH_RERANK_DEFAULT_SORT_KEY);
+        const saved = d?.[SEARCH_RERANK_DEFAULT_SORT_KEY];
+        if (["score", "read", "pv", "recent", "original"].includes(saved)) {
+          v = saved;
+        }
+      } catch {}
+      reflectSort(v);
+    })();
+    rerankSortButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const v = btn.dataset.searchRerankSort;
+        reflectSort(v);
+        try {
+          cachedStorageSet({ [SEARCH_RERANK_DEFAULT_SORT_KEY]: v });
+        } catch {}
+      });
+    });
   }
 
   // ── 탭 복귀 시 검색 자동 초기화(전역, 기본 OFF) ───────────────────────────

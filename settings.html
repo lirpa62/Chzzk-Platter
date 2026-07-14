@@ -1242,6 +1242,187 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">통합검색 동영상 재정렬</span>
+                  <span class="settings-item-desc"
+                    >통합검색(/search)의 동영상 결과를 더 넓게 받아(아래 최대
+                    개수만큼) 제목 관련도·조회수·라이브 시청자·파트너 채널
+                    기준으로 재정렬합니다. 결과 상단 피커로 추천순·인기순·라이브
+                    시청순·최신순·치지직 원본순 전환 가능(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-search-rerank />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">재정렬 최대 개수</span>
+                  <span class="settings-item-desc"
+                    >재정렬 후보로 가져올 최대 동영상 수(50~1,000, 기본 200).
+                    값이 크면 간단한 검색어로도 관련 영상을 찾을 확률이
+                    높아지지만 검색 시간이 오래 걸릴 수 있습니다</span
+                  >
+                </div>
+                <div class="settings-volume-row">
+                  <input
+                    type="range"
+                    min="50"
+                    max="1000"
+                    step="50"
+                    class="settings-volume-slider"
+                    data-search-rerank-pool-slider
+                    aria-label="재정렬 최대 개수 슬라이더"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="50"
+                      max="1000"
+                      step="50"
+                      inputmode="numeric"
+                      data-search-rerank-pool
+                      aria-label="재정렬 최대 개수"
+                    />
+                    <small>개</small>
+                  </span>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">추천순 점수 비중</span>
+                  <span class="settings-item-desc"
+                    >추천순 정렬 점수의 항목별 비중(각 0~100). 기본값은 제목
+                    관련도 40 · 조회수 30 · 라이브 시청자 15 · 파트너 채널 10 ·
+                    최신성 5</span
+                  >
+                </div>
+                <div class="settings-custom-row">
+                  <label class="settings-custom-field">
+                    <span>제목 관련도</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-rel
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>조회수</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-read
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>라이브 시청자</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-pv
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>파트너 채널</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-verified
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>최신성</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-recent
+                      />
+                    </span>
+                  </label>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">기본 정렬</span>
+                  <span class="settings-item-desc"
+                    >검색 시 처음 적용할 정렬(기본 추천순). 결과 화면의 정렬
+                    피커로 언제든 바꿀 수 있습니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-5"
+                  id="searchRerankDefaultSort"
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-search-rerank-sort="score"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    추천순
+                  </button>
+                  <button
+                    type="button"
+                    data-search-rerank-sort="read"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    인기순
+                  </button>
+                  <button
+                    type="button"
+                    data-search-rerank-sort="pv"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    라이브 시청순
+                  </button>
+                  <button
+                    type="button"
+                    data-search-rerank-sort="recent"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    최신순
+                  </button>
+                  <button
+                    type="button"
+                    data-search-rerank-sort="original"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    원본순
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name"
                     >탭 복귀 시 검색 자동 초기화</span
                   >
