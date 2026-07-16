@@ -90,6 +90,8 @@
     "cheeseVolumePct",
     "cheeseWheelVolume",
     "cheeseWheelVolumeStep",
+    "cheeseCommentTimestampClickAction",
+    "cheeseCommentTimestampClickDelay",
     "cheeseGainPct",
     "cheeseWideScreenAuto",
     "audioMixer:presets",
@@ -2608,6 +2610,74 @@
     });
   });
   loadReliveHours();
+
+  // ── 댓글 타임스탬프 클릭 시 팝오버 동작(닫기/유지/지연, 기본 닫기) ──────────
+  const COMMENT_TS_CLICK_ACTION_KEY = "cheeseCommentTimestampClickAction";
+  const COMMENT_TS_CLICK_DELAY_KEY = "cheeseCommentTimestampClickDelay";
+  const COMMENT_TS_CLICK_ACTIONS = ["close", "keep", "delay"];
+  const COMMENT_TS_CLICK_DELAY_DEFAULT = 4;
+  const commentTsClickButtons = Array.from(
+    document.querySelectorAll("[data-comment-ts-click]"),
+  );
+  const commentTsDelayRow = document.querySelector(
+    "[data-comment-ts-delay-row]",
+  );
+  const commentTsDelayInput = document.querySelector(
+    "[data-comment-ts-click-delay]",
+  );
+  function clampCommentTsDelay(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return COMMENT_TS_CLICK_DELAY_DEFAULT;
+    return Math.min(10, Math.max(1, Math.round(n)));
+  }
+  function reflectCommentTsClick(action) {
+    const v = COMMENT_TS_CLICK_ACTIONS.includes(action) ? action : "close";
+    commentTsClickButtons.forEach((btn) => {
+      const active = btn.dataset.commentTsClick === v;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    // '지연 닫기'일 때만 지연 시간 입력 행을 보인다.
+    if (commentTsDelayRow) commentTsDelayRow.hidden = v !== "delay";
+  }
+  async function loadCommentTsClick() {
+    let action = "close";
+    let delay = COMMENT_TS_CLICK_DELAY_DEFAULT;
+    try {
+      const data = await cachedStorageGet([
+        COMMENT_TS_CLICK_ACTION_KEY,
+        COMMENT_TS_CLICK_DELAY_KEY,
+      ]);
+      const a = data?.[COMMENT_TS_CLICK_ACTION_KEY];
+      if (COMMENT_TS_CLICK_ACTIONS.includes(a)) action = a;
+      if (data?.[COMMENT_TS_CLICK_DELAY_KEY] !== undefined) {
+        delay = clampCommentTsDelay(data[COMMENT_TS_CLICK_DELAY_KEY]);
+      }
+    } catch {}
+    reflectCommentTsClick(action);
+    if (commentTsDelayInput) commentTsDelayInput.value = String(delay);
+  }
+  commentTsClickButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.commentTsClick;
+      reflectCommentTsClick(action);
+      try {
+        cachedStorageSet({ [COMMENT_TS_CLICK_ACTION_KEY]: action });
+      } catch {}
+    });
+  });
+  if (commentTsDelayInput) {
+    const save = () => {
+      const v = clampCommentTsDelay(commentTsDelayInput.value);
+      commentTsDelayInput.value = String(v); // 범위 밖 입력 보정
+      try {
+        cachedStorageSet({ [COMMENT_TS_CLICK_DELAY_KEY]: v });
+      } catch {}
+    };
+    commentTsDelayInput.addEventListener("change", save);
+    commentTsDelayInput.addEventListener("blur", save);
+  }
+  loadCommentTsClick();
 
   // ── 메인 진입 시 팔로우로 이동(기본 OFF) ──────────────────────────────────
   const ROOT_TO_FOLLOWING_KEY = "cheeseRootToFollowing";

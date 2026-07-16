@@ -2087,15 +2087,19 @@
     if (!wrap) {
       wrap = createButtonControl();
     }
-    // native 볼륨 컨트롤(우리 것이 아닌) 뒤에 둔다.
+    // 이미 이 좌측 그룹 안에 있으면 위치를 강제하지 않는다. ⚠ 예전엔 '네이티브 볼륨
+    // 바로 뒤' 불변식을 매 tick 강제했는데, 사용자가 볼륨과 믹서 사이에 되감기/앞으로를
+    // 끼워 배치하면 arrangePlayerButtons(seek 을 볼륨 뒤로)와 여기(믹서를 볼륨 바로 뒤로)가
+    // 서로 상대를 밀어내 무한 재삽입 → 호버 시 깜빡임·클릭 불가가 됐다. 믹서는 '존재'만
+    // 보장하고, 그룹 내 상대 순서는 arrangePlayerButtons 의 앵커 체계에 맡긴다.
+    if (wrap.parentElement === controls) return;
+    // 최초 삽입 위치: 네이티브 볼륨(우리 것이 아닌) 바로 뒤. 없으면 그룹 맨 앞.
     const nativeVolume = Array.from(
       controls.querySelectorAll(".pzp-pc__volume-control"),
     ).find((el) => !el.classList.contains(CONTROL_CLASS));
     if (nativeVolume) {
-      if (wrap.previousElementSibling === nativeVolume) return;
       nativeVolume.insertAdjacentElement("afterend", wrap);
     } else {
-      if (wrap.parentElement === controls) return;
       controls.insertBefore(wrap, controls.firstChild);
     }
     syncUI();
@@ -3590,8 +3594,8 @@
   // 화질 메뉴 항목(li) prefix 텍스트에서 height 파싱("1080p(원본)"→1080, "자동"→0).
   function qualityItemHeight(li) {
     const txt = String(
-      li?.querySelector?.(".pzp-ui-setting-quality-item__prefix")?.textContent ||
-        "",
+      li?.querySelector?.(".pzp-ui-setting-quality-item__prefix")
+        ?.textContent || "",
     );
     if (/auto|자동|abr/i.test(txt)) return 0;
     const m = txt.match(/(\d{3,4})\s*p/i);
@@ -3674,6 +3678,13 @@
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
   function applyMaxQuality() {
     if (!maxQualityAuto) return;
+    // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
+    // 경우, 모든 탭을 1080p60(≈8Mbps)으로 강제하면 대역폭·디코드·미디어 메모리가 탭 수만큼
+    // 증폭돼 시스템 메모리 폭증 + 간헐적 수 초 버퍼링을 유발했다(실사용 계측: JS 힙/버퍼는
+    // 정상인데 탭당 렌더러 1GB+ = 미디어 파이프라인 부하). 숨김 탭은 치지직 기본 ABR 에
+    // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
+    // 건다(가시 탭만 최대화질).
+    if (document.hidden) return;
     // 재생이 아직 시작되지 않았거나(자동재생 대기/사용자 제스처 전) 준비 전이면 개입하지
     // 않는다. 이 시점에 화질을 전환(스트림 재초기화)하면 플레이어 초기화가 깨진다.
     //
@@ -3815,6 +3826,9 @@
         }
         return;
       }
+      // 사용자가 되감기로 과거를 보는 중(hlsSeekLocked)이면 라이브로 끌어당기지 않는다
+      // (화질 전환이 되감기 중에 트리거돼도 원점 복귀 방지).
+      if (hlsSeekLocked) return;
       // 지연이 관측됨 → 따라잡기 발동(내부에서 점프/배속을 지연 크기에 따라 선택). 이미
       // 엣지 근처(lat < syncCfg.enable)면 startSyncCatchUp 이 스스로 no-op 한다.
       startSyncCatchUp();
@@ -3837,7 +3851,14 @@
     if (!(video instanceof HTMLVideoElement)) return;
     if (!boundMaxQualityVideos.has(video)) {
       boundMaxQualityVideos.add(video);
-      const onProgress = () => applyMaxQuality();
+      // 이벤트 경로는 '진입 직후 최고화질을 빨리 걸기' 용도다. 한 번 걸고 나면
+      // (maxQualitySetHeight>0) 이후 드리프트 보정은 tick 폴링이 담당하므로, timeupdate
+      // (초당 여러 번)마다 applyMaxQuality 의 fiber 탐색(findCorePlayer)을 반복하지 않게
+      // 조기 반환한다 — 여러 방송 탭을 켰을 때의 누적 CPU 부하를 줄인다.
+      const onProgress = () => {
+        if (maxQualitySetHeight > 0) return;
+        applyMaxQuality();
+      };
       video.addEventListener("timeupdate", onProgress);
       video.addEventListener("playing", onProgress);
       video.addEventListener("loadeddata", onProgress);
@@ -3865,6 +3886,8 @@
   function jumpToLiveEdge(core = null, video = null) {
     const c = core || findCorePlayer();
     const v = video || findVideo();
+    // 라이브 엣지로 복귀하므로 되감기 hls 락을 해제(강제 동기화·버퍼 설정 원복).
+    unlockHlsForRewind();
     // corePlayer가 라이브 엣지 이동 API를 노출하면 그걸 우선 사용.
     try {
       if (c && typeof c.seekToLive === "function") {
@@ -3886,6 +3909,63 @@
     return false;
   }
 
+  // ── 되감기 중 hls.js 라이브 엣지 강제 동기화 방지 ─────────────────────────────
+  // 치지직 라이브는 hls.js 로 재생되는데, 재생 지연이 hls 의 라이브 지연 상한
+  // (liveMaxLatencyDuration/liveSyncDurationCount 기반)을 넘으면 streamController 의
+  // synchronizeToLiveEdge 가 media.currentTime 을 라이브 엣지로 '강제 점프'시킨다. 그래서
+  // 사용자가 되감기로 지연을 ~30초까지 키우면 원점(라이브)으로 튕겨 되감기가 무의미해진다
+  // (실측: FWD 843→875 가 player-vendor 의 synchronizeToLiveEdge 에서 발생).
+  //
+  // 되감기(사용자가 과거를 보는 중)일 때만 그 강제 동기화를 무력화한다. 라이브 엣지로
+  // 복귀하면 원복한다. hls 내부 API 접근은 방어적으로.
+  //
+  // ⚠ 버퍼 설정(backBufferLength/maxBufferLength)은 절대 건드리지 않는다. 과거
+  // backBufferLength=Infinity + maxBufferLength=600 으로 늘렸다가, 여러 방송 시청 시
+  // 재생 지난 미디어가 무한 보존돼(시간당 ~수 GB/탭) 메모리가 수십 GB 까지 치솟고
+  // SourceBuffer 비대화로 비주기적 수 초 멈춤이 생기는 심각한 문제가 있었다(실사용 재현).
+  // 우리 되감기는 서버측 DVR 윈도우(video.seekable) 안에서 seek 해 세그먼트를 서버에서
+  // 다시 받으므로 클라이언트 back buffer 보존이 필요 없다 — sync 무력화만으로 충분하다.
+  let hlsSeekLocked = false;
+  function getLiveHls(core = null) {
+    try {
+      const c = core || findCorePlayer();
+      const hls = c?.player?._mediaController?._hls;
+      return hls && hls.config && hls.streamController ? hls : null;
+    } catch {
+      return null;
+    }
+  }
+  // synchronizeToLiveEdge 를 no-op 으로 교체(원본 보관). 1회만 패치.
+  function patchHlsSync(hls) {
+    const sc = hls.streamController;
+    if (sc.__cheeseSyncPatched) return;
+    sc.__cheeseSyncOriginal = sc.synchronizeToLiveEdge;
+    sc.synchronizeToLiveEdge = function () {}; // 되감기 중엔 아무것도 안 함
+    sc.__cheeseSyncPatched = true;
+  }
+  function unpatchHlsSync(hls) {
+    const sc = hls?.streamController;
+    if (sc?.__cheeseSyncPatched && sc.__cheeseSyncOriginal) {
+      sc.synchronizeToLiveEdge = sc.__cheeseSyncOriginal;
+      sc.__cheeseSyncPatched = false;
+      sc.__cheeseSyncOriginal = null;
+    }
+  }
+  // 되감기 락 걸기: 라이브 엣지 강제 동기화만 무력화(버퍼 설정은 위 주석대로 불변).
+  function lockHlsForRewind() {
+    if (hlsSeekLocked) return;
+    const hls = getLiveHls();
+    if (!hls) return;
+    patchHlsSync(hls);
+    hlsSeekLocked = true;
+  }
+  // 락 해제(라이브 엣지 복귀 시): 강제 동기화 원복.
+  function unlockHlsForRewind() {
+    if (!hlsSeekLocked) return;
+    unpatchHlsSync(getLiveHls());
+    hlsSeekLocked = false;
+  }
+
   // 코덱 문자열에서 사람이 읽기 쉬운 이름 추출(예: avc1.4d401f → H.264, mp4a.40.2 → AAC).
   function prettyCodec(codec) {
     if (!codec) return null;
@@ -3893,15 +3973,27 @@
     // 치지직이 '알 수 없음'으로 넘기는 값(UNK 등)은 코덱 미상으로 취급 → null 반환해
     // 상위 폴백(오디오 프로파일/audioOnly 트랙/MPD)이 채우게 하고, 그래도 없으면 —(대시)로
     // 표시한다(사용자가 UNK 같은 원문 노출을 보지 않도록).
-    if (c === "unk" || c === "unknown" || c === "none" || c === "-") return null;
+    if (c === "unk" || c === "unknown" || c === "none" || c === "-")
+      return null;
     // 표준 코덱 문자열(avc1.xxx, mp4a.40.2 등)과 함께, 치지직이 720p/1080p(그리드 경유)에서
     // 주는 사람이 읽는 축약형("H264","h264" 등)도 인식한다.
-    if (c.startsWith("avc1") || c.startsWith("avc3") || c === "h264" || c === "avc")
+    if (
+      c.startsWith("avc1") ||
+      c.startsWith("avc3") ||
+      c === "h264" ||
+      c === "avc"
+    )
       return "H.264 (AVC)";
-    if (c.startsWith("hev1") || c.startsWith("hvc1") || c === "h265" || c === "hevc")
+    if (
+      c.startsWith("hev1") ||
+      c.startsWith("hvc1") ||
+      c === "h265" ||
+      c === "hevc"
+    )
       return "H.265 (HEVC)";
     if (c.startsWith("av01") || c === "av1") return "AV1";
-    if (c.startsWith("vp9") || c.startsWith("vp09") || c === "vp9") return "VP9";
+    if (c.startsWith("vp9") || c.startsWith("vp09") || c === "vp9")
+      return "VP9";
     if (c.startsWith("vp8") || c === "vp8") return "VP8";
     if (c.startsWith("mp4a") || c === "aac") return "AAC";
     if (c.startsWith("opus") || c === "opus") return "Opus";
@@ -4348,6 +4440,22 @@
     sync: [SYNC_BUTTON_CLASS],
   };
 
+  // 네이티브 볼륨 컨트롤(우리 믹서/필터 래퍼가 아닌 것)만 반환. ⚠ 믹서 버튼 래퍼도
+  // pzp-pc__volume-control 클래스를 달고 있어, 단순 :scope > .pzp-pc__volume-control 은
+  // 믹서까지 매칭한다. seek '볼륨 뒤' 앵커가 믹서 래퍼를 잡아버리면 배치가 뒤엉켜
+  // 무한 재삽입이 났다. 그래서 네이티브 볼륨만 콕 집어 앵커로 쓴다.
+  function nativeVolumeControl(controls) {
+    return (
+      Array.from(
+        controls.querySelectorAll(":scope > .pzp-pc__volume-control"),
+      ).find(
+        (el) =>
+          !el.classList.contains(CONTROL_CLASS) &&
+          !el.classList.contains("cheese-video-filter-control"),
+      ) || null
+    );
+  }
+
   function sideControls(player, key) {
     const side = playerButtonSide.side[key] === "left" ? "left" : "right";
     return (
@@ -4394,7 +4502,11 @@
       const startIdx = order.indexOf(after);
       if (startIdx >= 0) {
         for (let i = startIdx; i < order.length; i++) {
-          const el = controls.querySelector(`:scope > .${order[i]}`);
+          // 볼륨 앵커는 네이티브 볼륨만 겨냥(믹서 래퍼도 pzp-pc__volume-control 이라 제외).
+          const el =
+            order[i] === "pzp-pc__volume-control"
+              ? nativeVolumeControl(controls)
+              : controls.querySelector(`:scope > .${order[i]}`);
           if (el) return el; // 이 네이티브 뒤에 붙인다
         }
       }
@@ -4408,7 +4520,7 @@
       );
       if (ours.length) return ours[ours.length - 1];
       return (
-        controls.querySelector(":scope > .pzp-pc__volume-control") ||
+        nativeVolumeControl(controls) ||
         controls.querySelector(":scope > .pzp-playback-switch") ||
         null
       );
@@ -5316,6 +5428,18 @@
       rewindButtonSeekUntil = Date.now() + 3000; // seeked가 곧 도착(여유 3초)
     }
     w.video.currentTime = target;
+    // 되감기로 라이브 엣지에서 유의미하게 뒤(과거)에 서면 hls 강제 동기화를 무력화해
+    // 지연이 커져도 원점으로 튕기지 않게 한다. 엣지 근처로 복귀하면 원복.
+    updateHlsRewindLock(target, w.end);
+  }
+
+  // 현재 목표 위치가 라이브 엣지에서 얼마나 뒤인지에 따라 hls 되감기 락을 켜고 끈다.
+  // 엣지에서 REWIND_LOCK_MIN_BEHIND_S 이상 뒤면 락(강제 동기화 방지), 엣지 근처면 언락.
+  const REWIND_LOCK_MIN_BEHIND_S = 5;
+  function updateHlsRewindLock(target, liveEnd) {
+    const behind = liveEnd - target;
+    if (behind >= REWIND_LOCK_MIN_BEHIND_S) lockHlsForRewind();
+    else unlockHlsForRewind();
   }
 
   // 버튼 활성/비활성 갱신: 윈도우 양 끝이면 해당 방향 버튼 비활성.
@@ -5435,6 +5559,8 @@
     try {
       w.video.currentTime = target;
     } catch {}
+    // 되감기 바로 과거에 서면 hls 강제 동기화 무력화(엣지 복귀 시 원복).
+    updateHlsRewindLock(target, w.end);
   }
 
   function ensureSeekBar() {
@@ -5883,6 +6009,11 @@
       syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
     }
     if (Date.now() - lastAutoCatchUpAt < syncAutoCooldownMs) return false;
+    // 사용자가 되감기로 라이브 엣지에서 유의미하게 뒤(과거)를 보는 중이면(hlsSeekLocked)
+    // 자동으로 라이브로 끌어당기지 않는다. autoCatchUpPauseUntil(seek 후 일정 시간 정지)만
+    // 으론 그 시간이 지나면 다시 발동해 원점으로 튕겼는데(자동 따라잡기 사용 시), 되감은
+    // 상태를 유지하는 동안엔 계속 차단해야 한다. 락은 사용자가 앞으로/라이브 복귀할 때 풀린다.
+    if (hlsSeekLocked) return false;
     // 사용자가 직접 과거로 seek했다면(타임머신) 일정 시간 자동 따라잡기를 멈춘다.
     // 의도적으로 과거를 보는 중인데 계속 라이브로 끌어당기지 않도록. 중단 길이는
     // seek 크기에 따라 가변(짧은 되감기=10초, 큰 seek=60초; onUserSeeked가 설정).
@@ -5992,18 +6123,70 @@
     updateSyncButtonState();
   }
 
-  // 되감기/앞으로 버튼 클릭 위임.
-  document.addEventListener("click", (e) => {
-    const rew = e.target.closest?.(`.${REWIND_BUTTON_CLASS}`);
-    const fwd = e.target.closest?.(`.${FORWARD_BUTTON_CLASS}`);
-    if (!rew && !fwd) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = rew || fwd;
-    if (btn.disabled) return;
-    seekBy(Boolean(fwd));
+  // 되감기/앞으로 버튼: 클릭 1회 + 꾹 누르면(pointerdown 유지) 연속 seek.
+  let seekHoldTimer = 0;
+  let seekHoldForward = false;
+  function stopSeekHold() {
+    if (seekHoldTimer) {
+      // seekHoldTimer 는 처음엔 setTimeout(반복 시작 지연), 이후 setInterval 이다.
+      // 둘 다 정리한다(브라우저 타이머 id 는 공유 공간이라 안전).
+      clearTimeout(seekHoldTimer);
+      clearInterval(seekHoldTimer);
+      seekHoldTimer = 0;
+    }
+  }
+  function doHeldSeek() {
+    const btn = document.querySelector(
+      `.${seekHoldForward ? FORWARD_BUTTON_CLASS : REWIND_BUTTON_CLASS}`,
+    );
+    // 해당 방향 끝(버튼 비활성)에 닿으면 반복 중단.
+    if (!btn || btn.disabled) {
+      stopSeekHold();
+      updateSeekButtonsState();
+      return;
+    }
+    seekBy(seekHoldForward);
     updateSeekButtonsState();
-  });
+  }
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.button !== 0) return; // 주 버튼만
+      const rew = e.target.closest?.(`.${REWIND_BUTTON_CLASS}`);
+      const fwd = e.target.closest?.(`.${FORWARD_BUTTON_CLASS}`);
+      if (!rew && !fwd) return;
+      const btn = rew || fwd;
+      e.preventDefault();
+      e.stopPropagation();
+      if (btn.disabled) return;
+      seekHoldForward = Boolean(fwd);
+      stopSeekHold();
+      doHeldSeek(); // 즉시 1회(누르는 즉시 반응)
+      // 꾹 누르는 동안 반복. 첫 반복은 살짝 늦게(400ms) 시작해 단발 클릭과 구분,
+      // 이후 SEEK_HOLD_INTERVAL_MS 간격.
+      seekHoldTimer = window.setTimeout(() => {
+        seekHoldTimer = window.setInterval(doHeldSeek, SEEK_HOLD_INTERVAL_MS);
+      }, 400);
+    },
+    true,
+  );
+  // 버튼에서 손을 떼거나 벗어나면 반복 중단.
+  document.addEventListener("pointerup", stopSeekHold, true);
+  document.addEventListener("pointercancel", stopSeekHold, true);
+  // 우리 버튼은 click 도 발생하지만, pointerdown 에서 이미 처리하므로 click 은 삼킨다
+  // (중복 seek 방지). 치지직 기본 동작으로도 전파되지 않게 한다.
+  document.addEventListener(
+    "click",
+    (e) => {
+      const on =
+        e.target.closest?.(`.${REWIND_BUTTON_CLASS}`) ||
+        e.target.closest?.(`.${FORWARD_BUTTON_CLASS}`);
+      if (!on) return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
 
   // ── 방향키(←/→) = 10초 되감기/앞으로 ──────────────────────────────────────
   // 라이브 + 되감기 바 표시 상태에서, 타이핑/방향키소비 UI(슬라이더 등)가 아니면
@@ -6065,18 +6248,28 @@
     return true;
   }
 
+  // 방향키를 꾹 누르면(키 반복) 연속 되감기/앞으로. 다만 OS 키 반복 주기(수십 ms)마다
+  // seek 하면 과도하니, SEEK_HOLD_INTERVAL_MS 간격으로 스로틀한다.
+  const SEEK_HOLD_INTERVAL_MS = 130;
+  let lastHeldSeekAt = 0;
   document.addEventListener(
     "keydown",
     (e) => {
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (e.repeat) return; // 길게 눌러도 한 칸씩(연속 점프 방지)
       if (!seekHotkeyAllowed(e)) return;
+      // 키 반복(꾹 누름)이면 스로틀 간격을 지킨다. 첫 입력(repeat=false)은 항상 통과.
+      if (e.repeat && Date.now() - lastHeldSeekAt < SEEK_HOLD_INTERVAL_MS) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       const w = getSeekWindow();
       if (!w) return;
       // 네이티브 ±N초 seek와 중복되지 않도록 우리가 가로채 ±10초로 통일.
       e.preventDefault();
       e.stopImmediatePropagation();
+      lastHeldSeekAt = Date.now();
       seekBy(e.key === "ArrowRight");
       updateSeekButtonsState();
     },
@@ -6530,6 +6723,8 @@
       clearPresetDirty();
       teardownGraph();
       stopSyncCatchUp(); // 미디어 전환 시 따라잡기 중단
+      // 미디어 전환 → 옛 hls 인스턴스는 사라지므로 되감기 락 상태만 리셋(원복 대상 없음).
+      hlsSeekLocked = false;
       // 새 페이지 진입 → 라이브면 최초 1회 강제 따라잡기를 무장한다(라이브가 아니면
       // 따라잡기 버튼이 없어 자연 소진). 진입 직후 seeked/쿨다운 차단을 무시한다.
       armFreshLiveEntry();
@@ -6681,16 +6876,21 @@
 
   // documentElement 전체(subtree childList)를 감시하므로 라이브 채팅·재생 UI 변이가
   // 초당 수십~수백 번 콜백을 부른다. tick은 findPlayer/querySelector를 여러 번 도는
-  // 무거운 작업이라, 매 변이마다 실행하면 페이지가 버벅인다. 짧은 디바운스로 변이가
-  // 몰려도 '80ms에 1회'만 tick을 돌린다(우리 버튼 주입이 유발한 변이도 같은 창에
-  // 흡수돼 재진입 폭주가 없다). content.js init(120ms 디바운스)과 같은 접근.
+  // 무거운 작업이라, 매 변이마다 실행하면 페이지가 버벅인다. 디바운스로 변이가 몰려도
+  // '250ms에 1회'만 tick을 돌린다(우리 버튼 주입이 유발한 변이도 같은 창에 흡수돼
+  // 재진입 폭주가 없다). 예전 80ms 때는 채팅 폭주 방송에서 tick이 초당 ~12회 돌아
+  // 메인스레드의 ~58%를 차지했고(프로파일 실측), 미디어 파이프라인을 굶겨 간헐 버퍼링과
+  // 렌더러 메모리 증가의 주 원인이 됐다. 버튼/효과 보정은 4회/초로 충분하다.
   let tickTimer = 0;
   function scheduleTick() {
     if (tickTimer) return;
     tickTimer = window.setTimeout(() => {
       tickTimer = 0;
+      // 백그라운드 탭에선 UI 보정이 무의미하다(버튼은 어차피 안 보임) — tick을 건너뛴다.
+      // 탭이 다시 보이면 다음 변이(채팅 등으로 상시 발생)가 곧바로 tick을 다시 돌린다.
+      if (document.hidden) return;
       tick();
-    }, 80);
+    }, 250);
   }
   const observer = new MutationObserver(scheduleTick);
   observer.observe(document.documentElement, {

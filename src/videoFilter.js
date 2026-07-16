@@ -336,7 +336,7 @@
   // state.filters.sharpness는 건드리지 않고, 적용 단계에서만 이 배율을 곱한다.
   let autoSharpenScale = 1;
   // 프레임 간격 측정 상태.
-  let frameMon = { raf: 0, last: 0, acc: 0, count: 0, lastAdjustAt: 0 };
+  let frameMon = { raf: 0, timer: 0, last: 0, acc: 0, count: 0, lastAdjustAt: 0 };
 
   function loadAutoSharpen() {
     try {
@@ -762,36 +762,74 @@
     syncUI();
   }
 
-  function startFrameMonitor() {
-    if (frameMon.raf) return;
+  // 성능 자동조절용 프레임 모니터. ⚠ 예전엔 강한 선명 필터가 켜진 동안 rAF 가 매
+  // 프레임(60fps) 쉬지 않고 돌아 CPU 를 상시 점유했다(프로파일에서 이 tick 이 68% 차지).
+  // 조절은 AUTO_ADJUST_COOLDOWN_MS(2.5초)마다 한 번이면 충분하므로, FRAME_SAMPLE 프레임
+  // (~0.5초)만 측정→평가한 뒤 rAF 를 멈추고, 쿨다운만큼 쉬었다가 setTimeout 으로 다음
+  // 측정 버스트를 예약한다. 이러면 상시 60fps 콜백이 '주기적 짧은 버스트'로 줄어든다.
+  // (탭이 hidden 이면 rAF 도 setTimeout 재개도 도로 hidden 체크로 건너뛴다.)
+  function runFrameSampleBurst() {
     frameMon.last = 0;
     frameMon.acc = 0;
     frameMon.count = 0;
     const tick = (ts) => {
-      frameMon.raf = requestAnimationFrame(tick);
+      if (document.hidden) {
+        // 백그라운드면 측정 의미 없음 → 버스트 종료 후 쿨다운 뒤 재시도.
+        frameMon.raf = 0;
+        scheduleNextBurst();
+        return;
+      }
       if (!frameMon.last) {
         frameMon.last = ts;
+        frameMon.raf = requestAnimationFrame(tick);
         return;
       }
       const dt = ts - frameMon.last;
       frameMon.last = ts;
       // 탭 비활성 등으로 생기는 비정상적 큰 간격은 무시(오탐 방지).
-      if (dt > 200) return;
-      frameMon.acc += dt;
-      frameMon.count += 1;
-      if (frameMon.count < FRAME_SAMPLE) return;
+      if (dt <= 200) {
+        frameMon.acc += dt;
+        frameMon.count += 1;
+      }
+      if (frameMon.count < FRAME_SAMPLE) {
+        frameMon.raf = requestAnimationFrame(tick);
+        return;
+      }
       const avg = frameMon.acc / frameMon.count;
-      frameMon.acc = 0;
-      frameMon.count = 0;
+      frameMon.raf = 0;
       evaluateFrameAvg(avg);
+      scheduleNextBurst(); // 측정 끝 → rAF 멈추고 쿨다운 뒤 다음 버스트 예약
     };
     frameMon.raf = requestAnimationFrame(tick);
+  }
+
+  function scheduleNextBurst() {
+    if (frameMon.timer) return;
+    frameMon.timer = setTimeout(() => {
+      frameMon.timer = 0;
+      // 그동안 필터가 꺼졌거나 선명도가 임계 미만이면 재개하지 않는다.
+      if (
+        !state.enabled ||
+        state.filters.sharpness < SHARPEN_HEAVY_THRESHOLD
+      )
+        return;
+      runFrameSampleBurst();
+    }, AUTO_ADJUST_COOLDOWN_MS);
+  }
+
+  function startFrameMonitor() {
+    if (frameMon.raf || frameMon.timer) return;
+    runFrameSampleBurst();
   }
 
   function stopFrameMonitor() {
     if (frameMon.raf) {
       cancelAnimationFrame(frameMon.raf);
       frameMon.raf = 0;
+    }
+    if (frameMon.timer) {
+      clearTimeout(frameMon.timer);
+      frameMon.timer = 0;
     }
   }
 

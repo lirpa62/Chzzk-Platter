@@ -619,12 +619,14 @@ body {
 }
 
 .settings-item:has(.settings-volume-row),
+.settings-item:has(#commentTsClickAction),
 .settings-item:has(#searchRerankDefaultSort),
 .settings-item:has(#autoReliveMaxHours),
 .settings-item:has(#rootToFollowingLogoMode) {
   flex-direction: column;
 }
 
+.settings-item #commentTsClickAction,
 .settings-item #autoReliveMaxHours,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;

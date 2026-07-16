@@ -390,13 +390,25 @@
   // 채팅 행 하나 처리: 시간 삽입 + 가림 복원.
   function processRow(row) {
     if (!(row instanceof HTMLElement)) return;
+    // 스윕 재방문 최적화: 이미 처리 완료로 표시된 행은 React fiber/props 접근 없이 즉시
+    // 반환한다. 예전엔 컨테이너 재부착(헬스체크) 때마다 전체 행을 fiber 접근 포함으로
+    // 재처리해(수백 행 × 반복) 채팅 폭주 방송에서 큰 메인스레드 부하였다(프로파일 실측
+    // ~500ms/스윕). 예외는 '복원 ON + 처리 후에 새로 가려졌는데 아직 미복원'인 행뿐
+    // (블라인드는 처리 후에도 발생할 수 있으므로 그 행만 아래 일반 경로로 재처리).
+    if (row.dataset.cheeseRowDone === "1") {
+      if (!(restoreBlindedChat && !moaRestoring() && isHiddenRow(row))) return;
+      const doneSpan = getRowMessageSpan(row);
+      if (doneSpan?.classList.contains("cheese-blind-restored-text")) return;
+    }
     if (!row.querySelector("[class*='_chatting_message_']")) return;
     const chatMessage = getChatMessage(row);
     if (!chatMessage) return;
 
+    let done = true;
     if (showChatTimestamp && !moaShowingTime()) {
       const epoch = readChatEpochMs(chatMessage);
       if (epoch) applyTimestamp(row, epoch);
+      else done = false; // 시간이 아직 props에 없음 → 다음 방문 때 재시도
     }
 
     // 복원 기능이 켜져 있으면, 아직 안 가려진 행의 원문을 미리 캐시해 둔다(가려진 뒤엔
@@ -416,6 +428,15 @@
         if (original) applyRestore(row, original);
       }
     }
+    if (done) row.dataset.cheeseRowDone = "1";
+  }
+
+  // 처리 완료 마커 일괄 해제: 기능이 (재)활성화될 때 호출해, 꺼진 동안 처리 없이
+  // 마킹만 된 행들이 다음 스윕에서 다시 처리되게 한다.
+  function clearRowDoneMarkers() {
+    document
+      .querySelectorAll("[data-cheese-row-done]")
+      .forEach((el) => delete el.dataset.cheeseRowDone);
   }
 
   // ── 채팅 리스트 감시 ──────────────────────────────────────────────────────
@@ -547,6 +568,7 @@
     }
     showChatTimestamp = next;
     if (next) {
+      clearRowDoneMarkers(); // 꺼진 동안 done 마킹된 행들도 다시 처리(시간 부착)
       ensureChatRowObserver();
     } else {
       removeAllTimestamps();
@@ -562,6 +584,7 @@
     }
     restoreBlindedChat = next;
     if (next) {
+      clearRowDoneMarkers(); // 꺼진 동안 done 마킹된 행들도 다시 처리(캐시/복원)
       ensureChatRowObserver();
     } else {
       revertAllRestores();
@@ -635,7 +658,10 @@
   // 감시 컨테이너가 죽으면(observer가 죽은 노드를 봄) 재부착한다 — 설정이 켜져
   // 있어도 가끔 시간/복원이 안 나타나던 또 다른 원인.
   let lastPath = location.pathname;
+  // 2초 주기 + 백그라운드 탭 스킵. 재부착 시 스윕은 processRow 의 done 마커 덕에 이미
+  // 처리된 행을 fiber 접근 없이 건너뛰므로(위 참조) 저렴하다.
   setInterval(() => {
+    if (document.hidden) return; // 보이지 않는 탭은 다시 보일 때 다음 주기에 복구
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
       removeAllTimestamps();
@@ -645,5 +671,5 @@
     if (!anyChatEnhanceOn()) return;
     // 감시 중인 컨테이너가 더 이상 문서에 없으면(교체됨) 새 컨테이너에 재부착.
     if (!isChatObserverHealthy()) ensureChatRowObserver();
-  }, 1000);
+  }, 2000);
 })();

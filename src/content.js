@@ -620,6 +620,41 @@ const ACHIEVEMENT_BADGE_URL_MAP = Object.freeze({
   chraksil_tengai_5_128:
     "https://nng-phinf.pstatic.net/MjAyNTA3MDRfMjc4/MDAxNzUxNjIxNzk1NjUz.3qqlqb86KvS1bIletC1eMjZ67teJjse-AiVFleZvvWIg.zoiwYobtKUygxwxSewrt4Nn3W-R29uu7LAyM0mBNcaog.PNG/%ED%85%90%EA%B0%80%EC%9D%B4_%EC%B0%B8%EA%B0%80%EC%83%81_128px.png",
 });
+// badgeId → 배지 이름(툴팁/blind 텍스트). 네이티브 카드가 없는 뒤 페이지 채널의 폴백
+// 배지에 쓴다. 이미지(URL)는 위 맵으로 항상 정확하고, 이름은 툴팁에만 쓰이므로 여기에
+// 없으면 빈 이름으로 둔다(이미지는 정상 표시).
+const ACHIEVEMENT_BADGE_NAME_MAP = Object.freeze({
+  "2025chzzkcup_1": "2025 치지직컵 우승:도개걸운모",
+  "2025chzzkcup_2": "2025 치지직 2위:앰큐베이턱",
+  "2025chzzkcup_3": "2025 치지직 3위:부산행",
+  chistival_overcooked: "치스티벌_오버쿡드2 우승 팀장",
+  chstival_pubg_1: "치스티벌_배틀그라운드 우승 팀장",
+  chstival_head_1: "치스티벌_헤드뱅어즈:리듬로얄 우승 팀장",
+  chstival_party_1: "치스티벌_파티애니멀즈 우승 팀장",
+  chstival_fall_1: "치스티벌_폴가이즈 우승 팀장",
+  chistival_sonicracingcrossworld: "치스티벌_소닉레이싱크로스월드 우승 팀장",
+  fco_teammaster: "FCO 우당탕축구단 명장",
+  chraksil_dd_1_128: "치락실 D&D 1등",
+  chraksil_dd_2_128: "치락실 D&D 2등",
+  chraksil_dd_3_128: "치락실 D&D 3등",
+  chraksil_dd_4_128: "치락실 D&D TOP10",
+  chraksil_dd_5_128: "치락실 D&D 참가상",
+  chraksil_snowbros_1: "치락실 SNOW BROS.2 SPECIAL 1등",
+  chraksil_snowbros_2: "치락실 SNOW BROS.2 SPECIAL 2등",
+  chraksil_snowbros_3: "치락실 SNOW BROS.2 SPECIAL 3등",
+  chraksil_snowbros_4: "치락실 SNOW BROS.2 SPECIAL TOP10",
+  chraksil_snowbros_5: "치락실 SNOW BROS.2 SPECIAL 참가상",
+  chraksil_pacman_1_128: "치락실 PAC-MAN 1등",
+  chraksil_pacman_2_128: "치락실 PAC-MAN 2등",
+  chraksil_pacman_3_128: "치락실 PAC-MAN 3등",
+  chraksil_pacman_4_128: "치락실 PAC-MAN 256 TOP10",
+  chraksil_pacman_5_128: "치락실 PAC-MAN 참가상",
+  chraksil_tengai_1_128: "치락실 TENGAI 1등",
+  chraksil_tengai_2_128: "치락실 TENGAI 2등",
+  chraksil_tengai_3_128: "치락실 TENGAI 3등",
+  chraksil_tengai_4_128: "치락실 TENGAI TOP10",
+  chraksil_tengai_5_128: "치락실 TENGAI 참가상",
+});
 // 미설정 시 기본 표시(전체 방송/인기 클립/카테고리/팔로잉). 편성표·치즈팜은 기본 off.
 const HEADER_NAV_DEFAULT_SHOWN = new Set([
   "hdrLives",
@@ -685,6 +720,17 @@ const COMMENT_MARKERS_ENABLED_KEY = "cheeseCommentMarkersEnabled";
 // 댓글 타임스탬프 기능 전체 on/off(버튼 우클릭 메뉴로 토글, 전역 저장). 디폴트 ON.
 // off면 버튼 비활성(opacity)+좌클릭 무효+마커 미표시, 우클릭만 가능.
 const COMMENT_FEATURE_ENABLED_KEY = "cheeseCommentFeatureEnabled";
+// 팝오버에서 타임스탬프 클릭 시 동작: "close"(기존 동작=즉시 닫기, 기본) / "keep"(계속
+// 열어둠) / "delay"(delay초 뒤 자동 닫기). delay 값은 1~10초(기본 4).
+const COMMENT_TS_CLICK_ACTION_KEY = "cheeseCommentTimestampClickAction";
+const COMMENT_TS_CLICK_DELAY_KEY = "cheeseCommentTimestampClickDelay";
+const COMMENT_TS_CLICK_ACTIONS = ["close", "keep", "delay"];
+const COMMENT_TS_CLICK_DELAY_MIN = 1;
+const COMMENT_TS_CLICK_DELAY_MAX = 10;
+const COMMENT_TS_CLICK_DELAY_DEFAULT = 4;
+let commentTsClickAction = "close"; // 기본: 기존 동작 유지
+let commentTsClickDelaySec = COMMENT_TS_CLICK_DELAY_DEFAULT;
+let commentTsClickDelayTimer = 0; // 지연 닫기 타이머
 const COMMENT_FEATURE_OFF_CLASS = "comment-timestamp-feature-off";
 const COMMENT_FEATURE_MENU_CLASS = "cheese-search-comment-feature-menu";
 const COMMENT_MARKER_RENDER_RETRY_LIMIT = 30;
@@ -4178,6 +4224,30 @@ async function loadCommentMarkersEnabled() {
   }
 }
 
+// 팝오버 타임스탬프 클릭 동작(닫기/유지/지연) + 지연 초를 로드. 미설정이면 기본값 유지.
+let commentTsClickLoaded = false;
+async function loadCommentTsClickAction() {
+  if (commentTsClickLoaded) return;
+  commentTsClickLoaded = true;
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([
+      COMMENT_TS_CLICK_ACTION_KEY,
+      COMMENT_TS_CLICK_DELAY_KEY,
+    ]);
+    const action = data?.[COMMENT_TS_CLICK_ACTION_KEY];
+    if (COMMENT_TS_CLICK_ACTIONS.includes(action)) {
+      commentTsClickAction = action;
+    }
+    const delay = data?.[COMMENT_TS_CLICK_DELAY_KEY];
+    if (delay !== undefined) {
+      commentTsClickDelaySec = clampCommentTsClickDelay(delay);
+    }
+  } catch {
+    // 로드 실패 시 기본값(close, 4초) 유지.
+  }
+}
+
 function setCommentMarkersEnabled(enabled) {
   commentMarkerState.markersEnabled = Boolean(enabled);
   if (chrome.storage?.local) {
@@ -4273,6 +4343,7 @@ function initCommentTimestampMarkers() {
   }
   void loadCommentMarkersEnabled();
   void loadCommentFeatureEnabled();
+  void loadCommentTsClickAction();
   const videoNo = getCurrentVideoNo();
   if (!videoNo) {
     resetCommentTimestampMarkers();
@@ -6310,6 +6381,7 @@ function getCommentTimestampPanelRoot(anchor) {
 }
 
 function closeCommentTimestampPanel() {
+  clearCommentTsClickDelayTimer();
   stopCommentTimestampPanelTimeTracker();
   stopCommentTimestampPanelAnchorMonitor();
   releaseCommentPanelControlsVisible();
@@ -6457,7 +6529,37 @@ function renderCommentTimestampPanelItem(marker) {
 function handleCommentTimestampPanelSeek(event) {
   const seconds = Number(event.currentTarget.dataset.commentMarkerSeek || 0);
   seekVideoToCommentTimestamp(seconds);
-  closeCommentTimestampPanel();
+  // 클릭 시 팝오버 처리: 설정(commentTsClickAction)에 따라 닫기/유지/지연 닫기.
+  clearCommentTsClickDelayTimer(); // 연속 클릭 시 이전 지연 타이머 리셋
+  if (commentTsClickAction === "keep") {
+    return; // 계속 열어둠
+  }
+  if (commentTsClickAction === "delay") {
+    const ms =
+      clampCommentTsClickDelay(commentTsClickDelaySec) * 1000;
+    commentTsClickDelayTimer = window.setTimeout(() => {
+      commentTsClickDelayTimer = 0;
+      closeCommentTimestampPanel();
+    }, ms);
+    return;
+  }
+  closeCommentTimestampPanel(); // "close"(기본)
+}
+
+function clampCommentTsClickDelay(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return COMMENT_TS_CLICK_DELAY_DEFAULT;
+  return Math.min(
+    COMMENT_TS_CLICK_DELAY_MAX,
+    Math.max(COMMENT_TS_CLICK_DELAY_MIN, Math.round(n)),
+  );
+}
+
+function clearCommentTsClickDelayTimer() {
+  if (commentTsClickDelayTimer) {
+    clearTimeout(commentTsClickDelayTimer);
+    commentTsClickDelayTimer = 0;
+  }
 }
 
 function startCommentTimestampPanelTimeTracker() {
@@ -8589,8 +8691,15 @@ const CHAT_MOA_KEYS = [
 ];
 const CHAT_MOA_ACTIVE_KEY = "cheeseChatMoaActive";
 let lastChatMoaState = "";
+let lastChatMoaCheckAt = 0;
 
 function reportChatMoaState() {
+  // moaHasChat 판정은 키별 classList/querySelector 비용이 있어(8키), 채팅 트윅 패스마다
+  // 돌리면 채팅 폭주 방송에서 누적 부하가 컸다(프로파일 실측 ~0.5s/10s). moa 토글은
+  // 사용자가 손으로 누르는 드문 이벤트이므로 2초에 1회면 충분하다.
+  const now = Date.now();
+  if (now - lastChatMoaCheckAt < 2000) return;
+  lastChatMoaCheckAt = now;
   const active = CHAT_MOA_KEYS.filter((k) => moaHasChat(k));
   const sig = active.join(",");
   if (sig === lastChatMoaState) return; // 변화 없으면 storage 쓰기 생략
@@ -10489,21 +10598,19 @@ function updateChatTweakStyle() {
     html.cheese-chat-hide-subscription aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_subscription_"]) {
       display: none !important;
     }
-    /* 미션 메시지 숨김: 채팅 리스트의 미션 '메시지' 행만 숨긴다. */
-    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
-    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]) {
+    /* 미션 메시지 숨김: 채팅 스트림의 '미션 후원 알림' 행만 숨긴다.
+       ⚠ 치지직 개편으로 진행 중인 미션 '패널'과 후원 '알림 메시지'를 _fixed_/직계
+       컨테이너로 구분하던 방식이 깨졌다(실측). 진행 중인 미션 패널은 미션 전용 UI
+       래퍼(_container_1u2rv_ = '진행 중인 미션' 헤더/리스트, _is_active_mission_ =
+       게이지·타이머 있는 미션 항목, _area_ = 입력창 하단 미션 영역) 안에 있고, 그
+       패널 안 미션 유저 닉네임 컨테이너에도 _is_mission_(_container_zw6kq_…_is_mission_)
+       이 붙어 [class*="_item_"] 셀렉터에 잡혀 패널까지 숨겨졌다.
+       → 채팅 스트림 미션 메시지 행만 숨기고, 미션 패널 UI 조상(_1u2rv_ / _is_active_mission_
+       / _nhfkh_ = 미션 항목 컴포넌트)을 가진 항목은 제외한다. 조상 제외는 후손 결합
+       :not(<panel> *) 로 처리해 되살림 규칙이 필요없다. */
+    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_item_"]:not([class*="_1u2rv_"] *):not([class*="_is_active_mission_"] *):not([class*="_nhfkh_"] *):has(> [class*="_container_"]:not([class*="_is_fixed_"]) [class*="_is_mission_"]),
+    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:not([class*="_1u2rv_"] *):not([class*="_is_active_mission_"] *):not([class*="_nhfkh_"] *):has(> [class*="_container_"]:not([class*="_is_fixed_"]) [class*="_is_mission_"]) {
       display: none !important;
-    }
-    /* 미션 '메시지' 숨김이 미션 '패널'까지 숨기지 않도록 되살린다(실측). 미션 패널 항목의
-       후원자 닉네임 래퍼에도 _is_mission_ 이 있어 위 숨김 규칙에 잡히기 때문이다. 되살릴
-       대상은 두 종류 — (1) 상단/하단 고정 '진행 중인 미션' 패널(_fixed_ 안), (2) 그 패널의
-       '진행 중인 미션'을 클릭하면 뜨는 상세 패널(_area_ 안, 미션 목록). 둘 다 채팅 메시지
-       리스트가 아니라 미션 패널 전용 컨테이너 안에 있어 이 조상으로 구분된다. */
-    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_fixed_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
-    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_fixed_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
-    html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_area_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]),
-    html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_area_"] [class*="_item_"]:has(> [class*="_container_"] [class*="_is_mission_"]) {
-      display: revert !important;
     }
     html.cheese-chat-left-position aside#aside-chatting,
     html.cheese-chat-left-position aside#vod-aside { order: -1 !important; }
@@ -10529,12 +10636,12 @@ function updateChatTweakStyle() {
     html.cheese-chat-auto-hide.cheese-chat-resizing aside#vod-aside {
       transform: translateX(0) !important;
     }
-    /* 다시보기: 채팅이 왼쪽 배치되면 그 아래 영상정보(_details_/_container_1nl77_)가
+    /* 다시보기: 채팅이 왼쪽 배치되면 그 아래 영상정보(_details_/_container_1nl77_ -> _container_13ugb_2)가
        채팅 너비만큼 왼쪽이 비어 어긋난다. 채팅 너비(--cheese-chat-resized-width, 미조절
        시 기본 353px)만큼 margin-left를 줘 정렬을 맞춘다. 채팅이 없으면 이 규칙은
        적용 대상이 없어 자동 무효(margin 없음). */
     html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_details_"],
-    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_container_1nl77_"] {
+    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_container_13ugb_2"] {
       margin-left: var(--cheese-chat-resized-width, 353px) !important;
     }
     /* 채팅창 위 배너 광고(_banner_)는 position:absolute; right:0; max-width:353px 라
@@ -10716,22 +10823,33 @@ let chatTweakRaf = 0;
 let chatHtmlClassObserver = null;
 
 let chatTweakDebounce = 0;
+// 채팅 트윅 패스 최소 간격. 예전엔 채팅 변이 배치마다 rAF(활발한 채팅에서 초당 수십 회)로
+// 전체 패스가 돌아, 셀렉터 폭풍 + 강제 리플로우가 메인스레드의 ~64%를 차지했다(프로파일
+// 실측). 이는 라이브 미디어 파이프라인을 굶겨 간헐 버퍼링과 렌더러 메모리 증가(스타일/
+// 레이아웃 구조 상시 가열)의 직접 원인이었다. 메시지 숨김은 순수 CSS(:has()) 규칙이 JS
+// 개입 없이 즉시 처리하므로, 마커/레이아웃 보정 패스는 이 간격으로 충분하다.
+const CHAT_TWEAK_MIN_INTERVAL_MS = 300;
+let lastChatTweakAt = 0;
 function scheduleChatTweak() {
-  // 즉시 1회(rAF) 적용 — 새 채팅 행 숨김 마커 등은 빨리 반영돼야 한다.
-  if (!chatTweakRaf) {
+  // leading: 최소 간격이 지났으면 다음 프레임에 1회 적용(새 패널 마커 등 빠른 반영).
+  if (
+    !chatTweakRaf &&
+    Date.now() - lastChatTweakAt >= CHAT_TWEAK_MIN_INTERVAL_MS
+  ) {
     chatTweakRaf = requestAnimationFrame(() => {
       chatTweakRaf = 0;
+      lastChatTweakAt = Date.now();
       applyChatTweaksLight();
     });
   }
-  // 추가로, 치지직이 다시보기 진입 시 채팅 DOM을 연속 재렌더하며 우리 너비를 리셋해
-  // 깜빡인다. 마지막 변화 후 120ms 안정되면 한 번 더 적용해 최종 너비를 확정한다
-  // (멱등이라 안정 상태면 no-op).
+  // trailing: 마지막 변화 후 안정되면 한 번 더 적용해 최종 상태 확정(치지직이 다시보기
+  // 진입 시 채팅 DOM을 연속 재렌더하며 우리 너비를 리셋해 깜빡이던 문제 대응. 멱등).
   if (chatTweakDebounce) clearTimeout(chatTweakDebounce);
   chatTweakDebounce = window.setTimeout(() => {
     chatTweakDebounce = 0;
+    lastChatTweakAt = Date.now();
     applyChatTweaksLight();
-  }, 120);
+  }, CHAT_TWEAK_MIN_INTERVAL_MS);
 }
 
 function stopChatObserver() {
@@ -10752,12 +10870,21 @@ function stopChatObserver() {
 }
 
 // 옵저버용 경량 적용: 새 패널에 마커만 다시 붙이고 레이아웃 보정(전체 재구성 X).
+// 기능이 모두 꺼진 상태에서 full applyChatTweaks(정리 작업: querySelectorAll 다수 +
+// 스타일/클래스 재설정)를 채팅 변이마다 반복하지 않도록, 정리는 ON→OFF 전환 시 1회만
+// 수행하고(chatTweaksCleanedUp) 이후엔 moa 상태 감시만 남긴다. (예전엔 '모든 기능
+// OFF'인데도 이 반복 정리가 채팅 폭주 방송에서 큰 부하였다 — 프로파일 실측.)
+let chatTweaksCleanedUp = false;
 function applyChatTweaksLight() {
   reportChatMoaState(); // moa 상태 변화(<html> 클래스 토글)도 옵저버가 잡아 갱신
   if (!anyChatTweakOn()) {
-    applyChatTweaks();
+    if (!chatTweaksCleanedUp) {
+      applyChatTweaks(); // 잔여 마커/클래스/너비 정리(1회)
+      chatTweaksCleanedUp = true;
+    }
     return;
   }
+  chatTweaksCleanedUp = false; // 기능이 다시 켜짐 → 다음 OFF 전환 때 정리 다시 1회
   // 비활성(양보/off) 기능의 마커만 제거하고, 활성 기능 마커는 보존한다. 활성
   // 마커를 매번 제거→재추가하면 그 DOM 변경이 옵저버를 다시 깨워 무한 깜빡임이
   // 발생했다(applyChatHideMarkers는 classList.add라 이미 있으면 no-op).
@@ -11400,21 +11527,20 @@ function countFollowItems(nav) {
 // '접기'가 나올 때까지 더보기를 반복 클릭한다. 클릭→React 추가 로드(비동기)→다음
 // 더보기 버튼 등장을 기다려 다시 클릭. 접기가 보이거나 더보기가 사라지면 종료.
 // ⚠ 더보기 클릭 후 목록 항목 수가 '안 늘면' 더 로드할 게 없거나 실패한 것이므로 즉시
-// 중단한다(치즈나이프 아이디어). 무한 반복(최대 50회 × 250ms)으로 대량 로드가 지속돼
+// 중단한다. 무한 반복(최대 50회 × 250ms)으로 대량 로드가 지속돼
 // 방송이 렉 걸리던 문제를 줄인다.
 function driveFollowAutoExpand() {
   followAutoExpandTimer = 0;
   if (!shouldExpandFollow()) return;
   const nav = findSidebarFollowNav();
   if (!nav) return;
-  if (findFollowCollapseButton(nav)) {
-    // 이미 전부 펼침(접기 버튼) → 종료.
-    stopFollowAutoExpand();
-    return;
-  }
+  // '더보기' 버튼이 있으면 아직 펼칠 게 남은 것이므로 접기 버튼 유무와 무관하게 계속
+  // 펼친다. 치지직이 목록을 재구성하는 과도기엔 더보기와 접기가 '동시에' 존재할 수 있는데
+  // (실측: more=true·collapse=true), 예전엔 접기만 보고 '이미 펼침'으로 오판해 부분(예
+  // 105개) 펼침 상태로 멈추는 버그가 있었다. 더보기가 없을 때만 접기=완료로 판단한다.
   const more = findFollowMoreButton(nav);
   if (!more) {
-    // 더보기/접기 둘 다 없음(목록이 짧거나 전환 중) → 더 할 일 없음.
+    // 더보기 없음 → 완료(접기 있음=전부 펼침) 또는 할 일 없음(목록 짧음/전환 중). 종료.
     stopFollowAutoExpand();
     return;
   }
@@ -11453,10 +11579,10 @@ function ensureFollowExpansion() {
   if (!shouldExpandFollow()) return;
   const nav = findSidebarFollowNav();
   if (!nav) return;
-  // 접기 버튼이 있으면 이미 펼쳐진 상태 → 아무것도 안 함.
-  if (findFollowCollapseButton(nav)) return;
-  // 더보기 버튼이 있고 드라이버가 안 돌고 있으면 시작. 새 펼침 세션이므로 진전/무진전
-  // 카운터를 함께 리셋한다(직전 세션 잔여값이 새 세션의 조기 중단을 유발하지 않게).
+  // '더보기' 버튼이 있으면 아직 펼칠 게 남은 것 → 드라이버 시작(접기 버튼이 함께 있어도).
+  // 과도기에 더보기·접기가 동시에 있는데 접기만 보고 종료하면 부분 펼침에서 멈춘다(버그).
+  // 더보기가 있고 드라이버가 안 돌고 있으면 시작. 새 펼침 세션이므로 진전/무진전 카운터를
+  // 함께 리셋한다(직전 세션 잔여값이 새 세션의 조기 중단을 유발하지 않게).
   if (findFollowMoreButton(nav) && !followAutoExpandTimer) {
     followAutoExpandTries = 0;
     followAutoExpandNoProgress = 0;
@@ -12444,6 +12570,9 @@ async function loadChannelLiveButton() {
 // React 재렌더로 우리 노드가 지워지거나 숨김 클래스가 벗겨져도 init tick 의
 // ensureSearchRerank 가 멱등 복구한다.
 const SEARCH_RERANK_HIDDEN_CLASS = "cheese-search-rerank-native-hidden";
+// 재정렬 카드 썸네일 배지(다시보기/시청)에 부여하는 우리 전용 클래스. 원본 배지 클래스
+// 해시(_container_1o5pg_ → _container_g43cd_ …)가 바뀌어도 fallback CSS 가 흔들리지 않게.
+const SEARCH_RERANK_BADGE_CLASS = "cheese-search-rerank-badge";
 const SEARCH_RERANK_INITIAL = 6; // 처음 표시 개수(네이티브와 동일)
 const SEARCH_RERANK_STEP = 12; // 더보기 1회당 추가 개수
 const searchRerankState = {
@@ -12589,10 +12718,14 @@ function setSearchRerankLiveBadge(thumbA, livePv) {
   }
   const text = `${formatCompactCount(livePv)}회 시청된 라이브`;
   if (desc) {
-    // 원본 배지 span(_container_1o5pg_2). '다시보기' em 등 다른 자식은 항목 데이터가
-    // 없으니 제거하고 시청 배지만 남긴다.
-    const badge = desc.querySelector('span[class*="_container_1o5pg_"]');
+    // 원본 배지 span(_container_1o5pg_ → 개편 후 _container_g43cd_). '다시보기' em 등 다른
+    // 자식은 항목 데이터가 없으니 제거하고 시청 배지만 남긴다.
+    const badge = desc.querySelector(
+      'span[class*="_container_1o5pg_"], span[class*="_container_g43cd_"]',
+    );
     if (badge) {
+      // 우리 fallback CSS 가 잡을 전용 클래스 부여(원본 배지 클래스 해시 변경에 안 흔들림).
+      badge.classList.add(SEARCH_RERANK_BADGE_CLASS);
       badge.textContent = text;
       desc.querySelectorAll("em").forEach((el) => el.remove());
       // 배지 span 만 남기고 나머지 텍스트/노드 정리(중복 방지).
@@ -12605,17 +12738,17 @@ function setSearchRerankLiveBadge(thumbA, livePv) {
   // 클론 템플릿에 오버레이가 없었던 카드 → 원본 클래스로 새로 만든다. 페이지 어딘가의
   // 실제 배지 클래스를 하베스트하고, 못 찾으면 알려진 클래스로 폴백.
   const sampleBadge = document.querySelector(
-    'div[class*="_description_"] span[class*="_container_1o5pg_"]',
+    'div[class*="_description_"] span[class*="_container_1o5pg_"], div[class*="_description_"] span[class*="_container_g43cd_"]',
   );
   const descCls =
     document.querySelector(
       'a[class*="_thumbnail_"] div[class*="_description_"]',
     )?.className || "_description_ul5zy_432";
-  const badgeCls = sampleBadge?.className || "_container_1o5pg_2";
+  const badgeCls = sampleBadge?.className || "_container_g43cd_2";
   const overlay = document.createElement("div");
   overlay.className = descCls;
   const span = document.createElement("span");
-  span.className = badgeCls;
+  span.className = `${badgeCls} ${SEARCH_RERANK_BADGE_CLASS}`;
   span.textContent = text;
   overlay.appendChild(span);
   // 썸네일 이미지 다음, _time_ 앞에 삽입(원본 순서와 동일).
@@ -12624,104 +12757,130 @@ function setSearchRerankLiveBadge(thumbA, livePv) {
   else thumbA.appendChild(overlay);
 }
 
-// 검색 카드의 채널명 뒤 인증/업적 배지를 원본과 같은 <i> 구조로 채운다. React가
-// 채널명보다 배지를 늦게 붙이는 경우가 있어, blind+tooltip까지 완성된 원본만 URL별로
-// 캐시한다. 원본을 찾지 못한 배지는 이름/툴팁을 추측해 만들지 않는다.
-const searchRerankAchievementIconTemplates = new Map();
-let searchRerankVerifiedIconTemplate = null;
+// 검색 카드의 채널명 뒤 인증/업적 배지 처리.
+//
+// 배지 소스는 두 단계로 얻는다:
+//  1) 우선 — 페이지의 '네이티브 검색 카드'가 이미 렌더한 배지 <i> 를 그 channelId 로 통째로
+//     복제(가장 정확: 원본이 실제 보여주는 것과 동일). 단, 네이티브 카드는 검색 첫 페이지만
+//     있어 재정렬로 앞에 온 뒤 페이지 채널은 캐시 미스가 난다.
+//  2) 폴백 — 캐시 미스면 API activatedChannelBadgeIds 의 '첫 badgeId' 를 하드코딩 URL 맵
+//     (ACHIEVEMENT_BADGE_URL_MAP)으로 변환해, harvest 해 둔 '업적 배지 구조 템플릿'의 배경
+//     이미지·라벨만 교체해 만든다. 원본처럼 첫 배지 1개만 표시한다(예전엔 badgeIds 를 전부
+//     순회해 없는 배지까지 붙던 버그가 있었다).
+//
+// channelId → 그 채널의 배지 <i> 배열(인증마크·업적, 원본 순서 그대로)을 캐시.
+const searchRerankChannelBadges = new Map();
+// harvest 로 얻은 '구조 템플릿'(배경/라벨만 갈아끼워 재사용). 인증마크용·업적용 각 1개.
+let searchRerankVerifiedTemplate = null;
+let searchRerankAchievementTemplate = null;
 let searchRerankIconTemplateRevision = 0;
 
-function getSearchRerankNativeChannelIcons() {
-  return [
-    ...document.querySelectorAll(
-      'a[class*="_channel_"] span[class*="_text_"] ~ i[class*="_icon_"]',
-    ),
-  ].filter((icon) => !icon.closest(".cheese-search-rerank-list"));
+// 네이티브(우리 리스트 밖) 채널 링크에서 channelId 추출. href="/<32hex>" 형태.
+function getSearchRerankNativeChannelId(anchor) {
+  const href = anchor?.getAttribute?.("href") || "";
+  const m = href.match(/^\/([0-9a-f]{32})(?:[/?#]|$)/i);
+  return m ? m[1] : null;
 }
 
-function getSearchRerankDirectChild(icon, predicate) {
-  return [...(icon?.children || [])].find(predicate) || null;
-}
-
-function getSearchRerankIconBlind(icon) {
-  return getSearchRerankDirectChild(icon, (child) =>
-    child.classList.contains("blind"),
-  );
-}
-
-function getSearchRerankIconTooltip(icon) {
-  return getSearchRerankDirectChild(
-    icon,
-    (child) =>
-      child.tagName === "SPAN" &&
-      [...child.classList].some((name) => name.includes("_tooltip_")),
-  );
-}
-
-function normalizeSearchRerankBadgeUrl(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const match = raw.match(/^url\((?:["']?)(.*?)(?:["']?)\)$/i);
-  const url = match ? match[1] : raw;
-  try {
-    return new URL(url, location.href).href;
-  } catch {
-    return url;
-  }
-}
-
+// 네이티브 검색 카드들에서 채널별 배지 <i> 를 수집해 캐시한다. 배지가 아직 React 로
+// 완성되기 전(빈 <i>)이면 건너뛰고 다음 DOM 변경 때 다시 수집한다.
 function harvestSearchRerankNativeChannelIcons() {
   let changed = false;
-  for (const icon of getSearchRerankNativeChannelIcons()) {
-    const blind = getSearchRerankIconBlind(icon);
-    const label = blind?.textContent.trim() || "";
-    const backgroundUrl = normalizeSearchRerankBadgeUrl(
-      icon.style.backgroundImage,
+  const anchors = document.querySelectorAll('a[class*="_channel_"]');
+  for (const anchor of anchors) {
+    if (anchor.closest(".cheese-search-rerank-list")) continue; // 우리 카드는 제외
+    const channelId = getSearchRerankNativeChannelId(anchor);
+    if (!channelId || searchRerankChannelBadges.has(channelId)) continue;
+    const textSpan = anchor.querySelector('span[class*="_text_"]');
+    const host = textSpan?.parentElement;
+    if (!host) continue;
+    // _text_ span 뒤의 형제 <i> 들(인증마크 + 업적 배지).
+    const icons = [...host.children].filter(
+      (c) => c.tagName === "I" && c.matches('[class*="_icon_"]'),
     );
-    if (!backgroundUrl) {
-      if (label === "인증 마크" && !searchRerankVerifiedIconTemplate) {
-        searchRerankVerifiedIconTemplate = icon.cloneNode(true);
-        changed = true;
+    if (!icons.length) continue; // 배지 없는 채널(캐시 안 함 → 나중에 배지 생기면 수집)
+    // 업적 배지는 blind + tooltip 이 완성돼야 유효. 하나라도 미완성이면 이번엔 skip.
+    const incomplete = icons.some((icon) => {
+      const isVerified =
+        !icon.style.backgroundImage &&
+        [...icon.children].some(
+          (c) => c.classList.contains("blind") && /인증/.test(c.textContent),
+        );
+      if (isVerified) return false; // 인증마크는 배경/툴팁 없음 = 완성
+      const blind = [...icon.children].find((c) =>
+        c.classList.contains("blind"),
+      );
+      const tooltip = [...icon.children].find(
+        (c) =>
+          c.tagName === "SPAN" &&
+          [...c.classList].some((n) => n.includes("_tooltip_")),
+      );
+      return !blind || !tooltip;
+    });
+    if (incomplete) continue;
+    searchRerankChannelBadges.set(
+      channelId,
+      icons.map((icon) => icon.cloneNode(true)),
+    );
+    changed = true;
+    // 폴백용 구조 템플릿 수집(인증마크·업적 각 1개면 충분).
+    for (const icon of icons) {
+      const isVerified =
+        !icon.style.backgroundImage &&
+        [...icon.children].some(
+          (c) => c.classList.contains("blind") && /인증/.test(c.textContent),
+        );
+      if (isVerified) {
+        if (!searchRerankVerifiedTemplate) {
+          searchRerankVerifiedTemplate = icon.cloneNode(true);
+        }
+      } else if (
+        !searchRerankAchievementTemplate &&
+        icon.style.backgroundImage
+      ) {
+        searchRerankAchievementTemplate = icon.cloneNode(true);
       }
-      continue;
-    }
-    // 원본 업적 배지는 blind와 내부 tooltip을 모두 갖는다. 둘 중 하나라도 아직 없으면
-    // React가 완성하기 전이므로 이번 렌더에서는 건너뛰고 다음 DOM 변경 때 다시 수집한다.
-    const tooltip = getSearchRerankIconTooltip(icon);
-    const badgeName = tooltip?.querySelector('span[class*="_badge_name_"]');
-    if (!label || !tooltip || !badgeName) continue;
-    if (!searchRerankAchievementIconTemplates.has(backgroundUrl)) {
-      const template = icon.cloneNode(true);
-      // 툴팁 이름은 원본 i의 blind를 단일 기준으로 맞춘다.
-      template.querySelector('span[class*="_badge_name_"]').textContent = label;
-      searchRerankAchievementIconTemplates.set(backgroundUrl, template);
-      changed = true;
     }
   }
   if (changed) searchRerankIconTemplateRevision++;
 }
 
-function createSearchRerankChannelIcon({ type, url = "" }) {
-  const template =
-    type === "verified"
-      ? searchRerankVerifiedIconTemplate
-      : searchRerankAchievementIconTemplates.get(
-          normalizeSearchRerankBadgeUrl(url),
-        );
-  if (!template) return null;
-  const icon = template.cloneNode(true);
-  icon.classList.add(
-    "cheese-search-rerank-channel-icon",
-    `is-${type}`,
-  );
-  return icon;
+// 하드코딩 URL 맵으로 업적 배지 <i> 를 만든다. 구조 소스는 두 단계:
+//  1) 업적 구조 템플릿(harvest) 이 있으면 그걸로(툴팁까지 완성).
+//  2) 없으면(검색 결과에 네이티브 업적 배지가 하나도 없던 경우) 인증마크 템플릿을 재사용
+//     한다 — 업적/인증 <i> 는 같은 _icon_ 클래스를 쓰므로, 배경이미지·blind 만 갈아끼우면
+//     배지가 정상 표시된다(호버 툴팁은 없지만 이미지·이름은 정확). 둘 다 없거나 badgeId 가
+//     맵에 없으면 null.
+function createSearchRerankFallbackAchievementIcon(badgeId) {
+  const url = ACHIEVEMENT_BADGE_URL_MAP[badgeId];
+  if (!url) return null;
+  const label = ACHIEVEMENT_BADGE_NAME_MAP[badgeId] || "";
+  if (searchRerankAchievementTemplate) {
+    const icon = searchRerankAchievementTemplate.cloneNode(true);
+    icon.style.backgroundImage = `url("${url}")`;
+    const blind = [...icon.children].find((c) => c.classList.contains("blind"));
+    if (blind) blind.textContent = label;
+    const badgeName = icon.querySelector('span[class*="_badge_name_"]');
+    if (badgeName) badgeName.textContent = label;
+    return icon;
+  }
+  // 폴백: 인증마크 템플릿 재사용(같은 _icon_ 클래스). 배경이미지 + blind 만 설정. 인증마크엔
+  // 없는 툴팁은 생략하지만 배지 자체는 원본과 동일하게 표시된다.
+  if (searchRerankVerifiedTemplate) {
+    const icon = searchRerankVerifiedTemplate.cloneNode(true);
+    icon.style.backgroundImage = `url("${url}")`;
+    // 인증마크 <i> 안엔 blind 만 있다. 그 텍스트를 배지 이름으로 교체.
+    const blind = [...icon.children].find((c) => c.classList.contains("blind"));
+    if (blind) blind.textContent = label;
+    return icon;
+  }
+  return null;
 }
 
 function setSearchRerankChannelNameAndBadges(name, channel) {
   if (!name) return;
   const iconHost = name.parentElement || name;
-  // li 클론에 남은 템플릿 채널의 배지를 먼저 제거한다. 원본 구조에서 배지는
-  // _text_ span의 자식이 아니라 같은 부모 아래의 다음 형제 <i>다.
+  // li 클론에 남은 템플릿 채널의 배지를 먼저 제거한다(원본/우리 것 모두).
   [...iconHost.children].forEach((child) => {
     if (
       child.tagName === "I" &&
@@ -12732,21 +12891,32 @@ function setSearchRerankChannelNameAndBadges(name, channel) {
     }
   });
   name.textContent = channel.channelName || "";
-  if (channel.verifiedMark === true) {
-    const verifiedIcon = createSearchRerankChannelIcon({ type: "verified" });
-    if (verifiedIcon) iconHost.appendChild(verifiedIcon);
+  // 1) 네이티브 카드에서 수집한 이 채널의 배지가 있으면 그대로 복제(가장 정확).
+  const cached = searchRerankChannelBadges.get(channel.channelId);
+  if (cached && cached.length) {
+    for (const iconTemplate of cached) {
+      const icon = iconTemplate.cloneNode(true);
+      icon.classList.add("cheese-search-rerank-channel-icon");
+      iconHost.appendChild(icon);
+    }
+    return;
+  }
+  // 2) 캐시 미스(뒤 페이지 채널 등) → API 값으로 폴백 생성. 원본처럼 인증마크 + 첫 업적
+  //    배지 1개만. 구조 템플릿이 아직 없으면 그 배지는 생략(잘못된 배지는 안 붙임).
+  if (channel.verifiedMark === true && searchRerankVerifiedTemplate) {
+    const v = searchRerankVerifiedTemplate.cloneNode(true);
+    v.classList.add("cheese-search-rerank-channel-icon");
+    iconHost.appendChild(v);
   }
   const badgeIds = Array.isArray(channel.activatedChannelBadgeIds)
     ? channel.activatedChannelBadgeIds
     : [];
-  for (const badgeId of badgeIds) {
-    const url = ACHIEVEMENT_BADGE_URL_MAP[badgeId];
-    if (!url) continue;
-    const achievementIcon = createSearchRerankChannelIcon({
-      type: "achievement",
-      url,
-    });
-    if (achievementIcon) iconHost.appendChild(achievementIcon);
+  if (badgeIds.length) {
+    const achievement = createSearchRerankFallbackAchievementIcon(badgeIds[0]);
+    if (achievement) {
+      achievement.classList.add("cheese-search-rerank-channel-icon");
+      iconHost.appendChild(achievement);
+    }
   }
 }
 
@@ -14414,8 +14584,13 @@ async function loadCardPreviewAudio() {
 // 커스텀 CSS 툴팁(cheese-live-start-tooltip)을 붙인다.
 const CARD_DATE_TOOLTIP_CLASS = "cheese-live-start-tooltip"; // 시청 툴팁과 CSS 재사용
 const CARD_DATE_TARGET_CLASS = "cheese-live-start-tooltip-target";
-// 정보 줄만 대상(태그 줄 _link_ 변형 제외). 카드에 /video/ 앵커가 있어야 한다.
-const CARD_INFO_SEL = '[class*="_information_"]:not([class*="_link_"])';
+// 정보 줄 대상(태그 줄 _link_ 변형 제외) + 채널 줄(_channel_). 카드에 /video/ 앵커가
+// 있어야 한다. ⚠ e스포츠 등 일부 탭 카드(_j1bbv_)는 _information_ 에 카테고리·태그만
+// 있고 조회수/상대날짜(N시간 전)는 _channel_ 안에 있어, _information_ 만 대상으로 하면
+// 툴팁이 카테고리 쪽에 붙었다. 그래서 _channel_ 도 호버 대상에 넣고, 실제 부착 위치는
+// cardDateAttachTarget 이 '상대 날짜가 있는 곳'으로 고른다.
+const CARD_INFO_SEL =
+  '[class*="_information_"]:not([class*="_link_"]), [class*="_channel_"]';
 let cardDateTooltipBound = false;
 const cardDateCache = new Map(); // videoNo → {publishAt, liveOpenAt} (null=실패/없음)
 const cardDateFetching = new Set(); // 중복 요청 방지
@@ -14429,6 +14604,47 @@ function cardVideoNoFromInfo(info) {
   const href = anchor?.getAttribute("href") || "";
   const m = href.match(/\/video\/(\d+)/);
   return m ? m[1] : "";
+}
+
+// 상대 날짜("21시간 전", "3일 전").
+const CARD_REL_DATE_RE = /(초|분|시간|일|주|개월|년)\s*전/;
+// 절대 날짜("07.16", "26.07.16", "2026.07.16" 등 점 구분 날짜).
+const CARD_ABS_DATE_RE = /\b\d{1,4}\.\d{1,2}(\.\d{1,2})?\.?\b/;
+
+// _channel_ 안에 '날짜' _count_ 가 있는지. 치지직은 최근이면 상대("N시간 전"), 오래되면
+// 절대("07.16")로 표기해 두 형태를 모두 인정한다. 단 재생수 _count_("8,468회")는
+// 날짜가 아니므로 '회'가 든 텍스트는 제외한다(절대 날짜 정규식이 "34.1만회" 등을
+// 오탐하지 않게).
+function channelHasDate(channel) {
+  if (!channel) return false;
+  const counts = channel.querySelectorAll('[class*="_count_"]');
+  for (const c of counts) {
+    const t = (c.textContent || "").trim();
+    if (/회/.test(t)) continue; // 재생수 등 제외
+    if (CARD_REL_DATE_RE.test(t) || CARD_ABS_DATE_RE.test(t)) return true;
+  }
+  return false;
+}
+
+// 툴팁을 실제로 붙일 요소를 고른다. 상대 날짜(N시간 전)가 어디 있느냐가 카드 구조마다
+// 다르다: 일반 다시보기 카드는 _information_ 줄에 조회수/상대날짜가 함께 있고, e스포츠
+// 등 일부 탭 카드는 _channel_ 안 마지막 _count_ 에 상대 날짜가 있다.
+// 반환값: 부착 대상 요소, 또는 부적합하면 null.
+//  - 호버 대상이 _channel_ 인데 상대 날짜가 없으면(예: 통합검색 재정렬 카드의 채널명
+//    링크 _channel_1qnxh_) 툴팁을 붙이지 않는다(null). 채널명에 잘못 붙던 버그 방지.
+//  - _information_ 호버 시: 같은 카드 _channel_ 에 상대 날짜가 있으면 그 _channel_ 에,
+//    없으면 _information_ 자신에 붙인다.
+function cardDateAttachTarget(info) {
+  const card = info.closest("li, [class*='_container_']") || info.parentElement;
+  const isChannel = /(^|\s|_)channel_/.test(info.className || "");
+  if (isChannel) {
+    // 호버한 채널 줄에 날짜가 있을 때만 유효(없으면 재정렬 카드 채널명 등 → 붙이지 않음).
+    return channelHasDate(info) ? info : null;
+  }
+  // _information_ 호버: 날짜를 가진 _channel_ 이 있으면 거기로, 없으면 _information_.
+  const channel = card?.querySelector?.('[class*="_channel_"]') || null;
+  if (channel && channelHasDate(channel)) return channel;
+  return info;
 }
 
 async function fetchCardVideoDates(videoNo) {
@@ -14475,12 +14691,16 @@ function renderCardDateTooltip(info, videoNo) {
   }
   if (!parts.length) return;
   // 시청 화면 툴팁과 CSS(표시 로직)는 공유하되, 위치는 카드 전용 마커로 오버라이드.
-  info.classList.add(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
-  let label = info.querySelector(`:scope > .${CARD_DATE_TOOLTIP_CLASS}`);
+  // 부착 대상은 '상대 날짜가 있는 곳'(일반 카드=_information_, e스포츠 카드=_channel_).
+  // null 이면 부적합(상대 날짜 없는 채널명 등) → 붙이지 않는다.
+  const target = cardDateAttachTarget(info);
+  if (!target) return;
+  target.classList.add(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
+  let label = target.querySelector(`:scope > .${CARD_DATE_TOOLTIP_CLASS}`);
   if (!label) {
     label = document.createElement("span");
     label.className = CARD_DATE_TOOLTIP_CLASS;
-    info.appendChild(label);
+    target.appendChild(label);
   }
   const html = parts.map((p) => escapeHtml(p)).join("<br>");
   if (label.innerHTML !== html) label.innerHTML = html;
@@ -15733,6 +15953,8 @@ const BOOT_PREFETCH_KEYS = [
     CHAT_FOLD_PERSIST_KEY,
     COMMENT_MARKERS_ENABLED_KEY,
     COMMENT_FEATURE_ENABLED_KEY,
+    COMMENT_TS_CLICK_ACTION_KEY,
+    COMMENT_TS_CLICK_DELAY_KEY,
   ]),
 ];
 const BOOT_PREFETCH_KEY_SET = new Set(BOOT_PREFETCH_KEYS);
@@ -15904,6 +16126,17 @@ if (chrome.storage?.onChanged) {
     if (changes[SEARCH_RESET_ON_RETURN_KEY]) {
       searchResetOnReturn =
         changes[SEARCH_RESET_ON_RETURN_KEY].newValue === true;
+    }
+    if (changes[COMMENT_TS_CLICK_ACTION_KEY]) {
+      const a = changes[COMMENT_TS_CLICK_ACTION_KEY].newValue;
+      if (COMMENT_TS_CLICK_ACTIONS.includes(a)) commentTsClickAction = a;
+      // 유지/닫기로 바뀌면 대기 중이던 지연 닫기 타이머는 취소.
+      if (commentTsClickAction !== "delay") clearCommentTsClickDelayTimer();
+    }
+    if (changes[COMMENT_TS_CLICK_DELAY_KEY]) {
+      commentTsClickDelaySec = clampCommentTsClickDelay(
+        changes[COMMENT_TS_CLICK_DELAY_KEY].newValue,
+      );
     }
     if (changes[SEARCH_RERANK_KEY]) {
       searchRerank = changes[SEARCH_RERANK_KEY].newValue === true;
@@ -16623,10 +16856,16 @@ function scheduleInitFromMutations(mutations) {
     return;
   }
   if (observerState.initTimer) return;
+  // 디바운스 250ms: 채팅 폭주 방송에서 변이가 상시 발생하므로, 예전 120ms 때는 init(수십
+  // 개의 ensure* 실행)이 초당 ~8회 돌아 누적 부하가 컸다(프로파일 실측 — audioMixer tick과
+  // 함께 간헐 버퍼링·렌더러 메모리 증가의 원인). UI 보정은 4회/초로 충분하다.
   observerState.initTimer = setTimeout(() => {
     observerState.initTimer = 0;
+    // 백그라운드 탭에선 UI 보정(버튼/카드 주입 등)이 무의미하다 — 건너뛴다. 탭이 다시
+    // 보이면 다음 변이(채팅 등으로 상시 발생)가 곧바로 init을 다시 돌린다.
+    if (document.hidden) return;
     init();
-  }, 120);
+  }, 250);
 }
 
 function isCheeseSearchOnlyMutation(mutation) {

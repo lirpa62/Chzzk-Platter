@@ -1166,6 +1166,72 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name"
+                    >└ 타임스탬프 클릭 시</span
+                  >
+                  <span class="settings-item-desc"
+                    >댓글 타임스탬프 목록에서 항목을 클릭해 이동할 때 팝오버를
+                    닫을지 여부(기본 닫기)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="commentTsClickAction"
+                  role="radiogroup"
+                  aria-label="타임스탬프 클릭 시 동작"
+                >
+                  <button
+                    type="button"
+                    data-comment-ts-click="close"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    type="button"
+                    data-comment-ts-click="keep"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    유지
+                  </button>
+                  <button
+                    type="button"
+                    data-comment-ts-click="delay"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    지연 닫기
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item"
+                data-comment-ts-delay-row
+                hidden
+              >
+                <label for="commentTsClickDelayInput">
+                  <span class="settings-item-name">└─ 지연 닫기 시간</span>
+                  <span class="settings-item-desc"
+                    >클릭 후 이 시간이 지나면 팝오버를 닫습니다(1~10초)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="commentTsClickDelayInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-comment-ts-click-delay
+                  />
+                  <small>초</small>
+                </span>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"

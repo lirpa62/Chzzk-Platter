@@ -1,3 +1,78 @@
+/* ── 치즈 플래터 색상 변수(테마 대응 fallback) ────────────────────────────────
+   치지직이 색상 변수명을 개편(--Surface-Neutral-Base → --sem-color-surface-neutral-base
+   등)했다. 우리 CSS 는 var(--sem-color-*, <fallback>) 형태로 그 변수를 참조하는데,
+   fallback 을 라이트 색상 하드코딩 대신 아래 치즈 플래터 변수로 두면 — 치지직 변수가
+   또 바뀌거나 다크모드에서 안 잡혀도, 우리 변수가 라이트/다크를 자동 전환한다.
+   (치지직은 다크모드에서 상위 요소에 .theme_dark 클래스를 붙인다.) */
+:root {
+  --cheese-platter-background-neutral-base: #fff;
+  --cheese-platter-border-accent-red-base: #d92d20;
+  --cheese-platter-border-accent-violet-base: #4e41db;
+  --cheese-platter-border-brand-alpha-weak: #1bb37326;
+  --cheese-platter-border-brand-base: #32bb81;
+  --cheese-platter-border-brand-weak: #49c28f;
+  --cheese-platter-border-neutral-base: #c0c1c2;
+  --cheese-platter-border-neutral-strong-static: #697183;
+  --cheese-platter-content-accent-red-strong: #e02020;
+  --cheese-platter-content-accent-violet-strong: #3e34af;
+  --cheese-platter-content-brand-base: #168f5c;
+  --cheese-platter-content-brand-strong: #23815a;
+  --cheese-platter-content-brand-weaker: #32bb81;
+  --cheese-platter-content-neutral-alpha-stronger: #000c;
+  --cheese-platter-content-neutral-alpha-strongest: #000000e5;
+  --cheese-platter-content-neutral-cool-base: #4d4d4d;
+  --cheese-platter-content-neutral-cool-strong: #2e3033;
+  --cheese-platter-content-neutral-cool-stronger: #202224;
+  --cheese-platter-content-neutral-cool-weak: #6d6e70;
+  --cheese-platter-content-neutral-primary: #0e0f10;
+  --cheese-platter-content-neutral-primary-static: #fff;
+  --cheese-platter-content-neutral-warm-base: #6d6e70;
+  --cheese-platter-content-neutral-warm-strong: #2e3033;
+  --cheese-platter-content-neutral-warm-stronger: #2e3033;
+  --cheese-platter-shadow-base: #0000000d;
+  --cheese-platter-shadow-strong: #0000001a;
+  --cheese-platter-surface-brand-weak: #d1f0e3;
+  --cheese-platter-surface-interaction-lighten-hovered: #0000000d;
+  --cheese-platter-surface-neutral-base: #e1e1e5;
+  --cheese-platter-surface-neutral-subtle: #e8e9eb;
+  --cheese-platter-surface-neutral-weaker: #fff;
+  --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+}
+.theme_dark {
+  --cheese-platter-background-neutral-base: #141517;
+  --cheese-platter-border-accent-red-base: #d92d20;
+  --cheese-platter-border-accent-violet-base: #4e41db;
+  --cheese-platter-border-brand-alpha-weak: #00ffa326;
+  --cheese-platter-border-brand-base: #00e693;
+  --cheese-platter-border-brand-weak: #009962;
+  --cheese-platter-border-neutral-base: #4d4d4d;
+  --cheese-platter-border-neutral-strong-static: #697183;
+  --cheese-platter-content-accent-red-strong: #ff5454;
+  --cheese-platter-content-accent-violet-strong: #7a7aff;
+  --cheese-platter-content-brand-base: #00e693;
+  --cheese-platter-content-brand-strong: #00ffa3;
+  --cheese-platter-content-brand-weaker: #009962;
+  --cheese-platter-content-neutral-alpha-stronger: #fffc;
+  --cheese-platter-content-neutral-alpha-strongest: #ffffffe5;
+  --cheese-platter-content-neutral-cool-base: #9da5b6;
+  --cheese-platter-content-neutral-cool-strong: #c9cedc;
+  --cheese-platter-content-neutral-cool-stronger: #dfe2ea;
+  --cheese-platter-content-neutral-cool-weak: #697183;
+  --cheese-platter-content-neutral-primary: #fff;
+  --cheese-platter-content-neutral-primary-static: #fff;
+  --cheese-platter-content-neutral-warm-base: #6d6e70;
+  --cheese-platter-content-neutral-warm-strong: #979899;
+  --cheese-platter-content-neutral-warm-stronger: #c0c1c2;
+  --cheese-platter-shadow-base: #0003;
+  --cheese-platter-shadow-strong: #0000004d;
+  --cheese-platter-surface-brand-weak: #006641;
+  --cheese-platter-surface-interaction-lighten-hovered: #ffffff0d;
+  --cheese-platter-surface-neutral-base: #2e3033;
+  --cheese-platter-surface-neutral-subtle: #2a2c2f;
+  --cheese-platter-surface-neutral-weaker: #1c1d1f;
+  --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+}
+
 .cheese-search-shell {
   position: relative;
   display: flex;
@@ -7,8 +82,14 @@
   margin: 0 0 16px;
   padding: 10px;
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-family: inherit;
 }
 
@@ -64,7 +145,10 @@
   height: 24px;
   padding: 0 10px;
   overflow: hidden;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 12px;
   line-height: 1;
 }
@@ -128,13 +212,23 @@
   width: 100%;
   height: 36px;
   padding: 0 10px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 20px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
 }
 
 .cheese-search-field:focus-within {
-  border-color: var(--Border-Brand-Base, #00c73c);
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
   box-shadow: 0 0 0 3px rgba(0, 199, 60, 0.18);
 }
 
@@ -145,8 +239,14 @@
   margin: 16px 0;
   padding: 10px;
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong, #151515);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
 }
 
 .cheese-search-studio-shell .cheese-search-query-column {
@@ -155,19 +255,32 @@
 
 .cheese-search-studio-shell .cheese-search-field {
   padding: 0 10px;
-  border: 1px solid var(--Border-Neutral-Base, rgba(0, 0, 0, 0.12));
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 20px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   cursor: text;
 }
 
 .cheese-search-studio-shell .cheese-search-field:focus-within {
-  border-color: var(--Border-Brand-Base, #00c73c);
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
   box-shadow: 0 0 0 3px rgba(0, 199, 60, 0.18);
 }
 
 .cheese-search-studio-shell .cheese-search-input {
-  color: var(--Content-Neutral-Warm-Strong, #151515);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-size: 13px;
 }
 
@@ -184,7 +297,10 @@
   .cheese-search-control[data-action="date-toggle"]
   span[data-date-label] {
   width: fit-content;
-  color: var(--Content-Neutral-Alpha-Stronger, #151515);
+  color: var(
+    --sem-color-content-neutral-alpha-stronger,
+    var(--cheese-platter-content-neutral-alpha-stronger)
+  );
 }
 
 .cheese-search-studio-shell .cheese-search-control[data-studio-action="reset"] {
@@ -198,13 +314,25 @@
 }
 
 .cheese-search-studio-shell .cheese-search-button-primary {
-  border-color: var(--Border-Brand-Weak, rgba(0, 199, 60, 0.28));
-  background: var(--Border-Brand-Alpha-Weak, rgba(0, 199, 60, 0.12));
-  color: var(--Content-Neutral-Alpha-Stronger, #151515);
+  border-color: var(
+    --sem-color-border-brand-weak,
+    var(--cheese-platter-border-brand-weak)
+  );
+  background: var(
+    --sem-color-border-brand-alpha-weak,
+    var(--cheese-platter-border-brand-alpha-weak)
+  );
+  color: var(
+    --sem-color-content-neutral-alpha-stronger,
+    var(--cheese-platter-content-neutral-alpha-stronger)
+  );
 }
 
 .cheese-search-studio-shell .cheese-search-button-primary:hover {
-  color: var(--Content-Brand-Strong, #00a132);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   box-shadow: rgba(0, 199, 60, 0.18) 0px 0px 0px 3px;
 }
 
@@ -281,7 +409,10 @@
 
 .cheese-search-studio-summary {
   margin: 0 0 12px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 13px;
   line-height: 18px;
 }
@@ -340,13 +471,19 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font: inherit;
   font-size: 14px;
 }
 
 .cheese-search-input::placeholder {
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
 }
 
 .cheese-search-category-chip {
@@ -360,8 +497,11 @@
   overflow: hidden;
   border: 0;
   border-radius: 999px;
-  background: var(--Border-Brand-Alpha-Weak);
-  color: var(--Content-Brand-Strong);
+  background: var(--sem-color-border-brand-alpha-weak);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -403,7 +543,10 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--Content-Neutral-Warm-Base, #6d6e70);
+  color: var(
+    --sem-color-content-neutral-warm-base,
+    var(--cheese-platter-content-neutral-warm-base)
+  );
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 32px;
@@ -430,7 +573,10 @@
 }
 
 .cheese-search-field:focus-within .search_form_button__\+3aOm {
-  color: var(--Content-Neutral-Primary, #0e0f10);
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
 }
 
 .blind {
@@ -442,7 +588,10 @@
 }
 
 .cheese-search-upload-badge {
-  background-color: var(--Surface-Theme-NewGreen-Base) !important;
+  background-color: var(
+    --sem-color-surface-theme-green-base,
+    #01952c
+  ) !important;
 }
 
 .cheese-search-watch-timeline {
@@ -473,7 +622,10 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   cursor: pointer;
 }
 
@@ -492,11 +644,21 @@
   z-index: 35;
   width: min(360px, calc(100vw - 32px));
   padding: 11px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-size: 12px;
   line-height: 1.45;
 }
@@ -514,7 +676,10 @@
 .cheese-search-help code {
   padding: 1px 4px;
   border-radius: 4px;
-  background-color: var(--Surface-Neutral-Base);
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
   color: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
@@ -522,10 +687,20 @@
 
 .cheese-search-control {
   height: 36px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -538,19 +713,31 @@
 }
 
 .cheese-search-button[data-action="popup"]:hover {
-  border-color: var(--Border-Accent-Violet-Base);
+  border-color: var(
+    --sem-color-border-accent-violet-base,
+    var(--cheese-platter-border-accent-violet-base)
+  );
   box-shadow: rgb(113 0 255 / 30%) 0px 0px 0px 3px;
   background-color: rgb(102 35 227 / 20%);
-  color: var(--Content-Accent-Violet-Strong);
+  color: var(
+    --sem-color-content-accent-violet-strong,
+    var(--cheese-platter-content-accent-violet-strong)
+  );
   transition: all 0.2s ease-in-out;
 }
 
 .cheese-search-button[data-action="reset"]:hover,
 .cheese-search-button[data-studio-action="reset"]:hover {
-  border-color: var(--Border-Accent-Red-Base, #d92d20);
+  border-color: var(
+    --sem-color-border-accent-red-base,
+    var(--cheese-platter-border-accent-red-base)
+  );
   box-shadow: rgb(255 0 0 / 30%) 0px 0px 0px 3px;
   background-color: rgba(224, 76, 76, 0.15);
-  color: var(--Content-Accent-Red-Strong, #b42318);
+  color: var(
+    --sem-color-content-accent-red-strong,
+    var(--cheese-platter-content-accent-red-strong)
+  );
   transition: all 0.2s ease-in-out;
 }
 
@@ -561,21 +748,39 @@
 }
 
 .cheese-search-button-primary {
-  background: var(--Border-Brand-Alpha-Weak);
-  color: var(--Content-Neutral-Alpha-Stronger);
-  border-color: var(--Border-Brand-Weak);
+  background: var(
+    --sem-color-border-brand-alpha-weak,
+    var(--cheese-platter-border-brand-alpha-weak)
+  );
+  color: var(
+    --sem-color-content-neutral-alpha-stronger,
+    var(--cheese-platter-content-neutral-alpha-stronger)
+  );
+  border-color: var(
+    --sem-color-border-brand-weak,
+    var(--cheese-platter-border-brand-weak)
+  );
 }
 
 .cheese-search-button-primary:hover {
-  color: var(--Content-Brand-Strong);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   box-shadow: rgba(0, 199, 60, 0.18) 0px 0px 0px 3px;
   transition: all 0.2s ease-in-out;
 }
 
 .cheese-search-button-primary.is-stop {
-  border-color: var(--Border-Accent-Red-Base);
+  border-color: var(
+    --sem-color-border-accent-red-base,
+    var(--cheese-platter-border-accent-red-base)
+  );
   background-color: rgba(224, 76, 76, 0.15);
-  color: var(--Content-Accent-Red-Strong);
+  color: var(
+    --sem-color-content-accent-red-strong,
+    var(--cheese-platter-content-accent-red-strong)
+  );
 }
 
 .cheese-search-button-primary.is-stop:hover {
@@ -614,11 +819,17 @@
 
 .cheese-search-date-trigger:focus {
   box-shadow: rgba(0, 199, 60, 0.18) 0px 0px 0px 3px;
-  border-color: var(--Border-Brand-Base, #00c73c);
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
 }
 
 .cheese-search-date-caption {
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 12px;
 }
 
@@ -629,11 +840,21 @@
   z-index: 30;
   width: 292px;
   padding: 14px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
 }
 
 .cheese-search-calendar-head {
@@ -673,9 +894,16 @@
   gap: 8px;
   margin: -2px 0 10px;
   padding: 10px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
 }
 
 .cheese-search-calendar-month-popover[hidden] {
@@ -699,10 +927,20 @@
 .cheese-search-calendar-picker-years button,
 .cheese-search-calendar-picker-months button {
   height: 28px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 6px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -728,10 +966,17 @@
 .cheese-search-calendar-presets button {
   height: 26px;
   padding: 0 7px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 6px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(--sem-color-content-neutral-warm-strong);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -764,19 +1009,32 @@
 
 .cheese-search-calendar-nav,
 .cheese-search-calendar-actions button {
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 7px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(--sem-color-content-neutral-warm-strong);
   cursor: pointer;
   font: inherit;
 }
 
 .cheese-search-calendar-nav:hover,
 .cheese-search-calendar-actions button:hover {
-  border-color: var(--Border-Accent-Violet-Base);
+  border-color: var(
+    --sem-color-border-accent-violet-base,
+    var(--cheese-platter-border-accent-violet-base)
+  );
   background: #685aff2b;
-  color: var(--Content-Neutral-Alpha-Strongest);
+  color: var(
+    --sem-color-content-neutral-alpha-strongest,
+    var(--cheese-platter-content-neutral-alpha-strongest)
+  );
 }
 
 .cheese-search-calendar-nav {
@@ -801,7 +1059,10 @@
 
 .cheese-search-calendar-weekdays {
   margin-bottom: 4px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 11px;
   text-align: center;
 }
@@ -816,7 +1077,7 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(--sem-color-content-neutral-warm-strong);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -828,7 +1089,10 @@
 }
 
 .cheese-search-calendar-day.is-outside {
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.38));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
 }
 
 .cheese-search-calendar-day.is-range {
@@ -877,7 +1141,10 @@
 .cheese-search-video-type-trigger:focus,
 .cheese-search-sort-trigger:focus {
   box-shadow: rgba(0, 199, 60, 0.18) 0px 0px 0px 3px;
-  border-color: var(--Border-Brand-Base, #00c73c);
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
 }
 
 .cheese-search-duration-trigger::after,
@@ -903,9 +1170,16 @@
   z-index: 30;
   min-width: 120px;
   padding: 6px;
-  border: 1px solid var(--Border-Neutral-Base);
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
   font-weight: 600;
 }
@@ -928,7 +1202,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(--sem-color-content-neutral-warm-strong);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -971,7 +1245,10 @@
   width: 100%;
   border: 0;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   text-align: center;
 }
 
@@ -989,7 +1266,10 @@
 }
 
 .cheese-search-loading strong {
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0;
@@ -1006,7 +1286,10 @@
   width: 100vw;
   border: 0;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   text-align: center;
 }
 
@@ -1024,7 +1307,10 @@
 }
 
 .cheese-search-empty strong {
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0;
@@ -1037,7 +1323,10 @@
 
 .cheese-search-empty p {
   margin: 14px 0 0;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
@@ -1050,7 +1339,10 @@
 .cheese-search-skeleton-shimmer {
   position: relative;
   overflow: hidden;
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
 }
 
 .cheese-search-skeleton-shimmer::after {
@@ -1121,7 +1413,10 @@
   overflow: hidden;
   padding-top: 149.1666666667%;
   border-radius: 10px;
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07)) !important;
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  ) !important;
 }
 
 .cheese-search-results-list[data-content-type="clips"]
@@ -1185,7 +1480,7 @@
   flex-wrap: wrap;
   gap: 12px;
   margin: 16px 0 10px;
-  color: var(--Content-Neutral-Warm-Strong);
+  color: var(--sem-color-content-neutral-warm-strong);
   font-size: 14px;
 }
 
@@ -1226,7 +1521,10 @@
 .video_card_time_info .video_card_item__lOC8Y:last-child:before {
   content: "~";
   margin: 0px 10px 0px 0px !important;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   background-color: transparent;
   height: 0;
   width: 0;
@@ -1288,7 +1586,10 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   border-radius: 8px;
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
   color: #fff;
 }
 
@@ -1315,7 +1616,10 @@
 }
 
 .cheese-search-results-list .video_card_is_dimmed__9YEzr {
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
 }
 
 /* dimmed(썸네일 없음) 성인 영상: 네이티브 _is_dimmed_._is_adult_ 복제.
@@ -1368,6 +1672,33 @@
   line-height: 16px;
 }
 
+/* 통합검색 재정렬 카드의 썸네일 배지(다시보기/시청 배지). 치지직 개편으로 원본 배지
+   클래스가 _container_1o5pg_ → _container_g43cd_ 로 바뀌며 우리 클론 배지가 스타일을
+   잃어 흰 텍스트만 남았다. 원본 클래스 해시를 좇는 대신 우리 클론 배지에 부여한 전용
+   클래스(cheese-search-rerank-badge)로 잡아 해시 변경에 흔들리지 않는다. sem 변수는
+   있으면 그대로, 없으면 하드코딩 값으로 폴백(다크에서도 대비가 유지되도록 반전 표면색). */
+.cheese-search-rerank-badge {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex: none;
+  vertical-align: top;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  background-color: var(
+    --sem-color-surface-neutral-alpha-inverse-stronger-static,
+    var(--cheese-platter-surface-neutral-alpha-inverse-stronger-static)
+  );
+  color: var(
+    --sem-color-content-neutral-primary-static,
+    var(--cheese-platter-content-neutral-primary-static)
+  );
+}
+
 .cheese-search-results-list .video_card_wrapper__M6XT7 {
   display: flex;
   gap: 8px;
@@ -1382,7 +1713,10 @@
 .cheese-search-results-list .video_card_title__Amjk2 {
   display: -webkit-box;
   overflow: hidden;
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   font-size: 15px;
   font-weight: 700;
   line-height: 20px;
@@ -1398,7 +1732,10 @@
   gap: 4px 8px;
   min-width: 0;
   margin-top: 5px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-size: 13px;
   line-height: 18px;
 }
@@ -1413,7 +1750,10 @@
   padding: 2px 6px;
   overflow: hidden;
   border-radius: 4px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.56));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   text-overflow: ellipsis;
   white-space: nowrap;
   /* 네이티브 동작 복제: 평상시 배경 없음, 호버 시에만 그라데이션 */
@@ -1607,7 +1947,7 @@
   overflow: hidden;
   border-radius: 15px;
   background-color: #22222299;
-  color: rgba(var(--Content-Neutral-Primary-Static-rgb), 0.72);
+  color: rgba(var(--sem-color-content-neutral-primary-static-rgb), 0.72);
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
@@ -1662,7 +2002,7 @@
   min-width: 0;
   /* 네이티브 정보 줄 타이포 복제. 단 색은 흰색 유지 — 우리 클립 카드는
      썸네일 위에 그라데이션 오버레이 + 흰 글씨 구조라 네이티브의 어두운
-     색(rgba(--Content-Neutral-Primary-Static-rgb))을 쓰면 안 보인다. */
+     색(rgba(--sem-color-content-neutral-primary-static-rgb))을 쓰면 안 보인다. */
   margin-top: 6px;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.92);
@@ -2182,12 +2522,22 @@
 
 .cheese-search-scroll-top {
   align-items: center;
-  background: var(--color-bg-01, #fff);
-  border: 1px solid var(--Border-Neutral-Base, rgba(0, 0, 0, 0.12));
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 50%;
   bottom: 28px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  color: var(--Content-Neutral-Warm-Strong, #24272b);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   cursor: pointer;
   display: inline-flex;
   height: 46px;
@@ -2290,12 +2640,20 @@
 
 .cheese-live-start-tooltip {
   align-items: center;
-  background-color: var(--Surface-Neutral-Base);
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
   border-radius: 6px;
   box-shadow:
-    0 2px 2px var(--Shadow-Strong),
-    0 2px 6px 2px var(--Shadow-Base);
-  color: var(--Content-Neutral-Cool-Strong);
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
   display: inline-flex;
   font-size: 12px;
   font-weight: 400;
@@ -2411,11 +2769,18 @@
   padding: 0 9px;
   border-radius: 6px;
   /* 치지직 원본 툴팁(_label_) 변수 그대로 → 라이트/다크 자동 대응 */
-  background-color: var(--Surface-Neutral-Base);
-  color: var(--Content-Neutral-Cool-Strong);
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
   box-shadow:
-    0 2px 2px var(--Shadow-Strong),
-    0 2px 6px 2px var(--Shadow-Base);
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px var(--sem-color-shadow-base);
   font-size: 12px;
   font-weight: 400;
   line-height: 17px;
@@ -2458,7 +2823,10 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--Content-Neutral-Cool-Base);
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   cursor: pointer;
   transition:
     background 0.12s ease,
@@ -2468,7 +2836,10 @@
 
 #cheese-header-follow .cheese-header-follow-chevron:hover:not(:disabled) {
   background: rgba(125, 125, 125, 0.16);
-  color: var(--Content-Neutral-Cool-Strong);
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
 }
 
 #cheese-header-follow .cheese-header-follow-chevron:disabled {
@@ -2517,7 +2888,10 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--Surface-Neutral-Subtle);
+  background: var(
+    --sem-color-surface-neutral-subtle,
+    var(--cheese-platter-surface-neutral-subtle)
+  );
 }
 
 #cheese-header-follow .cheese-header-follow-profile img {
@@ -2534,7 +2908,11 @@
   bottom: -1px;
   width: 7px;
   height: 7px;
-  border: 2px solid var(--Surface-Neutral-Base);
+  border: 2px solid
+    var(
+      --sem-color-surface-neutral-base,
+      var(--cheese-platter-surface-neutral-base)
+    );
   border-radius: 50%;
   background: #00ffa3;
   content: "";
@@ -2587,11 +2965,16 @@
   width: 200px;
   padding: 12px;
   border-radius: 6px;
-  background-color: var(--Surface-Neutral-Weaker);
-  color: var(--Content-Neutral-Cool-Strong);
+  background-color: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: var(--sem-color-content-neutral-cool-strong);
   box-shadow:
-    0 2px 2px var(--Shadow-Strong),
-    0 2px 6px 2px var(--Shadow-Base);
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
   word-break: break-all;
   word-wrap: break-word;
 }
@@ -2618,7 +3001,13 @@
   max-width: 100%;
   align-items: center;
   overflow: hidden;
-  color: var(--Content-Brand-Base, var(--Content-Neutral-Cool-Strong));
+  color: var(
+    --sem-color-content-brand-base,
+    var(
+      --sem-color-content-neutral-cool-strong,
+      var(--cheese-platter-content-neutral-cool-strong)
+    )
+  );
   font-size: 13px;
   font-weight: 400;
   line-height: 16px;
@@ -2664,8 +3053,17 @@
   padding: 0 5px;
   overflow: hidden;
   border-radius: 4px;
-  background-color: var(--Surface-Neutral-Subtle);
-  color: var(--Content-Neutral-Cool-Base, var(--Content-Neutral-Cool-Weak));
+  background-color: var(
+    --sem-color-surface-neutral-subtle,
+    var(--cheese-platter-surface-neutral-subtle)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(
+      --sem-color-content-neutral-cool-weak,
+      var(--cheese-platter-content-neutral-cool-weak)
+    )
+  );
   font-size: 11px;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -2678,7 +3076,7 @@
   -webkit-line-clamp: 2;
   margin-top: 10px;
   overflow: hidden;
-  color: var(--color-content-02, var(--Content-Neutral-Cool-Strong));
+  color: var(--color-content-02, var(--sem-color-content-neutral-cool-strong));
   font-size: 13px;
   letter-spacing: -0.3px;
   line-height: 16px;
@@ -2691,7 +3089,10 @@
   flex: none;
   margin: 8px 0 0;
   padding-left: 8px;
-  color: var(--Content-Accent-Red-Strong, #ff393e);
+  color: var(
+    --sem-color-content-accent-red-strong,
+    var(--cheese-platter-content-accent-red-strong)
+  );
   letter-spacing: -0.3px;
   font-size: 12px;
   font-style: normal;
@@ -3159,12 +3560,18 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   padding: 14px 4px;
   height: 16px;
   margin-left: auto;
-  color: var(--Content-Neutral-Cool-Strong);
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
   cursor: pointer;
 }
 
 #cheese-logpower-badge:hover {
-  background: var(--Surface-Interaction-Lighten-Hovered);
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
 }
 
 #cheese-logpower-badge .cheese-logpower-text {
@@ -3178,7 +3585,10 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
    바꾸면 함께 물든다(progress/timer 시계 svg는 이미 적립 색이라 무관). */
 #cheese-logpower-badge.is-earning .cheese-logpower-text,
 #cheese-logpower-badge.is-earning > svg {
-  color: var(--Content-Brand-Strong);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
 }
 
 /* 적립 중(progress) / 1시간 타이머(timer) — con-chzzk 동일. 적립 추적 로직이
@@ -3191,7 +3601,10 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   margin-left: 2px;
   padding-left: 2px;
   border-left: 1px solid rgba(var(--color-border-01-rgb), 0.25);
-  color: var(--Content-Brand-Strong);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -3212,7 +3625,10 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
 }
 
 .cheese-logpower-claimed {
-  color: var(--Content-Brand-Strong);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
 }
 
 .cheese-logpower-time {
@@ -3224,8 +3640,14 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
 #cheese-logpower-badge .tooltip-text {
   visibility: hidden;
   width: 120px;
-  background-color: var(--Surface-Neutral-Base);
-  color: var(--Content-Neutral-Cool-Stronger);
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-stronger,
+    var(--cheese-platter-content-neutral-cool-stronger)
+  );
   box-shadow:
     0 2px 8px 0 var(--color-shadow-layer04-02),
     0 0 2px 0 var(--color-shadow-layer04-01);
@@ -3249,7 +3671,7 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   margin-top: 2px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--Content-Neutral-Primary);
+  color: var(--sem-color-content-neutral-primary);
 }
 /* 값이 없으면(로드 전) 빈 줄이 생기지 않게 숨김. */
 #cheese-logpower-badge .cheese-logpower-tooltip-value:empty {
@@ -3263,7 +3685,10 @@ html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   margin-top: 3px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--Content-Brand-Strong);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
 }
 #cheese-logpower-badge .cheese-logpower-tip-progress[hidden],
 #cheese-logpower-badge .cheese-logpower-tip-timer[hidden] {
@@ -3295,7 +3720,10 @@ img.cheese-blind-emoji {
 .cheese-chat-time {
   margin-right: 4px;
   font-size: 0.85em;
-  color: var(--Content-Neutral-Cool-Base, rgba(255, 255, 255, 0.5));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   white-space: nowrap;
@@ -3352,6 +3780,48 @@ html.cheese-chat-width-resize-enabled
   max-width: 100% !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
+}
+
+/* 채팅 왼쪽 배치 시: 닉네임 프로필 팝오버([role="alertdialog"])와 닉네임 메뉴 팝오버가
+   치지직 기본값(position:fixed; right:10px)으로 화면 '오른쪽 가장자리'에 뜬다. 채팅창이
+   왼쪽에 있으면 팝오버만 반대편(화면 오른쪽)에 떨어져 나타난다(실측: aside.left=0 인데
+   팝오버 left=833). 왼쪽 배치일 땐 오른쪽 고정을 풀고(right:auto) 화면 왼쪽 가장자리에
+   붙여 채팅창 위/근처에 뜨게 한다. top 은 치지직이 닉네임 위치 기준으로 인라인 계산하므로
+   건드리지 않는다. 팝오버 폭은 위 규칙(profile-popup-width/popover-width)이 채팅 폭에
+   맞추므로 채팅창 안에 들어간다. */
+html.cheese-chat-left-position aside#aside-chatting [role="alertdialog"],
+html.cheese-chat-left-position aside#vod-aside [role="alertdialog"],
+html.cheese-chat-left-position
+  aside#vod-aside
+  [class*="_menu_"]
+  > [class*="_container_"] {
+  left: 8px !important;
+  right: auto !important;
+  /* 채팅 폭 변수(너비 조절 시 설정)가 있으면 그 안에, 없으면 기본 채팅 폭(353px) 기준으로
+     넘치지 않게 클램프. 8px 여백을 양쪽으로 빼 채팅창 안에 안전하게 든다. */
+  max-width: calc(var(--cheese-chat-resized-width, 353px) - 16px) !important;
+}
+
+/* 채팅 헤더 '더보기 메뉴' 팝오버(_menu_1e2su_ 안의 _container_1wi65_). 팝오버는 부모
+   _menu_(헤더 오른쪽에 위치)를 기준으로 absolute 배치되므로, 인라인 right:8px 이 곧
+   '채팅창 오른쪽 안쪽'에 뜨는 정상 위치다. 채팅 왼쪽 배치에서도 채팅창 자체가 화면
+   왼쪽으로 갈 뿐 헤더/팝오버의 상대 위치는 그대로라 right:8px 를 유지한다(left:8px 로
+   뒤집으면 좁은 _menu_ 기준 왼쪽이라 오히려 벗어난다 — 실측 확인). 인라인 값이 이미
+   맞으므로 여기서는 위치를 덮어쓰지 않는다. */
+
+/* 채팅 접기 버튼 SVG(_icon_1e2su_) — 기본 화살표는 오른쪽(채팅창 오른쪽으로 접힘)을
+   가리킨다. 채팅창이 왼쪽 배치일 땐 접히는 방향도 왼쪽이므로 아이콘을 좌우반전해
+   '왼쪽으로 사라진다'는 방향감을 준다. 해시 변경에 견디게 _icon_1e2su_ 로 잡되, 접기
+   버튼(aria-label="채팅 접기") 하위로 한정해 다른 아이콘을 건드리지 않는다. */
+html.cheese-chat-left-position
+  aside#aside-chatting
+  [aria-label="채팅 접기"]
+  [class*="_icon_1e2su_"],
+html.cheese-chat-left-position
+  aside#vod-aside
+  [aria-label="채팅 접기"]
+  [class*="_icon_1e2su_"] {
+  transform: scaleX(-1) !important;
 }
 
 /* 닉네임 클릭 메뉴 팝오버(_menu_ > _container_)도 채팅 너비에 맞춤. */
@@ -3431,12 +3901,18 @@ html.cheese-chat-width-resize-enabled
   display: inline-flex;
   align-items: center;
   margin-top: 1px;
-  color: var(--Content-Brand-Strong, #00ffa3);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   flex: none;
 }
 
 .cheese-logpower-toast-body b {
-  color: var(--Content-Brand-Strong, #00ffa3);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   font-weight: 800;
 }
 
@@ -3449,7 +3925,10 @@ html.cheese-chat-width-resize-enabled
 
 /* 하위 문구 안 채널명 강조(주변 흐린 회색보다 밝은 브랜드색 + 굵게). */
 .cheese-logpower-toast-ch {
-  color: var(--Content-Brand-Strong, #00ffa3);
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
   font-weight: 700;
 }
 
@@ -3519,11 +3998,19 @@ html.cheese-chat-width-resize-enabled
   flex-direction: column;
   align-items: center;
   overflow: hidden;
-  color: var(--Content-Neutral-Cool-Strong);
-  background: var(--Background-Neutral-Base, #16161a);
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   box-shadow:
-    0 4px 4px 0 var(--Shadow-Strong, rgba(0, 0, 0, 0.4)),
-    0 4px 12px 4px var(--Shadow-Base, rgba(0, 0, 0, 0.3));
+    0 4px 4px 0
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 4px 12px 4px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
 }
 .cheese-logpower-popup-action {
   align-self: stretch;
@@ -3544,7 +4031,10 @@ html.cheese-chat-width-resize-enabled
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  color: var(--Content-Neutral-Cool-Weak);
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak)
+  );
   cursor: pointer;
 }
 .cheese-logpower-popup-close svg {
@@ -3558,7 +4048,10 @@ html.cheese-chat-width-resize-enabled
   height: 22px;
   border-radius: 6px;
   cursor: pointer;
-  color: var(--Content-Neutral-Cool-Weak);
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak)
+  );
   flex: none;
 }
 .cheese-logpower-popup-refresh svg {
@@ -3567,8 +4060,8 @@ html.cheese-chat-width-resize-enabled
 .cheese-logpower-popup-close:hover,
 .cheese-logpower-popup-refresh:hover {
   background: var(
-    --Surface-Interaction-Lighten-Hovered,
-    rgba(255, 255, 255, 0.08)
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
   );
 }
 .cheese-logpower-popup-loading,
@@ -3605,7 +4098,10 @@ html.cheese-chat-width-resize-enabled
   border-radius: 3px;
   padding: 0 4px;
   border: 1px solid
-    var(--Border-Neutral-Strong-Static, rgba(255, 255, 255, 0.2));
+    var(
+      --sem-color-border-neutral-strong-static,
+      var(--cheese-platter-border-neutral-strong-static)
+    );
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -3633,8 +4129,8 @@ html.cheese-chat-width-resize-enabled
 }
 .cheese-logpower-popup-pagelink:hover {
   background: var(
-    --Surface-Interaction-Lighten-Hovered,
-    rgba(255, 255, 255, 0.08)
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
   );
 }
 .cheese-logpower-popup-notice,
@@ -3772,12 +4268,20 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
   border-radius: 6px;
   font-size: 12px;
   line-height: 16px;
-  color: var(--Content-Neutral-Cool-Strong, #fff);
-  background-color: var(--Surface-Neutral-Base, rgba(20, 22, 26, 0.95));
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 2px 2px var(--Shadow-Strong, rgba(0, 0, 0, 0.4)),
-    0 2px 6px 2px var(--Shadow-Base, rgba(0, 0, 0, 0.4));
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
@@ -3797,12 +4301,20 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.5;
-  color: var(--Content-Neutral-Cool-Strong, #fff);
-  background-color: var(--Surface-Neutral-Base, rgba(20, 22, 26, 0.96));
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 2px 2px var(--Shadow-Strong, rgba(0, 0, 0, 0.4)),
-    0 2px 6px 2px var(--Shadow-Base, rgba(0, 0, 0, 0.4));
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.12s ease;
@@ -3821,7 +4333,10 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
   margin-top: 3px;
 }
 .cheese-follow-channel-tooltip .cheese-fct-row span {
-  color: var(--Content-Neutral-Cool-Weak, rgba(255, 255, 255, 0.55));
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak)
+  );
 }
 .cheese-follow-channel-tooltip .cheese-fct-row strong {
   font-weight: 700;
@@ -3839,8 +4354,14 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
   border: none;
   cursor: pointer;
   font-weight: 700;
-  background-color: var(--Surface-Neutral-Base, #e1e1e5);
-  color: var(--Content-Neutral-Primary, #0e0f10);
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
   border-radius: 17px;
   font-size: 15px !important;
   line-height: 1 !important;
@@ -3872,8 +4393,14 @@ html.cheese-fcln-lock body {
   flex-direction: column;
   border-radius: 14px;
   overflow: hidden;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong, #151515);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 .cheese-fcln-head {
@@ -3881,7 +4408,11 @@ html.cheese-fcln-lock body {
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px;
-  border-bottom: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+  border-bottom: 1px solid
+    var(
+      --sem-color-surface-neutral-weaker,
+      var(--cheese-platter-surface-neutral-weaker)
+    );
 }
 .cheese-fcln-title {
   font-size: 16px;
@@ -3900,7 +4431,10 @@ html.cheese-fcln-lock body {
   border-radius: 6px;
 }
 .cheese-fcln-close:hover {
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.06));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
 }
 .cheese-fcln-toolbar {
   display: flex;
@@ -3925,8 +4459,15 @@ html.cheese-fcln-lock body {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
-  background: var(--color-bg-01, #fff);
+  border: 1px solid
+    var(
+      --sem-color-surface-neutral-weaker,
+      var(--cheese-platter-surface-neutral-weaker)
+    );
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   color: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -3948,9 +4489,16 @@ html.cheese-fcln-lock body {
   min-width: 160px;
   padding: 4px;
   border-radius: 10px;
-  background: var(--color-bg-01, #fff);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.1));
+  border: 1px solid
+    var(
+      --sem-color-surface-neutral-weaker,
+      var(--cheese-platter-surface-neutral-weaker)
+    );
   /* 열림/닫힘 애니메이션: 기본은 숨김(투명·살짝 위·클릭 불가), .is-open 이면 표시. */
   opacity: 0;
   transform: translateY(-6px);
@@ -3984,16 +4532,28 @@ html.cheese-fcln-lock body {
   margin-bottom: 5px;
 }
 .cheese-fcln-filter-option:hover {
-  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+  background-color: var(
+    --sem-color-border-brand-alpha-weak,
+    var(--cheese-platter-border-brand-alpha-weak)
+  );
 }
 .cheese-fcln-filter-option.is-active {
   font-weight: 800;
-  color: var(--Content-Brand-Weaker, #32bb81);
-  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+  color: var(
+    --sem-color-content-brand-weaker,
+    var(--cheese-platter-content-brand-weaker)
+  );
+  background-color: var(
+    --sem-color-border-brand-alpha-weak,
+    var(--cheese-platter-border-brand-alpha-weak)
+  );
 }
 .cheese-fcln-summary {
   font-size: 12px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
 }
 /* 전체 선택 바(목록 위) */
 .cheese-fcln-selectbar {
@@ -4004,7 +4564,11 @@ html.cheese-fcln-lock body {
 .cheese-fcln-selectall {
   padding: 6px 12px;
   border-radius: 8px;
-  border: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
+  border: 1px solid
+    var(
+      --sem-color-surface-neutral-weaker,
+      var(--cheese-platter-surface-neutral-weaker)
+    );
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -4012,7 +4576,10 @@ html.cheese-fcln-lock body {
   font-weight: 600;
 }
 .cheese-fcln-selectall:hover {
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.06));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
 }
 .cheese-fcln-list {
   flex: 1;
@@ -4024,7 +4591,10 @@ html.cheese-fcln-lock body {
   padding: 40px 0;
   text-align: center;
   font-size: 13px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
 }
 .cheese-fcln-row {
   display: flex;
@@ -4038,12 +4608,18 @@ html.cheese-fcln-lock body {
   margin-bottom: 5px;
 }
 .cheese-fcln-row:hover {
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.04));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
 }
 /* 언팔로우 대상으로 선택된 행 강조 */
 .cheese-fcln-row.is-selected,
 .cheese-fcln-row.is-selected:hover {
-  background-color: var(--Border-Brand-Alpha-Weak, #1bb39b26);
+  background-color: var(
+    --sem-color-border-brand-alpha-weak,
+    var(--cheese-platter-border-brand-alpha-weak)
+  );
 }
 .cheese-fcln-check input {
   width: 16px;
@@ -4057,7 +4633,10 @@ html.cheese-fcln-lock body {
   border-radius: 50%;
   object-fit: cover;
   display: block;
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.1));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
 }
 /* 프로필·이름 클릭 시 새 탭으로 채널 이동 → 클릭 가능함을 커서/호버로 표시 */
 .cheese-fcln-prof {
@@ -4082,7 +4661,10 @@ html.cheese-fcln-lock body {
 .cheese-fcln-date {
   flex: none;
   font-size: 12px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
   min-width: 68px;
   text-align: right;
 }
@@ -4091,8 +4673,14 @@ html.cheese-fcln-lock body {
   padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid transparent;
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.1));
-  color: var(--Content-Neutral-Warm-Stronger, #151515);
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-stronger,
+    var(--cheese-platter-content-neutral-warm-stronger)
+  );
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -4113,7 +4701,10 @@ html.cheese-fcln-lock body {
   position: relative;
   overflow: hidden;
   border-radius: 6px;
-  background: var(--Surface-Neutral-Weak, rgba(0, 0, 0, 0.07));
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
 }
 .cheese-fcln-sk::after {
   content: "";
@@ -4157,7 +4748,10 @@ html.cheese-fcln-lock body {
 .cheese-fcln-progress {
   padding: 8px 18px;
   font-size: 12px;
-  color: var(--Content-Neutral-Cool-Base, rgba(0, 0, 0, 0.58));
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
 }
 .cheese-fcln-actions {
   display: flex;
@@ -4165,7 +4759,11 @@ html.cheese-fcln-lock body {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+  border-top: 1px solid
+    var(
+      --sem-color-surface-neutral-weaker,
+      var(--cheese-platter-surface-neutral-weaker)
+    );
 }
 .cheese-fcln-actions button {
   padding: 9px 16px;
@@ -4190,7 +4788,10 @@ html.cheese-fcln-lock body {
   color: #fff;
 }
 .cheese-fcln-actions button:disabled {
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.15));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
   color: inherit;
 }
 
@@ -4208,8 +4809,14 @@ html.cheese-fcln-lock body {
   width: min(340px, calc(100% - 40px));
   padding: 22px 20px 16px;
   border-radius: 12px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong, #151515);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   text-align: center;
 }
@@ -4232,7 +4839,10 @@ html.cheese-fcln-lock body {
   font-weight: 700;
 }
 .cheese-fcln-confirm-cancel {
-  background: var(--Surface-Neutral-Weaker, rgba(0, 0, 0, 0.08));
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
   color: inherit;
 }
 .cheese-fcln-confirm-ok {
@@ -4253,7 +4863,10 @@ html.cheese-fcln-lock body {
   margin: 2px 0 14px;
 }
 .cheese-search-rerank-label {
-  color: var(--Content-Brand-Base, #168f5c) !important;
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  ) !important;
   font-size: 14px !important;
   font-weight: 700;
 }
@@ -4276,12 +4889,18 @@ html.cheese-fcln-lock body {
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--Content-Neutral-Warm-Base, #888);
+  color: var(
+    --sem-color-content-neutral-warm-base,
+    var(--cheese-platter-content-neutral-warm-base)
+  );
   cursor: help;
 }
 .cheese-search-rerank-info:hover,
 .cheese-search-rerank-info:focus-visible {
-  color: var(--Content-Brand-Base, #168f5c);
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
 }
 .cheese-search-rerank-info-tip {
   display: none;
@@ -4291,10 +4910,17 @@ html.cheese-fcln-lock body {
   z-index: 40;
   width: 320px;
   padding: 10px 12px;
-  border: 1px solid var(--Border-Neutral-Base, rgba(128, 128, 128, 0.35));
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
   border-radius: 8px;
-  background: var(--color-bg-01, #fff);
-  color: var(--Content-Neutral-Warm-Strong, inherit);
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(--sem-color-content-neutral-warm-strong, inherit);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
   font-size: 12px;
   font-weight: 400;
