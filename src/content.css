@@ -2415,7 +2415,9 @@
 .cheese-search-comment-marker {
   background: transparent;
   border: 0;
-  bottom: 0;
+  /* 레이어 부모가 세그(상하 padding 8px 박스)에서 wrap 루트(3px, 패딩 없음)로 바뀌어
+     bottom:0 이면 마커가 바 위로 떠 보인다 → -8px 로 내려 바에 걸치게(실측 보정). */
+  bottom: -8px;
   color: #25df97;
   cursor: pointer;
   height: 18px;
@@ -2447,14 +2449,48 @@
   width: 8px;
 }
 
-.pzp-pc--size-l
-  .pzp-progress-slider
-  .pzp-ui-progress__wrap:hover
-  .cheese-search-comment-marker,
-.pzp-ui-slider__handler:hover .cheese-search-comment-marker,
+/* 호버 시 바가 굵어지는 만큼 마커도 +2px. ⚠ 마커 레이어가 세그가 아니라 wrap 루트에
+   붙으므로(챕터 대응), 세그 기준 옛 셀렉터(.pzp-ui-progress__wrap:hover 하위 등)는
+   더 이상 매칭되지 않는다 — wrap 루트 :hover 기준으로 잡아 챕터/일반 공통 적용. */
+.pzp-ui-slider__wrap:hover .cheese-search-comment-marker,
 .pzp-ui-slider__wrap.pzp-ui-slider--handler-hover
   .cheese-search-comment-marker {
-  bottom: 2px;
+  bottom: -6px;
+}
+/* 단, 마커에 호버/포커스가 있으면 '모든' 마커를 기본 위치(-8px)로 되돌린다. 마커에
+   호버하면 재생바도 6px 로 굵어져 wrap:hover 규칙이 모든 마커를 -6px 로 올리는데, 이때
+   사용자는 마커를 조준 중이라 마커들이 함께 들썩이면 거슬린다. 레이어가 마커 호버/포커스를
+   품고 있으면(:has) 마커 위치를 고정한다. wrap:hover 규칙보다 뒤·특이도 높아 덮는다. */
+.cheese-search-comment-marker-layer:has(.cheese-search-comment-marker:hover)
+  .cheese-search-comment-marker,
+.cheese-search-comment-marker-layer:has(
+    .cheese-search-comment-marker:focus-visible
+  )
+  .cheese-search-comment-marker {
+  bottom: -8px;
+}
+
+/* 전체화면(.pzp-pc--fullscreen)은 재생바가 더 두꺼워 마커 기준이 다르다. 기본 -7px,
+   재생바 호버 -5px, 마커 자신 호버/포커스 -5px. (일반: -8/-6/-8 대비 전체화면 보정.) */
+.pzp-pc--fullscreen .cheese-search-comment-marker {
+  bottom: -7px;
+}
+.pzp-pc--fullscreen .pzp-ui-slider__wrap:hover .cheese-search-comment-marker,
+.pzp-pc--fullscreen
+  .pzp-ui-slider__wrap.pzp-ui-slider--handler-hover
+  .cheese-search-comment-marker {
+  bottom: -5px;
+}
+/* 전체화면: 마커 호버/포커스 시 모든 마커를 기본(-7px) 유지. (일반의 -8px 대응.) */
+.pzp-pc--fullscreen
+  .cheese-search-comment-marker-layer:has(.cheese-search-comment-marker:hover)
+  .cheese-search-comment-marker,
+.pzp-pc--fullscreen
+  .cheese-search-comment-marker-layer:has(
+    .cheese-search-comment-marker:focus-visible
+  )
+  .cheese-search-comment-marker {
+  bottom: -7px;
 }
 
 .cheese-search-comment-marker:hover .cheese-search-comment-marker-dot,
@@ -2488,12 +2524,21 @@
   gap: 4px;
   line-height: 1.35;
   margin-top: 6px;
+  /* 일반 상태 preview 폭은 182px(실측)라 이전 고정 180px 이 적정. 전체화면만 preview 가
+     272px 로 커지므로(아래 fullscreen 규칙에서 100%) 여기선 일반 기준으로 둔다. */
   max-width: 180px;
   min-width: 0;
   padding: 9px 10px;
   pointer-events: none;
   text-align: center;
   width: 180px;
+}
+
+/* 전체화면은 seek preview(부모 __description)가 넓어진다(실측: 182px→272px). 툴팁을
+   부모 폭에 맞춰 100% 로 채운다(box-sizing:border-box 라 패딩 포함 정확히 맞음). */
+.pzp-pc--fullscreen .cheese-search-comment-preview-tooltip {
+  width: 100%;
+  max-width: 100%;
 }
 
 .cheese-search-comment-preview-tooltip strong {
@@ -4933,3 +4978,52 @@ html.cheese-fcln-lock body {
 .cheese-search-rerank-info:focus-visible .cheese-search-rerank-info-tip {
   display: block;
 }
+
+/* ══ 다시보기 AI 생성 챕터 숨김 ═══════════════════════════════════════════════
+   치지직이 일부 다시보기에 자동 생성하는 AI 챕터가 스포가 될 수 있다는 피드백 →
+   설정 토글(기본 OFF=표시). 켜면 content.js 가 html 에 cheese-vod-chapter-hide 를
+   붙이고 여기서 숨긴다. 챕터 UI는 세 곳:
+   1) 좌하단 챕터 제목(.pzp-pc__chapter-title / .pzp-chapter-title)
+   2) 탐색 미리보기 등 chapter 계열 표시(클래스명에 chapter 포함)
+   3) 재생바 세그먼트 분할(.pzp-ui-progress__wrap 들 사이 틈) — 요소 자체는 재생바
+      구조라 숨길 수 없고, 틈(gap/margin)만 0 으로 밀어 연속된 바처럼 보이게 한다. */
+/* ⚠ [class*="chapter"] 광범위 매칭은 금지 — 챕터 있는 다시보기에선 재생바 슬라이더
+   (또는 그 조상)에도 chapter 계열 클래스가 붙어 재생바가 통째로 사라졌다(실측).
+   확실히 아는 표시 요소만 콕 집어 숨긴다. */
+html.cheese-vod-chapter-hide .pzp-pc .pzp-pc__chapter-title,
+html.cheese-vod-chapter-hide .pzp-pc .pzp-chapter-title,
+html.cheese-vod-chapter-hide .pzp-pc .pzp-seeking-preview__title {
+  display: none !important;
+}
+/* 재생바의 챕터 표시는 '호버한 챕터 세그만 굵어지는' 유튜브식 동작이다(실측: 비호버 시
+   wrap 3px·전 세그 3px·같은 색·간격 0 = 구분 안 보임 / 호버 시 wrap 만 6px 로 커지고
+   호버된 세그만 확대). 숨김 모드에선 호버 시 '모든' 세그를 wrap 높이(100%=6px)로 채워
+   챕터 없는 영상과 동일한 '전체 바 확대'처럼 보이게 한다.
+   - :hover 게이트: 비호버엔 미적용 → height:100% 상시 적용 때 일반 다시보기 재생바가
+     순환 참조로 붕괴하던 문제 회피(실측).
+   - :has(세그+세그) 게이트: 세그 2개 이상(=챕터 있는 영상)일 때만 적용, 일반 다시보기는
+     네이티브 그대로.
+   - :not(:has(마커 호버/포커스)) 게이트: 댓글 타임스탬프 '마커'에만 호버해도 wrap:hover 는
+     참이라 재생바가 통째로 굵어졌다(마커 조준 중엔 재생바가 안 굵어져야 자연스러움) →
+     마커 호버/포커스 중이면 세그 확대를 끈다(네이티브 재생바 두께 동작에 맡김).
+   - padding 은 절대 건드리지 않는다(상하 8px 가 클릭 영역, 0 이면 재생바 소멸 — 실측). */
+html.cheese-vod-chapter-hide
+  .pzp-ui-slider__wrap:hover:has(
+    > .pzp-ui-progress__wrap + .pzp-ui-progress__wrap
+  ):not(
+    :has(.cheese-search-comment-marker:hover)
+  ):not(:has(.cheese-search-comment-marker:focus-visible))
+  > .pzp-ui-progress__wrap {
+  height: 100% !important;
+}
+
+/* 재생바 세그(__bg/__loaded/__played)의 폭·색은 건드리지 않는다. 실측으로 확정된 이유:
+   세 요소가 각각 다른 렌더 구조(bg=들여쓴 트랙, loaded=자체 배경, played=::before 클립)라,
+   어느 하나라도 width 를 손대면 다른 요소가 노출되는 부작용이 연쇄로 났다:
+   - __bg width:100% → 미재생 배경(0.5)이 연속으로 밝아져 '버퍼처럼 긴' 띠로 보임.
+   - __played width:calc(scale) → 미재생 세그의 played 가 사라져 그 아래 __bg(0.5)가
+     노출(원본은 played 요소가 세그를 덮어 elementFromPoint 가 투명, 우리 규칙 땐 w0.5).
+   - __loaded 손대면 버퍼가 크게 길어짐.
+   → 세그 경계의 3px 진행색 틈은 남겨둔다(원본에도 있는 챕터 구분선 수준). 스포 방지의
+   핵심(챕터 제목·미리보기 챕터명 숨김, 호버 시 챕터 강조 균일화)은 위에서 이미 달성했고,
+   재생바 세그 틈은 미묘해 실용상 충분하다. 재생바 폭 조작은 부작용>이득이라 하지 않는다. */

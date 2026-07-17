@@ -469,6 +469,11 @@ let cardLivePreviewOn = false;
 // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
 const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
 let cardDateTooltipOn = true;
+// 다시보기 AI 생성 챕터 숨김(전역, 기본 OFF=표시). 치지직이 일부 다시보기에 자동 생성하는
+// 챕터(재생바 분할 + 좌하단 챕터 제목)가 스포가 될 수 있다는 피드백 → 옵션으로 숨김.
+// 켜면 html 에 cheese-vod-chapter-hide 클래스를 붙이고 CSS(content.css)가 숨긴다.
+const VOD_CHAPTER_HIDE_KEY = "cheeseVodChapterHide";
+let vodChapterHideOn = false;
 // 팔로잉 목록(following?tab=CHANNEL) 채널 아이템 호버 시 커스텀 툴팁으로 최근 방송일·
 // 팔로우 시작일·첫 방송일·총 방송 시간 표시(전역, 기본 OFF). content.js 전용.
 const FOLLOW_CHANNEL_TOOLTIP_KEY = "cheeseFollowChannelTooltip";
@@ -6761,7 +6766,17 @@ function renderCommentTimestampMarkers() {
   }
   slider.style.overflow = "visible";
   const sliderRoot = slider.closest(".pzp-ui-slider__wrap");
-  if (sliderRoot) sliderRoot.style.overflow = "visible";
+  if (sliderRoot) {
+    sliderRoot.style.overflow = "visible";
+    // ⚠ AI 챕터 영상은 첫 세그(slider)가 재생바 폭의 일부(첫 챕터 비율)라, 레이어를
+    // 세그 안에 두면 left% 가 그 좁은 폭 기준으로 왜곡된다. 전체 폭인 wrap 루트에
+    // 부착한다(일반 영상도 세그=전체 폭이라 동작 동일).
+    if (getComputedStyle(sliderRoot).position === "static") {
+      sliderRoot.style.position = "relative";
+    }
+  }
+  // 레이어 부착처: wrap 루트(전체 폭) 우선, 없으면 기존처럼 첫 세그.
+  const layerHost = sliderRoot || slider;
 
   const markers = commentMarkerState.markers.filter(
     (marker) =>
@@ -6777,12 +6792,17 @@ function renderCommentTimestampMarkers() {
       .join(","),
   ].join("|");
 
-  let layer = slider.querySelector(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`);
+  let layer = layerHost.querySelector(`.${VIDEO_COMMENT_MARKER_LAYER_CLASS}`);
+  // 예전 버전이 첫 세그 안에 만들어 둔 레이어가 있으면 wrap 루트로 옮겨 새로 만든다.
+  if (layer && layer.parentElement !== layerHost) {
+    layer.remove();
+    layer = null;
+  }
   if (layer?.dataset.signature === signature) return;
   if (!layer) {
     layer = document.createElement("div");
     layer.className = VIDEO_COMMENT_MARKER_LAYER_CLASS;
-    slider.append(layer);
+    layerHost.append(layer);
   }
 
   layer.dataset.signature = signature;
@@ -6820,6 +6840,21 @@ function findPlayerSliderProgressWrap() {
 }
 
 function getPlayerDuration(slider) {
+  // ⚠ AI 챕터가 있는 다시보기는 재생바가 여러 세그먼트로 나뉘고, 각 세그의 max 는 그
+  // '챕터의 끝 시각'이다(첫 세그 max=첫 챕터 끝). 첫 세그 max 를 duration 으로 쓰면
+  // 이후 시간대 마커가 전부 필터로 탈락해 "챕터 영상에서 마커가 안 보이는" 버그가
+  // 났다(실측). 같은 wrap 의 모든 세그 max 중 최댓값(=영상 전체 길이)을 쓴다.
+  const root = slider?.closest?.(".pzp-ui-slider__wrap");
+  if (root) {
+    let maxOfSegs = 0;
+    root
+      .querySelectorAll(":scope > .pzp-ui-progress__wrap")
+      .forEach((seg) => {
+        const m = Number(seg.getAttribute("max") || 0);
+        if (Number.isFinite(m) && m > maxOfSegs) maxOfSegs = m;
+      });
+    if (maxOfSegs > 0) return maxOfSegs;
+  }
   const fromSlider = Number(slider?.getAttribute("max") || 0);
   if (Number.isFinite(fromSlider) && fromSlider > 0) return fromSlider;
   const videoDuration = Number(document.querySelector("video")?.duration || 0);
@@ -12845,12 +12880,41 @@ function harvestSearchRerankNativeChannelIcons() {
   if (changed) searchRerankIconTemplateRevision++;
 }
 
-// 하드코딩 URL 맵으로 업적 배지 <i> 를 만든다. 구조 소스는 두 단계:
+// 배지 <i> 의 클래스를 페이지에서 하베스트한다. 검색 결과에 스트리머 섹션이 아예 없어도
+// (예: '팰월드' 처럼 동영상만 잡히는 검색어) 채팅 닉네임 마크 등 페이지 어딘가의 _icon_
+// <i> 에서 클래스를 얻을 수 있다. 못 찾으면 알려진 클래스로 폴백.
+// ⚠ 이게 없으면: 스트리머가 안 잡히는 검색어에서는 harvest 소스가 없어 두 구조 템플릿이
+// 모두 null → 인증마크/업적 배지가 통째로 생략됐다(파트너 이름을 한 번 검색해 템플릿이
+// 캐시된 뒤에야 배지가 붙는 버그).
+function getSearchRerankIconClass() {
+  const anyIcon = document.querySelector(
+    'i[class*="_icon_1iatj_"], i[class*="_icon_dtc6c_"], i[class*="_icon_"][style*="background-image"]',
+  );
+  return anyIcon?.className || "_icon_1iatj_17";
+}
+
+// 구조 템플릿이 하나도 없을 때 <i> 를 직접 만든다(배경이미지 + blind 라벨).
+// 원본과 동일한 _icon_ 클래스 + 인라인 크기를 준다. 호버 툴팁은 없지만 배지 이미지·이름은
+// 정확하다.
+function buildSearchRerankIconFromScratch(url, label) {
+  const icon = document.createElement("i");
+  icon.className = getSearchRerankIconClass();
+  icon.style.width = "16px";
+  icon.style.height = "16px";
+  if (url) icon.style.backgroundImage = `url("${url}")`;
+  const blind = document.createElement("span");
+  blind.className = "blind";
+  blind.textContent = label || "";
+  icon.appendChild(blind);
+  return icon;
+}
+
+// 하드코딩 URL 맵으로 업적 배지 <i> 를 만든다. 구조 소스는 세 단계:
 //  1) 업적 구조 템플릿(harvest) 이 있으면 그걸로(툴팁까지 완성).
 //  2) 없으면(검색 결과에 네이티브 업적 배지가 하나도 없던 경우) 인증마크 템플릿을 재사용
 //     한다 — 업적/인증 <i> 는 같은 _icon_ 클래스를 쓰므로, 배경이미지·blind 만 갈아끼우면
-//     배지가 정상 표시된다(호버 툴팁은 없지만 이미지·이름은 정확). 둘 다 없거나 badgeId 가
-//     맵에 없으면 null.
+//     배지가 정상 표시된다(호버 툴팁은 없지만 이미지·이름은 정확).
+//  3) 둘 다 없으면(스트리머 섹션이 없는 검색어) 직접 생성한다. badgeId 가 맵에 없으면 null.
 function createSearchRerankFallbackAchievementIcon(badgeId) {
   const url = ACHIEVEMENT_BADGE_URL_MAP[badgeId];
   if (!url) return null;
@@ -12874,7 +12938,8 @@ function createSearchRerankFallbackAchievementIcon(badgeId) {
     if (blind) blind.textContent = label;
     return icon;
   }
-  return null;
+  // 3) 템플릿이 전혀 없는 경우(스트리머 섹션 없는 검색어) — 직접 생성.
+  return buildSearchRerankIconFromScratch(url, label);
 }
 
 function setSearchRerankChannelNameAndBadges(name, channel) {
@@ -12902,9 +12967,12 @@ function setSearchRerankChannelNameAndBadges(name, channel) {
     return;
   }
   // 2) 캐시 미스(뒤 페이지 채널 등) → API 값으로 폴백 생성. 원본처럼 인증마크 + 첫 업적
-  //    배지 1개만. 구조 템플릿이 아직 없으면 그 배지는 생략(잘못된 배지는 안 붙임).
-  if (channel.verifiedMark === true && searchRerankVerifiedTemplate) {
-    const v = searchRerankVerifiedTemplate.cloneNode(true);
+  //    배지 1개만. 구조 템플릿이 없으면(스트리머 섹션 없는 검색어) 직접 만들어 붙인다.
+  //    인증마크는 배경이미지 없이 _icon_ 클래스의 CSS 로 그려지므로 클래스만 맞으면 된다.
+  if (channel.verifiedMark === true) {
+    const v = searchRerankVerifiedTemplate
+      ? searchRerankVerifiedTemplate.cloneNode(true)
+      : buildSearchRerankIconFromScratch("", "인증 마크");
     v.classList.add("cheese-search-rerank-channel-icon");
     iconHost.appendChild(v);
   }
@@ -15670,6 +15738,23 @@ async function loadCardDateTooltip() {
   else unbindCardDateTooltip();
 }
 
+// AI 챕터 숨김 상태를 html 클래스로 반영(CSS 가 실제 숨김을 수행).
+function applyVodChapterHide() {
+  document.documentElement.classList.toggle(
+    "cheese-vod-chapter-hide",
+    vodChapterHideOn,
+  );
+}
+
+async function loadVodChapterHide() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([VOD_CHAPTER_HIDE_KEY]);
+    vodChapterHideOn = data?.[VOD_CHAPTER_HIDE_KEY] === true; // 기본 OFF=표시
+  } catch {}
+  applyVodChapterHide();
+}
+
 // 헤더 전담 옵저버(미니 네비가 React 재렌더로 사라지면 즉시 복구).
 let headerObserver = null;
 let headerObservedRoot = null;
@@ -15948,6 +16033,7 @@ const BOOT_PREFETCH_KEYS = [
     CARD_PREVIEW_AUDIO_KEY,
     CARD_PREVIEW_WHEEL_DELAY_KEY,
     CARD_DATE_TOOLTIP_KEY,
+    VOD_CHAPTER_HIDE_KEY,
     FOLLOW_CHANNEL_TOOLTIP_KEY,
     FOLLOW_CLEANUP_KEY,
     CHAT_FOLD_PERSIST_KEY,
@@ -16402,6 +16488,10 @@ if (chrome.storage?.onChanged) {
       // 켜지면 호버 감지 바인딩 보장, 꺼지고 팔로잉 미리보기도 꺼졌으면 닫기.
       if (cardLivePreviewOn || followPreviewOn) bindFollowPreviewHover();
       else closeFollowPreview();
+    }
+    if (changes[VOD_CHAPTER_HIDE_KEY]) {
+      vodChapterHideOn = changes[VOD_CHAPTER_HIDE_KEY].newValue === true;
+      applyVodChapterHide(); // 즉시 반영(html 클래스 토글)
     }
     if (changes[CARD_DATE_TOOLTIP_KEY]) {
       cardDateTooltipOn = changes[CARD_DATE_TOOLTIP_KEY].newValue !== false;
@@ -17133,6 +17223,7 @@ void loadFollowPreview();
 void loadFollowOpenNewTab();
 void loadCardPreviewAudio();
 void loadCardDateTooltip();
+void loadVodChapterHide();
 void loadFollowChannelTooltip();
 void loadFollowCleanup();
 void loadChatFoldPersist();

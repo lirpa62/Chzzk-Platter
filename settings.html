@@ -1168,9 +1168,7 @@
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
-                  <span class="settings-item-name"
-                    >└ 타임스탬프 클릭 시</span
-                  >
+                  <span class="settings-item-name">└ 타임스탬프 클릭 시</span>
                   <span class="settings-item-desc"
                     >댓글 타임스탬프 목록에서 항목을 클릭해 이동할 때 팝오버를
                     닫을지 여부(기본 닫기)</span
@@ -1208,11 +1206,7 @@
                   </button>
                 </div>
               </li>
-              <li
-                class="settings-item"
-                data-comment-ts-delay-row
-                hidden
-              >
+              <li class="settings-item" data-comment-ts-delay-row hidden>
                 <label for="commentTsClickDelayInput">
                   <span class="settings-item-name">└─ 지연 닫기 시간</span>
                   <span class="settings-item-desc"
@@ -1258,6 +1252,19 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-card-date-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">AI 챕터 숨김</span>
+                  <span class="settings-item-desc"
+                    >일부 다시보기에 자동 생성되는 AI 챕터를 숨깁니다. 내용
+                    스포가 싫을 때 사용(체크=숨김, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-chapter-hide />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -1359,10 +1366,9 @@
                 <div>
                   <span class="settings-item-name">추천순 점수 비중</span>
                   <span class="settings-item-desc"
-                    >추천순 정렬 점수의 항목별 비중(각 0~100). 모든 항목이
-                    0이면 기본값으로 자동 적용됩니다. 기본값: 제목 관련도 40 ·
-                    조회수 30 · 라이브 시청자 15 · 파트너 채널 10 · 최신성
-                    5</span
+                    >추천순 정렬 점수의 항목별 비중(각 0~100). 모든 항목이 0이면
+                    기본값으로 자동 적용됩니다. 기본값: 제목 관련도 40 · 조회수
+                    30 · 라이브 시청자 15 · 파트너 채널 10 · 최신성 5</span
                   >
                 </div>
                 <div class="settings-custom-row">

@@ -27,6 +27,7 @@
     "cheeseRootToFollowingLogoMode",
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
+    "cheeseVodChapterHide",
     "cheeseCardLivePreview",
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewWheelDelaySec",
@@ -2512,6 +2513,30 @@
     } catch {}
   });
   loadCardDateTooltip();
+
+  // ── 다시보기 AI 챕터 숨김(전역, 기본 OFF=표시) ───────────────────────────────
+  const VOD_CHAPTER_HIDE_KEY = "cheeseVodChapterHide";
+  const vodChapterHideInput = document.querySelector(
+    "[data-vod-chapter-hide]",
+  );
+
+  async function loadVodChapterHide() {
+    let on = false; // 기본 꺼짐(챕터 표시)
+    try {
+      const data = await cachedStorageGet(VOD_CHAPTER_HIDE_KEY);
+      on = data?.[VOD_CHAPTER_HIDE_KEY] === true;
+    } catch {}
+    if (vodChapterHideInput) vodChapterHideInput.checked = on;
+  }
+
+  vodChapterHideInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VOD_CHAPTER_HIDE_KEY]: vodChapterHideInput.checked,
+      });
+    } catch {}
+  });
+  loadVodChapterHide();
 
   // ── 구독 배지 다음 등급까지 남은 기간(구독권 관리 팝업, 전역 기본 ON) ────────
   const SUBSCRIBE_BADGE_PROGRESS_KEY = "cheeseSubscribeBadgeProgress";
