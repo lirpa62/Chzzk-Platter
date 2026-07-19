@@ -29,7 +29,7 @@
   function channelIdFromPopup(popup) {
     if (!popup) return null;
     const imgs = popup.querySelectorAll(
-      "[class*='_image_62f6x_'], [class*='_emoticon_'] img, [class*='_badge_'] img",
+      ":is([class*='_image_62f6x_'], [class*='_image_jj04l_']), [class*='_emoticon_'] img, [class*='_badge_'] img",
     );
     for (const el of imgs) {
       const url =
@@ -219,7 +219,9 @@
 
   // '내 구독 배지' 영역(_area_) 반환: 내부 제목 strong 이 '내 구독 배지'.
   function findBadgeArea(popup) {
-    const areas = popup.querySelectorAll("[class*='_area_62f6x_']");
+    const areas = popup.querySelectorAll(
+      ":is([class*='_area_62f6x_'], [class*='_area_jj04l_'])",
+    );
     for (const a of areas) {
       const t = a
         .querySelector("[class*='_text_'] strong, [class*='_title_']")
@@ -267,8 +269,10 @@
     Object.assign(overlay.style, {
       position: "fixed",
       zIndex: "2147483000",
-      background: "var(--Surface-Neutral-Weaker)",
-      color: "var(--Content-Neutral-Warm-Stronger)",
+      background:
+        "var(--sem-color-surface-neutral-weaker, var(--cheese-platter-surface-neutral-weaker))",
+      color:
+        "var(--sem-color-content-neutral-warm-stronger, var(--cheese-platter-content-neutral-warm-stronger))",
       borderRadius: "12px",
       boxShadow: "0 8px 28px rgba(0,0,0,.45)",
       padding: "16px",
@@ -309,8 +313,7 @@
       // 3) 그래도 없으면 #popup_contents 의 다이얼로그 조상(또는 콘텐츠 자체).
       if (!dialog) {
         const contents = document.getElementById("popup_contents");
-        dialog =
-          contents?.closest("[role='alertdialog']") || contents || null;
+        dialog = contents?.closest("[role='alertdialog']") || contents || null;
       }
       return dialog && document.body.contains(dialog) ? dialog : null;
     }
@@ -322,7 +325,9 @@
         const pad = 12;
         // 가로는 팝업 박스 기준(안쪽 여백 pad). 세로는 헤더/프로필을 제외하고 첫 콘텐츠
         // 영역(_area_ 첫 번째, "1개월 구독권 만료일")부터 팝업 하단까지만 덮는다.
-        const firstArea = box.querySelector("[class*='_area_62f6x_']");
+        const firstArea = box.querySelector(
+          ":is([class*='_area_62f6x_'], [class*='_area_jj04l_'])",
+        );
         const topPx = firstArea
           ? firstArea.getBoundingClientRect().top
           : r.top + pad;
@@ -357,7 +362,7 @@
     });
     const h = document.createElement("strong");
     h.textContent = "전체 구독 배지";
-    h.className = "_title_10ysp_69";
+    h.className = "_title_uasnk_69";
     const close = document.createElement("button");
     close.type = "button";
     close.setAttribute("aria-label", "닫기");
@@ -500,7 +505,9 @@
 
   // '내 구독 배지' 영역에 '전체보기' 버튼을 추가한다(이미 있으면 스킵).
   async function ensureViewAllButton(area, info) {
-    const box = area.querySelector("[class*='_box_62f6x_']");
+    const box = area.querySelector(
+      ":is([class*='_box_62f6x_'], [class*='_box_jj04l_'])",
+    );
     if (!box || box.querySelector("[data-cheese-view-all]")) return;
 
     const btn = document.createElement("button");
@@ -550,17 +557,23 @@
     const gauge = calcGauge(info);
     if (!gauge) return;
 
-    const progress = area.querySelector("[class*='_progress_62f6x_']");
+    const progress = area.querySelector(
+      ":is([class*='_progress_62f6x_'], [class*='_progress_jj04l_'])",
+    );
     if (!progress) return;
 
     // ① 다음 배지(두 번째 _badge_) 이미지 흐리게 + 잠금 오버레이.
     // React 안전: img 를 이동/래핑하지 않는다. nextBadge 를 relative 로 두고 자물쇠
     // SVG 를 절대배치 오버레이로 '추가'만 한다(마커 data-cheese-lock). 제거 시 자물쇠만
     // 걷어내고 opacity 만 원복하면 되므로 React 노드는 그대로 유지된다.
-    const badges = progress.querySelectorAll("[class*='_badge_62f6x_']");
+    const badges = progress.querySelectorAll(
+      ":is([class*='_badge_62f6x_'], [class*='_badge_jj04l_'])",
+    );
     const nextBadge = badges[1];
     if (nextBadge && !nextBadge.querySelector("[data-cheese-lock]")) {
-      const img = nextBadge.querySelector("[class*='_image_62f6x_']");
+      const img = nextBadge.querySelector(
+        ":is([class*='_image_62f6x_'], [class*='_image_jj04l_'])",
+      );
       if (img) {
         img.style.opacity = ".5";
         if (getComputedStyle(nextBadge).position === "static") {
@@ -591,10 +604,14 @@
     }
 
     // ② 게이지 % 반영(치지직이 이미 값을 넣지만, 우리 계산으로 보정).
-    const gaugeEl = progress.querySelector("[class*='_gauge_62f6x_']");
+    const gaugeEl = progress.querySelector(
+      ":is([class*='_gauge_62f6x_'], [class*='_gauge_jj04l_'])",
+    );
     if (gaugeEl) gaugeEl.style.width = `${gauge.percent}%`;
 
-    const bar = progress.querySelector("[class*='_bar_62f6x_']");
+    const bar = progress.querySelector(
+      ":is([class*='_bar_62f6x_'], [class*='_bar_jj04l_'])",
+    );
     if (!bar) return;
 
     // ③ 남은 기간 라벨(우리 노드). 이미 있으면 텍스트만 갱신.
@@ -712,8 +729,12 @@
       .forEach((el) => el.remove());
     // 잠금 오버레이: 자물쇠 SVG 제거 + 흐리게 한 배지 이미지 opacity 원복.
     document.querySelectorAll("[data-cheese-lock]").forEach((lock) => {
-      const badge = lock.closest("[class*='_badge_62f6x_']");
-      const img = badge?.querySelector("[class*='_image_62f6x_']");
+      const badge = lock.closest(
+        ":is([class*='_badge_62f6x_'], [class*='_badge_jj04l_'])",
+      );
+      const img = badge?.querySelector(
+        ":is([class*='_image_62f6x_'], [class*='_image_jj04l_'])",
+      );
       if (img) img.style.opacity = "";
       lock.remove();
     });

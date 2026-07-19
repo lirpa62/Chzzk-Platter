@@ -27,6 +27,7 @@
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
   let wheelVolumeStep = 0.05; // 휠 한 칸당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
+  let actionOverlayOn = true; // 조작(휠 볼륨/시크) 시 화면 중앙 반투명 피드백(전역, 기본 ON)
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
@@ -116,6 +117,7 @@
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
     // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
     volumePctOn = e.data.volumePct !== false;
+    actionOverlayOn = e.data.actionOverlay !== false; // 기본 ON
     wheelVolumeOn = e.data.wheelVolume === true; // 기본 OFF
     // 휠 볼륨 조절 간격(% 1~10 → 0.01~0.10). 범위 밖/미설정이면 5%.
     {
@@ -3323,7 +3325,16 @@
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
+      // ⚠ 마우스 클릭 후 버튼에 포커스가 남으면, 이후 스페이스(재생/일시정지 습관)가
+      // 브라우저의 '포커스된 버튼 활성화'로 click 을 합성해 믹서가 저절로 켜졌다
+      // ('클릭 시 바로 켜기' 옵션 사용자 피드백). 키보드 유발 클릭(detail=0)은 무시하고,
+      // 처리 후 blur 로 포커스를 해제해 재발을 막는다.
+      if (e.detail === 0 && e.isTrusted) {
+        btn.blur();
+        return;
+      }
       handleMixerButtonClick();
+      btn.blur();
       return;
     }
     // 패널이 열려 있고, 버튼·패널 바깥을 '사용자가' 클릭하면 닫는다. 합성 클릭
@@ -5410,6 +5421,12 @@
     return { video: v, start, end, cur: v.currentTime };
   }
 
+  // 되감기/앞으로 오버레이 누적 표시용. 짧은 간격 내 같은 방향 연속이면 초를 합산.
+  const SEEK_ACCUM_WINDOW_MS = 1200; // 이 간격 안의 같은 방향 조작은 누적(연타/홀드)
+  let seekAccumSec = 0;
+  let seekAccumForward = null;
+  let seekAccumAt = 0;
+
   // ±step초 이동(seekable 윈도우로 클램프). forward=true면 앞으로.
   function seekBy(forward) {
     const w = getSeekWindow();
@@ -5427,7 +5444,27 @@
     if (!forward && Math.abs(target - w.cur) <= SYNC_SHORT_REWIND_MAX_S + 0.5) {
       rewindButtonSeekUntil = Date.now() + 3000; // seeked가 곧 도착(여유 3초)
     }
+    const moved = Math.round(Math.abs(target - w.cur)); // 실제 이동한 초(클램프 반영)
     w.video.currentTime = target;
+    // 조작 화면 피드백(전역 옵션): 방향 아이콘 + 누적 초. 버튼/홀드/단축키 공통 실행점.
+    // 짧은 시간(SEEK_ACCUM_WINDOW_MS) 내 '같은 방향' 연속 조작이면 초를 누적해서 보여준다
+    // (꾹 누르기/연타 대응). 방향이 바뀌거나 시간이 지나면 리셋한다.
+    const now = Date.now();
+    if (
+      seekAccumForward === forward &&
+      now - seekAccumAt < SEEK_ACCUM_WINDOW_MS
+    ) {
+      seekAccumSec += moved;
+    } else {
+      seekAccumSec = moved;
+      seekAccumForward = forward;
+    }
+    seekAccumAt = now;
+    showActionOverlay(
+      forward ? "forward" : "rewind",
+      `${seekAccumSec}초`,
+      forward ? "right" : "left",
+    );
     // 되감기로 라이브 엣지에서 유의미하게 뒤(과거)에 서면 hls 강제 동기화를 무력화해
     // 지연이 커져도 원점으로 튕기지 않게 한다. 엣지 근처로 복귀하면 원복.
     updateHlsRewindLock(target, w.end);
@@ -6565,6 +6602,62 @@
     if (dir > 0 && video.muted) video.muted = false;
     video.volume = v; // UI 슬라이더(aria-valuenow)는 이 값으로 자동 동기화됨(실측)
     flashVolumeTooltip();
+    const muted = video.muted || v === 0;
+    // ⚠ 표시 % 는 방금 설정한 v 를 그대로 쓴다. video.volume 설정 직후 native 슬라이더의
+    // aria-valuenow 는 아직 '이전 값'이라(치지직 비동기 갱신), 슬라이더를 읽으면 한 틱
+    // 뒤처진 값이 나온다(실측: 실제35%인데 30% 표시). v 가 곧 정확한 목표값이다.
+    const pct = Math.round(v * 100);
+    showActionOverlay(muted ? "mute" : dir > 0 ? "volUp" : "volDown", `${pct}%`);
+  }
+
+  // ── 조작 화면 피드백 오버레이(전역 옵션, 기본 ON) ───────────────────────────
+  // 휠 볼륨/되감기/앞으로(버튼·홀드·단축키) 조작 시 플레이어 중앙에 반투명 아이콘+텍스트를
+  // 잠깐 띄운다. 유튜브/넷플릭스식 피드백. 우리 요소만 쓰므로 치지직 DOM/React 안전.
+  const ACTION_OVERLAY_ID = "cheese-action-overlay";
+  let actionOverlayHideTimer = 0;
+  const ACTION_OVERLAY_ICONS = {
+    volUp: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="M16 8a5 5 0 0 1 0 8M18.5 5.5a8.5 8.5 0 0 1 0 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    volDown: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="M16 9.5a4 4 0 0 1 0 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    mute: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="m16 9 5 6m0-6-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    rewind: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M11 6 4 12l7 6V6ZM20 6l-7 6 7 6V6Z" fill="currentColor"/></svg>`,
+    forward: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M13 6l7 6-7 6V6ZM4 6l7 6-7 6V6Z" fill="currentColor"/></svg>`,
+  };
+  function getActionOverlayEl() {
+    const player = findPlayer();
+    if (!player) return null;
+    let el = player.querySelector(`#${ACTION_OVERLAY_ID}`);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = ACTION_OVERLAY_ID;
+      el.setAttribute("aria-hidden", "true");
+      el.innerHTML = `<span class="cheese-ao-icon"></span><span class="cheese-ao-text"></span>`;
+      // 플레이어 안에 두면 전체화면에서도 함께 보인다. static 이면 relative 로.
+      if (getComputedStyle(player).position === "static") {
+        player.style.position = "relative";
+      }
+      player.appendChild(el);
+    }
+    return el;
+  }
+  // position: "left" | "center"(기본) | "right" — 되감기=left, 앞으로=right, 볼륨=center.
+  function showActionOverlay(iconKey, text, position = "center") {
+    if (!actionOverlayOn) return;
+    const el = getActionOverlayEl();
+    if (!el) return;
+    const iconEl = el.querySelector(".cheese-ao-icon");
+    const textEl = el.querySelector(".cheese-ao-text");
+    if (iconEl) iconEl.innerHTML = ACTION_OVERLAY_ICONS[iconKey] || "";
+    if (textEl) textEl.textContent = String(text || "");
+    el.classList.remove("cheese-ao-left", "cheese-ao-center", "cheese-ao-right");
+    el.classList.add(`cheese-ao-${position}`);
+    // 재트리거 시 애니메이션 리셋(빠른 연속 조작에도 매번 뜨게).
+    el.classList.remove("is-show");
+    void el.offsetWidth; // reflow 로 애니메이션 리셋
+    el.classList.add("is-show");
+    clearTimeout(actionOverlayHideTimer);
+    actionOverlayHideTimer = window.setTimeout(() => {
+      el.classList.remove("is-show");
+    }, 700);
   }
 
   let volumeDelegationBound = false;

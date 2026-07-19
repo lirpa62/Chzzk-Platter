@@ -28,6 +28,8 @@
     "cheeseCafeNow",
     "cheeseCardDateTooltip",
     "cheeseVodChapterHide",
+    "cheeseHideBlockedComment",
+    "cheeseCommentBlocks",
     "cheeseCardLivePreview",
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewWheelDelaySec",
@@ -90,6 +92,7 @@
     "cheeseVodAutoplayOff",
     "cheeseVolumePct",
     "cheeseWheelVolume",
+    "cheeseActionOverlay",
     "cheeseWheelVolumeStep",
     "cheeseCommentTimestampClickAction",
     "cheeseCommentTimestampClickDelay",
@@ -670,7 +673,8 @@
     try {
       const d = await cachedStorageGet(FEATURE_HIDDEN_KEY);
       if (headerStudioInput) {
-        headerStudioInput.checked = d?.[FEATURE_HIDDEN_KEY]?.headerStudio === true;
+        headerStudioInput.checked =
+          d?.[FEATURE_HIDDEN_KEY]?.headerStudio === true;
       }
     } catch {}
     refreshHeaderNavLimit();
@@ -828,9 +832,10 @@
     list.style.left = `${Math.round(rect.left)}px`;
     list.style.top = `${Math.round(rect.bottom + 4)}px`;
     list.style.minWidth = `${Math.round(rect.width)}px`;
-    list.style.maxHeight = `${
-      Math.max(140, window.innerHeight - rect.bottom - 16)
-    }px`;
+    list.style.maxHeight = `${Math.max(
+      140,
+      window.innerHeight - rect.bottom - 16,
+    )}px`;
   }
 
   function renderGlobalDefaultPicker(type) {
@@ -943,7 +948,9 @@
     closeAllGlobalDefaultPickers();
   });
   window.addEventListener("resize", () => closeAllGlobalDefaultPickers());
-  panelsScroll?.addEventListener("scroll", () => closeAllGlobalDefaultPickers());
+  panelsScroll?.addEventListener("scroll", () =>
+    closeAllGlobalDefaultPickers(),
+  );
 
   async function loadGlobalDefaults() {
     try {
@@ -1204,9 +1211,7 @@
   async function loadVideoFilterAlwaysOn() {
     let on = false;
     try {
-      const data = await cachedStorageGet(
-        VIDEO_FILTER_ALWAYS_ON_KEY,
-      );
+      const data = await cachedStorageGet(VIDEO_FILTER_ALWAYS_ON_KEY);
       on = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
     } catch {}
     if (videoFilterAlwaysOnInput) videoFilterAlwaysOnInput.checked = on;
@@ -1350,9 +1355,29 @@
       } catch {}
     });
   }
+  // 조작 화면 피드백 오버레이(전역, 기본 ON).
+  const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
+  const actionOverlayInput = document.querySelector("[data-action-overlay]");
+  if (actionOverlayInput) {
+    (async () => {
+      let on = true; // 기본 켜짐
+      try {
+        const d = await cachedStorageGet(ACTION_OVERLAY_KEY);
+        on = d?.[ACTION_OVERLAY_KEY] !== false;
+      } catch {}
+      actionOverlayInput.checked = on;
+    })();
+    actionOverlayInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [ACTION_OVERLAY_KEY]: actionOverlayInput.checked });
+      } catch {}
+    });
+  }
   // 휠 볼륨 조절 간격(1~10%, 기본 5).
   const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
-  const wheelVolumeStepInput = document.querySelector("[data-wheel-volume-step]");
+  const wheelVolumeStepInput = document.querySelector(
+    "[data-wheel-volume-step]",
+  );
   function clampWheelVolumeStep(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return 5;
@@ -1821,7 +1846,10 @@
       let saved = {};
       try {
         const d = await cachedStorageGet(SEARCH_RERANK_WEIGHTS_KEY);
-        if (d?.[SEARCH_RERANK_WEIGHTS_KEY] && typeof d[SEARCH_RERANK_WEIGHTS_KEY] === "object") {
+        if (
+          d?.[SEARCH_RERANK_WEIGHTS_KEY] &&
+          typeof d[SEARCH_RERANK_WEIGHTS_KEY] === "object"
+        ) {
           saved = d[SEARCH_RERANK_WEIGHTS_KEY];
         }
       } catch {}
@@ -2024,7 +2052,9 @@
     if (isWhale && screenshotDirectInput) {
       // Whale: 이 옵션으로 브라우저 확인창을 없앨 수 없으므로 비활성화 + 안내.
       screenshotDirectInput.disabled = true;
-      screenshotDirectInput.closest(".settings-item")?.classList.add("is-locked");
+      screenshotDirectInput
+        .closest(".settings-item")
+        ?.classList.add("is-locked");
       const desc = document.querySelector("[data-screenshot-direct-save-desc]");
       if (desc) {
         desc.textContent =
@@ -2051,9 +2081,7 @@
   async function loadChannelLiveButtonEnd() {
     let on = true;
     try {
-      const data = await cachedStorageGet(
-        CHANNEL_LIVE_BUTTON_END_KEY,
-      );
+      const data = await cachedStorageGet(CHANNEL_LIVE_BUTTON_END_KEY);
       on = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
     } catch {}
     if (channelLiveButtonEndInput) channelLiveButtonEndInput.checked = on;
@@ -2516,9 +2544,7 @@
 
   // ── 다시보기 AI 챕터 숨김(전역, 기본 OFF=표시) ───────────────────────────────
   const VOD_CHAPTER_HIDE_KEY = "cheeseVodChapterHide";
-  const vodChapterHideInput = document.querySelector(
-    "[data-vod-chapter-hide]",
-  );
+  const vodChapterHideInput = document.querySelector("[data-vod-chapter-hide]");
 
   async function loadVodChapterHide() {
     let on = false; // 기본 꺼짐(챕터 표시)
@@ -2537,6 +2563,496 @@
     } catch {}
   });
   loadVodChapterHide();
+
+  // ── 차단 이용자 댓글 안내 숨김(다시보기·커뮤니티, 전역 기본 OFF) ─────────────
+  const HIDE_BLOCKED_COMMENT_KEY = "cheeseHideBlockedComment";
+  const hideBlockedCommentInput = document.querySelector(
+    "[data-hide-blocked-comment]",
+  );
+
+  async function loadHideBlockedComment() {
+    let on = false; // 기본 꺼짐(안내 표시)
+    try {
+      const data = await cachedStorageGet(HIDE_BLOCKED_COMMENT_KEY);
+      on = data?.[HIDE_BLOCKED_COMMENT_KEY] === true;
+    } catch {}
+    if (hideBlockedCommentInput) hideBlockedCommentInput.checked = on;
+  }
+
+  hideBlockedCommentInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [HIDE_BLOCKED_COMMENT_KEY]: hideBlockedCommentInput.checked,
+      });
+    } catch {}
+  });
+  loadHideBlockedComment();
+
+  // ── 사용자 차단 관리 탭(댓글 차단 목록: 닉네임/사유/일시, 검색, 선택/일괄 해제) ──
+  const COMMENT_BLOCK_KEY = "cheeseCommentBlocks";
+  const cbmSearchInput = document.querySelector("[data-cbm-search]");
+  const cbmListEl = document.querySelector("[data-cbm-list]");
+  const cbmEmptyEl = document.querySelector("[data-cbm-empty]");
+  const cbmBulkBar = document.querySelector("[data-cbm-bulk]");
+  const cbmSelectAll = document.querySelector("[data-cbm-selectall]");
+  const cbmSelCount = document.querySelector("[data-cbm-selcount]");
+  const cbmRemoveSelBtn = document.querySelector("[data-cbm-remove-selected]");
+  const cbmRemoveAllBtn = document.querySelector("[data-cbm-remove-all]");
+  let cbmBlocks = [];
+  const cbmSelected = new Set(); // 선택된 userIdHash
+
+  function cbmFormatDate(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    try {
+      return new Date(n).toLocaleString("ko-KR", {
+        year: "2-digit",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  function cbmEscape(s) {
+    return String(s == null ? "" : s).replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
+  }
+
+  function renderCbmList() {
+    if (!cbmListEl) return;
+    const q = (cbmSearchInput?.value || "").trim().toLowerCase();
+    const items = cbmBlocks
+      .slice()
+      .sort((a, b) => Number(b.blockedAt || 0) - Number(a.blockedAt || 0))
+      .filter((b) => {
+        if (!q) return true;
+        return (
+          String(b.nickname || "")
+            .toLowerCase()
+            .includes(q) ||
+          String(b.reason || "")
+            .toLowerCase()
+            .includes(q)
+        );
+      });
+    if (!cbmBlocks.length) {
+      cbmListEl.innerHTML = "";
+      if (cbmEmptyEl) cbmEmptyEl.hidden = false;
+      if (cbmBulkBar) cbmBulkBar.hidden = true;
+      cbmSelected.clear();
+      updateCbmSelectionUI([]); // 전체선택 체크/개수/버튼 상태 리셋
+      return;
+    }
+    if (cbmEmptyEl) cbmEmptyEl.hidden = true;
+    if (cbmBulkBar) cbmBulkBar.hidden = false;
+    // 목록에 없는(=이미 해제된) 선택 항목 정리.
+    const existing = new Set(cbmBlocks.map((b) => b.userIdHash));
+    [...cbmSelected].forEach((h) => {
+      if (!existing.has(h)) cbmSelected.delete(h);
+    });
+    if (!items.length) {
+      cbmListEl.innerHTML = `<p class="settings-cbm-noresult">검색 결과가 없습니다.</p>`;
+      updateCbmSelectionUI(items);
+      return;
+    }
+    cbmListEl.innerHTML = items
+      .map((b) => {
+        const nick = cbmEscape(b.nickname || "(닉네임 없음)");
+        const reason = b.reason
+          ? `<div class="settings-cbm-reason">${cbmEscape(b.reason)}</div>`
+          : "";
+        const date = cbmFormatDate(b.blockedAt);
+        // '치지직 차단' 배지는 닉네임 '위'에 별도 줄로(긴 닉네임 줄바꿈 방지).
+        const native = b.nativeBlocked
+          ? `<div class="settings-cbm-native-row"><span class="settings-cbm-native">치지직 차단</span></div>`
+          : "";
+        const sel = cbmSelected.has(b.userIdHash) ? " is-selected" : "";
+        // 닉네임 변경 이력(있으면 펼침/접기). 최신 변경이 위로 오게 역순.
+        const hist = Array.isArray(b.nicknameHistory) ? b.nicknameHistory : [];
+        const histBlock = hist.length
+          ? `<button type="button" class="settings-cbm-hist-toggle" data-hist-toggle>
+               이전 닉네임 ${hist.length}개 ▾
+             </button>
+             <div class="settings-cbm-hist" hidden>
+               ${hist
+                 .slice()
+                 .reverse()
+                 .map(
+                   (h) =>
+                     `<div class="settings-cbm-hist-item">${cbmEscape(
+                       h.nickname,
+                     )}<span class="settings-cbm-hist-date">${cbmEscape(
+                       cbmFormatDate(h.at),
+                     )}</span></div>`,
+                 )
+                 .join("")}
+             </div>`
+          : "";
+        return `
+          <div class="settings-cbm-item${sel}" data-hash="${cbmEscape(
+            b.userIdHash,
+          )}" role="checkbox" aria-checked="${cbmSelected.has(
+            b.userIdHash,
+          )}" tabindex="0">
+            <div class="settings-cbm-main">
+              ${native}
+              <div class="settings-cbm-name">${nick}</div>
+              ${reason}
+              <div class="settings-cbm-date">${cbmEscape(date)}</div>
+              ${histBlock}
+              <div class="settings-cbm-hash" title="userIdHash">${cbmEscape(
+                b.userIdHash,
+              )}</div>
+            </div>
+            <button type="button" class="settings-cbm-remove" data-hash="${cbmEscape(
+              b.userIdHash,
+            )}">해제</button>
+          </div>`;
+      })
+      .join("");
+    // 닉네임 변경 이력 펼침/접기(선택 토글과 구분).
+    cbmListEl.querySelectorAll("[data-hist-toggle]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const box = btn.nextElementSibling;
+        if (box) box.hidden = !box.hidden;
+      });
+    });
+    // 항목 전체가 선택 토글. '해제' 버튼 클릭은 토글에서 제외(별도 동작).
+    cbmListEl.querySelectorAll(".settings-cbm-item").forEach((item) => {
+      const hash = item.dataset.hash;
+      const toggle = () => {
+        if (cbmSelected.has(hash)) cbmSelected.delete(hash);
+        else cbmSelected.add(hash);
+        item.classList.toggle("is-selected", cbmSelected.has(hash));
+        item.setAttribute("aria-checked", String(cbmSelected.has(hash)));
+        updateCbmSelectionUI(items);
+      };
+      item.addEventListener("click", (e) => {
+        if (e.target.closest(".settings-cbm-remove")) return; // 해제 버튼은 제외
+        toggle();
+      });
+      item.addEventListener("keydown", (e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    });
+    cbmListEl.querySelectorAll(".settings-cbm-remove").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const hash = btn.dataset.hash;
+        const entry = cbmBlocks.find((b) => b.userIdHash === hash);
+        if (entry?.nativeBlocked) {
+          openCbmUnblockModal([entry]);
+        } else {
+          removeCbmBlocks([hash], false);
+        }
+      });
+    });
+    updateCbmSelectionUI(items);
+  }
+
+  // 선택 개수/전체선택 체크/버튼 활성 상태 갱신.
+  function updateCbmSelectionUI(visibleItems) {
+    const n = cbmSelected.size;
+    if (cbmSelCount)
+      cbmSelCount.textContent = n ? `${n}명 선택됨` : "";
+    if (cbmRemoveSelBtn) cbmRemoveSelBtn.disabled = n === 0;
+    if (cbmSelectAll) {
+      const vis = visibleItems || [];
+      const allSel =
+        vis.length > 0 && vis.every((b) => cbmSelected.has(b.userIdHash));
+      cbmSelectAll.checked = allSel;
+      cbmSelectAll.indeterminate = n > 0 && !allSel;
+    }
+  }
+
+  // 여러 hash 를 한 번에 해제. alsoNative=true 면 치지직 차단도 함께 해제 요청.
+  async function removeCbmBlocks(hashes, alsoNative) {
+    const set = new Set(hashes);
+    // 치지직 차단 해제가 필요한 대상(선택+native)만 추림(로컬 제거 전 미리).
+    const nativeTargets = alsoNative
+      ? cbmBlocks
+          .filter((b) => set.has(b.userIdHash) && b.nativeBlocked)
+          .map((b) => b.userIdHash)
+      : [];
+    cbmBlocks = cbmBlocks.filter((b) => !set.has(b.userIdHash));
+    hashes.forEach((h) => cbmSelected.delete(h));
+    try {
+      cachedStorageSet({ [COMMENT_BLOCK_KEY]: cbmBlocks });
+    } catch {}
+    renderCbmList();
+    if (nativeTargets.length) {
+      const anyFail = await requestNativeUnblock(nativeTargets);
+      if (anyFail) {
+        alert(
+          "일부 사용자의 치지직 차단 해제는 처리하지 못했습니다. 치지직 다시보기/커뮤니티 페이지를 연 뒤 다시 시도하거나, 치지직에서 직접 해제해주세요.",
+        );
+      }
+    }
+  }
+
+  // 치지직 탭(content)에 여러 hash 해제 대행 요청. 실패가 하나라도 있으면 true.
+  async function requestNativeUnblock(hashes) {
+    let anyFail = false;
+    try {
+      const tabs = await new Promise((resolve) =>
+        chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, resolve),
+      );
+      for (const hash of hashes) {
+        let done = false;
+        for (const tab of tabs || []) {
+          const res = await new Promise((resolve) =>
+            chrome.tabs.sendMessage(
+              tab.id,
+              { type: "CHEESE_NATIVE_UNBLOCK_USER", userHash: hash },
+              (r) => resolve(chrome.runtime.lastError ? null : r),
+            ),
+          );
+          if (res?.ok) {
+            done = true;
+            break;
+          }
+        }
+        if (!done) anyFail = true;
+      }
+    } catch {
+      anyFail = true;
+    }
+    return anyFail;
+  }
+
+  // 치지직 차단도 함께 해제할지 묻는 커스텀 모달. entries = 해제 대상 중 nativeBlocked
+  // 인 항목들(1명이면 단건, 여러 명이면 일괄). '로컬만'/'둘 다'는 이 대상 전체에 적용하고,
+  // 대상에 없던(로컬 전용) 나머지는 호출부에서 이미 함께 제거된다.
+  function openCbmUnblockModal(entries, allHashes) {
+    document.getElementById("cbm-unblock-modal")?.remove();
+    // allHashes: 이번 해제 전체 대상(로컬전용 포함). 없으면 native 대상만.
+    const all = Array.isArray(allHashes)
+      ? allHashes
+      : entries.map((e) => e.userIdHash);
+    const nativeHashes = entries.map((e) => e.userIdHash);
+    const title =
+      entries.length === 1
+        ? `${cbmEscape(entries[0].nickname || "이 사용자")}님 차단 해제`
+        : `${all.length}명 차단 해제`;
+    const body =
+      entries.length === 1
+        ? `이 사용자는 <b>치지직 차단</b>도 함께 되어 있습니다. 치지직 차단도 같이 해제할까요?`
+        : `선택한 ${all.length}명 중 <b>${entries.length}명</b>은 치지직 차단도 되어 있습니다. 치지직 차단도 같이 해제할까요?`;
+    const back = document.createElement("div");
+    back.id = "cbm-unblock-modal";
+    back.className = "cbm-modal-backdrop";
+    back.innerHTML = `
+      <div class="cbm-modal" role="dialog" aria-modal="true">
+        <div class="cbm-modal-title">${title}</div>
+        <p class="cbm-modal-body">${body}</p>
+        <div class="cbm-modal-actions">
+          <button type="button" class="cbm-modal-cancel">취소</button>
+          <button type="button" class="cbm-modal-local">로컬만 해제</button>
+          <button type="button" class="cbm-modal-both">둘 다 해제</button>
+        </div>
+      </div>`;
+    document.body.appendChild(back);
+    const close = () => back.remove();
+    back.addEventListener("click", (e) => {
+      if (e.target === back) close();
+    });
+    back.querySelector(".cbm-modal-cancel").addEventListener("click", close);
+    back.querySelector(".cbm-modal-local").addEventListener("click", () => {
+      removeCbmBlocks(all, false); // 전체 로컬만 해제(치지직 유지)
+      close();
+    });
+    back.querySelector(".cbm-modal-both").addEventListener("click", () => {
+      // 전체 로컬 해제 + native 대상은 치지직도 해제.
+      removeCbmBlocks(all, true);
+      void nativeHashes;
+      close();
+    });
+  }
+
+  // 일괄 해제 진입점: 대상 hash 목록을 받아, native 가 섞였으면 모달로 확인.
+  function bulkRemove(hashes) {
+    if (!hashes.length) return;
+    const set = new Set(hashes);
+    const nativeEntries = cbmBlocks.filter(
+      (b) => set.has(b.userIdHash) && b.nativeBlocked,
+    );
+    if (nativeEntries.length) {
+      openCbmUnblockModal(nativeEntries, hashes);
+    } else {
+      removeCbmBlocks(hashes, false);
+    }
+  }
+
+  // 커스텀 확인 모달(title/body/확인라벨). 확인 시 onConfirm 실행.
+  function openCbmConfirm({ title, body, confirmLabel, onConfirm }) {
+    document.getElementById("cbm-unblock-modal")?.remove();
+    const back = document.createElement("div");
+    back.id = "cbm-unblock-modal";
+    back.className = "cbm-modal-backdrop";
+    back.innerHTML = `
+      <div class="cbm-modal" role="dialog" aria-modal="true">
+        <div class="cbm-modal-title">${cbmEscape(title)}</div>
+        <p class="cbm-modal-body">${cbmEscape(body)}</p>
+        <div class="cbm-modal-actions">
+          <button type="button" class="cbm-modal-cancel">취소</button>
+          <button type="button" class="cbm-modal-both">${cbmEscape(
+            confirmLabel || "확인",
+          )}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(back);
+    const close = () => back.remove();
+    back.addEventListener("click", (e) => {
+      if (e.target === back) close();
+    });
+    back.querySelector(".cbm-modal-cancel").addEventListener("click", close);
+    back.querySelector(".cbm-modal-both").addEventListener("click", () => {
+      close();
+      onConfirm();
+    });
+  }
+
+  async function loadCbmBlocks() {
+    try {
+      const data = await cachedStorageGet(COMMENT_BLOCK_KEY);
+      const list = data?.[COMMENT_BLOCK_KEY];
+      cbmBlocks = Array.isArray(list) ? list : [];
+    } catch {
+      cbmBlocks = [];
+    }
+    renderCbmList();
+    void refreshCbmNicknames(); // 백그라운드로 닉네임 최신화(변경 이력 추적)
+  }
+
+  // 차단 유저들의 현재 닉네임을 확인해 변경되었으면 이력에 남기고 저장한다.
+  //  1) channels/{userIdHash} 로 각 유저 현재 닉네임(channelName) 병렬 조회.
+  //  2) native 차단 유저는 privateUserBlocks 목록으로도 대조(닉네임 보강).
+  // 닉네임이 이전과 다르면 nicknameHistory 에 '이전 닉네임'을 push 하고 nickname 을 갱신.
+  let cbmRefreshing = false;
+  async function refreshCbmNicknames() {
+    if (cbmRefreshing || !cbmBlocks.length) return;
+    cbmRefreshing = true;
+    try {
+      // 현재 닉네임 맵 구성: hash → nickname.
+      const current = new Map();
+      // (2) native 차단 목록 먼저(있으면 API 호출 절감).
+      if (cbmBlocks.some((b) => b.nativeBlocked)) {
+        try {
+          const res = await fetch(
+            "https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks?limit=500&offset=0",
+            { credentials: "include" },
+          );
+          if (res.ok) {
+            const j = await res.json();
+            (j?.content?.blockUsers || []).forEach((u) => {
+              if (u?.userIdHash)
+                current.set(String(u.userIdHash), String(u.nickname || ""));
+            });
+          }
+        } catch {}
+      }
+      // (1) 나머지는 channels/{hash} 병렬 조회.
+      const need = cbmBlocks.filter((b) => !current.has(b.userIdHash));
+      await Promise.all(
+        need.map(async (b) => {
+          try {
+            const res = await fetch(
+              `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(
+                b.userIdHash,
+              )}`,
+              { credentials: "include" },
+            );
+            if (!res.ok) return;
+            const j = await res.json();
+            const nn = j?.content?.channelName;
+            if (nn) current.set(String(b.userIdHash), String(nn));
+          } catch {}
+        }),
+      );
+      // 변경 반영.
+      let changed = false;
+      cbmBlocks = cbmBlocks.map((b) => {
+        const now = current.get(b.userIdHash);
+        if (!now || now === b.nickname) return b;
+        // 닉네임 변경됨 → 이전 닉네임을 이력에 남기고 현재로 갱신.
+        const history = Array.isArray(b.nicknameHistory)
+          ? b.nicknameHistory.slice()
+          : [];
+        if (b.nickname) history.push({ nickname: b.nickname, at: Date.now() });
+        changed = true;
+        return { ...b, nickname: now, nicknameHistory: history };
+      });
+      if (changed) {
+        try {
+          cachedStorageSet({ [COMMENT_BLOCK_KEY]: cbmBlocks });
+        } catch {}
+        renderCbmList();
+      }
+    } finally {
+      cbmRefreshing = false;
+    }
+  }
+
+  cbmSearchInput?.addEventListener("input", renderCbmList);
+
+  // 전체 선택(현재 검색으로 보이는 항목 기준).
+  cbmSelectAll?.addEventListener("change", () => {
+    const q = (cbmSearchInput?.value || "").trim().toLowerCase();
+    const visible = cbmBlocks.filter(
+      (b) =>
+        !q ||
+        String(b.nickname || "").toLowerCase().includes(q) ||
+        String(b.reason || "").toLowerCase().includes(q),
+    );
+    if (cbmSelectAll.checked) {
+      visible.forEach((b) => cbmSelected.add(b.userIdHash));
+    } else {
+      visible.forEach((b) => cbmSelected.delete(b.userIdHash));
+    }
+    renderCbmList();
+  });
+  // 선택 해제.
+  cbmRemoveSelBtn?.addEventListener("click", () => {
+    bulkRemove([...cbmSelected]);
+  });
+  // 전체 해제(현재 목록 전부) — 커스텀 확인 모달 후 진행.
+  cbmRemoveAllBtn?.addEventListener("click", () => {
+    if (!cbmBlocks.length) return;
+    openCbmConfirm({
+      title: "전체 차단 해제",
+      body: `차단한 사용자 ${cbmBlocks.length}명을 모두 해제할까요?`,
+      confirmLabel: "전체 해제",
+      onConfirm: () => bulkRemove(cbmBlocks.map((b) => b.userIdHash)),
+    });
+  });
+  // 다른 탭/페이지에서 차단 추가·해제 시 실시간 반영.
+  if (chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes[COMMENT_BLOCK_KEY]) {
+        const list = changes[COMMENT_BLOCK_KEY].newValue;
+        cbmBlocks = Array.isArray(list) ? list : [];
+        renderCbmList();
+      }
+    });
+  }
+  loadCbmBlocks();
 
   // ── 구독 배지 다음 등급까지 남은 기간(구독권 관리 팝업, 전역 기본 ON) ────────
   const SUBSCRIBE_BADGE_PROGRESS_KEY = "cheeseSubscribeBadgeProgress";
@@ -2584,7 +3100,9 @@
 
   // ── 방종 후 뱅온 자동 새로고침(기본 OFF) ───────────────────────────────────
   const AUTO_RELOAD_ON_RELIVE_KEY = "cheeseAutoReloadOnRelive";
-  const autoReliveInput = document.querySelector("[data-auto-reload-on-relive]");
+  const autoReliveInput = document.querySelector(
+    "[data-auto-reload-on-relive]",
+  );
   async function loadAutoReloadOnRelive() {
     let on = false; // 기본 꺼짐
     try {
@@ -2811,7 +3329,9 @@
   const buttonOrderRoot = document.querySelector("[data-player-button-order]");
   if (buttonOrderRoot) {
     const listLeft = buttonOrderRoot.querySelector('[data-order-list="left"]');
-    const listRight = buttonOrderRoot.querySelector('[data-order-list="right"]');
+    const listRight = buttonOrderRoot.querySelector(
+      '[data-order-list="right"]',
+    );
     // order: { left:[key...], right:[key...] } — 5 key 를 좌/우로 분배 + 상대순서.
     // slot: { key:{grp,after} } — 각 우리 버튼이 붙는 네이티브 앵커.
     let order = { left: [], right: [...PLAYER_BTN_KEYS] }; // 기본 전부 오른쪽
@@ -2889,8 +3409,7 @@
         for (const k of wanted) if (!seen.has(k)) outOrder[grp].push(k);
       }
       // slot: 저장값 우선, 없거나 앵커가 그룹 허용 밖이면 기본(우측=샵 뒤, 좌측=START).
-      const savedSlot =
-        saved && typeof saved === "object" ? saved.slot : null;
+      const savedSlot = saved && typeof saved === "object" ? saved.slot : null;
       const outSlot = {};
       for (const k of PLAYER_BTN_KEYS) {
         const grp = side[k] === "left" ? "left" : "right";
@@ -3222,10 +3741,7 @@
     let value = "normal";
     let custom = { ...SYNC_CUSTOM_DEFAULT };
     try {
-      const data = await cachedStorageGet([
-        SYNC_PRESET_KEY,
-        SYNC_CUSTOM_KEY,
-      ]);
+      const data = await cachedStorageGet([SYNC_PRESET_KEY, SYNC_CUSTOM_KEY]);
       if (data?.[SYNC_PRESET_KEY]) value = data[SYNC_PRESET_KEY];
       const c = data?.[SYNC_CUSTOM_KEY];
       if (c && typeof c === "object") {

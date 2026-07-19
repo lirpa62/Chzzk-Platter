@@ -1536,3 +1536,55 @@
   left: 0;
   transform: none;
 }
+
+/* ── 조작 화면 피드백 오버레이(휠 볼륨/되감기/앞으로) ───────────────────────── */
+#cheese-action-overlay {
+  position: absolute;
+  top: 50%;
+  /* 가로 위치는 변형 클래스가 정한다: center=50%, left=5%(되감기), right=95%(앞으로). */
+  left: 50%;
+  --cheese-ao-scale: 0.9;
+  transform: translate(-50%, -50%) scale(var(--cheese-ao-scale));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 2147483000;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+#cheese-action-overlay.cheese-ao-center {
+  left: 50%;
+}
+#cheese-action-overlay.cheese-ao-left {
+  left: 8%;
+}
+#cheese-action-overlay.cheese-ao-right {
+  left: 92%;
+}
+#cheese-action-overlay.is-show {
+  opacity: 0.82;
+  --cheese-ao-scale: 1;
+}
+#cheese-action-overlay .cheese-ao-icon {
+  display: inline-flex;
+  color: #fff;
+}
+#cheese-action-overlay .cheese-ao-text {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  line-height: 1;
+}
+#cheese-action-overlay .cheese-ao-text:empty {
+  display: none;
+}

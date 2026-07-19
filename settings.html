@@ -234,6 +234,15 @@
           >
             클립&카페
           </button>
+          <button
+            type="button"
+            class="settings-tab"
+            data-tab="commentBlock"
+            role="tab"
+            aria-selected="false"
+          >
+            사용자 차단 관리
+          </button>
         </nav>
 
         <div class="settings-panels">
@@ -439,6 +448,19 @@
                   />
                   <small>%</small>
                 </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">조작 화면 피드백</span>
+                  <span class="settings-item-desc"
+                    >휠 볼륨 조절·되감기·앞으로(버튼/단축키) 시 화면 중앙에
+                    반투명 아이콘을 잠깐 표시합니다(체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-action-overlay />
+                  <i aria-hidden="true"></i>
+                </label>
               </li>
               <li class="settings-item">
                 <label>
@@ -2980,6 +3002,72 @@
               cafe.naver.com 게시글에 붙은 치지직 클립 링크(OG링크)를 감지해 글
               안에서 바로 재생합니다. 설정 변경은 카페 페이지를 새로고침하면
               적용됩니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="commentBlock"
+            aria-label="사용자 차단 관리"
+          >
+            <h2 class="settings-group-title">사용자 차단 관리</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >차단 이용자 댓글 안내 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >다시보기·커뮤니티·클립 댓글의 '내가 차단한 이용자의
+                    댓글입니다.' 안내 줄을 숨깁니다(체크=숨김, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-hide-blocked-comment />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              다시보기·커뮤니티·클립 댓글에서 각 사용자 닉네임 옆의 차단
+              버튼으로 등록한 목록입니다. 차단한 사용자의 댓글·채팅은 표시되지
+              않습니다. 해제 시 다시보기·커뮤니티·클립에서 이미 화면에서 제거된
+              댓글·채팅은 해당 페이지를 새로고침해야 다시 표시됩니다(라이브
+              채팅은 해제 즉시 새 메시지부터 표시).
+            </p>
+            <div class="settings-cbm-search">
+              <input
+                type="search"
+                data-cbm-search
+                placeholder="닉네임 또는 차단 사유 검색"
+                aria-label="차단 사용자 검색"
+              />
+            </div>
+            <div class="settings-cbm-bulk" data-cbm-bulk hidden>
+              <label class="settings-cbm-selectall">
+                <input type="checkbox" data-cbm-selectall />
+              </label>
+              <span class="settings-cbm-selcount" data-cbm-selcount></span>
+              <span class="settings-cbm-bulk-spacer"></span>
+              <button
+                type="button"
+                class="settings-cbm-bulk-remove"
+                data-cbm-remove-selected
+                disabled
+              >
+                선택 해제
+              </button>
+              <button
+                type="button"
+                class="settings-cbm-bulk-remove-all"
+                data-cbm-remove-all
+              >
+                전체 해제
+              </button>
+            </div>
+            <div class="settings-cbm-list" data-cbm-list></div>
+            <p class="settings-cbm-empty" data-cbm-empty hidden>
+              차단한 사용자가 없습니다.
             </p>
           </section>
         </div>

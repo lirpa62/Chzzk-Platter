@@ -2061,6 +2061,11 @@
   pointer-events: none;
   position: absolute;
   z-index: 4;
+  /* 마커가 많은 영상(수십 개)에서 컨트롤바 페이드인마다 dot 의 다층 box-shadow 를
+     매 프레임 재페인트해 재생바 등장이 버벅였다 → 레이어 승격으로 래스터를 캐시해
+     합성만 하게 한다. */
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 .cheese-search-comment-timestamp-button {
@@ -2416,8 +2421,8 @@
   background: transparent;
   border: 0;
   /* 레이어 부모가 세그(상하 padding 8px 박스)에서 wrap 루트(3px, 패딩 없음)로 바뀌어
-     bottom:0 이면 마커가 바 위로 떠 보인다 → -8px 로 내려 바에 걸치게(실측 보정). */
-  bottom: -8px;
+     bottom:0 이면 마커가 바 위로 떠 보인다 → -7px 로 내려 바에 걸치게(실측 보정). */
+  bottom: -7px;
   color: #25df97;
   cursor: pointer;
   height: 18px;
@@ -2434,63 +2439,39 @@
   background: currentColor;
   border: 2px solid rgba(0, 0, 0, 0.72);
   border-radius: 999px;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.72),
-    0 4px 12px rgba(37, 223, 151, 0.45);
+  /* ⚠ 마커가 수십 개인 영상에서 다층 blur 그림자는 컨트롤바 페이드마다 페인트 부담이
+     크다(프로파일: JS 는 1% 미만, 남은 버벅임은 렌더 비용) → 기본은 얇은 외곽선만,
+     glow 는 호버한 마커에만 준다. */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.72);
   display: block;
   height: 8px;
   left: 50%;
   position: absolute;
   top: 5px;
   transform: translateX(-50%);
-  transition:
-    transform 0.16s ease,
-    box-shadow 0.16s ease;
+  transition: transform 0.16s ease;
   width: 8px;
 }
 
-/* 호버 시 바가 굵어지는 만큼 마커도 +2px. ⚠ 마커 레이어가 세그가 아니라 wrap 루트에
-   붙으므로(챕터 대응), 세그 기준 옛 셀렉터(.pzp-ui-progress__wrap:hover 하위 등)는
-   더 이상 매칭되지 않는다 — wrap 루트 :hover 기준으로 잡아 챕터/일반 공통 적용. */
-.pzp-ui-slider__wrap:hover .cheese-search-comment-marker,
+/* 재생바 '빈 곳'에 호버해 바가 굵어질 때만 마커 전체를 +2px 올린다. 마커 위에 호버할
+   때는 나머지 마커가 들썩이지 않도록 올리지 않는다(:not(:has(마커 호버))).
+   ⚠ 예전엔 각 마커 bottom 을 개별 변경(65개 리플로우)했는데, 여기선 '레이어 1개'의
+   transform 토글이라 :has 평가·결과가 모두 레이어 1개 범위 + 합성만(리플로우 0)이라 가볍다. */
+.pzp-ui-slider__wrap:hover
+  .cheese-search-comment-marker-layer:not(
+    :has(.cheese-search-comment-marker:hover)
+  ):not(:has(.cheese-search-comment-marker:focus-visible)),
 .pzp-ui-slider__wrap.pzp-ui-slider--handler-hover
-  .cheese-search-comment-marker {
-  bottom: -6px;
-}
-/* 단, 마커에 호버/포커스가 있으면 '모든' 마커를 기본 위치(-8px)로 되돌린다. 마커에
-   호버하면 재생바도 6px 로 굵어져 wrap:hover 규칙이 모든 마커를 -6px 로 올리는데, 이때
-   사용자는 마커를 조준 중이라 마커들이 함께 들썩이면 거슬린다. 레이어가 마커 호버/포커스를
-   품고 있으면(:has) 마커 위치를 고정한다. wrap:hover 규칙보다 뒤·특이도 높아 덮는다. */
-.cheese-search-comment-marker-layer:has(.cheese-search-comment-marker:hover)
-  .cheese-search-comment-marker,
-.cheese-search-comment-marker-layer:has(
-    .cheese-search-comment-marker:focus-visible
-  )
-  .cheese-search-comment-marker {
-  bottom: -8px;
+  .cheese-search-comment-marker-layer:not(
+    :has(.cheese-search-comment-marker:hover)
+  ):not(:has(.cheese-search-comment-marker:focus-visible)) {
+  transform: translateZ(0) translateY(-2px);
+  transition: transform 0.16s ease;
 }
 
-/* 전체화면(.pzp-pc--fullscreen)은 재생바가 더 두꺼워 마커 기준이 다르다. 기본 -7px,
-   재생바 호버 -5px, 마커 자신 호버/포커스 -5px. (일반: -8/-6/-8 대비 전체화면 보정.) */
+/* 전체화면은 재생바가 두꺼워 기본 위치가 다르다(-6px). 호버 이동/보정은 위 공통 규칙 담당. */
 .pzp-pc--fullscreen .cheese-search-comment-marker {
-  bottom: -7px;
-}
-.pzp-pc--fullscreen .pzp-ui-slider__wrap:hover .cheese-search-comment-marker,
-.pzp-pc--fullscreen
-  .pzp-ui-slider__wrap.pzp-ui-slider--handler-hover
-  .cheese-search-comment-marker {
-  bottom: -5px;
-}
-/* 전체화면: 마커 호버/포커스 시 모든 마커를 기본(-7px) 유지. (일반의 -8px 대응.) */
-.pzp-pc--fullscreen
-  .cheese-search-comment-marker-layer:has(.cheese-search-comment-marker:hover)
-  .cheese-search-comment-marker,
-.pzp-pc--fullscreen
-  .cheese-search-comment-marker-layer:has(
-    .cheese-search-comment-marker:focus-visible
-  )
-  .cheese-search-comment-marker {
-  bottom: -7px;
+  bottom: -6px;
 }
 
 .cheese-search-comment-marker:hover .cheese-search-comment-marker-dot,
@@ -2678,8 +2659,13 @@
   white-space: nowrap;
 }
 
-/* 라이브 상세 메타(시청자 수/스트리밍 시간) 호버 시 라이브 시작일 툴팁 */
-.cheese-live-start-tooltip-target {
+/* 라이브 상세 메타(시청자 수/스트리밍 시간) 호버 시 라이브 시작일 툴팁.
+   ⚠ 카드 날짜 툴팁 대상(.cheese-card-date-target)에는 relative 를 주지 않는다 — 카드
+   툴팁은 fixed 라 불필요하고, 대상(_information_ 등)을 relative 로 만들면 그 안 치지직
+   absolute 자식의 기준점이 바뀌어 문서 하단 밖으로 삐져나가 페이지 스크롤이 생겼다
+   (실측: 클래스 부여 mutation 만으로 scrollH 978→993, 치지직이 플레이어 폭 868↔853 을
+   재계산하며 왕복 → 깜빡임). */
+.cheese-live-start-tooltip-target:not(.cheese-card-date-target) {
   position: relative;
 }
 
@@ -2699,7 +2685,11 @@
     --sem-color-content-neutral-cool-strong,
     var(--cheese-platter-content-neutral-cool-strong)
   );
-  display: inline-flex;
+  /* ⚠ 숨김을 opacity/visibility 로만 하면 absolute 박스가 레이아웃에 남아 '문서
+     오버플로'에 기여한다 — 페이지 하단 근처 타깃에 툴팁이 부착되는 순간 문서가 15px
+     커져 페이지 스크롤이 생기고 치지직 레이아웃이 고착됐다(실측: scrollH 978→993 의
+     mutation 이 정확히 이 툴팁 부착이었음). display:none 으로 숨겨 기여 자체를 없앤다. */
+  display: none;
   font-size: 12px;
   font-weight: 400;
   justify-content: center;
@@ -2723,25 +2713,30 @@
 
 .cheese-live-start-tooltip-target:hover .cheese-live-start-tooltip,
 .cheese-live-start-tooltip-target:focus-within .cheese-live-start-tooltip {
+  display: inline-flex;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
   visibility: visible;
 }
 
-/* 채널 다시보기 목록 카드용: 정보 줄이 작아 시청 화면 기준값(top: 100%-48px)을
-   쓰면 카드 위로 겹친다. 카드에선 정보 줄 바로 아래·왼쪽 정렬로 띄운다. */
-.cheese-card-date-target .cheese-live-start-tooltip {
+/* 채널 다시보기 목록 카드용 날짜 툴팁 — body 직속 싱글턴(fixed). ⚠ 타깃에 클래스/자식을
+   부착하는 방식은 치지직 React 리렌더가 클래스를 지우는 순간 스타일이 무너져 페이지
+   15px 스크롤이 왕복(깜빡임)했다(장기 실측). 치지직 DOM 에 아무것도 안 붙이는 이 방식이
+   근본 해결. 표시는 JS 가 is-show 클래스로, 좌표는 인라인(left/top)으로 제어한다. */
+.cheese-live-start-tooltip.cheese-card-date-float {
+  position: fixed;
   left: 0;
-  top: calc(100% + 4px);
-  transform: translateX(0) translateY(2px);
+  top: 0;
+  transform: none;
   justify-content: flex-start;
   text-align: left;
   white-space: nowrap;
+  z-index: 2147483646;
 }
-
-.cheese-card-date-target:hover .cheese-live-start-tooltip,
-.cheese-card-date-target:focus-within .cheese-live-start-tooltip {
-  transform: translateX(0) translateY(0);
+.cheese-live-start-tooltip.cheese-card-date-float.is-show {
+  display: inline-flex;
+  opacity: 1;
+  visibility: visible;
 }
 
 /* 팔로잉 섹션 오프라인 채널 숨김(JS가 _is_live_ 없는 li에 부여) */
@@ -5027,3 +5022,147 @@ html.cheese-vod-chapter-hide
    → 세그 경계의 3px 진행색 틈은 남겨둔다(원본에도 있는 챕터 구분선 수준). 스포 방지의
    핵심(챕터 제목·미리보기 챕터명 숨김, 호버 시 챕터 강조 균일화)은 위에서 이미 달성했고,
    재생바 세그 틈은 미묘해 실용상 충분하다. 재생바 폭 조작은 부작용>이득이라 하지 않는다. */
+
+/* ══ 댓글 사용자 차단 ═════════════════════════════════════════════════════════ */
+/* 댓글 헤더의 '사용자 차단' 버튼(더보기 옆). 평소 은은하게, 호버 시 강조. */
+.cheese-comment-block-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0 2px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sem-color-content-neutral-alternative, #939aa8);
+  cursor: pointer;
+  vertical-align: middle;
+  opacity: 0.7;
+  transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+}
+.cheese-comment-block-button:hover,
+.cheese-comment-block-button:focus-visible {
+  opacity: 1;
+  color: #ff5b5b;
+  background: rgba(255, 91, 91, 0.12);
+  outline: 0;
+}
+
+/* 차단 팝오버(body-fixed absolute, 스크롤 좌표 기반). */
+.cheese-comment-block-popover {
+  position: fixed;
+  z-index: 2147483646;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base, #1f2738)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--sem-color-content-neutral-warm-strong, #eef1f6);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cheese-cbp-title {
+  font-weight: 800;
+  font-size: 14px;
+  margin-bottom: 8px;
+  /* 긴 닉네임이 팝오버 밖으로 나가지 않게 줄바꿈/말줄임. */
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.cheese-cbp-note {
+  margin: 0 0 10px;
+  color: var(--sem-color-content-neutral-alternative, #aeb4c0);
+}
+.cheese-cbp-reason {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 40px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 13px;
+  font-family: inherit;
+  margin-bottom: 8px;
+}
+.cheese-cbp-reason:focus {
+  outline: 0;
+  border-color: rgba(120, 160, 255, 0.7);
+}
+.cheese-cbp-native {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.cheese-cbp-native input {
+  width: 15px;
+  height: 15px;
+  accent-color: #ff5b5b;
+  cursor: pointer;
+}
+.cheese-cbp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.cheese-cbp-actions button {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 0;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cheese-cbp-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+}
+.cheese-cbp-cancel:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.cheese-cbp-confirm,
+.cheese-cbp-unblock {
+  background: #ff5b5b;
+  color: #fff;
+}
+.cheese-cbp-confirm:hover,
+.cheese-cbp-unblock:hover {
+  background: #ff4141;
+}
+
+/* 차단 토스트. */
+.cheese-comment-block-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%) translateY(12px);
+  z-index: 2147483647;
+  max-width: 90vw;
+  padding: 11px 18px;
+  border-radius: 10px;
+  background: rgba(20, 24, 32, 0.96);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.cheese-comment-block-toast.is-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

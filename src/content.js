@@ -60,6 +60,7 @@ const seekPreviewState = {
   publishAt: 0, // 등록일(ms). 0이면 미확보/없음
   fetching: false,
   observer: null,
+  observedRoot: null, // 현재 observe 중인 플레이어 루트(재렌더 시 재부착 판단용)
 };
 const liveDetailState = {
   channelId: "",
@@ -97,6 +98,10 @@ let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
 // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF). MAIN world(audioMixer.js)가 처리.
 const WHEEL_VOLUME_KEY = "cheeseWheelVolume";
 let wheelVolume = false;
+// 조작(휠 볼륨/되감기/앞으로) 시 플레이어 중앙 반투명 피드백 오버레이(전역, 기본 ON).
+// MAIN world(audioMixer.js)가 표시. content.js 는 플래그 로드/브로드캐스트만.
+const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
+let actionOverlay = true;
 // 휠 볼륨 조절 간격(%, 1~10, 기본 5). MAIN world(audioMixer.js)가 사용.
 const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
 let wheelVolumeStep = 5;
@@ -474,6 +479,29 @@ let cardDateTooltipOn = true;
 // 켜면 html 에 cheese-vod-chapter-hide 클래스를 붙이고 CSS(content.css)가 숨긴다.
 const VOD_CHAPTER_HIDE_KEY = "cheeseVodChapterHide";
 let vodChapterHideOn = false;
+// 다시보기/커뮤니티 댓글의 '내가 차단한 이용자의 댓글입니다.' 플레이스홀더 숨김(전역,
+// 기본 OFF=표시). 켜면 html 에 cheese-hide-blocked-comment 를 붙이고 CSS(content.js
+// 인젝션)가 숨긴다.
+const HIDE_BLOCKED_COMMENT_KEY = "cheeseHideBlockedComment";
+let hideBlockedCommentOn = false;
+// 댓글 사용자 차단(다시보기/커뮤니티). userIdHash 기준으로 차단하며, MAIN world
+// (commentBlock.js)가 댓글 API 응답에서 차단 유저 댓글을 제거한다. content.js 는 버튼
+// 주입·팝오버·저장·차단목록 동기화를 담당한다.
+// 저장 구조: cheeseCommentBlocks = [{ userIdHash, nickname, reason, blockedAt, nativeBlocked }]
+const COMMENT_BLOCK_KEY = "cheeseCommentBlocks";
+let commentBlocks = []; // 차단 목록(원본 배열)
+let commentBlockHashSet = new Set(); // 빠른 조회용 userIdHash 집합
+let commentBlockNicknameSet = new Set(); // 채팅 DOM 숨김용 닉네임 집합(hash 없어 닉네임 기반)
+// commentId → { userIdHash, nickname } (MAIN world 가 보내준 맵 누적).
+const commentUserMap = new Map();
+// userIdHash → Set(녹화 당시 닉네임들). VOD 채팅 응답에서 MAIN world 가 수집해 보냄.
+// 닉네임 변경 유저를 차단할 때, 이미 렌더/버퍼된 '녹화 닉네임' 메시지를 숨기는 데 쓴다.
+const vodNickByHash = new Map();
+const COMMENT_BLOCK_BUTTON_CLASS = "cheese-comment-block-button";
+const COMMENT_BLOCK_POPOVER_ID = "cheese-comment-block-popover";
+const CHAT_BLOCK_ITEM_CLASS = "cheese-chat-block-item"; // 채팅 프로필 팝오버 주입 항목
+// 네이티브 '사용자 차단' 항목과 동일한 차단 아이콘(SVG). currentColor 라 테마 자동 대응.
+const CHAT_BLOCK_ITEM_ICON = `<svg width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><mask id="cheese-chat-block-mask" maskUnits="userSpaceOnUse" x="4" y="4" width="17" height="16" style="mask-type: luminance;"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 4.5H21L17 11.5L15.41 12C15.41 12 13.5 13.5 13 13.5C13 13.5 12.6667 14 12.5 14C12.3333 14 12 13.5 12 13.5C12 14 13 19.6351 13 19.6351H4V4.5Z" fill="white"></path></mask><g mask="url(#cheese-chat-block-mask)"><path d="M16.05 8.82432C16.05 10.8375 14.4492 12.4486 12.5 12.4486C10.5508 12.4486 8.95 10.8375 8.95 8.82432C8.95 6.81117 10.5508 5.2 12.5 5.2C14.4492 5.2 16.05 6.81117 16.05 8.82432Z" stroke="currentColor" stroke-width="1.4"></path><path d="M19.2375 19.6352C19.2375 23.4395 16.2096 26.5028 12.5 26.5028C8.79037 26.5028 5.7625 23.4395 5.7625 19.6352C5.7625 15.8309 8.79037 12.7676 12.5 12.7676C16.2096 12.7676 19.2375 15.8309 19.2375 19.6352Z" stroke="currentColor" stroke-width="1.4"></path></g><ellipse cx="5.7625" cy="19.9277" rx="0.7" ry="0.508744" fill="currentColor"></ellipse><ellipse cx="19.24" cy="19.9277" rx="0.7" ry="0.508744" fill="currentColor"></ellipse><circle cx="17.5" cy="17" r="3.5" stroke="currentColor" stroke-width="1.4"></circle><path d="M19.5 14.5L15.5 19.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path></svg>`;
 // 팔로잉 목록(following?tab=CHANNEL) 채널 아이템 호버 시 커스텀 툴팁으로 최근 방송일·
 // 팔로우 시작일·첫 방송일·총 방송 시간 표시(전역, 기본 OFF). content.js 전용.
 const FOLLOW_CHANNEL_TOOLTIP_KEY = "cheeseFollowChannelTooltip";
@@ -4400,6 +4428,9 @@ function initSeekPreviewRealtime() {
     void fetchVideoDates(videoNo);
   }
   startSeekPreviewObserver();
+  // 등록일 라벨 마킹은 매 mutation 이 아니라 init 주기(뮤테이션 디바운스)면 충분하다 —
+  // 라벨은 SPA 전환/재렌더 때만 새로 생긴다.
+  updateVideoInfoLabel();
 }
 
 async function fetchVideoDates(videoNo) {
@@ -4427,32 +4458,35 @@ async function fetchVideoDates(videoNo) {
   }
 }
 
+// ⚠ MutationObserver 방식(문서/플레이어 + characterData 관찰)은 콜백을 아무리 줄여도
+// '레코드 생성' 오버헤드가 상시 발생해 재생바 등장이 원본보다 늦었다(프로파일: JS 는
+// 1% 미만인데 체감 저하 잔존). seek preview 는 재생바에 마우스가 있을 때만 뜨므로,
+// 관찰 대신 pointermove(rAF 스로틀) 기반으로 바꾼다 — 마우스가 멈추면 비용 0, 컨트롤바
+// 페이드 순간에도 mutation 감시가 없어 원본과 동일하다.
+let seekPreviewPointerScheduled = false;
+function onSeekPreviewPointerMove() {
+  if (!seekPreviewState.videoNo || !seekPreviewState.liveOpenAt) return;
+  if (seekPreviewPointerScheduled) return;
+  seekPreviewPointerScheduled = true;
+  requestAnimationFrame(() => {
+    seekPreviewPointerScheduled = false;
+    updateSeekPreviewRealtime();
+  });
+}
+
 function startSeekPreviewObserver() {
-  if (seekPreviewState.observer) return;
-  // 문서 전체를 보는 옵저버라 라이브/다시보기에서 매우 자주 깨어난다. rAF로 묶어
-  // 프레임당 1회만 갱신해 비용을 줄인다(갱신 자체는 querySelector 1회로 가볍다).
-  let scheduled = false;
-  const obs = new MutationObserver(() => {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
-      updateSeekPreviewRealtime();
-      updateVideoInfoLabel();
-    });
+  if (seekPreviewState.observer) return; // observer 필드를 'bound' 플래그로 재사용
+  document.addEventListener("pointermove", onSeekPreviewPointerMove, {
+    passive: true,
   });
-  obs.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-  seekPreviewState.observer = obs;
+  seekPreviewState.observer = true;
 }
 
 function teardownSeekPreviewObserver() {
   if (seekPreviewState.observer) {
-    seekPreviewState.observer.disconnect();
+    document.removeEventListener("pointermove", onSeekPreviewPointerMove);
     seekPreviewState.observer = null;
+    seekPreviewState.observedRoot = null;
   }
 }
 
@@ -4719,6 +4753,32 @@ function getStoredHiddenLogPowerChannels() {
     } catch {
       resolve([]);
     }
+  });
+}
+// ⚠ 치지직 파티 아이콘(라이브 탐색/사이드바 프로필의 초록 배지, svg[class*="_icon_party_"])의
+// mask id 충돌 보정. 치지직은 파티 카드마다 같은 <mask id="mask0_..."> 를 재사용하는데,
+// 브라우저는 url(#id) 를 '문서 첫 번째 매칭 mask' 로 해석한다. 그 첫 mask 가 든 SVG 가
+// display:none 되면(우리 '사이드바 숨김'이 사이드바 안 파티 아이콘을 숨김) 문서 뒤쪽 본문
+// 파티 아이콘들의 mask 참조가 모두 깨져 배지가 흰색으로만 보인다(실측: mask#mask0_3630_68461
+// 5개 중 첫 2개가 숨긴 사이드바 안 → 본문 3개 전부 깨짐). 각 파티 아이콘 SVG 의 mask id 를
+// 인스턴스별 고유값으로 바꿔 참조를 SVG 로컬로 만든다 → 다른 SVG 숨김과 무관해진다.
+let partyIconMaskSeq = 0;
+function fixPartyIconMasks(root = document) {
+  const svgs = root.querySelectorAll?.(
+    "svg[class*='_icon_party_']:not([data-cheese-mask-fixed])",
+  );
+  if (!svgs || !svgs.length) return;
+  svgs.forEach((svg) => {
+    const mask = svg.querySelector("mask[id]");
+    const g = svg.querySelector("g[mask]");
+    if (!mask || !g) {
+      svg.setAttribute("data-cheese-mask-fixed", "1"); // 구조 다르면 재시도 안 함
+      return;
+    }
+    const uid = `cheese-party-mask-${++partyIconMaskSeq}`;
+    mask.id = uid;
+    g.setAttribute("mask", `url(#${uid})`);
+    svg.setAttribute("data-cheese-mask-fixed", "1");
   });
 }
 // 파워 아이콘 SVG(con-chzzk 팝업 합계 표시용).
@@ -6222,11 +6282,8 @@ function ensureCommentTimestampButton() {
       </span>
       <span class="cheese-search-comment-timestamp-count" aria-hidden="true"></span>
     `;
-    button.addEventListener("click", handleCommentTimestampButtonClick);
-    button.addEventListener(
-      "contextmenu",
-      handleCommentTimestampButtonContextMenu,
-    );
+    // 클릭/우클릭은 document 캡처 위임(파일 하단)으로 처리 — 버튼 노드 재생성이나
+    // 치지직의 이벤트 전파 차단에도 간헐적으로 안 열리는 일이 없게 한다.
     const clipButton = controls.querySelector(".custom__clip-button");
     controls.insertBefore(button, clipButton || controls.firstChild);
     setTimeout(() => {
@@ -6275,16 +6332,15 @@ function updateCommentTimestampButton(
   }
 }
 
-function handleCommentTimestampButtonClick(event) {
+function handleCommentTimestampButtonClick(event, delegatedButton) {
+  const button = delegatedButton || event.currentTarget;
   event.preventDefault();
   event.stopPropagation();
+  // 포커스 잔류 방지(스페이스 재생 시 합성 클릭으로 패널이 열리는 오작동 예방).
+  button?.blur?.();
   // 기능이 꺼져 있으면 좌클릭은 무효(우클릭 메뉴로만 다시 켤 수 있다).
   if (!commentMarkerState.featureEnabled) return;
-  if (
-    event.currentTarget?.classList?.contains(
-      VIDEO_COMMENT_BUTTON_DISABLED_CLASS,
-    )
-  ) {
+  if (button?.classList?.contains(VIDEO_COMMENT_BUTTON_DISABLED_CLASS)) {
     return;
   }
   const panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`);
@@ -6292,14 +6348,14 @@ function handleCommentTimestampButtonClick(event) {
     closeCommentTimestampPanel();
     return;
   }
-  openCommentTimestampPanel(event.currentTarget);
+  openCommentTimestampPanel(button);
 }
 
 // 우클릭 → 기능 켜기/끄기 팝오버. 기능 off 상태에서도 항상 동작한다.
-function handleCommentTimestampButtonContextMenu(event) {
+function handleCommentTimestampButtonContextMenu(event, delegatedButton) {
   event.preventDefault();
   event.stopPropagation();
-  toggleCommentFeatureMenu(event.currentTarget);
+  toggleCommentFeatureMenu(delegatedButton || event.currentTarget);
 }
 
 function toggleCommentFeatureMenu(anchor) {
@@ -6540,8 +6596,7 @@ function handleCommentTimestampPanelSeek(event) {
     return; // 계속 열어둠
   }
   if (commentTsClickAction === "delay") {
-    const ms =
-      clampCommentTsClickDelay(commentTsClickDelaySec) * 1000;
+    const ms = clampCommentTsClickDelay(commentTsClickDelaySec) * 1000;
     commentTsClickDelayTimer = window.setTimeout(() => {
       commentTsClickDelayTimer = 0;
       closeCommentTimestampPanel();
@@ -6847,12 +6902,10 @@ function getPlayerDuration(slider) {
   const root = slider?.closest?.(".pzp-ui-slider__wrap");
   if (root) {
     let maxOfSegs = 0;
-    root
-      .querySelectorAll(":scope > .pzp-ui-progress__wrap")
-      .forEach((seg) => {
-        const m = Number(seg.getAttribute("max") || 0);
-        if (Number.isFinite(m) && m > maxOfSegs) maxOfSegs = m;
-      });
+    root.querySelectorAll(":scope > .pzp-ui-progress__wrap").forEach((seg) => {
+      const m = Number(seg.getAttribute("max") || 0);
+      if (Number.isFinite(m) && m > maxOfSegs) maxOfSegs = m;
+    });
     if (maxOfSegs > 0) return maxOfSegs;
   }
   const fromSlider = Number(slider?.getAttribute("max") || 0);
@@ -6885,7 +6938,8 @@ function handleCommentMarkerPreviewShow(event) {
   const seconds = markerElement?.dataset?.seconds || "";
   if (!seconds) return;
   commentMarkerState.activePreviewSeconds = seconds;
-  removeCommentMarkerPreviewTooltip();
+  // 매 enter 마다 제거→재생성하면 마커 위를 스칠 때 DOM churn 으로 스타일 재계산이
+  // 잦아진다(프로파일) → render 가 기존 툴팁을 재사용(같은 마커면 스킵)한다.
   renderCommentMarkerPreviewTooltip(seconds);
 }
 
@@ -6917,11 +6971,25 @@ function renderCommentMarkerPreviewTooltip(seconds, attempt = 0) {
   const marker = findCommentTimestampMarkerBySeconds(seconds);
   if (!marker) return;
 
-  removeCommentMarkerPreviewTooltip();
+  // 기존 툴팁 재사용: 같은 마커면 그대로, 다른 마커면 내용만 교체(노드 재생성 없음).
+  const existing = description.querySelector(
+    `.${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}`,
+  );
+  if (existing) {
+    if (existing.dataset.seconds !== String(seconds)) {
+      existing.dataset.seconds = String(seconds);
+      existing.innerHTML = buildCommentMarkerPreviewInner(marker);
+    }
+    return;
+  }
   timeElement.insertAdjacentHTML(
     "afterend",
     buildCommentMarkerPreviewHtml(marker),
   );
+  const created = description.querySelector(
+    `.${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}`,
+  );
+  if (created) created.dataset.seconds = String(seconds);
 }
 
 function findCommentTimestampMarkerBySeconds(seconds) {
@@ -6932,12 +7000,11 @@ function findCommentTimestampMarkerBySeconds(seconds) {
   );
 }
 
-function buildCommentMarkerPreviewHtml(marker) {
+function buildCommentMarkerPreviewInner(marker) {
   const seconds = Number(marker.seconds);
   const comments = Array.isArray(marker.comments) ? marker.comments : [];
   const label = marker.timeLabel || formatSeconds(seconds);
   return `
-    <div class="${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}" role="tooltip">
       <strong>${escapeHtml(label)}</strong>
       ${comments
         .slice(0, 4)
@@ -6954,8 +7021,11 @@ function buildCommentMarkerPreviewHtml(marker) {
           ? `<span class="cheese-search-comment-preview-tooltip-more">외 ${Number(marker.sourceCount) - comments.length}개</span>`
           : ""
       }
-    </div>
   `;
+}
+
+function buildCommentMarkerPreviewHtml(marker) {
+  return `<div class="${VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS}" role="tooltip">${buildCommentMarkerPreviewInner(marker)}</div>`;
 }
 
 function removeCommentMarkerPreviewTooltip() {
@@ -9669,6 +9739,9 @@ function applyFillScreen() {
   );
   // 넓은 화면(viewmode)이면 영상 레이아웃이 달라 화면 채우기가 방해된다 → 적용 안 함.
   const isWide = isWideScreenModeOn();
+  // 전체화면이면 브라우저가 영상을 꽉 채우므로 우리가 높이를 강제하면 오히려 깨진다
+  // (치지직 업데이트로 재발). document.fullscreenElement 로 판정(클래스 해시 무관).
+  const isFullscreen = !!document.fullscreenElement;
   const on =
     FILL_SCREEN_ENABLED &&
     featureFlags.fillScreen &&
@@ -9676,6 +9749,7 @@ function applyFillScreen() {
     !isMini &&
     !isPip &&
     !isWide &&
+    !isFullscreen &&
     !(aside && isChatStackedLayout(aside));
   if (!on) {
     // 타겟 재탐색과 무관하게, 우리가 스타일을 건 요소를 직접 원복(PIP/미니플레이어에서
@@ -10645,6 +10719,14 @@ function updateChatTweakStyle() {
        :not(<panel> *) 로 처리해 되살림 규칙이 필요없다. */
     html.cheese-chat-hide-mission-msg aside#aside-chatting [class*="_item_"]:not([class*="_1u2rv_"] *):not([class*="_is_active_mission_"] *):not([class*="_nhfkh_"] *):has(> [class*="_container_"]:not([class*="_is_fixed_"]) [class*="_is_mission_"]),
     html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:not([class*="_1u2rv_"] *):not([class*="_is_active_mission_"] *):not([class*="_nhfkh_"] *):has(> [class*="_container_"]:not([class*="_is_fixed_"]) [class*="_is_mission_"]) {
+      display: none !important;
+    }
+    /* 다시보기/커뮤니티 댓글 중 '내가 차단한 이용자의 댓글입니다.' 플레이스홀더 숨김.
+       차단/삭제 댓글은 일반 댓글(_wrap_ > _header_ + _content_)과 달리 _wrap_ 직계 자식이
+       _default_(프로필 이미지 + 안내 문구만) 구조다. 그 _default_ 를 직계로 가진 댓글 wrap
+       을 #commentArea 안에서만 숨긴다(다른 영역 영향 없음). */
+    html.cheese-hide-blocked-comment #commentArea [class*="_wrap_1woio_"]:has(> [class*="_default_1woio_"]),
+    html.cheese-hide-blocked-comment #commentArea [class*="_wrap_1woio_"]:has(> [class*="_default_"]) {
       display: none !important;
     }
     html.cheese-chat-left-position aside#aside-chatting,
@@ -14748,9 +14830,32 @@ async function fetchCardVideoDates(videoNo) {
 let cardDateHoverInfo = null;
 let cardDateHoverVideoNo = "";
 
+// ⚠ 카드 날짜 툴팁은 'body 직속 싱글턴 fixed' 방식이다. 예전엔 타깃(_information_ 등)에
+// 클래스+자식 span 을 부착했는데, 치지직 React 가 그 요소를 리렌더하며 우리 클래스를
+// 지우는 순간 스타일이 무너져 페이지 15px 스크롤이 왕복(깜빡임)했다(장기 실측). 치지직
+// DOM 에 아무것도 부착하지 않으면 그 상호작용 자체가 사라진다.
+const CARD_DATE_FLOAT_ID = "cheese-card-date-float";
+function getCardDateFloatEl() {
+  let el = document.getElementById(CARD_DATE_FLOAT_ID);
+  if (!el) {
+    el = document.createElement("span");
+    el.id = CARD_DATE_FLOAT_ID;
+    el.className = `${CARD_DATE_TOOLTIP_CLASS} cheese-card-date-float`;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function hideCardDateTooltip() {
+  document.getElementById(CARD_DATE_FLOAT_ID)?.classList.remove("is-show");
+}
+
 function renderCardDateTooltip(info, videoNo) {
   const dates = cardDateCache.get(videoNo);
   if (!dates) return; // 미확보/실패 → 툴팁 없음
+  // fetch 완료가 늦게 와서 마우스가 이미 떠났으면 표시하지 않는다(JS 표시 방식이라
+  // :hover CSS 가 지켜주지 않음).
+  if (!info?.isConnected || !info.matches(":hover")) return;
   const parts = [];
   if (dates.publishAt)
     parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
@@ -14758,20 +14863,27 @@ function renderCardDateTooltip(info, videoNo) {
     parts.push(`라이브 시작일 : ${formatKstClock(dates.liveOpenAt)}`);
   }
   if (!parts.length) return;
-  // 시청 화면 툴팁과 CSS(표시 로직)는 공유하되, 위치는 카드 전용 마커로 오버라이드.
-  // 부착 대상은 '상대 날짜가 있는 곳'(일반 카드=_information_, e스포츠 카드=_channel_).
-  // null 이면 부적합(상대 날짜 없는 채널명 등) → 붙이지 않는다.
+  // 위치 기준은 '상대 날짜가 있는 곳'(일반 카드=_information_, e스포츠 카드=_channel_).
+  // null 이면 부적합(상대 날짜 없는 채널명 등) → 표시하지 않는다.
   const target = cardDateAttachTarget(info);
   if (!target) return;
-  target.classList.add(CARD_DATE_TARGET_CLASS, "cheese-card-date-target");
-  let label = target.querySelector(`:scope > .${CARD_DATE_TOOLTIP_CLASS}`);
-  if (!label) {
-    label = document.createElement("span");
-    label.className = CARD_DATE_TOOLTIP_CLASS;
-    target.appendChild(label);
-  }
+  const label = getCardDateFloatEl();
   const html = parts.map((p) => escapeHtml(p)).join("<br>");
   if (label.innerHTML !== html) label.innerHTML = html;
+  label.classList.add("is-show");
+  // 타깃 아래 기본, 하단 공간 부족 시 위로 뒤집고 뷰포트 안으로 클램프(fixed 좌표).
+  const tr = target.getBoundingClientRect();
+  const lr = label.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  let left = tr.left;
+  if (left + lr.width > vw - 8) left = vw - 8 - lr.width;
+  if (left < 8) left = 8;
+  let top = tr.bottom + 4;
+  if (top + lr.height > vh - 8) top = tr.top - 4 - lr.height;
+  if (top < 8) top = 8;
+  label.style.left = `${Math.round(left)}px`;
+  label.style.top = `${Math.round(top)}px`;
 }
 
 function onCardDateMouseOver(e) {
@@ -14780,10 +14892,14 @@ function onCardDateMouseOver(e) {
   if (!info) {
     cardDateHoverInfo = null;
     cardDateHoverVideoNo = "";
+    hideCardDateTooltip();
     return;
   }
   const videoNo = cardVideoNoFromInfo(info);
-  if (!videoNo) return;
+  if (!videoNo) {
+    hideCardDateTooltip();
+    return;
+  }
   cardDateHoverInfo = info;
   cardDateHoverVideoNo = videoNo;
   if (cardDateCache.has(videoNo)) {
@@ -14793,10 +14909,19 @@ function onCardDateMouseOver(e) {
   }
 }
 
+function onCardDateScrollHide() {
+  hideCardDateTooltip();
+}
+
 function bindCardDateTooltip() {
   if (cardDateTooltipBound) return;
   cardDateTooltipBound = true;
   document.addEventListener("mouseover", onCardDateMouseOver, {
+    passive: true,
+  });
+  // fixed 툴팁이라 스크롤하면 타깃과 어긋난다 → 스크롤 시 숨김(다음 호버에 재표시).
+  document.addEventListener("scroll", onCardDateScrollHide, {
+    capture: true,
     passive: true,
   });
 }
@@ -14804,9 +14929,13 @@ function bindCardDateTooltip() {
 function unbindCardDateTooltip() {
   cardDateTooltipBound = false;
   document.removeEventListener("mouseover", onCardDateMouseOver);
+  document.removeEventListener("scroll", onCardDateScrollHide, {
+    capture: true,
+  });
   cardDateHoverInfo = null;
   cardDateHoverVideoNo = "";
-  // 이미 붙인 툴팁 정리.
+  document.getElementById(CARD_DATE_FLOAT_ID)?.remove();
+  // 구버전(타깃 부착 방식)이 남긴 잔재 정리.
   document
     .querySelectorAll(
       `.${CARD_DATE_TARGET_CLASS} > .${CARD_DATE_TOOLTIP_CLASS}`,
@@ -15755,6 +15884,699 @@ async function loadVodChapterHide() {
   applyVodChapterHide();
 }
 
+function applyHideBlockedComment() {
+  document.documentElement.classList.toggle(
+    "cheese-hide-blocked-comment",
+    hideBlockedCommentOn,
+  );
+}
+
+async function loadHideBlockedComment() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([HIDE_BLOCKED_COMMENT_KEY]);
+    hideBlockedCommentOn = data?.[HIDE_BLOCKED_COMMENT_KEY] === true; // 기본 OFF
+  } catch {}
+  applyHideBlockedComment();
+}
+
+// ══ 댓글 사용자 차단 ═════════════════════════════════════════════════════════
+
+// 차단 목록을 MAIN world(commentBlock.js)로 보낸다(응답 필터용 hash 집합).
+// ⚠ '치지직 차단도 함께'(nativeBlocked)인 유저는 보내지 않는다 — 치지직 서버가 이미 그
+// 유저 댓글을 '내가 차단한 이용자의 댓글입니다.' 플레이스홀더로 내려주므로, 우리가 응답에서
+// 제거하면 안 된다. 그래야 로컬만 해제해도(치지직 차단 유지) 플레이스홀더가 정상 표시된다.
+// 로컬 전용 차단(nativeBlocked=false)만 우리가 응답에서 제거해 아예 안 보이게 한다.
+function pushCommentBlocksToMain() {
+  // hashes: 댓글 응답 제거용(로컬 전용 — native 는 치지직 플레이스홀더에 맡김).
+  // chatHashes: 채팅 메시지 필터용(전체 — 채팅에선 native 포함 무조건 안 보이게).
+  const localOnly = commentBlocks
+    .filter((b) => !b.nativeBlocked)
+    .map((b) => String(b.userIdHash));
+  const all = commentBlocks.map((b) => String(b.userIdHash));
+  window.postMessage(
+    {
+      source: "cheese-comment-block",
+      type: "set-blocked",
+      hashes: localOnly,
+      chatHashes: all,
+    },
+    "*",
+  );
+}
+
+function rebuildCommentBlockSet() {
+  commentBlockHashSet = new Set(commentBlocks.map((b) => String(b.userIdHash)));
+  // 채팅 메시지 DOM 은 hash 가 없어 닉네임으로 숨기므로 닉네임 집합도 유지한다.
+  // ⚠ 다시보기 채팅은 '녹화 당시 닉네임'으로 렌더되므로, 현재 닉네임뿐 아니라 과거
+  // 닉네임(nicknameHistory)도 모두 숨김 대상에 포함해야 닉네임 변경 유저가 잡힌다.
+  commentBlockNicknameSet = new Set();
+  for (const b of commentBlocks) {
+    const cur = String(b.nickname || "").trim();
+    if (cur) commentBlockNicknameSet.add(cur);
+    if (Array.isArray(b.nicknameHistory)) {
+      for (const h of b.nicknameHistory) {
+        const old = String(h?.nickname || "").trim();
+        if (old) commentBlockNicknameSet.add(old);
+      }
+    }
+  }
+  // VOD 응답에서 수집한 '녹화 당시 닉네임'도 병합(닉네임 변경 유저의 과거 메시지 대응).
+  for (const h of commentBlockHashSet) {
+    const nicks = vodNickByHash.get(h);
+    if (nicks) for (const n of nicks) commentBlockNicknameSet.add(n);
+  }
+}
+
+async function loadCommentBlocks() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([COMMENT_BLOCK_KEY]);
+    const list = data?.[COMMENT_BLOCK_KEY];
+    commentBlocks = Array.isArray(list) ? list : [];
+  } catch {
+    commentBlocks = [];
+  }
+  rebuildCommentBlockSet();
+  pushCommentBlocksToMain();
+  sweepChatBlocks(); // 로드 시 이미 렌더된 채팅에 적용
+}
+
+function saveCommentBlocks() {
+  rebuildCommentBlockSet();
+  try {
+    chrome.storage?.local?.set({ [COMMENT_BLOCK_KEY]: commentBlocks });
+  } catch {}
+  pushCommentBlocksToMain();
+}
+
+// 다시보기/커뮤니티/라이브 페이지에서 loungeId(채널ID)를 확보한다. '치지직 사용자 차단도
+// 같이하기'에만 필요.
+//  - 커뮤니티: /{channelId}/community...  → pathname 첫 세그먼트가 32hex 채널ID.
+//  - 라이브:   /live/{channelId}          → 두 번째 세그먼트가 채널ID.
+//  - 다시보기: /video/{videoNo}           → URL 엔 없으니 페이지 채널 링크에서 추출.
+// 못 찾으면 "".
+function getCommentBlockChannelId() {
+  const seg = location.pathname.split("/").filter(Boolean);
+  for (const s of seg) {
+    if (/^[0-9a-f]{32}$/i.test(s)) return s; // 첫 32hex 세그먼트(커뮤니티/라이브)
+  }
+  // 다시보기 등: 페이지 어딘가의 채널 링크(a[href="/<32hex>"]).
+  const anchors = document.querySelectorAll('a[href^="/"]');
+  for (const el of anchors) {
+    const m = (el.getAttribute("href") || "").match(
+      /^\/([0-9a-f]{32})(?:[/?#]|$)/i,
+    );
+    if (m) return m[1];
+  }
+  return "";
+}
+
+// MAIN world 로부터 commentId→user 맵/ready 수신.
+window.addEventListener("message", (e) => {
+  if (e.source !== window) return;
+  const d = e.data;
+  if (!d || d.source !== "cheese-comment-block") return;
+  if (d.type === "ready") {
+    pushCommentBlocksToMain();
+  } else if (d.type === "comment-map" && Array.isArray(d.map)) {
+    for (const it of d.map) {
+      if (it?.commentId) {
+        commentUserMap.set(String(it.commentId), {
+          userIdHash: String(it.userIdHash || ""),
+          nickname: String(it.nickname || ""),
+          privateUserBlock: !!it.privateUserBlock,
+        });
+      }
+    }
+    scheduleCommentBlockButtons();
+    applyNativeBlockPlaceholders(); // 치지직 차단 유저 댓글 → 플레이스홀더 교체
+  } else if (d.type === "profile" && d.userIdHash) {
+    // 채팅 닉네임 클릭 시의 프로필. 팝오버 버튼 주입에 쓸 '마지막 프로필'로 보관.
+    lastChatProfile = {
+      userIdHash: String(d.userIdHash),
+      nickname: String(d.nickname || ""),
+      at: Date.now(),
+    };
+    scheduleChatBlockButton();
+  } else if (d.type === "vod-nicks" && Array.isArray(d.pairs)) {
+    // VOD 채팅의 hash→녹화 닉네임 쌍. 차단 유저 것이면 숨김 닉네임 집합에 즉시 반영하고,
+    // 현재 닉네임과 다른 녹화 닉네임은 '닉네임 변경 이력'에도 기록한다(관리 탭 표시용).
+    let touchedBlocked = false;
+    let historyChanged = false;
+    for (const pair of d.pairs) {
+      const h = String(pair?.[0] || "");
+      const nick = String(pair?.[1] || "").trim();
+      if (!h || !nick) continue;
+      let set = vodNickByHash.get(h);
+      if (!set) {
+        set = new Set();
+        vodNickByHash.set(h, set);
+      }
+      set.add(nick);
+      if (commentBlockHashSet.has(h)) {
+        if (!commentBlockNicknameSet.has(nick)) {
+          commentBlockNicknameSet.add(nick);
+          touchedBlocked = true;
+        }
+        const entry = commentBlocks.find((b) => b.userIdHash === h);
+        if (entry && nick !== entry.nickname) {
+          if (!Array.isArray(entry.nicknameHistory)) entry.nicknameHistory = [];
+          if (!entry.nicknameHistory.some((x) => x?.nickname === nick)) {
+            entry.nicknameHistory.push({ nickname: nick, at: Date.now() });
+            historyChanged = true;
+          }
+        }
+      }
+    }
+    if (historyChanged) saveCommentBlocks();
+    if (touchedBlocked) sweepChatBlocks();
+  }
+});
+
+// 채팅 프로필 팝오버('사용자 차단' 항목)를 주입할 때 대상 유저 식별용 최신 프로필.
+let lastChatProfile = null;
+
+// 댓글 wrap 에서 commentId 를 얻는다(id="commentBox-{commentId}").
+function commentIdFromWrap(wrap) {
+  const id = wrap?.id || "";
+  const m = id.match(/^commentBox-(.+)$/);
+  return m ? m[1] : "";
+}
+
+let commentBlockBtnTimer = 0;
+function scheduleCommentBlockButtons() {
+  if (commentBlockBtnTimer) return;
+  commentBlockBtnTimer = window.setTimeout(() => {
+    commentBlockBtnTimer = 0;
+    injectCommentBlockButtons();
+    applyNativeBlockPlaceholders();
+  }, 150);
+}
+
+// 치지직 자체 차단(privateUserBlock=true) 유저의 댓글 DOM 을 '내가 차단한 이용자의
+// 댓글입니다.' 플레이스홀더로 교체한다. 다시보기는 치지직 프론트가 이미 그려주지만
+// 커뮤니티는 원본을 그대로 노출해(실측) 양쪽 불일치했다 → 우리가 통일한다.
+// 원본이 이미 플레이스홀더(_default_)면 건드리지 않는다(중복 방지).
+const NATIVE_BLOCK_PLACEHOLDER_HTML = `<div class="_default_1woio_320 cheese-native-block-placeholder"><img class="_image_1woio_328" width="36" height="36" src="https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png"><div class="_text_1woio_192">내가 차단한 이용자의 댓글입니다.</div></div>`;
+function applyNativeBlockPlaceholders() {
+  const area = document.getElementById("commentArea");
+  if (!area) return;
+  area.querySelectorAll('[id^="commentBox-"]').forEach((wrap) => {
+    if (wrap.dataset.cheeseNativePlaceholder === "1") return;
+    // 치지직이 이미 플레이스홀더로 그린 경우(_default_ 직계) 스킵.
+    if (wrap.querySelector(':scope > [class*="_default_"]')) return;
+    const commentId = commentIdFromWrap(wrap);
+    const user = commentUserMap.get(commentId);
+    if (!user || !user.privateUserBlock) return;
+    // 원 댓글 내용을 플레이스홀더로 교체(헤더/본문/푸터 전체 대체). 대댓글이 있으면
+    // 그 스레드도 함께 사라지는 건 치지직 원본과 동일한 동작.
+    wrap.innerHTML = NATIVE_BLOCK_PLACEHOLDER_HTML;
+    wrap.dataset.cheeseNativePlaceholder = "1";
+  });
+}
+
+// 각 댓글 헤더의 '더보기' 옆에 '사용자 차단' 버튼을 주입(멱등).
+function injectCommentBlockButtons() {
+  const area = document.getElementById("commentArea");
+  if (!area) return;
+  const wraps = area.querySelectorAll('[id^="commentBox-"]');
+  wraps.forEach((wrap) => {
+    if (wrap.querySelector(`.${COMMENT_BLOCK_BUTTON_CLASS}`)) return;
+    const commentId = commentIdFromWrap(wrap);
+    if (!commentId) return;
+    const user = commentUserMap.get(commentId);
+    if (!user || !user.userIdHash) return; // 맵 확보 후 다시 시도
+    const more = wrap.querySelector('[class*="_more_1woio_"]');
+    const nameBtn = wrap.querySelector('[class*="_information_1woio_"]');
+    const host = more || nameBtn?.parentElement;
+    if (!host) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = COMMENT_BLOCK_BUTTON_CLASS;
+    btn.setAttribute("aria-label", "사용자 차단");
+    btn.title = "사용자 차단";
+    btn.dataset.userHash = user.userIdHash;
+    btn.dataset.nickname = user.nickname || "";
+    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M5.6 5.6l12.8 12.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    btn.addEventListener("click", onCommentBlockButtonClick);
+    // 더보기 버튼 앞에 둔다.
+    host.insertBefore(btn, host.firstChild);
+  });
+}
+
+function onCommentBlockButtonClick(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const btn = e.currentTarget;
+  openCommentBlockPopover(
+    btn,
+    btn.dataset.userHash || "",
+    btn.dataset.nickname || "",
+  );
+}
+
+function closeCommentBlockPopover() {
+  document.getElementById(COMMENT_BLOCK_POPOVER_ID)?.remove();
+  document.removeEventListener("mousedown", onCommentBlockPopoverOutside, true);
+  document.removeEventListener("keydown", onCommentBlockPopoverKey, true);
+}
+
+function onCommentBlockPopoverOutside(e) {
+  const pop = document.getElementById(COMMENT_BLOCK_POPOVER_ID);
+  if (pop && !pop.contains(e.target)) closeCommentBlockPopover();
+}
+function onCommentBlockPopoverKey(e) {
+  if (e.key === "Escape") closeCommentBlockPopover();
+}
+
+function openCommentBlockPopover(anchor, userHash, nickname) {
+  closeCommentBlockPopover();
+  if (!userHash) return;
+  const already = commentBlockHashSet.has(userHash);
+  const pop = document.createElement("div");
+  pop.id = COMMENT_BLOCK_POPOVER_ID;
+  pop.className = "cheese-comment-block-popover";
+  pop.innerHTML = `
+    <div class="cheese-cbp-title">${escapeHtml(nickname || "이 사용자")}님 차단</div>
+    ${
+      already
+        ? `<p class="cheese-cbp-note">이미 차단된 사용자입니다.</p>
+           <div class="cheese-cbp-actions">
+             <button type="button" class="cheese-cbp-cancel">닫기</button>
+             <button type="button" class="cheese-cbp-unblock">차단 해제</button>
+           </div>`
+        : `<textarea class="cheese-cbp-reason" placeholder="차단 사유(선택)" rows="2" maxlength="200"></textarea>
+           <label class="cheese-cbp-native">
+             <input type="checkbox" class="cheese-cbp-native-check" />
+             <span>치지직 사용자 차단도 같이하기</span>
+           </label>
+           <div class="cheese-cbp-actions">
+             <button type="button" class="cheese-cbp-cancel">취소</button>
+             <button type="button" class="cheese-cbp-confirm">차단</button>
+           </div>`
+    }
+  `;
+  document.body.appendChild(pop);
+
+  // 위치: position:fixed(뷰포트 좌표) 기준. 앵커 아래에 두되, 아래 공간이 부족하면 위로
+  // 뒤집어 화면 밖으로 잘리지 않게 한다(스크롤해도 안 보이던 문제 해결).
+  const r = anchor.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  let left = r.left;
+  const maxLeft = vw - pr.width - 8;
+  if (left > maxLeft) left = maxLeft;
+  if (left < 8) left = 8;
+  let top = r.bottom + 6;
+  // 아래로 넘치면 앵커 위로. 위도 부족하면 화면 안으로 클램프.
+  if (top + pr.height > vh - 8) {
+    const above = r.top - 6 - pr.height;
+    top = above >= 8 ? above : Math.max(8, vh - pr.height - 8);
+  }
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+
+  pop
+    .querySelector(".cheese-cbp-cancel")
+    ?.addEventListener("click", closeCommentBlockPopover);
+  pop.querySelector(".cheese-cbp-unblock")?.addEventListener("click", () => {
+    unblockCommentUser(userHash);
+    closeCommentBlockPopover();
+  });
+  pop
+    .querySelector(".cheese-cbp-confirm")
+    ?.addEventListener("click", async () => {
+      const reason = (
+        pop.querySelector(".cheese-cbp-reason")?.value || ""
+      ).trim();
+      const native = !!pop.querySelector(".cheese-cbp-native-check")?.checked;
+      await blockCommentUser(userHash, nickname, reason, native);
+      closeCommentBlockPopover();
+    });
+
+  setTimeout(() => {
+    document.addEventListener("mousedown", onCommentBlockPopoverOutside, true);
+    document.addEventListener("keydown", onCommentBlockPopoverKey, true);
+  }, 0);
+}
+
+async function blockCommentUser(userHash, nickname, reason, native) {
+  if (commentBlockHashSet.has(userHash)) return;
+  // VOD 응답에서 이미 수집된 '녹화 당시 닉네임'이 현재 닉네임과 다르면 변경 이력으로 기록.
+  const history = [];
+  const recorded = vodNickByHash.get(userHash);
+  if (recorded) {
+    for (const n of recorded) {
+      if (n && n !== nickname) history.push({ nickname: n, at: Date.now() });
+    }
+  }
+  commentBlocks.push({
+    userIdHash: userHash,
+    nickname: nickname || "",
+    reason: reason || "",
+    blockedAt: Date.now(),
+    nativeBlocked: false,
+    nicknameHistory: history,
+  });
+  saveCommentBlocks();
+  // 치지직 실제 차단 옵션.
+  if (native) {
+    const channelId = getCommentBlockChannelId();
+    if (!channelId) {
+      showCommentBlockToast(
+        "치지직 차단은 채널 정보를 못 찾아 건너뛰었습니다(로컬 차단만 적용).",
+      );
+    } else {
+      // ⚠ background fetch 는 페이지 컨텍스트(Origin/Referer/세션)가 달라 403 이 났다.
+      // content.js(ISOLATED world)에서 직접 호출하면 페이지와 동일한 자격으로 요청돼
+      // 통과한다(comm-api.game.naver.com 은 host_permissions 에 있어 CORS 무관).
+      try {
+        const res = await fetch(
+          `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
+            userHash,
+          )}?loungeId=${encodeURIComponent(channelId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+          },
+        );
+        const entry = commentBlocks.find((b) => b.userIdHash === userHash);
+        if (res.ok) {
+          if (entry) entry.nativeBlocked = true;
+          saveCommentBlocks();
+          showCommentBlockToast("차단했습니다(치지직 차단 포함).");
+        } else {
+          showCommentBlockToast(
+            `로컬 차단됨. 치지직 차단 실패(status ${res.status}).`,
+          );
+        }
+      } catch {
+        showCommentBlockToast("로컬 차단됨. 치지직 차단 요청에 실패했습니다.");
+      }
+    }
+  } else {
+    showCommentBlockToast("차단했습니다.");
+  }
+  // 이 유저의 이미 렌더된 댓글 즉시 숨김(다음 API 응답부턴 MAIN world 가 제거).
+  hideRenderedCommentsOf(userHash);
+  // 이미 채팅창에 떠 있는 이 유저 메시지도 즉시 숨김. 채팅 메시지 DOM 엔 userIdHash 가
+  // 없어(fiber 엔 내 uid 뿐, 실측) '닉네임 일치'로 숨긴다(동명이인 오숨김은 감수).
+  // 앞으로 올 새 메시지는 MAIN world 가 hash 로 정확히 필터한다.
+  hideRenderedChatOf(nickname);
+  // 닉네임 변경 유저: VOD 응답에서 수집한 '녹화 당시 닉네임'(vodNickByHash → rebuild 로
+  // 세트에 병합됨)까지 포함해 전체 스윕 — 이미 렌더/버퍼된 과거 닉네임 메시지도 숨긴다.
+  sweepChatBlocks();
+}
+
+function unblockCommentUser(userHash) {
+  commentBlocks = commentBlocks.filter((b) => b.userIdHash !== userHash);
+  saveCommentBlocks();
+  showRenderedCommentsOf(userHash); // 우리가 숨긴 댓글 즉시 복원(같은 페이지)
+  showCommentBlockToast("차단을 해제했습니다.");
+}
+
+// 이미 DOM 에 그려진 차단 유저 댓글을 숨긴다(응답 필터 전에 렌더된 것 대비). 복원 시
+// map 에 의존하지 않도록 숨긴 요소에 data-cheese-blocked-hash 를 남긴다.
+function hideRenderedCommentsOf(userHash) {
+  const area = document.getElementById("commentArea");
+  if (!area) return;
+  area.querySelectorAll('[id^="commentBox-"]').forEach((wrap) => {
+    const commentId = commentIdFromWrap(wrap);
+    const user = commentUserMap.get(commentId);
+    if (user && user.userIdHash === userHash) {
+      wrap.style.display = "none";
+      wrap.dataset.cheeseBlockedHash = userHash;
+    }
+  });
+}
+
+// 차단 해제 시: 우리가 숨긴(data-cheese-blocked-hash) 이 유저 댓글을 즉시 복원한다.
+// data 속성으로 찾으므로 commentUserMap 상태와 무관하다(첫 해제가 안 되던 문제 방지).
+// MAIN world 응답 필터로 아예 제거됐던 것은 새로고침해야 다시 온다.
+function showRenderedCommentsOf(userHash) {
+  const area = document.getElementById("commentArea");
+  if (!area) return;
+  area
+    .querySelectorAll(`[data-cheese-blocked-hash="${userHash}"]`)
+    .forEach((wrap) => {
+      wrap.style.display = "";
+      delete wrap.dataset.cheeseBlockedHash;
+    });
+}
+
+// 채팅창(aside)에서 특정 닉네임의 이미 렌더된 메시지를 숨긴다. 채팅 메시지 DOM 엔
+// userIdHash 가 없어(실측) 닉네임 텍스트 일치로 처리(동명이인 오숨김 감수). 라이브 새
+// 메시지는 MAIN world 가 hash 로 막으므로, 이 함수는 '차단 시점의 기존 메시지'와 '다시보기
+// 이미 렌더된 메시지' 정리용이다.
+function chatAsides() {
+  return document.querySelectorAll("aside#aside-chatting, aside#vod-aside");
+}
+// 이미 렌더된 채팅 가림 방식은 aside 별로 다르다:
+//  - 라이브(#aside-chatting): display:none — 완전히 사라짐(레이아웃 부작용 없음).
+//  - 다시보기(#vod-aside): opacity:0 + pointer-events:none — 치지직이 aside 높이를
+//    콘텐츠 기반으로 재계산(소수점 px 인라인)하므로 공간을 유지해 계산을 안 깨뜨린다.
+// 새로 오는 메시지는 응답/WebSocket 필터가 hash 로 아예 제거한다.
+function hideChatItem(item, nick) {
+  if (item.closest("#vod-aside")) {
+    item.style.opacity = "0";
+    item.style.pointerEvents = "none";
+  } else {
+    item.style.display = "none";
+  }
+  item.dataset.cheeseChatBlocked = nick;
+}
+function unhideChatItem(item) {
+  item.style.opacity = "";
+  item.style.pointerEvents = "";
+  item.style.display = "";
+  delete item.dataset.cheeseChatBlocked;
+}
+
+function hideRenderedChatOf(nickname) {
+  const nn = String(nickname || "").trim();
+  if (!nn) return;
+  chatAsides().forEach((aside) => {
+    aside.querySelectorAll('[class*="_item_"]').forEach((item) => {
+      if (item.dataset.cheeseChatBlocked) return;
+      // 닉네임 텍스트 노드(_nickname_ 안 _text_)로 판별. 없으면 스킵.
+      const nameEl = item.querySelector(
+        '[class*="_nickname_"] [class*="_text_"], [class*="_username_"] [class*="_text_"]',
+      );
+      if (!nameEl) return;
+      if ((nameEl.textContent || "").trim() === nn) {
+        hideChatItem(item, nn);
+      }
+    });
+  });
+}
+function showRenderedChatOf(nickname) {
+  const nn = String(nickname || "").trim();
+  if (!nn) return;
+  chatAsides().forEach((aside) => {
+    aside
+      .querySelectorAll(`[data-cheese-chat-blocked="${CSS.escape(nn)}"]`)
+      .forEach((item) => unhideChatItem(item));
+  });
+}
+
+// 채팅 항목 하나가 차단 닉네임이면 가린다(관찰자/스윕 공용). 이미 처리된 것은 스킵.
+function applyChatBlockToItem(item) {
+  if (!item || item.dataset.cheeseChatBlocked) return;
+  if (!commentBlockNicknameSet.size) return;
+  const nameEl = item.querySelector?.(
+    '[class*="_nickname_"] [class*="_text_"], [class*="_username_"] [class*="_text_"]',
+  );
+  if (!nameEl) return;
+  const nn = (nameEl.textContent || "").trim();
+  if (nn && commentBlockNicknameSet.has(nn)) {
+    hideChatItem(item, nn);
+  }
+}
+
+// 현재 채팅창의 모든 항목에 차단 닉네임 가림을 적용하고, 집합에서 빠진(해제된) 닉네임의
+// 가림은 복원한다(초기 진입/차단목록 변경/VOD 녹화닉네임 수신 시).
+function sweepChatBlocks() {
+  chatAsides().forEach((aside) => {
+    aside.querySelectorAll('[class*="_item_"]').forEach((item) => {
+      const hiddenNick = item.dataset.cheeseChatBlocked;
+      if (hiddenNick && !commentBlockNicknameSet.has(hiddenNick)) {
+        // 해제된 유저의 닉네임 → 복원.
+        unhideChatItem(item);
+        return;
+      }
+      applyChatBlockToItem(item);
+    });
+  });
+}
+
+// 채팅창 관찰: 새로 렌더되는 메시지에도 차단 닉네임 숨김을 적용. 라이브 새 메시지는 MAIN
+// world 가 hash 로 막지만, ① 페이지 진입 시 이미 있던 메시지 ② 다시보기 재생 중 렌더되는
+// 메시지는 여기서 닉네임으로 처리한다. 신규 추가 노드만 검사해 부하를 낮춘다.
+let chatMsgObserver = null;
+let chatMsgObservedAsides = new WeakSet();
+function ensureChatMsgObserver() {
+  const asides = chatAsides();
+  if (!asides.length) return;
+  if (!chatMsgObserver) {
+    chatMsgObserver = new MutationObserver((muts) => {
+      if (!commentBlockNicknameSet.size) return;
+      for (const m of muts) {
+        m.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) return;
+          // 추가된 노드가 채팅 항목이거나 그 안에 항목을 포함.
+          if (node.matches?.('[class*="_item_"]')) applyChatBlockToItem(node);
+          node
+            .querySelectorAll?.('[class*="_item_"]')
+            .forEach((it) => applyChatBlockToItem(it));
+        });
+      }
+    });
+  }
+  asides.forEach((aside) => {
+    if (chatMsgObservedAsides.has(aside)) return;
+    chatMsgObserver.observe(aside, { childList: true, subtree: true });
+    chatMsgObservedAsides.add(aside);
+  });
+  sweepChatBlocks(); // 이미 렌더된 것 1회 처리
+}
+
+let commentBlockToastTimer = 0;
+function showCommentBlockToast(msg) {
+  let el = document.getElementById("cheese-comment-block-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cheese-comment-block-toast";
+    el.className = "cheese-comment-block-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add("is-show");
+  clearTimeout(commentBlockToastTimer);
+  commentBlockToastTimer = window.setTimeout(() => {
+    el.classList.remove("is-show");
+  }, 2600);
+}
+
+// 댓글 영역 관찰: 신규 댓글 렌더 시 버튼 재주입.
+let commentBlockObserver = null;
+function ensureCommentBlockObserver() {
+  const area = document.getElementById("commentArea");
+  if (!area) return;
+  if (commentBlockObserver) return;
+  commentBlockObserver = new MutationObserver(() =>
+    scheduleCommentBlockButtons(),
+  );
+  commentBlockObserver.observe(area, { childList: true, subtree: true });
+  scheduleCommentBlockButtons();
+}
+
+// ── 채팅 프로필 팝오버 '사용자 차단' 항목 주입 ───────────────────────────────
+// 라이브/다시보기 채팅에서 닉네임 클릭 시 뜨는 프로필 팝오버([role="alertdialog"])의
+// 버튼 리스트(_area_ > _list_ > button._item_) 끝에 우리 '사용자 차단' 항목을 추가한다.
+// 대상 유저는 직전 profile-card 응답(lastChatProfile, MAIN world 전달)로 식별한다.
+function findChatProfilePopover() {
+  // 프로필 팝오버: alertdialog + 프로필 정보 버튼(_information_)이 있는 것(이모티콘 등 배제).
+  const dialogs = document.querySelectorAll(
+    '[role="alertdialog"][aria-modal="true"]',
+  );
+  for (const d of dialogs) {
+    if (
+      d.querySelector('[class*="_information_9iogl_"], [class*="_list_9iogl_"]')
+    ) {
+      return d;
+    }
+  }
+  return null;
+}
+
+// 자가 발화/React 경쟁 루프 방어 플래그.
+let chatBlockInjecting = false; // 우리가 appendChild 하는 순간의 observer 발화 무시.
+let chatBlockBtnTimer = 0; // 디바운스.
+// 같은 팝오버에 대한 재주입 진동 방지: React 가 우리 버튼을 지우고 우리가 다시 넣는 왕복이
+// 짧은 시간에 반복되면 그 팝오버는 포기한다.
+let chatBlockLastList = null;
+let chatBlockReinjectCount = 0;
+let chatBlockReinjectWindowAt = 0;
+const CHAT_BLOCK_REINJECT_LIMIT = 5;
+const CHAT_BLOCK_REINJECT_WINDOW_MS = 1500;
+
+function ensureChatBlockButton() {
+  const pop = findChatProfilePopover();
+  if (!pop) return;
+  const list = pop.querySelector('[class*="_list_9iogl_"]');
+  if (!list) return;
+  if (list.querySelector(`.${CHAT_BLOCK_ITEM_CLASS}`)) return; // 이미 주입됨(멱등)
+  // 대상 프로필이 없으면(아직 안 옴) 스킵 — profile 수신 시 다시 호출된다.
+  if (!lastChatProfile || Date.now() - lastChatProfile.at > 15000) return;
+
+  // 재주입 진동 감지: 같은 list 에 짧은 시간 내 반복 주입되면(React 가 계속 지움) 포기.
+  const now = Date.now();
+  if (list === chatBlockLastList) {
+    if (now - chatBlockReinjectWindowAt < CHAT_BLOCK_REINJECT_WINDOW_MS) {
+      chatBlockReinjectCount += 1;
+      if (chatBlockReinjectCount > CHAT_BLOCK_REINJECT_LIMIT) return; // 진동 → 포기
+    } else {
+      chatBlockReinjectCount = 0;
+      chatBlockReinjectWindowAt = now;
+    }
+  } else {
+    chatBlockLastList = list;
+    chatBlockReinjectCount = 0;
+    chatBlockReinjectWindowAt = now;
+  }
+
+  const userHash = lastChatProfile.userIdHash;
+  // 닉네임은 팝오버 DOM 의 _name_(현재 닉네임, '수정됨' 이어도 최신)을 우선 사용하고,
+  // 없으면 profile-card 값 폴백. 이래야 닉네임 변경 유저도 최신 닉네임으로 저장된다.
+  const nameEl = pop.querySelector(
+    '[class*="_name_9iogl_"] [class*="_text_"], [class*="_name_9iogl_"]',
+  );
+  const nickname =
+    (nameEl?.textContent || "").trim() || lastChatProfile.nickname;
+  const nativeItem = list.querySelector(
+    `button[class*="_item_9iogl_"]:not(.${CHAT_BLOCK_ITEM_CLASS})`,
+  );
+  const nativeCls = nativeItem?.className || "";
+  const blocked = commentBlockHashSet.has(userHash);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `${nativeCls} ${CHAT_BLOCK_ITEM_CLASS}`.trim();
+  btn.dataset.userHash = userHash;
+  btn.dataset.nickname = nickname;
+  // 네이티브 '사용자 차단' 항목과 동일한 차단 아이콘(SVG)을 텍스트 앞에 둔다.
+  const label = blocked ? "치즈 플래터 차단 해제" : "치즈 플래터 차단";
+  btn.innerHTML = `${CHAT_BLOCK_ITEM_ICON}<span>${escapeHtml(label)}</span>`;
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openCommentBlockPopover(btn, userHash, nickname);
+  });
+  // appendChild 순간의 observer 발화는 무시(직접 루프 차단).
+  chatBlockInjecting = true;
+  list.appendChild(btn);
+  chatBlockInjecting = false;
+}
+
+function scheduleChatBlockButton() {
+  if (chatBlockInjecting) return; // 우리 주입이 유발한 발화는 건너뜀
+  if (chatBlockBtnTimer) return; // 디바운스(채팅 폭주 시 과호출 방지)
+  chatBlockBtnTimer = window.setTimeout(() => {
+    chatBlockBtnTimer = 0;
+    ensureChatBlockButton();
+  }, 120);
+}
+
+let chatBlockObserver = null;
+function ensureChatBlockObserver() {
+  if (chatBlockObserver) return;
+  // ⚠ body 전체 subtree 관찰이라 채팅 폭주 시 과호출될 수 있어 반드시 디바운스로 받는다.
+  chatBlockObserver = new MutationObserver(() => scheduleChatBlockButton());
+  chatBlockObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 // 헤더 전담 옵저버(미니 네비가 React 재렌더로 사라지면 즉시 복구).
 let headerObserver = null;
 let headerObservedRoot = null;
@@ -15921,6 +16743,7 @@ function broadcastFeatureFlags() {
       volumePct, // 볼륨 조절 % 표시(전역)
       wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
       wheelVolumeStep, // 휠 볼륨 조절 간격(%, 1~10)
+      actionOverlay, // 조작(휠 볼륨/시크) 화면 피드백 오버레이(전역)
       gainPct, // 게인 조절 % 표시(전역)
       screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
       mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
@@ -15972,6 +16795,7 @@ const FEATURE_FLAGS_KEYS = [
   VOLUME_PCT_KEY,
   WHEEL_VOLUME_KEY,
   WHEEL_VOLUME_STEP_KEY,
+  ACTION_OVERLAY_KEY,
   GAIN_PCT_KEY,
   MIXER_CLICK_ACTIVATE_KEY,
   MIXER_CLICK_NO_PANEL_KEY,
@@ -16034,6 +16858,8 @@ const BOOT_PREFETCH_KEYS = [
     CARD_PREVIEW_WHEEL_DELAY_KEY,
     CARD_DATE_TOOLTIP_KEY,
     VOD_CHAPTER_HIDE_KEY,
+    HIDE_BLOCKED_COMMENT_KEY,
+    COMMENT_BLOCK_KEY,
     FOLLOW_CHANNEL_TOOLTIP_KEY,
     FOLLOW_CLEANUP_KEY,
     CHAT_FOLD_PERSIST_KEY,
@@ -16137,6 +16963,7 @@ async function loadFeatureFlags() {
     volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
     wheelVolume = data?.[WHEEL_VOLUME_KEY] === true; // 미설정=기본 OFF
     wheelVolumeStep = normalizeWheelVolumeStep(data?.[WHEEL_VOLUME_STEP_KEY]);
+    actionOverlay = data?.[ACTION_OVERLAY_KEY] !== false; // 미설정=기본 ON
     gainPct = data?.[GAIN_PCT_KEY] !== false;
     mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
     mixerClickNoPanel = data?.[MIXER_CLICK_NO_PANEL_KEY] === true;
@@ -16313,6 +17140,10 @@ if (chrome.storage?.onChanged) {
       wheelVolumeStep = normalizeWheelVolumeStep(
         changes[WHEEL_VOLUME_STEP_KEY].newValue,
       );
+    }
+    if (changes[ACTION_OVERLAY_KEY]) {
+      actionOverlay = changes[ACTION_OVERLAY_KEY].newValue !== false;
+      broadcastFeatureFlags(); // MAIN world 로 즉시 반영
     }
     if (changes[GAIN_PCT_KEY]) {
       gainPct = changes[GAIN_PCT_KEY].newValue !== false;
@@ -16493,6 +17324,50 @@ if (chrome.storage?.onChanged) {
       vodChapterHideOn = changes[VOD_CHAPTER_HIDE_KEY].newValue === true;
       applyVodChapterHide(); // 즉시 반영(html 클래스 토글)
     }
+    if (changes[HIDE_BLOCKED_COMMENT_KEY]) {
+      hideBlockedCommentOn =
+        changes[HIDE_BLOCKED_COMMENT_KEY].newValue === true;
+      applyHideBlockedComment();
+    }
+    if (changes[COMMENT_BLOCK_KEY]) {
+      // 변경 전 상태 보존: hash 집합 + 유저별 nativeBlocked + hash→닉네임.
+      const prevSet = new Set(commentBlockHashSet);
+      const prevNative = new Map(
+        commentBlocks.map((b) => [String(b.userIdHash), !!b.nativeBlocked]),
+      );
+      const prevNick = new Map(
+        commentBlocks.map((b) => [String(b.userIdHash), b.nickname || ""]),
+      );
+      const list = changes[COMMENT_BLOCK_KEY].newValue;
+      commentBlocks = Array.isArray(list) ? list : [];
+      rebuildCommentBlockSet();
+      const newNick = new Map(
+        commentBlocks.map((b) => [String(b.userIdHash), b.nickname || ""]),
+      );
+      pushCommentBlocksToMain(); // MAIN world 응답 필터 갱신
+      // 차단 추가된 유저: 현재 렌더된 원본 댓글 + 채팅 메시지(닉네임 기반) 즉시 숨김.
+      commentBlockHashSet.forEach((h) => {
+        if (!prevSet.has(h)) {
+          hideRenderedCommentsOf(h);
+          hideRenderedChatOf(newNick.get(h));
+        }
+      });
+      // 해제된 유저(이전 차단, 지금 아님) 복원 처리:
+      //  - 로컬 전용(nativeBlocked=false)이었으면: 우리가 숨긴 원본 댓글을 즉시 복원.
+      //  - 치지직 차단도 됐던(nativeBlocked=true) 유저는 복원하지 않는다 — 치지직 차단이
+      //    유지되면 원본이 아니라 '내가 차단한 이용자' 플레이스홀더가 와야 맞고, 그건
+      //    새로고침(재요청) 시 치지직 응답으로 온다. 여기서 원본을 드러내면 안 된다.
+      //  - 채팅 메시지는 닉네임 기반이라 항상 복원(native 여부와 무관).
+      prevSet.forEach((h) => {
+        if (!commentBlockHashSet.has(h)) {
+          if (!prevNative.get(h)) showRenderedCommentsOf(h);
+          showRenderedChatOf(prevNick.get(h));
+        }
+      });
+      // 채팅창 전체 스윕: 추가는 녹화 닉네임 포함 숨김, 해제는 집합에서 빠진 닉네임 복원.
+      sweepChatBlocks();
+      scheduleCommentBlockButtons();
+    }
     if (changes[CARD_DATE_TOOLTIP_KEY]) {
       cardDateTooltipOn = changes[CARD_DATE_TOOLTIP_KEY].newValue !== false;
       if (cardDateTooltipOn) bindCardDateTooltip();
@@ -16608,9 +17483,13 @@ function isClipEditorPage() {
 
 function init() {
   if (isClipEditorPage()) return; // 클립 에디터: 확장 개입 없음(드래그 버벅임 방지)
+  ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
+  ensureChatBlockObserver(); // 채팅 프로필 팝오버에 '사용자 차단' 항목 주입 관찰
+  ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰
   initCommentTimestampMarkers();
   initSeekPreviewRealtime();
   initLiveDetailStartTooltip();
+  fixPartyIconMasks(); // 파티 아이콘 mask id 충돌 보정(사이드바 숨김 시 흰색으로 깨지던 문제)
   // 사이드바는 SPA 재렌더로 마커 클래스가 지워질 수 있어 매 init마다 다시 부여한다.
   applySidebarSections();
   ensureSidebarObserver(); // 사이드바 전담 옵저버로 즉시 재적용(깜빡임 최소화)
@@ -16997,6 +17876,12 @@ document.addEventListener(
   },
   true,
 );
+// 전체화면 진입/이탈 시 화면 채우기를 재평가한다(전체화면이면 우리 높이 강제를 원복해야
+// 브라우저 전체화면이 정상 적용된다 — 치지직 업데이트로 재발한 문제 대응).
+document.addEventListener("fullscreenchange", () => {
+  requestAnimationFrame(() => applyFillScreen());
+  setTimeout(() => applyFillScreen(), 200); // 레이아웃 늦게 반영 대비
+});
 ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
@@ -17024,12 +17909,59 @@ window.addEventListener(
 document.addEventListener("click", handleCategoryFilterClick);
 document.addEventListener("click", handleCategoryResetDocumentClick);
 document.addEventListener("click", handleCommentTimestampDocumentClick);
+// 댓글 타임스탬프 버튼 클릭/우클릭 — 캡처 위임. 버튼 직접 바인딩은 노드 재생성·치지직의
+// 이벤트 전파 차단에 취약해 간헐적으로 팝오버가 안 열렸다.
+document.addEventListener(
+  "click",
+  (e) => {
+    const btn = e.target?.closest?.(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+    if (!btn) return;
+    handleCommentTimestampButtonClick(e, btn);
+  },
+  true,
+);
+document.addEventListener(
+  "contextmenu",
+  (e) => {
+    const btn = e.target?.closest?.(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+    if (!btn) return;
+    handleCommentTimestampButtonContextMenu(e, btn);
+  },
+  true,
+);
 document.addEventListener("click", handleStudioMoreCaptureClick, true);
 document.addEventListener("click", handleStudioDocumentClick);
 document.addEventListener("keydown", handleCommentTimestampKeydown);
 document.addEventListener("visibilitychange", onSearchVisibilityChange);
 window.addEventListener("blur", onSearchWindowBlur);
 window.addEventListener("focus", onSearchWindowFocus);
+
+// 관리 탭(설정 팝업)에서 '치지직 차단도 함께 해제'를 요청하면, 치지직 페이지인 이 content
+// 가 대신 해제 API(DELETE)를 호출한다(설정 팝업은 채널ID·세션이 없어 직접 못 부름).
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "CHEESE_NATIVE_UNBLOCK_USER") {
+    const userHash = String(message.userHash || "");
+    const channelId = getCommentBlockChannelId();
+    if (!userHash || !channelId) {
+      sendResponse({ ok: false, reason: "no-channel" });
+      return true;
+    }
+    fetch(
+      `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
+        userHash,
+      )}?loungeId=${encodeURIComponent(channelId)}`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      },
+    )
+      .then((res) => sendResponse({ ok: res.ok, status: res.status }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true; // 비동기 응답
+  }
+  return false;
+});
 
 chrome.runtime.onMessage.addListener((message) => {
   // 통나무파워 적립 추적(background) broadcast.
@@ -17224,6 +18156,8 @@ void loadFollowOpenNewTab();
 void loadCardPreviewAudio();
 void loadCardDateTooltip();
 void loadVodChapterHide();
+void loadHideBlockedComment();
+void loadCommentBlocks();
 void loadFollowChannelTooltip();
 void loadFollowCleanup();
 void loadChatFoldPersist();

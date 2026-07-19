@@ -850,3 +850,275 @@ body {
   color: var(--popup-fg, inherit);
   border-color: var(--popup-muted);
 }
+
+/* ── 사용자 차단 관리 탭 ─────────────────────────────────────────────────── */
+.settings-cbm-search {
+  margin-bottom: 12px;
+}
+.settings-cbm-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--popup-border);
+  background: var(--popup-bg);
+  color: var(--popup-fg);
+  font-size: 13px;
+}
+.settings-cbm-search input:focus {
+  outline: 0;
+  border-color: var(--popup-brand);
+}
+.settings-cbm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-cbm-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--popup-border-soft);
+  background: var(--popup-dimmed-bg);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.settings-cbm-item:hover {
+  border-color: var(--popup-border);
+}
+/* 항목 전체가 선택 토글 — 선택 시 알림색 배경/테두리로 강조. */
+.settings-cbm-item.is-selected {
+  background: var(--popup-alert-bg);
+  border-color: var(--popup-alert);
+}
+.settings-cbm-item:focus-visible {
+  outline: 2px solid var(--popup-focus-ring);
+  outline-offset: 1px;
+}
+.settings-cbm-main {
+  min-width: 0;
+  flex: 1;
+}
+/* '치지직 차단' 배지는 닉네임 위 별도 줄(긴 닉네임과 겹쳐 줄바꿈되던 문제 방지). */
+.settings-cbm-native-row {
+  margin-bottom: 4px;
+}
+.settings-cbm-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--popup-fg);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.settings-cbm-native {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff5b5b;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.settings-cbm-reason {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--popup-fg);
+  opacity: 0.85;
+  word-break: break-word;
+}
+.settings-cbm-date {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--popup-muted);
+}
+.settings-cbm-remove {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--popup-border);
+  background: transparent;
+  color: var(--popup-fg);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-cbm-remove:hover {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+.settings-cbm-noresult,
+.settings-cbm-empty {
+  padding: 20px 4px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--popup-muted);
+}
+
+.settings-cbm-hash {
+  margin-top: 4px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--popup-muted);
+  word-break: break-all;
+  opacity: 0.7;
+}
+
+/* 치지직 차단 함께 해제 확인 모달 */
+.cbm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.cbm-modal {
+  width: 320px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--popup-bg);
+  color: var(--popup-fg);
+  border: 1px solid var(--popup-border);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+}
+.cbm-modal-title {
+  font-weight: 800;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+.cbm-modal-body {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--popup-fg);
+}
+.cbm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cbm-modal-actions button {
+  padding: 8px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--popup-border);
+  background: transparent;
+  color: var(--popup-fg);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cbm-modal-cancel:hover,
+.cbm-modal-local:hover {
+  background: var(--popup-dimmed-bg);
+}
+.cbm-modal-both {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+.cbm-modal-both:hover {
+  background: var(--popup-alert);
+  color: var(--popup-inversed-text);
+}
+
+/* 사용자 차단 관리 — 선택/일괄 해제 바 + 항목 체크박스 */
+.settings-cbm-bulk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--popup-dimmed-bg);
+}
+.settings-cbm-bulk:has(.settings-cbm-bulk-remove:enabled) {
+  border-color: var(--popup-alert);
+}
+.settings-cbm-selectall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--popup-fg);
+  cursor: pointer;
+  user-select: none;
+}
+.settings-cbm-selectall input {
+  width: 15px;
+  height: 15px;
+  accent-color: #ff5b5b;
+  cursor: pointer;
+}
+.settings-cbm-selcount {
+  font-size: 12px;
+  color: var(--popup-muted);
+}
+.settings-cbm-bulk-spacer {
+  flex: 1;
+}
+.settings-cbm-bulk-remove,
+.settings-cbm-bulk-remove-all {
+  padding: 6px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--popup-border);
+  background: transparent;
+  color: var(--popup-fg);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-cbm-bulk-remove:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.settings-cbm-bulk-remove:not(:disabled):hover,
+.settings-cbm-bulk-remove-all:hover {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+
+/* 차단 유저 닉네임 변경 이력 */
+.settings-cbm-hist-toggle {
+  margin-top: 5px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--popup-brand-strong);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-cbm-hist-toggle:hover {
+  text-decoration: underline;
+}
+.settings-cbm-hist {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--popup-soft-bg);
+}
+.settings-cbm-hist-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--popup-fg);
+  padding: 2px 0;
+}
+.settings-cbm-hist-date {
+  color: var(--popup-muted);
+  flex: none;
+}

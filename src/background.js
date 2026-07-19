@@ -54,7 +54,9 @@ if (chrome.webRequest?.onCompleted) {
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  if (details.reason !== "update") return;
+  // 설치(install)·업데이트(update) 모두 안내 배너를 띄운다. 설치 직후에도 이미 열려 있던
+  // 치지직 탭에는 콘텐츠 스크립트가 주입돼 있지 않아, 새로고침해야 확장이 동작하기 때문.
+  if (details.reason !== "install" && details.reason !== "update") return;
 
   try {
     const tabs = await chrome.tabs.query({
@@ -69,16 +71,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
           chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: showUpdateNotificationBanner,
-            args: [version],
+            args: [version, details.reason],
           }),
         ),
     );
   } catch (error) {
-    console.warn("업데이트 안내 배너를 표시하지 못했습니다.", error);
+    console.warn("안내 배너를 표시하지 못했습니다.", error);
   }
 });
 
-function showUpdateNotificationBanner(version) {
+function showUpdateNotificationBanner(version, reason) {
   const bannerId = "cheese-search-ext-update-banner";
   if (document.getElementById(bannerId)) return;
 
@@ -106,11 +108,17 @@ function showUpdateNotificationBanner(version) {
     "transition:transform .3s ease",
   ].join(";");
 
+  const message =
+    reason === "install"
+      ? `치즈 플래터(v${version})가 설치되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`
+      : `치즈 플래터가 v${version}으로 업데이트되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`;
+  const closeLabel = reason === "install" ? "설치 안내 닫기" : "업데이트 안내 닫기";
+
   banner.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap">
-      <span>치즈 플래터가 v${version}으로 업데이트되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.</span>
+      <span>${message}</span>
       <button type="button" data-cheese-search-update-refresh style="border:0;border-radius:5px;padding:5px 10px;background:#fff;color:#087b2b;font-size:13px;font-weight:700;line-height:18px;cursor:pointer">새로고침</button>
-      <button type="button" data-cheese-search-update-close aria-label="업데이트 안내 닫기" style="display:inline-flex;align-items:center;justify-content:center;border:0;padding:4px;background:transparent;color:#fff;line-height:1;cursor:pointer">
+      <button type="button" data-cheese-search-update-close aria-label="${closeLabel}" style="display:inline-flex;align-items:center;justify-content:center;border:0;padding:4px;background:transparent;color:#fff;line-height:1;cursor:pointer">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path>
         </svg>
