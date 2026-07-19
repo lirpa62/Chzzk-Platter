@@ -2591,6 +2591,8 @@
   // ── 사용자 차단 관리 탭(댓글 차단 목록: 닉네임/사유/일시, 검색, 선택/일괄 해제) ──
   const COMMENT_BLOCK_KEY = "cheeseCommentBlocks";
   const cbmSearchInput = document.querySelector("[data-cbm-search]");
+  const cbmViewportEl = document.querySelector("[data-cbm-viewport]");
+  const cbmSizerEl = document.querySelector("[data-cbm-sizer]");
   const cbmListEl = document.querySelector("[data-cbm-list]");
   const cbmEmptyEl = document.querySelector("[data-cbm-empty]");
   const cbmBulkBar = document.querySelector("[data-cbm-bulk]");
@@ -2600,6 +2602,30 @@
   const cbmRemoveAllBtn = document.querySelector("[data-cbm-remove-all]");
   let cbmBlocks = [];
   const cbmSelected = new Set(); // 선택된 userIdHash
+
+  // ── 설정 팝업 토스트(차단/해제 결과 안내) ─────────────────────────────────
+  const settingsToastEl = document.querySelector("[data-settings-toast]");
+  let settingsToastTimer = 0;
+  function settingsToast(text, kind) {
+    if (!settingsToastEl || !text) return;
+    if (settingsToastTimer) {
+      clearTimeout(settingsToastTimer);
+      settingsToastTimer = 0;
+    }
+    settingsToastEl.textContent = text;
+    settingsToastEl.dataset.kind = kind || "";
+    settingsToastEl.hidden = false;
+    // reflow 후 클래스 부여로 트랜지션 발동.
+    void settingsToastEl.offsetHeight;
+    settingsToastEl.classList.add("is-show");
+    settingsToastTimer = setTimeout(() => {
+      settingsToastEl.classList.remove("is-show");
+      settingsToastTimer = setTimeout(() => {
+        settingsToastEl.hidden = true;
+        settingsToastTimer = 0;
+      }, 200);
+    }, 2400);
+  }
 
   function cbmFormatDate(ms) {
     const n = Number(ms);
@@ -2631,27 +2657,194 @@
     );
   }
 
+  // 검색 매칭: 닉네임·사유·UID(userIdHash)·이전 닉네임 이력 중 하나라도 포함하면 true.
+  function cbmMatchesQuery(b, q) {
+    if (!q) return true;
+    if (
+      String(b.nickname || "")
+        .toLowerCase()
+        .includes(q)
+    )
+      return true;
+    if (
+      String(b.reason || "")
+        .toLowerCase()
+        .includes(q)
+    )
+      return true;
+    if (
+      String(b.userIdHash || "")
+        .toLowerCase()
+        .includes(q)
+    )
+      return true;
+    const hist = Array.isArray(b.nicknameHistory) ? b.nicknameHistory : [];
+    return hist.some((h) =>
+      String(h?.nickname || "")
+        .toLowerCase()
+        .includes(q),
+    );
+  }
+
+  // 현재 화면에 보이는(검색 필터 통과) 항목 — 위임 핸들러의 selectAll 갱신용.
+  let cbmVisibleItems = [];
+  let cbmListDelegationBound = false;
+  function cbmItemToggle(item) {
+    const hash = item.dataset.hash;
+    if (!hash) return;
+    if (cbmSelected.has(hash)) cbmSelected.delete(hash);
+    else cbmSelected.add(hash);
+    item.classList.toggle("is-selected", cbmSelected.has(hash));
+    item.setAttribute("aria-checked", String(cbmSelected.has(hash)));
+    updateCbmSelectionUI(cbmVisibleItems);
+  }
+  // cbmListEl 에 위임 리스너를 '한 번만' 바인딩. 항목 수와 무관하게 리스너는 상수 개.
+  function cbmBindListDelegation() {
+    if (cbmListDelegationBound || !cbmListEl) return;
+    cbmListDelegationBound = true;
+    cbmListEl.addEventListener("click", (e) => {
+      // 이력 펼침/접기.
+      const histToggle = e.target.closest("[data-hist-toggle]");
+      if (histToggle && cbmListEl.contains(histToggle)) {
+        e.stopPropagation();
+        const box = histToggle.nextElementSibling;
+        if (box) box.hidden = !box.hidden;
+        return;
+      }
+      // 해제 버튼.
+      const removeBtn = e.target.closest(".settings-cbm-remove");
+      if (removeBtn && cbmListEl.contains(removeBtn)) {
+        e.stopPropagation();
+        const hash = removeBtn.dataset.hash;
+        const entry = cbmBlocks.find((b) => b.userIdHash === hash);
+        if (entry?.nativeBlocked) openCbmUnblockModal([entry]);
+        else removeCbmBlocks([hash], false);
+        return;
+      }
+      // 그 외 항목 클릭 → 선택 토글.
+      const item = e.target.closest(".settings-cbm-item");
+      if (item && cbmListEl.contains(item)) cbmItemToggle(item);
+    });
+    cbmListEl.addEventListener("keydown", (e) => {
+      if (e.key !== " " && e.key !== "Enter") return;
+      const item = e.target.closest(".settings-cbm-item");
+      if (item && cbmListEl.contains(item)) {
+        e.preventDefault();
+        cbmItemToggle(item);
+      }
+    });
+  }
+  cbmBindListDelegation();
+
+  // 항목 1개의 HTML(가상 스크롤 창 렌더에 재사용).
+  function cbmItemHtml(b) {
+    const nick = cbmEscape(b.nickname || "(닉네임 없음)");
+    const reason = b.reason
+      ? `<div class="settings-cbm-reason">${cbmEscape(b.reason)}</div>`
+      : "";
+    const date = cbmFormatDate(b.blockedAt);
+    const native = b.nativeBlocked
+      ? `<div class="settings-cbm-native-row"><span class="settings-cbm-native">치지직 차단</span></div>`
+      : "";
+    const sel = cbmSelected.has(b.userIdHash) ? " is-selected" : "";
+    const hist = Array.isArray(b.nicknameHistory) ? b.nicknameHistory : [];
+    const histBlock = hist.length
+      ? `<button type="button" class="settings-cbm-hist-toggle" data-hist-toggle>
+           이전 닉네임 ${hist.length}개 ▾
+         </button>
+         <div class="settings-cbm-hist" hidden>
+           ${hist
+             .slice()
+             .reverse()
+             .map(
+               (h) =>
+                 `<div class="settings-cbm-hist-item">${cbmEscape(
+                   h.nickname,
+                 )}</div>`,
+             )
+             .join("")}
+         </div>`
+      : "";
+    return `
+      <div class="settings-cbm-item${sel}" data-hash="${cbmEscape(
+        b.userIdHash,
+      )}" role="checkbox" aria-checked="${cbmSelected.has(
+        b.userIdHash,
+      )}" tabindex="0">
+        <div class="settings-cbm-main">
+          ${native}
+          <div class="settings-cbm-name">${nick}</div>
+          ${reason}
+          <div class="settings-cbm-date">${cbmEscape(date)}</div>
+          ${histBlock}
+          <div class="settings-cbm-hash" title="userIdHash">${cbmEscape(
+            b.userIdHash,
+          )}</div>
+        </div>
+        <button type="button" class="settings-cbm-remove" data-hash="${cbmEscape(
+          b.userIdHash,
+        )}">해제</button>
+      </div>`;
+  }
+
+  // ── 가상 스크롤 상태 ────────────────────────────────────────────────────────
+  // 항목 높이는 제각각(배지·사유·이력 유무)이라 '측정된 평균 높이'로 근사한다. 렌더 후
+  // 실제 창 높이로 평균을 보정해 다음 렌더가 더 정확해진다. GAP 은 flex gap(8px) 반영.
+  const CBM_ROW_GAP = 8;
+  let cbmAvgRowH = 96; // 초기 추정(대략적인 한 항목 높이). 렌더하며 실측으로 수렴.
+  const CBM_OVERSCAN = 4; // 위/아래로 더 그려둘 여유 항목 수(스크롤 시 빈 칸 방지).
+  let cbmFilteredItems = []; // 현재 필터 통과 전체(정렬된) — 스크롤 시 창만 다시 그린다.
+
+  // 스크롤 위치에 맞춰 '보이는 창'만 다시 그린다(전체 재계산 없이).
+  function cbmRenderWindow() {
+    if (!cbmListEl || !cbmViewportEl || !cbmSizerEl) return;
+    const total = cbmFilteredItems.length;
+    if (!total) return;
+    const rowH = cbmAvgRowH + CBM_ROW_GAP;
+    const scrollTop = cbmViewportEl.scrollTop;
+    const viewH = cbmViewportEl.clientHeight || 420;
+    let start = Math.floor(scrollTop / rowH) - CBM_OVERSCAN;
+    if (start < 0) start = 0;
+    let visibleCount = Math.ceil(viewH / rowH) + CBM_OVERSCAN * 2;
+    let end = start + visibleCount;
+    if (end > total) end = total;
+    // 창 HTML 생성 + 위치 이동(translateY 로 sizer 안에서 내려앉힘).
+    const slice = cbmFilteredItems.slice(start, end);
+    cbmListEl.style.transform = `translateY(${start * rowH}px)`;
+    cbmListEl.innerHTML = slice.map(cbmItemHtml).join("");
+  }
+
+  // 방금 그려진 창의 실제 높이로 평균 행 높이를 1회 보정한다(스크롤 중엔 하지 않아 창이
+  // 튀지 않게 한다). 렌더 직후 rAF 로 호출. 평균이 크게 바뀌면 sizer 를 다시 맞추고 재렌더.
+  function cbmCalibrateRowHeight() {
+    if (!cbmListEl || !cbmSizerEl) return;
+    const rows = cbmListEl.children.length;
+    if (!rows) return;
+    const measured = cbmListEl.offsetHeight / rows - CBM_ROW_GAP;
+    if (measured > 20 && Math.abs(measured - cbmAvgRowH) > 3) {
+      cbmAvgRowH = measured;
+      const total = cbmFilteredItems.length;
+      if (total)
+        cbmSizerEl.style.height = `${total * (cbmAvgRowH + CBM_ROW_GAP)}px`;
+      cbmRenderWindow(); // 새 평균으로 창 위치/개수 재계산
+    }
+  }
+
   function renderCbmList() {
     if (!cbmListEl) return;
     const q = (cbmSearchInput?.value || "").trim().toLowerCase();
     const items = cbmBlocks
       .slice()
       .sort((a, b) => Number(b.blockedAt || 0) - Number(a.blockedAt || 0))
-      .filter((b) => {
-        if (!q) return true;
-        return (
-          String(b.nickname || "")
-            .toLowerCase()
-            .includes(q) ||
-          String(b.reason || "")
-            .toLowerCase()
-            .includes(q)
-        );
-      });
+      .filter((b) => cbmMatchesQuery(b, q));
     if (!cbmBlocks.length) {
+      cbmListEl.classList.add("is-static");
       cbmListEl.innerHTML = "";
+      if (cbmSizerEl) cbmSizerEl.style.height = "";
       if (cbmEmptyEl) cbmEmptyEl.hidden = false;
       if (cbmBulkBar) cbmBulkBar.hidden = true;
+      cbmFilteredItems = [];
+      cbmVisibleItems = [];
       cbmSelected.clear();
       updateCbmSelectionUI([]); // 전체선택 체크/개수/버튼 상태 리셋
       return;
@@ -2664,114 +2857,50 @@
       if (!existing.has(h)) cbmSelected.delete(h);
     });
     if (!items.length) {
+      // 검색 결과 없음: 가상화 끄고(정적) 안내만.
+      cbmListEl.classList.add("is-static");
+      cbmListEl.style.transform = "";
+      if (cbmSizerEl) cbmSizerEl.style.height = "";
       cbmListEl.innerHTML = `<p class="settings-cbm-noresult">검색 결과가 없습니다.</p>`;
+      cbmFilteredItems = [];
+      cbmVisibleItems = items;
       updateCbmSelectionUI(items);
       return;
     }
-    cbmListEl.innerHTML = items
-      .map((b) => {
-        const nick = cbmEscape(b.nickname || "(닉네임 없음)");
-        const reason = b.reason
-          ? `<div class="settings-cbm-reason">${cbmEscape(b.reason)}</div>`
-          : "";
-        const date = cbmFormatDate(b.blockedAt);
-        // '치지직 차단' 배지는 닉네임 '위'에 별도 줄로(긴 닉네임 줄바꿈 방지).
-        const native = b.nativeBlocked
-          ? `<div class="settings-cbm-native-row"><span class="settings-cbm-native">치지직 차단</span></div>`
-          : "";
-        const sel = cbmSelected.has(b.userIdHash) ? " is-selected" : "";
-        // 닉네임 변경 이력(있으면 펼침/접기). 최신 변경이 위로 오게 역순.
-        const hist = Array.isArray(b.nicknameHistory) ? b.nicknameHistory : [];
-        const histBlock = hist.length
-          ? `<button type="button" class="settings-cbm-hist-toggle" data-hist-toggle>
-               이전 닉네임 ${hist.length}개 ▾
-             </button>
-             <div class="settings-cbm-hist" hidden>
-               ${hist
-                 .slice()
-                 .reverse()
-                 .map(
-                   (h) =>
-                     `<div class="settings-cbm-hist-item">${cbmEscape(
-                       h.nickname,
-                     )}<span class="settings-cbm-hist-date">${cbmEscape(
-                       cbmFormatDate(h.at),
-                     )}</span></div>`,
-                 )
-                 .join("")}
-             </div>`
-          : "";
-        return `
-          <div class="settings-cbm-item${sel}" data-hash="${cbmEscape(
-            b.userIdHash,
-          )}" role="checkbox" aria-checked="${cbmSelected.has(
-            b.userIdHash,
-          )}" tabindex="0">
-            <div class="settings-cbm-main">
-              ${native}
-              <div class="settings-cbm-name">${nick}</div>
-              ${reason}
-              <div class="settings-cbm-date">${cbmEscape(date)}</div>
-              ${histBlock}
-              <div class="settings-cbm-hash" title="userIdHash">${cbmEscape(
-                b.userIdHash,
-              )}</div>
-            </div>
-            <button type="button" class="settings-cbm-remove" data-hash="${cbmEscape(
-              b.userIdHash,
-            )}">해제</button>
-          </div>`;
-      })
-      .join("");
-    // 닉네임 변경 이력 펼침/접기(선택 토글과 구분).
-    cbmListEl.querySelectorAll("[data-hist-toggle]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const box = btn.nextElementSibling;
-        if (box) box.hidden = !box.hidden;
-      });
-    });
-    // 항목 전체가 선택 토글. '해제' 버튼 클릭은 토글에서 제외(별도 동작).
-    cbmListEl.querySelectorAll(".settings-cbm-item").forEach((item) => {
-      const hash = item.dataset.hash;
-      const toggle = () => {
-        if (cbmSelected.has(hash)) cbmSelected.delete(hash);
-        else cbmSelected.add(hash);
-        item.classList.toggle("is-selected", cbmSelected.has(hash));
-        item.setAttribute("aria-checked", String(cbmSelected.has(hash)));
-        updateCbmSelectionUI(items);
-      };
-      item.addEventListener("click", (e) => {
-        if (e.target.closest(".settings-cbm-remove")) return; // 해제 버튼은 제외
-        toggle();
-      });
-      item.addEventListener("keydown", (e) => {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          toggle();
-        }
-      });
-    });
-    cbmListEl.querySelectorAll(".settings-cbm-remove").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const hash = btn.dataset.hash;
-        const entry = cbmBlocks.find((b) => b.userIdHash === hash);
-        if (entry?.nativeBlocked) {
-          openCbmUnblockModal([entry]);
-        } else {
-          removeCbmBlocks([hash], false);
-        }
-      });
-    });
+    // ── 가상 스크롤 렌더 ──────────────────────────────────────────────────────
+    cbmListEl.classList.remove("is-static");
+    cbmFilteredItems = items;
+    cbmVisibleItems = items; // 위임 핸들러 selectAll 갱신용(전체 필터 결과)
+    // sizer 를 전체 높이로 → 스크롤바가 실제 개수를 반영. 창은 그 안에서만 이동.
+    if (cbmSizerEl)
+      cbmSizerEl.style.height = `${items.length * (cbmAvgRowH + CBM_ROW_GAP)}px`;
+    // 목록이 줄어 현재 스크롤이 범위를 넘으면 맨 위로(빈 화면 방지).
+    if (cbmViewportEl && cbmViewportEl.scrollTop > cbmSizerEl.offsetHeight)
+      cbmViewportEl.scrollTop = 0;
+    cbmRenderWindow();
+    // 실측 평균 보정은 렌더 다음 프레임에 1회(레이아웃 확정 후).
+    requestAnimationFrame(cbmCalibrateRowHeight);
     updateCbmSelectionUI(items);
   }
+
+  // 스크롤 시 창만 다시 그린다(rAF 로 스로틀 — 스크롤당 1회 렌더).
+  let cbmScrollRaf = 0;
+  cbmViewportEl?.addEventListener(
+    "scroll",
+    () => {
+      if (cbmScrollRaf) return;
+      cbmScrollRaf = requestAnimationFrame(() => {
+        cbmScrollRaf = 0;
+        if (cbmFilteredItems.length) cbmRenderWindow();
+      });
+    },
+    { passive: true },
+  );
 
   // 선택 개수/전체선택 체크/버튼 활성 상태 갱신.
   function updateCbmSelectionUI(visibleItems) {
     const n = cbmSelected.size;
-    if (cbmSelCount)
-      cbmSelCount.textContent = n ? `${n}명 선택됨` : "";
+    if (cbmSelCount) cbmSelCount.textContent = n ? `${n}명 선택됨` : "";
     if (cbmRemoveSelBtn) cbmRemoveSelBtn.disabled = n === 0;
     if (cbmSelectAll) {
       const vis = visibleItems || [];
@@ -2791,18 +2920,30 @@
           .filter((b) => set.has(b.userIdHash) && b.nativeBlocked)
           .map((b) => b.userIdHash)
       : [];
+    const removedCount = cbmBlocks.filter((b) => set.has(b.userIdHash)).length;
     cbmBlocks = cbmBlocks.filter((b) => !set.has(b.userIdHash));
     hashes.forEach((h) => cbmSelected.delete(h));
     try {
       cachedStorageSet({ [COMMENT_BLOCK_KEY]: cbmBlocks });
     } catch {}
     renderCbmList();
+    // 로컬 해제 결과 토스트(즉시). native 해제는 비동기라 결과를 아래에서 별도 안내.
+    if (removedCount > 0) {
+      settingsToast(
+        removedCount === 1
+          ? "차단을 해제했습니다."
+          : `${removedCount}명의 차단을 해제했습니다.`,
+      );
+    }
     if (nativeTargets.length) {
       const anyFail = await requestNativeUnblock(nativeTargets);
       if (anyFail) {
-        alert(
-          "일부 사용자의 치지직 차단 해제는 처리하지 못했습니다. 치지직 다시보기/커뮤니티 페이지를 연 뒤 다시 시도하거나, 치지직에서 직접 해제해주세요.",
+        settingsToast(
+          "일부 사용자의 치지직 차단 해제는 처리하지 못했습니다. 치지직 페이지를 연 뒤 다시 시도해주세요.",
+          "error",
         );
+      } else {
+        settingsToast("치지직 차단도 함께 해제했습니다.");
       }
     }
   }
@@ -2968,23 +3109,36 @@
           }
         } catch {}
       }
-      // (1) 나머지는 channels/{hash} 병렬 조회.
+      // (1) 나머지는 channels/{hash} 조회. ⚠ 차단 수가 많으면 한 번에 수백 개를 병렬
+      // 발사해 네트워크·CPU 가 순간적으로 튄다 → 동시 6개씩 배치로 제한(워커 풀).
       const need = cbmBlocks.filter((b) => !current.has(b.userIdHash));
+      const fetchOne = async (b) => {
+        try {
+          const res = await fetch(
+            `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(
+              b.userIdHash,
+            )}`,
+            { credentials: "include" },
+          );
+          if (!res.ok) return;
+          const j = await res.json();
+          const nn = j?.content?.channelName;
+          if (nn) current.set(String(b.userIdHash), String(nn));
+        } catch {}
+      };
+      const CBM_FETCH_CONCURRENCY = 6;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < need.length) {
+          const idx = cursor++;
+          await fetchOne(need[idx]);
+        }
+      };
       await Promise.all(
-        need.map(async (b) => {
-          try {
-            const res = await fetch(
-              `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(
-                b.userIdHash,
-              )}`,
-              { credentials: "include" },
-            );
-            if (!res.ok) return;
-            const j = await res.json();
-            const nn = j?.content?.channelName;
-            if (nn) current.set(String(b.userIdHash), String(nn));
-          } catch {}
-        }),
+        Array.from(
+          { length: Math.min(CBM_FETCH_CONCURRENCY, need.length) },
+          worker,
+        ),
       );
       // 변경 반영.
       let changed = false;
@@ -3010,17 +3164,245 @@
     }
   }
 
-  cbmSearchInput?.addEventListener("input", renderCbmList);
+  // 검색은 디바운스(차단 수가 많으면 키 입력마다 전체 재렌더는 무겁다). 200ms.
+  let cbmSearchTimer = 0;
+  cbmSearchInput?.addEventListener("input", () => {
+    if (cbmSearchTimer) clearTimeout(cbmSearchTimer);
+    cbmSearchTimer = setTimeout(() => {
+      cbmSearchTimer = 0;
+      renderCbmList();
+    }, 200);
+  });
+
+  // ── UID(userIdHash) 직접 입력 차단 ──────────────────────────────────────────
+  const cbmAddUidInput = document.querySelector("[data-cbm-adduid-input]");
+  const cbmAddUidReason = document.querySelector("[data-cbm-adduid-reason]");
+  const cbmAddUidBtn = document.querySelector("[data-cbm-adduid-btn]");
+  const cbmAddUidNative = document.querySelector("[data-cbm-adduid-native]");
+  const cbmAddUidHint = document.querySelector("[data-cbm-adduid-hint]");
+
+  let cbmUidHintTimer = 0;
+  function cbmShowUidHint(text, kind) {
+    if (!cbmAddUidHint) return;
+    if (cbmUidHintTimer) {
+      clearTimeout(cbmUidHintTimer);
+      cbmUidHintTimer = 0;
+    }
+    cbmAddUidHint.textContent = text || "";
+    cbmAddUidHint.dataset.kind = kind || "";
+    // 문구가 표시되면 3초 뒤 자동으로 지운다(빈 문구는 타이머 불필요).
+    if (text) {
+      cbmUidHintTimer = setTimeout(() => {
+        cbmAddUidHint.textContent = "";
+        cbmAddUidHint.dataset.kind = "";
+        cbmUidHintTimer = 0;
+      }, 3000);
+    }
+  }
+
+  // 치지직 탭(content)에 UID 차단 대행 요청. 성공하면 true.
+  async function requestNativeBlock(userHash) {
+    try {
+      const tabs = await new Promise((resolve) =>
+        chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, resolve),
+      );
+      for (const tab of tabs || []) {
+        const res = await new Promise((resolve) =>
+          chrome.tabs.sendMessage(
+            tab.id,
+            { type: "CHEESE_NATIVE_BLOCK_USER", userHash },
+            (r) => resolve(chrome.runtime.lastError ? null : r),
+          ),
+        );
+        if (res?.ok) return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  // 대상 유저의 현재 닉네임 조회(있으면 목록 표시가 예뻐진다). 실패해도 무방.
+  async function fetchChannelNickname(userHash) {
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(
+          userHash,
+        )}`,
+        { credentials: "include" },
+      );
+      if (!res.ok) return "";
+      const j = await res.json();
+      return String(j?.content?.channelName || "");
+    } catch {
+      return "";
+    }
+  }
+
+  async function cbmAddByUid() {
+    const raw = (cbmAddUidInput?.value || "").trim();
+    // 입력에서 순수 32자리 hex 만 추출(URL 붙여넣기도 허용).
+    const m = raw.match(/[0-9a-f]{32}/i);
+    const userHash = m ? m[0].toLowerCase() : "";
+    if (!userHash) {
+      cbmShowUidHint("올바른 UID(32자리 hex)를 입력해주세요.", "error");
+      return;
+    }
+    if (cbmBlocks.some((b) => b.userIdHash === userHash)) {
+      cbmShowUidHint("이미 차단 목록에 있는 사용자입니다.", "error");
+      return;
+    }
+    if (cbmAddUidBtn) cbmAddUidBtn.disabled = true;
+    cbmShowUidHint("처리 중…", "");
+
+    const reason = (cbmAddUidReason?.value || "").trim();
+    const wantNative = !!cbmAddUidNative?.checked;
+    let nativeOk = false;
+    if (wantNative) nativeOk = await requestNativeBlock(userHash);
+    const nickname = await fetchChannelNickname(userHash);
+
+    cbmBlocks.push({
+      userIdHash: userHash,
+      nickname: nickname || "",
+      reason: reason || "",
+      blockedAt: Date.now(),
+      nativeBlocked: nativeOk,
+      nicknameHistory: [],
+    });
+    try {
+      cachedStorageSet({ [COMMENT_BLOCK_KEY]: cbmBlocks });
+    } catch {}
+    renderCbmList();
+
+    // 입력 폼 초기화(다음 차단을 위해). native 체크·사유는 리셋한다.
+    if (cbmAddUidInput) cbmAddUidInput.value = "";
+    if (cbmAddUidReason) cbmAddUidReason.value = "";
+    if (cbmAddUidNative) cbmAddUidNative.checked = false;
+    if (cbmAddUidBtn) cbmAddUidBtn.disabled = false;
+    if (wantNative && !nativeOk) {
+      cbmShowUidHint(
+        "로컬 차단됨. 치지직 차단은 실패했습니다(치지직 탭을 연 뒤 다시 시도)",
+        "error",
+      );
+    } else {
+      cbmShowUidHint(
+        nativeOk ? "차단했습니다(치지직 차단 포함)" : "차단했습니다(로컬)",
+        "ok",
+      );
+    }
+  }
+
+  cbmAddUidBtn?.addEventListener("click", cbmAddByUid);
+  const cbmUidEnter = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      cbmAddByUid();
+    }
+  };
+  cbmAddUidInput?.addEventListener("keydown", cbmUidEnter);
+  cbmAddUidReason?.addEventListener("keydown", cbmUidEnter);
+  // 새 UID 를 입력하기 시작하면 직전 결과 안내를 지운다.
+  cbmAddUidInput?.addEventListener("input", () => cbmShowUidHint("", ""));
+
+  // ── 차단 목록 내보내기(JSON / CSV) ─────────────────────────────────────────
+  function cbmDownload(filename, text, mime) {
+    try {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {}
+  }
+
+  function cbmExportStamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(
+      d.getHours(),
+    )}${p(d.getMinutes())}`;
+  }
+
+  // 내보내기 컬럼명(한글)과 각 차단 항목 → 값 매핑을 공유한다(JSON·CSV 동일 구조).
+  const CBM_EXPORT_COLUMNS = [
+    "UID",
+    "닉네임",
+    "차단 사유",
+    "차단 일시",
+    "차단 일시(ISO)",
+    "치지직 차단",
+    "이전 닉네임 이력",
+  ];
+  function cbmExportRow(b) {
+    const at = Number(b.blockedAt || 0);
+    // 변경 시각은 '감지 시점'일 뿐 실제 변경 시각이 아니라 부정확 → 닉네임만 내보낸다.
+    const hist = Array.isArray(b.nicknameHistory)
+      ? b.nicknameHistory.map((h) => `${h?.nickname || ""}`).join(" | ")
+      : "";
+    return [
+      b.userIdHash || "",
+      b.nickname || "",
+      b.reason || "",
+      at ? cbmFormatDate(at) : "",
+      at ? new Date(at).toISOString() : "",
+      b.nativeBlocked ? "예" : "아니오",
+      hist,
+    ];
+  }
+
+  document
+    .querySelector("[data-cbm-export-json]")
+    ?.addEventListener("click", () => {
+      if (!cbmBlocks.length) {
+        cbmShowUidHint("내보낼 차단 목록이 없습니다.", "error");
+        return;
+      }
+      // 한글 키 객체 배열로 직렬화(원본 구조 대신 사람이 읽기 쉬운 컬럼명).
+      const data = cbmBlocks.map((b) => {
+        const row = cbmExportRow(b);
+        const obj = {};
+        CBM_EXPORT_COLUMNS.forEach((k, i) => {
+          obj[k] = row[i];
+        });
+        return obj;
+      });
+      cbmDownload(
+        `치즈플래터-차단목록-${cbmExportStamp()}.json`,
+        JSON.stringify(data, null, 2),
+        "application/json",
+      );
+    });
+
+  document
+    .querySelector("[data-cbm-export-csv]")
+    ?.addEventListener("click", () => {
+      if (!cbmBlocks.length) {
+        cbmShowUidHint("내보낼 차단 목록이 없습니다.", "error");
+        return;
+      }
+      const csvCell = (v) => {
+        const s = String(v == null ? "" : v);
+        // 따옴표는 두 번, 특수문자 포함 시 감싸기. CSV 인젝션 방지로 =,+,-,@ 선행은 앞에 '.
+        const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+        return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+      };
+      const rows = cbmBlocks.map((b) => cbmExportRow(b).map(csvCell).join(","));
+      // Excel 한글 깨짐 방지 BOM.
+      const text =
+        "﻿" + [CBM_EXPORT_COLUMNS.map(csvCell).join(","), ...rows].join("\r\n");
+      cbmDownload(
+        `치즈플래터-차단목록-${cbmExportStamp()}.csv`,
+        text,
+        "text/csv;charset=utf-8",
+      );
+    });
 
   // 전체 선택(현재 검색으로 보이는 항목 기준).
   cbmSelectAll?.addEventListener("change", () => {
     const q = (cbmSearchInput?.value || "").trim().toLowerCase();
-    const visible = cbmBlocks.filter(
-      (b) =>
-        !q ||
-        String(b.nickname || "").toLowerCase().includes(q) ||
-        String(b.reason || "").toLowerCase().includes(q),
-    );
+    const visible = cbmBlocks.filter((b) => cbmMatchesQuery(b, q));
     if (cbmSelectAll.checked) {
       visible.forEach((b) => cbmSelected.add(b.userIdHash));
     } else {

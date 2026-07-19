@@ -3028,6 +3028,36 @@
                 </label>
               </li>
             </ul>
+            <div class="settings-cbm-adduid">
+              <input
+                type="text"
+                data-cbm-adduid-input
+                placeholder="UID(userIdHash) 입력으로 직접 차단"
+                aria-label="UID로 사용자 차단"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button
+                type="button"
+                class="settings-cbm-adduid-btn"
+                data-cbm-adduid-btn
+              >
+                차단
+              </button>
+            </div>
+            <input
+              type="text"
+              class="settings-cbm-adduid-reason"
+              data-cbm-adduid-reason
+              placeholder="차단 사유 입력 (선택)"
+              aria-label="차단 사유 입력"
+              autocomplete="off"
+            />
+            <label class="settings-cbm-adduid-native">
+              <input type="checkbox" data-cbm-adduid-native />
+              <span>치지직 사용자 차단도 같이하기</span>
+            </label>
+            <p class="settings-cbm-adduid-hint" data-cbm-adduid-hint></p>
             <p class="settings-group-desc">
               다시보기·커뮤니티·클립 댓글에서 각 사용자 닉네임 옆의 차단
               버튼으로 등록한 목록입니다. 차단한 사용자의 댓글·채팅은 표시되지
@@ -3035,11 +3065,29 @@
               댓글·채팅은 해당 페이지를 새로고침해야 다시 표시됩니다(라이브
               채팅은 해제 즉시 새 메시지부터 표시).
             </p>
+            <div class="settings-cbm-export-bar">
+              <button
+                type="button"
+                class="settings-cbm-export"
+                data-cbm-export-json
+                title="차단 목록을 JSON 파일로 내보내기"
+              >
+                JSON 내보내기
+              </button>
+              <button
+                type="button"
+                class="settings-cbm-export"
+                data-cbm-export-csv
+                title="차단 목록을 CSV 파일로 내보내기"
+              >
+                CSV 내보내기
+              </button>
+            </div>
             <div class="settings-cbm-search">
               <input
                 type="search"
                 data-cbm-search
-                placeholder="닉네임 또는 차단 사유 검색"
+                placeholder="닉네임 · 차단 사유 · UID 검색"
                 aria-label="차단 사용자 검색"
               />
             </div>
@@ -3065,7 +3113,12 @@
                 전체 해제
               </button>
             </div>
-            <div class="settings-cbm-list" data-cbm-list></div>
+            <!-- 가상 스크롤: viewport(고정 높이 스크롤) > sizer(전체 높이) > window(보이는 항목만) -->
+            <div class="settings-cbm-viewport" data-cbm-viewport>
+              <div class="settings-cbm-sizer" data-cbm-sizer>
+                <div class="settings-cbm-list" data-cbm-list></div>
+              </div>
+            </div>
             <p class="settings-cbm-empty" data-cbm-empty hidden>
               차단한 사용자가 없습니다.
             </p>
@@ -3073,6 +3126,7 @@
         </div>
       </div>
     </main>
+    <div class="settings-toast" data-settings-toast hidden></div>
     <script src="src/settings.js"></script>
   </body>
 </html>

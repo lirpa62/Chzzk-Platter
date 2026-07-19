@@ -16267,10 +16267,10 @@ async function blockCommentUser(userHash, nickname, reason, native) {
         if (res.ok) {
           if (entry) entry.nativeBlocked = true;
           saveCommentBlocks();
-          showCommentBlockToast("차단했습니다(치지직 차단 포함).");
+          showCommentBlockToast("차단했습니다(치지직 차단 포함)");
         } else {
           showCommentBlockToast(
-            `로컬 차단됨. 치지직 차단 실패(status ${res.status}).`,
+            `로컬 차단됨. 치지직 차단 실패(status ${res.status})`,
           );
         }
       } catch {
@@ -17952,6 +17952,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       )}?loungeId=${encodeURIComponent(channelId)}`,
       {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      },
+    )
+      .then((res) => sendResponse({ ok: res.ok, status: res.status }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+    return true; // 비동기 응답
+  }
+  // 설정 페이지에서 UID 직접 입력으로 치지직 차단 요청(맥락 없는 전역 차단).
+  // ⚠ 치지직 차단은 content(ISOLATED)에서 페이지와 동일 자격으로 호출해야 통과한다
+  // (background 는 Origin/Referer 불일치로 403). loungeId 는 비워도 200(전역 차단).
+  if (message?.type === "CHEESE_NATIVE_BLOCK_USER") {
+    const userHash = String(message.userHash || "");
+    if (!userHash) {
+      sendResponse({ ok: false, reason: "no-hash" });
+      return true;
+    }
+    const channelId = getCommentBlockChannelId(); // 있으면 그 맥락, 없으면 빈 값(전역)
+    fetch(
+      `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
+        userHash,
+      )}?loungeId=${encodeURIComponent(channelId || "")}`,
+      {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
       },
