@@ -3114,10 +3114,24 @@
               </button>
             </div>
             <!-- 가상 스크롤: viewport(고정 높이 스크롤) > sizer(전체 높이) > window(보이는 항목만) -->
-            <div class="settings-cbm-viewport" data-cbm-viewport>
-              <div class="settings-cbm-sizer" data-cbm-sizer>
-                <div class="settings-cbm-list" data-cbm-list></div>
+            <div class="settings-cbm-scroll">
+              <div class="settings-cbm-viewport" data-cbm-viewport>
+                <div class="settings-cbm-sizer" data-cbm-sizer>
+                  <div class="settings-cbm-list" data-cbm-list></div>
+                </div>
               </div>
+              <button
+                type="button"
+                class="settings-cbm-fab"
+                data-cbm-fab
+                aria-label="목록 최상단으로 이동"
+                title="최상단으로"
+                hidden
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 19V6M6 12l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             </div>
             <p class="settings-cbm-empty" data-cbm-empty hidden>
               차단한 사용자가 없습니다.

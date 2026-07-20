@@ -2847,6 +2847,7 @@
       cbmVisibleItems = [];
       cbmSelected.clear();
       updateCbmSelectionUI([]); // 전체선택 체크/개수/버튼 상태 리셋
+      cbmUpdateFab();
       return;
     }
     if (cbmEmptyEl) cbmEmptyEl.hidden = true;
@@ -2865,6 +2866,7 @@
       cbmFilteredItems = [];
       cbmVisibleItems = items;
       updateCbmSelectionUI(items);
+      cbmUpdateFab();
       return;
     }
     // ── 가상 스크롤 렌더 ──────────────────────────────────────────────────────
@@ -2881,13 +2883,33 @@
     // 실측 평균 보정은 렌더 다음 프레임에 1회(레이아웃 확정 후).
     requestAnimationFrame(cbmCalibrateRowHeight);
     updateCbmSelectionUI(items);
+    cbmUpdateFab(); // 목록/스크롤 변화에 맞춰 FAB 표시 갱신
   }
 
   // 스크롤 시 창만 다시 그린다(rAF 로 스로틀 — 스크롤당 1회 렌더).
   let cbmScrollRaf = 0;
+  // 최상단 이동 FAB — 일정 이상 내려가면 표시.
+  const cbmFabEl = document.querySelector("[data-cbm-fab]");
+  const CBM_FAB_SHOW_AT = 240; // 이만큼 스크롤되면 FAB 노출
+  function cbmUpdateFab() {
+    if (!cbmFabEl || !cbmViewportEl) return;
+    const show = cbmViewportEl.scrollTop > CBM_FAB_SHOW_AT;
+    if (show) {
+      cbmFabEl.hidden = false; // display 복원(트랜지션 가능하게)
+      cbmFabEl.classList.add("is-show");
+    } else {
+      cbmFabEl.classList.remove("is-show");
+    }
+  }
+  cbmFabEl?.addEventListener("click", () => {
+    if (!cbmViewportEl) return;
+    cbmViewportEl.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
   cbmViewportEl?.addEventListener(
     "scroll",
     () => {
+      cbmUpdateFab();
       if (cbmScrollRaf) return;
       cbmScrollRaf = requestAnimationFrame(() => {
         cbmScrollRaf = 0;

@@ -11178,14 +11178,6 @@ div#layout-body [class*="_filter_"][style*="top"],
 div#layout-body [class*="_header_"][style*="top"] {
   transform: translateY(var(--cheese-sticky-shift, 0px)) !important;
 }`,
-      // lives/videos 페이지 헤더(section 직계 _header_)는 인라인 top 대신 CSS
-      // padding-top:30px으로 헤더 아래 여백을 둔다 → 헤더 자동 숨김 시 빈 공간으로
-      // 남으므로 0으로 회수. 단 **배너 없을 때만**(body에 cheese-has-banner 없을 때):
-      // 배너가 있으면 헤더가 배너 아래 그대로라 이 여백이 필요하다. 셀렉터는 section
-      // 직계 _header_로 한정해 콘텐츠 내 다른 _header_ 오염을 막는다.
-      `body:not(.cheese-has-banner) div#layout-body section[class*="_section_"] > [class*="_header_"]:not([style*="top"]) {
-  padding-top: 0 !important;
-}`,
     );
     // 사이드바가 보일 때만 본문 여백 보정(숨김이면 위 분기가 0 회수).
     if (!featureFlags.sidebar) {
@@ -11317,7 +11309,8 @@ function updateHeaderOffsetVar(header) {
   if (root.style.getPropertyValue("--cheese-header-offset") !== next) {
     root.style.setProperty("--cheese-header-offset", next);
   }
-  // 배너 유무 마커(px>0=배너 있음). 헤더 padding-top 회수는 배너 없을 때만 적용.
+  // 배너 유무 마커(px>0=배너 있음). 헤더 padding-top 회수는 이제 순수 CSS 규칙이
+  // 처리하므로(위 applyHeaderAutoHide 의 헤더 자동숨김 블록), 여기선 마커만 토글한다.
   const hasBanner = px > 0;
   if (document.body.classList.contains("cheese-has-banner") !== hasBanner) {
     document.body.classList.toggle("cheese-has-banner", hasBanner);

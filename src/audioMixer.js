@@ -2020,7 +2020,14 @@
   // feature-flags 브리지로 mixerGainMin/mixerGainMax를 전달하면 갱신한다.
   let GAIN_MIN = 0.5;
   let GAIN_MAX = 2;
+  // ⚠ 레이스 방어: 사용자가 설정한 게인 범위(예: 최소 10%)를 아직 브리지로 못 받았는데
+  // 그 전에 채널 상태가 로드되면, 로드된 저장 게인(예: 30%)이 '기본 하한 50%' 기준으로
+  // 클램프돼 50%로 튀어오를 수 있다(피드백: 50% 미만이 새로고침/방송전환 시 50%로 복귀).
+  // 실제 범위를 받기 전엔 클램프하지 않고, 받은 뒤 clampLoadedGain 으로 한 번 정리한다.
+  let gainRangeReceived = false;
   function clampGain(g) {
+    // 범위 미수신 상태에선 저장값을 보존한다(기본 하한으로 성급히 깎지 않음).
+    if (!gainRangeReceived) return g;
     return Math.max(GAIN_MIN, Math.min(GAIN_MAX, g));
   }
   function gainToNorm(g) {
@@ -2042,7 +2049,11 @@
       min = 0.5;
       max = 2;
     } // 잘못된 조합이면 기본값
-    if (min === GAIN_MIN && max === GAIN_MAX) return; // 변화 없음
+    const firstReceive = !gainRangeReceived;
+    const unchanged = min === GAIN_MIN && max === GAIN_MAX;
+    gainRangeReceived = true; // 이제부터 클램프 유효(실제 범위 확정).
+    // 범위가 그대로여도, '처음 수신'이면 그동안 보류했던 로드 게인 정리를 위해 계속 진행한다.
+    if (unchanged && !firstReceive) return;
     GAIN_MIN = min;
     GAIN_MAX = max;
     // 현재 게인이 새 범위를 벗어나면 클램프하고 적용(그래프에도 반영).
@@ -3327,9 +3338,19 @@
       e.stopPropagation();
       // ⚠ 마우스 클릭 후 버튼에 포커스가 남으면, 이후 스페이스(재생/일시정지 습관)가
       // 브라우저의 '포커스된 버튼 활성화'로 click 을 합성해 믹서가 저절로 켜졌다
-      // ('클릭 시 바로 켜기' 옵션 사용자 피드백). 키보드 유발 클릭(detail=0)은 무시하고,
-      // 처리 후 blur 로 포커스를 해제해 재발을 막는다.
-      if (e.detail === 0 && e.isTrusted) {
+      // ('클릭 시 바로 켜기' 옵션 사용자 피드백). 그 키보드 유발 클릭만 무시한다.
+      // ⚠ 예전엔 detail===0 만으로 걸렀는데, 스크린리더/음성제어/일부 트랙패드·펜 입력은
+      // '진짜 클릭'인데도 detail===0 이라 클릭이 통째로 무시돼(패널이 안 열림) 버렸다.
+      // 키보드 합성 클릭은 detail===0 '이면서' 좌표가 전부 0 이다(포인터 위치 없음).
+      // 이 버튼은 컨트롤바 안에 있어 실제 클릭이 (0,0)일 수 없으므로 좌표까지 봐서 구분한다.
+      const keyboardSynth =
+        e.detail === 0 &&
+        e.isTrusted &&
+        e.screenX === 0 &&
+        e.screenY === 0 &&
+        e.clientX === 0 &&
+        e.clientY === 0;
+      if (keyboardSynth) {
         btn.blur();
         return;
       }
