@@ -325,7 +325,19 @@
           } catch {}
         });
       }
-      if (this.__cheeseVodChatUrl) {
+      // 차단 대상이 없으면 응답을 건드릴 이유가 없다. 특히 Firefox는 네이티브 XHR의
+      // read-only response/responseText 재정의를 더 엄격하게 처리할 수 있으므로, 빈 목록
+      // 상태에서도 getter 를 덮어쓰면 다시보기 채팅 요청 자체가 중단될 수 있다.
+      const vodResponseType = String(this.responseType || "");
+      const canPatchVodResponse =
+        this.__cheeseVodChatUrl &&
+        chatBlockedHashes.size > 0 &&
+        (vodResponseType === "" ||
+          vodResponseType === "text" ||
+          vodResponseType === "json") &&
+        typeof rDesc?.get === "function" &&
+        (vodResponseType === "json" || typeof rtDesc?.get === "function");
+      if (canPatchVodResponse) {
         // ⚠ addEventListener("load") 로 응답을 교체하면, 페이지 핸들러가 먼저 실행돼 원본을
         // 읽어버려 소용없다(실측: 필터 changed:true 인데도 화면엔 그대로). 대신 이 인스턴스의
         // responseText/response getter 를 '미리' 지연 필터 방식으로 교체한다 — 누가 언제
@@ -333,47 +345,63 @@
         const xhr = this;
         let cachedText = null; // 필터된 응답 문자열 캐시(1회 계산).
         let cachedData = null;
+        let computed = false;
         const computeFiltered = () => {
-          if (cachedText !== null) return;
+          if (computed) return;
+          computed = true;
           try {
-            const raw = rtDesc.get.call(xhr); // 원본 responseText
-            if (!raw) return;
-            const data = originalJSONParse(raw);
+            const responseType = String(xhr.responseType || "");
+            let raw = "";
+            let data = null;
+            if (responseType === "json") {
+              data = rDesc.get.call(xhr);
+              if (!data || typeof data !== "object") return;
+            } else {
+              raw = rtDesc.get.call(xhr); // 원본 responseText
+              if (!raw) return;
+              data = originalJSONParse(raw);
+            }
+            collectVodNicks(data?.content);
             if (chatBlockedHashes.size && filterVodChat(data)) {
               cachedData = data;
               cachedText = JSON.stringify(data);
             } else {
-              cachedText = raw; // 변경 없음 → 원본 그대로
               cachedData = data;
+              cachedText = raw; // text 응답은 원본 그대로, json 응답은 cachedData 사용
             }
           } catch {
-            cachedText = ""; // 실패 시 빈 값 방지: 원본으로 폴백
-            try {
-              cachedText = rtDesc.get.call(xhr);
-            } catch {}
+            cachedText = null; // 실패 시 각 getter 가 네이티브 원본으로 폴백
+            cachedData = null;
           }
         };
-        Object.defineProperty(xhr, "responseText", {
-          configurable: true,
-          get() {
-            if (xhr.readyState !== 4) return rtDesc.get.call(xhr);
-            computeFiltered();
-            return cachedText != null ? cachedText : rtDesc.get.call(xhr);
-          },
-        });
-        Object.defineProperty(xhr, "response", {
-          configurable: true,
-          get() {
-            if (xhr.readyState !== 4) return rDesc.get.call(xhr);
-            // responseType 이 "json" 이면 객체, 아니면 문자열.
-            if (xhr.responseType === "json") {
+        try {
+          // responseText 는 responseType=""/"text" 에서만 읽을 수 있다. json/blob 등에서
+          // 접근하면 Firefox가 InvalidStateError를 던지므로 타입에 맞는 getter만 설치한다.
+          if (vodResponseType !== "json") {
+            Object.defineProperty(xhr, "responseText", {
+              configurable: true,
+              get() {
+                if (xhr.readyState !== 4) return rtDesc.get.call(xhr);
+                computeFiltered();
+                return cachedText != null ? cachedText : rtDesc.get.call(xhr);
+              },
+            });
+          }
+          Object.defineProperty(xhr, "response", {
+            configurable: true,
+            get() {
+              if (xhr.readyState !== 4) return rDesc.get.call(xhr);
               computeFiltered();
-              return cachedData != null ? cachedData : rDesc.get.call(xhr);
-            }
-            computeFiltered();
-            return cachedText != null ? cachedText : rDesc.get.call(xhr);
-          },
-        });
+              if (xhr.responseType === "json") {
+                return cachedData != null ? cachedData : rDesc.get.call(xhr);
+              }
+              return cachedText != null ? cachedText : rDesc.get.call(xhr);
+            },
+          });
+        } catch {
+          // Firefox 등에서 인스턴스 getter 재정의가 거부되어도 아래 원본 send는 실행한다.
+          // 전역 JSON.parse 훅이 VOD 채팅 필터의 폴백 역할을 한다.
+        }
       }
       if (this.__cheeseCommentUrl) {
         const xhr = this;

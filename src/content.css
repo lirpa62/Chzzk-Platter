@@ -8,6 +8,7 @@
   --cheese-platter-background-neutral-base: #fff;
   --cheese-platter-border-accent-red-base: #d92d20;
   --cheese-platter-border-accent-violet-base: #4e41db;
+  --cheese-platter-border-accent-prime-strong: #cf9a12;
   --cheese-platter-border-brand-alpha-weak: #1bb37326;
   --cheese-platter-border-brand-base: #32bb81;
   --cheese-platter-border-brand-weak: #49c28f;
@@ -37,11 +38,13 @@
   --cheese-platter-surface-neutral-subtle: #e8e9eb;
   --cheese-platter-surface-neutral-weaker: #fff;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+  --cheese-platter-surface-function-nickname-yellow: #fbf0d1;
 }
 .theme_dark {
   --cheese-platter-background-neutral-base: #141517;
   --cheese-platter-border-accent-red-base: #d92d20;
   --cheese-platter-border-accent-violet-base: #4e41db;
+  --cheese-platter-border-accent-prime-strong: #cf9a12;
   --cheese-platter-border-brand-alpha-weak: #00ffa326;
   --cheese-platter-border-brand-base: #00e693;
   --cheese-platter-border-brand-weak: #009962;
@@ -71,6 +74,7 @@
   --cheese-platter-surface-neutral-subtle: #2a2c2f;
   --cheese-platter-surface-neutral-weaker: #1c1d1f;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+  --cheese-platter-surface-function-nickname-yellow: #473508;
 }
 
 .cheese-search-shell {
@@ -2505,14 +2509,16 @@
   gap: 4px;
   line-height: 1.35;
   margin-top: 6px;
-  /* 일반 상태 preview 폭은 182px(실측)라 이전 고정 180px 이 적정. 전체화면만 preview 가
-     272px 로 커지므로(아래 fullscreen 규칙에서 100%) 여기선 일반 기준으로 둔다. */
+  /* ⚠ 폭: 예전엔 고정 180px 이라 세로 방송처럼 preview 가 180px 보다 좁을 때 툴팁이
+     preview 밖으로 넘쳐, 재생바 끝쪽에서 화면 밖으로 짤렸다. 부모(preview) 폭에 맞추되
+     (width:100%) 가로 방송에선 180px 를 넘지 않게 상한만 둔다. 전체화면은 아래 규칙에서
+     상한을 100% 로 풀어 넓은 preview 를 꽉 채운다. */
+  width: 100%;
   max-width: 180px;
   min-width: 0;
   padding: 9px 10px;
   pointer-events: none;
   text-align: center;
-  width: 180px;
 }
 
 /* 전체화면은 seek preview(부모 __description)가 넓어진다(실측: 182px→272px). 툴팁을
@@ -2520,6 +2526,21 @@
 .pzp-pc--fullscreen .cheese-search-comment-preview-tooltip {
   width: 100%;
   max-width: 100%;
+}
+/* ⚠ 세로 방송: preview(__description)가 콘텐츠 폭이라 툴팁 안 긴 댓글이 preview 를
+   353px 까지 넓혔다(width:100% 가 그 넓어진 부모를 따라가는 순환). 세로에선 툴팁에
+   '고정 px 상한'을 줘, 그 폭에서 텍스트가 끊기고(word-break) preview 도 그 이상 안 커지게
+   한다. 세로 preview 는 좁아 58px 면 충분. width 도 그 상한으로 고정(100% 순환 차단). */
+html.cheese-vod-portrait .cheese-search-comment-preview-tooltip {
+  width: 58px;
+  max-width: 58px;
+}
+
+html.cheese-vod-portrait
+  .pzp-seeking-preview--fullscreen
+  .cheese-search-comment-preview-tooltip {
+  width: 87px;
+  max-width: 87px;
 }
 
 .cheese-search-comment-preview-tooltip strong {
@@ -2537,6 +2558,11 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   text-align: center;
+  /* ⚠ 'ㅋㅋㅋ…'처럼 공백 없는 긴 문자열은 white-space:normal 로도 안 끊겨 한 줄로 뻗어
+     preview(콘텐츠 폭)를 353px 까지 넓혔다(세로 방송에서 화면 밖 짤림). 어디서든 끊어
+     preview 를 넓히지 않게 한다. */
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .cheese-search-comment-preview-tooltip-more {
@@ -2641,22 +2667,44 @@
   }
 }
 
-/* seek preview 실제 방송 시각 병기(시간 아래 줄, 약간 작고 흐리게) */
+/* seek preview 실제 방송 시각 병기(시간 아래 줄, '날짜 / 시각' 두 줄).
+   ⚠ 예전엔 한 줄(nowrap)이라 긴 텍스트가 __time 폭을 크게 넓혀(58→147px) 세로 방송·
+   재생바 끝에서 preview 가 짤렸다. 두 줄로 나눠 폭을 줄이고, 우리 라벨 폭이 __time(preview)
+   폭에 영향을 주지 않도록 width:0 + min-width:100% 로 '부모 폭에 맞추되 넓히진 않게' 한다. */
 .cheese-search-seek-realtime {
-  display: block;
+  /* ⚠ 폭 억제: 콘텐츠로 부모(preview)를 넓히지 않도록 0 폭 기준 + 부모 폭 100% 채움. */
+  display: flex;
+  flex-wrap: wrap; /* 폭 넉넉(가로)하면 한 줄, 좁으면(세로) 자동 두 줄 */
+  align-items: center;
+  justify-content: center;
+  column-gap: 5px;
+  row-gap: 1px;
+  width: 0;
+  min-width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   margin-top: 2px;
-  font-size: 13px;
+  padding: 5px 4px;
+  font-size: 11px;
   font-weight: 800;
   background: rgba(18, 20, 24, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-  box-sizing: border-box;
-  padding: 5px 0;
   color: #25df97;
-  line-height: 1.3;
-  opacity: 0.85;
+  line-height: 1.25;
+  opacity: 0.9;
+}
+/* 날짜·시각 같은 크기로 통일(폰트 차이로 인한 이질감 제거). */
+.cheese-seek-realtime-date,
+.cheese-seek-realtime-time {
   white-space: nowrap;
+}
+/* 세로 방송: preview 가 좁아 실제시각 텍스트가 툴팁 밖으로 나갔다 → 더 작고 촘촘하게. */
+html.cheese-vod-portrait .cheese-search-seek-realtime {
+  font-size: 10.5px;
+  letter-spacing: -1px;
+  font-weight: 700;
 }
 
 /* 라이브 상세 메타(시청자 수/스트리밍 시간) 호버 시 라이브 시작일 툴팁.
@@ -2742,6 +2790,473 @@
 /* 팔로잉 섹션 오프라인 채널 숨김(JS가 _is_live_ 없는 li에 부여) */
 #sidebar li.cheese-sb-offline-hide {
   display: none !important;
+}
+
+/* ══ 전용 팔로잉 목록(sbFollowCustom) ══════════════════════════════════════ */
+/* 원본 목록(ul)/더보기(_box_) 숨김 — 헤더는 유지(harvest·접힘버튼용). */
+#sidebar .cheese-custom-follow-orig-hidden {
+  display: none !important;
+}
+#cheese-custom-follow {
+  display: block;
+}
+/* ⚠ 전환 깜빡임 방지: 네이티브 _is_expanded_ 클래스가 우리 아이템에 붙는 데 1프레임
+   시차가 있어(사이드바는 이미 펼침) 그 순간 레이아웃이 깨졌다. 원본 클래스에 의존하지
+   않고, '사이드바 펼침 상태'면 우리 CSS 로 네이티브 펼침 레이아웃을 직접 강제한다
+   (._item_._is_expanded_ 규칙과 동일값). 이러면 시차와 무관하게 항상 올바른 레이아웃. */
+#sidebar[class*="_is_expanded_"] #cheese-custom-follow .cheese-cf-inner {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 5px;
+  border-radius: 8px;
+}
+/* ⚠ 스타일은 harvest 한 네이티브 클래스가 담당한다. 아래는 harvest 실패(로그아웃/0팔로우)
+   시의 폴백 + 우리 고유 요소(별표)만. 네이티브 클래스가 붙으면 그 CSS 가 이긴다. */
+.cheese-cf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cheese-cf-inner {
+  position: relative; /* a._item_link_ absolute 기준 + 별표 위치 기준 */
+}
+/* ── 폴백 스타일(네이티브 클래스 없을 때만 대략 표시) ── */
+.cheese-cf-inner:not([class*="_item_"]) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px;
+  border-radius: 8px;
+}
+/* 폴백 호버/액티브: 네이티브 인터랙션 동일 — 배경색 켜짐 + 프로필 링 살짝 확장. */
+.cheese-cf-item:hover .cheese-cf-inner:not([class*="_item_"]),
+.cheese-cf-item:active .cheese-cf-inner:not([class*="_item_"]) {
+  background-color: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+}
+.cheese-cf-item:hover
+  .cheese-cf-inner:not([class*="_item_"])
+  .cheese-cf-profile,
+.cheese-cf-item:active
+  .cheese-cf-inner:not([class*="_item_"])
+  .cheese-cf-profile {
+  margin: 0;
+  padding: 3px;
+}
+.cheese-cf-item:hover
+  .cheese-cf-inner:not([class*="_item_"])
+  .cheese-cf-profile
+  img,
+.cheese-cf-item:active
+  .cheese-cf-inner:not([class*="_item_"])
+  .cheese-cf-profile
+  img {
+  padding: 2px;
+}
+/* 프로필 폴백(harvest 실패 시). 네이티브 _profile_ 와 동일하게: 라이브면 청록 그라디언트
+   링, 오프라인이면 회색 링. background-clip 로 안쪽은 배경색, 테두리 링만 그라디언트. */
+.cheese-cf-profile {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  padding: 1px;
+  box-sizing: border-box;
+  background-image:
+    linear-gradient(
+      var(
+          --sem-color-background-neutral-base,
+          var(--cheese-platter-background-neutral-base)
+        )
+        #fff,
+      var(
+        --sem-color-background-neutral-base,
+        var(--cheese-platter-background-neutral-base)
+      )
+    ),
+    linear-gradient(
+      180deg,
+      var(
+          --sem-color-border-neutral-base,
+          var(--cheese-platter-border-neutral-base)
+        )
+        0%,
+      var(
+          --sem-color-border-neutral-base,
+          var(--cheese-platter-border-neutral-base)
+        )
+        100%
+    );
+  background-origin: border-box;
+  background-clip: content-box, border-box;
+}
+.cheese-cf-profile.is-live {
+  background-image:
+    linear-gradient(
+      var(
+        --sem-color-background-neutral-base,
+        var(--cheese-platter-background-neutral-base)
+      ),
+      var(
+        --sem-color-background-neutral-base,
+        var(--cheese-platter-background-neutral-base)
+      )
+    ),
+    linear-gradient(
+      180deg,
+      var(
+          --sem-color-surface-brand-strongest-static,
+          var(--cheese-platter-surface-brand-strongest-static)
+        )
+        0%,
+      #027f80 100%
+    );
+}
+.cheese-cf-profile img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 2px;
+  border-radius: inherit;
+  object-fit: cover;
+  background-color: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+}
+.cheese-cf-profile::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  right: 3px;
+  border: 1px solid
+    var(--sem-color-border-neutral-alpha-weakest, rgba(255, 255, 255, 0.08));
+  border-radius: inherit;
+  pointer-events: none;
+}
+.cheese-cf-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.cheese-cf-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.cheese-cf-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-cf-desc {
+  display: block;
+  font-size: 11px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-cf-count {
+  flex: none;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(
+    --sem-color-content-accent-red-strong,
+    var(--cheese-platter-content-accent-red-strong, #ff5454)
+  );
+}
+.cheese-cf-link {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+/* ── 별표(즐겨찾기) 버튼 — 링크(z-index:1) 위, 항목 맨 오른쪽. 평소 숨김 ── */
+.cheese-follow-fav {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  line-height: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+/* lucide star: 즐겨찾기(is-fav)면 채움, 아니면 외곽선만. */
+.cheese-follow-fav.is-fav .cheese-cf-star-svg {
+  fill: currentColor;
+}
+/* 커스텀 순서 드래그: 끌 수 있는 항목은 grab 커서, 드래그 중이면 반투명. */
+.cheese-cf-draggable {
+  position: relative;
+  transition: transform 0.12s ease;
+}
+/* 꾹 눌러 드래그 모드로 진입한 항목(cheese-cf-dragready)일 때만: grab 커서 + 링크
+   pointer-events off(그래야 li 가 드래그를 받는다). 평소엔 링크 클릭=채널 이동 유지. */
+.cheese-cf-dragready {
+  cursor: grab;
+}
+.cheese-cf-dragready .cheese-cf-link,
+.cheese-cf-dragready a[class*="_item_link_"] {
+  pointer-events: none;
+}
+.cheese-cf-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+/* 호버 시(또는 '별표 항상 표시' 옵션이면) 별표 노출 + 시청자수를 별표 폭만큼 왼쪽으로
+   밀어 겹침 방지. 별표가 안 보일 땐 여백도 없어 네이티브와 동일. */
+.cheese-cf-item:hover .cheese-follow-fav,
+html.cheese-cf-favstar #cheese-custom-follow .cheese-follow-fav.is-fav {
+  opacity: 1;
+}
+.cheese-cf-item:hover [class*="_count_"],
+.cheese-cf-item:hover .cheese-cf-count,
+html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav [class*="_count_"],
+html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
+  margin-right: 20px;
+}
+.cheese-follow-fav.is-fav,
+.cheese-follow-fav:hover {
+  color: #ffcc33;
+}
+
+/* ── 즐겨찾기 구분: 항목 테두리/배경색(sbFollowFavStyle) ── */
+html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav .cheese-cf-inner {
+  background: var(
+    --sem-color-surface-function-nickname-yellow,
+    var(--cheese-platter-surface-function-nickname-yellow)
+  );
+  box-shadow: inset 0 0 0 1px
+    var(
+      --sem-color-border-accent-prime-strong,
+      var(--cheese-platter-border-accent-prime-strong)
+    );
+  border-radius: 8px;
+}
+/* 접힘 상태(아이콘만)에선 항목이 작아 8px 라운드가 원형에 가까워 어색 → 4px 로. */
+html.cheese-cf-favstyle
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-fav
+  .cheese-cf-inner {
+  border-radius: 4px;
+}
+html.cheese-cf-favstyle
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-fav
+  + .cheese-cf-fav {
+  margin-top: 10px;
+}
+/* 펼침 상태 즐겨찾기 항목 간 간격(딱 붙지 않게). 일반 항목과 구분감. */
+html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
+  margin-top: 5px;
+}
+
+/* ── 즐겨찾기 구분: 그룹 구분 바(sbFollowFavBar) ── */
+.cheese-cf-favbar {
+  list-style: none;
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+}
+.cheese-cf-favbar:not(.cheese-cf-favbar-top) {
+  border-top: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base, #4d4d4d)
+    );
+  margin-top: 4px;
+  padding-top: 6px;
+}
+/* 전용 목록 사용 시 네이티브 팔로우 헤더의 새로고침/접기 버튼 숨김(클릭 시 원본 재출현 방지).
+   우리 아이콘 컨트롤(.cheese-cf-header-ctrl)이 대신한다. */
+#sidebar [data-cf-native-btn] {
+  display: none !important;
+}
+/* 우리 헤더 아이콘 컨트롤 — 헤더 우측 인라인(펼침), 헤더 아래 세로 중앙(접힘). */
+.cheese-cf-header-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+/* 접힘 상태(아이콘만, 폭 좁음): 버튼을 세로로 쌓아 좁은 폭에 맞춘다. 헤더가 좁아
+   가로로 두면 넘쳐서 잘려 안 보였다. flex-basis 100% + wrap 으로 세로 스택. */
+#sidebar:not([class*="_is_expanded_"]) .cheese-cf-header-ctrl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin: 4px 0 0;
+}
+.cheese-cf-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+}
+.cheese-cf-ctrl-btn:hover:not(:disabled) {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
+}
+.cheese-cf-ctrl-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* 더보기/접기 문구 버튼 바(헤더 아래·목록 위쪽). 둘 다 가능하면 나란히. */
+.cheese-cf-more-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cheese-cf-more {
+  flex: 1 1 auto;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cheese-cf-more:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
+}
+.cheese-cf-loading,
+.cheese-cf-empty {
+  padding: 12px 8px;
+  font-size: 12px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak)
+  );
+  text-align: center;
+}
+/* 접힘 상태에선 이름/카테고리/시청자수/별표/더보기 숨기고 아이콘만(네이티브 근사) */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  [class*="_information_"],
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-info,
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow [class*="_count_"],
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-count,
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-more-bar {
+  display: none !important;
+}
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-inner {
+  justify-content: center;
+}
+/* 접힘 상태: 별표는 즐겨찾기(is-fav)인 것만 프로필 우상단에 작은 배지로 항상 표시한다.
+   (비-fav 는 숨김. 해제는 펼친 상태에서만 — JS 가 접힘 클릭 무시.) */
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-follow-fav {
+  display: none !important;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-follow-fav.is-fav {
+  display: inline-flex !important;
+  position: absolute;
+  right: 1px;
+  top: -1px;
+  transform: none;
+  width: 13px;
+  height: 13px;
+  opacity: 1;
+  color: #ffcc33;
+  z-index: 3;
+  cursor: default; /* 접힘 상태는 표시 전용(해제 불가) */
+  pointer-events: none;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-follow-fav.is-fav
+  .cheese-cf-star-svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  /* 어두운 배경 대비를 위해 얇은 외곽선(테두리색). */
+  stroke: var(--sem-color-background-neutral-base, #141517);
+  stroke-width: 2.5;
+}
+/* 접힘 상태(아이콘만): 구분 바는 텍스트(즐겨찾기/팔로잉) 없이 얇은 구분선만 표시한다
+   (좁은 폭에 라벨을 두면 넘친다). */
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-favbar {
+  padding: 0;
+  margin: 5px 8px;
+  height: 0;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-favbar
+  span {
+  display: none;
+}
+/* 접힘 상단 라벨(favbar-top)은 구분선도 불필요 → 완전히 숨김. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-favbar-top {
+  display: none;
 }
 
 #cheese-header-follow li.cheese-sb-offline-hide {
@@ -3326,6 +3841,29 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+/* 중앙 하단: 옵션(시청자/방송시간 항상 표시)으로 추가되는 메타. 넓을 땐 우측 메타가
+   보이므로 중복 방지로 숨기고, 좁을 때(is-narrow, 우측 숨김)만 표시한다. 한 줄(row)로
+   촘촘하게, 우측 메타보다 조금 작은 폰트. */
+#cheese-follow-preview .cheese-follow-preview-meta-center-side {
+  display: none;
+}
+#cheese-follow-preview.is-narrow .cheese-follow-preview-meta-center-side {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  margin-top: 1px;
+  flex-wrap: wrap;
+}
+#cheese-follow-preview
+  .cheese-follow-preview-meta-center-side
+  .cheese-follow-preview-meta-viewers,
+#cheese-follow-preview
+  .cheese-follow-preview-meta-center-side
+  .cheese-follow-preview-meta-elapsed {
+  font-size: calc(11px * var(--cheese-fp-header-font, 1));
 }
 
 #cheese-follow-preview .cheese-follow-preview-meta-title {
@@ -5005,9 +5543,9 @@ html.cheese-vod-chapter-hide .pzp-pc .pzp-seeking-preview__title {
 html.cheese-vod-chapter-hide
   .pzp-ui-slider__wrap:hover:has(
     > .pzp-ui-progress__wrap + .pzp-ui-progress__wrap
-  ):not(
-    :has(.cheese-search-comment-marker:hover)
-  ):not(:has(.cheese-search-comment-marker:focus-visible))
+  ):not(:has(.cheese-search-comment-marker:hover)):not(
+    :has(.cheese-search-comment-marker:focus-visible)
+  )
   > .pzp-ui-progress__wrap {
   height: 100% !important;
 }
@@ -5040,7 +5578,10 @@ html.cheese-vod-chapter-hide
   cursor: pointer;
   vertical-align: middle;
   opacity: 0.7;
-  transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    opacity 0.12s ease;
 }
 .cheese-comment-block-button:hover,
 .cheese-comment-block-button:focus-visible {
@@ -5160,7 +5701,9 @@ html.cheese-vod-chapter-hide
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 .cheese-comment-block-toast.is-show {
   opacity: 1;

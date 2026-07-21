@@ -192,6 +192,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="customfollow"
+            role="tab"
+            aria-selected="false"
+          >
+            전용 팔로잉 목록
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="preview"
             role="tab"
             aria-selected="false"
@@ -430,6 +439,22 @@
                 </label>
               </li>
               <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >└ 우클릭 중에만 휠 볼륨 조절</span
+                  >
+                  <span class="settings-item-desc"
+                    >마우스 오른쪽 버튼을 누른 채 휠을 굴릴 때만 볼륨을
+                    조절합니다. 일반 휠은 페이지 스크롤로 유지됩니다(위 '휠로
+                    볼륨 조절'이 켜져 있어야 함, 체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-wheel-volume-rightclick />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
                 <label for="wheelVolumeStepInput">
                   <span class="settings-item-name">휠 볼륨 조절 간격</span>
                   <span class="settings-item-desc"
@@ -451,14 +476,221 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">조작 화면 피드백</span>
+                  <span class="settings-item-name">└ 조작 화면 피드백</span>
                   <span class="settings-item-desc"
-                    >휠 볼륨 조절·되감기·앞으로(버튼/단축키) 시 화면 중앙에
-                    반투명 아이콘을 잠깐 표시합니다(체크=사용, 기본 켜짐)</span
+                    >휠 볼륨 조절·되감기·앞으로(버튼/단축키) 시 화면에 반투명
+                    아이콘을 잠깐 표시합니다(체크=사용, 기본 켜짐). 아래에서
+                    종류별 표시 여부와 위치를 조절할 수 있습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-action-overlay />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-osd-group="volume"
+              >
+                <div>
+                  <span class="settings-item-name"
+                    >└─ 볼륨 OSD 위치
+                    <button
+                      type="button"
+                      class="settings-osd-reset"
+                      data-osd-reset="volume"
+                    >
+                      초기화
+                    </button></span
+                  >
+                  <span class="settings-item-desc"
+                    >전체 화면 기준. 가로/세로 %는 OSD 중심 위치입니다.</span
+                  >
+                  <div class="settings-osd-rows">
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">가로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="volume-x"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="volume-x"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">세로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="volume-y"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="volume-y"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <label class="settings-switch">
+                  <input type="checkbox" data-osd-on="volume" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-osd-group="rewind"
+              >
+                <div>
+                  <span class="settings-item-name"
+                    >└─ 되감기 OSD 위치
+                    <button
+                      type="button"
+                      class="settings-osd-reset"
+                      data-osd-reset="rewind"
+                    >
+                      초기화
+                    </button></span
+                  >
+                  <span class="settings-item-desc"
+                    >화면 왼쪽 절반 기준. 가로/세로 %는 OSD 중심
+                    위치입니다.</span
+                  >
+                  <div class="settings-osd-rows">
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">가로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="rewind-x"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="rewind-x"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">세로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="rewind-y"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="rewind-y"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <label class="settings-switch">
+                  <input type="checkbox" data-osd-on="rewind" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-osd-group="forward"
+              >
+                <div>
+                  <span class="settings-item-name"
+                    >└─ 앞으로 OSD 위치
+                    <button
+                      type="button"
+                      class="settings-osd-reset"
+                      data-osd-reset="forward"
+                    >
+                      초기화
+                    </button></span
+                  >
+                  <span class="settings-item-desc"
+                    >화면 오른쪽 절반 기준. 가로/세로 %는 OSD 중심
+                    위치입니다.</span
+                  >
+                  <div class="settings-osd-rows">
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">가로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="forward-x"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="forward-x"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                    <div class="settings-osd-row">
+                      <span class="settings-osd-axis">세로</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        data-osd="forward-y"
+                      />
+                      <span class="settings-custom-input">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          inputmode="numeric"
+                          data-osd-num="forward-y"
+                        />
+                        <small>%</small>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <label class="settings-switch">
+                  <input type="checkbox" data-osd-on="forward" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2024,6 +2256,367 @@
 
           <section
             class="settings-group"
+            data-panel="customfollow"
+            aria-label="전용 팔로잉 목록"
+          >
+            <h2 class="settings-group-title">전용 팔로잉 목록</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >치즈 플래터 전용 팔로잉 목록 사용</span
+                  >
+                  <span class="settings-item-desc"
+                    >사이드바의 팔로잉 채널 목록을 치즈 플래터 전용 목록으로
+                    대체해 정렬·즐겨찾기·표시 개수를 제어합니다(체크=사용, 기본
+                    꺼짐). 라이브 미리보기도 함께 동작합니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowCustom" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">정렬 기준</span>
+                  <span class="settings-item-desc"
+                    >전용 팔로잉 목록의 정렬 순서(즐겨찾기는 항상 상단
+                    고정)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-5"
+                  data-cf-sort
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-sort-value="popular"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    인기순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-sort-value="recent"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    최신순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-sort-value="oldest"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    오래된순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-sort-value="name-asc"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    이름↑
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-sort-value="name-desc"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    이름↓
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div style="flex-direction: row">
+                  <label style="display: flex; flex-direction: column">
+                    <span class="settings-item-name"
+                      >└ 즐겨찾기 내 별도 정렬</span
+                    >
+                    <span
+                      class="settings-item-desc"
+                      style="padding-left: 16px; margin-top: 2px"
+                      >켜면 즐겨찾기 그룹만 아래 기준으로 따로 정렬합니다. 끄면
+                      위 정렬 기준을 함께 따릅니다.</span
+                    >
+                  </label>
+                  <label
+                    class="settings-switch"
+                    style="margin-left: auto; flex: none"
+                  >
+                    <input type="checkbox" data-feature="sbFollowFavSort" />
+                    <i aria-hidden="true"></i>
+                  </label>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-6"
+                  data-cf-fav-sort
+                  role="radiogroup"
+                  style="margin-top: 6px; padding-left: 16px"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="popular"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    인기순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="recent"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    최신순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="oldest"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    오래된순
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="name-asc"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    이름↑
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="name-desc"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    이름↓
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-fav-sort-value="custom"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    커스텀 순서
+                  </button>
+                </div>
+                <div
+                  class="settings-custom-row"
+                  id="cfFavOrderRow"
+                  hidden
+                  style="padding-left: 16px; margin-top: 8px"
+                >
+                  <div style="width: 100%">
+                    <span class="settings-item-desc" style="margin-bottom: 6px"
+                      >아래에서 드래그하거나 ↑↓ 버튼으로 즐겨찾기 순서를
+                      바꿉니다. 사이드바에서도 드래그로 바꿀 수 있습니다.</span
+                    >
+                    <ul id="cfFavOrderList" class="cf-fav-order-list"></ul>
+                  </div>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">자동 펼치기</span>
+                  <span class="settings-item-desc"
+                    >전용 목록을 처음부터 모든 채널까지 펼쳐서
+                    표시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowCustomAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">오프라인 채널 숨김</span>
+                  <span class="settings-item-desc"
+                    >방송 중이 아닌 채널을 목록에서 숨깁니다(즐겨찾기는 항상
+                    표시, 체크=숨김, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowCustomOffline" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >즐겨찾기 구분: 별표 항상 표시</span
+                  >
+                  <span class="settings-item-desc"
+                    >즐겨찾기한 채널은 별표(★)를 호버하지 않아도 항상
+                    표시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowFavStar" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >즐겨찾기 구분: 테두리·배경색</span
+                  >
+                  <span class="settings-item-desc"
+                    >즐겨찾기한 채널 항목에 테두리와 연한 배경색을
+                    입힙니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowFavStyle" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >즐겨찾기 구분: 그룹 구분 바</span
+                  >
+                  <span class="settings-item-desc"
+                    >즐겨찾기 그룹과 일반 그룹 사이에 구분선을
+                    표시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowFavBar" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">초기 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >'더보기' 전에 보여줄 채널 수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-initial
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >'더보기'를 누를 때마다 추가로 펼칠 채널 수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-more
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              자동 갱신 주기
+            </h2>
+            <div
+              class="settings-segmented settings-segmented-4"
+              id="cfRefresh"
+              role="radiogroup"
+            >
+              <button
+                type="button"
+                data-cf-refresh="0"
+                role="radio"
+                aria-checked="true"
+              >
+                끔
+              </button>
+              <button
+                type="button"
+                data-cf-refresh="30"
+                role="radio"
+                aria-checked="false"
+              >
+                30초
+              </button>
+              <button
+                type="button"
+                data-cf-refresh="60"
+                role="radio"
+                aria-checked="false"
+              >
+                60초
+              </button>
+              <button
+                type="button"
+                data-cf-refresh="custom"
+                role="radio"
+                aria-checked="false"
+              >
+                커스텀
+              </button>
+            </div>
+            <div class="settings-custom-row" id="cfRefreshCustomRow" hidden>
+              <label class="settings-custom-field">
+                <span>갱신 주기</span>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="cfRefreshCustomSec"
+                    min="3"
+                    max="600"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>초</small>
+                </span>
+              </label>
+            </div>
+            <p class="settings-group-desc">
+              전용 목록을 주기적으로 새로고침해 라이브 상태·시청자 수를
+              갱신합니다. 전용 목록을 사용하면 사이드바 탭의 '팔로우 채널 자동
+              갱신'은 전용 목록에 적용되지 않습니다. 목록 항목의 별표(☆)로
+              즐겨찾기를 지정하면 항상 상단에 고정됩니다. 오프라인 채널 숨김은
+              위 '오프라인 채널 숨김' 설정을 따릅니다. 사이드바가 접힌 상태에선
+              팔로잉 헤더의 아이콘 버튼으로 새로고침/펼치기/접기를 할 수
+              있습니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
             data-panel="sidebar"
             aria-label="팔로잉 새 탭"
           >
@@ -2151,6 +2744,32 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-follow-preview-full-title />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">시청자 수 항상 표시</span>
+                  <span class="settings-item-desc"
+                    >미리보기 창이 좁아 우측 정보가 숨겨져도 현재 시청자 수를
+                    제목 아래에 항상 표시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-preview-always-viewers />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">방송 시간 항상 표시</span>
+                  <span class="settings-item-desc"
+                    >미리보기 창이 좁아 우측 정보가 숨겨져도 방송 경과 시간을
+                    제목 아래에 항상 표시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follow-preview-always-elapsed />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -3128,8 +3747,20 @@
                 title="최상단으로"
                 hidden
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 19V6M6 12l6-6 6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 19V6M6 12l6-6 6 6"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
                 </svg>
               </button>
             </div>

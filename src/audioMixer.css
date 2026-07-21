@@ -1540,8 +1540,8 @@
 /* ── 조작 화면 피드백 오버레이(휠 볼륨/되감기/앞으로) ───────────────────────── */
 #cheese-action-overlay {
   position: absolute;
+  /* 위치(top/left)는 JS 가 종류별 설정값(중심 기준 %)으로 인라인 지정한다. 아래는 폴백. */
   top: 50%;
-  /* 가로 위치는 변형 클래스가 정한다: center=50%, left=5%(되감기), right=95%(앞으로). */
   left: 50%;
   --cheese-ao-scale: 0.9;
   transform: translate(-50%, -50%) scale(var(--cheese-ao-scale));
@@ -1561,15 +1561,6 @@
   transition:
     opacity 0.12s ease,
     transform 0.12s ease;
-}
-#cheese-action-overlay.cheese-ao-center {
-  left: 50%;
-}
-#cheese-action-overlay.cheese-ao-left {
-  left: 8%;
-}
-#cheese-action-overlay.cheese-ao-right {
-  left: 92%;
 }
 #cheese-action-overlay.is-show {
   opacity: 0.82;

@@ -26,8 +26,17 @@
   let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
-  let wheelVolumeStep = 0.05; // 휠 한 칸당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
-  let actionOverlayOn = true; // 조작(휠 볼륨/시크) 시 화면 중앙 반투명 피드백(전역, 기본 ON)
+  let wheelVolumeRightClick = false; // 우클릭(오른쪽 버튼)을 누른 채 휠일 때만 조절(기본 OFF)
+  let wheelVolumeStep = 0.05; // 휠 한 틱당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
+  let actionOverlayOn = true; // 조작(휠 볼륨/시크) 시 화면 반투명 피드백(전역, 기본 ON)
+  // OSD(조작 오버레이) 종류별 표시 on/off + 위치(중심 기준 %). 볼륨은 전체 화면 기준,
+  // 되감기는 왼쪽 절반 기준(x 0~100 → 실제 0~50%), 앞으로는 오른쪽 절반 기준(x 0~100 →
+  // 실제 50~100%). y 는 셋 다 전체 화면 기준 0~100%. 기본값은 기존 위치(볼륨 중앙 등).
+  const actionOverlayPos = {
+    volume: { on: true, x: 50, y: 50 },
+    rewind: { on: true, x: 30, y: 50 }, // 왼쪽 절반의 30% → 실제 left 15%
+    forward: { on: true, x: 70, y: 50 }, // 오른쪽 절반의 70% → 실제 left 85%
+  };
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
@@ -118,7 +127,21 @@
     // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
     volumePctOn = e.data.volumePct !== false;
     actionOverlayOn = e.data.actionOverlay !== false; // 기본 ON
+    // OSD 종류별 표시/위치(있으면 반영). 값은 content.js 가 정규화해 넘긴다.
+    if (e.data.actionOverlayPos && typeof e.data.actionOverlayPos === "object") {
+      for (const k of ["volume", "rewind", "forward"]) {
+        const p = e.data.actionOverlayPos[k];
+        if (p && typeof p === "object") {
+          if (typeof p.on === "boolean") actionOverlayPos[k].on = p.on;
+          if (Number.isFinite(p.x))
+            actionOverlayPos[k].x = Math.min(100, Math.max(0, p.x));
+          if (Number.isFinite(p.y))
+            actionOverlayPos[k].y = Math.min(100, Math.max(0, p.y));
+        }
+      }
+    }
     wheelVolumeOn = e.data.wheelVolume === true; // 기본 OFF
+    wheelVolumeRightClick = e.data.wheelVolumeRightClick === true; // 기본 OFF
     // 휠 볼륨 조절 간격(% 1~10 → 0.01~0.10). 범위 밖/미설정이면 5%.
     {
       const s = Number(e.data.wheelVolumeStep);
@@ -5484,7 +5507,7 @@
     showActionOverlay(
       forward ? "forward" : "rewind",
       `${seekAccumSec}초`,
-      forward ? "right" : "left",
+      forward ? "forward" : "rewind",
     );
     // 되감기로 라이브 엣지에서 유의미하게 뒤(과거)에 서면 hls 강제 동기화를 무력화해
     // 지연이 커져도 원점으로 튕기지 않게 한다. 엣지 근처로 복귀하면 원복.
@@ -6608,13 +6631,23 @@
     ensureVolumeTooltip();
     showVolumeTooltip(wrap);
   }
+  // 우클릭+휠 볼륨 조절을 쓴 뒤 버튼을 떼면 뜨는 contextmenu 를 막기 위한 것.
+  // 실측 이벤트 순서: mousedown(2) → wheel(buttons=2) → mouseup(2) → contextmenu.
+  // wheel 로 볼륨을 조절한 '시각'을 기록하고, 그 직후(창) 오는 contextmenu 를 억제한다
+  // (플래그만으로는 다른 리스너/타이밍 간섭 시 놓칠 수 있어 시각 창으로 확실히 잡는다).
+  let rightWheelUsedAt = 0;
   function onVideoWheelVolume(e) {
     if (!wheelVolumeOn) return;
+    // '우클릭 중에만' 옵션: 오른쪽 버튼(buttons 비트 2)이 눌린 상태의 휠만 처리한다.
+    // (옵션 OFF면 기존대로 버튼 무관하게 휠로 조절.)
+    if (wheelVolumeRightClick && !(e.buttons & 2)) return;
     if (!isOverVideoArea(e.target)) return;
     const video = findVideo();
     if (!(video instanceof HTMLVideoElement)) return;
     // 페이지 스크롤 대신 볼륨을 조절한다(영상 위에서만).
     e.preventDefault();
+    // 우클릭+휠을 썼으면, 곧 오는 contextmenu 를 억제하기 위해 시각을 기록한다.
+    if (wheelVolumeRightClick) rightWheelUsedAt = Date.now();
     // deltaY<0(위로) = 볼륨↑, deltaY>0(아래로) = 볼륨↓.
     const dir = e.deltaY < 0 ? 1 : -1;
     let v = video.volume + dir * wheelVolumeStep;
@@ -6628,7 +6661,11 @@
     // aria-valuenow 는 아직 '이전 값'이라(치지직 비동기 갱신), 슬라이더를 읽으면 한 틱
     // 뒤처진 값이 나온다(실측: 실제35%인데 30% 표시). v 가 곧 정확한 목표값이다.
     const pct = Math.round(v * 100);
-    showActionOverlay(muted ? "mute" : dir > 0 ? "volUp" : "volDown", `${pct}%`);
+    showActionOverlay(
+      muted ? "mute" : dir > 0 ? "volUp" : "volDown",
+      `${pct}%`,
+      "volume",
+    );
   }
 
   // ── 조작 화면 피드백 오버레이(전역 옵션, 기본 ON) ───────────────────────────
@@ -6660,17 +6697,34 @@
     }
     return el;
   }
-  // position: "left" | "center"(기본) | "right" — 되감기=left, 앞으로=right, 볼륨=center.
-  function showActionOverlay(iconKey, text, position = "center") {
+  // kind: "volume" | "rewind" | "forward" — 종류별 on/off + 위치(중심 기준 %)를 적용한다.
+  // 좌표계: 볼륨=전체 화면(x 그대로), 되감기=왼쪽 절반(x→x/2), 앞으로=오른쪽 절반(x→50+x/2).
+  // y 는 셋 다 전체 화면 기준. OSD 중심이 그 지점에 오도록 left/top + translate(-50%,-50%).
+  function showActionOverlay(iconKey, text, kind = "volume") {
     if (!actionOverlayOn) return;
+    const cfg = actionOverlayPos[kind] || actionOverlayPos.volume;
+    if (!cfg.on) return; // 이 종류 OSD 표시 꺼짐
     const el = getActionOverlayEl();
     if (!el) return;
     const iconEl = el.querySelector(".cheese-ao-icon");
     const textEl = el.querySelector(".cheese-ao-text");
     if (iconEl) iconEl.innerHTML = ACTION_OVERLAY_ICONS[iconKey] || "";
     if (textEl) textEl.textContent = String(text || "");
-    el.classList.remove("cheese-ao-left", "cheese-ao-center", "cheese-ao-right");
-    el.classList.add(`cheese-ao-${position}`);
+    // 기준계별 실제 left% 환산.
+    let leftPct = cfg.x;
+    if (kind === "rewind") leftPct = cfg.x / 2; // 0~100 → 0~50
+    else if (kind === "forward") leftPct = 50 + cfg.x / 2; // 0~100 → 50~100
+    // ⚠ OSD 는 중심(translate -50%,-50%) 기준이라 0%/100% 근처에서 절반이 화면 밖으로
+    // 나간다. OSD 실제 크기의 '절반'을 플레이어 크기 대비 %로 구해, left/top 을 그만큼
+    // 안쪽으로 clamp 해 항상 화면 안에 완전히 들어오게 한다.
+    const player = el.parentElement;
+    const pw = player?.clientWidth || 0;
+    const ph = player?.clientHeight || 0;
+    const halfX = pw ? ((el.offsetWidth / 2) / pw) * 100 : 0;
+    const halfY = ph ? ((el.offsetHeight / 2) / ph) * 100 : 0;
+    const clampAxis = (v, half) => Math.min(100 - half, Math.max(half, v));
+    el.style.left = `${clampAxis(leftPct, halfX)}%`;
+    el.style.top = `${clampAxis(cfg.y, halfY)}%`;
     // 재트리거 시 애니메이션 리셋(빠른 연속 조작에도 매번 뜨게).
     el.classList.remove("is-show");
     void el.offsetWidth; // reflow 로 애니메이션 리셋
@@ -6699,6 +6753,19 @@
       capture: true,
       passive: false,
     });
+    // 우클릭+휠로 볼륨을 조절한 직후(2초 내) 오는 contextmenu 를 억제한다. 휠을 안 쓴
+    // 순수 우클릭은 rightWheelUsedAt 이 오래됐거나 0 이라 메뉴가 정상적으로 뜬다.
+    document.addEventListener(
+      "contextmenu",
+      (e) => {
+        if (rightWheelUsedAt && Date.now() - rightWheelUsedAt < 2000) {
+          e.preventDefault();
+          e.stopPropagation();
+          rightWheelUsedAt = 0;
+        }
+      },
+      true,
+    );
   }
 
   // tick fast-path 판정: 같은 페이지에서 우리 버튼·효과가 이미 모두 안정 상태인가.

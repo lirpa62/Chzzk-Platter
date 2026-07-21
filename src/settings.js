@@ -45,6 +45,8 @@
     "cheeseFollowOpenNewTab",
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
+    "cheeseFollowPreviewAlwaysViewers",
+    "cheeseFollowPreviewAlwaysElapsed",
     "cheeseFollowPreviewHeaderFont",
     "cheeseFollowPreviewLiveEdge",
     "cheeseFollowPreviewMaxLifeSec",
@@ -52,6 +54,14 @@
     "cheeseFollowPreviewThumbOnly",
     "cheeseFollowPreviewVolume",
     "cheeseFollowRefreshSec",
+    "cheeseFollowCustomSort",
+    "cheeseFollowFavSortMode",
+    "cheeseFollowFavOrder",
+    "cheeseFollowFavMeta",
+    "cheeseFollowCustomInitial",
+    "cheeseFollowCustomMore",
+    "cheeseFollowCustomRefreshSec",
+    "cheeseFollowFavorites",
     "cheeseSectionRefreshCategory",
     "cheeseSectionRefreshSchedule",
     "cheeseHeaderFollowCount",
@@ -92,7 +102,9 @@
     "cheeseVodAutoplayOff",
     "cheeseVolumePct",
     "cheeseWheelVolume",
+    "cheeseWheelVolumeRightClick",
     "cheeseActionOverlay",
+    "cheeseActionOverlayPos",
     "cheeseWheelVolumeStep",
     "cheeseCommentTimestampClickAction",
     "cheeseCommentTimestampClickDelay",
@@ -1355,6 +1367,28 @@
       } catch {}
     });
   }
+  // 우클릭 중에만 휠 볼륨 조절(기본 OFF).
+  const WHEEL_VOLUME_RIGHTCLICK_KEY = "cheeseWheelVolumeRightClick";
+  const wheelVolumeRcInput = document.querySelector(
+    "[data-wheel-volume-rightclick]",
+  );
+  if (wheelVolumeRcInput) {
+    (async () => {
+      let on = false;
+      try {
+        const d = await cachedStorageGet(WHEEL_VOLUME_RIGHTCLICK_KEY);
+        on = d?.[WHEEL_VOLUME_RIGHTCLICK_KEY] === true;
+      } catch {}
+      wheelVolumeRcInput.checked = on;
+    })();
+    wheelVolumeRcInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [WHEEL_VOLUME_RIGHTCLICK_KEY]: wheelVolumeRcInput.checked,
+        });
+      } catch {}
+    });
+  }
   // 조작 화면 피드백 오버레이(전역, 기본 ON).
   const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
   const actionOverlayInput = document.querySelector("[data-action-overlay]");
@@ -1373,6 +1407,79 @@
       } catch {}
     });
   }
+
+  // ── 조작 OSD 종류별 표시/위치(볼륨/되감기/앞으로) ──────────────────────────
+  const ACTION_OVERLAY_POS_KEY = "cheeseActionOverlayPos";
+  const OSD_POS_DEFAULT = {
+    volume: { on: true, x: 50, y: 50 },
+    rewind: { on: true, x: 30, y: 50 },
+    forward: { on: true, x: 70, y: 50 },
+  };
+  const osdPos = JSON.parse(JSON.stringify(OSD_POS_DEFAULT)); // 현재 상태(로드 후 갱신)
+  const clampPct = (n) => Math.min(100, Math.max(0, Math.round(Number(n) || 0)));
+  function saveOsdPos() {
+    try {
+      cachedStorageSet({ [ACTION_OVERLAY_POS_KEY]: osdPos });
+    } catch {}
+  }
+  function reflectOsd(kind, axis) {
+    const v = osdPos[kind][axis];
+    const range = document.querySelector(`[data-osd="${kind}-${axis}"]`);
+    const num = document.querySelector(`[data-osd-num="${kind}-${axis}"]`);
+    if (range) range.value = String(v);
+    if (num) num.value = String(v);
+  }
+  function bindOsdKind(kind) {
+    // on/off 토글
+    const onInput = document.querySelector(`[data-osd-on="${kind}"]`);
+    if (onInput) {
+      onInput.checked = osdPos[kind].on;
+      onInput.addEventListener("change", () => {
+        osdPos[kind].on = onInput.checked;
+        saveOsdPos();
+      });
+    }
+    // x/y 슬라이더 ↔ 숫자 동기화
+    for (const axis of ["x", "y"]) {
+      reflectOsd(kind, axis);
+      const range = document.querySelector(`[data-osd="${kind}-${axis}"]`);
+      const num = document.querySelector(`[data-osd-num="${kind}-${axis}"]`);
+      const commit = (val) => {
+        osdPos[kind][axis] = clampPct(val);
+        reflectOsd(kind, axis);
+        saveOsdPos();
+      };
+      range?.addEventListener("input", () => commit(range.value));
+      num?.addEventListener("change", () => commit(num.value));
+      num?.addEventListener("blur", () => commit(num.value));
+    }
+    // 초기화: 이 종류만 기본 위치(x/y)로 되돌린다(on/off 는 유지).
+    const resetBtn = document.querySelector(`[data-osd-reset="${kind}"]`);
+    resetBtn?.addEventListener("click", () => {
+      osdPos[kind].x = OSD_POS_DEFAULT[kind].x;
+      osdPos[kind].y = OSD_POS_DEFAULT[kind].y;
+      reflectOsd(kind, "x");
+      reflectOsd(kind, "y");
+      saveOsdPos();
+    });
+  }
+  (async () => {
+    try {
+      const d = await cachedStorageGet(ACTION_OVERLAY_POS_KEY);
+      const saved = d?.[ACTION_OVERLAY_POS_KEY];
+      if (saved && typeof saved === "object") {
+        for (const kind of ["volume", "rewind", "forward"]) {
+          const s = saved[kind];
+          if (s && typeof s === "object") {
+            if (typeof s.on === "boolean") osdPos[kind].on = s.on;
+            if (Number.isFinite(Number(s.x))) osdPos[kind].x = clampPct(s.x);
+            if (Number.isFinite(Number(s.y))) osdPos[kind].y = clampPct(s.y);
+          }
+        }
+      }
+    } catch {}
+    ["volume", "rewind", "forward"].forEach(bindOsdKind);
+  })();
   // 휠 볼륨 조절 간격(1~10%, 기본 5).
   const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
   const wheelVolumeStepInput = document.querySelector(
@@ -1707,6 +1814,326 @@
     [2, 3],
     2,
   );
+
+  // 문자열 값 세그먼티드(정렬 기준 등). bindGainRangeSegmented의 문자열 버전.
+  function bindStringSegmented(group, dataAttr, storageKey, allowed, def, onChange) {
+    if (!group) return;
+    const buttons = Array.from(group.querySelectorAll(`[data-${dataAttr}]`));
+    const toKey = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    function reflect(val) {
+      const v = allowed.includes(val) ? val : def;
+      buttons.forEach((btn) => {
+        const active = btn.dataset[toKey] === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+      if (typeof onChange === "function") onChange(v);
+    }
+    (async () => {
+      let v = def;
+      try {
+        const d = await cachedStorageGet(storageKey);
+        const s = d?.[storageKey];
+        if (allowed.includes(s)) v = s;
+      } catch {}
+      reflect(v);
+    })();
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const s = btn.dataset[toKey];
+        const val = allowed.includes(s) ? s : def;
+        reflect(val);
+        try {
+          cachedStorageSet({ [storageKey]: val });
+        } catch {}
+      });
+    });
+  }
+  bindStringSegmented(
+    document.querySelector("[data-cf-sort]"),
+    "cf-sort-value",
+    "cheeseFollowCustomSort",
+    ["popular", "recent", "oldest", "name-asc", "name-desc"],
+    "popular",
+  );
+
+  // 즐겨찾기 내 별도 정렬 기준 — 'custom' 이면 순서 편집 행을 노출한다.
+  const cfFavOrderRow = document.getElementById("cfFavOrderRow");
+  bindStringSegmented(
+    document.querySelector("[data-cf-fav-sort]"),
+    "cf-fav-sort-value",
+    "cheeseFollowFavSortMode",
+    ["popular", "recent", "oldest", "name-asc", "name-desc", "custom"],
+    "popular",
+    (val) => {
+      if (cfFavOrderRow) cfFavOrderRow.hidden = val !== "custom";
+      if (val === "custom") renderCfFavOrderList();
+    },
+  );
+  // setupCfFavOrderEditor() 호출은 cfFavMeta/cfFavOrder(let) 선언 뒤로 옮겼다(TDZ 방지).
+
+  // 전용 팔로잉 목록 초기/더보기 개수(숫자 입력, 1~200).
+  function bindCustomFollowCount(selector, storageKey, def) {
+    const input = document.querySelector(selector);
+    if (!input) return;
+    const clamp = (n) => Math.min(200, Math.max(1, Math.round(n)));
+    (async () => {
+      let v = def;
+      try {
+        const d = await cachedStorageGet(storageKey);
+        const n = Number(d?.[storageKey]);
+        if (Number.isFinite(n)) v = clamp(n);
+      } catch {}
+      input.value = String(v);
+    })();
+    const commit = () => {
+      const n = Number(input.value);
+      const v = Number.isFinite(n) ? clamp(n) : def;
+      input.value = String(v);
+      try {
+        cachedStorageSet({ [storageKey]: v });
+      } catch {}
+    };
+    input.addEventListener("change", commit);
+    input.addEventListener("blur", commit);
+  }
+  bindCustomFollowCount("[data-cf-initial]", "cheeseFollowCustomInitial", 10);
+  bindCustomFollowCount("[data-cf-more]", "cheeseFollowCustomMore", 20);
+
+  // ── 즐겨찾기 커스텀 순서 편집기(설정 팝업) ──────────────────────────────
+  // 저장키: cheeseFollowFavOrder(channelId 배열), cheeseFollowFavMeta({id,name,imageUrl}[]).
+  // 사이드바 드래그와 같은 배열을 공유한다. 여기서 드래그/↑↓ 로 편집 → 저장 → content 반영.
+  const CF_FAV_ORDER_KEY = "cheeseFollowFavOrder";
+  const CF_FAV_META_KEY = "cheeseFollowFavMeta";
+  let cfFavOrder = []; // channelId 순서
+  let cfFavMeta = []; // {id,name,imageUrl}
+  let cfFavDragId = "";
+
+  // meta + order 를 합쳐, order 순서로 정렬된 {id,name,imageUrl} 배열을 만든다.
+  function cfFavMerged() {
+    const byId = new Map(cfFavMeta.map((m) => [String(m.id), m]));
+    const ids = new Set(cfFavMeta.map((m) => String(m.id)));
+    const ordered = cfFavOrder.filter((id) => ids.has(id));
+    // order 에 없는 즐겨찾기(신규)는 뒤에 이름순으로 붙인다.
+    const rest = cfFavMeta
+      .map((m) => String(m.id))
+      .filter((id) => !cfFavOrder.includes(id))
+      .sort((a, b) =>
+        (byId.get(a)?.name || "").localeCompare(byId.get(b)?.name || "", "ko"),
+      );
+    return [...ordered, ...rest].map((id) => byId.get(id) || { id, name: id });
+  }
+
+  function saveCfFavOrder(ids) {
+    cfFavOrder = ids.slice();
+    try {
+      cachedStorageSet({ [CF_FAV_ORDER_KEY]: cfFavOrder });
+    } catch {}
+  }
+
+  const cfEsc = (s) =>
+    String(s == null ? "" : s).replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
+  function renderCfFavOrderList() {
+    const listEl = document.getElementById("cfFavOrderList");
+    if (!listEl) return;
+    const merged = cfFavMerged();
+    if (!merged.length) {
+      listEl.innerHTML =
+        '<li class="cf-fav-order-empty">즐겨찾기한 채널이 없습니다. 사이드바 목록에서 별표(★)로 지정하세요.</li>';
+      return;
+    }
+    listEl.innerHTML = merged
+      .map((m, i) => {
+        const img = m.imageUrl
+          ? `<img src="${cfEsc(m.imageUrl)}?type=f60_60_na" alt="" width="22" height="22">`
+          : '<span class="cf-fav-order-noimg"></span>';
+        return (
+          `<li class="cf-fav-order-item" draggable="true" data-id="${cfEsc(m.id)}">` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          img +
+          `<span class="cf-fav-order-name">${cfEsc(m.name || m.id)}</span>` +
+          `<span class="cf-fav-order-btns">` +
+          `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" class="cf-fav-order-down" data-dir="down" aria-label="아래로" title="아래로"${i === merged.length - 1 ? " disabled" : ""}>↓</button>` +
+          `</span>` +
+          `</li>`
+        );
+      })
+      .join("");
+  }
+  function moveCfFav(id, dir) {
+    const ids = cfFavMerged().map((m) => String(m.id));
+    const from = ids.indexOf(id);
+    if (from < 0) return;
+    const to = dir === "up" ? from - 1 : from + 1;
+    if (to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    saveCfFavOrder(ids);
+    renderCfFavOrderList();
+  }
+
+  function setupCfFavOrderEditor() {
+    const listEl = document.getElementById("cfFavOrderList");
+    if (!listEl) return;
+    (async () => {
+      try {
+        const d = await cachedStorageGet([CF_FAV_ORDER_KEY, CF_FAV_META_KEY]);
+        cfFavOrder = Array.isArray(d?.[CF_FAV_ORDER_KEY])
+          ? d[CF_FAV_ORDER_KEY].map(String)
+          : [];
+        cfFavMeta = Array.isArray(d?.[CF_FAV_META_KEY]) ? d[CF_FAV_META_KEY] : [];
+      } catch {}
+      renderCfFavOrderList();
+    })();
+    // 다른 곳(사이드바 드래그/즐겨찾기 변경)에서 바뀌면 실시간 반영.
+    try {
+      chrome.storage?.onChanged?.addListener((changes, area) => {
+        if (area !== "local") return;
+        if (changes[CF_FAV_ORDER_KEY])
+          cfFavOrder = (changes[CF_FAV_ORDER_KEY].newValue || []).map(String);
+        if (changes[CF_FAV_META_KEY])
+          cfFavMeta = changes[CF_FAV_META_KEY].newValue || [];
+        if (changes[CF_FAV_ORDER_KEY] || changes[CF_FAV_META_KEY])
+          renderCfFavOrderList();
+      });
+    } catch {}
+    // ↑↓ 버튼.
+    listEl.addEventListener("click", (e) => {
+      const btn = e.target.closest?.("[data-dir]");
+      if (!btn) return;
+      const li = btn.closest(".cf-fav-order-item");
+      if (li) moveCfFav(li.dataset.id, btn.dataset.dir);
+    });
+    // 드래그 정렬 — 플레이어 버튼 순서와 같은 방식: 드래그 중 실시간으로 DOM 을
+    // insertBefore 이동(밀려나는 효과), drop 시 현재 DOM 순서를 읽어 저장한다. 상단 여백
+    // 드롭도 after=null(맨 앞) 로 자연히 처리된다.
+    let cfDragEl = null;
+    // 커서 y 아래에 올 '기준 요소'(그 앞에 dragEl 삽입). 없으면 맨 끝(append).
+    const cfDragAfter = (y) => {
+      const items = [
+        ...listEl.querySelectorAll(".cf-fav-order-item:not(.cf-fav-order-dragging)"),
+      ];
+      let closest = { offset: -Infinity, el: null };
+      for (const child of items) {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset)
+          closest = { offset, el: child };
+      }
+      return closest.el;
+    };
+    listEl.addEventListener("dragstart", (e) => {
+      const li = e.target.closest?.(".cf-fav-order-item");
+      if (!li) return;
+      cfDragEl = li;
+      cfFavDragId = li.dataset.id || "";
+      e.dataTransfer.effectAllowed = "move";
+      // 클래스는 다음 프레임에(드래그 고스트 이미지가 반투명으로 캡처되지 않도록).
+      requestAnimationFrame(() => li.classList.add("cf-fav-order-dragging"));
+    });
+    listEl.addEventListener("dragover", (e) => {
+      if (!cfDragEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const after = cfDragAfter(e.clientY);
+      if (after == null) listEl.appendChild(cfDragEl);
+      else if (after !== cfDragEl) listEl.insertBefore(cfDragEl, after);
+    });
+    listEl.addEventListener("drop", (e) => {
+      if (!cfDragEl) return;
+      e.preventDefault();
+      // 현재 DOM 순서를 즐겨찾기 순서로 저장(리렌더는 onChanged/명시 호출로).
+      const ids = [...listEl.querySelectorAll(".cf-fav-order-item")].map(
+        (li) => li.dataset.id,
+      );
+      saveCfFavOrder(ids);
+      renderCfFavOrderList();
+    });
+    listEl.addEventListener("dragend", () => {
+      cfDragEl?.classList.remove("cf-fav-order-dragging");
+      cfDragEl = null;
+      cfFavDragId = "";
+    });
+  }
+  // 상태 변수(let) 선언 이후에 호출해야 TDZ 에러가 나지 않는다.
+  setupCfFavOrderEditor();
+
+  // 전용 팔로잉 목록 자동 갱신 주기 — 끔/30/60/커스텀 세그먼티드(기존 팔로우 갱신과 동일).
+  const CF_REFRESH_KEY = "cheeseFollowCustomRefreshSec";
+  const CF_REFRESH_PRESETS = [0, 30, 60];
+  const CF_REFRESH_CUSTOM_DEFAULT = 30;
+  const cfRefreshButtons = Array.from(
+    document.querySelectorAll("[data-cf-refresh]"),
+  );
+  const cfRefreshCustomRow = document.getElementById("cfRefreshCustomRow");
+  const cfRefreshCustomSec = document.getElementById("cfRefreshCustomSec");
+  if (cfRefreshButtons.length) {
+    const clampCustom = (n, def) => {
+      const v = Math.round(Number(n));
+      return Number.isFinite(v) ? Math.min(600, Math.max(3, v)) : def;
+    };
+    function reflectCfRefresh(secRaw) {
+      let sec = Number(secRaw);
+      if (!Number.isFinite(sec) || sec <= 0) sec = 0;
+      const activeKey =
+        sec === 0 ? "0" : CF_REFRESH_PRESETS.includes(sec) ? String(sec) : "custom";
+      cfRefreshButtons.forEach((btn) => {
+        const active = btn.dataset.cfRefresh === activeKey;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+      if (cfRefreshCustomRow) cfRefreshCustomRow.hidden = activeKey !== "custom";
+    }
+    function saveCfCustom() {
+      const sec = clampCustom(cfRefreshCustomSec?.value, CF_REFRESH_CUSTOM_DEFAULT);
+      if (cfRefreshCustomSec) cfRefreshCustomSec.value = String(sec);
+      try {
+        cachedStorageSet({ [CF_REFRESH_KEY]: sec });
+      } catch {}
+    }
+    (async () => {
+      let sec = 0;
+      try {
+        const d = await cachedStorageGet(CF_REFRESH_KEY);
+        if (d?.[CF_REFRESH_KEY] != null) sec = d[CF_REFRESH_KEY];
+      } catch {}
+      const n = Number(sec);
+      const customInit =
+        Number.isFinite(n) && n >= 3 && n <= 600 && !CF_REFRESH_PRESETS.includes(n)
+          ? Math.round(n)
+          : CF_REFRESH_CUSTOM_DEFAULT;
+      if (cfRefreshCustomSec) cfRefreshCustomSec.value = String(customInit);
+      reflectCfRefresh(sec);
+    })();
+    cfRefreshButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.cfRefresh;
+        if (key === "custom") {
+          reflectCfRefresh(
+            Number(cfRefreshCustomSec?.value) || CF_REFRESH_CUSTOM_DEFAULT,
+          );
+          saveCfCustom();
+        } else {
+          const sec = Number(key);
+          reflectCfRefresh(sec);
+          try {
+            cachedStorageSet({ [CF_REFRESH_KEY]: sec });
+          } catch {}
+        }
+      });
+    });
+    cfRefreshCustomSec?.addEventListener("change", saveCfCustom);
+  }
 
   // 되감기 바는 '라이브 되감기 숨김'과 독립적으로 표시할 수 있다. 되감기 숨김은
   // 되감기/앞으로 '버튼'만 숨기고, 바(드래그·방향키 seek)는 이 토글만 따른다. 그래서
@@ -2274,6 +2701,33 @@
     } catch {}
   });
   loadFollowPreviewFullTitle();
+
+  // 미리보기: 시청자 수/방송 시간 항상 표시(창이 좁아도). 각각 기본 OFF.
+  function bindFollowPreviewAlwaysToggle(selector, key) {
+    const input = document.querySelector(selector);
+    if (!input) return;
+    (async () => {
+      let on = false;
+      try {
+        const d = await cachedStorageGet(key);
+        on = d?.[key] === true;
+      } catch {}
+      input.checked = on;
+    })();
+    input.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [key]: input.checked });
+      } catch {}
+    });
+  }
+  bindFollowPreviewAlwaysToggle(
+    "[data-follow-preview-always-viewers]",
+    "cheeseFollowPreviewAlwaysViewers",
+  );
+  bindFollowPreviewAlwaysToggle(
+    "[data-follow-preview-always-elapsed]",
+    "cheeseFollowPreviewAlwaysElapsed",
+  );
 
   // ── 미리보기 헤더 폰트 크기(입력 75~175%, 저장 배율 0.75~1.75) ──────────────
   const FOLLOW_PREVIEW_HEADER_FONT_KEY = "cheeseFollowPreviewHeaderFont";

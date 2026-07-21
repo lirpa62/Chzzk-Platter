@@ -619,6 +619,8 @@ body {
 }
 
 .settings-item:has(.settings-volume-row),
+.settings-item:has(.settings-segmented-5),
+.settings-item:has(.settings-segmented-6),
 .settings-item:has(#commentTsClickAction),
 .settings-item:has(#searchRerankDefaultSort),
 .settings-item:has(#autoReliveMaxHours),
@@ -632,6 +634,7 @@ body {
   margin-left: auto;
 }
 
+[aria-label="전용 팔로잉 목록"] button.settings-segmented-btn,
 #searchRerankDefaultSort [data-search-rerank-sort] {
   justify-content: center;
 }
@@ -704,6 +707,51 @@ body {
   font-size: 11px;
   font-weight: 600;
   color: var(--popup-muted);
+}
+
+/* 조작 OSD 위치 조절(가로/세로 슬라이더 + 숫자) */
+.settings-osd-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.settings-osd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-osd-axis {
+  flex: none;
+  width: 28px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--popup-muted);
+}
+.settings-osd-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 4px;
+  accent-color: var(--popup-brand);
+  cursor: pointer;
+}
+/* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본
+   동작(hover/focus 시에만 표시)에 맡기고 강제 표시하지 않는다(다른 설정 인풋과 동일). */
+.settings-osd-row .settings-custom-input {
+  flex: none;
+  width: 84px;
+  min-width: 84px;
+  padding: 7px 8px;
+}
+.settings-osd-row .settings-custom-input input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+/* OSD 종류 표시가 꺼지면 해당 위치 슬라이더를 흐리게(조작은 가능하게 두되 비활성 느낌). */
+.settings-item[data-osd-group]:has([data-osd-on]:not(:checked))
+  .settings-osd-rows {
+  opacity: 0.4;
 }
 
 .settings-segmented button {
@@ -849,6 +897,24 @@ body {
 .settings-order-reset:hover {
   color: var(--popup-fg, inherit);
   border-color: var(--popup-muted);
+}
+
+/* OSD 위치 초기화(이름 옆 작은 버튼) */
+.settings-osd-reset {
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 5px;
+  border: 1px solid var(--popup-border);
+  background: transparent;
+  color: var(--popup-muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.settings-osd-reset:hover {
+  color: var(--popup-brand-strong, var(--popup-brand));
+  border-color: var(--popup-brand);
 }
 
 /* ── 사용자 차단 관리 탭 ─────────────────────────────────────────────────── */
@@ -1311,4 +1377,88 @@ body {
   font-size: 11px;
   color: var(--popup-fg);
   padding: 2px 0;
+}
+
+/* ── 즐겨찾기 커스텀 순서 편집 리스트(설정 팝업) ── */
+.cf-fav-order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.cf-fav-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--popup-border, #3a3a3a);
+  border-radius: 6px;
+  background: var(--popup-input-bg, rgba(255, 255, 255, 0.04));
+  cursor: grab;
+  position: relative; /* 드롭 인디케이터 기준 */
+}
+.cf-fav-order-item:active {
+  cursor: grabbing;
+}
+.cf-fav-order-dragging {
+  opacity: 0.4;
+}
+.cf-fav-order-handle {
+  color: var(--popup-fg-weak, #888);
+  font-size: 12px;
+  letter-spacing: -2px;
+  flex: none;
+  user-select: none;
+}
+.cf-fav-order-item img,
+.cf-fav-order-noimg {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+  object-fit: cover;
+  background: var(--popup-border, #3a3a3a);
+}
+.cf-fav-order-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--popup-fg);
+}
+.cf-fav-order-btns {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.cf-fav-order-btns button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--popup-border, #3a3a3a);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--popup-fg);
+  cursor: pointer;
+  line-height: 1;
+}
+.cf-fav-order-btns button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.cf-fav-order-empty {
+  font-size: 11px;
+  color: var(--popup-fg-weak, #888);
+  padding: 6px 0;
+  list-style: none;
+}
+
+/* 순서 편집기: 드래그 중 실시간 이동(플레이어 버튼 순서와 동일) — 드래그 항목만 반투명. */
+.cf-fav-order-dragging {
+  opacity: 0.4;
 }

@@ -98,10 +98,36 @@ let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
 // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF). MAIN world(audioMixer.js)가 처리.
 const WHEEL_VOLUME_KEY = "cheeseWheelVolume";
 let wheelVolume = false;
+const WHEEL_VOLUME_RIGHTCLICK_KEY = "cheeseWheelVolumeRightClick";
+let wheelVolumeRightClick = false; // 우클릭 누른 채 휠일 때만 볼륨 조절(기본 OFF)
 // 조작(휠 볼륨/되감기/앞으로) 시 플레이어 중앙 반투명 피드백 오버레이(전역, 기본 ON).
 // MAIN world(audioMixer.js)가 표시. content.js 는 플래그 로드/브로드캐스트만.
 const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
 let actionOverlay = true;
+// 조작 OSD 종류별 표시/위치(중심 기준 %). 볼륨=전체 화면, 되감기=왼쪽 절반, 앞으로=오른쪽
+// 절반 기준(x 0~100). 기본값은 audioMixer 기본과 동일. settings 에서 조절.
+const ACTION_OVERLAY_POS_KEY = "cheeseActionOverlayPos";
+const ACTION_OVERLAY_POS_DEFAULT = {
+  volume: { on: true, x: 50, y: 50 },
+  rewind: { on: true, x: 30, y: 50 },
+  forward: { on: true, x: 70, y: 50 },
+};
+let actionOverlayPos = normalizeActionOverlayPos(null);
+function normalizeActionOverlayPos(raw) {
+  const out = {};
+  for (const k of ["volume", "rewind", "forward"]) {
+    const d = ACTION_OVERLAY_POS_DEFAULT[k];
+    const s = raw && typeof raw === "object" ? raw[k] : null;
+    const nx = Number(s?.x);
+    const ny = Number(s?.y);
+    out[k] = {
+      on: s && typeof s.on === "boolean" ? s.on : d.on,
+      x: Number.isFinite(nx) ? Math.min(100, Math.max(0, nx)) : d.x,
+      y: Number.isFinite(ny) ? Math.min(100, Math.max(0, ny)) : d.y,
+    };
+  }
+  return out;
+}
 // 휠 볼륨 조절 간격(%, 1~10, 기본 5). MAIN world(audioMixer.js)가 사용.
 const WHEEL_VOLUME_STEP_KEY = "cheeseWheelVolumeStep";
 let wheelVolumeStep = 5;
@@ -357,6 +383,12 @@ const FOLLOW_PREVIEW_THUMB_KEY = "cheeseFollowPreviewThumbOnly";
 const FOLLOW_PREVIEW_LIVE_EDGE_KEY = "cheeseFollowPreviewLiveEdge";
 // 미리보기 방송 제목 전체 표시(줄바꿈). 기본 false=1줄 자름(…). true=여러 줄 전체 표시.
 const FOLLOW_PREVIEW_FULL_TITLE_KEY = "cheeseFollowPreviewFullTitle";
+// 미리보기 창이 좁아 우측 메타(시청자/경과시간)가 숨겨져도, 옵션이 켜지면 중앙 메타
+// 하단에 항상 표시한다(각각 독립 토글, 기본 OFF).
+const FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY = "cheeseFollowPreviewAlwaysViewers";
+const FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY = "cheeseFollowPreviewAlwaysElapsed";
+let followPreviewAlwaysViewers = false;
+let followPreviewAlwaysElapsed = false;
 let followPreviewOn = true;
 let followPreviewMuted = true; // 기본 음소거
 let followPreviewHeaderFont = FOLLOW_PREVIEW_HEADER_FONT_DEFAULT;
@@ -571,6 +603,13 @@ const featureFlags = {
   sbServices: false, // 서비스 바로가기(게임/e스포츠/오리지널/PC게임/라운지)
   sbFollowOffline: false, // 팔로잉 섹션의 오프라인 채널 숨김
   sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
+  sbFollowCustom: false, // 네이티브 팔로잉 목록을 치즈 플래터 전용 목록으로 대체(기본 OFF)
+  sbFollowCustomAutoExpand: false, // 전용 팔로잉 목록을 처음부터 전부 펼쳐 표시
+  sbFollowCustomOffline: false, // 전용 팔로잉 목록에서 오프라인 채널 숨김
+  sbFollowFavStar: false, // 즐겨찾기 구분: 별표 항상 표시
+  sbFollowFavStyle: false, // 즐겨찾기 구분: 항목 테두리/배경색
+  sbFollowFavBar: false, // 즐겨찾기 구분: 그룹 구분 바
+  sbFollowFavSort: false, // 즐겨찾기 그룹을 별도 기준으로 정렬(cheeseFollowFavSortMode)
   sidebarPush: false, // 사이드바 펼침 시 오버레이 대신 콘텐츠를 밀어내 공간 차지
 };
 // 사이드바(aside#sidebar) 숨김용 CSS를 토글하는 <style> id.
@@ -591,6 +630,39 @@ const HEADER_FOLLOW_COUNT_KEY = "cheeseHeaderFollowCount";
 const HEADER_FOLLOW_DEFAULT_COUNT = 5;
 const HEADER_FOLLOW_MIN_COUNT = 1;
 const HEADER_FOLLOW_MAX_COUNT = 10;
+
+// ── 전용 팔로잉 목록(sbFollowCustom) 설정/상태 ──────────────────────────────
+const CUSTOM_FOLLOW_SORT_KEY = "cheeseFollowCustomSort";
+const CUSTOM_FOLLOW_FAV_SORT_KEY = "cheeseFollowFavSortMode"; // 즐겨찾기 내 별도 정렬 기준
+const CUSTOM_FOLLOW_INITIAL_KEY = "cheeseFollowCustomInitial";
+const CUSTOM_FOLLOW_MORE_KEY = "cheeseFollowCustomMore";
+const CUSTOM_FOLLOW_FAVORITES_KEY = "cheeseFollowFavorites";
+const CUSTOM_FOLLOW_SORTS = [
+  "popular",
+  "recent",
+  "oldest",
+  "name-asc",
+  "name-desc",
+];
+// 즐겨찾기 내 별도 정렬은 '커스텀 순서(custom)'도 허용한다(일반 정렬엔 없음).
+const CUSTOM_FOLLOW_FAV_SORTS = [...CUSTOM_FOLLOW_SORTS, "custom"];
+const CUSTOM_FOLLOW_FAV_ORDER_KEY = "cheeseFollowFavOrder"; // 커스텀 순서(channelId 배열)
+const CUSTOM_FOLLOW_FAV_META_KEY = "cheeseFollowFavMeta"; // 설정 팝업 표시용 {id,name,imageUrl}[]
+const CUSTOM_FOLLOW_SORT_DEFAULT = "popular";
+const CUSTOM_FOLLOW_INITIAL_DEFAULT = 10;
+const CUSTOM_FOLLOW_MORE_DEFAULT = 20;
+const CUSTOM_FOLLOW_COUNT_MIN = 1;
+const CUSTOM_FOLLOW_COUNT_MAX = 200;
+let customFollowSort = CUSTOM_FOLLOW_SORT_DEFAULT;
+let customFollowFavSort = CUSTOM_FOLLOW_SORT_DEFAULT; // 즐겨찾기 내 별도 정렬 기준(옵션 ON 시)
+let customFollowFavOrder = []; // 커스텀 순서용 channelId 배열(favSort==="custom")
+let customFollowInitial = CUSTOM_FOLLOW_INITIAL_DEFAULT;
+let customFollowMore = CUSTOM_FOLLOW_MORE_DEFAULT;
+let customFollowFavorites = new Set(); // 즐겨찾기 channelId
+let customFollowItems = []; // 병합·정규화된 팔로잉 배열
+let customFollowVersion = 0; // 데이터가 실제 바뀔 때만 증가(sig 무효화)
+let customFollowLoading = false; // fetch 직렬화 가드
+let customFollowShown = CUSTOM_FOLLOW_INITIAL_DEFAULT; // 현재 표시 개수
 const ACHIEVEMENT_BADGE_URL_MAP = Object.freeze({
   "2025chzzkcup_1":
     "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMjU4/MDAxNzY3MDgxODczNjA2.WSIGn-NlCjbGAKomslHWdyPOADmnaX5cvBfCskSwEsQg.dZDFrMbTTVAPZBBOE6sUOGAk6D_DYvL-dsQK9wKdZbQg.PNG/%EC%9A%B0%EC%8A%B9%ED%8C%80.png",
@@ -4519,8 +4591,22 @@ function formatBroadcastClock(baseMs, offsetSeconds) {
   return `${formatKstClock(baseMs + offsetSeconds * 1000)}`;
 }
 
+// 현재 재생 영상이 '세로'(videoHeight > videoWidth)인지 <html> 클래스로 표시한다.
+// seek preview 실제시각 라벨·댓글 마커 툴팁이 좁은 세로 preview 에 맞게 CSS 를 달리 적용.
+function updateVodPortraitClass() {
+  const v = document.querySelector("video.webplayer-internal-video");
+  const portrait = !!(
+    v &&
+    v.videoWidth &&
+    v.videoHeight &&
+    v.videoHeight > v.videoWidth
+  );
+  document.documentElement.classList.toggle("cheese-vod-portrait", portrait);
+}
+
 // 현재 떠 있는 seek preview의 시간 아래에 실제 방송 시각을 병기/갱신한다.
 function updateSeekPreviewRealtime() {
+  updateVodPortraitClass();
   // 팝업에서 숨김 처리하면 이미 붙은 병기 줄을 제거하고 끝낸다.
   if (featureFlags.seekPreviewRealtime) {
     document
@@ -4531,22 +4617,48 @@ function updateSeekPreviewRealtime() {
   if (!seekPreviewState.liveOpenAt) return;
   const timeEl = document.querySelector(SEEK_PREVIEW_TIME_SELECTOR);
   if (!timeEl) return;
-  // 우리가 추가한 줄(있으면)을 제외한 순수 시간 텍스트만 파싱.
+  // 우리가 추가한 줄(있으면)을 제외한 '순수 시간' 텍스트만 파싱한다. textContent replace
+  // 는 두 줄 구조에서 부정확할 수 있어, 우리 span 을 뺀 나머지 자식의 텍스트만 합친다.
   const existing = timeEl.querySelector(`.${SEEK_PREVIEW_REALTIME_CLASS}`);
-  const baseText = existing
-    ? timeEl.textContent.replace(existing.textContent, "")
-    : timeEl.textContent;
+  let baseText = "";
+  timeEl.childNodes.forEach((n) => {
+    if (n === existing) return;
+    baseText += n.textContent || "";
+  });
   const seconds = parseClockToSeconds(baseText);
   if (!Number.isFinite(seconds)) return;
   const label = formatBroadcastClock(seekPreviewState.liveOpenAt, seconds);
   if (existing) {
-    if (existing.textContent !== label) existing.textContent = label;
+    if (existing.dataset.label !== label) {
+      existing.dataset.label = label;
+      setSeekRealtimeContent(existing, label);
+    }
     return;
   }
   const span = document.createElement("span");
   span.className = SEEK_PREVIEW_REALTIME_CLASS;
-  span.textContent = label;
+  span.dataset.label = label;
+  setSeekRealtimeContent(span, label);
   timeEl.appendChild(span);
+}
+
+// 실제시각 라벨을 '날짜 / 시각' 두 줄로 나눠 넣는다(한 줄이면 preview 폭을 넓혀 세로
+// 방송·재생바 끝에서 화면 밖으로 짤렸다). "YY.MM.DD. 오전/오후 H:MM:SS" → 날짜부 + 시각부.
+function setSeekRealtimeContent(el, label) {
+  el.textContent = "";
+  const m = String(label).match(/^(.+?\.)\s+(.+)$/); // "26.07.20." | "오후 4:06:50"
+  const datePart = m ? m[1] : label;
+  const timePart = m ? m[2] : "";
+  const d = document.createElement("span");
+  d.className = "cheese-seek-realtime-date";
+  d.textContent = datePart;
+  el.appendChild(d);
+  if (timePart) {
+    const t = document.createElement("span");
+    t.className = "cheese-seek-realtime-time";
+    t.textContent = timePart;
+    el.appendChild(t);
+  }
 }
 
 // 영상 정보 영역의 등록일/라이브 시작일 호버 툴팁(_label_, position:absolute)을 전체
@@ -6954,6 +7066,7 @@ function handleCommentMarkerPreviewHide(event) {
 function renderCommentMarkerPreviewTooltip(seconds, attempt = 0) {
   clearCommentMarkerPreviewTooltipTimer();
   if (commentMarkerState.activePreviewSeconds !== String(seconds)) return;
+  updateVodPortraitClass(); // 세로 방송이면 툴팁을 좁은 preview 폭에 맞추기 위해
 
   const description = document.querySelector(
     ".pzp-pc__seeking-preview .pzp-seeking-preview__description",
@@ -8683,6 +8796,15 @@ function applyFeatureFlags(value) {
     "cheese-hide-blocked-cards",
     featureFlags.hideBlockedCards === true,
   );
+  // 전용 팔로잉 즐겨찾기 구분(별표 고정/테두리·배경) — <html> 게이트 클래스로 CSS 처리.
+  document.documentElement.classList.toggle(
+    "cheese-cf-favstar",
+    featureFlags.sbFollowFavStar === true,
+  );
+  document.documentElement.classList.toggle(
+    "cheese-cf-favstyle",
+    featureFlags.sbFollowFavStyle === true,
+  );
   applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
   // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
   updateSeekPreviewRealtime();
@@ -8693,6 +8815,12 @@ function applyFeatureFlags(value) {
   // 펼쳐진 목록은 그대로 두고 더 이상 자동 펼침만 안 함).
   if (featureFlags.sbFollowAutoExpand) ensureFollowExpansion();
   else if (!followExpandWanted) stopFollowAutoExpand();
+  // 전용 팔로잉 목록: 마스터 토글/게이트 변화 즉시 반영.
+  ensureCustomFollowList();
+  ensureCustomFollowCollapsedControls();
+  // 전용 목록 on/off 에 따라 전용 자동 갱신 타이머를 켜고 끈다(꺼지면 안 돌게).
+  if (typeof startCustomFollowRefreshTimer === "function")
+    startCustomFollowRefreshTimer();
 }
 
 // ══ 채팅창 정리(랭킹/미션/승부예측 숨김 · 너비 · 왼쪽 배치) ══════════════════
@@ -11493,7 +11621,9 @@ function applySidebarSections() {
     const label = getSidebarNavLabel(nav);
     let hidden = null; // null=대상 아님(건드리지 않음)
     if (label.includes("팔로"))
-      hidden = featureFlags.sbFollow; // 팔로우/팔로잉
+      // 전용 팔로잉 목록이 켜져 있으면 팔로우 섹션을 숨기지 않는다(우리 목록을 그 안에
+      // 주입하므로). 그 외엔 sbFollow(섹션 통째 숨김) 설정을 따른다.
+      hidden = featureFlags.sbFollowCustom ? false : featureFlags.sbFollow;
     else if (label.includes("인기카테고리"))
       hidden = featureFlags.sbPopularCategory;
     else if (label.includes("방송일정"))
@@ -11871,6 +12001,9 @@ function getAchievementBadgeUrls(ids) {
 function normalizeHeaderFollowLiveItem(item) {
   const channelId = item?.channelId || item?.channel?.channelId || "";
   if (!channelId) return null;
+  // ⚠ countRaw(원시 숫자)/openDate 는 전용 팔로잉 목록의 인기순·방송시작순 정렬에 쓴다.
+  // 기존 count(포맷 문자열)는 헤더 캐러셀 표시용이라 그대로 둔다.
+  const countRawNum = Number(item?.liveInfo?.concurrentUserCount);
   return {
     channelId,
     channelName: item?.channel?.channelName || "",
@@ -11882,6 +12015,8 @@ function normalizeHeaderFollowLiveItem(item) {
     category: item?.liveInfo?.liveCategoryValue || "",
     title: item?.liveInfo?.liveTitle || "",
     count: formatHeaderFollowCount(item?.liveInfo?.concurrentUserCount),
+    countRaw: Number.isFinite(countRawNum) ? countRawNum : null,
+    openDate: parsePublishDate(item?.liveInfo?.openDate) || null,
   };
 }
 
@@ -12267,6 +12402,18 @@ function handleSidebarExpandTransition(sidebar) {
     }
     // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
     scheduleSidebarPushSettle();
+    // ⚠ 전용 팔로잉 목록: 전환 시 즉시 재렌더 + harvest 가 아직 innerExpanded 를 못
+    // 얻었으면(펼침 직후 원본 li 가 아직 안 그려짐) 다음 프레임에 한 번 더 시도해 UI 깨짐
+    // 창을 최소화한다. sig 에 isSidebarExpanded 가 있어 값 변화 시에만 실제 DOM 을 바꾼다.
+    if (featureFlags.sbFollowCustom) {
+      ensureCustomFollowList();
+      ensureCustomFollowCollapsedControls();
+      // 원본 li 에 _is_expanded_ 가 몇 ms 늦게 붙어도 다음 프레임에 실시간 조회로 반영.
+      requestAnimationFrame(() => {
+        ensureCustomFollowList();
+        ensureCustomFollowCollapsedControls();
+      });
+    }
   }
   sidebarWasExpanded = expanded;
 }
@@ -12298,6 +12445,8 @@ function ensureSidebarObserver() {
       handleSidebarExpandTransition(cur);
       ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
       ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
+      ensureCustomFollowList(); // 전용 팔로잉 목록 주입/유지(sbFollowCustom)
+      ensureCustomFollowCollapsedControls(); // 접힘 상태 헤더 조작 버튼
     }, 30);
   });
   // childList/subtree + attributes(class): 사이드바 확장/축소는 #sidebar의 class만
@@ -12312,6 +12461,8 @@ function ensureSidebarObserver() {
   ensureHeaderFollowNav();
   ensureFollowExpansion();
   ensureFollowCollapseHeaderButton();
+  ensureCustomFollowList();
+  ensureCustomFollowCollapsedControls();
   // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
   // 있다 → 여기서 1회만 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
   applySidebarPush();
@@ -13453,6 +13604,665 @@ function isLiveFollowItem(li) {
   return !isOfflineFollowItem(li);
 }
 
+// ══ 전용 팔로잉 목록(sbFollowCustom) 렌더/주입 ═════════════════════════════
+const CUSTOM_FOLLOW_NAV_ID = "cheese-custom-follow";
+const CUSTOM_FOLLOW_ORIG_HIDE_CLASS = "cheese-custom-follow-orig-hidden";
+// 네이티브 팔로우 목록에서 harvest 한 클래스(스타일 일치용). 없으면 폴백 클래스만.
+let customFollowHarvest = null;
+
+// 원본 팔로우 nav 에서 ul/li/프로필/이름 클래스를 harvest. 실패해도 폴백으로 렌더.
+// harvest 완성도: 정보 영역(_information_)까지 잡힌 '완전본'이면 true. 접힘 상태에서
+// 잡은 '부분본'(프로필·inner 만)을 완전본이 나중에 덮어쓰도록 구분한다.
+let customFollowHarvestComplete = false;
+function harvestCustomFollowClasses(nav) {
+  // 이미 완전본을 캐시했으면 재사용. 부분본만 있으면 완전본을 찾으러 계속 진행한다.
+  if (customFollowHarvest && customFollowHarvestComplete)
+    return customFollowHarvest;
+  // ⚠ 우리 ul(.cheese-cf-list) 은 제외하고 '원본' ul 을 고른다.
+  const ul = [...nav.querySelectorAll('ul[class*="_list_"]')].find(
+    (u) => !u.classList.contains("cheese-cf-list"),
+  );
+  const li = ul?.querySelector(":scope > li");
+  if (!ul || !li) return customFollowHarvest; // 원본이 비면 기존(부분/없음) 유지.
+  // ⚠ 접힘 상태 원본 li 엔 _information_/_name_/_count_ 가 없다(아이콘만). 예전엔 그 경우
+  // harvest 를 아예 건너뛰어 접힘 첫 진입이 폴백으로 그려졌다. 이제는 '있는 것만'(프로필·
+  // inner·li) 부분 harvest 하고, 정보 영역까지 있는 완전본이 나오면 그때 덮어쓴다.
+  const isComplete = !!li.querySelector('[class*="_information_"]');
+  // 이미 부분본이 있고 이번에도 완전본이 아니면(둘 다 부분) 재계산 불필요 — 기존 유지.
+  if (customFollowHarvest && !isComplete) return customFollowHarvest;
+  // 우리 마커 클래스는 harvest 결과에서 제거(우리 요소에 섞여 숨김/오작동 방지).
+  const clean = (cls) =>
+    (cls || "")
+      .split(/\s+/)
+      .filter((c) => c && !c.startsWith("cheese-"))
+      .join(" ");
+  // 네이티브 li 내부 구조: li > div._item_ > (._profile_, ._information_ > ._name_ +
+  // ._description_, em._count_, a._item_link_). 우리도 동일 구조 + 클래스를 harvest 해
+  // 네이티브 CSS 를 그대로 얹는다.
+  const inner = li.querySelector('[class*="_item_"][class*="_type_profile_"]');
+  // ⚠ 프로필 아바타는 _profile_2us73_ 이지만 inner 도 _type_profile_ 를 가져 [class*="_profile_"]
+  // 첫 매칭이 inner 를 잡는다. inner 자신은 제외하고, _type_ 없는 실제 프로필만 고른다.
+  const profileEl = [
+    ...(inner || li).querySelectorAll('[class*="_profile_"]'),
+  ].find((el) => el !== inner && !/_type_profile_/.test(el.className));
+  const profileLiveCls = clean(profileEl?.className);
+  const nameEl = li.querySelector('[class*="_name_"]');
+  const ellipsisEl = nameEl?.querySelector('[class*="_ellipsis_"]');
+  const textEl = ellipsisEl?.querySelector('[class*="_text_"]');
+  // inner 클래스에서 _is_expanded_ 계열을 분리(접힘 상태 대응). innerExpanded 는 펼침일 때만 부여.
+  const innerCleanAll = clean(inner?.className) || "";
+  const innerExpanded = (
+    innerCleanAll.match(/\S*_is_expanded_\S*/g) || []
+  ).join(" ");
+  const result = {
+    ul: clean(ul.className),
+    li: clean(li.className),
+    inner: innerCleanAll.replace(/\S*_is_expanded_\S*/g, "").trim(),
+    innerExpanded,
+    profile: profileLiveCls.replace(/\S*_is_live_\S*/g, "").trim(),
+    profileLive: profileLiveCls,
+    information: clean(li.querySelector('[class*="_information_"]')?.className),
+    name: clean(nameEl?.className),
+    ellipsis: clean(ellipsisEl?.className),
+    text: clean(textEl?.className),
+    icon: clean(nameEl?.querySelector('[class*="_icon_"]')?.className),
+    description: clean(li.querySelector('[class*="_description_"]')?.className),
+    count: clean(li.querySelector('[class*="_count_"]')?.className),
+    link: clean(li.querySelector('[class*="_item_link_"]')?.className),
+  };
+  // _is_expanded_ 는 렌더 시 실시간 조회(getCustomFollowExpandedNow)하므로, harvest 는
+  // 나머지 정적 클래스만 담는다. 완전본(정보 영역 포함)이면 complete 로 표시해, 이후 완전본이
+  // 다시 나와도 재계산하지 않게 한다(부분본은 완전본이 나오면 덮어쓰기 허용).
+  customFollowHarvest = result;
+  customFollowHarvestComplete = isComplete;
+  return result;
+}
+
+// lucide 'star' 아이콘. 채움(is-fav)은 CSS 에서 fill:currentColor 로, 비었을 땐 stroke 만.
+const LUCIDE_STAR_ICON = `<svg class="cheese-cf-star-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>`;
+
+// 전용 팔로잉 목록 아이템 HTML — 네이티브 li 구조를 그대로 모방하고 harvest 한 네이티브
+// 클래스를 얹어 네이티브 CSS 가 적용되게 한다. 별표만 우리 요소로 링크(_item_link_) 위에 얹음.
+function createCustomFollowItemHtml(item, h, expandedNow) {
+  const live = item.live;
+  const href = live
+    ? `/live/${encodeURIComponent(item.channelId)}`
+    : `/${encodeURIComponent(item.channelId)}`;
+  const imageUrl = item.imageUrl
+    ? `${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
+    : "";
+  const fav = customFollowFavorites.has(item.channelId);
+  const c = (native, fallback) => (h && native ? native : fallback); // harvest 우선, 없으면 폴백
+  const profileCls = live
+    ? c(h?.profileLive, "cheese-cf-profile is-live")
+    : c(h?.profile, "cheese-cf-profile");
+  // 인증마크 + 업적 배지: 네이티브는 모두 _icon_ 에 background-image(인라인). harvest 한
+  // _icon_ 클래스를 쓰고, 인증마크는 클래스 기본 배경, 배지는 인라인 background-image.
+  const iconCls = c(h?.icon, "cheese-cf-official");
+  const officialHtml = item.verifiedMark
+    ? `<i class="${iconCls}" style="width:13px;height:13px" aria-hidden="true"></i><span class="blind">인증 마크</span>`
+    : "";
+  // 업적 배지는 첫 1개만 표시(네이티브 근사 + 폭 절약).
+  const firstBadge = (item.achievementBadgeUrls || [])[0];
+  const badgeHtml = firstBadge
+    ? `<i class="${iconCls}" style="width:13px;height:13px;background-image:url('${escapeAttribute(firstBadge)}')" aria-hidden="true"></i>`
+    : "";
+  const countHtml =
+    live && item.countText
+      ? `<em class="${c(h?.count, "cheese-cf-count")}">${escapeHtml(item.countText)}</em>`
+      : "";
+  // _is_expanded_ 는 renderCustomFollowList 가 '실시간 조회'해 expandedNow 로 넘긴다
+  // (harvest 캐시가 접힘 시점 값이라 전환 직후 놓치는 문제를 없앰).
+  const expandedCls = expandedNow ? " " + expandedNow : "";
+  // 커스텀 순서 드래그: 즐겨찾기 별도정렬 ON + custom 모드 + 이 항목이 즐겨찾기일 때.
+  // 접힘 상태(아이콘만)에서도 재정렬 가능(즐겨찾기는 오프라인도 표시되어 전부 보임).
+  const dragOn =
+    featureFlags.sbFollowFavSort && customFollowFavSort === "custom" && fav;
+  // draggable 은 기본 false — 꾹 누르면(long-press) JS 가 동적으로 켠다(짧은 클릭은
+  // 채널 이동 유지). 클래스로 '순서 편집 가능 항목'을 식별한다.
+  const dragAttr = dragOn
+    ? ` class="cheese-cf-item ${c(h?.li, "")} cheese-cf-fav cheese-cf-draggable"`
+    : ` class="cheese-cf-item ${c(h?.li, "")}${fav ? " cheese-cf-fav" : ""}"`;
+  return (
+    `<li${dragAttr} data-channel-id="${escapeAttribute(item.channelId)}" data-live="${live ? "1" : "0"}">` +
+    `<div class="cheese-cf-inner ${c(h?.inner, "")}${expandedCls}">` +
+    `<div class="${profileCls}">` +
+    (imageUrl
+      ? `<img width="26" height="26" src="${escapeAttribute(imageUrl)}" alt="" draggable="false">`
+      : "") +
+    `<span class="blind">${live ? "LIVE" : "오프라인"}</span>` +
+    `</div>` +
+    `<div class="${c(h?.information, "cheese-cf-info")}">` +
+    `<strong class="${c(h?.name, "cheese-cf-name")}">` +
+    `<span class="${c(h?.ellipsis, "cheese-cf-ellipsis")}">` +
+    `<span class="${c(h?.text, "cheese-cf-text")}">${escapeHtml(item.name)}</span>` +
+    officialHtml +
+    badgeHtml +
+    `</span>` +
+    `</strong>` +
+    (live && item.category
+      ? `<span class="${c(h?.description, "cheese-cf-desc")}">${escapeHtml(item.category)}</span>`
+      : "") +
+    `</div>` +
+    countHtml +
+    `<a class="${c(h?.link, "cheese-cf-link")}" draggable="false" href="${escapeAttribute(href)}" aria-label="${escapeAttribute(item.name)}"></a>` +
+    `<button type="button" class="cheese-follow-fav${fav ? " is-fav" : ""}" data-fav-id="${escapeAttribute(item.channelId)}" aria-pressed="${fav}" aria-label="${fav ? "즐겨찾기 해제" : "즐겨찾기"}" title="${fav ? "즐겨찾기 해제" : "즐겨찾기"}">${LUCIDE_STAR_ICON}</button>` +
+    `</div>` +
+    `</li>`
+  );
+}
+
+// 현재 설정/데이터로 표시할 아이템 목록(오프라인 숨김 + 정렬). 즐겨찾기는 오프라인이어도 표시.
+function getCustomFollowVisibleItems() {
+  let items = customFollowItems;
+  if (featureFlags.sbFollowCustomOffline) {
+    items = items.filter(
+      (it) => it.live || customFollowFavorites.has(it.channelId),
+    );
+  }
+  return sortCustomFollow(items, customFollowSort);
+}
+
+// 전용 팔로잉 목록의 현재 상태 시그니처(자가발화 방지 — 값이 같으면 재렌더 skip).
+function customFollowSig(visibleCount, shown) {
+  const favSig = [...customFollowFavorites].sort().join(",");
+  return [
+    customFollowVersion,
+    customFollowSort,
+    featureFlags.sbFollowFavSort ? customFollowFavSort : "-",
+    featureFlags.sbFollowFavSort && customFollowFavSort === "custom"
+      ? customFollowFavOrder.join(",")
+      : "-",
+    favSig,
+    shown,
+    visibleCount,
+    featureFlags.sbFollowCustomOffline ? 1 : 0,
+    isSidebarExpanded() ? 1 : 0,
+    featureFlags.sbFollowFavStar ? 1 : 0,
+    featureFlags.sbFollowFavStyle ? 1 : 0,
+    featureFlags.sbFollowFavBar ? 1 : 0,
+  ].join(":");
+}
+
+// 우리 목록 nav 를 원본 팔로우 nav 뒤에 주입/갱신. 게이트/멱등/자가발화 방지 포함.
+function ensureCustomFollowList() {
+  const sidebar = document.getElementById("sidebar");
+  // 게이트: 전용 목록 마스터 ON + 사이드바 전체 숨김 아님. (sbFollow 섹션 숨김과는
+  // 무관 — 전용 목록 사용 시 applySidebarSections 가 팔로우 nav 를 숨기지 않는다.)
+  const gateOn = featureFlags.sbFollowCustom && !featureFlags.sidebar;
+  const origNav = findSidebarFollowNav();
+  // 게이트 OFF: 우리 목록 제거 + 원본 목록/더보기 복원.
+  if (!gateOn || !sidebar) {
+    document.getElementById(CUSTOM_FOLLOW_NAV_ID)?.remove();
+    document
+      .querySelectorAll("#sidebar ." + CUSTOM_FOLLOW_ORIG_HIDE_CLASS)
+      .forEach((el) => el.classList.remove(CUSTOM_FOLLOW_ORIG_HIDE_CLASS));
+    return;
+  }
+  if (!origNav) return;
+  // ⚠ harvest 를 원본 숨김보다 '먼저' 한다 — 숨긴 뒤 harvest 하면 우리 마커
+  // (cheese-custom-follow-orig-hidden)까지 className 에 섞여 우리 ul 이 display:none 된다.
+  const h = harvestCustomFollowClasses(origNav);
+  // ⚠ 원본 목록(ul) 숨김 — 우리 ul(.cheese-cf-list)은 제외하고, 치지직이 펼침 시 원본 ul 을
+  // '재생성'해도 마커 없는 새 ul 이 다시 나타나므로 매번 '우리 것이 아닌 모든 _list_'를 숨긴다.
+  origNav.querySelectorAll('ul[class*="_list_"]').forEach((ul) => {
+    if (!ul.classList.contains("cheese-cf-list"))
+      ul.classList.add(CUSTOM_FOLLOW_ORIG_HIDE_CLASS);
+  });
+  // 원본 '더보기' 버튼 박스(_box_)도 숨김 — 우리 더보기와 중복 방지(재생성 대비 전부).
+  origNav
+    .querySelectorAll('[class*="_box_"]:has([class*="_more_button_"])')
+    .forEach((el) => el.classList.add(CUSTOM_FOLLOW_ORIG_HIDE_CLASS));
+
+  // 데이터가 아직 없으면 1회 로드 트리거(로딩 가드).
+  if (customFollowVersion === 0 && !customFollowLoading) {
+    void refreshCustomFollowList();
+  }
+
+  bindCustomFollowDelegation(); // document 위임 1회(노드 교체 무관)
+  // 우리 nav 확보/생성(원본 nav 안, ul 뒤).
+  let ourNav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
+  if (!ourNav) {
+    ourNav = document.createElement("div");
+    ourNav.id = CUSTOM_FOLLOW_NAV_ID;
+    ourNav.className = "cheese-cf-nav";
+    origNav.appendChild(ourNav);
+  } else if (ourNav.parentElement !== origNav) {
+    origNav.appendChild(ourNav); // 사이드바 재렌더로 떨어졌으면 재부착
+  }
+  renderCustomFollowList(ourNav, h);
+}
+
+// 원본 팔로우 nav 의 현재 _is_expanded_ 클래스를 실시간 조회(펼침 상태에서 원본 li 에
+// 붙은 것). harvest 캐시 대신 매 렌더마다 읽어, 전환 직후 시차 없이 정확히 반영한다.
+function getCustomFollowExpandedNow(origNav) {
+  if (!isSidebarExpanded()) return "";
+  const inner = origNav?.querySelector(
+    'ul[class*="_list_"]:not(.cheese-cf-list) > li [class*="_is_expanded_"]',
+  );
+  const cls = (inner?.className || "").toString();
+  return (cls.match(/\S*_is_expanded_\S*/g) || []).join(" ");
+}
+
+// 우리 목록 innerHTML 재구성(sig 가드로 실제 변화 시에만).
+function renderCustomFollowList(ourNav, h) {
+  const origNav =
+    ourNav.closest('nav[class*="_section_"]') || ourNav.parentElement;
+  const expandedNow = getCustomFollowExpandedNow(origNav);
+  const visible = getCustomFollowVisibleItems();
+  const autoExpand = featureFlags.sbFollowCustomAutoExpand;
+  const shown = autoExpand
+    ? visible.length
+    : Math.min(customFollowShown, visible.length);
+  // sig 에 expandedNow·harvest 유무를 포함 → _is_expanded_ 가 붙거나 harvest 가 확보되는
+  // 순간(펼침 진입) 재렌더된다.
+  const sig =
+    customFollowSig(visible.length, shown) +
+    ":" +
+    (expandedNow ? 1 : 0) +
+    ":" +
+    (h ? 1 : 0);
+  if (ourNav.dataset.sig === sig) return; // 변화 없음 → DOM 미변경(자가발화 차단)
+  ourNav.dataset.sig = sig;
+
+  if (customFollowVersion === 0) {
+    ourNav.innerHTML = `<div class="cheese-cf-loading">팔로잉 목록 불러오는 중…</div>`;
+    return;
+  }
+  if (!visible.length) {
+    ourNav.innerHTML = `<div class="cheese-cf-empty">표시할 채널이 없습니다.</div>`;
+    return;
+  }
+  const slice = visible.slice(0, shown);
+  // 즐겨찾기 그룹 구분 바(옵션): 즐겨찾기(앞) 그룹과 일반 그룹 경계에 1회 삽입.
+  // 접힘 상태에서도 적용(CSS 가 접힘 땐 텍스트 없이 구분선만 보이게 처리).
+  const favBarOn = featureFlags.sbFollowFavBar;
+  let listHtml = "";
+  let prevFav = null;
+  slice.forEach((it) => {
+    const isFav = customFollowFavorites.has(it.channelId);
+    if (favBarOn && prevFav === true && isFav === false) {
+      listHtml += `<li class="cheese-cf-favbar" aria-hidden="true"><span>팔로잉</span></li>`;
+    }
+    listHtml += createCustomFollowItemHtml(it, h, expandedNow);
+    prevFav = isFav;
+  });
+  // 즐겨찾기만 있고 일반이 아직 없을 때도 상단 라벨(옵션): 첫 즐겨찾기 앞.
+  if (
+    favBarOn &&
+    slice.length &&
+    customFollowFavorites.has(slice[0].channelId)
+  ) {
+    listHtml = `<li class="cheese-cf-favbar cheese-cf-favbar-top" aria-hidden="true"><span>즐겨찾기</span></li>${listHtml}`;
+  }
+  // 더보기/접기 문구 버튼 — 헤더 아래 별도 wrapper. 더 펼칠 게 있으면 더보기, 초기보다
+  // 많이 펼쳤으면 접기를 함께 노출(둘 다 가능하면 나란히). 자동펼치기면 숨김.
+  const hasMore = shown < visible.length;
+  const canCollapse = !autoExpand && shown > customFollowInitial;
+  const moreHtml =
+    !autoExpand && (hasMore || canCollapse)
+      ? `<div class="cheese-cf-more-bar">` +
+        (hasMore
+          ? `<button type="button" class="cheese-cf-more" data-cf-more="expand">더보기 (${visible.length - shown})</button>`
+          : "") +
+        (canCollapse
+          ? `<button type="button" class="cheese-cf-more" data-cf-more="collapse">접기</button>`
+          : "") +
+        `</div>`
+      : "";
+  // 더보기/접기 바는 헤더 아래·목록 위쪽에 배치(펼침 상태에서 접근성). 접힘 상태에선
+  // CSS 로 숨기고 헤더 아이콘 컨트롤이 대신한다.
+  ourNav.innerHTML =
+    moreHtml +
+    `<ul class="cheese-cf-list${h ? " " + h.ul : ""}">${listHtml}</ul>`;
+}
+
+// 우리 목록 컨테이너에 위임 클릭 1회 부착(innerHTML 재구성에도 유지).
+// ⚠ 위임은 document 캡처 단계에 '한 번만' 바인딩한다. 예전엔 ourNav 노드에 붙였는데,
+// 사이드바 재렌더로 우리 목록이 제거·재생성되면 새 노드엔 리스너가 없어 별표/더보기가 죽었다.
+// 캡처 단계라 네이티브 링크(_item_link_)보다 먼저 잡아 preventDefault 가 확실히 걸린다.
+let customFollowDelegationBound = false;
+function bindCustomFollowDelegation() {
+  if (customFollowDelegationBound) return;
+  customFollowDelegationBound = true;
+  document.addEventListener(
+    "click",
+    (e) => {
+      // 우리 헤더 아이콘 컨트롤(새로고침/더보기/접기) — 원본 nav 헤더에 주입됨.
+      const ctrl = e.target.closest?.(".cheese-cf-header-ctrl [data-cf-ctrl]");
+      if (ctrl) {
+        e.preventDefault();
+        e.stopPropagation();
+        const act = ctrl.dataset.cfCtrl;
+        if (act === "refresh") void refreshCustomFollowList();
+        else if (act === "expand") {
+          customFollowShown += customFollowMore;
+          ensureCustomFollowList();
+          ensureCustomFollowCollapsedControls();
+        } else if (act === "collapse") {
+          customFollowShown = customFollowInitial;
+          ensureCustomFollowList();
+          ensureCustomFollowCollapsedControls();
+        }
+        return;
+      }
+      const nav = e.target.closest?.("#" + CUSTOM_FOLLOW_NAV_ID);
+      if (!nav) return;
+      const fav = e.target.closest?.(".cheese-follow-fav");
+      if (fav) {
+        e.preventDefault();
+        e.stopPropagation();
+        // 접힘 상태(아이콘만)에선 별표는 '표시 전용' — 해제는 펼친 상태에서만 허용.
+        if (isSidebarExpanded())
+          toggleCustomFollowFavorite(fav.dataset.favId || "");
+        return;
+      }
+      const more = e.target.closest?.("[data-cf-more]");
+      if (more) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (more.dataset.cfMore === "expand")
+          customFollowShown += customFollowMore;
+        else customFollowShown = customFollowInitial;
+        ensureCustomFollowList();
+        ensureCustomFollowCollapsedControls();
+        return;
+      }
+    },
+    true,
+  );
+  bindCustomFollowDragSort();
+}
+
+// 사이드바 즐겨찾기 커스텀 순서 드래그(HTML5 DnD, nav 위임). 드래그 중인 channelId 를
+// 기억하고, 다른 즐겨찾기 항목 위로 drop 하면 순서 배열을 재계산해 저장한다.
+let customFollowDragId = "";
+// 플레이어 버튼 순서 편집과 같은 방식: 드래그 중 실시간 insertBefore 로 이동(밀려나는
+// 효과 + 상단 드롭 자연 처리), drop 시 DOM 순서를 읽어 저장. 즐겨찾기 그룹 안에서만 이동한다.
+let customFollowDragEl = null;
+function bindCustomFollowDragSort() {
+  // 즐겨찾기 draggable 항목들 중, 커서 y 아래에 올 '기준 요소'(그 앞에 삽입). 없으면 맨 끝.
+  const dragAfter = (listEl, y) => {
+    const items = [
+      ...listEl.querySelectorAll(
+        ".cheese-cf-draggable:not(.cheese-cf-dragging)",
+      ),
+    ];
+    let closest = { offset: -Infinity, el: null };
+    for (const child of items) {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset)
+        closest = { offset, el: child };
+    }
+    return closest.el;
+  };
+  const onStart = (e) => {
+    const li = e.target?.closest?.(".cheese-cf-draggable");
+    if (!li || !li.closest("#" + CUSTOM_FOLLOW_NAV_ID)) return;
+    // 꾹 눌러 'dragready' 가 된 항목만 실제 드래그 허용(짧은 클릭은 채널 이동).
+    if (!li.classList.contains("cheese-cf-dragready")) {
+      e.preventDefault();
+      return;
+    }
+    customFollowDragEl = li;
+    customFollowDragId = li.dataset.channelId || "";
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try {
+        e.dataTransfer.setData("text/plain", customFollowDragId);
+      } catch {}
+    }
+    requestAnimationFrame(() => li.classList.add("cheese-cf-dragging"));
+    // 드래그 중 미리보기가 떠 있으면 방해되므로 닫는다.
+    if (typeof closeFollowPreview === "function") closeFollowPreview();
+  };
+  const onOver = (e) => {
+    if (!customFollowDragEl) return;
+    const listEl = customFollowDragEl.parentElement;
+    if (!listEl) return;
+    // 우리 목록 영역 위에서만 반응(다른 곳으로 드래그 시 이동 안 함).
+    if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID)) return;
+    e.preventDefault(); // drop 허용
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const after = dragAfter(listEl, e.clientY);
+    // 마지막 즐겨찾기 뒤(첫 일반 항목 앞)까지만 허용: after 가 없으면 마지막 draggable 뒤로.
+    if (after == null) {
+      const favs = [
+        ...listEl.querySelectorAll(
+          ".cheese-cf-draggable:not(.cheese-cf-dragging)",
+        ),
+      ];
+      const last = favs[favs.length - 1];
+      if (last && last.nextSibling !== customFollowDragEl)
+        last.after(customFollowDragEl);
+    } else if (after !== customFollowDragEl) {
+      listEl.insertBefore(customFollowDragEl, after);
+    }
+  };
+  const onDrop = (e) => {
+    if (!customFollowDragEl) return;
+    const listEl = customFollowDragEl.parentElement;
+    if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID) || !listEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // 현재 DOM 상의 즐겨찾기 순서를 읽어 저장.
+    const ids = [...listEl.querySelectorAll(".cheese-cf-draggable")].map(
+      (li) => li.dataset.channelId,
+    );
+    customFollowFavOrder = ids;
+    try {
+      chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_ORDER_KEY]: ids });
+    } catch {}
+    customFollowVersion += 1;
+    ensureCustomFollowList();
+  };
+  const onEnd = () => {
+    customFollowDragEl?.classList.remove("cheese-cf-dragging");
+    clearDragReady();
+    customFollowDragEl = null;
+    customFollowDragId = "";
+  };
+  document.addEventListener("dragstart", onStart, true);
+  document.addEventListener("dragover", onOver, true);
+  document.addEventListener("drop", onDrop, true);
+  document.addEventListener("dragend", onEnd, true);
+
+  // ── 꾹 누르기(long-press)로 드래그 모드 진입 ──────────────────────────────
+  // draggable 은 렌더에서 기본 false. 항목을 LONGPRESS_MS 동안 누르고 있으면 draggable 을
+  // 켜고 dragready 클래스를 부여(이때부터 드래그로 순서 편집). 그 전에 떼거나 크게 움직이면
+  // 취소 → 짧은 클릭/탭은 링크 클릭(채널 이동)으로 흘러간다.
+  const LONGPRESS_MS = 300;
+  const MOVE_TOLERANCE = 8; // px: 이보다 크게 움직이면 스크롤/취소로 간주
+  let pressTimer = 0;
+  let pressLi = null;
+  let pressX = 0;
+  let pressY = 0;
+  const clearDragReady = () => {
+    document.querySelectorAll(".cheese-cf-dragready").forEach((el) => {
+      el.classList.remove("cheese-cf-dragready");
+      el.removeAttribute("draggable");
+    });
+  };
+  const cancelPress = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = 0;
+    pressLi = null;
+  };
+  const onPointerDown = (e) => {
+    if (e.button != null && e.button !== 0) return; // 좌클릭만
+    const li = e.target?.closest?.(".cheese-cf-draggable");
+    if (!li || !li.closest("#" + CUSTOM_FOLLOW_NAV_ID)) return;
+    pressLi = li;
+    pressX = e.clientX;
+    pressY = e.clientY;
+    cancelPressTimerOnly();
+    pressTimer = setTimeout(() => {
+      pressTimer = 0;
+      if (!pressLi) return;
+      // 드래그 준비: draggable 켜고 클래스 부여. 미리보기도 닫는다.
+      clearDragReady();
+      pressLi.setAttribute("draggable", "true");
+      pressLi.classList.add("cheese-cf-dragready");
+      if (typeof closeFollowPreview === "function") closeFollowPreview();
+    }, LONGPRESS_MS);
+  };
+  function cancelPressTimerOnly() {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = 0;
+  }
+  const onPointerMove = (e) => {
+    if (!pressLi) return;
+    if (
+      Math.abs(e.clientX - pressX) > MOVE_TOLERANCE ||
+      Math.abs(e.clientY - pressY) > MOVE_TOLERANCE
+    ) {
+      cancelPress(); // 크게 움직이면(스크롤 등) long-press 취소
+    }
+  };
+  const onPointerUp = () => {
+    // 실제 드래그(dragstart)로 이어지지 않았다면 dragready 를 곧 해제(클릭 이동 흐름 유지).
+    cancelPress();
+    // dragstart 가 안 났으면 다음 tick 에 dragready 해제(click 이 먼저 처리되게).
+    setTimeout(() => {
+      if (!customFollowDragEl) clearDragReady();
+    }, 0);
+  };
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("pointermove", onPointerMove, true);
+  document.addEventListener("pointerup", onPointerUp, true);
+  document.addEventListener("pointercancel", cancelPress, true);
+}
+
+// 즐겨찾기 토글 + 저장 + 재렌더.
+function toggleCustomFollowFavorite(channelId) {
+  if (!channelId) return;
+  if (customFollowFavorites.has(channelId)) {
+    customFollowFavorites.delete(channelId);
+  } else {
+    customFollowFavorites.add(channelId);
+  }
+  try {
+    chrome.storage?.local?.set({
+      [CUSTOM_FOLLOW_FAVORITES_KEY]: [...customFollowFavorites],
+    });
+  } catch {}
+  saveCustomFollowFavMeta();
+  customFollowVersion += 1; // sig 무효화(즐겨찾기 반영 재정렬)
+  ensureCustomFollowList();
+}
+
+// 설정 팝업의 순서 편집 리스트가 채널명을 표시하도록, 현재 즐겨찾기 채널의 {id,name,
+// imageUrl} 를 저장한다(설정 팝업엔 팔로잉 데이터가 없으므로). 즐겨찾기 변경 시 갱신.
+function saveCustomFollowFavMeta() {
+  try {
+    const byId = new Map(customFollowItems.map((it) => [it.channelId, it]));
+    const meta = [...customFollowFavorites].map((id) => {
+      const it = byId.get(id);
+      return { id, name: it?.name || "", imageUrl: it?.imageUrl || "" };
+    });
+    chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_META_KEY]: meta });
+  } catch {}
+}
+
+// 현재 즐겨찾기 채널을 '화면 정렬 순서'대로 나열한 배열(커스텀 순서 편집의 기준).
+// customFollowFavOrder 에 없던 항목(새 즐겨찾기)도 현재 표시 순서로 편입한다.
+function currentFavoriteOrder() {
+  const favs = getCustomFollowVisibleItems().filter((it) =>
+    customFollowFavorites.has(it.channelId),
+  );
+  return favs.map((it) => it.channelId);
+}
+
+// dragId 를 targetId 의 앞(side="before")/뒤(side="after")로 옮겨 커스텀 순서를 재계산·저장.
+// side 미지정이면 targetId 바로 앞에 놓는다(기존 호출 호환).
+function reorderCustomFollowFavorite(dragId, targetId, side) {
+  if (!dragId || dragId === targetId) return;
+  const order = currentFavoriteOrder();
+  const from = order.indexOf(dragId);
+  if (from < 0 || order.indexOf(targetId) < 0) return;
+  order.splice(from, 1); // 먼저 드래그 항목을 뺀다
+  const t = order.indexOf(targetId); // 제거 후 타깃 인덱스
+  const insertAt = side === "after" ? t + 1 : t; // 타깃 앞/뒤
+  order.splice(insertAt, 0, dragId);
+  customFollowFavOrder = order;
+  try {
+    chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_ORDER_KEY]: order });
+  } catch {}
+  customFollowVersion += 1;
+  ensureCustomFollowList();
+}
+
+// 팔로우 헤더: 네이티브 새로고침·접기 버튼을 숨기고(클릭 시 원본 목록이 되살아나므로),
+// 우리 아이콘 컨트롤(새로고침 + 접힘 상태 더보기/접기)을 주입한다. 클릭은 document 위임 처리.
+const CUSTOM_FOLLOW_CTRL_CLASS = "cheese-cf-header-ctrl";
+const CF_SVG_REFRESH = `<svg width="15" height="15" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
+const CF_SVG_EXPAND = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CF_SVG_COLLAPSE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 15l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function ensureCustomFollowCollapsedControls() {
+  const gateOn = featureFlags.sbFollowCustom && !featureFlags.sidebar;
+  const origNav = findSidebarFollowNav();
+  const existing = origNav?.querySelector("." + CUSTOM_FOLLOW_CTRL_CLASS);
+  if (!gateOn || !origNav) {
+    existing?.remove();
+    return;
+  }
+  const header = origNav.querySelector('[class*="_header_"]');
+  if (!header) return;
+  // 네이티브 새로고침/접기 버튼 숨김(마커 → CSS). 클릭 시 원본 목록 재출현 방지.
+  header
+    .querySelectorAll(
+      'button[aria-label="새로고침"], button[aria-label*="접기"], button[aria-expanded]',
+    )
+    .forEach((b) => (b.dataset.cfNativeBtn = "1"));
+  // 접힘 상태에서만 더보기/접기 아이콘을 헤더에 노출(펼침 상태는 목록 위 문구 버튼이 담당).
+  const collapsed = !isSidebarExpanded();
+  const autoExpand = featureFlags.sbFollowCustomAutoExpand;
+  const visibleCount = getCustomFollowVisibleItems().length;
+  const shown = autoExpand
+    ? visibleCount
+    : Math.min(customFollowShown, visibleCount);
+  // 접힘 상태 헤더엔 더보기/접기를 '항상' 노출한다(사용자 요청). 단 실제로 늘릴/줄일 게
+  // 없으면(더 없음/이미 초기) 버튼을 disabled 로 흐리게 둔다. autoExpand 면 둘 다 무의미.
+  const showMoreCtrl = collapsed && !autoExpand && visibleCount > 0;
+  const canExpand = shown < visibleCount;
+  const canCollapse = shown > customFollowInitial;
+  const sig = [
+    collapsed ? 1 : 0,
+    showMoreCtrl ? 1 : 0,
+    canExpand ? 1 : 0,
+    canCollapse ? 1 : 0,
+  ].join(":");
+  // 부착 대상: 펼침이면 헤더(우측 인라인), 접힘이면 원본 nav 직접(헤더 flex 폭 제약을
+  // 벗어나 버튼 3개를 세로로 다 노출). 로그 실측: 헤더에 두면 접힘 시 3번째(접기)가 잘렸다.
+  const parent = collapsed ? origNav : header;
+  if (
+    existing &&
+    existing.dataset.sig === sig &&
+    existing.parentElement === parent
+  )
+    return; // 멱등
+  const bar = existing || document.createElement("div");
+  bar.className = CUSTOM_FOLLOW_CTRL_CLASS;
+  bar.dataset.sig = sig;
+  bar.innerHTML =
+    `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>` +
+    (showMoreCtrl
+      ? `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="expand" title="더 펼치기" aria-label="더 펼치기"${canExpand ? "" : " disabled"}>${CF_SVG_EXPAND}</button>` +
+        `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="collapse" title="접기" aria-label="접기"${canCollapse ? "" : " disabled"}>${CF_SVG_COLLAPSE}</button>`
+      : "");
+  // 상태 바뀌면 재배치. 접힘 시 nav 직속이되 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
+  if (bar.parentElement !== parent) {
+    if (collapsed) {
+      const headerEl = origNav.querySelector('[class*="_header_"]');
+      if (headerEl && headerEl.parentElement === parent) headerEl.after(bar);
+      else parent.insertBefore(bar, parent.firstChild);
+    } else {
+      parent.appendChild(bar);
+    }
+  }
+}
+
 // 클릭 대상이 "팔로잉 채널 이동 링크"면 /live/<32hex> 채널ID 반환(아니면 null).
 // 대상 2곳: (1) 사이드바 팔로잉 섹션 li, (2) 헤더 미니 팔로우 li.cheese-header-follow-item.
 function getFollowNavClickChannelId(target) {
@@ -13824,6 +14634,7 @@ function formatLiveElapsed(openAtMs) {
 function renderFollowPreviewMeta(el, meta) {
   const bar = el.querySelector(".cheese-follow-preview-meta");
   if (!bar || !meta) return;
+  followPreviewState.lastMeta = meta; // 옵션 변경 시 즉시 재렌더용 보관
   const elapsed = formatLiveElapsed(meta.openAt);
   const imageUrl = meta.channelImageUrl
     ? `${meta.channelImageUrl}${meta.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
@@ -13849,6 +14660,19 @@ function renderFollowPreviewMeta(el, meta) {
       ? `<span class="cheese-follow-preview-meta-category">${escapeHtml(meta.category)}</span>`
       : "") +
     `</span>` +
+    // 2-1) 중앙 하단: 옵션이 켜지면 시청자/경과시간을 여기에도(창이 좁아 우측이 숨겨져도
+    //      항상 보이게). meta-center 폭에 맞춰 한 줄(row)로 촘촘하게 표시.
+    ((followPreviewAlwaysViewers && meta.viewers) ||
+    (followPreviewAlwaysElapsed && elapsed)
+      ? `<span class="cheese-follow-preview-meta-center-side">` +
+        (followPreviewAlwaysViewers && meta.viewers
+          ? `<em class="cheese-follow-preview-meta-viewers">현재 ${escapeHtml(meta.viewers)}</em>`
+          : "") +
+        (followPreviewAlwaysElapsed && elapsed
+          ? `<span class="cheese-follow-preview-meta-elapsed" data-open-at="${meta.openAt}"><b>${escapeHtml(elapsed)}</b> 스트리밍 중</span>`
+          : "") +
+        `</span>`
+      : "") +
     `</span>` +
     // 3) 우측: 현재 시청자 / 경과시간
     `<span class="cheese-follow-preview-meta-side">` +
@@ -13866,13 +14690,16 @@ function renderFollowPreviewMeta(el, meta) {
 function startFollowPreviewElapsedTimer(el) {
   stopFollowPreviewElapsedTimer();
   followPreviewState.elapsedTimer = setInterval(() => {
-    const span = el.querySelector(".cheese-follow-preview-meta-elapsed");
-    if (!span) return;
-    const openAt = Number(span.dataset.openAt);
-    if (!openAt) return;
-    const b = span.querySelector("b");
-    const next = formatLiveElapsed(openAt);
-    if (b && b.textContent !== next) b.textContent = next; // 시간 부분만 갱신
+    // 우측(meta-side)과 중앙 하단(옵션) 복제본이 있을 수 있어 모두 갱신한다.
+    el.querySelectorAll(".cheese-follow-preview-meta-elapsed").forEach(
+      (span) => {
+        const openAt = Number(span.dataset.openAt);
+        if (!openAt) return;
+        const b = span.querySelector("b");
+        const next = formatLiveElapsed(openAt);
+        if (b && b.textContent !== next) b.textContent = next; // 시간 부분만 갱신
+      },
+    );
   }, 1000);
 }
 
@@ -13941,11 +14768,11 @@ async function refreshFollowPreviewViewers(el, channelId) {
     if (followPreviewState.currentChannelId !== channelId) return;
     const n = Number(json?.content?.concurrentUserCount);
     if (!Number.isFinite(n)) return;
-    const em = el.querySelector(".cheese-follow-preview-meta-viewers");
-    if (em) {
-      const next = `현재 ${new Intl.NumberFormat("ko-KR").format(n)}`;
+    const next = `현재 ${new Intl.NumberFormat("ko-KR").format(n)}`;
+    // 우측(meta-side)과 중앙 하단(옵션) 복제본 모두 갱신.
+    el.querySelectorAll(".cheese-follow-preview-meta-viewers").forEach((em) => {
       if (em.textContent !== next) em.textContent = next;
-    }
+    });
   } catch {
     // 실패 시 이전 값 유지.
   }
@@ -14341,6 +15168,8 @@ function onFollowPreviewMouseOver(e) {
   if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
   // 클릭 이동 직후 억제 창 동안엔 미리보기를 열지 않는다(마우스 따라 잔존 방지).
   if (Date.now() < followPreviewOpenSuppressUntil) return;
+  // 즐겨찾기 커스텀 순서 드래그 중이면 미리보기를 열지 않는다(드래그 방해 방지).
+  if (customFollowDragId) return;
   // 드래그/고정 중엔 다른 채널로 전환하지 않는다.
   if (followPreviewState.resizing || followPreviewState.pinned) return;
   const found = getFollowPreviewAnchor(e.target);
@@ -14460,6 +15289,8 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_THUMB_KEY,
       FOLLOW_PREVIEW_LIVE_EDGE_KEY,
       FOLLOW_PREVIEW_FULL_TITLE_KEY,
+      FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY,
+      FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY,
       CARD_LIVE_PREVIEW_KEY,
     ]);
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
@@ -14474,6 +15305,10 @@ async function loadFollowPreview() {
     followPreviewThumbOnly = data?.[FOLLOW_PREVIEW_THUMB_KEY] === true; // 기본 영상
     followPreviewLiveEdge = data?.[FOLLOW_PREVIEW_LIVE_EDGE_KEY] !== false; // 미설정/true=엣지
     followPreviewFullTitle = data?.[FOLLOW_PREVIEW_FULL_TITLE_KEY] === true; // 기본 자름
+    followPreviewAlwaysViewers =
+      data?.[FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY] === true; // 기본 OFF
+    followPreviewAlwaysElapsed =
+      data?.[FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY] === true; // 기본 OFF
     const size = data?.[FOLLOW_PREVIEW_SIZE_KEY];
     const w = Number(size?.w);
     if (Number.isFinite(w)) {
@@ -14843,6 +15678,12 @@ function hideCardDateTooltip() {
   document.getElementById(CARD_DATE_FLOAT_ID)?.classList.remove("is-show");
 }
 
+function clearCardDateTooltipHover() {
+  cardDateHoverInfo = null;
+  cardDateHoverVideoNo = "";
+  hideCardDateTooltip();
+}
+
 function renderCardDateTooltip(info, videoNo) {
   const dates = cardDateCache.get(videoNo);
   if (!dates) return; // 미확보/실패 → 툴팁 없음
@@ -14883,15 +15724,18 @@ function onCardDateMouseOver(e) {
   if (!cardDateTooltipOn) return;
   const info = e.target?.closest?.(CARD_INFO_SEL);
   if (!info) {
-    cardDateHoverInfo = null;
-    cardDateHoverVideoNo = "";
-    hideCardDateTooltip();
+    clearCardDateTooltipHover();
     return;
   }
   const videoNo = cardVideoNoFromInfo(info);
   if (!videoNo) {
-    hideCardDateTooltip();
+    clearCardDateTooltipHover();
     return;
+  }
+  // 다른 카드로 바로 이동했을 때 새 API 응답을 기다리는 동안 이전 카드 툴팁이 남지
+  // 않도록 먼저 닫는다. Firefox에서 네트워크 지연이 있을 때 특히 오래 남아 보였다.
+  if (cardDateHoverInfo !== info || cardDateHoverVideoNo !== videoNo) {
+    hideCardDateTooltip();
   }
   cardDateHoverInfo = info;
   cardDateHoverVideoNo = videoNo;
@@ -14900,6 +15744,22 @@ function onCardDateMouseOver(e) {
   } else {
     void fetchCardVideoDates(videoNo); // 없으면 fetch 후 finally에서 반영
   }
+}
+
+function onCardDateMouseOut(e) {
+  const info = cardDateHoverInfo;
+  if (!info || !e.target || !info.contains(e.target)) return;
+  const next = e.relatedTarget;
+  if (next instanceof Node && info.contains(next)) return;
+  clearCardDateTooltipHover();
+}
+
+function onCardDateDocumentLeave() {
+  clearCardDateTooltipHover();
+}
+
+function onCardDateVisibilityChange() {
+  if (document.hidden) clearCardDateTooltipHover();
 }
 
 function onCardDateScrollHide() {
@@ -14912,6 +15772,15 @@ function bindCardDateTooltip() {
   document.addEventListener("mouseover", onCardDateMouseOver, {
     passive: true,
   });
+  document.addEventListener("mouseout", onCardDateMouseOut, {
+    passive: true,
+  });
+  document.documentElement.addEventListener(
+    "mouseleave",
+    onCardDateDocumentLeave,
+    { passive: true },
+  );
+  document.addEventListener("visibilitychange", onCardDateVisibilityChange);
   // fixed 툴팁이라 스크롤하면 타깃과 어긋난다 → 스크롤 시 숨김(다음 호버에 재표시).
   document.addEventListener("scroll", onCardDateScrollHide, {
     capture: true,
@@ -14922,6 +15791,12 @@ function bindCardDateTooltip() {
 function unbindCardDateTooltip() {
   cardDateTooltipBound = false;
   document.removeEventListener("mouseover", onCardDateMouseOver);
+  document.removeEventListener("mouseout", onCardDateMouseOut);
+  document.documentElement.removeEventListener(
+    "mouseleave",
+    onCardDateDocumentLeave,
+  );
+  document.removeEventListener("visibilitychange", onCardDateVisibilityChange);
   document.removeEventListener("scroll", onCardDateScrollHide, {
     capture: true,
   });
@@ -15267,6 +16142,158 @@ async function fetchAllFollowings() {
       };
     })
     .filter(Boolean);
+}
+
+// ── 전용 팔로잉 목록 데이터 병합 ───────────────────────────────────────────
+// 전체 팔로잉(fetchAllFollowings: 오프라인 포함 + followDate)에 라이브 메타
+// (headerFollowLiveItems: 시청자수/제목/카테고리/openDate)를 덧입혀 정규화한다.
+// 라이브 메타는 헤더 캐러셀과 같은 fetch 결과를 공유해 중복 요청을 피한다.
+function mergeCustomFollowItems(all, liveItems) {
+  const liveMap = new Map();
+  for (const it of liveItems || []) {
+    if (it?.channelId) liveMap.set(String(it.channelId), it);
+  }
+  return (all || [])
+    .map((ch) => {
+      const id = String(ch.channelId || "");
+      if (!id) return null;
+      const live = liveMap.get(id) || null;
+      const followMs = ch.followDate ? parseCleanupDateStr(ch.followDate) : NaN;
+      return {
+        channelId: id,
+        name: ch.name || "(이름 없음)",
+        imageUrl: live?.channelImageUrl || ch.imageUrl || "",
+        verifiedMark: live?.verifiedMark === true,
+        achievementBadgeUrls: live?.achievementBadgeUrls || [],
+        followDate: Number.isFinite(followMs) ? followMs : null,
+        live: ch.openLive === true || !!live,
+        category: live?.category || "",
+        title: live?.title || "",
+        countRaw: live && Number.isFinite(live.countRaw) ? live.countRaw : null,
+        countText: live?.count || "",
+        openDate: live?.openDate || null,
+      };
+    })
+    .filter(Boolean);
+}
+
+// 라이브 방송 시작 시각(openDate) 캐시: channelId → { at: 조회시각ms, openDate: ms }.
+// /followings/live 엔 openDate 가 없어, 최신순/오래된순 정렬에 필요할 때만 live-status 로
+// 라이브 채널의 openDate 를 보강한다(동시성 제한). 캐시로 매 새로고침 재호출을 줄인다.
+const customFollowOpenDateCache = new Map();
+const CUSTOM_FOLLOW_OPENDATE_TTL_MS = 60000; // 1분(방송 시작 시각은 자주 안 변함)
+
+// 라이브 채널들의 openDate 를 live-status 로 병렬 보강(동시 6개). items 를 제자리 갱신.
+async function enrichCustomFollowOpenDates(items) {
+  const now = Date.now();
+  const targets = items.filter((it) => {
+    if (!it.live) return false;
+    const c = customFollowOpenDateCache.get(it.channelId);
+    if (c && now - c.at < CUSTOM_FOLLOW_OPENDATE_TTL_MS) {
+      it.openDate = c.openDate; // 캐시 반영
+      return false;
+    }
+    return true;
+  });
+  if (!targets.length) return;
+  const fetchOne = async (it) => {
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(it.channelId)}/live-status`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const j = await res.json();
+      const od = parsePublishDate(j?.content?.openDate) || null;
+      it.openDate = od;
+      customFollowOpenDateCache.set(it.channelId, {
+        at: Date.now(),
+        openDate: od,
+      });
+    } catch {}
+  };
+  const CONCURRENCY = 6;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length) {
+      if (document.hidden) return; // 백그라운드면 중단
+      await fetchOne(targets[cursor++]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
+  );
+}
+
+// 전용 팔로잉 목록 데이터 새로고침(직렬화 + 백그라운드 스킵). 병합 후 버전을 올리고
+// 사이드바에 우리 목록을 재렌더한다.
+async function refreshCustomFollowList() {
+  if (customFollowLoading) return;
+  if (document.hidden) return;
+  customFollowLoading = true;
+  try {
+    const [all] = await Promise.all([
+      fetchAllFollowings().catch(() => []),
+      refreshHeaderFollowLiveInfo().catch(() => {}), // headerFollowLiveItems 채움(공유)
+    ]);
+    customFollowItems = mergeCustomFollowItems(all, headerFollowLiveItems);
+    saveCustomFollowFavMeta(); // 즐겨찾기 이름/이미지(설정 팝업 순서 편집용) 갱신
+    // 최신순/오래된순 정렬일 때만 라이브 채널 openDate 를 보강(방송 시작 기준 정렬용).
+    if (customFollowSort === "recent" || customFollowSort === "oldest") {
+      await enrichCustomFollowOpenDates(customFollowItems);
+    }
+    customFollowVersion += 1;
+    if (typeof ensureCustomFollowList === "function") ensureCustomFollowList();
+  } catch {
+    // 실패 시 이전 목록 유지.
+  } finally {
+    customFollowLoading = false;
+  }
+}
+
+// 즐겨찾기 상단 고정을 반영한 정렬. mode 별 비교 + favorite 안정 분리.
+// 한 그룹 내부의 mode 별 비교 함수.
+function customFollowModeCmp(a, b, mode) {
+  const liveRank = (it) => (it.live ? 0 : 1);
+  const byName = (x, y) => x.name.localeCompare(y.name, "ko");
+  switch (mode) {
+    case "custom": {
+      // 커스텀 순서: customFollowFavOrder 배열의 인덱스 순(없으면 뒤로 + 이름순).
+      const ia = customFollowFavOrder.indexOf(a.channelId);
+      const ib = customFollowFavOrder.indexOf(b.channelId);
+      const ra = ia < 0 ? Infinity : ia;
+      const rb = ib < 0 ? Infinity : ib;
+      return ra - rb || byName(a, b);
+    }
+    case "name-asc":
+      return byName(a, b);
+    case "name-desc":
+      return byName(b, a);
+    case "recent": // 방송 시작 최근(라이브 우선 → openDate desc)
+      if (liveRank(a) !== liveRank(b)) return liveRank(a) - liveRank(b);
+      return (b.openDate || 0) - (a.openDate || 0) || byName(a, b);
+    case "oldest": // 방송 시작 오래된 순(라이브 우선 → openDate asc)
+      if (liveRank(a) !== liveRank(b)) return liveRank(a) - liveRank(b);
+      return (
+        (a.openDate || Infinity) - (b.openDate || Infinity) || byName(a, b)
+      );
+    case "popular":
+    default: // 인기순(라이브 우선 → 시청자수 desc)
+      if (liveRank(a) !== liveRank(b)) return liveRank(a) - liveRank(b);
+      return (b.countRaw || 0) - (a.countRaw || 0) || byName(a, b);
+  }
+}
+function sortCustomFollow(items, mode) {
+  const favRank = (it) => (customFollowFavorites.has(it.channelId) ? 0 : 1);
+  // 즐겨찾기 그룹은 옵션(sbFollowFavSort) ON 이면 별도 기준(customFollowFavSort)으로,
+  // OFF 면 일반 정렬 기준(mode)으로 정렬한다.
+  const favMode = featureFlags.sbFollowFavSort ? customFollowFavSort : mode;
+  const cmp = (a, b) => {
+    if (favRank(a) !== favRank(b)) return favRank(a) - favRank(b); // 즐겨찾기 먼저
+    const groupMode = favRank(a) === 0 ? favMode : mode; // 그룹별 정렬 기준
+    return customFollowModeCmp(a, b, groupMode);
+  };
+  return items.slice().sort(cmp);
 }
 
 // "YYYY-MM-DD HH:MM:SS" → epoch ms(로컬). 실패 시 NaN.
@@ -16622,6 +17649,12 @@ let sectionRefreshSchedule = false;
 
 function clickFollowRefresh() {
   if (document.hidden) return;
+  // 전용 팔로잉 목록이 켜져 있으면 이 기존 팔로우 갱신은 '비활성화'한다(전용 목록은
+  // 자체 주기 타이머 cheeseFollowCustomRefreshSec 로 갱신). 사이드바가 보이는 상태에서만
+  // 해당(숨김이면 헤더 팔로잉은 아래 분기가 처리). 헤더 팔로잉 캐러셀 갱신은 계속 허용.
+  if (featureFlags.sbFollowCustom && !featureFlags.sidebar) {
+    return;
+  }
   if (
     featureFlags.sidebar &&
     featureFlags.headerTopicTabs &&
@@ -16698,17 +17731,101 @@ function applyFollowRefresh(secRaw) {
   startFollowRefreshTimer();
 }
 
+// ── 전용 팔로잉 목록 자동 갱신(별도 주기) ──────────────────────────────────
+// 전용 목록은 우리가 직접 refreshCustomFollowList 를 주기 호출한다(네이티브 버튼 클릭이
+// 아니므로 별도 주기). 전용 목록 사용 시엔 기존 팔로우 갱신을 clickFollowRefresh 에서
+// 비활성화하고, 이 타이머만 동작한다.
+const CUSTOM_FOLLOW_REFRESH_KEY = "cheeseFollowCustomRefreshSec";
+let customFollowRefreshSec = 0;
+let customFollowRefreshTimer = 0;
+function startCustomFollowRefreshTimer() {
+  stopCustomFollowRefreshTimer();
+  if (!customFollowRefreshSec) return;
+  if (!featureFlags.sbFollowCustom) return; // 전용 목록 꺼져 있으면 안 돎
+  const tick = () => {
+    if (!document.hidden && featureFlags.sbFollowCustom)
+      void refreshCustomFollowList();
+    customFollowRefreshTimer = setTimeout(tick, customFollowRefreshSec * 1000);
+  };
+  customFollowRefreshTimer = setTimeout(tick, customFollowRefreshSec * 1000);
+}
+function stopCustomFollowRefreshTimer() {
+  if (customFollowRefreshTimer) {
+    clearTimeout(customFollowRefreshTimer);
+    customFollowRefreshTimer = 0;
+  }
+}
+function applyCustomFollowRefresh(secRaw) {
+  let sec = Number(secRaw);
+  if (!Number.isFinite(sec) || sec <= 0) sec = 0;
+  else sec = Math.min(600, Math.max(3, sec));
+  customFollowRefreshSec = sec;
+  startCustomFollowRefreshTimer();
+}
+
 async function loadFollowRefresh() {
   if (!chrome.storage?.local) return;
   try {
     const data = await getBootData([
       FOLLOW_REFRESH_KEY,
+      CUSTOM_FOLLOW_REFRESH_KEY,
       SECTION_REFRESH_CATEGORY_KEY,
       SECTION_REFRESH_SCHEDULE_KEY,
     ]);
     sectionRefreshCategory = data?.[SECTION_REFRESH_CATEGORY_KEY] === true;
     sectionRefreshSchedule = data?.[SECTION_REFRESH_SCHEDULE_KEY] === true;
     applyFollowRefresh(data?.[FOLLOW_REFRESH_KEY]);
+    applyCustomFollowRefresh(data?.[CUSTOM_FOLLOW_REFRESH_KEY]);
+  } catch {}
+}
+
+// 전용 팔로잉 목록 설정(정렬/초기·더보기 개수/즐겨찾기) 로드.
+function clampCustomFollowCount(v, def) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return def;
+  return Math.min(
+    CUSTOM_FOLLOW_COUNT_MAX,
+    Math.max(CUSTOM_FOLLOW_COUNT_MIN, n),
+  );
+}
+function applyCustomFollowSettings(data) {
+  const sort = data?.[CUSTOM_FOLLOW_SORT_KEY];
+  customFollowSort = CUSTOM_FOLLOW_SORTS.includes(sort)
+    ? sort
+    : CUSTOM_FOLLOW_SORT_DEFAULT;
+  const favSort = data?.[CUSTOM_FOLLOW_FAV_SORT_KEY];
+  customFollowFavSort = CUSTOM_FOLLOW_FAV_SORTS.includes(favSort)
+    ? favSort
+    : CUSTOM_FOLLOW_SORT_DEFAULT;
+  const favOrder = data?.[CUSTOM_FOLLOW_FAV_ORDER_KEY];
+  if (Array.isArray(favOrder)) customFollowFavOrder = favOrder.map(String);
+  customFollowInitial = clampCustomFollowCount(
+    data?.[CUSTOM_FOLLOW_INITIAL_KEY],
+    CUSTOM_FOLLOW_INITIAL_DEFAULT,
+  );
+  customFollowMore = clampCustomFollowCount(
+    data?.[CUSTOM_FOLLOW_MORE_KEY],
+    CUSTOM_FOLLOW_MORE_DEFAULT,
+  );
+  // 표시 개수가 초기값보다 작아지지 않게(설정 변경 반영).
+  if (customFollowShown < customFollowInitial)
+    customFollowShown = customFollowInitial;
+  const favs = data?.[CUSTOM_FOLLOW_FAVORITES_KEY];
+  customFollowFavorites = new Set(Array.isArray(favs) ? favs.map(String) : []);
+}
+async function loadCustomFollowSettings() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([
+      CUSTOM_FOLLOW_SORT_KEY,
+      CUSTOM_FOLLOW_FAV_SORT_KEY,
+      CUSTOM_FOLLOW_FAV_ORDER_KEY,
+      CUSTOM_FOLLOW_INITIAL_KEY,
+      CUSTOM_FOLLOW_MORE_KEY,
+      CUSTOM_FOLLOW_FAVORITES_KEY,
+    ]);
+    applyCustomFollowSettings(data);
+    customFollowShown = customFollowInitial;
   } catch {}
 }
 
@@ -16735,8 +17852,10 @@ function broadcastFeatureFlags() {
       liveSeekBar, // 라이브 되감기 바 표시(전역)
       volumePct, // 볼륨 조절 % 표시(전역)
       wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
+      wheelVolumeRightClick, // 우클릭+휠일 때만 볼륨 조절
       wheelVolumeStep, // 휠 볼륨 조절 간격(%, 1~10)
       actionOverlay, // 조작(휠 볼륨/시크) 화면 피드백 오버레이(전역)
+      actionOverlayPos, // OSD 종류별 표시/위치(볼륨/되감기/앞으로)
       gainPct, // 게인 조절 % 표시(전역)
       screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
       mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
@@ -16787,8 +17906,10 @@ const FEATURE_FLAGS_KEYS = [
   LIVE_SEEK_BAR_KEY,
   VOLUME_PCT_KEY,
   WHEEL_VOLUME_KEY,
+  WHEEL_VOLUME_RIGHTCLICK_KEY,
   WHEEL_VOLUME_STEP_KEY,
   ACTION_OVERLAY_KEY,
+  ACTION_OVERLAY_POS_KEY,
   GAIN_PCT_KEY,
   MIXER_CLICK_ACTIVATE_KEY,
   MIXER_CLICK_NO_PANEL_KEY,
@@ -16955,8 +18076,12 @@ async function loadFeatureFlags() {
     logPowerEarningColor = data?.[LOGPOWER_EARNING_COLOR_KEY] === true; // 기본 OFF
     volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
     wheelVolume = data?.[WHEEL_VOLUME_KEY] === true; // 미설정=기본 OFF
+    wheelVolumeRightClick = data?.[WHEEL_VOLUME_RIGHTCLICK_KEY] === true; // 기본 OFF
     wheelVolumeStep = normalizeWheelVolumeStep(data?.[WHEEL_VOLUME_STEP_KEY]);
     actionOverlay = data?.[ACTION_OVERLAY_KEY] !== false; // 미설정=기본 ON
+    actionOverlayPos = normalizeActionOverlayPos(
+      data?.[ACTION_OVERLAY_POS_KEY],
+    );
     gainPct = data?.[GAIN_PCT_KEY] !== false;
     mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
     mixerClickNoPanel = data?.[MIXER_CLICK_NO_PANEL_KEY] === true;
@@ -17129,6 +18254,10 @@ if (chrome.storage?.onChanged) {
     if (changes[WHEEL_VOLUME_KEY]) {
       wheelVolume = changes[WHEEL_VOLUME_KEY].newValue === true;
     }
+    if (changes[WHEEL_VOLUME_RIGHTCLICK_KEY]) {
+      wheelVolumeRightClick =
+        changes[WHEEL_VOLUME_RIGHTCLICK_KEY].newValue === true;
+    }
     if (changes[WHEEL_VOLUME_STEP_KEY]) {
       wheelVolumeStep = normalizeWheelVolumeStep(
         changes[WHEEL_VOLUME_STEP_KEY].newValue,
@@ -17137,6 +18266,12 @@ if (chrome.storage?.onChanged) {
     if (changes[ACTION_OVERLAY_KEY]) {
       actionOverlay = changes[ACTION_OVERLAY_KEY].newValue !== false;
       broadcastFeatureFlags(); // MAIN world 로 즉시 반영
+    }
+    if (changes[ACTION_OVERLAY_POS_KEY]) {
+      actionOverlayPos = normalizeActionOverlayPos(
+        changes[ACTION_OVERLAY_POS_KEY].newValue,
+      );
+      broadcastFeatureFlags();
     }
     if (changes[GAIN_PCT_KEY]) {
       gainPct = changes[GAIN_PCT_KEY].newValue !== false;
@@ -17297,6 +18432,21 @@ if (chrome.storage?.onChanged) {
         .getElementById(FOLLOW_PREVIEW_ID)
         ?.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
     }
+    if (
+      changes[FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY] ||
+      changes[FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY]
+    ) {
+      if (changes[FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY])
+        followPreviewAlwaysViewers =
+          changes[FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY].newValue === true;
+      if (changes[FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY])
+        followPreviewAlwaysElapsed =
+          changes[FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY].newValue === true;
+      // 떠 있는 미리보기 메타 즉시 재렌더(보관된 마지막 meta 로).
+      const fpEl = document.getElementById(FOLLOW_PREVIEW_ID);
+      if (fpEl && followPreviewState.lastMeta)
+        renderFollowPreviewMeta(fpEl, followPreviewState.lastMeta);
+    }
     if (changes[CARD_PREVIEW_AUDIO_KEY]) {
       cardPreviewAudioOn = changes[CARD_PREVIEW_AUDIO_KEY].newValue !== false;
       if (cardPreviewAudioOn) bindCardPreviewAudio();
@@ -17420,6 +18570,7 @@ if (chrome.storage?.onChanged) {
       changes[LIVE_SEEK_BAR_KEY] ||
       changes[VOLUME_PCT_KEY] ||
       changes[WHEEL_VOLUME_KEY] ||
+      changes[WHEEL_VOLUME_RIGHTCLICK_KEY] ||
       changes[WHEEL_VOLUME_STEP_KEY] ||
       changes[GAIN_PCT_KEY] ||
       changes[SCREENSHOT_PREVIEW_KEY] ||
@@ -17440,6 +18591,9 @@ if (chrome.storage?.onChanged) {
     if (changes[FOLLOW_REFRESH_KEY]) {
       applyFollowRefresh(changes[FOLLOW_REFRESH_KEY].newValue);
     }
+    if (changes[CUSTOM_FOLLOW_REFRESH_KEY]) {
+      applyCustomFollowRefresh(changes[CUSTOM_FOLLOW_REFRESH_KEY].newValue);
+    }
     if (changes[SECTION_REFRESH_CATEGORY_KEY]) {
       sectionRefreshCategory =
         changes[SECTION_REFRESH_CATEGORY_KEY].newValue === true;
@@ -17447,6 +18601,47 @@ if (chrome.storage?.onChanged) {
     if (changes[SECTION_REFRESH_SCHEDULE_KEY]) {
       sectionRefreshSchedule =
         changes[SECTION_REFRESH_SCHEDULE_KEY].newValue === true;
+    }
+    // 전용 팔로잉 목록 설정 변경 → 값 반영 + sig 무효화 + 재렌더.
+    if (
+      changes[CUSTOM_FOLLOW_SORT_KEY] ||
+      changes[CUSTOM_FOLLOW_FAV_SORT_KEY] ||
+      changes[CUSTOM_FOLLOW_FAV_ORDER_KEY] ||
+      changes[CUSTOM_FOLLOW_INITIAL_KEY] ||
+      changes[CUSTOM_FOLLOW_MORE_KEY] ||
+      changes[CUSTOM_FOLLOW_FAVORITES_KEY]
+    ) {
+      applyCustomFollowSettings({
+        [CUSTOM_FOLLOW_SORT_KEY]:
+          changes[CUSTOM_FOLLOW_SORT_KEY]?.newValue ?? customFollowSort,
+        [CUSTOM_FOLLOW_FAV_SORT_KEY]:
+          changes[CUSTOM_FOLLOW_FAV_SORT_KEY]?.newValue ?? customFollowFavSort,
+        [CUSTOM_FOLLOW_FAV_ORDER_KEY]: changes[CUSTOM_FOLLOW_FAV_ORDER_KEY]
+          ?.newValue ?? [...customFollowFavOrder],
+        [CUSTOM_FOLLOW_INITIAL_KEY]:
+          changes[CUSTOM_FOLLOW_INITIAL_KEY]?.newValue ?? customFollowInitial,
+        [CUSTOM_FOLLOW_MORE_KEY]:
+          changes[CUSTOM_FOLLOW_MORE_KEY]?.newValue ?? customFollowMore,
+        [CUSTOM_FOLLOW_FAVORITES_KEY]: changes[CUSTOM_FOLLOW_FAVORITES_KEY]
+          ?.newValue ?? [...customFollowFavorites],
+      });
+      customFollowVersion += 1; // sig 무효화
+      ensureCustomFollowList();
+      // 최신순/오래된순(일반 또는 즐겨찾기 정렬)으로 바뀌었는데 openDate 가 없으면 보강.
+      const needsOpenDate = (m) => m === "recent" || m === "oldest";
+      if (
+        (changes[CUSTOM_FOLLOW_SORT_KEY] ||
+          changes[CUSTOM_FOLLOW_FAV_SORT_KEY]) &&
+        (needsOpenDate(customFollowSort) ||
+          (featureFlags.sbFollowFavSort &&
+            needsOpenDate(customFollowFavSort))) &&
+        customFollowItems.some((it) => it.live && !it.openDate)
+      ) {
+        void enrichCustomFollowOpenDates(customFollowItems).then(() => {
+          customFollowVersion += 1;
+          ensureCustomFollowList();
+        });
+      }
     }
     if (changes[HEADER_NAV_KEY]) {
       const v = changes[HEADER_NAV_KEY].newValue;
@@ -18166,6 +19361,7 @@ startBootPrefetch();
 init();
 void loadFeatureFlags();
 void loadFollowRefresh();
+void loadCustomFollowSettings().then(() => ensureCustomFollowList());
 void loadHeaderNav();
 void loadChannelLiveButton();
 void loadFollowPreview();
