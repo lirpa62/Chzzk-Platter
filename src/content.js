@@ -14334,6 +14334,15 @@ function onFollowOpenNewTabClick(e) {
   // 좌클릭(주 버튼)만. 보조/휠 클릭·수식키(새 탭·다운로드 등)는 브라우저 기본에 맡김.
   if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)
     return;
+  // ⚠ 전용 팔로잉 목록의 우리 컨트롤(별표/더보기/헤더 아이콘)은 채널 이동이 아니라 자체
+  // 동작이므로 가로채지 않는다. 별표가 항목 안에 있어 channelId 가 잡히면 별표 클릭이
+  // 새 탭 열기로 새고, 별표 토글이 막히던 버그가 있었다.
+  if (
+    e.target?.closest?.(
+      ".cheese-follow-fav, [data-cf-more], .cheese-cf-header-ctrl",
+    )
+  )
+    return;
   const channelId = getFollowNavClickChannelId(e.target);
   if (!channelId) return;
   e.preventDefault();

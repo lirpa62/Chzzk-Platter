@@ -2806,15 +2806,7 @@ html.cheese-cf-on
   ul[class*="_list_"]:not(.cheese-cf-list),
 html.cheese-cf-on
   #sidebar
-  nav.cheese-cf-early
-  ul[class*="_list_"]:not(.cheese-cf-list),
-html.cheese-cf-on
-  #sidebar
   nav:has(#cheese-custom-follow)
-  [class*="_box_"]:has([class*="_more_button_"]),
-html.cheese-cf-on
-  #sidebar
-  nav.cheese-cf-early
   [class*="_box_"]:has([class*="_more_button_"]) {
   display: none !important;
 }

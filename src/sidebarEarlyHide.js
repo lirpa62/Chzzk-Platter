@@ -5,7 +5,6 @@
 // content.js 가 나중에 완전한 규칙으로 같은 <style> id 를 덮으므로 충돌하지 않는다.
 (() => {
   "use strict";
-  if (window.top !== window) return; // 사이드바가 없는 플레이어 iframe에서는 실행하지 않음
   // content.js 의 SIDEBAR_HIDE_STYLE_ID 와 동일해야 나중에 자연스럽게 대체된다.
   const STYLE_ID = "cheese-sidebar-hide-style";
   const FEATURE_KEY = "cheeseFeatureHidden";
@@ -50,7 +49,7 @@
     //    (content.js 의 html.cheese-cf-on 규칙과 동일 효과를, 클래스 없이 nav 범위로.)
     if (f.sbFollowCustom === true) {
       rules.push(
-        `#sidebar nav.cheese-cf-early ul[class*="_list_"]:not(.cheese-cf-list),#sidebar nav.cheese-cf-early [class*="_box_"]:has([class*="_more_button_"]){display:none!important}`,
+        `#sidebar nav:has(#cheese-custom-follow) ul[class*="_list_"]:not(.cheese-cf-list){display:none!important}`,
       );
     }
     return rules;
@@ -83,7 +82,6 @@
     ["서비스바로가기", "sbServices"],
   ];
   let labelFlags = null; // 숨겨야 할 키워드 목록(설정 로드 후 채움)
-  let customFollowEarly = false; // 전용 목록이 생기기 전 기본 팔로우 ul만 조기 숨김
 
   function navLabel(nav) {
     const title = nav.querySelector('[class*="_title_"]');
@@ -97,17 +95,12 @@
 
   // 사이드바 nav 를 하나라도 처리했으면 true(→ 옵저버 조기 해제 신호).
   function applyLabelHide() {
-    if ((!labelFlags || !labelFlags.length) && !customFollowEarly) return false;
+    if (!labelFlags || !labelFlags.length) return false;
     const sb = document.getElementById("sidebar");
     if (!sb) return false;
     const navs = sb.querySelectorAll('nav[class*="_section_"]');
     navs.forEach((nav) => {
       const label = navLabel(nav);
-      // 전용 팔로잉 목록 DOM은 content.js가 나중에 만든다. 그 전에는 섹션 제목으로 원본
-      // 팔로우 nav를 찾아 마커만 붙이고, 헤더는 유지한 채 ul/더보기만 CSS로 숨긴다.
-      if (customFollowEarly && label.includes("팔로우")) {
-        nav.classList.add("cheese-cf-early");
-      }
       for (const kw of labelFlags) {
         if (label.includes(kw)) {
           nav.classList.add(HIDE_CLASS);
@@ -131,7 +124,7 @@
     }
   }
   function startLabelObserver() {
-    if ((!labelFlags || !labelFlags.length) && !customFollowEarly) return;
+    if (!labelFlags || !labelFlags.length) return;
     applyLabelHide(); // 이미 있으면 즉시 1회 적용
     // ⚠ 첫 처리 후 바로 해제하면 안 된다 — 치지직 SPA 가 사이드바 nav 를 '재렌더'하면 새
     // nav 엔 클래스가 없어 다시 깜빡인다. content.js(document_idle)가 관리를 넘겨받을 때까지
@@ -169,11 +162,10 @@
       if (rules.length) inject(rules.join("\n"));
       // 라벨 기반 숨김 대상 키워드 수집 후 옵저버 시작.
       if (f && typeof f === "object") {
-        customFollowEarly = f.sbFollowCustom === true;
         labelFlags = LABEL_RULES.filter(([, flag]) => f[flag] === true).map(
           ([kw]) => kw,
         );
-        if (labelFlags.length || customFollowEarly) startLabelObserver();
+        if (labelFlags.length) startLabelObserver();
       }
     });
   } catch {
