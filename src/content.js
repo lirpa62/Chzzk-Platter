@@ -610,8 +610,11 @@ const featureFlags = {
   sbFollowFavStyle: false, // 즐겨찾기 구분: 항목 테두리/배경색
   sbFollowFavBar: false, // 즐겨찾기 구분: 그룹 구분 바
   sbFollowFavSort: false, // 즐겨찾기 그룹을 별도 기준으로 정렬(cheeseFollowFavSortMode)
+  sbFollowCustomExcludeLogpowerHidden: false, // 통나무파워 지우개로 지운 채널을 전용목록에서 제외
   sidebarPush: false, // 사이드바 펼침 시 오버레이 대신 콘텐츠를 밀어내 공간 차지
 };
+// 통나무파워 지우개로 지운 채널(hiddenChannels) 캐시 — 전용목록 필터용. onChanged 로 갱신.
+let logpowerHiddenChannelsCache = new Set();
 // 사이드바(aside#sidebar) 숨김용 CSS를 토글하는 <style> id.
 const SIDEBAR_HIDE_STYLE_ID = "cheese-sidebar-hide-style";
 
@@ -8805,6 +8808,13 @@ function applyFeatureFlags(value) {
     "cheese-cf-favstyle",
     featureFlags.sbFollowFavStyle === true,
   );
+  // 전용목록 마스터 ON 을 <html> 클래스로 즉시 반영 → 원본 팔로우 목록(ul)을 CSS 로 바로
+  // 숨긴다. JS(ensureCustomFollowList)가 마커 클래스를 붙이기 전 새로고침 순간에 원본이
+  // 잠깐 보이는 깜빡임을 없앤다(마스터 ON + 사이드바 전체숨김 아님이 게이트).
+  document.documentElement.classList.toggle(
+    "cheese-cf-on",
+    featureFlags.sbFollowCustom === true && featureFlags.sidebar !== true,
+  );
   applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
   // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
   updateSeekPreviewRealtime();
@@ -9881,8 +9891,12 @@ function applyFillScreen() {
     !(aside && isChatStackedLayout(aside));
   if (!on) {
     // 타겟 재탐색과 무관하게, 우리가 스타일을 건 요소를 직접 원복(PIP/미니플레이어에서
-    // 구조가 바뀌어도 확실히 지운다). 다시보기 max-height(capMaxH)도 함께 정리.
-    if (t && t.capMaxH) t.el.style.removeProperty("max-height");
+    // 구조가 바뀌어도 확실히 지운다).
+    // ⚠ 다시보기(capMaxH)의 _player_ max-height 는 '치지직 네이티브'가 넣은 값
+    // (예: calc(100% - 85px), 영상 아래 정보 바 자리 확보용)이다. 우리는 다시보기에
+    // fillScreen 을 적용하지 않으므로(위 isLive 제외) 넣은 적이 없다 → 지우면 안 된다.
+    // 예전에 무조건 removeProperty 하던 코드가 이 네이티브 값을 지워, 특히 21:9 등
+    // 와이드 화면에서 영상이 wrapper 를 꽉 채워 커지는 버그가 있었다(제거함).
     clearFillScreenStyles();
     return;
   }
@@ -11150,6 +11164,9 @@ function applySidebarHidden() {
     style.id = SIDEBAR_HIDE_STYLE_ID;
     (document.head || document.documentElement).appendChild(style);
   }
+  // 조기 주입 스크립트(sidebarEarlyHide.js)가 만든 임시본이면 마커를 지워, 이제부턴
+  // content.js 의 완전판이 관리하게 한다(조기 스크립트가 다시 덮지 않도록).
+  if (style.dataset.cheeseEarly) delete style.dataset.cheeseEarly;
   const rules = [];
   if (featureFlags.sidebar) {
     // 사이드바 전체를 숨기고, 콘텐츠(div#layout-body) 패딩을 0으로(공간 회수).
@@ -11225,6 +11242,9 @@ function applySidebarHidden() {
       "/schedule": featureFlags.sbSchedule,
       "/following": featureFlags.sbFollowing,
       "/cheezefarm": featureFlags.sbCheezefarm,
+      // 파트너는 라벨('파트너') 기반 섹션 숨김도 있지만, href 로도 즉시 숨겨(document_start
+      // 조기 주입 포함) JS 클래스 부여 전 깜빡임을 없앤다.
+      "/partner": featureFlags.sbPartner,
     };
     const hiddenSel = Object.entries(menuHrefs)
       .filter(([, hide]) => hide)
@@ -13760,6 +13780,17 @@ function getCustomFollowVisibleItems() {
       (it) => it.live || customFollowFavorites.has(it.channelId),
     );
   }
+  // 통나무파워 지우개로 지운 채널 제외(옵션). 단 즐겨찾기는 사용자가 명시 지정했으므로 유지.
+  if (
+    featureFlags.sbFollowCustomExcludeLogpowerHidden &&
+    logpowerHiddenChannelsCache.size
+  ) {
+    items = items.filter(
+      (it) =>
+        customFollowFavorites.has(it.channelId) ||
+        !logpowerHiddenChannelsCache.has(String(it.channelId)),
+    );
+  }
   return sortCustomFollow(items, customFollowSort);
 }
 
@@ -13781,6 +13812,9 @@ function customFollowSig(visibleCount, shown) {
     featureFlags.sbFollowFavStar ? 1 : 0,
     featureFlags.sbFollowFavStyle ? 1 : 0,
     featureFlags.sbFollowFavBar ? 1 : 0,
+    featureFlags.sbFollowCustomExcludeLogpowerHidden
+      ? logpowerHiddenChannelsCache.size
+      : 0,
   ].join(":");
 }
 
@@ -13851,9 +13885,14 @@ function renderCustomFollowList(ourNav, h) {
   const expandedNow = getCustomFollowExpandedNow(origNav);
   const visible = getCustomFollowVisibleItems();
   const autoExpand = featureFlags.sbFollowCustomAutoExpand;
+  // 즐겨찾기는 '초기 표시 개수'에서 제외한다(항상 표시). 즐겨찾기가 목록 앞에 몰려 있으므로
+  // 그 수만큼 shown 을 늘려, 초기 개수(customFollowShown)는 일반 채널 기준으로 적용된다.
+  const favCount = visible.filter((it) =>
+    customFollowFavorites.has(it.channelId),
+  ).length;
   const shown = autoExpand
     ? visible.length
-    : Math.min(customFollowShown, visible.length);
+    : Math.min(favCount + customFollowShown, visible.length);
   // sig 에 expandedNow·harvest 유무를 포함 → _is_expanded_ 가 붙거나 harvest 가 확보되는
   // 순간(펼침 진입) 재렌더된다.
   const sig =
@@ -13898,7 +13937,8 @@ function renderCustomFollowList(ourNav, h) {
   // 더보기/접기 문구 버튼 — 헤더 아래 별도 wrapper. 더 펼칠 게 있으면 더보기, 초기보다
   // 많이 펼쳤으면 접기를 함께 노출(둘 다 가능하면 나란히). 자동펼치기면 숨김.
   const hasMore = shown < visible.length;
-  const canCollapse = !autoExpand && shown > customFollowInitial;
+  // 접기 판정도 즐겨찾기 제외 기준(초기 개수 + 즐겨찾기 수)과 비교한다.
+  const canCollapse = !autoExpand && shown > favCount + customFollowInitial;
   const moreHtml =
     !autoExpand && (hasMore || canCollapse)
       ? `<div class="cheese-cf-more-bar">` +
@@ -14054,11 +14094,19 @@ function bindCustomFollowDragSort() {
     try {
       chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_ORDER_KEY]: ids });
     } catch {}
+    // ⚠ 재렌더(ensureCustomFollowList) 전에 드래그 상태를 비운다. 재렌더로 li 가 교체되면
+    // dragend 가 사라진 요소에서 안 올 수 있어, customFollowDragId 가 남아 미리보기가 영영
+    // 억제되는 버그가 있었다. 여기서 확실히 해제한다.
+    customFollowDragEl = null;
+    customFollowDragId = "";
+    clearDragReady();
     customFollowVersion += 1;
     ensureCustomFollowList();
   };
   const onEnd = () => {
-    customFollowDragEl?.classList.remove("cheese-cf-dragging");
+    document
+      .querySelectorAll(".cheese-cf-dragging")
+      .forEach((el) => el.classList.remove("cheese-cf-dragging"));
     clearDragReady();
     customFollowDragEl = null;
     customFollowDragId = "";
@@ -17826,6 +17874,9 @@ async function loadCustomFollowSettings() {
     ]);
     applyCustomFollowSettings(data);
     customFollowShown = customFollowInitial;
+    // 통나무파워 지우개로 지운 채널 목록 로드(제외 옵션용).
+    const hidden = await getStoredHiddenLogPowerChannels();
+    logpowerHiddenChannelsCache = new Set(hidden.map(String));
   } catch {}
 }
 
@@ -18641,6 +18692,17 @@ if (chrome.storage?.onChanged) {
           customFollowVersion += 1;
           ensureCustomFollowList();
         });
+      }
+    }
+    // 통나무파워 지우개 목록(hiddenChannels) 변경 → 전용목록 제외 캐시 갱신 + 재렌더.
+    if (changes.hiddenChannels) {
+      const next = Array.isArray(changes.hiddenChannels.newValue)
+        ? changes.hiddenChannels.newValue.map((id) => String(id))
+        : [];
+      logpowerHiddenChannelsCache = new Set(next);
+      if (featureFlags.sbFollowCustomExcludeLogpowerHidden) {
+        customFollowVersion += 1; // sig 무효화
+        ensureCustomFollowList();
       }
     }
     if (changes[HEADER_NAV_KEY]) {

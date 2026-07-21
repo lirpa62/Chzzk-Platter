@@ -2797,6 +2797,27 @@ html.cheese-vod-portrait .cheese-search-seek-realtime {
 #sidebar .cheese-custom-follow-orig-hidden {
   display: none !important;
 }
+/* 깜빡임 방지: 전용목록 마스터 ON(html.cheese-cf-on)이면, 우리 목록(#cheese-custom-follow)을
+   품은 nav 안의 '원본' ul(우리 .cheese-cf-list 제외)과 더보기 박스를 CSS 로 '즉시' 숨긴다.
+   JS 가 마커 클래스를 붙이기 전(새로고침·재렌더 순간)에도 원본이 안 보인다. */
+html.cheese-cf-on
+  #sidebar
+  nav:has(> #cheese-custom-follow)
+  ul[class*="_list_"]:not(.cheese-cf-list),
+html.cheese-cf-on
+  #sidebar
+  nav.cheese-cf-early
+  ul[class*="_list_"]:not(.cheese-cf-list),
+html.cheese-cf-on
+  #sidebar
+  nav:has(#cheese-custom-follow)
+  [class*="_box_"]:has([class*="_more_button_"]),
+html.cheese-cf-on
+  #sidebar
+  nav.cheese-cf-early
+  [class*="_box_"]:has([class*="_more_button_"]) {
+  display: none !important;
+}
 #cheese-custom-follow {
   display: block;
 }
