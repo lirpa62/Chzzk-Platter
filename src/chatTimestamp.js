@@ -12,6 +12,8 @@
   let chatRowObserver = null;
   let observedChatContainers = []; // 현재 감시 중인 채팅 컨테이너(교체 감지용)
   let retryTimer = 0;
+  const rowRetryState = new WeakMap();
+  const ROW_RETRY_DELAYS = [50, 150, 350, 700];
 
   // 가려진 채팅 복원용 상태.
   const BLIND_PLACEHOLDER_TEXTS = [
@@ -182,11 +184,12 @@
   // ── 시간 span 삽입/제거 ───────────────────────────────────────────────────
   // 닉네임 앞에 회색 HH:MM 시간 span을 삽입.
   function applyTimestamp(row, epochMs) {
-    if (row.querySelector(":scope .cheese-chat-time")) return;
+    const existing = row.querySelector(":scope .cheese-chat-time");
+    if (existing) return true;
     const nicknameBtn =
       row.querySelector("button[class*='_nickname_']") ||
       row.querySelector("[class*='_nickname_']");
-    if (!nicknameBtn || !nicknameBtn.parentNode) return;
+    if (!nicknameBtn || !nicknameBtn.parentNode) return false;
     const d = new Date(epochMs);
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
@@ -194,6 +197,7 @@
     span.className = "cheese-chat-time";
     span.textContent = `${hh}:${mm}`;
     nicknameBtn.parentNode.insertBefore(span, nicknameBtn);
+    return true;
   }
 
   function removeAllTimestamps() {
@@ -389,26 +393,48 @@
 
   // 채팅 행 하나 처리: 시간 삽입 + 가림 복원.
   function processRow(row) {
-    if (!(row instanceof HTMLElement)) return;
+    if (!(row instanceof HTMLElement)) return false;
     // 스윕 재방문 최적화: 이미 처리 완료로 표시된 행은 React fiber/props 접근 없이 즉시
     // 반환한다. 예전엔 컨테이너 재부착(헬스체크) 때마다 전체 행을 fiber 접근 포함으로
     // 재처리해(수백 행 × 반복) 채팅 폭주 방송에서 큰 메인스레드 부하였다(프로파일 실측
-    // ~500ms/스윕). 예외는 '복원 ON + 처리 후에 새로 가려졌는데 아직 미복원'인 행뿐
-    // (블라인드는 처리 후에도 발생할 수 있으므로 그 행만 아래 일반 경로로 재처리).
+    // ~500ms/스윕). 예외는 React 재렌더로 시간 요소가 사라졌거나, 처리 후 새로
+    // 가려졌는데 아직 미복원인 행뿐이다. 해당 행만 아래 일반 경로로 재처리한다.
     if (row.dataset.cheeseRowDone === "1") {
-      if (!(restoreBlindedChat && !moaRestoring() && isHiddenRow(row))) return;
-      const doneSpan = getRowMessageSpan(row);
-      if (doneSpan?.classList.contains("cheese-blind-restored-text")) return;
+      const timestampMissing =
+        showChatTimestamp &&
+        !moaShowingTime() &&
+        !row.querySelector(":scope .cheese-chat-time");
+      const restorePending =
+        restoreBlindedChat && !moaRestoring() && isHiddenRow(row);
+      if (!timestampMissing && !restorePending) {
+        clearRowRetry(row);
+        return true;
+      }
+      if (!timestampMissing) {
+        const doneSpan = getRowMessageSpan(row);
+        if (doneSpan?.classList.contains("cheese-blind-restored-text")) {
+          clearRowRetry(row);
+          return true;
+        }
+      }
+      delete row.dataset.cheeseRowDone;
     }
-    if (!row.querySelector("[class*='_chatting_message_']")) return;
+    if (!row.querySelector("[class*='_chatting_message_']")) {
+      scheduleRowRetry(row);
+      return false;
+    }
     const chatMessage = getChatMessage(row);
-    if (!chatMessage) return;
+    if (!chatMessage) {
+      scheduleRowRetry(row);
+      return false;
+    }
 
     let done = true;
     if (showChatTimestamp && !moaShowingTime()) {
       const epoch = readChatEpochMs(chatMessage);
-      if (epoch) applyTimestamp(row, epoch);
-      else done = false; // 시간이 아직 props에 없음 → 다음 방문 때 재시도
+      if (!epoch || !applyTimestamp(row, epoch)) {
+        done = false;
+      }
     }
 
     // 복원 기능이 켜져 있으면, 아직 안 가려진 행의 원문을 미리 캐시해 둔다(가려진 뒤엔
@@ -428,7 +454,43 @@
         if (original) applyRestore(row, original);
       }
     }
-    if (done) row.dataset.cheeseRowDone = "1";
+    if (done) {
+      row.dataset.cheeseRowDone = "1";
+      clearRowRetry(row);
+    } else {
+      delete row.dataset.cheeseRowDone;
+      scheduleRowRetry(row);
+    }
+    return done;
+  }
+
+  function scheduleRowRetry(row) {
+    if (
+      !(row instanceof HTMLElement) ||
+      !row.isConnected ||
+      !anyChatEnhanceOn()
+    ) {
+      return;
+    }
+    const state = rowRetryState.get(row) || { attempt: 0, timer: 0 };
+    if (state.timer || state.attempt >= ROW_RETRY_DELAYS.length) return;
+    const delay = ROW_RETRY_DELAYS[state.attempt];
+    state.attempt += 1;
+    state.timer = window.setTimeout(() => {
+      state.timer = 0;
+      if (!row.isConnected || !anyChatEnhanceOn()) {
+        rowRetryState.delete(row);
+        return;
+      }
+      processRow(row);
+    }, delay);
+    rowRetryState.set(row, state);
+  }
+
+  function clearRowRetry(row) {
+    const state = rowRetryState.get(row);
+    if (state?.timer) clearTimeout(state.timer);
+    rowRetryState.delete(row);
   }
 
   // 처리 완료 마커 일괄 해제: 기능이 (재)활성화될 때 호출해, 꺼진 동안 처리 없이
@@ -499,6 +561,15 @@
         // 기존 행이 React 재렌더로 다시 가려졌으면 재복원.
         if (mutation.target instanceof Element) {
           reapplyRestoreForTarget(mutation.target);
+          const targetRow = mutation.target.closest(
+            "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']",
+          );
+          if (
+            targetRow &&
+            targetRow.querySelector("[class*='_chatting_message_']")
+          ) {
+            processRow(targetRow);
+          }
         }
         mutation.addedNodes.forEach((node) => {
           if (!(node instanceof HTMLElement)) return;

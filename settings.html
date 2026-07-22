@@ -174,6 +174,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="liveFollowing"
+            role="tab"
+            aria-selected="false"
+          >
+            라이브 탐색
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="layout"
             role="tab"
             aria-selected="false"
@@ -1359,6 +1368,116 @@
               줄입니다. 값이 작을수록 라이브에 바짝 붙지만 끊김이 잦을 수
               있습니다. 커스텀은 시작 2~30초, 목표 1~10초(시작 &gt; 목표).
             </p>
+
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              따라잡기 배속
+            </h2>
+            <div
+              class="settings-segmented settings-segmented-4"
+              id="syncRate"
+              role="radiogroup"
+            >
+              <button
+                type="button"
+                data-sync-rate="1.2"
+                role="radio"
+                aria-checked="false"
+              >
+                1.2배
+              </button>
+              <button
+                type="button"
+                data-sync-rate="1.5"
+                role="radio"
+                aria-checked="true"
+              >
+                1.5배
+              </button>
+              <button
+                type="button"
+                data-sync-rate="2"
+                role="radio"
+                aria-checked="false"
+              >
+                2배
+              </button>
+              <button
+                type="button"
+                data-sync-rate="3"
+                role="radio"
+                aria-checked="false"
+              >
+                3배
+              </button>
+            </div>
+            <p class="settings-group-desc">
+              지연을 따라잡을 때의 재생 배속입니다. 높을수록 빨리 따라잡아
+              지연이 덜 밀리지만, 빨라지는 구간이 더 크게 느껴질 수
+              있습니다(지연 12초 이상은 배속 대신 즉시 라이브로 이동).
+            </p>
+
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              자동 따라잡기 쿨다운
+            </h2>
+            <div
+              class="settings-segmented settings-segmented-2"
+              id="syncCooldown"
+              role="radiogroup"
+            >
+              <button
+                type="button"
+                data-sync-cooldown="on"
+                role="radio"
+                aria-checked="true"
+              >
+                사용
+              </button>
+              <button
+                type="button"
+                data-sync-cooldown="off"
+                role="radio"
+                aria-checked="false"
+              >
+                끔
+              </button>
+            </div>
+            <div class="settings-custom-row" id="syncCooldownRow">
+              <label class="settings-custom-field">
+                <span>기본 간격</span>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="syncCooldownBase"
+                    min="5"
+                    max="120"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>초</small>
+                </span>
+              </label>
+              <label class="settings-custom-field">
+                <span>최대 간격</span>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="syncCooldownMax"
+                    min="5"
+                    max="600"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>초</small>
+                </span>
+              </label>
+            </div>
+            <p class="settings-group-desc">
+              따라잡기가 너무 자주 발동해 끊기지 않도록 재발동 사이에 두는 최소
+              간격입니다. 자주 발동하면 이 간격이 '기본'에서 '최대'까지 점점
+              늘어납니다. '끔'으로 하면 지연이 밀릴 때마다 거의 즉시
+              따라잡습니다 (대신 배속 구간이 잦아질 수 있음). 기본 5~120초, 최대
+              5~600초.
+            </p>
           </section>
 
           <section
@@ -1772,6 +1891,79 @@
                   <input type="checkbox" data-search-reset-on-return />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="liveFollowing"
+            aria-label="라이브 탐색"
+          >
+            <h2 class="settings-group-title">라이브 탐색</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">제외 필터 버튼 표시</span>
+                  <span class="settings-item-desc"
+                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그를 관리하는
+                    '제외 필터 추가' 버튼을 표시합니다(체크=표시, 기본 켜짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-live-tag-filter-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked settings-live-tag-item">
+                <div>
+                  <span class="settings-item-name">라이브 제외 태그</span>
+                  <span class="settings-item-desc"
+                    >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그가
+                    붙은 방송을 숨깁니다. 쉼표나 줄바꿈으로 여러 태그를 한 번에
+                    추가할 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-live-tag-manager">
+                  <form class="settings-live-tag-form" data-live-tag-form>
+                    <input
+                      type="text"
+                      data-live-tag-input
+                      maxlength="200"
+                      placeholder="숨길 태그 입력"
+                      aria-label="숨길 라이브 태그"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button type="submit">추가</button>
+                  </form>
+                  <div class="settings-live-tag-bulk" data-live-tag-bulk>
+                    <label>
+                      <input type="checkbox" data-live-tag-select-all />
+                      <span>전체 선택</span>
+                    </label>
+                    <span data-live-tag-selected-count></span>
+                    <span class="settings-live-tag-spacer"></span>
+                    <button
+                      type="button"
+                      data-live-tag-remove-selected
+                      disabled
+                    >
+                      선택 삭제
+                    </button>
+                    <button type="button" data-live-tag-remove-all>
+                      전체 삭제
+                    </button>
+                  </div>
+                  <ul
+                    class="settings-live-tag-list"
+                    data-live-tag-list
+                    aria-label="라이브 제외 태그 목록"
+                  ></ul>
+                  <p class="settings-live-tag-empty" data-live-tag-empty>
+                    추가한 제외 태그가 없습니다.
+                  </p>
+                </div>
               </li>
             </ul>
           </section>
@@ -2277,6 +2469,25 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >라이브·다시보기·채널·검색에 즐겨찾기 버튼 추가</span
+                  >
+                  <span class="settings-item-desc"
+                    >전용 팔로잉 목록을 사용할 때 팔로잉 채널의 방송·채널·검색
+                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다(체크=사용, 기본
+                    꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowPageFavoriteButton"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">정렬 기준</span>
@@ -2765,6 +2976,53 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">헤더에서 숨길 요소</span>
+                  <span class="settings-item-desc"
+                    >미리보기 헤더에서 숨길 항목을 선택합니다(체크=숨김). 필요한
+                    것만 남겨 헤더를 간소화할 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-check-grid">
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="title"
+                    />제목</label
+                  >
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="profile"
+                    />프로필 사진</label
+                  >
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="name"
+                    />스트리머 이름</label
+                  >
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="category"
+                    />카테고리</label
+                  >
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="viewers"
+                    />시청자 수</label
+                  >
+                  <label class="settings-check"
+                    ><input
+                      type="checkbox"
+                      data-follow-preview-hide-part="elapsed"
+                    />경과 시간</label
+                  >
+                </div>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">시청자 수 항상 표시</span>
@@ -2988,7 +3246,8 @@
                   <span class="settings-item-desc"
                     >팔로잉 목록, 채널, 검색에서 채널 이미지 또는 이름 영역에
                     마우스를 올리면 최근 방송일·팔로우 시작일·첫 방송일·총 방송
-                    시간을 툴팁으로 보여줍니다(체크=사용, 기본 꺼짐)</span
+                    시간을 툴팁으로 보여줍니다. 전용 팔로잉 목록에서는 라이브
+                    미리보기가 꺼져 있을 때 표시됩니다(체크=사용, 기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">

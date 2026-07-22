@@ -45,6 +45,7 @@
     "cheeseFollowOpenNewTab",
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
+    "cheeseFollowPreviewHiddenParts",
     "cheeseFollowPreviewAlwaysViewers",
     "cheeseFollowPreviewAlwaysElapsed",
     "cheeseFollowPreviewHeaderFont",
@@ -67,6 +68,8 @@
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
+    "cheeseLiveTagFilterButton",
+    "cheeseLiveTagFilters",
     "cheeseLogPowerClickAction",
     "cheeseLogPowerEarningColor",
     "cheeseLogPowerPopupLimit",
@@ -94,6 +97,9 @@
     "cheeseSubscribeBadgeProgress",
     "cheeseSyncCustom",
     "cheeseSyncPreset",
+    "cheeseSyncRate",
+    "cheeseSyncCooldownEnabled",
+    "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
     "cheeseVideoFilterBeginner",
     "cheeseVideoFilterClickActivate",
@@ -2702,6 +2708,36 @@
   });
   loadFollowPreviewFullTitle();
 
+  // 미리보기 헤더에서 숨길 요소(개별 체크=숨김). {title,profile,name,category,viewers,
+  // elapsed} 객체 한 키에 모아 저장한다.
+  const FOLLOW_PREVIEW_HIDDEN_PARTS_KEY = "cheeseFollowPreviewHiddenParts";
+  const followPreviewHidePartInputs = Array.from(
+    document.querySelectorAll("[data-follow-preview-hide-part]"),
+  );
+  function saveFollowPreviewHiddenParts() {
+    const parts = {};
+    followPreviewHidePartInputs.forEach((el) => {
+      if (el.checked) parts[el.dataset.followPreviewHidePart] = true;
+    });
+    try {
+      cachedStorageSet({ [FOLLOW_PREVIEW_HIDDEN_PARTS_KEY]: parts });
+    } catch {}
+  }
+  (async () => {
+    let parts = {};
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_HIDDEN_PARTS_KEY);
+      const v = data?.[FOLLOW_PREVIEW_HIDDEN_PARTS_KEY];
+      if (v && typeof v === "object") parts = v;
+    } catch {}
+    followPreviewHidePartInputs.forEach((el) => {
+      el.checked = parts[el.dataset.followPreviewHidePart] === true;
+    });
+  })();
+  followPreviewHidePartInputs.forEach((el) =>
+    el.addEventListener("change", saveFollowPreviewHiddenParts),
+  );
+
   // 미리보기: 시청자 수/방송 시간 항상 표시(창이 좁아도). 각각 기본 OFF.
   function bindFollowPreviewAlwaysToggle(selector, key) {
     const input = document.querySelector(selector);
@@ -3041,6 +3077,230 @@
     } catch {}
   });
   loadHideBlockedComment();
+
+  // ── 전체 방송·팔로잉 라이브 제외 태그 ────────────────────────────────────
+  const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
+  const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+  const liveTagFilterButtonInput = document.querySelector(
+    "[data-live-tag-filter-button]",
+  );
+  const liveTagForm = document.querySelector("[data-live-tag-form]");
+  const liveTagInput = document.querySelector("[data-live-tag-input]");
+  const liveTagList = document.querySelector("[data-live-tag-list]");
+  const liveTagEmpty = document.querySelector("[data-live-tag-empty]");
+  const liveTagBulk = document.querySelector("[data-live-tag-bulk]");
+  const liveTagSelectAll = document.querySelector(
+    "[data-live-tag-select-all]",
+  );
+  const liveTagSelectedCount = document.querySelector(
+    "[data-live-tag-selected-count]",
+  );
+  const liveTagRemoveSelected = document.querySelector(
+    "[data-live-tag-remove-selected]",
+  );
+  const liveTagRemoveAll = document.querySelector(
+    "[data-live-tag-remove-all]",
+  );
+  let settingsLiveTagFilters = [];
+  const settingsLiveTagSelected = new Set();
+
+  function normalizeLiveTagFilter(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .trim()
+      .replace(/^#+\s*/, "")
+      .trim()
+      .toLocaleLowerCase("ko-KR");
+  }
+
+  function sanitizeLiveTagFilters(value) {
+    const result = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(value) ? value : []) {
+      const display = String(raw || "")
+        .normalize("NFKC")
+        .trim()
+        .replace(/^#+\s*/, "")
+        .trim();
+      const key = normalizeLiveTagFilter(display);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      result.push(display);
+    }
+    return result;
+  }
+
+  function parseLiveTagFilterInput(value) {
+    return sanitizeLiveTagFilters(String(value || "").split(/[,\n]+/));
+  }
+
+  function renderSettingsLiveTagFilters() {
+    if (!liveTagList) return;
+    const existing = new Set(
+      settingsLiveTagFilters.map(normalizeLiveTagFilter),
+    );
+    for (const key of [...settingsLiveTagSelected]) {
+      if (!existing.has(key)) settingsLiveTagSelected.delete(key);
+    }
+
+    liveTagList.innerHTML = settingsLiveTagFilters
+      .map((tag, index) => {
+        const key = normalizeLiveTagFilter(tag);
+        return `
+          <li class="settings-live-tag-row">
+            <label>
+              <input type="checkbox" data-live-tag-select="${index}" ${
+                settingsLiveTagSelected.has(key) ? "checked" : ""
+              }>
+              <span>#${escapeHtml(tag)}</span>
+            </label>
+            <button type="button" data-live-tag-remove="${index}" aria-label="${escapeHtml(
+              tag,
+            )} 태그 삭제" title="삭제">
+              <svg class="lucide lucide-trash-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h18"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <path d="M10 11v6"/>
+                <path d="M14 11v6"/>
+              </svg>
+            </button>
+          </li>`;
+      })
+      .join("");
+
+    const count = settingsLiveTagSelected.size;
+    const hasItems = settingsLiveTagFilters.length > 0;
+    if (liveTagEmpty) liveTagEmpty.hidden = hasItems;
+    if (liveTagBulk) liveTagBulk.hidden = !hasItems;
+    if (liveTagSelectedCount) {
+      liveTagSelectedCount.textContent = count ? `${count}개 선택됨` : "";
+    }
+    if (liveTagRemoveSelected) liveTagRemoveSelected.disabled = count === 0;
+    if (liveTagRemoveAll) liveTagRemoveAll.disabled = !hasItems;
+    if (liveTagSelectAll) {
+      liveTagSelectAll.checked = hasItems && count === settingsLiveTagFilters.length;
+      liveTagSelectAll.indeterminate = count > 0 && count < settingsLiveTagFilters.length;
+    }
+  }
+
+  function saveSettingsLiveTagFilters(next) {
+    settingsLiveTagFilters = sanitizeLiveTagFilters(next);
+    renderSettingsLiveTagFilters();
+    cachedStorageSet({ [LIVE_TAG_FILTERS_KEY]: settingsLiveTagFilters });
+  }
+
+  liveTagFilterButtonInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [LIVE_TAG_FILTER_BUTTON_KEY]: liveTagFilterButtonInput.checked,
+    });
+  });
+
+  liveTagForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const added = parseLiveTagFilterInput(liveTagInput?.value);
+    if (!added.length) {
+      liveTagInput?.focus();
+      return;
+    }
+    saveSettingsLiveTagFilters([...settingsLiveTagFilters, ...added]);
+    if (liveTagInput) liveTagInput.value = "";
+    liveTagInput?.focus();
+  });
+
+  liveTagList?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest?.("[data-live-tag-select]");
+    if (!checkbox) return;
+    const tag = settingsLiveTagFilters[Number(checkbox.dataset.liveTagSelect)];
+    const key = normalizeLiveTagFilter(tag);
+    if (!key) return;
+    if (checkbox.checked) settingsLiveTagSelected.add(key);
+    else settingsLiveTagSelected.delete(key);
+    renderSettingsLiveTagFilters();
+  });
+
+  liveTagList?.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-live-tag-remove]");
+    if (!button) return;
+    const index = Number(button.dataset.liveTagRemove);
+    if (!Number.isInteger(index) || !settingsLiveTagFilters[index]) return;
+    const removed = settingsLiveTagFilters[index];
+    settingsLiveTagSelected.delete(normalizeLiveTagFilter(removed));
+    saveSettingsLiveTagFilters(
+      settingsLiveTagFilters.filter((_, itemIndex) => itemIndex !== index),
+    );
+  });
+
+  liveTagSelectAll?.addEventListener("change", () => {
+    settingsLiveTagSelected.clear();
+    if (liveTagSelectAll.checked) {
+      settingsLiveTagFilters.forEach((tag) =>
+        settingsLiveTagSelected.add(normalizeLiveTagFilter(tag)),
+      );
+    }
+    renderSettingsLiveTagFilters();
+  });
+
+  liveTagRemoveSelected?.addEventListener("click", () => {
+    if (!settingsLiveTagSelected.size) return;
+    saveSettingsLiveTagFilters(
+      settingsLiveTagFilters.filter(
+        (tag) => !settingsLiveTagSelected.has(normalizeLiveTagFilter(tag)),
+      ),
+    );
+    settingsLiveTagSelected.clear();
+    renderSettingsLiveTagFilters();
+  });
+
+  liveTagRemoveAll?.addEventListener("click", () => {
+    if (!settingsLiveTagFilters.length) return;
+    openCbmConfirm({
+      title: "제외 태그 전체 삭제",
+      body: `추가한 제외 태그 ${settingsLiveTagFilters.length}개를 모두 삭제할까요?`,
+      confirmLabel: "전체 삭제",
+      onConfirm: () => {
+        settingsLiveTagSelected.clear();
+        saveSettingsLiveTagFilters([]);
+      },
+    });
+  });
+
+  async function loadSettingsLiveTagFilters() {
+    try {
+      const data = await cachedStorageGet([
+        LIVE_TAG_FILTERS_KEY,
+        LIVE_TAG_FILTER_BUTTON_KEY,
+      ]);
+      settingsLiveTagFilters = sanitizeLiveTagFilters(
+        data?.[LIVE_TAG_FILTERS_KEY],
+      );
+      if (liveTagFilterButtonInput) {
+        liveTagFilterButtonInput.checked =
+          data?.[LIVE_TAG_FILTER_BUTTON_KEY] !== false;
+      }
+    } catch {
+      settingsLiveTagFilters = [];
+      if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = true;
+    }
+    renderSettingsLiveTagFilters();
+  }
+
+  if (chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes[LIVE_TAG_FILTERS_KEY]) {
+        settingsLiveTagFilters = sanitizeLiveTagFilters(
+          changes[LIVE_TAG_FILTERS_KEY].newValue,
+        );
+        renderSettingsLiveTagFilters();
+      }
+      if (changes[LIVE_TAG_FILTER_BUTTON_KEY] && liveTagFilterButtonInput) {
+        liveTagFilterButtonInput.checked =
+          changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue !== false;
+      }
+    });
+  }
+  void loadSettingsLiveTagFilters();
 
   // ── 사용자 차단 관리 탭(댓글 차단 목록: 닉네임/사유/일시, 검색, 선택/일괄 해제) ──
   const COMMENT_BLOCK_KEY = "cheeseCommentBlocks";
@@ -4630,6 +4890,106 @@
     el?.addEventListener("change", saveSyncCustom),
   );
   loadSyncPreset();
+
+  // ── 따라잡기 배속(1.2/1.5/2/3, 기본 1.5) ──────────────────────────────────
+  const SYNC_RATE_KEY = "cheeseSyncRate";
+  const SYNC_RATE_ALLOWED = ["1.2", "1.5", "2", "3"];
+  const syncRateButtons = Array.from(
+    document.querySelectorAll("[data-sync-rate]"),
+  );
+  function reflectSyncRate(v) {
+    const val = SYNC_RATE_ALLOWED.includes(String(v)) ? String(v) : "1.5";
+    syncRateButtons.forEach((btn) => {
+      const active = btn.dataset.syncRate === val;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  (async () => {
+    let v = "1.5";
+    try {
+      const d = await cachedStorageGet(SYNC_RATE_KEY);
+      if (SYNC_RATE_ALLOWED.includes(String(d?.[SYNC_RATE_KEY])))
+        v = String(d[SYNC_RATE_KEY]);
+    } catch {}
+    reflectSyncRate(v);
+  })();
+  syncRateButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.dataset.syncRate;
+      reflectSyncRate(v);
+      try {
+        cachedStorageSet({ [SYNC_RATE_KEY]: Number(v) });
+      } catch {}
+    });
+  });
+
+  // ── 자동 따라잡기 쿨다운(사용/끔 + 커스텀 base/max 초) ─────────────────────
+  const SYNC_CD_ENABLED_KEY = "cheeseSyncCooldownEnabled";
+  const SYNC_CD_CUSTOM_KEY = "cheeseSyncCooldownCustom";
+  const SYNC_CD_DEFAULT = { base: 15, max: 120 };
+  const syncCdButtons = Array.from(
+    document.querySelectorAll("[data-sync-cooldown]"),
+  );
+  const syncCdRow = document.getElementById("syncCooldownRow");
+  const syncCdBase = document.getElementById("syncCooldownBase");
+  const syncCdMax = document.getElementById("syncCooldownMax");
+  function reflectSyncCooldown(enabled) {
+    const on = enabled !== false;
+    syncCdButtons.forEach((btn) => {
+      const active = (btn.dataset.syncCooldown === "on") === on;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    // 끔이면 커스텀 값 입력은 의미 없으니 흐리게(숨기지 않고 비활성).
+    if (syncCdRow) syncCdRow.style.opacity = on ? "" : "0.4";
+    [syncCdBase, syncCdMax].forEach((el) => {
+      if (el) el.disabled = !on;
+    });
+  }
+  function saveSyncCooldownCustom() {
+    let base = clamp(syncCdBase?.value, 5, 120, SYNC_CD_DEFAULT.base);
+    let max = clamp(syncCdMax?.value, 5, 600, SYNC_CD_DEFAULT.max);
+    base = Math.round(base);
+    max = Math.round(max);
+    if (max < base) max = base;
+    if (syncCdBase) syncCdBase.value = String(base);
+    if (syncCdMax) syncCdMax.value = String(max);
+    try {
+      cachedStorageSet({ [SYNC_CD_CUSTOM_KEY]: { base, max } });
+    } catch {}
+  }
+  (async () => {
+    let enabled = true;
+    let custom = { ...SYNC_CD_DEFAULT };
+    try {
+      const d = await cachedStorageGet([SYNC_CD_ENABLED_KEY, SYNC_CD_CUSTOM_KEY]);
+      enabled = d?.[SYNC_CD_ENABLED_KEY] !== false;
+      const c = d?.[SYNC_CD_CUSTOM_KEY];
+      if (c && typeof c === "object") {
+        custom = {
+          base: Math.round(clamp(c.base, 5, 120, SYNC_CD_DEFAULT.base)),
+          max: Math.round(clamp(c.max, 5, 600, SYNC_CD_DEFAULT.max)),
+        };
+        if (custom.max < custom.base) custom.max = custom.base;
+      }
+    } catch {}
+    if (syncCdBase) syncCdBase.value = String(custom.base);
+    if (syncCdMax) syncCdMax.value = String(custom.max);
+    reflectSyncCooldown(enabled);
+  })();
+  syncCdButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const on = btn.dataset.syncCooldown === "on";
+      reflectSyncCooldown(on);
+      try {
+        cachedStorageSet({ [SYNC_CD_ENABLED_KEY]: on });
+      } catch {}
+    });
+  });
+  [syncCdBase, syncCdMax].forEach((el) =>
+    el?.addEventListener("change", saveSyncCooldownCustom),
+  );
 
   // ── 팔로우 채널 자동 갱신(0=끔/30/60초 프리셋 + 커스텀 3~600초) ────────────
   const FOLLOW_REFRESH_KEY = "cheeseFollowRefreshSec";

@@ -192,6 +192,13 @@
     // 읽어 전달. custom이면 syncCustom={enable,target}을 함께 받는다.
     if (typeof applySyncPreset === "function")
       applySyncPreset(e.data.syncPreset, e.data.syncCustom);
+    // 따라잡기 배속(1.2/1.5/2/3). 쿨다운 on/off + 커스텀 {base,max}(초).
+    if (typeof applySyncTuning === "function")
+      applySyncTuning(
+        e.data.syncRate,
+        e.data.syncCooldownEnabled,
+        e.data.syncCooldownCustom,
+      );
     // 되감기 간격(3~60초). 바뀌면 이미 떠 있는 버튼 라벨/아이콘 갱신.
     const ns = Number(e.data.seekStepS);
     if (Number.isFinite(ns) && ns >= 3 && ns <= 60) {
@@ -297,7 +304,7 @@
   const SYNC_BUTTON_CLASS = "cheese-live-sync-button";
   const SYNC_MENU_ID = "cheese-live-sync-menu";
   const SYNC_CHECK_MS = 1000; // 버튼 활성/비활성 갱신 주기
-  const SYNC_RATE = 1.5; // 따라잡기 배속
+  let SYNC_RATE = 1.5; // 따라잡기 배속(설정으로 변경 가능: 1.2/1.5/2/3)
   const SYNC_MAX_DURATION_MS = 30000; // 안전: 최대 따라잡기 시간
   const SYNC_NO_PROGRESS_MS = 4000; // 이 시간 동안 지연이 의미있게 안 줄면(스톨) 중단
   const SYNC_PROGRESS_EPS_S = 0.3; // '진전'으로 인정할 최소 지연 감소(초)
@@ -313,9 +320,13 @@
   // 현재 적용 중인 임계값. enable=수동/자동 발동 임계, target=따라잡기 목표 지연.
   let syncCfg = { ...SYNC_PRESETS.normal };
   // 자동 따라잡기 재발동 쿨다운(진동 방지). 지수 백오프로 늘었다 안정 시 리셋.
-  const SYNC_AUTO_COOLDOWN_BASE_MS = 15000; // 기본 쿨다운
-  const SYNC_AUTO_COOLDOWN_MAX_MS = 120000; // 백오프 상한(2분)
+  // base/max 는 설정으로 변경 가능(let). 쿨다운을 끄면(syncCooldownOn=false) 백오프 없이
+  // 항상 최소 간격(SYNC_COOLDOWN_OFF_MS)으로만 막아 지연이 밀리면 바로바로 따라잡는다.
+  let SYNC_AUTO_COOLDOWN_BASE_MS = 15000; // 기본 쿨다운
+  let SYNC_AUTO_COOLDOWN_MAX_MS = 120000; // 백오프 상한(2분)
   const SYNC_BACKOFF_RESET_MS = 120000; // 이 시간 동안 안정(임계 아래)이면 백오프 리셋
+  const SYNC_COOLDOWN_OFF_MS = 3000; // 쿨다운 OFF 시 최소 간격(과도한 연속 발동만 방지)
+  let syncCooldownOn = true; // 쿨다운 사용 여부(기본 ON)
   let syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS; // 현재 쿨다운(백오프로 변동)
   let syncLastUnstableAt = 0; // 마지막으로 임계 이상이었던 시각(백오프 리셋 판단)
   const SYNC_USER_SEEK_PAUSE_MS = 60000; // 사용자가 과거로 seek하면 이 시간만큼 자동 따라잡기 중단
@@ -6063,6 +6074,31 @@
     updateSyncButtonState();
   }
 
+  // 따라잡기 배속 + 쿨다운 튜닝 적용. content.js 브리지에서 호출.
+  //  rate: 1.2/1.5/2/3 (그 외 무시). cooldownEnabled: 쿨다운 사용 여부.
+  //  cooldownCustom: {base,max}(초) 또는 null(기본 15~120초).
+  function applySyncTuning(rate, cooldownEnabled, cooldownCustom) {
+    const r = Number(rate);
+    if ([1.2, 1.5, 2, 3].includes(r)) SYNC_RATE = r;
+    syncCooldownOn = cooldownEnabled !== false; // 기본 ON
+    if (
+      cooldownCustom &&
+      typeof cooldownCustom === "object" &&
+      Number.isFinite(Number(cooldownCustom.base)) &&
+      Number.isFinite(Number(cooldownCustom.max))
+    ) {
+      const base = Math.min(120, Math.max(5, Math.round(Number(cooldownCustom.base))));
+      const max = Math.min(600, Math.max(base, Math.round(Number(cooldownCustom.max))));
+      SYNC_AUTO_COOLDOWN_BASE_MS = base * 1000;
+      SYNC_AUTO_COOLDOWN_MAX_MS = max * 1000;
+    } else {
+      SYNC_AUTO_COOLDOWN_BASE_MS = 15000;
+      SYNC_AUTO_COOLDOWN_MAX_MS = 120000;
+    }
+    // 새 기준으로 현재 쿨다운 재설정(백오프 초기화).
+    syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
+  }
+
   // 라이브 최초 진입 후 1회 강제 따라잡기를 무장한다(tick의 페이지 전환에서 호출).
   function armFreshLiveEntry() {
     syncFreshLiveEntry = true;
@@ -6081,6 +6117,13 @@
   // 자동 따라잡기 발동 가능 조건: 쿨다운 경과 + 영상이 재생 중(일시정지/되감기
   // 중이 아님). 사용자가 의도적으로 멈추거나 되감을 땐 자동으로 끌어당기지 않는다.
   function canAutoCatchUp() {
+    // 쿨다운 OFF: 백오프 없이 아주 짧은 최소 간격만 두고 바로 재발동(지연이 밀리면 즉시
+    // 따라잡음). 대신 1.5배속 구간이 잦아질 수 있어 기본은 ON.
+    if (!syncCooldownOn) {
+      return Date.now() - lastAutoCatchUpAt >= SYNC_COOLDOWN_OFF_MS
+        ? canAutoCatchUpBase()
+        : false;
+    }
     // 마지막 발동 이후 일정 시간 임계 아래로 안정됐으면 백오프를 기본값으로 리셋
     // (일시적 네트워크 저하가 끝나면 다시 민첩하게 따라잡도록).
     if (
@@ -6090,6 +6133,10 @@
       syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
     }
     if (Date.now() - lastAutoCatchUpAt < syncAutoCooldownMs) return false;
+    return canAutoCatchUpBase();
+  }
+  // 쿨다운 외 공통 안전조건(되감기/사용자 seek/재생상태 등). 위 canAutoCatchUp 에서 호출.
+  function canAutoCatchUpBase() {
     // 사용자가 되감기로 라이브 엣지에서 유의미하게 뒤(과거)를 보는 중이면(hlsSeekLocked)
     // 자동으로 라이브로 끌어당기지 않는다. autoCatchUpPauseUntil(seek 후 일정 시간 정지)만
     // 으론 그 시간이 지나면 다시 발동해 원점으로 튕겼는데(자동 따라잡기 사용 시), 되감은

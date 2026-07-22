@@ -70,15 +70,20 @@
   const TOAST_ID = "cheese-vf-toast";
   const TOAST_DURATION_MS = 3500; // 프리셋 선택 시 짧게만 안내
   const SETTINGS_URL = "chrome://settings/system";
-  // 선명도 자동 조절(전역 설정, localStorage). 기본 OFF.
+  // 선명도 자동 조절(전역 설정, localStorage). 미설정 환경은 성능 보호를 위해 기본 ON.
   const AUTO_SHARPEN_KEY = "cheeseVideoFilter.autoSharpen";
-  // 프레임 드롭 감지 파라미터.
-  const FRAME_SAMPLE = 30; // 이 프레임 수 동안의 평균 간격으로 판단
-  const FRAME_BUDGET_MS = 22; // 약 45fps 미만이면 느린 것으로 간주
-  const FRAME_RECOVER_MS = 17; // 약 59fps 이상이면 회복으로 간주
+  // 프레임 드롭 감지 파라미터. 화면 rAF 주기는 모니터 주사율·채팅 렌더링에도 영향을
+  // 받으므로 실제 video의 누적 재생/드롭 프레임 변화량을 2초 단위로 비교한다.
+  const FRAME_SAMPLE_INTERVAL_MS = 2000;
+  const FRAME_SAMPLE_MIN_TOTAL = 20;
+  const FRAME_DROP_BAD_RATIO = 0.08;
+  const FRAME_DROP_SEVERE_RATIO = 0.2;
+  const FRAME_DROP_GOOD_RATIO = 0.02;
+  const FRAME_BAD_SAMPLES_REQUIRED = 2;
+  const FRAME_GOOD_SAMPLES_REQUIRED = 5; // 2초 × 5회 = 약 10초 안정 후 복구
   const AUTO_STEP = 0.25; // 한 번에 줄이거나 늘리는 effective 배율 폭
   const AUTO_MIN_SCALE = 0; // 최저(선명도 사실상 0까지 감소 허용)
-  const AUTO_ADJUST_COOLDOWN_MS = 2500; // 조절 간 최소 간격(진동 방지)
+  const AUTO_ADJUST_COOLDOWN_MS = 2500; // 강등 조절 간 최소 간격(진동 방지)
 
   // 필터 파라미터 정의. 각 항목은 슬라이더 범위와 기본값(중립). neutral은 "보정 없음".
   // 단위 설명:
@@ -335,14 +340,24 @@
   // 자동 조절이 곱하는 선명도 배율(1=원래대로, 0=선명도 없음). 사용자가 설정한
   // state.filters.sharpness는 건드리지 않고, 적용 단계에서만 이 배율을 곱한다.
   let autoSharpenScale = 1;
-  // 프레임 간격 측정 상태.
-  let frameMon = { raf: 0, timer: 0, last: 0, acc: 0, count: 0, lastAdjustAt: 0 };
+  // 실제 video 프레임 품질 측정 상태.
+  let frameMon = {
+    timer: 0,
+    video: null,
+    lastTotal: 0,
+    lastDropped: 0,
+    badSamples: 0,
+    goodSamples: 0,
+    lastAdjustAt: 0,
+  };
 
   function loadAutoSharpen() {
     try {
-      return window.localStorage.getItem(AUTO_SHARPEN_KEY) === "1";
+      const saved = window.localStorage.getItem(AUTO_SHARPEN_KEY);
+      // 미설정 환경은 성능 보호를 기본으로 켠다. 사용자가 명시적으로 끈 "0"은 유지.
+      return saved == null ? true : saved === "1";
     } catch {
-      return false;
+      return true;
     }
   }
 
@@ -741,9 +756,9 @@
   }
 
   // ── 선명도 자동 조절(프레임 드롭 감지) ──────────────────────────────────────
-  // 브라우저 확장은 CPU 사용률을 직접 못 읽으므로, rAF 프레임 간격으로 버벅임을
-  // 추정한다. 느린 상태가 이어지면 autoSharpenScale을 낮춰 선명도를 줄이고, 회복되면
-  // 다시 올린다. 사용자가 설정한 state.filters.sharpness는 그대로 둔다.
+  // 브라우저 확장은 CPU/GPU 사용률을 직접 못 읽으므로, video의 실제 재생 프레임 대비
+  // 드롭 프레임 비율로 버벅임을 추정한다. 느린 상태가 이어지면 autoSharpenScale을
+  // 낮추고, 안정 상태가 충분히 유지되면 다시 올린다. 사용자 설정값 자체는 보존한다.
   function setAutoSharpen(enabled) {
     autoSharpenEnabled = Boolean(enabled);
     try {
@@ -762,89 +777,134 @@
     syncUI();
   }
 
-  // 성능 자동조절용 프레임 모니터. ⚠ 예전엔 강한 선명 필터가 켜진 동안 rAF 가 매
-  // 프레임(60fps) 쉬지 않고 돌아 CPU 를 상시 점유했다(프로파일에서 이 tick 이 68% 차지).
-  // 조절은 AUTO_ADJUST_COOLDOWN_MS(2.5초)마다 한 번이면 충분하므로, FRAME_SAMPLE 프레임
-  // (~0.5초)만 측정→평가한 뒤 rAF 를 멈추고, 쿨다운만큼 쉬었다가 setTimeout 으로 다음
-  // 측정 버스트를 예약한다. 이러면 상시 60fps 콜백이 '주기적 짧은 버스트'로 줄어든다.
-  // (탭이 hidden 이면 rAF 도 setTimeout 재개도 도로 hidden 체크로 건너뛴다.)
-  function runFrameSampleBurst() {
-    frameMon.last = 0;
-    frameMon.acc = 0;
-    frameMon.count = 0;
-    const tick = (ts) => {
-      if (document.hidden) {
-        // 백그라운드면 측정 의미 없음 → 버스트 종료 후 쿨다운 뒤 재시도.
-        frameMon.raf = 0;
-        scheduleNextBurst();
-        return;
+  // getVideoPlaybackQuality는 Chromium/Firefox 모두 지원한다. 오래된 환경에서는 webkit
+  // 누적 카운터를 폴백으로 사용하고, 둘 다 없으면 자동 강등을 하지 않는다.
+  function readVideoFrameQuality(video) {
+    try {
+      const q = video?.getVideoPlaybackQuality?.();
+      const total = Number(q?.totalVideoFrames);
+      const dropped = Number(q?.droppedVideoFrames);
+      if (Number.isFinite(total) && Number.isFinite(dropped)) {
+        return { total, dropped };
       }
-      if (!frameMon.last) {
-        frameMon.last = ts;
-        frameMon.raf = requestAnimationFrame(tick);
-        return;
+      const webkitTotal = Number(video?.webkitDecodedFrameCount);
+      const webkitDropped = Number(video?.webkitDroppedFrameCount);
+      if (Number.isFinite(webkitTotal) && Number.isFinite(webkitDropped)) {
+        return { total: webkitTotal, dropped: webkitDropped };
       }
-      const dt = ts - frameMon.last;
-      frameMon.last = ts;
-      // 탭 비활성 등으로 생기는 비정상적 큰 간격은 무시(오탐 방지).
-      if (dt <= 200) {
-        frameMon.acc += dt;
-        frameMon.count += 1;
-      }
-      if (frameMon.count < FRAME_SAMPLE) {
-        frameMon.raf = requestAnimationFrame(tick);
-        return;
-      }
-      const avg = frameMon.acc / frameMon.count;
-      frameMon.raf = 0;
-      evaluateFrameAvg(avg);
-      scheduleNextBurst(); // 측정 끝 → rAF 멈추고 쿨다운 뒤 다음 버스트 예약
-    };
-    frameMon.raf = requestAnimationFrame(tick);
+    } catch {}
+    return null;
   }
 
-  function scheduleNextBurst() {
+  function resetFrameSample(video, quality = readVideoFrameQuality(video)) {
+    frameMon.video = video || null;
+    frameMon.lastTotal = quality?.total || 0;
+    frameMon.lastDropped = quality?.dropped || 0;
+    frameMon.badSamples = 0;
+    frameMon.goodSamples = 0;
+  }
+
+  function scheduleNextFrameSample() {
     if (frameMon.timer) return;
     frameMon.timer = setTimeout(() => {
       frameMon.timer = 0;
-      // 그동안 필터가 꺼졌거나 선명도가 임계 미만이면 재개하지 않는다.
       if (
+        document.hidden ||
+        !autoSharpenEnabled ||
         !state.enabled ||
         state.filters.sharpness < SHARPEN_HEAVY_THRESHOLD
       )
         return;
-      runFrameSampleBurst();
-    }, AUTO_ADJUST_COOLDOWN_MS);
+      sampleVideoFrameQuality();
+    }, FRAME_SAMPLE_INTERVAL_MS);
   }
 
   function startFrameMonitor() {
-    if (frameMon.raf || frameMon.timer) return;
-    runFrameSampleBurst();
+    if (
+      frameMon.timer ||
+      document.hidden ||
+      !autoSharpenEnabled ||
+      !state.enabled
+    )
+      return;
+    const video = appliedVideo || findVideo();
+    if (!video) return;
+    if (frameMon.video !== video) resetFrameSample(video);
+    scheduleNextFrameSample();
   }
 
   function stopFrameMonitor() {
-    if (frameMon.raf) {
-      cancelAnimationFrame(frameMon.raf);
-      frameMon.raf = 0;
-    }
     if (frameMon.timer) {
       clearTimeout(frameMon.timer);
       frameMon.timer = 0;
     }
+    resetFrameSample(null, null);
   }
 
-  function evaluateFrameAvg(avg) {
+  function sampleVideoFrameQuality() {
+    const video = appliedVideo || findVideo();
+    if (!video || video !== frameMon.video) {
+      resetFrameSample(video);
+      scheduleNextFrameSample();
+      return;
+    }
+
+    const quality = readVideoFrameQuality(video);
+    if (!quality) return;
+    const deltaTotal = quality.total - frameMon.lastTotal;
+    const deltaDropped = Math.max(0, quality.dropped - frameMon.lastDropped);
+    frameMon.lastTotal = quality.total;
+    frameMon.lastDropped = quality.dropped;
+
+    // 일시정지·버퍼링·표본 부족은 필터 성능으로 판정하지 않는다.
+    if (
+      video.paused ||
+      video.ended ||
+      video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA ||
+      deltaTotal < FRAME_SAMPLE_MIN_TOTAL
+    ) {
+      frameMon.badSamples = 0;
+      frameMon.goodSamples = 0;
+      scheduleNextFrameSample();
+      return;
+    }
+
+    const dropRatio = deltaDropped / Math.max(1, deltaTotal);
+    evaluateFrameDropRatio(dropRatio);
+    scheduleNextFrameSample();
+  }
+
+  function evaluateFrameDropRatio(dropRatio) {
     const now = Date.now();
-    if (now - frameMon.lastAdjustAt < AUTO_ADJUST_COOLDOWN_MS) return;
-    if (avg > FRAME_BUDGET_MS && autoSharpenScale > AUTO_MIN_SCALE) {
-      // 느림 → 선명도를 한 단계 줄인다.
-      autoSharpenScale = Math.max(AUTO_MIN_SCALE, autoSharpenScale - AUTO_STEP);
+    const severe = dropRatio >= FRAME_DROP_SEVERE_RATIO;
+    if (dropRatio >= FRAME_DROP_BAD_RATIO) {
+      frameMon.badSamples += 1;
+      frameMon.goodSamples = 0;
+    } else if (dropRatio <= FRAME_DROP_GOOD_RATIO) {
+      frameMon.goodSamples += 1;
+      frameMon.badSamples = 0;
+    } else {
+      frameMon.badSamples = 0;
+      frameMon.goodSamples = 0;
+    }
+
+    if (
+      (severe || frameMon.badSamples >= FRAME_BAD_SAMPLES_REQUIRED) &&
+      autoSharpenScale > AUTO_MIN_SCALE &&
+      now - frameMon.lastAdjustAt >= AUTO_ADJUST_COOLDOWN_MS
+    ) {
+      const step = severe ? AUTO_STEP * 2 : AUTO_STEP;
+      autoSharpenScale = Math.max(AUTO_MIN_SCALE, autoSharpenScale - step);
       frameMon.lastAdjustAt = now;
+      frameMon.badSamples = 0;
       reapplySharpenOnly();
-    } else if (avg < FRAME_RECOVER_MS && autoSharpenScale < 1) {
-      // 회복 → 선명도를 한 단계 되돌린다.
+    } else if (
+      frameMon.goodSamples >= FRAME_GOOD_SAMPLES_REQUIRED &&
+      autoSharpenScale < 1
+    ) {
       autoSharpenScale = Math.min(1, autoSharpenScale + AUTO_STEP);
       frameMon.lastAdjustAt = now;
+      frameMon.goodSamples = 0;
       reapplySharpenOnly();
     }
   }
@@ -859,6 +919,7 @@
     const css = buildCssFilter();
     video.style.setProperty("filter", css, "important");
     ensureStyleRule(css);
+    syncAutoSharpenStatus();
   }
 
   function setEnabled(enabled) {
@@ -1583,8 +1644,8 @@
     // 오디오 믹서 버튼 바로 뒤(옆)에 둔다. 믹서가 아직 없으면 native 볼륨 뒤,
     // 그것도 없으면 컨트롤 맨 앞.
     const mixerControl = controls.querySelector(".cheese-audio-mixer-control");
-    // tick이 매 프레임 부르므로 패널 head를 재생성하는 syncUI 대신 버튼만
-    // 가볍게 갱신하는 syncButton을 쓴다(전원 토글 클릭이 삼켜지는 것 방지).
+    // DOM 변이 보정 때 패널 head를 재생성하는 syncUI 대신 버튼만 가볍게 갱신한다
+    // (전원 토글 클릭이 삼켜지는 것 방지).
     if (mixerControl) {
       if (wrap.previousElementSibling === mixerControl) {
         syncButton();
@@ -1925,7 +1986,7 @@
           ${renderCustomDraftBar()}
           ${PARAM_KEYS.map(renderParamRow).join("")}
           <div class="cheese-vf-auto-row">
-            <span class="cheese-vf-auto-label">선명도 자동 조절${INFO_TEXT["auto-sharpen"] ? infoIcon("auto-sharpen") : ""}</span>
+            <span class="cheese-vf-auto-label">선명도 자동 조절${INFO_TEXT["auto-sharpen"] ? infoIcon("auto-sharpen") : ""}<em class="cheese-vf-auto-status" data-auto-sharpen-status hidden></em></span>
             <label class="cheese-vf-switch">
               <input type="checkbox" data-action="auto-sharpen-toggle" ${autoSharpenEnabled ? "checked" : ""}>
               <i aria-hidden="true"></i>
@@ -2548,6 +2609,17 @@
 
     const autoToggle = panel.querySelector("[data-action='auto-sharpen-toggle']");
     if (autoToggle) autoToggle.checked = autoSharpenEnabled;
+    syncAutoSharpenStatus();
+  }
+
+  function syncAutoSharpenStatus() {
+    const status = ui?.panel?.querySelector("[data-auto-sharpen-status]");
+    if (!status) return;
+    const protectedNow = autoSharpenEnabled && autoSharpenScale < 1;
+    status.hidden = !protectedNow;
+    status.textContent = protectedNow
+      ? `성능 보호 ${Math.round(autoSharpenScale * 100)}%`
+      : "";
   }
 
   // 버튼 클릭 위임(document 레벨).
@@ -2625,7 +2697,63 @@
   );
 
   // ── 부트스트랩 ────────────────────────────────────────────────────────────
+  function isTickStable(pageKey) {
+    if (!pageKey || pageKey !== currentPageKey) return false;
+
+    const button = document.querySelector(`.${CONTROL_CLASS}`);
+    const panelOpen = Boolean(ui?.panel?.isConnected);
+    if (featureFlags.videoFilter) {
+      return (
+        !button &&
+        !panelOpen &&
+        !appliedVideo &&
+        !document.querySelector("video.cheese-vf-target")
+      );
+    }
+
+    if (!button?.isConnected) return false;
+    const controls =
+      document.querySelector(".pzp-pc__bottom-buttons-left") ||
+      findPlayer()?.querySelector(".pzp-pc__bottom-buttons-left");
+    if (!controls || button.parentElement !== controls) return false;
+    const mixerControl = controls.querySelector(".cheese-audio-mixer-control");
+    if (mixerControl) {
+      if (button.previousElementSibling !== mixerControl) return false;
+    } else {
+      const nativeVolume = Array.from(
+        controls.querySelectorAll(".pzp-pc__volume-control"),
+      ).find(
+        (el) =>
+          !el.classList.contains(CONTROL_CLASS) &&
+          !el.classList.contains("cheese-audio-mixer-control"),
+      );
+      if (nativeVolume && button.previousElementSibling !== nativeVolume) {
+        return false;
+      }
+    }
+    if (
+      videoFilterAlwaysOn &&
+      !state.enabled &&
+      !state.userDisabled
+    ) {
+      return false;
+    }
+    if (!state.enabled) {
+      return !appliedVideo && !document.querySelector("video.cheese-vf-target");
+    }
+
+    const video = findVideo();
+    return Boolean(
+      video &&
+        video === appliedVideo &&
+        video.classList.contains("cheese-vf-target"),
+    );
+  }
+
   function tick() {
+    // 설정 메시지처럼 옵저버를 거치지 않는 직접 호출도 숨김 탭에서는 처리하지 않는다.
+    // 복귀 시 visibilitychange에서 전체 상태를 한 번 보정한다.
+    if (document.hidden) return;
     // 클립 만들기(클립 에디터)에선 비디오 필터를 개입시키지 않는다(seeker 드래그 버벅임 방지).
     if (location.pathname.startsWith("/clip-editor")) return;
     const pageKey = getPageKey();
@@ -2655,6 +2783,8 @@
       draftBackup = null;
       clearPresetDirty();
       resolveAndLoadChannel(pageKey);
+    } else if (isTickStable(pageKey)) {
+      return;
     }
     // 팝업 기능 숨김 플래그 반영. 숨김이면 버튼 제거 + 효과 off(state.enabled는 유지).
     if (featureFlags.videoFilter) {
@@ -2685,23 +2815,68 @@
     requestState(channelId);
   }
 
-  // observer 콜백에서 tick을 직접 부르면, tick이 일으킨 DOM 변경(버튼 삽입/
-  // <style>·<svg> 추가 등)이 다시 콜백을 깨워 동기적으로 폭주할 수 있다. rAF로
-  // 디바운스해 프레임당 한 번만 돌게 한다.
-  let tickScheduled = false;
+  // 라이브 채팅과 플레이어 UI는 문서 전체에 DOM 변이를 계속 만든다. 프레임마다 tick을
+  // 실행하면 필터가 안정된 뒤에도 querySelector와 버튼 보정이 반복되므로, 변이가 몰려도
+  // 250ms에 한 번만 실행한다. 숨김 탭에서는 옵저버 자체를 끊고 복귀 시 전체 보정한다.
+  const TICK_THROTTLE_MS = 250;
+  let tickTimer = 0;
+  let observer = null;
+
   function scheduleTick() {
-    if (tickScheduled) return;
-    tickScheduled = true;
-    requestAnimationFrame(() => {
-      tickScheduled = false;
+    if (document.hidden || tickTimer) return;
+    tickTimer = window.setTimeout(() => {
+      tickTimer = 0;
+      if (document.hidden) return;
       tick();
+    }, TICK_THROTTLE_MS);
+  }
+
+  function startObserver() {
+    if (observer || document.hidden) return;
+    observer = new MutationObserver(scheduleTick);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
     });
   }
 
-  const observer = new MutationObserver(scheduleTick);
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-  tick();
+  function stopObserver() {
+    observer?.disconnect();
+    observer = null;
+    if (tickTimer) {
+      clearTimeout(tickTimer);
+      tickTimer = 0;
+    }
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      stopObserver();
+      stopFrameMonitor();
+      return;
+    }
+    startObserver();
+    tick();
+    if (
+      state.enabled &&
+      autoSharpenEnabled &&
+      state.filters.sharpness >= SHARPEN_HEAVY_THRESHOLD
+    ) {
+      startFrameMonitor();
+    }
+  }
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("pageshow", handleVisibilityChange);
+  window.addEventListener(
+    "pagehide",
+    () => {
+      stopObserver();
+      stopFrameMonitor();
+    },
+    { once: true },
+  );
+
+  startObserver();
+  if (!document.hidden) tick();
 })();

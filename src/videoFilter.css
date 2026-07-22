@@ -810,6 +810,18 @@
   font-size: 12px;
 }
 
+.cheese-vf-auto-status {
+  flex: none;
+  margin-left: 2px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(176, 108, 255, 0.16);
+  color: #c79aff;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
 .cheese-vf-switch {
   position: relative;
   display: inline-flex;

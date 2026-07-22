@@ -10,6 +10,7 @@
   --cheese-platter-border-accent-violet-base: #4e41db;
   --cheese-platter-border-accent-prime-strong: #cf9a12;
   --cheese-platter-border-brand-alpha-weak: #1bb37326;
+  --cheese-platter-border-brand-strong: #1bb373;
   --cheese-platter-border-brand-base: #32bb81;
   --cheese-platter-border-brand-weak: #49c28f;
   --cheese-platter-border-neutral-base: #c0c1c2;
@@ -33,6 +34,7 @@
   --cheese-platter-shadow-base: #0000000d;
   --cheese-platter-shadow-strong: #0000001a;
   --cheese-platter-surface-brand-weak: #d1f0e3;
+  --cheese-platter-surface-brand-alpha-stronger: #1bb373cc;
   --cheese-platter-surface-interaction-lighten-hovered: #0000000d;
   --cheese-platter-surface-neutral-base: #e1e1e5;
   --cheese-platter-surface-neutral-subtle: #e8e9eb;
@@ -46,6 +48,7 @@
   --cheese-platter-border-accent-violet-base: #4e41db;
   --cheese-platter-border-accent-prime-strong: #cf9a12;
   --cheese-platter-border-brand-alpha-weak: #00ffa326;
+  --cheese-platter-border-brand-strong: #00ffa3;
   --cheese-platter-border-brand-base: #00e693;
   --cheese-platter-border-brand-weak: #009962;
   --cheese-platter-border-neutral-base: #4d4d4d;
@@ -69,6 +72,7 @@
   --cheese-platter-shadow-base: #0003;
   --cheese-platter-shadow-strong: #0000004d;
   --cheese-platter-surface-brand-weak: #006641;
+  --cheese-platter-surface-brand-alpha-stronger: #00ffa3cc;
   --cheese-platter-surface-interaction-lighten-hovered: #ffffff0d;
   --cheese-platter-surface-neutral-base: #2e3033;
   --cheese-platter-surface-neutral-subtle: #2a2c2f;
@@ -3021,7 +3025,7 @@ html.cheese-cf-on
   opacity: 0;
   transition: opacity 0.12s ease;
 }
-/* lucide star: 즐겨찾기(is-fav)면 채움, 아니면 외곽선만. */
+/* Lucide Star: 즐겨찾기(is-fav)면 채움, 아니면 외곽선만 표시한다. */
 .cheese-follow-fav.is-fav .cheese-cf-star-svg {
   fill: currentColor;
 }
@@ -3058,6 +3062,361 @@ html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
 .cheese-follow-fav.is-fav,
 .cheese-follow-fav:hover {
   color: #ffcc33;
+}
+
+/* 라이브·다시보기·채널·검색 결과 액션 영역의 전용 팔로잉 즐겨찾기 버튼. */
+.cheese-cf-page-favorite {
+  flex: 0 0 auto;
+  line-height: 0;
+  background: var(--cheese-platter-border-neutral-strong-static) !important;
+  color: var(--cheese-platter-content-neutral-primary-static) !important;
+}
+
+/* 전체 방송·팔로잉 라이브 제외 태그 */
+.cheese-live-tag-filter-hidden,
+[data-cheese-live-tag-filter-hidden="1"] {
+  display: none !important;
+}
+
+.cheese-live-tag-filter-button {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+[role="tablist"] > .cheese-live-tag-filter-button {
+  margin-left: 4px;
+}
+
+.cheese-live-tag-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(
+    --sem-color-surface-brand-weak,
+    var(--cheese-platter-surface-brand-weak)
+  );
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
+  font-size: 11px;
+  font-style: normal;
+  line-height: 18px;
+}
+
+html.cheese-live-tag-filter-lock,
+html.cheese-live-tag-filter-lock body {
+  overflow: hidden !important;
+}
+
+.cheese-live-tag-filter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.cheese-live-tag-filter-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(500px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 64px));
+  overflow: hidden;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.35);
+}
+
+.cheese-live-tag-filter-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border-bottom: 1px solid
+    var(
+      --sem-color-surface-neutral-base,
+      var(--cheese-platter-surface-neutral-base)
+    );
+}
+
+.cheese-live-tag-filter-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cheese-live-tag-filter-head strong {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
+}
+
+.cheese-live-tag-filter-head span {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.cheese-live-tag-filter-head > button,
+.cheese-live-tag-filter-row > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cheese-live-tag-filter-head > button:hover,
+.cheese-live-tag-filter-row > button:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+}
+
+.cheese-live-tag-filter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 16px 18px 10px;
+}
+
+.cheese-live-tag-filter-form input {
+  min-width: 0;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 11px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 6px;
+  outline: 0;
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: inherit;
+  font-size: 13px;
+}
+
+.cheese-live-tag-filter-form input:focus {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+}
+
+.cheese-live-tag-filter-form button,
+.cheese-live-tag-filter-bulk button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 6px;
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-live-tag-filter-form button {
+  border-color: var(
+    --sem-color-border-brand-strong,
+    var(--cheese-platter-border-brand-strong)
+  );
+  background: var(
+    --sem-color-surface-brand-alpha-stronger,
+    var(--cheese-platter-surface-brand-alpha-stronger)
+  );
+  color: var(--cheese-platter-content-neutral-primary-static);
+}
+.cheese-live-tag-filter-form button:hover {
+  filter: brightness(1.08);
+}
+
+.cheese-live-tag-filter-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 18px 10px;
+  padding: 8px 10px;
+  border: 1px solid
+    var(
+      --sem-color-surface-neutral-base,
+      var(--cheese-platter-surface-neutral-base)
+    );
+  border-radius: 6px;
+}
+
+.cheese-live-tag-filter-bulk > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-live-tag-filter-bulk input,
+.cheese-live-tag-filter-row input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-live-tag-filter-bulk > span:not(.cheese-live-tag-filter-spacer) {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+}
+
+.cheese-live-tag-filter-spacer {
+  flex: 1;
+}
+
+.cheese-live-tag-filter-bulk button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cheese-live-tag-filter-bulk
+  button[data-live-tag-filter-remove-selected]:not(:disabled):hover,
+.cheese-live-tag-filter-bulk button[data-live-tag-filter-remove-all]:hover {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+
+.cheese-live-tag-filter-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0 18px 18px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cheese-live-tag-filter-list button[data-live-tag-filter-remove]:hover {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+
+.cheese-live-tag-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  border-bottom: 1px solid
+    var(
+      --sem-color-surface-neutral-base,
+      var(--cheese-platter-surface-neutral-base)
+    );
+}
+
+.cheese-live-tag-filter-row > label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+.cheese-live-tag-filter-row > label span {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-live-tag-filter-empty {
+  margin: 0;
+  padding: 24px 18px 30px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 13px;
+  text-align: center;
+}
+
+.cheese-live-tag-filter-bulk[hidden],
+.cheese-live-tag-filter-empty[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .cheese-live-tag-filter-bulk {
+    flex-wrap: wrap;
+  }
+
+  .cheese-live-tag-filter-spacer {
+    display: none;
+  }
+}
+.cheese-cf-page-favorite .cheese-cf-star-svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+.cheese-cf-page-favorite:hover,
+.cheese-cf-page-favorite.is-fav {
+  color: #ffcc33 !important;
+}
+.cheese-cf-page-favorite.is-fav .cheese-cf-star-svg {
+  fill: currentColor;
 }
 
 /* ── 즐겨찾기 구분: 항목 테두리/배경색(sbFollowFavStyle) ── */
@@ -3166,10 +3525,75 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
   cursor: default;
 }
 /* 더보기/접기 문구 버튼 바(헤더 아래·목록 위쪽). 둘 다 가능하면 나란히. */
+/* ── 전용 팔로잉 목록 '맨 위로' FAB ── */
+/* 우리 nav 안 마지막 자식. sticky bottom 으로 스크롤 컨테이너 하단 우측에 떠 있는다.
+   평소 숨김(opacity 0 + 클릭 불가), 스크롤이 임계 넘으면 is-show 로 나타난다. */
+.cheese-cf-fab {
+  position: sticky;
+  bottom: 10px;
+  float: right;
+  margin: 4px 4px 8px 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base, #4d4d4d)
+    );
+  border-radius: 50%;
+  background: var(
+    --sem-color-background-neutral-strong,
+    var(--cheese-platter-background-neutral-strong, #26272b)
+  );
+  color: var(
+    --sem-color-content-neutral-base,
+    var(--cheese-platter-content-neutral-base, #e1e1e5)
+  );
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+.cheese-cf-fab.is-show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.cheese-cf-fab:hover {
+  background: var(
+    --sem-color-background-neutral-strongest,
+    var(--cheese-platter-background-neutral-strongest, #303136)
+  );
+}
+/* 접힘 상태(아이콘만): FAB 는 폭이 좁아 방해되므로 숨긴다. */
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-fab {
+  display: none !important;
+}
+
 .cheese-cf-more-bar {
   display: flex;
   gap: 6px;
   margin-bottom: 6px;
+  /* 목록 스크롤 시 더보기/접기 바를 스크롤 컨테이너 상단에 고정. 배경을 사이드바 색으로
+     채워 아래로 지나가는 항목이 비쳐 보이지 않게 한다. top 을 살짝 음수로 둬 상단의
+     빈 틈을 없애고, 그만큼 padding 으로 메워 바가 잘리지 않게 한다. */
+  position: sticky;
+  top: -5px;
+  z-index: 4;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base, #141517)
+  );
+  padding-top: 5px;
 }
 .cheese-cf-more {
   flex: 1 1 auto;
@@ -3222,7 +3646,9 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
 }
 /* 접힘 상태: 별표는 즐겨찾기(is-fav)인 것만 프로필 우상단에 작은 배지로 항상 표시한다.
    (비-fav 는 숨김. 해제는 펼친 상태에서만 — JS 가 접힘 클릭 무시.) */
-#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-follow-fav {
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-follow-fav {
   display: none !important;
 }
 #sidebar:not([class*="_is_expanded_"])
@@ -5721,4 +6147,205 @@ html.cheese-vod-chapter-hide
 .cheese-comment-block-toast.is-show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* ── 미리보기 헤더 요소별 숨김(cheese-fp-hide-<part>) ──
+   설정에서 각 요소를 개별 on/off. 체크(=숨김)면 해당 html 클래스가 붙어 그 요소를 감춘다. */
+/* 제목 */
+#cheese-follow-preview.cheese-fp-hide-title .cheese-follow-preview-meta-title {
+  display: none !important;
+}
+/* 프로필 사진 */
+#cheese-follow-preview.cheese-fp-hide-profile
+  .cheese-follow-preview-meta-profile {
+  display: none !important;
+}
+/* 방송인 이름(인증마크도 함께) */
+#cheese-follow-preview.cheese-fp-hide-name .cheese-follow-preview-meta-name,
+#cheese-follow-preview.cheese-fp-hide-name
+  .cheese-follow-preview-meta-verified {
+  display: none !important;
+}
+/* 카테고리 */
+#cheese-follow-preview.cheese-fp-hide-category
+  .cheese-follow-preview-meta-category {
+  display: none !important;
+}
+/* 시청자 수 — 우측·중앙하단(항상 표시 옵션) 두 위치 모두 */
+#cheese-follow-preview.cheese-fp-hide-viewers
+  .cheese-follow-preview-meta-viewers {
+  display: none !important;
+}
+/* 경과 시간 — 우측·중앙하단 두 위치 모두 */
+#cheese-follow-preview.cheese-fp-hide-elapsed
+  .cheese-follow-preview-meta-elapsed {
+  display: none !important;
+}
+/* 이름·인증·카테고리가 모두 숨겨져 sub 줄이 비면 공간만 차지하므로 접는다. */
+#cheese-follow-preview.cheese-fp-hide-name.cheese-fp-hide-category
+  .cheese-follow-preview-meta-sub {
+  display: none !important;
+}
+
+/* 전용 팔로잉 목록(라이브 채널)의 호버 툴팁: 헤더 팔로잉 툴팁 마크업을 우리 툴팁
+   컨테이너(#cheese-follow-channel-tooltip) 안에서 재사용한다. 위치는 컨테이너(JS 좌표)
+   가 잡으므로 내부 tooltip/inner 의 자체 위치·표시 규칙은 무력화하고 내용 스타일만 쓴다. */
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip {
+  position: static !important;
+  transform: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  display: block;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-inner {
+  display: block;
+  width: 220px;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: var(--sem-color-content-neutral-cool-strong);
+  box-shadow:
+    0 2px 2px
+      var(--sem-color-shadow-strong, var(--cheese-platter-shadow-strong)),
+    0 2px 6px 2px
+      var(--sem-color-shadow-base, var(--cheese-platter-shadow-base));
+  word-break: break-all;
+  word-wrap: break-word;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-group {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  gap: 4px 8px;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-name {
+  display: inline-flex;
+  flex: none;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  color: var(
+    --sem-color-content-brand-base,
+    var(
+      --sem-color-content-neutral-cool-strong,
+      var(--cheese-platter-content-neutral-cool-strong)
+    )
+  );
+  /* 헤더에서 가져온 font-family. 확보 전에는 상속 폰트를 사용한다. */
+  font-family: var(--cheese-fct-name-font, inherit);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 16px;
+}
+#cheese-follow-channel-tooltip
+  .cheese-header-follow-tooltip-name
+  span:first-child {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-official-mark,
+#cheese-follow-channel-tooltip .cheese-header-follow-achievement-badge {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  margin-top: 1px;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-official-mark {
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-achievement-badge {
+  background-position: 50%;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-category {
+  display: inline-block;
+  height: 20px;
+  max-width: 100%;
+  margin: -2px 0;
+  padding: 0 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  background-color: var(
+    --sem-color-surface-neutral-subtle,
+    var(--cheese-platter-surface-neutral-subtle)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(
+      --sem-color-content-neutral-cool-weak,
+      var(--cheese-platter-content-neutral-cool-weak)
+    )
+  );
+  /* 헤더에서 가져온 font-family. 확보 전에는 상속 폰트를 사용한다. */
+  font-family: var(--cheese-fct-cat-font, inherit);
+  font-size: 11px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--color-content-02, var(--sem-color-content-neutral-cool-strong));
+  font-size: 13px;
+  letter-spacing: -0.3px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+}
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-count {
+  display: block;
+  position: relative;
+  padding-left: 8px;
+  margin: 8px 0 0;
+  color: var(
+    --sem-color-content-accent-red-strong,
+    var(--cheese-platter-content-accent-red-strong)
+  );
+  letter-spacing: -0.3px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+#cheese-follow-channel-tooltip .cheese-header-follow-tooltip-count::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: currentColor;
+  content: "";
+  transform: translateY(-50%);
+}
+
+/* 라이브 채널 헤더-스타일 툴팁일 때: 컨테이너 자체 박스(패딩/배경/테두리)를 없애고
+   내부 inner 가 박스를 담당하게 한다(이중 박스 방지). */
+.cheese-follow-channel-tooltip.is-header-style {
+  padding: 0 !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
