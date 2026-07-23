@@ -31,14 +31,18 @@
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
     "cheeseCardLivePreview",
+    "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewWheelDelaySec",
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
+    "cheeseChannelLiveProfileBackground",
+    "cheeseChannelProfileRadius",
     "cheeseChatButtonWrap",
     "cheeseChatFoldPersist",
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
+    "cheeseChatTimeFormat",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowCleanup",
@@ -68,6 +72,7 @@
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
+    "cheeseLiveViewerCountInline",
     "cheeseLiveTagFilterButton",
     "cheeseLiveTagFilters",
     "cheeseLogPowerClickAction",
@@ -84,6 +89,7 @@
     "cheeseMixerClickNoPanel",
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
+    "cheeseMixerGainStep",
     "cheeseMixerGlobalDefaultMode",
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
@@ -263,6 +269,9 @@
   function applyTheme(theme) {
     const isDark = theme === "dark";
     document.documentElement.dataset.theme = isDark ? "dark" : "light";
+    try {
+      window.Coloris?.set({ themeMode: isDark ? "dark" : "light" });
+    } catch {}
     themeToggle?.setAttribute("aria-pressed", String(isDark));
     themeToggle?.setAttribute(
       "aria-label",
@@ -465,6 +474,61 @@
   inputs.forEach((input) => input.addEventListener("change", save));
   load();
 
+  // ── 채팅 시간 표시 형식(24시간 | AM/PM | 오전/오후) ───────────────────────
+  const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
+  const chatShowTimeInput = document.querySelector(
+    '[data-feature="chatShowTime"]',
+  );
+  const chatTimeFormatItem = document.querySelector(
+    "[data-chat-time-format-item]",
+  );
+  const chatTimeFormatButtons = Array.from(
+    document.querySelectorAll("[data-chat-time-format-value]"),
+  );
+  let chatTimeMoaLocked = false;
+  function normalizeChatTimeFormat(value) {
+    return value === "12h-en" || value === "12h-ko" ? value : "24h";
+  }
+  function reflectChatTimeFormat(value) {
+    const normalized = normalizeChatTimeFormat(value);
+    chatTimeFormatButtons.forEach((button) => {
+      const active = button.dataset.chatTimeFormatValue === normalized;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  function reflectChatTimeFormatAvailability() {
+    const disabled = chatTimeMoaLocked || !chatShowTimeInput?.checked;
+    chatTimeFormatButtons.forEach((button) => {
+      button.disabled = disabled;
+    });
+    chatTimeFormatItem?.classList.toggle("is-locked", disabled);
+  }
+  (async () => {
+    let format = "24h";
+    try {
+      const data = await cachedStorageGet(CHAT_TIME_FORMAT_KEY);
+      format = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
+    } catch {}
+    reflectChatTimeFormat(format);
+    reflectChatTimeFormatAvailability();
+  })();
+  chatTimeFormatButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const format = normalizeChatTimeFormat(
+        button.dataset.chatTimeFormatValue,
+      );
+      reflectChatTimeFormat(format);
+      try {
+        cachedStorageSet({ [CHAT_TIME_FORMAT_KEY]: format });
+      } catch {}
+    });
+  });
+  chatShowTimeInput?.addEventListener(
+    "change",
+    reflectChatTimeFormatAvailability,
+  );
+
   // ── 채팅 폰트 크기: 커스텀 팝오버 드롭다운(0.8~2, 기본 1) ──────────────────
   const CHAT_FONT_SCALE_KEY = "cheeseChatFontScale";
   // 입력은 퍼센트(80~200), 저장값은 배율(0.8~2.0).
@@ -559,6 +623,18 @@
         item?.removeAttribute("title");
       }
     });
+    chatTimeMoaLocked = locked.has("chatShowTime");
+    reflectChatTimeFormatAvailability();
+    if (chatTimeFormatItem) {
+      if (chatTimeMoaLocked) {
+        chatTimeFormatItem.setAttribute(
+          "title",
+          "배지 모아 챗이 이 기능을 제어 중입니다",
+        );
+      } else {
+        chatTimeFormatItem.removeAttribute("title");
+      }
+    }
     // 폰트 크기 입력도 moa가 폰트 스케일을 제어 중이면 잠근다.
     if (chatFontScaleInput) {
       const item = chatFontScaleInput.closest(".settings-item");
@@ -1821,6 +1897,38 @@
     2,
   );
 
+  // 플레이어 빠른 게인과 믹서 패널 게인 슬라이더의 공통 조절 간격(1~10%, 기본 5).
+  const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
+  const mixerGainStepInput = document.querySelector(
+    "[data-mixer-gain-step]",
+  );
+  function clampMixerGainStep(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 5;
+    return Math.min(10, Math.max(1, Math.round(n)));
+  }
+  if (mixerGainStepInput) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet(MIXER_GAIN_STEP_KEY);
+        mixerGainStepInput.value = String(
+          clampMixerGainStep(data?.[MIXER_GAIN_STEP_KEY] ?? 5),
+        );
+      } catch {
+        mixerGainStepInput.value = "5";
+      }
+    })();
+    const saveMixerGainStep = () => {
+      const value = clampMixerGainStep(mixerGainStepInput.value);
+      mixerGainStepInput.value = String(value);
+      try {
+        cachedStorageSet({ [MIXER_GAIN_STEP_KEY]: value });
+      } catch {}
+    };
+    mixerGainStepInput.addEventListener("change", saveMixerGainStep);
+    mixerGainStepInput.addEventListener("blur", saveMixerGainStep);
+  }
+
   // 문자열 값 세그먼티드(정렬 기준 등). bindGainRangeSegmented의 문자열 버전.
   function bindStringSegmented(group, dataAttr, storageKey, allowed, def, onChange) {
     if (!group) return;
@@ -2529,6 +2637,392 @@
   });
   loadChannelLiveButtonEnd();
 
+  // ── 채널 프로필 모서리(0~50%, 기본 50%) ─────────────────────────────────
+  const CHANNEL_PROFILE_RADIUS_KEY = "cheeseChannelProfileRadius";
+  const channelProfileRadiusSlider = document.querySelector(
+    "[data-channel-profile-radius-slider]",
+  );
+  const channelProfileRadiusInput = document.querySelector(
+    "[data-channel-profile-radius]",
+  );
+  const channelLiveProfilePreview = document.querySelector(
+    "[data-channel-live-profile-preview]",
+  );
+  function clampChannelProfileRadius(value) {
+    const radius = Number(value);
+    if (!Number.isFinite(radius)) return 50;
+    return Math.min(50, Math.max(0, Math.round(radius)));
+  }
+  function reflectChannelProfileRadius(value) {
+    const radius = clampChannelProfileRadius(value);
+    if (channelProfileRadiusSlider) {
+      channelProfileRadiusSlider.value = String(radius);
+    }
+    if (channelProfileRadiusInput) {
+      channelProfileRadiusInput.value = String(radius);
+    }
+    channelLiveProfilePreview?.style.setProperty(
+      "--channel-profile-preview-radius",
+      `${radius}%`,
+    );
+  }
+  function saveChannelProfileRadius(value) {
+    const radius = clampChannelProfileRadius(value);
+    reflectChannelProfileRadius(radius);
+    try {
+      cachedStorageSet({ [CHANNEL_PROFILE_RADIUS_KEY]: radius });
+    } catch {}
+  }
+  (async () => {
+    let radius = 50;
+    try {
+      const data = await cachedStorageGet(CHANNEL_PROFILE_RADIUS_KEY);
+      radius = clampChannelProfileRadius(
+        data?.[CHANNEL_PROFILE_RADIUS_KEY] ?? 50,
+      );
+    } catch {}
+    reflectChannelProfileRadius(radius);
+  })();
+  channelProfileRadiusSlider?.addEventListener("input", () => {
+    saveChannelProfileRadius(channelProfileRadiusSlider.value);
+  });
+  channelProfileRadiusInput?.addEventListener("change", () => {
+    saveChannelProfileRadius(channelProfileRadiusInput.value);
+  });
+  channelProfileRadiusInput?.addEventListener("blur", () => {
+    saveChannelProfileRadius(channelProfileRadiusInput.value);
+  });
+
+  // ── 라이브 프로필 테두리 그라디언트(기본 OFF) ─────────────────────────────
+  const CHANNEL_LIVE_PROFILE_BACKGROUND_KEY =
+    "cheeseChannelLiveProfileBackground";
+  const CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT = Object.freeze({
+    enabled: false,
+    angle: 180,
+    start: "#00ffa3",
+    startAlpha: 100,
+    end: "#027f80",
+    endAlpha: 100,
+  });
+  const channelLiveProfileCustomInput = document.querySelector(
+    "[data-channel-live-profile-custom]",
+  );
+  const channelLiveProfileEditor = document.querySelector(
+    "[data-channel-live-profile-editor]",
+  );
+  const channelLiveProfileStartInput = document.querySelector(
+    "[data-channel-live-profile-start]",
+  );
+  const channelLiveProfileAngleSlider = document.querySelector(
+    "[data-channel-live-profile-angle-slider]",
+  );
+  const channelLiveProfileAngleInput = document.querySelector(
+    "[data-channel-live-profile-angle]",
+  );
+  const channelLiveProfileEndInput = document.querySelector(
+    "[data-channel-live-profile-end]",
+  );
+  const channelLiveProfileReset = document.querySelector(
+    "[data-channel-live-profile-reset]",
+  );
+  try {
+    window.Coloris?.({
+      el: "[data-channel-live-profile-color]",
+      parent: document.body,
+      theme: "default",
+      themeMode:
+        document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+      margin: 6,
+      format: "hex",
+      alpha: true,
+      forceAlpha: true,
+      selectInput: true,
+      closeLabel: "색상 선택 완료",
+      a11y: {
+        open: "색상 선택기 열기",
+        close: "색상 선택기 닫기",
+        clear: "색상 지우기",
+        marker: "채도: {s}. 밝기: {v}.",
+        hueSlider: "색조",
+        alphaSlider: "불투명도",
+        input: "HEX 색상값",
+        format: "색상 형식",
+        swatch: "색상 견본",
+        instruction:
+          "방향키로 채도와 밝기를 조절하고 Enter 키로 선택합니다.",
+      },
+    });
+  } catch {}
+  panelsScroll?.addEventListener(
+    "scroll",
+    () => {
+      try {
+        window.Coloris?.close();
+      } catch {}
+    },
+    { passive: true },
+  );
+  let channelLiveProfileBackground = {
+    ...CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT,
+  };
+  let channelLiveProfileSaveTimer = 0;
+
+  function normalizeChannelLiveProfileColor(value, fallback) {
+    const color = String(value || "").trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+  }
+
+  function normalizeChannelLiveProfileNumber(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(number)));
+  }
+
+  function channelLiveProfileRgba(color, alphaPercent) {
+    const rgb = Number.parseInt(color.slice(1), 16);
+    const red = (rgb >> 16) & 255;
+    const green = (rgb >> 8) & 255;
+    const blue = rgb & 255;
+    const alpha = normalizeChannelLiveProfileNumber(
+      alphaPercent,
+      0,
+      100,
+      100,
+    );
+    return `rgba(${red}, ${green}, ${blue}, ${alpha / 100})`;
+  }
+
+  function channelLiveProfileHexa(color, alphaPercent) {
+    const alpha = normalizeChannelLiveProfileNumber(
+      alphaPercent,
+      0,
+      100,
+      100,
+    );
+    const alphaHex = Math.floor((alpha / 100) * 255)
+      .toString(16)
+      .padStart(2, "0");
+    return `${color}${alphaHex}`.toUpperCase();
+  }
+
+  function parseChannelLiveProfileHex(value) {
+    const match = String(value || "")
+      .trim()
+      .match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i);
+    if (!match) return null;
+    return {
+      color: `#${match[1].toLowerCase()}`,
+      alpha: match[2]
+        ? Math.round((Number.parseInt(match[2], 16) / 255) * 100)
+        : 100,
+    };
+  }
+
+  function reflectChannelLiveProfileColorInput(input, color, alpha, enabled) {
+    if (!input) return;
+    const value = channelLiveProfileHexa(color, alpha);
+    input.value = value;
+    input.disabled = !enabled;
+    const field = input.closest(".clr-field");
+    if (field) {
+      field.style.color = value;
+      field.classList.toggle("is-disabled", !enabled);
+    }
+  }
+
+  function normalizeChannelLiveProfileBackground(value) {
+    const config = value && typeof value === "object" ? value : {};
+    return {
+      enabled: config.enabled === true,
+      angle: normalizeChannelLiveProfileNumber(
+        config.angle,
+        0,
+        360,
+        CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.angle,
+      ),
+      start: normalizeChannelLiveProfileColor(
+        config.start,
+        CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.start,
+      ),
+      startAlpha: normalizeChannelLiveProfileNumber(
+        config.startAlpha,
+        0,
+        100,
+        CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.startAlpha,
+      ),
+      end: normalizeChannelLiveProfileColor(
+        config.end,
+        CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.end,
+      ),
+      endAlpha: normalizeChannelLiveProfileNumber(
+        config.endAlpha,
+        0,
+        100,
+        CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.endAlpha,
+      ),
+    };
+  }
+
+  function reflectChannelLiveProfileBackground() {
+    const config = channelLiveProfileBackground;
+    if (channelLiveProfileCustomInput) {
+      channelLiveProfileCustomInput.checked = config.enabled;
+    }
+    reflectChannelLiveProfileColorInput(
+      channelLiveProfileStartInput,
+      config.start,
+      config.startAlpha,
+      config.enabled,
+    );
+    if (channelLiveProfileAngleSlider) {
+      channelLiveProfileAngleSlider.value = String(config.angle);
+      channelLiveProfileAngleSlider.disabled = !config.enabled;
+    }
+    if (channelLiveProfileAngleInput) {
+      channelLiveProfileAngleInput.value = String(config.angle);
+      channelLiveProfileAngleInput.disabled = !config.enabled;
+    }
+    reflectChannelLiveProfileColorInput(
+      channelLiveProfileEndInput,
+      config.end,
+      config.endAlpha,
+      config.enabled,
+    );
+    if (channelLiveProfileReset) {
+      channelLiveProfileReset.disabled = !config.enabled;
+    }
+    channelLiveProfileEditor?.classList.toggle(
+      "is-disabled",
+      !config.enabled,
+    );
+    channelLiveProfileEditor?.setAttribute(
+      "aria-disabled",
+      String(!config.enabled),
+    );
+    channelLiveProfilePreview?.style.setProperty(
+      "--channel-profile-preview-angle",
+      `${config.angle}deg`,
+    );
+    channelLiveProfilePreview?.style.setProperty(
+      "--channel-profile-preview-start",
+      channelLiveProfileRgba(config.start, config.startAlpha),
+    );
+    channelLiveProfilePreview?.style.setProperty(
+      "--channel-profile-preview-end",
+      channelLiveProfileRgba(config.end, config.endAlpha),
+    );
+  }
+
+  function updateChannelLiveProfileBackground(patch, save = true) {
+    channelLiveProfileBackground = normalizeChannelLiveProfileBackground({
+      ...channelLiveProfileBackground,
+      ...patch,
+    });
+    reflectChannelLiveProfileBackground();
+    if (save) {
+      clearTimeout(channelLiveProfileSaveTimer);
+      channelLiveProfileSaveTimer = 0;
+      cachedStorageSet({
+        [CHANNEL_LIVE_PROFILE_BACKGROUND_KEY]: channelLiveProfileBackground,
+      });
+    }
+  }
+
+  function scheduleChannelLiveProfileBackgroundSave() {
+    clearTimeout(channelLiveProfileSaveTimer);
+    channelLiveProfileSaveTimer = window.setTimeout(() => {
+      channelLiveProfileSaveTimer = 0;
+      cachedStorageSet({
+        [CHANNEL_LIVE_PROFILE_BACKGROUND_KEY]: channelLiveProfileBackground,
+      });
+    }, 120);
+  }
+
+  channelLiveProfileCustomInput?.addEventListener("change", () => {
+    updateChannelLiveProfileBackground({
+      enabled: channelLiveProfileCustomInput.checked,
+    });
+  });
+  function bindChannelLiveProfileRange(slider, input, key) {
+    slider?.addEventListener("input", () => {
+      updateChannelLiveProfileBackground({ [key]: slider.value }, false);
+    });
+    slider?.addEventListener("change", () => {
+      updateChannelLiveProfileBackground({ [key]: slider.value });
+    });
+    input?.addEventListener("change", () => {
+      updateChannelLiveProfileBackground({ [key]: input.value });
+    });
+    input?.addEventListener("blur", () => {
+      updateChannelLiveProfileBackground({ [key]: input.value });
+    });
+  }
+  bindChannelLiveProfileRange(
+    channelLiveProfileAngleSlider,
+    channelLiveProfileAngleInput,
+    "angle",
+  );
+  function bindChannelLiveProfileColor(input, colorKey, alphaKey) {
+    input?.addEventListener("input", () => {
+      const parsed = parseChannelLiveProfileHex(input.value);
+      if (!parsed) return;
+      updateChannelLiveProfileBackground(
+        {
+          [colorKey]: parsed.color,
+          [alphaKey]: parsed.alpha,
+        },
+        false,
+      );
+      scheduleChannelLiveProfileBackgroundSave();
+    });
+    input?.addEventListener("change", () => {
+      const parsed = parseChannelLiveProfileHex(input.value);
+      if (!parsed) {
+        reflectChannelLiveProfileBackground();
+        return;
+      }
+      updateChannelLiveProfileBackground({
+        [colorKey]: parsed.color,
+        [alphaKey]: parsed.alpha,
+      });
+    });
+  }
+  bindChannelLiveProfileColor(
+    channelLiveProfileStartInput,
+    "start",
+    "startAlpha",
+  );
+  bindChannelLiveProfileColor(
+    channelLiveProfileEndInput,
+    "end",
+    "endAlpha",
+  );
+  channelLiveProfileReset?.addEventListener("click", () => {
+    updateChannelLiveProfileBackground({
+      angle: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.angle,
+      start: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.start,
+      startAlpha: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.startAlpha,
+      end: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.end,
+      endAlpha: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.endAlpha,
+    });
+  });
+  reflectChannelLiveProfileBackground();
+  (async () => {
+    try {
+      const data = await cachedStorageGet(
+        CHANNEL_LIVE_PROFILE_BACKGROUND_KEY,
+      );
+      channelLiveProfileBackground = normalizeChannelLiveProfileBackground(
+        data?.[CHANNEL_LIVE_PROFILE_BACKGROUND_KEY],
+      );
+    } catch {
+      channelLiveProfileBackground = {
+        ...CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT,
+      };
+    }
+    reflectChannelLiveProfileBackground();
+  })();
+
   // ── 방송 시청 중 팔로잉 새 탭으로 열기(전역, 기본 OFF) ──────────────────────
   const FOLLOW_OPEN_NEW_TAB_KEY = "cheeseFollowOpenNewTab";
   const followOpenNewTabInput = document.querySelector(
@@ -2862,16 +3356,50 @@
   // ── 카드 미리보기 음량(라이브 탐색 카드 호버 video, 전역 기본 ON) ──────────
   // 카드 호버 플레이어 미리보기(팔로잉 미리보기 인프라 재사용, 기본 OFF).
   const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
+  const CARD_LIVE_PREVIEW_POSITION_KEY = "cheeseCardLivePreviewPosition";
   const cardLivePreviewInput = document.querySelector(
     "[data-card-live-preview]",
   );
+  const cardLivePreviewPositionItem = document.querySelector(
+    "[data-card-live-preview-position-item]",
+  );
+  const cardLivePreviewPositionButtons = Array.from(
+    document.querySelectorAll("[data-card-live-preview-position]"),
+  );
+  function normalizeCardLivePreviewPosition(value) {
+    return value === "left" || value === "right" ? value : "auto";
+  }
+  function reflectCardLivePreviewPosition(value) {
+    const position = normalizeCardLivePreviewPosition(value);
+    cardLivePreviewPositionButtons.forEach((button) => {
+      const active = button.dataset.cardLivePreviewPosition === position;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  function reflectCardLivePreviewPositionAvailability() {
+    const disabled = !cardLivePreviewInput?.checked;
+    cardLivePreviewPositionButtons.forEach((button) => {
+      button.disabled = disabled;
+    });
+    cardLivePreviewPositionItem?.classList.toggle("is-locked", disabled);
+  }
   async function loadCardLivePreview() {
     let on = false; // 기본 꺼짐
+    let position = "auto";
     try {
-      const data = await cachedStorageGet(CARD_LIVE_PREVIEW_KEY);
+      const data = await cachedStorageGet([
+        CARD_LIVE_PREVIEW_KEY,
+        CARD_LIVE_PREVIEW_POSITION_KEY,
+      ]);
       on = data?.[CARD_LIVE_PREVIEW_KEY] === true;
+      position = normalizeCardLivePreviewPosition(
+        data?.[CARD_LIVE_PREVIEW_POSITION_KEY],
+      );
     } catch {}
     if (cardLivePreviewInput) cardLivePreviewInput.checked = on;
+    reflectCardLivePreviewPosition(position);
+    reflectCardLivePreviewPositionAvailability();
   }
   cardLivePreviewInput?.addEventListener("change", () => {
     try {
@@ -2879,6 +3407,18 @@
         [CARD_LIVE_PREVIEW_KEY]: cardLivePreviewInput.checked,
       });
     } catch {}
+    reflectCardLivePreviewPositionAvailability();
+  });
+  cardLivePreviewPositionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const position = normalizeCardLivePreviewPosition(
+        button.dataset.cardLivePreviewPosition,
+      );
+      reflectCardLivePreviewPosition(position);
+      try {
+        cachedStorageSet({ [CARD_LIVE_PREVIEW_POSITION_KEY]: position });
+      } catch {}
+    });
   });
   loadCardLivePreview();
 
@@ -3081,8 +3621,12 @@
   // ── 전체 방송·팔로잉 라이브 제외 태그 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+  const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
   const liveTagFilterButtonInput = document.querySelector(
     "[data-live-tag-filter-button]",
+  );
+  const liveViewerCountInlineInput = document.querySelector(
+    "[data-live-viewer-count-inline]",
   );
   const liveTagForm = document.querySelector("[data-live-tag-form]");
   const liveTagInput = document.querySelector("[data-live-tag-input]");
@@ -3195,6 +3739,11 @@
       [LIVE_TAG_FILTER_BUTTON_KEY]: liveTagFilterButtonInput.checked,
     });
   });
+  liveViewerCountInlineInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [LIVE_VIEWER_COUNT_INLINE_KEY]: liveViewerCountInlineInput.checked,
+    });
+  });
 
   liveTagForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -3270,6 +3819,7 @@
       const data = await cachedStorageGet([
         LIVE_TAG_FILTERS_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
+        LIVE_VIEWER_COUNT_INLINE_KEY,
       ]);
       settingsLiveTagFilters = sanitizeLiveTagFilters(
         data?.[LIVE_TAG_FILTERS_KEY],
@@ -3278,9 +3828,16 @@
         liveTagFilterButtonInput.checked =
           data?.[LIVE_TAG_FILTER_BUTTON_KEY] !== false;
       }
+      if (liveViewerCountInlineInput) {
+        liveViewerCountInlineInput.checked =
+          data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
+      }
     } catch {
       settingsLiveTagFilters = [];
       if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = true;
+      if (liveViewerCountInlineInput) {
+        liveViewerCountInlineInput.checked = false;
+      }
     }
     renderSettingsLiveTagFilters();
   }
@@ -3297,6 +3854,13 @@
       if (changes[LIVE_TAG_FILTER_BUTTON_KEY] && liveTagFilterButtonInput) {
         liveTagFilterButtonInput.checked =
           changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue !== false;
+      }
+      if (
+        changes[LIVE_VIEWER_COUNT_INLINE_KEY] &&
+        liveViewerCountInlineInput
+      ) {
+        liveViewerCountInlineInput.checked =
+          changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
       }
     });
   }

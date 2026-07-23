@@ -28,7 +28,7 @@
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
   let wheelVolumeRightClick = false; // 우클릭(오른쪽 버튼)을 누른 채 휠일 때만 조절(기본 OFF)
   let wheelVolumeStep = 0.05; // 휠 한 틱당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
-  let actionOverlayOn = true; // 조작(휠 볼륨/시크) 시 화면 반투명 피드백(전역, 기본 ON)
+  let actionOverlayOn = true; // 조작(음량·게인 슬라이더/휠 볼륨/시크) 화면 피드백(전역, 기본 ON)
   // OSD(조작 오버레이) 종류별 표시 on/off + 위치(중심 기준 %). 볼륨은 전체 화면 기준,
   // 되감기는 왼쪽 절반 기준(x 0~100 → 실제 0~50%), 앞으로는 오른쪽 절반 기준(x 0~100 →
   // 실제 50~100%). y 는 셋 다 전체 화면 기준 0~100%. 기본값은 기존 위치(볼륨 중앙 등).
@@ -182,9 +182,13 @@
     // 전역 기본값 재방문 동작(global | channel, 기본 global).
     globalDefaultMode =
       e.data.mixerGlobalDefaultMode === "channel" ? "channel" : "global";
-    // 게인 슬라이더 범위(전역). 기본 0.5~2. 값이 바뀌면 현재 게인을 새 범위로
-    // 클램프하고 슬라이더/패널을 다시 그려 즉시 반영한다.
-    updateGainRange(e.data.mixerGainMin, e.data.mixerGainMax);
+    // 게인 슬라이더 범위와 조절 간격(전역). 값이 바뀌면 현재 게인을 새 범위로
+    // 클램프하고 플레이어/패널 슬라이더를 다시 그려 즉시 반영한다.
+    updateGainRange(
+      e.data.mixerGainMin,
+      e.data.mixerGainMax,
+      e.data.mixerGainStep,
+    );
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
     liveSeekBarOn = e.data.liveSeekBar !== false;
     if (typeof applyLiveSeekBar === "function") applyLiveSeekBar();
@@ -2050,10 +2054,11 @@
       </svg>`;
   }
 
-  // 게인 범위는 설정에서 조절 가능(전역). 기본 0.5~2(50%~200%). content.js가
-  // feature-flags 브리지로 mixerGainMin/mixerGainMax를 전달하면 갱신한다.
+  // 게인 범위와 조절 간격은 설정에서 조절 가능(전역). 기본 0.5~2(50%~200%),
+  // 간격 0.05(5%). content.js가 feature-flags 브리지로 전달하면 갱신한다.
   let GAIN_MIN = 0.5;
   let GAIN_MAX = 2;
+  let GAIN_STEP = 0.05;
   // ⚠ 레이스 방어: 사용자가 설정한 게인 범위(예: 최소 10%)를 아직 브리지로 못 받았는데
   // 그 전에 채널 상태가 로드되면, 로드된 저장 게인(예: 30%)이 '기본 하한 50%' 기준으로
   // 클램프돼 50%로 튀어오를 수 있다(피드백: 50% 미만이 새로고침/방송전환 시 50%로 복귀).
@@ -2068,28 +2073,57 @@
     const n = (g - GAIN_MIN) / (GAIN_MAX - GAIN_MIN);
     return Math.max(0, Math.min(1, n));
   }
+  // 포인터로 고른 연속값을 설정 간격에 맞춘다. 100%(원본 음량)를 기준점으로
+  // 사용해 최소값이 25%이고 간격이 4%처럼 나누어떨어지지 않아도 100%를 정확히
+  // 선택할 수 있다. 양 끝점은 범위 끝을 그대로 허용한다.
+  function quantizeGain(g) {
+    g = clampGain(Number(g));
+    if (!Number.isFinite(g)) return clampGain(1);
+    if (g <= GAIN_MIN) return GAIN_MIN;
+    if (g >= GAIN_MAX) return GAIN_MAX;
+    const quantized =
+      1 + Math.round((g - 1) / GAIN_STEP) * GAIN_STEP;
+    return Math.round(clampGain(quantized) * 100) / 100;
+  }
+  // 키보드 한 단계 이동. 현재값이 새 간격 격자에 없으면 이동 방향에서 가장 가까운
+  // 다음 격자로 붙이고, 이미 격자에 있으면 정확히 한 단계 이동한다.
+  function gainByStep(g, direction) {
+    const units = (Number(g) - 1) / GAIN_STEP;
+    const index =
+      direction > 0
+        ? Math.floor(units + 1e-7) + 1
+        : Math.ceil(units - 1e-7) - 1;
+    return Math.round(clampGain(1 + index * GAIN_STEP) * 100) / 100;
+  }
   function normToGain(n) {
     const g = GAIN_MIN + n * (GAIN_MAX - GAIN_MIN);
-    return Math.round(g * 20) / 20;
+    return quantizeGain(g);
   }
-  // 설정에서 받은 게인 범위를 반영한다. 유효값만 채택하고(min<max, 상식 범위),
-  // 실제로 바뀐 경우에만 현재 게인을 새 범위로 클램프 후 슬라이더/패널을 갱신한다.
-  function updateGainRange(rawMin, rawMax) {
+  // 설정에서 받은 게인 범위와 간격을 반영한다. 유효값만 채택하고 실제로 바뀐
+  // 경우에만 현재 게인을 새 범위로 클램프 후 슬라이더/패널을 갱신한다.
+  function updateGainRange(rawMin, rawMax, rawStep) {
     let min = Number(rawMin);
     let max = Number(rawMax);
+    let step = Math.round(Number(rawStep));
     if (!Number.isFinite(min) || min < 0 || min > 1) min = 0.5; // 0~100%
     if (!Number.isFinite(max) || max < 1 || max > 4) max = 2; // 100~400%
+    if (!Number.isFinite(step) || step < 1 || step > 10) step = 5;
     if (max <= min) {
       min = 0.5;
       max = 2;
     } // 잘못된 조합이면 기본값
     const firstReceive = !gainRangeReceived;
-    const unchanged = min === GAIN_MIN && max === GAIN_MAX;
+    const normalizedStep = step / 100;
+    const unchanged =
+      min === GAIN_MIN &&
+      max === GAIN_MAX &&
+      normalizedStep === GAIN_STEP;
     gainRangeReceived = true; // 이제부터 클램프 유효(실제 범위 확정).
     // 범위가 그대로여도, '처음 수신'이면 그동안 보류했던 로드 게인 정리를 위해 계속 진행한다.
     if (unchanged && !firstReceive) return;
     GAIN_MIN = min;
     GAIN_MAX = max;
+    GAIN_STEP = normalizedStep;
     // 현재 게인이 새 범위를 벗어나면 클램프하고 적용(그래프에도 반영).
     const clamped = clampGain(state.gain);
     if (clamped !== state.gain) {
@@ -2107,7 +2141,8 @@
   function gainSliderMarkup() {
     const n = gainToNorm(state.gain);
     const pct = Math.round(n * 1000) / 10;
-    return `<div role="slider" tabindex="0" data-master-gain style="display: none;" class="pzp-pc__volume-slider pzp-pc-volume-slider pzp-ui-slider--volume pzp-ui-slider" aria-label="음량" aria-live="polite" aria-valuemin="0" aria-valuenow="${Math.round(n * 100)}" aria-valuemax="100" aria-valuetext="${Math.round(n * 100)}%"><input type="range" max="1" tabindex="-1" class="pzp-ui-slider__aria-range"><div class="pzp-ui-slider__wrap"><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__entire-background" style="--pzp-ui-progress__scale: 1;"></div><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__volume" style="--pzp-ui-progress__scale: ${n};"></div><div class="pzp-ui-slider__handler-wrap" style="left: ${pct}%;"><span role="none presentation" class="pzp-ui-slider__handler"></span></div></div></div>`;
+    const gainPct = Math.round(state.gain * 100);
+    return `<div role="slider" tabindex="0" data-master-gain style="display: none;" class="pzp-pc__volume-slider pzp-pc-volume-slider pzp-ui-slider--volume pzp-ui-slider" aria-label="게인" aria-live="polite" aria-valuemin="${Math.round(GAIN_MIN * 100)}" aria-valuenow="${gainPct}" aria-valuemax="${Math.round(GAIN_MAX * 100)}" aria-valuetext="${gainPct}%"><input type="range" max="1" tabindex="-1" class="pzp-ui-slider__aria-range"><div class="pzp-ui-slider__wrap"><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__entire-background" style="--pzp-ui-progress__scale: 1;"></div><div class="pzp-ui-progress__div pzp-ui-progress pzp-ui-progress__volume" style="--pzp-ui-progress__scale: ${n};"></div><div class="pzp-ui-slider__handler-wrap" style="left: ${pct}%;"><span role="none presentation" class="pzp-ui-slider__handler"></span></div></div></div>`;
   }
 
   // 버튼 + 슬라이더를 native 볼륨 컨트롤(.pzp-pc__volume-control)로 감싼다.
@@ -2153,6 +2188,7 @@
   }
 
   function removeButton() {
+    resetGainSliderInteraction();
     document.querySelectorAll(`.${CONTROL_CLASS}`).forEach((el) => el.remove());
   }
 
@@ -2493,7 +2529,7 @@
         </section>
         <section class="cheese-mixer-pane ${activeTab === "advanced" ? "is-active" : ""}" data-pane="advanced">
           ${renderCustomDraftBar("advanced")}
-          ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, 0.05, state.gain)}
+          ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, "any", state.gain)}
           ${renderAdvancedRow("저음", "bass", -12, 12, 0.1, state.eq[0])}
           ${renderAdvancedRow("고음", "treble", -12, 12, 0.1, state.eq[8])}
           ${renderAdvancedRow("음성 선명도", "clarity", -12, 12, 0.1, state.eq[4])}
@@ -2508,7 +2544,7 @@
 
           ${groupHeading("음량", "group-gain")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, 0.05, state.gain)}
+            ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, "any", state.gain)}
           </div>
 
           ${groupHeading("컴프레서", "group-comp")}
@@ -2799,6 +2835,33 @@
       "keydown",
       (e) => {
         if (isEditableMixerTarget(e.target)) e.stopPropagation();
+        const gainInput = e.target.matches?.('[data-slider="gain"]')
+          ? e.target
+          : null;
+        if (
+          gainInput &&
+          ["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp", "Home", "End"].includes(
+            e.key,
+          )
+        ) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          let next = state.gain;
+          if (e.key === "Home") next = GAIN_MIN;
+          else if (e.key === "End") next = GAIN_MAX;
+          else {
+            const direction =
+              e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : -1;
+            next = gainByStep(state.gain, direction);
+          }
+          handleSlider("gain", next);
+          gainInput.value = String(state.gain);
+          const output = gainInput
+            .closest(".cheese-mixer-row")
+            ?.querySelector("[data-output]");
+          if (output) output.textContent = fmtNum(state.gain);
+          return;
+        }
         // 빠른 저장 이름 입력: Enter로 저장, Esc로 취소
         if (e.target.matches?.("[data-quicksave-name]")) {
           if (e.key === "Enter") {
@@ -2906,13 +2969,16 @@
       ) {
         t.value = t.value.slice(0, CUSTOM_PRESET_NAME_MAX_LENGTH);
       } else if (t.dataset.slider) {
-        handleSlider(t.dataset.slider, parseFloat(t.value));
+        const key = t.dataset.slider;
+        handleSlider(key, parseFloat(t.value));
+        const value = key === "gain" ? state.gain : parseFloat(t.value);
+        if (key === "gain") t.value = String(value);
         // 같은 행의 output만 갱신한다. gain처럼 같은 key가 두 탭에 중복
         // 존재해도 querySelector가 엉뚱한(숨겨진) output을 잡지 않도록 한다.
         const out = t
           .closest(".cheese-mixer-row")
           ?.querySelector("[data-output]");
-        if (out) out.textContent = fmtNum(t.value);
+        if (out) out.textContent = fmtNum(value);
       } else if (t.dataset.eq != null) {
         const idx = parseInt(t.dataset.eq, 10);
         handleEqBand(idx, parseFloat(t.value));
@@ -3134,7 +3200,7 @@
   function handleSlider(key, value) {
     switch (key) {
       case "gain":
-        state.gain = clampGain(value);
+        state.gain = quantizeGain(value);
         break;
       case "bass":
         applyEqGroup("bass", value);
@@ -3402,10 +3468,12 @@
     }
   });
 
-  // 마스터 음량 슬라이더(native div 구조) 드래그 처리. 세로 슬라이더이므로 위쪽이
-  // 큰 값. pointer 위치를 0~1로 정규화해 게인으로 변환.
+  // 마스터 음량 슬라이더(native div 구조) 드래그 처리. 가로 슬라이더이므로 오른쪽이
+  // 큰 값이다. pointer 위치를 0~1로 정규화해 게인으로 변환한다.
   let gainDragging = false;
   let gainDragTarget = null;
+  let gainDragPointerId = null;
+  let gainControlsReleaseTimer = 0;
   function gainFromPointer(slider, clientX) {
     const wrap = slider.querySelector(".pzp-ui-slider__wrap") || slider;
     const rect = wrap.getBoundingClientRect();
@@ -3416,21 +3484,35 @@
   function applyGainFromPointer(slider, clientX) {
     const g = gainFromPointer(slider, clientX);
     if (g == null) return;
+    const previousGain = state.gain;
     handleSlider("gain", g);
     updateGainSliderVisual(slider);
+    showGainActionOverlay(previousGain);
+  }
+  function showGainActionOverlay(previousGain) {
+    const previousPct = Math.round(Number(previousGain) * 100);
+    const currentPct = Math.round(state.gain * 100);
+    if (!Number.isFinite(previousPct) || currentPct === previousPct) return;
+    // 기존 볼륨 OSD의 표시 여부·위치 설정을 공유하되, 믹서 아이콘과 라벨로
+    // 플레이어 음량이 아니라 마스터 게인을 조절하는 중임을 구분한다.
+    showActionOverlay("gain", `게인 ${currentPct}%`, "volume");
   }
   function updateGainSliderVisual(slider) {
     const n = gainToNorm(state.gain);
+    const gainPct = Math.round(state.gain * 100);
     const vol = slider.querySelector(".pzp-ui-progress__volume");
     if (vol) vol.style.setProperty("--pzp-ui-progress__scale", String(n));
     const handle = slider.querySelector(".pzp-ui-slider__handler-wrap");
     if (handle) handle.style.left = `${Math.round(n * 1000) / 10}%`;
-    slider.setAttribute("aria-valuenow", String(Math.round(n * 100)));
+    slider.setAttribute("aria-valuemin", String(Math.round(GAIN_MIN * 100)));
+    slider.setAttribute("aria-valuenow", String(gainPct));
+    slider.setAttribute("aria-valuemax", String(Math.round(GAIN_MAX * 100)));
+    slider.setAttribute("aria-valuetext", `${gainPct}%`);
     // 게인 툴팁은 실제 게인(0.5~2.0)을 %로 표시(100%=원본). 텍스트만 갱신.
     // 툴팁은 슬라이더 형제(래퍼 직속)이므로 래퍼에서 찾는다.
     const tip = gainTooltipOf(slider);
     if (tip) {
-      const next = `${Math.round(state.gain * 100)}%`;
+      const next = `${gainPct}%`;
       if (tip.textContent !== next) tip.textContent = next;
     }
   }
@@ -3438,6 +3520,44 @@
   // 벗어나면 잠시 뒤 숨김. 이미 보이는 중엔 is-visible을 다시 안 붙여 떨림 방지.
   let gainTooltipHideTimer = 0;
   let gainTooltipHovering = false;
+  const GAIN_CONTROLS_HOLDER = "gain-slider";
+  function keepGainControlsVisible(slider) {
+    if (gainControlsReleaseTimer) {
+      clearTimeout(gainControlsReleaseTimer);
+      gainControlsReleaseTimer = 0;
+    }
+    const root = slider?.closest?.(".pzp-pc") || findPlayer();
+    if (root) keepControlsVisible(root, GAIN_CONTROLS_HOLDER);
+  }
+  function releaseGainControlsWhenIdle(delay = 0) {
+    if (gainControlsReleaseTimer) {
+      clearTimeout(gainControlsReleaseTimer);
+      gainControlsReleaseTimer = 0;
+    }
+    if (gainDragging || gainTooltipHovering) return;
+    const release = () => {
+      gainControlsReleaseTimer = 0;
+      if (!gainDragging && !gainTooltipHovering) {
+        releaseControlsVisible(GAIN_CONTROLS_HOLDER);
+      }
+    };
+    if (delay > 0) {
+      gainControlsReleaseTimer = window.setTimeout(release, delay);
+    } else {
+      release();
+    }
+  }
+  function resetGainSliderInteraction() {
+    if (gainControlsReleaseTimer) {
+      clearTimeout(gainControlsReleaseTimer);
+      gainControlsReleaseTimer = 0;
+    }
+    gainDragging = false;
+    gainDragTarget = null;
+    gainDragPointerId = null;
+    gainTooltipHovering = false;
+    releaseControlsVisible(GAIN_CONTROLS_HOLDER);
+  }
   function gainTooltipOf(slider) {
     // 툴팁은 슬라이더 형제(래퍼 .cheese-audio-mixer-control 직속)에 있다.
     const wrap = slider?.closest?.(`.${CONTROL_CLASS}`);
@@ -3474,27 +3594,76 @@
     e.stopPropagation();
     gainDragging = true;
     gainDragTarget = slider;
+    gainDragPointerId = e.pointerId;
+    keepGainControlsVisible(slider);
     applyGainFromPointer(slider, e.clientX);
     showGainTooltip(slider);
   });
   document.addEventListener("pointermove", (e) => {
-    if (!gainDragging || !gainDragTarget) return;
+    if (
+      !gainDragging ||
+      !gainDragTarget ||
+      (gainDragPointerId != null && e.pointerId !== gainDragPointerId)
+    )
+      return;
     applyGainFromPointer(gainDragTarget, e.clientX);
     showGainTooltip(gainDragTarget);
   });
-  document.addEventListener("pointerup", () => {
+  function finishGainDrag(e) {
+    if (
+      gainDragPointerId != null &&
+      e?.pointerId != null &&
+      e.pointerId !== gainDragPointerId
+    )
+      return;
     const target = gainDragTarget;
     gainDragging = false;
     gainDragTarget = null;
+    gainDragPointerId = null;
     // 드래그 끝나면 호버 아닐 때 숨김 예약.
     const tip = gainTooltipOf(target);
     if (tip) scheduleGainTooltipHide(tip);
-  });
+    releaseGainControlsWhenIdle();
+  }
+  document.addEventListener("pointerup", finishGainDrag, true);
+  document.addEventListener("pointercancel", finishGainDrag, true);
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      const slider = e.target.closest?.("[data-master-gain]");
+      if (
+        !slider ||
+        !["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp", "Home", "End"].includes(
+          e.key,
+        )
+      )
+        return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      let next = state.gain;
+      if (e.key === "Home") next = GAIN_MIN;
+      else if (e.key === "End") next = GAIN_MAX;
+      else {
+        const direction =
+          e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : -1;
+        next = gainByStep(state.gain, direction);
+      }
+      const previousGain = state.gain;
+      handleSlider("gain", next);
+      updateGainSliderVisual(slider);
+      showGainActionOverlay(previousGain);
+      showGainTooltip(slider);
+      keepGainControlsVisible(slider);
+      releaseGainControlsWhenIdle(1200);
+    },
+    true,
+  );
   // 호버 표시(delegation: 슬라이더가 버튼과 함께 재생성돼도 동작).
   document.addEventListener("mouseover", (e) => {
     const slider = e.target.closest?.("[data-master-gain]");
     if (!slider) return;
     gainTooltipHovering = true;
+    keepGainControlsVisible(slider);
     showGainTooltip(slider);
   });
   document.addEventListener("mouseout", (e) => {
@@ -3505,7 +3674,9 @@
     gainTooltipHovering = false;
     const tip = gainTooltipOf(slider);
     if (tip) scheduleGainTooltipHide(tip);
+    releaseGainControlsWhenIdle();
   });
+  window.addEventListener("blur", resetGainSliderInteraction);
 
   function handleUserGestureForAudioContext() {
     // 첫 제스처 기록 → '항상 켜기' 자동 활성화 조건 충족. 다음 틱에 시도(현재
@@ -6528,6 +6699,9 @@
   // document 위임으로 받고, 툴팁/MutationObserver는 ensureVolumeTooltip이 래퍼에
   // 멱등 보장한다(슬라이더 재생성과 무관하게 항상 동작).
   let volumeTooltipHovering = false; // 마우스가 볼륨 컨트롤 위에 있는지
+  let nativeVolumeOsdSlider = null;
+  let nativeVolumeOsdPointerId = null;
+  let nativeVolumeOsdUntil = 0;
 
   // 우리 게인 컨트롤이 아닌 native 볼륨 컨트롤 래퍼를 찾는다(이벤트 target 기준).
   function nativeVolumeWrapOf(target) {
@@ -6558,6 +6732,49 @@
     return (
       wrap?.querySelector?.(".pzp-pc__volume-slider:not([data-master-gain])") ||
       null
+    );
+  }
+
+  function nativeVolumeSliderOfTarget(target) {
+    const el =
+      target instanceof Element
+        ? target
+        : target?.parentElement instanceof Element
+          ? target.parentElement
+          : null;
+    const slider = el?.closest?.(
+      ".pzp-pc__volume-slider:not([data-master-gain])",
+    );
+    if (!slider || slider.closest(`.${CONTROL_CLASS}`)) return null;
+    return findPlayer()?.contains(slider) ? slider : null;
+  }
+
+  function armNativeVolumeOsd(slider, duration = Infinity) {
+    if (!slider) return;
+    nativeVolumeOsdSlider = slider;
+    nativeVolumeOsdUntil =
+      duration === Infinity ? Infinity : Date.now() + duration;
+  }
+
+  function disarmNativeVolumeOsd() {
+    nativeVolumeOsdSlider = null;
+    nativeVolumeOsdPointerId = null;
+    nativeVolumeOsdUntil = 0;
+  }
+
+  function showNativeVolumeSliderOsd(slider, previousPct, currentPct) {
+    if (
+      slider !== nativeVolumeOsdSlider ||
+      Date.now() > nativeVolumeOsdUntil ||
+      currentPct === previousPct
+    )
+      return;
+    const video = findVideo();
+    const muted = Boolean(video?.muted) || currentPct === 0;
+    showActionOverlay(
+      muted ? "mute" : currentPct > previousPct ? "volUp" : "volDown",
+      `${currentPct}%`,
+      "volume",
     );
   }
 
@@ -6612,9 +6829,14 @@
       tip.className = VOLUME_TOOLTIP_CLASS;
       anchor.appendChild(tip);
     }
-    // aria-valuenow가 바뀌는 동안(=조작 중) 텍스트만 라이브 갱신.
+    // aria-valuenow가 바뀌는 동안 툴팁 텍스트를 갱신하고, 사용자가 슬라이더를
+    // 조작 중인 경우에만 OSD를 표시한다.
+    let previousPct = volumePercentOf(slider);
     const obs = new MutationObserver(() => {
       if (tip.classList.contains("is-visible")) setVolumeTooltipText(anchor);
+      const currentPct = volumePercentOf(slider);
+      showNativeVolumeSliderOsd(slider, previousPct, currentPct);
+      previousPct = currentPct;
     });
     obs.observe(slider, {
       attributes: true,
@@ -6643,11 +6865,29 @@
     const wrap = nativeVolumeWrapOf(e.target);
     if (wrap) setVolumeTooltipText(wrap);
   }
+  function onVolumePointerDown(e) {
+    const slider = nativeVolumeSliderOfTarget(e.target);
+    if (!slider) return;
+    ensureVolumeTooltip();
+    nativeVolumeOsdPointerId = e.pointerId;
+    armNativeVolumeOsd(slider);
+  }
+  function onVolumePointerEnd(e) {
+    if (
+      nativeVolumeOsdPointerId == null ||
+      (e?.pointerId != null && e.pointerId !== nativeVolumeOsdPointerId)
+    )
+      return;
+    nativeVolumeOsdPointerId = null;
+    nativeVolumeOsdUntil = Date.now() + 250;
+  }
   function onVolumeWheelOrKey(e) {
     const wrap = nativeVolumeWrapOf(e.target);
     if (!wrap) return;
     ensureVolumeTooltip();
     showVolumeTooltip(wrap);
+    const slider = nativeVolumeSliderOfTarget(e.target);
+    if (slider) armNativeVolumeOsd(slider, 500);
   }
 
   // ── 영상 위 마우스 휠로 볼륨 조절(전역 옵션, 기본 OFF) ──────────────────────
@@ -6716,14 +6956,15 @@
   }
 
   // ── 조작 화면 피드백 오버레이(전역 옵션, 기본 ON) ───────────────────────────
-  // 휠 볼륨/되감기/앞으로(버튼·홀드·단축키) 조작 시 플레이어 중앙에 반투명 아이콘+텍스트를
-  // 잠깐 띄운다. 유튜브/넷플릭스식 피드백. 우리 요소만 쓰므로 치지직 DOM/React 안전.
+  // 음량·게인 슬라이더, 휠 볼륨, 되감기·앞으로(버튼·홀드·단축키) 조작 시
+  // 플레이어에 반투명 아이콘+텍스트를 잠깐 띄운다.
   const ACTION_OVERLAY_ID = "cheese-action-overlay";
   let actionOverlayHideTimer = 0;
   const ACTION_OVERLAY_ICONS = {
     volUp: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="M16 8a5 5 0 0 1 0 8M18.5 5.5a8.5 8.5 0 0 1 0 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     volDown: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="M16 9.5a4 4 0 0 1 0 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     mute: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/><path d="m16 9 5 6m0-6-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    gain: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M7 4v5m0 4v7M12 4v10m0 4v2M17 4v2m0 4v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="7" cy="11" r="2" fill="currentColor"/><circle cx="12" cy="16" r="2" fill="currentColor"/><circle cx="17" cy="8" r="2" fill="currentColor"/></svg>`,
     rewind: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M11 6 4 12l7 6V6ZM20 6l-7 6 7 6V6Z" fill="currentColor"/></svg>`,
     forward: `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" aria-hidden="true"><path d="M13 6l7 6-7 6V6ZM4 6l7 6-7 6V6Z" fill="currentColor"/></svg>`,
   };
@@ -6788,12 +7029,16 @@
     volumeDelegationBound = true;
     document.addEventListener("pointerover", onVolumePointerOver, true);
     document.addEventListener("pointerout", onVolumePointerOut, true);
+    document.addEventListener("pointerdown", onVolumePointerDown, true);
     document.addEventListener("pointermove", onVolumePointerMove, true);
+    document.addEventListener("pointerup", onVolumePointerEnd, true);
+    document.addEventListener("pointercancel", onVolumePointerEnd, true);
     document.addEventListener("wheel", onVolumeWheelOrKey, {
       capture: true,
       passive: true,
     });
     document.addEventListener("keydown", onVolumeWheelOrKey, true);
+    window.addEventListener("blur", disarmNativeVolumeOsd);
     // 영상 위 휠 볼륨 조절: preventDefault 가 필요하므로 non-passive 로 별도 등록.
     // wheelVolumeOn 게이트로 옵션이 꺼져 있으면 즉시 반환한다.
     document.addEventListener("wheel", onVideoWheelVolume, {

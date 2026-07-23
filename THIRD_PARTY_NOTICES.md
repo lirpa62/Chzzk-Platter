@@ -39,3 +39,15 @@ provided under the MIT License:
 
 The software is provided on an "AS IS" basis, without warranties of any kind.
 See the Lucide license text for details.
+
+## Coloris
+
+This extension includes Coloris v0.25.0.
+
+- Project: https://github.com/mdbassit/Coloris
+- License: MIT License
+- License text: `LICENSES/Coloris.txt`
+- Copyright: Copyright (c) 2021 Mohammed Bassit
+
+The software is provided on an "AS IS" basis, without warranties of any kind.
+See the Coloris license text for details.

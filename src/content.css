@@ -5,6 +5,10 @@
    또 바뀌거나 다크모드에서 안 잡혀도, 우리 변수가 라이트/다크를 자동 전환한다.
    (치지직은 다크모드에서 상위 요소에 .theme_dark 클래스를 붙인다.) */
 :root {
+  --cheese-channel-profile-radius: 50%;
+  --cheese-channel-live-profile-angle: 180deg;
+  --cheese-channel-live-profile-start: rgba(0, 255, 163, 1);
+  --cheese-channel-live-profile-end: rgba(2, 127, 128, 1);
   --cheese-platter-background-neutral-base: #fff;
   --cheese-platter-border-accent-red-base: #d92d20;
   --cheese-platter-border-accent-violet-base: #4e41db;
@@ -41,6 +45,39 @@
   --cheese-platter-surface-neutral-weaker: #fff;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
   --cheese-platter-surface-function-nickname-yellow: #fbf0d1;
+}
+
+/* content.js가 채널 ID 링크와 프로필 구조를 확인한 요소에만 클래스를 붙인다.
+   동영상·클립 썸네일에는 적용하지 않고 프로필 컨테이너와 이미지 모서리를 함께 맞춘다. */
+.cheese-channel-profile-radius-target,
+.cheese-channel-profile-radius-target img {
+  border-radius: var(--cheese-channel-profile-radius, 50%) !important;
+}
+
+/* 사용자 지정 라이브 프로필 링. 옵션이 켜진 경우에만 네이티브/전용 팔로잉 목록의
+   라이브 프로필 background-image를 같은 두 색 그라디언트로 교체한다. */
+html.cheese-channel-live-profile-custom
+  .cheese-channel-profile-radius-target[class*="_is_live_"],
+html.cheese-channel-live-profile-custom
+  .cheese-channel-profile-radius-target.is-live {
+  background-image:
+    linear-gradient(
+      var(
+        --sem-color-background-neutral-weak,
+        var(--cheese-platter-background-neutral-base)
+      ),
+      var(
+        --sem-color-background-neutral-weak,
+        var(--cheese-platter-background-neutral-base)
+      )
+    ),
+    linear-gradient(
+      var(--cheese-channel-live-profile-angle),
+      var(--cheese-channel-live-profile-start) 0%,
+      var(--cheese-channel-live-profile-end) 100%
+    ) !important;
+  background-origin: border-box !important;
+  background-clip: content-box, border-box !important;
 }
 .theme_dark {
   --cheese-platter-background-neutral-base: #141517;
@@ -3078,6 +3115,16 @@ html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
   display: none !important;
 }
 
+.cheese-live-viewer-count-inline [class*="_count_badge_"] {
+  top: var(--cheese-live-viewer-count-top) !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: var(--cheese-live-viewer-count-left) !important;
+  z-index: 2;
+  margin: 0 !important;
+  transform: none !important;
+}
+
 .cheese-live-tag-filter-button {
   position: relative;
   flex: 0 0 auto;
@@ -4732,7 +4779,7 @@ img.cheese-blind-emoji {
   object-fit: contain;
 }
 
-/* 채팅 시간 표시(chatTimestamp.js가 닉네임 앞에 삽입하는 HH:MM span).
+/* 채팅 시간 표시(chatTimestamp.js가 닉네임 앞에 삽입하는 시간 span).
    폰트 크기 조절 시 배율 보정은 chatFontScale.css가 처리한다. */
 .cheese-chat-time {
   margin-right: 4px;

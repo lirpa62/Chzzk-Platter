@@ -183,8 +183,10 @@ let videoFilterBeginner = false;
 // 오디오 믹서 게인 슬라이더 범위(전역). 기본 0.5~2(50%~200%).
 const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
 const MIXER_GAIN_MAX_KEY = "cheeseMixerGainMax";
+const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
 let mixerGainMin = 0.5;
 let mixerGainMax = 2;
+let mixerGainStep = 5;
 // 게인 최소(배율): 0~1(0~100%) 범위만 허용, 미설정/이상값은 기본 0.5.
 function normalizeGainMin(v) {
   const n = Number(v);
@@ -194,6 +196,11 @@ function normalizeGainMin(v) {
 function normalizeGainMax(v) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1 && n <= 4 ? n : 2;
+}
+// 게인 조절 간격(%): 1~10 정수만 허용, 미설정/이상값은 기본 5.
+function normalizeGainStep(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(10, Math.max(1, Math.round(n))) : 5;
 }
 const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
@@ -355,6 +362,89 @@ let channelLiveButtonOn = true;
 // 라이브 바로가기 버튼을 탭리스트 '끝(우측)'에 둘지(true) 탭들 바로 뒤(false)에 둘지.
 const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
 let channelLiveButtonEnd = true;
+// 채널·팔로잉·검색·라이브 카드와 사이드바의 프로필 모서리(%). 기본 50은 기존 원형
+// 프로필을 유지하고, 0은 사각형으로 표시한다.
+const CHANNEL_PROFILE_RADIUS_KEY = "cheeseChannelProfileRadius";
+const CHANNEL_PROFILE_RADIUS_DEFAULT = 50;
+const CHANNEL_PROFILE_RADIUS_TARGET_CLASS =
+  "cheese-channel-profile-radius-target";
+let channelProfileRadius = CHANNEL_PROFILE_RADIUS_DEFAULT;
+function normalizeChannelProfileRadius(value) {
+  const radius = Number(value);
+  if (!Number.isFinite(radius)) return CHANNEL_PROFILE_RADIUS_DEFAULT;
+  return Math.min(50, Math.max(0, Math.round(radius)));
+}
+// 방송 중 프로필 링의 각도·RGBA 그라디언트. 기본 OFF라 미설정 상태에서는 치지직의
+// background-image를 그대로 사용한다.
+const CHANNEL_LIVE_PROFILE_BACKGROUND_KEY =
+  "cheeseChannelLiveProfileBackground";
+const CHANNEL_LIVE_PROFILE_BACKGROUND_ROOT_CLASS =
+  "cheese-channel-live-profile-custom";
+const CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT = Object.freeze({
+  enabled: false,
+  angle: 180,
+  start: "#00ffa3",
+  startAlpha: 100,
+  end: "#027f80",
+  endAlpha: 100,
+});
+let channelLiveProfileBackground = {
+  ...CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT,
+};
+function normalizeChannelLiveProfileColor(value, fallback) {
+  const color = String(value || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+}
+function normalizeChannelLiveProfileNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+function channelLiveProfileRgba(color, alphaPercent) {
+  const rgb = Number.parseInt(color.slice(1), 16);
+  const red = (rgb >> 16) & 255;
+  const green = (rgb >> 8) & 255;
+  const blue = rgb & 255;
+  const alpha = normalizeChannelLiveProfileNumber(
+    alphaPercent,
+    0,
+    100,
+    100,
+  );
+  return `rgba(${red}, ${green}, ${blue}, ${alpha / 100})`;
+}
+function normalizeChannelLiveProfileBackground(value) {
+  const config = value && typeof value === "object" ? value : {};
+  return {
+    enabled: config.enabled === true,
+    angle: normalizeChannelLiveProfileNumber(
+      config.angle,
+      0,
+      360,
+      CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.angle,
+    ),
+    start: normalizeChannelLiveProfileColor(
+      config.start,
+      CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.start,
+    ),
+    startAlpha: normalizeChannelLiveProfileNumber(
+      config.startAlpha,
+      0,
+      100,
+      CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.startAlpha,
+    ),
+    end: normalizeChannelLiveProfileColor(
+      config.end,
+      CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.end,
+    ),
+    endAlpha: normalizeChannelLiveProfileNumber(
+      config.endAlpha,
+      0,
+      100,
+      CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.endAlpha,
+    ),
+  };
+}
 // 중간광고 중 원래 방송이 미니플레이어로 축소되며 음소거되는데, 이를 해제해 방송 소리를
 // 계속 듣는다(전역, 기본 OFF — 광고 소리와 겹칠 수 있어 명시적 opt-in). content.js 전용.
 const AD_MINI_UNMUTE_KEY = "cheeseAdMiniplayerUnmute";
@@ -550,6 +640,13 @@ let cardPreviewHoverEnteredAt = 0; // 현재 카드에 진입한 시각(ms)
 // 기본 OFF). 켜면 카드 호버가 팔로잉 미리보기와 동일한 패널을 띄운다. content.js 전용.
 const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
 let cardLivePreviewOn = false;
+// 라이브 탐색 카드의 별도 미리보기 배치 선호도. auto는 기존처럼 사이드바 반대편을
+// 우선하고, left/right는 해당 방향을 우선한다. 어느 모드든 화면 경계에서는 자동 반전.
+const CARD_LIVE_PREVIEW_POSITION_KEY = "cheeseCardLivePreviewPosition";
+let cardLivePreviewPosition = "auto";
+function normalizeCardLivePreviewPosition(value) {
+  return value === "left" || value === "right" ? value : "auto";
+}
 // 채널 다시보기 목록 카드(_information_) 호버 시 등록일/라이브 시작일 툴팁(전역, 기본
 // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
 const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
@@ -613,14 +710,15 @@ const featureFlags = {
   chatWidthResize: false,
   chatLeftPosition: false,
   chatAutoHide: false,
-  chatShowTime: false, // 채팅 메시지에 HH:MM 시간 표시(MAIN world chatTimestamp.js)
+  chatShowTime: false, // 채팅 메시지에 시간 표시(MAIN world chatTimestamp.js)
   chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
   chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
   chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
   chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
   chatLogPowerToastOtherTabs: false, // 다른 치지직 탭에서 획득해도 현재 보는 탭에 토스트
   streamStats: false,
-  fillScreen: false, // 화면 채우기: main 높이를 조절해 영상 좌우 레터박스 최소화
+  fillScreen: false, // 라이브 화면 채우기
+  fillScreenVod: false, // 다시보기 화면 채우기
   vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
   vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
@@ -653,7 +751,8 @@ const featureFlags = {
   sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
   sbFollowCustom: false, // 네이티브 팔로잉 목록을 치즈 플래터 전용 목록으로 대체(기본 OFF)
   sbFollowCustomAutoExpand: false, // 전용 팔로잉 목록을 처음부터 전부 펼쳐 표시
-  sbFollowCustomOffline: false, // 전용 팔로잉 목록에서 오프라인 채널 숨김
+  sbFollowCustomOffline: false, // 전용 팔로잉 목록 일반 그룹에서 오프라인 채널 숨김
+  sbFollowCustomFavoriteOffline: false, // 전용 팔로잉 목록 즐겨찾기 그룹에서 오프라인 채널 숨김
   sbFollowPageFavoriteButton: false, // 라이브·다시보기·채널 액션 영역에 즐겨찾기 버튼 표시
   sbFollowFavStar: false, // 즐겨찾기 구분: 별표 항상 표시
   sbFollowFavStyle: false, // 즐겨찾기 구분: 항목 테두리/배경색
@@ -8906,6 +9005,12 @@ const CHAT_FONT_SCALE_MIN = 0.8;
 const CHAT_FONT_SCALE_MAX = 2;
 const CHAT_FONT_SCALE_DEFAULT = 1;
 let chatFontScaleValue = CHAT_FONT_SCALE_DEFAULT;
+// 채팅 시간 표시 형식. MAIN world(chatTimestamp.js)에 전달한다.
+const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
+let chatTimeFormat = "24h";
+function normalizeChatTimeFormat(value) {
+  return value === "12h-en" || value === "12h-ko" ? value : "24h";
+}
 // 특수 메시지(후원·구독·같이보기+·고정 등)도 폰트/아이콘 크기를 함께 조절할지.
 // 기본 false=제외(일반 메시지만 조절). 켜면 특수 메시지도 배율 적용.
 const CHAT_FONT_SCALE_SPECIAL_KEY = "cheeseChatFontScaleSpecial";
@@ -9534,30 +9639,51 @@ function getFillScreenTarget() {
 
 const FILL_SCREEN_ENABLED = true;
 
-// 중간광고 진입/종료 시 #live_player_layout 의 class 에 miniplayer 가 붙었다 빠진다.
-// PIP 전환은 상위 section 의 class(_type_pip_)로 나타난다. 전역 옵저버는 childList 만
-// 감시해 class 만 바뀌면 놓칠 수 있으므로, 영상 박스 + 그 상위 section 의 class 변화를
-// 직접 감시해 화면 채우기를 즉시 원복/재적용한다(광고·PIP 종료 후 원래 크기로 복귀).
+// 중간광고 진입/종료 시 #live_player_layout 의 class 에 miniplayer 가 붙었다 빠지고,
+// 라이브/다시보기 PIP 전환은 상위 section 의 class(_type_pip_)로 나타난다. 전역
+// 옵저버는 childList 만 감시해 class 만 바뀌면 놓칠 수 있으므로, 현재 영상 박스와 그
+// 상위 section 의 class 변화를 직접 감시해 화면 채우기를 즉시 원복/재적용한다.
 let fillScreenPlayerObserver = null;
 let fillScreenObservedBox = null;
+let fillScreenObservedPlayerRoot = null;
 function ensureFillScreenPlayerObserver() {
-  const box = document.querySelector("div#layout-body #live_player_layout");
-  if (fillScreenObservedBox === box && box?.isConnected) return; // 이미 감시 중
+  const target = getFillScreenTarget();
+  const box = target?.box;
+  const playerRoot =
+    box?.matches?.(".pzp-pc") === true
+      ? box
+      : box?.querySelector?.(".pzp-pc") || null;
+  if (
+    fillScreenObservedBox === box &&
+    fillScreenObservedPlayerRoot === playerRoot &&
+    box?.isConnected
+  ) {
+    return;
+  }
   if (fillScreenPlayerObserver) {
     fillScreenPlayerObserver.disconnect();
     fillScreenPlayerObserver = null;
     fillScreenObservedBox = null;
+    fillScreenObservedPlayerRoot = null;
   }
   if (!(box instanceof HTMLElement)) return;
   fillScreenPlayerObserver = new MutationObserver(() => {
     applyFillScreen();
-    applyAdMiniplayerUnmute(); // 미니플레이어 전환 시 음소거 해제 옵션 반영
+    if (box.id === "live_player_layout") {
+      applyAdMiniplayerUnmute(); // 라이브 미니플레이어 전환 시 음소거 해제 옵션 반영
+    }
   });
-  // 영상 박스(miniplayer class) + 상위 section(_type_pip_ class) 둘 다 class 만 감시.
+  // 영상 박스(miniplayer 등) + 상위 section(_type_pip_ 등) 둘 다 class 만 감시.
   fillScreenPlayerObserver.observe(box, {
     attributes: true,
     attributeFilter: ["class"],
   });
+  if (playerRoot instanceof HTMLElement && playerRoot !== box) {
+    fillScreenPlayerObserver.observe(playerRoot, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
   const section = box.closest("div#layout-body section");
   if (section instanceof HTMLElement) {
     fillScreenPlayerObserver.observe(section, {
@@ -9566,6 +9692,7 @@ function ensureFillScreenPlayerObserver() {
     });
   }
   fillScreenObservedBox = box;
+  fillScreenObservedPlayerRoot = playerRoot;
 }
 
 // 중간광고 중 미니플레이어(원래 방송)의 음소거를 해제한다(옵션 ON일 때만). 치지직이
@@ -9641,27 +9768,53 @@ function applyAdMiniplayerUnmute() {
   if (!adUnmuteSuppressed && video.muted) setAdUnmuteMutedFalse(video);
 }
 
-// 영상 영역(_player_1qjld_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
+// 영상 영역(_player_, overflow:hidden)의 height 를 '폭×9/16'으로 키워 영상이 폭을
 // 꽉 채우게 한다(레터박스 제거, 하단 안 잘림). main 은 건드리지 않으므로 main 의
-// overflow-y 스크롤은 그대로 유지된다. 다시보기(capMaxH:true)는 아직 적용하지 않는다.
-// stacked(상하 배치)/라이브 아님이면 원복. 멱등 적용으로 깜빡임 방지.
+// overflow-y 스크롤은 그대로 유지된다. 라이브/다시보기는 별도 옵션으로 적용한다.
+// stacked(상하 배치)면 원복하며, 멱등 적용으로 깜빡임을 줄인다.
 // 우리가 실제로 스타일을 넣은 요소를 기억해 둔다. 원복은 '지금 타겟을 다시 찾아서'가
 // 아니라 '기억해 둔 요소'에서 하므로, PIP/미니플레이어로 DOM 구조가 바뀌어 타겟 재탐색이
 // 실패/변경돼도 확실히 지워진다(스타일이 요소에 남아 스크롤을 유발하던 문제 해결).
 let fillScreenStyledEl = null; // height/flex-shrink 를 건 영상 층(_player_)
 let fillScreenStyledContents = null; // max-height/flex-shrink 를 건 부모(_contents_)
+let fillScreenStyledElSnapshot = null;
+let fillScreenStyledContentsSnapshot = null;
+
+function captureInlineStyleProperties(element, properties) {
+  const snapshot = {};
+  for (const property of properties) {
+    snapshot[property] = {
+      value: element.style.getPropertyValue(property),
+      priority: element.style.getPropertyPriority(property),
+    };
+  }
+  return snapshot;
+}
+
+function restoreInlineStyleProperties(element, snapshot) {
+  if (!(element instanceof HTMLElement) || !snapshot) return;
+  for (const [property, saved] of Object.entries(snapshot)) {
+    if (saved.value) {
+      element.style.setProperty(property, saved.value, saved.priority);
+    } else {
+      element.style.removeProperty(property);
+    }
+  }
+}
+
 function clearFillScreenStyles() {
-  if (fillScreenStyledEl instanceof HTMLElement) {
-    fillScreenStyledEl.style.removeProperty("height");
-    fillScreenStyledEl.style.removeProperty("min-height");
-    fillScreenStyledEl.style.removeProperty("flex-shrink");
-  }
-  if (fillScreenStyledContents instanceof HTMLElement) {
-    fillScreenStyledContents.style.removeProperty("max-height");
-    fillScreenStyledContents.style.removeProperty("flex-shrink");
-  }
+  restoreInlineStyleProperties(
+    fillScreenStyledEl,
+    fillScreenStyledElSnapshot,
+  );
+  restoreInlineStyleProperties(
+    fillScreenStyledContents,
+    fillScreenStyledContentsSnapshot,
+  );
   fillScreenStyledEl = null;
   fillScreenStyledContents = null;
+  fillScreenStyledElSnapshot = null;
+  fillScreenStyledContentsSnapshot = null;
 }
 // 치지직 '넓은 화면'(viewmode)이 켜져 있는지 판정. 넓은 화면이면 영상 레이아웃이 달라져
 // 화면 채우기(영상 층 높이 강제)가 오히려 방해하므로 적용하지 않는다. viewmode 버튼은
@@ -9678,6 +9831,41 @@ function isWideScreenModeOn() {
   return (
     btn.hasAttribute("checked") ||
     btn.getAttribute("aria-label") === "좁은 화면"
+  );
+}
+
+function isPlayerFullscreenModeOn(target) {
+  if (
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.webkitIsFullScreen === true
+  ) {
+    return true;
+  }
+
+  const fullscreenSelector = ".pzp-pc--fullscreen";
+  const candidates = [target?.box, target?.el];
+  if (
+    candidates.some(
+      (element) =>
+        element instanceof HTMLElement &&
+        (element.matches(fullscreenSelector) ||
+          element.closest(fullscreenSelector) ||
+          element.querySelector(fullscreenSelector)),
+    ) ||
+    document.querySelector(fullscreenSelector)
+  ) {
+    return true;
+  }
+
+  const button = document.querySelector(
+    ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
+  );
+  const label = button?.getAttribute("aria-label") || "";
+  return (
+    button?.getAttribute("aria-pressed") === "true" ||
+    button?.hasAttribute("checked") ||
+    /전체\s*화면\s*(?:종료|나가기|해제)/.test(label)
   );
 }
 
@@ -9916,8 +10104,8 @@ function applyAutoReloadOnRelive() {
 function applyFillScreen() {
   const t = getFillScreenTarget();
   const aside = findResizableChatAside();
-  // 다시보기(capMaxH)는 일단 제외 — 라이브 영상 컨테이너만 대상.
   const isLive = !!t && !t.capMaxH;
+  const isVod = !!t && t.capMaxH;
   // 중간광고 시 원래 영상은 #live_player_layout.miniplayer 로 축소돼 채팅쪽으로 이동한다.
   // 이때 미니플레이어의 작은 폭으로 높이를 잡으면 안 되므로 적용을 끄고 원복한다(광고가
   // 끝나 miniplayer 클래스가 빠지면 다음 applyFillScreen 호출에서 자동 재적용).
@@ -9934,13 +10122,15 @@ function applyFillScreen() {
   );
   // 넓은 화면(viewmode)이면 영상 레이아웃이 달라 화면 채우기가 방해된다 → 적용 안 함.
   const isWide = isWideScreenModeOn();
-  // 전체화면이면 브라우저가 영상을 꽉 채우므로 우리가 높이를 강제하면 오히려 깨진다
-  // (치지직 업데이트로 재발). document.fullscreenElement 로 판정(클래스 해시 무관).
-  const isFullscreen = !!document.fullscreenElement;
+  // 전체화면이면 브라우저가 영상을 꽉 채우므로 높이 강제를 즉시 원복한다. 표준/WebKit
+  // Fullscreen API뿐 아니라 치지직 플레이어 클래스와 버튼 상태도 함께 확인한다.
+  const isFullscreen = isPlayerFullscreenModeOn(t);
+  const pageEnabled =
+    (isLive && featureFlags.fillScreen) ||
+    (isVod && featureFlags.fillScreenVod);
   const on =
     FILL_SCREEN_ENABLED &&
-    featureFlags.fillScreen &&
-    isLive &&
+    pageEnabled &&
     !isMini &&
     !isPip &&
     !isWide &&
@@ -9949,35 +10139,55 @@ function applyFillScreen() {
   if (!on) {
     // 타겟 재탐색과 무관하게, 우리가 스타일을 건 요소를 직접 원복(PIP/미니플레이어에서
     // 구조가 바뀌어도 확실히 지운다).
-    // ⚠ 다시보기(capMaxH)의 _player_ max-height 는 '치지직 네이티브'가 넣은 값
-    // (예: calc(100% - 85px), 영상 아래 정보 바 자리 확보용)이다. 우리는 다시보기에
-    // fillScreen 을 적용하지 않으므로(위 isLive 제외) 넣은 적이 없다 → 지우면 안 된다.
-    // 예전에 무조건 removeProperty 하던 코드가 이 네이티브 값을 지워, 특히 21:9 등
-    // 와이드 화면에서 영상이 wrapper 를 꽉 채워 커지는 버그가 있었다(제거함).
+    // 다시보기의 네이티브 max-height 등은 적용 전에 저장한 인라인 값으로 정확히 되돌린다.
     clearFillScreenStyles();
     return;
   }
   const { el, box } = t;
   // 적용 대상이 바뀌었으면(다른 영상 층) 이전 것 먼저 원복.
-  if (fillScreenStyledEl && fillScreenStyledEl !== el) clearFillScreenStyles();
+  if (
+    fillScreenStyledEl &&
+    (fillScreenStyledEl !== el ||
+      fillScreenStyledContents !== (t.contents || null))
+  ) {
+    clearFillScreenStyles();
+  }
+  const videoBox = box instanceof HTMLElement ? box : el;
+  // 영상 폭(boxW)은 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
+  const boxW = videoBox.getBoundingClientRect().width;
+  if (!(boxW > 0)) return;
+  if (!fillScreenStyledEl) {
+    fillScreenStyledEl = el;
+    fillScreenStyledElSnapshot = captureInlineStyleProperties(el, [
+      "height",
+      "max-height",
+      "flex-shrink",
+    ]);
+  }
   // 영상 층 부모(_contents_)의 max-height:100% 제약을 풀고 flex-shrink 를 막아, 영상을
   // 키워 콘텐츠가 넘치면 형제가 침범하지 않고 main 의 overflow-y 스크롤로 흘러가게 한다.
   if (t.contents instanceof HTMLElement) {
+    if (!fillScreenStyledContents) {
+      fillScreenStyledContents = t.contents;
+      fillScreenStyledContentsSnapshot = captureInlineStyleProperties(
+        t.contents,
+        ["max-height", "flex-shrink"],
+      );
+    }
     if (t.contents.style.maxHeight !== "none") {
       t.contents.style.setProperty("max-height", "none", "important");
     }
     if (t.contents.style.flexShrink !== "0") {
       t.contents.style.setProperty("flex-shrink", "0", "important");
     }
-    fillScreenStyledContents = t.contents;
   }
-  const videoBox = box instanceof HTMLElement ? box : el;
-  // 영상 폭(boxW)은 높이를 바꿔도 안 변한다(채팅/사이드바가 정함) → 그대로 읽음.
-  const boxW = videoBox.getBoundingClientRect().width;
-  if (!(boxW > 0)) return;
+  // 다시보기 _player_에는 영상 아래 정보 영역을 위한 네이티브 max-height 제한이 있으므로,
+  // 옵션이 켜진 동안만 해제한다. 원래 값은 위 snapshot에 보관해 해제 시 그대로 복원한다.
+  if (isVod && el.style.maxHeight !== "none") {
+    el.style.setProperty("max-height", "none", "important");
+  }
   const idealH = Math.round((boxW * 9) / 16);
   const value = `${idealH}px`;
-  fillScreenStyledEl = el; // 원복 대상 기억
   // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
   // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
   // 높이를 유지시킨다(넘치는 분량은 main 의 overflow-y 스크롤이 흡수).
@@ -12513,9 +12723,9 @@ function isCustomFollowOwnedSidebarNode(node) {
     node.matches?.(
       "#cheese-custom-follow, #cheese-custom-follow *, .cheese-cf-header-ctrl, .cheese-cf-header-ctrl *, .cheese-custom-follow-orig-hidden",
     ) ||
-      node.closest?.(
-        "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
-      ),
+    node.closest?.(
+      "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
+    ),
   );
 }
 
@@ -12933,6 +13143,166 @@ async function loadChannelLiveButton() {
     channelLiveButtonEnd = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
   } catch {}
   ensureChannelLiveButton();
+}
+
+function isChannelProfileLink(anchor) {
+  const href = anchor?.getAttribute?.("href") || "";
+  return (
+    /^\/[a-f0-9]{32}(?:[/?#]|$)/i.test(href) ||
+    /^https:\/\/chzzk\.naver\.com\/[a-f0-9]{32}(?:[/?#]|$)/i.test(href) ||
+    /^https:\/\/game\.naver\.com\/profile\/[a-f0-9]{32}(?:[/?#]|$)/i.test(
+      href,
+    )
+  );
+}
+
+function isCompactSquareProfileImage(root) {
+  const image = root?.querySelector?.(":scope > img");
+  if (!image) return false;
+  const width = Number(image.getAttribute("width"));
+  const height = Number(image.getAttribute("height"));
+  return (
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    width === height &&
+    width <= 160
+  );
+}
+
+function isChannelProfileThumbnail(anchor) {
+  if (isChannelProfileLink(anchor)) return true;
+  const href = anchor?.getAttribute?.("href") || "";
+  const isLiveChannelLink =
+    /^\/live\/[a-f0-9]{32}(?:[/?#]|$)/i.test(href) ||
+    /^https:\/\/chzzk\.naver\.com\/live\/[a-f0-9]{32}(?:[/?#]|$)/i.test(
+      href,
+    );
+  // 라이브 카드 영상 썸네일도 /live/{channelId}를 사용한다. width/height가 같은
+  // 소형 이미지만 프로필로 인정해 100% 영상 썸네일에는 적용하지 않는다.
+  return isLiveChannelLink && isCompactSquareProfileImage(anchor);
+}
+
+// CSS module 해시가 바뀌어도 역할 클래스와 링크 구조로 프로필만 골라 전용 클래스를
+// 붙인다. 단순 _thumbnail_ 전역 CSS는 동영상·클립 썸네일까지 바꾸므로 사용하지 않는다.
+function applyChannelProfileRadius() {
+  document.documentElement.style.setProperty(
+    "--cheese-channel-profile-radius",
+    `${normalizeChannelProfileRadius(channelProfileRadius)}%`,
+  );
+
+  document
+    .querySelectorAll(
+      'a[class*="_thumbnail_"]:not(.cheese-channel-profile-radius-target)',
+    )
+    .forEach((anchor) => {
+      if (isChannelProfileThumbnail(anchor)) {
+        anchor.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
+      }
+    });
+
+  // 다시보기·커뮤니티 댓글 작성자처럼 링크 대신 thumbnail 버튼을 쓰는 프로필.
+  document
+    .querySelectorAll(
+      '[class*="_profile_"] button[class*="_thumbnail_"]:not(.cheese-channel-profile-radius-target)',
+    )
+    .forEach((button) => {
+      if (button.querySelector(":scope > img")) {
+        button.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
+      }
+    });
+
+  // 프로필 내부 이미지 링크. 라이브 카드처럼 바깥 profile에 링이 있고 안쪽 image 링크가
+  // 실제 이미지를 자르는 구조를 지원한다.
+  document
+    .querySelectorAll(
+      'div[class*="_profile_"]:not([class*="_type_profile_"]) a[class*="_image_"]:not(.cheese-channel-profile-radius-target)',
+    )
+    .forEach((profile) => {
+      profile.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
+    });
+
+  // profile div 자체가 이미지/링을 담당하는 구조. 채널 루트 링크, channel_link, 사이드바,
+  // 커뮤니티 카드 헤더에 한정해 채팅 프로필과 일반 레이아웃의 _profile_ 오탐을 막는다.
+  document
+    .querySelectorAll(
+      'div[class*="_profile_"]:not([class*="_type_profile_"]):not(.cheese-channel-profile-radius-target)',
+    )
+    .forEach((profile) => {
+      const link = profile.closest("a[href]");
+      const hasDirectImage = Boolean(profile.querySelector(":scope > img"));
+      const isCommunityProfile =
+        profile.matches('[style*="background-image"]') &&
+        profile.parentElement?.matches?.('div[class*="_header_"]') &&
+        Boolean(profile.closest("#layout-body"));
+      if (
+        profile.closest("#sidebar") ||
+        profile.closest('a[class*="_channel_link_"]') ||
+        isChannelProfileLink(link) ||
+        hasDirectImage ||
+        isCommunityProfile
+      ) {
+        profile.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
+      }
+    });
+
+  // 헤더 우측의 로그인 사용자 프로필 버튼.
+  document
+    .querySelectorAll(
+      'button[class*="_profile_button_"]:not(.cheese-channel-profile-radius-target)',
+    )
+    .forEach((button) => {
+      button.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
+    });
+}
+
+async function loadChannelProfileRadius() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([CHANNEL_PROFILE_RADIUS_KEY]);
+    channelProfileRadius = normalizeChannelProfileRadius(
+      data?.[CHANNEL_PROFILE_RADIUS_KEY],
+    );
+  } catch {}
+  applyChannelProfileRadius();
+}
+
+function applyChannelLiveProfileBackground() {
+  const root = document.documentElement;
+  const config = normalizeChannelLiveProfileBackground(
+    channelLiveProfileBackground,
+  );
+  root.classList.toggle(
+    CHANNEL_LIVE_PROFILE_BACKGROUND_ROOT_CLASS,
+    config.enabled,
+  );
+  root.style.setProperty(
+    "--cheese-channel-live-profile-angle",
+    `${config.angle}deg`,
+  );
+  root.style.setProperty(
+    "--cheese-channel-live-profile-start",
+    channelLiveProfileRgba(config.start, config.startAlpha),
+  );
+  root.style.setProperty(
+    "--cheese-channel-live-profile-end",
+    channelLiveProfileRgba(config.end, config.endAlpha),
+  );
+}
+
+async function loadChannelLiveProfileBackground() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([CHANNEL_LIVE_PROFILE_BACKGROUND_KEY]);
+    channelLiveProfileBackground = normalizeChannelLiveProfileBackground(
+      data?.[CHANNEL_LIVE_PROFILE_BACKGROUND_KEY],
+    );
+  } catch {
+    channelLiveProfileBackground = {
+      ...CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT,
+    };
+  }
+  applyChannelLiveProfileBackground();
 }
 
 // ── 통합검색(/search) 동영상 섹션 재랭킹 ──────────────────────────────────────
@@ -13707,6 +14077,8 @@ const followPreviewState = {
   elapsedTimer: 0, // 라이브 경과 시간 1초 갱신 타이머
   viewersTimer: 0, // 시청자수 주기 갱신 타이머
   maxLifeTimer: 0, // 자동 종료 타이머(고정/호버 무관, 장시간 시청 방지)
+  anchor: null, // 현재 패널을 연 DOM 앵커
+  anchorKind: "", // card | following
 };
 
 function clearFollowPreviewOpenTimer() {
@@ -14022,11 +14394,14 @@ function ensureCustomFollowPageFavoriteButton() {
 // 카테고리명과 혼동하지 않고 사용자가 저장한 태그와 정확히 일치하는 카드를 숨긴다.
 const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
 const LIVE_TAG_FILTER_BUTTON_CLASS = "cheese-live-tag-filter-button";
 const LIVE_TAG_FILTER_MODAL_ID = "cheese-live-tag-filter-modal";
 const LIVE_TAG_FILTER_HIDDEN_CLASS = "cheese-live-tag-filter-hidden";
+const LIVE_VIEWER_COUNT_INLINE_CLASS = "cheese-live-viewer-count-inline";
 let liveTagFilters = [];
 let liveTagFilterButtonOn = false;
+let liveViewerCountInlineOn = false;
 const liveTagFilterSelected = new Set();
 let liveTagFilterRestoreFocus = null;
 
@@ -14242,6 +14617,85 @@ function applyLiveTagFilters() {
   }
 }
 
+function clearLiveViewerCountPlacement() {
+  document
+    .querySelectorAll(`.${LIVE_VIEWER_COUNT_INLINE_CLASS}`)
+    .forEach((card) => {
+      card.classList.remove(LIVE_VIEWER_COUNT_INLINE_CLASS);
+      card.style.removeProperty("--cheese-live-viewer-count-left");
+      card.style.removeProperty("--cheese-live-viewer-count-top");
+    });
+}
+
+function applyLiveViewerCountPlacement() {
+  if (!liveViewerCountInlineOn || !getLiveTagFilterPageKind()) {
+    clearLiveViewerCountPlacement();
+    return;
+  }
+  const scope =
+    document.querySelector("#layout-body") ||
+    document.querySelector("main") ||
+    document.body;
+  if (!scope) {
+    clearLiveViewerCountPlacement();
+    return;
+  }
+
+  const activeCards = new Set();
+  const thumbnails = scope.querySelectorAll(
+    'a[class*="_thumbnail_"][href^="/live/"]',
+  );
+  for (const thumbnail of thumbnails) {
+    const card = thumbnail.parentElement;
+    const description = thumbnail.querySelector(
+      ':scope > div[class*="_description_"]',
+    );
+    const liveBadge = description?.querySelector(":scope > em");
+    const countBadge = thumbnail.querySelector(
+      ':scope > div[class*="_count_badge_"]',
+    );
+    if (
+      !card?.matches?.('div[class*="_container_"]') ||
+      !description ||
+      !liveBadge ||
+      !countBadge?.querySelector("span")
+    ) {
+      continue;
+    }
+
+    activeCards.add(card);
+    const left =
+      description.offsetLeft +
+      liveBadge.offsetLeft +
+      liveBadge.offsetWidth +
+      4;
+    const top = description.offsetTop + liveBadge.offsetTop;
+    const leftValue = `${Math.round(left)}px`;
+    const topValue = `${Math.round(top)}px`;
+    card.classList.add(LIVE_VIEWER_COUNT_INLINE_CLASS);
+    if (
+      card.style.getPropertyValue("--cheese-live-viewer-count-left") !==
+      leftValue
+    ) {
+      card.style.setProperty("--cheese-live-viewer-count-left", leftValue);
+    }
+    if (
+      card.style.getPropertyValue("--cheese-live-viewer-count-top") !==
+      topValue
+    ) {
+      card.style.setProperty("--cheese-live-viewer-count-top", topValue);
+    }
+  }
+  document
+    .querySelectorAll(`.${LIVE_VIEWER_COUNT_INLINE_CLASS}`)
+    .forEach((card) => {
+      if (activeCards.has(card)) return;
+      card.classList.remove(LIVE_VIEWER_COUNT_INLINE_CLASS);
+      card.style.removeProperty("--cheese-live-viewer-count-left");
+      card.style.removeProperty("--cheese-live-viewer-count-top");
+    });
+}
+
 function renderLiveTagFilterModal() {
   const overlay = document.getElementById(LIVE_TAG_FILTER_MODAL_ID);
   if (!overlay) return;
@@ -14452,15 +14906,20 @@ async function loadLiveTagFilters() {
     const data = await getBootData([
       LIVE_TAG_FILTERS_KEY,
       LIVE_TAG_FILTER_BUTTON_KEY,
+      LIVE_VIEWER_COUNT_INLINE_KEY,
     ]);
     liveTagFilters = sanitizeLiveTagFilters(data?.[LIVE_TAG_FILTERS_KEY]);
     liveTagFilterButtonOn = data?.[LIVE_TAG_FILTER_BUTTON_KEY] !== false;
+    liveViewerCountInlineOn =
+      data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
   } catch {
     liveTagFilters = [];
     liveTagFilterButtonOn = true;
+    liveViewerCountInlineOn = false;
   }
   ensureLiveTagFilterUi();
   applyLiveTagFilters();
+  applyLiveViewerCountPlacement();
 }
 
 if (chrome.storage?.onChanged) {
@@ -14468,7 +14927,8 @@ if (chrome.storage?.onChanged) {
     if (
       area !== "local" ||
       (!changes[LIVE_TAG_FILTERS_KEY] &&
-        !changes[LIVE_TAG_FILTER_BUTTON_KEY])
+        !changes[LIVE_TAG_FILTER_BUTTON_KEY] &&
+        !changes[LIVE_VIEWER_COUNT_INLINE_KEY])
     ) {
       return;
     }
@@ -14481,9 +14941,14 @@ if (chrome.storage?.onChanged) {
       liveTagFilterButtonOn =
         changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue !== false;
     }
+    if (changes[LIVE_VIEWER_COUNT_INLINE_KEY]) {
+      liveViewerCountInlineOn =
+        changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
+    }
     renderLiveTagFilterModal();
     ensureLiveTagFilterUi();
     applyLiveTagFilters();
+    applyLiveViewerCountPlacement();
   });
 }
 
@@ -14521,7 +14986,7 @@ function createCustomFollowItemHtml(item, h, expandedNow) {
   // (harvest 캐시가 접힘 시점 값이라 전환 직후 놓치는 문제를 없앰).
   const expandedCls = expandedNow ? " " + expandedNow : "";
   // 커스텀 순서 드래그: 즐겨찾기 별도정렬 ON + custom 모드 + 이 항목이 즐겨찾기일 때.
-  // 접힘 상태(아이콘만)에서도 재정렬 가능(즐겨찾기는 오프라인도 표시되어 전부 보임).
+  // 접힘 상태(아이콘만)에서도 현재 표시 중인 즐겨찾기는 재정렬할 수 있다.
   const dragOn =
     featureFlags.sbFollowFavSort && customFollowFavSort === "custom" && fav;
   // draggable 은 기본 false — 꾹 누르면(long-press) JS 가 동적으로 켠다(짧은 클릭은
@@ -14532,7 +14997,7 @@ function createCustomFollowItemHtml(item, h, expandedNow) {
   return (
     `<li${dragAttr} data-channel-id="${escapeAttribute(item.channelId)}" data-live="${live ? "1" : "0"}">` +
     `<div class="cheese-cf-inner ${c(h?.inner, "")}${expandedCls}">` +
-    `<div class="${profileCls}">` +
+    `<div class="${profileCls} ${CHANNEL_PROFILE_RADIUS_TARGET_CLASS}">` +
     (imageUrl
       ? `<img width="26" height="26" src="${escapeAttribute(imageUrl)}" alt="" draggable="false">`
       : "") +
@@ -14558,15 +15023,23 @@ function createCustomFollowItemHtml(item, h, expandedNow) {
   );
 }
 
-// 현재 설정/데이터로 표시할 아이템 목록(오프라인 숨김 + 정렬). 즐겨찾기는 오프라인이어도 표시.
+// 현재 설정/데이터로 표시할 아이템 목록(그룹별 오프라인 숨김 + 정렬).
 function getCustomFollowVisibleItems() {
   let items = customFollowItems;
-  if (featureFlags.sbFollowCustomOffline) {
-    items = items.filter(
-      (it) => it.live || customFollowFavorites.has(it.channelId),
-    );
+  if (
+    featureFlags.sbFollowCustomOffline ||
+    featureFlags.sbFollowCustomFavoriteOffline
+  ) {
+    items = items.filter((it) => {
+      if (it.live) return true;
+      const favorite = customFollowFavorites.has(it.channelId);
+      return favorite
+        ? !featureFlags.sbFollowCustomFavoriteOffline
+        : !featureFlags.sbFollowCustomOffline;
+    });
   }
-  // 통나무파워 지우개로 지운 채널 제외(옵션). 단 즐겨찾기는 사용자가 명시 지정했으므로 유지.
+  // 통나무파워 지우개로 지운 채널 제외(옵션). 즐겨찾기는 이 제외 설정의 영향은
+  // 받지 않지만, 위 즐겨찾기 오프라인 숨김 설정은 그대로 적용된다.
   if (
     featureFlags.sbFollowCustomExcludeLogpowerHidden &&
     logpowerHiddenChannelsCache.size
@@ -14594,6 +15067,7 @@ function customFollowSig(visibleCount, shown) {
     shown,
     visibleCount,
     featureFlags.sbFollowCustomOffline ? 1 : 0,
+    featureFlags.sbFollowCustomFavoriteOffline ? 1 : 0,
     isSidebarExpanded() ? 1 : 0,
     featureFlags.sbFollowFavStar ? 1 : 0,
     featureFlags.sbFollowFavStyle ? 1 : 0,
@@ -14749,8 +15223,9 @@ function renderCustomFollowList(ourNav, h) {
   const expandedNow = getCustomFollowExpandedNow(origNav);
   const visible = getCustomFollowVisibleItems();
   const autoExpand = featureFlags.sbFollowCustomAutoExpand;
-  // 즐겨찾기는 '초기 표시 개수'에서 제외한다(항상 표시). 즐겨찾기가 목록 앞에 몰려 있으므로
-  // 그 수만큼 shown 을 늘려, 초기 개수(customFollowShown)는 일반 채널 기준으로 적용된다.
+  // 현재 표시 대상인 즐겨찾기는 '초기 표시 개수'에서 제외한다. 즐겨찾기가 목록 앞에
+  // 몰려 있으므로 그 수만큼 shown 을 늘려, 초기 개수(customFollowShown)는 일반 채널
+  // 기준으로 적용된다.
   const favCount = visible.filter((it) =>
     customFollowFavorites.has(it.channelId),
   ).length;
@@ -14962,13 +15437,16 @@ function bindCustomFollowDragSort() {
     if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID) || !listEl) return;
     e.preventDefault();
     e.stopPropagation();
-    // 현재 DOM 상의 즐겨찾기 순서를 읽어 저장.
+    // 현재 DOM 상의 즐겨찾기 순서를 읽되, 오프라인 숨김으로 보이지 않는 즐겨찾기는
+    // 기존 커스텀 순서에 그대로 보존한다.
     const ids = [...listEl.querySelectorAll(".cheese-cf-draggable")].map(
       (li) => li.dataset.channelId,
     );
-    customFollowFavOrder = ids;
+    customFollowFavOrder = mergeVisibleFavoriteOrder(ids);
     try {
-      chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_ORDER_KEY]: ids });
+      chrome.storage?.local?.set({
+        [CUSTOM_FOLLOW_FAV_ORDER_KEY]: customFollowFavOrder,
+      });
     } catch {}
     // ⚠ 재렌더 전에 드래그 상태를 비운다(재렌더로 li 교체 시 dragend 가 안 와 잔존하는 버그).
     customFollowDragEl = null;
@@ -15105,13 +15583,45 @@ function saveCustomFollowFavMeta() {
   return false;
 }
 
-// 현재 즐겨찾기 채널을 '화면 정렬 순서'대로 나열한 배열(커스텀 순서 편집의 기준).
-// customFollowFavOrder 에 없던 항목(새 즐겨찾기)도 현재 표시 순서로 편입한다.
+// 현재 화면에 보이는 즐겨찾기를 정렬 순서대로 나열한다. 오프라인 숨김으로 빠진
+// 즐겨찾기는 아래 mergeVisibleFavoriteOrder가 기존 순서에 그대로 보존한다.
 function currentFavoriteOrder() {
   const favs = getCustomFollowVisibleItems().filter((it) =>
     customFollowFavorites.has(it.channelId),
   );
   return favs.map((it) => it.channelId);
+}
+
+// 화면에서 재정렬한 즐겨찾기만 새 순서로 치환하고, 오프라인 숨김 등으로 현재 보이지
+// 않는 즐겨찾기는 기존 위치와 상대 순서를 유지한다. 보이는 ID만 저장하면 숨긴 채널이
+// 커스텀 순서 목록에서 유실되어 다시 라이브가 됐을 때 맨 뒤로 밀리는 문제가 생긴다.
+function mergeVisibleFavoriteOrder(visibleIds) {
+  const visible = [
+    ...new Set(
+      (Array.isArray(visibleIds) ? visibleIds : [])
+        .map(String)
+        .filter((id) => customFollowFavorites.has(id)),
+    ),
+  ];
+  const visibleSet = new Set(visible);
+  const full = [];
+  const seen = new Set();
+  const append = (id) => {
+    id = String(id || "");
+    if (!id || seen.has(id) || !customFollowFavorites.has(id)) return;
+    seen.add(id);
+    full.push(id);
+  };
+  customFollowFavOrder.forEach(append);
+  customFollowItems.forEach((it) => append(it.channelId));
+  customFollowFavorites.forEach(append);
+
+  let cursor = 0;
+  const merged = full.map((id) =>
+    visibleSet.has(id) ? visible[cursor++] : id,
+  );
+  while (cursor < visible.length) merged.push(visible[cursor++]);
+  return merged;
 }
 
 // dragId 를 targetId 의 앞(side="before")/뒤(side="after")로 옮겨 커스텀 순서를 재계산·저장.
@@ -15125,9 +15635,11 @@ function reorderCustomFollowFavorite(dragId, targetId, side) {
   const t = order.indexOf(targetId); // 제거 후 타깃 인덱스
   const insertAt = side === "after" ? t + 1 : t; // 타깃 앞/뒤
   order.splice(insertAt, 0, dragId);
-  customFollowFavOrder = order;
+  customFollowFavOrder = mergeVisibleFavoriteOrder(order);
   try {
-    chrome.storage?.local?.set({ [CUSTOM_FOLLOW_FAV_ORDER_KEY]: order });
+    chrome.storage?.local?.set({
+      [CUSTOM_FOLLOW_FAV_ORDER_KEY]: customFollowFavOrder,
+    });
   } catch {}
   customFollowVersion += 1;
   ensureCustomFollowList();
@@ -15438,10 +15950,10 @@ function setFollowPreviewPinned(on) {
   if (on) clearFollowPreviewCloseTimer();
 }
 
-// 패널을 호버 요소 옆(치지직 툴팁 자리)에 fixed 배치. 기본은 우측, 사이드바가
-// 오른쪽 배치(sidebarRight)거나 우측 공간 부족이면 좌측에 둔다. 좌측 배치면 패널에
-// is-left 클래스 → 리사이즈 핸들이 좌하단으로 가고 드래그 방향도 반대가 된다.
-function positionFollowPreview(el, anchor) {
+// 패널을 호버 요소 옆(치지직 툴팁 자리)에 fixed 배치한다. 카드 미리보기는 설정한
+// 선호 방향을, 사이드바 미리보기는 사이드바 반대편을 우선하되 화면 경계에서 자동
+// 반전한다. 좌측 배치면 is-left로 리사이즈 핸들과 드래그 방향도 함께 바꾼다.
+function positionFollowPreview(el, anchor, anchorKind = "following") {
   const r = anchor.getBoundingClientRect();
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -15475,7 +15987,27 @@ function positionFollowPreview(el, anchor) {
   const isHeaderFollow =
     anchor.classList?.contains?.("cheese-header-follow-item") === true;
   let side; // true=좌측(is-left)
-  if (!isHeaderFollow && featureFlags.sidebarRight) side = true;
+  if (anchorKind === "card") {
+    const preferredLeft =
+      cardLivePreviewPosition === "left" ||
+      (cardLivePreviewPosition === "auto" && featureFlags.sidebarRight);
+    const preferredSpace = preferredLeft ? leftSpace : rightSpace;
+    const oppositeSpace = preferredLeft ? rightSpace : leftSpace;
+    const maxViewportWidth = Math.max(0, vw - EDGE * 2);
+    const desiredWidth = Math.min(
+      followPreviewState.width,
+      maxViewportWidth,
+    );
+
+    // 선호 방향에 저장 폭이 그대로 들어가면 유지한다. 부족할 때 반대편에는 전체 폭이
+    // 들어가면 자동 반전하고, 양쪽 모두 좁다면 최소 폭이 들어가는 선호 방향을 유지한다.
+    // 최소 폭조차 한쪽에만 들어가면 그쪽을, 양쪽 모두 불가능하면 더 넓은 쪽을 택한다.
+    if (preferredSpace >= desiredWidth) side = preferredLeft;
+    else if (oppositeSpace >= desiredWidth) side = !preferredLeft;
+    else if (preferredSpace >= FOLLOW_PREVIEW_MIN_W) side = preferredLeft;
+    else if (oppositeSpace >= FOLLOW_PREVIEW_MIN_W) side = !preferredLeft;
+    else side = leftSpace > rightSpace;
+  } else if (!isHeaderFollow && featureFlags.sidebarRight) side = true;
   else if (rightSpace >= FOLLOW_PREVIEW_MIN_W)
     side = false; // 우측에 최소폭 들어가면 우측
   else side = leftSpace > rightSpace; // 우측 너무 좁으면 더 넓은 쪽
@@ -15502,9 +16034,11 @@ function positionFollowPreview(el, anchor) {
 }
 
 // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
-async function openFollowPreview(li, channelId) {
+async function openFollowPreview(li, channelId, anchorKind = "following") {
   if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
   followPreviewState.currentChannelId = channelId;
+  followPreviewState.anchor = li;
+  followPreviewState.anchorKind = anchorKind;
   followPreviewState.retried = false;
   startFollowPreviewMaxLifeTimer(); // 자동 종료(장시간 시청 방지)
   // 새 호버로 여는 것이므로 이전에 드래그로 옮긴 위치는 버리고 앵커 기준으로 재배치
@@ -15515,7 +16049,7 @@ async function openFollowPreview(li, channelId) {
   el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
   el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
   applyFollowPreviewHiddenParts(el);
-  positionFollowPreview(el, li);
+  positionFollowPreview(el, li, anchorKind);
   el.classList.add("is-loading");
   el.classList.remove("is-ready");
 
@@ -15974,6 +16508,8 @@ function teardownFollowPreviewMedia(video) {
 
 function closeFollowPreview() {
   followPreviewState.currentChannelId = "";
+  followPreviewState.anchor = null;
+  followPreviewState.anchorKind = "";
   followPreviewState.resizing = false;
   followPreviewState.pinned = false;
   followPreviewState.movedPos = null;
@@ -16087,7 +16623,7 @@ function getFollowPreviewAnchor(target) {
       !card.closest(".cheese-header-follow-item")
     ) {
       const m = card.getAttribute("href")?.match(/^\/live\/([a-f0-9]{32})/i);
-      if (m) return { anchor: card, channelId: m[1] };
+      if (m) return { anchor: card, channelId: m[1], kind: "card" };
     }
   }
   // 사이드바/헤더 팔로우 아이템 미리보기는 팔로잉 미리보기 옵션이 켜졌을 때만.
@@ -16099,14 +16635,18 @@ function getFollowPreviewAnchor(target) {
   if (t.classList.contains("cheese-header-follow-item")) {
     // 헤더 팔로우 아이템은 모두 라이브(우리가 라이브만 렌더). data-channel-id 사용.
     const channelId = t.dataset.channelId || "";
-    return channelId ? { anchor: t, channelId } : null;
+    return channelId
+      ? { anchor: t, channelId, kind: "following" }
+      : null;
   }
   // 사이드바: 팔로잉 섹션 + 라이브만.
   const nav = t.closest('nav[class*="_section_"]');
   if (!nav || !getSidebarNavLabel(nav).includes("팔로")) return null;
   if (!isLiveFollowItem(t)) return null;
   const channelId = getFollowItemChannelId(t);
-  return channelId ? { anchor: t, channelId } : null;
+  return channelId
+    ? { anchor: t, channelId, kind: "following" }
+    : null;
 }
 
 // 위임 호버. 라이브 팔로잉(사이드바/헤더) 진입 → 디바운스 후 미리보기.
@@ -16137,7 +16677,7 @@ function onFollowPreviewMouseOver(e) {
       );
       return;
     }
-    openFollowPreview(found.anchor, found.channelId);
+    openFollowPreview(found.anchor, found.channelId, found.kind);
   };
   followPreviewState.openTimer = setTimeout(
     tryOpen,
@@ -16250,9 +16790,13 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY,
       FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY,
       CARD_LIVE_PREVIEW_KEY,
+      CARD_LIVE_PREVIEW_POSITION_KEY,
     ]);
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
     cardLivePreviewOn = data?.[CARD_LIVE_PREVIEW_KEY] === true; // 기본 OFF
+    cardLivePreviewPosition = normalizeCardLivePreviewPosition(
+      data?.[CARD_LIVE_PREVIEW_POSITION_KEY],
+    );
     followPreviewMuted = data?.[FOLLOW_PREVIEW_MUTED_KEY] !== false; // 미설정/true=음소거
     followPreviewVolume = normalizeFollowPreviewVolume(
       data?.[FOLLOW_PREVIEW_VOLUME_KEY],
@@ -16794,11 +17338,72 @@ const followChannelTooltipState = {
   hoverTimer: 0,
 };
 
+// 링크에서 채널ID를 읽는다. 팔로잉 채널 카드의 내부/외부 프로필 링크를 모두 지원한다.
+function getFollowTooltipChannelIdFromAnchor(anchor) {
+  const href = anchor?.getAttribute?.("href") || "";
+  const channelPath = href.match(
+    /^(?:https:\/\/chzzk\.naver\.com)?\/([a-f0-9]{32})(?:[/?#]|$)/i,
+  );
+  if (channelPath) return channelPath[1];
+  return (
+    href.match(
+      /^https:\/\/game\.naver\.com\/profile\/([a-f0-9]{32})(?:[/?#]|$)/i,
+    )?.[1] || ""
+  );
+}
+
+// 팔로잉 채널 탭의 목록 카드인지 구조로 확인한다. CSS module 해시는 빌드마다 바뀌므로
+// 역할명(_container_/_item_/_wrapper_/_thumbnail_)과 실제 목록 계층만 사용한다.
+function findFollowingChannelTooltipAnchor(target) {
+  if (!isFollowingChannelPage()) return null;
+  const anchor = target?.closest?.(
+    'a[class*="_wrapper_"], a[class*="_thumbnail_"]',
+  );
+  if (!anchor) return null;
+  const item = anchor.closest('li[class*="_item_"]');
+  const section = item?.closest('section[class*="_container_"]');
+  const layoutBody = document.getElementById("layout-body");
+  if (!item || !section || !layoutBody?.contains(section)) return null;
+  const channelId = getFollowTooltipChannelIdFromAnchor(anchor);
+  return channelId ? { anchor, channelId } : null;
+}
+
+// 채널 홈의 프로필 썸네일/닉네임인지 확인한다. 닉네임 계열 클래스는 다른 카드에도
+// 사용되므로, 가까운 조상 안에 현재 채널과 일치하는 game.naver.com 프로필 링크가
+// 있을 때만 인정해 페이지 안의 다른 이름에 툴팁이 붙지 않게 한다.
+function findChannelHomeTooltipAnchor(target) {
+  const channelId = getChannelHomeId();
+  if (!channelId) return null;
+
+  const thumbnail = target?.closest?.(
+    'a[class*="_thumbnail_"], a[href*="game.naver.com/profile/"]',
+  );
+  if (
+    thumbnail &&
+    getFollowTooltipChannelIdFromAnchor(thumbnail) === channelId
+  ) {
+    return { anchor: thumbnail, channelId };
+  }
+
+  const name = target?.closest?.('[class*="_name_"] [class*="_text_"]');
+  if (!name) return null;
+  const layoutBody = document.getElementById("layout-body");
+  let scope = name.parentElement;
+  for (let depth = 0; scope && scope !== layoutBody && depth < 6; depth += 1) {
+    const hasCurrentProfile = [
+      ...scope.querySelectorAll('a[href*="game.naver.com/profile/"]'),
+    ].some(
+      (anchor) => getFollowTooltipChannelIdFromAnchor(anchor) === channelId,
+    );
+    if (hasCurrentProfile) return { anchor: name, channelId };
+    scope = scope.parentElement;
+  }
+  return null;
+}
+
 // 툴팁 대상(썸네일/이름) 호버 요소와 채널ID를 찾는다. 두 페이지를 지원한다.
-//  1) 팔로잉 목록(following?tab=CHANNEL): 썸네일/이름 wrapper 링크. href=/<채널ID>.
-//  2) 채널 홈(/<채널ID>[/...]): 프로필 헤더의 썸네일(_thumbnail_18tzy_)/이름(_name_18tzy_).
-//     썸네일 href 는 game.naver.com/profile/<채널ID>, 이름은 링크가 아니므로 현재 페이지
-//     URL(채널 홈 = 곧 채널ID)에서 채널ID를 얻는다.
+//  1) 팔로잉 목록(following?tab=CHANNEL): 목록 카드 안 썸네일/이름 링크.
+//  2) 채널 홈(/<채널ID>[/...]): 현재 채널 프로필 링크와 같은 영역의 썸네일/이름.
 function followChannelAnchorFromTarget(target) {
   // 0) 우리 전용 팔로잉 목록 항목(.cheese-cf-item, data-channel-id). 라이브 미리보기가
   //    '켜져' 있으면 미리보기가 뜨므로 툴팁은 안 띄운다(미리보기 OFF 일 때만).
@@ -16817,26 +17422,10 @@ function followChannelAnchorFromTarget(target) {
     }
   }
   // 1) 팔로잉 목록.
-  const listAnchor = target?.closest?.(
-    'a[class*="_wrapper_asbvn_"], a[class*="_thumbnail_asbvn_"]',
-  );
-  if (listAnchor) {
-    const m = listAnchor.getAttribute("href")?.match(/^\/([a-f0-9]{32})/i);
-    if (m) return { anchor: listAnchor, channelId: m[1] };
-  }
+  const listTarget = findFollowingChannelTooltipAnchor(target);
+  if (listTarget) return listTarget;
   // 2) 채널 홈 프로필 헤더(썸네일 또는 이름).
-  const homeAnchor = target?.closest?.(
-    'a[class*="_thumbnail_18tzy_"], [class*="_name_18tzy_"]',
-  );
-  if (homeAnchor) {
-    // 썸네일 href(game.naver.com/profile/<id>) 우선, 없으면(이름) 페이지 URL.
-    const href = homeAnchor.getAttribute?.("href") || "";
-    const hm = href.match(/profile\/([a-f0-9]{32})/i);
-    const pm = location.pathname.match(/^\/([a-f0-9]{32})(?:\/|$)/i);
-    const channelId = hm?.[1] || pm?.[1];
-    if (channelId) return { anchor: homeAnchor, channelId };
-  }
-  return null;
+  return findChannelHomeTooltipAnchor(target);
 }
 
 async function fetchFollowChannelData(channelId) {
@@ -17441,13 +18030,17 @@ function findFollowCleanupPageContext() {
   const layoutBody = document.getElementById("layout-body");
   if (!layoutBody) return null;
 
-  const title = [...layoutBody.querySelectorAll('strong[class*="_title_"]')].find(
-    (node) => node.textContent?.trim() === "팔로잉",
-  );
+  const title = [
+    ...layoutBody.querySelectorAll('strong[class*="_title_"]'),
+  ].find((node) => node.textContent?.trim() === "팔로잉");
   const header =
     title?.closest('div[class*="_header_"]') || title?.parentElement || null;
   let listSection = null;
-  for (let sibling = header?.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
+  for (
+    let sibling = header?.nextElementSibling;
+    sibling;
+    sibling = sibling.nextElementSibling
+  ) {
     if (sibling.matches?.('section[class*="_container_"]')) {
       listSection = sibling;
       break;
@@ -17485,7 +18078,10 @@ function ensureFollowCleanupButton() {
   btn.className = ["cheese-follow-cleanup-open", ...(title?.classList || [])]
     .filter(Boolean)
     .join(" ");
-  if (bar.parentElement !== listSection.parentElement || bar.nextElementSibling !== listSection) {
+  if (
+    bar.parentElement !== listSection.parentElement ||
+    bar.nextElementSibling !== listSection
+  ) {
     listSection.parentElement.insertBefore(bar, listSection);
   }
 }
@@ -18988,6 +19584,7 @@ function broadcastFeatureFlags() {
       videoFilterBeginner, // 비디오 필터 초보자용 원클릭(전역)
       mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
       mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
+      mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
       // 하단 버튼 좌/우 배치 + 순서 + 네이티브 앵커 슬롯
       // { side:{...}, order:{left,right}, slot:{key:{grp,after}} }
@@ -19004,6 +19601,7 @@ function broadcastFeatureFlags() {
           ]),
         ),
       },
+      chatTimeFormat, // 24h | 12h-en(AM/PM) | 12h-ko(오전/오후)
     },
     location.origin,
   );
@@ -19044,10 +19642,12 @@ const FEATURE_FLAGS_KEYS = [
   VIDEO_FILTER_BEGINNER_KEY,
   MIXER_GAIN_MIN_KEY,
   MIXER_GAIN_MAX_KEY,
+  MIXER_GAIN_STEP_KEY,
   SEEK_STEP_KEY,
   CHAT_WIDTH_KEY,
   CHAT_FONT_SCALE_KEY,
   CHAT_FONT_SCALE_SPECIAL_KEY,
+  CHAT_TIME_FORMAT_KEY,
   CHAT_BUTTON_WRAP_KEY,
   LOGPOWER_CLICK_ACTION_KEY,
   LOGPOWER_PROGRESS_MODE_KEY,
@@ -19080,6 +19680,8 @@ const BOOT_PREFETCH_KEYS = [
     HEADER_FOLLOW_COUNT_KEY,
     CHANNEL_LIVE_BUTTON_KEY,
     CHANNEL_LIVE_BUTTON_END_KEY,
+    CHANNEL_LIVE_PROFILE_BACKGROUND_KEY,
+    CHANNEL_PROFILE_RADIUS_KEY,
     FOLLOW_OPEN_NEW_TAB_KEY,
     FOLLOW_PREVIEW_KEY,
     FOLLOW_PREVIEW_SIZE_KEY,
@@ -19092,6 +19694,7 @@ const BOOT_PREFETCH_KEYS = [
     FOLLOW_PREVIEW_FULL_TITLE_KEY,
     FOLLOW_PREVIEW_HIDDEN_PARTS_KEY,
     CARD_LIVE_PREVIEW_KEY,
+    CARD_LIVE_PREVIEW_POSITION_KEY,
     CARD_PREVIEW_AUDIO_KEY,
     CARD_PREVIEW_WHEEL_DELAY_KEY,
     CARD_DATE_TOOLTIP_KEY,
@@ -19107,6 +19710,7 @@ const BOOT_PREFETCH_KEYS = [
     COMMENT_TS_CLICK_DELAY_KEY,
     LIVE_TAG_FILTER_BUTTON_KEY,
     LIVE_TAG_FILTERS_KEY,
+    LIVE_VIEWER_COUNT_INLINE_KEY,
   ]),
 ];
 const BOOT_PREFETCH_KEY_SET = new Set(BOOT_PREFETCH_KEYS);
@@ -19225,6 +19829,7 @@ async function loadFeatureFlags() {
     videoFilterBeginner = data?.[VIDEO_FILTER_BEGINNER_KEY] === true;
     mixerGainMin = normalizeGainMin(data?.[MIXER_GAIN_MIN_KEY]);
     mixerGainMax = normalizeGainMax(data?.[MIXER_GAIN_MAX_KEY]);
+    mixerGainStep = normalizeGainStep(data?.[MIXER_GAIN_STEP_KEY]);
     syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
     const custom = data?.[SYNC_CUSTOM_KEY];
     syncCustomValue = custom && typeof custom === "object" ? custom : null;
@@ -19244,6 +19849,7 @@ async function loadFeatureFlags() {
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
     chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
     chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
+    chatTimeFormat = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
     chatButtonWrap = data?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=ON
     applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
   } catch {
@@ -19465,6 +20071,9 @@ if (chrome.storage?.onChanged) {
     if (changes[MIXER_GAIN_MAX_KEY]) {
       mixerGainMax = normalizeGainMax(changes[MIXER_GAIN_MAX_KEY].newValue);
     }
+    if (changes[MIXER_GAIN_STEP_KEY]) {
+      mixerGainStep = normalizeGainStep(changes[MIXER_GAIN_STEP_KEY].newValue);
+    }
     if (changes[SEEK_STEP_KEY]) {
       seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
     }
@@ -19483,6 +20092,11 @@ if (chrome.storage?.onChanged) {
       chatFontScaleSpecial =
         changes[CHAT_FONT_SCALE_SPECIAL_KEY].newValue === true;
       applyChatFontScale(); // 특수 메시지 스케일 클래스 즉시 토글
+    }
+    if (changes[CHAT_TIME_FORMAT_KEY]) {
+      chatTimeFormat = normalizeChatTimeFormat(
+        changes[CHAT_TIME_FORMAT_KEY].newValue,
+      );
     }
     if (changes[CHAT_BUTTON_WRAP_KEY]) {
       chatButtonWrap = changes[CHAT_BUTTON_WRAP_KEY].newValue !== false;
@@ -19527,6 +20141,18 @@ if (chrome.storage?.onChanged) {
       channelLiveButtonEnd =
         changes[CHANNEL_LIVE_BUTTON_END_KEY].newValue !== false;
       ensureChannelLiveButton();
+    }
+    if (changes[CHANNEL_PROFILE_RADIUS_KEY]) {
+      channelProfileRadius = normalizeChannelProfileRadius(
+        changes[CHANNEL_PROFILE_RADIUS_KEY].newValue,
+      );
+      applyChannelProfileRadius();
+    }
+    if (changes[CHANNEL_LIVE_PROFILE_BACKGROUND_KEY]) {
+      channelLiveProfileBackground = normalizeChannelLiveProfileBackground(
+        changes[CHANNEL_LIVE_PROFILE_BACKGROUND_KEY].newValue,
+      );
+      applyChannelLiveProfileBackground();
     }
     if (changes[FOLLOW_OPEN_NEW_TAB_KEY]) {
       followOpenNewTabOn = changes[FOLLOW_OPEN_NEW_TAB_KEY].newValue === true;
@@ -19611,6 +20237,21 @@ if (chrome.storage?.onChanged) {
       // 켜지면 호버 감지 바인딩 보장, 꺼지고 팔로잉 미리보기도 꺼졌으면 닫기.
       if (cardLivePreviewOn || followPreviewOn) bindFollowPreviewHover();
       else closeFollowPreview();
+    }
+    if (changes[CARD_LIVE_PREVIEW_POSITION_KEY]) {
+      cardLivePreviewPosition = normalizeCardLivePreviewPosition(
+        changes[CARD_LIVE_PREVIEW_POSITION_KEY].newValue,
+      );
+      const previewEl = document.getElementById(FOLLOW_PREVIEW_ID);
+      const anchor = followPreviewState.anchor;
+      if (
+        previewEl &&
+        followPreviewState.anchorKind === "card" &&
+        anchor?.isConnected &&
+        !followPreviewState.movedPos
+      ) {
+        positionFollowPreview(previewEl, anchor, "card");
+      }
     }
     if (changes[VOD_CHAPTER_HIDE_KEY]) {
       vodChapterHideOn = changes[VOD_CHAPTER_HIDE_KEY].newValue === true;
@@ -19736,6 +20377,8 @@ if (chrome.storage?.onChanged) {
       changes[VIDEO_FILTER_BEGINNER_KEY] ||
       changes[MIXER_GAIN_MIN_KEY] ||
       changes[MIXER_GAIN_MAX_KEY] ||
+      changes[MIXER_GAIN_STEP_KEY] ||
+      changes[CHAT_TIME_FORMAT_KEY] ||
       changes[SEEK_STEP_KEY]
     ) {
       broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기바/볼륨·게인%/되감기간격만 바뀐 경우도 전달
@@ -19853,6 +20496,8 @@ function init() {
   ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
   ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 태그 관리 버튼 보장
   applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 태그 즉시 적용
+  applyLiveViewerCountPlacement(); // 옵션 시 시청자 수를 LIVE 배지 옆에 배치
+  applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
   ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
   ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
@@ -20214,29 +20859,36 @@ window.addEventListener(
   debounce(() => {
     applyChatStackedClass();
     applyFillScreen();
+    applyLiveViewerCountPlacement();
   }, 150),
   { passive: true },
 );
-// 넓은 화면(viewmode) 버튼 클릭 → 상태 전환 후 화면 채우기 재평가(넓은 화면이면 원복,
-// 좁은 화면으로 돌아오면 재적용). 클릭 직후엔 아직 상태가 안 바뀌었을 수 있어 rAF 대기.
+function scheduleFillScreenModeRecheck() {
+  requestAnimationFrame(() => applyFillScreen());
+  setTimeout(() => applyFillScreen(), 120);
+  setTimeout(() => applyFillScreen(), 300);
+}
+
+// 넓은 화면/전체화면 버튼 클릭 → 상태 전환 후 화면 채우기 재평가. 클릭 직후엔
+// Fullscreen API와 플레이어 클래스가 아직 바뀌지 않았을 수 있어 짧게 나눠 확인한다.
 document.addEventListener(
   "click",
   (e) => {
     const btn = e.target?.closest?.(
-      ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+      ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, .pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
     );
     if (!btn) return;
-    requestAnimationFrame(() => applyFillScreen());
-    setTimeout(() => applyFillScreen(), 200); // 늦게 반영되는 경우 대비 한 번 더
+    scheduleFillScreenModeRecheck();
   },
   true,
 );
 // 전체화면 진입/이탈 시 화면 채우기를 재평가한다(전체화면이면 우리 높이 강제를 원복해야
 // 브라우저 전체화면이 정상 적용된다 — 치지직 업데이트로 재발한 문제 대응).
-document.addEventListener("fullscreenchange", () => {
-  requestAnimationFrame(() => applyFillScreen());
-  setTimeout(() => applyFillScreen(), 200); // 레이아웃 늦게 반영 대비
-});
+document.addEventListener("fullscreenchange", scheduleFillScreenModeRecheck);
+document.addEventListener(
+  "webkitfullscreenchange",
+  scheduleFillScreenModeRecheck,
+);
 ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
@@ -20532,6 +21184,8 @@ void loadFollowRefresh();
 void loadCustomFollowSettings().then(() => ensureCustomFollowList());
 void loadHeaderNav();
 void loadChannelLiveButton();
+void loadChannelProfileRadius();
+void loadChannelLiveProfileBackground();
 void loadFollowPreview();
 void loadFollowOpenNewTab();
 void loadCardPreviewAudio();

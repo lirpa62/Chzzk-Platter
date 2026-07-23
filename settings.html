@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>치즈 플래터 - 기능 설정</title>
     <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/coloris.min.css" />
     <link rel="stylesheet" href="src/popup.css" />
     <link rel="stylesheet" href="src/settings.css" />
   </head>
@@ -219,6 +220,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="channel"
+            role="tab"
+            aria-selected="false"
+          >
+            채널
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="following"
             role="tab"
             aria-selected="false"
@@ -315,7 +325,7 @@
 
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">화면 채우기</span>
+                  <span class="settings-item-name">라이브 화면 채우기</span>
                   <span class="settings-item-desc"
                     >라이브 영상 높이를 조절해 좌우 레터박스를
                     최소화(체크=사용)</span
@@ -487,9 +497,10 @@
                 <label>
                   <span class="settings-item-name">└ 조작 화면 피드백</span>
                   <span class="settings-item-desc"
-                    >휠 볼륨 조절·되감기·앞으로(버튼/단축키) 시 화면에 반투명
-                    아이콘을 잠깐 표시합니다(체크=사용, 기본 켜짐). 아래에서
-                    종류별 표시 여부와 위치를 조절할 수 있습니다.</span
+                    >음량·게인 슬라이더, 휠 볼륨 조절,
+                    되감기·앞으로(버튼/단축키) 시 화면에 반투명 아이콘을 잠깐
+                    표시합니다(체크=사용, 기본 켜짐). 아래에서 종류별 표시
+                    여부와 위치를 조절할 수 있습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -503,7 +514,7 @@
               >
                 <div>
                   <span class="settings-item-name"
-                    >└─ 볼륨 OSD 위치
+                    >└─ 볼륨·게인 OSD 위치
                     <button
                       type="button"
                       class="settings-osd-reset"
@@ -1042,6 +1053,27 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label for="mixerGainStepInput">
+                  <span class="settings-item-name">게인 조절 간격</span>
+                  <span class="settings-item-desc"
+                    >플레이어와 믹서 패널의 게인 슬라이더를 한 단계씩 조절할
+                    크기(1~10%, 기본 5%)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="mixerGainStepInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-mixer-gain-step
+                  />
+                  <small>%</small>
+                </span>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">게인 슬라이더 최소</span>
@@ -1489,6 +1521,19 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">다시보기 화면 채우기</span>
+                  <span class="settings-item-desc"
+                    >다시보기 영상 높이를 조절해 좌우 레터박스를
+                    최소화(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="fillScreenVod" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">영상 더보기 아래 배치</span>
                   <span class="settings-item-desc"
                     >다시보기에서 영상 옆 정보(영상 더보기)를 영상 아래로
@@ -1906,8 +1951,8 @@
                 <label>
                   <span class="settings-item-name">제외 필터 버튼 표시</span>
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그를 관리하는
-                    '제외 필터 추가' 버튼을 표시합니다(체크=표시, 기본 켜짐).</span
+                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그를 관리하는 '제외
+                    필터 추가' 버튼을 표시합니다(체크=표시, 기본 켜짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1915,12 +1960,29 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item settings-item-stacked settings-live-tag-item">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >시청자 수를 LIVE 옆에 표시</span
+                  >
+                  <span class="settings-item-desc"
+                    >전체 방송과 팔로잉 라이브 카드의 시청자 수를 LIVE 배지 옆에
+                    표시합니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-live-viewer-count-inline />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-live-tag-item"
+              >
                 <div>
                   <span class="settings-item-name">라이브 제외 태그</span>
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그가
-                    붙은 방송을 숨깁니다. 쉼표나 줄바꿈으로 여러 태그를 한 번에
+                    >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그가 붙은
+                    방송을 숨깁니다. 쉼표나 줄바꿈으로 여러 태그를 한 번에
                     추가할 수 있습니다.</span
                   >
                 </div>
@@ -2476,8 +2538,8 @@
                   >
                   <span class="settings-item-desc"
                     >전용 팔로잉 목록을 사용할 때 팔로잉 채널의 방송·채널·검색
-                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다(체크=사용, 기본
-                    꺼짐).</span
+                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다(체크=사용,
+                    기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2665,12 +2727,31 @@
                 <label>
                   <span class="settings-item-name">오프라인 채널 숨김</span>
                   <span class="settings-item-desc"
-                    >방송 중이 아닌 채널을 목록에서 숨깁니다(즐겨찾기는 항상
-                    표시, 체크=숨김, 기본 꺼짐)</span
+                    >즐겨찾기를 제외한 일반 그룹에서 방송 중이 아닌 채널을
+                    숨깁니다(체크=숨김, 기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="sbFollowCustomOffline" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >즐겨찾기 오프라인 채널 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >즐겨찾기 그룹에서 방송 중이 아닌 채널을 숨깁니다. 일반
+                    그룹의 오프라인 숨김과 별도로 사용할 수 있습니다(체크=숨김,
+                    기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowCustomFavoriteOffline"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2837,10 +2918,10 @@
               전용 목록을 주기적으로 새로고침해 라이브 상태·시청자 수를
               갱신합니다. 전용 목록을 사용하면 사이드바 탭의 '팔로우 채널 자동
               갱신'은 전용 목록에 적용되지 않습니다. 목록 항목의 별표(☆)로
-              즐겨찾기를 지정하면 항상 상단에 고정됩니다. 오프라인 채널 숨김은
-              위 '오프라인 채널 숨김' 설정을 따릅니다. 사이드바가 접힌 상태에선
-              팔로잉 헤더의 아이콘 버튼으로 새로고침/펼치기/접기를 할 수
-              있습니다.
+              즐겨찾기를 지정하면 항상 상단에 고정됩니다. 일반 그룹과 즐겨찾기
+              그룹의 오프라인 채널은 각각 숨길 수 있습니다. 사이드바가 접힌
+              상태에선 팔로잉 헤더의 아이콘 버튼으로 새로고침/펼치기/접기를 할
+              수 있습니다.
             </p>
           </section>
 
@@ -3154,6 +3235,49 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-card-live-preview-position-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 미리보기 표시 위치</span>
+                  <span class="settings-item-desc"
+                    >선택한 방향을 우선하되 화면 경계를 벗어나면 반대편이나 더
+                    넓은 쪽으로 자동 배치합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="cardLivePreviewPosition"
+                  role="radiogroup"
+                  aria-label="카드 미리보기 표시 위치"
+                >
+                  <button
+                    type="button"
+                    data-card-live-preview-position="auto"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    자동
+                  </button>
+                  <button
+                    type="button"
+                    data-card-live-preview-position="left"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    왼쪽 우선
+                  </button>
+                  <button
+                    type="button"
+                    data-card-live-preview-position="right"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    오른쪽 우선
+                  </button>
+                </div>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
@@ -3201,7 +3325,7 @@
 
           <section
             class="settings-group"
-            data-panel="following"
+            data-panel="channel"
             aria-label="채널"
           >
             <h2 class="settings-group-title">채널</h2>
@@ -3230,6 +3354,153 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">프로필 모서리</span>
+                  <span class="settings-item-desc"
+                    >채널·팔로잉·검색·라이브 카드·댓글·커뮤니티·헤더와
+                    사이드바의 프로필 모서리를 조절합니다(0~50%, 기본 50%)</span
+                  >
+                </div>
+                <div class="settings-volume-row">
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    step="1"
+                    class="settings-volume-slider"
+                    data-channel-profile-radius-slider
+                    aria-label="채널 프로필 모서리 슬라이더"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      step="1"
+                      inputmode="numeric"
+                      data-channel-profile-radius
+                      aria-label="채널 프로필 모서리"
+                    />
+                    <small>%</small>
+                  </span>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >라이브 프로필 테두리 사용자 지정</span
+                  >
+                  <span class="settings-item-desc"
+                    >방송 중인 프로필 주위의 그라디언트 각도·색상·투명도를 직접
+                    설정합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-channel-live-profile-custom />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-channel-live-profile-item"
+                data-channel-live-profile-editor
+              >
+                <div>
+                  <span class="settings-item-name">라이브 테두리 색상</span>
+                  <span class="settings-item-desc"
+                    >각도와 시작색·끝색의 투명도를 HEX 색상 선택기로 조절합니다.
+                    미리보기 모서리는 위의 프로필 모서리 설정을 따릅니다.</span
+                  >
+                </div>
+                <div class="settings-channel-live-profile-editor">
+                  <div
+                    class="settings-channel-profile-preview"
+                    data-channel-live-profile-preview
+                    role="img"
+                    aria-label="라이브 프로필 테두리 미리보기"
+                  >
+                    <span class="settings-channel-profile-preview-ring">
+                      <img
+                        src="icons/icon-128.png"
+                        width="64"
+                        height="64"
+                        alt=""
+                        draggable="false"
+                      />
+                    </span>
+                    <span class="settings-channel-profile-preview-label"
+                      >방송 중 프로필</span
+                    >
+                  </div>
+                  <div class="settings-channel-profile-colors">
+                    <label class="settings-channel-profile-range">
+                      <span>각도</span>
+                      <span class="settings-channel-profile-range-control">
+                        <input
+                          type="range"
+                          min="0"
+                          max="360"
+                          step="1"
+                          value="180"
+                          class="settings-channel-profile-slider"
+                          data-channel-live-profile-angle-slider
+                          aria-label="라이브 프로필 테두리 그라디언트 각도 슬라이더"
+                        />
+                        <span class="settings-custom-input">
+                          <input
+                            type="number"
+                            min="0"
+                            max="360"
+                            step="1"
+                            inputmode="numeric"
+                            value="180"
+                            data-channel-live-profile-angle
+                            aria-label="라이브 프로필 테두리 그라디언트 각도"
+                          />
+                          <small>°</small>
+                        </span>
+                      </span>
+                    </label>
+                    <label class="settings-channel-profile-color">
+                      <span>시작색</span>
+                      <span class="settings-channel-profile-color-control">
+                        <input
+                          type="text"
+                          value="#00ffa3ff"
+                          data-channel-live-profile-color
+                          data-channel-live-profile-start
+                          autocomplete="off"
+                          spellcheck="false"
+                          readonly
+                          aria-label="라이브 프로필 테두리 시작색"
+                        />
+                      </span>
+                    </label>
+                    <label class="settings-channel-profile-color">
+                      <span>끝색</span>
+                      <span class="settings-channel-profile-color-control">
+                        <input
+                          type="text"
+                          value="#027f80ff"
+                          data-channel-live-profile-color
+                          data-channel-live-profile-end
+                          autocomplete="off"
+                          spellcheck="false"
+                          readonly
+                          aria-label="라이브 프로필 테두리 끝색"
+                        />
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      class="settings-order-reset settings-channel-profile-reset"
+                      data-channel-live-profile-reset
+                    >
+                      기본값
+                    </button>
+                  </div>
+                </div>
+              </li>
             </ul>
           </section>
 
@@ -3247,7 +3518,8 @@
                     >팔로잉 목록, 채널, 검색에서 채널 이미지 또는 이름 영역에
                     마우스를 올리면 최근 방송일·팔로우 시작일·첫 방송일·총 방송
                     시간을 툴팁으로 보여줍니다. 전용 팔로잉 목록에서는 라이브
-                    미리보기가 꺼져 있을 때 표시됩니다(체크=사용, 기본 꺼짐)</span
+                    미리보기가 꺼져 있을 때 표시됩니다(체크=사용, 기본
+                    꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3540,13 +3812,55 @@
                 <label>
                   <span class="settings-item-name">채팅 시간 표시</span>
                   <span class="settings-item-desc"
-                    >각 채팅 앞에 보낸 시각(HH:MM) 표시(체크=표시)</span
+                    >각 채팅 앞에 보낸 시각 표시(체크=표시)</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatShowTime" />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-chat-time-format-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 시간 표시 형식</span>
+                  <span class="settings-item-desc"
+                    >채팅 시각을 표시할 형식을 선택합니다(기본 24시간제)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-chat-time-format
+                  role="radiogroup"
+                  aria-label="채팅 시간 표시 형식"
+                >
+                  <button
+                    type="button"
+                    data-chat-time-format-value="24h"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    24시간
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-time-format-value="12h-en"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    AM/PM
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-time-format-value="12h-ko"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    오전/오후
+                  </button>
+                </div>
               </li>
               <li class="settings-item">
                 <label>
@@ -4049,6 +4363,7 @@
       </div>
     </main>
     <div class="settings-toast" data-settings-toast hidden></div>
+    <script src="src/coloris.min.js"></script>
     <script src="src/settings.js"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 // 채팅 강화 — 시간 표시 + 가려진 채팅 복원 (MAIN world)
-// 배지 모아 챗(badge-moa-chat) 로직 이식. (1) 각 채팅 앞에 회색 HH:MM 시간 표시,
+// 배지 모아 챗(badge-moa-chat) 로직 이식. (1) 각 채팅 앞에 회색 시간 표시,
 // (2) 클린봇/블라인드로 가려진 메시지를 원문으로 복원. 둘 다 치지직 React 내부
 // 데이터(chatMessage)에서 읽으므로 MAIN world가 필요하다(__reactProps$/__reactFiber$는
 // 격리 월드에서 안 보임). 마커는 우리 고유 클래스 — moa의 chzzk-badge-moa-* 와 분리.
@@ -8,6 +8,7 @@
   "use strict";
 
   let showChatTimestamp = false;
+  let chatTimestampFormat = "24h";
   let restoreBlindedChat = false;
   let chatRowObserver = null;
   let observedChatContainers = []; // 현재 감시 중인 채팅 컨테이너(교체 감지용)
@@ -182,20 +183,40 @@
   }
 
   // ── 시간 span 삽입/제거 ───────────────────────────────────────────────────
-  // 닉네임 앞에 회색 HH:MM 시간 span을 삽입.
+  function normalizeChatTimestampFormat(value) {
+    return value === "12h-en" || value === "12h-ko" ? value : "24h";
+  }
+
+  function formatChatTimestamp(epochMs) {
+    const date = new Date(epochMs);
+    const hour24 = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    if (chatTimestampFormat === "24h") {
+      return `${String(hour24).padStart(2, "0")}:${minutes}`;
+    }
+    const hour12 = hour24 % 12 || 12;
+    if (chatTimestampFormat === "12h-ko") {
+      return `${hour24 < 12 ? "오전" : "오후"} ${hour12}:${minutes}`;
+    }
+    return `${hour24 < 12 ? "AM" : "PM"} ${hour12}:${minutes}`;
+  }
+
+  // 닉네임 앞에 회색 시간 span을 삽입한다. 이미 있으면 현재 설정 형식으로 갱신한다.
   function applyTimestamp(row, epochMs) {
     const existing = row.querySelector(":scope .cheese-chat-time");
-    if (existing) return true;
+    if (existing) {
+      existing.dataset.chatEpochMs = String(epochMs);
+      existing.textContent = formatChatTimestamp(epochMs);
+      return true;
+    }
     const nicknameBtn =
       row.querySelector("button[class*='_nickname_']") ||
       row.querySelector("[class*='_nickname_']");
     if (!nicknameBtn || !nicknameBtn.parentNode) return false;
-    const d = new Date(epochMs);
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
     const span = document.createElement("span");
     span.className = "cheese-chat-time";
-    span.textContent = `${hh}:${mm}`;
+    span.dataset.chatEpochMs = String(epochMs);
+    span.textContent = formatChatTimestamp(epochMs);
     nicknameBtn.parentNode.insertBefore(span, nicknameBtn);
     return true;
   }
@@ -647,6 +668,26 @@
     }
   }
 
+  function setChatTimestampFormat(next) {
+    const normalized = normalizeChatTimestampFormat(next);
+    if (normalized === chatTimestampFormat) return;
+    chatTimestampFormat = normalized;
+    let needsSweep = false;
+    document.querySelectorAll(".cheese-chat-time").forEach((span) => {
+      const epochMs = Number(span.dataset.chatEpochMs);
+      if (Number.isFinite(epochMs) && epochMs > 1e12) {
+        span.textContent = formatChatTimestamp(epochMs);
+      } else {
+        span.remove();
+        needsSweep = true;
+      }
+    });
+    if (needsSweep && showChatTimestamp && !moaShowingTime()) {
+      clearRowDoneMarkers();
+      ensureChatRowObserver();
+    }
+  }
+
   function setRestoreBlindedChat(next) {
     next = next === true;
     if (next === restoreBlindedChat) {
@@ -670,6 +711,7 @@
     flagsReceived = true;
     stopFlagRequestRetry();
     const f = e.data.flags || {};
+    setChatTimestampFormat(e.data.chatTimeFormat);
     // 체크=표시(true)면 각 기능 ON. (data-feature지만 '숨김'이 아니라 '켬' 의미)
     setShowChatTimestamp(f.chatShowTime === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
