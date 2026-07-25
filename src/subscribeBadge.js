@@ -6,8 +6,12 @@
 // React 안전 원칙: 팝업 내부는 React 가 관리하므로 기존 노드를 innerHTML 로 교체하거나
 // DOM 이동하지 않는다. 우리가 만든 노드만 append/insertBefore(자체 생성 래퍼 대상)한다.
 // 팝업/버튼은 좁은 감시로만 찾고, 무한 주입을 막기 위해 우리 요소엔 data-* 마커를 둔다.
-(() => {
+(async () => {
   "use strict";
+  try {
+    const data = await chrome.storage.local.get("cheeseMasterEnabled");
+    if (data?.cheeseMasterEnabled === false) return;
+  } catch {}
   if (window.__cheeseSubscribeBadgeLoaded) return;
   window.__cheeseSubscribeBadgeLoaded = true;
 

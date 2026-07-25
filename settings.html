@@ -276,6 +276,181 @@
         <div class="settings-panels">
           <section
             class="settings-group"
+            data-panel="all"
+            aria-label="전체 기능"
+          >
+            <h2 class="settings-group-title">전체 기능</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">치즈 플래터 사용</span>
+                  <span class="settings-item-desc"
+                    >개별 설정은 유지한 채 모든 기능을 한 번에 일시 중지하거나
+                    다시 사용합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-master-enabled />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-notice">
+              변경 즉시 페이지를 강제로 새로고침하지 않습니다. 열려 있는 관련
+              페이지에 안내가 나타나면 시청이나 작업을 마친 뒤 원하는 시점에
+              새로고침해 주세요. 새로고침 전까지는 기존 옵저버·타이머·주입 UI가
+              남거나 새 기능이 아직 시작되지 않을 수 있습니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="all"
+            aria-label="업데이트 안내"
+          >
+            <h2 class="settings-group-title">업데이트 안내</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">업데이트 새로고침 안내</span>
+                  <span class="settings-item-desc"
+                    >확장이 업데이트되면 열려 있는 치지직 탭에 새로고침 안내를
+                    표시합니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-update-notice-enabled />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-update-notice-mode-row
+              >
+                <div>
+                  <span class="settings-item-name">└ 표시 방식</span>
+                  <span class="settings-item-desc"
+                    >상단에 계속 표시하거나, 3초 동안만 상단 또는 우측 하단에
+                    표시합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-update-notice-mode
+                  role="radiogroup"
+                  aria-label="업데이트 안내 표시 방식"
+                >
+                  <button
+                    type="button"
+                    data-update-notice-mode-value="fixed"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    상단 고정
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-mode-value="temporary"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    잠시 표시
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-mode-value="toast"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    토스트
+                  </button>
+                </div>
+              </li>
+            </ul>
+            <p class="settings-notice">
+              안내를 끄거나 새로고침하지 않아도 현재 탭을 계속 사용할 수 있지만,
+              탭에 남아 있는 이전 버전의 스크립트·스타일 때문에 새 기능과 오류
+              수정이 적용되지 않거나 변경한 설정이 즉시 또는 일부만 반영될 수
+              있습니다. 업데이트 후 문제가 보이면 해당 탭을 새로고침해 주세요.
+              최초 설치 안내와 전체 기능 스위치·설정 불러오기 후 적용 안내는 이
+              설정과 관계없이 표시됩니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="all"
+            aria-label="설정 내보내기 및 불러오기"
+          >
+            <h2 class="settings-group-title">설정 이동</h2>
+            <p class="settings-group-desc">
+              기능 설정, 커스텀 프리셋, 즐겨찾기와 그룹 구성을 JSON 파일로
+              내보내거나 다른 브라우저에서 불러옵니다. 캐시, 로그인 정보와 임시
+              시청 상태는 포함하지 않습니다.
+            </p>
+            <div class="settings-transfer-actions">
+              <button
+                type="button"
+                class="settings-transfer-button"
+                data-settings-export
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 3v12m0 0 4-4m-4 4-4-4M5 15v4h14v-4"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                설정 내보내기
+              </button>
+              <button
+                type="button"
+                class="settings-transfer-button"
+                data-settings-import-open
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 15V3m0 0 4 4m-4-4L8 7M5 15v4h14v-4"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                설정 불러오기
+              </button>
+              <input
+                type="file"
+                accept="application/json,.json"
+                data-settings-import-file
+                hidden
+              />
+            </div>
+            <p class="settings-notice">
+              불러오면 파일에 포함된 설정만 덮어쓰고 열린 관련 페이지에 새로고침
+              안내를 표시합니다. 페이지와 설정창을 강제로 다시 열지는 않으며,
+              설정창을 닫았다 다시 열면 불러온 값을 확인할 수 있습니다. 내보낸
+              파일에는 채널 ID, 즐겨찾기와 그룹처럼 직접 설정한 정보가 포함될 수
+              있으므로 공유할 때 내용을 확인해 주세요.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
             data-panel="player"
             aria-label="플레이어 기능"
           >
@@ -1647,10 +1822,11 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
-                    >미리보기 실제 시각 숨김</span
+                    >미리보기 방송 시각(추정) 숨김</span
                   >
                   <span class="settings-item-desc"
-                    >다시보기 탐색 미리보기의 방송 당시 시각</span
+                    >등록 시각과 영상 길이를 바탕으로 계산한 방송 당시 추정
+                    시각</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1665,7 +1841,7 @@
                   >
                   <span class="settings-item-desc"
                     >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
-                    라이브 시작일을 정확한 날짜·시각으로 표시(체크=사용)</span
+                    방송 시작 추정 시각을 표시(체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1966,8 +2142,8 @@
                     >시청자 수를 LIVE 옆에 표시</span
                   >
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉 라이브 카드의 시청자 수를 LIVE 배지 옆에
-                    표시합니다(체크=사용, 기본 꺼짐).</span
+                    >전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를 LIVE
+                    배지 옆에 표시합니다(체크=사용, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2531,31 +2707,45 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >라이브·다시보기·채널·검색에 즐겨찾기 버튼 추가</span
-                  >
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">즐겨찾기·그룹 배치</span>
                   <span class="settings-item-desc"
-                    >전용 팔로잉 목록을 사용할 때 팔로잉 채널의 방송·채널·검색
-                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다(체크=사용,
-                    기본 꺼짐).</span
+                    >전용 팔로잉 목록에서 즐겨찾기와 그룹 중 어느 영역을 먼저
+                    표시할지 선택합니다.</span
                   >
-                </label>
-                <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowPageFavoriteButton"
-                  />
-                  <i aria-hidden="true"></i>
-                </label>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-cf-group-placement
+                  role="radiogroup"
+                  aria-label="즐겨찾기와 그룹 배치"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-group-placement-value="groups-first"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    그룹 먼저
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-group-placement-value="favorites-first"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    즐겨찾기 먼저
+                  </button>
+                </div>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">정렬 기준</span>
                   <span class="settings-item-desc"
-                    >전용 팔로잉 목록의 정렬 순서(즐겨찾기는 항상 상단
-                    고정)</span
+                    >즐겨찾기와 그룹을 제외한 일반 목록의 정렬 순서입니다.</span
                   >
                 </div>
                 <div
@@ -2610,17 +2800,164 @@
                   </button>
                 </div>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">자동 펼치기</span>
+                  <span class="settings-item-desc"
+                    >전용 목록을 처음부터 모든 채널까지 펼쳐서 표시합니다.
+                    목록의 '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌
+                    상태를 유지합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowCustomAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">오프라인 채널 숨김</span>
+                  <span class="settings-item-desc"
+                    >즐겨찾기를 제외한 일반 목록에서 방송 중이 아닌 채널을
+                    숨깁니다(체크=숨김, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowCustomOffline" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >통나무파워 지운 채널 제외</span
+                  >
+                  <span class="settings-item-desc"
+                    >통나무파워 지우개로 지운 채널을 전용 목록에서도
+                    숨깁니다(즐겨찾기는 항상 표시, 체크=제외, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowCustomExcludeLogpowerHidden"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">팔로잉 초기 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >'더보기' 전에 보여줄 채널 수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-initial
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">팔로잉 더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >'더보기'를 누를 때마다 추가로 펼칠 채널 수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-more
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              즐겨찾기
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">초기 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >즐겨찾기 영역의 '더보기' 전에 보여줄 채널 수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-fav-initial
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >즐겨찾기 영역의 '더보기'를 누를 때 추가할 채널
+                    수(1~200)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-fav-more
+                    min="1"
+                    max="200"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >라이브·다시보기·채널·검색에 즐겨찾기 버튼 추가</span
+                  >
+                  <span class="settings-item-desc"
+                    >전용 팔로잉 목록을 사용할 때 팔로잉 채널의 방송·채널·검색
+                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다(체크=사용,
+                    기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowPageFavoriteButton"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div style="flex-direction: row">
                   <label style="display: flex; flex-direction: column">
                     <span class="settings-item-name"
-                      >└ 즐겨찾기 내 별도 정렬</span
+                      >즐겨찾기 내 별도 정렬</span
                     >
-                    <span
-                      class="settings-item-desc"
-                      style="padding-left: 16px; margin-top: 2px"
-                      >켜면 즐겨찾기 그룹만 아래 기준으로 따로 정렬합니다. 끄면
-                      위 정렬 기준을 함께 따릅니다.</span
+                    <span class="settings-item-desc"
+                      >켜면 즐겨찾기만 아래 기준으로 따로 정렬합니다. 끄면 전용
+                      목록의 정렬 기준을 함께 따릅니다.</span
                     >
                   </label>
                   <label
@@ -2635,7 +2972,7 @@
                   class="settings-segmented settings-segmented-6"
                   data-cf-fav-sort
                   role="radiogroup"
-                  style="margin-top: 6px; padding-left: 16px"
+                  style="margin-top: 6px"
                 >
                   <button
                     type="button"
@@ -2696,7 +3033,7 @@
                   class="settings-custom-row"
                   id="cfFavOrderRow"
                   hidden
-                  style="padding-left: 16px; margin-top: 8px"
+                  style="margin-top: 8px"
                 >
                   <div style="width: 100%">
                     <span class="settings-item-desc" style="margin-bottom: 6px"
@@ -2709,42 +3046,11 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">자동 펼치기</span>
-                  <span class="settings-item-desc"
-                    >전용 목록을 처음부터 모든 채널까지 펼쳐서
-                    표시합니다(체크=사용, 기본 꺼짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowCustomAutoExpand"
-                  />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
                   <span class="settings-item-name">오프라인 채널 숨김</span>
                   <span class="settings-item-desc"
-                    >즐겨찾기를 제외한 일반 그룹에서 방송 중이 아닌 채널을
-                    숨깁니다(체크=숨김, 기본 꺼짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="sbFollowCustomOffline" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >즐겨찾기 오프라인 채널 숨김</span
-                  >
-                  <span class="settings-item-desc"
-                    >즐겨찾기 그룹에서 방송 중이 아닌 채널을 숨깁니다. 일반
-                    그룹의 오프라인 숨김과 별도로 사용할 수 있습니다(체크=숨김,
-                    기본 꺼짐).</span
+                    >즐겨찾기에서 방송 중이 아닌 채널을 숨깁니다. 일반 목록의
+                    오프라인 숨김과 별도로 사용할 수 있습니다(체크=숨김, 기본
+                    꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2757,27 +3063,21 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >통나무파워 지운 채널 제외</span
-                  >
+                  <span class="settings-item-name">방송 중 채널 우선</span>
                   <span class="settings-item-desc"
-                    >통나무파워 지우개로 지운 채널을 전용 목록에서도
-                    숨깁니다(즐겨찾기는 항상 표시, 체크=제외, 기본 꺼짐)</span
+                    >오프라인 채널을 숨기지 않고, 방송 중인 즐겨찾기를 위에 모아
+                    표시합니다. 선택한 정렬이나 커스텀 순서는 방송 중·오프라인
+                    각 묶음 안에서 유지됩니다(체크=사용, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowCustomExcludeLogpowerHidden"
-                  />
+                  <input type="checkbox" data-feature="sbFollowFavLiveFirst" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >즐겨찾기 구분: 별표 항상 표시</span
-                  >
+                  <span class="settings-item-name">별표 항상 표시</span>
                   <span class="settings-item-desc"
                     >즐겨찾기한 채널은 별표(★)를 호버하지 않아도 항상
                     표시합니다(체크=사용, 기본 꺼짐)</span
@@ -2790,9 +3090,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >즐겨찾기 구분: 테두리·배경색</span
-                  >
+                  <span class="settings-item-name">테두리·배경색 표시</span>
                   <span class="settings-item-desc"
                     >즐겨찾기한 채널 항목에 테두리와 연한 배경색을
                     입힙니다(체크=사용, 기본 꺼짐)</span
@@ -2805,12 +3103,10 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >즐겨찾기 구분: 그룹 구분 바</span
-                  >
+                  <span class="settings-item-name">그룹 구분 바 표시</span>
                   <span class="settings-item-desc"
-                    >즐겨찾기 그룹과 일반 그룹 사이에 구분선을
-                    표시합니다(체크=사용, 기본 꺼짐)</span
+                    >즐겨찾기와 일반 목록 사이에 구분선을 표시합니다(체크=사용,
+                    기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2818,19 +3114,26 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">그룹</h2>
+            <p class="settings-group-desc">
+              커스텀 그룹의 추가·수정·삭제와 순서 변경은 펼친 사이드바의 그룹
+              관리 버튼에서 할 수 있습니다.
+            </p>
+            <ul class="settings-list">
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">초기 표시 개수</span>
                   <span class="settings-item-desc"
-                    >'더보기' 전에 보여줄 채널 수(1~200)</span
+                    >그룹 영역의 '더보기' 전에 보여줄 그룹 수(1~30)</span
                   >
                 </label>
                 <span class="settings-custom-input">
                   <input
                     type="number"
-                    data-cf-initial
+                    data-cf-group-initial
                     min="1"
-                    max="200"
+                    max="30"
                     step="1"
                     inputmode="numeric"
                   />
@@ -2841,20 +3144,102 @@
                 <label>
                   <span class="settings-item-name">더보기 증가량</span>
                   <span class="settings-item-desc"
-                    >'더보기'를 누를 때마다 추가로 펼칠 채널 수(1~200)</span
+                    >그룹 영역의 '더보기'를 누를 때 추가할 그룹 수(1~30)</span
                   >
                 </label>
                 <span class="settings-custom-input">
                   <input
                     type="number"
-                    data-cf-more
+                    data-cf-group-more
                     min="1"
-                    max="200"
+                    max="30"
                     step="1"
                     inputmode="numeric"
                   />
                   <small>개</small>
                 </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">구독 채널 자동 그룹</span>
+                  <span class="settings-item-desc"
+                    >구독 중인 팔로잉 채널을 별도의 '구독' 그룹에도 함께
+                    표시합니다. 원래 전용 목록에서는 사라지지
+                    않습니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupSubscribe"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">태그 자동 그룹</span>
+                  <span class="settings-item-desc"
+                    >같은 태그를 가진 팔로잉 채널이 2개 이상이면 태그별 그룹을
+                    자동으로 만듭니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowGroupTags" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 오프라인 채널 숨김</span>
+                  <span class="settings-item-desc"
+                    >태그 자동 그룹에서는 현재 방송 중인 채널만 표시합니다. 끄면
+                    오프라인 팔로잉 채널의 최근 태그도 확인하므로 최초 구성에
+                    시간이 더 걸릴 수 있습니다(기본 켜짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-cf-group-tag-hide-offline
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >그룹 오프라인 채널 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >커스텀·구독 그룹에서 방송 중이 아닌 채널을 숨깁니다. 태그
+                    그룹의 오프라인 숨김과 별도로 동작합니다(체크=숨김, 기본
+                    꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowGroupOffline" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">방송 중 채널 우선</span>
+                  <span class="settings-item-desc"
+                    >오프라인 채널을 숨기지 않고, 각 그룹 안에서 방송 중인
+                    채널을 위에 모아 표시합니다. 기존 정렬 순서는 방송
+                    중·오프라인 각 묶음 안에서 유지됩니다(체크=사용, 기본
+                    꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupLiveFirst"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
               </li>
             </ul>
             <h2 class="settings-group-title" style="margin-top: 14px">
@@ -3281,11 +3666,11 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
-                    >카드 미리보기 음소거·음량</span
+                    >치지직 기본 카드 미리보기 음량 조작</span
                   >
                   <span class="settings-item-desc"
-                    >라이브 카드 미리보기 위에서 우클릭=음소거 / 토글, 휠=음량
-                    조절(체크=사용)</span
+                    >치지직이 카드 안에서 재생하는 기본 미리보기 위에서
+                    우클릭=음소거 전환, 휠=음량 조절(체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3316,9 +3701,10 @@
               </li>
             </ul>
             <p class="settings-group-desc">
-              탐색 페이지의 라이브 카드에 마우스를 올리면 치지직이 음소거
-              미리보기를 잠깐 재생합니다. 이 위에서 우클릭으로 음소거를 끄거나
-              휠로 음량을 조절할 수 있습니다. 스크롤 중 휠이 음량으로 걸리는 게
+              이 설정은 치즈 플래터의 별도 미리보기 창이 아니라, 탐색 카드
+              안에서 재생되는 치지직 기본 미리보기를 조작합니다. 치즈 플래터의
+              별도 미리보기 창이 열리면 소리가 겹치지 않도록 치지직 기본
+              미리보기는 잠시 음소거됩니다. 스크롤 중 휠이 음량으로 걸리는 게
               불편하면 위 '휠 음량 활성 지연'을 늘리세요.
             </p>
           </section>

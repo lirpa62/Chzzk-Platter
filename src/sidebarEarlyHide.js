@@ -3,8 +3,12 @@
 // 에 도는데(약 0.5~0.8s 지연), 그 사이 사이드바가 먼저 렌더되면 숨겨야 할 메뉴·섹션·원본
 // 팔로우 목록이 잠깐 보였다 사라지는 깜빡임이 났다. 이 스크립트가 그 지연 구간을 메운다.
 // content.js 가 나중에 완전한 규칙으로 같은 <style> id 를 덮으므로 충돌하지 않는다.
-(() => {
+(async () => {
   "use strict";
+  try {
+    const data = await chrome.storage.local.get("cheeseMasterEnabled");
+    if (data?.cheeseMasterEnabled === false) return;
+  } catch {}
   // content.js 의 SIDEBAR_HIDE_STYLE_ID 와 동일해야 나중에 자연스럽게 대체된다.
   const STYLE_ID = "cheese-sidebar-hide-style";
   const FEATURE_KEY = "cheeseFeatureHidden";

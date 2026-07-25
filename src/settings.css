@@ -784,6 +784,7 @@ body {
 .settings-item:has([data-chat-time-format]),
 .settings-item:has(.settings-custom-row [data-search-rerank-w-rel]),
 .settings-item:has([data-follow-preview-hide-part]),
+.settings-item:has([data-cf-group-placement]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -793,6 +794,7 @@ body {
 .settings-item [data-mixer-global-default-mode],
 .settings-item [data-video-filter-global-default-mode],
 .settings-item [data-chat-time-format],
+.settings-item [data-cf-group-placement],
 .settings-item [data-logpower-progress-mode],
 .settings-item [data-logpower-timer-mode],
 .settings-item:has([data-mixer-gain-min]) [data-mixer-gain-min] {
@@ -806,7 +808,8 @@ body {
 .settings-item:has(#searchRerankDefaultSort),
 .settings-item:has(#autoReliveMaxHours),
 .settings-item:has(#cardLivePreviewPosition),
-.settings-item:has(#rootToFollowingLogoMode) {
+.settings-item:has(#rootToFollowingLogoMode),
+.settings-item:has([data-update-notice-mode]) {
   flex-direction: column;
 }
 
@@ -815,6 +818,10 @@ body {
 .settings-item #cardLivePreviewPosition,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;
+}
+
+.settings-item [data-update-notice-mode] {
+  width: 100%;
 }
 
 [aria-label="전용 팔로잉 목록"] button.settings-segmented-btn,
@@ -1285,6 +1292,39 @@ body > .clr-picker .clr-preview {
 .settings-order-reset:hover {
   color: var(--popup-fg, inherit);
   border-color: var(--popup-muted);
+}
+
+.settings-transfer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.settings-transfer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  background: var(--popup-bg);
+  color: var(--popup-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-transfer-button:hover {
+  border-color: var(--popup-brand);
+  color: var(--popup-brand-strong, var(--popup-brand));
+}
+
+.settings-transfer-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 /* OSD 위치 초기화(이름 옆 작은 버튼) */

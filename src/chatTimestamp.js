@@ -4,8 +4,18 @@
 // 데이터(chatMessage)에서 읽으므로 MAIN world가 필요하다(__reactProps$/__reactFiber$는
 // 격리 월드에서 안 보임). 마커는 우리 고유 클래스 — moa의 chzzk-badge-moa-* 와 분리.
 // 설정은 content.js(격리)가 cheese-feature-flags postMessage로 전달한다.
-(() => {
+(async () => {
   "use strict";
+
+  async function masterEnabled() {
+    const root = document.documentElement;
+    for (let i = 0; i < 100; i += 1) {
+      if (root?.dataset.cheesePlatterMasterReady === "1") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return !root?.hasAttribute("data-cheese-platter-disabled");
+  }
+  if (!(await masterEnabled())) return;
 
   let showChatTimestamp = false;
   let chatTimestampFormat = "24h";
@@ -15,13 +25,21 @@
   let retryTimer = 0;
   const rowRetryState = new WeakMap();
   const ROW_RETRY_DELAYS = [50, 150, 350, 700];
+  const CHAT_ROW_SELECTOR =
+    "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']";
+  const CHAT_MESSAGE_SELECTOR = "[class*='_chatting_message_']";
+  const OWNED_CHAT_NODE_SELECTOR =
+    ".cheese-chat-time, .cheese-blind-restored-text, .cheese-blind-emoji";
+  const pendingChatRows = new Set();
+  const ROW_BATCH_MAX = 40;
+  const ROW_BATCH_BUDGET_MS = 6;
+  let rowBatchFrame = 0;
 
   // 가려진 채팅 복원용 상태.
   const BLIND_PLACEHOLDER_TEXTS = [
     "메시지가 블라인드 처리되었습니다.",
     "클린봇이 부적절한 표현을 감지했습니다.",
   ];
-  let blindRestoreWriting = false; // 우리가 DOM 쓸 때 observer 재반응 무한루프 방지
   // 행 → { placeholder, nickname }: OFF 시 원래 가림 문구로 되돌리기 위함.
   const restoredRowInfo = new WeakMap();
   // 원문 캐시(uid|messageTime → {text, emojis}). 치지직이 블라인드 처리 시 그 행의
@@ -205,8 +223,14 @@
   function applyTimestamp(row, epochMs) {
     const existing = row.querySelector(":scope .cheese-chat-time");
     if (existing) {
-      existing.dataset.chatEpochMs = String(epochMs);
-      existing.textContent = formatChatTimestamp(epochMs);
+      const epochText = String(epochMs);
+      const formatted = formatChatTimestamp(epochMs);
+      if (existing.dataset.chatEpochMs !== epochText) {
+        existing.dataset.chatEpochMs = epochText;
+      }
+      if (existing.textContent !== formatted) {
+        existing.textContent = formatted;
+      }
       return true;
     }
     const nicknameBtn =
@@ -348,16 +372,9 @@
       original.emojis,
     );
     if (label) fragment.appendChild(document.createTextNode(` ${label}`));
-    blindRestoreWriting = true;
-    try {
-      span.textContent = "";
-      span.appendChild(fragment);
-      span.classList.add("cheese-blind-restored-text");
-    } finally {
-      queueMicrotask(() => {
-        blindRestoreWriting = false;
-      });
-    }
+    span.textContent = "";
+    span.appendChild(fragment);
+    span.classList.add("cheese-blind-restored-text");
   }
 
   // OFF: 복원된 행을 원래 가림 문구로 되돌린다.
@@ -367,53 +384,135 @@
       .forEach((span) => {
         const row = span.closest("[class*='_item_']");
         const info = row ? restoredRowInfo.get(row) : null;
-        blindRestoreWriting = true;
-        try {
-          span.textContent = info ? info.placeholder : span.textContent;
-          span.classList.remove("cheese-blind-restored-text");
-        } finally {
-          queueMicrotask(() => {
-            blindRestoreWriting = false;
-          });
-        }
+        span.textContent = info ? info.placeholder : span.textContent;
+        span.classList.remove("cheese-blind-restored-text");
         if (row) restoredRowInfo.delete(row);
       });
   }
 
-  // 가림 문구가 된 행을 (재)복원. 두 경우 모두 처리:
-  //  - 이미 복원했다가 React 재렌더로 다시 가려진 행(restoredRowInfo 존재)
-  //  - 정상으로 왔다가 '처음' 가려진 행(restoredRowInfo 없음). 이 경우도 캐시 원문이
-  //    있으면 즉시 복원한다. (예전엔 info 없으면 바로 반환해, 최초 블라인드는 복원되지
-  //    않고 토글 재활성화(sweep) 후에야 복원되던 문제.)
-  function reapplyRestoreForTarget(target) {
-    if (!restoreBlindedChat || blindRestoreWriting || moaRestoring()) return;
-    if (!(target instanceof Element)) return;
-    const row = target.closest("[class*='_item_']");
-    if (!(row instanceof HTMLElement)) return;
-    if (!row.querySelector("[class*='_chatting_message_']")) return;
-    const info = restoredRowInfo.get(row);
-    // 이미 복원 이력이 있으면 노드 재활용 가드(닉네임 불일치 시 폐기).
-    if (info && getRowNickname(row) !== info.nickname) {
-      restoredRowInfo.delete(row);
-      return;
+  function findChatRowForNode(node) {
+    const element =
+      node instanceof Element
+        ? node
+        : node?.parentElement instanceof Element
+          ? node.parentElement
+          : null;
+    if (!element) return null;
+
+    if (
+      element.matches(CHAT_ROW_SELECTOR) &&
+      element.querySelector(CHAT_MESSAGE_SELECTOR)
+    ) {
+      return element;
     }
-    const span = getRowMessageSpan(row);
-    if (!(span instanceof HTMLElement)) return;
-    if (span.classList.contains("cheese-blind-restored-text")) return;
-    const current = String(span.textContent || "").trim();
-    if (BLIND_PLACEHOLDER_TEXTS.includes(current)) {
-      const chatMessage = getChatMessage(row);
-      const original = chatMessage
-        ? readChatOriginal(chatMessage) ||
-          originalMsgCache.get(chatCacheKey(chatMessage)) ||
-          null
-        : null;
-      if (original) applyRestore(row, original);
+    const message =
+      (element.matches(CHAT_MESSAGE_SELECTOR) && element) ||
+      element.closest(CHAT_MESSAGE_SELECTOR);
+    const row = message?.closest(CHAT_ROW_SELECTOR);
+    return row instanceof HTMLElement ? row : null;
+  }
+
+  function collectChatRows(root) {
+    const rows = new Set();
+    if (!(root instanceof Element)) return rows;
+    const direct = findChatRowForNode(root);
+    if (direct) rows.add(direct);
+    root.querySelectorAll(CHAT_MESSAGE_SELECTOR).forEach((message) => {
+      const row = message.closest(CHAT_ROW_SELECTOR);
+      if (row instanceof HTMLElement) rows.add(row);
+    });
+    return rows;
+  }
+
+  function clearPendingChatRows() {
+    pendingChatRows.clear();
+    if (rowBatchFrame) {
+      cancelAnimationFrame(rowBatchFrame);
+      rowBatchFrame = 0;
     }
   }
 
+  function flushPendingChatRows() {
+    rowBatchFrame = 0;
+    if (document.hidden || !anyChatEnhanceOn()) {
+      pendingChatRows.clear();
+      return;
+    }
+
+    const startedAt = performance.now();
+    const moaTimeActive = moaShowingTime();
+    const moaRestoreActive = moaRestoring();
+    let processed = 0;
+    let scanned = 0;
+    for (const row of pendingChatRows) {
+      pendingChatRows.delete(row);
+      scanned += 1;
+      if (row.isConnected) {
+        processRow(row, moaTimeActive, moaRestoreActive);
+        processed += 1;
+      }
+      if (
+        processed >= ROW_BATCH_MAX ||
+        scanned >= ROW_BATCH_MAX * 4 ||
+        performance.now() - startedAt >= ROW_BATCH_BUDGET_MS
+      ) {
+        break;
+      }
+    }
+    if (pendingChatRows.size > 0) {
+      rowBatchFrame = requestAnimationFrame(flushPendingChatRows);
+    }
+  }
+
+  function queueChatRow(row, invalidate = false) {
+    if (
+      !(row instanceof HTMLElement) ||
+      !row.isConnected ||
+      !anyChatEnhanceOn() ||
+      document.hidden
+    ) {
+      return;
+    }
+    if (invalidate) delete row.dataset.cheeseRowDone;
+    pendingChatRows.add(row);
+    if (!rowBatchFrame) {
+      rowBatchFrame = requestAnimationFrame(flushPendingChatRows);
+    }
+  }
+
+  function isOwnedChatNode(node) {
+    if (node instanceof Element) {
+      return (
+        node.matches(OWNED_CHAT_NODE_SELECTOR) ||
+        !!node.closest(OWNED_CHAT_NODE_SELECTOR)
+      );
+    }
+    return (
+      node?.parentElement instanceof Element &&
+      !!node.parentElement.closest(OWNED_CHAT_NODE_SELECTOR)
+    );
+  }
+
+  function isExtensionOnlyMutation(mutation) {
+    if (isOwnedChatNode(mutation.target)) return true;
+    let changedCount = 0;
+    for (const node of mutation.addedNodes) {
+      changedCount += 1;
+      if (!isOwnedChatNode(node)) return false;
+    }
+    for (const node of mutation.removedNodes) {
+      changedCount += 1;
+      if (!isOwnedChatNode(node)) return false;
+    }
+    return changedCount > 0;
+  }
+
   // 채팅 행 하나 처리: 시간 삽입 + 가림 복원.
-  function processRow(row) {
+  function processRow(
+    row,
+    moaTimeActive = moaShowingTime(),
+    moaRestoreActive = moaRestoring(),
+  ) {
     if (!(row instanceof HTMLElement)) return false;
     // 스윕 재방문 최적화: 이미 처리 완료로 표시된 행은 React fiber/props 접근 없이 즉시
     // 반환한다. 예전엔 컨테이너 재부착(헬스체크) 때마다 전체 행을 fiber 접근 포함으로
@@ -421,22 +520,32 @@
     // ~500ms/스윕). 예외는 React 재렌더로 시간 요소가 사라졌거나, 처리 후 새로
     // 가려졌는데 아직 미복원인 행뿐이다. 해당 행만 아래 일반 경로로 재처리한다.
     if (row.dataset.cheeseRowDone === "1") {
+      const hidden =
+        restoreBlindedChat && !moaRestoreActive && isHiddenRow(row);
+      const doneSpan =
+        restoreBlindedChat && !moaRestoreActive
+          ? getRowMessageSpan(row)
+          : null;
+      const restoredSpan =
+        doneSpan?.classList.contains("cheese-blind-restored-text") === true;
+      const restoredSpanStale =
+        restoredSpan &&
+        (!hidden ||
+          BLIND_PLACEHOLDER_TEXTS.includes(
+            String(doneSpan.textContent || "").trim(),
+          ));
       const timestampMissing =
         showChatTimestamp &&
-        !moaShowingTime() &&
+        !moaTimeActive &&
         !row.querySelector(":scope .cheese-chat-time");
-      const restorePending =
-        restoreBlindedChat && !moaRestoring() && isHiddenRow(row);
-      if (!timestampMissing && !restorePending) {
+      const restorePending = hidden && !restoredSpan;
+      if (!timestampMissing && !restorePending && !restoredSpanStale) {
         clearRowRetry(row);
         return true;
       }
-      if (!timestampMissing) {
-        const doneSpan = getRowMessageSpan(row);
-        if (doneSpan?.classList.contains("cheese-blind-restored-text")) {
-          clearRowRetry(row);
-          return true;
-        }
+      if (restoredSpanStale) {
+        doneSpan.classList.remove("cheese-blind-restored-text");
+        restoredRowInfo.delete(row);
       }
       delete row.dataset.cheeseRowDone;
     }
@@ -450,21 +559,30 @@
       return false;
     }
 
+    const restoredInfo = restoredRowInfo.get(row);
+    if (restoredInfo && getRowNickname(row) !== restoredInfo.nickname) {
+      restoredRowInfo.delete(row);
+      getRowMessageSpan(row)?.classList.remove(
+        "cheese-blind-restored-text",
+      );
+    }
+
     let done = true;
-    if (showChatTimestamp && !moaShowingTime()) {
+    if (showChatTimestamp && !moaTimeActive) {
       const epoch = readChatEpochMs(chatMessage);
       if (!epoch || !applyTimestamp(row, epoch)) {
         done = false;
       }
     }
 
+    const hidden = isHiddenRow(row);
     // 복원 기능이 켜져 있으면, 아직 안 가려진 행의 원문을 미리 캐시해 둔다(가려진 뒤엔
     // props 의 원문이 비워질 수 있어 늦다).
-    if (restoreBlindedChat && !moaRestoring() && !isHiddenRow(row)) {
+    if (restoreBlindedChat && !moaRestoreActive && !hidden) {
       cacheOriginalMessage(chatMessage);
     }
 
-    if (restoreBlindedChat && !moaRestoring() && isHiddenRow(row)) {
+    if (restoreBlindedChat && !moaRestoreActive && hidden) {
       const span = getRowMessageSpan(row);
       if (span && !span.classList.contains("cheese-blind-restored-text")) {
         // props 에 원문이 있으면 그걸, 없으면(치지직이 비웠으면) 캐시에서 꺼낸다.
@@ -503,7 +621,7 @@
         rowRetryState.delete(row);
         return;
       }
-      processRow(row);
+      queueChatRow(row, true);
     }, delay);
     rowRetryState.set(row, state);
   }
@@ -542,24 +660,11 @@
     return containers;
   }
 
-  function isChatRowNode(node) {
-    if (!(node instanceof HTMLElement)) return false;
-    return (
-      node.matches(
-        "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']",
-      ) && !!node.querySelector("[class*='_chatting_message_']")
-    );
-  }
-
   // 이미 떠 있는 행들을 한 번 훑어 시간 삽입.
-  function sweepExistingRows() {
-    document
-      .querySelectorAll(
-        "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']",
-      )
-      .forEach((row) => {
-        if (row.querySelector("[class*='_chatting_message_']")) processRow(row);
-      });
+  function sweepExistingRows(containers = findChatListContainers()) {
+    containers.forEach((container) => {
+      collectChatRows(container).forEach((row) => queueChatRow(row, true));
+    });
   }
 
   function anyChatEnhanceOn() {
@@ -570,43 +675,29 @@
     if (!anyChatEnhanceOn()) return;
     const containers = findChatListContainers();
     if (containers.length === 0) {
+      if (chatRowObserver) {
+        chatRowObserver.disconnect();
+        chatRowObserver = null;
+      }
+      observedChatContainers = [];
+      clearPendingChatRows();
       scheduleRetry();
       return;
     }
     clearRetry();
     if (chatRowObserver) chatRowObserver.disconnect();
     chatRowObserver = new MutationObserver((mutations) => {
-      if (blindRestoreWriting || !anyChatEnhanceOn()) return;
+      if (document.hidden || !anyChatEnhanceOn()) return;
       for (const mutation of mutations) {
         if (mutation.type !== "childList") continue;
-        // 기존 행이 React 재렌더로 다시 가려졌으면 재복원.
-        if (mutation.target instanceof Element) {
-          reapplyRestoreForTarget(mutation.target);
-          const targetRow = mutation.target.closest(
-            "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']",
-          );
-          if (
-            targetRow &&
-            targetRow.querySelector("[class*='_chatting_message_']")
-          ) {
-            processRow(targetRow);
-          }
-        }
+        const invalidate = !isExtensionOnlyMutation(mutation);
+        const targetRow = findChatRowForNode(mutation.target);
+        if (targetRow) queueChatRow(targetRow, invalidate);
         mutation.addedNodes.forEach((node) => {
-          if (!(node instanceof HTMLElement)) return;
-          if (isChatRowNode(node)) {
-            processRow(node);
-          } else {
-            node
-              .querySelectorAll(
-                "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']",
-              )
-              .forEach((row) => {
-                if (row.querySelector("[class*='_chatting_message_']")) {
-                  processRow(row);
-                }
-              });
-          }
+          if (!(node instanceof Element)) return;
+          collectChatRows(node).forEach((row) =>
+            queueChatRow(row, invalidate),
+          );
         });
       }
     });
@@ -628,7 +719,7 @@
   }
 
   function scheduleRetry() {
-    if (!anyChatEnhanceOn() || retryTimer) return;
+    if (!anyChatEnhanceOn() || document.hidden || retryTimer) return;
     retryTimer = window.setTimeout(() => {
       retryTimer = 0;
       ensureChatRowObserver();
@@ -649,19 +740,21 @@
     }
     observedChatContainers = [];
     clearRetry();
+    clearPendingChatRows();
   }
 
   // ── 설정 적용 ─────────────────────────────────────────────────────────────
   function setShowChatTimestamp(next) {
     next = next === true;
     if (next === showChatTimestamp) {
-      if (next) ensureChatRowObserver(); // SPA 전환 등으로 컨테이너가 바뀌었을 수 있음
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
       return;
     }
     showChatTimestamp = next;
     if (next) {
       clearRowDoneMarkers(); // 꺼진 동안 done 마킹된 행들도 다시 처리(시간 부착)
-      ensureChatRowObserver();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
     } else {
       removeAllTimestamps();
       if (!anyChatEnhanceOn()) stopChatRowObserver();
@@ -684,22 +777,25 @@
     });
     if (needsSweep && showChatTimestamp && !moaShowingTime()) {
       clearRowDoneMarkers();
-      ensureChatRowObserver();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
     }
   }
 
   function setRestoreBlindedChat(next) {
     next = next === true;
     if (next === restoreBlindedChat) {
-      if (next) ensureChatRowObserver();
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
       return;
     }
     restoreBlindedChat = next;
     if (next) {
       clearRowDoneMarkers(); // 꺼진 동안 done 마킹된 행들도 다시 처리(캐시/복원)
-      ensureChatRowObserver();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
     } else {
       revertAllRestores();
+      originalMsgCache.clear();
       if (!anyChatEnhanceOn()) stopChatRowObserver();
     }
   }
@@ -766,6 +862,16 @@
     attributeFilter: ["class"],
   });
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearPendingChatRows();
+      return;
+    }
+    if (!anyChatEnhanceOn()) return;
+    if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+    else ensureChatRowObserver();
+  });
+
   // SPA 네비게이션(라이브↔다시보기↔채널)으로 채팅 컨테이너가 바뀌면 재부착.
   // 추가로, 경로 변화 없이 React 재렌더로 채팅 컨테이너가 교체(detach)된 경우에도
   // 감시 컨테이너가 죽으면(observer가 죽은 노드를 봄) 재부착한다 — 설정이 켜져
@@ -778,6 +884,8 @@
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
       removeAllTimestamps();
+      originalMsgCache.clear();
+      clearPendingChatRows();
       if (anyChatEnhanceOn()) ensureChatRowObserver();
       return;
     }

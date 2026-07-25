@@ -11,8 +11,18 @@
 //
 // 설정 저장은 MAIN world에서 chrome.storage 접근이 불가하므로 window.postMessage로
 // 일반 content script(src/content.js)에 위임한다(오디오 믹서 브릿지와 동일 패턴).
-(() => {
+(async () => {
   "use strict";
+
+  async function masterEnabled() {
+    const root = document.documentElement;
+    for (let i = 0; i < 100; i += 1) {
+      if (root?.dataset.cheesePlatterMasterReady === "1") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return !root?.hasAttribute("data-cheese-platter-disabled");
+  }
+  if (!(await masterEnabled())) return;
 
   if (window.__cheeseVideoFilterLoaded) return;
   window.__cheeseVideoFilterLoaded = true;

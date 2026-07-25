@@ -1,3 +1,11 @@
+(async () => {
+  "use strict";
+
+  try {
+    const data = await chrome.storage.local.get("cheeseMasterEnabled");
+    if (data?.cheeseMasterEnabled === false) return;
+  } catch {}
+
 // 설정
 // 치지직 업데이트로 클래스명이 해시(_xxxx_xxx) 형태로만 바뀌므로,
 // 해시 접미사에 의존하지 않고 구조/속성 기반으로 선택한다.
@@ -289,3 +297,5 @@ function updatePageVisibility() {
     });
   });
 }
+
+})();

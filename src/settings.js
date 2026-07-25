@@ -16,8 +16,11 @@
   // 새 옵션을 추가하면 이 배열에도 그 키를 넣어야 로드된다(누락 시 그 옵션만 기본값으로
   // 뜰 뿐, 다른 값은 안전).
   const SETTINGS_STORAGE_KEYS = [
+    "cheeseMasterEnabled",
     "cheeseFeatureHidden", // 모든 data-feature 토글 통합
     "cheeseSearchTheme",
+    "cheeseUpdateNoticeEnabled",
+    "cheeseUpdateNoticeMode",
     "cheeseAdMiniplayerKeepMuted",
     "cheeseAdMiniplayerUnmute",
     "cheeseAutoReloadOnError",
@@ -65,8 +68,25 @@
     "cheeseFollowFavMeta",
     "cheeseFollowCustomInitial",
     "cheeseFollowCustomMore",
+    "cheeseFollowFavInitial",
+    "cheeseFollowFavMore",
+    "cheeseFollowGroupInitial",
+    "cheeseFollowGroupMore",
     "cheeseFollowCustomRefreshSec",
     "cheeseFollowFavorites",
+    "cheeseFollowGroupPlacement",
+    "cheeseFollowGroupTagHideOffline",
+    "cheeseFollowCustomGroups",
+    "cheeseFollowGroupCollapsed",
+    "cheeseFollowGroupCustomIcons",
+    "cheeseFollowGroupOrder",
+    "cheeseFollowGroupExcludedTags",
+    "cheeseFollowGroupOfflineOverrides",
+    "cheeseFollowPreviewSize",
+    "cheeseChatWidth",
+    "cheeseChatFoldState",
+    "cheeseCommentFeatureEnabled",
+    "cheeseCommentMarkersEnabled",
     "cheeseSectionRefreshCategory",
     "cheeseSectionRefreshSchedule",
     "cheeseHeaderFollowCount",
@@ -292,6 +312,118 @@
     localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light",
   );
   themeToggle?.addEventListener("click", toggleTheme);
+
+  // ── 전체 기능 일시 중지 ──────────────────────────────────────────────────
+  const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
+  const masterEnabledInput = document.querySelector("[data-master-enabled]");
+
+  (async () => {
+    let enabled = true;
+    try {
+      const data = await cachedStorageGet(MASTER_ENABLED_KEY);
+      enabled = data?.[MASTER_ENABLED_KEY] !== false;
+    } catch {}
+    if (masterEnabledInput) masterEnabledInput.checked = enabled;
+  })();
+
+  masterEnabledInput?.addEventListener("change", () => {
+    const enabled = masterEnabledInput.checked;
+    masterEnabledInput.disabled = true;
+    cachedStorageSet({ [MASTER_ENABLED_KEY]: enabled });
+    try {
+      chrome.runtime.sendMessage(
+        { type: "CHEESE_MASTER_SET", enabled },
+        (response) => {
+          const failed = Boolean(chrome.runtime.lastError) || !response?.ok;
+          masterEnabledInput.disabled = false;
+          if (failed) {
+            settingsToast(
+              "설정은 저장했지만 새로고침 안내를 표시하지 못했습니다.",
+              "error",
+            );
+            return;
+          }
+          settingsToast(
+            enabled
+              ? "치즈 플래터 사용을 켰습니다. 열린 페이지에서 새로고침을 선택해 주세요."
+              : "치즈 플래터 사용을 중지했습니다. 열린 페이지에서 새로고침을 선택해 주세요.",
+            "ok",
+          );
+        },
+      );
+    } catch {
+      masterEnabledInput.disabled = false;
+      settingsToast("설정은 저장했지만 새로고침 안내를 표시하지 못했습니다.", "error");
+    }
+  });
+
+  // ── 업데이트 새로고침 안내 ───────────────────────────────────────────────
+  const UPDATE_NOTICE_ENABLED_KEY = "cheeseUpdateNoticeEnabled";
+  const UPDATE_NOTICE_MODE_KEY = "cheeseUpdateNoticeMode";
+  const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
+  const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
+  const updateNoticeEnabled = document.querySelector(
+    "[data-update-notice-enabled]",
+  );
+  const updateNoticeModeRow = document.querySelector(
+    "[data-update-notice-mode-row]",
+  );
+  const updateNoticeModeButtons = Array.from(
+    document.querySelectorAll("[data-update-notice-mode-value]"),
+  );
+
+  function normalizeUpdateNoticeMode(value) {
+    return UPDATE_NOTICE_MODES.has(value) ? value : UPDATE_NOTICE_DEFAULT_MODE;
+  }
+
+  function reflectUpdateNoticeMode(modeRaw) {
+    const mode = normalizeUpdateNoticeMode(modeRaw);
+    updateNoticeModeButtons.forEach((button) => {
+      const active = button.dataset.updateNoticeModeValue === mode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+
+  function reflectUpdateNoticeEnabled(enabled) {
+    if (updateNoticeEnabled) updateNoticeEnabled.checked = enabled;
+    updateNoticeModeRow?.classList.toggle("is-locked", !enabled);
+    updateNoticeModeButtons.forEach((button) => {
+      button.disabled = !enabled;
+    });
+  }
+
+  (async () => {
+    let enabled = true;
+    let mode = UPDATE_NOTICE_DEFAULT_MODE;
+    try {
+      const data = await cachedStorageGet([
+        UPDATE_NOTICE_ENABLED_KEY,
+        UPDATE_NOTICE_MODE_KEY,
+      ]);
+      enabled = data?.[UPDATE_NOTICE_ENABLED_KEY] !== false;
+      mode = normalizeUpdateNoticeMode(data?.[UPDATE_NOTICE_MODE_KEY]);
+    } catch {}
+    reflectUpdateNoticeEnabled(enabled);
+    reflectUpdateNoticeMode(mode);
+  })();
+
+  updateNoticeEnabled?.addEventListener("change", () => {
+    const enabled = updateNoticeEnabled.checked;
+    reflectUpdateNoticeEnabled(enabled);
+    cachedStorageSet({ [UPDATE_NOTICE_ENABLED_KEY]: enabled });
+  });
+
+  updateNoticeModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      const mode = normalizeUpdateNoticeMode(
+        button.dataset.updateNoticeModeValue,
+      );
+      reflectUpdateNoticeMode(mode);
+      cachedStorageSet({ [UPDATE_NOTICE_MODE_KEY]: mode });
+    });
+  });
 
   // ── 카테고리 탭(좌측 탭 → 우측 패널 전환) ─────────────────────────────────
   // 팝업을 열 때마다 항상 첫 탭('전체')에서 시작한다(설정 팝업은 예측 가능성이
@@ -1970,6 +2102,52 @@
     ["popular", "recent", "oldest", "name-asc", "name-desc"],
     "popular",
   );
+  bindStringSegmented(
+    document.querySelector("[data-cf-group-placement]"),
+    "cf-group-placement-value",
+    "cheeseFollowGroupPlacement",
+    ["groups-first", "favorites-first"],
+    "groups-first",
+  );
+
+  const cfTagGroupInput = document.querySelector(
+    '[data-feature="sbFollowGroupTags"]',
+  );
+  const cfTagHideOfflineInput = document.querySelector(
+    "[data-cf-group-tag-hide-offline]",
+  );
+  const CF_TAG_HIDE_OFFLINE_KEY = "cheeseFollowGroupTagHideOffline";
+  const reflectCfTagHideOfflineAvailability = () => {
+    if (!cfTagHideOfflineInput) return;
+    const disabled = !cfTagGroupInput?.checked;
+    cfTagHideOfflineInput.disabled = disabled;
+    cfTagHideOfflineInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", disabled);
+  };
+  if (cfTagHideOfflineInput) {
+    (async () => {
+      let hideOffline = true;
+      try {
+        const data = await cachedStorageGet(CF_TAG_HIDE_OFFLINE_KEY);
+        hideOffline = data?.[CF_TAG_HIDE_OFFLINE_KEY] !== false;
+      } catch {}
+      cfTagHideOfflineInput.checked = hideOffline;
+      reflectCfTagHideOfflineAvailability();
+    })();
+    cfTagHideOfflineInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [CF_TAG_HIDE_OFFLINE_KEY]: cfTagHideOfflineInput.checked,
+        });
+      } catch {}
+    });
+  }
+  cfTagGroupInput?.addEventListener(
+    "change",
+    reflectCfTagHideOfflineAvailability,
+  );
+  queueMicrotask(reflectCfTagHideOfflineAvailability);
 
   // 즐겨찾기 내 별도 정렬 기준 — 'custom' 이면 순서 편집 행을 노출한다.
   const cfFavOrderRow = document.getElementById("cfFavOrderRow");
@@ -1987,10 +2165,10 @@
   // setupCfFavOrderEditor() 호출은 cfFavMeta/cfFavOrder(let) 선언 뒤로 옮겼다(TDZ 방지).
 
   // 전용 팔로잉 목록 초기/더보기 개수(숫자 입력, 1~200).
-  function bindCustomFollowCount(selector, storageKey, def) {
+  function bindCustomFollowCount(selector, storageKey, def, max = 200) {
     const input = document.querySelector(selector);
     if (!input) return;
-    const clamp = (n) => Math.min(200, Math.max(1, Math.round(n)));
+    const clamp = (n) => Math.min(max, Math.max(1, Math.round(n)));
     (async () => {
       let v = def;
       try {
@@ -2013,6 +2191,20 @@
   }
   bindCustomFollowCount("[data-cf-initial]", "cheeseFollowCustomInitial", 10);
   bindCustomFollowCount("[data-cf-more]", "cheeseFollowCustomMore", 20);
+  bindCustomFollowCount("[data-cf-fav-initial]", "cheeseFollowFavInitial", 10);
+  bindCustomFollowCount("[data-cf-fav-more]", "cheeseFollowFavMore", 10);
+  bindCustomFollowCount(
+    "[data-cf-group-initial]",
+    "cheeseFollowGroupInitial",
+    5,
+    30,
+  );
+  bindCustomFollowCount(
+    "[data-cf-group-more]",
+    "cheeseFollowGroupMore",
+    5,
+    30,
+  );
 
   // ── 즐겨찾기 커스텀 순서 편집기(설정 팝업) ──────────────────────────────
   // 저장키: cheeseFollowFavOrder(channelId 배열), cheeseFollowFavMeta({id,name,imageUrl}[]).
@@ -3904,6 +4096,130 @@
       }, 200);
     }, 2400);
   }
+
+  // ── 설정 JSON 내보내기·불러오기 ──────────────────────────────────────────
+  const SETTINGS_TRANSFER_FORMAT = "chzzk-platter-settings";
+  const SETTINGS_TRANSFER_SCHEMA_VERSION = 1;
+  const SETTINGS_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+  const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
+  const settingsExportButton = document.querySelector(
+    "[data-settings-export]",
+  );
+  const settingsImportOpenButton = document.querySelector(
+    "[data-settings-import-open]",
+  );
+  const settingsImportFile = document.querySelector(
+    "[data-settings-import-file]",
+  );
+
+  function downloadSettingsJson(payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const date = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.download = `chzzk-platter-settings-${date}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  settingsExportButton?.addEventListener("click", async () => {
+    settingsExportButton.disabled = true;
+    try {
+      const settings = await chrome.storage.local.get(
+        Array.from(SETTINGS_TRANSFER_KEYS),
+      );
+      const payload = {
+        format: SETTINGS_TRANSFER_FORMAT,
+        schemaVersion: SETTINGS_TRANSFER_SCHEMA_VERSION,
+        extensionVersion: chrome.runtime.getManifest().version,
+        exportedAt: new Date().toISOString(),
+        settings,
+        appearance: {
+          theme:
+            localStorage.getItem(THEME_STORAGE_KEY) === "dark"
+              ? "dark"
+              : "light",
+        },
+      };
+      downloadSettingsJson(payload);
+      settingsToast("설정 파일을 내보냈습니다.", "ok");
+    } catch {
+      settingsToast("설정을 내보내지 못했습니다.", "error");
+    } finally {
+      settingsExportButton.disabled = false;
+    }
+  });
+
+  settingsImportOpenButton?.addEventListener("click", () => {
+    settingsImportFile?.click();
+  });
+
+  settingsImportFile?.addEventListener("change", async () => {
+    const file = settingsImportFile.files?.[0];
+    settingsImportFile.value = "";
+    if (!file) return;
+    if (file.size > SETTINGS_IMPORT_MAX_BYTES) {
+      settingsToast("설정 파일이 너무 큽니다.", "error");
+      return;
+    }
+
+    settingsImportOpenButton.disabled = true;
+    try {
+      const payload = JSON.parse(await file.text());
+      if (
+        payload?.format !== SETTINGS_TRANSFER_FORMAT ||
+        payload?.schemaVersion !== SETTINGS_TRANSFER_SCHEMA_VERSION ||
+        !payload.settings ||
+        typeof payload.settings !== "object" ||
+        Array.isArray(payload.settings)
+      ) {
+        throw new Error("invalid-format");
+      }
+
+      const imported = {};
+      for (const [key, value] of Object.entries(payload.settings)) {
+        if (!SETTINGS_TRANSFER_KEYS.has(key) || value === undefined) continue;
+        imported[key] = value;
+      }
+      if (!Object.keys(imported).length) throw new Error("empty-settings");
+
+      await chrome.storage.local.set(imported);
+      if (storageCacheData) Object.assign(storageCacheData, imported);
+
+      const theme = payload?.appearance?.theme;
+      if (theme === "dark" || theme === "light") {
+        localStorage.setItem(THEME_STORAGE_KEY, theme);
+        applyTheme(theme);
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(imported, MASTER_ENABLED_KEY) &&
+        masterEnabledInput
+      ) {
+        masterEnabledInput.checked = imported[MASTER_ENABLED_KEY] !== false;
+      }
+
+      settingsToast(
+        "설정을 불러왔습니다. 열린 페이지에서 새로고침을 선택해 주세요.",
+        "ok",
+      );
+      try {
+        chrome.runtime.sendMessage({
+          type: "CHEESE_SHOW_REFRESH_NOTICE",
+          reason: "settings-import",
+        });
+      } catch {}
+    } catch {
+      settingsToast("올바른 치즈 플래터 설정 파일이 아닙니다.", "error");
+    } finally {
+      settingsImportOpenButton.disabled = false;
+    }
+  });
 
   function cbmFormatDate(ms) {
     const n = Number(ms);

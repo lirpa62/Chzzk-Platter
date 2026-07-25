@@ -2,8 +2,13 @@
 // 치지직 클립(/clips) 페이지의 "클릭하여 라이브 시청" 플로팅 버튼을 숨기고,
 // 이전/다음 네비게이션 버튼은 호버했을 때만 보이게 한다(시청 몰입 방해 최소화).
 // 버튼이 그려지기 전에 숨겨 깜빡임을 막으려고 document_start + MAIN world로 주입한다.
-(function () {
+(async function () {
   "use strict";
+
+  try {
+    const data = await chrome.storage.local.get("cheeseMasterEnabled");
+    if (data?.cheeseMasterEnabled === false) return;
+  } catch {}
 
   if (window.__cheeseClipButtonHideLoaded) return;
   window.__cheeseClipButtonHideLoaded = true;

@@ -7,7 +7,19 @@
 // content.js 로부터 차단 userIdHash 목록을 postMessage 로 받아 유지한다.
 //
 // ⚠ MAIN world 라 chrome.storage 직접 접근 불가 → 차단 목록은 content.js 가 보내준다.
-(() => {
+(async () => {
+  "use strict";
+
+  async function masterEnabled() {
+    const root = document.documentElement;
+    for (let i = 0; i < 100; i += 1) {
+      if (root?.dataset.cheesePlatterMasterReady === "1") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return !root?.hasAttribute("data-cheese-platter-disabled");
+  }
+  if (!(await masterEnabled())) return;
+
   if (window.__cheeseCommentBlockLoaded) return;
   window.__cheeseCommentBlockLoaded = true;
 
@@ -60,6 +72,7 @@
   // 실측 방식). VOD 채팅은 /videos/{no}/chats HTTP 응답이라 fetch/XHR 훅에서 처리.
   JSON.parse = function (text, reviver) {
     const data = originalJSONParse(text, reviver);
+    if (!chatBlockedHashes.size) return data;
     try {
       if (data && typeof data === "object") {
         // 실시간 채팅(cmd 93101): bdy 배열, msg.uid = userIdHash.
@@ -91,15 +104,12 @@
         // 네트워크 훅을 우회하지만(실측: XHR getter 교체까지 해도 화면 그대로),
         // responseType='' 이라 텍스트를 직접 JSON.parse 하는 순간은 못 피한다 — 여기서
         // 페이로드 형태(content.videoChats/previousVideoChats)로 감지해 필터한다.
-        // hash→'녹화 당시 닉네임' 쌍은 차단 여부와 무관하게 항상 수집한다(나중에 차단할
-        // 때 이미 렌더/버퍼된 메시지를 녹화 닉네임으로 숨기기 위함 — 닉네임 변경 유저 대응).
         else if (
           data.content &&
           (Array.isArray(data.content.videoChats) ||
             Array.isArray(data.content.previousVideoChats))
         ) {
-          collectVodNicks(data.content);
-          if (chatBlockedHashes.size) filterVodChat(data);
+          filterVodChat(data);
         }
       }
     } catch {
@@ -108,34 +118,11 @@
     return data;
   };
 
-  // VOD 채팅 응답에서 hash→녹화 닉네임 쌍을 수집해 content.js 로 보낸다(중복 전송 방지).
+  // VOD 채팅에서 실제 차단 대상의 hash→녹화 닉네임만 content.js 로 보낸다.
+  // 모든 시청자의 닉네임을 매 응답마다 수집하면 긴 다시보기에서 집합과 Map이 계속
+  // 커지고, 채팅 배열을 필터와 수집으로 두 번 순회하게 된다.
   const sentVodNickKeys = new Set();
-  function collectVodNicks(c) {
-    const pairs = [];
-    const scan = (arr) => {
-      if (!Array.isArray(arr)) return;
-      for (const m of arr) {
-        const h = vodChatHash(m);
-        if (!h) continue;
-        let nick = "";
-        if (m?.profile) {
-          try {
-            const p =
-              typeof m.profile === "string"
-                ? originalJSONParse(m.profile)
-                : m.profile;
-            nick = String(p?.nickname || "").trim();
-          } catch {}
-        }
-        if (!nick) continue;
-        const key = h + "\n" + nick;
-        if (sentVodNickKeys.has(key)) continue;
-        sentVodNickKeys.add(key);
-        pairs.push([h, nick]);
-      }
-    };
-    scan(c.videoChats);
-    scan(c.previousVideoChats);
+  function emitVodNickPairs(pairs) {
     if (pairs.length) {
       window.postMessage(
         { source: "cheese-comment-block", type: "vod-nicks", pairs },
@@ -167,22 +154,40 @@
   }
   function filterVodChat(data) {
     let changed = false;
+    const pairs = [];
     const c = data?.content;
     if (!c || typeof c !== "object") return false;
+    const keepUnblocked = (m) => {
+      if (!m) return false;
+      const hash = vodChatHash(m);
+      if (!hash || !chatBlockedHashes.has(hash)) return true;
+      if (m.profile) {
+        try {
+          const profile =
+            typeof m.profile === "string"
+              ? originalJSONParse(m.profile)
+              : m.profile;
+          const nick = String(profile?.nickname || "").trim();
+          const key = nick ? `${hash}\n${nick}` : "";
+          if (key && !sentVodNickKeys.has(key)) {
+            sentVodNickKeys.add(key);
+            pairs.push([hash, nick]);
+          }
+        } catch {}
+      }
+      return false;
+    };
     if (Array.isArray(c.previousVideoChats)) {
       const before = c.previousVideoChats.length;
-      c.previousVideoChats = c.previousVideoChats.filter(
-        (m) => m && !chatBlockedHashes.has(vodChatHash(m)),
-      );
+      c.previousVideoChats = c.previousVideoChats.filter(keepUnblocked);
       if (c.previousVideoChats.length !== before) changed = true;
     }
     if (Array.isArray(c.videoChats)) {
       const before = c.videoChats.length;
-      c.videoChats = c.videoChats.filter(
-        (m) => m && !chatBlockedHashes.has(vodChatHash(m)),
-      );
+      c.videoChats = c.videoChats.filter(keepUnblocked);
       if (c.videoChats.length !== before) changed = true;
     }
+    emitVodNickPairs(pairs);
     return changed;
   }
 
@@ -361,7 +366,6 @@
               if (!raw) return;
               data = originalJSONParse(raw);
             }
-            collectVodNicks(data?.content);
             if (chatBlockedHashes.size && filterVodChat(data)) {
               cachedData = data;
               cachedText = JSON.stringify(data);

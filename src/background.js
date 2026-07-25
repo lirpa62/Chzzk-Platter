@@ -30,6 +30,56 @@ const CACHE_STORAGE_PREFIX = "cache:";
 const CHANNEL_SEARCH_STORAGE_PREFIX = "channelSearch:";
 const CACHE_CHUNK_SEPARATOR = "#chunk:";
 const CACHE_CHUNK_SIZE = 1000;
+const UPDATE_NOTICE_ENABLED_KEY = "cheeseUpdateNoticeEnabled";
+const UPDATE_NOTICE_MODE_KEY = "cheeseUpdateNoticeMode";
+const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
+const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
+const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
+const REFRESH_NOTICE_URLS = [
+  "https://chzzk.naver.com/*",
+  "https://studio.chzzk.naver.com/*",
+  "https://m.naver.com/shorts/*",
+  "https://cafe.naver.com/*",
+  "https://*.cafe.naver.com/*",
+  "https://game.naver.com/profile*",
+];
+let masterEnabled = true;
+
+const masterStateReady = chrome.storage.local
+  .get(MASTER_ENABLED_KEY)
+  .then((data) => {
+    masterEnabled = data?.[MASTER_ENABLED_KEY] !== false;
+    return masterEnabled;
+  })
+  .catch(() => true);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[MASTER_ENABLED_KEY]) {
+    masterEnabled = changes[MASTER_ENABLED_KEY].newValue !== false;
+  }
+});
+
+async function showRefreshNoticeOnExtensionTabs(reason) {
+  const preferences = await chrome.storage.local.get(UPDATE_NOTICE_MODE_KEY);
+  const storedMode = preferences?.[UPDATE_NOTICE_MODE_KEY];
+  const noticeMode = UPDATE_NOTICE_MODES.has(storedMode)
+    ? storedMode
+    : UPDATE_NOTICE_DEFAULT_MODE;
+  const tabs = await chrome.tabs.query({ url: REFRESH_NOTICE_URLS });
+  const version = chrome.runtime.getManifest().version;
+  await Promise.allSettled(
+    tabs
+      .filter((tab) => Number.isInteger(tab.id))
+      .map((tab) =>
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: showUpdateNotificationBanner,
+          args: [version, reason, noticeMode],
+        }),
+      ),
+  );
+  return tabs.length;
+}
 
 const cache = new Map();
 const inFlightFetches = new Map();
@@ -54,11 +104,23 @@ if (chrome.webRequest?.onCompleted) {
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  // 설치(install)·업데이트(update) 모두 안내 배너를 띄운다. 설치 직후에도 이미 열려 있던
-  // 치지직 탭에는 콘텐츠 스크립트가 주입돼 있지 않아, 새로고침해야 확장이 동작하기 때문.
+  // 설치 직후에는 항상, 업데이트 때는 사용자 설정에 따라 안내를 띄운다. 이미 열려 있던
+  // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
 
   try {
+    if ((await masterStateReady) === false) return;
+    let noticeMode = UPDATE_NOTICE_DEFAULT_MODE;
+    if (details.reason === "update") {
+      const preferences = await chrome.storage.local.get([
+        UPDATE_NOTICE_ENABLED_KEY,
+        UPDATE_NOTICE_MODE_KEY,
+      ]);
+      if (preferences?.[UPDATE_NOTICE_ENABLED_KEY] === false) return;
+      const storedMode = preferences?.[UPDATE_NOTICE_MODE_KEY];
+      if (UPDATE_NOTICE_MODES.has(storedMode)) noticeMode = storedMode;
+    }
+
     const tabs = await chrome.tabs.query({
       url: ["https://chzzk.naver.com/*", "https://studio.chzzk.naver.com/*"],
     });
@@ -71,7 +133,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
           chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: showUpdateNotificationBanner,
-            args: [version, details.reason],
+            args: [version, details.reason, noticeMode],
           }),
         ),
     );
@@ -80,43 +142,88 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-function showUpdateNotificationBanner(version, reason) {
+function showUpdateNotificationBanner(version, reason, requestedMode) {
   const bannerId = "cheese-search-ext-update-banner";
-  if (document.getElementById(bannerId)) return;
+  document.getElementById(bannerId)?.remove();
 
+  const transientMs = 3000;
+  const mode =
+    reason === "install" ||
+    !["fixed", "temporary", "toast"].includes(requestedMode)
+      ? "fixed"
+      : requestedMode;
+  const isToast = mode === "toast";
+  const isTransient = mode !== "fixed";
   const banner = document.createElement("div");
   banner.id = bannerId;
   banner.setAttribute("role", "status");
   banner.setAttribute("aria-live", "polite");
-  banner.style.cssText = [
-    "position:fixed",
-    "top:0",
-    "left:0",
-    "right:0",
-    "z-index:2147483647",
-    "box-sizing:border-box",
-    "padding:11px 16px",
-    "background:linear-gradient(90deg,#e4ce00,#168f5c,#4e41db)",
-    "color:#fff",
-    "font-family:Arial,sans-serif",
-    "font-size:14px",
-    "font-weight:600",
-    "line-height:20px",
-    "text-align:center",
-    "box-shadow:0 2px 8px rgba(0,0,0,.2)",
-    "transform:translateY(-100%)",
-    "transition:transform .3s ease",
-  ].join(";");
+  banner.style.cssText = isToast
+    ? [
+        "position:fixed",
+        "right:20px",
+        "bottom:20px",
+        "z-index:2147483647",
+        "box-sizing:border-box",
+        "width:min(440px,calc(100vw - 32px))",
+        "padding:14px",
+        "border:1px solid rgba(255,255,255,.14)",
+        "border-radius:8px",
+        "background:#24272d",
+        "color:#fff",
+        "font-family:Arial,sans-serif",
+        "font-size:14px",
+        "font-weight:600",
+        "line-height:20px",
+        "text-align:left",
+        "box-shadow:0 8px 28px rgba(0,0,0,.34)",
+        "opacity:0",
+        "transform:translateY(16px) scale(.98)",
+        "transition:opacity .25s ease,transform .25s ease",
+      ].join(";")
+    : [
+        "position:fixed",
+        "top:0",
+        "left:0",
+        "right:0",
+        "z-index:2147483647",
+        "box-sizing:border-box",
+        "padding:11px 16px",
+        "background:linear-gradient(90deg,#e4ce00,#168f5c,#4e41db)",
+        "color:#fff",
+        "font-family:Arial,sans-serif",
+        "font-size:14px",
+        "font-weight:600",
+        "line-height:20px",
+        "text-align:center",
+        "box-shadow:0 2px 8px rgba(0,0,0,.2)",
+        "transform:translateY(-100%)",
+        "transition:transform .3s ease",
+      ].join(";");
 
+  const messageByReason = {
+    install: `치즈 플래터(v${version})가 설치되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`,
+    update: `치즈 플래터가 v${version}으로 업데이트되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`,
+    "master-enabled":
+      "치즈 플래터 사용을 켰습니다. 이 페이지에 기능을 적용하려면 새로고침해 주세요.",
+    "master-disabled":
+      "치즈 플래터 사용을 중지했습니다. 이 페이지에서 기존 기능을 정리하려면 새로고침해 주세요.",
+    "settings-import":
+      "치즈 플래터 설정을 불러왔습니다. 이 페이지에 새 설정을 적용하려면 새로고침해 주세요.",
+  };
   const message =
+    messageByReason[reason] ||
+    "치즈 플래터 설정이 변경되었습니다. 이 페이지에 적용하려면 새로고침해 주세요.";
+  const closeLabel =
     reason === "install"
-      ? `치즈 플래터(v${version})가 설치되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`
-      : `치즈 플래터가 v${version}으로 업데이트되었습니다. 정상적인 사용을 위해 페이지를 새로고침해 주세요.`;
-  const closeLabel = reason === "install" ? "설치 안내 닫기" : "업데이트 안내 닫기";
+      ? "설치 안내 닫기"
+      : reason === "update"
+        ? "업데이트 안내 닫기"
+        : "설정 변경 안내 닫기";
 
   banner.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap">
-      <span>${message}</span>
+    <div style="display:flex;align-items:center;justify-content:${isToast ? "flex-start" : "center"};gap:10px 12px;flex-wrap:${isToast ? "nowrap" : "wrap"}">
+      <span style="${isToast ? "flex:1;min-width:0" : ""}">${message}</span>
       <button type="button" data-cheese-search-update-refresh style="border:0;border-radius:5px;padding:5px 10px;background:#fff;color:#087b2b;font-size:13px;font-weight:700;line-height:18px;cursor:pointer">새로고침</button>
       <button type="button" data-cheese-search-update-close aria-label="${closeLabel}" style="display:inline-flex;align-items:center;justify-content:center;border:0;padding:4px;background:transparent;color:#fff;line-height:1;cursor:pointer">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -131,7 +238,10 @@ function showUpdateNotificationBanner(version, reason) {
 
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      banner.style.transform = "translateY(0)";
+      banner.style.transform = isToast
+        ? "translateY(0) scale(1)"
+        : "translateY(0)";
+      if (isToast) banner.style.opacity = "1";
     });
   });
 
@@ -139,17 +249,52 @@ function showUpdateNotificationBanner(version, reason) {
     "[data-cheese-search-update-refresh]",
   );
   const closeButton = banner.querySelector("[data-cheese-search-update-close]");
+  let dismissTimer = 0;
+
+  function clearDismissTimer() {
+    if (!dismissTimer) return;
+    clearTimeout(dismissTimer);
+    dismissTimer = 0;
+  }
+
+  function dismiss() {
+    clearDismissTimer();
+    if (!banner.isConnected) return;
+    if (isToast) {
+      banner.style.opacity = "0";
+      banner.style.transform = "translateY(16px) scale(.98)";
+    } else {
+      banner.style.transform = "translateY(-100%)";
+    }
+    setTimeout(() => banner.remove(), 300);
+  }
+
+  function scheduleDismiss() {
+    if (!isTransient || !banner.isConnected) return;
+    clearDismissTimer();
+    dismissTimer = setTimeout(dismiss, transientMs);
+  }
 
   refreshButton.addEventListener("click", () => {
+    clearDismissTimer();
     refreshButton.disabled = true;
     refreshButton.textContent = "새로고침 중...";
     location.reload();
   });
 
-  closeButton.addEventListener("click", () => {
-    banner.style.transform = "translateY(-100%)";
-    setTimeout(() => banner.remove(), 300);
-  });
+  closeButton.addEventListener("click", dismiss);
+
+  if (isTransient) {
+    banner.addEventListener("mouseenter", clearDismissTimer);
+    banner.addEventListener("mouseleave", scheduleDismiss);
+    banner.addEventListener("focusin", clearDismissTimer);
+    banner.addEventListener("focusout", () => {
+      setTimeout(() => {
+        if (!banner.contains(document.activeElement)) scheduleDismiss();
+      }, 0);
+    });
+    scheduleDismiss();
+  }
 }
 
 const cacheHydration = hydrateCachesFromStorage();
@@ -2950,6 +3095,7 @@ async function lpCheckProgress(channelId) {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (!masterEnabled) return;
   const channelId = lpChannelIdFromAlarm(alarm?.name);
   if (channelId) void lpCheckProgress(channelId);
 });
@@ -3011,6 +3157,32 @@ async function cafeFetchClipMetadata(clipId) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
+    return false;
+  }
+
+  if (message.type === "CHEESE_MASTER_SET") {
+    masterEnabled = message.enabled !== false;
+    chrome.storage.local
+      .set({ [MASTER_ENABLED_KEY]: masterEnabled })
+      .then(() =>
+        showRefreshNoticeOnExtensionTabs(
+          masterEnabled ? "master-enabled" : "master-disabled",
+        ),
+      )
+      .then((notified) => sendResponse({ ok: true, notified }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message.type === "CHEESE_SHOW_REFRESH_NOTICE") {
+    showRefreshNoticeOnExtensionTabs(message.reason || "settings")
+      .then((notified) => sendResponse({ ok: true, notified }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (!masterEnabled) {
+    sendResponse({ ok: false, disabled: true });
     return false;
   }
 
@@ -3139,35 +3311,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     try {
       chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
-          if (chrome.runtime.lastError || downloadId == null) {
-            sendResponse({ ok: false, reason: "start-failed" });
-            return;
+        if (chrome.runtime.lastError || downloadId == null) {
+          sendResponse({ ok: false, reason: "start-failed" });
+          return;
+        }
+        // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
+        let settled = false;
+        const onChanged = (delta) => {
+          if (delta.id !== downloadId || !delta.state) return;
+          const s = delta.state.current;
+          if (s === "complete") {
+            finish({ ok: true, saved: true });
+          } else if (s === "interrupted") {
+            finish({ ok: true, saved: false }); // 사용자가 취소 등
           }
-          // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
-          let settled = false;
-          const onChanged = (delta) => {
-            if (delta.id !== downloadId || !delta.state) return;
-            const s = delta.state.current;
-            if (s === "complete") {
-              finish({ ok: true, saved: true });
-            } else if (s === "interrupted") {
-              finish({ ok: true, saved: false }); // 사용자가 취소 등
-            }
-          };
-          const finish = (result) => {
-            if (settled) return;
-            settled = true;
-            chrome.downloads.onChanged.removeListener(onChanged);
-            sendResponse(result);
-          };
-          chrome.downloads.onChanged.addListener(onChanged);
-          // 혹시 onChanged가 안 오는 환경 대비 타임아웃. saveAs(대화상자)는 사용자가
-          // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
-          // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
-          const timeoutMs = saveAs ? 300000 : 15000;
-          setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
-        },
-      );
+        };
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          chrome.downloads.onChanged.removeListener(onChanged);
+          sendResponse(result);
+        };
+        chrome.downloads.onChanged.addListener(onChanged);
+        // 혹시 onChanged가 안 오는 환경 대비 타임아웃. saveAs(대화상자)는 사용자가
+        // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
+        // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
+        const timeoutMs = saveAs ? 300000 : 15000;
+        setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
+      });
     } catch {
       sendResponse({ ok: false, reason: "exception" });
     }

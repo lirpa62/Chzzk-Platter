@@ -1,4 +1,8 @@
-(function initializeChzzkCafeNow() {
+(async function initializeChzzkCafeNow() {
+  try {
+    const data = await chrome.storage.local.get("cheeseMasterEnabled");
+    if (data?.cheeseMasterEnabled === false) return;
+  } catch {}
   const api = globalThis.CheeseCafeClipApi;
   if (!api) return;
 
