@@ -372,12 +372,17 @@ let channelLiveButtonOn = true;
 // 라이브 바로가기 버튼을 탭리스트 '끝(우측)'에 둘지(true) 탭들 바로 뒤(false)에 둘지.
 const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
 let channelLiveButtonEnd = true;
-// 채널·팔로잉·검색·라이브 카드와 사이드바의 프로필 모서리(%). 기본 50은 기존 원형
-// 프로필을 유지하고, 0은 사각형으로 표시한다.
+// 채널·팔로잉·검색·라이브 카드와 사이드바의 프로필 모서리. 신규 사용자는 기본
+// OFF이고, 기존에 반경을 저장한 사용자는 마이그레이션 시 기존 표시를 유지한다.
+const CHANNEL_PROFILE_RADIUS_ENABLED_KEY =
+  "cheeseChannelProfileRadiusEnabled";
 const CHANNEL_PROFILE_RADIUS_KEY = "cheeseChannelProfileRadius";
 const CHANNEL_PROFILE_RADIUS_DEFAULT = 50;
 const CHANNEL_PROFILE_RADIUS_TARGET_CLASS =
   "cheese-channel-profile-radius-target";
+const CHANNEL_PROFILE_RADIUS_ROOT_CLASS =
+  "cheese-channel-profile-radius-enabled";
+let channelProfileRadiusEnabled = false;
 let channelProfileRadius = CHANNEL_PROFILE_RADIUS_DEFAULT;
 function normalizeChannelProfileRadius(value) {
   const radius = Number(value);
@@ -624,10 +629,12 @@ function normalizeRootLogoMode(v) {
 }
 // 실제 동작 판정.
 function rootEntryToFollowingActive() {
+  if (!IS_TOP_FRAME) return false;
   // 진입 시 이동: 단독(only)이면 상위 무시하고 OFF. 그 외엔 상위 토글을 따른다.
   return rootToFollowing && rootToFollowingLogoMode !== "only";
 }
 function logoClickToFollowingActive() {
+  if (!IS_TOP_FRAME) return false;
   // 로고 이동: 단독이면 상위 무관 ON. 포함이면 상위 ON 일 때 ON. 제외면 OFF.
   if (rootToFollowingLogoMode === "only") return true;
   if (rootToFollowingLogoMode === "include") return rootToFollowing;
@@ -758,6 +765,8 @@ const featureFlags = {
   sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
   sbFollowCustom: false, // 네이티브 팔로잉 목록을 치즈 플래터 전용 목록으로 대체(기본 OFF)
   sbFollowCustomAutoExpand: false, // 전용 팔로잉 목록을 처음부터 전부 펼쳐 표시
+  sbFollowFavAutoExpand: false, // 전용 목록의 즐겨찾기를 처음부터 전부 펼쳐 표시
+  sbFollowGroupAutoExpand: false, // 전용 목록의 그룹을 처음부터 전부 펼쳐 표시
   sbFollowCustomOffline: false, // 전용 팔로잉 목록 일반 그룹에서 오프라인 채널 숨김
   sbFollowCustomFavoriteOffline: false, // 전용 팔로잉 목록 즐겨찾기 그룹에서 오프라인 채널 숨김
   sbFollowPageFavoriteButton: false, // 라이브·다시보기·채널 액션 영역에 즐겨찾기 버튼 표시
@@ -881,9 +890,11 @@ let customFollowRetryTimer = 0; // 일부/전체 요청 실패 후 1회 재시�
 let customFollowShown = CUSTOM_FOLLOW_INITIAL_DEFAULT; // 현재 표시 개수
 let customFollowFavShown = CUSTOM_FOLLOW_FAV_INITIAL_DEFAULT;
 let customFollowGroupShown = CUSTOM_FOLLOW_GROUP_INITIAL_DEFAULT;
-// 자동 펼치기 중 사용자가 '접기'를 누르면 같은 사이드바 세션에서는 초기 개수를
-// 유지한다. 사이드바를 다시 펼치거나 옵션을 다시 켜면 자동 펼침을 재개한다.
+// 자동 펼치기 중 사용자가 '접기'를 누르면 같은 사이드바 세션에서는 각 영역의 초기
+// 개수를 유지한다. 사이드바를 다시 펼치거나 해당 옵션을 다시 켜면 자동 펼침을 재개한다.
 let customFollowAutoExpandSuppressed = false;
+let customFollowFavAutoExpandSuppressed = false;
+let customFollowGroupAutoExpandSuppressed = false;
 let customFollowItemsSignature = ""; // 동일 응답의 저장·DOM 전체 교체 방지
 let customFollowFavMetaSignature = ""; // 설정 팝업용 메타 중복 저장 방지
 let customFollowGroups = []; // [{id,name,color,icon,channelIds}]
@@ -9096,6 +9107,8 @@ function applyFeatureFlags(value) {
   const obj = value && typeof value === "object" ? value : {};
   const previousCustomFollowEnabled = featureFlags.sbFollowCustom;
   const previousCustomFollowAutoExpand = featureFlags.sbFollowCustomAutoExpand;
+  const previousFavAutoExpand = featureFlags.sbFollowFavAutoExpand;
+  const previousGroupAutoExpand = featureFlags.sbFollowGroupAutoExpand;
   const previousSubscribeGroups = featureFlags.sbFollowGroupSubscribe;
   const previousTagGroups = featureFlags.sbFollowGroupTags;
   const previousGroupOffline = featureFlags.sbFollowGroupOffline;
@@ -9107,6 +9120,18 @@ function applyFeatureFlags(value) {
     previousCustomFollowAutoExpand !== featureFlags.sbFollowCustomAutoExpand
   ) {
     customFollowAutoExpandSuppressed = false;
+  }
+  if (
+    previousCustomFollowEnabled !== featureFlags.sbFollowCustom ||
+    previousFavAutoExpand !== featureFlags.sbFollowFavAutoExpand
+  ) {
+    customFollowFavAutoExpandSuppressed = false;
+  }
+  if (
+    previousCustomFollowEnabled !== featureFlags.sbFollowCustom ||
+    previousGroupAutoExpand !== featureFlags.sbFollowGroupAutoExpand
+  ) {
+    customFollowGroupAutoExpandSuppressed = false;
   }
   // MAIN world 스크립트(오디오믹서/비디오필터)에 전달.
   broadcastFeatureFlags();
@@ -12929,6 +12954,8 @@ function handleSidebarExpandTransition(sidebar) {
       // 접힌 상태에서 방금 펼침 → '접기' 의사 리셋(자동 펼치기 재적용).
       followUserCollapsed = false;
       customFollowAutoExpandSuppressed = false;
+      customFollowFavAutoExpandSuppressed = false;
+      customFollowGroupAutoExpandSuppressed = false;
     }
     // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
     scheduleSidebarPushSettle();
@@ -13190,6 +13217,10 @@ function isChzzkRootPath() {
   return p === "/" || p === "";
 }
 function goToFollowing() {
+  // content.js는 all_frames로 주입된다. 메인 광고 iframe(home_banner_tgtLREC)도
+  // chzzk 루트 URL을 잠시 사용하므로, 여기서 이동하면 광고 영역 안에 /following
+  // 전체 페이지가 로드되어 헤더가 중복된 것처럼 보인다. 실제 탭만 이동시킨다.
+  if (!IS_TOP_FRAME) return;
   try {
     location.replace(ROOT_FOLLOWING_URL);
   } catch {
@@ -13208,6 +13239,7 @@ function applyRootToFollowing() {
 // 로고 클릭을 capture 로 가로채 팔로우로 보낸다(1회 바인딩). 동작 여부는 로고 모드로 판정.
 let rootToFollowingLogoBound = false;
 function bindLogoClickToFollowing() {
+  if (!IS_TOP_FRAME) return;
   if (rootToFollowingLogoBound) return;
   rootToFollowingLogoBound = true;
   document.addEventListener(
@@ -13410,20 +13442,65 @@ function isChannelProfileThumbnail(anchor) {
   return isLiveChannelLink && isCompactSquareProfileImage(anchor);
 }
 
+const CHANNEL_PROFILE_RADIUS_EXCLUDED_SELECTORS = [
+  "aside#aside-chatting",
+  "aside#vod-aside",
+  "[role='log']",
+  "[class*='live_chatting_']",
+  "[class*='vod_chatting_']",
+];
+const CHANNEL_PROFILE_RADIUS_EXCLUDED_SELECTOR =
+  CHANNEL_PROFILE_RADIUS_EXCLUDED_SELECTORS.join(",");
+
+function isChannelProfileRadiusExcluded(element) {
+  return (
+    !IS_TOP_FRAME ||
+    Boolean(element?.closest?.(CHANNEL_PROFILE_RADIUS_EXCLUDED_SELECTOR))
+  );
+}
+
 // CSS module 해시가 바뀌어도 역할 클래스와 링크 구조로 프로필만 골라 전용 클래스를
 // 붙인다. 단순 _thumbnail_ 전역 CSS는 동영상·클립 썸네일까지 바꾸므로 사용하지 않는다.
 function applyChannelProfileRadius() {
-  document.documentElement.style.setProperty(
+  const root = document.documentElement;
+  root.style.setProperty(
     "--cheese-channel-profile-radius",
     `${normalizeChannelProfileRadius(channelProfileRadius)}%`,
   );
+  root.classList.toggle(
+    CHANNEL_PROFILE_RADIUS_ROOT_CLASS,
+    IS_TOP_FRAME && channelProfileRadiusEnabled,
+  );
+
+  if (!IS_TOP_FRAME) {
+    document
+      .querySelectorAll(`.${CHANNEL_PROFILE_RADIUS_TARGET_CLASS}`)
+      .forEach((element) =>
+        element.classList.remove(CHANNEL_PROFILE_RADIUS_TARGET_CLASS),
+      );
+    return;
+  }
+
+  // 이전 버전이 채팅 프로필·후원 이벤트 버튼에 붙인 마커도 즉시 정리한다.
+  document
+    .querySelectorAll(
+      CHANNEL_PROFILE_RADIUS_EXCLUDED_SELECTORS.map(
+        (selector) => `${selector} .${CHANNEL_PROFILE_RADIUS_TARGET_CLASS}`,
+      ).join(","),
+    )
+    .forEach((element) =>
+      element.classList.remove(CHANNEL_PROFILE_RADIUS_TARGET_CLASS),
+    );
 
   document
     .querySelectorAll(
       'a[class*="_thumbnail_"]:not(.cheese-channel-profile-radius-target)',
     )
     .forEach((anchor) => {
-      if (isChannelProfileThumbnail(anchor)) {
+      if (
+        !isChannelProfileRadiusExcluded(anchor) &&
+        isChannelProfileThumbnail(anchor)
+      ) {
         anchor.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
       }
     });
@@ -13434,7 +13511,10 @@ function applyChannelProfileRadius() {
       '[class*="_profile_"] button[class*="_thumbnail_"]:not(.cheese-channel-profile-radius-target)',
     )
     .forEach((button) => {
-      if (button.querySelector(":scope > img")) {
+      if (
+        !isChannelProfileRadiusExcluded(button) &&
+        button.querySelector(":scope > img")
+      ) {
         button.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
       }
     });
@@ -13446,6 +13526,7 @@ function applyChannelProfileRadius() {
       'div[class*="_profile_"]:not([class*="_type_profile_"]) a[class*="_image_"]:not(.cheese-channel-profile-radius-target)',
     )
     .forEach((profile) => {
+      if (isChannelProfileRadiusExcluded(profile)) return;
       profile.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
     });
 
@@ -13456,6 +13537,7 @@ function applyChannelProfileRadius() {
       'div[class*="_profile_"]:not([class*="_type_profile_"]):not(.cheese-channel-profile-radius-target)',
     )
     .forEach((profile) => {
+      if (isChannelProfileRadiusExcluded(profile)) return;
       const link = profile.closest("a[href]");
       const hasDirectImage = Boolean(profile.querySelector(":scope > img"));
       const isCommunityProfile =
@@ -13476,7 +13558,7 @@ function applyChannelProfileRadius() {
   // 헤더 우측의 로그인 사용자 프로필 버튼.
   document
     .querySelectorAll(
-      'button[class*="_profile_button_"]:not(.cheese-channel-profile-radius-target)',
+      '#header button[class*="_profile_button_"]:not(.cheese-channel-profile-radius-target)',
     )
     .forEach((button) => {
       button.classList.add(CHANNEL_PROFILE_RADIUS_TARGET_CLASS);
@@ -13486,7 +13568,14 @@ function applyChannelProfileRadius() {
 async function loadChannelProfileRadius() {
   if (!chrome.storage?.local) return;
   try {
-    const data = await getBootData([CHANNEL_PROFILE_RADIUS_KEY]);
+    const data = await getBootData([
+      CHANNEL_PROFILE_RADIUS_ENABLED_KEY,
+      CHANNEL_PROFILE_RADIUS_KEY,
+    ]);
+    const hasStoredRadius = data?.[CHANNEL_PROFILE_RADIUS_KEY] !== undefined;
+    channelProfileRadiusEnabled =
+      data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] === true ||
+      (data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] == null && hasStoredRadius);
     channelProfileRadius = normalizeChannelProfileRadius(
       data?.[CHANNEL_PROFILE_RADIUS_KEY],
     );
@@ -14690,15 +14779,19 @@ function ensureCustomFollowPageFavoriteButton() {
 const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
 const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
+const LIVE_VIEWER_COUNT_HIDDEN_KEY = "cheeseLiveViewerCountHidden";
 const LIVE_TAG_FILTER_BUTTON_CLASS = "cheese-live-tag-filter-button";
 const LIVE_TAG_FILTER_MODAL_ID = "cheese-live-tag-filter-modal";
 const LIVE_TAG_FILTER_HIDDEN_CLASS = "cheese-live-tag-filter-hidden";
 const LIVE_VIEWER_COUNT_INLINE_CLASS = "cheese-live-viewer-count-inline";
 const LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS =
   "cheese-live-viewer-count-inline-badge";
+const LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS =
+  "cheese-live-viewer-count-hidden-badge";
 let liveTagFilters = [];
 let liveTagFilterButtonOn = false;
 let liveViewerCountInlineOn = false;
+let liveViewerCountHiddenOn = false;
 const liveTagFilterSelected = new Set();
 let liveTagFilterRestoreFocus = null;
 
@@ -14766,9 +14859,14 @@ function getLiveTagFilterPageKind() {
 }
 
 function isLiveViewerCountPlacementPage() {
+  // content.js는 all_frames로 주입되므로 메인 광고 iframe 안의 카드에는 개입하지 않는다.
+  if (!IS_TOP_FRAME) return false;
   if (getLiveTagFilterPageKind()) return true;
   const pathname = location.pathname.replace(/\/+$/, "") || "/";
-  return /^\/category\/[^/]+\/[^/]+\/lives$/i.test(pathname);
+  return (
+    pathname === "/" ||
+    /^\/category\/[^/]+\/[^/]+\/lives$/i.test(pathname)
+  );
 }
 
 function findLiveTagFilterTablist(kind) {
@@ -14937,21 +15035,16 @@ function clearLiveViewerCountPlacement() {
     });
 }
 
-function applyLiveViewerCountPlacement() {
-  if (!liveViewerCountInlineOn || !isLiveViewerCountPlacementPage()) {
-    clearLiveViewerCountPlacement();
-    return;
-  }
-  const scope =
-    document.querySelector("#layout-body") ||
-    document.querySelector("main") ||
-    document.body;
-  if (!scope) {
-    clearLiveViewerCountPlacement();
-    return;
-  }
+function clearLiveViewerCountHidden() {
+  document
+    .querySelectorAll(`.${LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS}`)
+    .forEach((badge) =>
+      badge.classList.remove(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
+    );
+}
 
-  const placements = [];
+function findLiveViewerCountTargets(scope) {
+  const targets = [];
   const thumbnails = scope.querySelectorAll(
     'a[class*="_thumbnail_"][href^="/live/"]',
   );
@@ -14969,7 +15062,50 @@ function applyLiveViewerCountPlacement() {
     ) {
       continue;
     }
+    targets.push({ card, countBadge, liveBadge, thumbnail });
+  }
+  return targets;
+}
 
+function applyLiveViewerCountPlacement() {
+  if (
+    (!liveViewerCountInlineOn && !liveViewerCountHiddenOn) ||
+    !isLiveViewerCountPlacementPage()
+  ) {
+    clearLiveViewerCountPlacement();
+    clearLiveViewerCountHidden();
+    return;
+  }
+  const scope =
+    document.querySelector("#layout-body") ||
+    document.querySelector("main") ||
+    document.body;
+  if (!scope) {
+    clearLiveViewerCountPlacement();
+    clearLiveViewerCountHidden();
+    return;
+  }
+
+  const targets = findLiveViewerCountTargets(scope);
+  if (liveViewerCountHiddenOn) {
+    clearLiveViewerCountPlacement();
+    const activeBadges = new Set(targets.map(({ countBadge }) => countBadge));
+    activeBadges.forEach((badge) =>
+      badge.classList.add(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
+    );
+    document
+      .querySelectorAll(`.${LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS}`)
+      .forEach((badge) => {
+        if (!activeBadges.has(badge)) {
+          badge.classList.remove(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS);
+        }
+      });
+    return;
+  }
+
+  clearLiveViewerCountHidden();
+  const placements = [];
+  for (const { card, countBadge, liveBadge, thumbnail } of targets) {
     // UI 변경으로 liveBadge.offsetParent가 description이 아닌 thumbnail이 될 수 있다.
     // 실제 화면 좌표 차이를 사용하면 어느 쪽이 offsetParent여도 중복 합산되지 않는다.
     const thumbnailRect = thumbnail.getBoundingClientRect();
@@ -15246,14 +15382,17 @@ async function loadLiveTagFilters() {
       LIVE_TAG_FILTERS_KEY,
       LIVE_TAG_FILTER_BUTTON_KEY,
       LIVE_VIEWER_COUNT_INLINE_KEY,
+      LIVE_VIEWER_COUNT_HIDDEN_KEY,
     ]);
     liveTagFilters = sanitizeLiveTagFilters(data?.[LIVE_TAG_FILTERS_KEY]);
-    liveTagFilterButtonOn = data?.[LIVE_TAG_FILTER_BUTTON_KEY] !== false;
+    liveTagFilterButtonOn = data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
     liveViewerCountInlineOn = data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
+    liveViewerCountHiddenOn = data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true;
   } catch {
     liveTagFilters = [];
-    liveTagFilterButtonOn = true;
+    liveTagFilterButtonOn = false;
     liveViewerCountInlineOn = false;
+    liveViewerCountHiddenOn = false;
   }
   ensureLiveTagFilterUi();
   applyLiveTagFilters();
@@ -15266,7 +15405,8 @@ if (chrome.storage?.onChanged) {
       area !== "local" ||
       (!changes[LIVE_TAG_FILTERS_KEY] &&
         !changes[LIVE_TAG_FILTER_BUTTON_KEY] &&
-        !changes[LIVE_VIEWER_COUNT_INLINE_KEY])
+        !changes[LIVE_VIEWER_COUNT_INLINE_KEY] &&
+        !changes[LIVE_VIEWER_COUNT_HIDDEN_KEY])
     ) {
       return;
     }
@@ -15277,11 +15417,15 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[LIVE_TAG_FILTER_BUTTON_KEY]) {
       liveTagFilterButtonOn =
-        changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue !== false;
+        changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue === true;
     }
     if (changes[LIVE_VIEWER_COUNT_INLINE_KEY]) {
       liveViewerCountInlineOn =
         changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
+    }
+    if (changes[LIVE_VIEWER_COUNT_HIDDEN_KEY]) {
+      liveViewerCountHiddenOn =
+        changes[LIVE_VIEWER_COUNT_HIDDEN_KEY].newValue === true;
     }
     renderLiveTagFilterModal();
     ensureLiveTagFilterUi();
@@ -15946,7 +16090,9 @@ function buildCustomFollowDisplayGroups(visibleItems) {
 
 function renderCustomFollowGroups(groups, h, expandedNow) {
   const areaCollapsed = customFollowGroupCollapsed.area === true;
-  const shownCount = Math.min(customFollowGroupShown, groups.length);
+  const shownCount = isCustomFollowGroupAutoExpandActive()
+    ? groups.length
+    : Math.min(customFollowGroupShown, groups.length);
   const shownGroups = groups.slice(0, shownCount);
   const sectionsHtml = shownGroups
     .map((group) => {
@@ -17113,6 +17259,8 @@ function customFollowSig(visibleCount, shown) {
     customFollowGroupMore,
     visibleCount,
     isCustomFollowAutoExpandActive() ? 1 : 0,
+    isCustomFollowFavAutoExpandActive() ? 1 : 0,
+    isCustomFollowGroupAutoExpandActive() ? 1 : 0,
     featureFlags.sbFollowCustomOffline ? 1 : 0,
     featureFlags.sbFollowCustomFavoriteOffline ? 1 : 0,
     featureFlags.sbFollowFavLiveFirst ? 1 : 0,
@@ -17143,6 +17291,20 @@ function customFollowSig(visibleCount, shown) {
 function isCustomFollowAutoExpandActive() {
   return (
     featureFlags.sbFollowCustomAutoExpand && !customFollowAutoExpandSuppressed
+  );
+}
+
+function isCustomFollowFavAutoExpandActive() {
+  return (
+    featureFlags.sbFollowFavAutoExpand &&
+    !customFollowFavAutoExpandSuppressed
+  );
+}
+
+function isCustomFollowGroupAutoExpandActive() {
+  return (
+    featureFlags.sbFollowGroupAutoExpand &&
+    !customFollowGroupAutoExpandSuppressed
   );
 }
 
@@ -17371,7 +17533,9 @@ function renderCustomFollowList(ourNav, h) {
   const regularItems = visible.filter(
     (item) => !customFollowFavorites.has(item.channelId),
   );
-  const favoriteShown = Math.min(customFollowFavShown, favoriteItems.length);
+  const favoriteShown = isCustomFollowFavAutoExpandActive()
+    ? favoriteItems.length
+    : Math.min(customFollowFavShown, favoriteItems.length);
   const regularShown = autoExpand
     ? regularItems.length
     : Math.min(customFollowShown, regularItems.length);
@@ -17550,25 +17714,13 @@ function bindCustomFollowDelegation() {
       ) {
         closeCustomFollowGroupDeletePopover();
       }
-      // 우리 헤더 아이콘 컨트롤(새로고침/더보기/접기) — 원본 nav 헤더에 주입됨.
+      // 우리 헤더 새로고침 컨트롤 — 원본 nav 헤더에 주입됨.
       const ctrl = e.target.closest?.(".cheese-cf-header-ctrl [data-cf-ctrl]");
       if (ctrl) {
         e.preventDefault();
         e.stopPropagation();
         const act = ctrl.dataset.cfCtrl;
         if (act === "refresh") void refreshCustomFollowList();
-        else if (act === "expand") {
-          customFollowAutoExpandSuppressed = false;
-          customFollowShown += customFollowMore;
-          ensureCustomFollowList();
-          ensureCustomFollowCollapsedControls();
-        } else if (act === "collapse") {
-          customFollowAutoExpandSuppressed =
-            featureFlags.sbFollowCustomAutoExpand;
-          customFollowShown = customFollowInitial;
-          ensureCustomFollowList();
-          ensureCustomFollowCollapsedControls();
-        }
         return;
       }
       const nav = e.target.closest?.("#" + CUSTOM_FOLLOW_NAV_ID);
@@ -17609,8 +17761,11 @@ function bindCustomFollowDelegation() {
         e.preventDefault();
         e.stopPropagation();
         if (groupMore.dataset.cfGroupMore === "expand") {
+          customFollowGroupAutoExpandSuppressed = false;
           customFollowGroupShown += customFollowGroupMore;
         } else {
+          customFollowGroupAutoExpandSuppressed =
+            featureFlags.sbFollowGroupAutoExpand;
           customFollowGroupShown = customFollowGroupInitial;
         }
         customFollowVersion += 1;
@@ -17642,10 +17797,14 @@ function bindCustomFollowDelegation() {
           sectionMore.dataset.cfSectionMore || "",
         ).split(":");
         if (key === "favorites") {
-          customFollowFavShown =
-            action === "expand"
-              ? customFollowFavShown + customFollowFavMore
-              : customFollowFavInitial;
+          if (action === "expand") {
+            customFollowFavAutoExpandSuppressed = false;
+            customFollowFavShown += customFollowFavMore;
+          } else {
+            customFollowFavAutoExpandSuppressed =
+              featureFlags.sbFollowFavAutoExpand;
+            customFollowFavShown = customFollowFavInitial;
+          }
         } else if (key === "following") {
           if (action === "expand") {
             customFollowAutoExpandSuppressed = false;
@@ -18253,11 +18412,9 @@ function reorderCustomFollowFavorite(dragId, targetId, side) {
 }
 
 // 팔로우 헤더: 네이티브 새로고침·접기 버튼을 숨기고(클릭 시 원본 목록이 되살아나므로),
-// 우리 아이콘 컨트롤(새로고침 + 접힘 상태 더보기/접기)을 주입한다. 클릭은 document 위임 처리.
+// 우리 새로고침 컨트롤을 주입한다. 클릭은 document 위임 처리.
 const CUSTOM_FOLLOW_CTRL_CLASS = "cheese-cf-header-ctrl";
 const CF_SVG_REFRESH = `<svg width="15" height="15" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
-const CF_SVG_EXPAND = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-const CF_SVG_COLLAPSE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 15l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 function ensureCustomFollowCollapsedControls() {
   const gateOn = featureFlags.sbFollowCustom && !featureFlags.sidebar;
   const origNav = findSidebarFollowNav();
@@ -18274,30 +18431,10 @@ function ensureCustomFollowCollapsedControls() {
       'button[aria-label="새로고침"], button[aria-label*="접기"], button[aria-expanded]',
     )
     .forEach((b) => (b.dataset.cfNativeBtn = "1"));
-  // 접힘 상태에서만 더보기/접기 아이콘을 헤더에 노출(펼침 상태는 목록 위 문구 버튼이 담당).
+  // 펼침 상태에서는 헤더 우측, 접힘 상태에서는 좁은 헤더 아래에 새로고침을 둔다.
   const collapsed = !isSidebarExpanded();
-  const autoExpand = isCustomFollowAutoExpandActive();
-  const visibleItems = getCustomFollowVisibleItems();
-  const visibleCount = visibleItems.filter(
-    (item) => !customFollowFavorites.has(item.channelId),
-  ).length;
-  const shown = autoExpand
-    ? visibleCount
-    : Math.min(customFollowShown, visibleCount);
-  // 접힘 상태 헤더엔 더보기/접기를 '항상' 노출한다(사용자 요청). 단 실제로 늘릴/줄일 게
-  // 없으면(더 없음/이미 초기) 버튼을 disabled 로 흐리게 둔다. 자동 펼침 중에는 펼치기는
-  // 비활성이고 접기는 활성화되어, 접힌 사이드바에서도 초기 개수로 줄일 수 있다.
-  const showMoreCtrl = collapsed && visibleCount > 0;
-  const canExpand = shown < visibleCount;
-  const canCollapse = shown > customFollowInitial;
-  const sig = [
-    collapsed ? 1 : 0,
-    showMoreCtrl ? 1 : 0,
-    canExpand ? 1 : 0,
-    canCollapse ? 1 : 0,
-  ].join(":");
-  // 부착 대상: 펼침이면 헤더(우측 인라인), 접힘이면 원본 nav 직접(헤더 flex 폭 제약을
-  // 벗어나 버튼 3개를 세로로 다 노출). 로그 실측: 헤더에 두면 접힘 시 3번째(접기)가 잘렸다.
+  const sig = collapsed ? "1" : "0";
+  // 부착 대상: 펼침이면 헤더(우측 인라인), 접힘이면 원본 nav 직접.
   const parent = collapsed ? origNav : header;
   if (
     existing &&
@@ -18308,12 +18445,7 @@ function ensureCustomFollowCollapsedControls() {
   const bar = existing || document.createElement("div");
   bar.className = CUSTOM_FOLLOW_CTRL_CLASS;
   bar.dataset.sig = sig;
-  bar.innerHTML =
-    `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>` +
-    (showMoreCtrl
-      ? `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="expand" title="더 펼치기" aria-label="더 펼치기"${canExpand ? "" : " disabled"}>${CF_SVG_EXPAND}</button>` +
-        `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="collapse" title="접기" aria-label="접기"${canCollapse ? "" : " disabled"}>${CF_SVG_COLLAPSE}</button>`
-      : "");
+  bar.innerHTML = `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>`;
   // 상태 바뀌면 재배치. 접힘 시 nav 직속이되 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
   if (bar.parentElement !== parent) {
     if (collapsed) {
@@ -22783,6 +22915,7 @@ const BOOT_PREFETCH_KEYS = [
     CHANNEL_LIVE_BUTTON_KEY,
     CHANNEL_LIVE_BUTTON_END_KEY,
     CHANNEL_LIVE_PROFILE_BACKGROUND_KEY,
+    CHANNEL_PROFILE_RADIUS_ENABLED_KEY,
     CHANNEL_PROFILE_RADIUS_KEY,
     FOLLOW_OPEN_NEW_TAB_KEY,
     FOLLOW_PREVIEW_KEY,
@@ -22813,6 +22946,7 @@ const BOOT_PREFETCH_KEYS = [
     LIVE_TAG_FILTER_BUTTON_KEY,
     LIVE_TAG_FILTERS_KEY,
     LIVE_VIEWER_COUNT_INLINE_KEY,
+    LIVE_VIEWER_COUNT_HIDDEN_KEY,
   ]),
 ];
 const BOOT_PREFETCH_KEY_SET = new Set(BOOT_PREFETCH_KEYS);
@@ -23243,6 +23377,11 @@ if (chrome.storage?.onChanged) {
       channelLiveButtonEnd =
         changes[CHANNEL_LIVE_BUTTON_END_KEY].newValue !== false;
       ensureChannelLiveButton();
+    }
+    if (changes[CHANNEL_PROFILE_RADIUS_ENABLED_KEY]) {
+      channelProfileRadiusEnabled =
+        changes[CHANNEL_PROFILE_RADIUS_ENABLED_KEY].newValue === true;
+      applyChannelProfileRadius();
     }
     if (changes[CHANNEL_PROFILE_RADIUS_KEY]) {
       channelProfileRadius = normalizeChannelProfileRadius(
@@ -24022,6 +24161,27 @@ function isCheeseSearchOnlyMutation(mutation) {
   return nodes.every(isCheeseSearchOwnedNode);
 }
 
+function isAdminOnlyChatNoticeNode(node) {
+  const element =
+    node instanceof Element
+      ? node
+      : node?.parentElement instanceof Element
+        ? node.parentElement
+        : null;
+  if (!element) return false;
+  // 공지 행 구조: div._item_ > div._container_ > div._inner_ > p._title_ + p._description_
+  // 제목 p 로 좁혀, 변이마다 채팅 행의 모든 p 를 훑지 않게 한다.
+  const selector = "p[class*='_title_']";
+  const candidates = element.matches(selector)
+    ? [element]
+    : element.querySelectorAll(selector);
+  return [...candidates].some(
+    (candidate) =>
+      String(candidate.textContent || "").trim() ===
+      "관리자 전용 채팅이 활성화 되었습니다.",
+  );
+}
+
 function isChatStreamOnlyMutation(mutation) {
   const target =
     mutation.target instanceof Element
@@ -24033,6 +24193,7 @@ function isChatStreamOnlyMutation(mutation) {
   if (!aside) return false;
   const row = target.closest('[class*="_item_"]');
   if (row?.querySelector('[class*="_chatting_message_"]')) return true;
+  if (isAdminOnlyChatNoticeNode(row || target)) return true;
   const changedNodes = [
     ...mutation.addedNodes,
     ...mutation.removedNodes,
@@ -24042,7 +24203,8 @@ function isChatStreamOnlyMutation(mutation) {
     changedNodes.every(
       (node) =>
         node.matches?.('[class*="_chatting_message_"]') ||
-        node.querySelector?.('[class*="_chatting_message_"]'),
+        node.querySelector?.('[class*="_chatting_message_"]') ||
+        isAdminOnlyChatNoticeNode(node),
     )
   );
 }

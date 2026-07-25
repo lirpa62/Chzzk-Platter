@@ -341,8 +341,13 @@ body {
 }
 
 .settings-live-tag-form button {
-  border-color: var(--popup-brand-strong);
-  background: var(--popup-brand-strong);
+  border-color: var(--popup-brand);
+  background: var(--popup-help-bg);
+  color: var(--popup-brand-strong);
+}
+
+.settings-live-tag-form button:hover {
+  background: var(--popup-brand);
   color: #fff;
 }
 
@@ -785,6 +790,7 @@ body {
 .settings-item:has(.settings-custom-row [data-search-rerank-w-rel]),
 .settings-item:has([data-follow-preview-hide-part]),
 .settings-item:has([data-cf-group-placement]),
+.settings-item:has([data-update-notice-duration]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -820,8 +826,61 @@ body {
   margin-left: auto;
 }
 
-.settings-item [data-update-notice-mode] {
+.settings-item [data-update-notice-mode],
+.settings-item [data-update-notice-duration] {
   width: 100%;
+}
+
+.settings-item[data-update-notice-duration-row][hidden],
+.settings-item[data-update-notice-toast-position-row][hidden] {
+  display: none;
+}
+
+.settings-toast-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 5px;
+  align-self: center;
+  padding: 7px;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  background: var(--popup-soft-bg);
+}
+
+.settings-toast-position-grid button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--popup-muted);
+  cursor: pointer;
+}
+
+.settings-toast-position-grid button:hover:not(:disabled) {
+  border-color: var(--popup-border);
+  background: var(--popup-card-bg);
+}
+
+.settings-toast-position-grid button.is-active {
+  border-color: var(--popup-brand);
+  background: var(--popup-help-bg);
+  color: var(--popup-brand-strong);
+}
+
+.settings-toast-position-grid button:disabled {
+  cursor: not-allowed;
+}
+
+.settings-toast-position-grid button span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 [aria-label="전용 팔로잉 목록"] button.settings-segmented-btn,

@@ -49,6 +49,7 @@
 
   const CLIPS_ORIGIN = "https://chzzk.naver.com";
   const CLIPS_BASE_PATH = "/clips";
+  const CLIP_EDITOR_PATH = "/clip-editor";
 
   const LIVE_WRAP_SELECTOR = 'div[class*="FloatingButtonView-module__wrap__"]';
   const LIVE_LINK_SELECTOR = 'a[class*="FloatingButtonView-module__link__"]';
@@ -83,7 +84,40 @@
     }
   }
 
+  // 클립 만들기(클립 에디터)인지. 이 페이지는 우리가 숨길 대상(라이브 시청 버튼·클립
+  // 네비게이션)이 아예 없는데, 클립 목록에서 열면 document.referrer 가 /clips 라
+  // isClipsContext() 가 true 로 잡혔다. 그러면 seeker 가 매 프레임 class 를 바꿀 때마다
+  // applyUiState() 의 전체 문서 querySelectorAll 이 돌아 영상이 무한 버퍼링처럼 멈춘다.
+  function isClipEditorUrl(url) {
+    if (!url) return false;
+
+    try {
+      const parsed = new URL(url);
+      return (
+        parsed.origin === CLIPS_ORIGIN &&
+        parsed.pathname.startsWith(CLIP_EDITOR_PATH)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function isClipEditorContext() {
+    if (isClipEditorUrl(window.location.href)) return true;
+
+    try {
+      return isClipEditorUrl(window.top.location.href);
+    } catch {
+      // 교차 출처 접근 오류는 무시한다.
+    }
+
+    return false;
+  }
+
   function isClipsContext() {
+    // 클립 에디터에서는 referrer 가 /clips 여도 개입하지 않는다.
+    if (isClipEditorContext()) return false;
+
     if (isClipsUrl(window.location.href)) return true;
 
     try {
@@ -252,20 +286,57 @@
   loadClipHideFlag();
 
   const observer = new MutationObserver(onMutations);
-  const startObserver = () => {
+  let observing = false;
+
+  // 클립 에디터에서는 옵저버 자체를 뗀다. onMutations 안에서 걸러도 seeker 가 매 프레임
+  // 만드는 class 변이가 전부 콜백까지 올라와(문서 전체 subtree) 재생이 끊겼다.
+  const syncObserver = () => {
     if (!document.documentElement) return;
 
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["aria-hidden", "class"],
-    });
+    const want = !isClipEditorContext();
+    if (want === observing) return;
+
+    if (want) {
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["aria-hidden", "class"],
+      });
+    } else {
+      observer.disconnect();
+    }
+    observing = want;
   };
 
   if (document.documentElement) {
-    startObserver();
+    syncObserver();
   } else {
-    document.addEventListener("DOMContentLoaded", startObserver, { once: true });
+    document.addEventListener("DOMContentLoaded", syncObserver, { once: true });
   }
+
+  // SPA 라우팅으로 클립 에디터에 들어가거나 빠져나올 때 옵저버를 붙였다 뗀다.
+  // history API 는 popstate 를 쏘지 않으므로 pushState/replaceState 도 감싼다.
+  const onUrlChange = () => {
+    syncObserver();
+    applyUiState();
+  };
+
+  window.addEventListener("popstate", onUrlChange);
+
+  try {
+    const wrapHistory = (name) => {
+      const original = history[name];
+      if (typeof original !== "function") return;
+      history[name] = function (...args) {
+        const result = original.apply(this, args);
+        try {
+          onUrlChange();
+        } catch {}
+        return result;
+      };
+    };
+    wrapHistory("pushState");
+    wrapHistory("replaceState");
+  } catch {}
 })();

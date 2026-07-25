@@ -32,9 +32,26 @@ const CACHE_CHUNK_SEPARATOR = "#chunk:";
 const CACHE_CHUNK_SIZE = 1000;
 const UPDATE_NOTICE_ENABLED_KEY = "cheeseUpdateNoticeEnabled";
 const UPDATE_NOTICE_MODE_KEY = "cheeseUpdateNoticeMode";
+const UPDATE_NOTICE_DURATION_KEY = "cheeseUpdateNoticeDurationSec";
+const UPDATE_NOTICE_TOAST_POSITION_KEY = "cheeseUpdateNoticeToastPosition";
 const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
+const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
+const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
 const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
+const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
+const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
+  "top-left",
+  "top-center",
+  "top-right",
+  "middle-left",
+  "middle-center",
+  "middle-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right",
+]);
 const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
+const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
 const REFRESH_NOTICE_URLS = [
   "https://chzzk.naver.com/*",
   "https://studio.chzzk.naver.com/*",
@@ -60,11 +77,24 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 async function showRefreshNoticeOnExtensionTabs(reason) {
-  const preferences = await chrome.storage.local.get(UPDATE_NOTICE_MODE_KEY);
+  const preferences = await chrome.storage.local.get([
+    UPDATE_NOTICE_MODE_KEY,
+    UPDATE_NOTICE_DURATION_KEY,
+    UPDATE_NOTICE_TOAST_POSITION_KEY,
+  ]);
   const storedMode = preferences?.[UPDATE_NOTICE_MODE_KEY];
   const noticeMode = UPDATE_NOTICE_MODES.has(storedMode)
     ? storedMode
     : UPDATE_NOTICE_DEFAULT_MODE;
+  const storedDuration = Number(preferences?.[UPDATE_NOTICE_DURATION_KEY]);
+  const durationSec = UPDATE_NOTICE_DURATIONS.has(storedDuration)
+    ? storedDuration
+    : UPDATE_NOTICE_DEFAULT_DURATION_SEC;
+  const storedToastPosition =
+    preferences?.[UPDATE_NOTICE_TOAST_POSITION_KEY];
+  const toastPosition = UPDATE_NOTICE_TOAST_POSITIONS.has(storedToastPosition)
+    ? storedToastPosition
+    : UPDATE_NOTICE_DEFAULT_TOAST_POSITION;
   const tabs = await chrome.tabs.query({ url: REFRESH_NOTICE_URLS });
   const version = chrome.runtime.getManifest().version;
   await Promise.allSettled(
@@ -74,7 +104,7 @@ async function showRefreshNoticeOnExtensionTabs(reason) {
         chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: showUpdateNotificationBanner,
-          args: [version, reason, noticeMode],
+          args: [version, reason, noticeMode, toastPosition, durationSec],
         }),
       ),
   );
@@ -108,17 +138,50 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
 
+  // 예전 버전은 제외 필터 버튼의 미설정 기본값이 ON이었다. 저장값이 없는 기존 사용자는
+  // 종전 상태를 유지하고, 신규 설치만 OFF로 시작한다. 명시된 사용자 값은 덮어쓰지 않는다.
+  try {
+    const stored = await chrome.storage.local.get(LIVE_TAG_FILTER_BUTTON_KEY);
+    if (
+      !Object.prototype.hasOwnProperty.call(
+        stored || {},
+        LIVE_TAG_FILTER_BUTTON_KEY,
+      )
+    ) {
+      await chrome.storage.local.set({
+        [LIVE_TAG_FILTER_BUTTON_KEY]: details.reason === "update",
+      });
+    }
+  } catch (error) {
+    console.warn("제외 필터 버튼 기본값을 초기화하지 못했습니다.", error);
+  }
+
   try {
     if ((await masterStateReady) === false) return;
     let noticeMode = UPDATE_NOTICE_DEFAULT_MODE;
+    let durationSec = UPDATE_NOTICE_DEFAULT_DURATION_SEC;
+    let toastPosition = UPDATE_NOTICE_DEFAULT_TOAST_POSITION;
     if (details.reason === "update") {
       const preferences = await chrome.storage.local.get([
         UPDATE_NOTICE_ENABLED_KEY,
         UPDATE_NOTICE_MODE_KEY,
+        UPDATE_NOTICE_DURATION_KEY,
+        UPDATE_NOTICE_TOAST_POSITION_KEY,
       ]);
       if (preferences?.[UPDATE_NOTICE_ENABLED_KEY] === false) return;
       const storedMode = preferences?.[UPDATE_NOTICE_MODE_KEY];
       if (UPDATE_NOTICE_MODES.has(storedMode)) noticeMode = storedMode;
+      const storedDuration = Number(
+        preferences?.[UPDATE_NOTICE_DURATION_KEY],
+      );
+      if (UPDATE_NOTICE_DURATIONS.has(storedDuration)) {
+        durationSec = storedDuration;
+      }
+      const storedToastPosition =
+        preferences?.[UPDATE_NOTICE_TOAST_POSITION_KEY];
+      if (UPDATE_NOTICE_TOAST_POSITIONS.has(storedToastPosition)) {
+        toastPosition = storedToastPosition;
+      }
     }
 
     const tabs = await chrome.tabs.query({
@@ -133,7 +196,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
           chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: showUpdateNotificationBanner,
-            args: [version, details.reason, noticeMode],
+            args: [
+              version,
+              details.reason,
+              noticeMode,
+              toastPosition,
+              durationSec,
+            ],
           }),
         ),
     );
@@ -142,11 +211,21 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-function showUpdateNotificationBanner(version, reason, requestedMode) {
+function showUpdateNotificationBanner(
+  version,
+  reason,
+  requestedMode,
+  requestedToastPosition,
+  requestedDurationSec,
+) {
   const bannerId = "cheese-search-ext-update-banner";
   document.getElementById(bannerId)?.remove();
 
-  const transientMs = 3000;
+  const requestedDuration = Number(requestedDurationSec);
+  const transientDurationSec = [3, 5, 10, 15].includes(requestedDuration)
+    ? requestedDuration
+    : 3;
+  const transientMs = transientDurationSec * 1000;
   const mode =
     reason === "install" ||
     !["fixed", "temporary", "toast"].includes(requestedMode)
@@ -154,6 +233,45 @@ function showUpdateNotificationBanner(version, reason, requestedMode) {
       : requestedMode;
   const isToast = mode === "toast";
   const isTransient = mode !== "fixed";
+  const toastPositions = new Set([
+    "top-left",
+    "top-center",
+    "top-right",
+    "middle-left",
+    "middle-center",
+    "middle-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+  ]);
+  const toastPosition = toastPositions.has(requestedToastPosition)
+    ? requestedToastPosition
+    : "top-center";
+  const [toastRow, toastColumn] = toastPosition.split("-");
+  const toastPositionStyles = [
+    toastRow === "top"
+      ? "top:20px"
+      : toastRow === "middle"
+        ? "top:50%"
+        : "bottom:20px",
+    toastColumn === "left"
+      ? "left:20px"
+      : toastColumn === "center"
+        ? "left:50%"
+        : "right:20px",
+  ];
+  const toastAnchorTransform = [
+    toastColumn === "center" ? "translateX(-50%)" : "",
+    toastRow === "middle" ? "translateY(-50%)" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const toastHiddenOffset =
+    toastRow === "top" ? "translateY(-16px)" : "translateY(16px)";
+  const toastVisibleTransform =
+    `${toastAnchorTransform} scale(1)`.trim();
+  const toastHiddenTransform =
+    `${toastAnchorTransform} ${toastHiddenOffset} scale(.98)`.trim();
   const banner = document.createElement("div");
   banner.id = bannerId;
   banner.setAttribute("role", "status");
@@ -161,8 +279,7 @@ function showUpdateNotificationBanner(version, reason, requestedMode) {
   banner.style.cssText = isToast
     ? [
         "position:fixed",
-        "right:20px",
-        "bottom:20px",
+        ...toastPositionStyles,
         "z-index:2147483647",
         "box-sizing:border-box",
         "width:min(440px,calc(100vw - 32px))",
@@ -178,7 +295,7 @@ function showUpdateNotificationBanner(version, reason, requestedMode) {
         "text-align:left",
         "box-shadow:0 8px 28px rgba(0,0,0,.34)",
         "opacity:0",
-        "transform:translateY(16px) scale(.98)",
+        `transform:${toastHiddenTransform}`,
         "transition:opacity .25s ease,transform .25s ease",
       ].join(";")
     : [
@@ -239,7 +356,7 @@ function showUpdateNotificationBanner(version, reason, requestedMode) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       banner.style.transform = isToast
-        ? "translateY(0) scale(1)"
+        ? toastVisibleTransform
         : "translateY(0)";
       if (isToast) banner.style.opacity = "1";
     });
@@ -262,7 +379,7 @@ function showUpdateNotificationBanner(version, reason, requestedMode) {
     if (!banner.isConnected) return;
     if (isToast) {
       banner.style.opacity = "0";
-      banner.style.transform = "translateY(16px) scale(.98)";
+      banner.style.transform = toastHiddenTransform;
     } else {
       banner.style.transform = "translateY(-100%)";
     }

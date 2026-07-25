@@ -21,6 +21,8 @@
     "cheeseSearchTheme",
     "cheeseUpdateNoticeEnabled",
     "cheeseUpdateNoticeMode",
+    "cheeseUpdateNoticeDurationSec",
+    "cheeseUpdateNoticeToastPosition",
     "cheeseAdMiniplayerKeepMuted",
     "cheeseAdMiniplayerUnmute",
     "cheeseAutoReloadOnError",
@@ -40,6 +42,7 @@
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
     "cheeseChannelLiveProfileBackground",
+    "cheeseChannelProfileRadiusEnabled",
     "cheeseChannelProfileRadius",
     "cheeseChatButtonWrap",
     "cheeseChatFoldPersist",
@@ -93,6 +96,7 @@
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
     "cheeseLiveViewerCountInline",
+    "cheeseLiveViewerCountHidden",
     "cheeseLiveTagFilterButton",
     "cheeseLiveTagFilters",
     "cheeseLogPowerClickAction",
@@ -360,8 +364,24 @@
   // ── 업데이트 새로고침 안내 ───────────────────────────────────────────────
   const UPDATE_NOTICE_ENABLED_KEY = "cheeseUpdateNoticeEnabled";
   const UPDATE_NOTICE_MODE_KEY = "cheeseUpdateNoticeMode";
+  const UPDATE_NOTICE_DURATION_KEY = "cheeseUpdateNoticeDurationSec";
+  const UPDATE_NOTICE_TOAST_POSITION_KEY = "cheeseUpdateNoticeToastPosition";
   const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
+  const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
+  const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
   const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
+  const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
+  const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
+    "top-left",
+    "top-center",
+    "top-right",
+    "middle-left",
+    "middle-center",
+    "middle-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+  ]);
   const updateNoticeEnabled = document.querySelector(
     "[data-update-notice-enabled]",
   );
@@ -371,41 +391,129 @@
   const updateNoticeModeButtons = Array.from(
     document.querySelectorAll("[data-update-notice-mode-value]"),
   );
+  const updateNoticeDurationRow = document.querySelector(
+    "[data-update-notice-duration-row]",
+  );
+  const updateNoticeDurationButtons = Array.from(
+    document.querySelectorAll("[data-update-notice-duration-value]"),
+  );
+  const updateNoticeToastPositionRow = document.querySelector(
+    "[data-update-notice-toast-position-row]",
+  );
+  const updateNoticeToastPositionButtons = Array.from(
+    document.querySelectorAll("[data-update-notice-toast-position-value]"),
+  );
+  let currentUpdateNoticeEnabled = true;
+  let currentUpdateNoticeMode = UPDATE_NOTICE_DEFAULT_MODE;
 
   function normalizeUpdateNoticeMode(value) {
     return UPDATE_NOTICE_MODES.has(value) ? value : UPDATE_NOTICE_DEFAULT_MODE;
   }
 
-  function reflectUpdateNoticeMode(modeRaw) {
-    const mode = normalizeUpdateNoticeMode(modeRaw);
-    updateNoticeModeButtons.forEach((button) => {
-      const active = button.dataset.updateNoticeModeValue === mode;
+  function normalizeUpdateNoticeDuration(value) {
+    const duration = Number(value);
+    return UPDATE_NOTICE_DURATIONS.has(duration)
+      ? duration
+      : UPDATE_NOTICE_DEFAULT_DURATION_SEC;
+  }
+
+  function normalizeUpdateNoticeToastPosition(value) {
+    return UPDATE_NOTICE_TOAST_POSITIONS.has(value)
+      ? value
+      : UPDATE_NOTICE_DEFAULT_TOAST_POSITION;
+  }
+
+  function reflectUpdateNoticeToastPosition(positionRaw) {
+    const position = normalizeUpdateNoticeToastPosition(positionRaw);
+    updateNoticeToastPositionButtons.forEach((button) => {
+      const active =
+        button.dataset.updateNoticeToastPositionValue === position;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-checked", String(active));
     });
   }
 
+  function reflectUpdateNoticeDuration(durationRaw) {
+    const duration = normalizeUpdateNoticeDuration(durationRaw);
+    updateNoticeDurationButtons.forEach((button) => {
+      const active =
+        Number(button.dataset.updateNoticeDurationValue) === duration;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+
+  function reflectUpdateNoticeOptionAvailability() {
+    const transientMode = currentUpdateNoticeMode !== "fixed";
+    const toastMode = currentUpdateNoticeMode === "toast";
+    if (updateNoticeDurationRow) {
+      updateNoticeDurationRow.hidden = !transientMode;
+      updateNoticeDurationRow.classList.toggle(
+        "is-locked",
+        !currentUpdateNoticeEnabled,
+      );
+    }
+    updateNoticeDurationButtons.forEach((button) => {
+      button.disabled = !currentUpdateNoticeEnabled || !transientMode;
+    });
+    if (updateNoticeToastPositionRow) {
+      updateNoticeToastPositionRow.hidden = !toastMode;
+      updateNoticeToastPositionRow.classList.toggle(
+        "is-locked",
+        !currentUpdateNoticeEnabled,
+      );
+    }
+    updateNoticeToastPositionButtons.forEach((button) => {
+      button.disabled = !currentUpdateNoticeEnabled || !toastMode;
+    });
+  }
+
+  function reflectUpdateNoticeMode(modeRaw) {
+    const mode = normalizeUpdateNoticeMode(modeRaw);
+    currentUpdateNoticeMode = mode;
+    updateNoticeModeButtons.forEach((button) => {
+      const active = button.dataset.updateNoticeModeValue === mode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+    reflectUpdateNoticeOptionAvailability();
+  }
+
   function reflectUpdateNoticeEnabled(enabled) {
+    currentUpdateNoticeEnabled = enabled;
     if (updateNoticeEnabled) updateNoticeEnabled.checked = enabled;
     updateNoticeModeRow?.classList.toggle("is-locked", !enabled);
     updateNoticeModeButtons.forEach((button) => {
       button.disabled = !enabled;
     });
+    reflectUpdateNoticeOptionAvailability();
   }
 
   (async () => {
     let enabled = true;
     let mode = UPDATE_NOTICE_DEFAULT_MODE;
+    let duration = UPDATE_NOTICE_DEFAULT_DURATION_SEC;
+    let toastPosition = UPDATE_NOTICE_DEFAULT_TOAST_POSITION;
     try {
       const data = await cachedStorageGet([
         UPDATE_NOTICE_ENABLED_KEY,
         UPDATE_NOTICE_MODE_KEY,
+        UPDATE_NOTICE_DURATION_KEY,
+        UPDATE_NOTICE_TOAST_POSITION_KEY,
       ]);
       enabled = data?.[UPDATE_NOTICE_ENABLED_KEY] !== false;
       mode = normalizeUpdateNoticeMode(data?.[UPDATE_NOTICE_MODE_KEY]);
+      duration = normalizeUpdateNoticeDuration(
+        data?.[UPDATE_NOTICE_DURATION_KEY],
+      );
+      toastPosition = normalizeUpdateNoticeToastPosition(
+        data?.[UPDATE_NOTICE_TOAST_POSITION_KEY],
+      );
     } catch {}
     reflectUpdateNoticeEnabled(enabled);
     reflectUpdateNoticeMode(mode);
+    reflectUpdateNoticeDuration(duration);
+    reflectUpdateNoticeToastPosition(toastPosition);
   })();
 
   updateNoticeEnabled?.addEventListener("change", () => {
@@ -422,6 +530,28 @@
       );
       reflectUpdateNoticeMode(mode);
       cachedStorageSet({ [UPDATE_NOTICE_MODE_KEY]: mode });
+    });
+  });
+
+  updateNoticeDurationButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      const duration = normalizeUpdateNoticeDuration(
+        button.dataset.updateNoticeDurationValue,
+      );
+      reflectUpdateNoticeDuration(duration);
+      cachedStorageSet({ [UPDATE_NOTICE_DURATION_KEY]: duration });
+    });
+  });
+
+  updateNoticeToastPositionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      const position = normalizeUpdateNoticeToastPosition(
+        button.dataset.updateNoticeToastPositionValue,
+      );
+      reflectUpdateNoticeToastPosition(position);
+      cachedStorageSet({ [UPDATE_NOTICE_TOAST_POSITION_KEY]: position });
     });
   });
 
@@ -2829,8 +2959,16 @@
   });
   loadChannelLiveButtonEnd();
 
-  // ── 채널 프로필 모서리(0~50%, 기본 50%) ─────────────────────────────────
+  // ── 채널 프로필 모서리(기본 OFF, 0~50%) ─────────────────────────────────
+  const CHANNEL_PROFILE_RADIUS_ENABLED_KEY =
+    "cheeseChannelProfileRadiusEnabled";
   const CHANNEL_PROFILE_RADIUS_KEY = "cheeseChannelProfileRadius";
+  const channelProfileRadiusEnabledInput = document.querySelector(
+    "[data-channel-profile-radius-enabled]",
+  );
+  const channelProfileRadiusControls = document.querySelector(
+    "[data-channel-profile-radius-controls]",
+  );
   const channelProfileRadiusSlider = document.querySelector(
     "[data-channel-profile-radius-slider]",
   );
@@ -2858,6 +2996,23 @@
       `${radius}%`,
     );
   }
+  function reflectChannelProfileRadiusEnabled(enabled) {
+    const on = enabled === true;
+    if (channelProfileRadiusEnabledInput) {
+      channelProfileRadiusEnabledInput.checked = on;
+    }
+    if (channelProfileRadiusSlider) channelProfileRadiusSlider.disabled = !on;
+    if (channelProfileRadiusInput) channelProfileRadiusInput.disabled = !on;
+    channelProfileRadiusControls?.classList.toggle("is-locked", !on);
+    channelLiveProfilePreview?.style.setProperty(
+      "--channel-profile-preview-radius",
+      on
+        ? `${clampChannelProfileRadius(
+            channelProfileRadiusInput?.value ?? 50,
+          )}%`
+        : "50%",
+    );
+  }
   function saveChannelProfileRadius(value) {
     const radius = clampChannelProfileRadius(value);
     reflectChannelProfileRadius(radius);
@@ -2867,14 +3022,42 @@
   }
   (async () => {
     let radius = 50;
+    let enabled = false;
     try {
-      const data = await cachedStorageGet(CHANNEL_PROFILE_RADIUS_KEY);
+      const data = await cachedStorageGet([
+        CHANNEL_PROFILE_RADIUS_ENABLED_KEY,
+        CHANNEL_PROFILE_RADIUS_KEY,
+      ]);
+      const hasStoredRadius = data?.[CHANNEL_PROFILE_RADIUS_KEY] !== undefined;
+      enabled =
+        data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] === true ||
+        (data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] == null &&
+          hasStoredRadius);
       radius = clampChannelProfileRadius(
         data?.[CHANNEL_PROFILE_RADIUS_KEY] ?? 50,
       );
+      if (
+        data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] == null &&
+        hasStoredRadius
+      ) {
+        cachedStorageSet({ [CHANNEL_PROFILE_RADIUS_ENABLED_KEY]: true });
+      }
     } catch {}
     reflectChannelProfileRadius(radius);
+    reflectChannelProfileRadiusEnabled(enabled);
   })();
+  channelProfileRadiusEnabledInput?.addEventListener("change", () => {
+    const enabled = channelProfileRadiusEnabledInput.checked;
+    reflectChannelProfileRadiusEnabled(enabled);
+    try {
+      cachedStorageSet({
+        [CHANNEL_PROFILE_RADIUS_ENABLED_KEY]: enabled,
+        [CHANNEL_PROFILE_RADIUS_KEY]: clampChannelProfileRadius(
+          channelProfileRadiusInput?.value ?? 50,
+        ),
+      });
+    } catch {}
+  });
   channelProfileRadiusSlider?.addEventListener("input", () => {
     saveChannelProfileRadius(channelProfileRadiusSlider.value);
   });
@@ -3814,11 +3997,15 @@
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
+  const LIVE_VIEWER_COUNT_HIDDEN_KEY = "cheeseLiveViewerCountHidden";
   const liveTagFilterButtonInput = document.querySelector(
     "[data-live-tag-filter-button]",
   );
   const liveViewerCountInlineInput = document.querySelector(
     "[data-live-viewer-count-inline]",
+  );
+  const liveViewerCountHiddenInput = document.querySelector(
+    "[data-live-viewer-count-hidden]",
   );
   const liveTagForm = document.querySelector("[data-live-tag-form]");
   const liveTagInput = document.querySelector("[data-live-tag-input]");
@@ -3936,6 +4123,20 @@
       [LIVE_VIEWER_COUNT_INLINE_KEY]: liveViewerCountInlineInput.checked,
     });
   });
+  const reflectLiveViewerCountInlineAvailability = () => {
+    if (!liveViewerCountInlineInput) return;
+    const disabled = liveViewerCountHiddenInput?.checked === true;
+    liveViewerCountInlineInput.disabled = disabled;
+    liveViewerCountInlineInput
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", disabled);
+  };
+  liveViewerCountHiddenInput?.addEventListener("change", () => {
+    reflectLiveViewerCountInlineAvailability();
+    cachedStorageSet({
+      [LIVE_VIEWER_COUNT_HIDDEN_KEY]: liveViewerCountHiddenInput.checked,
+    });
+  });
 
   liveTagForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -4012,25 +4213,34 @@
         LIVE_TAG_FILTERS_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
+        LIVE_VIEWER_COUNT_HIDDEN_KEY,
       ]);
       settingsLiveTagFilters = sanitizeLiveTagFilters(
         data?.[LIVE_TAG_FILTERS_KEY],
       );
       if (liveTagFilterButtonInput) {
         liveTagFilterButtonInput.checked =
-          data?.[LIVE_TAG_FILTER_BUTTON_KEY] !== false;
+          data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
       }
       if (liveViewerCountInlineInput) {
         liveViewerCountInlineInput.checked =
           data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
       }
+      if (liveViewerCountHiddenInput) {
+        liveViewerCountHiddenInput.checked =
+          data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true;
+      }
     } catch {
       settingsLiveTagFilters = [];
-      if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = true;
+      if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = false;
       if (liveViewerCountInlineInput) {
         liveViewerCountInlineInput.checked = false;
       }
+      if (liveViewerCountHiddenInput) {
+        liveViewerCountHiddenInput.checked = false;
+      }
     }
+    reflectLiveViewerCountInlineAvailability();
     renderSettingsLiveTagFilters();
   }
 
@@ -4045,7 +4255,7 @@
       }
       if (changes[LIVE_TAG_FILTER_BUTTON_KEY] && liveTagFilterButtonInput) {
         liveTagFilterButtonInput.checked =
-          changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue !== false;
+          changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue === true;
       }
       if (
         changes[LIVE_VIEWER_COUNT_INLINE_KEY] &&
@@ -4053,6 +4263,14 @@
       ) {
         liveViewerCountInlineInput.checked =
           changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
+      }
+      if (
+        changes[LIVE_VIEWER_COUNT_HIDDEN_KEY] &&
+        liveViewerCountHiddenInput
+      ) {
+        liveViewerCountHiddenInput.checked =
+          changes[LIVE_VIEWER_COUNT_HIDDEN_KEY].newValue === true;
+        reflectLiveViewerCountInlineAvailability();
       }
     });
   }

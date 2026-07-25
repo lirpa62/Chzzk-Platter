@@ -330,8 +330,8 @@
                 <div>
                   <span class="settings-item-name">└ 표시 방식</span>
                   <span class="settings-item-desc"
-                    >상단에 계속 표시하거나, 3초 동안만 상단 또는 우측 하단에
-                    표시합니다</span
+                    >상단에 계속 표시하거나, 설정한 시간 동안만 상단 또는 선택한
+                    위치의 토스트로 표시합니다</span
                   >
                 </div>
                 <div
@@ -363,6 +363,167 @@
                     aria-checked="false"
                   >
                     토스트
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-update-notice-duration-row
+                hidden
+              >
+                <div>
+                  <span class="settings-item-name">└ 표시 시간</span>
+                  <span class="settings-item-desc"
+                    >잠시 표시와 토스트가 자동으로 닫힐 때까지의 시간을
+                    선택합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-update-notice-duration
+                  role="radiogroup"
+                  aria-label="업데이트 안내 표시 시간"
+                >
+                  <button
+                    type="button"
+                    data-update-notice-duration-value="3"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    3초
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-duration-value="5"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    5초
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-duration-value="10"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    10초
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-duration-value="15"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    15초
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-update-notice-toast-position-row
+                hidden
+              >
+                <div>
+                  <span class="settings-item-name">└ 토스트 위치</span>
+                  <span class="settings-item-desc"
+                    >토스트가 나타날 화면 위치를 선택합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-toast-position-grid"
+                  data-update-notice-toast-position
+                  role="radiogroup"
+                  aria-label="업데이트 토스트 위치"
+                >
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="top-left"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="왼쪽 위"
+                    title="왼쪽 위"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="top-center"
+                    role="radio"
+                    aria-checked="true"
+                    aria-label="가운데 위"
+                    title="가운데 위"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="top-right"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="오른쪽 위"
+                    title="오른쪽 위"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="middle-left"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="왼쪽 가운데"
+                    title="왼쪽 가운데"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="middle-center"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="화면 가운데"
+                    title="화면 가운데"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="middle-right"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="오른쪽 가운데"
+                    title="오른쪽 가운데"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="bottom-left"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="왼쪽 아래"
+                    title="왼쪽 아래"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="bottom-center"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="가운데 아래"
+                    title="가운데 아래"
+                  >
+                    <span></span>
+                  </button>
+                  <button
+                    type="button"
+                    data-update-notice-toast-position-value="bottom-right"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="오른쪽 아래"
+                    title="오른쪽 아래"
+                  >
+                    <span></span>
                   </button>
                 </div>
               </li>
@@ -2128,7 +2289,7 @@
                   <span class="settings-item-name">제외 필터 버튼 표시</span>
                   <span class="settings-item-desc"
                     >전체 방송과 팔로잉 탐색 페이지에 제외 태그를 관리하는 '제외
-                    필터 추가' 버튼을 표시합니다(체크=표시, 기본 켜짐).</span
+                    필터 추가' 버튼을 표시합니다(체크=표시, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2142,12 +2303,26 @@
                     >시청자 수를 LIVE 옆에 표시</span
                   >
                   <span class="settings-item-desc"
-                    >전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를 LIVE
-                    배지 옆에 표시합니다(체크=사용, 기본 꺼짐).</span
+                    >메인, 전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를
+                    LIVE 배지 옆에 표시합니다(체크=사용, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-live-viewer-count-inline />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">시청자 수 숨김</span>
+                  <span class="settings-item-desc"
+                    >메인, 전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를
+                    숨깁니다. 켜져 있는 동안 LIVE 옆 표시보다 우선
+                    적용됩니다(체크=숨김, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-live-viewer-count-hidden />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2893,6 +3068,23 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">자동 펼치기</span>
+                  <span class="settings-item-desc"
+                    >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다. '접기'를
+                    누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    유지합니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowFavAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">초기 표시 개수</span>
                   <span class="settings-item-desc"
                     >즐겨찾기 영역의 '더보기' 전에 보여줄 채널 수(1~200)</span
@@ -3123,6 +3315,23 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">자동 펼치기</span>
+                  <span class="settings-item-desc"
+                    >그룹 영역을 처음부터 모든 그룹까지 펼쳐서 표시합니다. '접기'를
+                    누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    유지합니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">초기 표시 개수</span>
                   <span class="settings-item-desc"
                     >그룹 영역의 '더보기' 전에 보여줄 그룹 수(1~30)</span
@@ -3305,8 +3514,8 @@
               갱신'은 전용 목록에 적용되지 않습니다. 목록 항목의 별표(☆)로
               즐겨찾기를 지정하면 항상 상단에 고정됩니다. 일반 그룹과 즐겨찾기
               그룹의 오프라인 채널은 각각 숨길 수 있습니다. 사이드바가 접힌
-              상태에선 팔로잉 헤더의 아이콘 버튼으로 새로고침/펼치기/접기를 할
-              수 있습니다.
+              상태에서도 팔로잉 헤더의 아이콘 버튼으로 목록을 새로고침할 수
+              있습니다.
             </p>
           </section>
 
@@ -3740,12 +3949,31 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item settings-item-stacked">
-                <div>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">프로필 모서리</span>
                   <span class="settings-item-desc"
+                    >채널 프로필에 사용자 지정 모서리를 적용합니다(기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-channel-profile-radius-enabled
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-channel-profile-radius-controls
+              >
+                <div>
+                  <span class="settings-item-name">└ 모서리 정도</span>
+                  <span class="settings-item-desc"
                     >채널·팔로잉·검색·라이브 카드·댓글·커뮤니티·헤더와
-                    사이드바의 프로필 모서리를 조절합니다(0~50%, 기본 50%)</span
+                    사이드바의 프로필 모서리를 조절합니다(0~50%)</span
                   >
                 </div>
                 <div class="settings-volume-row">
@@ -4252,8 +4480,9 @@
                 <label>
                   <span class="settings-item-name">가려진 채팅 표시</span>
                   <span class="settings-item-desc"
-                    >클린봇·블라인드로 가려진 메시지를 원문으로
-                    표시(체크=표시)</span
+                    >라이브에서 클린봇·블라인드로 가려진 메시지를 원문으로
+                    표시합니다. 다시보기 채팅은 원문이 제공되지 않아 적용되지
+                    않습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
