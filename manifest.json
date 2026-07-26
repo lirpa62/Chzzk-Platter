@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "치즈 플래터 - Chzzk Platter",
   "short_name": "ChzzkPlatter",
-  "version": "1.30.0",
+  "version": "1.31.0",
   "description": "치지직 검색, 플레이어, 오디오 믹서, 채팅, 팔로잉, 레이아웃을 한 접시에 담은 통합 편의 확장 프로그램",
   "icons": {
     "16": "icons/icon-16.png",
@@ -41,6 +41,7 @@
         "https://chzzk.naver.com/*",
         "https://studio.chzzk.naver.com/*"
       ],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/masterGate.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -50,6 +51,7 @@
         "https://chzzk.naver.com/*",
         "https://studio.chzzk.naver.com/*"
       ],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/coloris.min.js"],
       "css": ["src/coloris.min.css"],
       "run_at": "document_start"
@@ -59,6 +61,7 @@
         "https://chzzk.naver.com/*",
         "https://studio.chzzk.naver.com/*"
       ],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/searchQuery.js", "src/content.js", "src/subscribeBadge.js"],
       "css": ["src/content.css", "src/chatFontScale.css"],
       "run_at": "document_idle",
@@ -66,6 +69,7 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/audioMixer.js", "src/videoFilter.js", "src/chatTimestamp.js"],
       "css": ["src/audioMixer.css", "src/videoFilter.css"],
       "run_at": "document_idle",
@@ -74,18 +78,21 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*", "https://m.naver.com/shorts/*"],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/clipButtonHide.js"],
       "run_at": "document_start",
       "all_frames": true
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/sidebarEarlyHide.js"],
       "run_at": "document_start",
       "all_frames": true
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
+      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/commentBlock.js"],
       "run_at": "document_start",
       "world": "MAIN",
@@ -96,6 +103,12 @@
       "js": ["src/cafeClipUrl.js", "src/cafeNow.js"],
       "css": ["src/cafeNow.css"],
       "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://chzzk.naver.com/embed/clip/*"],
+      "js": ["src/cafeClipPlayback.js"],
+      "run_at": "document_start",
       "all_frames": true
     },
     {

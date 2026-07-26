@@ -83,10 +83,14 @@ const liveDetailState = {
   fetching: false,
 };
 // ── 기능 표시/숨김 전역 설정(확장 팝업 패널) ────────────────────────────────
-// 키 cheeseFeatureHidden = { <feature>: true(숨김)/false(표시) }. 미설정/false=표시.
-// content.js가 chrome.storage에서 읽어 자기 기능 게이트에 쓰고, MAIN world
+// 키 cheeseFeatureHidden = { <feature>: boolean }. 기존 숨김 옵션뿐 아니라 일부
+// 활성화 옵션도 함께 저장한다. content.js가 자기 기능 게이트에 쓰고, MAIN world
 // (audioMixer/videoFilter/clipButtonHide)에는 postMessage로 전달한다.
 const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
+const FEATURE_DEFAULT_TRUE = new Set([
+  "sbFollowFavEnabled",
+  "sbFollowGroupEnabled",
+]);
 const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
 // 실시간 따라잡기 민감도 프리셋(low/normal/high/custom). audioMixer(MAIN world)에 전달.
 const SYNC_PRESET_KEY = "cheeseSyncPreset";
@@ -560,7 +564,7 @@ const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
 let searchResetOnReturn = false;
 // 통합검색(/search) 동영상 섹션 재랭킹(전역, 기본 OFF). 치지직 검색 API는 정렬 기준이
 // 모호해(관련도 낮은 저조회 영상이 상위에 옴), 같은 API를 size=50 × 3페이지로 넓게 받아
-// 제목 관련도·조회수·livePv·인증마크·최신성 점수로 재정렬해 보여준다. content.js 전용.
+// 제목·채널명 관련도, 조회수, livePv, 인증마크, 최신성 점수로 재정렬한다. content.js 전용.
 const SEARCH_RERANK_KEY = "cheeseSearchRerank";
 let searchRerank = false;
 // 재정렬 후보 풀 최대 개수(50~1000, 기본 200). 클수록 관련 영상을 더 잘 찾지만
@@ -572,11 +576,18 @@ function normalizeSearchRerankPoolMax(v) {
   if (!Number.isFinite(n)) return 200;
   return Math.min(1000, Math.max(50, Math.round(n)));
 }
-// 추천순 점수 비중(각 0~100). rel=제목 관련도, read=조회수, pv=라이브 시청자,
-// verified=인증 채널, recent=최신성. 기본 40/30/15/10/5이며, 모두 0이면 기본값으로
-// 폴백해 모든 추천 점수가 같아지는 상황을 막는다.
+// 추천순 점수 비중(각 0~100). rel=제목 관련도, channel=채널명 관련도, read=조회수,
+// pv=라이브 시청자, verified=인증 채널, recent=최신성. 모두 0이면 기본값으로 폴백한다.
 const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
 const SEARCH_RERANK_WEIGHTS_DEFAULT = {
+  rel: 35,
+  channel: 15,
+  read: 25,
+  pv: 10,
+  verified: 10,
+  recent: 5,
+};
+const SEARCH_RERANK_WEIGHTS_LEGACY_DEFAULT = {
   rel: 40,
   read: 30,
   pv: 15,
@@ -585,10 +596,31 @@ const SEARCH_RERANK_WEIGHTS_DEFAULT = {
 };
 let searchRerankWeights = { ...SEARCH_RERANK_WEIGHTS_DEFAULT };
 function normalizeSearchRerankWeights(v) {
+  const saved =
+    v &&
+    typeof v === "object" &&
+    Object.keys(SEARCH_RERANK_WEIGHTS_DEFAULT).some((key) =>
+      Object.prototype.hasOwnProperty.call(v, key),
+    )
+      ? v
+      : null;
+  const legacyDefault =
+    saved &&
+    !Object.prototype.hasOwnProperty.call(saved, "channel") &&
+    Object.entries(SEARCH_RERANK_WEIGHTS_LEGACY_DEFAULT).every(
+      ([key, value]) => Number(saved[key]) === value,
+    );
+  if (legacyDefault) return { ...SEARCH_RERANK_WEIGHTS_DEFAULT };
+
   const out = { ...SEARCH_RERANK_WEIGHTS_DEFAULT };
-  if (v && typeof v === "object") {
+  if (saved) {
     for (const k of Object.keys(out)) {
-      const n = Number(v[k]);
+      // 기존 커스텀 비중은 채널명 점수를 0으로 시작해 기존 정렬을 보존한다.
+      if (k === "channel" && !Object.prototype.hasOwnProperty.call(saved, k)) {
+        out[k] = 0;
+        continue;
+      }
+      const n = Number(saved[k]);
       if (Number.isFinite(n))
         out[k] = Math.min(100, Math.max(0, Math.round(n)));
     }
@@ -765,7 +797,9 @@ const featureFlags = {
   sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
   sbFollowCustom: false, // 네이티브 팔로잉 목록을 치즈 플래터 전용 목록으로 대체(기본 OFF)
   sbFollowCustomAutoExpand: false, // 전용 팔로잉 목록을 처음부터 전부 펼쳐 표시
+  sbFollowFavEnabled: true, // 전용 목록에서 즐겨찾기 영역 표시(기본 ON)
   sbFollowFavAutoExpand: false, // 전용 목록의 즐겨찾기를 처음부터 전부 펼쳐 표시
+  sbFollowGroupEnabled: true, // 전용 목록에서 그룹 영역 표시(기본 ON)
   sbFollowGroupAutoExpand: false, // 전용 목록의 그룹을 처음부터 전부 펼쳐 표시
   sbFollowCustomOffline: false, // 전용 팔로잉 목록 일반 그룹에서 오프라인 채널 숨김
   sbFollowCustomFavoriteOffline: false, // 전용 팔로잉 목록 즐겨찾기 그룹에서 오프라인 채널 숨김
@@ -9102,18 +9136,20 @@ function formatSeconds(totalSeconds) {
 }
 
 // ── 기능 표시/숨김 플래그 로드 + MAIN world 전달 ────────────────────────────
-// 저장값에 명시된 boolean이면 그 값, 없으면 false(표시)가 기본.
+// 저장값에 명시된 boolean이면 그 값을 쓰고, 일부 기존 영역은 호환성을 위해 기본 ON.
 function applyFeatureFlags(value) {
   const obj = value && typeof value === "object" ? value : {};
   const previousCustomFollowEnabled = featureFlags.sbFollowCustom;
   const previousCustomFollowAutoExpand = featureFlags.sbFollowCustomAutoExpand;
   const previousFavAutoExpand = featureFlags.sbFollowFavAutoExpand;
   const previousGroupAutoExpand = featureFlags.sbFollowGroupAutoExpand;
+  const previousGroupEnabled = featureFlags.sbFollowGroupEnabled;
   const previousSubscribeGroups = featureFlags.sbFollowGroupSubscribe;
   const previousTagGroups = featureFlags.sbFollowGroupTags;
   const previousGroupOffline = featureFlags.sbFollowGroupOffline;
   for (const k of Object.keys(featureFlags)) {
-    featureFlags[k] = obj[k] === true;
+    featureFlags[k] =
+      typeof obj[k] === "boolean" ? obj[k] : FEATURE_DEFAULT_TRUE.has(k);
   }
   if (
     previousCustomFollowEnabled !== featureFlags.sbFollowCustom ||
@@ -9146,11 +9182,13 @@ function applyFeatureFlags(value) {
   // 전용 팔로잉 즐겨찾기 구분(별표 고정/테두리·배경) — <html> 게이트 클래스로 CSS 처리.
   document.documentElement.classList.toggle(
     "cheese-cf-favstar",
-    featureFlags.sbFollowFavStar === true,
+    featureFlags.sbFollowFavEnabled === true &&
+      featureFlags.sbFollowFavStar === true,
   );
   document.documentElement.classList.toggle(
     "cheese-cf-favstyle",
-    featureFlags.sbFollowFavStyle === true,
+    featureFlags.sbFollowFavEnabled === true &&
+      featureFlags.sbFollowFavStyle === true,
   );
   // 전용목록 마스터 ON 을 <html> 클래스로 즉시 반영 → 원본 팔로우 목록(ul)을 CSS 로 바로
   // 숨긴다. JS(ensureCustomFollowList)가 마커 클래스를 붙이기 전 새로고침 순간에 원본이
@@ -9174,7 +9212,8 @@ function applyFeatureFlags(value) {
   ensureCustomFollowCollapsedControls();
   ensureCustomFollowPageFavoriteButton();
   if (
-    (previousSubscribeGroups !== featureFlags.sbFollowGroupSubscribe ||
+    (previousGroupEnabled !== featureFlags.sbFollowGroupEnabled ||
+      previousSubscribeGroups !== featureFlags.sbFollowGroupSubscribe ||
       previousTagGroups !== featureFlags.sbFollowGroupTags ||
       previousGroupOffline !== featureFlags.sbFollowGroupOffline) &&
     featureFlags.sbFollowCustom
@@ -9182,13 +9221,13 @@ function applyFeatureFlags(value) {
     customFollowVersion += 1;
     ensureCustomFollowList();
     if (
-      previousSubscribeGroups !== featureFlags.sbFollowGroupSubscribe &&
+      featureFlags.sbFollowGroupEnabled &&
       featureFlags.sbFollowGroupSubscribe
     ) {
       void refreshCustomFollowSubscriptions();
     }
     if (
-      previousTagGroups !== featureFlags.sbFollowGroupTags &&
+      featureFlags.sbFollowGroupEnabled &&
       featureFlags.sbFollowGroupTags &&
       customFollowItems.length
     ) {
@@ -11207,7 +11246,9 @@ function applyChatTweaks() {
     "cheese-chat-button-wrap",
     chatButtonWrap,
   );
-  clearChatHideMarkers();
+  // 활성 기능의 기존 마커는 보존한다. 설정 변경 때마다 전부 제거했다가 다시 붙이면
+  // 채팅 패널 DOM 변이와 레이아웃 계산이 연달아 발생해 짧은 멈춤을 만들 수 있다.
+  clearInactiveChatHideMarkers();
   applyChatHideMarkers();
   applyChatLayout();
   applyChatLeftClass();
@@ -11507,6 +11548,30 @@ function isOwnChatMutation(mutation) {
   return false;
 }
 
+const CHAT_STREAM_CONTAINER_SELECTOR =
+  "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
+
+// 랭킹/미션/채팅 폭 같은 content.js의 정리 기능은 채팅 메시지 행 자체를 처리하지 않는다.
+// 시간 표시·가려진 채팅 복원은 별도 MAIN 스크립트가 행 단위 배치로 담당한다. 따라서
+// 메시지가 추가될 때마다 이 옵저버까지 전체 aside를 다시 훑는 것은 순수한 중복 작업이다.
+function isChatStreamMutation(mutation) {
+  const target =
+    mutation.target instanceof Element
+      ? mutation.target
+      : mutation.target?.parentElement;
+  if (target?.closest?.(CHAT_STREAM_CONTAINER_SELECTOR)) return true;
+
+  const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+  return (
+    changedNodes.length > 0 &&
+    changedNodes.every((node) => {
+      const element =
+        node instanceof Element ? node : node?.parentElement || null;
+      return Boolean(element?.closest?.(CHAT_STREAM_CONTAINER_SELECTOR));
+    })
+  );
+}
+
 function startChatObserver() {
   // (2) <html> 자기 자신의 class 만 보는 경량 옵저버(subtree 없음) — moa enabled
   //     클래스 토글 감지용. 채팅 기능 on/off 와 무관하게 항상 유지해도 부하가 없다
@@ -11539,8 +11604,17 @@ function startChatObserver() {
   }
   const targets = containers.length ? containers : [document.documentElement];
   chatObserver = new MutationObserver((mutations) => {
+    if (document.hidden) return;
     // 우리 마커 추가만으로 일어난 변경이면(타 변경 없음) 무시한다.
-    if (mutations.every(isOwnChatMutation)) return;
+    // 실제 채팅 행 추가도 이 옵저버의 담당이 아니므로 함께 제외한다.
+    if (
+      mutations.every(
+        (mutation) =>
+          isOwnChatMutation(mutation) || isChatStreamMutation(mutation),
+      )
+    ) {
+      return;
+    }
     scheduleChatTweak();
   });
   for (const t of targets) {
@@ -13185,9 +13259,12 @@ function spaNavigate(href) {
     if (!scope) continue;
     const links = scope.querySelectorAll(`a[href="${href}"]`);
     for (const link of links) {
+      // 우리가 주입한 컨테이너(헤더 네비/헤더 팔로우/전용 팔로잉 목록) 내부 링크는
+      // 건너뛴다. 전용 목록의 링크를 클릭하면 이 함수를 부른 그 클릭으로 되돌아와
+      // 무한 재진입이 된다(원본 링크는 CSS 로 숨겨져 있을 뿐 DOM 에는 남아 있다).
       if (
         link.closest(
-          `#${HEADER_NAV_CONTAINER_ID}, #${HEADER_FOLLOW_CONTAINER_ID}`,
+          `#${HEADER_NAV_CONTAINER_ID}, #${HEADER_FOLLOW_CONTAINER_ID}, #${CUSTOM_FOLLOW_NAV_ID}`,
         )
       )
         continue;
@@ -13624,8 +13701,8 @@ async function loadChannelLiveProfileBackground() {
 // ── 통합검색(/search) 동영상 섹션 재랭킹 ──────────────────────────────────────
 // 치지직 검색 API(service/v1/search/videos)는 정렬 기준이 모호해 관련도 낮은 저조회
 // 영상이 상위에 오고, 인증 채널·고조회 영상이 뒤에 묻힌다. 옵션이 켜져 있으면 같은
-// API를 size=50 × 4페이지로 넓게 받아(중복 videoNo 제거, 최대 200개) 제목 관련도·
-// 조회수·livePv·인증마크·최신성 점수로 재정렬한다.
+// API를 size=50 × 4페이지로 넓게 받아(중복 videoNo 제거, 최대 200개) 제목·채널명
+// 관련도, 조회수, livePv, 인증마크, 최신성 점수로 재정렬한다.
 //
 // 표시: React가 관리하는 네이티브 리스트를 재정렬하지 않는다(재렌더로 되돌아감 +
 // 충돌). 대신 네이티브 동영상 리스트/더보기를 CSS 로 숨기고, 숨긴 li 를 클론 템플릿
@@ -13696,30 +13773,67 @@ async function fetchSearchRerankPool(keyword) {
   return out.slice(0, poolMax);
 }
 
-// 점수: 제목 관련도(40) + 조회수 로그(30) + livePv 로그(15) + 인증마크(10) + 최신성(5).
+function normalizeSearchRerankText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("ko-KR")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// 점수: 제목 관련도(35) + 채널명 관련도(15) + 조회수 로그(25) +
+// livePv 로그(10) + 인증마크(10) + 최신성(5).
 // 로그 스케일이라 5,486 vs 79 차이는 크게, 5,486 vs 4,836 차이는 작게 반영된다.
 function scoreSearchRerankItem(item, tokens, phrase) {
   const v = item?.video || {};
   const ch = item?.channel || {};
-  const title = String(v.videoTitle || "").toLowerCase();
+  const title = normalizeSearchRerankText(v.videoTitle);
+  const channelName = normalizeSearchRerankText(ch.channelName);
   let matched = 0;
   for (const t of tokens) if (title.includes(t)) matched++;
   let rel = tokens.length ? matched / tokens.length : 0;
   if (phrase && title.includes(phrase)) rel += 0.3; // 구문 그대로 포함 보너스
+  let channelMatched = 0;
+  for (const token of tokens) {
+    // 한 글자 검색어가 우연히 포함됐다는 이유만으로 채널 점수가 커지지 않게 한다.
+    if (
+      channelName === token ||
+      (token.length > 1 && channelName.includes(token))
+    ) {
+      channelMatched++;
+    }
+  }
+  // 토큰 일치만으로 만점을 주지 않고, 전체 채널명 정확/접두/부분 일치를 우선한다.
+  let channelRel = tokens.length
+    ? (channelMatched / tokens.length) * 0.7
+    : 0;
+  if (phrase && channelName === phrase) {
+    channelRel = 1;
+  } else if (phrase.length > 1 && channelName.startsWith(phrase)) {
+    channelRel = Math.max(channelRel, 0.9);
+  } else if (phrase.length > 1 && channelName.includes(phrase)) {
+    channelRel = Math.max(channelRel, 0.8);
+  }
+  channelRel = Math.min(1, channelRel);
   const pop = Math.min(1, Math.log10(1 + (Number(v.readCount) || 0)) / 6);
   const pv = Math.min(1, Math.log10(1 + (Number(v.livePv) || 0)) / 5);
   const ver = ch.verifiedMark ? 1 : 0;
   const days = (Date.now() - (Number(v.publishDateAt) || 0)) / 86400000;
   const rec = Math.max(0, Math.min(1, (30 - days) / 30));
-  // 비중은 설정에서 커스텀 가능(기본 40/30/15/10/5).
+  // 비중은 설정에서 커스텀 가능(기본 35/15/25/10/10/5).
   const w = searchRerankWeights;
   return (
-    w.rel * rel + w.read * pop + w.pv * pv + w.verified * ver + w.recent * rec
+    w.rel * rel +
+    w.channel * channelRel +
+    w.read * pop +
+    w.pv * pv +
+    w.verified * ver +
+    w.recent * rec
   );
 }
 
 function buildSearchRerankScores(items, keyword) {
-  const norm = keyword.toLowerCase().replace(/\s+/g, " ").trim();
+  const norm = normalizeSearchRerankText(keyword);
   const tokens = norm.split(" ").filter(Boolean);
   items.forEach((it, i) => {
     it.__origIndex = i;
@@ -13727,8 +13841,7 @@ function buildSearchRerankScores(items, keyword) {
   });
 }
 
-// 재랭킹 정렬 옵션. score(추천)는 __score(제목 관련도 40 + 조회수 로그 30 +
-// livePv 로그 15 + 인증마크 10 + 최신성 5) 내림차순.
+// 재랭킹 정렬 옵션. score(추천)는 제목·채널명 관련도와 인기도, 인증, 최신성의 합산 점수.
 const SEARCH_RERANK_SORTS = [
   { value: "score", label: "추천순" },
   { value: "read", label: "인기순" },
@@ -14716,6 +14829,7 @@ function ensureCustomFollowPageFavoriteButton() {
   ];
   const enabled =
     featureFlags.sbFollowCustom === true &&
+    featureFlags.sbFollowFavEnabled === true &&
     featureFlags.sbFollowPageFavoriteButton === true;
   const contexts = enabled ? getCustomFollowPageFavoriteContexts() : [];
   if (!contexts.length) {
@@ -14773,9 +14887,9 @@ function ensureCustomFollowPageFavoriteButton() {
   unusedButtons.forEach((button) => button.remove());
 }
 
-// ── 전체 방송·팔로잉 라이브 제외 태그 ──────────────────────────────────────
-// /lives 및 /following?tab=ALL|LIVE 카드의 태그 링크(/lives?tags=...)만 읽어,
-// 카테고리명과 혼동하지 않고 사용자가 저장한 태그와 정확히 일치하는 카드를 숨긴다.
+// ── 전체 방송·팔로잉 라이브 제외 필터 ──────────────────────────────────────
+// /lives 및 /following?tab=ALL|LIVE 카드의 태그와 카테고리 표시명을 읽어,
+// 사용자가 저장한 값과 정확히 일치하는 카드를 숨긴다.
 const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
 const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
@@ -14817,8 +14931,11 @@ const LIVE_TAG_FILTER_TRASH_ICON = `
 function normalizeLiveTagFilter(value) {
   return String(value || "")
     .normalize("NFKC")
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+    .replace(/\s+/g, " ")
     .trim()
     .replace(/^#+\s*/, "")
+    .replace(/\s+/g, " ")
     .trim()
     .toLocaleLowerCase("ko-KR");
 }
@@ -14829,8 +14946,11 @@ function sanitizeLiveTagFilters(value) {
   for (const raw of Array.isArray(value) ? value : []) {
     const display = String(raw || "")
       .normalize("NFKC")
+      .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+      .replace(/\s+/g, " ")
       .trim()
       .replace(/^#+\s*/, "")
+      .replace(/\s+/g, " ")
       .trim();
     const key = normalizeLiveTagFilter(display);
     if (!key || seen.has(key)) continue;
@@ -14892,7 +15012,7 @@ function updateLiveTagFilterButton(button) {
   }`;
   button.setAttribute(
     "aria-label",
-    count ? `제외 필터 추가, 제외 태그 ${count}개` : "제외 필터 추가",
+    count ? `제외 필터 추가, 제외 항목 ${count}개` : "제외 필터 추가",
   );
 }
 
@@ -14946,8 +15066,8 @@ function ensureLiveTagFilterUi() {
   updateLiveTagFilterButton(button);
 }
 
-function getLiveTagsFromNode(node) {
-  const tags = [];
+function getLiveFilterValuesFromNode(node) {
+  const values = [];
   const anchor = node.matches?.("a") ? node : node.closest?.("a");
   if (anchor) {
     try {
@@ -14958,17 +15078,21 @@ function getLiveTagsFromNode(node) {
       ) {
         for (const value of url.searchParams.getAll("tags")) {
           const key = normalizeLiveTagFilter(value);
-          if (key) tags.push(key);
+          if (key) values.push(key);
         }
       }
     } catch {}
   }
-  const visibleTag = node.matches?.('span[class*="_tag_"]')
+  const visibleValue = node.matches?.(
+    'span[class*="_tag_"], span[class*="_category_"]',
+  )
     ? node
-    : anchor?.querySelector?.('span[class*="_tag_"]');
-  const visibleKey = normalizeLiveTagFilter(visibleTag?.textContent);
-  if (visibleKey) tags.push(visibleKey);
-  return tags;
+    : anchor?.querySelector?.(
+        'span[class*="_tag_"], span[class*="_category_"]',
+      );
+  const visibleKey = normalizeLiveTagFilter(visibleValue?.textContent);
+  if (visibleKey) values.push(visibleKey);
+  return values;
 }
 
 function clearHiddenLiveTagFilterCards() {
@@ -15008,13 +15132,19 @@ function applyLiveTagFilters() {
     document.body;
   if (!scope) return;
 
-  const tagNodes = scope.querySelectorAll(
-    'a[href*="tags="], span[class*="_tag_"]',
+  const filterNodes = scope.querySelectorAll(
+    'a[href*="tags="], a[href*="/category/"][href*="/lives"], span[class*="_tag_"]',
   );
-  for (const node of tagNodes) {
-    if (!getLiveTagsFromNode(node).some((tag) => filterSet.has(tag))) continue;
+  for (const node of filterNodes) {
+    if (
+      !getLiveFilterValuesFromNode(node).some((value) => filterSet.has(value))
+    ) {
+      continue;
+    }
     const card = node.closest("li");
-    if (card) hideLiveTagFilterCard(card);
+    if (card?.querySelector('a[href^="/live/"]')) {
+      hideLiveTagFilterCard(card);
+    }
   }
 }
 
@@ -15200,9 +15330,9 @@ function renderLiveTagFilterModal() {
             <input type="checkbox" data-live-tag-filter-select="${index}" ${
               checked ? "checked" : ""
             }>
-            <span>#${escapeHtml(tag)}</span>
+            <span>${escapeHtml(tag)}</span>
           </label>
-          <button type="button" data-live-tag-filter-remove="${index}" aria-label="태그 삭제" title="삭제">
+          <button type="button" data-live-tag-filter-remove="${index}" aria-label="제외 항목 삭제" title="삭제">
             ${LIVE_TAG_FILTER_TRASH_ICON}
           </button>
         </li>`;
@@ -15262,13 +15392,13 @@ function openLiveTagFilterModal(trigger) {
     <div class="cheese-live-tag-filter-dialog" role="dialog" aria-modal="true" aria-labelledby="cheese-live-tag-filter-title">
       <header class="cheese-live-tag-filter-head">
         <div>
-          <strong id="cheese-live-tag-filter-title">라이브 제외 태그</strong>
-          <span>일치하는 태그가 붙은 방송을 목록에서 숨깁니다.</span>
+          <strong id="cheese-live-tag-filter-title">라이브 제외 필터</strong>
+          <span>일치하는 태그 또는 카테고리의 방송을 목록에서 숨깁니다.</span>
         </div>
         <button type="button" data-live-tag-filter-close aria-label="닫기">${LIVE_TAG_FILTER_CLOSE_ICON}</button>
       </header>
       <form class="cheese-live-tag-filter-form" data-live-tag-filter-form>
-        <input type="text" data-live-tag-filter-input maxlength="200" placeholder="숨길 태그 입력" aria-label="숨길 라이브 태그" autocomplete="off" spellcheck="false">
+        <input type="text" data-live-tag-filter-input maxlength="200" placeholder="숨길 태그 또는 카테고리 입력" aria-label="숨길 라이브 태그 또는 카테고리" autocomplete="off" spellcheck="false">
         <button type="submit">추가</button>
       </form>
       <div class="cheese-live-tag-filter-bulk" data-live-tag-filter-bulk>
@@ -15281,8 +15411,8 @@ function openLiveTagFilterModal(trigger) {
         <button type="button" data-live-tag-filter-remove-selected disabled>선택 삭제</button>
         <button type="button" data-live-tag-filter-remove-all>전체 삭제</button>
       </div>
-      <ul class="cheese-live-tag-filter-list" data-live-tag-filter-list aria-label="라이브 제외 태그 목록"></ul>
-      <p class="cheese-live-tag-filter-empty" data-live-tag-filter-empty>추가한 제외 태그가 없습니다.</p>
+      <ul class="cheese-live-tag-filter-list" data-live-tag-filter-list aria-label="라이브 제외 필터 목록"></ul>
+      <p class="cheese-live-tag-filter-empty" data-live-tag-filter-empty>추가한 제외 항목이 없습니다.</p>
     </div>`;
   document.body.appendChild(overlay);
   document.documentElement.classList.add("cheese-live-tag-filter-lock");
@@ -15792,7 +15922,9 @@ function createCustomFollowItemHtml(
   const imageUrl = item.imageUrl
     ? `${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
     : "";
-  const fav = customFollowFavorites.has(item.channelId);
+  const fav =
+    featureFlags.sbFollowFavEnabled &&
+    customFollowFavorites.has(item.channelId);
   const c = (native, fallback) => (h && native ? native : fallback); // harvest 우선, 없으면 폴백
   const profileCls = live
     ? c(h?.profileLive, "cheese-cf-profile is-live")
@@ -15850,7 +15982,9 @@ function createCustomFollowItemHtml(
     `</div>` +
     countHtml +
     `<a class="${c(h?.link, "cheese-cf-link")}" draggable="false" href="${escapeAttribute(href)}" aria-label="${escapeAttribute(item.name)}"></a>` +
-    `<button type="button" class="cheese-follow-fav${fav ? " is-fav" : ""}" data-fav-id="${escapeAttribute(item.channelId)}" aria-pressed="${fav}" aria-label="${fav ? "즐겨찾기 해제" : "즐겨찾기"}" title="${fav ? "즐겨찾기 해제" : "즐겨찾기"}">${LUCIDE_STAR_ICON}</button>` +
+    (featureFlags.sbFollowFavEnabled
+      ? `<button type="button" class="cheese-follow-fav${fav ? " is-fav" : ""}" data-fav-id="${escapeAttribute(item.channelId)}" aria-pressed="${fav}" aria-label="${fav ? "즐겨찾기 해제" : "즐겨찾기"}" title="${fav ? "즐겨찾기 해제" : "즐겨찾기"}">${LUCIDE_STAR_ICON}</button>`
+      : "") +
     `</div>` +
     `</li>`
   );
@@ -15859,13 +15993,15 @@ function createCustomFollowItemHtml(
 // 현재 설정/데이터로 표시할 아이템 목록(그룹별 오프라인 숨김 + 정렬).
 function getCustomFollowVisibleItems() {
   let items = customFollowItems;
+  const favoritesEnabled = featureFlags.sbFollowFavEnabled;
   if (
     featureFlags.sbFollowCustomOffline ||
-    featureFlags.sbFollowCustomFavoriteOffline
+    (favoritesEnabled && featureFlags.sbFollowCustomFavoriteOffline)
   ) {
     items = items.filter((it) => {
       if (it.live) return true;
-      const favorite = customFollowFavorites.has(it.channelId);
+      const favorite =
+        favoritesEnabled && customFollowFavorites.has(it.channelId);
       return favorite
         ? !featureFlags.sbFollowCustomFavoriteOffline
         : !featureFlags.sbFollowCustomOffline;
@@ -15879,7 +16015,7 @@ function getCustomFollowVisibleItems() {
   ) {
     items = items.filter(
       (it) =>
-        customFollowFavorites.has(it.channelId) ||
+        (favoritesEnabled && customFollowFavorites.has(it.channelId)) ||
         !logpowerHiddenChannelsCache.has(String(it.channelId)),
     );
   }
@@ -15894,7 +16030,8 @@ function getCustomFollowGroupVisibleItems() {
   ) {
     items = items.filter(
       (item) =>
-        customFollowFavorites.has(item.channelId) ||
+        (featureFlags.sbFollowFavEnabled &&
+          customFollowFavorites.has(item.channelId)) ||
         !logpowerHiddenChannelsCache.has(String(item.channelId)),
     );
   }
@@ -16184,7 +16321,8 @@ function getCustomFollowAutomaticGroupSources() {
   ) {
     items = items.filter(
       (item) =>
-        customFollowFavorites.has(item.channelId) ||
+        (featureFlags.sbFollowFavEnabled &&
+          customFollowFavorites.has(item.channelId)) ||
         !logpowerHiddenChannelsCache.has(String(item.channelId)),
     );
   }
@@ -17263,11 +17401,13 @@ function customFollowSig(visibleCount, shown) {
     isCustomFollowGroupAutoExpandActive() ? 1 : 0,
     featureFlags.sbFollowCustomOffline ? 1 : 0,
     featureFlags.sbFollowCustomFavoriteOffline ? 1 : 0,
+    featureFlags.sbFollowFavEnabled ? 1 : 0,
     featureFlags.sbFollowFavLiveFirst ? 1 : 0,
     isSidebarExpanded() ? 1 : 0,
     featureFlags.sbFollowFavStar ? 1 : 0,
     featureFlags.sbFollowFavStyle ? 1 : 0,
     featureFlags.sbFollowFavBar ? 1 : 0,
+    featureFlags.sbFollowGroupEnabled ? 1 : 0,
     featureFlags.sbFollowGroupSubscribe ? 1 : 0,
     featureFlags.sbFollowGroupTags ? 1 : 0,
     featureFlags.sbFollowGroupOffline ? 1 : 0,
@@ -17527,12 +17667,15 @@ function renderCustomFollowList(ourNav, h) {
   const expandedNow = getCustomFollowExpandedNow(origNav);
   const visible = getCustomFollowVisibleItems();
   const autoExpand = isCustomFollowAutoExpandActive();
-  const favoriteItems = visible.filter((item) =>
-    customFollowFavorites.has(item.channelId),
-  );
-  const regularItems = visible.filter(
-    (item) => !customFollowFavorites.has(item.channelId),
-  );
+  const favoritesEnabled = featureFlags.sbFollowFavEnabled;
+  const groupsEnabled = featureFlags.sbFollowGroupEnabled;
+  const favoriteItems = favoritesEnabled
+    ? visible.filter((item) => customFollowFavorites.has(item.channelId))
+    : [];
+  // 즐겨찾기 영역만 끈 경우 해당 채널 자체가 사라지지 않도록 일반 목록에 합친다.
+  const regularItems = favoritesEnabled
+    ? visible.filter((item) => !customFollowFavorites.has(item.channelId))
+    : visible;
   const favoriteShown = isCustomFollowFavAutoExpandActive()
     ? favoriteItems.length
     : Math.min(customFollowFavShown, favoriteItems.length);
@@ -17556,27 +17699,33 @@ function renderCustomFollowList(ourNav, h) {
   }
   if (!visible.length) {
     ourNav.innerHTML =
-      renderCustomFollowGroups(
+      (groupsEnabled
+        ? renderCustomFollowGroups(
+            buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems()),
+            h,
+            expandedNow,
+          )
+        : "") + `<div class="cheese-cf-empty">표시할 채널이 없습니다.</div>`;
+    return;
+  }
+  const groupsHtml = groupsEnabled
+    ? renderCustomFollowGroups(
         buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems()),
         h,
         expandedNow,
-      ) + `<div class="cheese-cf-empty">표시할 채널이 없습니다.</div>`;
-    return;
-  }
-  const groupsHtml = renderCustomFollowGroups(
-    buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems()),
-    h,
-    expandedNow,
-  );
-  const favoritesHtml = renderCustomFollowChannelSection({
-    key: "favorites",
-    label: "즐겨찾기",
-    items: favoriteItems,
-    shown: favoriteShown,
-    initial: customFollowFavInitial,
-    h,
-    expandedNow,
-  });
+      )
+    : "";
+  const favoritesHtml = favoritesEnabled
+    ? renderCustomFollowChannelSection({
+        key: "favorites",
+        label: "즐겨찾기",
+        items: favoriteItems,
+        shown: favoriteShown,
+        initial: customFollowFavInitial,
+        h,
+        expandedNow,
+      })
+    : "";
   const followingHtml = renderCustomFollowChannelSection({
     key: "following",
     label: "팔로잉",
@@ -17918,6 +18067,51 @@ function bindCustomFollowDelegation() {
         }
         ensureCustomFollowList();
         ensureCustomFollowCollapsedControls();
+        return;
+      }
+      // 채널 이동은 치지직 SPA 라우터를 태운다. 우리 목록의 <a href>를 그대로 두면
+      // 전체 페이지가 새로고침되어, 네이티브 사이드바의 부분 전환과 달리 오디오 믹서의
+      // 사용자 제스처·AudioContext·현재 프리셋 UI가 모두 새로 시작한다. 그 결과 항상
+      // 켜기 적용이 늦거나, 설정을 다시 불러오는 동안 프리셋이 사라진 것처럼 보일 수 있다.
+      const channelLink = e.target.closest?.(
+        "#" + CUSTOM_FOLLOW_NAV_ID + " a[href]",
+      );
+      if (channelLink) {
+        if (e.defaultPrevented) return;
+        // 새 탭/새 창 의도(수정키·휠클릭)는 브라우저 기본 동작을 그대로 둔다.
+        if (
+          e.button !== 0 ||
+          e.metaKey ||
+          e.ctrlKey ||
+          e.shiftKey ||
+          e.altKey
+        ) {
+          return;
+        }
+        // 순서 편집(드래그) 중인 항목의 클릭은 이동시키지 않는다.
+        if (channelLink.closest(".cheese-cf-dragready, .cheese-cf-dragging")) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation?.();
+          return;
+        }
+        const href = channelLink.getAttribute("href") || "";
+        if (!href.startsWith("/")) return; // 외부 링크는 기본 동작
+        e.preventDefault();
+        e.stopPropagation();
+        // document 캡처 단계의 다른 위임 핸들러가 같은 커스텀 링크를 다시 처리하지
+        // 않게 한다. spaNavigate가 만드는 네이티브 링크 클릭은 별도 이벤트라 영향 없다.
+        e.stopImmediatePropagation?.();
+        // '방송 시청 중 팔로잉 새 탭으로 열기' 옵션은 전용 목록에서도 동일하게 적용한다.
+        if (
+          followOpenNewTabOn &&
+          location.pathname.startsWith("/live/") &&
+          /^\/live\/[0-9a-f]{32}(?:[/?#]|$)/i.test(href)
+        ) {
+          window.open(href, "_blank", "noopener");
+          return;
+        }
+        spaNavigate(href);
         return;
       }
     },
@@ -20823,12 +21017,18 @@ async function enrichCustomFollowLiveMetadata(
 function enrichCustomFollowOpenDates(items) {
   return enrichCustomFollowLiveMetadata(items, {
     needOpenDate: true,
-    needTags: featureFlags.sbFollowGroupTags,
+    needTags:
+      featureFlags.sbFollowGroupEnabled && featureFlags.sbFollowGroupTags,
   });
 }
 
 async function refreshCustomFollowSubscriptions() {
-  if (!featureFlags.sbFollowGroupSubscribe) return;
+  if (
+    !featureFlags.sbFollowGroupEnabled ||
+    !featureFlags.sbFollowGroupSubscribe
+  ) {
+    return;
+  }
   if (
     customFollowSubscriptionFetchedAt &&
     Date.now() - customFollowSubscriptionFetchedAt < 5 * 60 * 1000
@@ -21020,7 +21220,8 @@ async function refreshCustomFollowList() {
     commitCustomFollowItems(nextItems);
     const needOpenDate =
       customFollowSort === "recent" || customFollowSort === "oldest";
-    const needTags = featureFlags.sbFollowGroupTags;
+    const needTags =
+      featureFlags.sbFollowGroupEnabled && featureFlags.sbFollowGroupTags;
     if (needOpenDate || needTags) {
       await enrichCustomFollowLiveMetadata(nextItems, {
         needOpenDate,
@@ -21079,7 +21280,11 @@ function prioritizeLiveCustomFollowItems(items, enabled) {
 }
 
 function sortCustomFollow(items, mode) {
-  const favRank = (it) => (customFollowFavorites.has(it.channelId) ? 0 : 1);
+  const favRank = (it) =>
+    featureFlags.sbFollowFavEnabled &&
+    customFollowFavorites.has(it.channelId)
+      ? 0
+      : 1;
   // 즐겨찾기 그룹은 옵션(sbFollowFavSort) ON 이면 별도 기준(customFollowFavSort)으로,
   // OFF 면 일반 정렬 기준(mode)으로 정렬한다.
   const favMode = featureFlags.sbFollowFavSort ? customFollowFavSort : mode;
@@ -22749,6 +22954,7 @@ async function loadCustomFollowSettings() {
     logpowerHiddenChannelsCache = new Set(hidden.map(String));
     ensureCustomFollowPageFavoriteButton();
     if (
+      featureFlags.sbFollowGroupEnabled &&
       featureFlags.sbFollowGroupTags &&
       shouldLoadCustomFollowOfflineTags() &&
       customFollowItems.length
@@ -23725,6 +23931,7 @@ if (chrome.storage?.onChanged) {
       if (
         (changes[CUSTOM_FOLLOW_GROUP_TAG_HIDE_OFFLINE_KEY] ||
           changes[CUSTOM_FOLLOW_GROUP_OFFLINE_OVERRIDES_KEY]) &&
+        featureFlags.sbFollowGroupEnabled &&
         featureFlags.sbFollowGroupTags &&
         shouldLoadCustomFollowOfflineTags() &&
         customFollowItems.length
@@ -23804,8 +24011,8 @@ function init() {
   applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
   ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
   ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
-  ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 태그 관리 버튼 보장
-  applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 태그 즉시 적용
+  ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
+  applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
   applyLiveViewerCountPlacement(); // 옵션 시 시청자 수를 LIVE 배지 옆에 배치
   applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
   ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장

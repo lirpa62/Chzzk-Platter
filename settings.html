@@ -2122,8 +2122,9 @@
                   <span class="settings-item-name">추천순 점수 비중</span>
                   <span class="settings-item-desc"
                     >추천순 정렬 점수의 항목별 비중(각 0~100). 모든 항목이 0이면
-                    기본값으로 자동 적용됩니다. 기본값: 제목 관련도 40 · 조회수
-                    30 · 라이브 시청자 15 · 파트너 채널 10 · 최신성 5</span
+                    기본값으로 자동 적용됩니다. 기본값: 제목 관련도 35 · 채널명
+                    관련도 15 · 조회수 25 · 라이브 시청자 10 · 파트너 채널 10 ·
+                    최신성 5</span
                   >
                 </div>
                 <div class="settings-custom-row">
@@ -2137,6 +2138,19 @@
                         step="1"
                         inputmode="numeric"
                         data-search-rerank-w-rel
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>채널명 관련도</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-search-rerank-w-channel
                       />
                     </span>
                   </label>
@@ -2288,8 +2302,8 @@
                 <label>
                   <span class="settings-item-name">제외 필터 버튼 표시</span>
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그를 관리하는 '제외
-                    필터 추가' 버튼을 표시합니다(체크=표시, 기본 꺼짐).</span
+                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그·카테고리를 관리하는
+                    '제외 필터 추가' 버튼을 표시합니다(체크=표시, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2330,11 +2344,11 @@
                 class="settings-item settings-item-stacked settings-live-tag-item"
               >
                 <div>
-                  <span class="settings-item-name">라이브 제외 태그</span>
+                  <span class="settings-item-name">라이브 제외 필터</span>
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그가 붙은
-                    방송을 숨깁니다. 쉼표나 줄바꿈으로 여러 태그를 한 번에
-                    추가할 수 있습니다.</span
+                    >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그 또는
+                    카테고리와 일치하는 방송을 숨깁니다. 쉼표나 줄바꿈으로 여러
+                    항목을 한 번에 추가할 수 있습니다.</span
                   >
                 </div>
                 <div class="settings-live-tag-manager">
@@ -2343,8 +2357,8 @@
                       type="text"
                       data-live-tag-input
                       maxlength="200"
-                      placeholder="숨길 태그 입력"
-                      aria-label="숨길 라이브 태그"
+                      placeholder="숨길 태그 또는 카테고리 입력"
+                      aria-label="숨길 라이브 태그 또는 카테고리"
                       autocomplete="off"
                       spellcheck="false"
                     />
@@ -2371,10 +2385,10 @@
                   <ul
                     class="settings-live-tag-list"
                     data-live-tag-list
-                    aria-label="라이브 제외 태그 목록"
+                    aria-label="라이브 제외 필터 목록"
                   ></ul>
                   <p class="settings-live-tag-empty" data-live-tag-empty>
-                    추가한 제외 태그가 없습니다.
+                    추가한 제외 항목이 없습니다.
                   </p>
                 </div>
               </li>
@@ -3068,6 +3082,24 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">즐겨찾기 사용</span>
+                  <span class="settings-item-desc"
+                    >전용 팔로잉 목록의 즐겨찾기 영역과 별표 버튼을 사용합니다.
+                    끄면 저장된 즐겨찾기는 유지되고 해당 채널은 일반 팔로잉 목록에
+                    표시됩니다(기본 켜짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowFavEnabled"
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">자동 펼치기</span>
                   <span class="settings-item-desc"
                     >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다. '접기'를
@@ -3313,6 +3345,24 @@
               관리 버튼에서 할 수 있습니다.
             </p>
             <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">그룹 사용</span>
+                  <span class="settings-item-desc"
+                    >전용 팔로잉 목록에 커스텀·자동 그룹을 표시합니다. 끄면 자동
+                    그룹용 추가 정보 수집도 쉬며, 저장된 그룹과 설정은
+                    유지됩니다(기본 켜짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupEnabled"
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">자동 펼치기</span>
@@ -4822,11 +4872,44 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 클립 자동재생</span>
+                  <span class="settings-item-desc"
+                    >화면에 들어온 클립 하나를 자동재생합니다(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-cafe-now-autoplay />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 자동재생 음소거</span>
+                  <span class="settings-item-desc"
+                    >자동재생 클립의 음소거를 유지합니다. 해제하면 브라우저 정책상
+                    첫 클립만 음소거로 시작하고, 플레이어를 한 번 클릭한 뒤부터는
+                    같은 페이지의 이후 클립이 소리 있게 자동재생됩니다(체크=음소거
+                    유지, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-cafe-now-autoplay-muted />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
             </ul>
             <p class="settings-group-desc">
               cafe.naver.com 게시글에 붙은 치지직 클립 링크(OG링크)를 감지해 글
-              안에서 바로 재생합니다. 설정 변경은 카페 페이지를 새로고침하면
-              적용됩니다.
+              안에서 바로 재생합니다. 자동재생은 화면에 가장 잘 보이는 클립
+              하나만 재생하며 음소거 유지 여부를 선택할 수 있습니다.
+              소리 있는 자동재생은 브라우저 정책상 사용자가 해당 플레이어를 한 번
+              조작한 뒤에만 허용되므로, 음소거를 해제해도 페이지의 첫 클립은
+              음소거로 시작합니다. 자동재생 설정은 열린 카페 페이지에도 바로
+              적용됩니다. 인라인 재생 기능 전체를 켜거나 끈 경우에는 카페 페이지를
+              새로고침해야 합니다.
             </p>
           </section>
 

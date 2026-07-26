@@ -31,6 +31,8 @@
     "cheeseRootToFollowing",
     "cheeseRootToFollowingLogoMode",
     "cheeseCafeNow",
+    "cheeseCafeNowAutoplay",
+    "cheeseCafeNowAutoplayMuted",
     "cheeseCardDateTooltip",
     "cheeseVodChapterHide",
     "cheeseHideBlockedComment",
@@ -692,8 +694,12 @@
   });
 
   const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
-  // 미설정 시 기본 체크(숨김)인 항목. clipLiveButton은 기본적으로 숨긴다.
-  const DEFAULT_HIDDEN = new Set(["clipLiveButton"]);
+  // 미설정 시 기본 체크인 항목. 기존 동작을 유지해야 하는 영역도 여기에 포함한다.
+  const DEFAULT_CHECKED = new Set([
+    "clipLiveButton",
+    "sbFollowFavEnabled",
+    "sbFollowGroupEnabled",
+  ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
 
   // 로드가 성공적으로 끝나기 전엔 save() 로 전체(cheeseFeatureHidden)를 덮어쓰지 않는다.
@@ -714,7 +720,7 @@
     inputs.forEach((input) => {
       const key = input.dataset.feature;
       const v = saved[key];
-      input.checked = typeof v === "boolean" ? v : DEFAULT_HIDDEN.has(key);
+      input.checked = typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key);
     });
     if (ok) featureFlagsLoaded = true;
   }
@@ -2667,9 +2673,17 @@
       savePool(rerankPoolInput.value),
     );
   }
-  // 추천순 점수 비중(각 0~100, 기본 40/30/15/10/5, 모두 0이면 기본값 폴백).
+  // 추천순 점수 비중(각 0~100, 기본 35/15/25/10/10/5, 모두 0이면 기본값 폴백).
   const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
   const RERANK_WEIGHT_DEFAULTS = {
+    rel: 35,
+    channel: 15,
+    read: 25,
+    pv: 10,
+    verified: 10,
+    recent: 5,
+  };
+  const RERANK_WEIGHT_LEGACY_DEFAULTS = {
     rel: 40,
     read: 30,
     pv: 15,
@@ -2678,6 +2692,7 @@
   };
   const rerankWeightInputs = {
     rel: document.querySelector("[data-search-rerank-w-rel]"),
+    channel: document.querySelector("[data-search-rerank-w-channel]"),
     read: document.querySelector("[data-search-rerank-w-read]"),
     pv: document.querySelector("[data-search-rerank-w-pv]"),
     verified: document.querySelector("[data-search-rerank-w-verified]"),
@@ -2689,9 +2704,30 @@
     return Math.min(100, Math.max(0, Math.round(n)));
   }
   function normalizeRerankWeights(weights) {
+    const saved =
+      weights &&
+      typeof weights === "object" &&
+      Object.keys(RERANK_WEIGHT_DEFAULTS).some((key) =>
+        Object.prototype.hasOwnProperty.call(weights, key),
+      )
+        ? weights
+        : null;
+    const legacyDefault =
+      saved &&
+      !Object.prototype.hasOwnProperty.call(saved, "channel") &&
+      Object.entries(RERANK_WEIGHT_LEGACY_DEFAULTS).every(
+        ([key, value]) => Number(saved[key]) === value,
+      );
+    if (legacyDefault) return { ...RERANK_WEIGHT_DEFAULTS };
+
     const out = {};
     for (const k of Object.keys(RERANK_WEIGHT_DEFAULTS)) {
-      out[k] = clampRerankWeight(weights?.[k], RERANK_WEIGHT_DEFAULTS[k]);
+      out[k] =
+        k === "channel" &&
+        saved &&
+        !Object.prototype.hasOwnProperty.call(saved, k)
+          ? 0
+          : clampRerankWeight(saved?.[k], RERANK_WEIGHT_DEFAULTS[k]);
     }
     return Object.values(out).every((weight) => weight === 0)
       ? { ...RERANK_WEIGHT_DEFAULTS }
@@ -3993,7 +4029,7 @@
   });
   loadHideBlockedComment();
 
-  // ── 전체 방송·팔로잉 라이브 제외 태그 ────────────────────────────────────
+  // ── 전체 방송·팔로잉 라이브 제외 필터 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
@@ -4030,8 +4066,11 @@
   function normalizeLiveTagFilter(value) {
     return String(value || "")
       .normalize("NFKC")
+      .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+      .replace(/\s+/g, " ")
       .trim()
       .replace(/^#+\s*/, "")
+      .replace(/\s+/g, " ")
       .trim()
       .toLocaleLowerCase("ko-KR");
   }
@@ -4042,8 +4081,11 @@
     for (const raw of Array.isArray(value) ? value : []) {
       const display = String(raw || "")
         .normalize("NFKC")
+        .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+        .replace(/\s+/g, " ")
         .trim()
         .replace(/^#+\s*/, "")
+        .replace(/\s+/g, " ")
         .trim();
       const key = normalizeLiveTagFilter(display);
       if (!key || seen.has(key)) continue;
@@ -4075,11 +4117,11 @@
               <input type="checkbox" data-live-tag-select="${index}" ${
                 settingsLiveTagSelected.has(key) ? "checked" : ""
               }>
-              <span>#${escapeHtml(tag)}</span>
+              <span>${escapeHtml(tag)}</span>
             </label>
             <button type="button" data-live-tag-remove="${index}" aria-label="${escapeHtml(
               tag,
-            )} 태그 삭제" title="삭제">
+            )} 제외 항목 삭제" title="삭제">
               <svg class="lucide lucide-trash-2" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 6h18"/>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
@@ -4197,8 +4239,8 @@
   liveTagRemoveAll?.addEventListener("click", () => {
     if (!settingsLiveTagFilters.length) return;
     openCbmConfirm({
-      title: "제외 태그 전체 삭제",
-      body: `추가한 제외 태그 ${settingsLiveTagFilters.length}개를 모두 삭제할까요?`,
+      title: "제외 필터 전체 삭제",
+      body: `추가한 제외 항목 ${settingsLiveTagFilters.length}개를 모두 삭제할까요?`,
       confirmLabel: "전체 삭제",
       onConfirm: () => {
         settingsLiveTagSelected.clear();
@@ -5841,19 +5883,74 @@
 
   // ── 카페 클립 인라인 재생(네이버 카페, 기본 ON) ───────────────────────────
   const CAFE_NOW_KEY = "cheeseCafeNow";
+  const CAFE_NOW_AUTOPLAY_KEY = "cheeseCafeNowAutoplay";
+  const CAFE_NOW_AUTOPLAY_MUTED_KEY = "cheeseCafeNowAutoplayMuted";
   const cafeNowInput = document.querySelector("[data-cafe-now]");
+  const cafeNowAutoplayInput = document.querySelector(
+    "[data-cafe-now-autoplay]",
+  );
+  const cafeNowAutoplayRow = cafeNowAutoplayInput?.closest(".settings-item");
+  const cafeNowAutoplayMutedInput = document.querySelector(
+    "[data-cafe-now-autoplay-muted]",
+  );
+  const cafeNowAutoplayMutedRow =
+    cafeNowAutoplayMutedInput?.closest(".settings-item");
+  const reflectCafeNowAutoplayAvailability = () => {
+    const enabled = cafeNowInput?.checked === true;
+    if (cafeNowAutoplayInput) cafeNowAutoplayInput.disabled = !enabled;
+    cafeNowAutoplayRow?.classList.toggle("is-locked", !enabled);
+    const autoplayEnabled =
+      enabled && cafeNowAutoplayInput?.checked === true;
+    if (cafeNowAutoplayMutedInput) {
+      cafeNowAutoplayMutedInput.disabled = !autoplayEnabled;
+    }
+    cafeNowAutoplayMutedRow?.classList.toggle(
+      "is-locked",
+      !autoplayEnabled,
+    );
+  };
   if (cafeNowInput) {
     (async () => {
       let on = true; // 기본 ON
+      let autoplay = false; // 소리·트래픽이 발생할 수 있어 기본 OFF
+      let autoplayMuted = true;
       try {
-        const d = await cachedStorageGet(CAFE_NOW_KEY);
+        const d = await cachedStorageGet([
+          CAFE_NOW_KEY,
+          CAFE_NOW_AUTOPLAY_KEY,
+          CAFE_NOW_AUTOPLAY_MUTED_KEY,
+        ]);
         on = d?.[CAFE_NOW_KEY] !== false; // 미설정/true=사용
+        autoplay = d?.[CAFE_NOW_AUTOPLAY_KEY] === true;
+        autoplayMuted = d?.[CAFE_NOW_AUTOPLAY_MUTED_KEY] !== false;
       } catch {}
       cafeNowInput.checked = on;
+      if (cafeNowAutoplayInput) cafeNowAutoplayInput.checked = autoplay;
+      if (cafeNowAutoplayMutedInput) {
+        cafeNowAutoplayMutedInput.checked = autoplayMuted;
+      }
+      reflectCafeNowAutoplayAvailability();
     })();
     cafeNowInput.addEventListener("change", () => {
       try {
         cachedStorageSet({ [CAFE_NOW_KEY]: cafeNowInput.checked });
+      } catch {}
+      reflectCafeNowAutoplayAvailability();
+    });
+    cafeNowAutoplayInput?.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [CAFE_NOW_AUTOPLAY_KEY]: cafeNowAutoplayInput.checked,
+        });
+      } catch {}
+      reflectCafeNowAutoplayAvailability();
+    });
+    cafeNowAutoplayMutedInput?.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [CAFE_NOW_AUTOPLAY_MUTED_KEY]:
+            cafeNowAutoplayMutedInput.checked,
+        });
       } catch {}
     });
   }

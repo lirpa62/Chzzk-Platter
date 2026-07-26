@@ -664,6 +664,10 @@
   let state = DEFAULT_STATE();
   let currentPageKey = null; // 현재 페이지 raw 키(live:<id>|video:<no>)
   let currentMediaId = null; // 해석된 채널id(설정 저장/복원 키)
+  // 믹서의 켜짐 상태는 탭 안에서만 복원한다. 영구 저장된 enabled=true를 불러오면
+  // 예전에 믹서를 켰던 채널이 여러 새 탭 중 하나에서 예고 없이 자동 활성화된다.
+  // 같은 탭에서 다른 페이지로 갔다 돌아오는 사용성은 pageKey별 메모리 상태로 유지한다.
+  const tabEnabledPageKeys = new Set();
   let wideScreenAppliedForPage = null; // 넓은 화면 자동 적용을 끝낸 pageKey(미디어당 1회)
   let wideScreenRetryUntil = 0; // viewmode 버튼이 늦게 뜰 수 있어 잠깐 재시도하는 마감 시각
   // 현재 미디어의 저장 설정(프리셋 등) 로드 완료 여부. '항상 켜기' 자동 활성화는
@@ -904,6 +908,7 @@
     audio.connected = false;
     audio.video = video || null;
     state.enabled = false;
+    if (currentPageKey) tabEnabledPageKeys.delete(currentPageKey);
     // 실패를 두 종류로 구분한다:
     //  1) 진짜 충돌(InvalidStateError): createMediaElementSource는 video당 1회만 가능.
     //     다른 확장이 이미 같은 video로 source를 만들었으면 우리는 절대 만들 수 없다
@@ -1058,12 +1063,17 @@
 
   function setEnabled(enabled) {
     state.enabled = enabled;
+    if (currentPageKey) {
+      if (enabled) tabEnabledPageKeys.add(currentPageKey);
+      else tabEnabledPageKeys.delete(currentPageKey);
+    }
     if (enabled) {
       graphConflict = false;
       clearGraphRetryBlock();
       const video = findVideo();
       if (!video) {
         state.enabled = false;
+        if (currentPageKey) tabEnabledPageKeys.delete(currentPageKey);
         syncUI();
         return;
       }
@@ -1926,7 +1936,9 @@
         ? channelBaseState
         : snapshotChannelPreset();
     const out = {
-      enabled: state.enabled,
+      // 켜짐 상태는 현재 탭 안에서만 관리한다. false를 명시해 이전 버전에서 남은
+      // 영구 enabled=true도 다음 저장 때 정리한다.
+      enabled: false,
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
       preset: preset.preset,
@@ -1971,6 +1983,9 @@
           customPresets: normalizeCustomPresets(saved.customPresets),
           defaultCustomId: String(saved.defaultCustomId || ""),
         };
+        // 영구 저장값의 enabled는 사용하지 않는다. 같은 탭에서 이 페이지를 켜 둔
+        // 기록만 복원해 새 탭 여러 개 중 하나가 임의로 켜지는 현상을 막는다.
+        state.enabled = tabEnabledPageKeys.has(currentPageKey);
         globalDefaultPreset = normalizeGlobalDefaultPreset(saved.globalDefault);
         // 기본값으로 등록된 커스텀이 더 이상 없으면(삭제됨) 등록 해제 → 원래 기본 복귀.
         if (
@@ -2016,7 +2031,7 @@
       // 이미 state에 반영돼 있으므로 자동으로 켜도 그 프리셋이 적용된다).
       stateLoaded = true;
       maybeAutoEnableMixer();
-      // 저장된 enabled 채널도 클릭 없이 복원되도록 재생 기반 resume 을 시도한다.
+      // 같은 탭에서 복원된 enabled 상태도 클릭 없이 이어지도록 재생 기반 resume을 시도한다.
       bindVideoAutoEnable();
     } else if (e.data.type === "globals-changed") {
       const prevEnabled = globalDefaultPreset.enabled;
@@ -3719,13 +3734,13 @@
   // 재생되면 AudioContext resume 을 시도한다. 자동재생 정책이 허용하면 resume 이 성공해
   // (state=running) 클릭 없이도 '항상 켜기' 믹서가 걸리고, 허용 안 되면 조용히 실패해
   // 기존처럼 첫 클릭을 기다린다(무해). SPA 로 video 가 교체돼도 매번 새로 바인딩한다.
-  // 클릭 없이 자동 활성이 필요한 상황: '항상 켜기'(mixerAlwaysOn) 또는 이 채널에 저장된
-  // enabled=true(사용자가 예전에 켠 채널). 둘 다 저장 프리셋 로드(stateLoaded) 후 판단.
+  // 클릭 없이 자동 활성이 필요한 상황: '항상 켜기'(mixerAlwaysOn) 또는 같은 탭에서
+  // 이 페이지를 켠 채 이동했다 돌아온 경우. 둘 다 저장 프리셋 로드 후 판단한다.
   function wantsAutoEnable() {
     if (userGestureSeen) return false;
     if (state.userDisabled) return false; // 이 채널은 직접 끔
     if (mixerAlwaysOn) return true;
-    return stateLoaded && state.enabled === true; // 저장된 켠 상태
+    return stateLoaded && state.enabled === true; // 현재 탭에서 복원한 켠 상태
   }
   const boundAutoEnableVideos = new WeakSet();
   // 자동재생이 이미 허용됐는지 추정: video가 소리를 내며 재생 중이거나 navigator의
@@ -3753,7 +3768,7 @@
       const proceed = () => {
         if (audio.ctx && audio.ctx.state === "running") {
           userGestureSeen = true; // resume 성공 = 오디오 시작 가능 상태
-          // 항상 켜기면 maybeAutoEnableMixer, 저장된 enabled면 그래프만 복원.
+          // 항상 켜기면 maybeAutoEnableMixer, 탭 복원 상태면 그래프만 복원.
           if (mixerAlwaysOn) maybeAutoEnableMixer();
           if (state.enabled && !audio.connected) ensureEnabledGraph();
         }
@@ -7200,7 +7215,16 @@
       }
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
-      state = DEFAULT_STATE();
+      // 커스텀 프리셋과 '기본' 대체값은 채널별 값이 아니라 전역 공유 데이터다.
+      // 채널 전환 때 함께 빈 값으로 초기화하면 비동기 로드가 끝날 때까지 패널에서
+      // 프리셋이 삭제된 것처럼 보이고, 로드 실패 시에는 그 상태가 계속 남는다.
+      const sharedCustomPresets = normalizeCustomPresets(state.customPresets);
+      const sharedDefaultCustomId = String(state.defaultCustomId || "");
+      state = {
+        ...DEFAULT_STATE(),
+        customPresets: sharedCustomPresets,
+        defaultCustomId: sharedDefaultCustomId,
+      };
       customDraft = null;
       draftBackup = null; // 미디어 전환 → 이전 드래프트 복원 대상 무효
       clearPresetDirty();

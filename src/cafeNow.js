@@ -17,15 +17,36 @@
   const PLAYER_SELECTOR = "[data-cheese-cafe-player]";
   const STANDALONE_PLAYER_SELECTOR = "[data-cheese-cafe-standalone]";
   const CHZZK_ICON_URL = "https://chzzk.naver.com/favicon.ico";
+  const CAFE_NOW_KEY = "cheeseCafeNow";
+  const CAFE_NOW_AUTOPLAY_KEY = "cheeseCafeNowAutoplay";
+  const CAFE_NOW_AUTOPLAY_MUTED_KEY = "cheeseCafeNowAutoplayMuted";
+  const CAFE_CLIP_PLAYBACK_MESSAGE = "cheese-platter-cafe-clip-playback";
+  const AUTOPLAY_START_RATIO = 0.55;
+  const AUTOPLAY_KEEP_RATIO = 0.2;
+  const AUTOPLAY_SWITCH_MARGIN = 0.15;
+  const AUTOPLAY_RELEASE_DELAY_MS = 30000;
 
   const OBSERVED_ATTRIBUTES = ["href", "data-url", "data-link-url", "data-href"];
 
   let scanQueued = false;
+  let autoplayEvaluationQueued = false;
+  let cafeAutoplayEnabled = false;
+  let cafeAutoplayMuted = true;
+  let autoplayObserver = null;
+  let activeAutoplayPlayer = null;
+  let autoplayVisibilityListenerBound = false;
+  let playbackMessageListenerBound = false;
+  // 사용자가 클립 플레이어를 한 번이라도 직접 조작했는지. 사용자 활성화는 origin
+  // (chzzk.naver.com) 단위로 유지되므로, 한 번 활성화되면 이후 새로 띄우는 embed 는
+  // 처음부터 소리 있게 자동재생할 수 있다. 페이지를 벗어나면 초기화된다.
+  let clipOriginActivated = false;
   const pendingRoots = new Set();
   const metadataRequests = new Map();
   const metadataCache = new Map();
   const thumbnailDimensionRequests = new Map();
   const oglinkStates = new WeakMap();
+  const autoplayVisibility = new Map();
+  const autoplayReleaseTimers = new WeakMap();
 
   function getCandidateValues(element) {
     const values = OBSERVED_ATTRIBUTES.map((attribute) =>
@@ -76,6 +97,384 @@
       .trim();
   }
 
+  function getPlayerMedia(player) {
+    if (!(player instanceof HTMLElement)) return null;
+    const type = String(player.dataset.cheeseCafeMediaType || "");
+    const id = String(player.dataset.cheeseCafeMediaId || "");
+    return type && id ? { type, id } : null;
+  }
+
+  function postPlayerCommand(frame, action) {
+    if (!(frame instanceof HTMLIFrameElement) || !frame.contentWindow) return;
+    frame.contentWindow.postMessage(
+      {
+        source: CAFE_CLIP_PLAYBACK_MESSAGE,
+        action,
+        muted: cafeAutoplayMuted,
+      },
+      "https://chzzk.naver.com",
+    );
+  }
+
+  // 우리 클립이 재생을 시작하면 같은 문서의 다른 재생 중인 영상(네이버 카페 자체 동영상
+  // 등)을 멈춘다. 우리 자동재생 관리자는 우리 플레이어만 추적하므로, 이게 없으면 카페
+  // 동영상과 클립 소리가 겹쳐 들린다. 크로스 오리진 iframe 내부는 건드릴 수 없어
+  // 같은 문서의 <video> 만 대상으로 한다.
+  function pauseOtherDocumentVideos() {
+    document.querySelectorAll("video").forEach((video) => {
+      if (!(video instanceof HTMLVideoElement) || video.paused) return;
+      if (video.closest(PLAYER_SELECTOR)) return; // 우리 플레이어는 제외
+      try {
+        video.pause();
+      } catch {}
+    });
+  }
+
+  // 다른 클립 플레이어 정지. iframe 내부는 크로스 오리진이라 postMessage 로만 멈춘다.
+  function pauseOtherClipPlayers(exceptPlayer) {
+    document.querySelectorAll(PLAYER_SELECTOR).forEach((player) => {
+      if (player === exceptPlayer || !(player instanceof HTMLElement)) return;
+      const frame = player.querySelector(
+        ":scope iframe.cheese-cafe-player__frame",
+      );
+      if (!(frame instanceof HTMLIFrameElement)) return;
+      postPlayerCommand(frame, "pause");
+      player.dataset.cheeseCafeAutoplayMode = "idle";
+      if (activeAutoplayPlayer === player) activeAutoplayPlayer = null;
+    });
+  }
+
+  function createPlayerFrame(player, media, options = {}) {
+    const frame = document.createElement("iframe");
+    frame.className = "cheese-cafe-player__frame";
+    frame.src = api.getEmbedUrl(media, {
+      autoPlay: options.autoPlay === true,
+      // 소리 있는 자동재생은 사용자 제스처 전까지 브라우저가 차단한다. 다만 이미 이
+      // origin 에 활성화가 생겼다면(clipOriginActivated) 처음부터 소리 있게 시작한다
+      // → 세션 내 첫 클립만 한 번 클릭하면 이후 클립은 클릭 없이 소리가 난다.
+      muted:
+        options.autoPlay === true &&
+        (cafeAutoplayMuted || !clipOriginActivated),
+    });
+    frame.title = "CHZZK Player";
+    frame.frameBorder = "0";
+    frame.loading = "lazy";
+    frame.allow = "autoplay; clipboard-write; web-share";
+    frame.allowFullscreen = true;
+    frame.addEventListener("load", () => {
+      if (!cafeAutoplayEnabled || !frame.isConnected) return;
+      const action =
+        player.dataset.cheeseCafeAutoplayMode === "active" ? "play" : "pause";
+      postPlayerCommand(frame, action);
+    });
+    return frame;
+  }
+
+  function mountPlayerFrame(player, options = {}) {
+    if (!(player instanceof HTMLElement)) return null;
+    const currentFrame = player.querySelector(
+      ":scope iframe.cheese-cafe-player__frame",
+    );
+    if (currentFrame instanceof HTMLIFrameElement) return currentFrame;
+
+    const frameWrap = player.querySelector(
+      ":scope .cheese-cafe-player__frame-wrap",
+    );
+    const media = getPlayerMedia(player);
+    if (!(frameWrap instanceof HTMLElement) || !media) return null;
+
+    const autoPlay = options.autoPlay === true;
+    const frame = createPlayerFrame(player, media, { autoPlay });
+    player.dataset.cheeseCafeEmbedLoaded = "true";
+    player.dataset.cheeseCafeAutoplayInitialized = autoPlay ? "true" : "false";
+    frameWrap.append(frame);
+    return frame;
+  }
+
+  function clearAutoplayRelease(player) {
+    const timer = autoplayReleaseTimers.get(player);
+    if (timer) clearTimeout(timer);
+    autoplayReleaseTimers.delete(player);
+  }
+
+  function scheduleAutoplayRelease(player, frame) {
+    clearAutoplayRelease(player);
+    const timer = window.setTimeout(() => {
+      autoplayReleaseTimers.delete(player);
+      if (
+        !cafeAutoplayEnabled ||
+        !player.isConnected ||
+        player.dataset.cheeseCafeAutoplayMode !== "idle"
+      ) {
+        return;
+      }
+
+      if ((autoplayVisibility.get(player) || 0) > 0) {
+        scheduleAutoplayRelease(player, frame);
+        return;
+      }
+
+      if (frame.isConnected) frame.remove();
+      player.dataset.cheeseCafeAutoplayInitialized = "false";
+      player.dataset.cheeseCafeEmbedLoaded = "false";
+    }, AUTOPLAY_RELEASE_DELAY_MS);
+    autoplayReleaseTimers.set(player, timer);
+  }
+
+  function ensurePlayerEmbedLoaded(player) {
+    if (!(player instanceof HTMLElement)) return;
+    if (player.dataset.cheeseCafeEmbedLoaded === "true") return;
+    mountPlayerFrame(player);
+  }
+
+  function setPlayerAutoplay(player, active) {
+    if (!(player instanceof HTMLElement)) return;
+    // 사용자가 직접 멈춘 플레이어는 다시 자동재생하지 않는다(스크롤로 재진입해도).
+    if (active && player.dataset.cheeseCafeUserPaused === "true") return;
+
+    const mode = active ? "active" : "idle";
+    if (player.dataset.cheeseCafeAutoplayMode === mode) return;
+    player.dataset.cheeseCafeAutoplayMode = mode;
+    if (!active) {
+      const frame = player.querySelector(
+        ":scope iframe.cheese-cafe-player__frame",
+      );
+      if (
+        frame instanceof HTMLIFrameElement &&
+        player.dataset.cheeseCafeAutoplayInitialized === "true"
+      ) {
+        postPlayerCommand(frame, "pause");
+        scheduleAutoplayRelease(player, frame);
+      }
+      return;
+    }
+
+    clearAutoplayRelease(player);
+    const currentFrame = player.querySelector(
+      ":scope iframe.cheese-cafe-player__frame",
+    );
+    if (
+      currentFrame instanceof HTMLIFrameElement &&
+      player.dataset.cheeseCafeAutoplayInitialized === "true"
+    ) {
+      postPlayerCommand(currentFrame, "play");
+      return;
+    }
+
+    // Navigating an already connected iframe adds entries to the browser's
+    // joint session history. Mount a fresh iframe with its final URL instead.
+    currentFrame?.remove();
+    player.dataset.cheeseCafeEmbedLoaded = "false";
+    player.dataset.cheeseCafeAutoplayInitialized = "false";
+    mountPlayerFrame(player, { autoPlay: true });
+  }
+
+  function cleanupAutoplayPlayers() {
+    for (const player of autoplayVisibility.keys()) {
+      if (player.isConnected) continue;
+      clearAutoplayRelease(player);
+      autoplayObserver?.unobserve(player);
+      autoplayVisibility.delete(player);
+      if (activeAutoplayPlayer === player) activeAutoplayPlayer = null;
+    }
+  }
+
+  function evaluateAutoplayPlayer() {
+    autoplayEvaluationQueued = false;
+    if (!cafeAutoplayEnabled) return;
+
+    cleanupAutoplayPlayers();
+    if (document.hidden) {
+      if (activeAutoplayPlayer) setPlayerAutoplay(activeAutoplayPlayer, false);
+      activeAutoplayPlayer = null;
+      return;
+    }
+
+    let candidate = null;
+    let candidateRatio = 0;
+    for (const [player, ratio] of autoplayVisibility) {
+      if (ratio < AUTOPLAY_START_RATIO || ratio <= candidateRatio) continue;
+      candidate = player;
+      candidateRatio = ratio;
+    }
+
+    const activeRatio = activeAutoplayPlayer
+      ? autoplayVisibility.get(activeAutoplayPlayer) || 0
+      : 0;
+    const keepActive =
+      activeAutoplayPlayer?.isConnected &&
+      activeRatio >= AUTOPLAY_KEEP_RATIO &&
+      (!candidate ||
+        candidate === activeAutoplayPlayer ||
+        candidateRatio < activeRatio + AUTOPLAY_SWITCH_MARGIN);
+    if (keepActive) {
+      for (const [player, ratio] of autoplayVisibility) {
+        if (player !== activeAutoplayPlayer && ratio > 0) {
+          ensurePlayerEmbedLoaded(player);
+        }
+      }
+      return;
+    }
+
+    if (activeAutoplayPlayer && activeAutoplayPlayer !== candidate) {
+      setPlayerAutoplay(activeAutoplayPlayer, false);
+    }
+    activeAutoplayPlayer = candidate;
+    if (candidate) setPlayerAutoplay(candidate, true);
+    for (const [player, ratio] of autoplayVisibility) {
+      if (player !== candidate && ratio > 0) ensurePlayerEmbedLoaded(player);
+    }
+  }
+
+  function scheduleAutoplayEvaluation() {
+    if (!cafeAutoplayEnabled || autoplayEvaluationQueued) return;
+    autoplayEvaluationQueued = true;
+    requestAnimationFrame(evaluateAutoplayPlayer);
+  }
+
+  function ensureAutoplayObserver() {
+    if (
+      !cafeAutoplayEnabled ||
+      autoplayObserver ||
+      typeof IntersectionObserver !== "function"
+    ) {
+      return;
+    }
+    autoplayObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          autoplayVisibility.set(
+            entry.target,
+            entry.isIntersecting ? entry.intersectionRatio : 0,
+          );
+        });
+        scheduleAutoplayEvaluation();
+      },
+      { threshold: [0, AUTOPLAY_KEEP_RATIO, AUTOPLAY_START_RATIO, 0.75, 1] },
+    );
+  }
+
+  function registerAutoplayPlayer(player) {
+    if (!cafeAutoplayEnabled || !(player instanceof HTMLElement)) return;
+    ensureAutoplayObserver();
+    if (!autoplayObserver || autoplayVisibility.has(player)) return;
+    autoplayVisibility.set(player, 0);
+    autoplayObserver.observe(player);
+  }
+
+  // embed(cafeClipPlayback.js)가 보내는 재생 상태 알림 처리.
+  //  - user-paused: 사용자가 직접 멈춤 → 자동재생 대상에서 제외
+  //  - playing: 재생 시작 → 카페의 다른 재생 중인 영상 정지(소리 겹침 방지)
+  //  - activated: 사용자가 클립을 직접 조작함 → 이후 클립은 소리 있게 시작
+  function handlePlaybackMessage(event) {
+    const name = event.data?.event;
+    if (
+      event.data?.source !== CAFE_CLIP_PLAYBACK_MESSAGE ||
+      (name !== "user-paused" && name !== "playing" && name !== "activated")
+    ) {
+      return;
+    }
+    try {
+      if (new URL(event.origin).hostname !== "chzzk.naver.com") return;
+    } catch {
+      return;
+    }
+
+    if (name === "activated") {
+      clipOriginActivated = true;
+      return;
+    }
+
+    const frames = document.querySelectorAll(
+      "iframe.cheese-cafe-player__frame",
+    );
+    for (const frame of frames) {
+      if (frame.contentWindow !== event.source) continue;
+      const player = frame.closest(PLAYER_SELECTOR);
+      if (!(player instanceof HTMLElement)) return;
+
+      if (name === "playing") {
+        // 이 클립이 재생 중이므로 다른 클립·카페 동영상을 멈춘다.
+        pauseOtherDocumentVideos();
+        pauseOtherClipPlayers(player);
+        // 사용자가 직접 재생을 눌렀다면 이전 '직접 멈춤' 표시는 해제한다.
+        delete player.dataset.cheeseCafeUserPaused;
+        return;
+      }
+
+      player.dataset.cheeseCafeUserPaused = "true";
+      player.dataset.cheeseCafeAutoplayMode = "idle";
+      if (activeAutoplayPlayer === player) activeAutoplayPlayer = null;
+      clearAutoplayRelease(player);
+      return;
+    }
+  }
+
+  function startAutoplayManager() {
+    if (!cafeAutoplayEnabled) return;
+    ensureAutoplayObserver();
+    if (!playbackMessageListenerBound) {
+      window.addEventListener("message", handlePlaybackMessage);
+      playbackMessageListenerBound = true;
+    }
+    document.querySelectorAll(PLAYER_SELECTOR).forEach(registerAutoplayPlayer);
+    if (!autoplayVisibilityListenerBound) {
+      document.addEventListener(
+        "visibilitychange",
+        scheduleAutoplayEvaluation,
+      );
+      autoplayVisibilityListenerBound = true;
+    }
+    scheduleAutoplayEvaluation();
+  }
+
+  function stopAutoplayManager() {
+    if (activeAutoplayPlayer) {
+      setPlayerAutoplay(activeAutoplayPlayer, false);
+    }
+    activeAutoplayPlayer = null;
+    autoplayObserver?.disconnect();
+    autoplayObserver = null;
+    document.querySelectorAll(PLAYER_SELECTOR).forEach((player) => {
+      clearAutoplayRelease(player);
+      ensurePlayerEmbedLoaded(player);
+    });
+    autoplayVisibility.clear();
+    if (autoplayVisibilityListenerBound) {
+      document.removeEventListener(
+        "visibilitychange",
+        scheduleAutoplayEvaluation,
+      );
+      autoplayVisibilityListenerBound = false;
+    }
+    if (playbackMessageListenerBound) {
+      window.removeEventListener("message", handlePlaybackMessage);
+      playbackMessageListenerBound = false;
+    }
+  }
+
+  function setCafeAutoplayEnabled(enabled) {
+    const nextEnabled = enabled === true;
+    const changed = cafeAutoplayEnabled !== nextEnabled;
+    cafeAutoplayEnabled = nextEnabled;
+    if (!started) return;
+    if (nextEnabled) {
+      startAutoplayManager();
+    } else if (changed || autoplayObserver || activeAutoplayPlayer) {
+      stopAutoplayManager();
+    }
+  }
+
+  function setCafeAutoplayMuted(muted) {
+    cafeAutoplayMuted = muted !== false;
+    if (started && activeAutoplayPlayer) {
+      const frame = activeAutoplayPlayer.querySelector(
+        ":scope iframe.cheese-cafe-player__frame",
+      );
+      postPlayerCommand(frame, "play");
+    }
+  }
+
   function createPlayer(media) {
     const mediaKey = api.getMediaKey(media);
     const wrapper = document.createElement("div");
@@ -87,17 +486,16 @@
     const frameWrap = document.createElement("div");
     frameWrap.className = "cheese-cafe-player__frame-wrap";
 
-    const frame = document.createElement("iframe");
-    frame.className = "cheese-cafe-player__frame";
-    frame.src = api.getEmbedUrl(media);
-    frame.title = "CHZZK Player";
-    frame.frameBorder = "0";
-    frame.loading = "lazy";
-    frame.allow = "autoplay; clipboard-write; web-share";
-    frame.allowFullscreen = true;
-
-    frameWrap.append(frame);
+    const deferInitialLoad =
+      cafeAutoplayEnabled && typeof IntersectionObserver === "function";
+    wrapper.dataset.cheeseCafeEmbedLoaded = "false";
+    wrapper.dataset.cheeseCafeAutoplayMode = "idle";
+    wrapper.dataset.cheeseCafeAutoplayInitialized = "false";
     wrapper.append(frameWrap);
+    if (!deferInitialLoad) mountPlayerFrame(wrapper);
+    queueMicrotask(() => {
+      if (wrapper.isConnected) registerAutoplayPlayer(wrapper);
+    });
 
     return wrapper;
   }
@@ -601,6 +999,7 @@
   }
 
   function onMutations(mutations) {
+    let removedPlayer = false;
     mutations.forEach((mutation) => {
       if (mutation.type === "attributes") {
         queueScan(mutation.target);
@@ -610,11 +1009,24 @@
       mutation.addedNodes.forEach((node) => {
         if (node instanceof Element) queueScan(node);
       });
+      if (
+        cafeAutoplayEnabled &&
+        [...mutation.removedNodes].some(
+          (node) =>
+            node instanceof Element &&
+            (node.matches(PLAYER_SELECTOR) ||
+              Boolean(node.querySelector(PLAYER_SELECTOR))),
+        )
+      ) {
+        removedPlayer = true;
+      }
     });
+    if (removedPlayer) scheduleAutoplayEvaluation();
   }
 
   function start() {
     queueScan(document);
+    startAutoplayManager();
 
     const observer = new MutationObserver(onMutations);
     observer.observe(document.documentElement, {
@@ -657,7 +1069,6 @@
   // all_frames 로 여러 프레임에서 이 스크립트가 돌지만, storage 는 확장 전역이라 각
   // 프레임이 같은 값을 읽는다. 토글을 끄면 새로고침 시 실행 안 함(동적 해제는 복잡해서
   // 새 링크 스캔만 멈추게 게이트한다).
-  const CAFE_NOW_KEY = "cheeseCafeNow";
   let started = false;
   function bootIfEnabled() {
     if (started) return;
@@ -670,14 +1081,39 @@
     }
   }
   try {
-    chrome.storage?.local?.get(CAFE_NOW_KEY, (data) => {
-      if (chrome.runtime?.lastError) {
-        bootIfEnabled(); // storage 접근 실패 시 기본 동작(ON)
-        return;
-      }
-      if (data?.[CAFE_NOW_KEY] !== false) bootIfEnabled(); // 미설정/true=ON
-    });
+    chrome.storage?.local?.get(
+      [
+        CAFE_NOW_KEY,
+        CAFE_NOW_AUTOPLAY_KEY,
+        CAFE_NOW_AUTOPLAY_MUTED_KEY,
+      ],
+      (data) => {
+        if (chrome.runtime?.lastError) {
+          bootIfEnabled(); // storage 접근 실패 시 기본 동작(ON)
+          return;
+        }
+        cafeAutoplayEnabled = data?.[CAFE_NOW_AUTOPLAY_KEY] === true;
+        cafeAutoplayMuted = data?.[CAFE_NOW_AUTOPLAY_MUTED_KEY] !== false;
+        if (data?.[CAFE_NOW_KEY] !== false) bootIfEnabled(); // 미설정/true=ON
+      },
+    );
   } catch {
     bootIfEnabled();
   }
+
+  try {
+    chrome.storage?.onChanged?.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      if (changes[CAFE_NOW_AUTOPLAY_KEY]) {
+        setCafeAutoplayEnabled(
+          changes[CAFE_NOW_AUTOPLAY_KEY].newValue === true,
+        );
+      }
+      if (changes[CAFE_NOW_AUTOPLAY_MUTED_KEY]) {
+        setCafeAutoplayMuted(
+          changes[CAFE_NOW_AUTOPLAY_MUTED_KEY].newValue !== false,
+        );
+      }
+    });
+  } catch {}
 })();

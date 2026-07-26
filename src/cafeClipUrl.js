@@ -74,13 +74,16 @@
     return getMediaUrl({ type: "clip", id: clipId });
   }
 
-  function getEmbedUrl(mediaOrClipId) {
+  function getEmbedUrl(mediaOrClipId, options = {}) {
     const media = normalizeMedia(mediaOrClipId);
+    const autoPlay = options.autoPlay === true;
+    const muted = options.muted === true;
+    // CHZZK embed parses these lowercase query values with Number(...).
     const params = new URLSearchParams({
       parent: "cafe.naver.com",
       extension: "ChzzkCafeNow",
-      autoPlay: "false",
-      muted: "false",
+      autoplay: autoPlay ? "1" : "0",
+      muted: muted ? "1" : "0",
     });
 
     return `https://chzzk.naver.com/embed/clip/${encodeURIComponent(
