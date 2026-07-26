@@ -220,6 +220,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="popupPlayer"
+            role="tab"
+            aria-selected="false"
+          >
+            팝업 플레이어
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="channel"
             role="tab"
             aria-selected="false"
@@ -677,7 +686,8 @@
                 <label>
                   <span class="settings-item-name">실시간 따라잡기 숨김</span>
                   <span class="settings-item-desc"
-                    >라이브 지연 따라잡기 버튼</span
+                    >라이브 지연 따라잡기 버튼(단축키 Shift+F, 숨기면 단축키도
+                    끔)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1085,6 +1095,20 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="screenshotButton" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">숨긴 버튼의 기능도 끄기</span>
+                  <span class="settings-item-desc"
+                    >켜면(기본) 위에서 숨긴 버튼의 기능과 단축키까지 함께 끕니다.
+                    끄면 버튼만 숨기고 단축키(Shift+A/S/M/I/F, 방향키)는 그대로
+                    사용할 수 있습니다(체크=기능도 끔)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-player-disable-hidden />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2302,8 +2326,9 @@
                 <label>
                   <span class="settings-item-name">제외 필터 버튼 표시</span>
                   <span class="settings-item-desc"
-                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그·카테고리를 관리하는
-                    '제외 필터 추가' 버튼을 표시합니다(체크=표시, 기본 꺼짐).</span
+                    >전체 방송과 팔로잉 탐색 페이지에 제외 태그·카테고리를
+                    관리하는 '제외 필터 추가' 버튼을 표시합니다(체크=표시, 기본
+                    꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3085,8 +3110,8 @@
                   <span class="settings-item-name">즐겨찾기 사용</span>
                   <span class="settings-item-desc"
                     >전용 팔로잉 목록의 즐겨찾기 영역과 별표 버튼을 사용합니다.
-                    끄면 저장된 즐겨찾기는 유지되고 해당 채널은 일반 팔로잉 목록에
-                    표시됩니다(기본 켜짐).</span
+                    끄면 저장된 즐겨찾기는 유지되고 해당 채널은 일반 팔로잉
+                    목록에 표시됩니다(기본 켜짐).</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3102,16 +3127,13 @@
                 <label>
                   <span class="settings-item-name">자동 펼치기</span>
                   <span class="settings-item-desc"
-                    >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다. '접기'를
-                    누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다.
+                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
                     유지합니다(체크=사용, 기본 꺼짐).</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowFavAutoExpand"
-                  />
+                  <input type="checkbox" data-feature="sbFollowFavAutoExpand" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -3367,8 +3389,8 @@
                 <label>
                   <span class="settings-item-name">자동 펼치기</span>
                   <span class="settings-item-desc"
-                    >그룹 영역을 처음부터 모든 그룹까지 펼쳐서 표시합니다. '접기'를
-                    누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    >그룹 영역을 처음부터 모든 그룹까지 펼쳐서 표시합니다.
+                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
                     유지합니다(체크=사용, 기본 꺼짐).</span
                   >
                 </label>
@@ -3857,6 +3879,346 @@
 
           <section
             class="settings-group"
+            data-panel="popupPlayer"
+            aria-label="팝업 플레이어"
+          >
+            <h2 class="settings-group-title">팝업 플레이어</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">팝업 플레이어</span>
+                  <span class="settings-item-desc"
+                    >사이드바의 라이브 채널을 본문으로 끌어다 놓으면 떠 있는
+                    창으로 재생합니다. 여러 개를 동시에 열 수
+                    있습니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 팝업 소리</span>
+                  <span class="settings-item-desc"
+                    >여러 팝업을 열었을 때 소리 정책. '첫 팝업만'은 먼저 연
+                    팝업에만 소리를 켭니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-popup-player-audio
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="mute"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    모두 음소거
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="first"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    첫 팝업만
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="all"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    모두 소리
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 초기 크기</span>
+                  <span class="settings-item-desc"
+                    >팝업을 처음 열 때의 크기. 연 뒤에는 우하단을 끌어 자유롭게
+                    조절할 수 있습니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-5"
+                  data-popup-player-size
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="400"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    400
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="510"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    510
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="640"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    640
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="800"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    800
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mode-value="custom"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    커스텀
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-popup-player-size-custom hidden>
+                <label>
+                  <span class="settings-item-name">└ 가로 × 세로 (px)</span>
+                  <span class="settings-item-desc"
+                    >240~2000 사이로 지정합니다</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    min="240"
+                    max="2000"
+                    step="10"
+                    inputmode="numeric"
+                    data-popup-player-size-w
+                    aria-label="팝업 초기 가로(px)"
+                  />
+                  <small>×</small>
+                  <input
+                    type="number"
+                    min="240"
+                    max="2000"
+                    step="10"
+                    inputmode="numeric"
+                    data-popup-player-size-h
+                    aria-label="팝업 초기 세로(px)"
+                  />
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 넓은 화면 자동 적용</span>
+                  <span class="settings-item-desc"
+                    >팝업을 열면 치지직 '넓은 화면'을 자동으로 켭니다(체크=사용,
+                    기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-wide />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 최대 화질 자동 고정</span>
+                  <span class="settings-item-desc"
+                    >팝업에만 적용되며 플레이어의 전역 설정과 무관합니다. 작은
+                    창에 최고 화질을 고정하면 대역폭·CPU 부담이 커지므로 기본
+                    꺼짐입니다(체크=사용)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-maxq />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              팝업 창은 치지직 플레이어를 그대로 사용하므로 재생 시간 제한이
+              없습니다. 창 상단을 드래그해 옮기고, 우하단을 끌어 크기를 조절할
+              수 있습니다. 즐겨찾기 순서 변경(길게 누르기)과는 구분되어
+              동작합니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="popupPlayer"
+            aria-label="팝업 플레이어 버튼"
+          >
+            <h2 class="settings-group-title">팝업 플레이어 버튼</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >오디오 믹서 버튼 (Shift + A)</span
+                  >
+                  <span class="settings-item-desc"
+                    >팝업 안에 오디오 믹서 버튼을 표시합니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-mixer />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >비디오 필터 버튼 (Shift + V)</span
+                  >
+                  <span class="settings-item-desc"
+                    >팝업 안에 비디오 필터 버튼을 표시합니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-filter />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >실시간 따라잡기 버튼 (Shift + F)</span
+                  >
+                  <span class="settings-item-desc"
+                    >팝업 안에 실시간 따라잡기 버튼을
+                    표시합니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-sync />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">되감기 바 표시</span>
+                  <span class="settings-item-desc"
+                    >팝업 안에 라이브 되감기 바를 표시합니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-seekbar />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >스트림 정보 버튼 (Shift + I)</span
+                  >
+                  <span class="settings-item-desc"
+                    >해상도·비트레이트·지연 등 스트림 정보 버튼을
+                    표시합니다(체크=표시, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-stats />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >스크린샷 버튼 (Shift + S)</span
+                  >
+                  <span class="settings-item-desc"
+                    >팝업 안에 스크린샷 버튼을 표시합니다(체크=표시, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-screenshot />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">되감기 버튼 (←)</span>
+                  <span class="settings-item-desc"
+                    >팝업 안에 되감기 버튼을 표시합니다(체크=표시, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-rewind />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">앞으로 감기 버튼 (→)</span>
+                  <span class="settings-item-desc"
+                    >팝업 안에 앞으로 감기 버튼을 표시합니다(체크=표시, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-btn-forward />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >숨긴 버튼의 기능도 끄기</span
+                  >
+                  <span class="settings-item-desc"
+                    >끄면(기본) 버튼만 숨기고 단축키는 그대로 동작합니다. 켜면
+                    위에서 끈 버튼의 기능 자체를 꺼서 단축키로도 동작하지
+                    않습니다(체크=기능도 끔)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-popup-player-disable-hidden />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              팝업 창이 좁을 수 있어 자주 쓰는 세 가지(오디오 믹서·비디오
+              필터·실시간 따라잡기)와 되감기 바만 기본으로 표시합니다. 창을 넓게
+              쓰신다면 나머지도 켜서 사용하세요.
+            </p>
+            <p class="settings-notice">
+              <strong>되감기</strong>와 <strong>앞으로 감기</strong>는 치지직
+              컨트롤에서 한 쌍으로 묶여 있어, '기능도 끄기'는
+              <strong>둘 다 껐을 때만</strong> 적용됩니다. 또한 방향키 되감기는
+              <strong>되감기 바가 표시되는 동안에는 계속 동작</strong>합니다 —
+              방향키까지 끄려면 되감기 바 표시도 함께 꺼 주세요. 그리고
+              <strong>탭 음소거</strong>는 브라우저 탭 전체를 끄는 기능이라
+              팝업만 음소거할 수 없어, 팝업에서는 버튼과 단축키 모두 동작하지
+              않습니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
             data-panel="preview"
             aria-label="카드 미리보기"
           >
@@ -4008,10 +4370,7 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-channel-profile-radius-enabled
-                  />
+                  <input type="checkbox" data-channel-profile-radius-enabled />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -4889,10 +5248,10 @@
                 <label>
                   <span class="settings-item-name">└ 자동재생 음소거</span>
                   <span class="settings-item-desc"
-                    >자동재생 클립의 음소거를 유지합니다. 해제하면 브라우저 정책상
-                    첫 클립만 음소거로 시작하고, 플레이어를 한 번 클릭한 뒤부터는
-                    같은 페이지의 이후 클립이 소리 있게 자동재생됩니다(체크=음소거
-                    유지, 기본 켜짐)</span
+                    >자동재생 클립의 음소거를 유지합니다. 해제하면 브라우저
+                    정책상 첫 클립만 음소거로 시작하고, 플레이어를 한 번 클릭한
+                    뒤부터는 같은 페이지의 이후 클립이 소리 있게
+                    자동재생됩니다(체크=음소거 유지, 기본 켜짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -4904,11 +5263,11 @@
             <p class="settings-group-desc">
               cafe.naver.com 게시글에 붙은 치지직 클립 링크(OG링크)를 감지해 글
               안에서 바로 재생합니다. 자동재생은 화면에 가장 잘 보이는 클립
-              하나만 재생하며 음소거 유지 여부를 선택할 수 있습니다.
-              소리 있는 자동재생은 브라우저 정책상 사용자가 해당 플레이어를 한 번
-              조작한 뒤에만 허용되므로, 음소거를 해제해도 페이지의 첫 클립은
-              음소거로 시작합니다. 자동재생 설정은 열린 카페 페이지에도 바로
-              적용됩니다. 인라인 재생 기능 전체를 켜거나 끈 경우에는 카페 페이지를
+              하나만 재생하며 음소거 유지 여부를 선택할 수 있습니다. 소리 있는
+              자동재생은 브라우저 정책상 사용자가 해당 플레이어를 한 번 조작한
+              뒤에만 허용되므로, 음소거를 해제해도 페이지의 첫 클립은 음소거로
+              시작합니다. 자동재생 설정은 열린 카페 페이지에도 바로 적용됩니다.
+              인라인 재생 기능 전체를 켜거나 끈 경우에는 카페 페이지를
               새로고침해야 합니다.
             </p>
           </section>

@@ -8290,3 +8290,160 @@ html.cheese-vod-chapter-hide
   border: 0 !important;
   box-shadow: none !important;
 }
+
+/* ══ 팝업 플레이어(cheesePopupPlayer) ═══════════════════════════════════════ */
+/* 사이드바 채널을 끌어다 놓으면 뜨는 떠 있는 창. 치지직 페이지를 iframe 으로 그대로
+   띄우므로 광고·그리드를 우회하지 않는다(재생 시간 제한 불필요). */
+.cheese-popup-player {
+  position: absolute;
+  /* 크기는 JS 가 초기값(설정)으로 지정하고, 이후 리사이즈 핸들이 갱신한다. */
+  width: 510px;
+  height: 510px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  min-width: 240px;
+  min-height: 160px;
+}
+
+.cheese-popup-player__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* 드래그 중에는 iframe 이 커서를 먹지 않게 한다(포인터를 놓치면 창이 따라오지 않는다). */
+.cheese-popup-player.is-dragging .cheese-popup-player__frame {
+  pointer-events: none;
+}
+
+/* 상단 드래그 바 — 평소엔 거의 안 보이다가 호버 시 드러난다. */
+.cheese-popup-player__bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 4px;
+  cursor: move;
+  background: linear-gradient(rgb(0 0 0 / 55%), rgb(0 0 0 / 0%));
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.cheese-popup-player:hover .cheese-popup-player__bar,
+.cheese-popup-player.is-dragging .cheese-popup-player__bar {
+  opacity: 1;
+}
+
+.cheese-popup-player__close {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: rgb(0 0 0 / 45%);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.cheese-popup-player__close:hover {
+  background: rgb(224 32 32 / 80%);
+}
+
+/* 팝업 프레임 안에서는 사이드바·헤더를 숨긴다(작은 창에 중복 표시 방지). JS 가 주입을
+   막지만, 치지직 자체 UI 도 좁은 창에서는 방해되므로 CSS 로도 숨긴다. */
+html.cheese-popup-player-frame #sidebar,
+html.cheese-popup-player-frame header#header {
+  display: none !important;
+}
+
+/* 팝업 리사이즈 핸들 — 미리보기(.cheese-follow-preview-resize)와 동일한 아크 아이콘. */
+.cheese-popup-player__resize {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: nwse-resize;
+  z-index: 4;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+  touch-action: none;
+}
+
+.cheese-popup-player__resize svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── 팝업 프레임 내부 레이아웃 보정 ── */
+/* 사이드바가 없으므로 본문 좌측 여백을 없앤다. */
+html.cheese-popup-player-frame div#layout-body {
+  padding-left: 0 !important;
+}
+
+/* 작은 창에서 세로 공간을 꽉 쓴다. 단, 넓은 화면(_is_large_)은 치지직이 자체 비율로
+   계산하므로 건드리지 않는다(강제하면 레이아웃이 깨진다). */
+html.cheese-popup-player-frame
+  div#layout-body
+  > section[class*="_container_"]:not([class*="_is_large_"]) {
+  height: 100vh !important;
+}
+
+/* ── 팝업 안 우리 버튼 표시 정책 ──
+   각 버튼을 옵션으로 켜고 끈다. 숨김은 '표시'만 막는 것이라 기능은 살아 있고
+   단축키는 그대로 동작한다. 좁은 창을 고려해 자주 쓰는 셋(믹서·필터·따라잡기)만
+   기본 ON, 나머지는 기본 OFF 로 둔다. */
+html.cheese-popup-player-frame:not(.cheese-popup-btn-mixer)
+  .cheese-audio-mixer-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-filter)
+  .cheese-video-filter-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-sync)
+  .cheese-live-sync-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-stats)
+  .cheese-stream-stats-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-screenshot)
+  .cheese-screenshot-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-rewind)
+  .cheese-live-rewind-button,
+html.cheese-popup-player-frame:not(.cheese-popup-btn-forward)
+  .cheese-live-forward-button {
+  display: none !important;
+}
+/* 되감기 바는 CSS 로 숨기지 않는다 — liveSeekBar 플래그를 팝업 값으로 보내므로
+   audioMixer 가 바 자체를 만들지 않는다(방향키 seek 판정도 이 값을 따른다). */
+
+/* 탭 음소거만은 옵션을 두지 않는다. 브라우저 탭 음소거는 '탭 단위'라 iframe 하나만
+   끌 수 없고(탭 전체가 꺼져 본창 방송까지 멈춘다), video.muted 로 흉내 내면 같은
+   버튼이 본창과 다른 의미가 되어 혼란스럽다. */
+html.cheese-popup-player-frame .cheese-tab-mute-button {
+  display: none !important;
+}
+
+/* ── 기본 플레이어: '숨긴 버튼의 기능도 끄기'를 껐을 때 ──
+   기능 플래그는 false 로 되돌려(단축키 유지) MAIN world 가 버튼을 만들게 두고,
+   표시만 여기서 숨긴다. 켜져 있을 때는 기존대로 플래그가 버튼 자체를 없앤다. */
+html.cheese-player-hide-audioMixer .cheese-audio-mixer-button,
+html.cheese-player-hide-videoFilter .cheese-video-filter-button,
+html.cheese-player-hide-liveSync .cheese-live-sync-button,
+html.cheese-player-hide-streamStats .cheese-stream-stats-button,
+html.cheese-player-hide-tabMute .cheese-tab-mute-button,
+html.cheese-player-hide-screenshotButton .cheese-screenshot-button,
+html.cheese-player-hide-liveRewind .cheese-live-rewind-button,
+html.cheese-player-hide-liveRewind .cheese-live-forward-button {
+  display: none !important;
+}

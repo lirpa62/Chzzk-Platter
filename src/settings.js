@@ -55,6 +55,23 @@
     "cheeseFollowChannelTooltip",
     "cheeseFollowCleanup",
     "cheeseFollowOpenNewTab",
+    "cheesePlayerDisableHidden",
+    "cheesePopupPlayer",
+    "cheesePopupPlayerAudio",
+    "cheesePopupPlayerSize",
+    "cheesePopupPlayerSizeW",
+    "cheesePopupPlayerSizeH",
+    "cheesePopupPlayerWide",
+    "cheesePopupPlayerBtnMixer",
+    "cheesePopupPlayerBtnFilter",
+    "cheesePopupPlayerBtnSync",
+    "cheesePopupPlayerSeekBar",
+    "cheesePopupPlayerBtnStats",
+    "cheesePopupPlayerBtnScreenshot",
+    "cheesePopupPlayerBtnRewind",
+    "cheesePopupPlayerBtnForward",
+    "cheesePopupPlayerMaxQuality",
+    "cheesePopupPlayerDisableHidden",
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
     "cheeseFollowPreviewHiddenParts",
@@ -2077,6 +2094,172 @@
       });
     });
   }
+
+  // ── 팝업 플레이어(사이드바 채널 드래그 → 떠 있는 창) ──────────────────────
+  const popupPlayerInput = document.querySelector("[data-popup-player]");
+  if (popupPlayerInput) {
+    const KEY = "cheesePopupPlayer";
+    (async () => {
+      let on = false; // 기본 OFF
+      try {
+        const d = await cachedStorageGet(KEY);
+        on = d?.[KEY] === true;
+      } catch {}
+      popupPlayerInput.checked = on;
+    })();
+    popupPlayerInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [KEY]: popupPlayerInput.checked });
+      } catch {}
+    });
+  }
+
+  const popupPlayerAudioGroup = document.querySelector(
+    "[data-popup-player-audio]",
+  );
+  if (popupPlayerAudioGroup) {
+    const AUDIO_KEY = "cheesePopupPlayerAudio";
+    const MODES = ["mute", "first", "all"];
+    const audioButtons = Array.from(
+      popupPlayerAudioGroup.querySelectorAll("[data-mode-value]"),
+    );
+    function reflectPopupAudio(mode) {
+      const v = MODES.includes(mode) ? mode : "first";
+      audioButtons.forEach((btn) => {
+        const active = btn.dataset.modeValue === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "first"; // 기본: 첫 팝업만 소리
+      try {
+        const d = await cachedStorageGet(AUDIO_KEY);
+        if (MODES.includes(d?.[AUDIO_KEY])) mode = d[AUDIO_KEY];
+      } catch {}
+      reflectPopupAudio(mode);
+    })();
+    audioButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = MODES.includes(btn.dataset.modeValue)
+          ? btn.dataset.modeValue
+          : "first";
+        reflectPopupAudio(mode);
+        try {
+          cachedStorageSet({ [AUDIO_KEY]: mode });
+        } catch {}
+      });
+    });
+  }
+
+  const popupPlayerSizeGroup = document.querySelector(
+    "[data-popup-player-size]",
+  );
+  if (popupPlayerSizeGroup) {
+    const SIZE_KEY = "cheesePopupPlayerSize";
+    const W_KEY = "cheesePopupPlayerSizeW";
+    const H_KEY = "cheesePopupPlayerSizeH";
+    const SIZES = ["400", "510", "640", "800", "custom"];
+    const sizeButtons = Array.from(
+      popupPlayerSizeGroup.querySelectorAll("[data-mode-value]"),
+    );
+    const customRow = document.querySelector("[data-popup-player-size-custom]");
+    const wInput = document.querySelector("[data-popup-player-size-w]");
+    const hInput = document.querySelector("[data-popup-player-size-h]");
+    const clampPx = (v) => {
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n)) return 510;
+      return Math.min(2000, Math.max(240, n));
+    };
+    function reflectPopupSize(size) {
+      const v = SIZES.includes(String(size)) ? String(size) : "510";
+      sizeButtons.forEach((btn) => {
+        const active = btn.dataset.modeValue === v;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-checked", String(active));
+      });
+      // '직접 지정'일 때만 가로·세로 입력을 보여준다.
+      if (customRow) customRow.hidden = v !== "custom";
+    }
+    (async () => {
+      let size = "510";
+      try {
+        const d = await cachedStorageGet([SIZE_KEY, W_KEY, H_KEY]);
+        if (SIZES.includes(String(d?.[SIZE_KEY]))) size = String(d[SIZE_KEY]);
+        if (wInput) wInput.value = String(clampPx(d?.[W_KEY] ?? 510));
+        if (hInput) hInput.value = String(clampPx(d?.[H_KEY] ?? 510));
+      } catch {}
+      reflectPopupSize(size);
+    })();
+    sizeButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const size = SIZES.includes(btn.dataset.modeValue)
+          ? btn.dataset.modeValue
+          : "510";
+        reflectPopupSize(size);
+        try {
+          cachedStorageSet({
+            [SIZE_KEY]: size === "custom" ? "custom" : Number(size),
+          });
+        } catch {}
+      });
+    });
+    const commitPx = (input, key) => {
+      if (!input) return;
+      const save = () => {
+        const px = clampPx(input.value);
+        input.value = String(px);
+        try {
+          cachedStorageSet({ [key]: px });
+        } catch {}
+      };
+      input.addEventListener("change", save);
+      input.addEventListener("blur", save);
+    };
+    commitPx(wInput, W_KEY);
+    commitPx(hInput, H_KEY);
+  }
+
+  // 팝업 플레이어의 나머지 체크박스들. [셀렉터, 키, 기본 ON 여부].
+  // 좁은 창을 고려해 자주 쓰는 버튼만 기본 ON, 나머지는 기본 OFF.
+  [
+    ["[data-player-disable-hidden]", "cheesePlayerDisableHidden", true],
+    ["[data-popup-player-wide]", "cheesePopupPlayerWide", true],
+    ["[data-popup-player-btn-mixer]", "cheesePopupPlayerBtnMixer", true],
+    ["[data-popup-player-btn-filter]", "cheesePopupPlayerBtnFilter", true],
+    ["[data-popup-player-btn-sync]", "cheesePopupPlayerBtnSync", true],
+    ["[data-popup-player-seekbar]", "cheesePopupPlayerSeekBar", true],
+    ["[data-popup-player-btn-stats]", "cheesePopupPlayerBtnStats", false],
+    [
+      "[data-popup-player-btn-screenshot]",
+      "cheesePopupPlayerBtnScreenshot",
+      false,
+    ],
+    ["[data-popup-player-btn-rewind]", "cheesePopupPlayerBtnRewind", false],
+    ["[data-popup-player-btn-forward]", "cheesePopupPlayerBtnForward", false],
+    ["[data-popup-player-maxq]", "cheesePopupPlayerMaxQuality", false],
+    [
+      "[data-popup-player-disable-hidden]",
+      "cheesePopupPlayerDisableHidden",
+      false,
+    ],
+  ].forEach(([sel, key, defaultOn]) => {
+    const input = document.querySelector(sel);
+    if (!input) return;
+    (async () => {
+      let on = defaultOn;
+      try {
+        const d = await cachedStorageGet(key);
+        on = defaultOn ? d?.[key] !== false : d?.[key] === true;
+      } catch {}
+      input.checked = on;
+    })();
+    input.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [key]: input.checked });
+      } catch {}
+    });
+  });
 
   // ── 비디오 필터 전역 기본값 재방문 동작(오디오 믹서와 동일, 별도 키) ──────────
   const vfGlobalDefaultModeGroup = document.querySelector(

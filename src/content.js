@@ -20,6 +20,11 @@ const SELECTORS = {
 // 중복 실행되지 않도록 판별한다. 플레이어/채팅 iframe용 기능은 기존대로 각 프레임에서
 // 동작하되, 전용 팔로잉 목록의 네트워크 갱신만 이 값을 게이트로 사용한다.
 const IS_TOP_FRAME = window.top === window;
+// 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
+// 사이드바·헤더 등 최상위 전용 UI 를 주입하지 않고 플레이어 기능만 남긴다.
+const IS_POPUP_PLAYER_FRAME =
+  !IS_TOP_FRAME &&
+  new URLSearchParams(location.search).get("cheesePopup") === "1";
 
 const CONTENT_CONFIG = {
   videos: {
@@ -121,6 +126,10 @@ const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
 let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
 const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
 let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
+// 기본 플레이어: 숨긴 버튼의 기능(단축키 포함)까지 끌지(전역, 기본 ON=기존 동작 유지).
+// 끄면 버튼만 숨기고 단축키는 그대로 쓸 수 있다. 팝업의 동명 옵션과는 독립이다.
+const PLAYER_DISABLE_HIDDEN_KEY = "cheesePlayerDisableHidden";
+let playerDisableHidden = true;
 const VOLUME_PCT_KEY = "cheeseVolumePct";
 let volumePct = true; // 볼륨 조절 % 표시(전역, 기본 ON)
 // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF). MAIN world(audioMixer.js)가 처리.
@@ -474,6 +483,83 @@ let adMiniplayerKeepMuted = true;
 const FOLLOW_OPEN_NEW_TAB_KEY = "cheeseFollowOpenNewTab";
 let followOpenNewTabOn = false;
 let followOpenNewTabBound = false;
+// ── 팝업 플레이어(사이드바 채널을 끌어다 놓으면 뜨는 떠 있는 창) ──────────────
+// 치지직 페이지를 iframe 으로 그대로 띄운다(미리보기의 m3u8 직접 재생과 달리 광고·그리드를
+// 우회하지 않으므로 재생 시간 제한이 필요 없다). 대신 iframe 안에서도 content.js 가
+// all_frames 로 실행되므로, 사이드바·헤더 등 최상위 전용 기능은 반드시 막아야 한다.
+const POPUP_PLAYER_KEY = "cheesePopupPlayer";
+// 소리 정책: "mute"=모두 음소거, "first"=처음 연 팝업만 소리, "all"=모두 소리.
+const POPUP_PLAYER_AUDIO_KEY = "cheesePopupPlayerAudio";
+const POPUP_PLAYER_AUDIO_MODES = ["mute", "first", "all"];
+const POPUP_PLAYER_AUDIO_DEFAULT = "first";
+const POPUP_PLAYER_CLASS = "cheese-popup-player";
+const POPUP_PLAYER_DRAG_TYPE = "application/x-cheese-popup-channel";
+// 초기 크기(px). 프리셋(정사각) 또는 커스텀 가로·세로. 열린 뒤에는 자유 리사이즈.
+const POPUP_PLAYER_SIZE_KEY = "cheesePopupPlayerSize"; // 프리셋 값 또는 "custom"
+const POPUP_PLAYER_SIZE_ALLOWED = [400, 510, 640, 800];
+const POPUP_PLAYER_SIZE_DEFAULT = 510;
+const POPUP_PLAYER_SIZE_W_KEY = "cheesePopupPlayerSizeW";
+const POPUP_PLAYER_SIZE_H_KEY = "cheesePopupPlayerSizeH";
+const POPUP_PLAYER_SIZE_MIN = 240;
+const POPUP_PLAYER_SIZE_MAX = 2000;
+// 팝업에서 넓은 화면 자동 적용(기본 ON).
+const POPUP_PLAYER_WIDE_KEY = "cheesePopupPlayerWide";
+// 팝업 안에서 표시할 우리 버튼(믹서/필터/따라잡기). 나머지는 항상 숨김.
+const POPUP_PLAYER_BTN_MIXER_KEY = "cheesePopupPlayerBtnMixer";
+const POPUP_PLAYER_BTN_FILTER_KEY = "cheesePopupPlayerBtnFilter";
+const POPUP_PLAYER_BTN_SYNC_KEY = "cheesePopupPlayerBtnSync";
+const POPUP_PLAYER_SEEKBAR_KEY = "cheesePopupPlayerSeekBar";
+// 좁은 창을 고려해 아래 넷은 기본 OFF(넓게 쓰는 사용자만 켠다).
+const POPUP_PLAYER_BTN_STATS_KEY = "cheesePopupPlayerBtnStats";
+const POPUP_PLAYER_BTN_SHOT_KEY = "cheesePopupPlayerBtnScreenshot";
+const POPUP_PLAYER_BTN_REWIND_KEY = "cheesePopupPlayerBtnRewind";
+const POPUP_PLAYER_BTN_FORWARD_KEY = "cheesePopupPlayerBtnForward";
+// 팝업 전용 최대 화질 자동 고정(전역 설정과 독립, 기본 OFF).
+const POPUP_PLAYER_MAXQ_KEY = "cheesePopupPlayerMaxQuality";
+// 숨긴 버튼의 기능까지 끌지(기본 OFF=표시만 숨기고 단축키는 동작).
+const POPUP_PLAYER_DISABLE_HIDDEN_KEY = "cheesePopupPlayerDisableHidden";
+let popupPlayerOn = false;
+let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
+let popupPlayerSize = POPUP_PLAYER_SIZE_DEFAULT;
+let popupPlayerWide = true;
+let popupPlayerSizeW = POPUP_PLAYER_SIZE_DEFAULT;
+let popupPlayerSizeH = POPUP_PLAYER_SIZE_DEFAULT;
+let popupPlayerBtnMixer = true;
+let popupPlayerBtnFilter = true;
+let popupPlayerBtnSync = true;
+let popupPlayerSeekBar = true;
+let popupPlayerBtnStats = false;
+let popupPlayerBtnScreenshot = false;
+let popupPlayerBtnRewind = false;
+let popupPlayerBtnForward = false;
+let popupPlayerMaxQuality = false;
+let popupPlayerDisableHidden = false;
+let popupPlayerZIndex = 2147483000;
+let popupPlayerBound = false;
+let popupPlayerDragging = false; // 팝업용 드래그 진행 중(미리보기 오픈 억제)
+function normalizePopupPlayerAudio(v) {
+  const s = String(v || "");
+  return POPUP_PLAYER_AUDIO_MODES.includes(s) ? s : POPUP_PLAYER_AUDIO_DEFAULT;
+}
+// 프리셋이면 숫자, 커스텀이면 "custom".
+function normalizePopupPlayerSize(v) {
+  if (String(v) === "custom") return "custom";
+  const n = Number(v);
+  return POPUP_PLAYER_SIZE_ALLOWED.includes(n) ? n : POPUP_PLAYER_SIZE_DEFAULT;
+}
+function normalizePopupPlayerSizePx(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return POPUP_PLAYER_SIZE_DEFAULT;
+  return Math.min(POPUP_PLAYER_SIZE_MAX, Math.max(POPUP_PLAYER_SIZE_MIN, n));
+}
+// 실제 적용할 초기 {w,h}. 프리셋은 정사각, 커스텀은 저장된 가로·세로.
+function getPopupPlayerInitialSize() {
+  if (popupPlayerSize === "custom") {
+    return { w: popupPlayerSizeW, h: popupPlayerSizeH };
+  }
+  const n = Number(popupPlayerSize) || POPUP_PLAYER_SIZE_DEFAULT;
+  return { w: n, h: n };
+}
 // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
 const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
 const FOLLOW_PREVIEW_SIZE_KEY = "cheeseFollowPreviewSize"; // {w} (height는 16:9)
@@ -9173,6 +9259,7 @@ function applyFeatureFlags(value) {
   broadcastFeatureFlags();
   applySidebarHidden();
   applyHeaderAutoHide();
+  applyPlayerHideOnlyClasses();
   // 차단한 유저 카드 숨김: <html>에 게이트 클래스만 토글, 실제 숨김은 content.css의
   // 순수 CSS(:has(_is_block_)) 규칙이 처리한다(목록이 커도 부하 없음).
   document.documentElement.classList.toggle(
@@ -18324,9 +18411,12 @@ function bindCustomFollowDragSort() {
   const onStart = (e) => {
     const li = e.target?.closest?.(".cheese-cf-draggable");
     if (!li || !li.closest("#" + CUSTOM_FOLLOW_NAV_ID)) return;
-    // 꾹 눌러 'dragready' 가 된 항목만 실제 드래그 허용(짧은 클릭은 채널 이동).
+    // 꾹 눌러 'dragready' 가 된 항목만 순서 편집 드래그 허용(짧은 클릭은 채널 이동).
     if (!li.classList.contains("cheese-cf-dragready")) {
-      e.preventDefault();
+      // ⚠ 팝업 플레이어가 켜져 있으면 preventDefault 로 드래그를 죽이지 않는다.
+      // 여기서 취소하면 같은 dragstart 를 쓰는 팝업 드래그가 시작조차 못 한다
+      // (둘 다 document 캡처 단계이고 이 리스너가 먼저 등록돼 있다).
+      if (!popupPlayerOn) e.preventDefault();
       return;
     }
     customFollowDragEl = li;
@@ -18488,6 +18578,315 @@ function bindCustomFollowDragSort() {
   document.addEventListener("pointermove", onPointerMove, true);
   document.addEventListener("pointerup", onPointerUp, true);
   document.addEventListener("pointercancel", cancelPress, true);
+}
+
+// ── 팝업 플레이어 ──────────────────────────────────────────────────────────
+// 사이드바(전용 목록/네이티브 모두)의 채널 링크를 끌어다 본문에 놓으면, 그 방송을
+// 떠 있는 창으로 띄운다. 여러 개를 동시에 열 수 있다.
+function countOpenPopupPlayers() {
+  return document.querySelectorAll(`.${POPUP_PLAYER_CLASS}`).length;
+}
+
+// 소리 정책 적용. "first" 는 '현재 열려 있는 팝업이 없을 때'만 소리를 준다.
+function shouldPopupPlayerMute() {
+  if (popupPlayerAudioMode === "all") return false;
+  if (popupPlayerAudioMode === "mute") return true;
+  return countOpenPopupPlayers() > 0; // first: 첫 팝업만 소리
+}
+
+function createPopupPlayer(href, left, top) {
+  const popup = document.createElement("div");
+  popup.className = POPUP_PLAYER_CLASS;
+  popup.style.left = `${Math.max(0, Math.round(left))}px`;
+  popup.style.top = `${Math.max(0, Math.round(top))}px`;
+  const initialSize = getPopupPlayerInitialSize();
+  popup.style.width = `${initialSize.w}px`;
+  popup.style.height = `${initialSize.h}px`;
+  popup.style.zIndex = String(++popupPlayerZIndex);
+
+  const frame = document.createElement("iframe");
+  frame.className = "cheese-popup-player__frame";
+  // ⚠ 팝업 iframe 임을 URL 로 표시한다. 이 프레임 안에서도 content.js 가 실행되는데,
+  // 사이드바・헤더 같은 최상위 전용 기능이 중복 주입되면 안 되기 때문이다.
+  const url = new URL(href, location.origin);
+  url.searchParams.set("cheesePopup", "1");
+  frame.src = url.pathname + url.search;
+  // ⚠ allow 에 fullscreen 을 넣으면 allowFullscreen 속성은 무시되고 콘솔 경고가 뜬다
+  // ("Allow attribute will take precedence over 'allowfullscreen'"). allow 만 쓴다.
+  frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  frame.setAttribute("scrolling", "no");
+  frame.title = "치지직 팝업 플레이어";
+  popup.appendChild(frame);
+
+  const bar = document.createElement("div");
+  bar.className = "cheese-popup-player__bar";
+  popup.appendChild(bar);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "cheese-popup-player__close";
+  closeBtn.setAttribute("aria-label", "팝업 닫기");
+  closeBtn.title = "닫기";
+  closeBtn.textContent = "✕";
+  // 정리 훅. 닫기·기능 OFF 어느 경로로 사라지든 document 리스너까지 확실히 뗀다.
+  const cleanups = [];
+  popup.__cheeseCleanup = () => {
+    while (cleanups.length) {
+      try {
+        cleanups.pop()();
+      } catch {}
+    }
+    frame.src = "about:blank"; // 재생 즉시 중단(리소스 해제)
+  };
+  closeBtn.addEventListener("click", () => {
+    popup.__cheeseCleanup();
+    popup.remove();
+  });
+  bar.appendChild(closeBtn);
+
+  // 드래그 이동. iframe 위에서는 mousemove 가 부모로 오지 않으므로, 드래그 중에는
+  // iframe 의 pointer-events 를 꺼서 커서를 놓치지 않게 한다.
+  let startX = 0;
+  let startY = 0;
+  let originLeft = 0;
+  let originTop = 0;
+  const onMouseMove = (e) => {
+    e.preventDefault();
+    const nextLeft = originLeft + (e.clientX - startX);
+    const nextTop = originTop + (e.clientY - startY);
+    popup.style.left = `${Math.max(0, Math.round(nextLeft))}px`;
+    popup.style.top = `${Math.max(0, Math.round(nextTop))}px`;
+  };
+  const onMouseUp = () => {
+    document.removeEventListener("mousemove", onMouseMove, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
+    popup.classList.remove("is-dragging");
+  };
+  bar.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.target === closeBtn) return;
+    e.preventDefault();
+    popup.style.zIndex = String(++popupPlayerZIndex);
+    startX = e.clientX;
+    startY = e.clientY;
+    originLeft = popup.offsetLeft;
+    originTop = popup.offsetTop;
+    popup.classList.add("is-dragging");
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
+    // ⚠ 드래그 도중 팝업이 사라지면(닫기·기능 OFF) mouseup 이 안 와 document 리스너가
+    // 남고, 그 클로저가 제거된 popup 을 계속 참조해 누수가 된다. 정리 훅에 등록한다.
+    cleanups.push(onMouseUp);
+  });
+  // 클릭 시 맨 앞으로.
+  popup.addEventListener("mousedown", () => {
+    popup.style.zIndex = String(++popupPlayerZIndex);
+  });
+
+  // 리사이즈 핸들 — 미리보기와 동일한 아크 아이콘. CSS resize 대신 직접 구현해야
+  // iframe 위에서도 포인터를 놓치지 않는다(Pointer Capture 사용).
+  const resize = document.createElement("span");
+  resize.className = "cheese-popup-player__resize";
+  resize.setAttribute("aria-hidden", "true");
+  resize.innerHTML = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 9a12 12 0 0 1-12 12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+  popup.appendChild(resize);
+
+  let rsX = 0;
+  let rsY = 0;
+  let rsW = 0;
+  let rsH = 0;
+  let resizing = false;
+  const onResizeMove = (e) => {
+    if (!resizing) return;
+    const w = Math.max(240, Math.round(rsW + (e.clientX - rsX)));
+    const h = Math.max(160, Math.round(rsH + (e.clientY - rsY)));
+    popup.style.width = `${w}px`;
+    popup.style.height = `${h}px`;
+  };
+  const onResizeUp = (e) => {
+    if (!resizing) return;
+    resizing = false;
+    popup.classList.remove("is-dragging");
+    try {
+      resize.releasePointerCapture?.(e.pointerId);
+    } catch {}
+    resize.removeEventListener("pointermove", onResizeMove);
+    resize.removeEventListener("pointerup", onResizeUp);
+    resize.removeEventListener("pointercancel", onResizeUp);
+  };
+  resize.addEventListener("pointerdown", (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    resizing = true;
+    rsX = e.clientX;
+    rsY = e.clientY;
+    rsW = popup.offsetWidth;
+    rsH = popup.offsetHeight;
+    // is-dragging 으로 iframe pointer-events 를 꺼 커서를 놓치지 않게 한다.
+    popup.classList.add("is-dragging");
+    popup.style.zIndex = String(++popupPlayerZIndex);
+    try {
+      resize.setPointerCapture?.(e.pointerId);
+    } catch {}
+    resize.addEventListener("pointermove", onResizeMove);
+    resize.addEventListener("pointerup", onResizeUp);
+    resize.addEventListener("pointercancel", onResizeUp);
+  });
+
+  return popup;
+}
+
+function openPopupPlayer(href, clientX, clientY) {
+  if (!popupPlayerOn || !IS_TOP_FRAME) return;
+  const muted = shouldPopupPlayerMute();
+  const url = new URL(href, location.origin);
+  if (muted) url.searchParams.set("cheesePopupMuted", "1");
+  const popup = createPopupPlayer(
+    url.pathname + url.search,
+    clientX + window.scrollX - 200,
+    clientY + window.scrollY - 16,
+  );
+  document.body.appendChild(popup);
+}
+
+// 사이드바 채널 링크의 드래그 시작 → 팝업 대상 href 를 dataTransfer 에 싣는다.
+// ⚠ 즐겨찾기 순서 편집(cheese-cf-dragready)과 겹치지 않게, 그 상태의 항목은 건너뛴다.
+function bindPopupPlayerDrag() {
+  if (popupPlayerBound || !IS_TOP_FRAME) return;
+  popupPlayerBound = true;
+
+  document.addEventListener(
+    "dragstart",
+    (e) => {
+      if (!popupPlayerOn) return;
+      const li = e.target?.closest?.(".cheese-cf-dragready");
+      if (li) return; // 순서 편집 드래그 — 팝업 대상 아님
+      const link = e.target?.closest?.(
+        `#sidebar a[href^="/live/"], #${CUSTOM_FOLLOW_NAV_ID} a[href^="/live/"]`,
+      );
+      if (!link) return;
+      const href = link.getAttribute("href") || "";
+      if (!href.startsWith("/live/")) return;
+      try {
+        e.dataTransfer?.setData(POPUP_PLAYER_DRAG_TYPE, href);
+        e.dataTransfer?.setData("text/plain", href);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+      } catch {}
+      // 드래그 중에는 미리보기를 닫고 재오픈을 막는다. 안 그러면 끌기 시작한 항목의
+      // 호버가 살아 있어 미리보기가 함께 재생된다(드롭 후에도 남는다).
+      popupPlayerDragging = true;
+      if (typeof closeFollowPreview === "function") closeFollowPreview();
+      suppressFollowPreviewOpen();
+    },
+    true,
+  );
+
+  // 드래그가 끝나면(드롭/취소 모두) 억제를 조금 더 유지했다가 푼다 — dragend 직후
+  // mouseover 가 한 번 더 오는 브라우저가 있어 바로 풀면 미리보기가 뜬다.
+  document.addEventListener(
+    "dragend",
+    () => {
+      if (!popupPlayerDragging) return;
+      popupPlayerDragging = false;
+      suppressFollowPreviewOpen();
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "dragover",
+    (e) => {
+      if (!popupPlayerOn) return;
+      if (!e.dataTransfer?.types?.includes(POPUP_PLAYER_DRAG_TYPE)) return;
+      // 순서 편집 중이면(우리 목록 위) 그쪽이 처리하게 둔다.
+      if (customFollowDragEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      // 드래그가 길어져도 억제 창(800ms)이 만료되지 않게 계속 갱신한다.
+      if (popupPlayerDragging) suppressFollowPreviewOpen();
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "drop",
+    (e) => {
+      if (!popupPlayerOn) return;
+      const href = e.dataTransfer?.getData(POPUP_PLAYER_DRAG_TYPE);
+      if (!href) return;
+      if (customFollowDragEl) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // 드롭 직후에도 잠깐 억제를 유지한다(dragend 순서는 브라우저마다 다르다).
+      popupPlayerDragging = false;
+      if (typeof closeFollowPreview === "function") closeFollowPreview();
+      suppressFollowPreviewOpen();
+      openPopupPlayer(href, e.clientX, e.clientY);
+    },
+    true,
+  );
+}
+
+// 팝업 프레임 안에서 소리 정책 적용. 부모가 ?cheesePopupMuted=1 로 띄웠으면 이 프레임의
+// video 를 음소거로 유지한다(치지직이 재생을 다시 붙일 수 있어 잠시 감시한다).
+let popupPlayerMuteBound = false;
+function applyPopupPlayerMute() {
+  if (!IS_POPUP_PLAYER_FRAME) return;
+  // 팝업 프레임 표시용 루트 클래스(CSS 로 사이드바·헤더 숨김).
+  document.documentElement.classList.add("cheese-popup-player-frame");
+  if (popupPlayerMuteBound) return;
+  const wantMuted =
+    new URLSearchParams(location.search).get("cheesePopupMuted") === "1";
+  if (!wantMuted) return;
+  popupPlayerMuteBound = true;
+  const mute = () => {
+    document.querySelectorAll("video").forEach((v) => {
+      if (v instanceof HTMLVideoElement && !v.muted) {
+        v.muted = true;
+        v.defaultMuted = true;
+      }
+    });
+  };
+  mute();
+  // 플레이어가 늦게 붙거나 교체될 수 있어 잠깐만 재적용한다(무기한 감시는 부담).
+  // 감시 창이 끝나면 interval 과 play 리스너를 함께 뗀다 — play 리스너를 남겨두면
+  // 이후 모든 재생마다 문서 전체 querySelectorAll("video") 이 돈다.
+  const timer = setInterval(mute, 500);
+  document.addEventListener("play", mute, true);
+  setTimeout(() => {
+    clearInterval(timer);
+    document.removeEventListener("play", mute, true);
+  }, 15000);
+}
+
+// 팝업 프레임에서 '표시할 버튼' 클래스를 루트에 반영한다. 숨김은 CSS 가 처리하고,
+// 기능 자체는 끄지 않으므로 단축키는 그대로 동작한다.
+function applyPopupPlayerButtonClasses() {
+  if (!IS_POPUP_PLAYER_FRAME) return;
+  const root = document.documentElement;
+  root.classList.toggle("cheese-popup-btn-mixer", popupPlayerBtnMixer);
+  root.classList.toggle("cheese-popup-btn-filter", popupPlayerBtnFilter);
+  root.classList.toggle("cheese-popup-btn-sync", popupPlayerBtnSync);
+  root.classList.toggle("cheese-popup-seekbar", popupPlayerSeekBar);
+  root.classList.toggle("cheese-popup-btn-stats", popupPlayerBtnStats);
+  root.classList.toggle(
+    "cheese-popup-btn-screenshot",
+    popupPlayerBtnScreenshot,
+  );
+  root.classList.toggle("cheese-popup-btn-rewind", popupPlayerBtnRewind);
+  root.classList.toggle("cheese-popup-btn-forward", popupPlayerBtnForward);
+}
+
+// 사이드바 채널 링크를 draggable 로 만든다(네이티브 링크는 기본 draggable=false).
+function ensurePopupPlayerDraggable() {
+  if (!popupPlayerOn || !IS_TOP_FRAME) return;
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
+  sidebar.querySelectorAll('a[href^="/live/"]').forEach((link) => {
+    if (link.dataset.cheesePopupDraggable === "1") return;
+    link.dataset.cheesePopupDraggable = "1";
+    link.setAttribute("draggable", "true");
+  });
 }
 
 // 즐겨찾기 토글 + 저장 + 재렌더.
@@ -19170,6 +19569,11 @@ let followPreviewSuppressedChannelId = "";
 let followPreviewOpenSuppressUntil = 0;
 const FOLLOW_PREVIEW_CLICK_SUPPRESS_MS = 800;
 
+// 미리보기 오픈 억제 창을 지금부터 다시 건다(팝업 드래그 등에서 호출).
+function suppressFollowPreviewOpen(ms = FOLLOW_PREVIEW_CLICK_SUPPRESS_MS) {
+  followPreviewOpenSuppressUntil = Date.now() + ms;
+}
+
 function stopFollowPreviewMaxLifeTimer() {
   if (followPreviewState.maxLifeTimer) {
     clearTimeout(followPreviewState.maxLifeTimer);
@@ -19588,6 +19992,8 @@ function onFollowPreviewMouseOver(e) {
   if (Date.now() < followPreviewOpenSuppressUntil) return;
   // 즐겨찾기 커스텀 순서 드래그 중이면 미리보기를 열지 않는다(드래그 방해 방지).
   if (customFollowDragId) return;
+  // 팝업 플레이어용 드래그 중에도 열지 않는다(끌던 항목의 호버로 함께 재생되던 문제).
+  if (popupPlayerDragging) return;
   // 드래그/고정 중엔 다른 채널로 전환하지 않는다.
   if (followPreviewState.resizing || followPreviewState.pinned) return;
   const found = getFollowPreviewAnchor(e.target);
@@ -19723,7 +20129,51 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY,
       CARD_LIVE_PREVIEW_KEY,
       CARD_LIVE_PREVIEW_POSITION_KEY,
+      POPUP_PLAYER_KEY,
+      POPUP_PLAYER_AUDIO_KEY,
+      POPUP_PLAYER_SIZE_KEY,
+      POPUP_PLAYER_SIZE_W_KEY,
+      POPUP_PLAYER_SIZE_H_KEY,
+      POPUP_PLAYER_WIDE_KEY,
+      POPUP_PLAYER_BTN_MIXER_KEY,
+      POPUP_PLAYER_BTN_FILTER_KEY,
+      POPUP_PLAYER_BTN_SYNC_KEY,
+      POPUP_PLAYER_SEEKBAR_KEY,
+      POPUP_PLAYER_BTN_STATS_KEY,
+      POPUP_PLAYER_BTN_SHOT_KEY,
+      POPUP_PLAYER_BTN_REWIND_KEY,
+      POPUP_PLAYER_BTN_FORWARD_KEY,
+      POPUP_PLAYER_MAXQ_KEY,
+      POPUP_PLAYER_DISABLE_HIDDEN_KEY,
     ]);
+    popupPlayerOn = data?.[POPUP_PLAYER_KEY] === true; // 기본 OFF
+    popupPlayerAudioMode = normalizePopupPlayerAudio(
+      data?.[POPUP_PLAYER_AUDIO_KEY],
+    );
+    popupPlayerSize = normalizePopupPlayerSize(data?.[POPUP_PLAYER_SIZE_KEY]);
+    popupPlayerSizeW = normalizePopupPlayerSizePx(
+      data?.[POPUP_PLAYER_SIZE_W_KEY],
+    );
+    popupPlayerSizeH = normalizePopupPlayerSizePx(
+      data?.[POPUP_PLAYER_SIZE_H_KEY],
+    );
+    popupPlayerWide = data?.[POPUP_PLAYER_WIDE_KEY] !== false; // 기본 ON
+    popupPlayerBtnMixer = data?.[POPUP_PLAYER_BTN_MIXER_KEY] !== false;
+    popupPlayerBtnFilter = data?.[POPUP_PLAYER_BTN_FILTER_KEY] !== false;
+    popupPlayerBtnSync = data?.[POPUP_PLAYER_BTN_SYNC_KEY] !== false;
+    popupPlayerSeekBar = data?.[POPUP_PLAYER_SEEKBAR_KEY] !== false;
+    // 아래 넷은 기본 OFF(=== true 로 판정).
+    popupPlayerBtnStats = data?.[POPUP_PLAYER_BTN_STATS_KEY] === true;
+    popupPlayerBtnScreenshot = data?.[POPUP_PLAYER_BTN_SHOT_KEY] === true;
+    popupPlayerBtnRewind = data?.[POPUP_PLAYER_BTN_REWIND_KEY] === true;
+    popupPlayerBtnForward = data?.[POPUP_PLAYER_BTN_FORWARD_KEY] === true;
+    popupPlayerMaxQuality = data?.[POPUP_PLAYER_MAXQ_KEY] === true;
+    popupPlayerDisableHidden =
+      data?.[POPUP_PLAYER_DISABLE_HIDDEN_KEY] === true;
+    applyPopupPlayerButtonClasses();
+    // 팝업 프레임은 위 값들이 기능 플래그·최대 화질에 반영되므로, 로드 완료 후 한 번
+    // 더 알린다(로드 전에 MAIN world 가 요청했다면 기본값을 받았을 수 있다).
+    if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
     followPreviewOn = data?.[FOLLOW_PREVIEW_KEY] !== false; // 미설정/true=ON
     cardLivePreviewOn = data?.[CARD_LIVE_PREVIEW_KEY] === true; // 기본 OFF
     cardLivePreviewPosition = normalizeCardLivePreviewPosition(
@@ -22990,22 +23440,92 @@ function normalizeSyncCooldownCustom(v) {
   return { base, max };
 }
 
+// MAIN world 로 보낼 '되감기 바 표시' 값. 팝업은 팝업 설정을, 그 외엔 전역값을 쓴다.
+// ⚠ 이 값은 표시뿐 아니라 방향키 seek 허용 판정에도 쓰인다(seekHotkeyAllowed: 바 또는
+// 되감기/앞으로 버튼 중 하나라도 켜져 있으면 허용). 즉 '바가 보이면 방향키도 동작'이
+// 일관된 규칙이라, 버튼을 기능까지 껐더라도 바 설정은 건드리지 않는다.
+function getEffectiveLiveSeekBar() {
+  return IS_POPUP_PLAYER_FRAME ? popupPlayerSeekBar : liveSeekBar;
+}
+
+// MAIN world 로 보낼 기능 플래그. featureFlags 는 true=숨김(기능 끔)이다.
+//  - 기본 플레이어: playerDisableHidden 이 꺼져 있으면, 숨김으로 표시된 버튼의 플래그를
+//    false 로 되돌려 기능·단축키를 살린다(숨김은 CSS 가 담당).
+//  - 팝업 프레임: 표시 설정이 별도라, '기능까지 끄기'가 켜졌을 때만 플래그를 세운다.
+function getEffectiveFeatureFlags() {
+  const flags = { ...featureFlags };
+  if (IS_POPUP_PLAYER_FRAME) {
+    if (!popupPlayerDisableHidden) return flags;
+    if (!popupPlayerBtnMixer) flags.audioMixer = true;
+    if (!popupPlayerBtnFilter) flags.videoFilter = true;
+    if (!popupPlayerBtnSync) flags.liveSync = true;
+    if (!popupPlayerBtnStats) flags.streamStats = true;
+    if (!popupPlayerBtnScreenshot) flags.screenshotButton = true;
+    // 되감기/앞으로는 치지직 컨트롤에서 한 쌍으로 묶여 있어(liveRewind 하나로 제어)
+    // 둘 다 꺼져 있을 때만 기능을 끈다.
+    if (!popupPlayerBtnRewind && !popupPlayerBtnForward) {
+      flags.liveRewind = true;
+    }
+    return flags;
+  }
+  // 기본 플레이어에서 '기능도 끄기'를 끄면 숨김 플래그가 기능까지 끄지 않게 한다.
+  // (버튼 숨김은 CSS 의 html.cheese-player-hide-* 규칙이 담당)
+  if (!playerDisableHidden) {
+    for (const key of PLAYER_HIDE_ONLY_FLAGS) flags[key] = false;
+  }
+  return flags;
+}
+// '숨김'이 기능까지 끄던 플래그들 — 표시만 숨기는 모드에서 되살릴 대상.
+const PLAYER_HIDE_ONLY_FLAGS = [
+  "audioMixer",
+  "videoFilter",
+  "liveSync",
+  "liveRewind",
+  "streamStats",
+  "tabMute",
+  "screenshotButton",
+];
+
+// 기본 플레이어에서 '기능도 끄기'를 껐을 때, 숨김 대상 버튼을 CSS 로만 숨기기 위한
+// 루트 클래스. 플래그를 false 로 되돌렸으므로 MAIN world 는 버튼을 그대로 만든다.
+function applyPlayerHideOnlyClasses() {
+  const root = document.documentElement;
+  const hideOnly = !IS_POPUP_PLAYER_FRAME && !playerDisableHidden;
+  for (const key of PLAYER_HIDE_ONLY_FLAGS) {
+    root.classList.toggle(
+      `cheese-player-hide-${key}`,
+      hideOnly && featureFlags[key] === true,
+    );
+  }
+}
+
 function broadcastFeatureFlags() {
   window.postMessage(
     {
       source: FEATURE_FLAGS_MESSAGE,
-      flags: { ...featureFlags },
+      flags: getEffectiveFeatureFlags(),
       syncPreset: syncPresetValue,
       syncCustom: syncCustomValue, // {enable,target} 또는 null
       syncRate: syncRateValue, // 따라잡기 배속(1.2/1.5/2/3)
       syncCooldownEnabled, // 자동 따라잡기 쿨다운 on/off
       syncCooldownCustom, // {base,max}(초) 또는 null
       mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
-      maxQualityAuto, // 최대 화질 자동 고정(전역)
+      // 최대 화질 자동 고정. 팝업 프레임은 전역값과 무관하게 팝업 설정을 따른다
+      // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
+      maxQualityAuto: IS_POPUP_PLAYER_FRAME
+        ? popupPlayerMaxQuality
+        : maxQualityAuto,
       maxQualityRespectManual, // 수동 화질 변경 존중(전역)
       videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
-      wideScreenAuto, // 넓은 화면 자동 적용(전역)
-      liveSeekBar, // 라이브 되감기 바 표시(전역)
+      // 넓은 화면 자동 적용(전역). 팝업 플레이어 프레임에서는 팝업 설정이 켜져 있으면
+      // 전역값과 무관하게 켠다(작은 창에서 레터박스를 줄이는 게 기본 기대 동작).
+      wideScreenAuto:
+        IS_POPUP_PLAYER_FRAME && popupPlayerWide ? true : wideScreenAuto,
+      // 라이브 되감기 바 표시. 이 값은 표시뿐 아니라 '방향키 seek 허용' 판정에도 쓰인다
+      // (seekHotkeyAllowed: 바 또는 되감기/앞으로 버튼 중 하나만 켜져 있어도 허용).
+      // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
+      // 되어 방향키까지 막힌다. 반대로 바가 표시되는 동안에는 방향키가 그대로 동작한다.
+      liveSeekBar: getEffectiveLiveSeekBar(),
       volumePct, // 볼륨 조절 % 표시(전역)
       wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
       wheelVolumeRightClick, // 우클릭+휠일 때만 볼륨 조절
@@ -23065,6 +23585,7 @@ const FEATURE_FLAGS_KEYS = [
   VIDEO_FILTER_ALWAYS_ON_KEY,
   WIDE_SCREEN_AUTO_KEY,
   LIVE_SEEK_BAR_KEY,
+  PLAYER_DISABLE_HIDDEN_KEY,
   VOLUME_PCT_KEY,
   WHEEL_VOLUME_KEY,
   WHEEL_VOLUME_RIGHTCLICK_KEY,
@@ -23286,6 +23807,8 @@ async function loadFeatureFlags() {
     videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
     wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
     liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] !== false; // 미설정=기본 ON
+    // 미설정=기본 ON(기존 동작: 숨김이 기능까지 끔)
+    playerDisableHidden = data?.[PLAYER_DISABLE_HIDDEN_KEY] !== false;
     seekStepValue = normalizeSeekStep(data?.[SEEK_STEP_KEY]);
     const cw = Number(data?.[CHAT_WIDTH_KEY]);
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
@@ -23430,6 +23953,12 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[WIDE_SCREEN_AUTO_KEY]) {
       wideScreenAuto = changes[WIDE_SCREEN_AUTO_KEY].newValue === true;
+    }
+    if (changes[PLAYER_DISABLE_HIDDEN_KEY]) {
+      playerDisableHidden =
+        changes[PLAYER_DISABLE_HIDDEN_KEY].newValue !== false;
+      applyPlayerHideOnlyClasses();
+      broadcastFeatureFlags();
     }
     if (changes[LIVE_SEEK_BAR_KEY]) {
       liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
@@ -23605,6 +24134,74 @@ if (chrome.storage?.onChanged) {
       followOpenNewTabOn = changes[FOLLOW_OPEN_NEW_TAB_KEY].newValue === true;
       if (followOpenNewTabOn) bindFollowOpenNewTab();
       // OFF면 리스너는 남겨두되 followOpenNewTabOn 게이트로 무동작(핸들러 최상단 체크).
+    }
+    if (changes[POPUP_PLAYER_KEY]) {
+      popupPlayerOn = changes[POPUP_PLAYER_KEY].newValue === true;
+      if (popupPlayerOn) {
+        bindPopupPlayerDrag();
+        ensurePopupPlayerDraggable();
+      } else {
+        // 끄면 열려 있던 팝업도 모두 정리한다(재생 중단 + document 리스너 해제).
+        document.querySelectorAll(`.${POPUP_PLAYER_CLASS}`).forEach((el) => {
+          if (typeof el.__cheeseCleanup === "function") el.__cheeseCleanup();
+          else el.querySelector("iframe")?.setAttribute("src", "about:blank");
+          el.remove();
+        });
+      }
+    }
+    if (changes[POPUP_PLAYER_AUDIO_KEY]) {
+      popupPlayerAudioMode = normalizePopupPlayerAudio(
+        changes[POPUP_PLAYER_AUDIO_KEY].newValue,
+      );
+    }
+    if (changes[POPUP_PLAYER_SIZE_KEY]) {
+      popupPlayerSize = normalizePopupPlayerSize(
+        changes[POPUP_PLAYER_SIZE_KEY].newValue,
+      );
+    }
+    if (changes[POPUP_PLAYER_SIZE_W_KEY]) {
+      popupPlayerSizeW = normalizePopupPlayerSizePx(
+        changes[POPUP_PLAYER_SIZE_W_KEY].newValue,
+      );
+    }
+    if (changes[POPUP_PLAYER_SIZE_H_KEY]) {
+      popupPlayerSizeH = normalizePopupPlayerSizePx(
+        changes[POPUP_PLAYER_SIZE_H_KEY].newValue,
+      );
+    }
+    if (changes[POPUP_PLAYER_WIDE_KEY]) {
+      popupPlayerWide = changes[POPUP_PLAYER_WIDE_KEY].newValue !== false;
+    }
+    // 팝업 버튼 표시 토글들. [키, 적용 함수, 기본 ON 여부] 표로 처리한다.
+    let popupBtnChanged = false;
+    for (const [key, set, defaultOn] of [
+      [POPUP_PLAYER_BTN_MIXER_KEY, (v) => (popupPlayerBtnMixer = v), true],
+      [POPUP_PLAYER_BTN_FILTER_KEY, (v) => (popupPlayerBtnFilter = v), true],
+      [POPUP_PLAYER_BTN_SYNC_KEY, (v) => (popupPlayerBtnSync = v), true],
+      [POPUP_PLAYER_SEEKBAR_KEY, (v) => (popupPlayerSeekBar = v), true],
+      [POPUP_PLAYER_BTN_STATS_KEY, (v) => (popupPlayerBtnStats = v), false],
+      [POPUP_PLAYER_BTN_SHOT_KEY, (v) => (popupPlayerBtnScreenshot = v), false],
+      [POPUP_PLAYER_BTN_REWIND_KEY, (v) => (popupPlayerBtnRewind = v), false],
+      [POPUP_PLAYER_BTN_FORWARD_KEY, (v) => (popupPlayerBtnForward = v), false],
+      [
+        POPUP_PLAYER_DISABLE_HIDDEN_KEY,
+        (v) => (popupPlayerDisableHidden = v),
+        false,
+      ],
+    ]) {
+      if (!changes[key]) continue;
+      const next = changes[key].newValue;
+      set(defaultOn ? next !== false : next === true);
+      popupBtnChanged = true;
+    }
+    if (popupBtnChanged) {
+      applyPopupPlayerButtonClasses();
+      // '기능까지 끄기'가 걸려 있으면 플래그가 바뀌므로 MAIN world 에 다시 알린다.
+      if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
+    }
+    if (changes[POPUP_PLAYER_MAXQ_KEY]) {
+      popupPlayerMaxQuality = changes[POPUP_PLAYER_MAXQ_KEY].newValue === true;
+      if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
     }
     if (changes[FOLLOW_PREVIEW_KEY]) {
       followPreviewOn = changes[FOLLOW_PREVIEW_KEY].newValue !== false;
@@ -24002,26 +24599,34 @@ function init() {
   initSeekPreviewRealtime();
   initLiveDetailStartTooltip();
   fixPartyIconMasks(); // 파티 아이콘 mask id 충돌 보정(사이드바 숨김 시 흰색으로 깨지던 문제)
-  // 사이드바는 SPA 재렌더로 마커 클래스가 지워질 수 있어 매 init마다 다시 부여한다.
-  applySidebarSections();
-  ensureSidebarObserver(); // 사이드바 전담 옵저버로 즉시 재적용(깜빡임 최소화)
-  ensureHeaderNav(); // 사이드바 숨김 시 헤더 미니 네비 보장
-  ensureHeaderFollowNav(); // 사이드바/주제 탭 숨김 시 팔로우 목록을 헤더에 보장
-  ensureHeaderObserver(); // 헤더 재렌더로 사라지면 즉시 복구
-  applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
-  ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
-  ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
-  ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
-  applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
-  applyLiveViewerCountPlacement(); // 옵션 시 시청자 수를 LIVE 배지 옆에 배치
-  applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
-  ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
-  ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
+  // ⚠ 팝업 플레이어 iframe 안에서는 '플레이어 관련 기능만' 남긴다. 사이드바·헤더·목록
+  // 주입은 최상위 문서 전용이고, 팝업 안에서 돌면 작은 창에 사이드바/헤더가 중복으로
+  // 그려진다(광고 iframe 헤더 중복과 같은 원인). 아래 블록 전체를 건너뛴다.
+  if (!IS_POPUP_PLAYER_FRAME) {
+    // 사이드바는 SPA 재렌더로 마커 클래스가 지워질 수 있어 매 init마다 다시 부여한다.
+    applySidebarSections();
+    ensureSidebarObserver(); // 사이드바 전담 옵저버로 즉시 재적용(깜빡임 최소화)
+    ensureHeaderNav(); // 사이드바 숨김 시 헤더 미니 네비 보장
+    ensureHeaderFollowNav(); // 사이드바/주제 탭 숨김 시 팔로우 목록을 헤더에 보장
+    ensureHeaderObserver(); // 헤더 재렌더로 사라지면 즉시 복구
+    applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
+    ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
+    ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
+    ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
+    applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
+    applyLiveViewerCountPlacement(); // 옵션 시 시청자 수를 LIVE 배지 옆에 배치
+    applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
+    ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
+    ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
+    bindPopupPlayerDrag(); // 사이드바 채널 드래그 → 팝업 플레이어
+    ensurePopupPlayerDraggable();
+  }
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
   applyChatFoldPersist(); // 채팅창 접힘 상태 유지(옵션 시, 라이브 진입 1회 복원)
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
   applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
+  applyPopupPlayerMute(); // 팝업 플레이어 프레임이면 소리 정책(음소거) 적용
   // applyRootToFollowing 은 여기서 부르지 않는다 — init 은 저장값 로드(비동기)보다 먼저
   // 실행될 수 있어, 기본값(false)으로 loadDone 가드를 잘못 세워 이후 진짜 값으로도 이동이
   // 안 되던 버그가 있었다. 진입 이동은 저장 로드 완료 지점에서만 호출한다.
@@ -24921,6 +25526,9 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== "cheese-tab-mute") return;
+  // 팝업 프레임에서는 탭 음소거를 처리하지 않는다(버튼도 숨김). 브라우저 탭 음소거는
+  // 탭 단위라 여기서 걸면 본창 방송까지 함께 꺼진다.
+  if (IS_POPUP_PLAYER_FRAME) return;
   // type: "toggle" | "query"
   sendTabMute(data.type === "query" ? "query" : "toggle");
 });

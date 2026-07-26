@@ -670,6 +670,26 @@
   const tabEnabledPageKeys = new Set();
   let wideScreenAppliedForPage = null; // 넓은 화면 자동 적용을 끝낸 pageKey(미디어당 1회)
   let wideScreenRetryUntil = 0; // viewmode 버튼이 늦게 뜰 수 있어 잠깐 재시도하는 마감 시각
+  // 넓은 화면 적용 대기 폴링. tick 은 DOM 변이가 있어야 도는데, 플레이어가 자리를 잡고
+  // 조용해지면 변이가 멈춰 마감(8초)까지 재시도가 한 번도 안 일어날 수 있다(팝업에서
+  // 적용이 1~2초 걸리기도 하고 10초 넘게 걸리기도 하던 원인). 적용 전까지만 짧게 돈다.
+  let wideScreenPollTimer = 0;
+  function stopWideScreenPolling() {
+    if (!wideScreenPollTimer) return;
+    clearInterval(wideScreenPollTimer);
+    wideScreenPollTimer = 0;
+  }
+  function startWideScreenPolling() {
+    if (wideScreenPollTimer) return;
+    wideScreenPollTimer = window.setInterval(() => {
+      if (document.hidden) return; // 숨은 탭에서는 의미 없음(보이면 다시 시도)
+      if (Date.now() > wideScreenRetryUntil) {
+        stopWideScreenPolling();
+        return;
+      }
+      maybeAutoWideScreen();
+    }, 200);
+  }
   // 현재 미디어의 저장 설정(프리셋 등) 로드 완료 여부. '항상 켜기' 자동 활성화는
   // 이게 true일 때만 시도해, 저장된 프리셋이 적용되기 전에 기본 프리셋으로 켜지는
   // 레이스를 막는다.
@@ -5480,6 +5500,34 @@
     true,
   );
 
+  // 실시간 따라잡기 단축키(Shift+F). 따라잡기 버튼이 표시된 상태에서 타이핑 중이
+  // 아닐 때만, 버튼 클릭과 동일하게 동작한다(라이브 전용 — 버튼도 라이브에만 뜬다).
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (e.code !== "KeyF" && e.key !== "F" && e.key !== "f") return;
+      if (featureFlags.liveSync) return; // 따라잡기 숨김=기능 끔
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      if (!location.pathname.startsWith("/live/")) return; // 라이브에서만
+      e.preventDefault();
+      e.stopPropagation();
+      // 버튼 상태를 그대로 따른다(정지 모드면 자동 따라잡기 해제).
+      const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
+      if (btn?.disabled) return;
+      if (btn?.classList.contains("is-stop") && !syncCatchUp) {
+        setAutoSync(false);
+        closeSyncMenu();
+        return;
+      }
+      toggleSyncCatchUp();
+    },
+    true,
+  );
+
   // ESC로 열린 패널 닫기(오디오 믹서 패널 / 스트림 정보 패널). 믹서 패널 내부의 빠른
   // 저장 이름 입력 모달이 열려 있으면 그 모달만 취소되도록 여기선 건드리지 않는다
   // (모달 취소는 패널 내부 keydown 리스너가 처리). 타이핑 중에도 ESC는 허용해야
@@ -7204,6 +7252,8 @@
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
       wideScreenAppliedForPage = null;
       wideScreenRetryUntil = Date.now() + 8000;
+      stopWideScreenPolling(); // 이전 미디어의 폴링은 끊고, 아래 tick 에서 새로 시작
+
       // 새 미디어 → 최대 화질 자동 고정 상태 리셋(이전 영상의 수동 존중을 새 영상까지
       // 끌고 가지 않는다).
       maxQualitySetHeight = 0;
@@ -7340,12 +7390,21 @@
   function maybeAutoWideScreen() {
     if (!wideScreenAuto) return;
     if (!currentPageKey) return; // 라이브/다시보기 페이지에서만
-    if (wideScreenAppliedForPage === currentPageKey) return; // 이미 이 미디어에 적용함
+    if (wideScreenAppliedForPage === currentPageKey) {
+      stopWideScreenPolling();
+      return; // 이미 이 미디어에 적용함
+    }
     const btn = findViewModeButton();
     if (!btn || !isElementRendered(btn)) {
-      // 버튼이 아직 없음 — 재시도 마감 전이면 다음 tick에서 다시 시도.
+      // 버튼이 아직 없음 — 재시도 마감 전이면 다시 시도한다.
       if (Date.now() > wideScreenRetryUntil) {
         wideScreenAppliedForPage = currentPageKey; // 마감 → 더 시도 안 함
+        stopWideScreenPolling();
+      } else {
+        // ⚠ tick 은 DOM 변이가 있어야 돌아간다. 플레이어가 자리를 잡고 조용해지면
+        // 변이가 멈춰, 마감(8초)까지 재시도가 '한 번도' 일어나지 않을 수 있다.
+        // 그래서 적용 전까지는 짧은 주기로 직접 폴링한다(적용되면 즉시 해제).
+        startWideScreenPolling();
       }
       return;
     }
@@ -7355,7 +7414,9 @@
       } catch {}
     }
     wideScreenAppliedForPage = currentPageKey; // 1회 적용 완료(켜져 있었어도 소진)
+    stopWideScreenPolling();
   }
+
 
   // 페이지의 채널id를 비동기로 확보한 뒤 해당 채널 설정을 로드한다. 해석 도중
   // 페이지가 바뀌면(currentPageKey 변경) 결과를 버린다(race 방지).
