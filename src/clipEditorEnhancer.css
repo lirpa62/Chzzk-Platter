@@ -1,0 +1,423 @@
+.cheese-clip-editor-timeline {
+  outline: none;
+}
+
+.cheese-clip-editor-ruler-labels {
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+  top: 4px;
+  left: 14px;
+  right: 14px;
+  height: 14px;
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+
+.cheese-clip-editor-ruler-labels > span {
+  position: absolute;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.cheese-clip-editor-ruler-labels > span:first-child {
+  transform: none;
+}
+
+.cheese-clip-editor-ruler-labels > span:last-child {
+  transform: translateX(-100%);
+}
+
+.cheese-clip-editor-precision {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-weak)
+    );
+  border-radius: 6px;
+  background: var(
+    --sem-color-surface-neutral-weakest,
+    var(--cheese-platter-surface-neutral-weakest)
+  );
+  padding: 10px 12px;
+}
+
+.cheese-clip-editor-precision *,
+.cheese-clip-editor-precision *::before,
+.cheese-clip-editor-precision *::after {
+  box-sizing: border-box;
+}
+
+.cheese-clip-editor-precision-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  margin-bottom: 8px;
+}
+
+.cheese-clip-editor-precision-head strong {
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+}
+
+.cheese-clip-editor-precision-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cheese-clip-editor-time-basis {
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak)
+  );
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.cheese-clip-editor-reset {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-weak)
+    );
+  border-radius: 4px;
+  background: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+}
+
+.cheese-clip-editor-reset:hover:not(:disabled),
+.cheese-clip-editor-reset:focus-visible {
+  border-color: var(
+    --sem-color-border-brand-strong,
+    var(--cheese-platter-border-brand-strong)
+  );
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
+  outline: none;
+}
+
+.cheese-clip-editor-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cheese-clip-editor-precision-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(168px, 1fr));
+  align-items: end;
+  gap: 6px 8px;
+}
+
+.cheese-clip-editor-boundary {
+  display: block;
+  min-width: 0;
+}
+
+.cheese-clip-editor-boundary-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.cheese-clip-editor-boundary-controls {
+  display: grid;
+  grid-template-columns: 24px 24px minmax(72px, 1fr) 24px 24px;
+  height: 30px;
+}
+
+.cheese-clip-editor-step,
+.cheese-clip-editor-time-input {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-weak)
+    );
+  background: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-clip-editor-step {
+  cursor: pointer;
+  padding: 0;
+  font-size: 10px;
+  line-height: 28px;
+}
+
+.cheese-clip-editor-step:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.cheese-clip-editor-step:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.cheese-clip-editor-step + .cheese-clip-editor-step,
+.cheese-clip-editor-step + .cheese-clip-editor-time-input,
+.cheese-clip-editor-time-input + .cheese-clip-editor-step {
+  border-left: 0;
+}
+
+.cheese-clip-editor-step:hover,
+.cheese-clip-editor-step:focus-visible {
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
+  background: var(
+    --sem-color-surface-brand-weakest,
+    var(--cheese-platter-surface-brand-weakest)
+  );
+  outline: none;
+}
+
+.cheese-clip-editor-time-input {
+  width: 100%;
+  border-radius: 0;
+  padding: 0 5px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 28px;
+  outline: none;
+}
+
+.cheese-clip-editor-time-input:focus {
+  border-color: var(
+    --sem-color-border-brand-strong,
+    var(--cheese-platter-border-brand-strong)
+  );
+  box-shadow: inset 0 0 0 1px
+    var(
+      --sem-color-border-brand-strong,
+      var(--cheese-platter-border-brand-strong)
+    );
+}
+
+.cheese-clip-editor-time-input.is-invalid {
+  border-color: var(
+    --sem-color-border-accent-red-strong,
+    var(--cheese-platter-border-accent-red-strong)
+  );
+  box-shadow: inset 0 0 0 1px
+    var(
+      --sem-color-border-accent-red-strong,
+      var(--cheese-platter-border-accent-red-strong)
+    );
+}
+
+.cheese-clip-editor-seeker-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.cheese-clip-editor-current-time {
+  min-width: 0;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cheese-clip-editor-current-time output {
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  font-weight: 700;
+}
+
+.cheese-clip-editor-seeker-action-buttons {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.cheese-clip-editor-seeker-action {
+  height: 26px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-weak)
+    );
+  border-radius: 4px;
+  background: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  padding: 0 7px;
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.cheese-clip-editor-seeker-action:hover,
+.cheese-clip-editor-seeker-action:focus-visible {
+  border-color: var(
+    --sem-color-border-brand-strong,
+    var(--cheese-platter-border-brand-strong)
+  );
+  color: var(
+    --sem-color-content-brand-strong,
+    var(--cheese-platter-content-brand-strong)
+  );
+  outline: none;
+}
+
+.cheese-clip-editor-duration {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 18px;
+  color: var(
+    --sem-color-border-brand-strong,
+    var(--cheese-platter-border-brand-strong)
+  );
+  font-weight: 700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 380px) {
+  .cheese-clip-editor-precision-body {
+    grid-template-columns: minmax(168px, 1fr);
+  }
+
+  .cheese-clip-editor-seeker-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.cheese-clip-editor-timeline > div[class*="_seeker_"] {
+  cursor: grab;
+  overflow: visible;
+}
+
+/* 치지직 원본 라벨은 긴 영상에서 절대 currentTime(예: 57:01.2)을 그대로
+   노출할 수 있어, 정밀 기능의 타임라인 상대 시각 라벨만 표시한다. */
+.cheese-clip-editor-timeline > div[class*="_seeker_"] [class*="_time_"] {
+  display: none !important;
+}
+
+.cheese-clip-editor-timeline.is-seeker-dragging,
+.cheese-clip-editor-timeline.is-seeker-dragging > div[class*="_seeker_"],
+.cheese-clip-editor-timeline.is-seeker-dragging > div[class*="_seeker_"] * {
+  cursor: grabbing !important;
+}
+
+.cheese-clip-editor-seeker-time {
+  pointer-events: none;
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  min-width: 48px;
+  border-radius: 4px;
+  background: var(--sem-color-surface-neutral-inverted, rgba(24, 24, 27, 0.9));
+  padding: 2px 5px;
+  color: var(--sem-color-content-neutral-inverted, #fff);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  text-align: center;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* 재생 영역에서는 치지직 원본 구간 툴팁을 우선해 시간 라벨끼리 겹치지 않게 한다. */
+.cheese-clip-editor-timeline:has(> span[class*="_play_"]:hover)
+  .cheese-clip-editor-seeker-time {
+  visibility: hidden;
+}
+
+.cheese-clip-editor-seeker-time.is-near-start {
+  left: 0;
+  transform: none;
+}
+
+.cheese-clip-editor-seeker-time.is-near-end {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+.cheese-clip-editor-timeline > span[class*="_edge_"]:focus-visible {
+  outline: 2px solid
+    var(
+      --sem-color-border-brand-strong,
+      var(--cheese-platter-border-brand-strong)
+    );
+  outline-offset: 2px;
+}
+
+.theme_dark .cheese-clip-editor-step,
+.theme_dark .cheese-clip-editor-time-input {
+  background: var(
+    --sem-color-surface-neutral-base,
+    var(--cheese-platter-surface-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+}

@@ -52,8 +52,11 @@
   let vodChatPage = isVodChatPage(currentHostPath);
 
   function isBlindRestoreActive() {
-    // SPA 전환 직후 2초 헬스체크를 기다리지 않고 현재 최상위 경로를 바로 판정한다.
-    return restoreBlindedChat && !isVodChatPage();
+    // 다시보기에서도 동작시킨다. 블라인드 처리 메시지는 원문이 기록에 남지 않아 대부분
+    // 복원되지 않지만, 클린봇 메시지는 원문이 그대로 내려와 복원이 가능하다.
+    // 복원할 원문이 없는 행은 restoreUnavailableRows 로 한 번만 표시하고 재시도를
+    // 멈추므로(무한 재처리 없음), 켜 두어도 부하가 늘지 않는다.
+    return restoreBlindedChat;
   }
 
   let chatRowObserver = null;
@@ -67,9 +70,15 @@
   const OWNED_CHAT_NODE_SELECTOR =
     ".cheese-chat-time, .cheese-blind-restored-text, .cheese-blind-emoji";
   const pendingChatRows = new Set();
+  const PENDING_CHAT_ROW_MAX = 240;
   const ROW_BATCH_MAX = 40;
   const ROW_BATCH_BUDGET_MS = 6;
+  const CHAT_SCROLL_SETTLE_MS = 180;
+  const CHAT_SCROLL_INTENT_MS = 700;
   let rowBatchFrame = 0;
+  let rowBatchResumeTimer = 0;
+  let chatScrollActiveUntil = 0;
+  let chatScrollIntentUntil = 0;
 
   // 가려진 채팅 복원용 상태.
   const BLIND_PLACEHOLDER_TEXTS = [
@@ -553,12 +562,43 @@
       cancelAnimationFrame(rowBatchFrame);
       rowBatchFrame = 0;
     }
+    if (rowBatchResumeTimer) {
+      clearTimeout(rowBatchResumeTimer);
+      rowBatchResumeTimer = 0;
+    }
+  }
+
+  function schedulePendingChatRows() {
+    if (
+      pendingChatRows.size === 0 ||
+      rowBatchFrame ||
+      rowBatchResumeTimer ||
+      document.hidden ||
+      !anyChatEnhanceOn()
+    ) {
+      return;
+    }
+
+    const scrollWait = chatScrollActiveUntil - performance.now();
+    if (scrollWait > 0) {
+      rowBatchResumeTimer = window.setTimeout(() => {
+        rowBatchResumeTimer = 0;
+        schedulePendingChatRows();
+      }, Math.ceil(scrollWait));
+      return;
+    }
+
+    rowBatchFrame = requestAnimationFrame(flushPendingChatRows);
   }
 
   function flushPendingChatRows() {
     rowBatchFrame = 0;
     if (document.hidden || !anyChatEnhanceOn()) {
       pendingChatRows.clear();
+      return;
+    }
+    if (performance.now() < chatScrollActiveUntil) {
+      schedulePendingChatRows();
       return;
     }
 
@@ -583,7 +623,7 @@
       }
     }
     if (pendingChatRows.size > 0) {
-      rowBatchFrame = requestAnimationFrame(flushPendingChatRows);
+      schedulePendingChatRows();
     }
   }
 
@@ -598,10 +638,75 @@
     }
     if (invalidate) delete row.dataset.cheeseRowDone;
     pendingChatRows.add(row);
-    if (!rowBatchFrame) {
-      rowBatchFrame = requestAnimationFrame(flushPendingChatRows);
+    // 긴 가상 스크롤 중 화면에서 이미 사라진 행을 계속 붙잡아 두지 않는다. 최신 행만
+    // 남겨도 정지 후 현재 DOM을 처리하는 데 충분하며, 임시 메모리 증가도 제한된다.
+    if (pendingChatRows.size > PENDING_CHAT_ROW_MAX) {
+      pendingChatRows.delete(pendingChatRows.values().next().value);
     }
+    schedulePendingChatRows();
   }
+
+  function getChatAsideFromEvent(event) {
+    const target =
+      event.target instanceof Element
+        ? event.target
+        : document.activeElement instanceof Element
+          ? document.activeElement
+          : null;
+    return target?.closest("aside#aside-chatting, aside#vod-aside") || null;
+  }
+
+  function deferChatRowProcessing() {
+    chatScrollActiveUntil = performance.now() + CHAT_SCROLL_SETTLE_MS;
+    if (rowBatchFrame) {
+      cancelAnimationFrame(rowBatchFrame);
+      rowBatchFrame = 0;
+    }
+    schedulePendingChatRows();
+  }
+
+  function markChatScrollIntent(event) {
+    if (!getChatAsideFromEvent(event)) return;
+    chatScrollIntentUntil = performance.now() + CHAT_SCROLL_INTENT_MS;
+    deferChatRowProcessing();
+  }
+
+  // 과거 채팅을 탐색하면 치지직이 가상 목록의 행을 계속 교체한다. 이때 시간 표시와
+  // 블라인드 복원을 매 프레임 실행하면 저사양 환경에서 영상 디코딩까지 밀릴 수 있다.
+  // 휠·터치·스크롤바 입력 중에는 행을 큐에만 모으고, 입력이 잠시 멈춘 뒤 최신 DOM을
+  // 묶어서 처리한다. 새 채팅 도착에 따른 자동 스크롤은 입력 의도가 없어 보류하지 않는다.
+  ["wheel", "touchmove", "pointerdown"].forEach((type) => {
+    document.addEventListener(type, markChatScrollIntent, {
+      capture: true,
+      passive: true,
+    });
+  });
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (
+        ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(
+          event.key,
+        )
+      ) {
+        markChatScrollIntent(event);
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    "scroll",
+    (event) => {
+      if (
+        performance.now() >= chatScrollIntentUntil ||
+        !getChatAsideFromEvent(event)
+      ) {
+        return;
+      }
+      deferChatRowProcessing();
+    },
+    { capture: true, passive: true },
+  );
 
   function isOwnedChatNode(node) {
     if (node instanceof Element) {
@@ -829,7 +934,12 @@
     if (chatRowObserver) chatRowObserver.disconnect();
     chatRowObserver = new MutationObserver((mutations) => {
       if (document.hidden || !anyChatEnhanceOn()) return;
+      // ⚠ 관리자 전용 공지 검사는 노드마다 querySelectorAll + textContent 를 돈다.
+      // 과거 채팅 탐색 중에는 가상 목록이 행을 대량 교체하므로, 이 검사까지 매 변이마다
+      // 돌리면 저사양에서 영상 디코딩을 밀어낸다. 공지는 '새 채팅으로 도착'하는 것이라
+      // 스크롤 입력 중에는 건너뛰고, 입력이 멎은 뒤 처리 경로에서 다시 확인한다.
       if (
+        performance.now() >= chatScrollActiveUntil &&
         mutations.some(
           (mutation) =>
             [...mutation.addedNodes].some(containsAdminOnlyChatNotice),

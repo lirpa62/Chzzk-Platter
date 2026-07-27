@@ -227,6 +227,43 @@ function normalizeGainStep(v) {
 }
 const SEEK_STEP_KEY = "cheeseSeekStepS"; // 라이브 되감기/앞으로 간격(초, 3~60, 기본 10)
 let seekStepValue = 10;
+const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
+const CLIP_EDITOR_SHIFT_STEP_KEY = "cheeseClipEditorShiftArrowStepS";
+const CLIP_EDITOR_BOUNDARY_STEP_KEY = "cheeseClipEditorBoundaryStepS";
+const CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY =
+  "cheeseClipEditorBoundaryOuterStepS";
+let clipEditorArrowStep = 5;
+let clipEditorShiftArrowStep = 0.1;
+let clipEditorBoundaryStep = 0.1;
+let clipEditorBoundaryOuterStep = 1;
+
+function normalizeClipEditorArrowStep(value) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.min(5, Math.max(1, Math.round(number)))
+    : 5;
+}
+
+function normalizeClipEditorShiftArrowStep(value) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.min(0.9, Math.max(0.1, Math.round(number * 10) / 10))
+    : 0.1;
+}
+
+function normalizeClipEditorBoundaryStep(value) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.min(1, Math.max(0.1, Math.round(number * 10) / 10))
+    : 0.1;
+}
+
+function normalizeClipEditorBoundaryOuterStep(value) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.min(10, Math.max(1, Math.round(number)))
+    : 1;
+}
 
 // 플레이어 하단 버튼의 좌/우 배치(우측에 몰리는 것을 완화). 버튼별 "left"|"right".
 // 기본값은 현재 배치와 동일(믹서/필터=left, 나머지=right).
@@ -762,6 +799,15 @@ function logoClickToFollowingActive() {
 // 오버레이(전역, 기본 ON). content.js 전용.
 const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
 let cardPreviewAudioOn = true;
+// 치지직 기본 카드 미리보기의 음소거를 해제할 때 적용할 시작 음량(0~1, 기본 50%).
+const CARD_PREVIEW_DEFAULT_VOLUME_KEY =
+  "cheeseCardPreviewDefaultVolume";
+let cardPreviewDefaultVolume = 0.5;
+function normalizeCardPreviewDefaultVolume(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0.5;
+  return Math.min(1, Math.max(0.01, Math.round(n * 100) / 100));
+}
 // 카드에 마우스가 이 시간(초) 이상 머문 뒤에만 휠을 음량 조절로 가로챈다. 그 전엔 페이지
 // 스크롤을 통과시켜, 스크롤로 카드를 스칠 때 스크롤이 걸리지 않게 한다(전역, 기본 1초).
 // 0이면 즉시(기존 동작). content.js 전용.
@@ -856,6 +902,7 @@ const featureFlags = {
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
   screenshotButton: false, // 플레이어 컨트롤의 '스크린샷' 버튼 숨김(true=숨김, 기본 표시)
   hideBlockedCards: false, // 차단한 유저 카드(_is_block_)를 탐색/검색 목록에서 완전히 숨김
+  clipEditorPrecision: false, // 클립 에디터 시간 눈금·정밀 구간 조정
   commentTimestamp: false,
   searchVideos: false,
   searchClips: false,
@@ -5050,10 +5097,7 @@ function setSeekRealtimeContent(el, label) {
     t.textContent = timePart;
     el.appendChild(t);
   }
-  const estimated = document.createElement("span");
-  estimated.className = "cheese-seek-realtime-estimated";
-  estimated.textContent = "추정";
-  el.appendChild(estimated);
+  // '추정' 배지는 넣지 않는다 — 같은 내용을 span 의 title 툴팁이 이미 안내한다.
 }
 
 // 영상 정보 영역의 등록일/방송 시작 추정 시각 호버 툴팁(_label_, position:absolute)을 전체
@@ -6117,7 +6161,9 @@ function handleLogPowerRewardPopup() {
   setChatResizerClickThrough(!!btn);
   if (!btn) return;
   // 자동 획득이 켜졌을 때만 API 수령 + 팝업 치움(꺼져 있으면 사용자가 직접 받도록 둠).
-  if (!featureFlags.chatLogPower || !featureFlags.chatLogPowerAuto) return;
+  // 자동 획득은 '보유 통나무파워 표시'와 독립된 옵션이다. 배지를 숨긴 사용자는
+  // chatLogPower=false이므로 두 플래그를 함께 요구하면 보상 버튼을 전혀 처리하지 못한다.
+  if (!featureFlags.chatLogPowerAuto) return;
   const now = Date.now();
   if (now - logPowerRewardHandledAt < 5000) return; // 과열 방지(5초 쿨다운)
   logPowerRewardHandledAt = now;
@@ -6223,6 +6269,9 @@ function applyLogPowerAutoClaim() {
   // 꺼져 있어도 자동 획득만으로 이 옵저버가 필요하다). 옵저버 콜백이 handleLogPowerReward
   // Popup을 호출해 폴링(1분)을 기다리지 않고 즉시 처리한다.
   ensureLogPowerBadgeObserver();
+  // 버튼이 이미 떠 있는 상태에서 설정을 켜면 새 DOM 변이가 발생하지 않아 옵저버
+  // 콜백이 오지 않는다. 현재 DOM을 즉시 한 번 검사해 기존 버튼도 바로 처리한다.
+  handleLogPowerRewardPopup();
   startLogPowerClaimTimer(); // 옵저버가 놓치는 경우 대비 폴링도 유지(안전망)
 }
 
@@ -17827,6 +17876,9 @@ function renderCustomFollowList(ourNav, h) {
   } else {
     ourNav.innerHTML = groupsHtml + favoritesHtml + followingHtml;
   }
+  // ⚠ innerHTML 재구성으로 링크가 통째로 교체된다 → draggable 속성도 함께 사라진다.
+  // init() 에서만 표시하면 이후 재렌더(그룹 접기/더보기 등)에서 팝업 드래그가 죽는다.
+  ensurePopupPlayerDraggable();
 }
 
 // 우리 목록 컨테이너에 위임 클릭 1회 부착(innerHTML 재구성에도 유지).
@@ -18740,7 +18792,9 @@ function openPopupPlayer(href, clientX, clientY) {
   if (!popupPlayerOn || !IS_TOP_FRAME) return;
   const muted = shouldPopupPlayerMute();
   const url = new URL(href, location.origin);
-  if (muted) url.searchParams.set("cheesePopupMuted", "1");
+  // 0 도 명시해서 보낸다. sidebarEarlyHide.js 가 이 값으로 localStorage 의
+  // 'player-volume-muted' 를 플레이어 초기화 전에 맞춘다(소리 켜기도 명시가 필요).
+  url.searchParams.set("cheesePopupMuted", muted ? "1" : "0");
   const popup = createPopupPlayer(
     url.pathname + url.search,
     clientX + window.scrollX - 200,
@@ -20257,8 +20311,12 @@ function onCardPreviewContextCapture(e) {
     video.muted = true;
     return;
   }
-  video.muted = !video.muted;
-  if (!video.muted && video.volume === 0) video.volume = 1;
+  if (video.muted || video.volume === 0) {
+    video.volume = cardPreviewDefaultVolume;
+    video.muted = false;
+  } else {
+    video.muted = true;
+  }
 }
 
 // 휠: 카드 미리보기 video 위면 음량 ±5%(올리면 자동 음소거 해제). 페이지 스크롤 막음.
@@ -20283,9 +20341,11 @@ function onCardPreviewWheelCapture(e) {
   e.stopPropagation();
   e.stopImmediatePropagation();
   const dir = e.deltaY < 0 ? 1 : -1; // 위로=증가
-  let vol =
-    (Number.isFinite(video.volume) ? video.volume : 1) +
-    dir * CARD_PREVIEW_WHEEL_STEP;
+  const activating = dir > 0 && (video.muted || video.volume === 0);
+  let vol = activating
+    ? cardPreviewDefaultVolume
+    : (Number.isFinite(video.volume) ? video.volume : 1) +
+      dir * CARD_PREVIEW_WHEEL_STEP;
   vol = Math.max(0, Math.min(1, Math.round(vol * 100) / 100));
   video.volume = vol;
   // 음량을 올리면 자동 음소거 해제, 0으로 내리면 음소거.
@@ -20436,9 +20496,13 @@ async function loadCardPreviewAudio() {
   try {
     const data = await getBootData([
       CARD_PREVIEW_AUDIO_KEY,
+      CARD_PREVIEW_DEFAULT_VOLUME_KEY,
       CARD_PREVIEW_WHEEL_DELAY_KEY,
     ]);
     cardPreviewAudioOn = data?.[CARD_PREVIEW_AUDIO_KEY] !== false; // 미설정/true=ON
+    cardPreviewDefaultVolume = normalizeCardPreviewDefaultVolume(
+      data?.[CARD_PREVIEW_DEFAULT_VOLUME_KEY],
+    );
     cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
       data?.[CARD_PREVIEW_WHEEL_DELAY_KEY],
     );
@@ -23546,6 +23610,10 @@ function broadcastFeatureFlags() {
       mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
       mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
       seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
+      clipEditorArrowStep, // 클립 에디터 seeker 방향키 이동 간격(초, 1~5)
+      clipEditorShiftArrowStep, // Shift+방향키 미세 이동 간격(초, 0.1~0.9)
+      clipEditorBoundaryStep, // 시작·종료 안쪽 조정 버튼 단위(초, 0.1~1)
+      clipEditorBoundaryOuterStep, // 시작·종료 바깥쪽 조정 버튼 단위(초, 1~10)
       // 하단 버튼 좌/우 배치 + 순서 + 네이티브 앵커 슬롯
       // { side:{...}, order:{left,right}, slot:{key:{grp,after}} }
       playerButtonSide: {
@@ -23605,6 +23673,10 @@ const FEATURE_FLAGS_KEYS = [
   MIXER_GAIN_MAX_KEY,
   MIXER_GAIN_STEP_KEY,
   SEEK_STEP_KEY,
+  CLIP_EDITOR_ARROW_STEP_KEY,
+  CLIP_EDITOR_SHIFT_STEP_KEY,
+  CLIP_EDITOR_BOUNDARY_STEP_KEY,
+  CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY,
   CHAT_WIDTH_KEY,
   CHAT_FONT_SCALE_KEY,
   CHAT_FONT_SCALE_SPECIAL_KEY,
@@ -23658,6 +23730,7 @@ const BOOT_PREFETCH_KEYS = [
     CARD_LIVE_PREVIEW_KEY,
     CARD_LIVE_PREVIEW_POSITION_KEY,
     CARD_PREVIEW_AUDIO_KEY,
+    CARD_PREVIEW_DEFAULT_VOLUME_KEY,
     CARD_PREVIEW_WHEEL_DELAY_KEY,
     CARD_DATE_TOOLTIP_KEY,
     VOD_CHAPTER_HIDE_KEY,
@@ -23810,6 +23883,18 @@ async function loadFeatureFlags() {
     // 미설정=기본 ON(기존 동작: 숨김이 기능까지 끔)
     playerDisableHidden = data?.[PLAYER_DISABLE_HIDDEN_KEY] !== false;
     seekStepValue = normalizeSeekStep(data?.[SEEK_STEP_KEY]);
+    clipEditorArrowStep = normalizeClipEditorArrowStep(
+      data?.[CLIP_EDITOR_ARROW_STEP_KEY],
+    );
+    clipEditorShiftArrowStep = normalizeClipEditorShiftArrowStep(
+      data?.[CLIP_EDITOR_SHIFT_STEP_KEY],
+    );
+    clipEditorBoundaryStep = normalizeClipEditorBoundaryStep(
+      data?.[CLIP_EDITOR_BOUNDARY_STEP_KEY],
+    );
+    clipEditorBoundaryOuterStep = normalizeClipEditorBoundaryOuterStep(
+      data?.[CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY],
+    );
     const cw = Number(data?.[CHAT_WIDTH_KEY]);
     chatWidthValue = Number.isFinite(cw) ? cw : 0;
     chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
@@ -24048,6 +24133,26 @@ if (chrome.storage?.onChanged) {
     if (changes[SEEK_STEP_KEY]) {
       seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
     }
+    if (changes[CLIP_EDITOR_ARROW_STEP_KEY]) {
+      clipEditorArrowStep = normalizeClipEditorArrowStep(
+        changes[CLIP_EDITOR_ARROW_STEP_KEY].newValue,
+      );
+    }
+    if (changes[CLIP_EDITOR_SHIFT_STEP_KEY]) {
+      clipEditorShiftArrowStep = normalizeClipEditorShiftArrowStep(
+        changes[CLIP_EDITOR_SHIFT_STEP_KEY].newValue,
+      );
+    }
+    if (changes[CLIP_EDITOR_BOUNDARY_STEP_KEY]) {
+      clipEditorBoundaryStep = normalizeClipEditorBoundaryStep(
+        changes[CLIP_EDITOR_BOUNDARY_STEP_KEY].newValue,
+      );
+    }
+    if (changes[CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY]) {
+      clipEditorBoundaryOuterStep = normalizeClipEditorBoundaryOuterStep(
+        changes[CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY].newValue,
+      );
+    }
     if (changes[CHAT_WIDTH_KEY]) {
       const v = Number(changes[CHAT_WIDTH_KEY].newValue);
       chatWidthValue = Number.isFinite(v) ? v : 0;
@@ -24271,6 +24376,11 @@ if (chrome.storage?.onChanged) {
       if (cardPreviewAudioOn) bindCardPreviewAudio();
       else unbindCardPreviewAudio();
     }
+    if (changes[CARD_PREVIEW_DEFAULT_VOLUME_KEY]) {
+      cardPreviewDefaultVolume = normalizeCardPreviewDefaultVolume(
+        changes[CARD_PREVIEW_DEFAULT_VOLUME_KEY].newValue,
+      );
+    }
     if (changes[CARD_PREVIEW_WHEEL_DELAY_KEY]) {
       cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
         changes[CARD_PREVIEW_WHEEL_DELAY_KEY].newValue,
@@ -24424,7 +24534,11 @@ if (chrome.storage?.onChanged) {
       changes[MIXER_GAIN_MAX_KEY] ||
       changes[MIXER_GAIN_STEP_KEY] ||
       changes[CHAT_TIME_FORMAT_KEY] ||
-      changes[SEEK_STEP_KEY]
+      changes[SEEK_STEP_KEY] ||
+      changes[CLIP_EDITOR_ARROW_STEP_KEY] ||
+      changes[CLIP_EDITOR_SHIFT_STEP_KEY] ||
+      changes[CLIP_EDITOR_BOUNDARY_STEP_KEY] ||
+      changes[CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY]
     ) {
       broadcastFeatureFlags(); // 프리셋/커스텀/항상켜기/넓은화면/되감기바/볼륨·게인%/되감기간격만 바뀐 경우도 전달
     }
@@ -24583,15 +24697,15 @@ if (chrome.storage?.onChanged) {
   });
 }
 
-// 클립 만들기(클립 에디터) 페이지인지. 이 페이지는 우리 기능 대상이 아니고, seeker
-// 드래그 시 DOM/스타일이 매 프레임 바뀌는데 init 의 사이드바/헤더 재적용·측정이 매번
-// 돌면 영상/미리보기가 버벅인다. 여기선 아무 작업도 하지 않는다.
+// 클립 만들기(클립 에디터) 페이지인지. seeker 드래그 시 DOM/스타일이 매 프레임
+// 바뀌므로 사이드바/헤더 등 일반 content 초기화는 건너뛴다. 정밀 구간 조정은 가벼운
+// 전용 스크립트(clipEditorEnhancer.js)가 옵션이 켜진 경우에만 따로 처리한다.
 function isClipEditorPage() {
   return location.pathname.startsWith("/clip-editor");
 }
 
 function init() {
-  if (isClipEditorPage()) return; // 클립 에디터: 확장 개입 없음(드래그 버벅임 방지)
+  if (isClipEditorPage()) return; // 클립 에디터: 일반 기능 개입 없음(드래그 버벅임 방지)
   ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
   ensureChatBlockObserver(); // 채팅 프로필 팝오버에 '사용자 차단' 항목 주입 관찰
   ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰

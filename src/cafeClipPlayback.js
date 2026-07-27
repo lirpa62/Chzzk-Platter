@@ -2,20 +2,35 @@
   const params = new URLSearchParams(location.search);
   if (params.get("extension") !== "ChzzkCafeNow") return;
 
+  const initialAutoplay = params.get("autoplay") === "1";
+
+  // ⚠ 한때 localStorage('embed-player-volume-muted')를 document_start 에 바꿔 소리 있는
+  // 자동재생을 시도했지만, 임베드 플레이어는 이 값을 자동재생 음소거 결정에 쓰지 않는다
+  // (사용자 활성화가 있는 프레임에서도 play() 가 거부됐고, 값만 잠깐 바뀌었다가 폴백에
+  // 의해 되돌아갔다). 효과 없이 사용자의 치지직 origin 설정만 건드리므로 제거했다.
+  // 소리는 아래 canPlayUnmuted()/scheduleUnmuteRetries() 경로 — 즉 사용자가 플레이어를
+  // 한 번 조작한 뒤 켜지는 방식으로만 처리한다(브라우저 자동재생 정책상 이게 한계).
+
   const MESSAGE_SOURCE = "cheese-platter-cafe-clip-playback";
-  const OBSERVER_TIMEOUT_MS = 10000;
-  let desiredAction = null;
-  let desiredMuted = true;
+  const OBSERVER_TIMEOUT_MS = 15000;
+  const PLAY_RETRY_INTERVAL_MS = 250;
+  const PLAY_RETRY_TIMEOUT_MS = 15000;
+  let desiredAction = initialAutoplay ? "play" : null;
+  let desiredMuted = params.get("muted") !== "0";
   let playPending = false;
   let commandVersion = 0;
-  let attemptedVideo = null;
-  let attemptedVersion = -1;
   let observer = null;
   let observerTimeout = 0;
   let observerExpired = false;
   let applyQueued = false;
   let iframeInteracted = false;
+  let lastInteractionAt = 0; // iframe 내부 마지막 실제 조작 시각(사용자 pause 판별용)
   let unmuteRetryTimers = [];
+  let playRetryTimer = 0;
+  let playRetryUntil = initialAutoplay
+    ? Date.now() + PLAY_RETRY_TIMEOUT_MS
+    : 0;
+  let autoplayUnmuteBlocked = false;
 
   function isCafeOrigin(origin) {
     try {
@@ -43,7 +58,10 @@
   }
 
   function applyDesiredMute(video) {
-    const muted = desiredMuted || !canPlayUnmuted();
+    const muted =
+      desiredMuted ||
+      !canPlayUnmuted() ||
+      (autoplayUnmuteBlocked && !iframeInteracted && !hasUserActivation());
     video.muted = muted;
     video.defaultMuted = muted;
   }
@@ -58,6 +76,7 @@
     const video = document.querySelector("video");
     if (!(video instanceof HTMLVideoElement)) return;
 
+    autoplayUnmuteBlocked = false;
     video.muted = false;
     video.defaultMuted = false;
     if (video.paused) {
@@ -78,55 +97,105 @@
     });
   }
 
+  function clearPlayRetryTimer() {
+    if (playRetryTimer) {
+      clearTimeout(playRetryTimer);
+      playRetryTimer = 0;
+    }
+  }
+
+  function resetPlayRetry() {
+    clearPlayRetryTimer();
+    playRetryUntil = 0;
+  }
+
+  function schedulePlayRetry(version) {
+    if (
+      desiredAction !== "play" ||
+      version !== commandVersion ||
+      Date.now() >= playRetryUntil ||
+      playRetryTimer
+    ) {
+      return;
+    }
+
+    playRetryTimer = window.setTimeout(() => {
+      playRetryTimer = 0;
+      if (
+        desiredAction !== "play" ||
+        version !== commandVersion ||
+        Date.now() >= playRetryUntil
+      ) {
+        return;
+      }
+      queueApplyPlaybackCommand();
+    }, PLAY_RETRY_INTERVAL_MS);
+  }
+
+  function attemptVideoPlay(video, version, allowMutedFallback) {
+    if (desiredAction !== "play" || version !== commandVersion) return;
+    playPending = true;
+
+    let result;
+    try {
+      result = video.play();
+    } catch {
+      playPending = false;
+      schedulePlayRetry(version);
+      return;
+    }
+
+    if (!result || typeof result.then !== "function") {
+      playPending = false;
+      clearPlayRetryTimer();
+      return;
+    }
+
+    result.then(
+      () => {
+        if (version !== commandVersion) return;
+        playPending = false;
+        clearPlayRetryTimer();
+      },
+      () => {
+        if (version !== commandVersion || desiredAction !== "play") return;
+        playPending = false;
+
+        if (allowMutedFallback && !video.muted) {
+          autoplayUnmuteBlocked = true;
+          video.muted = true;
+          video.defaultMuted = true;
+          attemptVideoPlay(video, version, false);
+          return;
+        }
+        schedulePlayRetry(version);
+      },
+    );
+  }
+
   function applyPlaybackCommand() {
     if (!desiredAction) return true;
     const video = document.querySelector("video");
     if (!(video instanceof HTMLVideoElement)) return false;
 
     if (desiredAction === "pause") {
+      resetPlayRetry();
+      playPending = false;
       if (!video.paused) video.pause();
-      attemptedVideo = null;
-      attemptedVersion = -1;
       return true;
     }
 
     applyDesiredMute(video);
-    if (
-      !video.paused ||
-      playPending ||
-      (attemptedVideo === video && attemptedVersion === commandVersion)
-    ) {
+    if (!video.paused) {
+      playPending = false;
+      clearPlayRetryTimer();
+      return true;
+    }
+    if (playPending) {
       return true;
     }
 
-    attemptedVideo = video;
-    attemptedVersion = commandVersion;
-    playPending = true;
-    try {
-      const result = video.play();
-      if (result && typeof result.then === "function") {
-        result.then(
-          () => {
-            playPending = false;
-          },
-          () => {
-            playPending = false;
-            // 소리 있는 재생이 거부됐다면(활성화 만료 등) 음소거로 되돌려 재시도한다.
-            // 이게 없으면 아예 재생되지 않아 자동재생이 멈춘 것처럼 보인다.
-            if (video.muted) return;
-            video.muted = true;
-            video.defaultMuted = true;
-            try {
-              video.play()?.catch?.(() => {});
-            } catch {}
-          },
-        );
-      } else {
-        playPending = false;
-      }
-    } catch {
-      playPending = false;
-    }
+    attemptVideoPlay(video, commandVersion, true);
     return true;
   }
 
@@ -171,10 +240,21 @@
       return;
     }
 
+    // 부모가 iframe 을 제거하기 직전에 보내는 정리 신호. iframe 이 그냥 떨어져 나가면
+    // pagehide 가 안 오는 경우가 있어(Chromium), 타이머·리스너가 남을 수 있다.
+    if (event.data.action === "release") {
+      releaseControl();
+      return;
+    }
     desiredAction = event.data.action === "play" ? "play" : "pause";
     desiredMuted = event.data.muted !== false;
     if (desiredMuted) clearUnmuteRetries();
     commandVersion += 1;
+    playPending = false;
+    resetPlayRetry();
+    if (desiredAction === "play") {
+      playRetryUntil = Date.now() + PLAY_RETRY_TIMEOUT_MS;
+    }
     observerExpired = false;
     stopObserver();
     queueApplyPlaybackCommand();
@@ -200,15 +280,13 @@
     notifyParent("playing");
     if (desiredAction === "play") {
       applyDesiredMute(event.target);
-      attemptedVideo = event.target;
-      attemptedVersion = commandVersion;
     }
   }
 
   function releaseControl() {
     desiredAction = null;
-    attemptedVideo = null;
-    attemptedVersion = -1;
+    playPending = false;
+    resetPlayRetry();
     clearUnmuteRetries();
     stopObserver();
   }
@@ -217,6 +295,7 @@
     if (!event.isTrusted) return;
     const first = !iframeInteracted;
     iframeInteracted = true;
+    lastInteractionAt = Date.now();
     // 이 origin(chzzk)에 사용자 활성화가 생겼음을 부모에 알린다. 부모는 이후 마운트하는
     // iframe 을 처음부터 소리 있게 시작시킬 수 있다(활성화는 origin 단위로 유지되므로).
     if (first) notifyParent("activated");
@@ -237,10 +316,24 @@
     if (desiredAction !== "play") return;
     // 우리가 건 play() 가 아직 진행 중이거나 재생 종료로 인한 pause 는 무시한다.
     if (playPending || event.target.ended) return;
-    if (!(iframeInteracted || hasUserActivation())) return;
+    // ⚠ 'iframe 안에서 실제로 조작했는지'만 본다. 예전엔 hasUserActivation() 도 함께
+    // 봤는데, 이 값은 문서 단위라 카페 페이지를 한 번이라도 클릭했으면 true 가 된다.
+    // 그러면 부모가 보낸 pause(다른 클립 재생 시 정지)까지 '사용자가 멈춤'으로 오인해
+    // 그 플레이어가 자동재생 대상에서 영구 제외됐다(자동재생이 안 되던 원인).
+    const userPaused =
+      iframeInteracted && Date.now() - lastInteractionAt <= 300;
+    if (userPaused) {
+      releaseControl();
+      notifyParent("user-paused");
+      return;
+    }
 
-    releaseControl();
-    notifyParent("user-paused");
+    // 소스 교체나 플레이어 초기화 도중 발생한 pause 는 사용자의 일시정지가 아니다.
+    // 자동재생 대상이 화면에 남아 있다면 제한 시간 안에서 다시 재생을 시도한다.
+    if (!playRetryUntil) {
+      playRetryUntil = Date.now() + PLAY_RETRY_TIMEOUT_MS;
+    }
+    schedulePlayRetry(commandVersion);
   }
 
   document.addEventListener("play", handleDocumentPlay, true);
@@ -248,18 +341,32 @@
   document.addEventListener("pointerdown", handleUserActivation, true);
   document.addEventListener("keydown", handleUserActivation, true);
   document.addEventListener("touchstart", handleUserActivation, true);
+  if (initialAutoplay) {
+    queueApplyPlaybackCommand();
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        if (desiredAction !== "play") return;
+        observerExpired = false;
+        if (Date.now() >= playRetryUntil) {
+          playRetryUntil = Date.now() + PLAY_RETRY_TIMEOUT_MS;
+        }
+        queueApplyPlaybackCommand();
+      },
+      { once: true },
+    );
+  }
   window.addEventListener(
     "pagehide",
     () => {
       stopObserver();
+      resetPlayRetry();
       clearUnmuteRetries();
       document.removeEventListener("play", handleDocumentPlay, true);
       document.removeEventListener("pause", handleDocumentPause, true);
       document.removeEventListener("pointerdown", handleUserActivation, true);
       document.removeEventListener("keydown", handleUserActivation, true);
       document.removeEventListener("touchstart", handleUserActivation, true);
-      attemptedVideo = null;
-      attemptedVersion = -1;
       playPending = false;
       observerExpired = true;
     },

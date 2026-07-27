@@ -2829,10 +2829,47 @@
   // 실행하면 필터가 안정된 뒤에도 querySelector와 버튼 보정이 반복되므로, 변이가 몰려도
   // 250ms에 한 번만 실행한다. 숨김 탭에서는 옵저버 자체를 끊고 복귀 시 전체 보정한다.
   const TICK_THROTTLE_MS = 250;
+  const CHAT_STREAM_SELECTOR =
+    "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
   let tickTimer = 0;
   let observer = null;
 
-  function scheduleTick() {
+  function isChatStreamOnlyMutation(mutation) {
+    const target =
+      mutation.target instanceof Element
+        ? mutation.target
+        : mutation.target?.parentElement;
+    if (target?.closest?.(CHAT_STREAM_SELECTOR)) return true;
+    const chatAside = target?.closest?.(
+      "aside#aside-chatting, aside#vod-aside",
+    );
+    if (chatAside) {
+      const row = target.closest("[class*='_item_']");
+      if (row?.querySelector("[class*='_chatting_message_']")) return true;
+    }
+    const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return (
+      changedNodes.length > 0 &&
+      changedNodes.every((node) => {
+        const element =
+          node instanceof Element ? node : node?.parentElement || null;
+        return Boolean(
+          element?.closest?.(CHAT_STREAM_SELECTOR) ||
+            (chatAside &&
+              (element?.matches?.("[class*='_chatting_message_']") ||
+                element?.querySelector?.("[class*='_chatting_message_']"))),
+        );
+      })
+    );
+  }
+
+  function scheduleTick(mutations) {
+    if (
+      mutations?.length &&
+      mutations.every(isChatStreamOnlyMutation)
+    ) {
+      return;
+    }
     if (document.hidden || tickTimer) return;
     tickTimer = window.setTimeout(() => {
       tickTimer = 0;

@@ -3,6 +3,40 @@
 // 에 도는데(약 0.5~0.8s 지연), 그 사이 사이드바가 먼저 렌더되면 숨겨야 할 메뉴·섹션·원본
 // 팔로우 목록이 잠깐 보였다 사라지는 깜빡임이 났다. 이 스크립트가 그 지연 구간을 메운다.
 // content.js 가 나중에 완전한 규칙으로 같은 <style> id 를 덮으므로 충돌하지 않는다.
+// ── 팝업 플레이어 음소거 상태 선반영 ────────────────────────────────────────
+// 치지직 플레이어는 localStorage 의 'player-volume-muted' 로 초기 음소거를 정한다.
+// 팝업 iframe 에는 사용자 활성화가 없어 소리 있는 자동재생이 차단되는데, 이 값을
+// 플레이어가 읽기 전(document_start)에 맞춰두면 클릭 없이도 의도한 상태로 시작한다.
+//
+// ⚠ localStorage 는 origin 전체가 공유한다. 팝업이 쓴 값을 그대로 두면 본창·다음 방문의
+// 음소거 상태까지 바뀐다. 그래서 '원래 값을 기억했다가 곧바로 되돌리는' 방식으로,
+// 플레이어가 읽는 그 순간에만 우리 값이 보이게 한다. await 앞에서 동기로 처리해야
+// document_start 시점을 놓치지 않는다.
+(() => {
+  "use strict";
+  const MUTED_KEY = "player-volume-muted";
+  try {
+    if (window.top === window) return; // 최상위 문서는 대상 아님
+    const params = new URLSearchParams(location.search);
+    if (params.get("cheesePopup") !== "1") return; // 우리 팝업 프레임만
+    const wantMuted = params.get("cheesePopupMuted") === "1";
+    const prev = localStorage.getItem(MUTED_KEY);
+    const next = wantMuted ? "true" : "false";
+    if (prev === next) return; // 이미 같은 값 — 건드릴 필요 없음
+    localStorage.setItem(MUTED_KEY, next);
+    // 플레이어가 초기값을 읽은 뒤 원복한다(다른 탭·다음 방문에 영향 남기지 않기).
+    const restore = () => {
+      try {
+        if (localStorage.getItem(MUTED_KEY) !== next) return; // 사용자가 바꿨으면 존중
+        if (prev === null) localStorage.removeItem(MUTED_KEY);
+        else localStorage.setItem(MUTED_KEY, prev);
+      } catch {}
+    };
+    window.addEventListener("pagehide", restore, { once: true });
+    setTimeout(restore, 10000);
+  } catch {}
+})();
+
 (async () => {
   "use strict";
   try {

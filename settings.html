@@ -1100,11 +1100,13 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">숨긴 버튼의 기능도 끄기</span>
+                  <span class="settings-item-name"
+                    >숨긴 버튼의 기능도 끄기</span
+                  >
                   <span class="settings-item-desc"
-                    >켜면(기본) 위에서 숨긴 버튼의 기능과 단축키까지 함께 끕니다.
-                    끄면 버튼만 숨기고 단축키(Shift+A/S/M/I/F, 방향키)는 그대로
-                    사용할 수 있습니다(체크=기능도 끔)</span
+                    >켜면(기본) 위에서 숨긴 버튼의 기능과 단축키까지 함께
+                    끕니다. 끄면 버튼만 숨기고 단축키(Shift+A/S/M/I/F, 방향키)는
+                    그대로 사용할 수 있습니다(체크=기능도 끔)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1118,8 +1120,8 @@
                     >스크린샷 저장 전 미리보기</span
                   >
                   <span class="settings-item-desc"
-                    >스크린샷을 찍으면 미리보기 창에서 저장/취소를 확인(끄면
-                    바로 저장, 체크=미리보기)</span
+                    >스크린샷을 찍으면 미리보기에서 영역 자르기와 저장/취소를
+                    확인(끄면 바로 저장, 체크=미리보기)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -4299,6 +4301,43 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-card-preview-default-volume-item
+              >
+                <div>
+                  <span class="settings-item-name"
+                    >└ 음소거 해제 기본 음량</span
+                  >
+                  <span class="settings-item-desc"
+                    >우클릭 또는 휠로 치지직 기본 카드 미리보기의 소리를 처음 켤
+                    때 적용할 음량(1~100%, 기본 50%)</span
+                  >
+                </div>
+                <div class="settings-volume-row">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    step="1"
+                    class="settings-volume-slider"
+                    data-card-preview-default-volume-slider
+                    aria-label="치지직 기본 카드 미리보기 음소거 해제 음량 슬라이더"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="1"
+                      inputmode="numeric"
+                      data-card-preview-default-volume
+                      aria-label="치지직 기본 카드 미리보기 음소거 해제 음량"
+                    />
+                    <small>%</small>
+                  </span>
+                </div>
+              </li>
               <li class="settings-item">
                 <label for="cardPreviewWheelDelayInput">
                   <span class="settings-item-name">└ 휠 음량 활성 지연</span>
@@ -4889,9 +4928,10 @@
                 <label>
                   <span class="settings-item-name">가려진 채팅 표시</span>
                   <span class="settings-item-desc"
-                    >라이브에서 클린봇·블라인드로 가려진 메시지를 원문으로
-                    표시합니다. 다시보기 채팅은 원문이 제공되지 않아 적용되지
-                    않습니다.</span
+                    >클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다.
+                    다시보기에서는 원문이 함께 내려오는 클린봇 메시지만
+                    복원되며, 블라인드 처리된 메시지는 원문이 남지 않아 그대로
+                    표시됩니다.</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -5207,6 +5247,336 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">클립 구간 정밀 조정</span>
+                  <span class="settings-item-desc"
+                    >클립 에디터에 시간 눈금과 재생바 재생 시각, 시작·종료 직접
+                    입력·현재 위치 적용, 0.1초·1초 단위 조정과 별도 에디터 창
+                    높이 보정을 추가합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="clipEditorPrecision" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-clip-editor-step-item>
+                <label for="clipEditorBoundaryStepSelect">
+                  <span class="settings-item-name"
+                    >└ 구간 조정 안쪽 버튼 단위</span
+                  >
+                  <span class="settings-item-desc"
+                    >시작·종료 입력칸과 가까운 버튼의 이동 단위(기본
+                    0.1초)</span
+                  >
+                </label>
+                <div
+                  class="settings-popover settings-step-picker"
+                  data-clip-editor-step-picker="boundary"
+                >
+                  <button
+                    type="button"
+                    id="clipEditorBoundaryStepSelect"
+                    class="settings-popover-trigger"
+                    data-clip-editor-step-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-clip-editor-step-label>0.1초</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-clip-editor-step-list
+                    role="listbox"
+                    aria-label="구간 조정 안쪽 버튼 단위"
+                    hidden
+                  >
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.1">
+                        0.1초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.2">
+                        0.2초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.3">
+                        0.3초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.4">
+                        0.4초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.5">
+                        0.5초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.6">
+                        0.6초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.7">
+                        0.7초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.8">
+                        0.8초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.9">
+                        0.9초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="1">
+                        1.0초
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+              <li class="settings-item" data-clip-editor-step-item>
+                <label for="clipEditorBoundaryOuterStepSelect">
+                  <span class="settings-item-name"
+                    >└ 구간 조정 바깥쪽 버튼 단위</span
+                  >
+                  <span class="settings-item-desc"
+                    >시작·종료 입력칸에서 먼 버튼의 이동 단위(기본
+                    1초)</span
+                  >
+                </label>
+                <div
+                  class="settings-popover settings-step-picker"
+                  data-clip-editor-step-picker="boundaryOuter"
+                >
+                  <button
+                    type="button"
+                    id="clipEditorBoundaryOuterStepSelect"
+                    class="settings-popover-trigger"
+                    data-clip-editor-step-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-clip-editor-step-label>1초</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-clip-editor-step-list
+                    role="listbox"
+                    aria-label="구간 조정 바깥쪽 버튼 단위"
+                    hidden
+                  >
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="1">
+                        1초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="2">
+                        2초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="3">
+                        3초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="4">
+                        4초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="5">
+                        5초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="6">
+                        6초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="7">
+                        7초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="8">
+                        8초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="9">
+                        9초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="10">
+                        10초
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+              <li class="settings-item" data-clip-editor-step-item>
+                <label for="clipEditorArrowStepSelect">
+                  <span class="settings-item-name"
+                    >└ 방향키 재생바 이동 간격</span
+                  >
+                  <span class="settings-item-desc"
+                    >좌우 방향키로 현재 재생 위치를 이동할 간격(기본 5초)</span
+                  >
+                </label>
+                <div
+                  class="settings-popover settings-step-picker"
+                  data-clip-editor-step-picker="arrow"
+                >
+                  <button
+                    type="button"
+                    id="clipEditorArrowStepSelect"
+                    class="settings-popover-trigger"
+                    data-clip-editor-step-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-clip-editor-step-label>5초</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-clip-editor-step-list
+                    role="listbox"
+                    aria-label="방향키 seeker 이동 간격"
+                    hidden
+                  >
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="1">
+                        1초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="2">
+                        2초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="3">
+                        3초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="4">
+                        4초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="5">
+                        5초
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+              <li class="settings-item" data-clip-editor-step-item>
+                <label for="clipEditorShiftArrowStepSelect">
+                  <span class="settings-item-name"
+                    >└ Shift + 방향키 미세 이동</span
+                  >
+                  <span class="settings-item-desc"
+                    >Shift를 누른 채 좌우 방향키로 이동할 간격(기본 0.1초)</span
+                  >
+                </label>
+                <div
+                  class="settings-popover settings-step-picker"
+                  data-clip-editor-step-picker="shift"
+                >
+                  <button
+                    type="button"
+                    id="clipEditorShiftArrowStepSelect"
+                    class="settings-popover-trigger"
+                    data-clip-editor-step-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-clip-editor-step-label>0.1초</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-clip-editor-step-list
+                    role="listbox"
+                    aria-label="Shift와 방향키 미세 이동 간격"
+                    hidden
+                  >
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.1">
+                        0.1초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.2">
+                        0.2초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.3">
+                        0.3초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.4">
+                        0.4초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.5">
+                        0.5초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.6">
+                        0.6초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.7">
+                        0.7초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.8">
+                        0.8초
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="0.9">
+                        0.9초
+                      </button>
+                    </li>
+                  </ul>
+                </div>
               </li>
             </ul>
           </section>

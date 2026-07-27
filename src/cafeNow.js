@@ -36,9 +36,8 @@
   let activeAutoplayPlayer = null;
   let autoplayVisibilityListenerBound = false;
   let playbackMessageListenerBound = false;
-  // 사용자가 클립 플레이어를 한 번이라도 직접 조작했는지. 사용자 활성화는 origin
-  // (chzzk.naver.com) 단위로 유지되므로, 한 번 활성화되면 이후 새로 띄우는 embed 는
-  // 처음부터 소리 있게 자동재생할 수 있다. 페이지를 벗어나면 초기화된다.
+  // 사용자가 클립 플레이어를 한 번이라도 직접 조작했는지. embed 가 보내는 activated
+  // 신호를 받아 두어 진단·향후 폴백에 쓴다.
   let clipOriginActivated = false;
   const pendingRoots = new Set();
   const metadataRequests = new Map();
@@ -149,16 +148,15 @@
     frame.className = "cheese-cafe-player__frame";
     frame.src = api.getEmbedUrl(media, {
       autoPlay: options.autoPlay === true,
-      // 소리 있는 자동재생은 사용자 제스처 전까지 브라우저가 차단한다. 다만 이미 이
-      // origin 에 활성화가 생겼다면(clipOriginActivated) 처음부터 소리 있게 시작한다
-      // → 세션 내 첫 클립만 한 번 클릭하면 이후 클립은 클릭 없이 소리가 난다.
-      muted:
-        options.autoPlay === true &&
-        (cafeAutoplayMuted || !clipOriginActivated),
+      // 음소거 여부는 사용자 설정을 그대로 따른다. 다만 브라우저 자동재생 정책상
+      // 사용자 제스처 전에는 소리 있는 재생이 거부되므로, 그때는 embed 쪽
+      // (cafeClipPlayback.js)이 음소거 자동재생으로 전환하고 이후 사용자가 플레이어를
+      // 조작하면 소리를 켠다.
+      muted: options.autoPlay === true && cafeAutoplayMuted,
     });
     frame.title = "CHZZK Player";
     frame.frameBorder = "0";
-    frame.loading = "lazy";
+    frame.loading = options.autoPlay === true ? "eager" : "lazy";
     frame.allow = "autoplay; clipboard-write; web-share";
     frame.allowFullscreen = true;
     frame.addEventListener("load", () => {
@@ -214,7 +212,12 @@
         return;
       }
 
-      if (frame.isConnected) frame.remove();
+      // 제거 전에 정리 신호를 보낸다 — iframe 이 떨어져 나가면 pagehide 가 안 올 수 있어
+      // embed 쪽 타이머·리스너가 남는다.
+      if (frame.isConnected) {
+        postPlayerCommand(frame, "release");
+        frame.remove();
+      }
       player.dataset.cheeseCafeAutoplayInitialized = "false";
       player.dataset.cheeseCafeEmbedLoaded = "false";
     }, AUTOPLAY_RELEASE_DELAY_MS);
@@ -263,6 +266,9 @@
 
     // Navigating an already connected iframe adds entries to the browser's
     // joint session history. Mount a fresh iframe with its final URL instead.
+    if (currentFrame instanceof HTMLIFrameElement) {
+      postPlayerCommand(currentFrame, "release"); // localStorage 원복 유도
+    }
     currentFrame?.remove();
     player.dataset.cheeseCafeEmbedLoaded = "false";
     player.dataset.cheeseCafeAutoplayInitialized = "false";

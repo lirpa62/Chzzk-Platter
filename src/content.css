@@ -38,11 +38,13 @@
   --cheese-platter-shadow-base: #0000000d;
   --cheese-platter-shadow-strong: #0000001a;
   --cheese-platter-surface-brand-weak: #d1f0e3;
+  --cheese-platter-surface-brand-weakest: #e8f7f1;
   --cheese-platter-surface-brand-alpha-stronger: #1bb373cc;
   --cheese-platter-surface-interaction-lighten-hovered: #0000000d;
   --cheese-platter-surface-neutral-base: #e1e1e5;
   --cheese-platter-surface-neutral-subtle: #e8e9eb;
   --cheese-platter-surface-neutral-weaker: #fff;
+  --cheese-platter-surface-neutral-weakest: #f0f1f2;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
   --cheese-platter-surface-function-nickname-yellow: #fbf0d1;
 }
@@ -134,11 +136,13 @@ html.cheese-channel-live-profile-custom
   --cheese-platter-shadow-base: #0003;
   --cheese-platter-shadow-strong: #0000004d;
   --cheese-platter-surface-brand-weak: #006641;
+  --cheese-platter-surface-brand-weakest: #003321;
   --cheese-platter-surface-brand-alpha-stronger: #00ffa3cc;
   --cheese-platter-surface-interaction-lighten-hovered: #ffffff0d;
   --cheese-platter-surface-neutral-base: #2e3033;
   --cheese-platter-surface-neutral-subtle: #2a2c2f;
   --cheese-platter-surface-neutral-weaker: #1c1d1f;
+  --cheese-platter-surface-neutral-weakest: #0e0f10;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
   --cheese-platter-surface-function-nickname-yellow: #473508;
 }
@@ -2808,16 +2812,6 @@ html.cheese-vod-portrait
 .cheese-seek-realtime-time {
   white-space: nowrap;
 }
-.cheese-seek-realtime-estimated {
-  padding: 1px 3px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  font-size: 8px;
-  font-weight: 700;
-  line-height: 1;
-  opacity: 0.78;
-  white-space: nowrap;
-}
 /* 세로 방송: preview 가 좁아 실제시각 텍스트가 툴팁 밖으로 나갔다 → 더 작고 촘촘하게. */
 html.cheese-vod-portrait .cheese-search-seek-realtime {
   font-size: 10.5px;
@@ -3337,7 +3331,6 @@ html.cheese-cf-on
 
 .cheese-cf-group-list {
   margin: 1px 0 3px;
-  padding-left: 5px;
 }
 
 .cheese-cf-group-empty {
@@ -4614,6 +4607,23 @@ body > .clr-picker {
   );
 }
 
+/* 그룹 관리 모달의 채널 목록도 사이드바와 같은 규칙으로 오프라인을 탈색한다
+   (is-live 가 없는 프로필 = 오프라인). 행 호버 시 원래 색으로. */
+.cheese-cf-group-modal-profile:not(.is-live) img {
+  filter: grayscale(1);
+  opacity: 0.75;
+  transition:
+    filter 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.cheese-cf-group-modal-channel:hover
+  .cheese-cf-group-modal-profile:not(.is-live)
+  img {
+  filter: grayscale(0);
+  opacity: 1;
+}
+
 .cheese-cf-group-modal-channel-name {
   display: block;
   overflow: hidden;
@@ -4874,6 +4884,41 @@ body > .clr-picker {
     var(--cheese-platter-surface-neutral-base)
   );
 }
+
+/* 프로필 모서리 적용 시 드러나는 링 안쪽 여백은 사이드바의 기본 배경과 맞춘다.
+   surface-neutral 색을 쓰면 라이트 모드에서 기존 흰 여백이 회색으로 바뀐다. */
+html.cheese-channel-profile-radius-enabled
+  #cheese-custom-follow
+  .cheese-channel-profile-radius-target
+  > img {
+  background-color: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  ) !important;
+}
+
+/* 접힌 전용 목록은 프로필 링의 안쪽 폭이 작다. 모서리 옵션이 이미지에 적용될 때
+   이미지 패딩이 content-box 바깥으로 더해지면 오른쪽/아래쪽 간격이 먼저 사라지므로,
+   링 안쪽 크기에 패딩까지 포함하고 사방 여백을 동일하게 유지한다. */
+html.cheese-channel-profile-radius-enabled
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-channel-profile-radius-target {
+  box-sizing: border-box !important;
+}
+
+html.cheese-channel-profile-radius-enabled
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-channel-profile-radius-target
+  > img {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 2px !important;
+}
+
 .cheese-cf-profile::after {
   content: "";
   position: absolute;
@@ -6506,6 +6551,21 @@ html.cheese-chat-popup aside#aside-chatting textarea[class*="_input_"],
 html.cheese-chat-stacked aside#aside-chatting textarea[class*="_input_"],
 html.cheese-chat-stacked aside#vod-aside textarea[class*="_input_"] {
   max-height: 40px !important;
+}
+
+/* 다시보기에서 과거 채팅을 탐색한 뒤 새 채팅을 플로팅 행으로 보여줄 때, 치지직
+   컨테이너가 메시지 길이에 맞춰 줄어들지 않도록 채팅창 전체 폭을 유지한다. */
+aside#vod-aside
+  [role="log"]
+  [class*="_floating_"]:has(> button[class*="_button_chatting_"]),
+aside#vod-aside
+  [role="log"]
+  [class*="_floating_"]
+  > button[class*="_button_chatting_"] {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* 보유 통나무파워 배지(채팅 입력창 부근 후원 도구 줄). con-chzzk 스타일 동일. */
@@ -8446,4 +8506,21 @@ html.cheese-player-hide-screenshotButton .cheese-screenshot-button,
 html.cheese-player-hide-liveRewind .cheese-live-rewind-button,
 html.cheese-player-hide-liveRewind .cheese-live-forward-button {
   display: none !important;
+}
+
+/* ── 전용 팔로잉 목록: 오프라인 채널 프로필 이미지 그레이스케일 ──────────────
+   즐겨찾기·그룹·팔로잉 모두 같은 항목 마크업(li[data-live])을 쓰므로 한 규칙으로
+   적용된다. 프로필 링(회색)만으로는 구분이 약해, 이미지도 함께 탈색해 라이브 채널이
+   한눈에 들어오게 한다. 호버하면 원래 색으로 돌아온다(어떤 채널인지 확인용). */
+#cheese-custom-follow li[data-live="0"] img {
+  filter: grayscale(1);
+  opacity: 0.75;
+  transition:
+    filter 0.12s ease,
+    opacity 0.12s ease;
+}
+
+#cheese-custom-follow li[data-live="0"]:hover img {
+  filter: grayscale(0);
+  opacity: 1;
 }

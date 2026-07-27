@@ -572,27 +572,16 @@ body {
   white-space: nowrap;
 }
 
-.settings-select {
-  box-sizing: border-box;
-  width: 150px;
-  min-width: 0;
-  padding: 7px 26px 7px 9px;
-  border: 1px solid var(--popup-border);
-  border-radius: 8px;
-  background: var(--popup-surface);
-  color: var(--popup-text);
-  font-size: 12px;
-  font-weight: 700;
+.settings-step-picker {
+  width: 100px;
 }
 
-.settings-select:disabled {
+.settings-step-picker .settings-popover-trigger {
+  width: 100%;
+}
+
+.settings-step-picker .settings-popover-trigger:disabled {
   opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.settings-select:focus-visible {
-  outline: 2px solid var(--popup-focus-ring);
-  outline-offset: 2px;
 }
 
 /* 커스텀 팝오버 드롭다운(채팅 폰트 크기 등) */
@@ -605,7 +594,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 130px;
+  min-width: 100px;
   justify-content: space-between;
   padding: 7px 10px;
   border: 1px solid var(--popup-border);

@@ -670,6 +670,10 @@
   const tabEnabledPageKeys = new Set();
   let wideScreenAppliedForPage = null; // 넓은 화면 자동 적용을 끝낸 pageKey(미디어당 1회)
   let wideScreenRetryUntil = 0; // viewmode 버튼이 늦게 뜰 수 있어 잠깐 재시도하는 마감 시각
+  // 느린 환경에서 플레이어 자체가 늦게 뜨는 동안은 마감을 연장한다. 그 연장의 상한과
+  // 대기 시작 시각(미디어 전환 때 갱신) — 무한 대기 방지.
+  let wideScreenWaitStartedAt = 0;
+  const WIDE_SCREEN_MAX_WAIT_MS = 60000;
   // 넓은 화면 적용 대기 폴링. tick 은 DOM 변이가 있어야 도는데, 플레이어가 자리를 잡고
   // 조용해지면 변이가 멈춰 마감(8초)까지 재시도가 한 번도 안 일어날 수 있다(팝업에서
   // 적용이 1~2초 걸리기도 하고 10초 넘게 걸리기도 하던 원인). 적용 전까지만 짧게 돈다.
@@ -683,7 +687,10 @@
     if (wideScreenPollTimer) return;
     wideScreenPollTimer = window.setInterval(() => {
       if (document.hidden) return; // 숨은 탭에서는 의미 없음(보이면 다시 시도)
-      if (Date.now() > wideScreenRetryUntil) {
+      // ⚠ 여기서 마감을 먼저 검사해 멈추면, maybeAutoWideScreen 안의 '플레이어가 아직
+      // 안 떴으면 마감 연장' 로직에 도달하지 못한다(느린 환경에서 자동 적용 실패의
+      // 직접 원인). 판정은 maybeAutoWideScreen 에 맡기고, 여기선 상한만 지킨다.
+      if (Date.now() - wideScreenWaitStartedAt > WIDE_SCREEN_MAX_WAIT_MS) {
         stopWideScreenPolling();
         return;
       }
@@ -3872,6 +3879,75 @@
   function trackSelected(t) {
     return !!(t?.selected || t?._selected);
   }
+  function codecIsPresent(value) {
+    const codec = String(value || "")
+      .trim()
+      .toLowerCase();
+    return (
+      !!codec && !["unk", "unknown", "none", "null", "-"].includes(codec)
+    );
+  }
+  function trackIsAudioOnly(t) {
+    if (!t) return false;
+    if (
+      t.audioOnly === true ||
+      t._audioOnly === true ||
+      t.isAudioOnly === true ||
+      t._isAudioOnly === true
+    ) {
+      return true;
+    }
+    const marker = String(
+      t.encodingTrackId ??
+        t._encodingTrackId ??
+        t.encodingOptionID ??
+        t._videoQuality ??
+        t.label ??
+        t.id ??
+        "",
+    )
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "");
+    if (marker.includes("audioonly") || marker.includes("radio")) return true;
+
+    const videoCodec =
+      t.videoCodec ?? t._videoCodec ?? t.dataset?.videoCodec;
+    const audioCodec =
+      t.audioCodec ?? t._audioCodec ?? t.dataset?.audioCodec;
+    const width = Number(t.width ?? t._width ?? t.dataset?.videoWidth);
+    const height = trackHeight(t);
+    return (
+      codecIsPresent(audioCodec) &&
+      !codecIsPresent(videoCodec) &&
+      !(width > 0) &&
+      !(height > 0)
+    );
+  }
+  function playerRadioModeIsActive() {
+    const player = findPlayer();
+    if (!player) return false;
+    const checkedItems = player.querySelectorAll(
+      [
+        ".pzp-ui-setting-pane-item--checked",
+        "[role='menuitemradio'][aria-checked='true']",
+        "[role='switch'][aria-checked='true']",
+        "button[aria-pressed='true']",
+      ].join(","),
+    );
+    return Array.from(checkedItems).some((item) =>
+      /라디오\s*모드|audio\s*only/i.test(
+        `${item.getAttribute("aria-label") || ""} ${item.textContent || ""}`,
+      ),
+    );
+  }
+  function coreIsAudioOnly(core, tracks) {
+    if (playerRadioModeIsActive()) return true;
+    const selected = tracks.find((t) => trackSelected(t));
+    if (trackIsAudioOnly(selected)) return true;
+
+    const codecs = core?._currentCodecs || core?.srcObject?._currentCodecs;
+    return codecIsPresent(codecs?.audio) && !codecIsPresent(codecs?.video);
+  }
 
   // 화질 메뉴 항목(li) prefix 텍스트에서 height 파싱("1080p(원본)"→1080, "자동"→0).
   function qualityItemHeight(li) {
@@ -3958,6 +4034,21 @@
   // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
   let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
+  let maxQualityCatchupTimer = 0;
+  let maxQualitySuspendedForAudioOnly = false;
+  let maxQualityResumeAfterAudioOnlyAt = 0;
+  const MAX_QUALITY_AUDIO_ONLY_RESUME_DELAY_MS = 2500;
+  function suspendMaxQualityForAudioOnly() {
+    maxQualitySuspendedForAudioOnly = true;
+    maxQualityResumeAfterAudioOnlyAt =
+      Date.now() + MAX_QUALITY_AUDIO_ONLY_RESUME_DELAY_MS;
+    maxQualitySetHeight = 0;
+    maxQualityMenuClickAt = 0;
+    if (maxQualityCatchupTimer) {
+      clearTimeout(maxQualityCatchupTimer);
+      maxQualityCatchupTimer = 0;
+    }
+  }
   function applyMaxQuality() {
     if (!maxQualityAuto) return;
     // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
@@ -3967,6 +4058,12 @@
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
     if (document.hidden) return;
+    if (
+      maxQualitySuspendedForAudioOnly &&
+      Date.now() < maxQualityResumeAfterAudioOnlyAt
+    ) {
+      return;
+    }
     // 재생이 아직 시작되지 않았거나(자동재생 대기/사용자 제스처 전) 준비 전이면 개입하지
     // 않는다. 이 시점에 화질을 전환(스트림 재초기화)하면 플레이어 초기화가 깨진다.
     //
@@ -4004,8 +4101,33 @@
     if (!core) return;
     const tracks = Array.from(core.videoTracks || []);
     if (!tracks.length) return;
+    // 라디오 모드도 corePlayer.videoTracks 안의 선택 트랙으로 표현된다. 이 상태에서
+    // 최고 영상 트랙을 다시 선택하면 사용자가 라디오 모드를 해제하는 전환과 충돌해
+    // 오디오 전용 스트림으로 되돌아갈 수 있으므로 영상 모드 복귀 전까지 개입을 멈춘다.
+    if (coreIsAudioOnly(core, tracks)) {
+      suspendMaxQualityForAudioOnly();
+      return;
+    }
+    if (maxQualitySuspendedForAudioOnly) {
+      // 라디오 해제 직후에는 선택 트랙만 먼저 영상으로 바뀌고 디코더/스트림 전환은
+      // 아직 진행 중일 수 있다. 이 과도 상태에서 화질을 다시 바꾸면 라디오 해제와
+      // 충돌하므로 실제 영상 프레임이 준비된 뒤 짧은 유예 시간을 두고 재개한다.
+      if (
+        Date.now() < maxQualityResumeAfterAudioOnlyAt ||
+        !(video.videoWidth > 0) ||
+        !(video.videoHeight > 0)
+      ) {
+        return;
+      }
+      maxQualitySuspendedForAudioOnly = false;
+      maxQualityResumeAfterAudioOnlyAt = 0;
+      maxQualitySetHeight = 0;
+      maxQualityMenuClickAt = 0;
+    }
     // 고정 화질(abr 제외) 중 최고 height. 없으면(전부 abr) 개입 안 함.
-    const fixed = tracks.filter((t) => !trackIsAbr(t) && trackHeight(t) > 0);
+    const fixed = tracks.filter(
+      (t) => !trackIsAbr(t) && !trackIsAudioOnly(t) && trackHeight(t) > 0,
+    );
     if (!fixed.length) return;
     let best = fixed[0];
     for (const t of fixed) if (trackHeight(t) > trackHeight(best)) best = t;
@@ -4063,10 +4185,6 @@
     }
   }
 
-  // 화질 전환 뒤 라이브 엣지 복귀. 전환 직후엔 스트림이 아직 재초기화 중이라 seek 이
-  // 안 먹을 수 있어, 짧은 간격으로 몇 번 재시도하며 '지연이 충분히 줄면' 종료한다.
-  // 미디어 전환/기능 해제 시 다음 tick 의 currentPageKey 검사로 자연 소진된다.
-  let maxQualityCatchupTimer = 0;
   // 화질 전환 뒤 라이브 엣지 복귀.
   //
   // 계측 로그로 확인한 사실: 화질 전환(스트림 재초기화)은 새 타임라인을 currentTime≈0
@@ -4093,6 +4211,12 @@
       maxQualityCatchupTimer = 0;
       // 페이지가 바뀌었거나 기능이 꺼졌으면 중단.
       if (!maxQualityAuto || currentPageKey !== startedPageKey) return;
+      const core = findCorePlayer();
+      const tracks = Array.from(core?.videoTracks || []);
+      if (core && tracks.length && coreIsAudioOnly(core, tracks)) {
+        suspendMaxQualityForAudioOnly();
+        return;
+      }
       const video = findVideo();
       const lat = getLiveLatencySeconds();
       // 아직 재초기화 과도 상태(지연 미관측/재생 정지/seekable 없음)면 기다린다.
@@ -5152,6 +5276,7 @@
     const el = document.getElementById(SCREENSHOT_MODAL_ID);
     if (el) {
       saveScreenshotRect(el); // 닫을 때 마지막 위치·크기 보존
+      el.__cheeseScreenshotCleanup?.();
       el.remove();
       if (!savedByUser) showScreenshotToast(false, "저장을 취소했어요");
     }
@@ -5165,6 +5290,55 @@
     return `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path fill="currentColor" d="M16.6 4.933A1.083 1.083 0 1 0 15.066 3.4L10 8.468 4.933 3.4A1.083 1.083 0 0 0 3.4 4.933L8.468 10 3.4 15.067A1.083 1.083 0 1 0 4.933 16.6L10 11.532l5.067 5.067a1.083 1.083 0 1 0 1.532-1.532L11.532 10l5.067-5.067Z"></path></svg>`;
   }
 
+  function screenshotCropIcon() {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  function screenshotResetIcon() {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  function cropScreenshotDataURL(image, crop) {
+    const naturalWidth = image.naturalWidth;
+    const naturalHeight = image.naturalHeight;
+    if (!(naturalWidth > 0) || !(naturalHeight > 0)) {
+      throw new Error("screenshot image is not ready");
+    }
+    const startX = Math.max(
+      0,
+      Math.min(naturalWidth - 1, Math.round(crop.x * naturalWidth)),
+    );
+    const startY = Math.max(
+      0,
+      Math.min(naturalHeight - 1, Math.round(crop.y * naturalHeight)),
+    );
+    const endX = Math.max(
+      startX + 1,
+      Math.min(naturalWidth, Math.round((crop.x + crop.w) * naturalWidth)),
+    );
+    const endY = Math.max(
+      startY + 1,
+      Math.min(naturalHeight, Math.round((crop.y + crop.h) * naturalHeight)),
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = endX - startX;
+    canvas.height = endY - startY;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("no 2d context");
+    context.drawImage(
+      image,
+      startX,
+      startY,
+      canvas.width,
+      canvas.height,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    return canvas.toDataURL("image/png");
+  }
+
   function openScreenshotPreview(dataURL, name) {
     closeScreenshotPreview(true); // 이전 미리보기 교체는 취소 아님 → 토스트 안 띄움
     const win = document.createElement("div");
@@ -5175,16 +5349,177 @@
     win.innerHTML = `
       <div class="cheese-screenshot-win-header">
         <span class="cheese-screenshot-win-title">스크린샷 미리보기</span>
-        <button type="button" class="cheese-screenshot-win-close" aria-label="닫기">${closeIcon()}</button>
+        <div class="cheese-screenshot-win-tools">
+          <button type="button" class="cheese-screenshot-crop-toggle" aria-label="영역 자르기" title="영역 자르기" aria-pressed="false">${screenshotCropIcon()}</button>
+          <button type="button" class="cheese-screenshot-crop-reset" aria-label="자르기 영역 초기화" title="자르기 영역 초기화" hidden>${screenshotResetIcon()}</button>
+          <button type="button" class="cheese-screenshot-win-close" aria-label="닫기" title="닫기">${closeIcon()}</button>
+        </div>
       </div>
       <div class="cheese-screenshot-win-body">
         <img class="cheese-screenshot-win-img" alt="스크린샷 미리보기" />
+        <div class="cheese-screenshot-crop-selection" role="group" aria-label="저장할 스크린샷 영역" tabindex="0" hidden>
+          <i data-crop-handle="nw"></i><i data-crop-handle="n"></i><i data-crop-handle="ne"></i>
+          <i data-crop-handle="w"></i><i data-crop-handle="e"></i>
+          <i data-crop-handle="sw"></i><i data-crop-handle="s"></i><i data-crop-handle="se"></i>
+          <output class="cheese-screenshot-crop-size"></output>
+        </div>
       </div>
       <div class="cheese-screenshot-win-actions">
-        <button type="button" class="cheese-screenshot-cancel">취소</button>
-        <button type="button" class="cheese-screenshot-save">저장</button>
+        <span class="cheese-screenshot-output-size"></span>
+        <div class="cheese-screenshot-action-buttons">
+          <button type="button" class="cheese-screenshot-cancel">취소</button>
+          <button type="button" class="cheese-screenshot-save">저장</button>
+        </div>
       </div>`;
-    win.querySelector(".cheese-screenshot-win-img").src = dataURL;
+    const body = win.querySelector(".cheese-screenshot-win-body");
+    const image = win.querySelector(".cheese-screenshot-win-img");
+    const cropSelection = win.querySelector(
+      ".cheese-screenshot-crop-selection",
+    );
+    const cropToggle = win.querySelector(".cheese-screenshot-crop-toggle");
+    const cropReset = win.querySelector(".cheese-screenshot-crop-reset");
+    const cropSize = win.querySelector(".cheese-screenshot-crop-size");
+    const outputSize = win.querySelector(".cheese-screenshot-output-size");
+    const saveButton = win.querySelector(".cheese-screenshot-save");
+    let cropEnabled = false;
+    let crop = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+
+    function renderCropSelection() {
+      if (!image.complete || !image.naturalWidth || !body.isConnected) return;
+      const naturalWidth = image.naturalWidth;
+      const naturalHeight = image.naturalHeight;
+      const selectedWidth = Math.max(1, Math.round(crop.w * naturalWidth));
+      const selectedHeight = Math.max(1, Math.round(crop.h * naturalHeight));
+      outputSize.textContent = cropEnabled
+        ? `${selectedWidth} × ${selectedHeight}px`
+        : `${naturalWidth} × ${naturalHeight}px`;
+      if (!cropEnabled) return;
+      const bodyRect = body.getBoundingClientRect();
+      const imageRect = image.getBoundingClientRect();
+      cropSelection.style.left = `${imageRect.left - bodyRect.left + crop.x * imageRect.width}px`;
+      cropSelection.style.top = `${imageRect.top - bodyRect.top + crop.y * imageRect.height}px`;
+      cropSelection.style.width = `${crop.w * imageRect.width}px`;
+      cropSelection.style.height = `${crop.h * imageRect.height}px`;
+      cropSize.textContent = `${selectedWidth} × ${selectedHeight}`;
+    }
+
+    function setCropEnabled(next) {
+      cropEnabled = next;
+      cropToggle.classList.toggle("is-active", cropEnabled);
+      cropToggle.setAttribute("aria-pressed", String(cropEnabled));
+      cropToggle.title = cropEnabled ? "영역 자르기 해제" : "영역 자르기";
+      cropToggle.setAttribute("aria-label", cropToggle.title);
+      cropReset.hidden = !cropEnabled;
+      cropSelection.hidden = !cropEnabled;
+      saveButton.textContent = cropEnabled ? "선택 영역 저장" : "저장";
+      renderCropSelection();
+      if (cropEnabled) cropSelection.focus({ preventScroll: true });
+    }
+
+    function resetCrop() {
+      crop = { x: 0, y: 0, w: 1, h: 1 };
+      renderCropSelection();
+    }
+
+    function startCropPointer(event) {
+      if (!cropEnabled || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const handle = event.target.closest("[data-crop-handle]")?.dataset
+        .cropHandle;
+      const imageRect = image.getBoundingClientRect();
+      if (!(imageRect.width > 0) || !(imageRect.height > 0)) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const start = { ...crop };
+      const minW = Math.min(1, 24 / imageRect.width);
+      const minH = Math.min(1, 24 / imageRect.height);
+      cropSelection.setPointerCapture(event.pointerId);
+
+      const move = (moveEvent) => {
+        const dx = (moveEvent.clientX - startX) / imageRect.width;
+        const dy = (moveEvent.clientY - startY) / imageRect.height;
+        if (!handle) {
+          crop = {
+            ...start,
+            x: Math.max(0, Math.min(1 - start.w, start.x + dx)),
+            y: Math.max(0, Math.min(1 - start.h, start.y + dy)),
+          };
+          renderCropSelection();
+          return;
+        }
+        let left = start.x;
+        let top = start.y;
+        let right = start.x + start.w;
+        let bottom = start.y + start.h;
+        if (handle.includes("w")) {
+          left = Math.max(0, Math.min(right - minW, start.x + dx));
+        }
+        if (handle.includes("e")) {
+          right = Math.max(
+            left + minW,
+            Math.min(1, start.x + start.w + dx),
+          );
+        }
+        if (handle.includes("n")) {
+          top = Math.max(0, Math.min(bottom - minH, start.y + dy));
+        }
+        if (handle.includes("s")) {
+          bottom = Math.max(
+            top + minH,
+            Math.min(1, start.y + start.h + dy),
+          );
+        }
+        crop = {
+          x: left,
+          y: top,
+          w: right - left,
+          h: bottom - top,
+        };
+        renderCropSelection();
+      };
+      const end = () => {
+        cropSelection.removeEventListener("pointermove", move);
+        cropSelection.removeEventListener("pointerup", end);
+        cropSelection.removeEventListener("pointercancel", end);
+      };
+      cropSelection.addEventListener("pointermove", move);
+      cropSelection.addEventListener("pointerup", end);
+      cropSelection.addEventListener("pointercancel", end);
+    }
+
+    function moveCropWithKeyboard(event) {
+      if (
+        !cropEnabled ||
+        !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
+          event.key,
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      const amount = event.shiftKey ? 0.05 : 0.01;
+      if (event.key === "ArrowLeft") {
+        crop.x = Math.max(0, crop.x - amount);
+      } else if (event.key === "ArrowRight") {
+        crop.x = Math.min(1 - crop.w, crop.x + amount);
+      } else if (event.key === "ArrowUp") {
+        crop.y = Math.max(0, crop.y - amount);
+      } else {
+        crop.y = Math.min(1 - crop.h, crop.y + amount);
+      }
+      renderCropSelection();
+    }
+
+    image.addEventListener("load", renderCropSelection);
+    image.src = dataURL;
+    cropToggle.addEventListener("click", () => {
+      setCropEnabled(!cropEnabled);
+    });
+    cropReset.addEventListener("click", resetCrop);
+    cropSelection.addEventListener("pointerdown", startCropPointer);
+    cropSelection.addEventListener("keydown", moveCropWithKeyboard);
+    cropSelection.addEventListener("dblclick", resetCrop);
 
     // 위치·크기 복원(없으면 중앙 근처 기본).
     const saved = loadScreenshotRect();
@@ -5210,14 +5545,31 @@
     win
       .querySelector(".cheese-screenshot-cancel")
       .addEventListener("click", () => closeScreenshotPreview());
-    win
-      .querySelector(".cheese-screenshot-save")
-      .addEventListener("click", () => {
-        downloadScreenshot(dataURL, name, onScreenshotSaved);
-        closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
-      });
+    saveButton.addEventListener("click", () => {
+      let output = dataURL;
+      let outputName = name;
+      if (cropEnabled) {
+        try {
+          output = cropScreenshotDataURL(image, crop);
+          outputName = `${name}_crop`;
+        } catch {
+          showScreenshotToast(false, "선택 영역을 만들 수 없어요");
+          return;
+        }
+      }
+      downloadScreenshot(output, outputName, onScreenshotSaved);
+      closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
+    });
 
     document.body.appendChild(win);
+    const cropResizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(renderCropSelection)
+        : null;
+    cropResizeObserver?.observe(body);
+    cropResizeObserver?.observe(image);
+    win.__cheeseScreenshotCleanup = () => cropResizeObserver?.disconnect();
+    renderCropSelection();
     bindScreenshotDrag(win, win.querySelector(".cheese-screenshot-win-header"));
     // CSS resize:both 로 크기를 바꾼 뒤 마우스를 놓는 순간(pointerup) 크기 저장.
     // (ResizeObserver는 appendChild 직후 0 크기로 발화해 0px가 저장되던 문제가 있어 안 씀.)
@@ -5228,8 +5580,8 @@
   // 헤더를 잡아 창을 이동. 이동 종료 시 위치 저장.
   function bindScreenshotDrag(win, handle) {
     handle.addEventListener("pointerdown", (e) => {
-      // 닫기 버튼 위에서 시작한 드래그는 무시(버튼 클릭 우선).
-      if (e.target.closest(".cheese-screenshot-win-close")) return;
+      // 도구 버튼 위에서 시작한 드래그는 무시(버튼 클릭 우선).
+      if (e.target.closest("button")) return;
       if (e.button !== 0) return;
       e.preventDefault();
       const rect = win.getBoundingClientRect();
@@ -7252,6 +7604,7 @@
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
       wideScreenAppliedForPage = null;
       wideScreenRetryUntil = Date.now() + 8000;
+      wideScreenWaitStartedAt = Date.now(); // 연장 상한 계산 기준
       stopWideScreenPolling(); // 이전 미디어의 폴링은 끊고, 아래 tick 에서 새로 시작
 
       // 새 미디어 → 최대 화질 자동 고정 상태 리셋(이전 영상의 수동 존중을 새 영상까지
@@ -7259,6 +7612,8 @@
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
       maxQualityMenuClickAt = 0;
+      maxQualitySuspendedForAudioOnly = false;
+      maxQualityResumeAfterAudioOnlyAt = 0;
       if (maxQualityCatchupTimer) {
         clearTimeout(maxQualityCatchupTimer);
         maxQualityCatchupTimer = 0;
@@ -7396,6 +7751,16 @@
     }
     const btn = findViewModeButton();
     if (!btn || !isElementRendered(btn)) {
+      // ⚠ 마감(8초)은 '페이지 전환 시점' 기준이라, 사양·네트워크가 느려 플레이어가
+      // 늦게 뜨면 버튼이 나타나기도 전에 만료돼 자동 적용이 통째로 취소됐다.
+      // 플레이어(video)가 아직 준비되지 않았다면 아직 '늦은' 것이 아니므로 마감을
+      // 미뤄 준다. 상한(WIDE_SCREEN_MAX_WAIT_MS)까지만 연장해 무한 대기는 막는다.
+      if (
+        !document.querySelector(".webplayer-internal-video") &&
+        Date.now() - wideScreenWaitStartedAt < WIDE_SCREEN_MAX_WAIT_MS
+      ) {
+        wideScreenRetryUntil = Date.now() + 8000;
+      }
       // 버튼이 아직 없음 — 재시도 마감 전이면 다시 시도한다.
       if (Date.now() > wideScreenRetryUntil) {
         wideScreenAppliedForPage = currentPageKey; // 마감 → 더 시도 안 함
@@ -7449,8 +7814,44 @@
   // 재진입 폭주가 없다). 예전 80ms 때는 채팅 폭주 방송에서 tick이 초당 ~12회 돌아
   // 메인스레드의 ~58%를 차지했고(프로파일 실측), 미디어 파이프라인을 굶겨 간헐 버퍼링과
   // 렌더러 메모리 증가의 주 원인이 됐다. 버튼/효과 보정은 4회/초로 충분하다.
+  const CHAT_STREAM_SELECTOR =
+    "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
   let tickTimer = 0;
-  function scheduleTick() {
+  function isChatStreamOnlyMutation(mutation) {
+    const target =
+      mutation.target instanceof Element
+        ? mutation.target
+        : mutation.target?.parentElement;
+    if (target?.closest?.(CHAT_STREAM_SELECTOR)) return true;
+    const chatAside = target?.closest?.(
+      "aside#aside-chatting, aside#vod-aside",
+    );
+    if (chatAside) {
+      const row = target.closest("[class*='_item_']");
+      if (row?.querySelector("[class*='_chatting_message_']")) return true;
+    }
+    const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return (
+      changedNodes.length > 0 &&
+      changedNodes.every((node) => {
+        const element =
+          node instanceof Element ? node : node?.parentElement || null;
+        return Boolean(
+          element?.closest?.(CHAT_STREAM_SELECTOR) ||
+            (chatAside &&
+              (element?.matches?.("[class*='_chatting_message_']") ||
+                element?.querySelector?.("[class*='_chatting_message_']"))),
+        );
+      })
+    );
+  }
+  function scheduleTick(mutations) {
+    if (
+      mutations?.length &&
+      mutations.every(isChatStreamOnlyMutation)
+    ) {
+      return;
+    }
     if (tickTimer) return;
     tickTimer = window.setTimeout(() => {
       tickTimer = 0;

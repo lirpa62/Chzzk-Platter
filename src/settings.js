@@ -33,6 +33,10 @@
     "cheeseCafeNow",
     "cheeseCafeNowAutoplay",
     "cheeseCafeNowAutoplayMuted",
+    "cheeseClipEditorArrowStepS",
+    "cheeseClipEditorShiftArrowStepS",
+    "cheeseClipEditorBoundaryStepS",
+    "cheeseClipEditorBoundaryOuterStepS",
     "cheeseCardDateTooltip",
     "cheeseVodChapterHide",
     "cheeseHideBlockedComment",
@@ -40,6 +44,7 @@
     "cheeseCardLivePreview",
     "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
+    "cheeseCardPreviewDefaultVolume",
     "cheeseCardPreviewWheelDelaySec",
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
@@ -718,6 +723,153 @@
     "sbFollowGroupEnabled",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
+  const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
+  const CLIP_EDITOR_SHIFT_STEP_KEY = "cheeseClipEditorShiftArrowStepS";
+  const CLIP_EDITOR_BOUNDARY_STEP_KEY = "cheeseClipEditorBoundaryStepS";
+  const CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY =
+    "cheeseClipEditorBoundaryOuterStepS";
+  const clipEditorPrecisionInput = document.querySelector(
+    '[data-feature="clipEditorPrecision"]',
+  );
+  const clipEditorStepPickers = Array.from(
+    document.querySelectorAll("[data-clip-editor-step-picker]"),
+  );
+  const clipEditorArrowStepPicker = document.querySelector(
+    '[data-clip-editor-step-picker="arrow"]',
+  );
+  const clipEditorShiftStepPicker = document.querySelector(
+    '[data-clip-editor-step-picker="shift"]',
+  );
+  const clipEditorBoundaryStepPicker = document.querySelector(
+    '[data-clip-editor-step-picker="boundary"]',
+  );
+  const clipEditorBoundaryOuterStepPicker = document.querySelector(
+    '[data-clip-editor-step-picker="boundaryOuter"]',
+  );
+
+  function normalizeClipEditorArrowStep(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(5, Math.max(1, Math.round(number)))
+      : 5;
+  }
+
+  function normalizeClipEditorShiftStep(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(0.9, Math.max(0.1, Math.round(number * 10) / 10))
+      : 0.1;
+  }
+
+  function normalizeClipEditorBoundaryStep(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(1, Math.max(0.1, Math.round(number * 10) / 10))
+      : 0.1;
+  }
+
+  function normalizeClipEditorBoundaryOuterStep(value) {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? Math.min(10, Math.max(1, Math.round(number)))
+      : 1;
+  }
+
+  function reflectClipEditorStepAvailability() {
+    const disabled = !clipEditorPrecisionInput?.checked;
+    clipEditorStepPickers.forEach((picker) => {
+      const trigger = picker.querySelector("[data-clip-editor-step-trigger]");
+      if (trigger) trigger.disabled = disabled;
+      if (disabled) closeClipEditorStepPicker(picker);
+    });
+  }
+
+  function normalizeClipEditorStepValue(picker, value) {
+    const type = picker?.dataset.clipEditorStepPicker;
+    if (type === "shift") return normalizeClipEditorShiftStep(value);
+    if (type === "boundary") return normalizeClipEditorBoundaryStep(value);
+    if (type === "boundaryOuter") {
+      return normalizeClipEditorBoundaryOuterStep(value);
+    }
+    return normalizeClipEditorArrowStep(value);
+  }
+
+  function setClipEditorStepValue(picker, value) {
+    if (!picker) return;
+    const normalized = normalizeClipEditorStepValue(picker, value);
+    const stringValue = String(normalized);
+    picker.dataset.value = stringValue;
+    const trigger = picker.querySelector("[data-clip-editor-step-trigger]");
+    const label = picker.querySelector("[data-clip-editor-step-label]");
+    if (trigger) trigger.dataset.value = stringValue;
+    if (label) label.textContent = `${stringValue}초`;
+    picker
+      .querySelectorAll("[data-clip-editor-step-list] [role='option']")
+      .forEach((option) => {
+        option.setAttribute(
+          "aria-selected",
+          String(option.dataset.value === stringValue),
+        );
+      });
+  }
+
+  function closeClipEditorStepPicker(picker) {
+    if (!picker) return;
+    const trigger = picker.querySelector("[data-clip-editor-step-trigger]");
+    const list = picker.querySelector("[data-clip-editor-step-list]");
+    picker.classList.remove("is-open");
+    trigger?.setAttribute("aria-expanded", "false");
+    if (list) list.hidden = true;
+  }
+
+  function closeAllClipEditorStepPickers(except = null) {
+    clipEditorStepPickers.forEach((picker) => {
+      if (picker !== except) closeClipEditorStepPicker(picker);
+    });
+  }
+
+  function positionClipEditorStepList(picker) {
+    const trigger = picker?.querySelector("[data-clip-editor-step-trigger]");
+    const list = picker?.querySelector("[data-clip-editor-step-list]");
+    if (!trigger || !list) return;
+    const rect = trigger.getBoundingClientRect();
+    list.style.left = `${Math.round(rect.left)}px`;
+    list.style.top = `${Math.round(rect.bottom + 4)}px`;
+    list.style.minWidth = `${Math.round(rect.width)}px`;
+    list.style.maxHeight = `${Math.max(
+      120,
+      window.innerHeight - rect.bottom - 16,
+    )}px`;
+  }
+
+  function openClipEditorStepPicker(picker) {
+    const trigger = picker?.querySelector("[data-clip-editor-step-trigger]");
+    const list = picker?.querySelector("[data-clip-editor-step-list]");
+    if (!picker || !trigger || !list || trigger.disabled) return;
+    closeAllClipEditorStepPickers(picker);
+    picker.classList.add("is-open");
+    trigger.setAttribute("aria-expanded", "true");
+    list.hidden = false;
+    positionClipEditorStepList(picker);
+  }
+
+  function saveClipEditorStepValue(picker, rawValue) {
+    if (!picker) return;
+    const value = normalizeClipEditorStepValue(picker, rawValue);
+    const type = picker.dataset.clipEditorStepPicker;
+    const key =
+      type === "shift"
+        ? CLIP_EDITOR_SHIFT_STEP_KEY
+        : type === "boundary"
+          ? CLIP_EDITOR_BOUNDARY_STEP_KEY
+          : type === "boundaryOuter"
+            ? CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY
+          : CLIP_EDITOR_ARROW_STEP_KEY;
+    setClipEditorStepValue(picker, value);
+    try {
+      cachedStorageSet({ [key]: value });
+    } catch {}
+  }
 
   // 로드가 성공적으로 끝나기 전엔 save() 로 전체(cheeseFeatureHidden)를 덮어쓰지 않는다.
   // 로드 실패/미완료 상태에서 저장하면 모든 토글이 기본값(unchecked)으로 확정돼 기존
@@ -739,6 +891,7 @@
       const v = saved[key];
       input.checked = typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key);
     });
+    reflectClipEditorStepAvailability();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -757,7 +910,76 @@
   }
 
   inputs.forEach((input) => input.addEventListener("change", save));
+  clipEditorPrecisionInput?.addEventListener(
+    "change",
+    reflectClipEditorStepAvailability,
+  );
   load();
+
+  (async () => {
+    try {
+      const data = await cachedStorageGet([
+        CLIP_EDITOR_ARROW_STEP_KEY,
+        CLIP_EDITOR_SHIFT_STEP_KEY,
+        CLIP_EDITOR_BOUNDARY_STEP_KEY,
+        CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY,
+      ]);
+      setClipEditorStepValue(
+        clipEditorArrowStepPicker,
+        data?.[CLIP_EDITOR_ARROW_STEP_KEY],
+      );
+      setClipEditorStepValue(
+        clipEditorShiftStepPicker,
+        data?.[CLIP_EDITOR_SHIFT_STEP_KEY],
+      );
+      setClipEditorStepValue(
+        clipEditorBoundaryStepPicker,
+        data?.[CLIP_EDITOR_BOUNDARY_STEP_KEY],
+      );
+      setClipEditorStepValue(
+        clipEditorBoundaryOuterStepPicker,
+        data?.[CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY],
+      );
+    } catch {
+      setClipEditorStepValue(clipEditorArrowStepPicker, 5);
+      setClipEditorStepValue(clipEditorShiftStepPicker, 0.1);
+      setClipEditorStepValue(clipEditorBoundaryStepPicker, 0.1);
+      setClipEditorStepValue(clipEditorBoundaryOuterStepPicker, 1);
+    }
+  })();
+
+  clipEditorStepPickers.forEach((picker) => {
+    const trigger = picker.querySelector("[data-clip-editor-step-trigger]");
+    const list = picker.querySelector("[data-clip-editor-step-list]");
+    trigger?.addEventListener("click", () => {
+      if (picker.classList.contains("is-open")) {
+        closeClipEditorStepPicker(picker);
+      } else {
+        openClipEditorStepPicker(picker);
+      }
+    });
+    list?.addEventListener("click", (event) => {
+      const option = event.target.closest("[role='option'][data-value]");
+      if (!option) return;
+      saveClipEditorStepValue(picker, option.dataset.value);
+      closeClipEditorStepPicker(picker);
+      trigger?.focus();
+    });
+    list?.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeClipEditorStepPicker(picker);
+      trigger?.focus();
+    });
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-clip-editor-step-picker]")) return;
+    closeAllClipEditorStepPickers();
+  });
+  window.addEventListener("resize", () => closeAllClipEditorStepPickers());
+  panelsScroll?.addEventListener("scroll", () =>
+    closeAllClipEditorStepPickers(),
+  );
 
   // ── 채팅 시간 표시 형식(24시간 | AM/PM | 오전/오후) ───────────────────────
   const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
@@ -4090,9 +4312,65 @@
       on = data?.[CARD_PREVIEW_AUDIO_KEY] !== false; // 미설정/true=표시
     } catch {}
     if (cardPreviewAudioInput) cardPreviewAudioInput.checked = on;
+    reflectCardPreviewAudioChildrenEnabled();
   }
 
-  // 휠 음량 활성 지연(초). 부모(카드 미리보기 음량)가 꺼져 있으면 비활성화.
+  // 음소거 해제 기본 음량(1~100%, 저장은 0~1 배율).
+  const CARD_PREVIEW_DEFAULT_VOLUME_KEY =
+    "cheeseCardPreviewDefaultVolume";
+  const cardDefaultVolumeItem = document.querySelector(
+    "[data-card-preview-default-volume-item]",
+  );
+  const cardDefaultVolumeSlider = document.querySelector(
+    "[data-card-preview-default-volume-slider]",
+  );
+  const cardDefaultVolumeInput = document.querySelector(
+    "[data-card-preview-default-volume]",
+  );
+  function clampCardDefaultVolumePct(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 50;
+    return Math.min(100, Math.max(1, Math.round(n)));
+  }
+  function reflectCardDefaultVolume(pct) {
+    const value = clampCardDefaultVolumePct(pct);
+    if (cardDefaultVolumeSlider) {
+      cardDefaultVolumeSlider.value = String(value);
+    }
+    if (cardDefaultVolumeInput) {
+      cardDefaultVolumeInput.value = String(value);
+    }
+  }
+  async function loadCardDefaultVolume() {
+    let pct = 50;
+    try {
+      const data = await cachedStorageGet(CARD_PREVIEW_DEFAULT_VOLUME_KEY);
+      const scale = Number(data?.[CARD_PREVIEW_DEFAULT_VOLUME_KEY]);
+      pct = Number.isFinite(scale) ? scale * 100 : 50;
+    } catch {}
+    reflectCardDefaultVolume(pct);
+    reflectCardPreviewAudioChildrenEnabled();
+  }
+  function saveCardDefaultVolume(pct) {
+    const value = clampCardDefaultVolumePct(pct);
+    reflectCardDefaultVolume(value);
+    try {
+      cachedStorageSet({
+        [CARD_PREVIEW_DEFAULT_VOLUME_KEY]: value / 100,
+      });
+    } catch {}
+  }
+  cardDefaultVolumeSlider?.addEventListener("input", () => {
+    saveCardDefaultVolume(cardDefaultVolumeSlider.value);
+  });
+  cardDefaultVolumeInput?.addEventListener("change", () => {
+    saveCardDefaultVolume(cardDefaultVolumeInput.value);
+  });
+  cardDefaultVolumeInput?.addEventListener("blur", () => {
+    saveCardDefaultVolume(cardDefaultVolumeInput.value);
+  });
+
+  // 하위 음량 설정. 부모(카드 미리보기 음량)가 꺼져 있으면 모두 비활성화.
   const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
   const cardWheelDelayInput = document.querySelector(
     "[data-card-preview-wheel-delay]",
@@ -4102,12 +4380,18 @@
     if (!Number.isFinite(n)) return 1;
     return Math.min(5, Math.max(0, Math.round(n * 2) / 2)); // 0~5, 0.5 단위
   }
-  function reflectCardWheelDelayEnabled() {
+  function reflectCardPreviewAudioChildrenEnabled() {
     const parentOn = !!cardPreviewAudioInput?.checked;
-    if (!cardWheelDelayInput) return;
-    cardWheelDelayInput.disabled = !parentOn;
+    if (cardDefaultVolumeSlider) {
+      cardDefaultVolumeSlider.disabled = !parentOn;
+    }
+    if (cardDefaultVolumeInput) {
+      cardDefaultVolumeInput.disabled = !parentOn;
+    }
+    cardDefaultVolumeItem?.classList.toggle("is-locked", !parentOn);
+    if (cardWheelDelayInput) cardWheelDelayInput.disabled = !parentOn;
     cardWheelDelayInput
-      .closest(".settings-item")
+      ?.closest(".settings-item")
       ?.classList.toggle("is-locked", !parentOn);
   }
   async function loadCardWheelDelay() {
@@ -4117,7 +4401,7 @@
       v = clampCardWheelDelay(d?.[CARD_PREVIEW_WHEEL_DELAY_KEY] ?? 1);
     } catch {}
     if (cardWheelDelayInput) cardWheelDelayInput.value = String(v);
-    reflectCardWheelDelayEnabled();
+    reflectCardPreviewAudioChildrenEnabled();
   }
   if (cardWheelDelayInput) {
     const saveDelay = () => {
@@ -4137,9 +4421,10 @@
         [CARD_PREVIEW_AUDIO_KEY]: cardPreviewAudioInput.checked,
       });
     } catch {}
-    reflectCardWheelDelayEnabled();
+    reflectCardPreviewAudioChildrenEnabled();
   });
   loadCardPreviewAudio();
+  loadCardDefaultVolume();
   loadCardWheelDelay();
 
   // ── 다시보기 카드 날짜 툴팁(채널 다시보기 목록 카드 호버, 전역 기본 ON) ──────

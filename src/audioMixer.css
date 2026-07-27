@@ -47,6 +47,7 @@
 /* 미리보기 팝오버 창(배경 덮개 없음, 드래그 이동 + 리사이즈). 위치·크기는 JS가 인라인
    left/top/width/height로 지정하고 localStorage에 기억한다. */
 .cheese-screenshot-win {
+  box-sizing: border-box;
   position: fixed;
   z-index: 2147483000;
   display: flex;
@@ -65,6 +66,11 @@
   overflow: hidden; /* 리사이즈 핸들이 라운드 밖으로 안 나가게 */
   resize: both; /* 우하단 드래그로 크기 조절 */
 }
+.cheese-screenshot-win *,
+.cheese-screenshot-win *::before,
+.cheese-screenshot-win *::after {
+  box-sizing: border-box;
+}
 .cheese-screenshot-win-header {
   flex: 0 0 auto;
   display: flex;
@@ -81,6 +87,13 @@
   font-size: 14px;
   font-weight: 700;
 }
+.cheese-screenshot-win-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cheese-screenshot-crop-toggle,
+.cheese-screenshot-crop-reset,
 .cheese-screenshot-win-close {
   display: flex;
   align-items: center;
@@ -94,11 +107,21 @@
   background: transparent;
   cursor: pointer;
 }
+.cheese-screenshot-crop-toggle:hover,
+.cheese-screenshot-crop-reset:hover,
 .cheese-screenshot-win-close:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
 }
+.cheese-screenshot-crop-toggle.is-active {
+  color: #06121a;
+  background: #00ffa3;
+}
+.cheese-screenshot-crop-reset[hidden] {
+  display: none;
+}
 .cheese-screenshot-win-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -106,27 +129,148 @@
   justify-content: center;
   padding: 12px;
   background: #000;
+  overflow: hidden;
 }
 .cheese-screenshot-win-img {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.cheese-screenshot-crop-selection {
+  position: absolute;
+  z-index: 2;
+  min-width: 24px;
+  min-height: 24px;
+  border: 2px solid #00ffa3;
+  outline: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.58);
+  cursor: move;
+  touch-action: none;
+}
+.cheese-screenshot-crop-selection[hidden] {
+  display: none;
+}
+.cheese-screenshot-crop-selection::before,
+.cheese-screenshot-crop-selection::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.cheese-screenshot-crop-selection::before {
+  inset: 33.333% 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.45);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+}
+.cheese-screenshot-crop-selection::after {
+  inset: 0 33.333%;
+  border-left: 1px solid rgba(255, 255, 255, 0.45);
+  border-right: 1px solid rgba(255, 255, 255, 0.45);
+}
+.cheese-screenshot-crop-selection:focus-visible {
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.58),
+    0 0 0 2px #fff;
+}
+.cheese-screenshot-crop-selection > i {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #06121a;
+  background: #00ffa3;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="nw"] {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="n"] {
+  top: -6px;
+  left: calc(50% - 5px);
+  cursor: ns-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="ne"] {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="w"] {
+  top: calc(50% - 5px);
+  left: -6px;
+  cursor: ew-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="e"] {
+  top: calc(50% - 5px);
+  right: -6px;
+  cursor: ew-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="sw"] {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="s"] {
+  bottom: -6px;
+  left: calc(50% - 5px);
+  cursor: ns-resize;
+}
+.cheese-screenshot-crop-selection > i[data-crop-handle="se"] {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+.cheese-screenshot-crop-size {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 8px);
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cheese-screenshot-win-actions {
   flex: 0 0 auto;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.cheese-screenshot-win-actions button {
+.cheese-screenshot-output-size {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #9fa6b2;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cheese-screenshot-action-buttons {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+.cheese-screenshot-action-buttons button {
   padding: 8px 18px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   border: 1px solid transparent;
+  white-space: nowrap;
 }
 .cheese-screenshot-cancel {
   color: #dfe3ea;
