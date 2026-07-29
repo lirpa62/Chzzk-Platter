@@ -1,6 +1,9 @@
 const params = new URLSearchParams(location.search);
 let activeChannelId = params.get("channelId") || "";
-let activeChannelName = params.get("channelName") || "";
+let activeChannelName = normalizeChannelNameParam(
+  params.get("channelName"),
+  activeChannelId,
+);
 let activeContentType =
   params.get("contentType") === "clips" ? "clips" : "videos";
 const EMPTY_RESULTS_ANIMATION_URL = chrome.runtime.getURL(
@@ -124,6 +127,7 @@ setSortValue(params.get("sort") || getInitialSortValue());
 updateSearchResetButtons();
 renderAllCalendars();
 renderChannelStatus();
+void hydrateActiveChannelName();
 
 function sendMessage(payload) {
   return new Promise((resolve, reject) => {
@@ -1372,6 +1376,35 @@ function getChannelNameFromVideos(items) {
   return first ? String(first.channel.channelName || "").trim() : "";
 }
 
+function normalizeChannelNameParam(value, channelId = "") {
+  const name = String(value || "").trim();
+  if (!name || name === String(channelId || "").trim()) return "";
+  return /^[0-9a-f]{32}$/i.test(name) ? "" : name;
+}
+
+async function hydrateActiveChannelName() {
+  const channelId = String(activeChannelId || "").trim();
+  if (!channelId || activeChannelName) return;
+
+  try {
+    const response = await fetch(
+      `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}`,
+      { credentials: "include" },
+    );
+    if (!response.ok) return;
+    const payload = await response.json();
+    const channelName = normalizeChannelNameParam(
+      payload?.content?.channelName,
+      channelId,
+    );
+    if (!channelName || activeChannelId !== channelId) return;
+    activeChannelName = channelName;
+    elements.streamer.value = channelName;
+    updateSearchResetButtons();
+    renderChannelStatus();
+  } catch {}
+}
+
 function renderChannelStatus() {
   if (!activeChannelId) {
     setChannelStatus(
@@ -1381,7 +1414,7 @@ function renderChannelStatus() {
     return;
   }
 
-  const label = activeChannelName || activeChannelId;
+  const label = activeChannelName || "채널 정보를 확인하는 중";
   setChannelStatus(`검색 대상: ${label}`, false);
 }
 

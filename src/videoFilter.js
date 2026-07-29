@@ -2864,7 +2864,11 @@
   }
 
   function scheduleTick(mutations) {
+    // ⚠ 필터가 켜져 있는 동안에는 채팅 전용 변이라도 건너뛰지 않는다. tick 이 플레이어
+    // 재렌더 후 필터를 다시 입히는 역할을 하는데, 조용한 방송에서 채팅 변이까지 걸러
+    // 버리면 tick 이 오지 않아 필터가 풀린 채로 남는다.
     if (
+      !state.enabled &&
       mutations?.length &&
       mutations.every(isChatStreamOnlyMutation)
     ) {

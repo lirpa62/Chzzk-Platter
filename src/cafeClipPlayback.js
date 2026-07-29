@@ -1,6 +1,13 @@
 (function controlCafeClipPlayback() {
   const params = new URLSearchParams(location.search);
-  if (params.get("extension") !== "ChzzkCafeNow") return;
+  const extension = params.get("extension");
+  if (
+    extension !== "ChzzkCafeNow" &&
+    extension !== "ChzzkPlatterSearch"
+  ) {
+    return;
+  }
+  const isSearchPlayer = extension === "ChzzkPlatterSearch";
 
   const initialAutoplay = params.get("autoplay") === "1";
 
@@ -15,6 +22,7 @@
   const OBSERVER_TIMEOUT_MS = 15000;
   const PLAY_RETRY_INTERVAL_MS = 250;
   const PLAY_RETRY_TIMEOUT_MS = 15000;
+  const SEARCH_UNMUTE_BUTTON_ID = "cheese-platter-search-clip-unmute";
   let desiredAction = initialAutoplay ? "play" : null;
   let desiredMuted = params.get("muted") !== "0";
   let playPending = false;
@@ -31,10 +39,12 @@
     ? Date.now() + PLAY_RETRY_TIMEOUT_MS
     : 0;
   let autoplayUnmuteBlocked = false;
+  let searchUnmuteButton = null;
 
-  function isCafeOrigin(origin) {
+  function isAllowedParentOrigin(origin) {
     try {
       const hostname = new URL(origin).hostname;
+      if (isSearchPlayer) return hostname === "chzzk.naver.com";
       return (
         hostname === "cafe.naver.com" ||
         hostname.endsWith(".cafe.naver.com")
@@ -66,10 +76,88 @@
     video.defaultMuted = muted;
   }
 
+  function removeSearchUnmuteButton() {
+    searchUnmuteButton?.remove();
+    searchUnmuteButton = null;
+  }
+
+  function syncSearchUnmuteButton(video) {
+    if (
+      !isSearchPlayer ||
+      desiredAction !== "play" ||
+      desiredMuted ||
+      !(video instanceof HTMLVideoElement) ||
+      !video.muted
+    ) {
+      removeSearchUnmuteButton();
+      return;
+    }
+    if (searchUnmuteButton?.isConnected) return;
+
+    const button = document.createElement("button");
+    button.id = SEARCH_UNMUTE_BUTTON_ID;
+    button.type = "button";
+    button.setAttribute("aria-label", "클립 소리 켜기");
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17"
+        viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        aria-hidden="true">
+        <path d="M11 5 6 9H2v6h4l5 4z"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+      </svg>
+      <span>소리 켜기</span>`;
+    button.style.cssText = [
+      "position:fixed",
+      "top:12px",
+      "right:12px",
+      "z-index:2147483647",
+      "height:34px",
+      "padding:0 12px",
+      "border:1px solid rgba(255,255,255,.3)",
+      "border-radius:6px",
+      "background:rgba(20,20,20,.86)",
+      "box-shadow:0 2px 8px rgba(0,0,0,.28)",
+      "color:#fff",
+      "font:600 13px/1 system-ui,sans-serif",
+      "display:inline-flex",
+      "align-items:center",
+      "gap:6px",
+      "cursor:pointer",
+    ].join(";");
+    button.addEventListener("click", () => {
+      iframeInteracted = true;
+      autoplayUnmuteBlocked = false;
+      video.muted = false;
+      video.defaultMuted = false;
+      if (video.volume <= 0) video.volume = 0.5;
+      try {
+        video.play()?.catch?.(() => {
+          syncSearchUnmuteButton(video);
+        });
+      } catch {
+        syncSearchUnmuteButton(video);
+      }
+      if (!video.muted) removeSearchUnmuteButton();
+    });
+    searchUnmuteButton = button;
+    (document.body || document.documentElement).appendChild(button);
+  }
+
   function clearUnmuteRetries() {
     unmuteRetryTimers.forEach(clearTimeout);
     unmuteRetryTimers = [];
   }
+
+  // ⚠ 인라인(iframe) 자동 소리 켜기는 시도하지 말 것 — 아래를 모두 실측으로 확인했다.
+  //  1) 제스처 없이 muted=false → 크롬이 재생을 '일시정지'시킨다.
+  //  2) pause 후 unmute→play → 소리가 거부되면 눈에 보이는 끊김이 생긴다.
+  //  3) 지연 후 자동 시도 → play() 는 resolve 되지만 muted 가 true 로 되돌아간다.
+  // 콘솔에서 수동 실행하면 성공하는데, 그건 '스니펫 실행' 자체가 제스처이기 때문이다.
+  // 새 탭(m.naver.com/shorts)은 최상위 문서라 브라우저의 사이트 소리 허용이 그대로
+  // 적용되지만, iframe 에는 그 혜택이 오지 않는다. 소리는 아래 '소리 켜기' 버튼
+  // (진짜 클릭)으로만 켠다.
 
   function unmuteAfterUserActivation() {
     if (desiredAction !== "play" || desiredMuted) return;
@@ -156,6 +244,7 @@
         if (version !== commandVersion) return;
         playPending = false;
         clearPlayRetryTimer();
+        syncSearchUnmuteButton(video);
       },
       () => {
         if (version !== commandVersion || desiredAction !== "play") return;
@@ -165,6 +254,7 @@
           autoplayUnmuteBlocked = true;
           video.muted = true;
           video.defaultMuted = true;
+          syncSearchUnmuteButton(video);
           attemptVideoPlay(video, version, false);
           return;
         }
@@ -185,12 +275,17 @@
       return true;
     }
 
-    applyDesiredMute(video);
+    // ⚠ 순서 주의: 이미 재생 중인 요소의 음소거를 풀면 크롬이 거부하고 되돌린다.
+    // 그래서 '아직 정지 상태일 때' 음소거를 맞춰 두고 play() 로 들어가야 소리가 붙는다.
+    // 이미 재생 중이라면 여기서 muted 를 건드리지 않고(끊김·되돌림 방지) 현재 상태를
+    // 유지한 뒤, 소리가 필요하면 복구 재시도/버튼에 맡긴다.
     if (!video.paused) {
       playPending = false;
       clearPlayRetryTimer();
+      syncSearchUnmuteButton(video);
       return true;
     }
+    applyDesiredMute(video);
     if (playPending) {
       return true;
     }
@@ -234,7 +329,7 @@
   window.addEventListener("message", (event) => {
     if (
       event.source !== window.parent ||
-      !isCafeOrigin(event.origin) ||
+      !isAllowedParentOrigin(event.origin) ||
       event.data?.source !== MESSAGE_SOURCE
     ) {
       return;
@@ -280,6 +375,7 @@
     notifyParent("playing");
     if (desiredAction === "play") {
       applyDesiredMute(event.target);
+      syncSearchUnmuteButton(event.target);
     }
   }
 
@@ -289,6 +385,7 @@
     resetPlayRetry();
     clearUnmuteRetries();
     stopObserver();
+    removeSearchUnmuteButton();
   }
 
   function handleUserActivation(event) {
@@ -338,6 +435,15 @@
 
   document.addEventListener("play", handleDocumentPlay, true);
   document.addEventListener("pause", handleDocumentPause, true);
+  document.addEventListener(
+    "volumechange",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement) {
+        syncSearchUnmuteButton(event.target);
+      }
+    },
+    true,
+  );
   document.addEventListener("pointerdown", handleUserActivation, true);
   document.addEventListener("keydown", handleUserActivation, true);
   document.addEventListener("touchstart", handleUserActivation, true);
@@ -362,6 +468,7 @@
       stopObserver();
       resetPlayRetry();
       clearUnmuteRetries();
+      removeSearchUnmuteButton();
       document.removeEventListener("play", handleDocumentPlay, true);
       document.removeEventListener("pause", handleDocumentPause, true);
       document.removeEventListener("pointerdown", handleUserActivation, true);

@@ -285,6 +285,280 @@
   applyUiState();
   loadClipHideFlag();
 
+  // ── 새 탭 클립 자동재생(부모 요청) ─────────────────────────────────────────
+  // 치지직 /clips 의 플레이어는 m.naver.com/shorts iframe(교차 출처) 안에 있어서,
+  // 부모(chzzk) 문서에서는 video 를 만질 수 없다. 부모가 postMessage 로 요청을 보내면
+  // 이 프레임에서 재생을 시도한다. 이 스크립트는 shorts 프레임에도 주입된다.
+  const AUTOPLAY_MESSAGE = "cheese-clip-page-autoplay";
+  const AUTOPLAY_TIMEOUT_MS = 20000;
+  let autoplayRequested = false;
+  let autoplayDone = false;
+  let autoplayDeadline = 0;
+  let autoplayTimer = 0;
+  let autoplayPending = false;
+  let autoplayUnmuteButton = null;
+  let autoUnmuteTimers = []; // 소리 복구 재시도 타이머(아래 recovery 함수들이 사용)
+
+  function stopClipAutoplay() {
+    if (autoplayTimer) clearTimeout(autoplayTimer);
+    autoplayTimer = 0;
+    clearClipAutoUnmuteRecovery(); // 소리 복구 재시도 타이머도 함께 정리
+    autoplayUnmuteButton?.remove();
+    autoplayUnmuteButton = null;
+  }
+
+  function showClipAutoplayUnmuteButton(video) {
+    if (
+      !(video instanceof HTMLVideoElement) ||
+      !video.muted ||
+      autoplayUnmuteButton?.isConnected
+    ) {
+      return;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-label", "클립 소리 켜기");
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17"
+        viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        aria-hidden="true">
+        <path d="M11 5 6 9H2v6h4l5 4z"></path>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+      </svg>
+      <span>소리 켜기</span>`;
+    button.style.cssText = [
+      "position:fixed",
+      "top:12px",
+      "right:12px",
+      "z-index:2147483647",
+      "height:34px",
+      "padding:0 12px",
+      "border:1px solid rgba(255,255,255,.3)",
+      "border-radius:6px",
+      "background:rgba(20,20,20,.86)",
+      "box-shadow:0 2px 8px rgba(0,0,0,.28)",
+      "color:#fff",
+      "font:600 13px/1 system-ui,sans-serif",
+      "display:inline-flex",
+      "align-items:center",
+      "gap:6px",
+      "cursor:pointer",
+    ].join(";");
+    button.addEventListener("click", () => {
+      video.muted = false;
+      video.defaultMuted = false;
+      if (video.volume <= 0) video.volume = 0.5;
+      try {
+        const result = video.play();
+        Promise.resolve(result).then(
+          () => {
+            window.setTimeout(() => {
+              if (video.paused || video.muted) {
+                video.muted = true;
+                video.defaultMuted = true;
+                return;
+              }
+              autoplayDone = true;
+              notifyClipAutoplayResult(false);
+              button.remove();
+              if (autoplayUnmuteButton === button) {
+                autoplayUnmuteButton = null;
+              }
+            }, 120);
+          },
+          () => {
+            video.muted = true;
+            video.defaultMuted = true;
+          },
+        );
+      } catch {
+        video.muted = true;
+        video.defaultMuted = true;
+      }
+    });
+    autoplayUnmuteButton = button;
+    (document.body || document.documentElement).appendChild(button);
+  }
+
+  function notifyClipAutoplayResult(muted) {
+    try {
+      window.parent?.postMessage(
+        {
+          source: AUTOPLAY_MESSAGE,
+          event: "playing",
+          muted: muted === true,
+        },
+        "https://chzzk.naver.com",
+      );
+    } catch {}
+  }
+
+  function scheduleClipAutoplayRetry(delay = 300) {
+    if (
+      autoplayTimer ||
+      autoplayPending ||
+      autoplayDone ||
+      !autoplayRequested ||
+      Date.now() > autoplayDeadline
+    ) {
+      return;
+    }
+    autoplayTimer = window.setTimeout(tryClipAutoplay, delay);
+  }
+
+  function playClipMuted(video) {
+    video.muted = true;
+    video.defaultMuted = true;
+    let result;
+    try {
+      result = video.play();
+    } catch {
+      autoplayPending = false;
+      scheduleClipAutoplayRetry();
+      return;
+    }
+    Promise.resolve(result).then(
+      () => {
+        autoplayPending = false;
+        autoplayDone = true;
+        notifyClipAutoplayResult(true);
+        showClipAutoplayUnmuteButton(video);
+        // 음소거로 붙은 뒤 소리를 되살릴 수 있는지 몇 번 더 시도한다. 첫 unmuted
+        // play() 는 프레임이 막 뜬 시점이라 거부되지만, 재생이 안정된 뒤에는 통과하는
+        // 경우가 있다(사이트 소리 허용 설정 등). 통합검색 인라인에서 같은 방식으로
+        // 해결됐다. 실패해도 '소리 켜기' 버튼이 남아 사용자가 켤 수 있다.
+        scheduleClipAutoUnmuteRecovery(video);
+      },
+      () => {
+        autoplayPending = false;
+        scheduleClipAutoplayRetry();
+      },
+    );
+  }
+
+  // 음소거 재생 뒤 소리 복구 재시도(성공하면 즉시 중단하고 버튼도 치운다).
+  function clearClipAutoUnmuteRecovery() {
+    autoUnmuteTimers.forEach(clearTimeout);
+    autoUnmuteTimers = [];
+  }
+  function scheduleClipAutoUnmuteRecovery(video) {
+    clearClipAutoUnmuteRecovery();
+    [150, 400, 900, 1800].forEach((delay) => {
+      autoUnmuteTimers.push(
+        window.setTimeout(() => {
+          if (!(video instanceof HTMLVideoElement) || !video.isConnected) return;
+          if (!video.muted || video.paused) return;
+          // ⚠ 사용자 제스처 없이 음소거를 풀면 크롬은 실패로 끝내지 않고 '재생을
+          // 일시정지'시킨다("Unmuting failed and the element was paused instead").
+          // 그러면 자동재생 자체가 멈춰 더 나빠지므로, 이 문서에 실제 활성화가 있을
+          // 때만 시도한다. 없으면 '소리 켜기' 버튼에 맡긴다(버튼 클릭은 진짜 제스처).
+          if (navigator.userActivation?.hasBeenActive !== true) return;
+          video.muted = false;
+          video.defaultMuted = false;
+          if (video.volume <= 0) video.volume = 0.5;
+          window.setTimeout(() => {
+            // 음소거 해제 때문에 멈췄으면 즉시 원복해 재생을 되살린다.
+            if (video.paused) {
+              video.muted = true;
+              video.defaultMuted = true;
+              try {
+                video.play()?.catch?.(() => {});
+              } catch {}
+              return;
+            }
+            if (video.muted) return; // 플레이어가 되돌림 → 다음 회차에서 재시도
+            clearClipAutoUnmuteRecovery();
+            autoplayUnmuteButton?.remove();
+            autoplayUnmuteButton = null;
+          }, 120);
+        }, delay),
+      );
+    });
+  }
+
+  function tryClipAutoplay() {
+    autoplayTimer = 0;
+    if (autoplayDone || autoplayPending || !autoplayRequested) return;
+    if (Date.now() > autoplayDeadline) {
+      autoplayRequested = false;
+      return;
+    }
+    const video = document.querySelector("video");
+    if (video instanceof HTMLVideoElement) {
+      if (!video.paused && !video.muted) {
+        autoplayDone = true;
+        notifyClipAutoplayResult(false);
+        return;
+      }
+      // 새 탭 플레이어는 초기 muted 상태일 수 있다. 네이티브 /clips 내부 클릭과
+      // 동일하게 먼저 소리 있는 재생을 명시적으로 시도하고, 정책상 거부될 때만
+      // 음소거로 폴백한다.
+      autoplayPending = true;
+      // ⚠ 이미 재생 중인 요소의 음소거를 제스처 없이 풀면 크롬이 '일시정지'시킨다.
+      // 아직 멈춰 있을 때(=play 전)는 그 규칙이 적용되지 않고 play() 가 거부될 뿐이라
+      // 안전하다. 재생 중이라면 건드리지 말고 복구 경로에 맡긴다.
+      if (video.paused) {
+        video.muted = false;
+        video.defaultMuted = false;
+      }
+      try {
+        Promise.resolve(video.play()).then(
+          () => {
+            window.setTimeout(() => {
+              autoplayPending = false;
+              if (!video.paused && !video.muted) {
+                autoplayDone = true;
+                notifyClipAutoplayResult(false);
+                return;
+              }
+              // 재생은 붙었는데 플레이어가 음소거로 되돌린 경우: 여기서 곧바로
+              // playClipMuted 로 확정하면 소리가 영영 안 켜진다(autoplayDone 고정).
+              // 재생 중이면 복구 재시도에 맡긴다.
+              if (!video.paused) {
+                autoplayDone = true;
+                notifyClipAutoplayResult(true);
+                showClipAutoplayUnmuteButton(video);
+                scheduleClipAutoUnmuteRecovery(video);
+                return;
+              }
+              playClipMuted(video);
+            }, 120);
+          },
+          () => {
+            playClipMuted(video);
+          },
+        );
+      } catch {
+        playClipMuted(video);
+      }
+      return;
+    }
+    scheduleClipAutoplayRetry();
+  }
+
+  window.addEventListener("message", (event) => {
+    if (
+      event.source !== window.parent ||
+      event.data?.source !== AUTOPLAY_MESSAGE
+    ) {
+      return;
+    }
+    try {
+      if (new URL(event.origin).hostname !== "chzzk.naver.com") return;
+    } catch {
+      return;
+    }
+    if (autoplayDone) return;
+    // 부모는 재시도마다 다시 보낸다 — 이미 진행 중이면 중복 시작하지 않는다.
+    autoplayDeadline = Date.now() + AUTOPLAY_TIMEOUT_MS;
+    if (autoplayRequested) return;
+    autoplayRequested = true;
+    tryClipAutoplay();
+  });
+  window.addEventListener("pagehide", stopClipAutoplay, { once: true });
+
   const observer = new MutationObserver(onMutations);
   let observing = false;
 

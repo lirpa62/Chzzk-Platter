@@ -1883,6 +1883,19 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">되감기·앞으로 버튼</span>
+                  <span class="settings-item-desc"
+                    >다시보기 플레이어에 치지직 기본 이동 간격(5초)의
+                    되감기·앞으로 버튼을 표시합니다(체크=표시, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="vodSeekButtons" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">다시보기 화면 채우기</span>
                   <span class="settings-item-desc"
                     >다시보기 영상 높이를 조절해 좌우 레터박스를
@@ -2096,6 +2109,27 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name"
+                    >탭 복귀 시 검색 자동 초기화</span
+                  >
+                  <span class="settings-item-desc"
+                    >동영상·클립 검색 결과가 있는 상태에서 다른 탭·창에 갔다가
+                    돌아오면 검색을 자동으로 초기화합니다(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-search-reset-on-return />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              통합검색 동영상
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">통합검색 동영상 재정렬</span>
                   <span class="settings-item-desc"
                     >통합검색(/search)의 동영상 결과를 더 넓게 받아(아래 최대
@@ -2142,6 +2176,27 @@
                     <small>개</small>
                   </span>
                 </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">동영상 더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >통합검색 동영상의 '더보기'를 한 번 누를 때 추가로 표시할
+                    결과 수(1~100개, 기본 12개)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    inputmode="numeric"
+                    data-search-rerank-more-step
+                    aria-label="통합검색 동영상 더보기 증가량"
+                  />
+                  <small>개</small>
+                </span>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
@@ -2298,21 +2353,386 @@
                   </button>
                 </div>
               </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              통합검색 클립
+            </h2>
+            <ul class="settings-list">
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
-                    >탭 복귀 시 검색 자동 초기화</span
+                    >통합검색 클립 결과 표시 (실험)</span
                   >
                   <span class="settings-item-desc"
-                    >동영상·클립 검색 결과가 있는 상태에서 다른 탭·창에 갔다가
-                    돌아오면 검색을 자동으로 초기화합니다(체크=사용, 기본
-                    꺼짐)</span
+                    >통합검색(/search)에 최근 인기·추천 피드, 관련 채널과 검색
+                    후보에서 많이 나타난 카테고리의 클립을 조합해 표시합니다.
+                    전체 클립 검색 API가 아니므로 후보에 없는 클립은 누락될 수
+                    있습니다(체크=사용, 기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-search-reset-on-return />
+                  <input type="checkbox" data-integrated-search-clips />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">카테고리 검색 사용법</span>
+                  <span class="settings-item-desc"
+                    >검색어에 <code>@음악</code>을 넣으면 음악 카테고리의 클립을
+                    우선 확인합니다. 일반 검색어와 함께
+                    <code>싱드컵 @음악</code>처럼 사용할 수 있으며, 공백이 있는
+                    카테고리는 <code>@"종합 게임"</code>처럼 따옴표로
+                    묶습니다.</span
+                  >
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >클립 클릭 시 바로 재생
+                    <button
+                      type="button"
+                      class="settings-info-button"
+                      data-settings-info="clip-click"
+                      aria-label="클립 클릭 동작 안내"
+                      aria-expanded="false"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 16v-4"></path>
+                        <path d="M12 8h.01"></path>
+                      </svg>
+                    </button></span
+                  >
+                  <span class="settings-item-desc"
+                    >통합검색 클립 카드를 클릭하면 현재 검색 화면 위에서 바로
+                    재생합니다. 끄면 클립 페이지를 새 탭으로 엽니다(체크=바로
+                    재생, 기본 켜짐)</span
+                  >
+                  <span
+                    class="settings-info-panel"
+                    data-settings-info-panel="clip-click"
+                    hidden
+                  >
+                    <strong>소리는 어떻게 나오나요?</strong>
+                    <span
+                      ><b>바로 재생</b>은 검색 화면 위 작은 창에서 재생되는데,
+                      이때는 브라우저가 소리를 막기 때문에 <b>항상 음소거로
+                      시작</b>합니다. 영상 오른쪽 위 <b>소리 켜기</b> 버튼을 누르면
+                      소리가 나옵니다.</span
+                    >
+                    <span
+                      ><b>새 탭</b>으로 열면 클립 페이지가 따로 열려서, 아래 설정을
+                      해두면 <b>처음부터 소리와 함께</b> 재생됩니다.</span
+                    >
+                    <span
+                      >크롬 주소창에 <code>chrome://settings/content/sound</code>
+                      를 입력해 <b>소리 재생이 허용됨</b> 목록에
+                      <code>https://chzzk.naver.com</code> 을 추가하세요.</span
+                    >
+                  </span>
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-integrated-search-clips-direct-play
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">클립 검색 후보 범위</span>
+                  <span class="settings-item-desc"
+                    >검색어와 어느 정도 일치한 클립까지 후보에 포함할지
+                    선택합니다. 넓게 설정하면 결과는 늘지만 관련도가 낮은 클립도
+                    포함될 수 있습니다(기본 균형)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="integratedSearchClipMatchMode"
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-integrated-search-clips-match="strict"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    정확
+                    <small>한 항목 안에서 일치</small>
+                  </button>
+                  <button
+                    type="button"
+                    data-integrated-search-clips-match="balanced"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    균형
+                    <small>모든 검색 단어 일치</small>
+                  </button>
+                  <button
+                    type="button"
+                    data-integrated-search-clips-match="loose"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    넓게
+                    <small>한 단어 이상 일치</small>
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">클립 기본 날짜 범위</span>
+                  <span class="settings-item-desc"
+                    >통합검색에서 클립 후보를 처음 수집할 날짜 범위입니다. 결과
+                    화면에서도 전체·30일·7일·24시간 범위를 바로 변경할 수
+                    있습니다(기본 전체)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  id="integratedSearchClipDateFilter"
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-integrated-search-clips-date-filter="all"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    전체
+                  </button>
+                  <button
+                    type="button"
+                    data-integrated-search-clips-date-filter="month"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    30일
+                  </button>
+                  <button
+                    type="button"
+                    data-integrated-search-clips-date-filter="week"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    7일
+                  </button>
+                  <button
+                    type="button"
+                    data-integrated-search-clips-date-filter="day"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    24시간
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">클립 후보 불러오기 개수</span>
+                  <span class="settings-item-desc"
+                    >초기 검색에서 수집할 전체 후보 목표(각 50~100,000개, 기본
+                    1,000개)입니다. 추천·관련 채널 후보는 추천 피드 60%, 관련
+                    채널 40%로 나누고, 카테고리 후보는 선택된 상위 카테고리에
+                    균등 배분합니다. 값을 크게 설정하면 수천 페이지를 요청할 수
+                    있어 검색 시간, 메모리 사용량과 API 호출 제한 가능성이 크게
+                    늘어납니다</span
+                  >
+                </div>
+                <span class="settings-subgroup-title"
+                  >추천·관련 채널 전체</span
+                >
+                <div
+                  class="settings-volume-row settings-clip-candidate-row"
+                >
+                  <input
+                    type="range"
+                    min="50"
+                    max="100000"
+                    step="50"
+                    class="settings-volume-slider"
+                    data-integrated-search-clips-candidate-limit-slider
+                    aria-label="추천 및 관련 채널 클립 후보 개수 슬라이더"
+                  />
+                  <span class="settings-custom-input settings-count-input">
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      pattern="[0-9,]*"
+                      maxlength="7"
+                      data-integrated-search-clips-candidate-limit
+                      aria-label="추천 및 관련 채널 클립 후보 개수"
+                    />
+                    <small>개</small>
+                  </span>
+                </div>
+                <span class="settings-subgroup-title"
+                  >관련 카테고리 전체</span
+                >
+                <div
+                  class="settings-volume-row settings-clip-candidate-row"
+                >
+                  <input
+                    type="range"
+                    min="50"
+                    max="100000"
+                    step="50"
+                    class="settings-volume-slider"
+                    data-integrated-search-clips-category-limit-slider
+                    aria-label="관련 카테고리 클립 후보 개수 슬라이더"
+                  />
+                  <span class="settings-custom-input settings-count-input">
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      pattern="[0-9,]*"
+                      maxlength="7"
+                      data-integrated-search-clips-category-limit
+                      aria-label="관련 카테고리 클립 후보 개수"
+                    />
+                    <small>개</small>
+                  </span>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">클립 더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >통합검색 클립의 '더보기'를 한 번 누를 때 추가로 표시할 결과
+                    수(1~100개, 기본 8개). 후보 불러오기 개수에는 영향을 주지
+                    않습니다</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    inputmode="numeric"
+                    data-integrated-search-clips-more-step
+                    aria-label="통합검색 클립 더보기 증가량"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">클립 관련순 점수 비중</span>
+                  <span class="settings-item-desc"
+                    >관련순 정렬 점수의 항목별 비중(각 0~100). 모든 항목이 0이면
+                    기본값으로 자동 복구됩니다. 기본값: 클립 제목 35 · 카테고리
+                    20 · 채널명 20 · 조회수 10 · 파트너 채널 5 · 최신성 10</span
+                  >
+                </div>
+                <div class="settings-custom-row">
+                  <label class="settings-custom-field">
+                    <span>클립 제목</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-title
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>카테고리</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-category
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>채널명</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-channel
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>조회수</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-read
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>파트너 채널</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-verified
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-custom-field">
+                    <span>최신성</span>
+                    <span class="settings-custom-input">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        inputmode="numeric"
+                        data-integrated-search-clips-w-recent
+                      />
+                    </span>
+                  </label>
+                </div>
+                <div class="settings-order-actions">
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-integrated-search-clips-weights-reset
+                  >
+                    기본값으로 초기화
+                  </button>
+                </div>
               </li>
             </ul>
           </section>
@@ -5247,6 +5667,56 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >클립 시청 시 오디오 믹서 항상 켜기</span
+                  >
+                  <span class="settings-item-desc"
+                    >클립 페이지의 첫 사용자 조작에서 오디오 믹서를 자동으로
+                    활성화하고 이후 클립 전환에도 유지합니다(체크=사용, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-clip-audio-mixer-always-on />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name"
+                    >클립 오디오 믹서 프리셋</span
+                  >
+                  <span class="settings-item-desc"
+                    >클립에서 원클릭 또는 자동 활성화할 때 적용할 프리셋(기본:
+                    기본)</span
+                  >
+                </div>
+                <div
+                  class="settings-preset-picker"
+                  data-global-default-picker="clip"
+                >
+                  <button
+                    type="button"
+                    class="settings-popover-trigger"
+                    data-global-default-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-global-default-label>기본</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-global-default-list
+                    role="listbox"
+                    hidden
+                  ></ul>
+                </div>
               </li>
               <li class="settings-item">
                 <label>

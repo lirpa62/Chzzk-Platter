@@ -25,6 +25,231 @@ const IS_TOP_FRAME = window.top === window;
 const IS_POPUP_PLAYER_FRAME =
   !IS_TOP_FRAME &&
   new URLSearchParams(location.search).get("cheesePopup") === "1";
+const CLIP_PAGE_AUTOPLAY_PARAM = "cheesePlatterAutoplay";
+const clipPageAutoplayState = {
+  pathname: "",
+  requested: false,
+  pending: false,
+  completed: false,
+  deadline: 0,
+  nextAttemptAt: 0,
+  retryTimer: 0,
+};
+
+function resetClipPageAutoplayState(pathname = "") {
+  if (clipPageAutoplayState.retryTimer) {
+    clearTimeout(clipPageAutoplayState.retryTimer);
+  }
+  Object.assign(clipPageAutoplayState, {
+    pathname,
+    requested: false,
+    pending: false,
+    completed: false,
+    deadline: 0,
+    nextAttemptAt: 0,
+    retryTimer: 0,
+  });
+}
+
+function captureClipPageAutoplayRequest() {
+  if (!IS_TOP_FRAME) return;
+  const pathname = location.pathname;
+  if (!/^\/clips\/[^/]+\/?$/.test(pathname)) {
+    if (clipPageAutoplayState.pathname) {
+      resetClipPageAutoplayState();
+    }
+    return;
+  }
+  if (clipPageAutoplayState.pathname !== pathname) {
+    resetClipPageAutoplayState(pathname);
+  }
+
+  const url = new URL(location.href);
+  if (url.searchParams.get(CLIP_PAGE_AUTOPLAY_PARAM) !== "1") return;
+  clipPageAutoplayState.requested = true;
+  // 쇼츠형 플레이어는 shadow DOM 마운트가 늦을 수 있어 여유를 둔다(느린 회선 대비).
+  clipPageAutoplayState.deadline = Date.now() + 25000;
+  url.searchParams.delete(CLIP_PAGE_AUTOPLAY_PARAM);
+  history.replaceState(
+    history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+}
+
+function scheduleClipPageAutoplayRetry(delay = 300) {
+  const state = clipPageAutoplayState;
+  if (
+    state.retryTimer ||
+    !state.requested ||
+    state.completed ||
+    Date.now() >= state.deadline
+  ) {
+    return;
+  }
+  state.retryTimer = window.setTimeout(() => {
+    state.retryTimer = 0;
+    ensureClipPageAutoplay();
+  }, delay);
+}
+
+// ⚠ /clips 의 플레이어는 같은 문서가 아니라 'm.naver.com/shorts' iframe(교차 출처)에
+// 들어 있다. 그래서 최상위 문서에서는 video 도 재생 버튼도 절대 찾을 수 없고,
+// contentDocument 접근도 막힌다. 실제 재생 제어는 그 프레임에서 도는
+// clipButtonHide.js 가 담당한다(여기서는 자동재생 요청 여부만 표시해 둔다).
+function findClipPageVideo() {
+  const video = document.querySelector(
+    ".webplayer-internal-video, .pzp-pc video, video",
+  );
+  return video instanceof HTMLVideoElement ? video : null;
+}
+
+const CLIP_PAGE_AUTOPLAY_MESSAGE = "cheese-clip-page-autoplay";
+
+// 쇼츠 iframe(m.naver.com)에 자동재생 요청을 보낸다. 교차 출처라 targetOrigin 을
+// 명시하고, 프레임이 늦게 붙을 수 있어 재시도마다 다시 보낸다(수신 측이 멱등 처리).
+function postClipPageAutoplayRequest() {
+  document.querySelectorAll("iframe").forEach((frame) => {
+    const src = frame.getAttribute("src") || "";
+    if (!src.includes("m.naver.com/shorts")) return;
+    // ⚠ src 속성이 m.naver.com 이어도 프레임이 아직 그 주소로 이동하지 않았을 수 있다
+    // (about:blank 이거나 리다이렉트 전). 그 상태에서 targetOrigin 을 지정해 보내면
+    // "target origin does not match the recipient window's origin" 예외가 콘솔에 뜬다.
+    // 재시도로 결국 전달되지만 로그가 지저분해지므로, 아직 아니면 조용히 건너뛴다.
+    const win = frame.contentWindow;
+    if (!win) return;
+    try {
+      // 교차 출처면 접근 시 예외 → 아직 chzzk(동일 출처)이라는 뜻이라 보내지 않는다.
+      if (win.location.origin === location.origin) return;
+    } catch {
+      // 접근 불가 = 이미 교차 출처(m.naver.com)로 이동함 → 전송 진행.
+    }
+    try {
+      win.postMessage(
+        { source: CLIP_PAGE_AUTOPLAY_MESSAGE, muted: false },
+        "https://m.naver.com",
+      );
+    } catch {}
+  });
+}
+
+window.addEventListener("message", (event) => {
+  if (
+    event.origin !== "https://m.naver.com" ||
+    event.data?.source !== CLIP_PAGE_AUTOPLAY_MESSAGE ||
+    event.data?.event !== "playing"
+  ) {
+    return;
+  }
+  const fromClipFrame = [...document.querySelectorAll("iframe")].some(
+    (frame) =>
+      (frame.getAttribute("src") || "").includes("m.naver.com/shorts") &&
+      frame.contentWindow === event.source,
+  );
+  if (!fromClipFrame) return;
+
+  clipPageAutoplayState.completed = true;
+  clipPageAutoplayState.pending = false;
+  if (clipPageAutoplayState.retryTimer) {
+    clearTimeout(clipPageAutoplayState.retryTimer);
+    clipPageAutoplayState.retryTimer = 0;
+  }
+});
+
+function ensureClipPageAutoplay() {
+  captureClipPageAutoplayRequest();
+  const state = clipPageAutoplayState;
+  if (state.requested && Date.now() >= state.deadline) {
+    state.requested = false;
+    return;
+  }
+  if (
+    !state.requested ||
+    state.pending ||
+    state.completed ||
+    Date.now() < state.nextAttemptAt
+  ) {
+    return;
+  }
+  const video = findClipPageVideo();
+  if (!video) {
+    // 이 문서에 video 가 없으면 쇼츠 iframe 안에 있는 것이다. 교차 출처라 직접 만질 수
+    // 없으므로, 그 프레임의 clipButtonHide.js 에 자동재생 요청을 postMessage 로 넘긴다.
+    postClipPageAutoplayRequest();
+    scheduleClipPageAutoplayRetry();
+    return;
+  }
+
+  const attemptPathname = state.pathname;
+  state.pending = true;
+  state.nextAttemptAt = Date.now() + 300;
+  video.autoplay = true;
+  video.muted = false;
+  video.defaultMuted = false;
+  let result;
+  try {
+    result = video.play();
+  } catch {
+    state.pending = false;
+    scheduleClipPageAutoplayRetry();
+    return;
+  }
+  Promise.resolve(result).then(
+    () => {
+      if (state.pathname !== attemptPathname) return;
+      state.pending = false;
+      // ⚠ /clips 는 pzp 가 아니라 쇼츠형(ControlAreaView) 플레이어라, video.play() 가
+      // resolve 된 뒤에도 플레이어 자체 로직이 곧바로 다시 멈춰 세우는 경우가 있다.
+      // 잠깐 뒤 실제로 재생 중인지 확인하고, 멈춰 있으면 네이티브 재생 버튼을 눌러
+      // 플레이어의 정상 재생 흐름을 그대로 태운다.
+      window.setTimeout(() => {
+        if (state.pathname !== attemptPathname || state.completed) return;
+        if (!video.paused) {
+          state.completed = true;
+          return;
+        }
+        if (clickClipPagePlayButton()) {
+          state.completed = true;
+          return;
+        }
+        scheduleClipPageAutoplayRetry();
+      }, 250);
+    },
+    () => {
+      if (state.pathname !== attemptPathname) return;
+      state.pending = false;
+      // 새 탭의 소리 있는 자동재생은 브라우저가 막을 수 있다. 이 경우 재생 자체가
+      // 멈춘 채 남지 않도록 음소거로 한 번만 폴백하고, 소리는 네이티브 컨트롤에서
+      // 사용자가 켜게 둔다.
+      if (!video.muted) {
+        video.muted = true;
+        video.defaultMuted = true;
+        try {
+          Promise.resolve(video.play()).then(
+            () => {
+              if (state.pathname !== attemptPathname) return;
+              state.completed = true;
+            },
+            () => {
+              // 음소거로도 거부되면 네이티브 재생 버튼을 눌러 본다.
+              if (clickClipPagePlayButton()) {
+                state.completed = true;
+                return;
+              }
+              scheduleClipPageAutoplayRetry();
+            },
+          );
+        } catch {
+          scheduleClipPageAutoplayRetry();
+        }
+      } else if (clickClipPagePlayButton()) {
+        state.completed = true;
+      } else {
+        scheduleClipPageAutoplayRetry();
+      }
+    },
+  );
+}
 
 const CONTENT_CONFIG = {
   videos: {
@@ -699,6 +924,15 @@ function normalizeSearchRerankPoolMax(v) {
   if (!Number.isFinite(n)) return 200;
   return Math.min(1000, Math.max(50, Math.round(n)));
 }
+const SEARCH_RERANK_MORE_STEP_KEY = "cheeseSearchRerankMoreStep";
+const SEARCH_RERANK_MORE_STEP_DEFAULT = 12;
+let searchRerankMoreStep = SEARCH_RERANK_MORE_STEP_DEFAULT;
+function normalizeSearchMoreStep(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.min(100, Math.max(1, Math.round(number)))
+    : fallback;
+}
 // 추천순 점수 비중(각 0~100). rel=제목 관련도, channel=채널명 관련도, read=조회수,
 // pv=라이브 시청자, verified=인증 채널, recent=최신성. 모두 0이면 기본값으로 폴백한다.
 const SEARCH_RERANK_WEIGHTS_KEY = "cheeseSearchRerankWeights";
@@ -760,6 +994,85 @@ function normalizeSearchRerankSort(v) {
     ? v
     : "score";
 }
+// 통합검색(/search)에 최근 추천 피드와 관련 채널의 클립 검색 결과를 보강한다.
+// 전역 추천 피드에는 검색어 파라미터가 없어 수집한 후보를 로컬에서 필터링하며,
+// 결과 범위가 제한적이므로 기존 사용자에게는 기본 OFF로 제공한다.
+const SEARCH_CLIPS_KEY = "cheeseSearchClips";
+let integratedSearchClipsEnabled = false;
+const SEARCH_CLIPS_DIRECT_PLAY_KEY = "cheeseSearchClipDirectPlay";
+// 기본 ON(검색 화면에서 바로 재생). 인라인 iframe은 브라우저 정책상 음소거로
+// 시작하며, 사용자가 명시적으로 끈 경우에만 새 탭으로 연다.
+let integratedSearchClipDirectPlay = true;
+const SEARCH_CLIPS_WEIGHTS_KEY = "cheeseSearchClipWeights";
+const SEARCH_CLIPS_WEIGHTS_DEFAULT = {
+  title: 35,
+  category: 20,
+  channel: 20,
+  read: 10,
+  verified: 5,
+  recent: 10,
+};
+let integratedSearchClipWeights = { ...SEARCH_CLIPS_WEIGHTS_DEFAULT };
+function normalizeIntegratedSearchClipWeights(value) {
+  const saved = value && typeof value === "object" ? value : null;
+  const normalized = { ...SEARCH_CLIPS_WEIGHTS_DEFAULT };
+  if (saved) {
+    for (const key of Object.keys(normalized)) {
+      const number = Number(saved[key]);
+      if (Number.isFinite(number)) {
+        normalized[key] = Math.min(100, Math.max(0, Math.round(number)));
+      }
+    }
+  }
+  return Object.values(normalized).every((weight) => weight === 0)
+    ? { ...SEARCH_CLIPS_WEIGHTS_DEFAULT }
+    : normalized;
+}
+const SEARCH_CLIPS_MATCH_MODE_KEY = "cheeseSearchClipMatchMode";
+let integratedSearchClipMatchMode = "balanced";
+function normalizeIntegratedSearchClipMatchMode(value) {
+  return ["strict", "balanced", "loose"].includes(value)
+    ? value
+    : "balanced";
+}
+const SEARCH_CLIPS_DATE_FILTER_KEY = "cheeseSearchClipDateFilter";
+let integratedSearchClipDateFilter = "all";
+function normalizeIntegratedSearchClipDateFilter(value) {
+  return ["all", "month", "week", "day"].includes(value)
+    ? value
+    : "all";
+}
+function getIntegratedSearchClipApiFilterType() {
+  return {
+    day: "WITHIN_ONE_DAY",
+    week: "WITHIN_SEVEN_DAYS",
+    month: "WITHIN_THIRTY_DAYS",
+    all: "ALL",
+  }[integratedSearchClipDateFilter];
+}
+const SEARCH_CLIPS_CANDIDATE_LIMIT_KEY = "cheeseSearchClipCandidateLimit";
+const SEARCH_CLIPS_CATEGORY_LIMIT_KEY = "cheeseSearchClipCategoryLimit";
+const SEARCH_CLIPS_LIMIT_DEFAULT = 1000;
+const SEARCH_CLIPS_LIMIT_MAX = 100000;
+let integratedSearchClipCandidateLimit = SEARCH_CLIPS_LIMIT_DEFAULT;
+let integratedSearchClipCategoryLimit = SEARCH_CLIPS_LIMIT_DEFAULT;
+function normalizeIntegratedSearchClipLimit(value, fallback) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  const number = Number(raw.replaceAll(",", ""));
+  return Number.isFinite(number)
+    ? Math.min(SEARCH_CLIPS_LIMIT_MAX, Math.max(50, Math.round(number)))
+    : fallback;
+}
+function formatIntegratedSearchClipLimit(value) {
+  return normalizeIntegratedSearchClipLimit(
+    value,
+    SEARCH_CLIPS_LIMIT_DEFAULT,
+  ).toLocaleString("ko-KR");
+}
+const SEARCH_CLIPS_MORE_STEP_KEY = "cheeseSearchClipMoreStep";
+const SEARCH_CLIPS_MORE_STEP_DEFAULT = 8;
+let integratedSearchClipMoreStep = SEARCH_CLIPS_MORE_STEP_DEFAULT;
 // 종료 화면이 이 시간 이상 지속되면 폴링을 멈춘다(무기한 폴링 방지). 시간(hour) 단위로
 // 저장하며 6/12/24 중 하나. 잘못된 값은 6으로. content.js 전용.
 const AUTO_RELIVE_MAX_HOURS_KEY = "cheeseAutoReliveMaxHours";
@@ -897,6 +1210,7 @@ const featureFlags = {
   streamStats: false,
   fillScreen: false, // 라이브 화면 채우기
   fillScreenVod: false, // 다시보기 화면 채우기
+  vodSeekButtons: false, // 다시보기 되감기·앞으로 버튼 표시
   vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
   vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
   tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
@@ -1275,6 +1589,8 @@ const CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR = [
   ".cheese-search-studio-more-menu",
   "[data-cheese-studio-row]",
   "[data-cheese-studio-toast]",
+  ".cheese-integrated-search-clips",
+  ".cheese-search-section-top-wrap",
   ".cheese-search-scroll-top",
   ".cheese-search-comment-marker-layer",
   ".cheese-search-comment-marker",
@@ -2663,6 +2979,11 @@ function handleCategoryFilterClick(event) {
   if (!link || event.ctrlKey || event.metaKey) return;
   const searchList = link.closest(".cheese-search-results-list");
   if (!searchList) return;
+  // 통합검색의 보강 클립 섹션에는 채널 탭용 검색 shell이 없으므로, 카테고리
+  // 링크는 가로채지 않고 원래 치지직 카테고리 페이지로 이동하게 둔다.
+  if (searchList.classList.contains("cheese-search-integrated-clips-list")) {
+    return;
+  }
 
   event.preventDefault();
   event.stopPropagation();
@@ -4544,7 +4865,19 @@ function renderClipCard(clip) {
   const title = String(clip?.clipTitle || "제목 없음");
   const createdDate = formatClipCreatedDate(clip);
   const clipUrl = getClipUrl(clip);
+  const integratedPlayAttributes = clip?.__integratedSearch
+    ? ` data-integrated-search-clip-play="${escapeAttribute(clipUID)}" data-integrated-search-clip-title="${escapeAttribute(title)}"`
+    : "";
+  const ownerChannelId = String(clip?.ownerChannelId || "").trim();
+  const ownerChannelName = getIntegratedSearchClipChannelName(clip);
+  const ownerChannelHtml =
+    clip?.__integratedSearch && ownerChannelId && ownerChannelName
+      ? `<a class="cheese-search-clip-channel-link" href="/${encodeURIComponent(ownerChannelId)}" target="_blank" rel="noreferrer">${escapeHtml(ownerChannelName)}</a>`
+      : "";
   const categoryLink = isAdult ? "" : renderClipCategoryLink(clip);
+  const categoryMetaHtml = ownerChannelHtml
+    ? `<div class="cheese-search-clip-meta-row">${categoryLink}${ownerChannelHtml}</div>`
+    : categoryLink;
   const likeCount = getLikeCount(clip);
   const likeCountHtml =
     likeCount > 0
@@ -4555,11 +4888,11 @@ function renderClipCard(clip) {
     <li class="cheese-search-card channel_clip_item__eVWfU">
       <div class="clip_card_link__Pxcf6">
         <div class="${clipContainerClasses}"${backgroundImage} data-clip-thumbnail-url="${escapeAttribute(thumbnailImageUrl)}" data-clip-uid="${escapeAttribute(clipUID)}"${orientationReady}>
-          <a class="cheese-search-clip-cover-link" href="${escapeAttribute(clipUrl)}" target="_blank" rel="noreferrer" aria-label="${escapeAttribute(title)}"></a>
+          <a class="cheese-search-clip-cover-link" href="${escapeAttribute(clipUrl)}" target="_blank" rel="noreferrer" aria-label="${escapeAttribute(title)}"${integratedPlayAttributes}></a>
           <div class="clip_card_wrapper__AcHtn">
             ${isAdult ? renderClipAdultArea() : ""}
             <strong class="clip_card_title__Pc2jc">${escapeHtml(title)}</strong>
-            ${categoryLink}
+            ${categoryMetaHtml}
             <span class="clip_card_information__8-dGy clip_card_-play__hqsAe">
               <span class="cheese-search-clip-info-main">
                 ${createClipPlayIcon()}<span class="blind">재생 수</span>${formatCompactCount(clip?.readCount)}
@@ -12080,6 +12413,7 @@ function scheduleSidebarPushSettle() {
   let tries = 0;
   const tick = () => {
     applySidebarPush();
+    scheduleSearchSectionTopFabSync();
     tries += 1;
     if (tries < 4) {
       sidebarPushSettleTimer = window.setTimeout(tick, 80);
@@ -13237,6 +13571,7 @@ function ensureSidebarObserver() {
       applySidebarSections();
       ensureHeaderFollowNav();
       handleSidebarExpandTransition(cur);
+      scheduleSearchSectionTopFabSync();
       ensureFollowExpansion(); // 갱신/재렌더로 접혀도 펼침 의사면 다시 펼침
       ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
       ensureCustomFollowList(); // 전용 팔로잉 목록 주입/유지(sbFollowCustom)
@@ -13850,7 +14185,6 @@ const SEARCH_RERANK_HIDDEN_CLASS = "cheese-search-rerank-native-hidden";
 // 해시(_container_1o5pg_ → _container_g43cd_ …)가 바뀌어도 fallback CSS 가 흔들리지 않게.
 const SEARCH_RERANK_BADGE_CLASS = "cheese-search-rerank-badge";
 const SEARCH_RERANK_INITIAL = 6; // 처음 표시 개수(네이티브와 동일)
-const SEARCH_RERANK_STEP = 12; // 더보기 1회당 추가 개수
 const searchRerankState = {
   keyword: "", // 현재 fetch 대상 검색어
   fetchedFor: "", // fetch 완료된 검색어
@@ -13859,6 +14193,193 @@ const searchRerankState = {
   sort: "score", // score(추천) | read(조회수) | recent(최신) | original(원본)
   visible: SEARCH_RERANK_INITIAL,
 };
+
+const SEARCH_SECTION_TOP_ICON = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+    viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true">
+    <path d="m5 12 7-7 7 7"></path>
+    <path d="M12 19V5"></path>
+  </svg>`;
+
+let searchSectionTopFabFrame = 0;
+let searchSectionTopFabBound = false;
+
+function syncSearchSectionTopFabs() {
+  searchSectionTopFabFrame = 0;
+  const compactViewport = window.matchMedia("(max-width: 720px)").matches;
+  const fabEdgeBottom = compactViewport ? 14 : 24;
+  const fabSectionInset = compactViewport ? 8 : 12;
+  const sidebar = document.getElementById("sidebar");
+  const sidebarWidth =
+    featureFlags.sidebarRight &&
+    !featureFlags.sidebar &&
+    sidebar &&
+    getComputedStyle(sidebar).display !== "none"
+      ? Math.max(0, Math.ceil(sidebar.getBoundingClientRect().width))
+      : 0;
+  const sidebarOffset = `${sidebarWidth}px`;
+  const candidates = [];
+  const wraps = [
+    ...document.querySelectorAll(".cheese-search-section-top-wrap.is-fab"),
+  ];
+  wraps.forEach((wrap) => {
+    if (
+      wrap.style.getPropertyValue("--cheese-search-fab-sidebar-offset") !==
+      sidebarOffset
+    ) {
+      wrap.style.setProperty(
+        "--cheese-search-fab-sidebar-offset",
+        sidebarOffset,
+      );
+    }
+    const section = wrap.closest("section");
+    const enabled = wrap.dataset.fabEnabled === "true";
+    if (!enabled || !section || section.hidden) {
+      if (!wrap.hidden) wrap.hidden = true;
+      return;
+    }
+    const button = wrap.querySelector(".cheese-search-section-top");
+    const target =
+      section.querySelector(button?.dataset.targetSelector || "") ||
+      section;
+    const sectionRect = section.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const sectionOffset = `${Math.max(
+      0,
+      Math.ceil(window.innerWidth - sidebarWidth - sectionRect.right),
+    )}px`;
+    const sectionBottomOffset = `${Math.max(
+      0,
+      Math.ceil(
+        window.innerHeight -
+          sectionRect.bottom +
+          fabSectionInset -
+          fabEdgeBottom,
+      ),
+    )}px`;
+    if (
+      wrap.style.getPropertyValue("--cheese-search-fab-section-offset") !==
+      sectionOffset
+    ) {
+      wrap.style.setProperty(
+        "--cheese-search-fab-section-offset",
+        sectionOffset,
+      );
+    }
+    if (
+      wrap.style.getPropertyValue(
+        "--cheese-search-fab-section-bottom-offset",
+      ) !== sectionBottomOffset
+    ) {
+      wrap.style.setProperty(
+        "--cheese-search-fab-section-bottom-offset",
+        sectionBottomOffset,
+      );
+    }
+    const active =
+      targetRect.top < 84 &&
+      sectionRect.bottom > 72 &&
+      sectionRect.top < window.innerHeight;
+    if (!active) {
+      if (!wrap.hidden) wrap.hidden = true;
+      return;
+    }
+    candidates.push({ wrap, targetTop: targetRect.top });
+  });
+
+  const activeWrap = candidates.reduce(
+    (current, candidate) =>
+      !current || candidate.targetTop > current.targetTop
+        ? candidate
+        : current,
+    null,
+  )?.wrap;
+  candidates.forEach(({ wrap }) => {
+    const hidden = wrap !== activeWrap;
+    if (wrap.hidden !== hidden) wrap.hidden = hidden;
+  });
+}
+
+function scheduleSearchSectionTopFabSync() {
+  if (searchSectionTopFabFrame) return;
+  searchSectionTopFabFrame = requestAnimationFrame(
+    syncSearchSectionTopFabs,
+  );
+}
+
+function bindSearchSectionTopFabSync() {
+  if (searchSectionTopFabBound) return;
+  searchSectionTopFabBound = true;
+  window.addEventListener("scroll", scheduleSearchSectionTopFabSync, {
+    passive: true,
+  });
+  window.addEventListener("resize", scheduleSearchSectionTopFabSync, {
+    passive: true,
+  });
+}
+
+function ensureSearchSectionTopButton(
+  section,
+  { show, targetSelector, label, floating = false },
+) {
+  let wrap = section.querySelector(
+    ":scope > .cheese-search-section-top-wrap",
+  );
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "cheese-search-section-top-wrap";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cheese-search-section-top";
+    button.innerHTML = SEARCH_SECTION_TOP_ICON;
+    button.addEventListener("click", () => {
+      const owner = button.closest("section");
+      const target =
+        owner?.querySelector(button.dataset.targetSelector || "") || owner;
+      target?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+          .matches
+          ? "auto"
+          : "smooth",
+        block: "start",
+      });
+    });
+    wrap.appendChild(button);
+  }
+  const button = wrap.querySelector(".cheese-search-section-top");
+  if (button.dataset.targetSelector !== targetSelector) {
+    button.dataset.targetSelector = targetSelector;
+  }
+  if (button.getAttribute("aria-label") !== label) {
+    button.setAttribute("aria-label", label);
+  }
+  if (button.title !== label) button.title = label;
+  if (wrap.classList.contains("is-fab") !== floating) {
+    wrap.classList.toggle("is-fab", floating);
+  }
+  if (floating) {
+    const enabled = String(Boolean(show));
+    if (wrap.dataset.fabEnabled !== enabled) {
+      wrap.dataset.fabEnabled = enabled;
+    }
+    bindSearchSectionTopFabSync();
+  } else {
+    if (wrap.hasAttribute("data-fab-enabled")) {
+      delete wrap.dataset.fabEnabled;
+    }
+    const hidden = !show;
+    if (wrap.hidden !== hidden) {
+      wrap.hidden = hidden;
+    }
+  }
+  // 결과 목록이나 더보기 래퍼가 다시 만들어져도 항상 섹션의 마지막에 둔다.
+  if (section.lastElementChild !== wrap) {
+    section.appendChild(wrap);
+  }
+  if (floating) scheduleSearchSectionTopFabSync();
+}
 
 // /search 페이지의 검색어(query 파라미터). 아니면 "".
 function getSearchRerankKeyword() {
@@ -14354,9 +14875,12 @@ function fillSearchRerankCard(li, item) {
 
 // 우리 리스트/컨트롤을 제거하고 네이티브를 원복한다.
 function cleanupSearchRerank() {
+  findSearchVideoSection()
+    ?.querySelector(":scope > .cheese-search-section-top-wrap")
+    ?.remove();
   document
     .querySelectorAll(
-      ".cheese-search-rerank-list, .cheese-search-rerank-bar, .cheese-search-rerank-more",
+      ".cheese-search-rerank-list, .cheese-search-rerank-bar, .cheese-search-rerank-more:not(.cheese-integrated-search-clips-more)",
     )
     .forEach((el) => el.remove());
   document
@@ -14402,6 +14926,672 @@ function bindSearchRerankPickerClose() {
   });
 }
 
+function renderSearchOptionsWeightFields(type, fields) {
+  return fields
+    .map(
+      ([key, label]) => `
+        <label class="cheese-search-options-field">
+          <span>${label}</span>
+          <input type="number" min="0" max="100" step="1" inputmode="numeric" data-search-options-${type}-weight="${key}">
+        </label>`,
+    )
+    .join("");
+}
+
+function renderSearchOptionsTrigger(type, label, alignRight = false) {
+  const videoWeights = [
+    ["rel", "제목"],
+    ["channel", "채널명"],
+    ["read", "조회수"],
+    ["pv", "라이브 시청자"],
+    ["verified", "파트너"],
+    ["recent", "최신성"],
+  ];
+  const clipWeights = [
+    ["title", "클립 제목"],
+    ["category", "카테고리"],
+    ["channel", "채널명"],
+    ["read", "조회수"],
+    ["verified", "파트너"],
+    ["recent", "최신성"],
+  ];
+  const body =
+    type === "video"
+      ? `
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">재정렬 최대 개수</span>
+          <div class="cheese-search-options-range">
+            <input type="range" min="50" max="1000" step="50" data-search-options-video-pool-slider>
+            <input type="number" min="50" max="1000" step="50" inputmode="numeric" data-search-options-video-pool>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">더보기 증가량</span>
+          <div class="cheese-search-options-range">
+            <input type="range" min="1" max="100" step="1" data-search-options-video-more-step-slider>
+            <input type="number" min="1" max="100" step="1" inputmode="numeric" data-search-options-video-more-step>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">다음 검색 기본 정렬</span>
+          <div class="cheese-search-options-segments is-five">
+            <button type="button" data-search-options-video-sort="score">추천순</button>
+            <button type="button" data-search-options-video-sort="read">인기순</button>
+            <button type="button" data-search-options-video-sort="pv">라이브</button>
+            <button type="button" data-search-options-video-sort="recent">최신순</button>
+            <button type="button" data-search-options-video-sort="original">원본순</button>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <div class="cheese-search-options-title-row">
+            <span class="cheese-search-options-title">추천순 점수 비중</span>
+            <button type="button" class="cheese-search-options-reset" data-search-options-video-reset>초기화</button>
+          </div>
+          <div class="cheese-search-options-fields">
+            ${renderSearchOptionsWeightFields("video", videoWeights)}
+          </div>
+        </section>`
+      : `
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">클립 클릭 동작<button type="button" class="cheese-search-options-info" data-search-options-info="clip-open" aria-label="클립 클릭 동작 안내" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg></button></span>
+          <div class="cheese-search-options-segments is-two">
+            <button type="button" data-search-options-clip-open="page">새 탭</button>
+            <button type="button" data-search-options-clip-open="play">바로 재생</button>
+          </div>
+          <div class="cheese-search-options-info-panel" data-search-options-info-panel="clip-open" hidden>
+            <strong>소리는 어떻게 나오나요?</strong>
+            <span><b>바로 재생</b>은 검색 화면 위 작은 창에서 재생되는데, 이때는 브라우저가 소리를 막기 때문에 <b>항상 음소거로 시작</b>합니다. 영상 오른쪽 위 <b>소리 켜기</b> 버튼을 누르면 소리가 나옵니다.</span>
+            <span><b>새 탭</b>으로 열면 클립 페이지가 따로 열려서, 아래 설정을 해두면 <b>처음부터 소리와 함께</b> 재생됩니다.</span>
+            <span><button type="button" class="cheese-search-options-code" data-search-options-open-settings="chrome://settings/content/sound" title="새 탭에서 열기">chrome://settings/content/sound</button> 을 열고 <b>소리 재생이 허용됨</b> 목록에 <button type="button" class="cheese-search-options-code" data-search-options-copy="https://chzzk.naver.com" title="클릭하여 복사">https://chzzk.naver.com</button> 을 추가하세요.</span>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">검색 후보 범위</span>
+          <div class="cheese-search-options-segments">
+            <button type="button" data-search-options-clip-match="strict">정확</button>
+            <button type="button" data-search-options-clip-match="balanced">균형</button>
+            <button type="button" data-search-options-clip-match="loose">넓게</button>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">날짜 범위</span>
+          <div class="cheese-search-options-segments is-four">
+            <button type="button" data-search-options-clip-date="all">전체</button>
+            <button type="button" data-search-options-clip-date="month">30일</button>
+            <button type="button" data-search-options-clip-date="week">7일</button>
+            <button type="button" data-search-options-clip-date="day">24시간</button>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">후보 개수</span>
+          <label class="cheese-search-options-limit">
+            <span>추천·관련 채널</span>
+            <div class="cheese-search-options-range">
+              <input type="range" min="50" max="100000" step="50" data-search-options-clip-limit-slider="candidate">
+              <input type="text" inputmode="numeric" autocomplete="off" pattern="[0-9,]*" maxlength="7" data-search-options-clip-limit="candidate" aria-label="추천 및 관련 채널 클립 후보 개수">
+            </div>
+          </label>
+          <label class="cheese-search-options-limit">
+            <span>관련 카테고리</span>
+            <div class="cheese-search-options-range">
+              <input type="range" min="50" max="100000" step="50" data-search-options-clip-limit-slider="category">
+              <input type="text" inputmode="numeric" autocomplete="off" pattern="[0-9,]*" maxlength="7" data-search-options-clip-limit="category" aria-label="관련 카테고리 클립 후보 개수">
+            </div>
+          </label>
+        </section>
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">더보기 증가량</span>
+          <div class="cheese-search-options-range">
+            <input type="range" min="1" max="100" step="1" data-search-options-clip-more-step-slider>
+            <input type="number" min="1" max="100" step="1" inputmode="numeric" data-search-options-clip-more-step>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <div class="cheese-search-options-title-row">
+            <span class="cheese-search-options-title">관련순 점수 비중</span>
+            <button type="button" class="cheese-search-options-reset" data-search-options-clip-reset>초기화</button>
+          </div>
+          <div class="cheese-search-options-fields">
+            ${renderSearchOptionsWeightFields("clip", clipWeights)}
+          </div>
+        </section>`;
+
+  return `
+    <div class="cheese-search-options${alignRight ? " is-align-right" : ""}" data-search-options="${type}">
+      <button type="button" class="cheese-search-options-trigger" data-search-options-trigger aria-label="${label}" title="${label}" aria-haspopup="dialog" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div class="cheese-search-options-popover" role="dialog" aria-label="${label}" hidden>
+        <header class="cheese-search-options-head">
+          <strong>${label}</strong>
+          <button type="button" class="cheese-search-options-close" data-search-options-close aria-label="닫기">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </header>
+        <div class="cheese-search-options-body">${body}</div>
+      </div>
+    </div>`;
+}
+
+function setSearchOptionsActive(root, selector, value, dataKey) {
+  root.querySelectorAll(selector).forEach((button) => {
+    const active = button.dataset[dataKey] === value;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function syncSearchOptionsPopover(root) {
+  const type = root?.dataset?.searchOptions;
+  if (type === "video") {
+    const pool = String(searchRerankPoolMax);
+    const poolInput = root.querySelector("[data-search-options-video-pool]");
+    const poolSlider = root.querySelector(
+      "[data-search-options-video-pool-slider]",
+    );
+    if (poolInput) poolInput.value = pool;
+    if (poolSlider) poolSlider.value = pool;
+    const moreStep = String(searchRerankMoreStep);
+    const moreStepInput = root.querySelector(
+      "[data-search-options-video-more-step]",
+    );
+    const moreStepSlider = root.querySelector(
+      "[data-search-options-video-more-step-slider]",
+    );
+    if (moreStepInput) moreStepInput.value = moreStep;
+    if (moreStepSlider) moreStepSlider.value = moreStep;
+    setSearchOptionsActive(
+      root,
+      "[data-search-options-video-sort]",
+      searchRerankDefaultSort,
+      "searchOptionsVideoSort",
+    );
+    root
+      .querySelectorAll("[data-search-options-video-weight]")
+      .forEach((input) => {
+        input.value = String(
+          searchRerankWeights[input.dataset.searchOptionsVideoWeight] ?? 0,
+        );
+      });
+    return;
+  }
+  if (type !== "clip") return;
+  setSearchOptionsActive(
+    root,
+    "[data-search-options-clip-open]",
+    integratedSearchClipDirectPlay ? "play" : "page",
+    "searchOptionsClipOpen",
+  );
+  setSearchOptionsActive(
+    root,
+    "[data-search-options-clip-match]",
+    integratedSearchClipMatchMode,
+    "searchOptionsClipMatch",
+  );
+  setSearchOptionsActive(
+    root,
+    "[data-search-options-clip-date]",
+    integratedSearchClipDateFilter,
+    "searchOptionsClipDate",
+  );
+  for (const [key, value] of [
+    ["candidate", integratedSearchClipCandidateLimit],
+    ["category", integratedSearchClipCategoryLimit],
+  ]) {
+    const input = root.querySelector(
+      `[data-search-options-clip-limit="${key}"]`,
+    );
+    const slider = root.querySelector(
+      `[data-search-options-clip-limit-slider="${key}"]`,
+    );
+    if (input) input.value = formatIntegratedSearchClipLimit(value);
+    if (slider) slider.value = String(value);
+  }
+  const moreStep = String(integratedSearchClipMoreStep);
+  const moreStepInput = root.querySelector(
+    "[data-search-options-clip-more-step]",
+  );
+  const moreStepSlider = root.querySelector(
+    "[data-search-options-clip-more-step-slider]",
+  );
+  if (moreStepInput) moreStepInput.value = moreStep;
+  if (moreStepSlider) moreStepSlider.value = moreStep;
+  root
+    .querySelectorAll("[data-search-options-clip-weight]")
+    .forEach((input) => {
+      input.value = String(
+        integratedSearchClipWeights[
+          input.dataset.searchOptionsClipWeight
+        ] ?? 0,
+      );
+    });
+}
+
+// 짧은 안내 토스트(복사 완료 등). 화면 하단 중앙에 잠깐 떴다 사라진다.
+const CHEESE_COPY_TOAST_ID = "cheese-copy-toast";
+let cheeseCopyToastTimer = 0;
+function showCheeseCopyToast(message) {
+  document.getElementById(CHEESE_COPY_TOAST_ID)?.remove();
+  if (cheeseCopyToastTimer) {
+    clearTimeout(cheeseCopyToastTimer);
+    cheeseCopyToastTimer = 0;
+  }
+  const toast = document.createElement("div");
+  toast.id = CHEESE_COPY_TOAST_ID;
+  toast.setAttribute("role", "status");
+  toast.textContent = String(message || "");
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("is-shown"));
+  cheeseCopyToastTimer = window.setTimeout(() => {
+    cheeseCopyToastTimer = 0;
+    toast.classList.remove("is-shown");
+    window.setTimeout(() => toast.remove(), 220);
+  }, 1600);
+}
+
+function closeSearchOptionsPopover(root) {
+  const popover = root?.querySelector(".cheese-search-options-popover");
+  const trigger = root?.querySelector("[data-search-options-trigger]");
+  if (popover) popover.hidden = true;
+  root?.classList.remove("is-open-up");
+  trigger?.setAttribute("aria-expanded", "false");
+  // 닫을 때 안내 패널도 접는다. 팝오버는 숨기기만 하고 재사용되므로, 접지 않으면
+  // 다음에 열었을 때 이전에 펼친 상태가 그대로 남는다.
+  root
+    ?.querySelectorAll("[data-search-options-info-panel]")
+    .forEach((panel) => {
+      panel.hidden = true;
+    });
+  root
+    ?.querySelectorAll("[data-search-options-info]")
+      .forEach((button) => button.setAttribute("aria-expanded", "false"));
+}
+
+function positionSearchOptionsPopover(root) {
+  const trigger = root?.querySelector("[data-search-options-trigger]");
+  const popover = root?.querySelector(".cheese-search-options-popover");
+  const body = popover?.querySelector(".cheese-search-options-body");
+  if (!trigger || !popover || popover.hidden) return;
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    root.classList.remove("is-open-up");
+    popover.style.removeProperty("max-height");
+    body?.style.removeProperty("max-height");
+    return;
+  }
+
+  const rect = trigger.getBoundingClientRect();
+  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 16);
+  const spaceAbove = Math.max(0, rect.top - 16);
+  const desiredHeight = Math.min(640, popover.scrollHeight || 640);
+  const openUp =
+    spaceBelow < Math.min(desiredHeight, 360) && spaceAbove > spaceBelow;
+  const available = openUp ? spaceAbove : spaceBelow;
+  const maxHeight = Math.max(140, Math.min(640, available));
+
+  root.classList.toggle("is-open-up", openUp);
+  popover.style.maxHeight = `${maxHeight}px`;
+  if (body) body.style.maxHeight = `${Math.max(88, maxHeight - 50)}px`;
+}
+
+let searchOptionsOutsideBound = false;
+function bindSearchOptionsOutsideClose() {
+  if (searchOptionsOutsideBound) return;
+  searchOptionsOutsideBound = true;
+  document.addEventListener("click", (event) => {
+    document
+      .querySelectorAll(
+        ".cheese-search-options-popover:not([hidden])",
+      )
+      .forEach((popover) => {
+        const root = popover.closest(".cheese-search-options");
+        if (!root?.contains(event.target)) closeSearchOptionsPopover(root);
+      });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document
+      .querySelectorAll(
+        ".cheese-search-options-popover:not([hidden])",
+      )
+      .forEach((popover) =>
+        closeSearchOptionsPopover(
+          popover.closest(".cheese-search-options"),
+        ),
+      );
+  });
+}
+
+function saveSearchOptionsWeights(root, type, explicitWeights = null) {
+  const selector = `[data-search-options-${type}-weight]`;
+  const raw = explicitWeights ? { ...explicitWeights } : {};
+  if (!explicitWeights) {
+    root.querySelectorAll(selector).forEach((input) => {
+      const key =
+        type === "video"
+          ? input.dataset.searchOptionsVideoWeight
+          : input.dataset.searchOptionsClipWeight;
+      raw[key] = input.value;
+    });
+  }
+  const normalized =
+    type === "video"
+      ? normalizeSearchRerankWeights(raw)
+      : normalizeIntegratedSearchClipWeights(raw);
+  try {
+    chrome.storage?.local?.set({
+      [type === "video"
+        ? SEARCH_RERANK_WEIGHTS_KEY
+        : SEARCH_CLIPS_WEIGHTS_KEY]: normalized,
+    });
+  } catch {}
+  root.querySelectorAll(selector).forEach((input) => {
+    const key =
+      type === "video"
+        ? input.dataset.searchOptionsVideoWeight
+        : input.dataset.searchOptionsClipWeight;
+    input.value = String(normalized[key] ?? 0);
+  });
+}
+
+function bindSearchOptionsPopover(root) {
+  if (!root || root.dataset.searchOptionsBound === "true") return;
+  root.dataset.searchOptionsBound = "true";
+  const type = root.dataset.searchOptions;
+  const popover = root.querySelector(".cheese-search-options-popover");
+  const trigger = root.querySelector("[data-search-options-trigger]");
+  trigger?.addEventListener("click", () => {
+    const open = popover?.hidden !== false;
+    document
+      .querySelectorAll(
+        ".cheese-search-options-popover:not([hidden])",
+      )
+      .forEach((other) =>
+        closeSearchOptionsPopover(
+          other.closest(".cheese-search-options"),
+        ),
+      );
+    if (!popover || !open) return;
+    syncSearchOptionsPopover(root);
+    popover.hidden = false;
+    positionSearchOptionsPopover(root);
+    trigger.setAttribute("aria-expanded", "true");
+  });
+  root
+    .querySelector("[data-search-options-close]")
+    ?.addEventListener("click", () => closeSearchOptionsPopover(root));
+
+  if (type === "video") {
+    const poolInput = root.querySelector("[data-search-options-video-pool]");
+    const poolSlider = root.querySelector(
+      "[data-search-options-video-pool-slider]",
+    );
+    poolSlider?.addEventListener("input", () => {
+      if (poolInput) poolInput.value = poolSlider.value;
+    });
+    const savePool = (value) => {
+      const normalized = normalizeSearchRerankPoolMax(value);
+      if (poolInput) poolInput.value = String(normalized);
+      if (poolSlider) poolSlider.value = String(normalized);
+      try {
+        chrome.storage?.local?.set({
+          [SEARCH_RERANK_POOL_KEY]: normalized,
+        });
+      } catch {}
+    };
+    poolSlider?.addEventListener("change", () =>
+      savePool(poolSlider.value),
+    );
+    poolInput?.addEventListener("change", () =>
+      savePool(poolInput.value),
+    );
+    const moreStepInput = root.querySelector(
+      "[data-search-options-video-more-step]",
+    );
+    const moreStepSlider = root.querySelector(
+      "[data-search-options-video-more-step-slider]",
+    );
+    moreStepSlider?.addEventListener("input", () => {
+      if (moreStepInput) moreStepInput.value = moreStepSlider.value;
+    });
+    const saveMoreStep = (value) => {
+      const normalized = normalizeSearchMoreStep(
+        value,
+        SEARCH_RERANK_MORE_STEP_DEFAULT,
+      );
+      searchRerankMoreStep = normalized;
+      if (moreStepInput) moreStepInput.value = String(normalized);
+      if (moreStepSlider) moreStepSlider.value = String(normalized);
+      try {
+        chrome.storage?.local?.set({
+          [SEARCH_RERANK_MORE_STEP_KEY]: normalized,
+        });
+      } catch {}
+    };
+    moreStepSlider?.addEventListener("change", () =>
+      saveMoreStep(moreStepSlider.value),
+    );
+    moreStepInput?.addEventListener("change", () =>
+      saveMoreStep(moreStepInput.value),
+    );
+    root.addEventListener("click", (event) => {
+      const sort = event.target.closest(
+        "[data-search-options-video-sort]",
+      );
+      if (sort) {
+        setSearchOptionsActive(
+          root,
+          "[data-search-options-video-sort]",
+          sort.dataset.searchOptionsVideoSort,
+          "searchOptionsVideoSort",
+        );
+        try {
+          chrome.storage?.local?.set({
+            [SEARCH_RERANK_DEFAULT_SORT_KEY]:
+              sort.dataset.searchOptionsVideoSort,
+          });
+        } catch {}
+      }
+      if (event.target.closest("[data-search-options-video-reset]")) {
+        saveSearchOptionsWeights(
+          root,
+          "video",
+          SEARCH_RERANK_WEIGHTS_DEFAULT,
+        );
+      }
+    });
+    root
+      .querySelectorAll("[data-search-options-video-weight]")
+      .forEach((input) => {
+        input.addEventListener("change", () =>
+          saveSearchOptionsWeights(root, "video"),
+        );
+      });
+  } else if (type === "clip") {
+    root.addEventListener("click", (event) => {
+      // 제목 옆 (i) 버튼 → 같은 키의 안내 패널 토글.
+      const infoButton = event.target.closest("[data-search-options-info]");
+      if (infoButton) {
+        event.preventDefault();
+        const panel = root.querySelector(
+          `[data-search-options-info-panel="${infoButton.dataset.searchOptionsInfo}"]`,
+        );
+        if (panel) {
+          const next = panel.hidden;
+          panel.hidden = !next;
+          infoButton.setAttribute("aria-expanded", String(next));
+        }
+        return;
+      }
+      // 안내 패널의 chrome:// 설정 링크 — 페이지에서는 못 여니 background 에 요청한다.
+      const openSettings = event.target.closest(
+        "[data-search-options-open-settings]",
+      );
+      if (openSettings) {
+        event.preventDefault();
+        try {
+          chrome.runtime.sendMessage({
+            type: "CHEESE_OPEN_SETTINGS_PAGE",
+            url: openSettings.dataset.searchOptionsOpenSettings,
+          });
+        } catch {}
+        return;
+      }
+      // 안내 패널의 주소 복사 버튼.
+      const copyTarget = event.target.closest("[data-search-options-copy]");
+      if (copyTarget) {
+        event.preventDefault();
+        const text = copyTarget.dataset.searchOptionsCopy || "";
+        const done = () => {
+          copyTarget.classList.add("is-copied");
+          window.setTimeout(
+            () => copyTarget.classList.remove("is-copied"),
+            1200,
+          );
+          showCheeseCopyToast("주소를 복사했습니다");
+        };
+        try {
+          navigator.clipboard.writeText(text).then(done, () => {});
+        } catch {}
+        return;
+      }
+      const openMode = event.target.closest(
+        "[data-search-options-clip-open]",
+      );
+      if (openMode) {
+        const direct =
+          openMode.dataset.searchOptionsClipOpen !== "page";
+        integratedSearchClipDirectPlay = direct;
+        if (!direct) closeIntegratedSearchClipPlayer();
+        setSearchOptionsActive(
+          root,
+          "[data-search-options-clip-open]",
+          direct ? "play" : "page",
+          "searchOptionsClipOpen",
+        );
+        try {
+          chrome.storage?.local?.set({
+            [SEARCH_CLIPS_DIRECT_PLAY_KEY]: direct,
+          });
+        } catch {}
+      }
+      const match = event.target.closest(
+        "[data-search-options-clip-match]",
+      );
+      if (match) {
+        setSearchOptionsActive(
+          root,
+          "[data-search-options-clip-match]",
+          match.dataset.searchOptionsClipMatch,
+          "searchOptionsClipMatch",
+        );
+        try {
+          chrome.storage?.local?.set({
+            [SEARCH_CLIPS_MATCH_MODE_KEY]:
+              match.dataset.searchOptionsClipMatch,
+          });
+        } catch {}
+      }
+      const date = event.target.closest(
+        "[data-search-options-clip-date]",
+      );
+      if (date) {
+        setSearchOptionsActive(
+          root,
+          "[data-search-options-clip-date]",
+          date.dataset.searchOptionsClipDate,
+          "searchOptionsClipDate",
+        );
+        try {
+          chrome.storage?.local?.set({
+            [SEARCH_CLIPS_DATE_FILTER_KEY]:
+              date.dataset.searchOptionsClipDate,
+          });
+        } catch {}
+      }
+      if (event.target.closest("[data-search-options-clip-reset]")) {
+        saveSearchOptionsWeights(
+          root,
+          "clip",
+          SEARCH_CLIPS_WEIGHTS_DEFAULT,
+        );
+      }
+    });
+    for (const key of ["candidate", "category"]) {
+      const input = root.querySelector(
+        `[data-search-options-clip-limit="${key}"]`,
+      );
+      const slider = root.querySelector(
+        `[data-search-options-clip-limit-slider="${key}"]`,
+      );
+      slider?.addEventListener("input", () => {
+        if (input) {
+          input.value = formatIntegratedSearchClipLimit(slider.value);
+        }
+      });
+      const saveLimit = (value) => {
+        const normalized = normalizeIntegratedSearchClipLimit(
+          value,
+          SEARCH_CLIPS_LIMIT_DEFAULT,
+        );
+        if (input) {
+          input.value = formatIntegratedSearchClipLimit(normalized);
+        }
+        if (slider) slider.value = String(normalized);
+        try {
+          chrome.storage?.local?.set({
+            [key === "candidate"
+              ? SEARCH_CLIPS_CANDIDATE_LIMIT_KEY
+              : SEARCH_CLIPS_CATEGORY_LIMIT_KEY]: normalized,
+          });
+        } catch {}
+      };
+      slider?.addEventListener("change", () =>
+        saveLimit(slider.value),
+      );
+      input?.addEventListener("change", () => saveLimit(input.value));
+    }
+    const moreStepInput = root.querySelector(
+      "[data-search-options-clip-more-step]",
+    );
+    const moreStepSlider = root.querySelector(
+      "[data-search-options-clip-more-step-slider]",
+    );
+    moreStepSlider?.addEventListener("input", () => {
+      if (moreStepInput) moreStepInput.value = moreStepSlider.value;
+    });
+    const saveMoreStep = (value) => {
+      const normalized = normalizeSearchMoreStep(
+        value,
+        SEARCH_CLIPS_MORE_STEP_DEFAULT,
+      );
+      integratedSearchClipMoreStep = normalized;
+      if (moreStepInput) moreStepInput.value = String(normalized);
+      if (moreStepSlider) moreStepSlider.value = String(normalized);
+      try {
+        chrome.storage?.local?.set({
+          [SEARCH_CLIPS_MORE_STEP_KEY]: normalized,
+        });
+      } catch {}
+    };
+    moreStepSlider?.addEventListener("change", () =>
+      saveMoreStep(moreStepSlider.value),
+    );
+    moreStepInput?.addEventListener("change", () =>
+      saveMoreStep(moreStepInput.value),
+    );
+    root
+      .querySelectorAll("[data-search-options-clip-weight]")
+      .forEach((input) => {
+        input.addEventListener("change", () =>
+          saveSearchOptionsWeights(root, "clip"),
+        );
+      });
+  }
+  bindSearchOptionsOutsideClose();
+}
+
 // 렌더(멱등): 네이티브 리스트/더보기 숨김 + 우리 바/리스트/더보기 보장.
 function renderSearchRerank() {
   const section = findSearchVideoSection();
@@ -14444,6 +15634,10 @@ function renderSearchRerank() {
           `<button type="button" role="option" aria-selected="false" data-rerank-sort="${o.value}">${o.label}</button>`,
       ).join("") +
       `</div></div>` +
+      renderSearchOptionsTrigger(
+        "video",
+        "동영상 재정렬 설정",
+      ) +
       // 재정렬 최대 개수 트레이드오프 안내(호버/포커스 시 툴팁).
       `<button type="button" class="cheese-search-rerank-info" aria-label="재정렬 안내">` +
       `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M7 6.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="3.9" r="0.9" fill="currentColor"/></svg>` +
@@ -14465,31 +15659,37 @@ function renderSearchRerank() {
       searchRerankState.visible = SEARCH_RERANK_INITIAL;
       renderSearchRerank();
     });
+    bindSearchOptionsPopover(
+      bar.querySelector('[data-search-options="video"]'),
+    );
     listWrap.before(bar);
     bindSearchRerankPickerClose();
   }
   updateSearchRerankPicker(bar);
 
-  // 우리 리스트(네이티브 ul 클래스 재사용). 시그니처 동일하면 재렌더 생략(멱등).
+  // 우리 리스트(네이티브 ul 클래스 재사용). 시그니처가 같으면 카드 복제만 생략하고
+  // 하단 컨트롤은 계속 동기화해 React 재렌더로 사라진 경우에도 복구한다.
   let ourList = section.querySelector("ul.cheese-search-rerank-list");
-  if (ourList && ourList.dataset.sig === sig) return;
+  const shouldRenderList = !ourList || ourList.dataset.sig !== sig;
   if (!ourList) {
     ourList = document.createElement("ul");
     ourList.className = `${listWrap.querySelector("ul")?.className || ""} cheese-search-rerank-list`;
     listWrap.after(ourList);
   }
-  ourList.dataset.sig = sig;
-  ourList.textContent = "";
-  const frag = document.createDocumentFragment();
-  for (const item of items.slice(0, visible)) {
-    const li = templateLi.cloneNode(true);
-    fillSearchRerankCard(li, item);
-    frag.appendChild(li);
+  if (shouldRenderList) {
+    ourList.dataset.sig = sig;
+    ourList.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const item of items.slice(0, visible)) {
+      const li = templateLi.cloneNode(true);
+      fillSearchRerankCard(li, item);
+      frag.appendChild(li);
+    }
+    ourList.appendChild(frag);
   }
-  ourList.appendChild(frag);
 
   // 더보기/접기 버튼. 네이티브 버튼을 클론해(svg 화살표·클래스 그대로) 스타일 통일.
-  // - 남은 항목 있음 → '더보기'(aria-expanded=false), 클릭 시 STEP 만큼 더 표시.
+  // - 남은 항목 있음 → '더보기'(aria-expanded=false), 클릭 시 설정 개수만큼 더 표시.
   // - 다 펼쳐짐(항목이 INITIAL 초과) → '접기'(aria-expanded=true), 클릭 시 INITIAL 로 축소.
   //   원본과 동일하게 svg 화살표는 aria-expanded 로 회전(CSS 로 보정).
   // - 항목이 INITIAL 이하(더보기 자체가 불필요) → 버튼 없음.
@@ -14509,7 +15709,7 @@ function renderSearchRerank() {
         const hasMore =
           searchRerankState.visible < searchRerankState.items.length;
         searchRerankState.visible = hasMore
-          ? searchRerankState.visible + SEARCH_RERANK_STEP
+          ? searchRerankState.visible + searchRerankMoreStep
           : SEARCH_RERANK_INITIAL;
         renderSearchRerank();
         // 접기 시 리스트 상단이 화면 밖이면 재정렬 바로 스크롤(원본 UX와 유사).
@@ -14540,6 +15740,12 @@ function renderSearchRerank() {
   } else {
     moreWrap?.remove();
   }
+  ensureSearchSectionTopButton(section, {
+    show: visible > SEARCH_RERANK_INITIAL,
+    targetSelector: ".cheese-search-rerank-bar",
+    label: "동영상 결과 맨 위로",
+    floating: true,
+  });
 }
 
 // init tick 마다 호출되는 멱등 보장 함수. 옵션 off/검색 페이지 아님 → 원복.
@@ -14582,6 +15788,1907 @@ function ensureSearchRerank() {
     .catch(() => {
       searchRerankState.fetching = false;
     });
+}
+
+// ── 통합검색(/search) 클립 결과 보강 ─────────────────────────────────────────
+// 치지직은 현재 통합검색에 클립을 제공하지 않고, 전역 클립 API도 검색어를 받지
+// 않는다. 최근 1일/7일 인기·추천 피드의 후보를 로컬 검색하고, 검색어와 강하게
+// 일치하는 채널이나 카테고리가 있으면 해당 클립을 보완한다. 결과가 전체 클립
+// 검색으로 오인되지 않도록 섹션에 사용한 후보 범위를 명시한다.
+const INTEGRATED_SEARCH_CLIPS_SECTION_CLASS =
+  "cheese-integrated-search-clips";
+const INTEGRATED_SEARCH_NATIVE_EMPTY_HIDDEN_CLASS =
+  "cheese-integrated-search-native-empty-hidden";
+const INTEGRATED_SEARCH_NATIVE_EMPTY_LAYOUT_CLASS =
+  "cheese-integrated-search-native-empty-layout";
+const INTEGRATED_SEARCH_NATIVE_EMPTY_ACTIVE_CLASS =
+  "cheese-integrated-search-clips-active";
+const INTEGRATED_SEARCH_CLIPS_INITIAL = 8;
+const INTEGRATED_SEARCH_CLIPS_API_PAGE_SIZE = 50;
+const INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES = Math.ceil(
+  SEARCH_CLIPS_LIMIT_MAX / INTEGRATED_SEARCH_CLIPS_API_PAGE_SIZE,
+);
+const INTEGRATED_SEARCH_CLIPS_MAX_CATEGORIES = 2;
+const INTEGRATED_SEARCH_CLIPS_CATEGORY_DISCOVERY_LIMIT = 300;
+const INTEGRATED_SEARCH_CLIPS_CACHE_TTL_MS = 10 * 60 * 1000;
+const INTEGRATED_SEARCH_CLIPS_EXHAUSTED_NOTICE =
+  "더 확인할 추천 클립이 없습니다.";
+const INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE =
+  "현재 수집한 추천·관련 채널·카테고리 클립에서는 일치하는 결과를 찾지 못했습니다.";
+const INTEGRATED_SEARCH_CLIP_FEEDS = Object.freeze([
+  { key: "day-popular", filterType: "WITHIN_1_DAY", orderType: "POPULAR" },
+  {
+    key: "day-recommend",
+    filterType: "WITHIN_1_DAY",
+    orderType: "RECOMMEND",
+  },
+  { key: "week-popular", filterType: "WITHIN_7_DAYS", orderType: "POPULAR" },
+  {
+    key: "week-recommend",
+    filterType: "WITHIN_7_DAYS",
+    orderType: "RECOMMEND",
+  },
+]);
+function getIntegratedSearchClipFeedDefinitions() {
+  if (integratedSearchClipDateFilter === "day") {
+    return INTEGRATED_SEARCH_CLIP_FEEDS.filter(
+      (feed) => feed.filterType === "WITHIN_1_DAY",
+    );
+  }
+  if (
+    integratedSearchClipDateFilter === "week" ||
+    integratedSearchClipDateFilter === "month"
+  ) {
+    return INTEGRATED_SEARCH_CLIP_FEEDS.filter(
+      (feed) => feed.filterType === "WITHIN_7_DAYS",
+    );
+  }
+  return INTEGRATED_SEARCH_CLIP_FEEDS;
+}
+const integratedSearchClipsState = {
+  keyword: "",
+  fetchedFor: "",
+  loading: false,
+  showSkeleton: false,
+  loadingMore: false,
+  allItems: [],
+  results: [],
+  feeds: [],
+  visible: INTEGRATED_SEARCH_CLIPS_INITIAL,
+  sort: "relevant",
+  error: "",
+  notice: "",
+  revision: 0,
+  controller: null,
+};
+let integratedSearchClipFeedCache = {
+  expiresAt: 0,
+  items: [],
+  feeds: [],
+};
+
+function updateIntegratedSearchClipFeedCacheMetadata(items) {
+  if (
+    integratedSearchClipFeedCache.expiresAt <= Date.now() ||
+    !integratedSearchClipFeedCache.items.length
+  ) {
+    return;
+  }
+  const byUid = new Map(
+    (Array.isArray(items) ? items : [])
+      .map((item) => [String(item?.clipUID || "").trim(), item])
+      .filter(([uid]) => uid),
+  );
+  if (!byUid.size) return;
+  integratedSearchClipFeedCache.items =
+    integratedSearchClipFeedCache.items.map((item) => {
+      const enriched = byUid.get(String(item?.clipUID || "").trim());
+      if (!enriched) return item;
+      return {
+        ...item,
+        clipCategoryValue:
+          enriched.clipCategoryValue || item.clipCategoryValue,
+        categoryValue: enriched.categoryValue || item.categoryValue,
+      };
+    });
+}
+const INTEGRATED_SEARCH_CLIP_PLAYER_ID =
+  "cheese-integrated-search-clip-player";
+let integratedSearchClipPlayerReturnFocus = null;
+
+function buildIntegratedSearchClipEmbedUrl(clipUID) {
+  const params = new URLSearchParams({
+    parent: location.hostname,
+    extension: "ChzzkPlatterSearch",
+    autoplay: "1",
+    muted: "0",
+  });
+  return `https://chzzk.naver.com/embed/clip/${encodeURIComponent(
+    clipUID,
+  )}?${params}`;
+}
+
+function buildIntegratedSearchClipPageUrl(clipUID, { autoplay = false } = {}) {
+  const url = new URL(
+    getClipUrl({ clipUID: String(clipUID || "").trim() }),
+  );
+  if (autoplay) url.searchParams.set(CLIP_PAGE_AUTOPLAY_PARAM, "1");
+  return url.toString();
+}
+
+function closeIntegratedSearchClipPlayer({ restoreFocus = true } = {}) {
+  const overlay = document.getElementById(
+    INTEGRATED_SEARCH_CLIP_PLAYER_ID,
+  );
+  if (!overlay) return;
+  const frame = overlay.querySelector("iframe");
+  try {
+    frame?.contentWindow?.postMessage(
+      {
+        source: "cheese-platter-cafe-clip-playback",
+        action: "release",
+      },
+      "https://chzzk.naver.com",
+    );
+  } catch {}
+  overlay.remove();
+  document.documentElement.classList.remove(
+    "cheese-search-clip-player-open",
+  );
+  document.documentElement.style.removeProperty("--cheese-scrollbar-gap");
+  document.removeEventListener(
+    "keydown",
+    handleIntegratedSearchClipPlayerKeydown,
+  );
+  if (
+    restoreFocus &&
+    integratedSearchClipPlayerReturnFocus?.isConnected
+  ) {
+    integratedSearchClipPlayerReturnFocus.focus({ preventScroll: true });
+  }
+  integratedSearchClipPlayerReturnFocus = null;
+}
+
+function handleIntegratedSearchClipPlayerKeydown(event) {
+  if (event.key === "Escape") closeIntegratedSearchClipPlayer();
+}
+
+function openIntegratedSearchClipPlayer(clipUID, title, trigger) {
+  const normalizedUID = String(clipUID || "").trim();
+  if (!normalizedUID) return;
+  closeIntegratedSearchClipPlayer({ restoreFocus: false });
+  integratedSearchClipPlayerReturnFocus = trigger || null;
+
+  const overlay = document.createElement("div");
+  overlay.id = INTEGRATED_SEARCH_CLIP_PLAYER_ID;
+  overlay.className = "cheese-search-clip-player-overlay";
+  overlay.innerHTML = `
+    <div class="cheese-search-clip-player-dialog" role="dialog" aria-modal="true" aria-labelledby="cheese-search-clip-player-title">
+      <header class="cheese-search-clip-player-head">
+        <strong id="cheese-search-clip-player-title">${escapeHtml(title || "클립 재생")}</strong>
+        <div class="cheese-search-clip-player-actions">
+          <a href="${escapeAttribute(buildIntegratedSearchClipPageUrl(normalizedUID, { autoplay: true }))}" target="_blank" rel="noreferrer" aria-label="클립 페이지를 새 탭에서 열기" title="새 탭에서 열기">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg>
+          </a>
+          <button type="button" data-integrated-search-clip-player-close aria-label="닫기" title="닫기">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div class="cheese-search-clip-player-frame-wrap">
+        <iframe src="${escapeAttribute(buildIntegratedSearchClipEmbedUrl(normalizedUID))}" title="${escapeAttribute(title || "치지직 클립 플레이어")}" allow="autoplay; fullscreen; picture-in-picture"></iframe>
+      </div>
+    </div>`;
+  overlay.addEventListener("click", (event) => {
+    if (
+      event.target === overlay ||
+      event.target.closest("[data-integrated-search-clip-player-close]")
+    ) {
+      closeIntegratedSearchClipPlayer();
+    }
+  });
+  document.body.appendChild(overlay);
+  // 스크롤바가 사라지며 생기는 가로 이동을 막는다(잠그기 직전 폭을 재서 padding 보정).
+  const scrollbarGap = window.innerWidth - document.documentElement.clientWidth;
+  document.documentElement.style.setProperty(
+    "--cheese-scrollbar-gap",
+    `${Math.max(0, scrollbarGap)}px`,
+  );
+  document.documentElement.classList.add(
+    "cheese-search-clip-player-open",
+  );
+  document.addEventListener(
+    "keydown",
+    handleIntegratedSearchClipPlayerKeydown,
+  );
+  overlay
+    .querySelector("[data-integrated-search-clip-player-close]")
+    ?.focus({ preventScroll: true });
+}
+
+function cloneIntegratedSearchClipFeeds(feeds) {
+  return (Array.isArray(feeds) ? feeds : []).map((feed) => ({ ...feed }));
+}
+
+function getIntegratedSearchClipFeedNext(json) {
+  return String(json?.content?.page?.next?.next || "").trim();
+}
+
+function getIntegratedSearchClipCursorNext(json) {
+  const next = json?.content?.page?.next;
+  const clipUID = String(next?.clipUID || "").trim();
+  return clipUID
+    ? { clipUID, readCount: next?.readCount ?? "" }
+    : null;
+}
+
+function buildIntegratedSearchClipFeedUrl(feed, next = "") {
+  const url = new URL(
+    "https://api.chzzk.naver.com/service/v1/home/recommended/clips",
+  );
+  url.searchParams.set("next", next);
+  url.searchParams.set("filterType", feed.filterType);
+  url.searchParams.set("orderType", feed.orderType);
+  return url.toString();
+}
+
+async function fetchIntegratedSearchClipJson(url, signal) {
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function fetchInitialIntegratedSearchClipFeeds(
+  signal,
+  candidateLimit = integratedSearchClipCandidateLimit,
+) {
+  if (
+    integratedSearchClipFeedCache.expiresAt > Date.now() &&
+    integratedSearchClipFeedCache.items.length
+  ) {
+    return {
+      items: integratedSearchClipFeedCache.items.map((item) => ({ ...item })),
+      feeds: cloneIntegratedSearchClipFeeds(
+        integratedSearchClipFeedCache.feeds,
+      ),
+    };
+  }
+
+  const feedDefinitions = getIntegratedSearchClipFeedDefinitions();
+  const effectiveCandidateLimit = Math.max(
+    1,
+    Math.min(
+      integratedSearchClipCandidateLimit,
+      Number(candidateLimit) || integratedSearchClipCandidateLimit,
+    ),
+  );
+  const feedTarget = Math.max(
+    1,
+    Math.ceil(
+      (effectiveCandidateLimit * 0.6) /
+        feedDefinitions.length,
+    ),
+  );
+  const settled = await Promise.allSettled(
+    feedDefinitions.map(async (definition, feedIndex) => {
+      const items = [];
+      const seen = new Set();
+      const requestedCursors = new Set();
+      let next = "";
+      let page = 0;
+
+      while (
+        items.length < feedTarget &&
+        page < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES
+      ) {
+        if (requestedCursors.has(next)) break;
+        requestedCursors.add(next);
+        let json;
+        try {
+          json = await fetchIntegratedSearchClipJson(
+            buildIntegratedSearchClipFeedUrl(definition, next),
+            signal,
+          );
+        } catch (error) {
+          if (!items.length) throw error;
+          break;
+        }
+        const data = Array.isArray(json?.content?.data)
+          ? json.content.data
+          : [];
+        for (const clip of data) {
+          const uid = String(clip?.clipUID || "").trim();
+          if (!uid || seen.has(uid)) continue;
+          seen.add(uid);
+          items.push(clip);
+          if (items.length >= feedTarget) break;
+        }
+        page += 1;
+        const nextCursor = getIntegratedSearchClipFeedNext(json);
+        if (!nextCursor || nextCursor === next) {
+          next = "";
+          break;
+        }
+        next = nextCursor;
+      }
+
+      return {
+        feed: { ...definition, next, page },
+        items: items.map((clip, itemIndex) => ({
+          ...clip,
+          __integratedSearchSourceRank: feedIndex * 10000 + itemIndex,
+        })),
+      };
+    }),
+  );
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const fulfilled = settled
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
+  if (!fulfilled.length) {
+    throw new Error("추천 클립 피드를 불러오지 못했습니다.");
+  }
+
+  const items = fulfilled.flatMap((result) => result.items);
+  const feeds = fulfilled.map((result) => result.feed);
+  // 네 피드 중 일부만 성공한 응답을 캐시하면 이후 검색도 누락된 후보만 보게 된다.
+  // 부분 성공은 현재 화면에서 사용하되, 전체 성공일 때만 10분 캐시한다.
+  if (
+    effectiveCandidateLimit >= integratedSearchClipCandidateLimit &&
+    fulfilled.length === feedDefinitions.length
+  ) {
+    integratedSearchClipFeedCache = {
+      expiresAt: Date.now() + INTEGRATED_SEARCH_CLIPS_CACHE_TTL_MS,
+      items: items.map((item) => ({ ...item })),
+      feeds: cloneIntegratedSearchClipFeeds(feeds),
+    };
+  }
+  return { items, feeds };
+}
+
+function scoreIntegratedSearchClipChannel(channelName, keyword) {
+  const name = normalizeSearchRerankText(channelName);
+  const phrase = normalizeSearchRerankText(keyword);
+  if (!name || phrase.length < 2) return 0;
+  if (name === phrase) return 3;
+  if (name.startsWith(phrase)) return 2;
+  if (name.includes(phrase)) return 1;
+  return 0;
+}
+
+async function fetchRelatedChannelClipsForIntegratedSearch(
+  keyword,
+  signal,
+  candidateLimit = integratedSearchClipCandidateLimit,
+) {
+  const phrase = normalizeSearchRerankText(keyword);
+  if (phrase.length < 2) return [];
+
+  const channelUrl = new URL(
+    "https://api.chzzk.naver.com/service/v1/search/channels",
+  );
+  channelUrl.searchParams.set("keyword", keyword);
+  channelUrl.searchParams.set("offset", "0");
+  channelUrl.searchParams.set("size", "10");
+  const channelJson = await fetchIntegratedSearchClipJson(
+    channelUrl.toString(),
+    signal,
+  );
+  const channels = (Array.isArray(channelJson?.content?.data)
+    ? channelJson.content.data
+    : []
+  )
+    .map((item) => item?.channel)
+    .filter((channel) => channel?.channelId)
+    .map((channel) => ({
+      channel,
+      score: scoreIntegratedSearchClipChannel(channel.channelName, keyword),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        (Number(b.channel.followerCount) || 0) -
+          (Number(a.channel.followerCount) || 0),
+    )
+    .slice(0, 3);
+  if (!channels.length) return [];
+
+  const effectiveCandidateLimit = Math.max(
+    1,
+    Math.min(
+      integratedSearchClipCandidateLimit,
+      Number(candidateLimit) || integratedSearchClipCandidateLimit,
+    ),
+  );
+  const channelTarget = Math.max(
+    1,
+    Math.ceil(
+      (effectiveCandidateLimit * 0.4) / channels.length,
+    ),
+  );
+  const settled = await Promise.allSettled(
+    channels.map(async ({ channel }, channelIndex) => {
+      const items = [];
+      const seen = new Set();
+      const requestedCursors = new Set();
+      let cursor = { clipUID: "", readCount: "" };
+      let page = 0;
+
+      while (
+        items.length < channelTarget &&
+        page < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES
+      ) {
+        const cursorKey = `${cursor.clipUID}:${cursor.readCount}`;
+        if (requestedCursors.has(cursorKey)) break;
+        requestedCursors.add(cursorKey);
+        const url = new URL(
+          `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channel.channelId)}/clips`,
+        );
+        url.searchParams.set("clipUID", cursor.clipUID);
+        url.searchParams.set(
+          "filterType",
+          getIntegratedSearchClipApiFilterType(),
+        );
+        url.searchParams.set("orderType", "RECENT");
+        url.searchParams.set(
+          "size",
+          String(
+            Math.min(
+              INTEGRATED_SEARCH_CLIPS_API_PAGE_SIZE,
+              channelTarget - items.length,
+            ),
+          ),
+        );
+        url.searchParams.set("readCount", String(cursor.readCount));
+        let json;
+        try {
+          json = await fetchIntegratedSearchClipJson(
+            url.toString(),
+            signal,
+          );
+        } catch (error) {
+          if (!items.length) throw error;
+          break;
+        }
+        const data = Array.isArray(json?.content?.data)
+          ? json.content.data
+          : [];
+        for (const clip of data) {
+          const uid = String(clip?.clipUID || "").trim();
+          if (!uid || seen.has(uid)) continue;
+          seen.add(uid);
+          items.push(clip);
+        }
+        page += 1;
+        const next = getIntegratedSearchClipCursorNext(json);
+        if (!next) break;
+        cursor = next;
+      }
+
+      return items.slice(0, channelTarget).map((clip, itemIndex) => ({
+        ...clip,
+        ownerChannelId: clip?.ownerChannelId || channel.channelId,
+        ownerChannel: clip?.ownerChannel || channel,
+        __integratedSearchSourceRank:
+          -100000 + channelIndex * 1000 + itemIndex,
+      }));
+    }),
+  );
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return settled
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => result.value);
+}
+
+function mergeIntegratedSearchClipItems(...groups) {
+  const byUid = new Map();
+  let fallbackIndex = 0;
+  for (const item of groups.flat()) {
+    const uid = String(item?.clipUID || "").trim();
+    if (!uid) continue;
+    const existing = byUid.get(uid);
+    if (!existing) {
+      byUid.set(uid, {
+        ...item,
+        __integratedSearchOriginalIndex: fallbackIndex++,
+      });
+      continue;
+    }
+    byUid.set(uid, {
+      ...existing,
+      ...item,
+      ownerChannel: item?.ownerChannel || existing.ownerChannel,
+      __integratedSearchOriginalIndex:
+        existing.__integratedSearchOriginalIndex,
+      __integratedSearchSourceRank: Math.min(
+        Number(existing.__integratedSearchSourceRank) || 0,
+        Number(item.__integratedSearchSourceRank) || 0,
+      ),
+    });
+  }
+  return [...byUid.values()];
+}
+
+function getIntegratedSearchClipChannelName(clip) {
+  return String(clip?.ownerChannel?.channelName || "").trim();
+}
+
+function getIntegratedSearchClipTime(clip) {
+  const raw = String(clip?.createdDate || "").trim();
+  if (!raw) return 0;
+  const parsed = Date.parse(raw.replace(" ", "T"));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getIntegratedSearchClipCategoryKey(clip) {
+  const categoryType = String(clip?.categoryType || "").trim();
+  const clipCategory = String(clip?.clipCategory || "").trim();
+  return categoryType && clipCategory
+    ? `${categoryType}:${clipCategory}`
+    : "";
+}
+
+function hasResolvedIntegratedSearchClipCategoryValue(clip) {
+  const categoryValue = String(
+    clip?.clipCategoryValue || clip?.categoryValue || "",
+  ).trim();
+  const categoryId = String(clip?.clipCategory || "").trim();
+  return Boolean(
+    categoryValue && (!categoryId || categoryValue !== categoryId),
+  );
+}
+
+async function enrichIntegratedSearchClipCategories(clips, signal) {
+  const items = Array.isArray(clips) ? clips : [];
+  const categories = new Map();
+  for (const clip of items) {
+    if (hasResolvedIntegratedSearchClipCategoryValue(clip)) continue;
+    const key = getIntegratedSearchClipCategoryKey(clip);
+    if (!key || categories.has(key)) continue;
+    categories.set(key, {
+      categoryType: String(clip.categoryType || "").trim(),
+      clipCategory: String(clip.clipCategory || "").trim(),
+    });
+  }
+  if (!categories.size || signal?.aborted) return items;
+
+  try {
+    const enriched = await sendMessage({
+      type: "CHEESE_SEARCH_ENRICH_CLIP_CATEGORIES",
+      payload: { categories: [...categories.values()] },
+    });
+    if (signal?.aborted || !Array.isArray(enriched)) return items;
+    const categoryValues = new Map(
+      enriched
+        .map((category) => {
+          const key = getIntegratedSearchClipCategoryKey(category);
+          const value = String(category?.categoryValue || "").trim();
+          return key && value ? [key, value] : null;
+        })
+        .filter(Boolean),
+    );
+    if (!categoryValues.size) return items;
+    return items.map((clip) => {
+      if (hasResolvedIntegratedSearchClipCategoryValue(clip)) return clip;
+      const categoryValue = categoryValues.get(
+        getIntegratedSearchClipCategoryKey(clip),
+      );
+      return categoryValue
+        ? { ...clip, clipCategoryValue: categoryValue, categoryValue }
+        : clip;
+    });
+  } catch {
+    return items;
+  }
+}
+
+function scoreIntegratedSearchClipCategory(category, keyword) {
+  const phrase = normalizeSearchRerankText(keyword);
+  if (!phrase) return 0;
+  const names = [
+    category?.categoryValue,
+    category?.clipCategory,
+  ]
+    .map(normalizeSearchRerankText)
+    .filter(Boolean);
+  if (names.some((name) => name === phrase)) return 4;
+  if (
+    phrase.length > 1 &&
+    names.some(
+      (name) => name.startsWith(phrase) || phrase.startsWith(name),
+    )
+  ) {
+    return 3;
+  }
+  if (
+    phrase.length > 1 &&
+    names.some((name) => name.includes(phrase) || phrase.includes(name))
+  ) {
+    return 2;
+  }
+  const tokens = phrase.split(" ").filter(Boolean);
+  return tokens.length &&
+    tokens.every((token) => names.some((name) => name.includes(token)))
+    ? 1
+    : 0;
+}
+
+function parseIntegratedSearchClipQuery(keyword) {
+  const source = String(keyword || "").trim();
+  const categoryTerms = [];
+  const textKeyword = source
+    .replace(
+      /(^|\s)(?:@(?:"([^"]*)"|'([^']*)'|([^\s()|]+))|(?:category|cat|카테고리):(?:"([^"]*)"|'([^']*)'|([^\s()|]+)))(?=\s|$|[()|])/gi,
+      (
+        _match,
+        leadingSpace,
+        atDoubleQuoted,
+        atSingleQuoted,
+        atBare,
+        fieldDoubleQuoted,
+        fieldSingleQuoted,
+        fieldBare,
+      ) => {
+        const category = [
+          atDoubleQuoted,
+          atSingleQuoted,
+          atBare,
+          fieldDoubleQuoted,
+          fieldSingleQuoted,
+          fieldBare,
+        ]
+          .map((value) => String(value || "").trim())
+          .find(Boolean);
+        const normalized = normalizeSearchRerankText(category);
+        if (normalized && !categoryTerms.includes(normalized)) {
+          categoryTerms.push(normalized);
+        }
+        return leadingSpace || "";
+      },
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  const phrase = normalizeSearchRerankText(textKeyword);
+  return {
+    source,
+    textKeyword,
+    phrase,
+    tokens: phrase.split(" ").filter(Boolean),
+    categoryTerms,
+  };
+}
+
+function getIntegratedSearchClipCategoryMatchScore(clip, categoryTerms) {
+  if (!categoryTerms.length) return 0;
+  const names = [
+    clip?.clipCategoryValue,
+    clip?.categoryValue,
+    clip?.clipCategory,
+  ]
+    .map(normalizeSearchRerankText)
+    .filter(Boolean);
+  if (!names.length) return 0;
+
+  let total = 0;
+  for (const term of categoryTerms) {
+    let best = 0;
+    for (const name of names) {
+      if (name === term) {
+        best = Math.max(best, 1);
+      } else if (name.startsWith(term) || term.startsWith(name)) {
+        best = Math.max(best, 0.9);
+      } else if (name.includes(term) || term.includes(name)) {
+        best = Math.max(best, 0.8);
+      }
+    }
+    if (!best) return 0;
+    total += best;
+  }
+  return total / categoryTerms.length;
+}
+
+function findIntegratedSearchClipCategoryMatches(clips, keyword) {
+  const query = parseIntegratedSearchClipQuery(keyword);
+  const byKey = new Map();
+  // @카테고리가 있으면 일반 검색어와 무관하게 해당 카테고리를 먼저 확정한다.
+  // 이후 카테고리 API에서 가져온 클립에 일반 검색어를 적용한다.
+  for (const clip of Array.isArray(clips) ? clips : []) {
+    const categoryType = String(clip?.categoryType || "").trim();
+    const clipCategory = String(clip?.clipCategory || "").trim();
+    if (!categoryType || !clipCategory) continue;
+    const key = `${categoryType}:${clipCategory}`;
+    const categoryValue = getClipCategoryLabel(clip);
+    const explicitCategoryScore = getIntegratedSearchClipCategoryMatchScore(
+      clip,
+      query.categoryTerms,
+    );
+    let clipScore = 0;
+    let categoryScore = explicitCategoryScore;
+    if (query.categoryTerms.length) {
+      if (!explicitCategoryScore) continue;
+    } else {
+      clipScore = scoreIntegratedSearchClip(clip, query);
+      if (clipScore == null) continue;
+      categoryScore = scoreIntegratedSearchClipCategory(
+        { categoryValue, clipCategory },
+        keyword,
+      );
+    }
+    const existing = byKey.get(key);
+    byKey.set(key, {
+      categoryType,
+      clipCategory,
+      categoryValue,
+      categoryScore: Math.max(
+        categoryScore,
+        Number(existing?.categoryScore) || 0,
+      ),
+      occurrences: (Number(existing?.occurrences) || 0) + 1,
+      relevance: (Number(existing?.relevance) || 0) + clipScore,
+    });
+  }
+  return [...byKey.values()]
+    .sort((a, b) =>
+      query.categoryTerms.length
+        ? b.categoryScore - a.categoryScore ||
+          b.occurrences - a.occurrences ||
+          a.categoryValue.localeCompare(b.categoryValue, "ko")
+        : b.occurrences - a.occurrences ||
+          b.relevance - a.relevance ||
+          b.categoryScore - a.categoryScore ||
+          a.categoryValue.localeCompare(b.categoryValue, "ko"),
+    )
+    .slice(0, INTEGRATED_SEARCH_CLIPS_MAX_CATEGORIES);
+}
+
+async function fetchRelatedCategoryClipsForIntegratedSearch(
+  clips,
+  keyword,
+  signal,
+) {
+  const categories = findIntegratedSearchClipCategoryMatches(clips, keyword);
+  if (!categories.length || signal?.aborted) return [];
+
+  const categoryTarget = Math.max(
+    1,
+    Math.ceil(integratedSearchClipCategoryLimit / categories.length),
+  );
+  const settled = await Promise.allSettled(
+    categories.map(async (category, categoryIndex) => {
+      const items = [];
+      const seen = new Set();
+      const requestedCursors = new Set();
+      let cursor = { clipUID: "", readCount: "" };
+      let page = 0;
+
+      while (
+        items.length < categoryTarget &&
+        page < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES
+      ) {
+        const cursorKey = `${cursor.clipUID}:${cursor.readCount}`;
+        if (requestedCursors.has(cursorKey)) break;
+        requestedCursors.add(cursorKey);
+        const url = new URL(
+          `https://api.chzzk.naver.com/service/v1/categories/${encodeURIComponent(category.categoryType)}/${encodeURIComponent(category.clipCategory)}/clips`,
+        );
+        url.searchParams.set("clipUID", cursor.clipUID);
+        url.searchParams.set(
+          "filterType",
+          getIntegratedSearchClipApiFilterType(),
+        );
+        url.searchParams.set("orderType", "POPULAR");
+        url.searchParams.set(
+          "size",
+          String(
+            Math.min(
+              INTEGRATED_SEARCH_CLIPS_API_PAGE_SIZE,
+              categoryTarget - items.length,
+            ),
+          ),
+        );
+        url.searchParams.set("readCount", String(cursor.readCount));
+        let json;
+        try {
+          json = await fetchIntegratedSearchClipJson(
+            url.toString(),
+            signal,
+          );
+        } catch (error) {
+          if (!items.length) throw error;
+          break;
+        }
+        const data = Array.isArray(json?.content?.data)
+          ? json.content.data
+          : [];
+        for (const clip of data) {
+          const uid = String(clip?.clipUID || "").trim();
+          if (!uid || seen.has(uid)) continue;
+          seen.add(uid);
+          items.push(clip);
+        }
+        page += 1;
+        const next = getIntegratedSearchClipCursorNext(json);
+        if (!next) break;
+        cursor = next;
+      }
+
+      return items.slice(0, categoryTarget).map((clip, itemIndex) => ({
+        ...clip,
+        categoryType: clip?.categoryType || category.categoryType,
+        clipCategory: clip?.clipCategory || category.clipCategory,
+        clipCategoryValue: category.categoryValue,
+        categoryValue: category.categoryValue,
+        __integratedSearchCategorySource: true,
+        __integratedSearchSourceRank:
+          -50000 + categoryIndex * 1000 + itemIndex,
+      }));
+    }),
+  );
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return settled
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => result.value);
+}
+
+function scoreIntegratedSearchClip(clip, query) {
+  const { tokens, phrase, categoryTerms } = query;
+  const title = normalizeSearchRerankText(clip?.clipTitle);
+  const channel = normalizeSearchRerankText(
+    getIntegratedSearchClipChannelName(clip),
+  );
+  const category = normalizeSearchRerankText(getClipCategoryLabel(clip));
+  const categoryMatchScore = getIntegratedSearchClipCategoryMatchScore(
+    clip,
+    categoryTerms,
+  );
+  if (categoryTerms.length && !categoryMatchScore) return null;
+
+  // @카테고리는 후보 범위를 정하는 조건이므로 남은 일반어는 제목·채널명에서
+  // 찾는다. 카테고리명이 일반어까지 대신 만족시키는 일을 막는다.
+  const fields = (
+    categoryTerms.length ? [title, channel] : [title, category, channel]
+  ).filter(Boolean);
+  const matchedTokenCount = tokens.filter((token) =>
+    fields.some((field) => field.includes(token)),
+  ).length;
+  const allTokensMatched =
+    tokens.length > 0 && matchedTokenCount === tokens.length;
+  const allTokensInOneField =
+    tokens.length > 0 &&
+    fields.some((field) => tokens.every((token) => field.includes(token)));
+  const phraseMatched =
+    phrase.length > 0 && fields.some((field) => field.includes(phrase));
+  let eligible = tokens.length ? allTokensMatched : categoryTerms.length > 0;
+  if (integratedSearchClipMatchMode === "strict") {
+    eligible = tokens.length
+      ? tokens.length === 1
+        ? fields.some(
+            (field) => field === phrase || field.startsWith(phrase),
+          )
+        : phraseMatched || allTokensInOneField
+      : categoryTerms.length > 0;
+  } else if (integratedSearchClipMatchMode === "loose") {
+    eligible = tokens.length
+      ? phrase.length === 1
+        ? fields.some(
+            (field) => field === phrase || field.startsWith(phrase),
+          )
+        : matchedTokenCount > 0
+      : categoryTerms.length > 0;
+  }
+  if (!eligible) return null;
+
+  const scoreField = (field) => {
+    if (!field) return 0;
+    if (field === phrase) return 1;
+    if (phrase && field.startsWith(phrase)) return 0.9;
+    if (phrase && field.includes(phrase)) return 0.8;
+    const matched = tokens.filter((token) => field.includes(token)).length;
+    return tokens.length ? (matched / tokens.length) * 0.65 : 0;
+  };
+  const popularity = Math.min(
+    1,
+    Math.log10(1 + (Number(clip?.readCount) || 0)) / 6,
+  );
+  const ageDays =
+    (Date.now() - getIntegratedSearchClipTime(clip)) / 86400000;
+  const recent = Math.max(0, Math.min(1, (30 - ageDays) / 30));
+  const verified = clip?.ownerChannel?.verifiedMark === true ? 1 : 0;
+  const categoryRelevance = categoryTerms.length
+    ? categoryMatchScore
+    : scoreField(category);
+  return (
+    scoreField(title) * integratedSearchClipWeights.title +
+    categoryRelevance * integratedSearchClipWeights.category +
+    scoreField(channel) * integratedSearchClipWeights.channel +
+    popularity * integratedSearchClipWeights.read +
+    verified * integratedSearchClipWeights.verified +
+    recent * integratedSearchClipWeights.recent
+  );
+}
+
+function rebuildIntegratedSearchClipResults() {
+  const query = parseIntegratedSearchClipQuery(
+    integratedSearchClipsState.keyword,
+  );
+  integratedSearchClipsState.results = integratedSearchClipsState.allItems
+    .map((clip) => {
+      const score = scoreIntegratedSearchClip(clip, query);
+      return score == null
+        ? null
+        : {
+            ...clip,
+            __integratedSearch: true,
+            __integratedSearchScore: score,
+            __integratedSearchCategoryPriority:
+              query.categoryTerms.length &&
+              clip.__integratedSearchCategorySource
+                ? 1
+                : 0,
+          };
+    })
+    .filter(Boolean);
+  integratedSearchClipsState.revision++;
+}
+
+function sortedIntegratedSearchClipResults() {
+  const results = integratedSearchClipsState.results.slice();
+  if (integratedSearchClipsState.sort === "popular") {
+    results.sort(
+      (a, b) =>
+        (Number(b?.readCount) || 0) - (Number(a?.readCount) || 0) ||
+        b.__integratedSearchScore - a.__integratedSearchScore,
+    );
+  } else if (integratedSearchClipsState.sort === "recent") {
+    results.sort(
+      (a, b) =>
+        getIntegratedSearchClipTime(b) - getIntegratedSearchClipTime(a) ||
+        b.__integratedSearchScore - a.__integratedSearchScore,
+    );
+  } else {
+    results.sort(
+      (a, b) =>
+        b.__integratedSearchCategoryPriority -
+          a.__integratedSearchCategoryPriority ||
+        b.__integratedSearchScore - a.__integratedSearchScore ||
+        (Number(b?.readCount) || 0) - (Number(a?.readCount) || 0) ||
+        a.__integratedSearchOriginalIndex -
+          b.__integratedSearchOriginalIndex,
+    );
+  }
+  return results;
+}
+
+function findIntegratedSearchNativeEmptySection() {
+  if (location.pathname !== "/search") return null;
+  const sections = document.querySelectorAll("#layout-body section");
+  return (
+    [...sections].find((section) => {
+      if (
+        section.classList.contains(INTEGRATED_SEARCH_CLIPS_SECTION_CLASS) ||
+        !section.querySelector('i[class*="_image_search_"]')
+      ) {
+        return false;
+      }
+      return /검색 결과가 없습니다/.test(section.textContent || "");
+    }) || null
+  );
+}
+
+function setIntegratedSearchNativeEmptyHidden(hidden) {
+  document.documentElement.classList.toggle(
+    INTEGRATED_SEARCH_NATIVE_EMPTY_ACTIVE_CLASS,
+    hidden,
+  );
+  const current = findIntegratedSearchNativeEmptySection();
+  document
+    .querySelectorAll(
+      `#layout-body section.${INTEGRATED_SEARCH_NATIVE_EMPTY_HIDDEN_CLASS}`,
+    )
+    .forEach((section) => {
+      if (section !== current) {
+        section.classList.remove(
+          INTEGRATED_SEARCH_NATIVE_EMPTY_HIDDEN_CLASS,
+        );
+      }
+    });
+  current?.classList.toggle(
+    INTEGRATED_SEARCH_NATIVE_EMPTY_HIDDEN_CLASS,
+    hidden,
+  );
+}
+
+function findIntegratedSearchClipsMount() {
+  if (location.pathname !== "/search") return null;
+  const videoSection = findSearchVideoSection();
+  if (videoSection?.parentElement) {
+    return { parent: videoSection.parentElement, after: videoSection };
+  }
+  const nativeEmpty = findIntegratedSearchNativeEmptySection();
+  if (nativeEmpty?.parentElement) {
+    return {
+      parent: nativeEmpty.parentElement,
+      before: nativeEmpty,
+      after: null,
+    };
+  }
+  const layoutBody = document.querySelector("#layout-body");
+  const main = layoutBody?.querySelector("main") || layoutBody;
+  return main ? { parent: main, after: null } : null;
+}
+
+function getIntegratedSearchClipsNativeSection(mount) {
+  if (mount?.after?.tagName === "SECTION") return mount.after;
+  if (mount?.before?.tagName === "SECTION") return mount.before;
+  return (
+    [...(mount?.parent?.children || [])].find(
+      (child) =>
+        child.tagName === "SECTION" &&
+        !child.classList.contains(INTEGRATED_SEARCH_CLIPS_SECTION_CLASS),
+    ) || null
+  );
+}
+
+function syncIntegratedSearchClipsNativeClasses(section, mount) {
+  const nativeSection = getIntegratedSearchClipsNativeSection(mount);
+  const nativeSectionClasses = readClassName(nativeSection)
+    .split(/\s+/)
+    .filter(Boolean);
+  const nextSectionClassName = [
+    ...new Set([
+      ...nativeSectionClasses,
+      INTEGRATED_SEARCH_CLIPS_SECTION_CLASS,
+      ...(mount?.before ? [INTEGRATED_SEARCH_NATIVE_EMPTY_LAYOUT_CLASS] : []),
+    ]),
+  ].join(" ");
+  if (readClassName(section) !== nextSectionClassName) {
+    section.className = nextSectionClassName;
+  }
+
+  const more = section.querySelector(
+    ".cheese-integrated-search-clips-more",
+  );
+  if (!more) return;
+  const nativeMoreButton = nativeSection
+    ? [...nativeSection.querySelectorAll("button")].find(
+        (button) =>
+          !button.closest(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`) &&
+          !button.closest("li") &&
+          /더보기|접기/.test(button.textContent || ""),
+      )
+    : null;
+  const nativeMoreClasses = readClassName(nativeMoreButton?.parentElement)
+    .split(/\s+/)
+    .filter(
+      (className) =>
+        className &&
+        className !== SEARCH_RERANK_HIDDEN_CLASS &&
+        className !== "cheese-search-rerank-more",
+    );
+  const nextMoreClassName = [
+    ...new Set([
+      ...nativeMoreClasses,
+      "cheese-search-rerank-more",
+      "cheese-integrated-search-clips-more",
+      ...(nativeMoreClasses.length
+        ? ["cheese-integrated-search-clips-more-native"]
+        : []),
+    ]),
+  ].join(" ");
+  if (readClassName(more) !== nextMoreClassName) {
+    more.className = nextMoreClassName;
+  }
+
+  const moreButton = more.querySelector(
+    "[data-integrated-search-clips-action]",
+  );
+  if (!moreButton) return;
+  const nativeButtonClasses = readClassName(nativeMoreButton)
+    .split(/\s+/)
+    .filter(Boolean);
+  const nextMoreButtonClassName = [
+    ...new Set([
+      ...nativeButtonClasses,
+      "cheese-integrated-search-clips-more-button",
+      ...(nativeButtonClasses.length
+        ? ["cheese-integrated-search-clips-more-button-native"]
+        : []),
+    ]),
+  ].join(" ");
+  if (readClassName(moreButton) !== nextMoreButtonClassName) {
+    moreButton.className = nextMoreButtonClassName;
+  }
+  const nativeSvg = nativeMoreButton?.querySelector("svg");
+  let harvestedSvg = moreButton.querySelector(
+    "[data-integrated-search-clips-native-icon]",
+  );
+  if (nativeSvg && !harvestedSvg) {
+    harvestedSvg = nativeSvg.cloneNode(true);
+    harvestedSvg.setAttribute(
+      "data-integrated-search-clips-native-icon",
+      "",
+    );
+    moreButton.appendChild(harvestedSvg);
+  } else if (!nativeSvg) {
+    harvestedSvg?.remove();
+  }
+}
+
+function renderIntegratedSearchClipSkeletonCard() {
+  return `
+    <li class="cheese-search-skeleton-card channel_clip_item__eVWfU" aria-hidden="true">
+      <div class="clip_card_container__aoMWB clip_card_is_horizontal__lTG78 clip_card_is_blur__2VGDh">
+        <span class="cheese-search-clip-skeleton-thumb cheese-search-skeleton-shimmer"></span>
+        <div class="clip_card_wrapper__AcHtn">
+          <span class="cheese-search-skeleton-line cheese-search-skeleton-title cheese-search-skeleton-shimmer"></span>
+          <span class="cheese-search-skeleton-line cheese-search-skeleton-title-short cheese-search-skeleton-shimmer"></span>
+          <span class="cheese-search-skeleton-pill cheese-search-skeleton-shimmer"></span>
+        </div>
+      </div>
+    </li>
+  `;
+}
+
+function setIntegratedSearchClipsStatus(status, message) {
+  const text = String(message || "");
+  const empty =
+    text === INTEGRATED_SEARCH_CLIPS_EXHAUSTED_NOTICE ||
+    text === INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE;
+  if (
+    status.dataset.integratedSearchClipsStatusMessage === text &&
+    status.classList.contains("is-empty") === empty &&
+    !status.classList.contains("is-exhausted")
+  ) {
+    return;
+  }
+  status.dataset.integratedSearchClipsStatusMessage = text;
+  status.classList.remove("is-exhausted");
+  status.classList.toggle("is-empty", empty);
+  if (!empty) {
+    status.textContent = text;
+    return;
+  }
+
+  const visual = document.createElement("span");
+  visual.className = "cheese-integrated-search-clips-empty-visual";
+  visual.setAttribute("aria-hidden", "true");
+  const image = document.createElement("img");
+  image.src = EMPTY_RESULTS_ANIMATION_URL;
+  image.alt = "";
+  image.loading = "lazy";
+  image.decoding = "async";
+  visual.appendChild(image);
+
+  const label = document.createElement("span");
+  label.className = "cheese-integrated-search-clips-empty-label";
+  label.textContent = text;
+  status.replaceChildren(visual, label);
+}
+
+function ensureIntegratedSearchClipsSection() {
+  const mount = findIntegratedSearchClipsMount();
+  if (!mount) return null;
+  let section = document.querySelector(
+    `.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`,
+  );
+  if (
+    section &&
+    !section.querySelector(".cheese-search-integrated-clips-list")
+  ) {
+    section.remove();
+    section = null;
+  }
+  if (!section) {
+    section = document.createElement("section");
+    section.className = INTEGRATED_SEARCH_CLIPS_SECTION_CLASS;
+    section.setAttribute("aria-label", "클립 검색 결과");
+    section.innerHTML = `
+      <header class="cheese-integrated-search-clips-header">
+        <div class="cheese-integrated-search-clips-heading">
+          <strong>클립</strong>
+          <button type="button" class="cheese-search-rerank-info cheese-integrated-search-clips-category-info" aria-label="클립 카테고리 검색 안내">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="6.2" stroke="currentColor" stroke-width="1.4"></circle>
+              <path d="M7 6.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+              <circle cx="7" cy="3.9" r="0.9" fill="currentColor"></circle>
+            </svg>
+            <span class="cheese-search-rerank-info-tip" role="tooltip"><b>@음악</b>처럼 입력하면 해당 카테고리의 클립을 우선 확인합니다. 일반 검색어는 <b>싱드컵 @음악</b>처럼 함께 사용할 수 있으며, 공백이 있는 카테고리는 <b>@"종합 게임"</b>처럼 따옴표로 묶습니다.</span>
+          </button>
+          <span class="cheese-integrated-search-clips-scope">추천·관련 채널·카테고리 기준</span>
+          <span class="cheese-integrated-search-clips-count" data-integrated-search-clips-count></span>
+        </div>
+        <div class="cheese-integrated-search-clips-controls">
+          <div class="cheese-integrated-search-clips-date" role="radiogroup" aria-label="클립 날짜 범위">
+            <button type="button" data-integrated-search-clips-date="all" role="radio">전체</button>
+            <button type="button" data-integrated-search-clips-date="month" role="radio">30일</button>
+            <button type="button" data-integrated-search-clips-date="week" role="radio">7일</button>
+            <button type="button" data-integrated-search-clips-date="day" role="radio">24시간</button>
+          </div>
+          <div class="cheese-integrated-search-clips-sort" role="radiogroup" aria-label="클립 정렬">
+            <button type="button" data-integrated-search-clips-sort="relevant" role="radio">관련순</button>
+            <button type="button" data-integrated-search-clips-sort="popular" role="radio">인기순</button>
+            <button type="button" data-integrated-search-clips-sort="recent" role="radio">최신순</button>
+          </div>
+          ${renderSearchOptionsTrigger("clip", "클립 통합검색 설정", true)}
+        </div>
+      </header>
+      <div class="cheese-integrated-search-clips-status" data-integrated-search-clips-status hidden></div>
+      <ul class="cheese-search-results-list cheese-search-integrated-clips-list" data-content-type="clips" aria-live="polite"></ul>
+      <div class="cheese-integrated-search-clips-more" data-integrated-search-clips-more hidden>
+        <button type="button" data-integrated-search-clips-action></button>
+      </div>
+    `;
+    bindSearchOptionsPopover(
+      section.querySelector('[data-search-options="clip"]'),
+    );
+    section.addEventListener("click", (event) => {
+      const clipPlayLink = event.target.closest(
+        "[data-integrated-search-clip-play]",
+      );
+      if (
+        clipPlayLink &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        const clipUID = clipPlayLink.dataset.integratedSearchClipPlay;
+        if (integratedSearchClipDirectPlay) {
+          openIntegratedSearchClipPlayer(
+            clipUID,
+            clipPlayLink.dataset.integratedSearchClipTitle,
+            clipPlayLink,
+          );
+        } else {
+          window.open(
+            buildIntegratedSearchClipPageUrl(clipUID, {
+              autoplay: true,
+            }),
+            "_blank",
+            "noopener,noreferrer",
+          );
+        }
+        return;
+      }
+      const dateButton = event.target.closest(
+        "[data-integrated-search-clips-date]",
+      );
+      if (dateButton) {
+        const value = normalizeIntegratedSearchClipDateFilter(
+          dateButton.dataset.integratedSearchClipsDate,
+        );
+        if (value !== integratedSearchClipDateFilter) {
+          try {
+            chrome.storage?.local?.set({
+              [SEARCH_CLIPS_DATE_FILTER_KEY]: value,
+            });
+          } catch {}
+        }
+        return;
+      }
+      const sortButton = event.target.closest(
+        "[data-integrated-search-clips-sort]",
+      );
+      if (sortButton) {
+        integratedSearchClipsState.sort =
+          sortButton.dataset.integratedSearchClipsSort;
+        integratedSearchClipsState.visible =
+          INTEGRATED_SEARCH_CLIPS_INITIAL;
+        renderIntegratedSearchClips();
+        return;
+      }
+      const actionButton = event.target.closest(
+        "[data-integrated-search-clips-action]",
+      );
+      if (!actionButton || actionButton.disabled) return;
+      const action = actionButton.dataset.integratedSearchClipsAction;
+      if (action === "expand") {
+        integratedSearchClipsState.visible +=
+          integratedSearchClipMoreStep;
+        renderIntegratedSearchClips();
+      } else if (action === "fetch") {
+        void fetchMoreIntegratedSearchClips();
+      } else if (action === "collapse") {
+        integratedSearchClipsState.visible =
+          INTEGRATED_SEARCH_CLIPS_INITIAL;
+        renderIntegratedSearchClips();
+        section.scrollIntoView({ block: "nearest" });
+      } else if (action === "retry") {
+        startIntegratedSearchClips(integratedSearchClipsState.keyword, true);
+      }
+    });
+  }
+
+  if (mount.before) {
+    if (section.nextElementSibling !== mount.before) {
+      mount.before.before(section);
+    }
+  } else if (mount.after) {
+    if (mount.after.nextElementSibling !== section) {
+      mount.after.after(section);
+    }
+  } else if (section.parentElement !== mount.parent) {
+    mount.parent.appendChild(section);
+  }
+  syncIntegratedSearchClipsNativeClasses(section, mount);
+  return section;
+}
+
+function integratedSearchClipsCanFetchMore() {
+  return integratedSearchClipsState.feeds.some(
+    (feed) =>
+      feed.next &&
+      Number(feed.page) < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES,
+  );
+}
+
+function setIntegratedSearchClipsMoreLabel(button, label) {
+  const textNodes = [...button.childNodes].filter(
+    (node) => node.nodeType === Node.TEXT_NODE,
+  );
+  if (textNodes.map((node) => node.textContent).join("") === label) {
+    return;
+  }
+  textNodes.forEach((node) => node.remove());
+  if (!label) return;
+  const svg = button.querySelector("svg");
+  if (svg) button.insertBefore(document.createTextNode(label), svg);
+  else button.appendChild(document.createTextNode(label));
+}
+
+function setIntegratedSearchClipsMoreLoading(button, loading) {
+  if (button.classList.contains("is-loading") !== loading) {
+    button.classList.toggle("is-loading", loading);
+  }
+  if (loading) {
+    if (button.getAttribute("aria-busy") !== "true") {
+      button.setAttribute("aria-busy", "true");
+    }
+    if (
+      !button.querySelector(
+        ".cheese-integrated-search-clips-more-pulse",
+      )
+    ) {
+      const pulse = document.createElement("span");
+      pulse.className = "cheese-integrated-search-clips-more-pulse";
+      pulse.setAttribute("aria-hidden", "true");
+      pulse.innerHTML = "<i></i><i></i><i></i>";
+      const svg = button.querySelector("svg");
+      if (svg) button.insertBefore(pulse, svg);
+      else button.appendChild(pulse);
+    }
+    return;
+  }
+  button.removeAttribute("aria-busy");
+  button
+    .querySelector(".cheese-integrated-search-clips-more-pulse")
+    ?.remove();
+}
+
+function renderIntegratedSearchClips() {
+  const section = ensureIntegratedSearchClipsSection();
+  if (!section) return;
+  const hasCurrentResults = integratedSearchClipsState.results.length > 0;
+  const deferLoadingUi =
+    integratedSearchClipsState.loading &&
+    !integratedSearchClipsState.showSkeleton &&
+    !hasCurrentResults;
+  section.hidden = deferLoadingUi;
+  setIntegratedSearchNativeEmptyHidden(
+    (integratedSearchClipsState.loading &&
+      integratedSearchClipsState.showSkeleton) ||
+      (!integratedSearchClipsState.error &&
+        integratedSearchClipsState.results.length > 0),
+  );
+  const renderSignature = [
+    integratedSearchClipsState.keyword,
+    integratedSearchClipsState.fetchedFor,
+    integratedSearchClipsState.loading,
+    integratedSearchClipsState.showSkeleton,
+    integratedSearchClipsState.loadingMore,
+    integratedSearchClipsState.sort,
+    integratedSearchClipsState.visible,
+    integratedSearchClipsState.error,
+    integratedSearchClipsState.notice,
+    integratedSearchClipsState.revision,
+    integratedSearchClipDateFilter,
+  ].join("|");
+  if (section.dataset.renderSignature === renderSignature) return;
+  section.dataset.renderSignature = renderSignature;
+  const list = section.querySelector(".cheese-search-integrated-clips-list");
+  const status = section.querySelector(
+    "[data-integrated-search-clips-status]",
+  );
+  const count = section.querySelector("[data-integrated-search-clips-count]");
+  const scope = section.querySelector(
+    ".cheese-integrated-search-clips-scope",
+  );
+  const more = section.querySelector("[data-integrated-search-clips-more]");
+  const moreButton = more?.querySelector(
+    "[data-integrated-search-clips-action]",
+  );
+  if (!list || !status || !count || !more || !moreButton) return;
+  const searchQuery = parseIntegratedSearchClipQuery(
+    integratedSearchClipsState.keyword,
+  );
+  if (scope) {
+    const nextScope = searchQuery.categoryTerms.length
+      ? `@${searchQuery.categoryTerms.join(", @")} 카테고리 우선`
+      : "추천·관련 채널·카테고리 기준";
+    if (scope.textContent !== nextScope) scope.textContent = nextScope;
+  }
+  if (deferLoadingUi) {
+    setIntegratedSearchClipsMoreLoading(moreButton, false);
+    count.textContent = "";
+    status.hidden = true;
+    list.hidden = true;
+    list.removeAttribute("aria-busy");
+    list.textContent = "";
+    more.hidden = true;
+    return;
+  }
+  ensureSearchSectionTopButton(section, {
+    show: false,
+    targetSelector: ".cheese-integrated-search-clips-header",
+    label: "클립 결과 맨 위로",
+    floating: true,
+  });
+
+  section.querySelectorAll("[data-integrated-search-clips-sort]").forEach(
+    (button) => {
+      const active =
+        button.dataset.integratedSearchClipsSort ===
+        integratedSearchClipsState.sort;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    },
+  );
+  section.querySelectorAll("[data-integrated-search-clips-date]").forEach(
+    (button) => {
+      const active =
+        button.dataset.integratedSearchClipsDate ===
+        integratedSearchClipDateFilter;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    },
+  );
+
+  if (integratedSearchClipsState.loading && !hasCurrentResults) {
+    setIntegratedSearchClipsMoreLoading(moreButton, false);
+    count.textContent = "";
+    status.hidden = false;
+    setIntegratedSearchClipsStatus(
+      status,
+      searchQuery.categoryTerms.length
+        ? `@${searchQuery.categoryTerms.join(", @")} 카테고리 클립을 우선 확인하고 있습니다.`
+        : "최근 추천 클립과 관련 채널을 확인하고 있습니다.",
+    );
+    list.hidden = false;
+    list.setAttribute("aria-busy", "true");
+    list.innerHTML = Array.from({ length: 4 }, () =>
+      renderIntegratedSearchClipSkeletonCard(),
+    ).join("");
+    more.hidden = true;
+    return;
+  }
+
+  list.removeAttribute("aria-busy");
+  const sorted = sortedIntegratedSearchClipResults();
+  const visible = Math.min(integratedSearchClipsState.visible, sorted.length);
+  count.textContent = integratedSearchClipsState.fetchedFor
+    ? `${sorted.length.toLocaleString("ko-KR")}개 / 후보 ${integratedSearchClipsState.allItems.length.toLocaleString("ko-KR")}개`
+    : "";
+
+  if (integratedSearchClipsState.error) {
+    setIntegratedSearchClipsMoreLoading(moreButton, false);
+    status.hidden = false;
+    setIntegratedSearchClipsStatus(
+      status,
+      integratedSearchClipsState.error,
+    );
+    list.hidden = true;
+    list.textContent = "";
+    more.hidden = false;
+    moreButton.disabled = false;
+    moreButton.dataset.integratedSearchClipsAction = "retry";
+    moreButton.setAttribute("aria-expanded", "false");
+    setIntegratedSearchClipsMoreLabel(moreButton, "다시 시도");
+    return;
+  }
+
+  if (!sorted.length) {
+    if (findIntegratedSearchNativeEmptySection()) {
+      section.remove();
+      return;
+    }
+    status.hidden = Boolean(findIntegratedSearchNativeEmptySection());
+    setIntegratedSearchClipsStatus(
+      status,
+      integratedSearchClipsState.notice ||
+        INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE,
+    );
+    list.hidden = true;
+    list.textContent = "";
+  } else {
+    status.hidden = !integratedSearchClipsState.notice;
+    setIntegratedSearchClipsStatus(
+      status,
+      integratedSearchClipsState.notice,
+    );
+    list.hidden = false;
+    list.innerHTML = sorted.slice(0, visible).map(renderClipCard).join("");
+    list
+      .querySelectorAll(
+        "[data-clip-thumbnail-url]:not([data-clip-orientation-ready])",
+      )
+      .forEach(normalizeClipCardOrientation);
+  }
+
+  if (integratedSearchClipsState.loading) {
+    more.hidden = false;
+    moreButton.dataset.integratedSearchClipsAction = "";
+    moreButton.removeAttribute("aria-expanded");
+    moreButton.disabled = true;
+    setIntegratedSearchClipsMoreLabel(moreButton, "추가 후보 확인 중");
+    setIntegratedSearchClipsMoreLoading(moreButton, true);
+    return;
+  }
+
+  setIntegratedSearchClipsMoreLoading(moreButton, false);
+  let action = "";
+  let label = "";
+  if (integratedSearchClipsState.loadingMore) {
+    action = "fetch";
+    label = "추가 클립 확인 중";
+  } else if (visible < sorted.length) {
+    action = "expand";
+    label = `더보기 (${(sorted.length - visible).toLocaleString("ko-KR")}개)`;
+  } else if (integratedSearchClipsCanFetchMore()) {
+    action = "fetch";
+    label = "더 찾아보기";
+  } else if (
+    sorted.length > INTEGRATED_SEARCH_CLIPS_INITIAL &&
+    integratedSearchClipsState.visible > INTEGRATED_SEARCH_CLIPS_INITIAL
+  ) {
+    action = "collapse";
+    label = "접기";
+  }
+
+  more.hidden = !action;
+  if (action) {
+    if (moreButton.dataset.integratedSearchClipsAction !== action) {
+      moreButton.dataset.integratedSearchClipsAction = action;
+    }
+    const expanded = String(action === "collapse");
+    if (moreButton.getAttribute("aria-expanded") !== expanded) {
+      moreButton.setAttribute("aria-expanded", expanded);
+    }
+    setIntegratedSearchClipsMoreLabel(moreButton, label);
+    moreButton.disabled = integratedSearchClipsState.loadingMore;
+    setIntegratedSearchClipsMoreLoading(
+      moreButton,
+      integratedSearchClipsState.loadingMore,
+    );
+  } else {
+    moreButton.dataset.integratedSearchClipsAction = "";
+    moreButton.removeAttribute("aria-expanded");
+    moreButton.disabled = false;
+    setIntegratedSearchClipsMoreLabel(moreButton, "");
+    setIntegratedSearchClipsMoreLoading(moreButton, false);
+  }
+  ensureSearchSectionTopButton(section, {
+    show: visible > INTEGRATED_SEARCH_CLIPS_INITIAL,
+    targetSelector: ".cheese-integrated-search-clips-header",
+    label: "클립 결과 맨 위로",
+    floating: true,
+  });
+}
+
+async function fetchMoreIntegratedSearchClips() {
+  if (
+    integratedSearchClipsState.loadingMore ||
+    !integratedSearchClipsCanFetchMore()
+  ) {
+    return;
+  }
+  const keyword = integratedSearchClipsState.keyword;
+  const signal = integratedSearchClipsState.controller?.signal;
+  integratedSearchClipsState.loadingMore = true;
+  integratedSearchClipsState.notice = "";
+  renderIntegratedSearchClips();
+
+  const targets = integratedSearchClipsState.feeds.filter(
+    (feed) =>
+      feed.next &&
+      Number(feed.page) < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES,
+  );
+  const settled = await Promise.allSettled(
+    targets.map(async (feed) => {
+      const json = await fetchIntegratedSearchClipJson(
+        buildIntegratedSearchClipFeedUrl(feed, feed.next),
+        signal,
+      );
+      return {
+        key: feed.key,
+        next: getIntegratedSearchClipFeedNext(json),
+        items: Array.isArray(json?.content?.data)
+          ? json.content.data.slice(0, integratedSearchClipCandidateLimit)
+          : [],
+      };
+    }),
+  );
+  if (
+    signal?.aborted ||
+    integratedSearchClipsState.keyword !== keyword
+  ) {
+    return;
+  }
+
+  const beforeMatches = integratedSearchClipsState.results.length;
+  const added = [];
+  settled.forEach((result) => {
+    if (result.status !== "fulfilled") return;
+    const feed = integratedSearchClipsState.feeds.find(
+      (entry) => entry.key === result.value.key,
+    );
+    if (!feed) return;
+    feed.page = Number(feed.page) + 1;
+    feed.next = result.value.next;
+    result.value.items.forEach((clip, itemIndex) => {
+      added.push({
+        ...clip,
+        __integratedSearchSourceRank:
+          feed.page * 10000 + itemIndex,
+      });
+    });
+  });
+
+  const enrichedAdded = await enrichIntegratedSearchClipCategories(
+    added,
+    signal,
+  );
+  if (
+    signal?.aborted ||
+    integratedSearchClipsState.keyword !== keyword
+  ) {
+    return;
+  }
+  integratedSearchClipsState.allItems = mergeIntegratedSearchClipItems(
+    integratedSearchClipsState.allItems,
+    enrichedAdded,
+  );
+  rebuildIntegratedSearchClipResults();
+  const addedMatches =
+    integratedSearchClipsState.results.length - beforeMatches;
+  integratedSearchClipsState.loadingMore = false;
+  const canFetchMore = integratedSearchClipsCanFetchMore();
+  integratedSearchClipsState.notice =
+    addedMatches > 0
+      ? `추가 후보에서 ${addedMatches.toLocaleString("ko-KR")}개의 결과를 찾았습니다.`
+      : added.length
+        ? canFetchMore
+          ? "추가 추천 후보를 확인했지만 새로 일치하는 클립은 없었습니다."
+          : "추가 추천 후보를 모두 확인했지만 새로 일치하는 클립은 없었습니다."
+        : canFetchMore
+          ? "추가 추천 클립을 불러오지 못했습니다."
+          : INTEGRATED_SEARCH_CLIPS_EXHAUSTED_NOTICE;
+  if (addedMatches > 0) {
+    integratedSearchClipsState.visible +=
+      integratedSearchClipMoreStep;
+  }
+  renderIntegratedSearchClips();
+}
+
+function cleanupIntegratedSearchClips(removeSection = true) {
+  integratedSearchClipsState.controller?.abort();
+  setIntegratedSearchNativeEmptyHidden(false);
+  if (removeSection) {
+    closeIntegratedSearchClipPlayer({ restoreFocus: false });
+    document
+      .querySelector(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`)
+      ?.remove();
+  }
+  Object.assign(integratedSearchClipsState, {
+    keyword: "",
+    fetchedFor: "",
+    loading: false,
+    showSkeleton: false,
+    loadingMore: false,
+    allItems: [],
+    results: [],
+    feeds: [],
+    visible: INTEGRATED_SEARCH_CLIPS_INITIAL,
+    sort: "relevant",
+    error: "",
+    notice: "",
+    revision: 0,
+    controller: null,
+  });
+}
+
+async function startIntegratedSearchClips(keyword, force = false) {
+  const normalizedKeyword = String(keyword || "").trim();
+  if (!normalizedKeyword) return;
+  const searchQuery = parseIntegratedSearchClipQuery(normalizedKeyword);
+  const discoveryLimit = searchQuery.categoryTerms.length
+    ? Math.min(
+        integratedSearchClipCandidateLimit,
+        INTEGRATED_SEARCH_CLIPS_CATEGORY_DISCOVERY_LIMIT,
+      )
+    : integratedSearchClipCandidateLimit;
+  if (
+    !force &&
+    integratedSearchClipsState.loading &&
+    integratedSearchClipsState.keyword === normalizedKeyword
+  ) {
+    return;
+  }
+
+  const deferCachedLoadingUi =
+    !force &&
+    integratedSearchClipFeedCache.expiresAt > Date.now() &&
+    integratedSearchClipFeedCache.items.length > 0;
+  const cachedItems = deferCachedLoadingUi
+    ? integratedSearchClipFeedCache.items.map((item) => ({ ...item }))
+    : [];
+  const cachedFeeds = deferCachedLoadingUi
+    ? cloneIntegratedSearchClipFeeds(integratedSearchClipFeedCache.feeds)
+    : [];
+  // 설정 팝오버에서 옵션을 연속 조정할 수 있도록 재수집 중에는 섹션 DOM을
+  // 유지한다. 검색 페이지를 벗어나거나 기능을 끌 때만 섹션을 제거한다.
+  cleanupIntegratedSearchClips(false);
+  integratedSearchClipsState.keyword = normalizedKeyword;
+  integratedSearchClipsState.loading = true;
+  integratedSearchClipsState.showSkeleton = !deferCachedLoadingUi;
+  integratedSearchClipsState.controller = new AbortController();
+  const signal = integratedSearchClipsState.controller.signal;
+  if (cachedItems.length) {
+    integratedSearchClipsState.allItems =
+      mergeIntegratedSearchClipItems(cachedItems);
+    integratedSearchClipsState.feeds = cachedFeeds;
+    integratedSearchClipsState.fetchedFor = normalizedKeyword;
+    rebuildIntegratedSearchClipResults();
+    if (integratedSearchClipsState.results.length) {
+      integratedSearchClipsState.notice =
+        "저장된 클립 결과를 먼저 표시하고 추가 후보를 확인하고 있습니다.";
+    }
+  }
+  renderIntegratedSearchClips();
+
+  try {
+    const [feedResult, channelResult] = await Promise.allSettled([
+      fetchInitialIntegratedSearchClipFeeds(signal, discoveryLimit),
+      fetchRelatedChannelClipsForIntegratedSearch(
+        searchQuery.textKeyword,
+        signal,
+        discoveryLimit,
+      ),
+    ]);
+    if (
+      signal.aborted ||
+      integratedSearchClipsState.keyword !== normalizedKeyword
+    ) {
+      return;
+    }
+
+    const feedItems =
+      feedResult.status === "fulfilled" ? feedResult.value.items : [];
+    const feeds =
+      feedResult.status === "fulfilled" ? feedResult.value.feeds : [];
+    const channelItems =
+      channelResult.status === "fulfilled" ? channelResult.value : [];
+    if (
+      !feedItems.length &&
+      !channelItems.length &&
+      feedResult.status === "rejected"
+    ) {
+      throw new Error("클립 후보를 불러오지 못했습니다.");
+    }
+
+    const mergedItems = mergeIntegratedSearchClipItems(
+      channelItems,
+      feedItems,
+    );
+    const enrichedItems = await enrichIntegratedSearchClipCategories(
+      mergedItems,
+      signal,
+    );
+    if (
+      signal.aborted ||
+      integratedSearchClipsState.keyword !== normalizedKeyword
+    ) {
+      return;
+    }
+    updateIntegratedSearchClipFeedCacheMetadata(enrichedItems);
+    const categoryItems =
+      await fetchRelatedCategoryClipsForIntegratedSearch(
+        enrichedItems,
+        normalizedKeyword,
+        signal,
+      );
+    integratedSearchClipsState.allItems =
+      searchQuery.categoryTerms.length
+        ? mergeIntegratedSearchClipItems(categoryItems, enrichedItems)
+        : mergeIntegratedSearchClipItems(enrichedItems, categoryItems);
+    if (
+      signal.aborted ||
+      integratedSearchClipsState.keyword !== normalizedKeyword
+    ) {
+      return;
+    }
+    integratedSearchClipsState.feeds = cloneIntegratedSearchClipFeeds(feeds);
+    integratedSearchClipsState.fetchedFor = normalizedKeyword;
+    integratedSearchClipsState.loading = false;
+    integratedSearchClipsState.showSkeleton = false;
+    integratedSearchClipsState.notice = "";
+    integratedSearchClipsState.visible =
+      INTEGRATED_SEARCH_CLIPS_INITIAL;
+    rebuildIntegratedSearchClipResults();
+    renderIntegratedSearchClips();
+  } catch (error) {
+    if (
+      signal.aborted ||
+      integratedSearchClipsState.keyword !== normalizedKeyword
+    ) {
+      return;
+    }
+    integratedSearchClipsState.loading = false;
+    integratedSearchClipsState.showSkeleton = false;
+    if (integratedSearchClipsState.results.length) {
+      integratedSearchClipsState.error = "";
+      integratedSearchClipsState.notice =
+        "추가 후보를 불러오지 못해 저장된 클립 결과를 표시합니다.";
+      renderIntegratedSearchClips();
+      return;
+    }
+    integratedSearchClipsState.error =
+      error?.message || "클립 검색 결과를 불러오지 못했습니다.";
+    renderIntegratedSearchClips();
+  }
+}
+
+function ensureIntegratedSearchClips() {
+  if (!IS_TOP_FRAME) return;
+  const keyword = integratedSearchClipsEnabled
+    ? getSearchRerankKeyword()
+    : "";
+  if (!keyword || !findIntegratedSearchClipsMount()) {
+    if (
+      integratedSearchClipsState.keyword ||
+      document.querySelector(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`)
+    ) {
+      cleanupIntegratedSearchClips();
+    }
+    return;
+  }
+  if (
+    integratedSearchClipsState.keyword === keyword &&
+    integratedSearchClipsState.fetchedFor === keyword &&
+    !integratedSearchClipsState.loading &&
+    !integratedSearchClipsState.error &&
+    integratedSearchClipsState.results.length === 0 &&
+    findIntegratedSearchNativeEmptySection()
+  ) {
+    setIntegratedSearchNativeEmptyHidden(false);
+    document
+      .querySelector(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`)
+      ?.remove();
+    return;
+  }
+  if (integratedSearchClipsState.keyword !== keyword) {
+    void startIntegratedSearchClips(keyword);
+    return;
+  }
+  renderIntegratedSearchClips(); // 치지직 재렌더로 섹션이 사라졌으면 복구
 }
 
 // ── 사이드바 팔로잉 채널 호버 라이브 영상 미리보기 ─────────────────────────────
@@ -23696,8 +26803,17 @@ const FEATURE_FLAGS_KEYS = [
   SEARCH_RESET_ON_RETURN_KEY,
   SEARCH_RERANK_KEY,
   SEARCH_RERANK_POOL_KEY,
+  SEARCH_RERANK_MORE_STEP_KEY,
   SEARCH_RERANK_WEIGHTS_KEY,
   SEARCH_RERANK_DEFAULT_SORT_KEY,
+  SEARCH_CLIPS_KEY,
+  SEARCH_CLIPS_DIRECT_PLAY_KEY,
+  SEARCH_CLIPS_WEIGHTS_KEY,
+  SEARCH_CLIPS_MATCH_MODE_KEY,
+  SEARCH_CLIPS_DATE_FILTER_KEY,
+  SEARCH_CLIPS_CANDIDATE_LIMIT_KEY,
+  SEARCH_CLIPS_CATEGORY_LIMIT_KEY,
+  SEARCH_CLIPS_MORE_STEP_KEY,
   AUTO_RELIVE_MAX_HOURS_KEY,
   ROOT_TO_FOLLOWING_KEY,
   ROOT_TO_FOLLOWING_LOGO_KEY,
@@ -23809,11 +26925,41 @@ async function loadFeatureFlags() {
     searchRerankPoolMax = normalizeSearchRerankPoolMax(
       data?.[SEARCH_RERANK_POOL_KEY],
     );
+    searchRerankMoreStep = normalizeSearchMoreStep(
+      data?.[SEARCH_RERANK_MORE_STEP_KEY],
+      SEARCH_RERANK_MORE_STEP_DEFAULT,
+    );
     searchRerankWeights = normalizeSearchRerankWeights(
       data?.[SEARCH_RERANK_WEIGHTS_KEY],
     );
     searchRerankDefaultSort = normalizeSearchRerankSort(
       data?.[SEARCH_RERANK_DEFAULT_SORT_KEY],
+    );
+    integratedSearchClipsEnabled =
+      data?.[SEARCH_CLIPS_KEY] === true; // 기본 OFF
+    integratedSearchClipDirectPlay =
+      data?.[SEARCH_CLIPS_DIRECT_PLAY_KEY] !== false; // 기본 ON(바로 재생)
+    integratedSearchClipWeights = normalizeIntegratedSearchClipWeights(
+      data?.[SEARCH_CLIPS_WEIGHTS_KEY],
+    );
+    integratedSearchClipMatchMode = normalizeIntegratedSearchClipMatchMode(
+      data?.[SEARCH_CLIPS_MATCH_MODE_KEY],
+    );
+    integratedSearchClipDateFilter =
+      normalizeIntegratedSearchClipDateFilter(
+        data?.[SEARCH_CLIPS_DATE_FILTER_KEY],
+      );
+    integratedSearchClipCandidateLimit = normalizeIntegratedSearchClipLimit(
+      data?.[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY],
+      SEARCH_CLIPS_LIMIT_DEFAULT,
+    );
+    integratedSearchClipCategoryLimit = normalizeIntegratedSearchClipLimit(
+      data?.[SEARCH_CLIPS_CATEGORY_LIMIT_KEY],
+      SEARCH_CLIPS_LIMIT_DEFAULT,
+    );
+    integratedSearchClipMoreStep = normalizeSearchMoreStep(
+      data?.[SEARCH_CLIPS_MORE_STEP_KEY],
+      SEARCH_CLIPS_MORE_STEP_DEFAULT,
     );
     autoReliveMaxHours = normalizeAutoReliveMaxHours(
       data?.[AUTO_RELIVE_MAX_HOURS_KEY],
@@ -23982,6 +27128,12 @@ if (chrome.storage?.onChanged) {
         ensureSearchRerank();
       }
     }
+    if (changes[SEARCH_RERANK_MORE_STEP_KEY]) {
+      searchRerankMoreStep = normalizeSearchMoreStep(
+        changes[SEARCH_RERANK_MORE_STEP_KEY].newValue,
+        SEARCH_RERANK_MORE_STEP_DEFAULT,
+      );
+    }
     if (changes[SEARCH_RERANK_WEIGHTS_KEY]) {
       searchRerankWeights = normalizeSearchRerankWeights(
         changes[SEARCH_RERANK_WEIGHTS_KEY].newValue,
@@ -24003,6 +27155,95 @@ if (chrome.storage?.onChanged) {
         changes[SEARCH_RERANK_DEFAULT_SORT_KEY].newValue,
       );
       // 기본 정렬은 다음 검색부터 적용(현재 화면의 수동 선택은 존중).
+    }
+    if (changes[SEARCH_CLIPS_KEY]) {
+      integratedSearchClipsEnabled =
+        changes[SEARCH_CLIPS_KEY].newValue === true;
+      ensureIntegratedSearchClips(); // 끄면 즉시 정리, 켜면 현재 검색어로 시작
+    }
+    if (changes[SEARCH_CLIPS_DIRECT_PLAY_KEY]) {
+      integratedSearchClipDirectPlay =
+        changes[SEARCH_CLIPS_DIRECT_PLAY_KEY].newValue !== false;
+      if (!integratedSearchClipDirectPlay) {
+        closeIntegratedSearchClipPlayer();
+      }
+    }
+    if (changes[SEARCH_CLIPS_WEIGHTS_KEY]) {
+      integratedSearchClipWeights = normalizeIntegratedSearchClipWeights(
+        changes[SEARCH_CLIPS_WEIGHTS_KEY].newValue,
+      );
+      if (
+        integratedSearchClipsEnabled &&
+        integratedSearchClipsState.allItems.length
+      ) {
+        rebuildIntegratedSearchClipResults();
+        renderIntegratedSearchClips();
+      }
+    }
+    if (changes[SEARCH_CLIPS_MATCH_MODE_KEY]) {
+      integratedSearchClipMatchMode =
+        normalizeIntegratedSearchClipMatchMode(
+          changes[SEARCH_CLIPS_MATCH_MODE_KEY].newValue,
+        );
+      if (integratedSearchClipsEnabled && integratedSearchClipsState.keyword) {
+        void startIntegratedSearchClips(
+          integratedSearchClipsState.keyword,
+          true,
+        );
+      }
+    }
+    if (changes[SEARCH_CLIPS_DATE_FILTER_KEY]) {
+      integratedSearchClipDateFilter =
+        normalizeIntegratedSearchClipDateFilter(
+          changes[SEARCH_CLIPS_DATE_FILTER_KEY].newValue,
+        );
+      integratedSearchClipFeedCache = {
+        expiresAt: 0,
+        items: [],
+        feeds: [],
+      };
+      if (integratedSearchClipsEnabled && integratedSearchClipsState.keyword) {
+        void startIntegratedSearchClips(
+          integratedSearchClipsState.keyword,
+          true,
+        );
+      }
+    }
+    if (
+      changes[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY] ||
+      changes[SEARCH_CLIPS_CATEGORY_LIMIT_KEY]
+    ) {
+      if (changes[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY]) {
+        integratedSearchClipCandidateLimit =
+          normalizeIntegratedSearchClipLimit(
+            changes[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY].newValue,
+            SEARCH_CLIPS_LIMIT_DEFAULT,
+          );
+        integratedSearchClipFeedCache = {
+          expiresAt: 0,
+          items: [],
+          feeds: [],
+        };
+      }
+      if (changes[SEARCH_CLIPS_CATEGORY_LIMIT_KEY]) {
+        integratedSearchClipCategoryLimit =
+          normalizeIntegratedSearchClipLimit(
+            changes[SEARCH_CLIPS_CATEGORY_LIMIT_KEY].newValue,
+            SEARCH_CLIPS_LIMIT_DEFAULT,
+          );
+      }
+      if (integratedSearchClipsEnabled && integratedSearchClipsState.keyword) {
+        void startIntegratedSearchClips(
+          integratedSearchClipsState.keyword,
+          true,
+        );
+      }
+    }
+    if (changes[SEARCH_CLIPS_MORE_STEP_KEY]) {
+      integratedSearchClipMoreStep = normalizeSearchMoreStep(
+        changes[SEARCH_CLIPS_MORE_STEP_KEY].newValue,
+        SEARCH_CLIPS_MORE_STEP_DEFAULT,
+      );
     }
     if (changes[AUTO_RELIVE_MAX_HOURS_KEY]) {
       autoReliveMaxHours = normalizeAutoReliveMaxHours(
@@ -24706,6 +27947,7 @@ function isClipEditorPage() {
 
 function init() {
   if (isClipEditorPage()) return; // 클립 에디터: 일반 기능 개입 없음(드래그 버벅임 방지)
+  ensureClipPageAutoplay();
   ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
   ensureChatBlockObserver(); // 채팅 프로필 팝오버에 '사용자 차단' 항목 주입 관찰
   ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰
@@ -24732,6 +27974,7 @@ function init() {
     applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
     ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
     ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
+    ensureIntegratedSearchClips(); // 통합검색 추천·관련 채널·카테고리 클립 섹션(옵션 시)
     bindPopupPlayerDrag(); // 사이드바 채널 드래그 → 팝업 플레이어
     ensurePopupPlayerDraggable();
   }

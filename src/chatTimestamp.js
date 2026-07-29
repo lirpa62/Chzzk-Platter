@@ -56,7 +56,11 @@
     // 복원되지 않지만, 클린봇 메시지는 원문이 그대로 내려와 복원이 가능하다.
     // 복원할 원문이 없는 행은 restoreUnavailableRows 로 한 번만 표시하고 재시도를
     // 멈추므로(무한 재처리 없음), 켜 두어도 부하가 늘지 않는다.
-    return restoreBlindedChat;
+    //
+    // ⚠ 관리자 전용 채팅에서는 복원만 끈다. 예전엔 이 상태에서 옵저버를 통째로
+    // 멈췄는데, 오프라인 채널 입장 시에도 이 공지가 떠 있어 '시간 표시'까지 함께
+    // 죽었다(제보). 무한 재시도를 막으려던 목적은 복원 쪽에만 해당한다.
+    return restoreBlindedChat && !isAdminOnlyChatActive();
   }
 
   let chatRowObserver = null;
@@ -914,11 +918,10 @@
   }
 
   function ensureChatRowObserver() {
+    // ⚠ 관리자 전용 채팅이어도 옵저버를 멈추지 않는다. 시간 표시는 계속 필요하고,
+    // 복원만 isBlindRestoreActive() 에서 꺼진다(오프라인 채널에서 시간 표시가
+    // 사라지던 원인).
     if (!anyChatEnhanceOn()) return;
-    if (isAdminOnlyChatActive()) {
-      stopChatRowObserver();
-      return;
-    }
     const containers = findChatListContainers();
     if (containers.length === 0) {
       if (chatRowObserver) {
@@ -945,10 +948,10 @@
             [...mutation.addedNodes].some(containsAdminOnlyChatNotice),
         )
       ) {
-        // 공지 행이 곧 스크롤로 밀려나도 재부착되지 않도록 상태를 래치한다.
+        // 공지 행이 곧 스크롤로 밀려나도 상태가 풀리지 않게 래치만 한다.
+        // ⚠ 여기서 옵저버를 멈추면 시간 표시까지 죽는다(오프라인 채널 제보 원인).
+        // 복원은 isBlindRestoreActive() 가 이 래치를 보고 알아서 꺼진다.
         adminOnlyChatLatched = true;
-        stopChatRowObserver();
-        return;
       }
       for (const mutation of mutations) {
         if (mutation.type !== "childList") continue;
@@ -981,12 +984,8 @@
   }
 
   function scheduleRetry() {
-    if (
-      !anyChatEnhanceOn() ||
-      document.hidden ||
-      retryTimer ||
-      isAdminOnlyChatActive()
-    ) {
+    // 관리자 전용이어도 재시도를 막지 않는다(시간 표시는 계속 붙어야 한다).
+    if (!anyChatEnhanceOn() || document.hidden || retryTimer) {
       return;
     }
     retryTimer = window.setTimeout(() => {
@@ -1175,10 +1174,6 @@
       clearPendingChatRows();
       if (isBlindRestoreActive()) clearRowDoneMarkers();
       if (anyChatEnhanceOn()) ensureChatRowObserver();
-      return;
-    }
-    if (isAdminOnlyChatActive()) {
-      if (chatRowObserver || pendingChatRows.size) stopChatRowObserver();
       return;
     }
     if (!anyChatEnhanceOn()) return;

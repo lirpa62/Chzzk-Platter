@@ -26,6 +26,7 @@
     streamStats: false,
     liveSync: false,
     liveRewind: false,
+    vodSeekButtons: false,
     tabMute: false,
     screenshotButton: false, // 스크린샷 버튼 숨김(true=숨김, 기본 표시)
   };
@@ -127,10 +128,21 @@
     featureFlags.streamStats = f.streamStats === true;
     featureFlags.liveSync = f.liveSync === true;
     featureFlags.liveRewind = f.liveRewind === true;
+    featureFlags.vodSeekButtons = f.vodSeekButtons === true;
     featureFlags.tabMute = f.tabMute === true;
     featureFlags.screenshotButton = f.screenshotButton === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
+    const mixerAlwaysOnPrev = mixerAlwaysOn;
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
+    // ⚠ 확장 업데이트로 스크립트가 '이미 재생 중인 페이지'에 다시 주입되면, video 의
+    // playing 이벤트는 이미 지나가 다시 오지 않는다. 그래서 bindVideoAutoEnable 의
+    // 리스너만으로는 자동 활성화가 걸리지 않아 '항상 켜기'인데도 믹서가 풀린 채 남았다.
+    // 플래그를 받은 시점(= 값이 처음 도착하거나 켜진 순간)에 현재 재생 상태로 즉시
+    // 한 번 시도한다.
+    if (mixerAlwaysOn && !mixerAlwaysOnPrev) {
+      if (typeof bindVideoAutoEnable === "function") bindVideoAutoEnable();
+      if (typeof maybeAutoEnableMixer === "function") maybeAutoEnableMixer();
+    }
     // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
     wideScreenAuto = e.data.wideScreenAuto === true;
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
@@ -310,8 +322,10 @@
   // 라이브 되감기/앞으로(seekable 윈도우 내) 관련
   const REWIND_BUTTON_CLASS = "cheese-live-rewind-button";
   const FORWARD_BUTTON_CLASS = "cheese-live-forward-button";
+  const VOD_SEEK_BUTTON_CLASS = "cheese-vod-seek-button";
   const SEEK_BAR_CLASS = "cheese-live-seek-bar"; // 되감기 가능 영역 표시 + 드래그 seek 바
   let seekStepS = 10; // 한 번에 ±N초(settings에서 3~60 조절). content.js가 전달.
+  const VOD_SEEK_STEP_S = 5; // 치지직 다시보기 기본 방향키 이동 간격
   const SEEK_EDGE_PAD_S = 2; // 라이브 엣지에 이만큼 못 미치게(엣지 직전까지만 앞으로)
 
   // 라이브 싱크 따라잡기 관련
@@ -6006,14 +6020,27 @@
     return btn;
   }
 
-  // ── 라이브 되감기/앞으로(seekable 윈도우 내) ──────────────────────────────
+  // ── 라이브·다시보기 되감기/앞으로 ─────────────────────────────────────────
   // 치지직 라이브는 seekable.start가 진입 시점에서 거의 고정이고 end만 전진하는
   // DVR 성격(측정 확인). 그래서 seekable.start ~ (라이브 엣지-여유) 안에서 ±10초
   // 이동을 제공한다. 과거로 가면 onUserSeeked가 lastUserSeekAt을 기록해 자동
   // 따라잡기가 잠시 멈춘다(우리가 ourSeekUntil을 설정하지 않으므로 '사용자 seek'로 인식).
+  // 다시보기는 같은 버튼 위치·아이콘을 재사용하되 치지직 기본 간격인 ±5초만 적용한다.
   // 아이콘 안 숫자(N)는 step에 따라 1~2자리. font-size를 자릿수에 맞춰 줄인다.
-  function rewindIcon() {
-    const n = seekStepS;
+  function isLiveSeekPage() {
+    return location.pathname.startsWith("/live/");
+  }
+
+  function isVodSeekPage() {
+    return location.pathname.startsWith("/video/");
+  }
+
+  function currentSeekStep() {
+    return isVodSeekPage() ? VOD_SEEK_STEP_S : seekStepS;
+  }
+
+  function rewindIcon(step = currentSeekStep()) {
+    const n = step;
     const fs = n >= 10 ? 8 : 9;
     return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <path d="M18 11a7 7 0 1 1-6.7 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"></path>
@@ -6022,8 +6049,8 @@
     </svg>`;
   }
 
-  function forwardIcon() {
-    const n = seekStepS;
+  function forwardIcon(step = currentSeekStep()) {
+    const n = step;
     const fs = n >= 10 ? 8 : 9;
     return `<svg class="pzp-ui-icon__svg" focusable="false" xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
       <path d="M18 11a7 7 0 1 0 6.7 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"></path>
@@ -6036,40 +6063,64 @@
     const btn = document.createElement("button");
     const cls = forward ? FORWARD_BUTTON_CLASS : REWIND_BUTTON_CLASS;
     btn.className = `${cls} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    const vod = isVodSeekPage();
+    if (vod) btn.classList.add(VOD_SEEK_BUTTON_CLASS);
     btn.type = "button";
     btn.disabled = true;
-    const label = forward ? `${seekStepS}초 앞으로` : `${seekStepS}초 되감기`;
+    const step = vod ? VOD_SEEK_STEP_S : seekStepS;
+    const label = forward ? `${step}초 앞으로` : `${step}초 되감기`;
     const tip = forward
-      ? `${seekStepS}초 앞으로 (→)`
-      : `${seekStepS}초 되감기 (←)`;
+      ? `${step}초 앞으로 (→)`
+      : `${step}초 되감기 (←)`;
+    btn.dataset.seekLabelSignature = `${forward ? "forward" : "rewind"}:${step}`;
     btn.setAttribute("aria-label", label);
-    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${tip}</span><span class="pzp-ui-icon">${forward ? forwardIcon() : rewindIcon()}</span>`;
+    btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${tip}</span><span class="pzp-ui-icon">${forward ? forwardIcon(step) : rewindIcon(step)}</span>`;
     return btn;
   }
 
   // step 변경 시 이미 떠 있는 버튼의 아이콘/라벨을 갱신(재생성 없이).
   function refreshSeekButtonLabels() {
-    const rew = document.querySelector(`.${REWIND_BUTTON_CLASS}`);
-    const fwd = document.querySelector(`.${FORWARD_BUTTON_CLASS}`);
-    if (rew) {
-      rew.setAttribute("aria-label", `${seekStepS}초 되감기`);
-      rew.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${seekStepS}초 되감기 (←)</span><span class="pzp-ui-icon">${rewindIcon()}</span>`;
-    }
-    if (fwd) {
-      fwd.setAttribute("aria-label", `${seekStepS}초 앞으로`);
-      fwd.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${seekStepS}초 앞으로 (→)</span><span class="pzp-ui-icon">${forwardIcon()}</span>`;
-    }
+    document
+      .querySelectorAll(`.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`)
+      .forEach((button) => {
+        const forward = button.classList.contains(FORWARD_BUTTON_CLASS);
+        const step = button.classList.contains(VOD_SEEK_BUTTON_CLASS)
+          ? VOD_SEEK_STEP_S
+          : seekStepS;
+        const direction = forward ? "앞으로" : "되감기";
+        const signature = `${forward ? "forward" : "rewind"}:${step}`;
+        // ensure tick 때 같은 SVG를 계속 다시 쓰면 전역 MutationObserver를 한 번 더
+        // 깨우고 기존 노드를 버리게 된다. 모드/간격이 실제로 바뀔 때만 갱신한다.
+        if (button.dataset.seekLabelSignature === signature) return;
+        button.dataset.seekLabelSignature = signature;
+        button.setAttribute("aria-label", `${step}초 ${direction}`);
+        button.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${step}초 ${direction} (${forward ? "→" : "←"})</span><span class="pzp-ui-icon">${forward ? forwardIcon(step) : rewindIcon(step)}</span>`;
+      });
   }
 
-  // 현재 video의 되감기/앞으로 가능 여부를 반환. {video, start, end, cur}
+  // 현재 video의 이동 가능 범위를 반환. 라이브는 DVR seekable 범위, 다시보기는
+  // 전체 재생 시간을 사용한다.
   function getSeekWindow() {
     const v = findVideo();
-    if (!v || !v.seekable || !v.seekable.length) return null;
+    if (!v) return null;
+    if (isVodSeekPage()) {
+      let end = Number(v.duration);
+      if (
+        (!Number.isFinite(end) || end <= 0) &&
+        v.seekable &&
+        v.seekable.length
+      ) {
+        end = v.seekable.end(v.seekable.length - 1);
+      }
+      if (!Number.isFinite(end) || end <= 0) return null;
+      return { video: v, start: 0, end, cur: v.currentTime, mode: "vod" };
+    }
+    if (!isLiveSeekPage() || !v.seekable || !v.seekable.length) return null;
     const start = v.seekable.start(0);
     const end = v.seekable.end(v.seekable.length - 1);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
       return null;
-    return { video: v, start, end, cur: v.currentTime };
+    return { video: v, start, end, cur: v.currentTime, mode: "live" };
   }
 
   // 되감기/앞으로 오버레이 누적 표시용. 짧은 간격 내 같은 방향 연속이면 초를 합산.
@@ -6082,9 +6133,13 @@
   function seekBy(forward) {
     const w = getSeekWindow();
     if (!w) return;
-    const step = forward ? seekStepS : -seekStepS;
-    // 앞으로는 라이브 엣지 직전(여유 2초)까지만. 되감기는 윈도우 시작까지.
-    const maxFwd = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+    const amount = w.mode === "vod" ? VOD_SEEK_STEP_S : seekStepS;
+    const step = forward ? amount : -amount;
+    // 라이브는 엣지 직전까지만, 다시보기는 영상 끝까지 이동한다.
+    const maxFwd =
+      w.mode === "vod"
+        ? w.end
+        : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
     let target = w.cur + step;
     target = Math.max(w.start, Math.min(maxFwd, target));
     if (Math.abs(target - w.cur) < 0.05) return; // 이미 끝/시작
@@ -6092,7 +6147,11 @@
     // 인식해 되감기 시 자동 따라잡기를 잠시 멈춘다(의도된 동작).
     // 되감기 버튼으로 10초 이내만 되감았으면 '짧은 되감기'로 표시해 onUserSeeked가
     // 60초 대신 짧은(10초) 일시정지를 적용하게 한다(잠깐 놓친 부분 확인용).
-    if (!forward && Math.abs(target - w.cur) <= SYNC_SHORT_REWIND_MAX_S + 0.5) {
+    if (
+      w.mode === "live" &&
+      !forward &&
+      Math.abs(target - w.cur) <= SYNC_SHORT_REWIND_MAX_S + 0.5
+    ) {
       rewindButtonSeekUntil = Date.now() + 3000; // seeked가 곧 도착(여유 3초)
     }
     const moved = Math.round(Math.abs(target - w.cur)); // 실제 이동한 초(클램프 반영)
@@ -6118,7 +6177,7 @@
     );
     // 되감기로 라이브 엣지에서 유의미하게 뒤(과거)에 서면 hls 강제 동기화를 무력화해
     // 지연이 커져도 원점으로 튕기지 않게 한다. 엣지 근처로 복귀하면 원복.
-    updateHlsRewindLock(target, w.end);
+    if (w.mode === "live") updateHlsRewindLock(target, w.end);
   }
 
   // 현재 목표 위치가 라이브 엣지에서 얼마나 뒤인지에 따라 hls 되감기 락을 켜고 끈다.
@@ -6134,21 +6193,34 @@
   function updateSeekButtonsState() {
     const rew = document.querySelector(`.${REWIND_BUTTON_CLASS}`);
     const fwd = document.querySelector(`.${FORWARD_BUTTON_CLASS}`);
-    if (!rew && !fwd) return;
+    // 치지직이 플레이어를 재렌더하며 버튼을 먼저 제거한 경우 타이머만 남기지 않는다.
+    // 전역 옵저버의 다음 tick이 버튼을 복원하면 startSeekCheck도 다시 시작된다.
+    if (!rew && !fwd) {
+      stopSeekCheck();
+      return;
+    }
+    if (document.hidden) return;
     const w = getSeekWindow();
     if (!w) {
       if (rew) rew.disabled = true;
       if (fwd) fwd.disabled = true;
       return;
     }
-    const maxFwd = Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+    const maxFwd =
+      w.mode === "vod"
+        ? w.end
+        : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
     if (rew) rew.disabled = w.cur - w.start < 0.5; // 더 되감을 게 없으면 비활성
     if (fwd) fwd.disabled = maxFwd - w.cur < 0.5; // 라이브 엣지면 비활성
   }
 
   function ensureSeekButtons() {
-    // 라이브에서만, 그리고 되감기 기능이 숨김이 아닐 때만.
-    if (!location.pathname.startsWith("/live/") || featureFlags.liveRewind) {
+    const live = isLiveSeekPage();
+    const vod = isVodSeekPage();
+    const shouldShow =
+      (live && !featureFlags.liveRewind) ||
+      (vod && featureFlags.vodSeekButtons);
+    if (!shouldShow) {
       removeSeekButtons();
       return;
     }
@@ -6165,10 +6237,19 @@
       controls.firstChild;
     const baseAnchor =
       syncBtn || insertAnchorFor(controls, "rewind", rightAnchor);
-    if (!controls.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
+    // SPA 이동으로 라이브와 다시보기 사이를 오가면 같은 클래스의 이전 버튼이 남을 수
+    // 있다. 모드가 달라졌을 때만 교체해 숫자와 동작 상태를 정확히 맞춘다.
+    player
+      .querySelectorAll(`.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`)
+      .forEach((button) => {
+        if (button.classList.contains(VOD_SEEK_BUTTON_CLASS) !== vod) {
+          button.remove();
+        }
+      });
+    if (!player.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
       controls.insertBefore(createSeekButton(false), baseAnchor);
     }
-    if (!controls.querySelector(`.${FORWARD_BUTTON_CLASS}`)) {
+    if (!player.querySelector(`.${FORWARD_BUTTON_CLASS}`)) {
       // 따라잡기가 앵커면 그 다음(되감기·따라잡기·앞으로). 아니면 되감기 바로 다음
       // (되감기·앞으로가 붙게).
       const rewindBtn = controls.querySelector(`.${REWIND_BUTTON_CLASS}`);
@@ -6179,13 +6260,14 @@
           : baseAnchor;
       controls.insertBefore(createSeekButton(true), fwdAnchor);
     }
+    refreshSeekButtonLabels();
     startSeekCheck();
     updateSeekButtonsState();
   }
 
   // 되감기/앞으로 버튼 활성 상태를 1초 주기로 갱신(따라잡기 기능과 독립).
   function startSeekCheck() {
-    if (seekCheckTimer) return;
+    if (seekCheckTimer || document.hidden) return;
     seekCheckTimer = window.setInterval(updateSeekButtonsState, SYNC_CHECK_MS);
   }
 
@@ -6205,6 +6287,27 @@
     // removeSeekBar() 를 불렀는데, 되감기 숨김 시 tick 이 removeSeekButtons(바 제거)→
     // applyLiveSeekBar(바 생성)를 반복해 전역 옵저버가 무한 발화하며 바가 진동했다.
   }
+
+  // 숨겨진 탭에서는 버튼을 누를 수 없으므로 1초 상태 확인도 멈춘다. 복귀 시 버튼이
+  // 남아 있으면 즉시 상태를 맞추고 타이머를 재개한다.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopSeekCheck();
+      return;
+    }
+    if (!isLiveSeekPage() && !isVodSeekPage()) {
+      removeSeekButtons();
+      return;
+    }
+    if (
+      document.querySelector(
+        `.${REWIND_BUTTON_CLASS}, .${FORWARD_BUTTON_CLASS}`,
+      )
+    ) {
+      updateSeekButtonsState();
+      startSeekCheck();
+    }
+  });
 
   // ── 라이브 되감기 바(seekable 구간 표시 + 드래그 seek) ──────────────────────
   // 치지직 라이브 프로그레스바는 현재를 항상 100%로 두고 되감기 가능 범위(seekable
@@ -7493,9 +7596,10 @@
     if (!player) return false; // 플레이어 없으면 full tick(자동활성화 등 처리 필요)
     const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
     if (!controls) return false;
-    const isLive = location.pathname.startsWith("/live/");
+    const isLive = isLiveSeekPage();
+    const isVod = isVodSeekPage();
     // 켜진 기능의 버튼이 컨트롤 바에 실제로 있어야 안정. (숨김이면 없어야 안정.)
-    const has = (cls) => !!controls.querySelector(`.${cls}`);
+    const has = (cls) => !!player.querySelector(`.${cls}`);
     // 오디오 믹서
     if (featureFlags.audioMixer) {
       if (document.getElementById(PANEL_ID) || has(BUTTON_CLASS)) return false;
@@ -7539,6 +7643,22 @@
       )
         return false;
     }
+    if (isVod) {
+      const shouldHaveVodSeek = featureFlags.vodSeekButtons;
+      const hasVodRewind = !!player.querySelector(
+        `.${REWIND_BUTTON_CLASS}.${VOD_SEEK_BUTTON_CLASS}`,
+      );
+      const hasVodForward = !!player.querySelector(
+        `.${FORWARD_BUTTON_CLASS}.${VOD_SEEK_BUTTON_CLASS}`,
+      );
+      if (
+        shouldHaveVodSeek
+          ? !hasVodRewind || !hasVodForward
+          : hasVodRewind || hasVodForward
+      ) {
+        return false;
+      }
+    }
     // 자동 넓은 화면 적용이 아직 남아 있으면(이 미디어에 미적용) full tick 필요.
     if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey)
       return false;
@@ -7560,7 +7680,10 @@
   function tick() {
     // 클립 만들기(클립 에디터)에선 오디오 믹서를 개입시키지 않는다. seeker 드래그로
     // DOM 이 매 프레임 바뀌는데 여기서 video 탐색/그래프 판정을 돌리면 영상이 버벅인다.
-    if (location.pathname.startsWith("/clip-editor")) return;
+    if (location.pathname.startsWith("/clip-editor")) {
+      if (seekCheckTimer) removeSeekButtons();
+      return;
+    }
     const pageKey = getPageKey();
     if (!pageKey) {
       // 라이브/다시보기 URL을 벗어남. 단, 플레이어가 PIP(미니플레이어)로 떠 계속
@@ -7592,6 +7715,7 @@
         removeStatsButton();
         stopSyncCatchUp();
         removeSyncButton();
+        removeSeekButtons();
         clearGraphRetryBlock();
         currentPageKey = null;
         currentMediaId = null;
@@ -7675,11 +7799,9 @@
     } else {
       ensureSyncButton();
     }
-    if (featureFlags.liveRewind) {
-      removeSeekButtons();
-    } else {
-      ensureSeekButtons();
-    }
+    // 라이브 숨김 설정과 다시보기 표시 설정을 ensureSeekButtons 내부에서 페이지별로
+    // 판정한다. 같은 버튼 위치·순서를 공유하므로 여기서는 항상 한 번 재평가한다.
+    ensureSeekButtons();
     // 되감기 바는 되감기/앞으로 '버튼'(liveRewind)과 독립 — 버튼을 숨겨도 바는 유지한다.
     // 그래서 버튼 분기 밖에서 항상 재평가한다(내부는 liveSeekBarOn 만 따름).
     applyLiveSeekBar();
@@ -7846,7 +7968,22 @@
     );
   }
   function scheduleTick(mutations) {
+    // ⚠ 채팅 전용 변이는 건너뛰어 부하를 줄이지만, 그러면 '채팅 변이가 tick 을 계속
+    // 깨워 준다'는 전제가 깨진다. tick 은 ensureEnabledGraph 로 플레이어 재렌더·PIP
+    // 전환 후 믹서를 다시 붙이는 역할도 하므로, 효과가 켜져 있는 동안에는 건너뛰지
+    // 않는다(안 그러면 조용한 방송에서 믹서가 풀린 채로 남는다).
+    // ⚠ syncCatchUp 은 아래쪽에서 let 으로 선언돼, 옵저버가 모듈 본문 완료 전에
+    // 발화하면 TDZ 오류가 난다(typeof 로도 못 막는다). try 로 감싸 안전하게 읽는다.
+    let effectActive = state.enabled === true;
+    if (!effectActive) {
+      try {
+        effectActive = syncCatchUp != null;
+      } catch {
+        effectActive = false;
+      }
+    }
     if (
+      !effectActive &&
       mutations?.length &&
       mutations.every(isChatStreamOnlyMutation)
     ) {

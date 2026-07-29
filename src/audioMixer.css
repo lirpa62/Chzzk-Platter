@@ -1695,13 +1695,15 @@
   gap: 6px;
   padding: 16px 20px;
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.55);
+  /* ⚠ backdrop-filter 를 쓰지 않는다. 이 속성은 '뒤에 있는 것'(= 영상)을 필터 패스로
+     다시 합성하게 만들어, 영상이 하드웨어 디코딩 전용 표면에서 벗어난다. 그러면
+     NVIDIA RTX VSR 같은 드라이버 측 업스케일링이 꺼진다(제보). 흐림 효과 대신
+     배경을 조금 더 진하게 해 가독성을 유지한다. */
+  background: rgba(0, 0, 0, 0.72);
   color: #fff;
   pointer-events: none;
   opacity: 0;
   z-index: 2147483000;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
   transition:
     opacity 0.12s ease,
     transform 0.12s ease;

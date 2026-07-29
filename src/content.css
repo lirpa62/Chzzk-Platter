@@ -35,6 +35,8 @@
   --cheese-platter-content-neutral-warm-base: #6d6e70;
   --cheese-platter-content-neutral-warm-strong: #2e3033;
   --cheese-platter-content-neutral-warm-stronger: #2e3033;
+  --cheese-platter-background-inverted-alpha-1: #0000000a;
+  --cheese-platter-neutral-foreground-subtle-1: #2e2e2e;
   --cheese-platter-shadow-base: #0000000d;
   --cheese-platter-shadow-strong: #0000001a;
   --cheese-platter-surface-brand-weak: #d1f0e3;
@@ -133,6 +135,8 @@ html.cheese-channel-live-profile-custom
   --cheese-platter-content-neutral-warm-base: #6d6e70;
   --cheese-platter-content-neutral-warm-strong: #979899;
   --cheese-platter-content-neutral-warm-stronger: #c0c1c2;
+  --cheese-platter-background-inverted-alpha-1: #ffffff0a;
+  --cheese-platter-neutral-foreground-subtle-1: #f1f1f1;
   --cheese-platter-shadow-base: #0003;
   --cheese-platter-shadow-strong: #0000004d;
   --cheese-platter-surface-brand-weak: #006641;
@@ -1518,8 +1522,29 @@ html.cheese-channel-live-profile-custom
 .cheese-search-results-list[data-content-type="clips"]
   .cheese-search-skeleton-card {
   flex: none;
-  width: calc(33.3333% - 9.33333px);
+  width: calc(25% - 10.5px);
   pointer-events: none;
+}
+
+@container (max-width: 920px) {
+  .cheese-search-results-list[data-content-type="clips"]
+    .cheese-search-skeleton-card {
+    width: calc(33.3333% - 9.33333px);
+  }
+}
+
+@container (max-width: 640px) {
+  .cheese-search-results-list[data-content-type="clips"]
+    .cheese-search-skeleton-card {
+    width: calc(50% - 7px);
+  }
+}
+
+@container (max-width: 420px) {
+  .cheese-search-results-list[data-content-type="clips"]
+    .cheese-search-skeleton-card {
+    width: 100%;
+  }
 }
 
 .cheese-search-results-list[data-content-type="clips"]
@@ -5882,6 +5907,16 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
   object-fit: cover;
 }
 
+html.cheese-channel-profile-radius-enabled
+  #cheese-header-follow
+  .cheese-header-follow-profile,
+html.cheese-channel-profile-radius-enabled
+  #cheese-header-follow
+  .cheese-header-follow-profile
+  img {
+  border-radius: var(--cheese-channel-profile-radius, 50%) !important;
+}
+
 #cheese-header-follow .cheese-header-follow-profile.is-live::after {
   position: absolute;
   right: -1px;
@@ -6257,6 +6292,27 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
   display: block;
   background: #000;
   border: 2px solid #16161a;
+}
+
+html.cheese-channel-profile-radius-enabled
+  #cheese-follow-preview
+  .cheese-follow-preview-meta-profile,
+html.cheese-channel-profile-radius-enabled
+  #cheese-follow-preview
+  .cheese-follow-preview-meta-profile
+  img {
+  border-radius: var(--cheese-channel-profile-radius, 50%) !important;
+}
+
+html.cheese-channel-live-profile-custom
+  #cheese-follow-preview
+  .cheese-follow-preview-meta-profile {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    var(--cheese-channel-live-profile-angle),
+    var(--cheese-channel-live-profile-start) 0%,
+    var(--cheese-channel-live-profile-end) 100%
+  ) !important;
 }
 
 /* 중앙: 제목(위) + 채널명·인증·카테고리(아래) */
@@ -7895,6 +7951,115 @@ html.cheese-fcln-lock body {
 .cheese-search-rerank-more button[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
+
+.cheese-search-section-top-wrap {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.cheese-search-section-top-wrap[hidden] {
+  display: none !important;
+}
+
+.cheese-search-section-top-wrap.is-fab {
+  --cheese-search-fab-edge-offset: max(24px, env(safe-area-inset-right));
+  --cheese-search-fab-bottom-edge-offset: max(
+    24px,
+    env(safe-area-inset-bottom)
+  );
+  --cheese-search-fab-sidebar-offset: 0px;
+  --cheese-search-fab-section-offset: 0px;
+  --cheese-search-fab-section-bottom-offset: 0px;
+  position: fixed;
+  right: calc(
+    var(--cheese-search-fab-edge-offset) +
+      var(--cheese-search-fab-sidebar-offset) +
+      var(--cheese-search-fab-section-offset)
+  );
+  bottom: calc(
+    var(--cheese-search-fab-bottom-edge-offset) +
+      var(--cheese-search-fab-section-bottom-offset)
+  );
+  z-index: 10020;
+  width: auto;
+  margin: 0;
+  pointer-events: none;
+}
+
+.cheese-search-section-top-wrap.is-fab .cheese-search-section-top {
+  width: 44px;
+  height: 44px;
+  border-color: transparent;
+  background: var(
+    --sem-color-surface-brand-strong,
+    var(--cheese-platter-content-brand-base, #00d98b)
+  );
+  color: var(--sem-color-content-neutral-primary-static, #fff);
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.2),
+    0 8px 22px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+
+.cheese-search-section-top-wrap.is-fab .cheese-search-section-top:hover {
+  border-color: transparent;
+  color: var(--sem-color-content-neutral-primary-static, #fff);
+  filter: brightness(0.94);
+}
+
+.cheese-search-section-top-wrap.is-fab
+  .cheese-search-section-top:focus-visible {
+  outline: 2px solid
+    var(
+      --sem-color-border-brand-base,
+      var(--cheese-platter-border-brand-base)
+    );
+  outline-offset: 3px;
+}
+
+.cheese-search-section-top {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 50%;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+
+.cheese-search-section-top:hover {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-search-rerank-bar,
+.cheese-integrated-search-clips-header {
+  scroll-margin-top: 84px;
+}
+
 /* 재정렬 안내 정보 아이콘 + 호버/포커스 툴팁. */
 .cheese-search-rerank-info {
   position: relative;
@@ -7950,6 +8115,931 @@ html.cheese-fcln-lock body {
 .cheese-search-rerank-info:hover .cheese-search-rerank-info-tip,
 .cheese-search-rerank-info:focus-visible .cheese-search-rerank-info-tip {
   display: block;
+}
+
+.cheese-search-options {
+  position: relative;
+  flex: none;
+}
+
+.cheese-search-options-trigger,
+.cheese-search-options-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 6px;
+  background: var(
+    --sem-color-surface-neutral-weakest,
+    var(--cheese-platter-surface-neutral-weakest)
+  );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+}
+
+.cheese-search-options-trigger:hover,
+.cheese-search-options-trigger[aria-expanded="true"],
+.cheese-search-options-close:hover {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-search-options-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 120;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 120px));
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.cheese-search-options.is-align-right .cheese-search-options-popover {
+  right: 0;
+  left: auto;
+}
+
+.cheese-search-options.is-open-up .cheese-search-options-popover {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+.cheese-search-options-popover[hidden] {
+  display: none;
+}
+
+.cheese-search-options-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base)
+    );
+}
+
+.cheese-search-options-head strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.cheese-search-options-close {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.cheese-search-options-body {
+  max-height: min(590px, calc(100vh - 170px));
+  padding: 2px 14px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cheese-search-options-group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 0;
+  border-bottom: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base)
+    );
+}
+
+.cheese-search-options-group:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+
+.cheese-search-options-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cheese-search-options-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* 제목 옆 (i) 버튼 — 누르면 아래 안내 패널이 열린다(설정 팝업과 동일한 방식). */
+.cheese-search-options-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  margin-left: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+  vertical-align: -3px;
+}
+
+.cheese-search-options-info:hover,
+.cheese-search-options-info[aria-expanded="true"] {
+  color: #03c75a;
+  background: rgba(3, 199, 90, 0.14);
+}
+
+.cheese-search-options-info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 9px 11px;
+  border: 1px solid
+    var(--sem-color-border-brand-base, var(--cheese-platter-border-brand-base));
+  background: var(
+    --sem-color-surface-brand-weakest,
+    var(--cheese-platter-surface-brand-weakest)
+  );
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.cheese-search-options-info-panel[hidden] {
+  display: none;
+}
+
+.cheese-search-options-info-panel strong {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 안내 패널 안의 클릭 가능한 주소(설정 열기 / 복사). 버튼이지만 코드처럼 보이게. */
+.cheese-search-options-code {
+  display: inline;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.2);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.cheese-search-options-code:hover,
+.cheese-search-options-code:focus-visible {
+  background: rgba(3, 199, 90, 0.24);
+  outline: 0;
+}
+
+/* 복사 완료 피드백 — 배경만 잠깐 강조한다(레이아웃이 흔들리지 않게). */
+.cheese-search-options-code.is-copied {
+  background: rgba(3, 199, 90, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(3, 199, 90, 0.55);
+}
+
+.cheese-search-options-reset {
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.cheese-search-options-reset:hover {
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-search-options-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.cheese-search-options-segments.is-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cheese-search-options-segments.is-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cheese-search-options-segments.is-five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.cheese-search-options-segments button {
+  min-width: 0;
+  height: 30px;
+  padding: 0 5px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 5px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.cheese-search-options-segments button:hover,
+.cheese-search-options-segments button.is-active {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+  background: var(
+    --sem-color-surface-brand-weakest,
+    var(--cheese-platter-surface-brand-weakest)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-search-options-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 10px;
+}
+
+.cheese-search-options-range input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-search-options-range input[type="number"],
+.cheese-search-options-range input[type="text"],
+.cheese-search-options-field input {
+  width: 100%;
+  height: 30px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 5px;
+  outline: none;
+  background: var(
+    --sem-color-surface-neutral-weakest,
+    var(--cheese-platter-surface-neutral-weakest)
+  );
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.cheese-search-options-range input[type="number"]:focus,
+.cheese-search-options-range input[type="text"]:focus,
+.cheese-search-options-field input:focus {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+}
+
+.cheese-search-options-range
+  input[data-search-options-clip-limit] {
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .cheese-search-section-top-wrap.is-fab {
+    --cheese-search-fab-edge-offset: max(14px, env(safe-area-inset-right));
+    --cheese-search-fab-bottom-edge-offset: max(
+      14px,
+      env(safe-area-inset-bottom)
+    );
+  }
+}
+
+.cheese-search-options-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+}
+
+.cheese-search-options-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cheese-search-options-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 10px;
+}
+
+/* ── 통합검색(/search) 최근 추천·관련 채널 클립 결과 ──────────────────────── */
+.cheese-integrated-search-clips {
+  width: 100%;
+  min-width: 0;
+  margin-top: 38px;
+  padding-bottom: 18px;
+}
+
+.cheese-integrated-search-clips[hidden] {
+  display: none !important;
+}
+
+.cheese-integrated-search-clips.cheese-integrated-search-native-empty-layout {
+  box-sizing: border-box;
+  max-width: 2060px;
+  margin: 0 auto;
+  padding: 15px 30px 0;
+}
+
+#layout-body
+  section.cheese-integrated-search-native-empty-hidden {
+  display: none !important;
+}
+
+html.cheese-integrated-search-clips-active
+  #layout-body
+  section:has(i[class*="_image_search_"]) {
+  display: none !important;
+}
+
+/* 스크롤 잠금. overflow:hidden 만 걸면 스크롤바가 사라진 폭만큼 페이지가 넓어져
+   내용이 옆으로 흔들린다. 사라진 스크롤바 폭(JS 가 --cheese-scrollbar-gap 으로
+   지정)만큼 padding 으로 채워 레이아웃 이동을 없앤다. */
+html.cheese-search-clip-player-open {
+  overflow: hidden !important;
+  padding-right: var(--cheese-scrollbar-gap, 0px) !important;
+}
+
+.cheese-search-clip-player-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.cheese-search-clip-player-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: var(
+    --sem-color-background-neutral-strong,
+    var(--cheese-platter-background-neutral-strong, #18191c)
+  );
+  color: var(
+    --sem-color-content-neutral-strong,
+    var(--cheese-platter-content-neutral-strong, #fff)
+  );
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.45);
+}
+
+.cheese-search-clip-player-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 0 12px 0 16px;
+}
+
+.cheese-search-clip-player-head > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-search-clip-player-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.cheese-search-clip-player-actions a,
+.cheese-search-clip-player-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cheese-search-clip-player-actions a:hover,
+.cheese-search-clip-player-actions button:hover,
+.cheese-search-clip-player-actions a:focus-visible,
+.cheese-search-clip-player-actions button:focus-visible {
+  background: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+}
+
+.cheese-search-clip-player-frame-wrap {
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.cheese-search-clip-player-frame-wrap iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  .cheese-search-clip-player-overlay {
+    padding: 12px;
+  }
+
+  .cheese-search-clip-player-dialog {
+    max-height: calc(100vh - 24px);
+  }
+}
+
+.cheese-integrated-search-clips-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.cheese-integrated-search-clips-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cheese-integrated-search-clips-heading > strong {
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 28px;
+}
+
+.cheese-integrated-search-clips-category-info
+  .cheese-search-rerank-info-tip {
+  left: -48px;
+  width: min(320px, calc(100vw - 40px));
+}
+
+.cheese-integrated-search-clips-scope {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 5px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.cheese-integrated-search-clips-count {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.cheese-integrated-search-clips-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cheese-integrated-search-clips-date,
+.cheese-integrated-search-clips-sort {
+  display: inline-grid;
+  flex: none;
+  padding: 3px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 7px;
+  background: var(
+    --sem-color-surface-neutral-weakest,
+    var(--cheese-platter-surface-neutral-weakest)
+  );
+}
+
+.cheese-integrated-search-clips-date {
+  grid-template-columns: repeat(4, minmax(48px, 1fr));
+  min-width: 222px;
+}
+
+.cheese-integrated-search-clips-sort {
+  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  min-width: 188px;
+}
+
+.cheese-integrated-search-clips-date button,
+.cheese-integrated-search-clips-sort button {
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.cheese-integrated-search-clips-date button:hover,
+.cheese-integrated-search-clips-sort button:hover {
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+}
+
+.cheese-integrated-search-clips-date button.is-active,
+.cheese-integrated-search-clips-sort button.is-active {
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.cheese-integrated-search-clips-status {
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(
+    --sem-color-surface-neutral-weakest,
+    var(--cheese-platter-surface-neutral-weakest)
+  );
+  border-radius: 10px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cheese-integrated-search-clips-status.is-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 16px 14px 20px;
+  text-align: center;
+}
+
+.cheese-integrated-search-clips-empty-visual {
+  display: block;
+  width: min(180px, 45vw);
+  aspect-ratio: 7 / 5;
+}
+
+.cheese-integrated-search-clips-empty-visual img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cheese-integrated-search-clips-empty-label {
+  display: block;
+}
+
+.cheese-integrated-search-clips-status[hidden],
+.cheese-search-integrated-clips-list[hidden],
+.cheese-integrated-search-clips-more[hidden] {
+  display: none !important;
+}
+
+.cheese-search-integrated-clips-list .cheese-search-clip-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.cheese-search-integrated-clips-list
+  .cheese-search-clip-meta-row
+  .cheese-search-clip-category-link {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.cheese-search-integrated-clips-list .cheese-search-clip-channel-link {
+  position: relative;
+  z-index: 1;
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 48%;
+  margin-left: auto;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  pointer-events: auto;
+  text-align: right;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cheese-search-integrated-clips-list .cheese-search-clip-channel-link:hover {
+  color: #fff;
+}
+
+.cheese-search-integrated-clips-list .clip_card_title__Pc2jc {
+  margin-top: 0;
+}
+
+.cheese-integrated-search-clips-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 18px;
+}
+
+.cheese-integrated-search-clips-more-native {
+  padding-top: 0;
+}
+
+.cheese-integrated-search-clips-more
+  button:not(.cheese-integrated-search-clips-more-button-native) {
+  min-width: 150px;
+  height: 38px;
+  padding: 0 18px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 7px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.cheese-integrated-search-clips-more
+  button:not(.cheese-integrated-search-clips-more-button-native):hover:not(
+    :disabled
+  ) {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-border-brand-base)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-integrated-search-clips-more button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.cheese-integrated-search-clips-more-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 5px;
+}
+
+.cheese-integrated-search-clips-more-pulse i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: cheese-integrated-search-clips-more-pulse 0.9s ease-in-out
+    infinite;
+}
+
+.cheese-integrated-search-clips-more-pulse i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.cheese-integrated-search-clips-more-pulse i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.cheese-integrated-search-clips-more-button.is-loading
+  [data-integrated-search-clips-native-icon] {
+  display: none;
+}
+
+@keyframes cheese-integrated-search-clips-more-pulse {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheese-integrated-search-clips-more-pulse i {
+    animation: none;
+    opacity: 0.75;
+  }
+}
+
+@media (max-width: 720px) {
+  .cheese-integrated-search-clips-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cheese-integrated-search-clips-sort {
+    width: 100%;
+  }
+
+  .cheese-integrated-search-clips-controls,
+  .cheese-integrated-search-clips-date {
+    width: 100%;
+  }
+
+  .cheese-search-options-popover,
+  .cheese-search-options.is-align-right .cheese-search-options-popover {
+    position: fixed;
+    top: 72px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+    max-height: calc(100vh - 88px);
+  }
+
+  .cheese-search-options-body {
+    max-height: calc(100vh - 140px);
+  }
 }
 
 /* ══ 다시보기 AI 생성 챕터 숨김 ═══════════════════════════════════════════════
@@ -8503,8 +9593,10 @@ html.cheese-player-hide-liveSync .cheese-live-sync-button,
 html.cheese-player-hide-streamStats .cheese-stream-stats-button,
 html.cheese-player-hide-tabMute .cheese-tab-mute-button,
 html.cheese-player-hide-screenshotButton .cheese-screenshot-button,
-html.cheese-player-hide-liveRewind .cheese-live-rewind-button,
-html.cheese-player-hide-liveRewind .cheese-live-forward-button {
+html.cheese-player-hide-liveRewind
+  .cheese-live-rewind-button:not(.cheese-vod-seek-button),
+html.cheese-player-hide-liveRewind
+  .cheese-live-forward-button:not(.cheese-vod-seek-button) {
   display: none !important;
 }
 
@@ -8523,4 +9615,34 @@ html.cheese-player-hide-liveRewind .cheese-live-forward-button {
 #cheese-custom-follow li[data-live="0"]:hover img {
   filter: grayscale(0);
   opacity: 1;
+}
+
+/* ── 짧은 안내 토스트(주소 복사 등) ─────────────────────────────────────────── */
+#cheese-copy-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  z-index: 2147483647;
+  transform: translate(-50%, 10px);
+  max-width: 80vw;
+  padding: 9px 16px;
+  border: 1px solid rgba(3, 199, 90, 0.45);
+  border-radius: 9px;
+  background: rgba(20, 22, 26, 0.95);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+#cheese-copy-toast.is-shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

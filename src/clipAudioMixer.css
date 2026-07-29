@@ -1,0 +1,159 @@
+:root {
+  --cheese-platter-background-inverted-alpha-1: #0000000a;
+  --cheese-platter-neutral-foreground-subtle-1: #2e2e2e;
+}
+
+.theme_dark {
+  --cheese-platter-background-inverted-alpha-1: #ffffff0a;
+  --cheese-platter-neutral-foreground-subtle-1: #f1f1f1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cheese-platter-background-inverted-alpha-1: #ffffff0a;
+    --cheese-platter-neutral-foreground-subtle-1: #f1f1f1;
+  }
+}
+
+[data-cheese-clip-audio-mixer-toolbar]::before {
+  content: "";
+  display: block;
+  flex: 0 0 64px;
+  width: 48px;
+  height: 64px;
+  pointer-events: none;
+}
+
+.cheese-clip-audio-mixer-slot {
+  z-index: 100;
+  display: flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  background-color: var(
+    --color-neutral-background-inverted-alpha-1,
+    var(--cheese-platter-background-inverted-alpha-1)
+  );
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  border-radius: 50%;
+}
+
+.cheese-clip-audio-mixer-slot[hidden] {
+  display: none !important;
+}
+
+button.cheese-clip-audio-mixer-button {
+  box-sizing: border-box;
+  width: 48px !important;
+  min-width: 48px !important;
+  height: 48px !important;
+  padding: 6px !important;
+  position: relative !important;
+  overflow: visible !important;
+  color: var(
+    --color-neutral-foreground-subtle-1,
+    var(--cheese-platter-neutral-foreground-subtle-1)
+  );
+}
+
+button.cheese-clip-audio-mixer-button > svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+  pointer-events: none;
+}
+
+.cheese-clip-audio-mixer-tooltip {
+  z-index: 2;
+  box-sizing: border-box;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 80px));
+  padding: 8px 10px;
+  color: #fff;
+  text-align: left;
+  letter-spacing: 0;
+  background: rgba(24, 24, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.28),
+    0 5px 14px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(4px, -50%);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0.12s;
+}
+
+.cheese-clip-audio-mixer-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 6px solid rgba(24, 24, 27, 0.96);
+  transform: translateY(-50%);
+}
+
+.cheese-clip-audio-mixer-button:hover
+  .cheese-clip-audio-mixer-tooltip,
+.cheese-clip-audio-mixer-button:focus-visible
+  .cheese-clip-audio-mixer-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+}
+
+.cheese-clip-audio-mixer-tooltip-title,
+.cheese-clip-audio-mixer-tooltip-preset,
+.cheese-clip-audio-mixer-tooltip-message {
+  display: block;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.cheese-clip-audio-mixer-tooltip-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cheese-clip-audio-mixer-tooltip-preset {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.cheese-clip-audio-mixer-tooltip-message {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 17px;
+  white-space: normal;
+}
+
+.cheese-clip-audio-mixer-dot {
+  fill: #838285;
+  transition: fill 0.15s ease;
+}
+
+.cheese-clip-audio-mixer-button.is-active .cheese-clip-audio-mixer-dot {
+  fill: #00ffa3;
+}
+
+.cheese-clip-audio-mixer-button.is-error .cheese-clip-audio-mixer-dot {
+  fill: #ff4f59;
+}

@@ -1023,15 +1023,22 @@ async function fetchAllMakeClips(request) {
   };
 }
 
+function hasResolvedClipCategoryValue(clip) {
+  const categoryValue = String(
+    clip?.clipCategoryValue || clip?.categoryValue || "",
+  ).trim();
+  const categoryId = String(clip?.clipCategory || "").trim();
+  return Boolean(
+    categoryValue && (!categoryId || categoryValue !== categoryId),
+  );
+}
+
 async function enrichClipsWithCategoryValues(clips, signal) {
   if (!Array.isArray(clips) || !clips.length) return [];
 
   const uniqueCategoryKeys = new Set();
   clips.forEach((clip) => {
-    const existing = String(
-      clip?.clipCategoryValue || clip?.categoryValue || "",
-    ).trim();
-    if (existing) return; // already enriched (e.g. from persisted cache)
+    if (hasResolvedClipCategoryValue(clip)) return;
     const key = getClipCategoryKey(clip);
     if (key && !categoryInfoCache.has(key)) uniqueCategoryKeys.add(key);
   });
@@ -1045,10 +1052,7 @@ async function enrichClipsWithCategoryValues(clips, signal) {
   }
 
   return clips.map((clip) => {
-    const existing = String(
-      clip?.clipCategoryValue || clip?.categoryValue || "",
-    ).trim();
-    if (existing) return clip;
+    if (hasResolvedClipCategoryValue(clip)) return clip;
     const key = getClipCategoryKey(clip);
     const categoryInfo = key ? categoryInfoCache.get(key) : null;
     const categoryValue = String(categoryInfo?.categoryValue || "").trim();
@@ -1059,6 +1063,34 @@ async function enrichClipsWithCategoryValues(clips, signal) {
       categoryValue,
     };
   });
+}
+
+async function enrichClipCategoryDescriptors(descriptors) {
+  const unique = new Map();
+  for (const descriptor of Array.isArray(descriptors) ? descriptors : []) {
+    const categoryType = String(descriptor?.categoryType || "").trim();
+    const clipCategory = String(descriptor?.clipCategory || "").trim();
+    if (!categoryType || !clipCategory) continue;
+    const key = `${categoryType}:${clipCategory}`;
+    if (!unique.has(key)) {
+      unique.set(key, { categoryType, clipCategory });
+    }
+    if (unique.size >= 500) break;
+  }
+  const enriched = await enrichClipsWithCategoryValues([...unique.values()]);
+  return enriched
+    .map((clip) => {
+      const categoryValue = String(
+        clip?.clipCategoryValue || clip?.categoryValue || "",
+      ).trim();
+      if (!categoryValue) return null;
+      return {
+        categoryType: String(clip.categoryType || "").trim(),
+        clipCategory: String(clip.clipCategory || "").trim(),
+        categoryValue,
+      };
+    })
+    .filter(Boolean);
 }
 
 function getClipCategoryKey(clip) {
@@ -3277,6 +3309,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // chrome:// URL 은 페이지에서 열 수 없다(링크·window.open 모두 차단). 확장에서만
+  // chrome.tabs.create 로 열 수 있어, 콘텐츠 스크립트의 요청을 여기서 대신 처리한다.
+  // 안전을 위해 미리 허용한 설정 페이지만 연다(임의 URL 열기 방지).
+  if (message.type === "CHEESE_OPEN_SETTINGS_PAGE") {
+    const ALLOWED = new Set(["chrome://settings/content/sound"]);
+    const url = String(message.url || "");
+    if (!ALLOWED.has(url)) {
+      sendResponse?.({ ok: false });
+      return false;
+    }
+    chrome.tabs.create({ url }).then(
+      () => sendResponse?.({ ok: true }),
+      () => sendResponse?.({ ok: false }),
+    );
+    return true; // 비동기 응답
+  }
+
   if (message.type === "CHEESE_MASTER_SET") {
     masterEnabled = message.enabled !== false;
     chrome.storage.local
@@ -3474,6 +3523,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHEESE_SEARCH_FETCH_CLIPS") {
     const request = { ...(message.payload || {}), contentType: "clips" };
     handleFetchClipsMessage(request, sender, sendResponse);
+    return true;
+  }
+
+  if (message.type === "CHEESE_SEARCH_ENRICH_CLIP_CATEGORIES") {
+    enrichClipCategoryDescriptors(message.payload?.categories)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
     return true;
   }
 
