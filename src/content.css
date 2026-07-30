@@ -6803,6 +6803,15 @@ img.cheese-blind-emoji {
   white-space: nowrap;
 }
 
+html.cheese-chat-time-custom-color .cheese-chat-time {
+  color: var(--cheese-chat-time-color-light, #000) !important;
+}
+
+html.cheese-chat-time-custom-color.theme_dark .cheese-chat-time,
+html.cheese-chat-time-custom-color .theme_dark .cheese-chat-time {
+  color: var(--cheese-chat-time-color-dark, #fff) !important;
+}
+
 /* 채팅창 접힘 상태 복원 마스킹: 저장된 상태가 '접힘'인데 치지직이 로드 시 자체
    초기화로 채팅창을 잠깐 펼쳤다가 우리가 다시 접는 동안(복원 기간)의 깜빡임을 가린다.
    자동 숨김과 동일하게 채팅 aside 를 화면 밖으로(translateX) 밀어내 영상 폭은 그대로
@@ -8501,6 +8510,57 @@ html.cheese-fcln-lock body {
   font-size: 11px;
 }
 
+.cheese-search-options-source-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 3px;
+}
+
+.cheese-search-options-source-custom[hidden] {
+  display: none;
+}
+
+.cheese-search-options-source-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.cheese-search-options-source-row > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cheese-search-options-source-name {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+}
+
+.cheese-search-options-source-row > span small {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.cheese-search-options-source-effective {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 10px;
+  white-space: pre-line;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
 .cheese-search-options-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -8695,6 +8755,62 @@ html.cheese-search-clip-player-open {
   font-weight: 800;
   letter-spacing: 0;
   line-height: 28px;
+}
+
+.cheese-integrated-search-clips-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+}
+
+.cheese-integrated-search-clips-refresh:hover:not(:disabled),
+.cheese-integrated-search-clips-refresh:focus-visible {
+  background: var(
+    --sem-color-surface-neutral-weaker,
+    var(--cheese-platter-surface-neutral-weaker)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+
+.cheese-integrated-search-clips-refresh:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.cheese-integrated-search-clips-refresh-loading {
+  display: none;
+}
+
+.cheese-integrated-search-clips-refresh.is-loading
+  .cheese-integrated-search-clips-refresh-idle {
+  display: none;
+}
+
+.cheese-integrated-search-clips-refresh.is-loading
+  .cheese-integrated-search-clips-refresh-loading {
+  display: block;
+  animation: cheese-integrated-search-clips-refresh 0.8s linear infinite;
+}
+
+@keyframes cheese-integrated-search-clips-refresh {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .cheese-integrated-search-clips-category-info
@@ -9006,8 +9122,13 @@ html.cheese-search-clip-player-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .cheese-integrated-search-clips-refresh.is-loading
+    .cheese-integrated-search-clips-refresh-loading,
   .cheese-integrated-search-clips-more-pulse i {
     animation: none;
+  }
+
+  .cheese-integrated-search-clips-more-pulse i {
     opacity: 0.75;
   }
 }
@@ -9544,6 +9665,12 @@ html.cheese-popup-player-frame header#header {
 /* 사이드바가 없으므로 본문 좌측 여백을 없앤다. */
 html.cheese-popup-player-frame div#layout-body {
   padding-left: 0 !important;
+}
+
+/* scrolling 속성은 브라우저별 반영 시점이 달라 내부 문서에도 같은 설정을 적용한다. */
+html.cheese-popup-player-frame.cheese-popup-scroll-enabled,
+html.cheese-popup-player-frame.cheese-popup-scroll-enabled body {
+  overflow: auto !important;
 }
 
 /* 작은 창에서 세로 공간을 꽉 쓴다. 단, 넓은 화면(_is_large_)은 치지직이 자체 비율로

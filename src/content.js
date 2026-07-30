@@ -766,6 +766,8 @@ const POPUP_PLAYER_SIZE_MIN = 240;
 const POPUP_PLAYER_SIZE_MAX = 2000;
 // 팝업에서 넓은 화면 자동 적용(기본 ON).
 const POPUP_PLAYER_WIDE_KEY = "cheesePopupPlayerWide";
+// 팝업 iframe 내부 스크롤 허용(기본 OFF).
+const POPUP_PLAYER_SCROLL_KEY = "cheesePopupPlayerScroll";
 // 팝업 안에서 표시할 우리 버튼(믹서/필터/따라잡기). 나머지는 항상 숨김.
 const POPUP_PLAYER_BTN_MIXER_KEY = "cheesePopupPlayerBtnMixer";
 const POPUP_PLAYER_BTN_FILTER_KEY = "cheesePopupPlayerBtnFilter";
@@ -784,6 +786,7 @@ let popupPlayerOn = false;
 let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
 let popupPlayerSize = POPUP_PLAYER_SIZE_DEFAULT;
 let popupPlayerWide = true;
+let popupPlayerScroll = false;
 let popupPlayerSizeW = POPUP_PLAYER_SIZE_DEFAULT;
 let popupPlayerSizeH = POPUP_PLAYER_SIZE_DEFAULT;
 let popupPlayerBtnMixer = true;
@@ -1000,9 +1003,9 @@ function normalizeSearchRerankSort(v) {
 const SEARCH_CLIPS_KEY = "cheeseSearchClips";
 let integratedSearchClipsEnabled = false;
 const SEARCH_CLIPS_DIRECT_PLAY_KEY = "cheeseSearchClipDirectPlay";
-// 기본 ON(검색 화면에서 바로 재생). 인라인 iframe은 브라우저 정책상 음소거로
-// 시작하며, 사용자가 명시적으로 끈 경우에만 새 탭으로 연다.
-let integratedSearchClipDirectPlay = true;
+// 기본 OFF(클립 페이지를 새 탭으로 열기). 사용자가 명시적으로 켠 경우에만
+// 검색 화면 위 인라인 플레이어를 사용한다.
+let integratedSearchClipDirectPlay = false;
 const SEARCH_CLIPS_WEIGHTS_KEY = "cheeseSearchClipWeights";
 const SEARCH_CLIPS_WEIGHTS_DEFAULT = {
   title: 35,
@@ -1028,6 +1031,190 @@ function normalizeIntegratedSearchClipWeights(value) {
     ? { ...SEARCH_CLIPS_WEIGHTS_DEFAULT }
     : normalized;
 }
+const SEARCH_CLIPS_SOURCE_PRESET_KEY = "cheeseSearchClipSourcePreset";
+const SEARCH_CLIPS_SOURCE_WEIGHTS_KEY = "cheeseSearchClipSourceWeights";
+const SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY =
+  "cheeseSearchClipSourceCustomWeights";
+const SEARCH_CLIPS_SOURCE_PRESETS = Object.freeze({
+  balanced: Object.freeze({
+    recommend: 50,
+    related: 25,
+    tag: 15,
+    following: 10,
+  }),
+  search: Object.freeze({
+    recommend: 40,
+    related: 30,
+    tag: 25,
+    following: 5,
+  }),
+  following: Object.freeze({
+    recommend: 40,
+    related: 20,
+    tag: 20,
+    following: 20,
+  }),
+});
+const SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS = Object.freeze({
+  recommend: Object.freeze({ min: 40, max: 70 }),
+  related: Object.freeze({ min: 10, max: 35 }),
+  tag: Object.freeze({ min: 0, max: 25 }),
+  following: Object.freeze({ min: 0, max: 20 }),
+});
+const SEARCH_CLIPS_SOURCE_TARGET_CAPS = Object.freeze({
+  related: 10000,
+  tag: 2000,
+  following: 1000,
+});
+let integratedSearchClipSourcePreset = "balanced";
+let integratedSearchClipSourceWeights = {
+  ...SEARCH_CLIPS_SOURCE_PRESETS.balanced,
+};
+let integratedSearchClipSourceCustomWeights = {
+  ...SEARCH_CLIPS_SOURCE_PRESETS.balanced,
+};
+function normalizeIntegratedSearchClipSourcePreset(value) {
+  return ["balanced", "search", "following", "custom"].includes(value)
+    ? value
+    : "balanced";
+}
+function normalizeIntegratedSearchClipSourceWeights(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS).map(
+      ([key, limits]) => {
+        const fallback = SEARCH_CLIPS_SOURCE_PRESETS.balanced[key];
+        const number = Number(source[key]);
+        return [
+          key,
+          Number.isFinite(number)
+            ? Math.min(
+                limits.max,
+                Math.max(limits.min, Math.round(number)),
+              )
+            : fallback,
+        ];
+      },
+    ),
+  );
+}
+function getIntegratedSearchClipSourceEffectiveWeights(value) {
+  const raw = normalizeIntegratedSearchClipSourceWeights(value);
+  const allocated = {};
+  let freeKeys = Object.keys(raw);
+  let remaining = 100;
+  while (freeKeys.length) {
+    const rawTotal = freeKeys.reduce((sum, key) => sum + raw[key], 0);
+    const provisional = Object.fromEntries(
+      freeKeys.map((key) => [
+        key,
+        rawTotal > 0
+          ? (remaining * raw[key]) / rawTotal
+          : remaining / freeKeys.length,
+      ]),
+    );
+    const constrained = freeKeys.filter((key) => {
+      const limits = SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS[key];
+      return (
+        provisional[key] < limits.min || provisional[key] > limits.max
+      );
+    });
+    if (!constrained.length) {
+      freeKeys.forEach((key) => {
+        allocated[key] = provisional[key];
+      });
+      break;
+    }
+    constrained.forEach((key) => {
+      const limits = SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS[key];
+      const fixed = Math.min(
+        limits.max,
+        Math.max(limits.min, provisional[key]),
+      );
+      allocated[key] = fixed;
+      remaining -= fixed;
+    });
+    freeKeys = freeKeys.filter((key) => !constrained.includes(key));
+  }
+  const normalized = Object.fromEntries(
+    Object.entries(allocated).map(([key, number]) => [
+      key,
+      Math.floor(number),
+    ]),
+  );
+  let remainder =
+    100 -
+    Object.values(normalized).reduce((sum, number) => sum + number, 0);
+  const byFraction = Object.keys(allocated).sort(
+    (a, b) =>
+      allocated[b] -
+        Math.floor(allocated[b]) -
+        (allocated[a] - Math.floor(allocated[a])) ||
+      b.localeCompare(a),
+  );
+  for (const key of byFraction) {
+    if (
+      remainder <= 0 ||
+      normalized[key] >= SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS[key].max
+    ) {
+      continue;
+    }
+    normalized[key] += 1;
+    remainder -= 1;
+  }
+  return normalized;
+}
+function getIntegratedSearchClipSourceRatios(weights) {
+  const normalized =
+    getIntegratedSearchClipSourceEffectiveWeights(weights);
+  const total = Math.max(
+    1,
+    Object.values(normalized).reduce((sum, value) => sum + value, 0),
+  );
+  return Object.fromEntries(
+    Object.entries(normalized).map(([key, value]) => [key, value / total]),
+  );
+}
+function formatIntegratedSearchClipSourceEffective(weights) {
+  const inputWeights =
+    normalizeIntegratedSearchClipSourceWeights(weights);
+  const inputTotal = Object.values(inputWeights).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  const ratios = getIntegratedSearchClipSourceRatios(weights);
+  const format = (key) => {
+    const percentage = ratios[key] * 100;
+    return Number.isInteger(percentage)
+      ? String(percentage)
+      : percentage.toFixed(1);
+  };
+  return `입력 합계 ${inputTotal}\n100% 환산 비율: 추천 ${format("recommend")}% · 관련 채널 ${format("related")}% · 태그 ${format("tag")}% · 팔로잉 ${format("following")}%`;
+}
+function getIntegratedSearchClipSourceTargets(candidateLimit) {
+  const limit = Math.max(1, Math.round(Number(candidateLimit) || 1));
+  const ratios = getIntegratedSearchClipSourceRatios(
+    integratedSearchClipSourceWeights,
+  );
+  const related = Math.min(
+    SEARCH_CLIPS_SOURCE_TARGET_CAPS.related,
+    Math.max(0, Math.round(limit * ratios.related)),
+  );
+  const tag = Math.min(
+    SEARCH_CLIPS_SOURCE_TARGET_CAPS.tag,
+    Math.max(0, Math.round(limit * ratios.tag)),
+  );
+  const following = Math.min(
+    SEARCH_CLIPS_SOURCE_TARGET_CAPS.following,
+    Math.max(0, Math.round(limit * ratios.following)),
+  );
+  return {
+    recommend: Math.max(1, limit - related - tag - following),
+    related,
+    tag,
+    following,
+  };
+}
 const SEARCH_CLIPS_MATCH_MODE_KEY = "cheeseSearchClipMatchMode";
 let integratedSearchClipMatchMode = "balanced";
 function normalizeIntegratedSearchClipMatchMode(value) {
@@ -1041,6 +1228,13 @@ function normalizeIntegratedSearchClipDateFilter(value) {
   return ["all", "month", "week", "day"].includes(value)
     ? value
     : "all";
+}
+const SEARCH_CLIPS_DEFAULT_SORT_KEY = "cheeseSearchClipDefaultSort";
+let integratedSearchClipDefaultSort = "relevant";
+function normalizeIntegratedSearchClipSort(value) {
+  return ["relevant", "popular", "recent"].includes(value)
+    ? value
+    : "relevant";
 }
 function getIntegratedSearchClipApiFilterType() {
   return {
@@ -9735,6 +9929,49 @@ let chatTimeFormat = "24h";
 function normalizeChatTimeFormat(value) {
   return value === "12h-en" || value === "12h-ko" ? value : "24h";
 }
+// 채팅 시간 글자색은 사용자 지정을 켠 경우에만 라이트/다크 값을 각각 적용한다.
+const CHAT_TIME_COLORS_KEY = "cheeseChatTimeColors";
+const CHAT_TIME_COLORS_ROOT_CLASS = "cheese-chat-time-custom-color";
+const CHAT_TIME_COLORS_DEFAULT = Object.freeze({
+  enabled: false,
+  light: "#000000",
+  dark: "#ffffff",
+});
+let chatTimeColors = { ...CHAT_TIME_COLORS_DEFAULT };
+function normalizeChatTimeColor(value, fallback) {
+  const color = String(value || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+}
+function normalizeChatTimeColors(value) {
+  const config = value && typeof value === "object" ? value : {};
+  return {
+    enabled: config.enabled === true,
+    light: normalizeChatTimeColor(
+      config.light,
+      CHAT_TIME_COLORS_DEFAULT.light,
+    ),
+    dark: normalizeChatTimeColor(
+      config.dark,
+      CHAT_TIME_COLORS_DEFAULT.dark,
+    ),
+  };
+}
+function applyChatTimeColors() {
+  const root = document.documentElement;
+  if (!root) return;
+  root.classList.toggle(
+    CHAT_TIME_COLORS_ROOT_CLASS,
+    chatTimeColors.enabled,
+  );
+  root.style.setProperty(
+    "--cheese-chat-time-color-light",
+    chatTimeColors.light,
+  );
+  root.style.setProperty(
+    "--cheese-chat-time-color-dark",
+    chatTimeColors.dark,
+  );
+}
 // 특수 메시지(후원·구독·같이보기+·고정 등)도 폰트/아이콘 크기를 함께 조절할지.
 // 기본 false=제외(일반 메시지만 조절). 켜면 특수 메시지도 배율 적용.
 const CHAT_FONT_SCALE_SPECIAL_KEY = "cheeseChatFontScaleSpecial";
@@ -12225,6 +12462,11 @@ function applySidebarHidden() {
   padding-left: 220px !important;
 }`,
         `header#header { padding-right: 80px !important; }`,
+        `@media screen and (min-width: 736px) {
+  div[class*="_comment_"][class*="_show_"]:has(#commentArea) {
+    right: calc(25px + var(--cheese-sidebar-right-width, 80px)) !important;
+  }
+}`,
         `header#header :has(> button[aria-controls="navigation"]) { position: static !important; }`,
         `header#header button[aria-controls="navigation"] {
   position: absolute !important;
@@ -12426,6 +12668,21 @@ function scheduleSidebarPushSettle() {
 function applySidebarPush() {
   let style = document.getElementById(SIDEBAR_PUSH_STYLE_ID);
   const sidebar = document.getElementById("sidebar");
+  const root = document.documentElement;
+  const sidebarRightVisible =
+    featureFlags.sidebarRight && !featureFlags.sidebar && !!sidebar;
+  if (sidebarRightVisible) {
+    const measuredWidth = Math.round(sidebar.getBoundingClientRect().width);
+    const width = measuredWidth > 0 ? measuredWidth : 80;
+    const value = `${width}px`;
+    if (
+      root.style.getPropertyValue("--cheese-sidebar-right-width") !== value
+    ) {
+      root.style.setProperty("--cheese-sidebar-right-width", value);
+    }
+  } else {
+    root.style.removeProperty("--cheese-sidebar-right-width");
+  }
   const on = featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar; // 숨김이면 무의미
   const expanded = on && isSidebarExpanded(sidebar);
   if (!expanded) {
@@ -14938,6 +15195,14 @@ function renderSearchOptionsWeightFields(type, fields) {
     .join("");
 }
 
+function renderSearchOptionsInfoButton(key, label) {
+  return `<button type="button" class="cheese-search-options-info" data-search-options-info="${key}" aria-label="${label}" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg></button>`;
+}
+
+function renderSearchOptionsInfoPanel(key, title, description) {
+  return `<div class="cheese-search-options-info-panel cheese-search-options-source-info-panel" data-search-options-info-panel="${key}" hidden><strong>${title}</strong><span>${description}</span></div>`;
+}
+
 function renderSearchOptionsTrigger(type, label, alignRight = false) {
   const videoWeights = [
     ["rel", "제목"],
@@ -15014,6 +15279,50 @@ function renderSearchOptionsTrigger(type, label, alignRight = false) {
           </div>
         </section>
         <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">후보 출처 배분</span>
+          <div class="cheese-search-options-segments is-four">
+            <button type="button" data-search-options-clip-source-preset="balanced">균형</button>
+            <button type="button" data-search-options-clip-source-preset="search">검색어</button>
+            <button type="button" data-search-options-clip-source-preset="following">팔로잉</button>
+            <button type="button" data-search-options-clip-source-preset="custom">커스텀</button>
+          </div>
+          <output class="cheese-search-options-source-effective" data-search-options-clip-source-effective aria-live="polite"></output>
+          <div class="cheese-search-options-source-custom" data-search-options-clip-source-custom hidden>
+            <label class="cheese-search-options-source-row">
+              <span><b class="cheese-search-options-source-name">추천 ${renderSearchOptionsInfoButton("clip-source-recommend", "추천 후보 출처 안내")}</b><small>40~70</small></span>
+              <div class="cheese-search-options-range">
+                <input type="range" min="40" max="70" step="1" data-search-options-clip-source-slider="recommend">
+                <input type="number" min="40" max="70" step="1" inputmode="numeric" data-search-options-clip-source-weight="recommend" aria-label="추천 클립 후보 비중">
+              </div>
+              ${renderSearchOptionsInfoPanel("clip-source-recommend", "추천 후보", "치지직 홈의 인기·추천 클립 피드에서 후보를 가져옵니다. 검색어와 직접 관련 없는 후보도 포함될 수 있지만 넓은 범위에서 결과를 찾는 기본 후보가 됩니다.")}
+            </label>
+            <label class="cheese-search-options-source-row">
+              <span><b class="cheese-search-options-source-name">관련 채널 ${renderSearchOptionsInfoButton("clip-source-related", "관련 채널 후보 출처 안내")}</b><small>10~35</small></span>
+              <div class="cheese-search-options-range">
+                <input type="range" min="10" max="35" step="1" data-search-options-clip-source-slider="related">
+                <input type="number" min="10" max="35" step="1" inputmode="numeric" data-search-options-clip-source-weight="related" aria-label="관련 채널 클립 후보 비중">
+              </div>
+              ${renderSearchOptionsInfoPanel("clip-source-related", "관련 채널 후보", "검색어와 일치하거나 유사한 채널명을 찾은 뒤 해당 채널의 최근 클립을 가져옵니다. 스트리머 이름으로 검색할 때 특히 효과적입니다.")}
+            </label>
+            <label class="cheese-search-options-source-row">
+              <span><b class="cheese-search-options-source-name">태그 채널 ${renderSearchOptionsInfoButton("clip-source-tag", "태그 채널 후보 출처 안내")}</b><small>0~25</small></span>
+              <div class="cheese-search-options-range">
+                <input type="range" min="0" max="25" step="1" data-search-options-clip-source-slider="tag">
+                <input type="number" min="0" max="25" step="1" inputmode="numeric" data-search-options-clip-source-weight="tag" aria-label="태그 채널 클립 후보 비중">
+              </div>
+              ${renderSearchOptionsInfoPanel("clip-source-tag", "태그 채널 후보", "검색어를 태그로 사용하는 라이브·다시보기에서 채널을 찾은 뒤 해당 채널의 클립을 가져옵니다. 일치하는 태그 방송이 없으면 이 출처의 후보가 적거나 없을 수 있습니다.")}
+            </label>
+            <label class="cheese-search-options-source-row">
+              <span><b class="cheese-search-options-source-name">팔로잉 ${renderSearchOptionsInfoButton("clip-source-following", "팔로잉 후보 출처 안내")}</b><small>0~20</small></span>
+              <div class="cheese-search-options-range">
+                <input type="range" min="0" max="20" step="1" data-search-options-clip-source-slider="following">
+                <input type="number" min="0" max="20" step="1" inputmode="numeric" data-search-options-clip-source-weight="following" aria-label="팔로잉 채널 클립 후보 비중">
+              </div>
+              ${renderSearchOptionsInfoPanel("clip-source-following", "팔로잉 후보", "로그인 계정의 팔로잉 채널 중 최근 동영상이 확인되는 채널에서 클립을 가져옵니다. 로그인하지 않았거나 확인할 팔로잉 채널이 없으면 후보가 없을 수 있습니다.")}
+            </label>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
           <span class="cheese-search-options-title">날짜 범위</span>
           <div class="cheese-search-options-segments is-four">
             <button type="button" data-search-options-clip-date="all">전체</button>
@@ -15023,12 +15332,20 @@ function renderSearchOptionsTrigger(type, label, alignRight = false) {
           </div>
         </section>
         <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">다음 검색 기본 정렬</span>
+          <div class="cheese-search-options-segments">
+            <button type="button" data-search-options-clip-sort="relevant">관련순</button>
+            <button type="button" data-search-options-clip-sort="popular">인기순</button>
+            <button type="button" data-search-options-clip-sort="recent">최신순</button>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
           <span class="cheese-search-options-title">후보 개수</span>
           <label class="cheese-search-options-limit">
-            <span>추천·관련 채널</span>
+            <span>기본 후보 전체</span>
             <div class="cheese-search-options-range">
               <input type="range" min="50" max="100000" step="50" data-search-options-clip-limit-slider="candidate">
-              <input type="text" inputmode="numeric" autocomplete="off" pattern="[0-9,]*" maxlength="7" data-search-options-clip-limit="candidate" aria-label="추천 및 관련 채널 클립 후보 개수">
+              <input type="text" inputmode="numeric" autocomplete="off" pattern="[0-9,]*" maxlength="7" data-search-options-clip-limit="candidate" aria-label="추천, 태그, 팔로잉 및 관련 채널 클립 후보 개수">
             </div>
           </label>
           <label class="cheese-search-options-limit">
@@ -15132,9 +15449,48 @@ function syncSearchOptionsPopover(root) {
   );
   setSearchOptionsActive(
     root,
+    "[data-search-options-clip-source-preset]",
+    integratedSearchClipSourcePreset,
+    "searchOptionsClipSourcePreset",
+  );
+  const sourceCustom = root.querySelector(
+    "[data-search-options-clip-source-custom]",
+  );
+  if (sourceCustom) {
+    sourceCustom.hidden = integratedSearchClipSourcePreset !== "custom";
+  }
+  for (const [key, value] of Object.entries(
+    integratedSearchClipSourceWeights,
+  )) {
+    const input = root.querySelector(
+      `[data-search-options-clip-source-weight="${key}"]`,
+    );
+    const slider = root.querySelector(
+      `[data-search-options-clip-source-slider="${key}"]`,
+    );
+    if (input) input.value = String(value);
+    if (slider) slider.value = String(value);
+  }
+  const sourceEffective = root.querySelector(
+    "[data-search-options-clip-source-effective]",
+  );
+  if (sourceEffective) {
+    sourceEffective.textContent =
+      formatIntegratedSearchClipSourceEffective(
+        integratedSearchClipSourceWeights,
+      );
+  }
+  setSearchOptionsActive(
+    root,
     "[data-search-options-clip-date]",
     integratedSearchClipDateFilter,
     "searchOptionsClipDate",
+  );
+  setSearchOptionsActive(
+    root,
+    "[data-search-options-clip-sort]",
+    integratedSearchClipDefaultSort,
+    "searchOptionsClipSort",
   );
   for (const [key, value] of [
     ["candidate", integratedSearchClipCandidateLimit],
@@ -15493,6 +15849,34 @@ function bindSearchOptionsPopover(root) {
           });
         } catch {}
       }
+      const sourcePreset = event.target.closest(
+        "[data-search-options-clip-source-preset]",
+      );
+      if (sourcePreset) {
+        const preset = normalizeIntegratedSearchClipSourcePreset(
+          sourcePreset.dataset.searchOptionsClipSourcePreset,
+        );
+        integratedSearchClipSourcePreset = preset;
+        integratedSearchClipSourceWeights =
+          normalizeIntegratedSearchClipSourceWeights(
+            preset === "custom"
+              ? integratedSearchClipSourceCustomWeights
+              : SEARCH_CLIPS_SOURCE_PRESETS[preset],
+          );
+        syncSearchOptionsPopover(root);
+        try {
+          const payload = {
+            [SEARCH_CLIPS_SOURCE_PRESET_KEY]: preset,
+            [SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]:
+              integratedSearchClipSourceWeights,
+          };
+          if (preset === "custom") {
+            payload[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] =
+              integratedSearchClipSourceCustomWeights;
+          }
+          chrome.storage?.local?.set(payload);
+        } catch {}
+      }
       const date = event.target.closest(
         "[data-search-options-clip-date]",
       );
@@ -15507,6 +15891,23 @@ function bindSearchOptionsPopover(root) {
           chrome.storage?.local?.set({
             [SEARCH_CLIPS_DATE_FILTER_KEY]:
               date.dataset.searchOptionsClipDate,
+          });
+        } catch {}
+      }
+      const sort = event.target.closest(
+        "[data-search-options-clip-sort]",
+      );
+      if (sort) {
+        setSearchOptionsActive(
+          root,
+          "[data-search-options-clip-sort]",
+          sort.dataset.searchOptionsClipSort,
+          "searchOptionsClipSort",
+        );
+        try {
+          chrome.storage?.local?.set({
+            [SEARCH_CLIPS_DEFAULT_SORT_KEY]:
+              sort.dataset.searchOptionsClipSort,
           });
         } catch {}
       }
@@ -15581,6 +15982,60 @@ function bindSearchOptionsPopover(root) {
     moreStepInput?.addEventListener("change", () =>
       saveMoreStep(moreStepInput.value),
     );
+    const sourceKeys = Object.keys(SEARCH_CLIPS_SOURCE_WEIGHT_LIMITS);
+    const readSourceWeights = () =>
+      Object.fromEntries(
+        sourceKeys.map((key) => [
+          key,
+          root.querySelector(
+            `[data-search-options-clip-source-weight="${key}"]`,
+          )?.value,
+        ]),
+      );
+    const updateSourceEffective = () => {
+      const weights = normalizeIntegratedSearchClipSourceWeights(
+        readSourceWeights(),
+      );
+      const output = root.querySelector(
+        "[data-search-options-clip-source-effective]",
+      );
+      if (output) {
+        output.textContent =
+          formatIntegratedSearchClipSourceEffective(weights);
+      }
+    };
+    const saveSourceWeights = () => {
+      integratedSearchClipSourcePreset = "custom";
+      integratedSearchClipSourceCustomWeights =
+        normalizeIntegratedSearchClipSourceWeights(readSourceWeights());
+      integratedSearchClipSourceWeights = {
+        ...integratedSearchClipSourceCustomWeights,
+      };
+      syncSearchOptionsPopover(root);
+      try {
+        chrome.storage?.local?.set({
+          [SEARCH_CLIPS_SOURCE_PRESET_KEY]: "custom",
+          [SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]:
+            integratedSearchClipSourceWeights,
+          [SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]:
+            integratedSearchClipSourceCustomWeights,
+        });
+      } catch {}
+    };
+    for (const key of sourceKeys) {
+      const input = root.querySelector(
+        `[data-search-options-clip-source-weight="${key}"]`,
+      );
+      const slider = root.querySelector(
+        `[data-search-options-clip-source-slider="${key}"]`,
+      );
+      slider?.addEventListener("input", () => {
+        if (input) input.value = slider.value;
+        updateSourceEffective();
+      });
+      slider?.addEventListener("change", saveSourceWeights);
+      input?.addEventListener("change", saveSourceWeights);
+    }
     root
       .querySelectorAll("[data-search-options-clip-weight]")
       .forEach((input) => {
@@ -15811,10 +16266,16 @@ const INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES = Math.ceil(
 const INTEGRATED_SEARCH_CLIPS_MAX_CATEGORIES = 2;
 const INTEGRATED_SEARCH_CLIPS_CATEGORY_DISCOVERY_LIMIT = 300;
 const INTEGRATED_SEARCH_CLIPS_CACHE_TTL_MS = 10 * 60 * 1000;
+const INTEGRATED_SEARCH_CLIPS_TAG_ENRICH_LIMIT = 24;
+const INTEGRATED_SEARCH_CLIPS_CHANNEL_DISCOVERY_CACHE_TTL_MS =
+  5 * 60 * 1000;
+const INTEGRATED_SEARCH_CLIPS_MAX_TAG_CHANNELS = 12;
+const INTEGRATED_SEARCH_CLIPS_MAX_FOLLOWING_CHANNELS = 12;
+const INTEGRATED_SEARCH_CLIPS_CHANNEL_FETCH_CONCURRENCY = 2;
 const INTEGRATED_SEARCH_CLIPS_EXHAUSTED_NOTICE =
   "더 확인할 추천 클립이 없습니다.";
 const INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE =
-  "현재 수집한 추천·관련 채널·카테고리 클립에서는 일치하는 결과를 찾지 못했습니다.";
+  "현재 수집한 추천·태그·팔로잉·관련 채널·카테고리 클립에서는 일치하는 결과를 찾지 못했습니다.";
 const INTEGRATED_SEARCH_CLIP_FEEDS = Object.freeze([
   { key: "day-popular", filterType: "WITHIN_1_DAY", orderType: "POPULAR" },
   {
@@ -15851,11 +16312,12 @@ const integratedSearchClipsState = {
   loading: false,
   showSkeleton: false,
   loadingMore: false,
+  tagLoading: false,
   allItems: [],
   results: [],
   feeds: [],
   visible: INTEGRATED_SEARCH_CLIPS_INITIAL,
-  sort: "relevant",
+  sort: integratedSearchClipDefaultSort,
   error: "",
   notice: "",
   revision: 0,
@@ -15866,6 +16328,19 @@ let integratedSearchClipFeedCache = {
   items: [],
   feeds: [],
 };
+const integratedSearchClipTagChannelCache = new Map();
+let integratedSearchClipFollowingChannelCache = {
+  expiresAt: 0,
+  channels: [],
+};
+
+function clearIntegratedSearchClipDiscoveryCaches() {
+  integratedSearchClipTagChannelCache.clear();
+  integratedSearchClipFollowingChannelCache = {
+    expiresAt: 0,
+    channels: [],
+  };
+}
 
 function updateIntegratedSearchClipFeedCacheMetadata(items) {
   if (
@@ -15889,6 +16364,14 @@ function updateIntegratedSearchClipFeedCacheMetadata(items) {
         clipCategoryValue:
           enriched.clipCategoryValue || item.clipCategoryValue,
         categoryValue: enriched.categoryValue || item.categoryValue,
+        ...(enriched.__integratedSearchTagsResolved
+          ? {
+              clipTags: Array.isArray(enriched.clipTags)
+                ? [...enriched.clipTags]
+                : [],
+              __integratedSearchTagsResolved: true,
+            }
+          : {}),
       };
     });
 }
@@ -16047,6 +16530,7 @@ async function fetchIntegratedSearchClipJson(url, signal) {
 async function fetchInitialIntegratedSearchClipFeeds(
   signal,
   candidateLimit = integratedSearchClipCandidateLimit,
+  targetRatio = 0.6,
 ) {
   if (
     integratedSearchClipFeedCache.expiresAt > Date.now() &&
@@ -16071,7 +16555,7 @@ async function fetchInitialIntegratedSearchClipFeeds(
   const feedTarget = Math.max(
     1,
     Math.ceil(
-      (effectiveCandidateLimit * 0.6) /
+      (effectiveCandidateLimit * targetRatio) /
         feedDefinitions.length,
     ),
   );
@@ -16167,6 +16651,7 @@ async function fetchRelatedChannelClipsForIntegratedSearch(
   keyword,
   signal,
   candidateLimit = integratedSearchClipCandidateLimit,
+  targetRatio = 0.4,
 ) {
   const phrase = normalizeSearchRerankText(keyword);
   if (phrase.length < 2) return [];
@@ -16211,7 +16696,7 @@ async function fetchRelatedChannelClipsForIntegratedSearch(
   const channelTarget = Math.max(
     1,
     Math.ceil(
-      (effectiveCandidateLimit * 0.4) / channels.length,
+      (effectiveCandidateLimit * targetRatio) / channels.length,
     ),
   );
   const settled = await Promise.allSettled(
@@ -16288,6 +16773,407 @@ async function fetchRelatedChannelClipsForIntegratedSearch(
     .flatMap((result) => result.value);
 }
 
+function getIntegratedSearchClipDiscoveryItems(json) {
+  const content = json?.content;
+  if (Array.isArray(content)) return content;
+  if (!content || typeof content !== "object") return [];
+  for (const key of [
+    "data",
+    "followingList",
+    "followingVideoList",
+    "videoList",
+    "liveList",
+    "content",
+    "items",
+  ]) {
+    if (Array.isArray(content[key])) return content[key];
+  }
+  return (
+    Object.values(content).find(
+      (value) =>
+        Array.isArray(value) &&
+        value.some((item) => item && typeof item === "object"),
+    ) || []
+  );
+}
+
+function normalizeIntegratedSearchClipDiscoveryChannel(
+  item,
+  sourceTags = [],
+) {
+  const channelCandidates = [
+    item?.channel,
+    item?.ownerChannel,
+    item?.video?.channel,
+    item?.video?.ownerChannel,
+    item?.live?.channel,
+    item?.liveInfo?.channel,
+    item?.content?.channel,
+    item,
+  ].filter((candidate) => candidate && typeof candidate === "object");
+  const channel =
+    channelCandidates.find((candidate) => candidate.channelId) || {};
+  const channelId = String(
+    channel.channelId ||
+      item?.channelId ||
+      item?.video?.channelId ||
+      item?.live?.channelId ||
+      item?.liveInfo?.channelId ||
+      "",
+  ).trim();
+  if (!channelId) return null;
+  return {
+    ...channel,
+    channelId,
+    channelName: String(
+      channel.channelName ||
+        item?.channelName ||
+        item?.video?.channelName ||
+        "",
+    ).trim(),
+    __integratedSearchDiscoveryText: [
+      item?.video?.videoTitle,
+      item?.videoTitle,
+      item?.live?.liveTitle,
+      item?.liveInfo?.liveTitle,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" "),
+    __integratedSearchSourceTags: [
+      ...new Set(
+        (Array.isArray(sourceTags) ? sourceTags : [])
+          .map((tag) => String(tag || "").trim())
+          .filter(Boolean),
+      ),
+    ],
+  };
+}
+
+function mergeIntegratedSearchClipDiscoveryChannels(...groups) {
+  const byId = new Map();
+  for (const channel of groups.flat()) {
+    const channelId = String(channel?.channelId || "").trim();
+    if (!channelId) continue;
+    const existing = byId.get(channelId);
+    if (!existing) {
+      byId.set(channelId, { ...channel });
+      continue;
+    }
+    byId.set(channelId, {
+      ...existing,
+      ...channel,
+      channelName: channel.channelName || existing.channelName,
+      channelImageUrl:
+        channel.channelImageUrl || existing.channelImageUrl,
+      __integratedSearchDiscoveryText: [
+        existing.__integratedSearchDiscoveryText,
+        channel.__integratedSearchDiscoveryText,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .join(" "),
+      __integratedSearchSourceTags: [
+        ...new Set([
+          ...(Array.isArray(existing.__integratedSearchSourceTags)
+            ? existing.__integratedSearchSourceTags
+            : []),
+          ...(Array.isArray(channel.__integratedSearchSourceTags)
+            ? channel.__integratedSearchSourceTags
+            : []),
+        ]),
+      ],
+    });
+  }
+  return [...byId.values()];
+}
+
+function getIntegratedSearchClipTagSearchTerms(query) {
+  const phrase = String(query?.textKeyword || "").trim();
+  const normalizedPhrase = normalizeSearchRerankText(phrase);
+  if (!normalizedPhrase) return [];
+  if (!normalizedPhrase.includes(" ")) return [phrase];
+  return [
+    ...new Set(
+      normalizedPhrase
+        .split(" ")
+        .map((term) => term.trim())
+        .filter((term) => term.length > 1),
+    ),
+  ].slice(0, 2);
+}
+
+async function discoverIntegratedSearchClipTagChannels(
+  query,
+  signal,
+) {
+  const terms = getIntegratedSearchClipTagSearchTerms(query);
+  if (!terms.length) return [];
+  const channelGroups = await Promise.all(
+    terms.map(async (term) => {
+      const cacheKey = normalizeSearchRerankText(term);
+      const cached = integratedSearchClipTagChannelCache.get(cacheKey);
+      if (cached?.expiresAt > Date.now()) {
+        return cached.channels.map((channel) => ({ ...channel }));
+      }
+      const definitions = [
+        { path: "lives", sortType: "POPULAR", parameter: "tags" },
+        { path: "lives", sortType: "LATEST", parameter: "tags" },
+        { path: "videos", sortType: "POPULAR", parameter: "tag" },
+        { path: "videos", sortType: "LATEST", parameter: "tag" },
+      ];
+      const settled = await Promise.allSettled(
+        definitions.map(async (definition) => {
+          const url = new URL(
+            `https://api.chzzk.naver.com/service/v1/tag/${definition.path}`,
+          );
+          url.searchParams.set("size", "50");
+          url.searchParams.set("sortType", definition.sortType);
+          url.searchParams.set(definition.parameter, term);
+          const json = await fetchIntegratedSearchClipJson(
+            url.toString(),
+            signal,
+          );
+          return getIntegratedSearchClipDiscoveryItems(json)
+            .map((item) =>
+              normalizeIntegratedSearchClipDiscoveryChannel(item, [term]),
+            )
+            .filter(Boolean);
+        }),
+      );
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      const channels = mergeIntegratedSearchClipDiscoveryChannels(
+        ...settled
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value),
+      ).slice(0, INTEGRATED_SEARCH_CLIPS_MAX_TAG_CHANNELS);
+      integratedSearchClipTagChannelCache.set(cacheKey, {
+        expiresAt:
+          Date.now() +
+          INTEGRATED_SEARCH_CLIPS_CHANNEL_DISCOVERY_CACHE_TTL_MS,
+        channels: channels.map((channel) => ({ ...channel })),
+      });
+      return channels;
+    }),
+  );
+  return mergeIntegratedSearchClipDiscoveryChannels(
+    ...channelGroups,
+  ).slice(0, INTEGRATED_SEARCH_CLIPS_MAX_TAG_CHANNELS);
+}
+
+async function discoverIntegratedSearchClipFollowingChannels(signal) {
+  if (
+    integratedSearchClipFollowingChannelCache.expiresAt > Date.now()
+  ) {
+    return integratedSearchClipFollowingChannelCache.channels.map(
+      (channel) => ({ ...channel }),
+    );
+  }
+  const url = new URL(
+    "https://api.chzzk.naver.com/service/v2/home/following/videos",
+  );
+  url.searchParams.set("size", "50");
+  url.searchParams.set("nextNo", "");
+  let json;
+  try {
+    json = await fetchIntegratedSearchClipJson(url.toString(), signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    integratedSearchClipFollowingChannelCache = {
+      expiresAt:
+        Date.now() +
+        INTEGRATED_SEARCH_CLIPS_CHANNEL_DISCOVERY_CACHE_TTL_MS,
+      channels: [],
+    };
+    return [];
+  }
+  const channels = mergeIntegratedSearchClipDiscoveryChannels(
+    getIntegratedSearchClipDiscoveryItems(json)
+      .map((item) => normalizeIntegratedSearchClipDiscoveryChannel(item))
+      .filter(Boolean),
+  );
+  integratedSearchClipFollowingChannelCache = {
+    expiresAt:
+      Date.now() +
+      INTEGRATED_SEARCH_CLIPS_CHANNEL_DISCOVERY_CACHE_TTL_MS,
+    channels: channels.map((channel) => ({ ...channel })),
+  };
+  return channels;
+}
+
+async function fetchIntegratedSearchClipsForChannels(
+  channels,
+  signal,
+  totalTarget,
+  sourceRankBase,
+) {
+  const candidates = mergeIntegratedSearchClipDiscoveryChannels(channels);
+  const normalizedTarget = Math.max(0, Math.floor(Number(totalTarget) || 0));
+  if (!candidates.length || !normalizedTarget) return [];
+  const channelTarget = Math.max(
+    1,
+    Math.ceil(normalizedTarget / candidates.length),
+  );
+  const results = new Array(candidates.length);
+  let cursorIndex = 0;
+
+  const worker = async () => {
+    while (cursorIndex < candidates.length) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      const channelIndex = cursorIndex++;
+      const channel = candidates[channelIndex];
+      const items = [];
+      const seen = new Set();
+      const requestedCursors = new Set();
+      let cursor = { clipUID: "", readCount: "" };
+      let page = 0;
+
+      try {
+        while (
+          items.length < channelTarget &&
+          page < INTEGRATED_SEARCH_CLIPS_MAX_FEED_PAGES
+        ) {
+          const cursorKey = `${cursor.clipUID}:${cursor.readCount}`;
+          if (requestedCursors.has(cursorKey)) break;
+          requestedCursors.add(cursorKey);
+          const url = new URL(
+            `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channel.channelId)}/clips`,
+          );
+          url.searchParams.set("clipUID", cursor.clipUID);
+          url.searchParams.set(
+            "filterType",
+            getIntegratedSearchClipApiFilterType(),
+          );
+          url.searchParams.set("orderType", "RECENT");
+          url.searchParams.set(
+            "size",
+            String(
+              Math.min(
+                INTEGRATED_SEARCH_CLIPS_API_PAGE_SIZE,
+                channelTarget - items.length,
+              ),
+            ),
+          );
+          url.searchParams.set("readCount", String(cursor.readCount));
+          const json = await fetchIntegratedSearchClipJson(
+            url.toString(),
+            signal,
+          );
+          const data = Array.isArray(json?.content?.data)
+            ? json.content.data
+            : [];
+          for (const clip of data) {
+            const uid = String(clip?.clipUID || "").trim();
+            if (!uid || seen.has(uid)) continue;
+            seen.add(uid);
+            items.push(clip);
+          }
+          page += 1;
+          const next = getIntegratedSearchClipCursorNext(json);
+          if (!next) break;
+          cursor = next;
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error;
+      }
+      results[channelIndex] = items
+        .slice(0, channelTarget)
+        .map((clip, itemIndex) => ({
+          ...clip,
+          ownerChannelId: clip?.ownerChannelId || channel.channelId,
+          ownerChannel: clip?.ownerChannel || channel,
+          __integratedSearchSourceTags: [
+            ...new Set([
+              ...(Array.isArray(clip?.__integratedSearchSourceTags)
+                ? clip.__integratedSearchSourceTags
+                : []),
+              ...(Array.isArray(channel.__integratedSearchSourceTags)
+                ? channel.__integratedSearchSourceTags
+                : []),
+            ]),
+          ],
+          __integratedSearchSourceRank:
+            sourceRankBase + channelIndex * 1000 + itemIndex,
+        }));
+    }
+  };
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(
+          INTEGRATED_SEARCH_CLIPS_CHANNEL_FETCH_CONCURRENCY,
+          candidates.length,
+        ),
+      },
+      () => worker(),
+    ),
+  );
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return results.flat().filter(Boolean).slice(0, normalizedTarget);
+}
+
+async function fetchTagChannelClipsForIntegratedSearch(
+  query,
+  signal,
+  target,
+) {
+  const normalizedTarget = Math.max(0, Math.round(Number(target) || 0));
+  if (!normalizedTarget) return [];
+  const channels = await discoverIntegratedSearchClipTagChannels(
+    query,
+    signal,
+  );
+  return fetchIntegratedSearchClipsForChannels(
+    channels,
+    signal,
+    normalizedTarget,
+    -200000,
+  );
+}
+
+async function fetchFollowingChannelClipsForIntegratedSearch(
+  query,
+  signal,
+  target,
+) {
+  const normalizedTarget = Math.max(0, Math.round(Number(target) || 0));
+  if (!normalizedTarget) return [];
+  const phrase = normalizeSearchRerankText(query?.textKeyword);
+  const tokens = Array.isArray(query?.tokens) ? query.tokens : [];
+  const channels = (
+    await discoverIntegratedSearchClipFollowingChannels(signal)
+  )
+    .map((channel, index) => {
+      const name = normalizeSearchRerankText(channel.channelName);
+      const discoveryText = normalizeSearchRerankText(
+        channel.__integratedSearchDiscoveryText,
+      );
+      const fields = [name, discoveryText].filter(Boolean);
+      const matchedTokens = tokens.filter((token) =>
+        fields.some((field) => field.includes(token)),
+      ).length;
+      const score =
+        (phrase && name === phrase ? 4 : 0) +
+        (phrase && name.startsWith(phrase) ? 3 : 0) +
+        (phrase && fields.some((field) => field.includes(phrase)) ? 2 : 0) +
+        matchedTokens;
+      return { channel, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, INTEGRATED_SEARCH_CLIPS_MAX_FOLLOWING_CHANNELS)
+    .map((entry) => entry.channel);
+  return fetchIntegratedSearchClipsForChannels(
+    channels,
+    signal,
+    normalizedTarget,
+    100000,
+  );
+}
+
 function mergeIntegratedSearchClipItems(...groups) {
   const byUid = new Map();
   let fallbackIndex = 0;
@@ -16306,6 +17192,16 @@ function mergeIntegratedSearchClipItems(...groups) {
       ...existing,
       ...item,
       ownerChannel: item?.ownerChannel || existing.ownerChannel,
+      __integratedSearchSourceTags: [
+        ...new Set([
+          ...(Array.isArray(existing.__integratedSearchSourceTags)
+            ? existing.__integratedSearchSourceTags
+            : []),
+          ...(Array.isArray(item.__integratedSearchSourceTags)
+            ? item.__integratedSearchSourceTags
+            : []),
+        ]),
+      ],
       __integratedSearchOriginalIndex:
         existing.__integratedSearchOriginalIndex,
       __integratedSearchSourceRank: Math.min(
@@ -16384,6 +17280,86 @@ async function enrichIntegratedSearchClipCategories(clips, signal) {
       return categoryValue
         ? { ...clip, clipCategoryValue: categoryValue, categoryValue }
         : clip;
+    });
+  } catch {
+    return items;
+  }
+}
+
+function getIntegratedSearchClipTags(clip) {
+  const sources = [
+    ...(Array.isArray(clip?.clipTags) ? clip.clipTags : []),
+    ...(Array.isArray(clip?.tags) ? clip.tags : []),
+    ...(Array.isArray(clip?.__integratedSearchSourceTags)
+      ? clip.__integratedSearchSourceTags
+      : []),
+  ];
+  return [
+    ...new Set(
+      sources
+        .map((tag) =>
+          String(
+            typeof tag === "string"
+              ? tag
+              : tag?.tagName || tag?.name || tag?.value || "",
+          ).trim(),
+        )
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function getIntegratedSearchClipTagDescriptors(clips) {
+  const descriptors = [];
+  const seen = new Set();
+  for (const clip of Array.isArray(clips) ? clips : []) {
+    if (clip?.__integratedSearchTagsResolved) continue;
+    const clipUID = String(clip?.clipUID || "").trim();
+    const videoId = String(clip?.videoId || "").trim();
+    if (!clipUID || !videoId || seen.has(clipUID)) continue;
+    seen.add(clipUID);
+    descriptors.push({ clipUID, videoId });
+    if (descriptors.length >= INTEGRATED_SEARCH_CLIPS_TAG_ENRICH_LIMIT) {
+      break;
+    }
+  }
+  return descriptors;
+}
+
+async function enrichIntegratedSearchClipTags(clips, signal) {
+  const items = Array.isArray(clips) ? clips : [];
+  const descriptors = getIntegratedSearchClipTagDescriptors(items);
+  if (!descriptors.length || signal?.aborted) return items;
+
+  try {
+    const enriched = await sendMessage({
+      type: "CHEESE_SEARCH_ENRICH_CLIP_TAGS",
+      payload: { clips: descriptors },
+    });
+    if (signal?.aborted || !Array.isArray(enriched)) return items;
+    const tagsByUid = new Map(
+      enriched
+        .map((entry) => {
+          const clipUID = String(entry?.clipUID || "").trim();
+          if (!clipUID || entry?.resolved !== true) return null;
+          return [
+            clipUID,
+            Array.isArray(entry.tags)
+              ? entry.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
+              : [],
+          ];
+        })
+        .filter(Boolean),
+    );
+    if (!tagsByUid.size) return items;
+    return items.map((clip) => {
+      const clipUID = String(clip?.clipUID || "").trim();
+      if (!tagsByUid.has(clipUID)) return clip;
+      return {
+        ...clip,
+        clipTags: tagsByUid.get(clipUID),
+        __integratedSearchTagsResolved: true,
+      };
     });
   } catch {
     return items;
@@ -16645,6 +17621,10 @@ function scoreIntegratedSearchClip(clip, query) {
     getIntegratedSearchClipChannelName(clip),
   );
   const category = normalizeSearchRerankText(getClipCategoryLabel(clip));
+  const normalizedTags = getIntegratedSearchClipTags(clip)
+    .map(normalizeSearchRerankText)
+    .filter(Boolean);
+  const tags = normalizedTags.join(" ");
   const categoryMatchScore = getIntegratedSearchClipCategoryMatchScore(
     clip,
     categoryTerms,
@@ -16652,9 +17632,12 @@ function scoreIntegratedSearchClip(clip, query) {
   if (categoryTerms.length && !categoryMatchScore) return null;
 
   // @카테고리는 후보 범위를 정하는 조건이므로 남은 일반어는 제목·채널명에서
-  // 찾는다. 카테고리명이 일반어까지 대신 만족시키는 일을 막는다.
+  // 찾는다. 태그는 클립 작성자가 붙인 검색 메타데이터이므로 함께 확인하되,
+  // 카테고리명이 일반어까지 대신 만족시키는 일은 막는다.
   const fields = (
-    categoryTerms.length ? [title, channel] : [title, category, channel]
+    categoryTerms.length
+      ? [title, channel, tags]
+      : [title, category, channel, tags]
   ).filter(Boolean);
   const matchedTokenCount = tokens.filter((token) =>
     fields.some((field) => field.includes(token)),
@@ -16672,6 +17655,9 @@ function scoreIntegratedSearchClip(clip, query) {
       ? tokens.length === 1
         ? fields.some(
             (field) => field === phrase || field.startsWith(phrase),
+          ) ||
+          normalizedTags.some(
+            (tag) => tag === phrase || tag.startsWith(phrase),
           )
         : phraseMatched || allTokensInOneField
       : categoryTerms.length > 0;
@@ -16705,8 +17691,16 @@ function scoreIntegratedSearchClip(clip, query) {
   const categoryRelevance = categoryTerms.length
     ? categoryMatchScore
     : scoreField(category);
+  const tagRelevance = normalizedTags.reduce(
+    (best, tag) => Math.max(best, scoreField(tag)),
+    scoreField(tags),
+  );
+  const titleAndTagRelevance = Math.max(
+    scoreField(title),
+    tagRelevance * 0.85,
+  );
   return (
-    scoreField(title) * integratedSearchClipWeights.title +
+    titleAndTagRelevance * integratedSearchClipWeights.title +
     categoryRelevance * integratedSearchClipWeights.category +
     scoreField(channel) * integratedSearchClipWeights.channel +
     popularity * integratedSearchClipWeights.read +
@@ -16737,6 +17731,36 @@ function rebuildIntegratedSearchClipResults() {
     })
     .filter(Boolean);
   integratedSearchClipsState.revision++;
+}
+
+function shouldEnrichIntegratedSearchClipTags(query, clips) {
+  return (
+    Array.isArray(query?.tokens) &&
+    query.tokens.length > 0 &&
+    getIntegratedSearchClipTagDescriptors(clips).length > 0
+  );
+}
+
+async function finishIntegratedSearchClipTagEnrichment(
+  keyword,
+  signal,
+) {
+  const items = integratedSearchClipsState.allItems;
+  const enrichedItems = await enrichIntegratedSearchClipTags(items, signal);
+  if (
+    signal?.aborted ||
+    integratedSearchClipsState.keyword !== keyword
+  ) {
+    return;
+  }
+  integratedSearchClipsState.allItems = mergeIntegratedSearchClipItems(
+    integratedSearchClipsState.allItems,
+    enrichedItems,
+  );
+  updateIntegratedSearchClipFeedCacheMetadata(enrichedItems);
+  integratedSearchClipsState.tagLoading = false;
+  rebuildIntegratedSearchClipResults();
+  renderIntegratedSearchClips();
 }
 
 function sortedIntegratedSearchClipResults() {
@@ -17000,9 +18024,13 @@ function ensureIntegratedSearchClipsSection() {
               <path d="M7 6.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
               <circle cx="7" cy="3.9" r="0.9" fill="currentColor"></circle>
             </svg>
-            <span class="cheese-search-rerank-info-tip" role="tooltip"><b>@음악</b>처럼 입력하면 해당 카테고리의 클립을 우선 확인합니다. 일반 검색어는 <b>싱드컵 @음악</b>처럼 함께 사용할 수 있으며, 공백이 있는 카테고리는 <b>@"종합 게임"</b>처럼 따옴표로 묶습니다.</span>
+            <span class="cheese-search-rerank-info-tip" role="tooltip">일반 검색어는 클립 제목·채널명·태그와 같은 태그로 방송한 채널의 클립까지 확인합니다. <b>@음악</b>처럼 입력하면 해당 카테고리의 클립을 우선하며, <b>싱드컵 @음악</b>처럼 함께 사용할 수 있습니다. 공백이 있는 카테고리는 <b>@"종합 게임"</b>처럼 따옴표로 묶습니다.</span>
           </button>
-          <span class="cheese-integrated-search-clips-scope">추천·관련 채널·카테고리 기준</span>
+          <button type="button" class="cheese-integrated-search-clips-refresh" data-integrated-search-clips-refresh aria-label="클립 검색 결과 새로고침" title="최신 클립 다시 확인">
+            <svg class="cheese-integrated-search-clips-refresh-idle" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path><path d="M21 3v5h-5"></path></svg>
+            <svg class="cheese-integrated-search-clips-refresh-loading" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+          </button>
+          <span class="cheese-integrated-search-clips-scope">추천·태그·팔로잉·관련 채널·카테고리 기준</span>
           <span class="cheese-integrated-search-clips-count" data-integrated-search-clips-count></span>
         </div>
         <div class="cheese-integrated-search-clips-controls">
@@ -17030,6 +18058,30 @@ function ensureIntegratedSearchClipsSection() {
       section.querySelector('[data-search-options="clip"]'),
     );
     section.addEventListener("click", (event) => {
+      const refreshButton = event.target.closest(
+        "[data-integrated-search-clips-refresh]",
+      );
+      if (refreshButton) {
+        if (
+          integratedSearchClipsState.loading ||
+          integratedSearchClipsState.loadingMore ||
+          integratedSearchClipsState.tagLoading
+        ) {
+          return;
+        }
+        integratedSearchClipFeedCache = {
+          expiresAt: 0,
+          items: [],
+          feeds: [],
+        };
+        clearIntegratedSearchClipDiscoveryCaches();
+        void startIntegratedSearchClips(
+          integratedSearchClipsState.keyword,
+          true,
+          { preserveSort: true },
+        );
+        return;
+      }
       const clipPlayLink = event.target.closest(
         "[data-integrated-search-clip-play]",
       );
@@ -17186,6 +18238,7 @@ function renderIntegratedSearchClips() {
   setIntegratedSearchNativeEmptyHidden(
     (integratedSearchClipsState.loading &&
       integratedSearchClipsState.showSkeleton) ||
+      integratedSearchClipsState.tagLoading ||
       (!integratedSearchClipsState.error &&
         integratedSearchClipsState.results.length > 0),
   );
@@ -17195,6 +18248,7 @@ function renderIntegratedSearchClips() {
     integratedSearchClipsState.loading,
     integratedSearchClipsState.showSkeleton,
     integratedSearchClipsState.loadingMore,
+    integratedSearchClipsState.tagLoading,
     integratedSearchClipsState.sort,
     integratedSearchClipsState.visible,
     integratedSearchClipsState.error,
@@ -17216,14 +18270,30 @@ function renderIntegratedSearchClips() {
   const moreButton = more?.querySelector(
     "[data-integrated-search-clips-action]",
   );
+  const refreshButton = section.querySelector(
+    "[data-integrated-search-clips-refresh]",
+  );
   if (!list || !status || !count || !more || !moreButton) return;
+  if (refreshButton) {
+    const refreshing =
+      integratedSearchClipsState.loading ||
+      integratedSearchClipsState.loadingMore ||
+      integratedSearchClipsState.tagLoading;
+    refreshButton.disabled = refreshing;
+    refreshButton.classList.toggle("is-loading", refreshing);
+    refreshButton.setAttribute("aria-busy", String(refreshing));
+    refreshButton.setAttribute(
+      "aria-label",
+      refreshing ? "클립 검색 결과 새로고침 중" : "클립 검색 결과 새로고침",
+    );
+  }
   const searchQuery = parseIntegratedSearchClipQuery(
     integratedSearchClipsState.keyword,
   );
   if (scope) {
     const nextScope = searchQuery.categoryTerms.length
       ? `@${searchQuery.categoryTerms.join(", @")} 카테고리 우선`
-      : "추천·관련 채널·카테고리 기준";
+      : "추천·태그·팔로잉·관련 채널·카테고리 기준";
     if (scope.textContent !== nextScope) scope.textContent = nextScope;
   }
   if (deferLoadingUi) {
@@ -17306,15 +18376,22 @@ function renderIntegratedSearchClips() {
   }
 
   if (!sorted.length) {
-    if (findIntegratedSearchNativeEmptySection()) {
+    if (
+      !integratedSearchClipsState.tagLoading &&
+      findIntegratedSearchNativeEmptySection()
+    ) {
       section.remove();
       return;
     }
-    status.hidden = Boolean(findIntegratedSearchNativeEmptySection());
+    status.hidden =
+      !integratedSearchClipsState.tagLoading &&
+      Boolean(findIntegratedSearchNativeEmptySection());
     setIntegratedSearchClipsStatus(
       status,
-      integratedSearchClipsState.notice ||
-        INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE,
+      integratedSearchClipsState.tagLoading
+        ? "상위 클립 후보의 태그를 추가로 확인하고 있습니다."
+        : integratedSearchClipsState.notice ||
+            INTEGRATED_SEARCH_CLIPS_NO_MATCH_NOTICE,
     );
     list.hidden = true;
     list.textContent = "";
@@ -17339,6 +18416,16 @@ function renderIntegratedSearchClips() {
     moreButton.removeAttribute("aria-expanded");
     moreButton.disabled = true;
     setIntegratedSearchClipsMoreLabel(moreButton, "추가 후보 확인 중");
+    setIntegratedSearchClipsMoreLoading(moreButton, true);
+    return;
+  }
+
+  if (integratedSearchClipsState.tagLoading) {
+    more.hidden = false;
+    moreButton.dataset.integratedSearchClipsAction = "";
+    moreButton.removeAttribute("aria-expanded");
+    moreButton.disabled = true;
+    setIntegratedSearchClipsMoreLabel(moreButton, "클립 태그 확인 중");
     setIntegratedSearchClipsMoreLoading(moreButton, true);
     return;
   }
@@ -17485,7 +18572,15 @@ async function fetchMoreIntegratedSearchClips() {
     integratedSearchClipsState.visible +=
       integratedSearchClipMoreStep;
   }
+  integratedSearchClipsState.tagLoading =
+    shouldEnrichIntegratedSearchClipTags(
+      parseIntegratedSearchClipQuery(keyword),
+      integratedSearchClipsState.allItems,
+    );
   renderIntegratedSearchClips();
+  if (integratedSearchClipsState.tagLoading) {
+    void finishIntegratedSearchClipTagEnrichment(keyword, signal);
+  }
 }
 
 function cleanupIntegratedSearchClips(removeSection = true) {
@@ -17503,11 +18598,12 @@ function cleanupIntegratedSearchClips(removeSection = true) {
     loading: false,
     showSkeleton: false,
     loadingMore: false,
+    tagLoading: false,
     allItems: [],
     results: [],
     feeds: [],
     visible: INTEGRATED_SEARCH_CLIPS_INITIAL,
-    sort: "relevant",
+    sort: integratedSearchClipDefaultSort,
     error: "",
     notice: "",
     revision: 0,
@@ -17515,9 +18611,14 @@ function cleanupIntegratedSearchClips(removeSection = true) {
   });
 }
 
-async function startIntegratedSearchClips(keyword, force = false) {
+async function startIntegratedSearchClips(
+  keyword,
+  force = false,
+  { preserveSort = false } = {},
+) {
   const normalizedKeyword = String(keyword || "").trim();
   if (!normalizedKeyword) return;
+  const previousSort = integratedSearchClipsState.sort;
   const searchQuery = parseIntegratedSearchClipQuery(normalizedKeyword);
   const discoveryLimit = searchQuery.categoryTerms.length
     ? Math.min(
@@ -17525,6 +18626,8 @@ async function startIntegratedSearchClips(keyword, force = false) {
         INTEGRATED_SEARCH_CLIPS_CATEGORY_DISCOVERY_LIMIT,
       )
     : integratedSearchClipCandidateLimit;
+  const sourceTargets =
+    getIntegratedSearchClipSourceTargets(discoveryLimit);
   if (
     !force &&
     integratedSearchClipsState.loading &&
@@ -17546,6 +18649,10 @@ async function startIntegratedSearchClips(keyword, force = false) {
   // 설정 팝오버에서 옵션을 연속 조정할 수 있도록 재수집 중에는 섹션 DOM을
   // 유지한다. 검색 페이지를 벗어나거나 기능을 끌 때만 섹션을 제거한다.
   cleanupIntegratedSearchClips(false);
+  if (preserveSort) {
+    integratedSearchClipsState.sort =
+      normalizeIntegratedSearchClipSort(previousSort);
+  }
   integratedSearchClipsState.keyword = normalizedKeyword;
   integratedSearchClipsState.loading = true;
   integratedSearchClipsState.showSkeleton = !deferCachedLoadingUi;
@@ -17565,14 +18672,30 @@ async function startIntegratedSearchClips(keyword, force = false) {
   renderIntegratedSearchClips();
 
   try {
-    const [feedResult, channelResult] = await Promise.allSettled([
-      fetchInitialIntegratedSearchClipFeeds(signal, discoveryLimit),
-      fetchRelatedChannelClipsForIntegratedSearch(
-        searchQuery.textKeyword,
-        signal,
-        discoveryLimit,
-      ),
-    ]);
+    const [feedResult, channelResult, tagResult, followingResult] =
+      await Promise.allSettled([
+        fetchInitialIntegratedSearchClipFeeds(
+          signal,
+          discoveryLimit,
+          sourceTargets.recommend / discoveryLimit,
+        ),
+        fetchRelatedChannelClipsForIntegratedSearch(
+          searchQuery.textKeyword,
+          signal,
+          discoveryLimit,
+          sourceTargets.related / discoveryLimit,
+        ),
+        fetchTagChannelClipsForIntegratedSearch(
+          searchQuery,
+          signal,
+          sourceTargets.tag,
+        ),
+        fetchFollowingChannelClipsForIntegratedSearch(
+          searchQuery,
+          signal,
+          sourceTargets.following,
+        ),
+      ]);
     if (
       signal.aborted ||
       integratedSearchClipsState.keyword !== normalizedKeyword
@@ -17586,16 +18709,26 @@ async function startIntegratedSearchClips(keyword, force = false) {
       feedResult.status === "fulfilled" ? feedResult.value.feeds : [];
     const channelItems =
       channelResult.status === "fulfilled" ? channelResult.value : [];
+    const tagItems =
+      tagResult.status === "fulfilled" ? tagResult.value : [];
+    const followingItems =
+      followingResult.status === "fulfilled"
+        ? followingResult.value
+        : [];
     if (
       !feedItems.length &&
       !channelItems.length &&
+      !tagItems.length &&
+      !followingItems.length &&
       feedResult.status === "rejected"
     ) {
       throw new Error("클립 후보를 불러오지 못했습니다.");
     }
 
     const mergedItems = mergeIntegratedSearchClipItems(
+      tagItems,
       channelItems,
+      followingItems,
       feedItems,
     );
     const enrichedItems = await enrichIntegratedSearchClipCategories(
@@ -17633,7 +18766,18 @@ async function startIntegratedSearchClips(keyword, force = false) {
     integratedSearchClipsState.visible =
       INTEGRATED_SEARCH_CLIPS_INITIAL;
     rebuildIntegratedSearchClipResults();
+    integratedSearchClipsState.tagLoading =
+      shouldEnrichIntegratedSearchClipTags(
+        searchQuery,
+        integratedSearchClipsState.allItems,
+      );
     renderIntegratedSearchClips();
+    if (integratedSearchClipsState.tagLoading) {
+      void finishIntegratedSearchClipTagEnrichment(
+        normalizedKeyword,
+        signal,
+      );
+    }
   } catch (error) {
     if (
       signal.aborted ||
@@ -17674,6 +18818,7 @@ function ensureIntegratedSearchClips() {
     integratedSearchClipsState.keyword === keyword &&
     integratedSearchClipsState.fetchedFor === keyword &&
     !integratedSearchClipsState.loading &&
+    !integratedSearchClipsState.tagLoading &&
     !integratedSearchClipsState.error &&
     integratedSearchClipsState.results.length === 0 &&
     findIntegratedSearchNativeEmptySection()
@@ -21753,6 +22898,30 @@ function shouldPopupPlayerMute() {
   return countOpenPopupPlayers() > 0; // first: 첫 팝업만 소리
 }
 
+function applyPopupPlayerFrameScrolling(frame) {
+  if (!(frame instanceof HTMLIFrameElement)) return;
+  const scrolling = popupPlayerScroll ? "yes" : "no";
+  frame.setAttribute("scrolling", scrolling);
+  frame.style.overflow = popupPlayerScroll ? "auto" : "hidden";
+}
+
+function applyPopupPlayerScrollMode() {
+  if (IS_POPUP_PLAYER_FRAME) {
+    document.documentElement.classList.toggle(
+      "cheese-popup-scroll-enabled",
+      popupPlayerScroll,
+    );
+  }
+  applyOpenPopupPlayerScrolling();
+}
+
+function applyOpenPopupPlayerScrolling() {
+  if (!IS_TOP_FRAME) return;
+  document
+    .querySelectorAll(`.${POPUP_PLAYER_CLASS} iframe.cheese-popup-player__frame`)
+    .forEach(applyPopupPlayerFrameScrolling);
+}
+
 function createPopupPlayer(href, left, top) {
   const popup = document.createElement("div");
   popup.className = POPUP_PLAYER_CLASS;
@@ -21773,7 +22942,7 @@ function createPopupPlayer(href, left, top) {
   // ⚠ allow 에 fullscreen 을 넣으면 allowFullscreen 속성은 무시되고 콘솔 경고가 뜬다
   // ("Allow attribute will take precedence over 'allowfullscreen'"). allow 만 쓴다.
   frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-  frame.setAttribute("scrolling", "no");
+  applyPopupPlayerFrameScrolling(frame);
   frame.title = "치지직 팝업 플레이어";
   popup.appendChild(frame);
 
@@ -23296,6 +24465,7 @@ async function loadFollowPreview() {
       POPUP_PLAYER_SIZE_W_KEY,
       POPUP_PLAYER_SIZE_H_KEY,
       POPUP_PLAYER_WIDE_KEY,
+      POPUP_PLAYER_SCROLL_KEY,
       POPUP_PLAYER_BTN_MIXER_KEY,
       POPUP_PLAYER_BTN_FILTER_KEY,
       POPUP_PLAYER_BTN_SYNC_KEY,
@@ -23319,6 +24489,8 @@ async function loadFollowPreview() {
       data?.[POPUP_PLAYER_SIZE_H_KEY],
     );
     popupPlayerWide = data?.[POPUP_PLAYER_WIDE_KEY] !== false; // 기본 ON
+    popupPlayerScroll = data?.[POPUP_PLAYER_SCROLL_KEY] === true; // 기본 OFF
+    applyPopupPlayerScrollMode();
     popupPlayerBtnMixer = data?.[POPUP_PLAYER_BTN_MIXER_KEY] !== false;
     popupPlayerBtnFilter = data?.[POPUP_PLAYER_BTN_FILTER_KEY] !== false;
     popupPlayerBtnSync = data?.[POPUP_PLAYER_BTN_SYNC_KEY] !== false;
@@ -26175,10 +27347,11 @@ function findChatProfilePopover() {
   const dialogs = document.querySelectorAll(
     '[role="alertdialog"][aria-modal="true"]',
   );
+  // ⚠ 해시를 고정으로 박으면 치지직 배포마다 깨진다. 실제로 _9iogl_ → _ns3zq_ 로
+  // 바뀌면서, 새 빌드를 먼저 받은 사용자만 차단 버튼이 사라졌다(제보). 그래서
+  // '해시가 무엇이든' 역할 클래스 이름만 보고 찾는다(_information_ / _list_).
   for (const d of dialogs) {
-    if (
-      d.querySelector('[class*="_information_9iogl_"], [class*="_list_9iogl_"]')
-    ) {
+    if (d.querySelector('[class*="_information_"], [class*="_list_"]')) {
       return d;
     }
   }
@@ -26196,10 +27369,22 @@ let chatBlockReinjectWindowAt = 0;
 const CHAT_BLOCK_REINJECT_LIMIT = 5;
 const CHAT_BLOCK_REINJECT_WINDOW_MS = 1500;
 
+// ⚠ 치지직 CSS module 해시(_9iogl_ → _ns3zq_ …)는 배포마다 바뀌고 사용자별로 순차
+// 적용된다. 해시를 박아 두면 새 빌드를 먼저 받은 사용자에게만 기능이 사라진다(제보).
+// 아래는 모두 해시를 뺀 '역할 이름'만으로 찾는다.
+function findChatProfileMenuList(pop) {
+  return (
+    // 버튼이 든 목록형 컨테이너(메뉴). 해시가 무엇이든 _list_ 는 유지된다.
+    [...pop.querySelectorAll('[class*="_list_"], ul')].find(
+      (el) => el.querySelectorAll("button").length >= 1,
+    ) || null
+  );
+}
+
 function ensureChatBlockButton() {
   const pop = findChatProfilePopover();
   if (!pop) return;
-  const list = pop.querySelector('[class*="_list_9iogl_"]');
+  const list = findChatProfileMenuList(pop);
   if (!list) return;
   if (list.querySelector(`.${CHAT_BLOCK_ITEM_CLASS}`)) return; // 이미 주입됨(멱등)
   // 대상 프로필이 없으면(아직 안 옴) 스킵 — profile 수신 시 다시 호출된다.
@@ -26225,12 +27410,13 @@ function ensureChatBlockButton() {
   // 닉네임은 팝오버 DOM 의 _name_(현재 닉네임, '수정됨' 이어도 최신)을 우선 사용하고,
   // 없으면 profile-card 값 폴백. 이래야 닉네임 변경 유저도 최신 닉네임으로 저장된다.
   const nameEl = pop.querySelector(
-    '[class*="_name_9iogl_"] [class*="_text_"], [class*="_name_9iogl_"]',
+    '[class*="_name_"] [class*="_text_"], [class*="_name_"]',
   );
   const nickname =
     (nameEl?.textContent || "").trim() || lastChatProfile.nickname;
+  // 네이티브 메뉴 버튼의 클래스를 그대로 빌려 스타일을 맞춘다(해시 무관).
   const nativeItem = list.querySelector(
-    `button[class*="_item_9iogl_"]:not(.${CHAT_BLOCK_ITEM_CLASS})`,
+    `button:not(.${CHAT_BLOCK_ITEM_CLASS})`,
   );
   const nativeCls = nativeItem?.className || "";
   const blocked = commentBlockHashSet.has(userHash);
@@ -26788,6 +27974,7 @@ const FEATURE_FLAGS_KEYS = [
   CHAT_FONT_SCALE_KEY,
   CHAT_FONT_SCALE_SPECIAL_KEY,
   CHAT_TIME_FORMAT_KEY,
+  CHAT_TIME_COLORS_KEY,
   CHAT_BUTTON_WRAP_KEY,
   LOGPOWER_CLICK_ACTION_KEY,
   LOGPOWER_PROGRESS_MODE_KEY,
@@ -26809,8 +27996,12 @@ const FEATURE_FLAGS_KEYS = [
   SEARCH_CLIPS_KEY,
   SEARCH_CLIPS_DIRECT_PLAY_KEY,
   SEARCH_CLIPS_WEIGHTS_KEY,
+  SEARCH_CLIPS_SOURCE_PRESET_KEY,
+  SEARCH_CLIPS_SOURCE_WEIGHTS_KEY,
+  SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY,
   SEARCH_CLIPS_MATCH_MODE_KEY,
   SEARCH_CLIPS_DATE_FILTER_KEY,
+  SEARCH_CLIPS_DEFAULT_SORT_KEY,
   SEARCH_CLIPS_CANDIDATE_LIMIT_KEY,
   SEARCH_CLIPS_CATEGORY_LIMIT_KEY,
   SEARCH_CLIPS_MORE_STEP_KEY,
@@ -26938,10 +28129,41 @@ async function loadFeatureFlags() {
     integratedSearchClipsEnabled =
       data?.[SEARCH_CLIPS_KEY] === true; // 기본 OFF
     integratedSearchClipDirectPlay =
-      data?.[SEARCH_CLIPS_DIRECT_PLAY_KEY] !== false; // 기본 ON(바로 재생)
+      data?.[SEARCH_CLIPS_DIRECT_PLAY_KEY] === true; // 기본 OFF(새 탭)
     integratedSearchClipWeights = normalizeIntegratedSearchClipWeights(
       data?.[SEARCH_CLIPS_WEIGHTS_KEY],
     );
+    integratedSearchClipSourcePreset =
+      normalizeIntegratedSearchClipSourcePreset(
+        data?.[SEARCH_CLIPS_SOURCE_PRESET_KEY],
+      );
+    integratedSearchClipSourceCustomWeights =
+      normalizeIntegratedSearchClipSourceWeights(
+        data?.[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] ??
+          (integratedSearchClipSourcePreset === "custom"
+            ? data?.[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
+            : undefined),
+      );
+    integratedSearchClipSourceWeights =
+      normalizeIntegratedSearchClipSourceWeights(
+        integratedSearchClipSourcePreset === "custom"
+          ? integratedSearchClipSourceCustomWeights
+          : SEARCH_CLIPS_SOURCE_PRESETS[
+              integratedSearchClipSourcePreset
+            ],
+      );
+    if (
+      data?.[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] == null &&
+      integratedSearchClipSourcePreset === "custom" &&
+      data?.[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
+    ) {
+      try {
+        chrome.storage.local.set({
+          [SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]:
+            integratedSearchClipSourceCustomWeights,
+        });
+      } catch {}
+    }
     integratedSearchClipMatchMode = normalizeIntegratedSearchClipMatchMode(
       data?.[SEARCH_CLIPS_MATCH_MODE_KEY],
     );
@@ -26949,6 +28171,9 @@ async function loadFeatureFlags() {
       normalizeIntegratedSearchClipDateFilter(
         data?.[SEARCH_CLIPS_DATE_FILTER_KEY],
       );
+    integratedSearchClipDefaultSort = normalizeIntegratedSearchClipSort(
+      data?.[SEARCH_CLIPS_DEFAULT_SORT_KEY],
+    );
     integratedSearchClipCandidateLimit = normalizeIntegratedSearchClipLimit(
       data?.[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY],
       SEARCH_CLIPS_LIMIT_DEFAULT,
@@ -27046,11 +28271,13 @@ async function loadFeatureFlags() {
     chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
     chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
     chatTimeFormat = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
+    chatTimeColors = normalizeChatTimeColors(data?.[CHAT_TIME_COLORS_KEY]);
     chatButtonWrap = data?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=ON
     applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
   } catch {
     // 실패 시 전부 표시(기본값) 유지.
   }
+  applyChatTimeColors();
 }
 
 if (chrome.storage?.onChanged) {
@@ -27163,7 +28390,7 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[SEARCH_CLIPS_DIRECT_PLAY_KEY]) {
       integratedSearchClipDirectPlay =
-        changes[SEARCH_CLIPS_DIRECT_PLAY_KEY].newValue !== false;
+        changes[SEARCH_CLIPS_DIRECT_PLAY_KEY].newValue === true;
       if (!integratedSearchClipDirectPlay) {
         closeIntegratedSearchClipPlayer();
       }
@@ -27178,6 +28405,67 @@ if (chrome.storage?.onChanged) {
       ) {
         rebuildIntegratedSearchClipResults();
         renderIntegratedSearchClips();
+      }
+    }
+    if (
+      changes[SEARCH_CLIPS_SOURCE_PRESET_KEY] ||
+      changes[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY] ||
+      changes[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]
+    ) {
+      if (changes[SEARCH_CLIPS_SOURCE_PRESET_KEY]) {
+        integratedSearchClipSourcePreset =
+          normalizeIntegratedSearchClipSourcePreset(
+            changes[SEARCH_CLIPS_SOURCE_PRESET_KEY].newValue,
+          );
+      }
+      if (changes[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]) {
+        integratedSearchClipSourceCustomWeights =
+          normalizeIntegratedSearchClipSourceWeights(
+            changes[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY].newValue,
+          );
+      } else if (
+        integratedSearchClipSourcePreset === "custom" &&
+        changes[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
+      ) {
+        integratedSearchClipSourceCustomWeights =
+          normalizeIntegratedSearchClipSourceWeights(
+            changes[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY].newValue,
+          );
+        try {
+          chrome.storage.local.set({
+            [SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]:
+              integratedSearchClipSourceCustomWeights,
+          });
+        } catch {}
+      }
+      const activeSourceChanged =
+        !!changes[SEARCH_CLIPS_SOURCE_PRESET_KEY] ||
+        !!changes[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY] ||
+        (integratedSearchClipSourcePreset === "custom" &&
+          !!changes[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]);
+      if (activeSourceChanged) {
+        integratedSearchClipSourceWeights =
+          normalizeIntegratedSearchClipSourceWeights(
+            integratedSearchClipSourcePreset === "custom"
+              ? integratedSearchClipSourceCustomWeights
+              : SEARCH_CLIPS_SOURCE_PRESETS[
+                  integratedSearchClipSourcePreset
+                ],
+          );
+        integratedSearchClipFeedCache = {
+          expiresAt: 0,
+          items: [],
+          feeds: [],
+        };
+        if (
+          integratedSearchClipsEnabled &&
+          integratedSearchClipsState.keyword
+        ) {
+          void startIntegratedSearchClips(
+            integratedSearchClipsState.keyword,
+            true,
+          );
+        }
       }
     }
     if (changes[SEARCH_CLIPS_MATCH_MODE_KEY]) {
@@ -27208,6 +28496,12 @@ if (chrome.storage?.onChanged) {
           true,
         );
       }
+    }
+    if (changes[SEARCH_CLIPS_DEFAULT_SORT_KEY]) {
+      integratedSearchClipDefaultSort = normalizeIntegratedSearchClipSort(
+        changes[SEARCH_CLIPS_DEFAULT_SORT_KEY].newValue,
+      );
+      // 기본 정렬은 다음 검색 또는 새로고침부터 적용한다.
     }
     if (
       changes[SEARCH_CLIPS_CANDIDATE_LIMIT_KEY] ||
@@ -27415,6 +28709,12 @@ if (chrome.storage?.onChanged) {
         changes[CHAT_TIME_FORMAT_KEY].newValue,
       );
     }
+    if (changes[CHAT_TIME_COLORS_KEY]) {
+      chatTimeColors = normalizeChatTimeColors(
+        changes[CHAT_TIME_COLORS_KEY].newValue,
+      );
+      applyChatTimeColors();
+    }
     if (changes[CHAT_BUTTON_WRAP_KEY]) {
       chatButtonWrap = changes[CHAT_BUTTON_WRAP_KEY].newValue !== false;
       applyChatTweaks(); // 버튼 줄바꿈 게이트 클래스 즉시 반영
@@ -27517,6 +28817,10 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[POPUP_PLAYER_WIDE_KEY]) {
       popupPlayerWide = changes[POPUP_PLAYER_WIDE_KEY].newValue !== false;
+    }
+    if (changes[POPUP_PLAYER_SCROLL_KEY]) {
+      popupPlayerScroll = changes[POPUP_PLAYER_SCROLL_KEY].newValue === true;
+      applyPopupPlayerScrollMode();
     }
     // 팝업 버튼 표시 토글들. [키, 적용 함수, 기본 ON 여부] 표로 처리한다.
     let popupBtnChanged = false;
@@ -27974,7 +29278,7 @@ function init() {
     applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
     ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
     ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
-    ensureIntegratedSearchClips(); // 통합검색 추천·관련 채널·카테고리 클립 섹션(옵션 시)
+    ensureIntegratedSearchClips(); // 통합검색 추천·태그·팔로잉·관련 채널·카테고리 클립 섹션
     bindPopupPlayerDrag(); // 사이드바 채널 드래그 → 팝업 플레이어
     ensurePopupPlayerDraggable();
   }

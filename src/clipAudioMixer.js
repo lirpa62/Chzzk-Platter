@@ -238,6 +238,7 @@
   let enabled = false;
   let autoEnableArmed = false;
   let autoEnableSuppressed = false;
+  let autoResumePromise = null;
   let button = null;
   let tooltip = null;
   let slot = null;
@@ -655,7 +656,10 @@
     if (!button?.isConnected) {
       button = document.createElement("button");
       button.type = "button";
-      button.className = `${nativeButton.className} ${BUTTON_CLASS}`;
+      // 네이티브 볼륨 버튼 클래스에는 컨트롤 표시 상태에 따른 opacity가 포함될 수
+      // 있다. 이를 복사하면 클립 전환 직후 아이콘이 숨고 호버할 때만 나타나므로,
+      // 위치만 네이티브 버튼에서 계산하고 시각 상태는 전용 클래스로 관리한다.
+      button.className = BUTTON_CLASS;
       button.innerHTML =
         mixerIcon() +
         `<span class="${TOOLTIP_CLASS}" role="tooltip" aria-hidden="true"></span>`;
@@ -663,7 +667,6 @@
       button.addEventListener("click", onButtonClick);
       slot.appendChild(button);
     } else {
-      button.className = `${nativeButton.className} ${BUTTON_CLASS}`;
       tooltip ||= button.querySelector(`.${TOOLTIP_CLASS}`);
     }
     updateButton();
@@ -939,6 +942,70 @@
     }
   }
 
+  function tryAutoEnableWithoutGesture() {
+    if (
+      !alwaysOn ||
+      enabled ||
+      autoEnableSuppressed ||
+      !masterEnabled ||
+      featureHidden
+    ) {
+      return;
+    }
+
+    const video = findActiveVideo();
+    if (!(video instanceof HTMLVideoElement)) {
+      armAutoEnable();
+      return;
+    }
+
+    try {
+      audio.ctx ||= new AudioContext();
+    } catch (error) {
+      autoEnableSuppressed = true;
+      showGraphError(error);
+      disarmAutoEnable();
+      return;
+    }
+
+    // 실행이 허용되지 않은 AudioContext에 video를 먼저 연결하면 사용자가 조작할
+    // 때까지 원음까지 끊길 수 있다. running 상태가 확인된 뒤에만 그래프를 구성한다.
+    if (audio.ctx.state !== "running") {
+      armAutoEnable();
+      if (!autoResumePromise) {
+        const pendingContext = audio.ctx;
+        autoResumePromise = pendingContext
+          .resume()
+          .catch(() => {})
+          .finally(() => {
+            autoResumePromise = null;
+            if (
+              pendingContext === audio.ctx &&
+              pendingContext.state === "running" &&
+              alwaysOn &&
+              !enabled &&
+              !autoEnableSuppressed &&
+              masterEnabled &&
+              !featureHidden
+            ) {
+              scheduleSync();
+            }
+          });
+      }
+      return;
+    }
+
+    enabled = true;
+    if (!connectGraph(video)) {
+      autoEnableSuppressed = true;
+      disarmAutoEnable();
+      return;
+    }
+    autoEnableSuppressed = false;
+    disarmAutoEnable();
+    updateButton();
+  }
+
   function onAutoEnableGesture(event) {
     if (event.target?.closest?.(`.${BUTTON_CLASS}`)) return;
     if (!alwaysOn || !masterEnabled || featureHidden) {
@@ -992,7 +1059,9 @@
     ) {
       connectGraph(video);
     }
-    if (alwaysOn && !enabled && !autoEnableSuppressed) armAutoEnable();
+    if (alwaysOn && !enabled && !autoEnableSuppressed) {
+      tryAutoEnableWithoutGesture();
+    }
   }
 
   function scheduleSync() {

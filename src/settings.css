@@ -836,6 +836,7 @@ body {
 .settings-item:has([data-popup-player-audio]),
 .settings-item:has([data-cf-group-placement]),
 .settings-item:has([data-integrated-search-clips-weights-reset]),
+.settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
@@ -862,6 +863,8 @@ body {
 .settings-item:has(#integratedSearchClipMatchMode),
 .settings-item:has(#integratedSearchClipDateFilter),
 .settings-item:has(#autoReliveMaxHours),
+.settings-item:has(#integratedSearchClipSourcePreset),
+.settings-item:has(#integratedSearchClipDefaultSort),
 .settings-item:has(#cardLivePreviewPosition),
 .settings-item:has(#rootToFollowingLogoMode),
 .settings-item:has([data-update-notice-mode]) {
@@ -871,6 +874,8 @@ body {
 .settings-item #commentTsClickAction,
 .settings-item #integratedSearchClipDateFilter,
 .settings-item #autoReliveMaxHours,
+.settings-item #integratedSearchClipSourcePreset,
+.settings-item #integratedSearchClipDefaultSort,
 .settings-item #cardLivePreviewPosition,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;
@@ -1039,6 +1044,170 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+}
+
+.settings-clip-source-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--popup-border);
+}
+
+.settings-clip-source-custom[hidden] {
+  display: none;
+}
+
+.settings-clip-source-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-clip-source-row > span:first-child {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--popup-muted);
+}
+
+.settings-clip-source-row > span:first-child small {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.settings-clip-source-row > .settings-info-panel {
+  box-sizing: border-box;
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.settings-clip-source-row > input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--popup-brand);
+}
+
+.settings-clip-source-row .settings-custom-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.settings-clip-source-row .settings-custom-input input {
+  min-width: 0;
+  text-align: right;
+}
+
+.settings-clip-source-effective {
+  color: var(--popup-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+/* 채팅 시간 표시: 라이트/다크 모드별 Coloris 색상 선택 */
+.settings-chat-time-color-item {
+  align-items: stretch;
+}
+
+.settings-chat-time-color-head {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.settings-chat-time-color-head > div {
+  min-width: 0;
+}
+
+.settings-chat-time-color-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-chat-time-color-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-chat-time-color-control,
+.settings-chat-time-color-control .clr-field {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-chat-time-color-control .clr-field {
+  color: #000;
+}
+
+.settings-chat-time-color-control .clr-field.is-disabled {
+  cursor: not-allowed;
+}
+
+.settings-chat-time-color-control .clr-field input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 38px 0 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-chat-time-color-control .clr-field input:focus-visible {
+  border-color: var(--popup-brand);
+  outline: 2px solid color-mix(in srgb, var(--popup-brand) 22%, transparent);
+  outline-offset: 1px;
+}
+
+.settings-chat-time-color-control .clr-field input:disabled {
+  cursor: not-allowed;
+}
+
+.settings-chat-time-color-control .clr-field button {
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+
+.settings-chat-time-color-control .clr-field button::after {
+  border-radius: 5px;
+}
+
+.settings-chat-time-color-control .clr-field button:disabled {
+  cursor: not-allowed;
+}
+
+.settings-chat-time-color-reset {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.settings-chat-time-color-item.is-disabled .settings-chat-time-color-editor {
+  opacity: 0.48;
 }
 
 /* 채널 탭: 라이브 프로필 테두리 색상 + 프로필 모서리 연동 미리보기 */

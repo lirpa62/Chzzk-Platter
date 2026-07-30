@@ -25,6 +25,12 @@ const CLIP_PAGE_THROTTLE_MS = 50;
 const SORT_METRIC_CONCURRENCY = 6;
 const CLIP_REACTION_TIMEOUT_MS = 3500;
 const CLIP_REACTION_FAILURE_LIMIT = 12;
+const CLIP_TAG_ENRICH_LIMIT = 24;
+const CLIP_TAG_FETCH_CONCURRENCY = 6;
+const CLIP_TAG_FETCH_TIMEOUT_MS = 4000;
+const CLIP_TAG_CACHE_TTL_MS = 30 * 60 * 1000;
+const CLIP_TAG_FAILURE_CACHE_TTL_MS = 2 * 60 * 1000;
+const CLIP_TAG_CACHE_MAX = 2000;
 
 const CACHE_STORAGE_PREFIX = "cache:";
 const CHANNEL_SEARCH_STORAGE_PREFIX = "channelSearch:";
@@ -118,6 +124,8 @@ const categoryInfoCache = new Map();
 const categoryInfoInFlight = new Map();
 const commentTimestampCache = new Map();
 const videoCommentCountCache = new Map();
+const clipTagCache = new Map();
+const clipTagInFlight = new Map();
 const collectionTaskQueue = [];
 let activeCollectionTaskCount = 0;
 let channelSearchQueue = Promise.resolve();
@@ -1091,6 +1099,137 @@ async function enrichClipCategoryDescriptors(descriptors) {
       };
     })
     .filter(Boolean);
+}
+
+function extractCreatorHubClipTags(description) {
+  const tags = [];
+  const seen = new Set();
+  for (const match of String(description || "").matchAll(
+    /#([\p{L}\p{N}_]+)/gu,
+  )) {
+    const tag = String(match[1] || "").trim();
+    const key = tag.toLocaleLowerCase("ko-KR");
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function setClipTagCache(key, value, ttlMs) {
+  if (clipTagCache.has(key)) clipTagCache.delete(key);
+  clipTagCache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value,
+  });
+  while (clipTagCache.size > CLIP_TAG_CACHE_MAX) {
+    const oldestKey = clipTagCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    clipTagCache.delete(oldestKey);
+  }
+}
+
+async function fetchCreatorHubClipTags(descriptor) {
+  const clipUID = String(descriptor?.clipUID || "").trim();
+  const videoId = String(descriptor?.videoId || "").trim();
+  if (!clipUID || !videoId) return null;
+  const cacheKey = `${clipUID}:${videoId}`;
+  const cached = clipTagCache.get(cacheKey);
+  if (cached && Number(cached.expiresAt || 0) > Date.now()) {
+    return cached.value;
+  }
+  if (cached) clipTagCache.delete(cacheKey);
+
+  const inFlight = clipTagInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    const url = new URL(`${CREATORHUB_API_BASE}/clipviewer/card`);
+    url.searchParams.set("userInteraction", "false");
+    url.searchParams.set("seedType", "SPECIFIC");
+    url.searchParams.set("serviceType", "CHZZK");
+    url.searchParams.set("seedMediaId", videoId);
+    url.searchParams.set("mediaType", "SHORT_FORM");
+    url.searchParams.set("panelType", "sdk_chzzk");
+    url.searchParams.set(
+      "referer",
+      `https://chzzk.naver.com/clips/${encodeURIComponent(clipUID)}`,
+    );
+    url.searchParams.set("recType", "CHZZK");
+    url.searchParams.set(
+      "recId",
+      JSON.stringify({
+        seedClipUID: clipUID,
+        fromType: "GLOBAL",
+        listType: "RECOMMEND",
+      }),
+    );
+    url.searchParams.set("enableReverse", "false");
+    url.searchParams.set("adAllowed", "false");
+    url.searchParams.set("clickNsc", "chzzk_url_clip");
+    url.searchParams.set("clickArea", "clip_item");
+    url.searchParams.set("deviceType", "html5_mo");
+    url.searchParams.set("profileOverride", "false");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      CLIP_TAG_FETCH_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "include",
+        signal: controller.signal,
+        headers: { accept: "application/json, text/plain, */*" },
+      });
+      if (!response.ok) {
+        throw new Error(`클립 태그 API 요청 실패: HTTP ${response.status}`);
+      }
+      const payload = await response.json();
+      const content = payload?.body?.card?.content;
+      if (
+        Number(payload?.header?.code) !== 0 ||
+        String(content?.contentId || "").trim() !== clipUID
+      ) {
+        throw new Error("클립 태그 API 응답을 확인할 수 없습니다.");
+      }
+      const value = {
+        clipUID,
+        tags: extractCreatorHubClipTags(content.description),
+        resolved: true,
+      };
+      setClipTagCache(cacheKey, value, CLIP_TAG_CACHE_TTL_MS);
+      return value;
+    } catch {
+      setClipTagCache(cacheKey, null, CLIP_TAG_FAILURE_CACHE_TTL_MS);
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  })().finally(() => {
+    clipTagInFlight.delete(cacheKey);
+  });
+  clipTagInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+async function enrichClipTagDescriptors(descriptors) {
+  const unique = new Map();
+  for (const descriptor of Array.isArray(descriptors) ? descriptors : []) {
+    const clipUID = String(descriptor?.clipUID || "").trim();
+    const videoId = String(descriptor?.videoId || "").trim();
+    if (!clipUID || !videoId || unique.has(clipUID)) continue;
+    unique.set(clipUID, { clipUID, videoId });
+    if (unique.size >= CLIP_TAG_ENRICH_LIMIT) break;
+  }
+  if (!unique.size) return [];
+  const results = await mapWithConcurrency(
+    [...unique.values()],
+    CLIP_TAG_FETCH_CONCURRENCY,
+    fetchCreatorHubClipTags,
+  );
+  return results.filter(Boolean);
 }
 
 function getClipCategoryKey(clip) {
@@ -3528,6 +3667,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "CHEESE_SEARCH_ENRICH_CLIP_CATEGORIES") {
     enrichClipCategoryDescriptors(message.payload?.categories)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_SEARCH_ENRICH_CLIP_TAGS") {
+    enrichClipTagDescriptors(message.payload?.clips)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) =>
         sendResponse({ ok: false, error: normalizeError(error) }),

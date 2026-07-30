@@ -58,6 +58,7 @@
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatTimeFormat",
+    "cheeseChatTimeColors",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowCleanup",
@@ -69,6 +70,7 @@
     "cheesePopupPlayerSizeW",
     "cheesePopupPlayerSizeH",
     "cheesePopupPlayerWide",
+    "cheesePopupPlayerScroll",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -150,7 +152,11 @@
     "cheeseSearchClipCategoryLimit",
     "cheeseSearchClipMoreStep",
     "cheeseSearchClipDateFilter",
+    "cheeseSearchClipDefaultSort",
     "cheeseSearchClipMatchMode",
+    "cheeseSearchClipSourcePreset",
+    "cheeseSearchClipSourceWeights",
+    "cheeseSearchClipSourceCustomWeights",
     "cheeseSearchClipWeights",
     "cheeseSearchRerank",
     "cheeseSearchRerankMoreStep",
@@ -903,6 +909,7 @@
       input.checked = typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key);
     });
     reflectClipEditorStepAvailability();
+    reflectChatTimeFormatAvailability();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -992,8 +999,14 @@
     closeAllClipEditorStepPickers(),
   );
 
-  // ── 채팅 시간 표시 형식(24시간 | AM/PM | 오전/오후) ───────────────────────
+  // ── 채팅 시간 표시 형식·테마별 글자 색상 ───────────────────────────────────
   const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
+  const CHAT_TIME_COLORS_KEY = "cheeseChatTimeColors";
+  const CHAT_TIME_COLORS_DEFAULT = Object.freeze({
+    enabled: false,
+    light: "#000000",
+    dark: "#ffffff",
+  });
   const chatShowTimeInput = document.querySelector(
     '[data-feature="chatShowTime"]',
   );
@@ -1003,10 +1016,52 @@
   const chatTimeFormatButtons = Array.from(
     document.querySelectorAll("[data-chat-time-format-value]"),
   );
+  const chatTimeColorItem = document.querySelector(
+    "[data-chat-time-color-item]",
+  );
+  const chatTimeColorEnabledInput = document.querySelector(
+    "[data-chat-time-color-enabled]",
+  );
+  const chatTimeColorEditor = document.querySelector(
+    "[data-chat-time-color-editor]",
+  );
+  const chatTimeColorLightInput = document.querySelector(
+    "[data-chat-time-color-light]",
+  );
+  const chatTimeColorDarkInput = document.querySelector(
+    "[data-chat-time-color-dark]",
+  );
+  const chatTimeColorReset = document.querySelector(
+    "[data-chat-time-color-reset]",
+  );
   let chatTimeMoaLocked = false;
+  let chatTimeColors = { ...CHAT_TIME_COLORS_DEFAULT };
+  let chatTimeColorsSaveTimer = 0;
+
   function normalizeChatTimeFormat(value) {
     return value === "12h-en" || value === "12h-ko" ? value : "24h";
   }
+
+  function normalizeChatTimeColor(value, fallback) {
+    const color = String(value || "").trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+  }
+
+  function normalizeChatTimeColors(value) {
+    const config = value && typeof value === "object" ? value : {};
+    return {
+      enabled: config.enabled === true,
+      light: normalizeChatTimeColor(
+        config.light,
+        CHAT_TIME_COLORS_DEFAULT.light,
+      ),
+      dark: normalizeChatTimeColor(
+        config.dark,
+        CHAT_TIME_COLORS_DEFAULT.dark,
+      ),
+    };
+  }
+
   function reflectChatTimeFormat(value) {
     const normalized = normalizeChatTimeFormat(value);
     chatTimeFormatButtons.forEach((button) => {
@@ -1021,7 +1076,73 @@
       button.disabled = disabled;
     });
     chatTimeFormatItem?.classList.toggle("is-locked", disabled);
+    reflectChatTimeColors();
   }
+
+  function reflectChatTimeColorInput(input, color, disabled) {
+    if (!input) return;
+    const displayColor = color.toUpperCase();
+    input.value = displayColor;
+    input.disabled = disabled;
+    const field = input.closest(".clr-field");
+    if (field) {
+      field.style.color = displayColor;
+      field.classList.toggle("is-disabled", disabled);
+      const trigger = field.querySelector("button");
+      if (trigger) trigger.disabled = disabled;
+    }
+  }
+
+  function reflectChatTimeColors() {
+    const unavailable = chatTimeMoaLocked || !chatShowTimeInput?.checked;
+    const editorDisabled = unavailable || !chatTimeColors.enabled;
+    if (chatTimeColorEnabledInput) {
+      chatTimeColorEnabledInput.checked = chatTimeColors.enabled;
+      chatTimeColorEnabledInput.disabled = unavailable;
+    }
+    reflectChatTimeColorInput(
+      chatTimeColorLightInput,
+      chatTimeColors.light,
+      editorDisabled,
+    );
+    reflectChatTimeColorInput(
+      chatTimeColorDarkInput,
+      chatTimeColors.dark,
+      editorDisabled,
+    );
+    if (chatTimeColorReset) chatTimeColorReset.disabled = editorDisabled;
+    chatTimeColorEditor?.setAttribute(
+      "aria-disabled",
+      String(editorDisabled),
+    );
+    chatTimeColorItem?.classList.toggle("is-locked", unavailable);
+    chatTimeColorItem?.classList.toggle("is-disabled", editorDisabled);
+  }
+
+  function updateChatTimeColors(patch, save = true) {
+    chatTimeColors = normalizeChatTimeColors({
+      ...chatTimeColors,
+      ...patch,
+    });
+    reflectChatTimeColors();
+    if (!save) return;
+    clearTimeout(chatTimeColorsSaveTimer);
+    chatTimeColorsSaveTimer = 0;
+    try {
+      cachedStorageSet({ [CHAT_TIME_COLORS_KEY]: chatTimeColors });
+    } catch {}
+  }
+
+  function scheduleChatTimeColorsSave() {
+    clearTimeout(chatTimeColorsSaveTimer);
+    chatTimeColorsSaveTimer = window.setTimeout(() => {
+      chatTimeColorsSaveTimer = 0;
+      try {
+        cachedStorageSet({ [CHAT_TIME_COLORS_KEY]: chatTimeColors });
+      } catch {}
+    }, 120);
+  }
+
   (async () => {
     let format = "24h";
     try {
@@ -1030,6 +1151,17 @@
     } catch {}
     reflectChatTimeFormat(format);
     reflectChatTimeFormatAvailability();
+  })();
+  (async () => {
+    try {
+      const data = await cachedStorageGet(CHAT_TIME_COLORS_KEY);
+      chatTimeColors = normalizeChatTimeColors(
+        data?.[CHAT_TIME_COLORS_KEY],
+      );
+    } catch {
+      chatTimeColors = { ...CHAT_TIME_COLORS_DEFAULT };
+    }
+    reflectChatTimeColors();
   })();
   chatTimeFormatButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -1042,10 +1174,39 @@
       } catch {}
     });
   });
-  chatShowTimeInput?.addEventListener(
-    "change",
-    reflectChatTimeFormatAvailability,
-  );
+  chatTimeColorEnabledInput?.addEventListener("change", () => {
+    updateChatTimeColors({
+      enabled: chatTimeColorEnabledInput.checked,
+    });
+  });
+  function bindChatTimeColorInput(input, key) {
+    input?.addEventListener("input", () => {
+      const color = normalizeChatTimeColor(input.value, "");
+      if (!color) return;
+      updateChatTimeColors({ [key]: color }, false);
+      scheduleChatTimeColorsSave();
+    });
+    input?.addEventListener("change", () => {
+      const color = normalizeChatTimeColor(input.value, "");
+      if (!color) {
+        reflectChatTimeColors();
+        return;
+      }
+      updateChatTimeColors({ [key]: color });
+    });
+  }
+  bindChatTimeColorInput(chatTimeColorLightInput, "light");
+  bindChatTimeColorInput(chatTimeColorDarkInput, "dark");
+  chatTimeColorReset?.addEventListener("click", () => {
+    updateChatTimeColors({
+      light: CHAT_TIME_COLORS_DEFAULT.light,
+      dark: CHAT_TIME_COLORS_DEFAULT.dark,
+    });
+  });
+  chatShowTimeInput?.addEventListener("change", () => {
+    reflectChatTimeFormatAvailability();
+  });
+  reflectChatTimeColors();
 
   // ── 채팅 폰트 크기: 커스텀 팝오버 드롭다운(0.8~2, 기본 1) ──────────────────
   const CHAT_FONT_SCALE_KEY = "cheeseChatFontScale";
@@ -1151,6 +1312,16 @@
         );
       } else {
         chatTimeFormatItem.removeAttribute("title");
+      }
+    }
+    if (chatTimeColorItem) {
+      if (chatTimeMoaLocked) {
+        chatTimeColorItem.setAttribute(
+          "title",
+          "배지 모아 챗이 이 기능을 제어 중입니다",
+        );
+      } else {
+        chatTimeColorItem.removeAttribute("title");
       }
     }
     // 폰트 크기 입력도 moa가 폰트 스케일을 제어 중이면 잠근다.
@@ -2495,6 +2666,7 @@
   [
     ["[data-player-disable-hidden]", "cheesePlayerDisableHidden", true],
     ["[data-popup-player-wide]", "cheesePopupPlayerWide", true],
+    ["[data-popup-player-scroll]", "cheesePopupPlayerScroll", false],
     ["[data-popup-player-btn-mixer]", "cheesePopupPlayerBtnMixer", true],
     ["[data-popup-player-btn-filter]", "cheesePopupPlayerBtnFilter", true],
     ["[data-popup-player-btn-sync]", "cheesePopupPlayerBtnSync", true],
@@ -3144,12 +3316,12 @@
   );
   if (integratedSearchClipDirectPlayInput) {
     (async () => {
-      // 기본 ON(검색 화면에서 바로 재생). 사용자가 명시적으로 끈 경우에만
-      // 새 탭으로 연다.
-      let on = true;
+      // 기본 OFF(클립 페이지를 새 탭으로 열기). 사용자가 명시적으로 켠 경우에만
+      // 검색 화면 위에서 바로 재생한다.
+      let on = false;
       try {
         const data = await cachedStorageGet(SEARCH_CLIPS_DIRECT_PLAY_KEY);
-        on = data?.[SEARCH_CLIPS_DIRECT_PLAY_KEY] !== false;
+        on = data?.[SEARCH_CLIPS_DIRECT_PLAY_KEY] === true;
       } catch {}
       integratedSearchClipDirectPlayInput.checked = on;
     })();
@@ -3201,6 +3373,286 @@
     });
   }
 
+  const SEARCH_CLIPS_SOURCE_PRESET_KEY = "cheeseSearchClipSourcePreset";
+  const SEARCH_CLIPS_SOURCE_WEIGHTS_KEY = "cheeseSearchClipSourceWeights";
+  const SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY =
+    "cheeseSearchClipSourceCustomWeights";
+  const SEARCH_CLIPS_SOURCE_PRESETS = {
+    balanced: { recommend: 50, related: 25, tag: 15, following: 10 },
+    search: { recommend: 40, related: 30, tag: 25, following: 5 },
+    following: { recommend: 40, related: 20, tag: 20, following: 20 },
+  };
+  const SEARCH_CLIPS_SOURCE_LIMITS = {
+    recommend: { min: 40, max: 70 },
+    related: { min: 10, max: 35 },
+    tag: { min: 0, max: 25 },
+    following: { min: 0, max: 20 },
+  };
+  const sourcePresetButtons = Array.from(
+    document.querySelectorAll(
+      "[data-integrated-search-clips-source-preset]",
+    ),
+  );
+  const sourceCustom = document.querySelector(
+    "[data-integrated-search-clips-source-custom]",
+  );
+  const sourceEffective = document.querySelector(
+    "[data-integrated-search-clips-source-effective]",
+  );
+  const sourceWeightInputs = Object.fromEntries(
+    Object.keys(SEARCH_CLIPS_SOURCE_LIMITS).map((key) => [
+      key,
+      document.querySelector(
+        `[data-integrated-search-clips-source-weight="${key}"]`,
+      ),
+    ]),
+  );
+  const sourceWeightSliders = Object.fromEntries(
+    Object.keys(SEARCH_CLIPS_SOURCE_LIMITS).map((key) => [
+      key,
+      document.querySelector(
+        `[data-integrated-search-clips-source-slider="${key}"]`,
+      ),
+    ]),
+  );
+  const normalizeSourcePreset = (value) =>
+    ["balanced", "search", "following", "custom"].includes(value)
+      ? value
+      : "balanced";
+  const normalizeSourceWeights = (value) => {
+    const source = value && typeof value === "object" ? value : {};
+    return Object.fromEntries(
+      Object.entries(SEARCH_CLIPS_SOURCE_LIMITS).map(([key, limits]) => {
+        const number = Number(source[key]);
+        const fallback = SEARCH_CLIPS_SOURCE_PRESETS.balanced[key];
+        return [
+          key,
+          Number.isFinite(number)
+            ? Math.min(
+                limits.max,
+                Math.max(limits.min, Math.round(number)),
+              )
+            : fallback,
+        ];
+      }),
+    );
+  };
+  const getEffectiveSourceWeights = (value) => {
+    const raw = normalizeSourceWeights(value);
+    const allocated = {};
+    let freeKeys = Object.keys(raw);
+    let remaining = 100;
+    while (freeKeys.length) {
+      const rawTotal = freeKeys.reduce((sum, key) => sum + raw[key], 0);
+      const provisional = Object.fromEntries(
+        freeKeys.map((key) => [
+          key,
+          rawTotal > 0
+            ? (remaining * raw[key]) / rawTotal
+            : remaining / freeKeys.length,
+        ]),
+      );
+      const constrained = freeKeys.filter((key) => {
+        const limits = SEARCH_CLIPS_SOURCE_LIMITS[key];
+        return (
+          provisional[key] < limits.min ||
+          provisional[key] > limits.max
+        );
+      });
+      if (!constrained.length) {
+        freeKeys.forEach((key) => {
+          allocated[key] = provisional[key];
+        });
+        break;
+      }
+      constrained.forEach((key) => {
+        const limits = SEARCH_CLIPS_SOURCE_LIMITS[key];
+        const fixed = Math.min(
+          limits.max,
+          Math.max(limits.min, provisional[key]),
+        );
+        allocated[key] = fixed;
+        remaining -= fixed;
+      });
+      freeKeys = freeKeys.filter((key) => !constrained.includes(key));
+    }
+    const normalized = Object.fromEntries(
+      Object.entries(allocated).map(([key, number]) => [
+        key,
+        Math.floor(number),
+      ]),
+    );
+    let remainder =
+      100 -
+      Object.values(normalized).reduce((sum, number) => sum + number, 0);
+    const byFraction = Object.keys(allocated).sort(
+      (a, b) =>
+        allocated[b] -
+          Math.floor(allocated[b]) -
+          (allocated[a] - Math.floor(allocated[a])) ||
+        b.localeCompare(a),
+    );
+    for (const key of byFraction) {
+      if (
+        remainder <= 0 ||
+        normalized[key] >= SEARCH_CLIPS_SOURCE_LIMITS[key].max
+      ) {
+        continue;
+      }
+      normalized[key] += 1;
+      remainder -= 1;
+    }
+    return normalized;
+  };
+  const formatSourceEffective = (weights) => {
+    const inputWeights = normalizeSourceWeights(weights);
+    const inputTotal = Object.values(inputWeights).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    const normalized = getEffectiveSourceWeights(weights);
+    const format = (key) => String(normalized[key]);
+    return `입력 합계 ${inputTotal}\n100% 환산 비율: 추천 ${format("recommend")}% · 관련 채널 ${format("related")}% · 태그 ${format("tag")}% · 팔로잉 ${format("following")}%`;
+  };
+  let currentSourcePreset = "balanced";
+  let currentSourceWeights = {
+    ...SEARCH_CLIPS_SOURCE_PRESETS.balanced,
+  };
+  let currentCustomSourceWeights = {
+    ...SEARCH_CLIPS_SOURCE_PRESETS.balanced,
+  };
+  const reflectSourceAllocation = (preset, weights) => {
+    currentSourcePreset = normalizeSourcePreset(preset);
+    currentSourceWeights = normalizeSourceWeights(weights);
+    sourcePresetButtons.forEach((button) => {
+      const active =
+        button.dataset.integratedSearchClipsSourcePreset ===
+        currentSourcePreset;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+    if (sourceCustom) {
+      sourceCustom.hidden = currentSourcePreset !== "custom";
+    }
+    for (const [key, value] of Object.entries(currentSourceWeights)) {
+      if (sourceWeightInputs[key]) {
+        sourceWeightInputs[key].value = String(value);
+      }
+      if (sourceWeightSliders[key]) {
+        sourceWeightSliders[key].value = String(value);
+      }
+    }
+    if (sourceEffective) {
+      sourceEffective.textContent = formatSourceEffective(
+        currentSourceWeights,
+      );
+    }
+  };
+  const saveSourceAllocation = (preset, weights) => {
+    const normalizedPreset = normalizeSourcePreset(preset);
+    const normalizedWeights = normalizeSourceWeights(
+      normalizedPreset === "custom"
+        ? weights
+        : SEARCH_CLIPS_SOURCE_PRESETS[normalizedPreset],
+    );
+    if (normalizedPreset === "custom") {
+      currentCustomSourceWeights = { ...normalizedWeights };
+    }
+    reflectSourceAllocation(normalizedPreset, normalizedWeights);
+    try {
+      const payload = {
+        [SEARCH_CLIPS_SOURCE_PRESET_KEY]: normalizedPreset,
+        [SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]: normalizedWeights,
+      };
+      if (normalizedPreset === "custom") {
+        payload[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] =
+          currentCustomSourceWeights;
+      }
+      cachedStorageSet(payload);
+    } catch {}
+  };
+  if (sourcePresetButtons.length) {
+    (async () => {
+      let data = {};
+      try {
+        data = await cachedStorageGet([
+          SEARCH_CLIPS_SOURCE_PRESET_KEY,
+          SEARCH_CLIPS_SOURCE_WEIGHTS_KEY,
+          SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY,
+        ]);
+      } catch {}
+      const preset = normalizeSourcePreset(
+        data?.[SEARCH_CLIPS_SOURCE_PRESET_KEY],
+      );
+      const savedCustomWeights =
+        data?.[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] ??
+        (preset === "custom"
+          ? data?.[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
+          : undefined);
+      currentCustomSourceWeights =
+        normalizeSourceWeights(savedCustomWeights);
+      reflectSourceAllocation(
+        preset,
+        preset === "custom"
+          ? currentCustomSourceWeights
+          : SEARCH_CLIPS_SOURCE_PRESETS[preset],
+      );
+      if (
+        data?.[SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY] == null &&
+        preset === "custom" &&
+        data?.[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
+      ) {
+        try {
+          cachedStorageSet({
+            [SEARCH_CLIPS_SOURCE_CUSTOM_WEIGHTS_KEY]:
+              currentCustomSourceWeights,
+          });
+        } catch {}
+      }
+    })();
+    sourcePresetButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const preset = normalizeSourcePreset(
+          button.dataset.integratedSearchClipsSourcePreset,
+        );
+        saveSourceAllocation(
+          preset,
+          preset === "custom"
+            ? currentCustomSourceWeights
+            : SEARCH_CLIPS_SOURCE_PRESETS[preset],
+        );
+      });
+    });
+    const readSourceWeights = () =>
+      Object.fromEntries(
+        Object.keys(SEARCH_CLIPS_SOURCE_LIMITS).map((key) => [
+          key,
+          sourceWeightInputs[key]?.value,
+        ]),
+      );
+    for (const key of Object.keys(SEARCH_CLIPS_SOURCE_LIMITS)) {
+      sourceWeightSliders[key]?.addEventListener("input", () => {
+        if (sourceWeightInputs[key]) {
+          sourceWeightInputs[key].value = sourceWeightSliders[key].value;
+        }
+        currentSourceWeights = normalizeSourceWeights(readSourceWeights());
+        if (sourceEffective) {
+          sourceEffective.textContent = formatSourceEffective(
+            currentSourceWeights,
+          );
+        }
+      });
+      sourceWeightSliders[key]?.addEventListener("change", () => {
+        saveSourceAllocation("custom", readSourceWeights());
+      });
+      const saveInput = () => {
+        saveSourceAllocation("custom", readSourceWeights());
+      };
+      sourceWeightInputs[key]?.addEventListener("change", saveInput);
+      sourceWeightInputs[key]?.addEventListener("blur", saveInput);
+    }
+  }
+
   const SEARCH_CLIPS_DATE_FILTER_KEY = "cheeseSearchClipDateFilter";
   const integratedSearchClipDateButtons = Array.from(
     document.querySelectorAll(
@@ -3235,6 +3687,47 @@
         );
         try {
           cachedStorageSet({ [SEARCH_CLIPS_DATE_FILTER_KEY]: value });
+        } catch {}
+      });
+    });
+  }
+
+  const SEARCH_CLIPS_DEFAULT_SORT_KEY = "cheeseSearchClipDefaultSort";
+  const integratedSearchClipDefaultSortButtons = Array.from(
+    document.querySelectorAll(
+      "[data-integrated-search-clips-default-sort]",
+    ),
+  );
+  if (integratedSearchClipDefaultSortButtons.length) {
+    const normalizeClipSort = (value) =>
+      ["relevant", "popular", "recent"].includes(value)
+        ? value
+        : "relevant";
+    const reflectClipSort = (value) => {
+      const normalized = normalizeClipSort(value);
+      integratedSearchClipDefaultSortButtons.forEach((button) => {
+        const active =
+          button.dataset.integratedSearchClipsDefaultSort === normalized;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+      return normalized;
+    };
+    (async () => {
+      let value = "relevant";
+      try {
+        const data = await cachedStorageGet(SEARCH_CLIPS_DEFAULT_SORT_KEY);
+        value = normalizeClipSort(data?.[SEARCH_CLIPS_DEFAULT_SORT_KEY]);
+      } catch {}
+      reflectClipSort(value);
+    })();
+    integratedSearchClipDefaultSortButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = reflectClipSort(
+          button.dataset.integratedSearchClipsDefaultSort,
+        );
+        try {
+          cachedStorageSet({ [SEARCH_CLIPS_DEFAULT_SORT_KEY]: value });
         } catch {}
       });
     });
@@ -3993,6 +4486,15 @@
           "방향키로 채도와 밝기를 조절하고 Enter 키로 선택합니다.",
       },
     });
+    window.Coloris?.("[data-chat-time-color-picker]");
+    window.Coloris?.wrap("[data-chat-time-color-picker]");
+    window.Coloris?.setInstance("[data-chat-time-color-picker]", {
+      alpha: false,
+      forceAlpha: false,
+      format: "hex",
+      selectInput: true,
+    });
+    reflectChatTimeColors();
   } catch {}
   panelsScroll?.addEventListener(
     "scroll",
