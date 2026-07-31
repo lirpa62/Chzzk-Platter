@@ -11,6 +11,7 @@
   const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
   const PRESETS_KEY = "audioMixer:presets";
   const DEFAULT_CUSTOM_KEY = "audioMixer:defaultCustomId";
+  const ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const SELECTED_PRESET_KEY = "cheeseClipAudioMixerPreset";
   const EQ_BANDS = [
@@ -18,7 +19,9 @@
   ];
   const BUTTON_CLASS = "cheese-clip-audio-mixer-button";
   const SLOT_CLASS = "cheese-clip-audio-mixer-slot";
+  const STACK_CLASS = "cheese-clip-media-tool-stack";
   const TOOLTIP_CLASS = "cheese-clip-audio-mixer-tooltip";
+  const TOOL_LAYOUT_EVENT = "cheese-clip-media-tools-layout";
   const VOLUME_BUTTON_SELECTOR =
     'button[class*="VolumeButtonView-module__btn_sound__"]';
   const VOLUME_GROUP_SELECTOR =
@@ -231,6 +234,7 @@
 
   let masterEnabled = true;
   let featureHidden = false;
+  let featureEnabled = true;
   let alwaysOn = false;
   let selectedPreset = "default";
   let presetLabel = "기본";
@@ -250,6 +254,8 @@
   let routeTimer = 0;
   let transitionRevealTimer = 0;
   let transitionBroadcastTimer = 0;
+  let layoutRaf = 0;
+  let layoutSettleTimer = 0;
   let lastTransitionBroadcastAt = 0;
   let transitionHidden = true;
   let transitionChannel = null;
@@ -385,13 +391,14 @@
     featureHidden =
       Boolean(hidden && typeof hidden === "object") &&
       hidden.audioMixer === true;
+    featureEnabled = data?.[ENABLED_KEY] !== false;
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
     const preset = resolveSelectedPreset(data);
     selectedPreset = preset.key;
     presetLabel = preset.label;
     presetSnapshot = preset.snapshot;
 
-    if (!masterEnabled || featureHidden) {
+    if (!masterEnabled || featureHidden || !featureEnabled) {
       disarmAutoEnable();
       disableMixer();
       removeButton();
@@ -412,6 +419,7 @@
         FEATURE_HIDDEN_KEY,
         PRESETS_KEY,
         DEFAULT_CUSTOM_KEY,
+        ENABLED_KEY,
         ALWAYS_ON_KEY,
         SELECTED_PRESET_KEY,
       ]);
@@ -519,8 +527,26 @@
     );
   }
 
+  function ensureToolStack() {
+    let stack = document.querySelector(`.${STACK_CLASS}`);
+    if (stack) return stack;
+    stack = document.createElement("div");
+    stack.className = STACK_CLASS;
+    document.body.appendChild(stack);
+    return stack;
+  }
+
+  function requestSharedToolLayout() {
+    if (document.visibilityState === "hidden") return;
+    document
+      .querySelector(`.${STACK_CLASS}`)
+      ?.classList.add("is-layout-pending");
+    window.dispatchEvent(new Event(TOOL_LAYOUT_EVENT));
+  }
+
   function positionButtonSlot(nativeButton, nativeGroup, toolTop) {
-    if (!slot) return;
+    const stack = slot?.closest(`.${STACK_CLASS}`);
+    if (!slot || !stack) return;
     const buttonRect = nativeButton.getBoundingClientRect();
     const groupRect = nativeGroup.getBoundingClientRect();
     const toolStyle = getComputedStyle(toolTop);
@@ -528,15 +554,40 @@
       parseFloat(toolStyle.rowGap || toolStyle.gap),
       16,
     );
-    const slotWidth = 48;
-    const slotHeight = 48;
-    const aboveTop = groupRect.top - gap - slotHeight;
-    slot.style.left = `${Math.round(
-      buttonRect.left + (buttonRect.width - slotWidth) / 2,
+    const toolCount = Math.max(1, stack.children.length);
+    const stackHeight = toolCount * 48 + (toolCount - 1) * gap;
+    const fitsAbove = groupRect.top - gap - stackHeight >= 0;
+    stack.style.setProperty("--cheese-clip-media-tool-gap", `${gap}px`);
+    stack.style.left = `${Math.round(
+      buttonRect.left + (buttonRect.width - 48) / 2,
     )}px`;
-    slot.style.top = `${Math.round(
-      aboveTop >= 0 ? aboveTop : groupRect.bottom + gap,
+    stack.style.top = `${Math.round(
+      fitsAbove ? groupRect.top - gap : groupRect.bottom + gap,
     )}px`;
+    stack.dataset.placement = fitsAbove ? "above" : "below";
+    stack.classList.remove("is-layout-pending");
+  }
+
+  function scheduleSharedToolLayout() {
+    if (document.visibilityState === "hidden") return;
+    document
+      .querySelector(`.${STACK_CLASS}`)
+      ?.classList.add("is-layout-pending");
+    if (layoutRaf) cancelAnimationFrame(layoutRaf);
+    layoutRaf = requestAnimationFrame(() => {
+      layoutRaf = 0;
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = 0;
+      sync();
+    });
+    if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
+    layoutSettleTimer = setTimeout(() => {
+      layoutSettleTimer = 0;
+      if (document.visibilityState === "hidden") return;
+      if (syncTimer) clearTimeout(syncTimer);
+      syncTimer = 0;
+      sync();
+    }, 120);
   }
 
   function revealButtonAfterTransition() {
@@ -611,7 +662,7 @@
   }
 
   function ensureButton() {
-    if (!masterEnabled || featureHidden) return;
+    if (!masterEnabled || featureHidden || !featureEnabled) return;
     if (transitionHidden) {
       if (slot) slot.hidden = true;
       return;
@@ -628,14 +679,16 @@
     }
 
     // 치지직 React가 관리하는 toolTop 안에 외부 노드를 넣으면 렌더 때마다 슬롯을
-    // 제거해 확장과 재삽입 경쟁이 발생한다. body 포털에 두고 볼륨 좌표를 따라가면
-    // DOM 소유권 충돌 없이 항상 볼륨 바로 아래에 표시할 수 있다.
-    if (!slot?.isConnected || slot.parentElement !== document.body) {
+    // 제거해 확장과 재삽입 경쟁이 발생한다. 공용 body 포털 스택을 볼륨 좌표에
+    // 고정해 DOM 소유권 충돌 없이 필터 버튼과 함께 정렬한다.
+    const stack = ensureToolStack();
+    if (!slot?.isConnected || slot.parentElement !== stack) {
       slot?.remove();
       slot = document.createElement("div");
       slot.className = SLOT_CLASS;
-      document.body.appendChild(slot);
+      stack.appendChild(slot);
       button = null;
+      requestSharedToolLayout();
     }
     slot.hidden = false;
     if (anchorToolTop !== toolTop) {
@@ -675,12 +728,15 @@
   function removeButton() {
     anchorResizeObserver?.disconnect();
     anchorToolTop?.removeAttribute("data-cheese-clip-audio-mixer-toolbar");
+    const stack = slot?.closest(`.${STACK_CLASS}`);
     slot?.remove();
+    if (stack && !stack.childElementCount) stack.remove();
     slot = null;
     button = null;
     tooltip = null;
     anchorGroup = null;
     anchorToolTop = null;
+    requestSharedToolLayout();
   }
 
   function getMediaSource(video) {
@@ -929,7 +985,8 @@
       enabled ||
       autoEnableSuppressed ||
       !masterEnabled ||
-      featureHidden
+      featureHidden ||
+      !featureEnabled
     ) {
       return;
     }
@@ -948,7 +1005,8 @@
       enabled ||
       autoEnableSuppressed ||
       !masterEnabled ||
-      featureHidden
+      featureHidden ||
+      !featureEnabled
     ) {
       return;
     }
@@ -1008,7 +1066,7 @@
 
   function onAutoEnableGesture(event) {
     if (event.target?.closest?.(`.${BUTTON_CLASS}`)) return;
-    if (!alwaysOn || !masterEnabled || featureHidden) {
+    if (!alwaysOn || !masterEnabled || featureHidden || !featureEnabled) {
       disarmAutoEnable();
       return;
     }
@@ -1048,7 +1106,7 @@
 
   function sync() {
     syncTimer = 0;
-    if (!masterEnabled || featureHidden) return;
+    if (!masterEnabled || featureHidden || !featureEnabled) return;
 
     ensureButton();
     const video = findActiveVideo();
@@ -1106,7 +1164,14 @@
         graphError = "";
         if (alwaysOn && !enabled && !autoEnableSuppressed) armAutoEnable();
       }
-      if (document.hidden || !masterEnabled || featureHidden) return;
+      if (
+        document.hidden ||
+        !masterEnabled ||
+        featureHidden ||
+        !featureEnabled
+      ) {
+        return;
+      }
       if (
         routeChanged ||
         !slot?.isConnected ||
@@ -1124,6 +1189,7 @@
       !changes[FEATURE_HIDDEN_KEY] &&
       !changes[PRESETS_KEY] &&
       !changes[DEFAULT_CUSTOM_KEY] &&
+      !changes[ENABLED_KEY] &&
       !changes[ALWAYS_ON_KEY] &&
       !changes[SELECTED_PRESET_KEY]
     ) {
@@ -1142,6 +1208,7 @@
   });
   window.addEventListener("resize", scheduleSync);
   window.visualViewport?.addEventListener("resize", scheduleSync);
+  window.addEventListener(TOOL_LAYOUT_EVENT, scheduleSharedToolLayout);
   window.addEventListener("wheel", broadcastTransitionStart, {
     capture: true,
     passive: true,
@@ -1159,6 +1226,10 @@
     transitionRevealTimer = 0;
     if (transitionBroadcastTimer) clearTimeout(transitionBroadcastTimer);
     transitionBroadcastTimer = 0;
+    if (layoutRaf) cancelAnimationFrame(layoutRaf);
+    layoutRaf = 0;
+    if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
+    layoutSettleTimer = 0;
     if (routeTimer) clearInterval(routeTimer);
     routeTimer = 0;
     disarmAutoEnable();

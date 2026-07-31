@@ -33,8 +33,12 @@
     "cheeseCafeNow",
     "cheeseCafeNowAutoplay",
     "cheeseCafeNowAutoplayMuted",
+    "cheeseClipAudioMixerEnabled",
     "cheeseClipAudioMixerAlwaysOn",
     "cheeseClipAudioMixerPreset",
+    "cheeseClipVideoFilterEnabled",
+    "cheeseClipVideoFilterAlwaysOn",
+    "cheeseClipVideoFilterPreset",
     "cheeseClipEditorArrowStepS",
     "cheeseClipEditorShiftArrowStepS",
     "cheeseClipEditorBoundaryStepS",
@@ -1489,8 +1493,12 @@
   // ── 오디오 믹서 전역 기본값(채널 무관) ────────────────────────────────────
   const AUDIO_MIXER_PRESETS_KEY = "audioMixer:presets";
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
+  const CLIP_AUDIO_MIXER_ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const CLIP_AUDIO_MIXER_ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const CLIP_AUDIO_MIXER_PRESET_KEY = "cheeseClipAudioMixerPreset";
+  const CLIP_VIDEO_FILTER_ENABLED_KEY = "cheeseClipVideoFilterEnabled";
+  const CLIP_VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseClipVideoFilterAlwaysOn";
+  const CLIP_VIDEO_FILTER_PRESET_KEY = "cheeseClipVideoFilterPreset";
   const VIDEO_FILTER_PRESETS_KEY = "videoFilter:presets";
   const VIDEO_FILTER_GLOBAL_DEFAULT_KEY = "videoFilter:globalDefault";
   const MIXER_BUILT_IN_PRESETS = [
@@ -1530,11 +1538,27 @@
   const clipAudioMixerAlwaysOnInput = document.querySelector(
     "[data-clip-audio-mixer-always-on]",
   );
+  const clipAudioMixerEnabledInput = document.querySelector(
+    "[data-clip-audio-mixer-enabled]",
+  );
+  const clipVideoFilterAlwaysOnInput = document.querySelector(
+    "[data-clip-video-filter-always-on]",
+  );
+  const clipVideoFilterEnabledInput = document.querySelector(
+    "[data-clip-video-filter-enabled]",
+  );
   let mixerCustomPresets = [];
   let mixerGlobalDefault = { enabled: false, preset: "default" };
   let videoFilterCustomPresets = [];
   let videoFilterGlobalDefault = { enabled: false, preset: "default" };
   let clipAudioMixerPreset = { enabled: true, preset: "default" };
+  let clipVideoFilterPreset = { enabled: true, preset: "beginner" };
+  const GLOBAL_DEFAULT_PICKER_TYPES = [
+    "audio",
+    "video",
+    "clip",
+    "clip-video",
+  ];
 
   function normalizeGlobalDefaultConfig(value) {
     const cfg = value && typeof value === "object" ? value : {};
@@ -1546,31 +1570,41 @@
 
   function globalDefaultConfig(type) {
     if (type === "clip") return clipAudioMixerPreset;
+    if (type === "clip-video") return clipVideoFilterPreset;
     return type === "video" ? videoFilterGlobalDefault : mixerGlobalDefault;
   }
 
   function globalDefaultBuiltIns(type) {
-    return type === "video"
+    return type === "video" || type === "clip-video"
       ? VIDEO_FILTER_BUILT_IN_PRESETS
       : MIXER_BUILT_IN_PRESETS;
   }
 
   function globalDefaultCustoms(type) {
-    return type === "video" ? videoFilterCustomPresets : mixerCustomPresets;
+    return type === "video" || type === "clip-video"
+      ? videoFilterCustomPresets
+      : mixerCustomPresets;
   }
 
   function globalDefaultStorageKey(type) {
     if (type === "clip") return CLIP_AUDIO_MIXER_PRESET_KEY;
+    if (type === "clip-video") return CLIP_VIDEO_FILTER_PRESET_KEY;
     return type === "video"
       ? VIDEO_FILTER_GLOBAL_DEFAULT_KEY
       : AUDIO_MIXER_GLOBAL_DEFAULT_KEY;
   }
 
   function globalDefaultEnabledInput(type) {
-    if (type === "clip") return null;
+    if (type === "clip" || type === "clip-video") return null;
     return type === "video"
       ? videoFilterGlobalDefaultEnabledInput
       : mixerGlobalDefaultEnabledInput;
+  }
+
+  function globalDefaultFallback(type) {
+    return type === "clip-video"
+      ? "beginner"
+      : globalDefaultBuiltIns(type)[0][0];
   }
 
   function escapeHtml(value) {
@@ -1597,7 +1631,10 @@
     const custom = globalDefaultCustoms(type).find(
       (preset) => preset?.id === value,
     );
-    return custom?.name || globalDefaultBuiltIns(type)[0][1];
+    const fallback = globalDefaultBuiltIns(type).find(
+      ([key]) => key === globalDefaultFallback(type),
+    );
+    return custom?.name || fallback?.[1] || globalDefaultBuiltIns(type)[0][1];
   }
 
   function closeGlobalDefaultPicker(type) {
@@ -1611,7 +1648,7 @@
   }
 
   function closeAllGlobalDefaultPickers(exceptType = "") {
-    ["audio", "video", "clip"].forEach((type) => {
+    GLOBAL_DEFAULT_PICKER_TYPES.forEach((type) => {
       if (type !== exceptType) closeGlobalDefaultPicker(type);
     });
   }
@@ -1634,7 +1671,7 @@
     const root = globalDefaultRoot(type);
     if (!root) return;
     const config = globalDefaultConfig(type);
-    const fallback = globalDefaultBuiltIns(type)[0][0];
+    const fallback = globalDefaultFallback(type);
     const selected = globalDefaultOptionExists(type, config.preset)
       ? config.preset
       : fallback;
@@ -1678,17 +1715,18 @@
     const root = globalDefaultRoot(type);
     const trigger = root?.querySelector("[data-global-default-trigger]");
     if (input) input.checked = config.enabled;
-    if (trigger) trigger.disabled = type !== "clip" && !config.enabled;
-    if (type !== "clip" && !config.enabled) closeGlobalDefaultPicker(type);
+    const isClipPicker = type === "clip" || type === "clip-video";
+    if (trigger) trigger.disabled = !isClipPicker && !config.enabled;
+    if (!isClipPicker && !config.enabled) closeGlobalDefaultPicker(type);
     renderGlobalDefaultPicker(type);
   }
 
   function saveGlobalDefault(type) {
     const config = globalDefaultConfig(type);
-    config.enabled =
-      type === "clip"
-        ? true
-        : globalDefaultEnabledInput(type)?.checked === true;
+    const isClipPicker = type === "clip" || type === "clip-video";
+    config.enabled = isClipPicker
+      ? true
+      : globalDefaultEnabledInput(type)?.checked === true;
     // preset은 이미 config.preset에 반영돼 있다(옵션 클릭/로드 시 설정). 트리거의
     // data-value는 render 이후에야 갱신되므로 여기서 읽으면 '이전 선택값'으로
     // 덮어써 방금 고른 프리셋이 무시된다 → config.preset을 신뢰한다.
@@ -1697,8 +1735,9 @@
     syncGlobalDefaultUI(type);
     try {
       cachedStorageSet({
-        [globalDefaultStorageKey(type)]:
-          type === "clip" ? config.preset : { ...config },
+        [globalDefaultStorageKey(type)]: isClipPicker
+          ? config.preset
+          : { ...config },
       });
     } catch {}
   }
@@ -1716,7 +1755,7 @@
     positionGlobalDefaultList(root);
   }
 
-  ["audio", "video", "clip"].forEach((type) => {
+  GLOBAL_DEFAULT_PICKER_TYPES.forEach((type) => {
     const root = globalDefaultRoot(type);
     root
       ?.querySelector("[data-global-default-trigger]")
@@ -1748,6 +1787,33 @@
     } catch {}
   });
 
+  clipAudioMixerEnabledInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CLIP_AUDIO_MIXER_ENABLED_KEY]:
+          clipAudioMixerEnabledInput.checked === true,
+      });
+    } catch {}
+  });
+
+  clipVideoFilterAlwaysOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CLIP_VIDEO_FILTER_ALWAYS_ON_KEY]:
+          clipVideoFilterAlwaysOnInput.checked === true,
+      });
+    } catch {}
+  });
+
+  clipVideoFilterEnabledInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CLIP_VIDEO_FILTER_ENABLED_KEY]:
+          clipVideoFilterEnabledInput.checked === true,
+      });
+    } catch {}
+  });
+
   document.addEventListener("click", (event) => {
     if (event.target.closest("[data-global-default-picker]")) return;
     closeAllGlobalDefaultPickers();
@@ -1762,8 +1828,12 @@
       const data = await cachedStorageGet([
         AUDIO_MIXER_PRESETS_KEY,
         AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
+        CLIP_AUDIO_MIXER_ENABLED_KEY,
         CLIP_AUDIO_MIXER_ALWAYS_ON_KEY,
         CLIP_AUDIO_MIXER_PRESET_KEY,
+        CLIP_VIDEO_FILTER_ENABLED_KEY,
+        CLIP_VIDEO_FILTER_ALWAYS_ON_KEY,
+        CLIP_VIDEO_FILTER_PRESET_KEY,
         VIDEO_FILTER_PRESETS_KEY,
         VIDEO_FILTER_GLOBAL_DEFAULT_KEY,
       ]);
@@ -1777,9 +1847,25 @@
         enabled: true,
         preset: String(data?.[CLIP_AUDIO_MIXER_PRESET_KEY] || "default"),
       };
+      clipVideoFilterPreset = {
+        enabled: true,
+        preset: String(data?.[CLIP_VIDEO_FILTER_PRESET_KEY] || "beginner"),
+      };
+      if (clipAudioMixerEnabledInput) {
+        clipAudioMixerEnabledInput.checked =
+          data?.[CLIP_AUDIO_MIXER_ENABLED_KEY] !== false;
+      }
       if (clipAudioMixerAlwaysOnInput) {
         clipAudioMixerAlwaysOnInput.checked =
           data?.[CLIP_AUDIO_MIXER_ALWAYS_ON_KEY] === true;
+      }
+      if (clipVideoFilterEnabledInput) {
+        clipVideoFilterEnabledInput.checked =
+          data?.[CLIP_VIDEO_FILTER_ENABLED_KEY] !== false;
+      }
+      if (clipVideoFilterAlwaysOnInput) {
+        clipVideoFilterAlwaysOnInput.checked =
+          data?.[CLIP_VIDEO_FILTER_ALWAYS_ON_KEY] === true;
       }
       videoFilterCustomPresets = Array.isArray(data?.[VIDEO_FILTER_PRESETS_KEY])
         ? data[VIDEO_FILTER_PRESETS_KEY]
@@ -1793,13 +1879,24 @@
       mixerGlobalDefault = { enabled: false, preset: "default" };
       videoFilterGlobalDefault = { enabled: false, preset: "default" };
       clipAudioMixerPreset = { enabled: true, preset: "default" };
+      clipVideoFilterPreset = { enabled: true, preset: "beginner" };
+      if (clipAudioMixerEnabledInput) {
+        clipAudioMixerEnabledInput.checked = true;
+      }
       if (clipAudioMixerAlwaysOnInput) {
         clipAudioMixerAlwaysOnInput.checked = false;
+      }
+      if (clipVideoFilterEnabledInput) {
+        clipVideoFilterEnabledInput.checked = true;
+      }
+      if (clipVideoFilterAlwaysOnInput) {
+        clipVideoFilterAlwaysOnInput.checked = false;
       }
     }
     syncGlobalDefaultUI("audio");
     syncGlobalDefaultUI("video");
     syncGlobalDefaultUI("clip");
+    syncGlobalDefaultUI("clip-video");
   }
 
   loadGlobalDefaults();

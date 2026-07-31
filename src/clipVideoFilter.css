@@ -1,0 +1,183 @@
+.cheese-clip-media-tool-stack {
+  --cheese-clip-media-tool-gap: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cheese-clip-media-tool-gap);
+  position: fixed;
+  width: 48px;
+  pointer-events: none;
+}
+
+.cheese-clip-media-tool-stack.is-layout-pending {
+  visibility: hidden;
+}
+
+.cheese-clip-media-tool-stack[data-placement="above"] {
+  transform: translateY(-100%);
+}
+
+.cheese-clip-media-tool-stack[data-placement="below"] {
+  transform: none;
+}
+
+.cheese-clip-media-tool-stack > .cheese-clip-video-filter-slot {
+  order: 1;
+}
+
+.cheese-clip-media-tool-stack > .cheese-clip-audio-mixer-slot {
+  order: 2;
+}
+
+.cheese-clip-media-tool-stack > .cheese-clip-audio-mixer-slot,
+.cheese-clip-media-tool-stack > .cheese-clip-video-filter-slot {
+  flex: 0 0 48px;
+  position: relative;
+  inset: auto;
+  pointer-events: auto;
+}
+
+.cheese-clip-video-filter-slot {
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  border-radius: 50%;
+  background-color: var(
+    --cheese-platter-background-inverted-alpha-1,
+    #0000000a
+  ) !important;
+}
+
+.cheese-clip-video-filter-slot[hidden] {
+  display: none !important;
+}
+
+button.cheese-clip-video-filter-button {
+  box-sizing: border-box;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  position: relative !important;
+  width: 48px !important;
+  min-width: 48px !important;
+  height: 48px !important;
+  padding: 6px !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  overflow: visible !important;
+  background: transparent !important;
+  color: var(--cheese-platter-neutral-foreground-subtle-1, #2e2e2e) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  cursor: pointer;
+  appearance: none;
+}
+
+button.cheese-clip-video-filter-button > svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+  color: inherit;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+}
+
+.cheese-clip-video-filter-dot {
+  fill: #838285;
+  transition: fill 0.15s ease;
+}
+
+.cheese-clip-video-filter-button.is-active .cheese-clip-video-filter-dot {
+  fill: #00ffa3;
+}
+
+.cheese-clip-video-filter-tooltip {
+  z-index: 2;
+  box-sizing: border-box;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 80px));
+  padding: 8px 10px;
+  color: #fff;
+  text-align: left;
+  letter-spacing: 0;
+  background: rgba(24, 24, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.28),
+    0 5px 14px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(4px, -50%);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0.12s;
+}
+
+.cheese-clip-video-filter-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 6px solid rgba(24, 24, 27, 0.96);
+  transform: translateY(-50%);
+}
+
+.cheese-clip-video-filter-button:hover .cheese-clip-video-filter-tooltip,
+.cheese-clip-video-filter-button:focus-visible
+  .cheese-clip-video-filter-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+}
+
+.cheese-clip-video-filter-tooltip-title,
+.cheese-clip-video-filter-tooltip-preset {
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+}
+
+.cheese-clip-video-filter-tooltip-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.cheese-clip-video-filter-tooltip-preset {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15px;
+}
+
+[data-cheese-clip-audio-mixer-toolbar][data-cheese-clip-video-filter-toolbar]::before {
+  flex-basis: 128px;
+  height: 128px;
+}
+
+[data-cheese-clip-video-filter-toolbar]:not(
+    [data-cheese-clip-audio-mixer-toolbar]
+  )::before {
+  content: "";
+  display: block;
+  flex: 0 0 64px;
+  width: 48px;
+  height: 64px;
+  pointer-events: none;
+}
