@@ -17,6 +17,7 @@
   // 뜰 뿐, 다른 값은 안전).
   const SETTINGS_STORAGE_KEYS = [
     "cheeseMasterEnabled",
+    "cheeseGlobalScrollTopFab",
     "cheeseFeatureHidden", // 모든 data-feature 토글 통합
     "cheeseSearchTheme",
     "cheeseUpdateNoticeEnabled",
@@ -404,6 +405,27 @@
       masterEnabledInput.disabled = false;
       settingsToast("설정은 저장했지만 새로고침 안내를 표시하지 못했습니다.", "error");
     }
+  });
+
+  const GLOBAL_SCROLL_TOP_FAB_KEY = "cheeseGlobalScrollTopFab";
+  const globalScrollTopFabInput = document.querySelector(
+    "[data-global-scroll-top-fab]",
+  );
+
+  (async () => {
+    try {
+      const data = await cachedStorageGet(GLOBAL_SCROLL_TOP_FAB_KEY);
+      if (globalScrollTopFabInput) {
+        globalScrollTopFabInput.checked =
+          data?.[GLOBAL_SCROLL_TOP_FAB_KEY] === true;
+      }
+    } catch {}
+  })();
+
+  globalScrollTopFabInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [GLOBAL_SCROLL_TOP_FAB_KEY]: globalScrollTopFabInput.checked,
+    });
   });
 
   // ── 업데이트 새로고침 안내 ───────────────────────────────────────────────

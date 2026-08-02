@@ -322,6 +322,8 @@ const FEATURE_DEFAULT_TRUE = new Set([
   "sbFollowGroupEnabled",
 ]);
 const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
+const GLOBAL_SCROLL_TOP_FAB_KEY = "cheeseGlobalScrollTopFab";
+let globalScrollTopFabOn = false;
 // 실시간 따라잡기 민감도 프리셋(low/normal/high/custom). audioMixer(MAIN world)에 전달.
 const SYNC_PRESET_KEY = "cheeseSyncPreset";
 const SYNC_CUSTOM_KEY = "cheeseSyncCustom"; // {enable,target} (preset=custom일 때)
@@ -27949,6 +27951,7 @@ function broadcastFeatureFlags() {
 // 각 load* 가 그 결과를 참조하게 해 IPC를 1회로 줄인다.
 const FEATURE_FLAGS_KEYS = [
   FEATURE_HIDDEN_KEY,
+  GLOBAL_SCROLL_TOP_FAB_KEY,
   SYNC_PRESET_KEY,
   SYNC_CUSTOM_KEY,
   SYNC_RATE_KEY,
@@ -28121,6 +28124,8 @@ async function loadFeatureFlags() {
   if (!chrome.storage?.local) return;
   try {
     const data = await getBootData(FEATURE_FLAGS_KEYS);
+    globalScrollTopFabOn = data?.[GLOBAL_SCROLL_TOP_FAB_KEY] === true;
+    applyGlobalScrollTopFabSetting();
     screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
     screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
     autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
@@ -28297,6 +28302,11 @@ async function loadFeatureFlags() {
 if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
+    if (changes[GLOBAL_SCROLL_TOP_FAB_KEY]) {
+      globalScrollTopFabOn =
+        changes[GLOBAL_SCROLL_TOP_FAB_KEY].newValue === true;
+      applyGlobalScrollTopFabSetting();
+    }
     if (changes[SYNC_PRESET_KEY]) {
       syncPresetValue = normalizeSyncPresetValue(
         changes[SYNC_PRESET_KEY].newValue,
@@ -29735,7 +29745,7 @@ function ensureScrollTopButton() {
 }
 
 function updateScrollTopButton() {
-  if (!IS_TOP_FRAME) return;
+  if (!IS_TOP_FRAME || !globalScrollTopFabOn) return;
   const searchList = getChannelSearchResultList();
   const existing = document.querySelector(".cheese-search-scroll-top");
   if (hasActiveIntegratedSearchSectionFab()) {
@@ -29765,7 +29775,7 @@ let scrollTopButtonTimer = 0;
 let scrollTopButtonLastUpdate = 0;
 const SCROLL_TOP_BUTTON_UPDATE_INTERVAL_MS = 80;
 function scheduleScrollTopButtonUpdate() {
-  if (!IS_TOP_FRAME) return;
+  if (!IS_TOP_FRAME || !globalScrollTopFabOn) return;
   if (scrollTopButtonFrame || scrollTopButtonTimer) return;
   const elapsed = performance.now() - scrollTopButtonLastUpdate;
   if (elapsed < SCROLL_TOP_BUTTON_UPDATE_INTERVAL_MS) {
@@ -29791,6 +29801,37 @@ function handlePageScrollTopButton(event) {
     }
   }
   scheduleScrollTopButtonUpdate();
+}
+
+let globalScrollTopListenerBound = false;
+function applyGlobalScrollTopFabSetting() {
+  if (!IS_TOP_FRAME) return;
+  if (globalScrollTopFabOn) {
+    if (!globalScrollTopListenerBound) {
+      document.addEventListener("scroll", handlePageScrollTopButton, {
+        passive: true,
+        capture: true,
+      });
+      globalScrollTopListenerBound = true;
+    }
+    scheduleScrollTopButtonUpdate();
+    return;
+  }
+
+  if (globalScrollTopListenerBound) {
+    document.removeEventListener("scroll", handlePageScrollTopButton, true);
+    globalScrollTopListenerBound = false;
+  }
+  if (scrollTopButtonFrame) {
+    cancelAnimationFrame(scrollTopButtonFrame);
+    scrollTopButtonFrame = 0;
+  }
+  if (scrollTopButtonTimer) {
+    clearTimeout(scrollTopButtonTimer);
+    scrollTopButtonTimer = 0;
+  }
+  lastMainPageScrollContainer = null;
+  document.querySelector(".cheese-search-scroll-top")?.remove();
 }
 
 function scheduleInitFromMutations(mutations) {
@@ -29923,10 +29964,6 @@ document.addEventListener(
 );
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
-});
-document.addEventListener("scroll", handlePageScrollTopButton, {
-  passive: true,
-  capture: true,
 });
 window.addEventListener("hashchange", () => {
   cleanupStudioMakeClipViewIfInactive();
