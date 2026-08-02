@@ -715,6 +715,10 @@
   // 이게 true일 때만 시도해, 저장된 프리셋이 적용되기 전에 기본 프리셋으로 켜지는
   // 레이스를 막는다.
   let stateLoaded = false;
+  const STATE_LOAD_RETRY_MS = 400;
+  const STATE_LOAD_MAX_ATTEMPTS = 4;
+  let stateLoadRetryTimer = 0;
+  let stateLoadAttempts = 0;
   let activeTab = "presets";
   let customDraft = null;
   // 커스텀 추가/편집 드래프트 진입 직전의 믹서 상태(취소 시 복원용).
@@ -1068,9 +1072,20 @@
       audio.ctx.resume().catch(() => {});
     }
   }
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) resumeAudioForForeground();
-  });
+  function recoverMixerForForeground() {
+    if (document.hidden) return;
+    resumeAudioForForeground();
+    if (location.pathname.startsWith("/clip-editor")) return;
+    // 치즈나우 같은 외부 확장이 백그라운드 탭을 만든 경우, 숨겨진 동안 플레이어가
+    // 완성돼도 MutationObserver tick은 건너뛴다. 가시화 시 전체 보정과 자동 활성화를
+    // 즉시 다시 실행해 다음 DOM 변이를 기다리지 않게 한다.
+    forceFullTick = true;
+    tick();
+    bindVideoAutoEnable();
+    maybeAutoEnableMixer();
+  }
+  document.addEventListener("visibilitychange", recoverMixerForForeground);
+  window.addEventListener("pageshow", recoverMixerForForeground);
   window.addEventListener("focus", resumeAudioForForeground);
 
   function applyState() {
@@ -2000,16 +2015,39 @@
   }
 
   function requestState(mediaId) {
+    if (!mediaId) return;
     window.postMessage(
       { source: "cheese-audio-mixer", type: "load", channelId: mediaId },
       location.origin,
     );
+    // MAIN/격리 world의 초기화 순서가 느린 환경에서는 첫 요청이 content 브리지보다 먼저
+    // 나갈 수 있다. 저장 설정을 받기 전일 때만 최대 횟수까지 다시 요청한다.
+    if (
+      stateLoaded ||
+      currentMediaId !== mediaId ||
+      stateLoadAttempts >= STATE_LOAD_MAX_ATTEMPTS
+    ) {
+      return;
+    }
+    stateLoadAttempts += 1;
+    clearTimeout(stateLoadRetryTimer);
+    stateLoadRetryTimer = window.setTimeout(() => {
+      stateLoadRetryTimer = 0;
+      if (!stateLoaded && currentMediaId === mediaId) requestState(mediaId);
+    }, STATE_LOAD_RETRY_MS);
+  }
+
+  function resetStateLoadRetry() {
+    clearTimeout(stateLoadRetryTimer);
+    stateLoadRetryTimer = 0;
+    stateLoadAttempts = 0;
   }
 
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-audio-mixer-content")
       return;
     if (e.data.type === "loaded" && e.data.channelId === currentMediaId) {
+      resetStateLoadRetry();
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
         state = {
@@ -2232,24 +2270,25 @@
       findPlayer()?.querySelector(".pzp-pc__bottom-buttons-left");
     if (!controls) return;
     let wrap = document.querySelector(`.${CONTROL_CLASS}`);
-    if (!wrap) {
-      wrap = createButtonControl();
-    }
     // 이미 이 좌측 그룹 안에 있으면 위치를 강제하지 않는다. ⚠ 예전엔 '네이티브 볼륨
     // 바로 뒤' 불변식을 매 tick 강제했는데, 사용자가 볼륨과 믹서 사이에 되감기/앞으로를
     // 끼워 배치하면 arrangePlayerButtons(seek 을 볼륨 뒤로)와 여기(믹서를 볼륨 바로 뒤로)가
     // 서로 상대를 밀어내 무한 재삽입 → 호버 시 깜빡임·클릭 불가가 됐다. 믹서는 '존재'만
     // 보장하고, 그룹 내 상대 순서는 arrangePlayerButtons 의 앵커 체계에 맡긴다.
-    if (wrap.parentElement === controls) return;
-    // 최초 삽입 위치: 네이티브 볼륨(우리 것이 아닌) 바로 뒤. 없으면 그룹 맨 앞.
+    if (wrap && wrap.parentElement === controls) return;
+    // 최초 삽입 위치: 네이티브 볼륨(우리 것이 아닌) 바로 뒤.
     const nativeVolume = Array.from(
       controls.querySelectorAll(".pzp-pc__volume-control"),
     ).find((el) => !el.classList.contains(CONTROL_CLASS));
-    if (nativeVolume) {
-      nativeVolume.insertAdjacentElement("afterend", wrap);
-    } else {
-      controls.insertBefore(wrap, controls.firstChild);
-    }
+    // ⚠ 볼륨이 아직 없으면 '그룹 맨 앞'에 넣지 말고 다음 tick 으로 미룬다. 예전엔
+    // firstChild 앞에 끼웠는데, 방송을 한 번에 여러 개 켜면 플레이어 UI 렌더가 밀려
+    // 볼륨보다 우리가 먼저 들어가는 일이 잦았다. 그러면 믹서가 스피커 '앞(오른쪽)'에
+    // 남고, 바로 위 재삽입 가드 때문에 그 세션 내내 교정되지 않았다.
+    // 볼륨 부재 = 플레이어 UI 미준비 이므로, 버튼도 아직 만들 때가 아니다.
+    // (요소 생성도 여기까지 미룬다 — 미부착 래퍼를 tick 마다 새로 만들어 버리는 낭비 방지)
+    if (!nativeVolume) return;
+    if (!wrap) wrap = createButtonControl();
+    nativeVolume.insertAdjacentElement("afterend", wrap);
     syncUI();
   }
 
@@ -6295,6 +6334,13 @@
       stopSeekCheck();
       return;
     }
+    // 탭이 다시 보이면 최대 화질 고정을 즉시 재시도한다. applyMaxQuality 는 백그라운드
+    // 탭에서 개입하지 않으므로(대역폭·디코드 부하), 방송을 한 번에 여러 개 켜면 숨은 탭들이
+    // 치지직 ABR 이 고른 낮은 화질(360p 등)로 시작한다. 그동안 timeupdate 이벤트 경로도
+    // 같은 게이트에 막혀 maxQualitySetHeight 가 0 으로 남는다. 예전엔 복구를 tick 폴링에만
+    // 맡겼는데, tick 은 MutationObserver 로만 깨어나므로 채팅이 조용하거나 다시보기면
+    // 변이가 안 와서 낮은 화질이 그대로 굳었다. 가시화 시점에 직접 한 번 건다.
+    applyMaxQuality();
     if (!isLiveSeekPage() && !isVodSeekPage()) {
       removeSeekButtons();
       return;
@@ -7719,6 +7765,8 @@
         clearGraphRetryBlock();
         currentPageKey = null;
         currentMediaId = null;
+        stateLoaded = false;
+        resetStateLoadRetry();
       }
       return;
     }
@@ -7744,6 +7792,7 @@
       }
       pendingUserEdit = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
+      resetStateLoadRetry();
       // 커스텀 프리셋과 '기본' 대체값은 채널별 값이 아니라 전역 공유 데이터다.
       // 채널 전환 때 함께 빈 값으로 초기화하면 비동기 로드가 끝날 때까지 패널에서
       // 프리셋이 삭제된 것처럼 보이고, 로드 실패 시에는 그 상태가 계속 남는다.
@@ -7912,6 +7961,7 @@
     if (currentPageKey !== pageKey) return; // 그새 페이지가 바뀜
     if (!channelId) {
       // 채널id 확보 실패 — 기본 설정으로 동작. 로드할 게 없으니 자동 활성화 허용.
+      resetStateLoadRetry();
       stateLoaded = true;
       maybeAutoEnableMixer();
       return;

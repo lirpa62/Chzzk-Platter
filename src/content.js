@@ -3817,18 +3817,22 @@ function restoreOriginalView() {
   state.originalPaginationHidden = false;
   state.originalPaginationElement = null;
   state.originalViewRemembered = false;
+  scheduleScrollTopButtonUpdate();
 }
 
 function activateSearchView({ header, list, pagination }) {
   if (list?.classList?.contains("cheese-search-results-list")) {
     hidePaginationWhileSearching();
+    scheduleScrollTopButtonUpdate();
     return ensureSearchList(list);
   }
   rememberOriginalView({ header, list, pagination });
   if (header && !state.originalHeaderHidden) hideOriginalElement(header);
   if (list && !state.originalListHidden) hideOriginalElement(list);
   hidePaginationWhileSearching(pagination);
-  return ensureSearchList(list);
+  const searchList = ensureSearchList(list);
+  scheduleScrollTopButtonUpdate();
+  return searchList;
 }
 
 function rememberOriginalView({ header, list, pagination }) {
@@ -14557,6 +14561,9 @@ function syncSearchSectionTopFabs() {
     const hidden = wrap !== activeWrap;
     if (wrap.hidden !== hidden) wrap.hidden = hidden;
   });
+  // 통합검색 섹션 FAB가 나타나거나 사라지면 전역 최상단 FAB와 중복되지 않게
+  // 다음 프레임에 전역 버튼의 표시 상태도 다시 계산한다.
+  scheduleScrollTopButtonUpdate();
 }
 
 function scheduleSearchSectionTopFabSync() {
@@ -19092,7 +19099,14 @@ function harvestCustomFollowClasses(nav) {
     name: clean(nameEl?.className),
     ellipsis: clean(ellipsisEl?.className),
     text: clean(textEl?.className),
-    icon: clean(nameEl?.querySelector('[class*="_icon_"]')?.className),
+    // ⚠ 아이콘(인증마크·업적배지) 클래스는 '배지가 있는 채널'에서만 얻을 수 있다.
+    // 예전엔 첫 li 의 이름 영역만 봤는데, 그 채널에 배지가 없으면 icon 이 빈 값이 되고
+    // 모든 항목이 스타일 없는 폴백(cheese-cf-official)으로 그려져 마크가 사라졌다.
+    // 목록은 라이브/오프라인에 따라 순서가 바뀌므로, 어떤 채널이 맨 앞에 오느냐에 따라
+    // 증상이 생겼다 사라졌다 했다(제보). 목록 전체에서 처음 발견되는 아이콘을 쓴다.
+    icon:
+      clean(nameEl?.querySelector('[class*="_icon_"]')?.className) ||
+      clean(ul.querySelector('[class*="_name_"] [class*="_icon_"]')?.className),
     description: clean(li.querySelector('[class*="_description_"]')?.className),
     count: clean(li.querySelector('[class*="_count_"]')?.className),
     link: clean(li.querySelector('[class*="_item_link_"]')?.className),
@@ -29503,7 +29517,7 @@ function isVisible(element) {
 }
 
 function handleWindowScroll() {
-  updateScrollTopButton();
+  scheduleScrollTopButtonUpdate();
   if (
     getStudioMakeClipContext() &&
     studioMakeClipState.hasLoaded &&
@@ -29579,6 +29593,125 @@ function createScrollTopIcon() {
   `;
 }
 
+function getChannelSearchResultList() {
+  return document.querySelector(
+    '.cheese-search-results-list[data-cheese-search-active="1"]:not(.cheese-search-integrated-clips-list)',
+  );
+}
+
+function getScrollableAncestors(element) {
+  const containers = [];
+  let current = element?.parentElement || null;
+  while (current && current !== document.body) {
+    const style = getComputedStyle(current);
+    if (
+      /(auto|scroll|overlay)/.test(style.overflowY) &&
+      current.scrollHeight > current.clientHeight + 1
+    ) {
+      containers.push(current);
+    }
+    current = current.parentElement;
+  }
+  return containers;
+}
+
+let lastMainPageScrollContainer = null;
+
+function isMainPageScrollContainer(element) {
+  if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+  const layoutBody = document.getElementById("layout-body");
+  if (!layoutBody || (element !== layoutBody && !layoutBody.contains(element))) {
+    return false;
+  }
+  if (
+    element.closest(
+      "aside#sidebar, #aside-chatting, [role='dialog'], [role='listbox'], .cheese-search-comment-timestamp-panel",
+    )
+  ) {
+    return false;
+  }
+  const style = getComputedStyle(element);
+  if (!/(auto|scroll|overlay)/.test(style.overflowY)) return false;
+  if (element.scrollHeight <= element.clientHeight + 1) return false;
+
+  // 채팅·작은 팝오버의 스크롤을 본문 스크롤로 오인하지 않는다.
+  const rect = element.getBoundingClientRect();
+  return (
+    rect.width >= Math.min(480, window.innerWidth * 0.45) &&
+    rect.height >= Math.min(320, window.innerHeight * 0.35)
+  );
+}
+
+function getMainPageScrollContainers() {
+  const containers = new Set();
+  const add = (element, { requireOverflow = true } = {}) => {
+    if (!(element instanceof HTMLElement) || !element.isConnected) return;
+    if (element.scrollHeight <= element.clientHeight + 1) return;
+    if (
+      element !== document.documentElement &&
+      element !== document.body &&
+      element.getClientRects().length === 0
+    ) {
+      return;
+    }
+    if (
+      requireOverflow &&
+      !/(auto|scroll|overlay)/.test(getComputedStyle(element).overflowY)
+    ) {
+      return;
+    }
+    containers.add(element);
+  };
+
+  add(document.scrollingElement, { requireOverflow: false });
+  add(document.body, { requireOverflow: false });
+  add(document.getElementById("layout-body"));
+  document
+    .querySelectorAll(
+      "#layout-body > main, #layout-body > section, #layout-body main",
+    )
+    .forEach((element) => add(element));
+  if (isMainPageScrollContainer(lastMainPageScrollContainer)) {
+    add(lastMainPageScrollContainer);
+  }
+
+  const searchList = getChannelSearchResultList();
+  getScrollableAncestors(searchList).forEach((element) => add(element));
+  return [...containers];
+}
+
+function getMainPageScrollTop() {
+  return Math.max(
+    0,
+    window.scrollY || 0,
+    document.scrollingElement?.scrollTop || 0,
+    ...getMainPageScrollContainers().map(
+      (container) => container.scrollTop || 0,
+    ),
+  );
+}
+
+function hasActiveIntegratedSearchSectionFab() {
+  return [
+    ...document.querySelectorAll(".cheese-search-section-top-wrap.is-fab"),
+  ].some((wrap) => {
+    if (wrap.dataset.fabEnabled !== "true") return false;
+    const section = wrap.closest("section");
+    if (!section || section.hidden) return false;
+    const button = wrap.querySelector(".cheese-search-section-top");
+    const targetSelector = button?.dataset.targetSelector || "";
+    const target =
+      (targetSelector && section.querySelector(targetSelector)) || section;
+    const sectionRect = section.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    return (
+      targetRect.top < 84 &&
+      sectionRect.bottom > 72 &&
+      sectionRect.top < window.innerHeight
+    );
+  });
+}
+
 function ensureScrollTopButton() {
   let button = document.querySelector(".cheese-search-scroll-top");
   if (button) return button;
@@ -29589,15 +29722,75 @@ function ensureScrollTopButton() {
   button.hidden = true;
   button.innerHTML = createScrollTopIcon();
   button.addEventListener("click", () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth";
+    getMainPageScrollContainers().forEach((container) => {
+      container.scrollTo({ top: 0, behavior });
+    });
+    window.scrollTo({ top: 0, behavior });
   });
   document.body.append(button);
   return button;
 }
 
 function updateScrollTopButton() {
-  const button = ensureScrollTopButton();
-  button.hidden = window.scrollY < Math.max(1000, window.innerHeight * 1.2);
+  if (!IS_TOP_FRAME) return;
+  const searchList = getChannelSearchResultList();
+  const existing = document.querySelector(".cheese-search-scroll-top");
+  if (hasActiveIntegratedSearchSectionFab()) {
+    if (existing) existing.hidden = true;
+    return;
+  }
+
+  const button = existing || ensureScrollTopButton();
+  const searchScrollContainers = getScrollableAncestors(searchList);
+  const scrollBoundary =
+    searchScrollContainers[0]?.getBoundingClientRect().top || 0;
+  const controls = document.querySelector(
+    ".cheese-search-shell:not(.cheese-search-studio-shell)",
+  );
+  const controlsPassed = Boolean(
+    searchList &&
+      isVisible(searchList) &&
+      controls?.getBoundingClientRect().bottom < scrollBoundary + 16,
+  );
+  const scrollTop = getMainPageScrollTop();
+  button.hidden =
+    !controlsPassed && scrollTop < Math.max(1000, window.innerHeight * 1.2);
+}
+
+let scrollTopButtonFrame = 0;
+let scrollTopButtonTimer = 0;
+let scrollTopButtonLastUpdate = 0;
+const SCROLL_TOP_BUTTON_UPDATE_INTERVAL_MS = 80;
+function scheduleScrollTopButtonUpdate() {
+  if (!IS_TOP_FRAME) return;
+  if (scrollTopButtonFrame || scrollTopButtonTimer) return;
+  const elapsed = performance.now() - scrollTopButtonLastUpdate;
+  if (elapsed < SCROLL_TOP_BUTTON_UPDATE_INTERVAL_MS) {
+    scrollTopButtonTimer = window.setTimeout(() => {
+      scrollTopButtonTimer = 0;
+      scheduleScrollTopButtonUpdate();
+    }, SCROLL_TOP_BUTTON_UPDATE_INTERVAL_MS - elapsed);
+    return;
+  }
+  scrollTopButtonFrame = requestAnimationFrame(() => {
+    scrollTopButtonFrame = 0;
+    scrollTopButtonLastUpdate = performance.now();
+    updateScrollTopButton();
+  });
+}
+
+function handlePageScrollTopButton(event) {
+  const target = event?.target;
+  if (target instanceof HTMLElement) {
+    if (target !== lastMainPageScrollContainer) {
+      if (!isMainPageScrollContainer(target)) return;
+      lastMainPageScrollContainer = target;
+    }
+  }
+  scheduleScrollTopButtonUpdate();
 }
 
 function scheduleInitFromMutations(mutations) {
@@ -29698,6 +29891,7 @@ window.addEventListener(
     applyChatStackedClass();
     applyFillScreen();
     applyLiveViewerCountPlacement();
+    scheduleScrollTopButtonUpdate();
   }, 150),
   { passive: true },
 );
@@ -29727,9 +29921,12 @@ document.addEventListener(
   "webkitfullscreenchange",
   scheduleFillScreenModeRecheck,
 );
-ensureScrollTopButton();
 window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
   passive: true,
+});
+document.addEventListener("scroll", handlePageScrollTopButton, {
+  passive: true,
+  capture: true,
 });
 window.addEventListener("hashchange", () => {
   cleanupStudioMakeClipViewIfInactive();

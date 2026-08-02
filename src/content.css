@@ -2732,9 +2732,9 @@ html.cheese-vod-portrait
   height: 46px;
   justify-content: center;
   position: fixed;
-  right: 28px;
+  right: calc(28px + var(--cheese-sidebar-right-width, 0px));
   width: 46px;
-  z-index: 1000;
+  z-index: 10020;
   transition:
     background-color 0.2s,
     border-color 0.2s,
@@ -6035,6 +6035,20 @@ html.cheese-channel-profile-radius-enabled
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 전용 팔로잉 목록의 아이콘 폴백. 네이티브 _icon_ 클래스를 harvest 하지 못한 경우
+   (팔로잉 채널 중 배지를 가진 채널이 하나도 없을 때 등) 쓰인다. 예전엔 이 클래스에
+   스타일이 없어서 인증마크·업적배지가 빈 요소로 그려져 사라져 보였다(제보). */
+.cheese-cf-official {
+  display: inline-block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-left: 3px;
+  vertical-align: top;
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
 }
 
 #cheese-header-follow .cheese-header-follow-official-mark,

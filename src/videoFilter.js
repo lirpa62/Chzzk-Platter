@@ -387,6 +387,13 @@
   // 덮어써 전부 삭제될 수 있다(사용자 프리셋 자동 삭제 버그). 로드 전 저장에서는
   // customPresets 를 아예 보내지 않아, content.js 가 전역 프리셋을 유지하게 한다.
   let presetsLoaded = false;
+  // 채널별 저장 설정을 받아오기 전에는 '항상 켜기'를 실행하지 않는다. 새 탭에서 video가
+  // storage 응답보다 먼저 준비되면 기본 state를 켜고 저장해 기존 채널 프리셋을 덮을 수 있다.
+  let stateLoaded = false;
+  const STATE_LOAD_RETRY_MS = 400;
+  const STATE_LOAD_MAX_ATTEMPTS = 4;
+  let stateLoadRetryTimer = 0;
+  let stateLoadAttempts = 0;
   // 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선, 기본 global).
   let globalDefaultMode = "global";
   // 채널의 '원래 선택'(전역 적용 전) 스냅샷 — 전역값이 채널 저장을 덮어쓰지 않게.
@@ -965,6 +972,7 @@
   // CSS/SVG 기반이라 오디오처럼 제스처/AudioContext 게이트가 필요 없다.
   function maybeAutoEnableFilter() {
     if (!videoFilterAlwaysOn) return;
+    if (!stateLoaded) return; // 채널 프리셋/직접 끔 상태를 먼저 복원
     if (featureFlags.videoFilter) return; // 기능 숨김 상태면 자동 활성 안 함
     if (state.userDisabled) return; // 이 채널은 사용자가 직접 끔(opt-out)
     if (state.enabled) return; // 이미 켜짐
@@ -1556,16 +1564,40 @@
   }
 
   function requestState(mediaId) {
+    if (!mediaId) return;
     window.postMessage(
       { source: "cheese-video-filter", type: "load", channelId: mediaId },
       location.origin,
     );
+    // MAIN/격리 world가 document_idle에 각각 주입되므로 아주 느린 초기화에서는 첫 요청이
+    // 브리지 리스너보다 먼저 나갈 수 있다. 응답 전일 때만 제한적으로 다시 요청한다.
+    if (
+      stateLoaded ||
+      currentMediaId !== mediaId ||
+      stateLoadAttempts >= STATE_LOAD_MAX_ATTEMPTS
+    ) {
+      return;
+    }
+    stateLoadAttempts += 1;
+    clearTimeout(stateLoadRetryTimer);
+    stateLoadRetryTimer = window.setTimeout(() => {
+      stateLoadRetryTimer = 0;
+      if (!stateLoaded && currentMediaId === mediaId) requestState(mediaId);
+    }, STATE_LOAD_RETRY_MS);
+  }
+
+  function resetStateLoadRetry() {
+    clearTimeout(stateLoadRetryTimer);
+    stateLoadRetryTimer = 0;
+    stateLoadAttempts = 0;
   }
 
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-video-filter-content")
       return;
     if (e.data.type === "loaded" && e.data.channelId === currentMediaId) {
+      resetStateLoadRetry();
+      stateLoaded = true;
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
         presetsLoaded = true; // 전역 프리셋 수신 완료 → 이후 저장은 customPresets 포함 가능
@@ -1586,9 +1618,9 @@
         if (state.enabled) applyState();
         else clearFilter();
         syncUI();
-        // 저장된 enabled가 false여도 '항상 켜기'면 자동 활성화(opt-out 채널 제외).
-        maybeAutoEnableFilter();
       }
+      // 저장된 enabled가 false여도 '항상 켜기'면 자동 활성화(opt-out 채널 제외).
+      maybeAutoEnableFilter();
     } else if (e.data.type === "globals-changed") {
       presetsLoaded = true; // 전역 프리셋 수신 완료
       const prevEnabled = globalDefaultPreset.enabled;
@@ -1648,41 +1680,28 @@
       findPlayer()?.querySelector(".pzp-pc__bottom-buttons-left");
     if (!controls) return;
     let wrap = document.querySelector(`.${CONTROL_CLASS}`);
-    if (!wrap) {
-      wrap = createButtonControl();
-    }
-    // 오디오 믹서 버튼 바로 뒤(옆)에 둔다. 믹서가 아직 없으면 native 볼륨 뒤,
-    // 그것도 없으면 컨트롤 맨 앞.
+    // 오디오 믹서 버튼 바로 뒤(옆)에 둔다. 믹서가 아직 없으면 native 볼륨 뒤.
     const mixerControl = controls.querySelector(".cheese-audio-mixer-control");
-    // DOM 변이 보정 때 패널 head를 재생성하는 syncUI 대신 버튼만 가볍게 갱신한다
-    // (전원 토글 클릭이 삼켜지는 것 방지).
-    if (mixerControl) {
-      if (wrap.previousElementSibling === mixerControl) {
-        syncButton();
-        return;
-      }
-      mixerControl.insertAdjacentElement("afterend", wrap);
-    } else {
-      const nativeVolume = Array.from(
-        controls.querySelectorAll(".pzp-pc__volume-control"),
-      ).find(
+    const anchor =
+      mixerControl ||
+      Array.from(controls.querySelectorAll(".pzp-pc__volume-control")).find(
         (el) =>
           !el.classList.contains(CONTROL_CLASS) &&
           !el.classList.contains("cheese-audio-mixer-control"),
       );
-      if (nativeVolume) {
-        if (wrap.previousElementSibling === nativeVolume) {
-          syncButton();
-          return;
-        }
-        nativeVolume.insertAdjacentElement("afterend", wrap);
-      } else {
-        if (wrap.parentElement === controls) {
-          syncButton();
-          return;
-        }
-        controls.insertBefore(wrap, controls.firstChild);
-      }
+    // ⚠ 믹서도 볼륨도 없으면 '맨 앞'에 끼우지 말고 다음 tick 으로 미룬다. 예전엔
+    // firstChild 앞에 넣었는데, 방송을 한 번에 여러 개 켜면 플레이어 UI 렌더가 밀려
+    // 우리가 먼저 들어갔고, 필터 버튼이 스피커 '앞(오른쪽)'에 남았다.
+    // 앵커 부재 = 플레이어 UI 미준비 이므로 배치를 확정할 수 없다.
+    if (!anchor) {
+      if (wrap) syncButton();
+      return;
+    }
+    if (!wrap) wrap = createButtonControl();
+    // DOM 변이 보정 때 패널 head를 재생성하는 syncUI 대신 버튼만 가볍게 갱신한다
+    // (전원 토글 클릭이 삼켜지는 것 방지).
+    if (wrap.previousElementSibling !== anchor) {
+      anchor.insertAdjacentElement("afterend", wrap);
     }
     syncButton();
   }
@@ -2743,6 +2762,7 @@
     }
     if (
       videoFilterAlwaysOn &&
+      stateLoaded &&
       !state.enabled &&
       !state.userDisabled
     ) {
@@ -2774,6 +2794,8 @@
         removeButton();
         currentPageKey = null;
         currentMediaId = null;
+        stateLoaded = false;
+        resetStateLoadRetry();
       }
       return;
     }
@@ -2781,6 +2803,8 @@
       currentPageKey = pageKey;
       currentMediaId = null;
       pendingUserEdit = false;
+      stateLoaded = false;
+      resetStateLoadRetry();
       clearFilter();
       state = DEFAULT_STATE();
       // ⚠ state 를 리셋하면 state.customPresets 가 []가 된다. presetsLoaded 를 false 로
@@ -2812,7 +2836,16 @@
   async function resolveAndLoadChannel(pageKey) {
     const channelId = await resolveChannelId(pageKey);
     if (currentPageKey !== pageKey) return;
-    if (!channelId) return;
+    if (!channelId) {
+      // 채널 ID를 확인하지 못했으면 불러올 저장값이 없다. stateLoaded 를 열어주지 않으면
+      // maybeAutoEnableFilter 가 영구히 막혀 '항상 켜기'가 동작하지 않는다(오디오 믹서의
+      // 동일 분기와 맞춘다). 저장은 saveState 의 !currentMediaId 가드가 막으므로, 기본
+      // 프리셋이 채널값처럼 storage 에 기록될 위험은 없다.
+      resetStateLoadRetry();
+      stateLoaded = true;
+      maybeAutoEnableFilter();
+      return;
+    }
     currentMediaId = channelId;
     // 채널 id 확보 전 대기 중이던 사용자 변경이 있으면 먼저 저장하되, 로드는 '항상' 한다.
     // (예전엔 pendingUserEdit 이면 저장만 하고 requestState 를 건너뛰어, 새 채널의 저장값·
