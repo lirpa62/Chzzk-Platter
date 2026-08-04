@@ -41,6 +41,8 @@
   const TRANSITION_BROADCAST_INTERVAL_MS = 80;
   const TRANSITION_CHANNEL_NAME =
     "cheese-platter-clip-audio-mixer-transition";
+  const FRAME_ACTIVITY_MESSAGE = "cheese-platter-clip-frame-activity";
+  const FRAME_ACTIVITY_FALLBACK_MS = 1500;
 
   const DEFAULT_SNAPSHOT = {
     gain: 1,
@@ -261,6 +263,9 @@
   let transitionChannel = null;
   let lastRoute = location.href;
   let graphError = "";
+  let frameActive = false;
+  let frameActivityKnown = false;
+  let frameActivityFallbackTimer = 0;
 
   function isChzzkClipFrame() {
     try {
@@ -405,11 +410,12 @@
       return;
     }
 
-    if (enabled && audio.connected) applySnapshot();
+    if (frameActive && enabled && audio.connected) applySnapshot();
     if (alwaysOn && !previousAlwaysOn) autoEnableSuppressed = false;
-    if (alwaysOn && !enabled && !autoEnableSuppressed) armAutoEnable();
-    else if (!alwaysOn) disarmAutoEnable();
-    scheduleSync();
+    if (frameActive && alwaysOn && !enabled && !autoEnableSuppressed) {
+      armAutoEnable();
+    } else if (!alwaysOn) disarmAutoEnable();
+    if (frameActive) scheduleSync();
   }
 
   async function loadSettings() {
@@ -537,7 +543,7 @@
   }
 
   function requestSharedToolLayout() {
-    if (document.visibilityState === "hidden") return;
+    if (!frameActive || document.visibilityState === "hidden") return;
     document
       .querySelector(`.${STACK_CLASS}`)
       ?.classList.add("is-layout-pending");
@@ -569,7 +575,7 @@
   }
 
   function scheduleSharedToolLayout() {
-    if (document.visibilityState === "hidden") return;
+    if (!frameActive || document.visibilityState === "hidden") return;
     document
       .querySelector(`.${STACK_CLASS}`)
       ?.classList.add("is-layout-pending");
@@ -583,7 +589,7 @@
     if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
     layoutSettleTimer = setTimeout(() => {
       layoutSettleTimer = 0;
-      if (document.visibilityState === "hidden") return;
+      if (!frameActive || document.visibilityState === "hidden") return;
       if (syncTimer) clearTimeout(syncTimer);
       syncTimer = 0;
       sync();
@@ -592,6 +598,7 @@
 
   function revealButtonAfterTransition() {
     transitionRevealTimer = 0;
+    if (!frameActive) return;
     transitionHidden = false;
     if (!document.hidden) scheduleSync();
   }
@@ -600,6 +607,8 @@
     transitionHidden = true;
     if (slot) slot.hidden = true;
     if (transitionRevealTimer) clearTimeout(transitionRevealTimer);
+    transitionRevealTimer = 0;
+    if (!frameActive) return;
     transitionRevealTimer = setTimeout(
       revealButtonAfterTransition,
       TRANSITION_REVEAL_DELAY_MS,
@@ -759,6 +768,7 @@
 
   function syncNormalizerActivity() {
     const shouldRun =
+      frameActive &&
       audio.connected &&
       presetSnapshot.normalizer.enabled &&
       audio.video instanceof HTMLVideoElement &&
@@ -797,6 +807,7 @@
     stopNormalizer();
     if (
       !audio.connected ||
+      !frameActive ||
       !presetSnapshot.normalizer.enabled ||
       !(audio.video instanceof HTMLVideoElement) ||
       audio.video.paused ||
@@ -809,6 +820,7 @@
     audio.normTimer = setInterval(() => {
       if (
         !audio.connected ||
+        !frameActive ||
         !presetSnapshot.normalizer.enabled ||
         audio.video?.paused ||
         audio.video?.ended
@@ -863,9 +875,14 @@
     else stopNormalizer();
   }
 
-  function restoreOriginalAudio({ restoreSource = true } = {}) {
+  function restoreOriginalAudio({
+    restoreSource = true,
+    preserveSource = false,
+  } = {}) {
     stopNormalizer();
     unbindNormalizerVideo();
+    const previousSource = audio.source;
+    const previousVideo = audio.video;
     try {
       if (audio.source && audio.ctx) {
         audio.source.disconnect();
@@ -893,12 +910,25 @@
     audio.comp = null;
     audio.outputGain = null;
     audio.limiter = null;
-    audio.source = null;
-    audio.video = null;
+    audio.source = preserveSource ? previousSource : null;
+    audio.video = preserveSource ? previousVideo : null;
     audio.connected = false;
   }
 
+  function suspendMixerGraph() {
+    if (audio.connected || audio.source) {
+      restoreOriginalAudio({
+        restoreSource: false,
+        preserveSource: true,
+      });
+    } else {
+      stopNormalizer();
+    }
+    updateButton();
+  }
+
   function connectGraph(video) {
+    if (!frameActive) return false;
     try {
       graphError = "";
       audio.ctx ||= new AudioContext();
@@ -907,12 +937,9 @@
       }
 
       if (audio.connected || audio.source) {
-        // 같은 영상에서 믹서를 다시 구성할 때만 잠깐 원음으로 복구한다.
-        // 다음 클립으로 넘어갈 때 이전 source를 destination에 다시 연결하면
-        // 제거된 video/blob과 AudioNode가 그래프에 계속 남을 수 있다.
-        restoreOriginalAudio({
-          restoreSource: !audio.video || audio.video === video,
-        });
+        // 이전 클립의 처리 그래프만 끊고 새 영상에 재사용할 source를 가져온다.
+        // 제거된 video/blob을 destination에 다시 연결하면 노드가 남을 수 있다.
+        restoreOriginalAudio({ restoreSource: false });
       }
 
       audio.source = getMediaSource(video);
@@ -981,6 +1008,7 @@
   function armAutoEnable() {
     if (
       autoEnableArmed ||
+      !frameActive ||
       !alwaysOn ||
       enabled ||
       autoEnableSuppressed ||
@@ -1001,6 +1029,7 @@
 
   function tryAutoEnableWithoutGesture() {
     if (
+      !frameActive ||
       !alwaysOn ||
       enabled ||
       autoEnableSuppressed ||
@@ -1066,7 +1095,13 @@
 
   function onAutoEnableGesture(event) {
     if (event.target?.closest?.(`.${BUTTON_CLASS}`)) return;
-    if (!alwaysOn || !masterEnabled || featureHidden || !featureEnabled) {
+    if (
+      !frameActive ||
+      !alwaysOn ||
+      !masterEnabled ||
+      featureHidden ||
+      !featureEnabled
+    ) {
       disarmAutoEnable();
       return;
     }
@@ -1106,7 +1141,14 @@
 
   function sync() {
     syncTimer = 0;
-    if (!masterEnabled || featureHidden || !featureEnabled) return;
+    if (
+      !frameActive ||
+      !masterEnabled ||
+      featureHidden ||
+      !featureEnabled
+    ) {
+      return;
+    }
 
     ensureButton();
     const video = findActiveVideo();
@@ -1123,7 +1165,7 @@
   }
 
   function scheduleSync() {
-    if (syncTimer) return;
+    if (!frameActive || syncTimer) return;
     syncTimer = setTimeout(sync, SYNC_DELAY_MS);
   }
 
@@ -1144,7 +1186,7 @@
   }
 
   function startObserver() {
-    if (observer || !document.documentElement) return;
+    if (!frameActive || observer || !document.documentElement) return;
     observer = new MutationObserver((mutations) => {
       if (document.hidden) return;
       if (mutations.some(isRelevantMutation)) scheduleSync();
@@ -1156,8 +1198,9 @@
   }
 
   function startRouteWatcher() {
-    if (routeTimer) return;
+    if (!frameActive || routeTimer) return;
     routeTimer = setInterval(() => {
+      if (!frameActive) return;
       const routeChanged = location.href !== lastRoute;
       if (routeChanged) {
         lastRoute = location.href;
@@ -1182,6 +1225,78 @@
     }, ROUTE_CHECK_MS);
   }
 
+  function stopActiveFrameWork() {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = 0;
+    if (routeTimer) clearInterval(routeTimer);
+    routeTimer = 0;
+    if (transitionRevealTimer) clearTimeout(transitionRevealTimer);
+    transitionRevealTimer = 0;
+    if (transitionBroadcastTimer) clearTimeout(transitionBroadcastTimer);
+    transitionBroadcastTimer = 0;
+    if (layoutRaf) cancelAnimationFrame(layoutRaf);
+    layoutRaf = 0;
+    if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
+    layoutSettleTimer = 0;
+    disarmAutoEnable();
+    observer?.disconnect();
+    observer = null;
+    anchorResizeObserver?.disconnect();
+    anchorGroup = null;
+    transitionHidden = true;
+    if (slot) slot.hidden = true;
+    suspendMixerGraph();
+  }
+
+  function setFrameActive(active) {
+    const next = active === true;
+    if (next === frameActive) return;
+    frameActive = next;
+    if (!frameActive) {
+      stopActiveFrameWork();
+      return;
+    }
+    startObserver();
+    startRouteWatcher();
+    if (alwaysOn && !enabled && !autoEnableSuppressed) armAutoEnable();
+    hideButtonDuringTransition();
+  }
+
+  function handleFrameActivity(event) {
+    if (
+      event.source !== window.parent ||
+      event.origin !== "https://chzzk.naver.com" ||
+      event.data?.source !== FRAME_ACTIVITY_MESSAGE
+    ) {
+      return;
+    }
+    if (event.data.event === "transition-start") {
+      hideButtonDuringTransition();
+      return;
+    }
+    if (typeof event.data.active !== "boolean") return;
+    frameActivityKnown = true;
+    if (frameActivityFallbackTimer) {
+      clearTimeout(frameActivityFallbackTimer);
+      frameActivityFallbackTimer = 0;
+    }
+    setFrameActive(event.data.active === true);
+  }
+
+  function requestFrameActivity() {
+    try {
+      window.parent?.postMessage(
+        { source: FRAME_ACTIVITY_MESSAGE, event: "ready" },
+        "https://chzzk.naver.com",
+      );
+    } catch {}
+    if (frameActivityFallbackTimer) return;
+    frameActivityFallbackTimer = setTimeout(() => {
+      frameActivityFallbackTimer = 0;
+      if (!frameActivityKnown) setFrameActive(true);
+    }, FRAME_ACTIVITY_FALLBACK_MS);
+  }
+
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
     if (
@@ -1199,7 +1314,7 @@
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
+    if (!document.hidden && frameActive) {
       syncNormalizerActivity();
       scheduleSync();
     } else if (audio.video?.paused) {
@@ -1230,6 +1345,8 @@
     layoutRaf = 0;
     if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
     layoutSettleTimer = 0;
+    if (frameActivityFallbackTimer) clearTimeout(frameActivityFallbackTimer);
+    frameActivityFallbackTimer = 0;
     if (routeTimer) clearInterval(routeTimer);
     routeTimer = 0;
     disarmAutoEnable();
@@ -1253,17 +1370,17 @@
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
     startTransitionChannel();
-    hideButtonDuringTransition();
-    startObserver();
-    startRouteWatcher();
-    if (alwaysOn && !autoEnableSuppressed) armAutoEnable();
-    scheduleSync();
+    requestFrameActivity();
+    if (frameActive) {
+      hideButtonDuringTransition();
+      startObserver();
+      startRouteWatcher();
+      if (alwaysOn && !autoEnableSuppressed) armAutoEnable();
+    }
   });
 
+  window.addEventListener("message", handleFrameActivity);
   startTransitionChannel();
-  startObserver();
-  startRouteWatcher();
   await loadSettings();
-  hideButtonDuringTransition();
-  sync();
+  requestFrameActivity();
 })();

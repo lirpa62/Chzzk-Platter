@@ -27,18 +27,181 @@
     return null;
   }
 
+  function normalizedText(value) {
+    return String(value || "")
+      .replace(/\s+/g, "")
+      .trim();
+  }
+
+  function findExactTextElement(root, matcher) {
+    if (!root) return null;
+    const matches = [];
+    const selectors = [
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "strong",
+      "[role='heading']",
+      "[class*='_title_']",
+      "p",
+      "span",
+      "div",
+    ];
+    root.querySelectorAll(selectors.join(",")).forEach((el) => {
+      if (matcher(normalizedText(el.textContent))) matches.push(el);
+    });
+    // 같은 문구를 감싼 조상이 여럿이면 실제 텍스트에 가장 가까운 요소를 사용한다.
+    return (
+      matches.find(
+        (candidate) =>
+          !matches.some(
+            (other) => other !== candidate && candidate.contains(other),
+          ),
+      ) || null
+    );
+  }
+
+  function findSubscribeTitle(root) {
+    return findExactTextElement(root, (text) => /구독(권)?관리$/.test(text));
+  }
+
+  function findSubscribeTitleInDocument() {
+    const candidates = document.querySelectorAll(
+      "h1, h2, h3, h4, strong, [role='heading'], [class*='_title_']",
+    );
+    return (
+      [...candidates].find((el) =>
+        /구독(권)?관리$/.test(normalizedText(el.textContent)),
+      ) || null
+    );
+  }
+
+  function findBadgeTitle(root) {
+    return findExactTextElement(root, (text) => text === "내구독배지");
+  }
+
+  function visualAssetUrl(el) {
+    if (!el) return "";
+    const raw =
+      el.currentSrc ||
+      el.src ||
+      el.getAttribute?.("src") ||
+      el.getAttribute?.("data-src") ||
+      el.style?.backgroundImage ||
+      "";
+    return String(raw).replace(/^url\(["']?|["']?\)$/g, "");
+  }
+
+  function getSubscriptionAssets(root, type = "(?:badge|emoji)") {
+    if (!root) return [];
+    const pattern = new RegExp(`/subscription/${type}/`, "i");
+    return [...root.querySelectorAll("img, [style*='background-image']")].filter(
+      (el) => pattern.test(visualAssetUrl(el)),
+    );
+  }
+
+  function getSubscriptionBadgeImages(root) {
+    return getSubscriptionAssets(root, "badge");
+  }
+
+  function lowestCommonAncestor(elements, boundary) {
+    if (!elements.length) return null;
+    let candidate = elements[0];
+    while (candidate && candidate !== boundary?.parentElement) {
+      if (elements.every((el) => candidate.contains(el))) return candidate;
+      candidate = candidate.parentElement;
+    }
+    return null;
+  }
+
+  function findBadgeProgress(area) {
+    if (!area) return null;
+    const badgeImages = getSubscriptionBadgeImages(area);
+    const semantic = [...area.querySelectorAll("[class*='_progress_']")].find(
+      (el) => getSubscriptionBadgeImages(el).length >= 2,
+    );
+    if (semantic) return semantic;
+
+    const nativeProgress = area.querySelector("[role='progressbar']");
+    if (nativeProgress) {
+      const parent = nativeProgress.parentElement;
+      if (parent && getSubscriptionBadgeImages(parent).length >= 2) {
+        return parent;
+      }
+      return nativeProgress;
+    }
+
+    if (badgeImages.length >= 2) {
+      return lowestCommonAncestor(badgeImages.slice(0, 2), area) || area;
+    }
+    return null;
+  }
+
+  function findBadgeHeaderBox(area) {
+    const title = findBadgeTitle(area);
+    if (!title) return null;
+    const semantic = title.closest("[class*='_box_']");
+    if (semantic && area.contains(semantic)) return semantic;
+
+    let box = title.parentElement;
+    while (box?.parentElement && box.parentElement !== area) {
+      const parent = box.parentElement;
+      if (findBadgeProgress(parent)) break;
+      box = parent;
+    }
+    return box || title.parentElement;
+  }
+
+  function getBadgeItems(progress) {
+    if (!progress) return [];
+    const items = getSubscriptionBadgeImages(progress).map((img) => {
+      const semantic = img.closest("[class*='_badge_']");
+      if (semantic && progress.contains(semantic)) return semantic;
+
+      let item = img.parentElement || img;
+      while (item.parentElement && item.parentElement !== progress) {
+        const parent = item.parentElement;
+        if (getSubscriptionBadgeImages(parent).length !== 1) break;
+        item = parent;
+      }
+      return item;
+    });
+    return [...new Set(items)];
+  }
+
+  function findProgressBar(progress) {
+    if (!progress) return null;
+    const semantic = progress.querySelector("[class*='_bar_']");
+    if (semantic) return semantic;
+    const nativeProgress = progress.matches("[role='progressbar']")
+      ? progress
+      : progress.querySelector("[role='progressbar']");
+    return nativeProgress || null;
+  }
+
+  function findProgressGauge(progress, bar) {
+    if (!progress) return null;
+    const semantic = progress.querySelector("[class*='_gauge_']");
+    if (semantic) return semantic;
+    const nativeProgress = progress.matches("[role='progressbar']")
+      ? progress
+      : progress.querySelector("[role='progressbar']");
+    if (nativeProgress && nativeProgress !== bar) return nativeProgress;
+    return (
+      [...(bar || progress).querySelectorAll("[style]")].find(
+        (el) => el.style.width && el !== bar,
+      ) || null
+    );
+  }
+
   // 열린 구독 팝업 안 배지/이모티콘 이미지 URL 에서 채널ID(32자 hex)를 추출한다.
   // 배지 URL 형태: .../glive/subscription/badge/<channelId>/<tier>/<month>_...png
   // URL 에 채널ID 가 없는 페이지(예: /following)에서도 팝업만 있으면 동작한다.
   function channelIdFromPopup(popup) {
     if (!popup) return null;
-    const imgs = popup.querySelectorAll(
-      ":is([class*='_image_62f6x_'], [class*='_image_jj04l_']), [class*='_emoticon_'] img, [class*='_badge_'] img",
-    );
-    for (const el of imgs) {
-      const url =
-        el.src ||
-        (el.style?.backgroundImage || "").replace(/^url\(["']?|["']?\)$/g, "");
+    for (const el of getSubscriptionAssets(popup)) {
+      const url = visualAssetUrl(el);
       const m = url.match(/\/subscription\/(?:badge|emoji)\/([a-f0-9]{32})\//i);
       if (m) return m[1];
     }
@@ -75,17 +238,35 @@
   }
 
   // ── 구독 정보 API ──────────────────────────────────────────────────────────
+  const SUBSCRIBE_INFO_CACHE_TTL = 30 * 1000;
+  const subscribeInfoCache = new Map();
+
   async function fetchSubscribeInfo(channelId) {
-    try {
-      const r = await fetch(
-        `https://api.chzzk.naver.com/commercial/v1/subscribe/channels/${channelId}`,
-        { credentials: "include" },
-      );
-      if (!r.ok) return null;
-      return (await r.json())?.content?.info ?? null;
-    } catch {
-      return null;
+    const cached = subscribeInfoCache.get(channelId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+    const request = (async () => {
+      try {
+        const r = await fetch(
+          `https://api.chzzk.naver.com/commercial/v1/subscribe/channels/${channelId}`,
+          { credentials: "include" },
+        );
+        if (!r.ok) return null;
+        return (await r.json())?.content?.info ?? null;
+      } catch {
+        return null;
+      }
+    })();
+    subscribeInfoCache.set(channelId, {
+      value: request,
+      expiresAt: Date.now() + SUBSCRIBE_INFO_CACHE_TTL,
+    });
+    const value = await request;
+    const entry = subscribeInfoCache.get(channelId);
+    if (entry?.value === request) {
+      entry.value = value;
     }
+    return value;
   }
 
   // 전체 티어/배지 목록. content.subscriptionTierInfoList 반환.
@@ -207,30 +388,59 @@
   }
 
   // ── 팝업 탐색 ──────────────────────────────────────────────────────────────
-  // 제목이 '구독권 관리'/'구독 관리' 인 alertdialog 컨테이너.
+  // 역할과 표시 문구로 구독 관리 팝업을 찾는다. CSS module 해시는 사용하지 않는다.
   function findSubscribePopup() {
     const dialogs = document.querySelectorAll(
-      "[role='alertdialog'], [class*='_container_1aj24_']",
+      "[role='alertdialog'], [role='dialog']",
     );
-    for (const el of dialogs) {
-      const title = el
-        .querySelector("strong[class*='_title_'], [class*='_title_']")
-        ?.textContent?.trim();
-      if (title && /구독(권)?\s*관리/.test(title)) return el;
+    for (const dialog of dialogs) {
+      if (findSubscribeTitle(dialog)) return dialog;
+    }
+
+    // 일부 팝업은 role 이 래퍼가 아닌 내부 노드에 붙거나 생략된다.
+    const contents = document.getElementById("popup_contents");
+    if (contents && findSubscribeTitle(contents)) {
+      return (
+        contents.closest("[role='alertdialog'], [role='dialog']") || contents
+      );
+    }
+
+    // 마지막 폴백: 구독 관리 제목과 구독 배지 자산을 함께 포함하는 가장 가까운 조상.
+    const title = findSubscribeTitleInDocument();
+    if (!title) return null;
+    let candidate = title.parentElement;
+    while (candidate && candidate !== document.body) {
+      if (getSubscriptionBadgeImages(candidate).length > 0) return candidate;
+      candidate = candidate.parentElement;
     }
     return null;
   }
 
-  // '내 구독 배지' 영역(_area_) 반환: 내부 제목 strong 이 '내 구독 배지'.
+  // '내 구독 배지' 문구와 실제 구독 배지/진행 바를 함께 감싼 가장 작은 영역을 반환한다.
   function findBadgeArea(popup) {
-    const areas = popup.querySelectorAll(
-      ":is([class*='_area_62f6x_'], [class*='_area_jj04l_'])",
-    );
+    if (!popup) return null;
+    const areas = popup.querySelectorAll("[class*='_area_'], section, article");
     for (const a of areas) {
-      const t = a
-        .querySelector("[class*='_text_'] strong, [class*='_title_']")
-        ?.textContent?.trim();
-      if (t === "내 구독 배지") return a;
+      if (
+        findBadgeTitle(a) &&
+        (getSubscriptionBadgeImages(a).length > 0 || findBadgeProgress(a))
+      ) {
+        return a;
+      }
+    }
+
+    const title = findBadgeTitle(popup);
+    if (!title) return null;
+    let candidate = title.parentElement;
+    while (candidate && candidate !== popup.parentElement) {
+      if (
+        getSubscriptionBadgeImages(candidate).length > 0 ||
+        findBadgeProgress(candidate)
+      ) {
+        return candidate;
+      }
+      if (candidate === popup) break;
+      candidate = candidate.parentElement;
     }
     return null;
   }
@@ -294,30 +504,27 @@
     // 다이얼로그 조상. 넘겨받은 popup 이 레이어 래퍼 등 엉뚱한 요소일 수 있으므로,
     // 팝업 내부의 콘텐츠 영역(#popup_contents)을 기준으로 삼는 게 가장 정확하다.
     function resolvePopupBox() {
-      // 다이얼로그의 '제목'은 헤더 안 _title_ 요소로 판정한다(콘텐츠 안 채널명 등 다른
-      // strong 을 제목으로 오인하지 않게).
-      const isSubscribeDialog = (d) => {
-        const title =
-          d.querySelector("[class*='_title_']")?.textContent?.trim() || "";
-        return /구독(권)?\s*관리/.test(title);
-      };
+      const isSubscribeDialog = (dialog) => Boolean(findSubscribeTitle(dialog));
       // 1) 넘겨받은 popup 이 다이얼로그면 그것, 아니면 조상 다이얼로그.
       let dialog = null;
       if (popup && document.body.contains(popup)) {
-        dialog = popup.matches?.("[role='alertdialog']")
+        dialog = popup.matches?.("[role='alertdialog'], [role='dialog']")
           ? popup
-          : popup.closest?.("[role='alertdialog']");
+          : popup.closest?.("[role='alertdialog'], [role='dialog']");
       }
-      // 2) 없으면 열린 alertdialog 중 구독 관리 제목을 가진 것.
+      // 2) 없으면 열린 dialog 중 구독 관리 제목을 가진 것.
       if (!dialog) {
-        dialog = [...document.querySelectorAll("[role='alertdialog']")].find(
-          isSubscribeDialog,
-        );
+        dialog = [
+          ...document.querySelectorAll("[role='alertdialog'], [role='dialog']"),
+        ].find(isSubscribeDialog);
       }
       // 3) 그래도 없으면 #popup_contents 의 다이얼로그 조상(또는 콘텐츠 자체).
       if (!dialog) {
         const contents = document.getElementById("popup_contents");
-        dialog = contents?.closest("[role='alertdialog']") || contents || null;
+        dialog =
+          contents?.closest("[role='alertdialog'], [role='dialog']") ||
+          contents ||
+          null;
       }
       return dialog && document.body.contains(dialog) ? dialog : null;
     }
@@ -327,14 +534,12 @@
       if (box) {
         const r = box.getBoundingClientRect();
         const pad = 12;
-        // 가로는 팝업 박스 기준(안쪽 여백 pad). 세로는 헤더/프로필을 제외하고 첫 콘텐츠
-        // 영역(_area_ 첫 번째, "1개월 구독권 만료일")부터 팝업 하단까지만 덮는다.
-        const firstArea = box.querySelector(
-          ":is([class*='_area_62f6x_'], [class*='_area_jj04l_'])",
-        );
-        const topPx = firstArea
-          ? firstArea.getBoundingClientRect().top
-          : r.top + pad;
+        // 가로는 팝업 박스 기준(안쪽 여백 pad). 세로는 헤더를 제외한 콘텐츠부터 덮는다.
+        const contents =
+          (box.id === "popup_contents" ? box : box.querySelector("#popup_contents")) ||
+          findBadgeArea(box);
+        const contentsTop = contents?.getBoundingClientRect().top;
+        const topPx = Number.isFinite(contentsTop) ? contentsTop : r.top + pad;
         overlay.style.left = `${r.left + pad}px`;
         overlay.style.width = `${Math.max(0, r.width - pad * 2)}px`;
         overlay.style.top = `${topPx}px`;
@@ -366,7 +571,15 @@
     });
     const h = document.createElement("strong");
     h.textContent = "전체 구독 배지";
-    h.className = "_title_uasnk_69";
+    Object.assign(h.style, {
+      fontSize: "16px",
+      lineHeight: "22px",
+    });
+    const nativeTitle = findSubscribeTitle(resolvePopupBox());
+    if (nativeTitle) {
+      const nativeFontFamily = getComputedStyle(nativeTitle).fontFamily;
+      if (nativeFontFamily) h.style.fontFamily = nativeFontFamily;
+    }
     const close = document.createElement("button");
     close.type = "button";
     close.setAttribute("aria-label", "닫기");
@@ -509,9 +722,7 @@
 
   // '내 구독 배지' 영역에 '전체보기' 버튼을 추가한다(이미 있으면 스킵).
   async function ensureViewAllButton(area, info) {
-    const box = area.querySelector(
-      ":is([class*='_box_62f6x_'], [class*='_box_jj04l_'])",
-    );
+    const box = findBadgeHeaderBox(area);
     if (!box || box.querySelector("[data-cheese-view-all]")) return;
 
     const btn = document.createElement("button");
@@ -539,8 +750,7 @@
       e.stopPropagation();
       // 오버레이를 얹을 팝업 컨테이너(버튼 조상에서 탐색, 없으면 현재 열린 팝업).
       const popup =
-        btn.closest("[role='alertdialog']") ||
-        btn.closest("[class*='_container_1aj24_']") ||
+        btn.closest("[role='alertdialog'], [role='dialog']") ||
         findSubscribePopup();
       const channelId = await getChannelId(popup);
       if (!channelId) return;
@@ -559,25 +769,22 @@
     void ensureViewAllButton(area, info);
 
     const gauge = calcGauge(info);
-    if (!gauge) return;
+    if (!gauge) {
+      area.dataset.cheeseSubscribeBadgeEnhanced = "1";
+      return;
+    }
 
-    const progress = area.querySelector(
-      ":is([class*='_progress_62f6x_'], [class*='_progress_jj04l_'])",
-    );
+    const progress = findBadgeProgress(area);
     if (!progress) return;
 
     // ① 다음 배지(두 번째 _badge_) 이미지 흐리게 + 잠금 오버레이.
     // React 안전: img 를 이동/래핑하지 않는다. nextBadge 를 relative 로 두고 자물쇠
     // SVG 를 절대배치 오버레이로 '추가'만 한다(마커 data-cheese-lock). 제거 시 자물쇠만
     // 걷어내고 opacity 만 원복하면 되므로 React 노드는 그대로 유지된다.
-    const badges = progress.querySelectorAll(
-      ":is([class*='_badge_62f6x_'], [class*='_badge_jj04l_'])",
-    );
+    const badges = getBadgeItems(progress);
     const nextBadge = badges[1];
     if (nextBadge && !nextBadge.querySelector("[data-cheese-lock]")) {
-      const img = nextBadge.querySelector(
-        ":is([class*='_image_62f6x_'], [class*='_image_jj04l_'])",
-      );
+      const img = getSubscriptionBadgeImages(nextBadge)[0];
       if (img) {
         img.style.opacity = ".5";
         if (getComputedStyle(nextBadge).position === "static") {
@@ -608,15 +815,10 @@
     }
 
     // ② 게이지 % 반영(치지직이 이미 값을 넣지만, 우리 계산으로 보정).
-    const gaugeEl = progress.querySelector(
-      ":is([class*='_gauge_62f6x_'], [class*='_gauge_jj04l_'])",
-    );
-    if (gaugeEl) gaugeEl.style.width = `${gauge.percent}%`;
-
-    const bar = progress.querySelector(
-      ":is([class*='_bar_62f6x_'], [class*='_bar_jj04l_'])",
-    );
+    const bar = findProgressBar(progress);
     if (!bar) return;
+    const gaugeEl = findProgressGauge(progress, bar);
+    if (gaugeEl) gaugeEl.style.width = `${gauge.percent}%`;
 
     // ③ 남은 기간 라벨(우리 노드). 이미 있으면 텍스트만 갱신.
     let label = bar.querySelector("[data-cheese-remaining]");
@@ -687,6 +889,7 @@
       });
       ticks.appendChild(t);
     }
+    area.dataset.cheeseSubscribeBadgeEnhanced = "1";
   }
 
   // ── 팝업 감지 & 처리 ────────────────────────────────────────────────────────
@@ -700,9 +903,10 @@
     if (!popup) return;
     const area = findBadgeArea(popup);
     if (!area) return;
-    // 이미 처리했으면(전체보기 버튼 존재) 스킵. 게이지 라벨은 게이지가 없는 채널에선
-    // 안 생기므로, 항상 생기는 '전체보기' 버튼을 처리 완료 표식으로 쓴다.
-    if (area.querySelector("[data-cheese-view-all]")) return;
+    const hasViewAll = Boolean(area.querySelector("[data-cheese-view-all]"));
+    // 팝업 렌더링이 끝난 뒤 두 요소가 모두 붙은 경우에만 완료로 본다. 제목이 먼저
+    // 렌더되고 진행 바가 늦게 추가되는 UI에서도 옵저버가 다음 변이에 다시 보강한다.
+    if (hasViewAll && area.dataset.cheeseSubscribeBadgeEnhanced === "1") return;
 
     processing = true;
     try {
@@ -733,12 +937,8 @@
       .forEach((el) => el.remove());
     // 잠금 오버레이: 자물쇠 SVG 제거 + 흐리게 한 배지 이미지 opacity 원복.
     document.querySelectorAll("[data-cheese-lock]").forEach((lock) => {
-      const badge = lock.closest(
-        ":is([class*='_badge_62f6x_'], [class*='_badge_jj04l_'])",
-      );
-      const img = badge?.querySelector(
-        ":is([class*='_image_62f6x_'], [class*='_image_jj04l_'])",
-      );
+      const badge = lock.parentElement;
+      const img = getSubscriptionBadgeImages(badge)[0];
       if (img) img.style.opacity = "";
       lock.remove();
     });
@@ -746,6 +946,9 @@
     document
       .querySelectorAll("[data-cheese-view-all]")
       .forEach((el) => el.remove());
+    document
+      .querySelectorAll("[data-cheese-subscribe-badge-enhanced='1']")
+      .forEach((el) => delete el.dataset.cheeseSubscribeBadgeEnhanced);
     closeAllBadgeOverlay();
   }
 

@@ -648,7 +648,7 @@ const CHANNEL_LIVE_BUTTON_KEY = "cheeseChannelLiveButton";
 let channelLiveButtonOn = true;
 // 라이브 바로가기 버튼을 탭리스트 '끝(우측)'에 둘지(true) 탭들 바로 뒤(false)에 둘지.
 const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
-let channelLiveButtonEnd = true;
+let channelLiveButtonEnd = false;
 // 채널·팔로잉·검색·라이브 카드와 사이드바의 프로필 모서리. 신규 사용자는 기본
 // OFF이고, 기존에 반경을 저장한 사용자는 마이그레이션 시 기존 표시를 유지한다.
 const CHANNEL_PROFILE_RADIUS_ENABLED_KEY =
@@ -657,6 +657,8 @@ const CHANNEL_PROFILE_RADIUS_KEY = "cheeseChannelProfileRadius";
 const CHANNEL_PROFILE_RADIUS_DEFAULT = 50;
 const CHANNEL_PROFILE_RADIUS_TARGET_CLASS =
   "cheese-channel-profile-radius-target";
+const CHANNEL_PROFILE_POPUP_TARGET_CLASS =
+  "cheese-channel-profile-popup-target";
 const CHANNEL_PROFILE_RADIUS_ROOT_CLASS =
   "cheese-channel-profile-radius-enabled";
 let channelProfileRadiusEnabled = false;
@@ -915,6 +917,32 @@ let autoReloadOnRelive = false;
 // 초기화(기본 OFF). content.js 전용.
 const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
 let searchResetOnReturn = false;
+// 카테고리 동영상 탭 필터(기본 OFF). 카테고리 API는 최신순 커서만 제공하므로,
+// 사용자가 검색을 실행한 때에만 후보를 순차 수집하고 브라우저에서 필터·정렬한다.
+const CATEGORY_VIDEO_FILTER_KEY = "cheeseCategoryVideoFilter";
+let categoryVideoFilterEnabled = false;
+const CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY =
+  "cheeseCategoryVideoCandidateLimit";
+const CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT = 2000;
+const CATEGORY_VIDEO_CANDIDATE_LIMITS = new Set([
+  500, 1000, 2000, 3000, 5000,
+]);
+let categoryVideoCandidateLimit = CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT;
+function normalizeCategoryVideoCandidateLimit(value) {
+  const number = Number(value);
+  return CATEGORY_VIDEO_CANDIDATE_LIMITS.has(number)
+    ? number
+    : CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT;
+}
+const CATEGORY_VIDEO_FILTER_CACHE_TTL_MS = 60 * 60 * 1000;
+const CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY =
+  "cheeseCategoryVideoFilterCacheIndex";
+const CATEGORY_VIDEO_FILTER_CACHE_PREFIX = "cheeseCategoryVideoFilterCache:";
+const CATEGORY_VIDEO_FILTER_CACHE_LIMIT = 3;
+const CATEGORY_VIDEO_FILTER_CONTINUATION_VERSION = 1;
+const CATEGORY_VIDEO_FILTER_PAGE_SIZE = 50;
+const CATEGORY_VIDEO_FILTER_RENDER_INITIAL = 120;
+const CATEGORY_VIDEO_FILTER_RENDER_STEP = 120;
 // 통합검색(/search) 동영상 섹션 재랭킹(전역, 기본 OFF). 치지직 검색 API는 정렬 기준이
 // 모호해(관련도 낮은 저조회 영상이 상위에 옴), 같은 API를 size=50 × 3페이지로 넓게 받아
 // 제목·채널명 관련도, 조회수, livePv, 인증마크, 최신성 점수로 재정렬한다. content.js 전용.
@@ -1380,6 +1408,16 @@ let followCleanupOn = true;
 const CHAT_FOLD_PERSIST_KEY = "cheeseChatFoldPersist"; // on/off
 const CHAT_FOLD_STATE_KEY = "cheeseChatFoldState"; // 저장된 접힘 상태(boolean)
 let chatFoldPersistOn = false;
+// 독립 `/live/{channelId}/chat` 팝업에서 Document Picture-in-Picture 채팅을 연다.
+// 일반 chrome.windows 팝업에는 always-on-top 설정 수단이 없어 지원 Chromium에서만
+// 사용자 클릭으로 여는 실험 기능이다.
+const CHAT_POPUP_PIP_KEY = "cheeseChatPopupPip";
+const CHAT_POPUP_PIP_BUTTON_CLASS = "cheese-chat-popup-pip-button";
+const CHAT_POPUP_PIP_RETURN_CLASS = "cheese-chat-popup-pip-return";
+const CHAT_POPUP_PIP_QUERY_KEY = "cheeseChatPip";
+let chatPopupPipOn = false;
+let chatPopupPipWindow = null;
+let chatPopupPipOpening = false;
 const featureFlags = {
   audioMixer: false,
   videoFilter: false,
@@ -1798,6 +1836,9 @@ const CHEESE_SEARCH_MUTATION_IGNORE_SELECTOR = [
   ".cheese-cf-page-favorite",
   ".cheese-live-tag-filter-button",
   ".cheese-live-tag-filter-overlay",
+  ".cheese-category-video-filter",
+  "[data-cvf-result-list]",
+  "[data-cvf-result-sentinel]",
   ".cheese-cf-group-modal",
   ".clr-picker",
   `.${LIVE_DETAIL_START_TOOLTIP_CLASS}`,
@@ -3180,7 +3221,6 @@ function handleCategoryFilterClick(event) {
   if (searchList.classList.contains("cheese-search-integrated-clips-list")) {
     return;
   }
-
   event.preventDefault();
   event.stopPropagation();
   applyCategoryFilter(link.dataset.cheeseCategoryFilter);
@@ -5913,11 +5953,19 @@ function formatCompactPower(value) {
 // 주의: [class*='_donation_'] 폴백을 먼저 쓰면 채팅 '메시지' 안의 도네이션 컨테이너
 // (_is_donation_o04z9_)를 잘못 잡아 배지가 메시지로 들어갔다 나오는 핑퐁이 난다.
 // 그래서 (1) 후원하기 버튼 우선, (2) 폴백은 입력 영역(_is_donation_ 제외)으로 한정.
+const CHAT_MODAL_SELECTOR = '[role="dialog"], [role="alertdialog"]';
+
+function isInsideChatModal(element) {
+  return Boolean(element?.closest?.(CHAT_MODAL_SELECTOR));
+}
+
 function findLogPowerHost() {
-  // 1) '후원하기' 버튼의 부모 div(가장 정확).
+  // 1) 채팅 입력 영역의 '후원하기' 버튼 부모 div. 후원 다이얼로그 하단에도 같은
+  //    문구의 버튼이 있으므로 dialog/alertdialog 내부는 반드시 제외한다.
   const aside = document.querySelector("aside#aside-chatting");
   const scope = aside || document;
   for (const btn of scope.querySelectorAll("button")) {
+    if (isInsideChatModal(btn)) continue;
     const t = (btn.textContent || "").trim();
     if (t.startsWith("후원하기")) {
       const parent = btn.parentElement;
@@ -5929,9 +5977,11 @@ function findLogPowerHost() {
   //    _is_donation_ 은 제외). textarea가 없으면 host 없음으로 본다.
   const inputArea = findLogPowerInputArea();
   if (inputArea) {
-    const host = inputArea.querySelector(
-      "[class*='live_chatting_input_donation__'], [class*='_donation_']:not([class*='_is_donation_'])",
-    );
+    const host = [
+      ...inputArea.querySelectorAll(
+        "[class*='live_chatting_input_donation__'], [class*='_donation_']:not([class*='_is_donation_'])",
+      ),
+    ].find((candidate) => !isInsideChatModal(candidate));
     if (host) return host;
   }
   return null;
@@ -5942,9 +5992,11 @@ function findLogPowerHost() {
 // 교체되므로, 이 영역만 MutationObserver로 감시하면 채팅 메시지 변이는 콜백을 안
 // 깨워 CPU/메모리 부담이 크게 준다(전체 documentElement 감시는 메모리 폭증 위험).
 function findLogPowerInputArea() {
-  const ta = document.querySelector(
-    "aside#aside-chatting textarea[class*='_input_'], aside#aside-chatting textarea[placeholder*='채팅']",
-  );
+  const ta = [
+    ...document.querySelectorAll(
+      "aside#aside-chatting textarea[class*='_input_'], aside#aside-chatting textarea[placeholder*='채팅']",
+    ),
+  ].find((candidate) => !isInsideChatModal(candidate));
   if (!ta) return null;
   // textarea에서 위로 올라가며, 같은 박스 안에 후원 host(_donation_/후원하기)를
   // 후손으로 갖는 최상위 입력 박스를 찾는다.
@@ -5953,18 +6005,22 @@ function findLogPowerInputArea() {
     if (node.contains(ta) && nodeHasDonationHost(node)) return node;
     node = node.parentElement;
   }
-  return ta.closest("aside") || ta.parentElement;
+  return ta.closest("div[class*='_area_']") || ta.parentElement;
 }
 
 // 주어진 노드 안에 후원 컨테이너/후원하기 버튼이 있는지(입력 박스 판별용).
 function nodeHasDonationHost(node) {
   // 입력창 후원 컨테이너만(채팅 메시지 도네 _is_donation_ 제외) 또는 후원하기 버튼.
-  if (
-    node.querySelector("[class*='_donation_']:not([class*='_is_donation_'])")
-  ) {
+  const donationHost = [
+    ...node.querySelectorAll(
+      "[class*='_donation_']:not([class*='_is_donation_'])",
+    ),
+  ].find((candidate) => !isInsideChatModal(candidate));
+  if (donationHost) {
     return true;
   }
   for (const btn of node.querySelectorAll("button")) {
+    if (isInsideChatModal(btn)) continue;
     if ((btn.textContent || "").trim().startsWith("후원하기")) return true;
   }
   return false;
@@ -6343,7 +6399,10 @@ function ensureLogPowerBadge() {
     return null;
   }
   const host = findLogPowerHost();
-  if (!host) return null;
+  if (!host) {
+    removeLogPowerBadge();
+    return null;
+  }
   let badge = document.getElementById(LOGPOWER_BADGE_ID);
   // 배지가 없거나, 현재 host(또는 그 후손)에 붙어있지 않으면 (재)부착.
   if (!badge) {
@@ -10330,14 +10389,7 @@ function setChatAsideWidth(aside, width, maxWidth) {
   // (배지 모아 챗 syncChatResizeCssVars 동일: 다이얼로그=너비-20, 팝오버=너비-16).
   // vod-aside 너비도 이 변수로 적용된다(위 <style> 규칙).
   root.style.setProperty("--cheese-chat-resized-width", `${w}px`);
-  root.style.setProperty(
-    "--cheese-chat-profile-popup-width",
-    `${Math.max(1, w - 20)}px`,
-  );
-  root.style.setProperty(
-    "--cheese-chat-popover-width",
-    `${Math.max(1, w - 16)}px`,
-  );
+  syncChatPopupWidthVars(w);
   // 라이브 미니플레이어가 채팅 너비에 맞게 줄어들도록 높이(16:9 비율) 변수 설정.
   // (배지 모아 챗 동일: width*206/353. vod 채팅엔 미니플레이어가 없어 라이브만.)
   if (aside.id === "aside-chatting") {
@@ -10348,6 +10400,35 @@ function setChatAsideWidth(aside, width, maxWidth) {
   }
   normalizeChatInputHeight(aside); // 폭이 줄면 placeholder가 줄바꿈돼 입력창이 커지는 것 방지
   return w;
+}
+
+function syncChatPopupWidthVars(width) {
+  const w = Math.round(Number(width));
+  if (!Number.isFinite(w) || w <= 0) return;
+  const root = document.documentElement;
+  const profileWidth = `${Math.max(1, w - 20)}px`;
+  const popoverWidth = `${Math.max(1, w - 16)}px`;
+  if (
+    root.style.getPropertyValue("--cheese-chat-profile-popup-width") !==
+    profileWidth
+  ) {
+    root.style.setProperty("--cheese-chat-profile-popup-width", profileWidth);
+  }
+  if (
+    root.style.getPropertyValue("--cheese-chat-popover-width") !== popoverWidth
+  ) {
+    root.style.setProperty("--cheese-chat-popover-width", popoverWidth);
+  }
+}
+
+function clearChatPopupWidthVars() {
+  const root = document.documentElement;
+  if (root.style.getPropertyValue("--cheese-chat-profile-popup-width")) {
+    root.style.removeProperty("--cheese-chat-profile-popup-width");
+  }
+  if (root.style.getPropertyValue("--cheese-chat-popover-width")) {
+    root.style.removeProperty("--cheese-chat-popover-width");
+  }
 }
 
 // 빈 채팅 입력 textarea의 height를 40px로 강제(배지 모아 챗 동일). 폭이 좁아지면
@@ -10372,7 +10453,7 @@ function normalizeChatInputHeight(aside) {
   textarea.style.setProperty("height", "40px", "important");
 }
 
-function resetChatAsideWidth(aside) {
+function resetChatAsideWidth(aside, { preservePopupWidth = false } = {}) {
   if (!(aside instanceof HTMLElement)) return;
   aside.style.removeProperty("width");
   aside.style.removeProperty("flex-basis");
@@ -10398,8 +10479,7 @@ function resetChatAsideWidth(aside) {
   // 프로필 다이얼로그/팝오버 너비 + 미니플레이어 높이 변수 원복(전역).
   const root = document.documentElement;
   root.style.removeProperty("--cheese-chat-resized-width");
-  root.style.removeProperty("--cheese-chat-profile-popup-width");
-  root.style.removeProperty("--cheese-chat-popover-width");
+  if (!preservePopupWidth) clearChatPopupWidthVars();
   root.style.removeProperty("--cheese-live-miniplayer-height");
 }
 
@@ -10417,9 +10497,13 @@ function applyChatLayout() {
   );
   // 비활성(토글 off/양보) 또는 세로 배치면 원복.
   if (!enabled) {
+    const preservePopupWidth =
+      chatFeatureActive("chatLeftPosition") &&
+      !!aside &&
+      !isChatStackedLayout(aside);
     document
       .querySelectorAll(CHAT_ASIDE_SEL)
-      .forEach((a) => resetChatAsideWidth(a));
+      .forEach((a) => resetChatAsideWidth(a, { preservePopupWidth }));
     return;
   }
   const maxWidth = getMaxChatWidth(aside);
@@ -10537,6 +10621,256 @@ function isStandaloneChatPopup() {
   if (/\/live\/[^/?#]+\/chat(?:[/?#]|$)/.test(location.pathname)) return true;
   const aside = document.querySelector("aside#aside-chatting");
   return !!aside && String(aside.className || "").includes("_is_popup_chat_");
+}
+
+function supportsChatDocumentPip() {
+  return Boolean(
+    IS_TOP_FRAME &&
+    window.isSecureContext &&
+    window.documentPictureInPicture?.requestWindow,
+  );
+}
+
+function chatPopupPipIcon() {
+  // Lucide picture-in-picture-2.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 9V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h6"></path><rect width="10" height="7" x="12" y="12" rx="2"></rect></svg>`;
+}
+
+function isChatPopupPipOpen() {
+  try {
+    return Boolean(chatPopupPipWindow && !chatPopupPipWindow.closed);
+  } catch {
+    return false;
+  }
+}
+
+function removeChatPopupPipReturnButton() {
+  const existing = document.querySelector(`.${CHAT_POPUP_PIP_RETURN_CLASS}`);
+  existing?._cheeseKeydownController?.abort();
+  existing?.remove();
+}
+
+function updateChatPopupPipReturnButton(active) {
+  const existing = document.querySelector(`.${CHAT_POPUP_PIP_RETURN_CLASS}`);
+  if (!active || !chatPopupPipOn || !isStandaloneChatPopup()) {
+    removeChatPopupPipReturnButton();
+    return;
+  }
+  if (existing) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = CHAT_POPUP_PIP_RETURN_CLASS;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "항상 위 채팅 실행 중");
+  overlay.innerHTML = `
+    <div class="${CHAT_POPUP_PIP_RETURN_CLASS}__content">
+      ${chatPopupPipIcon()}
+      <strong>항상 위 창에서 채팅을 표시하고 있습니다.</strong>
+      <button type="button">원본 채팅으로 돌아오기</button>
+    </div>
+  `;
+  const button = overlay.querySelector("button");
+  if (!button) return;
+  button.type = "button";
+  button.setAttribute("aria-label", "항상 위 채팅을 닫고 원본 채팅으로 돌아오기");
+  button.title = "항상 위 채팅 닫기";
+  button.addEventListener("click", () => closeChatPopupPip());
+  const keydownController = new AbortController();
+  overlay._cheeseKeydownController = keydownController;
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeChatPopupPip();
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        button.focus();
+      }
+    },
+    { capture: true, signal: keydownController.signal },
+  );
+  document.body.appendChild(overlay);
+}
+
+function updateChatPopupPipButton() {
+  const active = isChatPopupPipOpen();
+  document
+    .querySelectorAll(`.${CHAT_POPUP_PIP_BUTTON_CLASS}`)
+    .forEach((button) => {
+      const label = active ? "항상 위 채팅 닫기" : "항상 위 채팅 열기";
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    });
+  updateChatPopupPipReturnButton(active);
+}
+
+function closeChatPopupPip() {
+  const pipWindow = chatPopupPipWindow;
+  chatPopupPipWindow = null;
+  if (pipWindow) {
+    try {
+      if (!pipWindow.closed) pipWindow.close();
+    } catch {}
+  }
+  updateChatPopupPipButton();
+}
+
+function findChatPopupPipButtonHost(aside) {
+  if (!aside) return null;
+  const asideRect = aside.getBoundingClientRect();
+  const headers = [...aside.querySelectorAll('[class*="_header_"]')]
+    .filter((header) => {
+      const rect = header.getBoundingClientRect();
+      return (
+        rect.width >= asideRect.width * 0.6 &&
+        rect.top <= asideRect.top + 120 &&
+        header.querySelector("button")
+      );
+    })
+    .sort(
+      (a, b) =>
+        a.getBoundingClientRect().top - b.getBoundingClientRect().top,
+    );
+  const header = headers[0];
+  if (!header) return null;
+  const buttons = [...header.querySelectorAll("button")].filter((button) =>
+    button.querySelector("svg"),
+  );
+  const template = buttons.at(-1) || null;
+  return { host: header, template };
+}
+
+function setupChatPopupPipDocument(pipWindow) {
+  const pipDocument = pipWindow.document;
+  pipDocument.documentElement.lang = "ko";
+  pipDocument.title = `${document.title || "치지직 채팅"} - 항상 위`;
+
+  const style = pipDocument.createElement("style");
+  style.textContent = `
+    :root { color-scheme: light dark; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #141517; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; }
+    [data-cheese-chat-pip-loading] {
+      position: fixed; inset: 0; display: grid; place-items: center;
+      color: rgba(255,255,255,.72); font: 13px/1.4 sans-serif;
+    }
+  `;
+  pipDocument.head.appendChild(style);
+
+  const loading = pipDocument.createElement("div");
+  loading.dataset.cheeseChatPipLoading = "1";
+  loading.setAttribute("role", "status");
+  loading.textContent = "채팅 불러오는 중...";
+
+  const frame = pipDocument.createElement("iframe");
+  const chatUrl = new URL(location.href);
+  chatUrl.searchParams.set(CHAT_POPUP_PIP_QUERY_KEY, "1");
+  frame.src = chatUrl.href;
+  frame.title = "치지직 항상 위 채팅";
+  frame.allow = "clipboard-read; clipboard-write";
+  frame.addEventListener("load", () => loading.remove(), { once: true });
+  pipDocument.body.append(loading, frame);
+}
+
+async function toggleChatPopupPip() {
+  if (chatPopupPipOpening) return;
+  if (isChatPopupPipOpen()) {
+    closeChatPopupPip();
+    return;
+  }
+  if (!supportsChatDocumentPip()) return;
+
+  chatPopupPipOpening = true;
+  updateChatPopupPipButton();
+  try {
+    const pipWindow = await window.documentPictureInPicture.requestWindow({
+      width: Math.min(560, Math.max(320, Math.round(window.innerWidth))),
+      height: Math.min(900, Math.max(420, Math.round(window.innerHeight))),
+      preferInitialWindowPlacement: true,
+    });
+    if (!chatPopupPipOn || !isStandaloneChatPopup()) {
+      pipWindow.close();
+      return;
+    }
+    chatPopupPipWindow = pipWindow;
+    setupChatPopupPipDocument(pipWindow);
+    pipWindow.addEventListener(
+      "pagehide",
+      () => {
+        if (chatPopupPipWindow === pipWindow) chatPopupPipWindow = null;
+        updateChatPopupPipButton();
+      },
+      { once: true },
+    );
+  } catch (error) {
+    if (chatPopupPipWindow) {
+      try {
+        if (!chatPopupPipWindow.closed) chatPopupPipWindow.close();
+      } catch {}
+      chatPopupPipWindow = null;
+    }
+    console.warn("[치즈 플래터] 항상 위 채팅 열기 실패", error);
+    showCheeseCopyToast("항상 위 채팅을 열지 못했습니다.");
+  } finally {
+    chatPopupPipOpening = false;
+    updateChatPopupPipButton();
+  }
+}
+
+function removeChatPopupPipButtons() {
+  document
+    .querySelectorAll(`.${CHAT_POPUP_PIP_BUTTON_CLASS}`)
+    .forEach((button) => button.remove());
+  removeChatPopupPipReturnButton();
+}
+
+function ensureChatPopupPipButton() {
+  const isPipChild =
+    !IS_TOP_FRAME ||
+    new URLSearchParams(location.search).get(CHAT_POPUP_PIP_QUERY_KEY) === "1";
+  if (
+    !chatPopupPipOn ||
+    isPipChild ||
+    !isStandaloneChatPopup() ||
+    !supportsChatDocumentPip()
+  ) {
+    removeChatPopupPipButtons();
+    if (!chatPopupPipOn || !isStandaloneChatPopup()) closeChatPopupPip();
+    return;
+  }
+
+  const existing = document.querySelector(`.${CHAT_POPUP_PIP_BUTTON_CLASS}`);
+  if (existing) {
+    updateChatPopupPipButton();
+    return;
+  }
+
+  const aside = document.querySelector("aside#aside-chatting");
+  if (!aside) return;
+  const placement = findChatPopupPipButtonHost(aside);
+  const button = document.createElement("button");
+  button.type = "button";
+  if (placement?.template?.className) {
+    button.className = `${placement.template.className} ${CHAT_POPUP_PIP_BUTTON_CLASS}`;
+  } else {
+    button.className = `${CHAT_POPUP_PIP_BUTTON_CLASS} is-floating`;
+  }
+  button.innerHTML = chatPopupPipIcon();
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void toggleChatPopupPip();
+  });
+  if (placement?.template) placement.template.after(button);
+  else (placement?.host || aside).appendChild(button);
+  updateChatPopupPipButton();
 }
 
 // 영상/채팅이 상하로 나뉜(stacked) 레이아웃이면 <html>에 표식을 둔다. CSS에서
@@ -11427,7 +11761,13 @@ function applyChatLeftClass() {
     chatFeatureActive("chatLeftPosition") &&
     !!aside &&
     !isChatStackedLayout(aside);
-  document.documentElement.classList.toggle("cheese-chat-left-position", on);
+  const root = document.documentElement;
+  root.classList.toggle("cheese-chat-left-position", on);
+  if (on) {
+    syncChatPopupWidthVars(aside.getBoundingClientRect().width);
+  } else if (!root.classList.contains("cheese-chat-width-resize-enabled")) {
+    clearChatPopupWidthVars();
+  }
 }
 
 // ── 채팅창 접힘 상태 유지 ────────────────────────────────────────────────────
@@ -14214,7 +14554,7 @@ async function loadChannelLiveButton() {
       CHANNEL_LIVE_BUTTON_END_KEY,
     ]);
     channelLiveButtonOn = data?.[CHANNEL_LIVE_BUTTON_KEY] !== false; // 미설정/true=표시
-    channelLiveButtonEnd = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
+    channelLiveButtonEnd = data?.[CHANNEL_LIVE_BUTTON_END_KEY] === true; // true=끝, 미설정/false=탭 뒤
   } catch {}
   ensureChannelLiveButton();
 }
@@ -14366,6 +14706,26 @@ function applyChannelProfileRadius() {
       }
     });
 
+  // 구독권 관리/정기구독 팝업은 링크 없이 profile > thumbnail > img 구조를 사용한다.
+  // alertdialog와 popup_contents 내부의 직접 자식 관계로 한정해 구독 배지·이모티콘
+  // 썸네일까지 프로필로 오인하지 않게 한다.
+  document
+    .querySelectorAll(
+      ':is([role="alertdialog"], [role="dialog"]) #popup_contents [class*="_profile_"] > [class*="_thumbnail_"]',
+    )
+    .forEach((thumbnail) => {
+      if (
+        isChannelProfileRadiusExcluded(thumbnail) ||
+        !thumbnail.querySelector(":scope > img")
+      ) {
+        return;
+      }
+      thumbnail.classList.add(
+        CHANNEL_PROFILE_RADIUS_TARGET_CLASS,
+        CHANNEL_PROFILE_POPUP_TARGET_CLASS,
+      );
+    });
+
   // 헤더 우측의 로그인 사용자 프로필 버튼.
   document
     .querySelectorAll(
@@ -14430,6 +14790,1455 @@ async function loadChannelLiveProfileBackground() {
     };
   }
   applyChannelLiveProfileBackground();
+}
+
+// ── 카테고리 동영상 탭 필터 ────────────────────────────────────────────────
+// `/category/{type}/{id}/videos`의 원본 API는 최신순 커서만 제공한다. 따라서
+// 기간·정렬 탭을 누른 경우에만 최대 2,000개를 순차 수집하고 로컬에서 정렬한다.
+// 원본 React 목록은 직접 수정하지 않고 결과가 활성화된
+// 동안만 숨겨 치지직의 재렌더와 소유권 충돌을 피한다.
+const CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS =
+  "cheese-category-video-native-hidden";
+const CATEGORY_VIDEO_PERIODS = {
+  month: { label: "30일", ageMs: 30 * 24 * 60 * 60 * 1000 },
+  week: { label: "7일", ageMs: 7 * 24 * 60 * 60 * 1000 },
+  day: { label: "24시간", ageMs: 24 * 60 * 60 * 1000 },
+  all: { label: "전체", ageMs: 0 },
+};
+const CATEGORY_VIDEO_SORTS = {
+  views: "인기순",
+  latest: "최신순",
+  oldest: "오래된순",
+};
+const categoryVideoFilterState = {
+  contextKey: "",
+  context: null,
+  items: [],
+  next: null,
+  complete: false,
+  reachedLimit: false,
+  strategy: "latest",
+  candidateTarget: CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT,
+  pendingItems: [],
+  oldestCheckpoint: null,
+  active: false,
+  loading: false,
+  restartRequested: false,
+  abortController: null,
+  requestToken: 0,
+  nativeListTemplate: null,
+  nativeItemTemplates: new Map(),
+  resultList: null,
+  resultSentinel: null,
+  loadMoreElement: null,
+  resultObserver: null,
+  filteredItems: [],
+  renderedCount: 0,
+};
+let categoryVideoNativeFilterStyle = null;
+
+function harvestCategoryVideoNativeFilterStyle() {
+  const dateList = Array.from(
+    document.querySelectorAll('[role="tablist"]'),
+  ).find((list) =>
+    ["WITHIN_THIRTY_DAYS", "WITHIN_SEVEN_DAYS", "WITHIN_ONE_DAY", "ALL"].every(
+      (id) => list.querySelector(`:scope > button#${id}`),
+    ),
+  );
+  const wrapper = dateList?.parentElement;
+  const sortList = Array.from(
+    wrapper?.querySelectorAll(':scope > [role="tablist"]') || [],
+  ).find(
+    (list) =>
+      list !== dateList && list.querySelector(":scope > button#POPULAR"),
+  );
+  const dateButton = dateList?.querySelector(":scope > button");
+  const sortButton = sortList?.querySelector(":scope > button");
+  if (!wrapper || !dateList || !dateButton || !sortList || !sortButton) return;
+  categoryVideoNativeFilterStyle = {
+    wrapperClass: wrapper.className,
+    wrapperTop: wrapper.style.top,
+    dateListClass: dateList.className,
+    dateButtonClass: dateButton.className,
+    sortListClass: sortList.className,
+    sortButtonClass: sortButton.className,
+  };
+}
+
+function getCategoryVideoContext() {
+  const match = location.pathname.match(
+    /^\/category\/([^/]+)\/([^/]+)\/videos\/?$/i,
+  );
+  if (!match) return null;
+  try {
+    const categoryType = decodeURIComponent(match[1]);
+    const categoryId = decodeURIComponent(match[2]);
+    return {
+      categoryType,
+      categoryId,
+      key: `${categoryType}:${categoryId}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getCategoryVideoElements() {
+  const activeTab = Array.from(
+    document.querySelectorAll('button#VIDEO[role="tab"]'),
+  ).find((button) => button.getAttribute("aria-selected") === "true");
+  if (!activeTab) {
+    return { activeTab: null, section: null, anchor: null, list: null };
+  }
+
+  const section = activeTab.closest("section");
+  const tabList = activeTab.closest('[role="tablist"]');
+  const anchor = tabList?.parentElement || tabList || activeTab.parentElement;
+  const lists = Array.from(section?.querySelectorAll("ul") || []).filter(
+    (list) => !list.matches("[data-cvf-result-list]"),
+  );
+  const list =
+    lists.find((candidate) => candidate.querySelector('a[href^="/video/"]')) ||
+    null;
+  return { activeTab, section, anchor, list };
+}
+
+function applyCategoryVideoFontFamily(root, sourceTab) {
+  if (!root || !sourceTab) return;
+  const fontFamily = getComputedStyle(sourceTab).fontFamily.trim();
+  if (!fontFamily) return;
+  const property = "--cheese-category-video-font-family";
+  if (root.style.getPropertyValue(property) === fontFamily) return;
+  root.style.setProperty(property, fontFamily);
+}
+
+function createCategoryVideoFilterRoot() {
+  const root = document.createElement("div");
+  root.className = "cheese-category-video-filter";
+  root.dataset.period = "all";
+  root.dataset.sort = "latest";
+  const native = categoryVideoNativeFilterStyle || {};
+  const toolbarClass = [
+    native.wrapperClass,
+    "cheese-category-video-toolbar",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const dateListClass = [
+    native.dateListClass,
+    "cheese-category-video-period",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const dateButtonClass = [
+    native.dateButtonClass,
+    "cheese-category-video-period-button",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const sortListClass = [
+    native.sortListClass,
+    "cheese-category-video-sort",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const sortButtonClass = [
+    native.sortButtonClass,
+    "cheese-category-video-sort-button",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  root.innerHTML = `
+    <div class="${escapeAttribute(toolbarClass)}" data-cvf-toolbar>
+      <div class="${escapeAttribute(dateListClass)}" role="tablist" aria-label="등록 기간">
+        ${Object.entries(CATEGORY_VIDEO_PERIODS)
+          .map(
+            ([value, option]) =>
+              `<button type="button" class="${escapeAttribute(dateButtonClass)}" data-cvf-period="${value}" role="tab" aria-selected="${String(value === "all")}">${option.label}</button>`,
+          )
+          .join("")}
+      </div>
+      <div class="${escapeAttribute(sortListClass)}" role="tablist" aria-label="정렬">
+        ${Object.entries(CATEGORY_VIDEO_SORTS)
+          .map(
+            ([value, label]) =>
+              `<button type="button" class="${escapeAttribute(sortButtonClass)}" data-cvf-sort="${value}" role="tab" aria-selected="${String(value === "latest")}">${label}</button>`,
+          )
+          .join("")}
+      </div>
+    </div>
+    <div class="cheese-category-video-status-row">
+      <p class="cheese-category-video-status" data-cvf-status hidden></p>
+      <div class="cheese-category-video-status-actions">
+        <button type="button" class="cheese-category-video-status-button" data-cvf-action="refresh" title="캐시를 지우고 최신 동영상을 다시 확인합니다">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>최신 동영상 확인</span>
+        </button>
+        <button type="button" class="cheese-category-video-status-button" data-cvf-action="reset" title="필터를 초기화하고 원본 목록으로 돌아갑니다">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>필터 초기화</span>
+        </button>
+      </div>
+    </div>`;
+
+  const toolbar = root.querySelector("[data-cvf-toolbar]");
+  if (toolbar && native.wrapperTop) toolbar.style.top = native.wrapperTop;
+
+  root.addEventListener("click", handleCategoryVideoFilterClick);
+  return root;
+}
+
+function handleCategoryVideoFilterClick(event) {
+  const root = event.currentTarget;
+  const actionButton = event.target.closest("[data-cvf-action]");
+  if (actionButton) {
+    const action = actionButton.dataset.cvfAction;
+    if (action === "refresh") void refreshCategoryVideoFilter();
+    else if (action === "reset") resetCategoryVideoFilterView();
+    return;
+  }
+  const periodButton = event.target.closest("[data-cvf-period]");
+  if (periodButton) {
+    root.dataset.period = periodButton.dataset.cvfPeriod;
+    root.querySelectorAll("[data-cvf-period]").forEach((button) => {
+      button.setAttribute(
+        "aria-selected",
+        String(button === periodButton),
+      );
+    });
+    void startCategoryVideoSearch();
+    return;
+  }
+
+  const sortButton = event.target.closest("[data-cvf-sort]");
+  if (sortButton) {
+    root.dataset.sort = sortButton.dataset.cvfSort;
+    root.querySelectorAll("[data-cvf-sort]").forEach((button) => {
+      button.setAttribute("aria-selected", String(button === sortButton));
+    });
+    void startCategoryVideoSearch();
+  }
+}
+
+function getCategoryVideoFilters(
+  root = document.querySelector(".cheese-category-video-filter"),
+) {
+  return {
+    period: root?.dataset.period || "all",
+    sort: root?.dataset.sort || "latest",
+  };
+}
+
+function getCategoryVideoCutoff(period) {
+  const ageMs = CATEGORY_VIDEO_PERIODS[period]?.ageMs || 0;
+  return ageMs ? Date.now() - ageMs : 0;
+}
+
+function getCategoryVideoCollectionStrategy(filters) {
+  return filters.sort === "oldest" && getCategoryVideoCutoff(filters.period)
+    ? `oldest:${filters.period}`
+    : "latest";
+}
+
+function getCategoryVideoOldestTime(items) {
+  return items.reduce((oldest, item) => {
+    const time = getItemTime(item);
+    if (!time) return oldest;
+    return oldest ? Math.min(oldest, time) : time;
+  }, 0);
+}
+
+function categoryVideoCacheCoversFilters(filters) {
+  if (categoryVideoFilterState.complete) return true;
+  if (
+    categoryVideoFilterState.items.length >=
+    categoryVideoFilterState.candidateTarget
+  ) {
+    return true;
+  }
+  const cutoff = getCategoryVideoCutoff(filters.period);
+  if (!cutoff) return false;
+  const oldest = getCategoryVideoOldestTime(categoryVideoFilterState.items);
+  return Boolean(oldest && oldest <= cutoff);
+}
+
+function filterCategoryVideos(filters) {
+  const cutoff = getCategoryVideoCutoff(filters.period);
+  const result = categoryVideoFilterState.items.filter((video) => {
+    if (cutoff && getItemTime(video) < cutoff) return false;
+    return true;
+  });
+
+  return result.sort((a, b) => {
+    if (filters.sort === "views") {
+      return (
+        getViewCount(b) - getViewCount(a) || getItemTime(b) - getItemTime(a)
+      );
+    }
+    const diff = getItemTime(b) - getItemTime(a);
+    return filters.sort === "oldest" ? -diff : diff;
+  });
+}
+
+function setCategoryVideoStatus(text, kind = "") {
+  const status = document.querySelector("[data-cvf-status]");
+  if (!status) return;
+  status.textContent = String(text || "");
+  status.dataset.kind = kind;
+  status.hidden = !text;
+}
+
+function setCategoryVideoLoading(loading) {
+  categoryVideoFilterState.loading = loading;
+  const root = document.querySelector(".cheese-category-video-filter");
+  root?.classList.toggle("is-loading", loading);
+  const refreshButton = root?.querySelector('[data-cvf-action="refresh"]');
+  if (refreshButton) refreshButton.disabled = loading;
+  updateCategoryVideoLoadMoreButton();
+}
+
+function captureCategoryVideoNativeTemplates(list) {
+  if (!list || list.matches("[data-cvf-result-list]")) return;
+  const cleanList = list.cloneNode(false);
+  cleanList.classList.remove(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
+  categoryVideoFilterState.nativeListTemplate = cleanList;
+  list.querySelectorAll(":scope > li").forEach((item) => {
+    const badgeText = item.querySelector("a[href^='/video/'] em")?.textContent?.trim();
+    const key = badgeText === "업로드" ? "upload" : "replay";
+    if (!categoryVideoFilterState.nativeItemTemplates.has(key)) {
+      categoryVideoFilterState.nativeItemTemplates.set(key, item.cloneNode(true));
+    }
+    if (!categoryVideoFilterState.nativeItemTemplates.has("default")) {
+      categoryVideoFilterState.nativeItemTemplates.set("default", item.cloneNode(true));
+    }
+  });
+}
+
+function disconnectCategoryVideoResultObserver() {
+  categoryVideoFilterState.resultObserver?.disconnect();
+  categoryVideoFilterState.resultObserver = null;
+}
+
+function removeCategoryVideoResultList() {
+  disconnectCategoryVideoResultObserver();
+  document.querySelectorAll("[data-cvf-result-list]").forEach((list) => list.remove());
+  document.querySelectorAll("[data-cvf-result-sentinel]").forEach((item) => item.remove());
+  document.querySelectorAll("[data-cvf-load-more]").forEach((item) => item.remove());
+  categoryVideoFilterState.resultList = null;
+  categoryVideoFilterState.resultSentinel = null;
+  categoryVideoFilterState.loadMoreElement = null;
+  categoryVideoFilterState.filteredItems = [];
+  categoryVideoFilterState.renderedCount = 0;
+}
+
+function resetCategoryVideoCollectionState() {
+  categoryVideoFilterState.requestToken += 1;
+  categoryVideoFilterState.abortController?.abort();
+  categoryVideoFilterState.abortController = null;
+  categoryVideoFilterState.restartRequested = false;
+  categoryVideoFilterState.items = [];
+  categoryVideoFilterState.next = null;
+  categoryVideoFilterState.complete = false;
+  categoryVideoFilterState.reachedLimit = false;
+  categoryVideoFilterState.strategy = "latest";
+  categoryVideoFilterState.candidateTarget = categoryVideoCandidateLimit;
+  categoryVideoFilterState.pendingItems = [];
+  categoryVideoFilterState.oldestCheckpoint = null;
+  categoryVideoFilterState.active = false;
+  setCategoryVideoLoading(false);
+  removeCategoryVideoResultList();
+  setCategoryVideoNativeHidden(false);
+}
+
+function resetCategoryVideoFilterView() {
+  resetCategoryVideoCollectionState();
+  const root = document.querySelector(".cheese-category-video-filter");
+  if (!root) return;
+  root.dataset.period = "all";
+  root.dataset.sort = "latest";
+  root.querySelectorAll("[data-cvf-period]").forEach((button) => {
+    button.setAttribute(
+      "aria-selected",
+      String(button.dataset.cvfPeriod === "all"),
+    );
+  });
+  root.querySelectorAll("[data-cvf-sort]").forEach((button) => {
+    button.setAttribute(
+      "aria-selected",
+      String(button.dataset.cvfSort === "latest"),
+    );
+  });
+  setCategoryVideoStatus("");
+  scheduleScrollTopButtonUpdate();
+}
+
+function getCategoryVideoTemplate(video) {
+  const key = isUploadVideoType(video) ? "upload" : "replay";
+  return (
+    categoryVideoFilterState.nativeItemTemplates.get(key) ||
+    categoryVideoFilterState.nativeItemTemplates.get("default") ||
+    null
+  );
+}
+
+function setCategoryVideoLinkText(link, text, blindText) {
+  if (!link) return;
+  const blindClass = link.querySelector(".blind")?.className || "blind";
+  link.replaceChildren(document.createTextNode(text));
+  if (blindText) {
+    const blind = document.createElement("span");
+    blind.className = blindClass;
+    blind.textContent = blindText;
+    link.append(blind);
+  }
+}
+
+function formatCategoryVideoRelativeTime(video) {
+  const time = getItemTime(video);
+  if (!time) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 60) return "방금 전";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
+  if (seconds < 30 * 86400) return `${Math.floor(seconds / 86400)}일 전`;
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: new Date(time).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(time));
+}
+
+function formatCategoryVideoCardDuration(value) {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remains = seconds % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remains).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(remains).padStart(2, "0")}`;
+}
+
+function getCategoryVideoVerifiedMarkTemplate() {
+  return Array.from(document.querySelectorAll("i")).find((icon) =>
+    Array.from(icon.querySelectorAll(".blind")).some(
+      (blind) => blind.textContent.trim() === "인증 마크",
+    ),
+  );
+}
+
+function patchCategoryVideoNativeCard(template, video) {
+  if (!template) return null;
+  const card = template.cloneNode(true);
+  const videoNo = String(video?.videoNo || video?.videoId || "").trim();
+  if (!videoNo) return null;
+  const videoHref = `/video/${encodeURIComponent(videoNo)}`;
+  const channel = video?.channel || {};
+  const channelId = String(channel?.channelId || "").trim();
+  const channelName = String(channel?.channelName || "채널 정보 없음").trim();
+  const channelHref = channelId ? `/${encodeURIComponent(channelId)}` : "";
+  const videoLinks = Array.from(card.querySelectorAll('a[href^="/video/"]'));
+  const thumbnailLink =
+    videoLinks.find((link) => link.querySelector('img[width="100%"]')) ||
+    videoLinks[0];
+  const titleLink =
+    videoLinks.find(
+      (link) => link !== thumbnailLink && /(?:^|_)title(?:_|$)/i.test(link.className),
+    ) || videoLinks.find((link) => link !== thumbnailLink);
+
+  videoLinks.forEach((link) => {
+    link.href = videoHref;
+    link.removeAttribute("target");
+    link.removeAttribute("rel");
+  });
+  if (thumbnailLink) {
+    thumbnailLink.title = String(video?.videoTitle || "");
+    const image = thumbnailLink.querySelector('img[width="100%"], img');
+    const thumbnailUrl = getThumbnailImageUrl(video);
+    if (image && thumbnailUrl) {
+      image.src = thumbnailUrl;
+      image.removeAttribute("srcset");
+      image.loading = "lazy";
+    }
+    const badge = thumbnailLink.querySelector("em");
+    if (badge) badge.textContent = getVideoTypeLabel(video);
+    const duration = Array.from(thumbnailLink.querySelectorAll("span")).find(
+      (span) => /(?:^|_)time(?:_|$)/i.test(span.className) && !span.classList.contains("blind"),
+    );
+    if (duration) duration.textContent = formatCategoryVideoCardDuration(video?.duration);
+    const blind = Array.from(thumbnailLink.querySelectorAll(".blind")).find((node) =>
+      /동영상/.test(node.textContent),
+    );
+    if (blind) blind.textContent = `${channelName}동영상 엔드로 이동`;
+  }
+  setCategoryVideoLinkText(
+    titleLink,
+    String(video?.videoTitle || "제목 없음").trim(),
+    "동영상 엔드로 이동",
+  );
+
+  const wrapper = thumbnailLink?.nextElementSibling || card;
+  const channelLinks = Array.from(wrapper.querySelectorAll("a[href]")).filter((link) => {
+    const href = link.getAttribute("href") || "";
+    return !href.startsWith("/video/") && !href.includes("?tags=");
+  });
+  channelLinks.forEach((link) => {
+    if (!channelHref) return;
+    link.href = channelHref;
+    link.removeAttribute("target");
+    link.removeAttribute("rel");
+  });
+  const profileImage = channelLinks
+    .map((link) => link.querySelector("img"))
+    .find(Boolean);
+  if (profileImage && channel?.channelImageUrl) {
+    profileImage.src = channel.channelImageUrl;
+    profileImage.removeAttribute("srcset");
+    profileImage.loading = "lazy";
+  }
+  const profileBlind = channelLinks
+    .flatMap((link) => Array.from(link.querySelectorAll(".blind")))
+    .find((node) => /채널로 이동/.test(node.textContent));
+  if (profileBlind) profileBlind.textContent = `${channelName} 채널로 이동`;
+
+  const nameLink = channelLinks.find(
+    (link) => /(?:^|_)channel(?:_|$)/i.test(link.className) || !link.querySelector("img"),
+  );
+  const nameRoot =
+    nameLink?.querySelector('span[class*="_ellipsis_"]') || nameLink;
+  const nameText = nameRoot?.querySelector('span[class*="_text_"]');
+  if (nameText) nameText.textContent = channelName;
+  else if (nameRoot) nameRoot.prepend(document.createTextNode(channelName));
+  nameRoot?.querySelectorAll("i").forEach((icon) => icon.remove());
+  if (channel?.verifiedMark && nameRoot) {
+    const verified = getCategoryVideoVerifiedMarkTemplate();
+    if (verified) nameRoot.append(verified.cloneNode(true));
+  }
+
+  const information = Array.from(wrapper.querySelectorAll('div[class*="_information_"]'));
+  const meta = information.find((node) => !node.querySelector("a"));
+  if (meta) {
+    const item = meta.querySelector("span") || document.createElement("span");
+    if (!item.parentElement) meta.append(item);
+    item.textContent = formatCategoryVideoRelativeTime(video);
+    item.title = formatPublishDateTime(video);
+    Array.from(meta.children).forEach((child) => {
+      if (child !== item) child.remove();
+    });
+  }
+
+  const tagArea = information.find((node) => node.querySelector('a[href*="tags="]'));
+  if (tagArea) {
+    const anchorTemplate = tagArea.querySelector("a")?.cloneNode(true);
+    tagArea.replaceChildren();
+    const tags = Array.isArray(video?.tags) ? video.tags : [];
+    tags.slice(0, 4).forEach((tag) => {
+      if (!anchorTemplate) return;
+      const anchor = anchorTemplate.cloneNode(true);
+      anchor.href = `/videos?tags=${encodeURIComponent(tag)}`;
+      const label = anchor.querySelector("span") || anchor;
+      label.textContent = tag;
+      tagArea.append(anchor);
+    });
+    tagArea.hidden = !tagArea.childElementCount;
+  }
+  card.querySelectorAll('button[aria-haspopup="true"]').forEach((button) =>
+    button.closest('div[class*="_layer_"]')?.remove(),
+  );
+  card.dataset.cvfVideoNo = videoNo;
+  return card;
+}
+
+function ensureCategoryVideoResultList(nativeList) {
+  captureCategoryVideoNativeTemplates(nativeList);
+  let resultList = document.querySelector("[data-cvf-result-list]");
+  if (!resultList) {
+    resultList = categoryVideoFilterState.nativeListTemplate?.cloneNode(false);
+    if (!resultList) return null;
+    resultList.classList.remove(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
+    resultList.classList.add("cheese-category-video-results-native");
+    resultList.dataset.cvfResultList = "";
+  }
+  if (nativeList?.parentElement && resultList.parentElement !== nativeList.parentElement) {
+    nativeList.before(resultList);
+  } else if (!resultList.isConnected && nativeList) {
+    nativeList.before(resultList);
+  }
+  let sentinel = document.querySelector("[data-cvf-result-sentinel]");
+  if (!sentinel) {
+    sentinel = document.createElement("div");
+    sentinel.className = "cheese-category-video-result-sentinel";
+    sentinel.dataset.cvfResultSentinel = "";
+    sentinel.setAttribute("aria-hidden", "true");
+  }
+  if (resultList.parentElement && sentinel.previousElementSibling !== resultList) {
+    resultList.after(sentinel);
+  }
+  let loadMore = document.querySelector("[data-cvf-load-more]");
+  if (!loadMore) {
+    loadMore = document.createElement("div");
+    loadMore.className = "cheese-category-video-load-more";
+    loadMore.dataset.cvfLoadMore = "";
+    loadMore.hidden = true;
+    loadMore.innerHTML = `
+      <button type="button" class="cheese-category-video-load-more-button" data-cvf-load-more-button>
+        동영상 ${categoryVideoCandidateLimit.toLocaleString("ko-KR")}개 더 확인
+      </button>`;
+    loadMore
+      .querySelector("[data-cvf-load-more-button]")
+      ?.addEventListener("click", () => void loadMoreCategoryVideos());
+  }
+  if (sentinel.parentElement && loadMore.previousElementSibling !== sentinel) {
+    sentinel.after(loadMore);
+  }
+  categoryVideoFilterState.resultList = resultList;
+  categoryVideoFilterState.resultSentinel = sentinel;
+  categoryVideoFilterState.loadMoreElement = loadMore;
+  updateCategoryVideoLoadMoreButton();
+  return resultList;
+}
+
+function updateCategoryVideoLoadMoreButton() {
+  const wrapper =
+    categoryVideoFilterState.loadMoreElement ||
+    document.querySelector("[data-cvf-load-more]");
+  if (!wrapper) return;
+  categoryVideoFilterState.loadMoreElement = wrapper;
+  const button = wrapper.querySelector("[data-cvf-load-more-button]");
+  const renderedAll =
+    categoryVideoFilterState.renderedCount >=
+    categoryVideoFilterState.filteredItems.length;
+  const visible =
+    categoryVideoFilterState.active &&
+    categoryVideoFilterState.reachedLimit &&
+    !categoryVideoFilterState.loading &&
+    renderedAll;
+  wrapper.hidden = !visible;
+  if (!button) return;
+  button.disabled = categoryVideoFilterState.loading;
+  button.textContent = categoryVideoFilterState.loading
+    ? "추가 동영상 확인 중..."
+    : `동영상 ${categoryVideoCandidateLimit.toLocaleString("ko-KR")}개 더 확인`;
+}
+
+function appendCategoryVideoResultBatch(targetCount = 0) {
+  const list = categoryVideoFilterState.resultList;
+  if (!list) return;
+  const start = categoryVideoFilterState.renderedCount;
+  const requestedEnd =
+    Number.isFinite(targetCount) && targetCount > start
+      ? targetCount
+      : start +
+        (start
+          ? CATEGORY_VIDEO_FILTER_RENDER_STEP
+          : CATEGORY_VIDEO_FILTER_RENDER_INITIAL);
+  const end = Math.min(
+    categoryVideoFilterState.filteredItems.length,
+    requestedEnd,
+  );
+  if (end <= start) {
+    updateCategoryVideoLoadMoreButton();
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (let index = start; index < end; index += 1) {
+    const video = categoryVideoFilterState.filteredItems[index];
+    const card = patchCategoryVideoNativeCard(getCategoryVideoTemplate(video), video);
+    if (card) fragment.append(card);
+  }
+  list.append(fragment);
+  categoryVideoFilterState.renderedCount = end;
+  categoryVideoFilterState.resultSentinel?.toggleAttribute(
+    "hidden",
+    end >= categoryVideoFilterState.filteredItems.length,
+  );
+  updateCategoryVideoLoadMoreButton();
+}
+
+function observeCategoryVideoResultSentinel() {
+  disconnectCategoryVideoResultObserver();
+  const sentinel = categoryVideoFilterState.resultSentinel;
+  if (!sentinel || sentinel.hidden) return;
+  categoryVideoFilterState.resultObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      appendCategoryVideoResultBatch();
+      if (
+        categoryVideoFilterState.renderedCount >=
+        categoryVideoFilterState.filteredItems.length
+      ) {
+        disconnectCategoryVideoResultObserver();
+      }
+    },
+    { rootMargin: "600px 0px" },
+  );
+  categoryVideoFilterState.resultObserver.observe(sentinel);
+}
+
+function setCategoryVideoNativeHidden(hidden) {
+  const { section } = getCategoryVideoElements();
+  document
+    .querySelectorAll(`.${CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS}`)
+    .forEach((element) => {
+      if (!hidden || !section?.contains(element)) {
+        element.classList.remove(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
+      }
+    });
+  if (!hidden || !section) return;
+  section.querySelectorAll("ul").forEach((list) => {
+    if (
+      !list.matches("[data-cvf-result-list]") &&
+      list.querySelector('a[href^="/video/"]')
+    ) {
+      list.classList.add(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
+    }
+  });
+}
+
+function renderCategoryVideoLoading() {
+  setCategoryVideoStatus("카테고리 동영상을 확인하고 있습니다.");
+}
+
+function renderCategoryVideoResults({ preserveRenderedCount = false } = {}) {
+  const root = document.querySelector(".cheese-category-video-filter");
+  const { list: nativeList } = getCategoryVideoElements();
+  if (!root || !nativeList) return;
+  captureCategoryVideoNativeTemplates(nativeList);
+  const list = ensureCategoryVideoResultList(nativeList);
+  if (!list || !categoryVideoFilterState.nativeItemTemplates.size) return;
+  categoryVideoFilterState.active = true;
+  const filters = getCategoryVideoFilters(root);
+  const filtered = filterCategoryVideos(filters);
+  const previousRenderedCount = preserveRenderedCount
+    ? categoryVideoFilterState.renderedCount
+    : 0;
+  categoryVideoFilterState.filteredItems = filtered;
+  categoryVideoFilterState.renderedCount = 0;
+  disconnectCategoryVideoResultObserver();
+  list.replaceChildren();
+  list.hidden = !filtered.length;
+  setCategoryVideoNativeHidden(true);
+  if (filtered.length) {
+    appendCategoryVideoResultBatch(
+      Math.max(CATEGORY_VIDEO_FILTER_RENDER_INITIAL, previousRenderedCount),
+    );
+    observeCategoryVideoResultSentinel();
+    setCategoryVideoStatus(
+      `검색 결과 ${filtered.length.toLocaleString("ko-KR")}개 · 확인 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개`,
+      categoryVideoFilterState.loading ? "" : "success",
+    );
+  } else {
+    categoryVideoFilterState.resultSentinel?.setAttribute("hidden", "");
+    setCategoryVideoStatus("선택한 조건에 맞는 동영상이 없습니다.");
+  }
+  updateCategoryVideoLoadMoreButton();
+  scheduleScrollTopButtonUpdate();
+}
+
+function getCategoryVideoCacheKey(context) {
+  return `${CATEGORY_VIDEO_FILTER_CACHE_PREFIX}${context.key}`;
+}
+
+async function clearCategoryVideoCache(context) {
+  const key = getCategoryVideoCacheKey(context);
+  try {
+    const indexData = await chrome.storage.local.get(
+      CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY,
+    );
+    const previous = Array.isArray(
+      indexData?.[CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY],
+    )
+      ? indexData[CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY]
+      : [];
+    const index = previous.filter((entry) => entry?.key !== key);
+    await chrome.storage.local.remove(key);
+    await chrome.storage.local.set({
+      [CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY]: index,
+    });
+  } catch {
+    try {
+      await chrome.storage.local.remove(key);
+    } catch {}
+  }
+}
+
+async function refreshCategoryVideoFilter() {
+  const context = getCategoryVideoContext();
+  const root = document.querySelector(".cheese-category-video-filter");
+  if (!context || !root) return;
+  resetCategoryVideoCollectionState();
+  const refreshToken = categoryVideoFilterState.requestToken;
+  const refreshButton = root.querySelector('[data-cvf-action="refresh"]');
+  root.classList.add("is-refreshing");
+  if (refreshButton) refreshButton.disabled = true;
+  setCategoryVideoStatus("저장된 목록을 지우고 있습니다.");
+  await clearCategoryVideoCache(context);
+  root.classList.remove("is-refreshing");
+  if (refreshButton) refreshButton.disabled = false;
+  if (
+    categoryVideoFilterState.requestToken !== refreshToken ||
+    getCategoryVideoContext()?.key !== context.key ||
+    !document.contains(root)
+  ) {
+    return;
+  }
+  void startCategoryVideoSearch();
+}
+
+function normalizeCategoryVideoCursor(cursor) {
+  if (!cursor || typeof cursor !== "object") return null;
+  const normalized = {};
+  if (cursor.publishDateAt != null && cursor.publishDateAt !== "") {
+    normalized.publishDateAt = cursor.publishDateAt;
+  }
+  if (cursor.readCount != null && cursor.readCount !== "") {
+    normalized.readCount = cursor.readCount;
+  }
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function normalizeCategoryVideoOldestCheckpoint(checkpoint) {
+  if (!checkpoint || typeof checkpoint !== "object") return null;
+  const rangeStart = Number(checkpoint.rangeStart);
+  const rangeEnd = Number(checkpoint.rangeEnd);
+  const windowStart = Number(checkpoint.windowStart);
+  const windowEnd = Number(checkpoint.windowEnd);
+  if (
+    !Number.isFinite(rangeStart) ||
+    !Number.isFinite(rangeEnd) ||
+    !Number.isFinite(windowStart) ||
+    !Number.isFinite(windowEnd) ||
+    rangeStart >= rangeEnd ||
+    windowStart < rangeStart ||
+    windowEnd > rangeEnd ||
+    windowStart >= windowEnd
+  ) {
+    return null;
+  }
+  return {
+    rangeStart,
+    rangeEnd,
+    windowStart,
+    windowEnd,
+    cursor: normalizeCategoryVideoCursor(checkpoint.cursor),
+    pendingItems: Array.isArray(checkpoint.pendingItems)
+      ? checkpoint.pendingItems.slice(0, CATEGORY_VIDEO_FILTER_PAGE_SIZE)
+      : [],
+    finishWindowAfterPending: checkpoint.finishWindowAfterPending === true,
+  };
+}
+
+async function readCategoryVideoCache(context, strategy) {
+  const key = getCategoryVideoCacheKey(context);
+  try {
+    const data = await chrome.storage.local.get(key);
+    const cache = data?.[key];
+    if (
+      !cache ||
+      !Array.isArray(cache.items) ||
+      (cache.strategy || "latest") !== strategy ||
+      normalizeCategoryVideoCandidateLimit(
+        cache.candidateLimit ?? CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT,
+      ) !== categoryVideoCandidateLimit ||
+      (cache.reachedLimit === true &&
+        cache.continuationVersion !==
+          CATEGORY_VIDEO_FILTER_CONTINUATION_VERSION) ||
+      Date.now() - Number(cache.savedAt || 0) >=
+        CATEGORY_VIDEO_FILTER_CACHE_TTL_MS
+    ) {
+      if (cache) void chrome.storage.local.remove(key);
+      return null;
+    }
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCategoryVideoCache(
+  context,
+  strategy = categoryVideoFilterState.strategy,
+) {
+  if (!categoryVideoFilterState.items.length) return;
+  const key = getCategoryVideoCacheKey(context);
+  const savedAt = Date.now();
+  const payload = {
+    savedAt,
+    strategy,
+    continuationVersion: CATEGORY_VIDEO_FILTER_CONTINUATION_VERSION,
+    candidateLimit: categoryVideoCandidateLimit,
+    candidateTarget: categoryVideoFilterState.candidateTarget,
+    items: categoryVideoFilterState.items,
+    next: categoryVideoFilterState.next,
+    pendingItems: categoryVideoFilterState.pendingItems,
+    oldestCheckpoint: categoryVideoFilterState.oldestCheckpoint,
+    complete: categoryVideoFilterState.complete,
+    reachedLimit: categoryVideoFilterState.reachedLimit,
+  };
+  try {
+    const indexData = await chrome.storage.local.get(
+      CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY,
+    );
+    const previous = Array.isArray(
+      indexData?.[CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY],
+    )
+      ? indexData[CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY]
+      : [];
+    const index = [
+      { key, savedAt },
+      ...previous.filter((entry) => entry?.key && entry.key !== key),
+    ].slice(0, CATEGORY_VIDEO_FILTER_CACHE_LIMIT);
+    const keep = new Set(index.map((entry) => entry.key));
+    const removeKeys = previous
+      .map((entry) => entry?.key)
+      .filter((oldKey) => oldKey && !keep.has(oldKey));
+    await chrome.storage.local.set({
+      [key]: payload,
+      [CATEGORY_VIDEO_FILTER_CACHE_INDEX_KEY]: index,
+    });
+    if (removeKeys.length) await chrome.storage.local.remove(removeKeys);
+  } catch {
+    // 캐시 저장 실패는 현재 검색 결과에 영향을 주지 않는다.
+  }
+}
+
+async function fetchCategoryVideoPage(context, next, signal) {
+  const url = new URL(
+    `https://api.chzzk.naver.com/service/v2/categories/${encodeURIComponent(context.categoryType)}/${encodeURIComponent(context.categoryId)}/videos`,
+  );
+  url.searchParams.set("size", String(CATEGORY_VIDEO_FILTER_PAGE_SIZE));
+  if (next?.publishDateAt != null) {
+    url.searchParams.set("publishDateAt", String(next.publishDateAt));
+  }
+  if (next?.readCount != null) {
+    url.searchParams.set("readCount", String(next.readCount));
+  }
+  const response = await fetch(url, { credentials: "include", signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  const content = payload?.content || payload;
+  return {
+    items: Array.isArray(content?.data) ? content.data : [],
+    next: content?.page?.next || null,
+  };
+}
+
+function getCategoryVideoId(video) {
+  return String(video?.videoNo || video?.videoId || "").trim();
+}
+
+function appendCategoryVideoCandidates(
+  candidates,
+  seen,
+  target,
+  predicate = null,
+) {
+  let index = 0;
+  while (
+    index < candidates.length &&
+    categoryVideoFilterState.items.length < target
+  ) {
+    const video = candidates[index];
+    index += 1;
+    if (predicate && !predicate(video)) continue;
+    const id = getCategoryVideoId(video);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    categoryVideoFilterState.items.push(video);
+  }
+  return candidates.slice(index);
+}
+
+function maybeRenderCategoryVideoCollectionProgress(enabled, previousCount) {
+  if (!enabled || categoryVideoFilterState.items.length === previousCount) return;
+  if (
+    previousCount === 0 ||
+    categoryVideoFilterState.items.length % 200 <
+      CATEGORY_VIDEO_FILTER_PAGE_SIZE
+  ) {
+    renderCategoryVideoResults();
+  }
+}
+
+async function collectCategoryVideoLatest(
+  context,
+  filters,
+  controller,
+  token,
+  target,
+  renderProgress,
+) {
+  const cutoff = getCategoryVideoCutoff(filters.period);
+  const seen = new Set(
+    categoryVideoFilterState.items.map(getCategoryVideoId).filter(Boolean),
+  );
+  let periodCovered = false;
+  const visitedCursors = new Set();
+
+  while (
+    categoryVideoFilterState.items.length < target &&
+    (!categoryVideoFilterState.complete ||
+      categoryVideoFilterState.pendingItems.length > 0) &&
+    !periodCovered
+  ) {
+    if (categoryVideoFilterState.pendingItems.length) {
+      const previousCount = categoryVideoFilterState.items.length;
+      const pending = categoryVideoFilterState.pendingItems;
+      let index = 0;
+      while (
+        index < pending.length &&
+        categoryVideoFilterState.items.length < target
+      ) {
+        const video = pending[index];
+        const time = getItemTime(video);
+        const id = getCategoryVideoId(video);
+        if (cutoff && time && time < cutoff) {
+          if (id && !seen.has(id)) {
+            seen.add(id);
+            categoryVideoFilterState.items.push(video);
+          }
+          index += 1;
+          periodCovered = true;
+          break;
+        }
+        index += 1;
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        categoryVideoFilterState.items.push(video);
+      }
+      categoryVideoFilterState.pendingItems = pending.slice(index);
+      setCategoryVideoStatus(
+        `동영상 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개를 확인하고 있습니다.`,
+      );
+      maybeRenderCategoryVideoCollectionProgress(
+        renderProgress,
+        previousCount,
+      );
+      if (
+        categoryVideoFilterState.items.length >= target ||
+        periodCovered
+      ) {
+        break;
+      }
+    }
+
+    const cursorKey = JSON.stringify(categoryVideoFilterState.next || null);
+    if (visitedCursors.has(cursorKey)) {
+      categoryVideoFilterState.complete = true;
+      break;
+    }
+    visitedCursors.add(cursorKey);
+    const page = await fetchCategoryVideoPage(
+      context,
+      categoryVideoFilterState.next,
+      controller.signal,
+    );
+    if (token !== categoryVideoFilterState.requestToken) return;
+    categoryVideoFilterState.next = normalizeCategoryVideoCursor(page.next);
+    categoryVideoFilterState.complete = !categoryVideoFilterState.next;
+    categoryVideoFilterState.pendingItems = page.items;
+    if (!page.items.length && !categoryVideoFilterState.next) break;
+  }
+
+  categoryVideoFilterState.reachedLimit =
+    !periodCovered &&
+    categoryVideoFilterState.items.length >= target &&
+    (categoryVideoFilterState.pendingItems.length > 0 ||
+      !categoryVideoFilterState.complete);
+}
+
+function createCategoryVideoOldestCheckpoint(filters) {
+  const rangeStart = getCategoryVideoCutoff(filters.period);
+  const rangeEnd = Date.now();
+  if (!rangeStart || rangeStart >= rangeEnd) return null;
+  const windowEnd = Math.min(
+    rangeEnd,
+    rangeStart + 24 * 60 * 60 * 1000,
+  );
+  return {
+    rangeStart,
+    rangeEnd,
+    windowStart: rangeStart,
+    windowEnd,
+    cursor: { publishDateAt: windowEnd, readCount: 0 },
+    pendingItems: [],
+    finishWindowAfterPending: false,
+  };
+}
+
+function advanceCategoryVideoOldestWindow(checkpoint) {
+  const nextStart = checkpoint.windowEnd;
+  if (nextStart >= checkpoint.rangeEnd) return false;
+  checkpoint.windowStart = nextStart;
+  checkpoint.windowEnd = Math.min(
+    checkpoint.rangeEnd,
+    nextStart + 24 * 60 * 60 * 1000,
+  );
+  checkpoint.cursor = {
+    publishDateAt: checkpoint.windowEnd,
+    readCount: 0,
+  };
+  checkpoint.pendingItems = [];
+  checkpoint.finishWindowAfterPending = false;
+  return true;
+}
+
+async function collectCategoryVideoOldestRange(
+  context,
+  filters,
+  controller,
+  token,
+  target,
+  renderProgress,
+) {
+  let checkpoint =
+    normalizeCategoryVideoOldestCheckpoint(
+      categoryVideoFilterState.oldestCheckpoint,
+    ) || createCategoryVideoOldestCheckpoint(filters);
+  if (!checkpoint) {
+    categoryVideoFilterState.complete = true;
+    categoryVideoFilterState.reachedLimit = false;
+    return;
+  }
+  const seen = new Set(
+    categoryVideoFilterState.items.map(getCategoryVideoId).filter(Boolean),
+  );
+  const visitedCursors = new Set();
+
+  while (checkpoint && categoryVideoFilterState.items.length < target) {
+    if (checkpoint.pendingItems.length) {
+      const previousCount = categoryVideoFilterState.items.length;
+      checkpoint.pendingItems = appendCategoryVideoCandidates(
+        checkpoint.pendingItems,
+        seen,
+        target,
+        (video) => {
+          const time = getItemTime(video);
+          return time >= checkpoint.windowStart && time < checkpoint.windowEnd;
+        },
+      );
+      setCategoryVideoStatus(
+        `기간 시작일부터 동영상 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개를 확인하고 있습니다.`,
+      );
+      maybeRenderCategoryVideoCollectionProgress(
+        renderProgress,
+        previousCount,
+      );
+      if (categoryVideoFilterState.items.length >= target) break;
+    }
+
+    if (checkpoint.finishWindowAfterPending) {
+      if (!advanceCategoryVideoOldestWindow(checkpoint)) {
+        checkpoint = null;
+        break;
+      }
+      continue;
+    }
+
+    const cursorKey = `${checkpoint.windowStart}:${JSON.stringify(checkpoint.cursor || null)}`;
+    if (!checkpoint.cursor || visitedCursors.has(cursorKey)) {
+      checkpoint.finishWindowAfterPending = true;
+      continue;
+    }
+    visitedCursors.add(cursorKey);
+    const page = await fetchCategoryVideoPage(
+      context,
+      checkpoint.cursor,
+      controller.signal,
+    );
+    if (token !== categoryVideoFilterState.requestToken) return;
+    const pageOldest = getCategoryVideoOldestTime(page.items);
+    checkpoint.cursor = normalizeCategoryVideoCursor(page.next);
+    checkpoint.pendingItems = page.items;
+    checkpoint.finishWindowAfterPending =
+      !checkpoint.cursor ||
+      !page.items.length ||
+      Boolean(pageOldest && pageOldest < checkpoint.windowStart);
+  }
+
+  categoryVideoFilterState.next = null;
+  categoryVideoFilterState.pendingItems = [];
+  categoryVideoFilterState.oldestCheckpoint = checkpoint;
+  categoryVideoFilterState.complete = !checkpoint;
+  categoryVideoFilterState.reachedLimit =
+    categoryVideoFilterState.items.length >= target && Boolean(checkpoint);
+}
+
+function loadMoreCategoryVideos() {
+  if (
+    categoryVideoFilterState.loading ||
+    !categoryVideoFilterState.reachedLimit
+  ) {
+    return;
+  }
+  const context = getCategoryVideoContext();
+  const root = document.querySelector(".cheese-category-video-filter");
+  if (
+    !context ||
+    !root ||
+    context.key !== categoryVideoFilterState.contextKey ||
+    getCategoryVideoCollectionStrategy(getCategoryVideoFilters(root)) !==
+      categoryVideoFilterState.strategy
+  ) {
+    return;
+  }
+  categoryVideoFilterState.candidateTarget =
+    Math.max(
+      categoryVideoFilterState.candidateTarget,
+      categoryVideoFilterState.items.length,
+    ) + categoryVideoCandidateLimit;
+  categoryVideoFilterState.reachedLimit = false;
+  updateCategoryVideoLoadMoreButton();
+  void startCategoryVideoSearch({ continueFromCurrent: true });
+}
+
+async function startCategoryVideoSearch({ continueFromCurrent = false } = {}) {
+  if (!categoryVideoFilterEnabled || !IS_TOP_FRAME) return;
+  if (categoryVideoFilterState.loading) {
+    categoryVideoFilterState.restartRequested = true;
+    categoryVideoFilterState.abortController?.abort();
+    return;
+  }
+  const context = getCategoryVideoContext();
+  const root = document.querySelector(".cheese-category-video-filter");
+  if (!context || !root) return;
+
+  const filters = getCategoryVideoFilters(root);
+  const strategy = getCategoryVideoCollectionStrategy(filters);
+  if (
+    continueFromCurrent &&
+    (strategy !== categoryVideoFilterState.strategy ||
+      context.key !== categoryVideoFilterState.contextKey)
+  ) {
+    continueFromCurrent = false;
+  }
+  const token = ++categoryVideoFilterState.requestToken;
+  const controller = new AbortController();
+  categoryVideoFilterState.restartRequested = false;
+  categoryVideoFilterState.abortController = controller;
+  categoryVideoFilterState.strategy = strategy;
+  setCategoryVideoLoading(true);
+  setCategoryVideoStatus(
+    continueFromCurrent
+      ? `동영상 ${categoryVideoCandidateLimit.toLocaleString("ko-KR")}개를 더 확인하고 있습니다.`
+      : "저장된 목록을 확인하고 있습니다.",
+  );
+
+  try {
+    if (!continueFromCurrent) {
+      const cache = await readCategoryVideoCache(context, strategy);
+      if (token !== categoryVideoFilterState.requestToken) return;
+      categoryVideoFilterState.items = cache?.items || [];
+      categoryVideoFilterState.next = normalizeCategoryVideoCursor(cache?.next);
+      categoryVideoFilterState.complete = cache?.complete === true;
+      categoryVideoFilterState.reachedLimit = cache?.reachedLimit === true;
+      categoryVideoFilterState.strategy = strategy;
+      const cachedCandidateTarget = Number(cache?.candidateTarget);
+      categoryVideoFilterState.candidateTarget = Math.max(
+        categoryVideoCandidateLimit,
+        categoryVideoFilterState.items.length,
+        Number.isFinite(cachedCandidateTarget) && cachedCandidateTarget > 0
+          ? Math.min(
+              Math.floor(cachedCandidateTarget),
+              categoryVideoFilterState.items.length +
+                categoryVideoCandidateLimit,
+            )
+          : 0,
+      );
+      categoryVideoFilterState.pendingItems = Array.isArray(cache?.pendingItems)
+        ? cache.pendingItems.slice(0, CATEGORY_VIDEO_FILTER_PAGE_SIZE)
+        : [];
+      categoryVideoFilterState.oldestCheckpoint =
+        normalizeCategoryVideoOldestCheckpoint(cache?.oldestCheckpoint);
+      if (strategy === "latest") {
+        categoryVideoFilterState.oldestCheckpoint = null;
+      } else {
+        categoryVideoFilterState.next = null;
+        categoryVideoFilterState.pendingItems = [];
+      }
+    }
+
+    if (categoryVideoFilterState.items.length) {
+      renderCategoryVideoResults({
+        preserveRenderedCount: continueFromCurrent,
+      });
+    } else {
+      renderCategoryVideoLoading();
+    }
+
+    if (
+      continueFromCurrent ||
+      !categoryVideoCacheCoversFilters(filters)
+    ) {
+      if (strategy !== "latest") {
+        setCategoryVideoStatus("선택한 기간의 시작 지점을 확인하고 있습니다.");
+        await collectCategoryVideoOldestRange(
+          context,
+          filters,
+          controller,
+          token,
+          categoryVideoFilterState.candidateTarget,
+          !continueFromCurrent,
+        );
+      } else {
+        await collectCategoryVideoLatest(
+          context,
+          filters,
+          controller,
+          token,
+          categoryVideoFilterState.candidateTarget,
+          !continueFromCurrent,
+        );
+      }
+    }
+
+    await writeCategoryVideoCache(context, strategy);
+    if (token !== categoryVideoFilterState.requestToken) return;
+    renderCategoryVideoResults({
+      preserveRenderedCount: continueFromCurrent,
+    });
+    const suffix = categoryVideoFilterState.reachedLimit
+      ? strategy === "latest"
+        ? ` 최신 동영상부터 누적 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개까지 확인했습니다.`
+        : ` 선택 기간의 시작점부터 누적 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개까지 확인했습니다.`
+      : strategy !== "latest"
+        ? " 선택한 기간의 동영상을 확인했습니다."
+      : categoryVideoFilterState.complete
+        ? " 카테고리의 전체 동영상을 확인했습니다."
+        : " 선택한 기간에 필요한 동영상을 확인했습니다.";
+    setCategoryVideoStatus(`필터 적용 완료.${suffix}`, "success");
+  } catch (error) {
+    if (token !== categoryVideoFilterState.requestToken) return;
+    if (error?.name === "AbortError") {
+      if (categoryVideoFilterState.items.length) {
+        await writeCategoryVideoCache(context, strategy);
+        renderCategoryVideoResults({
+          preserveRenderedCount: continueFromCurrent,
+        });
+      }
+      if (!categoryVideoFilterState.restartRequested) {
+        setCategoryVideoStatus("검색을 중지했습니다.");
+      }
+    } else {
+      if (categoryVideoFilterState.items.length) {
+        renderCategoryVideoResults({
+          preserveRenderedCount: continueFromCurrent,
+        });
+        setCategoryVideoStatus(
+          `추가 동영상을 불러오지 못해 저장된 ${categoryVideoFilterState.items.length.toLocaleString("ko-KR")}개에서 검색했습니다.`,
+          "error",
+        );
+      } else {
+        setCategoryVideoNativeHidden(false);
+        removeCategoryVideoResultList();
+        categoryVideoFilterState.active = false;
+        setCategoryVideoStatus(
+          `동영상 목록을 불러오지 못했습니다. ${String(error?.message || error)}`,
+          "error",
+        );
+      }
+    }
+  } finally {
+    if (token === categoryVideoFilterState.requestToken) {
+      categoryVideoFilterState.abortController = null;
+      setCategoryVideoLoading(false);
+      if (categoryVideoFilterState.restartRequested) {
+        categoryVideoFilterState.restartRequested = false;
+        queueMicrotask(() => void startCategoryVideoSearch());
+      }
+    }
+  }
+}
+
+function cleanupCategoryVideoFilter() {
+  if (
+    !categoryVideoFilterState.contextKey &&
+    !categoryVideoFilterState.loading &&
+    !document.querySelector(".cheese-category-video-filter") &&
+    !document.querySelector("[data-cvf-result-list]") &&
+    !document.querySelector("[data-cvf-result-sentinel]") &&
+    !document.querySelector("[data-cvf-load-more]") &&
+    !document.querySelector(`.${CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS}`)
+  ) {
+    return;
+  }
+  categoryVideoFilterState.requestToken += 1;
+  categoryVideoFilterState.abortController?.abort();
+  categoryVideoFilterState.abortController = null;
+  categoryVideoFilterState.restartRequested = false;
+  categoryVideoFilterState.contextKey = "";
+  categoryVideoFilterState.context = null;
+  categoryVideoFilterState.items = [];
+  categoryVideoFilterState.next = null;
+  categoryVideoFilterState.complete = false;
+  categoryVideoFilterState.reachedLimit = false;
+  categoryVideoFilterState.strategy = "latest";
+  categoryVideoFilterState.candidateTarget = categoryVideoCandidateLimit;
+  categoryVideoFilterState.pendingItems = [];
+  categoryVideoFilterState.oldestCheckpoint = null;
+  categoryVideoFilterState.active = false;
+  categoryVideoFilterState.loading = false;
+  categoryVideoFilterState.nativeListTemplate = null;
+  categoryVideoFilterState.nativeItemTemplates.clear();
+  removeCategoryVideoResultList();
+  document.querySelector(".cheese-category-video-filter")?.remove();
+  setCategoryVideoNativeHidden(false);
+}
+
+function handleCategoryVideoTabClickCapture(event) {
+  const button = event.target.closest?.('button[role="tab"]');
+  if (!button?.matches("#LIVE, #CLIP")) return;
+  const tabList = button.closest('[role="tablist"]');
+  if (
+    !tabList?.querySelector(":scope > button#VIDEO") ||
+    !tabList.querySelector(":scope > button#LIVE") ||
+    !tabList.querySelector(":scope > button#CLIP")
+  ) {
+    return;
+  }
+  cleanupCategoryVideoFilter();
+}
+
+document.addEventListener("click", handleCategoryVideoTabClickCapture, true);
+
+function ensureCategoryVideoFilter() {
+  harvestCategoryVideoNativeFilterStyle();
+  if (!IS_TOP_FRAME || !categoryVideoFilterEnabled) {
+    cleanupCategoryVideoFilter();
+    return;
+  }
+  const context = getCategoryVideoContext();
+  if (!context) {
+    cleanupCategoryVideoFilter();
+    return;
+  }
+  const { activeTab, section, anchor } = getCategoryVideoElements();
+  if (!activeTab || !section || !anchor) return;
+
+  if (categoryVideoFilterState.contextKey !== context.key) {
+    cleanupCategoryVideoFilter();
+    categoryVideoFilterState.contextKey = context.key;
+    categoryVideoFilterState.context = context;
+  }
+  captureCategoryVideoNativeTemplates(getCategoryVideoElements().list);
+  let root = document.querySelector(".cheese-category-video-filter");
+  let created = false;
+  if (!root) {
+    root = createCategoryVideoFilterRoot();
+    anchor.after(root);
+    created = true;
+  } else if (!section.contains(root)) {
+    anchor.after(root);
+  }
+  applyCategoryVideoFontFamily(root, activeTab);
+  if (categoryVideoFilterState.active) {
+    setCategoryVideoNativeHidden(true);
+    if (
+      (created || !document.querySelector("[data-cvf-result-list]")) &&
+      categoryVideoFilterState.items.length
+    ) {
+      renderCategoryVideoResults();
+    }
+  }
 }
 
 // ── 통합검색(/search) 동영상 섹션 재랭킹 ──────────────────────────────────────
@@ -26728,6 +28537,15 @@ async function loadChatFoldPersist() {
   applyChatFoldPersist();
 }
 
+async function loadChatPopupPip() {
+  if (!chrome.storage?.local) return;
+  try {
+    const data = await getBootData([CHAT_POPUP_PIP_KEY]);
+    chatPopupPipOn = data?.[CHAT_POPUP_PIP_KEY] === true; // 기본 OFF
+  } catch {}
+  ensureChatPopupPipButton();
+}
+
 async function loadCardDateTooltip() {
   if (!chrome.storage?.local) return;
   try {
@@ -27358,18 +29176,36 @@ function ensureCommentBlockObserver() {
 // 라이브/다시보기 채팅에서 닉네임 클릭 시 뜨는 프로필 팝오버([role="alertdialog"])의
 // 버튼 리스트(_area_ > _list_ > button._item_) 끝에 우리 '사용자 차단' 항목을 추가한다.
 // 대상 유저는 직전 profile-card 응답(lastChatProfile, MAIN world 전달)로 식별한다.
+function isChatProfilePopover(dialog) {
+  if (
+    !(dialog instanceof HTMLElement) ||
+    !dialog.matches('[role="alertdialog"][aria-modal="true"]')
+  ) {
+    return false;
+  }
+  // 후원하기의 채팅·영상·미션 탭도 information/list/button 구조를 사용한다.
+  // 입력 ID가 하나라도 있으면 사용자 프로필 팝오버가 아니다.
+  if (dialog.querySelector("#donation-money, #video-url, #mission-detail")) {
+    return false;
+  }
+  // 이모티콘 다이얼로그에도 _list_와 button이 있으므로 목록만으로 판정하면 안 된다.
+  // 프로필 고유 정보 영역과 메뉴 버튼 목록을 모두 가진 경우에만 대상으로 인정한다.
+  if (!dialog.querySelector('[class*="_information_"]')) return false;
+  return Boolean(findChatProfileMenuList(dialog));
+}
+
 function findChatProfilePopover() {
-  // 프로필 팝오버: alertdialog + 프로필 정보 버튼(_information_)이 있는 것(이모티콘 등 배제).
-  const dialogs = document.querySelectorAll(
-    '[role="alertdialog"][aria-modal="true"]',
-  );
+  const dialogs = [
+    ...document.querySelectorAll(
+      '[role="alertdialog"][aria-modal="true"]',
+    ),
+  ];
   // ⚠ 해시를 고정으로 박으면 치지직 배포마다 깨진다. 실제로 _9iogl_ → _ns3zq_ 로
   // 바뀌면서, 새 빌드를 먼저 받은 사용자만 차단 버튼이 사라졌다(제보). 그래서
-  // '해시가 무엇이든' 역할 클래스 이름만 보고 찾는다(_information_ / _list_).
-  for (const d of dialogs) {
-    if (d.querySelector('[class*="_information_"], [class*="_list_"]')) {
-      return d;
-    }
+  // '해시가 무엇이든' 역할 클래스 이름만 보고 찾는다. 마지막에 열린 다이얼로그부터
+  // 확인해 이전 프로필 팝업이 DOM에 잠시 남아 있어도 현재 팝업을 우선한다.
+  for (let index = dialogs.length - 1; index >= 0; index -= 1) {
+    if (isChatProfilePopover(dialogs[index])) return dialogs[index];
   }
   return null;
 }
@@ -27390,14 +29226,20 @@ const CHAT_BLOCK_REINJECT_WINDOW_MS = 1500;
 // 아래는 모두 해시를 뺀 '역할 이름'만으로 찾는다.
 function findChatProfileMenuList(pop) {
   return (
-    // 버튼이 든 목록형 컨테이너(메뉴). 해시가 무엇이든 _list_ 는 유지된다.
+    // 프로필 메뉴 버튼은 해시와 무관하게 역할명 _item_ 을 사용한다. 후원 영상의
+    // _video_button_ 및 이모티콘 버튼은 대상에서 제외한다.
     [...pop.querySelectorAll('[class*="_list_"], ul')].find(
-      (el) => el.querySelectorAll("button").length >= 1,
+      (el) => el.querySelector('button[class*="_item_"]'),
     ) || null
   );
 }
 
 function ensureChatBlockButton() {
+  // 이전 오인식으로 이모티콘 등 다른 다이얼로그에 들어간 버튼은 발견 즉시 정리한다.
+  document.querySelectorAll(`.${CHAT_BLOCK_ITEM_CLASS}`).forEach((button) => {
+    const dialog = button.closest('[role="alertdialog"][aria-modal="true"]');
+    if (!isChatProfilePopover(dialog)) button.remove();
+  });
   const pop = findChatProfilePopover();
   if (!pop) return;
   const list = findChatProfileMenuList(pop);
@@ -28005,6 +29847,8 @@ const FEATURE_FLAGS_KEYS = [
   AUTO_RELOAD_ON_ERROR_KEY,
   AUTO_RELOAD_ON_RELIVE_KEY,
   SEARCH_RESET_ON_RETURN_KEY,
+  CATEGORY_VIDEO_FILTER_KEY,
+  CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY,
   SEARCH_RERANK_KEY,
   SEARCH_RERANK_POOL_KEY,
   SEARCH_RERANK_MORE_STEP_KEY,
@@ -28063,6 +29907,7 @@ const BOOT_PREFETCH_KEYS = [
     FOLLOW_CHANNEL_TOOLTIP_KEY,
     FOLLOW_CLEANUP_KEY,
     CHAT_FOLD_PERSIST_KEY,
+    CHAT_POPUP_PIP_KEY,
     COMMENT_MARKERS_ENABLED_KEY,
     COMMENT_FEATURE_ENABLED_KEY,
     COMMENT_TS_CLICK_ACTION_KEY,
@@ -28131,6 +29976,11 @@ async function loadFeatureFlags() {
     autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
     autoReloadOnRelive = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true; // 기본 OFF
     searchResetOnReturn = data?.[SEARCH_RESET_ON_RETURN_KEY] === true; // 기본 OFF
+    categoryVideoFilterEnabled =
+      data?.[CATEGORY_VIDEO_FILTER_KEY] === true; // 기본 OFF
+    categoryVideoCandidateLimit = normalizeCategoryVideoCandidateLimit(
+      data?.[CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY],
+    );
     searchRerank = data?.[SEARCH_RERANK_KEY] === true; // 기본 OFF
     searchRerankPoolMax = normalizeSearchRerankPoolMax(
       data?.[SEARCH_RERANK_POOL_KEY],
@@ -28297,6 +30147,7 @@ async function loadFeatureFlags() {
     // 실패 시 전부 표시(기본값) 유지.
   }
   applyChatTimeColors();
+  ensureCategoryVideoFilter();
 }
 
 if (chrome.storage?.onChanged) {
@@ -28353,6 +30204,17 @@ if (chrome.storage?.onChanged) {
     if (changes[SEARCH_RESET_ON_RETURN_KEY]) {
       searchResetOnReturn =
         changes[SEARCH_RESET_ON_RETURN_KEY].newValue === true;
+    }
+    if (changes[CATEGORY_VIDEO_FILTER_KEY]) {
+      categoryVideoFilterEnabled =
+        changes[CATEGORY_VIDEO_FILTER_KEY].newValue === true;
+      ensureCategoryVideoFilter();
+    }
+    if (changes[CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY]) {
+      categoryVideoCandidateLimit = normalizeCategoryVideoCandidateLimit(
+        changes[CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY].newValue,
+      );
+      updateCategoryVideoLoadMoreButton();
     }
     if (changes[COMMENT_TS_CLICK_ACTION_KEY]) {
       const a = changes[COMMENT_TS_CLICK_ACTION_KEY].newValue;
@@ -28780,7 +30642,7 @@ if (chrome.storage?.onChanged) {
     }
     if (changes[CHANNEL_LIVE_BUTTON_END_KEY]) {
       channelLiveButtonEnd =
-        changes[CHANNEL_LIVE_BUTTON_END_KEY].newValue !== false;
+        changes[CHANNEL_LIVE_BUTTON_END_KEY].newValue === true;
       ensureChannelLiveButton();
     }
     if (changes[CHANNEL_PROFILE_RADIUS_ENABLED_KEY]) {
@@ -29062,6 +30924,11 @@ if (chrome.storage?.onChanged) {
       }
       applyChatFoldPersist();
     }
+    if (changes[CHAT_POPUP_PIP_KEY]) {
+      chatPopupPipOn = changes[CHAT_POPUP_PIP_KEY].newValue === true;
+      if (!chatPopupPipOn) closeChatPopupPip();
+      ensureChatPopupPipButton();
+    }
     if (changes[FOLLOW_PREVIEW_SIZE_KEY]) {
       const w = Number(changes[FOLLOW_PREVIEW_SIZE_KEY].newValue?.w);
       if (Number.isFinite(w)) {
@@ -29307,6 +31174,7 @@ function init() {
     ensurePopupPlayerDraggable();
   }
   applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
+  ensureChatPopupPipButton(); // 독립 채팅 팝업의 항상 위 Document PiP 버튼 보장
   applyChatFoldPersist(); // 채팅창 접힘 상태 유지(옵션 시, 라이브 진입 1회 복원)
   ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
   applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
@@ -29363,8 +31231,12 @@ function init() {
       clearProgressStallTimer();
       clearFetchProgress();
     }
+    ensureCategoryVideoFilter();
     return;
   }
+
+  // 채널별 동영상/클립 검색으로 들어오면 카테고리 전용 필터 UI를 정리한다.
+  cleanupCategoryVideoFilter();
 
   const initializedFor = `${context.channelId}:${context.contentType}`;
   const isFreshContext = state.initializedFor !== initializedFor;
@@ -30268,6 +32140,7 @@ void loadCommentBlocks();
 void loadFollowChannelTooltip();
 void loadFollowCleanup();
 void loadChatFoldPersist();
+void loadChatPopupPip();
 // 부트스트랩 load* 들이 프리페치를 모두 소비한 뒤 캐시를 비워, 이후 재로드(설정 변경
 // 반영 등)는 실제 get 으로 신선한 값을 읽게 한다. 다시보기 tick 에서 나중에 도는
 // comment 로더까지 여유를 주려고 프리페치 완료 후 한 텀 뒤에 무효화한다.

@@ -60,6 +60,7 @@
     "cheeseChannelProfileRadius",
     "cheeseChatButtonWrap",
     "cheeseChatFoldPersist",
+    "cheeseChatPopupPip",
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatTimeFormat",
@@ -169,6 +170,8 @@
     "cheeseSearchRerankWeights",
     "cheeseSearchRerankDefaultSort",
     "cheeseSearchResetOnReturn",
+    "cheeseCategoryVideoFilter",
+    "cheeseCategoryVideoCandidateLimit",
     "cheeseSeekStepS",
     "cheeseSubscribeBadgeProgress",
     "cheeseSyncCustom",
@@ -4253,6 +4256,151 @@
     });
   }
 
+  // ── 카테고리 동영상 필터(전역, 기본 OFF) ──────────────────────────────────
+  const CATEGORY_VIDEO_FILTER_KEY = "cheeseCategoryVideoFilter";
+  const CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY =
+    "cheeseCategoryVideoCandidateLimit";
+  const CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT = 2000;
+  const CATEGORY_VIDEO_CANDIDATE_LIMITS = new Set([
+    500, 1000, 2000, 3000, 5000,
+  ]);
+  const categoryVideoFilterInput = document.querySelector(
+    "[data-category-video-filter]",
+  );
+  const categoryVideoCandidatePicker = document.querySelector(
+    "[data-category-video-candidate-picker]",
+  );
+  const categoryVideoCandidateTrigger = categoryVideoCandidatePicker?.querySelector(
+    "[data-category-video-candidate-trigger]",
+  );
+  const categoryVideoCandidateLabel = categoryVideoCandidatePicker?.querySelector(
+    "[data-category-video-candidate-label]",
+  );
+  const categoryVideoCandidateList = categoryVideoCandidatePicker?.querySelector(
+    "[data-category-video-candidate-list]",
+  );
+  const normalizeCategoryVideoCandidateLimit = (value) => {
+    const number = Number(value);
+    return CATEGORY_VIDEO_CANDIDATE_LIMITS.has(number)
+      ? number
+      : CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT;
+  };
+  const reflectCategoryVideoCandidateLimit = (value) => {
+    const normalized = normalizeCategoryVideoCandidateLimit(value);
+    if (categoryVideoCandidatePicker) {
+      categoryVideoCandidatePicker.dataset.value = String(normalized);
+    }
+    if (categoryVideoCandidateLabel) {
+      categoryVideoCandidateLabel.textContent = `${normalized.toLocaleString("ko-KR")}개`;
+    }
+    categoryVideoCandidateList
+      ?.querySelectorAll("[role='option'][data-value]")
+      .forEach((option) => {
+        option.setAttribute(
+          "aria-selected",
+          String(Number(option.dataset.value) === normalized),
+        );
+      });
+    return normalized;
+  };
+  const closeCategoryVideoCandidatePicker = () => {
+    categoryVideoCandidatePicker?.classList.remove("is-open");
+    categoryVideoCandidateTrigger?.setAttribute("aria-expanded", "false");
+    if (categoryVideoCandidateList) categoryVideoCandidateList.hidden = true;
+  };
+  const positionCategoryVideoCandidateList = () => {
+    if (!categoryVideoCandidateTrigger || !categoryVideoCandidateList) return;
+    const rect = categoryVideoCandidateTrigger.getBoundingClientRect();
+    categoryVideoCandidateList.style.left = `${Math.round(rect.left)}px`;
+    categoryVideoCandidateList.style.top = `${Math.round(rect.bottom + 4)}px`;
+    categoryVideoCandidateList.style.minWidth = `${Math.round(rect.width)}px`;
+    categoryVideoCandidateList.style.maxHeight = `${Math.max(
+      140,
+      window.innerHeight - rect.bottom - 16,
+    )}px`;
+  };
+  const openCategoryVideoCandidatePicker = () => {
+    if (
+      !categoryVideoCandidatePicker ||
+      !categoryVideoCandidateTrigger ||
+      !categoryVideoCandidateList
+    ) {
+      return;
+    }
+    categoryVideoCandidatePicker.classList.add("is-open");
+    categoryVideoCandidateTrigger.setAttribute("aria-expanded", "true");
+    categoryVideoCandidateList.hidden = false;
+    positionCategoryVideoCandidateList();
+  };
+  if (categoryVideoFilterInput) {
+    (async () => {
+      let on = false;
+      try {
+        const data = await cachedStorageGet(CATEGORY_VIDEO_FILTER_KEY);
+        on = data?.[CATEGORY_VIDEO_FILTER_KEY] === true;
+      } catch {}
+      categoryVideoFilterInput.checked = on;
+    })();
+    categoryVideoFilterInput.addEventListener("change", () => {
+      cachedStorageSet({
+        [CATEGORY_VIDEO_FILTER_KEY]: categoryVideoFilterInput.checked,
+      });
+    });
+  }
+  if (categoryVideoCandidatePicker) {
+    (async () => {
+      let value = CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT;
+      try {
+        const data = await cachedStorageGet(
+          CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY,
+        );
+        value = normalizeCategoryVideoCandidateLimit(
+          data?.[CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY],
+        );
+      } catch {}
+      reflectCategoryVideoCandidateLimit(value);
+    })();
+    categoryVideoCandidateTrigger?.addEventListener("click", () => {
+      if (categoryVideoCandidatePicker.classList.contains("is-open")) {
+        closeCategoryVideoCandidatePicker();
+      } else {
+        openCategoryVideoCandidatePicker();
+      }
+    });
+    categoryVideoCandidateList?.addEventListener("click", (event) => {
+      const option = event.target.closest("[role='option'][data-value]");
+      if (!option) return;
+      const value = reflectCategoryVideoCandidateLimit(option.dataset.value);
+      cachedStorageSet({ [CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY]: value });
+      closeCategoryVideoCandidatePicker();
+      categoryVideoCandidateTrigger?.focus();
+    });
+    categoryVideoCandidateList?.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeCategoryVideoCandidatePicker();
+      categoryVideoCandidateTrigger?.focus();
+    });
+    document.addEventListener("click", (event) => {
+      if (!categoryVideoCandidatePicker.contains(event.target)) {
+        closeCategoryVideoCandidatePicker();
+      }
+    });
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        if (
+          categoryVideoCandidatePicker.classList.contains("is-open") &&
+          !categoryVideoCandidateList?.contains(event.target)
+        ) {
+          closeCategoryVideoCandidatePicker();
+        }
+      },
+      true,
+    );
+    window.addEventListener("resize", closeCategoryVideoCandidatePicker);
+  }
+
   // ── 탭 복귀 시 검색 자동 초기화(전역, 기본 OFF) ───────────────────────────
   const SEARCH_RESET_ON_RETURN_KEY = "cheeseSearchResetOnReturn";
   const searchResetInput = document.querySelector(
@@ -4413,17 +4561,17 @@
   });
   loadScreenshotDirectSave();
 
-  // 라이브 바로가기 버튼 배치(끝/탭 뒤). 기본 ON(끝).
+  // 라이브 바로가기 버튼 배치(끝/탭 뒤). 기본 OFF(탭 뒤).
   const CHANNEL_LIVE_BUTTON_END_KEY = "cheeseChannelLiveButtonEnd";
   const channelLiveButtonEndInput = document.querySelector(
     "[data-channel-live-button-end]",
   );
 
   async function loadChannelLiveButtonEnd() {
-    let on = true;
+    let on = false;
     try {
       const data = await cachedStorageGet(CHANNEL_LIVE_BUTTON_END_KEY);
-      on = data?.[CHANNEL_LIVE_BUTTON_END_KEY] !== false; // 미설정/true=끝
+      on = data?.[CHANNEL_LIVE_BUTTON_END_KEY] === true; // true=끝, 미설정/false=탭 뒤
     } catch {}
     if (channelLiveButtonEndInput) channelLiveButtonEndInput.checked = on;
   }
@@ -5345,6 +5493,26 @@
     } catch {}
   });
   loadChatFoldPersist();
+
+  // 독립 채팅 팝업의 Document Picture-in-Picture 항상 위 버튼(기본 OFF).
+  const CHAT_POPUP_PIP_KEY = "cheeseChatPopupPip";
+  const chatPopupPipInput = document.querySelector("[data-chat-popup-pip]");
+  async function loadChatPopupPip() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(CHAT_POPUP_PIP_KEY);
+      on = data?.[CHAT_POPUP_PIP_KEY] === true;
+    } catch {}
+    if (chatPopupPipInput) chatPopupPipInput.checked = on;
+  }
+  chatPopupPipInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CHAT_POPUP_PIP_KEY]: chatPopupPipInput.checked,
+      });
+    } catch {}
+  });
+  loadChatPopupPip();
 
   const CARD_PREVIEW_AUDIO_KEY = "cheeseCardPreviewAudio";
   const cardPreviewAudioInput = document.querySelector(

@@ -33,6 +33,8 @@
   const TRANSITION_REVEAL_DELAY_MS = 500;
   const TRANSITION_CHANNEL_NAME =
     "cheese-platter-clip-audio-mixer-transition";
+  const FRAME_ACTIVITY_MESSAGE = "cheese-platter-clip-frame-activity";
+  const FRAME_ACTIVITY_FALLBACK_MS = 1500;
   const FRAME_SAMPLE_INTERVAL_MS = 2000;
   const FRAME_DROP_BAD_RATIO = 0.08;
   const FRAME_DROP_SEVERE_RATIO = 0.2;
@@ -215,6 +217,9 @@
   let lastSvgInner = "";
   let sharpnessScale = 1;
   let frameMonitor = createFrameMonitor();
+  let frameActive = false;
+  let frameActivityKnown = false;
+  let frameActivityFallbackTimer = 0;
   const originalFilters = new WeakMap();
 
   function isChzzkClipFrame() {
@@ -308,9 +313,9 @@
       removeButton();
       return;
     }
-    if (enabled) applyFilter(findActiveVideo());
+    if (frameActive && enabled) applyFilter(findActiveVideo());
     if (alwaysOn && !previousAlwaysOn) autoEnableSuppressed = false;
-    scheduleSync();
+    if (frameActive) scheduleSync();
   }
 
   async function loadSettings() {
@@ -512,7 +517,13 @@
   }
 
   function applyFilter(video) {
-    if (!(video instanceof HTMLVideoElement) || !enabled) return;
+    if (
+      !(video instanceof HTMLVideoElement) ||
+      !enabled ||
+      !frameActive
+    ) {
+      return;
+    }
     if (appliedVideo && appliedVideo !== video) clearFilter(appliedVideo);
     rememberOriginalFilter(video);
     if (needsSvgFilter()) updateSvgFilter();
@@ -563,6 +574,7 @@
   function syncFrameMonitor(video) {
     if (
       document.hidden ||
+      !frameActive ||
       !enabled ||
       filters.sharpness < HEAVY_SHARPNESS
     ) {
@@ -582,6 +594,7 @@
     const video = frameMonitor.video;
     if (
       document.hidden ||
+      !frameActive ||
       !enabled ||
       video !== appliedVideo ||
       video?.paused
@@ -658,7 +671,7 @@
   }
 
   function requestSharedToolLayout() {
-    if (document.visibilityState === "hidden") return;
+    if (!frameActive || document.visibilityState === "hidden") return;
     document
       .querySelector(`.${STACK_CLASS}`)
       ?.classList.add("is-layout-pending");
@@ -687,7 +700,7 @@
   }
 
   function scheduleSharedToolLayout() {
-    if (document.visibilityState === "hidden") return;
+    if (!frameActive || document.visibilityState === "hidden") return;
     document
       .querySelector(`.${STACK_CLASS}`)
       ?.classList.add("is-layout-pending");
@@ -701,7 +714,7 @@
     if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
     layoutSettleTimer = setTimeout(() => {
       layoutSettleTimer = 0;
-      if (document.visibilityState === "hidden") return;
+      if (!frameActive || document.visibilityState === "hidden") return;
       if (syncTimer) clearTimeout(syncTimer);
       syncTimer = 0;
       sync();
@@ -790,6 +803,7 @@
 
   function revealButtonAfterTransition() {
     transitionRevealTimer = 0;
+    if (!frameActive) return;
     transitionHidden = false;
     if (!document.hidden) scheduleSync();
   }
@@ -797,7 +811,11 @@
   function hideButtonDuringTransition() {
     transitionHidden = true;
     if (slot) slot.hidden = true;
+    stopFrameMonitor();
+    clearFilter();
     if (transitionRevealTimer) clearTimeout(transitionRevealTimer);
+    transitionRevealTimer = 0;
+    if (!frameActive) return;
     transitionRevealTimer = setTimeout(
       revealButtonAfterTransition,
       TRANSITION_REVEAL_DELAY_MS,
@@ -819,6 +837,7 @@
   function sync() {
     syncTimer = 0;
     if (
+      !frameActive ||
       !masterEnabled ||
       featureHidden ||
       !featureEnabled ||
@@ -840,7 +859,7 @@
   }
 
   function scheduleSync() {
-    if (syncTimer) return;
+    if (!frameActive || syncTimer) return;
     syncTimer = setTimeout(sync, SYNC_DELAY_MS);
   }
 
@@ -857,7 +876,7 @@
   }
 
   function startObserver() {
-    if (observer || !document.documentElement) return;
+    if (!frameActive || observer || !document.documentElement) return;
     observer = new MutationObserver((mutations) => {
       if (!document.hidden && mutations.some(isRelevantMutation)) scheduleSync();
     });
@@ -865,9 +884,10 @@
   }
 
   function startRouteWatcher() {
-    if (routeTimer) return;
+    if (!frameActive || routeTimer) return;
     routeTimer = setInterval(() => {
       if (
+        !frameActive ||
         document.hidden ||
         !masterEnabled ||
         featureHidden ||
@@ -888,6 +908,75 @@
     }, ROUTE_CHECK_MS);
   }
 
+  function stopActiveFrameWork() {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = 0;
+    if (routeTimer) clearInterval(routeTimer);
+    routeTimer = 0;
+    if (transitionRevealTimer) clearTimeout(transitionRevealTimer);
+    transitionRevealTimer = 0;
+    if (layoutRaf) cancelAnimationFrame(layoutRaf);
+    layoutRaf = 0;
+    if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
+    layoutSettleTimer = 0;
+    observer?.disconnect();
+    observer = null;
+    anchorResizeObserver?.disconnect();
+    anchorGroup = null;
+    transitionHidden = true;
+    if (slot) slot.hidden = true;
+    stopFrameMonitor();
+    clearFilter();
+  }
+
+  function setFrameActive(active) {
+    const next = active === true;
+    if (next === frameActive) return;
+    frameActive = next;
+    if (!frameActive) {
+      stopActiveFrameWork();
+      return;
+    }
+    startObserver();
+    startRouteWatcher();
+    hideButtonDuringTransition();
+  }
+
+  function handleFrameActivity(event) {
+    if (
+      event.source !== window.parent ||
+      event.origin !== "https://chzzk.naver.com" ||
+      event.data?.source !== FRAME_ACTIVITY_MESSAGE
+    ) {
+      return;
+    }
+    if (event.data.event === "transition-start") {
+      hideButtonDuringTransition();
+      return;
+    }
+    if (typeof event.data.active !== "boolean") return;
+    frameActivityKnown = true;
+    if (frameActivityFallbackTimer) {
+      clearTimeout(frameActivityFallbackTimer);
+      frameActivityFallbackTimer = 0;
+    }
+    setFrameActive(event.data.active === true);
+  }
+
+  function requestFrameActivity() {
+    try {
+      window.parent?.postMessage(
+        { source: FRAME_ACTIVITY_MESSAGE, event: "ready" },
+        "https://chzzk.naver.com",
+      );
+    } catch {}
+    if (frameActivityFallbackTimer) return;
+    frameActivityFallbackTimer = setTimeout(() => {
+      frameActivityFallbackTimer = 0;
+      if (!frameActivityKnown) setFrameActive(true);
+    }, FRAME_ACTIVITY_FALLBACK_MS);
+  }
+
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
     if (
@@ -904,7 +993,7 @@
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopFrameMonitor();
-    else scheduleSync();
+    else if (frameActive) scheduleSync();
   });
   window.addEventListener("resize", scheduleSync);
   window.visualViewport?.addEventListener("resize", scheduleSync);
@@ -929,6 +1018,8 @@
     layoutRaf = 0;
     if (layoutSettleTimer) clearTimeout(layoutSettleTimer);
     layoutSettleTimer = 0;
+    if (frameActivityFallbackTimer) clearTimeout(frameActivityFallbackTimer);
+    frameActivityFallbackTimer = 0;
     observer?.disconnect();
     observer = null;
     anchorResizeObserver?.disconnect();
@@ -946,16 +1037,16 @@
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
     startTransitionChannel();
-    startObserver();
-    startRouteWatcher();
-    hideButtonDuringTransition();
-    scheduleSync();
+    requestFrameActivity();
+    if (frameActive) {
+      startObserver();
+      startRouteWatcher();
+      hideButtonDuringTransition();
+    }
   });
 
+  window.addEventListener("message", handleFrameActivity);
   startTransitionChannel();
-  startObserver();
-  startRouteWatcher();
   await loadSettings();
-  hideButtonDuringTransition();
-  scheduleSync();
+  requestFrameActivity();
 })();

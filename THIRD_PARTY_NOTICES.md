@@ -24,7 +24,8 @@ conditions of any kind. See the Apache License 2.0 text for details.
 
 This extension includes the Lucide `chevron-down`, `eye`, `eye-off`, `folder`,
 `funnel-x`, `gamepad-2`, `grip-vertical`, `heart`, `music-2`, `pencil`, `plus`,
-`settings-2`, `sparkles`, `star`, `trash-2`, `users`, and `x` SVG icons.
+`picture-in-picture-2`, `settings-2`, `sparkles`, `star`, `trash-2`, `users`,
+and `x` SVG icons.
 
 - Project: https://github.com/lucide-icons/lucide
 - License: ISC License

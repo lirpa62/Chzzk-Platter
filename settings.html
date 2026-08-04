@@ -2140,6 +2140,91 @@
               </li>
             </ul>
             <h2 class="settings-group-title" style="margin-top: 14px">
+              카테고리 동영상
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">카테고리 동영상 필터</span>
+                  <span class="settings-item-desc"
+                    >카테고리의 동영상 탭에 등록 기간과 정렬 필터를 추가합니다.
+                    오래된순은 선택 기간의 시작점부터 확인하고, 최신 목록 확인과
+                    원본 목록 복원 버튼을 제공합니다. 결과는 1시간 동안
+                    캐시합니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-category-video-filter />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 후보 확인 개수</span>
+                  <span class="settings-item-desc"
+                    >최초 필터 적용과 결과 하단의 더 확인을 한 번 누를 때마다
+                    확인할 동영상 수입니다. 값이 크면 오래된 동영상을 더 넓게
+                    찾지만 API 요청과 수집 시간이 늘어납니다(기본 2,000개)</span
+                  >
+                </div>
+                <div
+                  class="settings-popover settings-preset-picker"
+                  data-category-video-candidate-picker
+                >
+                  <button
+                    type="button"
+                    class="settings-popover-trigger"
+                    data-category-video-candidate-trigger
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-category-video-candidate-label>2,000개</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
+                  </button>
+                  <ul
+                    class="settings-popover-list"
+                    data-category-video-candidate-list
+                    role="listbox"
+                    aria-label="카테고리 동영상 후보 확인 개수"
+                    hidden
+                  >
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="500">
+                        500개
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="1000">
+                        1,000개
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button
+                        type="button"
+                        role="option"
+                        data-value="2000"
+                        aria-selected="true"
+                      >
+                        2,000개 (기본)
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="3000">
+                        3,000개
+                      </button>
+                    </li>
+                    <li role="presentation">
+                      <button type="button" role="option" data-value="5000">
+                        5,000개
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
               통합검색 동영상
             </h2>
             <ul class="settings-list">
@@ -5655,6 +5740,23 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-chat-fold-persist />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >팝업 채팅 항상 위 버튼 (실험)</span
+                  >
+                  <span class="settings-item-desc"
+                    >독립 채팅 팝업에서 항상 위 Picture-in-Picture 채팅을 열 수
+                    있는 버튼을 표시합니다. 지원되는 Chromium 브라우저에서만
+                    동작하며, 실행 중에는 원본 채팅을 가리고 가운데 돌아오기
+                    버튼을 표시합니다(기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-popup-pip />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
