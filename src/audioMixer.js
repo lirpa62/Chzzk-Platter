@@ -2437,9 +2437,26 @@
     controlsRoot = null;
   }
 
+  let refreshingPanel = false;
   function refreshPanelContent() {
     const panel = ui?.panel;
     if (!panel) return;
+    // ⚠ innerHTML 교체는 포커스된 숫자 입력칸을 통째로 없앤다. 그 상태로 지우면 change 가
+    // 영영 발생하지 않아(요소가 blur 전에 사라짐) 입력값이 조용히 버려진다. 실제로
+    // 값 수정 → enterCustomFromEdit → ensureMixerEnabled → setEnabled → 여기로 오는
+    // 경로가 있어, 헤더의 '초기화/프리셋 추가'가 나타나지 않는 원인이 됐다.
+    // 지우기 전에 먼저 확정한다.
+    // commitNumInput 은 handleSlider→setEnabled 를 거쳐 다시 여기로 올 수 있으므로
+    // 재진입을 막는다(중첩 호출에서는 확정만 건너뛰고 재렌더는 정상 진행).
+    if (!refreshingPanel) {
+      refreshingPanel = true;
+      try {
+        const editing = panel.querySelector("[data-num-input]:focus");
+        if (editing) commitNumInput(editing);
+      } finally {
+        refreshingPanel = false;
+      }
+    }
     panel.innerHTML = renderPanel();
     // 위임 리스너는 panel에 한 번만 붙어 있으므로 재바인딩하지 않는다(중복 누적 방지).
     syncUI();
@@ -2563,10 +2580,16 @@
     positionPanel(panel, root);
   }
 
-  // head 영역. 프리셋에서 벗어나 수정된 상태(presetDirty)면 "프리셋 추가" 버튼을
-  // 보여준다(클릭 시 패널 위 모달로 이름 입력 — renderQuickSaveModal 참고).
+  // head 영역.
+  // - "초기화": 되돌릴 원본 프리셋이 있을 때만(presetDirty + dirtyFromKey).
+  // - "프리셋 추가": 현재 값이 저장된 프리셋과 다르면 언제나. ⚠ 예전엔 presetDirty 에만
+  //   걸려 있었는데, state.preset 이 이미 "custom" 이면 enterCustomFromEdit 이
+  //   isRealPreset("custom")=false 로 presetDirty 를 못 세워 버튼이 사라졌다. 커스텀
+  //   상태에서 값을 더 다듬어 새 프리셋으로 저장하려는 게 자연스러운 흐름이라 분리한다.
+  //   (confirmQuickSave 는 createMixerSnapshot() 현재값만 쓰므로 dirtyFromKey 가 없어도 된다.)
   function renderHeadInner() {
     const canReset = presetDirty && Boolean(dirtyFromKey);
+    const canQuickSave = presetDirty || state.preset === "custom";
     return `
       <strong>오디오 믹서</strong>
       ${
@@ -2575,7 +2598,7 @@
           : ""
       }
       ${
-        presetDirty
+        canQuickSave
           ? `<button type="button" class="cheese-mixer-quicksave-button" data-action="quicksave-open">+ 프리셋 추가</button>`
           : ""
       }
@@ -2649,27 +2672,27 @@
 
           ${groupHeading("음량", "group-gain")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, "any", state.gain)}
+            ${renderAdvancedRow("음량 (게인)", "gain", GAIN_MIN, GAIN_MAX, "any", state.gain, true)}
           </div>
 
           ${groupHeading("컴프레서", "group-comp")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("Threshold (dB)", "comp-threshold", -100, 0, 0.1, state.comp.threshold)}
-            ${renderAdvancedRow("Knee (dB)", "comp-knee", 0, 40, 0.1, state.comp.knee)}
-            ${renderAdvancedRow("Ratio", "comp-ratio", 1, 20, 0.1, state.comp.ratio)}
-            ${renderAdvancedRow("Attack (s)", "comp-attack", 0, 1, 0.001, state.comp.attack)}
-            ${renderAdvancedRow("Release (s)", "comp-release", 0, 1, 0.01, state.comp.release)}
-            ${renderAdvancedRow("Makeup (dB)", "comp-makeup", 0, 24, 0.1, state.comp.makeup ?? 0)}
+            ${renderAdvancedRow("Threshold (dB)", "comp-threshold", -100, 0, 0.1, state.comp.threshold, true)}
+            ${renderAdvancedRow("Knee (dB)", "comp-knee", 0, 40, 0.1, state.comp.knee, true)}
+            ${renderAdvancedRow("Ratio", "comp-ratio", 1, 20, 0.1, state.comp.ratio, true)}
+            ${renderAdvancedRow("Attack (s)", "comp-attack", 0, 1, 0.001, state.comp.attack, true)}
+            ${renderAdvancedRow("Release (s)", "comp-release", 0, 1, 0.01, state.comp.release, true)}
+            ${renderAdvancedRow("Makeup (dB)", "comp-makeup", 0, 24, 0.1, state.comp.makeup ?? 0, true)}
           </div>
 
           ${groupHeading("리미터", "group-limiter")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("Limiter (dB)", "limiter-threshold", -20, 0, 0.1, state.limiter.threshold)}
+            ${renderAdvancedRow("Limiter (dB)", "limiter-threshold", -20, 0, 0.1, state.limiter.threshold, true)}
           </div>
 
           ${groupHeading("노멀라이저", "group-normalizer")}
           <div class="cheese-mixer-expert-group">
-            ${renderAdvancedRow("목표 레벨", "normalizer-target", 0.04, 0.3, 0.01, state.normalizer.target)}
+            ${renderAdvancedRow("목표 레벨", "normalizer-target", 0.04, 0.3, 0.002, state.normalizer.target, true)}
           </div>
         </section>
       </div>
@@ -2851,14 +2874,60 @@
       </div>`;
   }
 
-  function renderAdvancedRow(label, key, min, max, step, value) {
+  // numeric=true 면 값 표시를 <output> 대신 직접 입력 가능한 number 입력으로 낸다.
+  // 전문가 탭에서만 쓴다 — 고급 탭의 저음/고음/선명도는 applyEqGroup 이 0.1 로 반올림해
+  // 저장하므로 정밀 입력의 이득이 없다.
+  function renderAdvancedRow(label, key, min, max, step, value, numeric) {
     const info = INFO_TEXT[key] ? infoIcon(key) : "";
+    // step="any"(게인)는 number 입력에도 그대로 넘긴다(브라우저가 임의 소수 허용).
+    const out = numeric
+      ? `<input type="number" class="cheese-mixer-row-num" min="${min}" max="${max}" step="${step}" value="${fmtNum(value)}" data-output="${key}" data-num-input="${key}" aria-label="${label} 값">`
+      : `<output data-output="${key}">${fmtNum(value)}</output>`;
     return `
       <div class="cheese-mixer-row">
         <label class="cheese-mixer-row-label">${label}${info}</label>
         <input type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-slider="${key}">
-        <output data-output="${key}">${fmtNum(value)}</output>
+        ${out}
       </div>`;
+  }
+
+  // 숫자 입력 확정: 값 검증 → 짝 슬라이더의 min/max 로 clamp → 슬라이더와 동일 경로로 반영.
+  // clamp 기준을 슬라이더 속성에서 읽어, 범위 정의가 renderAdvancedRow 한 곳에만 있게 한다
+  // (Ratio<1, Attack<0 등 Web Audio 가 거부하는 값이 들어가는 것도 이걸로 막힌다).
+  function commitNumInput(el) {
+    const key = el.dataset.numInput;
+    const row = el.closest(".cheese-mixer-row");
+    const slider = row?.querySelector(`[data-slider="${key}"]`);
+    if (!slider) return;
+    const min = parseFloat(slider.min);
+    const max = parseFloat(slider.max);
+    let v = parseFloat(el.value);
+    // 빈 칸이나 잘못된 입력 → 현재 값으로 되돌린다(무음/NaN 방지).
+    if (!Number.isFinite(v)) {
+      const cur = sliderValue(key);
+      el.value = fmtNum(cur == null ? 0 : cur);
+      return;
+    }
+    if (Number.isFinite(min)) v = Math.max(min, v);
+    if (Number.isFinite(max)) v = Math.min(max, v);
+    handleSlider(key, v);
+    // gain 은 handleSlider 안에서 GAIN_STEP 으로 양자화되므로 실제 반영값을 다시 읽는다.
+    const applied = sliderValue(key);
+    const shown = applied == null ? v : applied;
+    slider.value = shown;
+    el.value = fmtNum(shown); // clamp/양자화 결과를 입력칸에도 되돌려 보여준다
+  }
+
+  // data-output 이 <output>일 수도 <input type=number>일 수도 있어 갱신을 한 곳으로 모은다.
+  // ⚠ 사용자가 입력 중인(focus 된) number 칸은 덮어쓰지 않는다 — 타이핑이 잘린다.
+  function setRowOutput(el, value) {
+    if (!el) return;
+    if (el.tagName === "INPUT") {
+      if (document.activeElement === el) return;
+      el.value = fmtNum(value);
+    } else {
+      el.textContent = fmtNum(value);
+    }
   }
 
   // 슬라이더 표시값 정리: 0.1/0.001 step 등에서 생기는 부동소수점 오차를 없애고
@@ -2940,6 +3009,22 @@
       "keydown",
       (e) => {
         if (isEditableMixerTarget(e.target)) e.stopPropagation();
+        // 전문가 탭 숫자 입력: Enter=확정, Esc=현재 값으로 되돌리기.
+        // (Enter 는 브라우저가 change 도 함께 내지만, 여기서 직접 확정해 두면
+        //  값이 그대로일 때 change 가 안 나는 경우에도 슬라이더 표시가 맞춰진다.)
+        if (e.target.dataset?.numInput) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commitNumInput(e.target);
+            e.target.blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            const cur = sliderValue(e.target.dataset.numInput);
+            e.target.value = fmtNum(cur == null ? 0 : cur);
+            e.target.blur();
+          }
+          return;
+        }
         const gainInput = e.target.matches?.('[data-slider="gain"]')
           ? e.target
           : null;
@@ -2961,10 +3046,12 @@
           }
           handleSlider("gain", next);
           gainInput.value = String(state.gain);
-          const output = gainInput
-            .closest(".cheese-mixer-row")
-            ?.querySelector("[data-output]");
-          if (output) output.textContent = fmtNum(state.gain);
+          setRowOutput(
+            gainInput
+              .closest(".cheese-mixer-row")
+              ?.querySelector("[data-output]"),
+            state.gain,
+          );
           return;
         }
         // 빠른 저장 이름 입력: Enter로 저장, Esc로 취소
@@ -3080,10 +3167,10 @@
         if (key === "gain") t.value = String(value);
         // 같은 행의 output만 갱신한다. gain처럼 같은 key가 두 탭에 중복
         // 존재해도 querySelector가 엉뚱한(숨겨진) output을 잡지 않도록 한다.
-        const out = t
-          .closest(".cheese-mixer-row")
-          ?.querySelector("[data-output]");
-        if (out) out.textContent = fmtNum(value);
+        setRowOutput(
+          t.closest(".cheese-mixer-row")?.querySelector("[data-output]"),
+          value,
+        );
       } else if (t.dataset.eq != null) {
         const idx = parseInt(t.dataset.eq, 10);
         handleEqBand(idx, parseFloat(t.value));
@@ -3093,6 +3180,12 @@
     });
     panel.addEventListener("change", (e) => {
       const t = e.target;
+      // 전문가 탭 숫자 입력 확정(Enter/포커스 이동). input 이벤트로는 반영하지 않는다 —
+      // "-24" 를 치는 도중 "-" 나 "2" 가 즉시 적용돼 소리가 튀기 때문이다.
+      if (t.dataset.numInput) {
+        commitNumInput(t);
+        return;
+      }
       if (t.dataset.exportPick) {
         // 내보내기 선택 체크박스. (다른 토글 분기로 떨어지지 않도록 먼저 처리)
         toggleExportPick(t.dataset.exportPick, t.checked);
@@ -3503,10 +3596,10 @@
       const v = sliderValue(input.dataset.slider);
       if (v == null) return;
       input.value = v;
-      const out = input
-        .closest(".cheese-mixer-row")
-        ?.querySelector("[data-output]");
-      if (out) out.textContent = fmtNum(v);
+      setRowOutput(
+        input.closest(".cheese-mixer-row")?.querySelector("[data-output]"),
+        v,
+      );
     });
 
     // 전문가 EQ 슬라이더 + 값 표시 갱신

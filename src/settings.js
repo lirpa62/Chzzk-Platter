@@ -89,6 +89,8 @@
     "cheesePopupPlayerDisableHidden",
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
+    "cheeseFollowPreviewHeaderBottom",
+    "cheeseFollowPreviewCardLayout",
     "cheeseFollowPreviewHiddenParts",
     "cheeseFollowPreviewAlwaysViewers",
     "cheeseFollowPreviewAlwaysElapsed",
@@ -5211,6 +5213,53 @@
     } catch {}
   });
   loadFollowPreviewFullTitle();
+
+  // ── 미리보기 헤더 바 위치(기본 OFF=영상 위, ON=영상 아래) ──────────────────
+  const FOLLOW_PREVIEW_HEADER_BOTTOM_KEY = "cheeseFollowPreviewHeaderBottom";
+  const followPreviewHeaderBottomInput = document.querySelector(
+    "[data-follow-preview-header-bottom]",
+  );
+  async function loadFollowPreviewHeaderBottom() {
+    let on = false; // 기본 위
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_HEADER_BOTTOM_KEY);
+      on = data?.[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY] === true;
+    } catch {}
+    if (followPreviewHeaderBottomInput)
+      followPreviewHeaderBottomInput.checked = on;
+  }
+  followPreviewHeaderBottomInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_PREVIEW_HEADER_BOTTOM_KEY]:
+          followPreviewHeaderBottomInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowPreviewHeaderBottom();
+
+  // ── 미리보기 라이브 카드식 헤더 배치(기본 OFF) ────────────────────────────
+  const FOLLOW_PREVIEW_CARD_LAYOUT_KEY = "cheeseFollowPreviewCardLayout";
+  const followPreviewCardLayoutInput = document.querySelector(
+    "[data-follow-preview-card-layout]",
+  );
+  async function loadFollowPreviewCardLayout() {
+    let on = false; // 기본 기존 배치
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_CARD_LAYOUT_KEY);
+      on = data?.[FOLLOW_PREVIEW_CARD_LAYOUT_KEY] === true;
+    } catch {}
+    if (followPreviewCardLayoutInput)
+      followPreviewCardLayoutInput.checked = on;
+  }
+  followPreviewCardLayoutInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_PREVIEW_CARD_LAYOUT_KEY]: followPreviewCardLayoutInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowPreviewCardLayout();
 
   // 미리보기 헤더에서 숨길 요소(개별 체크=숨김). {title,profile,name,category,viewers,
   // elapsed} 객체 한 키에 모아 저장한다.

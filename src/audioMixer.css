@@ -316,7 +316,9 @@
   bottom: 64px;
   z-index: 2147483646;
   box-sizing: border-box;
-  width: min(360px, calc(100% - 24px));
+  /* 전문가 탭 값 표시가 직접 입력 가능한 number 칸이 되면서 폭이 필요해져 400px 로 넓혔다.
+     좁은 화면에서는 calc(100% - 24px) 가 계속 상한이라 화면 밖으로 나가지 않는다. */
+  width: min(400px, calc(100% - 24px));
   max-height: min(520px, calc(100% - 90px));
   overflow: hidden;
   display: flex;
@@ -1090,7 +1092,9 @@
 /* 슬라이더 행 */
 .cheese-mixer-row {
   display: grid;
-  grid-template-columns: 124px 1fr 44px;
+  /* 3열: 라벨 / 슬라이더 / 값. 값 열은 전문가 탭에서 직접 입력칸이 되므로 62px 로 잡는다
+     (44px 면 "-100" 같은 4자리 + 스피너가 잘린다). 패널 폭 400px 확대와 함께 조정. */
+  grid-template-columns: 124px 1fr 62px;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
@@ -1115,6 +1119,37 @@
 .cheese-mixer-row input[type="range"] {
   width: 100%;
   accent-color: #00ffa3;
+}
+
+/* 전문가 탭 값 직접 입력칸. <output> 과 같은 자리·같은 글꼴로 보이게 맞추되, 편집
+   가능하다는 걸 알 수 있도록 테두리를 준다. */
+.cheese-mixer-row-num {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 3px 4px;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-family: inherit;
+  -moz-appearance: textfield; /* Firefox 스피너 제거 — 62px 안에서 자리를 너무 먹는다 */
+  appearance: textfield;
+}
+
+.cheese-mixer-row-num::-webkit-outer-spin-button,
+.cheese-mixer-row-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cheese-mixer-row-num:focus {
+  outline: none;
+  border-color: rgba(0, 255, 163, 0.7);
+  background: rgba(0, 255, 163, 0.08);
 }
 
 .cheese-mixer-toggle-row {

@@ -843,6 +843,11 @@ const FOLLOW_PREVIEW_VOLUME_KEY = "cheeseFollowPreviewVolume";
 let followPreviewVolume = 1;
 let followPreviewGuardBound = false; // volumechange 재해제 리스너 1회 등록 여부
 let followPreviewVolumeGuard = false; // 우리가 muted/volume 되돌리는 중(재진입 방지)
+// 이 미리보기에서 사용자가 controls 로 소리를 직접 조작했는지. true 면 재해제 가드를
+// 끈다 — 가드는 '브라우저 자동재생 정책이 되돌린 음소거'를 복구하려는 것이지, 사용자의
+// 음소거/볼륨 조작까지 되돌리려는 게 아니다. 새 채널을 열 때마다 false 로 리셋한다.
+let followPreviewUserAudioTouched = false;
+let followPreviewLastPointerAt = 0; // 미리보기 video 위 마지막 사용자 입력 시각
 function normalizeFollowPreviewVolume(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 1;
@@ -858,6 +863,11 @@ const FOLLOW_PREVIEW_THUMB_KEY = "cheeseFollowPreviewThumbOnly";
 const FOLLOW_PREVIEW_LIVE_EDGE_KEY = "cheeseFollowPreviewLiveEdge";
 // 미리보기 방송 제목 전체 표시(줄바꿈). 기본 false=1줄 자름(…). true=여러 줄 전체 표시.
 const FOLLOW_PREVIEW_FULL_TITLE_KEY = "cheeseFollowPreviewFullTitle";
+// 미리보기 헤더 바 위치. 기본 false=영상 위, true=영상 아래.
+const FOLLOW_PREVIEW_HEADER_BOTTOM_KEY = "cheeseFollowPreviewHeaderBottom";
+// 미리보기 헤더 레이아웃. 기본 false=기존(프로필|제목·채널명|우측 시청자),
+// true=치지직 라이브 카드식(제목 한 줄 → 프로필·채널명 / 경과시간·카테고리).
+const FOLLOW_PREVIEW_CARD_LAYOUT_KEY = "cheeseFollowPreviewCardLayout";
 // 미리보기 헤더에서 숨길 요소를 개별 선택(체크=숨김). {title,profile,name,category,
 // viewers,elapsed} 불리언 객체. 미설정/false = 표시. 각 파트는 html 클래스로 CSS 처리.
 const FOLLOW_PREVIEW_HIDDEN_PARTS_KEY = "cheeseFollowPreviewHiddenParts";
@@ -881,6 +891,8 @@ let followPreviewHeaderFont = FOLLOW_PREVIEW_HEADER_FONT_DEFAULT;
 let followPreviewThumbOnly = false; // 기본 영상
 let followPreviewLiveEdge = true; // 라이브 최신(엣지)부터 재생, 기본 ON
 let followPreviewFullTitle = false; // 제목 전체 표시(줄바꿈), 기본 OFF
+let followPreviewHeaderBottom = false; // 헤더 바를 영상 아래에, 기본 OFF(위)
+let followPreviewCardLayout = false; // 라이브 카드식 헤더 배치, 기본 OFF
 let followPreviewHiddenParts = {}; // {title,profile,...}=true 면 해당 요소 숨김
 // 저장값을 {part:boolean} 로 정규화(허용 파트만, true 인 것만 담음).
 function normalizeFollowPreviewHiddenParts(v) {
@@ -25346,12 +25358,16 @@ function ensureFollowPreviewEl() {
     `<div class="cheese-follow-preview-loading" aria-hidden="true"><i></i><i></i><i></i></div>` +
     `<video class="cheese-follow-preview-video" muted autoplay playsinline controls controlslist="nodownload noremoteplayback noplaybackrate"></video>` +
     `<img class="cheese-follow-preview-thumb" alt="" />` +
+    // 영상 위 시청자 수 뱃지(치지직 라이브 카드식). 카드 레이아웃일 때만 CSS로 표시.
+    `<div class="cheese-follow-preview-live-badge" aria-hidden="true"><i></i><b></b></div>` +
     `<span class="cheese-follow-preview-resize" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 9a12 12 0 0 1-12 12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>` +
     `</div>`;
   document.body.appendChild(el);
   applyFollowPreviewHeaderFont(el);
   el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
   el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
+  el.classList.toggle("cheese-fp-header-bottom", followPreviewHeaderBottom);
+  el.classList.toggle("cheese-fp-card-layout", followPreviewCardLayout);
   applyFollowPreviewHiddenParts(el);
   // 패널 위에 있으면 닫지 않도록 hover 추적(드래그 리사이즈용). 벗어나면 닫음.
   el.addEventListener("mouseleave", () => scheduleCloseFollowPreview());
@@ -25537,6 +25553,8 @@ async function openFollowPreview(li, channelId, anchorKind = "following") {
   applyFollowPreviewHeaderFont(el); // 헤더 폰트 배율 반영(재사용 경로 포함)
   el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
   el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
+  el.classList.toggle("cheese-fp-header-bottom", followPreviewHeaderBottom);
+  el.classList.toggle("cheese-fp-card-layout", followPreviewCardLayout);
   applyFollowPreviewHiddenParts(el);
   positionFollowPreview(el, li, anchorKind);
   el.classList.add("is-loading");
@@ -25613,6 +25631,42 @@ function renderFollowPreviewMeta(el, meta) {
   const imageUrl = meta.channelImageUrl
     ? `${meta.channelImageUrl}${meta.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
     : "";
+  // 영상 위 시청자 뱃지(카드 레이아웃 전용 — 표시 여부는 CSS가 정한다).
+  const badge = el.querySelector(".cheese-follow-preview-live-badge");
+  if (badge) {
+    const b = badge.querySelector("b");
+    if (b) b.textContent = meta.viewers ? `${meta.viewers}명` : "";
+    badge.classList.toggle("is-empty", !meta.viewers);
+  }
+  // 라이브 카드식 배치: 제목이 위 한 줄을 다 쓰고, 그 아래 프로필·채널명 / 경과시간·
+  // 카테고리. 숨김 파트(cheese-fp-hide-*)는 같은 요소 클래스를 쓰므로 그대로 적용된다.
+  if (followPreviewCardLayout) {
+    bar.innerHTML =
+      (meta.title
+        ? `<strong class="cheese-follow-preview-meta-title">${escapeHtml(meta.title)}</strong>`
+        : "") +
+      `<span class="cheese-follow-preview-meta-row">` +
+      `<span class="cheese-follow-preview-meta-profile">` +
+      (imageUrl
+        ? `<img src="${escapeAttribute(imageUrl)}" alt="" loading="lazy" decoding="async">`
+        : "") +
+      `</span>` +
+      `<span class="cheese-follow-preview-meta-name">${escapeHtml(meta.channelName)}</span>` +
+      (meta.verifiedMark
+        ? `<i class="cheese-follow-preview-meta-verified" aria-hidden="true"></i>`
+        : "") +
+      `<span class="cheese-follow-preview-meta-row-side">` +
+      (elapsed
+        ? `<span class="cheese-follow-preview-meta-elapsed" data-open-at="${meta.openAt}"><b>${escapeHtml(elapsed)}</b></span>`
+        : "") +
+      (meta.category
+        ? `<span class="cheese-follow-preview-meta-category">${escapeHtml(meta.category)}</span>`
+        : "") +
+      `</span>` +
+      `</span>`;
+    startFollowPreviewElapsedTimer(el);
+    return;
+  }
   bar.innerHTML =
     // 1) 프로필
     `<span class="cheese-follow-preview-meta-profile">` +
@@ -25747,11 +25801,24 @@ async function refreshFollowPreviewViewers(el, channelId) {
     if (followPreviewState.currentChannelId !== channelId) return;
     const n = Number(json?.content?.concurrentUserCount);
     if (!Number.isFinite(n)) return;
-    const next = `현재 ${new Intl.NumberFormat("ko-KR").format(n)}`;
+    const formatted = new Intl.NumberFormat("ko-KR").format(n);
+    const next = `현재 ${formatted}`;
     // 우측(meta-side)과 중앙 하단(옵션) 복제본 모두 갱신.
     el.querySelectorAll(".cheese-follow-preview-meta-viewers").forEach((em) => {
       if (em.textContent !== next) em.textContent = next;
     });
+    // 영상 위 시청자 뱃지(카드 레이아웃)도 같은 값으로 갱신.
+    const badgeNum = el.querySelector(".cheese-follow-preview-live-badge b");
+    if (badgeNum && badgeNum.textContent !== `${formatted}명`) {
+      badgeNum.textContent = `${formatted}명`;
+      badgeNum
+        .closest(".cheese-follow-preview-live-badge")
+        ?.classList.remove("is-empty");
+    }
+    // 캐시된 meta 도 갱신해, 옵션 변경 재렌더 때 옛 값으로 되돌아가지 않게 한다.
+    if (followPreviewState.lastMeta) {
+      followPreviewState.lastMeta.viewers = formatted;
+    }
   } catch {
     // 실패 시 이전 값 유지.
   }
@@ -25761,6 +25828,9 @@ async function refreshFollowPreviewViewers(el, channelId) {
 function applyFollowPreviewVolumeNow() {
   const v = document.querySelector(".cheese-follow-preview-video");
   if (!v) return;
+  // 설정에서 값을 바꾼 것 = 사용자의 새 의사 표시. 이전 창에서 controls 로 만졌던
+  // 기록은 지워, 설정값이 다시 기준이 되게 한다.
+  followPreviewUserAudioTouched = false;
   followPreviewVolumeGuard = true;
   try {
     v.muted = followPreviewMuted;
@@ -25804,16 +25874,37 @@ function attachFollowPreviewSource(el, m3u8, channelId, thumb) {
   if (!video) return;
   teardownFollowPreviewMedia(video); // 이전 연결 정리
   // 소리 상태를 설정값으로 강제(controls로 사용자가 바꿔도 다음 미리보기에선 일관).
+  // 새 채널이므로 '사용자가 직접 조작함' 표시도 함께 리셋한다.
+  followPreviewUserAudioTouched = false;
+  followPreviewLastPointerAt = 0;
+  followPreviewVolumeGuard = true; // 아래 대입이 volumechange 가드를 깨우지 않게
   video.muted = followPreviewMuted;
   video.volume = followPreviewMuted ? 0 : followPreviewVolume;
+  followPreviewVolumeGuard = false;
   // '소리 켜기 고정'인데도 hls attach/자동재생 정책으로 video 가 다시 음소거되는 일이
   // 잦다. volumechange 를 감시해, 소리 켜기 설정이면 muted 로 돌아갈 때마다 즉시
   // 재해제하고 저장 볼륨을 복구한다(guard 로 우리 변경이 콜백을 재트리거하지 않게).
   if (!followPreviewGuardBound) {
     followPreviewGuardBound = true;
+    // 사용자가 controls 로 직접 조작하면 그 시점부터 가드를 끈다. volumechange 만으로는
+    // '브라우저가 되돌린 음소거'와 '사용자가 누른 음소거'를 구분할 수 없어서, 예전엔
+    // 사용자가 음소거하거나 볼륨을 낮춰도 가드가 즉시 되돌려 놨다.
+    // ⚠ controls 는 브라우저 섀도우 DOM 이라 '볼륨 슬라이더 클릭'만 골라낼 수 없다.
+    // 대신 '최근 사용자 입력이 있었는가'로 판정한다 — 자동재생 정책이 되돌리는 음소거는
+    // 사용자 입력 없이 발생하므로, 입력 직후(1초 내)의 volumechange 만 사용자 의도로 본다.
+    const markUserAudioTouch = () => {
+      followPreviewLastPointerAt = Date.now();
+    };
+    video.addEventListener("pointerdown", markUserAudioTouch);
+    video.addEventListener("keydown", markUserAudioTouch);
     video.addEventListener("volumechange", () => {
       if (followPreviewVolumeGuard) return;
       if (followPreviewMuted) return; // 음소거 고정이면 개입 안 함
+      // 사용자 입력 직후의 변경이면 사용자 의도 → 그대로 존중하고 이후에도 건드리지 않는다.
+      if (Date.now() - followPreviewLastPointerAt < 1000) {
+        followPreviewUserAudioTouched = true;
+      }
+      if (followPreviewUserAudioTouched) return; // 사용자 조작 존중
       if (video.muted || video.volume === 0) {
         followPreviewVolumeGuard = true;
         try {
@@ -26279,6 +26370,8 @@ async function loadFollowPreview() {
       FOLLOW_PREVIEW_THUMB_KEY,
       FOLLOW_PREVIEW_LIVE_EDGE_KEY,
       FOLLOW_PREVIEW_FULL_TITLE_KEY,
+      FOLLOW_PREVIEW_HEADER_BOTTOM_KEY,
+      FOLLOW_PREVIEW_CARD_LAYOUT_KEY,
       FOLLOW_PREVIEW_HIDDEN_PARTS_KEY,
       FOLLOW_PREVIEW_ALWAYS_VIEWERS_KEY,
       FOLLOW_PREVIEW_ALWAYS_ELAPSED_KEY,
@@ -26347,6 +26440,9 @@ async function loadFollowPreview() {
     followPreviewThumbOnly = data?.[FOLLOW_PREVIEW_THUMB_KEY] === true; // 기본 영상
     followPreviewLiveEdge = data?.[FOLLOW_PREVIEW_LIVE_EDGE_KEY] !== false; // 미설정/true=엣지
     followPreviewFullTitle = data?.[FOLLOW_PREVIEW_FULL_TITLE_KEY] === true; // 기본 자름
+    followPreviewHeaderBottom =
+      data?.[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY] === true; // 기본 위
+    followPreviewCardLayout = data?.[FOLLOW_PREVIEW_CARD_LAYOUT_KEY] === true; // 기본 기존 배치
     followPreviewHiddenParts = normalizeFollowPreviewHiddenParts(
       data?.[FOLLOW_PREVIEW_HIDDEN_PARTS_KEY],
     );
@@ -29894,6 +29990,8 @@ const BOOT_PREFETCH_KEYS = [
     FOLLOW_PREVIEW_THUMB_KEY,
     FOLLOW_PREVIEW_LIVE_EDGE_KEY,
     FOLLOW_PREVIEW_FULL_TITLE_KEY,
+    FOLLOW_PREVIEW_HEADER_BOTTOM_KEY,
+    FOLLOW_PREVIEW_CARD_LAYOUT_KEY,
     FOLLOW_PREVIEW_HIDDEN_PARTS_KEY,
     CARD_LIVE_PREVIEW_KEY,
     CARD_LIVE_PREVIEW_POSITION_KEY,
@@ -30780,6 +30878,22 @@ if (chrome.storage?.onChanged) {
       document
         .getElementById(FOLLOW_PREVIEW_ID)
         ?.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
+    }
+    if (changes[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY]) {
+      followPreviewHeaderBottom =
+        changes[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY].newValue === true;
+      document
+        .getElementById(FOLLOW_PREVIEW_ID)
+        ?.classList.toggle("cheese-fp-header-bottom", followPreviewHeaderBottom);
+    }
+    if (changes[FOLLOW_PREVIEW_CARD_LAYOUT_KEY]) {
+      followPreviewCardLayout =
+        changes[FOLLOW_PREVIEW_CARD_LAYOUT_KEY].newValue === true;
+      const fpEl = document.getElementById(FOLLOW_PREVIEW_ID);
+      fpEl?.classList.toggle("cheese-fp-card-layout", followPreviewCardLayout);
+      // 배치는 JS가 만든 DOM 구조라 클래스만 바꿔선 안 되고 메타를 다시 그려야 한다.
+      if (fpEl && followPreviewState.lastMeta)
+        renderFollowPreviewMeta(fpEl, followPreviewState.lastMeta);
     }
     if (changes[FOLLOW_PREVIEW_HIDDEN_PARTS_KEY]) {
       followPreviewHiddenParts = normalizeFollowPreviewHiddenParts(
