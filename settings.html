@@ -308,8 +308,8 @@
                   <span class="settings-item-name">전역 최상단 이동 버튼</span>
                   <span class="settings-item-desc"
                     >페이지를 길게 스크롤하면 본문 최상단으로 이동하는 버튼을
-                    표시합니다. 통합검색 동영상·클립의 섹션별 버튼에는 영향을 주지
-                    않습니다</span
+                    표시합니다. 통합검색 동영상·클립의 섹션별 버튼에는 영향을
+                    주지 않습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -754,6 +754,46 @@
                   <input type="checkbox" data-live-seek-bar />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-live-seek-bar-bottom-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 되감기 바 위치</span>
+                  <span class="settings-item-desc"
+                    >화면 아래에서 떨어진 거리(px)입니다. 기본 60px. 값을 낮추면
+                    치지직 타임머신 재생바와 겹칠 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-osd-row">
+                  <input
+                    type="range"
+                    min="35"
+                    max="445"
+                    step="1"
+                    data-live-seek-bar-bottom
+                    aria-label="되감기 바 위치(px)"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="35"
+                      max="445"
+                      step="1"
+                      data-live-seek-bar-bottom-num
+                      aria-label="되감기 바 위치 직접 입력(px)"
+                    />
+                    px
+                  </span>
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-live-seek-bar-bottom-reset
+                  >
+                    기본값
+                  </button>
+                </div>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
@@ -3309,6 +3349,75 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">라운지 소식 숨김</span>
+                  <span class="settings-item-desc"
+                    >헤더 알림 옆의 치지직 라운지 소식 버튼. 공지사항·업데이트
+                    등 라운지 게시판의 새 글을 모아 봅니다(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="loungeNews" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 새 글 확인 주기</span>
+                  <span class="settings-item-desc"
+                    >라운지에 새 글이 올라왔는지 확인하는 간격입니다. 짧을수록
+                    알림이 빨라지지만 통신량이 늘어납니다(기본 10분). 다른 탭을
+                    보고 있는 동안에는 확인하지 않습니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-5"
+                  id="loungeRefresh"
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-lounge-refresh="3"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    3분
+                  </button>
+                  <button
+                    type="button"
+                    data-lounge-refresh="5"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    5분
+                  </button>
+                  <button
+                    type="button"
+                    data-lounge-refresh="10"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    10분
+                  </button>
+                  <button
+                    type="button"
+                    data-lounge-refresh="30"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    30분
+                  </button>
+                  <button
+                    type="button"
+                    data-lounge-refresh="60"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    1시간
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">헤더 자동 숨김</span>
                   <span class="settings-item-desc"
                     >헤더를 숨기고 화면 맨 위에 마우스를 대면 표시</span
@@ -4319,6 +4428,25 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name"
+                    >오프라인 채널 자동 그룹</span
+                  >
+                  <span class="settings-item-desc"
+                    >현재 방송 중이 아닌 팔로잉 채널을 별도의 '오프라인'
+                    그룹에도 함께 표시합니다. 원래 전용 목록에서는 사라지지
+                    않습니다(체크=사용, 기본 꺼짐).</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupOfflineAuto"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">태그 자동 그룹</span>
                   <span class="settings-item-desc"
                     >같은 태그를 가진 팔로잉 채널이 2개 이상이면 태그별 그룹을
@@ -4603,13 +4731,64 @@
                   <span class="settings-item-desc"
                     >헤더를 치지직 라이브 카드처럼 배치합니다. 제목이 위 한 줄을
                     모두 쓰고, 그 아래 프로필·채널명과 경과시간·카테고리가
-                    표시됩니다. 시청자 수는 영상 위에 표시됩니다(체크=카드식)</span
+                    표시됩니다. 시청자 수는 영상 위에
+                    표시됩니다(체크=카드식)</span
                   >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-follow-preview-card-layout />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-follow-preview-badge-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 시청자 수 위치</span>
+                  <span class="settings-item-desc"
+                    >카드식 배치에서 영상 위에 표시되는 시청자 수 배지의
+                    위치입니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  id="followPreviewBadgePos"
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    data-follow-preview-badge-pos="tl"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    좌측 상단
+                  </button>
+                  <button
+                    type="button"
+                    data-follow-preview-badge-pos="tr"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    우측 상단
+                  </button>
+                  <button
+                    type="button"
+                    data-follow-preview-badge-pos="bl"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    좌측 하단
+                  </button>
+                  <button
+                    type="button"
+                    data-follow-preview-badge-pos="br"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    우측 하단
+                  </button>
+                </div>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
@@ -4656,6 +4835,259 @@
                       data-follow-preview-hide-part="elapsed"
                     />경과 시간</label
                   >
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">헤더 글자 색상</span>
+                  <span class="settings-item-desc"
+                    >미리보기 헤더 각 항목의 색을 라이트·다크 모드별로
+                    지정합니다. 카테고리는 고른 색에서 테두리·배경을 함께
+                    파생합니다.</span
+                  >
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-chat-time-color-item"
+              >
+                <div class="settings-chat-time-color-head">
+                  <div>
+                    <span class="settings-item-name">└ 제목 색상</span>
+                    <span class="settings-item-desc"
+                      >라이트·다크 모드에서 쓸 제목 색을 각각 지정합니다.</span
+                    >
+                  </div>
+                  <label class="settings-switch">
+                    <input type="checkbox" data-fp-color-enabled="title" />
+                    <i aria-hidden="true"></i>
+                  </label>
+                </div>
+                <div
+                  class="settings-chat-time-color-editor"
+                  data-fp-color-editor="title"
+                >
+                  <label class="settings-chat-time-color-row">
+                    <span>라이트 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#17171C"
+                        data-fp-color-picker
+                        data-fp-color="title"
+                        data-fp-color-mode="light"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="라이트 모드 제목 색상"
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-chat-time-color-row">
+                    <span>다크 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#FFFFFF"
+                        data-fp-color-picker
+                        data-fp-color="title"
+                        data-fp-color-mode="dark"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="다크 모드 제목 색상"
+                      />
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    class="settings-order-reset settings-chat-time-color-reset"
+                    data-fp-color-reset="title"
+                  >
+                    기본값
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-chat-time-color-item"
+              >
+                <div class="settings-chat-time-color-head">
+                  <div>
+                    <span class="settings-item-name">└ 채널명 색상</span>
+                    <span class="settings-item-desc"
+                      >라이트·다크 모드에서 쓸 채널명 색을 각각
+                      지정합니다.</span
+                    >
+                  </div>
+                  <label class="settings-switch">
+                    <input type="checkbox" data-fp-color-enabled="name" />
+                    <i aria-hidden="true"></i>
+                  </label>
+                </div>
+                <div
+                  class="settings-chat-time-color-editor"
+                  data-fp-color-editor="name"
+                >
+                  <label class="settings-chat-time-color-row">
+                    <span>라이트 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#17171C"
+                        data-fp-color-picker
+                        data-fp-color="name"
+                        data-fp-color-mode="light"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="라이트 모드 채널명 색상"
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-chat-time-color-row">
+                    <span>다크 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#FFFFFF"
+                        data-fp-color-picker
+                        data-fp-color="name"
+                        data-fp-color-mode="dark"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="다크 모드 채널명 색상"
+                      />
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    class="settings-order-reset settings-chat-time-color-reset"
+                    data-fp-color-reset="name"
+                  >
+                    기본값
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-chat-time-color-item"
+              >
+                <div class="settings-chat-time-color-head">
+                  <div>
+                    <span class="settings-item-name">└ 카테고리 색상</span>
+                    <span class="settings-item-desc"
+                      >라이트·다크 모드에서 쓸 카테고리 색을 각각
+                      지정합니다.</span
+                    >
+                  </div>
+                  <label class="settings-switch">
+                    <input type="checkbox" data-fp-color-enabled="category" />
+                    <i aria-hidden="true"></i>
+                  </label>
+                </div>
+                <div
+                  class="settings-chat-time-color-editor"
+                  data-fp-color-editor="category"
+                >
+                  <label class="settings-chat-time-color-row">
+                    <span>라이트 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#17171C"
+                        data-fp-color-picker
+                        data-fp-color="category"
+                        data-fp-color-mode="light"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="라이트 모드 카테고리 색상"
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-chat-time-color-row">
+                    <span>다크 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#FFFFFF"
+                        data-fp-color-picker
+                        data-fp-color="category"
+                        data-fp-color-mode="dark"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="다크 모드 카테고리 색상"
+                      />
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    class="settings-order-reset settings-chat-time-color-reset"
+                    data-fp-color-reset="category"
+                  >
+                    기본값
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked settings-chat-time-color-item"
+              >
+                <div class="settings-chat-time-color-head">
+                  <div>
+                    <span class="settings-item-name">└ 경과시간 색상</span>
+                    <span class="settings-item-desc"
+                      >라이트·다크 모드에서 쓸 경과시간 색을 각각
+                      지정합니다.</span
+                    >
+                  </div>
+                  <label class="settings-switch">
+                    <input type="checkbox" data-fp-color-enabled="elapsed" />
+                    <i aria-hidden="true"></i>
+                  </label>
+                </div>
+                <div
+                  class="settings-chat-time-color-editor"
+                  data-fp-color-editor="elapsed"
+                >
+                  <label class="settings-chat-time-color-row">
+                    <span>라이트 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#17171C"
+                        data-fp-color-picker
+                        data-fp-color="elapsed"
+                        data-fp-color-mode="light"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="라이트 모드 경과시간 색상"
+                      />
+                    </span>
+                  </label>
+                  <label class="settings-chat-time-color-row">
+                    <span>다크 모드</span>
+                    <span class="settings-chat-time-color-control">
+                      <input
+                        type="text"
+                        value="#FFFFFF"
+                        data-fp-color-picker
+                        data-fp-color="elapsed"
+                        data-fp-color-mode="dark"
+                        readonly
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="다크 모드 경과시간 색상"
+                      />
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    class="settings-order-reset settings-chat-time-color-reset"
+                    data-fp-color-reset="elapsed"
+                  >
+                    기본값
+                  </button>
                 </div>
               </li>
               <li class="settings-item">
@@ -5279,6 +5711,19 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">팔로워 수 정확히 보기</span>
+                  <span class="settings-item-desc"
+                    >“팔로워 X만명”처럼 줄여 표시된 수에 마우스를 올리면 정확한
+                    수(xx,xxx명)를 툴팁으로 보여줍니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-follower-exact />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">채널 라이브 바로가기</span>
                   <span class="settings-item-desc"
                     >채널 홈 탭에 라이브로 가는 버튼 표시(체크=표시)</span
@@ -5900,6 +6345,156 @@
                   >
                     기본값
                   </button>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">작성 기기 아이콘 표시</span>
+                  <span class="settings-item-desc"
+                    >각 채팅 앞에 작성 기기(PC·안드로이드·iOS) 아이콘을
+                    표시합니다. 치지직이 채팅과 함께 보내는 정보를 그대로
+                    보여줍니다(체크=표시)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatShowOsIcon" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">닉네임 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅에서 닉네임을 숨기고 내용만 표시합니다. 스트리머(방장),
+                    매니저, 파트너 채팅은 누가 말했는지 알 수 있도록 그대로
+                    표시합니다(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideNickname" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">배지 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅 닉네임 앞의 배지(등급·후원·구독 등)를 숨깁니다.
+                    스트리머(방장), 매니저, 파트너의 배지는 그대로
+                    표시합니다(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideBadge" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >PIP 이동 시 채팅 함께 고정</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브를 보다가 다른 페이지로 이동해 영상이 PIP 로 바뀌면,
+                    PIP 안에 채팅을 이어 붙여 함께 봅니다. PIP 를 드래그해
+                    옮기면 채팅도 같이 따라갑니다. 채팅 아래쪽 끝을 위아래로
+                    드래그하면 채팅 높이를 조절할 수 있습니다(체크=표시, 기본
+                    꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="pipChat" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name"
+                    >단어·정규식으로 채팅 숨김
+                    <button
+                      type="button"
+                      class="settings-info-button"
+                      data-settings-info="chat-word-filter"
+                      aria-label="정규식 사용법 안내"
+                      aria-expanded="false"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 16v-4"></path>
+                        <path d="M12 8h.01"></path>
+                      </svg></button
+                  ></span>
+                  <span class="settings-item-desc"
+                    >입력한 단어가 포함된 채팅을 숨깁니다(대소문자 구분 없음).
+                    정규식으로 쓰려면 <b>정규식</b> 체크박스를 켠 뒤 추가하세요.
+                    한 번에 하나씩 추가합니다.</span
+                  >
+                  <span
+                    class="settings-info-panel"
+                    data-settings-info-panel="chat-word-filter"
+                    hidden
+                  >
+                    <strong>정규식 사용법</strong>
+                    <span
+                      ><b>정규식</b> 체크박스를 끈 채로 추가하면
+                      <b>입력한 글자가 들어간 채팅</b>을 모두 숨깁니다.
+                      <code>광고</code> 만 넣어도 “이건 광고입니다”가 걸립니다.
+                      대소문자는 구분하지 않습니다.</span
+                    >
+                    <span
+                      >더 정밀하게 걸러야 할 때만 <b>정규식</b> 체크박스를 켜고
+                      추가하세요. 자주 쓰는 표현입니다.</span
+                    >
+                    <span><code>ㅋ{3,}</code> ㅋ이 3번 이상 이어질 때</span>
+                    <span><code>^ㅇㅇ$</code> 딱 “ㅇㅇ”만 있는 채팅</span>
+                    <span><code>광고|홍보</code> 광고 또는 홍보</span>
+                    <span><code>[0-9]{6,}</code> 숫자 6자리 이상</span>
+                    <span><code>https?://</code> 링크가 들어간 채팅</span>
+                    <span
+                      >기호 뜻 — <code>^</code> 시작, <code>$</code> 끝,
+                      <code>|</code> 또는, <code>{2,}</code> 2번 이상,
+                      <code>[ ]</code> 이 중 하나, <code>.</code> 아무 글자,
+                      <code>?</code> 앞 글자가 있어도 없어도 됨</span
+                    >
+                    <span
+                      >추가된 규칙 왼쪽의 <code>.*</code> 는 정규식으로 등록된
+                      규칙, <code>가나</code> 는 단어로 등록된 규칙이라는
+                      표시입니다. 정규식이 올바르지 않으면 추가되지 않고 오류
+                      메시지가 표시됩니다.</span
+                    >
+                  </span>
+                </div>
+                <div class="settings-word-filter" data-chat-word-filter>
+                  <div class="settings-word-filter-add">
+                    <input
+                      type="text"
+                      data-cwf-input
+                      placeholder="숨길 단어 또는 정규식"
+                      aria-label="숨길 단어 또는 정규식"
+                    />
+                    <label class="settings-word-filter-regex">
+                      <input type="checkbox" data-cwf-regex />
+                      정규식
+                    </label>
+                    <button type="button" data-cwf-add>추가</button>
+                  </div>
+                  <p
+                    class="settings-word-filter-error"
+                    data-cwf-error
+                    hidden
+                  ></p>
+                  <ul class="settings-word-filter-list" data-cwf-list></ul>
                 </div>
               </li>
               <li class="settings-item">

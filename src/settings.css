@@ -838,6 +838,9 @@ body {
 .settings-item:has([data-integrated-search-clips-weights-reset]),
 .settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
+.settings-item:has([data-fp-color-reset]),
+.settings-item:has([data-live-seek-bar-bottom]),
+.settings-item:has([data-chat-word-filter]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -849,6 +852,7 @@ body {
 .settings-item [data-chat-time-format],
 .settings-item [data-cf-group-placement],
 .settings-item [data-popup-player-audio],
+.settings-item [data-fp-color-reset],
 .settings-item [data-logpower-progress-mode],
 .settings-item [data-logpower-timer-mode],
 .settings-item:has([data-mixer-gain-min]) [data-mixer-gain-min] {
@@ -866,6 +870,7 @@ body {
 .settings-item:has(#integratedSearchClipSourcePreset),
 .settings-item:has(#integratedSearchClipDefaultSort),
 .settings-item:has(#cardLivePreviewPosition),
+.settings-item:has(#followPreviewBadgePos),
 .settings-item:has(#rootToFollowingLogoMode),
 .settings-item:has([data-update-notice-mode]) {
   flex-direction: column;
@@ -874,9 +879,11 @@ body {
 .settings-item #commentTsClickAction,
 .settings-item #integratedSearchClipDateFilter,
 .settings-item #autoReliveMaxHours,
+.settings-item #loungeRefresh,
 .settings-item #integratedSearchClipSourcePreset,
 .settings-item #integratedSearchClipDefaultSort,
 .settings-item #cardLivePreviewPosition,
+.settings-item #followPreviewBadgePos,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;
 }
@@ -1441,6 +1448,15 @@ body > .clr-picker .clr-preview {
   accent-color: var(--popup-brand);
   cursor: pointer;
 }
+
+.settings-osd-row:has([data-live-seek-bar-bottom]) {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
 /* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본
    동작(hover/focus 시에만 표시)에 맡기고 강제 표시하지 않는다(다른 설정 인풋과 동일). */
 .settings-osd-row .settings-custom-input {
@@ -1607,6 +1623,10 @@ body > .clr-picker .clr-preview {
 .settings-order-reset:hover {
   color: var(--popup-fg, inherit);
   border-color: var(--popup-muted);
+}
+.settings-order-reset[data-live-seek-bar-bottom-reset] {
+  grid-column: 1 / -1;
+  justify-self: end;
 }
 
 .settings-transfer-actions {
@@ -2225,4 +2245,149 @@ body > .clr-picker .clr-preview {
 .settings-check input {
   flex: none;
   cursor: pointer;
+}
+
+/* 채팅 단어·정규식 필터 */
+.settings-word-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-word-filter-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 입력칸은 태그 필터 입력(.settings-live-tag-form input)과 같은 규격으로 맞춘다. */
+.settings-word-filter-add input[type="text"] {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-size: 12px;
+}
+
+.settings-word-filter-add input[type="text"]:focus {
+  border-color: var(--popup-brand-strong);
+}
+
+.settings-word-filter-add input[type="text"]::placeholder {
+  color: var(--popup-muted);
+}
+
+.settings-word-filter-regex {
+  flex: none;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+.settings-word-filter-regex input[type="checkbox"] {
+  accent-color: var(--popup-brand-strong);
+}
+
+/* 추가 버튼: 태그 필터의 추가 버튼(.settings-live-tag-form button)과 같은 톤.
+   ⚠ 브랜드색을 배경으로 깔고 흰 글자를 쓰면 라이트 모드 대비가 2.27 로 부족하다.
+   기존 패턴대로 옅은 배경 + 진한 브랜드색 글자를 쓰고, 호버에서만 채운다. */
+.settings-word-filter-add button {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--popup-brand);
+  border-radius: 7px;
+  background: var(--popup-help-bg);
+  color: var(--popup-brand-strong);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-word-filter-add button:hover {
+  background: var(--popup-brand);
+  color: #fff;
+}
+
+.settings-word-filter-error {
+  margin: 0;
+  color: var(--popup-alert-text, #ff5454);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-word-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.settings-word-filter-empty {
+  padding: 8px 2px;
+  color: var(--popup-muted);
+  font-size: 12px;
+}
+
+.settings-word-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  background: var(--popup-surface);
+}
+
+/* 정규식/단어 구분 뱃지 */
+.settings-word-filter-kind {
+  flex: none;
+  min-width: 32px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--popup-soft-bg);
+  color: var(--popup-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.settings-word-filter-pattern {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--popup-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.settings-word-filter-item button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--popup-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-word-filter-item button:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
 }

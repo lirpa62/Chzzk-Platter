@@ -698,6 +698,10 @@ html.cheese-channel-live-profile-custom
   min-width: 0;
   max-width: 220px;
   cursor: pointer;
+  padding: 0 14px;
+  /* ⚠ 이 버튼에는 치지직 native 클래스를 harvest 해 붙인다(applyStudioNativeSelectClasses).
+     그 클래스가 자체 color 를 가지고 있어 그냥 지정하면 밀린다 — !important 로 고정. */
+  color: #697183 !important;
 }
 
 .cheese-search-studio-select-inner {
@@ -1085,7 +1089,7 @@ html.cheese-channel-live-profile-custom
       --sem-color-border-neutral-base,
       var(--cheese-platter-border-neutral-base)
     );
-  border-radius: 8px;
+  border-radius: 5px;
   background: var(
     --sem-color-background-neutral-base,
     var(--cheese-platter-background-neutral-base)
@@ -5216,6 +5220,23 @@ body > .clr-picker {
   );
 }
 
+/* 프로필 이미지가 없는 채널은 치지직 기본 프로필을 채운다. 라이트·다크 이미지를
+   함께 렌더하고 현재 페이지 테마에 맞는 하나만 보여 주므로 테마 전환에도 재렌더가
+   필요 없으며, 빈 컨테이너 때문에 라이브 링 크기가 무너지는 것도 방지한다. */
+#cheese-custom-follow .cheese-cf-default-profile-dark {
+  display: none;
+}
+
+html.theme_dark #cheese-custom-follow .cheese-cf-default-profile-light,
+.theme_dark #cheese-custom-follow .cheese-cf-default-profile-light {
+  display: none;
+}
+
+html.theme_dark #cheese-custom-follow .cheese-cf-default-profile-dark,
+.theme_dark #cheese-custom-follow .cheese-cf-default-profile-dark {
+  display: block;
+}
+
 /* 프로필 모서리 적용 시 드러나는 링 안쪽 여백은 사이드바의 기본 배경과 맞춘다.
    surface-neutral 색을 쓰면 라이트 모드에서 기존 흰 여백이 회색으로 바뀐다. */
 html.cheese-channel-profile-radius-enabled
@@ -6565,14 +6586,44 @@ html.cheese-channel-profile-radius-enabled
   align-items: center;
   gap: 8px;
   padding: 10px 8px 10px 12px;
-  background: #16161a;
-  color: #fff;
+  background: var(--cheese-fp-head-bg, #16161a);
+  color: var(--cheese-fp-head-fg, #fff);
   cursor: grab; /* 헤더 드래그로 패널 이동 */
   user-select: none;
 }
 
 #cheese-follow-preview .cheese-follow-preview-header:active {
   cursor: grabbing;
+}
+
+/* ── 미리보기 헤더 테마 색상 ────────────────────────────────────────────────
+   치지직 라이트/다크에 맞춰 헤더 바 배경·글자색을 전환한다. 패널은 body 직속이라
+   페이지 내부 래퍼에 붙은 .theme_dark 가 조상이 아닐 수 있어, html 에 붙는 경우와
+   내부 래퍼에 붙는 경우를 모두 커버한다(채팅 시간 색상 규칙과 동일한 전략).
+   기본값은 라이트로 두고, 다크일 때 기존 색(#16161a)을 그대로 쓴다. */
+#cheese-follow-preview {
+  --cheese-fp-head-bg: #f8f9fa;
+  --cheese-fp-head-fg: #17171c;
+  --cheese-fp-head-fg-dim: rgba(0, 0, 0, 0.6);
+  --cheese-fp-head-fg-soft: rgba(0, 0, 0, 0.88);
+  --cheese-fp-head-border: rgba(0, 0, 0, 0.28);
+  --cheese-fp-head-hover: rgba(0, 0, 0, 0.08);
+  --cheese-fp-head-accent-red: #d92d20;
+  --cheese-fp-head-accent-green: #128a58;
+  --cheese-fp-head-accent-green-weak: rgba(18, 138, 88, 0.12);
+}
+
+html.theme_dark #cheese-follow-preview,
+.theme_dark #cheese-follow-preview {
+  --cheese-fp-head-bg: #16161a;
+  --cheese-fp-head-fg: #fff;
+  --cheese-fp-head-fg-dim: rgba(255, 255, 255, 0.6);
+  --cheese-fp-head-fg-soft: rgba(255, 255, 255, 0.88);
+  --cheese-fp-head-border: rgba(255, 255, 255, 0.28);
+  --cheese-fp-head-hover: rgba(255, 255, 255, 0.12);
+  --cheese-fp-head-accent-red: #ff5454;
+  --cheese-fp-head-accent-green: #00ffa3;
+  --cheese-fp-head-accent-green-weak: rgba(0, 255, 163, 0.14);
 }
 
 /* 헤더 바 아래 배치 옵션. 패널이 flex column 이라 column-reverse 로 순서만 뒤집으면
@@ -6680,6 +6731,7 @@ html.cheese-channel-profile-radius-enabled
 #cheese-follow-preview.cheese-fp-card-layout
   .cheese-follow-preview-live-badge:not(.is-empty) {
   position: absolute;
+  /* 기본은 좌측 상단. data-badge-pos 로 네 모서리 중 선택(아래 규칙에서 덮어씀). */
   left: 8px;
   top: 8px;
   z-index: 2;
@@ -6725,8 +6777,10 @@ html.cheese-channel-profile-radius-enabled
   border-radius: 50%;
   object-fit: cover;
   display: block;
-  background: #000;
-  border: 2px solid #16161a;
+  /* 라이브 링(초록)과 사진 사이를 헤더 배경색으로 띄운다. 예전엔 #000/#16161a 로
+     하드코딩돼 있어 라이트 모드에서 사진 둘레가 검게 보였다. */
+  background: var(--cheese-fp-head-bg, #000);
+  border: 2px solid var(--cheese-fp-head-bg, #16161a);
 }
 
 html.cheese-channel-profile-radius-enabled
@@ -6787,7 +6841,7 @@ html.cheese-channel-live-profile-custom
   /* 헤더 폰트 배율(settings, 기본 1)을 곱해 헤더 전체가 함께 스케일 */
   font-size: calc(15px * var(--cheese-fp-header-font, 1));
   font-weight: 800;
-  color: #fff;
+  color: var(--cheese-fp-head-fg, #fff);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6812,7 +6866,7 @@ html.cheese-channel-live-profile-custom
   max-width: 50%;
   font-size: calc(13px * var(--cheese-fp-header-font, 1));
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.92));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6831,11 +6885,11 @@ html.cheese-channel-live-profile-custom
   flex: none;
   max-width: 45%;
   padding: 2px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid var(--cheese-fp-head-border, rgba(255, 255, 255, 0.28));
   border-radius: 999px;
   font-size: calc(12px * var(--cheese-fp-header-font, 1));
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.88));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6860,13 +6914,14 @@ html.cheese-channel-live-profile-custom
   font-size: calc(13px * var(--cheese-fp-header-font, 1));
   font-weight: 800;
   font-style: normal;
-  color: #ff5454;
+  /* 라이트에서 #ff5454 는 대비 3.0 으로 본문 기준(4.5) 미달이라 어두운 적색을 쓴다. */
+  color: var(--cheese-fp-head-accent-red, #ff5454);
 }
 
 #cheese-follow-preview .cheese-follow-preview-meta-elapsed {
   font-size: calc(13px * var(--cheese-fp-header-font, 1));
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.92));
 }
 
 #cheese-follow-preview .cheese-follow-preview-meta-elapsed b {
@@ -6885,7 +6940,7 @@ html.cheese-channel-live-profile-custom
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--cheese-fp-head-fg-dim, rgba(255, 255, 255, 0.6));
   cursor: pointer;
   transition:
     background 0.12s ease,
@@ -6899,13 +6954,15 @@ html.cheese-channel-live-profile-custom
 }
 
 #cheese-follow-preview .cheese-follow-preview-pin:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--cheese-fp-head-hover, rgba(255, 255, 255, 0.12));
+  color: var(--cheese-fp-head-fg, #fff);
 }
 
+/* 고정 상태 강조색. 다크는 치지직 브랜드 그린(#00ffa3) 그대로, 라이트는 같은 색이
+   대비 1.26 이라 형광처럼 번져 보여 어두운 브랜드 그린(#1bb373)을 쓴다. */
 #cheese-follow-preview.is-pinned .cheese-follow-preview-pin {
-  color: #00ffa3;
-  background: rgba(0, 255, 163, 0.14);
+  color: var(--cheese-fp-head-accent-green, #00ffa3);
+  background: var(--cheese-fp-head-accent-green-weak, rgba(0, 255, 163, 0.14));
 }
 
 /* 영상 본문: 16:9. 폭 100%, 비율로 높이 결정 */
@@ -7391,6 +7448,37 @@ html.cheese-chat-time-custom-color .cheese-chat-time {
 html.cheese-chat-time-custom-color.theme_dark .cheese-chat-time,
 html.cheese-chat-time-custom-color .theme_dark .cheese-chat-time {
   color: var(--cheese-chat-time-color-dark, #fff) !important;
+}
+
+/* 채팅 작성 기기(PC/AOS/IOS) 아이콘. 시간 표시와 같은 톤의 회색으로 두어 눈에
+   띄지 않게 한다(강조하면 조롱 소재가 되기 쉬움). 크기는 em 기준이라 채팅 폰트
+   배율(cheeseChatFontScale)을 그대로 따라간다. */
+.cheese-chat-os {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  flex-shrink: 0;
+  vertical-align: -0.12em;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  opacity: 0.75;
+}
+
+.cheese-chat-os svg {
+  display: block;
+  width: 0.92em;
+  height: 0.92em;
+}
+
+/* Lucide 세 아이콘의 viewBox 점유 높이가 달라(모니터 본체 3~17, 폰·사과 2~22)
+   같은 크기로 두면 폰·사과가 눈에 띄게 커 보인다. 세로가 꽉 찬 둘만 살짝 줄인다. */
+.cheese-chat-os[data-os="AOS"] svg,
+.cheese-chat-os[data-os="IOS"] svg {
+  width: 0.82em;
+  height: 0.82em;
 }
 
 /* 채팅창 접힘 상태 복원 마스킹: 저장된 상태가 '접힘'인데 치지직이 로드 시 자체
@@ -10359,4 +10447,608 @@ html.cheese-player-hide-liveRewind
 #cheese-copy-toast.is-shown {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/* ── 치지직 라운지 소식(헤더 armchair 버튼 + 탭 모달) ────────────────────────
+   버튼은 네이티브 알림 버튼의 클래스를 그대로 물려받아 크기·호버가 일치한다.
+   여기서는 '새 글' 붉은 점과 모달만 정의한다. */
+#cheese-lounge-button {
+  position: relative;
+}
+
+#cheese-lounge-button.has-new::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--cheese-platter-background-neutral-base);
+  background: red;
+  pointer-events: none;
+}
+
+#cheese-lounge-modal {
+  position: fixed;
+  z-index: 2147483600;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(520px, calc(100vh - 120px));
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--cheese-lounge-bg);
+  color: var(--cheese-lounge-color);
+  border: 1px solid var(--cheese-lounge-border);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+}
+
+html.light #cheese-lounge-modal,
+.light #cheese-lounge-modal {
+  --cheese-lounge-bg: #fff;
+  --cheese-lounge-fg: #32bb81;
+  --cheese-lounge-color: #4d4d4d;
+  --cheese-lounge-border: rgba(255, 255, 255, 0.14);
+  --cheese-lounge-hover: #0000000d;
+  --cheese-lounge-dim: #6d6e70;
+}
+html.theme_dark #cheese-lounge-modal,
+.theme_dark #cheese-lounge-modal {
+  --cheese-lounge-bg: #16161a;
+  --cheese-lounge-fg: #00e693;
+  --cheese-lounge-color: #9da5b6;
+  --cheese-lounge-border: rgba(255, 255, 255, 0.14);
+  --cheese-lounge-hover: #ffffff0d;
+  --cheese-lounge-dim: #697183;
+}
+
+/* 모달 헤더: 제목 + 닫기. 폰트는 치지직 주제 탭에서 harvest 한 값(JS 가 인라인
+   --cheese-lounge-font 로 넣음)을 쓰고, 없으면 페이지 기본 폰트를 상속한다. */
+#cheese-lounge-modal .cheese-lounge-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 8px 12px 14px;
+  font-family: var(--cheese-lounge-font, inherit);
+}
+
+#cheese-lounge-modal .cheese-lounge-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: auto;
+}
+
+#cheese-lounge-modal .cheese-lounge-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cheese-lounge-dim);
+  cursor: pointer;
+}
+
+#cheese-lounge-modal .cheese-lounge-close:hover {
+  background: var(--cheese-lounge-hover);
+}
+
+#cheese-lounge-modal .cheese-lounge-close svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* 가로 탭 — 항목이 7개라 좁은 화면에서는 가로 스크롤한다. */
+#cheese-lounge-modal .cheese-lounge-tabs {
+  font-family: var(--cheese-lounge-font, inherit);
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 0 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--cheese-lounge-border);
+}
+
+#cheese-lounge-modal .cheese-lounge-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+#cheese-lounge-modal .cheese-lounge-tabs button {
+  position: relative;
+  flex: none;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  color: var(--cheese-lounge-dim);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+#cheese-lounge-modal .cheese-lounge-tabs button:hover {
+  background: var(--cheese-lounge-hover);
+}
+
+#cheese-lounge-modal .cheese-lounge-tabs button.is-active {
+  color: var(--cheese-lounge-fg);
+  border-bottom-color: var(--cheese-lounge-fg);
+}
+
+/* 탭에도 새 글 점을 띄운다(어느 탭이 새 글인지 알 수 있게). */
+#cheese-lounge-modal .cheese-lounge-tabs button.has-new::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ff5454;
+}
+
+#cheese-lounge-modal .cheese-lounge-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+/* 로딩 스켈레톤 — 실제 항목(.cheese-lounge-item)과 같은 패딩·간격을 써서
+   목록이 도착했을 때 레이아웃이 튀지 않게 한다. */
+#cheese-lounge-modal .cheese-lounge-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 14px;
+}
+
+#cheese-lounge-modal .cheese-lounge-sk-line {
+  position: relative;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--cheese-lounge-hover, rgba(0, 0, 0, 0.06));
+}
+
+#cheese-lounge-modal .cheese-lounge-sk-title {
+  width: 88%;
+  height: 13px;
+}
+
+#cheese-lounge-modal .cheese-lounge-sk-title.is-short {
+  width: 62%;
+}
+
+#cheese-lounge-modal .cheese-lounge-sk-date {
+  width: 96px;
+  height: 10px;
+}
+
+/* 훑고 지나가는 광택. 검색 결과 스켈레톤과 같은 타이밍(1.25s)을 쓴다.
+   기본(라이트)은 어두운 쪽으로, 다크는 흰 쪽으로 훑어야 보인다. */
+#cheese-lounge-modal .cheese-lounge-sk-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 0, 0, 0.06),
+    transparent
+  );
+  animation: cheese-search-skeleton 1.25s infinite;
+}
+
+html.theme_dark #cheese-lounge-modal .cheese-lounge-sk-line::after,
+.theme_dark #cheese-lounge-modal .cheese-lounge-sk-line::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.28),
+    transparent
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #cheese-lounge-modal .cheese-lounge-sk-line::after {
+    animation: none;
+  }
+}
+
+#cheese-lounge-modal .cheese-lounge-empty {
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--cheese-lounge-dim, rgba(0, 0, 0, 0.55));
+}
+
+#cheese-lounge-modal .cheese-lounge-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 14px;
+  color: inherit;
+  text-decoration: none;
+}
+
+#cheese-lounge-modal .cheese-lounge-item:hover {
+  background: var(--cheese-lounge-hover, rgba(0, 0, 0, 0.05));
+}
+
+/* 제목은 2줄까지만 자른다. ⚠ -webkit-box 를 쓰므로 flex 로 아이콘을 배치할 수 없다.
+   사진 아이콘은 인라인으로 흘려보내 제목 끝에 자연스럽게 붙게 한다. */
+#cheese-lounge-modal .cheese-lounge-item-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+#cheese-lounge-modal .cheese-lounge-photo {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-left: 4px;
+  vertical-align: -0.15em;
+  opacity: 0.7;
+}
+
+#cheese-lounge-modal .cheese-lounge-item-date {
+  font-size: 11px;
+  color: var(--cheese-lounge-dim, rgba(0, 0, 0, 0.55));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 시청자 배지 위치(카드식 배치 전용). data-badge-pos: tl|tr|bl|br.
+   기본 규칙이 left/top 8px 이므로 반대편만 뒤집어 준다. */
+#cheese-follow-preview[data-badge-pos="tr"] .cheese-follow-preview-live-badge {
+  left: auto !important;
+  right: 8px;
+}
+
+#cheese-follow-preview[data-badge-pos="bl"] .cheese-follow-preview-live-badge {
+  top: auto !important;
+  bottom: 8px;
+}
+
+#cheese-follow-preview[data-badge-pos="br"] .cheese-follow-preview-live-badge {
+  left: auto !important;
+  right: 8px;
+  top: auto !important;
+  bottom: 8px;
+}
+
+/* 헤더 항목별 사용자 지정 색. JS 가 --cheese-fp-<part>-fg 를 인라인으로 넣고,
+   꺼져 있으면 변수를 지워 기존(테마) 색으로 되돌아간다(두 번째 인자가 원래 값). */
+#cheese-follow-preview .cheese-follow-preview-meta-title {
+  color: var(--cheese-fp-title-fg, var(--cheese-fp-head-fg, #fff));
+}
+
+#cheese-follow-preview .cheese-follow-preview-meta-name {
+  color: var(
+    --cheese-fp-name-fg,
+    var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.92))
+  );
+}
+
+#cheese-follow-preview .cheese-follow-preview-meta-elapsed {
+  color: var(
+    --cheese-fp-elapsed-fg,
+    var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.92))
+  );
+}
+
+/* 카테고리는 pill 이라 글자 외에 테두리·배경도 함께 파생한 값을 쓴다. */
+#cheese-follow-preview .cheese-follow-preview-meta-category {
+  color: var(
+    --cheese-fp-category-fg,
+    var(--cheese-fp-head-fg-soft, rgba(255, 255, 255, 0.88))
+  );
+  border-color: var(
+    --cheese-fp-category-border,
+    var(--cheese-fp-head-border, rgba(255, 255, 255, 0.28))
+  );
+  background: var(--cheese-fp-category-bg, transparent);
+}
+
+/* 무한 스크롤 끝 안내 */
+#cheese-lounge-modal .cheese-lounge-end {
+  padding: 14px 12px 18px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--cheese-lounge-dim, rgba(0, 0, 0, 0.45));
+}
+
+/* 최상단 이동 FAB. 모달 우하단에 떠 있고, 2페이지 이상 로드되고 어느 정도 내려가야
+   나타난다(.is-shown). 모달이 position:fixed 이므로 absolute 기준이 모달이다. */
+#cheese-lounge-modal .cheese-lounge-top {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--cheese-lounge-border, rgba(0, 0, 0, 0.12));
+  border-radius: 50%;
+  background: var(--cheese-lounge-bg, #fff);
+  color: var(--cheese-lounge-fg, #17171c);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+#cheese-lounge-modal .cheese-lounge-top.is-shown {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+#cheese-lounge-modal .cheese-lounge-top:hover {
+  background: var(--cheese-lounge-hover, rgba(0, 0, 0, 0.05));
+}
+
+#cheese-lounge-modal .cheese-lounge-top svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #cheese-lounge-modal .cheese-lounge-top {
+    transition: none;
+  }
+}
+
+/* 라운지 소식 버튼이 헤더 우측에 하나 더 들어가면 검색창과 버튼들이 붙어 보인다.
+   1200~1265px 구간에서만 검색창 컨테이너 우측 여백을 늘려 자리를 만든다 — 이보다
+   넓으면 원래도 여유가 있고, 더 좁으면 치지직이 레이아웃을 따로 줄인다.
+   (클래스 해시가 바뀌어도 되도록 form[role="search"] 를 품은 요소로 찾는다.) */
+@media (min-width: 1200px) and (max-width: 1265px) {
+  html.cheese-lounge-on header#header :has(> form[role="search"]) {
+    left: calc(50% - 40px);
+  }
+}
+
+/* ── 채팅 닉네임 숨김 ──────────────────────────────────────────────────────
+   ⚠ '숨길 행에 클래스를 붙이는' 방식이면 chatTimestamp.js 의 행 처리가 rAF 배치로
+   밀리는 동안 치지직이 먼저 렌더해 닉네임이 한 프레임 번쩍인다(플로팅 버튼 클릭 후
+   과거 채팅으로 이동할 때 특히 눈에 띔). 그래서 기능이 켜지면(html 게이트 클래스)
+   일단 전부 숨기고, 역할 판정으로 예외 마커(.cheese-chat-nick-shown)가 붙은 행은
+   :not() 으로 걸러 아예 선택하지 않는다. 판정 전에는 숨겨져 있어 깜빡임이 없다.
+   ⚠ :not() 은 반드시 '마커가 붙는 행 요소'에 붙여야 한다. 조상 아무 곳에나 두면
+   중간 컨테이너가 :not() 을 만족해 예외 행까지 숨겨진다(실제로 겪은 버그).
+   ⚠ 예외를 display:revert 로 되살리는 방식도 안 된다 — 치지직의 display:flex 까지
+   되돌려 chatFontScale.css 의 배지 크기 계산이 무너진다. */
+/* ⚠ 바깥 래퍼는 메시지 종류마다 다르다(실측):
+     일반 채팅        button._nickname_…
+     후원/구독/미션   button._profile_button_…
+     플로팅 새 채팅   span._username_…
+   반면 그 안쪽은 모두 같다:
+     span._container_… ┬ span._wrapper_…   ← 배지
+                       └ span._nickname_…  ← 닉네임 텍스트
+   그래서 바깥 래퍼를 조건에 넣지 않고, 공통인 _container_ 의 '직계 자식'만 겨냥한다.
+   (바깥을 통째로 숨기면 배지까지 사라지므로 안쪽만 골라야 한다.) */
+html.cheese-chat-nick-hide-on
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  ):not(.cheese-chat-nick-shown)
+  [class*="_container_"]
+  > [class*="_nickname_"] {
+  display: none !important;
+}
+
+/* 닉네임 뒤 구분 문자(콜론 등)가 별도 요소로 있으면 함께 감춘다. */
+html.cheese-chat-nick-hide-on
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  ):not(.cheese-chat-nick-shown)
+  [class*="_nickname_"]
+  + [class*="_colon_"] {
+  display: none !important;
+}
+
+/* 플로팅 '새 채팅' 버튼도 구조가 같다(_username_ > _container_ > _wrapper_/_nickname_).
+   배지는 남기고 닉네임 텍스트만 숨긴다 — 채팅 행과 동일한 기준. */
+html.cheese-chat-nick-hide-on
+  button[class*="_button_chatting_"]:not(.cheese-chat-nick-shown)
+  [class*="_container_"]
+  > [class*="_nickname_"] {
+  display: none !important;
+}
+
+/* ── 채팅 배지 숨김(닉네임 숨김과 독립 옵션) ────────────────────────────────
+   배지는 닉네임 묶음 안의 _wrapper_ 에 들어 있다(실측 구조):
+     button._nickname_…  >  span._container_…  >  span._wrapper_…   ← 배지
+                                                >  span._nickname_… ← 닉네임
+   닉네임 숨김과 같은 예외 마커(.cheese-chat-nick-shown)로 방장·매니저·파트너를
+   가려낸다. */
+/* ⚠ 예외를 'display: revert' 로 되살리면 안 된다 — revert 는 치지직 자신의 display
+   (flex)까지 되돌려 UA 기본값(inline)이 되고, 그러면 chatFontScale.css 가 계산하는
+   배지 아이콘 크기(flex/width)가 무너져 배지가 이상한 크기로 보인다.
+   그래서 예외 행은 아예 선택하지 않는다 — :not() 으로 걸러 display 를 건드리지 않는다. */
+html.cheese-chat-badge-hide-on
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  ):not(.cheese-chat-nick-shown)
+  [class*="_container_"]
+  > [class*="_wrapper_"],
+html.cheese-chat-badge-hide-on
+  button[class*="_button_chatting_"]:not(.cheese-chat-nick-shown)
+  [class*="_container_"]
+  > [class*="_wrapper_"] {
+  display: none !important;
+}
+
+/* 팔로워 수 정확값 툴팁 — 라이브 시작 시간 툴팁(.cheese-live-start-tooltip)의 스타일을
+   그대로 재사용하고, 앵커(position:relative)와 hover 표시 조건만 여기서 추가한다. */
+/* ⚠ 툴팁이 absolute 라 이 요소가 '위치 기준(containing block)'이 돼야 한다.
+   치지직이 같은 특이성으로 position 을 지정하면 로드 순서에 따라 밀릴 수 있어
+   !important 로 고정한다 — 이게 안 걸리면 툴팁이 조상 어딘가를 기준으로 잡아
+   팔로워 텍스트 바로 아래가 아닌 엉뚱한 곳에 뜬다.
+   inline 요소(span)는 relative 여도 기준 박스가 줄 단위로 쪼개져 위치가 어긋나므로
+   inline-block 으로 승격한다. */
+.cheese-follower-tooltip-target {
+  position: relative !important;
+}
+
+/* span 등 인라인 요소만 승격한다 — p 처럼 이미 블록인 요소에 쓰면 줄바꿈이 달라진다. */
+span.cheese-follower-tooltip-target {
+  display: inline-block;
+}
+
+/* ⚠ 기본 규칙의 top: calc(100% - 48px) 는 라이브 상세의 큰 _data_ 블록에 맞춘 값이다.
+   팔로워 텍스트는 한 줄짜리라 그대로 쓰면 요소 위로 떠버린다 — 바로 아래로 재지정. */
+.cheese-follower-tooltip-target .cheese-live-start-tooltip {
+  top: calc(100% + 6px);
+}
+
+.cheese-follower-tooltip-target:hover .cheese-live-start-tooltip,
+.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
+  display: inline-flex;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
+}
+
+/* p 는 블록이라 가로 폭이 부모 전체다. 기본값(left:50% + translateX(-50%))으로 가운데
+   정렬하면 팔로워 글자가 아니라 '줄 전체'의 중앙에 붙어 한참 오른쪽에 뜬다.
+   왼쪽 끝(글자 시작점)에 맞춘다. span 은 inline-block 이라 폭이 글자만큼이므로 그대로 둔다. */
+p.cheese-follower-tooltip-target .cheese-live-start-tooltip {
+  left: 0;
+  transform: translateX(0) translateY(2px);
+}
+
+p.cheese-follower-tooltip-target:hover .cheese-live-start-tooltip,
+p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
+  transform: translateX(0) translateY(0);
+}
+
+/* ── PIP 채팅(치지직 PIP 안에 채팅 이어 붙이기) ───────────────────────────
+   라이브에서 SPA 로 다른 페이지에 가면 치지직은 플레이어만 PIP 로 남기고 채팅
+   aside 는 언마운트한다(실측). 그래서 채팅 전용 URL 을 iframe 으로 새로 띄운다.
+
+   ⚠ 화면에 fixed 로 따로 띄우지 않고 PIP section 안에 넣는다. PIP 를 드래그하면 transform
+   이 section 에 걸리므로, 안에 넣어야 채팅이 함께 따라간다.
+
+   ⚠ 치지직 순정 PIP 에는 flex-direction:column 도 height 도 없다(세로 배치는 우리가
+   만들어야 한다). PIP 의 transform(드래그 위치)과 width 는 손대지 않는다. */
+/* ⚠ 치지직 CSS 모듈(_container_wj4te_1 등)이 같은 속성을 더 높은 우선순위로 잡고 있어
+   맨 클래스로는 지지 않는다 — 이 파일 곳곳에서 쓰는 방식대로 !important 로 고정한다.
+   순정 PIP 에는 height 도 flex-direction 도 없으므로 세로 배치는 우리가 만들어야 한다. */
+.cheese-pip-chat-host {
+  display: flex !important;
+  flex-direction: column !important;
+  /* ⚠ 영상 래퍼(_wrapper_)에는 자체 높이가 없다 — 원래 section 높이를 flex 로 꽉 채워
+     쓰는 구조라, height:auto 로 두면 영상이 0px 로 접힌다(실측: wrapper.height=0px).
+     그래서 '영상 높이 + 채팅 높이'를 우리가 직접 계산해 section 높이로 준다.
+     영상 높이는 마커를 붙이기 전에 실측해 --cheese-pip-video-h 로 넣는다(JS).
+     width 는 치지직이 정한 값을 그대로 둔다. */
+  height: calc(
+    var(--cheese-pip-video-h, 225px) + var(--cheese-pip-chat-height, 450px)
+  ) !important;
+  /* JS 가 채팅 높이를 (100vh - 225 - 46) 로 이미 제한한다. 여기서는 계산이 어긋나
+     넘치는 경우의 안전망만 둔다(값이 겹쳐도 더 작은 쪽이 이긴다). */
+  max-height: 100vh !important;
+}
+.cheese-pip-chat {
+  position: relative;
+  flex: 0 0 auto !important;
+  display: flex !important;
+  flex-direction: column;
+  width: 100% !important;
+  height: var(--cheese-pip-chat-height, 450px) !important;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--cheese-platter-background-neutral-base);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0 0 8px 8px;
+}
+
+/* 영상 래퍼는 자체 높이가 없으므로(위 참고) 우리가 16:9 높이를 직접 지정한다.
+   flex:0 0 auto 로 고정해 채팅이 영상을 밀거나 눌리지 않게 한다. */
+.cheese-pip-chat-host > [class*="_wrapper_"] {
+  flex: 0 0 auto !important;
+  height: var(--cheese-pip-video-h, 225px) !important;
+  min-height: 0 !important;
+}
+
+.cheese-pip-chat iframe {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  /* 손잡이가 덮는 만큼 비워 둔다(채팅 입력창이 손잡이에 가리지 않도록). */
+  margin-bottom: 10px;
+}
+
+/* 위쪽 경계를 잡아 채팅 높이 조절(폭은 PIP 를 그대로 따라간다). */
+/* 높이 조절 손잡이 — 채팅 아래쪽 끝(= PIP section 하단). 아래로 끌면 채팅이 커진다.
+   ⚠ iframe 은 별도 문서라 그 위에서 시작한 드래그는 우리에게 오지 않는다. 손잡이를
+   iframe '위에' 겹쳐 깔고(z-index) 잡을 수 있는 두께를 줘야 실제로 잡힌다. */
+.cheese-pip-chat__handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 10px;
+  cursor: ns-resize;
+  z-index: 2;
+}
+.cheese-pip-chat__handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 3px;
+  opacity: 1;
+  border-radius: 999px;
+  background: var(--cheese-platter-content-neutral-cool-weak);
+}
+.cheese-pip-chat__handle:hover {
+  background: var(--cheese-platter-border-brand-base, #32bb81);
+  opacity: 0.5;
+}
+
+/* 드래그 중에는 iframe 이 포인터를 가로채 커서가 튀거나 드래그가 끊긴다 — 잠시 막는다. */
+.cheese-pip-chat.is-resizing iframe {
+  pointer-events: none;
 }

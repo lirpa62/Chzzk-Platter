@@ -48,11 +48,13 @@
     "cheeseVodChapterHide",
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
+    "cheeseChatWordFilters",
     "cheeseCardLivePreview",
     "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewDefaultVolume",
     "cheeseCardPreviewWheelDelaySec",
+    "cheeseFollowerExact",
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
     "cheeseChannelLiveProfileBackground",
@@ -61,6 +63,7 @@
     "cheeseChatButtonWrap",
     "cheeseChatFoldPersist",
     "cheeseChatPopupPip",
+    "cheesePipChatWidth",
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatTimeFormat",
@@ -91,6 +94,8 @@
     "cheeseFollowPreviewFullTitle",
     "cheeseFollowPreviewHeaderBottom",
     "cheeseFollowPreviewCardLayout",
+    "cheeseFollowPreviewBadgePos",
+    "cheeseFollowPreviewColors",
     "cheeseFollowPreviewHiddenParts",
     "cheeseFollowPreviewAlwaysViewers",
     "cheeseFollowPreviewAlwaysElapsed",
@@ -101,6 +106,9 @@
     "cheeseFollowPreviewThumbOnly",
     "cheeseFollowPreviewVolume",
     "cheeseFollowRefreshSec",
+    "cheeseLoungeRefreshMin",
+    // 탭별 '읽음' 기준 feedId. 복원하면 다른 기기에서도 읽은 글이 새 글로 뜨지 않는다.
+    "cheeseLoungeRead",
     "cheeseFollowCustomSort",
     "cheeseFollowFavSortMode",
     "cheeseFollowFavOrder",
@@ -131,6 +139,7 @@
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
+    "cheeseLiveSeekBarBottom",
     "cheeseLiveViewerCountInline",
     "cheeseLiveViewerCountHidden",
     "cheeseLiveTagFilterButton",
@@ -408,7 +417,10 @@
       );
     } catch {
       masterEnabledInput.disabled = false;
-      settingsToast("설정은 저장했지만 새로고침 안내를 표시하지 못했습니다.", "error");
+      settingsToast(
+        "설정은 저장했지만 새로고침 안내를 표시하지 못했습니다.",
+        "error",
+      );
     }
   });
 
@@ -498,8 +510,7 @@
   function reflectUpdateNoticeToastPosition(positionRaw) {
     const position = normalizeUpdateNoticeToastPosition(positionRaw);
     updateNoticeToastPositionButtons.forEach((button) => {
-      const active =
-        button.dataset.updateNoticeToastPositionValue === position;
+      const active = button.dataset.updateNoticeToastPositionValue === position;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-checked", String(active));
     });
@@ -769,6 +780,8 @@
     "clipLiveButton",
     "sbFollowFavEnabled",
     "sbFollowGroupEnabled",
+    // 라운지 소식은 기본 숨김(체크=숨김). content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
+    "loungeNews",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -912,7 +925,7 @@
           ? CLIP_EDITOR_BOUNDARY_STEP_KEY
           : type === "boundaryOuter"
             ? CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY
-          : CLIP_EDITOR_ARROW_STEP_KEY;
+            : CLIP_EDITOR_ARROW_STEP_KEY;
     setClipEditorStepValue(picker, value);
     try {
       cachedStorageSet({ [key]: value });
@@ -941,6 +954,7 @@
     });
     reflectClipEditorStepAvailability();
     reflectChatTimeFormatAvailability();
+    reflectLoungeRefreshAvailability();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -1074,7 +1088,9 @@
   }
 
   function normalizeChatTimeColor(value, fallback) {
-    const color = String(value || "").trim().toLowerCase();
+    const color = String(value || "")
+      .trim()
+      .toLowerCase();
     return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
   }
 
@@ -1086,10 +1102,7 @@
         config.light,
         CHAT_TIME_COLORS_DEFAULT.light,
       ),
-      dark: normalizeChatTimeColor(
-        config.dark,
-        CHAT_TIME_COLORS_DEFAULT.dark,
-      ),
+      dark: normalizeChatTimeColor(config.dark, CHAT_TIME_COLORS_DEFAULT.dark),
     };
   }
 
@@ -1142,10 +1155,7 @@
       editorDisabled,
     );
     if (chatTimeColorReset) chatTimeColorReset.disabled = editorDisabled;
-    chatTimeColorEditor?.setAttribute(
-      "aria-disabled",
-      String(editorDisabled),
-    );
+    chatTimeColorEditor?.setAttribute("aria-disabled", String(editorDisabled));
     chatTimeColorItem?.classList.toggle("is-locked", unavailable);
     chatTimeColorItem?.classList.toggle("is-disabled", editorDisabled);
   }
@@ -1186,9 +1196,7 @@
   (async () => {
     try {
       const data = await cachedStorageGet(CHAT_TIME_COLORS_KEY);
-      chatTimeColors = normalizeChatTimeColors(
-        data?.[CHAT_TIME_COLORS_KEY],
-      );
+      chatTimeColors = normalizeChatTimeColors(data?.[CHAT_TIME_COLORS_KEY]);
     } catch {
       chatTimeColors = { ...CHAT_TIME_COLORS_DEFAULT };
     }
@@ -1580,12 +1588,7 @@
   let videoFilterGlobalDefault = { enabled: false, preset: "default" };
   let clipAudioMixerPreset = { enabled: true, preset: "default" };
   let clipVideoFilterPreset = { enabled: true, preset: "beginner" };
-  const GLOBAL_DEFAULT_PICKER_TYPES = [
-    "audio",
-    "video",
-    "clip",
-    "clip-video",
-  ];
+  const GLOBAL_DEFAULT_PICKER_TYPES = ["audio", "video", "clip", "clip-video"];
 
   function normalizeGlobalDefaultConfig(value) {
     const cfg = value && typeof value === "object" ? value : {};
@@ -2249,6 +2252,8 @@
       on = data?.[LIVE_SEEK_BAR_KEY] !== false;
     } catch {}
     if (liveSeekBarInput) liveSeekBarInput.checked = on;
+    // 체크 상태가 정해진 뒤 하위 항목(위치) 잠금을 다시 평가한다.
+    reflectLsbAvailability();
   }
   liveSeekBarInput?.addEventListener("change", () => {
     try {
@@ -2258,6 +2263,186 @@
     } catch {}
   });
   loadLiveSeekBar();
+
+  // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
+  // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
+  const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
+  const CWF_MAX = 200;
+  let chatWordFilters = [];
+  const cwfInput = document.querySelector("[data-cwf-input]");
+  const cwfRegex = document.querySelector("[data-cwf-regex]");
+  const cwfAdd = document.querySelector("[data-cwf-add]");
+  const cwfList = document.querySelector("[data-cwf-list]");
+  const cwfError = document.querySelector("[data-cwf-error]");
+
+  function cwfShowError(message) {
+    if (!cwfError) return;
+    cwfError.textContent = message || "";
+    cwfError.hidden = !message;
+  }
+
+  function cwfRender() {
+    if (!cwfList) return;
+    if (!chatWordFilters.length) {
+      cwfList.innerHTML = `<li class="settings-word-filter-empty">등록된 규칙이 없습니다.</li>`;
+      return;
+    }
+    cwfList.innerHTML = chatWordFilters
+      .map(
+        (f, i) =>
+          `<li class="settings-word-filter-item">` +
+          `<span class="settings-word-filter-kind">${f.regex ? ".*" : "가나"}</span>` +
+          `<span class="settings-word-filter-pattern">${escapeHtml(f.pattern)}</span>` +
+          `<button type="button" data-cwf-remove="${i}" aria-label="삭제">×</button>` +
+          `</li>`,
+      )
+      .join("");
+  }
+
+  function cwfSave() {
+    try {
+      cachedStorageSet({ [CHAT_WORD_FILTER_KEY]: chatWordFilters });
+    } catch {}
+  }
+
+  function cwfAddCurrent() {
+    const pattern = String(cwfInput?.value || "").trim();
+    if (!pattern) return;
+    const isRegex = cwfRegex?.checked === true;
+    if (isRegex) {
+      // 잘못된 정규식은 저장하지 않는다 — 런타임에서 조용히 무시되면 원인을 알기 어렵다.
+      try {
+        new RegExp(pattern);
+      } catch (error) {
+        cwfShowError(
+          `정규식이 올바르지 않습니다: ${error instanceof Error ? error.message : error}`,
+        );
+        return;
+      }
+    }
+    if (chatWordFilters.length >= CWF_MAX) {
+      cwfShowError(`규칙은 최대 ${CWF_MAX}개까지 등록할 수 있습니다.`);
+      return;
+    }
+    const dup = chatWordFilters.some(
+      (f) => f.pattern === pattern && f.regex === isRegex,
+    );
+    if (dup) {
+      cwfShowError("이미 등록된 규칙입니다.");
+      return;
+    }
+    chatWordFilters.push({ pattern, regex: isRegex });
+    cwfShowError("");
+    if (cwfInput) cwfInput.value = "";
+    cwfRender();
+    cwfSave();
+  }
+
+  cwfAdd?.addEventListener("click", cwfAddCurrent);
+  cwfInput?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    // ⚠ 한글 입력 중(조합 중)의 Enter 는 '글자 확정'이지 '추가'가 아니다. 이걸 거르지
+    // 않으면 "ㅋㅋㅋ" 확정 Enter 로 한 번, 이어진 Enter 로 남은 조각이 또 추가된다.
+    // keyCode 229 는 구형 브라우저·IME 폴백.
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    cwfAddCurrent();
+  });
+  cwfList?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-cwf-remove]");
+    if (!btn) return;
+    const i = Number(btn.dataset.cwfRemove);
+    if (!Number.isInteger(i)) return;
+    chatWordFilters.splice(i, 1);
+    cwfShowError("");
+    cwfRender();
+    cwfSave();
+  });
+  (async () => {
+    try {
+      const data = await cachedStorageGet(CHAT_WORD_FILTER_KEY);
+      const list = data?.[CHAT_WORD_FILTER_KEY];
+      chatWordFilters = Array.isArray(list)
+        ? list
+            .map((f) => ({
+              pattern: String(f?.pattern ?? "").trim(),
+              regex: f?.regex === true,
+            }))
+            .filter((f) => f.pattern)
+        : [];
+    } catch {
+      chatWordFilters = [];
+    }
+    cwfRender();
+  })();
+
+  // ── 되감기 바 위치(px, 기본 60) ───────────────────────────────────────────
+  // 슬라이더와 숫자 입력이 같은 값을 공유한다. 되감기 바 표시가 꺼져 있으면 잠근다.
+  const LIVE_SEEK_BAR_BOTTOM_KEY = "cheeseLiveSeekBarBottom";
+  const LSB_BOTTOM_DEFAULT = 60;
+  const LSB_BOTTOM_MIN = 35;
+  const LSB_BOTTOM_MAX = 445;
+  const lsbRange = document.querySelector("[data-live-seek-bar-bottom]");
+  const lsbNum = document.querySelector("[data-live-seek-bar-bottom-num]");
+  const lsbReset = document.querySelector("[data-live-seek-bar-bottom-reset]");
+  const lsbItem = document.querySelector("[data-live-seek-bar-bottom-item]");
+
+  function normalizeLsbBottom(value) {
+    // ⚠ null/"" 은 Number() 가 0 으로 바꿔 버려 min(35)로 눌린다. 미설정은 기본값으로.
+    if (value == null || value === "") return LSB_BOTTOM_DEFAULT;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return LSB_BOTTOM_DEFAULT;
+    return Math.min(LSB_BOTTOM_MAX, Math.max(LSB_BOTTOM_MIN, n));
+  }
+
+  function reflectLsbBottom(value) {
+    const v = normalizeLsbBottom(value);
+    if (lsbRange) lsbRange.value = String(v);
+    if (lsbNum) lsbNum.value = String(v);
+  }
+
+  // 되감기 바가 꺼져 있으면 위치를 바꿀 이유가 없다 — 채팅 시간/형식과 같은 방식.
+  function reflectLsbAvailability() {
+    // ⚠ loadLiveSeekBar()(위쪽)도 이 함수를 부른다. 그 시점엔 아래 const 들이 아직
+    // 초기화 전일 수 있어(TDZ) 캡처 변수 대신 DOM 에서 직접 찾는다.
+    const off =
+      document.querySelector("[data-live-seek-bar]")?.checked !== true;
+    [
+      "[data-live-seek-bar-bottom]",
+      "[data-live-seek-bar-bottom-num]",
+      "[data-live-seek-bar-bottom-reset]",
+    ].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (el) el.disabled = off;
+    });
+    document
+      .querySelector("[data-live-seek-bar-bottom-item]")
+      ?.classList.toggle("is-locked", off);
+  }
+
+  function saveLsbBottom(value) {
+    const v = normalizeLsbBottom(value);
+    reflectLsbBottom(v);
+    try {
+      cachedStorageSet({ [LIVE_SEEK_BAR_BOTTOM_KEY]: v });
+    } catch {}
+  }
+
+  lsbRange?.addEventListener("input", () => saveLsbBottom(lsbRange.value));
+  lsbNum?.addEventListener("change", () => saveLsbBottom(lsbNum.value));
+  lsbReset?.addEventListener("click", () => saveLsbBottom(LSB_BOTTOM_DEFAULT));
+  liveSeekBarInput?.addEventListener("change", reflectLsbAvailability);
+  (async () => {
+    let v = LSB_BOTTOM_DEFAULT;
+    try {
+      const data = await cachedStorageGet(LIVE_SEEK_BAR_BOTTOM_KEY);
+      if (data?.[LIVE_SEEK_BAR_BOTTOM_KEY] != null) {
+        v = data[LIVE_SEEK_BAR_BOTTOM_KEY];
+      }
+    } catch {}
+    reflectLsbBottom(v);
+    reflectLsbAvailability();
+  })();
 
   // ── 볼륨/게인 % 표시(전역, 기본 ON) ───────────────────────────────────────
   // 체크=표시. 미설정 시 ON. 각각 독립.
@@ -2348,7 +2533,8 @@
     forward: { on: true, x: 70, y: 50 },
   };
   const osdPos = JSON.parse(JSON.stringify(OSD_POS_DEFAULT)); // 현재 상태(로드 후 갱신)
-  const clampPct = (n) => Math.min(100, Math.max(0, Math.round(Number(n) || 0)));
+  const clampPct = (n) =>
+    Math.min(100, Math.max(0, Math.round(Number(n) || 0)));
   function saveOsdPos() {
     try {
       cachedStorageSet({ [ACTION_OVERLAY_POS_KEY]: osdPos });
@@ -2916,9 +3102,7 @@
 
   // 플레이어 빠른 게인과 믹서 패널 게인 슬라이더의 공통 조절 간격(1~10%, 기본 5).
   const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
-  const mixerGainStepInput = document.querySelector(
-    "[data-mixer-gain-step]",
-  );
+  const mixerGainStepInput = document.querySelector("[data-mixer-gain-step]");
   function clampMixerGainStep(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return 5;
@@ -2947,7 +3131,14 @@
   }
 
   // 문자열 값 세그먼티드(정렬 기준 등). bindGainRangeSegmented의 문자열 버전.
-  function bindStringSegmented(group, dataAttr, storageKey, allowed, def, onChange) {
+  function bindStringSegmented(
+    group,
+    dataAttr,
+    storageKey,
+    allowed,
+    def,
+    onChange,
+  ) {
     if (!group) return;
     const buttons = Array.from(group.querySelectorAll(`[data-${dataAttr}]`));
     const toKey = dataAttr.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -3084,12 +3275,7 @@
     5,
     30,
   );
-  bindCustomFollowCount(
-    "[data-cf-group-more]",
-    "cheeseFollowGroupMore",
-    5,
-    30,
-  );
+  bindCustomFollowCount("[data-cf-group-more]", "cheeseFollowGroupMore", 5, 30);
 
   // ── 즐겨찾기 커스텀 순서 편집기(설정 팝업) ──────────────────────────────
   // 저장키: cheeseFollowFavOrder(channelId 배열), cheeseFollowFavMeta({id,name,imageUrl}[]).
@@ -3182,7 +3368,9 @@
         cfFavOrder = Array.isArray(d?.[CF_FAV_ORDER_KEY])
           ? d[CF_FAV_ORDER_KEY].map(String)
           : [];
-        cfFavMeta = Array.isArray(d?.[CF_FAV_META_KEY]) ? d[CF_FAV_META_KEY] : [];
+        cfFavMeta = Array.isArray(d?.[CF_FAV_META_KEY])
+          ? d[CF_FAV_META_KEY]
+          : [];
       } catch {}
       renderCfFavOrderList();
     })();
@@ -3212,7 +3400,9 @@
     // 커서 y 아래에 올 '기준 요소'(그 앞에 dragEl 삽입). 없으면 맨 끝(append).
     const cfDragAfter = (y) => {
       const items = [
-        ...listEl.querySelectorAll(".cf-fav-order-item:not(.cf-fav-order-dragging)"),
+        ...listEl.querySelectorAll(
+          ".cf-fav-order-item:not(.cf-fav-order-dragging)",
+        ),
       ];
       let closest = { offset: -Infinity, el: null };
       for (const child of items) {
@@ -3277,16 +3467,24 @@
       let sec = Number(secRaw);
       if (!Number.isFinite(sec) || sec <= 0) sec = 0;
       const activeKey =
-        sec === 0 ? "0" : CF_REFRESH_PRESETS.includes(sec) ? String(sec) : "custom";
+        sec === 0
+          ? "0"
+          : CF_REFRESH_PRESETS.includes(sec)
+            ? String(sec)
+            : "custom";
       cfRefreshButtons.forEach((btn) => {
         const active = btn.dataset.cfRefresh === activeKey;
         btn.classList.toggle("is-active", active);
         btn.setAttribute("aria-checked", String(active));
       });
-      if (cfRefreshCustomRow) cfRefreshCustomRow.hidden = activeKey !== "custom";
+      if (cfRefreshCustomRow)
+        cfRefreshCustomRow.hidden = activeKey !== "custom";
     }
     function saveCfCustom() {
-      const sec = clampCustom(cfRefreshCustomSec?.value, CF_REFRESH_CUSTOM_DEFAULT);
+      const sec = clampCustom(
+        cfRefreshCustomSec?.value,
+        CF_REFRESH_CUSTOM_DEFAULT,
+      );
       if (cfRefreshCustomSec) cfRefreshCustomSec.value = String(sec);
       try {
         cachedStorageSet({ [CF_REFRESH_KEY]: sec });
@@ -3300,7 +3498,10 @@
       } catch {}
       const n = Number(sec);
       const customInit =
-        Number.isFinite(n) && n >= 3 && n <= 600 && !CF_REFRESH_PRESETS.includes(n)
+        Number.isFinite(n) &&
+        n >= 3 &&
+        n <= 600 &&
+        !CF_REFRESH_PRESETS.includes(n)
           ? Math.round(n)
           : CF_REFRESH_CUSTOM_DEFAULT;
       if (cfRefreshCustomSec) cfRefreshCustomSec.value = String(customInit);
@@ -3425,9 +3626,7 @@
     if (!button) return;
     event.preventDefault();
     const key = button.dataset.settingsInfo;
-    const panel = document.querySelector(
-      `[data-settings-info-panel="${key}"]`,
-    );
+    const panel = document.querySelector(`[data-settings-info-panel="${key}"]`);
     if (!panel) return;
     const next = panel.hidden;
     panel.hidden = !next;
@@ -3464,14 +3663,11 @@
   );
   if (integratedSearchClipMatchButtons.length) {
     const normalizeMatchMode = (value) =>
-      ["strict", "balanced", "loose"].includes(value)
-        ? value
-        : "balanced";
+      ["strict", "balanced", "loose"].includes(value) ? value : "balanced";
     const reflectMatchMode = (value) => {
       const normalized = normalizeMatchMode(value);
       integratedSearchClipMatchButtons.forEach((button) => {
-        const active =
-          button.dataset.integratedSearchClipsMatch === normalized;
+        const active = button.dataset.integratedSearchClipsMatch === normalized;
         button.classList.toggle("is-active", active);
         button.setAttribute("aria-checked", String(active));
       });
@@ -3513,9 +3709,7 @@
     following: { min: 0, max: 20 },
   };
   const sourcePresetButtons = Array.from(
-    document.querySelectorAll(
-      "[data-integrated-search-clips-source-preset]",
-    ),
+    document.querySelectorAll("[data-integrated-search-clips-source-preset]"),
   );
   const sourceCustom = document.querySelector(
     "[data-integrated-search-clips-source-custom]",
@@ -3552,10 +3746,7 @@
         return [
           key,
           Number.isFinite(number)
-            ? Math.min(
-                limits.max,
-                Math.max(limits.min, Math.round(number)),
-              )
+            ? Math.min(limits.max, Math.max(limits.min, Math.round(number)))
             : fallback,
         ];
       }),
@@ -3578,10 +3769,7 @@
       );
       const constrained = freeKeys.filter((key) => {
         const limits = SEARCH_CLIPS_SOURCE_LIMITS[key];
-        return (
-          provisional[key] < limits.min ||
-          provisional[key] > limits.max
-        );
+        return provisional[key] < limits.min || provisional[key] > limits.max;
       });
       if (!constrained.length) {
         freeKeys.forEach((key) => {
@@ -3607,14 +3795,12 @@
       ]),
     );
     let remainder =
-      100 -
-      Object.values(normalized).reduce((sum, number) => sum + number, 0);
+      100 - Object.values(normalized).reduce((sum, number) => sum + number, 0);
     const byFraction = Object.keys(allocated).sort(
       (a, b) =>
         allocated[b] -
           Math.floor(allocated[b]) -
-          (allocated[a] - Math.floor(allocated[a])) ||
-        b.localeCompare(a),
+          (allocated[a] - Math.floor(allocated[a])) || b.localeCompare(a),
     );
     for (const key of byFraction) {
       if (
@@ -3667,9 +3853,7 @@
       }
     }
     if (sourceEffective) {
-      sourceEffective.textContent = formatSourceEffective(
-        currentSourceWeights,
-      );
+      sourceEffective.textContent = formatSourceEffective(currentSourceWeights);
     }
   };
   const saveSourceAllocation = (preset, weights) => {
@@ -3713,8 +3897,7 @@
         (preset === "custom"
           ? data?.[SEARCH_CLIPS_SOURCE_WEIGHTS_KEY]
           : undefined);
-      currentCustomSourceWeights =
-        normalizeSourceWeights(savedCustomWeights);
+      currentCustomSourceWeights = normalizeSourceWeights(savedCustomWeights);
       reflectSourceAllocation(
         preset,
         preset === "custom"
@@ -3761,9 +3944,8 @@
         }
         currentSourceWeights = normalizeSourceWeights(readSourceWeights());
         if (sourceEffective) {
-          sourceEffective.textContent = formatSourceEffective(
-            currentSourceWeights,
-          );
+          sourceEffective.textContent =
+            formatSourceEffective(currentSourceWeights);
         }
       });
       sourceWeightSliders[key]?.addEventListener("change", () => {
@@ -3779,9 +3961,7 @@
 
   const SEARCH_CLIPS_DATE_FILTER_KEY = "cheeseSearchClipDateFilter";
   const integratedSearchClipDateButtons = Array.from(
-    document.querySelectorAll(
-      "[data-integrated-search-clips-date-filter]",
-    ),
+    document.querySelectorAll("[data-integrated-search-clips-date-filter]"),
   );
   if (integratedSearchClipDateButtons.length) {
     const normalizeDateFilter = (value) =>
@@ -3818,15 +3998,11 @@
 
   const SEARCH_CLIPS_DEFAULT_SORT_KEY = "cheeseSearchClipDefaultSort";
   const integratedSearchClipDefaultSortButtons = Array.from(
-    document.querySelectorAll(
-      "[data-integrated-search-clips-default-sort]",
-    ),
+    document.querySelectorAll("[data-integrated-search-clips-default-sort]"),
   );
   if (integratedSearchClipDefaultSortButtons.length) {
     const normalizeClipSort = (value) =>
-      ["relevant", "popular", "recent"].includes(value)
-        ? value
-        : "relevant";
+      ["relevant", "popular", "recent"].includes(value) ? value : "relevant";
     const reflectClipSort = (value) => {
       const normalized = normalizeClipSort(value);
       integratedSearchClipDefaultSortButtons.forEach((button) => {
@@ -3857,10 +4033,8 @@
     });
   }
 
-  const SEARCH_CLIPS_CANDIDATE_LIMIT_KEY =
-    "cheeseSearchClipCandidateLimit";
-  const SEARCH_CLIPS_CATEGORY_LIMIT_KEY =
-    "cheeseSearchClipCategoryLimit";
+  const SEARCH_CLIPS_CANDIDATE_LIMIT_KEY = "cheeseSearchClipCandidateLimit";
+  const SEARCH_CLIPS_CATEGORY_LIMIT_KEY = "cheeseSearchClipCategoryLimit";
   const SEARCH_CLIPS_LIMIT_DEFAULT = 1000;
   const SEARCH_CLIPS_LIMIT_MAX = 100000;
   const integratedSearchClipLimitInputs = {
@@ -3888,21 +4062,14 @@
       : fallback;
   };
   const formatClipLimit = (value) =>
-    normalizeClipLimit(
-      value,
-      SEARCH_CLIPS_LIMIT_DEFAULT,
-    ).toLocaleString("ko-KR");
+    normalizeClipLimit(value, SEARCH_CLIPS_LIMIT_DEFAULT).toLocaleString(
+      "ko-KR",
+    );
   if (Object.values(integratedSearchClipLimitInputs).some(Boolean)) {
     const reflectClipLimits = (candidate, category) => {
       const normalized = {
-        candidate: normalizeClipLimit(
-          candidate,
-          SEARCH_CLIPS_LIMIT_DEFAULT,
-        ),
-        category: normalizeClipLimit(
-          category,
-          SEARCH_CLIPS_LIMIT_DEFAULT,
-        ),
+        candidate: normalizeClipLimit(candidate, SEARCH_CLIPS_LIMIT_DEFAULT),
+        category: normalizeClipLimit(category, SEARCH_CLIPS_LIMIT_DEFAULT),
       };
       if (integratedSearchClipLimitInputs.candidate) {
         integratedSearchClipLimitInputs.candidate.value = formatClipLimit(
@@ -3960,8 +4127,9 @@
     )) {
       slider?.addEventListener("input", () => {
         if (integratedSearchClipLimitInputs[key]) {
-          integratedSearchClipLimitInputs[key].value =
-            formatClipLimit(slider.value);
+          integratedSearchClipLimitInputs[key].value = formatClipLimit(
+            slider.value,
+          );
         }
       });
       slider?.addEventListener("change", saveClipLimits);
@@ -3978,22 +4146,16 @@
     recent: 10,
   };
   const integratedSearchClipWeightInputs = {
-    title: document.querySelector(
-      "[data-integrated-search-clips-w-title]",
-    ),
+    title: document.querySelector("[data-integrated-search-clips-w-title]"),
     category: document.querySelector(
       "[data-integrated-search-clips-w-category]",
     ),
-    channel: document.querySelector(
-      "[data-integrated-search-clips-w-channel]",
-    ),
+    channel: document.querySelector("[data-integrated-search-clips-w-channel]"),
     read: document.querySelector("[data-integrated-search-clips-w-read]"),
     verified: document.querySelector(
       "[data-integrated-search-clips-w-verified]",
     ),
-    recent: document.querySelector(
-      "[data-integrated-search-clips-w-recent]",
-    ),
+    recent: document.querySelector("[data-integrated-search-clips-w-recent]"),
   };
   const normalizeClipWeights = (weights) => {
     const normalized = { ...SEARCH_CLIPS_WEIGHT_DEFAULTS };
@@ -4001,10 +4163,7 @@
       for (const key of Object.keys(normalized)) {
         const number = Number(weights[key]);
         if (Number.isFinite(number)) {
-          normalized[key] = Math.min(
-            100,
-            Math.max(0, Math.round(number)),
-          );
+          normalized[key] = Math.min(100, Math.max(0, Math.round(number)));
         }
       }
     }
@@ -4272,15 +4431,18 @@
   const categoryVideoCandidatePicker = document.querySelector(
     "[data-category-video-candidate-picker]",
   );
-  const categoryVideoCandidateTrigger = categoryVideoCandidatePicker?.querySelector(
-    "[data-category-video-candidate-trigger]",
-  );
-  const categoryVideoCandidateLabel = categoryVideoCandidatePicker?.querySelector(
-    "[data-category-video-candidate-label]",
-  );
-  const categoryVideoCandidateList = categoryVideoCandidatePicker?.querySelector(
-    "[data-category-video-candidate-list]",
-  );
+  const categoryVideoCandidateTrigger =
+    categoryVideoCandidatePicker?.querySelector(
+      "[data-category-video-candidate-trigger]",
+    );
+  const categoryVideoCandidateLabel =
+    categoryVideoCandidatePicker?.querySelector(
+      "[data-category-video-candidate-label]",
+    );
+  const categoryVideoCandidateList =
+    categoryVideoCandidatePicker?.querySelector(
+      "[data-category-video-candidate-list]",
+    );
   const normalizeCategoryVideoCandidateLimit = (value) => {
     const number = Number(value);
     return CATEGORY_VIDEO_CANDIDATE_LIMITS.has(number)
@@ -4353,9 +4515,7 @@
     (async () => {
       let value = CATEGORY_VIDEO_CANDIDATE_LIMIT_DEFAULT;
       try {
-        const data = await cachedStorageGet(
-          CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY,
-        );
+        const data = await cachedStorageGet(CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY);
         value = normalizeCategoryVideoCandidateLimit(
           data?.[CATEGORY_VIDEO_CANDIDATE_LIMIT_KEY],
         );
@@ -4428,6 +4588,24 @@
 
   // ── 채널 라이브 바로가기 버튼(전역, 기본 ON) ──────────────────────────────
   // 체크=표시. 미설정이면 표시(true)가 기본.
+  // ── 팔로워 수 정확히 보기(호버 툴팁, 기본 OFF) ────────────────────────────
+  const FOLLOWER_EXACT_KEY = "cheeseFollowerExact";
+  const followerExactInput = document.querySelector("[data-follower-exact]");
+  async function loadFollowerExact() {
+    let on = false; // 기본 OFF
+    try {
+      const data = await cachedStorageGet(FOLLOWER_EXACT_KEY);
+      on = data?.[FOLLOWER_EXACT_KEY] === true;
+    } catch {}
+    if (followerExactInput) followerExactInput.checked = on;
+  }
+  followerExactInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [FOLLOWER_EXACT_KEY]: followerExactInput.checked });
+    } catch {}
+  });
+  loadFollowerExact();
+
   const CHANNEL_LIVE_BUTTON_KEY = "cheeseChannelLiveButton";
   const channelLiveButtonInput = document.querySelector(
     "[data-channel-live-button]",
@@ -4659,8 +4837,7 @@
       const hasStoredRadius = data?.[CHANNEL_PROFILE_RADIUS_KEY] !== undefined;
       enabled =
         data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] === true ||
-        (data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] == null &&
-          hasStoredRadius);
+        (data?.[CHANNEL_PROFILE_RADIUS_ENABLED_KEY] == null && hasStoredRadius);
       radius = clampChannelProfileRadius(
         data?.[CHANNEL_PROFILE_RADIUS_KEY] ?? 50,
       );
@@ -4751,8 +4928,7 @@
         input: "HEX 색상값",
         format: "색상 형식",
         swatch: "색상 견본",
-        instruction:
-          "방향키로 채도와 밝기를 조절하고 Enter 키로 선택합니다.",
+        instruction: "방향키로 채도와 밝기를 조절하고 Enter 키로 선택합니다.",
       },
     });
     window.Coloris?.("[data-chat-time-color-picker]");
@@ -4764,6 +4940,15 @@
       selectInput: true,
     });
     reflectChatTimeColors();
+    // 미리보기 카테고리 기준 색도 같은 설정으로 Coloris 를 붙인다.
+    window.Coloris?.("[data-fp-color-picker]");
+    window.Coloris?.wrap("[data-fp-color-picker]");
+    window.Coloris?.setInstance("[data-fp-color-picker]", {
+      alpha: false,
+      forceAlpha: false,
+      format: "hex",
+      selectInput: true,
+    });
   } catch {}
   panelsScroll?.addEventListener(
     "scroll",
@@ -4780,7 +4965,9 @@
   let channelLiveProfileSaveTimer = 0;
 
   function normalizeChannelLiveProfileColor(value, fallback) {
-    const color = String(value || "").trim().toLowerCase();
+    const color = String(value || "")
+      .trim()
+      .toLowerCase();
     return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
   }
 
@@ -4795,22 +4982,12 @@
     const red = (rgb >> 16) & 255;
     const green = (rgb >> 8) & 255;
     const blue = rgb & 255;
-    const alpha = normalizeChannelLiveProfileNumber(
-      alphaPercent,
-      0,
-      100,
-      100,
-    );
+    const alpha = normalizeChannelLiveProfileNumber(alphaPercent, 0, 100, 100);
     return `rgba(${red}, ${green}, ${blue}, ${alpha / 100})`;
   }
 
   function channelLiveProfileHexa(color, alphaPercent) {
-    const alpha = normalizeChannelLiveProfileNumber(
-      alphaPercent,
-      0,
-      100,
-      100,
-    );
+    const alpha = normalizeChannelLiveProfileNumber(alphaPercent, 0, 100, 100);
     const alphaHex = Math.floor((alpha / 100) * 255)
       .toString(16)
       .padStart(2, "0");
@@ -4903,10 +5080,7 @@
     if (channelLiveProfileReset) {
       channelLiveProfileReset.disabled = !config.enabled;
     }
-    channelLiveProfileEditor?.classList.toggle(
-      "is-disabled",
-      !config.enabled,
-    );
+    channelLiveProfileEditor?.classList.toggle("is-disabled", !config.enabled);
     channelLiveProfileEditor?.setAttribute(
       "aria-disabled",
       String(!config.enabled),
@@ -5004,11 +5178,7 @@
     "start",
     "startAlpha",
   );
-  bindChannelLiveProfileColor(
-    channelLiveProfileEndInput,
-    "end",
-    "endAlpha",
-  );
+  bindChannelLiveProfileColor(channelLiveProfileEndInput, "end", "endAlpha");
   channelLiveProfileReset?.addEventListener("click", () => {
     updateChannelLiveProfileBackground({
       angle: CHANNEL_LIVE_PROFILE_BACKGROUND_DEFAULT.angle,
@@ -5021,9 +5191,7 @@
   reflectChannelLiveProfileBackground();
   (async () => {
     try {
-      const data = await cachedStorageGet(
-        CHANNEL_LIVE_PROFILE_BACKGROUND_KEY,
-      );
+      const data = await cachedStorageGet(CHANNEL_LIVE_PROFILE_BACKGROUND_KEY);
       channelLiveProfileBackground = normalizeChannelLiveProfileBackground(
         data?.[CHANNEL_LIVE_PROFILE_BACKGROUND_KEY],
       );
@@ -5249,8 +5417,10 @@
       const data = await cachedStorageGet(FOLLOW_PREVIEW_CARD_LAYOUT_KEY);
       on = data?.[FOLLOW_PREVIEW_CARD_LAYOUT_KEY] === true;
     } catch {}
-    if (followPreviewCardLayoutInput)
-      followPreviewCardLayoutInput.checked = on;
+    if (followPreviewCardLayoutInput) followPreviewCardLayoutInput.checked = on;
+    // 카드식 배치 체크 상태가 정해진 뒤에 하위 항목 잠금을 다시 평가한다
+    // (아래 async 로더가 먼저 끝나면 옛 상태로 잠글 수 있다).
+    reflectFpCardDependents();
   }
   followPreviewCardLayoutInput?.addEventListener("change", () => {
     try {
@@ -5260,6 +5430,157 @@
     } catch {}
   });
   loadFollowPreviewCardLayout();
+
+  // ── 카드식 배치: 시청자 배지 위치(tl|tr|bl|br, 기본 tl) ────────────────────
+  const FP_BADGE_POS_KEY = "cheeseFollowPreviewBadgePos";
+  const FP_BADGE_POSITIONS = ["tl", "tr", "bl", "br"];
+  const fpBadgeButtons = Array.from(
+    document.querySelectorAll("[data-follow-preview-badge-pos]"),
+  );
+  function reflectFpBadgePos(raw) {
+    const pos = FP_BADGE_POSITIONS.includes(raw) ? raw : "tl";
+    fpBadgeButtons.forEach((btn) => {
+      const active = btn.dataset.followPreviewBadgePos === pos;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  // 카드식 배치가 꺼져 있으면 배지 자체가 안 보이므로 잠근다.
+  function reflectFpCardDependents() {
+    // ⚠ 위쪽 loadFollowPreviewCardLayout() 도 이 함수를 부른다. 그 시점엔 아래 const
+    // 들이 아직 초기화 전일 수 있어(TDZ) 캡처 변수 대신 DOM 에서 직접 찾는다.
+    const input = document.querySelector("[data-follow-preview-card-layout]");
+    const off = input?.checked !== true;
+    document
+      .querySelectorAll("[data-follow-preview-badge-pos]")
+      .forEach((btn) => {
+        btn.disabled = off;
+      });
+    document
+      .querySelector("[data-follow-preview-badge-item]")
+      ?.classList.toggle("is-locked", off);
+  }
+  fpBadgeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const pos = btn.dataset.followPreviewBadgePos;
+      reflectFpBadgePos(pos);
+      try {
+        cachedStorageSet({ [FP_BADGE_POS_KEY]: pos });
+      } catch {}
+    });
+  });
+  followPreviewCardLayoutInput?.addEventListener(
+    "change",
+    reflectFpCardDependents,
+  );
+  (async () => {
+    let pos = "tl";
+    try {
+      const data = await cachedStorageGet(FP_BADGE_POS_KEY);
+      if (data?.[FP_BADGE_POS_KEY]) pos = data[FP_BADGE_POS_KEY];
+    } catch {}
+    reflectFpBadgePos(pos);
+    reflectFpCardDependents();
+  })();
+
+  // ── 미리보기 헤더 글자 색상(제목·채널명·카테고리·경과시간) ─────────────────
+  // 항목별로 { enabled, light, dark } 를 하나의 키에 모아 저장한다. 카테고리는
+  // content.js 가 고른 색에서 테두리·배경까지 파생하므로 여기서는 색 하나만 받는다.
+  const FP_COLORS_KEY = "cheeseFollowPreviewColors";
+  const FP_COLOR_DEFAULTS = Object.freeze({
+    title: { light: "#FFFFFF", dark: "#FFFFFF" },
+    name: { light: "#17171C", dark: "#FFFFFF" },
+    category: { light: "#17171C", dark: "#FFFFFF" },
+    elapsed: { light: "#17171C", dark: "#FFFFFF" },
+  });
+  let fpColors = {};
+  function normalizeFpHex(v, fallback) {
+    const s = String(v || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(s)) return s.toUpperCase();
+    if (/^#[0-9a-f]{3}$/i.test(s)) {
+      return `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`.toUpperCase();
+    }
+    return fallback;
+  }
+  function reflectFpColors() {
+    for (const [part, def] of Object.entries(FP_COLOR_DEFAULTS)) {
+      const cfg = fpColors[part] || { enabled: false, ...def };
+      const toggle = document.querySelector(
+        `[data-fp-color-enabled="${part}"]`,
+      );
+      if (toggle) toggle.checked = cfg.enabled === true;
+      const editor = document.querySelector(`[data-fp-color-editor="${part}"]`);
+      if (editor) editor.hidden = !cfg.enabled;
+      const reset = document.querySelector(`[data-fp-color-reset="${part}"]`);
+      if (reset) reset.disabled = !cfg.enabled;
+      ["light", "dark"].forEach((mode) => {
+        const input = document.querySelector(
+          `[data-fp-color="${part}"][data-fp-color-mode="${mode}"]`,
+        );
+        if (!input) return;
+        input.value = cfg[mode];
+        input.disabled = !cfg.enabled;
+        const field = input.closest(".clr-field");
+        if (field) field.style.color = cfg[mode];
+      });
+    }
+  }
+  function saveFpColors() {
+    try {
+      cachedStorageSet({ [FP_COLORS_KEY]: { ...fpColors } });
+    } catch {}
+  }
+  document.querySelectorAll("[data-fp-color-enabled]").forEach((toggle) => {
+    toggle.addEventListener("change", () => {
+      const part = toggle.dataset.fpColorEnabled;
+      if (!fpColors[part]) fpColors[part] = { ...FP_COLOR_DEFAULTS[part] };
+      fpColors[part].enabled = toggle.checked;
+      reflectFpColors();
+      saveFpColors();
+    });
+  });
+  document.querySelectorAll("[data-fp-color]").forEach((input) => {
+    // Coloris 는 input 이벤트로 색을 흘려보낸다(change 까지 기다리면 반영이 늦다).
+    input.addEventListener("input", () => {
+      const part = input.dataset.fpColor;
+      const mode = input.dataset.fpColorMode;
+      if (!fpColors[part]) fpColors[part] = { ...FP_COLOR_DEFAULTS[part] };
+      fpColors[part][mode] = normalizeFpHex(
+        input.value,
+        FP_COLOR_DEFAULTS[part][mode],
+      );
+      const field = input.closest(".clr-field");
+      if (field) field.style.color = fpColors[part][mode];
+      saveFpColors();
+    });
+  });
+  document.querySelectorAll("[data-fp-color-reset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const part = btn.dataset.fpColorReset;
+      fpColors[part] = {
+        ...FP_COLOR_DEFAULTS[part],
+        enabled: fpColors[part]?.enabled === true,
+      };
+      reflectFpColors();
+      saveFpColors();
+    });
+  });
+  (async () => {
+    let saved = null;
+    try {
+      const data = await cachedStorageGet(FP_COLORS_KEY);
+      saved = data?.[FP_COLORS_KEY];
+    } catch {}
+    for (const [part, def] of Object.entries(FP_COLOR_DEFAULTS)) {
+      const v = saved && typeof saved === "object" ? saved[part] : null;
+      fpColors[part] = {
+        enabled: v?.enabled === true,
+        light: normalizeFpHex(v?.light, def.light),
+        dark: normalizeFpHex(v?.dark, def.dark),
+      };
+    }
+    reflectFpColors();
+  })();
 
   // 미리보기 헤더에서 숨길 요소(개별 체크=숨김). {title,profile,name,category,viewers,
   // elapsed} 객체 한 키에 모아 저장한다.
@@ -5579,8 +5900,7 @@
   }
 
   // 음소거 해제 기본 음량(1~100%, 저장은 0~1 배율).
-  const CARD_PREVIEW_DEFAULT_VOLUME_KEY =
-    "cheeseCardPreviewDefaultVolume";
+  const CARD_PREVIEW_DEFAULT_VOLUME_KEY = "cheeseCardPreviewDefaultVolume";
   const cardDefaultVolumeItem = document.querySelector(
     "[data-card-preview-default-volume-item]",
   );
@@ -5779,18 +6099,14 @@
   const liveTagList = document.querySelector("[data-live-tag-list]");
   const liveTagEmpty = document.querySelector("[data-live-tag-empty]");
   const liveTagBulk = document.querySelector("[data-live-tag-bulk]");
-  const liveTagSelectAll = document.querySelector(
-    "[data-live-tag-select-all]",
-  );
+  const liveTagSelectAll = document.querySelector("[data-live-tag-select-all]");
   const liveTagSelectedCount = document.querySelector(
     "[data-live-tag-selected-count]",
   );
   const liveTagRemoveSelected = document.querySelector(
     "[data-live-tag-remove-selected]",
   );
-  const liveTagRemoveAll = document.querySelector(
-    "[data-live-tag-remove-all]",
-  );
+  const liveTagRemoveAll = document.querySelector("[data-live-tag-remove-all]");
   let settingsLiveTagFilters = [];
   const settingsLiveTagSelected = new Set();
 
@@ -5875,8 +6191,10 @@
     if (liveTagRemoveSelected) liveTagRemoveSelected.disabled = count === 0;
     if (liveTagRemoveAll) liveTagRemoveAll.disabled = !hasItems;
     if (liveTagSelectAll) {
-      liveTagSelectAll.checked = hasItems && count === settingsLiveTagFilters.length;
-      liveTagSelectAll.indeterminate = count > 0 && count < settingsLiveTagFilters.length;
+      liveTagSelectAll.checked =
+        hasItems && count === settingsLiveTagFilters.length;
+      liveTagSelectAll.indeterminate =
+        count > 0 && count < settingsLiveTagFilters.length;
     }
   }
 
@@ -6030,17 +6348,11 @@
         liveTagFilterButtonInput.checked =
           changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue === true;
       }
-      if (
-        changes[LIVE_VIEWER_COUNT_INLINE_KEY] &&
-        liveViewerCountInlineInput
-      ) {
+      if (changes[LIVE_VIEWER_COUNT_INLINE_KEY] && liveViewerCountInlineInput) {
         liveViewerCountInlineInput.checked =
           changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
       }
-      if (
-        changes[LIVE_VIEWER_COUNT_HIDDEN_KEY] &&
-        liveViewerCountHiddenInput
-      ) {
+      if (changes[LIVE_VIEWER_COUNT_HIDDEN_KEY] && liveViewerCountHiddenInput) {
         liveViewerCountHiddenInput.checked =
           changes[LIVE_VIEWER_COUNT_HIDDEN_KEY].newValue === true;
         reflectLiveViewerCountInlineAvailability();
@@ -6093,9 +6405,7 @@
   const SETTINGS_TRANSFER_SCHEMA_VERSION = 1;
   const SETTINGS_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
   const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
-  const settingsExportButton = document.querySelector(
-    "[data-settings-export]",
-  );
+  const settingsExportButton = document.querySelector("[data-settings-export]");
   const settingsImportOpenButton = document.querySelector(
     "[data-settings-import-open]",
   );
@@ -7630,15 +7940,11 @@
     const enabled = cafeNowInput?.checked === true;
     if (cafeNowAutoplayInput) cafeNowAutoplayInput.disabled = !enabled;
     cafeNowAutoplayRow?.classList.toggle("is-locked", !enabled);
-    const autoplayEnabled =
-      enabled && cafeNowAutoplayInput?.checked === true;
+    const autoplayEnabled = enabled && cafeNowAutoplayInput?.checked === true;
     if (cafeNowAutoplayMutedInput) {
       cafeNowAutoplayMutedInput.disabled = !autoplayEnabled;
     }
-    cafeNowAutoplayMutedRow?.classList.toggle(
-      "is-locked",
-      !autoplayEnabled,
-    );
+    cafeNowAutoplayMutedRow?.classList.toggle("is-locked", !autoplayEnabled);
   };
   if (cafeNowInput) {
     (async () => {
@@ -7679,8 +7985,7 @@
     cafeNowAutoplayMutedInput?.addEventListener("change", () => {
       try {
         cachedStorageSet({
-          [CAFE_NOW_AUTOPLAY_MUTED_KEY]:
-            cafeNowAutoplayMutedInput.checked,
+          [CAFE_NOW_AUTOPLAY_MUTED_KEY]: cafeNowAutoplayMutedInput.checked,
         });
       } catch {}
     });
@@ -7889,7 +8194,10 @@
     let enabled = true;
     let custom = { ...SYNC_CD_DEFAULT };
     try {
-      const d = await cachedStorageGet([SYNC_CD_ENABLED_KEY, SYNC_CD_CUSTOM_KEY]);
+      const d = await cachedStorageGet([
+        SYNC_CD_ENABLED_KEY,
+        SYNC_CD_CUSTOM_KEY,
+      ]);
       enabled = d?.[SYNC_CD_ENABLED_KEY] !== false;
       const c = d?.[SYNC_CD_CUSTOM_KEY];
       if (c && typeof c === "object") {
@@ -7986,6 +8294,60 @@
   });
   followCustomSec?.addEventListener("change", saveFollowCustom);
   loadFollowRefresh();
+
+  // ── 라운지 소식 새 글 확인 주기(분, 기본 10) ───────────────────────────────
+  const LOUNGE_REFRESH_KEY = "cheeseLoungeRefreshMin";
+  const LOUNGE_REFRESH_PRESETS = [3, 5, 10, 30, 60];
+  const LOUNGE_REFRESH_DEFAULT = 10;
+  const loungeRefreshButtons = Array.from(
+    document.querySelectorAll("[data-lounge-refresh]"),
+  );
+  const loungeNewsInput = document.querySelector('[data-feature="loungeNews"]');
+  // ⚠ loungeNews 는 '숨김' 플래그다(체크=숨김). 체크되면 라운지 기능 자체가 꺼지고
+  // 주기 폴링도 멈추므로(content.js: ensureLoungeButton → stopLoungeRefresh),
+  // 주기 선택은 의미가 없다 — 채팅 시간 표시/형식과 같은 방식으로 잠근다.
+  function reflectLoungeRefreshAvailability() {
+    // ⚠ 기능 플래그 로더(load())도 이 함수를 부른다. 그 시점에 아래쪽 const 들이 아직
+    // 초기화 전일 수 있으므로(TDZ) 캡처된 변수를 쓰지 않고 DOM 에서 직접 찾는다.
+    const input = document.querySelector('[data-feature="loungeNews"]');
+    const disabled = input?.checked === true;
+    document.querySelectorAll("[data-lounge-refresh]").forEach((btn) => {
+      btn.disabled = disabled;
+    });
+    document
+      .getElementById("loungeRefresh")
+      ?.closest(".settings-item")
+      ?.classList.toggle("is-locked", disabled);
+  }
+  loungeNewsInput?.addEventListener("change", reflectLoungeRefreshAvailability);
+  function reflectLoungeRefresh(minRaw) {
+    const n = Number(minRaw);
+    const min = LOUNGE_REFRESH_PRESETS.includes(n) ? n : LOUNGE_REFRESH_DEFAULT;
+    loungeRefreshButtons.forEach((btn) => {
+      const active = Number(btn.dataset.loungeRefresh) === min;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  async function loadLoungeRefresh() {
+    let min = LOUNGE_REFRESH_DEFAULT;
+    try {
+      const data = await cachedStorageGet(LOUNGE_REFRESH_KEY);
+      if (data?.[LOUNGE_REFRESH_KEY] != null) min = data[LOUNGE_REFRESH_KEY];
+    } catch {}
+    reflectLoungeRefresh(min);
+    reflectLoungeRefreshAvailability();
+  }
+  loungeRefreshButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const min = Number(btn.dataset.loungeRefresh);
+      reflectLoungeRefresh(min);
+      try {
+        cachedStorageSet({ [LOUNGE_REFRESH_KEY]: min });
+      } catch {}
+    });
+  });
+  loadLoungeRefresh();
 
   // 인기 카테고리 / 다가오는 방송 일정도 함께 갱신(기본 OFF). 팔로우 갱신 주기에 얹힘.
   function bindSectionRefreshToggle(sel, key) {

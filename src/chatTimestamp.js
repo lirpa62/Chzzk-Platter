@@ -20,6 +20,16 @@
   let showChatTimestamp = false;
   let chatTimestampFormat = "24h";
   let restoreBlindedChat = false;
+  // 채팅 작성 기기(extras.osType: PC/AOS/IOS) 아이콘 표시. 기본 OFF —
+  // 치지직이 모든 시청자에게 보내는 값이지만 치지직 UI 에는 없는 정보라, 시청자가
+  // 노출을 예상하지 못한다. 원하는 사람만 켜도록 기본은 끈 채로 둔다.
+  let showChatOsIcon = false;
+  // 채팅 닉네임 숨김. 방장(스트리머)·매니저·파트너 채팅은 예외로 남긴다 —
+  // 누가 말했는지가 중요한 역할들이라 숨기면 대화 맥락이 깨진다.
+  let hideChatNickname = false;
+  // 채팅 배지(등급·후원·구독 등) 숨김. 닉네임 숨김과 독립된 옵션이며, 역할 예외는
+  // 닉네임 쪽과 동일하게 적용한다(방장·매니저·파트너는 배지도 남긴다).
+  let hideChatBadge = false;
 
   // 다시보기 채팅은 이미 블라인드 처리된 기록만 내려와 React props에도 원문이 없다.
   // 복원을 시도해도 성공할 수 없고, 빠른 탐색 중 재사용되는 행을 계속 분석하면 채팅
@@ -182,6 +192,25 @@
     return null;
   }
 
+  // 상위(return) 방향 탐색. 플로팅 '새 채팅' 버튼은 chatMessage 가 부모 컴포넌트에
+  // 있어 자식 탐색만으로는 못 찾는다(실측 확인).
+  // ⚠ 채팅 행에는 쓰지 않는다 — 행은 형제로 나열되므로, 자기 props 를 못 읽었을 때
+  // 위로 올라가면 이웃/목록 단위의 다른 메시지를 잡을 위험이 있다. 행은 기존대로
+  // 재시도(scheduleRowRetry)에 맡긴다.
+  function getChatMessageFromAncestors(node) {
+    let fiber = getReactFiber(node);
+    let guard = 0;
+    while (fiber != null && guard < 30) {
+      const mp = fiber.memoizedProps;
+      if (mp?.chatMessage && typeof mp.chatMessage === "object") {
+        return mp.chatMessage;
+      }
+      fiber = fiber.return;
+      guard += 1;
+    }
+    return null;
+  }
+
   // 실제 전송 시각(epoch ms)을 찾는다. playerMessageTime(영상 경과)은 제외.
   function readChatEpochMs(chatMessage) {
     if (!chatMessage || typeof chatMessage !== "object") return null;
@@ -319,6 +348,130 @@
       return `${hour24 < 12 ? "오전" : "오후"} ${hour12}:${minutes}`;
     }
     return `${hour24 < 12 ? "AM" : "PM"} ${hour12}:${minutes}`;
+  }
+
+  // ── 작성 기기(osType) 아이콘 ───────────────────────────────────────────────
+  // extras 는 JSON 문자열로 오고 osType 은 "PC" | "AOS" | "IOS". 값이 없거나 모르는
+  // 값이면 아무것도 표시하지 않는다(빈 자리로 두지 않고 아예 생략).
+  function readChatOsType(chatMessage) {
+    let extras = chatMessage?.extras;
+    if (typeof extras === "string") extras = parseJsonSafe(extras);
+    const os = extras?.osType;
+    if (typeof os !== "string") return "";
+    const upper = os.toUpperCase();
+    return upper === "PC" || upper === "AOS" || upper === "IOS" ? upper : "";
+  }
+
+  // Lucide 아이콘(stroke 기반, currentColor, 24x24) — monitor/smartphone/apple.
+  // 원본 path 를 그대로 옮겼다(ISC, THIRD_PARTY_NOTICES.md 참고).
+  const OS_ICON_SVG = {
+    PC: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+    AOS: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+    IOS: '<path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/>',
+  };
+  const OS_ICON_LABEL = { PC: "PC", AOS: "안드로이드", IOS: "iOS" };
+
+  function applyOsIcon(row, osType) {
+    const existing = row.querySelector(":scope .cheese-chat-os");
+    if (existing) {
+      if (existing.dataset.os === osType) return true;
+      existing.remove(); // 행 재사용으로 다른 기기 메시지가 들어온 경우
+    }
+    const svg = OS_ICON_SVG[osType];
+    if (!svg) return true; // 표시할 게 없으면 '처리 완료'로 본다(재시도 방지)
+    const nicknameBtn =
+      row.querySelector("button[class*='_nickname_']") ||
+      row.querySelector("[class*='_nickname_']");
+    if (!nicknameBtn || !nicknameBtn.parentNode) return false;
+    const span = document.createElement("span");
+    span.className = "cheese-chat-os";
+    span.dataset.os = osType;
+    span.title = OS_ICON_LABEL[osType] || osType;
+    span.setAttribute("aria-label", span.title);
+    span.innerHTML =
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+      `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svg}</svg>`;
+    // 시간 span 이 있으면 그 뒤(닉네임 바로 앞)에 둔다.
+    const timeSpan = row.querySelector(":scope .cheese-chat-time");
+    if (timeSpan && timeSpan.parentNode === nicknameBtn.parentNode) {
+      timeSpan.insertAdjacentElement("afterend", span);
+    } else {
+      nicknameBtn.parentNode.insertBefore(span, nicknameBtn);
+    }
+    return true;
+  }
+
+  function removeAllOsIcons() {
+    document.querySelectorAll(".cheese-chat-os").forEach((el) => el.remove());
+  }
+
+  // ── 닉네임 숨김 ───────────────────────────────────────────────────────────
+  // 예외(숨기지 않음): 방장·매니저 등 역할 보유자, 파트너(verifiedMark).
+  // ⚠ userRoleCode 문자열은 치지직이 바꿀 수 있어 '값 목록'으로 판정하지 않는다.
+  // common_user 가 아니면 전부 역할자로 본다(모르는 역할이 생겨도 안전한 쪽으로).
+  function isChatRoleExempt(row, chatMessage) {
+    let profile = chatMessage?.profile;
+    if (typeof profile === "string") profile = parseJsonSafe(profile);
+    if (profile && typeof profile === "object") {
+      if (profile.verifiedMark === true) return true; // 파트너
+      const role = String(profile.userRoleCode || "").toLowerCase();
+      if (role) {
+        // ⚠ 여기서 바로 반환한다. 아래 DOM 폴백까지 내려가면 '일반 시청자'(대다수)
+        // 마다 서브트리 querySelector 가 돌아 폭주 채팅에서 부하가 누적된다.
+        // 역할을 읽었으면 그 값이 결론이다.
+        return role !== "common_user";
+      }
+    }
+    // 여기까지 왔다 = profile 을 읽지 못했거나 userRoleCode 가 비어 있다(다시보기 등).
+    // 그때만 DOM 에서 역할 배지를 찾는다. 치지직은 방장·매니저 배지를 닉네임 앞
+    // _badge_ 컨테이너에 그린다.
+    return !!row.querySelector(
+      "[class*='_badge_'] img, [class*='_streamer_'], [class*='_manager_']",
+    );
+  }
+
+  // ⚠ '숨길 행에 클래스를 붙이는' 방식이면, 행 처리가 rAF 배치(6ms 예산)로 밀리는
+  // 동안 치지직이 먼저 렌더해 닉네임이 한 프레임 번쩍인다(플로팅 버튼 클릭 후 대량
+  // 삽입 시 특히). 그래서 반대로 간다 — CSS 는 기능이 켜지면 전부 숨기고, 판정이
+  // 끝난 예외 행에만 이 클래스를 붙여 되살린다.
+  function applyNicknameHide(row, chatMessage) {
+    const exempt = isChatRoleExempt(row, chatMessage);
+    row.classList.toggle("cheese-chat-nick-shown", exempt);
+    return true;
+  }
+
+  function removeAllNicknameHides() {
+    document
+      .querySelectorAll(".cheese-chat-nick-shown")
+      .forEach((el) => el.classList.remove("cheese-chat-nick-shown"));
+  }
+
+  // 채팅창을 위로 스크롤하면 새 채팅이 하단 '플로팅 버튼'으로 미리 보인다. 이건 채팅
+  // 행(_item_)이 아니라 별도 요소라 processRow 가 닿지 않는다. 여기서 따로 처리한다.
+  // ⚠ 이 버튼 마크업에는 역할 정보가 없다(팬 배지만 있음). React props 에서
+  // chatMessage 를 찾아 역할을 판정하고, 못 찾으면 숨기지 않는다(안전한 쪽).
+  const FLOATING_CHAT_SELECTOR =
+    "[class*='_floating_'] > button[class*='_button_chatting_']";
+  function applyFloatingNicknameHide() {
+    const buttons = document.querySelectorAll(FLOATING_CHAT_SELECTOR);
+    buttons.forEach((btn) => {
+      if (!hideChatNickname && !hideChatBadge) {
+        btn.classList.remove("cheese-chat-nick-shown");
+        delete btn.dataset.cheeseFloatSig;
+        return;
+      }
+      // ⚠ 이 함수는 MutationObserver 콜백에서 매 변이마다 불린다(폭주 채팅에서 초당
+      // 수십 회). 판정에는 fiber 탐색(최대 90단계)이 들어가므로, 표시 중인 메시지가
+      // 그대로면 건너뛴다. 시그니처는 닉네임+본문 텍스트로 충분하다.
+      const sig = btn.textContent || "";
+      if (btn.dataset.cheeseFloatSig === sig) return;
+      btn.dataset.cheeseFloatSig = sig;
+      const msg = getChatMessage(btn) || getChatMessageFromAncestors(btn);
+      // props 를 못 읽으면 역할을 확인할 수 없다 — 방장·매니저 채팅이 잘못 가려지지
+      // 않도록 '표시'(예외) 쪽으로 둔다.
+      const exempt = msg ? isChatRoleExempt(btn, msg) : true;
+      btn.classList.toggle("cheese-chat-nick-shown", exempt);
+    });
   }
 
   // 닉네임 앞에 회색 시간 span을 삽입한다. 이미 있으면 현재 설정 형식으로 갱신한다.
@@ -640,7 +793,13 @@
     ) {
       return;
     }
-    if (invalidate) delete row.dataset.cheeseRowDone;
+    if (invalidate) {
+      delete row.dataset.cheeseRowDone;
+      // ⚠ 닉네임/배지 판정 마커도 함께 무효화한다. 치지직은 가상 스크롤로 행 DOM 을
+      // 재사용하므로, 이걸 남겨두면 새 메시지가 들어와도 이전 사용자의 역할 판정
+      // 결과(.cheese-chat-nick-shown)가 그대로 유지된다.
+      delete row.dataset.cheeseNickDone;
+    }
     pendingChatRows.add(row);
     // 긴 가상 스크롤 중 화면에서 이미 사라진 행을 계속 붙잡아 두지 않는다. 최신 행만
     // 남겨도 정지 후 현재 DOM을 처리하는 데 충분하며, 임시 메모리 증가도 제한된다.
@@ -769,12 +928,28 @@
         showChatTimestamp &&
         !moaTimeActive &&
         !row.querySelector(":scope .cheese-chat-time");
+      // OS 아이콘은 '없을 수도 있는' 표시라 단순 부재로는 미처리 판정을 할 수 없다
+      // (osType 없는 메시지가 매 tick 재처리된다). 켜진 뒤 아직 한 번도 처리되지
+      // 않은 행만 다시 본다 — data-cheese-os-done 로 1회 처리 여부를 표시한다.
+      const osIconMissing = showChatOsIcon && !row.dataset.cheeseOsDone;
+      // 닉네임 숨김은 클래스 유무로 판정할 수 없다(예외 행은 원래 클래스가 없음).
+      // done 마킹된 행이라도 기능이 켜져 있으면 한 번 더 평가한다 — 비용은
+      // classList.toggle 한 번이라 가볍다.
+      // 닉네임/배지 숨김은 같은 예외 마커를 쓰므로 둘 중 하나라도 켜지면 판정한다.
+      const nickHideNeedsCheck =
+        (hideChatNickname || hideChatBadge) && !row.dataset.cheeseNickDone;
       // 원문을 구할 수 없다고 이미 판명된 행은 계속 pending 으로 두지 않는다(무한 재처리).
       const restorePending =
         Boolean(restorablePlaceholder) &&
         !restoredSpan &&
         !restoreUnavailableRows.has(row);
-      if (!timestampMissing && !restorePending && !restoredSpanStale) {
+      if (
+        !timestampMissing &&
+        !osIconMissing &&
+        !nickHideNeedsCheck &&
+        !restorePending &&
+        !restoredSpanStale
+      ) {
         clearRowRetry(row);
         return true;
       }
@@ -783,6 +958,18 @@
         restoredRowInfo.delete(row);
       }
       delete row.dataset.cheeseRowDone;
+    }
+    // ⚠ 닉네임/배지 숨김 판정은 아래 _chatting_message_ 게이트보다 먼저 한다.
+    // 후원·구독·미션 메시지는 _chatting_message_ 가 없고 _container_gb6rb_ 등 다른
+    // 구조라 게이트에서 걸러진다. 그러면 CSS 는 숨기는데 역할 판정이 영영 안 돌아
+    // 방장·매니저의 후원 메시지까지 가려진다.
+    // (상위 탐색은 쓰지 않는다 — 행은 형제로 나열돼 이웃 메시지를 잡을 수 있다.)
+    if (hideChatNickname || hideChatBadge) {
+      const msgForRole = getChatMessage(row);
+      if (msgForRole) {
+        applyNicknameHide(row, msgForRole);
+        row.dataset.cheeseNickDone = "1";
+      }
     }
     if (!row.querySelector("[class*='_chatting_message_']")) {
       scheduleRowRetry(row);
@@ -809,6 +996,15 @@
         done = false;
       }
     }
+    if (showChatOsIcon) {
+      // osType 이 없는 메시지(시스템 등)는 applyOsIcon 이 true 를 반환해 재시도하지 않는다.
+      if (applyOsIcon(row, readChatOsType(chatMessage))) {
+        row.dataset.cheeseOsDone = "1";
+      } else {
+        done = false;
+      }
+    }
+    // (닉네임/배지 판정은 위쪽 게이트 이전에서 이미 처리했다.)
 
     const hidden = isHiddenRow(row);
     // 복원 기능이 켜져 있으면, 아직 안 가려진 행의 원문을 미리 캐시해 둔다(가려진 뒤엔
@@ -884,6 +1080,12 @@
     document
       .querySelectorAll("[data-cheese-row-done]")
       .forEach((el) => delete el.dataset.cheeseRowDone);
+    document
+      .querySelectorAll("[data-cheese-os-done]")
+      .forEach((el) => delete el.dataset.cheeseOsDone);
+    document
+      .querySelectorAll("[data-cheese-nick-done]")
+      .forEach((el) => delete el.dataset.cheeseNickDone);
   }
 
   // ── 채팅 리스트 감시 ──────────────────────────────────────────────────────
@@ -914,7 +1116,13 @@
   }
 
   function anyChatEnhanceOn() {
-    return showChatTimestamp || isBlindRestoreActive();
+    return (
+      showChatTimestamp ||
+      showChatOsIcon ||
+      hideChatNickname ||
+      hideChatBadge ||
+      isBlindRestoreActive()
+    );
   }
 
   function ensureChatRowObserver() {
@@ -965,6 +1173,9 @@
           );
         });
       }
+      // 플로팅 새 채팅 버튼은 채팅 행이 아니라 별도 요소라 위 경로에 안 잡힌다.
+      // 내용이 계속 바뀌므로 변이가 있을 때마다 다시 판정한다(선택자 1회 조회라 가볍다).
+      if (hideChatNickname || hideChatBadge) applyFloatingNicknameHide();
     });
     containers.forEach((c) =>
       chatRowObserver.observe(c, { childList: true, subtree: true }),
@@ -1029,6 +1240,69 @@
     }
   }
 
+  function setHideChatBadge(next) {
+    next = next === true;
+    // 게이트 클래스는 값이 같아도 항상 맞춰둔다(초기 로드 시 반영 누락 방지).
+    document.documentElement.classList.toggle(
+      "cheese-chat-badge-hide-on",
+      next,
+    );
+    if (next === hideChatBadge) {
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
+      return;
+    }
+    hideChatBadge = next;
+    // 역할 예외 판정은 닉네임 숨김과 같은 마커(.cheese-chat-nick-shown)를 쓴다.
+    // 켜질 때 아직 판정되지 않은 행이 있을 수 있어 다시 훑는다.
+    if (next) {
+      clearRowDoneMarkers();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
+    } else if (!anyChatEnhanceOn()) {
+      stopChatRowObserver();
+    }
+    applyFloatingNicknameHide();
+  }
+
+  function setHideChatNickname(next) {
+    next = next === true;
+    // 게이트 클래스는 값이 같아도 항상 맞춰둔다(초기 로드 시 반영 누락 방지).
+    document.documentElement.classList.toggle("cheese-chat-nick-hide-on", next);
+    if (next === hideChatNickname) {
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
+      return;
+    }
+    hideChatNickname = next;
+    if (next) {
+      clearRowDoneMarkers();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
+    } else {
+      // ⚠ 예외 마커(.cheese-chat-nick-shown)는 배지 숨김도 함께 쓴다. 배지 숨김이
+      // 켜져 있으면 지우지 않는다 — 지우면 방장·매니저 배지가 사라진다.
+      if (!hideChatBadge) removeAllNicknameHides();
+      if (!anyChatEnhanceOn()) stopChatRowObserver();
+    }
+    applyFloatingNicknameHide(); // 플로팅 버튼은 행 스윕 대상이 아니라 따로 반영
+  }
+
+  function setShowChatOsIcon(next) {
+    next = next === true;
+    if (next === showChatOsIcon) {
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
+      return;
+    }
+    showChatOsIcon = next;
+    if (next) {
+      clearRowDoneMarkers();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
+    } else {
+      removeAllOsIcons();
+      if (!anyChatEnhanceOn()) stopChatRowObserver();
+    }
+  }
+
   function setChatTimestampFormat(next) {
     const normalized = normalizeChatTimestampFormat(next);
     if (normalized === chatTimestampFormat) return;
@@ -1085,6 +1359,9 @@
     setChatTimestampFormat(e.data.chatTimeFormat);
     // 체크=표시(true)면 각 기능 ON. (data-feature지만 '숨김'이 아니라 '켬' 의미)
     setShowChatTimestamp(f.chatShowTime === true);
+    setShowChatOsIcon(f.chatShowOsIcon === true);
+    setHideChatNickname(f.chatHideNickname === true);
+    setHideChatBadge(f.chatHideBadge === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
   });
   // 로드 직후 현재 플래그 요청. content.js(격리 월드)와 로드 순서가 보장되지 않아

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "치즈 플래터 - Chzzk Platter",
   "short_name": "ChzzkPlatter",
-  "version": "1.38.0",
+  "version": "1.39.0",
   "description": "치지직 검색, 플레이어, 오디오 믹서, 채팅, 팔로잉, 레이아웃을 한 접시에 담은 통합 편의 확장 프로그램",
   "icons": {
     "16": "icons/icon-16.png",
@@ -39,7 +39,8 @@
     {
       "matches": [
         "https://chzzk.naver.com/*",
-        "https://studio.chzzk.naver.com/*"
+        "https://studio.chzzk.naver.com/*",
+        "https://game.naver.com/profile*"
       ],
       "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/masterGate.js"],
@@ -49,7 +50,8 @@
     {
       "matches": [
         "https://chzzk.naver.com/*",
-        "https://studio.chzzk.naver.com/*"
+        "https://studio.chzzk.naver.com/*",
+        "https://game.naver.com/profile*"
       ],
       "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/coloris.min.js"],
@@ -59,7 +61,8 @@
     {
       "matches": [
         "https://chzzk.naver.com/*",
-        "https://studio.chzzk.naver.com/*"
+        "https://studio.chzzk.naver.com/*",
+        "https://game.naver.com/profile*"
       ],
       "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
       "js": ["src/searchQuery.js", "src/content.js", "src/subscribeBadge.js"],
@@ -129,6 +132,12 @@
       "js": ["src/cafeClipPlayback.js"],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": ["https://game.naver.com/profile*"],
+      "js": ["src/profileClipSize.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "matches": ["https://game.naver.com/profile*"],

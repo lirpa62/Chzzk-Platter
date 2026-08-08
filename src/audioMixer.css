@@ -1601,7 +1601,9 @@
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 60px;
+  /* 설정에서 조절(35~445px). 기본 60px 은 치지직 타임머신 재생바와 겹치지 않는 위치.
+     JS 가 <html> 에 --cheese-live-seek-bar-bottom 을 넣는다. */
+  bottom: var(--cheese-live-seek-bar-bottom, 60px);
   height: 16px;
   z-index: 60;
   opacity: 0;

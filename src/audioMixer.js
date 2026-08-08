@@ -213,6 +213,14 @@
     );
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
     liveSeekBarOn = e.data.liveSeekBar !== false;
+    // 되감기 바 하단 여백(px). CSS 변수로 넘겨 위치만 바꾼다(치지직 DOM 은 안 건드림).
+    const bottom = Math.round(Number(e.data.liveSeekBarBottom));
+    if (Number.isFinite(bottom)) {
+      document.documentElement.style.setProperty(
+        "--cheese-live-seek-bar-bottom",
+        `${bottom}px`,
+      );
+    }
     if (typeof applyLiveSeekBar === "function") applyLiveSeekBar();
     // 따라잡기 민감도 프리셋(낮음/보통/높음/커스텀). content.js가 chrome.storage에서
     // 읽어 전달. custom이면 syncCustom={enable,target}을 함께 받는다.
@@ -777,6 +785,29 @@
   // 라이브/다시보기 페이지를 벗어나(팔로잉·전체 방송 등으로 이동) 플레이어가 PIP
   // (미니플레이어)로 떠 있는 상태인지. 이때 video는 계속 재생 중이라 오디오 믹서
   // 그래프를 teardown하면 안 된다(PIP에서 믹서가 꺼지던 원인).
+  // 라이브를 벗어난 뒤 body/html 에 치지직의 scroll lock(inline overflow:hidden)이
+  // 남아 스크롤이 잠기는 경우가 있다(제보). 우리 UI 는 이 값을 인라인으로 쓰지 않고
+  // <html> 클래스로만 잠그므로, '인라인 overflow 만' 지우는 건 우리 기능과 충돌하지
+  // 않는다. 단 진짜 모달이 열려 있을 때 풀면 안 되므로 그 경우는 건너뛴다.
+  function clearStrayScrollLock() {
+    if (getPageKey()) return; // 라이브/다시보기에서는 치지직이 정상적으로 관리한다
+    // 열려 있는 모달·다이얼로그가 있으면 그 잠금은 정당하다.
+    if (
+      document.querySelector(
+        "[role='dialog']:not([aria-hidden='true']), dialog[open], [class*='_modal_'], [class*='_layer_popup_']",
+      )
+    ) {
+      return;
+    }
+    for (const el of [document.body, document.documentElement]) {
+      if (!el) continue;
+      if (el.style.overflow === "hidden") el.style.removeProperty("overflow");
+      if (el.style.overflowY === "hidden") {
+        el.style.removeProperty("overflow-y");
+      }
+    }
+  }
+
   function isPipActive() {
     return !!document.querySelector(
       "[class*='_type_pip_'], .pzp-pc.pzp-pc--pip",
@@ -7842,6 +7873,14 @@
       const keepGraph =
         currentPageKey &&
         (isPipActive() || (audio.connected && videoAlive) || videoAlive);
+      // ⚠ 넓은 화면 폴링은 '오디오 그래프 유지'와 생명주기가 다르다. PIP 로 남아
+      // keepGraph 로 조기 반환하면 currentPageKey 가 그대로 남아, 200ms 폴링이 메인
+      // 페이지에서도 계속 돌며 viewmode 버튼을 클릭한다. 그 클릭이 치지직의 넓은 화면
+      // 핸들러를 깨워 body 에 overflow:hidden 을 남기는데, 라이브 페이지를 이미
+      // 벗어난 뒤라 치지직의 해제 로직이 돌지 않아 스크롤이 잠긴다(제보 재현 경로).
+      // 라이브 URL 을 벗어난 순간 폴링은 무조건 멈춘다 — 그래프 유지와 무관하다.
+      stopWideScreenPolling();
+      clearStrayScrollLock(); // 치지직이 남긴 inline overflow:hidden 회수
       if (keepGraph) {
         if (!featureFlags.audioMixer) ensureEnabledGraph();
         return;
@@ -8009,6 +8048,13 @@
   function maybeAutoWideScreen() {
     if (!wideScreenAuto) return;
     if (!currentPageKey) return; // 라이브/다시보기 페이지에서만
+    // ⚠ currentPageKey 는 PIP 유지 경로에서 남아 있을 수 있다. 현재 URL 이 실제로
+    // 라이브/다시보기가 아니면 클릭하지 않는다 — 메인에서 viewmode 를 눌러 치지직이
+    // body 에 overflow:hidden 을 남기는 것을 막는다(2중 안전장치).
+    if (!getPageKey()) {
+      stopWideScreenPolling();
+      return;
+    }
     if (wideScreenAppliedForPage === currentPageKey) {
       stopWideScreenPolling();
       return; // 이미 이 미디어에 적용함

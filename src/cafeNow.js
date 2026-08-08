@@ -6,6 +6,32 @@
   const api = globalThis.CheeseCafeClipApi;
   if (!api) return;
 
+  // ⚠ 글쓰기·수정 화면에서는 링크를 플레이어로 바꾸지 않는다. 작성 중인 본문의 DOM 을
+  // 건드리면 에디터 상태가 어긋나고, 인라인 재생이 글쓰기를 방해한다.
+  // (all_frames 라 에디터 iframe 안에서도 이 스크립트가 돈다.)
+  function isWriteUrl(url) {
+    return (
+      /\/articles\/write/i.test(url) || // /ca-fe/cafes/{id}/articles/write
+      /\/articles\/\d+\/edit/i.test(url) || // 수정
+      /ArticleWrite|ArticleUpdate/i.test(url) // 구 에디터
+    );
+  }
+  function isCafeWritePage() {
+    if (isWriteUrl(`${location.pathname}${location.search}`)) return true;
+    // 에디터가 iframe 안에서 뜨면 프레임 URL 에는 write 경로가 없을 수 있다.
+    // 같은 출처면 상위 프레임 주소로, 아니면 referrer 로 한 번 더 확인한다.
+    try {
+      const top = window.top;
+      if (top && top !== window && top.location.href) {
+        if (isWriteUrl(top.location.href)) return true;
+      }
+    } catch {
+      // 교차 출처 상위 프레임 — referrer 로 폴백한다.
+    }
+    return isWriteUrl(document.referrer || "");
+  }
+  if (isCafeWritePage()) return;
+
   const OGLINK_SELECTOR = "div.se-component.se-oglink";
   const OGLINK_THUMBNAIL_SELECTOR = ".se-oglink-thumbnail";
   const OGLINK_TITLE_SELECTOR = ".se-oglink-title";

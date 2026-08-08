@@ -388,6 +388,25 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
+/* 5-2. 확장프로그램이 주입한 작성 기기 아이콘(.cheese-chat-os) — 시간 표시와 같은
+   이유로 안 커진다. 아이콘 크기는 span 의 em 기준이므로 여기서 font-size 만 배율에
+   맞춰 주면 내부 svg(0.92em / 0.82em)가 함께 커진다. 기준은 메시지 텍스트 14px. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    :is(
+      [class*="_item_"],
+      [class*="live_chatting_list_item"],
+      [class*="vod_chatting_item"]
+    ),
+    [class*="_floating_"]
+  )
+  [class*="_chatting_message_"]
+  .cheese-chat-os {
+  font-size: calc(14px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
+}
+
 /* 6. 배지 아이콘 컨테이너(_icon_o04z9_) */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
