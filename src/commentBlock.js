@@ -10,6 +10,27 @@
 (async () => {
   "use strict";
 
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+
+  if (isClipEditorContext()) return;
+
   async function masterEnabled() {
     const root = document.documentElement;
     for (let i = 0; i < 100; i += 1) {

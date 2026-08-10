@@ -39,6 +39,23 @@
 
 (async () => {
   "use strict";
+  const isClipEditorUrl = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      return (
+        url.origin === "https://chzzk.naver.com" &&
+        url.pathname.startsWith("/clip-editor")
+      );
+    } catch {
+      return false;
+    }
+  };
+  if (isClipEditorUrl(location.href)) return;
+  try {
+    if (isClipEditorUrl(window.top.location.href)) return;
+  } catch {}
+  if (window.top !== window && isClipEditorUrl(document.referrer)) return;
+
   try {
     const data = await chrome.storage.local.get("cheeseMasterEnabled");
     if (data?.cheeseMasterEnabled === false) return;

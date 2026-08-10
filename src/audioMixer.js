@@ -7,6 +7,27 @@
 (async () => {
   "use strict";
 
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+
+  if (isClipEditorContext()) return;
+
   async function masterEnabled() {
     const root = document.documentElement;
     for (let i = 0; i < 100; i += 1) {
@@ -27,6 +48,7 @@
     liveSync: false,
     liveRewind: false,
     vodSeekButtons: false,
+    vodGlobalArrowSeek: false,
     tabMute: false,
     screenshotButton: false, // 스크린샷 버튼 숨김(true=숨김, 기본 표시)
   };
@@ -129,6 +151,7 @@
     featureFlags.liveSync = f.liveSync === true;
     featureFlags.liveRewind = f.liveRewind === true;
     featureFlags.vodSeekButtons = f.vodSeekButtons === true;
+    featureFlags.vodGlobalArrowSeek = f.vodGlobalArrowSeek === true;
     featureFlags.tabMute = f.tabMute === true;
     featureFlags.screenshotButton = f.screenshotButton === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
@@ -727,6 +750,8 @@
   const STATE_LOAD_MAX_ATTEMPTS = 4;
   let stateLoadRetryTimer = 0;
   let stateLoadAttempts = 0;
+  let stateLoadRequestSeq = 0;
+  let activeStateLoadRequestId = "";
   let activeTab = "presets";
   let customDraft = null;
   // 커스텀 추가/편집 드래프트 진입 직전의 믹서 상태(취소 시 복원용).
@@ -1106,7 +1131,7 @@
   function recoverMixerForForeground() {
     if (document.hidden) return;
     resumeAudioForForeground();
-    if (location.pathname.startsWith("/clip-editor")) return;
+    if (isClipEditorContext()) return;
     // 치즈나우 같은 외부 확장이 백그라운드 탭을 만든 경우, 숨겨진 동안 플레이어가
     // 완성돼도 MutationObserver tick은 건너뛴다. 가시화 시 전체 보정과 자동 활성화를
     // 즉시 다시 실행해 다음 DOM 변이를 기다리지 않게 한다.
@@ -1981,24 +2006,48 @@
   // 채널id 확보 전에 사용자가 설정을 바꿨는지. true면 뒤늦게 도착한 저장 설정을
   // 로드해 현재 변경을 덮어쓰지 않는다.
   let pendingUserEdit = false;
+  // 채널id는 확보됐지만 저장 설정을 아직 받기 전에 사용자가 값을 바꾼 경우. Firefox는
+  // storage 응답이 상대적으로 늦을 수 있어, 뒤늦은 load 응답이 방금 조절한 게인/EQ를
+  // 기본값으로 되돌리지 않도록 현재 값을 우선한다.
+  let userEditedDuringLoad = false;
+  const STATE_SAVE_DEBOUNCE_MS = 120;
+  let stateSaveTimer = 0;
+  let pendingStateSave = null;
 
-  // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 customPresets
-  // 를 함께 저장). 그 외 자동 저장은 로드 전이면 customPresets 를 생략(빈 배열로 전역
-  // 프리셋 덮어쓰기 방지).
+  function flushPendingStateSave() {
+    clearTimeout(stateSaveTimer);
+    stateSaveTimer = 0;
+    const packet = pendingStateSave;
+    pendingStateSave = null;
+    if (!packet) return;
+    window.postMessage(packet, location.origin);
+  }
+
+  // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 전역
+  // customPresets/defaultCustomId를 함께 저장). 일반 채널 설정 저장에는 전역값을 싣지 않는다.
   function saveState(opts) {
     if (!currentMediaId) {
       // 채널id 확보 전 변경 — 확보되면 그때 저장한다.
       pendingUserEdit = true;
       return;
     }
-    window.postMessage(
-      {
-        source: "cheese-audio-mixer",
-        type: "save",
-        channelId: currentMediaId,
-        state: serializeState(opts),
-      },
-      location.origin,
+    if (!stateLoaded) userEditedDuringLoad = true;
+    pendingStateSave = {
+      source: "cheese-audio-mixer",
+      type: "save",
+      channelId: currentMediaId,
+      state: serializeState(opts),
+    };
+    // 슬라이더 input마다 storage.set을 호출하면 Firefox에서 저장 알림과 IPC가 폭주한다.
+    // 짧게 합쳐 마지막 값만 저장하되, 커스텀 프리셋 편집은 즉시 확정한다.
+    if (opts?.forcePresets) {
+      flushPendingStateSave();
+      return;
+    }
+    clearTimeout(stateSaveTimer);
+    stateSaveTimer = window.setTimeout(
+      flushPendingStateSave,
+      STATE_SAVE_DEBOUNCE_MS,
     );
   }
 
@@ -2035,20 +2084,25 @@
       limiter: { ...preset.limiter },
       normalizer: { ...preset.normalizer },
     };
-    // customPresets 저장 조건: 사용자가 직접 커스텀 변경(forcePresets)했거나 이미 로드
-    // 완료(stateLoaded). 채널 전환 직후 로드 전 자동 저장에서만 생략해, DEFAULT_STATE 로
-    // 비워진 빈 customPresets 가 전역 프리셋(audioMixer:presets)을 지우지 않게 한다.
-    if (opts?.forcePresets || stateLoaded) {
+    // 전역 데이터는 실제 커스텀 프리셋 추가/수정/삭제 때만 저장한다. 일반 게인/EQ 저장에
+    // 같은 배열을 매번 포함하면 Firefox의 storage.onChanged가 이를 변경으로 알려 현재
+    // 상태에 전역 기본 프리셋을 재적용하고, 슬라이더가 원래 값으로 튈 수 있다.
+    if (opts?.forcePresets) {
       out.customPresets = normalizeCustomPresets(state.customPresets);
       out.defaultCustomId = String(state.defaultCustomId || "");
     }
     return out;
   }
 
-  function requestState(mediaId) {
-    if (!mediaId) return;
+  function requestState(mediaId, requestId = activeStateLoadRequestId) {
+    if (!mediaId || !requestId) return;
     window.postMessage(
-      { source: "cheese-audio-mixer", type: "load", channelId: mediaId },
+      {
+        source: "cheese-audio-mixer",
+        type: "load",
+        channelId: mediaId,
+        requestId,
+      },
       location.origin,
     );
     // MAIN/격리 world의 초기화 순서가 느린 환경에서는 첫 요청이 content 브리지보다 먼저
@@ -2056,6 +2110,7 @@
     if (
       stateLoaded ||
       currentMediaId !== mediaId ||
+      activeStateLoadRequestId !== requestId ||
       stateLoadAttempts >= STATE_LOAD_MAX_ATTEMPTS
     ) {
       return;
@@ -2064,8 +2119,21 @@
     clearTimeout(stateLoadRetryTimer);
     stateLoadRetryTimer = window.setTimeout(() => {
       stateLoadRetryTimer = 0;
-      if (!stateLoaded && currentMediaId === mediaId) requestState(mediaId);
+      if (
+        !stateLoaded &&
+        currentMediaId === mediaId &&
+        activeStateLoadRequestId === requestId
+      ) {
+        requestState(mediaId, requestId);
+      }
     }, STATE_LOAD_RETRY_MS);
+  }
+
+  function beginStateLoad(mediaId) {
+    resetStateLoadRetry();
+    stateLoaded = false;
+    activeStateLoadRequestId = `${++stateLoadRequestSeq}:${mediaId}`;
+    requestState(mediaId, activeStateLoadRequestId);
   }
 
   function resetStateLoadRetry() {
@@ -2077,10 +2145,28 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-audio-mixer-content")
       return;
-    if (e.data.type === "loaded" && e.data.channelId === currentMediaId) {
+    if (
+      e.data.type === "loaded" &&
+      e.data.channelId === currentMediaId &&
+      e.data.requestId === activeStateLoadRequestId &&
+      !stateLoaded
+    ) {
       resetStateLoadRetry();
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
+        const locallyEditedState = userEditedDuringLoad
+          ? {
+              enabled: state.enabled,
+              userDisabled: state.userDisabled,
+              userPickedPreset: state.userPickedPreset,
+              preset: state.preset,
+              gain: state.gain,
+              eq: [...state.eq],
+              comp: { ...state.comp },
+              limiter: { ...state.limiter },
+              normalizer: { ...state.normalizer },
+            }
+          : null;
         state = {
           ...DEFAULT_STATE(),
           ...saved,
@@ -2118,6 +2204,11 @@
             state.normalizer = snapshot.normalizer;
           }
         }
+        // 로드 대기 중 사용자가 직접 조절한 채널 값은 늦게 도착한 저장값보다 우선한다.
+        // 전역 공유 프리셋 목록은 load 응답에서 받아 초기 진입 시에도 빠뜨리지 않는다.
+        if (locallyEditedState) {
+          state = { ...state, ...locallyEditedState };
+        }
         // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 기본값이 켜진 동안 채널
         // 저장이 전역값으로 덮어써지지 않게 하고, 전역 해제 시 이 값으로 복원한다.
         channelBaseState = snapshotChannelPreset();
@@ -2126,7 +2217,7 @@
         // (기본 'global' 모드는 항상 전역값.) enabled/userDisabled는 채널값 유지.
         const useChannelPick =
           globalDefaultMode === "channel" && state.userPickedPreset === true;
-        if (!useChannelPick) applyGlobalDefaultPreset();
+        if (!locallyEditedState && !useChannelPick) applyGlobalDefaultPreset();
         // userDisabled 채널인데 로드 전 자동 활성화가 먼저 켰을 수 있다(레이스).
         // 저장된 의사를 존중해 확실히 끈다.
         if (state.userDisabled && audio.connected) {
@@ -2140,6 +2231,7 @@
       // 저장 설정 로드 완료 → 이제부터 '항상 켜기' 자동 활성화 허용(저장된 프리셋이
       // 이미 state에 반영돼 있으므로 자동으로 켜도 그 프리셋이 적용된다).
       stateLoaded = true;
+      userEditedDuringLoad = false;
       maybeAutoEnableMixer();
       // 같은 탭에서 복원된 enabled 상태도 클릭 없이 이어지도록 재생 기반 resume을 시도한다.
       bindVideoAutoEnable();
@@ -2156,7 +2248,7 @@
       }
       globalDefaultPreset = normalizeGlobalDefaultPreset(next.globalDefault);
       if (!globalDefaultPreset.enabled) {
-        if (prevEnabled && currentMediaId) requestState(currentMediaId);
+        if (prevEnabled && currentMediaId) beginStateLoad(currentMediaId);
         return;
       }
       if (applyGlobalDefaultPreset()) {
@@ -3215,6 +3307,12 @@
       // "-24" 를 치는 도중 "-" 나 "2" 가 즉시 적용돼 소리가 튀기 때문이다.
       if (t.dataset.numInput) {
         commitNumInput(t);
+        flushPendingStateSave();
+        return;
+      }
+      // range 슬라이더는 input 중 마지막 값만 모아 두었다가 조작 종료(change)에 확정한다.
+      if (t.dataset.slider || t.dataset.eq != null) {
+        flushPendingStateSave();
         return;
       }
       if (t.dataset.exportPick) {
@@ -3849,6 +3947,7 @@
     gainDragging = false;
     gainDragTarget = null;
     gainDragPointerId = null;
+    flushPendingStateSave();
     // 드래그 끝나면 호버 아닐 때 숨김 예약.
     const tip = gainTooltipOf(target);
     if (tip) scheduleGainTooltipHide(tip);
@@ -3913,6 +4012,25 @@
     if (!userGestureSeen) {
       userGestureSeen = true;
       window.setTimeout(() => maybeAutoEnableMixer(), 0);
+    }
+    // Firefox는 사용자 활성화가 setTimeout 뒤에는 소진될 수 있다. 플래그가 첫 입력보다
+    // 늦게 도착할 수도 있으므로 '최초 1회' 분기 밖에서 매 입력마다 필요한 경우만 준비한다.
+    // AudioContext가 running이 되면 저장 설정 로드 시점과 관계없이 자동 활성화를 재시도한다.
+    if (mixerAlwaysOn) {
+      try {
+        audio.ctx ||= new AudioContext();
+        if (audio.ctx.state === "suspended") {
+          audio.ctx
+            .resume()
+            .then(() => {
+              maybeAutoEnableMixer();
+              if (state.enabled && !audio.connected) ensureEnabledGraph();
+            })
+            .catch(() => {});
+        } else {
+          maybeAutoEnableMixer();
+        }
+      } catch {}
     }
     if (!state.enabled) return;
     // 제스처가 있는 지금이 AudioContext를 만들/재개할 유일한 기회다. 이미 연결돼
@@ -7185,11 +7303,10 @@
     true,
   );
 
-  // ── 방향키(←/→) = 10초 되감기/앞으로 ──────────────────────────────────────
-  // 라이브 + 되감기 바 표시 상태에서, 타이핑/방향키소비 UI(슬라이더 등)가 아니면
-  // 가로챈다(영상 아래·사이드바·헤더를 클릭해 포커스가 옮겨가도 동작). 가로챌 땐
-  // capture+preventDefault+stopImmediatePropagation으로 치지직 네이티브 방향키 seek
-  // 중복 발동을 막는다.
+  // ── 방향키(←/→) = 라이브 설정 간격 / 다시보기 5초 이동 ────────────────────
+  // 라이브는 되감기 바나 버튼이 보일 때, 다시보기는 전역 방향키 옵션이 켜졌을 때
+  // 타이핑/방향키소비 UI(슬라이더 등)가 아니면 가로챈다. 플레이어에 포커스를 주려고
+  // 영상을 클릭할 필요가 없으며, capture 단계에서 네이티브 seek 중복 발동을 막는다.
 
   // 입력/채팅/contentEditable에 포커스가 있으면 단축키 비활성.
   function isTypingTarget(t) {
@@ -7222,18 +7339,22 @@
     return false;
   }
 
-  // 단축키를 받을 상황인가: 라이브 + 되감기 바 표시 + 타이핑/방향키소비 UI 아님.
+  // 단축키를 받을 상황인가: 지원 페이지의 기능이 켜짐 + 타이핑/방향키소비 UI 아님.
   // 영상 아래·사이드바·헤더 등을 클릭해 포커스가 플레이어 밖으로 가도(마우스를 안
   // 움직여도) 방향키 seek 가 먹히도록, 포커스/포인터 위치 조건은 두지 않는다. 대신
   // 타이핑 중이거나 방향키를 자체로 쓰는 요소(슬라이더/라디오 등)일 때만 양보한다.
   function seekHotkeyAllowed(e) {
-    // 방향키 seek 는 '되감기 바'(liveSeekBarOn) 또는 '되감기/앞으로 버튼'(featureFlags.
-    // liveRewind=true 면 버튼 숨김) 중 하나라도 켜져 있으면 허용한다. 둘 다 꺼졌을 때만
-    // 차단(바 없이 버튼만 켜도 방향키가 먹히도록 — 피드백 반영).
-    const seekBarOn = liveSeekBarOn;
-    const seekButtonsOn = !featureFlags.liveRewind;
-    if (!seekBarOn && !seekButtonsOn) return false;
-    if (!location.pathname.startsWith("/live/")) return false;
+    const live = isLiveSeekPage();
+    const vod = isVodSeekPage();
+    if (!live && !vod) return false;
+    if (live) {
+      // 라이브는 되감기 바 또는 되감기·앞으로 버튼 중 하나라도 켜져 있으면 허용한다.
+      const seekBarOn = liveSeekBarOn;
+      const seekButtonsOn = !featureFlags.liveRewind;
+      if (!seekBarOn && !seekButtonsOn) return false;
+    } else if (!featureFlags.vodGlobalArrowSeek) {
+      return false;
+    }
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
       return false;
     if (
@@ -7241,7 +7362,7 @@
       isArrowConsumingTarget(document.activeElement)
     )
       return false;
-    if (!findPlayer()) return false; // 플레이어가 있는 라이브 화면일 때만
+    if (!findPlayer()) return false; // 현재 페이지에 플레이어가 있을 때만
     return true;
   }
 
@@ -7263,7 +7384,7 @@
       }
       const w = getSeekWindow();
       if (!w) return;
-      // 네이티브 ±N초 seek와 중복되지 않도록 우리가 가로채 ±10초로 통일.
+      // 네이티브 seek와 중복되지 않도록 우리가 가로채 페이지별 간격으로 통일한다.
       e.preventDefault();
       e.stopImmediatePropagation();
       lastHeldSeekAt = Date.now();
@@ -7850,7 +7971,7 @@
   function tick() {
     // 클립 만들기(클립 에디터)에선 오디오 믹서를 개입시키지 않는다. seeker 드래그로
     // DOM 이 매 프레임 바뀌는데 여기서 video 탐색/그래프 판정을 돌리면 영상이 버벅인다.
-    if (location.pathname.startsWith("/clip-editor")) {
+    if (isClipEditorContext()) {
       if (seekCheckTimer) removeSeekButtons();
       return;
     }
@@ -7903,6 +8024,9 @@
       return;
     }
     if (pageKey !== currentPageKey) {
+      // 이전 채널에서 마지막으로 조절한 값이 debounce 대기 중이면, currentMediaId/state를
+      // 새 채널 값으로 바꾸기 전에 확정한다.
+      flushPendingStateSave();
       currentPageKey = pageKey;
       currentMediaId = null; // 채널id는 아래에서 비동기로 해석
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
@@ -7923,6 +8047,7 @@
         maxQualityCatchupTimer = 0;
       }
       pendingUserEdit = false;
+      userEditedDuringLoad = false;
       stateLoaded = false; // 새 미디어 → 저장 설정 로드 전(자동 활성화 대기)
       resetStateLoadRetry();
       // 커스텀 프리셋과 '기본' 대체값은 채널별 값이 아니라 전역 공유 데이터다.
@@ -8115,7 +8240,7 @@
       pendingUserEdit = false;
       saveState({ forcePresets: true }); // 대기 변경엔 커스텀 편집도 있을 수 있어 강제 저장
     }
-    requestState(channelId); // loaded 수신 시 stateLoaded=true
+    beginStateLoad(channelId); // loaded 수신 시 stateLoaded=true
   }
 
   // documentElement 전체(subtree childList)를 감시하므로 라이브 채팅·재생 UI 변이가
@@ -8192,5 +8317,6 @@
     childList: true,
     subtree: true,
   });
+  window.addEventListener("pagehide", flushPendingStateSave);
   tick();
 })();

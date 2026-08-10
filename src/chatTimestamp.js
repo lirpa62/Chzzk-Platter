@@ -7,6 +7,27 @@
 (async () => {
   "use strict";
 
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+
+  if (isClipEditorContext()) return;
+
   async function masterEnabled() {
     const root = document.documentElement;
     for (let i = 0; i < 100; i += 1) {
@@ -60,6 +81,54 @@
 
   let currentHostPath = getHostPagePathname();
   let vodChatPage = isVodChatPage(currentHostPath);
+
+  // 다시보기 채팅의 실제 전송 시각(messageTime 등)과 영상 경과 시각
+  // (playerMessageTime)을 격리 월드로 넘겨 방송 시작 시각을 보정한다. 채팅 기능을 모두
+  // 꺼도 첫 진입 후 잠깐만 수집하며, 상한에 도달하거나 제한 시간이 지나면 옵저버를
+  // 정리한다. 실제 단위(ms/초) 판정과 이상치 제거는 content.js가 여러 표본으로 수행한다.
+  const VOD_TIME_ANCHOR_SOURCE = "cheese-vod-chat-time-anchor";
+  const VOD_TIME_ANCHOR_TARGET = 16;
+  const VOD_TIME_ANCHOR_WINDOW_MS = 30000;
+  let vodTimeAnchorSent = new Set();
+  let vodTimeAnchorCollectUntil = 0;
+  let vodTimeAnchorStopTimer = 0;
+
+  function getVodVideoNo(pathname = getHostPagePathname()) {
+    const match = String(pathname || "").match(/^\/video\/(\d+)(?:\/|$)/);
+    return match ? match[1] : "";
+  }
+
+  function needsVodTimeAnchorCollection() {
+    return Boolean(
+      vodChatPage &&
+        getVodVideoNo() &&
+        Date.now() < vodTimeAnchorCollectUntil &&
+        vodTimeAnchorSent.size < VOD_TIME_ANCHOR_TARGET,
+    );
+  }
+
+  function stopVodTimeAnchorTimer() {
+    if (!vodTimeAnchorStopTimer) return;
+    clearTimeout(vodTimeAnchorStopTimer);
+    vodTimeAnchorStopTimer = 0;
+  }
+
+  function resetVodTimeAnchorCollection() {
+    stopVodTimeAnchorTimer();
+    vodTimeAnchorSent = new Set();
+    if (!vodChatPage || !getVodVideoNo()) {
+      vodTimeAnchorCollectUntil = 0;
+      return;
+    }
+    vodTimeAnchorCollectUntil = Date.now() + VOD_TIME_ANCHOR_WINDOW_MS;
+    vodTimeAnchorStopTimer = window.setTimeout(() => {
+      vodTimeAnchorStopTimer = 0;
+      vodTimeAnchorCollectUntil = 0;
+      if (!anyChatEnhanceOn()) stopChatRowObserver();
+    }, VOD_TIME_ANCHOR_WINDOW_MS + 100);
+  }
+
+  resetVodTimeAnchorCollection();
 
   function isBlindRestoreActive() {
     // 다시보기에서도 동작시킨다. 블라인드 처리 메시지는 원문이 기록에 남지 않아 대부분
@@ -228,6 +297,49 @@
       if (Number.isFinite(n) && n > 1e12) return n;
     }
     return null;
+  }
+
+  function readVodPlayerMessageTime(chatMessage) {
+    const value = Number(chatMessage?.playerMessageTime);
+    if (!Number.isFinite(value) || value < 0 || value > 604800000) return null;
+    return value;
+  }
+
+  function postVodTimeAnchor(chatMessage) {
+    if (!needsVodTimeAnchorCollection()) return;
+    const videoNo = getVodVideoNo();
+    const messageEpochMs = readChatEpochMs(chatMessage);
+    const playerMessageTime = readVodPlayerMessageTime(chatMessage);
+    if (!videoNo || !messageEpochMs || playerMessageTime == null) return;
+
+    const key = `${messageEpochMs}|${playerMessageTime}`;
+    if (vodTimeAnchorSent.has(key)) return;
+    vodTimeAnchorSent.add(key);
+
+    const payload = {
+      source: VOD_TIME_ANCHOR_SOURCE,
+      videoNo,
+      messageEpochMs,
+      playerMessageTime,
+    };
+    try {
+      const target =
+        window.top && window.top.location.origin === location.origin
+          ? window.top
+          : window;
+      target.postMessage(payload, location.origin);
+    } catch {
+      window.postMessage(payload, location.origin);
+    }
+
+    if (vodTimeAnchorSent.size >= VOD_TIME_ANCHOR_TARGET) {
+      vodTimeAnchorCollectUntil = 0;
+      stopVodTimeAnchorTimer();
+      // 현재 행 배치를 마친 뒤, 다른 채팅 기능이 없을 때만 관찰을 끝낸다.
+      queueMicrotask(() => {
+        if (!anyChatEnhanceOn()) stopChatRowObserver();
+      });
+    }
   }
 
   function parseJsonSafe(str) {
@@ -981,6 +1093,8 @@
       return false;
     }
 
+    postVodTimeAnchor(chatMessage);
+
     const restoredInfo = restoredRowInfo.get(row);
     if (restoredInfo && getRowNickname(row) !== restoredInfo.nickname) {
       restoredRowInfo.delete(row);
@@ -1121,7 +1235,8 @@
       showChatOsIcon ||
       hideChatNickname ||
       hideChatBadge ||
-      isBlindRestoreActive()
+      isBlindRestoreActive() ||
+      needsVodTimeAnchorCollection()
     );
   }
 
@@ -1363,6 +1478,9 @@
     setHideChatNickname(f.chatHideNickname === true);
     setHideChatBadge(f.chatHideBadge === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
+    if (needsVodTimeAnchorCollection() && !isChatObserverHealthy()) {
+      ensureChatRowObserver();
+    }
   });
   // 로드 직후 현재 플래그 요청. content.js(격리 월드)와 로드 순서가 보장되지 않아
   // 첫 요청이 유실될 수 있으므로, 플래그를 받을 때까지 짧게 재시도한다(서로의 첫
@@ -1449,6 +1567,7 @@
       restoreUnavailableRows = new WeakSet();
       adminOnlyChatLatched = false; // 새 페이지에서는 다시 판정
       clearPendingChatRows();
+      resetVodTimeAnchorCollection();
       if (isBlindRestoreActive()) clearRowDoneMarkers();
       if (anyChatEnhanceOn()) ensureChatRowObserver();
       return;

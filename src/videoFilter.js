@@ -14,6 +14,27 @@
 (async () => {
   "use strict";
 
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+
+  if (isClipEditorContext()) return;
+
   async function masterEnabled() {
     const root = document.documentElement;
     for (let i = 0; i < 100; i += 1) {
@@ -2784,8 +2805,8 @@
     // 설정 메시지처럼 옵저버를 거치지 않는 직접 호출도 숨김 탭에서는 처리하지 않는다.
     // 복귀 시 visibilitychange에서 전체 상태를 한 번 보정한다.
     if (document.hidden) return;
-    // 클립 만들기(클립 에디터)에선 비디오 필터를 개입시키지 않는다(seeker 드래그 버벅임 방지).
-    if (location.pathname.startsWith("/clip-editor")) return;
+    // SPA 경로 전환으로 스크립트가 남아 있어도 클립 에디터에서는 개입하지 않는다.
+    if (isClipEditorContext()) return;
     const pageKey = getPageKey();
     if (!pageKey) {
       if (currentPageKey) {

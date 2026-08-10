@@ -1,6 +1,29 @@
 (async () => {
   "use strict";
 
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+
+  // 클립 에디터 설정 전달은 clipEditorBridge.js가 전담한다. 일반 페이지용 전역
+  // 옵저버·이벤트·API 브리지는 에디터와 그 내부 프레임에서 시작하지 않는다.
+  if (isClipEditorContext()) return;
+
   try {
     const data = await chrome.storage.local.get("cheeseMasterEnabled");
     if (data?.cheeseMasterEnabled === false) return;
@@ -296,6 +319,17 @@
   // 시작 추정 시각(liveOpenDate) + preview 시간으로 계산한 당시 추정 시각을 병기.
   const SEEK_PREVIEW_TIME_SELECTOR = ".pzp-seeking-preview__time";
   const SEEK_PREVIEW_REALTIME_CLASS = "cheese-search-seek-realtime";
+  const VOD_CHAT_TIME_ANCHOR_SOURCE = "cheese-vod-chat-time-anchor";
+  const VOD_CHAT_CORRECTION_KEY = "cheeseVodChatTimeCorrections";
+  const VOD_CHAT_CORRECTION_MAX = 300;
+  const VOD_CHAT_CORRECTION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+  const VOD_CHAT_CORRECTION_MIN_SAMPLES = 3;
+  const VOD_CHAT_CORRECTION_MAX_SPREAD_MS = 3000;
+  const vodChatCorrections = new Map(); // videoNo → 보정된 방송 시작 시각
+  const vodChatAnchorSamples = new Map(); // 현재 세션에서 받은 원시 기준점
+  let vodChatCorrectionsLoaded = false;
+  let vodChatCorrectionsLoadPromise = null;
+  let vodChatCorrectionsSaveTimer = 0;
   // 영상 정보 영역의 등록일/방송 시작 추정 시각 툴팁(._label_..._77) 교체 대상.
   const VIDEO_INFO_LABEL_SELECTOR = '[class*="_label_"]';
   // 라이브 상세 영역의 시청자/스트리밍 시간 메타에 붙이는 라이브 시작일 툴팁.
@@ -304,6 +338,7 @@
   const seekPreviewState = {
     videoNo: "",
     liveOpenAt: 0, // 라이브 시작 시각(ms). 0이면 미확보/없음
+    liveOpenAtCorrected: false, // 다시보기 채팅 시각으로 보정했는지
     publishAt: 0, // 등록일(ms). 0이면 미확보/없음
     fetching: false,
     observer: null,
@@ -1621,6 +1656,7 @@
     chatShowOsIcon: false, // 채팅 작성 기기(PC/AOS/IOS) 아이콘 표시(chatTimestamp.js)
     chatHideNickname: false, // 채팅 닉네임 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
     chatHideBadge: false, // 채팅 배지 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
+    chatSplitNickname: false, // 일반 채팅의 닉네임 줄과 메시지 줄 분리
     loungeNews: false, // 헤더 치지직 라운지 소식 버튼(숨김 플래그 — true=숨김)
     chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
@@ -1632,6 +1668,7 @@
     fillScreen: false, // 라이브 화면 채우기
     fillScreenVod: false, // 다시보기 화면 채우기
     vodSeekButtons: false, // 다시보기 되감기·앞으로 버튼 표시
+    vodGlobalArrowSeek: false, // 플레이어 포커스 없이 다시보기 방향키 5초 이동
     vodMoreBelow: false, // 다시보기 '영상 더보기' 정보 영역을 영상 아래로 배치
     vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
     tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
@@ -5735,6 +5772,7 @@
       teardownSeekPreviewObserver();
       seekPreviewState.videoNo = "";
       seekPreviewState.liveOpenAt = 0;
+      seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
       hideVideoInfoTooltip(); // 다시보기 이탈 → 우리 툴팁 숨김
       return;
@@ -5742,12 +5780,17 @@
     if (seekPreviewState.videoNo !== videoNo) {
       seekPreviewState.videoNo = videoNo;
       seekPreviewState.liveOpenAt = 0;
+      seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
       hideVideoInfoTooltip(); // 영상 전환 → 이전 영상 툴팁 숨김
       videoInfoHoverTrigger = null;
       // 새 영상 진입 → 자동 재생 끄기 재적용 허용(영상마다 스위치가 새로 렌더됨).
       vodAutoplaySettingApplied = false;
       vodAutoplayTurnedOff = false;
+      void loadVodChatCorrections().then(() => {
+        const correction = vodChatCorrections.get(videoNo);
+        if (correction) applyVodChatCorrectionToViews(videoNo, correction);
+      });
       void fetchVideoDates(videoNo);
     }
     startSeekPreviewObserver();
@@ -5768,8 +5811,11 @@
       const json = await res.json();
       if (seekPreviewState.videoNo !== videoNo) return; // 그새 영상 전환됨
       const c = json?.content || {};
+      const correction = vodChatCorrections.get(videoNo);
       // 라이브 다시보기는 liveOpenDate 보유, 업로드 영상은 publishDate만.
-      seekPreviewState.liveOpenAt = parsePublishDate(c.liveOpenDate) || 0;
+      seekPreviewState.liveOpenAt =
+        correction?.startAt || parsePublishDate(c.liveOpenDate) || 0;
+      seekPreviewState.liveOpenAtCorrected = Boolean(correction?.startAt);
       seekPreviewState.publishAt = parsePublishDate(c.publishDate) || 0;
       // 이미 떠 있는 seek preview / 정보 툴팁에 즉시 반영.
       updateSeekPreviewRealtime();
@@ -5879,18 +5925,28 @@
     const seconds = parseClockToSeconds(baseText);
     if (!Number.isFinite(seconds)) return;
     const label = formatBroadcastClock(seekPreviewState.liveOpenAt, seconds);
+    const source = seekPreviewState.liveOpenAtCorrected ? "chat" : "estimate";
     if (existing) {
-      if (existing.dataset.label !== label) {
+      if (
+        existing.dataset.label !== label ||
+        existing.dataset.source !== source
+      ) {
         existing.dataset.label = label;
+        existing.dataset.source = source;
         setSeekRealtimeContent(existing, label);
       }
+      existing.title = seekPreviewState.liveOpenAtCorrected
+        ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
+        : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
       return;
     }
     const span = document.createElement("span");
     span.className = SEEK_PREVIEW_REALTIME_CLASS;
     span.dataset.label = label;
-    span.title =
-      "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
+    span.dataset.source = source;
+    span.title = seekPreviewState.liveOpenAtCorrected
+      ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
+      : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
     setSeekRealtimeContent(span, label);
     timeEl.appendChild(span);
   }
@@ -5934,10 +5990,17 @@
       );
     }
     if (seekPreviewState.liveOpenAt) {
-      parts.push(
-        `방송 시작 시각(추정) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
-      );
-      parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
+      if (seekPreviewState.liveOpenAtCorrected) {
+        parts.push(
+          `방송 시작 시각(채팅 기준) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
+        );
+        parts.push("※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.");
+      } else {
+        parts.push(
+          `방송 시작 시각(추정) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
+        );
+        parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
+      }
     }
     return parts.join("<br>");
   }
@@ -10310,6 +10373,12 @@
       "cheese-cf-on",
       featureFlags.sbFollowCustom === true && featureFlags.sidebar !== true,
     );
+    // 일반 채팅의 닉네임/메시지 줄 분리. 행별 마커 없이 루트 클래스와 CSS로만 처리해
+    // 가상 스크롤 행 재사용이나 빠른 채팅에서도 별도 DOM 작업이 생기지 않게 한다.
+    document.documentElement.classList.toggle(
+      "cheese-chat-nickname-message-split",
+      featureFlags.chatSplitNickname === true,
+    );
     applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
     // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
     updateSeekPreviewRealtime();
@@ -11825,6 +11894,28 @@
       document.querySelector(fullscreenSelector)
     ) {
       return true;
+    }
+
+    // 일부 Chromium 계열 브라우저는 전환 중 Fullscreen API/플레이어 클래스를 늦게
+    // 갱신한다. 플레이어가 실제 뷰포트를 덮고 있으면 전체화면으로 보아 높이 강제를
+    // 원복한다. 일반 넓은 화면은 위에서 별도 제외되며 대개 뷰포트 전체 높이를 덮지 않는다.
+    const viewportWidth =
+      window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight =
+      window.innerHeight || document.documentElement.clientHeight;
+    if (viewportWidth > 0 && viewportHeight > 0) {
+      for (const element of candidates) {
+        if (!(element instanceof HTMLElement)) continue;
+        const rect = element.getBoundingClientRect();
+        if (
+          rect.left <= 2 &&
+          rect.top <= 2 &&
+          rect.right >= viewportWidth - 2 &&
+          rect.bottom >= viewportHeight - 2
+        ) {
+          return true;
+        }
+      }
     }
 
     const button = document.querySelector(
@@ -13997,16 +14088,56 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 팔로잉 섹션(치지직 원본)의 오프라인 채널 li를 숨긴다. 오프라인 = 프로필에
   // _is_live_ 클래스가 없는 항목(또는 blind "오프라인"). 우리가 렌더한 ul은 라이브만이라
   // 대상이 아님.
-  function applyFollowOffline(followNav) {
+  const FOLLOW_AUTO_EXPANDING_CLASS = "cheese-follow-auto-expanding";
+
+  function getNativeFollowList(followNav) {
+    return (
+      followNav?.querySelector(
+        'ul[class*="_list_"]:not(.cheese-cf-list)',
+      ) || null
+    );
+  }
+
+  function applyFollowOfflineToItems(items) {
     const hide = featureFlags.sbFollowOffline;
-    const originalUl = followNav.querySelector('ul[class*="_list_"]');
-    if (!originalUl) return;
-    originalUl.querySelectorAll(":scope > li").forEach((li) => {
+    items.forEach((li) => {
+      if (li?.nodeType !== Node.ELEMENT_NODE || li.tagName !== "LI") return;
       li.classList.toggle(
         "cheese-sb-offline-hide",
         hide && isOfflineFollowItem(li),
       );
     });
+  }
+
+  function applyFollowOffline(followNav) {
+    const originalUl = getNativeFollowList(followNav);
+    if (!originalUl) return;
+    applyFollowOfflineToItems(originalUl.querySelectorAll(":scope > li"));
+  }
+
+  // 네이티브 새로고침/더보기는 한 번에 최대 50개 li를 추가한다. 기존 사이드바 보정은
+  // 30ms 디바운스 뒤 전체 목록을 검사하므로, 새 오프라인 행이 한 프레임 보였다가 사라질
+  // 수 있다. 옵저버가 전달한 addedNodes 중 현재 원본 ul의 직계 li만 즉시 판정하면 첫
+  // 페인트 전에 숨길 수 있고, 이미 분류된 수백 개 항목을 매번 다시 훑지 않아도 된다.
+  function applyFollowOfflineFromMutations(mutations) {
+    if (!mutations?.length) return;
+    const followNav = findSidebarFollowNav();
+    const originalUl = getNativeFollowList(followNav);
+    if (!originalUl) return;
+    const addedItems = new Set();
+    mutations.forEach((mutation) => {
+      if (mutation.type !== "childList" || !mutation.addedNodes.length) return;
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (node.tagName === "LI" && node.parentElement === originalUl) {
+          addedItems.add(node);
+        }
+        node.querySelectorAll?.("li").forEach((li) => {
+          if (li.parentElement === originalUl) addedItems.add(li);
+        });
+      });
+    });
+    if (addedItems.size) applyFollowOfflineToItems(addedItems);
   }
 
   // 팔로잉 li가 오프라인인지 판정. blind 텍스트("오프라인"/"LIVE")를 1순위(해시 무관),
@@ -14078,6 +14209,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let followAutoExpandTries = 0; // 안전: 무한 반복 방지
   let followAutoExpandPrevCount = -1; // 직전 라운드 목록 항목 수(진전 판정용)
   let followAutoExpandNoProgress = 0; // 연속으로 항목이 안 늘어난 라운드 수(느린 로드 허용)
+  let followCollapseAfterExpand = false; // 갱신 중 임시 접기를 누르면 펼침 완료 직후 접기
   // 자동 펼치기 옵션(sbFollowAutoExpand)이 켜져 있어도, 사용자가 이번 세션에서 직접
   // '접기'를 눌렀으면 재펼침을 멈춘다(사용자 의사 우선). 페이지 이동/새로고침 시 초기화.
   let followUserCollapsed = false;
@@ -14105,6 +14237,30 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return followNav?.querySelector('button[aria-label="접기"]') || null;
   }
 
+  // 자동 펼침 중 치지직의 하단 버튼은 갱신마다 '접기 → 더보기 → 접기'로 바뀐다.
+  // 더보기는 프로그램적으로 계속 클릭해야 하지만 화면에는 보이지 않게 nav에 짧게
+  // 마커를 둔다. visibility:hidden을 쓰므로 레이아웃 높이는 변하지 않는다.
+  function setFollowAutoExpandVisualState(nav, active) {
+    const sidebar = document.getElementById("sidebar");
+    const current = active ? nav || findSidebarFollowNav() : null;
+    sidebar
+      ?.querySelectorAll(`nav.${FOLLOW_AUTO_EXPANDING_CLASS}`)
+      .forEach((node) => {
+        if (node !== current) node.classList.remove(FOLLOW_AUTO_EXPANDING_CLASS);
+      });
+    current?.classList.toggle(FOLLOW_AUTO_EXPANDING_CLASS, Boolean(active));
+  }
+
+  function syncFollowAutoExpandVisualState(nav) {
+    const followNav = nav || findSidebarFollowNav();
+    setFollowAutoExpandVisualState(
+      followNav,
+      Boolean(
+        followNav && shouldExpandFollow() && findFollowMoreButton(followNav),
+      ),
+    );
+  }
+
   function stopFollowAutoExpand() {
     if (followAutoExpandTimer) {
       clearTimeout(followAutoExpandTimer);
@@ -14113,11 +14269,37 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     followAutoExpandTries = 0;
     followAutoExpandPrevCount = -1; // 다음 펼치기 세션이 깨끗이 시작되도록 리셋
     followAutoExpandNoProgress = 0;
+    followCollapseAfterExpand = false;
+    setFollowAutoExpandVisualState(null, false);
+  }
+
+  function requestFollowCollapse() {
+    const collapse = findFollowCollapseButton();
+    if (collapse) {
+      followExpandWanted = false;
+      followUserCollapsed = true;
+      stopFollowAutoExpand();
+      collapse.click();
+      return;
+    }
+
+    // 자동 갱신 중에는 네이티브 접기가 잠시 더보기로 교체된다. 이때 사용자가 임시
+    // 접기를 누르면 현재 로드를 중간 상태로 남기지 않고 끝까지 펼친 직후 접는다.
+    if (!findFollowMoreButton()) return;
+    followCollapseAfterExpand = true;
+    followExpandWanted = true;
+    followUserCollapsed = false;
+    if (!followAutoExpandTimer) {
+      followAutoExpandTries = 0;
+      followAutoExpandNoProgress = 0;
+      followAutoExpandPrevCount = -1;
+      driveFollowAutoExpand();
+    }
   }
 
   // 팔로잉 nav의 현재 목록 항목 수.
   function countFollowItems(nav) {
-    const ul = nav?.querySelector('ul[class*="_list_"]');
+    const ul = getNativeFollowList(nav);
     return ul ? ul.querySelectorAll(":scope > li").length : 0;
   }
 
@@ -14128,15 +14310,25 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 방송이 렉 걸리던 문제를 줄인다.
   function driveFollowAutoExpand() {
     followAutoExpandTimer = 0;
-    if (!shouldExpandFollow()) return;
+    if (!shouldExpandFollow()) {
+      setFollowAutoExpandVisualState(null, false);
+      return;
+    }
     const nav = findSidebarFollowNav();
-    if (!nav) return;
+    if (!nav) {
+      setFollowAutoExpandVisualState(null, false);
+      return;
+    }
     // '더보기' 버튼이 있으면 아직 펼칠 게 남은 것이므로 접기 버튼 유무와 무관하게 계속
     // 펼친다. 치지직이 목록을 재구성하는 과도기엔 더보기와 접기가 '동시에' 존재할 수 있는데
     // (실측: more=true·collapse=true), 예전엔 접기만 보고 '이미 펼침'으로 오판해 부분(예
     // 105개) 펼침 상태로 멈추는 버그가 있었다. 더보기가 없을 때만 접기=완료로 판단한다.
     const more = findFollowMoreButton(nav);
     if (!more) {
+      if (followCollapseAfterExpand && findFollowCollapseButton(nav)) {
+        requestFollowCollapse();
+        return;
+      }
       // 더보기 없음 → 완료(접기 있음=전부 펼침) 또는 할 일 없음(목록 짧음/전환 중). 종료.
       stopFollowAutoExpand();
       return;
@@ -14154,6 +14346,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         return;
       }
       // 무진전이지만 아직 여유가 있으면 클릭하지 않고(중복 클릭 방지) 로드를 더 기다린다.
+      setFollowAutoExpandVisualState(nav, true);
       followAutoExpandTimer = setTimeout(driveFollowAutoExpand, 400);
       return;
     }
@@ -14165,6 +14358,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     followAutoExpandPrevCount = count;
     followAutoExpandTries += 1;
+    setFollowAutoExpandVisualState(nav, true);
     more.click();
     // 추가 로드 렌더를 기다렸다 다음 라운드(없어질 때까지).
     followAutoExpandTimer = setTimeout(driveFollowAutoExpand, 250);
@@ -14173,9 +14367,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 사용자가 펼침을 원하는데(followExpandWanted) 현재 접힌 상태(더보기 버튼 존재)면
   // 자동 펼침을 (재)시작한다. 사이드바 옵저버/갱신 후 호출 → 재렌더로 접혀도 복원.
   function ensureFollowExpansion() {
-    if (!shouldExpandFollow()) return;
+    if (!shouldExpandFollow()) {
+      setFollowAutoExpandVisualState(null, false);
+      return;
+    }
     const nav = findSidebarFollowNav();
-    if (!nav) return;
+    if (!nav) {
+      setFollowAutoExpandVisualState(null, false);
+      return;
+    }
     // '더보기' 버튼이 있으면 아직 펼칠 게 남은 것 → 드라이버 시작(접기 버튼이 함께 있어도).
     // 과도기에 더보기·접기가 동시에 있는데 접기만 보고 종료하면 부분 펼침에서 멈춘다(버그).
     // 더보기가 있고 드라이버가 안 돌고 있으면 시작. 새 펼침 세션이므로 진전/무진전 카운터를
@@ -14185,6 +14385,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       followAutoExpandNoProgress = 0;
       followAutoExpandPrevCount = -1;
       driveFollowAutoExpand();
+    } else {
+      syncFollowAutoExpandVisualState(nav);
     }
   }
 
@@ -14203,6 +14405,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const nav = btn.closest('nav[class*="_section_"]');
     if (!nav || !getSidebarNavLabel(nav).includes("팔로")) return;
     if (btn.getAttribute("aria-label") === "더보기") {
+      // 자동 갱신 중 화면에는 이 버튼을 '접기'로 유지한다. 사용자가 누르면 React의
+      // 더보기 클릭은 막고, 현재 자동 펼침이 끝난 직후 네이티브 접기를 실행한다.
+      if (nav.classList.contains(FOLLOW_AUTO_EXPANDING_CLASS)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        requestFollowCollapse();
+        return;
+      }
       // '자동 펼치기' 옵션이 꺼져 있으면 사용자의 '더보기' 클릭을 가로채 끝까지 강제
       // 펼치지 않는다 — 사용자는 한 단계만 더 보려던 것일 수 있고, 강제 전체 펼침은
       // 팔로우가 많을 때 대량 로드로 렉을 유발한다. 옵션이 켜진 경우에만 이어서 펼친다.
@@ -14297,11 +14507,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // .click()으로 누르지만 그건 isTrusted=false 라 onFollowMoreClickCapture 가
       // 무시하므로, 여기서 followUserCollapsed 를 직접 켜야 자동 펼치기가 재펼침하지
       // 않는다.)
-      followExpandWanted = false;
-      followUserCollapsed = true;
-      stopFollowAutoExpand();
-      // 하단 '접기'를 눌러 실제로 목록을 접는다.
-      findFollowCollapseButton()?.click();
+      requestFollowCollapse();
     });
     // 제목 바로 뒤(새로고침 등 우측 버튼 앞)에 둔다.
     const title = header.querySelector('[class*="_title_"]');
@@ -15421,6 +15627,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     sidebarObservedRoot = sidebar;
     sidebarWasExpanded = isSidebarExpanded(sidebar);
     sidebarObserver = new MutationObserver((mutations) => {
+      // React가 새 행/더보기 버튼을 붙인 직후, 브라우저가 다음 프레임을 그리기 전에
+      // 오프라인 행과 자동 펼침 버튼의 시각 상태를 먼저 확정한다. 아래 30ms 작업은 전체
+      // 섹션·헤더·전용 목록 보정을 계속 담당한다.
+      applyFollowOfflineFromMutations(mutations);
+      syncFollowAutoExpandVisualState();
       // 전용 목록의 innerHTML 교체와 헤더 컨트롤 주입은 이 옵저버가 다시 보정할 대상이
       // 아니다. 우리 변이만 들어온 배치는 무시해 갱신 1회가 후속 사이드바 검사를 만드는
       // 자가 발화를 차단한다.
@@ -15700,26 +15911,48 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return m ? m[1] : null;
   }
 
+  const CHANNEL_LIVE_TTL_MS = 30000; // 정상 응답 캐시
+  const CHANNEL_LIVE_ERROR_TTL_MS = 10000; // 실패 시 재시도 간격(폭주 방지)
+
   async function fetchChannelLiveStatus(channelId) {
     if (channelLiveFetching === channelId) return;
     const cached = channelLiveStatus.get(channelId);
-    if (cached && Date.now() - cached.at < 30000) return; // 30초 캐시
+    if (cached) {
+      // 실패로 남긴 항목은 더 짧게, 정상 항목은 30초 동안 재조회하지 않는다.
+      const ttl = cached.error
+        ? CHANNEL_LIVE_ERROR_TTL_MS
+        : CHANNEL_LIVE_TTL_MS;
+      if (Date.now() - cached.at < ttl) return;
+    }
     channelLiveFetching = channelId;
+    // ⚠ 실패해도 '언제 실패했는지'를 남겨야 한다. 아무것도 안 남기면 ensure* 가
+    // 매 패스(4회/초)마다 이 함수를 다시 불러 실패 요청이 폭주한다.
+    let next = null;
     try {
       const res = await fetch(
         `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
         { credentials: "include", headers: { accept: "application/json" } },
       );
-      if (!res.ok) return;
-      const json = await res.json();
-      const live = json?.content?.status === "OPEN";
-      mapSetCapped(channelLiveStatus, channelId, { live, at: Date.now() }, 200);
-      ensureChannelLiveButton(); // 상태 반영해 라벨 갱신
+      if (res.ok) {
+        const json = await res.json();
+        next = { live: json?.content?.status === "OPEN", at: Date.now() };
+      }
     } catch {
-      // 실패 시 캐시 없음 → 라벨은 보수적으로 '라이브'(이동은 가능).
+      // 네트워크 오류 — 아래에서 error 표식으로 처리한다.
     } finally {
       if (channelLiveFetching === channelId) channelLiveFetching = "";
     }
+    if (!next) {
+      // 실패: 기존 값이 있으면 그 값을 유지하되 시각만 갱신(라벨 깜빡임 방지),
+      // 없으면 error 표식만 남겨 '확인 중' 상태를 유지한다.
+      next = cached
+        ? { live: cached.live, at: Date.now(), error: true }
+        : { live: null, at: Date.now(), error: true };
+    }
+    const prev = channelLiveStatus.get(channelId);
+    mapSetCapped(channelLiveStatus, channelId, next, 200);
+    // 표시가 달라질 때만 다시 그린다(멱등 갱신이라 무해하지만 불필요한 호출을 줄인다).
+    if (!prev || prev.live !== next.live) ensureChannelLiveButton();
   }
 
   // 바로가기 SVG(네모+화살표) 아이콘.
@@ -15745,9 +15978,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
     const href = `/live/${channelId}`;
     const status = channelLiveStatus.get(channelId);
-    // 3-상태: loading(미조회) / live / offline. 미조회 땐 라이브/오프라인을 확정 못 하니
-    // 깜빡임(라이브→오프라인) 대신 로딩 표시를 보여준다(클릭 비활성).
-    const phase = !status ? "loading" : status.live ? "live" : "offline";
+    // 3-상태: loading(미조회·확정불가) / live / offline. 확정 못 했을 땐 깜빡임
+    // (라이브→오프라인) 대신 로딩 표시를 보여준다(클릭 비활성).
+    // ⚠ 조회에 실패하면 live 가 null 로 남는다 — false 와 구분해야 '오프라인'으로
+    // 잘못 단정하지 않는다.
+    const phase =
+      !status || status.live == null
+        ? "loading"
+        : status.live
+          ? "live"
+          : "offline";
     const label =
       phase === "loading"
         ? "확인 중"
@@ -15817,8 +16057,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           ? `<span class="${CHANNEL_LIVE_BUTTON_CLASS}-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="${CHANNEL_LIVE_BUTTON_CLASS}-label">${label}</span>`
           : `${channelLiveArrowIcon()}<span class="${CHANNEL_LIVE_BUTTON_CLASS}-label">${label}</span>`;
     }
-    // 상태 미조회면 조회 트리거(라벨 갱신은 fetch 완료 후 재호출).
-    if (!status) void fetchChannelLiveStatus(channelId);
+    // 조회 트리거. ⚠ 예전엔 `if (!status)` 였는데, 한 번 캐시가 차면 이 호출 자체가
+    // 사라져 fetch 안의 30초 TTL 에 영영 도달하지 못했다 → 채널 페이지에 머무는 동안
+    // 라이브↔오프라인 전환이 반영되지 않았다(제보). TTL 판단은 fetch 쪽에 맡기고
+    // 여기서는 항상 부른다(캐시가 신선하면 즉시 return 하므로 네트워크 비용 없음).
+    void fetchChannelLiveStatus(channelId);
   }
 
   async function loadChannelLiveButton() {
@@ -28029,6 +28272,281 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const cardDateCache = new Map(); // videoNo → {publishAt, liveOpenAt} (null=실패/없음)
   const cardDateFetching = new Set(); // 중복 요청 방지
 
+  function normalizeVodChatCorrection(value) {
+    const startAt = Math.round(Number(value?.startAt));
+    const sampleCount = Math.round(Number(value?.sampleCount));
+    const spreadMs = Math.max(0, Math.round(Number(value?.spreadMs)));
+    const updatedAt = Math.round(Number(value?.updatedAt));
+    if (
+      !Number.isFinite(startAt) ||
+      startAt <= 978307200000 ||
+      !Number.isFinite(sampleCount) ||
+      sampleCount < VOD_CHAT_CORRECTION_MIN_SAMPLES ||
+      !Number.isFinite(spreadMs) ||
+      spreadMs > VOD_CHAT_CORRECTION_MAX_SPREAD_MS ||
+      !Number.isFinite(updatedAt) ||
+      updatedAt <= 0 ||
+      Date.now() - updatedAt > VOD_CHAT_CORRECTION_TTL_MS
+    ) {
+      return null;
+    }
+    return { startAt, sampleCount, spreadMs, updatedAt };
+  }
+
+  function applyVodChatCorrectionToViews(videoNo, correction) {
+    if (!videoNo || !correction?.startAt) return;
+    if (seekPreviewState.videoNo === videoNo) {
+      seekPreviewState.liveOpenAt = correction.startAt;
+      seekPreviewState.liveOpenAtCorrected = true;
+      updateSeekPreviewRealtime();
+      updateVideoInfoLabel();
+      if (videoInfoHoverTrigger) {
+        showVideoInfoTooltip(videoInfoHoverTrigger);
+      }
+    }
+
+    if (cardDateCache.has(videoNo)) {
+      const current = cardDateCache.get(videoNo);
+      cardDateCache.set(videoNo, {
+        publishAt: Number(current?.publishAt) || 0,
+        liveOpenAt: correction.startAt,
+        liveOpenAtCorrected: true,
+      });
+      if (
+        cardDateHoverInfo &&
+        cardDateHoverTarget &&
+        cardDateHoverVideoNo === videoNo
+      ) {
+        renderCardDateTooltip(
+          cardDateHoverInfo,
+          cardDateHoverTarget,
+          videoNo,
+        );
+      }
+    }
+  }
+
+  async function loadVodChatCorrections() {
+    if (vodChatCorrectionsLoaded) return vodChatCorrections;
+    if (vodChatCorrectionsLoadPromise) return vodChatCorrectionsLoadPromise;
+    vodChatCorrectionsLoadPromise = (async () => {
+      try {
+        const data = await chrome.storage.local.get(VOD_CHAT_CORRECTION_KEY);
+        const raw = data?.[VOD_CHAT_CORRECTION_KEY];
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          Object.entries(raw).forEach(([videoNo, value]) => {
+            if (!/^\d+$/.test(videoNo)) return;
+            const correction = normalizeVodChatCorrection(value);
+            if (correction) vodChatCorrections.set(videoNo, correction);
+          });
+        }
+      } catch {
+        // 캐시를 읽지 못하면 현재 페이지 표본만 사용한다.
+      } finally {
+        vodChatCorrectionsLoaded = true;
+        vodChatCorrectionsLoadPromise = null;
+      }
+
+      const currentVideoNo = getCurrentVideoNo();
+      const current = vodChatCorrections.get(currentVideoNo);
+      if (current) applyVodChatCorrectionToViews(currentVideoNo, current);
+      cardDateCache.forEach((value, videoNo) => {
+        const correction = vodChatCorrections.get(videoNo);
+        if (correction) applyVodChatCorrectionToViews(videoNo, correction);
+      });
+      return vodChatCorrections;
+    })();
+    return vodChatCorrectionsLoadPromise;
+  }
+
+  function scheduleVodChatCorrectionsSave() {
+    if (vodChatCorrectionsSaveTimer) clearTimeout(vodChatCorrectionsSaveTimer);
+    vodChatCorrectionsSaveTimer = window.setTimeout(() => {
+      vodChatCorrectionsSaveTimer = 0;
+      const entries = [...vodChatCorrections.entries()]
+        .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+        .slice(0, VOD_CHAT_CORRECTION_MAX);
+      vodChatCorrections.clear();
+      const value = {};
+      entries.forEach(([videoNo, correction]) => {
+        vodChatCorrections.set(videoNo, correction);
+        value[videoNo] = correction;
+      });
+      try {
+        chrome.storage.local.set({ [VOD_CHAT_CORRECTION_KEY]: value });
+      } catch {}
+    }, 300);
+  }
+
+  function medianNumber(values) {
+    if (!values.length) return NaN;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[middle]
+      : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  function evaluateVodChatTimeScale(samples, scale, durationMs) {
+    const maxOffset = Number.isFinite(durationMs)
+      ? durationMs + 10 * 60 * 1000
+      : 7 * 24 * 60 * 60 * 1000;
+    const rows = samples
+      .map((sample) => ({
+        offsetMs: sample.playerMessageTime * scale,
+        startAt:
+          sample.messageEpochMs - sample.playerMessageTime * scale,
+      }))
+      .filter(
+        (row) =>
+          Number.isFinite(row.offsetMs) &&
+          row.offsetMs >= 0 &&
+          row.offsetMs <= maxOffset &&
+          Number.isFinite(row.startAt) &&
+          row.startAt > 978307200000 &&
+          row.startAt < Date.now() + 60 * 60 * 1000,
+      );
+    if (rows.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
+
+    const center = medianNumber(rows.map((row) => row.startAt));
+    const inliers = rows.filter(
+      (row) =>
+        Math.abs(row.startAt - center) <=
+        VOD_CHAT_CORRECTION_MAX_SPREAD_MS * 2,
+    );
+    if (inliers.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
+
+    const startAt = medianNumber(inliers.map((row) => row.startAt));
+    const spreadMs = Math.max(
+      ...inliers.map((row) => Math.abs(row.startAt - startAt)),
+    );
+    if (spreadMs > VOD_CHAT_CORRECTION_MAX_SPREAD_MS) return null;
+
+    return {
+      startAt: Math.round(startAt),
+      sampleCount: inliers.length,
+      spreadMs: Math.round(spreadMs),
+      dropped: rows.length - inliers.length,
+      scale,
+    };
+  }
+
+  function buildVodChatCorrection(samples) {
+    if (samples.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
+    const distinctOffsets = new Set(
+      samples.map((sample) => String(sample.playerMessageTime)),
+    );
+    if (distinctOffsets.size < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
+
+    const video = document.querySelector(
+      "video.webplayer-internal-video, .pzp-pc video, video",
+    );
+    const durationMs =
+      video instanceof HTMLVideoElement && Number.isFinite(video.duration)
+        ? video.duration * 1000
+        : NaN;
+    const candidates = [
+      evaluateVodChatTimeScale(samples, 1, durationMs),
+      evaluateVodChatTimeScale(samples, 1000, durationMs),
+    ]
+      .filter(Boolean)
+      .sort(
+        (a, b) =>
+          a.spreadMs + a.dropped * 1000 -
+          (b.spreadMs + b.dropped * 1000),
+      );
+    if (!candidates.length) return null;
+    if (candidates.length > 1) {
+      const firstScore = candidates[0].spreadMs + candidates[0].dropped * 1000;
+      const secondScore =
+        candidates[1].spreadMs + candidates[1].dropped * 1000;
+      // 두 단위가 비슷하게 맞으면 표본이 더 벌어질 때까지 성급히 결정하지 않는다.
+      if (secondScore - firstScore < 500) return null;
+    }
+
+    const correction = candidates[0];
+    const publishAt = seekPreviewState.publishAt;
+    if (publishAt) {
+      if (correction.startAt > publishAt + 60 * 60 * 1000) return null;
+      const oldestPlausible =
+        publishAt -
+        (Number.isFinite(durationMs) ? durationMs : 0) -
+        48 * 60 * 60 * 1000;
+      if (correction.startAt < oldestPlausible) return null;
+    }
+    return correction;
+  }
+
+  function addVodChatTimeAnchor(data) {
+    const videoNo = String(data?.videoNo || "");
+    const messageEpochMs = Number(data?.messageEpochMs);
+    const playerMessageTime = Number(data?.playerMessageTime);
+    if (
+      !/^\d+$/.test(videoNo) ||
+      videoNo !== getCurrentVideoNo() ||
+      !Number.isFinite(messageEpochMs) ||
+      messageEpochMs <= 978307200000 ||
+      !Number.isFinite(playerMessageTime) ||
+      playerMessageTime < 0
+    ) {
+      return;
+    }
+
+    let samples = vodChatAnchorSamples.get(videoNo);
+    if (!samples) {
+      if (vodChatAnchorSamples.size >= 12) {
+        const oldestVideoNo = vodChatAnchorSamples.keys().next().value;
+        if (oldestVideoNo !== undefined) {
+          vodChatAnchorSamples.delete(oldestVideoNo);
+        }
+      }
+      samples = [];
+      vodChatAnchorSamples.set(videoNo, samples);
+    }
+    const key = `${messageEpochMs}|${playerMessageTime}`;
+    if (samples.some((sample) => sample.key === key)) return;
+    samples.push({ key, messageEpochMs, playerMessageTime });
+    if (samples.length > 24) samples.splice(0, samples.length - 24);
+
+    const correction = buildVodChatCorrection(samples);
+    if (!correction) return;
+    const current = vodChatCorrections.get(videoNo);
+    if (
+      current &&
+      current.sampleCount >= correction.sampleCount &&
+      current.spreadMs <= correction.spreadMs &&
+      Math.abs(current.startAt - correction.startAt) <= 500
+    ) {
+      applyVodChatCorrectionToViews(videoNo, current);
+      return;
+    }
+
+    const next = {
+      startAt: correction.startAt,
+      sampleCount: correction.sampleCount,
+      spreadMs: correction.spreadMs,
+      updatedAt: Date.now(),
+    };
+    vodChatCorrections.set(videoNo, next);
+    applyVodChatCorrectionToViews(videoNo, next);
+    scheduleVodChatCorrectionsSave();
+  }
+
+  window.addEventListener("message", (event) => {
+    if (
+      !IS_TOP_FRAME ||
+      event.origin !== location.origin ||
+      event.data?.source !== VOD_CHAT_TIME_ANCHOR_SOURCE
+    ) {
+      return;
+    }
+    void loadVodChatCorrections().then(() => {
+      addVodChatTimeAnchor(event.data);
+    });
+  });
+
+  if (IS_TOP_FRAME) void loadVodChatCorrections();
+
   // 정보 줄 요소가 속한 카드에서 videoNo를 추출한다(_information_은 /video/ 앵커의
   // 형제라 카드 컨테이너로 올라가 앵커를 찾는다). 못 찾으면 "".
   function cardVideoNoFromInfo(info) {
@@ -28092,14 +28610,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         { credentials: "include", headers: { accept: "application/json" } },
       );
       if (!res.ok) {
-        cardDateCache.set(videoNo, null);
+        const correction = vodChatCorrections.get(videoNo);
+        cardDateCache.set(
+          videoNo,
+          correction
+            ? {
+                publishAt: 0,
+                liveOpenAt: correction.startAt,
+                liveOpenAtCorrected: true,
+              }
+            : null,
+        );
         return;
       }
       const json = await res.json();
       const c = json?.content || {};
+      const correction = vodChatCorrections.get(videoNo);
       cardDateCache.set(videoNo, {
         publishAt: parsePublishDate(c.publishDate) || 0,
-        liveOpenAt: parsePublishDate(c.liveOpenDate) || 0,
+        liveOpenAt:
+          correction?.startAt || parsePublishDate(c.liveOpenDate) || 0,
+        liveOpenAtCorrected: Boolean(correction?.startAt),
       });
     } catch {
       cardDateCache.set(videoNo, null);
@@ -28163,8 +28694,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (dates.publishAt)
       parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
     if (dates.liveOpenAt) {
-      parts.push(`방송 시작 시각(추정) : ${formatKstClock(dates.liveOpenAt)}`);
-      parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
+      if (dates.liveOpenAtCorrected) {
+        parts.push(
+          `방송 시작 시각(채팅 기준) : ${formatKstClock(dates.liveOpenAt)}`,
+        );
+        parts.push("※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.");
+      } else {
+        parts.push(
+          `방송 시작 시각(추정) : ${formatKstClock(dates.liveOpenAt)}`,
+        );
+        parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
+      }
     }
     if (!parts.length) return;
     const label = getCardDateFloatEl();
@@ -32883,15 +33423,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     });
   }
 
-  // 클립 만들기(클립 에디터) 페이지인지. seeker 드래그 시 DOM/스타일이 매 프레임
-  // 바뀌므로 사이드바/헤더 등 일반 content 초기화는 건너뛴다. 정밀 구간 조정은 가벼운
-  // 전용 스크립트(clipEditorEnhancer.js)가 옵션이 켜진 경우에만 따로 처리한다.
-  function isClipEditorPage() {
-    return location.pathname.startsWith("/clip-editor");
-  }
-
   function init() {
-    if (isClipEditorPage()) return; // 클립 에디터: 일반 기능 개입 없음(드래그 버벅임 방지)
+    if (isClipEditorContext()) return;
     ensureClipPageAutoplay();
     ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
     ensureChatBlockObserver(); // 채팅 프로필 팝오버에 '사용자 차단' 항목 주입 관찰
@@ -33593,16 +34126,38 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, .pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
       );
       if (!btn) return;
+      if (
+        btn.matches(
+          ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
+        )
+      ) {
+        // capture 단계에서 네이티브 Fullscreen 요청보다 먼저 강제 높이를 제거한다.
+        // 브라우저가 보정된 레이아웃 크기를 전체화면 기준으로 잡는 상황을 막는다.
+        clearFillScreenStyles();
+      }
       scheduleFillScreenModeRecheck();
     },
     true,
   );
   // 전체화면 진입/이탈 시 화면 채우기를 재평가한다(전체화면이면 우리 높이 강제를 원복해야
   // 브라우저 전체화면이 정상 적용된다 — 치지직 업데이트로 재발한 문제 대응).
-  document.addEventListener("fullscreenchange", scheduleFillScreenModeRecheck);
+  function handleFillScreenFullscreenChange() {
+    if (
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.webkitIsFullScreen === true
+    ) {
+      clearFillScreenStyles();
+    }
+    scheduleFillScreenModeRecheck();
+  }
+  document.addEventListener(
+    "fullscreenchange",
+    handleFillScreenFullscreenChange,
+  );
   document.addEventListener(
     "webkitfullscreenchange",
-    scheduleFillScreenModeRecheck,
+    handleFillScreenFullscreenChange,
   );
   window.addEventListener("scroll", debounce(handleWindowScroll, 120), {
     passive: true,
@@ -33942,6 +34497,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const AUDIO_MIXER_DEFAULT_CUSTOM_KEY = "audioMixer:defaultCustomId";
   // 채널 저장값보다 우선 적용할 전역 기본 프리셋 설정.
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
+  // Firefox에서 연속 slider input의 storage.set 완료 순서가 뒤섞이지 않게 직렬화한다.
+  // load는 앞서 받은 save가 모두 끝난 뒤 실행돼 채널 전환 직전 마지막 값이 보장된다.
+  let audioMixerStorageQueue = Promise.resolve();
 
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
@@ -33967,46 +34525,52 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (globalDefault && typeof globalDefault === "object") {
           toSet[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] = globalDefault;
         }
-        chrome.storage.local.set(toSet);
+        audioMixerStorageQueue = audioMixerStorageQueue
+          .catch(() => {})
+          .then(() => chrome.storage.local.set(toSet));
       } catch {}
     } else if (data.type === "load") {
-      try {
-        chrome.storage.local.get(
-          [
+      const requestId = String(data.requestId || "");
+      if (!requestId) return;
+      void audioMixerStorageQueue
+        .catch(() => {})
+        .then(() =>
+          chrome.storage.local.get([
             key,
             AUDIO_MIXER_PRESETS_KEY,
             AUDIO_MIXER_DEFAULT_CUSTOM_KEY,
             AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
-          ],
-          (result) => {
-            const saved = result?.[key] || null;
-            const presets = result?.[AUDIO_MIXER_PRESETS_KEY] || [];
-            const defaultCustomId = String(
-              result?.[AUDIO_MIXER_DEFAULT_CUSTOM_KEY] || "",
-            );
-            const globalDefault =
-              result?.[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] || null;
-            // per-media 설정에 전역 커스텀 프리셋·기본값 id를 합쳐서 반환.
-            const merged = saved
-              ? {
-                  ...saved,
-                  customPresets: presets,
-                  defaultCustomId,
-                  globalDefault,
-                }
-              : { customPresets: presets, defaultCustomId, globalDefault };
-            window.postMessage(
-              {
-                source: "cheese-audio-mixer-content",
-                type: "loaded",
-                channelId,
-                state: merged,
-              },
-              location.origin,
-            );
-          },
-        );
-      } catch {}
+          ]),
+        )
+        .then((result) => {
+          const saved = result?.[key] || null;
+          const presets = result?.[AUDIO_MIXER_PRESETS_KEY] || [];
+          const defaultCustomId = String(
+            result?.[AUDIO_MIXER_DEFAULT_CUSTOM_KEY] || "",
+          );
+          const globalDefault =
+            result?.[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] || null;
+          // per-media 설정에 전역 커스텀 프리셋·기본값 id를 합쳐서 반환.
+          const merged = saved
+            ? {
+                ...saved,
+                customPresets: presets,
+                defaultCustomId,
+                globalDefault,
+              }
+            : { customPresets: presets, defaultCustomId, globalDefault };
+          window.postMessage(
+            {
+              source: "cheese-audio-mixer-content",
+              type: "loaded",
+              channelId,
+              requestId,
+              state: merged,
+            },
+            location.origin,
+          );
+        })
+        .catch(() => {});
     }
   });
 

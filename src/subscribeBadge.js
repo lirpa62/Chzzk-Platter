@@ -8,6 +8,26 @@
 // 팝업/버튼은 좁은 감시로만 찾고, 무한 주입을 막기 위해 우리 요소엔 data-* 마커를 둔다.
 (async () => {
   "use strict";
+  function isClipEditorContext() {
+    const isEditorUrl = (value) => {
+      try {
+        const url = new URL(value, location.href);
+        return (
+          url.origin === "https://chzzk.naver.com" &&
+          url.pathname.startsWith("/clip-editor")
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (isEditorUrl(location.href)) return true;
+    try {
+      if (isEditorUrl(window.top.location.href)) return true;
+    } catch {}
+    return window.top !== window && isEditorUrl(document.referrer);
+  }
+  if (isClipEditorContext()) return;
+
   try {
     const data = await chrome.storage.local.get("cheeseMasterEnabled");
     if (data?.cheeseMasterEnabled === false) return;

@@ -3239,6 +3239,28 @@ html.cheese-vod-portrait .cheese-search-seek-realtime {
   display: none !important;
 }
 
+/* 자동 갱신 중 React가 접기를 더보기로 교체해도 같은 자리에 접기 모양을 유지한다.
+   실제 aria-label은 더보기로 남겨 자동 펼침 드라이버가 계속 사용할 수 있다. */
+#sidebar
+  nav.cheese-follow-auto-expanding
+  button[aria-label="더보기"] {
+  visibility: visible !important;
+  font-size: 0 !important;
+}
+#sidebar
+  nav.cheese-follow-auto-expanding
+  button[aria-label="더보기"]::before {
+  content: "접기";
+  font-size: 12px;
+  line-height: 23px;
+}
+#sidebar
+  nav.cheese-follow-auto-expanding
+  button[aria-label="더보기"]
+  svg {
+  transform: rotate(180deg);
+}
+
 /* ══ 전용 팔로잉 목록(sbFollowCustom) ══════════════════════════════════════ */
 /* 원본 목록(ul)/더보기(_box_) 숨김 — 헤더는 유지(harvest·접힘버튼용). */
 #sidebar .cheese-custom-follow-orig-hidden {
@@ -7448,6 +7470,27 @@ html.cheese-chat-time-custom-color .cheese-chat-time {
 html.cheese-chat-time-custom-color.theme_dark .cheese-chat-time,
 html.cheese-chat-time-custom-color .theme_dark .cheese-chat-time {
   color: var(--cheese-chat-time-color-dark, #fff) !important;
+}
+
+/* 일반 채팅의 시간·기기·배지·닉네임은 첫 줄에 두고 메시지 본문만 다음 줄로 보낸다.
+   치지직 가상 스크롤 행에 마커를 붙이지 않고 루트 클래스만 사용하므로 행 재사용에도
+   추가 처리가 없다. 후원·구독 알림/미션/오버레이와 플로팅 새 채팅은 원래 배치를 유지한다. */
+html.cheese-chat-nickname-message-split
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  )
+  [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
+    [class*="_is_donation_"]
+  ):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  > [class*="_text_"] {
+  display: block !important;
+  width: 100%;
+  margin-top: 2px;
 }
 
 /* 채팅 작성 기기(PC/AOS/IOS) 아이콘. 시간 표시와 같은 톤의 회색으로 두어 눈에
