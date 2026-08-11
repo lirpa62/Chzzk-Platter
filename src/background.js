@@ -58,6 +58,10 @@ const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
 ]);
 const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+const SETTINGS_NEW_FEATURE_BASELINE_KEY =
+  "cheeseSettingsNewFeatureBaselinePending";
+const SETTINGS_NEW_FEATURE_UPDATE_KEY =
+  "cheeseSettingsNewFeatureUpdatePending";
 const REFRESH_NOTICE_URLS = [
   "https://chzzk.naver.com/*",
   "https://studio.chzzk.naver.com/*",
@@ -96,8 +100,7 @@ async function showRefreshNoticeOnExtensionTabs(reason) {
   const durationSec = UPDATE_NOTICE_DURATIONS.has(storedDuration)
     ? storedDuration
     : UPDATE_NOTICE_DEFAULT_DURATION_SEC;
-  const storedToastPosition =
-    preferences?.[UPDATE_NOTICE_TOAST_POSITION_KEY];
+  const storedToastPosition = preferences?.[UPDATE_NOTICE_TOAST_POSITION_KEY];
   const toastPosition = UPDATE_NOTICE_TOAST_POSITIONS.has(storedToastPosition)
     ? storedToastPosition
     : UPDATE_NOTICE_DEFAULT_TOAST_POSITION;
@@ -141,10 +144,43 @@ if (chrome.webRequest?.onCompleted) {
   });
 }
 
+// ⚠ storage.session 은 기본 접근 수준이 TRUSTED_CONTEXTS 라 콘텐츠 스크립트에서
+// 읽기·쓰기가 조용히 실패한다(예외만 던지고 값은 안 들어감 — 채팅 이어보기가
+// '저장분: 0' 이던 원인). 콘텐츠 스크립트에도 열어 준다.
+// 서비스 워커는 수시로 깨었다 죽으므로 최초 실행 시점에 매번 호출한다.
+try {
+  chrome.storage.session
+    .setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+    .catch(() => {});
+} catch {}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   // 설치 직후에는 항상, 업데이트 때는 사용자 설정에 따라 안내를 띄운다. 이미 열려 있던
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
+
+  // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
+  // 설정 페이지가 data-new-feature로 선언한 기능 중 아직 확인하지 않은 항목만 표시한다.
+  // 설치 직후 설정을 열지 않은 채 업데이트된 경우에도 신규 설치 기준점을 유지한다.
+  try {
+    if (details.reason === "install") {
+      await chrome.storage.local.set({
+        [SETTINGS_NEW_FEATURE_BASELINE_KEY]: true,
+      });
+      await chrome.storage.local.remove(SETTINGS_NEW_FEATURE_UPDATE_KEY);
+    } else {
+      const state = await chrome.storage.local.get(
+        SETTINGS_NEW_FEATURE_BASELINE_KEY,
+      );
+      if (state?.[SETTINGS_NEW_FEATURE_BASELINE_KEY] !== true) {
+        await chrome.storage.local.set({
+          [SETTINGS_NEW_FEATURE_UPDATE_KEY]: true,
+        });
+      }
+    }
+  } catch (error) {
+    console.warn("새 기능 표시 상태를 기록하지 못했습니다.", error);
+  }
 
   // 예전 버전은 제외 필터 버튼의 미설정 기본값이 ON이었다. 저장값이 없는 기존 사용자는
   // 종전 상태를 유지하고, 신규 설치만 OFF로 시작한다. 명시된 사용자 값은 덮어쓰지 않는다.
@@ -179,9 +215,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       if (preferences?.[UPDATE_NOTICE_ENABLED_KEY] === false) return;
       const storedMode = preferences?.[UPDATE_NOTICE_MODE_KEY];
       if (UPDATE_NOTICE_MODES.has(storedMode)) noticeMode = storedMode;
-      const storedDuration = Number(
-        preferences?.[UPDATE_NOTICE_DURATION_KEY],
-      );
+      const storedDuration = Number(preferences?.[UPDATE_NOTICE_DURATION_KEY]);
       if (UPDATE_NOTICE_DURATIONS.has(storedDuration)) {
         durationSec = storedDuration;
       }
@@ -276,8 +310,7 @@ function showUpdateNotificationBanner(
     .join(" ");
   const toastHiddenOffset =
     toastRow === "top" ? "translateY(-16px)" : "translateY(16px)";
-  const toastVisibleTransform =
-    `${toastAnchorTransform} scale(1)`.trim();
+  const toastVisibleTransform = `${toastAnchorTransform} scale(1)`.trim();
   const toastHiddenTransform =
     `${toastAnchorTransform} ${toastHiddenOffset} scale(.98)`.trim();
   const banner = document.createElement("div");

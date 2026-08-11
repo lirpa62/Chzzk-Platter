@@ -44,6 +44,199 @@
   // 중복 실행되지 않도록 판별한다. 플레이어/채팅 iframe용 기능은 기존대로 각 프레임에서
   // 동작하되, 전용 팔로잉 목록의 네트워크 갱신만 이 값을 게이트로 사용한다.
   const IS_TOP_FRAME = window.top === window;
+  const INBOX_COMMUNITY_IMAGE_MESSAGE_SOURCE = "cheese-inbox-community-image";
+  const INBOX_COMMUNITY_STATE_MESSAGE_SOURCE = "cheese-inbox-community-state";
+  const INBOX_COMMUNITY_LIGHTBOX_ID = "cheese-inbox-community-lightbox";
+  const INBOX_COMMUNITY_LIGHTBOX_POINTER_EVENTS = [
+    "pointerdown",
+    "pointerup",
+    "mousedown",
+    "mouseup",
+    "click",
+  ];
+  let inboxCommunityLightboxReturnFocus = null;
+  let inboxCommunityHeaderUnread = false;
+
+  function normalizeInboxCommunityImageUrl(raw) {
+    try {
+      const url = new URL(String(raw || "").trim());
+      if (
+        url.protocol !== "https:" ||
+        !(
+          url.hostname === "pstatic.net" ||
+          url.hostname.endsWith(".pstatic.net")
+        )
+      ) {
+        return "";
+      }
+      return url.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  function isInboxCommunityFrameSource(source) {
+    if (!source) return false;
+    return [...document.querySelectorAll("iframe")].some((frame) => {
+      if (frame.contentWindow !== source) return false;
+      try {
+        const url = new URL(frame.getAttribute("src") || "", location.href);
+        return (
+          url.origin === "https://game.naver.com" && url.pathname === "/notify"
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function handleInboxCommunityLightboxPointer(event) {
+    const overlay = document.getElementById(INBOX_COMMUNITY_LIGHTBOX_ID);
+    if (!overlay || !overlay.contains(event.target)) return;
+    // 치지직 수신함은 상위 문서의 바깥 클릭을 감지해 레이어를 닫는다. 라이트박스
+    // 안의 이벤트는 window 캡처 단계에서 소비해 그 핸들러까지 전달하지 않는다.
+    event.stopImmediatePropagation();
+    if (
+      event.type === "click" &&
+      (event.target === overlay ||
+        event.target.closest(".cheese-inbox-community-lightbox-close"))
+    ) {
+      closeInboxCommunityLightbox();
+    }
+  }
+
+  function closeInboxCommunityLightbox({ restoreFocus = true } = {}) {
+    const overlay = document.getElementById(INBOX_COMMUNITY_LIGHTBOX_ID);
+    if (!overlay) return;
+    overlay.remove();
+    document.documentElement.classList.remove(
+      "cheese-inbox-community-lightbox-open",
+    );
+    document.documentElement.style.removeProperty(
+      "--cheese-inbox-community-scrollbar-gap",
+    );
+    document.removeEventListener(
+      "keydown",
+      handleInboxCommunityLightboxKeydown,
+    );
+    INBOX_COMMUNITY_LIGHTBOX_POINTER_EVENTS.forEach((eventName) => {
+      window.removeEventListener(
+        eventName,
+        handleInboxCommunityLightboxPointer,
+        true,
+      );
+    });
+    if (restoreFocus && inboxCommunityLightboxReturnFocus?.isConnected) {
+      inboxCommunityLightboxReturnFocus.focus({ preventScroll: true });
+    }
+    inboxCommunityLightboxReturnFocus = null;
+  }
+
+  function handleInboxCommunityLightboxKeydown(event) {
+    if (event.key === "Escape") {
+      closeInboxCommunityLightbox();
+      return;
+    }
+    if (event.key === "Tab") {
+      const closeButton = document.querySelector(
+        `#${INBOX_COMMUNITY_LIGHTBOX_ID} .cheese-inbox-community-lightbox-close`,
+      );
+      if (!closeButton) return;
+      event.preventDefault();
+      closeButton.focus({ preventScroll: true });
+    }
+  }
+
+  function openInboxCommunityLightbox(rawUrl) {
+    const imageUrl = normalizeInboxCommunityImageUrl(rawUrl);
+    if (!IS_TOP_FRAME || !imageUrl) return;
+    closeInboxCommunityLightbox({ restoreFocus: false });
+    inboxCommunityLightboxReturnFocus = document.activeElement;
+
+    const overlay = document.createElement("div");
+    overlay.id = INBOX_COMMUNITY_LIGHTBOX_ID;
+    overlay.className = "cheese-inbox-community-lightbox";
+    overlay.innerHTML =
+      '<div class="cheese-inbox-community-lightbox-dialog" role="dialog" aria-modal="true" aria-label="커뮤니티 첨부 이미지 확대 보기">' +
+      '<div class="cheese-inbox-community-lightbox-toolbar">' +
+      '<button type="button" class="cheese-inbox-community-lightbox-close" aria-label="닫기" title="닫기">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 6-12 12"></path><path d="m6 6 12 12"></path></svg>' +
+      "</button></div>" +
+      '<div class="cheese-inbox-community-lightbox-stage">' +
+      '<div class="cheese-inbox-community-lightbox-loading" aria-live="polite">이미지 불러오는 중</div>' +
+      '<img alt="커뮤니티 첨부 이미지" draggable="false">' +
+      "</div></div>";
+
+    const image = overlay.querySelector("img");
+    const loading = overlay.querySelector(
+      ".cheese-inbox-community-lightbox-loading",
+    );
+    image.addEventListener(
+      "load",
+      () => {
+        overlay.classList.add("is-loaded");
+        loading?.remove();
+      },
+      { once: true },
+    );
+    image.addEventListener(
+      "error",
+      () => {
+        overlay.classList.add("is-error");
+        if (loading) loading.textContent = "이미지를 불러오지 못했습니다.";
+      },
+      { once: true },
+    );
+    image.src = imageUrl;
+    INBOX_COMMUNITY_LIGHTBOX_POINTER_EVENTS.forEach((eventName) => {
+      window.addEventListener(
+        eventName,
+        handleInboxCommunityLightboxPointer,
+        true,
+      );
+    });
+    document.body.appendChild(overlay);
+
+    const scrollbarGap =
+      window.innerWidth - document.documentElement.clientWidth;
+    document.documentElement.style.setProperty(
+      "--cheese-inbox-community-scrollbar-gap",
+      `${Math.max(0, scrollbarGap)}px`,
+    );
+    document.documentElement.classList.add(
+      "cheese-inbox-community-lightbox-open",
+    );
+    document.addEventListener("keydown", handleInboxCommunityLightboxKeydown);
+    overlay
+      .querySelector(".cheese-inbox-community-lightbox-close")
+      ?.focus({ preventScroll: true });
+  }
+
+  if (IS_TOP_FRAME) {
+    window.addEventListener("message", (event) => {
+      if (
+        event.origin !== "https://game.naver.com" ||
+        !isInboxCommunityFrameSource(event.source)
+      ) {
+        return;
+      }
+      if (
+        event.data?.source === INBOX_COMMUNITY_IMAGE_MESSAGE_SOURCE &&
+        event.data?.type === "open"
+      ) {
+        openInboxCommunityLightbox(event.data?.url);
+        return;
+      }
+      if (event.data?.source !== INBOX_COMMUNITY_STATE_MESSAGE_SOURCE) {
+        return;
+      }
+      if (event.data?.type === "unread") {
+        syncHeaderInboxCommunityDot(event.data?.unread === true);
+      } else if (event.data?.type === "refresh") {
+        void refreshInboxCommunityLatest({ force: true });
+      }
+    });
+  }
   // 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
   // 사이드바·헤더 등 최상위 전용 UI 를 주입하지 않고 플레이어 기능만 남긴다.
   const IS_POPUP_PLAYER_FRAME =
@@ -360,8 +553,12 @@
     // 라운지 소식은 '숨김'이 기본(원하는 사람만 켠다 — 헤더에 버튼이 하나 더 늘고
     // 주기적으로 라운지 API 를 호출하므로 opt-in 이 맞다).
     "loungeNews",
+    // 네이버 게임 수신함 안의 팔로잉 커뮤니티 탭도 채널별 API 요청이 필요하므로
+    // 기존 사용자에게 자동으로 켜지지 않게 기본 숨김으로 둔다.
+    "inboxCommunityNews",
   ]);
   const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
+  let featureFlagsLoaded = false;
   const GLOBAL_SCROLL_TOP_FAB_KEY = "cheeseGlobalScrollTopFab";
   let globalScrollTopFabOn = false;
   // 실시간 따라잡기 민감도 프리셋(low/normal/high/custom). audioMixer(MAIN world)에 전달.
@@ -818,7 +1015,6 @@
   const POPUP_PLAYER_AUDIO_MODES = ["mute", "first", "all"];
   const POPUP_PLAYER_AUDIO_DEFAULT = "first";
   const POPUP_PLAYER_CLASS = "cheese-popup-player";
-  const POPUP_PLAYER_DRAG_TYPE = "application/x-cheese-popup-channel";
   // 초기 크기(px). 프리셋(정사각) 또는 커스텀 가로·세로. 열린 뒤에는 자유 리사이즈.
   const POPUP_PLAYER_SIZE_KEY = "cheesePopupPlayerSize"; // 프리셋 값 또는 "custom"
   const POPUP_PLAYER_SIZE_ALLOWED = [400, 510, 640, 800];
@@ -928,6 +1124,8 @@
   const FOLLOW_PREVIEW_FULL_TITLE_KEY = "cheeseFollowPreviewFullTitle";
   // 미리보기 헤더 바 위치. 기본 false=영상 위, true=영상 아래.
   const FOLLOW_PREVIEW_HEADER_BOTTOM_KEY = "cheeseFollowPreviewHeaderBottom";
+  // 미리보기 헤더 전체 숨김. true 면 메타·고정 버튼과 카드식 시청자 배지를 숨긴다.
+  const FOLLOW_PREVIEW_HIDE_HEADER_KEY = "cheeseFollowPreviewHideHeader";
   // 미리보기 헤더 레이아웃. 기본 false=기존(프로필|제목·채널명|우측 시청자),
   // true=치지직 라이브 카드식(제목 한 줄 → 프로필·채널명 / 경과시간·카테고리).
   const FOLLOW_PREVIEW_CARD_LAYOUT_KEY = "cheeseFollowPreviewCardLayout";
@@ -969,6 +1167,7 @@
   let followPreviewLiveEdge = true; // 라이브 최신(엣지)부터 재생, 기본 ON
   let followPreviewFullTitle = false; // 제목 전체 표시(줄바꿈), 기본 OFF
   let followPreviewHeaderBottom = false; // 헤더 바를 영상 아래에, 기본 OFF(위)
+  let followPreviewHideHeader = false; // 헤더 없이 영상만 표시, 기본 OFF
   let followPreviewCardLayout = false; // 라이브 카드식 헤더 배치, 기본 OFF
   let followPreviewBadgePos = "tl"; // 시청자 배지 위치(tl|tr|bl|br)
   // { [part]: { enabled, light, dark } }
@@ -1066,6 +1265,18 @@
         followPreviewHiddenParts[part] === true,
       );
     }
+  }
+
+  function applyFollowPreviewHeaderVisibility(el) {
+    const root = el || document.getElementById(FOLLOW_PREVIEW_ID);
+    if (!root) return;
+    root.classList.toggle("cheese-fp-hide-header", followPreviewHideHeader);
+    // 헤더를 숨기면 고정 해제 버튼도 사라진다. 열린 패널이 닫히지 않는 상태로
+    // 남지 않도록 옵션 적용 시 고정을 함께 해제한다.
+    if (followPreviewHideHeader && followPreviewState.pinned) {
+      setFollowPreviewPinned(false);
+    }
+    if (followPreviewHideHeader) followPreviewState.movedPos = null;
   }
   let followPreviewMaxLifeSec = 120; // 기본 2분
   // 리방(재방송)/네트워크·미디어 재생 오류로 플레이어 오류 다이얼로그가 뜨면 자동
@@ -1537,6 +1748,33 @@
   // ── 채팅 단어/정규식 필터 ──────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }] — regex=true 면 정규식, 아니면 부분일치(대소문자 무시).
   // 잘못된 정규식은 저장 시점에 걸러내고, 런타임에서도 컴파일 실패는 건너뛴다.
+  // ── 채팅 이어보기(재입장 시 이전 채팅 복원) ────────────────────────────────
+  // 치지직은 접속 시점에 서버가 정한 만큼(기본 50개)만 내려준다. 그보다 더 거슬러
+  // 올라갈 공개 API 는 없으므로, '보고 있는 동안' 우리가 직접 쌓아 둔다. 같은 채널로
+  // 돌아왔을 때 복원하고, 현재 페이지에서도 네이티브 200행보다 위로 스크롤하면 저장
+  // 버퍼의 누락분을 목록 맨 위에 보충한다.
+  //
+  // 치지직 채팅 목록에 직접 끼워 넣는다 — 실측 결과 React 가 우리 행을 지우지 않는다
+  // (프로브: 15초/새 채팅 유입 동안 생존=true).
+  //
+  // 수명은 storage.session 이 정한다: 브라우저를 닫으면 통째로 사라진다.
+  const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
+  const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
+  const CHAT_HISTORY_STORE_PREFIX = "cheeseChatHistory:"; // + channelId
+  const CHAT_HISTORY_LIMIT_DEFAULT = 200;
+  const CHAT_HISTORY_LIMIT_MIN = 50;
+  const CHAT_HISTORY_LIMIT_MAX = 500;
+  // 저장소는 storage.session — 메모리 기반이라 브라우저를 닫으면 자동으로 비워진다.
+  // 그래서 시간 기반 만료(TTL)나 주기적 청소가 필요 없다.
+  //
+  // ⚠ session 은 10MB 고정 상한이고 unlimitedStorage 권한이 통하지 않는다. 실측 행 크기가
+  // 평균 1547B 라 500개 x 13채널이면 한도에 닿는다(이모티콘 많은 방송이면 8채널). 그래서
+  // 상한을 믿지 말고 quota 초과 시 스스로 덜어내야 한다 — saveChatHistoryWithEviction().
+  const CHAT_HISTORY_EVICT_RATIO = 0.1; // 초과 시 오래된 쪽부터 10%씩 버리고 재시도
+  const CHAT_HISTORY_MARK = "data-cheese-chat-history";
+  let chatHistoryOn = false;
+  let chatHistoryLimit = CHAT_HISTORY_LIMIT_DEFAULT;
+
   const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
   // 단어 필터로 숨긴 항목 표시값(차단 닉네임과 구분해 복원 판정에 쓴다).
   const CHAT_WORD_FILTER_MARK = "\u0000word-filter";
@@ -1658,6 +1896,7 @@
     chatHideBadge: false, // 채팅 배지 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
     chatSplitNickname: false, // 일반 채팅의 닉네임 줄과 메시지 줄 분리
     loungeNews: false, // 헤더 치지직 라운지 소식 버튼(숨김 플래그 — true=숨김)
+    inboxCommunityNews: false, // 수신함 팔로잉 커뮤니티 탭(숨김 플래그)
     chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
     chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
@@ -1747,7 +1986,24 @@
   const LOUNGE_REFRESH_KEY = "cheeseLoungeRefreshMin";
   const LOUNGE_REFRESH_PRESETS = [3, 5, 10, 30, 60];
   const LOUNGE_REFRESH_DEFAULT_MIN = 10;
+  const INBOX_COMMUNITY_CACHE_KEY = "cheeseInboxCommunityCache";
+  const INBOX_COMMUNITY_READ_KEY = "cheeseInboxCommunityReadMap";
+  const INBOX_COMMUNITY_POST_API_PREFIX =
+    "https://apis.naver.com/nng_main/nng_comment_api/v1/type/CHANNEL_POST/id";
+  const INBOX_COMMUNITY_MAX_ITEMS = 300;
+  const INBOX_COMMUNITY_ITEM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const INBOX_COMMUNITY_CONCURRENCY = 4;
+  const INBOX_COMMUNITY_REQUEST_TIMEOUT_MS = 12000;
+  const INBOX_COMMUNITY_CACHE_VERSION = 4;
+  const INBOX_COMMUNITY_CONTENT_MAX_LENGTH = 50000;
+  const INBOX_COMMUNITY_ATTACHMENT_MAX = 10;
+  // 커뮤니티 소식은 라운지와 요청 비용이 완전히 다르다: 라운지는 보드 7개 고정이지만
+  // 커뮤니티는 '팔로잉 채널 수'만큼 요청한다(목록 1 + 채널당 1). 같은 주기로 묶으면
+  // 라운지를 빨리 보려고 주기를 줄일 때 커뮤니티 요청량이 같이 폭증한다 → 키를 분리한다.
+  // 미설정이면 라운지 값을 물려받아(=기존 동작 유지) 업데이트 직후 체감 변화가 없다.
+  const INBOX_COMMUNITY_REFRESH_KEY = "cheeseInboxCommunityRefreshMin";
   let loungeRefreshMin = LOUNGE_REFRESH_DEFAULT_MIN;
+  let inboxCommunityRefreshMin = null; // null = 라운지 값 따름
   const LOUNGE_FEED_LIMIT = 25;
   const LOUNGE_TABS = [
     { id: 1, name: "공지사항" },
@@ -1763,9 +2019,17 @@
   let loungeFeedCache = {}; // { boardId: {at, items} }
   let loungeActiveTab = LOUNGE_TABS[0].id;
   let loungeRefreshTimer = 0;
+  let inboxCommunityRefreshTimer = 0;
   let loungeLastFetchAt = 0; // 마지막 전체 보드 확인 시각(중복 요청 억제)
   let loungeVisibilityBound = false; // visibilitychange 리스너 1회만 등록
   let loungeLoadSeq = 0;
+  let inboxCommunityLastFetchAt = 0;
+  let inboxCommunityRefreshPromise = null;
+  let inboxCommunityAbortController = null;
+  let inboxCommunityItems = [];
+  let inboxCommunityCacheLoaded = false;
+  let inboxCommunityCacheLoadPromise = null;
+  let inboxCommunityReadMap = null;
   const FOLLOWING_LIVE_API_URL =
     "https://api.chzzk.naver.com/service/v1/channels/followings/live";
   const HEADER_FOLLOW_COUNT_KEY = "cheeseHeaderFollowCount";
@@ -5994,7 +6258,9 @@
         parts.push(
           `방송 시작 시각(채팅 기준) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
         );
-        parts.push("※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.");
+        parts.push(
+          "※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.",
+        );
       } else {
         parts.push(
           `방송 시작 시각(추정) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
@@ -10324,6 +10590,7 @@
       featureFlags[k] =
         typeof obj[k] === "boolean" ? obj[k] : FEATURE_DEFAULT_TRUE.has(k);
     }
+    featureFlagsLoaded = true;
     if (
       previousCustomFollowEnabled !== featureFlags.sbFollowCustom ||
       previousCustomFollowAutoExpand !== featureFlags.sbFollowCustomAutoExpand
@@ -10449,6 +10716,22 @@
   function normalizeChatTimeFormat(value) {
     return value === "12h-en" || value === "12h-ko" ? value : "24h";
   }
+  const CHAT_OS_ICONS_KEY = "cheeseChatOsIcons";
+  const CHAT_OS_ICON_POSITION_KEY = "cheeseChatOsIconPosition";
+  let chatOsCustomIcons = {};
+  let chatOsIconPosition = "after";
+  function normalizeChatOsIconPosition(value) {
+    return value === "before" ? "before" : "after";
+  }
+  function normalizeChatOsCustomIcons(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const icons = {};
+    ["PC", "AOS", "IOS"].forEach((type) => {
+      const sanitized = sanitizeCustomFollowSvg(source[type]);
+      if (sanitized) icons[type] = sanitized.svg;
+    });
+    return icons;
+  }
   // 채팅 시간 글자색은 사용자 지정을 켠 경우에만 라이트/다크 값을 각각 적용한다.
   const CHAT_TIME_COLORS_KEY = "cheeseChatTimeColors";
   const CHAT_TIME_COLORS_ROOT_CLASS = "cheese-chat-time-custom-color";
@@ -10496,6 +10779,26 @@
   // 기본 true(줄바꿈 on). 끄면 한 줄 유지(넘치면 잘림) — 치지직 기본 동작.
   const CHAT_BUTTON_WRAP_KEY = "cheeseChatButtonWrap";
   let chatButtonWrap = true;
+  // 구버전 moa 호환 폴백. ⚠ 이 마커들은 '이미 렌더된 채팅 요소'에 박히므로, 사용자가
+  // moa 기능을 끈 뒤에도 스크롤백에 그대로 남는다. 그대로 신뢰하면 한 번 켰다 끈 것만으로
+  // 우리 기능이 영영 잠기는 한쪽 방향 래치가 된다(제보: '가려진 채팅 표시'가 계속 비활성).
+  //
+  // 신버전 moa 는 기능을 켜면 <html>에 *-enabled 클래스를 반드시 붙인다. 그러므로
+  // moa 가 붙인 <html> 클래스가 하나라도 보이면(=신버전) 폴백은 쓰지 않고 위의 enabled
+  // 판정만 따른다. 폴백은 그런 클래스가 전혀 없는 진짜 구버전에서만 의미가 있다.
+  function moaLegacyMark(selector) {
+    if (isModernMoaPresent()) return false;
+    return !!document.querySelector(selector);
+  }
+
+  // <html>에 chzzk-badge-moa-* 클래스가 하나라도 있으면 신버전 moa 로 본다.
+  function isModernMoaPresent() {
+    for (const cls of document.documentElement.classList) {
+      if (cls.startsWith("chzzk-badge-moa-")) return true;
+    }
+    return false;
+  }
+
   // 우리 숨김 마커(요소에 부착) — moa의 chzzk-badge-moa-hidden-* 와 분리.
   const CHAT_HIDE_CLASSES = {
     chatHideRanking: "cheese-chat-hidden-ranking",
@@ -10536,17 +10839,17 @@
         return cl.contains("chzzk-badge-moa-chat-font-scale-enabled");
       case "chatShowTime":
         // 신버전 moa는 기능 ON 시 <html>에 enabled 클래스를 붙인다(가려진/오래된
-        // 채팅이 없어도 즉시 감지). 구버전 호환: 삽입된 시간 span 마커도 폴백으로 본다.
+        // 채팅이 없어도 즉시 감지). 구버전 호환은 moaLegacyMark() 참고.
         return (
           cl.contains("chzzk-badge-moa-chat-timestamp-enabled") ||
-          !!document.querySelector(".chzzk-badge-moa-chat-time")
+          moaLegacyMark(".chzzk-badge-moa-chat-time")
         );
       case "chatRestoreBlind":
         // 신버전 moa는 기능 ON 시 <html>에 enabled 클래스를 붙인다(가려진 채팅이
-        // 올라오기 전에도 감지 → 중복 복원 방지). 구버전 호환: 복원 마커도 폴백.
+        // 올라오기 전에도 감지 → 중복 복원 방지). 구버전 호환은 moaLegacyMark() 참고.
         return (
           cl.contains("chzzk-badge-moa-restore-blind-enabled") ||
-          !!document.querySelector(".chzzk-badge-moa-blind-restored-text")
+          moaLegacyMark(".chzzk-badge-moa-blind-restored-text")
         );
       default:
         return false;
@@ -11351,19 +11654,21 @@
   // PIP 를 드래그해 옮기면 transform 이 이 section 에 걸리므로, 안에 넣어야 채팅이 함께
   // 따라간다(밖에 fixed 로 두면 PIP 만 움직이고 채팅은 제자리에 남는다).
   //
-  // ⚠ 치지직 순정 PIP 에는 flex-direction:column 도 height 도 없다. 세로로 쌓으려면
-  // 우리가 직접 줘야 한다 — 단, PIP 의 transform/위치/크기는 건드리지 않기 위해 section
-  // 에는 마커 클래스만 붙이고 나머지는 전부 CSS 에서 처리한다.
+  // ⚠ 치지직 순정 PIP 에는 flex-direction:column 도 height 도 없다. 세로 배치와 저장된
+  // 폭·위치는 마커 클래스/CSS 변수로 적용하고, 실제 값 저장은 드래그가 끝날 때만 한다.
   const PIP_CHAT_CLASS = "cheese-pip-chat";
   // PIP section 에 붙이는 마커. 세로 쌓기 레이아웃을 CSS 로 켜는 스위치 역할만 한다.
   const PIP_CHAT_HOST_CLASS = "cheese-pip-chat-host";
   // 저장 키는 폭이 아니라 '채팅 높이'다(PIP 아래에 쌓이므로). 키 이름은 호환을 위해 유지.
   const PIP_CHAT_HEIGHT_KEY = "cheesePipChatWidth";
+  const PIP_LAYOUT_KEY = "cheesePipChatLayout";
   const PIP_CHAT_HEIGHT_DEFAULT = 450;
   const PIP_CHAT_HEIGHT_MIN = 205; // 이보다 낮으면 채팅 입력창까지 잘려 쓸 수 없다
-  // 상한은 화면 높이에 따라 달라진다: 영상(225) + 컨트롤(46) + 여백(10) 을 뺀 만큼.
-  // PIP 전체가 뷰포트를 넘지 않게 하는 값이라 고정 상수로 둘 수 없다.
-  const PIP_CHAT_RESERVED_PX = 225 + 46 + 10;
+  const PIP_LAYOUT_MARGIN = 8;
+  const PIP_WIDTH_DEFAULT = 400;
+  const PIP_WIDTH_MIN = 300;
+  const PIP_WIDTH_MAX = 960;
+  const PIP_CONTROLS_HEIGHT_DEFAULT = 46;
   const PIP_SEL = 'section[class*="_type_pip_"]';
   // PIP 안의 영상 래퍼. 이 형제로 채팅을 넣어 세로로 이어 붙인다.
   const PIP_INNER_SEL = '[class*="_wrapper_"]';
@@ -11375,43 +11680,139 @@
   // 현재 리스너가 걸려 있는 패널. 고아를 치울 때 '그 패널이 맞는지' 확인해,
   // 살아 있는 패널의 정리 콜백을 실수로 날리지 않게 한다.
   let pipChatResizeOwner = null;
+  let pipLayout = { width: 0, x: null, y: null };
+  let pipLayoutControlsCleanup = null;
+  let pipLayoutControlsOwner = null;
+  let pipPositionOwner = null;
+  const pipNativePositionStyles = new WeakMap();
+  const PIP_NATIVE_POSITION_PROPS = [
+    "position",
+    "left",
+    "top",
+    "right",
+    "bottom",
+    "transform",
+  ];
   // 우리가 뭔가를 붙여 놓았는지. '아무것도 없을 때 정리 함수를 도는' 낭비를 막는
   // 게이트다(이 함수는 4회/초 불린다). removePipChat/생성부에서만 갱신한다.
   let pipChatMounted = false;
 
-  // PIP 영상의 '원래 높이'를 확보한다. 마커를 붙이는 순간 세로 레이아웃이 되면서
-  // _wrapper_ 가 0px 로 접히므로(자체 높이가 없는 구조), 붙이기 전에 재야 한다.
-  // 이미 마커가 붙어 있으면 폭에서 16:9 로 역산한다(재측정 불가).
-  function measurePipVideoHeight(pip) {
-    const wrap = pip.querySelector(PIP_INNER_SEL);
-    const already = pip.classList.contains(PIP_CHAT_HOST_CLASS);
-    if (!already && wrap) {
-      const h = Math.round(wrap.getBoundingClientRect().height);
-      if (h > 0) return h;
+  function normalizePipLayout(value) {
+    if (!value || typeof value !== "object") {
+      return { width: 0, x: null, y: null };
     }
-    const w = Math.round(pip.getBoundingClientRect().width);
-    if (w > 0) return Math.round((w * 9) / 16);
-    return 225; // 최후 폴백(400x225 = 치지직 기본 PIP 크기)
+    const width =
+      value.width == null || value.width === "" ? NaN : Number(value.width);
+    const x = value.x == null || value.x === "" ? NaN : Number(value.x);
+    const y = value.y == null || value.y === "" ? NaN : Number(value.y);
+    return {
+      width: Number.isFinite(width) && width > 0
+        ? Math.min(PIP_WIDTH_MAX, Math.max(PIP_WIDTH_MIN, Math.round(width)))
+        : 0,
+      x: Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : null,
+      y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : null,
+    };
   }
 
-  function applyPipVideoHeight(pip) {
-    const h = measurePipVideoHeight(pip);
-    pip.style.setProperty("--cheese-pip-video-h", `${h}px`);
+  function pipWidthMaxForViewport() {
+    const heightLimitedWidth = Math.max(
+      220,
+      ((window.innerHeight -
+        PIP_CONTROLS_HEIGHT_DEFAULT -
+        PIP_CHAT_HEIGHT_MIN -
+        PIP_LAYOUT_MARGIN * 2) *
+        16) /
+        9,
+    );
+    return Math.max(
+      220,
+      Math.min(
+        PIP_WIDTH_MAX,
+        window.innerWidth - PIP_LAYOUT_MARGIN * 2,
+        heightLimitedWidth,
+      ),
+    );
   }
 
-  // 창 크기에 따른 현재 상한. 창이 아주 작으면 상한이 하한보다 작아질 수 있으므로
-  // 최소한 하한은 보장한다(그 경우 조절 폭이 없을 뿐, 값이 뒤집히지는 않는다).
-  function pipChatMaxHeight() {
-    const room = Math.round(window.innerHeight - PIP_CHAT_RESERVED_PX);
+  function normalizePipWidth(value, fallback = PIP_WIDTH_DEFAULT) {
+    const max = pipWidthMaxForViewport();
+    const min = Math.min(PIP_WIDTH_MIN, max);
+    const number = Number(value);
+    const next = Number.isFinite(number) ? Math.round(number) : fallback;
+    return Math.min(max, Math.max(min, next));
+  }
+
+  function measurePipControlsHeight(pip) {
+    const raw = Number.parseFloat(
+      pip?.style.getPropertyValue("--cheese-pip-controls-h") || "",
+    );
+    if (Number.isFinite(raw) && raw >= 0) return raw;
+    const wrapper = pip?.querySelector(PIP_INNER_SEL);
+    if (pip && wrapper) {
+      const pipRect = pip.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const offset = Math.round(wrapperRect.top - pipRect.top);
+      if (offset >= 0 && offset <= 100) return offset;
+    }
+    return PIP_CONTROLS_HEIGHT_DEFAULT;
+  }
+
+  // 영상은 PIP 폭에 맞춰 16:9로 유지한다. 저장된 폭이 없으면 치지직이 현재 만든
+  // 네이티브 PIP 폭을 사용해 기존 크기를 그대로 보존한다.
+  function measurePipVideoHeight(pip) {
+    const width = normalizePipWidth(
+      pipLayout.width || pip?.getBoundingClientRect?.().width,
+    );
+    return Math.round((width * 9) / 16);
+  }
+
+  function applyPipVideoSize(pip, width = pipLayout.width) {
+    const shownWidth = normalizePipWidth(
+      width || pip.getBoundingClientRect().width,
+    );
+    pip.style.setProperty("--cheese-pip-width", `${shownWidth}px`);
+    pip.style.setProperty(
+      "--cheese-pip-video-h",
+      `${Math.round((shownWidth * 9) / 16)}px`,
+    );
+    pip.style.setProperty(
+      "--cheese-pip-controls-h",
+      `${Math.round(measurePipControlsHeight(pip))}px`,
+    );
+    return shownWidth;
+  }
+
+  function currentPipVideoHeight(pip = document.querySelector(PIP_SEL)) {
+    const raw = Number.parseFloat(
+      pip?.style.getPropertyValue("--cheese-pip-video-h") || "",
+    );
+    return Number.isFinite(raw) && raw > 0
+      ? raw
+      : measurePipVideoHeight(pip);
+  }
+
+  function currentPipControlsHeight(pip = document.querySelector(PIP_SEL)) {
+    return measurePipControlsHeight(pip);
+  }
+
+  // 창 높이에서 현재 영상 높이와 조작 여백을 뺀 값만 채팅에 허용한다. 영상 폭을
+  // 키운 뒤에도 PIP 전체가 화면을 크게 벗어나지 않도록 영상·채팅 상한을 함께 계산한다.
+  function pipChatMaxHeight(pip = document.querySelector(PIP_SEL)) {
+    const room = Math.round(
+      window.innerHeight -
+        currentPipControlsHeight(pip) -
+        currentPipVideoHeight(pip) -
+        PIP_LAYOUT_MARGIN * 2,
+    );
     return Math.max(PIP_CHAT_HEIGHT_MIN, room);
   }
 
   // 실제로 화면에 적용할 높이. 사용자가 고른 값(pipChatHeight)은 그대로 두고, 지금 창
   // 크기에서 넘치는 만큼만 줄여서 보여 준다 — 창을 다시 키우면 원래 값으로 돌아온다.
-  function applyPipChatHeightVar() {
+  function applyPipChatHeightVar(pip = document.querySelector(PIP_SEL)) {
     const shown = Math.min(
       Math.max(pipChatHeight, PIP_CHAT_HEIGHT_MIN),
-      pipChatMaxHeight(),
+      pipChatMaxHeight(pip),
     );
     document.documentElement.style.setProperty(
       "--cheese-pip-chat-height",
@@ -11421,18 +11822,176 @@
 
   // 창 크기가 바뀌면 상한도 바뀐다. 열려 있는 패널만 다시 계산한다.
   function clampPipChatHeightToViewport() {
-    if (!document.querySelector(`.${PIP_CHAT_CLASS}`)) return;
-    applyPipChatHeightVar();
+    const pip = document.querySelector(`.${PIP_CHAT_HOST_CLASS}`);
+    if (!pip) return;
+    applyPipVideoSize(pip);
+    applyPipChatHeightVar(pip);
+    // 네이티브 드래그 뒤의 transform은 치지직 내부 드래그 상태와 같은 값이다.
+    // 창 크기 변경 때 이를 0으로 평탄화하면 다음 드래그 첫 프레임이 이전 좌표로 튄다.
+    // 아직 위치 모드가 잡히지 않은 최초 한 번에만 저장 위치를 적용한다.
+    if (!pip.classList.contains("cheese-pip-layout-positioned")) {
+      applyStoredPipPosition(pip);
+    }
   }
 
-  function normalizePipChatHeight(value) {
-    const max = pipChatMaxHeight();
+  function normalizePipChatHeight(
+    value,
+    pip = document.querySelector(PIP_SEL),
+  ) {
+    const max = pipChatMaxHeight(pip);
     if (value == null || value === "") {
       return Math.min(PIP_CHAT_HEIGHT_DEFAULT, max);
     }
     const n = Math.round(Number(value));
     if (!Number.isFinite(n)) return Math.min(PIP_CHAT_HEIGHT_DEFAULT, max);
     return Math.min(max, Math.max(PIP_CHAT_HEIGHT_MIN, n));
+  }
+
+  function clampPipPosition(pip, left, top) {
+    const rect = pip.getBoundingClientRect();
+    const maxLeft = Math.max(
+      PIP_LAYOUT_MARGIN,
+      window.innerWidth - rect.width - PIP_LAYOUT_MARGIN,
+    );
+    const maxTop = Math.max(
+      PIP_LAYOUT_MARGIN,
+      window.innerHeight - rect.height - PIP_LAYOUT_MARGIN,
+    );
+    return {
+      left: Math.min(maxLeft, Math.max(PIP_LAYOUT_MARGIN, left)),
+      top: Math.min(maxTop, Math.max(PIP_LAYOUT_MARGIN, top)),
+    };
+  }
+
+  function rememberPipNativePositionStyles(pip) {
+    if (pipNativePositionStyles.has(pip)) return;
+    if (pipPositionOwner && pipPositionOwner !== pip) {
+      resetPipElement(pipPositionOwner);
+    }
+    const snapshot = {};
+    PIP_NATIVE_POSITION_PROPS.forEach((property) => {
+      snapshot[property] = {
+        value: pip.style.getPropertyValue(property),
+        priority: pip.style.getPropertyPriority(property),
+      };
+    });
+    pipNativePositionStyles.set(pip, snapshot);
+    pipPositionOwner = pip;
+  }
+
+  function restorePipNativePositionStyles(pip) {
+    const snapshot = pipNativePositionStyles.get(pip);
+    if (!snapshot) return;
+    PIP_NATIVE_POSITION_PROPS.forEach((property) => {
+      const saved = snapshot[property];
+      if (saved?.value) {
+        pip.style.setProperty(property, saved.value, saved.priority || "");
+      } else {
+        pip.style.removeProperty(property);
+      }
+    });
+    pipNativePositionStyles.delete(pip);
+    if (pipPositionOwner === pip) pipPositionOwner = null;
+  }
+
+  function resetPipElement(pip) {
+    if (!pip) return;
+    pip.classList.remove(PIP_CHAT_HOST_CLASS);
+    pip.classList.remove("cheese-pip-layout-positioned");
+    pip.classList.remove("cheese-pip-layout-interacting");
+    pip.style.removeProperty("--cheese-pip-width");
+    pip.style.removeProperty("--cheese-pip-video-h");
+    pip.style.removeProperty("--cheese-pip-controls-h");
+    pip.style.removeProperty("--cheese-pip-left");
+    pip.style.removeProperty("--cheese-pip-top");
+    restorePipNativePositionStyles(pip);
+  }
+
+  function setPipPosition(pip, left, top) {
+    const next = clampPipPosition(pip, left, top);
+    rememberPipNativePositionStyles(pip);
+    pip.classList.add("cheese-pip-layout-positioned");
+    pip.style.setProperty("--cheese-pip-left", `${Math.round(next.left)}px`);
+    pip.style.setProperty("--cheese-pip-top", `${Math.round(next.top)}px`);
+    pip.style.setProperty("position", "fixed");
+    pip.style.setProperty("left", "var(--cheese-pip-left)");
+    pip.style.setProperty("top", "var(--cheese-pip-top)");
+    pip.style.setProperty("right", "auto");
+    pip.style.setProperty("bottom", "auto");
+    // 이 함수는 PIP를 처음 배치할 때만 호출한다. 0 이동 transform은 PIP 안의
+    // position:fixed 전체화면·닫기 컨트롤이 PIP를 containing block으로 삼게 한다.
+    // 이후 네이티브 드래그가 기록한 transform은 치지직 내부 상태와 함께 보존한다.
+    pip.style.setProperty("transform", "translate3d(0, 0, 0)");
+    return next;
+  }
+
+  function makePipPositionRatio(pip) {
+    const rect = pip.getBoundingClientRect();
+    const availableX = Math.max(
+      0,
+      window.innerWidth - rect.width - PIP_LAYOUT_MARGIN * 2,
+    );
+    const availableY = Math.max(
+      0,
+      window.innerHeight - rect.height - PIP_LAYOUT_MARGIN * 2,
+    );
+    return {
+      x:
+        availableX > 0
+          ? Math.min(
+              1,
+              Math.max(0, (rect.left - PIP_LAYOUT_MARGIN) / availableX),
+            )
+          : 0,
+      y:
+        availableY > 0
+          ? Math.min(
+              1,
+              Math.max(0, (rect.top - PIP_LAYOUT_MARGIN) / availableY),
+            )
+          : 0,
+    };
+  }
+
+  function savePipLayout(pip, width = pip.getBoundingClientRect().width) {
+    const position = makePipPositionRatio(pip);
+    pipLayout = normalizePipLayout({
+      width: normalizePipWidth(width),
+      ...position,
+    });
+    try {
+      void chrome.storage.local.set({ [PIP_LAYOUT_KEY]: pipLayout });
+    } catch {}
+  }
+
+  function applyStoredPipPosition(pip) {
+    const rect = pip.getBoundingClientRect();
+    if (!Number.isFinite(pipLayout.x) || !Number.isFinite(pipLayout.y)) {
+      // 저장값이 없어도 현재 네이티브 위치를 fixed left/top 기준으로 한 번 고정한다.
+      // 이후 치지직 드래그가 기록하는 transform은 건드리지 않아 내부 상태와 DOM을
+      // 계속 일치시킨다.
+      setPipPosition(pip, rect.left, rect.top);
+      return;
+    }
+    const availableX = Math.max(
+      0,
+      window.innerWidth - rect.width - PIP_LAYOUT_MARGIN * 2,
+    );
+    const availableY = Math.max(
+      0,
+      window.innerHeight - rect.height - PIP_LAYOUT_MARGIN * 2,
+    );
+    setPipPosition(
+      pip,
+      PIP_LAYOUT_MARGIN + availableX * pipLayout.x,
+      PIP_LAYOUT_MARGIN + availableY * pipLayout.y,
+    );
+  }
+
+  function applyStoredPipLayout(pip) {
+    applyPipVideoSize(pip);
+    applyPipChatHeightVar(pip);
+    applyStoredPipPosition(pip);
   }
 
   // 라이브 페이지에 있는 동안 채널 id 를 기억한다(PIP 전환 후엔 URL 에서 못 얻는다).
@@ -11449,21 +12008,212 @@
   }
 
   function removePipChat() {
+    // 치지직은 PIP에서 원래 라이브로 돌아올 때 같은 section을 재사용하면서 React가
+    // 우리 마커 class를 먼저 지운다. querySelector만으로는 그 요소를 놓치므로 위치를
+    // 변경했던 실제 참조를 우선 복원한다.
+    const positionedPip = pipPositionOwner;
     if (pipChatResizeCleanup) {
       pipChatResizeCleanup();
       pipChatResizeCleanup = null;
     }
+    if (pipLayoutControlsCleanup) {
+      pipLayoutControlsCleanup();
+      pipLayoutControlsCleanup = null;
+    }
     pipChatResizeOwner = null;
+    pipLayoutControlsOwner = null;
     document
       .querySelectorAll(`.${PIP_CHAT_CLASS}`)
       .forEach((el) => el.remove());
+    resetPipElement(positionedPip);
     // 마커를 반드시 회수한다 — 남으면 채팅 없는 PIP 에 세로 레이아웃만 걸려 찌그러진다.
-    document.querySelectorAll(`.${PIP_CHAT_HOST_CLASS}`).forEach((el) => {
-      el.classList.remove(PIP_CHAT_HOST_CLASS);
-      el.style.removeProperty("--cheese-pip-video-h");
-    });
+    document
+      .querySelectorAll(`.${PIP_CHAT_HOST_CLASS}`)
+      .forEach((el) => resetPipElement(el));
     document.documentElement.style.removeProperty("--cheese-pip-chat-height");
     pipChatMounted = false;
+  }
+
+  function pipLayoutResizeIcon() {
+    // Lucide move-diagonal-2.
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 13v6h-6"></path><path d="M5 11V5h6"></path><path d="m19 19-6-6"></path><path d="M5 5l6 6"></path></svg>`;
+  }
+
+  function attachPipLayoutControls(pip) {
+    if (
+      pipLayoutControlsOwner === pip &&
+      pip.querySelector(".cheese-pip-layout-resize")
+    ) {
+      return;
+    }
+    if (pipLayoutControlsCleanup) pipLayoutControlsCleanup();
+    pipLayoutControlsOwner = pip;
+
+    const controller = new AbortController();
+    const { signal } = controller;
+    const resizeHandle = document.createElement("button");
+    resizeHandle.type = "button";
+    resizeHandle.className = "cheese-pip-layout-resize";
+    resizeHandle.setAttribute("aria-label", "PIP 영상 크기 조절");
+    resizeHandle.title = "PIP 영상 크기 조절";
+    resizeHandle.innerHTML = pipLayoutResizeIcon();
+    pip.append(resizeHandle);
+
+    let interaction = null;
+    let nativeStart = null;
+
+    const beginInteraction = (event) => {
+      if (
+        event.button !== 0 ||
+        !event.composedPath().includes(resizeHandle)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      // 치지직은 PIP 상위에서 같은 pointerdown을 받아 네이티브 이동을 시작한다.
+      // window 캡처 단계에서 소비해야 크기 조절과 위치 이동이 동시에 실행되지 않는다.
+      event.stopImmediatePropagation();
+      const rect = pip.getBoundingClientRect();
+      interaction = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        width: rect.width,
+      };
+      pip.classList.add("cheese-pip-layout-interacting");
+      document.body.style.setProperty("user-select", "none");
+    };
+
+    const updateInteraction = (event) => {
+      if (!interaction || event.pointerId !== interaction.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const width = normalizePipWidth(
+        interaction.width + event.clientX - interaction.startX,
+      );
+      pipLayout = { ...pipLayout, width };
+      applyPipVideoSize(pip, width);
+      applyPipChatHeightVar(pip);
+    };
+
+    const finishInteraction = (event) => {
+      if (!interaction || event.pointerId !== interaction.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      interaction = null;
+      pip.classList.remove("cheese-pip-layout-interacting");
+      document.body.style.removeProperty("user-select");
+      const rect = pip.getBoundingClientRect();
+      savePipLayout(pip, rect.width);
+    };
+
+    window.addEventListener("pointerdown", beginInteraction, {
+      capture: true,
+      signal,
+    });
+    window.addEventListener("pointermove", updateInteraction, {
+      capture: true,
+      signal,
+    });
+    window.addEventListener("pointerup", finishInteraction, {
+      capture: true,
+      signal,
+    });
+    window.addEventListener("pointercancel", finishInteraction, {
+      capture: true,
+      signal,
+    });
+    resizeHandle.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      },
+      { signal },
+    );
+    resizeHandle.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
+            event.key,
+          )
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const direction =
+          event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+        const step = event.shiftKey ? 2 : 16;
+        const rect = pip.getBoundingClientRect();
+        const width = normalizePipWidth(rect.width + direction * step);
+        pipLayout = { ...pipLayout, width };
+        applyPipVideoSize(pip, width);
+        applyPipChatHeightVar(pip);
+        savePipLayout(pip, width);
+      },
+      { signal },
+    );
+
+    // 치지직 네이티브 드래그도 그대로 허용한다. 드래그가 실제로 위치를 바꾼 경우에만
+    // 마지막 rect를 저장한다. 네이티브 transform을 left/top에 흡수해 0으로 만들면
+    // 치지직 내부의 마지막 이동량과 DOM 값이 달라져 다음 드래그 시작 시 위치가 튄다.
+    pip.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (
+          event.button !== 0 ||
+          event.target.closest(
+            ".cheese-pip-layout-resize, .cheese-pip-chat__handle",
+          )
+        ) {
+          return;
+        }
+        const rect = pip.getBoundingClientRect();
+        nativeStart = {
+          pointerId: event.pointerId,
+          left: rect.left,
+          top: rect.top,
+        };
+      },
+      { capture: true, signal },
+    );
+    const finishNativeDrag = (event) => {
+      if (!nativeStart || event.pointerId !== nativeStart.pointerId) return;
+      const start = nativeStart;
+      nativeStart = null;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!pip.isConnected || interaction) return;
+          const rect = pip.getBoundingClientRect();
+          if (
+            Math.abs(rect.left - start.left) < 2 &&
+            Math.abs(rect.top - start.top) < 2
+          ) {
+            return;
+          }
+          savePipLayout(pip, pipLayout.width || rect.width);
+        });
+      });
+    };
+    window.addEventListener("pointerup", finishNativeDrag, {
+      capture: true,
+      signal,
+    });
+    window.addEventListener("pointercancel", finishNativeDrag, {
+      capture: true,
+      signal,
+    });
+
+    pipLayoutControlsCleanup = () => {
+      controller.abort();
+      interaction = null;
+      nativeStart = null;
+      document.body.style.removeProperty("user-select");
+      pip.classList.remove("cheese-pip-layout-interacting");
+      resizeHandle.remove();
+      if (pipLayoutControlsOwner === pip) pipLayoutControlsOwner = null;
+    };
   }
 
   // 채팅 아래쪽 끝(= PIP 하단)을 잡아 높이를 조절한다. 아래로 끌면 채팅이 커지고
@@ -11477,53 +12227,91 @@
       pipChatResizeCleanup = null;
     }
     pipChatResizeOwner = panel;
+    const pip = panel.closest(PIP_SEL);
     let startY = 0;
     let startH = 0;
+    let startTop = 0;
+    let activePointerId = null;
     let dragging = false;
 
     const onMove = (e) => {
-      if (!dragging) return;
+      if (!dragging || e.pointerId !== activePointerId) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       // 손잡이가 아래쪽 끝이므로 아래로 끌면 높아진다(그대로 부호를 따른다).
-      pipChatHeight = normalizePipChatHeight(startH + (e.clientY - startY));
-      applyPipChatHeightVar();
+      const desiredHeight = startH + (e.clientY - startY);
+      const fixedPositionMax = Math.floor(
+        window.innerHeight -
+          startTop -
+          currentPipControlsHeight(pip) -
+          currentPipVideoHeight(pip) -
+          PIP_LAYOUT_MARGIN,
+      );
+      const maxHeight = Math.max(
+        PIP_CHAT_HEIGHT_MIN,
+        Math.min(pipChatMaxHeight(pip), fixedPositionMax),
+      );
+      pipChatHeight = Math.min(
+        maxHeight,
+        Math.max(PIP_CHAT_HEIGHT_MIN, Math.round(desiredHeight)),
+      );
+      applyPipChatHeightVar(pip);
     };
-    const onUp = () => {
-      if (!dragging) return;
+    const onUp = (e) => {
+      if (!dragging || e.pointerId !== activePointerId) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       dragging = false;
+      activePointerId = null;
       document.body.style.removeProperty("user-select");
       panel.classList.remove("is-resizing");
       try {
-        cachedStorageSet({ [PIP_CHAT_HEIGHT_KEY]: pipChatHeight });
+        void chrome.storage.local.set({
+          [PIP_CHAT_HEIGHT_KEY]: pipChatHeight,
+        });
       } catch {}
+      if (pip) {
+        savePipLayout(
+          pip,
+          pipLayout.width || pip.getBoundingClientRect().width,
+        );
+      }
     };
     const onDown = (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || !e.composedPath().includes(handle)) return;
       e.preventDefault();
+      // 손잡이 입력이 치지직 네이티브 PIP 드래그에 전달되면 같은 이동량이 transform에도
+      // 기록된다. window 캡처 단계에서 먼저 소비해 높이 조절만 실행한다.
+      e.stopImmediatePropagation();
       dragging = true;
+      activePointerId = e.pointerId;
       startY = e.clientY;
       startH = panel.getBoundingClientRect().height;
+      if (pip) {
+        const rect = pip.getBoundingClientRect();
+        startTop = rect.top;
+      }
       // 드래그 중 텍스트 선택이 따라붙는 걸 막는다.
       document.body.style.setProperty("user-select", "none");
       // iframe 이 포인터를 가로채면 드래그가 끊긴다 → 그 동안만 통과시킨다.
       panel.classList.add("is-resizing");
-      // 포인터를 손잡이에 묶어 두면 커서가 iframe·창 밖으로 나가도 이동이 계속 온다.
-      try {
-        handle.setPointerCapture(e.pointerId);
-      } catch {}
     };
 
-    // ⚠ setPointerCapture 를 걸면 이후 pointermove/up 이 window 가 아니라 '손잡이'로
-    // 전달된다. window 에 붙이면 한 번도 안 불린다 — 반드시 손잡이에 붙인다.
-    handle.addEventListener("pointerdown", onDown);
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
+    // window가 이벤트 경로의 시작이므로 치지직의 document/React 캡처 리스너보다 먼저
+    // 실행된다. 여기서 손잡이 포인터 시퀀스를 전부 소비해야 네이티브 이동 상태가 남지
+    // 않고, iframe 위나 창 경계까지 커서가 이동해도 높이 조절을 이어갈 수 있다.
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onUp, true);
     pipChatResizeCleanup = () => {
       pipChatResizeOwner = null;
-      handle.removeEventListener("pointerdown", onDown);
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onUp, true);
+      activePointerId = null;
+      dragging = false;
       document.body.style.removeProperty("user-select");
       panel.classList.remove("is-resizing");
     };
@@ -11567,6 +12355,15 @@
     }
     if (existing) {
       pip.classList.add(PIP_CHAT_HOST_CLASS); // 재렌더로 클래스가 날아갔을 수 있다
+      if (!pip.style.getPropertyValue("--cheese-pip-width")) {
+        applyStoredPipLayout(pip);
+      }
+      if (
+        !pip.classList.contains("cheese-pip-layout-positioned")
+      ) {
+        applyStoredPipPosition(pip);
+      }
+      attachPipLayoutControls(pip);
       // 다른 방송으로 갈아탄 경우에만 src 를 바꾼다(그냥 두면 iframe 이 리로드된다).
       const frame = existing.querySelector("iframe");
       const want = pipChatIframeUrl(pipChatLastLiveId);
@@ -11577,9 +12374,9 @@
       return;
     }
 
-    applyPipVideoHeight(pip); // ⚠ 반드시 마커보다 먼저(붙으면 영상이 0px 로 접힌다)
+    applyPipVideoSize(pip); // ⚠ 반드시 마커보다 먼저(붙으면 영상이 0px 로 접힌다)
     pip.classList.add(PIP_CHAT_HOST_CLASS);
-    applyPipChatHeightVar();
+    applyPipChatHeightVar(pip);
 
     const panel = document.createElement("div");
     panel.className = PIP_CHAT_CLASS;
@@ -11606,6 +12403,17 @@
     if (inner && inner.parentElement === pip) inner.after(panel);
     else pip.appendChild(panel);
     attachPipChatResize(panel, handle);
+    attachPipLayoutControls(pip);
+    applyStoredPipPosition(pip);
+    requestAnimationFrame(() => {
+      if (
+        pip.isConnected &&
+        pipLayoutControlsOwner === pip &&
+        !pip.classList.contains("cheese-pip-layout-interacting")
+      ) {
+        applyStoredPipPosition(pip);
+      }
+    });
     pipChatMounted = true;
   }
 
@@ -14092,9 +14900,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function getNativeFollowList(followNav) {
     return (
-      followNav?.querySelector(
-        'ul[class*="_list_"]:not(.cheese-cf-list)',
-      ) || null
+      followNav?.querySelector('ul[class*="_list_"]:not(.cheese-cf-list)') ||
+      null
     );
   }
 
@@ -14246,7 +15053,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     sidebar
       ?.querySelectorAll(`nav.${FOLLOW_AUTO_EXPANDING_CLASS}`)
       .forEach((node) => {
-        if (node !== current) node.classList.remove(FOLLOW_AUTO_EXPANDING_CLASS);
+        if (node !== current)
+          node.classList.remove(FOLLOW_AUTO_EXPANDING_CLASS);
       });
     current?.classList.toggle(FOLLOW_AUTO_EXPANDING_CLASS, Boolean(active));
   }
@@ -14841,6 +15649,439 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return { items, totalCount: Number(json?.content?.totalCount) || 0 };
   }
 
+  function parseInboxCommunityDate(raw) {
+    const value = String(raw || "");
+    if (!/^\d{14}$/.test(value)) return 0;
+    const year = Number(value.slice(0, 4));
+    const month = Number(value.slice(4, 6)) - 1;
+    const day = Number(value.slice(6, 8));
+    const hour = Number(value.slice(8, 10));
+    const minute = Number(value.slice(10, 12));
+    const second = Number(value.slice(12, 14));
+    // 치지직 날짜 문자열은 한국 시각이다. 정렬·보관 기한 판정에만 쓰므로 KST를 명시해
+    // 브라우저가 다른 시간대에 있어도 같은 결과가 나오게 한다.
+    return Date.UTC(year, month, day, hour - 9, minute, second);
+  }
+
+  function makeInboxCommunityContent(raw) {
+    const holder = document.createElement("div");
+    holder.innerHTML = String(raw || "").replace(/<br\s*\/?>/gi, "\n");
+    return decodeHtmlEntities(holder.textContent || holder.innerText || raw)
+      .replace(/\u00a0/g, " ")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, INBOX_COMMUNITY_CONTENT_MAX_LENGTH);
+  }
+
+  function makeInboxCommunityExcerpt(raw) {
+    return String(raw || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 240);
+  }
+
+  function normalizeInboxCommunityAttachment(raw) {
+    const type = String(raw?.type || raw?.attachType || "").toUpperCase();
+    if (type !== "PHOTO" && type !== "STICKER") return null;
+    const url = String(raw?.url || raw?.attachValue || "").trim();
+    try {
+      if (new URL(url).protocol !== "https:") return null;
+    } catch {
+      return null;
+    }
+    let extra = {};
+    try {
+      extra =
+        typeof raw?.extraJson === "string"
+          ? JSON.parse(raw.extraJson)
+          : raw?.extraJson || {};
+    } catch {}
+    const width = Number(raw?.width ?? extra?.width);
+    const height = Number(raw?.height ?? extra?.height);
+    return {
+      type,
+      url,
+      width: Number.isFinite(width) && width > 0 ? Math.round(width) : 0,
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : 0,
+    };
+  }
+
+  // 카운트는 음수·소수·문자열이 섞여 올 수 있다. 0 이상 정수만 통과시키고 나머지는 0.
+
+  function toInboxCommunityCount(value) {
+    const n = Math.floor(Number(value));
+
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function normalizeInboxCommunityItem(raw) {
+    const channelId = String(raw?.channelId || "").trim();
+    const commentId = String(raw?.commentId || "").trim();
+    const createdDate = String(raw?.createdDate || "").trim();
+    if (
+      !/^[0-9a-f]{32}$/i.test(channelId) ||
+      !commentId ||
+      !/^\d{14}$/.test(createdDate)
+    ) {
+      return null;
+    }
+    const attachments = (
+      Array.isArray(raw?.attachments)
+        ? raw.attachments
+        : Array.isArray(raw?.attaches)
+          ? raw.attaches
+          : []
+    )
+      .map(normalizeInboxCommunityAttachment)
+      .filter(Boolean)
+      .slice(0, INBOX_COMMUNITY_ATTACHMENT_MAX);
+    const content = String(raw?.content || raw?.excerpt || "")
+      .trim()
+      .slice(0, INBOX_COMMUNITY_CONTENT_MAX_LENGTH);
+    return {
+      id: `${channelId}:${commentId}`,
+      channelId,
+      channelName: String(raw?.channelName || "").trim() || "채널",
+      channelImageUrl: String(raw?.channelImageUrl || "").trim(),
+      commentId,
+      excerpt: makeInboxCommunityExcerpt(raw?.excerpt || content),
+      content,
+      createdDate,
+      attachments,
+      hasAttachment: attachments.length > 0 || raw?.hasAttachment === true,
+      verifiedMark: raw?.verifiedMark === true,
+      buffCount: toInboxCommunityCount(raw?.buffCount),
+      childObjectCount: toInboxCommunityCount(raw?.childObjectCount),
+      link: `https://chzzk.naver.com/${channelId}/community/detail/${encodeURIComponent(commentId)}`,
+    };
+  }
+
+  function normalizeInboxCommunityCache(raw) {
+    const items = Array.isArray(raw?.items)
+      ? raw.items.map(normalizeInboxCommunityItem).filter(Boolean)
+      : [];
+    const seen = new Set();
+    return items
+      .sort((a, b) => b.createdDate.localeCompare(a.createdDate))
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .slice(0, INBOX_COMMUNITY_MAX_ITEMS);
+  }
+
+  function makeInboxCommunityReadBaseline() {
+    const baseline = {};
+    inboxCommunityItems.forEach((item) => {
+      if (baseline[item.channelId] == null) {
+        baseline[item.channelId] = item.commentId;
+      }
+    });
+    return baseline;
+  }
+
+  function hasInboxCommunityUnread() {
+    if (!inboxCommunityReadMap) return false;
+    const latest = makeInboxCommunityReadBaseline();
+    return Object.entries(latest).some(
+      ([channelId, commentId]) =>
+        inboxCommunityReadMap[channelId] !== commentId,
+    );
+  }
+
+  function syncInboxCommunityUnreadFromCache() {
+    syncHeaderInboxCommunityDot(hasInboxCommunityUnread());
+  }
+
+  async function fetchInboxCommunityJson(url, parentSignal) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (parentSignal?.aborted) controller.abort();
+    else parentSignal?.addEventListener("abort", abort, { once: true });
+    const timer = window.setTimeout(
+      () => controller.abort(),
+      INBOX_COMMUNITY_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(url, {
+        credentials: "include",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abort);
+    }
+  }
+
+  async function fetchInboxCommunityFollowings(signal) {
+    const fetchPage = async (page) => {
+      const query = new URLSearchParams({
+        size: "100",
+        page: String(page),
+        sortType: "FOLLOW",
+      });
+      const json = await fetchInboxCommunityJson(
+        `https://api.chzzk.naver.com/service/v1/channels/followings?${query}`,
+        signal,
+      );
+      return {
+        list: Array.isArray(json?.content?.followingList)
+          ? json.content.followingList
+          : [],
+        totalPage: Math.max(1, Number(json?.content?.totalPage) || 1),
+      };
+    };
+
+    const first = await fetchPage(0);
+    const all = [...first.list];
+    // 전체 팔로잉 페이지는 세 개씩만 가져와 초기 요청량을 제한한다.
+    for (let page = 1; page < first.totalPage; page += 3) {
+      const pages = Array.from(
+        { length: Math.min(3, first.totalPage - page) },
+        (_, index) => page + index,
+      );
+      const chunks = await Promise.allSettled(pages.map(fetchPage));
+      chunks.forEach((result) => {
+        if (result.status === "fulfilled") all.push(...result.value.list);
+      });
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    }
+
+    const seen = new Set();
+    return all
+      .map((item) => item?.channel)
+      .filter((channel) => {
+        const channelId = String(channel?.channelId || "");
+        if (
+          !channelId ||
+          seen.has(channelId) ||
+          channel?.personalData?.following?.notification !== true
+        ) {
+          return false;
+        }
+        seen.add(channelId);
+        return true;
+      })
+      .map((channel) => ({
+        channelId: String(channel.channelId),
+        channelName: String(channel.channelName || "").trim() || "채널",
+        channelImageUrl: String(channel.channelImageUrl || "").trim(),
+        verifiedMark: channel.verifiedMark === true,
+      }));
+  }
+
+  async function fetchInboxCommunityLatest(channel, signal) {
+    const query = new URLSearchParams({
+      limit: "10",
+      offset: "0",
+      orderType: "DESC",
+      pagingType: "PAGE",
+    });
+    try {
+      const json = await fetchInboxCommunityJson(
+        `${INBOX_COMMUNITY_POST_API_PREFIX}/${encodeURIComponent(channel.channelId)}/comments?${query}`,
+        signal,
+      );
+      const rows = Array.isArray(json?.content?.comments?.data)
+        ? json.content.comments.data
+        : [];
+      // 최신 댓글이 시청자 글이어도 뒤쪽의 가장 최근 스트리머 글을 찾는다.
+      const row = rows.find((item) => item?.user?.userRoleCode === "streamer");
+      const comment = row?.comment;
+      if (!comment?.commentId || !/^\d{14}$/.test(comment?.createdDate || "")) {
+        return null;
+      }
+      const content = makeInboxCommunityContent(comment.content);
+      return normalizeInboxCommunityItem({
+        ...channel,
+        commentId: comment.commentId,
+        excerpt: makeInboxCommunityExcerpt(content),
+        content,
+        createdDate: comment.createdDate,
+        attaches: comment.attaches,
+        // 댓글 수는 comment 안, 버프 수는 형제 객체 buffNerf 안에 있다(단건 API 실측:
+        // content.comment.childObjectCount=12, content.buffNerf.buffCount=78).
+        // 목록 API 도 행마다 같은 모양({comment, user, buffNerf})으로 내려온다.
+        buffCount: row?.buffNerf?.buffCount,
+        childObjectCount: comment.childObjectCount,
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      return null;
+    }
+  }
+
+  async function mapInboxCommunityChannels(channels, signal) {
+    const results = new Array(channels.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (!signal.aborted) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= channels.length) return;
+        results[index] = await fetchInboxCommunityLatest(
+          channels[index],
+          signal,
+        );
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(INBOX_COMMUNITY_CONCURRENCY, channels.length) },
+        worker,
+      ),
+    );
+    return results.filter(Boolean);
+  }
+
+  async function saveInboxCommunityCache({ loading, error = false } = {}) {
+    try {
+      await chrome.storage.local.set({
+        [INBOX_COMMUNITY_CACHE_KEY]: {
+          version: INBOX_COMMUNITY_CACHE_VERSION,
+          updatedAt: inboxCommunityLastFetchAt || Date.now(),
+          loading: loading === true,
+          error: error === true,
+          items: inboxCommunityItems,
+        },
+      });
+    } catch {}
+  }
+
+  async function ensureInboxCommunityCacheLoaded() {
+    if (inboxCommunityCacheLoaded) return;
+    if (inboxCommunityCacheLoadPromise) return inboxCommunityCacheLoadPromise;
+    inboxCommunityCacheLoadPromise = (async () => {
+      try {
+        const data = await chrome.storage.local.get([
+          INBOX_COMMUNITY_CACHE_KEY,
+          INBOX_COMMUNITY_READ_KEY,
+        ]);
+        const stored = data?.[INBOX_COMMUNITY_CACHE_KEY];
+        const cacheIsCurrent =
+          Number(stored?.version) === INBOX_COMMUNITY_CACHE_VERSION;
+        // 요약과 첨부 유무만 저장하던 이전 캐시는 펼침 본문·이미지를 복원할 수 없다.
+        // 이전 항목을 그대로 보여주지 않고 한 번 새로 수집해 완전한 캐시로 교체한다.
+        inboxCommunityItems = cacheIsCurrent
+          ? normalizeInboxCommunityCache(stored)
+          : [];
+        // 이전 탭이 수집 도중 닫혀 loading 상태만 남았으면 최근 캐시로 보지 않고
+        // 즉시 다시 확인한다.
+        inboxCommunityLastFetchAt =
+          !cacheIsCurrent || stored?.loading === true
+            ? 0
+            : Number(stored?.updatedAt) || 0;
+        const storedRead = data?.[INBOX_COMMUNITY_READ_KEY];
+        inboxCommunityReadMap =
+          storedRead &&
+          typeof storedRead === "object" &&
+          !Array.isArray(storedRead)
+            ? { ...storedRead }
+            : null;
+        if (!inboxCommunityReadMap && inboxCommunityItems.length) {
+          inboxCommunityReadMap = makeInboxCommunityReadBaseline();
+          await chrome.storage.local.set({
+            [INBOX_COMMUNITY_READ_KEY]: inboxCommunityReadMap,
+          });
+        }
+      } catch {
+        inboxCommunityItems = [];
+        inboxCommunityLastFetchAt = 0;
+        inboxCommunityReadMap = null;
+      } finally {
+        inboxCommunityCacheLoaded = true;
+        inboxCommunityCacheLoadPromise = null;
+        syncInboxCommunityUnreadFromCache();
+      }
+    })();
+    return inboxCommunityCacheLoadPromise;
+  }
+
+  async function refreshInboxCommunityLatest({ force = false } = {}) {
+    if (
+      !IS_TOP_FRAME ||
+      location.hostname !== "chzzk.naver.com" ||
+      featureFlags.inboxCommunityNews ||
+      document.hidden
+    ) {
+      return;
+    }
+    if (inboxCommunityRefreshPromise) return inboxCommunityRefreshPromise;
+
+    inboxCommunityAbortController?.abort();
+    const controller = new AbortController();
+    inboxCommunityAbortController = controller;
+    const promise = (async () => {
+      try {
+        await ensureInboxCommunityCacheLoaded();
+        if (controller.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        if (
+          !force &&
+          Date.now() - inboxCommunityLastFetchAt < loungeRefreshMin * 60 * 1000
+        ) {
+          return;
+        }
+        inboxCommunityLastFetchAt = Date.now();
+        if (force || !inboxCommunityItems.length) {
+          await saveInboxCommunityCache({ loading: true });
+        }
+        const channels = await fetchInboxCommunityFollowings(controller.signal);
+        const eligibleIds = new Set(channels.map((item) => item.channelId));
+        const latestItems = await mapInboxCommunityChannels(
+          channels,
+          controller.signal,
+        );
+        const cutoff = Date.now() - INBOX_COMMUNITY_ITEM_TTL_MS;
+        const merged = new Map();
+        // 알림을 끄거나 팔로우를 해제한 채널의 이전 글은 다음 갱신에서 정리한다.
+        inboxCommunityItems.forEach((item) => {
+          if (
+            eligibleIds.has(item.channelId) &&
+            parseInboxCommunityDate(item.createdDate) >= cutoff
+          ) {
+            merged.set(item.id, item);
+          }
+        });
+        latestItems.forEach((item) => merged.set(item.id, item));
+        inboxCommunityItems = [...merged.values()]
+          .sort((a, b) => b.createdDate.localeCompare(a.createdDate))
+          .slice(0, INBOX_COMMUNITY_MAX_ITEMS);
+        const needsReadBaseline =
+          !inboxCommunityReadMap && inboxCommunityItems.length > 0;
+        await saveInboxCommunityCache({ loading: false });
+        if (needsReadBaseline) {
+          inboxCommunityReadMap = makeInboxCommunityReadBaseline();
+          await chrome.storage.local.set({
+            [INBOX_COMMUNITY_READ_KEY]: inboxCommunityReadMap,
+          });
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          await saveInboxCommunityCache({ loading: false, error: true });
+        }
+      } finally {
+        if (inboxCommunityAbortController === controller) {
+          inboxCommunityAbortController = null;
+        }
+      }
+    })();
+    const trackedPromise = promise.finally(() => {
+      if (inboxCommunityRefreshPromise === trackedPromise) {
+        inboxCommunityRefreshPromise = null;
+      }
+    });
+    inboxCommunityRefreshPromise = trackedPromise;
+    return trackedPromise;
+  }
+
   function loungeTabHasNew(boardId) {
     const latest = loungeLatestMap[boardId];
     if (!latest) return false;
@@ -14894,6 +16135,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function normalizeLoungeRefreshMin(raw) {
     const n = Number(raw);
     return LOUNGE_REFRESH_PRESETS.includes(n) ? n : LOUNGE_REFRESH_DEFAULT_MIN;
+  }
+
+  // 커뮤니티 주기는 미설정(null)이면 라운지 값을 따른다 — 기존 사용자에게 동작 변화 없음.
+  function normalizeInboxCommunityRefreshMin(raw) {
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    return LOUNGE_REFRESH_PRESETS.includes(n) ? n : null;
+  }
+
+  function loungePeriodMs() {
+    return loungeRefreshMin * 60 * 1000;
+  }
+
+  function inboxCommunityPeriodMs() {
+    return (inboxCommunityRefreshMin ?? loungeRefreshMin) * 60 * 1000;
   }
 
   function saveLoungeRead() {
@@ -15219,17 +16475,81 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     void selectLoungeTab(loungeActiveTab);
   }
 
+  function findHeaderInboxButton(header = document.getElementById("header")) {
+    if (!header) return null;
+    const buttons = Array.from(header.querySelectorAll("button")).filter(
+      (button) => button.id !== LOUNGE_BUTTON_ID,
+    );
+    return (
+      // 1) 수신함 아이콘 SVG 안에만 있는 <mask>
+      buttons.find((button) => button.querySelector("svg mask")) ||
+      // 2) 읽지 않은 네이티브 알림이 있을 때의 .blind = "New"
+      buttons.find(
+        (button) =>
+          button.querySelector(".blind")?.textContent?.trim() === "New",
+      ) ||
+      // 3) 캐시(#cash) 링크와 같은 묶음에 있는 버튼
+      (() => {
+        const cash = header.querySelector('a[href*="game.naver.com/profile"]');
+        const cashBox = cash?.closest('[class*="_box_"]');
+        return cashBox
+          ? buttons.find(
+              (button) => button.closest('[class*="_box_"]') === cashBox,
+            )
+          : null;
+      })()
+    );
+  }
+
+  function syncHeaderInboxCommunityDot(unread = inboxCommunityHeaderUnread) {
+    inboxCommunityHeaderUnread = unread === true;
+    const header = document.getElementById("header");
+    if (!header) return;
+    const inboxButton = findHeaderInboxButton(header);
+    const shouldShow =
+      featureFlagsLoaded &&
+      featureFlags.inboxCommunityNews === false &&
+      inboxCommunityHeaderUnread &&
+      inboxButton;
+
+    header
+      .querySelectorAll(".cheese-inbox-community-header-dot")
+      .forEach((dot) => {
+        if (!shouldShow || dot.parentElement !== inboxButton) dot.remove();
+      });
+    header
+      .querySelectorAll(".cheese-inbox-community-header-target")
+      .forEach((button) => {
+        if (!shouldShow || button !== inboxButton) {
+          button.classList.remove("cheese-inbox-community-header-target");
+        }
+      });
+    if (!shouldShow) return;
+
+    inboxButton.classList.add("cheese-inbox-community-header-target");
+    if (
+      !inboxButton.querySelector(":scope > .cheese-inbox-community-header-dot")
+    ) {
+      const dot = document.createElement("span");
+      dot.className = "cheese-inbox-community-header-dot";
+      dot.setAttribute("aria-hidden", "true");
+      inboxButton.appendChild(dot);
+    }
+  }
+
   function ensureLoungeButton() {
+    if (!featureFlagsLoaded) return;
     // 검색창 우측 여백 보정용 게이트 클래스(content.css). 버튼 주입 성공 여부와
     // 무관하게 '켜짐' 상태만 반영한다.
     document.documentElement.classList.toggle(
       "cheese-lounge-on",
       !featureFlags.loungeNews,
     );
+    syncPeriodicNewsRefresh();
+    syncHeaderInboxCommunityDot();
     if (featureFlags.loungeNews) {
       document.getElementById(LOUNGE_BUTTON_ID)?.remove();
       closeLoungeModal();
-      stopLoungeRefresh();
       return;
     }
     if (document.getElementById(LOUNGE_BUTTON_ID)) return;
@@ -15244,24 +16564,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // ⚠ <span class="blind">New</span> 도 단독 앵커로는 못 쓴다 — 읽지 않은 알림이
     //   있을 때만 나타나 대부분의 상황에서 버튼이 아예 안 생긴다.
     // 그래서 여러 표식을 순서대로 시도한다(하나가 바뀌어도 나머지로 버틴다).
-    const buttons = Array.from(header.querySelectorAll("button")).filter(
-      (b) => b.id !== LOUNGE_BUTTON_ID,
-    );
-    const inboxBtn =
-      // 1) 수신함 아이콘 SVG 안에만 있는 <mask>
-      buttons.find((b) => b.querySelector("svg mask")) ||
-      // 2) 읽지 않은 알림이 있을 때의 .blind = "New"
-      buttons.find(
-        (b) => b.querySelector(".blind")?.textContent?.trim() === "New",
-      ) ||
-      // 3) 캐시(#cash) 링크와 같은 묶음에 있는 버튼
-      (() => {
-        const cash = header.querySelector('a[href*="game.naver.com/profile"]');
-        const cashBox = cash?.closest('[class*="_box_"]');
-        return cashBox
-          ? buttons.find((b) => b.closest('[class*="_box_"]') === cashBox)
-          : null;
-      })();
+    const inboxBtn = findHeaderInboxButton(header);
     const anchorItem = inboxBtn?.closest('[class*="_item_"]') || inboxBtn;
     const box = anchorItem?.parentElement;
     if (!anchorItem || !box) return;
@@ -15320,7 +16623,67 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       box.addEventListener("pointerover", onLoungeLabelHarvest, true);
     }
     syncLoungeDot();
-    startLoungeRefresh();
+  }
+
+  function shouldRefreshLoungeNews() {
+    return featureFlags.loungeNews !== true;
+  }
+
+  function shouldRefreshInboxCommunityNews() {
+    return featureFlags.inboxCommunityNews !== true;
+  }
+
+  // 라운지·커뮤니티는 주기가 서로 다를 수 있으므로 타이머를 따로 돌린다.
+  // (force=true 는 해당 타이머의 tick — 자기 주기가 찼다는 뜻이라 즉시 확인한다.)
+  function refreshLoungeIfDue({ force = false } = {}) {
+    if (document.hidden || !shouldRefreshLoungeNews()) return;
+    if (force || Date.now() - loungeLastFetchAt > loungePeriodMs()) {
+      void refreshLoungeLatest();
+    }
+  }
+
+  function refreshInboxCommunityIfDue({ force = false } = {}) {
+    if (document.hidden || !shouldRefreshInboxCommunityNews()) return;
+    if (
+      force ||
+      Date.now() - inboxCommunityLastFetchAt > inboxCommunityPeriodMs()
+    ) {
+      void refreshInboxCommunityLatest({ force });
+    }
+  }
+
+  function syncPeriodicNewsRefresh() {
+    if (
+      !featureFlagsLoaded ||
+      !IS_TOP_FRAME ||
+      location.hostname !== "chzzk.naver.com"
+    ) {
+      return;
+    }
+    if (shouldRefreshLoungeNews()) startLoungeRefresh();
+    else stopLoungeRefresh();
+
+    if (shouldRefreshInboxCommunityNews()) {
+      startInboxCommunityRefresh();
+    } else {
+      stopInboxCommunityRefresh();
+      inboxCommunityAbortController?.abort();
+      inboxCommunityAbortController = null;
+    }
+    // 어느 쪽이든 켜져 있으면 복귀 감지를 걸어 둔다(둘 다 꺼지면 해제).
+    syncPeriodicNewsVisibility();
+  }
+
+  // 탭으로 돌아왔을 때 주기가 이미 지났으면 즉시 확인한다. 이게 없으면 숨은 동안의
+  // tick 이 전부 건너뛰어져, 복귀 후 '다음 tick'까지(최대 한 주기) 옛 상태로 남는다
+  // — 붉은 점을 확인하려는 바로 그 순간이 가장 오래된 상태가 된다.
+  // (백그라운드 타이머는 브라우저가 스로틀링해 실제로는 더 늦어질 수 있다.)
+  function syncPeriodicNewsVisibility() {
+    const want = !!(loungeRefreshTimer || inboxCommunityRefreshTimer);
+    if (want === loungeVisibilityBound) return;
+    loungeVisibilityBound = want;
+    if (want) document.addEventListener("visibilitychange", onLoungeVisible);
+    else document.removeEventListener("visibilitychange", onLoungeVisible);
   }
 
   function startLoungeRefresh() {
@@ -15328,35 +16691,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 즉시 1회 확인. 단 방금 확인했으면 건너뛴다 — 헤더 재렌더로 버튼이 재생성되거나
     // 숨김 토글을 껐다 켜면 여기 다시 오는데, 그때마다 7개 보드를 새로 부르면
     // 불필요한 요청이 몰린다.
-    const periodMs = loungeRefreshMin * 60 * 1000;
-    if (Date.now() - loungeLastFetchAt > periodMs) {
-      void refreshLoungeLatest();
-    }
+    refreshLoungeIfDue();
     loungeRefreshTimer = window.setInterval(() => {
       if (document.hidden) return; // 숨은 탭에서는 요청하지 않는다
-      void refreshLoungeLatest();
-    }, periodMs);
-    // 탭으로 돌아왔을 때 주기가 이미 지났으면 즉시 확인한다. 이게 없으면 숨은 동안의
-    // tick 이 전부 건너뛰어져, 복귀 후 '다음 tick'까지(최대 한 주기) 옛 상태로 남는다
-    // — 붉은 점을 확인하려는 바로 그 순간이 가장 오래된 상태가 된다.
-    // (백그라운드 타이머는 브라우저가 스로틀링해 실제로는 더 늦어질 수 있다.)
-    if (!loungeVisibilityBound) {
-      loungeVisibilityBound = true;
-      document.addEventListener("visibilitychange", onLoungeVisible);
-    }
+      refreshLoungeIfDue({ force: true });
+    }, loungePeriodMs());
+  }
+
+  function startInboxCommunityRefresh() {
+    if (inboxCommunityRefreshTimer) return;
+    refreshInboxCommunityIfDue();
+    inboxCommunityRefreshTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      refreshInboxCommunityIfDue({ force: true });
+    }, inboxCommunityPeriodMs());
   }
 
   function onLoungeVisible() {
-    if (document.hidden || !loungeRefreshTimer) return;
-    if (Date.now() - loungeLastFetchAt < loungeRefreshMin * 60 * 1000) return;
-    void refreshLoungeLatest();
+    if (document.hidden) return;
+    if (loungeRefreshTimer) refreshLoungeIfDue();
+    if (inboxCommunityRefreshTimer) refreshInboxCommunityIfDue();
   }
 
   // 주기가 바뀌면 타이머를 새 간격으로 다시 건다(설정 즉시 반영).
   function restartLoungeRefresh() {
-    if (!loungeRefreshTimer) return; // 아직 시작 전이면 다음 start 에서 새 값이 적용됨
     stopLoungeRefresh();
-    startLoungeRefresh();
+    stopInboxCommunityRefresh();
+    syncPeriodicNewsRefresh();
   }
 
   function stopLoungeRefresh() {
@@ -15364,10 +16725,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       clearInterval(loungeRefreshTimer);
       loungeRefreshTimer = 0;
     }
-    if (loungeVisibilityBound) {
-      loungeVisibilityBound = false;
-      document.removeEventListener("visibilitychange", onLoungeVisible);
+    syncPeriodicNewsVisibility();
+  }
+
+  function stopInboxCommunityRefresh() {
+    if (inboxCommunityRefreshTimer) {
+      clearInterval(inboxCommunityRefreshTimer);
+      inboxCommunityRefreshTimer = 0;
     }
+    syncPeriodicNewsVisibility();
   }
 
   function ensureHeaderFollowNav() {
@@ -22146,6 +23512,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     fetchController: null,
     openTimer: 0,
     closeTimer: 0,
+    tooltipPositionTimer: 0,
     currentChannelId: "",
     hls: null, // hls.js 인스턴스(폴백 시)
     width: FOLLOW_PREVIEW_DEFAULT_W,
@@ -22173,6 +23540,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!followPreviewState.closeTimer) return;
     clearTimeout(followPreviewState.closeTimer);
     followPreviewState.closeTimer = 0;
+  }
+
+  function clearFollowPreviewTooltipPositionTimer() {
+    if (!followPreviewState.tooltipPositionTimer) return;
+    clearTimeout(followPreviewState.tooltipPositionTimer);
+    followPreviewState.tooltipPositionTimer = 0;
   }
 
   function abortFollowPreviewFetch() {
@@ -22266,16 +23639,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 미리보기 최대 지속 시간은 followPreviewMaxLifeSec(초, settings에서 조절, 상한 5분).
   // 광고 우회로 '본방 대체 시청'이 되지 않도록 고정이든 계속 호버든 이 시간 뒤 강제 종료.
 
-  // 팔로잉 li → 32hex 채널id(a[href^="/live/"]). 없으면 null.
+  // 전용 목록의 data 속성을 우선하고, 네이티브 목록은 /live/ 링크에서 채널 ID를 찾는다.
   function getFollowItemChannelId(li) {
+    const dataChannelId = li?.dataset?.channelId || "";
+    if (/^[a-f0-9]{32}$/i.test(dataChannelId)) return dataChannelId;
     const a = li?.querySelector?.('a[href^="/live/"]');
     const href = a?.getAttribute("href") || "";
     const m = href.match(/^\/live\/([a-f0-9]{32})/i);
     return m ? m[1] : null;
   }
 
-  // 팔로잉 li가 라이브 중인지(오프라인 판정의 역). isOfflineFollowItem 재사용.
+  // 전용 목록은 data-live를, 네이티브 목록은 기존 오프라인 판정을 사용한다.
   function isLiveFollowItem(li) {
+    if (li?.dataset?.live === "1") return true;
+    if (li?.dataset?.live === "0") return false;
     return !isOfflineFollowItem(li);
   }
 
@@ -26047,6 +27424,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let customFollowDragEl = null;
   let customFollowReconcileTimer = 0; // drop 후 전체 재렌더를 미루는 타이머(버벅임 완화)
   function bindCustomFollowDragSort() {
+    // 즐겨찾기를 오래 누르면 순서 편집용 HTML5 DnD가 팝업 플레이어의 포인터 드래그를
+    // 대신 잡는다. 목록 안에 놓으면 순서를 바꾸고, 목록 밖에 놓으면 같은 동작으로 팝업을
+    // 열 수 있도록 드래그의 마지막 위치와 처리 여부를 함께 기억한다.
+    let popupFallbackHref = "";
+    let popupFallbackStartX = 0;
+    let popupFallbackStartY = 0;
+    let popupFallbackLastX = 0;
+    let popupFallbackLastY = 0;
+    let popupFallbackHandled = false;
+
     // 즐겨찾기 draggable 항목들 중, 커서 y 아래에 올 '기준 요소'(그 앞에 삽입). 없으면 맨 끝.
     const dragAfter = (listEl, y) => {
       const items = [
@@ -26076,6 +27463,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       customFollowDragEl = li;
       customFollowDragId = li.dataset.channelId || "";
+      popupFallbackHref =
+        li.querySelector('a[href^="/live/"]')?.getAttribute("href") || "";
+      popupFallbackStartX = popupFallbackLastX = Number(e.clientX) || 0;
+      popupFallbackStartY = popupFallbackLastY = Number(e.clientY) || 0;
+      popupFallbackHandled = false;
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = "move";
         try {
@@ -26113,6 +27505,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const onOver = (e) => {
       if (!customFollowDragEl) return;
       if (!customFollowDragEl.parentElement) return;
+      if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY)) {
+        popupFallbackLastX = e.clientX;
+        popupFallbackLastY = e.clientY;
+      }
       // 우리 목록 영역 위에서만 반응(다른 곳으로 드래그 시 이동 안 함).
       if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID)) return;
       e.preventDefault(); // drop 허용
@@ -26124,6 +27520,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (!customFollowDragEl) return;
       const listEl = customFollowDragEl.parentElement;
       if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID) || !listEl) return;
+      popupFallbackHandled = true;
       e.preventDefault();
       e.stopPropagation();
       // 현재 DOM 상의 즐겨찾기 순서를 읽되, 오프라인 숨김으로 보이지 않는 즐겨찾기는
@@ -26152,7 +27549,30 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ensureCustomFollowList();
       }, 250);
     };
-    const onEnd = () => {
+    const onEnd = (e) => {
+      const href = popupFallbackHref;
+      const handled = popupFallbackHandled;
+      const eventHasPosition =
+        Number.isFinite(e?.clientX) &&
+        Number.isFinite(e?.clientY) &&
+        (e.clientX !== 0 || e.clientY !== 0);
+      const endX = eventHasPosition ? e.clientX : popupFallbackLastX;
+      const endY = eventHasPosition ? e.clientY : popupFallbackLastY;
+      const moved = Math.hypot(
+        endX - popupFallbackStartX,
+        endY - popupFallbackStartY,
+      );
+      const endTarget = document.elementFromPoint(endX, endY);
+      const endedInCustomList = Boolean(
+        endTarget?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID),
+      );
+      const shouldOpenPopup =
+        popupPlayerOn &&
+        href.startsWith("/live/") &&
+        !handled &&
+        !endedInCustomList &&
+        moved >= 8;
+
       if (overRaf) {
         cancelAnimationFrame(overRaf);
         overRaf = 0;
@@ -26163,6 +27583,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       clearDragReady();
       customFollowDragEl = null;
       customFollowDragId = "";
+      popupFallbackHref = "";
+      popupFallbackHandled = false;
+
+      if (shouldOpenPopup) {
+        if (typeof closeFollowPreview === "function") closeFollowPreview();
+        suppressFollowPreviewOpen();
+        openPopupPlayer(href, endX, endY);
+      }
     };
     document.addEventListener("dragstart", onStart, true);
     document.addEventListener("dragover", onOver, true);
@@ -26432,79 +27860,223 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.body.appendChild(popup);
   }
 
-  // 사이드바 채널 링크의 드래그 시작 → 팝업 대상 href 를 dataTransfer 에 싣는다.
-  // ⚠ 즐겨찾기 순서 편집(cheese-cf-dragready)과 겹치지 않게, 그 상태의 항목은 건너뛴다.
+  // 사이드바 채널 링크의 좌클릭 드래그를 직접 추적한다. 브라우저 기본 HTML5 링크
+  // dragstart를 사용하면 CrxMouse 같은 Super Drag 확장도 같은 동작을 동시에 감지한다.
+  // PointerEvent로 분리하면 일반 클릭은 유지하면서 링크 드래그 신호를 만들지 않을 수 있다.
   function bindPopupPlayerDrag() {
     if (popupPlayerBound || !IS_TOP_FRAME) return;
     popupPlayerBound = true;
+    const linkSelector =
+      `#sidebar a[href^="/live/"], ` +
+      `#${CUSTOM_FOLLOW_NAV_ID} a[href^="/live/"]`;
+    const dragThreshold = 8;
+    let candidate = null;
+    let suppressClickUntil = 0;
+    let suppressClickLink = null;
 
+    const restoreNativeDrag = (state) => {
+      state?.nativeDragNodes?.forEach(({ node, hadAttribute, value }) => {
+        if (!node?.isConnected) return;
+        if (hadAttribute) node.setAttribute("draggable", value);
+        else node.removeAttribute("draggable");
+      });
+      state?.link?.classList?.remove("cheese-popup-player-drag-source");
+    };
+
+    const makeDragGhost = (link) => {
+      const ghost = document.createElement("div");
+      ghost.className = "cheese-popup-player-drag-ghost";
+      const sourceImage =
+        link.querySelector("img") ||
+        link.closest("li")?.querySelector("img") ||
+        link.parentElement?.querySelector("img");
+      if (sourceImage?.src) {
+        const image = document.createElement("img");
+        image.src = sourceImage.src;
+        image.alt = "";
+        image.draggable = false;
+        ghost.appendChild(image);
+      }
+      document.body.appendChild(ghost);
+      return ghost;
+    };
+
+    const makeDragShield = () => {
+      const shield = document.createElement("div");
+      shield.className = "cheese-popup-player-drag-shield";
+      shield.setAttribute("aria-hidden", "true");
+      document.body.appendChild(shield);
+      return shield;
+    };
+
+    const moveDragGhost = (state, clientX, clientY) => {
+      if (!state?.ghost) return;
+      state.ghost.style.transform = `translate3d(${Math.round(clientX + 12)}px, ${Math.round(clientY + 12)}px, 0)`;
+    };
+
+    const clearCandidate = () => {
+      const state = candidate;
+      candidate = null;
+      if (!state) return;
+      restoreNativeDrag(state);
+      state.ghost?.remove();
+      state.shield?.remove();
+      document.documentElement.classList.remove(
+        "cheese-popup-player-channel-dragging",
+      );
+      if (state.active) {
+        popupPlayerDragging = false;
+        suppressFollowPreviewOpen();
+      }
+      try {
+        if (state.link?.hasPointerCapture?.(state.pointerId)) {
+          state.link.releasePointerCapture(state.pointerId);
+        }
+      } catch {}
+    };
+
+    const onPointerDown = (event) => {
+      if (
+        !popupPlayerOn ||
+        event.button !== 0 ||
+        event.isPrimary === false
+      ) {
+        return;
+      }
+      const link = event.target?.closest?.(linkSelector);
+      if (!link || link.closest(".cheese-cf-dragready")) return;
+      const href = link.getAttribute("href") || "";
+      if (!href.startsWith("/live/")) return;
+
+      clearCandidate();
+      const nativeDragNodes = [link, ...link.querySelectorAll("img")].map(
+        (node) => ({
+          node,
+          hadAttribute: node.hasAttribute("draggable"),
+          value: node.getAttribute("draggable") || "",
+        }),
+      );
+      nativeDragNodes.forEach(({ node }) =>
+        node.setAttribute("draggable", "false"),
+      );
+      link.classList.add("cheese-popup-player-drag-source");
+      candidate = {
+        pointerId: event.pointerId,
+        link,
+        href,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        ghost: null,
+        shield: null,
+        nativeDragNodes,
+      };
+    };
+
+    const onPointerMove = (event) => {
+      const state = candidate;
+      if (!state || event.pointerId !== state.pointerId) return;
+      if (!state.link.isConnected && !state.active) {
+        clearCandidate();
+        return;
+      }
+      // 300ms 길게 눌러 시작한 즐겨찾기 순서 편집이 우선한다.
+      if (state.link.closest(".cheese-cf-dragready")) {
+        clearCandidate();
+        return;
+      }
+      if (!state.active) {
+        const distance = Math.hypot(
+          event.clientX - state.startX,
+          event.clientY - state.startY,
+        );
+        if (distance < dragThreshold) return;
+        state.active = true;
+        popupPlayerDragging = true;
+        state.shield = makeDragShield();
+        state.ghost = makeDragGhost(state.link);
+        document.documentElement.classList.add(
+          "cheese-popup-player-channel-dragging",
+        );
+        try {
+          state.link.setPointerCapture?.(state.pointerId);
+        } catch {}
+        if (typeof closeFollowPreview === "function") closeFollowPreview();
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      moveDragGhost(state, event.clientX, event.clientY);
+      // 드래그가 길어져도 미리보기 재오픈 억제 시간이 만료되지 않게 갱신한다.
+      suppressFollowPreviewOpen();
+    };
+
+    const onPointerUp = (event) => {
+      const state = candidate;
+      if (!state || event.pointerId !== state.pointerId) return;
+      const shouldOpen = state.active && popupPlayerOn && !customFollowDragEl;
+      if (state.active) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressClickUntil = Date.now() + 500;
+        suppressClickLink = state.link;
+      }
+      const href = state.href;
+      clearCandidate();
+      if (!shouldOpen) return;
+      if (typeof closeFollowPreview === "function") closeFollowPreview();
+      suppressFollowPreviewOpen();
+      openPopupPlayer(href, event.clientX, event.clientY);
+    };
+
+    const onPointerCancel = (event) => {
+      if (!candidate || event.pointerId !== candidate.pointerId) return;
+      clearCandidate();
+    };
+
+    // 혹시 브라우저가 링크의 기본 dragstart를 시도해도 취소한다. 즐겨찾기 순서 편집용
+    // draggable li에서 시작한 이벤트는 기존 정렬 코드로 넘긴다.
     document.addEventListener(
       "dragstart",
-      (e) => {
-        if (!popupPlayerOn) return;
-        const li = e.target?.closest?.(".cheese-cf-dragready");
-        if (li) return; // 순서 편집 드래그 — 팝업 대상 아님
-        const link = e.target?.closest?.(
-          `#sidebar a[href^="/live/"], #${CUSTOM_FOLLOW_NAV_ID} a[href^="/live/"]`,
-        );
+      (event) => {
+        if (!popupPlayerOn || event.target?.closest?.(".cheese-cf-dragready"))
+          return;
+        const link = event.target?.closest?.(linkSelector);
         if (!link) return;
-        const href = link.getAttribute("href") || "";
-        if (!href.startsWith("/live/")) return;
-        try {
-          e.dataTransfer?.setData(POPUP_PLAYER_DRAG_TYPE, href);
-          e.dataTransfer?.setData("text/plain", href);
-          if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
-        } catch {}
-        // 드래그 중에는 미리보기를 닫고 재오픈을 막는다. 안 그러면 끌기 시작한 항목의
-        // 호버가 살아 있어 미리보기가 함께 재생된다(드롭 후에도 남는다).
-        popupPlayerDragging = true;
-        if (typeof closeFollowPreview === "function") closeFollowPreview();
-        suppressFollowPreviewOpen();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true,
+    );
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("pointermove", onPointerMove, true);
+    document.addEventListener("pointerup", onPointerUp, true);
+    document.addEventListener("pointercancel", onPointerCancel, true);
+    window.addEventListener("blur", clearCandidate);
+
+    // 드롭 직후 브라우저가 합성하는 click이 원래 채널 링크를 열지 않게 한 번만 막는다.
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (Date.now() >= suppressClickUntil) {
+          suppressClickLink = null;
+          return;
+        }
+        if (event.target?.closest?.(linkSelector) !== suppressClickLink) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressClickUntil = 0;
+        suppressClickLink = null;
       },
       true,
     );
 
-    // 드래그가 끝나면(드롭/취소 모두) 억제를 조금 더 유지했다가 푼다 — dragend 직후
-    // mouseover 가 한 번 더 오는 브라우저가 있어 바로 풀면 미리보기가 뜬다.
+    // 팝업 드래그 중 발생한 contextmenu는 외부 제스처 확장으로 전달하지 않는다.
     document.addEventListener(
-      "dragend",
-      () => {
+      "contextmenu",
+      (event) => {
         if (!popupPlayerDragging) return;
-        popupPlayerDragging = false;
-        suppressFollowPreviewOpen();
-      },
-      true,
-    );
-
-    document.addEventListener(
-      "dragover",
-      (e) => {
-        if (!popupPlayerOn) return;
-        if (!e.dataTransfer?.types?.includes(POPUP_PLAYER_DRAG_TYPE)) return;
-        // 순서 편집 중이면(우리 목록 위) 그쪽이 처리하게 둔다.
-        if (customFollowDragEl) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
-        // 드래그가 길어져도 억제 창(800ms)이 만료되지 않게 계속 갱신한다.
-        if (popupPlayerDragging) suppressFollowPreviewOpen();
-      },
-      true,
-    );
-
-    document.addEventListener(
-      "drop",
-      (e) => {
-        if (!popupPlayerOn) return;
-        const href = e.dataTransfer?.getData(POPUP_PLAYER_DRAG_TYPE);
-        if (!href) return;
-        if (customFollowDragEl) return;
-        e.preventDefault();
-        e.stopPropagation();
-        // 드롭 직후에도 잠깐 억제를 유지한다(dragend 순서는 브라우저마다 다르다).
-        popupPlayerDragging = false;
-        if (typeof closeFollowPreview === "function") closeFollowPreview();
-        suppressFollowPreviewOpen();
-        openPopupPlayer(href, e.clientX, e.clientY);
+        event.preventDefault();
+        event.stopImmediatePropagation();
       },
       true,
     );
@@ -26883,6 +28455,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
     el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
     el.classList.toggle("cheese-fp-header-bottom", followPreviewHeaderBottom);
+    applyFollowPreviewHeaderVisibility(el);
     el.classList.toggle("cheese-fp-card-layout", followPreviewCardLayout);
     el.dataset.badgePos = followPreviewBadgePos;
     applyFollowPreviewColors(el);
@@ -26975,6 +28548,66 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (on) clearFollowPreviewCloseTimer();
   }
 
+  function getVisibleFollowPreviewTooltipRect(anchor) {
+    if (!anchor?.isConnected) return null;
+    const candidates = [];
+    const seen = new Set();
+    const add = (node) => {
+      if (!node || seen.has(node) || node.closest?.(`#${FOLLOW_PREVIEW_ID}`))
+        return;
+      seen.add(node);
+      candidates.push(node);
+    };
+
+    // 헤더 팔로우 툴팁과 치지직 사이드바 항목 내부 툴팁을 모두 지원한다. 해시가
+    // 바뀌는 네이티브 클래스는 역할명(_tooltip_)과 role 속성으로만 찾는다.
+    add(anchor.querySelector?.(".cheese-header-follow-tooltip"));
+    anchor
+      .querySelectorAll?.('[role="tooltip"], [class*="_tooltip_"]')
+      .forEach(add);
+    const external = document.getElementById("cheese-follow-channel-tooltip");
+    if (followChannelTooltipState?.hoverAnchor === anchor) add(external);
+
+    const visible = candidates.filter((node) => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 80 || rect.height < 24) return false;
+      const style = getComputedStyle(node);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number.parseFloat(style.opacity || "1") > 0.05
+      );
+    });
+    if (!visible.length) return null;
+
+    // 바깥 툴팁과 그 내부 요소가 함께 후보가 될 수 있다. 다른 후보를 감싸는 가장
+    // 바깥쪽 요소를 우선하고, 여러 개면 실제 박스 면적이 큰 것을 사용한다.
+    const roots = visible.filter(
+      (node) => !visible.some((other) => other !== node && other.contains(node)),
+    );
+    const ranked = (roots.length ? roots : visible).sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return br.width * br.height - ar.width * ar.height;
+    });
+    return ranked[0]?.getBoundingClientRect() || null;
+  }
+
+  function scheduleFollowPreviewTooltipPosition(el, anchor, anchorKind) {
+    clearFollowPreviewTooltipPositionTimer();
+    if (!followPreviewHideHeader || !el || !anchor) return;
+    followPreviewState.tooltipPositionTimer = window.setTimeout(() => {
+      followPreviewState.tooltipPositionTimer = 0;
+      if (
+        !followPreviewHideHeader ||
+        !el.isConnected ||
+        followPreviewState.anchor !== anchor
+      )
+        return;
+      positionFollowPreview(el, anchor, anchorKind);
+    }, 350);
+  }
+
   // 패널을 호버 요소 옆(치지직 툴팁 자리)에 fixed 배치한다. 카드 미리보기는 설정한
   // 선호 방향을, 사이드바 미리보기는 사이드바 반대편을 우선하되 화면 경계에서 자동
   // 반전한다. 좌측 배치면 is-left로 리사이즈 핸들과 드래그 방향도 함께 바꾼다.
@@ -26998,6 +28631,69 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       el.style.left = `${left}px`;
       el.style.top = `${top}px`;
       return;
+    }
+
+    // 헤더 없이 영상만 표시할 때는 기존 채널 툴팁을 기준으로 배치한다. 헤더에서는
+    // 툴팁 오른쪽을 우선하고, 사이드바에서는 툴팁 아래쪽을 우선하되 사이드바 바깥쪽
+    // 경계에 맞춘다. 선호 위치에 공간이 부족하면 반대쪽으로 뒤집는다.
+    if (followPreviewHideHeader) {
+      const tooltipRect = getVisibleFollowPreviewTooltipRect(anchor);
+      if (tooltipRect) {
+        const maxViewportWidth = Math.max(0, vw - EDGE * 2);
+        const minWidth = Math.min(FOLLOW_PREVIEW_MIN_W, maxViewportWidth);
+        const w = Math.max(
+          minWidth,
+          Math.min(followPreviewState.width, maxViewportWidth),
+        );
+        el.style.width = `${w}px`;
+        el.style.height = "";
+        applyFollowPreviewWidthClass(el, w);
+        const totalH = el.offsetHeight || Math.round((w * 9) / 16);
+        const tooltipGap = 8;
+        const isHeaderFollow =
+          anchor.classList?.contains?.("cheese-header-follow-item") === true;
+
+        if (isHeaderFollow) {
+          const rightSpace = vw - EDGE - tooltipRect.right - tooltipGap;
+          const leftSpace = tooltipRect.left - tooltipGap - EDGE;
+          const placeRight = rightSpace >= w || rightSpace >= leftSpace;
+          let left = placeRight
+            ? tooltipRect.right + tooltipGap
+            : tooltipRect.left - tooltipGap - w;
+          let top = tooltipRect.top;
+          left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
+          top = Math.max(EDGE, Math.min(top, vh - totalH - EDGE));
+          el.classList.toggle("is-left", !placeRight);
+          el.style.left = `${Math.round(left)}px`;
+          el.style.top = `${Math.round(top)}px`;
+          return;
+        }
+
+        const belowTop = tooltipRect.bottom + tooltipGap;
+        const aboveTop = tooltipRect.top - tooltipGap - totalH;
+        const belowSpace = vh - EDGE - tooltipRect.bottom - tooltipGap;
+        const aboveSpace = tooltipRect.top - tooltipGap - EDGE;
+        const belowFits = belowSpace >= totalH;
+        const aboveFits = aboveSpace >= totalH;
+        const placeBelow = belowFits || (!aboveFits && belowSpace >= aboveSpace);
+        let top = placeBelow ? belowTop : aboveTop;
+        top = Math.max(EDGE, Math.min(top, vh - totalH - EDGE));
+        const sidebar = anchor.closest?.("#sidebar");
+        const sidebarRect = sidebar?.getBoundingClientRect?.();
+        const sidebarOnRight = sidebarRect
+          ? sidebarRect.left + sidebarRect.width / 2 > vw / 2
+          : featureFlags.sidebarRight;
+        let left = sidebarRect
+          ? sidebarOnRight
+            ? tooltipRect.right - w
+            : tooltipRect.left
+          : tooltipRect.left + (tooltipRect.width - w) / 2;
+        left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
+        el.classList.toggle("is-left", Boolean(sidebarRect && sidebarOnRight));
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+        return;
+      }
     }
 
     // 앵커(li) 양옆의 가용 폭.
@@ -27072,11 +28768,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
     el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
     el.classList.toggle("cheese-fp-header-bottom", followPreviewHeaderBottom);
+    applyFollowPreviewHeaderVisibility(el);
     el.classList.toggle("cheese-fp-card-layout", followPreviewCardLayout);
     el.dataset.badgePos = followPreviewBadgePos;
     applyFollowPreviewColors(el);
     applyFollowPreviewHiddenParts(el);
     positionFollowPreview(el, li, anchorKind);
+    scheduleFollowPreviewTooltipPosition(el, li, anchorKind);
     el.classList.add("is-loading");
     el.classList.remove("is-ready");
 
@@ -27127,7 +28825,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
     };
     // 캐시 무력화로 최신 스냅샷(라이브 진행 중 갱신).
-    img.src = `${thumbUrl}${thumbUrl.includes("?") ? "&" : "?"}_t=${Date.now()}`;
+    img.src = makeFreshFollowPreviewThumbUrl(thumbUrl);
+  }
+
+  function makeFreshFollowPreviewThumbUrl(thumbUrl) {
+    if (!thumbUrl) return "";
+    return `${thumbUrl}${thumbUrl.includes("?") ? "&" : "?"}_t=${Date.now()}`;
   }
 
   // 경과 시간(ms 시작시각 → "HH:MM:SS", 시는 0패딩).
@@ -27395,6 +29098,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const video = el.querySelector(".cheese-follow-preview-video");
     if (!video) return;
     teardownFollowPreviewMedia(video); // 이전 연결 정리
+    // HLS가 첫 프레임을 준비하는 동안 검은 배경 대신 API의 라이브 스냅샷을 보여준다.
+    // poster는 loadeddata 이후 브라우저가 실제 영상 프레임으로 자연스럽게 교체한다.
+    const poster = makeFreshFollowPreviewThumbUrl(thumb);
+    if (poster) video.poster = poster;
+    else video.removeAttribute("poster");
     // 소리 상태를 설정값으로 강제(controls로 사용자가 바꿔도 다음 미리보기에선 일관).
     // 새 채널이므로 '사용자가 직접 조작함' 표시도 함께 리셋한다.
     followPreviewUserAudioTouched = false;
@@ -27613,6 +29321,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       try {
         video.pause();
         video.removeAttribute("src");
+        video.removeAttribute("poster");
         video.load();
       } catch {}
     }
@@ -27628,6 +29337,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     followPreviewState.movedPos = null;
     clearFollowPreviewOpenTimer();
     clearFollowPreviewCloseTimer();
+    clearFollowPreviewTooltipPositionTimer();
     abortFollowPreviewFetch();
     stopFollowPreviewElapsedTimer();
     stopFollowPreviewViewersTimer();
@@ -27689,6 +29399,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
       saveFollowPreviewSize();
+      if (
+        followPreviewHideHeader &&
+        followPreviewState.anchor?.isConnected
+      ) {
+        positionFollowPreview(
+          el,
+          followPreviewState.anchor,
+          followPreviewState.anchorKind,
+        );
+      }
     };
     // Pointer Events + setPointerCapture: 영상 컨트롤 위에서 손을 떼도 up 이벤트가
     // 핸들에 확실히 도달한다(mousedown/mouseup만 쓰면 video controls가 가로채 드래그가
@@ -27898,6 +29618,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         FOLLOW_PREVIEW_LIVE_EDGE_KEY,
         FOLLOW_PREVIEW_FULL_TITLE_KEY,
         FOLLOW_PREVIEW_HEADER_BOTTOM_KEY,
+        FOLLOW_PREVIEW_HIDE_HEADER_KEY,
         FOLLOW_PREVIEW_CARD_LAYOUT_KEY,
         FOLLOW_PREVIEW_BADGE_POS_KEY,
         FOLLOW_PREVIEW_COLORS_KEY,
@@ -27971,6 +29692,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       followPreviewFullTitle = data?.[FOLLOW_PREVIEW_FULL_TITLE_KEY] === true; // 기본 자름
       followPreviewHeaderBottom =
         data?.[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY] === true; // 기본 위
+      followPreviewHideHeader =
+        data?.[FOLLOW_PREVIEW_HIDE_HEADER_KEY] === true; // 기본 표시
       followPreviewCardLayout = data?.[FOLLOW_PREVIEW_CARD_LAYOUT_KEY] === true; // 기본 기존 배치
       followPreviewBadgePos = normalizeFollowPreviewBadgePos(
         data?.[FOLLOW_PREVIEW_BADGE_POS_KEY],
@@ -27998,6 +29721,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         followPreviewMaxLifeSec = sec;
       }
     } catch {}
+    applyFollowPreviewHeaderVisibility();
     // 팔로잉 미리보기 또는 카드 플레이어 미리보기 중 하나라도 켜져 있으면 호버 감지를
     // 바인딩한다(둘이 같은 인프라를 공유). 둘 다 꺼지면 미리보기를 닫는다.
     if (followPreviewOn || cardLivePreviewOn) bindFollowPreviewHover();
@@ -28317,11 +30041,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         cardDateHoverTarget &&
         cardDateHoverVideoNo === videoNo
       ) {
-        renderCardDateTooltip(
-          cardDateHoverInfo,
-          cardDateHoverTarget,
-          videoNo,
-        );
+        renderCardDateTooltip(cardDateHoverInfo, cardDateHoverTarget, videoNo);
       }
     }
   }
@@ -28394,8 +30114,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const rows = samples
       .map((sample) => ({
         offsetMs: sample.playerMessageTime * scale,
-        startAt:
-          sample.messageEpochMs - sample.playerMessageTime * scale,
+        startAt: sample.messageEpochMs - sample.playerMessageTime * scale,
       }))
       .filter(
         (row) =>
@@ -28411,8 +30130,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const center = medianNumber(rows.map((row) => row.startAt));
     const inliers = rows.filter(
       (row) =>
-        Math.abs(row.startAt - center) <=
-        VOD_CHAT_CORRECTION_MAX_SPREAD_MS * 2,
+        Math.abs(row.startAt - center) <= VOD_CHAT_CORRECTION_MAX_SPREAD_MS * 2,
     );
     if (inliers.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
 
@@ -28452,14 +30170,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .filter(Boolean)
       .sort(
         (a, b) =>
-          a.spreadMs + a.dropped * 1000 -
-          (b.spreadMs + b.dropped * 1000),
+          a.spreadMs + a.dropped * 1000 - (b.spreadMs + b.dropped * 1000),
       );
     if (!candidates.length) return null;
     if (candidates.length > 1) {
       const firstScore = candidates[0].spreadMs + candidates[0].dropped * 1000;
-      const secondScore =
-        candidates[1].spreadMs + candidates[1].dropped * 1000;
+      const secondScore = candidates[1].spreadMs + candidates[1].dropped * 1000;
       // 두 단위가 비슷하게 맞으면 표본이 더 벌어질 때까지 성급히 결정하지 않는다.
       if (secondScore - firstScore < 500) return null;
     }
@@ -28698,7 +30414,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         parts.push(
           `방송 시작 시각(채팅 기준) : ${formatKstClock(dates.liveOpenAt)}`,
         );
-        parts.push("※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.");
+        parts.push(
+          "※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.",
+        );
       } else {
         parts.push(
           `방송 시작 시각(추정) : ${formatKstClock(dates.liveOpenAt)}`,
@@ -28921,10 +30639,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   //  2) 채널 홈(/<채널ID>[/...]): 현재 채널 프로필 링크와 같은 영역의 썸네일/이름.
   function followChannelAnchorFromTarget(target) {
     // 0) 우리 전용 팔로잉 목록 항목(.cheese-cf-item, data-channel-id). 라이브 미리보기가
-    //    '켜져' 있으면 미리보기가 뜨므로 툴팁은 안 띄운다(미리보기 OFF 일 때만).
+    //    '켜져' 있어도 헤더를 숨긴 영상 전용 모드에서는 미리보기 배치 기준이 필요하므로
+    //    툴팁을 함께 띄운다. 일반 미리보기에서는 기존처럼 중복 툴팁을 생략한다.
     //    라이브 채널은 헤더 팔로잉 툴팁(이름/카테고리/제목/시청자수), 오프라인은 채널 정보
     //    툴팁(방송일 등)을 쓴다 — cfLive 플래그로 showFollowChannelTooltip 이 분기한다.
-    if (!followPreviewOn) {
+    if (!followPreviewOn || followPreviewHideHeader) {
       const cfItem = target?.closest?.(".cheese-cf-item");
       if (cfItem) {
         const id = cfItem.dataset?.channelId || "";
@@ -29049,9 +30768,23 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const r = ref.getBoundingClientRect();
     const w = tip.offsetWidth || 200;
     const h = tip.offsetHeight || 90;
-    // 앵커 오른쪽에 띄우되 화면 밖이면 왼쪽/아래로 보정.
-    let left = r.right + 8;
-    if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 8);
+    const sidebar = anchor.closest?.("#sidebar");
+    const sidebarRect = sidebar?.getBoundingClientRect?.();
+    // 사이드바 항목은 아이콘/텍스트 폭이 아니라 사이드바의 바깥 경계에 툴팁을 붙인다.
+    // 접힌 전용 목록에서도 툴팁이 사이드바 안으로 파고들지 않고, 우측 배치일 때는
+    // 같은 규칙을 좌우 반전한다. 사이드바 밖의 채널 홈 앵커는 기존 간격을 유지한다.
+    let left;
+    if (sidebarRect) {
+      const sidebarOnRight =
+        sidebarRect.left + sidebarRect.width / 2 > window.innerWidth / 2;
+      left = sidebarOnRight ? sidebarRect.left - w : sidebarRect.right;
+    } else {
+      left = r.right + 8;
+      if (left + w > window.innerWidth - 8) {
+        left = Math.max(8, r.left - w - 8);
+      }
+    }
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
     let top = r.top;
     if (top + h > window.innerHeight - 8)
       top = Math.max(8, window.innerHeight - h - 8);
@@ -29103,6 +30836,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       tip.classList.add("is-visible");
       tip.classList.add("is-header-style"); // 컨테이너 자체 박스 제거(내부 inner 가 박스)
       positionFollowChannelTooltip(tip, anchor);
+      if (
+        followPreviewHideHeader &&
+        followPreviewState.anchor === anchor
+      ) {
+        const preview = document.getElementById(FOLLOW_PREVIEW_ID);
+        if (preview) {
+          positionFollowPreview(
+            preview,
+            anchor,
+            followPreviewState.anchorKind,
+          );
+        }
+      }
       return;
     }
     // 오프라인(또는 그 외): 채널 정보 툴팁(최근 방송일·팔로우일·첫 방송일·총 방송시간).
@@ -30741,8 +32487,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   async function loadFollowerExact() {
     if (!chrome.storage?.local) return;
     try {
-      const data = await getBootData([FOLLOWER_EXACT_KEY]);
+      const data = await getBootData([
+        FOLLOWER_EXACT_KEY,
+        CHAT_HISTORY_ENABLED_KEY,
+        CHAT_HISTORY_LIMIT_KEY,
+      ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
+      chatHistoryOn = data?.[CHAT_HISTORY_ENABLED_KEY] === true; // 기본 OFF
+      chatHistoryLimit = normalizeChatHistoryLimit(
+        data?.[CHAT_HISTORY_LIMIT_KEY],
+      );
+      ensureChatHistory();
     } catch {
       followerExactOn = false;
     }
@@ -31272,6 +33027,622 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 채팅창 관찰: 새로 렌더되는 메시지에도 차단 닉네임 숨김을 적용. 라이브 새 메시지는 MAIN
   // world 가 hash 로 막지만, ① 페이지 진입 시 이미 있던 메시지 ② 다시보기 재생 중 렌더되는
   // 메시지는 여기서 닉네임으로 처리한다. 신규 추가 노드만 검사해 부하를 낮춘다.
+  // ── 채팅 이어보기 구현 ─────────────────────────────────────────────────────
+  // 저장 단위는 채널별 키 하나(cheeseChatHistory:<channelId>). 값은 행 HTML 그대로
+  // 담는다 — 치지직 배지·이모티콘 마크업을 우리가 재현하려 들면 클래스 해시가 바뀔
+  // 때마다 깨진다. 렌더된 결과를 그대로 보관하는 편이 훨씬 안정적이다.
+  let chatHistoryChannelId = null;
+  let chatHistoryBuffer = [];
+  let chatHistorySaveTimer = 0;
+  let chatHistoryRestored = false;
+  let chatHistoryObserver = null;
+  let chatHistoryObservedList = null;
+  let chatHistoryObservedRowParent = null;
+  let chatHistoryRestoreGeneration = 0;
+  let chatHistoryRestoringRowParent = null;
+  let chatHistoryRestoreReadFailures = 0;
+  let chatHistoryScrollParent = null;
+  let chatHistoryScrollTimer = 0;
+  let chatHistoryInsertInProgress = false;
+  let chatHistoryReconcileQueued = false;
+
+  function normalizeChatHistoryLimit(value) {
+    if (value == null || value === "") return CHAT_HISTORY_LIMIT_DEFAULT;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return CHAT_HISTORY_LIMIT_DEFAULT;
+    return Math.min(
+      CHAT_HISTORY_LIMIT_MAX,
+      Math.max(CHAT_HISTORY_LIMIT_MIN, n),
+    );
+  }
+
+  function chatHistoryKey(channelId) {
+    return `${CHAT_HISTORY_STORE_PREFIX}${channelId}`;
+  }
+
+  function currentLiveChannelId() {
+    const m = location.pathname.match(/^\/live\/([0-9a-f]{32})/i);
+    return m ? m[1] : null;
+  }
+
+  // ⚠ 컨테이너 클래스는 빌드마다 이름이 다르다(안정 이름 live_chatting_list_container
+  // 인 경우도, 해시 이름 _container_xxxx 인 경우도 있다). 다른 모듈들처럼 role='log'
+  // 폴백을 함께 두고, 그래도 못 찾으면 실제 행(_item_)의 조상에서 역으로 찾는다.
+  function chatHistoryListEl() {
+    const aside = document.querySelector("aside#aside-chatting");
+    if (!aside) return null;
+    const direct = aside.querySelector(
+      "[class*='live_chatting_list_container'], [role='log']",
+    );
+    if (direct) return direct;
+    // 최후 수단: 행을 먼저 찾고 그 부모를 컨테이너로 삼는다(클래스 이름에 의존하지 않음).
+    const row = aside.querySelector("[class*='_item_']");
+    return row?.parentElement || null;
+  }
+
+  // 실제로 행을 담고 있는 요소. 실측 구조:
+  //   div._container_8lqsk_1[role=log]        ← chatHistoryListEl() 이 찾는 바깥 컨테이너
+  //     ├ div._fixed_8lqsk_16                 ← 고정 메시지 배너(여기에 넣으면 안 된다)
+  //     └ div._wrapper_8lqsk_25               ← 행(_item_)들의 실제 부모
+  //         ├ div._list_bottom_8lqsk_61
+  //         └ div._item_8lqsk_7 ...
+  // 컨테이너의 firstChild 에 넣으면 고정 배너 앞에 쌓이므로, 반드시 '행의 부모'를 쓴다.
+  function chatHistoryRowParent(list) {
+    const row = list?.querySelector('[class*="_item_"]');
+    return row?.parentElement || list;
+  }
+
+  function chatHistoryRows(parent) {
+    if (!parent) return [];
+    return Array.from(parent.children).filter((node) =>
+      node.matches?.('[class*="_item_"]'),
+    );
+  }
+
+  // 실제 스크롤 wrapper는 column-reverse다. DOM 앞쪽이 화면 아래의 최신 채팅이고,
+  // 과거 기록은 DOM 맨 뒤에 역순으로 붙여야 위로 스크롤할 때 자연스럽게 이어진다.
+
+  // 저장은 디바운스한다 — 채팅 폭주 방송에서 매 줄마다 storage 를 쓰면 부하가 크다.
+  function scheduleChatHistorySave() {
+    if (chatHistorySaveTimer) return;
+    chatHistorySaveTimer = window.setTimeout(() => {
+      chatHistorySaveTimer = 0;
+      flushChatHistory();
+    }, 3000);
+  }
+
+  // storage.session 은 메모리 기반이라 브라우저 종료 시 자동으로 사라진다(수명 관리 불필요).
+  function chatHistoryStore() {
+    return chrome.storage?.session || null;
+  }
+
+  // 한도(10MB)에 닿으면 set() 이 던진다. 그냥 삼키면 '조용히 저장이 안 되는' 상태가
+  // 되므로, 참고 구현과 같은 방식으로 오래된 쪽부터 덜어내며 재시도한다.
+  // ⚠ 자기 채널만 줄여서는 부족하다 — 여러 채널이 각각 가득 차 있으면 총량이 문제다.
+  // 그래서 먼저 '가장 오래 안 본 다른 채널'을 통째로 버린 뒤, 그래도 안 되면 자기 것을 줄인다.
+  async function saveChatHistoryWithEviction(key, items) {
+    const store = chatHistoryStore();
+    if (!store) return;
+    let attempt = items;
+    while (attempt.length > 0) {
+      try {
+        await store.set({ [key]: { at: Date.now(), items: attempt } });
+        return;
+      } catch (error) {
+        // ⚠ 용량 초과가 아닌 오류(권한 등)까지 '덜어내며 재시도'하면, 아무리 줄여도
+        // 실패하므로 배열을 0 까지 갉아먹고 조용히 끝난다. 용량 문제일 때만 덜어낸다.
+        if (!/quota|QUOTA|exceed/i.test(String(error?.message || ""))) {
+          console.warn(
+            "[치즈] 채팅 이어보기 저장 실패:",
+            error?.message || error,
+          );
+          return;
+        }
+        if (await dropOldestOtherChatHistory(key)) continue; // 남 먼저 정리
+        const drop = Math.max(
+          1,
+          Math.floor(attempt.length * CHAT_HISTORY_EVICT_RATIO),
+        );
+        attempt = attempt.slice(drop); // 오래된 쪽(앞)부터 버린다
+      }
+    }
+    // 끝까지 못 넣으면 이 채널 기록은 지운다(빈 껍데기를 남기지 않는다).
+    try {
+      await store.remove(key);
+    } catch {}
+  }
+
+  // 가장 오래 안 본 다른 채널 기록 하나를 버린다. 버렸으면 true.
+  async function dropOldestOtherChatHistory(keepKey) {
+    const store = chatHistoryStore();
+    if (!store) return false;
+    try {
+      const all = await store.get(null);
+      let oldestKey = null;
+      let oldestAt = Infinity;
+      for (const [k, v] of Object.entries(all || {})) {
+        if (!k.startsWith(CHAT_HISTORY_STORE_PREFIX) || k === keepKey) continue;
+        const at = Number(v?.at) || 0;
+        if (at < oldestAt) {
+          oldestAt = at;
+          oldestKey = k;
+        }
+      }
+      if (!oldestKey) return false;
+      await store.remove(oldestKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function flushChatHistory() {
+    if (!chatHistoryOn || !chatHistoryChannelId) return;
+    const items = chatHistoryBuffer.slice(-chatHistoryLimit);
+    void saveChatHistoryWithEviction(
+      chatHistoryKey(chatHistoryChannelId),
+      items,
+    );
+  }
+
+  function removeRestoredChatHistoryRows(root = document) {
+    root
+      .querySelectorAll?.(`[${CHAT_HISTORY_MARK}]`)
+      .forEach((row) => row.remove());
+  }
+
+  // 새로 들어온 행을 버퍼에 담는다. 복원된 행은 다시 담지 않는다(중복 누적 방지).
+  // ⚠ 저장 전에 '우리가 덧붙인 것'을 걷어낸다. 실측 DOM 을 보면 행에 우리 마커와
+  // 주입 요소가 섞여 있다(data-cheese-os-done, data-cheese-row-done, .cheese-chat-time,
+  // .cheese-chat-os 등). 그대로 저장하면 복원했을 때
+  //   (1) chatTimestamp.js 가 '이미 처리됨'으로 보고 건너뛰어 기능이 안 먹고,
+  //   (2) 저장 당시 설정으로 굳은 시간·아이콘이 그대로 되살아나며,
+  //   (3) 중복 판정(HTML 비교)이 어긋난다.
+  // 원본 상태로 되돌려 저장하고, 복원 후에는 각 모듈이 새로 처리하게 둔다.
+  function cleanChatRowForStore(row) {
+    const clone = row.cloneNode(true);
+    clone
+      .querySelectorAll(".cheese-chat-time, .cheese-chat-os")
+      .forEach((el) => el.remove());
+    const strip = (el) => {
+      for (const name of el.getAttributeNames()) {
+        if (name.startsWith("data-cheese")) el.removeAttribute(name);
+      }
+    };
+    strip(clone);
+    clone
+      .querySelectorAll("[data-cheese-os-done], [data-cheese-row-done]")
+      .forEach(strip);
+    return clone.outerHTML;
+  }
+
+  function captureChatHistoryRow(row) {
+    if (!chatHistoryOn || !chatHistoryChannelId) return;
+    if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
+    const html = cleanChatRowForStore(row);
+    if (!html || html.length > 8000) return; // 비정상적으로 큰 행은 건너뛴다
+    chatHistoryBuffer.push(html);
+    if (chatHistoryBuffer.length > chatHistoryLimit * 2) {
+      chatHistoryBuffer = chatHistoryBuffer.slice(-chatHistoryLimit);
+    }
+    scheduleChatHistorySave();
+  }
+
+  function finishChatHistoryInsert() {
+    chatHistoryInsertInProgress = false;
+    if (chatHistoryReconcileQueued) scheduleChatHistoryReconcile(0);
+  }
+
+  // 저장된 기록의 끝과 현재 렌더된 기록의 시작이 겹치면 겹치는 구간은 한 번만
+  // 남긴다. 단순 Set 중복 제거는 같은 문장을 실제로 여러 번 보낸 채팅까지 지우므로
+  // 연속된 경계 구간만 비교한다.
+  function mergeChatHistorySequences(storedItems, currentItems) {
+    const maxOverlap = Math.min(storedItems.length, currentItems.length);
+    let overlap = 0;
+    for (let size = maxOverlap; size > 0; size -= 1) {
+      let matches = true;
+      for (let index = 0; index < size; index += 1) {
+        if (
+          storedItems[storedItems.length - size + index] !==
+          currentItems[index]
+        ) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        overlap = size;
+        break;
+      }
+    }
+    return [...storedItems, ...currentItems.slice(overlap)].slice(
+      -chatHistoryLimit,
+    );
+  }
+
+  function missingChatHistoryItems(desiredItems, presentItems) {
+    const presentCounts = new Map();
+    presentItems.forEach((html) => {
+      presentCounts.set(html, (presentCounts.get(html) || 0) + 1);
+    });
+    return desiredItems.filter((html) => {
+      const count = presentCounts.get(html) || 0;
+      if (!count) return true;
+      presentCounts.set(html, count - 1);
+      return false;
+    });
+  }
+
+  // column-reverse 목록의 DOM 뒤쪽에 과거 행을 붙인다. 파싱은 프레임당 40개로 나눠
+  // 타임스탬프·닉네임 필터 등 다른 옵저버가 한 프레임에 몰리지 않게 한다.
+  function appendChatHistoryRows(items, rowParent, generation) {
+    if (!items.length) return;
+    if (chatHistoryInsertInProgress) {
+      chatHistoryReconcileQueued = true;
+      return;
+    }
+    chatHistoryInsertInProgress = true;
+    const frag = document.createDocumentFragment();
+    const temp = document.createElement("div");
+    let index = 0;
+    const CHUNK = 40;
+    const step = () => {
+      if (
+        generation !== chatHistoryRestoreGeneration ||
+        rowParent !== chatHistoryObservedRowParent ||
+        !rowParent.isConnected
+      ) {
+        finishChatHistoryInsert();
+        return;
+      }
+      temp.innerHTML = items.slice(index, index + CHUNK).join("");
+      while (temp.firstElementChild) {
+        const el = temp.firstElementChild;
+        el.setAttribute(CHAT_HISTORY_MARK, "1");
+        frag.appendChild(el);
+      }
+      index += CHUNK;
+      if (index < items.length) {
+        requestAnimationFrame(step);
+        return;
+      }
+      Array.from(frag.children)
+        .reverse()
+        .forEach((el) => rowParent.appendChild(el));
+      finishChatHistoryInsert();
+    };
+    requestAnimationFrame(step);
+  }
+
+  // 치지직은 같은 페이지에서 위로 스크롤해도 네이티브 채팅 DOM을 최대 200행 정도만
+  // 유지한다. 저장 한도가 더 크면 현재 네이티브 행을 우선 남기고, 버퍼에만 있는 과거
+  // 행을 보충한다. 새로고침 뒤 치지직이 같은 행을 다시 불러온 경우에는 복원 복제본을
+  // 제거해 중복과 DOM 증가를 막는다.
+  function reconcileChatHistoryRows() {
+    chatHistoryReconcileQueued = false;
+    if (chatHistoryInsertInProgress || !chatHistoryOn) {
+      chatHistoryReconcileQueued = chatHistoryInsertInProgress;
+      return;
+    }
+    const rowParent = chatHistoryObservedRowParent;
+    if (!rowParent?.isConnected || rowParent.scrollTop >= -1) return;
+
+    const desired = chatHistoryBuffer.slice(-chatHistoryLimit);
+    const desiredCounts = new Map();
+    desired.forEach((html) => {
+      desiredCounts.set(html, (desiredCounts.get(html) || 0) + 1);
+    });
+
+    const rows = chatHistoryRows(rowParent);
+    const nativeCounts = new Map();
+    rows.forEach((row) => {
+      if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
+      const html = cleanChatRowForStore(row);
+      nativeCounts.set(html, (nativeCounts.get(html) || 0) + 1);
+    });
+
+    // 동일 채팅을 네이티브와 복원 행이 함께 갖고 있으면 네이티브를 우선한다.
+    const markerAllowance = new Map();
+    desiredCounts.forEach((count, html) => {
+      markerAllowance.set(
+        html,
+        Math.max(0, count - (nativeCounts.get(html) || 0)),
+      );
+    });
+    rows.forEach((row) => {
+      if (!row.hasAttribute(CHAT_HISTORY_MARK)) return;
+      const html = cleanChatRowForStore(row);
+      const left = markerAllowance.get(html) || 0;
+      if (left > 0) markerAllowance.set(html, left - 1);
+      else row.remove();
+    });
+
+    const missing = missingChatHistoryItems(
+      desired,
+      chatHistoryRows(rowParent).map(cleanChatRowForStore),
+    );
+    appendChatHistoryRows(
+      missing,
+      rowParent,
+      chatHistoryRestoreGeneration,
+    );
+  }
+
+  function scheduleChatHistoryReconcile(delay = 120) {
+    chatHistoryReconcileQueued = true;
+    if (chatHistoryScrollTimer) return;
+    chatHistoryScrollTimer = window.setTimeout(() => {
+      chatHistoryScrollTimer = 0;
+      reconcileChatHistoryRows();
+    }, delay);
+  }
+
+  function onChatHistoryScroll() {
+    if (chatHistoryScrollParent?.scrollTop < -1) {
+      scheduleChatHistoryReconcile();
+    }
+  }
+
+  function setChatHistoryScrollParent(parent) {
+    if (chatHistoryScrollParent === parent) return;
+    chatHistoryScrollParent?.removeEventListener(
+      "scroll",
+      onChatHistoryScroll,
+    );
+    chatHistoryScrollParent = parent;
+    chatHistoryScrollParent?.addEventListener(
+      "scroll",
+      onChatHistoryScroll,
+      { passive: true },
+    );
+  }
+
+  // 현재 치지직 라이브 채팅은 화면에 필요한 20여 행만 유지하는 가상화 목록이다.
+  // 예전처럼 200행이 채워질 때까지 22초 이상 기다리면 복원이 고장 난 것처럼 보인다.
+  // 대신 실제 행 부모가 잠시 안정될 때까지만 기다리고, SPA 재렌더로 목록이 교체되면
+  // 이 작업을 취소해 새 목록에서 다시 시작한다.
+  function waitChatListSettled(list, rowParent, generation) {
+    return new Promise((resolve) => {
+      let last = chatHistoryRows(rowParent).length;
+      let stable = 0;
+      let waited = 0;
+      const MIN_WAIT = 2000;
+      const MAX_WAIT = 8000;
+      const tick = () => {
+        if (
+          generation !== chatHistoryRestoreGeneration ||
+          list !== chatHistoryObservedList ||
+          rowParent !== chatHistoryObservedRowParent ||
+          !list.isConnected ||
+          !rowParent.isConnected
+        ) {
+          resolve(false);
+          return;
+        }
+        const now = chatHistoryRows(rowParent).length;
+        stable = now === last ? stable + 1 : 0;
+        last = now;
+        waited += 400;
+        if ((stable >= 4 && waited >= MIN_WAIT) || waited >= MAX_WAIT) {
+          resolve(true);
+          return;
+        }
+        setTimeout(tick, 400);
+      };
+      setTimeout(tick, 400);
+    });
+  }
+
+  async function restoreChatHistory(channelId, list, rowParent) {
+    if (
+      chatHistoryRestored ||
+      chatHistoryRestoringRowParent === rowParent
+    ) {
+      return;
+    }
+    const generation = chatHistoryRestoreGeneration;
+    chatHistoryRestoringRowParent = rowParent;
+    const store = chatHistoryStore();
+    try {
+      if (!store) {
+        chatHistoryRestored = true;
+        return;
+      }
+      let stored = null;
+      try {
+        const data = await store.get(chatHistoryKey(channelId));
+        stored = data?.[chatHistoryKey(channelId)];
+        chatHistoryRestoreReadFailures = 0;
+      } catch {
+        // background가 storage.session 접근 수준을 여는 시점과 겹쳤다면 다음 DOM
+        // 갱신에서 제한적으로 다시 시도한다. 실패를 복원 완료로 확정하면 해당 탭에서는
+        // 영영 기록을 읽지 못하고, 무제한 재시도하면 미지원 환경에서 타이머가 남는다.
+        chatHistoryRestoreReadFailures += 1;
+        if (chatHistoryRestoreReadFailures <= 3) {
+          window.setTimeout(() => {
+            if (
+              generation === chatHistoryRestoreGeneration &&
+              rowParent === chatHistoryObservedRowParent
+            ) {
+              ensureChatHistory();
+            }
+          }, 400 * chatHistoryRestoreReadFailures);
+        } else {
+          chatHistoryRestored = true;
+        }
+        return;
+      }
+      const items = Array.isArray(stored?.items) ? stored.items : [];
+      // 첫 방문은 복원할 데이터가 없으므로 기다리지 않는다. 현재 행은 옵저버를 붙일 때
+      // 이미 버퍼에 담았고 3초 뒤 저장된다.
+      if (!items.length) {
+        chatHistoryRestored = true;
+        return;
+      }
+      const settled = await waitChatListSettled(
+        list,
+        rowParent,
+        generation,
+      );
+      if (!settled) return;
+      const currentRows = chatHistoryRows(rowParent);
+      const currentItems = chatHistoryBuffer.length
+        ? chatHistoryBuffer.slice()
+        : currentRows.slice().reverse().map(cleanChatRowForStore);
+      const merged = mergeChatHistorySequences(items, currentItems);
+      const fresh = missingChatHistoryItems(
+        merged,
+        currentRows.map(cleanChatRowForStore),
+      );
+      chatHistoryRestored = true;
+      // 저장 기록과 현재 네이티브 채팅을 합친 뒤 한도를 적용한다. 저장된 500개에
+      // 새 채팅 20여 개를 그대로 더해 DOM이 500개를 넘는 상황을 막는다.
+      chatHistoryBuffer = merged;
+      scheduleChatHistorySave();
+      if (fresh.length) appendChatHistoryRows(fresh, rowParent, generation);
+    } finally {
+      if (
+        generation === chatHistoryRestoreGeneration &&
+        chatHistoryRestoringRowParent === rowParent
+      ) {
+        chatHistoryRestoringRowParent = null;
+      }
+    }
+  }
+
+  function stopChatHistory() {
+    chatHistoryRestoreGeneration += 1;
+    chatHistoryRestoringRowParent = null;
+    chatHistoryRestoreReadFailures = 0;
+    chatHistoryRestored = false;
+    if (chatHistoryObserver) {
+      chatHistoryObserver.disconnect();
+      chatHistoryObserver = null;
+    }
+    chatHistoryObservedList = null;
+    chatHistoryObservedRowParent = null;
+    setChatHistoryScrollParent(null);
+    chatHistoryReconcileQueued = false;
+    if (chatHistoryScrollTimer) {
+      clearTimeout(chatHistoryScrollTimer);
+      chatHistoryScrollTimer = 0;
+    }
+    if (chatHistorySaveTimer) {
+      clearTimeout(chatHistorySaveTimer);
+      chatHistorySaveTimer = 0;
+      flushChatHistory();
+    }
+  }
+
+  function ensureChatHistory() {
+    if (!IS_TOP_FRAME) return;
+    const channelId = chatHistoryOn ? currentLiveChannelId() : null;
+    if (!channelId) {
+      if (chatHistoryChannelId) {
+        flushChatHistory();
+        stopChatHistory();
+        removeRestoredChatHistoryRows();
+        chatHistoryChannelId = null;
+        chatHistoryBuffer = [];
+        chatHistoryRestored = false;
+      }
+      return;
+    }
+    // 채널이 바뀌면 이전 채널 기록을 저장하고 상태를 갈아끼운다.
+    if (chatHistoryChannelId && chatHistoryChannelId !== channelId) {
+      flushChatHistory();
+      stopChatHistory();
+      removeRestoredChatHistoryRows();
+      chatHistoryBuffer = [];
+      chatHistoryRestored = false;
+    }
+    chatHistoryChannelId = channelId;
+
+    const list = chatHistoryListEl();
+    if (!list) {
+      if (chatHistoryObservedList) stopChatHistory();
+      return;
+    }
+    const rowParent = chatHistoryRowParent(list);
+    if (!rowParent) return;
+
+    // role=log 또는 실제 행 wrapper 중 하나라도 교체되면 이전 대기 작업을 취소하고
+    // 새 목록에 옵저버와 복원을 다시 연결한다.
+    if (
+      chatHistoryObservedList !== list ||
+      chatHistoryObservedRowParent !== rowParent
+    ) {
+      stopChatHistory();
+      chatHistoryObservedList = list;
+      chatHistoryObservedRowParent = rowParent;
+      chatHistoryObserver = new MutationObserver((muts) => {
+        const parent = chatHistoryObservedRowParent;
+        if (!parent?.isConnected) {
+          queueMicrotask(ensureChatHistory);
+          return;
+        }
+        let nativeRowsChanged = false;
+        // 위로 스크롤할 때 추가되는 행은 새 채팅이 아니라 치지직이 다시 불러온
+        // 과거 200개다. 이를 새 메시지처럼 버퍼 끝에 넣으면 최신 기록을 밀어내므로
+        // 화면 하단에 있을 때 렌더된 행만 새 기록으로 수집한다.
+        const shouldCaptureNative = parent.scrollTop >= -1;
+        for (const m of muts) {
+          m.removedNodes.forEach((node) => {
+            if (
+              m.target === parent &&
+              node.nodeType === 1 &&
+              node.matches?.('[class*="_item_"]') &&
+              !node.hasAttribute(CHAT_HISTORY_MARK)
+            ) {
+              nativeRowsChanged = true;
+            }
+          });
+          m.addedNodes.forEach((node) => {
+            if (node.nodeType !== 1) return;
+            if (
+              node.parentElement === parent &&
+              node.matches?.('[class*="_item_"]')
+            ) {
+              if (!node.hasAttribute(CHAT_HISTORY_MARK)) {
+                nativeRowsChanged = true;
+              }
+              if (shouldCaptureNative) captureChatHistoryRow(node);
+              return;
+            }
+            node
+              .querySelectorAll?.('[class*="_item_"]')
+              .forEach((el) => {
+                if (el.parentElement === parent && shouldCaptureNative) {
+                  captureChatHistoryRow(el);
+                }
+              });
+          });
+        }
+        if (nativeRowsChanged && parent.scrollTop < -1) {
+          scheduleChatHistoryReconcile(300);
+        }
+      });
+      chatHistoryObserver.observe(list, { childList: true, subtree: true });
+      setChatHistoryScrollParent(rowParent);
+      // 진입 당시 이미 렌더된 행도 바로 저장한다. 예전에는 복원 대기(최대 40초)가
+      // 끝난 뒤에야 담아서 짧게 보고 이동하면 기록이 하나도 남지 않았다.
+      // column-reverse DOM은 최신 행이 앞에 있으므로 오래된 행부터 버퍼에 담는다.
+      chatHistoryRows(rowParent)
+        .slice()
+        .reverse()
+        .forEach(captureChatHistoryRow);
+    }
+
+    if (!chatHistoryRestored) {
+      void restoreChatHistory(channelId, list, rowParent);
+    }
+  }
+
+  // 탭을 닫거나 이동할 때 버퍼를 흘려보낸다(디바운스 대기 중이던 분량 보존).
+  window.addEventListener("pagehide", () => {
+    if (chatHistoryOn) flushChatHistory();
+  });
+
   let chatMsgObserver = null;
   let chatMsgObservedAsides = new WeakSet();
   function ensureChatMsgObserver() {
@@ -31527,6 +33898,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         HEADER_FOLLOW_COUNT_KEY,
         LOUNGE_READ_KEY,
         LOUNGE_REFRESH_KEY,
+        INBOX_COMMUNITY_REFRESH_KEY,
       ]);
       const v = data?.[HEADER_NAV_KEY];
       headerNavConfig = v && typeof v === "object" ? v : {};
@@ -31536,12 +33908,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const read = data?.[LOUNGE_READ_KEY];
       loungeReadMap = read && typeof read === "object" ? read : {};
       loungeRefreshMin = normalizeLoungeRefreshMin(data?.[LOUNGE_REFRESH_KEY]);
+      inboxCommunityRefreshMin = normalizeInboxCommunityRefreshMin(
+        data?.[INBOX_COMMUNITY_REFRESH_KEY],
+      );
     } catch {
       headerNavConfig = {};
       headerFollowPageSize = HEADER_FOLLOW_DEFAULT_COUNT;
       loungeReadMap = {};
       loungeRefreshMin = LOUNGE_REFRESH_DEFAULT_MIN;
+      inboxCommunityRefreshMin = null;
     }
+    restartLoungeRefresh();
     ensureHeaderNav();
     ensureHeaderFollowNav();
     ensureLoungeButton();
@@ -31971,6 +34348,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           ),
         },
         chatTimeFormat, // 24h | 12h-en(AM/PM) | 12h-ko(오전/오후)
+        chatOsCustomIcons, // {PC,AOS,IOS}: 정제된 사용자 SVG(없으면 기본 아이콘)
+        chatOsIconPosition, // before | after (채팅 시간 기준)
       },
       location.origin,
     );
@@ -31997,6 +34376,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     LIVE_SEEK_BAR_KEY,
     LIVE_SEEK_BAR_BOTTOM_KEY,
     PIP_CHAT_HEIGHT_KEY,
+    PIP_LAYOUT_KEY,
     PLAYER_DISABLE_HIDDEN_KEY,
     VOLUME_PCT_KEY,
     WHEEL_VOLUME_KEY,
@@ -32026,6 +34406,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     CHAT_FONT_SCALE_SPECIAL_KEY,
     CHAT_TIME_FORMAT_KEY,
     CHAT_TIME_COLORS_KEY,
+    CHAT_OS_ICONS_KEY,
+    CHAT_OS_ICON_POSITION_KEY,
     CHAT_BUTTON_WRAP_KEY,
     LOGPOWER_CLICK_ACTION_KEY,
     LOGPOWER_PROGRESS_MODE_KEY,
@@ -32073,6 +34455,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       HEADER_FOLLOW_COUNT_KEY,
       LOUNGE_READ_KEY,
       LOUNGE_REFRESH_KEY,
+      INBOX_COMMUNITY_REFRESH_KEY,
+      CHAT_HISTORY_ENABLED_KEY,
+      CHAT_HISTORY_LIMIT_KEY,
       FOLLOWER_EXACT_KEY,
       CHANNEL_LIVE_BUTTON_KEY,
       CHANNEL_LIVE_BUTTON_END_KEY,
@@ -32090,6 +34475,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       FOLLOW_PREVIEW_LIVE_EDGE_KEY,
       FOLLOW_PREVIEW_FULL_TITLE_KEY,
       FOLLOW_PREVIEW_HEADER_BOTTOM_KEY,
+      FOLLOW_PREVIEW_HIDE_HEADER_KEY,
       FOLLOW_PREVIEW_CARD_LAYOUT_KEY,
       FOLLOW_PREVIEW_BADGE_POS_KEY,
       FOLLOW_PREVIEW_COLORS_KEY,
@@ -32321,6 +34707,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[LIVE_SEEK_BAR_BOTTOM_KEY],
       );
       pipChatHeight = normalizePipChatHeight(data?.[PIP_CHAT_HEIGHT_KEY]);
+      pipLayout = normalizePipLayout(data?.[PIP_LAYOUT_KEY]);
       // 미설정=기본 ON(기존 동작: 숨김이 기능까지 끔)
       playerDisableHidden = data?.[PLAYER_DISABLE_HIDDEN_KEY] !== false;
       seekStepValue = normalizeSeekStep(data?.[SEEK_STEP_KEY]);
@@ -32342,6 +34729,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
       chatTimeFormat = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
       chatTimeColors = normalizeChatTimeColors(data?.[CHAT_TIME_COLORS_KEY]);
+      chatOsCustomIcons = normalizeChatOsCustomIcons(
+        data?.[CHAT_OS_ICONS_KEY],
+      );
+      chatOsIconPosition = normalizeChatOsIconPosition(
+        data?.[CHAT_OS_ICON_POSITION_KEY],
+      );
       chatButtonWrap = data?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=ON
       applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
     } catch {
@@ -32688,8 +35081,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[PIP_CHAT_HEIGHT_KEY].newValue,
         );
         // 다른 탭에서 바꿔도 열려 있는 패널에 즉시 반영.
-        if (document.querySelector(`.${PIP_CHAT_CLASS}`))
-          applyPipChatHeightVar();
+        const pip = document.querySelector(`.${PIP_CHAT_HOST_CLASS}`);
+        if (pip) {
+          applyPipChatHeightVar(pip);
+        }
+      }
+      if (changes[PIP_LAYOUT_KEY]) {
+        pipLayout = normalizePipLayout(changes[PIP_LAYOUT_KEY].newValue);
+        const pip = document.querySelector(`.${PIP_CHAT_HOST_CLASS}`);
+        // 현재 PIP에서 저장한 값도 storage.onChanged로 되돌아온다. 활성 드래그의
+        // transform을 저장 위치로 다시 적용하면 다음 드래그 첫 프레임이 튀므로,
+        // 아직 배치되지 않은 PIP에서만 외부 변경값을 적용한다.
+        if (pip && !pip.classList.contains("cheese-pip-layout-positioned")) {
+          applyStoredPipLayout(pip);
+        }
       }
       if (changes[FOLLOW_PREVIEW_LIVE_EDGE_KEY]) {
         // 다음 미리보기 열 때 반영되도록 상태만 갱신(진행 중 미리보기는 재생 방식 유지).
@@ -32818,6 +35223,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[CHAT_TIME_FORMAT_KEY]) {
         chatTimeFormat = normalizeChatTimeFormat(
           changes[CHAT_TIME_FORMAT_KEY].newValue,
+        );
+      }
+      if (changes[CHAT_OS_ICONS_KEY]) {
+        chatOsCustomIcons = normalizeChatOsCustomIcons(
+          changes[CHAT_OS_ICONS_KEY].newValue,
+        );
+      }
+      if (changes[CHAT_OS_ICON_POSITION_KEY]) {
+        chatOsIconPosition = normalizeChatOsIconPosition(
+          changes[CHAT_OS_ICON_POSITION_KEY].newValue,
         );
       }
       if (changes[CHAT_TIME_COLORS_KEY]) {
@@ -33026,6 +35441,24 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             "cheese-fp-header-bottom",
             followPreviewHeaderBottom,
           );
+      }
+      if (changes[FOLLOW_PREVIEW_HIDE_HEADER_KEY]) {
+        followPreviewHideHeader =
+          changes[FOLLOW_PREVIEW_HIDE_HEADER_KEY].newValue === true;
+        const fpEl = document.getElementById(FOLLOW_PREVIEW_ID);
+        applyFollowPreviewHeaderVisibility(fpEl);
+        if (fpEl && followPreviewState.anchor?.isConnected) {
+          positionFollowPreview(
+            fpEl,
+            followPreviewState.anchor,
+            followPreviewState.anchorKind,
+          );
+          scheduleFollowPreviewTooltipPosition(
+            fpEl,
+            followPreviewState.anchor,
+            followPreviewState.anchorKind,
+          );
+        }
       }
       if (changes[FOLLOW_PREVIEW_CARD_LAYOUT_KEY]) {
         followPreviewCardLayout =
@@ -33249,6 +35682,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[MIXER_GAIN_MAX_KEY] ||
         changes[MIXER_GAIN_STEP_KEY] ||
         changes[CHAT_TIME_FORMAT_KEY] ||
+        changes[CHAT_OS_ICONS_KEY] ||
+        changes[CHAT_OS_ICON_POSITION_KEY] ||
         changes[SEEK_STEP_KEY] ||
         changes[CLIP_EDITOR_ARROW_STEP_KEY] ||
         changes[CLIP_EDITOR_SHIFT_STEP_KEY] ||
@@ -33411,6 +35846,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           ?.removeAttribute("data-sig");
         ensureHeaderFollowNav();
       }
+      if (changes[CHAT_HISTORY_ENABLED_KEY]) {
+        chatHistoryOn = changes[CHAT_HISTORY_ENABLED_KEY].newValue === true;
+        if (!chatHistoryOn) {
+          stopChatHistory();
+          removeRestoredChatHistoryRows();
+          chatHistoryChannelId = null;
+          chatHistoryBuffer = [];
+          chatHistoryRestored = false;
+        }
+        ensureChatHistory();
+      }
+      if (changes[CHAT_HISTORY_LIMIT_KEY]) {
+        chatHistoryLimit = normalizeChatHistoryLimit(
+          changes[CHAT_HISTORY_LIMIT_KEY].newValue,
+        );
+      }
       if (changes[FOLLOWER_EXACT_KEY]) {
         setFollowerExact(changes[FOLLOWER_EXACT_KEY].newValue === true);
       }
@@ -33419,6 +35870,31 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[LOUNGE_REFRESH_KEY].newValue,
         );
         restartLoungeRefresh(); // 새 간격으로 타이머 재설정
+      }
+      if (changes[INBOX_COMMUNITY_REFRESH_KEY]) {
+        inboxCommunityRefreshMin = normalizeInboxCommunityRefreshMin(
+          changes[INBOX_COMMUNITY_REFRESH_KEY].newValue,
+        );
+        restartLoungeRefresh();
+      }
+      if (IS_TOP_FRAME && changes[INBOX_COMMUNITY_CACHE_KEY]) {
+        const stored = changes[INBOX_COMMUNITY_CACHE_KEY].newValue;
+        if (Number(stored?.version) === INBOX_COMMUNITY_CACHE_VERSION) {
+          inboxCommunityItems = normalizeInboxCommunityCache(stored);
+          inboxCommunityCacheLoaded = true;
+        } else {
+          inboxCommunityItems = [];
+          inboxCommunityCacheLoaded = false;
+        }
+        syncInboxCommunityUnreadFromCache();
+      }
+      if (IS_TOP_FRAME && changes[INBOX_COMMUNITY_READ_KEY]) {
+        const stored = changes[INBOX_COMMUNITY_READ_KEY].newValue;
+        inboxCommunityReadMap =
+          stored && typeof stored === "object" && !Array.isArray(stored)
+            ? { ...stored }
+            : null;
+        syncInboxCommunityUnreadFromCache();
       }
     });
   }
@@ -33448,6 +35924,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
       ensureLoungeButton(); // 헤더 알림 옆 라운지 소식 버튼 보장(SPA 재렌더 대응)
       ensurePipChat(); // PIP 전환 시 채팅 iframe 패널 보장/정리
+      ensureChatHistory(); // 채팅 이어보기: 수집 옵저버 보장 + 최초 1회 복원
       ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
       ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장

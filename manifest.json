@@ -42,7 +42,10 @@
         "https://studio.chzzk.naver.com/*",
         "https://game.naver.com/profile*"
       ],
-      "exclude_matches": ["https://chzzk.naver.com/embed/clip/*"],
+      "exclude_matches": [
+        "https://chzzk.naver.com/embed/clip/*",
+        "https://chzzk.naver.com/clip-editor*"
+      ],
       "js": ["src/masterGate.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -168,6 +171,13 @@
       "js": ["src/logPowerEraser.js"],
       "css": ["src/logPowerEraser.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://game.naver.com/notify*"],
+      "js": ["src/inboxCommunity.js"],
+      "css": ["src/inboxCommunity.css"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "action": {

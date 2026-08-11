@@ -84,6 +84,10 @@ body {
 }
 
 .settings-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
   appearance: none;
   text-align: left;
   padding: 9px 11px;
@@ -106,6 +110,36 @@ body {
 .settings-tab.is-active {
   background: var(--popup-help-bg);
   color: var(--popup-brand-strong);
+}
+
+.settings-tab-new-badge,
+.settings-item.is-new-feature .settings-item-name::after {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 29px;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--popup-brand) 55%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--popup-brand) 13%, transparent);
+  color: var(--popup-brand-strong);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 14px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.settings-tab-new-badge {
+  flex: none;
+}
+
+.settings-item.is-new-feature .settings-item-name::after {
+  margin-left: 6px;
+  content: "NEW";
+  vertical-align: 1px;
 }
 
 .settings-panels {
@@ -838,6 +872,8 @@ body {
 .settings-item:has([data-integrated-search-clips-weights-reset]),
 .settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
+.settings-item:has([data-chat-history-limit]),
+.settings-item:has([data-category-video-candidate-picker]),
 .settings-item:has([data-fp-color-reset]),
 .settings-item:has([data-live-seek-bar-bottom]),
 .settings-item:has([data-chat-word-filter]),
@@ -853,6 +889,7 @@ body {
 .settings-item [data-cf-group-placement],
 .settings-item [data-popup-player-audio],
 .settings-item [data-fp-color-reset],
+.settings-item [data-category-video-candidate-picker],
 .settings-item [data-logpower-progress-mode],
 .settings-item [data-logpower-timer-mode],
 .settings-item:has([data-mixer-gain-min]) [data-mixer-gain-min] {
@@ -896,6 +933,15 @@ body {
 .settings-item[data-update-notice-duration-row][hidden],
 .settings-item[data-update-notice-toast-position-row][hidden] {
   display: none;
+}
+
+.settings-item[data-popup-player-size-custom] {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.settings-item[data-popup-player-size-custom] .settings-custom-input {
+  margin-left: auto;
 }
 
 .settings-toast-position-grid {
@@ -1217,6 +1263,109 @@ body {
   opacity: 0.48;
 }
 
+/* 채팅 작성 기기 아이콘: 사용자 SVG 입력·미리보기 */
+.settings-chat-os-custom-item {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-chat-os-custom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.settings-chat-os-custom-row {
+  display: grid;
+  grid-template-rows: auto minmax(72px, auto) 16px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-chat-os-custom-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-chat-os-custom-head strong {
+  overflow: hidden;
+  color: var(--popup-text);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-chat-os-custom-head .settings-order-reset {
+  flex: none;
+  margin-left: auto;
+}
+
+.settings-chat-os-custom-preview {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--popup-muted);
+}
+
+.settings-chat-os-custom-preview svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.settings-chat-os-custom-row textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  max-height: 160px;
+  padding: 8px 9px;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.settings-chat-os-custom-row textarea:focus {
+  border-color: var(--popup-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--popup-brand) 18%, transparent);
+}
+
+.settings-chat-os-custom-row textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.settings-chat-os-custom-message {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--popup-muted);
+  font-size: 10px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-chat-os-custom-message.is-error {
+  color: var(--popup-danger, #e5484d);
+}
+
+.settings-chat-os-custom-item.is-locked .settings-chat-os-custom-grid {
+  opacity: 0.62;
+}
+
 /* 채널 탭: 라이브 프로필 테두리 색상 + 프로필 모서리 연동 미리보기 */
 .settings-channel-live-profile-item {
   flex-direction: column;
@@ -1457,6 +1606,14 @@ body > .clr-picker .clr-preview {
   align-items: center;
 }
 
+.settings-osd-row:has([data-chat-history-limit]) {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
 /* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본
    동작(hover/focus 시에만 표시)에 맡기고 강제 표시하지 않는다(다른 설정 인풋과 동일). */
 .settings-osd-row .settings-custom-input {
@@ -1625,6 +1782,11 @@ body > .clr-picker .clr-preview {
   border-color: var(--popup-muted);
 }
 .settings-order-reset[data-live-seek-bar-bottom-reset] {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.settings-order-reset[data-chat-history-limit-reset] {
   grid-column: 1 / -1;
   justify-self: end;
 }

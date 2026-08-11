@@ -6607,6 +6607,31 @@
   let seekBarDragging = false;
   let seekBarClsObs = null;
   let seekBarHovered = false; // 바 위에 마우스가 있는지(컨트롤 강제 유지용)
+  // 라이브 엣지 근처에서는 seekable.end가 세그먼트 단위로 점프할 때 playhead가
+  // 좌우로 왕복해 산만해진다. 충분히 라이브에 가까우면 시각 위치만 끝에 고정하고,
+  // 임계 주변에서 깜빡이지 않도록 진입/이탈값에 작은 차이를 둔다.
+  const SEEK_BAR_LIVE_SNAP_MIN_S = 3;
+  const SEEK_BAR_LIVE_SNAP_MAX_S = 4.5;
+  const SEEK_BAR_LIVE_SNAP_MARGIN_S = 1.5;
+  const SEEK_BAR_LIVE_SNAP_HYSTERESIS_S = 0.5;
+  let seekBarLiveEdgeVisual = false;
+  let seekBarLastVisualP = NaN;
+
+  function getSeekBarLiveSnapThresholds() {
+    const target = Number(syncCfg?.target);
+    const enter = Math.min(
+      SEEK_BAR_LIVE_SNAP_MAX_S,
+      Math.max(
+        SEEK_BAR_LIVE_SNAP_MIN_S,
+        (Number.isFinite(target) ? target : SYNC_PRESETS.normal.target) +
+          SEEK_BAR_LIVE_SNAP_MARGIN_S,
+      ),
+    );
+    return {
+      enter,
+      exit: enter + SEEK_BAR_LIVE_SNAP_HYSTERESIS_S,
+    };
+  }
 
   // 라이브 프로그레스 슬라이더(.pzp-pc__progress-slider)는 라이브에선 0x0로 접혀
   // 실체가 없다(현재를 항상 100%로 두는 구조). 그래서 실제 폭을 가진 하단 컨트롤
@@ -6795,12 +6820,33 @@
     const w = getSeekWindow();
     if (!w) {
       bar.classList.add("is-empty");
+      bar.classList.remove("is-live-edge");
+      seekBarLiveEdgeVisual = false;
+      seekBarLastVisualP = NaN;
       return;
     }
     bar.classList.remove("is-empty");
     // 오버레이 폭 전체 = seekable(start~라이브 엣지). playhead는 현재 재생 위치 비율.
     const span = w.end - w.start || 1;
-    const p = Math.min(1, Math.max(0, (w.video.currentTime - w.start) / span));
+    const behind = Math.max(0, w.end - w.video.currentTime);
+    const snapThresholds = getSeekBarLiveSnapThresholds();
+    const snapToLiveEdge =
+      !seekBarDragging &&
+      (seekBarLiveEdgeVisual
+        ? behind < snapThresholds.exit
+        : behind <= snapThresholds.enter);
+    if (seekBarLiveEdgeVisual !== snapToLiveEdge) {
+      seekBarLiveEdgeVisual = snapToLiveEdge;
+      seekBarLastVisualP = NaN;
+      bar.classList.toggle("is-live-edge", snapToLiveEdge);
+    }
+    const p = snapToLiveEdge
+      ? 1
+      : Math.min(1, Math.max(0, (w.video.currentTime - w.start) / span));
+    // 같은 위치를 매 rAF마다 style에 다시 쓰면 불필요한 style 변이와 옵저버 호출이
+    // 생긴다. 라이브 고정 중에는 최초 한 번만, 되감기 중에도 실제 변화가 있을 때만 쓴다.
+    if (Math.abs(p - seekBarLastVisualP) < 0.0001) return;
+    seekBarLastVisualP = p;
     // __range: 되감기 가능 영역 중 '이미 지나온(현재 이전)' 부분을 채워 강조.
     if (range) range.style.width = `${p * 100}%`;
     if (playhead) playhead.style.left = `${p * 100}%`;
@@ -6810,6 +6856,8 @@
     stopSeekBarRender();
     seekBarHovered = false;
     seekBarDragging = false;
+    seekBarLiveEdgeVisual = false;
+    seekBarLastVisualP = NaN;
     if (seekBarClsObs) {
       seekBarClsObs.disconnect();
       seekBarClsObs = null;

@@ -18,6 +18,9 @@
   const SETTINGS_STORAGE_KEYS = [
     "cheeseMasterEnabled",
     "cheeseGlobalScrollTopFab",
+    "cheeseSettingsKnownFeatures",
+    "cheeseSettingsNewFeatureBaselinePending",
+    "cheeseSettingsNewFeatureUpdatePending",
     "cheeseFeatureHidden", // 모든 data-feature 토글 통합
     "cheeseSearchTheme",
     "cheeseUpdateNoticeEnabled",
@@ -49,6 +52,8 @@
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
     "cheeseChatWordFilters",
+    "cheeseChatHistory",
+    "cheeseChatHistoryLimit",
     "cheeseCardLivePreview",
     "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
@@ -64,10 +69,13 @@
     "cheeseChatFoldPersist",
     "cheeseChatPopupPip",
     "cheesePipChatWidth",
+    "cheesePipChatLayout",
     "cheeseChatFontScale",
     "cheeseChatFontScaleSpecial",
     "cheeseChatTimeFormat",
     "cheeseChatTimeColors",
+    "cheeseChatOsIcons",
+    "cheeseChatOsIconPosition",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowCleanup",
@@ -93,6 +101,7 @@
     "cheeseFollowPreview",
     "cheeseFollowPreviewFullTitle",
     "cheeseFollowPreviewHeaderBottom",
+    "cheeseFollowPreviewHideHeader",
     "cheeseFollowPreviewCardLayout",
     "cheeseFollowPreviewBadgePos",
     "cheeseFollowPreviewColors",
@@ -107,6 +116,8 @@
     "cheeseFollowPreviewVolume",
     "cheeseFollowRefreshSec",
     "cheeseLoungeRefreshMin",
+    "cheeseInboxCommunityRefreshMin",
+    "cheeseInboxCommunityOpenNewTab",
     // 탭별 '읽음' 기준 feedId. 복원하면 다른 기기에서도 읽은 글이 새 글로 뜨지 않는다.
     "cheeseLoungeRead",
     "cheeseFollowCustomSort",
@@ -244,6 +255,16 @@
     if (storageCacheData) Object.assign(storageCacheData, obj);
     try {
       chrome.storage?.local?.set(obj);
+    } catch {}
+  }
+
+  function cachedStorageRemove(keys) {
+    const list = Array.isArray(keys) ? keys : [keys];
+    if (storageCacheData) {
+      list.forEach((key) => delete storageCacheData[key]);
+    }
+    try {
+      chrome.storage?.local?.remove(list);
     } catch {}
   }
 
@@ -644,6 +665,128 @@
   const tabButtons = Array.from(document.querySelectorAll(".settings-tab"));
   const panels = Array.from(document.querySelectorAll("[data-panel]"));
   const panelsScroll = document.querySelector(".settings-panels");
+  const SETTINGS_KNOWN_FEATURES_KEY = "cheeseSettingsKnownFeatures";
+  const SETTINGS_NEW_FEATURE_BASELINE_KEY =
+    "cheeseSettingsNewFeatureBaselinePending";
+  const SETTINGS_NEW_FEATURE_UPDATE_KEY =
+    "cheeseSettingsNewFeatureUpdatePending";
+  const newFeatureItems = Array.from(
+    document.querySelectorAll(".settings-item[data-new-feature]"),
+  );
+  const newFeatureState = {
+    known: new Set(),
+    pending: new Set(),
+    ready: false,
+  };
+
+  function newFeatureItemId(item) {
+    return String(item?.dataset?.newFeature || "").trim();
+  }
+
+  function newFeatureItemTab(item) {
+    return item?.closest?.("[data-panel]")?.dataset?.panel || "";
+  }
+
+  function renderNewFeatureBadges() {
+    newFeatureItems.forEach((item) => {
+      item.classList.toggle(
+        "is-new-feature",
+        newFeatureState.pending.has(newFeatureItemId(item)),
+      );
+    });
+
+    const tabCounts = new Map();
+    newFeatureItems.forEach((item) => {
+      const id = newFeatureItemId(item);
+      const tab = newFeatureItemTab(item);
+      if (!id || !tab || !newFeatureState.pending.has(id)) return;
+      if (!tabCounts.has(tab)) tabCounts.set(tab, new Set());
+      tabCounts.get(tab).add(id);
+    });
+    const totalCount = newFeatureState.pending.size;
+
+    tabButtons.forEach((button) => {
+      button.querySelector(".settings-tab-new-badge")?.remove();
+      const tab = button.dataset.tab || "";
+      const count = tab === "all" ? totalCount : tabCounts.get(tab)?.size || 0;
+      button.classList.toggle("has-new-feature", count > 0);
+      if (!count) return;
+      const badge = document.createElement("span");
+      badge.className = "settings-tab-new-badge";
+      badge.textContent = tab === "all" ? `NEW ${count}` : "NEW";
+      badge.setAttribute(
+        "aria-label",
+        tab === "all" ? `새 기능 ${count}개` : "새 기능 있음",
+      );
+      button.appendChild(badge);
+    });
+  }
+
+  const newFeatureReady = (async () => {
+    const data = await cachedStorageGet([
+      SETTINGS_KNOWN_FEATURES_KEY,
+      SETTINGS_NEW_FEATURE_BASELINE_KEY,
+      SETTINGS_NEW_FEATURE_UPDATE_KEY,
+    ]);
+    const allIds = new Set(newFeatureItems.map(newFeatureItemId).filter(Boolean));
+    const storedKnown = Array.isArray(data?.[SETTINGS_KNOWN_FEATURES_KEY])
+      ? data[SETTINGS_KNOWN_FEATURES_KEY]
+      : [];
+    newFeatureState.known = new Set(
+      storedKnown.filter((id) => typeof id === "string" && id),
+    );
+
+    // 신규 설치의 첫 설정 열기: 현재 선언된 기능을 모두 기준점으로 저장하고 배지는 생략한다.
+    if (data?.[SETTINGS_NEW_FEATURE_BASELINE_KEY] === true) {
+      allIds.forEach((id) => newFeatureState.known.add(id));
+      cachedStorageSet({
+        [SETTINGS_KNOWN_FEATURES_KEY]: Array.from(newFeatureState.known),
+      });
+      cachedStorageRemove([
+        SETTINGS_NEW_FEATURE_BASELINE_KEY,
+        SETTINGS_NEW_FEATURE_UPDATE_KEY,
+      ]);
+      newFeatureState.ready = true;
+      renderNewFeatureBadges();
+      return;
+    }
+
+    if (data?.[SETTINGS_NEW_FEATURE_UPDATE_KEY] === true) {
+      allIds.forEach((id) => {
+        if (!newFeatureState.known.has(id)) newFeatureState.pending.add(id);
+      });
+    }
+    newFeatureState.ready = true;
+    renderNewFeatureBadges();
+    if (!newFeatureState.pending.size) {
+      cachedStorageRemove(SETTINGS_NEW_FEATURE_UPDATE_KEY);
+    }
+  })();
+
+  function markNewFeatureTabSeen(tab) {
+    if (!newFeatureState.ready) {
+      void newFeatureReady.then(() => markNewFeatureTabSeen(tab));
+      return;
+    }
+    const ids = new Set(
+      newFeatureItems
+        .filter((item) => newFeatureItemTab(item) === tab)
+        .map(newFeatureItemId)
+        .filter((id) => newFeatureState.pending.has(id)),
+    );
+    if (!ids.size) return;
+    ids.forEach((id) => {
+      newFeatureState.pending.delete(id);
+      newFeatureState.known.add(id);
+    });
+    cachedStorageSet({
+      [SETTINGS_KNOWN_FEATURES_KEY]: Array.from(newFeatureState.known),
+    });
+    renderNewFeatureBadges();
+    if (!newFeatureState.pending.size) {
+      cachedStorageRemove(SETTINGS_NEW_FEATURE_UPDATE_KEY);
+    }
+  }
 
   let activeTab = "all"; // 검색 종료 시 복귀할 현재 탭
   function selectTab(tab) {
@@ -665,15 +808,25 @@
 
   tabButtons.forEach((btn) =>
     btn.addEventListener("click", () => {
+      // 새 탭의 항목 옆 NEW를 실제로 볼 수 있도록, 진입 순간이 아니라 이전 탭을
+      // 떠날 때 확인 처리한다. 같은 탭을 다시 누르는 것도 확인 동작으로 본다.
+      const previousTab = activeTab;
       // 탭을 누르면 검색을 종료하고 그 탭으로 전환.
       if (searchInput && searchInput.value) {
         searchInput.value = "";
         applySettingsSearch("");
       }
       selectTab(btn.dataset.tab);
+      if (previousTab !== "all") markNewFeatureTabSeen(previousTab);
     }),
   );
   selectTab("all");
+
+  // 설정 팝업을 닫을 때 마지막으로 보고 있던 탭도 확인 처리한다. storage.set 호출은
+  // 동기적으로 큐에 올리고, 실제 저장 완료를 기다리느라 팝업 닫힘을 막지는 않는다.
+  window.addEventListener("pagehide", () => {
+    if (activeTab !== "all") markNewFeatureTabSeen(activeTab);
+  });
 
   // ── 설정 검색: 이름+설명 텍스트로 항목을 필터링(검색 중엔 전체 탭에서 찾는다). ──
   const searchInput = document.querySelector("[data-settings-search]");
@@ -782,6 +935,8 @@
     "sbFollowGroupEnabled",
     // 라운지 소식은 기본 숨김(체크=숨김). content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
     "loungeNews",
+    // 수신함 커뮤니티 소식도 채널별 요청이 필요하므로 opt-in 으로 둔다.
+    "inboxCommunityNews",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -1247,6 +1402,341 @@
   });
   reflectChatTimeColors();
 
+  // ── 채팅 작성 기기 아이콘: 시간 앞/뒤 + 사용자 SVG ────────────────────────
+  const CHAT_OS_ICONS_KEY = "cheeseChatOsIcons";
+  const CHAT_OS_ICON_POSITION_KEY = "cheeseChatOsIconPosition";
+  const CHAT_OS_TYPES = ["PC", "AOS", "IOS"];
+  const CHAT_OS_DEFAULT_SVG = Object.freeze({
+    PC: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>',
+    AOS: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>',
+    IOS: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/></svg>',
+  });
+  const CHAT_OS_SVG_TAGS = new Set([
+    "circle",
+    "ellipse",
+    "g",
+    "line",
+    "path",
+    "polygon",
+    "polyline",
+    "rect",
+  ]);
+  const CHAT_OS_SVG_ATTRIBUTES = new Set([
+    "clip-rule",
+    "cx",
+    "cy",
+    "d",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "height",
+    "opacity",
+    "points",
+    "r",
+    "rx",
+    "ry",
+    "stroke",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+    "transform",
+    "width",
+    "x",
+    "x1",
+    "x2",
+    "y",
+    "y1",
+    "y2",
+  ]);
+  const CHAT_OS_SVG_ROOT_ATTRIBUTES = new Set([
+    "clip-rule",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "opacity",
+    "stroke",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+  ]);
+  const chatShowOsIconInput = document.querySelector(
+    '[data-feature="chatShowOsIcon"]',
+  );
+  const chatOsPositionItem = document.querySelector(
+    "[data-chat-os-position-item]",
+  );
+  const chatOsPositionButtons = Array.from(
+    document.querySelectorAll("[data-chat-os-position-value]"),
+  );
+  const chatOsCustomItem = document.querySelector(
+    "[data-chat-os-custom-item]",
+  );
+  const chatOsCustomInputs = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-custom-input="${type}"]`),
+    ]),
+  );
+  const chatOsCustomPreviews = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-custom-preview="${type}"]`),
+    ]),
+  );
+  const chatOsCustomMessages = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-custom-message="${type}"]`),
+    ]),
+  );
+  const chatOsCustomResets = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-custom-reset="${type}"]`),
+    ]),
+  );
+  const chatOsSaveTimers = new Map();
+  let chatOsCustomIcons = {};
+  let chatOsIconPosition = "after";
+
+  function normalizeChatOsIconPosition(value) {
+    return value === "before" ? "before" : "after";
+  }
+
+  function sanitizeChatOsSvg(value) {
+    const source = String(value || "").trim();
+    if (!source || source.length > 12000) return null;
+    try {
+      const doc = new DOMParser().parseFromString(source, "image/svg+xml");
+      const root = doc.documentElement;
+      if (root?.localName !== "svg" || root.querySelector("parsererror")) {
+        return null;
+      }
+      const viewBoxValues = String(root.getAttribute("viewBox") || "0 0 24 24")
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      if (
+        viewBoxValues.length !== 4 ||
+        viewBoxValues.some((number) => !Number.isFinite(number)) ||
+        viewBoxValues[2] <= 0 ||
+        viewBoxValues[3] <= 0 ||
+        viewBoxValues[2] > 10000 ||
+        viewBoxValues[3] > 10000
+      ) {
+        return null;
+      }
+      const unsafeValue = (raw) =>
+        /(?:javascript:|data:|url\s*\(|<|>)/i.test(raw);
+      const clean = (node) => {
+        for (const child of [...node.childNodes]) {
+          if (child.nodeType !== Node.ELEMENT_NODE) {
+            child.remove();
+            continue;
+          }
+          const tag = child.localName?.toLowerCase();
+          if (!CHAT_OS_SVG_TAGS.has(tag)) {
+            child.remove();
+            continue;
+          }
+          for (const attribute of [...child.attributes]) {
+            const name = attribute.name.toLowerCase();
+            if (
+              !CHAT_OS_SVG_ATTRIBUTES.has(name) ||
+              unsafeValue(attribute.value)
+            ) {
+              child.removeAttribute(attribute.name);
+            }
+          }
+          clean(child);
+        }
+      };
+      clean(root);
+      if (!root.children.length) return null;
+      const serializer = new XMLSerializer();
+      const content = [...root.children]
+        .map((child) => serializer.serializeToString(child))
+        .join("");
+      const viewBox = viewBoxValues.join(" ");
+      const attributes = [...root.attributes]
+        .filter((attribute) => {
+          const name = attribute.name.toLowerCase();
+          return (
+            name !== "viewbox" &&
+            CHAT_OS_SVG_ROOT_ATTRIBUTES.has(name) &&
+            !unsafeValue(attribute.value)
+          );
+        })
+        .map(
+          (attribute) =>
+            `${attribute.name.toLowerCase()}="${attribute.value
+              .replaceAll("&", "&amp;")
+              .replaceAll('"', "&quot;")}"`,
+        )
+        .join(" ");
+      return `<svg viewBox="${viewBox}"${attributes ? ` ${attributes}` : ""} aria-hidden="true">${content}</svg>`;
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeChatOsCustomIcons(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const output = {};
+    CHAT_OS_TYPES.forEach((type) => {
+      const sanitized = sanitizeChatOsSvg(source[type]);
+      if (sanitized) output[type] = sanitized;
+    });
+    return output;
+  }
+
+  function reflectChatOsPosition() {
+    chatOsPositionButtons.forEach((button) => {
+      const active =
+        button.dataset.chatOsPositionValue === chatOsIconPosition;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+
+  function reflectChatOsCustomRow(type, { syncInput = true } = {}) {
+    const input = chatOsCustomInputs.get(type);
+    const preview = chatOsCustomPreviews.get(type);
+    const message = chatOsCustomMessages.get(type);
+    const reset = chatOsCustomResets.get(type);
+    const customSvg = chatOsCustomIcons[type] || "";
+    if (syncInput && input) input.value = customSvg;
+    if (preview) preview.innerHTML = customSvg || CHAT_OS_DEFAULT_SVG[type];
+    if (message) {
+      message.textContent = customSvg
+        ? "사용자 SVG 적용 중"
+        : "기본 아이콘 사용 중";
+      message.classList.remove("is-error");
+    }
+    if (reset) reset.disabled = !customSvg || !chatShowOsIconInput?.checked;
+  }
+
+  function reflectChatOsAvailability() {
+    const disabled =
+      !chatShowOsIconInput?.checked || chatShowOsIconInput?.disabled === true;
+    chatOsPositionButtons.forEach((button) => {
+      button.disabled = disabled;
+    });
+    chatOsCustomInputs.forEach((input) => {
+      if (input) input.disabled = disabled;
+    });
+    chatOsCustomResets.forEach((reset, type) => {
+      if (reset) reset.disabled = disabled || !chatOsCustomIcons[type];
+    });
+    chatOsPositionItem?.classList.toggle("is-locked", disabled);
+    chatOsCustomItem?.classList.toggle("is-locked", disabled);
+  }
+
+  function saveChatOsCustomIcons() {
+    cachedStorageSet({ [CHAT_OS_ICONS_KEY]: chatOsCustomIcons });
+  }
+
+  function commitChatOsCustomInput(type, canonicalize = false) {
+    const input = chatOsCustomInputs.get(type);
+    const message = chatOsCustomMessages.get(type);
+    const preview = chatOsCustomPreviews.get(type);
+    if (!input) return;
+    const raw = input.value.trim();
+    if (!raw) {
+      delete chatOsCustomIcons[type];
+      saveChatOsCustomIcons();
+      reflectChatOsCustomRow(type);
+      reflectChatOsAvailability();
+      return;
+    }
+    const sanitized = sanitizeChatOsSvg(raw);
+    if (!sanitized) {
+      if (message) {
+        message.textContent = "안전한 SVG 도형 코드를 확인해 주세요.";
+        message.classList.add("is-error");
+      }
+      if (preview) {
+        preview.innerHTML =
+          chatOsCustomIcons[type] || CHAT_OS_DEFAULT_SVG[type];
+      }
+      return;
+    }
+    chatOsCustomIcons[type] = sanitized;
+    saveChatOsCustomIcons();
+    if (canonicalize) input.value = sanitized;
+    reflectChatOsCustomRow(type, { syncInput: canonicalize });
+    reflectChatOsAvailability();
+  }
+
+  (async () => {
+    try {
+      const data = await cachedStorageGet([
+        CHAT_OS_ICONS_KEY,
+        CHAT_OS_ICON_POSITION_KEY,
+      ]);
+      chatOsCustomIcons = normalizeChatOsCustomIcons(
+        data?.[CHAT_OS_ICONS_KEY],
+      );
+      chatOsIconPosition = normalizeChatOsIconPosition(
+        data?.[CHAT_OS_ICON_POSITION_KEY],
+      );
+    } catch {
+      chatOsCustomIcons = {};
+      chatOsIconPosition = "after";
+    }
+    CHAT_OS_TYPES.forEach((type) => reflectChatOsCustomRow(type));
+    reflectChatOsPosition();
+    reflectChatOsAvailability();
+  })();
+
+  chatOsPositionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      chatOsIconPosition = normalizeChatOsIconPosition(
+        button.dataset.chatOsPositionValue,
+      );
+      reflectChatOsPosition();
+      cachedStorageSet({
+        [CHAT_OS_ICON_POSITION_KEY]: chatOsIconPosition,
+      });
+    });
+  });
+  chatOsCustomInputs.forEach((input, type) => {
+    input?.addEventListener("input", () => {
+      clearTimeout(chatOsSaveTimers.get(type));
+      chatOsSaveTimers.set(
+        type,
+        window.setTimeout(() => {
+          chatOsSaveTimers.delete(type);
+          commitChatOsCustomInput(type);
+        }, 180),
+      );
+    });
+    input?.addEventListener("change", () => {
+      clearTimeout(chatOsSaveTimers.get(type));
+      chatOsSaveTimers.delete(type);
+      commitChatOsCustomInput(type, true);
+    });
+  });
+  chatOsCustomResets.forEach((reset, type) => {
+    reset?.addEventListener("click", () => {
+      clearTimeout(chatOsSaveTimers.get(type));
+      chatOsSaveTimers.delete(type);
+      delete chatOsCustomIcons[type];
+      saveChatOsCustomIcons();
+      reflectChatOsCustomRow(type);
+      reflectChatOsAvailability();
+    });
+  });
+  chatShowOsIconInput?.addEventListener("change", reflectChatOsAvailability);
+
   // ── 채팅 폰트 크기: 커스텀 팝오버 드롭다운(0.8~2, 기본 1) ──────────────────
   const CHAT_FONT_SCALE_KEY = "cheeseChatFontScale";
   // 입력은 퍼센트(80~200), 저장값은 배율(0.8~2.0).
@@ -1363,6 +1853,7 @@
         chatTimeColorItem.removeAttribute("title");
       }
     }
+    reflectChatOsAvailability();
     // 폰트 크기 입력도 moa가 폰트 스케일을 제어 중이면 잠근다.
     if (chatFontScaleInput) {
       const item = chatFontScaleInput.closest(".settings-item");
@@ -2266,6 +2757,78 @@
 
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
+  // ── 채팅 이어보기 ─────────────────────────────────────────────────────────
+  const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
+  const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
+  const CH_LIMIT_DEFAULT = 200;
+  const CH_LIMIT_MIN = 50;
+  const CH_LIMIT_MAX = 500;
+  const chInput = document.querySelector("[data-chat-history]");
+  const chRange = document.querySelector("[data-chat-history-limit]");
+  const chNum = document.querySelector("[data-chat-history-limit-num]");
+  const chReset = document.querySelector("[data-chat-history-limit-reset]");
+
+  function normalizeChLimit(value) {
+    if (value == null || value === "") return CH_LIMIT_DEFAULT;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return CH_LIMIT_DEFAULT;
+    return Math.min(CH_LIMIT_MAX, Math.max(CH_LIMIT_MIN, n));
+  }
+
+  function reflectChLimit(value) {
+    const v = normalizeChLimit(value);
+    if (chRange) chRange.value = String(v);
+    if (chNum) chNum.value = String(v);
+  }
+
+  // 이어보기가 꺼져 있으면 개수를 정할 이유가 없다.
+  function reflectChAvailability() {
+    const off = document.querySelector("[data-chat-history]")?.checked !== true;
+    [
+      "[data-chat-history-limit]",
+      "[data-chat-history-limit-num]",
+      "[data-chat-history-limit-reset]",
+    ].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (el) el.disabled = off;
+    });
+    chRange?.closest(".settings-item")?.classList.toggle("is-locked", off);
+  }
+
+  function saveChLimit(value) {
+    const v = normalizeChLimit(value);
+    reflectChLimit(v);
+    try {
+      cachedStorageSet({ [CHAT_HISTORY_LIMIT_KEY]: v });
+    } catch {}
+  }
+
+  chInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [CHAT_HISTORY_ENABLED_KEY]: chInput.checked });
+    } catch {}
+    reflectChAvailability();
+  });
+  chRange?.addEventListener("input", () => reflectChLimit(chRange.value));
+  chRange?.addEventListener("change", () => saveChLimit(chRange.value));
+  chNum?.addEventListener("change", () => saveChLimit(chNum.value));
+  chReset?.addEventListener("click", () => saveChLimit(CH_LIMIT_DEFAULT));
+  (async () => {
+    let enabled = false;
+    let limit = CH_LIMIT_DEFAULT;
+    try {
+      const data = await cachedStorageGet([
+        CHAT_HISTORY_ENABLED_KEY,
+        CHAT_HISTORY_LIMIT_KEY,
+      ]);
+      enabled = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
+      limit = data?.[CHAT_HISTORY_LIMIT_KEY];
+    } catch {}
+    if (chInput) chInput.checked = enabled;
+    reflectChLimit(limit);
+    reflectChAvailability();
+  })();
+
   const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
   const CWF_MAX = 200;
   let chatWordFilters = [];
@@ -5406,6 +5969,30 @@
   });
   loadFollowPreviewHeaderBottom();
 
+  // ── 미리보기 헤더 전체 숨김(기본 OFF) ────────────────────────────────────
+  const FOLLOW_PREVIEW_HIDE_HEADER_KEY = "cheeseFollowPreviewHideHeader";
+  const followPreviewHideHeaderInput = document.querySelector(
+    "[data-follow-preview-hide-header]",
+  );
+  async function loadFollowPreviewHideHeader() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(FOLLOW_PREVIEW_HIDE_HEADER_KEY);
+      on = data?.[FOLLOW_PREVIEW_HIDE_HEADER_KEY] === true;
+    } catch {}
+    if (followPreviewHideHeaderInput)
+      followPreviewHideHeaderInput.checked = on;
+  }
+  followPreviewHideHeaderInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOW_PREVIEW_HIDE_HEADER_KEY]:
+          followPreviewHideHeaderInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowPreviewHideHeader();
+
   // ── 미리보기 라이브 카드식 헤더 배치(기본 OFF) ────────────────────────────
   const FOLLOW_PREVIEW_CARD_LAYOUT_KEY = "cheeseFollowPreviewCardLayout";
   const followPreviewCardLayoutInput = document.querySelector(
@@ -6405,6 +6992,12 @@
   const SETTINGS_TRANSFER_SCHEMA_VERSION = 1;
   const SETTINGS_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
   const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
+  // NEW 읽음 상태는 설치별 UI 메타데이터이므로 설정 JSON으로 다른 브라우저에 옮기지 않는다.
+  [
+    "cheeseSettingsKnownFeatures",
+    "cheeseSettingsNewFeatureBaselinePending",
+    "cheeseSettingsNewFeatureUpdatePending",
+  ].forEach((key) => SETTINGS_TRANSFER_KEYS.delete(key));
   const settingsExportButton = document.querySelector("[data-settings-export]");
   const settingsImportOpenButton = document.querySelector(
     "[data-settings-import-open]",
@@ -6485,7 +7078,13 @@
       const imported = {};
       for (const [key, value] of Object.entries(payload.settings)) {
         if (!SETTINGS_TRANSFER_KEYS.has(key) || value === undefined) continue;
-        imported[key] = value;
+        if (key === CHAT_OS_ICONS_KEY) {
+          imported[key] = normalizeChatOsCustomIcons(value);
+        } else if (key === CHAT_OS_ICON_POSITION_KEY) {
+          imported[key] = normalizeChatOsIconPosition(value);
+        } else {
+          imported[key] = value;
+        }
       }
       if (!Object.keys(imported).length) throw new Error("empty-settings");
 
@@ -8297,20 +8896,29 @@
 
   // ── 라운지 소식 새 글 확인 주기(분, 기본 10) ───────────────────────────────
   const LOUNGE_REFRESH_KEY = "cheeseLoungeRefreshMin";
+  const INBOX_COMMUNITY_OPEN_NEW_TAB_KEY = "cheeseInboxCommunityOpenNewTab";
   const LOUNGE_REFRESH_PRESETS = [3, 5, 10, 30, 60];
   const LOUNGE_REFRESH_DEFAULT = 10;
   const loungeRefreshButtons = Array.from(
     document.querySelectorAll("[data-lounge-refresh]"),
   );
   const loungeNewsInput = document.querySelector('[data-feature="loungeNews"]');
-  // ⚠ loungeNews 는 '숨김' 플래그다(체크=숨김). 체크되면 라운지 기능 자체가 꺼지고
-  // 주기 폴링도 멈추므로(content.js: ensureLoungeButton → stopLoungeRefresh),
-  // 주기 선택은 의미가 없다 — 채팅 시간 표시/형식과 같은 방식으로 잠근다.
+  const inboxCommunityNewsInput = document.querySelector(
+    '[data-feature="inboxCommunityNews"]',
+  );
+  const inboxCommunityNewTabInput = document.querySelector(
+    "[data-inbox-community-new-tab]",
+  );
+  // 두 값 모두 '숨김' 플래그다(체크=숨김). 주기 타이머가 각각 따로 돌므로,
+  // 각 주기 선택은 '자기 기능'이 숨겨졌을 때만 잠근다.
   function reflectLoungeRefreshAvailability() {
     // ⚠ 기능 플래그 로더(load())도 이 함수를 부른다. 그 시점에 아래쪽 const 들이 아직
     // 초기화 전일 수 있으므로(TDZ) 캡처된 변수를 쓰지 않고 DOM 에서 직접 찾는다.
-    const input = document.querySelector('[data-feature="loungeNews"]');
-    const disabled = input?.checked === true;
+    const loungeInput = document.querySelector('[data-feature="loungeNews"]');
+    const communityInput = document.querySelector(
+      '[data-feature="inboxCommunityNews"]',
+    );
+    const disabled = loungeInput?.checked === true;
     document.querySelectorAll("[data-lounge-refresh]").forEach((btn) => {
       btn.disabled = disabled;
     });
@@ -8318,8 +8926,46 @@
       .getElementById("loungeRefresh")
       ?.closest(".settings-item")
       ?.classList.toggle("is-locked", disabled);
+    const communityDisabled = communityInput?.checked === true;
+    document
+      .querySelectorAll("[data-inbox-community-refresh]")
+      .forEach((btn) => {
+        btn.disabled = communityDisabled;
+      });
+    document
+      .getElementById("inboxCommunityRefresh")
+      ?.closest(".settings-item")
+      ?.classList.toggle("is-locked", communityDisabled);
+    const newTabInput = document.querySelector(
+      "[data-inbox-community-new-tab]",
+    );
+    if (newTabInput) {
+      newTabInput.disabled = communityDisabled;
+      newTabInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", communityDisabled);
+    }
   }
   loungeNewsInput?.addEventListener("change", reflectLoungeRefreshAvailability);
+  inboxCommunityNewsInput?.addEventListener(
+    "change",
+    reflectLoungeRefreshAvailability,
+  );
+  (async () => {
+    let enabled = false;
+    try {
+      const data = await cachedStorageGet(INBOX_COMMUNITY_OPEN_NEW_TAB_KEY);
+      enabled = data?.[INBOX_COMMUNITY_OPEN_NEW_TAB_KEY] === true;
+    } catch {}
+    if (inboxCommunityNewTabInput) {
+      inboxCommunityNewTabInput.checked = enabled;
+    }
+  })();
+  inboxCommunityNewTabInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [INBOX_COMMUNITY_OPEN_NEW_TAB_KEY]: inboxCommunityNewTabInput.checked,
+    });
+  });
   function reflectLoungeRefresh(minRaw) {
     const n = Number(minRaw);
     const min = LOUNGE_REFRESH_PRESETS.includes(n) ? n : LOUNGE_REFRESH_DEFAULT;
@@ -8348,6 +8994,47 @@
     });
   });
   loadLoungeRefresh();
+
+  // ── 커뮤니티 새 글 확인 주기(라운지와 별도) ────────────────────────────────
+  // 미설정이면 라운지 값을 그대로 따른다(기존 사용자 동작 유지). 그래서 초기 표시도
+  // 라운지 값을 읽어 보여 준다 — 사용자가 한 번 고르면 그때부터 독립한다.
+  const INBOX_COMMUNITY_REFRESH_KEY = "cheeseInboxCommunityRefreshMin";
+  const inboxCommunityRefreshButtons = Array.from(
+    document.querySelectorAll("[data-inbox-community-refresh]"),
+  );
+  function reflectInboxCommunityRefresh(minRaw) {
+    const n = Number(minRaw);
+    const min = LOUNGE_REFRESH_PRESETS.includes(n) ? n : LOUNGE_REFRESH_DEFAULT;
+    inboxCommunityRefreshButtons.forEach((btn) => {
+      const active = Number(btn.dataset.inboxCommunityRefresh) === min;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  async function loadInboxCommunityRefresh() {
+    let min = LOUNGE_REFRESH_DEFAULT;
+    try {
+      const data = await cachedStorageGet([
+        INBOX_COMMUNITY_REFRESH_KEY,
+        LOUNGE_REFRESH_KEY,
+      ]);
+      const own = data?.[INBOX_COMMUNITY_REFRESH_KEY];
+      if (own != null) min = own;
+      else if (data?.[LOUNGE_REFRESH_KEY] != null)
+        min = data[LOUNGE_REFRESH_KEY];
+    } catch {}
+    reflectInboxCommunityRefresh(min);
+  }
+  inboxCommunityRefreshButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const min = Number(btn.dataset.inboxCommunityRefresh);
+      reflectInboxCommunityRefresh(min);
+      try {
+        cachedStorageSet({ [INBOX_COMMUNITY_REFRESH_KEY]: min });
+      } catch {}
+    });
+  });
+  loadInboxCommunityRefresh();
 
   // 인기 카테고리 / 다가오는 방송 일정도 함께 갱신(기본 OFF). 팔로우 갱신 주기에 얹힘.
   function bindSectionRefreshToggle(sel, key) {

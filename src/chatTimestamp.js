@@ -45,6 +45,10 @@
   // 치지직이 모든 시청자에게 보내는 값이지만 치지직 UI 에는 없는 정보라, 시청자가
   // 노출을 예상하지 못한다. 원하는 사람만 켜도록 기본은 끈 채로 둔다.
   let showChatOsIcon = false;
+  let chatOsCustomIconTemplates = {};
+  let chatOsCustomIconSignature = "";
+  let chatOsIconPosition = "after";
+  let chatOsIconVersion = 0;
   // 채팅 닉네임 숨김. 방장(스트리머)·매니저·파트너 채팅은 예외로 남긴다 —
   // 누가 말했는지가 중요한 역할들이라 숨기면 대화 맥락이 깨진다.
   let hideChatNickname = false;
@@ -101,9 +105,9 @@
   function needsVodTimeAnchorCollection() {
     return Boolean(
       vodChatPage &&
-        getVodVideoNo() &&
-        Date.now() < vodTimeAnchorCollectUntil &&
-        vodTimeAnchorSent.size < VOD_TIME_ANCHOR_TARGET,
+      getVodVideoNo() &&
+      Date.now() < vodTimeAnchorCollectUntil &&
+      vodTimeAnchorSent.size < VOD_TIME_ANCHOR_TARGET,
     );
   }
 
@@ -179,6 +183,10 @@
   // DOM을 다시 쓰는 루프가 생기지 않도록, 같은 메시지에는 복원 쓰기를 제한한다.
   let restoreWriteState = new WeakMap();
   const RESTORE_WRITE_MAX = 3;
+  // 치지직 가상 목록은 같은 행 DOM을 새 메시지에 재사용한다. 행 단위 실패/쓰기 제한을
+  // 메시지 단위로 끊어 주지 않으면, 앞 메시지에서 원문을 못 찾은 기록 때문에 이후
+  // 블라인드 메시지도 토글 전까지 영구적으로 건너뛰게 된다.
+  let restoreRowMessageIdentity = new WeakMap();
   // 라이브에서도 진입 전에 이미 가려져 원문을 구할 수 없는 행이 있다. 이 행들을 표시해
   // 두지 않으면 processRow의 done 마커가 매 스윕 무효화되고(복원이 영영 pending),
   // 행마다 React fiber 탐색(최대 60단계)이 반복된다.
@@ -201,6 +209,43 @@
     const t = readChatEpochMs(chatMessage);
     if (!uid || !t) return "";
     return `${uid}|${t}`;
+  }
+
+  function getRestoreMessageIdentity(chatMessage) {
+    if (!chatMessage || typeof chatMessage !== "object") return "";
+    const explicitId =
+      chatMessage.messageId ||
+      chatMessage.messageNo ||
+      chatMessage.msgId ||
+      chatMessage.chatId ||
+      "";
+    if (explicitId) return `id:${explicitId}`;
+    const cacheKey = chatCacheKey(chatMessage);
+    if (cacheKey) return `time:${cacheKey}`;
+    const uid =
+      chatMessage.userId ||
+      chatMessage.uid ||
+      chatMessage.userIdHash ||
+      chatMessage.senderId ||
+      "";
+    const playerMessageTime = readVodPlayerMessageTime(chatMessage);
+    if (uid && playerMessageTime != null) {
+      return `vod:${uid}|${playerMessageTime}`;
+    }
+    return "";
+  }
+
+  function resetRestoreStateForReusedRow(row, chatMessage) {
+    const identity = getRestoreMessageIdentity(chatMessage);
+    if (!identity) return;
+    const previous = restoreRowMessageIdentity.get(row);
+    if (previous === identity) return;
+    restoreRowMessageIdentity.set(row, identity);
+    restoreUnavailableRows.delete(row);
+    restoreWriteState.delete(row);
+    restoredRowInfo.delete(row);
+    getRowMessageSpan(row)?.classList.remove("cheese-blind-restored-text");
+    clearRowRetry(row);
   }
 
   function cacheOriginalMessage(chatMessage) {
@@ -482,15 +527,196 @@
     IOS: '<path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/>',
   };
   const OS_ICON_LABEL = { PC: "PC", AOS: "안드로이드", IOS: "iOS" };
+  const OS_ICON_TYPES = ["PC", "AOS", "IOS"];
+  const OS_ICON_SVG_TAGS = new Set([
+    "circle",
+    "ellipse",
+    "g",
+    "line",
+    "path",
+    "polygon",
+    "polyline",
+    "rect",
+  ]);
+  const OS_ICON_SVG_ATTRIBUTES = new Set([
+    "clip-rule",
+    "cx",
+    "cy",
+    "d",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "height",
+    "opacity",
+    "points",
+    "r",
+    "rx",
+    "ry",
+    "stroke",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+    "transform",
+    "width",
+    "x",
+    "x1",
+    "x2",
+    "y",
+    "y1",
+    "y2",
+  ]);
+  const OS_ICON_SVG_ROOT_ATTRIBUTES = new Set([
+    "clip-rule",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "opacity",
+    "stroke",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-miterlimit",
+    "stroke-opacity",
+    "stroke-width",
+  ]);
+
+  // 설정 파일은 사용자가 직접 편집할 수도 있고 페이지 스크립트가 postMessage를 보낼
+  // 수도 있으므로 MAIN world에서도 다시 정제한다. 허용한 도형만 새 SVG 노드로 복사해
+  // script/foreignObject/image/use/style/event/href/외부 URL이 DOM에 들어오지 못하게 한다.
+  function sanitizeChatOsSvgTemplate(value) {
+    const source = String(value || "").trim();
+    if (!source || source.length > 12000) return null;
+    try {
+      const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+      const root = parsed.documentElement;
+      if (root?.localName !== "svg" || root.querySelector("parsererror")) {
+        return null;
+      }
+      const viewBoxValues = String(root.getAttribute("viewBox") || "0 0 24 24")
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      if (
+        viewBoxValues.length !== 4 ||
+        viewBoxValues.some((number) => !Number.isFinite(number)) ||
+        viewBoxValues[2] <= 0 ||
+        viewBoxValues[3] <= 0 ||
+        viewBoxValues[2] > 10000 ||
+        viewBoxValues[3] > 10000
+      ) {
+        return null;
+      }
+      const unsafeValue = (raw) =>
+        /(?:javascript:|data:|url\s*\(|<|>)/i.test(raw);
+      const clean = (node) => {
+        for (const child of [...node.childNodes]) {
+          if (child.nodeType !== Node.ELEMENT_NODE) {
+            child.remove();
+            continue;
+          }
+          const tag = child.localName?.toLowerCase();
+          if (!OS_ICON_SVG_TAGS.has(tag)) {
+            child.remove();
+            continue;
+          }
+          for (const attribute of [...child.attributes]) {
+            const name = attribute.name.toLowerCase();
+            if (
+              !OS_ICON_SVG_ATTRIBUTES.has(name) ||
+              unsafeValue(attribute.value)
+            ) {
+              child.removeAttribute(attribute.name);
+            }
+          }
+          clean(child);
+        }
+      };
+      clean(root);
+      if (!root.children.length) return null;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", viewBoxValues.join(" "));
+      [...root.attributes].forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        if (
+          name !== "viewbox" &&
+          OS_ICON_SVG_ROOT_ATTRIBUTES.has(name) &&
+          !unsafeValue(attribute.value)
+        ) {
+          svg.setAttribute(name, attribute.value);
+        }
+      });
+      [...root.children].forEach((child) => {
+        svg.appendChild(document.importNode(child, true));
+      });
+      svg.setAttribute("aria-hidden", "true");
+      return svg;
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeChatOsCustomIconTemplates(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const templates = {};
+    const signatures = {};
+    OS_ICON_TYPES.forEach((type) => {
+      const template = sanitizeChatOsSvgTemplate(source[type]);
+      if (!template) return;
+      templates[type] = template;
+      signatures[type] = template.outerHTML;
+    });
+    return { templates, signature: JSON.stringify(signatures) };
+  }
+
+  function createDefaultChatOsSvg(osType) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = OS_ICON_SVG[osType];
+    return svg;
+  }
+
+  function placeChatOsIcon(row, span, nicknameBtn) {
+    const parent = nicknameBtn?.parentNode;
+    if (!parent) return false;
+    const timeSpan = row.querySelector(":scope .cheese-chat-time");
+    if (timeSpan?.parentNode === parent) {
+      if (chatOsIconPosition === "before") {
+        parent.insertBefore(span, timeSpan);
+      } else {
+        timeSpan.insertAdjacentElement("afterend", span);
+      }
+    } else {
+      parent.insertBefore(span, nicknameBtn);
+    }
+    return true;
+  }
 
   function applyOsIcon(row, osType) {
     const existing = row.querySelector(":scope .cheese-chat-os");
     if (existing) {
-      if (existing.dataset.os === osType) return true;
-      existing.remove(); // 행 재사용으로 다른 기기 메시지가 들어온 경우
+      if (
+        existing.dataset.os === osType &&
+        existing.dataset.iconVersion === String(chatOsIconVersion)
+      ) {
+        const nicknameBtn =
+          row.querySelector("button[class*='_nickname_']") ||
+          row.querySelector("[class*='_nickname_']");
+        return placeChatOsIcon(row, existing, nicknameBtn);
+      }
+      existing.remove(); // 행 재사용 또는 사용자 아이콘 변경
     }
-    const svg = OS_ICON_SVG[osType];
-    if (!svg) return true; // 표시할 게 없으면 '처리 완료'로 본다(재시도 방지)
+    if (!OS_ICON_SVG[osType]) return true;
     const nicknameBtn =
       row.querySelector("button[class*='_nickname_']") ||
       row.querySelector("[class*='_nickname_']");
@@ -498,19 +724,16 @@
     const span = document.createElement("span");
     span.className = "cheese-chat-os";
     span.dataset.os = osType;
+    span.dataset.iconVersion = String(chatOsIconVersion);
     span.title = OS_ICON_LABEL[osType] || osType;
     span.setAttribute("aria-label", span.title);
-    span.innerHTML =
-      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
-      `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svg}</svg>`;
-    // 시간 span 이 있으면 그 뒤(닉네임 바로 앞)에 둔다.
-    const timeSpan = row.querySelector(":scope .cheese-chat-time");
-    if (timeSpan && timeSpan.parentNode === nicknameBtn.parentNode) {
-      timeSpan.insertAdjacentElement("afterend", span);
-    } else {
-      nicknameBtn.parentNode.insertBefore(span, nicknameBtn);
-    }
-    return true;
+    const customTemplate = chatOsCustomIconTemplates[osType];
+    span.appendChild(
+      customTemplate
+        ? customTemplate.cloneNode(true)
+        : createDefaultChatOsSvg(osType),
+    );
+    return placeChatOsIcon(row, span, nicknameBtn);
   }
 
   function removeAllOsIcons() {
@@ -613,19 +836,33 @@
   }
 
   function removeAllTimestamps() {
-    document
-      .querySelectorAll(".cheese-chat-time")
-      .forEach((el) => el.remove());
+    document.querySelectorAll(".cheese-chat-time").forEach((el) => el.remove());
+  }
+
+  // 구버전 moa 호환 폴백. ⚠ 이 마커들은 '이미 렌더된 채팅 요소'에 박혀 있어서
+  // 사용자가 moa 기능을 끈 뒤에도 스크롤백에 남는다. 그대로 믿으면 한 번 켰다 끈 것만으로
+  // 우리 기능이 영영 잠긴다(제보: '가려진 채팅 표시'가 계속 비활성).
+  // 신버전 moa 는 켤 때 <html>에 *-enabled 를 붙이므로, moa 클래스가 하나라도 보이면
+  // 폴백을 쓰지 않고 enabled 판정만 따른다.
+  function isModernMoaPresent() {
+    for (const cls of document.documentElement.classList) {
+      if (cls.startsWith("chzzk-badge-moa-")) return true;
+    }
+    return false;
+  }
+
+  function moaLegacyMark(selector) {
+    if (isModernMoaPresent()) return false;
+    return !!document.querySelector(selector);
   }
 
   // badge-moa-chat이 시간 표시 기능을 켰으면 우리는 양보(중복 방지).
   // 신버전 moa는 <html>에 enabled 클래스를 붙여 채팅이 없어도 즉시 감지된다.
-  // 구버전 호환: 삽입된 시간 span 마커도 폴백으로 본다.
   function moaShowingTime() {
     return (
       document.documentElement.classList.contains(
         "chzzk-badge-moa-chat-timestamp-enabled",
-      ) || !!document.querySelector(".chzzk-badge-moa-chat-time")
+      ) || moaLegacyMark(".chzzk-badge-moa-chat-time")
     );
   }
 
@@ -636,7 +873,7 @@
     return (
       document.documentElement.classList.contains(
         "chzzk-badge-moa-restore-blind-enabled",
-      ) || !!document.querySelector(".chzzk-badge-moa-blind-restored-text")
+      ) || moaLegacyMark(".chzzk-badge-moa-blind-restored-text")
     );
   }
 
@@ -651,9 +888,7 @@
   }
 
   function getRowNickname(row) {
-    const node = row.querySelector(
-      "[class*='_nickname_'] [class*='_text_']",
-    );
+    const node = row.querySelector("[class*='_nickname_'] [class*='_text_']");
     return node ? String(node.textContent || "").trim() : "";
   }
 
@@ -689,9 +924,7 @@
     ].join("|");
     const previous = restoreWriteState.get(row);
     const state =
-      previous?.signature === signature
-        ? previous
-        : { signature, attempts: 0 };
+      previous?.signature === signature ? previous : { signature, attempts: 0 };
     if (state.attempts >= RESTORE_WRITE_MAX) return false;
     state.attempts += 1;
     restoreWriteState.set(row, state);
@@ -780,15 +1013,13 @@
 
   // OFF: 복원된 행을 원래 가림 문구로 되돌린다.
   function revertAllRestores() {
-    document
-      .querySelectorAll(".cheese-blind-restored-text")
-      .forEach((span) => {
-        const row = span.closest("[class*='_item_']");
-        const info = row ? restoredRowInfo.get(row) : null;
-        span.textContent = info ? info.placeholder : span.textContent;
-        span.classList.remove("cheese-blind-restored-text");
-        if (row) restoredRowInfo.delete(row);
-      });
+    document.querySelectorAll(".cheese-blind-restored-text").forEach((span) => {
+      const row = span.closest("[class*='_item_']");
+      const info = row ? restoredRowInfo.get(row) : null;
+      span.textContent = info ? info.placeholder : span.textContent;
+      span.classList.remove("cheese-blind-restored-text");
+      if (row) restoredRowInfo.delete(row);
+    });
   }
 
   function findChatRowForNode(node) {
@@ -1093,14 +1324,14 @@
       return false;
     }
 
+    resetRestoreStateForReusedRow(row, chatMessage);
+
     postVodTimeAnchor(chatMessage);
 
     const restoredInfo = restoredRowInfo.get(row);
     if (restoredInfo && getRowNickname(row) !== restoredInfo.nickname) {
       restoredRowInfo.delete(row);
-      getRowMessageSpan(row)?.classList.remove(
-        "cheese-blind-restored-text",
-      );
+      getRowMessageSpan(row)?.classList.remove("cheese-blind-restored-text");
     }
 
     let done = true;
@@ -1130,7 +1361,7 @@
     const restorablePlaceholder = restoreActive
       ? getRestorablePlaceholder(row)
       : "";
-    if (restorablePlaceholder) {
+    if (restorablePlaceholder && !restoreUnavailableRows.has(row)) {
       const span = getRowMessageSpan(row);
       if (span && !span.classList.contains("cheese-blind-restored-text")) {
         // props 에 원문이 있으면 그걸, 없으면(치지직이 비웠으면) 캐시에서 꺼낸다.
@@ -1139,8 +1370,14 @@
           originalMsgCache.get(chatCacheKey(chatMessage)) ||
           null;
         if (!original) {
-          // 진입 전에 이미 가려지는 등 원문이 아예 없는 경우에는 다시 시도하지 않는다.
-          restoreUnavailableRows.add(row);
+          // React props가 DOM보다 늦게 갱신되는 경우가 있으므로 짧게만 재시도한다.
+          // 제한 횟수 뒤에도 없으면 행을 완료 처리해 채팅 폭주 시 반복 탐색을 막는다.
+          const retryAttempt = rowRetryState.get(row)?.attempt || 0;
+          if (retryAttempt < ROW_RETRY_DELAYS.length) {
+            done = false;
+          } else {
+            restoreUnavailableRows.add(row);
+          }
         } else if (canWriteRestore(row, chatMessage, restorablePlaceholder)) {
           applyRestore(row, original);
         } else {
@@ -1266,9 +1503,8 @@
       // 스크롤 입력 중에는 건너뛰고, 입력이 멎은 뒤 처리 경로에서 다시 확인한다.
       if (
         performance.now() >= chatScrollActiveUntil &&
-        mutations.some(
-          (mutation) =>
-            [...mutation.addedNodes].some(containsAdminOnlyChatNotice),
+        mutations.some((mutation) =>
+          [...mutation.addedNodes].some(containsAdminOnlyChatNotice),
         )
       ) {
         // 공지 행이 곧 스크롤로 밀려나도 상태가 풀리지 않게 래치만 한다.
@@ -1283,9 +1519,7 @@
         if (targetRow) queueChatRow(targetRow, invalidate);
         mutation.addedNodes.forEach((node) => {
           if (!(node instanceof Element)) return;
-          collectChatRows(node).forEach((row) =>
-            queueChatRow(row, invalidate),
-          );
+          collectChatRows(node).forEach((row) => queueChatRow(row, invalidate));
         });
       }
       // 플로팅 새 채팅 버튼은 채팅 행이 아니라 별도 요소라 위 경로에 안 잡힌다.
@@ -1418,6 +1652,33 @@
     }
   }
 
+  function refreshChatOsIcons() {
+    removeAllOsIcons();
+    document
+      .querySelectorAll("[data-cheese-os-done]")
+      .forEach((row) => delete row.dataset.cheeseOsDone);
+    if (!showChatOsIcon) return;
+    if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+    else ensureChatRowObserver();
+  }
+
+  function setChatOsCustomIcons(value) {
+    const normalized = normalizeChatOsCustomIconTemplates(value);
+    if (normalized.signature === chatOsCustomIconSignature) return;
+    chatOsCustomIconTemplates = normalized.templates;
+    chatOsCustomIconSignature = normalized.signature;
+    chatOsIconVersion += 1;
+    refreshChatOsIcons();
+  }
+
+  function setChatOsIconPosition(value) {
+    const normalized = value === "before" ? "before" : "after";
+    if (normalized === chatOsIconPosition) return;
+    chatOsIconPosition = normalized;
+    // SVG 자체는 그대로지만 기존 행도 즉시 새 순서로 이동하도록 다시 처리한다.
+    refreshChatOsIcons();
+  }
+
   function setChatTimestampFormat(next) {
     const normalized = normalizeChatTimestampFormat(next);
     if (normalized === chatTimestampFormat) return;
@@ -1459,6 +1720,7 @@
       revertAllRestores();
       originalMsgCache.clear();
       restoreWriteState = new WeakMap();
+      restoreRowMessageIdentity = new WeakMap();
       restoreUnavailableRows = new WeakSet();
       if (!anyChatEnhanceOn()) stopChatRowObserver();
     }
@@ -1467,11 +1729,14 @@
   // content.js(격리)가 보내는 기능 플래그 수신.
   let flagsReceived = false;
   window.addEventListener("message", (e) => {
-    if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    if (e.source !== window || e.data?.source !== "cheese-feature-flags")
+      return;
     flagsReceived = true;
     stopFlagRequestRetry();
     const f = e.data.flags || {};
     setChatTimestampFormat(e.data.chatTimeFormat);
+    setChatOsCustomIcons(e.data.chatOsCustomIcons);
+    setChatOsIconPosition(e.data.chatOsIconPosition);
     // 체크=표시(true)면 각 기능 ON. (data-feature지만 '숨김'이 아니라 '켬' 의미)
     setShowChatTimestamp(f.chatShowTime === true);
     setShowChatOsIcon(f.chatShowOsIcon === true);
@@ -1518,12 +1783,14 @@
     const nowRestore = moaRestoring();
     if (nowTime !== prevMoaTime) {
       prevMoaTime = nowTime;
-      if (nowTime) removeAllTimestamps(); // moa가 시간 표시 시작 → 우리 것 제거(양보)
+      if (nowTime)
+        removeAllTimestamps(); // moa가 시간 표시 시작 → 우리 것 제거(양보)
       else if (showChatTimestamp) ensureChatRowObserver(); // moa 꺼짐 → 우리가 다시
     }
     if (nowRestore !== prevMoaRestore) {
       prevMoaRestore = nowRestore;
-      if (nowRestore) revertAllRestores(); // moa가 복원 시작 → 우리 복원 되돌림(양보)
+      if (nowRestore)
+        revertAllRestores(); // moa가 복원 시작 → 우리 복원 되돌림(양보)
       else if (isBlindRestoreActive()) ensureChatRowObserver(); // moa 꺼짐 → 우리가 다시
     }
   });
@@ -1564,6 +1831,7 @@
       revertAllRestores();
       originalMsgCache.clear();
       restoreWriteState = new WeakMap();
+      restoreRowMessageIdentity = new WeakMap();
       restoreUnavailableRows = new WeakSet();
       adminOnlyChatLatched = false; // 새 페이지에서는 다시 판정
       clearPendingChatRows();

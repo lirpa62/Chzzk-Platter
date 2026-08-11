@@ -1,0 +1,437 @@
+.cheese-inbox-community-native-hidden {
+  display: none !important;
+}
+
+#cheese-inbox-community-tab {
+  position: relative;
+}
+
+#cheese-inbox-community-tab.has-new::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: #e02020;
+  border-radius: 50%;
+  position: absolute;
+  top: 5px;
+  right: 3px;
+}
+
+.cheese-inbox-community-section {
+  --cheese-inbox-bg: #fff;
+  --cheese-inbox-hover: #f5f6f7;
+  --cheese-inbox-text: #0e0f10;
+  --cheese-inbox-subtle: #697077;
+  --cheese-inbox-border: #e6e8ea;
+  background: var(--cheese-inbox-bg);
+  color: var(--cheese-inbox-text);
+  flex: 1 1 auto;
+  min-height: 0;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: inherit;
+}
+
+.cheese-inbox-community-section.is-dark {
+  --cheese-inbox-bg: #1c1d1f;
+  --cheese-inbox-hover: #26282b;
+  --cheese-inbox-text: #f1f3f5;
+  --cheese-inbox-subtle: #a9afb6;
+  --cheese-inbox-border: #34373b;
+}
+
+.cheese-inbox-community-section.is-active {
+  display: flex;
+}
+
+.cheese-inbox-community-list {
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.cheese-inbox-community-list li {
+  margin: 0;
+  padding: 0;
+}
+
+.cheese-inbox-community-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.cheese-inbox-community-list li:hover > .cheese-inbox-community-row,
+.cheese-inbox-community-list li:focus-within > .cheese-inbox-community-row {
+  background: var(--cheese-inbox-hover);
+}
+
+.cheese-inbox-community-message-link {
+  color: inherit;
+  text-decoration: none;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 76px;
+  padding: 12px 4px 12px 18px;
+}
+
+.cheese-inbox-community-message-link:focus-visible,
+.cheese-inbox-community-expand:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+.cheese-inbox-community-profile {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--cheese-inbox-hover);
+}
+
+.cheese-inbox-community-profile img {
+  object-fit: cover;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cheese-inbox-community-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cheese-inbox-community-copy strong,
+.cheese-inbox-community-copy > span:not(.cheese-inbox-community-stats) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-inbox-community-copy strong {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.cheese-inbox-community-copy > span:not(.cheese-inbox-community-stats) {
+  color: var(--cheese-inbox-text);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.cheese-inbox-community-copy small {
+  color: var(--cheese-inbox-subtle);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.cheese-inbox-community-attachment-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.cheese-inbox-community-expand {
+  color: var(--cheese-inbox-subtle);
+  background: transparent;
+  border: 0;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 76px;
+  margin: 0;
+  padding: 0 12px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cheese-inbox-community-expand:hover {
+  color: var(--cheese-inbox-text);
+}
+
+.cheese-inbox-community-expand svg {
+  width: 18px;
+  height: 18px;
+  transition: transform 160ms ease;
+}
+
+.cheese-inbox-community-expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.cheese-inbox-community-details {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 52px 14px 82px;
+}
+
+.cheese-inbox-community-details[hidden] {
+  display: none;
+}
+
+.cheese-inbox-community-details p {
+  color: var(--cheese-inbox-text);
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cheese-inbox-community-attachments {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.cheese-inbox-community-attachments:only-child {
+  margin-top: 0;
+}
+
+.cheese-inbox-community-attachments img {
+  border-radius: 4px;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-height: fit-content;
+  object-fit: contain;
+}
+
+.cheese-inbox-community-attachments > :only-child {
+  grid-column: 1 / -1;
+}
+
+.cheese-inbox-community-photo-button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: fit-content;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.cheese-inbox-community-photo-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.cheese-inbox-community-photo-button img {
+  pointer-events: none;
+}
+
+.cheese-inbox-community-attachments img.is-sticker {
+  width: 100px;
+  height: 100px;
+  max-height: 100px;
+  justify-self: start;
+}
+
+.cheese-inbox-community-status {
+  color: var(--cheese-inbox-subtle);
+  flex: 0 0 auto;
+  min-height: 18px;
+  padding: 7px 18px 10px;
+  border-top: 1px solid var(--cheese-inbox-border);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.cheese-inbox-community-status > span {
+  min-width: 0;
+}
+
+.cheese-inbox-community-status button {
+  appearance: none;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: -4px -5px -4px 0;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cheese-inbox-community-status button:hover:not(:disabled) {
+  color: var(--cheese-inbox-text);
+  background: var(--cheese-inbox-hover);
+}
+
+.cheese-inbox-community-status button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.cheese-inbox-community-status button:disabled {
+  cursor: wait;
+}
+
+.cheese-inbox-community-status svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cheese-inbox-community-status button.is-loading svg {
+  animation: cheese-inbox-community-spin 0.8s linear infinite;
+}
+
+@keyframes cheese-inbox-community-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cheese-inbox-community-empty {
+  color: var(--cheese-inbox-subtle);
+  flex: 1 1 auto;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 28px;
+  box-sizing: border-box;
+  text-align: center;
+  font-size: 13px;
+}
+
+.cheese-inbox-community-empty strong {
+  color: var(--cheese-inbox-text);
+  font-size: 14px;
+}
+
+.cheese-inbox-community-skeleton {
+  flex: 1 1 auto;
+  padding: 8px 18px;
+}
+
+.cheese-inbox-community-skeleton > span {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  grid-template-rows: 16px 14px;
+  gap: 8px 12px;
+  height: 76px;
+  padding: 12px 0;
+  box-sizing: border-box;
+}
+
+.cheese-inbox-community-skeleton i,
+.cheese-inbox-community-skeleton b,
+.cheese-inbox-community-skeleton em {
+  background: var(--cheese-inbox-hover);
+  display: block;
+  animation: cheese-inbox-community-pulse 1.2s ease-in-out infinite;
+}
+
+.cheese-inbox-community-skeleton i {
+  grid-row: 1 / 3;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+}
+
+.cheese-inbox-community-skeleton b {
+  width: 34%;
+  height: 14px;
+}
+
+.cheese-inbox-community-skeleton em {
+  width: 78%;
+  height: 12px;
+}
+
+@keyframes cheese-inbox-community-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheese-inbox-community-expand svg,
+  .cheese-inbox-community-skeleton i,
+  .cheese-inbox-community-skeleton b,
+  .cheese-inbox-community-skeleton em {
+    animation: none;
+  }
+}
+
+/* 버프 수·댓글 수(날짜 위 한 줄). 값이 0 인 항목은 JS 에서 아예 그리지 않는다. */
+.cheese-inbox-community-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cheese-inbox-subtle);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.cheese-inbox-community-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.cheese-inbox-community-stat-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* 파트너(인증) 배지 — 헤더 팔로우 목록과 같은 치지직 공식 아이콘을 쓴다. */
+.cheese-inbox-community-official-mark {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+}
+
+/* 스크린리더 전용 텍스트. ⚠ 이 페이지(game.naver.com/notify)에는 content.css 가
+   주입되지 않아 치지직의 .blind 가 없다. 전역 .blind 를 새로 정의하면 네이버 쪽
+   마크업까지 건드리게 되므로 우리 전용 클래스를 따로 둔다. */
+.cheese-inbox-community-a11y {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}

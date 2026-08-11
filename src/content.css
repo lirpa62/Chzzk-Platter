@@ -3241,23 +3241,16 @@ html.cheese-vod-portrait .cheese-search-seek-realtime {
 
 /* 자동 갱신 중 React가 접기를 더보기로 교체해도 같은 자리에 접기 모양을 유지한다.
    실제 aria-label은 더보기로 남겨 자동 펼침 드라이버가 계속 사용할 수 있다. */
-#sidebar
-  nav.cheese-follow-auto-expanding
-  button[aria-label="더보기"] {
+#sidebar nav.cheese-follow-auto-expanding button[aria-label="더보기"] {
   visibility: visible !important;
   font-size: 0 !important;
 }
-#sidebar
-  nav.cheese-follow-auto-expanding
-  button[aria-label="더보기"]::before {
+#sidebar nav.cheese-follow-auto-expanding button[aria-label="더보기"]::before {
   content: "접기";
   font-size: 12px;
   line-height: 23px;
 }
-#sidebar
-  nav.cheese-follow-auto-expanding
-  button[aria-label="더보기"]
-  svg {
+#sidebar nav.cheese-follow-auto-expanding button[aria-label="더보기"] svg {
   transform: rotate(180deg);
 }
 
@@ -6618,6 +6611,15 @@ html.cheese-channel-profile-radius-enabled
   cursor: grabbing;
 }
 
+/* 영상만 보기: 헤더의 메타·고정 버튼과 카드식 시청자 배지를 모두 제거한다.
+   본문 자체가 16:9 비율을 가지므로 별도 높이 보정 없이 영상만 패널을 채운다. */
+#cheese-follow-preview.cheese-fp-hide-header
+  .cheese-follow-preview-header,
+#cheese-follow-preview.cheese-fp-hide-header
+  .cheese-follow-preview-live-badge {
+  display: none !important;
+}
+
 /* ── 미리보기 헤더 테마 색상 ────────────────────────────────────────────────
    치지직 라이트/다크에 맞춰 헤더 바 배경·글자색을 전환한다. 패널은 body 직속이라
    페이지 내부 래퍼에 붙은 .theme_dark 가 조상이 아닐 수 있어, html 에 붙는 경우와
@@ -7003,9 +7005,10 @@ html.cheese-channel-live-profile-custom
   background: #000;
 }
 
-/* 로딩 중엔 video 가리고 3-dot 펄스 표시 */
+/* 로딩 중에는 영상 조작만 막는다. video의 poster에 라이브 스냅샷을 넣어 첫 프레임이
+   준비될 때까지 검은 화면 대신 썸네일을 유지하고, 3-dot 펄스로 로딩 상태를 알린다. */
 #cheese-follow-preview.is-loading .cheese-follow-preview-video {
-  visibility: hidden;
+  pointer-events: none;
 }
 
 /* 썸네일 이미지(기본 숨김, 썸네일 모드에서만 표시) */
@@ -7030,6 +7033,7 @@ html.cheese-channel-live-profile-custom
 #cheese-follow-preview .cheese-follow-preview-loading {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: none;
   align-items: center;
   justify-content: center;
@@ -7484,9 +7488,9 @@ html.cheese-chat-nickname-message-split
   )
   [class*="_chatting_message_"]:not([class*="_is_mission_"]):not(
     [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not(
-    [class*="_is_subscription_"]
-  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
+  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
+    [class*="_is_ticker_overlay_"]
+  ):not([class*="_is_overlay_"])
   > [class*="_text_"] {
   display: block !important;
   width: 100%;
@@ -9334,6 +9338,118 @@ html.cheese-search-clip-player-open {
   padding-right: var(--cheese-scrollbar-gap, 0px) !important;
 }
 
+html.cheese-inbox-community-lightbox-open {
+  overflow: hidden !important;
+  padding-right: var(--cheese-inbox-community-scrollbar-gap, 0px) !important;
+}
+
+.cheese-inbox-community-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.cheese-inbox-community-lightbox-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 240px;
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 80px);
+}
+
+.cheese-inbox-community-lightbox-toolbar {
+  flex: 0 0 36px;
+  height: 36px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cheese-inbox-community-lightbox-stage {
+  position: relative;
+  flex: 0 1 auto;
+  display: grid;
+  place-items: center;
+  min-width: 240px;
+  min-height: 180px;
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 124px);
+}
+
+.cheese-inbox-community-lightbox img {
+  display: none;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 80px);
+  max-height: calc(100vh - 124px);
+  object-fit: contain;
+  user-select: none;
+}
+
+.cheese-inbox-community-lightbox.is-loaded img {
+  display: block;
+}
+
+.cheese-inbox-community-lightbox-loading {
+  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.cheese-inbox-community-lightbox-close {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: #fff;
+  background: rgba(14, 15, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cheese-inbox-community-lightbox-close:hover {
+  background: rgba(14, 15, 16, 0.9);
+}
+
+.cheese-inbox-community-lightbox-close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.cheese-inbox-community-lightbox-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+@media (max-width: 640px) {
+  .cheese-inbox-community-lightbox {
+    padding: 16px;
+  }
+
+  .cheese-inbox-community-lightbox-dialog,
+  .cheese-inbox-community-lightbox-stage,
+  .cheese-inbox-community-lightbox img {
+    max-width: calc(100vw - 32px);
+  }
+
+  .cheese-inbox-community-lightbox-dialog {
+    max-height: calc(100vh - 32px);
+  }
+
+  .cheese-inbox-community-lightbox-stage,
+  .cheese-inbox-community-lightbox img {
+    max-height: calc(100vh - 76px);
+  }
+}
+
 .cheese-search-clip-player-overlay {
   position: fixed;
   inset: 0;
@@ -10303,6 +10419,69 @@ html.cheese-vod-chapter-hide
   border: 0;
 }
 
+/* 채널 링크를 팝업 플레이어로 옮기는 동안 브라우저 기본 링크·이미지 dragstart를
+   만들지 않는다. CrxMouse 등의 Super Drag와 같은 입력을 공유하지 않기 위한 처리다. */
+.cheese-popup-player-drag-source,
+.cheese-popup-player-drag-source * {
+  -webkit-user-drag: none !important;
+}
+
+html.cheese-popup-player-channel-dragging,
+html.cheese-popup-player-channel-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* 드래그 중 사이드바가 갱신되어 원래 링크가 교체되거나 커서가 플레이어 iframe 위로
+   이동해도 부모 문서가 pointerup을 끝까지 받을 수 있게 하는 투명 수신면. */
+.cheese-popup-player-drag-shield {
+  position: fixed;
+  z-index: 2147483645;
+  inset: 0;
+  cursor: grabbing;
+  background: transparent;
+}
+
+.cheese-popup-player-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483646;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 3px;
+  overflow: visible;
+  pointer-events: none;
+  border: 2px solid #00ffa3;
+  border-radius: 8px;
+  background: var(--cheese-platter-background-neutral-base, #1c1d1f);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 38%);
+  will-change: transform;
+}
+
+.cheese-popup-player-drag-ghost img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.cheese-popup-player-drag-ghost::after {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  box-sizing: border-box;
+  width: 15px;
+  height: 11px;
+  border: 2px solid #fff;
+  border-radius: 3px;
+  background: #141517;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+  content: "";
+}
+
 /* 드래그 중에는 iframe 이 커서를 먹지 않게 한다(포인터를 놓치면 창이 따라오지 않는다). */
 .cheese-popup-player.is-dragging .cheese-popup-player__frame {
   pointer-events: none;
@@ -10509,6 +10688,24 @@ html.cheese-player-hide-liveRewind
   border-radius: 50%;
   border: 2px solid var(--cheese-platter-background-neutral-base);
   background: red;
+  pointer-events: none;
+}
+
+#header .cheese-inbox-community-header-target {
+  position: relative;
+}
+
+#header .cheese-inbox-community-header-dot {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--cheese-platter-background-neutral-base);
+  border-radius: 50%;
+  box-sizing: content-box;
+  background: #e02020;
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -11010,24 +11207,38 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
    이 section 에 걸리므로, 안에 넣어야 채팅이 함께 따라간다.
 
    ⚠ 치지직 순정 PIP 에는 flex-direction:column 도 height 도 없다(세로 배치는 우리가
-   만들어야 한다). PIP 의 transform(드래그 위치)과 width 는 손대지 않는다. */
-/* ⚠ 치지직 CSS 모듈(_container_wj4te_1 등)이 같은 속성을 더 높은 우선순위로 잡고 있어
-   맨 클래스로는 지지 않는다 — 이 파일 곳곳에서 쓰는 방식대로 !important 로 고정한다.
-   순정 PIP 에는 height 도 flex-direction 도 없으므로 세로 배치는 우리가 만들어야 한다. */
+   만들어야 한다). 저장된 폭과 위치가 있으면 CSS 변수로 복원하고, 네이티브 드래그가
+   끝나면 JS가 최종 좌표만 저장하되 transform은 그대로 유지한다. 치지직 CSS 모듈이
+   레이아웃 속성을 더 높은 우선순위로 잡으므로 크기와 flex 속성은 !important 로 고정한다. */
 .cheese-pip-chat-host {
+  box-sizing: border-box !important;
   display: flex !important;
   flex-direction: column !important;
   /* ⚠ 영상 래퍼(_wrapper_)에는 자체 높이가 없다 — 원래 section 높이를 flex 로 꽉 채워
      쓰는 구조라, height:auto 로 두면 영상이 0px 로 접힌다(실측: wrapper.height=0px).
-     그래서 '영상 높이 + 채팅 높이'를 우리가 직접 계산해 section 높이로 준다.
-     영상 높이는 마커를 붙이기 전에 실측해 --cheese-pip-video-h 로 넣는다(JS).
-     width 는 치지직이 정한 값을 그대로 둔다. */
+     그래서 '상단 컨트롤 + 영상 높이 + 채팅 높이'를 직접 계산해 section 높이로 준다.
+     상단 컨트롤과 영상 높이는 마커를 붙이기 전에 실측해 CSS 변수로 넣는다(JS).
+     width 는 저장값 또는 현재 네이티브 실측값을 사용한다. */
+  width: var(--cheese-pip-width, 400px) !important;
   height: calc(
-    var(--cheese-pip-video-h, 225px) + var(--cheese-pip-chat-height, 450px)
+    var(--cheese-pip-controls-h, 46px) + var(--cheese-pip-video-h, 225px) +
+      var(--cheese-pip-chat-height, 450px)
   ) !important;
-  /* JS 가 채팅 높이를 (100vh - 225 - 46) 로 이미 제한한다. 여기서는 계산이 어긋나
+  /* JS가 현재 영상 높이를 뺀 만큼으로 채팅 높이를 제한한다. 여기서는 계산이 어긋나
      넘치는 경우의 안전망만 둔다(값이 겹쳐도 더 작은 쪽이 이긴다). */
-  max-height: 100vh !important;
+  max-width: calc(100vw - 16px) !important;
+  max-height: calc(100vh - 16px) !important;
+}
+
+.cheese-pip-chat-host.cheese-pip-layout-positioned {
+  position: fixed;
+  left: var(--cheese-pip-left, 8px);
+  top: var(--cheese-pip-top, 8px);
+  right: auto;
+  bottom: auto;
+  /* 최초 저장 좌표 적용은 즉시 처리하고, 이후 실제 드래그 움직임은 치지직 네이티브
+     transform에 맡긴다. */
+  transition: none !important;
 }
 .cheese-pip-chat {
   position: relative;
@@ -11061,13 +11272,12 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
   margin-bottom: 10px;
 }
 
-/* 위쪽 경계를 잡아 채팅 높이 조절(폭은 PIP 를 그대로 따라간다). */
 /* 높이 조절 손잡이 — 채팅 아래쪽 끝(= PIP section 하단). 아래로 끌면 채팅이 커진다.
    ⚠ iframe 은 별도 문서라 그 위에서 시작한 드래그는 우리에게 오지 않는다. 손잡이를
    iframe '위에' 겹쳐 깔고(z-index) 잡을 수 있는 두께를 줘야 실제로 잡힌다. */
 .cheese-pip-chat__handle {
   position: absolute;
-  right: 0;
+  right: 18px;
   bottom: 0;
   left: 0;
   height: 10px;
@@ -11094,4 +11304,52 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
 /* 드래그 중에는 iframe 이 포인터를 가로채 커서가 튀거나 드래그가 끊긴다 — 잠시 막는다. */
 .cheese-pip-chat.is-resizing iframe {
   pointer-events: none;
+}
+
+.cheese-pip-layout-resize {
+  appearance: none;
+  position: absolute;
+  z-index: 12;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #fff;
+  background: rgba(14, 15, 16, 0.72);
+  opacity: 0.78;
+  touch-action: none;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  border-width: 1px 0 0 1px;
+  border-radius: 5px 0 7px 0;
+  cursor: nwse-resize;
+}
+
+.cheese-pip-layout-resize:hover,
+.cheese-pip-layout-resize:focus-visible,
+.cheese-pip-layout-interacting .cheese-pip-layout-resize {
+  background: rgba(14, 15, 16, 0.94);
+  opacity: 1;
+}
+
+.cheese-pip-layout-resize:focus-visible {
+  outline: 2px solid var(--cheese-platter-border-brand-base, #32bb81);
+  outline-offset: 1px;
+}
+
+.cheese-pip-layout-resize svg {
+  width: 13px;
+  height: 13px;
+}
+
+.cheese-pip-layout-interacting > [class*="_wrapper_"],
+.cheese-pip-layout-interacting .cheese-pip-chat iframe {
+  pointer-events: none !important;
 }
