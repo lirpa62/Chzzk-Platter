@@ -163,3 +163,25 @@ button.cheese-clip-audio-mixer-button > svg {
 .cheese-clip-audio-mixer-button.is-error .cheese-clip-audio-mixer-dot {
   fill: #ff4f59;
 }
+
+button.cheese-clip-fav-btn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+button.cheese-clip-fav-btn > svg {
+  display: block;
+  margin: auto;
+  pointer-events: none;
+  transition: stroke 0.14s ease;
+}
+
+button.cheese-clip-fav-btn:hover > svg,
+button.cheese-clip-fav-btn:focus-visible > svg {
+  stroke: #ffcc33;
+}
+
+button.cheese-clip-fav-btn[data-on="true"]:hover > svg,
+button.cheese-clip-fav-btn[data-on="true"]:focus-visible > svg {
+  stroke: #fff;
+}

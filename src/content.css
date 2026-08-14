@@ -6381,7 +6381,7 @@ html.cheese-channel-profile-radius-enabled
 
 /* 전용 팔로잉 목록의 아이콘 폴백. 네이티브 _icon_ 클래스를 harvest 하지 못한 경우
    (팔로잉 채널 중 배지를 가진 채널이 하나도 없을 때 등) 쓰인다. 예전엔 이 클래스에
-   스타일이 없어서 인증마크·업적배지가 빈 요소로 그려져 사라져 보였다(제보). */
+   스타일이 없어서 인증마크·업적배지가 빈 요소로 그려져 사라져 보였다. */
 .cheese-cf-official {
   display: inline-block;
   flex: none;
@@ -6613,10 +6613,8 @@ html.cheese-channel-profile-radius-enabled
 
 /* 영상만 보기: 헤더의 메타·고정 버튼과 카드식 시청자 배지를 모두 제거한다.
    본문 자체가 16:9 비율을 가지므로 별도 높이 보정 없이 영상만 패널을 채운다. */
-#cheese-follow-preview.cheese-fp-hide-header
-  .cheese-follow-preview-header,
-#cheese-follow-preview.cheese-fp-hide-header
-  .cheese-follow-preview-live-badge {
+#cheese-follow-preview.cheese-fp-hide-header .cheese-follow-preview-header,
+#cheese-follow-preview.cheese-fp-hide-header .cheese-follow-preview-live-badge {
   display: none !important;
 }
 
@@ -7514,10 +7512,14 @@ html.cheese-chat-nickname-message-split
   opacity: 0.75;
 }
 
-.cheese-chat-os svg {
+.cheese-chat-os :is(svg, img) {
   display: block;
   width: 0.92em;
   height: 0.92em;
+}
+
+.cheese-chat-os img {
+  object-fit: contain;
 }
 
 /* Lucide 세 아이콘의 viewBox 점유 높이가 달라(모니터 본체 3~17, 폰·사과 2~22)
@@ -10673,9 +10675,25 @@ html.cheese-player-hide-liveRewind
 
 /* ── 치지직 라운지 소식(헤더 armchair 버튼 + 탭 모달) ────────────────────────
    버튼은 네이티브 알림 버튼의 클래스를 그대로 물려받아 크기·호버가 일치한다.
-   여기서는 '새 글' 붉은 점과 모달만 정의한다. */
+   헤더가 부분 재렌더될 때 투명한 color를 상속하는 경우가 있어 아이콘 색만 명시한다. */
+.cheese-lounge-header-item {
+  flex: none;
+}
+
 #cheese-lounge-button {
   position: relative;
+  flex: none;
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  ) !important;
+}
+
+#cheese-lounge-button > svg {
+  display: block;
+  flex: none;
+  color: inherit;
+  stroke: currentColor;
 }
 
 #cheese-lounge-button.has-new::after {
@@ -11352,4 +11370,909 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
 .cheese-pip-layout-interacting > [class*="_wrapper_"],
 .cheese-pip-layout-interacting .cheese-pip-chat iframe {
   pointer-events: none !important;
+}
+
+/* 전용 팔로잉 배치 순서(그룹 모달) — 조합 버튼 대신 '현재 순서 + 위/아래' 로 보여 준다.
+   설정 화면의 순서 편집기와 같은 개념이라 두 곳의 조작감이 어긋나지 않는다. */
+.cheese-cf-group-modal-placement > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cheese-cf-placement-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cheese-cf-placement-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+}
+
+/* 화살표 버튼은 정사각형으로 — 이름 폭이 달라도 줄이 흔들리지 않는다. */
+.cheese-cf-placement-row button {
+  flex: none;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.cheese-cf-placement-row button[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── 클립 보관함(/clips) ──────────────────────────────────────────────────
+   원본 목록을 없애지 않고 같은 section 안에서 전체 폭 보기로 전환한다. */
+.cheese-clip-vault-active > :not(.cheese-clip-vault-host):not(.cheese-clip-vault-panel) {
+  display: none !important;
+}
+
+#cheese-clip-vault-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: auto;
+  min-width: 92px;
+  margin-left: 10px;
+  padding: 0 11px;
+  height: 30px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 15px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.cheese-clip-vault-button-label {
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.cheese-clip-vault-button-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  line-height: 0;
+}
+
+.cheese-clip-vault-button-icons svg {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+#cheese-clip-vault-btn:hover,
+#cheese-clip-vault-btn[aria-expanded="true"] {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.theme_dark #cheese-clip-vault-btn:hover,
+.theme_dark #cheese-clip-vault-btn[aria-expanded="true"] {
+  color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-panel {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 18px 0 4px;
+  padding: 0;
+}
+
+.cheese-clip-vault-view-header {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  margin-bottom: 12px;
+  font-family: var(--cheese-clip-vault-font-family, inherit);
+}
+
+.cheese-clip-vault-view-header > strong {
+  min-width: 0;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.cheese-clip-vault-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-close:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.cheese-clip-vault-close svg {
+  display: block;
+}
+
+.cheese-clip-vault-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+}
+
+.cheese-clip-vault-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-family: var(--cheese-clip-vault-font-family, inherit);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.theme_dark .cheese-clip-vault-tabs button[aria-selected="true"] {
+  color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-tab-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: rgba(127, 127, 127, 0.14);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.cheese-clip-vault-toolbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-family: var(--cheese-clip-vault-font-family, inherit);
+}
+
+.cheese-clip-vault-toolbar input[type="search"],
+.cheese-clip-vault-toolbar button {
+  box-sizing: border-box;
+  height: 36px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: var(--cheese-platter-background-neutral-base, transparent);
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.cheese-clip-vault-toolbar input[type="search"] {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 480px;
+  padding: 0 11px;
+}
+
+.cheese-clip-vault-toolbar input[type="search"]:focus,
+.cheese-clip-vault-toolbar button:focus-visible {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-following-import-controls {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+}
+
+.cheese-clip-vault-following-import,
+.cheese-clip-vault-following-import-pause,
+.cheese-clip-vault-following-import-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 6px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-following-import:hover:not(:disabled),
+.cheese-clip-vault-following-import-pause:hover:not(:disabled) {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.theme_dark .cheese-clip-vault-following-import:hover:not(:disabled),
+.theme_dark .cheese-clip-vault-following-import-pause:hover:not(:disabled) {
+  color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-following-import-stop:hover:not(:disabled) {
+  border-color: #e5484d;
+  color: #d92d32;
+}
+
+.cheese-clip-vault-following-import:disabled,
+.cheese-clip-vault-following-import-pause:disabled,
+.cheese-clip-vault-following-import-stop:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.cheese-clip-vault-following-import[hidden],
+.cheese-clip-vault-following-import-pause[hidden],
+.cheese-clip-vault-following-import-stop[hidden] {
+  display: none;
+}
+
+.cheese-clip-vault-following-import svg,
+.cheese-clip-vault-following-import-pause svg,
+.cheese-clip-vault-following-import-stop svg {
+  display: block;
+  flex: none;
+}
+
+.cheese-clip-vault-following-import .lucide-loader-circle,
+.cheese-clip-vault-following-import-pause .lucide-loader-circle {
+  animation: cheese-clip-vault-loader-spin 0.85s linear infinite;
+}
+
+@keyframes cheese-clip-vault-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cheese-clip-vault-sort-picker {
+  position: relative;
+  flex: none;
+}
+
+.cheese-clip-vault-sort-picker > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 144px;
+  padding: 0 9px 0 11px;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-sort-picker > button[aria-expanded="true"] {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-sort-picker > button .cheese-clip-vault-group-chevron {
+  flex: none;
+  transition: transform 0.14s ease;
+}
+
+.cheese-clip-vault-sort-picker > button[aria-expanded="true"]
+  .cheese-clip-vault-group-chevron {
+  transform: rotate(180deg);
+}
+
+.cheese-clip-vault-sort-menu {
+  z-index: 50;
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  overflow: hidden;
+  min-width: 164px;
+  padding: 5px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: var(--cheese-platter-background-neutral-base, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.cheese-clip-vault-sort-menu[hidden] {
+  display: none;
+}
+
+.cheese-clip-vault-sort-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-sort-menu button:hover,
+.cheese-clip-vault-sort-menu button[aria-selected="true"] {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.cheese-clip-vault-sort-menu button[aria-selected="true"] {
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+  font-weight: 600;
+}
+
+.cheese-clip-vault-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 7px;
+  min-height: 36px;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-group-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cheese-clip-vault-group-toggle i {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(127, 127, 127, 0.28);
+  transition: background 0.14s ease;
+}
+
+.cheese-clip-vault-group-toggle i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.14s ease;
+}
+
+.cheese-clip-vault-group-toggle input:checked + i {
+  background: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-clip-vault-group-toggle input:checked + i::after {
+  transform: translateX(16px);
+}
+
+.cheese-clip-vault-group-toggle input:focus-visible + i {
+  outline: 2px solid var(--cheese-platter-border-brand-base, #32bb81);
+  outline-offset: 2px;
+}
+
+.cheese-clip-vault-summary {
+  min-height: 18px;
+  margin: 0 0 12px;
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* minmax(0, 1fr)로 제목이 길어도 열 너비가 밀리지 않게 한다. */
+.cheese-clip-vault-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cheese-clip-vault-grid > li {
+  position: relative;
+  min-width: 0;
+}
+
+.cheese-clip-vault-grid > .cheese-clip-vault-date-group,
+.cheese-clip-vault-grid > .cheese-clip-vault-group {
+  grid-column: 1 / -1;
+}
+
+.cheese-clip-vault-date-group > h3,
+.cheese-clip-vault-group summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  margin: 2px 0 9px;
+  color: inherit;
+  font-family: var(--cheese-clip-vault-font-family, inherit);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cheese-clip-vault-date-group > h3 small,
+.cheese-clip-vault-group summary small {
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-clip-vault-group details {
+  min-width: 0;
+}
+
+.cheese-clip-vault-group summary {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 5px;
+  border-radius: 4px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.cheese-clip-vault-group summary:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.cheese-clip-vault-group summary > span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-clip-vault-group summary > .cheese-clip-vault-group-chevron {
+  flex: none;
+  margin-left: auto;
+  transition: transform 0.14s ease;
+}
+
+.cheese-clip-vault-group details:not([open])
+  .cheese-clip-vault-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.cheese-clip-vault-group-grid {
+  margin-bottom: 10px;
+}
+
+.cheese-clip-vault-card-link {
+  display: block;
+  min-width: 0;
+  color: #fff;
+  text-decoration: none;
+}
+
+.cheese-clip-vault-card-thumb {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 6px;
+  background-color: rgba(127, 127, 127, 0.16);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.cheese-clip-vault-card-thumb.is-adult:not(.is-native-adult)::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  /* 네이티브 클립 카드의 연령 제한 딤과 같은 색상 및 농도. */
+  background-color: rgba(
+    var(--sem-color-surface-neutral-base-static-rgb, 14, 15, 16),
+    0.301961
+  );
+  content: "";
+  pointer-events: none;
+}
+
+.cheese-clip-vault-card-adult {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--sem-color-content-neutral-primary-static, #fff) !important;
+  opacity: 1 !important;
+  text-align: center;
+  pointer-events: none;
+}
+
+.cheese-clip-vault-card-adult svg,
+.cheese-clip-vault-card-adult svg * {
+  color: var(--sem-color-content-neutral-primary-static, #fff) !important;
+  opacity: 1 !important;
+}
+
+.cheese-clip-vault-card-adult-label {
+  margin-top: 10px;
+  color: var(--sem-color-content-neutral-primary-static, #fff) !important;
+  opacity: 1 !important;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 19px;
+}
+
+.cheese-clip-vault-card-thumb.is-adult .cheese-clip-vault-card-body {
+  z-index: 1;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  flex-direction: column;
+  padding: 15px;
+  background: none;
+}
+
+.cheese-clip-vault-card-body {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
+  padding: 44px 10px 10px;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.78));
+}
+
+.cheese-clip-vault-card-title,
+.cheese-clip-vault-card-channel,
+.cheese-clip-vault-card-play,
+.cheese-clip-vault-card-like {
+  min-width: 0;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.cheese-clip-vault-card-title {
+  overflow: hidden;
+  display: -webkit-box;
+  font-size: 14px;
+  line-height: 19px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cheese-clip-vault-card-channel {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-clip-vault-card-metrics {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 16px;
+  margin-top: 4px;
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.cheese-clip-vault-card-play,
+.cheese-clip-vault-card-like {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 16px;
+  color: inherit !important;
+  font: inherit;
+  line-height: 16px;
+  text-shadow: inherit;
+  white-space: nowrap;
+}
+
+.cheese-clip-vault-card-metric-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 16px;
+  margin: 0;
+  color: inherit;
+  font-style: normal;
+  line-height: 0;
+}
+
+.cheese-clip-vault-card-metric-icon svg {
+  display: block !important;
+  width: 12px !important;
+  height: 12px !important;
+  margin: 0 !important;
+  color: inherit !important;
+  vertical-align: middle;
+}
+
+.cheese-clip-vault-empty {
+  grid-column: 1 / -1;
+  padding: 72px 0;
+  text-align: center;
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 13px;
+}
+
+.cheese-clip-vault-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.cheese-clip-vault-more-wrap button {
+  min-width: 160px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cheese-clip-vault-more-wrap button:hover {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.cheese-clip-vault-more-wrap button[hidden] {
+  display: none;
+}
+
+@media (max-width: 1500px) {
+  .cheese-clip-vault-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .cheese-clip-vault-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 735px) {
+  .cheese-clip-vault-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cheese-clip-vault-toolbar input[type="search"],
+  .cheese-clip-vault-following-import-controls,
+  .cheese-clip-vault-sort-picker,
+  .cheese-clip-vault-sort-picker > button,
+  .cheese-clip-vault-group-toggle {
+    flex: none;
+    width: 100%;
+    max-width: none;
+  }
+
+  .cheese-clip-vault-following-import-controls {
+    flex-wrap: wrap;
+  }
+
+  .cheese-clip-vault-following-import {
+    flex: 1 0 100%;
+  }
+
+  .cheese-clip-vault-following-import-pause,
+  .cheese-clip-vault-following-import-stop {
+    flex: 1 1 calc(50% - 3px);
+  }
+
+  .cheese-clip-vault-sort-menu {
+    right: auto;
+    left: 0;
+    width: 100%;
+  }
+
+  .cheese-clip-vault-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  #cheese-clip-vault-btn {
+    min-width: 0;
+  }
+
+  .cheese-clip-vault-button-label {
+    display: none;
+  }
+
+  .cheese-clip-vault-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 목록 항목의 제거(×) 버튼.
+   ⚠ z-index 로 카드 <a> 위에 확실히 올린다. 아래로 깔리면 클릭이 링크에 먹혀
+   제거 대신 클립 페이지로 이동한다. */
+.cheese-clip-vault-del {
+  z-index: 3;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
+}
+
+/* ⚠ 별표는 absolute 라 기준이 될 positioned 조상이 필요하다. 원래 static 인 카드만
+   별도 클래스로 relative 를 보장해, 채널 클립의 absolute 링크 배치를 덮지 않는다. */
+.cheese-clip-vault-card-anchor {
+  position: relative;
+}
+
+/* 즐겨찾기 탭의 해제 버튼은 별표(채워짐)로 보여 준다 — × 는 '목록에서만 제거'라는
+   뜻이라 즐겨찾기 해제와 구분이 필요하다. 색은 사이드바 즐겨찾기와 같은 톤. */
+.cheese-clip-vault-del.is-star {
+  background: rgba(0, 0, 0, 0.45);
+  color: #ffcc33;
+}
+
+.cheese-clip-vault-del svg {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.cheese-clip-vault-del:hover,
+.cheese-clip-vault-del:focus-visible {
+  background: rgba(0, 0, 0, 0.78);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transform: scale(1.08);
+}
+
+.cheese-clip-vault-del:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* 카드 위 즐겨찾기 별표. 카드 전체가 <a> 라 위에 얹고 클릭은 JS 에서 가로챈다. */
+.cheese-clip-vault-star {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
+}
+
+/* 평소엔 숨기고 호버·담긴 상태에서만 보인다(카드 디자인을 해치지 않도록). */
+a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
+.cheese-clip-vault-star:focus-visible,
+.cheese-clip-vault-star.is-on {
+  opacity: 1;
+}
+
+/* 담긴 상태 색은 사이드바 즐겨찾기(.cheese-cf-page-favorite.is-fav)와 맞춘다. */
+.cheese-clip-vault-star.is-on {
+  color: #ffcc33;
+}
+
+.cheese-clip-vault-star:hover,
+.cheese-clip-vault-star:focus-visible {
+  background: rgba(0, 0, 0, 0.75);
+  box-shadow: 0 2px 9px rgba(0, 0, 0, 0.32);
+  transform: scale(1.08);
+}
+
+.cheese-clip-vault-star:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.cheese-clip-vault-star svg {
+  display: block;
+  flex: none;
+  pointer-events: none;
+}
+
+/* 기록된 좋아요는 별표 버튼과 역할이 다르므로 조작 버튼 대신 상태 배지로 표시한다.
+   원본 카드의 채널·재생 수 메타가 좌측 하단에 있어 우측 하단을 사용한다. */
+.cheese-clip-vault-like-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ff6472;
+  pointer-events: none;
+}
+
+.cheese-clip-vault-like-badge svg {
+  display: block;
+  width: 17px;
+  height: 17px;
 }

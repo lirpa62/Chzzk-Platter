@@ -2,6 +2,8 @@ const SERVICE_API_BASE = "https://api.chzzk.naver.com/service/v1";
 const API_BASE = `${SERVICE_API_BASE}/channels`;
 const MANAGE_API_BASE = "https://api.chzzk.naver.com/manage/v1";
 const CREATORHUB_API_BASE = "https://creatorhub-api.naver.com/api/v5.0";
+const CREATORHUB_CLIP_CARD_API_BASE =
+  "https://creatorhub-api.naver.com/api/v7.0";
 const COMMENT_API_BASE = "https://apis.naver.com/nng_main/nng_comment_api/v1";
 const CLIP_LIKE_API_BASE =
   "https://apis.naver.com/clip-viewer-web/like/v1/services/CHZZK/contents";
@@ -31,6 +33,18 @@ const CLIP_TAG_FETCH_TIMEOUT_MS = 4000;
 const CLIP_TAG_CACHE_TTL_MS = 30 * 60 * 1000;
 const CLIP_TAG_FAILURE_CACHE_TTL_MS = 2 * 60 * 1000;
 const CLIP_TAG_CACHE_MAX = 2000;
+const CLIP_VAULT_METRIC_CACHE_TTL_MS = 30 * 60 * 1000;
+const CLIP_VAULT_METRIC_FAILURE_CACHE_TTL_MS = 2 * 60 * 1000;
+const CLIP_VAULT_METRIC_CACHE_MAX = 2000;
+const CLIP_VAULT_METRIC_BATCH_MAX = 60;
+const CLIP_VAULT_METRIC_CONCURRENCY = 4;
+const CLIP_VAULT_METRIC_FETCH_TIMEOUT_MS = 8000;
+const CLIP_VAULT_FOLLOWING_IMPORT_CHANNEL_BATCH = 5;
+const CLIP_VAULT_FOLLOWING_IMPORT_CANDIDATE_MAX = 100;
+const CLIP_VAULT_FOLLOWING_IMPORT_PAGE_BATCH_MAX = 4;
+const CLIP_VAULT_FOLLOWING_IMPORT_REACTION_CONCURRENCY = 4;
+const CLIP_VAULT_FOLLOWING_IMPORT_FETCH_TIMEOUT_MS = 10000;
+const CLIP_VAULT_FOLLOWING_IMPORT_CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const CACHE_STORAGE_PREFIX = "cache:";
 const CHANNEL_SEARCH_STORAGE_PREFIX = "channelSearch:";
@@ -43,6 +57,7 @@ const UPDATE_NOTICE_TOAST_POSITION_KEY = "cheeseUpdateNoticeToastPosition";
 const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
 const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
 const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
+const CHAT_HISTORY_STORAGE_PREFIX = "cheeseChatHistory:";
 const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
 const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
 const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
@@ -129,6 +144,7 @@ const commentTimestampCache = new Map();
 const videoCommentCountCache = new Map();
 const clipTagCache = new Map();
 const clipTagInFlight = new Map();
+const clipVaultFollowingImportControllers = new Map();
 const collectionTaskQueue = [];
 let activeCollectionTaskCount = 0;
 let channelSearchQueue = Promise.resolve();
@@ -144,9 +160,7 @@ if (chrome.webRequest?.onCompleted) {
   });
 }
 
-// ⚠ storage.session 은 기본 접근 수준이 TRUSTED_CONTEXTS 라 콘텐츠 스크립트에서
-// 읽기·쓰기가 조용히 실패한다(예외만 던지고 값은 안 들어감 — 채팅 이어보기가
-// '저장분: 0' 이던 원인). 콘텐츠 스크립트에도 열어 준다.
+// storage.session 을 사용하는 기능을 콘텐츠 스크립트에서도 읽고 쓸 수 있게 한다.
 // 서비스 워커는 수시로 깨었다 죽으므로 최초 실행 시점에 매번 호출한다.
 try {
   chrome.storage.session
@@ -154,10 +168,62 @@ try {
     .catch(() => {});
 } catch {}
 
+async function clearChatHistoryOnBrowserStartup() {
+  try {
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all || {}).filter((key) =>
+      key.startsWith(CHAT_HISTORY_STORAGE_PREFIX),
+    );
+    if (keys.length) await chrome.storage.local.remove(keys);
+  } catch {}
+}
+
+async function migrateChatHistorySessionToLocal() {
+  try {
+    const [sessionItems, localItems] = await Promise.all([
+      chrome.storage.session.get(null),
+      chrome.storage.local.get(null),
+    ]);
+    const migrated = {};
+    for (const [key, value] of Object.entries(sessionItems || {})) {
+      if (
+        !key.startsWith(CHAT_HISTORY_STORAGE_PREFIX) ||
+        !Array.isArray(value?.items) ||
+        !value.items.length
+      ) {
+        continue;
+      }
+      const localValue = localItems?.[key];
+      if (
+        !Array.isArray(localValue?.items) ||
+        Number(value.at) > Number(localValue.at)
+      ) {
+        migrated[key] = value;
+      }
+    }
+    if (Object.keys(migrated).length) {
+      await chrome.storage.local.set(migrated);
+    }
+  } catch {}
+}
+
+// 채팅 이어보기는 새로고침·SPA 재진입·확장 업데이트는 견뎌야 하지만 브라우저를
+// 완전히 닫으면 비워지는 기능이다. local에 저장해 업데이트를 통과시키고, 새 브라우저
+// 세션이 시작될 때 해당 접두어 데이터만 정리한다.
+chrome.runtime.onStartup.addListener(() => {
+  void clearChatHistoryOnBrowserStartup();
+});
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   // 설치 직후에는 항상, 업데이트 때는 사용자 설정에 따라 안내를 띄운다. 이미 열려 있던
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
+
+  // 이전 버전은 이어보기 기록을 storage.session에 저장했다. 브라우저가 업데이트 과정에서
+  // 해당 메모리를 아직 유지하고 있다면 최신 기록을 local로 넘겨 첫 업데이트 손실을 줄인다.
+  if (details.reason === "update") {
+    await migrateChatHistorySessionToLocal();
+  }
 
   // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
   // 설정 페이지가 data-new-feature로 선언한 기능 중 아직 확인하지 않은 항목만 표시한다.
@@ -1650,8 +1716,13 @@ function parseMakeClipDeleteUrl(url) {
 }
 
 async function fetchClipLikeCount(clip, signal) {
+  const reaction = await fetchClipLikeReaction(clip, signal);
+  return reaction.count;
+}
+
+async function fetchClipLikeReaction(clip, signal) {
   const clipUID = String(clip?.clipUID || "").trim();
-  if (!clipUID) return 0;
+  if (!clipUID) return { count: 0, isReacted: false, isLogin: null };
 
   // 좋아요 카운트만 주는 경량 엔드포인트. clipviewer/card는 VOD 매니페스트까지
   // 통째로 내려줘 요청당 페이로드가 수 KB였으나, 이 API는 수백 바이트뿐이다.
@@ -1679,20 +1750,21 @@ async function fetchClipLikeCount(clip, signal) {
   }
 
   const payload = await response.json();
-  const count = extractClipLikeCount(payload);
-  return Number.isFinite(count) ? count : 0;
+  return extractClipLikeReaction(payload);
 }
 
-function extractClipLikeCount(payload) {
+function extractClipLikeReaction(payload) {
   const visited = new Set();
   const stack = [payload];
   let inspected = 0;
+  let isLogin = null;
 
   while (stack.length && inspected < 500) {
     const value = stack.pop();
     if (!value || typeof value !== "object" || visited.has(value)) continue;
     visited.add(value);
     inspected += 1;
+    if (typeof value.isLogin === "boolean") isLogin = value.isLogin;
 
     const reactions = value.reactions;
     if (Array.isArray(reactions)) {
@@ -1701,24 +1773,471 @@ function extractClipLikeCount(payload) {
       const reactionsCount = Number(
         likeReaction?.count ?? likeReaction?.reactionCount,
       );
-      if (Number.isFinite(reactionsCount)) return reactionsCount;
+      if (likeReaction) {
+        return {
+          count: Number.isFinite(reactionsCount) ? reactionsCount : 0,
+          isReacted: likeReaction.isReacted === true,
+          isLogin,
+        };
+      }
     }
 
     const reaction = value.reaction;
     if (reaction && typeof reaction === "object") {
       const reactionCount = Number(reaction.count ?? reaction.reactionCount);
-      if (Number.isFinite(reactionCount)) return reactionCount;
+      if (Number.isFinite(reactionCount)) {
+        return {
+          count: reactionCount,
+          isReacted: reaction.isReacted === true,
+          isLogin,
+        };
+      }
     }
 
     const directCount = Number(value.reactionCount ?? value.likeCount);
-    if (Number.isFinite(directCount)) return directCount;
+    if (Number.isFinite(directCount)) {
+      return {
+        count: directCount,
+        isReacted: value.isReacted === true,
+        isLogin,
+      };
+    }
 
     Object.values(value).forEach((child) => {
       if (child && typeof child === "object") stack.push(child);
     });
   }
 
-  return 0;
+  return { count: 0, isReacted: false, isLogin };
+}
+
+function extractClipLikeCount(payload) {
+  return extractClipLikeReaction(payload).count;
+}
+
+let clipVaultFollowingChannelsCache = null;
+async function fetchClipVaultFollowingChannels() {
+  const now = Date.now();
+  if (
+    clipVaultFollowingChannelsCache?.channels?.length &&
+    now - clipVaultFollowingChannelsCache.at <
+      CLIP_VAULT_FOLLOWING_IMPORT_CHANNEL_CACHE_TTL_MS
+  ) {
+    return clipVaultFollowingChannelsCache.channels;
+  }
+  const pageSize = 505;
+  const fetchPage = async (page) => {
+    const url = new URL(
+      "https://api.chzzk.naver.com/service/v1/channels/followings",
+    );
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("size", String(pageSize));
+    url.searchParams.set("sortType", "FOLLOW");
+    const response = await fetchWithTimeout(
+      url.toString(),
+      {
+        credentials: "include",
+        headers: { accept: "application/json, text/plain, */*" },
+      },
+      CLIP_VAULT_FOLLOWING_IMPORT_FETCH_TIMEOUT_MS,
+    );
+    if (!response.ok) {
+      throw new Error(`팔로잉 채널 요청 실패: HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    return {
+      list: Array.isArray(payload?.content?.followingList)
+        ? payload.content.followingList
+        : [],
+      totalPage: Number(payload?.content?.totalPage),
+    };
+  };
+
+  const first = await fetchPage(0);
+  const totalPage = Number.isFinite(first.totalPage)
+    ? Math.max(1, Math.floor(first.totalPage))
+    : 1;
+  const pages =
+    totalPage > 1
+      ? await mapWithConcurrency(
+          Array.from({ length: totalPage - 1 }, (_, index) => index + 1),
+          3,
+          fetchPage,
+        )
+      : [];
+  const seen = new Set();
+  const channels = [first, ...pages]
+    .flatMap((page) => page.list)
+    .map((item) => {
+      const channel = item?.channel || item;
+      const channelId = String(
+        channel?.channelId || item?.channelId || "",
+      ).trim();
+      if (!channelId || seen.has(channelId)) return null;
+      seen.add(channelId);
+      return {
+        channelId,
+        channelName: String(channel?.channelName || "").trim(),
+      };
+    })
+    .filter(Boolean);
+  clipVaultFollowingChannelsCache = { at: now, channels };
+  return channels;
+}
+
+function normalizeClipVaultFollowingImportCursor(raw) {
+  const clipUID = String(raw?.clipUID || "").trim();
+  return clipUID
+    ? { clipUID, readCount: raw?.readCount ?? "" }
+    : { clipUID: "", readCount: "" };
+}
+
+function clipVaultFollowingImportCursorKey(cursor) {
+  return `${String(cursor?.clipUID || "").trim()}:${String(cursor?.readCount ?? "")}`;
+}
+
+function normalizeClipVaultFollowingClip(clip, channel) {
+  const owner = clip?.ownerChannel || {};
+  const playCount = Number(clip?.readCount ?? clip?.viewCount);
+  return {
+    uid: String(clip?.clipUID || "").trim(),
+    title: String(clip?.clipTitle || clip?.contentTitle || "").trim(),
+    thumb: String(
+      clip?.thumbnailImageUrl || clip?.thumbnailUrl || "",
+    ).trim(),
+    channelName: String(
+      owner?.channelName || clip?.ownerChannelName || channel.channelName,
+    ).trim(),
+    channelId: String(
+      clip?.ownerChannelId || owner?.channelId || channel.channelId,
+    ).trim(),
+    videoId: String(clip?.videoId || "").trim(),
+    adult:
+      clip?.adult === true || String(clip?.adult || "").toLowerCase() === "true",
+    adultKnown: true,
+    ...(Number.isFinite(playCount)
+      ? {
+          playCount: Math.max(0, Math.round(playCount)),
+          playCountKnown: true,
+          playCountFetchedAt: Date.now(),
+        }
+      : {}),
+  };
+}
+
+async function fetchClipVaultFollowingChannelClipPageOnce(
+  channel,
+  cursor,
+  signal,
+) {
+  const url = new URL(
+    `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channel.channelId)}/clips`,
+  );
+  url.searchParams.set("clipUID", String(cursor?.clipUID || ""));
+  url.searchParams.set("filterType", "ALL");
+  url.searchParams.set("orderType", "RECENT");
+  url.searchParams.set("size", String(CLIP_PAGE_SIZE));
+  url.searchParams.set("readCount", String(cursor?.readCount ?? ""));
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      credentials: "include",
+      signal,
+      headers: { accept: "application/json, text/plain, */*" },
+    },
+    CLIP_VAULT_FOLLOWING_IMPORT_FETCH_TIMEOUT_MS,
+  );
+  if (!response.ok) {
+    throw new Error(`채널 클립 요청 실패: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const clips = Array.isArray(payload?.content?.data)
+    ? payload.content.data
+    : [];
+  const next = normalizeClipVaultFollowingImportCursor(
+    payload?.content?.page?.next,
+  );
+  return {
+    items: clips.map((clip) =>
+      normalizeClipVaultFollowingClip(clip, channel),
+    ),
+    next: next.clipUID ? next : null,
+  };
+}
+
+async function fetchClipVaultFollowingChannelClipPage(
+  channel,
+  cursor,
+  signal,
+) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= FETCH_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      throwIfAborted(signal);
+      return await fetchClipVaultFollowingChannelClipPageOnce(
+        channel,
+        cursor,
+        signal,
+      );
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      lastError = error;
+      if (attempt >= FETCH_RETRY_DELAYS_MS.length) break;
+      await sleep(FETCH_RETRY_DELAYS_MS[attempt], signal);
+    }
+  }
+  throw lastError;
+}
+
+async function checkClipVaultFollowingLikeCandidates(
+  rawItems,
+  maxAttempts = 3,
+  signal,
+) {
+  let pending = (Array.isArray(rawItems) ? rawItems : [])
+    .map((item) => {
+      const uid = String(item?.uid || item?.clipUID || "").trim();
+      return /^[\w-]{6,64}$/.test(uid) ? { ...item, uid } : null;
+    })
+    .filter(Boolean);
+  const likedItems = [];
+  let checkedCount = 0;
+  let retryRequestCount = 0;
+  let loginTrueCount = 0;
+  let loginFalseCount = 0;
+  const attempts = Math.max(1, Math.min(6, Math.floor(maxAttempts) || 1));
+
+  for (let attempt = 0; attempt < attempts && pending.length; attempt += 1) {
+    throwIfAborted(signal);
+    if (attempt > 0) {
+      retryRequestCount += pending.length;
+      await sleep(
+        FETCH_RETRY_DELAYS_MS[
+          Math.min(attempt - 1, FETCH_RETRY_DELAYS_MS.length - 1)
+        ],
+        signal,
+      );
+    }
+    const results = await mapWithConcurrency(
+      pending,
+      CLIP_VAULT_FOLLOWING_IMPORT_REACTION_CONCURRENCY,
+      async (item) => {
+        try {
+          const reaction = await fetchClipLikeReaction(
+            { clipUID: item.uid },
+            signal,
+          );
+          return { item, reaction };
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          return { item, reaction: null };
+        }
+      },
+    );
+    throwIfAborted(signal);
+    const failed = [];
+    for (const result of results) {
+      if (!result.reaction) {
+        failed.push(result.item);
+        continue;
+      }
+      checkedCount += 1;
+      if (result.reaction.isLogin === true) loginTrueCount += 1;
+      if (result.reaction.isLogin === false) loginFalseCount += 1;
+      if (!result.reaction.isReacted) continue;
+      likedItems.push({
+        ...result.item,
+        likeCount: Math.max(0, Number(result.reaction.count) || 0),
+        likeCountKnown: true,
+        likeCountFetchedAt: Date.now(),
+      });
+    }
+    pending = failed;
+  }
+
+  if (loginFalseCount > 0 && loginTrueCount === 0) {
+    throw new Error(
+      "치지직 로그인 상태를 확인할 수 없습니다. 로그인 후 다시 시도해 주세요.",
+    );
+  }
+  return {
+    items: likedItems,
+    failedItems: pending,
+    checkedCount,
+    retryRequestCount,
+  };
+}
+
+async function importClipVaultFollowingLikes(
+  rawKnownUIDs,
+  rawStartChannelIndex = 0,
+  rawStartClipCursor = null,
+  signal,
+) {
+  throwIfAborted(signal);
+  const knownUIDs = new Set(
+    (Array.isArray(rawKnownUIDs) ? rawKnownUIDs : [])
+      .map((uid) => String(uid || "").trim())
+      .filter((uid) => /^[\w-]{6,64}$/.test(uid))
+      .slice(0, 100000),
+  );
+  const channels = await fetchClipVaultFollowingChannels();
+  throwIfAborted(signal);
+  if (!channels.length) {
+    return {
+      items: [],
+      followedChannelCount: 0,
+      scannedChannelCount: 0,
+      startChannelIndex: 0,
+      nextChannelIndex: 0,
+      nextClipCursor: null,
+      candidateCount: 0,
+      checkedCount: 0,
+      failedCount: 0,
+      hasMoreChannels: false,
+    };
+  }
+
+  const requestedStartIndex = Number(rawStartChannelIndex);
+  const startIndex = Number.isFinite(requestedStartIndex)
+    ? Math.min(channels.length, Math.max(0, Math.floor(requestedStartIndex)))
+    : 0;
+  let nextChannelIndex = startIndex;
+  let nextClipCursor = normalizeClipVaultFollowingImportCursor(
+    rawStartClipCursor,
+  );
+  let scannedChannelCount = 0;
+  let fetchedPageCount = 0;
+  const candidates = [];
+  const seenUIDs = new Set(knownUIDs);
+  const requestedCursors = new Set();
+
+  while (
+    nextChannelIndex < channels.length &&
+    scannedChannelCount < CLIP_VAULT_FOLLOWING_IMPORT_CHANNEL_BATCH &&
+    fetchedPageCount < CLIP_VAULT_FOLLOWING_IMPORT_PAGE_BATCH_MAX &&
+    candidates.length < CLIP_VAULT_FOLLOWING_IMPORT_CANDIDATE_MAX
+  ) {
+    throwIfAborted(signal);
+    const channel = channels[nextChannelIndex];
+    const positionKey = `${nextChannelIndex}:${clipVaultFollowingImportCursorKey(nextClipCursor)}`;
+    if (requestedCursors.has(positionKey)) {
+      throw new Error(
+        `${channel.channelName || "팔로잉 채널"}의 클립 페이지 커서가 반복되었습니다.`,
+      );
+    }
+    requestedCursors.add(positionKey);
+
+    let page;
+    try {
+      page = await fetchClipVaultFollowingChannelClipPage(
+        channel,
+        nextClipCursor,
+        signal,
+      );
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      throw new Error(
+        `${channel.channelName || "팔로잉 채널"}의 전체 클립을 불러오지 못했습니다: ${normalizeError(error)}`,
+      );
+    }
+    fetchedPageCount += 1;
+    for (const item of page.items) {
+      if (!item.uid || seenUIDs.has(item.uid)) continue;
+      seenUIDs.add(item.uid);
+      candidates.push(item);
+    }
+
+    if (page.next) {
+      const currentCursorKey = clipVaultFollowingImportCursorKey(nextClipCursor);
+      const nextCursorKey = clipVaultFollowingImportCursorKey(page.next);
+      if (nextCursorKey === currentCursorKey) {
+        throw new Error(
+          `${channel.channelName || "팔로잉 채널"}의 다음 클립 페이지를 확인하지 못했습니다.`,
+        );
+      } else {
+        nextClipCursor = page.next;
+      }
+    } else {
+      nextChannelIndex += 1;
+      nextClipCursor = { clipUID: "", readCount: "" };
+      scannedChannelCount += 1;
+    }
+  }
+  const now = Date.now();
+  const checked = await checkClipVaultFollowingLikeCandidates(
+    candidates,
+    3,
+    signal,
+  );
+  return {
+    items: checked.items.map((item, index) => ({
+      ...item,
+      at: now - index,
+    })),
+    failedItems: checked.failedItems,
+    followedChannelCount: channels.length,
+    scannedChannelCount,
+    startChannelIndex: startIndex,
+    nextChannelIndex,
+    nextClipCursor: nextClipCursor.clipUID ? nextClipCursor : null,
+    candidateCount: candidates.length,
+    fetchedPageCount,
+    checkedCount: checked.checkedCount,
+    retryRequestCount: checked.retryRequestCount,
+    failedCount: checked.failedItems.length,
+    hasMoreChannels: nextChannelIndex < channels.length,
+  };
+}
+
+async function retryClipVaultFollowingLikes(rawItems, signal) {
+  const now = Date.now();
+  const checked = await checkClipVaultFollowingLikeCandidates(
+    rawItems,
+    3,
+    signal,
+  );
+  return {
+    items: checked.items.map((item, index) => ({
+      ...item,
+      at: now - index,
+    })),
+    failedItems: checked.failedItems,
+    checkedCount: checked.checkedCount,
+    retryRequestCount: checked.retryRequestCount,
+    failedCount: checked.failedItems.length,
+  };
+}
+
+function normalizeClipVaultFollowingImportJobId(value) {
+  const jobId = String(value || "").trim();
+  return /^[\w:.-]{8,120}$/.test(jobId) ? jobId : "";
+}
+
+function runClipVaultFollowingImportJob(rawJobId, task) {
+  const jobId =
+    normalizeClipVaultFollowingImportJobId(rawJobId) ||
+    `legacy:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  clipVaultFollowingImportControllers.get(jobId)?.abort();
+  const controller = new AbortController();
+  clipVaultFollowingImportControllers.set(jobId, controller);
+  return Promise.resolve()
+    .then(() => task(controller.signal))
+    .finally(() => {
+      if (clipVaultFollowingImportControllers.get(jobId) === controller) {
+        clipVaultFollowingImportControllers.delete(jobId);
+      }
+    });
+}
+
+function cancelClipVaultFollowingImportJob(rawJobId) {
+  const jobId = normalizeClipVaultFollowingImportJobId(rawJobId);
+  if (!jobId) return false;
+  const controller = clipVaultFollowingImportControllers.get(jobId);
+  if (!controller) return false;
+  controller.abort();
+  clipVaultFollowingImportControllers.delete(jobId);
+  return true;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -3428,13 +3947,253 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 const CAFE_CLIP_PLAY_INFO_PREFIX =
   "https://api.chzzk.naver.com/service/v1/play-info/clip/";
 const CAFE_CLIP_DETAIL_PREFIX = "https://api.chzzk.naver.com/service/v1/clips/";
+const clipVaultMetricCache = new Map();
+
+function setClipVaultMetricCache(clipUID, value) {
+  if (clipVaultMetricCache.has(clipUID)) {
+    clipVaultMetricCache.delete(clipUID);
+  }
+  clipVaultMetricCache.set(clipUID, value);
+  while (clipVaultMetricCache.size > CLIP_VAULT_METRIC_CACHE_MAX) {
+    const oldest = clipVaultMetricCache.keys().next().value;
+    if (oldest === undefined) break;
+    clipVaultMetricCache.delete(oldest);
+  }
+}
+
+async function fetchClipVaultPlayInfo(clipUID) {
+  const response = await fetchWithTimeout(
+    `${CAFE_CLIP_PLAY_INFO_PREFIX}${encodeURIComponent(clipUID)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json, text/plain, */*" },
+    },
+    CLIP_VAULT_METRIC_FETCH_TIMEOUT_MS,
+  );
+  if (!response.ok) {
+    throw new Error(`클립 상세 API 요청 실패: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const content = payload?.content;
+  if (Number(payload?.code) !== 200 || !content) {
+    throw new Error(payload?.message || "클립 상세 정보를 읽을 수 없습니다.");
+  }
+  const contentId = String(content.contentId || "").trim();
+  if (contentId && contentId !== clipUID) {
+    throw new Error("클립 재생 정보가 요청한 클립과 다릅니다.");
+  }
+  const videoId = String(content.videoId || "").trim();
+  if (!/^[0-9a-f]{40}$/i.test(videoId)) {
+    throw new Error("클립 미디어 ID를 읽을 수 없습니다.");
+  }
+  const playCount = Number(content.readCount ?? content.viewCount);
+  return {
+    videoId,
+    ...(Number.isFinite(playCount)
+      ? { playCount: Math.max(0, Math.round(playCount)) }
+      : {}),
+  };
+}
+
+async function fetchClipVaultCreatorMetric(clipUID, videoId) {
+  const url = new URL(`${CREATORHUB_CLIP_CARD_API_BASE}/clipviewer/card`);
+  url.searchParams.set("userInteraction", "false");
+  url.searchParams.set("seedType", "SPECIFIC");
+  url.searchParams.set("serviceType", "CHZZK");
+  url.searchParams.set("seedMediaId", videoId);
+  url.searchParams.set("mediaType", "SHORT_FORM");
+  url.searchParams.set("panelType", "sdk_chzzk");
+  url.searchParams.set(
+    "referer",
+    `https://chzzk.naver.com/clips/${encodeURIComponent(clipUID)}`,
+  );
+  url.searchParams.set("recType", "CHZZK");
+  url.searchParams.set(
+    "recId",
+    JSON.stringify({
+      seedClipUID: clipUID,
+      fromType: "GLOBAL",
+      listType: "RECOMMEND",
+    }),
+  );
+  url.searchParams.set("enableReverse", "false");
+  url.searchParams.set("adAllowed", "false");
+  url.searchParams.set("clickNsc", "chzzk_url_clip");
+  url.searchParams.set("clickArea", "clip_item");
+  url.searchParams.set("deviceType", "html5_mo");
+  url.searchParams.set("profileOverride", "false");
+
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      credentials: "include",
+      headers: { accept: "application/json, text/plain, */*" },
+    },
+    CLIP_VAULT_METRIC_FETCH_TIMEOUT_MS,
+  );
+  if (!response.ok) {
+    throw new Error(`CreatorHub 클립 요청 실패: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const content = payload?.body?.card?.content;
+  if (
+    Number(payload?.header?.code) !== 0 ||
+    String(content?.contentId || "").trim() !== clipUID
+  ) {
+    throw new Error("CreatorHub 클립 응답을 확인할 수 없습니다.");
+  }
+  const playCount = Number(content.count ?? content.vod?.count);
+  if (!Number.isFinite(playCount)) {
+    throw new Error("정확한 클립 재생 수를 읽을 수 없습니다.");
+  }
+  const likeReaction = Array.isArray(content?.interaction?.like?.reactions)
+    ? content.interaction.like.reactions.find(
+        (reaction) => reaction?.reactionType === "like",
+      )
+    : null;
+  const likeCount = Number(likeReaction?.count);
+  return {
+    videoId,
+    playCount: Math.max(0, Math.round(playCount)),
+    ...(Number.isFinite(likeCount)
+      ? { likeCount: Math.max(0, Math.round(likeCount)) }
+      : {}),
+  };
+}
+
+function normalizeClipVaultMetricDescriptor(raw) {
+  const clipUID = String(
+    typeof raw === "string" ? raw : raw?.clipUID || raw?.uid || "",
+  ).trim();
+  if (!/^[\w-]{6,64}$/.test(clipUID)) return null;
+  const rawVideoId = String(
+    typeof raw === "object" ? raw?.videoId || "" : "",
+  ).trim();
+  const rawPlayCount = Number(
+    typeof raw === "object" ? raw?.apiPlayCount : NaN,
+  );
+  return {
+    clipUID,
+    videoId: /^[0-9a-f]{40}$/i.test(rawVideoId) ? rawVideoId : "",
+    ...(Number.isFinite(rawPlayCount)
+      ? { apiPlayCount: Math.max(0, Math.round(rawPlayCount)) }
+      : {}),
+  };
+}
+
+function clipVaultMetricResult(clipUID, cached, now) {
+  return {
+    clipUID,
+    ...(/^[0-9a-f]{40}$/i.test(String(cached.videoId || ""))
+      ? { videoId: cached.videoId }
+      : {}),
+    ...(Number.isFinite(cached.playCount)
+      ? {
+          playCount: cached.playCount,
+          playCountFetchedAt: cached.playCountFetchedAt,
+        }
+      : {}),
+    ...(Number.isFinite(cached.likeCount)
+      ? {
+          likeCount: cached.likeCount,
+          likeCountFetchedAt: cached.likeCountFetchedAt,
+        }
+      : {}),
+    nextRetryAt: Math.min(
+      Number(cached.playExpiresAt || now),
+      Number(cached.likeExpiresAt || now),
+    ),
+  };
+}
+
+async function fetchClipVaultMetric(descriptor, forceRefresh = false) {
+  const clipUID = descriptor.clipUID;
+  const now = Date.now();
+  const cached = clipVaultMetricCache.get(clipUID) || {};
+  if (descriptor.videoId) cached.videoId = descriptor.videoId;
+  const playFresh =
+    !forceRefresh && Number(cached.playExpiresAt || 0) > now;
+  const likeFresh =
+    !forceRefresh && Number(cached.likeExpiresAt || 0) > now;
+  if (playFresh && likeFresh) {
+    return clipVaultMetricResult(clipUID, cached, now);
+  }
+
+  const next = { ...cached };
+  let playInfoMetric = null;
+  let creatorMetric = null;
+  try {
+    if (!next.videoId) {
+      playInfoMetric = await fetchClipVaultPlayInfo(clipUID);
+      next.videoId = playInfoMetric.videoId;
+    }
+    creatorMetric = await fetchClipVaultCreatorMetric(
+      clipUID,
+      next.videoId,
+    );
+  } catch {}
+
+  const resolvedPlayCount = Number.isFinite(creatorMetric?.playCount)
+    ? creatorMetric.playCount
+    : Number.isFinite(playInfoMetric?.playCount)
+      ? playInfoMetric.playCount
+      : descriptor.apiPlayCount;
+  if (Number.isFinite(resolvedPlayCount)) {
+    next.playCount = resolvedPlayCount;
+    next.playCountFetchedAt = now;
+    next.playExpiresAt = now + CLIP_VAULT_METRIC_CACHE_TTL_MS;
+  } else if (!playFresh) {
+    next.playExpiresAt = now + CLIP_VAULT_METRIC_FAILURE_CACHE_TTL_MS;
+  }
+
+  if (Number.isFinite(creatorMetric?.likeCount)) {
+    next.likeCount = creatorMetric.likeCount;
+    next.likeCountFetchedAt = now;
+    next.likeExpiresAt = now + CLIP_VAULT_METRIC_CACHE_TTL_MS;
+  } else if (!likeFresh) {
+    try {
+      next.likeCount = await fetchClipLikeCount({ clipUID });
+      next.likeCountFetchedAt = now;
+      next.likeExpiresAt = now + CLIP_VAULT_METRIC_CACHE_TTL_MS;
+    } catch {
+      next.likeExpiresAt = now + CLIP_VAULT_METRIC_FAILURE_CACHE_TTL_MS;
+    }
+  }
+  setClipVaultMetricCache(clipUID, next);
+  return clipVaultMetricResult(clipUID, next, now);
+}
+
+async function fetchClipVaultMetrics(rawDescriptors, forceRefresh = false) {
+  const descriptors = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(rawDescriptors) ? rawDescriptors : []) {
+    const descriptor = normalizeClipVaultMetricDescriptor(raw);
+    if (!descriptor || seen.has(descriptor.clipUID)) continue;
+    seen.add(descriptor.clipUID);
+    descriptors.push(descriptor);
+    if (descriptors.length >= CLIP_VAULT_METRIC_BATCH_MAX) break;
+  }
+  return mapWithConcurrency(
+    descriptors,
+    CLIP_VAULT_METRIC_CONCURRENCY,
+    (descriptor) => fetchClipVaultMetric(descriptor, forceRefresh),
+  );
+}
 
 function cafeNormalizeClipPlayInfo(payload) {
   const content = payload?.content;
   if (Number(payload?.code) !== 200 || !content) return null;
+  const ownerChannel = content.ownerChannel || {};
+  const channelName = String(ownerChannel.channelName || "").trim();
   return {
-    streamerName: String(content.ownerChannel?.channelName || "").trim(),
+    streamerName: channelName,
+    channelName,
+    channelId: String(ownerChannel.channelId || "").trim(),
     title: String(content.contentTitle || "").trim(),
+    adult:
+      content.adult === true ||
+      String(content.adult || "").toLowerCase() === "true",
+    adultKnown: true,
   };
 }
 function cafeNormalizeClipDetail(payload) {
@@ -3443,6 +4202,10 @@ function cafeNormalizeClipDetail(payload) {
   return {
     thumbnailImageUrl: String(content.thumbnailImageUrl || "").trim(),
     title: String(content.clipTitle || "").trim(),
+    adult:
+      content.adult === true ||
+      String(content.adult || "").toLowerCase() === "true",
+    adultKnown: true,
   };
 }
 async function cafeFetchClipPlayInfo(clipId) {
@@ -3471,8 +4234,13 @@ async function cafeFetchClipMetadata(clipId) {
   if (!p && !d) return null;
   return {
     streamerName: p?.streamerName || "",
+    channelName: p?.channelName || p?.streamerName || "",
+    channelId: p?.channelId || "",
     title: p?.title || d?.title || "",
     thumbnailImageUrl: d?.thumbnailImageUrl || "",
+    adult: p?.adult === true || d?.adult === true,
+    // 상세 정보 요청이 성공했다면 adult 필드가 생략된 응답도 일반 클립으로 취급한다.
+    adultKnown: true,
   };
 }
 
@@ -3553,6 +4321,75 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((metadata) => sendResponse({ metadata }))
       .catch(() => sendResponse({ metadata: null }));
     return true; // 비동기 응답
+  }
+
+  if (message.type === "CHEESE_CLIP_VAULT_GET_METADATA") {
+    const clipUID = String(message.clipUID || "").trim();
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(clipUID)) {
+      sendResponse({ ok: false, error: "올바르지 않은 클립 ID입니다." });
+      return false;
+    }
+    cafeFetchClipMetadata(clipUID)
+      .then((metadata) => {
+        if (!metadata) {
+          sendResponse({ ok: false, error: "클립 정보를 찾지 못했습니다." });
+          return;
+        }
+        sendResponse({ ok: true, result: metadata });
+      })
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_CLIP_VAULT_REFRESH_METRICS") {
+    fetchClipVaultMetrics(
+      message.clipItems || message.clipUIDs,
+      message.forceRefresh === true,
+    )
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_CLIP_VAULT_IMPORT_FOLLOWING_LIKES") {
+    runClipVaultFollowingImportJob(message.jobId, (signal) =>
+      importClipVaultFollowingLikes(
+        message.knownClipUIDs,
+        message.startChannelIndex,
+        message.startClipCursor,
+        signal,
+      ),
+    )
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_CLIP_VAULT_RETRY_FOLLOWING_LIKES") {
+    runClipVaultFollowingImportJob(message.jobId, (signal) =>
+      retryClipVaultFollowingLikes(message.clipItems, signal),
+    )
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: normalizeError(error) }),
+      );
+    return true;
+  }
+
+  if (message.type === "CHEESE_CLIP_VAULT_CANCEL_FOLLOWING_LIKES") {
+    sendResponse({
+      ok: true,
+      result: {
+        cancelled: cancelClipVaultFollowingImportJob(message.jobId),
+      },
+    });
+    return false;
   }
 
   // 통나무 파워 지우개(game.naver.com/profile): 전체 보유 목록을 background 로 fetch.

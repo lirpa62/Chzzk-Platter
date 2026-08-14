@@ -5,6 +5,13 @@
 (() => {
   "use strict";
 
+  const settingsPageParams = new URLSearchParams(window.location.search);
+  const isSettingsTabView = settingsPageParams.get("view") === "tab";
+  document.documentElement.classList.toggle(
+    "settings-tab-view",
+    isSettingsTabView,
+  );
+
   // ── storage 일괄 프리페치 + 캐시 ──────────────────────────────────────────
   // 예전엔 각 옵션이 chrome.storage.local.get(단일키) 를 개별 호출해, 팝업을 열 때
   // 수십 번의 IPC 가 몰려 콜드 스타트에서 렌더가 버벅였다. 팝업 시작 시 get(null) 로
@@ -54,6 +61,13 @@
     "cheeseChatWordFilters",
     "cheeseChatHistory",
     "cheeseChatHistoryLimit",
+    "cheeseClipVault",
+    "cheeseClipVaultAccountIds",
+    "cheeseClipVaultActiveAccount",
+    "cheeseClipVaultLimit",
+    "cheeseClipVaultSort",
+    "cheeseClipVaultGroupByStreamer",
+    "cheeseClipVaultGroupByDate",
     "cheeseCardLivePreview",
     "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
@@ -120,6 +134,8 @@
     "cheeseInboxCommunityOpenNewTab",
     // 탭별 '읽음' 기준 feedId. 복원하면 다른 기기에서도 읽은 글이 새 글로 뜨지 않는다.
     "cheeseLoungeRead",
+    // 라운지 읽음 상태와 같은 성격(마지막으로 본 글 표식)이라 함께 옮긴다.
+    "cheeseInboxCommunityReadMap",
     "cheeseFollowCustomSort",
     "cheeseFollowFavSortMode",
     "cheeseFollowFavOrder",
@@ -370,6 +386,13 @@
   // ── 테마(검색 팝업과 localStorage 키 공유) ────────────────────────────────
   const THEME_STORAGE_KEY = "cheeseSearchTheme";
   const themeToggle = document.getElementById("themeToggleButton");
+  const openSettingsTabButton = document.getElementById(
+    "openSettingsTabButton",
+  );
+
+  if (openSettingsTabButton && isSettingsTabView) {
+    openSettingsTabButton.hidden = true;
+  }
 
   function applyTheme(theme) {
     const isDark = theme === "dark";
@@ -728,7 +751,9 @@
       SETTINGS_NEW_FEATURE_BASELINE_KEY,
       SETTINGS_NEW_FEATURE_UPDATE_KEY,
     ]);
-    const allIds = new Set(newFeatureItems.map(newFeatureItemId).filter(Boolean));
+    const allIds = new Set(
+      newFeatureItems.map(newFeatureItemId).filter(Boolean),
+    );
     const storedKnown = Array.isArray(data?.[SETTINGS_KNOWN_FEATURES_KEY])
       ? data[SETTINGS_KNOWN_FEATURES_KEY]
       : [];
@@ -820,7 +845,21 @@
       if (previousTab !== "all") markNewFeatureTabSeen(previousTab);
     }),
   );
-  selectTab("all");
+  const requestedSettingsTab = isSettingsTabView
+    ? settingsPageParams.get("tab")
+    : "all";
+  selectTab(requestedSettingsTab || "all");
+
+  openSettingsTabButton?.addEventListener("click", () => {
+    const settingsUrl = new URL(chrome.runtime.getURL("settings.html"));
+    settingsUrl.searchParams.set("view", "tab");
+    settingsUrl.searchParams.set("tab", activeTab);
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url: settingsUrl.toString() });
+      return;
+    }
+    window.open(settingsUrl.toString(), "_blank", "noopener");
+  });
 
   // 설정 팝업을 닫을 때 마지막으로 보고 있던 탭도 확인 처리한다. storage.set 호출은
   // 동기적으로 큐에 올리고, 실제 저장 완료를 기다리느라 팝업 닫힘을 막지는 않는다.
@@ -1402,10 +1441,13 @@
   });
   reflectChatTimeColors();
 
-  // ── 채팅 작성 기기 아이콘: 시간 앞/뒤 + 사용자 SVG ────────────────────────
+  // ── 채팅 작성 기기 아이콘: 시간 앞/뒤 + 사용자 SVG/이미지 ─────────────────
   const CHAT_OS_ICONS_KEY = "cheeseChatOsIcons";
   const CHAT_OS_ICON_POSITION_KEY = "cheeseChatOsIconPosition";
   const CHAT_OS_TYPES = ["PC", "AOS", "IOS"];
+  const CHAT_OS_IMAGE_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
+  const CHAT_OS_IMAGE_OUTPUT_MAX_BYTES = 50 * 1024;
+  const CHAT_OS_IMAGE_SIZE = 64;
   const CHAT_OS_DEFAULT_SVG = Object.freeze({
     PC: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>',
     AOS: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>',
@@ -1476,9 +1518,7 @@
   const chatOsPositionButtons = Array.from(
     document.querySelectorAll("[data-chat-os-position-value]"),
   );
-  const chatOsCustomItem = document.querySelector(
-    "[data-chat-os-custom-item]",
-  );
+  const chatOsCustomItem = document.querySelector("[data-chat-os-custom-item]");
   const chatOsCustomInputs = new Map(
     CHAT_OS_TYPES.map((type) => [
       type,
@@ -1503,7 +1543,20 @@
       document.querySelector(`[data-chat-os-custom-reset="${type}"]`),
     ]),
   );
+  const chatOsImageButtons = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-image-button="${type}"]`),
+    ]),
+  );
+  const chatOsImageInputs = new Map(
+    CHAT_OS_TYPES.map((type) => [
+      type,
+      document.querySelector(`[data-chat-os-image-input="${type}"]`),
+    ]),
+  );
   const chatOsSaveTimers = new Map();
+  const chatOsImageJobs = new Map();
   let chatOsCustomIcons = {};
   let chatOsIconPosition = "after";
 
@@ -1592,36 +1645,176 @@
     const source = value && typeof value === "object" ? value : {};
     const output = {};
     CHAT_OS_TYPES.forEach((type) => {
-      const sanitized = sanitizeChatOsSvg(source[type]);
-      if (sanitized) output[type] = sanitized;
+      const raw = source[type];
+      // 1.40.0까지 저장한 문자열 SVG도 그대로 불러와 새 구조로 마이그레이션한다.
+      const icon =
+        typeof raw === "string" ? { type: "svg", data: raw } : raw;
+      if (!icon || typeof icon !== "object") return;
+      if (icon.type === "image") {
+        const data = sanitizeChatOsImageData(icon.data);
+        if (data) output[type] = { type: "image", data };
+        return;
+      }
+      const sanitized = sanitizeChatOsSvg(icon.data);
+      if (sanitized) output[type] = { type: "svg", data: sanitized };
     });
     return output;
   }
 
+  function sanitizeChatOsImageData(value) {
+    const source = String(value || "").trim();
+    const match = source.match(
+      /^data:image\/webp;base64,([a-z0-9+/]+={0,2})$/i,
+    );
+    if (!match) return null;
+    const encoded = match[1];
+    const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor((encoded.length * 3) / 4) - padding;
+    return bytes > 0 && bytes <= CHAT_OS_IMAGE_OUTPUT_MAX_BYTES
+      ? source
+      : null;
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () =>
+        resolve(String(reader.result || "")),
+      );
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function decodeChatOsImage(file) {
+    if (typeof createImageBitmap === "function") {
+      try {
+        const bitmap = await createImageBitmap(file);
+        return {
+          source: bitmap,
+          width: bitmap.width,
+          height: bitmap.height,
+          close: () => bitmap.close(),
+        };
+      } catch {}
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+      await image.decode();
+      return {
+        source: image,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        close: () => URL.revokeObjectURL(url),
+      };
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
+    }
+  }
+
+  async function encodeChatOsImage(file) {
+    if (
+      !file ||
+      !["image/png", "image/jpeg", "image/webp"].includes(file.type)
+    ) {
+      throw new Error("PNG, JPG 또는 WebP 이미지만 선택할 수 있습니다.");
+    }
+    if (file.size <= 0 || file.size > CHAT_OS_IMAGE_SOURCE_MAX_BYTES) {
+      throw new Error("이미지는 2MB 이하만 선택할 수 있습니다.");
+    }
+    const decoded = await decodeChatOsImage(file);
+    try {
+      if (!decoded.width || !decoded.height) {
+        throw new Error("이미지 크기를 확인할 수 없습니다.");
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = CHAT_OS_IMAGE_SIZE;
+      canvas.height = CHAT_OS_IMAGE_SIZE;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("이미지를 변환할 수 없습니다.");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      const scale = Math.min(
+        CHAT_OS_IMAGE_SIZE / decoded.width,
+        CHAT_OS_IMAGE_SIZE / decoded.height,
+      );
+      const width = Math.max(1, Math.round(decoded.width * scale));
+      const height = Math.max(1, Math.round(decoded.height * scale));
+      context.drawImage(
+        decoded.source,
+        Math.round((CHAT_OS_IMAGE_SIZE - width) / 2),
+        Math.round((CHAT_OS_IMAGE_SIZE - height) / 2),
+        width,
+        height,
+      );
+      let blob = null;
+      for (const quality of [0.92, 0.8, 0.65, 0.5]) {
+        blob = await canvasToBlob(canvas, "image/webp", quality);
+        if (blob && blob.size <= CHAT_OS_IMAGE_OUTPUT_MAX_BYTES) break;
+      }
+      if (!blob || blob.type !== "image/webp") {
+        throw new Error("이 브라우저에서는 WebP 변환을 지원하지 않습니다.");
+      }
+      if (blob.size > CHAT_OS_IMAGE_OUTPUT_MAX_BYTES) {
+        throw new Error("변환된 이미지가 50KB를 초과합니다.");
+      }
+      const data = sanitizeChatOsImageData(await blobToDataUrl(blob));
+      if (!data) throw new Error("변환된 이미지 형식이 올바르지 않습니다.");
+      return data;
+    } finally {
+      decoded.close();
+    }
+  }
+
   function reflectChatOsPosition() {
     chatOsPositionButtons.forEach((button) => {
-      const active =
-        button.dataset.chatOsPositionValue === chatOsIconPosition;
+      const active = button.dataset.chatOsPositionValue === chatOsIconPosition;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-checked", String(active));
     });
   }
 
+  function renderChatOsPreview(type) {
+    const preview = chatOsCustomPreviews.get(type);
+    if (!preview) return;
+    const custom = chatOsCustomIcons[type] || null;
+    if (custom?.type === "image") {
+      const image = document.createElement("img");
+      image.src = custom.data;
+      image.alt = "";
+      image.draggable = false;
+      preview.replaceChildren(image);
+      return;
+    }
+    preview.innerHTML = custom?.data || CHAT_OS_DEFAULT_SVG[type];
+  }
+
   function reflectChatOsCustomRow(type, { syncInput = true } = {}) {
     const input = chatOsCustomInputs.get(type);
-    const preview = chatOsCustomPreviews.get(type);
     const message = chatOsCustomMessages.get(type);
     const reset = chatOsCustomResets.get(type);
-    const customSvg = chatOsCustomIcons[type] || "";
-    if (syncInput && input) input.value = customSvg;
-    if (preview) preview.innerHTML = customSvg || CHAT_OS_DEFAULT_SVG[type];
+    const custom = chatOsCustomIcons[type] || null;
+    if (syncInput && input) {
+      input.value = custom?.type === "svg" ? custom.data : "";
+    }
+    renderChatOsPreview(type);
     if (message) {
-      message.textContent = customSvg
-        ? "사용자 SVG 적용 중"
+      message.textContent = custom
+        ? custom.type === "image"
+          ? "사용자 이미지 적용 중 (64px WebP)"
+          : "사용자 SVG 적용 중"
         : "기본 아이콘 사용 중";
       message.classList.remove("is-error");
     }
-    if (reset) reset.disabled = !customSvg || !chatShowOsIconInput?.checked;
+    if (reset) reset.disabled = !custom || !chatShowOsIconInput?.checked;
   }
 
   function reflectChatOsAvailability() {
@@ -1631,6 +1824,12 @@
       button.disabled = disabled;
     });
     chatOsCustomInputs.forEach((input) => {
+      if (input) input.disabled = disabled;
+    });
+    chatOsImageButtons.forEach((button) => {
+      if (button) button.disabled = disabled;
+    });
+    chatOsImageInputs.forEach((input) => {
       if (input) input.disabled = disabled;
     });
     chatOsCustomResets.forEach((reset, type) => {
@@ -1647,7 +1846,6 @@
   function commitChatOsCustomInput(type, canonicalize = false) {
     const input = chatOsCustomInputs.get(type);
     const message = chatOsCustomMessages.get(type);
-    const preview = chatOsCustomPreviews.get(type);
     if (!input) return;
     const raw = input.value.trim();
     if (!raw) {
@@ -1663,13 +1861,10 @@
         message.textContent = "안전한 SVG 도형 코드를 확인해 주세요.";
         message.classList.add("is-error");
       }
-      if (preview) {
-        preview.innerHTML =
-          chatOsCustomIcons[type] || CHAT_OS_DEFAULT_SVG[type];
-      }
+      renderChatOsPreview(type);
       return;
     }
-    chatOsCustomIcons[type] = sanitized;
+    chatOsCustomIcons[type] = { type: "svg", data: sanitized };
     saveChatOsCustomIcons();
     if (canonicalize) input.value = sanitized;
     reflectChatOsCustomRow(type, { syncInput: canonicalize });
@@ -1682,9 +1877,7 @@
         CHAT_OS_ICONS_KEY,
         CHAT_OS_ICON_POSITION_KEY,
       ]);
-      chatOsCustomIcons = normalizeChatOsCustomIcons(
-        data?.[CHAT_OS_ICONS_KEY],
-      );
+      chatOsCustomIcons = normalizeChatOsCustomIcons(data?.[CHAT_OS_ICONS_KEY]);
       chatOsIconPosition = normalizeChatOsIconPosition(
         data?.[CHAT_OS_ICON_POSITION_KEY],
       );
@@ -1723,6 +1916,43 @@
       clearTimeout(chatOsSaveTimers.get(type));
       chatOsSaveTimers.delete(type);
       commitChatOsCustomInput(type, true);
+    });
+  });
+  chatOsImageButtons.forEach((button, type) => {
+    button?.addEventListener("click", () =>
+      chatOsImageInputs.get(type)?.click(),
+    );
+  });
+  chatOsImageInputs.forEach((input, type) => {
+    input?.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+      clearTimeout(chatOsSaveTimers.get(type));
+      chatOsSaveTimers.delete(type);
+      const job = Symbol(type);
+      chatOsImageJobs.set(type, job);
+      const message = chatOsCustomMessages.get(type);
+      if (message) {
+        message.textContent = "이미지를 변환하고 있습니다...";
+        message.classList.remove("is-error");
+      }
+      try {
+        const data = await encodeChatOsImage(file);
+        if (chatOsImageJobs.get(type) !== job) return;
+        chatOsCustomIcons[type] = { type: "image", data };
+        saveChatOsCustomIcons();
+        reflectChatOsCustomRow(type);
+        reflectChatOsAvailability();
+      } catch (error) {
+        if (chatOsImageJobs.get(type) !== job) return;
+        if (message) {
+          message.textContent = error?.message || "이미지를 불러오지 못했습니다.";
+          message.classList.add("is-error");
+        }
+      } finally {
+        if (chatOsImageJobs.get(type) === job) chatOsImageJobs.delete(type);
+      }
     });
   });
   chatOsCustomResets.forEach((reset, type) => {
@@ -2758,6 +2988,195 @@
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
   // ── 채팅 이어보기 ─────────────────────────────────────────────────────────
+  // ── 클립 보관함 개수 ──────────────────────────────────────────────────────
+  const CLIP_VAULT_LIMIT_KEY = "cheeseClipVaultLimit";
+  const CLIP_VAULT_KEY = "cheeseClipVault";
+  const CLIP_VAULT_ACCOUNT_KEY_PREFIX = "cheeseClipVault:";
+  const CLIP_VAULT_ACCOUNT_IDS_KEY = "cheeseClipVaultAccountIds";
+  const CLIP_VAULT_ACTIVE_ACCOUNT_KEY = "cheeseClipVaultActiveAccount";
+  const CV_LIMIT_DEFAULT = 500;
+  const CV_LIMIT_MIN = 50;
+  const CV_LIMIT_MAX = 100000;
+  const CV_LARGE_LIMIT_NOTICE = 20000;
+  const CV_LIMIT_CAUTION_RATIO = 0.8;
+  const cvNum = document.querySelector("[data-clip-vault-limit]");
+  const cvReset = document.querySelector("[data-clip-vault-limit-reset]");
+  const cvUsage = document.querySelector("[data-clip-vault-limit-usage]");
+  const cvWarning = document.querySelector(
+    "[data-clip-vault-limit-warning]",
+  );
+  let cvCurrentVault = null;
+  let cvCurrentAccountId = "";
+
+  function normalizeCvAccountId(value) {
+    const id = String(value || "").trim().toLowerCase();
+    return /^[0-9a-f]{32}$/.test(id) ? id : "";
+  }
+
+  function cvAccountStorageKey(accountId = cvCurrentAccountId) {
+    const id = normalizeCvAccountId(accountId);
+    return id ? `${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${id}` : "";
+  }
+
+  function normalizeCvLimit(value) {
+    if (value == null || value === "") return CV_LIMIT_DEFAULT;
+    const n = Math.round(Number(String(value).replaceAll(",", "").trim()));
+    if (!Number.isFinite(n)) return CV_LIMIT_DEFAULT;
+    return Math.min(CV_LIMIT_MAX, Math.max(CV_LIMIT_MIN, n));
+  }
+
+  function setCvLimitInputValue(value) {
+    if (!cvNum) return;
+    cvNum.value = formatCvCount(value);
+  }
+
+  function formatCvLimitInput(value, selectionStart) {
+    const raw = String(value ?? "").replace(/[^0-9]/g, "");
+    if (!raw) return { value: "", selectionStart: 0 };
+    const formatted = formatCvCount(raw);
+    if (!Number.isInteger(selectionStart)) {
+      return { value: formatted, selectionStart: formatted.length };
+    }
+    const digitsBeforeCursor = String(value)
+      .slice(0, selectionStart)
+      .replace(/[^0-9]/g, "").length;
+    let cursor = 0;
+    let digitsSeen = 0;
+    while (cursor < formatted.length && digitsSeen < digitsBeforeCursor) {
+      if (/\d/.test(formatted[cursor])) digitsSeen += 1;
+      cursor += 1;
+    }
+    return { value: formatted, selectionStart: cursor };
+  }
+
+  function reflectCvAvailability() {
+    const off =
+      document.querySelector('[data-feature="clipVault"]')?.checked !== true;
+    [cvNum, cvReset].forEach((el) => {
+      if (el) el.disabled = off;
+    });
+    cvNum?.closest(".settings-item")?.classList.toggle("is-locked", off);
+  }
+
+  function clipVaultKindCount(vault, kind) {
+    return Array.isArray(vault?.[kind]) ? vault[kind].length : 0;
+  }
+
+  function formatCvCount(value) {
+    return Math.max(0, Number(value) || 0).toLocaleString("ko-KR");
+  }
+
+  function updateCvLimitStatus(limit, vault) {
+    const favCount = clipVaultKindCount(vault, "fav");
+    const likeCount = clipVaultKindCount(vault, "like");
+    const usage = `현재 사용량 · 즐겨찾기 ${formatCvCount(favCount)} / ${formatCvCount(limit)}개 · 기록된 좋아요 ${formatCvCount(likeCount)} / ${formatCvCount(limit)}개`;
+    if (cvUsage) cvUsage.textContent = usage;
+    if (!cvWarning) return;
+
+    const fullKinds = [];
+    const cautionKinds = [];
+    [
+      ["즐겨찾기", favCount],
+      ["기록된 좋아요", likeCount],
+    ].forEach(([label, count]) => {
+      if (count >= limit) fullKinds.push(label);
+      else if (count >= Math.ceil(limit * CV_LIMIT_CAUTION_RATIO)) {
+        cautionKinds.push(label);
+      }
+    });
+
+    let text = "";
+    let level = "notice";
+    if (fullKinds.length) {
+      text = `${fullKinds.join("·")} 보관함이 설정한 최대 개수에 도달했습니다. 이후 추가되는 클립은 가장 오래된 항목부터 교체됩니다.`;
+      level = "danger";
+    } else if (cautionKinds.length) {
+      text = `${cautionKinds.join("·")} 보관함이 최대 개수의 80% 이상입니다. 상한에 도달하면 새 항목을 위해 오래된 항목이 교체됩니다.`;
+      level = "warning";
+    } else if (limit >= CV_LARGE_LIMIT_NOTICE) {
+      text = `20,000개 이상 보관하면 보관함 열기, 검색·정렬, 좋아요 가져오기와 설정 내보내기에 시간이 더 걸릴 수 있습니다.`;
+    }
+    cvWarning.hidden = !text;
+    cvWarning.dataset.level = level;
+    cvWarning.textContent = text;
+  }
+
+  function saveCvLimit(value) {
+    const v = normalizeCvLimit(value);
+    setCvLimitInputValue(v);
+    updateCvLimitStatus(v, cvCurrentVault);
+    try {
+      cachedStorageSet({ [CLIP_VAULT_LIMIT_KEY]: v });
+    } catch {}
+  }
+
+  cvNum?.addEventListener("input", () => {
+    const next = formatCvLimitInput(cvNum.value, cvNum.selectionStart);
+    cvNum.value = next.value;
+    cvNum.setSelectionRange(next.selectionStart, next.selectionStart);
+  });
+  cvNum?.addEventListener("change", () => saveCvLimit(cvNum.value));
+  cvReset?.addEventListener("click", () => saveCvLimit(CV_LIMIT_DEFAULT));
+  document
+    .querySelector('[data-feature="clipVault"]')
+    ?.addEventListener("change", reflectCvAvailability);
+  async function loadCvVaultUsage() {
+    let limit = CV_LIMIT_DEFAULT;
+    let vault = null;
+    try {
+      const data = await cachedStorageGet([
+        CLIP_VAULT_LIMIT_KEY,
+        CLIP_VAULT_KEY,
+        CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
+      ]);
+      limit = data?.[CLIP_VAULT_LIMIT_KEY];
+      cvCurrentAccountId = normalizeCvAccountId(
+        data?.[CLIP_VAULT_ACTIVE_ACCOUNT_KEY],
+      );
+      const accountKey = cvAccountStorageKey();
+      if (accountKey) {
+        const accountData = await chrome.storage.local.get(accountKey);
+        vault = accountData?.[accountKey] || null;
+      }
+      if (!vault) vault = data?.[CLIP_VAULT_KEY];
+    } catch {}
+    cvCurrentVault = vault;
+    const normalizedLimit = normalizeCvLimit(limit);
+    setCvLimitInputValue(normalizedLimit);
+    updateCvLimitStatus(normalizedLimit, vault);
+    reflectCvAvailability();
+  }
+  void loadCvVaultUsage();
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      const currentAccountKey = cvAccountStorageKey();
+      if (
+        area !== "local" ||
+        (!changes[CLIP_VAULT_KEY] &&
+          !changes[CLIP_VAULT_LIMIT_KEY] &&
+          !changes[CLIP_VAULT_ACTIVE_ACCOUNT_KEY] &&
+          !(currentAccountKey && changes[currentAccountKey]))
+      ) {
+        return;
+      }
+      if (changes[CLIP_VAULT_ACTIVE_ACCOUNT_KEY]) {
+        void loadCvVaultUsage();
+        return;
+      }
+      const limit = normalizeCvLimit(
+        changes[CLIP_VAULT_LIMIT_KEY]?.newValue ??
+          storageCacheData?.[CLIP_VAULT_LIMIT_KEY],
+      );
+      setCvLimitInputValue(limit);
+      if (currentAccountKey && changes[currentAccountKey]) {
+        cvCurrentVault = changes[currentAccountKey].newValue || null;
+      } else if (changes[CLIP_VAULT_KEY]?.newValue !== undefined) {
+        cvCurrentVault = changes[CLIP_VAULT_KEY].newValue;
+      }
+      updateCvLimitStatus(limit, cvCurrentVault);
+    });
+  } catch {}
+
   const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
   const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
   const CH_LIMIT_DEFAULT = 200;
@@ -3741,13 +4160,150 @@
     ["popular", "recent", "oldest", "name-asc", "name-desc"],
     "popular",
   );
-  bindStringSegmented(
-    document.querySelector("[data-cf-group-placement]"),
-    "cf-group-placement-value",
-    "cheeseFollowGroupPlacement",
-    ["groups-first", "favorites-first"],
-    "groups-first",
-  );
+  // ── 전용 팔로잉 목록 배치 순서(그룹·즐겨찾기·팔로잉) ──────────────────────
+  // 저장 형식은 기존 키(cheeseFollowGroupPlacement)의 문자열 그대로 둔다 — content.js 가
+  // 그 값으로 순서를 찾는다. UI 만 '즐겨찾기 순서'와 같은 드래그 목록으로 바꾼다.
+  const CF_SECTION_ORDER_KEY = "cheeseFollowGroupPlacement";
+  const CF_SECTION_ORDERS = {
+    "groups-first": ["groups", "favorites", "following"],
+    "favorites-first": ["favorites", "groups", "following"],
+    "groups-following-favorites": ["groups", "following", "favorites"],
+    "favorites-following-groups": ["favorites", "following", "groups"],
+    "following-first-groups": ["following", "groups", "favorites"],
+    "following-first-favorites": ["following", "favorites", "groups"],
+  };
+  const CF_SECTION_LABELS = {
+    groups: "그룹",
+    favorites: "즐겨찾기",
+    following: "팔로잉",
+  };
+  let cfSectionOrder = CF_SECTION_ORDERS["groups-first"];
+
+  // 순서 배열 → 저장할 키. 6개 조합이 전부 정의돼 있어 항상 하나가 맞는다.
+  function cfSectionOrderToKey(order) {
+    const joined = order.join(",");
+    return (
+      Object.keys(CF_SECTION_ORDERS).find(
+        (k) => CF_SECTION_ORDERS[k].join(",") === joined,
+      ) || "groups-first"
+    );
+  }
+
+  function renderCfSectionOrder() {
+    const listEl = document.getElementById("cfSectionOrderList");
+    if (!listEl) return;
+    listEl.innerHTML = cfSectionOrder
+      .map((key, i) => {
+        const last = i === cfSectionOrder.length - 1;
+        return (
+          `<li class="cf-fav-order-item" draggable="true" data-id="${key}">` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-name">${CF_SECTION_LABELS[key]}</span>` +
+          `<span class="cf-fav-order-btns">` +
+          `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" class="cf-fav-order-down" data-dir="down" aria-label="아래로" title="아래로"${last ? " disabled" : ""}>↓</button>` +
+          `</span></li>`
+        );
+      })
+      .join("");
+  }
+
+  function saveCfSectionOrder() {
+    try {
+      cachedStorageSet({
+        [CF_SECTION_ORDER_KEY]: cfSectionOrderToKey(cfSectionOrder),
+      });
+    } catch {}
+  }
+
+  function moveCfSection(key, dir) {
+    const i = cfSectionOrder.indexOf(key);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= cfSectionOrder.length) return;
+    const next = [...cfSectionOrder];
+    [next[i], next[j]] = [next[j], next[i]];
+    cfSectionOrder = next;
+    renderCfSectionOrder();
+    saveCfSectionOrder();
+  }
+
+  function setupCfSectionOrderEditor() {
+    const listEl = document.getElementById("cfSectionOrderList");
+    if (!listEl) return;
+    listEl.addEventListener("click", (e) => {
+      const btn = e.target.closest?.("button[data-dir]");
+      if (!btn) return;
+      const li = btn.closest(".cf-fav-order-item");
+      if (li) moveCfSection(li.dataset.id, btn.dataset.dir);
+    });
+    // 드래그 정렬 — 즐겨찾기 순서 편집기와 같은 방식(실시간 insertBefore + drop 시 저장).
+    let dragEl = null;
+    const dragAfter = (y) => {
+      const items = [
+        ...listEl.querySelectorAll(
+          ".cf-fav-order-item:not(.cf-fav-order-dragging)",
+        ),
+      ];
+      let closest = { offset: -Infinity, el: null };
+      for (const child of items) {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          closest = { offset, el: child };
+        }
+      }
+      return closest.el;
+    };
+    listEl.addEventListener("dragstart", (e) => {
+      const li = e.target.closest?.(".cf-fav-order-item");
+      if (!li) return;
+      dragEl = li;
+      e.dataTransfer.effectAllowed = "move";
+      requestAnimationFrame(() => li.classList.add("cf-fav-order-dragging"));
+    });
+    listEl.addEventListener("dragover", (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const after = dragAfter(e.clientY);
+      if (after == null) listEl.appendChild(dragEl);
+      else if (after !== dragEl) listEl.insertBefore(dragEl, after);
+    });
+    // ⚠ 저장은 drop 이 아니라 dragend 에서 한다. dragover 가 DOM 을 실시간으로 옮기므로
+    // 목록은 이미 새 순서인데, 커서를 항목 사이 여백이나 목록 밖에서 놓으면 drop 이
+    // 발생하지 않아 저장만 건너뛴다 → 화면과 저장값이 어긋난다(제보).
+    // dragend 는 취소(ESC)를 포함해 항상 발생하므로 여기서 현재 DOM 순서를 확정한다.
+    const commitCfSectionOrder = () => {
+      const next = [...listEl.querySelectorAll(".cf-fav-order-item")].map(
+        (li) => li.dataset.id,
+      );
+      if (next.length !== cfSectionOrder.length) return;
+      const changed = next.some((k, i) => k !== cfSectionOrder[i]);
+      cfSectionOrder = next;
+      renderCfSectionOrder(); // 화살표 비활성 상태 갱신
+      if (changed) saveCfSectionOrder();
+    };
+    listEl.addEventListener("drop", (e) => {
+      if (!dragEl) return;
+      e.preventDefault(); // 브라우저 기본 동작(링크 열기 등)만 막는다
+    });
+    listEl.addEventListener("dragend", () => {
+      dragEl?.classList.remove("cf-fav-order-dragging");
+      dragEl = null;
+      commitCfSectionOrder();
+    });
+  }
+
+  (async () => {
+    try {
+      const data = await cachedStorageGet(CF_SECTION_ORDER_KEY);
+      const stored = data?.[CF_SECTION_ORDER_KEY];
+      cfSectionOrder =
+        CF_SECTION_ORDERS[stored] || CF_SECTION_ORDERS["groups-first"];
+    } catch {}
+    renderCfSectionOrder();
+    setupCfSectionOrderEditor();
+  })();
 
   const cfTagGroupInput = document.querySelector(
     '[data-feature="sbFollowGroupTags"]',
@@ -3993,20 +4549,24 @@
       if (after == null) listEl.appendChild(cfDragEl);
       else if (after !== cfDragEl) listEl.insertBefore(cfDragEl, after);
     });
+    // ⚠ 배치 순서 편집기와 같은 이유로 dragend 에서 확정한다. drop 만 믿으면 항목 사이
+    // 여백이나 목록 밖에서 놓았을 때 DOM 은 바뀐 채 저장이 누락된다.
     listEl.addEventListener("drop", (e) => {
       if (!cfDragEl) return;
       e.preventDefault();
+    });
+    listEl.addEventListener("dragend", () => {
+      const dragging = !!cfDragEl;
+      cfDragEl?.classList.remove("cf-fav-order-dragging");
+      cfDragEl = null;
+      cfFavDragId = "";
+      if (!dragging) return;
       // 현재 DOM 순서를 즐겨찾기 순서로 저장(리렌더는 onChanged/명시 호출로).
       const ids = [...listEl.querySelectorAll(".cf-fav-order-item")].map(
         (li) => li.dataset.id,
       );
       saveCfFavOrder(ids);
       renderCfFavOrderList();
-    });
-    listEl.addEventListener("dragend", () => {
-      cfDragEl?.classList.remove("cf-fav-order-dragging");
-      cfDragEl = null;
-      cfFavDragId = "";
     });
   }
   // 상태 변수(let) 선언 이후에 호출해야 TDZ 에러가 나지 않는다.
@@ -5980,14 +6540,12 @@
       const data = await cachedStorageGet(FOLLOW_PREVIEW_HIDE_HEADER_KEY);
       on = data?.[FOLLOW_PREVIEW_HIDE_HEADER_KEY] === true;
     } catch {}
-    if (followPreviewHideHeaderInput)
-      followPreviewHideHeaderInput.checked = on;
+    if (followPreviewHideHeaderInput) followPreviewHideHeaderInput.checked = on;
   }
   followPreviewHideHeaderInput?.addEventListener("change", () => {
     try {
       cachedStorageSet({
-        [FOLLOW_PREVIEW_HIDE_HEADER_KEY]:
-          followPreviewHideHeaderInput.checked,
+        [FOLLOW_PREVIEW_HIDE_HEADER_KEY]: followPreviewHideHeaderInput.checked,
       });
     } catch {}
   });
@@ -6997,6 +7555,10 @@
     "cheeseSettingsKnownFeatures",
     "cheeseSettingsNewFeatureBaselinePending",
     "cheeseSettingsNewFeatureUpdatePending",
+    // 아래 두 값은 설치 환경에서 최근 로그인 계정과 계정별 보관함 키를 찾기 위한
+    // 메타데이터다. 보관함 본문은 clipVaultAccounts로 따로 전송한다.
+    CLIP_VAULT_ACCOUNT_IDS_KEY,
+    CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
   ].forEach((key) => SETTINGS_TRANSFER_KEYS.delete(key));
   const settingsExportButton = document.querySelector("[data-settings-export]");
   const settingsImportOpenButton = document.querySelector(
@@ -7021,18 +7583,70 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function normalizeTransferClipVaultAccounts(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const accounts = {};
+    for (const [rawAccountId, vault] of Object.entries(value)) {
+      const accountId = normalizeCvAccountId(rawAccountId);
+      if (
+        !accountId ||
+        !vault ||
+        typeof vault !== "object" ||
+        Array.isArray(vault)
+      ) {
+        continue;
+      }
+      accounts[accountId] = vault;
+    }
+    return accounts;
+  }
+
+  async function readTransferClipVaultAccounts() {
+    const metadata = await chrome.storage.local.get([
+      CLIP_VAULT_ACCOUNT_IDS_KEY,
+      CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
+    ]);
+    const ids = new Set(
+      (Array.isArray(metadata?.[CLIP_VAULT_ACCOUNT_IDS_KEY])
+        ? metadata[CLIP_VAULT_ACCOUNT_IDS_KEY]
+        : []
+      )
+        .map(normalizeCvAccountId)
+        .filter(Boolean),
+    );
+    const activeAccountId = normalizeCvAccountId(
+      metadata?.[CLIP_VAULT_ACTIVE_ACCOUNT_KEY],
+    );
+    if (activeAccountId) ids.add(activeAccountId);
+    if (!ids.size) return {};
+
+    const storageKeys = [...ids].map(
+      (accountId) => `${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`,
+    );
+    const stored = await chrome.storage.local.get(storageKeys);
+    const accounts = {};
+    ids.forEach((accountId) => {
+      const vault = stored?.[`${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`];
+      if (!vault || typeof vault !== "object" || Array.isArray(vault)) return;
+      accounts[accountId] = vault;
+    });
+    return accounts;
+  }
+
   settingsExportButton?.addEventListener("click", async () => {
     settingsExportButton.disabled = true;
     try {
       const settings = await chrome.storage.local.get(
         Array.from(SETTINGS_TRANSFER_KEYS),
       );
+      const clipVaultAccounts = await readTransferClipVaultAccounts();
       const payload = {
         format: SETTINGS_TRANSFER_FORMAT,
         schemaVersion: SETTINGS_TRANSFER_SCHEMA_VERSION,
         extensionVersion: chrome.runtime.getManifest().version,
         exportedAt: new Date().toISOString(),
         settings,
+        clipVaultAccounts,
         appearance: {
           theme:
             localStorage.getItem(THEME_STORAGE_KEY) === "dark"
@@ -7086,7 +7700,34 @@
           imported[key] = value;
         }
       }
-      if (!Object.keys(imported).length) throw new Error("empty-settings");
+      const clipVaultAccounts = normalizeTransferClipVaultAccounts(
+        payload.clipVaultAccounts,
+      );
+      if (
+        !Object.keys(imported).length &&
+        !Object.keys(clipVaultAccounts).length
+      ) {
+        throw new Error("empty-settings");
+      }
+
+      if (Object.keys(clipVaultAccounts).length) {
+        const existingMetadata = await chrome.storage.local.get(
+          CLIP_VAULT_ACCOUNT_IDS_KEY,
+        );
+        const accountIds = new Set(
+          (Array.isArray(existingMetadata?.[CLIP_VAULT_ACCOUNT_IDS_KEY])
+            ? existingMetadata[CLIP_VAULT_ACCOUNT_IDS_KEY]
+            : []
+          )
+            .map(normalizeCvAccountId)
+            .filter(Boolean),
+        );
+        Object.entries(clipVaultAccounts).forEach(([accountId, vault]) => {
+          accountIds.add(accountId);
+          imported[`${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`] = vault;
+        });
+        imported[CLIP_VAULT_ACCOUNT_IDS_KEY] = [...accountIds];
+      }
 
       await chrome.storage.local.set(imported);
       if (storageCacheData) Object.assign(storageCacheData, imported);
@@ -8425,11 +9066,16 @@
       } catch {}
     });
     buttonOrderRoot.addEventListener("dragend", () => {
+      const dragging = !!dragEl;
       dragEl?.classList.remove("is-dragging");
       dragEl = null;
       buttonOrderRoot
         .querySelectorAll(".is-drop-over")
         .forEach((el) => el.classList.remove("is-drop-over"));
+      // ⚠ drop 만으로는 부족하다. dragover 가 DOM 을 실시간으로 옮기므로 목록은 이미
+      // 새 순서인데, 항목 사이 여백이나 목록 밖에서 놓으면 drop 이 발생하지 않아
+      // 저장만 건너뛴다(화면과 저장값 불일치). dragend 는 항상 발생한다.
+      if (dragging) saveFromDom();
     });
     // 드롭 지점(항목 위/아래 또는 빈 목록) 계산해 미리 삽입 위치를 잡는다.
     // 오디오 믹서·비디오 필터는 '한 묶음'이라 그 사이에는 놓을 수 없다: 삽입 후보가
@@ -8485,8 +9131,7 @@
     [listLeft, listRight].forEach((ul) => {
       ul.addEventListener("dragover", (e) => dragOverList(ul, e));
       ul.addEventListener("drop", (e) => {
-        e.preventDefault();
-        saveFromDom();
+        e.preventDefault(); // 저장은 dragend 에서 일괄 처리한다(위 주석 참고)
       });
     });
 

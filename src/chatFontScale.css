@@ -390,7 +390,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 
 /* 5-2. 확장프로그램이 주입한 작성 기기 아이콘(.cheese-chat-os) — 시간 표시와 같은
    이유로 안 커진다. 아이콘 크기는 span 의 em 기준이므로 여기서 font-size 만 배율에
-   맞춰 주면 내부 svg(0.92em / 0.82em)가 함께 커진다. 기준은 메시지 텍스트 14px. */
+   맞춰 주면 내부 SVG/이미지가 함께 커진다. 기준은 메시지 텍스트 14px. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(

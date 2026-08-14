@@ -177,6 +177,17 @@ body {
   min-width: 0;
 }
 
+.settings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.settings-open-tab-button[hidden] {
+  display: none;
+}
+
 .settings-header h1 {
   margin: 0;
   font-size: 17px;
@@ -323,6 +334,84 @@ body {
 .settings-item-desc {
   font-size: 11px;
   color: var(--popup-muted);
+}
+
+/* 설정 팝업의 새 탭 보기. 팝업 고정 크기는 유지하고 넓은 화면에서만 읽기 편한
+   여백과 글자 크기를 사용한다. */
+html.settings-tab-view {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+html.settings-tab-view body {
+  width: 100%;
+  min-width: 0;
+  height: 100vh;
+}
+
+html.settings-tab-view .settings-shell {
+  width: min(100%, 1180px);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 24px 28px;
+}
+
+html.settings-tab-view .settings-open-tab-button {
+  display: none;
+}
+
+html.settings-tab-view .settings-layout {
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 24px;
+}
+
+html.settings-tab-view .settings-header h1 {
+  font-size: 22px;
+}
+
+html.settings-tab-view .settings-subtitle,
+html.settings-tab-view .settings-hint {
+  font-size: 14px;
+}
+
+html.settings-tab-view .settings-search-input,
+html.settings-tab-view .settings-tab,
+html.settings-tab-view .settings-item-name {
+  font-size: 14px;
+}
+
+html.settings-tab-view .settings-tab {
+  padding: 10px 12px;
+}
+
+html.settings-tab-view .settings-group {
+  margin-bottom: 20px;
+}
+
+html.settings-tab-view .settings-group-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+
+html.settings-tab-view .settings-item {
+  padding: 14px 16px;
+}
+
+html.settings-tab-view .settings-item-desc {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  html.settings-tab-view .settings-shell {
+    padding: 16px;
+  }
+
+  html.settings-tab-view .settings-layout {
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 14px;
+  }
 }
 
 /* 항목 제목 옆 정보(i) 버튼 — 누르면 아래 안내 패널이 열린다. */
@@ -821,6 +910,17 @@ body {
   grid-template-columns: repeat(5, 1fr);
 }
 
+/* 전용 팔로잉 배치 순서: 라벨이 "그룹 › 즐겨찾기 › 팔로잉" 처럼 길어 한 줄에 안 들어간다.
+   이 컨트롤에서만 줄바꿈과 여유 높이를 허용한다(다른 세그먼트는 한 줄 유지). */
+[data-cf-group-placement] .settings-segmented-btn {
+  white-space: normal;
+  line-height: 1.35;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  height: auto;
+  min-height: 32px;
+}
+
 /* 그룹 내 소제목(예: 자동 종료) */
 .settings-subgroup-title {
   margin: 12px 0 6px;
@@ -839,6 +939,21 @@ body {
   font-size: 11px;
   line-height: 1.5;
   color: var(--popup-text);
+}
+
+.settings-clip-vault-limit-usage {
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-clip-vault-limit-warning {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-clip-vault-limit-warning[data-level="danger"] {
+  border-color: var(--popup-alert, #e5484d);
+  background: var(--popup-alert-bg, rgba(229, 72, 77, 0.12));
+  color: var(--popup-alert-text, #c4262d);
 }
 
 /* 커스텀 입력 행(따라잡기/팔로우 갱신) */
@@ -869,6 +984,9 @@ body {
 .settings-item:has([data-follow-preview-hide-part]),
 .settings-item:has([data-popup-player-audio]),
 .settings-item:has([data-cf-group-placement]),
+.settings-item:has([data-cf-section-order]),
+.settings-item:has([data-chat-os-position]),
+.settings-item:has([data-clip-vault-limit-usage]),
 .settings-item:has([data-integrated-search-clips-weights-reset]),
 .settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
@@ -888,6 +1006,8 @@ body {
 .settings-item [data-chat-time-format],
 .settings-item [data-cf-group-placement],
 .settings-item [data-popup-player-audio],
+.settings-item [data-chat-os-position],
+.settings-item [data-clip-vault-limit-usage],
 .settings-item [data-fp-color-reset],
 .settings-item [data-category-video-candidate-picker],
 .settings-item [data-logpower-progress-mode],
@@ -926,6 +1046,7 @@ body {
 }
 
 .settings-item [data-update-notice-mode],
+.settings-item [data-cf-section-order],
 .settings-item [data-update-notice-duration] {
   width: 100%;
 }
@@ -1263,7 +1384,7 @@ body {
   opacity: 0.48;
 }
 
-/* 채팅 작성 기기 아이콘: 사용자 SVG 입력·미리보기 */
+/* 채팅 작성 기기 아이콘: 사용자 SVG/이미지 입력·미리보기 */
 .settings-chat-os-custom-item {
   flex-direction: column;
   align-items: stretch;
@@ -1301,7 +1422,38 @@ body {
 
 .settings-chat-os-custom-head .settings-order-reset {
   flex: none;
+}
+
+.settings-chat-os-image-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
   margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  background: var(--popup-surface);
+  color: var(--popup-muted);
+  cursor: pointer;
+}
+
+.settings-chat-os-image-button:hover:not(:disabled) {
+  border-color: var(--popup-brand);
+  color: var(--popup-brand);
+}
+
+.settings-chat-os-image-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-chat-os-image-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .settings-chat-os-custom-preview {
@@ -1314,10 +1466,11 @@ body {
   color: var(--popup-muted);
 }
 
-.settings-chat-os-custom-preview svg {
+.settings-chat-os-custom-preview :is(svg, img) {
   display: block;
   width: 20px;
   height: 20px;
+  object-fit: contain;
 }
 
 .settings-chat-os-custom-row textarea {
@@ -1612,6 +1765,19 @@ body > .clr-picker .clr-preview {
   gap: 8px;
   width: 100%;
   align-items: center;
+}
+
+.settings-osd-row:has([data-clip-vault-limit]) {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.settings-osd-row:has([data-clip-vault-limit]) .settings-custom-input {
+  width: 100%;
+  min-width: 0;
 }
 
 /* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본

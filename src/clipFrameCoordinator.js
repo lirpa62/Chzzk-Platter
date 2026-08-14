@@ -15,6 +15,9 @@
   const MIN_SYNC_INTERVAL_MS = 100;
   const MIN_TRANSITION_INTERVAL_MS = 80;
   const activeStates = new WeakMap();
+  // src 속성이 m.naver.com이어도 최초 탐색 전 iframe 문서는 잠시 부모 origin을
+  // 상속한다. 실제 m.naver.com 콘텐츠 스크립트가 ready를 보낸 프레임만 전송한다.
+  const readyFrames = new WeakSet();
   const observedFrames = new Set();
   const forcedSources = new Set();
   let activeFrame = null;
@@ -25,6 +28,17 @@
   let checkTimer = 0;
   let mutationObserver = null;
   let intersectionObserver = null;
+
+  function currentAccountId() {
+    try {
+      const value = String(localStorage.getItem("userStatus.idhash") || "")
+        .trim()
+        .toLowerCase();
+      return /^[0-9a-f]{32}$/.test(value) ? value : "";
+    } catch {
+      return "";
+    }
+  }
 
   function isClipPage() {
     return /^\/clips(?:\/|$)/.test(location.pathname);
@@ -79,11 +93,14 @@
   }
 
   function postFrameState(frame, active, force = false) {
-    if (!force && activeStates.get(frame) === active) return;
-    activeStates.set(frame, active);
+    if (!readyFrames.has(frame)) return;
+    const accountId = currentAccountId();
+    const signature = `${active}:${accountId}`;
+    if (!force && activeStates.get(frame) === signature) return;
+    activeStates.set(frame, signature);
     try {
       frame.contentWindow?.postMessage(
-        { source: MESSAGE_SOURCE, active },
+        { source: MESSAGE_SOURCE, active, accountId },
         "https://m.naver.com",
       );
     } catch {}
@@ -168,16 +185,22 @@
     ) {
       return;
     }
-    const isKnownFrame = getAllFrames().some(
+    const readyFrame = getAllFrames().find(
       (frame) => frame.contentWindow === event.source,
     );
-    if (isKnownFrame) scheduleFrameActivitySync(event.source);
+    if (!readyFrame) return;
+    readyFrames.add(readyFrame);
+    // 같은 iframe이 새 쇼츠 문서로 이동해 ready를 다시 보낸 경우에도 현재 상태를
+    // 반드시 한 번 더 내려보낸다.
+    activeStates.delete(readyFrame);
+    scheduleFrameActivitySync(event.source);
   }
 
   function handlePageScroll() {
     const now = performance.now();
     if (
       activeFrame?.isConnected &&
+      readyFrames.has(activeFrame) &&
       now - lastTransitionAt >= MIN_TRANSITION_INTERVAL_MS
     ) {
       lastTransitionAt = now;

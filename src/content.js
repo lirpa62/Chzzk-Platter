@@ -1758,20 +1758,59 @@
   // (프로브: 15초/새 채팅 유입 동안 생존=true).
   //
   // 수명은 storage.session 이 정한다: 브라우저를 닫으면 통째로 사라진다.
+  // ── 클립 보관함(즐겨찾기 / 좋아요) ─────────────────────────────────────────
+  // /clips 헤더에 버튼을 달아 모아 보는 기능. 두 종류가 저장 구조·목록 UI 를 공유한다.
+  //
+  // ⚠ 치지직에는 '내가 좋아요한 클립 목록' API 가 없다(반응 API 는 클립 하나씩만
+  // isReacted 를 준다). 그래서 목록은 우리가 직접 모아 저장할 수밖에 없고, 기능을
+  // 켜기 전에 좋아요한 클립은 복구할 수 없다.
+  const CLIP_VAULT_KEY = "cheeseClipVault"; // 계정별 저장 이전의 레거시 키
+  const CLIP_VAULT_ACCOUNT_KEY_PREFIX = "cheeseClipVault:";
+  const CLIP_VAULT_ACCOUNT_IDS_KEY = "cheeseClipVaultAccountIds";
+  const CLIP_VAULT_ACTIVE_ACCOUNT_KEY = "cheeseClipVaultActiveAccount";
+  const CHZZK_USER_ID_HASH_KEY = "userStatus.idhash";
+  const CLIP_VAULT_LIMIT_KEY = "cheeseClipVaultLimit";
+  const CLIP_VAULT_SORT_KEY = "cheeseClipVaultSort";
+  const CLIP_VAULT_GROUP_STREAMER_KEY = "cheeseClipVaultGroupByStreamer";
+  const CLIP_VAULT_GROUP_DATE_KEY = "cheeseClipVaultGroupByDate";
+  const CLIP_VAULT_LIMIT_DEFAULT = 500;
+  const CLIP_VAULT_LIMIT_MIN = 50;
+  const CLIP_VAULT_LIMIT_MAX = 100000;
+  const CLIP_VAULT_METRIC_CACHE_TTL_MS = 30 * 60 * 1000;
+  // CreatorHub 카드 응답은 VOD 매니페스트까지 포함해 크다. 첫 화면 전체를 한 응답으로
+  // 기다리지 않고 작은 묶음부터 카드에 반영해 갱신이 멈춘 것처럼 보이지 않게 한다.
+  const CLIP_VAULT_METRIC_REFRESH_BATCH_SIZE = 8;
+  const CLIP_VAULT_METRIC_REFRESH_SESSION_MAX = 120;
+  const CLIP_VAULT_KINDS = ["fav", "like"];
+  const CLIP_VAULT_LABELS = {
+    fav: "즐겨찾기",
+    like: "기록된 좋아요",
+  };
+  const CLIP_VAULT_PAGE_SIZE = 60;
+  const CLIP_VAULT_SORTS = Object.freeze({
+    "saved-desc": "최근 저장순",
+    "saved-asc": "오래된 저장순",
+    popular: "인기순",
+    likes: "좋아요순",
+    title: "제목순",
+    channel: "채널명순",
+  });
+
   const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
   const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
   const CHAT_HISTORY_STORE_PREFIX = "cheeseChatHistory:"; // + channelId
   const CHAT_HISTORY_LIMIT_DEFAULT = 200;
   const CHAT_HISTORY_LIMIT_MIN = 50;
   const CHAT_HISTORY_LIMIT_MAX = 500;
-  // 저장소는 storage.session — 메모리 기반이라 브라우저를 닫으면 자동으로 비워진다.
-  // 그래서 시간 기반 만료(TTL)나 주기적 청소가 필요 없다.
-  //
-  // ⚠ session 은 10MB 고정 상한이고 unlimitedStorage 권한이 통하지 않는다. 실측 행 크기가
-  // 평균 1547B 라 500개 x 13채널이면 한도에 닿는다(이모티콘 많은 방송이면 8채널). 그래서
-  // 상한을 믿지 말고 quota 초과 시 스스로 덜어내야 한다 — saveChatHistoryWithEviction().
+  const CHAT_HISTORY_ROW_HTML_MAX = 64 * 1024;
+  const CHAT_HISTORY_RESTORE_BATCH_MAX = 50;
+  // 확장 업데이트 때도 이어지도록 storage.local에 저장하고, 브라우저가 새로 시작될 때
+  // background가 이 접두어의 기록만 지운다. quota 방어는 비정상적으로 큰 기록이나
+  // unlimitedStorage가 적용되지 않는 환경을 위해 그대로 둔다.
   const CHAT_HISTORY_EVICT_RATIO = 0.1; // 초과 시 오래된 쪽부터 10%씩 버리고 재시도
   const CHAT_HISTORY_MARK = "data-cheese-chat-history";
+  const CHAT_HISTORY_EPOCH_MARK = "data-cheese-history-epoch-ms";
+  const CHAT_HISTORY_OS_MARK = "data-cheese-history-os";
   let chatHistoryOn = false;
   let chatHistoryLimit = CHAT_HISTORY_LIMIT_DEFAULT;
 
@@ -1899,6 +1938,7 @@
     inboxCommunityNews: false, // 수신함 팔로잉 커뮤니티 탭(숨김 플래그)
     chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
+    clipVault: false, // /clips 헤더의 클립 보관함(즐겨찾기·좋아요) 버튼
     chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
     chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
     chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
@@ -2097,10 +2137,20 @@
   const CUSTOM_FOLLOW_GROUP_MAX = 30;
   const CUSTOM_FOLLOW_GROUP_CUSTOM_ICON_MAX = 10;
   const CUSTOM_FOLLOW_GROUP_MODAL_ID = "cheese-cf-group-modal";
-  const CUSTOM_FOLLOW_GROUP_PLACEMENTS = new Set([
-    "groups-first",
-    "favorites-first",
-  ]);
+  // 전용 팔로잉 목록의 세 영역(그룹/즐겨찾기/팔로잉) 배치 순서.
+  // ⚠ 기존 값 "groups-first"/"favorites-first" 는 팔로잉이 항상 마지막이라는 뜻이었다.
+  // 하위 호환을 위해 그대로 두고, 팔로잉 위치까지 고르는 조합을 추가한다.
+  const CUSTOM_FOLLOW_SECTION_ORDERS = {
+    "groups-first": ["groups", "favorites", "following"],
+    "favorites-first": ["favorites", "groups", "following"],
+    "following-first-groups": ["following", "groups", "favorites"],
+    "following-first-favorites": ["following", "favorites", "groups"],
+    "groups-following-favorites": ["groups", "following", "favorites"],
+    "favorites-following-groups": ["favorites", "following", "groups"],
+  };
+  const CUSTOM_FOLLOW_GROUP_PLACEMENTS = new Set(
+    Object.keys(CUSTOM_FOLLOW_SECTION_ORDERS),
+  );
   const CUSTOM_FOLLOW_SORT_DEFAULT = "popular";
   const CUSTOM_FOLLOW_INITIAL_DEFAULT = 10;
   const CUSTOM_FOLLOW_MORE_DEFAULT = 20;
@@ -5567,16 +5617,25 @@
   `;
   }
 
-  function renderClipAdultArea() {
+  function renderClipAdultArea({
+    areaClass = "clip_card_area__gi6nZ",
+    descriptionClass = "clip_card_description__k7S+l",
+    extraAreaClass = "",
+    extraDescriptionClass = "",
+  } = {}) {
+    const areaClasses = [areaClass, extraAreaClass].filter(Boolean).join(" ");
+    const descriptionClasses = [descriptionClass, extraDescriptionClass]
+      .filter(Boolean)
+      .join(" ");
     return `
-    <div class="clip_card_area__gi6nZ">
+    <div class="${escapeAttribute(areaClasses)}">
       <svg width="38" height="38" viewBox="0 0 14 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <circle cx="7" cy="7.5" r="6.4" stroke="currentColor" stroke-width="1.2"></circle>
         <path d="M8.65333 10.4453C7.71108 10.4453 7.02114 10.0116 6.78459 9.50302C6.7294 9.39263 6.70574 9.29406 6.70574 9.19156C6.70574 8.92741 6.88315 8.72635 7.19855 8.72635C7.43904 8.72635 7.57309 8.83279 7.7505 9.02992C8.01465 9.34926 8.26697 9.50302 8.6967 9.50302C9.53645 9.50302 9.92281 8.70269 9.92675 7.516V7.45292H9.9031C9.69809 8.00093 9.13826 8.37546 8.38918 8.37546C7.33654 8.37546 6.50073 7.62639 6.50073 6.51855C6.50073 5.33975 7.42327 4.5 8.69275 4.5C9.59953 4.5 10.3171 4.92185 10.731 5.75765C10.9479 6.19527 11.0661 6.75904 11.0661 7.42532C11.0661 9.31772 10.1633 10.4453 8.65333 10.4453ZM8.6967 7.49235C9.2999 7.49235 9.75328 7.0705 9.75328 6.49096C9.75328 5.90353 9.29596 5.45014 8.70852 5.45014C8.12109 5.45014 7.65982 5.89564 7.65982 6.47124C7.65982 7.06656 8.10138 7.49235 8.6967 7.49235Z" fill="currentColor"></path>
         <path d="M4.98 10.4017C4.62912 10.4017 4.38863 10.1652 4.38863 9.80643V5.73384H4.36497L3.53311 6.31339C3.42272 6.39224 3.33993 6.41984 3.21771 6.41984C2.97722 6.41984 2.7998 6.24637 2.7998 5.99405C2.7998 5.81269 2.87077 5.67865 3.05607 5.54855L4.18362 4.76793C4.45959 4.5787 4.64883 4.54321 4.89326 4.54321C5.31511 4.54321 5.56743 4.79947 5.56743 5.20949V9.80643C5.56743 10.1652 5.33088 10.4017 4.98 10.4017Z" fill="currentColor"></path>
       </svg>
       <span class="blind">19</span>
-      <em class="clip_card_description__k7S+l">연령 제한</em>
+      <em class="${escapeAttribute(descriptionClasses)}">연령 제한</em>
     </div>
   `;
   }
@@ -7427,7 +7486,10 @@
   let logPowerClaimChannelId = "";
   function applyLogPowerAutoClaim() {
     const channelId = getCurrentLiveChannelId();
-    const on = featureFlags.chatLogPowerAuto && !!channelId;
+    // 라디오 모드에서는 시청 적립 자체가 되지 않으므로 자동 획득 폴링도 멈춘다
+    // (성공할 수 없는 요청을 주기적으로 보내지 않는다).
+    const on =
+      featureFlags.chatLogPowerAuto && !!channelId && !isRadioModeActive();
     if (!on) {
       stopLogPowerClaimTimer();
       logPowerClaimChannelId = "";
@@ -7485,6 +7547,68 @@
   let logPowerHourChannelId = "";
   let logPowerHourLiveCheckAt = 0; // 1시간 타이머 도는 동안 라이브 종료 확인 시각
   const LOGPOWER_HOUR_LIVE_CHECK_MS = 60000; // 1분마다 라이브 종료 확인
+
+  // ── 라디오 모드(오디오 전용) 감지 ─────────────────────────────────────────
+  // 라디오 모드로 보면 통나무파워가 적립되지 않는데, 우리 배지는 '적립 중'과 1시간
+  // 타이머를 계속 보여 줘 사용자를 오해하게 한다. 전환을 감지해 즉시 멈춘다.
+  //
+  // ⚠ 판정은 video.videoWidth 로 한다(실측: 영상 1920 → 라디오 0). audioMixer 의
+  // 스트림 정보도 같은 신호를 쓴다. 설정 메뉴의 체크 항목은 메뉴를 열어야만 보이고
+  // (실측: 닫힌 상태에서 '라디오' 문자열 없음), 클래스는 해시라 쓰기 어렵다.
+  function isRadioModeActive() {
+    if (!location.pathname.startsWith("/live/")) return false;
+    const video = document.querySelector("#live_player_layout video");
+    if (!(video instanceof HTMLVideoElement)) return false;
+    // 아직 메타데이터 전이면 0 이므로 '재생 중인데 0' 일 때만 라디오로 본다.
+    if (video.readyState < 1) return false;
+    return !(video.videoWidth > 0);
+  }
+
+  let logPowerRadioPaused = false;
+  let logPowerRadioVideo = null;
+
+  // 라디오 전환은 video 트랙 교체로 나타난다. init 패스(최대 250ms)보다 빨리 반응하도록
+  // 해당 video 의 resize/loadedmetadata 를 직접 듣는다(영상↔오디오 전용 전환 시 발화).
+  function ensureLogPowerRadioWatch() {
+    const video = document.querySelector("#live_player_layout video");
+    if (!(video instanceof HTMLVideoElement)) {
+      logPowerRadioVideo = null;
+      return;
+    }
+    if (logPowerRadioVideo === video) return;
+    logPowerRadioVideo = video;
+    const onChange = () => applyLogPowerRadioGuard();
+    // once 를 쓰지 않는다 — 전환은 여러 번 일어난다. video 가 교체되면 리스너도 함께
+    // 사라지므로(노드 제거) 별도 해제는 필요 없다.
+    video.addEventListener("resize", onChange);
+    video.addEventListener("loadedmetadata", onChange);
+  }
+
+  // 라디오 모드로 바뀌면 타이머를 '일시정지'(남은 시간 보존)하고 표시를 즉시 지운다.
+  // 해제되면 저장된 잔여 시간부터 재개한다.
+  function applyLogPowerRadioGuard() {
+    const channelId = getCurrentLiveChannelId();
+    if (!channelId) {
+      logPowerRadioPaused = false;
+      return;
+    }
+    const radio = isRadioModeActive();
+    if (radio === logPowerRadioPaused) return; // 상태 변화 없음(멱등)
+    logPowerRadioPaused = radio;
+    if (radio) {
+      // 남은 시간을 보존한 채 멈춘다(이탈 처리와 동일한 경로).
+      pauseWatchHourTimer(channelId);
+      // '적립 중' 표시는 background status 기반이라 폴링을 기다리면 한동안 남는다.
+      // 즉시 끈다 — 라디오 모드에서는 어차피 적립되지 않는다.
+      logPowerWatchActive = false;
+      logPowerWatchActiveUntil = 0;
+      updateLogPowerIndicators();
+    } else {
+      // 해제 → 저장해 둔 잔여 시간부터 재개하고 적립 추적도 되살린다.
+      void restoreWatchHourTimer(channelId);
+      void restoreWatchRewardStatus(channelId);
+    }
+  }
 
   // 적립 추적 시작(채널 진입 시) — background에 위임. 즉시 status 응답이 오면 반영.
   async function startWatchRewardTracking(channelId) {
@@ -10615,6 +10739,9 @@
     applyHeaderAutoHide();
     ensureLoungeButton(); // 라운지 소식 숨김 토글 즉시 반영
     ensurePipChat(); // PIP 채팅 토글 즉시 반영
+    ensureClipVaultButton();
+    ensureClipVaultCardButtons();
+    syncClipFavToFrame();
     applyPlayerHideOnlyClasses();
     // 차단한 유저 카드 숨김: <html>에 게이트 클래스만 토글, 실제 숨김은 content.css의
     // 순수 CSS(:has(_is_block_)) 규칙이 처리한다(목록이 커도 부하 없음).
@@ -10718,6 +10845,7 @@
   }
   const CHAT_OS_ICONS_KEY = "cheeseChatOsIcons";
   const CHAT_OS_ICON_POSITION_KEY = "cheeseChatOsIconPosition";
+  const CHAT_OS_IMAGE_MAX_BYTES = 50 * 1024;
   let chatOsCustomIcons = {};
   let chatOsIconPosition = "after";
   function normalizeChatOsIconPosition(value) {
@@ -10727,10 +10855,29 @@
     const source = value && typeof value === "object" ? value : {};
     const icons = {};
     ["PC", "AOS", "IOS"].forEach((type) => {
-      const sanitized = sanitizeCustomFollowSvg(source[type]);
-      if (sanitized) icons[type] = sanitized.svg;
+      const raw = source[type];
+      const icon = typeof raw === "string" ? { type: "svg", data: raw } : raw;
+      if (!icon || typeof icon !== "object") return;
+      if (icon.type === "image") {
+        const data = sanitizeChatOsImageData(icon.data);
+        if (data) icons[type] = { type: "image", data };
+        return;
+      }
+      const sanitized = sanitizeCustomFollowSvg(icon.data);
+      if (sanitized) icons[type] = { type: "svg", data: sanitized.svg };
     });
     return icons;
+  }
+  function sanitizeChatOsImageData(value) {
+    const source = String(value || "").trim();
+    const match = source.match(
+      /^data:image\/webp;base64,([a-z0-9+/]+={0,2})$/i,
+    );
+    if (!match) return null;
+    const encoded = match[1];
+    const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor((encoded.length * 3) / 4) - padding;
+    return bytes > 0 && bytes <= CHAT_OS_IMAGE_MAX_BYTES ? source : null;
   }
   // 채팅 시간 글자색은 사용자 지정을 켠 경우에만 라이트/다크 값을 각각 적용한다.
   const CHAT_TIME_COLORS_KEY = "cheeseChatTimeColors";
@@ -10943,6 +11090,35 @@
     return /통나무\s*파워/.test(btn.textContent || "");
   }
 
+  // 미션 버튼의 가장 가까운 _container_만 숨기면 치지직 재렌더 시 버튼만 사라지고
+  // 패널의 빈 껍데기가 채팅 아래쪽에 남을 수 있다. 반대로 너무 멀리 올라가면 고정
+  // 영역 전체(랭킹/승부예측 포함)를 숨기므로, 다른 패널이나 채팅 스트림을 만나기 전의
+  // 마지막 미션 전용 컨테이너를 선택한다.
+  function findChatMissionPanel(btn, aside) {
+    const first = btn?.closest?.("[class*='_container_']");
+    if (!(first instanceof HTMLElement)) return null;
+    let candidate = first;
+    let node = first;
+    while (node instanceof HTMLElement && node !== aside) {
+      if (node.matches('[role="log"], [role="dialog"], [role="alertdialog"]')) {
+        break;
+      }
+      if (
+        node !== first &&
+        node.querySelector(
+          '[role="log"], textarea, [contenteditable="true"], button[class*="_ranking_button_"], [class*="_icon_party_"]',
+        )
+      ) {
+        break;
+      }
+      if (node.querySelector('button[class*="_mission_button_"]')) {
+        candidate = node;
+      }
+      node = node.parentElement;
+    }
+    return candidate;
+  }
+
   // 랭킹/미션/승부예측 패널에 숨김 마커를 부착(moa와 동일 셀렉터).
   function applyChatHideMarkers() {
     const asides = document.querySelectorAll(CHAT_ASIDE_SEL);
@@ -10978,9 +11154,9 @@
             // 전체가 사라져 후원이 불가능해진다 → 팝업 내부 버튼은 제외한다. 우리가
             // 숨기려는 건 채팅창 상단의 상시 '진행 중인 미션' 패널뿐이다.
             if (btn.closest('[role="dialog"], [role="alertdialog"]')) return;
-            btn
-              .closest("[class*='_container_']")
-              ?.classList.add(CHAT_HIDE_CLASSES.chatHideMission);
+            findChatMissionPanel(btn, aside)?.classList.add(
+              CHAT_HIDE_CLASSES.chatHideMission,
+            );
           });
       }
       if (chatFeatureActive("chatHidePrediction")) {
@@ -11706,9 +11882,10 @@
     const x = value.x == null || value.x === "" ? NaN : Number(value.x);
     const y = value.y == null || value.y === "" ? NaN : Number(value.y);
     return {
-      width: Number.isFinite(width) && width > 0
-        ? Math.min(PIP_WIDTH_MAX, Math.max(PIP_WIDTH_MIN, Math.round(width)))
-        : 0,
+      width:
+        Number.isFinite(width) && width > 0
+          ? Math.min(PIP_WIDTH_MAX, Math.max(PIP_WIDTH_MIN, Math.round(width)))
+          : 0,
       x: Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : null,
       y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : null,
     };
@@ -11786,9 +11963,7 @@
     const raw = Number.parseFloat(
       pip?.style.getPropertyValue("--cheese-pip-video-h") || "",
     );
-    return Number.isFinite(raw) && raw > 0
-      ? raw
-      : measurePipVideoHeight(pip);
+    return Number.isFinite(raw) && raw > 0 ? raw : measurePipVideoHeight(pip);
   }
 
   function currentPipControlsHeight(pip = document.querySelector(PIP_SEL)) {
@@ -12063,10 +12238,7 @@
     let nativeStart = null;
 
     const beginInteraction = (event) => {
-      if (
-        event.button !== 0 ||
-        !event.composedPath().includes(resizeHandle)
-      ) {
+      if (event.button !== 0 || !event.composedPath().includes(resizeHandle)) {
         return;
       }
       event.preventDefault();
@@ -12358,9 +12530,7 @@
       if (!pip.style.getPropertyValue("--cheese-pip-width")) {
         applyStoredPipLayout(pip);
       }
-      if (
-        !pip.classList.contains("cheese-pip-layout-positioned")
-      ) {
+      if (!pip.classList.contains("cheese-pip-layout-positioned")) {
         applyStoredPipPosition(pip);
       }
       attachPipLayoutControls(pip);
@@ -13114,37 +13284,179 @@
   // 과도하게 작아진다. 영상 더보기 배치/숨김을 적용할 때(채팅 없을 때만) _player_ 폭을
   // 100%로 덮어써 영상이 전체 폭을 쓰게 한다. off/채팅 있을 땐 우리 인라인을 제거해 원복.
   const VOD_PLAYER_WIDTH_ATTR = "data-cheese-vod-player-fullwidth";
-  // 우리가 100%로 덮기 전, 치지직이 인라인으로 준 원래 width(예: calc(100% - 353px))를
-  // 보관한다. 해제 시 이 값으로 '복원'해야 한다 — 단순 removeProperty 는 width 인라인을
-  // 아예 없애 영상 더보기가 영상 위로 오버레이되던 문제가 있었다(채팅 없는 다시보기).
-  const VOD_PLAYER_ORIG_WIDTH_ATTR = "data-cheese-vod-player-origwidth";
+  // 다시보기 채팅이 '접혀서 사라진' 상태인지. 접으면 aside 자체가 제거되지만 펼치기
+  // 버튼(_folded_button_ 또는 '채팅' 텍스트 버튼)은 남는다 — 그걸로 판별한다.
+  function isVodChatFoldedAway() {
+    if (!location.pathname.startsWith("/video/")) return false;
+    return !!document.querySelector(
+      'div#layout-body button[class*="_folded_button_"]',
+    );
+  }
+
+  // ── 접힘 시 영상을 오른쪽으로(빈칸을 왼쪽으로) ────────────────────────────
+  // 채팅을 접으면 aside 가 사라져 영상이 왼쪽에 붙고 오른쪽이 빈다. 영상 더보기를 왼쪽에
+  // 두었다면 빈칸도 왼쪽이어야 세로줄이 맞는다.
+  //
+  // ⚠ CSS 로는 풀 수 없었다. margin-left:auto 는 치지직이 폭을 계산하기 전에 '남는 공간'을
+  // 먹어 버려 calc(100% - 1154px) 같은 오염값을 만들고, 부모의 justify-content 는 먹지
+  // 않는다(실측). 그래서 '치지직이 폭 계산을 끝낸 뒤'에 JS 로 margin 을 붙인다.
+  //
+  // 붙이는 값은 우리가 계산하지 않는다 — 부모와 영상의 실제 폭 차이(=남는 공간)를 그대로
+  // 쓴다. 폭이 다시 바뀌면 먼저 margin 을 걷어내고 재계산해 오염을 피한다.
+  const VOD_SHIFT_ATTR = "data-cheese-vod-shift";
+  let vodShiftTimer = 0;
+  let vodShiftObserver = null;
+
+  function stopVodShiftWatch() {
+    if (vodShiftObserver) {
+      vodShiftObserver.disconnect();
+      vodShiftObserver = null;
+    }
+    if (vodShiftTimer) {
+      clearTimeout(vodShiftTimer);
+      vodShiftTimer = 0;
+    }
+  }
+
+  function clearVodPlayerShift(player) {
+    const box = player || findVodPlayerBox();
+    if (box instanceof HTMLElement && box.hasAttribute(VOD_SHIFT_ATTR)) {
+      box.style.removeProperty("margin-left");
+      box.removeAttribute(VOD_SHIFT_ATTR);
+    }
+  }
+
+  function applyVodPlayerShift() {
+    const box = findVodPlayerBox();
+    // ⚠ 플레이어가 사라진 경우(다시보기를 벗어남 등)에도 감시는 반드시 끊는다.
+    // 여기서 그냥 return 하면 옵저버가 분리된 노드를 계속 물고 남는다.
+    if (!(box instanceof HTMLElement)) {
+      stopVodShiftWatch();
+      return;
+    }
+
+    const want =
+      document.documentElement.classList.contains("cheese-vod-more-left") &&
+      isVodChatFoldedAway() &&
+      !findResizableChatAside();
+    if (!want) {
+      stopVodShiftWatch();
+      clearVodPlayerShift(box);
+      return;
+    }
+    // ⚠ 멱등: 이 함수는 init 패스(최대 4회/초)에서도 불린다. 이미 적용했거나 대기 중이면
+    // 아무것도 하지 않는다. 예전엔 매번 타이머를 새로 걸어 1초가 영영 안 채워졌고,
+    // 적용된 margin 도 매번 지워져 효과가 없었다.
+    if (box.hasAttribute(VOD_SHIFT_ATTR) || vodShiftTimer || vodShiftObserver) {
+      return;
+    }
+    // ⚠ 시간으로 기다리면 안 된다. 실측 결과 치지직은 접기 클릭 후 인라인 width 를
+    // 먼저 '지웠다가'(+30ms) 한참 뒤에야 다시 쓴다(+1500~1900ms, 매번 다름).
+    // 짧게 기다리면 지워진 상태를 '확정'으로 오해해 margin 을 붙이고, 그 margin 이
+    // 뒤늦은 계산에 섞여 폭이 오염된다(calc(100% - 1154px) 사고와 같은 구조).
+    //
+    // 그래서 시간이 아니라 '치지직이 width 를 쓰는 사건'을 기다린다. 인라인 width 가
+    // 채워지는 순간 그 다음 프레임에 margin 을 붙인다. 이미 채워져 있으면 즉시 진행.
+    const hasWidth = () =>
+      /calc|\dpx|%/.test(box.style.getPropertyValue("width") || "");
+
+    // ⚠ 성공하든 실패하든 '이번 접힘에 대해 처리했다'는 표식을 남긴다. 안 남기면
+    // 멱등 가드(VOD_SHIFT_ATTR)가 통과돼 init 패스마다(4회/초) rAF·옵저버·타이머를
+    // 계속 새로 만든다. 표식은 펼칠 때 clearVodPlayerShift 가 함께 지운다.
+    const finish = () => {
+      const el = findVodPlayerBox();
+      if (!(el instanceof HTMLElement)) return;
+      if (!isVodChatFoldedAway() || findResizableChatAside()) return;
+      el.setAttribute(VOD_SHIFT_ATTR, "1");
+      const parent = el.parentElement;
+      if (!parent) return;
+      const gap = Math.round(
+        parent.getBoundingClientRect().width - el.getBoundingClientRect().width,
+      );
+      if (gap <= 0) return; // 남는 공간이 없으면 붙일 이유가 없다
+      el.style.setProperty("margin-left", `${gap}px`, "important");
+    };
+
+    if (hasWidth()) {
+      requestAnimationFrame(finish);
+      return;
+    }
+    // width 가 채워질 때까지 감시(상한 3초 — 실측 최대 1.9초보다 여유 있게).
+    if (vodShiftObserver) vodShiftObserver.disconnect();
+    vodShiftObserver = new MutationObserver(() => {
+      if (!hasWidth()) return;
+      vodShiftObserver?.disconnect();
+      vodShiftObserver = null;
+      if (vodShiftTimer) {
+        clearTimeout(vodShiftTimer);
+        vodShiftTimer = 0;
+      }
+      requestAnimationFrame(finish);
+    });
+    vodShiftObserver.observe(box, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
+    vodShiftTimer = window.setTimeout(() => {
+      vodShiftTimer = 0;
+      vodShiftObserver?.disconnect();
+      vodShiftObserver = null;
+    }, 3000);
+  }
+
+  // 접기/펼치기 버튼을 누르면 즉시 재평가한다(주기 패스는 최대 250ms 디바운스).
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (!location.pathname.startsWith("/video/")) return;
+      if (
+        !e.target?.closest?.(
+          'button[aria-label="채팅 접기"], button[class*="_folded_button_"]',
+        )
+      ) {
+        return;
+      }
+      // 상태가 바뀌는 순간 우리 margin 과 감시를 모두 정리한 뒤 재평가한다.
+      stopVodShiftWatch();
+      clearVodPlayerShift();
+      applyVodPlayerShift();
+    },
+    true,
+  );
+
   function applyVodPlayerFullWidth(on) {
     const player = findVodPlayerBox();
     if (!(player instanceof HTMLElement)) return;
-    const hasChat = !!findResizableChatAside();
+    // ⚠ '채팅이 아예 없는 다시보기'와 '채팅을 접은 상태'는 다르다. 순정 실측 결과
+    // 접기는 치지직이 스스로 잘 처리한다: playerBox 를 calc(100% - 353px) 로 줄이고
+    // _content_right_(영상 더보기)를 margin-top 음수로 끌어올려 채팅이 비운 자리를 채운다.
+    // 그래서 접힘 중에 우리가 폭을 덮으면 그 배치를 깨뜨린다.
+    //
+    // 단 '아래 배치'를 켜면 우리가 _content_right_ 를 댓글 앞으로 옮겨 버리므로, 채팅이
+    // 비운 자리를 채울 것이 없어 빈칸으로 남는다(제보). 이때는 접힘도 '채팅 없음'과
+    // 같이 취급해 영상이 전체 폭을 쓰게 한다.
+    const foldedAway = isVodChatFoldedAway();
+    const moreMoved =
+      featureFlags.vodMoreBelow === true || featureFlags.vodMoreHide === true;
+    const hasChat = !!findResizableChatAside() || (foldedAway && !moreMoved);
     if (on && !hasChat) {
       if (player.style.getPropertyValue("width") !== "100%") {
-        // 원래 인라인 width 를 1회 보관(이미 우리가 덮은 상태면 보관 안 함).
-        if (!player.hasAttribute(VOD_PLAYER_WIDTH_ATTR)) {
-          player.setAttribute(
-            VOD_PLAYER_ORIG_WIDTH_ATTR,
-            player.style.getPropertyValue("width") || "",
-          );
-        }
         player.style.setProperty("width", "100%", "important");
         player.setAttribute(VOD_PLAYER_WIDTH_ATTR, "1");
       }
     } else if (player.hasAttribute(VOD_PLAYER_WIDTH_ATTR)) {
-      // 우리가 덮은 것 해제: 원래 width 로 복원한다(제거가 아니라). 원래가 빈 값이었으면
-      // 그때만 인라인을 제거해 치지직 CSS 기본값에 맡긴다.
-      const orig = player.getAttribute(VOD_PLAYER_ORIG_WIDTH_ATTR) || "";
-      if (orig) {
-        player.style.setProperty("width", orig);
-      } else {
-        player.style.removeProperty("width");
-      }
+      // 우리가 덮은 것 해제. 예전엔 보관해 둔 원래 width 를 그대로 되돌렸는데,
+      // ⚠ 그 보관값이 오염돼 있을 수 있다. 채팅 접기/펼치기 도중처럼 레이아웃이
+      // 과도기일 때 보관하면 calc(100% - 1154px) 같은 값이 들어가고(정상은 채팅폭
+      // 353px), 그걸 복원하는 순간 영상이 75px 로 무너진다.
+      // (실측: 스택 추적으로 이 줄이 1154px 을 쓰는 당사자임을 확인)
+      //
+      // 복원 대신 '지우는' 것이 안전하다 — 인라인을 지우면 치지직이 즉시 올바른 폭을
+      // 다시 계산한다(실측: 인라인 제거 → 1229px 로 즉시 정상). 과거에 removeProperty
+      // 로 바꿨다가 영상 더보기가 영상 위로 겹친 적이 있는데, 그건 margin 을 함께
+      // 건드리던 때의 문제였고 지금은 margin 을 손대지 않는다.
+      player.style.removeProperty("width");
       player.removeAttribute(VOD_PLAYER_WIDTH_ATTR);
-      player.removeAttribute(VOD_PLAYER_ORIG_WIDTH_ATTR);
     }
   }
 
@@ -13221,6 +13533,11 @@
       }
     }
     right.removeAttribute(VOD_MORE_MOVED_ATTR);
+    // ⚠ 치지직은 영상 더보기를 영상 옆에 붙이려고 인라인 margin-top(음수)을 쓴다.
+    // 우리가 아래로 옮겨 둔 동안 그 값이 '옮겨진 위치' 기준으로 남아 있는데, 원위치로
+    // 되돌릴 때 그대로 두면 영상 위로 올라와 겹친다(제보: 아래 배치를 켰다 끄면 겹침).
+    // 값을 우리가 계산하지 않고 지우기만 하면 치지직이 곧 올바르게 다시 쓴다.
+    right.style.removeProperty("margin-top");
     vodMoreOrigParent = null;
     vodMoreOrigNextSibling = null;
   }
@@ -13228,6 +13545,12 @@
   function applyVodMoreLayout() {
     const below = featureFlags.vodMoreBelow;
     const hide = featureFlags.vodMoreHide;
+    // 영상 더보기가 '영상 오른쪽 칸'에서 빠진 상태(아래로 이동 또는 숨김)를 <html> 에
+    // 표시한다. 이때는 채팅 왼쪽 배치 시 영상정보 왼쪽이 비므로 CSS 로 margin 을 채운다.
+    document.documentElement.classList.toggle(
+      "cheese-vod-more-away",
+      below === true || hide === true,
+    );
     // 숨김(우선): <style>로 _content_right_ 숨김. 이동은 불필요.
     let style = document.getElementById(VOD_MORE_STYLE_ID);
     if (hide) {
@@ -13338,6 +13661,17 @@
       !isChatStackedLayout(aside);
     const root = document.documentElement;
     root.classList.toggle("cheese-chat-left-position", on);
+    // 영상 더보기 좌측 배치 전용 클래스. 위 'on' 은 채팅 aside 가 실제로 있을 때만
+    // 참인데(접으면 aside 가 사라져 false), 그러면 더보기가 오른쪽으로 튄다.
+    // ⚠ cheese-chat-left-position 은 order 말고도 자동숨김 transform·배너 폭 등
+    // 여러 규칙을 함께 켠다. 채팅이 없는 상태에서 그것들까지 걸면 부작용이 나므로,
+    // 접힘 중에는 이 전용 클래스로 '더보기 order' 만 유지한다.
+    root.classList.toggle(
+      "cheese-vod-more-left",
+      chatFeatureActive("chatLeftPosition") &&
+        location.pathname.startsWith("/video/") &&
+        (on || isVodChatFoldedAway()),
+    );
     if (on) {
       syncChatPopupWidthVars(aside.getBoundingClientRect().width);
     } else if (!root.classList.contains("cheese-chat-width-resize-enabled")) {
@@ -14025,6 +14359,23 @@
     }
     html.cheese-chat-left-position aside#aside-chatting,
     html.cheese-chat-left-position aside#vod-aside { order: -1 !important; }
+    /* 채팅을 왼쪽에 두면 그 아래 '영상 더보기'(_content_right_)도 왼쪽으로 보내 세로줄을
+       맞춘다. 부모(_content_)가 flex row 라 order 만으로 자리가 바뀐다(실측: left x=78,
+       right x=956 인 나란한 두 칸).
+       ⚠ '아래 배치'로 우리가 _content_right_ 를 댓글 앞으로 옮겼을 때는 이미 _content_left_
+       안에 들어가 있어 order 가 의미 없고, 오히려 댓글 순서를 흔든다 → 그때는 제외한다.
+       숨김일 때도 대상이 없으므로 자연히 무효다. */
+    html.cheese-vod-more-left div#layout-body [class*="_content_right_"]:not([${VOD_MORE_MOVED_ATTR}]) {
+      order: -1 !important;
+    }
+    /* 다시보기: 채팅을 왼쪽에 두면 그 아래 영상정보(_details_/_container_13ugb_2)의 왼쪽이
+       채팅 너비만큼 빈다. 평소에는 위 order 규칙으로 '영상 더보기'가 그 자리를 채우지만,
+       더보기를 아래로 옮기거나 숨기면 채울 것이 없어 어긋난다 → 그때만 margin 으로 맞춘다. */
+    html.cheese-chat-left-position.cheese-vod-more-away div#layout-body [class*="_content_left_"] > [class*="_details_"],
+    html.cheese-chat-left-position.cheese-vod-more-away div#layout-body [class*="_content_left_"] > [class*="_container_13ugb_2"] {
+      /* 채팅이 실제로 있을 때만 적용 — 접으면 아래 여백이 필요 없다(공간 자체가 사라짐). */
+      margin-left: var(--cheese-chat-resized-width, 353px) !important;
+    }
     html.cheese-chat-auto-hide:not(.cheese-chat-stacked):not(.cheese-chat-popup) aside#aside-chatting,
     html.cheese-chat-auto-hide:not(.cheese-chat-stacked):not(.cheese-chat-popup) aside#vod-aside {
       position: relative !important;
@@ -14046,14 +14397,6 @@
     html.cheese-chat-auto-hide.cheese-chat-resizing aside#aside-chatting,
     html.cheese-chat-auto-hide.cheese-chat-resizing aside#vod-aside {
       transform: translateX(0) !important;
-    }
-    /* 다시보기: 채팅이 왼쪽 배치되면 그 아래 영상정보(_details_/_container_1nl77_ -> _container_13ugb_2)가
-       채팅 너비만큼 왼쪽이 비어 어긋난다. 채팅 너비(--cheese-chat-resized-width, 미조절
-       시 기본 353px)만큼 margin-left를 줘 정렬을 맞춘다. 채팅이 없으면 이 규칙은
-       적용 대상이 없어 자동 무효(margin 없음). */
-    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_details_"],
-    html.cheese-chat-left-position div#layout-body [class*="_content_left_"] > [class*="_container_13ugb_2"] {
-      margin-left: var(--cheese-chat-resized-width, 353px) !important;
     }
     /* 채팅창 위 배너 광고(_banner_)는 position:absolute; right:0; max-width:353px 라
        왼쪽 배치를 해도 오른쪽에 남는다. 왼쪽 배치 시 좌측으로 옮기고, 채팅 너비를
@@ -14181,16 +14524,53 @@
 
   const CHAT_STREAM_CONTAINER_SELECTOR =
     "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
+  const chatStreamRowParentCache = new WeakMap();
+
+  function cachedChatStreamRowParent(stream) {
+    if (!(stream instanceof Element)) return null;
+    if (
+      chatHistoryObservedList === stream &&
+      chatHistoryObservedRowParent?.isConnected
+    ) {
+      return chatHistoryObservedRowParent;
+    }
+    const cached = chatStreamRowParentCache.get(stream);
+    if (cached?.isConnected && stream.contains(cached)) return cached;
+    const message = stream.querySelector("[class*='_chatting_message_']");
+    const row = message?.closest?.('[class*="_item_"]');
+    const parent = row?.parentElement || null;
+    if (parent) chatStreamRowParentCache.set(stream, parent);
+    return parent;
+  }
+
+  function mutationTouchesChatFixedPanel(mutation) {
+    const selector =
+      'button[class*="_mission_button_"], button[class*="_ranking_button_"], [class*="_icon_party_"]';
+    return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+      const element =
+        node instanceof Element ? node : node?.parentElement || null;
+      return Boolean(element?.matches?.(selector) || element?.querySelector?.(selector));
+    });
+  }
 
   // 랭킹/미션/채팅 폭 같은 content.js의 정리 기능은 채팅 메시지 행 자체를 처리하지 않는다.
   // 시간 표시·가려진 채팅 복원은 별도 MAIN 스크립트가 행 단위 배치로 담당한다. 따라서
   // 메시지가 추가될 때마다 이 옵저버까지 전체 aside를 다시 훑는 것은 순수한 중복 작업이다.
   function isChatStreamMutation(mutation) {
+    // 고정 미션/랭킹 패널도 role=log 안에 들어오는 UI가 있다. 이 변이까지 일반 채팅으로
+    // 무시하면 새 패널에 숨김 마커를 붙일 기회를 잃으므로 반드시 트윅 패스로 보낸다.
+    if (mutationTouchesChatFixedPanel(mutation)) return false;
     const target =
       mutation.target instanceof Element
         ? mutation.target
         : mutation.target?.parentElement;
-    if (target?.closest?.(CHAT_STREAM_CONTAINER_SELECTOR)) return true;
+    const stream = target?.closest?.(CHAT_STREAM_CONTAINER_SELECTOR);
+    if (stream) {
+      const rowParent = cachedChatStreamRowParent(stream);
+      if (rowParent && (target === rowParent || rowParent.contains(target))) {
+        return true;
+      }
+    }
 
     const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
     return (
@@ -14198,7 +14578,14 @@
       changedNodes.every((node) => {
         const element =
           node instanceof Element ? node : node?.parentElement || null;
-        return Boolean(element?.closest?.(CHAT_STREAM_CONTAINER_SELECTOR));
+        if (!element) return false;
+        const owner =
+          element.closest?.(CHAT_STREAM_CONTAINER_SELECTOR) || stream;
+        const rowParent = owner ? cachedChatStreamRowParent(owner) : null;
+        return Boolean(
+          rowParent &&
+            (element === rowParent || rowParent.contains(element)),
+        );
       })
     );
   }
@@ -16480,15 +16867,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const buttons = Array.from(header.querySelectorAll("button")).filter(
       (button) => button.id !== LOUNGE_BUTTON_ID,
     );
+    const accessibleName = (button) =>
+      [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        ...Array.from(button.querySelectorAll(".blind"), (node) =>
+          node.textContent?.trim(),
+        ),
+      ]
+        .filter(Boolean)
+        .join(" ");
     return (
-      // 1) 수신함 아이콘 SVG 안에만 있는 <mask>
-      buttons.find((button) => button.querySelector("svg mask")) ||
-      // 2) 읽지 않은 네이티브 알림이 있을 때의 .blind = "New"
+      // 커뮤니티 붉은 점을 붙였던 버튼이면 이미 수신함으로 확인된 대상이다.
+      buttons.find((button) =>
+        button.classList.contains("cheese-inbox-community-header-target"),
+      ) ||
+      // 접근성 이름은 SVG 내부 구조보다 UI 업데이트에 덜 민감하다.
+      buttons.find((button) =>
+        /수신함|알림|inbox/i.test(accessibleName(button)),
+      ) ||
+      // 읽지 않은 네이티브 알림이 있을 때의 .blind = "New"
       buttons.find(
         (button) =>
           button.querySelector(".blind")?.textContent?.trim() === "New",
       ) ||
-      // 3) 캐시(#cash) 링크와 같은 묶음에 있는 버튼
+      // 수신함 아이콘 SVG 안에 있던 <mask>. 접근성 정보가 없는 UI의 폴백이다.
+      buttons.find((button) => button.querySelector("svg mask")) ||
+      // 캐시(#cash) 링크와 같은 묶음에 있는 버튼
       (() => {
         const cash = header.querySelector('a[href*="game.naver.com/profile"]');
         const cashBox = cash?.closest('[class*="_box_"]');
@@ -16501,10 +16906,29 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
   }
 
+  function removeLoungeButton() {
+    const btn = document.getElementById(LOUNGE_BUTTON_ID);
+    if (!btn) return;
+    const item = btn.parentElement;
+    // 이전 버전에서 만든 래퍼에는 전용 클래스가 없다. 버튼 하나만 든 래퍼까지
+    // 같이 지워 기능을 껐다 켰을 때 헤더에 빈 칸이 누적되지 않게 한다.
+    if (
+      item?.classList.contains("cheese-lounge-header-item") ||
+      (item && item.children.length === 1 && item.firstElementChild === btn)
+    ) {
+      item.remove();
+    } else {
+      btn.remove();
+    }
+  }
+
   function syncHeaderInboxCommunityDot(unread = inboxCommunityHeaderUnread) {
     inboxCommunityHeaderUnread = unread === true;
     const header = document.getElementById("header");
     if (!header) return;
+    header.querySelectorAll(".cheese-lounge-header-item").forEach((wrapper) => {
+      if (!wrapper.querySelector(`#${LOUNGE_BUTTON_ID}`)) wrapper.remove();
+    });
     const inboxButton = findHeaderInboxButton(header);
     const shouldShow =
       featureFlagsLoaded &&
@@ -16548,11 +16972,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     syncPeriodicNewsRefresh();
     syncHeaderInboxCommunityDot();
     if (featureFlags.loungeNews) {
-      document.getElementById(LOUNGE_BUTTON_ID)?.remove();
+      removeLoungeButton();
       closeLoungeModal();
       return;
     }
-    if (document.getElementById(LOUNGE_BUTTON_ID)) return;
     const header = document.getElementById("header");
     if (!header) return;
     // 앵커: 수신함(알림) 버튼 바로 뒤. 실측 구조는 아래와 같다.
@@ -16568,51 +16991,78 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const anchorItem = inboxBtn?.closest('[class*="_item_"]') || inboxBtn;
     const box = anchorItem?.parentElement;
     if (!anchorItem || !box) return;
-    const item = document.createElement("div");
-    item.className = anchorItem.className; // native _item_ 클래스를 그대로 물려받는다
-    const btn = document.createElement("button");
+    let btn = document.getElementById(LOUNGE_BUTTON_ID);
+    let item = btn?.parentElement;
+    if (!item || item === header || item === box) {
+      item = document.createElement("div");
+    }
+    // 치지직이 헤더 일부를 다시 그리면 기존 버튼만 살아 있어도 래퍼 위치·클래스가
+    // 오래된 상태로 남을 수 있다. 존재 여부만 보지 않고 매번 네이티브 상태와 맞춘다.
+    const nativeItemClasses = Array.from(anchorItem.classList).filter(
+      (name) => !name.startsWith("cheese-"),
+    );
+    item.className = [...nativeItemClasses, "cheese-lounge-header-item"].join(
+      " ",
+    );
+    const created = !btn;
+    btn ||= document.createElement("button");
     btn.id = LOUNGE_BUTTON_ID;
     btn.type = "button";
     // 수신함 버튼의 클래스를 그대로 물려받아 크기·호버·색이 일치하게 한다.
-    btn.className = inboxBtn?.className || "";
+    btn.className = Array.from(inboxBtn.classList)
+      .filter((name) => !name.startsWith("cheese-"))
+      .join(" ");
     btn.setAttribute("aria-label", "치지직 라운지 소식");
-    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute(
+      "aria-expanded",
+      String(Boolean(document.getElementById(LOUNGE_MODAL_ID))),
+    );
     // 툴팁은 호버 시점에 붙인다 — 네이티브 라벨(<span class="_label_…">)은 호버 중에만
     // DOM 에 있어서, 버튼 생성 시점에는 클래스를 harvest 할 수 없다. 첫 호버 때 헤더
     // 어딘가에 떠 있는 라벨에서 클래스를 가져와 우리 것에도 그대로 쓴다.
     // 못 찾으면 title 속성(브라우저 기본 툴팁)으로 폴백한다.
-    btn.title = "라운지 소식";
+    if (!btn.querySelector(".cheese-lounge-label")) {
+      btn.title = "라운지 소식";
+    }
     // Lucide armchair
-    btn.innerHTML =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" ` +
-      `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
-      `stroke-linejoin="round" aria-hidden="true">` +
-      `<path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/>` +
-      `<path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z"/>` +
-      `<path d="M5 18v2"/><path d="M19 18v2"/></svg>`;
+    if (created || !btn.querySelector(":scope > svg")) {
+      btn.innerHTML =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" ` +
+        `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+        `stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/>` +
+        `<path d="M3 11v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z"/>` +
+        `<path d="M5 18v2"/><path d="M19 18v2"/></svg>`;
+    }
     // 네이티브와 동일한 툴팁을 재현한다(첫 호버에 클래스 harvest → 이후 재사용).
-    btn.addEventListener("pointerenter", () => {
-      if (btn.querySelector(".cheese-lounge-label")) return;
-      const cls = harvestLoungeLabelClass(header);
-      if (!cls) return; // 아직 못 구했으면 이번 호버는 title 툴팁으로 대체
-      btn.removeAttribute("title"); // 네이티브 툴팁과 중복 표시 방지
-      const label = document.createElement("span");
-      label.className = `${cls} cheese-lounge-label`;
-      label.textContent = "라운지 소식";
-      btn.appendChild(label);
-    });
-    // 네이티브는 호버가 끝나면 라벨을 DOM 에서 없앤다. 우리도 같게 맞춘다
-    // (남겨두면 모달을 연 뒤에도 툴팁이 계속 떠 있다).
-    btn.addEventListener("pointerleave", () => {
-      btn.querySelector(".cheese-lounge-label")?.remove();
-    });
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openLoungeModal(btn);
-    });
-    item.appendChild(btn);
-    anchorItem.insertAdjacentElement("afterend", item); // 수신함 바로 오른쪽
+    if (btn.dataset.cheeseLoungeBound !== "1") {
+      btn.dataset.cheeseLoungeBound = "1";
+      btn.addEventListener("pointerenter", () => {
+        if (btn.querySelector(".cheese-lounge-label")) return;
+        const cls = harvestLoungeLabelClass(document.getElementById("header"));
+        if (!cls) return; // 아직 못 구했으면 이번 호버는 title 툴팁으로 대체
+        btn.removeAttribute("title"); // 네이티브 툴팁과 중복 표시 방지
+        const label = document.createElement("span");
+        label.className = `${cls} cheese-lounge-label`;
+        label.textContent = "라운지 소식";
+        btn.appendChild(label);
+      });
+      // 네이티브는 호버가 끝나면 라벨을 DOM 에서 없앤다. 우리도 같게 맞춘다
+      // (남겨두면 모달을 연 뒤에도 툴팁이 계속 떠 있다).
+      btn.addEventListener("pointerleave", () => {
+        btn.querySelector(".cheese-lounge-label")?.remove();
+      });
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openLoungeModal(btn);
+      });
+    }
+    if (btn.parentElement !== item) item.appendChild(btn);
+    // 헤더 재렌더나 반응형 재배치 뒤에도 수신함 바로 오른쪽을 다시 보장한다.
+    if (item.parentElement !== box || anchorItem.nextElementSibling !== item) {
+      anchorItem.insertAdjacentElement("afterend", item);
+    }
     // 네이티브 버튼에 호버가 스치면 그때 라벨 클래스를 미리 확보해 둔다. 이게 없으면
     // 우리 버튼에 '처음' 호버할 때는 아직 클래스를 못 구해 title 툴팁으로 나온다.
     // ⚠ box 는 치지직 소유 요소다. 헤더가 재렌더되면 우리 버튼만 사라지고 box 는 남을
@@ -23769,22 +24219,46 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   const CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS = "cheese-cf-page-favorite";
 
-  function normalizeActionButtonText(button) {
-    return String(button?.textContent || "")
+  function normalizeActionButtonText(value) {
+    return String(value || "")
       .replace(/\s+/g, "")
       .trim();
   }
 
+  // 치지직은 버튼 호버 시 툴팁을 버튼 내부에 동적으로 붙이기도 한다. 버튼 전체
+  // textContent를 비교하면 "팔로잉" 뒤에 툴팁 문구가 합쳐져 액션 영역을 놓치고,
+  // 그 순간 기존 즐겨찾기 버튼까지 제거하게 된다. 실제 툴팁 레이어의 텍스트만
+  // 제외한 고정 라벨을 사용해 호버 전후에 같은 버튼으로 인식한다.
+  function getStableActionButtonText(button) {
+    if (!(button instanceof Element)) return "";
+    const parts = [];
+    const visit = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        parts.push(node.nodeValue || "");
+        return;
+      }
+      if (!(node instanceof Element)) return;
+      const isTooltip =
+        node !== button &&
+        (node.getAttribute("role") === "tooltip" ||
+          [...node.classList].some((name) => /^_tooltip_/.test(name)));
+      if (isTooltip) return;
+      node.childNodes.forEach(visit);
+    };
+    visit(button);
+    return normalizeActionButtonText(parts.join(""));
+  }
+
   function findActionButtonByText(root, text) {
-    const expected = String(text || "").replace(/\s+/g, "");
+    const expected = normalizeActionButtonText(text);
     return [...(root?.querySelectorAll?.("button") || [])].find(
-      (button) => normalizeActionButtonText(button) === expected,
+      (button) => getStableActionButtonText(button) === expected,
     );
   }
 
   function findFollowingActionButtons(root) {
     return [...(root?.querySelectorAll?.("button") || [])].filter((button) =>
-      normalizeActionButtonText(button).endsWith("팔로잉"),
+      getStableActionButtonText(button).endsWith("팔로잉"),
     );
   }
 
@@ -23878,9 +24352,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       featureFlags.sbFollowCustom === true &&
       featureFlags.sbFollowFavEnabled === true &&
       featureFlags.sbFollowPageFavoriteButton === true;
+    const supportedPage =
+      location.pathname === "/search" ||
+      /^\/(?:live|video)\//.test(location.pathname) ||
+      Boolean(getChannelHomeId());
     const contexts = enabled ? getCustomFollowPageFavoriteContexts() : [];
     if (!contexts.length) {
-      buttons.forEach((button) => button.remove());
+      // 지원 페이지의 액션 영역은 호버 툴팁과 SPA 렌더 중 잠깐 탐색되지 않을 수
+      // 있다. 이때 연결된 버튼을 지우면 호버 중 사라졌다가 다시 나타나므로 보존한다.
+      // 기능을 끄거나 지원하지 않는 페이지로 이동했을 때만 확실히 정리한다.
+      if (!enabled || !supportedPage) {
+        buttons.forEach((button) => button.remove());
+      }
       return;
     }
 
@@ -25890,11 +26373,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           <span>채널은 여러 그룹에 중복으로 넣을 수 있습니다.</span>
           <button type="button" data-cf-modal-add>${customFollowLucideIcon("plus", 17)}<span>그룹 추가</span></button>
         </div>
-        <div class="cheese-cf-group-modal-placement" role="group" aria-label="즐겨찾기와 그룹 표시 순서">
+        <div class="cheese-cf-group-modal-placement" role="group" aria-label="그룹·즐겨찾기·팔로잉 표시 순서">
           <span>사이드바 배치</span>
           <div>
-            <button type="button" data-cf-modal-placement="groups-first" class="${customFollowGroupPlacement === "groups-first" ? "is-active" : ""}" aria-pressed="${String(customFollowGroupPlacement === "groups-first")}">그룹 먼저</button>
-            <button type="button" data-cf-modal-placement="favorites-first" class="${customFollowGroupPlacement === "favorites-first" ? "is-active" : ""}" aria-pressed="${String(customFollowGroupPlacement === "favorites-first")}">즐겨찾기 먼저</button>
+            ${customFollowPlacementOptionsHtml()}
           </div>
         </div>
         ${
@@ -26188,9 +26670,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         closeCustomFollowGroupModal();
       } else if (button.matches("[data-cf-modal-add]")) {
         editCustomFollowGroupFromModal();
-      } else if (button.matches("[data-cf-modal-placement]")) {
-        const placement = button.dataset.cfModalPlacement;
-        if (!CUSTOM_FOLLOW_GROUP_PLACEMENTS.has(placement)) return;
+      } else if (button.matches("[data-cf-modal-placement-move]")) {
+        const dir = button.dataset.cfModalPlacementMove;
+        const key = button.dataset.cfSection;
+        const current = [
+          ...(CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
+            CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"]),
+        ];
+        const i = current.indexOf(key);
+        const j = dir === "up" ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= current.length) return;
+        [current[i], current[j]] = [current[j], current[i]];
+        const placement = customFollowOrderToPlacement(current);
         customFollowGroupPlacement = placement;
         customFollowVersion += 1;
         try {
@@ -26843,11 +27334,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       h,
       expandedNow,
     });
-    if (customFollowGroupPlacement === "favorites-first") {
-      ourNav.innerHTML = favoritesHtml + groupsHtml + followingHtml;
-    } else {
-      ourNav.innerHTML = groupsHtml + favoritesHtml + followingHtml;
-    }
+    const sectionHtml = {
+      groups: groupsHtml,
+      favorites: favoritesHtml,
+      following: followingHtml,
+    };
+    const order =
+      CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
+      CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"];
+    ourNav.innerHTML = order.map((key) => sectionHtml[key]).join("");
     // ⚠ innerHTML 재구성으로 링크가 통째로 교체된다 → draggable 속성도 함께 사라진다.
     // init() 에서만 표시하면 이후 재렌더(그룹 접기/더보기 등)에서 팝업 드래그가 죽는다.
     ensurePopupPlayerDraggable();
@@ -26857,6 +27352,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // ⚠ 위임은 document 캡처 단계에 '한 번만' 바인딩한다. 예전엔 ourNav 노드에 붙였는데,
   // 사이드바 재렌더로 우리 목록이 제거·재생성되면 새 노드엔 리스너가 없어 별표/더보기가 죽었다.
   // 캡처 단계라 네이티브 링크(_item_link_)보다 먼저 잡아 preventDefault 가 확실히 걸린다.
+  // 배치 선택 버튼. 6가지 조합을 '그룹 → 즐겨찾기 → 팔로잉' 처럼 순서 그대로 보여 준다
+  // (조합마다 이름을 따로 짓는 것보다 읽기 쉽고, 팔로잉 위치도 한눈에 들어온다).
+  const CUSTOM_FOLLOW_SECTION_LABELS = {
+    groups: "그룹",
+    favorites: "즐겨찾기",
+    following: "팔로잉",
+  };
+
+  // 모달에서는 위/아래 버튼으로 순서를 바꾼다(설정 화면의 순서 편집기와 같은 개념).
+  // 조합 6개를 나열하는 것보다 '지금 순서'가 그대로 보여 이해하기 쉽다.
+  function customFollowPlacementOptionsHtml() {
+    const order =
+      CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
+      CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"];
+    return order
+      .map((key, i) => {
+        const last = i === order.length - 1;
+        return (
+          `<span class="cheese-cf-placement-row">` +
+          `<span class="cheese-cf-placement-name">${escapeHtml(CUSTOM_FOLLOW_SECTION_LABELS[key])}</span>` +
+          `<button type="button" data-cf-modal-placement-move="up" data-cf-section="${key}" aria-label="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" data-cf-modal-placement-move="down" data-cf-section="${key}" aria-label="아래로"${last ? " disabled" : ""}>↓</button>` +
+          `</span>`
+        );
+      })
+      .join("");
+  }
+
+  // 순서 배열 → 저장 키. 6개 조합이 모두 정의돼 있어 항상 하나가 맞는다.
+  function customFollowOrderToPlacement(order) {
+    const joined = order.join(",");
+    return (
+      Object.keys(CUSTOM_FOLLOW_SECTION_ORDERS).find(
+        (k) => CUSTOM_FOLLOW_SECTION_ORDERS[k].join(",") === joined,
+      ) || "groups-first"
+    );
+  }
+
   function getCustomFollowDisplayGroup(groupKey) {
     return buildCustomFollowDisplayGroups(
       getCustomFollowGroupVisibleItems(),
@@ -27936,11 +28469,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     };
 
     const onPointerDown = (event) => {
-      if (
-        !popupPlayerOn ||
-        event.button !== 0 ||
-        event.isPrimary === false
-      ) {
+      if (!popupPlayerOn || event.button !== 0 || event.isPrimary === false) {
         return;
       }
       const link = event.target?.closest?.(linkSelector);
@@ -28583,7 +29112,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 바깥 툴팁과 그 내부 요소가 함께 후보가 될 수 있다. 다른 후보를 감싸는 가장
     // 바깥쪽 요소를 우선하고, 여러 개면 실제 박스 면적이 큰 것을 사용한다.
     const roots = visible.filter(
-      (node) => !visible.some((other) => other !== node && other.contains(node)),
+      (node) =>
+        !visible.some((other) => other !== node && other.contains(node)),
     );
     const ranked = (roots.length ? roots : visible).sort((a, b) => {
       const ar = a.getBoundingClientRect();
@@ -28675,7 +29205,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const aboveSpace = tooltipRect.top - tooltipGap - EDGE;
         const belowFits = belowSpace >= totalH;
         const aboveFits = aboveSpace >= totalH;
-        const placeBelow = belowFits || (!aboveFits && belowSpace >= aboveSpace);
+        const placeBelow =
+          belowFits || (!aboveFits && belowSpace >= aboveSpace);
         let top = placeBelow ? belowTop : aboveTop;
         top = Math.max(EDGE, Math.min(top, vh - totalH - EDGE));
         const sidebar = anchor.closest?.("#sidebar");
@@ -29399,10 +29930,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
       saveFollowPreviewSize();
-      if (
-        followPreviewHideHeader &&
-        followPreviewState.anchor?.isConnected
-      ) {
+      if (followPreviewHideHeader && followPreviewState.anchor?.isConnected) {
         positionFollowPreview(
           el,
           followPreviewState.anchor,
@@ -29692,8 +30220,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       followPreviewFullTitle = data?.[FOLLOW_PREVIEW_FULL_TITLE_KEY] === true; // 기본 자름
       followPreviewHeaderBottom =
         data?.[FOLLOW_PREVIEW_HEADER_BOTTOM_KEY] === true; // 기본 위
-      followPreviewHideHeader =
-        data?.[FOLLOW_PREVIEW_HIDE_HEADER_KEY] === true; // 기본 표시
+      followPreviewHideHeader = data?.[FOLLOW_PREVIEW_HIDE_HEADER_KEY] === true; // 기본 표시
       followPreviewCardLayout = data?.[FOLLOW_PREVIEW_CARD_LAYOUT_KEY] === true; // 기본 기존 배치
       followPreviewBadgePos = normalizeFollowPreviewBadgePos(
         data?.[FOLLOW_PREVIEW_BADGE_POS_KEY],
@@ -30836,17 +31363,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       tip.classList.add("is-visible");
       tip.classList.add("is-header-style"); // 컨테이너 자체 박스 제거(내부 inner 가 박스)
       positionFollowChannelTooltip(tip, anchor);
-      if (
-        followPreviewHideHeader &&
-        followPreviewState.anchor === anchor
-      ) {
+      if (followPreviewHideHeader && followPreviewState.anchor === anchor) {
         const preview = document.getElementById(FOLLOW_PREVIEW_ID);
         if (preview) {
-          positionFollowPreview(
-            preview,
-            anchor,
-            followPreviewState.anchorKind,
-          );
+          positionFollowPreview(preview, anchor, followPreviewState.anchorKind);
         }
       }
       return;
@@ -32498,6 +33018,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[CHAT_HISTORY_LIMIT_KEY],
       );
       ensureChatHistory();
+      void loadClipVault();
     } catch {
       followerExactOn = false;
     }
@@ -33045,6 +33566,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let chatHistoryScrollTimer = 0;
   let chatHistoryInsertInProgress = false;
   let chatHistoryReconcileQueued = false;
+  let chatHistoryContextInvalidated = false;
+  let chatHistoryStorageErrorLogged = false;
+  let chatHistorySaveQueue = Promise.resolve();
+  let chatHistoryWasHidden = false;
+  let chatHistorySkipNextRestore = false;
+  let chatHistoryVisibilityTimers = [];
 
   function normalizeChatHistoryLimit(value) {
     if (value == null || value === "") return CHAT_HISTORY_LIMIT_DEFAULT;
@@ -33075,9 +33602,51 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       "[class*='live_chatting_list_container'], [role='log']",
     );
     if (direct) return direct;
-    // 최후 수단: 행을 먼저 찾고 그 부모를 컨테이너로 삼는다(클래스 이름에 의존하지 않음).
-    const row = aside.querySelector("[class*='_item_']");
+    // 최후 수단: 실제 메시지를 가진 행을 우선한다. 단순 _item_ 첫 항목은 진행 중인
+    // 미션/고정 공지일 수 있어 그 부모에 기록을 삽입하면 패널이 채팅 하단에 붙는다.
+    const row = Array.from(
+      aside.querySelectorAll("[class*='_item_']"),
+    ).find(isChatHistoryMessageRow);
     return row?.parentElement || null;
+  }
+
+  function isChatHistoryExcludedRow(row) {
+    if (!(row instanceof Element)) return true;
+    // `_layer_` 같은 해시 조각은 채팅 바깥 레이아웃 조상에도 쓰인다. closest() 한 번으로
+    // 문서 끝까지 올라가면 정상 채팅 행까지 제외되고, 이후 role=log 자체를 행 부모로
+    // 오인할 수 있다. 실제 채팅 경계 안의 고정/플로팅 UI와 다이얼로그만 제외한다.
+    const boundary = row.closest('[role="log"], aside#aside-chatting');
+    for (let node = row; node && node !== boundary; node = node.parentElement) {
+      if (
+        node.matches?.(
+          '[class*="_fixed_"], [class*="_floating_"], [role="dialog"], [role="alertdialog"]',
+        )
+      ) {
+        return true;
+      }
+    }
+    return Boolean(
+      row.matches(`.${CHAT_HIDE_CLASSES.chatHideMission}`) ||
+        row.querySelector(
+          `.${CHAT_HIDE_CLASSES.chatHideMission}, button[class*="_mission_button_"]`,
+        ),
+    );
+  }
+
+  function isChatHistoryMessageRow(row) {
+    if (
+      !(row instanceof Element) ||
+      !row.matches('[class*="_item_"]') ||
+      isChatHistoryExcludedRow(row)
+    ) {
+      return false;
+    }
+    return Boolean(
+      row.hasAttribute(CHAT_HISTORY_MARK) ||
+        row.querySelector(
+          '[class*="_chatting_message_"], [class*="_nickname_"], [class*="_message_"], [class*="_event_"]',
+        ),
+    );
   }
 
   // 실제로 행을 담고 있는 요소. 실측 구조:
@@ -33086,17 +33655,106 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   //     └ div._wrapper_8lqsk_25               ← 행(_item_)들의 실제 부모
   //         ├ div._list_bottom_8lqsk_61
   //         └ div._item_8lqsk_7 ...
-  // 컨테이너의 firstChild 에 넣으면 고정 배너 앞에 쌓이므로, 반드시 '행의 부모'를 쓴다.
+  // 고정 메시지·미션 내부에도 _item_ 클래스가 있으므로 querySelector로 첫 항목만 고르면
+  // 엉뚱한 부모를 잡는다. role=log의 직계 wrapper를 우선하고, 구조가 달라졌을 때는
+  // 직접 채팅 행을 가장 많이 가진 부모를 선택한다.
   function chatHistoryRowParent(list) {
-    const row = list?.querySelector('[class*="_item_"]');
-    return row?.parentElement || list;
+    if (!list) return null;
+    // 실제 일반 채팅 본문을 가진 행의 부모를 최우선으로 고른다. 이 기준은 고정 미션,
+    // 플로팅 새 채팅 버튼, 시스템 레이어의 해시 클래스가 바뀌어도 영향을 받지 않는다.
+    const messageParentCounts = new Map();
+    list.querySelectorAll("[class*='_chatting_message_']").forEach((message) => {
+      const row = message.closest?.('[class*="_item_"]');
+      if (!row || isChatHistoryExcludedRow(row)) return;
+      const parent = row.parentElement;
+      if (parent) {
+        messageParentCounts.set(
+          parent,
+          (messageParentCounts.get(parent) || 0) + 1,
+        );
+      }
+    });
+    let messageParent = null;
+    let messageCount = 0;
+    messageParentCounts.forEach((count, parent) => {
+      if (count > messageCount) {
+        messageParent = parent;
+        messageCount = count;
+      }
+    });
+    if (messageParent) return messageParent;
+
+    const restoredRow = list.querySelector(
+      `[class*="_item_"][${CHAT_HISTORY_MARK}]`,
+    );
+    const restoredParent = restoredRow?.parentElement || null;
+    if (
+      restoredParent &&
+      (restoredParent !== list ||
+        Array.from(restoredParent.children).some(
+          (row) =>
+            !row.hasAttribute?.(CHAT_HISTORY_MARK) &&
+            isChatHistoryMessageRow(row),
+        ))
+    ) {
+      return restoredParent;
+    }
+
+    const directWrapper = Array.from(list.children).find(
+      (node) =>
+        node.matches?.('[class*="_wrapper_"]') &&
+        !node.matches?.(
+          '[class*="_fixed_"], [class*="_floating_"], [class*="_layer_"]',
+        ) &&
+        Array.from(node.children).some(isChatHistoryMessageRow),
+    );
+    if (directWrapper) return directWrapper;
+
+    const parentCounts = new Map();
+    list.querySelectorAll('[class*="_item_"]').forEach((row) => {
+      if (
+        row.hasAttribute(CHAT_HISTORY_MARK) ||
+        !isChatHistoryMessageRow(row)
+      ) {
+        return;
+      }
+      const parent = row.parentElement;
+      if (parent) {
+        parentCounts.set(parent, (parentCounts.get(parent) || 0) + 1);
+      }
+    });
+    let bestParent = null;
+    let bestCount = 0;
+    parentCounts.forEach((count, parent) => {
+      if (count > bestCount) {
+        bestParent = parent;
+        bestCount = count;
+      }
+    });
+    // 확실한 실제 채팅 행이 아직 없다면 조용한 방송의 초기 로딩 상태다. role=log에
+    // 직접 저장 행을 넣지 말고 다음 ensure 주기에서 다시 확인한다.
+    return bestParent;
   }
 
   function chatHistoryRows(parent) {
     if (!parent) return [];
-    return Array.from(parent.children).filter((node) =>
-      node.matches?.('[class*="_item_"]'),
+    return Array.from(parent.children).filter(
+      (node) =>
+        node.matches?.('[class*="_item_"]') &&
+        !isChatHistoryExcludedRow(node),
     );
+  }
+
+  function isChatHistoryColumnReverse(parent) {
+    return (
+      parent instanceof Element &&
+      getComputedStyle(parent).flexDirection === "column-reverse"
+    );
+  }
+
+  function chatHistoryRowsChronological(parent) {
+    const rows = chatHistoryRows(parent);
+    return isChatHistoryColumnReverse(parent) ? rows.reverse() : rows;
   }
 
   // 실제 스크롤 wrapper는 column-reverse다. DOM 앞쪽이 화면 아래의 최신 채팅이고,
@@ -33104,16 +33762,53 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 저장은 디바운스한다 — 채팅 폭주 방송에서 매 줄마다 storage 를 쓰면 부하가 크다.
   function scheduleChatHistorySave() {
-    if (chatHistorySaveTimer) return;
+    if (chatHistoryContextInvalidated || chatHistorySaveTimer) return;
     chatHistorySaveTimer = window.setTimeout(() => {
       chatHistorySaveTimer = 0;
       flushChatHistory();
     }, 3000);
   }
 
-  // storage.session 은 메모리 기반이라 브라우저 종료 시 자동으로 사라진다(수명 관리 불필요).
   function chatHistoryStore() {
-    return chrome.storage?.session || null;
+    if (chatHistoryContextInvalidated) return null;
+    try {
+      if (!chrome.runtime?.id) {
+        stopChatHistoryAfterContextInvalidation();
+        return null;
+      }
+      return chrome.storage?.local || null;
+    } catch (error) {
+      if (isChatHistoryContextInvalidated(error)) {
+        stopChatHistoryAfterContextInvalidation();
+      }
+      return null;
+    }
+  }
+
+  function isChatHistoryContextInvalidated(error) {
+    return /extension context invalidated|context invalidated/i.test(
+      String(error?.message || error || ""),
+    );
+  }
+
+  function stopChatHistoryAfterContextInvalidation() {
+    if (chatHistoryContextInvalidated) return;
+    chatHistoryContextInvalidated = true;
+    if (chatHistorySaveTimer) {
+      clearTimeout(chatHistorySaveTimer);
+      chatHistorySaveTimer = 0;
+    }
+    if (chatHistoryScrollTimer) {
+      clearTimeout(chatHistoryScrollTimer);
+      chatHistoryScrollTimer = 0;
+    }
+    chatHistoryObserver?.disconnect();
+    chatHistoryObserver = null;
+    chatHistoryScrollParent?.removeEventListener(
+      "scroll",
+      onChatHistoryScroll,
+    );
+    chatHistoryScrollParent = null;
   }
 
   // 한도(10MB)에 닿으면 set() 이 던진다. 그냥 삼키면 '조용히 저장이 안 되는' 상태가
@@ -33127,15 +33822,25 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     while (attempt.length > 0) {
       try {
         await store.set({ [key]: { at: Date.now(), items: attempt } });
+        chatHistoryStorageErrorLogged = false;
         return;
       } catch (error) {
+        if (isChatHistoryContextInvalidated(error)) {
+          // 업데이트 뒤에는 이전 콘텐츠 스크립트를 되살릴 수 없다. 같은 실패를 계속
+          // 출력하지 말고 현재 인스턴스의 관찰·저장만 조용히 끝낸다.
+          stopChatHistoryAfterContextInvalidation();
+          return;
+        }
         // ⚠ 용량 초과가 아닌 오류(권한 등)까지 '덜어내며 재시도'하면, 아무리 줄여도
         // 실패하므로 배열을 0 까지 갉아먹고 조용히 끝난다. 용량 문제일 때만 덜어낸다.
         if (!/quota|QUOTA|exceed/i.test(String(error?.message || ""))) {
-          console.warn(
-            "[치즈] 채팅 이어보기 저장 실패:",
-            error?.message || error,
-          );
+          if (!chatHistoryStorageErrorLogged) {
+            chatHistoryStorageErrorLogged = true;
+            console.warn(
+              "[치즈] 채팅 이어보기 저장 실패:",
+              error?.message || error,
+            );
+          }
           return;
         }
         if (await dropOldestOtherChatHistory(key)) continue; // 남 먼저 정리
@@ -33177,12 +33882,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function flushChatHistory() {
-    if (!chatHistoryOn || !chatHistoryChannelId) return;
+    if (
+      chatHistoryContextInvalidated ||
+      !chatHistoryOn ||
+      !chatHistoryChannelId
+    ) {
+      return chatHistorySaveQueue;
+    }
+    if (chatHistorySaveTimer) {
+      clearTimeout(chatHistorySaveTimer);
+      chatHistorySaveTimer = 0;
+    }
     const items = chatHistoryBuffer.slice(-chatHistoryLimit);
-    void saveChatHistoryWithEviction(
-      chatHistoryKey(chatHistoryChannelId),
-      items,
-    );
+    // 채팅 DOM이 아직 뜨지 않은 새 페이지가 곧바로 종료되는 경우, 빈 배열로 이전
+    // 기록을 덮어쓰지 않는다. 저장 요청도 순서대로 실행해 늦게 끝난 옛 스냅샷이 최신
+    // 스냅샷을 되돌리는 경쟁 조건을 막는다.
+    if (!items.length) return chatHistorySaveQueue;
+    const key = chatHistoryKey(chatHistoryChannelId);
+    chatHistorySaveQueue = chatHistorySaveQueue
+      .catch(() => {})
+      .then(() => saveChatHistoryWithEviction(key, items));
+    return chatHistorySaveQueue;
   }
 
   function removeRestoredChatHistoryRows(root = document) {
@@ -33191,15 +33911,39 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .forEach((row) => row.remove());
   }
 
+  // 표시용 메타데이터는 중복 판정에서 제외한다. 시간/기기 표시 설정이 바뀌어도 같은
+  // 채팅을 다른 행으로 오인해 복제본을 하나 더 붙이지 않기 위해서다.
+  function chatHistoryComparableHtml(html) {
+    return String(html || "").replace(
+      /\sdata-cheese-history-(?:epoch-ms|os)="[^"]*"/g,
+      "",
+    );
+  }
+
+  function isStoredChatMissionHtml(html) {
+    return /cheese-chat-hidden-mission|_mission_button_/.test(
+      String(html || ""),
+    );
+  }
+
   // 새로 들어온 행을 버퍼에 담는다. 복원된 행은 다시 담지 않는다(중복 누적 방지).
-  // ⚠ 저장 전에 '우리가 덧붙인 것'을 걷어낸다. 실측 DOM 을 보면 행에 우리 마커와
-  // 주입 요소가 섞여 있다(data-cheese-os-done, data-cheese-row-done, .cheese-chat-time,
-  // .cheese-chat-os 등). 그대로 저장하면 복원했을 때
-  //   (1) chatTimestamp.js 가 '이미 처리됨'으로 보고 건너뛰어 기능이 안 먹고,
-  //   (2) 저장 당시 설정으로 굳은 시간·아이콘이 그대로 되살아나며,
-  //   (3) 중복 판정(HTML 비교)이 어긋난다.
-  // 원본 상태로 되돌려 저장하고, 복원 후에는 각 모듈이 새로 처리하게 둔다.
+  // ⚠ 저장 전에 '우리가 덧붙인 것'은 걷어내되, 복제 행에서 다시 얻을 수 없는 실제
+  // 전송 시각과 작성 기기 종류는 행 속성으로 보존한다. 복원 행에는 React props가 없어
+  // 이 값까지 버리면 시간/기기 표시가 영구히 사라진다. 화면 요소 자체는 저장하지 않아
+  // 표시 형식이나 사용자 아이콘이 바뀌어도 복원 시 현재 설정으로 다시 그릴 수 있다.
   function cleanChatRowForStore(row) {
+    const epoch =
+      row
+        .querySelector?.(":scope .cheese-chat-time")
+        ?.getAttribute("data-chat-epoch-ms") ||
+      row.getAttribute?.(CHAT_HISTORY_EPOCH_MARK) ||
+      "";
+    const os =
+      row
+        .querySelector?.(":scope .cheese-chat-os")
+        ?.getAttribute("data-os") ||
+      row.getAttribute?.(CHAT_HISTORY_OS_MARK) ||
+      "";
     const clone = row.cloneNode(true);
     clone
       .querySelectorAll(".cheese-chat-time, .cheese-chat-os")
@@ -33213,18 +33957,101 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     clone
       .querySelectorAll("[data-cheese-os-done], [data-cheese-row-done]")
       .forEach(strip);
+    if (/^\d{13}$/.test(epoch)) {
+      clone.setAttribute(CHAT_HISTORY_EPOCH_MARK, epoch);
+    }
+    if (/^(?:PC|AOS|IOS)$/.test(os)) {
+      clone.setAttribute(CHAT_HISTORY_OS_MARK, os);
+    }
     return clone.outerHTML;
   }
 
+  // content.js와 MAIN world의 채팅 강화 옵저버는 같은 DOM 변이를 서로 다른 순서로
+  // 받을 수 있다. 처음에는 원본 행을 즉시 저장해 누락을 막고, 잠시 뒤 시간/기기/가림
+  // 복원이 붙었다면 같은 버퍼 항목만 갱신한다. 행이 다른 메시지로 재사용된 경우에는
+  // 본문 HTML이 달라지므로 교체하지 않는다.
+  function refreshCapturedChatHistoryRow(row, originalHtml) {
+    const state = { html: originalHtml };
+    const refresh = () => {
+      if (
+        chatHistoryContextInvalidated ||
+        !chatHistoryOn ||
+        row.hasAttribute?.(CHAT_HISTORY_MARK)
+      ) {
+        return;
+      }
+      const refreshedHtml = cleanChatRowForStore(row);
+      if (!refreshedHtml || refreshedHtml.length > CHAT_HISTORY_ROW_HTML_MAX) {
+        return;
+      }
+      const previousHtml = state.html;
+      if (refreshedHtml === previousHtml) return;
+      const previousEpoch = previousHtml.match(
+        /data-cheese-history-epoch-ms="(\d{13})"/,
+      )?.[1];
+      const refreshedEpoch = refreshedHtml.match(
+        /data-cheese-history-epoch-ms="(\d{13})"/,
+      )?.[1];
+      const sameMessage =
+        chatHistoryComparableHtml(refreshedHtml) ===
+          chatHistoryComparableHtml(previousHtml) ||
+        Boolean(previousEpoch && previousEpoch === refreshedEpoch);
+      if (!sameMessage) return; // 같은 DOM 행이 새 메시지로 재사용됨
+      const index = chatHistoryBuffer.lastIndexOf(previousHtml);
+      if (index < 0) return;
+      chatHistoryBuffer[index] = refreshedHtml;
+      state.html = refreshedHtml;
+      scheduleChatHistorySave();
+    };
+    // 일반 시간/기기 표시는 첫 패스에서, React props가 늦게 갱신된 가림 복원은 두
+    // 번째 패스에서 반영한다. 두 번으로 상한을 고정해 폭주 채팅에서도 타이머가 늘지 않는다.
+    window.setTimeout(refresh, 250);
+    window.setTimeout(refresh, 1400);
+  }
+
   function captureChatHistoryRow(row) {
-    if (!chatHistoryOn || !chatHistoryChannelId) return;
+    if (
+      chatHistoryContextInvalidated ||
+      !chatHistoryOn ||
+      !chatHistoryChannelId
+    ) {
+      return;
+    }
     if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
+    if (!isChatHistoryMessageRow(row)) return;
     const html = cleanChatRowForStore(row);
-    if (!html || html.length > 8000) return; // 비정상적으로 큰 행은 건너뛴다
+    // 후원·시스템 메시지는 SVG 때문에 일반 채팅보다 크다. 8KB 제한에서는 설정 개수보다
+    // 실제 복원 개수가 눈에 띄게 줄 수 있어, 비정상적인 단일 행만 거르는 수준으로 둔다.
+    if (!html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return;
     chatHistoryBuffer.push(html);
     if (chatHistoryBuffer.length > chatHistoryLimit * 2) {
       chatHistoryBuffer = chatHistoryBuffer.slice(-chatHistoryLimit);
     }
+    refreshCapturedChatHistoryRow(row, html);
+    scheduleChatHistorySave();
+  }
+
+  function captureRenderedChatHistoryRows(rowParent) {
+    const snapshots = [];
+    chatHistoryRowsChronological(rowParent).forEach((row) => {
+      if (
+        row.hasAttribute(CHAT_HISTORY_MARK) ||
+        !isChatHistoryMessageRow(row)
+      ) {
+        return;
+      }
+      const html = cleanChatRowForStore(row);
+      if (!html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return;
+      snapshots.push(html);
+      refreshCapturedChatHistoryRow(row, html);
+    });
+    if (!snapshots.length) return;
+    // wrapper 재연결 시 이미 수집했던 화면 끝부분이 다시 렌더될 수 있다. 경계가 겹치는
+    // 부분만 합쳐 같은 채팅을 중복 저장하지 않고, 실제로 반복된 같은 문장은 보존한다.
+    chatHistoryBuffer = mergeChatHistorySequences(
+      chatHistoryBuffer,
+      snapshots,
+    );
     scheduleChatHistorySave();
   }
 
@@ -33243,8 +34070,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       let matches = true;
       for (let index = 0; index < size; index += 1) {
         if (
-          storedItems[storedItems.length - size + index] !==
-          currentItems[index]
+          chatHistoryComparableHtml(
+            storedItems[storedItems.length - size + index],
+          ) !== chatHistoryComparableHtml(currentItems[index])
         ) {
           matches = false;
           break;
@@ -33263,18 +34091,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function missingChatHistoryItems(desiredItems, presentItems) {
     const presentCounts = new Map();
     presentItems.forEach((html) => {
-      presentCounts.set(html, (presentCounts.get(html) || 0) + 1);
+      const key = chatHistoryComparableHtml(html);
+      presentCounts.set(key, (presentCounts.get(key) || 0) + 1);
     });
     return desiredItems.filter((html) => {
-      const count = presentCounts.get(html) || 0;
+      const key = chatHistoryComparableHtml(html);
+      const count = presentCounts.get(key) || 0;
       if (!count) return true;
-      presentCounts.set(html, count - 1);
+      presentCounts.set(key, count - 1);
       return false;
     });
   }
 
-  // column-reverse 목록의 DOM 뒤쪽에 과거 행을 붙인다. 파싱은 프레임당 40개로 나눠
-  // 타임스탬프·닉네임 필터 등 다른 옵저버가 한 프레임에 몰리지 않게 한다.
+  // column-reverse 목록의 DOM 뒤쪽에 과거 행을 붙인다. 최초에는 현재 채팅과 가까운
+  // 기록부터 제한적으로 복원하고, 과거 끝까지 스크롤했을 때 다음 묶음을 보충한다.
+  // 저장 한도 500개를 한꺼번에 넣으면 치지직 가상 목록의 높이 계산이 흔들려 현재
+  // 채팅 영역이 통째로 화면 밖으로 밀릴 수 있다.
   function appendChatHistoryRows(items, rowParent, generation) {
     if (!items.length) return;
     if (chatHistoryInsertInProgress) {
@@ -33282,10 +34114,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     chatHistoryInsertInProgress = true;
+    const pendingItems = items.slice(-CHAT_HISTORY_RESTORE_BATCH_MAX);
     const frag = document.createDocumentFragment();
     const temp = document.createElement("div");
     let index = 0;
-    const CHUNK = 40;
+    const CHUNK = 25;
     const step = () => {
       if (
         generation !== chatHistoryRestoreGeneration ||
@@ -33295,20 +34128,43 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         finishChatHistoryInsert();
         return;
       }
-      temp.innerHTML = items.slice(index, index + CHUNK).join("");
+      temp.innerHTML = pendingItems.slice(index, index + CHUNK).join("");
       while (temp.firstElementChild) {
         const el = temp.firstElementChild;
+        if (
+          isStoredChatMissionHtml(el.outerHTML) ||
+          !isChatHistoryMessageRow(el)
+        ) {
+          el.remove();
+          continue;
+        }
         el.setAttribute(CHAT_HISTORY_MARK, "1");
         frag.appendChild(el);
       }
       index += CHUNK;
-      if (index < items.length) {
+      if (index < pendingItems.length) {
         requestAnimationFrame(step);
         return;
       }
-      Array.from(frag.children)
-        .reverse()
-        .forEach((el) => rowParent.appendChild(el));
+      const keepCurrentChatVisible = !isChatHistoryScrolledBack();
+      const scrollParent = chatHistoryScrollParent?.isConnected
+        ? chatHistoryScrollParent
+        : rowParent;
+      if (isChatHistoryColumnReverse(rowParent)) {
+        Array.from(frag.children)
+          .reverse()
+          .forEach((el) => rowParent.appendChild(el));
+      } else {
+        // 일반 방향 목록은 과거→현재 순서이므로 복원 기록을 첫 채팅 행 앞에 둔다.
+        // _list_bottom_ 같은 센티널이 앞에 있어도 그 위치는 건드리지 않는다.
+        const firstChatRow = chatHistoryRows(rowParent)[0] || null;
+        rowParent.insertBefore(frag, firstChatRow);
+      }
+      if (keepCurrentChatVisible) {
+        scrollParent.scrollTop = isChatHistoryColumnReverse(scrollParent)
+          ? 0
+          : scrollParent.scrollHeight;
+      }
       finishChatHistoryInsert();
     };
     requestAnimationFrame(step);
@@ -33325,12 +34181,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     const rowParent = chatHistoryObservedRowParent;
-    if (!rowParent?.isConnected || rowParent.scrollTop >= -1) return;
+    if (!rowParent?.isConnected || !isChatHistoryNearOldestEdge()) return;
 
     const desired = chatHistoryBuffer.slice(-chatHistoryLimit);
     const desiredCounts = new Map();
     desired.forEach((html) => {
-      desiredCounts.set(html, (desiredCounts.get(html) || 0) + 1);
+      const key = chatHistoryComparableHtml(html);
+      desiredCounts.set(key, (desiredCounts.get(key) || 0) + 1);
     });
 
     const rows = chatHistoryRows(rowParent);
@@ -33338,7 +34195,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     rows.forEach((row) => {
       if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
       const html = cleanChatRowForStore(row);
-      nativeCounts.set(html, (nativeCounts.get(html) || 0) + 1);
+      const key = chatHistoryComparableHtml(html);
+      nativeCounts.set(key, (nativeCounts.get(key) || 0) + 1);
     });
 
     // 동일 채팅을 네이티브와 복원 행이 함께 갖고 있으면 네이티브를 우선한다.
@@ -33352,8 +34210,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     rows.forEach((row) => {
       if (!row.hasAttribute(CHAT_HISTORY_MARK)) return;
       const html = cleanChatRowForStore(row);
-      const left = markerAllowance.get(html) || 0;
-      if (left > 0) markerAllowance.set(html, left - 1);
+      const key = chatHistoryComparableHtml(html);
+      const left = markerAllowance.get(key) || 0;
+      if (left > 0) markerAllowance.set(key, left - 1);
       else row.remove();
     });
 
@@ -33361,11 +34220,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       desired,
       chatHistoryRows(rowParent).map(cleanChatRowForStore),
     );
-    appendChatHistoryRows(
-      missing,
-      rowParent,
-      chatHistoryRestoreGeneration,
-    );
+    appendChatHistoryRows(missing, rowParent, chatHistoryRestoreGeneration);
   }
 
   function scheduleChatHistoryReconcile(delay = 120) {
@@ -33378,23 +34233,101 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function onChatHistoryScroll() {
-    if (chatHistoryScrollParent?.scrollTop < -1) {
+    if (isChatHistoryNearOldestEdge()) {
       scheduleChatHistoryReconcile();
     }
   }
 
+  function isChatHistoryScrolledBack() {
+    const parent = chatHistoryScrollParent;
+    if (!parent?.isConnected) return false;
+    const style = getComputedStyle(parent);
+    if (style.flexDirection === "column-reverse") {
+      return parent.scrollTop < -1;
+    }
+    const distanceFromBottom =
+      parent.scrollHeight - parent.clientHeight - parent.scrollTop;
+    return distanceFromBottom > 1;
+  }
+
+  function isChatHistoryNearOldestEdge() {
+    const parent = chatHistoryScrollParent;
+    if (!parent?.isConnected || !isChatHistoryScrolledBack()) return false;
+    const threshold = Math.max(80, Math.min(240, parent.clientHeight * 0.25));
+    const maxScroll = Math.max(0, parent.scrollHeight - parent.clientHeight);
+    if (isChatHistoryColumnReverse(parent)) {
+      return maxScroll + parent.scrollTop <= threshold;
+    }
+    return parent.scrollTop <= threshold;
+  }
+
+  function findChatHistoryScrollParent(rowParent, list) {
+    let node = rowParent;
+    const aside = list?.closest?.("aside#aside-chatting");
+    while (node instanceof Element) {
+      const style = getComputedStyle(node);
+      if (
+        /(auto|scroll|overlay)/.test(style.overflowY) &&
+        node.clientHeight > 0
+      ) {
+        return node;
+      }
+      if (node === list || node === aside) break;
+      node = node.parentElement;
+    }
+    return rowParent;
+  }
+
   function setChatHistoryScrollParent(parent) {
     if (chatHistoryScrollParent === parent) return;
-    chatHistoryScrollParent?.removeEventListener(
-      "scroll",
-      onChatHistoryScroll,
-    );
+    chatHistoryScrollParent?.removeEventListener("scroll", onChatHistoryScroll);
     chatHistoryScrollParent = parent;
-    chatHistoryScrollParent?.addEventListener(
-      "scroll",
-      onChatHistoryScroll,
-      { passive: true },
+    chatHistoryScrollParent?.addEventListener("scroll", onChatHistoryScroll, {
+      passive: true,
+    });
+  }
+
+  function scrollChatHistoryToLatest(scrollParent, rowParent) {
+    if (!(scrollParent instanceof Element) || !scrollParent.isConnected) return;
+    const reverse =
+      isChatHistoryColumnReverse(rowParent) ||
+      isChatHistoryColumnReverse(scrollParent);
+    requestAnimationFrame(() => {
+      if (!scrollParent.isConnected) return;
+      scrollParent.scrollTop = reverse ? 0 : scrollParent.scrollHeight;
+    });
+  }
+
+  function clearChatHistoryVisibilityTimers() {
+    chatHistoryVisibilityTimers.forEach(clearTimeout);
+    chatHistoryVisibilityTimers = [];
+  }
+
+  // 숨은 탭에서 치지직이 가상 채팅 목록을 교체하면 이전 wrapper에는 복원 행만 남을 수
+  // 있다. 복귀 시 그 행을 화면에서 걷고 최신 위치로 돌아간 뒤 네이티브 wrapper를 다시
+  // 찾는다. 저장 버퍼는 유지하므로 과거 끝까지 스크롤하면 이어보기 행이 다시 보충된다.
+  function reconnectChatHistoryAfterVisibility() {
+    if (document.hidden || !chatHistoryOn || !currentLiveChannelId()) {
+      return;
+    }
+    const previousScrollParent = chatHistoryScrollParent;
+    const previousRowParent = chatHistoryObservedRowParent;
+    stopChatHistory();
+    removeRestoredChatHistoryRows(
+      document.querySelector("aside#aside-chatting") || document,
     );
+    scrollChatHistoryToLatest(previousScrollParent, previousRowParent);
+    chatHistorySkipNextRestore = true;
+    ensureChatHistory();
+
+    clearChatHistoryVisibilityTimers();
+    [150, 600, 1500].forEach((delay) => {
+      chatHistoryVisibilityTimers.push(
+        window.setTimeout(() => {
+          if (!document.hidden && chatHistoryOn) ensureChatHistory();
+        }, delay),
+      );
+    });
   }
 
   // 현재 치지직 라이브 채팅은 화면에 필요한 20여 행만 유지하는 가상화 목록이다.
@@ -33434,16 +34367,23 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   async function restoreChatHistory(channelId, list, rowParent) {
-    if (
-      chatHistoryRestored ||
-      chatHistoryRestoringRowParent === rowParent
-    ) {
+    if (chatHistoryRestored || chatHistoryRestoringRowParent === rowParent) {
       return;
     }
     const generation = chatHistoryRestoreGeneration;
     chatHistoryRestoringRowParent = rowParent;
-    const store = chatHistoryStore();
     try {
+      // SPA로 채널을 나갔다가 곧바로 돌아온 경우, 직전 페이지 상태를 저장하는 큐가
+      // 끝난 뒤 읽어야 방금 떠난 채널의 최신 기록을 놓치지 않는다.
+      await chatHistorySaveQueue.catch(() => {});
+      if (
+        chatHistoryContextInvalidated ||
+        generation !== chatHistoryRestoreGeneration ||
+        rowParent !== chatHistoryObservedRowParent
+      ) {
+        return;
+      }
+      const store = chatHistoryStore();
       if (!store) {
         chatHistoryRestored = true;
         return;
@@ -33453,10 +34393,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const data = await store.get(chatHistoryKey(channelId));
         stored = data?.[chatHistoryKey(channelId)];
         chatHistoryRestoreReadFailures = 0;
-      } catch {
-        // background가 storage.session 접근 수준을 여는 시점과 겹쳤다면 다음 DOM
-        // 갱신에서 제한적으로 다시 시도한다. 실패를 복원 완료로 확정하면 해당 탭에서는
-        // 영영 기록을 읽지 못하고, 무제한 재시도하면 미지원 환경에서 타이머가 남는다.
+      } catch (error) {
+        if (isChatHistoryContextInvalidated(error)) {
+          stopChatHistoryAfterContextInvalidation();
+          return;
+        }
+        // 일시적인 저장소 읽기 실패는 다음 DOM 갱신에서 제한적으로 다시 시도한다.
+        // 실패를 복원 완료로 확정하면 해당 탭에서는 영영 기록을 읽지 못하고, 무제한
+        // 재시도하면 미지원 환경에서 타이머가 남는다.
         chatHistoryRestoreReadFailures += 1;
         if (chatHistoryRestoreReadFailures <= 3) {
           window.setTimeout(() => {
@@ -33472,23 +34416,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
         return;
       }
-      const items = Array.isArray(stored?.items) ? stored.items : [];
+      const items = Array.isArray(stored?.items)
+        ? stored.items.filter((html) => !isStoredChatMissionHtml(html))
+        : [];
       // 첫 방문은 복원할 데이터가 없으므로 기다리지 않는다. 현재 행은 옵저버를 붙일 때
       // 이미 버퍼에 담았고 3초 뒤 저장된다.
       if (!items.length) {
         chatHistoryRestored = true;
         return;
       }
-      const settled = await waitChatListSettled(
-        list,
-        rowParent,
-        generation,
-      );
+      const settled = await waitChatListSettled(list, rowParent, generation);
       if (!settled) return;
       const currentRows = chatHistoryRows(rowParent);
       const currentItems = chatHistoryBuffer.length
         ? chatHistoryBuffer.slice()
-        : currentRows.slice().reverse().map(cleanChatRowForStore);
+        : chatHistoryRowsChronological(rowParent).map(cleanChatRowForStore);
       const merged = mergeChatHistorySequences(items, currentItems);
       const fresh = missingChatHistoryItems(
         merged,
@@ -33535,7 +34477,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function ensureChatHistory() {
-    if (!IS_TOP_FRAME) return;
+    if (!IS_TOP_FRAME || chatHistoryContextInvalidated) return;
     const channelId = chatHistoryOn ? currentLiveChannelId() : null;
     if (!channelId) {
       if (chatHistoryChannelId) {
@@ -33546,6 +34488,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatHistoryBuffer = [];
         chatHistoryRestored = false;
       }
+      chatHistorySkipNextRestore = false;
       return;
     }
     // 채널이 바뀌면 이전 채널 기록을 저장하고 상태를 갈아끼운다.
@@ -33555,6 +34498,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       removeRestoredChatHistoryRows();
       chatHistoryBuffer = [];
       chatHistoryRestored = false;
+      chatHistorySkipNextRestore = false;
     }
     chatHistoryChannelId = channelId;
 
@@ -33581,20 +34525,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           queueMicrotask(ensureChatHistory);
           return;
         }
-        let nativeRowsChanged = false;
+        let chatRowsChanged = false;
         // 위로 스크롤할 때 추가되는 행은 새 채팅이 아니라 치지직이 다시 불러온
         // 과거 200개다. 이를 새 메시지처럼 버퍼 끝에 넣으면 최신 기록을 밀어내므로
         // 화면 하단에 있을 때 렌더된 행만 새 기록으로 수집한다.
-        const shouldCaptureNative = parent.scrollTop >= -1;
+        const shouldCaptureNative = !isChatHistoryScrolledBack();
         for (const m of muts) {
           m.removedNodes.forEach((node) => {
             if (
               m.target === parent &&
               node.nodeType === 1 &&
-              node.matches?.('[class*="_item_"]') &&
-              !node.hasAttribute(CHAT_HISTORY_MARK)
+              node.matches?.('[class*="_item_"]')
             ) {
-              nativeRowsChanged = true;
+              chatRowsChanged = true;
             }
           });
           m.addedNodes.forEach((node) => {
@@ -33603,34 +34546,34 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               node.parentElement === parent &&
               node.matches?.('[class*="_item_"]')
             ) {
-              if (!node.hasAttribute(CHAT_HISTORY_MARK)) {
-                nativeRowsChanged = true;
-              }
+              chatRowsChanged = true;
               if (shouldCaptureNative) captureChatHistoryRow(node);
               return;
             }
-            node
-              .querySelectorAll?.('[class*="_item_"]')
-              .forEach((el) => {
-                if (el.parentElement === parent && shouldCaptureNative) {
-                  captureChatHistoryRow(el);
-                }
-              });
+            node.querySelectorAll?.('[class*="_item_"]').forEach((el) => {
+              if (el.parentElement === parent) {
+                chatRowsChanged = true;
+                if (shouldCaptureNative) captureChatHistoryRow(el);
+              }
+            });
           });
         }
-        if (nativeRowsChanged && parent.scrollTop < -1) {
+        if (chatRowsChanged && isChatHistoryNearOldestEdge()) {
           scheduleChatHistoryReconcile(300);
         }
       });
       chatHistoryObserver.observe(list, { childList: true, subtree: true });
-      setChatHistoryScrollParent(rowParent);
+      setChatHistoryScrollParent(findChatHistoryScrollParent(rowParent, list));
       // 진입 당시 이미 렌더된 행도 바로 저장한다. 예전에는 복원 대기(최대 40초)가
       // 끝난 뒤에야 담아서 짧게 보고 이동하면 기록이 하나도 남지 않았다.
-      // column-reverse DOM은 최신 행이 앞에 있으므로 오래된 행부터 버퍼에 담는다.
-      chatHistoryRows(rowParent)
-        .slice()
-        .reverse()
-        .forEach(captureChatHistoryRow);
+      // DOM 방향과 무관하게 버퍼는 항상 과거→최신 순서로 유지한다.
+      captureRenderedChatHistoryRows(rowParent);
+    }
+
+    if (chatHistorySkipNextRestore) {
+      chatHistoryRestored = true;
+      chatHistorySkipNextRestore = false;
+      scrollChatHistoryToLatest(chatHistoryScrollParent, rowParent);
     }
 
     if (!chatHistoryRestored) {
@@ -33639,12 +34582,2629 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 탭을 닫거나 이동할 때 버퍼를 흘려보낸다(디바운스 대기 중이던 분량 보존).
+  document.addEventListener("visibilitychange", () => {
+    if (!chatHistoryOn) return;
+    if (document.visibilityState === "hidden") {
+      chatHistoryWasHidden = true;
+      clearChatHistoryVisibilityTimers();
+      void flushChatHistory();
+      return;
+    }
+    if (!chatHistoryWasHidden) return;
+    chatHistoryWasHidden = false;
+    reconnectChatHistoryAfterVisibility();
+  });
+
+  function chatHistoryMutationNeedsReconnect(mutation) {
+    if (!chatHistoryOn || !currentLiveChannelId()) return false;
+    const target =
+      mutation.target instanceof Element
+        ? mutation.target
+        : mutation.target?.parentElement;
+    if (!target?.closest("aside#aside-chatting")) return false;
+    const candidates = [];
+    mutation.addedNodes.forEach((node) => {
+      if (!(node instanceof Element)) return;
+      if (node.matches?.('[class*="_item_"]')) candidates.push(node);
+      node
+        .querySelectorAll?.('[class*="_item_"]')
+        .forEach((row) => candidates.push(row));
+    });
+    return candidates.some((row) => {
+      if (
+        row.hasAttribute(CHAT_HISTORY_MARK) ||
+        !row.closest("aside#aside-chatting") ||
+        !isChatHistoryMessageRow(row)
+      ) {
+        return false;
+      }
+      return (
+        !chatHistoryObservedList?.isConnected ||
+        !chatHistoryObservedRowParent?.isConnected ||
+        row.parentElement !== chatHistoryObservedRowParent
+      );
+    });
+  }
   window.addEventListener("pagehide", () => {
-    if (chatHistoryOn) flushChatHistory();
+    if (chatHistoryOn) void flushChatHistory();
   });
 
   let chatMsgObserver = null;
   let chatMsgObservedAsides = new WeakSet();
+  // ── 클립 보관함: 저장 계층 ─────────────────────────────────────────────────
+  // 항목 형태: { uid, title, thumb, channelName, channelId, at }
+  //  - uid: 클립 UID(중복 판정 기준)
+  //  - at : 담은 시각(최신순 정렬 + 상한 초과 시 오래된 것부터 버림)
+  // 목록을 우리가 직접 그려야 하므로 카드에 필요한 최소 메타를 함께 보관한다.
+  let clipVault = { fav: [], like: [] };
+  let clipVaultLimit = CLIP_VAULT_LIMIT_DEFAULT;
+  let clipVaultLoaded = false;
+  let clipVaultAccountId = "";
+  let clipVaultLoadGeneration = 0;
+  let clipVaultLoadPending = false;
+
+  function normalizeClipVaultAccountId(value) {
+    const id = String(value || "").trim().toLowerCase();
+    return /^[0-9a-f]{32}$/.test(id) ? id : "";
+  }
+
+  function currentClipVaultAccountId() {
+    try {
+      return normalizeClipVaultAccountId(
+        localStorage.getItem(CHZZK_USER_ID_HASH_KEY),
+      );
+    } catch {
+      return "";
+    }
+  }
+
+  function clipVaultAccountStorageKey(accountId = clipVaultAccountId) {
+    const normalized = normalizeClipVaultAccountId(accountId);
+    return normalized ? `${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${normalized}` : "";
+  }
+
+  function isClipVaultAvailable() {
+    return (
+      featureFlags.clipVault === true &&
+      clipVaultLoaded &&
+      Boolean(clipVaultAccountId)
+    );
+  }
+
+  function normalizeClipVaultLimit(value) {
+    if (value == null || value === "") return CLIP_VAULT_LIMIT_DEFAULT;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return CLIP_VAULT_LIMIT_DEFAULT;
+    return Math.min(CLIP_VAULT_LIMIT_MAX, Math.max(CLIP_VAULT_LIMIT_MIN, n));
+  }
+
+  function parseClipVaultMetric(value) {
+    if (Number.isFinite(Number(value)) && String(value).trim() !== "") {
+      return Math.max(0, Number(value));
+    }
+    const text = String(value || "")
+      // 저장된 카드 HTML에는 SVG width/viewBox/path 숫자가 먼저 나온다. 태그를
+      // 제거하지 않으면 재생 아이콘의 width="11"을 재생수 11로 오인한다.
+      .replace(/<[^>]*>/g, " ")
+      .replace(/재생\s*수|좋아요/gi, "")
+      .replaceAll(",", "")
+      .trim();
+    const match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*(억|만|천)?/);
+    if (!match) return 0;
+    const unit =
+      match[2] === "억"
+        ? 100000000
+        : match[2] === "만"
+          ? 10000
+          : match[2] === "천"
+            ? 1000
+            : 1;
+    const number = Number(match[1]) * unit;
+    return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+  }
+
+  function normalizeClipVaultTitle(value, channelName) {
+    const title = String(value || "").trim();
+    const channel = String(channelName || "").trim();
+    if (!title || !channel) return title.slice(0, 200);
+    if (
+      title.slice(0, channel.length).localeCompare(channel, "ko", {
+        sensitivity: "base",
+      }) !== 0
+    ) {
+      return title.slice(0, 200);
+    }
+    const remainder = title.slice(channel.length);
+    const match = remainder.match(/^\s*(?:[-–—|·:]\s*)+(.+)$/);
+    return String(match?.[1] || title)
+      .trim()
+      .slice(0, 200);
+  }
+
+  function normalizeClipVaultItem(raw) {
+    const uid = String(raw?.uid || "").trim();
+    if (!uid) return null;
+    const playHtml = String(raw?.playHtml || "").slice(0, 600);
+    const at = Number(raw?.at) || Date.now();
+    const playCountKnown =
+      raw?.playCountKnown === true ||
+      String(raw?.playCount ?? "").trim() !== "" ||
+      Boolean(playHtml);
+    const likeCountKnown =
+      raw?.likeCountKnown === true ||
+      String(raw?.likeCount ?? "").trim() !== "";
+    const channelName = String(raw?.channelName || "")
+      .trim()
+      .slice(0, 100);
+    const adultKnown = raw?.adultKnown === true;
+    return {
+      uid,
+      title: normalizeClipVaultTitle(raw?.title, channelName),
+      thumb: String(raw?.thumb || "").trim(),
+      channelName,
+      channelId: String(raw?.channelId || "").trim(),
+      videoId: /^[0-9a-f]{40}$/i.test(String(raw?.videoId || "").trim())
+        ? String(raw.videoId).trim()
+        : "",
+      adult:
+        raw?.adult === true ||
+        String(raw?.adult || "").toLowerCase() === "true",
+      adultKnown,
+      playHtml,
+      // 이전 버전에서 SVG width(11)가 playCount로 저장됐을 수 있으므로, 원본 카드
+      // HTML이 남아 있으면 그 안의 실제 텍스트를 우선해 기존 데이터도 자동 복구한다.
+      playCount: parseClipVaultMetric(playHtml || raw?.playCount),
+      likeCount: parseClipVaultMetric(raw?.likeCount),
+      playCountKnown,
+      likeCountKnown,
+      playCountFetchedAt:
+        Number(raw?.playCountFetchedAt) || (playCountKnown ? at : 0),
+      likeCountFetchedAt:
+        Number(raw?.likeCountFetchedAt) || (likeCountKnown ? at : 0),
+      at,
+    };
+  }
+
+  function normalizeClipVault(raw) {
+    const out = { fav: [], like: [] };
+    for (const kind of CLIP_VAULT_KINDS) {
+      const list = Array.isArray(raw?.[kind]) ? raw[kind] : [];
+      const seen = new Set();
+      for (const item of list) {
+        const norm = normalizeClipVaultItem(item);
+        if (!norm || seen.has(norm.uid)) continue;
+        seen.add(norm.uid);
+        out[kind].push(norm);
+      }
+      // 최신순 유지(담은 시각 내림차순).
+      out[kind].sort((a, b) => b.at - a.at);
+    }
+    return out;
+  }
+
+  function mergeClipVaults(primary, legacy) {
+    const merged = normalizeClipVault(primary);
+    const older = normalizeClipVault(legacy);
+    for (const kind of CLIP_VAULT_KINDS) {
+      const known = new Set(merged[kind].map((item) => item.uid));
+      older[kind].forEach((item) => {
+        if (known.has(item.uid)) return;
+        known.add(item.uid);
+        merged[kind].push(item);
+      });
+      merged[kind].sort((a, b) => b.at - a.at);
+    }
+    return merged;
+  }
+
+  function normalizeClipVaultAccountIds(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map(normalizeClipVaultAccountId).filter(Boolean))];
+  }
+
+  function resetClipVaultAccountRuntime() {
+    cancelClipVaultFollowingImportRequest();
+    clipVaultFollowingImportRunning = false;
+    clipVaultFollowingImportPauseRequested = false;
+    // 이전 계정 작업은 jobId 취소와 계정 ID 검사로 끝낸다. 여기서 중지 플래그를 남기면
+    // 실제 작업이 없어도 새 계정의 좋아요 탭이 계속 '확인 중'으로 보인다.
+    clipVaultFollowingImportStopRequested = false;
+    clipVaultFollowingImportPaused = false;
+    clipVaultFollowingImportResume = null;
+    clipVaultFollowingImportStatus = "";
+    clipVaultFollowingImportJobId = "";
+    clipVaultFollowingImportAddedCount = 0;
+    clipVaultFollowingImportPageCount = 0;
+    clipVaultFollowingImportCandidateCount = 0;
+    clipVaultMetricRefreshPending.clear();
+    clipVaultMetricRefreshSession.clear();
+    clipVaultMetricRetryAt.clear();
+    clipVaultMetricRefreshRunning = false;
+    clipVaultMetaBackfillPending.clear();
+    clipVaultMetaBackfillRetryAt.clear();
+    clipVaultRenderSig = "";
+    if (clipVaultOpenKind) {
+      closeClipVaultPanel({ restoreScroll: false, focusButton: false });
+    }
+    clearClipVaultCardDecorations();
+  }
+
+  async function loadClipVault(requestedAccountId = currentClipVaultAccountId()) {
+    if (!IS_TOP_FRAME || !chrome.storage?.local) return;
+    const accountId = normalizeClipVaultAccountId(requestedAccountId);
+    if (
+      accountId === clipVaultAccountId &&
+      (clipVaultLoaded || clipVaultLoadPending)
+    ) {
+      return;
+    }
+
+    flushClipVaultSave();
+    clipVaultAccountId = accountId;
+    clipVaultLoaded = false;
+    clipVaultLoadPending = true;
+    clipVault = { fav: [], like: [] };
+    resetClipVaultAccountRuntime();
+    const generation = ++clipVaultLoadGeneration;
+
+    if (!accountId) {
+      clipVaultLoaded = true;
+      clipVaultLoadPending = false;
+      ensureClipVaultButton();
+      syncClipFavToFrame();
+      return;
+    }
+
+    const accountKey = clipVaultAccountStorageKey(accountId);
+    try {
+      const data = await chrome.storage.local.get([
+        accountKey,
+        CLIP_VAULT_KEY,
+        CLIP_VAULT_ACCOUNT_IDS_KEY,
+        CLIP_VAULT_LIMIT_KEY,
+        CLIP_VAULT_SORT_KEY,
+        CLIP_VAULT_GROUP_STREAMER_KEY,
+        CLIP_VAULT_GROUP_DATE_KEY,
+      ]);
+      if (
+        generation !== clipVaultLoadGeneration ||
+        accountId !== clipVaultAccountId
+      ) {
+        return;
+      }
+
+      let accountVault = normalizeClipVault(data?.[accountKey]);
+      const hasLegacy = Object.prototype.hasOwnProperty.call(
+        data || {},
+        CLIP_VAULT_KEY,
+      );
+      if (hasLegacy) {
+        accountVault = mergeClipVaults(accountVault, data?.[CLIP_VAULT_KEY]);
+      }
+      clipVault = accountVault;
+      clipVaultLimit = normalizeClipVaultLimit(data?.[CLIP_VAULT_LIMIT_KEY]);
+      clipVaultSort = Object.hasOwn(
+        CLIP_VAULT_SORTS,
+        data?.[CLIP_VAULT_SORT_KEY],
+      )
+        ? data[CLIP_VAULT_SORT_KEY]
+        : "saved-desc";
+      clipVaultGroupByStreamer = data?.[CLIP_VAULT_GROUP_STREAMER_KEY] === true;
+      clipVaultGroupByDate = data?.[CLIP_VAULT_GROUP_DATE_KEY] === true;
+
+      const accountIds = normalizeClipVaultAccountIds(
+        data?.[CLIP_VAULT_ACCOUNT_IDS_KEY],
+      );
+      if (!accountIds.includes(accountId)) accountIds.push(accountId);
+      await chrome.storage.local.set({
+        [accountKey]: clipVault,
+        [CLIP_VAULT_ACCOUNT_IDS_KEY]: accountIds,
+        [CLIP_VAULT_ACTIVE_ACCOUNT_KEY]: accountId,
+      });
+      if (hasLegacy) await chrome.storage.local.remove(CLIP_VAULT_KEY);
+    } catch {
+      clipVault = { fav: [], like: [] };
+      clipVaultLimit = CLIP_VAULT_LIMIT_DEFAULT;
+      clipVaultSort = "saved-desc";
+      clipVaultGroupByStreamer = false;
+      clipVaultGroupByDate = false;
+    }
+    if (
+      generation !== clipVaultLoadGeneration ||
+      accountId !== clipVaultAccountId
+    ) {
+      return;
+    }
+    clipVaultLoaded = true;
+    clipVaultLoadPending = false;
+    // 보관함 설정과 목록은 서로 다른 비동기 부트 경로에서 읽힌다. 목록이 나중에
+    // 도착해도 현재 카드의 별·하트와 누락 메타데이터를 즉시 맞춘다.
+    ensureClipVaultButton();
+    ensureClipVaultCardButtons();
+    backfillClipVaultMeta();
+    renderClipVaultPanel();
+    syncClipFavToFrame();
+  }
+
+  let clipVaultSaveTimer = 0;
+  let clipVaultSaveAccountId = "";
+  function flushClipVaultSave() {
+    if (clipVaultSaveTimer) clearTimeout(clipVaultSaveTimer);
+    clipVaultSaveTimer = 0;
+    const accountId = normalizeClipVaultAccountId(
+      clipVaultSaveAccountId || clipVaultAccountId,
+    );
+    clipVaultSaveAccountId = "";
+    const accountKey = clipVaultAccountStorageKey(accountId);
+    if (!accountKey || !clipVaultLoaded) return;
+    try {
+      chrome.storage?.local?.set({ [accountKey]: clipVault });
+    } catch {}
+  }
+
+  function saveClipVault() {
+    if (!clipVaultLoaded || !clipVaultAccountId) return;
+    // 연속 담기(스크롤하며 여러 개)에 대비해 디바운스한다.
+    clipVaultSaveAccountId = clipVaultAccountId;
+    if (clipVaultSaveTimer) return;
+    clipVaultSaveTimer = window.setTimeout(() => {
+      flushClipVaultSave();
+    }, 400);
+  }
+
+  window.addEventListener("pagehide", flushClipVaultSave);
+
+  function clipVaultHas(kind, uid) {
+    if (
+      !isClipVaultAvailable() ||
+      !CLIP_VAULT_KINDS.includes(kind) ||
+      !uid
+    ) {
+      return false;
+    }
+    return clipVault[kind].some((item) => item.uid === uid);
+  }
+
+  // 담기/빼기. 이미 있으면 갱신하지 않고 그대로 둔다(담은 시각 보존).
+  function clipVaultAdd(kind, meta) {
+    if (!isClipVaultAvailable() || !CLIP_VAULT_KINDS.includes(kind)) {
+      return false;
+    }
+    const item = normalizeClipVaultItem({ ...meta, at: Date.now() });
+    if (!item) return false;
+    if (clipVaultHas(kind, item.uid)) return false;
+    clipVault[kind].unshift(item);
+    // 상한 초과분은 오래된 쪽(뒤)부터 버린다.
+    if (clipVault[kind].length > clipVaultLimit) {
+      clipVault[kind].length = clipVaultLimit;
+    }
+    saveClipVault();
+    return true;
+  }
+
+  // ── 클립 보관함: UI ────────────────────────────────────────────────────────
+  // /clips 실측 구조:
+  //   div._container_17fea_2 > section._section_17fea_12
+  //     ├ div._header_17fea_20   > strong._title_17fea_44 ("인기 클립")  ← 버튼을 여기에
+  //     ├ div._filter_17fea_36   (실시간/주간/추천순/인기순 탭)
+  //     └ ul._list_17fea_104._type_clip_17fea_152  ← 카드 그리드
+  //   카드: a._link_qe8rh_2[href="/clips/<uid>"] > div._container_(배경이미지=썸네일)
+  //           > div._wrapper_ > strong._title_ + span._information_(채널명)
+  const CLIP_VAULT_BTN_ID = "cheese-clip-vault-btn";
+  const CLIP_VAULT_PANEL_ID = "cheese-clip-vault-panel";
+  const CLIP_VAULT_CARD_MARK = "data-cheese-clip-vault";
+  let clipVaultOpenKind = ""; // "" = 닫힘, 아니면 fav/like
+  let clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+  let clipVaultSearch = "";
+  let clipVaultSort = "saved-desc";
+  let clipVaultGroupByStreamer = false;
+  let clipVaultGroupByDate = false;
+  let clipVaultFollowingImportRunning = false;
+  let clipVaultFollowingImportPaused = false;
+  let clipVaultFollowingImportPauseRequested = false;
+  let clipVaultFollowingImportStopRequested = false;
+  let clipVaultFollowingImportStatus = "";
+  let clipVaultFollowingImportResume = null;
+  let clipVaultFollowingImportJobId = "";
+  // 일시정지 후 이어하기도 하나의 가져오기 작업으로 취급한다. 이 값은 같은 작업에서
+  // 새로 보관한 좋아요 수를 누적해, 재개 뒤 0개부터 다시 보이는 혼동을 막는다.
+  let clipVaultFollowingImportAddedCount = 0;
+  let clipVaultFollowingImportPageCount = 0;
+  let clipVaultFollowingImportCandidateCount = 0;
+  const clipVaultCollapsedStreamerGroups = new Set();
+  const clipVaultMetricRefreshPending = new Set();
+  const clipVaultMetricRefreshSession = new Set();
+  const clipVaultMetricRetryAt = new Map();
+  const clipVaultMetaBackfillPending = new Set();
+  const clipVaultMetaBackfillRetryAt = new Map();
+  let clipVaultMetricRefreshRunning = false;
+  let clipVaultMetricForceRefresh = false;
+  let clipVaultSavedScrollY = null;
+  let clipVaultSearchTimer = 0;
+  // 마지막 포인터 입력 시각. 클릭 처리 도중 패널을 재생성해 click 을 잃지 않도록 쓴다.
+  let clipVaultLastPointerAt = 0;
+  let clipVaultButtonRetryTimer = 0;
+  let clipVaultButtonRetryAttempt = 0;
+  const CLIP_VAULT_BUTTON_RETRY_DELAYS = [80, 180, 360, 720, 1200];
+
+  function isClipsListPage() {
+    return /^\/clips\/?$/.test(location.pathname);
+  }
+
+  function isChannelClipsListPage() {
+    return /^\/[0-9a-f]{32}\/clips\/?$/i.test(location.pathname);
+  }
+
+  function isClipCardListPage() {
+    return isClipsListPage() || isChannelClipsListPage();
+  }
+
+  function ensureClipVaultAccount() {
+    if (!IS_TOP_FRAME) return;
+    const accountId = currentClipVaultAccountId();
+    if (
+      accountId === clipVaultAccountId &&
+      (clipVaultLoaded || clipVaultLoadPending)
+    ) {
+      return;
+    }
+    void loadClipVault(accountId);
+  }
+
+  if (IS_TOP_FRAME) {
+    window.addEventListener("focus", ensureClipVaultAccount);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) ensureClipVaultAccount();
+    });
+  }
+
+  function clipUidFromHref(href) {
+    try {
+      const url = new URL(String(href || ""), location.origin);
+      if (url.origin !== location.origin) return "";
+      const match = url.pathname.match(/^\/clips\/([^/?#]+)/);
+      return match ? decodeURIComponent(match[1]) : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clipVaultCardLinks() {
+    const selector = [
+      'ul[class*="_type_clip_"] a[class*="_link_"][href^="/clips/"]',
+      'ul[class*="_type_clip_"] a[class*="_link_"][href*="chzzk.naver.com/clips/"]',
+      '#clips-PANEL a[href^="/clips/"]',
+      '#clips-PANEL a[href*="chzzk.naver.com/clips/"]',
+    ].join(", ");
+    const candidates = [...document.querySelectorAll(selector)].filter(
+      (link) =>
+        !link.closest(`#${CLIP_VAULT_PANEL_ID}`) &&
+        Boolean(clipUidFromHref(link.getAttribute("href"))),
+    );
+    const cards = new Map();
+    candidates.forEach((link) => {
+      const uid = clipUidFromHref(link.getAttribute("href"));
+      const card = link.closest("li") || link;
+      let byUid = cards.get(card);
+      if (!byUid) {
+        byUid = new Map();
+        cards.set(card, byUid);
+      }
+      const score =
+        (link.matches('[class*="_thumbnail_"], [class*="_cover_"]') ? 8 : 0) +
+        (link.querySelector('img, [style*="background-image"]') ? 4 : 0) +
+        (link.matches('[class*="_link_"]') ? 2 : 0);
+      const previous = byUid.get(uid);
+      if (!previous || score > previous.score) byUid.set(uid, { link, score });
+    });
+    return [...cards.values()].flatMap((byUid) =>
+      [...byUid.values()].map((entry) => entry.link),
+    );
+  }
+
+  function clearClipVaultCardDecorations() {
+    document.querySelectorAll(`[${CLIP_VAULT_CARD_MARK}]`).forEach((link) => {
+      link.removeAttribute(CLIP_VAULT_CARD_MARK);
+      link.classList.remove("cheese-clip-vault-card-anchor");
+      link.querySelector(".cheese-clip-vault-star")?.remove();
+      link.querySelector(".cheese-clip-vault-like-badge")?.remove();
+    });
+  }
+
+  function ensureClipVaultCardPositioning(link) {
+    if (!(link instanceof HTMLElement)) return;
+    if (getComputedStyle(link).position === "static") {
+      link.classList.add("cheese-clip-vault-card-anchor");
+    }
+  }
+
+  // 카드 요소에서 저장에 필요한 메타를 뽑는다(클래스 해시 대신 구조·역할로 접근).
+  function readClipCardMeta(link) {
+    if (!(link instanceof HTMLElement)) return null;
+    const uid = clipUidFromHref(link.getAttribute("href"));
+    if (!uid) return null;
+    const card = link.closest("li") || link;
+    const box =
+      link.querySelector('[style*="background-image"]') ||
+      card.querySelector('[style*="background-image"], [data-clip-thumbnail-url]');
+    const bg = box?.getAttribute("style") || "";
+    const thumb =
+      box?.getAttribute("data-clip-thumbnail-url") ||
+      (bg.match(/url\(["']?([^"')]+)/) || [])[1] ||
+      card.querySelector("img")?.currentSrc ||
+      card.querySelector("img")?.src ||
+      "";
+    const title = card
+      .querySelector('[class*="_title_"], [class*="clip_card_title"]')
+      ?.textContent?.trim();
+    const info = card.querySelectorAll('[class*="_information_"]');
+    // 첫 번째 _information_ 이 채널명, 재생수는 _-play_ 가 붙은 쪽이다.
+    const channelLink = card.querySelector(
+      '.cheese-search-clip-channel-link, a[href^="/"][class*="_channel_"]',
+    );
+    const channelName =
+      channelLink?.textContent?.trim() || info[0]?.textContent?.trim() || "";
+    const channelId =
+      (channelLink?.getAttribute("href") || "").match(
+        /^\/([0-9a-f]{32})(?:[/?#]|$)/i,
+      )?.[1] || "";
+    // 재생수 줄은 아이콘 SVG + 접근성 라벨(.blind "재생 수") + 숫자로 이뤄져 있다.
+    // textContent 로 뽑으면 "재생 수183" 처럼 붙어 나오므로, 내부 마크업을 통째로
+    // 보관해 렌더할 때 원본 그대로 되살린다.
+    const playEl = card.querySelector('[class*="_-play_"]');
+    const playHtml = playEl?.innerHTML || "";
+    const adult = Boolean(
+      card.querySelector(
+        ".cheese-search-clip-is-adult, .clip_card_area__gi6nZ, [class*='_is_adult_'], [class*='_age_restriction_']",
+      ) || /연령\s*제한/.test(card.textContent || ""),
+    );
+    return {
+      uid,
+      title: title || "",
+      thumb,
+      channelName,
+      channelId,
+      adult,
+      adultKnown: true,
+      playHtml,
+      playCount: parseClipVaultMetric(playEl?.textContent),
+      playCountKnown: Boolean(playEl),
+      playCountFetchedAt: playEl ? Date.now() : 0,
+      likeCount: 0,
+      likeCountKnown: false,
+      likeCountFetchedAt: 0,
+    };
+  }
+
+  // lucide star / heart / x (ISC — THIRD_PARTY_NOTICES.md 참고).
+  // 채움 여부만 fill 로 바꿔 '담김/안 담김'을 표현한다.
+  function clipVaultStarSvg(filled) {
+    return (
+      '<svg class="lucide lucide-star" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" ' +
+      'fill="' +
+      (filled ? "currentColor" : "none") +
+      '" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 ' +
+      "1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 " +
+      "1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 " +
+      "0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879" +
+      'L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>' +
+      "</svg>"
+    );
+  }
+
+  function clipVaultHeartSvg(filled = false) {
+    return (
+      '<svg class="lucide lucide-heart" viewBox="0 0 24 24" width="18" height="18" ' +
+      'aria-hidden="true" fill="' +
+      (filled ? "currentColor" : "none") +
+      '" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>' +
+      "</svg>"
+    );
+  }
+
+  function clipVaultXSvg() {
+    return (
+      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" ' +
+      'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>'
+    );
+  }
+
+  function clipVaultDownloadSvg() {
+    return (
+      '<svg class="lucide lucide-download" viewBox="0 0 24 24" width="16" height="16" ' +
+      'aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/>' +
+      '<path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>'
+    );
+  }
+
+  function clipVaultLoaderSvg() {
+    return (
+      '<svg class="lucide lucide-loader-circle" viewBox="0 0 24 24" width="16" height="16" ' +
+      'aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>'
+    );
+  }
+
+  function clipVaultPauseSvg() {
+    return (
+      '<svg class="lucide lucide-pause" viewBox="0 0 24 24" width="16" height="16" ' +
+      'aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><rect width="4" height="16" x="6" y="4" rx="1"/>' +
+      '<rect width="4" height="16" x="14" y="4" rx="1"/></svg>'
+    );
+  }
+
+  function clipVaultPlaySvg() {
+    return (
+      '<svg class="lucide lucide-play" viewBox="0 0 24 24" width="16" height="16" ' +
+      'aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 14 9-14 9z"/></svg>'
+    );
+  }
+
+  function clipVaultStopSvg() {
+    return (
+      '<svg class="lucide lucide-square" viewBox="0 0 24 24" width="15" height="15" ' +
+      'aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="5" y="5" rx="1"/></svg>'
+    );
+  }
+
+  function createClipVaultFollowingImportJobId() {
+    try {
+      return `clip-vault:${crypto.randomUUID()}`;
+    } catch {
+      return `clip-vault:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    }
+  }
+
+  function cancelClipVaultFollowingImportRequest() {
+    if (!clipVaultFollowingImportJobId) return;
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "CHEESE_CLIP_VAULT_CANCEL_FOLLOWING_LIKES",
+          jobId: clipVaultFollowingImportJobId,
+        },
+        () => void chrome.runtime.lastError,
+      );
+    } catch {}
+  }
+
+  function requestClipVaultFollowingImportControl(action) {
+    if (action === "stop") {
+      clipVaultFollowingImportStopRequested = true;
+      clipVaultFollowingImportPauseRequested = false;
+      if (clipVaultFollowingImportRunning) {
+        clipVaultFollowingImportStatus = "가져오기를 중지하고 있습니다.";
+        cancelClipVaultFollowingImportRequest();
+      } else {
+        clipVaultFollowingImportPaused = false;
+        clipVaultFollowingImportResume = null;
+        clipVaultFollowingImportStopRequested = false;
+        clipVaultFollowingImportStatus =
+          `가져오기를 중지했습니다. ${formatClipVaultFollowingImportCounts()}`;
+        clipVaultFollowingImportAddedCount = 0;
+        clipVaultFollowingImportPageCount = 0;
+        clipVaultFollowingImportCandidateCount = 0;
+      }
+      renderClipVaultPanel();
+      return;
+    }
+    if (!clipVaultFollowingImportRunning) return;
+    clipVaultFollowingImportPauseRequested = true;
+    clipVaultFollowingImportStatus = "현재 위치를 저장하고 있습니다.";
+    cancelClipVaultFollowingImportRequest();
+    renderClipVaultPanel();
+  }
+
+  function formatClipVaultImportEta(milliseconds) {
+    const totalSeconds = Math.max(1, Math.round(Number(milliseconds) / 1000));
+    if (totalSeconds < 60) return `약 ${totalSeconds}초`;
+    const minutes = Math.ceil(totalSeconds / 60);
+    if (minutes < 60) return `약 ${minutes}분`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes
+      ? `약 ${hours}시간 ${remainingMinutes}분`
+      : `약 ${hours}시간`;
+  }
+
+  function formatClipVaultFollowingImportCounts(
+    addedCount = clipVaultFollowingImportAddedCount,
+  ) {
+    const pageCount = Math.max(
+      0,
+      Number(clipVaultFollowingImportPageCount) || 0,
+    );
+    const candidateCount = Math.max(
+      0,
+      Number(clipVaultFollowingImportCandidateCount) || 0,
+    );
+    const added = Math.max(0, Number(addedCount) || 0);
+    const checked = pageCount
+      ? `이번 확인 ${pageCount.toLocaleString("ko-KR")}페이지 · 좋아요 후보 ${candidateCount.toLocaleString("ko-KR")}개`
+      : "클립 목록 확인 준비 중";
+    return `${checked} · 좋아요 ${added.toLocaleString("ko-KR")}개 추가`;
+  }
+
+  function getClipVaultImportEtaText({
+    checkedCount,
+    followedChannelCount,
+    completedChannelCount,
+    averageMsPerClip,
+    averageMsPerChannel,
+  }) {
+    const remainingChannels = Math.max(
+      0,
+      followedChannelCount - completedChannelCount,
+    );
+    if (!remainingChannels) return "";
+    let etaMs = 0;
+    if (
+      checkedCount > 0 &&
+      completedChannelCount > 0 &&
+      averageMsPerClip > 0
+    ) {
+      const estimatedTotalClips = Math.max(
+        checkedCount,
+        Math.ceil(
+          (checkedCount / completedChannelCount) * followedChannelCount,
+        ),
+      );
+      etaMs = Math.max(0, estimatedTotalClips - checkedCount) * averageMsPerClip;
+    }
+    if (!etaMs && averageMsPerChannel > 0) {
+      etaMs = remainingChannels * averageMsPerChannel;
+    }
+    return etaMs > 0
+      ? `예상 남은 시간 ${formatClipVaultImportEta(etaMs)}`
+      : "남은 시간 계산 중";
+  }
+
+  // ⚠ 멱등 필수. 이 함수는 별표 클릭·storage 변경(우리 저장이 되돌아옴) 등으로 자주
+  // 불리는데, 매번 grid.innerHTML 을 새로 쓰면 버튼 노드가 교체된다. mousedown~mouseup
+  // 사이에 교체되면 click 이 우리 버튼이 아니라 카드 <a> 로 가서 클립 페이지로 이동해
+  // 버린다(실측). 내용이 같으면 다시 그리지 않는다.
+  let clipVaultRenderSig = "";
+
+  function normalizeClipVaultSearchText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .toLocaleLowerCase("ko-KR")
+      .trim();
+  }
+
+  function getFilteredClipVaultItems(kind) {
+    const source = Array.isArray(clipVault[kind]) ? clipVault[kind] : [];
+    const query = normalizeClipVaultSearchText(clipVaultSearch);
+    const filtered = query
+      ? source.filter((item) =>
+          normalizeClipVaultSearchText(
+            `${item.title || ""} ${item.channelName || ""}`,
+          ).includes(query),
+        )
+      : source.slice();
+    if (clipVaultSort === "saved-asc") {
+      filtered.reverse();
+    } else if (clipVaultSort === "popular" || clipVaultSort === "likes") {
+      const metric = clipVaultSort === "popular" ? "playCount" : "likeCount";
+      filtered.sort(
+        (a, b) =>
+          Number(b[metric] || 0) - Number(a[metric] || 0) || b.at - a.at,
+      );
+    } else if (clipVaultSort === "title" || clipVaultSort === "channel") {
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      filtered.sort((a, b) => {
+        if (clipVaultSort === "title") {
+          return collator.compare(a.title || "", b.title || "") || b.at - a.at;
+        }
+        return (
+          collator.compare(a.channelName || "", b.channelName || "") ||
+          collator.compare(a.title || "", b.title || "") ||
+          b.at - a.at
+        );
+      });
+    }
+    return filtered;
+  }
+
+  function clipVaultEmptyMessage(kind, searching) {
+    if (searching) return "일치하는 클립이 없습니다.";
+    return kind === "like"
+      ? "기록된 좋아요 클립이 없습니다."
+      : "즐겨찾기한 클립이 없습니다.";
+  }
+
+  function clipVaultDateGroup(item) {
+    const date = new Date(Number(item?.at));
+    if (!Number.isFinite(date.getTime())) {
+      return { key: "unknown", label: "날짜 정보 없음", sortValue: null };
+    }
+    const startOfDay = (value) =>
+      new Date(
+        value.getFullYear(),
+        value.getMonth(),
+        value.getDate(),
+      ).getTime();
+    const today = startOfDay(new Date());
+    const target = startOfDay(date);
+    const diff = Math.round((today - target) / 86400000);
+    const label =
+      diff === 0
+        ? "오늘"
+        : diff === 1
+          ? "어제"
+          : `${String(date.getFullYear()).slice(-2)}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+    return {
+      key: `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`,
+      label,
+      sortValue: target,
+    };
+  }
+
+  function groupClipVaultItems(items, getGroup) {
+    const groups = [];
+    const byKey = new Map();
+    items.forEach((item) => {
+      const group = getGroup(item);
+      if (!byKey.has(group.key)) {
+        const entry = { ...group, items: [] };
+        byKey.set(group.key, entry);
+        groups.push(entry);
+      }
+      byKey.get(group.key).items.push(item);
+    });
+    return groups;
+  }
+
+  function groupClipVaultItemsByStreamer(items) {
+    const channelIdsByName = new Map();
+    items.forEach((item) => {
+      const channelId = String(item?.channelId || "").trim();
+      const nameKey = normalizeClipVaultSearchText(item?.channelName);
+      if (!channelId || !nameKey) return;
+      if (!channelIdsByName.has(nameKey)) {
+        channelIdsByName.set(nameKey, new Set());
+      }
+      channelIdsByName.get(nameKey).add(channelId);
+    });
+
+    return groupClipVaultItems(items, (item) => {
+      const channelId = String(item?.channelId || "").trim();
+      const nameKey = normalizeClipVaultSearchText(item?.channelName);
+      const matchingIds = channelIdsByName.get(nameKey);
+      const resolvedChannelId =
+        channelId ||
+        (matchingIds?.size === 1 ? matchingIds.values().next().value : "");
+      return {
+        key: resolvedChannelId
+          ? `id:${resolvedChannelId}`
+          : nameKey
+            ? `name:${nameKey}`
+            : "unknown",
+        label: item.channelName || "채널 정보 없음",
+      };
+    });
+  }
+
+  function clipVaultFolderSvg() {
+    return (
+      '<svg class="lucide lucide-folder" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' +
+      "</svg>"
+    );
+  }
+
+  function clipVaultChevronSvg() {
+    return '<svg class="cheese-clip-vault-group-chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  }
+
+  function renderClipVaultCard(item, kind, classes) {
+    const playMetric = item.playCountKnown
+      ? `<span class="cheese-clip-vault-card-play"><i class="cheese-clip-vault-card-metric-icon" aria-hidden="true">${createClipPlayIcon()}</i><span class="blind">재생 수</span><span>${Number(item.playCount || 0).toLocaleString("ko-KR")}</span></span>`
+      : "";
+    const likeMetric = item.likeCountKnown
+      ? `<span class="cheese-clip-vault-card-like"><i class="cheese-clip-vault-card-metric-icon" aria-hidden="true">${clipVaultHeartSvg()}</i><span class="blind">좋아요 수</span><span>${Number(item.likeCount || 0).toLocaleString("ko-KR")}</span></span>`
+      : "";
+    const adultClass = item.adult
+      ? ` is-adult${classes.adultDimmed ? ` is-native-adult ${classes.adultDimmed}` : ""}`
+      : "";
+    const adultArea = item.adult
+      ? renderClipAdultArea({
+          areaClass: classes.adultArea,
+          descriptionClass: classes.adultDescription,
+          extraAreaClass: "cheese-clip-vault-card-adult",
+          extraDescriptionClass: "cheese-clip-vault-card-adult-label",
+        })
+      : "";
+    return (
+      `<li>` +
+      `<a class="${escapeHtml(classes.link)} cheese-clip-vault-card-link" href="/clips/${encodeURIComponent(item.uid)}">` +
+      `<div class="${escapeHtml(classes.box)} cheese-clip-vault-card-thumb${adultClass}"${
+        item.thumb
+          ? ` style="background-image: url(&quot;${escapeHtml(item.thumb)}&quot;);"`
+          : ""
+      }>` +
+      `<div class="${escapeHtml(classes.wrap)} cheese-clip-vault-card-body">` +
+      adultArea +
+      `<strong class="${escapeHtml(classes.title)} cheese-clip-vault-card-title">${escapeHtml(item.title || "제목 없음")}</strong>` +
+      `<span class="${escapeHtml(classes.info)} cheese-clip-vault-card-channel">${escapeHtml(item.channelName || "채널 정보 없음")}</span>` +
+      (playMetric || likeMetric
+        ? `<div class="cheese-clip-vault-card-metrics">${playMetric}${likeMetric}</div>`
+        : "") +
+      `</div></div></a>` +
+      `<button type="button" class="cheese-clip-vault-del${kind === "fav" ? " is-star" : ""}" ` +
+      `data-uid="${escapeHtml(item.uid)}" ` +
+      `title="${kind === "fav" ? "즐겨찾기 해제" : "목록에서 제거(좋아요는 유지)"}" ` +
+      `aria-label="${kind === "fav" ? "즐겨찾기 해제" : "목록에서 제거"}">` +
+      (kind === "fav" ? clipVaultStarSvg(true) : clipVaultXSvg()) +
+      `</button>` +
+      `</li>`
+    );
+  }
+
+  function renderClipVaultDateGroups(items, kind, classes) {
+    const groups = groupClipVaultItems(items, clipVaultDateGroup);
+    const direction = clipVaultSort === "saved-asc" ? 1 : -1;
+    groups.sort((a, b) => {
+      if (a.sortValue == null) return 1;
+      if (b.sortValue == null) return -1;
+      return (a.sortValue - b.sortValue) * direction;
+    });
+    return groups
+      .map(
+        (group) =>
+          `<li class="cheese-clip-vault-date-group">` +
+          `<h3>${escapeHtml(group.label)}<small>${group.items.length.toLocaleString("ko-KR")}</small></h3>` +
+          `<ul class="cheese-clip-vault-grid cheese-clip-vault-group-grid">${group.items.map((item) => renderClipVaultCard(item, kind, classes)).join("")}</ul>` +
+          `</li>`,
+      )
+      .join("");
+  }
+
+  function isClipVaultMetricFresh(item, key, now = Date.now()) {
+    return (
+      Number(item?.[`${key}FetchedAt`] || 0) + CLIP_VAULT_METRIC_CACHE_TTL_MS >
+      now
+    );
+  }
+
+  async function resolveClipVaultMetricDescriptor(descriptor) {
+    if (/^[0-9a-f]{40}$/i.test(String(descriptor?.videoId || ""))) {
+      return descriptor;
+    }
+    const clipUID = String(descriptor?.clipUID || "").trim();
+    if (!clipUID) return descriptor;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      // background fetch는 Origin/Referer가 달라 이 엔드포인트가 응답하지 않는 환경이
+      // 있다. 치지직 페이지 컨텍스트에서 mediaId와 정확한 폴백 재생수를 먼저 얻는다.
+      const response = await fetch(
+        `https://api.chzzk.naver.com/service/v1/play-info/clip/${encodeURIComponent(clipUID)}`,
+        {
+          credentials: "include",
+          signal: controller.signal,
+          headers: { accept: "application/json, text/plain, */*" },
+        },
+      );
+      if (!response.ok) return descriptor;
+      const payload = await response.json();
+      const content = payload?.content;
+      if (
+        Number(payload?.code) !== 200 ||
+        (content?.contentId && String(content.contentId) !== clipUID)
+      ) {
+        return descriptor;
+      }
+      const videoId = String(content?.videoId || "").trim();
+      const apiPlayCount = Number(content?.readCount ?? content?.viewCount);
+      return {
+        ...descriptor,
+        ...(/^[0-9a-f]{40}$/i.test(videoId) ? { videoId } : {}),
+        ...(Number.isFinite(apiPlayCount)
+          ? { apiPlayCount: Math.max(0, Math.round(apiPlayCount)) }
+          : {}),
+      };
+    } catch {
+      return descriptor;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function resolveClipVaultMetricDescriptors(descriptors) {
+    const source = Array.isArray(descriptors) ? descriptors : [];
+    const resolved = new Array(source.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < source.length) {
+        const index = cursor;
+        cursor += 1;
+        resolved[index] = await resolveClipVaultMetricDescriptor(source[index]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, source.length) }, () => worker()),
+    );
+    return resolved;
+  }
+
+  async function refreshClipVaultMetrics(items) {
+    if (
+      !isClipVaultAvailable() ||
+      clipVaultMetricRefreshRunning ||
+      !clipVaultOpenKind ||
+      !Array.isArray(items) ||
+      !items.length
+    ) {
+      return;
+    }
+    const accountId = clipVaultAccountId;
+    const now = Date.now();
+    const forceRefresh = clipVaultMetricForceRefresh;
+    const candidates = [];
+    const seen = new Set();
+    for (const item of items) {
+      const uid = String(item?.uid || "").trim();
+      if (
+        !uid ||
+        seen.has(uid) ||
+        clipVaultMetricRefreshPending.has(uid) ||
+        clipVaultMetricRefreshSession.has(uid) ||
+        (!forceRefresh && Number(clipVaultMetricRetryAt.get(uid) || 0) > now) ||
+        (!forceRefresh &&
+          isClipVaultMetricFresh(item, "playCount", now) &&
+          isClipVaultMetricFresh(item, "likeCount", now))
+      ) {
+        continue;
+      }
+      if (
+        clipVaultMetricRefreshSession.size + candidates.length >=
+        CLIP_VAULT_METRIC_REFRESH_SESSION_MAX
+      ) {
+        break;
+      }
+      seen.add(uid);
+      candidates.push({ clipUID: uid, videoId: item.videoId || "" });
+    }
+    clipVaultMetricForceRefresh = false;
+    if (!candidates.length) return;
+    candidates.forEach(({ clipUID: uid }) => {
+      clipVaultMetricRefreshPending.add(uid);
+      clipVaultMetricRefreshSession.add(uid);
+    });
+    clipVaultMetricRefreshRunning = true;
+
+    let changed = false;
+    try {
+      for (
+        let offset = 0;
+        offset < candidates.length;
+        offset += CLIP_VAULT_METRIC_REFRESH_BATCH_SIZE
+      ) {
+        const chunk = await resolveClipVaultMetricDescriptors(
+          candidates.slice(
+            offset,
+            offset + CLIP_VAULT_METRIC_REFRESH_BATCH_SIZE,
+          ),
+        );
+        const result = await sendMessage({
+          type: "CHEESE_CLIP_VAULT_REFRESH_METRICS",
+          clipItems: chunk,
+          forceRefresh,
+        });
+        if (accountId !== clipVaultAccountId || !isClipVaultAvailable()) return;
+        let chunkChanged = false;
+        for (const metric of Array.isArray(result) ? result : []) {
+          const uid = String(metric?.clipUID || "").trim();
+          if (!uid) continue;
+          mapSetCapped(
+            clipVaultMetricRetryAt,
+            uid,
+            Number(metric?.nextRetryAt) ||
+              Date.now() + CLIP_VAULT_METRIC_CACHE_TTL_MS,
+            2000,
+          );
+          for (const kind of CLIP_VAULT_KINDS) {
+            const item = clipVault[kind].find((entry) => entry.uid === uid);
+            if (!item) continue;
+            if (
+              /^[0-9a-f]{40}$/i.test(String(metric?.videoId || "")) &&
+              item.videoId !== metric.videoId
+            ) {
+              item.videoId = metric.videoId;
+              changed = true;
+              chunkChanged = true;
+            }
+            if (Object.hasOwn(metric, "playCount")) {
+              item.playCount = Math.max(0, Number(metric.playCount) || 0);
+              item.playCountKnown = true;
+              item.playCountFetchedAt =
+                Number(metric.playCountFetchedAt) || Date.now();
+              item.playHtml = clipVaultPlayHtml(
+                item.playCount.toLocaleString("ko-KR"),
+              );
+              changed = true;
+              chunkChanged = true;
+            }
+            if (Object.hasOwn(metric, "likeCount")) {
+              item.likeCount = Math.max(0, Number(metric.likeCount) || 0);
+              item.likeCountKnown = true;
+              item.likeCountFetchedAt =
+                Number(metric.likeCountFetchedAt) || Date.now();
+              changed = true;
+              chunkChanged = true;
+            }
+          }
+        }
+        if (chunkChanged) {
+          saveClipVault();
+          clipVaultRenderSig = "";
+          renderClipVaultPanel();
+        }
+      }
+    } catch {
+      candidates.forEach(({ clipUID: uid }) => {
+        mapSetCapped(
+          clipVaultMetricRetryAt,
+          uid,
+          Date.now() + 2 * 60 * 1000,
+          2000,
+        );
+      });
+    } finally {
+      if (accountId === clipVaultAccountId) {
+        candidates.forEach(({ clipUID: uid }) =>
+          clipVaultMetricRefreshPending.delete(uid),
+        );
+        clipVaultMetricRefreshRunning = false;
+      }
+    }
+    if (changed) {
+      saveClipVault();
+      clipVaultRenderSig = "";
+    }
+    renderClipVaultPanel();
+  }
+
+  function renderClipVaultPanel() {
+    const panel = document.getElementById(CLIP_VAULT_PANEL_ID);
+    if (!panel) {
+      clipVaultRenderSig = "";
+      return;
+    }
+    if (!isClipVaultAvailable()) {
+      closeClipVaultPanel({ restoreScroll: false, focusButton: false });
+      return;
+    }
+    const kind = clipVaultOpenKind || "fav";
+    const allItems = clipVault[kind] || [];
+    const items = getFilteredClipVaultItems(kind);
+    const shownItems = items.slice(0, clipVaultVisibleCount);
+    void refreshClipVaultMetrics(shownItems);
+    // 좋아요 이벤트에서는 uid와 수치만 먼저 저장될 수 있다. 열린 보관함에서 보이는
+    // 누락 항목을 한 번에 2개씩 보강해 대량 저장 데이터가 있어도 요청이 몰리지 않게 한다.
+    const metaBackfillSlots = Math.max(
+      0,
+      2 - clipVaultMetaBackfillPending.size,
+    );
+    shownItems
+      .filter(
+        (item) =>
+          (!item.title ||
+            !item.thumb ||
+            !item.channelName ||
+            !item.adultKnown) &&
+          !clipVaultMetaBackfillPending.has(item.uid) &&
+          Number(clipVaultMetaBackfillRetryAt.get(item.uid) || 0) <= Date.now(),
+      )
+      .slice(0, metaBackfillSlots)
+      .forEach((item) => requestClipVaultMetaBackfill(item.uid));
+    const grid = panel.querySelector(".cheese-clip-vault-grid");
+    if (!grid) return;
+    panel
+      .querySelector(".cheese-clip-vault-tabpanel")
+      ?.setAttribute("aria-labelledby", `cheese-clip-vault-tab-${kind}`);
+    panel
+      .querySelectorAll(".cheese-clip-vault-tabs [data-kind]")
+      .forEach((tab) => {
+        const tabKind = tab.getAttribute("data-kind") || "fav";
+        const selected = tabKind === kind;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        const count = tab.querySelector("[data-clip-vault-tab-count]");
+        if (count) {
+          count.textContent = Number(
+            clipVault[tabKind]?.length || 0,
+          ).toLocaleString("ko-KR");
+        }
+      });
+    const summary = panel.querySelector("[data-clip-vault-summary]");
+    if (summary) {
+      const base = clipVaultSearch.trim()
+        ? `${items.length.toLocaleString("ko-KR")}개 검색됨 · 전체 ${allItems.length.toLocaleString("ko-KR")}개`
+        : `전체 ${allItems.length.toLocaleString("ko-KR")}개`;
+      const refreshing = shownItems.some((item) =>
+        clipVaultMetricRefreshPending.has(item.uid),
+      );
+      const metricStatus = refreshing
+        ? `${base} · 재생수·좋아요 갱신 중`
+        : base;
+      const vaultLabel = kind === "like" ? "기록된 좋아요" : "즐겨찾기";
+      const usage = `${vaultLabel} ${(clipVault[kind]?.length || 0).toLocaleString("ko-KR")} / ${clipVaultLimit.toLocaleString("ko-KR")}개`;
+      summary.textContent =
+        kind === "like" && clipVaultFollowingImportStatus
+          ? `${metricStatus} · ${usage} · ${clipVaultFollowingImportStatus}`
+          : `${metricStatus} · ${usage}`;
+    }
+    const followingImport = panel.querySelector(
+      "[data-clip-vault-following-import]",
+    );
+    if (followingImport) {
+      const importBusy =
+        clipVaultFollowingImportRunning ||
+        clipVaultFollowingImportPauseRequested ||
+        clipVaultFollowingImportStopRequested;
+      const importState = importBusy
+        ? "running"
+        : clipVaultFollowingImportPaused
+          ? "paused"
+          : "idle";
+      followingImport.hidden = kind !== "like";
+      followingImport.disabled =
+        importBusy ||
+        clipVaultFollowingImportPaused ||
+        clipVaultFollowingImportStopRequested;
+      followingImport.setAttribute(
+        "aria-busy",
+        String(importBusy),
+      );
+      if (followingImport.dataset.state !== importState) {
+        followingImport.dataset.state = importState;
+        followingImport.innerHTML =
+          importBusy
+            ? `${clipVaultLoaderSvg()}<span>좋아요 확인 중</span>`
+            : clipVaultFollowingImportPaused
+              ? `${clipVaultLoaderSvg()}<span>좋아요 확인 일시정지</span>`
+              : `${clipVaultDownloadSvg()}<span>팔로잉 좋아요 가져오기</span>`;
+      }
+      followingImport.title =
+        importBusy
+          ? "현재 좋아요 가져오기 작업이 진행 중입니다"
+          : clipVaultFollowingImportPaused
+            ? "좋아요 가져오기가 일시정지되었습니다. 이어하기를 눌러 계속할 수 있습니다"
+          : "팔로잉 채널을 5개 단위로 나눠 모든 클립의 좋아요 여부를 끝까지 확인합니다";
+    }
+    const followingImportPause = panel.querySelector(
+      "[data-clip-vault-following-import-pause]",
+    );
+    if (followingImportPause) {
+      const pauseState = clipVaultFollowingImportPauseRequested
+        ? "pausing"
+        : clipVaultFollowingImportPaused
+          ? "paused"
+          : "running";
+      followingImportPause.hidden =
+        kind !== "like" ||
+        clipVaultFollowingImportStopRequested ||
+        (!clipVaultFollowingImportRunning && !clipVaultFollowingImportPaused);
+      followingImportPause.disabled =
+        clipVaultFollowingImportPauseRequested ||
+        clipVaultFollowingImportStopRequested;
+      followingImportPause.setAttribute(
+        "aria-busy",
+        String(clipVaultFollowingImportPauseRequested),
+      );
+      if (followingImportPause.dataset.state !== pauseState) {
+        followingImportPause.dataset.state = pauseState;
+        followingImportPause.innerHTML =
+          pauseState === "pausing"
+            ? `${clipVaultLoaderSvg()}<span>일시정지 중</span>`
+            : pauseState === "paused"
+              ? `${clipVaultPlaySvg()}<span>이어하기</span>`
+              : `${clipVaultPauseSvg()}<span>일시정지</span>`;
+      }
+      followingImportPause.title =
+        pauseState === "paused"
+          ? "저장된 위치부터 좋아요 가져오기를 이어서 실행합니다"
+          : "현재 위치를 저장하고 좋아요 가져오기를 일시정지합니다";
+      followingImportPause.setAttribute(
+        "aria-label",
+        pauseState === "paused"
+          ? "팔로잉 좋아요 가져오기 이어하기"
+          : "팔로잉 좋아요 가져오기 일시정지",
+      );
+    }
+    const followingImportStop = panel.querySelector(
+      "[data-clip-vault-following-import-stop]",
+    );
+    if (followingImportStop) {
+      followingImportStop.hidden =
+        kind !== "like" ||
+        (!clipVaultFollowingImportRunning && !clipVaultFollowingImportPaused);
+      followingImportStop.disabled = clipVaultFollowingImportStopRequested;
+      followingImportStop.setAttribute(
+        "aria-busy",
+        String(clipVaultFollowingImportStopRequested),
+      );
+    }
+    const more = panel.querySelector("[data-clip-vault-more]");
+    if (more) {
+      const remaining = Math.max(0, items.length - shownItems.length);
+      more.hidden = remaining === 0;
+      more.textContent = remaining
+        ? `더보기 (${Math.min(CLIP_VAULT_PAGE_SIZE, remaining).toLocaleString("ko-KR")}개)`
+        : "";
+    }
+    // 시그니처에 제목 유무도 포함한다 — 좋아요로 담긴 uid-only 항목이 나중에 메타로
+    // 채워질 때(backfillClipVaultMeta) 다시 그려져야 한다.
+    // 시그니처에 메타 충족도를 포함한다 — 나중에 채널명·재생수가 채워질 때도 다시
+    // 그려야 한다(제목만 보면 그 갱신을 놓친다).
+    const sig = `${kind}|${clipVaultSort}|group:${clipVaultGroupByStreamer}:${clipVaultGroupByDate}|${normalizeClipVaultSearchText(clipVaultSearch)}|${shownItems
+      .map(
+        (i) =>
+          `${i.uid}:${i.title}:${i.channelName}:${i.thumb}:adult:${i.adultKnown}:${i.adult}:${i.playHtml.length}:${i.playCountKnown}:${i.playCount}:${i.likeCountKnown}:${i.likeCount}`,
+      )
+      .join(",")}`;
+    if (sig === clipVaultRenderSig) return; // 내용 동일 → 노드 교체 금지
+    clipVaultRenderSig = sig;
+    if (!shownItems.length) {
+      grid.innerHTML = `<li class="cheese-clip-vault-empty">${clipVaultEmptyMessage(kind, Boolean(clipVaultSearch.trim()))}</li>`;
+      return;
+    }
+    // 치지직 카드 마크업을 그대로 복제해 페이지 스타일을 그대로 쓴다.
+    const sourceCardLinks = clipVaultCardLinks();
+    const sample = sourceCardLinks[0] || null;
+    const sampleBox = sample?.querySelector('[style*="background-image"]');
+    const adultDescription = sourceCardLinks
+      .flatMap((link) => [...link.querySelectorAll("em")])
+      .find((element) => /연령\s*제한/.test(element.textContent || ""));
+    const adultArea = adultDescription?.parentElement;
+    const adultBox = adultArea?.closest('[style*="background-image"]');
+    const adultDimmed = [...(adultBox?.classList || [])]
+      .filter((className) => className.includes("_is_dimmed_"))
+      .join(" ");
+    const classes = {
+      link: sample?.className || "",
+      // 첫 샘플이 19세 카드여도 상태 클래스까지 일반 카드에 복제하지 않는다.
+      box: [...(sampleBox?.classList || [])]
+        .filter((className) => !className.includes("_is_dimmed_"))
+        .join(" "),
+      wrap: sample?.querySelector('[class*="_wrapper_"]')?.className || "",
+      title: sample?.querySelector('[class*="_title_"]')?.className || "",
+      info: sample?.querySelector('[class*="_information_"]')?.className || "",
+      play: sample?.querySelector('[class*="_-play_"]')?.className || "",
+      adultDimmed,
+      adultArea: adultArea?.className || "clip_card_area__gi6nZ",
+      adultDescription:
+        adultDescription?.className || "clip_card_description__k7S+l",
+    };
+    // 재생수 줄: 클래스와 아이콘 SVG 를 원본에서 그대로 가져와 모양을 맞춘다.
+    if (clipVaultGroupByStreamer) {
+      const groups = groupClipVaultItemsByStreamer(shownItems);
+      grid.innerHTML = groups
+        .map((group) => {
+          const collapsed = clipVaultCollapsedStreamerGroups.has(group.key);
+          const groupCards = clipVaultGroupByDate
+            ? renderClipVaultDateGroups(group.items, kind, classes)
+            : group.items
+                .map((item) => renderClipVaultCard(item, kind, classes))
+                .join("");
+          return (
+            `<li class="cheese-clip-vault-group">` +
+            `<details data-clip-vault-streamer-group="${escapeAttribute(group.key)}"${collapsed ? "" : " open"}>` +
+            `<summary>${clipVaultFolderSvg()}<span>${escapeHtml(group.label)}</span><small>${group.items.length.toLocaleString("ko-KR")}</small>${clipVaultChevronSvg()}</summary>` +
+            `<ul class="cheese-clip-vault-grid cheese-clip-vault-group-grid">${groupCards}</ul>` +
+            `</details></li>`
+          );
+        })
+        .join("");
+      grid
+        .querySelectorAll("details[data-clip-vault-streamer-group]")
+        .forEach((details) => {
+          details.addEventListener("toggle", () => {
+            const key = details.dataset.clipVaultStreamerGroup || "unknown";
+            if (details.open) clipVaultCollapsedStreamerGroups.delete(key);
+            else clipVaultCollapsedStreamerGroups.add(key);
+          });
+        });
+    } else if (clipVaultGroupByDate) {
+      grid.innerHTML = renderClipVaultDateGroups(shownItems, kind, classes);
+    } else {
+      grid.innerHTML = shownItems
+        .map((item) => renderClipVaultCard(item, kind, classes))
+        .join("");
+    }
+  }
+
+  function mergeClipVaultItemMeta(uid, source) {
+    if (!uid || !source) return false;
+    let changed = false;
+    for (const kind of CLIP_VAULT_KINDS) {
+      clipVault[kind] = clipVault[kind].map((item) => {
+        if (item.uid !== uid) return item;
+        const channelName = item.channelName || source.channelName || "";
+        const merged = {
+          ...item,
+          title: normalizeClipVaultTitle(
+            item.title || source.title || "",
+            channelName,
+          ),
+          thumb: item.thumb || source.thumb || "",
+          channelName,
+          channelId: item.channelId || source.channelId || "",
+          videoId: item.videoId || source.videoId || "",
+          adult: item.adultKnown ? item.adult : source.adult === true,
+          adultKnown: item.adultKnown || source.adultKnown === true,
+          playHtml: item.playHtml || source.playHtml || "",
+          playCount: item.playCountKnown
+            ? item.playCount
+            : source.playCount || 0,
+          playCountKnown:
+            item.playCountKnown || source.playCountKnown === true,
+          playCountFetchedAt:
+            item.playCountFetchedAt || source.playCountFetchedAt || 0,
+        };
+        const fields = [
+          "title",
+          "thumb",
+          "channelName",
+          "channelId",
+          "videoId",
+          "adult",
+          "adultKnown",
+          "playHtml",
+          "playCount",
+          "playCountKnown",
+          "playCountFetchedAt",
+        ];
+        if (fields.every((field) => merged[field] === item[field])) return item;
+        changed = true;
+        return merged;
+      });
+    }
+    return changed;
+  }
+
+  function requestClipVaultMetaBackfill(uid) {
+    const normalizedUid = String(uid || "").trim();
+    if (
+      !isClipVaultAvailable() ||
+      !normalizedUid ||
+      clipVaultMetaBackfillPending.has(normalizedUid) ||
+      Number(clipVaultMetaBackfillRetryAt.get(normalizedUid) || 0) > Date.now()
+    ) {
+      return;
+    }
+    const needsMeta = CLIP_VAULT_KINDS.some((kind) =>
+      clipVault[kind].some(
+        (item) =>
+          item.uid === normalizedUid &&
+          (!item.title ||
+            !item.thumb ||
+            !item.channelName ||
+            !item.adultKnown),
+      ),
+    );
+    if (!needsMeta) return;
+    const accountId = clipVaultAccountId;
+    clipVaultMetaBackfillPending.add(normalizedUid);
+    void sendMessage({
+      type: "CHEESE_CLIP_VAULT_GET_METADATA",
+      clipUID: normalizedUid,
+    })
+      .then((metadata) => {
+        if (accountId !== clipVaultAccountId || !isClipVaultAvailable()) return;
+        const source = {
+          title: String(metadata?.title || "").trim(),
+          thumb: String(metadata?.thumbnailImageUrl || "").trim(),
+          channelName: String(metadata?.channelName || "").trim(),
+          channelId: String(metadata?.channelId || "").trim(),
+          adult: metadata?.adult === true,
+          adultKnown: metadata?.adultKnown === true,
+        };
+        if (
+          !source.title &&
+          !source.thumb &&
+          !source.channelName &&
+          !source.adultKnown
+        ) {
+          clipVaultMetaBackfillRetryAt.set(
+            normalizedUid,
+            Date.now() + 60_000,
+          );
+          return;
+        }
+        clipVaultMetaBackfillRetryAt.delete(normalizedUid);
+        if (mergeClipVaultItemMeta(normalizedUid, source)) {
+          saveClipVault();
+          clipVaultRenderSig = "";
+        }
+      })
+      .catch(() => {
+        if (accountId !== clipVaultAccountId) return;
+        clipVaultMetaBackfillRetryAt.set(
+          normalizedUid,
+          Date.now() + 60_000,
+        );
+      })
+      .finally(() => {
+        if (accountId !== clipVaultAccountId) return;
+        clipVaultMetaBackfillPending.delete(normalizedUid);
+        if (clipVaultOpenKind) renderClipVaultPanel();
+      });
+  }
+
+  // 좋아요는 클립 재생 프레임에서 제목·썸네일이 빠진 채 저장될 수 있다. 목록에 같은
+  // 카드가 있으면 DOM 메타를 먼저 쓰고, 재생 페이지의 현재 클립은 상세 API로 보강한다.
+  function backfillClipVaultMeta() {
+    if (!isClipVaultAvailable()) return;
+    // ⚠ 제목만 보면 안 된다. 재생 화면에서 담은 항목은 og 메타로 제목·썸네일은 있어도
+    // 채널명·재생수가 비어 있다(제보: 채널명/재생수가 안 보일 때가 있음).
+    const isIncomplete = (it) =>
+      !it.title ||
+      !it.thumb ||
+      !it.channelName ||
+      !it.adultKnown ||
+      !it.playHtml ||
+      !it.playCountKnown;
+    const need = CLIP_VAULT_KINDS.some((k) => clipVault[k].some(isIncomplete));
+    if (!need) return;
+    // ⚠ 우리 패널의 카드는 치지직 클래스를 복제하므로 같은 셀렉터에 걸린다. 그걸 읽으면
+    // '제목 없음'인 우리 카드를 원본으로 착각해 메타가 영영 안 채워진다(제보: 패널을
+    // 열어 둔 채로는 안 채워지고, 닫았다 열면 채워짐). 우리 패널은 제외한다.
+    const byUid = new Map();
+    if (isClipCardListPage()) {
+      clipVaultCardLinks().forEach((link) => {
+        const meta = readClipCardMeta(link);
+        if (meta && meta.title) byUid.set(meta.uid, meta);
+      });
+    }
+    let changed = false;
+    byUid.forEach((source, uid) => {
+      if (mergeClipVaultItemMeta(uid, source)) changed = true;
+    });
+    if (changed) {
+      saveClipVault();
+      clipVaultRenderSig = "";
+      renderClipVaultPanel();
+    }
+    const detailUid = currentClipDetailUid();
+    if (detailUid) requestClipVaultMetaBackfill(detailUid);
+  }
+
+  // ── 클립 재생 페이지(/clips/<uid>) ↔ 재생 iframe 브리지 ────────────────────
+  // 재생 화면의 즐겨찾기 버튼은 m.naver.com/shorts iframe 안에 있는데, 그 프레임에서는
+  // 클립 uid 를 알 수 없다(실측: 카드 DOM 에 uid 없음). 반대로 상위 페이지는 URL 에
+  // uid 를 갖고 있다. 그래서 상위가 uid·담김여부를 내려보내고, 담기/빼기 요청을 받는다.
+  const CLIP_FAV_MSG = "cheese-clip-fav";
+
+  function currentClipDetailUid() {
+    const m = location.pathname.match(/^\/clips\/([^/?#]+)/);
+    return m ? m[1] : "";
+  }
+
+  // 레거시 보관 데이터와의 호환을 위해 재생수 HTML도 유지한다. 원본 목록 카드가 없는
+  // 클립 재생 페이지에서는 확장 기본 재생 아이콘을 사용한다.
+  function clipVaultPlayHtml(count) {
+    if (!count) return "";
+    const icon =
+      document.querySelector('ul[class*="_type_clip_"] [class*="_-play_"] svg')
+        ?.outerHTML || createClipPlayIcon();
+    return `${icon}<span class="blind">재생 수</span>${escapeHtml(count)}`;
+  }
+
+  function clipDetailMeta(uid) {
+    // 상세 페이지의 og 메타에서 제목·썸네일을 얻는다(추가 요청 없이).
+    const pick = (sel, attr) =>
+      document.querySelector(sel)?.getAttribute(attr)?.trim() || "";
+    return {
+      uid,
+      title: pick('meta[property="og:title"]', "content"),
+      thumb: pick('meta[property="og:image"]', "content"),
+      channelName: "",
+      channelId: "",
+      videoId: "",
+      playHtml: "",
+      playCount: 0,
+      likeCount: 0,
+      playCountKnown: false,
+      likeCountKnown: false,
+      playCountFetchedAt: 0,
+      likeCountFetchedAt: 0,
+    };
+  }
+
+  function syncClipFavToFrame() {
+    const uid = currentClipDetailUid();
+    if (!uid) return;
+    const frame = document.querySelector('iframe[src*="m.naver.com/shorts"]');
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          type: `${CLIP_FAV_MSG}-state`,
+          accountId: isClipVaultAvailable() ? clipVaultAccountId : "",
+          clip: isClipVaultAvailable()
+            ? {
+                uid,
+                isFav: clipVaultHas("fav", uid),
+                accountId: clipVaultAccountId,
+              }
+            : null,
+        },
+        "https://m.naver.com",
+      );
+    } catch {}
+  }
+
+  let clipFavBridgeBound = false;
+  function ensureClipFavBridge() {
+    if (clipFavBridgeBound) return;
+    clipFavBridgeBound = true;
+    window.addEventListener("message", (e) => {
+      if (e.origin !== "https://m.naver.com") return;
+      const d = e.data;
+      if (!d || d.type !== CLIP_FAV_MSG) return;
+      if (
+        !isClipVaultAvailable() ||
+        normalizeClipVaultAccountId(d.accountId) !== clipVaultAccountId
+      ) {
+        return;
+      }
+      const uid = currentClipDetailUid();
+      if (!uid) return;
+      if (d.action === "add") {
+        const meta = clipDetailMeta(uid);
+        // 채널명·채널ID·재생수는 재생 프레임에서만 보인다 → 메시지로 받아 채운다.
+        if (d.channelName) {
+          meta.channelName = String(d.channelName).slice(0, 100);
+        }
+        if (d.channelId) meta.channelId = String(d.channelId).slice(0, 64);
+        if (/^[0-9a-f]{40}$/i.test(String(d.videoId || ""))) {
+          meta.videoId = String(d.videoId);
+        }
+        if (String(d.playCount ?? "").trim() !== "") {
+          meta.playHtml = clipVaultPlayHtml(String(d.playCount).slice(0, 20));
+          meta.playCount = parseClipVaultMetric(d.playCount);
+          meta.playCountKnown = true;
+          meta.playCountFetchedAt = Date.now();
+        }
+        if (String(d.likeCount ?? "").trim() !== "") {
+          meta.likeCount = parseClipVaultMetric(d.likeCount);
+          meta.likeCountKnown = true;
+          meta.likeCountFetchedAt = Date.now();
+        }
+        clipVaultAdd("fav", meta);
+      } else clipVaultRemove("fav", uid);
+      renderClipVaultPanel();
+      syncClipFavToFrame();
+    });
+  }
+
+  function findClipVaultHost() {
+    const root = document.querySelector("div#layout-body");
+    if (!root) return null;
+    const normalizedText = (node) =>
+      String(node?.textContent || "").replace(/\s+/g, " ").trim();
+
+    // 페이지 상단에는 추천·배너 등 section 이 여러 개 생길 수 있다. 첫 section 에
+    // 의존하면 초기 렌더 순서에 따라 보관함 버튼이 보이지 않는 곳에 붙는다. 제목을
+    // 기준으로 실제 '인기 클립' 헤더를 먼저 고른다.
+    const title = [...root.querySelectorAll("strong")].find(
+      (node) => normalizedText(node) === "인기 클립",
+    );
+    const header = title?.closest('div[class*="_header_"]');
+    const section = header?.closest("section");
+    if (section && root.contains(section)) {
+      const host =
+        header.parentElement === section
+          ? header
+          : [...section.children].find((child) => child.contains(header));
+      if (host) return { section, header, host };
+    }
+
+    // 제목이 아직 스켈레톤으로 남은 극초기 렌더에서는 클립 카드 목록을 가진 section 을
+    // 폴백으로 사용한다. 제목이 완성되면 위의 경로가 우선한다.
+    const clipSection = [...root.querySelectorAll("section")].find((candidate) =>
+      candidate.querySelector('a[href^="/clips/"]'),
+    );
+    if (!clipSection) return null;
+    const fallbackHeader = clipSection?.querySelector('div[class*="_header_"]');
+    if (!fallbackHeader) return null;
+    const host =
+      fallbackHeader?.parentElement === clipSection
+        ? fallbackHeader
+        : [...clipSection.children].find((child) => child.contains(fallbackHeader));
+    return host ? { section: clipSection, header: fallbackHeader, host } : null;
+  }
+
+  function clearClipVaultButtonRetry() {
+    if (clipVaultButtonRetryTimer) {
+      clearTimeout(clipVaultButtonRetryTimer);
+      clipVaultButtonRetryTimer = 0;
+    }
+    clipVaultButtonRetryAttempt = 0;
+  }
+
+  function scheduleClipVaultButtonRetry() {
+    if (
+      clipVaultButtonRetryTimer ||
+      clipVaultButtonRetryAttempt >= CLIP_VAULT_BUTTON_RETRY_DELAYS.length
+    ) {
+      return;
+    }
+    const delay =
+      CLIP_VAULT_BUTTON_RETRY_DELAYS[clipVaultButtonRetryAttempt++] || 1200;
+    clipVaultButtonRetryTimer = window.setTimeout(() => {
+      clipVaultButtonRetryTimer = 0;
+      ensureClipVaultButton();
+    }, delay);
+  }
+
+  function harvestClipVaultFont(target) {
+    const source =
+      target?.header?.querySelector(":scope > strong") ||
+      target?.header?.querySelector("strong");
+    if (!source || !target?.section) return;
+    const fontFamily = getComputedStyle(source).fontFamily;
+    if (
+      fontFamily &&
+      target.section.style.getPropertyValue(
+        "--cheese-clip-vault-font-family",
+      ) !== fontFamily
+    ) {
+      target.section.style.setProperty(
+        "--cheese-clip-vault-font-family",
+        fontFamily,
+      );
+    }
+  }
+
+  function clearClipVaultViewClasses() {
+    document
+      .querySelectorAll(".cheese-clip-vault-active")
+      .forEach((section) =>
+        section.classList.remove("cheese-clip-vault-active"),
+      );
+    document
+      .querySelectorAll(".cheese-clip-vault-host")
+      .forEach((host) => host.classList.remove("cheese-clip-vault-host"));
+  }
+
+  function bindClipVaultPanelControls(panel) {
+    const search = panel.querySelector("[data-clip-vault-search]");
+    if (search) {
+      search.value = clipVaultSearch;
+      search.addEventListener("input", () => {
+        clipVaultSearch = search.value;
+        clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+        clearTimeout(clipVaultSearchTimer);
+        clipVaultSearchTimer = window.setTimeout(() => {
+          clipVaultSearchTimer = 0;
+          clipVaultRenderSig = "";
+          renderClipVaultPanel();
+        }, 120);
+      });
+    }
+    const sortPicker = panel.querySelector("[data-clip-vault-sort-picker]");
+    const sortTrigger = sortPicker?.querySelector(
+      "[data-clip-vault-sort-trigger]",
+    );
+    const sortMenu = sortPicker?.querySelector("[data-clip-vault-sort-menu]");
+    const sortLabel = sortTrigger?.querySelector(
+      "[data-clip-vault-sort-label]",
+    );
+    const reflectSort = () => {
+      if (sortLabel) sortLabel.textContent = CLIP_VAULT_SORTS[clipVaultSort];
+      sortMenu?.querySelectorAll("[data-clip-vault-sort]").forEach((option) => {
+        option.setAttribute(
+          "aria-selected",
+          String(option.dataset.clipVaultSort === clipVaultSort),
+        );
+      });
+    };
+    reflectSort();
+    sortTrigger?.addEventListener("click", () => {
+      const open = sortMenu?.hidden === true;
+      if (sortMenu) sortMenu.hidden = !open;
+      sortTrigger.setAttribute("aria-expanded", String(open));
+    });
+    sortTrigger?.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      event.preventDefault();
+      if (sortMenu) sortMenu.hidden = false;
+      sortTrigger.setAttribute("aria-expanded", "true");
+      const options = [
+        ...(sortMenu?.querySelectorAll("[data-clip-vault-sort]") || []),
+      ];
+      const selected = Math.max(
+        0,
+        options.findIndex(
+          (option) => option.getAttribute("aria-selected") === "true",
+        ),
+      );
+      options[
+        event.key === "ArrowUp"
+          ? (selected - 1 + options.length) % options.length
+          : selected
+      ]?.focus();
+    });
+    sortMenu?.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-clip-vault-sort]");
+      if (!option) return;
+      const value = option.dataset.clipVaultSort;
+      if (Object.hasOwn(CLIP_VAULT_SORTS, value)) {
+        clipVaultSort = value;
+        try {
+          chrome.storage?.local?.set({ [CLIP_VAULT_SORT_KEY]: clipVaultSort });
+        } catch {}
+        clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+        clipVaultRenderSig = "";
+        sortMenu.hidden = true;
+        sortTrigger?.setAttribute("aria-expanded", "false");
+        reflectSort();
+        renderClipVaultPanel();
+      }
+    });
+    const streamerGroupToggle = panel.querySelector(
+      "[data-clip-vault-group-streamer]",
+    );
+    const dateGroupToggle = panel.querySelector("[data-clip-vault-group-date]");
+    const reflectGroupToggles = () => {
+      if (streamerGroupToggle) {
+        streamerGroupToggle.checked = clipVaultGroupByStreamer;
+      }
+      if (dateGroupToggle) dateGroupToggle.checked = clipVaultGroupByDate;
+    };
+    const saveGroupMode = () => {
+      reflectGroupToggles();
+      try {
+        chrome.storage?.local?.set({
+          [CLIP_VAULT_GROUP_STREAMER_KEY]: clipVaultGroupByStreamer,
+          [CLIP_VAULT_GROUP_DATE_KEY]: clipVaultGroupByDate,
+        });
+      } catch {}
+      clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+      clipVaultRenderSig = "";
+      renderClipVaultPanel();
+    };
+    reflectGroupToggles();
+    streamerGroupToggle?.addEventListener("change", () => {
+      clipVaultGroupByStreamer = streamerGroupToggle.checked;
+      saveGroupMode();
+    });
+    dateGroupToggle?.addEventListener("change", () => {
+      clipVaultGroupByDate = dateGroupToggle.checked;
+      saveGroupMode();
+    });
+    panel
+      .querySelector("[data-clip-vault-following-import]")
+      ?.addEventListener("click", () => {
+        if (
+          clipVaultFollowingImportRunning ||
+          clipVaultFollowingImportPaused
+        ) {
+          return;
+        }
+        void importClipVaultFollowingLikes();
+      });
+    panel
+      .querySelector("[data-clip-vault-following-import-pause]")
+      ?.addEventListener("click", () => {
+        if (clipVaultFollowingImportRunning) {
+          requestClipVaultFollowingImportControl("pause");
+          return;
+        }
+        if (clipVaultFollowingImportPaused) {
+          void importClipVaultFollowingLikes();
+        }
+      });
+    panel
+      .querySelector("[data-clip-vault-following-import-stop]")
+      ?.addEventListener("click", () => {
+        requestClipVaultFollowingImportControl("stop");
+      });
+    panel.addEventListener("keydown", (event) => {
+      const sortOption = event.target.closest?.("[data-clip-vault-sort]");
+      if (
+        sortOption &&
+        ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
+      ) {
+        event.preventDefault();
+        const options = [...panel.querySelectorAll("[data-clip-vault-sort]")];
+        const index = options.indexOf(sortOption);
+        const nextIndex =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? options.length - 1
+              : (index +
+                  (event.key === "ArrowDown" ? 1 : -1) +
+                  options.length) %
+                options.length;
+        options[nextIndex]?.focus();
+        return;
+      }
+      const tab = event.target.closest?.(".cheese-clip-vault-tabs [data-kind]");
+      if (
+        !tab ||
+        !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      const tabs = [
+        ...panel.querySelectorAll(".cheese-clip-vault-tabs [data-kind]"),
+      ];
+      const index = tabs.indexOf(tab);
+      const nextIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      tabs[nextIndex]?.focus();
+      tabs[nextIndex]?.click();
+    });
+  }
+
+  async function importClipVaultFollowingLikes() {
+    if (!isClipVaultAvailable() || clipVaultFollowingImportRunning) return;
+    const importAccountId = clipVaultAccountId;
+    const resumed = Boolean(clipVaultFollowingImportResume);
+    if (!resumed) {
+      clipVaultFollowingImportAddedCount = 0;
+      clipVaultFollowingImportPageCount = 0;
+      clipVaultFollowingImportCandidateCount = 0;
+    }
+    // catch/finally의 일시정지·중지 상태 문구에서도 사용하므로 try 바깥에 둔다.
+    let importedCount = clipVaultFollowingImportAddedCount;
+    clipVaultFollowingImportRunning = true;
+    clipVaultFollowingImportPaused = false;
+    clipVaultFollowingImportPauseRequested = false;
+    clipVaultFollowingImportStopRequested = false;
+    clipVaultFollowingImportJobId =
+      createClipVaultFollowingImportJobId();
+    clipVaultFollowingImportStatus = resumed
+      ? `저장된 위치부터 팔로잉 채널의 클립을 확인하고 있습니다. ${formatClipVaultFollowingImportCounts()}`
+      : "팔로잉 채널의 전체 클립을 확인하고 있습니다.";
+    renderClipVaultPanel();
+    try {
+      const existing = new Set(clipVault.like.map((item) => item.uid));
+      let nextChannelIndex = Number(
+        clipVaultFollowingImportResume?.channelIndex,
+      );
+      if (!Number.isFinite(nextChannelIndex)) nextChannelIndex = 0;
+      let nextClipCursor = clipVaultFollowingImportResume?.clipCursor || null;
+      let followedChannelCount = 0;
+      let checkedCount = 0;
+      let hasMoreChannels = true;
+      let averageMsPerClip = 0;
+      let averageMsPerChannel = 0;
+
+      const mergeImportedItems = (rawItems) => {
+        if (importAccountId !== clipVaultAccountId) return 0;
+        const batchItems = [];
+        for (const raw of Array.isArray(rawItems) ? rawItems : []) {
+          const item = normalizeClipVaultItem(raw);
+          if (!item || existing.has(item.uid)) continue;
+          existing.add(item.uid);
+          batchItems.push(item);
+        }
+        if (!batchItems.length) return 0;
+        clipVault.like = [...batchItems, ...clipVault.like]
+          .sort((a, b) => b.at - a.at)
+          .slice(0, clipVaultLimit);
+        saveClipVault();
+        clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+        importedCount += batchItems.length;
+        clipVaultFollowingImportAddedCount = importedCount;
+        return batchItems.length;
+      };
+
+      while (hasMoreChannels) {
+        if (
+          clipVaultFollowingImportPauseRequested ||
+          clipVaultFollowingImportStopRequested
+        ) {
+          break;
+        }
+        const batchStartedAt = performance.now();
+        const batchStartChannelIndex = nextChannelIndex;
+        const batchStartClipCursor = nextClipCursor;
+        // 현재 묶음이 취소되면 응답 일부를 건너뛰지 않도록 묶음 시작 위치부터 다시
+        // 확인한다. 이미 추가된 좋아요 클립은 knownClipUIDs 로 중복 삽입되지 않는다.
+        clipVaultFollowingImportResume = {
+          channelIndex: batchStartChannelIndex,
+          clipCursor: batchStartClipCursor,
+        };
+        const previousPosition = `${nextChannelIndex}:${String(nextClipCursor?.clipUID || "")}:${String(nextClipCursor?.readCount ?? "")}`;
+        const result = await sendMessage({
+          type: "CHEESE_CLIP_VAULT_IMPORT_FOLLOWING_LIKES",
+          jobId: clipVaultFollowingImportJobId,
+          knownClipUIDs: [...existing],
+          startChannelIndex: nextChannelIndex,
+          startClipCursor: nextClipCursor,
+        });
+        if (importAccountId !== clipVaultAccountId) return;
+        mergeImportedItems(result?.items);
+
+        if (
+          clipVaultFollowingImportPauseRequested ||
+          clipVaultFollowingImportStopRequested
+        ) {
+          break;
+        }
+
+        clipVaultFollowingImportPageCount += Math.max(
+          0,
+          Number(result?.fetchedPageCount) || 0,
+        );
+        clipVaultFollowingImportCandidateCount += Math.max(
+          0,
+          Number(result?.candidateCount) || 0,
+        );
+
+        followedChannelCount =
+          Number(result?.followedChannelCount) || followedChannelCount;
+        let batchCheckedCount = Number(result?.checkedCount) || 0;
+        let failedItems = Array.isArray(result?.failedItems)
+          ? result.failedItems
+          : [];
+        let retryRound = 0;
+        while (failedItems.length && retryRound < 3) {
+          retryRound += 1;
+          clipVaultFollowingImportStatus = `좋아요 상태 ${failedItems.length.toLocaleString("ko-KR")}개 재시도 중 (${retryRound}/3) · ${formatClipVaultFollowingImportCounts(importedCount)}`;
+          renderClipVaultPanel();
+          const retried = await sendMessage({
+            type: "CHEESE_CLIP_VAULT_RETRY_FOLLOWING_LIKES",
+            jobId: clipVaultFollowingImportJobId,
+            clipItems: failedItems,
+          });
+          if (importAccountId !== clipVaultAccountId) return;
+          mergeImportedItems(retried?.items);
+          batchCheckedCount += Number(retried?.checkedCount) || 0;
+          failedItems = Array.isArray(retried?.failedItems)
+            ? retried.failedItems
+            : [];
+          if (
+            clipVaultFollowingImportPauseRequested ||
+            clipVaultFollowingImportStopRequested
+          ) {
+            break;
+          }
+        }
+        if (
+          clipVaultFollowingImportPauseRequested ||
+          clipVaultFollowingImportStopRequested
+        ) {
+          break;
+        }
+        if (failedItems.length) {
+          clipVaultFollowingImportResume = {
+            channelIndex: batchStartChannelIndex,
+            clipCursor: batchStartClipCursor,
+          };
+          throw new Error(
+            `좋아요 상태 ${failedItems.length.toLocaleString("ko-KR")}개를 확인하지 못해 현재 위치에서 중단했습니다. 다시 실행하면 같은 위치부터 재시도합니다.`,
+          );
+        }
+        checkedCount += batchCheckedCount;
+
+        const returnedNextIndex = Number(result?.nextChannelIndex);
+        const returnedNextCursor = result?.nextClipCursor || null;
+        hasMoreChannels = result?.hasMoreChannels === true;
+        const returnedPosition = `${returnedNextIndex}:${String(returnedNextCursor?.clipUID || "")}:${String(returnedNextCursor?.readCount ?? "")}`;
+        if (
+          hasMoreChannels &&
+          (!Number.isFinite(returnedNextIndex) ||
+            returnedPosition === previousPosition)
+        ) {
+          throw new Error("다음 팔로잉 채널 묶음을 확인하지 못했습니다.");
+        }
+        nextChannelIndex = Number.isFinite(returnedNextIndex)
+          ? returnedNextIndex
+          : followedChannelCount;
+        nextClipCursor = returnedNextCursor;
+        clipVaultFollowingImportResume = hasMoreChannels
+          ? {
+              channelIndex: nextChannelIndex,
+              clipCursor: nextClipCursor,
+            }
+          : null;
+
+        const batchElapsedMs = Math.max(1, performance.now() - batchStartedAt);
+        if (batchCheckedCount > 0) {
+          const batchMsPerClip = batchElapsedMs / batchCheckedCount;
+          averageMsPerClip = averageMsPerClip
+            ? averageMsPerClip * 0.7 + batchMsPerClip * 0.3
+            : batchMsPerClip;
+        }
+        const completedInBatch = Math.max(
+          0,
+          nextChannelIndex - batchStartChannelIndex,
+        );
+        if (completedInBatch > 0) {
+          const batchMsPerChannel = batchElapsedMs / completedInBatch;
+          averageMsPerChannel = averageMsPerChannel
+            ? averageMsPerChannel * 0.7 + batchMsPerChannel * 0.3
+            : batchMsPerChannel;
+        }
+        const activeChannelCount = nextClipCursor ? 1 : 0;
+        const completedChannelCount = Math.min(
+          nextChannelIndex,
+          followedChannelCount,
+        );
+        const progress = followedChannelCount
+          ? `${Math.min(nextChannelIndex + activeChannelCount, followedChannelCount).toLocaleString("ko-KR")}/${followedChannelCount.toLocaleString("ko-KR")}개 채널`
+          : "팔로잉 채널 없음";
+        const eta = getClipVaultImportEtaText({
+          checkedCount,
+          followedChannelCount,
+          completedChannelCount,
+          averageMsPerClip,
+          averageMsPerChannel,
+        });
+        clipVaultFollowingImportStatus = `팔로잉 ${progress} · ${formatClipVaultFollowingImportCounts(importedCount)}${eta ? ` · ${eta}` : ""}`;
+        clipVaultRenderSig = "";
+        renderClipVaultPanel();
+      }
+
+      if (
+        clipVaultFollowingImportPauseRequested ||
+        clipVaultFollowingImportStopRequested
+      ) {
+        return;
+      }
+
+      clipVaultFollowingImportResume = null;
+      clipVaultFollowingImportStatus = followedChannelCount
+        ? `팔로잉 ${followedChannelCount.toLocaleString("ko-KR")}/${followedChannelCount.toLocaleString("ko-KR")}개 채널 · ${formatClipVaultFollowingImportCounts(importedCount)} · 확인 완료`
+        : "팔로잉 채널이 없습니다.";
+      clipVaultRenderSig = "";
+    } catch (error) {
+      if (importAccountId !== clipVaultAccountId) return;
+      if (
+        !clipVaultFollowingImportPauseRequested &&
+        !clipVaultFollowingImportStopRequested
+      ) {
+        clipVaultFollowingImportStatus =
+          error?.message
+            ? `${error.message} · ${formatClipVaultFollowingImportCounts(importedCount)}`
+            : `팔로잉 채널의 좋아요 클립을 가져오지 못했습니다. ${formatClipVaultFollowingImportCounts(importedCount)}`;
+      }
+    } finally {
+      if (importAccountId !== clipVaultAccountId) return;
+      if (clipVaultFollowingImportStopRequested) {
+        clipVaultFollowingImportResume = null;
+        clipVaultFollowingImportPaused = false;
+        clipVaultFollowingImportStatus =
+          `가져오기를 중지했습니다. ${formatClipVaultFollowingImportCounts(importedCount)}`;
+        clipVaultFollowingImportAddedCount = 0;
+        clipVaultFollowingImportPageCount = 0;
+        clipVaultFollowingImportCandidateCount = 0;
+      } else if (clipVaultFollowingImportPauseRequested) {
+        clipVaultFollowingImportPaused = true;
+        clipVaultFollowingImportStatus =
+          `가져오기를 일시정지했습니다. ${formatClipVaultFollowingImportCounts(importedCount)} · 이어하기를 누르면 저장된 위치부터 계속합니다.`;
+      }
+      clipVaultFollowingImportRunning = false;
+      clipVaultFollowingImportPauseRequested = false;
+      clipVaultFollowingImportStopRequested = false;
+      clipVaultFollowingImportJobId = "";
+      renderClipVaultPanel();
+    }
+  }
+
+  // 헤더('인기 클립' 제목 옆)에 보관함 버튼을 보장한다.
+  function ensureClipVaultButton() {
+    if (!IS_TOP_FRAME) return;
+    const on = isClipVaultAvailable() && isClipsListPage();
+    const existing = document.getElementById(CLIP_VAULT_BTN_ID);
+    if (!on) {
+      clearClipVaultButtonRetry();
+      if (clipVaultOpenKind) {
+        closeClipVaultPanel({ restoreScroll: false, focusButton: false });
+      }
+      existing?.remove();
+      document.getElementById(CLIP_VAULT_PANEL_ID)?.remove();
+      clipVaultOpenKind = "";
+      clearClipVaultViewClasses();
+      return;
+    }
+    const target = findClipVaultHost();
+    if (!target) {
+      scheduleClipVaultButtonRetry();
+      return;
+    }
+    clearClipVaultButtonRetry();
+    harvestClipVaultFont(target);
+    const { section, header, host } = target;
+    // 패널을 열어 둔 상태에서 치지직이 목록 영역을 다시 그리면 우리 패널만 사라진다
+    // → 열림 상태(clipVaultOpenKind)를 근거로 다시 세운다.
+    // ⚠ 단 '지금 막 클릭한 직후'에는 복원하지 않는다. click 은 mouseup 뒤에 오는데
+    // 그 사이 패널을 새로 만들면 눌린 노드가 사라져 click 이 취소된다.
+    if (
+      clipVaultOpenKind &&
+      !document.getElementById(CLIP_VAULT_PANEL_ID) &&
+      Date.now() - clipVaultLastPointerAt > 400
+    ) {
+      openClipVaultPanel(clipVaultOpenKind);
+    }
+    if (clipVaultOpenKind && document.getElementById(CLIP_VAULT_PANEL_ID)) {
+      section.classList.add("cheese-clip-vault-active");
+      host.classList.add("cheese-clip-vault-host");
+    }
+    if (existing && existing.parentElement === header) {
+      existing.setAttribute(
+        "aria-expanded",
+        String(Boolean(clipVaultOpenKind)),
+      );
+      return;
+    }
+
+    const btn = existing || document.createElement("button");
+    btn.id = CLIP_VAULT_BTN_ID;
+    btn.type = "button";
+    btn.className = "cheese-clip-vault-btn";
+    btn.setAttribute("aria-expanded", String(Boolean(clipVaultOpenKind)));
+    btn.setAttribute("aria-controls", CLIP_VAULT_PANEL_ID);
+    btn.setAttribute("aria-label", "내 클립 보관함");
+    btn.title = "내 클립 보관함";
+    btn.innerHTML =
+      '<span class="cheese-clip-vault-button-icons" aria-hidden="true">' +
+      clipVaultStarSvg(false) +
+      "/" +
+      clipVaultHeartSvg() +
+      '</span><span class="cheese-clip-vault-button-label">보관함</span>';
+    header.appendChild(btn);
+  }
+
+  function closeClipVaultPanel({
+    restoreScroll = true,
+    focusButton = true,
+  } = {}) {
+    const savedScrollY = clipVaultSavedScrollY;
+    document.getElementById(CLIP_VAULT_PANEL_ID)?.remove();
+    clipVaultOpenKind = "";
+    clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+    clipVaultRenderSig = "";
+    clipVaultMetricRefreshSession.clear();
+    clearTimeout(clipVaultSearchTimer);
+    clipVaultSearchTimer = 0;
+    clearClipVaultViewClasses();
+    document
+      .getElementById(CLIP_VAULT_BTN_ID)
+      ?.setAttribute("aria-expanded", "false");
+    clipVaultSavedScrollY = null;
+    if (restoreScroll && Number.isFinite(savedScrollY)) {
+      requestAnimationFrame(() => window.scrollTo({ top: savedScrollY }));
+    }
+    if (focusButton) {
+      requestAnimationFrame(() => {
+        const button = document.getElementById(CLIP_VAULT_BTN_ID);
+        if (!button) return;
+        try {
+          button.focus({ preventScroll: true });
+        } catch {
+          button.focus();
+        }
+      });
+    }
+  }
+
+  function openClipVaultPanel(kind) {
+    if (!isClipVaultAvailable()) return;
+    const target = findClipVaultHost();
+    if (!target) return;
+    harvestClipVaultFont(target);
+    const { section, host } = target;
+    const nextKind = CLIP_VAULT_KINDS.includes(kind) ? kind : "fav";
+    const wasOpen = Boolean(clipVaultOpenKind);
+    if (!wasOpen) {
+      clipVaultSavedScrollY = window.scrollY;
+      clipVaultMetricRefreshSession.clear();
+      clipVaultMetricForceRefresh = true;
+    }
+    if (clipVaultOpenKind !== nextKind) {
+      clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+      clipVaultRenderSig = "";
+    }
+    document.getElementById(CLIP_VAULT_PANEL_ID)?.remove();
+    clearClipVaultViewClasses();
+    clipVaultOpenKind = nextKind;
+    const panel = document.createElement("section");
+    panel.id = CLIP_VAULT_PANEL_ID;
+    panel.className = "cheese-clip-vault-panel";
+    panel.setAttribute("aria-label", "내 클립 보관함");
+    panel.innerHTML =
+      `<div class="cheese-clip-vault-view-header">` +
+      `<strong>내 클립 보관함</strong>` +
+      `<button type="button" class="cheese-clip-vault-close" aria-label="보관함 닫기" title="보관함 닫기">${clipVaultXSvg()}</button>` +
+      `</div>` +
+      `<div class="cheese-clip-vault-tabs" role="tablist">` +
+      CLIP_VAULT_KINDS.map(
+        (k) =>
+          `<button id="cheese-clip-vault-tab-${k}" type="button" role="tab" data-kind="${k}" aria-controls="cheese-clip-vault-tabpanel" aria-selected="${String(k === clipVaultOpenKind)}" tabindex="${k === clipVaultOpenKind ? "0" : "-1"}">` +
+          `<span>${CLIP_VAULT_LABELS[k]}</span><span class="cheese-clip-vault-tab-count" data-clip-vault-tab-count>0</span>` +
+          `</button>`,
+      ).join("") +
+      `</div>` +
+      `<div class="cheese-clip-vault-toolbar">` +
+      `<input type="search" data-clip-vault-search placeholder="제목 또는 채널 검색" aria-label="보관함 검색">` +
+      `<div class="cheese-clip-vault-following-import-controls">` +
+      `<button type="button" class="cheese-clip-vault-following-import" data-clip-vault-following-import title="팔로잉 채널을 5개 단위로 나눠 모든 클립의 좋아요 여부를 끝까지 확인합니다" hidden></button>` +
+      `<button type="button" class="cheese-clip-vault-following-import-pause" data-clip-vault-following-import-pause title="좋아요 가져오기 일시정지" aria-label="팔로잉 좋아요 가져오기 일시정지" hidden></button>` +
+      `<button type="button" class="cheese-clip-vault-following-import-stop" data-clip-vault-following-import-stop title="가져오기 중지" aria-label="팔로잉 좋아요 가져오기 중지" hidden>${clipVaultStopSvg()}<span>중지</span></button>` +
+      `</div>` +
+      `<div class="cheese-clip-vault-sort-picker" data-clip-vault-sort-picker>` +
+      `<button type="button" data-clip-vault-sort-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="cheese-clip-vault-sort-menu">` +
+      `<span data-clip-vault-sort-label></span>${clipVaultChevronSvg()}</button>` +
+      `<div id="cheese-clip-vault-sort-menu" class="cheese-clip-vault-sort-menu" data-clip-vault-sort-menu role="listbox" aria-label="보관함 정렬" hidden>` +
+      Object.entries(CLIP_VAULT_SORTS)
+        .map(
+          ([value, label]) =>
+            `<button type="button" role="option" data-clip-vault-sort="${value}" aria-selected="${String(value === clipVaultSort)}">${label}</button>`,
+        )
+        .join("") +
+      `</div></div>` +
+      `<label class="cheese-clip-vault-group-toggle">` +
+      `<input type="checkbox" data-clip-vault-group-date${clipVaultGroupByDate ? " checked" : ""}>` +
+      `<i aria-hidden="true"></i><span>날짜별 모아보기</span></label>` +
+      `<label class="cheese-clip-vault-group-toggle">` +
+      `<input type="checkbox" data-clip-vault-group-streamer${clipVaultGroupByStreamer ? " checked" : ""}>` +
+      `<i aria-hidden="true"></i><span>스트리머별 모아보기</span></label>` +
+      `</div>` +
+      `<p class="cheese-clip-vault-summary" data-clip-vault-summary aria-live="polite"></p>` +
+      `<div id="cheese-clip-vault-tabpanel" class="cheese-clip-vault-tabpanel" role="tabpanel">` +
+      `<ul class="cheese-clip-vault-grid"></ul>` +
+      `</div>` +
+      `<div class="cheese-clip-vault-more-wrap"><button type="button" data-clip-vault-more hidden></button></div>`;
+    section.classList.add("cheese-clip-vault-active");
+    host.classList.add("cheese-clip-vault-host");
+    section.insertBefore(panel, host.nextSibling);
+    bindClipVaultPanelControls(panel);
+    // 새 패널은 grid 가 비어 있으므로 시그니처를 무효화해 반드시 다시 그리게 한다.
+    clipVaultRenderSig = "";
+    document
+      .getElementById(CLIP_VAULT_BTN_ID)
+      ?.setAttribute("aria-expanded", "true");
+    renderClipVaultPanel();
+  }
+
+  function syncClipVaultCardLikeBadge(link, uid) {
+    const existing = link.querySelector(".cheese-clip-vault-like-badge");
+    if (!clipVaultHas("like", uid)) {
+      existing?.remove();
+      return;
+    }
+    if (existing) return;
+    const badge = document.createElement("span");
+    badge.className = "cheese-clip-vault-like-badge";
+    badge.setAttribute("role", "img");
+    badge.setAttribute("aria-label", "좋아요한 클립");
+    badge.title = "좋아요한 클립";
+    badge.innerHTML = clipVaultHeartSvg(true);
+    link.appendChild(badge);
+  }
+
+  // 카드마다 즐겨찾기(별) 버튼과 기록된 좋아요(하트) 상태를 붙인다. ⚠ 카드 전체가
+  // <a> 라 별표 클릭이 링크로 새어 나간다 → preventDefault + stopPropagation 이 필요하다.
+  function ensureClipVaultCardButtons() {
+    if (!IS_TOP_FRAME || !isClipVaultAvailable() || !isClipCardListPage()) {
+      clearClipVaultCardDecorations();
+      return;
+    }
+    const links = clipVaultCardLinks();
+    links.forEach((link) => {
+      // 우리 패널 안의 복제 카드에는 별표를 달지 않는다(제거는 × 로 한다).
+      if (link.closest(`#${CLIP_VAULT_PANEL_ID}`)) return;
+      ensureClipVaultCardPositioning(link);
+      if (link.hasAttribute(CLIP_VAULT_CARD_MARK)) {
+        // 상태만 갱신(다른 곳에서 담거나 뺐을 수 있다).
+        const uid = clipUidFromHref(link.getAttribute("href"));
+        const b = link.querySelector(".cheese-clip-vault-star");
+        if (b) {
+          // ⚠ 멱등 필수. 예전엔 매 패스(4회/초) innerHTML 을 다시 써서 SVG 노드가
+          // 계속 교체됐고, mousedown~mouseup 사이에 교체되면 click 이 아예 발생하지
+          // 않는다(제보: 별표가 한 번에 안 눌리고 2~3번 눌러야 동작).
+          const on = clipVaultHas("fav", uid);
+          if (b.dataset.on !== String(on)) {
+            b.dataset.on = String(on);
+            b.classList.toggle("is-on", on);
+            b.innerHTML = clipVaultStarSvg(on);
+          }
+        }
+        syncClipVaultCardLikeBadge(link, uid);
+        return;
+      }
+      link.setAttribute(CLIP_VAULT_CARD_MARK, "1");
+      const uid = clipUidFromHref(link.getAttribute("href"));
+      if (!uid) return;
+      const star = document.createElement("button");
+      star.type = "button";
+      star.className = "cheese-clip-vault-star";
+      star.setAttribute("aria-label", "즐겨찾기");
+      const on = clipVaultHas("fav", uid);
+      star.dataset.on = String(on);
+      star.classList.toggle("is-on", on);
+      star.innerHTML = clipVaultStarSvg(on);
+      link.appendChild(star);
+      syncClipVaultCardLikeBadge(link, uid);
+    });
+  }
+
+  // 클릭 위임 1회 등록(패널·카드가 재렌더돼도 유지). 캡처 단계라 카드 <a> 보다 먼저 잡는다.
+  let clipVaultClickBound = false;
+  function ensureClipVaultClicks() {
+    if (clipVaultClickBound) return;
+    clipVaultClickBound = true;
+    // pointerdown 시각을 남겨 두면, 그 직후의 재렌더/복원을 잠깐 미룰 수 있다.
+    // ⚠ 삭제(×)와 별표는 여기서 처리한다. click 을 기다리면 그 사이 목록이 다시 그려져
+    // 눌린 노드가 사라지고, 그러면 click 이 우리 버튼이 아니라 카드 <a> 로 가서 클립
+    // 페이지로 이동해 버린다(제보). pointerdown 은 노드 교체보다 먼저 발생한다.
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        clipVaultLastPointerAt = Date.now();
+        if (!isClipVaultAvailable()) return;
+        const t = e.target;
+        if (!(t instanceof Element)) return;
+        if (!t.closest("[data-clip-vault-sort-picker]")) {
+          const trigger = document.querySelector(
+            "[data-clip-vault-sort-trigger]",
+          );
+          const menu = document.querySelector("[data-clip-vault-sort-menu]");
+          if (menu && !menu.hidden) menu.hidden = true;
+          trigger?.setAttribute("aria-expanded", "false");
+        }
+        if (e.button !== undefined && e.button !== 0) return;
+
+        const del = t.closest(".cheese-clip-vault-del");
+        if (del) {
+          e.preventDefault();
+          e.stopPropagation();
+          const uid = del.getAttribute("data-uid") || "";
+          const kind = CLIP_VAULT_KINDS.includes(clipVaultOpenKind)
+            ? clipVaultOpenKind
+            : CLIP_VAULT_KINDS.find((k) => clipVaultHas(k, uid)) || "fav";
+          clipVaultRemove(kind, uid);
+          renderClipVaultPanel();
+          ensureClipVaultCardButtons();
+          return;
+        }
+
+        const star = t.closest(".cheese-clip-vault-star");
+        if (star) {
+          e.preventDefault();
+          e.stopPropagation();
+          const link = star.closest("a[href]");
+          const meta = readClipCardMeta(link);
+          if (!meta) return;
+          const on = clipVaultHas("fav", meta.uid);
+          if (on) clipVaultRemove("fav", meta.uid);
+          else clipVaultAdd("fav", meta);
+          star.dataset.on = String(!on);
+          star.classList.toggle("is-on", !on);
+          star.innerHTML = clipVaultStarSvg(!on);
+          renderClipVaultPanel();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (!isClipVaultAvailable()) return;
+        const t = e.target;
+        if (!(t instanceof Element)) return;
+
+        // 별표·삭제의 '동작'은 pointerdown 에서 끝냈다. 여기서는 카드 링크로 이동하는
+        // 것만 막는다(우리 버튼 위에서 눌렀는데 <a> 로 새어 나가는 것 방지).
+        if (
+          t.closest(".cheese-clip-vault-star") ||
+          t.closest(".cheese-clip-vault-del")
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
+        if (t.closest(`#${CLIP_VAULT_BTN_ID}`)) {
+          e.preventDefault();
+          if (clipVaultOpenKind) closeClipVaultPanel();
+          else openClipVaultPanel("fav");
+          return;
+        }
+
+        if (t.closest(".cheese-clip-vault-close")) {
+          e.preventDefault();
+          closeClipVaultPanel();
+          return;
+        }
+
+        const tab = t.closest(".cheese-clip-vault-tabs [data-kind]");
+        if (tab) {
+          e.preventDefault();
+          const nextKind = tab.getAttribute("data-kind") || "fav";
+          if (clipVaultOpenKind !== nextKind) {
+            clipVaultMetricRefreshSession.clear();
+            clipVaultMetricForceRefresh = true;
+          }
+          clipVaultOpenKind = nextKind;
+          clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+          clipVaultRenderSig = "";
+          renderClipVaultPanel();
+          return;
+        }
+
+        if (t.closest("[data-clip-vault-more]")) {
+          e.preventDefault();
+          clipVaultVisibleCount += CLIP_VAULT_PAGE_SIZE;
+          clipVaultRenderSig = "";
+          renderClipVaultPanel();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape" || !isClipVaultAvailable()) {
+          return;
+        }
+        const sortMenu = document.querySelector("[data-clip-vault-sort-menu]");
+        if (sortMenu && !sortMenu.hidden) {
+          event.preventDefault();
+          event.stopPropagation();
+          sortMenu.hidden = true;
+          const trigger = document.querySelector(
+            "[data-clip-vault-sort-trigger]",
+          );
+          trigger?.setAttribute("aria-expanded", "false");
+          try {
+            trigger?.focus({ preventScroll: true });
+          } catch {
+            trigger?.focus();
+          }
+          return;
+        }
+        if (!clipVaultOpenKind) return;
+        event.preventDefault();
+        closeClipVaultPanel();
+      },
+      true,
+    );
+  }
+
+  function clipVaultRemove(kind, uid) {
+    if (
+      !isClipVaultAvailable() ||
+      !CLIP_VAULT_KINDS.includes(kind) ||
+      !uid
+    ) {
+      return false;
+    }
+    const before = clipVault[kind].length;
+    clipVault[kind] = clipVault[kind].filter((item) => item.uid !== uid);
+    if (clipVault[kind].length === before) return false;
+    saveClipVault();
+    return true;
+  }
+
   function ensureChatMsgObserver() {
     if (!commentBlockNicknameSet.size && !chatWordFilterRegexes.length) {
       if (chatMsgObserver) {
@@ -34348,7 +37908,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           ),
         },
         chatTimeFormat, // 24h | 12h-en(AM/PM) | 12h-ko(오전/오후)
-        chatOsCustomIcons, // {PC,AOS,IOS}: 정제된 사용자 SVG(없으면 기본 아이콘)
+        chatOsCustomIcons, // {PC,AOS,IOS}: 정제된 사용자 SVG/WebP(없으면 기본 아이콘)
         chatOsIconPosition, // before | after (채팅 시간 기준)
       },
       location.origin,
@@ -34729,9 +38289,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
       chatTimeFormat = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
       chatTimeColors = normalizeChatTimeColors(data?.[CHAT_TIME_COLORS_KEY]);
-      chatOsCustomIcons = normalizeChatOsCustomIcons(
-        data?.[CHAT_OS_ICONS_KEY],
-      );
+      chatOsCustomIcons = normalizeChatOsCustomIcons(data?.[CHAT_OS_ICONS_KEY]);
       chatOsIconPosition = normalizeChatOsIconPosition(
         data?.[CHAT_OS_ICON_POSITION_KEY],
       );
@@ -35849,13 +39407,72 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[CHAT_HISTORY_ENABLED_KEY]) {
         chatHistoryOn = changes[CHAT_HISTORY_ENABLED_KEY].newValue === true;
         if (!chatHistoryOn) {
+          clearChatHistoryVisibilityTimers();
           stopChatHistory();
           removeRestoredChatHistoryRows();
           chatHistoryChannelId = null;
           chatHistoryBuffer = [];
           chatHistoryRestored = false;
+          chatHistoryWasHidden = false;
+          chatHistorySkipNextRestore = false;
         }
         ensureChatHistory();
+      }
+      const clipVaultAccountKey = clipVaultAccountStorageKey();
+      if (clipVaultAccountKey && changes[clipVaultAccountKey]) {
+        clipVault = normalizeClipVault(
+          changes[clipVaultAccountKey].newValue,
+        );
+        renderClipVaultPanel(); // 열려 있으면 즉시 갱신(다른 탭에서 담아도 반영)
+        ensureClipVaultCardButtons();
+        backfillClipVaultMeta();
+      }
+      // 이전 버전 설정 JSON을 불러온 경우에도 현재 로그인 계정으로 한 번만 흡수한다.
+      if (
+        changes[CLIP_VAULT_KEY]?.newValue !== undefined &&
+        isClipVaultAvailable()
+      ) {
+        clipVault = mergeClipVaults(
+          clipVault,
+          changes[CLIP_VAULT_KEY].newValue,
+        );
+        saveClipVault();
+        try {
+          chrome.storage.local.remove(CLIP_VAULT_KEY);
+        } catch {}
+        clipVaultRenderSig = "";
+        renderClipVaultPanel();
+        ensureClipVaultCardButtons();
+      }
+      if (changes[CLIP_VAULT_LIMIT_KEY]) {
+        clipVaultLimit = normalizeClipVaultLimit(
+          changes[CLIP_VAULT_LIMIT_KEY].newValue,
+        );
+      }
+      if (changes[CLIP_VAULT_SORT_KEY]) {
+        const value = changes[CLIP_VAULT_SORT_KEY].newValue;
+        clipVaultSort = Object.hasOwn(CLIP_VAULT_SORTS, value)
+          ? value
+          : "saved-desc";
+        clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+        clipVaultRenderSig = "";
+        renderClipVaultPanel();
+      }
+      if (
+        changes[CLIP_VAULT_GROUP_STREAMER_KEY] ||
+        changes[CLIP_VAULT_GROUP_DATE_KEY]
+      ) {
+        if (changes[CLIP_VAULT_GROUP_STREAMER_KEY]) {
+          clipVaultGroupByStreamer =
+            changes[CLIP_VAULT_GROUP_STREAMER_KEY].newValue === true;
+        }
+        if (changes[CLIP_VAULT_GROUP_DATE_KEY]) {
+          clipVaultGroupByDate =
+            changes[CLIP_VAULT_GROUP_DATE_KEY].newValue === true;
+        }
+        clipVaultVisibleCount = CLIP_VAULT_PAGE_SIZE;
+        clipVaultRenderSig = "";
+        renderClipVaultPanel();
       }
       if (changes[CHAT_HISTORY_LIMIT_KEY]) {
         chatHistoryLimit = normalizeChatHistoryLimit(
@@ -35864,6 +39481,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[FOLLOWER_EXACT_KEY]) {
         setFollowerExact(changes[FOLLOWER_EXACT_KEY].newValue === true);
+      }
+      if (IS_TOP_FRAME && changes[LOUNGE_READ_KEY]) {
+        // 라운지 읽음 상태는 모든 치지직 탭이 공유한다. 한 탭에서 소식을 확인하면
+        // 다른 탭도 저장소 변경을 받아 헤더 버튼과 열린 모달의 붉은 점을 즉시 지운다.
+        const stored = changes[LOUNGE_READ_KEY].newValue;
+        loungeReadMap =
+          stored && typeof stored === "object" && !Array.isArray(stored)
+            ? { ...stored }
+            : {};
+        syncLoungeDot();
       }
       if (changes[LOUNGE_REFRESH_KEY]) {
         loungeRefreshMin = normalizeLoungeRefreshMin(
@@ -35925,6 +39552,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ensureLoungeButton(); // 헤더 알림 옆 라운지 소식 버튼 보장(SPA 재렌더 대응)
       ensurePipChat(); // PIP 전환 시 채팅 iframe 패널 보장/정리
       ensureChatHistory(); // 채팅 이어보기: 수집 옵저버 보장 + 최초 1회 복원
+      ensureClipVaultAccount(); // 로그인 계정별 보관함 로드/전환
+      ensureClipVaultClicks(); // 클립 보관함 클릭 위임(1회)
+      ensureClipVaultButton(); // /clips 헤더의 보관함 버튼
+      ensureClipVaultCardButtons(); // 카드별 즐겨찾기 별표
+      backfillClipVaultMeta(); // 좋아요로 담긴 uid-only 항목에 카드 메타 채우기
+      ensureClipFavBridge(); // 재생 iframe 과의 즐겨찾기 브리지(1회)
+      syncClipFavToFrame(); // 현재 클립 uid·담김 상태를 iframe 에 전달
       ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
       ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
@@ -35951,7 +39585,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyAutoReloadOnError(); // 리방/오류 시 자동 새로고침 감시(옵션 시)
     applyAutoReloadOnRelive(); // 방종 후 뱅온 자동 새로고침 감시(옵션 시)
     applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
+    applyVodPlayerShift(); // 접힘 시 영상을 오른쪽으로(빈칸을 왼쪽으로)
     applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
+    ensureLogPowerRadioWatch(); // 라디오 전환 즉시 감지(video resize)
+    applyLogPowerRadioGuard(); // 라디오 모드 전환 시 적립 표시/타이머 즉시 정지
     applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)
 
     cleanupStudioMakeClipViewIfInactive();
@@ -36484,7 +40121,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (cleanupStudioMakeClipViewIfInactive()) {
       return;
     }
+    const chatHistoryNeedsReconnect = mutations?.some(
+      chatHistoryMutationNeedsReconnect,
+    );
     if (
+      !chatHistoryNeedsReconnect &&
       mutations?.length &&
       mutations.every(
         (mutation) =>

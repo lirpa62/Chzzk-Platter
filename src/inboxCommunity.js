@@ -237,6 +237,10 @@
     const customSection = document.getElementById(SECTION_ID);
     if (!tabList || !customTab || !customSection) return;
 
+    document.documentElement.classList.toggle(
+      "cheese-inbox-community-active",
+      active,
+    );
     customTab.setAttribute("aria-selected", String(active));
     tabList.querySelectorAll("button[role='tab']").forEach((tab) => {
       if (tab !== customTab && active)
@@ -583,6 +587,7 @@
 
   function cleanupUi() {
     active = false;
+    document.documentElement.classList.remove("cheese-inbox-community-active");
     document.getElementById(TAB_ID)?.parentElement?.remove();
     document.getElementById(SECTION_ID)?.remove();
     expandedIds.clear();

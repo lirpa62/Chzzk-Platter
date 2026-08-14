@@ -154,8 +154,11 @@
   const CHAT_ROW_SELECTOR =
     "[class*='live_chatting_list_item'], [class*='vod_chatting_item'], [class*='_item_']";
   const CHAT_MESSAGE_SELECTOR = "[class*='_chatting_message_']";
+  const CHAT_HISTORY_ROW_ATTR = "data-cheese-chat-history";
+  const CHAT_HISTORY_EPOCH_ATTR = "data-cheese-history-epoch-ms";
+  const CHAT_HISTORY_OS_ATTR = "data-cheese-history-os";
   const OWNED_CHAT_NODE_SELECTOR =
-    ".cheese-chat-time, .cheese-blind-restored-text, .cheese-blind-emoji";
+    ".cheese-chat-time, .cheese-chat-os, .cheese-blind-restored-text, .cheese-blind-emoji";
   const pendingChatRows = new Set();
   const PENDING_CHAT_ROW_MAX = 240;
   const ROW_BATCH_MAX = 40;
@@ -528,6 +531,7 @@
   };
   const OS_ICON_LABEL = { PC: "PC", AOS: "안드로이드", IOS: "iOS" };
   const OS_ICON_TYPES = ["PC", "AOS", "IOS"];
+  const OS_ICON_IMAGE_MAX_BYTES = 50 * 1024;
   const OS_ICON_SVG_TAGS = new Set([
     "circle",
     "ellipse",
@@ -665,12 +669,43 @@
     const templates = {};
     const signatures = {};
     OS_ICON_TYPES.forEach((type) => {
-      const template = sanitizeChatOsSvgTemplate(source[type]);
+      const raw = source[type];
+      const icon =
+        typeof raw === "string" ? { type: "svg", data: raw } : raw;
+      if (!icon || typeof icon !== "object") return;
+      const template =
+        icon.type === "image"
+          ? createChatOsImageTemplate(icon.data)
+          : sanitizeChatOsSvgTemplate(icon.data);
       if (!template) return;
       templates[type] = template;
-      signatures[type] = template.outerHTML;
+      signatures[type] = `${icon.type === "image" ? "image" : "svg"}:${template.outerHTML}`;
     });
     return { templates, signature: JSON.stringify(signatures) };
+  }
+
+  function sanitizeChatOsImageData(value) {
+    const source = String(value || "").trim();
+    const match = source.match(
+      /^data:image\/webp;base64,([a-z0-9+/]+={0,2})$/i,
+    );
+    if (!match) return null;
+    const encoded = match[1];
+    const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    const bytes = Math.floor((encoded.length * 3) / 4) - padding;
+    return bytes > 0 && bytes <= OS_ICON_IMAGE_MAX_BYTES ? source : null;
+  }
+
+  function createChatOsImageTemplate(value) {
+    const data = sanitizeChatOsImageData(value);
+    if (!data) return null;
+    const image = document.createElement("img");
+    image.src = data;
+    image.alt = "";
+    image.draggable = false;
+    image.decoding = "async";
+    image.setAttribute("aria-hidden", "true");
+    return image;
   }
 
   function createDefaultChatOsSvg(osType) {
@@ -692,17 +727,31 @@
     const timeSpan = row.querySelector(":scope .cheese-chat-time");
     if (timeSpan?.parentNode === parent) {
       if (chatOsIconPosition === "before") {
+        if (span.parentNode === parent && timeSpan.previousSibling === span) {
+          return true;
+        }
         parent.insertBefore(span, timeSpan);
       } else {
+        if (span.parentNode === parent && timeSpan.nextSibling === span) {
+          return true;
+        }
         timeSpan.insertAdjacentElement("afterend", span);
       }
     } else {
+      if (span.parentNode === parent && nicknameBtn.previousSibling === span) {
+        return true;
+      }
       parent.insertBefore(span, nicknameBtn);
     }
     return true;
   }
 
   function applyOsIcon(row, osType) {
+    if (OS_ICON_SVG[osType]) {
+      row.setAttribute(CHAT_HISTORY_OS_ATTR, osType);
+    } else {
+      row.removeAttribute(CHAT_HISTORY_OS_ATTR);
+    }
     const existing = row.querySelector(":scope .cheese-chat-os");
     if (existing) {
       if (
@@ -811,6 +860,7 @@
 
   // 닉네임 앞에 회색 시간 span을 삽입한다. 이미 있으면 현재 설정 형식으로 갱신한다.
   function applyTimestamp(row, epochMs) {
+    row.setAttribute(CHAT_HISTORY_EPOCH_ATTR, String(epochMs));
     const existing = row.querySelector(":scope .cheese-chat-time");
     if (existing) {
       const epochText = String(epochMs);
@@ -1301,6 +1351,32 @@
         restoredRowInfo.delete(row);
       }
       delete row.dataset.cheeseRowDone;
+    }
+    // 이어보기로 복원한 행은 HTML 복제본이라 React fiber/props가 없다. 저장 시 남긴
+    // 최소 메타데이터로 시간과 기기 아이콘을 현재 설정에 맞춰 다시 만들고, 원문 데이터가
+    // 없는 복제 행을 React 탐색 재시도 큐에 반복해서 넣지 않는다. 가려진 채팅은 저장
+    // 당시 이미 복원된 DOM(.cheese-blind-restored-text)을 그대로 보존한다.
+    if (row.hasAttribute(CHAT_HISTORY_ROW_ATTR)) {
+      let snapshotDone = true;
+      if (showChatTimestamp && !moaTimeActive) {
+        const epoch = Number(row.getAttribute(CHAT_HISTORY_EPOCH_ATTR));
+        if (Number.isFinite(epoch) && epoch > 1e12) {
+          snapshotDone = applyTimestamp(row, epoch) && snapshotDone;
+        }
+      }
+      if (showChatOsIcon) {
+        const osType = row.getAttribute(CHAT_HISTORY_OS_ATTR) || "";
+        if (applyOsIcon(row, osType)) {
+          row.dataset.cheeseOsDone = "1";
+        } else {
+          snapshotDone = false;
+        }
+      }
+      if (snapshotDone) {
+        row.dataset.cheeseRowDone = "1";
+        clearRowRetry(row);
+      }
+      return snapshotDone;
     }
     // ⚠ 닉네임/배지 숨김 판정은 아래 _chatting_message_ 게이트보다 먼저 한다.
     // 후원·구독·미션 메시지는 _chatting_message_ 가 없고 _container_gb6rb_ 등 다른

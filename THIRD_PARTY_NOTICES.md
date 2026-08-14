@@ -24,7 +24,7 @@ conditions of any kind. See the Apache License 2.0 text for details.
 
 This extension includes the Lucide `apple`, `armchair`, `arrow-up`,
 `chevron-down`, `eye`, `eye-off`, `folder`, `funnel-x`, `gamepad-2`,
-`grip-vertical`, `heart`, `monitor`, `music-2`, `pencil`, `plus`,
+`grip-vertical`, `heart`, `image`, `monitor`, `music-2`, `pencil`, `plus`,
 `picture-in-picture-2`, `settings-2`, `smartphone`, `sparkles`, `star`,
 `trash-2`, `users`, and `x` SVG icons.
 
