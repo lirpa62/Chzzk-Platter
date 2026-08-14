@@ -59,8 +59,6 @@
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
     "cheeseChatWordFilters",
-    "cheeseChatHistory",
-    "cheeseChatHistoryLimit",
     "cheeseClipVault",
     "cheeseClipVaultAccountIds",
     "cheeseClipVaultActiveAccount",
@@ -2987,7 +2985,6 @@
 
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
-  // ── 채팅 이어보기 ─────────────────────────────────────────────────────────
   // ── 클립 보관함 개수 ──────────────────────────────────────────────────────
   const CLIP_VAULT_LIMIT_KEY = "cheeseClipVaultLimit";
   const CLIP_VAULT_KEY = "cheeseClipVault";
@@ -3176,77 +3173,6 @@
       updateCvLimitStatus(limit, cvCurrentVault);
     });
   } catch {}
-
-  const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
-  const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
-  const CH_LIMIT_DEFAULT = 200;
-  const CH_LIMIT_MIN = 50;
-  const CH_LIMIT_MAX = 500;
-  const chInput = document.querySelector("[data-chat-history]");
-  const chRange = document.querySelector("[data-chat-history-limit]");
-  const chNum = document.querySelector("[data-chat-history-limit-num]");
-  const chReset = document.querySelector("[data-chat-history-limit-reset]");
-
-  function normalizeChLimit(value) {
-    if (value == null || value === "") return CH_LIMIT_DEFAULT;
-    const n = Math.round(Number(value));
-    if (!Number.isFinite(n)) return CH_LIMIT_DEFAULT;
-    return Math.min(CH_LIMIT_MAX, Math.max(CH_LIMIT_MIN, n));
-  }
-
-  function reflectChLimit(value) {
-    const v = normalizeChLimit(value);
-    if (chRange) chRange.value = String(v);
-    if (chNum) chNum.value = String(v);
-  }
-
-  // 이어보기가 꺼져 있으면 개수를 정할 이유가 없다.
-  function reflectChAvailability() {
-    const off = document.querySelector("[data-chat-history]")?.checked !== true;
-    [
-      "[data-chat-history-limit]",
-      "[data-chat-history-limit-num]",
-      "[data-chat-history-limit-reset]",
-    ].forEach((sel) => {
-      const el = document.querySelector(sel);
-      if (el) el.disabled = off;
-    });
-    chRange?.closest(".settings-item")?.classList.toggle("is-locked", off);
-  }
-
-  function saveChLimit(value) {
-    const v = normalizeChLimit(value);
-    reflectChLimit(v);
-    try {
-      cachedStorageSet({ [CHAT_HISTORY_LIMIT_KEY]: v });
-    } catch {}
-  }
-
-  chInput?.addEventListener("change", () => {
-    try {
-      cachedStorageSet({ [CHAT_HISTORY_ENABLED_KEY]: chInput.checked });
-    } catch {}
-    reflectChAvailability();
-  });
-  chRange?.addEventListener("input", () => reflectChLimit(chRange.value));
-  chRange?.addEventListener("change", () => saveChLimit(chRange.value));
-  chNum?.addEventListener("change", () => saveChLimit(chNum.value));
-  chReset?.addEventListener("click", () => saveChLimit(CH_LIMIT_DEFAULT));
-  (async () => {
-    let enabled = false;
-    let limit = CH_LIMIT_DEFAULT;
-    try {
-      const data = await cachedStorageGet([
-        CHAT_HISTORY_ENABLED_KEY,
-        CHAT_HISTORY_LIMIT_KEY,
-      ]);
-      enabled = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
-      limit = data?.[CHAT_HISTORY_LIMIT_KEY];
-    } catch {}
-    if (chInput) chInput.checked = enabled;
-    reflectChLimit(limit);
-    reflectChAvailability();
-  })();
 
   const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
   const CWF_MAX = 200;

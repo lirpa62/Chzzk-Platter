@@ -33016,7 +33016,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_HISTORY_LIMIT_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
-      chatHistoryOn = data?.[CHAT_HISTORY_ENABLED_KEY] === true; // 기본 OFF
+      chatHistoryOn = false;
+      if (data?.[CHAT_HISTORY_ENABLED_KEY] === true) {
+        chrome.storage.local
+          .set({ [CHAT_HISTORY_ENABLED_KEY]: false })
+          .catch(() => {});
+      }
       chatHistoryLimit = normalizeChatHistoryLimit(
         data?.[CHAT_HISTORY_LIMIT_KEY],
       );
@@ -39540,7 +39545,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ensureHeaderFollowNav();
       }
       if (changes[CHAT_HISTORY_ENABLED_KEY]) {
-        chatHistoryOn = changes[CHAT_HISTORY_ENABLED_KEY].newValue === true;
+        chatHistoryOn = false;
+        if (changes[CHAT_HISTORY_ENABLED_KEY].newValue === true) {
+          chrome.storage.local
+            .set({ [CHAT_HISTORY_ENABLED_KEY]: false })
+            .catch(() => {});
+        }
         broadcastFeatureFlags();
         if (!chatHistoryOn) {
           clearChatHistoryVisibilityTimers();

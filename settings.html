@@ -4023,7 +4023,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item settings-item-stacked">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="following-section-order"
+              >
                 <div>
                   <span class="settings-item-name">목록 배치 순서</span>
                   <span class="settings-item-desc"
@@ -6739,64 +6742,6 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="chat-history">
-                <label>
-                  <span class="settings-item-name">채팅 이어보기</span>
-                  <span class="settings-item-desc"
-                    >보는 동안 채팅을 저장해 두었다가,
-                    <b>같은 방송에 다시 들어오면</b> 채팅창 위쪽에 이어서 채워
-                    넣습니다. 위로 스크롤하면 이전 대화를 볼 수 있습니다. 저장한
-                    내용은 <b>브라우저를 닫으면 모두 사라집니다</b>(체크=사용,
-                    기본 꺼짐)</span
-                  >
-                  <span class="settings-item-desc"
-                    >⚠ 치지직이 접속할 때 내려주는 양(약 50개)은 늘릴 수 없어,
-                    <b>처음 들어가는 방송에서는 효과가 없습니다.</b></span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-chat-history />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item settings-item-stacked">
-                <div>
-                  <span class="settings-item-name">└ 저장할 채팅 수</span>
-                  <span class="settings-item-desc"
-                    >채널마다 저장할 최근 채팅 개수입니다(50~500개, 기본 200개).
-                    많을수록 더 거슬러 볼 수 있습니다. 저장 공간이 부족해지면
-                    오래 보지 않은 채널부터 자동으로 정리합니다.</span
-                  >
-                </div>
-                <div class="settings-osd-row">
-                  <input
-                    type="range"
-                    min="50"
-                    max="500"
-                    step="10"
-                    data-chat-history-limit
-                    aria-label="저장할 채팅 수"
-                  />
-                  <span class="settings-custom-input">
-                    <input
-                      type="number"
-                      min="50"
-                      max="500"
-                      step="10"
-                      data-chat-history-limit-num
-                      aria-label="저장할 채팅 수 직접 입력"
-                    />
-                    개
-                  </span>
-                  <button
-                    type="button"
-                    class="settings-order-reset"
-                    data-chat-history-limit-reset
-                  >
-                    기본값
-                  </button>
-                </div>
-              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
@@ -7211,7 +7156,7 @@
           >
             <h2 class="settings-group-title">클립</h2>
             <ul class="settings-list">
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="clip-vault">
                 <label>
                   <span class="settings-item-name">내 클립 보관함</span>
                   <span class="settings-item-desc"

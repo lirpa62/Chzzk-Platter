@@ -57,8 +57,8 @@ const UPDATE_NOTICE_TOAST_POSITION_KEY = "cheeseUpdateNoticeToastPosition";
 const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
 const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
 const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
+const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
 const CHAT_HISTORY_STORAGE_PREFIX = "cheeseChatHistory:";
-const CHAT_HISTORY_STORAGE_VERSION = 3;
 const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
 const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
 const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
@@ -99,6 +99,12 @@ const masterStateReady = chrome.storage.local
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[MASTER_ENABLED_KEY]) {
     masterEnabled = changes[MASTER_ENABLED_KEY].newValue !== false;
+  }
+  if (
+    area === "local" &&
+    changes[CHAT_HISTORY_ENABLED_KEY]?.newValue === true
+  ) {
+    void disableChatHistory();
   }
 });
 
@@ -169,7 +175,14 @@ try {
     .catch(() => {});
 } catch {}
 
-async function clearChatHistoryOnBrowserStartup() {
+async function disableChatHistory(clearRecords = false) {
+  try {
+    const state = await chrome.storage.local.get(CHAT_HISTORY_ENABLED_KEY);
+    if (state?.[CHAT_HISTORY_ENABLED_KEY] !== false) {
+      await chrome.storage.local.set({ [CHAT_HISTORY_ENABLED_KEY]: false });
+    }
+  } catch {}
+  if (!clearRecords) return;
   try {
     const all = await chrome.storage.local.get(null);
     const keys = Object.keys(all || {}).filter((key) =>
@@ -177,57 +190,20 @@ async function clearChatHistoryOnBrowserStartup() {
     );
     if (keys.length) await chrome.storage.local.remove(keys);
   } catch {}
-}
-
-async function clearLegacyChatHistory() {
   try {
-    const all = await chrome.storage.local.get(null);
-    const keys = Object.entries(all || {})
-      .filter(
-        ([key, value]) =>
-          key.startsWith(CHAT_HISTORY_STORAGE_PREFIX) &&
-          Number(value?.version) !== CHAT_HISTORY_STORAGE_VERSION,
-      )
-      .map(([key]) => key);
-    if (keys.length) await chrome.storage.local.remove(keys);
+    const all = await chrome.storage.session.get(null);
+    const keys = Object.keys(all || {}).filter((key) =>
+      key.startsWith(CHAT_HISTORY_STORAGE_PREFIX),
+    );
+    if (keys.length) await chrome.storage.session.remove(keys);
   } catch {}
 }
 
-async function migrateChatHistorySessionToLocal() {
-  try {
-    const [sessionItems, localItems] = await Promise.all([
-      chrome.storage.session.get(null),
-      chrome.storage.local.get(null),
-    ]);
-    const migrated = {};
-    for (const [key, value] of Object.entries(sessionItems || {})) {
-      if (
-        !key.startsWith(CHAT_HISTORY_STORAGE_PREFIX) ||
-        Number(value?.version) !== CHAT_HISTORY_STORAGE_VERSION ||
-        !Array.isArray(value?.items) ||
-        !value.items.length
-      ) {
-        continue;
-      }
-      const localValue = localItems?.[key];
-      if (
-        !Array.isArray(localValue?.items) ||
-        Number(value.at) > Number(localValue.at)
-      ) {
-        migrated[key] = value;
-      }
-    }
-    if (Object.keys(migrated).length) {
-      await chrome.storage.local.set(migrated);
-    }
-  } catch {}
-}
-
-// 채팅 이어보기는 새로고침·SPA 재진입·확장 업데이트는 견뎌야 하지만 브라우저를
-// 완전히 닫으면 비워지는 기능이다. local에 저장해 업데이트를 통과시키고, 새 브라우저
-// 세션이 시작될 때 해당 접두어 데이터만 정리한다.
+// 채팅 이어보기는 복원 순서와 중복 문제가 해결될 때까지 노출하지 않는다. 이전에 기능을
+// 켠 사용자도 서비스 워커 시작과 확장 업데이트에서 끄고 남은 기록을 함께 정리한다.
+void disableChatHistory();
 chrome.runtime.onStartup.addListener(() => {
-  void clearChatHistoryOnBrowserStartup();
+  void disableChatHistory(true);
 });
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -235,12 +211,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
 
-  // 이전 버전은 이어보기 기록을 storage.session에 저장했다. 브라우저가 업데이트 과정에서
-  // 해당 메모리를 아직 유지하고 있다면 최신 기록을 local로 넘겨 첫 업데이트 손실을 줄인다.
-  if (details.reason === "update") {
-    await migrateChatHistorySessionToLocal();
-    await clearLegacyChatHistory();
-  }
+  await disableChatHistory(true);
 
   // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
   // 설정 페이지가 data-new-feature로 선언한 기능 중 아직 확인하지 않은 항목만 표시한다.

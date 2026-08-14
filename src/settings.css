@@ -990,7 +990,6 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-integrated-search-clips-weights-reset]),
 .settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
-.settings-item:has([data-chat-history-limit]),
 .settings-item:has([data-category-video-candidate-picker]),
 .settings-item:has([data-fp-color-reset]),
 .settings-item:has([data-live-seek-bar-bottom]),
@@ -1759,14 +1758,6 @@ body > .clr-picker .clr-preview {
   align-items: center;
 }
 
-.settings-osd-row:has([data-chat-history-limit]) {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 8px;
-  width: 100%;
-  align-items: center;
-}
-
 .settings-osd-row:has([data-clip-vault-limit]) {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -1948,11 +1939,6 @@ body > .clr-picker .clr-preview {
   border-color: var(--popup-muted);
 }
 .settings-order-reset[data-live-seek-bar-bottom-reset] {
-  grid-column: 1 / -1;
-  justify-self: end;
-}
-
-.settings-order-reset[data-chat-history-limit-reset] {
   grid-column: 1 / -1;
   justify-self: end;
 }
