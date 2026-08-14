@@ -45,6 +45,10 @@
   // 치지직이 모든 시청자에게 보내는 값이지만 치지직 UI 에는 없는 정보라, 시청자가
   // 노출을 예상하지 못한다. 원하는 사람만 켜도록 기본은 끈 채로 둔다.
   let showChatOsIcon = false;
+  // 채팅 이어보기는 격리 world(content.js)에서 저장하지만, 안정적인 메시지 키는
+  // React props를 볼 수 있는 MAIN world에서만 읽을 수 있다. 이어보기가 켜진 동안만
+  // 각 행에 키를 남겨 DOM 재렌더/새로고침 뒤에도 같은 메시지를 정확히 식별한다.
+  let chatHistoryCaptureOn = false;
   let chatOsCustomIconTemplates = {};
   let chatOsCustomIconSignature = "";
   let chatOsIconPosition = "after";
@@ -157,6 +161,8 @@
   const CHAT_HISTORY_ROW_ATTR = "data-cheese-chat-history";
   const CHAT_HISTORY_EPOCH_ATTR = "data-cheese-history-epoch-ms";
   const CHAT_HISTORY_OS_ATTR = "data-cheese-history-os";
+  const CHAT_HISTORY_ID_ATTR = "data-cheese-history-id";
+  const CHAT_HISTORY_PREVIOUS_ID_ATTR = "data-cheese-history-prev-id";
   const OWNED_CHAT_NODE_SELECTOR =
     ".cheese-chat-time, .cheese-chat-os, .cheese-blind-restored-text, .cheese-blind-emoji";
   const pendingChatRows = new Set();
@@ -236,6 +242,40 @@
       return `vod:${uid}|${playerMessageTime}`;
     }
     return "";
+  }
+
+  function getChatHistoryMessageId(chatMessage) {
+    if (!chatMessage || typeof chatMessage !== "object") return "";
+    // 치지직 라이브 채팅의 React key가 가장 안정적이다. 화면 가상화로 같은 DOM 행이
+    // 다른 메시지에 재사용되어도 key가 바뀌므로, HTML/문구 비교보다 중복 판정에 적합하다.
+    const key =
+      chatMessage.key ||
+      chatMessage.messageKey ||
+      chatMessage.messageId ||
+      chatMessage.messageNo ||
+      chatMessage.msgId ||
+      chatMessage.chatId ||
+      "";
+    if (key !== "") return `key:${String(key)}`;
+    return getRestoreMessageIdentity(chatMessage);
+  }
+
+  function syncChatHistoryIdentity(row, chatMessage) {
+    if (!chatHistoryCaptureOn || row.hasAttribute(CHAT_HISTORY_ROW_ATTR)) {
+      return "";
+    }
+    const id = getChatHistoryMessageId(chatMessage);
+    if (!id) {
+      row.removeAttribute(CHAT_HISTORY_ID_ATTR);
+      row.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_ATTR);
+      return "";
+    }
+    row.setAttribute(CHAT_HISTORY_ID_ATTR, id);
+    // 이전 메시지 연결은 content.js가 완성된 과거→최신 스냅샷에서 만든다. 여기서
+    // DOM 형제를 사용하면 column-reverse 목록의 처리 순서에 따라 값이 비거나 반대로
+    // 연결될 수 있다.
+    row.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_ATTR);
+    return id;
   }
 
   function resetRestoreStateForReusedRow(row, chatMessage) {
@@ -1299,6 +1339,17 @@
   ) {
     if (!(row instanceof HTMLElement)) return false;
     const restoreActive = isBlindRestoreActive() && !moaRestoreActive;
+    // 이어보기가 켜진 동안에는 React가 같은 DOM 행을 새 채팅에 재사용했는지도
+    // 확인해야 한다. 시간/기기 표시와 달리 ID는 저장·중복 제거의 기준값이라, done
+    // 마커가 남아 있어도 최신 props로 한 번 동기화한다.
+    if (
+      chatHistoryCaptureOn &&
+      !row.hasAttribute(CHAT_HISTORY_ROW_ATTR) &&
+      row.dataset.cheeseRowDone === "1"
+    ) {
+      const message = getChatMessage(row);
+      if (message) syncChatHistoryIdentity(row, message);
+    }
     // 스윕 재방문 최적화: 이미 처리 완료로 표시된 행은 React fiber/props 접근 없이 즉시
     // 반환한다. 예전엔 컨테이너 재부착(헬스체크) 때마다 전체 행을 fiber 접근 포함으로
     // 재처리해(수백 행 × 반복) 채팅 폭주 방송에서 큰 메인스레드 부하였다(프로파일 실측
@@ -1378,13 +1429,20 @@
       }
       return snapshotDone;
     }
+    // 후원·구독·시스템 행은 일반 채팅 본문 클래스가 없어서 아래 게이트에서 빠질 수
+    // 있다. 이어보기 ID는 행 종류와 무관하게 먼저 기록해 저장 스냅샷이 비지 않게 한다.
+    let historyChatMessage = null;
+    if (chatHistoryCaptureOn) {
+      historyChatMessage = getChatMessage(row);
+      if (historyChatMessage) syncChatHistoryIdentity(row, historyChatMessage);
+    }
     // ⚠ 닉네임/배지 숨김 판정은 아래 _chatting_message_ 게이트보다 먼저 한다.
     // 후원·구독·미션 메시지는 _chatting_message_ 가 없고 _container_gb6rb_ 등 다른
     // 구조라 게이트에서 걸러진다. 그러면 CSS 는 숨기는데 역할 판정이 영영 안 돌아
     // 방장·매니저의 후원 메시지까지 가려진다.
     // (상위 탐색은 쓰지 않는다 — 행은 형제로 나열돼 이웃 메시지를 잡을 수 있다.)
     if (hideChatNickname || hideChatBadge) {
-      const msgForRole = getChatMessage(row);
+      const msgForRole = historyChatMessage || getChatMessage(row);
       if (msgForRole) {
         applyNicknameHide(row, msgForRole);
         row.dataset.cheeseNickDone = "1";
@@ -1394,11 +1452,13 @@
       scheduleRowRetry(row);
       return false;
     }
-    const chatMessage = getChatMessage(row);
+    const chatMessage = historyChatMessage || getChatMessage(row);
     if (!chatMessage) {
       scheduleRowRetry(row);
       return false;
     }
+
+    syncChatHistoryIdentity(row, chatMessage);
 
     resetRestoreStateForReusedRow(row, chatMessage);
 
@@ -1546,6 +1606,7 @@
     return (
       showChatTimestamp ||
       showChatOsIcon ||
+      chatHistoryCaptureOn ||
       hideChatNickname ||
       hideChatBadge ||
       isBlindRestoreActive() ||
@@ -1662,6 +1723,23 @@
     } else {
       removeAllTimestamps();
       if (!anyChatEnhanceOn()) stopChatRowObserver();
+    }
+  }
+
+  function setChatHistoryCapture(next) {
+    next = next === true;
+    if (next === chatHistoryCaptureOn) {
+      if (next && !isChatObserverHealthy()) ensureChatRowObserver();
+      return;
+    }
+    chatHistoryCaptureOn = next;
+    if (next) {
+      // 이미 완료된 행에도 ID를 한 번 부여한다. 이후에는 행 재사용 여부만 확인한다.
+      clearRowDoneMarkers();
+      if (isChatObserverHealthy()) sweepExistingRows(observedChatContainers);
+      else ensureChatRowObserver();
+    } else if (!anyChatEnhanceOn()) {
+      stopChatRowObserver();
     }
   }
 
@@ -1819,6 +1897,7 @@
     setHideChatNickname(f.chatHideNickname === true);
     setHideChatBadge(f.chatHideBadge === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
+    setChatHistoryCapture(e.data.chatHistoryEnabled === true);
     if (needsVodTimeAnchorCollection() && !isChatObserverHealthy()) {
       ensureChatRowObserver();
     }

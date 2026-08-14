@@ -1804,6 +1804,7 @@
   const CHAT_HISTORY_LIMIT_MAX = 500;
   const CHAT_HISTORY_ROW_HTML_MAX = 64 * 1024;
   const CHAT_HISTORY_RESTORE_BATCH_MAX = 50;
+  const CHAT_HISTORY_STORAGE_VERSION = 3;
   // 확장 업데이트 때도 이어지도록 storage.local에 저장하고, 브라우저가 새로 시작될 때
   // background가 이 접두어의 기록만 지운다. quota 방어는 비정상적으로 큰 기록이나
   // unlimitedStorage가 적용되지 않는 환경을 위해 그대로 둔다.
@@ -1811,6 +1812,8 @@
   const CHAT_HISTORY_MARK = "data-cheese-chat-history";
   const CHAT_HISTORY_EPOCH_MARK = "data-cheese-history-epoch-ms";
   const CHAT_HISTORY_OS_MARK = "data-cheese-history-os";
+  const CHAT_HISTORY_ID_MARK = "data-cheese-history-id";
+  const CHAT_HISTORY_PREVIOUS_ID_MARK = "data-cheese-history-prev-id";
   let chatHistoryOn = false;
   let chatHistoryLimit = CHAT_HISTORY_LIMIT_DEFAULT;
 
@@ -33017,6 +33020,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatHistoryLimit = normalizeChatHistoryLimit(
         data?.[CHAT_HISTORY_LIMIT_KEY],
       );
+      broadcastFeatureFlags();
       ensureChatHistory();
       void loadClipVault();
     } catch {
@@ -33549,9 +33553,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // world 가 hash 로 막지만, ① 페이지 진입 시 이미 있던 메시지 ② 다시보기 재생 중 렌더되는
   // 메시지는 여기서 닉네임으로 처리한다. 신규 추가 노드만 검사해 부하를 낮춘다.
   // ── 채팅 이어보기 구현 ─────────────────────────────────────────────────────
-  // 저장 단위는 채널별 키 하나(cheeseChatHistory:<channelId>). 값은 행 HTML 그대로
-  // 담는다 — 치지직 배지·이모티콘 마크업을 우리가 재현하려 들면 클래스 해시가 바뀔
-  // 때마다 깨진다. 렌더된 결과를 그대로 보관하는 편이 훨씬 안정적이다.
+  // 저장 단위는 채널별 키 하나(cheeseChatHistory:<channelId>). 렌더된 행 HTML은
+  // 그대로 보관하되, MAIN world가 읽은 React 메시지 ID와 이전 메시지 ID를 함께
+  // 저장한다. HTML만 비교하면 시간/기기 아이콘이나 React 재렌더링으로 같은 채팅을
+  // 다른 행으로 오인해 중복·순서 뒤섞임이 생긴다.
   let chatHistoryChannelId = null;
   let chatHistoryBuffer = [];
   let chatHistorySaveTimer = 0;
@@ -33572,6 +33577,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let chatHistoryWasHidden = false;
   let chatHistorySkipNextRestore = false;
   let chatHistoryVisibilityTimers = [];
+  let chatHistoryCaptureFrame = 0;
+  let chatHistoryRefreshIdentityByRow = new WeakMap();
 
   function normalizeChatHistoryLimit(value) {
     if (value == null || value === "") return CHAT_HISTORY_LIMIT_DEFAULT;
@@ -33802,6 +33809,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       clearTimeout(chatHistoryScrollTimer);
       chatHistoryScrollTimer = 0;
     }
+    if (chatHistoryCaptureFrame) {
+      cancelAnimationFrame(chatHistoryCaptureFrame);
+      chatHistoryCaptureFrame = 0;
+    }
     chatHistoryObserver?.disconnect();
     chatHistoryObserver = null;
     chatHistoryScrollParent?.removeEventListener(
@@ -33821,7 +33832,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     let attempt = items;
     while (attempt.length > 0) {
       try {
-        await store.set({ [key]: { at: Date.now(), items: attempt } });
+        await store.set({
+          [key]: {
+            version: CHAT_HISTORY_STORAGE_VERSION,
+            at: Date.now(),
+            items: attempt,
+          },
+        });
         chatHistoryStorageErrorLogged = false;
         return;
       } catch (error) {
@@ -33911,19 +33928,56 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .forEach((row) => row.remove());
   }
 
-  // 표시용 메타데이터는 중복 판정에서 제외한다. 시간/기기 표시 설정이 바뀌어도 같은
-  // 채팅을 다른 행으로 오인해 복제본을 하나 더 붙이지 않기 위해서다.
-  function chatHistoryComparableHtml(html) {
-    return String(html || "").replace(
-      /\sdata-cheese-history-(?:epoch-ms|os)="[^"]*"/g,
-      "",
-    );
-  }
-
   function isStoredChatMissionHtml(html) {
     return /cheese-chat-hidden-mission|_mission_button_/.test(
       String(html || ""),
     );
+  }
+
+  function normalizeChatHistoryId(value) {
+    const id = String(value || "").trim();
+    return id && id.length <= 512 ? id : "";
+  }
+
+  function normalizeChatHistoryItem(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const id = normalizeChatHistoryId(raw.id);
+    const html = typeof raw.html === "string" ? raw.html : "";
+    if (!id || !html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return null;
+    const previousId = normalizeChatHistoryId(raw.previousId);
+    return { id, previousId: previousId === id ? "" : previousId, html };
+  }
+
+  function normalizeChatHistoryItems(raw) {
+    if (!Array.isArray(raw)) return [];
+    const items = [];
+    const indexById = new Map();
+    raw.forEach((value) => {
+      const item = normalizeChatHistoryItem(value);
+      if (!item) return;
+      const index = indexById.get(item.id);
+      if (index == null) {
+        indexById.set(item.id, items.length);
+        items.push(item);
+        return;
+      }
+      const previous = items[index];
+      // 가상 목록이 같은 메시지를 다시 렌더하면 최신 HTML만 갱신하고, 최초 순서는
+      // 유지한다. 실제로 같은 문장을 여러 번 보낸 경우에는 메시지 ID가 달라 보존된다.
+      items[index] = {
+        ...previous,
+        ...item,
+        previousId: item.previousId || previous.previousId || "",
+      };
+    });
+    const limited = items.slice(-chatHistoryLimit);
+    // ID 연결은 MAIN world의 비동기 행 처리 순서가 아니라, 확정된 과거→최신 배열에서
+    // 다시 만든다. 저장 내용을 진단하거나 향후 일부 구간을 병합할 때도 일관된 체인이
+    // 유지된다.
+    return limited.map((item, index) => ({
+      ...item,
+      previousId: index > 0 ? limited[index - 1].id : "",
+    }));
   }
 
   // 새로 들어온 행을 버퍼에 담는다. 복원된 행은 다시 담지 않는다(중복 누적 방지).
@@ -33944,6 +33998,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ?.getAttribute("data-os") ||
       row.getAttribute?.(CHAT_HISTORY_OS_MARK) ||
       "";
+    const id = normalizeChatHistoryId(
+      row.getAttribute?.(CHAT_HISTORY_ID_MARK),
+    );
+    const previousId = normalizeChatHistoryId(
+      row.getAttribute?.(CHAT_HISTORY_PREVIOUS_ID_MARK),
+    );
     const clone = row.cloneNode(true);
     clone
       .querySelectorAll(".cheese-chat-time, .cheese-chat-os")
@@ -33963,15 +34023,32 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (/^(?:PC|AOS|IOS)$/.test(os)) {
       clone.setAttribute(CHAT_HISTORY_OS_MARK, os);
     }
+    if (id) clone.setAttribute(CHAT_HISTORY_ID_MARK, id);
+    if (previousId && previousId !== id) {
+      clone.setAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK, previousId);
+    }
     return clone.outerHTML;
   }
 
+  function chatHistoryItemFromRow(row) {
+    if (!(row instanceof Element)) return null;
+    const id = normalizeChatHistoryId(row.getAttribute(CHAT_HISTORY_ID_MARK));
+    if (!id) return null;
+    const html = cleanChatRowForStore(row);
+    if (!html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return null;
+    const previousId = normalizeChatHistoryId(
+      row.getAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK),
+    );
+    return { id, previousId: previousId === id ? "" : previousId, html };
+  }
+
   // content.js와 MAIN world의 채팅 강화 옵저버는 같은 DOM 변이를 서로 다른 순서로
-  // 받을 수 있다. 처음에는 원본 행을 즉시 저장해 누락을 막고, 잠시 뒤 시간/기기/가림
-  // 복원이 붙었다면 같은 버퍼 항목만 갱신한다. 행이 다른 메시지로 재사용된 경우에는
-  // 본문 HTML이 달라지므로 교체하지 않는다.
-  function refreshCapturedChatHistoryRow(row, originalHtml) {
-    const state = { html: originalHtml };
+  // 받을 수 있다. 시간/기기/가림 복원이 잠시 뒤 붙었다면 같은 ID의 버퍼 항목만
+  // 갱신한다. 행이 다른 메시지로 재사용되면 새 ID에서만 타이머를 다시 등록한다.
+  function refreshCapturedChatHistoryRow(row, originalItem) {
+    if (chatHistoryRefreshIdentityByRow.get(row) === originalItem.id) return;
+    chatHistoryRefreshIdentityByRow.set(row, originalItem.id);
+    const state = { item: originalItem };
     const refresh = () => {
       if (
         chatHistoryContextInvalidated ||
@@ -33980,27 +34057,25 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ) {
         return;
       }
-      const refreshedHtml = cleanChatRowForStore(row);
-      if (!refreshedHtml || refreshedHtml.length > CHAT_HISTORY_ROW_HTML_MAX) {
+      const refreshedItem = chatHistoryItemFromRow(row);
+      if (!refreshedItem || refreshedItem.id !== state.item.id) return;
+      if (
+        refreshedItem.html === state.item.html &&
+        refreshedItem.previousId === state.item.previousId
+      ) {
         return;
       }
-      const previousHtml = state.html;
-      if (refreshedHtml === previousHtml) return;
-      const previousEpoch = previousHtml.match(
-        /data-cheese-history-epoch-ms="(\d{13})"/,
-      )?.[1];
-      const refreshedEpoch = refreshedHtml.match(
-        /data-cheese-history-epoch-ms="(\d{13})"/,
-      )?.[1];
-      const sameMessage =
-        chatHistoryComparableHtml(refreshedHtml) ===
-          chatHistoryComparableHtml(previousHtml) ||
-        Boolean(previousEpoch && previousEpoch === refreshedEpoch);
-      if (!sameMessage) return; // 같은 DOM 행이 새 메시지로 재사용됨
-      const index = chatHistoryBuffer.lastIndexOf(previousHtml);
+      const index = chatHistoryBuffer.findIndex(
+        (item) => item.id === state.item.id,
+      );
       if (index < 0) return;
-      chatHistoryBuffer[index] = refreshedHtml;
-      state.html = refreshedHtml;
+      const previous = chatHistoryBuffer[index];
+      chatHistoryBuffer[index] = {
+        ...previous,
+        ...refreshedItem,
+        previousId: refreshedItem.previousId || previous.previousId || "",
+      };
+      state.item = refreshedItem;
       scheduleChatHistorySave();
     };
     // 일반 시간/기기 표시는 첫 패스에서, React props가 늦게 갱신된 가림 복원은 두
@@ -34009,50 +34084,60 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     window.setTimeout(refresh, 1400);
   }
 
-  function captureChatHistoryRow(row) {
+  function captureRenderedChatHistoryRows(rowParent) {
     if (
       chatHistoryContextInvalidated ||
       !chatHistoryOn ||
-      !chatHistoryChannelId
+      !chatHistoryChannelId ||
+      !rowParent?.isConnected
     ) {
-      return;
+      return false;
     }
-    if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
-    if (!isChatHistoryMessageRow(row)) return;
-    const html = cleanChatRowForStore(row);
-    // 후원·시스템 메시지는 SVG 때문에 일반 채팅보다 크다. 8KB 제한에서는 설정 개수보다
-    // 실제 복원 개수가 눈에 띄게 줄 수 있어, 비정상적인 단일 행만 거르는 수준으로 둔다.
-    if (!html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return;
-    chatHistoryBuffer.push(html);
-    if (chatHistoryBuffer.length > chatHistoryLimit * 2) {
-      chatHistoryBuffer = chatHistoryBuffer.slice(-chatHistoryLimit);
-    }
-    refreshCapturedChatHistoryRow(row, html);
-    scheduleChatHistorySave();
-  }
+    const nativeRows = chatHistoryRowsChronological(rowParent).filter(
+      (row) =>
+        !row.hasAttribute(CHAT_HISTORY_MARK) && isChatHistoryMessageRow(row),
+    );
+    if (!nativeRows.length) return false;
 
-  function captureRenderedChatHistoryRows(rowParent) {
     const snapshots = [];
-    chatHistoryRowsChronological(rowParent).forEach((row) => {
-      if (
-        row.hasAttribute(CHAT_HISTORY_MARK) ||
-        !isChatHistoryMessageRow(row)
-      ) {
-        return;
-      }
-      const html = cleanChatRowForStore(row);
-      if (!html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return;
-      snapshots.push(html);
-      refreshCapturedChatHistoryRow(row, html);
-    });
-    if (!snapshots.length) return;
-    // wrapper 재연결 시 이미 수집했던 화면 끝부분이 다시 렌더될 수 있다. 경계가 겹치는
-    // 부분만 합쳐 같은 채팅을 중복 저장하지 않고, 실제로 반복된 같은 문장은 보존한다.
+    for (const row of nativeRows) {
+      const item = chatHistoryItemFromRow(row);
+      // MAIN world의 ID 스윕이 끝나기 전에 일부 행만 저장하면 column-reverse DOM
+      // 순서가 버퍼에 섞일 수 있다. 전체 네이티브 행이 ID를 받은 뒤 한 번에 합친다.
+      if (!item) return false;
+      snapshots.push(item);
+      refreshCapturedChatHistoryRow(row, item);
+    }
+
     chatHistoryBuffer = mergeChatHistorySequences(
       chatHistoryBuffer,
       snapshots,
     );
     scheduleChatHistorySave();
+    return true;
+  }
+
+  function scheduleChatHistoryCaptureSnapshot(rowParent) {
+    if (
+      chatHistoryContextInvalidated ||
+      !chatHistoryOn ||
+      isChatHistoryScrolledBack() ||
+      chatHistoryCaptureFrame
+    ) {
+      return;
+    }
+    chatHistoryCaptureFrame = requestAnimationFrame(() => {
+      chatHistoryCaptureFrame = 0;
+      const parent = chatHistoryObservedRowParent;
+      if (
+        parent !== rowParent ||
+        !parent?.isConnected ||
+        isChatHistoryScrolledBack()
+      ) {
+        return;
+      }
+      captureRenderedChatHistoryRows(parent);
+    });
   }
 
   function finishChatHistoryInsert() {
@@ -34060,47 +34145,49 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (chatHistoryReconcileQueued) scheduleChatHistoryReconcile(0);
   }
 
-  // 저장된 기록의 끝과 현재 렌더된 기록의 시작이 겹치면 겹치는 구간은 한 번만
-  // 남긴다. 단순 Set 중복 제거는 같은 문장을 실제로 여러 번 보낸 채팅까지 지우므로
-  // 연속된 경계 구간만 비교한다.
+  // 현재 화면의 네이티브 채팅 순서를 권위 있는 꼬리 구간으로 사용한다. 저장 기록과
+  // 하나라도 겹치면 그 앞의 과거 기록만 보존하고 현재 구간을 시간순으로 다시 붙인다.
+  // 이 방식은 새로고침 직후 ID 부여 순서 때문에 뒤집혀 저장된 v2 버퍼도 교정한다.
   function mergeChatHistorySequences(storedItems, currentItems) {
-    const maxOverlap = Math.min(storedItems.length, currentItems.length);
-    let overlap = 0;
-    for (let size = maxOverlap; size > 0; size -= 1) {
-      let matches = true;
-      for (let index = 0; index < size; index += 1) {
-        if (
-          chatHistoryComparableHtml(
-            storedItems[storedItems.length - size + index],
-          ) !== chatHistoryComparableHtml(currentItems[index])
-        ) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) {
-        overlap = size;
-        break;
+    const stored = normalizeChatHistoryItems(storedItems);
+    const current = normalizeChatHistoryItems(currentItems);
+    if (!stored.length) return current.slice(-chatHistoryLimit);
+    if (!current.length) return stored.slice(-chatHistoryLimit);
+
+    const storedIndexById = new Map(
+      stored.map((item, index) => [item.id, index]),
+    );
+    let firstStoredOverlap = -1;
+    for (const item of current) {
+      const index = storedIndexById.get(item.id);
+      if (index == null) continue;
+      if (firstStoredOverlap < 0 || index < firstStoredOverlap) {
+        firstStoredOverlap = index;
       }
     }
-    return [...storedItems, ...currentItems.slice(overlap)].slice(
+
+    if (firstStoredOverlap < 0) {
+      return normalizeChatHistoryItems([...stored, ...current]).slice(
+        -chatHistoryLimit,
+      );
+    }
+
+    const currentIds = new Set(current.map((item) => item.id));
+    const older = stored
+      .slice(0, firstStoredOverlap)
+      .filter((item) => !currentIds.has(item.id));
+    return normalizeChatHistoryItems([...older, ...current]).slice(
       -chatHistoryLimit,
     );
   }
 
   function missingChatHistoryItems(desiredItems, presentItems) {
-    const presentCounts = new Map();
-    presentItems.forEach((html) => {
-      const key = chatHistoryComparableHtml(html);
-      presentCounts.set(key, (presentCounts.get(key) || 0) + 1);
-    });
-    return desiredItems.filter((html) => {
-      const key = chatHistoryComparableHtml(html);
-      const count = presentCounts.get(key) || 0;
-      if (!count) return true;
-      presentCounts.set(key, count - 1);
-      return false;
-    });
+    const presentIds = new Set(
+      normalizeChatHistoryItems(presentItems).map((item) => item.id),
+    );
+    return normalizeChatHistoryItems(desiredItems).filter(
+      (item) => !presentIds.has(item.id),
+    );
   }
 
   // column-reverse 목록의 DOM 뒤쪽에 과거 행을 붙인다. 최초에는 현재 채팅과 가까운
@@ -34114,7 +34201,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     chatHistoryInsertInProgress = true;
-    const pendingItems = items.slice(-CHAT_HISTORY_RESTORE_BATCH_MAX);
+    const pendingItems = normalizeChatHistoryItems(items).slice(
+      -CHAT_HISTORY_RESTORE_BATCH_MAX,
+    );
     const frag = document.createDocumentFragment();
     const temp = document.createElement("div");
     let index = 0;
@@ -34128,10 +34217,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         finishChatHistoryInsert();
         return;
       }
-      temp.innerHTML = pendingItems.slice(index, index + CHUNK).join("");
+      const chunk = pendingItems.slice(index, index + CHUNK);
+      temp.innerHTML = chunk.map((item) => item.html).join("");
+      let itemIndex = 0;
       while (temp.firstElementChild) {
         const el = temp.firstElementChild;
+        const item = chunk[itemIndex++];
         if (
+          !item ||
           isStoredChatMissionHtml(el.outerHTML) ||
           !isChatHistoryMessageRow(el)
         ) {
@@ -34139,6 +34232,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           continue;
         }
         el.setAttribute(CHAT_HISTORY_MARK, "1");
+        el.setAttribute(CHAT_HISTORY_ID_MARK, item.id);
+        if (item.previousId) {
+          el.setAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK, item.previousId);
+        } else {
+          el.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK);
+        }
         frag.appendChild(el);
       }
       index += CHUNK;
@@ -34183,42 +34282,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const rowParent = chatHistoryObservedRowParent;
     if (!rowParent?.isConnected || !isChatHistoryNearOldestEdge()) return;
 
-    const desired = chatHistoryBuffer.slice(-chatHistoryLimit);
-    const desiredCounts = new Map();
-    desired.forEach((html) => {
-      const key = chatHistoryComparableHtml(html);
-      desiredCounts.set(key, (desiredCounts.get(key) || 0) + 1);
-    });
+    const desired = normalizeChatHistoryItems(
+      chatHistoryBuffer.slice(-chatHistoryLimit),
+    );
+    const desiredIds = new Set(desired.map((item) => item.id));
 
     const rows = chatHistoryRows(rowParent);
-    const nativeCounts = new Map();
-    rows.forEach((row) => {
-      if (row.hasAttribute(CHAT_HISTORY_MARK)) return;
-      const html = cleanChatRowForStore(row);
-      const key = chatHistoryComparableHtml(html);
-      nativeCounts.set(key, (nativeCounts.get(key) || 0) + 1);
-    });
+    const nativeIds = new Set(
+      rows
+        .filter((row) => !row.hasAttribute(CHAT_HISTORY_MARK))
+        .map(chatHistoryItemFromRow)
+        .filter(Boolean)
+        .map((item) => item.id),
+    );
 
-    // 동일 채팅을 네이티브와 복원 행이 함께 갖고 있으면 네이티브를 우선한다.
-    const markerAllowance = new Map();
-    desiredCounts.forEach((count, html) => {
-      markerAllowance.set(
-        html,
-        Math.max(0, count - (nativeCounts.get(html) || 0)),
-      );
-    });
+    // 같은 ID의 네이티브 채팅이 다시 내려오면 원본을 우선한다. HTML이 달라져도
+    // 복원 복제본을 즉시 걷어, 스크롤 왕복 뒤 중복이 남지 않게 한다.
     rows.forEach((row) => {
       if (!row.hasAttribute(CHAT_HISTORY_MARK)) return;
-      const html = cleanChatRowForStore(row);
-      const key = chatHistoryComparableHtml(html);
-      const left = markerAllowance.get(key) || 0;
-      if (left > 0) markerAllowance.set(key, left - 1);
-      else row.remove();
+      const item = chatHistoryItemFromRow(row);
+      if (!item || !desiredIds.has(item.id) || nativeIds.has(item.id)) {
+        row.remove();
+      }
     });
 
     const missing = missingChatHistoryItems(
       desired,
-      chatHistoryRows(rowParent).map(cleanChatRowForStore),
+      chatHistoryRows(rowParent).map(chatHistoryItemFromRow).filter(Boolean),
     );
     appendChatHistoryRows(missing, rowParent, chatHistoryRestoreGeneration);
   }
@@ -34416,9 +34506,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
         return;
       }
-      const items = Array.isArray(stored?.items)
-        ? stored.items.filter((html) => !isStoredChatMissionHtml(html))
-        : [];
+      // v1은 HTML 문자열만 저장했고, 시험판 v2는 초기 ID 부여 순서가 버퍼에 섞일 수
+      // 있었다. 그대로 복원하면 중복·역순이 남으므로 이전 형식은 한 번 정리하고
+      // 완성된 시간순 스냅샷을 쓰는 v3 기록부터 다시 쌓는다.
+      if (stored && Number(stored.version) !== CHAT_HISTORY_STORAGE_VERSION) {
+        try {
+          await store.remove(chatHistoryKey(channelId));
+        } catch {}
+      }
+      const items =
+        Number(stored?.version) === CHAT_HISTORY_STORAGE_VERSION
+          ? normalizeChatHistoryItems(stored.items).filter(
+              (item) => !isStoredChatMissionHtml(item.html),
+            )
+          : [];
       // 첫 방문은 복원할 데이터가 없으므로 기다리지 않는다. 현재 행은 옵저버를 붙일 때
       // 이미 버퍼에 담았고 3초 뒤 저장된다.
       if (!items.length) {
@@ -34430,11 +34531,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const currentRows = chatHistoryRows(rowParent);
       const currentItems = chatHistoryBuffer.length
         ? chatHistoryBuffer.slice()
-        : chatHistoryRowsChronological(rowParent).map(cleanChatRowForStore);
+        : chatHistoryRowsChronological(rowParent)
+            .map(chatHistoryItemFromRow)
+            .filter(Boolean);
       const merged = mergeChatHistorySequences(items, currentItems);
       const fresh = missingChatHistoryItems(
         merged,
-        currentRows.map(cleanChatRowForStore),
+        currentRows.map(chatHistoryItemFromRow).filter(Boolean),
       );
       chatHistoryRestored = true;
       // 저장 기록과 현재 네이티브 채팅을 합친 뒤 한도를 적용한다. 저장된 500개에
@@ -34468,6 +34571,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (chatHistoryScrollTimer) {
       clearTimeout(chatHistoryScrollTimer);
       chatHistoryScrollTimer = 0;
+    }
+    if (chatHistoryCaptureFrame) {
+      cancelAnimationFrame(chatHistoryCaptureFrame);
+      chatHistoryCaptureFrame = 0;
     }
     if (chatHistorySaveTimer) {
       clearTimeout(chatHistorySaveTimer);
@@ -34531,6 +34638,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 화면 하단에 있을 때 렌더된 행만 새 기록으로 수집한다.
         const shouldCaptureNative = !isChatHistoryScrolledBack();
         for (const m of muts) {
+          if (m.type === "attributes") {
+            const row = m.target;
+            if (
+              shouldCaptureNative &&
+              row instanceof Element &&
+              row.parentElement === parent &&
+              !row.hasAttribute(CHAT_HISTORY_MARK)
+            ) {
+              // MAIN world가 여러 행에 ID를 붙이는 동안 개별 행을 DOM 순서대로
+              // 저장하지 않는다. 같은 프레임의 속성 변이를 하나로 묶어 과거→최신
+              // 스냅샷으로 수집한다.
+              scheduleChatHistoryCaptureSnapshot(parent);
+            }
+            continue;
+          }
           m.removedNodes.forEach((node) => {
             if (
               m.target === parent &&
@@ -34547,13 +34669,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               node.matches?.('[class*="_item_"]')
             ) {
               chatRowsChanged = true;
-              if (shouldCaptureNative) captureChatHistoryRow(node);
+              if (shouldCaptureNative) {
+                scheduleChatHistoryCaptureSnapshot(parent);
+              }
               return;
             }
             node.querySelectorAll?.('[class*="_item_"]').forEach((el) => {
               if (el.parentElement === parent) {
                 chatRowsChanged = true;
-                if (shouldCaptureNative) captureChatHistoryRow(el);
+                if (shouldCaptureNative) {
+                  scheduleChatHistoryCaptureSnapshot(parent);
+                }
               }
             });
           });
@@ -34562,12 +34688,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           scheduleChatHistoryReconcile(300);
         }
       });
-      chatHistoryObserver.observe(list, { childList: true, subtree: true });
+      chatHistoryObserver.observe(list, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+          CHAT_HISTORY_ID_MARK,
+          CHAT_HISTORY_PREVIOUS_ID_MARK,
+        ],
+      });
       setChatHistoryScrollParent(findChatHistoryScrollParent(rowParent, list));
       // 진입 당시 이미 렌더된 행도 바로 저장한다. 예전에는 복원 대기(최대 40초)가
       // 끝난 뒤에야 담아서 짧게 보고 이동하면 기록이 하나도 남지 않았다.
       // DOM 방향과 무관하게 버퍼는 항상 과거→최신 순서로 유지한다.
-      captureRenderedChatHistoryRows(rowParent);
+      scheduleChatHistoryCaptureSnapshot(rowParent);
     }
 
     if (chatHistorySkipNextRestore) {
@@ -37845,6 +37979,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       {
         source: FEATURE_FLAGS_MESSAGE,
         flags: getEffectiveFeatureFlags(),
+        chatHistoryEnabled: chatHistoryOn,
         syncPreset: syncPresetValue,
         syncCustom: syncCustomValue, // {enable,target} 또는 null
         syncRate: syncRateValue, // 따라잡기 배속(1.2/1.5/2/3)
@@ -39406,6 +39541,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[CHAT_HISTORY_ENABLED_KEY]) {
         chatHistoryOn = changes[CHAT_HISTORY_ENABLED_KEY].newValue === true;
+        broadcastFeatureFlags();
         if (!chatHistoryOn) {
           clearChatHistoryVisibilityTimers();
           stopChatHistory();

@@ -58,6 +58,7 @@ const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
 const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
 const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
 const CHAT_HISTORY_STORAGE_PREFIX = "cheeseChatHistory:";
+const CHAT_HISTORY_STORAGE_VERSION = 3;
 const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
 const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
 const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
@@ -178,6 +179,20 @@ async function clearChatHistoryOnBrowserStartup() {
   } catch {}
 }
 
+async function clearLegacyChatHistory() {
+  try {
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.entries(all || {})
+      .filter(
+        ([key, value]) =>
+          key.startsWith(CHAT_HISTORY_STORAGE_PREFIX) &&
+          Number(value?.version) !== CHAT_HISTORY_STORAGE_VERSION,
+      )
+      .map(([key]) => key);
+    if (keys.length) await chrome.storage.local.remove(keys);
+  } catch {}
+}
+
 async function migrateChatHistorySessionToLocal() {
   try {
     const [sessionItems, localItems] = await Promise.all([
@@ -188,6 +203,7 @@ async function migrateChatHistorySessionToLocal() {
     for (const [key, value] of Object.entries(sessionItems || {})) {
       if (
         !key.startsWith(CHAT_HISTORY_STORAGE_PREFIX) ||
+        Number(value?.version) !== CHAT_HISTORY_STORAGE_VERSION ||
         !Array.isArray(value?.items) ||
         !value.items.length
       ) {
@@ -223,6 +239,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // 해당 메모리를 아직 유지하고 있다면 최신 기록을 local로 넘겨 첫 업데이트 손실을 줄인다.
   if (details.reason === "update") {
     await migrateChatHistorySessionToLocal();
+    await clearLegacyChatHistory();
   }
 
   // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
