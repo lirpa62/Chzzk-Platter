@@ -797,11 +797,21 @@
   // 브라우저 확장은 CPU/GPU 사용률을 직접 못 읽으므로, video의 실제 재생 프레임 대비
   // 드롭 프레임 비율로 버벅임을 추정한다. 느린 상태가 이어지면 autoSharpenScale을
   // 낮추고, 안정 상태가 충분히 유지되면 다시 올린다. 사용자 설정값 자체는 보존한다.
-  function setAutoSharpen(enabled) {
+  function setAutoSharpen(enabled, options = {}) {
     autoSharpenEnabled = Boolean(enabled);
     try {
       window.localStorage.setItem(AUTO_SHARPEN_KEY, enabled ? "1" : "0");
     } catch {}
+    if (options.syncStorage !== false) {
+      window.postMessage(
+        {
+          source: "cheese-video-filter",
+          type: "save-auto-sharpen",
+          enabled: autoSharpenEnabled,
+        },
+        location.origin,
+      );
+    }
     if (!autoSharpenEnabled) {
       autoSharpenScale = 1;
       stopFrameMonitor();
@@ -814,6 +824,20 @@
     }
     syncUI();
   }
+
+  function requestStoredAutoSharpen() {
+    window.postMessage(
+      {
+        source: "cheese-video-filter",
+        type: "load-auto-sharpen",
+        fallback: autoSharpenEnabled,
+      },
+      location.origin,
+    );
+  }
+
+  window.setTimeout(requestStoredAutoSharpen, 250);
+  window.setTimeout(requestStoredAutoSharpen, 1500);
 
   // getVideoPlaybackQuality는 Chromium/Firefox 모두 지원한다. 오래된 환경에서는 webkit
   // 누적 카운터를 폴백으로 사용하고, 둘 다 없으면 자동 강등을 하지 않는다.
@@ -1616,6 +1640,10 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-video-filter-content")
       return;
+    if (e.data.type === "auto-sharpen-loaded") {
+      setAutoSharpen(e.data.enabled === true, { syncStorage: false });
+      return;
+    }
     if (e.data.type === "loaded" && e.data.channelId === currentMediaId) {
       resetStateLoadRetry();
       stateLoaded = true;

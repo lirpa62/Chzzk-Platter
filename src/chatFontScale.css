@@ -218,7 +218,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
    다이얼로그([role="alertdialog"]) 내부는 조절 대상이 아니므로 건드리지 않는다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"])[class*="_is_ellipsis_"] {
+  :is(
+    [class*="_container_o04z9_"],
+    [class*="_container_zw6kq_"]
+  )[class*="_is_ellipsis_"] {
   vertical-align: baseline !important;
 }
 
@@ -238,11 +241,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     ),
     [class*="_floating_"]
   )
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"]),
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"]),
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
@@ -253,11 +256,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     ),
     [class*="_floating_"]
   )
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"])
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
   [class*="_text_"] {
   font-size: calc(14px * var(--cheese-chat-font-scale)) !important;
   line-height: calc(14px * var(--cheese-chat-font-scale) * 1.2) !important;
@@ -418,11 +421,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     ),
     [class*="_floating_"]
   )
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"])
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
   :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])
   > :is([class*="_icon_o04z9_"], [class*="_icon_zw6kq_"]) {
   width: calc(
@@ -450,11 +453,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
     ),
     [class*="_floating_"]
   )
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"])
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
   :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])
   > :is([class*="_icon_o04z9_"], [class*="_icon_zw6kq_"])
   :is([class*="_container_"], img, svg) {
@@ -541,7 +544,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
     ),
     [class*="_floating_"]
   )
-  :is(:is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis_1iatj_"]), [class*="_ellipsis2_dtc6c_"]):not(
+  :is(
+    :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis_1iatj_"]),
+    [class*="_ellipsis2_dtc6c_"]
+  ):not(
     :is([class*="_has_highlight_dtc6c_"], [class*="_has_highlight_1iatj_"])
   ) {
   display: inline-flex !important;
@@ -600,7 +606,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
     ),
     [class*="_floating_"]
   )
-  :is(:is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis_1iatj_"]), [class*="_ellipsis2_dtc6c_"])
+  :is(
+    :is([class*="_ellipsis_dtc6c_"], [class*="_ellipsis_1iatj_"]),
+    [class*="_ellipsis2_dtc6c_"]
+  )
   > :is([class*="_text_dtc6c_"], [class*="_text_1iatj_"]) {
   flex: 1 1 auto !important;
   min-width: 0 !important;
@@ -620,7 +629,10 @@ html.cheese-chat-font-scale-ready.cheese-chat-font-scale-ready
     ),
     [class*="_floating_"]
   )
-  :is(:is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]), :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])) {
+  :is(
+    :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]),
+    :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])
+  ) {
   min-width: 0 !important;
 }
 
@@ -653,9 +665,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -675,6 +689,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_text_1685p_"],
     [class*="_header_1685p_"],
     [class*="_message_dba1a_"],
+    [class*="_text_gboqn_"],
+    [class*="_detail_gboqn_"],
+    [class*="_header_gboqn_"],
+    [class*="_profile_button_gboqn_"],
     [class*="_profile_button_1f5gx_"],
     [class*="_button_shuts_"],
     [class*="_word_shuts_"],
@@ -694,6 +712,13 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_money_y1pxo_"],
     [class*="_time_y1pxo_"],
     [class*="_profile_button_y1pxo_"],
+    [class*="_text_16ttf_"],
+    [class*="_mark_16ttf_"],
+    [class*="_username_16ttf_"],
+    [class*="_money_16ttf_"],
+    [class*="_time_16ttf_"],
+    [class*="_header_16ttf_"],
+    [class*="_profile_button_16ttf_"],
     [class*="_message_85wp6_"],
     [class*="_text_gb6rb_"],
     [class*="_money_gb6rb_"],
@@ -719,9 +744,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -746,9 +773,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -789,9 +818,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -816,9 +847,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -839,7 +872,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
    배지 높이만 배율 반영(아이콘은 배지 안에서 상대적으로 유지). */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
-  [class*="_money_1f5gx_"] {
+  :is([class*="_money_1f5gx_"], [class*="_money_16ttf_"]) {
   min-height: calc(25px * var(--cheese-chat-font-scale)) !important;
 }
 
@@ -875,7 +908,10 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [role="alertdialog"]
-  :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])[class*="_is_button_badge_"] {
+  :is(
+    [class*="_wrapper_o04z9_"],
+    [class*="_wrapper_zw6kq_"]
+  )[class*="_is_button_badge_"] {
   gap: initial !important;
 }
 /* 배지 아이콘(_icon_o04z9_) 내부 img/svg/container 는 부모(_icon_o04z9_)를 채운다.
@@ -886,11 +922,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   [role="alertdialog"]
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"])
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
   :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])
   > :is([class*="_icon_o04z9_"], [class*="_icon_zw6kq_"])
   :is([class*="_container_"], img, svg):not(
@@ -914,9 +950,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="_container_shuts_"],
     [class*="_container_1685p_"],
     [class*="_container_dba1a_"],
+    [class*="_container_gboqn_"],
     [class*="_container_185hr_"],
     [class*="_container_1fnc6_"],
     [class*="_container_y1pxo_"],
+    [class*="_container_16ttf_"],
     [class*="_container_y391b_"],
     [class*="_container_85wp6_"],
     [class*="_container_gb6rb_"],
@@ -938,7 +976,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
    _container_dba1a_ 가 셀렉터에 더 있어 특이도가 위 (C) 보다 높아 덮어쓴다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
-  [class*="_container_dba1a_"]
+  :is([class*="_container_dba1a_"], [class*="_container_gboqn_"])
   :is([class*="_icon_dtc6c_"], [class*="_icon_1iatj_"]) {
   width: calc(13px * var(--cheese-chat-font-scale)) !important;
   height: calc(13px * var(--cheese-chat-font-scale)) !important;
@@ -947,7 +985,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
 
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
-  [class*="_word_dba1a_"] {
+  :is([class*="_word_dba1a_"], [class*="_word_gboqn_"]) {
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
   line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
 }
@@ -957,12 +995,12 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
    한정한다(다른 특수/일반 메시지·프로필 다이얼로그엔 적용 안 함). */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
-  [class*="_container_dba1a_"]
-  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not([class*="_is_mission_"]):not(
-    [class*="_is_donation_"]
-  ):not([class*="_donation_alarm_"]):not([class*="_is_subscription_"]):not(
-    [class*="_is_ticker_overlay_"]
-  ):not([class*="_is_overlay_"])
+  :is([class*="_container_dba1a_"], [class*="_container_gboqn_"])
+  :is([class*="_container_o04z9_"], [class*="_container_zw6kq_"]):not(
+    [class*="_is_mission_"]
+  ):not([class*="_is_donation_"]):not([class*="_donation_alarm_"]):not(
+    [class*="_is_subscription_"]
+  ):not([class*="_is_ticker_overlay_"]):not([class*="_is_overlay_"])
   :is([class*="_wrapper_o04z9_"], [class*="_wrapper_zw6kq_"])
   > :is([class*="_icon_o04z9_"], [class*="_icon_zw6kq_"]) {
   margin-right: calc(4px * var(--cheese-chat-font-scale)) !important;
@@ -972,6 +1010,6 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
    시간 배지의 높이 차로 세로 정렬이 어긋난다 → align-items: center 로 중앙 정렬. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
-  [class*="_information_y1pxo_"] {
+  :is([class*="_information_y1pxo_"], [class*="_information_16ttf_"]) {
   align-items: center !important;
 }

@@ -173,7 +173,10 @@
     volumePctOn = e.data.volumePct !== false;
     actionOverlayOn = e.data.actionOverlay !== false; // 기본 ON
     // OSD 종류별 표시/위치(있으면 반영). 값은 content.js 가 정규화해 넘긴다.
-    if (e.data.actionOverlayPos && typeof e.data.actionOverlayPos === "object") {
+    if (
+      e.data.actionOverlayPos &&
+      typeof e.data.actionOverlayPos === "object"
+    ) {
       for (const k of ["volume", "rewind", "forward"]) {
         const p = e.data.actionOverlayPos[k];
         if (p && typeof p === "object") {
@@ -255,6 +258,7 @@
         e.data.syncRate,
         e.data.syncCooldownEnabled,
         e.data.syncCooldownCustom,
+        e.data.syncMode,
       );
     // 되감기 간격(3~60초). 바뀌면 이미 떠 있는 버튼 라벨/아이콘 갱신.
     const ns = Number(e.data.seekStepS);
@@ -364,6 +368,11 @@
   const SYNC_MENU_ID = "cheese-live-sync-menu";
   const SYNC_CHECK_MS = 1000; // 버튼 활성/비활성 갱신 주기
   let SYNC_RATE = 1.5; // 따라잡기 배속(설정으로 변경 가능: 1.2/1.5/2/3)
+  // 따라잡기 방식: "rate"=배속으로 서서히(기본) | "jump"=라이브 엣지로 즉시 점프.
+  // 제보: "배속 말고 원클릭으로 맨 앞으로 땡기는 방식도 있으면 좋겠다".
+  let SYNC_MODE = "rate";
+  // 따라잡는 동안 우리가 의도한 배속(0 = 따라잡기 아님).
+  let syncIntendedRate = 0;
   const SYNC_MAX_DURATION_MS = 30000; // 안전: 최대 따라잡기 시간
   const SYNC_NO_PROGRESS_MS = 4000; // 이 시간 동안 지연이 의미있게 안 줄면(스톨) 중단
   const SYNC_PROGRESS_EPS_S = 0.3; // '진전'으로 인정할 최소 지연 감소(초)
@@ -2145,6 +2154,10 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-audio-mixer-content")
       return;
+    if (e.data.type === "auto-sync-loaded") {
+      setAutoSync(e.data.enabled === true, { syncStorage: false });
+      return;
+    }
     if (
       e.data.type === "loaded" &&
       e.data.channelId === currentMediaId &&
@@ -2308,8 +2321,7 @@
     if (!Number.isFinite(g)) return clampGain(1);
     if (g <= GAIN_MIN) return GAIN_MIN;
     if (g >= GAIN_MAX) return GAIN_MAX;
-    const quantized =
-      1 + Math.round((g - 1) / GAIN_STEP) * GAIN_STEP;
+    const quantized = 1 + Math.round((g - 1) / GAIN_STEP) * GAIN_STEP;
     return Math.round(clampGain(quantized) * 100) / 100;
   }
   // 키보드 한 단계 이동. 현재값이 새 간격 격자에 없으면 이동 방향에서 가장 가까운
@@ -2342,9 +2354,7 @@
     const firstReceive = !gainRangeReceived;
     const normalizedStep = step / 100;
     const unchanged =
-      min === GAIN_MIN &&
-      max === GAIN_MAX &&
-      normalizedStep === GAIN_STEP;
+      min === GAIN_MIN && max === GAIN_MAX && normalizedStep === GAIN_STEP;
     gainRangeReceived = true; // 이제부터 클램프 유효(실제 범위 확정).
     // 범위가 그대로여도, '처음 수신'이면 그동안 보류했던 로드 게인 정리를 위해 계속 진행한다.
     if (unchanged && !firstReceive) return;
@@ -3153,9 +3163,14 @@
           : null;
         if (
           gainInput &&
-          ["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp", "Home", "End"].includes(
-            e.key,
-          )
+          [
+            "ArrowLeft",
+            "ArrowDown",
+            "ArrowRight",
+            "ArrowUp",
+            "Home",
+            "End",
+          ].includes(e.key)
         ) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -3961,9 +3976,14 @@
       const slider = e.target.closest?.("[data-master-gain]");
       if (
         !slider ||
-        !["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp", "Home", "End"].includes(
-          e.key,
-        )
+        ![
+          "ArrowLeft",
+          "ArrowDown",
+          "ArrowRight",
+          "ArrowUp",
+          "Home",
+          "End",
+        ].includes(e.key)
       )
         return;
       e.preventDefault();
@@ -4178,9 +4198,7 @@
     const codec = String(value || "")
       .trim()
       .toLowerCase();
-    return (
-      !!codec && !["unk", "unknown", "none", "null", "-"].includes(codec)
-    );
+    return !!codec && !["unk", "unknown", "none", "null", "-"].includes(codec);
   }
   function trackIsAudioOnly(t) {
     if (!t) return false;
@@ -4205,10 +4223,8 @@
       .replace(/[\s_-]+/g, "");
     if (marker.includes("audioonly") || marker.includes("radio")) return true;
 
-    const videoCodec =
-      t.videoCodec ?? t._videoCodec ?? t.dataset?.videoCodec;
-    const audioCodec =
-      t.audioCodec ?? t._audioCodec ?? t.dataset?.audioCodec;
+    const videoCodec = t.videoCodec ?? t._videoCodec ?? t.dataset?.videoCodec;
+    const audioCodec = t.audioCodec ?? t._audioCodec ?? t.dataset?.audioCodec;
     const width = Number(t.width ?? t._width ?? t.dataset?.videoWidth);
     const height = trackHeight(t);
     return (
@@ -5720,8 +5736,8 @@
       if (!cropEnabled || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      const handle = event.target.closest("[data-crop-handle]")?.dataset
-        .cropHandle;
+      const handle =
+        event.target.closest("[data-crop-handle]")?.dataset.cropHandle;
       const imageRect = image.getBoundingClientRect();
       if (!(imageRect.width > 0) || !(imageRect.height > 0)) return;
       const startX = event.clientX;
@@ -5751,19 +5767,13 @@
           left = Math.max(0, Math.min(right - minW, start.x + dx));
         }
         if (handle.includes("e")) {
-          right = Math.max(
-            left + minW,
-            Math.min(1, start.x + start.w + dx),
-          );
+          right = Math.max(left + minW, Math.min(1, start.x + start.w + dx));
         }
         if (handle.includes("n")) {
           top = Math.max(0, Math.min(bottom - minH, start.y + dy));
         }
         if (handle.includes("s")) {
-          bottom = Math.max(
-            top + minH,
-            Math.min(1, start.y + start.h + dy),
-          );
+          bottom = Math.max(top + minH, Math.min(1, start.y + start.h + dy));
         }
         crop = {
           x: left,
@@ -5786,9 +5796,7 @@
     function moveCropWithKeyboard(event) {
       if (
         !cropEnabled ||
-        !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
-          event.key,
-        )
+        !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
       ) {
         return;
       }
@@ -6258,13 +6266,37 @@
     }
   }
 
-  function setAutoSync(enabled) {
+  function setAutoSync(enabled, options = {}) {
     autoSyncEnabled = Boolean(enabled);
     try {
       window.localStorage.setItem(SYNC_AUTO_STORE_KEY, enabled ? "1" : "0");
     } catch {}
+    if (options.syncStorage !== false) {
+      window.postMessage(
+        {
+          source: "cheese-audio-mixer",
+          type: "save-auto-sync",
+          enabled: autoSyncEnabled,
+        },
+        location.origin,
+      );
+    }
     updateSyncButtonState();
   }
+
+  function requestStoredAutoSync() {
+    window.postMessage(
+      {
+        source: "cheese-audio-mixer",
+        type: "load-auto-sync",
+        fallback: autoSyncEnabled,
+      },
+      location.origin,
+    );
+  }
+
+  window.setTimeout(requestStoredAutoSync, 250);
+  window.setTimeout(requestStoredAutoSync, 1500);
 
   function syncIcon() {
     // 빨리감기(▷▷) 아이콘
@@ -6350,9 +6382,7 @@
     btn.disabled = true;
     const step = vod ? VOD_SEEK_STEP_S : seekStepS;
     const label = forward ? `${step}초 앞으로` : `${step}초 되감기`;
-    const tip = forward
-      ? `${step}초 앞으로 (→)`
-      : `${step}초 되감기 (←)`;
+    const tip = forward ? `${step}초 앞으로 (→)` : `${step}초 되감기 (←)`;
     btn.dataset.seekLabelSignature = `${forward ? "forward" : "rewind"}:${step}`;
     btn.setAttribute("aria-label", label);
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">${tip}</span><span class="pzp-ui-icon">${forward ? forwardIcon(step) : rewindIcon(step)}</span>`;
@@ -6418,9 +6448,7 @@
     const step = forward ? amount : -amount;
     // 라이브는 엣지 직전까지만, 다시보기는 영상 끝까지 이동한다.
     const maxFwd =
-      w.mode === "vod"
-        ? w.end
-        : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+      w.mode === "vod" ? w.end : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
     let target = w.cur + step;
     target = Math.max(w.start, Math.min(maxFwd, target));
     if (Math.abs(target - w.cur) < 0.05) return; // 이미 끝/시작
@@ -6488,9 +6516,7 @@
       return;
     }
     const maxFwd =
-      w.mode === "vod"
-        ? w.end
-        : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
+      w.mode === "vod" ? w.end : Math.max(w.start, w.end - SEEK_EDGE_PAD_S);
     if (rew) rew.disabled = w.cur - w.start < 0.5; // 더 되감을 게 없으면 비활성
     if (fwd) fwd.disabled = maxFwd - w.cur < 0.5; // 라이브 엣지면 비활성
   }
@@ -6978,7 +7004,11 @@
       tip.textContent = Number.isFinite(lat)
         ? `따라잡는 중… (지연 ${lat.toFixed(1)}초)`
         : "따라잡는 중…";
-    } else if (Number.isFinite(lat) && lat >= SYNC_JUMP_LATENCY_S) {
+    } else if (
+      Number.isFinite(lat) &&
+      (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S)
+    ) {
+      // 점프 모드는 항상 '이동'이라고 알린다(배속으로 서서히 줄지 않으므로).
       tip.textContent = `라이브로 이동 (지연 ${formatLatency(lat)})`;
     } else {
       tip.textContent = Number.isFinite(lat)
@@ -7112,9 +7142,10 @@
   // 따라잡기 배속 + 쿨다운 튜닝 적용. content.js 브리지에서 호출.
   //  rate: 1.2/1.5/2/3 (그 외 무시). cooldownEnabled: 쿨다운 사용 여부.
   //  cooldownCustom: {base,max}(초) 또는 null(기본 15~120초).
-  function applySyncTuning(rate, cooldownEnabled, cooldownCustom) {
+  function applySyncTuning(rate, cooldownEnabled, cooldownCustom, mode) {
     const r = Number(rate);
     if ([1.2, 1.5, 2, 3].includes(r)) SYNC_RATE = r;
+    if (mode === "rate" || mode === "jump") SYNC_MODE = mode;
     syncCooldownOn = cooldownEnabled !== false; // 기본 ON
     if (
       cooldownCustom &&
@@ -7122,8 +7153,14 @@
       Number.isFinite(Number(cooldownCustom.base)) &&
       Number.isFinite(Number(cooldownCustom.max))
     ) {
-      const base = Math.min(120, Math.max(5, Math.round(Number(cooldownCustom.base))));
-      const max = Math.min(600, Math.max(base, Math.round(Number(cooldownCustom.max))));
+      const base = Math.min(
+        120,
+        Math.max(5, Math.round(Number(cooldownCustom.base))),
+      );
+      const max = Math.min(
+        600,
+        Math.max(base, Math.round(Number(cooldownCustom.max))),
+      );
       SYNC_AUTO_COOLDOWN_BASE_MS = base * 1000;
       SYNC_AUTO_COOLDOWN_MAX_MS = max * 1000;
     } else {
@@ -7214,8 +7251,9 @@
     const lat = getLiveLatencySeconds(core);
     if (!Number.isFinite(lat) || lat < syncCfg.enable) return;
 
-    // 지연이 크면(타임머신 등) 1.5배속 대신 라이브 엣지로 즉시 점프한다.
-    if (lat >= SYNC_JUMP_LATENCY_S) {
+    // 설정이 '즉시 점프'면 지연 크기와 무관하게 바로 라이브 엣지로 당긴다.
+    // 지연이 크면(타임머신 등) 배속 모드에서도 점프가 유일한 현실적 수단이다.
+    if (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S) {
       jumpToLiveEdge(core, video);
       return;
     }
@@ -7223,6 +7261,9 @@
     const originalRate = video.playbackRate || 1;
     setPlaybackRate(core, video, SYNC_RATE);
     if (video.playbackRate !== SYNC_RATE) return; // 배속 적용 실패
+    // 우리가 마지막으로 '의도한' 배속. 다른 확장(Video Speed Controller 등)이
+    // playbackRate 를 덮어써도, 원복 여부를 이 값으로 판단하지 않기 위해 남긴다.
+    syncIntendedRate = SYNC_RATE;
     const now = Date.now();
     syncCatchUp = {
       core,
@@ -7257,7 +7298,11 @@
         cur <= syncCfg.target ||
         elapsed > SYNC_MAX_DURATION_MS ||
         stalled ||
-        syncCatchUp.video.playbackRate !== SYNC_RATE
+        // ⚠ '배속이 우리 값과 다르다'만 보면 다른 확장(VSC 등)이 값을 조금
+        //    바꿔도 즉시 중단됐다. 사용자가 '느리게' 돌린 경우에만 중단하고,
+        //    우리보다 빠르게 덮어쓴 경우는 따라잡기를 계속한다(어차피 목표에
+        //    도달하면 아래 조건으로 끝난다).
+        syncCatchUp.video.playbackRate < syncCatchUp.originalRate + 0.01
       ) {
         stopSyncCatchUp();
         return;
@@ -7273,14 +7318,30 @@
   function stopSyncCatchUp() {
     if (!syncCatchUp) return;
     if (syncCatchUp.raf) cancelAnimationFrame(syncCatchUp.raf);
-    // 우리가 바꾼 2배속일 때만 원복(사용자가 그새 바꿨으면 건드리지 않음).
-    if (syncCatchUp.video.playbackRate === SYNC_RATE) {
-      setPlaybackRate(
-        syncCatchUp.core,
-        syncCatchUp.video,
-        syncCatchUp.originalRate || 1,
-      );
+    // ⚠ 예전에는 '현재 배속 === SYNC_RATE' 일 때만 원복했다. 그런데 Video Speed
+    //    Controller 같은 확장은 ratechange 를 듣고 값을 자기 것으로 덮어쓴다.
+    //    그러면 이 조건이 거짓이 되어 원복을 건너뛰고 배속이 걸린 채 남았다(제보).
+    //    → '우리가 올린 배속보다 아직 빠른가'로 판단한다. 사용자가 우리보다 더
+    //      느리게(또는 원래대로) 바꿨다면 그 의사를 존중해 건드리지 않는다.
+    const cur = syncCatchUp.video.playbackRate;
+    const back = syncCatchUp.originalRate || 1;
+    if (Number.isFinite(cur) && cur > back + 0.01) {
+      setPlaybackRate(syncCatchUp.core, syncCatchUp.video, back);
+      // 다른 확장이 곧바로 되돌릴 수 있어 한 박자 뒤 한 번 더 시도한다.
+      // (ratechange 핸들러가 우리 쓰기 이후에 도는 경우 대비)
+      const core = syncCatchUp.core;
+      const video = syncCatchUp.video;
+      setTimeout(() => {
+        if (syncCatchUp) return; // 그새 다시 따라잡기 시작했으면 손대지 않는다
+        if (
+          Number.isFinite(video.playbackRate) &&
+          video.playbackRate > back + 0.01
+        ) {
+          setPlaybackRate(core, video, back);
+        }
+      }, 120);
     }
+    syncIntendedRate = 0;
     syncCatchUp = null;
     releaseControlsVisible("sync"); // 따라잡기 끝 → 컨트롤 자동 숨김 복구
     updateSyncButtonState();
@@ -7867,7 +7928,8 @@
     if (textEl) textEl.textContent = String(text || "");
     // 기준계별 실제 left% 환산.
     let leftPct = cfg.x;
-    if (kind === "rewind") leftPct = cfg.x / 2; // 0~100 → 0~50
+    if (kind === "rewind")
+      leftPct = cfg.x / 2; // 0~100 → 0~50
     else if (kind === "forward") leftPct = 50 + cfg.x / 2; // 0~100 → 50~100
     // ⚠ OSD 는 중심(translate -50%,-50%) 기준이라 0%/100% 근처에서 절반이 화면 밖으로
     // 나간다. OSD 실제 크기의 '절반'을 플레이어 크기 대비 %로 구해, left/top 을 그만큼
@@ -7875,8 +7937,8 @@
     const player = el.parentElement;
     const pw = player?.clientWidth || 0;
     const ph = player?.clientHeight || 0;
-    const halfX = pw ? ((el.offsetWidth / 2) / pw) * 100 : 0;
-    const halfY = ph ? ((el.offsetHeight / 2) / ph) * 100 : 0;
+    const halfX = pw ? (el.offsetWidth / 2 / pw) * 100 : 0;
+    const halfY = ph ? (el.offsetHeight / 2 / ph) * 100 : 0;
     const clampAxis = (v, half) => Math.min(100 - half, Math.max(half, v));
     el.style.left = `${clampAxis(leftPct, halfX)}%`;
     el.style.top = `${clampAxis(cfg.y, halfY)}%`;
@@ -8265,7 +8327,6 @@
     stopWideScreenPolling();
   }
 
-
   // 페이지의 채널id를 비동기로 확보한 뒤 해당 채널 설정을 로드한다. 해석 도중
   // 페이지가 바뀌면(currentPageKey 변경) 결과를 버린다(race 방지).
   async function resolveAndLoadChannel(pageKey) {
@@ -8322,9 +8383,9 @@
           node instanceof Element ? node : node?.parentElement || null;
         return Boolean(
           element?.closest?.(CHAT_STREAM_SELECTOR) ||
-            (chatAside &&
-              (element?.matches?.("[class*='_chatting_message_']") ||
-                element?.querySelector?.("[class*='_chatting_message_']"))),
+          (chatAside &&
+            (element?.matches?.("[class*='_chatting_message_']") ||
+              element?.querySelector?.("[class*='_chatting_message_']"))),
         );
       })
     );

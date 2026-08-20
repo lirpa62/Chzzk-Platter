@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "치즈 플래터 - Chzzk Platter",
   "short_name": "ChzzkPlatter",
-  "version": "1.41.0",
+  "version": "1.42.0",
   "description": "치지직 검색, 플레이어, 오디오 믹서, 채팅, 팔로잉, 레이아웃을 한 접시에 담은 통합 편의 확장 프로그램",
   "icons": {
     "16": "icons/icon-16.png",
@@ -81,6 +81,12 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
+      "js": ["src/logPowerPrediction.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://chzzk.naver.com/*"],
       "exclude_matches": [
         "https://chzzk.naver.com/embed/clip/*",
         "https://chzzk.naver.com/clip-editor*"
@@ -142,7 +148,7 @@
         "https://chzzk.naver.com/embed/clip/*",
         "https://chzzk.naver.com/clip-editor*"
       ],
-      "js": ["src/commentBlock.js"],
+      "js": ["src/commentBlock.js", "src/logPowerDonate.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true
@@ -174,8 +180,8 @@
     },
     {
       "matches": ["https://game.naver.com/notify*"],
-      "js": ["src/inboxCommunity.js"],
-      "css": ["src/inboxCommunity.css"],
+      "js": ["src/inboxCommunity.js", "src/inboxLogPower.js"],
+      "css": ["src/inboxCommunity.css", "src/inboxLogPower.css"],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -200,12 +206,23 @@
         "src/popup.js",
         "no-search-results-found-animation.svg",
         "searching-animation.svg",
-        "loading.svg"
+        "loading.svg",
+        "logPowerStats.html",
+        "src/logPowerStats.css",
+        "src/logPowerStats.js",
+        "src/chart.min.js",
+        "src/coloris.min.js",
+        "src/coloris.min.css"
       ],
       "matches": [
         "https://chzzk.naver.com/*",
-        "https://studio.chzzk.naver.com/*"
+        "https://studio.chzzk.naver.com/*",
+        "https://game.naver.com/*"
       ]
     }
+  ],
+  "optional_host_permissions": [
+    "https://nng-phinf.pstatic.net/*",
+    "https://ssl.pstatic.net/*"
   ]
 }

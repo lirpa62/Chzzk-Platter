@@ -76,8 +76,7 @@ const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
 const SETTINGS_NEW_FEATURE_BASELINE_KEY =
   "cheeseSettingsNewFeatureBaselinePending";
-const SETTINGS_NEW_FEATURE_UPDATE_KEY =
-  "cheeseSettingsNewFeatureUpdatePending";
+const SETTINGS_NEW_FEATURE_UPDATE_KEY = "cheeseSettingsNewFeatureUpdatePending";
 const REFRESH_NOTICE_URLS = [
   "https://chzzk.naver.com/*",
   "https://studio.chzzk.naver.com/*",
@@ -1890,9 +1889,7 @@ function normalizeClipVaultFollowingClip(clip, channel) {
   return {
     uid: String(clip?.clipUID || "").trim(),
     title: String(clip?.clipTitle || clip?.contentTitle || "").trim(),
-    thumb: String(
-      clip?.thumbnailImageUrl || clip?.thumbnailUrl || "",
-    ).trim(),
+    thumb: String(clip?.thumbnailImageUrl || clip?.thumbnailUrl || "").trim(),
     channelName: String(
       owner?.channelName || clip?.ownerChannelName || channel.channelName,
     ).trim(),
@@ -1901,7 +1898,8 @@ function normalizeClipVaultFollowingClip(clip, channel) {
     ).trim(),
     videoId: String(clip?.videoId || "").trim(),
     adult:
-      clip?.adult === true || String(clip?.adult || "").toLowerCase() === "true",
+      clip?.adult === true ||
+      String(clip?.adult || "").toLowerCase() === "true",
     adultKnown: true,
     ...(Number.isFinite(playCount)
       ? {
@@ -1946,18 +1944,12 @@ async function fetchClipVaultFollowingChannelClipPageOnce(
     payload?.content?.page?.next,
   );
   return {
-    items: clips.map((clip) =>
-      normalizeClipVaultFollowingClip(clip, channel),
-    ),
+    items: clips.map((clip) => normalizeClipVaultFollowingClip(clip, channel)),
     next: next.clipUID ? next : null,
   };
 }
 
-async function fetchClipVaultFollowingChannelClipPage(
-  channel,
-  cursor,
-  signal,
-) {
+async function fetchClipVaultFollowingChannelClipPage(channel, cursor, signal) {
   let lastError = null;
   for (let attempt = 0; attempt <= FETCH_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
@@ -2091,9 +2083,8 @@ async function importClipVaultFollowingLikes(
     ? Math.min(channels.length, Math.max(0, Math.floor(requestedStartIndex)))
     : 0;
   let nextChannelIndex = startIndex;
-  let nextClipCursor = normalizeClipVaultFollowingImportCursor(
-    rawStartClipCursor,
-  );
+  let nextClipCursor =
+    normalizeClipVaultFollowingImportCursor(rawStartClipCursor);
   let scannedChannelCount = 0;
   let fetchedPageCount = 0;
   const candidates = [];
@@ -2137,7 +2128,8 @@ async function importClipVaultFollowingLikes(
     }
 
     if (page.next) {
-      const currentCursorKey = clipVaultFollowingImportCursorKey(nextClipCursor);
+      const currentCursorKey =
+        clipVaultFollowingImportCursorKey(nextClipCursor);
       const nextCursorKey = clipVaultFollowingImportCursorKey(page.next);
       if (nextCursorKey === currentCursorKey) {
         throw new Error(
@@ -3640,6 +3632,16 @@ const LP_WATCH_MISS_LIMIT = Math.ceil(
 );
 const LP_WATCH_MAX_MS = 75 * 60 * 1000; // 최대 추적 75분
 const LP_WATCH_AMOUNTS = [10, 12, 20]; // tier0/1/2 시청 보상액
+// ⚠ 1시간을 채우는 순간 치지직은 5분 보상과 1시간 보상을 [함께] 준다.
+//   그래서 그 주기의 delta 는 10+100=110 처럼 합쳐진 값으로 온다. 예전엔 이 값이
+//   targets 에 없어 5분 보상으로 인식되지 않았고, 마지막 12회째가 통째로 누락됐다
+//   (제보: 11회 110 만 기록되고 12회째가 사라짐).
+//   합계값은 5분 단독(10/12/20)·1시간 단독(100/120/200) 어느 것과도 겹치지 않는다.
+const LP_WATCH_COMBO = new Map([
+  [110, 10],
+  [132, 12],
+  [220, 20],
+]);
 const LP_SUBSCRIBE_URL =
   "https://api.chzzk.naver.com/commercial/v1/subscribe/channels";
 const LP_CHANNELS_PREFIX = "https://api.chzzk.naver.com/service/v1/channels";
@@ -3835,6 +3837,158 @@ async function lpStartTracking({ channelId, initialAmount }) {
 // 적립이 감지되면(활성 채널 확정), 다른 채널들의 적립 추적 state와 1시간 타이머를
 // 모두 정리하고 각 탭에 LOG_POWER_LIVE_ENDED를 보내 표시를 지운다(다른 채널의
 // 적립 중·1시간 타이머가 남아 사용자를 헷갈리게 하지 않도록).
+// 채널 표시 정보(이름/프로필). 기록에 남겨야 통계에서 id 대신 이름이 보인다.
+async function lpFetchChannelMeta(channelId) {
+  try {
+    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}`, {
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const c = (await res.json())?.content;
+    if (!c) return null;
+    return {
+      channelName: String(c.channelName || ""),
+      channelImageUrl: String(c.channelImageUrl || ""),
+      verifiedMark: c.verifiedMark === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// content.js 의 appendLogPowerLog 와 같은 규칙으로 내역에 남긴다.
+// ⚠ background 에서 직접 써야 한다. flush 시점(채널 이동·적립 중단)에 치지직 탭이
+//   열려 있다는 보장이 없다.
+const LP_LOG_KEY = "cheeseLogPowerLog";
+const LP_LOG_DAYS_KEY = "cheeseLogPowerLogDays";
+const LP_LOG_DAYS_DEFAULT = 90;
+const LP_LOG_DAYS_MIN = 7;
+const LP_LOG_DAYS_MAX = 3650;
+
+function lpNormalizeLogDays(value) {
+  if (value == null || value === "") return LP_LOG_DAYS_DEFAULT;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return LP_LOG_DAYS_DEFAULT;
+  if (n === 0) return 0; // 제한 없음
+  return Math.min(LP_LOG_DAYS_MAX, Math.max(LP_LOG_DAYS_MIN, n));
+}
+
+async function lpAppendLog(entry) {
+  const id = String(entry?.id || "").trim();
+  const amount = Number(entry?.amount) || 0;
+  if (!id || !Number.isFinite(amount) || amount === 0) return;
+  try {
+    const data = await chrome.storage.local.get([LP_LOG_KEY, LP_LOG_DAYS_KEY]);
+    const days = lpNormalizeLogDays(data?.[LP_LOG_DAYS_KEY]);
+    const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+    const list = Array.isArray(data?.[LP_LOG_KEY]) ? data[LP_LOG_KEY] : [];
+    // 같은 id 가 이미 있으면 중복 기록하지 않는다(재시도·다중 탭 대비).
+    if (list.some((it) => it?.id === id)) return;
+    const next = [
+      {
+        id,
+        at: Number(entry?.at) || Date.now(),
+        channelId: String(entry?.channelId || ""),
+        channelName: String(entry?.channelName || "").slice(0, 100),
+        channelImageUrl: String(entry?.channelImageUrl || "").slice(0, 300),
+        verifiedMark: entry?.verifiedMark === true,
+        amount,
+        fiveMinAmount: Number(entry?.fiveMinAmount) || 0,
+        boost: Number(entry?.boost) || 1,
+        claimType: String(entry?.claimType || "WATCH_1_HOUR").toUpperCase(),
+        // 5분 묶음의 회차 수(있을 때만).
+        ...(Number(entry?.watchCount) > 0
+          ? { watchCount: Number(entry.watchCount) }
+          : {}),
+      },
+      ...list.filter((it) => (Number(it?.at) || 0) >= cutoff),
+    ];
+    await chrome.storage.local.set({ [LP_LOG_KEY]: next });
+  } catch {}
+}
+
+// ── 연속 5분 보상 묶기 ──────────────────────────────────────────────────────
+// 1시간을 채우면 WATCH_1_HOUR 한 건(+fiveMinAmount 12회분)으로 기록되지만, 중간에
+// 채널을 옮기거나 시청을 멈추면 그때까지 받은 5분 보상이 어디에도 안 남아 '기타
+// 적립'으로 샜다(제보). 그렇다고 5분마다 한 건씩 남기면 기록이 12배가 된다.
+//
+// 그래서 (prev, curr, cnt) 로 '같은 채널에서 연속으로 받은 횟수'만 세어 두고,
+// 흐름이 끊길 때 한 건으로 묶어 기록한다.
+//   (null,null,0) → (null,A,1) → (A,A,2) → (A,B,1) 이 순간 A×2 를 기록
+//
+// ⚠ local 에 둔다. session 은 브라우저 세션이 끝나면 비고, 그보다 먼저 서비스
+//   워커가 잠들었다 깨는 사이에도 유실될 수 있다. 실제로 session 에 두었더니
+//   5분마다 run 이 초기화돼 보상이 낱개로 기록됐다(제보: 엘시v +10 이 55건).
+//   watch state 는 매 폴링마다 다시 쓰여서 티가 안 났지만, run 은 누적값이라
+//   한 번만 사라져도 묶임이 깨진다.
+const LP_RUN_KEY = "cheeseLogPowerFiveMinRun";
+
+async function lpGetRun() {
+  try {
+    const v = (await chrome.storage.local.get(LP_RUN_KEY))?.[LP_RUN_KEY];
+    if (v && typeof v === "object") return v;
+  } catch {}
+  return { prev: null, curr: null, cnt: 0, amount: 0, at: 0 };
+}
+
+async function lpSetRun(run) {
+  try {
+    await chrome.storage.local.set({ [LP_RUN_KEY]: run });
+  } catch {}
+}
+
+// 쌓인 연속분을 WATCH_5_MIN 한 건으로 남긴다. 남길 게 없으면 아무것도 안 한다.
+async function lpFlushRun() {
+  const run = await lpGetRun();
+  if (!run?.curr || !(run.cnt > 0) || !(run.amount > 0)) {
+    if (run?.curr || run?.cnt) {
+      await lpSetRun({
+        prev: run?.curr || null,
+        curr: null,
+        cnt: 0,
+        amount: 0,
+        at: 0,
+      });
+    }
+    return;
+  }
+  const channelId = run.curr;
+  const meta = await lpFetchChannelMeta(channelId);
+  // 부스팅 배수 = 실제 단가 / 기본 단가(10). 통계에서 '1티어 구독 ×1.2' 로 쓴다.
+  const unit = run.amount / run.cnt;
+  await lpAppendLog({
+    // 같은 묶음을 두 번 저장하지 않도록 채널+시작시각으로 고정한다.
+    id: `WATCH5RUN-${channelId}-${run.at}`,
+    at: run.at || Date.now(),
+    channelId,
+    channelName: meta?.channelName || "",
+    channelImageUrl: meta?.channelImageUrl || "",
+    verifiedMark: meta?.verifiedMark === true,
+    amount: run.amount,
+    fiveMinAmount: 0,
+    boost: Number((unit / 10).toFixed(2)) || 1,
+    claimType: "WATCH_5_MIN",
+    // 몇 회분이 묶였는지. 12회면 1시간을 채운 것, 그보다 적으면 중간에 끊긴 것.
+    watchCount: run.cnt,
+  });
+  await lpSetRun({ prev: channelId, curr: null, cnt: 0, amount: 0, at: 0 });
+}
+
+// 5분 보상 1회 감지. 같은 채널이면 누적, 채널이 바뀌면 이전 채널을 먼저 확정한다.
+async function lpNoteFiveMin(channelId, amount) {
+  const run = await lpGetRun();
+  if (run.curr && run.curr !== channelId) await lpFlushRun();
+  const cur = await lpGetRun();
+  const same = cur.curr === channelId;
+  await lpSetRun({
+    prev: cur.prev ?? null,
+    curr: channelId,
+    cnt: (same ? cur.cnt : 0) + 1,
+    amount: (same ? cur.amount : 0) + amount,
+    at: same && cur.at ? cur.at : Date.now(),
+  });
+}
+
 const LP_HOUR_TIMER_PREFIX = "cheeseLogPowerHourTimer:";
 async function lpClearOtherChannels(activeChannelId) {
   try {
@@ -3842,24 +3996,42 @@ async function lpClearOtherChannels(activeChannelId) {
     //    옮겨와도 재추적되지 않음). LOG_POWER_LIVE_ENDED 로 현재 떠 있는 적립 중 표시를
     //    지우되, background 추적/알람은 살려 다음 주기에 이 채널의 적립을 계속 감지한다.
     const sess = await chrome.storage.session.get(null);
+    const others = [];
     for (const key of Object.keys(sess || {})) {
       if (!key.startsWith(LP_WATCH_STATE_PREFIX)) continue;
       const cid = key.slice(LP_WATCH_STATE_PREFIX.length);
       if (!cid || cid === activeChannelId) continue;
+      others.push(cid);
       await lpDeactivateWatchState(cid); // 내부에서 status(active:false) broadcast
     }
-    // 2) 다른 채널의 1시간 타이머(local) 제거. content가 이 키로 복원하므로 지우면
-    //    재진입해도 안 뜬다. LOG_POWER_LIVE_ENDED가 현재 떠 있는 표시도 지운다.
-    const loc = await chrome.storage.local.get(null);
-    const toRemove = [];
-    for (const key of Object.keys(loc || {})) {
-      if (!key.startsWith(LP_HOUR_TIMER_PREFIX)) continue;
+    // 2) 다른 채널의 1시간 타이머는 '일시정지'한다.
+    //    ⚠ 예전엔 키를 지웠는데, 그러면 잠깐 다른 채널을 보고 돌아와도 타이머가
+    //      처음부터 다시 시작됐다. 치지직은 시청 시간을 누적으로 세므로(실측: 채널을
+    //      옮겼다 돌아오면 이어서 1시간이 찬다) 남은 시간을 보존해야 맞다(제보).
+    //      leftAt 을 찍어 두면 content 의 restoreWatchHourTimer 가 그 시점부터 재개한다.
+    //    ⚠ 예전엔 storage.local 전체(get(null))를 읽었다. 이 함수는 5분 보상마다
+    //      호출되는데 local 에는 통나무파워 내역이 통째로 들어 있어, 기록이 쌓일수록
+    //      5분마다 수 MB 를 직렬화하게 된다. 추적 중인 채널의 키만 콕 집어 읽는다.
+    //      (others 는 위에서 이미 activeChannelId 를 뺀 목록이다.)
+    if (!others.length) return;
+    const timerKeys = others.map((cid) => `${LP_HOUR_TIMER_PREFIX}${cid}`);
+    const loc = await chrome.storage.local.get(timerKeys);
+    const paused = {};
+    const now = Date.now();
+    for (const key of timerKeys) {
+      const cur = loc?.[key];
+      if (cur == null) continue;
       const cid = key.slice(LP_HOUR_TIMER_PREFIX.length);
-      if (!cid || cid === activeChannelId) continue;
-      toRemove.push(key);
+      const obj =
+        cur && typeof cur === "object" ? cur : { endsAt: Number(cur) };
+      const endsAt = Number(obj.endsAt) || 0;
+      // 이미 일시정지된 것은 leftAt 을 덮지 않는다(이탈 시간이 초기화된다).
+      if (!endsAt || Number(obj.leftAt) > 0) continue;
+      if (endsAt <= now) continue; // 만료된 키는 그대로 둔다(복원 때 정리)
+      paused[key] = { endsAt, leftAt: now };
       lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId: cid });
     }
-    if (toRemove.length) await chrome.storage.local.remove(toRemove);
+    if (Object.keys(paused).length) await chrome.storage.local.set(paused);
   } catch {}
 }
 
@@ -3877,6 +4049,7 @@ async function lpCheckProgress(channelId) {
   const live = await lpIsChannelLive(channelId);
   if (live === false) {
     await lpClearWatchState(channelId);
+    await lpFlushRun(); // 방송이 끝났다 → 쌓인 연속분 확정
     lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId });
     return;
   }
@@ -3894,6 +4067,7 @@ async function lpCheckProgress(channelId) {
   } else if (now - Number(state.startedAt || now) > LP_WATCH_MAX_MS) {
     // live 불확실(null)한 상태로 상한 초과 → 안전상 정리.
     await lpClearWatchState(channelId);
+    await lpFlushRun();
     lpBroadcast(lpStateToStatus(state, false));
     return;
   }
@@ -3905,19 +4079,76 @@ async function lpCheckProgress(channelId) {
     : LP_WATCH_AMOUNTS;
   const wasActive = Number(state.activeUntil || 0) > now;
   const next = { ...state, lastAmount: amount };
+  // 1시간 달성 주기: 5분+1시간이 한꺼번에 들어온다. 5분분만 run 에 넣고,
+  // 1시간 보상은 content.js 가 claims 로 따로 기록한다(여기서 세면 이중 계상).
+  const comboFive = LP_WATCH_COMBO.get(delta);
+  if (comboFive != null) {
+    next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
+    next.misses = 0;
+    await lpSetWatchState(channelId, next);
+    await lpNoteFiveMin(channelId, comboFive);
+    // 1시간이 찼으니 여기서 한 묶음이 끝난다 → 쌓인 5분분을 확정한다.
+    await lpFlushRun();
+    await lpClearOtherChannels(channelId);
+    lpBroadcast(lpStateToStatus(next, true));
+    return;
+  }
   if (targets.includes(delta)) {
     next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
     next.misses = 0;
     await lpSetWatchState(channelId, next);
+    // 연속 5분 보상 누적. 채널이 바뀌면 여기서 이전 채널분이 확정된다.
+    await lpNoteFiveMin(channelId, delta);
     // 이 채널이 활성 적립 채널로 확정됨 → 다른 채널의 적립·1시간 타이머 정리.
     await lpClearOtherChannels(channelId);
     lpBroadcast(lpStateToStatus(next, true));
     return;
   }
+  // ⚠ 절전·잠자기에서 깨면 그 사이 폴링이 멈춰 있어 보상이 여러 번 쌓인 채로
+  //   온다(제보: 27분 자고 나니 delta 72 = 6회분). 단일 값·콤보만 보던 예전에는
+  //   이 delta 를 놓쳐 '기타 적립'으로 샜다. 단가의 배수면 그 횟수만큼 인정한다.
+  //   ⚠ 콤보(132 등)는 위에서 이미 처리했다 — 순서를 바꾸면 안 된다.
+  const unit = state.expectedAmount || 0;
+  // 자는 동안 1시간이 차면 '1시간 보상 + 5분 n회'가 한꺼번에 온다.
+  // 1시간분을 떼어내고 남는 게 단가의 배수면 그만큼을 5분 보상으로 인정한다
+  // (1시간 보상 자체는 content.js 가 claims 로 따로 기록한다).
+  const hourUnit = unit > 0 ? unit * 10 : 0;
+  if (hourUnit > 0 && delta > hourUnit) {
+    const rest = delta - hourUnit;
+    if (rest > 0 && rest % unit === 0 && rest / unit <= 12) {
+      next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
+      next.misses = 0;
+      await lpSetWatchState(channelId, next);
+      await lpNoteFiveMin(channelId, rest);
+      await lpFlushRun(); // 1시간이 찼으니 한 묶음이 끝난다
+      await lpClearOtherChannels(channelId);
+      lpBroadcast(lpStateToStatus(next, true));
+      return;
+    }
+  }
+  if (unit > 0 && delta > 0 && delta % unit === 0) {
+    const ticks = delta / unit;
+    // 1시간(12회)까지만 인정한다. 그 이상이면 다른 적립이 섞였다고 본다.
+    // ⚠ 미구독(단가 10)에서는 후원 20·구독선물 50 도 배수라 시청 보상으로 보일 수
+    //   있다. 다만 그 둘은 logPowerDonate.js 가 요청을 직접 잡아 따로 기록하므로
+    //   여기서 겹쳐도 중복이 되지는 않는다(보유량 차액이 이미 설명된 상태).
+    if (ticks <= 12) {
+      next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
+      next.misses = 0;
+      await lpSetWatchState(channelId, next);
+      await lpNoteFiveMin(channelId, delta);
+      await lpClearOtherChannels(channelId);
+      lpBroadcast(lpStateToStatus(next, true));
+      return;
+    }
+  }
   next.misses = Number(state.misses || 0) + 1;
   if (next.misses >= LP_WATCH_MISS_LIMIT) next.activeUntil = 0;
   await lpSetWatchState(channelId, next);
   if (wasActive && Number(next.activeUntil || 0) <= now) {
+    // 적립이 끊겼다 → 쌓인 연속분을 확정한다. 여기서 안 하면 다른 채널을 볼
+    // 때까지(며칠 뒤일 수도) 기록이 안 남는다.
+    await lpFlushRun();
     lpBroadcast(lpStateToStatus(next, false));
   }
 }
@@ -4099,10 +4330,8 @@ async function fetchClipVaultMetric(descriptor, forceRefresh = false) {
   const now = Date.now();
   const cached = clipVaultMetricCache.get(clipUID) || {};
   if (descriptor.videoId) cached.videoId = descriptor.videoId;
-  const playFresh =
-    !forceRefresh && Number(cached.playExpiresAt || 0) > now;
-  const likeFresh =
-    !forceRefresh && Number(cached.likeExpiresAt || 0) > now;
+  const playFresh = !forceRefresh && Number(cached.playExpiresAt || 0) > now;
+  const likeFresh = !forceRefresh && Number(cached.likeExpiresAt || 0) > now;
   if (playFresh && likeFresh) {
     return clipVaultMetricResult(clipUID, cached, now);
   }
@@ -4115,10 +4344,7 @@ async function fetchClipVaultMetric(descriptor, forceRefresh = false) {
       playInfoMetric = await fetchClipVaultPlayInfo(clipUID);
       next.videoId = playInfoMetric.videoId;
     }
-    creatorMetric = await fetchClipVaultCreatorMetric(
-      clipUID,
-      next.videoId,
-    );
+    creatorMetric = await fetchClipVaultCreatorMetric(clipUID, next.videoId);
   } catch {}
 
   const resolvedPlayCount = Number.isFinite(creatorMetric?.playCount)

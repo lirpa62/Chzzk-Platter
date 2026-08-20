@@ -150,6 +150,66 @@
     return `${year === currentYear ? "" : `${year}.`}${month}.${day} ${hour}:${minute}`;
   }
 
+  // "YYYYMMDDHHmmss" → epoch ms. 그룹 경계 계산에만 쓴다.
+  function parseCreatedDate(value) {
+    const raw = String(value || "");
+    if (!/^\d{14}$/.test(raw)) return 0;
+    return +new Date(
+      Number(raw.slice(0, 4)),
+      Number(raw.slice(4, 6)) - 1,
+      Number(raw.slice(6, 8)),
+      Number(raw.slice(8, 10)),
+      Number(raw.slice(10, 12)),
+      Number(raw.slice(12, 14)),
+    );
+  }
+
+  // 치지직 수신함은 항목을 시간대로 묶고 <strong class="_timestamp_…"> 머리글을 단다.
+  // 클래스 해시는 배포마다 바뀌므로 접두사로 실물에서 걷어 온다(실패 시 자체 CSS).
+  function harvestTimestampClass() {
+    const el = document.querySelector(
+      "#root [class*='_timestamp_'], #root strong[class*='timestamp']",
+    );
+    return el?.className || "";
+  }
+
+  // 머리글 글꼴을 수신함 탭과 맞춘다. 폰트는 클래스를 걷어 와도 따라오지 않는
+  // 경우가 있어(탭 전용 규칙) 계산된 font-family 를 읽어 변수로 넘긴다.
+  function harvestTabFont(section) {
+    if (!section) return;
+    // 우리가 주입한 탭이 아니라 치지직 원본 탭에서 읽는다(순환 방지).
+    const tab = document.querySelector(
+      "#root [role='tab']:not(#cheese-inbox-community-tab)",
+    );
+    if (!tab) return;
+    const font = getComputedStyle(tab).fontFamily;
+    if (font) section.style.setProperty("--cheese-inbox-tab-font", font);
+  }
+
+  const GROUPS = [
+    ["오늘", (at, p) => at >= p.today],
+    ["최근 일주일", (at, p) => at >= p.week7],
+    ["최근 한달", (at, p) => at >= p.month30],
+    ["이전 활동", () => true],
+  ];
+
+  function groupItems(list) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const p = {
+      today: +today,
+      week7: +today - 6 * 86400000, // 오늘 포함 7일
+      month30: +today - 29 * 86400000, // 오늘 포함 30일
+    };
+    const out = GROUPS.map(([label]) => ({ label, items: [] }));
+    for (const it of list) {
+      const at = parseCreatedDate(it.createdDate);
+      const idx = GROUPS.findIndex(([, test]) => test(at, p));
+      out[idx === -1 ? out.length - 1 : idx].items.push(it);
+    }
+    return out.filter((g) => g.items.length);
+  }
+
   function formatCheckedAt(value) {
     const date = new Date(Number(value));
     if (!Number.isFinite(date.getTime())) return "";
@@ -502,9 +562,26 @@
       expandedIds.forEach((id) => {
         if (!validIds.has(id)) expandedIds.delete(id);
       });
-      body = `<ul class="cheese-inbox-community-list">${cache.items
-        .map((item) => renderCommunityItem(item, fallback))
-        .join("")}</ul>`;
+      // 치지직 수신함과 같은 시간대 머리글로 묶는다.
+      const tsClass = harvestTimestampClass();
+      const headClass = tsClass
+        ? `${tsClass} cheese-inbox-community-timestamp`
+        : "cheese-inbox-community-timestamp";
+      // ⚠ 예전에는 <ul> 하나가 스크롤 컨테이너(flex:1 + overflow-y:auto)였다.
+      //    그룹마다 <ul> 을 나누면 목록이 제각기 스크롤되므로, 바깥에 스크롤
+      //    래퍼를 하나 두고 그 안에서 머리글+목록을 반복한다.
+      body =
+        `<div class="cheese-inbox-community-scroll">` +
+        groupItems(cache.items)
+          .map(
+            (g) =>
+              `<strong class="${escapeHtml(headClass)}">${escapeHtml(g.label)}</strong>` +
+              `<ul class="cheese-inbox-community-list">${g.items
+                .map((item) => renderCommunityItem(item, fallback))
+                .join("")}</ul>`,
+          )
+          .join("") +
+        `</div>`;
     }
 
     const checkedAt = formatCheckedAt(cache.updatedAt);
@@ -519,6 +596,7 @@
       <span aria-live="polite">${escapeHtml(statusText)}</span>
       <button type="button" data-community-refresh class="${cache.loading ? "is-loading" : ""}" aria-label="${cache.loading ? "커뮤니티 소식 확인 중" : "커뮤니티 소식 새로고침"}" title="${cache.loading ? "확인 중" : "새로고침"}"${cache.loading ? " disabled" : ""}>${createRefreshIcon(cache.loading)}</button>
     </div>`;
+    harvestTabFont(section);
     section.querySelectorAll("img[data-fallback]").forEach((image) => {
       image.addEventListener(
         "error",

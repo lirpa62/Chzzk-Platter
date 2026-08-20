@@ -56,14 +56,18 @@ html.cheese-inbox-community-active #root {
   display: flex;
 }
 
-.cheese-inbox-community-list {
-  list-style: none;
+/* 스크롤은 그룹 전체를 감싸는 래퍼가 담당한다(목록이 여러 개로 나뉘므로). */
+.cheese-inbox-community-scroll {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0;
-  padding: 8px 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.cheese-inbox-community-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
 }
 
 .cheese-inbox-community-list li {
@@ -445,4 +449,16 @@ html.cheese-inbox-community-active #root {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+/* 시간대 머리글(오늘/최근 일주일/…). 치지직 클래스를 걷어 와 함께 붙이므로
+   보통은 원본 스타일이 적용된다. 아래는 수확 실패 시의 자체 폴백이다. */
+.cheese-inbox-community-timestamp {
+  /* 수신함 탭에서 걷어 온 글꼴(harvestTabFont). 실패하면 상속값을 그대로 쓴다. */
+  font-family: var(--cheese-inbox-tab-font, inherit);
+  display: block;
+  padding: 15px 20px 0 !important;
+  color: var(--cheese-inbox-text);
+  font-size: 13px;
+  font-weight: 400;
 }

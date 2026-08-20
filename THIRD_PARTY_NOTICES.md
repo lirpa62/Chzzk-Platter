@@ -2,6 +2,15 @@
 
 This project includes third-party open source software.
 
+## Chart.js
+
+This extension includes `Chart.js` v4.4.7.
+
+- Project: https://github.com/chartjs/Chart.js
+- License: MIT
+- Bundled file: `src/chart.min.js`
+- Full license text: `LICENSES/Chart.js.txt`
+
 ## hls.js
 
 This extension includes `hls.js` v1.5.20.

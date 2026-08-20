@@ -100,9 +100,7 @@
     }
     flagsReceived = true;
     stopFlagRequests();
-    arrowSeekStep = normalizeArrowSeekStep(
-      event.data?.clipEditorArrowStep,
-    );
+    arrowSeekStep = normalizeArrowSeekStep(event.data?.clipEditorArrowStep);
     shiftArrowSeekStep = normalizeShiftArrowSeekStep(
       event.data?.clipEditorShiftArrowStep,
     );
@@ -116,11 +114,11 @@
   function bindingIsIntact() {
     return Boolean(
       binding?.root?.isConnected &&
-        binding.panel?.isConnected &&
-        binding.seeker?.isConnected &&
-        binding.seekerTime?.isConnected &&
-        binding.rangeText?.isConnected &&
-        binding.edges?.every((edge) => edge.isConnected),
+      binding.panel?.isConnected &&
+      binding.seeker?.isConnected &&
+      binding.seekerTime?.isConnected &&
+      binding.rangeText?.isConnected &&
+      binding.edges?.every((edge) => edge.isConnected),
     );
   }
 
@@ -201,6 +199,7 @@
     if (!timeline) return;
     if (binding?.root === timeline.root && bindingIsIntact()) {
       syncFromNative();
+      moveFooterBesidePreview(timeline); // 재렌더로 원위치했으면 다시 옮긴다
       return;
     }
     mount(timeline);
@@ -285,10 +284,7 @@
     }
     const media = getMedia();
     if (contentType === "live" && Number.isFinite(media?.duration)) {
-      return Math.min(
-        MAX_EDITOR_SECONDS,
-        Math.max(0, media.duration - offset),
-      );
+      return Math.min(MAX_EDITOR_SECONDS, Math.max(0, media.duration - offset));
     }
     return Math.min(
       MAX_EDITOR_SECONDS,
@@ -314,8 +310,7 @@
       Math.abs(delta),
     )}`;
     const directionLabel = delta < 0 ? "앞으로" : "뒤로";
-    const boundary =
-      button.dataset.boundary === "start" ? "시작" : "종료";
+    const boundary = button.dataset.boundary === "start" ? "시작" : "종료";
     button.title = `${boundary} 시각을 ${formatStepValue(
       Math.abs(delta),
     )}초 ${directionLabel} 이동`;
@@ -480,10 +475,7 @@
     const centerInViewport = seekerRect.left + seekerRect.width / 2;
     const position = Math.min(
       usableWidth,
-      Math.max(
-        0,
-        centerInViewport - rootRect.left - TIMELINE_INNER_PADDING,
-      ),
+      Math.max(0, centerInViewport - rootRect.left - TIMELINE_INNER_PADDING),
     );
     return {
       time: (position / usableWidth) * binding.outerDuration,
@@ -611,10 +603,7 @@
         "aria-valuenow",
         String(Math.round(values[index] * 10) / 10),
       );
-      edge.setAttribute(
-        "aria-valuetext",
-        formatClock(values[index], false),
-      );
+      edge.setAttribute("aria-valuetext", formatClock(values[index], false));
     });
   }
 
@@ -714,9 +703,8 @@
       for (const endState of stateHooks) {
         if (endState.index <= startState.index) continue;
         if (
-          Math.abs(
-            endState.value - startState.value - selectedDuration,
-          ) > REACT_STATE_TOLERANCE
+          Math.abs(endState.value - startState.value - selectedDuration) >
+          REACT_STATE_TOLERANCE
         ) {
           continue;
         }
@@ -776,8 +764,7 @@
     const controller = findReactBoundaryController();
     if (controller) {
       binding.playerBase = controller.base;
-      const hook =
-        kind === "start" ? controller.startHook : controller.endHook;
+      const hook = kind === "start" ? controller.startHook : controller.endHook;
       hook.queue.dispatch(controller.base + target);
       setTimeout(syncFromNative, 30);
       return;
@@ -881,8 +868,7 @@
       const active = document.activeElement;
       if (
         active instanceof HTMLElement &&
-        (binding?.panel?.contains(active) ||
-          binding?.edges?.includes(active))
+        (binding?.panel?.contains(active) || binding?.edges?.includes(active))
       ) {
         active.blur();
       }
@@ -946,10 +932,7 @@
   }
 
   function onEditorKeyDown(event) {
-    if (
-      event.key !== "ArrowLeft" &&
-      event.key !== "ArrowRight"
-    ) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
     const edge = event.target.closest('span[class*="_edge_"]');
@@ -1040,8 +1023,7 @@
     if (window.opener) return true;
     if (width > 780) return false;
     return Boolean(
-      !Number.isFinite(availableWidth) ||
-        width < availableWidth * 0.85,
+      !Number.isFinite(availableWidth) || width < availableWidth * 0.85,
     );
   }
 
@@ -1064,9 +1046,7 @@
     const maximumGrowth = Number.isFinite(availableHeight)
       ? Math.max(0, availableHeight - originalHeight)
       : panelHeight;
-    const requestedGrowth = Math.ceil(
-      Math.min(panelHeight, maximumGrowth),
-    );
+    const requestedGrowth = Math.ceil(Math.min(panelHeight, maximumGrowth));
     if (requestedGrowth < 2) return;
 
     try {
@@ -1075,10 +1055,7 @@
       return;
     }
     const recordAppliedGrowth = () => {
-      const appliedGrowth = Math.max(
-        0,
-        window.outerHeight - originalHeight,
-      );
+      const appliedGrowth = Math.max(0, window.outerHeight - originalHeight);
       if (appliedGrowth < 2 || editorWindowExpansion) return false;
       editorWindowExpansion = {
         originalWidth,
@@ -1119,6 +1096,66 @@
     } catch {}
   }
 
+  // ── 저장 버튼 우측 배치 ────────────────────────────────────────────────────
+  // 정밀 조정 패널이 붙으면 편집 영역이 길어져 '저장' 버튼이 화면 밖으로 밀린다
+  // (제보: 저장하려면 매번 스크롤해야 한다). 치지직 기본 구조는
+  //   _content_ ─ _box_(클립 만들기) + _box_(미리보기)   ← 좌우 2단
+  //   _text_(안내문) / _footer_(저장)                     ← _content_ 아래 전체 폭
+  // 이 둘을 오른쪽 _box_ 안으로 옮기면 미리보기 아래(=화면 오른쪽)에 들어가 스크롤 없이
+  // 닿는다. DOM 이동뿐이라 치지직 스타일·이벤트는 그대로 유지된다.
+  let footerMove = null; // { text, textParent, textNext, footer, footerParent, footerNext }
+
+  function moveFooterBesidePreview(timeline) {
+    // 이미 옮겨 둔 상태에서 치지직이 다시 그리면 footer 가 원위치로 돌아온다.
+    // 그때는 기록을 버리고 새 노드 기준으로 다시 옮긴다(멱등).
+    if (footerMove) {
+      if (footerMove.footer?.isConnected) return;
+      footerMove = null;
+    }
+    const content = timeline.root.closest('[class*="_content_"]');
+    if (!content) return;
+    const boxes = [...content.children].filter((el) =>
+      /(^|\s)_box_/.test(el.className || ""),
+    );
+    // 오른쪽 칸(미리보기)이 있어야 옮길 자리가 생긴다.
+    const preview = boxes[1];
+    if (!preview) return;
+    const wrapper = content.parentElement;
+    const text = wrapper?.querySelector(':scope > [class*="_text_"]');
+    const footer = wrapper?.querySelector(':scope > [class*="_footer_"]');
+    if (!footer) return;
+
+    footerMove = {
+      text,
+      textParent: text?.parentElement || null,
+      textNext: text?.nextElementSibling || null,
+      footer,
+      footerParent: footer.parentElement,
+      footerNext: footer.nextElementSibling,
+    };
+    if (text) preview.append(text);
+    preview.append(footer);
+    footer.classList.add("cheese-clip-editor-footer-side");
+  }
+
+  function restoreFooterPosition() {
+    if (!footerMove) return;
+    const { text, textParent, textNext, footer, footerParent, footerNext } =
+      footerMove;
+    footerMove = null;
+    footer.classList.remove("cheese-clip-editor-footer-side");
+    // 원래 부모가 아직 살아 있을 때만 되돌린다(치지직이 다시 그렸으면 그쪽이 옳다).
+    if (textParent?.isConnected && text) {
+      textParent.insertBefore(text, textNext?.isConnected ? textNext : null);
+    }
+    if (footerParent?.isConnected) {
+      footerParent.insertBefore(
+        footer,
+        footerNext?.isConnected ? footerNext : null,
+      );
+    }
+  }
+
   function mount(timeline) {
     unmount({ restoreWindow: false });
     const panel = createPanel();
@@ -1131,6 +1168,7 @@
     timeline.root.append(labels);
     timeline.seeker.append(seekerTime);
     form.insertAdjacentElement("afterend", panel);
+    moveFooterBesidePreview(timeline);
 
     const abort = new AbortController();
     panel.addEventListener("click", onPanelClick, { signal: abort.signal });
@@ -1153,8 +1191,7 @@
     });
 
     timeline.edges.forEach((edge, index) => {
-      edge.dataset.cheesePreviousTabindex =
-        edge.getAttribute("tabindex") ?? "";
+      edge.dataset.cheesePreviousTabindex = edge.getAttribute("tabindex") ?? "";
       edge.dataset.cheesePreviousRole = edge.getAttribute("role") ?? "";
       edge.tabIndex = 0;
       edge.setAttribute("role", "slider");
@@ -1244,6 +1281,7 @@
     binding.labels.remove();
     binding.seekerTime.remove();
     binding.panel.remove();
+    restoreFooterPosition();
     binding = null;
     mediaElement = null;
     if (restoreWindow) restoreEditorWindowSize();

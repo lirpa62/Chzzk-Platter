@@ -421,3 +421,12 @@
     var(--cheese-platter-content-neutral-cool-strong)
   );
 }
+
+/* 저장 버튼을 미리보기(오른쪽 칸) 아래로 옮겼을 때의 정렬.
+   원래는 _content_ 아래 전체 폭이라 좌측 정렬이어도 자연스러웠지만, 좁은 칸으로
+   들어오면 왼쪽에 치우쳐 보인다 → 칸 가운데로 맞춘다. */
+.cheese-clip-editor-footer-side {
+  margin-left: auto;
+  margin-right: auto;
+  width: fit-content;
+}

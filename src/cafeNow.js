@@ -12,8 +12,11 @@
   function isWriteUrl(url) {
     return (
       /\/articles\/write/i.test(url) || // /ca-fe/cafes/{id}/articles/write
-      /\/articles\/\d+\/edit/i.test(url) || // 수정
-      /ArticleWrite|ArticleUpdate/i.test(url) // 구 에디터
+      // ⚠ 수정 화면의 실제 경로는 /modify 다(제보로 확인:
+      //    /ca-fe/cafes/31342874/articles/8/modify). 예전엔 /edit 만 막고 있어
+      //    수정 화면에서 본문이 사라지는 문제가 남아 있었다. 둘 다 막는다.
+      /\/articles\/\d+\/(?:edit|modify)/i.test(url) ||
+      /ArticleWrite|ArticleUpdate|ArticleModify/i.test(url) // 구 에디터
     );
   }
   function isCafeWritePage() {
@@ -35,7 +38,8 @@
   const OGLINK_SELECTOR = "div.se-component.se-oglink";
   const OGLINK_THUMBNAIL_SELECTOR = ".se-oglink-thumbnail";
   const OGLINK_TITLE_SELECTOR = ".se-oglink-title";
-  const CANDIDATE_SELECTOR = "a[href], [data-url], [data-link-url], [data-href]";
+  const CANDIDATE_SELECTOR =
+    "a[href], [data-url], [data-link-url], [data-href]";
   const PLAYER_CONTAINER_SELECTOR =
     ".cheese-cafe-standalone, .cheese-cafe-oglink";
   const TEXT_COMPONENT_SELECTOR = "div.se-component.se-text";
@@ -52,7 +56,12 @@
   const AUTOPLAY_SWITCH_MARGIN = 0.15;
   const AUTOPLAY_RELEASE_DELAY_MS = 30000;
 
-  const OBSERVED_ATTRIBUTES = ["href", "data-url", "data-link-url", "data-href"];
+  const OBSERVED_ATTRIBUTES = [
+    "href",
+    "data-url",
+    "data-link-url",
+    "data-href",
+  ];
 
   let scanQueued = false;
   let autoplayEvaluationQueued = false;
@@ -451,10 +460,7 @@
     }
     document.querySelectorAll(PLAYER_SELECTOR).forEach(registerAutoplayPlayer);
     if (!autoplayVisibilityListenerBound) {
-      document.addEventListener(
-        "visibilitychange",
-        scheduleAutoplayEvaluation,
-      );
+      document.addEventListener("visibilitychange", scheduleAutoplayEvaluation);
       autoplayVisibilityListenerBound = true;
     }
     scheduleAutoplayEvaluation();
@@ -606,9 +612,11 @@
     }
 
     if (!metadata.thumbnailImageUrl) return;
-    loadThumbnailDimensions(metadata.thumbnailImageUrl).then((thumbnailDimensions) => {
-      applyPlayerOrientation(root, thumbnailDimensions);
-    });
+    loadThumbnailDimensions(metadata.thumbnailImageUrl).then(
+      (thumbnailDimensions) => {
+        applyPlayerOrientation(root, thumbnailDimensions);
+      },
+    );
   }
 
   function findOglinkThumbnail(oglink) {
@@ -668,12 +676,15 @@
 
     const { element, candidate } = links[0];
 
-    const paragraph = element.closest(".se-text-paragraph") || element.parentElement;
+    const paragraph =
+      element.closest(".se-text-paragraph") || element.parentElement;
     const visibleText = normalizeVisibleText(
       paragraph?.innerText || paragraph?.textContent,
     );
     const linkText = normalizeVisibleText(element.textContent);
-    const canonicalText = normalizeVisibleText(api.getMediaUrl(candidate.media));
+    const canonicalText = normalizeVisibleText(
+      api.getMediaUrl(candidate.media),
+    );
     const mediaUrlText = normalizeVisibleText(candidate.mediaUrl);
     if (
       visibleText !== linkText &&
@@ -691,7 +702,8 @@
       media: candidate.media,
       mediaKey: candidate.mediaKey,
       mediaUrl: candidate.mediaUrl,
-      target: componentText === visibleText ? component : paragraph || component,
+      target:
+        componentText === visibleText ? component : paragraph || component,
     };
   }
 
@@ -701,20 +713,23 @@
       .forEach((component) => component.remove());
 
     document.querySelectorAll(TEXT_COMPONENT_SELECTOR).forEach((component) => {
-      if (getStandaloneClip(component)?.mediaKey === mediaKey) component.remove();
+      if (getStandaloneClip(component)?.mediaKey === mediaKey)
+        component.remove();
     });
 
     document.querySelectorAll(TEXT_PARAGRAPH_SELECTOR).forEach((paragraph) => {
-      if (getStandaloneClip(paragraph)?.mediaKey === mediaKey) paragraph.remove();
+      if (getStandaloneClip(paragraph)?.mediaKey === mediaKey)
+        paragraph.remove();
     });
   }
 
   function hasOglinkForMedia(mediaKey) {
-    return [...document.querySelectorAll(OGLINK_SELECTOR)].some((oglink) =>
-      !oglink.closest(STANDALONE_PLAYER_SELECTOR) &&
-      [...oglink.querySelectorAll(CANDIDATE_SELECTOR)].some(
-        (candidate) => getCandidateMedia(candidate)?.mediaKey === mediaKey,
-      ),
+    return [...document.querySelectorAll(OGLINK_SELECTOR)].some(
+      (oglink) =>
+        !oglink.closest(STANDALONE_PLAYER_SELECTOR) &&
+        [...oglink.querySelectorAll(CANDIDATE_SELECTOR)].some(
+          (candidate) => getCandidateMedia(candidate)?.mediaKey === mediaKey,
+        ),
     );
   }
 
@@ -723,11 +738,7 @@
     if (!title) return;
     const cachedMetadata = metadataCache.get(mediaInfo.mediaKey) || null;
 
-    renderOglinkTitle(
-      title,
-      mediaInfo.mediaUrl,
-      cachedMetadata,
-    );
+    renderOglinkTitle(title, mediaInfo.mediaUrl, cachedMetadata);
     updatePlayerLayout(card, cachedMetadata);
 
     if (card.dataset.cheeseCafeMetadataRequested === "true") return;
@@ -942,11 +953,7 @@
     if (!title) return;
     const cachedMetadata = metadataCache.get(state.mediaKey) || null;
 
-    renderOglinkTitle(
-      title,
-      state.mediaUrl,
-      cachedMetadata,
-    );
+    renderOglinkTitle(title, state.mediaUrl, cachedMetadata);
     updatePlayerLayout(oglink, cachedMetadata);
     if (state.metadataRequested) return;
 
@@ -957,7 +964,8 @@
       metadataCache.set(state.mediaKey, metadata);
 
       const currentTitle = oglink.querySelector(OGLINK_TITLE_SELECTOR);
-      if (currentTitle) renderOglinkTitle(currentTitle, state.mediaUrl, metadata);
+      if (currentTitle)
+        renderOglinkTitle(currentTitle, state.mediaUrl, metadata);
       updatePlayerLayout(oglink, metadata);
     });
   }
@@ -998,6 +1006,9 @@
 
   function scan(root) {
     if (!(root instanceof Document || root instanceof Element)) return;
+    // ⚠ 카페는 SPA 라 '글 보기 → 수정'으로 넘어가도 스크립트가 다시 로드되지 않는다.
+    //    로드 시점의 판정만 믿으면 수정 화면에서 본문이 사라진다(제보) → 매번 확인.
+    if (isCafeWritePage()) return;
 
     if (root instanceof Element) {
       const closestOglink = root.closest(OGLINK_SELECTOR);
@@ -1114,11 +1125,7 @@
   }
   try {
     chrome.storage?.local?.get(
-      [
-        CAFE_NOW_KEY,
-        CAFE_NOW_AUTOPLAY_KEY,
-        CAFE_NOW_AUTOPLAY_MUTED_KEY,
-      ],
+      [CAFE_NOW_KEY, CAFE_NOW_AUTOPLAY_KEY, CAFE_NOW_AUTOPLAY_MUTED_KEY],
       (data) => {
         if (chrome.runtime?.lastError) {
           bootIfEnabled(); // storage 접근 실패 시 기본 동작(ON)

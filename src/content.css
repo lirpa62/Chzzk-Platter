@@ -7828,6 +7828,7 @@ html.cheese-chat-width-resize-enabled
   display: flex;
   justify-content: flex-end;
   width: 100%;
+  align-items: center;
   padding: 5px;
   position: absolute;
   top: 0;
@@ -11407,7 +11408,8 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
 
 /* ── 클립 보관함(/clips) ──────────────────────────────────────────────────
    원본 목록을 없애지 않고 같은 section 안에서 전체 폭 보기로 전환한다. */
-.cheese-clip-vault-active > :not(.cheese-clip-vault-host):not(.cheese-clip-vault-panel) {
+.cheese-clip-vault-active
+  > :not(.cheese-clip-vault-host):not(.cheese-clip-vault-panel) {
   display: none !important;
 }
 
@@ -11678,7 +11680,8 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
   transition: transform 0.14s ease;
 }
 
-.cheese-clip-vault-sort-picker > button[aria-expanded="true"]
+.cheese-clip-vault-sort-picker
+  > button[aria-expanded="true"]
   .cheese-clip-vault-group-chevron {
   transform: rotate(180deg);
 }
@@ -11865,8 +11868,7 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
   transition: transform 0.14s ease;
 }
 
-.cheese-clip-vault-group details:not([open])
-  .cheese-clip-vault-group-chevron {
+.cheese-clip-vault-group details:not([open]) .cheese-clip-vault-group-chevron {
   transform: rotate(-90deg);
 }
 
@@ -12275,4 +12277,165 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
   display: block;
   width: 17px;
   height: 17px;
+}
+
+/* ── 수신함 팝오버 폭 확장 ────────────────────────────────────────────────
+   통나무파워 탭이 붙으면 탭이 하나 늘고 내역 항목도 길어져 치지직 기본 450px 로는
+   좁다. 폭을 정하는 건 iframe 이 아니라 그 부모 레이어다(실측: div._layer_ = 450px,
+   iframe 은 그 폭을 채울 뿐) → 부모를 넓히면 iframe 도 따라 커진다.
+
+   ⚠ 예전엔 :has(> iframe[src*="notify"]) 로 레이어를 지목했는데, 치지직은 레이어를
+   먼저 그리고 iframe 을 나중에 넣는다. 그동안은 :has 가 성립하지 않아 450px 로 한 번
+   보였다가 넓어졌다(제보: 열 때 폭이 튄다). iframe 을 조건에서 빼고, 폭이 450px 인
+   레이어를 직접 지목해 처음부터 500px 로 그린다. */
+/* ⚠ div[class*="_layer_"] 만 쓰면 사이트 곳곳의 다른 레이어까지 걸린다. 수신함
+   팝오버는 헤더 아이콘 묶음(_box_ > _item_) 안에 있고 폭이 450px 로 고정돼 있어,
+   그 두 조건으로 좁힌다(해시가 아니라 구조·폭으로 지목 → 빌드가 바뀌어도 유지). */
+html.cheese-inbox-wide
+  div[class*="_box_"]
+  > div[class*="_item_"]
+  > div[class*="_layer_"] {
+  width: 500px !important;
+}
+
+/* iframe 은 부모 폭을 그대로 채운다(치지직이 450px 을 직접 지정해 두는 경우 대비). */
+html.cheese-inbox-wide div[class*="_item_"] > div[class*="_layer_"] > iframe {
+  width: 100% !important;
+}
+
+/* 통나무파워 팝업 좌측 상단: 획득 내역을 새 탭으로 여는 버튼. */
+.cheese-logpower-popup-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.cheese-logpower-popup-open:hover {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.18);
+}
+
+/* ── 다시보기 채팅 활성도 그래프 ─────────────────────────────────────────── */
+/* 재생바 위에 구간별 채팅 밀도를 깔고, 후원(노랑)·구독(보라) 구간을 그 색으로
+   표시한다. 재생바 자체를 가리지 않도록 아래에서 위로 자라며 z-index 는 마커보다
+   낮게 둔다(마커 4). */
+.cheese-chat-graph-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 50px;
+  margin-bottom: 2px;
+  pointer-events: none;
+  /* 막대가 수백 개라 컨트롤바 페이드인마다 재페인트되면 버벅인다(마커와 같은 이유). */
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* viewBox 로 그려 재생바 폭 변화에 그대로 따라간다. */
+.cheese-chat-graph-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.cheese-chat-graph-area {
+  fill: rgba(255, 255, 255, 0.22);
+}
+
+.cheese-chat-graph-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 1.5;
+  /* viewBox 가 비균등 스케일이라 선 두께가 가로로 늘어나는 것을 막는다. */
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+/* 후원·구독 area(구간이 충분히 퍼져 있을 때). 채팅 위에 겹치므로 반투명. */
+.cheese-chat-graph-fill {
+  stroke: none;
+}
+
+.cheese-chat-graph-fill.is-cheese {
+  fill: var(--cheese-chat-graph-donation, #f5c518);
+  fill-opacity: 0.72;
+}
+
+.cheese-chat-graph-fill.is-sub {
+  fill: var(--cheese-chat-graph-subscription, #8b5cf6);
+  fill-opacity: 0.85;
+}
+
+/* 드문드문할 때는 바닥에서 올라오는 선으로 찍는다. */
+.cheese-chat-graph-mark {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+}
+
+.cheese-chat-graph-mark.is-cheese {
+  stroke: var(--cheese-chat-graph-donation, #f5c518);
+}
+
+.cheese-chat-graph-mark.is-sub {
+  stroke: var(--cheese-chat-graph-subscription, #8b5cf6);
+}
+
+/* 수집 진행률(아이콘 위에 겹침). 툴팁은 호버해야 보여 진행 상황을 알 수 없었다. */
+.cheese-chat-graph-progress {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.cheese-chat-graph-button.is-active {
+  color: #00ffa3;
+}
+
+.cheese-chat-graph-button {
+  position: relative;
+}
+
+/* 수집 중에도 클릭은 살려 둔다(다시 누르면 중단). 아이콘 맥동으로 진행 중임을 알린다. */
+
+.cheese-chat-graph-button.is-loading .pzp-ui-icon {
+  animation: cheese-chat-graph-pulse 1s ease-in-out infinite;
+}
+
+@keyframes cheese-chat-graph-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheese-chat-graph-button.is-loading .pzp-ui-icon {
+    animation: none;
+    opacity: 0.6;
+  }
 }

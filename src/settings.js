@@ -58,8 +58,16 @@
     "cheeseVodChapterHide",
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
+    "cheeseChatProfileBlockButton",
     "cheeseChatWordFilters",
-    "cheeseClipVault",
+    "cheeseLogPowerLogDays",
+    "cheeseLogPowerLogDaysLast",
+    "cheeseLogPowerStatsGroup",
+    "cheeseLogPowerStatsGroupOrder",
+    "cheeseLogPowerStatsViewMode",
+    "cheeseLogPowerBarEarnedOnly",
+    "cheeseLogPowerLineCumulative",
+    "cheeseLogPowerChartColors",
     "cheeseClipVaultAccountIds",
     "cheeseClipVaultActiveAccount",
     "cheeseClipVaultLimit",
@@ -90,6 +98,10 @@
     "cheeseChatOsIconPosition",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
+    "cheeseFollowingLiveSortRemember",
+    "cheesePipDisable",
+    "cheeseVodChatGraph",
+    "cheeseVodChatGraphColors",
     "cheeseFollowCleanup",
     "cheeseFollowOpenNewTab",
     "cheesePlayerDisableHidden",
@@ -176,6 +188,7 @@
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
     "cheeseMixerAlwaysOn",
+    "cheeseAudioMixer.autoSync",
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
     "cheeseMixerBeginner",
@@ -213,9 +226,11 @@
     "cheeseSyncCustom",
     "cheeseSyncPreset",
     "cheeseSyncRate",
+    "cheeseSyncMode",
     "cheeseSyncCooldownEnabled",
     "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
+    "cheeseVideoFilter.autoSharpen",
     "cheeseVideoFilterBeginner",
     "cheeseVideoFilterClickActivate",
     "cheeseVideoFilterClickNoPanel",
@@ -857,6 +872,16 @@
       return;
     }
     window.open(settingsUrl.toString(), "_blank", "noopener");
+  });
+
+  // 통나무파워 획득 내역을 새 탭으로 연다(수신함 탭·채팅 팝업과 같은 페이지).
+  document.getElementById("openLogStats")?.addEventListener("click", () => {
+    const url = chrome.runtime.getURL("logPowerStats.html");
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
   });
 
   // 설정 팝업을 닫을 때 마지막으로 보고 있던 탭도 확인 처리한다. storage.set 호출은
@@ -1645,8 +1670,7 @@
     CHAT_OS_TYPES.forEach((type) => {
       const raw = source[type];
       // 1.40.0까지 저장한 문자열 SVG도 그대로 불러와 새 구조로 마이그레이션한다.
-      const icon =
-        typeof raw === "string" ? { type: "svg", data: raw } : raw;
+      const icon = typeof raw === "string" ? { type: "svg", data: raw } : raw;
       if (!icon || typeof icon !== "object") return;
       if (icon.type === "image") {
         const data = sanitizeChatOsImageData(icon.data);
@@ -1668,9 +1692,7 @@
     const encoded = match[1];
     const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
     const bytes = Math.floor((encoded.length * 3) / 4) - padding;
-    return bytes > 0 && bytes <= CHAT_OS_IMAGE_OUTPUT_MAX_BYTES
-      ? source
-      : null;
+    return bytes > 0 && bytes <= CHAT_OS_IMAGE_OUTPUT_MAX_BYTES ? source : null;
   }
 
   function canvasToBlob(canvas, type, quality) {
@@ -1945,7 +1967,8 @@
       } catch (error) {
         if (chatOsImageJobs.get(type) !== job) return;
         if (message) {
-          message.textContent = error?.message || "이미지를 불러오지 못했습니다.";
+          message.textContent =
+            error?.message || "이미지를 불러오지 못했습니다.";
           message.classList.add("is-error");
         }
       } finally {
@@ -2999,14 +3022,14 @@
   const cvNum = document.querySelector("[data-clip-vault-limit]");
   const cvReset = document.querySelector("[data-clip-vault-limit-reset]");
   const cvUsage = document.querySelector("[data-clip-vault-limit-usage]");
-  const cvWarning = document.querySelector(
-    "[data-clip-vault-limit-warning]",
-  );
+  const cvWarning = document.querySelector("[data-clip-vault-limit-warning]");
   let cvCurrentVault = null;
   let cvCurrentAccountId = "";
 
   function normalizeCvAccountId(value) {
-    const id = String(value || "").trim().toLowerCase();
+    const id = String(value || "")
+      .trim()
+      .toLowerCase();
     return /^[0-9a-f]{32}$/.test(id) ? id : "";
   }
 
@@ -3123,7 +3146,6 @@
     try {
       const data = await cachedStorageGet([
         CLIP_VAULT_LIMIT_KEY,
-        CLIP_VAULT_KEY,
         CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
       ]);
       limit = data?.[CLIP_VAULT_LIMIT_KEY];
@@ -3135,7 +3157,10 @@
         const accountData = await chrome.storage.local.get(accountKey);
         vault = accountData?.[accountKey] || null;
       }
-      if (!vault) vault = data?.[CLIP_VAULT_KEY];
+      if (!vault) {
+        const legacyData = await chrome.storage.local.get(CLIP_VAULT_KEY);
+        vault = legacyData?.[CLIP_VAULT_KEY] || null;
+      }
     } catch {}
     cvCurrentVault = vault;
     const normalizedLimit = normalizeCvLimit(limit);
@@ -4608,6 +4633,72 @@
     seekStepInput.addEventListener("blur", save);
   }
 
+  // ── 통나무파워 내역 보관 기간(7~3650일, 기본 90) ─────────────────────────
+  // content.js 의 normalizeLogPowerLogDays 와 같은 범위를 쓴다. 값을 바꾸면
+  // 다음 기록이 쌓일 때 그 기준으로 오래된 항목이 정리된다.
+  // 0 = 제한 없음(content.js normalizeLogPowerLogDays 와 같은 약속).
+  const LOG_DAYS_KEY = "cheeseLogPowerLogDays";
+  const logDaysInput = document.querySelector("[data-log-days]");
+  const logDaysOff = document.querySelector("[data-log-days-off]");
+  const LOG_DAYS_LAST_KEY = "cheeseLogPowerLogDaysLast"; // 제한 없음 해제 시 되돌릴 값
+
+  function clampLogDays(v) {
+    // ⚠ Number("") 는 0 이라 그냥 clamp 하면 최소값(7일)이 된다. 칸을 비우고
+    //   빠져나갔을 뿐인데 보관 기간이 확 줄면 기록이 대량으로 지워진다.
+    if (v == null || String(v).trim() === "") return 90;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 90;
+    return Math.min(3650, Math.max(7, Math.round(n)));
+  }
+
+  function reflectLogDays(days) {
+    const off = days === 0;
+    if (logDaysOff) logDaysOff.checked = off;
+    if (logDaysInput) {
+      // 제한 없음일 때는 숫자를 못 고치게 막는다(0 을 보여 주면 헷갈린다).
+      logDaysInput.disabled = off;
+      logDaysInput.closest(".settings-item")?.classList.toggle("is-off", off);
+    }
+  }
+
+  if (logDaysInput || logDaysOff) {
+    (async () => {
+      let days = 90;
+      let last = 90;
+      try {
+        const d = await cachedStorageGet([LOG_DAYS_KEY, LOG_DAYS_LAST_KEY]);
+        const raw = d?.[LOG_DAYS_KEY];
+        days = raw === 0 ? 0 : clampLogDays(raw ?? 90);
+        last = clampLogDays(d?.[LOG_DAYS_LAST_KEY] ?? (days || 90));
+      } catch {}
+      if (logDaysInput) logDaysInput.value = String(days || last);
+      reflectLogDays(days);
+    })();
+
+    const saveDays = () => {
+      if (!logDaysInput || logDaysInput.disabled) return;
+      const v = clampLogDays(logDaysInput.value);
+      logDaysInput.value = String(v); // 범위 밖 입력 보정
+      try {
+        cachedStorageSet({ [LOG_DAYS_KEY]: v, [LOG_DAYS_LAST_KEY]: v });
+      } catch {}
+    };
+    logDaysInput?.addEventListener("change", saveDays);
+    logDaysInput?.addEventListener("blur", saveDays);
+
+    logDaysOff?.addEventListener("change", () => {
+      const off = logDaysOff.checked;
+      // 끌 때는 마지막으로 쓰던 일수로 되돌린다(입력칸에 남아 있는 값).
+      const back = clampLogDays(logDaysInput?.value ?? 90);
+      reflectLogDays(off ? 0 : back);
+      try {
+        cachedStorageSet(
+          off ? { [LOG_DAYS_KEY]: 0 } : { [LOG_DAYS_KEY]: back },
+        );
+      } catch {}
+    });
+  }
+
   function bindSearchMoreStep(selector, storageKey, fallback) {
     const input = document.querySelector(selector);
     if (!input) return;
@@ -5990,6 +6081,14 @@
     });
     reflectChatTimeColors();
     // 미리보기 카테고리 기준 색도 같은 설정으로 Coloris 를 붙인다.
+    window.Coloris?.("[data-vod-chat-graph-color]");
+    window.Coloris?.wrap("[data-vod-chat-graph-color]");
+    window.Coloris?.setInstance("[data-vod-chat-graph-color]", {
+      alpha: false,
+      forceAlpha: false,
+      format: "hex",
+      selectInput: true,
+    });
     window.Coloris?.("[data-fp-color-picker]");
     window.Coloris?.wrap("[data-fp-color-picker]");
     window.Coloris?.setInstance("[data-fp-color-picker]", {
@@ -6895,6 +6994,126 @@
   });
   loadFollowChannelTooltip();
 
+  // PIP 전환 끄기(기본 OFF).
+  const PIP_DISABLE_KEY = "cheesePipDisable";
+  const pipDisableInput = document.querySelector("[data-pip-disable]");
+  async function loadPipDisable() {
+    let on = false; // 기본 꺼짐(치지직 기본 동작 유지)
+    try {
+      const data = await cachedStorageGet(PIP_DISABLE_KEY);
+      on = data?.[PIP_DISABLE_KEY] === true;
+    } catch {}
+    if (pipDisableInput) pipDisableInput.checked = on;
+  }
+  pipDisableInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [PIP_DISABLE_KEY]: pipDisableInput.checked });
+    } catch {}
+  });
+  loadPipDisable();
+
+  // 다시보기 채팅 활성도 그래프(기본 OFF).
+  const VOD_CHAT_GRAPH_KEY = "cheeseVodChatGraph";
+  const vodChatGraphInput = document.querySelector("[data-vod-chat-graph]");
+  async function loadVodChatGraph() {
+    let on = false; // 기본 꺼짐 — 켜도 버튼만 생기고, 눌러야 수집한다
+    try {
+      const data = await cachedStorageGet(VOD_CHAT_GRAPH_KEY);
+      on = data?.[VOD_CHAT_GRAPH_KEY] === true;
+    } catch {}
+    if (vodChatGraphInput) vodChatGraphInput.checked = on;
+  }
+  vodChatGraphInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [VOD_CHAT_GRAPH_KEY]: vodChatGraphInput.checked });
+    } catch {}
+  });
+  loadVodChatGraph();
+
+  // 채팅 활성도 그래프의 후원·구독 색(Coloris). 기본값은 content.css 와 맞춘다.
+  const VOD_CHAT_GRAPH_COLORS_KEY = "cheeseVodChatGraphColors";
+  const VOD_CHAT_GRAPH_COLORS_DEFAULT = {
+    donation: "#F5C518",
+    subscription: "#8B5CF6",
+  };
+  const vodChatGraphColorInputs = document.querySelectorAll(
+    "[data-vod-chat-graph-color]",
+  );
+  const vodChatGraphColorReset = document.querySelector(
+    "[data-vod-chat-graph-color-reset]",
+  );
+
+  function reflectVodChatGraphColors(colors) {
+    vodChatGraphColorInputs.forEach((input) => {
+      const key = input.dataset.vodChatGraphColor;
+      const v = colors?.[key] || VOD_CHAT_GRAPH_COLORS_DEFAULT[key];
+      if (v) {
+        input.value = v;
+        // Coloris 는 wrap 한 부모의 배경으로 견본을 보여 준다.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  }
+
+  async function loadVodChatGraphColors() {
+    let colors = { ...VOD_CHAT_GRAPH_COLORS_DEFAULT };
+    try {
+      const data = await cachedStorageGet(VOD_CHAT_GRAPH_COLORS_KEY);
+      const saved = data?.[VOD_CHAT_GRAPH_COLORS_KEY];
+      if (saved && typeof saved === "object") colors = { ...colors, ...saved };
+    } catch {}
+    reflectVodChatGraphColors(colors);
+  }
+
+  function saveVodChatGraphColors() {
+    const colors = { ...VOD_CHAT_GRAPH_COLORS_DEFAULT };
+    vodChatGraphColorInputs.forEach((input) => {
+      const key = input.dataset.vodChatGraphColor;
+      const v = String(input.value || "").trim();
+      if (key && /^#[0-9a-f]{6}$/i.test(v)) colors[key] = v.toUpperCase();
+    });
+    try {
+      cachedStorageSet({ [VOD_CHAT_GRAPH_COLORS_KEY]: colors });
+    } catch {}
+  }
+
+  vodChatGraphColorInputs.forEach((input) => {
+    // Coloris 는 input 이벤트로 색을 흘려보낸다(change 까지 기다리면 반영이 늦다).
+    input.addEventListener("input", saveVodChatGraphColors);
+    input.addEventListener("change", saveVodChatGraphColors);
+  });
+  vodChatGraphColorReset?.addEventListener("click", () => {
+    reflectVodChatGraphColors(VOD_CHAT_GRAPH_COLORS_DEFAULT);
+    try {
+      cachedStorageSet({
+        [VOD_CHAT_GRAPH_COLORS_KEY]: { ...VOD_CHAT_GRAPH_COLORS_DEFAULT },
+      });
+    } catch {}
+  });
+  loadVodChatGraphColors();
+
+  // 팔로잉 LIVE 정렬 기억(기본 ON).
+  const FOLLOWING_LIVE_SORT_KEY = "cheeseFollowingLiveSortRemember";
+  const followingLiveSortInput = document.querySelector(
+    "[data-following-live-sort]",
+  );
+  async function loadFollowingLiveSort() {
+    let on = true; // 미설정/true=ON
+    try {
+      const data = await cachedStorageGet(FOLLOWING_LIVE_SORT_KEY);
+      on = data?.[FOLLOWING_LIVE_SORT_KEY] !== false;
+    } catch {}
+    if (followingLiveSortInput) followingLiveSortInput.checked = on;
+  }
+  followingLiveSortInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [FOLLOWING_LIVE_SORT_KEY]: followingLiveSortInput.checked,
+      });
+    } catch {}
+  });
+  loadFollowingLiveSort();
+
   // 팔로잉 정리 버튼(기본 ON).
   const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
   const followCleanupInput = document.querySelector("[data-follow-cleanup]");
@@ -7150,6 +7369,32 @@
     } catch {}
   });
   loadHideBlockedComment();
+
+  // ── 채팅 프로필 팝오버의 치즈 플래터 차단 버튼(전역, 기본 OFF) ───────────────
+  const CHAT_PROFILE_BLOCK_BUTTON_KEY = "cheeseChatProfileBlockButton";
+  const chatProfileBlockButtonInput = document.querySelector(
+    "[data-chat-profile-block-button]",
+  );
+
+  async function loadChatProfileBlockButton() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(CHAT_PROFILE_BLOCK_BUTTON_KEY);
+      on = data?.[CHAT_PROFILE_BLOCK_BUTTON_KEY] === true;
+    } catch {}
+    if (chatProfileBlockButtonInput) {
+      chatProfileBlockButtonInput.checked = on;
+    }
+  }
+
+  chatProfileBlockButtonInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [CHAT_PROFILE_BLOCK_BUTTON_KEY]: chatProfileBlockButtonInput.checked,
+      });
+    } catch {}
+  });
+  loadChatProfileBlockButton();
 
   // ── 전체 방송·팔로잉 라이브 제외 필터 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
@@ -7474,8 +7719,20 @@
   // ── 설정 JSON 내보내기·불러오기 ──────────────────────────────────────────
   const SETTINGS_TRANSFER_FORMAT = "chzzk-platter-settings";
   const SETTINGS_TRANSFER_SCHEMA_VERSION = 1;
-  const SETTINGS_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+  // 계정별 클립 보관함을 최대치로 사용하면 백업이 수십 MB가 될 수 있다. 직접 만든
+  // 전체 백업도 다시 읽을 수 있게 하되, 손상되거나 지나치게 큰 파일로 설정창이
+  // 멈추는 것은 막기 위해 넉넉한 상한만 둔다.
+  const SETTINGS_IMPORT_MAX_BYTES = 256 * 1024 * 1024;
   const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
+  const SETTINGS_FULL_DATA_KEYS = new Set([
+    "cheeseClipVault", // 계정별 저장 이전의 레거시 보관함
+    "cheeseLogPowerLog",
+    "cheeseLogPowerReadAt",
+    "cheeseLogPowerStatsExplorerKnownIds",
+    "cheeseLogPowerStatsExplorerUnreadIds",
+  ]);
+  const SETTINGS_MEDIA_KEY_PATTERN =
+    /^(?:audioMixer|videoFilter):[0-9a-f]{32}$/i;
   // NEW 읽음 상태는 설치별 UI 메타데이터이므로 설정 JSON으로 다른 브라우저에 옮기지 않는다.
   [
     "cheeseSettingsKnownFeatures",
@@ -7487,6 +7744,9 @@
     CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
   ].forEach((key) => SETTINGS_TRANSFER_KEYS.delete(key));
   const settingsExportButton = document.querySelector("[data-settings-export]");
+  const settingsFullExportButton = document.querySelector(
+    "[data-settings-export-full]",
+  );
   const settingsImportOpenButton = document.querySelector(
     "[data-settings-import-open]",
   );
@@ -7494,7 +7754,7 @@
     "[data-settings-import-file]",
   );
 
-  function downloadSettingsJson(payload) {
+  function downloadSettingsJson(payload, fullBackup = false) {
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
     });
@@ -7502,11 +7762,134 @@
     const anchor = document.createElement("a");
     const date = new Date().toISOString().slice(0, 10);
     anchor.href = url;
-    anchor.download = `chzzk-platter-settings-${date}.json`;
+    anchor.download = `chzzk-platter-${fullBackup ? "backup" : "settings"}-${date}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function cloneSafeTransferValue(value, depth = 0) {
+    if (depth > 24) return undefined;
+    if (
+      value === null ||
+      typeof value === "boolean" ||
+      typeof value === "string"
+    ) {
+      return typeof value === "string" && value.length > 8 * 1024 * 1024
+        ? undefined
+        : value;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 250000) return undefined;
+      const output = [];
+      for (const item of value) {
+        const cloned = cloneSafeTransferValue(item, depth + 1);
+        if (cloned === undefined) return undefined;
+        output.push(cloned);
+      }
+      return output;
+    }
+    if (!value || typeof value !== "object") return undefined;
+    const entries = Object.entries(value);
+    if (entries.length > 250000) return undefined;
+    const output = {};
+    for (const [key, item] of entries) {
+      if (key === "__proto__" || key === "prototype" || key === "constructor") {
+        continue;
+      }
+      const cloned = cloneSafeTransferValue(item, depth + 1);
+      if (cloned === undefined) return undefined;
+      output[key] = cloned;
+    }
+    return output;
+  }
+
+  function transferValueKind(value) {
+    if (Array.isArray(value)) return "array";
+    if (value === null) return "null";
+    return typeof value;
+  }
+
+  function normalizeImportedSettingValue(key, value) {
+    if (
+      key === "cheeseAudioMixer.autoSync" ||
+      key === "cheeseVideoFilter.autoSharpen" ||
+      key === "cheeseLogPowerBarEarnedOnly" ||
+      key === "cheeseLogPowerLineCumulative"
+    ) {
+      return typeof value === "boolean" ? value : undefined;
+    }
+    if (key === "cheeseLogPowerStatsViewMode") {
+      return value === "tree" || value === "explorer" ? value : undefined;
+    }
+    if (key === "cheeseLogPowerStatsGroupOrder") {
+      if (!Array.isArray(value)) return undefined;
+      const allowed = new Set(["streamer", "date", "type"]);
+      const order = [
+        ...new Set(value.map(String).filter((item) => allowed.has(item))),
+      ];
+      return order.length === 3 ? order : undefined;
+    }
+    if (key === "cheeseLogPowerStatsGroup") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      return {
+        date: value.date === true,
+        streamer: value.streamer === true,
+        type: value.type === true,
+      };
+    }
+    if (key === "cheeseLogPowerChartColors") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      const colors = {};
+      Object.entries(value)
+        .slice(0, 1000)
+        .forEach(([name, color]) => {
+          const safeName = String(name || "").trim().slice(0, 100);
+          const safeColor = String(color || "").trim().slice(0, 40);
+          if (safeName && safeColor) colors[safeName] = safeColor;
+        });
+      return colors;
+    }
+    const cloned = cloneSafeTransferValue(value);
+    if (cloned === undefined) return undefined;
+    const current = storageCacheData?.[key];
+    if (
+      current !== undefined &&
+      transferValueKind(current) !== transferValueKind(cloned)
+    ) {
+      return undefined;
+    }
+    return cloned;
+  }
+
+  function normalizeTransferClipVault(vault) {
+    if (!vault || typeof vault !== "object" || Array.isArray(vault)) return null;
+    const output = { fav: [], like: [] };
+    for (const kind of ["fav", "like"]) {
+      const source = Array.isArray(vault[kind]) ? vault[kind] : [];
+      const seen = new Set();
+      for (const rawItem of source.slice(0, 100000)) {
+        if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+          continue;
+        }
+        const uid = String(rawItem.uid || "").trim().slice(0, 100);
+        if (!uid || seen.has(uid)) continue;
+        const item = cloneSafeTransferValue(rawItem);
+        if (!item || typeof item !== "object") continue;
+        item.uid = uid;
+        seen.add(uid);
+        output[kind].push(item);
+      }
+    }
+    return output;
   }
 
   function normalizeTransferClipVaultAccounts(value) {
@@ -7514,24 +7897,20 @@
     const accounts = {};
     for (const [rawAccountId, vault] of Object.entries(value)) {
       const accountId = normalizeCvAccountId(rawAccountId);
-      if (
-        !accountId ||
-        !vault ||
-        typeof vault !== "object" ||
-        Array.isArray(vault)
-      ) {
-        continue;
-      }
-      accounts[accountId] = vault;
+      const normalizedVault = normalizeTransferClipVault(vault);
+      if (!accountId || !normalizedVault) continue;
+      accounts[accountId] = normalizedVault;
     }
     return accounts;
   }
 
-  async function readTransferClipVaultAccounts() {
-    const metadata = await chrome.storage.local.get([
-      CLIP_VAULT_ACCOUNT_IDS_KEY,
-      CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
-    ]);
+  async function readTransferClipVaultAccounts(snapshot = null) {
+    const metadata =
+      snapshot ||
+      (await chrome.storage.local.get([
+        CLIP_VAULT_ACCOUNT_IDS_KEY,
+        CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
+      ]));
     const ids = new Set(
       (Array.isArray(metadata?.[CLIP_VAULT_ACCOUNT_IDS_KEY])
         ? metadata[CLIP_VAULT_ACCOUNT_IDS_KEY]
@@ -7544,35 +7923,55 @@
       metadata?.[CLIP_VAULT_ACTIVE_ACCOUNT_KEY],
     );
     if (activeAccountId) ids.add(activeAccountId);
+    if (snapshot) {
+      Object.keys(snapshot).forEach((key) => {
+        if (!key.startsWith(CLIP_VAULT_ACCOUNT_KEY_PREFIX)) return;
+        const accountId = normalizeCvAccountId(
+          key.slice(CLIP_VAULT_ACCOUNT_KEY_PREFIX.length),
+        );
+        if (accountId) ids.add(accountId);
+      });
+    }
     if (!ids.size) return {};
 
     const storageKeys = [...ids].map(
       (accountId) => `${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`,
     );
-    const stored = await chrome.storage.local.get(storageKeys);
+    const stored = snapshot || (await chrome.storage.local.get(storageKeys));
     const accounts = {};
     ids.forEach((accountId) => {
       const vault = stored?.[`${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`];
-      if (!vault || typeof vault !== "object" || Array.isArray(vault)) return;
-      accounts[accountId] = vault;
+      const normalizedVault = normalizeTransferClipVault(vault);
+      if (normalizedVault) accounts[accountId] = normalizedVault;
     });
     return accounts;
   }
 
-  settingsExportButton?.addEventListener("click", async () => {
-    settingsExportButton.disabled = true;
+  function collectTransferMediaSettings(snapshot) {
+    const mediaSettings = {};
+    Object.entries(snapshot || {}).forEach(([key, value]) => {
+      if (!SETTINGS_MEDIA_KEY_PATTERN.test(key)) return;
+      const cloned = cloneSafeTransferValue(value);
+      if (cloned && typeof cloned === "object" && !Array.isArray(cloned)) {
+        mediaSettings[key] = cloned;
+      }
+    });
+    return mediaSettings;
+  }
+
+  async function exportSettings(includeUserData, button) {
+    if (button) button.disabled = true;
     try {
       const settings = await chrome.storage.local.get(
         Array.from(SETTINGS_TRANSFER_KEYS),
       );
-      const clipVaultAccounts = await readTransferClipVaultAccounts();
       const payload = {
         format: SETTINGS_TRANSFER_FORMAT,
         schemaVersion: SETTINGS_TRANSFER_SCHEMA_VERSION,
+        scope: includeUserData ? "full" : "settings",
         extensionVersion: chrome.runtime.getManifest().version,
         exportedAt: new Date().toISOString(),
         settings,
-        clipVaultAccounts,
         appearance: {
           theme:
             localStorage.getItem(THEME_STORAGE_KEY) === "dark"
@@ -7580,13 +7979,46 @@
               : "light",
         },
       };
-      downloadSettingsJson(payload);
-      settingsToast("설정 파일을 내보냈습니다.", "ok");
+      if (includeUserData) {
+        // 전체 저장소를 읽는 비용은 사용자가 명시적으로 전체 백업을 선택했을 때만
+        // 지불한다. cache:* 등 런타임 캐시는 payload에 넣지 않는다.
+        const snapshot = await chrome.storage.local.get(null);
+        const storage = {};
+        SETTINGS_FULL_DATA_KEYS.forEach((key) => {
+          if (snapshot[key] === undefined) return;
+          const cloned = cloneSafeTransferValue(snapshot[key]);
+          if (cloned !== undefined) storage[key] = cloned;
+        });
+        payload.userData = {
+          storage,
+          clipVaultAccounts: await readTransferClipVaultAccounts(snapshot),
+          mediaSettings: collectTransferMediaSettings(snapshot),
+        };
+      }
+      downloadSettingsJson(payload, includeUserData);
+      settingsToast(
+        includeUserData
+          ? "사용자 데이터를 포함한 백업을 내보냈습니다."
+          : "설정 파일을 내보냈습니다.",
+        "ok",
+      );
     } catch {
-      settingsToast("설정을 내보내지 못했습니다.", "error");
+      settingsToast(
+        includeUserData
+          ? "사용자 데이터 백업을 내보내지 못했습니다."
+          : "설정을 내보내지 못했습니다.",
+        "error",
+      );
     } finally {
-      settingsExportButton.disabled = false;
+      if (button) button.disabled = false;
     }
+  }
+
+  settingsExportButton?.addEventListener("click", () => {
+    void exportSettings(false, settingsExportButton);
+  });
+  settingsFullExportButton?.addEventListener("click", () => {
+    void exportSettings(true, settingsFullExportButton);
   });
 
   settingsImportOpenButton?.addEventListener("click", () => {
@@ -7598,7 +8030,7 @@
     settingsImportFile.value = "";
     if (!file) return;
     if (file.size > SETTINGS_IMPORT_MAX_BYTES) {
-      settingsToast("설정 파일이 너무 큽니다.", "error");
+      settingsToast("백업 파일은 256MB 이하만 불러올 수 있습니다.", "error");
       return;
     }
 
@@ -7617,17 +8049,59 @@
 
       const imported = {};
       for (const [key, value] of Object.entries(payload.settings)) {
+        if (SETTINGS_FULL_DATA_KEYS.has(key)) {
+          const normalized =
+            key === CLIP_VAULT_KEY
+              ? normalizeTransferClipVault(value)
+              : cloneSafeTransferValue(value);
+          if (normalized !== undefined && normalized !== null) {
+            imported[key] = normalized;
+          }
+          continue;
+        }
         if (!SETTINGS_TRANSFER_KEYS.has(key) || value === undefined) continue;
         if (key === CHAT_OS_ICONS_KEY) {
           imported[key] = normalizeChatOsCustomIcons(value);
         } else if (key === CHAT_OS_ICON_POSITION_KEY) {
           imported[key] = normalizeChatOsIconPosition(value);
         } else {
-          imported[key] = value;
+          const normalized = normalizeImportedSettingValue(key, value);
+          if (normalized !== undefined) imported[key] = normalized;
+        }
+      }
+      const userDataStorage = payload?.userData?.storage;
+      if (
+        userDataStorage &&
+        typeof userDataStorage === "object" &&
+        !Array.isArray(userDataStorage)
+      ) {
+        for (const [key, value] of Object.entries(userDataStorage)) {
+          if (!SETTINGS_FULL_DATA_KEYS.has(key)) continue;
+          const normalized =
+            key === CLIP_VAULT_KEY
+              ? normalizeTransferClipVault(value)
+              : cloneSafeTransferValue(value);
+          if (normalized !== undefined && normalized !== null) {
+            imported[key] = normalized;
+          }
+        }
+      }
+      const mediaSettings = payload?.userData?.mediaSettings;
+      if (
+        mediaSettings &&
+        typeof mediaSettings === "object" &&
+        !Array.isArray(mediaSettings)
+      ) {
+        for (const [key, value] of Object.entries(mediaSettings)) {
+          if (!SETTINGS_MEDIA_KEY_PATTERN.test(key)) continue;
+          const cloned = cloneSafeTransferValue(value);
+          if (cloned && typeof cloned === "object" && !Array.isArray(cloned)) {
+            imported[key] = cloned;
+          }
         }
       }
       const clipVaultAccounts = normalizeTransferClipVaultAccounts(
-        payload.clipVaultAccounts,
+        payload?.userData?.clipVaultAccounts || payload.clipVaultAccounts,
       );
       if (
         !Object.keys(imported).length &&
@@ -9293,6 +9767,43 @@
   loadSyncPreset();
 
   // ── 따라잡기 배속(1.2/1.5/2/3, 기본 1.5) ──────────────────────────────────
+  // ── 따라잡기 방식(배속 / 즉시 라이브로 이동) ───────────────────────────────
+  // 제보: "배속 말고 원클릭으로 맨 앞으로 땡기는 방식도 있으면 좋겠다".
+  const SYNC_MODE_KEY = "cheeseSyncMode";
+  const SYNC_MODE_ALLOWED = ["rate", "jump"];
+  const syncModeButtons = Array.from(
+    document.querySelectorAll("[data-sync-mode]"),
+  );
+  const syncRateRow = document.getElementById("syncRateRow");
+  function reflectSyncMode(v) {
+    const val = SYNC_MODE_ALLOWED.includes(String(v)) ? String(v) : "rate";
+    syncModeButtons.forEach((btn) => {
+      const active = btn.dataset.syncMode === val;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+    // 즉시 이동 모드에서는 배속 값이 쓰이지 않으므로 배속 설정을 가린다.
+    if (syncRateRow) syncRateRow.hidden = val === "jump";
+  }
+  (async () => {
+    let v = "rate";
+    try {
+      const d = await cachedStorageGet(SYNC_MODE_KEY);
+      if (SYNC_MODE_ALLOWED.includes(String(d?.[SYNC_MODE_KEY])))
+        v = String(d[SYNC_MODE_KEY]);
+    } catch {}
+    reflectSyncMode(v);
+  })();
+  syncModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.dataset.syncMode;
+      reflectSyncMode(v);
+      try {
+        cachedStorageSet({ [SYNC_MODE_KEY]: v });
+      } catch {}
+    });
+  });
+
   const SYNC_RATE_KEY = "cheeseSyncRate";
   const SYNC_RATE_ALLOWED = ["1.2", "1.5", "2", "3"];
   const syncRateButtons = Array.from(

@@ -1976,6 +1976,21 @@ body > .clr-picker .clr-preview {
   opacity: 0.55;
 }
 
+.settings-transfer-button[data-settings-export] {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.settings-transfer-button[data-settings-import-open] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.settings-transfer-button[data-settings-export-full] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
 /* OSD 위치 초기화(이름 옆 작은 버튼) */
 .settings-osd-reset {
   margin-left: 6px;
@@ -2704,4 +2719,30 @@ body > .clr-picker .clr-preview {
 .settings-word-filter-item button:hover {
   background: var(--popup-soft-bg);
   color: var(--popup-text);
+}
+
+/* 통나무파워 획득 내역을 새 탭으로 여는 버튼 */
+.settings-open-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 4px;
+  padding: 7px 12px;
+  border: 1px solid var(--popup-brand);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--popup-brand-strong);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-open-stats:hover {
+  background: var(--popup-brand);
+  color: #fff;
+}
+
+/* 기간 제한 없음일 때 일수 입력은 흐리게(값은 남겨 두어 해제 시 복원된다). */
+.settings-item.is-off .settings-custom-input {
+  opacity: 0.45;
 }

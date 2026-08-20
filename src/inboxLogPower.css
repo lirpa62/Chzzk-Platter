@@ -1,0 +1,450 @@
+/* 수신함 '통나무파워' 탭.
+   ⚠ 이 문서에는 content.css 가 주입되지 않는다(game.naver.com). 여기서 쓰는 색은
+   커뮤니티 소식 탭(inboxCommunity.css)과 같은 방식으로 자체 정의한다. */
+/* 수신함은 원래 문서 자체가 목록을 스크롤한다. 우리 탭이 열리면 섹션 안에서만
+   스크롤해야 헤더·탭 바가 고정되고 iframe html 에 별도 스크롤바가 생기지 않는다
+   (제보: 커뮤니티 소식과 같은 증상). 커뮤니티 탭과 동일한 처리다. */
+html.cheese-inbox-logpower-active,
+html.cheese-inbox-logpower-active body,
+html.cheese-inbox-logpower-active #root {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ⚠ 기본은 숨김. hidden 속성만으로는 치지직 섹션 CSS(display 지정)에 밀려 보인다
+   (제보: 다른 탭인데도 하단에 내용이 표시됨). 커뮤니티 소식 탭과 같이 .is-active
+   클래스로만 보이게 한다. */
+.cheese-inbox-logpower-section {
+  display: none;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  box-sizing: border-box;
+  --lp-text: #26262c;
+  --lp-subtle: #7e7f85;
+  --lp-line: rgba(0, 0, 0, 0.08);
+  --lp-accent: #168f5c;
+  --lp-soft: rgba(22, 143, 92, 0.12);
+  --lp-hover: rgba(0, 0, 0, 0.06);
+  color: var(--lp-text);
+}
+
+.cheese-inbox-logpower-section.is-active {
+  display: flex;
+}
+
+.cheese-inbox-logpower-section.is-dark {
+  --lp-text: rgba(255, 255, 255, 0.88);
+  --lp-subtle: rgba(255, 255, 255, 0.52);
+  --lp-line: rgba(255, 255, 255, 0.12);
+  --lp-accent: #32bb81;
+  --lp-soft: rgba(50, 187, 129, 0.16);
+  --lp-hover: rgba(255, 255, 255, 0.1);
+}
+
+.cheese-inbox-logpower-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* 아래에 기간 버튼 줄이 붙으므로 여기서는 구분선을 긋지 않는다. */
+  padding: 12px 16px 8px;
+  font-size: 13px;
+  color: var(--lp-subtle);
+}
+
+.cheese-inbox-logpower-summary strong {
+  color: var(--lp-accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cheese-inbox-logpower-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cheese-inbox-logpower-list > li {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.cheese-inbox-logpower-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 프로필 이미지. 없거나 로드 실패면 치지직 기본 이미지로 대체한다(JS 에서 처리). */
+.cheese-inbox-logpower-profile {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--lp-line);
+}
+
+/* 파트너(인증) 배지 — 치지직 공식 아이콘. */
+.cheese-inbox-logpower-mark {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+}
+
+/* 스크린리더 전용 — 이 문서에는 content.css 의 .blind 가 없다. */
+.cheese-inbox-logpower-a11y {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.cheese-inbox-logpower-row strong {
+  /* 이름이 남는 폭을 차지해야 시각(when)이 오른쪽 끝에 붙는다. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cheese-inbox-logpower-when {
+  flex: none;
+  color: var(--lp-subtle);
+  font-size: 12px;
+}
+
+.cheese-inbox-logpower-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--lp-subtle);
+}
+
+.cheese-inbox-logpower-amounts b {
+  color: var(--lp-text);
+  font-weight: 700;
+}
+
+.cheese-inbox-logpower-hour b {
+  color: var(--lp-accent);
+}
+
+.cheese-inbox-logpower-empty {
+  margin: 0;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--lp-subtle);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 우리 탭이 활성인 동안 치지직 원래 섹션을 숨긴다(커뮤니티 소식 탭과 같은 방식). */
+.cheese-inbox-logpower-native-hidden {
+  display: none !important;
+}
+
+/* 구독 부스팅 배수 배지. 1배(미구독)일 때는 표시하지 않는다. */
+.cheese-inbox-logpower-boost {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--lp-soft);
+  color: var(--lp-accent);
+  font-weight: 700;
+}
+
+/* 새 탭에서 자세히 보기 */
+.cheese-inbox-logpower-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lp-subtle);
+  cursor: pointer;
+}
+
+.cheese-inbox-logpower-open:hover {
+  background: var(--lp-hover);
+  color: var(--lp-accent);
+}
+
+/* 새 적립 알림 점. 헤더가 아니라 수신함 '통나무파워' 탭에만 붙는다.
+   커뮤니티 소식 탭(inboxCommunity.css)과 같은 모양·위치로 맞춘다. */
+#cheese-inbox-logpower-tab {
+  position: relative;
+}
+
+#cheese-inbox-logpower-tab.has-new::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: #e02020;
+  border-radius: 50%;
+  position: absolute;
+  top: 5px;
+  right: 3px;
+}
+
+/* 기간 빠른 선택(오늘/이번 주/이번 달/전체). 통계 페이지의 같은 버튼과 맞춘다. */
+.cheese-inbox-logpower-range {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 10px;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.cheese-inbox-logpower-range button {
+  flex: 1 1 0;
+  padding: 5px 0;
+  border: 1px solid var(--lp-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lp-subtle);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.cheese-inbox-logpower-range button:hover {
+  border-color: var(--lp-accent);
+  color: var(--lp-accent);
+}
+
+.cheese-inbox-logpower-range button[aria-pressed="true"] {
+  border-color: var(--lp-accent);
+  background: var(--lp-soft);
+  color: var(--lp-accent);
+  font-weight: 700;
+}
+
+/* 시간대 머리글(오늘/최근 일주일/…). 치지직 클래스를 걷어 와 함께 붙이므로
+   보통은 원본 스타일이 적용된다. 아래는 수확 실패 시의 자체 폴백이다. */
+.cheese-inbox-logpower-timestamp {
+  /* 수신함 탭에서 걷어 온 글꼴(harvestTabFont). 실패하면 상속값을 그대로 쓴다. */
+  font-family: var(--cheese-inbox-tab-font, inherit);
+  display: block;
+  padding: 12px 16px 0 !important;
+  color: var(--lp-text);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* 금액 줄 색상 — 라벨과 숫자가 같은 span 이라 문구까지 함께 물든다.
+   통계 페이지(logPowerStats.css)와 같은 색을 쓴다. */
+
+/* 그 밖의 차감(기타 사용 등) */
+.cheese-inbox-logpower-hour.is-neg,
+.cheese-inbox-logpower-hour.is-neg b {
+  color: #e02020;
+}
+
+/* 승부예측 베팅 — 아직 결과가 없는 지출이라 주황 계열 */
+.cheese-inbox-logpower-hour.is-bet,
+.cheese-inbox-logpower-hour.is-bet b {
+  color: #e08b2a;
+}
+
+/* 승부예측 적중 */
+.cheese-inbox-logpower-hour.is-win,
+.cheese-inbox-logpower-hour.is-win b {
+  color: #2e9e63;
+}
+
+/* ── 예측 상세(펼침) ──────────────────────────────────────────────────────
+   통계 페이지와 같은 '비율만큼 채워지는 막대' 형태. 목록에 미리 그리지 않고
+   펼칠 때 채운다(예측이 많으면 막대가 수십 개씩 쌓인다). */
+.cheese-inbox-logpower-pred {
+  margin-top: 6px;
+}
+
+.cheese-inbox-logpower-pred > summary {
+  cursor: pointer;
+  color: var(--lp-subtle);
+  font-size: 11px;
+  list-style: none;
+  user-select: none;
+}
+
+.cheese-inbox-logpower-pred > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* ⚠ 삼각형 문자(▸▾)는 Windows 에서 글꼴에 따라 모양·크기가 제각각이라
+   SVG 로 그린다. mask 라 색은 currentColor 를 따라간다. */
+.cheese-inbox-logpower-pred > summary::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 10px;
+  margin-right: 5px;
+  background: currentColor;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 10"><path d="M1 1l6 4-6 4z"/></svg>')
+    no-repeat center / contain;
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 10"><path d="M1 1l6 4-6 4z"/></svg>')
+    no-repeat center / contain;
+  transition: transform 0.14s ease;
+}
+
+.cheese-inbox-logpower-pred[open] > summary::before {
+  transform: rotate(90deg); /* 펼침 = 아래쪽 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cheese-inbox-logpower-pred > summary::before {
+    transition: none;
+  }
+}
+
+.cheese-inbox-logpower-pred-title {
+  margin: 6px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cheese-inbox-logpower-pred-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cheese-inbox-logpower-pred-item {
+  position: relative;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  border-radius: 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-inbox-logpower-pred-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(128, 128, 128, 0.16);
+}
+
+.cheese-inbox-logpower-pred-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cheese-inbox-logpower-pred-row > b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-inbox-logpower-pred-row > span {
+  color: var(--lp-subtle);
+  white-space: nowrap;
+}
+
+.cheese-inbox-logpower-pred-row > em {
+  font-style: normal;
+  font-weight: 700;
+}
+
+/* 내 선택 — 베팅과 같은 주황 계열 */
+.cheese-inbox-logpower-pred-item.is-mine {
+  border-color: rgba(224, 139, 42, 0.75);
+}
+
+.cheese-inbox-logpower-pred-item.is-mine .cheese-inbox-logpower-pred-bar {
+  background: rgba(224, 139, 42, 0.24);
+}
+
+/* 정답 — 적중과 같은 민트 계열 */
+.cheese-inbox-logpower-pred-item.is-win {
+  border-color: rgba(46, 196, 166, 0.85);
+}
+
+.cheese-inbox-logpower-pred-item.is-win .cheese-inbox-logpower-pred-bar {
+  background: rgba(46, 196, 166, 0.26);
+}
+
+.cheese-inbox-logpower-pred-note {
+  margin: 4px 0 0;
+  color: var(--lp-subtle);
+  font-size: 10px;
+}
+
+/* 나눠 건 이력(예측 상세 안) */
+.cheese-inbox-logpower-pred-hist {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.3);
+  font-size: 10px;
+}
+
+.cheese-inbox-logpower-pred-hist > span {
+  color: var(--lp-subtle);
+  font-weight: 700;
+}
+
+.cheese-inbox-logpower-pred-hist ul {
+  display: grid;
+  gap: 2px;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cheese-inbox-logpower-pred-hist li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-inbox-logpower-pred-hist li > span {
+  color: var(--lp-subtle);
+}
+
+/* 5분 묶음의 회차 수 */
+.cheese-inbox-logpower-count {
+  color: var(--lp-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 예측 베팅의 '적중 시 N' 배지(마감 후 확정 배당 기준) */
+.cheese-inbox-logpower-expect {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--lp-subtle);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
