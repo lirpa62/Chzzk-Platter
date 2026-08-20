@@ -2134,6 +2134,41 @@ body {
   opacity: 0.48;
 }
 
+.lps-calendar-day.has-records {
+  background: color-mix(
+    in srgb,
+    var(--lps-calendar-day-accent) 8%,
+    var(--popup-surface)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--lps-calendar-day-accent) 34%,
+      transparent
+    );
+}
+
+.lps-calendar-day.is-net-positive {
+  --lps-calendar-day-accent: #2e9e63;
+}
+
+.lps-calendar-day.is-net-negative {
+  --lps-calendar-day-accent: #d1495b;
+}
+
+.lps-calendar-day.is-net-neutral {
+  --lps-calendar-day-accent: var(--popup-muted);
+}
+
+.lps-calendar-day.has-records:hover:not(:disabled),
+.lps-calendar-day.has-records[aria-expanded="true"] {
+  background: color-mix(
+    in srgb,
+    var(--lps-calendar-day-accent) 15%,
+    var(--popup-surface)
+  );
+}
+
 .lps-calendar-day.is-today {
   box-shadow: inset 0 0 0 2px var(--popup-brand);
 }

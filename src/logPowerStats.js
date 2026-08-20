@@ -994,6 +994,13 @@
       key === dateKey(new Date()) ? "is-today" : "",
       outsideRange ? "is-outside-range" : "",
       list.length ? "has-records" : "",
+      list.length
+        ? stats.net > 0
+          ? "is-net-positive"
+          : stats.net < 0
+            ? "is-net-negative"
+            : "is-net-neutral"
+        : "",
     ]
       .filter(Boolean)
       .join(" ");
