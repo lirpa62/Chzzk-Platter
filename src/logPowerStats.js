@@ -68,6 +68,13 @@
   let groupOrder = DEFAULT_GROUP_ORDER.slice();
   let viewMode = "tree";
   let explorerPath = [];
+  const nowForCalendar = new Date();
+  let calendarMonth = +new Date(
+    nowForCalendar.getFullYear(),
+    nowForCalendar.getMonth(),
+    1,
+  );
+  let calendarPopoverTrigger = null;
   // 새 기록의 미확인 상태는 ID로 저장하고, 현재 그룹 순서에 맞는 폴더 경로는
   // 화면에서 다시 만든다. 마지막 폴더를 열면 그 경로의 ID를 읽음 처리한다.
   const explorerUnreadIds = new Set();
@@ -826,10 +833,13 @@
       return;
     }
     const sortedRows = sortEntries(rows);
+    const mode = effectiveViewMode();
     body.innerHTML =
-      effectiveViewMode() === "explorer"
-        ? renderExplorer(sortedRows)
-        : renderRows(sortedRows);
+      mode === "calendar"
+        ? renderCalendar(sortedRows)
+        : mode === "explorer"
+          ? renderExplorer(sortedRows)
+          : renderRows(sortedRows);
     bindGroupToggles(body);
     bindPredToggles(body);
     updateGroupCollapseControls(body);
@@ -856,6 +866,286 @@
     const today = dateKey(new Date());
     if (key === today) return `오늘 (${m}.${d})`;
     return `${y}.${m}.${d}`;
+  }
+
+  const CALENDAR_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+  function calendarMonthDate() {
+    const value = new Date(calendarMonth);
+    if (!+value) {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    return new Date(value.getFullYear(), value.getMonth(), 1);
+  }
+
+  function setCalendarMonth(value) {
+    const date = new Date(value);
+    if (!+date) return;
+    calendarMonth = +new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function ensureCalendarMonthForRange() {
+    if (!fromMs && !toMs) return;
+    const month = calendarMonthDate();
+    const start = +month;
+    const end = +new Date(month.getFullYear(), month.getMonth() + 1, 1) - 1;
+    if ((!fromMs || end >= fromMs) && (!toMs || start <= toMs)) return;
+    setCalendarMonth(fromMs || toMs);
+  }
+
+  function calendarDateLabel(key) {
+    const [year, month, day] = String(key).split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return `${year}년 ${month}월 ${day}일 (${CALENDAR_WEEKDAYS[date.getDay()]})`;
+  }
+
+  function calendarStats(list) {
+    let gain = 0;
+    let loss = 0;
+    for (const entry of list) {
+      const amount = entryTotal(entry);
+      if (amount > 0) gain += amount;
+      else if (amount < 0) loss += Math.abs(amount);
+    }
+    return { gain, loss, net: gain - loss };
+  }
+
+  function calendarProfiles(list) {
+    const profiles = new Map();
+    for (const entry of list) {
+      const name = String(entry.channelName || "채널").trim() || "채널";
+      const key = entry.channelId || normalizedChannelName(name) || entry.id;
+      if (!profiles.has(key)) {
+        profiles.set(key, {
+          name,
+          imageUrl: String(entry.channelImageUrl || ""),
+          weight: 0,
+          latest: 0,
+        });
+      }
+      const profile = profiles.get(key);
+      if (!profile.imageUrl && entry.channelImageUrl) {
+        profile.imageUrl = String(entry.channelImageUrl);
+      }
+      profile.weight += Math.abs(entryTotal(entry));
+      profile.latest = Math.max(profile.latest, Number(entry.at) || 0);
+    }
+    return [...profiles.values()].sort(
+      (a, b) => b.weight - a.weight || b.latest - a.latest,
+    );
+  }
+
+  function calendarProfileStack(list, limit = 4) {
+    const profiles = calendarProfiles(list);
+    if (!profiles.length) return "";
+    const visibleProfiles = profiles.slice(0, limit);
+    const avatars = visibleProfiles
+      .map((profile) => {
+        const title = escapeHtml(profile.name);
+        const color = escapeHtml(colorFor(profile.name));
+        if (!profile.imageUrl) {
+          return `<span class="lps-calendar-avatar is-empty" title="${title}" style="--lps-calendar-avatar-color:${color}" aria-hidden="true">${escapeHtml(profile.name.charAt(0))}</span>`;
+        }
+        return `<span class="lps-calendar-avatar" title="${title}" style="--lps-calendar-avatar-color:${color}" aria-hidden="true"><img src="${escapeHtml(profile.imageUrl)}" alt="" loading="lazy"></span>`;
+      })
+      .join("");
+    const rest = profiles.length - visibleProfiles.length;
+    return (
+      `<span class="lps-calendar-profiles" role="img" aria-label="관련 채널 ${fmt(profiles.length)}개">` +
+      avatars +
+      (rest > 0
+        ? `<span class="lps-calendar-profile-more" aria-hidden="true">+${fmt(rest)}</span>`
+        : "") +
+      `</span>`
+    );
+  }
+
+  function compactSignedPower(value) {
+    const amount = Number(value) || 0;
+    if (amount > 0) return `+${compactPower(amount)}`;
+    if (amount < 0) return `-${compactPower(Math.abs(amount))}`;
+    return "0";
+  }
+
+  const fmtCalendarGain = (value) =>
+    Number(value) > 0 ? `+${fmt(value)}` : "0";
+  const fmtCalendarLoss = (value) =>
+    Number(value) > 0 ? `-${fmt(value)}` : "0";
+
+  function calendarDayHtml(date, currentMonth, list) {
+    const key = dateKey(date);
+    const stats = calendarStats(list);
+    const dayStart = +new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+    );
+    const dayEnd = +new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() + 1,
+    ) - 1;
+    const outsideRange =
+      (fromMs && dayEnd < fromMs) || (toMs && dayStart > toMs);
+    const classes = [
+      "lps-calendar-day",
+      date.getMonth() !== currentMonth ? "is-outside-month" : "",
+      key === dateKey(new Date()) ? "is-today" : "",
+      outsideRange ? "is-outside-range" : "",
+      list.length ? "has-records" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const label = list.length
+      ? `${calendarDateLabel(key)}, 획득 ${fmt(stats.gain)}, 사용 ${fmt(stats.loss)}, 순변동 ${fmtSigned(stats.net)}, ${fmt(list.length)}건`
+      : `${calendarDateLabel(key)}, 기록 없음`;
+    return (
+      `<button type="button" class="${classes}" role="gridcell" aria-label="${escapeHtml(label)}" ` +
+      (list.length
+        ? `data-calendar-day="${key}" aria-expanded="false" aria-controls="lpsCalendarPopover"`
+        : "disabled") +
+      `>` +
+      `<span class="lps-calendar-day-number">${date.getDate()}</span>` +
+      (list.length
+        ? `<span class="lps-calendar-day-count">${fmt(list.length)}건</span>` +
+          `<span class="lps-calendar-day-stats">` +
+          (stats.gain
+            ? `<span class="is-gain"><small>획득</small> +${compactPower(stats.gain)}</span>`
+            : "") +
+          (stats.loss
+            ? `<span class="is-loss"><small>사용</small> -${compactPower(stats.loss)}</span>`
+            : "") +
+          `<span class="${netClass(stats.net)}"><small>순변동</small> ${compactSignedPower(stats.net)}</span>` +
+          `</span>` +
+          calendarProfileStack(list)
+        : "") +
+      `</button>`
+    );
+  }
+
+  function renderCalendar(rows) {
+    calendarPopoverTrigger = null;
+    const month = calendarMonthDate();
+    const year = month.getFullYear();
+    const monthIndex = month.getMonth();
+    const byDay = new Map();
+    for (const entry of rows) {
+      const key = dayKeyOf(entry.at);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(entry);
+    }
+    const monthRows = rows.filter((entry) => {
+      const date = new Date(entry.at);
+      return date.getFullYear() === year && date.getMonth() === monthIndex;
+    });
+    const monthStats = calendarStats(monthRows);
+    const gridStart = new Date(year, monthIndex, 1 - month.getDay());
+    const days = Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(gridStart);
+      date.setDate(gridStart.getDate() + index);
+      return calendarDayHtml(date, monthIndex, byDay.get(dateKey(date)) || []);
+    }).join("");
+    const weekdayHeaders = CALENDAR_WEEKDAYS.map(
+      (weekday, index) =>
+        `<span class="lps-calendar-weekday${index === 0 ? " is-sunday" : index === 6 ? " is-saturday" : ""}" role="columnheader">${weekday}</span>`,
+    ).join("");
+    return (
+      `<section class="lps-calendar" aria-label="${year}년 ${monthIndex + 1}월 통나무파워 달력">` +
+      `<header class="lps-calendar-head">` +
+      `<div class="lps-calendar-nav">` +
+      `<button type="button" data-calendar-nav="prev" aria-label="이전 달" title="이전 달">` +
+      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>` +
+      `<button type="button" class="lps-calendar-today" data-calendar-nav="today">오늘</button>` +
+      `<button type="button" data-calendar-nav="next" aria-label="다음 달" title="다음 달">` +
+      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>` +
+      `</div>` +
+      `<div class="lps-calendar-heading"><h3 aria-live="polite">${year}년 ${monthIndex + 1}월</h3>` +
+      `<p>${fmt(monthRows.length)}건 · 획득 <b class="lps-pnl-plus">${fmtCalendarGain(monthStats.gain)}</b> · 사용 <b class="lps-pnl-minus">${fmtCalendarLoss(monthStats.loss)}</b> · 순변동 <b class="${netClass(monthStats.net)}">${fmtSigned(monthStats.net)}</b></p></div>` +
+      `</header>` +
+      `<div class="lps-calendar-weekdays" role="row">${weekdayHeaders}</div>` +
+      `<div class="lps-calendar-grid" role="grid">${days}</div>` +
+      `<aside class="lps-calendar-popover" id="lpsCalendarPopover" role="dialog" aria-modal="false" aria-label="날짜 상세 내역" hidden></aside>` +
+      `</section>`
+    );
+  }
+
+  function closeCalendarPopover({ restoreFocus = false } = {}) {
+    const popover = document.getElementById("lpsCalendarPopover");
+    if (!popover || popover.hidden) return false;
+    popover.hidden = true;
+    popover.textContent = "";
+    document
+      .querySelectorAll('[data-calendar-day][aria-expanded="true"]')
+      .forEach((button) => button.setAttribute("aria-expanded", "false"));
+    const trigger = calendarPopoverTrigger;
+    calendarPopoverTrigger = null;
+    if (restoreFocus && trigger?.isConnected) trigger.focus();
+    return true;
+  }
+
+  function positionCalendarPopover(popover, trigger) {
+    const calendar = trigger.closest(".lps-calendar");
+    if (!calendar) return;
+    popover.style.left = "8px";
+    popover.style.top = "8px";
+    popover.style.visibility = "hidden";
+    popover.hidden = false;
+    const calendarRect = calendar.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const width = popover.offsetWidth;
+    const height = popover.offsetHeight;
+    const maxLeft = Math.max(8, calendar.clientWidth - width - 8);
+    const centered =
+      triggerRect.left - calendarRect.left + triggerRect.width / 2 - width / 2;
+    const left = Math.max(8, Math.min(maxLeft, centered));
+    const availableBelow = window.innerHeight - triggerRect.bottom;
+    const availableAbove = triggerRect.top;
+    let top = triggerRect.bottom - calendarRect.top + 8;
+    if (
+      availableBelow < Math.min(height, 360) &&
+      availableAbove > availableBelow
+    ) {
+      top = triggerRect.top - calendarRect.top - height - 8;
+    }
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.max(8, Math.round(top))}px`;
+    popover.style.visibility = "";
+  }
+
+  function openCalendarDay(key, trigger) {
+    const popover = document.getElementById("lpsCalendarPopover");
+    if (!popover) return;
+    if (
+      calendarPopoverTrigger === trigger &&
+      trigger.getAttribute("aria-expanded") === "true"
+    ) {
+      closeCalendarPopover();
+      return;
+    }
+    const list = sortEntries(
+      visible().filter((entry) => dayKeyOf(entry.at) === key),
+    );
+    if (!list.length) return;
+    closeCalendarPopover();
+    const stats = calendarStats(list);
+    popover.innerHTML =
+      `<header class="lps-calendar-popover-head"><div><small>날짜 상세</small>` +
+      `<h3>${escapeHtml(calendarDateLabel(key))}</h3></div>` +
+      `<button type="button" data-calendar-popover-close aria-label="날짜 상세 닫기" title="닫기">` +
+      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></header>` +
+      `<div class="lps-calendar-popover-summary">` +
+      `<span class="lps-pnl-plus"><small>획득</small><b>${fmtCalendarGain(stats.gain)}</b></span>` +
+      `<span class="lps-pnl-minus"><small>사용</small><b>${fmtCalendarLoss(stats.loss)}</b></span>` +
+      `<span class="${netClass(stats.net)}"><small>순변동</small><b>${fmtSigned(stats.net)}</b></span>` +
+      `</div><div class="lps-calendar-popover-list">${plainList(list)}</div>`;
+    document
+      .querySelectorAll('[data-calendar-day][aria-expanded="true"]')
+      .forEach((button) => button.setAttribute("aria-expanded", "false"));
+    trigger.setAttribute("aria-expanded", "true");
+    calendarPopoverTrigger = trigger;
+    bindPredToggles(popover);
+    positionCalendarPopover(popover, trigger);
   }
 
   function groupBy(list, keyOf, context) {
@@ -1011,6 +1301,7 @@
   }
 
   function effectiveViewMode() {
+    if (viewMode === "calendar") return "calendar";
     return viewMode === "explorer" && activeGroupLevels().length
       ? "explorer"
       : "tree";
@@ -1033,6 +1324,8 @@
       ".lps-group-collapse-actions",
     );
     if (collapseActions) collapseActions.hidden = effective !== "tree";
+    const orderRow = document.querySelector(".lps-group-order-row");
+    if (orderRow) orderRow.hidden = effective === "calendar";
   }
 
   function renderGroupOrderControls() {
@@ -3392,6 +3685,13 @@
   }
 
   document.addEventListener("click", (e) => {
+    if (
+      calendarPopoverTrigger &&
+      !e.target.closest?.(".lps-calendar-popover") &&
+      !e.target.closest?.("[data-calendar-day]")
+    ) {
+      closeCalendarPopover();
+    }
     if (e.target.closest?.("#lpsFabTop")) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
@@ -3443,11 +3743,47 @@
       return;
     }
 
+    if (e.target.closest?.("[data-calendar-popover-close]")) {
+      closeCalendarPopover({ restoreFocus: true });
+      return;
+    }
+
+    const calendarNav = e.target.closest?.("[data-calendar-nav]");
+    if (calendarNav) {
+      const action = calendarNav.dataset.calendarNav;
+      if (action === "today") {
+        setCalendarMonth(new Date());
+      } else {
+        const current = calendarMonthDate();
+        setCalendarMonth(
+          new Date(
+            current.getFullYear(),
+            current.getMonth() + (action === "prev" ? -1 : 1),
+            1,
+          ),
+        );
+      }
+      renderLogBody();
+      document
+        .querySelector(`[data-calendar-nav="${action}"]`)
+        ?.focus({ preventScroll: true });
+      return;
+    }
+
+    const calendarDay = e.target.closest?.("[data-calendar-day]");
+    if (calendarDay) {
+      openCalendarDay(calendarDay.dataset.calendarDay, calendarDay);
+      return;
+    }
+
     const viewButton = e.target.closest?.("[data-view-mode]");
     if (viewButton && !viewButton.disabled) {
       const next = viewButton.dataset.viewMode;
-      if (next !== "tree" && next !== "explorer") return;
+      if (next !== "tree" && next !== "explorer" && next !== "calendar") {
+        return;
+      }
       viewMode = next;
+      if (viewMode === "calendar") ensureCalendarMonthForRange();
       try {
         void chrome.storage.local.set({ [VIEW_MODE_KEY]: viewMode });
       } catch {}
@@ -4007,6 +4343,10 @@
       }
       return;
     }
+    if (e.key === "Escape" && closeCalendarPopover({ restoreFocus: true })) {
+      e.preventDefault();
+      return;
+    }
     // 목록 행에서 Enter/Space 로도 수정 열기(마우스 없이 쓰는 경우).
     // 예측 상세 토글에 포커스가 있을 때는 펼치기가 우선이다.
     if (e.target?.closest?.(".lps-pred")) return;
@@ -4063,7 +4403,11 @@
       groupByStreamer = v?.streamer === true;
       groupByType = v?.type === true;
       groupOrder = normalizeGroupOrder(saved?.[GROUP_ORDER_KEY]);
-      viewMode = saved?.[VIEW_MODE_KEY] === "explorer" ? "explorer" : "tree";
+      viewMode = ["tree", "explorer", "calendar"].includes(
+        saved?.[VIEW_MODE_KEY],
+      )
+        ? saved[VIEW_MODE_KEY]
+        : "tree";
       barEarnedOnly = saved?.[BAR_ONLY_KEY] === true;
       lineCumulative = saved?.[LINE_CUMULATIVE_KEY] === true;
     } catch {}
@@ -4128,6 +4472,13 @@
 
   // FAB: 스크롤·리사이즈에 따라 노출을 갱신한다(초기화 시 1회 등록).
   window.addEventListener("scroll", scheduleFabUpdate, { passive: true });
-  window.addEventListener("resize", scheduleFabUpdate, { passive: true });
+  window.addEventListener(
+    "resize",
+    () => {
+      closeCalendarPopover();
+      scheduleFabUpdate();
+    },
+    { passive: true },
+  );
   updateFabs();
 })();

@@ -7824,7 +7824,9 @@
       return typeof value === "boolean" ? value : undefined;
     }
     if (key === "cheeseLogPowerStatsViewMode") {
-      return value === "tree" || value === "explorer" ? value : undefined;
+      return value === "tree" || value === "explorer" || value === "calendar"
+        ? value
+        : undefined;
     }
     if (key === "cheeseLogPowerStatsGroupOrder") {
       if (!Array.isArray(value)) return undefined;
