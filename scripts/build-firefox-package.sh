@@ -43,6 +43,8 @@ copy_path "no-search-results-found-animation.svg"
 copy_path "searching-animation.svg"
 copy_path "loading.svg"
 
+patch -s -p1 -d "$FIREFOX_DIR" < "$ROOT_DIR/scripts/firefox-screenshot-download.patch"
+
 ruby -rjson -e '
   manifest = JSON.parse(File.read(ARGV[0]))
   manifest["background"] = { "scripts" => ["src/background.js"] }

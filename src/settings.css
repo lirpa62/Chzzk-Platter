@@ -1,4 +1,4 @@
-/* 치즈 서치 - 기능 설정 팝업 스타일 (popup.css 변수 재사용) */
+/* 치즈 플래터 - 기능 설정 팝업 스타일 (popup.css 변수 재사용) */
 html {
   /* Firefox 등 표준 커스텀 스크롤바 색(thumb / track) */
   scrollbar-color: var(--popup-brand) var(--popup-soft-bg);

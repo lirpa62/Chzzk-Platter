@@ -1,4 +1,4 @@
-// 치즈 서치 - 기능 설정 팝업
+// 치즈 플래터 - 기능 설정 팝업
 // 확장 아이콘 클릭 시 뜨는 전용 설정 페이지. 8개 기능의 표시/숨김을 전역
 // (chrome.storage.local `cheeseFeatureHidden`)으로 저장한다. content.js가
 // storage.onChanged로 즉시 반영하므로 열린 치지직 탭에 바로 적용된다.
@@ -7856,8 +7856,12 @@
       Object.entries(value)
         .slice(0, 1000)
         .forEach(([name, color]) => {
-          const safeName = String(name || "").trim().slice(0, 100);
-          const safeColor = String(color || "").trim().slice(0, 40);
+          const safeName = String(name || "")
+            .trim()
+            .slice(0, 100);
+          const safeColor = String(color || "")
+            .trim()
+            .slice(0, 40);
           if (safeName && safeColor) colors[safeName] = safeColor;
         });
       return colors;
@@ -7875,7 +7879,8 @@
   }
 
   function normalizeTransferClipVault(vault) {
-    if (!vault || typeof vault !== "object" || Array.isArray(vault)) return null;
+    if (!vault || typeof vault !== "object" || Array.isArray(vault))
+      return null;
     const output = { fav: [], like: [] };
     for (const kind of ["fav", "like"]) {
       const source = Array.isArray(vault[kind]) ? vault[kind] : [];
@@ -7884,7 +7889,9 @@
         if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
           continue;
         }
-        const uid = String(rawItem.uid || "").trim().slice(0, 100);
+        const uid = String(rawItem.uid || "")
+          .trim()
+          .slice(0, 100);
         if (!uid || seen.has(uid)) continue;
         const item = cloneSafeTransferValue(rawItem);
         if (!item || typeof item !== "object") continue;

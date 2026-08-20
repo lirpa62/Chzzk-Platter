@@ -1,4 +1,4 @@
-// 치즈 서치 - 오디오 믹서 (MAIN world content script)
+// 치즈 플래터 - 오디오 믹서 (MAIN world content script)
 // 치지직 라이브 <video>에 Web Audio 그래프를 연결해 컴프레서/노멀라이저/EQ를
 // 적용한다. content script(격리 월드)에서는 페이지 <video>의
 // MediaElementSource를 만들 수 없으므로 manifest에서 "world": "MAIN"으로 주입된다.
@@ -975,7 +975,7 @@
       clearGraphRetryBlock(video);
       return true;
     } catch (err) {
-      console.warn("[치즈 서치 오디오 믹서] 그래프 구성 실패:", err);
+      console.warn("[치즈 플래터 오디오 믹서] 그래프 구성 실패:", err);
       handleGraphBuildFailure(video, err);
       return false;
     }

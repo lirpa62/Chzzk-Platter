@@ -1,4 +1,4 @@
-// 치즈 서치 - 비디오 필터 (MAIN world content script)
+// 치즈 플래터 - 비디오 필터 (MAIN world content script)
 // 치지직 라이브/다시보기 <video>에 화면 보정 필터(밝기/노출/대비/채도/색온도/색조/
 // 감마/선명도/그림자/하이라이트)를 적용한다. 오디오 믹서(src/audioMixer.js)와 동일한
 // 구조로, 버튼은 오디오 믹서 버튼 옆에 두고 클릭하면 팝오버가 나타난다.
@@ -56,7 +56,8 @@
   let vfClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
   let vfBeginner = false; // 초보자용 원클릭: 클릭 시 패널 없이 '화질 향상' 프리셋으로 바로 on/off
   window.addEventListener("message", (e) => {
-    if (e.source !== window || e.data?.source !== "cheese-feature-flags") return;
+    if (e.source !== window || e.data?.source !== "cheese-feature-flags")
+      return;
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
     vfClickActivate = e.data.videoFilterClickActivate === true;
@@ -709,8 +710,7 @@
     try {
       const canvas = document.createElement("canvas");
       const gl =
-        canvas.getContext("webgl") ||
-        canvas.getContext("experimental-webgl");
+        canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
       if (gl) {
         const dbg = gl.getExtension("WEBGL_debug_renderer_info");
         const renderer = dbg
@@ -759,12 +759,14 @@
     toast
       .querySelector("[data-vf-toast-close]")
       ?.addEventListener("click", remove);
-    toast.querySelector("[data-vf-toast-copy]")?.addEventListener("click", (e) => {
-      copyText(SETTINGS_URL);
-      const btn = e.currentTarget;
-      btn.textContent = "복사됨!";
-      setTimeout(remove, 800);
-    });
+    toast
+      .querySelector("[data-vf-toast-copy]")
+      ?.addEventListener("click", (e) => {
+        copyText(SETTINGS_URL);
+        const btn = e.currentTarget;
+        btn.textContent = "복사됨!";
+        setTimeout(remove, 800);
+      });
     window.setTimeout(remove, TOAST_DURATION_MS);
   }
 
@@ -2685,7 +2687,9 @@
       if (out) out.textContent = fmtParam(key, v);
     });
 
-    const autoToggle = panel.querySelector("[data-action='auto-sharpen-toggle']");
+    const autoToggle = panel.querySelector(
+      "[data-action='auto-sharpen-toggle']",
+    );
     if (autoToggle) autoToggle.checked = autoSharpenEnabled;
     syncAutoSharpenStatus();
   }
@@ -2741,7 +2745,10 @@
       if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
       if (e.code !== "KeyV" && e.key !== "V" && e.key !== "v") return;
       if (featureFlags.videoFilter) return; // 필터 기능 숨김이면 끔
-      if (isTypingAnywhere(e.target) || isTypingAnywhere(document.activeElement))
+      if (
+        isTypingAnywhere(e.target) ||
+        isTypingAnywhere(document.activeElement)
+      )
         return;
       if (!document.querySelector(".webplayer-internal-video")) return;
       e.preventDefault();
@@ -2824,8 +2831,8 @@
     const video = findVideo();
     return Boolean(
       video &&
-        video === appliedVideo &&
-        video.classList.contains("cheese-vf-target"),
+      video === appliedVideo &&
+      video.classList.contains("cheese-vf-target"),
     );
   }
 
@@ -2937,9 +2944,9 @@
           node instanceof Element ? node : node?.parentElement || null;
         return Boolean(
           element?.closest?.(CHAT_STREAM_SELECTOR) ||
-            (chatAside &&
-              (element?.matches?.("[class*='_chatting_message_']") ||
-                element?.querySelector?.("[class*='_chatting_message_']"))),
+          (chatAside &&
+            (element?.matches?.("[class*='_chatting_message_']") ||
+              element?.querySelector?.("[class*='_chatting_message_']"))),
         );
       })
     );

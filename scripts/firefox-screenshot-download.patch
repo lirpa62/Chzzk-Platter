@@ -1,0 +1,239 @@
+--- a/src/background.js
++++ b/src/background.js
+@@ -4455,7 +4455,43 @@
+     adult: p?.adult === true || d?.adult === true,
+     // 상세 정보 요청이 성공했다면 adult 필드가 생략된 응답도 일반 클립으로 취급한다.
+     adultKnown: true,
++  };
++}
++
++function screenshotDataURLToBlob(dataURL) {
++  if (typeof dataURL !== "string" || !dataURL.startsWith("data:image")) {
++    return null;
++  }
++  try {
++    const commaIndex = dataURL.indexOf(",");
++    if (commaIndex < 0) return null;
++    const header = dataURL.slice(0, commaIndex);
++    const encoded = dataURL.slice(commaIndex + 1);
++    const mime = /data:(.*?)(;base64)?$/.exec(header)?.[1] || "image/png";
++    const binary = atob(encoded);
++    const bytes = new Uint8Array(binary.length);
++    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
++    return new Blob([bytes], { type: mime });
++  } catch {
++    return null;
++  }
++}
++
++function startFirefoxScreenshotDownload(options, done) {
++  let settled = false;
++  const finish = (error, downloadId) => {
++    if (settled) return;
++    settled = true;
++    done(error, downloadId);
+   };
++  try {
++    Promise.resolve(browser.downloads.download(options)).then(
++      (downloadId) => finish(null, downloadId),
++      (error) => finish(error || new Error("download failed"), null),
++    );
++  } catch (error) {
++    finish(error, null);
++  }
+ }
+ 
+ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+@@ -4690,46 +4726,75 @@
+   if (message.type === "CHEESE_SCREENSHOT_SAVE") {
+     const { url, filename } = message;
+     const saveAs = message.saveAs === true; // 기본 false=바로 저장
+-    // data:(바로 저장용) 또는 blob:(대화상자용, content가 변환) URL만 허용.
+-    if (
+-      typeof url !== "string" ||
+-      !(url.startsWith("data:image") || url.startsWith("blob:"))
+-    ) {
++    if (typeof url !== "string" || !url.startsWith("data:image")) {
+       sendResponse({ ok: false, reason: "invalid" });
+       return false;
+     }
++    const blob = screenshotDataURLToBlob(url);
++    const blobURL = blob ? URL.createObjectURL(blob) : null;
++    const downloadsApi = browser.downloads;
+     try {
+-      chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
+-        if (chrome.runtime.lastError || downloadId == null) {
+-          sendResponse({ ok: false, reason: "start-failed" });
+-          return;
+-        }
++      const waitForResult = (downloadId) => {
+         // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
+         let settled = false;
++        let timeoutId = null;
+         const onChanged = (delta) => {
+           if (delta.id !== downloadId || !delta.state) return;
+-          const s = delta.state.current;
+-          if (s === "complete") {
++          const state = delta.state.current;
++          if (state === "complete") {
+             finish({ ok: true, saved: true });
+-          } else if (s === "interrupted") {
++          } else if (state === "interrupted") {
+             finish({ ok: true, saved: false }); // 사용자가 취소 등
+           }
+         };
+         const finish = (result) => {
+           if (settled) return;
+           settled = true;
+-          chrome.downloads.onChanged.removeListener(onChanged);
++          if (timeoutId != null) clearTimeout(timeoutId);
++          downloadsApi.onChanged.removeListener(onChanged);
++          if (blobURL) URL.revokeObjectURL(blobURL);
+           sendResponse(result);
+         };
+-        chrome.downloads.onChanged.addListener(onChanged);
++        downloadsApi.onChanged.addListener(onChanged);
+         // 혹시 onChanged가 안 오는 환경 대비 타임아웃. saveAs(대화상자)는 사용자가
+         // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
+         // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
+         const timeoutMs = saveAs ? 300000 : 15000;
+-        setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
++        timeoutId = setTimeout(
++          () => finish({ ok: true, saved: true }),
++          timeoutMs,
++        );
++      };
++
++      const start = (downloadURL, retryDataURL) => {
++        startFirefoxScreenshotDownload(
++          { url: downloadURL, filename, saveAs },
++          (error, downloadId) => {
++            if (!error && downloadId != null) {
++              waitForResult(downloadId);
++              return;
++            }
++            if (retryDataURL && downloadURL !== url) {
++              start(url, false);
++              return;
++            }
++            if (blobURL) URL.revokeObjectURL(blobURL);
++            sendResponse({
++              ok: false,
++              reason: "start-failed",
++              error: String(error?.message || error || ""),
++            });
++          },
++        );
++      };
++      start(blobURL || url, Boolean(blobURL));
++    } catch (error) {
++      if (blobURL) URL.revokeObjectURL(blobURL);
++      sendResponse({
++        ok: false,
++        reason: "exception",
++        error: String(error?.message || error || ""),
+       });
+-    } catch {
+-      sendResponse({ ok: false, reason: "exception" });
+     }
+     return true; // 비동기 응답
+   }
+--- a/src/content.js
++++ b/src/content.js
+@@ -41916,46 +41916,79 @@
+     }
+   }
+ 
++  function downloadScreenshotWithAnchor(dataURL, filename) {
++    const blobURL = dataURLToBlobURL(dataURL);
++    if (!blobURL) return false;
++    try {
++      const anchor = document.createElement("a");
++      anchor.href = blobURL;
++      anchor.download = String(filename || "chzzk.png");
++      anchor.hidden = true;
++      (document.documentElement || document.body).appendChild(anchor);
++      anchor.click();
++      anchor.remove();
++      setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
++      return true;
++    } catch {
++      URL.revokeObjectURL(blobURL);
++      return false;
++    }
++  }
++
+   window.addEventListener("message", (event) => {
+     if (event.source !== window) return;
+     const data = event.data;
+     if (!data || data.source !== "cheese-screenshot-save") return;
+     const reqId = data.reqId;
+     const saveAs = !screenshotDirectSave; // 바로 저장 OFF면 '다른 이름으로 저장' 대화상자
+-    // 대화상자가 필요하면 Blob URL로(그래야 saveAs가 먹는다), 아니면 data URL 그대로.
+-    const blobURL = saveAs ? dataURLToBlobURL(data.dataURL) : null;
+-    const url = blobURL || data.dataURL;
+-    const replyAndCleanup = (payload) => {
+-      if (blobURL) {
+-        // 다운로드가 시작된 뒤 revoke(너무 일찍 지우면 다운로드가 깨질 수 있어 지연).
+-        setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
+-      }
+-      window.postMessage(payload, location.origin);
+-    };
++    const reply = (payload) => window.postMessage(payload, location.origin);
+     try {
+       chrome.runtime.sendMessage(
+         {
+           type: "CHEESE_SCREENSHOT_SAVE",
+-          url,
++          url: data.dataURL,
+           filename: data.filename,
+           saveAs,
+         },
+         (resp) => {
+-          const ok = !chrome.runtime.lastError && resp?.ok === true;
+-          replyAndCleanup({
++          const runtimeError = chrome.runtime.lastError;
++          const ok = !runtimeError && resp?.ok === true;
++          if (!ok) {
++            console.warn("[치즈] Firefox 스크린샷 저장 API 실패", {
++              runtimeError: runtimeError?.message || "",
++              reason: resp?.reason || "",
++              error: resp?.error || "",
++            });
++            const fallbackSaved = downloadScreenshotWithAnchor(
++              data.dataURL,
++              data.filename,
++            );
++            reply({
++              source: "cheese-screenshot-save-result",
++              reqId,
++              ok: fallbackSaved,
++              saved: fallbackSaved,
++            });
++            return;
++          }
++          reply({
+             source: "cheese-screenshot-save-result",
+             reqId,
+             ok,
+-            saved: ok ? resp.saved !== false : false,
++            saved: resp.saved !== false,
+           });
+         },
+       );
+     } catch {
+-      replyAndCleanup({
++      const fallbackSaved = downloadScreenshotWithAnchor(
++        data.dataURL,
++        data.filename,
++      );
++      reply({
+         source: "cheese-screenshot-save-result",
+         reqId,
+-        ok: false,
+-        saved: false,
++        ok: fallbackSaved,
++        saved: fallbackSaved,
+       });
+     }
+   });

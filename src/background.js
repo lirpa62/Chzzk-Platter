@@ -584,7 +584,7 @@ async function hydrateCachesFromStorage() {
       }
     }
   } catch (error) {
-    console.warn("[CheeseSearch] cache hydration failed", error);
+    console.warn("[치즈 플래터] cache hydration failed", error);
   }
 }
 
@@ -699,14 +699,14 @@ async function persistCacheEntry(key, entry) {
     } catch (error) {
       const message = String(error?.message || error || "");
       if (!/quota/i.test(message)) {
-        console.warn("[CheeseSearch] cache persist failed", error);
+        console.warn("[치즈 플래터] cache persist failed", error);
         await removeChunkedStorageEntries(key);
         return;
       }
       const evicted = await evictOldestCacheEntry(key);
       if (!evicted) {
         console.info(
-          "[CheeseSearch] storage quota exhausted — keeping cache in memory only",
+          "[치즈 플래터] storage quota exhausted — keeping cache in memory only",
         );
         await removeChunkedStorageEntries(key);
         try {
@@ -837,7 +837,7 @@ function writeChannelSearchCache(key, value) {
   persistentStorage
     .set({ [`${CHANNEL_SEARCH_STORAGE_PREFIX}${key}`]: value })
     .catch((error) => {
-      console.warn("[CheeseSearch] channel cache persist failed", error);
+      console.warn("[치즈 플래터] channel cache persist failed", error);
     });
 }
 
@@ -2770,7 +2770,7 @@ function cancelFetchSubscription(requestId) {
     const aborted = entry.progressReporters.size === 0;
     if (aborted) {
       console.debug(
-        "[CheeseSearch] aborting fetch — last subscriber cancelled",
+        "[치즈 플래터] aborting fetch — last subscriber cancelled",
         requestId,
       );
       entry.abortController.abort();

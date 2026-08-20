@@ -16572,7 +16572,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
       } catch (error) {
         console.debug?.(
-          "[CheeseSearch] failed to refresh follow live info",
+          "[치즈 플래터] failed to refresh follow live info",
           error,
         );
       } finally {
@@ -32372,7 +32372,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         } else {
           pageFailures.push(result.reason);
           console.debug?.(
-            "[CheeseSearch] skipped delayed following page",
+            "[치즈 플래터] skipped delayed following page",
             result.reason,
           );
         }
@@ -32815,7 +32815,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         });
       } catch (error) {
         console.debug?.(
-          "[CheeseSearch] failed to fetch complete following list",
+          "[치즈 플래터] failed to fetch complete following list",
           error,
         );
       }
@@ -32857,7 +32857,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
     } catch (error) {
       // 실패 시 이전 목록 유지.
-      console.debug?.("[CheeseSearch] custom following refresh failed", error);
+      console.debug?.("[치즈 플래터] custom following refresh failed", error);
       if (!customFollowDataReady) scheduleCustomFollowRetry();
     } finally {
       customFollowLoading = false;
@@ -33661,8 +33661,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ]);
       const list = data?.[COMMENT_BLOCK_KEY];
       commentBlocks = Array.isArray(list) ? list : [];
-      chatProfileBlockButtonOn =
-        data?.[CHAT_PROFILE_BLOCK_BUTTON_KEY] === true;
+      chatProfileBlockButtonOn = data?.[CHAT_PROFILE_BLOCK_BUTTON_KEY] === true;
       chatWordFilters = normalizeChatWordFilters(data?.[CHAT_WORD_FILTER_KEY]);
       compileChatWordFilters();
     } catch {

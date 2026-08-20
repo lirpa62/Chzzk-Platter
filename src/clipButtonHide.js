@@ -1,4 +1,4 @@
-// 치즈 서치 - 클립 라이브 버튼 숨김 (MAIN world, document_start)
+// 치즈 플래터 - 클립 라이브 버튼 숨김 (MAIN world, document_start)
 // 치지직 클립(/clips) 페이지의 "클릭하여 라이브 시청" 플로팅 버튼을 숨기고,
 // 이전/다음 네비게이션 버튼은 호버했을 때만 보이게 한다(시청 몰입 방해 최소화).
 // 버튼이 그려지기 전에 숨겨 깜빡임을 막으려고 document_start + MAIN world로 주입한다.
@@ -622,7 +622,9 @@
   let clipVaultAccountId = "";
 
   function normalizeClipVaultAccountId(value) {
-    const id = String(value || "").trim().toLowerCase();
+    const id = String(value || "")
+      .trim()
+      .toLowerCase();
     return /^[0-9a-f]{32}$/.test(id) ? id : "";
   }
 
@@ -820,24 +822,21 @@
     const accountKey = clipVaultAccountStorageKey(accountId);
     if (!uid || !accountKey) return;
     try {
-      chrome.storage?.local?.get(
-        [accountKey, CLIP_VAULT_LIMIT_KEY],
-        (data) => {
-          const vault = data?.[accountKey] || {};
-          const list = Array.isArray(vault.like) ? vault.like : [];
-          const next = list.filter((it) => it && it.uid !== uid);
-          if (!remove) {
-            next.unshift({ uid, ...readClipFrameMeta(), at: Date.now() });
-            const rawLimit = Number(data?.[CLIP_VAULT_LIMIT_KEY]);
-            const limit = Number.isFinite(rawLimit) ? rawLimit : 500;
-            if (next.length > limit) next.length = limit;
-          }
-          if (next.length === list.length && !remove) return; // 이미 있음
-          chrome.storage.local.set({
-            [accountKey]: { ...vault, like: next },
-          });
-        },
-      );
+      chrome.storage?.local?.get([accountKey, CLIP_VAULT_LIMIT_KEY], (data) => {
+        const vault = data?.[accountKey] || {};
+        const list = Array.isArray(vault.like) ? vault.like : [];
+        const next = list.filter((it) => it && it.uid !== uid);
+        if (!remove) {
+          next.unshift({ uid, ...readClipFrameMeta(), at: Date.now() });
+          const rawLimit = Number(data?.[CLIP_VAULT_LIMIT_KEY]);
+          const limit = Number.isFinite(rawLimit) ? rawLimit : 500;
+          if (next.length > limit) next.length = limit;
+        }
+        if (next.length === list.length && !remove) return; // 이미 있음
+        chrome.storage.local.set({
+          [accountKey]: { ...vault, like: next },
+        });
+      });
     } catch {}
   }
 
