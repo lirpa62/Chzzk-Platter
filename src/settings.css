@@ -113,7 +113,8 @@ body {
 }
 
 .settings-tab-new-badge,
-.settings-item.is-new-feature .settings-item-name::after {
+.settings-item.is-new-feature .settings-item-name::after,
+.settings-group-title.is-new-feature::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -136,7 +137,8 @@ body {
   flex: none;
 }
 
-.settings-item.is-new-feature .settings-item-name::after {
+.settings-item.is-new-feature .settings-item-name::after,
+.settings-group-title.is-new-feature::after {
   margin-left: 6px;
   content: "NEW";
   vertical-align: 1px;

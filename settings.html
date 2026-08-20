@@ -592,7 +592,12 @@
             data-panel="all"
             aria-label="설정 내보내기 및 불러오기"
           >
-            <h2 class="settings-group-title">설정 이동</h2>
+            <h2
+              class="settings-group-title"
+              data-new-feature="settings-full-backup"
+            >
+              설정 이동
+            </h2>
             <p class="settings-group-desc">
               설정만 내보내면 기능 설정, 커스텀 프리셋, 즐겨찾기·그룹, 사용자
               차단과 채팅 필터를 JSON 파일로 저장합니다. 사용자 데이터 포함
@@ -699,7 +704,10 @@
           >
             <h2 class="settings-group-title">화면·화질</h2>
             <ul class="settings-list">
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="pip-transition-disable"
+              >
                 <label>
                   <span class="settings-item-name">PIP 전환 끄기</span>
                   <span class="settings-item-desc"
@@ -1932,7 +1940,11 @@
               있습니다. 커스텀은 시작 2~30초, 목표 1~10초(시작 &gt; 목표).
             </p>
 
-            <h2 class="settings-group-title" style="margin-top: 14px">
+            <h2
+              class="settings-group-title"
+              style="margin-top: 14px"
+              data-new-feature="live-sync-mode"
+            >
               따라잡기 방식
             </h2>
             <div
@@ -2083,7 +2095,7 @@
           >
             <h2 class="settings-group-title">다시보기</h2>
             <ul class="settings-list">
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="vod-chat-activity">
                 <label>
                   <span class="settings-item-name">채팅 활성도</span>
                   <span class="settings-item-desc"
@@ -3728,7 +3740,7 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="inbox-log-power">
                 <label>
                   <span class="settings-item-name">수신함 통나무파워 숨김</span>
                   <span class="settings-item-desc"
@@ -4698,7 +4710,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="following-group-exclusive"
+              >
                 <label>
                   <span class="settings-item-name"
                     >그룹 채널을 팔로잉 목록에서 숨김</span
@@ -6306,7 +6321,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="following-live-sort"
+              >
                 <label>
                   <span class="settings-item-name">라이브 정렬 기억</span>
                   <span class="settings-item-desc"
@@ -7499,7 +7517,7 @@
               획득 내역
             </h2>
             <ul class="settings-list">
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="log-power-history">
                 <label for="logDaysInput">
                   <span class="settings-item-name">내역 보관 기간</span>
                   <span class="settings-item-desc"
@@ -7520,7 +7538,7 @@
                   <small>일</small>
                 </span>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="log-power-history">
                 <label>
                   <span class="settings-item-name">기간 제한 없음</span>
                   <span class="settings-item-desc"

@@ -707,7 +707,9 @@
   const SETTINGS_NEW_FEATURE_UPDATE_KEY =
     "cheeseSettingsNewFeatureUpdatePending";
   const newFeatureItems = Array.from(
-    document.querySelectorAll(".settings-item[data-new-feature]"),
+    document.querySelectorAll(
+      ".settings-item[data-new-feature], .settings-group-title[data-new-feature]",
+    ),
   );
   const newFeatureState = {
     known: new Set(),
@@ -855,7 +857,7 @@
         applySettingsSearch("");
       }
       selectTab(btn.dataset.tab);
-      if (previousTab !== "all") markNewFeatureTabSeen(previousTab);
+      markNewFeatureTabSeen(previousTab);
     }),
   );
   const requestedSettingsTab = isSettingsTabView
@@ -887,7 +889,7 @@
   // 설정 팝업을 닫을 때 마지막으로 보고 있던 탭도 확인 처리한다. storage.set 호출은
   // 동기적으로 큐에 올리고, 실제 저장 완료를 기다리느라 팝업 닫힘을 막지는 않는다.
   window.addEventListener("pagehide", () => {
-    if (activeTab !== "all") markNewFeatureTabSeen(activeTab);
+    markNewFeatureTabSeen(activeTab);
   });
 
   // ── 설정 검색: 이름+설명 텍스트로 항목을 필터링(검색 중엔 전체 탭에서 찾는다). ──
