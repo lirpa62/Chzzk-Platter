@@ -2827,6 +2827,15 @@ html.cheese-channel-live-profile-custom
   word-break: break-word;
 }
 
+/* 리캡 목록의 이모티콘. 행 높이(18px)에 맞춰 줄여 글자와 나란히 놓는다
+   (원본 24px 를 그대로 쓰면 줄 간격이 들쭉날쭉해진다). */
+.cheese-search-comment-panel-list strong img.cheese-blind-emoji {
+  width: 20px;
+  height: 20px;
+  vertical-align: -5px;
+  margin: 0 1px;
+}
+
 .cheese-search-comment-panel-list em {
   color: rgba(255, 255, 255, 0.52);
   font-size: 11px;
@@ -8665,10 +8674,12 @@ html.cheese-fcln-lock body {
 /* ── 통합검색(/search) 동영상 섹션 재랭킹 ─────────────────────────────────────
    네이티브 리스트/더보기를 숨기고 우리 리스트(네이티브 클래스 클론)를 같은 자리에
    렌더한다. 바(정렬 셀렉터)는 치지직 톤에 맞춰 절제된 스타일만 부여. */
-.cheese-search-rerank-native-hidden {
+.cheese-search-rerank-native-hidden,
+.cheese-search-live-rerank-native-hidden {
   display: none !important;
 }
-.cheese-search-rerank-bar {
+.cheese-search-rerank-bar,
+.cheese-search-live-rerank-bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -8683,10 +8694,12 @@ html.cheese-fcln-lock body {
   font-weight: 700;
 }
 /* 더보기/접기 버튼 화살표: 접기(aria-expanded=true) 상태면 위로 회전(원본과 동일). */
-.cheese-search-rerank-more button svg {
+.cheese-search-rerank-more button svg,
+.cheese-search-live-rerank-more button svg {
   transition: transform 0.15s ease;
 }
-.cheese-search-rerank-more button[aria-expanded="true"] svg {
+.cheese-search-rerank-more button[aria-expanded="true"] svg,
+.cheese-search-live-rerank-more button[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
 
@@ -8791,6 +8804,7 @@ html.cheese-fcln-lock body {
 }
 
 .cheese-search-rerank-bar,
+.cheese-search-live-rerank-bar,
 .cheese-integrated-search-clips-header {
   scroll-margin-top: 84px;
 }
@@ -12438,4 +12452,224 @@ html.cheese-inbox-wide div[class*="_item_"] > div[class*="_layer_"] > iframe {
     animation: none;
     opacity: 0.6;
   }
+}
+
+/* 프로필 대화상자 안에서 갈아 끼우는 '내 채팅 기록' 화면.
+   ⚠ 색은 치지직 대화상자에서 상속받는다(라이트/다크 양쪽에 맞추기 위해).
+   원래 내용은 hidden 으로 숨겨 두었다가 뒤로가기에서 되돌린다. */
+.cheese-recap-dialog-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cheese-recap-dialog-view-head {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding: 2px 0 10px;
+}
+
+.cheese-recap-dialog-view-head strong {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-recap-dialog-view-head button {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  padding: 4px;
+}
+
+.cheese-recap-dialog-view-head button:hover {
+  background: rgb(128 128 128 / 18%);
+}
+
+/* '리캡' 은 글자 버튼이라 테두리를 준다(아이콘 버튼과 구분). */
+.cheese-recap-dialog-view-head [data-recap-open] {
+  border: 1px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.75;
+  padding: 3px 8px;
+}
+
+.cheese-recap-dialog-view-head [data-recap-open]:hover {
+  opacity: 1;
+}
+
+.cheese-recap-dialog-view-status {
+  color: inherit;
+  font-size: 13px;
+  margin: 0;
+  opacity: 0.7;
+  padding: 28px 0;
+  text-align: center;
+}
+
+.cheese-recap-dialog-view-list {
+  margin: 0;
+  /* 대화상자 높이를 넘지 않게 목록만 스크롤한다.
+     ⚠ sticky 날짜 헤더의 기준이 되는 스크롤 컨테이너이기도 하다. */
+  max-height: min(380px, 50vh);
+  overflow-y: auto;
+  padding: 0;
+  position: relative;
+}
+
+/* 날짜 구분 헤더. 스크롤하면 그 날짜가 위에 붙어 있다가 다음 날짜로 바뀐다. */
+.cheese-recap-dialog-view-date {
+  /* 배경이 없으면 아래 줄이 비쳐 보인다. 대화상자의 실제 배경색을 JS 가
+     --cheese-recap-bg 로 넘겨 준다(테마마다 달라 하드코딩할 수 없다). */
+  background: var(--cheese-recap-bg, Canvas);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 2px 4px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* 한 줄 = 시각 + 본문 */
+.cheese-recap-dialog-view-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.cheese-recap-dialog-view-row time {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.65;
+  opacity: 0.5;
+}
+
+.cheese-recap-dialog-view-row span {
+  font-size: 13px;
+  line-height: 1.55;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.cheese-recap-dialog-view-more {
+  background: rgb(128 128 128 / 10%);
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 8px;
+  width: 100%;
+}
+
+.cheese-recap-dialog-view-more:hover {
+  background: rgb(128 128 128 / 18%);
+}
+
+.cheese-recap-dialog-view-more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* 본문 속 이모티콘 */
+img.cheese-recap-emoji {
+  display: inline-block;
+  object-fit: contain;
+  vertical-align: -6px;
+}
+
+/* 구독하지 않은 이모티콘은 이름만(유료 기능이라 그림을 보여 주지 않는다) */
+.cheese-recap-emoji-locked {
+  border: 1px dashed currentColor;
+  border-radius: 5px;
+  color: inherit;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+  padding: 0 4px;
+  text-decoration: none;
+  vertical-align: -2px;
+}
+
+/* '사용 중인 프로필' 팝업에 끼워 넣는 내 채팅 줄.
+   ⚠ 줄 자체의 여백·글꼴은 치지직 형제 줄의 클래스를 그대로 복사해 쓴다.
+   여기서는 우리 버튼만 손본다. */
+.cheese-recap-profile-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.cheese-recap-profile-row-more {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+  opacity: 0.75;
+  padding: 2px 8px;
+}
+
+.cheese-recap-profile-row-more:hover {
+  opacity: 1;
+}
+
+.cheese-recap-profile-row-more[hidden] {
+  display: none;
+}
+
+/* 후원·구독 배지. 금액대별 색은 badge-moa-chat 과 같은 구간·색을 쓴다.
+   (1,000,000+ brick / 500,000+ camel / 100,000+ green / 10,000+ cyan / 1+ violet) */
+.cheese-recap-donation {
+  border-radius: 5px;
+  color: #fff;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 5px;
+  padding: 1px 6px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.cheese-recap-donation.is-brick {
+  background: #c54952;
+}
+.cheese-recap-donation.is-camel {
+  background: #d18e3c;
+}
+.cheese-recap-donation.is-green {
+  background: #23815a;
+}
+.cheese-recap-donation.is-cyan {
+  background: #2d7b8b;
+}
+.cheese-recap-donation.is-violet {
+  background: #574fa8;
+}
+.cheese-recap-donation.is-neutral {
+  background: #838383;
+}
+
+/* 구독·구독권 선물은 후원 금액대와 성격이 다르다 → 별도 색 */
+.cheese-recap-donation.is-subscription {
+  background: #6f42c1;
+}
+.cheese-recap-donation.is-gift {
+  background: #3e34af;
 }

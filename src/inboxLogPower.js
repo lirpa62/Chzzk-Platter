@@ -88,7 +88,9 @@
         fiveMinAmount: Number(it?.fiveMinAmount) || 0,
         boost: Number(it?.boost) || 1,
         claimType: String(it?.claimType || "WATCH_1_HOUR").toUpperCase(),
+        accountId: String(it?.accountId || ""),
         watchCount: Number(it?.watchCount) || 0,
+        autoDetected: it?.autoDetected === true,
         // ⚠ 예측 상세용 필드. 여기서 안 옮기면 저장소에 있어도 화면에서 사라진다
         //   (제보: 수신함에서 예측 상세가 안 보임).
         predictionTitle: String(it?.predictionTitle || ""),
@@ -115,19 +117,56 @@
       .sort((a, b) => b.at - a.at);
   }
 
+  // ⚠ 이 스크립트는 game.naver.com 에서 돈다. 치지직 origin 의 localStorage 는
+  //   읽을 수 없으므로, 아래 로그인 확인에서 받은 userIdHash 를 보관해 쓴다.
+  let accountId = "";
+
+  // 계정을 아직 모르면(확인 전·실패) 전체를 보여 준다 — 빈 화면보다 낫다.
+  function filterByAccount(list) {
+    if (!accountId) return list;
+    return list.filter((e) => !e.accountId || e.accountId === accountId);
+  }
+
   async function loadEntries() {
     try {
       const data = await chrome.storage.local.get(LOG_KEY);
-      entries = normalizeEntries(data?.[LOG_KEY]);
+      const all = normalizeEntries(data?.[LOG_KEY]);
+      // ⚠ 다른 계정 기록이 섞이면 합계가 틀린다. 계정 도입 전 기록(accountId
+      //   없음)은 포함한다 — 대부분 단일 계정이라 빼면 과거가 사라져 보인다.
+      entries = filterByAccount(all);
     } catch {
       entries = [];
     }
   }
 
+  // ⚠ 읽음 시각을 계정마다 따로 둔다. 하나로 공유하면 A 계정에서 읽었을 때
+  //   B 계정의 새 적립까지 읽은 것이 돼 점이 사라진다.
+  //   저장 형태: { [accountId]: at }. 옛 버전은 숫자 하나였다 → 현재 계정 것으로
+  //   물려받는다(마이그레이션).
+  function readMapOf(raw) {
+    if (raw && typeof raw === "object") return { ...raw };
+    const legacy = Number(raw) || 0;
+    return legacy && accountId ? { [accountId]: legacy } : {};
+  }
+
+  function readAtFor(raw) {
+    const map = readMapOf(raw);
+    return Number(map[accountId || ""]) || 0;
+  }
+
+  async function saveReadAt(at) {
+    try {
+      const raw = (await chrome.storage.local.get(READ_KEY))?.[READ_KEY];
+      const map = readMapOf(raw);
+      map[accountId || ""] = at;
+      await chrome.storage.local.set({ [READ_KEY]: map });
+    } catch {}
+  }
+
   async function loadReadAt() {
     try {
       const data = await chrome.storage.local.get(READ_KEY);
-      const saved = Number(data?.[READ_KEY]) || 0;
+      const saved = readAtFor(data?.[READ_KEY]);
       if (saved) {
         readAt = saved;
         return;
@@ -135,7 +174,7 @@
       // ⚠ 처음 쓰는 경우(기준 없음)에는 기존 적립 전부가 '새 것'으로 잡혀
       //    점이 켜진 채 시작한다 → 현재 최신 적립을 기준으로 삼아 조용히 시작.
       readAt = latestAt();
-      if (readAt) void chrome.storage.local.set({ [READ_KEY]: readAt });
+      if (readAt) void saveReadAt(readAt);
     } catch {
       readAt = 0;
     }
@@ -155,9 +194,7 @@
     const at = latestAt();
     if (!at || at <= readAt) return;
     readAt = at;
-    try {
-      void chrome.storage.local.set({ [READ_KEY]: at });
-    } catch {}
+    void saveReadAt(at);
   }
 
   // 커뮤니티 소식 탭과 같은 방식: 노드를 붙이지 않고 has-new 클래스 + ::after.
@@ -467,6 +504,9 @@
           : `<span class="cheese-inbox-logpower-hour${amountClass(it)}">${escapeHtml(
               CLAIM_LABELS[it.claimType] || "적립",
             )} <b>${formatSigned(it.amount)}</b></span>` +
+            (it.autoDetected
+              ? `<span class="cheese-inbox-logpower-auto" title="보유량 비교로 찾은 적립입니다. 시각은 감지한 때입니다.">자동 감지</span>`
+              : "") +
             (it.claimType === "WATCH_5_MIN" && it.watchCount > 0
               ? `<span class="cheese-inbox-logpower-count">${formatCount(it.watchCount)}회</span>`
               : "") +
@@ -741,7 +781,8 @@
       void applyFlags();
     }
     if (changes[LOG_KEY]) {
-      entries = normalizeEntries(changes[LOG_KEY].newValue);
+      // ⚠ 여기서 전체를 대입하면 계정 필터가 풀린다.
+      entries = filterByAccount(normalizeEntries(changes[LOG_KEY].newValue));
       lastSignature = "";
       renderSection();
       // 탭을 보고 있는 중이면 방금 들어온 적립까지 읽은 것으로 친다.
@@ -749,8 +790,8 @@
       syncTabDot();
     }
     if (changes[READ_KEY]) {
-      // 다른 탭(창)에서 읽었으면 여기서도 점을 내린다.
-      readAt = Number(changes[READ_KEY].newValue) || 0;
+      // 다른 탭(창)에서 읽었으면 여기서도 점을 내린다(내 계정 값만).
+      readAt = readAtFor(changes[READ_KEY].newValue);
       syncTabDot();
     }
   });
@@ -763,9 +804,15 @@
         { credentials: "include" },
       );
       const json = res.ok ? await res.json() : null;
-      loggedIn = /^[0-9a-f]{32}$/i.test(
-        String(json?.content?.userIdHash || "").trim(),
-      );
+      const hash = String(json?.content?.userIdHash || "")
+        .trim()
+        .toLowerCase();
+      loggedIn = /^[0-9a-f]{32}$/.test(hash);
+      // 계정 필터에 쓴다(로컬스토리지를 못 읽는 origin 이라 이 값이 유일하다).
+      if (loggedIn) {
+        accountId = hash;
+        await loadEntries(); // 계정을 알게 됐으니 다시 걸러 담는다
+      }
     } catch {
       loggedIn = false;
     }

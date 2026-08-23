@@ -122,6 +122,11 @@
         fiveMinAmount: Number(it?.fiveMinAmount) || 0,
         boost: Number(it?.boost) || 1,
         claimType: String(it?.claimType || "WATCH_1_HOUR").toUpperCase(),
+        // ⚠ 계정 구분값. 여기서 버리면 화면과 집계가 계정을 구분하지 못한다.
+        //   빈 문자열 = 계정 도입 전(레거시) 기록.
+        accountId: String(it?.accountId || ""),
+        // 자동 감지 기록(기록 시각 = 감지 시각).
+        autoDetected: it?.autoDetected === true,
         // 5분 묶음의 회차 수(12회면 1시간을 채운 것).
         watchCount: Number(it?.watchCount) || 0,
         // 승부예측 마감 시 저장한 선택지 통계(있을 때만).
@@ -135,10 +140,95 @@
       .filter((it) => it.id && it.amount !== 0);
   }
 
+  // 현재 계정 것 + 계정 도입 전 기록만.
+  let accountIdForFilter = "";
+  // ⚠ 페이지를 새로 열자마자 계정 확인이 실패하면 메모리에는 기준이 없다.
+  //   마지막으로 확인된 계정을 저장소에 남겨 그때도 필터가 살아 있게 한다.
+  const LAST_ACCOUNT_KEY = "cheeseLogPowerLastAccountId";
+
+  // 계정 확인 → 실패하면 마지막으로 확인된 값으로 대체한다.
+  // 반환: { id, changed } — changed 는 이번 확인으로 기준 계정이 바뀌었는지.
+  // ⚠ 전역 플래그로 두면 동시 호출이 서로 덮어쓴다 → 호출자마다 값을 받는다.
+  async function resolveAccountDetail(fresh, maxAgeMs) {
+    const me = await currentAccountId(fresh, maxAgeMs);
+    if (me) {
+      const changed = me !== accountIdForFilter;
+      if (changed) {
+        try {
+          await chrome.storage.local.set({ [LAST_ACCOUNT_KEY]: me });
+        } catch {}
+      }
+      accountIdForFilter = me;
+      return { id: me, changed };
+    }
+    if (accountIdForFilter) return { id: accountIdForFilter, changed: false };
+    try {
+      const saved = (await chrome.storage.local.get(LAST_ACCOUNT_KEY))?.[
+        LAST_ACCOUNT_KEY
+      ];
+      if (/^[0-9a-f]{32}$/i.test(String(saved || ""))) {
+        accountIdForFilter = String(saved);
+        // 빈 기준 → 저장된 기준으로 채워졌다 = 필터가 달라진다.
+        return { id: accountIdForFilter, changed: true };
+      }
+    } catch {}
+    return { id: accountIdForFilter, changed: false };
+  }
+
+  // 계정 id 만 필요한 곳에서 쓴다.
+  async function resolveAccountForFilter(fresh) {
+    return (await resolveAccountDetail(fresh)).id;
+  }
+
+  function filterByAccount(list) {
+    if (!accountIdForFilter) {
+      // ⚠ 계정을 끝내 모른다(최초 확인 실패 + 저장된 기준도 없음).
+      //   기록이 한 계정 것뿐이면 그대로 보여 준다(단일 계정 사용자가 대부분이라
+      //   여기서 숨기면 내역이 통째로 사라져 보인다).
+      //   두 계정 이상이 섞여 있으면 합계·차트가 틀리므로 계정 도입 전 기록만
+      //   보여 주고, 화면에 계정 확인 실패를 알린다.
+      const owners = new Set();
+      for (const e of list) {
+        const o = String(e?.accountId || "");
+        if (o) owners.add(o);
+      }
+      if (owners.size <= 1) return list;
+      return list.filter((e) => !e.accountId);
+    }
+    return list.filter(
+      (e) => !e.accountId || e.accountId === accountIdForFilter,
+    );
+  }
+
+  // 계정을 모르는 채로 다계정 기록을 걸러냈는지(안내 표시용).
+  function accountUnknownWithMultiple(list) {
+    if (accountIdForFilter) return false;
+    const owners = new Set();
+    for (const e of list) {
+      const o = String(e?.accountId || "");
+      if (o) owners.add(o);
+    }
+    return owners.size > 1;
+  }
+
   async function load() {
     try {
       const data = await chrome.storage.local.get(LOG_KEY);
-      entries = normalize(data?.[LOG_KEY]);
+      const all = normalize(data?.[LOG_KEY]);
+      // ⚠ 다른 계정 기록을 함께 보여 주면 합계가 틀리고, 그 항목을 수정하면
+      //   현재 계정으로 복제된다. 계정 도입 전(accountId 없음) 기록은 포함한다
+      //   — 대부분 단일 계정이라 빼면 과거 내역이 통째로 사라져 보인다.
+      // ⚠ 확인에 실패했다고 필터를 풀면 다계정 환경에서 모든 계정 기록이 섞여
+      //   합계·차트가 틀리게 보인다. 마지막으로 확인된 계정을 유지한다.
+      await resolveAccountForFilter();
+      entries = filterByAccount(all);
+      // 계정을 모르는데 여러 계정 기록이 섞여 있으면 일부만 보여 준 상태다.
+      // 조용히 숨기면 합계가 틀린 것처럼 보이므로 이유를 알린다.
+      if (accountUnknownWithMultiple(all)) {
+        setSyncNote(
+          "로그인 상태를 확인하지 못해 계정 구분 전 기록만 표시합니다.",
+        );
+      }
     } catch {
       entries = [];
     }
@@ -153,13 +243,37 @@
   //   사라진다.
   const MANUAL_PREFIX = "MANUAL-";
 
-  async function mutateLog(fn) {
-    const data = await chrome.storage.local.get(LOG_KEY);
-    const list = Array.isArray(data?.[LOG_KEY]) ? data[LOG_KEY] : [];
-    const next = fn(list.slice());
-    if (!next) return false;
-    await chrome.storage.local.set({ [LOG_KEY]: next });
-    return true;
+  // 내역 변경은 background 가 단일 작성자다(동시 쓰기로 서로 덮어쓰는 것 방지).
+  // ⚠ 확장 페이지는 치지직 localStorage 를 못 읽어 계정 힌트를 보낼 수 없다.
+  //   background 의 계정 확인이 실패하면 수동 작업은 저장하지 않고 실패를 알린다
+  //   — 나중에 엉뚱한 계정으로 들어가는 것보다 사용자가 다시 시도하는 편이 낫다.
+  async function sendLogWrite(op, payload) {
+    try {
+      // 수동 편집은 캐시를 믿지 않는다(전환 직후 이전 계정으로 나갈 수 있다).
+      const hint = await currentAccountId(true);
+      // ⚠ 힌트 없이 보내면 background 가 자체 캐시(최대 5분)로 계정을 정한다.
+      //   전환 직후라면 이전 계정의 기록을 편집하게 된다 → 아예 보내지 않는다.
+      if (!hint) return { ok: false, reason: "account-unknown" };
+      // ⚠ 화면은 아직 이전 계정(A) 항목을 보여 주는데 저장은 새 계정(B)으로 나가면,
+      //   A 항목의 id 를 B 에서 못 찾아 '새 항목 추가'가 된다(다른 계정에 복제).
+      //   화면 기준과 저장 대상이 다르면 저장하지 않고 다시 불러오게 한다.
+      // 편집창이 열려 있으면 '창을 연 시점의 계정'과 비교한다(창을 닫기 전에는
+      // 기준이 바뀌지 않으므로 재시도해도 계속 차단된다).
+      const basis = editingAccountId || accountIdForFilter;
+      if (basis && basis !== hint) {
+        accountIdForFilter = hint;
+        return { ok: false, reason: "account-changed" };
+      }
+      const res = await chrome.runtime?.sendMessage?.({
+        type: "LP_WRITE",
+        op,
+        accountHint: hint,
+        payload,
+      });
+      return res || { ok: false, reason: "no-response" };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error) };
+    }
   }
 
   // 5분 묶음의 회차 수를 금액에서 역산한다. 5분 보상이 아니거나 단가로 안
@@ -172,19 +286,13 @@
     return Number.isInteger(n) && n >= 1 ? n : 0;
   }
 
+  // 수동 추가·수정. 실패 이유를 그대로 돌려준다(호출부가 사용자에게 알린다).
   function upsertEntry(entry) {
-    return mutateLog((list) => {
-      const i = list.findIndex((it) => it?.id === entry.id);
-      if (i >= 0) list[i] = { ...list[i], ...entry };
-      else list.unshift(entry);
-      // 저장 순서는 최신순을 유지한다(다른 화면이 그렇게 가정한다).
-      list.sort((a, b) => (Number(b?.at) || 0) - (Number(a?.at) || 0));
-      return list;
-    });
+    return sendLogWrite("UPSERT_MANUAL_ENTRY", { entry });
   }
 
   function deleteEntry(id) {
-    return mutateLog((list) => list.filter((it) => it?.id !== id));
+    return sendLogWrite("DELETE_MANUAL_ENTRY", { id });
   }
 
   const mmdd = (ms) => {
@@ -593,6 +701,27 @@
     return copy;
   }
 
+  // 프로필이 없는 채널은 치지직 기본 프로필을 쓴다(전용 팔로잉 목록과 같은 이미지).
+  // ⚠ 라이트/다크 두 장을 모두 넣고 CSS 로 고른다 — 테마를 바꿔도 다시 그리지
+  //   않는 목록이 있어, JS 로 한 장만 고르면 그 목록은 옛 테마 이미지로 남는다.
+  const DEFAULT_PROFILE_LIGHT =
+    "https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png";
+  const DEFAULT_PROFILE_DARK =
+    "https://ssl.pstatic.net/static/nng/glive/image/default_profile_dark.png";
+
+  function defaultProfileUrl() {
+    return document.documentElement.dataset.theme === "dark"
+      ? DEFAULT_PROFILE_DARK
+      : DEFAULT_PROFILE_LIGHT;
+  }
+
+  function defaultProfileHtml(size) {
+    return (
+      `<img class="lps-default-profile lps-default-profile-light" src="${DEFAULT_PROFILE_LIGHT}" alt="" width="${size}" height="${size}" loading="lazy">` +
+      `<img class="lps-default-profile lps-default-profile-dark" src="${DEFAULT_PROFILE_DARK}" alt="" width="${size}" height="${size}" loading="lazy">`
+    );
+  }
+
   function profileImg(e, extraClass = "") {
     const src = e.channelImageUrl;
     const className = `lps-avatar${extraClass ? ` ${extraClass}` : ""}`;
@@ -779,6 +908,10 @@
         : `<span class="${amountClass(e)}">${escapeHtml(
             CLAIM_LABELS[e.claimType] || claimFallbackLabel(e.claimType),
           )} <b>${fmtSigned(e.amount)}</b></span>${expectedWinHtml(e)}` +
+          // 보유량 비교로 찾은 기록 — 시각이 실제 획득 시점이 아니다.
+          (e.autoDetected
+            ? `<span class="lps-auto" title="다른 기기 등에서 받은 적립을 보유량 비교로 찾았습니다. 시각은 감지한 때입니다.">자동 감지</span>`
+            : "") +
           // 묶인 회차 수. 12회면 1시간을 채운 것, 적으면 중간에 끊긴 것.
           (e.claimType === "WATCH_5_MIN" && e.watchCount > 0
             ? `<span class="lps-watch-count">${fmt(e.watchCount)}회</span>`
@@ -981,11 +1114,8 @@
       date.getMonth(),
       date.getDate(),
     );
-    const dayEnd = +new Date(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate() + 1,
-    ) - 1;
+    const dayEnd =
+      +new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1) - 1;
     const outsideRange =
       (fromMs && dayEnd < fromMs) || (toMs && dayStart > toMs);
     const classes = [
@@ -1923,7 +2053,7 @@
           `<li role="option" data-ch-index="${i}" tabindex="-1">` +
           (c.channelImageUrl
             ? `<img src="${escapeHtml(c.channelImageUrl)}" alt="" width="24" height="24" loading="lazy">`
-            : `<span class="lps-ch-blank" aria-hidden="true"></span>`) +
+            : defaultProfileHtml(24)) +
           `<b>${escapeHtml(c.channelName || "채널")}</b>` +
           (c.local ? `<em>내역</em>` : "") +
           `</li>`,
@@ -1945,8 +2075,9 @@
     }
     const img = document.getElementById("lpsChannelPickedImg");
     if (img) {
-      img.src = picked.channelImageUrl || "";
-      img.hidden = !picked.channelImageUrl;
+      // 이미지가 없으면 숨기지 말고 치지직 기본 프로필을 쓴다.
+      img.src = picked.channelImageUrl || defaultProfileUrl();
+      img.hidden = false;
     }
     document.getElementById("lpsChannelPickedName").textContent =
       picked.channelName || "채널";
@@ -2132,6 +2263,10 @@
 
   // ── 추가/수정 대화상자 ─────────────────────────────────────────────────────
   let editingId = ""; // 빈 문자열이면 '새로 추가'
+  // ⚠ 편집창을 연 시점의 계정. 저장할 때 이 값과 실제 계정을 비교한다.
+  //   화면 필터(accountIdForFilter)와 비교하면, 안내 후 그 값이 새 계정으로
+  //   갱신돼 같은 창에서 다시 누르면 통과해 버린다(A 항목이 B 에 추가).
+  let editingAccountId = "";
 
   const dlg = () => document.getElementById("lpsDialog");
   const $f = (id) => document.getElementById(id);
@@ -2366,6 +2501,7 @@
     const box = dlg();
     if (!box) return;
     editingId = entry?.id || "";
+    editingAccountId = accountIdForFilter;
     pickedTier = 0;
     tierPending = null;
     showTierNote();
@@ -2421,6 +2557,7 @@
     const box = dlg();
     if (box) box.hidden = true;
     editingId = "";
+    editingAccountId = ""; // 다음에 열 때 그 시점 계정으로 다시 고정한다
   }
 
   async function saveDialog() {
@@ -2509,13 +2646,55 @@
         boostOf(type, prev?.boost),
       ),
     });
-    if (!ok) return showDialogError("저장하지 못했습니다.");
+    if (!ok?.ok) {
+      // 계정이 바뀌었으면 화면이 이전 계정 항목을 들고 있다 → 저장하지 않고
+      // 새 계정 기준으로 다시 불러온다(그대로 저장하면 다른 계정에 복제된다).
+      if (ok?.reason === "account-changed") {
+        // ⚠ 창을 열어 두면 A 계정 입력값이 그대로 남아 다시 저장할 수 있다.
+        //   닫고 새 계정 목록에서 다시 고르게 한다.
+        closeDialog();
+        await reloadAfterAccountChange();
+        setSyncNote(
+          "로그인 계정이 바뀌어 목록을 새로 불러왔습니다. 다시 확인해 주세요.",
+        );
+        return;
+      }
+      // 계정을 확인하지 못하면 저장하지 않는다 — 어느 계정 기록인지 모른 채
+      // 넣으면 나중에 집계가 어긋난다. 사용자가 다시 시도할 수 있게 알린다.
+      return showDialogError(
+        ok?.reason === "account-unknown"
+          ? "치지직 로그인을 확인하지 못했습니다. 치지직 탭을 연 뒤 다시 시도해 주세요."
+          : "저장하지 못했습니다.",
+      );
+    }
     closeDialog();
+  }
+
+  // 계정 전환을 감지했을 때: 새 계정 기준으로 목록을 다시 그린다.
+  async function reloadAfterAccountChange() {
+    await load();
+    render();
+    void refreshBalances();
   }
 
   async function removeCurrent() {
     if (!editingId) return;
-    await deleteEntry(editingId);
+    const ok = await deleteEntry(editingId);
+    if (!ok?.ok) {
+      if (ok?.reason === "account-changed") {
+        closeDialog();
+        await reloadAfterAccountChange();
+        setSyncNote(
+          "로그인 계정이 바뀌어 목록을 새로 불러왔습니다. 다시 확인해 주세요.",
+        );
+        return;
+      }
+      return showDialogError(
+        ok?.reason === "account-unknown"
+          ? "치지직 로그인을 확인하지 못했습니다. 치지직 탭을 연 뒤 다시 시도해 주세요."
+          : "삭제하지 못했습니다.",
+      );
+    }
     closeDialog();
   }
 
@@ -2645,6 +2824,13 @@
     const next =
       document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
+    // 고른 채널의 기본 프로필은 img 한 장이라 테마를 따라 직접 바꿔 준다
+    // (검색 목록 쪽은 두 장을 넣고 CSS 로 고르므로 손댈 것이 없다).
+    const pickedImg = document.getElementById("lpsChannelPickedImg");
+    if (pickedImg && !picked?.channelImageUrl) {
+      pickedImg.src =
+        next === "dark" ? DEFAULT_PROFILE_DARK : DEFAULT_PROFILE_LIGHT;
+    }
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch {}
@@ -2670,6 +2856,7 @@
       const value = String(input.value || "").trim();
       if (!name) return;
       channelColors.set(name, value);
+      customColored.add(name); // 직접 고른 색은 추출이 덮지 않는다
       saveChannelColorPrefs();
       // 색은 두 차트가 공유하므로 함께 다시 그린다.
       renderBarChart();
@@ -2688,17 +2875,28 @@
   // 채널명 → 선 색. 사용자가 직접 고르거나 프로필에서 추출한 값을 저장한다.
   // 비어 있으면 기본 팔레트를 쓴다.
   const COLOR_KEY = "cheeseLogPowerChartColors";
+  // 사용자가 직접 고른 채널. ⚠ 추출은 이 채널을 건드리지 않는다 — 색값만 봐서는
+  //   직접 고른 것인지 추출된 것인지 구분할 수 없어, 예전에는 '프로필에서 색
+  //   추출'이 커스텀 색을 덮어썼다(제보).
+  const COLOR_CUSTOM_KEY = "cheeseLogPowerChartColorsCustom";
   const channelColors = new Map();
+  const customColored = new Set();
 
   async function loadChannelColorPrefs() {
     try {
-      const data = await chrome.storage.local.get(COLOR_KEY);
+      const data = await chrome.storage.local.get([
+        COLOR_KEY,
+        COLOR_CUSTOM_KEY,
+      ]);
       const obj = data?.[COLOR_KEY];
       if (obj && typeof obj === "object") {
         for (const [k, v] of Object.entries(obj)) {
           if (typeof v === "string" && v) channelColors.set(k, v);
         }
       }
+      const list = data?.[COLOR_CUSTOM_KEY];
+      if (Array.isArray(list))
+        for (const k of list) if (k) customColored.add(k);
     } catch {}
   }
 
@@ -2708,6 +2906,7 @@
         [COLOR_KEY]: Object.fromEntries(
           [...channelColors.entries()].filter(([, v]) => v),
         ),
+        [COLOR_CUSTOM_KEY]: [...customColored],
       });
     } catch {}
   }
@@ -2724,94 +2923,93 @@
   // 전 보유분과 보관 기간이 지나 지워진 기록까지 섞여 기타만 거대해진다.
   //   → 스냅샷을 남기고 '그 이후의 변화'만 본다.
   //       기타 = (현재 보유 − 스냅샷 보유) − 그 사이 우리가 기록한 적립
-  const SNAP_KEY = "cheeseLogPowerBalanceSnapshot";
-  // 반올림·표시 지연으로 생기는 미세 차이는 무시한다.
-  const SNAP_NOISE = 5;
+  // ⚠ 구 키는 계정 구분이 없다. 계정을 바꾸면 A 의 기준으로 B 의 보유량을 비교해
+  //   수십만 단위의 허위 기타 적립·사용이 생긴다(상위 5채널 합계만 82만).
+  //   V2 는 계정별로 나눠 담고, 구 키는 폐기한다 — 어느 계정 것인지 알 수 없어
+  //   현재 계정에 귀속시킬 수 없다. 기준만 새로 잡으면 일회성 손실로 끝난다.
+  const SNAP_KEY_V1 = "cheeseLogPowerBalanceSnapshot";
+  const SNAP_KEY = "cheeseLogPowerBalanceSnapshotsV2";
 
-  // background 가 누적 중인 5분 보상(아직 내역에 없다).
-  // ⚠ flush 전에는 보유량만 올라 있고 기록이 없어, 보유량 맞추기가 그 분량을
-  //   '설명되지 않는 변동'으로 보고 기타 적립에 넣었다(제보: 기타 +72 가
-  //   5분 시청 +72 와 중복). 차액에서 빼 준다.
-  const RUN_KEY = "cheeseLogPowerFiveMinRun";
+  // 계정 식별. 확인 실패면 빈 문자열 — 그때는 비교·갱신을 모두 건너뛴다.
+  const USER_STATUS_URL =
+    "https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus";
+  let accountIdCache = { id: "", at: 0 };
+  const ACCOUNT_TTL_MS = 5 * 60 * 1000;
+  // 내역이 바뀔 때처럼 '계정이 바뀌었을 수도 있는' 시점에 쓰는 짧은 TTL.
+  // 5분 캐시를 그대로 쓰면 계정 전환 후에도 최대 5분간 이전 계정 기록을 보여 준다.
+  const ACCOUNT_SOFT_TTL_MS = 20 * 1000;
+  // ⚠ 진행 중인 확인은 공유한다. 내역 변경이 몰아치면 요청이 그만큼 나간다.
+  let accountInFlight = null;
 
-  async function pendingRun() {
-    try {
-      const v = (await chrome.storage.local.get(RUN_KEY))?.[RUN_KEY];
-      if (v && typeof v === "object" && v.curr && Number(v.amount) > 0) {
-        return { channelId: String(v.curr), amount: Number(v.amount) };
+  // fresh=true: 캐시를 무시하고 다시 확인한다(수동 편집 등).
+  // maxAgeMs: 이 나이보다 오래된 캐시는 쓰지 않는다(내역 변경 시 짧게).
+  async function currentAccountId(fresh, maxAgeMs) {
+    const now = Date.now();
+    const ttl = Number.isFinite(maxAgeMs) ? maxAgeMs : ACCOUNT_TTL_MS;
+    if (!fresh && accountIdCache.id && now - accountIdCache.at < ttl) {
+      return accountIdCache.id;
+    }
+    if (accountInFlight) return accountInFlight;
+    accountInFlight = (async () => {
+      try {
+        const res = await fetch(USER_STATUS_URL, { credentials: "include" });
+        if (!res.ok) return "";
+        const hash = String(
+          (await res.json())?.content?.userIdHash || "",
+        ).trim();
+        if (!/^[0-9a-f]{32}$/i.test(hash)) return "";
+        accountIdCache = { id: hash, at: Date.now() };
+        return hash;
+      } catch {
+        return "";
+      } finally {
+        accountInFlight = null;
       }
-    } catch {}
-    return null;
+    })();
+    return accountInFlight;
   }
 
-  async function loadSnapshot() {
+  // 구 스냅샷 폐기(한 번만). 계정을 알 수 없는 기준으로 비교하면 다른 계정의
+  // 보유량과 대조해 수십만 단위의 허위 기록이 생긴다.
+  async function migrateSnapshotV1() {
     try {
-      const v = (await chrome.storage.local.get(SNAP_KEY))?.[SNAP_KEY];
+      const cur = await chrome.storage.local.get(SNAP_KEY_V1);
+      if (cur?.[SNAP_KEY_V1] == null) return;
+      await chrome.storage.local.remove(SNAP_KEY_V1);
+    } catch {}
+  }
+
+  // 현재 계정의 스냅샷만 돌려준다. 계정을 모르면 null(비교하지 않는다).
+  async function loadSnapshot() {
+    const accountId = await currentAccountId();
+    if (!accountId) return null;
+    try {
+      const all = (await chrome.storage.local.get(SNAP_KEY))?.[SNAP_KEY];
+      const v = all && typeof all === "object" ? all[accountId] : null;
       return v && typeof v === "object" ? v : null;
     } catch {
       return null;
     }
   }
 
-  // 적립이 끝난 뒤에도 잠깐은 제외해 둔다. 마지막 5분 보상이 들어온 직후 방송이
-  // 끝나면 우리 기록보다 보유량이 먼저 오르는데, 그 틈에 비교하면 정상 시청 보상이
-  // 기타로 잡힌다(제보).
-  const SNAP_SETTLE_MS = 10 * 60 * 1000;
-
-  // ⚠ 적립이 진행 중인 채널은 스냅샷에서 제외한다. 5분 보상이 들어오는 도중이거나
-  //   1시간 타이머가 도는 채널은 '곧 우리가 기록할' 분량이라, 지금 찍어 두면
-  //   다음 비교에서 기타로 오인된다.
-  // ⚠ 단 '키가 있다'만으로 제외하면 안 된다. 다른 채널로 옮기면 이전 채널의 state 는
-  //   activeUntil=0 으로 비활성화될 뿐 남아 있어서, 계속 제외되는 바람에 그 채널의
-  //   미기록 5분 보상이 영영 안 잡혔다(제보). 아직 유효한 것만 센다.
-  async function activeChannelIds() {
-    const now = Date.now();
-    const ids = new Set();
-    try {
-      const sess = await chrome.storage.session.get(null);
-      for (const [k, v] of Object.entries(sess || {})) {
-        if (!k.startsWith("logpower_watch_reward_state:")) continue;
-        // activeUntil 이 지났어도 SNAP_SETTLE_MS 동안은 유예한다.
-        const until = Number(v?.activeUntil) || 0;
-        if (until + SNAP_SETTLE_MS <= now) continue;
-        ids.add(k.slice("logpower_watch_reward_state:".length));
-      }
-    } catch {}
-    try {
-      const loc = await chrome.storage.local.get(null);
-      for (const [k, v] of Object.entries(loc || {})) {
-        if (!k.startsWith("cheeseLogPowerHourTimer:")) continue;
-        // 타이머는 끝난 뒤에도 보상이 늦게 들어올 수 있어 같은 유예를 준다.
-        // leftAt(자리 비움)은 남은 시간이 보존된 상태라 그대로 제외 대상이다.
-        const endsAt = Number(v?.endsAt) || 0;
-        if (!(Number(v?.leftAt) > 0) && endsAt + SNAP_SETTLE_MS <= now)
-          continue;
-        ids.add(k.slice("cheeseLogPowerHourTimer:".length));
-      }
-    } catch {}
-    // 방송이 끝나면 state·타이머 키가 통째로 지워져서 위 두 경로로는 유예를 줄 수
-    // 없다. 그 순간이 하필 마지막 5분 보상이 들어온 직후라, 종료 직후에 비교하면
-    // 정상 시청 보상이 기타로 잡혔다(제보). 최근에 시청 보상을 받은 채널은
-    // 내역만 보고도 알 수 있으니 그걸로 유예를 준다.
-    for (const e of entries) {
-      if (!e.channelId || !isWatchClaim(e.claimType)) continue;
-      if (Number(e.at) + SNAP_SETTLE_MS > now) ids.add(e.channelId);
-    }
-    ids.delete("");
-    return ids;
-  }
-
   // 지금 적립 중이거나 1시간 타이머가 도는 채널을 훑는다(제목 옆 배지용).
-  // ⚠ activeChannelIds 와 달리 '만료되지 않은 것'만 남긴다. 스냅샷 제외는
-  //   넉넉히 걸러도 되지만, 배지는 지난 상태를 보여 주면 거짓말이 된다.
+  // ⚠ 배지는 '만료되지 않은 것'만 보여 준다 — 지난 상태를 띄우면 거짓말이 된다.
+  //   (스냅샷 제외 판정은 background 가 따로 넉넉히 한다.)
   async function activeWatchInfo() {
     const now = Date.now();
     const out = [];
+    // ⚠ 다른 계정의 추적·타이머까지 '적립 중'으로 띄우면 거짓말이 된다.
+    //   (계정 도입 전 상태는 accountId 가 비어 있다 → 내 것으로 본다.)
+    const me = await resolveAccountForFilter();
+    // 계정을 모르면 아무것도 띄우지 않는다 — 남의 적립을 내 것처럼 보이면 안 된다.
+    if (!me) return out;
+    const mine = (v) => !v?.accountId || v.accountId === me;
     try {
       const sess = await chrome.storage.session.get(null);
       for (const [k, v] of Object.entries(sess || {})) {
         if (!k.startsWith("logpower_watch_reward_state:")) continue;
         if (!(Number(v?.activeUntil) > now)) continue;
+        if (!mine(v)) continue;
         out.push({
           channelId: k.slice("logpower_watch_reward_state:".length),
           kind: "accruing",
@@ -2819,13 +3017,24 @@
       }
     } catch {}
     try {
-      const loc = await chrome.storage.local.get(null);
+      // ⚠ get(null) 은 내역까지 통째로 읽는다. 후보 채널(보유량 목록 + 위에서 모은
+      //   적립 중 채널)의 타이머 키만 콕 집어 읽는다.
+      const ids = new Set(out.map((x) => x.channelId));
+      for (const b of balances || []) {
+        const id = String(b?.channelId || "");
+        if (id) ids.add(id);
+      }
+      const timerKeys = [...ids].map((id) => `cheeseLogPowerHourTimer:${id}`);
+      const loc = timerKeys.length
+        ? await chrome.storage.local.get(timerKeys)
+        : {};
       for (const [k, v] of Object.entries(loc || {})) {
         if (!k.startsWith("cheeseLogPowerHourTimer:")) continue;
         // leftAt > 0 = 페이지를 떠나 일시정지된 상태. 남은 시간은 보존되지만
         // 지금 도는 건 아니므로 배지에는 넣지 않는다.
         if (Number(v?.leftAt) > 0) continue;
         if (!(Number(v?.endsAt) > now)) continue;
+        if (!mine(v)) continue;
         const id = k.slice("cheeseLogPowerHourTimer:".length);
         if (out.some((x) => x.channelId === id)) continue;
         out.push({ channelId: id, kind: "timer", endsAt: Number(v.endsAt) });
@@ -2881,119 +3090,39 @@
     box.hidden = false;
   }
 
-  // baseAt: 기준 시각을 직접 지정한다. 방금 기록한 내역과 같은 시각을 써야
-  // 경계(at === since)에서 그 내역이 다시 세어지지 않는다.
-  async function saveSnapshot(baseAt) {
-    if (!Array.isArray(balances)) return false;
-    const skip = await activeChannelIds();
-    const prevSnap = await loadSnapshot();
-    const prev = prevSnap?.map || {};
-    const prevAt = prevSnap?.atMap || {};
-    const now = Number(baseAt) || Date.now();
-    const map = {};
-    // 채널별 기준 시각. 보유량과 '언제부터 센 내역인지'는 반드시 같이 움직여야 한다.
-    // 하나만 갱신하면 이미 반영된 내역을 또 빼서 유령 차액이 생긴다.
-    const atMap = {};
-    for (const b of balances) {
-      const id = String(b?.channelId || "");
-      if (!id) continue;
-      // 적립 중인 채널은 '지금 값'을 찍으면 진행 중인 보상이 기준에 섞인다.
-      // 그렇다고 빼 버리면 기준 자체가 사라져, 적립이 끝난 뒤에도 비교 대상이
-      // 없어 그 채널의 미기록분이 영영 안 잡힌다(제보). 이전 기준을 넘겨 둔다.
-      if (skip.has(id)) {
-        if (id in prev) {
-          map[id] = Number(prev[id]) || 0;
-          // 기준을 물려받으면 시각도 함께 물려받는다. 전역 at 으로 비교하면
-          // 그 사이에 우리가 기록한 적립이 '스냅샷 이전'으로 밀려 빠지고,
-          // 그만큼이 기타로 둔갑한다.
-          atMap[id] = Number(prevAt[id]) || Number(prevSnap?.at) || now;
-        } else {
-          // 기준이 아예 없던 채널(적립 중일 때 처음 본 경우). 여기서 남겨 두지
-          // 않으면 적립이 끝난 뒤에도 비교 대상이 없어 미기록분을 못 잡는다.
-          // 지금 값을 기준 삼되 내역도 지금부터 세면 진행 중인 보상은 상쇄된다.
-          map[id] = Number(b.amount) || 0;
-          atMap[id] = now;
-        }
-        continue;
-      }
-      // 지금 값으로 다시 기준을 잡았으니, 내역도 지금부터 다시 센다.
-      map[id] = Number(b.amount) || 0;
-      atMap[id] = now;
-    }
-    try {
-      await chrome.storage.local.set({
-        [SNAP_KEY]: { at: now, map, atMap },
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // 한 채널이 기준 시각 이후 우리 내역에 남긴 합계.
-  function recordedSinceFor(channelId, sinceMs) {
-    let sum = 0;
-    for (const e of entries) {
-      // at === sinceMs 는 기준을 잡던 순간 이미 보유량에 반영된 내역이다.
-      // 포함하면 한 번 더 빼서 유령 차액(-N)이 생긴다.
-      if (e.channelId !== channelId || e.at <= sinceMs) continue;
-      sum += entryTotal(e);
-    }
-    return sum;
-  }
-
-  // 스냅샷과 현재를 비교해 설명되지 않는 변동을 채널별로 돌려준다.
-  async function computeOther() {
-    const snap = await loadSnapshot();
-    if (!snap?.map || !Array.isArray(balances)) return [];
-    const skip = await activeChannelIds();
-    const pending = await pendingRun();
-    const out = [];
-    for (const b of balances) {
-      const id = String(b?.channelId || "");
-      // 스냅샷에 없던 채널은 기준이 없어 판단할 수 없다.
-      if (!id || skip.has(id) || !(id in snap.map)) continue;
-      // 기준 시각은 채널마다 다를 수 있다(적립 중이라 기준을 물려받은 채널).
-      const since = Number(snap.atMap?.[id]) || Number(snap.at) || 0;
-      const delta = (Number(b.amount) || 0) - Number(snap.map[id] || 0);
-      // 아직 기록되지 않은 누적분도 '설명된 것'으로 친다.
-      const pend = pending?.channelId === id ? pending.amount : 0;
-      const other = delta - recordedSinceFor(id, since) - pend;
-      if (Math.abs(other) <= SNAP_NOISE) continue;
-      out.push({
-        channelId: id,
-        channelName: b.channelName || "채널",
-        channelImageUrl: b.channelImageUrl || "",
-        verifiedMark: b.verifiedMark === true,
-        amount: other,
-      });
-    }
-    return out;
-  }
-
-  // 기타 변동을 내역에 남기고 스냅샷을 지금 값으로 갱신한다.
-  // (기록과 스냅샷 갱신은 한 묶음이어야 같은 변동을 두 번 세지 않는다.)
+  // 보유량 맞추기는 background 가 소유한다.
+  // ⚠ 예전엔 여기서도 같은 계산을 했다. 두 곳에 두면 이번에 여러 번 고친 규칙
+  //   (atMap·pendingRun·유예·계정 경계)이 갈라진다 → 요청만 보낸다.
+  // ⚠ 실패를 0 으로 바꾸면 '차이가 없습니다'로 안내돼, 사용자는 맞춰진 줄 안다.
+  //   결과를 그대로 돌려주고 호출부가 사유를 표시한다.
   async function commitOther() {
-    const rows = await computeOther();
-    const now = Date.now();
-    for (const r of rows) {
-      await upsertEntry({
-        // 같은 순간 같은 채널이면 한 건 — 반복 저장해도 중복되지 않는다.
-        id: `OTHER-${r.channelId}-${now}`,
-        at: now,
-        channelId: r.channelId,
-        channelName: r.channelName,
-        channelImageUrl: r.channelImageUrl,
-        verifiedMark: r.verifiedMark,
-        amount: r.amount,
-        fiveMinAmount: 0,
-        boost: 1,
-        claimType: r.amount < 0 ? "OTHER_LOSS" : "OTHER_GAIN",
+    try {
+      const res = await chrome.runtime?.sendMessage?.({
+        type: "LP_RECONCILE",
       });
+      if (!res) return { ok: false, applied: 0, reason: "no-response" };
+      return {
+        ok: res.ok !== false,
+        applied: Number(res.applied) || 0,
+        reason: String(res.reason || ""),
+      };
+    } catch (error) {
+      return { ok: false, applied: 0, reason: String(error?.message || error) };
     }
-    // 방금 기록한 내역과 같은 시각으로 기준을 잡는다(이중 차감 방지).
-    await saveSnapshot(now);
-    return rows.length;
+  }
+
+  // 보정 실패 사유를 사용자 말로 바꾼다.
+  function syncFailNote(reason) {
+    if (reason === "account-unknown") {
+      return "로그인 상태를 확인하지 못했습니다. 치지직에 로그인한 뒤 다시 시도해 주세요.";
+    }
+    if (reason === "pending-left" || reason === "log-changed") {
+      return "아직 기록 중인 적립이 있어 잠시 후 다시 시도해 주세요.";
+    }
+    if (reason === "balances-failed") {
+      return "보유량을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    }
+    return "보유량을 맞추지 못했습니다. 잠시 후 다시 시도해 주세요.";
   }
 
   async function loadBalances() {
@@ -3149,8 +3278,12 @@
   // ⚠ 프로필 이미지 호스트는 optional_host_permissions 다. 사용자가 '프로필에서 색
   // 추출'을 누를 때만 권한을 요청하고, 거부하면 기본 팔레트를 그대로 쓴다.
   async function loadChannelColors(names, { force = false } = {}) {
-    const todo = names.filter((n) => n && (force || !channelColors.has(n)));
-    if (!todo.length) return { changed: false, ok: 0, fail: 0 };
+    // force 로 다시 뽑을 때도 사용자가 직접 고른 채널은 제외한다.
+    const todo = names.filter(
+      (n) => n && !customColored.has(n) && (force || !channelColors.has(n)),
+    );
+    const kept = names.filter((n) => n && customColored.has(n)).length;
+    if (!todo.length) return { changed: false, ok: 0, fail: 0, kept };
 
     // ⚠ 이미지 출처를 entries 로만 잡으면 '보유는 있는데 최근 적립이 없는' 채널
     //    (막대 차트에만 나오는 채널)은 URL 을 못 찾아 항상 추출에 실패한다.
@@ -3182,7 +3315,7 @@
         }
       }),
     );
-    return { changed, ok, fail };
+    return { changed, ok, fail, kept };
   }
 
   // 두 차트가 같은 채널을 같은 색으로 그려야 하므로 팔레트와 해석기를 공유한다.
@@ -3953,21 +4086,28 @@
           setColorNote("");
           // force: 이미 값이 있어도 프로필 기준으로 다시 뽑는다.
           void loadChannelColors(lastColorNames, { force: true }).then(
-            ({ ok, fail }) => {
+            ({ ok, fail, kept }) => {
               saveChannelColorPrefs();
               renderBarChart();
               renderLineChart();
               btn.disabled = false;
               btn.textContent = "프로필에서 색 추출";
               // 조용히 실패하면 '추출했는데 색이 이상하다'로 오해하게 된다.
+              const keptNote = kept
+                ? ` 직접 고른 ${kept}개는 그대로 뒀습니다.`
+                : "";
               if (!ok && fail) {
                 setColorNote(
-                  "프로필 이미지를 불러오지 못해 기본색을 유지합니다.",
+                  `프로필 이미지를 불러오지 못해 기본색을 유지합니다.${keptNote}`,
                 );
               } else if (fail) {
-                setColorNote(`${ok}개 적용, ${fail}개는 이미지가 없어 기본색.`);
+                setColorNote(
+                  `${ok}개 적용, ${fail}개는 이미지가 없어 기본색.${keptNote}`,
+                );
+              } else if (!ok && kept) {
+                setColorNote("모두 직접 고른 색이라 그대로 뒀습니다.");
               } else {
-                setColorNote("");
+                setColorNote(keptNote.trim());
               }
             },
           );
@@ -4021,14 +4161,16 @@
       void withBusy(btn, async () => {
         // 최신 보유량을 받아 비교한다(열어 둔 지 오래됐을 수 있다).
         await loadBalances();
-        const n = await commitOther();
+        const res = await commitOther();
         await load();
         render();
         await refreshBalances();
         setSyncNote(
-          n
-            ? `${n}개 채널의 차이를 '기타'로 기록했습니다.`
-            : "차이가 없습니다.",
+          !res.ok
+            ? syncFailNote(res.reason)
+            : res.applied
+              ? `${res.applied}개 채널의 차이를 '기타'로 기록했습니다.`
+              : "차이가 없습니다.",
         );
       });
       return;
@@ -4376,9 +4518,24 @@
     if (changes[LOG_KEY]) {
       const change = changes[LOG_KEY];
       rememberExplorerNewEntries(change.oldValue, change.newValue);
-      entries = normalize(change.newValue);
+      // ⚠ 전체를 대입하면 계정 필터가 풀려 다른 계정 기록이 다시 섞인다.
+      //   페이지를 열어 둔 채 계정을 바꿨을 수 있으므로 계정도 다시 확인한다.
+      const rows = normalize(change.newValue);
+      const prevAccount = accountIdForFilter;
+      entries = filterByAccount(rows);
       persistExplorerUnreadState();
       render();
+      // ⚠ 길이로 비교하면 A·B 의 기록 수가 같을 때 교체를 건너뛴다. 기준 계정이
+      //   실제로 바뀌었는지로 판단해, 바뀌었으면 무조건 다시 거른다.
+      // ⚠ 5분 캐시를 그대로 쓰면 전환 후에도 이전 계정 기록이 계속 보인다.
+      void resolveAccountDetail(false, ACCOUNT_SOFT_TTL_MS).then(
+        ({ id, changed }) => {
+          if (!id || (!changed && id === prevAccount)) return;
+          entries = filterByAccount(rows);
+          persistExplorerUnreadState();
+          render();
+        },
+      );
       return;
     }
     if (changes[EXPLORER_UNREAD_IDS_KEY]) {
@@ -4439,15 +4596,14 @@
           render();
           void renderActiveBadge();
           void refreshBalances().then(async () => {
-            // 페이지를 열 때 한 번 맞춘다. 기준이 없으면(첫 실행) 기록 없이
-            // 스냅샷만 남긴다 — 설치 전 보유분이 기타로 잡히면 안 된다.
-            const snap = await loadSnapshot();
-            if (!snap?.map) {
-              await saveSnapshot();
-              return;
-            }
-            const n = await commitOther();
-            if (n) {
+            // ⚠ 구 스냅샷(계정 구분 없음)은 폐기한다. 어느 계정 기준인지 알 수
+            //   없어 현재 계정에 귀속시키면 허위 차액이 생긴다. 기준만 새로
+            //   잡으면 일회성 손실로 끝나고, 내역은 그대로 남는다.
+            await migrateSnapshotV1();
+            // 페이지를 열 때 한 번 맞춘다. 기준 생성(첫 실행)도 background 가
+            // 판단한다 — 기준이 없으면 기록 없이 기준만 남긴다.
+            const res = await commitOther();
+            if (res.applied) {
               await load();
               rebuildExplorerUnreadPaths();
               persistExplorerUnreadState();

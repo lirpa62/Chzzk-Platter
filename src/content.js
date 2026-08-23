@@ -507,6 +507,9 @@
   const VIDEO_COMMENT_PREVIEW_TOOLTIP_CLASS =
     "cheese-search-comment-preview-tooltip";
   const COMMENT_BUTTON_INSERT_COOLDOWN_MS = 2000;
+  // 채팅 리캡 조회 버튼/패널(댓글 타임스탬프와 같은 팝오버 형태, 별도 버튼).
+  const RECAP_BUTTON_CLASS = "cheese-chat-recap-button";
+  const RECAP_PANEL_CLASS = "cheese-chat-recap-panel";
   // ── seek preview 방송 당시 추정 시각 병기 ───────────────────────────────────
   // 다시보기 재생바 호버 시 뜨는 seek preview의 시간(.pzp-seeking-preview__time) 아래에
   // 시작 추정 시각(liveOpenDate) + preview 시간으로 계산한 당시 추정 시각을 병기.
@@ -1407,6 +1410,42 @@
       ? v
       : "score";
   }
+  // 통합검색(/search) 라이브 섹션 재정렬(전역, 기본 OFF). 검색 API가 반환하는
+  // 라이브 후보를 제목·채널 관련도, 현재 시청자 수, 방송 시작 시각으로 재정렬한다.
+  const SEARCH_LIVE_RERANK_KEY = "cheeseSearchLiveRerank";
+  const SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY =
+    "cheeseSearchLiveRerankDefaultSort";
+  const SEARCH_LIVE_RERANK_WEIGHTS_KEY = "cheeseSearchLiveRerankWeights";
+  const SEARCH_LIVE_RERANK_WEIGHTS_DEFAULT = {
+    rel: 45,
+    channel: 20,
+    viewers: 25,
+    verified: 5,
+    recent: 5,
+  };
+  let searchLiveRerank = false;
+  let searchLiveRerankDefaultSort = "score";
+  let searchLiveRerankWeights = { ...SEARCH_LIVE_RERANK_WEIGHTS_DEFAULT };
+  function normalizeSearchLiveRerankSort(value) {
+    return ["score", "viewers", "recent", "original"].includes(value)
+      ? value
+      : "score";
+  }
+  function normalizeSearchLiveRerankWeights(value) {
+    const saved = value && typeof value === "object" ? value : null;
+    const normalized = { ...SEARCH_LIVE_RERANK_WEIGHTS_DEFAULT };
+    if (saved) {
+      for (const key of Object.keys(normalized)) {
+        const weight = Number(saved[key]);
+        if (Number.isFinite(weight)) {
+          normalized[key] = Math.min(100, Math.max(0, Math.round(weight)));
+        }
+      }
+    }
+    return Object.values(normalized).every((weight) => weight === 0)
+      ? { ...SEARCH_LIVE_RERANK_WEIGHTS_DEFAULT }
+      : normalized;
+  }
   // 통합검색(/search)에 최근 추천 피드와 관련 채널의 클립 검색 결과를 보강한다.
   // 전역 추천 피드에는 검색어 파라미터가 없어 수집한 후보를 로컬에서 필터링하며,
   // 결과 범위가 제한적이므로 기존 사용자에게는 기본 OFF로 제공한다.
@@ -1800,6 +1839,24 @@
     title: "제목순",
     channel: "채널명순",
   });
+
+  // ── 채팅 리캡(본인 채팅 로컬 기록) ────────────────────────────────────────
+  // ⚠ 위의 cheeseChatHistory 와는 다른 기능이다. 그건 '채팅 이어보기'용으로 모든
+  //   사람의 채팅을 HTML 로 담고 브라우저를 새로 켜면 지워진다. 리캡은 본인 채팅만
+  //   텍스트로 영구 보관해 통계·다시보기 조회에 쓴다.
+  const CHAT_RECAP_ENABLED_KEY = "cheeseChatRecap";
+  const CHAT_RECAP_RETENTION_KEY = "cheeseChatRecapRetentionDays"; // 0=무제한
+  const CHAT_RECAP_STORE_PREFIX = "chatRecap:"; // + <accountId>:<channelId>:<YYYY-MM>
+  const CHAT_RECAP_CATALOG_MESSAGE = "CHAT_RECAP_CATALOG";
+  const CHAT_RECAP_EARLIEST_MONTH = "2023-12";
+  const CHAT_RECAP_PRUNE_AT_KEY = "chatRecapPrunedAt";
+  const CHAT_RECAP_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  const CHAT_RECAP_MESSAGE = "cheese-chat-recap-batch";
+  const CHAT_RECAP_TEXT_MAX = 500;
+  // 한 청크(한 달·한 채널)에 담는 상한. 넘으면 오래된 것부터 버린다.
+  const CHAT_RECAP_CHUNK_MAX = 5000;
+  let chatRecapOn = false;
+  let chatRecapRetentionDays = 0;
 
   const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
   const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
@@ -6106,11 +6163,17 @@
       commentMarkerState.videoNo = videoNo;
       commentMarkerState.loadingVideoNo = videoNo;
       ensureCommentTimestampButton();
+      ensureChatRecapButton();
+      // 영상이 바뀌면 리캡 패널을 닫고 채널 힌트를 다시 잡는다.
+      closeChatRecapPanel();
+      if (chatRecapOn) void ensureRecapVodChannel();
       void loadCommentTimestampMarkers(videoNo);
       return;
     }
 
     ensureCommentTimestampButton();
+    // 리캡 버튼도 같은 주기에 붙인다(별도 관찰자를 만들지 않는다).
+    ensureChatRecapButton();
     if (commentMarkerState.markers.length) {
       scheduleCommentMarkerRender();
     }
@@ -7717,22 +7780,7 @@
   //
   // 항목: { id(claimId), at, channelId, channelName, amount }
   //  - amount 는 1시간 보상 획득량. 화면에서는 5분 보상 합계(=amount*1.2)도 함께 보여 준다.
-  const LOGPOWER_LOG_KEY = "cheeseLogPowerLog";
-  const LOGPOWER_LOG_DAYS_KEY = "cheeseLogPowerLogDays";
-  const LOGPOWER_LOG_DAYS_DEFAULT = 90;
-  const LOGPOWER_LOG_DAYS_MIN = 7;
-  const LOGPOWER_LOG_DAYS_MAX = 3650;
-  // 5분 시청 보상은 1시간 보상의 1.2배가 쌓인다(사용자 확인 값).
-  const LOGPOWER_FIVE_MIN_RATIO = 1.2;
-
-  // 0 = 제한 없음(정리하지 않음). 유효 범위(7~3650) 밖이라 구분값으로 안전하다.
-  function normalizeLogPowerLogDays(value) {
-    if (value == null || value === "") return LOGPOWER_LOG_DAYS_DEFAULT;
-    const n = Math.round(Number(value));
-    if (!Number.isFinite(n)) return LOGPOWER_LOG_DAYS_DEFAULT;
-    if (n === 0) return 0;
-    return Math.min(LOGPOWER_LOG_DAYS_MAX, Math.max(LOGPOWER_LOG_DAYS_MIN, n));
-  }
+  // 저장·보관기간 정리는 background 가 맡는다(단일 작성자).
 
   // MAIN world(logPowerDonate.js)가 후원·구독선물 적립을 역산해 알려 준다.
   // 시청 보상과 달리 claims 로 오지 않아 보유량 차이로만 알 수 있다.
@@ -7774,45 +7822,36 @@
   });
 
   // 획득 1건 기록. 건수 제한은 두지 않고 보관 기간이 지난 것만 지운다.
+  // 통나무파워 내역은 background 가 단일 작성자다.
+  // ⚠ 예전엔 여기서 직접 read-modify-write 했다. content·prediction·stats·settings
+  //   가 각자 같은 키를 고쳐 동시에 쓰면 나중 것이 앞의 것을 덮었다(lost update).
+  //   계정 힌트(localStorage userStatus.idhash)를 함께 보내 계정 확인 API 가
+  //   실패해도 기록이 엉뚱한 계정으로 새지 않게 한다.
+  const LOGPOWER_WRITE_RETRY_MS = [400, 1500];
+
   async function appendLogPowerLog(entry) {
-    if (!chrome.storage?.local) return;
     const id = String(entry?.id || "").trim();
     const amount = Number(entry?.amount) || 0;
     // ⚠ 승부예측 베팅은 음수(차감)로 기록된다 → 0 만 걸러낸다.
-    //   예전엔 amount <= 0 을 모두 막아 손실을 남길 방법이 없었다.
-    if (!id || !Number.isFinite(amount) || amount === 0) return;
-    try {
-      const data = await chrome.storage.local.get([
-        LOGPOWER_LOG_KEY,
-        LOGPOWER_LOG_DAYS_KEY,
-      ]);
-      const days = normalizeLogPowerLogDays(data?.[LOGPOWER_LOG_DAYS_KEY]);
-      // 0 = 제한 없음 → 아무것도 지우지 않는다.
-      const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
-      const list = Array.isArray(data?.[LOGPOWER_LOG_KEY])
-        ? data[LOGPOWER_LOG_KEY]
-        : [];
-      // 같은 claimId 가 이미 있으면 중복 기록하지 않는다(재시도·다중 탭 대비).
-      if (list.some((it) => it?.id === id)) return;
-      const next = [
-        {
-          id,
-          at: Number(entry?.at) || Date.now(),
-          channelId: String(entry?.channelId || ""),
-          channelName: String(entry?.channelName || "").slice(0, 100),
-          channelImageUrl: String(entry?.channelImageUrl || "").slice(0, 300),
-          verifiedMark: entry?.verifiedMark === true,
-          amount,
-          // 같은 시간 동안 받은 5분 보상 합계(실측 단가 기반). 0 이면 화면에서 생략.
-          fiveMinAmount: Number(entry?.fiveMinAmount) || 0,
-          boost: Number(entry?.boost) || 1,
-          // 적립 종류(FOLLOW/DONATE/…). 없으면 시청 보상 — 기존 기록 호환.
-          claimType: String(entry?.claimType || "WATCH_1_HOUR").toUpperCase(),
-        },
-        ...list.filter((it) => (Number(it?.at) || 0) >= cutoff),
-      ];
-      await chrome.storage.local.set({ [LOGPOWER_LOG_KEY]: next });
-    } catch {}
+    if (!id || !Number.isFinite(amount) || amount === 0) return false;
+    const payload = { entry: { ...entry, id, amount } };
+    const accountHint = currentClipVaultAccountId();
+    // 응답이 없으면(워커 미기동·포트 종료) 몇 번 다시 보낸다. 같은 id 라 중복되지 않는다.
+    for (let i = 0; i <= LOGPOWER_WRITE_RETRY_MS.length; i += 1) {
+      try {
+        const res = await chrome.runtime?.sendMessage?.({
+          type: "LP_WRITE",
+          op: "APPEND_CLAIM",
+          accountHint,
+          payload,
+        });
+        if (res?.ok) return true;
+      } catch {}
+      const wait = LOGPOWER_WRITE_RETRY_MS[i];
+      if (wait == null) break;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    return false;
   }
 
   const LOGPOWER_HOUR_MS = 3600000; // 1시간
@@ -7824,6 +7863,7 @@
   //   하는데(치지직은 시청 시간을 누적으로 센다 — 실측: 채널을 옮겼다 돌아오니
   //   87분 만에 1시간 보상이 들어왔다), 30분이 넘으면 타이머가 초기화됐다(제보).
   const LOGPOWER_HOUR_AWAY_LIMIT_MS = 60 * 60 * 1000; // 이탈 허용 1시간
+  let logPowerHourAccountId = ""; // 현재 도는 타이머의 소유 계정
   let logPowerHourInterval = 0; // 1초 카운트다운 인터벌
   let logPowerClaimedLabelTimer = 0; // '획득' 라벨 숨김 타이머
   // 적립 활성 상태(background status 반영). 현재 채널 일치 시에만 표시.
@@ -7908,6 +7948,9 @@
           type: "START_LOG_POWER_WATCH_REWARD_TRACKING",
           channelId,
           initialAmount: Number.isFinite(baseline) ? baseline : undefined,
+          // ⚠ background 계정 캐시는 최대 5분 묵는다. 전환 직후 새 계정 보상이
+          //   이전 계정으로 저장되지 않도록 지금 계정을 함께 보낸다.
+          accountHint: currentClipVaultAccountId(),
         })
         .catch(() => null);
       if (res?.status) applyWatchRewardStatus(res.status);
@@ -7975,14 +8018,18 @@
     channelId,
     endsAt = Date.now() + LOGPOWER_HOUR_MS,
     showClaimed = true,
+    accountId = currentClipVaultAccountId(),
   ) {
     if (!channelId) return;
+    logPowerHourAccountId = accountId;
     // storage엔 항상 저장(표시를 나중에 켜도 복원되게). leftAt:0 = 진행 중(일시정지 아님).
     try {
       chrome.storage?.local?.set({
         [`${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`]: {
           endsAt,
           leftAt: 0,
+          // 어느 계정의 진행도인지. 계정이 바뀌면 서버 기준이 달라 무의미하다.
+          accountId: logPowerHourAccountId,
         },
       });
     } catch {}
@@ -8079,11 +8126,18 @@
     if (raw && typeof raw === "object") {
       const endsAt = Number(raw.endsAt);
       const leftAt = Number(raw.leftAt) || 0;
-      if (Number.isFinite(endsAt) && endsAt > 0) return { endsAt, leftAt };
+      // ⚠ accountId 를 여기서 버리면 일시정지 저장에서도 빠져, 계정 A 타이머가
+      //   B 에서 이어진 뒤 B 소유로 덮인다.
+      const accountId = String(raw.accountId || "");
+      if (Number.isFinite(endsAt) && endsAt > 0) {
+        return { endsAt, leftAt, accountId };
+      }
       return null;
     }
     const endsAt = Number(raw); // 구버전 하위호환
-    if (Number.isFinite(endsAt) && endsAt > 0) return { endsAt, leftAt: 0 };
+    if (Number.isFinite(endsAt) && endsAt > 0) {
+      return { endsAt, leftAt: 0, accountId: "" };
+    }
     return null;
   }
 
@@ -8105,6 +8159,7 @@
         [`${LOGPOWER_HOUR_TIMER_KEY_PREFIX}${channelId}`]: {
           endsAt: now + remaining,
           leftAt: now,
+          accountId: logPowerHourAccountId || currentClipVaultAccountId(),
         },
       });
     } catch {}
@@ -8126,6 +8181,13 @@
         return;
       }
       const now = Date.now();
+      // ⚠ 다른 계정의 타이머는 이어받지 않는다. 서버의 시청 진행도가 달라
+      //   남은 시간이 무의미하고, 이어받으면 그 타이머가 이 계정 소유가 된다.
+      const me = currentClipVaultAccountId();
+      if (me && stored.accountId && stored.accountId !== me) {
+        clearWatchHourTimer(channelId);
+        return;
+      }
       if (stored.leftAt > 0) {
         // 일시정지(이탈) 상태 → 이탈 시간 판정.
         const awayMs = now - stored.leftAt;
@@ -8134,11 +8196,21 @@
           clearWatchHourTimer(channelId); // 1시간 초과 이탈 → 종료
         } else {
           // 이탈 시점 남은 시간부터 재개(새 endsAt = 지금 + remaining).
-          startWatchHourTimer(channelId, now + remaining, false);
+          startWatchHourTimer(
+            channelId,
+            now + remaining,
+            false,
+            stored.accountId || me,
+          );
         }
       } else if (stored.endsAt > now) {
         // 진행 중이던 타이머(구버전 또는 미저장 이탈) → 절대시각 그대로 이어감.
-        startWatchHourTimer(channelId, stored.endsAt, false);
+        startWatchHourTimer(
+          channelId,
+          stored.endsAt,
+          false,
+          stored.accountId || me,
+        );
       } else {
         clearWatchHourTimer(channelId); // 만료된 키 정리
       }
@@ -9136,6 +9208,32 @@
     } catch {}
   }
 
+  // 업로드 영상(videoType: UPLOAD)에는 채팅이 없다 — 채팅 API 가 400 을 준다
+  // (제보로 확인). 영상별로 한 번만 조회해 캐시한다.
+  const uploadVideoCache = new Map(); // videoNo → true(업로드) | false(다시보기)
+  const UPLOAD_VIDEO_CACHE_MAX = 100;
+
+  async function fetchIsUploadVideo(videoNo) {
+    if (uploadVideoCache.has(videoNo)) return uploadVideoCache.get(videoNo);
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/service/v2/videos/${videoNo}`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return false; // 모르면 막지 않는다(기존 동작 유지)
+      const type = String((await res.json())?.content?.videoType || "");
+      const up = type.toUpperCase() === "UPLOAD";
+      uploadVideoCache.set(videoNo, up);
+      if (uploadVideoCache.size > UPLOAD_VIDEO_CACHE_MAX) {
+        const oldest = uploadVideoCache.keys().next().value;
+        if (oldest !== undefined) uploadVideoCache.delete(oldest);
+      }
+      return up;
+    } catch {
+      return false;
+    }
+  }
+
   // 채팅을 끝까지 훑어 구간별로 센다. duration 은 초 단위.
   //
   // ⚠ 표본(구간마다 200건을 떠서 밀도만 재는 방식)도 만들어 봤지만 부정확했다(제보).
@@ -9356,6 +9454,8 @@
     const slider = findPlayerSliderProgressWrap();
     const duration = slider ? getPlayerDuration(slider) : 0;
     if (!duration) return; // 길이를 모르면 구간을 나눌 수 없다
+    // 업로드 영상은 채팅이 없다 → 수백 번 400 을 부르지 않는다.
+    if (await fetchIsUploadVideo(videoNo)) return;
     chatGraphState.loading = true;
     chatGraphState.cancel = false;
     chatGraphState.progress = 0;
@@ -9577,6 +9677,1070 @@
     event.stopPropagation();
     const seconds = Number(event.currentTarget.dataset.seconds || 0);
     seekVideoToCommentTimestamp(seconds);
+  }
+
+  // ── 채팅 리캡 조회(다시보기) ──────────────────────────────────────────────
+  // ⚠ 재생바 마커는 쓰지 않는다(사용자 지시). 댓글 타임스탬프와 같은 팝오버를
+  //   별도 버튼으로 연다. 패널 스타일·위치 계산은 그쪽 것을 그대로 재사용한다.
+  let recapPanelItems = [];
+
+  // 이 다시보기에서 내가 남긴 채팅을 모은다.
+  // ⚠ 로컬 기록을 쓰지 않는다. 다시보기 채팅 API 가 그 영상의 모든 채팅을
+  //   playerMessageTime(재생 오프셋)과 함께 주므로, 거기서 내 것만 골라내면 된다.
+  //   이 편이 정확하고(시작 시각 역산 불필요), 기능을 켜기 전 방송도 볼 수 있다.
+  //   (로컬 기록은 통계·리캡용으로 계속 쌓는다.)
+  const recapVodCache = new Map(); // videoNo → 정리된 목록
+  const RECAP_VOD_CACHE_MAX = 5;
+
+  function setRecapVodCache(videoNo, rows) {
+    // 다시 연 영상은 가장 최근 항목으로 옮겨 단순 LRU처럼 유지한다.
+    recapVodCache.delete(videoNo);
+    recapVodCache.set(videoNo, rows);
+    while (recapVodCache.size > RECAP_VOD_CACHE_MAX) {
+      const oldest = recapVodCache.keys().next().value;
+      if (oldest === undefined) break;
+      recapVodCache.delete(oldest);
+    }
+  }
+
+  // 이모티콘 맵. extras(JSON 문자열) 안의 emojis 가 {키: 이미지URL} 형태다.
+  function recapChatEmojis(m) {
+    try {
+      const e =
+        typeof m?.extras === "string" ? JSON.parse(m.extras) : m?.extras;
+      const map = e?.emojis;
+      return map && typeof map === "object" ? map : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 가져오기가 끝난 영상이면 로컬 기록에서 바로 꺼낸다. 아니면 null(→ API).
+  const CHAT_RECAP_IMPORTED_KEY = "chatRecapImportedVideos";
+  // 예전 버전은 실패·빈 결과도 완료로 남길 수 있었다. 현재 방식으로 끝까지
+  // 확인한 영상만 별도 표식해 오래된 잘못된 완료 상태를 한 번 재검증한다.
+  const CHAT_RECAP_VERIFIED_KEY = "chatRecapVerifiedVideosV2";
+
+  async function isRecapVideoImported(accountId, videoNo) {
+    const store = chatHistoryStore();
+    if (!store) return false;
+    try {
+      const flags = (await store.get(CHAT_RECAP_IMPORTED_KEY))?.[
+        CHAT_RECAP_IMPORTED_KEY
+      ];
+      const mine = flags && typeof flags === "object" ? flags[accountId] : null;
+      return (
+        Array.isArray(mine) &&
+        mine.some((value) => String(value) === String(videoNo))
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async function markRecapVideoImported(accountId, videoNo) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !videoNo) return false;
+    try {
+      const data = await store.get([
+        CHAT_RECAP_IMPORTED_KEY,
+        CHAT_RECAP_VERIFIED_KEY,
+      ]);
+      const stored = data?.[CHAT_RECAP_IMPORTED_KEY];
+      const flags = stored && typeof stored === "object" ? stored : {};
+      const mine = Array.isArray(flags[accountId])
+        ? flags[accountId].map((item) => String(item))
+        : [];
+      const verifiedStored = data?.[CHAT_RECAP_VERIFIED_KEY];
+      const verified =
+        verifiedStored && typeof verifiedStored === "object"
+          ? verifiedStored
+          : {};
+      const verifiedMine = Array.isArray(verified[accountId])
+        ? verified[accountId].map((item) => String(item))
+        : [];
+      const value = String(videoNo);
+      if (!mine.includes(value)) mine.push(value);
+      if (!verifiedMine.includes(value)) verifiedMine.push(value);
+      // 완료 표식을 자르면 오래된 다시보기를 다시 전수 확인하게 된다.
+      // unlimitedStorage 권한을 사용하므로 계정별 완료 목록을 온전히 유지한다.
+      flags[accountId] = mine;
+      verified[accountId] = verifiedMine;
+      await store.set({
+        [CHAT_RECAP_IMPORTED_KEY]: flags,
+        [CHAT_RECAP_VERIFIED_KEY]: verified,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function isRecapVideoVerified(accountId, videoNo) {
+    const store = chatHistoryStore();
+    if (!store) return false;
+    try {
+      const all = (await store.get(CHAT_RECAP_VERIFIED_KEY))?.[
+        CHAT_RECAP_VERIFIED_KEY
+      ];
+      const mine = all && typeof all === "object" ? all[accountId] : null;
+      return (
+        Array.isArray(mine) &&
+        mine.some((value) => String(value) === String(videoNo))
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async function loadStoredRecapChannelItems(accountId, channelId) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !channelId) return [];
+    try {
+      const all = await loadChatRecapChannelChunks(accountId, channelId);
+      const rows = [];
+      for (const value of Object.values(all || {})) {
+        rows.push(...(Array.isArray(value?.items) ? value.items : []));
+      }
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  async function loadRecapFromLocal(accountId, videoNo) {
+    const channelId = currentRecapChannelId();
+    if (!channelId || !(await isRecapVideoImported(accountId, videoNo))) {
+      return null;
+    }
+    const channelItems = await loadStoredRecapChannelItems(
+      accountId,
+      channelId,
+    );
+    const rows = [];
+    for (const it of channelItems) {
+      // 이 영상에서 가져온 것만(n = videoNo). n 이 없으면 라이브 수집분이라
+      // 재생 위치를 알 수 없어 목록에 못 쓴다.
+      if (String(it?.n || "") !== String(videoNo)) continue;
+      const seconds = Number(it?.v);
+      const text = String(it?.m || "");
+      if (!Number.isFinite(seconds) || seconds < 0 || !text) continue;
+      rows.push({ seconds, text, t: Number(it?.t) || 0 });
+    }
+    rows.sort((a, b) => a.seconds - b.seconds);
+    // 예전 버전은 가져오기 실패·빈 결과도 완료로 기록할 수 있었다. 라이브에서
+    // 저장됐지만 아직 영상 번호가 없는 행이 남아 있다면 API를 다시 확인한다.
+    if (
+      !rows.length &&
+      channelItems.some((item) => !item?.n && item?.m) &&
+      !(await isRecapVideoVerified(accountId, videoNo))
+    ) {
+      return null;
+    }
+    return rows;
+  }
+
+  // 응답 항목의 발신자 해시. 최상위 userIdHash 우선, 없으면 profile(문자열) 안.
+  function recapChatHash(m) {
+    const top = String(m?.userIdHash || "").toLowerCase();
+    if (top) return top;
+    try {
+      const p =
+        typeof m?.profile === "string" ? JSON.parse(m.profile) : m?.profile;
+      return String(p?.userIdHash || "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+  async function loadRecapForCurrentVideo(onProgress) {
+    const accountId = currentClipVaultAccountId();
+    const videoNo = getCurrentVideoNo();
+    if (!accountId || !videoNo) return [];
+    // 다시보기 경로에는 채널 id가 없으므로 로컬 라이브 기록과 대조하기 전에
+    // 영상 메타데이터에서 채널을 먼저 확보한다.
+    await ensureRecapVodChannel();
+    if (getCurrentVideoNo() !== videoNo) return [];
+    const channelId = currentRecapChannelId();
+    // 업로드 영상에는 채팅이 없다(채팅 API 400) → 훑지 않는다.
+    if (await fetchIsUploadVideo(videoNo)) return [];
+    // 캐시가 있으면 즉시(같은 영상을 다시 열 때 수백 요청을 반복하지 않는다).
+    const cached = recapVodCache.get(videoNo);
+    if (cached) {
+      setRecapVodCache(videoNo, cached);
+      return cached;
+    }
+
+    // ⚠ 리캡 페이지의 '가져오기'로 이미 훑은 영상이면 로컬에 오프셋(v)까지
+    //   저장돼 있다. 그걸 두고 API 를 다시 전수 페이징하면 같은 일을 반복한다
+    //   (긴 방송은 수백 요청). 가져오기 완료 표시가 있을 때만 로컬을 쓴다 —
+    //   표시가 곧 '이 영상 분량이 온전하다'는 보장이다.
+    const localRows = await loadRecapFromLocal(accountId, videoNo);
+    if (localRows) {
+      setRecapVodCache(videoNo, localRows);
+      onProgress?.(1);
+      return localRows;
+    }
+
+    // 라이브에서 먼저 저장된 기록에는 다시보기 번호와 재생 위치가 없다. API의
+    // 발신자 해시가 비거나 달라져도 전송 시각+본문이 정확히 같으면 내가 저장한
+    // 채팅으로 볼 수 있으므로 보조 판정에 사용한다.
+    const storedChannelItems = channelId
+      ? await loadStoredRecapChannelItems(accountId, channelId)
+      : [];
+    const storedExact = new Set();
+    const storedTimesByText = new Map();
+    for (const item of storedChannelItems) {
+      if (item?.d || !(Number(item?.t) > 0) || !item?.m) continue;
+      const text = String(item.m).trim();
+      const at = Number(item.t);
+      storedExact.add(`${at}|${text}`);
+      if (!storedTimesByText.has(text)) storedTimesByText.set(text, []);
+      storedTimesByText.get(text).push(at);
+    }
+
+    const duration = Number(document.querySelector("video")?.duration) || 0;
+    const totalMs = duration > 0 ? duration * 1000 : 0;
+    const rows = [];
+    let cursor = 0;
+    let completed = false;
+    let firstMessageTime = Infinity;
+    let lastMessageTime = 0;
+    for (let page = 0; page < CHAT_GRAPH_MAX_PAGES; page += 1) {
+      const url =
+        `https://api.chzzk.naver.com/service/v1/videos/${videoNo}/chats` +
+        `?playerMessageTime=${cursor}&previousVideoChatSize=50`;
+      let content = null;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) break;
+        // eslint-disable-next-line no-await-in-loop
+        content = (await res.json())?.content;
+      } catch {
+        break;
+      }
+      // 영상을 옮기면 즉시 멈춘다(보이지도 않는 영상을 계속 받지 않게).
+      if (getCurrentVideoNo() !== videoNo) return [];
+      // ⚠ 응답 키가 두 가지다(videoChats / previousVideoChats).
+      const list = Array.isArray(content?.videoChats)
+        ? content.videoChats
+        : Array.isArray(content?.previousVideoChats)
+          ? content.previousVideoChats
+          : null;
+      if (!list || !list.length) {
+        completed = true;
+        break;
+      }
+      for (const m of list) {
+        const rawMessageTime = Number(m?.messageTime) || 0;
+        if (rawMessageTime > 0) {
+          firstMessageTime = Math.min(firstMessageTime, rawMessageTime);
+          lastMessageTime = Math.max(lastMessageTime, rawMessageTime);
+        }
+        const at = Number(m?.playerMessageTime);
+        if (!Number.isFinite(at) || at < 0) continue;
+        const text = String(m?.content || "").trim();
+        if (!text) continue;
+        const messageTime = rawMessageTime;
+        // 라이브 DOM에서 실제 시각을 못 읽은 행은 수집 순간(Date.now())으로
+        // 저장된다. API 시각과 최대 몇 초 어긋날 수 있어 같은 본문은 5초 안까지
+        // 보조 일치로 인정한다.
+        const exactLocal =
+          storedExact.has(`${messageTime}|${text}`) ||
+          (messageTime > 0 &&
+            (storedTimesByText.get(text) || []).some(
+              (time) => Math.abs(time - messageTime) <= 5000,
+            ));
+        if (recapChatHash(m) !== accountId && !exactLocal) continue;
+        rows.push({
+          seconds: Math.round(at / 1000),
+          text,
+          t: messageTime,
+          type: Number(m?.messageTypeCode) || 1,
+          // {:d_108:} 같은 토큰을 이미지로 그리려면 키→URL 맵이 필요하다.
+          emojis: recapChatEmojis(m),
+        });
+      }
+      const next = Number(content?.nextPlayerMessageTime);
+      if (!Number.isFinite(next) || next <= cursor) {
+        completed = true;
+        break;
+      }
+      cursor = next;
+      if (totalMs > 0) {
+        onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
+      }
+    }
+    onProgress?.(1);
+    // 같은 시각+본문 중복 제거 후 시간순.
+    const seen = new Set();
+    const out = [];
+    for (const r of rows.sort((a, b) => a.seconds - b.seconds)) {
+      const key = r.t ? `${r.t}|${r.text}` : `${r.seconds}|${r.text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+    }
+    // 끝까지 읽은 경우에는 라이브 기록에 다시보기 번호·재생 위치를 보강한다.
+    // 다음 진입부터는 수백 페이지를 다시 훑지 않고 로컬 결과를 즉시 사용한다.
+    // 로컬 기록은 있는데 일치 결과가 0개라면 판정 이상일 수 있으므로 완료로
+    // 고정하지 않아 다음 진입에서 다시 확인할 기회를 남긴다.
+    const hasUnlinkedInVideoRange =
+      Number.isFinite(firstMessageTime) &&
+      lastMessageTime > 0 &&
+      storedChannelItems.some((item) => {
+        const at = Number(item?.t) || 0;
+        return (
+          !item?.n &&
+          item?.m &&
+          at >= firstMessageTime - 5000 &&
+          at <= lastMessageTime + 5000
+        );
+      });
+    let verified = false;
+    if (completed && channelId && (out.length || !hasUnlinkedInVideoRange)) {
+      let stored = true;
+      if (out.length) {
+        stored = await saveChatRecapBatch(
+          accountId,
+          channelId,
+          out.map((item) => ({
+            t: item.t,
+            m: item.text,
+            v: item.seconds,
+            n: String(videoNo),
+          })),
+          videoNo,
+        );
+      }
+      if (stored) verified = await markRecapVideoImported(accountId, videoNo);
+    }
+    // 실패·부분 수집 또는 로컬 기록과 맞지 않는 결과는 캐시하지 않는다. 패널을
+    // 다시 열면 재시도할 수 있어야 한다.
+    if (verified) setRecapVodCache(videoNo, out);
+    return out;
+  }
+
+  function ensureChatRecapButton() {
+    if (!chatRecapOn || !getCurrentVideoNo()) return;
+    const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls) return;
+    if (controls.querySelector(`.${RECAP_BUTTON_CLASS}`)) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `${RECAP_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    button.setAttribute("aria-label", "내 채팅 기록");
+    button.setAttribute("aria-expanded", "false");
+    button.innerHTML = `
+      <span class="pzp-button__tooltip pzp-button__tooltip--top">내 채팅 기록</span>
+      <span class="pzp-ui-icon">
+        <svg class="pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H12l-4.2 3.6A.75.75 0 0 1 6.6 19v-3H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" fill="currentColor"/>
+          <path d="M8 7.5h8M8 11h5" stroke="#111" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </span>`;
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (document.querySelector(`.${RECAP_PANEL_CLASS}`)) {
+        closeChatRecapPanel();
+      } else {
+        void openChatRecapPanel(button);
+      }
+    });
+    // 댓글 타임스탬프 버튼 옆에 둔다(없으면 컨트롤 끝).
+    const commentBtn = controls.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+    if (commentBtn) commentBtn.after(button);
+    else controls.prepend(button);
+  }
+
+  async function openChatRecapPanel(anchor) {
+    closeChatRecapPanel();
+    const root = getCommentTimestampPanelRoot(anchor);
+    if (!root) return;
+    if (getComputedStyle(root).position === "static") {
+      root.style.position = "relative";
+    }
+    root.style.overflow = "visible";
+    const panel = document.createElement("div");
+    // 패널 모양은 댓글 팝오버와 같게 한다(같은 클래스 + 식별용 클래스).
+    panel.className = `${VIDEO_COMMENT_PANEL_CLASS} ${RECAP_PANEL_CLASS}`;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "내 채팅 기록");
+    root.append(panel);
+    keepCommentPanelControlsVisible(root);
+    panel.innerHTML = `
+      <div class="cheese-search-comment-panel-head">
+        <strong>내 채팅 기록</strong>
+        <button type="button" data-recap-close aria-label="닫기">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+      <p class="cheese-search-comment-panel-status">불러오는 중입니다.</p>`;
+    positionCommentTimestampPanel(panel, root);
+    anchor?.setAttribute("aria-expanded", "true");
+    panel
+      .querySelector("[data-recap-close]")
+      ?.addEventListener("click", closeChatRecapPanel);
+
+    // 이모티콘 사전·구독 여부를 먼저 채운다(없으면 {:키:} 가 글자로 남는다).
+    // 채팅을 훑는 동안 같이 진행되도록 await 를 뒤에서 한 번에 받는다.
+    const emojiReady = loadDialogEmojiMap(currentClipVaultAccountId());
+
+    // ⚠ 긴 방송은 채팅 페이지가 수백 개다(순차 요청). 진행률을 보여 준다.
+    const status = panel.querySelector(".cheese-search-comment-panel-status");
+    recapPanelItems = await loadRecapForCurrentVideo((ratio) => {
+      if (!panel.isConnected || !status) return;
+      status.textContent = `내 채팅을 찾는 중입니다… ${Math.round(ratio * 100)}%`;
+    });
+    await emojiReady;
+    if (!panel.isConnected) return;
+    renderChatRecapPanel(panel);
+    positionCommentTimestampPanel(panel, root);
+  }
+
+  // {:key:} 토큰을 <img> 로 바꾼다(나머지 텍스트는 그대로 이스케이프).
+  // ⚠ URL 은 치지직 이미지 호스트만 허용한다 — 응답에 임의 URL 이 섞여도
+  //   외부로 요청이 나가지 않게 한다.
+  const RECAP_EMOJI_HOST =
+    /^https:\/\/(?:[a-z0-9-]+\.)*(?:pstatic\.net|naver\.net|navercdn\.com)\//i;
+  function recapSubscriptionEmojiChannelFromUrl(value) {
+    const match = String(value || "").match(
+      /\/subscription\/(?:emoji|emoticon)\/([0-9a-f]{32})(?:\/|$)/i,
+    );
+    return match ? match[1].toLowerCase() : "";
+  }
+
+  function normalizeRecapLockedEmojiMap(value) {
+    const out = Object.create(null);
+    if (!value || typeof value !== "object") return out;
+    for (const [key, rawChannelId] of Object.entries(value)) {
+      const channelId = String(rawChannelId || "").toLowerCase();
+      if (key && /^[0-9a-f]{32}$/.test(channelId)) out[key] = channelId;
+    }
+    return out;
+  }
+
+  function renderRecapMessageHtml(text, emojis) {
+    const raw = String(text || "");
+    const map = emojis && typeof emojis === "object" ? emojis : null;
+    let out = "";
+    let last = 0;
+    const pattern = /\{:([^:}]+):\}/g;
+    let match = null;
+    while ((match = pattern.exec(raw)) !== null) {
+      if (match.index > last) out += escapeHtml(raw.slice(last, match.index));
+      const key = String(match[1] || "").trim();
+      // ⚠ 메시지에 딸려 온 맵(extras.emojis)만 보면 안 된다. 다시보기 API 는
+      //   이 값을 비워 보내는 경우가 많고(실측 {}), 리캡 '가져오기'로 저장된
+      //   기록에는 아예 없다 → 구독 중인데도 글자로 보였다(제보).
+      //   라이브 대화상자와 같은 저장 사전(dlgEmojiMap)을 함께 본다.
+      const url = (map && map[key]) || dlgEmojiMap[key];
+      if (key in dlgLockedEmojis) {
+        // 미구독 이모티콘은 이미지로 만들지 않는다(유료 기능).
+        out += `<span class="cheese-recap-emoji-locked" title="현재 사용할 수 없는 구독자 전용 이모티콘입니다.">${escapeHtml(key)}</span>`;
+      } else if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
+        out += `<img class="cheese-blind-emoji" src="${escapeAttribute(url)}" alt="" width="24" height="24" loading="lazy" decoding="async" draggable="false">`;
+      } else {
+        out += escapeHtml(key); // 모르는 키도 {:키:} 대신 이름만 표시한다.
+      }
+      last = pattern.lastIndex;
+    }
+    if (last < raw.length) out += escapeHtml(raw.slice(last));
+    return out;
+  }
+
+  function renderChatRecapPanel(panel) {
+    // 제목 옆에 총 개수를 표시한다.
+    const title = panel.querySelector(
+      ".cheese-search-comment-panel-head strong",
+    );
+    if (title) {
+      title.textContent = recapPanelItems.length
+        ? `내 채팅 기록 ${recapPanelItems.length.toLocaleString()}개`
+        : "내 채팅 기록";
+    }
+    const head = panel.querySelector(".cheese-search-comment-panel-head");
+    const body = recapPanelItems.length
+      ? `<ol class="cheese-search-comment-panel-list">${recapPanelItems
+          .map(
+            (it) => `
+          <li>
+            <button type="button" data-recap-seek="${escapeAttribute(it.seconds)}">
+              <span>${escapeHtml(formatSeconds(it.seconds))}</span>
+              <strong>${renderRecapMessageHtml(it.text, it.emojis)}</strong>
+            </button>
+          </li>`,
+          )
+          .join("")}</ol>`
+      : `<p class="cheese-search-comment-panel-status">이 영상에서 남긴 채팅이 없습니다.</p>`;
+    panel.innerHTML = (head?.outerHTML || "") + body;
+    panel
+      .querySelector("[data-recap-close]")
+      ?.addEventListener("click", closeChatRecapPanel);
+    panel.querySelectorAll("[data-recap-seek]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        seekVideoToCommentTimestamp(Number(btn.dataset.recapSeek || 0));
+        // 댓글 팝오버와 같은 규칙을 따른다(닫기/유지/지연).
+        if (commentTsClickAction === "keep") return;
+        if (commentTsClickAction === "delay") {
+          window.setTimeout(
+            closeChatRecapPanel,
+            clampCommentTsClickDelay(commentTsClickDelaySec) * 1000,
+          );
+          return;
+        }
+        closeChatRecapPanel();
+      });
+    });
+  }
+
+  // ── 라이브: 이 채널에서 내가 친 채팅 ────────────────────────────────────
+  // 치지직의 '사용 중인 프로필' 대화상자 안에서 화면만 갈아 끼운다.
+  // (예전에는 프로필 우클릭으로 별도 팝오버를 띄웠는데, 대화상자 안에서 보는
+  //  편이 자연스러워 그 경로는 없앴다.)
+
+  // 대화상자 화면에서 쓸 이모티콘 사전. 리캡 페이지와 같은 저장소를 읽는다.
+  // { 키: URL } 과 잠긴 것 { 키: 채널UID } 두 벌.
+  let dlgEmojiMap = Object.create(null);
+  let dlgLockedEmojis = Object.create(null);
+
+  async function loadDialogEmojiMap(accountId) {
+    const store = chatHistoryStore();
+    if (!store || !accountId) return;
+    dlgEmojiMap = Object.create(null);
+    dlgLockedEmojis = Object.create(null);
+    try {
+      const stored = await store.get([
+        CHAT_RECAP_EMOJI_KEY,
+        CHAT_RECAP_LOCKED_EMOJI_KEY,
+      ]);
+      const all = stored?.[CHAT_RECAP_EMOJI_KEY];
+      const mine = all && typeof all === "object" ? all[accountId] : null;
+      dlgEmojiMap =
+        mine && typeof mine === "object" ? mine : Object.create(null);
+      const allLocked = stored?.[CHAT_RECAP_LOCKED_EMOJI_KEY];
+      const mineLocked =
+        allLocked && typeof allLocked === "object"
+          ? allLocked[accountId]
+          : null;
+      dlgLockedEmojis = normalizeRecapLockedEmojiMap(mineLocked);
+    } catch {}
+    // 구독 여부는 팩에서 확인한다(사전에 URL 이 남아 있어도 만료면 못 쓴다).
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/service/v1/channels/${accountId}/emoji-packs`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const content = (await res.json())?.content;
+      const locked = Object.create(null);
+      const allowedSubscription = new Set();
+      const subscribedChannels = new Set();
+      for (const group of [
+        "emojiPacks",
+        "cheatKeyEmojiPacks",
+        "subscriptionEmojiPacks",
+      ]) {
+        for (const pack of Array.isArray(content?.[group])
+          ? content[group]
+          : []) {
+          const emojis = Array.isArray(pack?.emojis) ? pack.emojis : [];
+          let ch = [
+            pack?.channelId,
+            pack?.channel?.channelId,
+            pack?.ownerChannelId,
+            pack?.creatorChannelId,
+            pack?.emojiPackId,
+          ]
+            .map((value) => String(value || "").toLowerCase())
+            .find((value) => /^[0-9a-f]{32}$/.test(value));
+          if (!ch) {
+            ch = emojis
+              .map((emoji) =>
+                recapSubscriptionEmojiChannelFromUrl(
+                  emoji?.emojiImageUrl ||
+                    emoji?.imageUrl ||
+                    emoji?.emojiUrl ||
+                    "",
+                ),
+              )
+              .find(Boolean);
+          }
+          if (
+            group === "subscriptionEmojiPacks" &&
+            pack?.emojiPackLocked !== true &&
+            ch
+          ) {
+            subscribedChannels.add(ch);
+          }
+          for (const e of emojis) {
+            const key = String(e?.emojiId || "");
+            if (!key) continue;
+            if (pack?.emojiPackLocked === true) {
+              const url =
+                e?.emojiImageUrl || e?.imageUrl || e?.emojiUrl || "";
+              const channelId =
+                ch || recapSubscriptionEmojiChannelFromUrl(url);
+              if (channelId) locked[key] = channelId;
+            } else if (group === "subscriptionEmojiPacks") {
+              allowedSubscription.add(key);
+            }
+          }
+        }
+      }
+      for (const [key, channelId] of Object.entries(dlgLockedEmojis)) {
+        if (allowedSubscription.has(key)) continue;
+        if (key in locked) {
+          if (!locked[key] && channelId) locked[key] = channelId;
+          continue;
+        }
+        if (channelId && subscribedChannels.has(channelId)) continue;
+        locked[key] = channelId;
+      }
+      // 만료된 구독 팩은 API 응답에서 사라질 수 있으므로 저장된 URL 경로도
+      // 함께 본다. 현재 허용 목록에 없는 구독 이모티콘은 텍스트로만 표시한다.
+      for (const [key, url] of Object.entries(dlgEmojiMap)) {
+        const channelId = recapSubscriptionEmojiChannelFromUrl(url);
+        if (channelId && !allowedSubscription.has(key)) {
+          delete dlgEmojiMap[key];
+          if (!subscribedChannels.has(channelId)) locked[key] = channelId;
+        }
+      }
+      dlgLockedEmojis = locked;
+    } catch {}
+  }
+
+  // {:키:} 를 이미지(구독 중) 또는 이름 칩(미구독)으로 바꿔 붙인다.
+  // ⚠ innerHTML 을 쓰지 않는다 — 채팅 본문이라 그대로 넣으면 안 된다.
+  function appendRecapMessage(target, text) {
+    const raw = String(text || "");
+    const pattern = /\{:([^:}]+):\}/g;
+    let last = 0;
+    let match = null;
+    while ((match = pattern.exec(raw)) !== null) {
+      if (match.index > last) {
+        target.append(document.createTextNode(raw.slice(last, match.index)));
+      }
+      const key = String(match[1] || "").trim();
+      const url = dlgEmojiMap[key];
+      if (key in dlgLockedEmojis) {
+        // 잠금 판정을 먼저 적용해 과거 URL이 남아 있어도 이미지를 만들지 않는다.
+        const el = document.createElement("span");
+        el.className = "cheese-recap-emoji-locked";
+        el.textContent = key;
+        el.title = "현재 사용할 수 없는 구독자 전용 이모티콘입니다.";
+        target.append(el);
+      } else if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "";
+        img.className = "cheese-recap-emoji";
+        img.width = 22;
+        img.height = 22;
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.draggable = false;
+        target.append(img);
+      } else {
+        target.append(document.createTextNode(key));
+      }
+      last = pattern.lastIndex;
+    }
+    if (last < raw.length) {
+      target.append(document.createTextNode(raw.slice(last)));
+    }
+  }
+
+  // 후원 금액대별 색(badge-moa-chat 과 같은 구간).
+  function donationTone(amount) {
+    const v = Number(amount) || 0;
+    if (v >= 1000000) return "brick";
+    if (v >= 500000) return "camel";
+    if (v >= 100000) return "green";
+    if (v >= 10000) return "cyan";
+    if (v > 0) return "violet";
+    return "neutral";
+  }
+
+  const DONATION_TYPE_LABEL = {
+    CHAT: "채팅 후원",
+    VIDEO: "영상 후원",
+    MISSION: "미션 후원",
+    PARTY: "파티 후원",
+  };
+
+  // 티어 표기. 채팅에서 온 구독에는 이름(tierName)이 있지만, 선물 API 는
+  // tierNo 만 준다(실측: tier:"TIER_1", tierNo:1) → 이름이 없으면 'N티어'.
+  function tierText(d) {
+    const name = String(d?.tierName || "").trim();
+    if (name) return name;
+    const no = Number(d?.tier) || 0;
+    return no ? `${no}티어` : "";
+  }
+
+  // 후원·구독 배지. 일반 채팅이면 null.
+  function donationBadgeEl(d) {
+    if (!d || typeof d !== "object") return null;
+    const el = document.createElement("b");
+    el.className = "cheese-recap-donation";
+    if (d.kind === "DONATION") {
+      el.classList.add(`is-${donationTone(d.amount)}`);
+      const label = DONATION_TYPE_LABEL[d.type] || "후원";
+      el.textContent = d.amount
+        ? `${label} ${Number(d.amount).toLocaleString()}`
+        : label;
+      if (d.type === "PARTY" && d.partyName) el.title = d.partyName;
+      if (d.videoType)
+        el.title = d.videoType === "YOUTUBE" ? "YouTube" : "클립";
+    } else if (d.kind === "SUBSCRIPTION") {
+      el.classList.add("is-subscription");
+      // 채팅에서 온 구독은 tierName 이 있다(예: '왕둥그리'). 없으면 'N티어'.
+      const tierLabel = tierText(d);
+      el.textContent = ["구독", tierLabel, d.month ? `${d.month}개월` : ""]
+        .filter(Boolean)
+        .join(" ");
+    } else if (d.kind === "GIFT_RECEIVED") {
+      el.classList.add("is-gift");
+      // 티어를 앞에 둔다: '1티어 구독권 받음'(수식어가 앞에 오는 우리말 어순).
+      el.textContent = [tierText(d), "구독권 받음"].filter(Boolean).join(" ");
+      el.title = d.anonymous ? "익명" : d.who || "";
+    } else if (d.kind === "GIFT_SENT") {
+      el.classList.add("is-gift");
+      el.textContent = [
+        tierText(d),
+        "구독권 선물",
+        d.quantity > 1 ? `${d.quantity}개` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      el.title = d.who || "";
+    } else {
+      return null;
+    }
+    return el;
+  }
+
+  function liveRecapRowsFromChunk(value) {
+    const rows = [];
+    for (const it of Array.isArray(value?.items) ? value.items : []) {
+      const t = Number(it?.t) || 0;
+      const m = String(it?.m || "");
+      if (!t || (!m && !it?.d)) continue;
+      rows.push({ t, m, ...(it?.d ? { d: it.d } : {}) });
+    }
+    rows.sort((a, b) => b.t - a.t);
+    return rows;
+  }
+
+  function createLiveRecapPager(accountId, channelId) {
+    const store = chatHistoryStore();
+    const keys = chatRecapMonthKeysForChannel(accountId, channelId).reverse();
+    let keyIndex = 0;
+    let pending = [];
+    return {
+      async next(limit) {
+        const rows = [];
+        while (rows.length < limit) {
+          if (pending.length) {
+            rows.push(...pending.splice(0, limit - rows.length));
+            continue;
+          }
+          if (!store || keyIndex >= keys.length) break;
+          const key = keys[keyIndex++];
+          try {
+            pending = liveRecapRowsFromChunk((await store.get(key))?.[key]);
+          } catch {
+            pending = [];
+          }
+        }
+        return {
+          rows,
+          done: keyIndex >= keys.length && pending.length === 0,
+        };
+      },
+    };
+  }
+
+  async function countLiveRecapForChannel(accountId, channelId) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !channelId) return 0;
+    try {
+      const keys = chatRecapMonthKeysForChannel(accountId, channelId);
+      let count = 0;
+      // 한 번에 전 기간을 역직렬화하지 않는다. 여섯 달씩 읽어 순간 힙을 제한한다.
+      for (let i = 0; i < keys.length; i += 6) {
+        const values = await store.get(keys.slice(i, i + 6));
+        for (const value of Object.values(values || {})) {
+          for (const it of Array.isArray(value?.items) ? value.items : []) {
+            const t = Number(it?.t) || 0;
+            const m = String(it?.m || "");
+            if (t && (m || (it?.d && typeof it.d === "object"))) count += 1;
+          }
+        }
+      }
+      return count;
+    } catch {
+      return 0;
+    }
+  }
+
+  // ── 치지직 '사용 중인 프로필' 팝업에 내 채팅 줄 넣기 ────────────────────
+  // 우클릭 팝오버 대신, 치지직이 띄우는 프로필 대화상자 안에 자연스럽게 붙인다.
+  // ⚠ 클래스 해시(_row_xwsra_83 등)는 빌드마다 바뀐다 → 부분 일치로 찾고,
+  //   실제 형제 요소의 클래스를 그대로 복사해 생김새를 맞춘다(하드코딩 금지).
+  const RECAP_DIALOG_ROW_CLASS = "cheese-recap-profile-row";
+
+  function findProfileDialog() {
+    for (const dlg of document.querySelectorAll('[role="alertdialog"]')) {
+      // '사용 중인 프로필' 팝업만 고른다(후원·미션 등 다른 대화상자 제외).
+      const title = dlg.querySelector("[class*='_title_']");
+      if (String(title?.textContent || "").includes("사용 중인 프로필")) {
+        return dlg;
+      }
+    }
+    return null;
+  }
+
+  // 대화상자 안에서 화면을 갈아 끼운다. 원래 내용은 지우지 않고 숨겨 두었다가
+  // '뒤로가기'에서 그대로 되돌린다(치지직 React 상태를 건드리지 않기 위해).
+  const RECAP_VIEW_CLASS = "cheese-recap-dialog-view";
+
+  function restoreProfileDialog(dlg) {
+    const view = dlg?.querySelector(`.${RECAP_VIEW_CLASS}`);
+    if (view) view.remove();
+    for (const el of dlg?.querySelectorAll("[data-cheese-recap-hidden]") ||
+      []) {
+      el.hidden = false;
+      el.removeAttribute("data-cheese-recap-hidden");
+    }
+  }
+
+  // 치지직의 닫기 동작을 그대로 태운다(우리가 DOM 을 지우면 React 상태가 어긋난다).
+  function closeProfileDialog(dlg) {
+    restoreProfileDialog(dlg);
+    const closeBtn =
+      dlg?.querySelector("button[class*='_close_']") ||
+      dlg?.querySelector("button[aria-label*='닫기']");
+    if (closeBtn) {
+      closeBtn.click();
+      return;
+    }
+    // 닫기 버튼을 못 찾으면 Esc 로 대신한다.
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  }
+
+  async function showRecapInDialog(dlg) {
+    if (!dlg || dlg.querySelector(`.${RECAP_VIEW_CLASS}`)) return;
+    const contents = dlg.querySelector("#popup_contents") || dlg;
+    // 원래 자식들을 숨긴다(제거하지 않는다).
+    for (const child of [...contents.children]) {
+      if (child.hidden) continue;
+      child.hidden = true;
+      child.setAttribute("data-cheese-recap-hidden", "1");
+    }
+    const view = document.createElement("div");
+    view.className = RECAP_VIEW_CLASS;
+    view.innerHTML = `
+      <div class="${RECAP_VIEW_CLASS}-head">
+        <button type="button" data-recap-back aria-label="뒤로가기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M15 5 8 12l7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <strong>내 채팅 기록</strong>
+        <button type="button" data-recap-open title="채팅 리캡 열기">리캡</button>
+        <button type="button" data-recap-close aria-label="닫기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="${RECAP_VIEW_CLASS}-status">불러오는 중입니다.</p>`;
+    contents.append(view);
+
+    view
+      .querySelector("[data-recap-back]")
+      ?.addEventListener("click", () => restoreProfileDialog(dlg));
+    view
+      .querySelector("[data-recap-close]")
+      ?.addEventListener("click", () => closeProfileDialog(dlg));
+    view.querySelector("[data-recap-open]")?.addEventListener("click", () => {
+      window.open(chrome.runtime.getURL("chatRecap.html"), "_blank");
+    });
+
+    const accountId = currentClipVaultAccountId();
+    await loadDialogEmojiMap(accountId);
+    const channelId = currentLiveChannelId();
+    const countFromRow = Number(
+      dlg.querySelector(`.${RECAP_DIALOG_ROW_CLASS}`)?.dataset.recapCount,
+    );
+    const totalCount = Number.isFinite(countFromRow)
+      ? countFromRow
+      : await countLiveRecapForChannel(accountId, channelId);
+    if (!view.isConnected) return;
+    const title = view.querySelector("strong");
+    if (title && totalCount) {
+      title.textContent = `내 채팅 기록 ${totalCount.toLocaleString()}개`;
+    }
+    view.querySelector(`.${RECAP_VIEW_CLASS}-status`)?.remove();
+    if (!totalCount) {
+      const empty = document.createElement("p");
+      empty.className = `${RECAP_VIEW_CLASS}-status`;
+      empty.textContent = "이 채널에서 남긴 채팅 기록이 없습니다.";
+      view.append(empty);
+      return;
+    }
+    // badge-moa-chat 의 '한줄 보기'와 같은 형태:
+    //   · 각 줄은 HH:MM + 본문이 한 줄에
+    //   · 날짜는 줄마다 반복하지 않고 구분 헤더로 한 번만
+    //   · 헤더는 sticky 라 스크롤하면 그 날짜가 위에 붙어 있다가 다음 날짜로 바뀐다
+    const list = document.createElement("div");
+    list.className = `${RECAP_VIEW_CLASS}-list`;
+    // ⚠ sticky 헤더가 아래 줄을 가리려면 불투명 배경이 필요하다. 치지직 대화상자의
+    //   배경색은 테마·빌드마다 달라 하드코딩할 수 없다 → 조상에서 실제 색을 찾아
+    //   CSS 변수로 넘긴다(투명이 아닌 첫 조상).
+    let bg = "";
+    for (let el = dlg; el && el !== document.body; el = el.parentElement) {
+      const c = getComputedStyle(el).backgroundColor;
+      if (c && c !== "transparent" && !/rgba\(0,\s*0,\s*0,\s*0\)/.test(c)) {
+        bg = c;
+        break;
+      }
+    }
+    if (bg) list.style.setProperty("--cheese-recap-bg", bg);
+    const batchSize = 200;
+    const pager = createLiveRecapPager(accountId, channelId);
+    let rendered = 0;
+    let lastDateKey = "";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = `${RECAP_VIEW_CLASS}-more`;
+    const renderNextBatch = async () => {
+      more.disabled = true;
+      more.textContent = "불러오는 중입니다.";
+      if (!more.isConnected) list.append(more);
+      const page = await pager.next(batchSize);
+      more.remove();
+      if (!list.isConnected && !view.isConnected) return;
+      const fragment = document.createDocumentFragment();
+      for (const r of page.rows) {
+        rendered += 1;
+        const d = new Date(r.t);
+        const dateKey = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+        if (dateKey !== lastDateKey) {
+          lastDateKey = dateKey;
+          const head = document.createElement("div");
+          head.className = `${RECAP_VIEW_CLASS}-date`;
+          head.textContent = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}.`;
+          fragment.append(head);
+        }
+        const row = document.createElement("div");
+        row.className = `${RECAP_VIEW_CLASS}-row`;
+        const time = document.createElement("time");
+        time.textContent = d.toLocaleTimeString("ko-KR", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const text = document.createElement("span");
+        const badge = donationBadgeEl(r.d);
+        if (badge) text.append(badge);
+        appendRecapMessage(text, r.m);
+        row.append(time, text);
+        fragment.append(row);
+      }
+      list.append(fragment);
+      if (!page.done) {
+        more.disabled = false;
+        const remaining = Math.max(0, totalCount - rendered);
+        more.textContent = remaining
+          ? `이전 기록 ${Math.min(batchSize, remaining).toLocaleString()}개 더 보기`
+          : "이전 기록 더 보기";
+        list.append(more);
+      }
+    };
+    view.append(list);
+    more.addEventListener("click", () => void renderNextBatch());
+    await renderNextBatch();
+  }
+
+  async function ensureRecapProfileRow() {
+    if (!chatRecapOn) return;
+    const dlg = findProfileDialog();
+    if (!dlg || dlg.querySelector(`.${RECAP_DIALOG_ROW_CLASS}`)) return;
+    // 구독·팔로우 줄이 들어 있는 묶음 안, 통나무파워 박스 앞에 넣는다.
+    const rows = dlg.querySelectorAll("[class*='_row_']");
+    const sample = rows[rows.length - 1];
+    const wrapper = sample?.parentElement;
+    if (!wrapper) return;
+
+    const row = document.createElement("div");
+    // 형제 줄의 클래스를 그대로 써서 여백·글꼴이 치지직 것과 같아진다.
+    row.className = `${sample.className} ${RECAP_DIALOG_ROW_CLASS}`;
+    row.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H12l-4.2 3.6A.75.75 0 0 1 6.6 19v-3H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" fill="currentColor"/>
+      </svg>
+      <span data-recap-count>이 채널에서 내가 친 채팅 …</span>
+      <button type="button" data-recap-more class="${RECAP_DIALOG_ROW_CLASS}-more">보기</button>`;
+    // 통나무파워 박스가 있으면 그 앞에, 없으면 묶음 끝에.
+    const power = wrapper.querySelector("[class*='_power_wrapper_']");
+    if (power) wrapper.insertBefore(row, power);
+    else wrapper.append(row);
+
+    row.querySelector("[data-recap-more]")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void showRecapInDialog(dlg);
+    });
+
+    const accountId = currentClipVaultAccountId();
+    const channelId = currentLiveChannelId();
+    const recapCount = await countLiveRecapForChannel(accountId, channelId);
+    if (!row.isConnected) return;
+    row.dataset.recapCount = String(recapCount);
+    const label = row.querySelector("[data-recap-count]");
+    if (label) {
+      label.textContent = recapCount
+        ? `이 채널에서 내가 친 채팅 ${recapCount.toLocaleString()}개`
+        : "이 채널에서 내가 친 채팅 없음";
+    }
+    const more = row.querySelector("[data-recap-more]");
+    if (more) more.hidden = !recapCount;
+  }
+
+  // 프로필 버튼을 누르면 치지직이 팝업을 그린다 → 그 직후 줄을 끼워 넣는다.
+  // ⚠ 렌더 타이밍이 일정하지 않아 몇 번 재시도한다(관찰자를 새로 만들지 않는다).
+  document.addEventListener("click", (e) => {
+    if (!chatRecapOn) return;
+    const btn = e.target?.closest?.(
+      "aside#aside-chatting button[class*='_setting_button_']",
+    );
+    if (!btn || !btn.querySelector("[class*='_profile_']")) return;
+    let tries = 0;
+    const tick = () => {
+      if (++tries > 12) return;
+      void ensureRecapProfileRow();
+      if (!findProfileDialog()?.querySelector(`.${RECAP_DIALOG_ROW_CLASS}`)) {
+        window.setTimeout(tick, 100);
+      }
+    };
+    window.setTimeout(tick, 60);
+  });
+
+  function closeChatRecapPanel() {
+    document.querySelector(`.${RECAP_PANEL_CLASS}`)?.remove();
+    document
+      .querySelector(`.${RECAP_BUTTON_CLASS}`)
+      ?.setAttribute("aria-expanded", "false");
+    if (!document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)) {
+      releaseCommentPanelControlsVisible();
+    }
   }
 
   function seekVideoToCommentTimestamp(seconds) {
@@ -20610,6 +21774,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return null;
   }
 
+  // 치지직 제목 클래스의 해시는 자주 바뀐다. 재정렬 바보다 앞에 있는 가장 가까운
+  // 섹션 제목에서 계산된 서체만 가져와 우리 제목에 적용한다.
+  function harvestSearchRerankLabelFont(section, bar) {
+    const label = bar?.querySelector(".cheese-search-rerank-label");
+    if (!section || !bar || !label) return;
+    const source = [...section.querySelectorAll("strong")]
+      .filter(
+        (strong) =>
+          strong !== label &&
+          Boolean(
+            strong.compareDocumentPosition(bar) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+      )
+      .at(-1);
+    const fontFamily = source && getComputedStyle(source).fontFamily.trim();
+    if (fontFamily && label.style.fontFamily !== fontFamily) {
+      label.style.fontFamily = fontFamily;
+    }
+  }
+
   // 검색 API 를 size=50 × 최대 4페이지 호출해 풀을 만든다(videoNo 중복 제거).
   async function fetchSearchRerankPool(keyword) {
     const out = [];
@@ -21128,16 +22313,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (searchRerankPickerCloseBound) return;
     searchRerankPickerCloseBound = true;
     document.addEventListener("click", (e) => {
-      const menu = document.querySelector(
-        ".cheese-search-rerank-bar .cheese-search-sort-menu:not([hidden])",
-      );
-      if (!menu) return;
-      if (e.target.closest?.("[data-rerank-sort-picker]")) return; // 피커 내부 클릭
-      menu.hidden = true;
-      menu
-        .closest("[data-rerank-sort-picker]")
-        ?.querySelector(".cheese-search-sort-trigger")
-        ?.setAttribute("aria-expanded", "false");
+      document
+        .querySelectorAll(
+          ".cheese-search-rerank-bar .cheese-search-sort-menu:not([hidden]), .cheese-search-live-rerank-bar .cheese-search-sort-menu:not([hidden])",
+        )
+        .forEach((menu) => {
+          const picker = menu.closest(
+            "[data-rerank-sort-picker], [data-live-rerank-sort-picker]",
+          );
+          if (picker?.contains(e.target)) return;
+          menu.hidden = true;
+          picker
+            ?.querySelector(".cheese-search-sort-trigger")
+            ?.setAttribute("aria-expanded", "false");
+        });
     });
   }
 
@@ -21167,6 +22356,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ["channel", "채널명"],
       ["read", "조회수"],
       ["pv", "라이브 시청자"],
+      ["verified", "파트너"],
+      ["recent", "최신성"],
+    ];
+    const liveWeights = [
+      ["rel", "방송 제목"],
+      ["channel", "채널명"],
+      ["viewers", "시청자 수"],
       ["verified", "파트너"],
       ["recent", "최신성"],
     ];
@@ -21214,7 +22410,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             ${renderSearchOptionsWeightFields("video", videoWeights)}
           </div>
         </section>`
-        : `
+        : type === "live"
+          ? `
+        <section class="cheese-search-options-group">
+          <span class="cheese-search-options-title">다음 검색 기본 정렬</span>
+          <div class="cheese-search-options-segments is-four">
+            <button type="button" data-search-options-live-sort="score">추천순</button>
+            <button type="button" data-search-options-live-sort="viewers">시청자순</button>
+            <button type="button" data-search-options-live-sort="recent">최신순</button>
+            <button type="button" data-search-options-live-sort="original">원본순</button>
+          </div>
+        </section>
+        <section class="cheese-search-options-group">
+          <div class="cheese-search-options-title-row">
+            <span class="cheese-search-options-title">추천순 점수 비중</span>
+            <button type="button" class="cheese-search-options-reset" data-search-options-live-reset>초기화</button>
+          </div>
+          <div class="cheese-search-options-fields">
+            ${renderSearchOptionsWeightFields("live", liveWeights)}
+          </div>
+        </section>`
+          : `
         <section class="cheese-search-options-group">
           <span class="cheese-search-options-title">클립 클릭 동작<button type="button" class="cheese-search-options-info" data-search-options-info="clip-open" aria-label="클립 클릭 동작 안내" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg></button></span>
           <div class="cheese-search-options-segments is-two">
@@ -21388,6 +22604,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         .forEach((input) => {
           input.value = String(
             searchRerankWeights[input.dataset.searchOptionsVideoWeight] ?? 0,
+          );
+        });
+      return;
+    }
+    if (type === "live") {
+      setSearchOptionsActive(
+        root,
+        "[data-search-options-live-sort]",
+        searchLiveRerankDefaultSort,
+        "searchOptionsLiveSort",
+      );
+      root
+        .querySelectorAll("[data-search-options-live-weight]")
+        .forEach((input) => {
+          input.value = String(
+            searchLiveRerankWeights[input.dataset.searchOptionsLiveWeight] ?? 0,
           );
         });
       return;
@@ -21577,26 +22809,36 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const key =
           type === "video"
             ? input.dataset.searchOptionsVideoWeight
-            : input.dataset.searchOptionsClipWeight;
+            : type === "live"
+              ? input.dataset.searchOptionsLiveWeight
+              : input.dataset.searchOptionsClipWeight;
         raw[key] = input.value;
       });
     }
     const normalized =
       type === "video"
         ? normalizeSearchRerankWeights(raw)
-        : normalizeIntegratedSearchClipWeights(raw);
+        : type === "live"
+          ? normalizeSearchLiveRerankWeights(raw)
+          : normalizeIntegratedSearchClipWeights(raw);
+    const storageKey =
+      type === "video"
+        ? SEARCH_RERANK_WEIGHTS_KEY
+        : type === "live"
+          ? SEARCH_LIVE_RERANK_WEIGHTS_KEY
+          : SEARCH_CLIPS_WEIGHTS_KEY;
     try {
       chrome.storage?.local?.set({
-        [type === "video"
-          ? SEARCH_RERANK_WEIGHTS_KEY
-          : SEARCH_CLIPS_WEIGHTS_KEY]: normalized,
+        [storageKey]: normalized,
       });
     } catch {}
     root.querySelectorAll(selector).forEach((input) => {
       const key =
         type === "video"
           ? input.dataset.searchOptionsVideoWeight
-          : input.dataset.searchOptionsClipWeight;
+          : type === "live"
+            ? input.dataset.searchOptionsLiveWeight
+            : input.dataset.searchOptionsClipWeight;
       input.value = String(normalized[key] ?? 0);
     });
   }
@@ -21702,6 +22944,38 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         .forEach((input) => {
           input.addEventListener("change", () =>
             saveSearchOptionsWeights(root, "video"),
+          );
+        });
+    } else if (type === "live") {
+      root.addEventListener("click", (event) => {
+        const sort = event.target.closest("[data-search-options-live-sort]");
+        if (sort) {
+          setSearchOptionsActive(
+            root,
+            "[data-search-options-live-sort]",
+            sort.dataset.searchOptionsLiveSort,
+            "searchOptionsLiveSort",
+          );
+          try {
+            chrome.storage?.local?.set({
+              [SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY]:
+                sort.dataset.searchOptionsLiveSort,
+            });
+          } catch {}
+        }
+        if (event.target.closest("[data-search-options-live-reset]")) {
+          saveSearchOptionsWeights(
+            root,
+            "live",
+            SEARCH_LIVE_RERANK_WEIGHTS_DEFAULT,
+          );
+        }
+      });
+      root
+        .querySelectorAll("[data-search-options-live-weight]")
+        .forEach((input) => {
+          input.addEventListener("change", () =>
+            saveSearchOptionsWeights(root, "live"),
           );
         });
     } else if (type === "clip") {
@@ -22006,7 +23280,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       bar = document.createElement("div");
       bar.className = "cheese-search-rerank-bar";
       bar.innerHTML =
-        `<span class="cheese-search-rerank-label _title_51mq8_11">치즈 플래터 재정렬</span>` +
+        `<span class="cheese-search-rerank-label">치즈 플래터 재정렬</span>` +
         `<div class="cheese-search-sort-picker" data-rerank-sort-picker>` +
         `<button type="button" class="cheese-search-control cheese-search-sort-trigger" aria-haspopup="listbox" aria-expanded="false"><span data-rerank-sort-label></span></button>` +
         `<div class="cheese-search-sort-menu" role="listbox" aria-label="동영상 정렬 선택" hidden>` +
@@ -22043,6 +23317,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       listWrap.before(bar);
       bindSearchRerankPickerClose();
     }
+    harvestSearchRerankLabelFont(section, bar);
     updateSearchRerankPicker(bar);
 
     // 우리 리스트(네이티브 ul 클래스 재사용). 시그니처가 같으면 카드 복제만 생략하고
@@ -22165,6 +23440,509 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       })
       .catch(() => {
         searchRerankState.fetching = false;
+      });
+  }
+
+  // ── 통합검색(/search) 라이브 섹션 재정렬 ────────────────────────────────────
+  const SEARCH_LIVE_RERANK_HIDDEN_CLASS =
+    "cheese-search-live-rerank-native-hidden";
+  const SEARCH_LIVE_RERANK_INITIAL_FALLBACK = 6;
+  const SEARCH_LIVE_RERANK_PAGE_SIZE = 50;
+  const SEARCH_LIVE_RERANK_POOL_MAX = 200;
+  const SEARCH_LIVE_RERANK_MORE_STEP = 12;
+  const SEARCH_LIVE_RERANK_SORTS = [
+    { value: "score", label: "추천순" },
+    { value: "viewers", label: "시청자순" },
+    { value: "recent", label: "최신순" },
+    { value: "original", label: "치지직 원본순" },
+  ];
+  const searchLiveRerankState = {
+    keyword: "",
+    fetchedFor: "",
+    fetching: false,
+    items: [],
+    sort: "score",
+    initial: SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
+    visible: SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
+  };
+
+  function findSearchLiveSection() {
+    const titles = document.querySelectorAll(
+      '#layout-body section strong[class*="_title_"]',
+    );
+    for (const title of titles) {
+      if (title.textContent.trim() === "라이브")
+        return title.closest("section");
+    }
+    return null;
+  }
+
+  function findSearchLiveNativeList(section = findSearchLiveSection()) {
+    if (!section) return null;
+    return [...section.querySelectorAll("ul")].find(
+      (list) =>
+        !list.classList.contains("cheese-search-live-rerank-list") &&
+        list.querySelector('a[href^="/live/"]'),
+    );
+  }
+
+  function parseSearchLiveOpenDate(value) {
+    const text = String(value || "").trim();
+    if (!text) return 0;
+    const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)
+      ? `${text.replace(" ", "T")}+09:00`
+      : text;
+    const parsed = Date.parse(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function normalizeSearchLiveItem(item, index) {
+    const live = item?.live || item?.liveInfo || {};
+    const channel = item?.channel || item?.streamer || {};
+    const channelId = String(live.channelId || channel.channelId || "");
+    if (!channelId) return null;
+    return {
+      ...item,
+      live,
+      channel: { ...channel, channelId },
+      __origIndex: index,
+      __openedAt: parseSearchLiveOpenDate(live.openDate),
+      __score: 0,
+    };
+  }
+
+  async function fetchSearchLiveRerankPool(keyword) {
+    const out = [];
+    const seen = new Set();
+    let offset = 0;
+    let pageCount = 0;
+    while (out.length < SEARCH_LIVE_RERANK_POOL_MAX && pageCount < 20) {
+      pageCount += 1;
+      const size = Math.min(
+        SEARCH_LIVE_RERANK_PAGE_SIZE,
+        SEARCH_LIVE_RERANK_POOL_MAX - out.length,
+      );
+      const response = await fetch(
+        `https://api.chzzk.naver.com/service/v1/search/lives?keyword=${encodeURIComponent(keyword)}&offset=${offset}&size=${size}`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!response.ok) break;
+      const json = await response.json();
+      const data = json?.content?.data;
+      if (!Array.isArray(data) || !data.length) break;
+      for (const raw of data) {
+        const item = normalizeSearchLiveItem(raw, out.length);
+        const key = `${item?.channel?.channelId || ""}:${item?.live?.liveId || ""}`;
+        if (!item || seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+        if (out.length >= SEARCH_LIVE_RERANK_POOL_MAX) break;
+      }
+      const nextOffset = Number(json?.content?.page?.next?.offset);
+      if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+      offset = nextOffset;
+    }
+    return out;
+  }
+
+  function scoreSearchLiveRerankItem(item, tokens, phrase) {
+    const live = item.live;
+    const channel = item.channel;
+    const title = normalizeSearchRerankText(live.liveTitle);
+    const channelName = normalizeSearchRerankText(channel.channelName);
+    const tokenScore = (text) =>
+      tokens.length
+        ? tokens.reduce((sum, token) => sum + Number(text.includes(token)), 0) /
+          tokens.length
+        : 0;
+    let relevance = tokenScore(title);
+    if (phrase && title.includes(phrase))
+      relevance = Math.min(1, relevance + 0.3);
+    let channelRelevance = tokenScore(channelName) * 0.7;
+    if (phrase && channelName === phrase) channelRelevance = 1;
+    else if (phrase.length > 1 && channelName.startsWith(phrase)) {
+      channelRelevance = Math.max(channelRelevance, 0.9);
+    } else if (phrase.length > 1 && channelName.includes(phrase)) {
+      channelRelevance = Math.max(channelRelevance, 0.8);
+    }
+    const viewers = Math.min(
+      1,
+      Math.log10(1 + (Number(live.concurrentUserCount) || 0)) / 5,
+    );
+    const ageHours = item.__openedAt
+      ? Math.max(0, (Date.now() - item.__openedAt) / 3600000)
+      : 24;
+    const recent = Math.max(0, Math.min(1, (24 - ageHours) / 24));
+    const weights = searchLiveRerankWeights;
+    return (
+      relevance * weights.rel +
+      Math.min(1, channelRelevance) * weights.channel +
+      viewers * weights.viewers +
+      Number(channel.verifiedMark === true) * weights.verified +
+      recent * weights.recent
+    );
+  }
+
+  function buildSearchLiveRerankScores(items, keyword) {
+    const phrase = normalizeSearchRerankText(keyword);
+    const tokens = phrase.split(" ").filter(Boolean);
+    items.forEach((item, index) => {
+      item.__origIndex = index;
+      item.__score = scoreSearchLiveRerankItem(item, tokens, phrase);
+    });
+  }
+
+  function sortedSearchLiveRerankItems() {
+    const items = searchLiveRerankState.items.slice();
+    if (searchLiveRerankState.sort === "viewers") {
+      items.sort(
+        (a, b) =>
+          (Number(b.live.concurrentUserCount) || 0) -
+            (Number(a.live.concurrentUserCount) || 0) ||
+          a.__origIndex - b.__origIndex,
+      );
+    } else if (searchLiveRerankState.sort === "recent") {
+      items.sort(
+        (a, b) => b.__openedAt - a.__openedAt || a.__origIndex - b.__origIndex,
+      );
+    } else if (searchLiveRerankState.sort === "original") {
+      items.sort((a, b) => a.__origIndex - b.__origIndex);
+    } else {
+      items.sort(
+        (a, b) => b.__score - a.__score || a.__origIndex - b.__origIndex,
+      );
+    }
+    return items;
+  }
+
+  function searchLiveThumbnailUrl(live) {
+    const url = String(
+      live.liveImageUrl || live.defaultThumbnailImageUrl || "",
+    );
+    return url.replace("{type}", "480");
+  }
+
+  function fillSearchLiveRerankCard(li, item) {
+    const live = item.live;
+    const channel = item.channel;
+    const channelId = channel.channelId;
+    const liveHref = `/live/${encodeURIComponent(channelId)}`;
+    li.querySelectorAll('a[href^="/live/"]').forEach((anchor) => {
+      anchor.setAttribute("href", liveHref);
+    });
+
+    const thumbnail = li.querySelector('a[class*="_thumbnail_"]');
+    if (thumbnail) {
+      thumbnail.setAttribute("href", liveHref);
+      const image = thumbnail.querySelector("img");
+      const imageUrl = searchLiveThumbnailUrl(live);
+      if (image && imageUrl) image.src = imageUrl;
+      const blind = thumbnail.querySelector("span.blind");
+      if (blind)
+        blind.textContent = `${channel.channelName || ""} 라이브로 이동`;
+    }
+
+    const title = li.querySelector('a[class*="_title_"]');
+    if (title) {
+      title.setAttribute("href", liveHref);
+      title.innerHTML = `${escapeHtml(String(live.liveTitle || "").trim())}<span class="blind">라이브로 이동</span>`;
+    }
+
+    const channelLink = li.querySelector('a[class*="_channel_"]');
+    if (channelLink) {
+      channelLink.setAttribute("href", `/${encodeURIComponent(channelId)}`);
+      const name = channelLink.querySelector('span[class*="_text_"]');
+      setSearchRerankChannelNameAndBadges(name, channel);
+    }
+    const profileLink = li.querySelector(
+      'div[class*="_profile_"] a[href]:not([href^="/live/"])',
+    );
+    if (profileLink)
+      profileLink.setAttribute("href", `/${encodeURIComponent(channelId)}`);
+    const profileImage =
+      profileLink?.querySelector("img") ||
+      channelLink?.querySelector('div[class*="_profile_"] img');
+    if (profileImage && channel.channelImageUrl) {
+      profileImage.src = `${channel.channelImageUrl}${channel.channelImageUrl.includes("?") ? "&" : "?"}type=f120_120_na`;
+    }
+
+    const viewerCount = Number(live.concurrentUserCount) || 0;
+    const viewerBadge =
+      li.querySelector('div[class*="_count_badge_"] span:not(.blind)') ||
+      [
+        ...(thumbnail?.querySelectorAll(
+          'div[class*="_description_"] span:not(.blind)',
+        ) || []),
+      ].find((span) => /(?:명|시청)/.test(span.textContent));
+    if (viewerBadge) {
+      [...viewerBadge.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .forEach((node) => node.remove());
+      viewerBadge.appendChild(
+        document.createTextNode(`${viewerCount.toLocaleString("ko-KR")}명`),
+      );
+    }
+
+    const categoryRow = [
+      ...li.querySelectorAll('div[class*="_information_"]'),
+    ].find((row) =>
+      row.querySelector('a[href*="/category/"], a[href*="tags="]'),
+    );
+    if (categoryRow) {
+      const sampleAnchor = categoryRow.querySelector("a");
+      const sampleSpans = [...categoryRow.querySelectorAll("a > span")];
+      const categoryClass =
+        sampleSpans.find((span) => !span.className.includes("_tag_"))
+          ?.className ||
+        sampleSpans[0]?.className ||
+        "";
+      const tagClass =
+        sampleSpans.find((span) => span.className.includes("_tag_"))
+          ?.className || categoryClass;
+      const anchorClass = sampleAnchor?.className || "";
+      categoryRow.textContent = "";
+      if (live.liveCategory && live.liveCategoryValue && categoryClass) {
+        categoryRow.insertAdjacentHTML(
+          "beforeend",
+          `<a class="${escapeAttribute(anchorClass)}" href="/category/${encodeURIComponent(String(live.categoryType || "ETC"))}/${encodeURIComponent(String(live.liveCategory))}/lives"><span class="${escapeAttribute(categoryClass)}">${escapeHtml(String(live.liveCategoryValue))}</span></a>`,
+        );
+      }
+      for (const tag of (Array.isArray(live.tags) ? live.tags : []).slice(
+        0,
+        5,
+      )) {
+        if (!tagClass) break;
+        categoryRow.insertAdjacentHTML(
+          "beforeend",
+          `<a href="/lives?tags=${encodeURIComponent(String(tag))}"><span class="${escapeAttribute(tagClass)}">${escapeHtml(String(tag))}</span></a>`,
+        );
+      }
+    }
+  }
+
+  function updateSearchLiveRerankPicker(bar) {
+    const current =
+      SEARCH_LIVE_RERANK_SORTS.find(
+        (option) => option.value === searchLiveRerankState.sort,
+      ) || SEARCH_LIVE_RERANK_SORTS[0];
+    const label = bar.querySelector("[data-live-rerank-sort-label]");
+    if (label) label.textContent = current.label;
+    bar.querySelectorAll("[data-live-rerank-sort]").forEach((option) => {
+      option.setAttribute(
+        "aria-selected",
+        String(option.dataset.liveRerankSort === current.value),
+      );
+    });
+  }
+
+  function renderSearchLiveRerank() {
+    const section = findSearchLiveSection();
+    const nativeList = findSearchLiveNativeList(section);
+    const template = nativeList?.querySelector(":scope > li");
+    if (
+      !section ||
+      !nativeList ||
+      !template ||
+      !searchLiveRerankState.items.length
+    ) {
+      return;
+    }
+    harvestSearchRerankNativeChannelIcons();
+    const nativeMoreButton = [...section.querySelectorAll("button")].find(
+      (button) =>
+        !button.closest(".cheese-search-live-rerank-more") &&
+        button.textContent.includes("더보기"),
+    );
+    const nativeMoreWrap = nativeMoreButton?.parentElement || null;
+    const nativeListWrap = nativeList.parentElement;
+    nativeListWrap?.classList.add(SEARCH_LIVE_RERANK_HIDDEN_CLASS);
+    nativeMoreWrap?.classList.add(SEARCH_LIVE_RERANK_HIDDEN_CLASS);
+
+    const items = sortedSearchLiveRerankItems();
+    const visible = Math.min(searchLiveRerankState.visible, items.length);
+    const signature = `${searchLiveRerankState.fetchedFor}|${searchLiveRerankState.sort}|${visible}|${items.length}|icons:${searchRerankIconTemplateRevision}`;
+    let bar = section.querySelector(".cheese-search-live-rerank-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "cheese-search-live-rerank-bar";
+      bar.innerHTML =
+        `<span class="cheese-search-rerank-label">치즈 플래터 라이브 재정렬</span>` +
+        `<div class="cheese-search-sort-picker" data-live-rerank-sort-picker>` +
+        `<button type="button" class="cheese-search-control cheese-search-sort-trigger" aria-haspopup="listbox" aria-expanded="false"><span data-live-rerank-sort-label></span></button>` +
+        `<div class="cheese-search-sort-menu" role="listbox" aria-label="라이브 정렬 선택" hidden>` +
+        SEARCH_LIVE_RERANK_SORTS.map(
+          (option) =>
+            `<button type="button" role="option" aria-selected="false" data-live-rerank-sort="${option.value}">${option.label}</button>`,
+        ).join("") +
+        `</div></div>` +
+        renderSearchOptionsTrigger("live", "라이브 재정렬 설정");
+      const trigger = bar.querySelector(".cheese-search-sort-trigger");
+      const menu = bar.querySelector(".cheese-search-sort-menu");
+      trigger.addEventListener("click", () => {
+        const open = menu.hidden;
+        menu.hidden = !open;
+        trigger.setAttribute("aria-expanded", String(open));
+      });
+      menu.addEventListener("click", (event) => {
+        const option = event.target.closest("[data-live-rerank-sort]");
+        if (!option) return;
+        searchLiveRerankState.sort = normalizeSearchLiveRerankSort(
+          option.dataset.liveRerankSort,
+        );
+        searchLiveRerankState.visible = searchLiveRerankState.initial;
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+        renderSearchLiveRerank();
+      });
+      bindSearchOptionsPopover(
+        bar.querySelector('[data-search-options="live"]'),
+      );
+      nativeListWrap?.before(bar);
+      bindSearchRerankPickerClose();
+    }
+    harvestSearchRerankLabelFont(section, bar);
+    updateSearchLiveRerankPicker(bar);
+
+    let list = section.querySelector("ul.cheese-search-live-rerank-list");
+    if (!list) {
+      list = document.createElement("ul");
+      list.className = `${nativeList.className.replace(SEARCH_LIVE_RERANK_HIDDEN_CLASS, "").trim()} cheese-search-live-rerank-list`;
+      nativeListWrap?.after(list);
+    }
+    if (list.dataset.sig !== signature) {
+      list.dataset.sig = signature;
+      list.textContent = "";
+      const fragment = document.createDocumentFragment();
+      for (const item of items.slice(0, visible)) {
+        const card = template.cloneNode(true);
+        fillSearchLiveRerankCard(card, item);
+        fragment.appendChild(card);
+      }
+      list.appendChild(fragment);
+      applyLiveViewerCountPlacement();
+      applyChannelProfileRadius();
+    }
+
+    let moreWrap = section.querySelector(".cheese-search-live-rerank-more");
+    if (items.length > searchLiveRerankState.initial) {
+      if (!moreWrap) {
+        moreWrap = document.createElement("div");
+        moreWrap.className = `${nativeMoreWrap?.className?.replace(SEARCH_LIVE_RERANK_HIDDEN_CLASS, "").trim() || ""} cheese-search-live-rerank-more`;
+        const button = nativeMoreButton
+          ? nativeMoreButton.cloneNode(true)
+          : document.createElement("button");
+        button.type = "button";
+        button.addEventListener("click", () => {
+          const hasMore =
+            searchLiveRerankState.visible < searchLiveRerankState.items.length;
+          searchLiveRerankState.visible = hasMore
+            ? searchLiveRerankState.visible + SEARCH_LIVE_RERANK_MORE_STEP
+            : searchLiveRerankState.initial;
+          renderSearchLiveRerank();
+          if (!hasMore) {
+            section
+              .querySelector(".cheese-search-live-rerank-bar")
+              ?.scrollIntoView({ block: "nearest" });
+          }
+        });
+        moreWrap.appendChild(button);
+        list.after(moreWrap);
+      }
+      const button = moreWrap.querySelector("button");
+      if (button) {
+        const expanded = visible >= items.length;
+        button.setAttribute("aria-expanded", String(expanded));
+        [...button.childNodes]
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .forEach((node) => node.remove());
+        const svg = button.querySelector("svg");
+        const label = expanded
+          ? "접기"
+          : `더보기 (${items.length - visible}개)`;
+        if (svg) button.insertBefore(document.createTextNode(label), svg);
+        else button.appendChild(document.createTextNode(label));
+      }
+    } else {
+      moreWrap?.remove();
+    }
+    ensureSearchSectionTopButton(section, {
+      show: visible > searchLiveRerankState.initial,
+      targetSelector: ".cheese-search-live-rerank-bar",
+      label: "라이브 결과 맨 위로",
+      floating: true,
+    });
+  }
+
+  function cleanupSearchLiveRerank() {
+    findSearchLiveSection()
+      ?.querySelector(":scope > .cheese-search-section-top-wrap")
+      ?.remove();
+    document
+      .querySelectorAll(
+        ".cheese-search-live-rerank-list, .cheese-search-live-rerank-bar, .cheese-search-live-rerank-more",
+      )
+      .forEach((element) => element.remove());
+    document
+      .querySelectorAll(`.${SEARCH_LIVE_RERANK_HIDDEN_CLASS}`)
+      .forEach((element) =>
+        element.classList.remove(SEARCH_LIVE_RERANK_HIDDEN_CLASS),
+      );
+    searchLiveRerankState.keyword = "";
+    searchLiveRerankState.fetchedFor = "";
+    searchLiveRerankState.fetching = false;
+    searchLiveRerankState.items = [];
+    searchLiveRerankState.initial = SEARCH_LIVE_RERANK_INITIAL_FALLBACK;
+    searchLiveRerankState.visible = SEARCH_LIVE_RERANK_INITIAL_FALLBACK;
+  }
+
+  function ensureSearchLiveRerank() {
+    const keyword = searchLiveRerank ? getSearchRerankKeyword() : "";
+    const section = findSearchLiveSection();
+    if (!keyword || !section) {
+      if (
+        document.querySelector(".cheese-search-live-rerank-list") ||
+        document.querySelector(`.${SEARCH_LIVE_RERANK_HIDDEN_CLASS}`)
+      ) {
+        cleanupSearchLiveRerank();
+      }
+      return;
+    }
+    if (searchLiveRerankState.fetchedFor === keyword) {
+      if (searchLiveRerankState.items.length) renderSearchLiveRerank();
+      return;
+    }
+    if (
+      searchLiveRerankState.fetching &&
+      searchLiveRerankState.keyword === keyword
+    ) {
+      return;
+    }
+    cleanupSearchLiveRerank();
+    const nativeCount = findSearchLiveNativeList(section)?.children.length || 0;
+    searchLiveRerankState.initial = Math.max(
+      1,
+      nativeCount || SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
+    );
+    searchLiveRerankState.visible = searchLiveRerankState.initial;
+    searchLiveRerankState.keyword = keyword;
+    searchLiveRerankState.fetching = true;
+    fetchSearchLiveRerankPool(keyword)
+      .then((items) => {
+        if (searchLiveRerankState.keyword !== keyword) return;
+        searchLiveRerankState.fetching = false;
+        buildSearchLiveRerankScores(items, keyword);
+        searchLiveRerankState.items = items;
+        searchLiveRerankState.fetchedFor = keyword;
+        searchLiveRerankState.sort = normalizeSearchLiveRerankSort(
+          searchLiveRerankDefaultSort,
+        );
+        if (items.length) renderSearchLiveRerank();
+      })
+      .catch(() => {
+        if (searchLiveRerankState.keyword === keyword) {
+          searchLiveRerankState.fetching = false;
+          searchLiveRerankState.fetchedFor = keyword;
+        }
       });
   }
 
@@ -33798,6 +35576,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         FOLLOWER_EXACT_KEY,
         CHAT_HISTORY_ENABLED_KEY,
         CHAT_HISTORY_LIMIT_KEY,
+        CHAT_RECAP_ENABLED_KEY,
+        CHAT_RECAP_RETENTION_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
       chatHistoryOn = false;
@@ -33809,6 +35589,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatHistoryLimit = normalizeChatHistoryLimit(
         data?.[CHAT_HISTORY_LIMIT_KEY],
       );
+      // 채팅 리캡은 기본 꺼짐(본인 채팅이라도 사용자가 켜는 선택을 하게 한다).
+      chatRecapOn = data?.[CHAT_RECAP_ENABLED_KEY] === true;
+      chatRecapRetentionDays = normalizeChatRecapRetention(
+        data?.[CHAT_RECAP_RETENTION_KEY],
+      );
+      if (chatRecapOn) {
+        void ensureRecapVodChannel();
+        void pruneChatRecap();
+      }
       broadcastFeatureFlags();
       ensureChatHistory();
       void loadClipVault();
@@ -34587,6 +36376,387 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       String(error?.message || error || ""),
     );
   }
+
+  // 리캡을 붙일 채널. 라이브는 경로에서, 다시보기는 API 로 한 번 조회해 캐시한다.
+  let recapVodChannel = { videoNo: "", channelId: "" };
+
+  function currentRecapChannelId() {
+    const live = currentLiveChannelId();
+    if (live) return String(live).toLowerCase();
+    const videoNo = getCurrentVideoNo();
+    if (videoNo && recapVodChannel.videoNo === videoNo) {
+      return recapVodChannel.channelId;
+    }
+    return "";
+  }
+
+  // 다시보기 채널 id 를 확보한다(경로에 없다). 다시보기에서 수집할 때 어느 채널에
+  // 넣을지 정하는 데 쓴다. 조회(패널)는 채팅 API 를 직접 읽으므로 이 값이 필요 없다.
+  let recapVodChannelPromise = null;
+
+  async function ensureRecapVodChannel() {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo) return;
+    // 이미 확보했으면 끝. 진행 중이면 그 조회를 함께 기다린다(중복 요청 방지).
+    if (recapVodChannel.videoNo === videoNo) {
+      if (recapVodChannelPromise) await recapVodChannelPromise;
+      return;
+    }
+    recapVodChannel = { videoNo, channelId: "" };
+    recapVodChannelPromise = (async () => {
+      try {
+        const res = await fetch(
+          `https://api.chzzk.naver.com/service/v2/videos/${videoNo}`,
+          { credentials: "include", headers: { accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        const content = (await res.json())?.content || {};
+        const id = String(content?.channel?.channelId || "").toLowerCase();
+        if (recapVodChannel.videoNo !== videoNo) return; // 그새 영상 전환
+        if (!/^[0-9a-f]{32}$/.test(id)) return;
+        recapVodChannel.channelId = id;
+        broadcastFeatureFlags();
+      } catch {}
+    })();
+    await recapVodChannelPromise;
+    recapVodChannelPromise = null;
+  }
+
+  // ── 채팅 리캡 저장 ────────────────────────────────────────────────────────
+  // 월별로 청크를 나눈다. 한 키에 몰면 읽고 쓸 때마다 전체를 직렬화해야 한다.
+  // 보관 기간: 0(무제한) / 90 / 365 만 허용한다.
+  function normalizeChatRecapRetention(raw) {
+    const n = Number(raw);
+    return n === 90 || n === 365 ? n : 0;
+  }
+
+  function chatRecapMonthKey(at) {
+    const d = new Date(Number(at) || Date.now());
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${d.getFullYear()}-${m}`;
+  }
+
+  function chatRecapStoreKey(accountId, channelId, month) {
+    return `${CHAT_RECAP_STORE_PREFIX}${accountId}:${channelId}:${month}`;
+  }
+
+  function chatRecapMonthKeysForChannel(accountId, channelId) {
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+    let start;
+    if (chatRecapRetentionDays > 0) {
+      const cutoff = new Date(
+        Date.now() - chatRecapRetentionDays * 24 * 60 * 60 * 1000,
+      );
+      start = new Date(cutoff.getFullYear(), cutoff.getMonth(), 1);
+    } else {
+      const [year, month] = CHAT_RECAP_EARLIEST_MONTH.split("-").map(Number);
+      start = new Date(year, month - 1, 1);
+    }
+    const keys = [];
+    // 서비스 시작 이전 키는 생길 수 없다. 상한은 잘못된 시계로 인한 무한 반복 방지.
+    for (let i = 0; start <= end && i < 240; i += 1) {
+      keys.push(
+        chatRecapStoreKey(accountId, channelId, chatRecapMonthKey(start)),
+      );
+      start = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    }
+    return keys;
+  }
+
+  async function loadChatRecapChannelChunks(accountId, channelId) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !channelId) return {};
+    const keys = chatRecapMonthKeysForChannel(accountId, channelId);
+    return keys.length ? await store.get(keys) : {};
+  }
+
+  const chatRecapWriteTails = new Map();
+  const chatRecapCatalogKnown = new Set();
+  const CHAT_RECAP_CATALOG_KNOWN_MAX = 5000;
+  let chatRecapEmojiWriteTail = Promise.resolve();
+
+  function enqueueChatRecapWrite(accountId, channelId, task) {
+    const queueKey = `${accountId}:${channelId}`;
+    const previous = chatRecapWriteTails.get(queueKey) || Promise.resolve();
+    const result = previous.catch(() => {}).then(task);
+    const tail = result.catch(() => {});
+    chatRecapWriteTails.set(queueKey, tail);
+    void tail.finally(() => {
+      if (chatRecapWriteTails.get(queueKey) === tail) {
+        chatRecapWriteTails.delete(queueKey);
+      }
+    });
+    return result;
+  }
+
+  async function registerChatRecapCatalog(accountId, channelId, months) {
+    const pending = [...new Set(months)].filter((month) => {
+      const key = `${accountId}:${channelId}:${month}`;
+      return /^\d{4}-\d{2}$/.test(month) && !chatRecapCatalogKnown.has(key);
+    });
+    if (!pending.length) return;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: CHAT_RECAP_CATALOG_MESSAGE,
+        op: "ADD",
+        accountId,
+        channelId,
+        months: pending,
+      });
+      if (response?.ok) {
+        for (const month of pending) {
+          chatRecapCatalogKnown.add(`${accountId}:${channelId}:${month}`);
+          if (chatRecapCatalogKnown.size > CHAT_RECAP_CATALOG_KNOWN_MAX) {
+            const oldest = chatRecapCatalogKnown.values().next().value;
+            if (oldest !== undefined) chatRecapCatalogKnown.delete(oldest);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 한 배치를 월별로 갈라 저장한다. 같은 시각+본문은 한 번만 남긴다(재시도 안전).
+  function saveChatRecapBatch(
+    accountId,
+    channelId,
+    items,
+    batchVideoNo = "",
+  ) {
+    return enqueueChatRecapWrite(accountId, channelId, () =>
+      saveChatRecapBatchLocked(
+        accountId,
+        channelId,
+        items,
+        batchVideoNo,
+      ),
+    );
+  }
+
+  async function saveChatRecapBatchLocked(
+    accountId,
+    channelId,
+    items,
+    batchVideoNo = "",
+  ) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !channelId || !Array.isArray(items)) {
+      return false;
+    }
+    const byMonth = new Map();
+    for (const it of items) {
+      const at = Number(it?.t) || 0;
+      const text = String(it?.m || "").slice(0, CHAT_RECAP_TEXT_MAX);
+      // ⚠ 후원·구독은 본문이 비어 있을 수 있다(파티 후원 등) → 금액만으로도 남긴다.
+      if (!at || (!text && !it?.d)) continue;
+      const month = chatRecapMonthKey(at);
+      if (!byMonth.has(month)) byMonth.set(month, []);
+      const row = { t: at, m: text };
+      if (Number.isFinite(Number(it?.v))) {
+        row.v = Number(it.v);
+        const videoNo = String(it?.n || batchVideoNo || "");
+        if (/^\d+$/.test(videoNo)) row.n = videoNo;
+      }
+      if (it?.d && typeof it.d === "object") row.d = it.d; // 후원·구독 정보
+      byMonth.get(month).push(row);
+    }
+    if (!byMonth.size) return true;
+    let saved = true;
+    const catalogMonths = [];
+    for (const [month, rows] of byMonth) {
+      const key = chatRecapStoreKey(accountId, channelId, month);
+      try {
+        const cur = (await store.get(key))?.[key];
+        const list = Array.isArray(cur?.items) ? cur.items : [];
+        // 중복 제거 키: 시각+본문. 같은 메시지를 두 번 받아도 한 줄만 남는다.
+        // ⚠ 같은 채팅(t|m)이 이미 있어도, 기존에 재생 오프셋(v)이 없고 새로
+        //   들어온 것에 있으면 그 값만 보강한다. 그냥 건너뛰면 라이브에서 먼저
+        //   저장된 줄에 v·n 이 영영 안 붙어 다시보기 목록에서 빠진다.
+        const index = new Map(list.map((e, i) => [`${e.t}|${e.m}`, i]));
+        let changed = false;
+        for (const row of rows) {
+          const dedupe = `${row.t}|${row.m}`;
+          let at = index.get(dedupe);
+          // 라이브 수집 시 실제 시각 대신 수집 순간이 저장된 행은 API 시각과
+          // 몇 초 어긋날 수 있다. 다시보기 보강 행에 한해 같은 본문·5초 이내의
+          // 미연결 행을 찾아 새 행을 만들지 않고 연결한다.
+          if (at === undefined && row.n && row.v !== undefined) {
+            const fuzzy = list.findIndex(
+              (item) =>
+                !item?.d &&
+                !item?.n &&
+                item?.m === row.m &&
+                Math.abs((Number(item?.t) || 0) - row.t) <= 5000,
+            );
+            if (fuzzy >= 0) at = fuzzy;
+          }
+          if (at !== undefined) {
+            index.set(dedupe, at);
+            const cur = list[at];
+            const next = { ...cur };
+            let enriched = false;
+            if (row.n && next.t !== row.t) {
+              next.t = row.t;
+              enriched = true;
+            }
+            if (next.v === undefined && row.v !== undefined) {
+              next.v = row.v;
+              enriched = true;
+            }
+            if (!next.n && row.n) {
+              next.n = row.n;
+              enriched = true;
+            }
+            if (enriched) {
+              list[at] = next;
+              changed = true;
+            }
+            continue;
+          }
+          index.set(dedupe, list.length);
+          list.push(row);
+          changed = true;
+        }
+        catalogMonths.push(month);
+        if (!changed) continue;
+        list.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0));
+        // 상한 초과분은 오래된 쪽부터 버린다.
+        const trimmed =
+          list.length > CHAT_RECAP_CHUNK_MAX
+            ? list.slice(list.length - CHAT_RECAP_CHUNK_MAX)
+            : list;
+        await store.set({ [key]: { v: 1, at: Date.now(), items: trimmed } });
+      } catch (error) {
+        saved = false;
+        if (isChatHistoryContextInvalidated(error)) return false;
+      }
+    }
+    if (catalogMonths.length) {
+      await registerChatRecapCatalog(accountId, channelId, catalogMonths);
+    }
+    return saved;
+  }
+
+  // 이모티콘 사전. 레코드에는 {:키:} 토큰만 넣고 URL 은 여기 한 벌만 둔다
+  // (같은 이모티콘을 수백 번 써도 한 줄). 리캡 화면이 이걸 읽어 이미지로 그린다.
+  const CHAT_RECAP_EMOJI_KEY = "chatRecapEmojis";
+  const CHAT_RECAP_LOCKED_EMOJI_KEY = "chatRecapLockedEmojis";
+  const CHAT_RECAP_EMOJI_MAX = 3000;
+
+  function saveChatRecapEmojis(accountId, map) {
+    const result = chatRecapEmojiWriteTail
+      .catch(() => {})
+      .then(() => saveChatRecapEmojisLocked(accountId, map));
+    chatRecapEmojiWriteTail = result.catch(() => {});
+    return result;
+  }
+
+  async function saveChatRecapEmojisLocked(accountId, map) {
+    const store = chatHistoryStore();
+    if (!store || !accountId) return;
+    try {
+      const all = (await store.get(CHAT_RECAP_EMOJI_KEY))?.[
+        CHAT_RECAP_EMOJI_KEY
+      ];
+      const root = all && typeof all === "object" ? all : {};
+      const mine =
+        root[accountId] && typeof root[accountId] === "object"
+          ? root[accountId]
+          : {};
+      let changed = false;
+      for (const [k, v] of Object.entries(map)) {
+        if (typeof v !== "string" || !v || mine[k] === v) continue;
+        mine[k] = v;
+        changed = true;
+      }
+      if (!changed) return;
+      // 상한을 넘으면 오래된 것부터 버린다(삽입 순서 = 객체 키 순서).
+      const keys = Object.keys(mine);
+      if (keys.length > CHAT_RECAP_EMOJI_MAX) {
+        for (const k of keys.slice(0, keys.length - CHAT_RECAP_EMOJI_MAX)) {
+          delete mine[k];
+        }
+      }
+      root[accountId] = mine;
+      await store.set({ [CHAT_RECAP_EMOJI_KEY]: root });
+    } catch {}
+  }
+
+  // 보관 기간이 지난 청크를 지운다(0 이면 무제한 → 아무것도 안 한다).
+  async function pruneChatRecap() {
+    if (!(chatRecapRetentionDays > 0)) return;
+    if (window.top !== window) return;
+    const store = chatHistoryStore();
+    if (!store) return;
+    try {
+      const last = Number((await store.get(CHAT_RECAP_PRUNE_AT_KEY))?.[
+        CHAT_RECAP_PRUNE_AT_KEY
+      ]);
+      if (Date.now() - last < CHAT_RECAP_PRUNE_INTERVAL_MS) return;
+      // 먼저 시각을 남겨 동시에 열린 다른 탭이 같은 전체 스캔을 반복하지 않게 한다.
+      await store.set({ [CHAT_RECAP_PRUNE_AT_KEY]: Date.now() });
+      const all = await store.get(null);
+      const cutoff = Date.now() - chatRecapRetentionDays * 24 * 60 * 60 * 1000;
+      const cutoffMonth = chatRecapMonthKey(cutoff);
+      const drop = [];
+      for (const key of Object.keys(all || {})) {
+        if (!key.startsWith(CHAT_RECAP_STORE_PREFIX)) continue;
+        // 키 끝의 YYYY-MM 을 문자열 비교한다(같은 형식이라 사전순=시간순).
+        const month = key.slice(key.lastIndexOf(":") + 1);
+        if (/^\d{4}-\d{2}$/.test(month) && month < cutoffMonth) drop.push(key);
+      }
+      if (drop.length) await store.remove(drop);
+    } catch {}
+  }
+
+  // 진단용: 페이지 콘솔에서 저장 상태를 확인할 수 있게 한다.
+  // ⚠ 페이지 콘솔은 MAIN world 라 chrome.storage 에 직접 접근할 수 없다.
+  //   window.postMessage 로 물어보면 여기(격리 월드)가 대신 읽어 되돌려 준다.
+  //   사용법: window.postMessage({source:"cheese-chat-recap-debug"}, "*")
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-chat-recap-debug") return;
+    void (async () => {
+      const store = chatHistoryStore();
+      const out = {
+        enabled: chatRecapOn,
+        accountId: currentClipVaultAccountId(),
+        channelId: currentRecapChannelId(),
+        videoNo: getCurrentVideoNo(),
+        chunks: {},
+      };
+      try {
+        const all = (await store?.get(null)) || {};
+        for (const [k, v] of Object.entries(all)) {
+          if (!k.startsWith(CHAT_RECAP_STORE_PREFIX)) continue;
+          out.chunks[k] = Array.isArray(v?.items) ? v.items.length : 0;
+        }
+      } catch {}
+      console.log("[치즈 플래터] 채팅 리캡 상태", out);
+    })();
+  });
+
+  // MAIN world(chatTimestamp.js)가 모아 보낸 배치를 받는다.
+  window.addEventListener("message", (e) => {
+    if (e.source !== window && e.source !== window.top) return;
+    if (e.data?.source !== CHAT_RECAP_MESSAGE) return;
+    if (!chatRecapOn) return;
+    const accountId = String(e.data.accountId || "").toLowerCase();
+    // ⚠ 보낸 계정과 지금 계정이 다르면 저장하지 않는다(전환 직후 혼입 방지).
+    if (!accountId || accountId !== currentClipVaultAccountId()) return;
+    const channelId = String(e.data.channelId || "").toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(channelId)) return;
+    void saveChatRecapBatch(
+      accountId,
+      channelId,
+      e.data.items,
+      String(e.data.videoNo || ""),
+    );
+    // 이모티콘 키→URL 사전(있을 때만 온다). 계정 단위로 합쳐 둔다.
+    if (e.data.emojis && typeof e.data.emojis === "object") {
+      void saveChatRecapEmojis(accountId, e.data.emojis);
+    }
+  });
 
   function stopChatHistoryAfterContextInvalidation() {
     if (chatHistoryContextInvalidated) return;
@@ -38776,6 +40946,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         source: FEATURE_FLAGS_MESSAGE,
         flags: getEffectiveFeatureFlags(),
         chatHistoryEnabled: chatHistoryOn,
+        // 채팅 리캡: 본인 판정에 쓸 계정과, 다시보기용 채널 힌트를 함께 준다.
+        chatRecapEnabled: chatRecapOn,
+        chatRecapAccountId: chatRecapOn ? currentClipVaultAccountId() : "",
+        chatRecapChannelId: chatRecapOn ? currentRecapChannelId() : "",
         syncPreset: syncPresetValue,
         syncCustom: syncCustomValue, // {enable,target} 또는 null
         syncRate: syncRateValue, // 따라잡기 배속(1.2/1.5/2/3)
@@ -38921,6 +41095,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     SEARCH_RERANK_MORE_STEP_KEY,
     SEARCH_RERANK_WEIGHTS_KEY,
     SEARCH_RERANK_DEFAULT_SORT_KEY,
+    SEARCH_LIVE_RERANK_KEY,
+    SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY,
+    SEARCH_LIVE_RERANK_WEIGHTS_KEY,
     SEARCH_CLIPS_KEY,
     SEARCH_CLIPS_DIRECT_PLAY_KEY,
     SEARCH_CLIPS_WEIGHTS_KEY,
@@ -38951,6 +41128,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       INBOX_COMMUNITY_REFRESH_KEY,
       CHAT_HISTORY_ENABLED_KEY,
       CHAT_HISTORY_LIMIT_KEY,
+      CHAT_RECAP_ENABLED_KEY,
+      CHAT_RECAP_RETENTION_KEY,
       FOLLOWER_EXACT_KEY,
       CHANNEL_LIVE_BUTTON_KEY,
       CHANNEL_LIVE_BUTTON_END_KEY,
@@ -39077,6 +41256,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       searchRerankDefaultSort = normalizeSearchRerankSort(
         data?.[SEARCH_RERANK_DEFAULT_SORT_KEY],
+      );
+      searchLiveRerank = data?.[SEARCH_LIVE_RERANK_KEY] === true; // 기본 OFF
+      searchLiveRerankDefaultSort = normalizeSearchLiveRerankSort(
+        data?.[SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY],
+      );
+      searchLiveRerankWeights = normalizeSearchLiveRerankWeights(
+        data?.[SEARCH_LIVE_RERANK_WEIGHTS_KEY],
       );
       integratedSearchClipsEnabled = data?.[SEARCH_CLIPS_KEY] === true; // 기본 OFF
       integratedSearchClipDirectPlay =
@@ -39364,6 +41550,30 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[SEARCH_RERANK_DEFAULT_SORT_KEY].newValue,
         );
         // 기본 정렬은 다음 검색부터 적용(현재 화면의 수동 선택은 존중).
+      }
+      if (changes[SEARCH_LIVE_RERANK_KEY]) {
+        searchLiveRerank = changes[SEARCH_LIVE_RERANK_KEY].newValue === true;
+        ensureSearchLiveRerank();
+      }
+      if (changes[SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY]) {
+        searchLiveRerankDefaultSort = normalizeSearchLiveRerankSort(
+          changes[SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY].newValue,
+        );
+      }
+      if (changes[SEARCH_LIVE_RERANK_WEIGHTS_KEY]) {
+        searchLiveRerankWeights = normalizeSearchLiveRerankWeights(
+          changes[SEARCH_LIVE_RERANK_WEIGHTS_KEY].newValue,
+        );
+        if (searchLiveRerank && searchLiveRerankState.items.length) {
+          buildSearchLiveRerankScores(
+            searchLiveRerankState.items,
+            searchLiveRerankState.fetchedFor || searchLiveRerankState.keyword,
+          );
+          document
+            .querySelector("ul.cheese-search-live-rerank-list")
+            ?.removeAttribute("data-sig");
+          renderSearchLiveRerank();
+        }
       }
       if (changes[SEARCH_CLIPS_KEY]) {
         integratedSearchClipsEnabled =
@@ -40371,6 +42581,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           ?.removeAttribute("data-sig");
         ensureHeaderFollowNav();
       }
+      if (changes[CHAT_RECAP_ENABLED_KEY]) {
+        chatRecapOn = changes[CHAT_RECAP_ENABLED_KEY].newValue === true;
+        if (chatRecapOn) void ensureRecapVodChannel();
+        broadcastFeatureFlags();
+      }
+      if (changes[CHAT_RECAP_RETENTION_KEY]) {
+        chatRecapRetentionDays = normalizeChatRecapRetention(
+          changes[CHAT_RECAP_RETENTION_KEY].newValue,
+        );
+        void pruneChatRecap();
+      }
       if (changes[CHAT_HISTORY_ENABLED_KEY]) {
         chatHistoryOn = false;
         if (changes[CHAT_HISTORY_ENABLED_KEY].newValue === true) {
@@ -40660,6 +42881,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
       ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
       ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
+      ensureSearchLiveRerank(); // 통합검색 라이브 섹션 재랭킹(옵션 시)
       ensureIntegratedSearchClips(); // 통합검색 추천·태그·팔로잉·관련 채널·카테고리 클립 섹션
       bindPopupPlayerDrag(); // 사이드바 채널 드래그 → 팝업 플레이어
       ensurePopupPlayerDraggable();

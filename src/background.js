@@ -3667,10 +3667,15 @@ async function lpGetWatchState(channelId) {
     return null;
   }
 }
+// ⚠ 저장 실패를 삼키면 lastAmount 가 안 올라가 다음 주기에 같은 차액을 또
+//   적립으로 센다. 성공 여부를 돌려준다.
 async function lpSetWatchState(channelId, state) {
   try {
     await chrome.storage.session.set({ [lpWatchStateKey(channelId)]: state });
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 async function lpClearWatchState(channelId) {
   try {
@@ -3800,11 +3805,29 @@ function lpBroadcast(message, exceptTabId) {
 }
 
 // content 요청으로 적립 추적 시작(채널 진입). 이미 추적 중이면 baseline 유지.
-async function lpStartTracking({ channelId, initialAmount }) {
+async function lpStartTracking({ channelId, initialAmount, accountHint }) {
   if (!channelId) return null;
   const now = Date.now();
+  // ⚠ 힌트가 캐시와 다르면 계정이 바뀐 것이다(캐시는 최대 5분 묵는다).
+  const { accountId: me } = await lpAccountFor(accountHint);
   const existing = await lpGetWatchState(channelId);
-  if (existing && now - Number(existing.startedAt || 0) <= LP_WATCH_MAX_MS) {
+  const existingOwner = String(existing?.accountId || "");
+  // ⚠ 소유자가 분명한 상태가 있는데 지금 계정을 확인하지 못했다면 아무것도 하지
+  //   않는다. 그대로 진행하면 accountId: null 로 덮어써 '누구 기준인지 모르는'
+  //   상태가 되고, 이후 적립이 엉뚱한 계정에 귀속된다(모르면 미룬다).
+  if (!me && LP_ACCOUNT_RE.test(existingOwner)) {
+    return lpStateToStatus(existing);
+  }
+  // 다른 계정이 만든 상태는 재사용하지 않는다 — lastAmount·단가가 남의 기준이다.
+  // ⚠ 계정 구분 전(업데이트 직후 남은 세션 상태)은 accountId 가 비어 있다. 누가
+  //   만든 기준인지 알 수 없으므로, 지금 계정을 아는 경우엔 물려받지 말고 한 번
+  //   다시 기준을 잡는다(남의 lastAmount 를 쓰면 차액이 통째로 어긋난다).
+  const sameOwner = me ? existingOwner === me : !existingOwner;
+  if (
+    existing &&
+    sameOwner &&
+    now - Number(existing.startedAt || 0) <= LP_WATCH_MAX_MS
+  ) {
     // 추적 유지(알람만 보장).
     chrome.alarms.create(lpWatchAlarmName(channelId), {
       delayInMinutes: LP_WATCH_INTERVAL_MIN,
@@ -3812,11 +3835,18 @@ async function lpStartTracking({ channelId, initialAmount }) {
     });
     return lpStateToStatus(existing);
   }
+  // ⚠ 계정을 모르면 새 상태도 만들지 않는다(accountId: null 상태가 남는다).
+  //   기존 상태가 없으면 다음 시작 요청에서 다시 시도한다.
+  if (!me) return existing ? lpStateToStatus(existing) : null;
   const expected = await lpFetchExpectedAmount(channelId);
   // baseline: content가 보낸 initialAmount 우선, 없으면 raw 조회.
+  // ⚠ 재기준(소유자 불일치)인데 보유량을 못 읽으면 기존 상태를 그대로 둔다 —
+  //   남의 기준을 지우기만 하고 새 기준을 못 세우면 판정이 통째로 어긋난다.
   let baseline = Number(initialAmount);
   if (!Number.isFinite(baseline)) baseline = await lpFetchAmount(channelId);
-  if (!Number.isFinite(baseline)) return null;
+  if (!Number.isFinite(baseline)) {
+    return existing ? lpStateToStatus(existing) : null;
+  }
   const state = {
     channelId,
     startedAt: now,
@@ -3824,6 +3854,9 @@ async function lpStartTracking({ channelId, initialAmount }) {
     expectedAmount: expected,
     activeUntil: 0,
     misses: 0,
+    // 추적을 시작한 계정. 로그인이 바뀌면 lastAmount·expectedAmount 가 남의
+    // 계정 기준이 되어 적립 판정이 계속 어긋난다 → 불일치 시 폐기하고 재기준.
+    accountId: me,
   };
   await lpSetWatchState(channelId, state);
   chrome.alarms.create(lpWatchAlarmName(channelId), {
@@ -3872,6 +3905,547 @@ function lpNormalizeLogDays(value) {
   if (n === 0) return 0; // 제한 없음
   return Math.min(LP_LOG_DAYS_MAX, Math.max(LP_LOG_DAYS_MIN, n));
 }
+
+// ── 통나무파워 내역: 단일 작성자 ────────────────────────────────────────────
+// ⚠ 예전에는 content·prediction·stats·settings 가 각자 read-modify-write 로
+//   같은 키를 고쳤다. 실행 컨텍스트가 달라 락이 없어 동시에 쓰면 나중 것이 앞의
+//   것을 덮는다(lost update). 모든 변경을 여기 큐로 모아 직렬화한다.
+let lpWriteTail = Promise.resolve();
+
+// 로그 또는 예측 대기 목록이 바뀔 때마다 오른다. 보정(reconcile)은 보유량을 큐
+// 밖에서 읽으므로, 읽은 뒤 판정 근거가 바뀌면 차액이 이중으로 계산될 수 있다.
+// 세대가 달라졌으면 이번 보정을 건너뛰고 다음 주기에 다시 읽는다.
+let lpLogGeneration = 0;
+
+// ⚠ 세대만으로는 부족하다. LP_WRITE 가 도착해 계정을 확인하는 동안에는 아직
+//   저장 전이라 세대가 안 오른다. 그런데 그 기록은 '이미 일어난 일'이라 보유량엔
+//   벌써 반영돼 있다 → 그 틈에 보정하면 기타 적립으로 오검출된다.
+//   요청을 받은 순간부터 저장이 끝날 때까지를 '처리 중'으로 센다.
+let lpWriteInFlight = 0;
+
+function lpBeginWrite() {
+  lpWriteInFlight += 1;
+}
+
+function lpEndWrite() {
+  if (lpWriteInFlight > 0) lpWriteInFlight -= 1;
+}
+
+// 보정이 보유량을 읽은 뒤 기록이 끼어들었는지 판단한다.
+// ⚠ 처리 중 요청은 '늘었는지'가 아니라 '하나라도 있는지'로 봐야 한다. 보정보다
+//   먼저 도착해 계정을 확인 중인 요청은 증가분으로는 안 잡히는데, 그 기록은
+//   보유량엔 이미 반영돼 있어 그대로 두면 기타 적립으로 오검출된다.
+function lpLogMoved(gen0) {
+  return lpLogGeneration !== gen0 || lpWriteInFlight > 0;
+}
+
+function lpEnqueueWrite(task) {
+  const result = lpWriteTail.then(task);
+  // 꼬리는 항상 정상 상태로 되돌린다(한 번 실패해도 다음 작업이 막히지 않게).
+  lpWriteTail = result.catch(() => {});
+  // 호출자는 자기 작업의 실패를 그대로 받는다.
+  return result;
+}
+
+// 계정 식별. 확인 실패면 null — 호출자가 힌트를 주면 그걸 검증해 쓴다.
+const LP_ACCOUNT_RE = /^[0-9a-f]{32}$/i;
+const LP_USER_STATUS_URL =
+  "https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus";
+
+// ⚠ lpCheckProgress 가 채널마다 1분 주기로 부른다. 계정은 자주 바뀌지 않으므로
+//   캐시한다(안 하면 추적 3채널 기준 4,320회/일).
+let lpAccountCache = { id: null, at: 0 };
+const LP_ACCOUNT_TTL_MS = 5 * 60 * 1000;
+// 시청 판정은 보유량과 직접 대조하므로 더 신선한 계정 값이 필요하다.
+// (전환 직후 A 로 판단하며 B 의 보유량을 읽는 창을 30초로 줄인다.)
+const LP_ACCOUNT_WATCH_TTL_MS = 30 * 1000;
+
+// ⚠ 채널마다 1분 알람이 동시에 깨면 각자 API 를 부른다. 진행 중인 요청을
+//   공유해 한 번만 나가게 한다.
+let lpAccountInFlight = null;
+// ⚠ 공유 요청에는 세대를 붙인다. 요청이 나간 뒤 '계정이 바뀌었다'는 신호(다른
+//   힌트)가 오면 그 요청의 결과는 이미 낡은 것이다. 세대가 밀린 응답은 캐시에
+//   쓰지 않고 버려, A 요청 결과가 B 작업에 쓰이는 것을 막는다.
+let lpAccountGen = 0;
+// 콘텐츠가 마지막으로 알려 준 계정. 캐시가 비어 있어도 진행 중 요청보다 새로운
+// 힌트가 들어왔는지 판별하는 데 쓴다.
+let lpAccountHintSignal = "";
+// ⚠ 로그아웃·API 장애 때는 캐시에 넣을 값이 없어 매분 재시도한다. 실패도 짧게
+//   기억해 반복 호출을 막는다(짧게 두어 로그인 직후 복구가 늦지 않게).
+let lpAccountFailAt = 0;
+const LP_ACCOUNT_FAIL_TTL_MS = 30 * 1000;
+
+// 캐시·진행 중 요청·실패 기록을 한꺼번에 무효화한다(계정이 바뀐 신호를 받았을 때).
+function lpInvalidateAccount() {
+  lpAccountCache = { id: null, at: 0 };
+  lpAccountFailAt = 0;
+  lpAccountGen += 1;
+  lpAccountInFlight = null; // 진행 중 요청의 결과는 세대 검사로 버려진다
+}
+
+async function lpFetchAccountId() {
+  const now = Date.now();
+  if (lpAccountCache.id && now - lpAccountCache.at < LP_ACCOUNT_TTL_MS) {
+    return lpAccountCache.id;
+  }
+  if (now - lpAccountFailAt < LP_ACCOUNT_FAIL_TTL_MS) return null;
+  if (lpAccountInFlight) return lpAccountInFlight;
+  const gen = lpAccountGen;
+  lpAccountInFlight = (async () => {
+    try {
+      const res = await fetch(LP_USER_STATUS_URL, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const hash = String((await res.json())?.content?.userIdHash || "").trim();
+      if (!LP_ACCOUNT_RE.test(hash)) throw new Error("no-hash");
+      // ⚠ 요청 도중 계정 전환 신호가 왔다 → 이 결과는 낡았다. 캐시에 넣지 않고
+      //   버린다(호출부는 null 을 받아 '모르면 미룬다'로 처리한다).
+      if (gen !== lpAccountGen) return null;
+      lpAccountCache = { id: hash, at: Date.now() };
+      lpAccountFailAt = 0;
+      return hash;
+    } catch {
+      if (gen === lpAccountGen) lpAccountFailAt = Date.now();
+      return null;
+    } finally {
+      if (gen === lpAccountGen) lpAccountInFlight = null;
+    }
+  })();
+  return lpAccountInFlight;
+}
+
+// 계정을 정하지 못한 작업은 내역에 넣지 않고 보류한다.
+// ⚠ accountId 없이 기록하면 나중에 스냅샷 비교가 그 기록을 '설명된 변동'으로
+//   세지 못해 같은 적립이 기타로 한 번 더 기록된다(이중 계상).
+const LP_PENDING_WRITES_KEY = "cheeseLogPowerPendingWrites";
+// 대상을 못 찾은 보류 작업을 언제까지 다시 시도할지(예측 대기 TTL 과 맞춘다).
+// 무한 재시도는 큐에 영영 남는 작업을 만든다.
+const LP_PENDING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+// 보류돼 있으면 보유량 비교를 막아야 하는 op — '내역에 아직 없는 금액'을 만드는
+// 것들이다. MARK_PREDICTION_RESULT(종류만 변경)·DELETE_MANUAL_ENTRY 는 금액
+// 합계를 바꾸지 않으므로, 이것 때문에 보정을 멈추면 이중 계상을 막기는커녕
+// 자동 감지만 며칠 마비된다.
+const LP_PENDING_BLOCKING_OPS = new Set([
+  "APPEND_CLAIM",
+  "UPSERT_PREDICTION_BET",
+  "APPEND_PREDICTION_RESULT",
+  "UPSERT_MANUAL_ENTRY",
+  "APPEND_AUTO_BATCH",
+]);
+
+async function lpAccountFor(hint) {
+  const h = String(hint || "")
+    .trim()
+    .toLowerCase();
+  const hinted = LP_ACCOUNT_RE.test(h) ? h : "";
+  if (hinted) {
+    const hintChanged =
+      !!lpAccountHintSignal && lpAccountHintSignal !== hinted;
+    // 계정 정보 없이 시작한 요청이 도는 중 처음 힌트를 받았다면, 그 요청은 힌트
+    // 이전 쿠키로 전송됐을 수 있다. 결과가 같을 가능성보다 계정 오귀속 방지가
+    // 중요하므로 새 세대로 다시 확인한다.
+    const unscopedRequest = !lpAccountHintSignal && !!lpAccountInFlight;
+    const cacheMismatch =
+      !!lpAccountCache.id && lpAccountCache.id !== hinted;
+    lpAccountHintSignal = hinted;
+    if (hintChanged || unscopedRequest || cacheMismatch) {
+      lpInvalidateAccount();
+    }
+  }
+  // ⚠ 힌트는 치지직 페이지가 방금 읽은 값이라 캐시보다 최신이다. 캐시가 다르면
+  //   계정이 바뀐 것이므로 캐시·진행 중 요청을 모두 버리고 다시 확인한다
+  //   (전환 직후 기록이 이전 계정으로 저장되던 문제).
+  const requestGen = lpAccountGen;
+  const id = await lpFetchAccountId();
+  // 기다리는 동안 다른 계정 힌트가 들어왔다. 이미 받아 둔 id 도 새 호출에 쓰면
+  // 안 된다. fetch 쪽 캐시 세대 검사와 별도로 각 대기자도 자기 세대를 확인한다.
+  if (requestGen !== lpAccountGen) {
+    return { accountId: null, verified: false, mismatch: !!hinted };
+  }
+  if (id) {
+    // ⚠ API 결과와 힌트가 다르다 = 확인 도중 계정이 바뀌었거나 둘 중 하나가
+    //   낡았다. 어느 쪽이 맞는지 알 수 없으므로 어느 계정으로도 쓰지 않는다.
+    //   다음 확인을 위해 캐시를 버리고 보류로 답한다(모르면 미룬다).
+    if (hinted && hinted !== id) {
+      lpInvalidateAccount();
+      // mismatch: 호출부가 사유를 구분하고 싶을 때 쓴다(현재는 accountId=null
+      // 만으로 '보류'가 되므로 모든 호출부가 자동으로 안전하게 동작한다).
+      return { accountId: null, verified: false, mismatch: true };
+    }
+    return { accountId: id, verified: true };
+  }
+  if (hinted) return { accountId: hinted, verified: false };
+  return { accountId: null, verified: false };
+}
+
+// 큐 안에서 쓰는 공통 헬퍼: 목록 읽기 → 적용 → 보관기간 정리 → 한 번 저장.
+// keepAll: 백업 불러오기처럼 보관기간 정리를 적용하면 안 되는 경우.
+// ⚠ 1년 전 백업을 90일 설정으로 불러오면 저장 직후 절반이 지워진다.
+async function lpMutateLog(apply, keepAll) {
+  const data = await chrome.storage.local.get([LP_LOG_KEY, LP_LOG_DAYS_KEY]);
+  const days = keepAll ? 0 : lpNormalizeLogDays(data?.[LP_LOG_DAYS_KEY]);
+  const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+  const list = Array.isArray(data?.[LP_LOG_KEY]) ? [...data[LP_LOG_KEY]] : [];
+  const changed = apply(list);
+  if (!changed) return false;
+  const next = list
+    .filter((it) => (Number(it?.at) || 0) >= cutoff)
+    .sort((a, b) => (Number(b?.at) || 0) - (Number(a?.at) || 0));
+  await chrome.storage.local.set({ [LP_LOG_KEY]: next });
+  lpLogGeneration += 1;
+  return true;
+}
+
+// 같은 기록인지: 계정까지 봐야 다계정에서 섞이지 않는다.
+function lpSameEntry(it, accountId, id) {
+  return (
+    it?.id === id && String(it?.accountId || "") === String(accountId || "")
+  );
+}
+
+// 사용자가 직접 고치거나 지우는 경우에 쓴다.
+// ⚠ 계정 도입 전 기록은 accountId 가 비어 있다. 엄격히 비교하면 못 찾아서
+//   수정이 '새 항목 추가'가 된다(제보: 기타 적립과 5분 시청이 둘 다 남음).
+//   같은 id 면 레거시도 같은 기록으로 보고, 수정하면서 현재 계정에 귀속시킨다.
+function lpSameOrLegacy(it, accountId, id) {
+  if (it?.id !== id) return false;
+  const owner = String(it?.accountId || "");
+  return owner === String(accountId || "") || owner === "";
+}
+
+// 계정을 못 정한 작업은 보류했다가 계정 확인이 복구되면 반영한다.
+// ⚠ enqueue 와 drain 이 각자 읽고 덮으면 drain 중 추가된 작업이 사라진다.
+//   보류 큐 조작도 직렬화한다.
+// 같은 작업인지 판단하는 키. 기록 id 나 예측 총액으로 구분한다.
+function lpPendingKey(op, payload, accountId) {
+  if (!op) return "";
+  const acc = String(accountId || "");
+  const id = String(payload?.entry?.id || payload?.id || "");
+  if (id) return `${op}:${acc}:${id}`;
+  if (payload?.predictionId) {
+    return `${op}:${acc}:${payload.predictionId}:${payload.totalBetAmount ?? ""}`;
+  }
+  return "";
+}
+
+let lpPendingTail = Promise.resolve();
+
+function lpWithPendingLock(task) {
+  const result = lpPendingTail.then(task);
+  lpPendingTail = result.catch(() => {});
+  return result;
+}
+
+async function lpQueuePending(op, payload, accountHint) {
+  return lpWithPendingLock(async () => {
+    try {
+      const cur = (await chrome.storage.local.get(LP_PENDING_WRITES_KEY))?.[
+        LP_PENDING_WRITES_KEY
+      ];
+      const list = Array.isArray(cur) ? cur : [];
+      // ⚠ 계정을 함께 남긴다. 없으면 나중에 로그인한 계정으로 반영된다.
+      //   힌트도 없으면 그때 확인되는 계정을 쓸 수밖에 없다.
+      const h = String(accountHint || "").toLowerCase();
+      const acc = LP_ACCOUNT_RE.test(h) ? h : "";
+      // ⚠ 호출부가 최대 세 번 재시도하므로 같은 작업이 여러 번 들어온다.
+      //   200개 상한에 걸리면 진짜 오래된 기록이 밀려나므로 중복을 없앤다.
+      const key = lpPendingKey(op, payload, acc);
+      const next = key
+        ? list.filter(
+            (j) => lpPendingKey(j?.op, j?.payload, j?.accountId) !== key,
+          )
+        : list;
+      next.push({ op, payload, at: Date.now(), accountId: acc });
+      const list2 = next;
+      // 무한히 쌓이지 않게 상한을 둔다(오래된 것부터 버린다).
+      await chrome.storage.local.set({
+        [LP_PENDING_WRITES_KEY]: list2.slice(-200),
+      });
+    } catch {}
+  });
+}
+
+// 보류된 작업을 계정이 확인되면 반영한다.
+// ⚠ 이게 없으면 보류가 곧 영구 유실이다. 계정 확인 실패가 잠깐이어도
+//   그 사이 기록이 영영 안 들어간다.
+async function lpDrainPending() {
+  return lpWithPendingLock(async () => {
+    try {
+      const cur = (await chrome.storage.local.get(LP_PENDING_WRITES_KEY))?.[
+        LP_PENDING_WRITES_KEY
+      ];
+      const list = Array.isArray(cur) ? cur : [];
+      if (!list.length) return { ok: true, applied: 0, left: 0 };
+      const rest = [];
+      let done = 0;
+      // 소유자를 아는데 아직 못 넣은 작업 수. 보정을 막을지 판단하는 기준이다.
+      // ⚠ 소유자 미상 작업은 세지 않는다. 그건 영영 반영되지 않으므로 세면
+      //   보정이 TTL(3일) 내내 멈춘다 — 오히려 보유량 비교로 기타 적립에
+      //   잡히는 것이 그 금액의 유일한 복구 경로다.
+      let blocking = 0;
+      for (const job of list) {
+        const run = LP_WRITE_OPS[job?.op];
+        if (!run) continue; // 모르는 op 는 버린다
+        // ⚠ 저장된 계정으로만 반영한다. 소유자를 모르는 작업을 '지금 로그인한
+        //   계정'에 넣으면, 그 사이 계정을 바꿨을 때 A 의 기록이 B 에 들어간다.
+        //   경과 시간은 소유자를 증명하지 못하므로 시간으로 허용하지 않는다.
+        //   (모르면 미룬다 — 다만 영원히 쌓이지 않게 TTL 이 지나면 버린다.)
+        const acc = LP_ACCOUNT_RE.test(String(job.accountId || ""))
+          ? String(job.accountId)
+          : "";
+        if (!acc) {
+          // 소유자 미상. 되살아날 방법이 없으므로 TTL 이 지나면 폐기한다.
+          if (Date.now() - Number(job.at || 0) < LP_PENDING_TTL_MS) {
+            rest.push(job); // blocking 에는 세지 않는다
+          }
+          continue;
+        }
+        try {
+          // ⚠ 정산(MARK_PREDICTION_RESULT)은 대상 BET 줄이 아직 안 들어왔으면
+          //   아무것도 못 고치고 끝난다. 그걸 완료로 처리하면 정산 결과가 영영
+          //   반영되지 않는다 → 대상을 못 찾았으면 다시 보류한다.
+          const ctx = { matched: true };
+          // eslint-disable-next-line no-await-in-loop
+          await lpEnqueueWrite(() =>
+            lpMutateLog((l) => run(l, job.payload || {}, acc, ctx)),
+          );
+          if (
+            ctx.matched === false &&
+            Date.now() - Number(job.at || 0) < LP_PENDING_TTL_MS
+          ) {
+            rest.push(job); // 베팅 기록이 늦게 붙는 중 → 다음 기회에
+            if (LP_PENDING_BLOCKING_OPS.has(job.op)) blocking += 1;
+            continue;
+          }
+          done += 1;
+        } catch {
+          rest.push(job); // 실패한 건 다음 기회에 다시
+          if (LP_PENDING_BLOCKING_OPS.has(job.op)) blocking += 1;
+        }
+      }
+      await chrome.storage.local.set({ [LP_PENDING_WRITES_KEY]: rest });
+      // ⚠ 남은 작업 수를 함께 돌려준다. 실제 적립이 보류된 채로 보유량을 비교하면
+      //   그 금액이 '설명되지 않는 변동'이 되어 기타 적립으로 이중 계상된다.
+      return { ok: true, applied: done, left: blocking };
+    } catch (error) {
+      return {
+        ok: false,
+        applied: 0,
+        left: -1,
+        reason: String(error?.message || error),
+      };
+    }
+  });
+}
+
+// 내역 항목 정규화. 저장 형태를 한 곳에서만 정한다.
+function lpNormalizeEntry(entry, accountId) {
+  const amount = Number(entry?.amount) || 0;
+  return {
+    id: String(entry?.id || "").trim(),
+    accountId: String(accountId || ""),
+    at: Number(entry?.at) || Date.now(),
+    channelId: String(entry?.channelId || ""),
+    channelName: String(entry?.channelName || "").slice(0, 100),
+    channelImageUrl: String(entry?.channelImageUrl || "").slice(0, 300),
+    verifiedMark: entry?.verifiedMark === true,
+    amount,
+    fiveMinAmount: Number(entry?.fiveMinAmount) || 0,
+    boost: Number(entry?.boost) || 1,
+    claimType: String(entry?.claimType || "WATCH_1_HOUR").toUpperCase(),
+    ...(Number(entry?.watchCount) > 0
+      ? { watchCount: Number(entry.watchCount) }
+      : {}),
+    // ⚠ 5분 묶음은 at(시작)과 실제 적립 시점이 최대 1시간 벌어진다. 보정이
+    //   기준 시각과 대조할 때 at 을 쓰면 '기준 이후에 들어온 기록'을 못 세어
+    //   같은 금액을 기타 적립으로 또 잡는다(제보: 둥그레 기타 +96).
+    //   묶음이 끝난 시각을 함께 남겨 그쪽으로 판정한다.
+    ...(Number(entry?.endAt) > 0 ? { endAt: Number(entry.endAt) } : {}),
+    // 보유량 비교로 찾아낸 기록. 실제 획득 시각이 아니라 '감지 시각'이라
+    // 화면에서 구분해 보여 준다.
+    ...(entry?.autoDetected === true ? { autoDetected: true } : {}),
+  };
+}
+
+// op 별 실제 적용. 전부 큐 안에서 실행된다.
+const LP_WRITE_OPS = {
+  APPEND_CLAIM(list, p, accountId) {
+    const e = lpNormalizeEntry(p.entry, accountId);
+    if (!e.id || e.amount === 0) return false;
+    if (list.some((it) => lpSameEntry(it, accountId, e.id))) return false;
+    list.unshift(e);
+    return true;
+  },
+
+  // 5분 누적 묶음. 총액(run.amount)을 그대로 반영한다 → 같은 묶음을 다시
+  // 저장해도 두 줄이 되지 않고, 초기화 실패로 금액이 더 붙은 경우에도 그
+  // 최종 금액으로 맞춰진다(APPEND 였다면 중복으로 무시돼 차액이 사라졌다).
+  UPSERT_WATCH_RUN(list, p, accountId) {
+    const e = lpNormalizeEntry(p.entry, accountId);
+    if (!e.id || e.amount === 0) return false;
+    const i = list.findIndex((it) => lpSameEntry(it, accountId, e.id));
+    if (i < 0) {
+      list.unshift(e);
+      return true;
+    }
+    // 금액·회차가 그대로면 바꿀 것이 없다(불필요한 저장·렌더를 막는다).
+    if (
+      Number(list[i].amount) === e.amount &&
+      Number(list[i].watchCount || 0) === Number(e.watchCount || 0)
+    ) {
+      return false;
+    }
+    list[i] = { ...list[i], ...e };
+    return true;
+  },
+
+  // 총액을 받아 맞춘다 → 재시도해도 두 번 차감되지 않는다.
+  UPSERT_PREDICTION_BET(list, p, accountId) {
+    const id = `PREDICTION_BET-${p.predictionId}`;
+    const total = Number(p.totalBetAmount) || 0;
+    if (!p.predictionId || !(total > 0)) return false;
+    const hit = list.find((it) => lpSameEntry(it, accountId, id));
+    if (!hit) {
+      const e = lpNormalizeEntry(
+        { ...p.meta, id, amount: -total, at: p.observedAt },
+        accountId,
+      );
+      e.betHistory = [{ at: e.at, amount: total }];
+      list.unshift(e);
+      return true;
+    }
+    const prev = Math.abs(Number(hit.amount) || 0);
+    if (total <= prev) return false; // 재시도·순서 역전 → 무시
+    hit.amount = -total;
+    hit.at = Number(p.observedAt) || hit.at;
+    hit.betHistory = [
+      ...(Array.isArray(hit.betHistory) ? hit.betHistory : []),
+      { at: hit.at, amount: total - prev },
+    ];
+    return true;
+  },
+
+  // 예측 결과(적중·취소) 한 건. id 로 멱등.
+  APPEND_PREDICTION_RESULT(list, p, accountId) {
+    const e = lpNormalizeEntry(p.entry, accountId);
+    if (!e.id || e.amount === 0) return false;
+    if (list.some((it) => lpSameEntry(it, accountId, e.id))) return false;
+    // 예측 상세는 정규화 대상이 아니라 그대로 옮긴다.
+    for (const k of [
+      "optionStats",
+      "selectedOptionNo",
+      "winningOptionNo",
+      "predictionTitle",
+    ]) {
+      if (p.entry?.[k] != null) e[k] = p.entry[k];
+    }
+    list.unshift(e);
+    return true;
+  },
+
+  // ⚠ '대상을 찾았는지'(matched)는 ctx 로 돌려준다. 전역에 담으면 동시 요청이
+  //   서로의 값을 덮어써, 대상 없는 정산이 성공으로 보고될 수 있다.
+  MARK_PREDICTION_RESULT(list, p, accountId, ctx) {
+    const prefix = `PREDICTION_BET-${p.predictionId}`;
+    // ⚠ 계정 도입 전에 남은 베팅도 정산해야 한다(그때 기록은 accountId 가 없다).
+    const mine = (it) => {
+      const owner = String(it?.accountId || "");
+      if (owner !== String(accountId || "") && owner !== "") return false;
+      return (
+        it?.id === prefix ||
+        /^-\d+$/.test(String(it?.id || "").slice(prefix.length))
+      );
+    };
+    // ⚠ 예전 버전은 패배 시 LOST 를 '새로 추가'해, 같은 예측에 BET 과 LOST 가
+    //   함께 남은 기록이 있다(합계가 두 배). 변환 전에 그 짝을 정리한다.
+    if (p.claimType === "PREDICTION_LOST") {
+      const hasLegacy = list.some(
+        (it) => it?.claimType === "PREDICTION_LOST" && mine(it),
+      );
+      if (hasLegacy) {
+        const before = list.length;
+        for (let i = list.length - 1; i >= 0; i -= 1) {
+          if (list[i]?.claimType === "PREDICTION_BET" && mine(list[i])) {
+            list.splice(i, 1);
+          }
+        }
+        return list.length !== before; // 결과 줄은 이미 있으므로 변환은 생략
+      }
+    }
+    // ⚠ 대상 베팅이 하나도 없으면 정산이 반영되지 않은 것이다. changed 만
+    //   돌려주면 호출부가 성공으로 보고 대기 목록에서 지워, 미정산 BET 만 남는다.
+    let matched = false;
+    let changed = false;
+    for (const it of list) {
+      if (!mine(it)) continue;
+      matched = true;
+      if (it.claimType !== p.claimType) {
+        it.claimType = p.claimType;
+        changed = true;
+      }
+      if (!it.optionStats || Number(p.meta?.winningOptionNo) > 0) {
+        Object.assign(it, p.meta);
+        changed = true;
+      }
+    }
+    if (ctx) ctx.matched = matched;
+    return changed;
+  },
+
+  UPSERT_MANUAL_ENTRY(list, p, accountId) {
+    const e = lpNormalizeEntry(p.entry, accountId);
+    if (!e.id || e.amount === 0) return false;
+    const i = list.findIndex((it) => lpSameOrLegacy(it, accountId, e.id));
+    if (i >= 0) list[i] = { ...list[i], ...e };
+    else list.unshift(e);
+    return true;
+  },
+
+  // 보유량 맞추기가 찾은 '설명되지 않는 변동' 여러 건. 자동 감지라 실패해도
+  // 다음 비교에서 다시 잡히므로 조용히 보류한다.
+  APPEND_AUTO_BATCH(list, p, accountId) {
+    const rows = Array.isArray(p.entries) ? p.entries : [];
+    let changed = false;
+    for (const raw of rows) {
+      const e = lpNormalizeEntry(raw, accountId);
+      if (!e.id || e.amount === 0) continue;
+      if (list.some((it) => lpSameEntry(it, accountId, e.id))) continue;
+      list.unshift(e);
+      changed = true;
+    }
+    return changed;
+  },
+
+  // 백업 불러오기: 목록을 통째로 교체한다.
+  // ⚠ 큐 밖에서 storage 를 직접 덮으면 진행 중인 쓰기를 날린다 → 여기로 모은다.
+  //   불러온 기록의 계정 정보는 보존한다(다른 계정 백업일 수 있다).
+  //   accountId 가 없는 항목은 '계정 구분 전' 레거시로 남긴다.
+  IMPORT_LOG(list, p) {
+    const rows = Array.isArray(p.entries) ? p.entries : [];
+    list.length = 0;
+    for (const raw of rows) {
+      const e = lpNormalizeEntry(raw, String(raw?.accountId || ""));
+      if (!e.id || e.amount === 0) continue;
+      for (const k of [
+        "optionStats",
+        "selectedOptionNo",
+        "winningOptionNo",
+        "predictionTitle",
+        "betHistory",
+      ]) {
+        if (raw?.[k] != null) e[k] = raw[k];
+      }
+      list.push(e);
+    }
+    return true;
+  },
+
+  DELETE_MANUAL_ENTRY(list, p, accountId) {
+    const i = list.findIndex((it) => lpSameOrLegacy(it, accountId, p.id));
+    if (i < 0) return false; // 이미 없다 → no-op 성공
+    list.splice(i, 1);
+    return true;
+  },
+};
 
 async function lpAppendLog(entry) {
   const id = String(entry?.id || "").trim();
@@ -3923,42 +4497,107 @@ async function lpAppendLog(entry) {
 //   한 번만 사라져도 묶임이 깨진다.
 const LP_RUN_KEY = "cheeseLogPowerFiveMinRun";
 
+// ⚠ run 은 읽기 → (네트워크·저장) → 초기화 사이가 길어 그 틈에 새 적립이
+//   더해지면 먼저 시작한 flush 가 그것까지 지운다. 조작 전체를 직렬화한다.
+let lpRunTail = Promise.resolve();
+
+function lpWithRunLock(task) {
+  const result = lpRunTail.then(task);
+  lpRunTail = result.catch(() => {});
+  return result;
+}
+
+// 묶음 id 의 꼬리표. 같은 ms 에 새 묶음이 연달아 생겨도 id 가 겹치지 않게 한다.
+let lpRunSeqN = 0;
+function lpRunSeq() {
+  lpRunSeqN = (lpRunSeqN + 1) % 100000;
+  return lpRunSeqN;
+}
+
 async function lpGetRun() {
   try {
     const v = (await chrome.storage.local.get(LP_RUN_KEY))?.[LP_RUN_KEY];
     if (v && typeof v === "object") return v;
   } catch {}
-  return { prev: null, curr: null, cnt: 0, amount: 0, at: 0 };
+  return { prev: null, curr: null, cnt: 0, amount: 0, at: 0, accountId: null };
 }
 
+// ⚠ 저장 실패를 삼키면 호출부가 '누적됨'으로 보고 넘어가 그 회차가 사라진다.
+//   성공 여부를 돌려준다.
 async function lpSetRun(run) {
   try {
     await chrome.storage.local.set({ [LP_RUN_KEY]: run });
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // 쌓인 연속분을 WATCH_5_MIN 한 건으로 남긴다. 남길 게 없으면 아무것도 안 한다.
-async function lpFlushRun() {
+// onlyChannelId: 그 채널의 묶음일 때만 확정한다.
+// ⚠ 채널을 가리지 않으면 '다른 채널의 종료 처리'가 지금 쌓이는 묶음을 밀어낸다.
+//   실측(제보): 둥그레(구독) 라이브가 끝나고 서새봄(미구독)으로 적립이 넘어갔는데,
+//   둥그레 알람이 살아 있어 주기적으로 flush 를 유발해 서새봄 보상이 5분마다
+//   1회씩 낱개로 기록됐다.
+async function lpFlushRun(onlyChannelId) {
+  return lpWithRunLock(() => lpFlushRunLocked(onlyChannelId));
+}
+
+// 반환: 이 묶음이 '해소'됐는지(로그에 확정되고 run 이 비었거나, 애초에 비어 있음).
+// ⚠ false 면 아직 기록되지 않은 금액이 run 에 남아 있다는 뜻이다. 호출부는 그
+//   상태에서 새 묶음을 시작하면 안 된다(덮어쓰면 그 금액이 통째로 사라진다).
+async function lpFlushRunLocked(onlyChannelId) {
   const run = await lpGetRun();
+  // ⚠ 다른 채널의 묶음이면 이 채널 기준으로는 확정할 것이 없다 = 해소됨(true).
+  //   false 로 돌리면 방송 종료 정리가 영영 막혀 알람이 무한히 남는다.
+  //   (그 묶음은 자기 채널의 flush 가 따로 확정한다.)
+  if (onlyChannelId && run?.curr && run.curr !== onlyChannelId) return true;
+  // ⚠ 이미 로그에 확정됐고 초기화만 실패한 묶음이다. 다시 기록하면 같은 id 라
+  //   무시되므로, 초기화만 다시 시도한다(성공하면 정상 상태로 돌아온다).
+  if (run?.flushedId) {
+    // 이미 로그에 있다 → 초기화만 성공하면 해소된다. 실패해도 금액은 안전하다.
+    await lpSetRun({
+      prev: run.curr || null,
+      curr: null,
+      cnt: 0,
+      amount: 0,
+      at: 0,
+      accountId: run.accountId ?? null,
+    });
+    return true;
+  }
   if (!run?.curr || !(run.cnt > 0) || !(run.amount > 0)) {
     if (run?.curr || run?.cnt) {
-      await lpSetRun({
+      // 기록할 금액이 없는 잔여 상태 → 비우기만 하면 해소다.
+      return lpSetRun({
         prev: run?.curr || null,
         curr: null,
         cnt: 0,
         amount: 0,
         at: 0,
+        accountId: run?.accountId ?? null,
       });
     }
-    return;
+    return true; // 비어 있음
   }
   const channelId = run.curr;
   const meta = await lpFetchChannelMeta(channelId);
   // 부스팅 배수 = 실제 단가 / 기본 단가(10). 통계에서 '1티어 구독 ×1.2' 로 쓴다.
   const unit = run.amount / run.cnt;
-  await lpAppendLog({
-    // 같은 묶음을 두 번 저장하지 않도록 채널+시작시각으로 고정한다.
-    id: `WATCH5RUN-${channelId}-${run.at}`,
+  // ⚠ 누적을 시작한 계정으로 기록해야 한다. lpAccountFor 는 '현재' 계정을
+  //   우선하므로, A 계정 run 을 B 로 로그인한 뒤 flush 하면 B 것이 된다.
+  //   run 에 담긴 계정이 있으면 그것을 그대로 쓴다.
+  const owner = String(run.accountId || "");
+  const accountId = LP_ACCOUNT_RE.test(owner)
+    ? owner
+    : (await lpAccountFor()).accountId;
+  const entry = {
+    // 같은 묶음을 두 번 저장하지 않도록 묶음 고유 id 로 고정한다(멱등).
+    // ⚠ runId 가 없는 건 이 변경 이전에 시작된 묶음이다 → 예전 형식을 유지해야
+    //   이미 저장된 기록과 중복되지 않는다.
+    id: run.runId
+      ? `WATCH5RUN-${run.runId}`
+      : `WATCH5RUN-${channelId}-${run.at}`,
     at: run.at || Date.now(),
     channelId,
     channelName: meta?.channelName || "",
@@ -3970,37 +4609,515 @@ async function lpFlushRun() {
     claimType: "WATCH_5_MIN",
     // 몇 회분이 묶였는지. 12회면 1시간을 채운 것, 그보다 적으면 중간에 끊긴 것.
     watchCount: run.cnt,
+    // 묶음이 확정된 시각(마지막 적립 시점에 해당). 보정의 기준 비교에 쓴다.
+    endAt: Date.now(),
+  };
+  if (!accountId) {
+    // ⚠ 보류 큐에 넣으면서 run 도 남기면 나중에 둘 다 반영돼 이중 계상된다.
+    //   run 은 그대로 두고 보류는 하지 않는다 — 계정이 확인되면 그때 flush 된다.
+    return false; // 미해소: 금액이 아직 run 에만 있다
+  }
+  // ⚠ 저장이 끝난 뒤에 run 을 비운다. 먼저 비우면 저장 실패 시 묶음이 사라진다.
+  //   UPSERT_WATCH_RUN 은 총액을 그대로 맞추므로(멱등) 재시도해도 두 줄이 되지
+  //   않고, 초기화 실패로 금액이 더 붙은 경우에도 최종 금액으로 정정된다.
+  try {
+    await lpEnqueueWrite(() =>
+      lpMutateLog((list) =>
+        LP_WRITE_OPS.UPSERT_WATCH_RUN(list, { entry }, accountId),
+      ),
+    );
+  } catch {
+    return false; // 로그 저장 실패 → run 을 그대로 두고 다음 기회에 다시 flush
+  }
+  // 여기까지 왔으면 로그에는 이 묶음의 최종 금액이 들어 있다(새로 넣었든,
+  // 이미 있던 줄을 맞췄든). 이제 run 을 비운다.
+  const cleared = await lpSetRun({
+    prev: channelId,
+    curr: null,
+    cnt: 0,
+    amount: 0,
+    at: 0,
+    accountId,
   });
-  await lpSetRun({ prev: channelId, curr: null, cnt: 0, amount: 0, at: 0 });
+  if (cleared) return true;
+  // ⚠ 초기화 저장이 실패했다. run 에는 아직 확정된 묶음이 남아 있어, 다음 5분
+  //   보상이 이 묶음에 합쳐지면 회차·금액이 뒤섞인다. '확정됨' 표식을 남겨
+  //   다음 누적이 이 묶음에 붙지 않고 새 run 으로 시작하게 한다.
+  await lpSetRun({ ...run, flushedId: entry.id, flushedAt: Date.now() });
+  // 로그에는 확정됐다 → 금액은 안전하다. 표식이 남았으면 다음 누적이 새 묶음으로
+  // 시작하므로 해소로 본다(표식 저장까지 실패해도 upsert 가 총액을 맞춘다).
+  return true;
 }
 
 // 5분 보상 1회 감지. 같은 채널이면 누적, 채널이 바뀌면 이전 채널을 먼저 확정한다.
-async function lpNoteFiveMin(channelId, amount) {
+async function lpNoteFiveMin(channelId, amount, accountHint, seen) {
+  return lpWithRunLock(() =>
+    lpNoteFiveMinLocked(channelId, amount, accountHint, seen),
+  );
+}
+
+// 시청 상태 저장이 확인됐다 → 임시 기준(seen)을 더 쓰지 않는다.
+// 채널만 비교하면 먼저 시작한 주기가 뒤 주기의 최신 seen까지 승인할 수 있으므로,
+// lpNoteFiveMin이 돌려준 묶음 id와 관측값이 모두 같을 때만 해제한다.
+async function lpConfirmRunSeen(channelId, token) {
+  if (!token) return false;
+  return lpWithRunLock(async () => {
+    const run = await lpGetRun();
+    if (
+      run.curr !== channelId ||
+      run.seenPending !== true ||
+      String(run.runId || "") !== String(token.runId || "") ||
+      Number(run.seen) !== Number(token.seen)
+    ) {
+      return false;
+    }
+    return lpSetRun({ ...run, seenPending: false });
+  });
+}
+
+// 반환: 저장한 묶음의 승인 토큰. 실패하면 null/false이며 호출부가 lastAmount를
+// 올리면 안 된다.
+async function lpNoteFiveMinLocked(channelId, amount, accountHint, seen) {
   const run = await lpGetRun();
-  if (run.curr && run.curr !== channelId) await lpFlushRun();
+  // ⚠ 같은 보유량을 두 번 반영하지 않는다. 누적은 성공했는데 시청 상태 저장이
+  //   실패하면 lastAmount 가 그대로라 다음 주기에 같은 delta 가 다시 들어온다.
+  //   '어디까지 반영했는지'를 run 에 남겨 두면 그 재진입을 걸러낸다.
+  if (
+    Number.isFinite(seen) &&
+    run.curr === channelId &&
+    Number(run.seen) === seen &&
+    run.seenPending === true
+  ) {
+    return { runId: String(run.runId || ""), seen };
+  }
+  // ⚠ 락 안이므로 lpFlushRun(락 획득)을 부르면 교착된다 → Locked 판을 부른다.
+  // ⚠ 선행 flush 가 실패하면(계정 미확인·로그 저장 실패) 이전 묶음이 기록되지
+  //   않은 채 run 에 남는다. 그 위에 새 묶음을 쓰면 그 금액이 통째로 사라진다
+  //   → 해소되지 않았으면 이번 회차를 포기하고 다음 주기에 다시 시도한다.
+  //   (호출부가 lastAmount 를 올리지 않으므로 차액은 그대로 보존된다.)
+  if (run.curr && run.curr !== channelId) {
+    if (!(await lpFlushRunLocked())) return false;
+  }
+  // ⚠ 계정이 바뀌면 이전 계정 묶음을 먼저 확정한다. 안 그러면 A 계정 분량이
+  //   B 계정 기록으로 넘어간다.
+  const { accountId } = await lpAccountFor(accountHint);
+  const mid = await lpGetRun();
+  if (mid.curr && accountId && mid.accountId && mid.accountId !== accountId) {
+    if (!(await lpFlushRunLocked())) return false;
+  }
   const cur = await lpGetRun();
-  const same = cur.curr === channelId;
-  await lpSetRun({
+  // ⚠ flushedId 가 있으면 이 묶음은 이미 로그에 확정됐고 초기화만 실패한 상태다.
+  //   여기에 더하면 같은 id 로 다시 기록하려다 무시돼 금액이 사라진다.
+  //   확정된 묶음은 이어받지 않고 새 묶음으로 시작한다.
+  const same = cur.curr === channelId && !cur.flushedId;
+  const at = same && cur.at ? cur.at : Date.now();
+  const nextRun = {
     prev: cur.prev ?? null,
     curr: channelId,
     cnt: (same ? cur.cnt : 0) + 1,
     amount: (same ? cur.amount : 0) + amount,
-    at: same && cur.at ? cur.at : Date.now(),
+    at,
+    // ⚠ 묶음 고유 id. 예전에는 flush 때 at 으로 만들었는데, 초기화가 실패해
+    //   같은 at 이 재사용되면 id 가 겹쳐 뒤 금액이 통째로 무시됐다. 누적을
+    //   시작할 때 한 번 정하고, 새 묶음이면 반드시 새 값을 쓴다.
+    runId: same && cur.runId ? cur.runId : `${channelId}-${at}-${lpRunSeq()}`,
+    // 이 묶음에 마지막으로 반영한 보유량(중복 반영 차단용).
+    // seenPending: 시청 상태(lastAmount) 저장이 아직 확인되지 않았다는 표시.
+    // 저장이 확인되면 lpConfirmRunSeen 이 꺼서, 이후에는 lastAmount 를 기준으로
+    // 쓴다(잔액이 정상적으로 줄어도 판정이 막히지 않게).
+    ...(Number.isFinite(seen) ? { seen, seenPending: true } : {}),
+    // 누적 시작 시점의 계정. flush 때 이 값으로 기록한다.
+    accountId: same && cur.accountId ? cur.accountId : accountId || null,
+  };
+  if (!(await lpSetRun(nextRun))) return null;
+  return {
+    runId: String(nextRun.runId || ""),
+    seen: Number(nextRun.seen),
+  };
+}
+
+// ── 예측 대기 목록: 단일 작성자 ──────────────────────────────────────────
+// ⚠ 탭마다 전체 목록을 읽고 덮어써서, 두 탭이 동시에 베팅·정산하면 한쪽 항목이
+//   유실되거나 되살아난다. 여기로 모아 직렬화한다.
+const LP_AWAITING_KEY = "cheeseLogPowerPredictionAwaiting";
+let lpAwaitingTail = Promise.resolve();
+
+function lpWithAwaitingLock(task) {
+  const result = lpAwaitingTail.then(task);
+  lpAwaitingTail = result.catch(() => {});
+  return result;
+}
+
+// ⚠ '바뀐 게 없음'과 '저장 실패'를 모두 false 로 돌려주면 호출부가 구분하지
+//   못해 실패를 성공으로 응답한다(정산 추적 항목 유실). 둘을 나눠 돌려준다.
+async function lpMutateAwaiting(apply) {
+  return lpWithAwaitingLock(async () => {
+    try {
+      const cur = (await chrome.storage.local.get(LP_AWAITING_KEY))?.[
+        LP_AWAITING_KEY
+      ];
+      const list = Array.isArray(cur) ? [...cur] : [];
+      const changed = apply(list);
+      if (!changed) return { ok: true, changed: false };
+      await chrome.storage.local.set({ [LP_AWAITING_KEY]: list });
+      // 자동 보정은 대기 목록도 판정 근거로 읽는다. 보유량을 읽는 사이 목록이
+      // 바뀌었다면 같은 세대로 감지해 이번 비교를 다시 하게 한다.
+      lpLogGeneration += 1;
+      return { ok: true, changed: true };
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        reason: String(error?.message || error),
+      };
+    }
   });
 }
 
+// 대기 항목을 넣거나 고친다(계정 + predictionId 로 찾는다).
+function lpUpsertAwaiting(list, p, accountId) {
+  const i = list.findIndex((x) => {
+    if (x?.predictionId !== p.predictionId) return false;
+    const owner = String(x?.accountId || "");
+    return owner === accountId || owner === "";
+  });
+  if (i >= 0) list[i] = { ...list[i], ...p, accountId };
+  else list.push({ ...p, accountId });
+  return true;
+}
+
+// 정산이 끝난 항목을 뺀다.
+function lpRemoveAwaiting(list, predictionId, accountId) {
+  const i = list.findIndex((x) => {
+    if (x?.predictionId !== predictionId) return false;
+    const owner = String(x?.accountId || "");
+    return owner === accountId || owner === "";
+  });
+  if (i < 0) return false;
+  list.splice(i, 1);
+  return true;
+}
+
+// ── 보유량 맞추기(자동 조정) ────────────────────────────────────────────────
+// ⚠ 통계 페이지에도 같은 로직이 있었다. 두 곳에 두면 이번 세션에만 네 번 고친
+//   규칙(atMap, pendingRun, 유예, 계정 경계)이 갈라진다 → background 만 소유한다.
+const LP_SNAP_KEY = "cheeseLogPowerBalanceSnapshotsV2";
+const LP_SNAP_NOISE = 5;
+const LP_SNAP_SETTLE_MS = 10 * 60 * 1000;
+const LP_HOUR_AWAY_LIMIT_MS = 60 * 60 * 1000;
+const LP_BALANCES_URL =
+  "https://api.chzzk.naver.com/service/v1/log-power/balances";
+
+async function lpFetchBalances() {
+  try {
+    const res = await fetch(LP_BALANCES_URL, { credentials: "include" });
+    if (!res.ok) return null;
+    const rows = (await res.json())?.content?.data;
+    return Array.isArray(rows) ? rows : null;
+  } catch {
+    return null;
+  }
+}
+
+async function lpLoadSnapshot(accountId) {
+  try {
+    const all = (await chrome.storage.local.get(LP_SNAP_KEY))?.[LP_SNAP_KEY];
+    const v = all && typeof all === "object" ? all[accountId] : null;
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+async function lpSaveSnapshot(accountId, snap) {
+  try {
+    const all = (await chrome.storage.local.get(LP_SNAP_KEY))?.[LP_SNAP_KEY];
+    const next = all && typeof all === "object" ? { ...all } : {};
+    next[accountId] = snap;
+    await chrome.storage.local.set({ [LP_SNAP_KEY]: next });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 지금 적립 중이라 '곧 우리가 기록할' 채널. 기준을 찍거나 차액을 잡으면 안 된다.
+async function lpActiveChannelIds(balances, log, accountId) {
+  const now = Date.now();
+  const ids = new Set();
+  try {
+    const sess = await chrome.storage.session.get(null);
+    for (const [k, v] of Object.entries(sess || {})) {
+      if (!k.startsWith(LP_WATCH_STATE_PREFIX)) continue;
+      // ⚠ activeUntil 이 지나도 알람은 살아 있어 그 채널의 보상이 계속 들어올 수
+      //   있다. 그런데 PC 가 다른 채널을 보고 있으면 delta 판정이 늦어, 그 사이
+      //   보유량만 오른 상태를 '설명 안 됨'으로 잡았다(제보: 카린 기타 +24).
+      //   추적 state 가 남아 있는 채널은 계정이 같으면 전부 제외한다.
+      if (accountId && v?.accountId && v.accountId !== accountId) continue;
+      ids.add(k.slice(LP_WATCH_STATE_PREFIX.length));
+    }
+  } catch {}
+  try {
+    const keys = (balances || [])
+      .map((b) => `${LP_HOUR_TIMER_PREFIX}${String(b?.channelId || "")}`)
+      .filter((k) => k.length > LP_HOUR_TIMER_PREFIX.length);
+    const loc = keys.length ? await chrome.storage.local.get(keys) : {};
+    for (const [k, v] of Object.entries(loc || {})) {
+      const raw = v && typeof v === "object" ? v : { endsAt: Number(v) };
+      const endsAt = Number(raw.endsAt) || 0;
+      const leftAt = Number(raw.leftAt) || 0;
+      if (leftAt > 0) {
+        // 자리를 비운 지 오래면 복원 때 종료된다 → 더 이상 제외하지 않는다.
+        if (now - leftAt > LP_HOUR_AWAY_LIMIT_MS) continue;
+        if (endsAt - leftAt <= 0) continue;
+      } else if (endsAt + LP_SNAP_SETTLE_MS <= now) {
+        continue;
+      }
+      // 다른 계정 타이머 때문에 이 계정의 감지가 막히면 안 된다.
+      if (accountId && raw.accountId && raw.accountId !== accountId) continue;
+      ids.add(k.slice(LP_HOUR_TIMER_PREFIX.length));
+    }
+  } catch {}
+  // 방금 시청 보상을 받은 채널은 키가 지워졌어도 잠깐 유예한다.
+  for (const e of log) {
+    const t = String(e?.claimType || "");
+    if (!e?.channelId || !(!t || t.startsWith("WATCH_"))) continue;
+    // ⚠ 묶음(WATCH_5_MIN)의 at 은 '시작' 시각이라 한 시간 전일 수 있다.
+    //   끝난 시각으로 유예를 재야 방금 확정된 묶음이 제외 대상에 들어간다.
+    const eAt = Number(e.endAt) || Number(e.at);
+    if (eAt + LP_SNAP_SETTLE_MS > now) ids.add(e.channelId);
+  }
+  ids.delete("");
+  return ids;
+}
+
+// 스냅샷과 현재 보유량을 비교해 설명되지 않는 변동을 기록한다.
+// 반환: { ok, applied, reason }
+// ⚠ 동시에 두 번 돌면 같은 차액을 두 번 기록한다(탭 진입 + 수동 버튼 + 알람).
+let lpReconcileInFlight = null;
+
+function lpReconcileOnce() {
+  if (lpReconcileInFlight) return lpReconcileInFlight;
+  lpReconcileInFlight = lpReconcile().finally(() => {
+    lpReconcileInFlight = null;
+  });
+  return lpReconcileInFlight;
+}
+
+async function lpReconcile() {
+  // ⚠ 캐시된 계정으로 비교하면 전환 직후 이전 계정 기준과 대조해 큰 허위 기록이
+  //   생긴다. 보정 전에는 항상 새로 확인한다.
+  // 사용자가 요청한 보정은 캐시·실패 기록을 모두 건너뛰고 새로 확인한다.
+  lpInvalidateAccount();
+  const accountId = await lpFetchAccountId();
+  // 계정을 모르면 비교하지 않는다 — 남의 계정 기준과 대조하면 허위 기록이 된다.
+  if (!accountId) return { ok: false, reason: "account-unknown" };
+
+  // ⚠ 보류분을 먼저 내역에 넣는다. 안 그러면 그 적립이 '설명되지 않는 변동'으로
+  //   기타 적립에 기록되고, 나중에 보류가 풀리면서 같은 금액이 한 번 더 들어온다.
+  //   (예약 실행 경로에만 있던 처리 → 수동·페이지 진입도 같은 함수를 쓰므로
+  //    여기로 옮겨 모든 진입점이 동일하게 동작하게 한다.)
+  const drained = await lpDrainPending();
+  // ⚠ 보류가 남아 있으면 비교하지 않는다. 그 기록은 보유량엔 이미 반영돼 있고
+  //   내역엔 없으므로, 지금 비교하면 기타 적립으로 한 번 더 기록된다(이중 계상).
+  if (!drained?.ok) return { ok: false, reason: "pending-failed" };
+  if (drained.left > 0) return { ok: false, reason: "pending-left" };
+
+  // ⚠ 보유량은 이 시점의 서버 상태다. 이 뒤로 로그가 바뀌면 둘의 기준 시각이
+  //   어긋난다 — 큐 안에서 세대를 대조해 걸러낸다.
+  const gen0 = lpLogGeneration;
+  const balances = await lpFetchBalances();
+  if (!balances) return { ok: false, reason: "balances-failed" };
+
+  const snap = await lpLoadSnapshot(accountId);
+  // 제외 판정은 로그와 무관한 상태(추적·타이머)만 본다 → 큐 밖에서 준비한다.
+  const skip = await lpActiveChannelIds(balances, [], accountId);
+  const run = await lpGetRun();
+  // ⚠ 누적 중인 run 이 있는 채널은 기준을 갱신하면 안 된다. 차액 계산에서 빼도
+  //   기준에는 run 이 포함된 보유량이 저장돼, 나중에 flush 로 내역에 들어오면
+  //   같은 금액이 한 번 더 빠진다(제보: 둥그레 기타 사용 -36).
+  // 다른 계정의 run 때문에 이 계정 감지가 막히면 안 된다.
+  // ⚠ flushedId 가 있는 묶음은 이미 내역에 들어가 있다(초기화만 실패한 상태).
+  //   그 채널까지 제외하면 실제 다른 기기 적립을 계속 못 잡는다 — 제외는
+  //   '아직 기록되지 않은 금액'을 보호하기 위한 것이다.
+  if (
+    run?.curr &&
+    Number(run.amount) > 0 &&
+    !run.flushedId &&
+    (!run.accountId || run.accountId === accountId)
+  ) {
+    skip.add(String(run.curr));
+  }
+  // ⚠ 예측 베팅은 보유량이 먼저 줄고 기록이 몇십 초 뒤에 붙는다. 그 틈에 비교하면
+  //   베팅이 '기타 사용'으로 잡히고, 뒤이어 진짜 기록이 들어와 되돌리는 보정까지
+  //   생긴다(제보: 큐베 -50 → 예측 베팅 -50 → +50).
+  //   정산 대기 중인 예측이 있는 채널은 건드리지 않는다.
+  try {
+    const aw = (
+      await chrome.storage.local.get("cheeseLogPowerPredictionAwaiting")
+    )?.cheeseLogPowerPredictionAwaiting;
+    for (const p of Array.isArray(aw) ? aw : []) {
+      // 현재 계정(또는 계정 도입 전) 대기 건만 제외 대상이다.
+      const owner = String(p?.accountId || "");
+      if (owner && owner !== accountId) continue;
+      if (p?.channelId) skip.add(String(p.channelId));
+    }
+  } catch {}
+  const now = Date.now();
+
+  // 기준이 없으면(첫 실행·계정 추가) 기록 없이 기준만 남긴다.
+  // ⚠ 기준을 만드는 동안 들어온 기록은 보유량에 이미 포함돼 기준으로 굳는다.
+  //   큐 안에서 확인해 그런 경우 다음 주기로 미룬다.
+  if (!snap?.map) {
+    // ⚠ '세대 변경'과 '저장 실패'를 한 값으로 합치면 저장소 오류가 5분 재시도로
+    //   분류돼 백오프가 안 걸리고 진단도 틀린다. 이유를 따로 돌려준다.
+    let why = "";
+    await lpEnqueueWrite(async () => {
+      if (lpLogMoved(gen0)) {
+        why = "log-changed";
+        return false;
+      }
+      const ok = await lpWriteSnapshot(accountId, balances, skip, null, now);
+      if (!ok) why = "snapshot-failed";
+      return ok;
+    });
+    if (why) return { ok: false, reason: why };
+    return { ok: true, applied: 0, reason: "baseline-created" };
+  }
+
+  // ⚠ 로그 읽기·차액 계산·기록을 한 큐 작업 안에서 한다. 밖에서 계산하면
+  //   그 사이 들어온 실제 적립을 못 보고 같은 변동을 한 번 더 기록한다.
+  let count = 0;
+  let stale = false;
+  let saved = false;
+  let failed = "";
+  // 기준 저장에서 제외할 채널(큐 안에서 계산한 유예 채널까지 합친다).
+  const skipForSnapshot = new Set(skip);
+  await lpEnqueueWrite(async () => {
+    // 보유량을 읽은 뒤 로그가 바뀌었다 → 그 기록이 보유량에도 이미 반영돼 있어
+    // 지금 빼면 이중 계산이 된다. 이번은 포기하고 다음 주기에 새로 읽는다.
+    if (lpLogMoved(gen0)) {
+      stale = true;
+      return false;
+    }
+    const wrote = await lpMutateLog((list) => {
+      // 차액 계산에는 현재 계정 기록만 센다(레거시를 섞으면 남의 기록을 차감).
+      const mine = list.filter((e) => String(e?.accountId || "") === accountId);
+      // 방금 시청 보상을 받은 채널은 키가 지워졌어도 잠깐 유예한다.
+      const hot = new Set(skip);
+      for (const e of mine) {
+        const t = String(e?.claimType || "");
+        if (!e?.channelId || !(!t || t.startsWith("WATCH_"))) continue;
+        // 묶음은 끝난 시각 기준으로 유예를 준다(시작 시각은 한참 전일 수 있다).
+        const eAt = Number(e.endAt) || Number(e.at);
+        if (eAt + LP_SNAP_SETTLE_MS > now) hot.add(e.channelId);
+      }
+      const rows = [];
+      for (const b of balances) {
+        const id = String(b?.channelId || "");
+        if (!id || hot.has(id) || !(id in snap.map)) continue;
+        const since = Number(snap.atMap?.[id]) || Number(snap.at) || 0;
+        let recorded = 0;
+        for (const e of mine) {
+          if (e.channelId !== id) continue;
+          // ⚠ 묶음(WATCH_5_MIN)은 at 이 '시작' 시각이라 기준보다 이전일 수 있다.
+          //   실제로는 기준 이후에 적립·기록된 금액이므로 endAt 으로 판정한다.
+          const eAt = Number(e.endAt) || Number(e.at);
+          if (eAt <= since) continue;
+          recorded += (Number(e.amount) || 0) + (Number(e.fiveMinAmount) || 0);
+        }
+        const other =
+          (Number(b.amount) || 0) - Number(snap.map[id] || 0) - recorded;
+        if (Math.abs(other) <= LP_SNAP_NOISE) continue;
+        rows.push({
+          id: `OTHER-${id}-${now}`,
+          at: now,
+          channelId: id,
+          channelName: b.channelName || "채널",
+          channelImageUrl: b.channelImageUrl || "",
+          verifiedMark: b.verifiedMark === true,
+          amount: other,
+          fiveMinAmount: 0,
+          boost: 1,
+          claimType: other < 0 ? "OTHER_LOSS" : "OTHER_GAIN",
+          autoDetected: true, // 화면에서 '자동 감지'로 구분한다
+        });
+      }
+      count = rows.length;
+      // ⚠ 유예 중인 채널은 기준도 갱신하지 않는다. 갱신하면 묶음 도중의 보유량이
+      //   기준으로 굳어, 나중에 그 묶음이 확정될 때 이미 기준에 포함된 몫이
+      //   중복으로 계산된다(제보: 둥그레 기타 +96).
+      for (const id of hot) skipForSnapshot.add(id);
+      if (!rows.length) return false;
+      return LP_WRITE_OPS.APPEND_AUTO_BATCH(list, { entries: rows }, accountId);
+    });
+    // ⚠ 기준 저장까지 같은 큐 작업 안에서 끝낸다. 큐를 나온 뒤 저장하면 그 틈에
+    //   들어온 기록이 기준에 흡수돼 다음 보정에서 영영 안 잡힌다(누락).
+    if (count && !wrote) {
+      failed = "write-failed"; // 기록 실패 → 기준을 옮기지 않는다
+      return wrote;
+    }
+    saved = await lpWriteSnapshot(
+      accountId,
+      balances,
+      skipForSnapshot,
+      snap,
+      now,
+    );
+    if (!saved) failed = "snapshot-failed";
+    return wrote;
+  });
+  // 보유량이 낡았다 → 기준도 옮기지 않는다(옮기면 그 변동을 영영 놓친다).
+  if (stale) return { ok: false, reason: "log-changed" };
+  if (failed) return { ok: false, reason: failed, applied: count };
+  return { ok: true, applied: count };
+}
+
+// 기준 저장. 적립 중인 채널은 이전 기준을 물려받는다(진행 중 보상이 섞이지 않게).
+async function lpWriteSnapshot(accountId, balances, skip, prevSnap, now) {
+  const prev = prevSnap?.map || {};
+  const prevAt = prevSnap?.atMap || {};
+  const map = {};
+  const atMap = {};
+  for (const b of balances) {
+    const id = String(b?.channelId || "");
+    if (!id) continue;
+    if (skip.has(id)) {
+      if (id in prev) {
+        map[id] = Number(prev[id]) || 0;
+        atMap[id] = Number(prevAt[id]) || Number(prevSnap?.at) || now;
+      } else {
+        map[id] = Number(b.amount) || 0;
+        atMap[id] = now;
+      }
+      continue;
+    }
+    map[id] = Number(b.amount) || 0;
+    atMap[id] = now;
+  }
+  return lpSaveSnapshot(accountId, { at: now, map, atMap });
+}
+
 const LP_HOUR_TIMER_PREFIX = "cheeseLogPowerHourTimer:";
-async function lpClearOtherChannels(activeChannelId) {
+async function lpClearOtherChannels(activeChannelId, ownerHint) {
   try {
     // 1) 다른 채널의 적립 '표시'만 끄고 추적은 유지한다(삭제하면 판정이 이 채널로
     //    옮겨와도 재추적되지 않음). LOG_POWER_LIVE_ENDED 로 현재 떠 있는 적립 중 표시를
     //    지우되, background 추적/알람은 살려 다음 주기에 이 채널의 적립을 계속 감지한다.
+    // ⚠ 다른 계정의 추적 상태까지 비활성화하면 그 계정으로 돌아갔을 때 감지가
+    //   끊긴다. 지금 계정 것만 정리한다.
+    // ⚠ 계정을 모른 채 진행하면 필터가 풀려 다른 계정의 추적 상태까지 비활성화하고
+    //   타이머를 일시정지한다. 호출부가 아는 소유자를 받아 쓰고, 그래도 모르면
+    //   정리를 아예 하지 않는다(안 하는 쪽이 남의 기준을 망치는 것보다 낫다).
+    const { accountId: me } = await lpAccountFor(ownerHint);
+    if (!me) return;
     const sess = await chrome.storage.session.get(null);
     const others = [];
-    for (const key of Object.keys(sess || {})) {
+    for (const [key, v] of Object.entries(sess || {})) {
       if (!key.startsWith(LP_WATCH_STATE_PREFIX)) continue;
       const cid = key.slice(LP_WATCH_STATE_PREFIX.length);
       if (!cid || cid === activeChannelId) continue;
+      if (v?.accountId && v.accountId !== me) continue;
       others.push(cid);
       await lpDeactivateWatchState(cid); // 내부에서 status(active:false) broadcast
     }
@@ -4028,7 +5145,12 @@ async function lpClearOtherChannels(activeChannelId) {
       // 이미 일시정지된 것은 leftAt 을 덮지 않는다(이탈 시간이 초기화된다).
       if (!endsAt || Number(obj.leftAt) > 0) continue;
       if (endsAt <= now) continue; // 만료된 키는 그대로 둔다(복원 때 정리)
-      paused[key] = { endsAt, leftAt: now };
+      // 타이머의 소유 계정을 유지한다(누락하면 다른 계정이 이어받는다).
+      paused[key] = {
+        endsAt,
+        leftAt: now,
+        accountId: String(obj.accountId || ""),
+      };
       lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId: cid });
     }
     if (Object.keys(paused).length) await chrome.storage.local.set(paused);
@@ -4048,8 +5170,16 @@ async function lpCheckProgress(channelId) {
   // 라이브 종료면 정리(null=불확실은 계속 진행).
   const live = await lpIsChannelLive(channelId);
   if (live === false) {
+    // ⚠ 확정을 먼저 한다. state·알람을 먼저 지우면 flush 가 실패했을 때 다시
+    //   시도할 알람이 없어 그 묶음이 영영 기록되지 않는다(자동 보정도 이 채널을
+    //   run 때문에 계속 제외한다). 확정에 성공했을 때만 추적을 정리한다.
+    const flushed = await lpFlushRun(channelId); // 쌓인 연속분 확정
+    if (!flushed) {
+      // 다음 알람에서 다시 시도한다 — 추적 상태·알람을 남겨 둔다.
+      lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId });
+      return;
+    }
     await lpClearWatchState(channelId);
-    await lpFlushRun(); // 방송이 끝났다 → 쌓인 연속분 확정
     lpBroadcast({ type: "LOG_POWER_LIVE_ENDED", channelId });
     return;
   }
@@ -4066,14 +5196,80 @@ async function lpCheckProgress(channelId) {
     }
   } else if (now - Number(state.startedAt || now) > LP_WATCH_MAX_MS) {
     // live 불확실(null)한 상태로 상한 초과 → 안전상 정리.
+    // ⚠ 여기서도 확정이 먼저다(실패하면 알람을 남겨 다음 주기에 재시도).
+    if (!(await lpFlushRun(channelId))) {
+      lpBroadcast(lpStateToStatus(state, false));
+      return;
+    }
     await lpClearWatchState(channelId);
-    await lpFlushRun();
     lpBroadcast(lpStateToStatus(state, false));
     return;
   }
+  // ⚠ 계정이 바뀌었으면 lastAmount·expectedAmount 가 이전 계정 기준이라
+  //   delta 가 엉뚱하게 나온다(실측 추정: 25795 → 300 이면 -25495).
+  //   그 상태로 두면 새 계정의 적립을 계속 놓치므로 기준을 다시 잡는다.
+  // ⚠ 캐시(최대 5분)를 쓰면 전환 직후 A 를 현재 계정으로 판단하면서 보유량은
+  //   B 것을 읽는다. 판정은 보유량과 직접 엮이므로 더 신선한 값이 필요하다.
+  //   매번 무효화하면 이 함수가 채널마다 1분 주기라 하루 수천 회가 되므로
+  //   (캐시를 넣은 이유가 그것이다) 이 경로에만 짧은 TTL 을 적용한다.
+  // ⚠ 전환 '신호'가 아니라 단순 신선도 문제다 → 진행 중 요청까지 버리면 채널마다
+  //   새 요청이 나간다. 캐시 나이만 비워 공유 요청은 그대로 쓴다.
+  if (Date.now() - lpAccountCache.at > LP_ACCOUNT_WATCH_TTL_MS) {
+    lpAccountCache = { id: null, at: 0 };
+  }
+  const { accountId: nowAccount } = await lpAccountFor();
+  // ⚠ 계정을 확인하지 못하면 이번 주기는 판정하지 않는다.
+  //   보유량(lpFetchAmount)은 '지금 로그인한 계정' 기준인데, 계정이 바뀌었는지
+  //   모르는 상태다. state.accountId 를 소유자로 삼아 진행하면 B 의 보유량을
+  //   A 의 기준과 비교하고 그 적립을 A 내역에 넣게 된다.
+  //   추적 상태는 그대로 두므로 다음 주기(1분 뒤)에 복구되면 이어서 감지한다.
+  if (!nowAccount) return;
+  const owner = nowAccount; // 이 지점 이후 소유 계정은 항상 확정돼 있다
+  // ⚠ 소유자가 비어 있는 상태(계정 미확인 중에 만들어진 것)도 재기준 대상이다.
+  //   그냥 두면 누구 기준인지 모르는 lastAmount 로 계속 판정한다.
+  if (state.accountId !== nowAccount) {
+    // ⚠ 이전 계정 묶음이 확정되지 않았는데 기준을 새 계정으로 옮기면, 그 금액이
+    //   기록되지 못한 채 남고 이후 판정에서 새 계정 차액과 섞인다.
+    //   해소될 때까지 재기준을 미룬다(다음 주기에 다시 시도).
+    if (!(await lpFlushRun(channelId))) return;
+    const fresh = await lpFetchAmount(channelId);
+    // ⚠ 새 보유량을 못 읽었으면 상태를 건드리지 않는다. 계정만 새 것으로 바꾸고
+    //   lastAmount 는 이전 계정 값을 남기면, 다음 주기에 '계정 일치'로 판단해
+    //   A 의 보유량과 B 의 보유량을 비교한다(허위 delta).
+    if (!Number.isFinite(fresh)) return; // 다음 주기에 다시 시도
+    await lpSetWatchState(channelId, {
+      ...state,
+      accountId: nowAccount,
+      lastAmount: fresh,
+      expectedAmount: await lpFetchExpectedAmount(channelId),
+      activeUntil: 0,
+      misses: 0,
+    });
+    return; // 이번 주기는 기준만 다시 잡고 끝낸다
+  }
+  // 계정 확인이 복구됐으면 보류분을 먼저 반영한다.
+  void lpDrainPending();
   const amount = await lpFetchAmount(channelId);
   if (!Number.isFinite(amount)) return; // 누락 → 판정 스킵
-  const delta = amount - Number(state.lastAmount || 0);
+  // ⚠ 시청 상태 저장이 실패하면 lastAmount 가 뒤처진 채 남는다. 그 값으로 차액을
+  //   내면 이미 run 에 넣은 몫까지 다시 세게 된다.
+  //   ⚠ 크기 비교(seen > lastAmount)로 판단하면 안 된다 — 예측 베팅 등으로 잔액이
+  //     정상적으로 줄면 seen 이 계속 커 보여서 이후 적립을 전부 놓친다.
+  //     '상태 저장이 아직 확인되지 않았다'는 사실만 토큰(seenPending)으로 본다.
+  const runNow = await lpGetRun();
+  const pendingSeenToken =
+    runNow.curr === channelId &&
+    runNow.seenPending === true &&
+    Number.isFinite(Number(runNow.seen))
+      ? {
+          runId: String(runNow.runId || ""),
+          seen: Number(runNow.seen),
+        }
+      : null;
+  const baseline = pendingSeenToken
+    ? pendingSeenToken.seen
+    : Number(state.lastAmount || 0);
+  const delta = amount - baseline;
   const targets = state.expectedAmount
     ? [state.expectedAmount]
     : LP_WATCH_AMOUNTS;
@@ -4085,22 +5281,33 @@ async function lpCheckProgress(channelId) {
   if (comboFive != null) {
     next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
     next.misses = 0;
-    await lpSetWatchState(channelId, next);
-    await lpNoteFiveMin(channelId, comboFive);
+    // ⚠ 누적 저장이 먼저다. lastAmount 를 올린 뒤 저장에 실패하면 그 회차의
+    //   차액이 이미 소비돼 영영 사라진다. 실패하면 기준을 그대로 두고 다음
+    //   주기에 같은 차액으로 다시 시도한다.
+    const note = await lpNoteFiveMin(channelId, comboFive, owner, amount);
+    if (!note) return;
+    // ⚠ 상태 저장이 실패했는데 flush 하면 seen 도 run 과 함께 사라져, 다음
+    //   알람이 같은 delta 를 또 처리한다(중복). 저장이 확인된 뒤에 확정한다.
+    if (!(await lpSetWatchState(channelId, next))) return;
+    await lpConfirmRunSeen(channelId, note);
     // 1시간이 찼으니 여기서 한 묶음이 끝난다 → 쌓인 5분분을 확정한다.
-    await lpFlushRun();
-    await lpClearOtherChannels(channelId);
+    await lpFlushRun(channelId);
+    await lpClearOtherChannels(channelId, owner);
     lpBroadcast(lpStateToStatus(next, true));
     return;
   }
   if (targets.includes(delta)) {
     next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
     next.misses = 0;
-    await lpSetWatchState(channelId, next);
     // 연속 5분 보상 누적. 채널이 바뀌면 여기서 이전 채널분이 확정된다.
-    await lpNoteFiveMin(channelId, delta);
+    const note = await lpNoteFiveMin(channelId, delta, owner, amount);
+    if (!note) return;
+    // 저장이 확인돼야 임시 기준(seen)을 놓는다.
+    if (await lpSetWatchState(channelId, next)) {
+      await lpConfirmRunSeen(channelId, note);
+    }
     // 이 채널이 활성 적립 채널로 확정됨 → 다른 채널의 적립·1시간 타이머 정리.
-    await lpClearOtherChannels(channelId);
+    await lpClearOtherChannels(channelId, owner);
     lpBroadcast(lpStateToStatus(next, true));
     return;
   }
@@ -4118,10 +5325,13 @@ async function lpCheckProgress(channelId) {
     if (rest > 0 && rest % unit === 0 && rest / unit <= 12) {
       next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
       next.misses = 0;
-      await lpSetWatchState(channelId, next);
-      await lpNoteFiveMin(channelId, rest);
-      await lpFlushRun(); // 1시간이 찼으니 한 묶음이 끝난다
-      await lpClearOtherChannels(channelId);
+      const note = await lpNoteFiveMin(channelId, rest, owner, amount);
+      if (!note) return;
+      // ⚠ 위와 같다 — 저장 확인 전에는 flush 하지 않는다.
+      if (!(await lpSetWatchState(channelId, next))) return;
+      await lpConfirmRunSeen(channelId, note);
+      await lpFlushRun(channelId); // 1시간이 찼으니 한 묶음이 끝난다
+      await lpClearOtherChannels(channelId, owner);
       lpBroadcast(lpStateToStatus(next, true));
       return;
     }
@@ -4135,26 +5345,137 @@ async function lpCheckProgress(channelId) {
     if (ticks <= 12) {
       next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
       next.misses = 0;
-      await lpSetWatchState(channelId, next);
-      await lpNoteFiveMin(channelId, delta);
-      await lpClearOtherChannels(channelId);
+      const note = await lpNoteFiveMin(channelId, delta, owner, amount);
+      if (!note) return;
+      if (await lpSetWatchState(channelId, next)) {
+        await lpConfirmRunSeen(channelId, note);
+      }
+      await lpClearOtherChannels(channelId, owner);
       lpBroadcast(lpStateToStatus(next, true));
       return;
     }
   }
   next.misses = Number(state.misses || 0) + 1;
   if (next.misses >= LP_WATCH_MISS_LIMIT) next.activeUntil = 0;
-  await lpSetWatchState(channelId, next);
+  const stateSaved = await lpSetWatchState(channelId, next);
+  // 앞 주기에서 run 저장만 성공하고 시청 상태 저장이 실패한 경우, 이번 주기의
+  // 일반 경로에서 lastAmount가 복구돼도 pending을 놓지 않으면 과거 seen이 계속
+  // 기준이 된다. 캡처한 토큰이 그대로일 때만 승인해 더 최신 관측은 건드리지 않는다.
+  if (stateSaved && pendingSeenToken) {
+    await lpConfirmRunSeen(channelId, pendingSeenToken);
+  }
   if (wasActive && Number(next.activeUntil || 0) <= now) {
     // 적립이 끊겼다 → 쌓인 연속분을 확정한다. 여기서 안 하면 다른 채널을 볼
     // 때까지(며칠 뒤일 수도) 기록이 안 남는다.
-    await lpFlushRun();
+    await lpFlushRun(channelId);
     lpBroadcast(lpStateToStatus(next, false));
   }
 }
 
+// ── 다른 기기 적립 자동 감지(60분) ──────────────────────────────────────────
+// ⚠ 모바일 시청분은 PC 확장이 감지할 수 없다(제보: 모라라·아오토라). 내역 탭을
+//   열 때만 맞추면 며칠치가 한 건으로 뭉치므로, 주기적으로 확인한다.
+//   치지직 탭 유무는 보지 않는다 — 모바일로 볼 때 PC 탭이 열려 있을 이유가 없다.
+const LP_RECONCILE_ALARM = "logpower:reconcile";
+const LP_RECONCILE_PERIOD_MIN = 60;
+const LP_RECONCILE_STATE_KEY = "cheeseLogPowerReconcileState";
+// 실패가 이어지면(로그아웃·네트워크) 간격을 늘린다. 로그아웃은 오류가 아니다.
+const LP_RECONCILE_BACKOFF_MIN = [60, 180, 360];
+// 로그가 바뀌어 건너뛴 경우의 재시도 간격(고장이 아니므로 짧게).
+const LP_RECONCILE_RETRY_MIN = 5;
+
+async function lpReconcileState() {
+  try {
+    const v = (await chrome.storage.local.get(LP_RECONCILE_STATE_KEY))?.[
+      LP_RECONCILE_STATE_KEY
+    ];
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+async function lpEnsureReconcileAlarm(delayMin) {
+  try {
+    chrome.alarms.create(LP_RECONCILE_ALARM, {
+      delayInMinutes: delayMin ?? LP_RECONCILE_PERIOD_MIN,
+      periodInMinutes: LP_RECONCILE_PERIOD_MIN,
+    });
+  } catch {}
+}
+
+async function lpRunScheduledReconcile() {
+  // 보류분 반영은 lpReconcile 안에서 한다(모든 진입점 공통).
+  const state = await lpReconcileState();
+  const res = await lpReconcileOnce();
+  const now = Date.now();
+  const next = { ...state, lastAttemptAt: now };
+  if (res?.ok) {
+    next.lastSuccessAt = now;
+    next.consecutiveFailures = 0;
+    delete next.reason;
+  } else if (res?.reason === "account-unknown") {
+    // 로그인 안 한 상태는 실패로 세지 않는다(경고를 띄우면 잘못된 신호다).
+    next.reason = res.reason;
+  } else if (res?.reason === "log-changed" || res?.reason === "pending-left") {
+    // 고장이 아니라 '읽는 사이에 실제 기록이 들어왔다' 또는 '아직 넣지 못한
+    // 기록이 남았다'는 뜻이다. 실패로 세면 정상 적립 중에 backoff 가 걸려
+    // 보정 주기가 6시간까지 벌어진다 → 짧게 재시도한다.
+    next.reason = res.reason;
+    await lpEnsureReconcileAlarm(LP_RECONCILE_RETRY_MIN);
+  } else {
+    next.consecutiveFailures = Number(state.consecutiveFailures || 0) + 1;
+    next.reason = res?.reason || "unknown";
+    const i = Math.min(
+      next.consecutiveFailures - 1,
+      LP_RECONCILE_BACKOFF_MIN.length - 1,
+    );
+    await lpEnsureReconcileAlarm(LP_RECONCILE_BACKOFF_MIN[i]);
+  }
+  try {
+    await chrome.storage.local.set({ [LP_RECONCILE_STATE_KEY]: next });
+  } catch {}
+  return res;
+}
+
+// 알람 등록 + 놓친 주기 보정.
+// ⚠ 절전·브라우저 종료 중에는 알람이 안 돈다. 시작할 때 마지막 성공으로부터
+//   한 주기가 지났으면 바로 한 번 맞춘다.
+async function lpBootReconcile() {
+  // ⚠ 전체 기능 OFF 면 아무것도 하지 않는다. 설정 로딩을 기다리지 않으면
+  //   꺼 둔 상태에서도 API 호출과 자동 기록이 일어난다.
+  await masterStateReady.catch(() => true);
+  if (!masterEnabled) return;
+  // ⚠ 이미 예약된 알람이 있으면 덮지 않는다. 덮으면 백오프가 60분으로 풀린다.
+  let alarm = null;
+  try {
+    alarm = await chrome.alarms.get(LP_RECONCILE_ALARM);
+  } catch {}
+  if (!alarm) await lpEnsureReconcileAlarm();
+  const state = await lpReconcileState();
+  const now = Date.now();
+  // ⚠ 워커가 깰 때마다 즉시 호출하면 백오프가 무의미해진다. 예약된 알람이
+  //   아직 안 왔거나, 마지막 시도가 한 주기 안이면 기다린다.
+  if (alarm && Number(alarm.scheduledTime) > now) return;
+  const lastAttempt = Number(state.lastAttemptAt || 0);
+  if (now - lastAttempt < LP_RECONCILE_PERIOD_MIN * 60 * 1000) return;
+  const last = Number(state.lastSuccessAt || 0);
+  if (now - last >= LP_RECONCILE_PERIOD_MIN * 60 * 1000) {
+    void lpRunScheduledReconcile();
+  }
+}
+
+void lpBootReconcile();
+chrome.runtime.onStartup.addListener(() => {
+  void lpBootReconcile();
+});
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (!masterEnabled) return;
+  if (alarm?.name === LP_RECONCILE_ALARM) {
+    void lpRunScheduledReconcile();
+    return;
+  }
   const channelId = lpChannelIdFromAlarm(alarm?.name);
   if (channelId) void lpCheckProgress(channelId);
 });
@@ -4458,9 +5779,227 @@ async function cafeFetchClipMetadata(clipId) {
   };
 }
 
+// 채팅 리캡은 채널·월별 키로 나뉜다. storage API에는 prefix 조회가 없어 리캡
+// 페이지가 매번 get(null)로 클립 캐시까지 읽지 않도록 계정별 카탈로그를 둔다.
+// content와 리캡 페이지가 동시에 쓰더라도 한 서비스 워커 큐에서 합쳐 유실을 막는다.
+const CHAT_RECAP_CATALOG_PREFIX = "chatRecapCatalog:";
+const CHAT_RECAP_ACCOUNT_RE = /^[0-9a-f]{32}$/i;
+const CHAT_RECAP_MONTH_RE = /^\d{4}-\d{2}$/;
+let chatRecapCatalogTail = Promise.resolve();
+
+function normalizeChatRecapCatalog(value) {
+  const channels = {};
+  const raw = value?.channels;
+  if (raw && typeof raw === "object") {
+    for (const [channelId, months] of Object.entries(raw)) {
+      if (!CHAT_RECAP_ACCOUNT_RE.test(channelId) || !Array.isArray(months)) {
+        continue;
+      }
+      channels[channelId.toLowerCase()] = [
+        ...new Set(months.map(String).filter((m) => CHAT_RECAP_MONTH_RE.test(m))),
+      ].sort();
+    }
+  }
+  return { v: 1, complete: value?.complete === true, channels };
+}
+
+function mutateChatRecapCatalog(accountId, apply) {
+  const task = chatRecapCatalogTail.catch(() => {}).then(async () => {
+    const key = `${CHAT_RECAP_CATALOG_PREFIX}${accountId}`;
+    const stored = (await chrome.storage.local.get(key))?.[key];
+    const catalog = normalizeChatRecapCatalog(stored);
+    const changed = apply(catalog);
+    if (changed === false) return catalog;
+    await chrome.storage.local.set({ [key]: catalog });
+    return catalog;
+  });
+  chatRecapCatalogTail = task.catch(() => {});
+  return task;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (message.type === "CHAT_RECAP_CATALOG") {
+    const accountId = String(message.accountId || "").toLowerCase();
+    if (!CHAT_RECAP_ACCOUNT_RE.test(accountId)) {
+      sendResponse?.({ ok: false, reason: "invalid-account" });
+      return false;
+    }
+    void mutateChatRecapCatalog(accountId, (catalog) => {
+      if (message.op === "REBUILD") {
+        const incoming = message.channels;
+        if (incoming && typeof incoming === "object") {
+          for (const [channelId, months] of Object.entries(incoming)) {
+            if (
+              !CHAT_RECAP_ACCOUNT_RE.test(channelId) ||
+              !Array.isArray(months)
+            ) {
+              continue;
+            }
+            const current = catalog.channels[channelId.toLowerCase()] || [];
+            catalog.channels[channelId.toLowerCase()] = [
+              ...new Set([
+                ...current,
+                ...months
+                  .map(String)
+                  .filter((month) => CHAT_RECAP_MONTH_RE.test(month)),
+              ]),
+            ].sort();
+          }
+        }
+        catalog.complete = true;
+        return true;
+      }
+      if (message.op !== "ADD") throw new Error("unknown-op");
+      const channelId = String(message.channelId || "").toLowerCase();
+      if (!CHAT_RECAP_ACCOUNT_RE.test(channelId)) {
+        throw new Error("invalid-channel");
+      }
+      const months = Array.isArray(message.months)
+        ? message.months
+            .map(String)
+            .filter((month) => CHAT_RECAP_MONTH_RE.test(month))
+        : [];
+      const current = catalog.channels[channelId] || [];
+      const next = [...new Set([...current, ...months])].sort();
+      if (
+        next.length === current.length &&
+        next.every((month, index) => month === current[index])
+      ) {
+        return false;
+      }
+      catalog.channels[channelId] = next;
+      return true;
+    })
+      .then(() => sendResponse?.({ ok: true }))
+      .catch((error) =>
+        sendResponse?.({ ok: false, reason: String(error?.message || error) }),
+      );
+    return true;
+  }
+
+  // 예측 대기 목록 변경(다중 탭 경합 방지).
+  if (message.type === "LP_AWAITING") {
+    // 베팅은 보유량에 먼저 반영되고 대기 목록·내역은 뒤따라 저장된다. 이 구간을
+    // 자동 보정이 통과하면 같은 베팅을 '기타 사용'으로 먼저 기록할 수 있다.
+    lpBeginWrite();
+    void (async () => {
+      try {
+        const { accountId, mismatch } = await lpAccountFor(message.accountHint);
+        if (!accountId) {
+          // 불일치는 사유를 구분해 알린다(호출부는 둘 다 재시도한다).
+          sendResponse?.({
+            ok: false,
+            reason: mismatch ? "account-mismatch" : "account-unknown",
+          });
+          return;
+        }
+        const p = message.payload || {};
+        const res = await lpMutateAwaiting((list) =>
+          message.op === "REMOVE"
+            ? lpRemoveAwaiting(list, p.predictionId, accountId)
+            : lpUpsertAwaiting(list, p.entry || {}, accountId),
+        );
+        sendResponse?.(
+          res.ok
+            ? { ok: true, changed: res.changed }
+            : { ok: false, reason: res.reason || "awaiting-write-failed" },
+        );
+      } catch (error) {
+        sendResponse?.({ ok: false, reason: String(error?.message || error) });
+      } finally {
+        lpEndWrite();
+      }
+    })();
+    return true;
+  }
+
+  // 보유량 맞추기. 내역 페이지 진입·수동 버튼·알람이 모두 이 하나를 쓴다.
+  if (message.type === "LP_RECONCILE") {
+    void (async () => {
+      try {
+        sendResponse?.(await lpReconcileOnce());
+      } catch (error) {
+        sendResponse?.({ ok: false, reason: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  // 통나무파워 내역 변경은 전부 여기로 모인다(단일 작성자).
+  // ⚠ 계정을 정하지 못하면 기록하지 않고 보류한다 — accountId 없이 넣으면
+  //   나중에 스냅샷 비교가 그 기록을 못 세어 같은 적립이 두 번 잡힌다.
+  if (message.type === "LP_WRITE") {
+    const op = String(message.op || "");
+    const run = LP_WRITE_OPS[op];
+    if (!run) {
+      sendResponse?.({ ok: false, reason: "unknown-op" });
+      return false;
+    }
+    // 계정 확인 전부터 '처리 중'으로 센다(보정이 이 틈에 끼어들지 않게).
+    lpBeginWrite();
+    void (async () => {
+      try {
+        const { accountId, verified, mismatch } = await lpAccountFor(
+          message.accountHint,
+        );
+        // 백업 불러오기는 파일에 담긴 계정 정보를 그대로 쓴다 → 계정 확인 불필요.
+        if (op === "IMPORT_LOG") {
+          const applied = await lpEnqueueWrite(() =>
+            lpMutateLog((list) => run(list, message.payload || {}, ""), true),
+          );
+          sendResponse?.({ ok: true, applied });
+          return;
+        }
+        if (!accountId) {
+          // ⚠ 불일치는 '계정을 모른다'와 다르다. 힌트가 API 와 어긋났으므로 그
+          //   힌트를 소유자로 박아 보류하면, 나중에 drain 이 검증 없이 그 계정에
+          //   기록한다 — 어느 계정에도 저장하지 않는다는 방침이 깨진다.
+          //   보류를 만들지 않고 호출부가 다시 시도하게 한다(재시도는 멱등).
+          if (mismatch) {
+            sendResponse?.({ ok: false, reason: "account-mismatch" });
+            return;
+          }
+          // 수동 작업은 사용자가 다시 시도할 수 있으므로 실패를 알린다.
+          if (op === "UPSERT_MANUAL_ENTRY" || op === "DELETE_MANUAL_ENTRY") {
+            sendResponse?.({ ok: false, reason: "account-unknown" });
+            return;
+          }
+          await lpQueuePending(op, message.payload, message.accountHint);
+          // ⚠ 성공으로 답하면 안 된다. 호출부가 '기록됨'으로 확정해 버려서
+          //   보류분이 영영 반영되지 않는다(예측 recorded, 스냅샷 이동).
+          sendResponse?.({
+            ok: false,
+            reason: "account-pending",
+            pending: true,
+          });
+          return;
+        }
+        // 이 요청 전용 컨텍스트. 동시 요청끼리 섞이지 않는다.
+        const ctx = { matched: true };
+        const applied = await lpEnqueueWrite(() =>
+          lpMutateLog((list) =>
+            run(list, message.payload || {}, accountId, ctx),
+          ),
+        );
+        // matched=false 면 대상이 없었다는 뜻 → 호출부가 재시도해야 한다.
+        sendResponse?.({
+          ok: ctx.matched,
+          applied,
+          verified,
+          matched: ctx.matched,
+          ...(ctx.matched ? {} : { reason: "no-target" }),
+        });
+      } catch (error) {
+        sendResponse?.({ ok: false, reason: String(error?.message || error) });
+      } finally {
+        lpEndWrite();
+      }
+    })();
+    return true; // 비동기 응답
   }
 
   // chrome:// URL 은 페이지에서 열 수 없다(링크·window.open 모두 차단). 확장에서만
@@ -4482,6 +6021,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "CHEESE_MASTER_SET") {
     masterEnabled = message.enabled !== false;
+    // ⚠ 꺼진 상태로 워커가 시작했으면 자동 보정 알람이 아예 없다. 다시 켤 때
+    //   복구하지 않으면 워커·브라우저를 재시작할 때까지 60분 감지가 멈춘다.
+    if (masterEnabled) void lpBootReconcile().catch(() => {});
     chrome.storage.local
       .set({ [MASTER_ENABLED_KEY]: masterEnabled })
       .then(() =>
@@ -4627,6 +6169,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     lpStartTracking({
       channelId: message.channelId,
       initialAmount: message.initialAmount,
+      accountHint: message.accountHint,
     })
       .then((status) => sendResponse({ status }))
       .catch(() => sendResponse({ status: null }));

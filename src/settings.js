@@ -23,6 +23,16 @@
   // 새 옵션을 추가하면 이 배열에도 그 키를 넣어야 로드된다(누락 시 그 옵션만 기본값으로
   // 뜰 뿐, 다른 값은 안전).
   const SETTINGS_STORAGE_KEYS = [
+    "cheeseSettingsPopupWidth",
+    "cheeseChatRecap",
+    "cheeseChatRecapRetentionDays",
+    "cheeseChatRecapChannelColors",
+    "cheeseChatRecapChannelColorsCustom",
+    "cheeseChatRecapChannelView",
+    "cheeseChatRecapCumulative",
+    "cheeseChatRecapDonScope",
+    "cheeseChatRecapWordSort",
+    "cheeseChatRecapWordType",
     "cheeseMasterEnabled",
     "cheeseGlobalScrollTopFab",
     "cheeseSettingsKnownFeatures",
@@ -218,6 +228,9 @@
     "cheeseSearchRerankPoolMax",
     "cheeseSearchRerankWeights",
     "cheeseSearchRerankDefaultSort",
+    "cheeseSearchLiveRerank",
+    "cheeseSearchLiveRerankDefaultSort",
+    "cheeseSearchLiveRerankWeights",
     "cheeseSearchResetOnReturn",
     "cheeseCategoryVideoFilter",
     "cheeseCategoryVideoCandidateLimit",
@@ -384,6 +397,107 @@
       });
     }
   }
+
+  // ── 팝업 폭 조절 ──────────────────────────────────────────────────────────
+  // 오른쪽 가장자리를 끌어 폭을 바꾸고, 값은 저장해 다음에도 유지한다.
+  // ⚠ 확장 팝업은 브라우저가 최대 800px 로 제한한다. 그보다 크게 잡아도
+  //   창은 800px 에서 멈추므로 상한을 맞춰 둔다.
+  const POPUP_WIDTH_KEY = "cheeseSettingsPopupWidth";
+  const POPUP_WIDTH_DEFAULT = 500;
+  const POPUP_WIDTH_MIN = 420;
+  const POPUP_WIDTH_MAX = 800;
+
+  function clampPopupWidth(px) {
+    const n = Math.round(Number(px));
+    if (!Number.isFinite(n)) return POPUP_WIDTH_DEFAULT;
+    return Math.min(POPUP_WIDTH_MAX, Math.max(POPUP_WIDTH_MIN, n));
+  }
+
+  // ⚠ chrome.storage 는 비동기라 첫 페인트 뒤에 값이 온다 → 폭이 한 번 튄다.
+  //   themeInit.js(head, 페인트 전 실행)가 읽을 수 있도록 localStorage 에도
+  //   함께 적는다. 정본은 chrome.storage, 이건 깜빡임 방지용 사본이다.
+  const POPUP_WIDTH_MIRROR = "cheeseSettingsPopupWidth";
+
+  function applyPopupWidth(px) {
+    document.documentElement.style.setProperty(
+      "--settings-popup-w",
+      `${clampPopupWidth(px)}px`,
+    );
+  }
+
+  // 두 저장소에 함께 적는다.
+  function savePopupWidth(px) {
+    const w = clampPopupWidth(px);
+    cachedStorageSet({ [POPUP_WIDTH_KEY]: w });
+    try {
+      localStorage.setItem(POPUP_WIDTH_MIRROR, String(w));
+    } catch {}
+  }
+
+  function setupPopupResize() {
+    // 탭 모드는 브라우저 창이 폭을 정한다 → 조절하지 않는다.
+    if (isSettingsTabView) return;
+    const handle = document.querySelector("[data-settings-resizer]");
+    if (!handle) return;
+
+    // 저장된 폭을 먼저 적용한다(프리페치 캐시에서 즉시 꺼낸다).
+    void (async () => {
+      try {
+        const saved = (await cachedStorageGet(POPUP_WIDTH_KEY))?.[
+          POPUP_WIDTH_KEY
+        ];
+        if (Number.isFinite(Number(saved))) {
+          applyPopupWidth(saved);
+          try {
+            localStorage.setItem(
+              POPUP_WIDTH_MIRROR,
+              String(clampPopupWidth(saved)),
+            );
+          } catch {}
+        }
+      } catch {}
+    })();
+
+    let startX = 0;
+    let startW = 0;
+    let pending = 0;
+
+    function onMove(e) {
+      // 오른쪽으로 끌면 넓어진다.
+      pending = clampPopupWidth(startW + (e.clientX - startX));
+      applyPopupWidth(pending);
+    }
+
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      handle.classList.remove("is-dragging");
+      document.documentElement.classList.remove("settings-resizing");
+      if (pending) savePopupWidth(pending);
+    }
+
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      startX = e.clientX;
+      startW =
+        document.documentElement.getBoundingClientRect().width ||
+        POPUP_WIDTH_DEFAULT;
+      pending = 0;
+      handle.classList.add("is-dragging");
+      document.documentElement.classList.add("settings-resizing");
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+
+    // 더블클릭하면 기본 폭으로 되돌린다(너무 좁혀 놓고 못 찾는 경우 대비).
+    handle.addEventListener("dblclick", () => {
+      applyPopupWidth(POPUP_WIDTH_DEFAULT);
+      savePopupWidth(POPUP_WIDTH_DEFAULT);
+    });
+  }
+
+  setupPopupResize();
 
   // 외부(치지직 탭 등)에서 값이 바뀌면 캐시에 반영.
   try {
@@ -876,6 +990,16 @@
     window.open(settingsUrl.toString(), "_blank", "noopener");
   });
 
+  // 채팅 리캡을 새 탭으로 연다.
+  document.getElementById("openChatRecap")?.addEventListener("click", () => {
+    const url = chrome.runtime.getURL("chatRecap.html");
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
+  });
+
   // 통나무파워 획득 내역을 새 탭으로 연다(수신함 탭·채팅 팝업과 같은 페이지).
   document.getElementById("openLogStats")?.addEventListener("click", () => {
     const url = chrome.runtime.getURL("logPowerStats.html");
@@ -1264,6 +1388,64 @@
   );
 
   // ── 채팅 시간 표시 형식·테마별 글자 색상 ───────────────────────────────────
+  // ── 채팅 리캡(내 채팅 기록) ───────────────────────────────────────────────
+  const CHAT_RECAP_ENABLED_KEY = "cheeseChatRecap";
+  const CHAT_RECAP_RETENTION_KEY = "cheeseChatRecapRetentionDays";
+
+  function bindChatRecapSettings() {
+    const toggle = document.querySelector("[data-chat-recap-enabled]");
+    const retentionItem = document.querySelector(
+      "[data-chat-recap-retention-item]",
+    );
+    const retentionButtons = Array.from(
+      document.querySelectorAll("[data-chat-recap-retention-value]"),
+    );
+    if (!toggle) return;
+
+    function reflectRetention(value) {
+      const v = String(Number(value) || 0);
+      retentionButtons.forEach((button) => {
+        const active = button.dataset.chatRecapRetentionValue === v;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    }
+
+    // 기록이 꺼져 있으면 보관 기간은 의미가 없다 → 잠근다.
+    function reflectAvailability() {
+      const disabled = !toggle.checked;
+      retentionButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+      retentionItem?.classList.toggle("is-locked", disabled);
+    }
+
+    void (async () => {
+      const data = await cachedStorageGet([
+        CHAT_RECAP_ENABLED_KEY,
+        CHAT_RECAP_RETENTION_KEY,
+      ]);
+      toggle.checked = data?.[CHAT_RECAP_ENABLED_KEY] === true; // 기본 꺼짐
+      reflectRetention(data?.[CHAT_RECAP_RETENTION_KEY]);
+      reflectAvailability();
+    })();
+
+    toggle.addEventListener("change", () => {
+      cachedStorageSet({ [CHAT_RECAP_ENABLED_KEY]: toggle.checked });
+      reflectAvailability();
+    });
+
+    retentionButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = Number(button.dataset.chatRecapRetentionValue) || 0;
+        cachedStorageSet({ [CHAT_RECAP_RETENTION_KEY]: value });
+        reflectRetention(value);
+      });
+    });
+  }
+
+  bindChatRecapSettings();
+
   const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
   const CHAT_TIME_COLORS_KEY = "cheeseChatTimeColors";
   const CHAT_TIME_COLORS_DEFAULT = Object.freeze({
@@ -5357,6 +5539,141 @@
       );
   }
 
+  // ── 통합검색 라이브 재정렬(전역, 기본 OFF) ────────────────────────────────
+  const SEARCH_LIVE_RERANK_KEY = "cheeseSearchLiveRerank";
+  const searchLiveRerankInput = document.querySelector(
+    "[data-search-live-rerank]",
+  );
+  if (searchLiveRerankInput) {
+    (async () => {
+      let enabled = false;
+      try {
+        const data = await cachedStorageGet(SEARCH_LIVE_RERANK_KEY);
+        enabled = data?.[SEARCH_LIVE_RERANK_KEY] === true;
+      } catch {}
+      searchLiveRerankInput.checked = enabled;
+    })();
+    searchLiveRerankInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [SEARCH_LIVE_RERANK_KEY]: searchLiveRerankInput.checked,
+        });
+      } catch {}
+    });
+  }
+  const SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY =
+    "cheeseSearchLiveRerankDefaultSort";
+  const searchLiveRerankSortButtons = Array.from(
+    document.querySelectorAll("[data-search-live-rerank-sort]"),
+  );
+  if (searchLiveRerankSortButtons.length) {
+    const normalizeLiveSort = (value) =>
+      ["score", "viewers", "recent", "original"].includes(value)
+        ? value
+        : "score";
+    const reflectLiveSort = (value) => {
+      const normalized = normalizeLiveSort(value);
+      searchLiveRerankSortButtons.forEach((button) => {
+        const active = button.dataset.searchLiveRerankSort === normalized;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    };
+    (async () => {
+      let value = "score";
+      try {
+        const data = await cachedStorageGet(
+          SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY,
+        );
+        value = normalizeLiveSort(data?.[SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY]);
+      } catch {}
+      reflectLiveSort(value);
+    })();
+    searchLiveRerankSortButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = normalizeLiveSort(button.dataset.searchLiveRerankSort);
+        reflectLiveSort(value);
+        try {
+          cachedStorageSet({
+            [SEARCH_LIVE_RERANK_DEFAULT_SORT_KEY]: value,
+          });
+        } catch {}
+      });
+    });
+  }
+  const SEARCH_LIVE_RERANK_WEIGHTS_KEY = "cheeseSearchLiveRerankWeights";
+  const SEARCH_LIVE_RERANK_WEIGHT_DEFAULTS = {
+    rel: 45,
+    channel: 20,
+    viewers: 25,
+    verified: 5,
+    recent: 5,
+  };
+  const searchLiveRerankWeightInputs = {
+    rel: document.querySelector("[data-search-live-rerank-w-rel]"),
+    channel: document.querySelector("[data-search-live-rerank-w-channel]"),
+    viewers: document.querySelector("[data-search-live-rerank-w-viewers]"),
+    verified: document.querySelector("[data-search-live-rerank-w-verified]"),
+    recent: document.querySelector("[data-search-live-rerank-w-recent]"),
+  };
+  function normalizeLiveRerankWeights(weights) {
+    const saved = weights && typeof weights === "object" ? weights : null;
+    const normalized = { ...SEARCH_LIVE_RERANK_WEIGHT_DEFAULTS };
+    if (saved) {
+      for (const key of Object.keys(normalized)) {
+        const weight = Number(saved[key]);
+        if (Number.isFinite(weight)) {
+          normalized[key] = Math.min(100, Math.max(0, Math.round(weight)));
+        }
+      }
+    }
+    return Object.values(normalized).every((weight) => weight === 0)
+      ? { ...SEARCH_LIVE_RERANK_WEIGHT_DEFAULTS }
+      : normalized;
+  }
+  if (Object.values(searchLiveRerankWeightInputs).some(Boolean)) {
+    const reflectLiveWeights = (weights) => {
+      const normalized = normalizeLiveRerankWeights(weights);
+      for (const [key, input] of Object.entries(searchLiveRerankWeightInputs)) {
+        if (input) input.value = String(normalized[key]);
+      }
+      return normalized;
+    };
+    (async () => {
+      let saved = {};
+      try {
+        const data = await cachedStorageGet(SEARCH_LIVE_RERANK_WEIGHTS_KEY);
+        saved = data?.[SEARCH_LIVE_RERANK_WEIGHTS_KEY] || {};
+      } catch {}
+      reflectLiveWeights(saved);
+    })();
+    const saveLiveWeights = (weights = null) => {
+      const raw =
+        weights ||
+        Object.fromEntries(
+          Object.entries(searchLiveRerankWeightInputs).map(([key, input]) => [
+            key,
+            input?.value,
+          ]),
+        );
+      const normalized = reflectLiveWeights(raw);
+      try {
+        cachedStorageSet({
+          [SEARCH_LIVE_RERANK_WEIGHTS_KEY]: normalized,
+        });
+      } catch {}
+    };
+    for (const input of Object.values(searchLiveRerankWeightInputs)) {
+      input?.addEventListener("change", () => saveLiveWeights());
+      input?.addEventListener("blur", () => saveLiveWeights());
+    }
+    document
+      .querySelector("[data-search-live-rerank-weights-reset]")
+      ?.addEventListener("click", () =>
+        saveLiveWeights(SEARCH_LIVE_RERANK_WEIGHT_DEFAULTS),
+      );
+  }
+
   // ── 통합검색 동영상 재정렬(전역, 기본 OFF) ────────────────────────────────
   const SEARCH_RERANK_KEY = "cheeseSearchRerank";
   const searchRerankInput = document.querySelector("[data-search-rerank]");
@@ -7732,7 +8049,16 @@
     "cheeseLogPowerReadAt",
     "cheeseLogPowerStatsExplorerKnownIds",
     "cheeseLogPowerStatsExplorerUnreadIds",
+    "chatRecapEmojis",
+    "chatRecapLockedEmojis",
+    "chatRecapImportedVideos",
+    "chatRecapVerifiedVideosV2",
+    "cheeseChatRecapPodiumAchievements",
   ]);
+  const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
+    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}|chatRecapCatalog:[0-9a-f]{32})$/i;
+  const isSettingsFullDataKey = (key) =>
+    SETTINGS_FULL_DATA_KEYS.has(key) || CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
   const SETTINGS_MEDIA_KEY_PATTERN =
     /^(?:audioMixer|videoFilter):[0-9a-f]{32}$/i;
   // NEW 읽음 상태는 설치별 UI 메타데이터이므로 설정 JSON으로 다른 브라우저에 옮기지 않는다.
@@ -7995,9 +8321,9 @@
         // 지불한다. cache:* 등 런타임 캐시는 payload에 넣지 않는다.
         const snapshot = await chrome.storage.local.get(null);
         const storage = {};
-        SETTINGS_FULL_DATA_KEYS.forEach((key) => {
-          if (snapshot[key] === undefined) return;
-          const cloned = cloneSafeTransferValue(snapshot[key]);
+        Object.entries(snapshot).forEach(([key, value]) => {
+          if (!isSettingsFullDataKey(key)) return;
+          const cloned = cloneSafeTransferValue(value);
           if (cloned !== undefined) storage[key] = cloned;
         });
         payload.userData = {
@@ -8087,7 +8413,7 @@
         !Array.isArray(userDataStorage)
       ) {
         for (const [key, value] of Object.entries(userDataStorage)) {
-          if (!SETTINGS_FULL_DATA_KEYS.has(key)) continue;
+          if (!isSettingsFullDataKey(key)) continue;
           const normalized =
             key === CLIP_VAULT_KEY
               ? normalizeTransferClipVault(value)
@@ -8140,8 +8466,34 @@
         imported[CLIP_VAULT_ACCOUNT_IDS_KEY] = [...accountIds];
       }
 
+      // ⚠ 통나무파워 내역은 background 가 단일 작성자다. 여기서 통째로 덮으면
+      //   그때 진행 중이던 5분 묶음·예측 기록을 날린다 → 큐로 보낸다.
+      const importedLog = imported.cheeseLogPowerLog;
+      let logImportOk = null; // null = 불러올 내역이 없었다
+      if (Array.isArray(importedLog)) {
+        delete imported.cheeseLogPowerLog;
+        let logOk = false;
+        // 최종 안내에서 쓰려고 바깥 스코프에 남긴다.
+        try {
+          const res = await chrome.runtime?.sendMessage?.({
+            type: "LP_WRITE",
+            op: "IMPORT_LOG",
+            payload: { entries: importedLog },
+          });
+          logOk = res?.ok === true;
+          logImportOk = logOk;
+        } catch {}
+        // ⚠ 여기서 토스트를 띄우면 아래 성공 안내가 곧바로 덮는다.
+        //   캐시에도 넣지 않는다 — 저장 안 된 내역이 화면에 보이면 안 된다.
+        if (!logOk) delete imported.cheeseLogPowerLog;
+      }
       await chrome.storage.local.set(imported);
-      if (storageCacheData) Object.assign(storageCacheData, imported);
+      if (storageCacheData) {
+        Object.assign(storageCacheData, imported);
+        if (Array.isArray(importedLog) && logImportOk) {
+          storageCacheData.cheeseLogPowerLog = importedLog;
+        }
+      }
 
       const theme = payload?.appearance?.theme;
       if (theme === "dark" || theme === "light") {
@@ -8157,8 +8509,10 @@
       }
 
       settingsToast(
-        "설정을 불러왔습니다. 열린 페이지에서 새로고침을 선택해 주세요.",
-        "ok",
+        logImportOk === false
+          ? "설정은 불러왔지만 통나무파워 내역은 저장하지 못했습니다. 다시 시도해 주세요."
+          : "설정을 불러왔습니다. 열린 페이지에서 새로고침을 선택해 주세요.",
+        logImportOk === false ? "error" : "ok",
       );
       try {
         chrome.runtime.sendMessage({

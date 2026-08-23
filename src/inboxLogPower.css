@@ -448,3 +448,14 @@ html.cheese-inbox-logpower-active #root {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* 보유량 비교로 찾은 적립(감지 시각) */
+.cheese-inbox-logpower-auto {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--lp-subtle);
+  font-size: 10px;
+  white-space: nowrap;
+}

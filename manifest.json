@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "치즈 플래터 - Chzzk Platter",
   "short_name": "ChzzkPlatter",
-  "version": "1.42.0",
+  "version": "1.43.0",
   "description": "치지직 검색, 플레이어, 오디오 믹서, 채팅, 팔로잉, 레이아웃을 한 접시에 담은 통합 편의 확장 프로그램",
   "icons": {
     "16": "icons/icon-16.png",
@@ -210,6 +210,9 @@
         "logPowerStats.html",
         "src/logPowerStats.css",
         "src/logPowerStats.js",
+        "chatRecap.html",
+        "src/chatRecap.css",
+        "src/chatRecap.js",
         "src/chart.min.js",
         "src/coloris.min.js",
         "src/coloris.min.css"

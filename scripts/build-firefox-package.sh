@@ -35,6 +35,7 @@ copy_path "icons"
 copy_path "popup.html"
 copy_path "settings.html"
 copy_path "logPowerStats.html"
+copy_path "chatRecap.html"
 copy_path "README.md"
 copy_path "LICENSE"
 copy_path "THIRD_PARTY_NOTICES.md"
@@ -44,6 +45,7 @@ copy_path "searching-animation.svg"
 copy_path "loading.svg"
 
 patch -s -p1 -d "$FIREFOX_DIR" < "$ROOT_DIR/scripts/firefox-screenshot-download.patch"
+find "$FIREFOX_DIR" -name '*.orig' -delete
 
 ruby -rjson -e '
   manifest = JSON.parse(File.read(ARGV[0]))

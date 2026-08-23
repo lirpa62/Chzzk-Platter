@@ -939,8 +939,7 @@ body {
   background: var(--popup-soft-bg);
 }
 
-.lps-channel-list img,
-.lps-ch-blank {
+.lps-channel-list img {
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -1618,8 +1617,10 @@ body {
   width: 18px;
   height: 18px;
   background: var(--lps-folder-color, var(--popup-muted));
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E") no-repeat center / contain;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E") no-repeat center / contain;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
 }
 
 .lps-subgroup-head[aria-expanded="true"] .lps-folder-icon {
@@ -1672,7 +1673,10 @@ body {
   top: 50%;
 }
 
-.lps-subgroup-content > .lps-subgroup-list > .lps-subgroup > .lps-subgroup-head {
+.lps-subgroup-content
+  > .lps-subgroup-list
+  > .lps-subgroup
+  > .lps-subgroup-head {
   padding-left: 14px;
 }
 
@@ -2141,11 +2145,7 @@ body {
     var(--popup-surface)
   );
   box-shadow: inset 0 0 0 1px
-    color-mix(
-      in srgb,
-      var(--lps-calendar-day-accent) 34%,
-      transparent
-    );
+    color-mix(in srgb, var(--lps-calendar-day-accent) 34%, transparent);
 }
 
 .lps-calendar-day.is-net-positive {
@@ -2190,13 +2190,11 @@ body {
   color: #fff;
 }
 
-.lps-calendar-day:nth-child(7n + 1):not(.is-today)
-  .lps-calendar-day-number {
+.lps-calendar-day:nth-child(7n + 1):not(.is-today) .lps-calendar-day-number {
   color: #d1495b;
 }
 
-.lps-calendar-day:nth-child(7n):not(.is-today)
-  .lps-calendar-day-number {
+.lps-calendar-day:nth-child(7n):not(.is-today) .lps-calendar-day-number {
   color: #3976b8;
 }
 
@@ -3202,4 +3200,35 @@ button[aria-busy="true"] {
   color: var(--popup-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 보유량 비교로 찾은 기록. 시각이 실제 획득 시점이 아님을 알린다. */
+.lps-auto {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--popup-soft-bg);
+  color: var(--popup-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 프로필이 없는 채널의 기본 프로필. 라이트/다크 두 장을 넣고 여기서 고른다
+   (JS 로 한 장만 고르면 테마를 바꿔도 다시 그리지 않는 목록이 옛 이미지로 남는다). */
+.lps-default-profile {
+  border-radius: 50%;
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+
+.lps-default-profile-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .lps-default-profile-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .lps-default-profile-dark {
+  display: inline-block;
 }

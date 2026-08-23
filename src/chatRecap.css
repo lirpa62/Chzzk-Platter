@@ -1,0 +1,2216 @@
+/* 치즈 플래터 - 채팅 리캡
+   레이아웃 뼈대(.lps-shell / .lps-header)는 logPowerStats.css 를 그대로 쓰고,
+   여기서는 리캡 전용 블록만 정의한다. 색은 popup.css 의 토큰을 따른다. */
+
+.crc-empty {
+  border: 1px dashed var(--popup-border);
+  border-radius: 12px;
+  color: var(--popup-muted);
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+/* ── 요약 카드 ───────────────────────────────────────────────────────────── */
+.crc-summary {
+  display: grid;
+  /* auto-fit + minmax(0,…) 로 좁은 창에서도 칸이 넘치지 않게 한다. */
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.crc-stat {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.crc-stat-label {
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.crc-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.crc-stat-word {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.crc-stat-word .crc-emoji,
+.crc-stat-word .crc-emoji-locked {
+  flex: none;
+}
+
+/* 날짜는 숫자보다 길어 같은 크기로 두면 줄바꿈이 지저분해진다. */
+.crc-stat-date {
+  font-size: 15px;
+}
+
+.crc-stat-sub {
+  color: var(--popup-muted);
+  font-size: 11px;
+}
+
+/* ── 공통 섹션 ───────────────────────────────────────────────────────────── */
+.crc-section {
+  margin-bottom: 28px;
+}
+
+.crc-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.crc-section-desc {
+  color: var(--popup-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+/* ── 채널별 목록 ─────────────────────────────────────────────────────────── */
+.crc-channels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 줄 전체가 버튼이다(눌러서 채널 요약을 편다). li 는 감싸기만 한다. */
+.crc-channels > li {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.14s ease;
+}
+
+.crc-channel {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  display: grid;
+  /* 순위 | 프로필 | 채널 정보 | 개수·비율 | 펼치기. 막대는 둘째 줄에서
+     채널 정보와 수치 아래를 이어 빈 가운데 공간을 없앤다. */
+  grid-template-columns: 28px 36px minmax(0, 1fr) auto 18px;
+  grid-template-rows: auto 6px;
+  gap: 9px 12px;
+  padding: 12px 14px;
+}
+
+.crc-channel-rank {
+  align-items: center;
+  align-self: center;
+  background: var(--popup-soft-bg);
+  border-radius: 999px;
+  color: var(--popup-muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  grid-row: 1 / 3;
+  height: 24px;
+  justify-content: center;
+  text-align: center;
+  width: 24px;
+}
+
+.crc-channels > li:nth-child(1) .crc-channel-rank {
+  background: color-mix(in srgb, #d1a21f 15%, transparent);
+  color: #a47b08;
+}
+
+.crc-channels > li:nth-child(2) .crc-channel-rank {
+  background: color-mix(in srgb, #9da1aa 17%, transparent);
+  color: #757a84;
+}
+
+.crc-channels > li:nth-child(3) .crc-channel-rank {
+  background: color-mix(in srgb, #b9784d 15%, transparent);
+  color: #965c36;
+}
+
+.crc-channel-avatar-wrap {
+  align-self: center;
+  background: var(--popup-soft-bg);
+  border-radius: 50%;
+  grid-row: 1 / 3;
+  height: 36px;
+  overflow: hidden;
+  position: relative;
+  width: 36px;
+}
+
+.crc-channel-avatar-wrap > img {
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+  width: 100%;
+}
+
+.crc-channel-avatar-wrap.has-image > .crc-default-profile {
+  display: none !important;
+}
+
+.crc-channel-avatar {
+  z-index: 1;
+}
+
+.crc-channel-avatar.is-empty {
+  visibility: hidden;
+}
+
+.crc-channel-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.crc-channel-name {
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-channel-bar {
+  background: var(--popup-soft-bg);
+  border-radius: 999px;
+  grid-column: 3 / 5;
+  grid-row: 2;
+  height: 5px;
+  overflow: hidden;
+}
+
+.crc-channel-bar > i {
+  background: var(--popup-brand);
+  display: block;
+  height: 100%;
+}
+
+/* 개수와 비율을 한 칸에 위아래로 쌓는다(가로로 늘어놓으면 행이 길어진다). */
+.crc-channel-figures {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 68px;
+  text-align: right;
+}
+
+.crc-channel-count {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.crc-channel-share {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-style: normal;
+  margin-top: 2px;
+}
+
+.crc-channel-meta {
+  align-items: center;
+  color: var(--popup-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 4px 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.crc-channel-meta > span + span::before {
+  color: var(--popup-border);
+  content: "·";
+  margin-right: 10px;
+}
+
+.crc-channel-first-chats {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  min-width: 0;
+  width: fit-content;
+}
+
+.crc-channel-first-chats .crc-first-chat {
+  align-items: center;
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 12%,
+    var(--popup-surface)
+  );
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.crc-channel-first-chats .crc-first-chat > em {
+  color: var(--popup-brand-strong);
+  flex: none;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.crc-channel-first-chats .crc-first-chat-message {
+  color: var(--popup-muted);
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-channel-chevron {
+  color: var(--popup-muted);
+  grid-row: 1 / 3;
+  transition: transform 0.14s ease;
+}
+
+.crc-channel[aria-expanded="true"] .crc-channel-chevron {
+  transform: rotate(90deg);
+}
+
+@media (max-width: 640px) {
+  .crc-channel {
+    grid-template-columns: 24px 32px minmax(0, 1fr) auto 18px;
+    gap: 8px 10px;
+    padding: 11px 12px;
+  }
+
+  .crc-channel-avatar-wrap {
+    height: 32px;
+    width: 32px;
+  }
+
+  .crc-channel-bar {
+    grid-column: 3 / 5;
+  }
+
+  .crc-channel-figures {
+    min-width: 58px;
+  }
+}
+
+/* 섹션 제목 + 오른쪽 토글 */
+.crc-section-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.crc-chart-wrap {
+  height: 320px;
+  position: relative;
+}
+
+/* 요일 비중(폴라) + 히트맵을 나란히. 좁으면 세로로 쌓는다. */
+.crc-when {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 270px) minmax(0, 1fr);
+}
+
+@media (max-width: 720px) {
+  .crc-when {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.crc-polar-wrap {
+  height: 230px;
+  position: relative;
+}
+
+/* ── 히트맵(요일 × 시간대) ───────────────────────────────────────────────── */
+.crc-heatmap {
+  /* 25칸 = 요일 라벨 + 24시간. 좁아지면 가로 스크롤(세로로 찌그러뜨리지 않는다). */
+  display: grid;
+  grid-template-columns: 28px repeat(24, minmax(14px, 1fr));
+  gap: 3px;
+  overflow-x: auto;
+  padding-right: 4px;
+  padding-bottom: 4px;
+}
+
+.crc-heat-label {
+  align-items: center;
+  color: var(--popup-muted);
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  justify-content: center;
+}
+
+.crc-heat-hour {
+  color: var(--popup-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.crc-heat-cell {
+  aspect-ratio: 1;
+  background: var(--popup-soft-bg);
+  border-radius: 3px;
+  min-height: 14px;
+}
+
+/* 채팅 수에 따라 4단계로 진해진다. */
+.crc-heat-cell[data-level="1"] {
+  background: color-mix(in srgb, var(--popup-brand) 28%, transparent);
+}
+.crc-heat-cell[data-level="2"] {
+  background: color-mix(in srgb, var(--popup-brand) 52%, transparent);
+}
+.crc-heat-cell[data-level="3"] {
+  background: color-mix(in srgb, var(--popup-brand) 76%, transparent);
+}
+.crc-heat-cell[data-level="4"] {
+  background: var(--popup-brand);
+}
+
+/* ── 자주 쓴 말 ──────────────────────────────────────────────────────────── */
+.crc-words {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.crc-word {
+  align-items: center;
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  font-size: 13px;
+  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-width: 0;
+  padding: 11px 12px;
+  transition:
+    background 0.14s,
+    border-color 0.14s,
+    transform 0.14s;
+}
+
+.crc-word:not(.crc-word-empty):hover,
+.crc-word:not(.crc-word-empty):focus-visible {
+  background: color-mix(in srgb, var(--popup-brand) 5%, var(--popup-surface));
+  border-color: color-mix(in srgb, var(--popup-brand) 58%, var(--popup-border));
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.crc-word-empty {
+  color: var(--popup-muted);
+  cursor: default;
+  display: block;
+  grid-column: 1 / -1;
+  padding: 24px;
+  text-align: center;
+}
+
+.crc-word-rank {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border-radius: 50%;
+  color: var(--popup-muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.crc-word:is([data-rank="1"], [data-rank="2"], [data-rank="3"]) {
+  background: color-mix(
+    in srgb,
+    var(--crc-word-rank-color) 6%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-word-rank-color) 45%,
+    var(--popup-border)
+  );
+}
+
+.crc-word[data-rank="1"] {
+  --crc-word-rank-color: #d1a21f;
+}
+
+.crc-word[data-rank="2"] {
+  --crc-word-rank-color: #9da1aa;
+}
+
+.crc-word[data-rank="3"] {
+  --crc-word-rank-color: #b9784d;
+}
+
+.crc-word:is([data-rank="1"], [data-rank="2"], [data-rank="3"]) .crc-word-rank {
+  background: color-mix(
+    in srgb,
+    var(--crc-word-rank-color) 18%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--crc-word-rank-color) 62%, var(--popup-border));
+  box-shadow: 0 1px 4px
+    color-mix(in srgb, var(--crc-word-rank-color) 20%, transparent);
+  color: color-mix(in srgb, var(--crc-word-rank-color) 72%, var(--popup-text));
+}
+
+.crc-word:is([data-rank="1"], [data-rank="2"], [data-rank="3"])
+  .crc-word-track
+  > i {
+  background: var(--crc-word-rank-color);
+}
+
+.crc-word-body {
+  min-width: 0;
+}
+
+.crc-word-head,
+.crc-word-meta {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.crc-word-head {
+  gap: 12px;
+  height: 20px;
+}
+
+.crc-word-head b {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-word-head strong {
+  flex: none;
+  font-size: 12px;
+}
+
+.crc-word-count {
+  align-items: flex-end;
+  display: inline-flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.crc-word-count em {
+  background: color-mix(in srgb, var(--popup-brand) 11%, transparent);
+  border-radius: 999px;
+  color: var(--popup-brand-strong);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+
+.crc-word-track {
+  background: var(--popup-soft-bg);
+  border-radius: 3px;
+  display: block;
+  height: 6px;
+  margin: 8px 0 6px;
+  overflow: hidden;
+}
+
+.crc-word-track > i {
+  background: var(--popup-brand);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  width: var(--crc-word-width);
+}
+
+.crc-word-meta {
+  color: var(--popup-muted);
+  font-size: 11px;
+  gap: 8px;
+}
+
+.crc-word-activity {
+  margin-top: 3px;
+}
+
+.crc-word-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-word-meta .is-all-channels {
+  color: var(--popup-brand-strong);
+  font-weight: 700;
+}
+
+.crc-word-overview {
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.crc-word-overview:empty {
+  display: none;
+}
+
+.crc-word-overview > div {
+  background: var(--popup-surface);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: 58px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.crc-word-overview span {
+  color: var(--popup-muted);
+  font-size: 11px;
+}
+
+.crc-word-overview strong {
+  align-items: center;
+  display: flex;
+  font-size: 14px;
+  gap: 5px;
+  height: 20px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-word-overview strong .crc-emoji,
+.crc-word-overview strong .crc-emoji-locked {
+  flex: none;
+}
+
+@media (max-width: 1100px) {
+  .crc-words {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .crc-words {
+    grid-template-columns: 1fr;
+  }
+
+  .crc-word-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── 다시보기 가져오기 팝업 ──────────────────────────────────────────────── */
+.crc-modal {
+  align-items: center;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 100;
+}
+
+.crc-modal[hidden] {
+  display: none;
+}
+
+/* ⚠ 클래스만 붙어 있고 규칙이 없었다 → 상세 팝업이 600px 그대로라 내용에 비해
+   창이 넓었다(제보). 진행·상세처럼 내용이 적은 모달은 좁게 쓴다. */
+.crc-modal-narrow {
+  width: min(420px, 100%);
+}
+
+.crc-modal-box {
+  background: var(--popup-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 35%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* 화면이 작아도 넘치지 않게: 내용은 목록에서만 스크롤한다. */
+  max-height: min(680px, calc(100vh - 40px));
+  padding: 18px 20px;
+  width: min(600px, 100%);
+}
+
+.crc-modal-box.crc-modal-narrow {
+  width: min(540px, 100%);
+}
+
+/* 검색 결과나 선택한 채널 수가 달라져도 창 전체가 위아래로 움직이지 않게 한다.
+   남는 높이는 두 채널 목록이 나눠 쓰고 목록 안에서만 스크롤한다. */
+.crc-import-modal-box {
+  box-sizing: border-box;
+  height: min(680px, calc(100vh - 40px));
+  height: min(680px, calc(100dvh - 40px));
+}
+
+.crc-import-modal-box .crc-modal-panes {
+  flex: 1 1 auto;
+}
+
+.crc-import-modal-box .crc-modal-list-wrap {
+  overflow: hidden;
+}
+
+.crc-import-modal-box .crc-modal-list {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.crc-modal-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.crc-modal-head strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.crc-info-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crc-info-title-wrap > span {
+  color: var(--popup-brand-strong);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.crc-info-title-wrap > strong {
+  align-items: center;
+  display: flex;
+  font-size: 17px;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-info-title-wrap > strong .crc-emoji,
+.crc-info-title-wrap > strong .crc-emoji-locked {
+  flex: none;
+}
+
+.crc-modal-head button {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 4px;
+}
+
+.crc-modal-head button:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+.crc-modal-desc {
+  color: var(--popup-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.crc-modal-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.crc-radio {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.crc-modal-limit {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+
+.crc-modal-limit select {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  color: var(--popup-text);
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+.crc-modal-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0; /* 부모 flex 안에서 목록이 줄어들 수 있게 */
+}
+
+.crc-modal-search {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  color: var(--popup-text);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.crc-modal-list {
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  list-style: none;
+  margin: 0;
+  max-height: 260px;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.crc-modal-list li {
+  border-radius: 8px;
+}
+
+.crc-modal-loading {
+  color: var(--popup-muted);
+  font-size: 13px;
+  padding: 14px;
+  text-align: center;
+}
+
+.crc-follow-item {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 7px 10px;
+}
+
+.crc-follow-item:hover {
+  background: var(--popup-soft-bg);
+}
+
+.crc-follow-item img {
+  border-radius: 50%;
+  flex: none;
+  height: 26px;
+  object-fit: cover;
+  width: 26px;
+}
+
+/* ⚠ 자손 선택자(span)로 두면 안쪽 .crc-name-text 까지 flex:1 이 걸려
+   이름이 남는 폭을 다 먹고 배지가 행 끝으로 밀린다(제보).
+   직계 자식만 고르고, 말줄임은 안쪽 텍스트가 담당한다.
+   ⚠ 프로필 칸(.crc-row-avatar)도 직계 span 이라 여기 걸리면 함께 늘어나
+   프로필과 이름 사이가 벌어진다(제보) → 제외한다. flex:1 은 '이름 칸이 남는
+   폭을 채워 배지를 이름 옆에 붙인다'는 뜻이므로 이름 칸에만 있어야 한다. */
+.crc-follow-item > span:not(.crc-row-avatar) {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.crc-modal-progress {
+  color: var(--popup-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.crc-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.crc-btn,
+.crc-btn-ghost {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+}
+
+.crc-btn {
+  background: var(--popup-brand);
+  border: 1px solid var(--popup-brand);
+  color: #fff;
+}
+
+.crc-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.crc-btn-ghost {
+  background: none;
+  border: 1px solid var(--popup-border);
+  color: var(--popup-text);
+}
+
+/* 리캡 목록의 이모티콘. 글자와 나란히 놓이도록 아래로 살짝 내린다. */
+img.crc-emoji {
+  display: inline-block;
+  object-fit: contain;
+  vertical-align: -5px;
+}
+
+/* 이름 + 인증 마크. 이름만 줄이고 배지는 항상 보이게 한다.
+   ⚠ flex 컨테이너 자체에는 ellipsis 가 걸리지 않는다 → 안쪽 텍스트 span 에 건다. */
+.crc-channel-name,
+.crc-follow-item > span:not(.crc-row-avatar) {
+  display: inline-flex;
+  /* 이름 + 배지를 왼쪽에 붙인다(남는 폭이 있어도 배지가 밀리지 않게). */
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.crc-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-channel-name > .lps-mark,
+.crc-follow-item > span > .lps-mark {
+  flex: none;
+}
+
+/* ── 채널 선택 2단 구성 ──────────────────────────────────────────────────── */
+.crc-modal-panes {
+  display: grid;
+  /* 좁은 창에서는 세로로 쌓는다(가로로 두면 목록이 너무 좁아진다). */
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px;
+  min-height: 0;
+}
+
+.crc-picked-head {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: space-between;
+  /* 검색창과 높이를 맞춰 두 목록의 위쪽 선이 어긋나지 않게 한다. */
+  min-height: 35px;
+}
+
+.crc-clear {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.crc-clear:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+.crc-clear:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 가져오는 중인 채널은 해제할 수 없다(작업이 이미 그 채널을 향해 돈다). */
+.crc-follow-item.is-locked {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.crc-follow-item.is-locked input {
+  cursor: default;
+}
+
+/* 지금 수집 중인 채널을 눈에 띄게 */
+.crc-follow-item.is-active {
+  background: color-mix(in srgb, var(--popup-brand) 14%, transparent);
+}
+
+.crc-item-state {
+  color: var(--popup-muted);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── 진행 막대 ───────────────────────────────────────────────────────────── */
+.crc-progressbar[hidden] {
+  display: none;
+}
+
+.crc-progressbar-track {
+  background: var(--popup-soft-bg);
+  border-radius: 999px;
+  height: 8px;
+  /* 핸들(프로필)이 위아래로 삐져나오므로 여백을 준다. */
+  margin: 12px 14px;
+  position: relative;
+}
+
+.crc-progressbar-fill {
+  background: var(--popup-brand);
+  border-radius: 999px;
+  height: 100%;
+  transition: width 0.3s ease;
+  width: 0;
+}
+
+.crc-progressbar-handle {
+  border: 2px solid var(--popup-bg);
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 25%);
+  height: 28px;
+  left: 0;
+  object-fit: cover;
+  position: absolute;
+  top: 50%;
+  /* left 는 0~100% 로 움직이고, 자기 폭의 절반만큼 되돌려 가운데를 맞춘다. */
+  transform: translate(-50%, -50%);
+  transition: left 0.3s ease;
+  width: 28px;
+}
+
+.crc-progressbar-handle[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crc-progressbar-fill,
+  .crc-progressbar-handle {
+    transition: none;
+  }
+
+  .crc-word {
+    transition: none;
+  }
+
+  .crc-word:not(.crc-word-empty):hover,
+  .crc-word:not(.crc-word-empty):focus-visible {
+    transform: none;
+  }
+}
+
+/* 구독자 전용(잠긴) 이모티콘. 유료 기능이라 이미지를 보여 주지 않고,
+   무엇이었는지만 알 수 있게 키를 칩으로 표시한다. */
+.crc-emoji-locked {
+  background: var(--popup-soft-bg);
+  border: 1px dashed var(--popup-border);
+  border-radius: 6px;
+  color: var(--popup-muted);
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 0 5px;
+  text-decoration: none;
+  vertical-align: -2px;
+}
+
+/* 채널명이 들어가는 카드 값. 숫자보다 길어 같은 크기면 넘친다. */
+.crc-stat-name {
+  align-items: center;
+  display: flex;
+  font-size: 15px;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 프로필–이름 사이의 6px 은 적당하지만 이름–배지 사이로는 넓다 → 배지만 좁힌다. */
+.crc-stat-name > .crc-stat-mark {
+  margin-left: -2px;
+}
+
+/* 요약 카드 안의 채널 프로필 */
+.crc-stat-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 20px;
+  object-fit: cover;
+  width: 20px;
+}
+
+.crc-stat-avatar[hidden] {
+  display: none;
+}
+
+/* 이름만 줄이고 뒤 문구는 살린다(flex 컨테이너엔 ellipsis 가 안 걸린다). */
+.crc-stat-channel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* 부제(작은 글씨) 안에서도 프로필을 쓴다 → 크기를 줄인다. */
+.crc-stat-sub {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.crc-stat-sub .crc-stat-avatar {
+  height: 16px;
+  width: 16px;
+}
+
+.crc-stat-sub .crc-stat-channel {
+  font-weight: 600;
+}
+
+.crc-stat-date-prefix {
+  flex: none;
+}
+
+.crc-summary[hidden] {
+  display: none;
+}
+
+.crc-channel:hover {
+  background: var(--popup-soft-bg);
+}
+
+.crc-channel[aria-expanded="true"] {
+  background: var(--popup-soft-bg);
+}
+
+/* 펼쳐진 채널 요약 */
+.crc-channel-detail {
+  border-top: 1px solid var(--popup-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 12px 14px;
+}
+
+.crc-detail-item {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+}
+
+.crc-detail-item > span {
+  color: var(--popup-muted);
+  font-size: 12px;
+}
+
+.crc-detail-item > strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.crc-detail-first-chats {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.crc-detail-first-chats .crc-first-chat {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 12%,
+    var(--popup-surface)
+  );
+  border: 1px solid color-mix(in srgb, var(--popup-border) 72%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.crc-channel-detail .crc-detail-first-chats {
+  flex-direction: row;
+}
+
+.crc-channel-detail .crc-detail-first-chats .crc-first-chat {
+  width: fit-content;
+}
+
+.crc-detail-first-chats .crc-first-chat > em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.crc-detail-first-chats .crc-first-chat > time {
+  color: var(--popup-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.crc-detail-first-chats .crc-first-chat-message {
+  -webkit-box-orient: vertical;
+  color: var(--popup-text);
+  display: -webkit-box;
+  font-size: 12px;
+  grid-column: 1 / -1;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+}
+
+/* 이 채널에서 자주 쓴 말 */
+.crc-detail-words {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.crc-detail-words > span {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 9px;
+}
+
+/* 제목은 중립색, 실제 항목은 채널색을 옅게 섞어 정보 계층을 구분한다. */
+.crc-detail-words > span:not(.crc-detail-words-title) {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 12%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 24%,
+    transparent
+  );
+}
+
+.crc-detail-words b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-detail-words i {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+/* 채널별 비중 한 줄 바 */
+.crc-ratio {
+  border-radius: 999px;
+  display: flex;
+  height: 20px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.crc-ratio[hidden] {
+  display: none;
+}
+
+.crc-ratio > i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+/* 비율 바 범례 */
+.crc-ratio-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.crc-ratio-legend li {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.crc-ratio-legend i {
+  border-radius: 3px;
+  flex: none;
+  height: 10px;
+  width: 10px;
+}
+
+.crc-ratio-legend span {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-ratio-legend b {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 폴라 차트 보기 전환 탭 */
+.crc-polar-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.crc-polar-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.crc-polar-tabs button {
+  background: none;
+  border: 1px solid var(--popup-border);
+  border-radius: 999px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+}
+
+.crc-polar-tabs button[aria-pressed="true"] {
+  background: var(--popup-brand);
+  border-color: var(--popup-brand);
+  color: #fff;
+}
+
+.crc-cards[hidden],
+.crc-channels[hidden] {
+  display: none;
+}
+
+/* 1·2·3등 포디움. 가운데(1등)가 가장 높다. */
+.crc-podium {
+  align-items: end;
+  display: grid;
+  gap: 40px;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  /* ⚠ 등수 그림자가 바깥으로 뻗는다(2등 왼쪽·3등 오른쪽 25px, 1등 번짐 36px)
+     → 잘리지 않게 여백을 둔다. margin-bottom 대신 padding 으로 잡아야
+     그림자가 다음 블록에 겹치지 않는다. */
+  padding: 40px 40px 44px;
+}
+
+.crc-card-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+}
+
+.crc-card {
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  display: grid;
+  min-width: 0;
+  outline: none;
+  perspective: 1100px;
+  position: relative;
+}
+
+.crc-card-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 0.48s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.crc-card.is-flipped .crc-card-inner {
+  transform: rotateY(180deg);
+}
+
+.crc-card-face {
+  backface-visibility: hidden;
+  background: var(--popup-surface);
+  border: 1px solid var(--crc-card-color, var(--popup-brand));
+  border-radius: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  grid-area: 1 / 1;
+  min-width: 0;
+  padding: 14px;
+  -webkit-backface-visibility: hidden;
+}
+
+.crc-card-back {
+  transform: rotateY(180deg);
+}
+
+/* 앞면은 리캡 카드처럼 핵심 기록을 위에서 아래로 한눈에 읽게 한다. */
+.crc-card-front {
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 540px;
+  padding: 24px 22px 28px;
+  text-align: center;
+}
+
+.crc-card-front-rank {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.crc-card-front-avatar {
+  border: 2px solid color-mix(in srgb, var(--crc-card-color) 42%, transparent);
+  height: 72px !important;
+  margin-top: 4px;
+  width: 72px !important;
+}
+
+.crc-card-front-name {
+  align-items: baseline;
+  display: inline-flex !important;
+  font-size: 25px !important;
+  justify-content: center;
+  line-height: 1.3;
+  margin-top: 2px;
+  max-width: 100%;
+  overflow: hidden !important;
+  text-align: center;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.crc-card-front-name > .lps-mark {
+  height: 20px;
+  margin-left: 6px;
+  width: 20px;
+}
+
+.crc-card-front-total {
+  font-size: 36px !important;
+  line-height: 1.15;
+  margin-top: 6px;
+}
+
+.crc-card-front-range {
+  color: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 72%,
+    var(--popup-text)
+  );
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.crc-card-front-first-chats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 5px;
+  min-width: 0;
+  width: min(100%, 280px);
+}
+
+.crc-card-front-first-chats .crc-first-chat {
+  align-items: center;
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 12%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--crc-card-color, var(--popup-brand)) 20%,
+      var(--popup-border)
+    );
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+.crc-card-front-first-chats .crc-first-chat > em {
+  color: var(--popup-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.crc-card-front-first-chats .crc-first-chat-message {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-card-front-divider {
+  background: var(--popup-border);
+  display: block;
+  height: 1px;
+  margin: 12px 0 14px;
+  width: 100%;
+}
+
+.crc-card-front-label,
+.crc-card-front-top > .crc-detail-words-title {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border: 0;
+  border-radius: 999px;
+  color: var(--popup-muted);
+  display: inline-flex;
+  flex-basis: auto;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1.3;
+  padding: 5px 14px;
+}
+
+.crc-card-front-peak {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 8%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--crc-card-color, var(--popup-brand)) 25%,
+      var(--popup-border)
+    );
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1.2;
+  margin-top: 3px;
+  padding: 7px 16px;
+}
+
+.crc-card:hover .crc-card-face,
+.crc-card:focus-visible .crc-card-face {
+  border-color: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 76%,
+    var(--popup-text)
+  );
+}
+
+.crc-card:focus-visible .crc-card-face {
+  outline: 2px solid var(--popup-brand);
+  outline-offset: 3px;
+}
+
+/* 포디움에서만 등수에 따라 높이를 준다(아래 정렬이라 위로 솟는다). */
+.crc-podium .crc-card.is-rank1 .crc-card-face {
+  padding-bottom: 22px;
+  padding-top: 22px;
+}
+
+.crc-podium .crc-card.is-rank2 .crc-card-face,
+.crc-podium .crc-card.is-rank3 .crc-card-face {
+  padding-bottom: 14px;
+}
+
+/* 등수별 겹겹 그림자(금·은·동).
+   방향: 1등은 아래로 곧게, 2등은 왼쪽 아래, 3등은 오른쪽 아래.
+   포디움이 [2등][1등][3등] 순서라 좌우로 벌어지는 모양이 된다.
+   1등만 blur 레이어를 더해 양옆으로도 빛이 번지게 한다(사용자 요청). */
+.crc-podium .crc-card.is-rank1 {
+  --crc-medal: 212, 175, 55; /* 금 */
+  box-shadow:
+    rgba(var(--crc-medal), 0.4) 0 5px,
+    rgba(var(--crc-medal), 0.3) 0 10px,
+    rgba(var(--crc-medal), 0.2) 0 15px,
+    rgba(var(--crc-medal), 0.1) 0 20px,
+    rgba(var(--crc-medal), 0.05) 0 25px,
+    /* 양옆으로 번지는 빛(1등만) */ rgba(var(--crc-medal), 0.35) 0 0 18px,
+    rgba(var(--crc-medal), 0.2) 0 0 36px;
+  transition: box-shadow 0.48s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.crc-podium .crc-card.is-rank2 {
+  --crc-medal: 168, 169, 173; /* 은 */
+  box-shadow:
+    rgba(var(--crc-medal), 0.4) -5px 5px,
+    rgba(var(--crc-medal), 0.3) -10px 10px,
+    rgba(var(--crc-medal), 0.2) -15px 15px,
+    rgba(var(--crc-medal), 0.1) -20px 20px,
+    rgba(var(--crc-medal), 0.05) -25px 25px;
+  transition: box-shadow 0.48s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.crc-podium .crc-card.is-rank3 {
+  --crc-medal: 176, 118, 70; /* 동 */
+  box-shadow:
+    rgba(var(--crc-medal), 0.4) 5px 5px,
+    rgba(var(--crc-medal), 0.3) 10px 10px,
+    rgba(var(--crc-medal), 0.2) 15px 15px,
+    rgba(var(--crc-medal), 0.1) 20px 20px,
+    rgba(var(--crc-medal), 0.05) 25px 25px;
+  transition: box-shadow 0.48s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.crc-podium .crc-card.is-rank2.is-flipped {
+  box-shadow:
+    rgba(var(--crc-medal), 0.4) 5px 5px,
+    rgba(var(--crc-medal), 0.3) 10px 10px,
+    rgba(var(--crc-medal), 0.2) 15px 15px,
+    rgba(var(--crc-medal), 0.1) 20px 20px,
+    rgba(var(--crc-medal), 0.05) 25px 25px;
+}
+
+.crc-podium .crc-card.is-rank3.is-flipped {
+  box-shadow:
+    rgba(var(--crc-medal), 0.4) -5px 5px,
+    rgba(var(--crc-medal), 0.3) -10px 10px,
+    rgba(var(--crc-medal), 0.2) -15px 15px,
+    rgba(var(--crc-medal), 0.1) -20px 20px,
+    rgba(var(--crc-medal), 0.05) -25px 25px;
+}
+
+.crc-card-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crc-card-rank {
+  flex: none;
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.crc-card-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 28px;
+  object-fit: cover;
+  width: 28px;
+}
+
+.crc-card-avatar[hidden] {
+  display: none;
+}
+
+.crc-card-name {
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-card-total {
+  color: var(--crc-card-color, var(--popup-brand));
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.crc-card-detail {
+  border-top: 1px solid var(--popup-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+/* 카드 안에서는 상세 항목을 세로로 쌓는다(가로 폭이 좁다). */
+.crc-card-detail .crc-detail-item {
+  justify-content: space-between;
+}
+
+.crc-card-detail .crc-detail-words {
+  gap: 5px;
+}
+
+.crc-card-front-top {
+  align-items: center;
+  border-top: 0;
+  display: flex;
+  flex-basis: auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 7px;
+  margin-top: 15px;
+  padding-top: 0;
+  width: min(100%, 250px);
+}
+
+.crc-card-front-top > span:not(.crc-detail-words-title) {
+  align-items: center;
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 7%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 23%,
+    var(--popup-border)
+  );
+  border-radius: 999px;
+  box-sizing: border-box;
+  display: flex;
+  flex: none;
+  justify-content: center;
+  min-height: 39px;
+  padding: 5px 14px;
+}
+
+.crc-card-front-top > span:not(.crc-detail-words-title) > b {
+  align-items: center;
+  display: inline-flex;
+  flex: 1 1 auto;
+  font-size: 18px;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-card-front-top > span:not(.crc-detail-words-title) > i {
+  flex: none;
+  font-size: 13px;
+  min-width: 42px;
+  text-align: right;
+}
+
+.crc-card-front-top .crc-emoji,
+.crc-card-front-top .crc-emoji-locked {
+  vertical-align: middle;
+}
+
+.crc-card-front-empty {
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+@media (max-width: 760px) {
+  .crc-card-front {
+    min-height: 500px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .crc-card-front-name {
+    font-size: 23px;
+  }
+
+  .crc-card-front-total {
+    font-size: 31px;
+  }
+}
+
+.crc-card-confetti {
+  overflow: visible;
+  pointer-events: none;
+  position: fixed;
+  z-index: 1000;
+}
+
+.crc-card-confetti > i {
+  animation: crc-card-confetti-burst 1.05s ease-out var(--crc-confetti-delay)
+    both;
+  border-radius: 2px;
+  height: 7px;
+  left: 50%;
+  position: absolute;
+  top: 45%;
+  width: 4px;
+}
+
+@keyframes crc-card-confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.65);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+        calc(-50% + var(--crc-confetti-x)),
+        calc(-50% + var(--crc-confetti-y))
+      )
+      rotate(var(--crc-confetti-r)) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crc-card-inner {
+    transition: none;
+  }
+
+  .crc-card-confetti {
+    display: none;
+  }
+
+  .crc-podium .crc-card {
+    transition: none;
+  }
+}
+
+/* 보기 전환은 제목 오른쪽 끝에(통나무파워 내역과 같은 배치). */
+.crc-section-head .crc-view-switch {
+  margin-left: auto;
+}
+
+/* 두 칸짜리 전환(목록·카드 / 월별·누적) */
+.crc-view-switch {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-word-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.crc-section-head .crc-word-controls .crc-view-switch {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-left: 0;
+}
+
+.crc-word-type-switch button,
+.crc-word-sort-switch button {
+  min-width: 68px;
+}
+
+/* 채널 색상 블록 여백 */
+.crc-colors {
+  margin-bottom: 14px;
+}
+
+/* 보기 전환은 채널 색상 아래, 오른쪽 끝에 둔다. */
+.crc-view-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+/* 자주 쓴 말·이모티콘 묶음의 제목 */
+.crc-detail-words-title {
+  background: var(--popup-soft-bg);
+  border-color: transparent;
+  color: var(--popup-muted);
+  flex-basis: 100%;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── 요약 카드·히트맵 상세 팝업 ─────────────────────────────────────────── */
+/* 누를 수 있다는 걸 보이게 한다. */
+.crc-stat[data-info],
+.crc-stat[data-word-summary].is-clickable {
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.12s,
+    transform 0.12s;
+}
+
+.crc-stat[data-info]:hover,
+.crc-stat[data-word-summary].is-clickable:hover,
+.crc-stat[data-word-summary].is-clickable:focus-visible {
+  border-color: var(--popup-brand);
+  transform: translateY(-1px);
+}
+
+.crc-heat-cell[data-hour] {
+  cursor: pointer;
+}
+
+.crc-heat-cell[data-hour]:hover,
+.crc-heat-cell[data-hour]:focus-visible {
+  outline: 2px solid var(--popup-brand);
+  outline-offset: 1px;
+}
+
+.crc-info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+  padding: 2px 4px 4px 2px;
+}
+
+.crc-info-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(125px, 100%), 1fr));
+}
+
+#crcInfoBody:is([data-info-key="crcFirst"]) .crc-info-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-info-metrics .crc-detail-item {
+  align-items: flex-start;
+  background: var(--popup-soft-bg);
+  border: 1px solid color-mix(in srgb, var(--popup-border) 72%, transparent);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.crc-info-select {
+  color: var(--popup-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.crc-info-select:hover {
+  background: color-mix(in srgb, var(--popup-brand) 8%, var(--popup-soft-bg));
+  border-color: color-mix(in srgb, var(--popup-brand) 45%, var(--popup-border));
+}
+
+.crc-info-select[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--popup-brand) 13%, var(--popup-surface));
+  border-color: var(--popup-brand);
+}
+
+.crc-info-metrics .crc-detail-item > span {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.crc-info-metrics .crc-detail-item > strong {
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.crc-info-date-stat > strong {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.crc-info-date-stat > strong > time {
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.crc-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crc-info-section-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.crc-info-section-head > strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.crc-info-section-head > span {
+  color: var(--popup-muted);
+  font-size: 11px;
+}
+
+.crc-word-detail-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.crc-word-trend-chart {
+  height: 190px;
+  min-width: 0;
+  position: relative;
+}
+
+.crc-info-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.crc-info-row {
+  align-items: center;
+  background: color-mix(in srgb, var(--popup-soft-bg) 58%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px 9px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.crc-info-row.is-related {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.crc-info-row.is-related .crc-info-bar {
+  grid-column: 1 / -1;
+}
+
+.crc-info-bar {
+  background: var(--popup-soft-bg);
+  border-radius: 999px;
+  grid-column: 2 / -1;
+  height: 4px;
+  overflow: hidden;
+}
+
+.crc-info-bar > i {
+  background: var(--popup-brand);
+  display: block;
+  height: 100%;
+}
+
+.crc-info-rank {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--popup-muted);
+  display: grid;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  height: 22px;
+  line-height: 1;
+  padding: 0;
+  place-items: center;
+  text-align: center;
+  width: 22px;
+}
+
+.crc-info-row[data-rank="1"] {
+  --crc-info-rank-color: #d1a21f;
+}
+
+.crc-info-row[data-rank="2"] {
+  --crc-info-rank-color: #9da1aa;
+}
+
+.crc-info-row[data-rank="3"] {
+  --crc-info-rank-color: #b9784d;
+}
+
+.crc-info-row:is([data-rank="1"], [data-rank="2"], [data-rank="3"])
+  .crc-info-rank {
+  background: color-mix(
+    in srgb,
+    var(--crc-info-rank-color) 18%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-info-rank-color) 58%,
+    var(--popup-border)
+  );
+  box-shadow: 0 1px 4px
+    color-mix(in srgb, var(--crc-info-rank-color) 18%, transparent);
+  color: color-mix(in srgb, var(--crc-info-rank-color) 68%, var(--popup-text));
+}
+
+.crc-info-row:is([data-rank="1"], [data-rank="2"], [data-rank="3"])
+  .crc-info-bar
+  > i {
+  background: var(--crc-info-rank-color);
+}
+
+/* 이름이 길어도 수치가 밀려나지 않게 이름 쪽만 줄인다. */
+.crc-info-row .crc-stat-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.crc-info-row > strong {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.crc-info-content {
+  border-top: 1px solid var(--popup-border);
+  padding-top: 14px;
+}
+
+.crc-info-body .crc-detail-words-title {
+  background: none;
+  border-radius: 0;
+  color: var(--popup-muted);
+  display: block;
+  font-size: 11px;
+  padding: 0;
+}
+
+.crc-info-empty {
+  color: var(--popup-muted);
+  font-size: 13px;
+  margin: 0;
+  padding: 24px 2px;
+  text-align: center;
+}
+
+/* ── 기본 프로필(프로필 이미지가 없는 채널) ─────────────────────────────── */
+/* 프로필 칸. 위 이름 칸 규칙에서 :not() 으로 빠져 있어 늘어나지 않는다. */
+.crc-row-avatar {
+  align-items: center;
+  display: flex;
+  flex: none;
+  height: 26px;
+  width: 26px;
+}
+
+.crc-row-avatar img {
+  border-radius: 50%;
+  height: 26px;
+  object-fit: cover;
+  width: 26px;
+}
+
+/* 라이트·다크 두 장을 모두 넣고 여기서 고른다. */
+.crc-default-profile-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .crc-default-profile-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .crc-default-profile-dark {
+  display: inline-block;
+}
+
+/* 요약 카드의 파트너 배지. 이름 바로 옆에 붙고 줄어들지 않는다.
+   ⚠ 간격이 두 번 붙었다: .crc-stat-name 의 gap 6px + .lps-mark 의 margin-left
+   4px = 10px 라 넓어 보였다(제보). 배지는 gap 으로만 띄우고 자체 마진은 뺀다. */
+.crc-stat-mark {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+}
+
+.crc-stat-mark > .lps-mark {
+  margin-left: 0;
+}
+
+/* 후원·구독 가져올 범위 토글 */
+.crc-modal-scope > span {
+  align-self: center;
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-weight: 600;
+}

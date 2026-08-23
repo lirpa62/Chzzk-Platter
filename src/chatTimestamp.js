@@ -95,6 +95,8 @@
   // 꺼도 첫 진입 후 잠깐만 수집하며, 상한에 도달하거나 제한 시간이 지나면 옵저버를
   // 정리한다. 실제 단위(ms/초) 판정과 이상치 제거는 content.js가 여러 표본으로 수행한다.
   const VOD_TIME_ANCHOR_SOURCE = "cheese-vod-chat-time-anchor";
+  // 채팅 리캡: 본인 채팅만 모아 content.js(격리 월드)로 넘긴다. 저장은 그쪽이 한다.
+  const CHAT_RECAP_SOURCE = "cheese-chat-recap-batch";
   const VOD_TIME_ANCHOR_TARGET = 16;
   const VOD_TIME_ANCHOR_WINDOW_MS = 30000;
   let vodTimeAnchorSent = new Set();
@@ -104,6 +106,14 @@
   function getVodVideoNo(pathname = getHostPagePathname()) {
     const match = String(pathname || "").match(/^\/video\/(\d+)(?:\/|$)/);
     return match ? match[1] : "";
+  }
+
+  // 라이브 채널 id. /live/<channelId> 경로에서만 나온다.
+  function getLiveChannelId(pathname = getHostPagePathname()) {
+    const match = String(pathname || "").match(
+      /^\/live\/([0-9a-f]{32})(?:\/|$)/i,
+    );
+    return match ? match[1].toLowerCase() : "";
   }
 
   function needsVodTimeAnchorCollection() {
@@ -392,6 +402,311 @@
     if (!Number.isFinite(value) || value < 0 || value > 604800000) return null;
     return value;
   }
+
+  // ── 채팅 리캡 수집 ────────────────────────────────────────────────────────
+  // ⚠ 관찰자를 새로 만들지 않는다. 채팅은 초당 수십 건이 흐르는 경로라 MutationObserver
+  //   를 하나 더 붙이면 그만큼 메인스레드 부하가 배가된다. 이미 도는 processRow 안에서
+  //   내 메시지인지만 판정하고, 저장은 버퍼에 모아 묶어 보낸다.
+  let chatRecapOn = false; // content.js 가 플래그로 켠다
+  let chatRecapAccountId = ""; // 내 userIdHash (플래그로 받는다)
+  // 다시보기 경로(/video/<no>)에는 채널 id 가 없다 → content.js 가 알려준다.
+  let chatRecapChannelHint = "";
+  const chatRecapBuffer = [];
+  const chatRecapSeen = new Set(); // 같은 메시지 두 번 담지 않게
+  const CHAT_RECAP_SEEN_MAX = 2000;
+  const CHAT_RECAP_FLUSH_MS = 5000;
+  const CHAT_RECAP_FLUSH_COUNT = 20;
+  const CHAT_RECAP_BUFFER_MAX = 200;
+  let chatRecapFlushTimer = 0;
+  let chatRecapBufferAccountId = "";
+  let chatRecapBufferChannelId = "";
+  let chatRecapBufferVideoNo = "";
+
+  function clearChatRecapBuffer() {
+    if (chatRecapFlushTimer) {
+      clearTimeout(chatRecapFlushTimer);
+      chatRecapFlushTimer = 0;
+    }
+    chatRecapBuffer.length = 0;
+    chatRecapBufferAccountId = "";
+    chatRecapBufferChannelId = "";
+    chatRecapBufferVideoNo = "";
+    recapEmojiPending = Object.create(null);
+  }
+
+  function setChatRecap(on, accountId, channelId) {
+    const nextAccount = String(accountId || "").toLowerCase();
+    const nextOn = on === true && /^[0-9a-f]{32}$/.test(nextAccount);
+    const nextChannel = String(channelId || "").toLowerCase();
+    const accountChanged = nextAccount !== chatRecapAccountId;
+    const channelChanged = nextChannel !== chatRecapChannelHint;
+    const contextChanged = accountChanged || channelChanged;
+    // 계정·채널이 바뀌었으면 아직 안 보낸 버퍼는 이전 문맥의 것이다. 새 힌트를
+    // 덮어쓰기 전에 먼저 보내야 직전 채팅이 다음 채널 기록으로 섞이지 않는다.
+    if (chatRecapReady() && (!nextOn || contextChanged)) {
+      flushChatRecap();
+      chatRecapSeen.clear();
+      if (
+        chatRecapBuffer.length &&
+        !accountChanged &&
+        !chatRecapChannelHint &&
+        nextChannel
+      ) {
+        // 다시보기 메타 조회가 끝나 처음 채널 힌트가 생긴 경우다. 같은 계정의
+        // 현재 영상이므로 새 힌트로 초기 버퍼를 안전하게 확정할 수 있다.
+        chatRecapBufferChannelId = nextChannel;
+        flushChatRecap();
+      }
+      // 계정·실제 채널이 바뀌었는데도 문맥을 특정하지 못한 버퍼는 다음 채널로
+      // 넘기지 않는다. 잘못 귀속하는 것보다 이 드문 초기 몇 건을 버리는 편이 안전하다.
+      if (chatRecapBuffer.length) clearChatRecapBuffer();
+    }
+    const was = chatRecapOn;
+    chatRecapOn = nextOn;
+    chatRecapAccountId = nextOn ? nextAccount : "";
+    chatRecapChannelHint = nextOn ? nextChannel : "";
+    if (!nextOn && chatRecapBuffer.length) {
+      // 채널을 끝내 확인하지 못한 버퍼는 저장 대상이 없다. 기능을 끈 뒤에도 다음
+      // 활성화까지 메모리에 남거나 다른 채널과 합쳐지지 않게 이때 정리한다.
+      clearChatRecapBuffer();
+    }
+    // 리캡만 켠 경우에도 행 관찰이 돌아야 수집된다.
+    if (nextOn && !was && !isChatObserverHealthy()) ensureChatRowObserver();
+    if (!nextOn && was && !anyChatEnhanceOn()) stopChatRowObserver();
+  }
+
+  function chatRecapReady() {
+    return chatRecapOn && !!chatRecapAccountId;
+  }
+
+  // 메시지 본문만 뽑는다(HTML 아님 — 저장 용량과 XSS 양쪽 이유).
+  // ⚠ DOM 폴백은 쓰지 않는다. 후원·구독·시스템 행은 본문 구조가 달라, 거기서
+  //   텍스트를 긁으면 닉네임이 본문으로 잡힌다(제보: '리르파' 가 채팅으로 저장됨).
+  //   props 의 본문이 없으면 그냥 건너뛴다 — 잘못된 값을 넣는 것보다 낫다.
+  // 본문을 문자열로 만든다.
+  // ⚠ 이모티콘만 보낸 채팅은 content 가 문자열이 아니라 React 엘리먼트 배열이다
+  //   (실측: [{type:'img', props:{src, title:'karinCheer2'}}, ...]).
+  //   문자열만 받으면 빈 값이 되고, 예전엔 DOM 폴백이 돌아 닉네임이 본문으로
+  //   저장됐다(제보: '리르파'). img 의 title 이 이모티콘 키라 {:키:} 로 되살린다.
+  // 이모티콘 키→URL. 레코드에 URL 을 넣으면 용량이 크게 늘어(URL ~110자)
+  // 채널 사전으로 따로 모아 보낸다. 같은 이모티콘을 수백 번 써도 한 줄이다.
+  let recapEmojiMap = Object.create(null);
+  let recapEmojiPending = Object.create(null);
+  const recapEmojiOrder = [];
+  const CHAT_RECAP_EMOJI_MAX = 3000;
+
+  function noteRecapEmoji(key, url) {
+    if (!key || typeof url !== "string" || !url) return;
+    if (recapEmojiMap[key] === url) return;
+    if (!(key in recapEmojiMap)) recapEmojiOrder.push(key);
+    recapEmojiMap[key] = url;
+    recapEmojiPending[key] = url;
+    while (recapEmojiOrder.length > CHAT_RECAP_EMOJI_MAX) {
+      const oldest = recapEmojiOrder.shift();
+      if (oldest !== undefined) {
+        delete recapEmojiMap[oldest];
+        delete recapEmojiPending[oldest];
+      }
+    }
+  }
+
+  function recapSegmentToText(seg) {
+    if (typeof seg === "string") return seg;
+    if (!seg || typeof seg !== "object") return "";
+    const title = seg.props?.title ?? seg.title;
+    if (typeof title === "string" && title) {
+      noteRecapEmoji(title, seg.props?.src ?? seg.src);
+      return `{:${title}:}`;
+    }
+    const t = seg.text ?? seg.value ?? seg.content ?? seg.message ?? seg.msg;
+    if (typeof t === "string") return t;
+    // 중첩 children 도 한 단계 훑는다(문자열/배열 모두).
+    const kids = seg.props?.children ?? seg.children;
+    if (typeof kids === "string") return kids;
+    if (Array.isArray(kids)) return kids.map(recapSegmentToText).join("");
+    return "";
+  }
+
+  function readChatRecapText(chatMessage) {
+    const direct =
+      chatMessage?.message ??
+      chatMessage?.content ??
+      chatMessage?.msg ??
+      chatMessage?.text;
+    if (typeof direct === "string") return direct.trim();
+    if (Array.isArray(direct)) {
+      return direct.map(recapSegmentToText).join("").trim();
+    }
+    if (direct && typeof direct === "object") {
+      return recapSegmentToText(direct).trim();
+    }
+    return "";
+  }
+
+  function flushChatRecap() {
+    if (chatRecapFlushTimer) {
+      clearTimeout(chatRecapFlushTimer);
+      chatRecapFlushTimer = 0;
+    }
+    if (!chatRecapBuffer.length) return;
+    const channelId =
+      chatRecapBufferChannelId || getLiveChannelId() || chatRecapChannelHint;
+    // 다시보기 메타 조회가 아직 끝나지 않았을 수 있다. 이때 먼저 splice 하면
+    // 채널 힌트가 도착하기 직전에 모은 채팅을 영구히 잃으므로 버퍼를 유지한다.
+    if (!channelId) {
+      if (!chatRecapFlushTimer && chatRecapReady()) {
+        chatRecapFlushTimer = window.setTimeout(
+          flushChatRecap,
+          CHAT_RECAP_FLUSH_MS,
+        );
+      }
+      return;
+    }
+    const items = chatRecapBuffer.splice(0, chatRecapBuffer.length);
+    const accountId = chatRecapBufferAccountId || chatRecapAccountId;
+    const videoNo = chatRecapBufferVideoNo || getVodVideoNo() || 0;
+    chatRecapBufferAccountId = "";
+    chatRecapBufferChannelId = "";
+    chatRecapBufferVideoNo = "";
+    const pendingEmojis = recapEmojiPending;
+    recapEmojiPending = Object.create(null);
+    const payload = {
+      source: CHAT_RECAP_SOURCE,
+      accountId,
+      channelId,
+      videoNo,
+      items,
+      // 새로 보거나 URL이 바뀐 항목만 보낸다. 전체 사전을 매번 복사하면 오래 연
+      // 탭에서 메시지 크기와 직렬화 비용이 계속 커진다.
+      ...(Object.keys(pendingEmojis).length
+        ? { emojis: pendingEmojis }
+        : {}),
+    };
+    try {
+      const target =
+        window.top && window.top.location.origin === location.origin
+          ? window.top
+          : window;
+      target.postMessage(payload, location.origin);
+    } catch {
+      try {
+        window.postMessage(payload, location.origin);
+      } catch {}
+    }
+  }
+
+  function scheduleChatRecapFlush() {
+    if (chatRecapBuffer.length >= CHAT_RECAP_FLUSH_COUNT) {
+      flushChatRecap();
+      return;
+    }
+    if (chatRecapFlushTimer) return;
+    chatRecapFlushTimer = window.setTimeout(
+      flushChatRecap,
+      CHAT_RECAP_FLUSH_MS,
+    );
+  }
+
+  // 채팅 메시지의 보낸 사람 해시. ⚠ 실측(commentBlock.js vodChatHash): 해시는
+  //   최상위 userIdHash 가 아니라 profile(JSON 문자열) 안에 있는 경우가 많다.
+  //   라이브 실시간 채팅은 uid 를 쓴다. 셋 다 확인해야 본인 판정이 걸린다.
+  function readChatSenderHash(chatMessage) {
+    const profile = chatMessage?.profile;
+    if (profile) {
+      try {
+        const p = typeof profile === "string" ? JSON.parse(profile) : profile;
+        if (p?.userIdHash) return String(p.userIdHash).toLowerCase();
+      } catch {}
+    }
+    return String(
+      chatMessage?.userIdHash || chatMessage?.uid || chatMessage?.userId || "",
+    ).toLowerCase();
+  }
+
+  function collectChatRecap(row, chatMessage) {
+    if (!chatRecapReady() || !chatMessage) return;
+    const uid = readChatSenderHash(chatMessage);
+    if (!uid || uid !== chatRecapAccountId) return; // 본인 채팅만
+    const id = getChatHistoryMessageId(chatMessage);
+    if (!id || chatRecapSeen.has(id)) return;
+    const text = readChatRecapText(chatMessage);
+    if (!text) return;
+    // 문자열 본문에 토큰이 섞인 경우의 URL 은 extras.emojis 에 있다.
+    if (text.includes("{:")) {
+      try {
+        const ex =
+          typeof chatMessage.extras === "string"
+            ? JSON.parse(chatMessage.extras)
+            : chatMessage.extras;
+        const map = ex?.emojis;
+        if (map && typeof map === "object") {
+          for (const [k, v] of Object.entries(map)) noteRecapEmoji(k, v);
+        }
+      } catch {}
+    }
+    chatRecapSeen.add(id);
+    if (chatRecapSeen.size > CHAT_RECAP_SEEN_MAX) {
+      const first = chatRecapSeen.values().next().value;
+      if (first !== undefined) chatRecapSeen.delete(first);
+    }
+    const at = readChatEpochMs(chatMessage) || Date.now();
+    const vodOffset = readVodPlayerMessageTime(chatMessage);
+    if (!chatRecapBuffer.length) {
+      chatRecapBufferAccountId = chatRecapAccountId;
+      chatRecapBufferChannelId = getLiveChannelId() || chatRecapChannelHint;
+      chatRecapBufferVideoNo = getVodVideoNo();
+    }
+    chatRecapBuffer.push({
+      t: at,
+      m: text.slice(0, 500),
+      ...(vodOffset != null ? { v: Math.round(vodOffset / 1000) } : {}),
+    });
+    // 버퍼가 비정상적으로 불어나면(저장 쪽이 막힘) 오래된 것부터 버린다.
+    if (chatRecapBuffer.length > CHAT_RECAP_BUFFER_MAX) {
+      chatRecapBuffer.splice(0, chatRecapBuffer.length - CHAT_RECAP_BUFFER_MAX);
+    }
+    scheduleChatRecapFlush();
+  }
+
+  // 진단: 페이지 콘솔에서 MAIN 쪽 수집 상태를 확인한다.
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-chat-recap-debug") return;
+    // 화면의 채팅 행에서 실제로 어떤 발신자 해시가 읽히는지 함께 찍는다
+    // (본인 판정이 안 걸릴 때 어느 필드에 값이 있는지 바로 보이게).
+    const samples = [];
+    for (const row of document.querySelectorAll(CHAT_ROW_SELECTOR)) {
+      if (samples.length >= 5) break;
+      const m = getChatMessage(row);
+      if (!m) continue;
+      samples.push({
+        hash: readChatSenderHash(m),
+        mine: readChatSenderHash(m) === chatRecapAccountId,
+        hasProfile: !!m.profile,
+        profileType: typeof m.profile,
+        topLevelKeys: Object.keys(m).slice(0, 15),
+        text: String(readChatRecapText(m) || "").slice(0, 20),
+        typeCode: Number(m?.msgTypeCode ?? m?.messageTypeCode ?? 1),
+      });
+    }
+    console.log("[치즈 플래터] 리캡 수집(MAIN)", {
+      on: chatRecapOn,
+      accountId: chatRecapAccountId,
+      channelHint: chatRecapChannelHint,
+      liveChannel: getLiveChannelId(),
+      buffered: chatRecapBuffer.length,
+      seen: chatRecapSeen.size,
+      observerOn: isChatObserverHealthy(),
+      rows: document.querySelectorAll(CHAT_ROW_SELECTOR).length,
+      samples,
+    });
+  });
+
+  // 페이지를 떠날 때 남은 버퍼를 흘려보낸다(마지막 몇 건이 사라지지 않게).
+  window.addEventListener("pagehide", flushChatRecap);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushChatRecap();
+  });
 
   function postVodTimeAnchor(chatMessage) {
     if (!needsVodTimeAnchorCollection()) return;
@@ -710,8 +1025,7 @@
     const signatures = {};
     OS_ICON_TYPES.forEach((type) => {
       const raw = source[type];
-      const icon =
-        typeof raw === "string" ? { type: "svg", data: raw } : raw;
+      const icon = typeof raw === "string" ? { type: "svg", data: raw } : raw;
       if (!icon || typeof icon !== "object") return;
       const template =
         icon.type === "image"
@@ -719,7 +1033,8 @@
           : sanitizeChatOsSvgTemplate(icon.data);
       if (!template) return;
       templates[type] = template;
-      signatures[type] = `${icon.type === "image" ? "image" : "svg"}:${template.outerHTML}`;
+      signatures[type] =
+        `${icon.type === "image" ? "image" : "svg"}:${template.outerHTML}`;
     });
     return { templates, signature: JSON.stringify(signatures) };
   }
@@ -1350,6 +1665,13 @@
       const message = getChatMessage(row);
       if (message) syncChatHistoryIdentity(row, message);
     }
+    // ⚠ 리캡 수집은 done 조기 반환보다 먼저 한다. 다른 채팅 기능이 모두 꺼져 있으면
+    //   행이 곧바로 done 처리돼 아래 일반 경로까지 내려오지 않는다(제보: 저장이 전혀
+    //   안 됨). 이미 수집한 메시지는 id 로 걸러지므로 중복되지 않는다.
+    if (chatRecapReady()) {
+      const recapMessage = getChatMessage(row);
+      if (recapMessage) collectChatRecap(row, recapMessage);
+    }
     // 스윕 재방문 최적화: 이미 처리 완료로 표시된 행은 React fiber/props 접근 없이 즉시
     // 반환한다. 예전엔 컨테이너 재부착(헬스체크) 때마다 전체 행을 fiber 접근 포함으로
     // 재처리해(수백 행 × 반복) 채팅 폭주 방송에서 큰 메인스레드 부하였다(프로파일 실측
@@ -1610,6 +1932,7 @@
       hideChatNickname ||
       hideChatBadge ||
       isBlindRestoreActive() ||
+      chatRecapReady() ||
       needsVodTimeAnchorCollection()
     );
   }
@@ -1898,6 +2221,12 @@
     setHideChatBadge(f.chatHideBadge === true);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
     setChatHistoryCapture(e.data.chatHistoryEnabled === true);
+    // 채팅 리캡: 켜짐 여부 + 내 계정 + (다시보기용) 채널 힌트.
+    setChatRecap(
+      e.data.chatRecapEnabled === true,
+      e.data.chatRecapAccountId,
+      e.data.chatRecapChannelId,
+    );
     if (needsVodTimeAnchorCollection() && !isChatObserverHealthy()) {
       ensureChatRowObserver();
     }
