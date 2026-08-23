@@ -13,7 +13,7 @@ if (window.location.pathname.endsWith("/settings.html")) {
     try {
       const saved = Number(localStorage.getItem("cheeseSettingsPopupWidth"));
       if (Number.isFinite(saved) && saved > 0) {
-        const w = Math.min(800, Math.max(420, Math.round(saved)));
+        const w = Math.min(788, Math.max(420, Math.round(saved)));
         document.documentElement.style.setProperty(
           "--settings-popup-w",
           w + "px",

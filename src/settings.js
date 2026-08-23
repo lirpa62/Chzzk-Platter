@@ -400,12 +400,12 @@
 
   // ── 팝업 폭 조절 ──────────────────────────────────────────────────────────
   // 오른쪽 가장자리를 끌어 폭을 바꾸고, 값은 저장해 다음에도 유지한다.
-  // ⚠ 확장 팝업은 브라우저가 최대 800px 로 제한한다. 그보다 크게 잡아도
-  //   창은 800px 에서 멈추므로 상한을 맞춰 둔다.
+  // ⚠ 브라우저의 800px 팝업 한도에 스크롤바 영역이 포함된다.
+  //   789px부터 루트 스크롤이 생길 수 있어 안전한 콘텐츠 폭으로 제한한다.
   const POPUP_WIDTH_KEY = "cheeseSettingsPopupWidth";
   const POPUP_WIDTH_DEFAULT = 500;
   const POPUP_WIDTH_MIN = 420;
-  const POPUP_WIDTH_MAX = 800;
+  const POPUP_WIDTH_MAX = 788;
 
   function clampPopupWidth(px) {
     const n = Math.round(Number(px));
@@ -447,13 +447,19 @@
           POPUP_WIDTH_KEY
         ];
         if (Number.isFinite(Number(saved))) {
-          applyPopupWidth(saved);
+          const normalized = clampPopupWidth(saved);
+          applyPopupWidth(normalized);
           try {
             localStorage.setItem(
               POPUP_WIDTH_MIRROR,
-              String(clampPopupWidth(saved)),
+              String(normalized),
             );
           } catch {}
+          // 1.43.0에서 저장된 789~800px 값은 한 번만 안전 상한으로
+          // 내린다. 정본도 맞춰 다음 실행에서 다시 보정하지 않게 한다.
+          if (Number(saved) !== normalized) {
+            cachedStorageSet({ [POPUP_WIDTH_KEY]: normalized });
+          }
         }
       } catch {}
     })();
@@ -461,16 +467,31 @@
     let startX = 0;
     let startW = 0;
     let pending = 0;
+    let applied = 0;
+    let pointerId = null;
 
     function onMove(e) {
+      if (pointerId !== null && e.pointerId !== pointerId) return;
+      e.preventDefault();
       // 오른쪽으로 끌면 넓어진다.
-      pending = clampPopupWidth(startW + (e.clientX - startX));
+      const next = clampPopupWidth(startW + (e.clientX - startX));
+      pending = next;
+      // 상·하한에서 같은 폭을 반복 적용하면 팝업 뷰포트가
+      // 루트 스크롤 범위를 다시 계산할 수 있다.
+      if (next === applied) return;
+      applied = next;
       applyPopupWidth(pending);
     }
 
-    function onUp() {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+    function onUp(e) {
+      if (pointerId !== null && e.pointerId !== pointerId) return;
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      if (pointerId !== null && handle.hasPointerCapture?.(pointerId)) {
+        handle.releasePointerCapture(pointerId);
+      }
+      pointerId = null;
       handle.classList.remove("is-dragging");
       document.documentElement.classList.remove("settings-resizing");
       if (pending) savePopupWidth(pending);
@@ -484,10 +505,14 @@
         document.documentElement.getBoundingClientRect().width ||
         POPUP_WIDTH_DEFAULT;
       pending = 0;
+      applied = clampPopupWidth(startW);
+      pointerId = e.pointerId;
+      handle.setPointerCapture?.(pointerId);
       handle.classList.add("is-dragging");
       document.documentElement.classList.add("settings-resizing");
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
     });
 
     // 더블클릭하면 기본 폭으로 되돌린다(너무 좁혀 놓고 못 찾는 경우 대비).
@@ -8143,6 +8168,9 @@
   }
 
   function normalizeImportedSettingValue(key, value) {
+    if (key === POPUP_WIDTH_KEY) {
+      return Number.isFinite(Number(value)) ? clampPopupWidth(value) : undefined;
+    }
     if (
       key === "cheeseAudioMixer.autoSync" ||
       key === "cheeseVideoFilter.autoSharpen" ||

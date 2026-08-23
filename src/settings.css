@@ -5,10 +5,15 @@ html {
   scrollbar-width: thin;
   /* 팝업 폭. 사용자가 오른쪽 가장자리를 끌어 조절하며, 값은 저장돼 다음에도
      유지된다(settings.js 가 --settings-popup-w 를 덮어쓴다).
-     ⚠ 확장 팝업의 최대 폭은 브라우저가 800px 로 제한한다. */
+     ⚠ 확장 팝업의 800px 한도에는 스크롤바 영역도 포함되어
+     안전한 콘텐츠 폭은 788px 이다. */
   --settings-popup-w: 500px;
   width: var(--settings-popup-w);
   min-width: var(--settings-popup-w);
+  /* 788px 상한에서 손잡이를 더 끌어도 루트 스크롤 영역을 만들지 않는다.
+     실제 옵션 스크롤은 .settings-panels 가 담당한다. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -41,6 +46,7 @@ body {
   width: 8px;
   height: 100%;
   cursor: ew-resize;
+  touch-action: none;
   z-index: 60;
   /* 평소에는 보이지 않다가 가까이 가면 드러난다(내용을 가리지 않게). */
   background: transparent;
@@ -396,6 +402,8 @@ html.settings-tab-view {
   width: 100%;
   min-width: 0;
   height: 100%;
+  overflow: auto;
+  overscroll-behavior: auto;
 }
 
 html.settings-tab-view body {
