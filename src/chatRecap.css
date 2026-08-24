@@ -13,6 +13,72 @@
   text-align: center;
 }
 
+.crc-account-state {
+  min-height: 320px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--popup-muted);
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+
+.crc-account-state:not([hidden]) {
+  display: flex;
+}
+
+.crc-account-state-icon {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 4px;
+  color: var(--popup-brand-strong);
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.crc-account-state strong {
+  color: var(--popup-text);
+  font-size: 17px;
+  line-height: 24px;
+}
+
+.crc-account-state p {
+  max-width: 440px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.crc-account-state-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.lps-header-actions .lps-refresh:disabled,
+.crc-account-state-actions .lps-refresh:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.crc-new-records {
+  gap: 6px;
+}
+
+.crc-new-records > span {
+  width: 7px;
+  height: 7px;
+  background: var(--popup-brand);
+  border-radius: 50%;
+  flex: none;
+}
+
 /* ── 요약 카드 ───────────────────────────────────────────────────────────── */
 .crc-summary {
   display: grid;

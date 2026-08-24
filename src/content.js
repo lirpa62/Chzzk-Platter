@@ -1853,8 +1853,9 @@
   const CHAT_RECAP_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
   const CHAT_RECAP_MESSAGE = "cheese-chat-recap-batch";
   const CHAT_RECAP_TEXT_MAX = 500;
-  // 한 청크(한 달·한 채널)에 담는 상한. 넘으면 오래된 것부터 버린다.
+  // 한 저장 키의 상한. 초과분은 chatRecapStore가 :part:N 키로 보존한다.
   const CHAT_RECAP_CHUNK_MAX = 5000;
+  const CHAT_RECAP_STORE_API = globalThis.CheeseChatRecapStore;
   let chatRecapOn = false;
   let chatRecapRetentionDays = 0;
 
@@ -10451,7 +10452,9 @@
           if (!store || keyIndex >= keys.length) break;
           const key = keys[keyIndex++];
           try {
-            pending = liveRecapRowsFromChunk((await store.get(key))?.[key]);
+            pending = liveRecapRowsFromChunk({
+              items: await CHAT_RECAP_STORE_API.loadMonth(store, key),
+            });
           } catch {
             pending = [];
           }
@@ -10472,9 +10475,10 @@
       let count = 0;
       // 한 번에 전 기간을 역직렬화하지 않는다. 여섯 달씩 읽어 순간 힙을 제한한다.
       for (let i = 0; i < keys.length; i += 6) {
-        const values = await store.get(keys.slice(i, i + 6));
-        for (const value of Object.values(values || {})) {
-          for (const it of Array.isArray(value?.items) ? value.items : []) {
+        const batch = keys.slice(i, i + 6);
+        const values = await CHAT_RECAP_STORE_API.loadMonths(store, batch, 6);
+        for (const key of batch) {
+          for (const it of values.get(key) || []) {
             const t = Number(it?.t) || 0;
             const m = String(it?.m || "");
             if (t && (m || (it?.d && typeof it.d === "object"))) count += 1;
@@ -36468,7 +36472,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const store = chatHistoryStore();
     if (!store || !accountId || !channelId) return {};
     const keys = chatRecapMonthKeysForChannel(accountId, channelId);
-    return keys.length ? await store.get(keys) : {};
+    if (!keys.length) return {};
+    const months = await CHAT_RECAP_STORE_API.loadMonths(store, keys, 24);
+    return Object.fromEntries(
+      keys.map((key) => [key, { items: months.get(key) || [] }]),
+    );
   }
 
   const chatRecapWriteTails = new Map();
@@ -36566,8 +36574,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     for (const [month, rows] of byMonth) {
       const key = chatRecapStoreKey(accountId, channelId, month);
       try {
-        const cur = (await store.get(key))?.[key];
-        const list = Array.isArray(cur?.items) ? cur.items : [];
+        const mergeState = await CHAT_RECAP_STORE_API.readForMerge(
+          store,
+          key,
+          rows,
+        );
+        const list = mergeState.items;
         // 중복 제거 키: 시각+본문. 같은 메시지를 두 번 받아도 한 줄만 남는다.
         // ⚠ 같은 채팅(t|m)이 이미 있어도, 기존에 재생 오프셋(v)이 없고 새로
         //   들어온 것에 있으면 그 값만 보강한다. 그냥 건너뛰면 라이브에서 먼저
@@ -36620,12 +36632,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         catalogMonths.push(month);
         if (!changed) continue;
         list.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0));
-        // 상한 초과분은 오래된 쪽부터 버린다.
-        const trimmed =
-          list.length > CHAT_RECAP_CHUNK_MAX
-            ? list.slice(list.length - CHAT_RECAP_CHUNK_MAX)
-            : list;
-        await store.set({ [key]: { v: 1, at: Date.now(), items: trimmed } });
+        await CHAT_RECAP_STORE_API.writeMerged(
+          store,
+          mergeState,
+          list,
+          CHAT_RECAP_CHUNK_MAX,
+        );
       } catch (error) {
         saved = false;
         if (isChatHistoryContextInvalidated(error)) return false;
@@ -36700,10 +36712,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const cutoffMonth = chatRecapMonthKey(cutoff);
       const drop = [];
       for (const key of Object.keys(all || {})) {
-        if (!key.startsWith(CHAT_RECAP_STORE_PREFIX)) continue;
-        // 키 끝의 YYYY-MM 을 문자열 비교한다(같은 형식이라 사전순=시간순).
-        const month = key.slice(key.lastIndexOf(":") + 1);
-        if (/^\d{4}-\d{2}$/.test(month) && month < cutoffMonth) drop.push(key);
+        const parsed = CHAT_RECAP_STORE_API.parseKey(
+          key,
+          CHAT_RECAP_STORE_PREFIX,
+        );
+        if (parsed?.month < cutoffMonth) drop.push(key);
       }
       if (drop.length) await store.remove(drop);
     } catch {}

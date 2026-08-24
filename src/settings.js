@@ -8081,7 +8081,7 @@
     "cheeseChatRecapPodiumAchievements",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
-    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}|chatRecapCatalog:[0-9a-f]{32})$/i;
+    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32})$/i;
   const isSettingsFullDataKey = (key) =>
     SETTINGS_FULL_DATA_KEYS.has(key) || CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
   const SETTINGS_MEDIA_KEY_PATTERN =

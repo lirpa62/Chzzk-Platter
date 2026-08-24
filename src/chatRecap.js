@@ -1,12 +1,13 @@
 // 치즈 플래터 - 채팅 리캡
 // 라이브에서 모아 둔 '내 채팅' 기록(chatRecap:<계정>:<채널>:<YYYY-MM>)을 읽어
-// 통계로 보여 준다. 저장은 content.js 가 하고, 이 페이지는 읽기만 한다.
+// 통계로 보여 준다. 5,000건 초과분은 같은 키의 :part:N에 이어 저장한다.
 (() => {
   "use strict";
 
   const STORE_PREFIX = "chatRecap:";
   const CATALOG_PREFIX = "chatRecapCatalog:";
   const CATALOG_MESSAGE = "CHAT_RECAP_CATALOG";
+  const STORE_API = globalThis.CheeseChatRecapStore;
   const STORE_CHUNK_MAX = 5000;
   const STORAGE_READ_BATCH = 24;
   const CATALOG_KNOWN_MAX = 5000;
@@ -35,15 +36,42 @@
 
   // ── 계정 ─────────────────────────────────────────────────────────────────
   // 기록은 계정별로 나뉘어 있다. 지금 로그인한 계정 것만 읽는다.
-  async function currentAccountId() {
+  async function currentAccountDetail() {
     try {
       const res = await fetch(USER_STATUS_URL, { credentials: "include" });
-      if (!res.ok) return "";
-      const hash = String((await res.json())?.content?.userIdHash || "").trim();
-      return HASH_RE.test(hash) ? hash.toLowerCase() : "";
+      if (!res.ok) {
+        return {
+          accountId: "",
+          status:
+            res.status === 401 || res.status === 403
+              ? "logged-out"
+              : "unavailable",
+          nickname: "",
+        };
+      }
+      const content = (await res.json())?.content || {};
+      const hash = String(content.userIdHash || "").trim();
+      if (!HASH_RE.test(hash)) {
+        return { accountId: "", status: "logged-out", nickname: "" };
+      }
+      const nickname = String(
+        content.nickname ||
+          content.userNickname ||
+          content.profileNickname ||
+          "",
+      ).trim();
+      return {
+        accountId: hash.toLowerCase(),
+        status: "authenticated",
+        nickname,
+      };
     } catch {
-      return "";
+      return { accountId: "", status: "unavailable", nickname: "" };
     }
+  }
+
+  async function currentAccountId() {
+    return (await currentAccountDetail()).accountId;
   }
 
   // ── 데이터 ───────────────────────────────────────────────────────────────
@@ -148,8 +176,8 @@
     try {
       const stored = await chrome.storage?.local?.get(catalogKey);
       catalog = normalizeRecapCatalog(stored?.[catalogKey]);
-    } catch {
-      return out;
+    } catch (error) {
+      throw new Error("catalog-read-failed", { cause: error });
     }
 
     if (!catalog) {
@@ -158,16 +186,17 @@
       let all = {};
       try {
         all = (await chrome.storage?.local?.get(null)) || {};
-      } catch {
-        return out;
+      } catch (error) {
+        throw new Error("catalog-rebuild-failed", { cause: error });
       }
       catalog = await rebuildRecapCatalog(accountId, all);
       for (const [channelId, months] of Object.entries(catalog)) {
         for (const month of months) {
+          const key = `${STORE_PREFIX}${accountId}:${channelId}:${month}`;
           appendRecapChunk(
             out,
             channelId,
-            all[`${STORE_PREFIX}${accountId}:${channelId}:${month}`],
+            { items: STORE_API.monthItemsFromValues(key, all) },
           );
         }
       }
@@ -184,9 +213,15 @@
       }
       for (let i = 0; i < descriptors.length; i += STORAGE_READ_BATCH) {
         const batch = descriptors.slice(i, i + STORAGE_READ_BATCH);
-        const values = await chrome.storage.local.get(batch.map((row) => row.key));
+        const values = await STORE_API.loadMonths(
+          chrome.storage.local,
+          batch.map((row) => row.key),
+          STORAGE_READ_BATCH,
+        );
         for (const row of batch) {
-          appendRecapChunk(out, row.channelId, values?.[row.key]);
+          appendRecapChunk(out, row.channelId, {
+            items: values.get(row.key) || [],
+          });
         }
         if (i + STORAGE_READ_BATCH < descriptors.length) await yieldToMain();
       }
@@ -221,7 +256,7 @@
   let emojiMap = Object.create(null);
   // 마지막으로 불러온 기록. 채널 상세를 펼칠 때 다시 읽지 않으려고 들고 있는다.
   let lastData = { items: [], donations: [], byChannel: new Map() };
-  let wordStatsCache = {
+  const emptyWordStats = () => ({
     rows: [],
     allChannels: new Set(),
     itemCount: 0,
@@ -230,7 +265,9 @@
     uniqueByType: { all: 0, text: 0, emoji: 0 },
     recentByType: { all: 0, text: 0, emoji: 0 },
     previousByType: { all: 0, text: 0, emoji: 0 },
-  };
+  });
+  let wordStatsCache = emptyWordStats();
+  let timeAggregateCache = null;
   let subscribedRows = []; // 구독 중 채널(상세 팝업용)
   let donScope = "all"; // "all" | "following" — 후원·구독 가져올 범위
   const DON_SCOPE_KEY = "cheeseChatRecapDonScope";
@@ -1639,7 +1676,49 @@
     });
   }
 
+  function timeAggregate(items) {
+    if (timeAggregateCache?.items === items) return timeAggregateCache;
+    const byDay = new Map();
+    const channelsByDay = new Map();
+    const byMonth = new Map();
+    const heat = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    const weekdays = new Array(7).fill(0);
+    const hourBins = new Array(8).fill(0);
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const date = new Date(item.t);
+      const day = localDayKey(item.t);
+      const month = monthKey(item.t);
+      const weekday = date.getDay();
+      const hour = date.getHours();
+      byDay.set(day, (byDay.get(day) || 0) + 1);
+      byMonth.set(month, (byMonth.get(month) || 0) + 1);
+      heat[weekday][hour] += 1;
+      weekdays[weekday] += 1;
+      hourBins[Math.floor(hour / 3)] += 1;
+      if (!channelsByDay.has(day)) channelsByDay.set(day, new Map());
+      const channelCounts = channelsByDay.get(day);
+      channelCounts.set(
+        item.channelId,
+        (channelCounts.get(item.channelId) || 0) + 1,
+      );
+    }
+    timeAggregateCache = {
+      items,
+      byDay,
+      channelsByDay,
+      byMonth,
+      heat,
+      weekdays,
+      hourBins,
+    };
+    return timeAggregateCache;
+  }
+
   function relatedChannelsForDay(items, day) {
+    if (items === lastData.items) {
+      return timeAggregate(items).channelsByDay.get(day) || new Map();
+    }
     const counts = new Map();
     for (const item of items) {
       if (localDayKey(item.t) !== day) continue;
@@ -1650,11 +1729,7 @@
 
   function buildBusiestInfo(selectedDay = "") {
     const items = lastData.items;
-    const byDay = new Map();
-    for (const item of items) {
-      const day = localDayKey(item.t);
-      byDay.set(day, (byDay.get(day) || 0) + 1);
-    }
+    const byDay = timeAggregate(items).byDay;
     const top = [...byDay.entries()]
       .sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))
       .slice(0, 10);
@@ -1737,23 +1812,16 @@
   }
 
   function renderSummary(items, donations) {
-    const dayKeys = items.map((it) => localDayKey(it.t));
-    const byDay = new Map();
-    for (const k of dayKeys) byDay.set(k, (byDay.get(k) || 0) + 1);
+    const aggregate = timeAggregate(items);
+    const byDay = aggregate.byDay;
     let busiest = ["", 0];
     for (const [k, n] of byDay) if (n > busiest[1]) busiest = [k, n];
 
     setText("crcTotal", fmt(items.length));
     setText("crcDays", fmt(byDay.size));
     setText("crcBusiest", fmt(busiest[1]));
-    const busiestByChannel = new Map();
-    for (const item of items) {
-      if (localDayKey(item.t) !== busiest[0]) continue;
-      busiestByChannel.set(
-        item.channelId,
-        (busiestByChannel.get(item.channelId) || 0) + 1,
-      );
-    }
+    const busiestByChannel =
+      aggregate.channelsByDay.get(busiest[0]) || new Map();
     const [busiestTopId] = topMapEntry(busiestByChannel);
     if (busiestTopId) {
       fillDateChannel($("crcBusiestDate"), busiest[0], busiestTopId);
@@ -1978,11 +2046,7 @@
   }
 
   function renderHeatmap(items) {
-    const grid = Array.from({ length: 7 }, () => new Array(24).fill(0));
-    for (const it of items) {
-      const d = new Date(it.t);
-      grid[d.getDay()][d.getHours()] += 1;
-    }
+    const grid = timeAggregate(items).heat;
     const max = Math.max(1, ...grid.flat());
     const box = $("crcHeatmap");
     box.textContent = "";
@@ -2055,11 +2119,7 @@
   function renderMonths(items) {
     const canvas = $("crcMonthChart");
     if (!canvas || typeof Chart === "undefined") return;
-    const byMonth = new Map();
-    for (const it of items) {
-      const k = monthKey(it.t);
-      byMonth.set(k, (byMonth.get(k) || 0) + 1);
-    }
+    const byMonth = timeAggregate(items).byMonth;
     // ⚠ 기록이 없는 달은 키가 없다. 그대로 이으면 빈 달이 접혀 추이가 왜곡된다
     //   → 처음~마지막 사이를 0 으로 채운다.
     const keys = [...byMonth.keys()].sort();
@@ -2141,16 +2201,14 @@
     if (!canvas || typeof Chart === "undefined") return;
     let labels;
     let values;
+    const aggregate = timeAggregate(items);
     if (polarMode === "hour") {
       // 시간대는 24칸이면 라벨이 겹친다 → 3시간 단위로 묶는다.
-      const bins = new Array(8).fill(0);
-      for (const it of items)
-        bins[Math.floor(new Date(it.t).getHours() / 3)] += 1;
+      const bins = aggregate.hourBins;
       labels = bins.map((_, i) => `${i * 3}-${i * 3 + 2}시`);
       values = bins;
     } else {
-      const byDay = new Array(7).fill(0);
-      for (const it of items) byDay[new Date(it.t).getDay()] += 1;
+      const byDay = aggregate.weekdays;
       // 월요일 시작으로 돌린다(주 시작을 월요일로 보는 다른 통계와 맞춘다).
       const order = [1, 2, 3, 4, 5, 6, 0];
       labels = order.map((d) => DAY_NAMES[d]);
@@ -3527,23 +3585,74 @@
     tintStatValue($("crcSubbed"), top.channelId);
   }
 
-  // 제목에 내 닉네임을 붙인다(내 기록이라는 걸 한눈에).
-  async function applyTitleNickname() {
-    try {
-      const res = await fetch(USER_STATUS_URL, { credentials: "include" });
-      if (!res.ok) return;
-      // ⚠ 필드명을 확인하지 못해 후보를 순서대로 본다. 못 찾으면 제목은 그대로 둔다.
-      const c = (await res.json())?.content || {};
-      const nickname = String(
-        c.nickname || c.userNickname || c.profileNickname || "",
-      ).trim();
-      if (!nickname) return;
-      setText("crcTitle", `${nickname} 채팅 리캡`);
-      document.title = `치즈 플래터 - ${nickname} 채팅 리캡`;
-    } catch {}
+  function applyAccountState(detail) {
+    const authenticated = detail?.status === "authenticated";
+    const state = $("crcAccountState");
+    const openChzzk = $("crcOpenChzzk");
+    const rebuild = $("crcCatalogRebuild");
+    state.hidden = authenticated;
+    if (!authenticated) $("crcNewRecords").hidden = true;
+    $("crcImport").disabled = !authenticated;
+    $("crcDonationImport").disabled = !authenticated;
+
+    if (authenticated) {
+      rebuild.hidden = true;
+      const nickname = String(detail.nickname || "").trim();
+      setText("crcTitle", nickname ? `${nickname} 채팅 리캡` : "채팅 리캡");
+      document.title = nickname
+        ? `치즈 플래터 - ${nickname} 채팅 리캡`
+        : "치즈 플래터 - 채팅 리캡";
+      return;
+    }
+
+    setText("crcTitle", "채팅 리캡");
+    document.title = "치즈 플래터 - 채팅 리캡";
+    const unavailable = detail?.status === "unavailable";
+    setText(
+      "crcAccountStateTitle",
+      unavailable
+        ? "로그인 상태를 확인하지 못했습니다."
+        : "치지직 로그인이 필요합니다.",
+    );
+    setText(
+      "crcAccountStateDescription",
+      unavailable
+        ? "네트워크 연결을 확인한 뒤 다시 시도해 주세요. 저장된 기록은 그대로 유지됩니다."
+        : "로그인한 계정에 저장된 채팅 기록만 표시합니다.",
+    );
+    openChzzk.hidden = unavailable;
+    rebuild.hidden = true;
+  }
+
+  function applyRecapLoadError() {
+    const state = $("crcAccountState");
+    state.hidden = false;
+    $("crcOpenChzzk").hidden = true;
+    $("crcCatalogRebuild").hidden = false;
+    $("crcNewRecords").hidden = true;
+    $("crcImport").disabled = true;
+    $("crcDonationImport").disabled = true;
+    setText("crcAccountStateTitle", "채팅 기록을 불러오지 못했습니다.");
+    setText(
+      "crcAccountStateDescription",
+      "저장된 기록은 그대로 유지됩니다. 다시 확인하거나 기록 인덱스를 복구해 주세요.",
+    );
+  }
+
+  function clearRecapRuntimeData() {
+    lastData = { items: [], donations: [], byChannel: new Map() };
+    wordStatsCache = emptyWordStats();
+    timeAggregateCache = null;
+    monthChart?.destroy();
+    monthChart = null;
+    polarChart?.destroy();
+    polarChart = null;
+    wordTrendChart?.destroy();
+    wordTrendChart = null;
   }
 
   let refreshInFlight = null;
+  let displayedAccountId = "";
 
   function refresh() {
     if (refreshInFlight) return refreshInFlight;
@@ -3554,13 +3663,43 @@
   }
 
   async function refreshOnce() {
-    const accountId = await currentAccountId();
+    const account = await currentAccountDetail();
+    const accountId = account.accountId;
+    applyAccountState(account);
+    if (accountId !== displayedAccountId) {
+      $("crcEmpty").hidden = true;
+      $("crcBody").hidden = true;
+      $("crcRange").hidden = true;
+      $("crcInfoModal").hidden = true;
+      clearRecapRuntimeData();
+    }
+    if (!accountId) {
+      displayedAccountId = "";
+      emojiMap = Object.create(null);
+      lockedEmojis = Object.create(null);
+      subscribedRows = [];
+      void loadPodiumAchievements("");
+      return;
+    }
     await loadChannelColors();
     await loadPodiumAchievements(accountId);
     await loadEmojiMap(accountId);
     // 구독 목록은 잠금 판정과 요약 카드가 함께 쓴다. 따로 두 번 요청하지 않는다.
     const subscribed = fetchSubscribedChannels();
-    const data = await loadRecap(accountId);
+    let data;
+    try {
+      data = await loadRecap(accountId);
+    } catch (error) {
+      console.warn("[치즈 플래터] 채팅 리캡 저장소 읽기 실패", error);
+      applyRecapLoadError();
+      clearRecapRuntimeData();
+      $("crcEmpty").hidden = true;
+      $("crcBody").hidden = true;
+      $("crcRange").hidden = true;
+      return;
+    }
+    displayedAccountId = accountId;
+    $("crcNewRecords").hidden = true;
     lastData = data;
     await buildWordStats(data.items);
     const subscribedChannelRows = await subscribed;
@@ -3570,7 +3709,10 @@
     const has = data.items.length > 0 || data.donations.length > 0;
     $("crcEmpty").hidden = has;
     $("crcBody").hidden = !has;
-    if (!has) return;
+    if (!has) {
+      $("crcRange").hidden = true;
+      return;
+    }
     // 두 목록은 loadRecap에서 각각 정렬되어 있다. 기간 한 줄을 위해 다시 합쳐
     // 복사·정렬하면 장기 기록 전체 크기의 임시 배열이 생기므로 양 끝만 비교한다.
     const firstAt = Math.min(
@@ -4010,8 +4152,12 @@
     const catalogMonths = [];
     for (const [month, list] of byMonth) {
       const key = `${STORE_PREFIX}${accountId}:${channelId}:${month}`;
-      const cur = (await chrome.storage.local.get(key))?.[key];
-      const items = Array.isArray(cur?.items) ? cur.items : [];
+      const mergeState = await STORE_API.readForMerge(
+        chrome.storage.local,
+        key,
+        list,
+      );
+      const items = mergeState.items;
       // ⚠ 위와 같은 이유로, 이미 있는 줄이면 v·n 만 보강한다.
       // ⚠ 후원은 본문이 비어 있을 수 있어(파티) t|m 만으로는 서로 뭉개진다 →
       //   종류·금액까지 키에 넣는다.
@@ -4073,13 +4219,12 @@
         added += 1;
       }
       items.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0));
-      const trimmed =
-        items.length > STORE_CHUNK_MAX
-          ? items.slice(items.length - STORE_CHUNK_MAX)
-          : items;
-      await chrome.storage.local.set({
-        [key]: { v: 1, at: Date.now(), items: trimmed },
-      });
+      await STORE_API.writeMerged(
+        chrome.storage.local,
+        mergeState,
+        items,
+        STORE_CHUNK_MAX,
+      );
       catalogMonths.push(month);
     }
     if (catalogMonths.length) {
@@ -5323,6 +5468,63 @@
     emojiPacksTried = false;
     void withBusy(e.currentTarget, () => refresh());
   });
-  void applyTitleNickname();
+  $("crcNewRecords")?.addEventListener("click", (e) => {
+    void withBusy(e.currentTarget, () => refresh());
+  });
+  $("crcOpenChzzk")?.addEventListener("click", () => {
+    const url = "https://chzzk.naver.com/";
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
+  });
+  $("crcAccountRetry")?.addEventListener("click", (e) => {
+    void withBusy(e.currentTarget, () => refresh());
+  });
+  $("crcCatalogRebuild")?.addEventListener("click", (e) => {
+    void withBusy(e.currentTarget, async () => {
+      const account = await currentAccountDetail();
+      if (!account.accountId) {
+        applyAccountState(account);
+        return;
+      }
+      try {
+        await chrome.storage.local.remove(
+          `${CATALOG_PREFIX}${account.accountId}`,
+        );
+        await refresh();
+      } catch (error) {
+        console.warn("[치즈 플래터] 채팅 리캡 인덱스 복구 실패", error);
+        applyRecapLoadError();
+      }
+    });
+  });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !displayedAccountId) return;
+    const prefix = `${STORE_PREFIX}${displayedAccountId}:`;
+    const catalogKey = `${CATALOG_PREFIX}${displayedAccountId}`;
+    if (
+      Object.keys(changes).some(
+        (key) => key === catalogKey || key.startsWith(prefix),
+      )
+    ) {
+      $("crcNewRecords").hidden = false;
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    void (async () => {
+      const account = await currentAccountDetail();
+      // 정상 화면은 계정 경계가 달라졌을 때만 다시 집계한다. 로그아웃·오류
+      // 안내 화면은 로그인이나 저장소 복구 여부를 확인하기 위해 다시 시도한다.
+      if (
+        !$("crcAccountState")?.hidden ||
+        account.accountId !== displayedAccountId
+      ) {
+        await refresh();
+      }
+    })();
+  });
   void refresh();
 })();
