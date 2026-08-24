@@ -120,8 +120,7 @@
   min-height: 28px;
 }
 
-.crc-stat-word .crc-emoji,
-.crc-stat-word .crc-emoji-locked {
+.crc-stat-word .crc-emoji {
   flex: none;
 }
 
@@ -707,8 +706,7 @@
   white-space: nowrap;
 }
 
-.crc-word-overview strong .crc-emoji,
-.crc-word-overview strong .crc-emoji-locked {
+.crc-word-overview strong .crc-emoji {
   flex: none;
 }
 
@@ -825,8 +823,7 @@
   white-space: nowrap;
 }
 
-.crc-info-title-wrap > strong .crc-emoji,
-.crc-info-title-wrap > strong .crc-emoji-locked {
+.crc-info-title-wrap > strong .crc-emoji {
   flex: none;
 }
 
@@ -1138,22 +1135,6 @@ img.crc-emoji {
   .crc-word:not(.crc-word-empty):focus-visible {
     transform: none;
   }
-}
-
-/* 구독자 전용(잠긴) 이모티콘. 유료 기능이라 이미지를 보여 주지 않고,
-   무엇이었는지만 알 수 있게 키를 칩으로 표시한다. */
-.crc-emoji-locked {
-  background: var(--popup-soft-bg);
-  border: 1px dashed var(--popup-border);
-  border-radius: 6px;
-  color: var(--popup-muted);
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  padding: 0 5px;
-  text-decoration: none;
-  vertical-align: -2px;
 }
 
 /* 채널명이 들어가는 카드 값. 숫자보다 길어 같은 크기면 넘친다. */
@@ -1840,8 +1821,7 @@ img.crc-emoji {
   text-align: right;
 }
 
-.crc-card-front-top .crc-emoji,
-.crc-card-front-top .crc-emoji-locked {
+.crc-card-front-top .crc-emoji {
   vertical-align: middle;
 }
 

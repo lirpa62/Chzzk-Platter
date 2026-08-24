@@ -362,8 +362,7 @@
           const emojiChannelId =
             channelId || subscriptionEmojiChannelFromUrl(url);
           if (isLocked) {
-            // 채널을 모르면 클릭 가능한 링크를 만들 수 없다. 이미지도 out 에
-            // 넣지 않으므로 이름만 남고, crc-emoji-locked 는 붙지 않는다.
+            // 이미지 사전에는 넣지 않고 내부 잠금 판정만 남겨 이름으로 표시한다.
             if (emojiChannelId) locked[key] = emojiChannelId;
             continue;
           }
@@ -497,12 +496,9 @@
       const url = emojiMap[key];
       if (key in lockedEmojis) {
         // 잠금 판정이 이미지 사전보다 우선이다. 저장소 정리가 실패하거나 늦어도
-        // 미구독 이모티콘 이미지가 다시 나타나지 않게 한다.
-        const el = document.createElement("span");
-        el.className = "crc-emoji-locked";
-        el.textContent = key;
-        el.title = "현재 사용할 수 없는 구독자 전용 이모티콘입니다.";
-        target.append(el);
+        // 미구독 이모티콘 이미지가 다시 나타나지 않게 하되 별도 잠금 UI 없이
+        // 사람이 읽을 수 있는 이름만 표시한다.
+        target.append(document.createTextNode(key));
       } else if (typeof url === "string" && EMOJI_HOST.test(url)) {
         const img = document.createElement("img");
         img.src = url;
@@ -3189,6 +3185,47 @@
     return wrap;
   }
 
+  const CARD_EXPRESSION_FONT_MAX = 18;
+  const CARD_EXPRESSION_FONT_MIN = 11;
+  let cardExpressionFitFrame = 0;
+
+  function fitCardExpressionLabels() {
+    cardExpressionFitFrame = 0;
+    for (const label of document.querySelectorAll(
+      ".crc-card-front-top > span:not(.crc-detail-words-title) > b",
+    )) {
+      label.style.removeProperty("font-size");
+      label.style.removeProperty("justify-content");
+      const available = label.clientWidth;
+      const required = label.scrollWidth;
+      if (!(available > 0) || required <= available + 0.5) continue;
+
+      let size = Math.max(
+        CARD_EXPRESSION_FONT_MIN,
+        Math.floor(
+          ((CARD_EXPRESSION_FONT_MAX * available) / required - 0.2) * 10,
+        ) / 10,
+      );
+      label.style.fontSize = `${size}px`;
+      // 글꼴별 폭과 소수점 반올림 차이를 한두 단계만 보정한다.
+      while (
+        label.scrollWidth > label.clientWidth + 0.5 &&
+        size > CARD_EXPRESSION_FONT_MIN
+      ) {
+        size = Math.max(CARD_EXPRESSION_FONT_MIN, size - 0.5);
+        label.style.fontSize = `${size}px`;
+      }
+      if (label.scrollWidth > label.clientWidth + 0.5) {
+        label.style.justifyContent = "flex-start";
+      }
+    }
+  }
+
+  function scheduleCardExpressionFit() {
+    if (cardExpressionFitFrame) cancelAnimationFrame(cardExpressionFitFrame);
+    cardExpressionFitFrame = requestAnimationFrame(fitCardExpressionLabels);
+  }
+
   // 카드 보기. 1~3등은 포디움(2·1·3 순서로 가운데가 가장 높게), 나머지는 아래에.
   function renderChannelCards(byChannel) {
     const box = $("crcChannelCards");
@@ -3319,6 +3356,7 @@
     for (const b of document.querySelectorAll("[data-view]")) {
       b.setAttribute("aria-pressed", String(b.dataset.view === channelView));
     }
+    if (channelView === "card") scheduleCardExpressionFit();
   }
 
   // 한 줄짜리 비율 바. 채널마다 자기 색으로 칠한다.
@@ -4913,6 +4951,11 @@
 
   // 채널별 채팅 보기 전환(목록 ↔ 카드)
   const VIEW_KEY = "cheeseChatRecapChannelView";
+  let cardExpressionResizeTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(cardExpressionResizeTimer);
+    cardExpressionResizeTimer = setTimeout(scheduleCardExpressionFit, 80);
+  });
   for (const btn of document.querySelectorAll("[data-view]")) {
     btn.addEventListener("click", () => {
       channelView = btn.dataset.view === "card" ? "card" : "list";
