@@ -862,7 +862,28 @@
       <!-- 채널 색상: 두 차트가 공유하므로 차트 묶음 밖에 둔다. -->
       <div class="lps-colors">
         <div class="lps-colors-head">
-          <span>채널 색상</span>
+          <button
+            type="button"
+            class="lps-colors-toggle"
+            id="lpsColorsToggle"
+            aria-expanded="true"
+            aria-controls="lpsColorsBody"
+          >
+            <span>채널 색상</span>
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
           <button type="button" class="lps-colors-auto" id="lpsColorAuto">
             프로필에서 색 추출
           </button>
@@ -870,8 +891,10 @@
             기본색
           </button>
         </div>
-        <p class="lps-colors-note" id="lpsColorNote" hidden></p>
-        <ul class="lps-colors-list" id="lpsColorList"></ul>
+        <div class="lps-colors-body" id="lpsColorsBody">
+          <p class="lps-colors-note" id="lpsColorNote" hidden></p>
+          <ul class="lps-colors-list" id="lpsColorList"></ul>
+        </div>
       </div>
 
       <p class="lps-sync-note" id="lpsSyncNote" hidden></p>

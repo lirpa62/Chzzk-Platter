@@ -89,6 +89,25 @@ async function appendRows(rows) {
   const largeState = await api.readForMerge(storage, baseKey, largeIncoming);
   assert.equal(largeState.full, false);
 
+  // 예전 다시보기 행은 재수집할 때 절대 시각이 조금 달라져도 영상·재생 위치·
+  // 본문이 같으면 한 행으로 정리한다.
+  const legacyVod = api.compactVodRows([
+    { t: 1000, m: "같은 채팅", n: "123", v: 17 },
+    { t: 1900, m: "같은 채팅", n: "123", v: 17 },
+    { t: 2400, m: "같은 채팅", n: "123", v: 17, i: "id:one" },
+  ]);
+  assert.equal(legacyVod.changed, true);
+  assert.equal(legacyVod.items.length, 1);
+  assert.equal(legacyVod.items[0].i, "id:one");
+
+  // 서버 메시지 ID가 서로 다르면 같은 초에 같은 문구를 보냈어도 보존한다.
+  const distinctVod = api.compactVodRows([
+    { t: 3000, m: "반복", n: "123", v: 20, i: "id:a" },
+    { t: 3100, m: "반복", n: "123", v: 20, i: "id:b" },
+  ]);
+  assert.equal(distinctVod.changed, false);
+  assert.equal(distinctVod.items.length, 2);
+
   console.log("chatRecapStore tests passed");
 })().catch((error) => {
   console.error(error);

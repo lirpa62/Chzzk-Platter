@@ -400,6 +400,7 @@
   display: flex;
   gap: 12px;
   justify-content: space-between;
+  margin-bottom: 5px;
 }
 
 .crc-chart-wrap {
@@ -955,6 +956,9 @@
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
+  /* 진행 문구는 textContent 로 넣는다 → \n 을 살리려면 pre-line 이 필요하다.
+     ⚠ pre-wrap 이 아니다: 소스의 들여쓰기 공백까지 그대로 나온다. */
+  white-space: pre-line;
 }
 
 .crc-modal-actions {
@@ -1192,6 +1196,21 @@ img.crc-emoji {
 
 .crc-stat-date-prefix {
   flex: none;
+}
+
+/* 하루 최다 카드에서는 날짜와 관련 채널을 각각 한 줄로 읽는다. */
+.crc-stat-date-channel-wrap {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.crc-stat-date-channel {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .crc-summary[hidden] {
@@ -2259,4 +2278,513 @@ img.crc-emoji {
   color: var(--popup-muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* ── 새 다시보기 확인 · 이미지 공유 ───────────────────────────────────── */
+.lps-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.crc-new-vods-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.crc-new-vods-button.has-new {
+  border-color: color-mix(in srgb, var(--popup-brand) 58%, var(--popup-border));
+  color: var(--popup-brand-strong);
+}
+
+.crc-new-vods-count {
+  align-items: center;
+  background: var(--popup-brand);
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  justify-content: center;
+  min-width: 18px;
+  padding: 2px 5px;
+}
+
+.crc-new-vods-count[hidden] {
+  display: none;
+}
+
+.crc-export-menu {
+  position: relative;
+}
+
+.crc-export-menu > .lps-refresh {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.crc-export-popover {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 7px);
+  z-index: 80;
+}
+
+.crc-export-popover[hidden] {
+  display: none;
+}
+
+.crc-export-popover button {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--popup-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.crc-export-popover button:hover {
+  background: var(--popup-soft-bg);
+}
+
+.crc-channel-export-modal-box {
+  width: min(620px, 100%);
+}
+
+.crc-channel-export-options {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-channel-export-group {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.crc-channel-export-group-head,
+.crc-channel-export-option {
+  align-items: center;
+  border-radius: 7px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crc-channel-export-group-head {
+  color: var(--popup-text);
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 2px;
+  padding: 7px 8px;
+}
+
+.crc-channel-export-option {
+  color: var(--popup-muted);
+  font-size: 12px;
+  padding: 8px;
+}
+
+.crc-channel-export-group-head:hover,
+.crc-channel-export-option:hover {
+  background: var(--popup-soft-bg);
+}
+
+.crc-channel-export-group input {
+  accent-color: var(--popup-brand);
+  flex: none;
+  height: 15px;
+  margin: 0;
+  width: 15px;
+}
+
+.crc-channel-export-count {
+  color: var(--popup-muted);
+  font-size: 11px;
+  margin: 0;
+}
+
+.crc-section-head .crc-section-title {
+  margin-bottom: 0;
+}
+
+.crc-section-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.crc-section-export {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 30px;
+}
+
+.crc-section-export:hover,
+#crcInfoExport:hover {
+  border-color: var(--popup-brand);
+  color: var(--popup-brand-strong);
+}
+
+.crc-section-export.is-exporting svg,
+#crcInfoExport.is-exporting svg {
+  visibility: hidden;
+}
+
+.crc-section-export.is-exporting::after,
+#crcInfoExport.is-exporting::after {
+  animation: crc-export-spin 0.7s linear infinite;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  content: "";
+  height: 13px;
+  position: absolute;
+  width: 13px;
+}
+
+@keyframes crc-export-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.crc-new-vod-panel {
+  align-items: center;
+  background: color-mix(in srgb, var(--popup-brand) 7%, var(--popup-surface));
+  border: 1px solid
+    color-mix(in srgb, var(--popup-brand) 30%, var(--popup-border));
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.crc-new-vod-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crc-new-vod-actions {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.crc-new-vod-panel strong {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.crc-new-vod-panel span {
+  color: var(--popup-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.crc-new-vod-panel .crc-btn-ghost {
+  flex: none;
+  padding: 6px 10px;
+}
+
+.crc-item-state.is-new {
+  background: color-mix(in srgb, var(--popup-brand) 13%, transparent);
+  border-radius: 999px;
+  color: var(--popup-brand-strong);
+  padding: 2px 6px;
+  flex: none !important;
+}
+
+.crc-modal-head-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+#crcInfoExport {
+  border: 1px solid transparent;
+  height: 28px;
+  justify-content: center;
+  position: relative;
+  width: 28px;
+}
+
+.crc-export-stage {
+  left: -100000px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  z-index: -1;
+}
+
+.crc-export-sheet {
+  background: var(--popup-bg);
+  box-sizing: border-box;
+  color: var(--popup-text);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 30px;
+}
+
+/* 화면 목록은 빠른 탐색을 위해 긴 문구를 줄이지만, 저장 이미지에는
+   보관된 첫 채팅과 표현 이름을 생략하지 않는다. html-to-image가 이 최종
+   계산 스타일을 복제하므로 캡처 대상 안에서만 말줄임을 해제한다. */
+.crc-export-sheet .crc-channel-first-chats,
+.crc-export-sheet .crc-channel-first-chats .crc-first-chat {
+  max-width: 100%;
+  width: max-content;
+}
+
+.crc-export-sheet .crc-channel-first-chats .crc-first-chat-message {
+  box-sizing: content-box;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  padding-right: 0.75em;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.crc-export-sheet .crc-channel-detail .crc-detail-first-chats {
+  flex-wrap: wrap;
+}
+
+.crc-export-sheet .crc-channel-detail .crc-detail-first-chats .crc-first-chat,
+.crc-export-sheet .crc-info-body .crc-detail-first-chats .crc-first-chat {
+  grid-template-columns: max-content max-content;
+  max-width: none;
+  width: max-content;
+}
+
+.crc-export-sheet
+  .crc-channel-detail
+  .crc-detail-first-chats
+  .crc-first-chat
+  > em,
+.crc-export-sheet
+  .crc-channel-detail
+  .crc-detail-first-chats
+  .crc-first-chat
+  > time,
+.crc-export-sheet .crc-info-body .crc-detail-first-chats .crc-first-chat > em,
+.crc-export-sheet
+  .crc-info-body
+  .crc-detail-first-chats
+  .crc-first-chat
+  > time {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.crc-export-sheet
+  .crc-channel-detail
+  .crc-detail-first-chats
+  .crc-first-chat-message {
+  -webkit-line-clamp: unset;
+  box-sizing: content-box;
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  padding-right: 0.75em;
+}
+
+.crc-export-sheet .crc-detail-words > span {
+  max-width: 100%;
+}
+
+.crc-export-sheet .crc-detail-words b {
+  min-width: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.crc-export-heading {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--popup-border);
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.crc-export-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.crc-export-heading strong {
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.crc-export-heading span,
+.crc-export-heading > b {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.crc-export-toast {
+  background: var(--popup-text);
+  border-radius: 8px;
+  bottom: 24px;
+  color: var(--popup-bg);
+  font-size: 12px;
+  left: 50%;
+  max-width: min(420px, calc(100vw - 32px));
+  opacity: 0;
+  padding: 10px 14px;
+  pointer-events: none;
+  position: fixed;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity 0.16s,
+    transform 0.16s;
+  z-index: 200;
+}
+
+.crc-export-toast.is-shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.crc-export-toast.is-error {
+  background: #d54444;
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .crc-section-head,
+  .crc-section-actions {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .crc-section-actions {
+    width: 100%;
+  }
+
+  .crc-new-vod-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .crc-new-vod-actions {
+    justify-content: flex-end;
+  }
+
+  .crc-channel-export-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── AI 분석 프롬프트 모달 ───────────────────────────────────────────────── */
+.crc-prompt-picks {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+
+.crc-prompt-pick {
+  align-items: flex-start;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+.crc-prompt-pick:hover {
+  background: var(--popup-soft-bg);
+}
+
+.crc-prompt-pick input {
+  flex: none;
+  margin-top: 2px;
+}
+
+.crc-prompt-pick span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.crc-prompt-pick strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 항목마다 '무엇이 들어가는지' 를 적어 둔다 — 붙여넣기 전에 판단하게. */
+.crc-prompt-pick em {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.crc-prompt-preview-label {
+  color: var(--popup-muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.crc-prompt-preview {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  color: var(--popup-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 220px;
+  padding: 10px 12px;
+  resize: vertical;
+  /* 시간대 줄이 길다 → 가로 스크롤 대신 접어서 보여 준다(pre-wrap). */
+  white-space: pre-wrap;
+  width: 100%;
+  word-break: break-word;
 }

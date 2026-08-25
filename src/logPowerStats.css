@@ -626,10 +626,46 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
   color: var(--popup-muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.lps-colors-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 5px;
+  padding: 3px 0;
+}
+
+.lps-colors-toggle:hover {
+  color: var(--popup-text);
+}
+
+.lps-colors-toggle svg {
+  transition: transform 0.16s ease;
+}
+
+.lps-colors-toggle[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+
+.lps-colors-body {
+  margin-top: 8px;
+}
+
+.lps-colors-body[hidden] {
+  display: none;
+}
+
+.lps-colors.is-collapsed .lps-colors-auto,
+.lps-colors.is-collapsed .lps-colors-reset {
+  display: none;
 }
 
 .lps-colors-auto,

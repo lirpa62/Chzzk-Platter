@@ -5,6 +5,30 @@
   "use strict";
 
   const LOG_KEY = "cheeseLogPowerLog";
+  const COLORS_COLLAPSED_KEY = "cheeseLogPowerStatsColorsCollapsed";
+
+  function setupColorsCollapse() {
+    const toggle = document.getElementById("lpsColorsToggle");
+    const body = document.getElementById("lpsColorsBody");
+    if (!toggle || !body) return;
+    const root = toggle.closest(".lps-colors");
+    const apply = (expanded) => {
+      toggle.setAttribute("aria-expanded", String(expanded));
+      body.hidden = !expanded;
+      root?.classList.toggle("is-collapsed", !expanded);
+    };
+    toggle.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") !== "true";
+      apply(expanded);
+      void chrome.storage.local.set({ [COLORS_COLLAPSED_KEY]: !expanded });
+    });
+    void chrome.storage.local
+      .get(COLORS_COLLAPSED_KEY)
+      .then((saved) => apply(saved?.[COLORS_COLLAPSED_KEY] !== true))
+      .catch(() => {});
+  }
+
+  setupColorsCollapse();
 
   /** 기간 경계는 달력 기준이다(오늘 00:00, 이번 주 월요일, 이번 달 1일). */
   function periodStarts(now = new Date()) {

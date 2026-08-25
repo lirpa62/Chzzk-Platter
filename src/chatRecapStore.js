@@ -122,6 +122,80 @@
   const sortItems = (items) =>
     items.sort((a, b) => (Number(a?.t) || 0) - (Number(b?.t) || 0));
 
+  function vodIdentityKey(item) {
+    const videoNo = String(item?.n || "");
+    const identity = String(item?.i || "");
+    return /^\d+$/.test(videoNo) && identity
+      ? `${videoNo}|${identity}`
+      : "";
+  }
+
+  function vodFallbackKey(item, donationKeyOf = () => "") {
+    const videoNo = String(item?.n || "");
+    const offset = Number(item?.v);
+    if (!/^\d+$/.test(videoNo) || !Number.isFinite(offset)) return "";
+    return JSON.stringify([
+      videoNo,
+      Math.round(offset),
+      String(item?.m || ""),
+      String(donationKeyOf(item?.d) || ""),
+    ]);
+  }
+
+  // 예전 버전은 다시보기 메시지를 절대 시각(t)으로만 구분했다. API 재조회 때
+  // t가 조금 달라지면 같은 영상·재생 위치의 메시지가 새 행으로 쌓였으므로,
+  // 메시지 ID(i)를 우선하고 없는 레거시 행만 영상+초 단위 위치+본문으로 합친다.
+  function compactVodRows(sourceItems, donationKeyOf = () => "") {
+    const items = [];
+    const identities = new Map();
+    const fallbacks = new Map();
+    let changed = false;
+
+    for (const item of sourceItems || []) {
+      const identity = vodIdentityKey(item);
+      const fallback = vodFallbackKey(item, donationKeyOf);
+      let index = identity ? identities.get(identity) : undefined;
+      if (index === undefined && fallback) {
+        const fallbackIndex = fallbacks.get(fallback);
+        if (
+          fallbackIndex !== undefined &&
+          (!identity || !String(items[fallbackIndex]?.i || ""))
+        ) {
+          index = fallbackIndex;
+        }
+      }
+
+      if (index === undefined) {
+        index = items.length;
+        items.push(item);
+        if (identity) identities.set(identity, index);
+        if (fallback && !fallbacks.has(fallback)) {
+          fallbacks.set(fallback, index);
+        }
+        continue;
+      }
+
+      const current = items[index];
+      const next = { ...current };
+      if (!next.i && item?.i) next.i = item.i;
+      if (!next.n && item?.n) next.n = item.n;
+      if (next.v === undefined && item?.v !== undefined) next.v = item.v;
+      if (!next.m && item?.m) next.m = item.m;
+      if (
+        item?.d &&
+        (!next.d || (item.d.src === "history" && next.d?.src !== "history"))
+      ) {
+        next.d = item.d;
+        if (item.d.src === "history" && Number(item?.t) > 0) next.t = item.t;
+      }
+      items[index] = next;
+      const nextIdentity = vodIdentityKey(next);
+      if (nextIdentity) identities.set(nextIdentity, index);
+      changed = true;
+    }
+    return { items, changed };
+  }
+
   async function writeMerged(
     storage,
     state,
@@ -191,6 +265,9 @@
     monthItemsFromValues,
     parseKey,
     readForMerge,
+    compactVodRows,
+    vodFallbackKey,
+    vodIdentityKey,
     writeMerged,
   });
 })();

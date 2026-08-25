@@ -2885,7 +2885,12 @@
     ];
   }
 
-  function createDatePicker(type, label, includePresets = true) {
+  function createDatePicker(
+    type,
+    label,
+    includePresets = true,
+    includeDayShortcuts = false,
+  ) {
     return `
     <div class="cheese-search-date-picker" data-date-picker="${type}">
       <button type="button" class="cheese-search-control cheese-search-date-trigger" data-action="date-toggle" aria-haspopup="dialog" aria-expanded="false">
@@ -2915,6 +2920,12 @@
         <div class="cheese-search-calendar-grid" data-calendar-grid></div>
         <div class="cheese-search-calendar-actions">
           <button type="button" data-calendar-action="clear">초기화</button>
+          ${
+            includeDayShortcuts
+              ? `<button type="button" data-calendar-action="yesterday">어제</button>
+          <button type="button" data-calendar-action="today">오늘</button>`
+              : ""
+          }
           <button type="button" data-calendar-action="close">닫기</button>
         </div>
       </div>
@@ -9721,6 +9732,46 @@
   // 예전 버전은 실패·빈 결과도 완료로 남길 수 있었다. 현재 방식으로 끝까지
   // 확인한 영상만 별도 표식해 오래된 잘못된 완료 상태를 한 번 재검증한다.
   const CHAT_RECAP_VERIFIED_KEY = "chatRecapVerifiedVideosV2";
+  // 후원·구독 결제 내역까지 다시보기 재생 위치와 연결했는지 별도로 기록한다.
+  // 기존 완료 목록을 지우지 않고, V3 표식이 없는 영상만 한 번 다시 확인한다.
+  const CHAT_RECAP_EVENT_LINK_KEY = "chatRecapVodEventLinksV3";
+  const CHAT_RECAP_HISTORY_REVISION_KEY = "chatRecapHistoryRevisionV1";
+
+  function recapAccountMap(root, accountId) {
+    const value = root && typeof root === "object" ? root[accountId] : null;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  }
+
+  async function recapVideoEventLinkState(accountId, videoNo, channelId) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !videoNo || !channelId) {
+      return { current: false, revision: 0 };
+    }
+    try {
+      const data = await store.get([
+        CHAT_RECAP_EVENT_LINK_KEY,
+        CHAT_RECAP_HISTORY_REVISION_KEY,
+      ]);
+      const revisions = recapAccountMap(
+        data?.[CHAT_RECAP_HISTORY_REVISION_KEY],
+        accountId,
+      );
+      const revision = Number(revisions[channelId]) || 0;
+      const links = recapAccountMap(data?.[CHAT_RECAP_EVENT_LINK_KEY], accountId);
+      const linked = links[String(videoNo)];
+      return {
+        current:
+          linked &&
+          String(linked.channelId || "") === channelId &&
+          (Number(linked.historyRevision) || 0) >= revision,
+        revision,
+      };
+    } catch {
+      return { current: false, revision: 0 };
+    }
+  }
 
   async function isRecapVideoImported(accountId, videoNo) {
     const store = chatHistoryStore();
@@ -9739,13 +9790,15 @@
     }
   }
 
-  async function markRecapVideoImported(accountId, videoNo) {
+  async function markRecapVideoImported(accountId, videoNo, channelIdHint = "") {
     const store = chatHistoryStore();
     if (!store || !accountId || !videoNo) return false;
     try {
       const data = await store.get([
         CHAT_RECAP_IMPORTED_KEY,
         CHAT_RECAP_VERIFIED_KEY,
+        CHAT_RECAP_EVENT_LINK_KEY,
+        CHAT_RECAP_HISTORY_REVISION_KEY,
       ]);
       const stored = data?.[CHAT_RECAP_IMPORTED_KEY];
       const flags = stored && typeof stored === "object" ? stored : {};
@@ -9763,6 +9816,28 @@
       const value = String(videoNo);
       if (!mine.includes(value)) mine.push(value);
       if (!verifiedMine.includes(value)) verifiedMine.push(value);
+      const channelId = String(
+        channelIdHint || currentRecapChannelId() || "",
+      ).toLowerCase();
+      const eventLinksStored = data?.[CHAT_RECAP_EVENT_LINK_KEY];
+      const eventLinks =
+        eventLinksStored && typeof eventLinksStored === "object"
+          ? eventLinksStored
+          : {};
+      const eventLinksMine = {
+        ...recapAccountMap(eventLinks, accountId),
+      };
+      const revisions = recapAccountMap(
+        data?.[CHAT_RECAP_HISTORY_REVISION_KEY],
+        accountId,
+      );
+      if (channelId) {
+        eventLinksMine[value] = {
+          channelId,
+          historyRevision: Number(revisions[channelId]) || 0,
+        };
+        eventLinks[accountId] = eventLinksMine;
+      }
       // 완료 표식을 자르면 오래된 다시보기를 다시 전수 확인하게 된다.
       // unlimitedStorage 권한을 사용하므로 계정별 완료 목록을 온전히 유지한다.
       flags[accountId] = mine;
@@ -9770,6 +9845,7 @@
       await store.set({
         [CHAT_RECAP_IMPORTED_KEY]: flags,
         [CHAT_RECAP_VERIFIED_KEY]: verified,
+        ...(channelId ? { [CHAT_RECAP_EVENT_LINK_KEY]: eventLinks } : {}),
       });
       return true;
     } catch {
@@ -9777,20 +9853,115 @@
     }
   }
 
-  async function isRecapVideoVerified(accountId, videoNo) {
+  async function clearRecapVideoForReimport(accountId, channelId, videoNo) {
     const store = chatHistoryStore();
-    if (!store) return false;
+    const targetVideoNo = String(videoNo || "");
+    if (!store || !accountId || !channelId || !/^\d+$/.test(targetVideoNo)) {
+      return { ok: false, removed: 0 };
+    }
+    const catalogKey = `chatRecapCatalog:${accountId}`;
+    let months = [];
     try {
-      const all = (await store.get(CHAT_RECAP_VERIFIED_KEY))?.[
-        CHAT_RECAP_VERIFIED_KEY
-      ];
-      const mine = all && typeof all === "object" ? all[accountId] : null;
-      return (
-        Array.isArray(mine) &&
-        mine.some((value) => String(value) === String(videoNo))
+      const catalog = (await store.get(catalogKey))?.[catalogKey];
+      months = Array.isArray(catalog?.channels?.[channelId])
+        ? catalog.channels[channelId]
+            .map(String)
+            .filter((month) => /^\d{4}-\d{2}$/.test(month))
+        : [];
+    } catch {}
+    if (!months.length) {
+      months = chatRecapMonthKeysForChannel(accountId, channelId).map((key) =>
+        key.slice(-7),
       );
+    }
+    let removed = 0;
+    const cleared = await enqueueChatRecapWrite(
+      accountId,
+      channelId,
+      async () => {
+        for (const month of months) {
+          const key = chatRecapStoreKey(accountId, channelId, month);
+          const mergeState = await CHAT_RECAP_STORE_API.readForMerge(
+            store,
+            key,
+            [{ t: 1 }],
+          );
+          if (!mergeState.items.length) continue;
+          const compacted = CHAT_RECAP_STORE_API.compactVodRows(
+            mergeState.items,
+            recapDonationMatchKey,
+          );
+          const next = [];
+          let changed = compacted.changed;
+          for (const item of compacted.items) {
+            if (String(item?.n || "") !== targetVideoNo) {
+              next.push(item);
+              continue;
+            }
+            removed += 1;
+            changed = true;
+            // 결제 내역은 익명 후원·구독을 다시 연결할 때 필요한 정본이다.
+            // 영상 연결 정보만 떼고 내역 자체는 보존한다.
+            if (item?.d?.src === "history") {
+              const { n, v, i, ...historyItem } = item;
+              next.push(historyItem);
+            }
+          }
+          if (!changed) continue;
+          await CHAT_RECAP_STORE_API.writeMerged(
+            store,
+            mergeState,
+            next,
+            CHAT_RECAP_CHUNK_MAX,
+          );
+        }
+        return true;
+      },
+    ).catch(() => false);
+    if (!cleared) return { ok: false, removed };
+
+    try {
+      const data = await store.get([
+        CHAT_RECAP_IMPORTED_KEY,
+        CHAT_RECAP_VERIFIED_KEY,
+        CHAT_RECAP_EVENT_LINK_KEY,
+      ]);
+      const imported =
+        data?.[CHAT_RECAP_IMPORTED_KEY] &&
+        typeof data[CHAT_RECAP_IMPORTED_KEY] === "object"
+          ? data[CHAT_RECAP_IMPORTED_KEY]
+          : {};
+      const verified =
+        data?.[CHAT_RECAP_VERIFIED_KEY] &&
+        typeof data[CHAT_RECAP_VERIFIED_KEY] === "object"
+          ? data[CHAT_RECAP_VERIFIED_KEY]
+          : {};
+      imported[accountId] = (Array.isArray(imported[accountId])
+        ? imported[accountId]
+        : []
+      ).filter((value) => String(value) !== targetVideoNo);
+      verified[accountId] = (Array.isArray(verified[accountId])
+        ? verified[accountId]
+        : []
+      ).filter((value) => String(value) !== targetVideoNo);
+      const eventLinks =
+        data?.[CHAT_RECAP_EVENT_LINK_KEY] &&
+        typeof data[CHAT_RECAP_EVENT_LINK_KEY] === "object"
+          ? data[CHAT_RECAP_EVENT_LINK_KEY]
+          : {};
+      const mine = { ...recapAccountMap(eventLinks, accountId) };
+      delete mine[targetVideoNo];
+      eventLinks[accountId] = mine;
+      await store.set({
+        [CHAT_RECAP_IMPORTED_KEY]: imported,
+        [CHAT_RECAP_VERIFIED_KEY]: verified,
+        [CHAT_RECAP_EVENT_LINK_KEY]: eventLinks,
+      });
+      recapVodCache.delete(targetVideoNo);
+      recapSearchRowsCache.delete(`${accountId}:${channelId}`);
+      return { ok: true, removed };
     } catch {
-      return false;
+      return { ok: false, removed };
     }
   }
 
@@ -9814,30 +9985,58 @@
     if (!channelId || !(await isRecapVideoImported(accountId, videoNo))) {
       return null;
     }
+    const eventLink = await recapVideoEventLinkState(
+      accountId,
+      videoNo,
+      channelId,
+    );
+    if (!eventLink.current) return null;
     const channelItems = await loadStoredRecapChannelItems(
       accountId,
       channelId,
     );
-    const rows = [];
+    const storedRows = [];
     for (const it of channelItems) {
       // 이 영상에서 가져온 것만(n = videoNo). n 이 없으면 라이브 수집분이라
       // 재생 위치를 알 수 없어 목록에 못 쓴다.
       if (String(it?.n || "") !== String(videoNo)) continue;
       const seconds = Number(it?.v);
       const text = String(it?.m || "");
-      if (!Number.isFinite(seconds) || seconds < 0 || !text) continue;
-      rows.push({ seconds, text, t: Number(it?.t) || 0 });
+      const donation = it?.d && typeof it.d === "object" ? { ...it.d } : null;
+      if (!Number.isFinite(seconds) || seconds < 0 || (!text && !donation)) {
+        continue;
+      }
+      storedRows.push({
+        t: Number(it?.t) || 0,
+        m: text,
+        v: seconds,
+        n: String(videoNo),
+        ...(it?.i ? { i: String(it.i) } : {}),
+        ...(donation ? { d: donation } : {}),
+      });
     }
+    const compacted = CHAT_RECAP_STORE_API.compactVodRows(
+      storedRows,
+      recapDonationMatchKey,
+    );
+    if (compacted.changed) {
+      await saveChatRecapBatch(
+        accountId,
+        channelId,
+        compacted.items,
+        videoNo,
+      );
+    }
+    const rows = compacted.items.map((item) => ({
+      seconds: Number(item.v),
+      text: String(item.m || ""),
+      t: Number(item.t) || 0,
+      ...(item.i ? { i: String(item.i) } : {}),
+      ...(item.d ? { d: { ...item.d } } : {}),
+    }));
     rows.sort((a, b) => a.seconds - b.seconds);
-    // 예전 버전은 가져오기 실패·빈 결과도 완료로 기록할 수 있었다. 라이브에서
-    // 저장됐지만 아직 영상 번호가 없는 행이 남아 있다면 API를 다시 확인한다.
-    if (
-      !rows.length &&
-      channelItems.some((item) => !item?.n && item?.m) &&
-      !(await isRecapVideoVerified(accountId, videoNo))
-    ) {
-      return null;
-    }
+    // V3 표식은 끝까지 읽었거나 채팅 미제공(400)이 확정된 뒤에만 남는다.
+    // 따라서 빈 결과도 다시 전수 확인하지 않고 그대로 사용할 수 있다.
     return rows;
   }
 
@@ -9853,6 +10052,24 @@
       return "";
     }
   }
+
+  function recapVodMessageIdentity(message, text, donation) {
+    const explicit =
+      message?.key ||
+      message?.messageKey ||
+      message?.messageId ||
+      message?.messageNo ||
+      message?.msgId ||
+      message?.chatId ||
+      "";
+    if (explicit !== "") return `id:${String(explicit)}`.slice(0, 500);
+    const offset = Number(message?.playerMessageTime);
+    if (!Number.isFinite(offset)) return "";
+    return `vod:${recapChatHash(message)}|${offset}|${String(text || "")}|${recapDonationMatchKey(donation)}`.slice(
+      0,
+      500,
+    );
+  }
   async function loadRecapForCurrentVideo(onProgress) {
     const accountId = currentClipVaultAccountId();
     const videoNo = getCurrentVideoNo();
@@ -9867,8 +10084,16 @@
     // 캐시가 있으면 즉시(같은 영상을 다시 열 때 수백 요청을 반복하지 않는다).
     const cached = recapVodCache.get(videoNo);
     if (cached) {
-      setRecapVodCache(videoNo, cached);
-      return cached;
+      const eventLink = await recapVideoEventLinkState(
+        accountId,
+        videoNo,
+        channelId,
+      );
+      if (eventLink.current) {
+        setRecapVodCache(videoNo, cached);
+        return cached;
+      }
+      recapVodCache.delete(videoNo);
     }
 
     // ⚠ 리캡 페이지의 '가져오기'로 이미 훑은 영상이면 로컬에 오프셋(v)까지
@@ -9891,13 +10116,21 @@
     const storedExact = new Set();
     const storedTimesByText = new Map();
     for (const item of storedChannelItems) {
-      if (item?.d || !(Number(item?.t) > 0) || !item?.m) continue;
-      const text = String(item.m).trim();
+      if (!(Number(item?.t) > 0) || (!item?.m && !item?.d)) continue;
+      // 결제 내역(src=history)은 아래의 일대일 복합 매처가 담당한다. 단순
+      // 시각+본문 집합에 넣으면 같은 결제 한 건이 여러 채팅과 연결될 수 있다.
+      if (item?.d?.src === "history") continue;
+      const text = String(item?.m || "").trim();
       const at = Number(item.t);
-      storedExact.add(`${at}|${text}`);
-      if (!storedTimesByText.has(text)) storedTimesByText.set(text, []);
-      storedTimesByText.get(text).push(at);
+      const donationKey = recapDonationMatchKey(item.d);
+      storedExact.add(`${at}|${text}|${donationKey}`);
+      const contentKey = `${text}|${donationKey}`;
+      if (!storedTimesByText.has(contentKey)) {
+        storedTimesByText.set(contentKey, []);
+      }
+      storedTimesByText.get(contentKey).push(at);
     }
+    const historyMatcher = createRecapHistoryMatcher(storedChannelItems);
 
     const duration = Number(document.querySelector("video")?.duration) || 0;
     const totalMs = duration > 0 ? duration * 1000 : 0;
@@ -9941,23 +10174,44 @@
         const at = Number(m?.playerMessageTime);
         if (!Number.isFinite(at) || at < 0) continue;
         const text = String(m?.content || "").trim();
-        if (!text) continue;
+        const type = Number(m?.messageTypeCode) || 1;
+        const donation = recapChatDonationInfo(m, type);
+        if (!text && !donation) continue;
         const messageTime = rawMessageTime;
         // 라이브 DOM에서 실제 시각을 못 읽은 행은 수집 순간(Date.now())으로
         // 저장된다. API 시각과 최대 몇 초 어긋날 수 있어 같은 본문은 5초 안까지
         // 보조 일치로 인정한다.
+        const donationKey = recapDonationMatchKey(donation);
+        const contentKey = `${text}|${donationKey}`;
         const exactLocal =
-          storedExact.has(`${messageTime}|${text}`) ||
+          storedExact.has(`${messageTime}|${contentKey}`) ||
           (messageTime > 0 &&
-            (storedTimesByText.get(text) || []).some(
+            (storedTimesByText.get(contentKey) || []).some(
               (time) => Math.abs(time - messageTime) <= 5000,
             ));
-        if (recapChatHash(m) !== accountId && !exactLocal) continue;
+        const historyMatch = donation
+          ? historyMatcher.match(messageTime, text, donation)
+          : null;
+        if (
+          recapChatHash(m) !== accountId &&
+          !exactLocal &&
+          !historyMatch
+        ) {
+          continue;
+        }
+        const matchedText = String(historyMatch?.m || text).trim();
+        const matchedDonation = historyMatch?.d
+          ? { ...donation, ...historyMatch.d, src: "history" }
+          : donation;
+        const identity = recapVodMessageIdentity(m, text, donation);
         rows.push({
           seconds: Math.round(at / 1000),
-          text,
-          t: messageTime,
-          type: Number(m?.messageTypeCode) || 1,
+          text: matchedText,
+          // 결제 내역 행을 정본으로 써야 기존 행에 n·v가 붙고 중복이 생기지 않는다.
+          t: Number(historyMatch?.t) || messageTime,
+          type,
+          ...(identity ? { i: identity } : {}),
+          ...(matchedDonation ? { d: matchedDonation } : {}),
           // {:d_108:} 같은 토큰을 이미지로 그리려면 키→URL 맵이 필요하다.
           emojis: recapChatEmojis(m),
         });
@@ -9977,7 +10231,11 @@
     const seen = new Set();
     const out = [];
     for (const r of rows.sort((a, b) => a.seconds - b.seconds)) {
-      const key = r.t ? `${r.t}|${r.text}` : `${r.seconds}|${r.text}`;
+      const key = r.i
+        ? `i:${r.i}`
+        : r.t
+          ? `${r.t}|${r.text}|${recapDonationMatchKey(r.d)}`
+          : `${r.seconds}|${r.text}|${recapDonationMatchKey(r.d)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(r);
@@ -9993,7 +10251,8 @@
         const at = Number(item?.t) || 0;
         return (
           !item?.n &&
-          item?.m &&
+          item?.d?.src !== "history" &&
+          (item?.m || item?.d) &&
           at >= firstMessageTime - 5000 &&
           at <= lastMessageTime + 5000
         );
@@ -10010,11 +10269,15 @@
             m: item.text,
             v: item.seconds,
             n: String(videoNo),
+            ...(item.i ? { i: item.i } : {}),
+            ...(item.d ? { d: item.d } : {}),
           })),
           videoNo,
         );
       }
-      if (stored) verified = await markRecapVideoImported(accountId, videoNo);
+      if (stored) {
+        verified = await markRecapVideoImported(accountId, videoNo, channelId);
+      }
     }
     // 실패·부분 수집 또는 로컬 기록과 맞지 않는 결과는 캐시하지 않는다. 패널을
     // 다시 열면 재시도할 수 있어야 한다.
@@ -10073,11 +10336,29 @@
     panel.innerHTML = `
       <div class="cheese-search-comment-panel-head">
         <strong>내 채팅 기록</strong>
-        <button type="button" data-recap-close aria-label="닫기">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
-          </svg>
-        </button>
+        <div class="cheese-recap-panel-head-actions">
+          <button type="button" data-recap-reimport aria-label="현재 다시보기 기록 삭제 후 다시 수집" title="현재 다시보기 기록 삭제 후 다시 수집" disabled>
+            <svg class="lucide lucide-rotate-cw" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 1-15.74 6"></path>
+              <path d="M3 12a9 9 0 0 1 15.74-6"></path>
+              <path d="M18 2v4h-4"></path>
+              <path d="M6 22v-4h4"></path>
+            </svg>
+          </button>
+          <button type="button" data-recap-close aria-label="닫기">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+            </svg>
+          </button>
+          <div class="cheese-recap-reimport-popover" data-recap-reimport-popover hidden>
+            <strong>현재 다시보기를 다시 수집할까요?</strong>
+            <p>이 영상에서 저장한 기록과 수집 완료 표시만 지운 뒤 다시 수집합니다.</p>
+            <div>
+              <button type="button" data-recap-reimport-cancel>취소</button>
+              <button type="button" data-recap-reimport-confirm>삭제 후 다시 수집</button>
+            </div>
+          </div>
+        </div>
       </div>
       <p class="cheese-search-comment-panel-status">불러오는 중입니다.</p>`;
     positionCommentTimestampPanel(panel, root);
@@ -10085,6 +10366,73 @@
     panel
       .querySelector("[data-recap-close]")
       ?.addEventListener("click", closeChatRecapPanel);
+    const reimportButton = panel.querySelector("[data-recap-reimport]");
+    const reimportPopover = panel.querySelector(
+      "[data-recap-reimport-popover]",
+    );
+    reimportButton?.addEventListener("click", () => {
+      if (reimportButton.disabled || !reimportPopover) return;
+      reimportPopover.hidden = !reimportPopover.hidden;
+      panel.classList.toggle(
+        "is-reimport-confirming",
+        !reimportPopover.hidden,
+      );
+    });
+    panel
+      .querySelector("[data-recap-reimport-cancel]")
+      ?.addEventListener("click", () => {
+        if (reimportPopover) reimportPopover.hidden = true;
+        panel.classList.remove("is-reimport-confirming");
+      });
+    panel
+      .querySelector("[data-recap-reimport-confirm]")
+      ?.addEventListener("click", async () => {
+        const accountId = currentClipVaultAccountId();
+        const videoNo = getCurrentVideoNo();
+        await ensureRecapVodChannel();
+        const channelId = currentRecapChannelId();
+        if (
+          !accountId ||
+          !videoNo ||
+          !channelId ||
+          getCurrentVideoNo() !== videoNo
+        ) {
+          if (reimportPopover) reimportPopover.hidden = true;
+          panel.classList.remove("is-reimport-confirming");
+          return;
+        }
+        if (reimportPopover) reimportPopover.hidden = true;
+        panel.classList.remove("is-reimport-confirming");
+        if (reimportButton) reimportButton.disabled = true;
+        const head = panel.querySelector(".cheese-search-comment-panel-head");
+        panel.replaceChildren();
+        if (head) panel.append(head);
+        const clearingStatus = document.createElement("p");
+        clearingStatus.className = "cheese-search-comment-panel-status";
+        clearingStatus.textContent = "기존 기록을 정리하는 중입니다.";
+        panel.append(clearingStatus);
+        const cleared = await clearRecapVideoForReimport(
+          accountId,
+          channelId,
+          videoNo,
+        );
+        if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+        if (!cleared.ok) {
+          clearingStatus.textContent =
+            "기록을 정리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+          if (reimportButton) reimportButton.disabled = false;
+          return;
+        }
+        clearingStatus.textContent = `기존 기록 ${cleared.removed.toLocaleString()}개를 정리했습니다. 다시 수집하는 중입니다.`;
+        recapPanelItems = await loadRecapForCurrentVideo((ratio) => {
+          if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+          clearingStatus.textContent = `다시 수집하는 중입니다… ${Math.round(ratio * 100)}%`;
+        });
+        if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+        renderChatRecapPanel(panel);
+        if (reimportButton) reimportButton.disabled = false;
+        positionCommentTimestampPanel(panel, root);
+      });
 
     // 이모티콘 사전·구독 여부를 먼저 채운다(없으면 {:키:} 가 글자로 남는다).
     // 채팅을 훑는 동안 같이 진행되도록 await 를 뒤에서 한 번에 받는다.
@@ -10099,6 +10447,7 @@
     await emojiReady;
     if (!panel.isConnected) return;
     renderChatRecapPanel(panel);
+    if (reimportButton) reimportButton.disabled = false;
     positionCommentTimestampPanel(panel, root);
   }
 
@@ -10129,10 +10478,12 @@
     const map = emojis && typeof emojis === "object" ? emojis : null;
     let out = "";
     let last = 0;
+    let previousWasTextEmoji = false;
     const pattern = /\{:([^:}]+):\}/g;
     let match = null;
     while ((match = pattern.exec(raw)) !== null) {
-      if (match.index > last) out += escapeHtml(raw.slice(last, match.index));
+      const between = raw.slice(last, match.index);
+      if (between) out += escapeHtml(between);
       const key = String(match[1] || "").trim();
       // ⚠ 메시지에 딸려 온 맵(extras.emojis)만 보면 안 된다. 다시보기 API 는
       //   이 값을 비워 보내는 경우가 많고(실측 {}), 리캡 '가져오기'로 저장된
@@ -10140,12 +10491,17 @@
       //   라이브 대화상자와 같은 저장 사전(dlgEmojiMap)을 함께 본다.
       const url = (map && map[key]) || dlgEmojiMap[key];
       if (key in dlgLockedEmojis) {
-        // 미구독 이모티콘은 이미지로 만들지 않는다(유료 기능).
-        out += `<span class="cheese-recap-emoji-locked" title="현재 사용할 수 없는 구독자 전용 이모티콘입니다.">${escapeHtml(key)}</span>`;
+        // 미구독 이모티콘은 이미지나 별도 잠금 UI 없이 이름만 표시한다.
+        if (previousWasTextEmoji && !between) out += " ";
+        out += escapeHtml(key);
+        previousWasTextEmoji = true;
       } else if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
         out += `<img class="cheese-blind-emoji" src="${escapeAttribute(url)}" alt="" width="24" height="24" loading="lazy" decoding="async" draggable="false">`;
+        previousWasTextEmoji = false;
       } else {
+        if (previousWasTextEmoji && !between) out += " ";
         out += escapeHtml(key); // 모르는 키도 {:키:} 대신 이름만 표시한다.
+        previousWasTextEmoji = true;
       }
       last = pattern.lastIndex;
     }
@@ -10164,20 +10520,36 @@
         : "내 채팅 기록";
     }
     const head = panel.querySelector(".cheese-search-comment-panel-head");
-    const body = recapPanelItems.length
-      ? `<ol class="cheese-search-comment-panel-list">${recapPanelItems
-          .map(
-            (it) => `
-          <li>
-            <button type="button" data-recap-seek="${escapeAttribute(it.seconds)}">
-              <span>${escapeHtml(formatSeconds(it.seconds))}</span>
-              <strong>${renderRecapMessageHtml(it.text, it.emojis)}</strong>
-            </button>
-          </li>`,
-          )
-          .join("")}</ol>`
-      : `<p class="cheese-search-comment-panel-status">이 영상에서 남긴 채팅이 없습니다.</p>`;
-    panel.innerHTML = (head?.outerHTML || "") + body;
+    panel.replaceChildren();
+    if (head) panel.append(head);
+    if (recapPanelItems.length) {
+      const list = document.createElement("ol");
+      list.className = "cheese-search-comment-panel-list";
+      for (const item of recapPanelItems) {
+        const row = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.recapSeek = String(item.seconds);
+        const time = document.createElement("span");
+        time.textContent = formatSeconds(item.seconds);
+        const message = document.createElement("strong");
+        const badge = donationBadgeEl(item.d);
+        if (badge) message.append(badge);
+        message.insertAdjacentHTML(
+          "beforeend",
+          renderRecapMessageHtml(item.text, item.emojis),
+        );
+        button.append(time, message);
+        row.append(button);
+        list.append(row);
+      }
+      panel.append(list);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "cheese-search-comment-panel-status";
+      empty.textContent = "이 영상에서 남긴 채팅이 없습니다.";
+      panel.append(empty);
+    }
     panel
       .querySelector("[data-recap-close]")
       ?.addEventListener("click", closeChatRecapPanel);
@@ -10281,10 +10653,8 @@
             const key = String(e?.emojiId || "");
             if (!key) continue;
             if (pack?.emojiPackLocked === true) {
-              const url =
-                e?.emojiImageUrl || e?.imageUrl || e?.emojiUrl || "";
-              const channelId =
-                ch || recapSubscriptionEmojiChannelFromUrl(url);
+              const url = e?.emojiImageUrl || e?.imageUrl || e?.emojiUrl || "";
+              const channelId = ch || recapSubscriptionEmojiChannelFromUrl(url);
               if (channelId) locked[key] = channelId;
             } else if (group === "subscriptionEmojiPacks") {
               allowedSubscription.add(key);
@@ -10314,26 +10684,28 @@
     } catch {}
   }
 
-  // {:키:} 를 이미지(구독 중) 또는 이름 칩(미구독)으로 바꿔 붙인다.
+  // {:키:} 를 이미지(구독 중) 또는 이름(미구독)으로 바꿔 붙인다.
   // ⚠ innerHTML 을 쓰지 않는다 — 채팅 본문이라 그대로 넣으면 안 된다.
   function appendRecapMessage(target, text) {
     const raw = String(text || "");
     const pattern = /\{:([^:}]+):\}/g;
     let last = 0;
+    let previousWasTextEmoji = false;
     let match = null;
     while ((match = pattern.exec(raw)) !== null) {
-      if (match.index > last) {
-        target.append(document.createTextNode(raw.slice(last, match.index)));
+      const between = raw.slice(last, match.index);
+      if (between) {
+        target.append(document.createTextNode(between));
       }
       const key = String(match[1] || "").trim();
       const url = dlgEmojiMap[key];
       if (key in dlgLockedEmojis) {
         // 잠금 판정을 먼저 적용해 과거 URL이 남아 있어도 이미지를 만들지 않는다.
-        const el = document.createElement("span");
-        el.className = "cheese-recap-emoji-locked";
-        el.textContent = key;
-        el.title = "현재 사용할 수 없는 구독자 전용 이모티콘입니다.";
-        target.append(el);
+        if (previousWasTextEmoji && !between) {
+          target.append(document.createTextNode(" "));
+        }
+        target.append(document.createTextNode(key));
+        previousWasTextEmoji = true;
       } else if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
         const img = document.createElement("img");
         img.src = url;
@@ -10345,8 +10717,13 @@
         img.decoding = "async";
         img.draggable = false;
         target.append(img);
+        previousWasTextEmoji = false;
       } else {
+        if (previousWasTextEmoji && !between) {
+          target.append(document.createTextNode(" "));
+        }
         target.append(document.createTextNode(key));
+        previousWasTextEmoji = true;
       }
       last = pattern.lastIndex;
     }
@@ -10372,6 +10749,154 @@
     MISSION: "미션 후원",
     PARTY: "파티 후원",
   };
+
+  function recapChatDonationInfo(message, code) {
+    if (code !== CHAT_TYPE_DONATION && code !== CHAT_TYPE_SUBSCRIPTION) {
+      return null;
+    }
+    let extras = message?.extras;
+    try {
+      if (typeof extras === "string") extras = JSON.parse(extras);
+    } catch {
+      extras = null;
+    }
+    if (code === CHAT_TYPE_SUBSCRIPTION) {
+      return {
+        kind: "SUBSCRIPTION",
+        month: Number(extras?.month) || 0,
+        tier: Number(extras?.tierNo) || 0,
+        tierName: String(extras?.tierName || ""),
+        src: "chat",
+      };
+    }
+    const donation = {
+      kind: "DONATION",
+      type: String(extras?.donationType || "CHAT"),
+      amount: Number(extras?.payAmount) || 0,
+      src: "chat",
+    };
+    if (donation.type === "PARTY") {
+      donation.partyName = String(extras?.partyName || "");
+      donation.partyNo = Number(extras?.partyNo) || 0;
+    }
+    return donation;
+  }
+
+  function recapDonationMatchKey(value) {
+    const donation = value && typeof value === "object" ? value : null;
+    if (!donation) return "";
+    return [
+      donation.kind,
+      donation.type,
+      Number(donation.amount) || 0,
+      Number(donation.month) || 0,
+      Number(donation.tier) || 0,
+    ].join(":");
+  }
+
+  function normalizeRecapMatchText(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function recapHistoryMatchScore(candidate, messageTime, text, donation) {
+    const history = candidate?.d;
+    if (!history || history.src !== "history" || !donation) return null;
+    const delta = Math.abs((Number(candidate.t) || 0) - messageTime);
+    if (!messageTime || delta > 5000) return null;
+
+    if (history.kind === "DONATION") {
+      if (donation.kind !== "DONATION") return null;
+      const historyAmount = Number(history.amount) || 0;
+      const chatAmount = Number(donation.amount) || 0;
+      // 금액이 없는 상태에서 시각만으로 익명 후원을 연결하지 않는다.
+      if (!historyAmount || !chatAmount || historyAmount !== chatAmount) {
+        return null;
+      }
+      const historyType = String(history.type || "").toUpperCase();
+      const chatType = String(donation.type || "").toUpperCase();
+      if (historyType && chatType && historyType !== chatType) return null;
+      const historyText = normalizeRecapMatchText(candidate.m);
+      const chatText = normalizeRecapMatchText(text);
+      if (historyText && chatText && historyText !== chatText) return null;
+      return {
+        score:
+          8 +
+          (historyType && historyType === chatType ? 2 : 0) +
+          (historyText && historyText === chatText ? 4 : 0) +
+          (delta <= 1500 ? 2 : 0),
+        delta,
+      };
+    }
+
+    if (
+      donation.kind !== "SUBSCRIPTION" ||
+      !["SUBSCRIPTION", "GIFT_SENT", "GIFT_RECEIVED"].includes(history.kind)
+    ) {
+      return null;
+    }
+    // 구독권은 금액·본문이 없어 더 보수적으로 본다. 2.5초 안에서 티어 또는
+    // 개월 정보가 맞는 유일한 후보만 허용한다.
+    if (delta > 2500) return null;
+    const historyTier = Number(history.tier) || 0;
+    const chatTier = Number(donation.tier) || 0;
+    const historyMonth = Number(history.month) || 0;
+    const chatMonth = Number(donation.month) || 0;
+    if (historyTier && chatTier && historyTier !== chatTier) return null;
+    if (historyMonth && chatMonth && historyMonth !== chatMonth) return null;
+    const tierMatched = historyTier && historyTier === chatTier;
+    const monthMatched = historyMonth && historyMonth === chatMonth;
+    if (!tierMatched && !monthMatched && delta > 750) return null;
+    return {
+      score: 5 + (tierMatched ? 2 : 0) + (monthMatched ? 2 : 0),
+      delta,
+    };
+  }
+
+  function createRecapHistoryMatcher(items) {
+    const candidates = [];
+    for (const item of Array.isArray(items) ? items : []) {
+      if (
+        item?.n ||
+        !(Number(item?.t) > 0) ||
+        item?.d?.src !== "history"
+      ) {
+        continue;
+      }
+      candidates.push(item);
+    }
+    const used = new Set();
+    return {
+      match(messageTime, text, donation) {
+        const matches = [];
+        for (let index = 0; index < candidates.length; index += 1) {
+          if (used.has(index)) continue;
+          const rank = recapHistoryMatchScore(
+            candidates[index],
+            messageTime,
+            text,
+            donation,
+          );
+          if (rank) matches.push({ index, ...rank });
+        }
+        matches.sort((a, b) => b.score - a.score || a.delta - b.delta);
+        const best = matches[0];
+        if (!best) return null;
+        const next = matches[1];
+        // 동급 후보의 시각도 비슷하면 어느 결제인지 확정할 수 없다.
+        if (
+          next &&
+          next.score === best.score &&
+          next.delta - best.delta < 1000
+        ) {
+          return null;
+        }
+        used.add(best.index);
+        return candidates[best.index];
+      },
+    };
+  }
 
   // 티어 표기. 채팅에서 온 구독에는 이름(tierName)이 있지만, 선물 API 는
   // tierNo 만 준다(실측: tier:"TIER_1", tierNo:1) → 이름이 없으면 'N티어'.
@@ -10467,6 +10992,965 @@
     };
   }
 
+  const RECAP_SEARCH_WINDOW_CLASS = "cheese-recap-search-window";
+  const RECAP_SEARCH_WINDOW_SIZE_KEY = "cheeseRecapSearchWindowSize";
+  const recapSearchChannelCache = new Map();
+  const recapSearchChannelMetaCache = new Map();
+  const recapSearchRowsCache = new Map();
+  const RECAP_SEARCH_ROWS_CACHE_MAX = 12;
+  const RECAP_SEARCH_ROWS_CACHE_TTL_MS = 30000;
+  let recapSearchWindowCleanup = null;
+
+  async function recapSearchChannelHasRows(accountId, channelId, months) {
+    const store = chatHistoryStore();
+    if (!store || !accountId || !channelId || !months?.length) return false;
+    const ordered = [...months].sort().reverse();
+    try {
+      for (let index = 0; index < ordered.length; index += 6) {
+        const batch = ordered.slice(index, index + 6);
+        const keys = batch.map((month) =>
+          chatRecapStoreKey(accountId, channelId, month),
+        );
+        const values = await CHAT_RECAP_STORE_API.loadMonths(store, keys, 6);
+        if (
+          keys.some((key) =>
+            (values.get(key) || []).some((item) => {
+              const t = Number(item?.t) || 0;
+              const m = String(item?.m || "");
+              return t && (m || (item?.d && typeof item.d === "object"));
+            }),
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  async function loadRecapSearchCatalog(accountId, preferredChannelId = "") {
+    const store = chatHistoryStore();
+    if (!store || !accountId) return {};
+    const key = `chatRecapCatalog:${accountId}`;
+    try {
+      const stored = (await store.get(key))?.[key];
+      const channels = {};
+      for (const [channelId, months] of Object.entries(
+        stored?.channels || {},
+      )) {
+        if (!/^[0-9a-f]{32}$/i.test(channelId) || !Array.isArray(months)) {
+          continue;
+        }
+        channels[channelId.toLowerCase()] = [
+          ...new Set(
+            months.map(String).filter((month) => /^\d{4}-\d{2}$/.test(month)),
+          ),
+        ].sort();
+      }
+      const preferred = String(preferredChannelId || "").toLowerCase();
+      if (/^[0-9a-f]{32}$/.test(preferred) && !channels[preferred]) {
+        channels[preferred] = chatRecapMonthKeysForChannel(accountId, preferred)
+          .map((item) => item.slice(-7))
+          .filter((month) => /^\d{4}-\d{2}$/.test(month));
+      }
+      const validChannels = {};
+      const entries = Object.entries(channels).filter(
+        ([, months]) => months.length,
+      );
+      for (let index = 0; index < entries.length; index += 4) {
+        const batch = entries.slice(index, index + 4);
+        const results = await Promise.all(
+          batch.map(([channelId, months]) =>
+            recapSearchChannelHasRows(accountId, channelId, months),
+          ),
+        );
+        batch.forEach(([channelId, months], batchIndex) => {
+          if (results[batchIndex]) validChannels[channelId] = months;
+        });
+      }
+      return validChannels;
+    } catch {
+      return {};
+    }
+  }
+
+  async function resolveRecapSearchChannelMeta(channelId) {
+    const cached = recapSearchChannelMetaCache.get(channelId);
+    if (cached) return cached;
+    const followed = customFollowItems.find(
+      (item) => item.channelId === channelId,
+    );
+    const remote = await resolveChannelMeta(channelId);
+    const meta = {
+      name: String(
+        remote?.channelName ||
+          followed?.name ||
+          channelNameCache.get(channelId) ||
+          recapSearchChannelCache.get(channelId) ||
+          channelId.slice(0, 8),
+      ),
+      imageUrl: String(
+        remote?.channelImageUrl || followed?.imageUrl || "",
+      ),
+      verifiedMark:
+        remote?.verifiedMark === true || followed?.verifiedMark === true,
+    };
+    recapSearchChannelCache.set(channelId, meta.name);
+    recapSearchChannelMetaCache.set(channelId, meta);
+    return meta;
+  }
+
+  async function loadRecapSearchChannelRows(accountId, channelId, months) {
+    const cacheKey = `${accountId}:${channelId}`;
+    const cached = recapSearchRowsCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < RECAP_SEARCH_ROWS_CACHE_TTL_MS) {
+      recapSearchRowsCache.delete(cacheKey);
+      recapSearchRowsCache.set(cacheKey, cached);
+      return cached.rows;
+    }
+    const store = chatHistoryStore();
+    if (!store) return [];
+    const keys = (months || []).map((month) =>
+      chatRecapStoreKey(accountId, channelId, month),
+    );
+    const values = await CHAT_RECAP_STORE_API.loadMonths(store, keys, 12);
+    const rows = [];
+    for (const key of keys) {
+      for (const item of values.get(key) || []) {
+        const t = Number(item?.t) || 0;
+        const m = String(item?.m || "");
+        const d = item?.d && typeof item.d === "object" ? item.d : null;
+        if (!t || (!m && !d)) continue;
+        rows.push({ t, m, channelId, ...(d ? { d } : {}) });
+      }
+    }
+    rows.sort((a, b) => b.t - a.t);
+    recapSearchRowsCache.set(cacheKey, { at: Date.now(), rows });
+    while (recapSearchRowsCache.size > RECAP_SEARCH_ROWS_CACHE_MAX) {
+      const oldest = recapSearchRowsCache.keys().next().value;
+      if (oldest === undefined) break;
+      recapSearchRowsCache.delete(oldest);
+    }
+    return rows;
+  }
+
+  function recapSearchText(row) {
+    const badge = donationBadgeEl(row?.d);
+    return `${badge?.textContent || ""} ${String(row?.m || "")}`.trim();
+  }
+
+  function closeRecapSearchWindow() {
+    recapSearchWindowCleanup?.();
+    recapSearchWindowCleanup = null;
+    document.querySelector(`.${RECAP_SEARCH_WINDOW_CLASS}`)?.remove();
+  }
+
+  async function restoreRecapSearchWindowSize(windowEl) {
+    try {
+      const saved = (await chrome.storage.local.get(
+        RECAP_SEARCH_WINDOW_SIZE_KEY,
+      ))?.[RECAP_SEARCH_WINDOW_SIZE_KEY];
+      const maxWidth = Math.max(320, innerWidth - 16);
+      const maxHeight = Math.max(280, innerHeight - 16);
+      const width = Number(saved?.width);
+      const height = Number(saved?.height);
+      if (Number.isFinite(width)) {
+        windowEl.style.width = `${Math.min(
+          maxWidth,
+          Math.max(Math.min(420, maxWidth), width),
+        )}px`;
+      }
+      if (Number.isFinite(height)) {
+        windowEl.style.height = `${Math.min(
+          maxHeight,
+          Math.max(Math.min(360, maxHeight), height),
+        )}px`;
+      }
+    } catch {}
+  }
+
+  function bindRecapSearchWindowSizePersistence(windowEl) {
+    let nativeResize = false;
+    const save = () => {
+      if (!windowEl.isConnected) return;
+      const rect = windowEl.getBoundingClientRect();
+      try {
+        const write = chrome.storage.local.set({
+          [RECAP_SEARCH_WINDOW_SIZE_KEY]: {
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          },
+        });
+        if (write && typeof write.catch === "function") {
+          void write.catch(() => {});
+        }
+      } catch {}
+    };
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return;
+      const rect = windowEl.getBoundingClientRect();
+      nativeResize =
+        rect.right - event.clientX <= 18 &&
+        rect.bottom - event.clientY <= 18;
+    };
+    const onPointerUp = () => {
+      if (!nativeResize) return;
+      nativeResize = false;
+      save();
+    };
+    windowEl.addEventListener("pointerdown", onPointerDown, true);
+    windowEl.addEventListener("cheese-recap-resized", save);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      windowEl.removeEventListener("pointerdown", onPointerDown, true);
+      windowEl.removeEventListener("cheese-recap-resized", save);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }
+
+  function bindRecapSearchWindowDrag(windowEl) {
+    const handle = windowEl.querySelector(`.${RECAP_SEARCH_WINDOW_CLASS}-head`);
+    if (!handle) return () => {};
+    let drag = null;
+    const move = (event) => {
+      if (!drag) return;
+      const maxLeft = Math.max(8, innerWidth - windowEl.offsetWidth - 8);
+      const maxTop = Math.max(8, innerHeight - 64);
+      windowEl.style.left = `${Math.min(maxLeft, Math.max(8, drag.left + event.clientX - drag.x))}px`;
+      windowEl.style.top = `${Math.min(maxTop, Math.max(8, drag.top + event.clientY - drag.y))}px`;
+      windowEl.style.right = "auto";
+      windowEl.style.bottom = "auto";
+    };
+    const up = () => {
+      drag = null;
+      handle.classList.remove("is-dragging");
+    };
+    const down = (event) => {
+      if (event.button !== 0 || event.target.closest("button, input, select")) {
+        return;
+      }
+      const rect = windowEl.getBoundingClientRect();
+      drag = {
+        x: event.clientX,
+        y: event.clientY,
+        left: rect.left,
+        top: rect.top,
+      };
+      handle.classList.add("is-dragging");
+      event.preventDefault();
+    };
+    handle.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      handle.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }
+
+  function bindRecapSearchWindowResize(windowEl) {
+    const handles = [
+      ...windowEl.querySelectorAll("[data-recap-search-resize]"),
+    ];
+    if (!handles.length) return () => {};
+    let resize = null;
+    const move = (event) => {
+      if (!resize) return;
+      const maxWidth = Math.max(320, innerWidth - resize.left - 8);
+      const maxHeight = Math.max(280, innerHeight - resize.top - 8);
+      if (resize.axis === "right") {
+        const width = resize.width + event.clientX - resize.x;
+        windowEl.style.width = `${Math.min(
+          maxWidth,
+          Math.max(Math.min(420, maxWidth), width),
+        )}px`;
+      } else {
+        const height = resize.height + event.clientY - resize.y;
+        windowEl.style.height = `${Math.min(
+          maxHeight,
+          Math.max(Math.min(360, maxHeight), height),
+        )}px`;
+      }
+    };
+    const up = () => {
+      if (!resize) return;
+      resize = null;
+      windowEl.classList.remove("is-resizing");
+      windowEl.dispatchEvent(new Event("cheese-recap-resized"));
+    };
+    const down = (event) => {
+      if (event.button !== 0) return;
+      const handle = event.currentTarget;
+      const rect = windowEl.getBoundingClientRect();
+      resize = {
+        axis: handle.dataset.recapSearchResize,
+        x: event.clientX,
+        y: event.clientY,
+        width: rect.width,
+        height: rect.height,
+        left: rect.left,
+        top: rect.top,
+      };
+      windowEl.classList.add("is-resizing");
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    handles.forEach((handle) => handle.addEventListener("pointerdown", down));
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      handles.forEach((handle) =>
+        handle.removeEventListener("pointerdown", down),
+      );
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }
+
+  function bindRecapSearchDatePickers(windowEl, values) {
+    const pickers = [
+      ...windowEl.querySelectorAll(
+        `.${RECAP_SEARCH_WINDOW_CLASS}-filters [data-date-picker]`,
+      ),
+    ];
+    const months = Object.fromEntries(
+      pickers.map((picker) => [
+        picker.dataset.datePicker,
+        getMonthStart(new Date()),
+      ]),
+    );
+
+    const setValue = (type, value) => {
+      values[type] = value;
+      const label = windowEl.querySelector(`[data-date-label="${type}"]`);
+      if (label) {
+        label.textContent = value ? formatDateLabel(value) : "선택 안 함";
+      }
+    };
+    const normalizeRange = (changedType) => {
+      if (
+        values.recapFrom &&
+        values.recapTo &&
+        values.recapFrom > values.recapTo
+      ) {
+        setValue(
+          changedType === "recapFrom" ? "recapTo" : "recapFrom",
+          "",
+        );
+      }
+    };
+    const applyRange = (preset) => {
+      const today = new Date();
+      const start = new Date(today);
+      if (preset === "week") start.setDate(today.getDate() - 7);
+      else if (preset === "month1") start.setMonth(today.getMonth() - 1);
+      else if (preset === "month3") start.setMonth(today.getMonth() - 3);
+      else if (preset === "month6") start.setMonth(today.getMonth() - 6);
+      else if (preset === "year1") {
+        start.setFullYear(today.getFullYear() - 1);
+      }
+      setValue("recapFrom", toDateKey(start));
+      setValue("recapTo", toDateKey(today));
+      months.recapFrom = getMonthStart(start);
+      months.recapTo = getMonthStart(today);
+    };
+    const closeAll = (except = null) => {
+      pickers.forEach((picker) => {
+        if (picker !== except) closeDatePicker(picker);
+      });
+    };
+    const render = (picker) => {
+      const type = picker.dataset.datePicker;
+      const title = picker.querySelector("[data-calendar-title]");
+      const grid = picker.querySelector("[data-calendar-grid]");
+      if (!type || !title || !grid) return;
+      const month = months[type] || getMonthStart(new Date());
+      const titleText = new Intl.DateTimeFormat("ko-KR", {
+        year: "numeric",
+        month: "long",
+      }).format(month);
+      title.innerHTML = `<button type="button" class="cheese-search-calendar-title-button" data-calendar-action="month-popover" aria-haspopup="dialog" aria-expanded="${String(isCalendarMonthPopoverOpen(picker))}">${escapeHtml(titleText)}</button>`;
+      renderCalendarMonthPopover(picker, month);
+
+      const selectedDate = values[type] || "";
+      const dateFrom = values.recapFrom || "";
+      const dateTo = values.recapTo || "";
+      const today = toDateKey(new Date());
+      grid.innerHTML = getCalendarDates(month)
+        .map((date) => {
+          const key = toDateKey(date);
+          const classes = [
+            "cheese-search-calendar-day",
+            date.getMonth() !== month.getMonth() ? "is-outside" : "",
+            key === today ? "is-today" : "",
+            key === selectedDate ? "is-selected" : "",
+            key === dateFrom ? "is-start" : "",
+            key === dateTo ? "is-end" : "",
+            dateFrom && dateTo && key > dateFrom && key < dateTo
+              ? "is-range"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return `<button type="button" class="${classes}" data-date="${key}">${date.getDate()}</button>`;
+        })
+        .join("");
+    };
+    const renderAll = () => pickers.forEach(render);
+    const onPickerClick = (event) => {
+      const picker = event.currentTarget;
+      const type = picker.dataset.datePicker;
+      const action = event.target.closest(
+        "[data-action], [data-calendar-action], [data-calendar-year], [data-calendar-month], [data-range-preset], [data-date]",
+      )?.dataset;
+      if (!type || !action) return;
+      event.stopPropagation();
+
+      if (action.action === "date-toggle") {
+        closeAll(picker);
+        const channelMenu = windowEl.querySelector(
+          `[data-recap-search-channel-menu]`,
+        );
+        if (channelMenu) channelMenu.hidden = true;
+        windowEl
+          .querySelector(`[data-recap-search-channel-toggle]`)
+          ?.setAttribute("aria-expanded", "false");
+        toggleDatePicker(picker);
+        render(picker);
+        return;
+      }
+      if (action.calendarAction === "prev") {
+        months[type] = addMonths(months[type], -1);
+        render(picker);
+        return;
+      }
+      if (action.calendarAction === "next") {
+        months[type] = addMonths(months[type], 1);
+        render(picker);
+        return;
+      }
+      if (action.calendarAction === "month-popover") {
+        toggleCalendarMonthPopover(picker);
+        return;
+      }
+      if (action.calendarYear) {
+        months[type] = new Date(
+          Number(action.calendarYear),
+          months[type].getMonth(),
+          1,
+        );
+        render(picker);
+        closeCalendarMonthPopover(picker);
+        keepDatePickerOpen(picker);
+        return;
+      }
+      if (action.calendarMonth) {
+        months[type] = new Date(
+          months[type].getFullYear(),
+          Number(action.calendarMonth) - 1,
+          1,
+        );
+        render(picker);
+        closeCalendarMonthPopover(picker);
+        keepDatePickerOpen(picker);
+        return;
+      }
+      if (action.calendarAction === "clear") {
+        setValue(type, "");
+        renderAll();
+        return;
+      }
+      if (
+        action.calendarAction === "today" ||
+        action.calendarAction === "yesterday"
+      ) {
+        const date = new Date();
+        if (action.calendarAction === "yesterday") {
+          date.setDate(date.getDate() - 1);
+        }
+        setValue(type, toDateKey(date));
+        months[type] = getMonthStart(date);
+        normalizeRange(type);
+        closeDatePicker(picker);
+        renderAll();
+        return;
+      }
+      if (action.calendarAction === "close") {
+        closeDatePicker(picker);
+        return;
+      }
+      if (action.rangePreset) {
+        applyRange(action.rangePreset);
+        closeAll();
+        renderAll();
+        return;
+      }
+      if (!action.date) return;
+      setValue(type, action.date);
+      months[type] = getMonthStart(new Date(`${action.date}T00:00:00`));
+      normalizeRange(type);
+      closeDatePicker(picker);
+      renderAll();
+    };
+    const onOutsidePointerDown = (event) => {
+      if (!windowEl.contains(event.target)) {
+        closeAll();
+        return;
+      }
+      pickers.forEach((picker) => {
+        if (!picker.contains(event.target)) closeDatePicker(picker);
+      });
+    };
+
+    pickers.forEach((picker) => {
+      picker.addEventListener("click", onPickerClick);
+      render(picker);
+    });
+    document.addEventListener("pointerdown", onOutsidePointerDown);
+    return () => {
+      pickers.forEach((picker) =>
+        picker.removeEventListener("click", onPickerClick),
+      );
+      document.removeEventListener("pointerdown", onOutsidePointerDown);
+    };
+  }
+
+  async function openRecapSearchWindow(preferredChannelId = "") {
+    closeRecapSearchWindow();
+    let accountId = currentClipVaultAccountId();
+    const windowEl = document.createElement("section");
+    windowEl.className = RECAP_SEARCH_WINDOW_CLASS;
+    windowEl.setAttribute("role", "dialog");
+    windowEl.setAttribute("aria-label", "내 채팅 기록 검색");
+    windowEl.innerHTML = `
+      <header class="${RECAP_SEARCH_WINDOW_CLASS}-head">
+        <strong>내 채팅 기록 검색</strong>
+        <div class="${RECAP_SEARCH_WINDOW_CLASS}-head-actions">
+          <button type="button" data-recap-search-page aria-label="채팅 리캡 열기" title="채팅 리캡 열기">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true"><path d="M3 3v18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m7 16 4-5 4 3 5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" data-recap-search-close aria-label="닫기" title="닫기">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="${RECAP_SEARCH_WINDOW_CLASS}-filters">
+        <div class="${RECAP_SEARCH_WINDOW_CLASS}-field is-channel">
+          <span>스트리머</span>
+          <div class="${RECAP_SEARCH_WINDOW_CLASS}-channel-picker" data-recap-search-channel-picker>
+            <button type="button" data-recap-search-channel-toggle aria-haspopup="listbox" aria-expanded="false">
+              <span data-recap-search-channel-label>전체 스트리머</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="${RECAP_SEARCH_WINDOW_CLASS}-channel-menu" data-recap-search-channel-menu role="listbox" aria-label="스트리머 선택" hidden></div>
+          </div>
+        </div>
+        ${createDatePicker("recapFrom", "시작일", true, true)}
+        ${createDatePicker("recapTo", "종료일", true, true)}
+        <label class="is-keyword"><span>키워드</span><input type="search" data-recap-search-keyword placeholder="채팅·후원·구독 내용 검색"></label>
+        <button type="button" data-recap-search-run>검색</button>
+      </div>
+      <div class="${RECAP_SEARCH_WINDOW_CLASS}-status" data-recap-search-status>
+        <span class="${RECAP_SEARCH_WINDOW_CLASS}-status-channel" data-recap-search-status-channel hidden></span>
+        <span data-recap-search-status-text>기록을 확인하는 중입니다.</span>
+      </div>
+      <div class="${RECAP_SEARCH_WINDOW_CLASS}-results" data-recap-search-results></div>
+      <button type="button" class="${RECAP_SEARCH_WINDOW_CLASS}-top" data-recap-search-top aria-label="검색 결과 맨 위로" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <i class="${RECAP_SEARCH_WINDOW_CLASS}-resize is-right" data-recap-search-resize="right" aria-hidden="true"></i>
+      <i class="${RECAP_SEARCH_WINDOW_CLASS}-resize is-bottom" data-recap-search-resize="bottom" aria-hidden="true"></i>`;
+    await restoreRecapSearchWindowSize(windowEl);
+    document.body.append(windowEl);
+    const dragCleanup = bindRecapSearchWindowDrag(windowEl);
+    const resizeCleanup = bindRecapSearchWindowResize(windowEl);
+    const sizePersistenceCleanup =
+      bindRecapSearchWindowSizePersistence(windowEl);
+    const dateValues = { recapFrom: "", recapTo: "" };
+    const datePickerCleanup = bindRecapSearchDatePickers(windowEl, dateValues);
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") closeRecapSearchWindow();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    recapSearchWindowCleanup = () => {
+      dragCleanup();
+      resizeCleanup();
+      sizePersistenceCleanup();
+      datePickerCleanup();
+      document.removeEventListener("keydown", onKeyDown);
+    };
+    windowEl
+      .querySelector("[data-recap-search-close]")
+      ?.addEventListener("click", closeRecapSearchWindow);
+    windowEl
+      .querySelector("[data-recap-search-page]")
+      ?.addEventListener("click", () => {
+        window.open(
+          chrome.runtime.getURL("chatRecap.html"),
+          "_blank",
+          "noopener",
+        );
+      });
+
+    const status = windowEl.querySelector("[data-recap-search-status]");
+    const statusText = windowEl.querySelector(
+      "[data-recap-search-status-text]",
+    );
+    const statusChannel = windowEl.querySelector(
+      "[data-recap-search-status-channel]",
+    );
+    const results = windowEl.querySelector("[data-recap-search-results]");
+    const channelPicker = windowEl.querySelector(
+      "[data-recap-search-channel-picker]",
+    );
+    const channelToggle = windowEl.querySelector(
+      "[data-recap-search-channel-toggle]",
+    );
+    const channelLabel = windowEl.querySelector(
+      "[data-recap-search-channel-label]",
+    );
+    const channelMenu = windowEl.querySelector(
+      "[data-recap-search-channel-menu]",
+    );
+    const topButton = windowEl.querySelector("[data-recap-search-top]");
+    if (!accountId) accountId = await fetchMyChannelId();
+    if (
+      !accountId ||
+      !status ||
+      !statusText ||
+      !statusChannel ||
+      !results ||
+      !channelPicker ||
+      !channelToggle ||
+      !channelLabel ||
+      !channelMenu ||
+      !topButton
+    ) {
+      if (statusText) {
+        statusText.textContent = "로그인 상태를 확인하지 못했습니다.";
+      }
+      return;
+    }
+
+    const catalog = await loadRecapSearchCatalog(accountId, preferredChannelId);
+    if (!windowEl.isConnected) return;
+    const channelIds = Object.entries(catalog)
+      .filter(([, months]) => Array.isArray(months) && months.length)
+      .map(([channelId]) => channelId)
+      .sort();
+    const preferred = String(preferredChannelId || "").toLowerCase();
+    let selectedChannelId = channelIds.includes(preferred) ? preferred : "";
+    const channelOptionMap = new Map();
+    const channelMetaMap = new Map();
+    const channelNameCollator = new Intl.Collator("ko-KR", {
+      numeric: true,
+      sensitivity: "base",
+    });
+    const setStatusText = (message) => {
+      statusText.textContent = message;
+    };
+    const renderSelectedChannelStatus = () => {
+      statusChannel.replaceChildren();
+      if (!selectedChannelId) {
+        statusChannel.hidden = true;
+        return;
+      }
+      const meta = channelMetaMap.get(selectedChannelId) || {
+        name:
+          channelOptionMap.get(selectedChannelId)?.textContent ||
+          selectedChannelId.slice(0, 8),
+        imageUrl: "",
+        verifiedMark: false,
+      };
+      const profile = document.createElement("span");
+      profile.className = `${RECAP_SEARCH_WINDOW_CLASS}-status-profile`;
+      if (meta.imageUrl) {
+        const image = document.createElement("img");
+        image.src = meta.imageUrl;
+        image.alt = "";
+        image.width = 24;
+        image.height = 24;
+        image.loading = "lazy";
+        image.decoding = "async";
+        profile.append(image);
+      } else {
+        profile.classList.add("is-default");
+      }
+      const name = document.createElement("strong");
+      name.textContent = meta.name;
+      statusChannel.append(profile, name);
+      if (meta.verifiedMark) {
+        const mark = document.createElement("i");
+        mark.className = `${RECAP_SEARCH_WINDOW_CLASS}-status-official`;
+        mark.setAttribute("aria-label", "파트너 채널");
+        statusChannel.append(mark);
+      }
+      statusChannel.hidden = false;
+    };
+    const sortChannelOptions = () => {
+      [...channelOptionMap.entries()]
+        .filter(([channelId]) => channelId)
+        .sort(([, left], [, right]) =>
+          channelNameCollator.compare(
+            left.textContent || "",
+            right.textContent || "",
+          ),
+        )
+        .forEach(([, option]) => channelMenu.append(option));
+    };
+    const addChannelOption = (channelId, label) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.recapSearchChannelValue = channelId;
+      option.setAttribute(
+        "aria-selected",
+        String(channelId === selectedChannelId),
+      );
+      option.textContent = label;
+      channelMenu.append(option);
+      channelOptionMap.set(channelId, option);
+    };
+    addChannelOption("", "전체 스트리머");
+    channelIds.forEach((channelId) =>
+      addChannelOption(channelId, channelId.slice(0, 8)),
+    );
+    if (selectedChannelId) {
+      channelLabel.textContent = selectedChannelId.slice(0, 8);
+    }
+    renderSelectedChannelStatus();
+    const closeChannelMenu = () => {
+      channelMenu.hidden = true;
+      channelToggle.setAttribute("aria-expanded", "false");
+    };
+    const focusChannelOption = (direction) => {
+      const options = [
+        ...channelMenu.querySelectorAll("[data-recap-search-channel-value]"),
+      ];
+      if (!options.length) return;
+      const current = options.indexOf(document.activeElement);
+      const next =
+        direction === "first"
+          ? 0
+          : direction === "last"
+            ? options.length - 1
+            : (current + direction + options.length) % options.length;
+      options[next]?.focus();
+    };
+    channelToggle.addEventListener("click", () => {
+      const nextOpen = channelMenu.hidden;
+      windowEl
+        .querySelectorAll("[data-date-picker]")
+        .forEach(closeDatePicker);
+      channelMenu.hidden = !nextOpen;
+      channelToggle.setAttribute("aria-expanded", String(nextOpen));
+    });
+    channelToggle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      channelMenu.hidden = false;
+      channelToggle.setAttribute("aria-expanded", "true");
+      focusChannelOption(event.key === "ArrowDown" ? "first" : "last");
+    });
+    channelMenu.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-recap-search-channel-value]");
+      if (!option) return;
+      selectedChannelId = option.dataset.recapSearchChannelValue || "";
+      channelLabel.textContent = option.textContent || "전체 스트리머";
+      channelOptionMap.forEach((item, channelId) => {
+        item.setAttribute(
+          "aria-selected",
+          String(channelId === selectedChannelId),
+        );
+      });
+      renderSelectedChannelStatus();
+      closeChannelMenu();
+      void runSearch();
+    });
+    channelMenu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeChannelMenu();
+        channelToggle.focus();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        focusChannelOption(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusChannelOption(event.key === "Home" ? "first" : "last");
+      }
+    });
+    const onChannelOutsidePointerDown = (event) => {
+      if (!channelPicker.contains(event.target)) closeChannelMenu();
+    };
+    document.addEventListener("pointerdown", onChannelOutsidePointerDown);
+    const previousCleanup = recapSearchWindowCleanup;
+    recapSearchWindowCleanup = () => {
+      document.removeEventListener(
+        "pointerdown",
+        onChannelOutsidePointerDown,
+      );
+      previousCleanup?.();
+    };
+    void (async () => {
+      for (let index = 0; index < channelIds.length; index += 4) {
+        const batch = channelIds.slice(index, index + 4);
+        await Promise.all(
+          batch.map(async (channelId) => {
+            const meta = await resolveRecapSearchChannelMeta(channelId);
+            channelMetaMap.set(channelId, meta);
+            const option = channelOptionMap.get(channelId);
+            if (option) option.textContent = meta.name;
+            if (selectedChannelId === channelId) {
+              channelLabel.textContent = meta.name;
+              renderSelectedChannelStatus();
+            }
+          }),
+        );
+        if (!windowEl.isConnected) return;
+        sortChannelOptions();
+      }
+    })();
+
+    let revision = 0;
+    let filteredRows = [];
+    let visible = 0;
+    let lastSearchDateKey = "";
+    const appendResults = () => {
+      const next = filteredRows.slice(visible, visible + 200);
+      if (!next.length) return;
+      const fragment = document.createDocumentFragment();
+      for (const rowData of next) {
+        const date = new Date(rowData.t);
+        const nextDateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+        if (lastSearchDateKey !== nextDateKey) {
+          lastSearchDateKey = nextDateKey;
+          const dateHead = document.createElement("div");
+          dateHead.className = `${RECAP_SEARCH_WINDOW_CLASS}-date`;
+          dateHead.dataset.dateKey = lastSearchDateKey;
+          dateHead.textContent = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}.`;
+          fragment.append(dateHead);
+        }
+        const row = document.createElement("div");
+        row.className = `${RECAP_SEARCH_WINDOW_CLASS}-row`;
+        const time = document.createElement("time");
+        time.textContent = date.toLocaleTimeString("ko-KR", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const message = document.createElement("span");
+        const badge = donationBadgeEl(rowData.d);
+        if (badge) message.append(badge);
+        appendRecapMessage(message, rowData.m);
+        row.append(time, message);
+        fragment.append(row);
+      }
+      results.append(fragment);
+      visible += next.length;
+    };
+    const runSearch = async () => {
+      const runRevision = ++revision;
+      const selected = selectedChannelId;
+      const targets = selected ? [selected] : channelIds;
+      status.hidden = false;
+      renderSelectedChannelStatus();
+      setStatusText(
+        targets.length
+          ? `기록을 불러오는 중입니다. (0/${targets.length})`
+          : "저장된 채팅 기록이 없습니다.",
+      );
+      const rows = [];
+      for (let index = 0; index < targets.length; index += 4) {
+        const batch = targets.slice(index, index + 4);
+        const loaded = await Promise.all(
+          batch.map((channelId) =>
+            loadRecapSearchChannelRows(
+              accountId,
+              channelId,
+              catalog[channelId],
+            ),
+          ),
+        );
+        if (runRevision !== revision || !windowEl.isConnected) return;
+        loaded.forEach((items) => rows.push(...items));
+        setStatusText(
+          `기록을 불러오는 중입니다. (${Math.min(index + batch.length, targets.length)}/${targets.length})`,
+        );
+      }
+      const fromValue = dateValues.recapFrom;
+      const toValue = dateValues.recapTo;
+      const keyword = String(
+        windowEl.querySelector("[data-recap-search-keyword]")?.value || "",
+      )
+        .trim()
+        .toLocaleLowerCase("ko-KR");
+      const from = fromValue ? getDayStart(fromValue) : 0;
+      const to = toValue ? getDayEnd(toValue) : Infinity;
+      filteredRows = rows
+        .filter(
+          (row) =>
+            row.t >= from &&
+            row.t <= to &&
+            (!keyword ||
+              recapSearchText(row)
+                .toLocaleLowerCase("ko-KR")
+                .includes(keyword)),
+        )
+        .sort((a, b) => b.t - a.t);
+      visible = 0;
+      lastSearchDateKey = "";
+      results.textContent = "";
+      appendResults();
+      status.hidden = false;
+      setStatusText(
+        filteredRows.length
+          ? `${filteredRows.length.toLocaleString("ko-KR")}개의 기록을 찾았습니다.`
+          : "조건에 맞는 채팅 기록이 없습니다.",
+      );
+      topButton.hidden = true;
+    };
+    results.addEventListener(
+      "scroll",
+      () => {
+        topButton.hidden = results.scrollTop < 180;
+        if (
+          results.scrollTop + results.clientHeight >=
+          results.scrollHeight - 160
+        ) {
+          appendResults();
+        }
+      },
+      { passive: true },
+    );
+    topButton.addEventListener("click", () =>
+      results.scrollTo({ top: 0, behavior: "smooth" }),
+    );
+    windowEl
+      .querySelector("[data-recap-search-run]")
+      ?.addEventListener("click", () => void runSearch());
+    const keywordInput = windowEl.querySelector(
+      "[data-recap-search-keyword]",
+    );
+    let hadKeyword = false;
+    keywordInput?.addEventListener("input", () => {
+      const hasKeyword = Boolean(String(keywordInput.value || "").trim());
+      if (hadKeyword && !hasKeyword) void runSearch();
+      hadKeyword = hasKeyword;
+    });
+    keywordInput?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") void runSearch();
+    });
+    await runSearch();
+  }
+
   async function countLiveRecapForChannel(accountId, channelId) {
     const store = chatHistoryStore();
     if (!store || !accountId || !channelId) return 0;
@@ -10558,9 +12042,10 @@
         </button>
         <strong>내 채팅 기록</strong>
         <button type="button" data-recap-open title="채팅 리캡 열기">리캡</button>
-        <button type="button" data-recap-close aria-label="닫기">
+        <button type="button" data-recap-search aria-label="내 채팅 기록 검색" title="기간·키워드·스트리머로 검색">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2"/>
+            <path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
@@ -10570,9 +12055,14 @@
     view
       .querySelector("[data-recap-back]")
       ?.addEventListener("click", () => restoreProfileDialog(dlg));
-    view
-      .querySelector("[data-recap-close]")
-      ?.addEventListener("click", () => closeProfileDialog(dlg));
+    view.querySelector("[data-recap-search]")?.addEventListener("click", () => {
+      const preferredChannelId = currentLiveChannelId();
+      closeProfileDialog(dlg);
+      window.setTimeout(
+        () => void openRecapSearchWindow(preferredChannelId),
+        0,
+      );
+    });
     view.querySelector("[data-recap-open]")?.addEventListener("click", () => {
       window.open(chrome.runtime.getURL("chatRecap.html"), "_blank");
     });
@@ -10619,21 +12109,26 @@
     if (bg) list.style.setProperty("--cheese-recap-bg", bg);
     const batchSize = 200;
     const pager = createLiveRecapPager(accountId, channelId);
-    let rendered = 0;
     let lastDateKey = "";
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = `${RECAP_VIEW_CLASS}-more`;
+    let loading = false;
+    let done = false;
+    const sentinel = document.createElement("div");
+    sentinel.className = `${RECAP_VIEW_CLASS}-sentinel`;
+    sentinel.setAttribute("aria-live", "polite");
+    const fab = document.createElement("button");
+    fab.type = "button";
+    fab.className = `${RECAP_VIEW_CLASS}-top`;
+    fab.hidden = true;
+    fab.setAttribute("aria-label", "내 채팅 기록 맨 위로");
+    fab.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const renderNextBatch = async () => {
-      more.disabled = true;
-      more.textContent = "불러오는 중입니다.";
-      if (!more.isConnected) list.append(more);
+      if (loading || done || !list.isConnected) return;
+      loading = true;
+      sentinel.textContent = "이전 기록을 불러오는 중입니다.";
       const page = await pager.next(batchSize);
-      more.remove();
-      if (!list.isConnected && !view.isConnected) return;
+      if (!list.isConnected || !view.isConnected) return;
       const fragment = document.createDocumentFragment();
       for (const r of page.rows) {
-        rendered += 1;
         const d = new Date(r.t);
         const dateKey = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
         if (dateKey !== lastDateKey) {
@@ -10658,18 +12153,35 @@
         row.append(time, text);
         fragment.append(row);
       }
-      list.append(fragment);
-      if (!page.done) {
-        more.disabled = false;
-        const remaining = Math.max(0, totalCount - rendered);
-        more.textContent = remaining
-          ? `이전 기록 ${Math.min(batchSize, remaining).toLocaleString()}개 더 보기`
-          : "이전 기록 더 보기";
-        list.append(more);
+      list.insertBefore(fragment, sentinel);
+      done = page.done;
+      loading = false;
+      sentinel.textContent = done
+        ? ""
+        : "아래로 스크롤하면 이전 기록을 불러옵니다.";
+      if (!done && list.scrollHeight <= list.clientHeight + 24) {
+        await renderNextBatch();
       }
     };
-    view.append(list);
-    more.addEventListener("click", () => void renderNextBatch());
+    list.append(sentinel);
+    view.append(list, fab);
+    list.addEventListener(
+      "scroll",
+      () => {
+        fab.hidden = list.scrollTop < 180;
+        if (
+          !done &&
+          !loading &&
+          list.scrollTop + list.clientHeight >= list.scrollHeight - 160
+        ) {
+          void renderNextBatch();
+        }
+      },
+      { passive: true },
+    );
+    fab.addEventListener("click", () => {
+      list.scrollTo({ top: 0, behavior: "smooth" });
+    });
     await renderNextBatch();
   }
 
@@ -13416,8 +14928,8 @@
   function supportsChatDocumentPip() {
     return Boolean(
       IS_TOP_FRAME &&
-      window.isSecureContext &&
-      window.documentPictureInPicture?.requestWindow,
+        window.isSecureContext &&
+        window.documentPictureInPicture?.requestWindow,
     );
   }
 
@@ -19350,9 +20862,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       node.matches?.(
         "#cheese-custom-follow, #cheese-custom-follow *, .cheese-cf-header-ctrl, .cheese-cf-header-ctrl *, .cheese-custom-follow-orig-hidden",
       ) ||
-      node.closest?.(
-        "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
-      ),
+        node.closest?.(
+          "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
+        ),
     );
   }
 
@@ -21789,7 +23301,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           strong !== label &&
           Boolean(
             strong.compareDocumentPosition(bar) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
+              Node.DOCUMENT_POSITION_FOLLOWING,
           ),
       )
       .at(-1);
@@ -25506,9 +27018,29 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         after: null,
       };
     }
-    const layoutBody = document.querySelector("#layout-body");
-    const main = layoutBody?.querySelector("main") || layoutBody;
-    return main ? { parent: main, after: null } : null;
+    // 네이티브 검색 DOM이 아직 그려지기 전에는 임시로 main에 붙이지 않는다.
+    // 그 경로를 허용하면 클립 스켈레톤/캐시가 먼저 나타난 뒤 채널·라이브·동영상
+    // 섹션이 뒤늦게 들어와 화면 전체가 한 번 밀린다. 동영상이 없는 검색이라도
+    // 실제 네이티브 결과 섹션 하나가 확인된 뒤 그 마지막에 붙인다.
+    const nativeSections = [
+      ...document.querySelectorAll("#layout-body section"),
+    ].filter((section) => {
+      if (section.classList.contains(INTEGRATED_SEARCH_CLIPS_SECTION_CLASS)) {
+        return false;
+      }
+      const title = [...section.querySelectorAll("strong")].find(
+        (strong) =>
+          strong.closest("section") === section &&
+          /^(채널|라이브|동영상)(?:\s|$)/.test(
+            String(strong.textContent || "").trim(),
+          ),
+      );
+      return Boolean(title);
+    });
+    const lastNative = nativeSections.at(-1);
+    return lastNative?.parentElement
+      ? { parent: lastNative.parentElement, after: lastNative }
+      : null;
   }
 
   function getIntegratedSearchClipsNativeSection(mount) {
@@ -26429,12 +27961,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const keyword = integratedSearchClipsEnabled
       ? getSearchRerankKeyword()
       : "";
-    if (!keyword || !findIntegratedSearchClipsMount()) {
+    if (!keyword) {
       if (
         integratedSearchClipsState.keyword ||
         document.querySelector(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`)
       ) {
         cleanupIntegratedSearchClips();
+      }
+      return;
+    }
+    if (!findIntegratedSearchClipsMount()) {
+      // 같은 검색어를 그리는 중 React가 네이티브 섹션을 잠깐 비운 경우에는 API
+      // 수집 상태를 유지한다. 우리 섹션만 제거해 단독 선행 노출을 막고, 네이티브
+      // DOM이 돌아오면 다음 ensure에서 현재 결과를 다시 붙인다.
+      setIntegratedSearchNativeEmptyHidden(false);
+      document
+        .querySelector(`.${INTEGRATED_SEARCH_CLIPS_SECTION_CLASS}`)
+        ?.remove();
+      if (
+        integratedSearchClipsState.keyword &&
+        integratedSearchClipsState.keyword !== keyword
+      ) {
+        cleanupIntegratedSearchClips(false);
       }
       return;
     }
@@ -36216,9 +37764,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     return Boolean(
       row.matches(`.${CHAT_HIDE_CLASSES.chatHideMission}`) ||
-      row.querySelector(
-        `.${CHAT_HIDE_CLASSES.chatHideMission}, button[class*="_mission_button_"]`,
-      ),
+        row.querySelector(
+          `.${CHAT_HIDE_CLASSES.chatHideMission}, button[class*="_mission_button_"]`,
+        ),
     );
   }
 
@@ -36232,9 +37780,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     return Boolean(
       row.hasAttribute(CHAT_HISTORY_MARK) ||
-      row.querySelector(
-        '[class*="_chatting_message_"], [class*="_nickname_"], [class*="_message_"], [class*="_event_"]',
-      ),
+        row.querySelector(
+          '[class*="_chatting_message_"], [class*="_nickname_"], [class*="_message_"], [class*="_event_"]',
+        ),
     );
   }
 
@@ -36524,20 +38072,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     } catch {}
   }
 
-  // 한 배치를 월별로 갈라 저장한다. 같은 시각+본문은 한 번만 남긴다(재시도 안전).
-  function saveChatRecapBatch(
-    accountId,
-    channelId,
-    items,
-    batchVideoNo = "",
-  ) {
+  // 한 배치를 월별로 갈라 저장한다. 라이브 행은 시각+본문, 다시보기 행은
+  // 메시지 ID 또는 영상+재생 위치+본문으로 합쳐 재수집해도 한 번만 남긴다.
+  function saveChatRecapBatch(accountId, channelId, items, batchVideoNo = "") {
     return enqueueChatRecapWrite(accountId, channelId, () =>
-      saveChatRecapBatchLocked(
-        accountId,
-        channelId,
-        items,
-        batchVideoNo,
-      ),
+      saveChatRecapBatchLocked(accountId, channelId, items, batchVideoNo),
     );
   }
 
@@ -36565,6 +38104,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const videoNo = String(it?.n || batchVideoNo || "");
         if (/^\d+$/.test(videoNo)) row.n = videoNo;
       }
+      if (it?.i) row.i = String(it.i).slice(0, 500);
       if (it?.d && typeof it.d === "object") row.d = it.d; // 후원·구독 정보
       byMonth.get(month).push(row);
     }
@@ -36580,24 +38120,75 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           rows,
         );
         const list = mergeState.items;
-        // 중복 제거 키: 시각+본문. 같은 메시지를 두 번 받아도 한 줄만 남는다.
+        const compacted = CHAT_RECAP_STORE_API.compactVodRows(
+          list,
+          recapDonationMatchKey,
+        );
+        if (compacted.changed) {
+          list.splice(0, list.length, ...compacted.items);
+        }
+        // 중복 제거 키: 시각+본문+후원 정보. 같은 메시지를 두 번 받아도 한 줄만
+        // 남기되, 본문이 빈 구독·후원 여러 건을 서로 같은 행으로 오인하지 않는다.
         // ⚠ 같은 채팅(t|m)이 이미 있어도, 기존에 재생 오프셋(v)이 없고 새로
         //   들어온 것에 있으면 그 값만 보강한다. 그냥 건너뛰면 라이브에서 먼저
         //   저장된 줄에 v·n 이 영영 안 붙어 다시보기 목록에서 빠진다.
-        const index = new Map(list.map((e, i) => [`${e.t}|${e.m}`, i]));
-        let changed = false;
+        const dedupeKey = (entry) =>
+          `${entry.t}|${entry.m}|${recapDonationMatchKey(entry.d)}`;
+        const index = new Map(
+          list.map((entry, index) => [dedupeKey(entry), index]),
+        );
+        const vodIdentities = new Map();
+        const vodFallbacks = new Map();
+        list.forEach((entry, listIndex) => {
+          const identity = CHAT_RECAP_STORE_API.vodIdentityKey(entry);
+          const fallback = CHAT_RECAP_STORE_API.vodFallbackKey(
+            entry,
+            recapDonationMatchKey,
+          );
+          if (identity) vodIdentities.set(identity, listIndex);
+          if (fallback && !vodFallbacks.has(fallback)) {
+            vodFallbacks.set(fallback, listIndex);
+          }
+        });
+        let changed = compacted.changed;
         for (const row of rows) {
-          const dedupe = `${row.t}|${row.m}`;
+          const dedupe = dedupeKey(row);
           let at = index.get(dedupe);
+          const vodIdentity = CHAT_RECAP_STORE_API.vodIdentityKey(row);
+          const vodFallback = CHAT_RECAP_STORE_API.vodFallbackKey(
+            row,
+            recapDonationMatchKey,
+          );
+          if (at === undefined && vodIdentity) {
+            at = vodIdentities.get(vodIdentity);
+          }
+          if (at === undefined && vodFallback) {
+            const fallbackIndex = vodFallbacks.get(vodFallback);
+            if (
+              fallbackIndex !== undefined &&
+              (!row.i || !list[fallbackIndex]?.i)
+            ) {
+              at = fallbackIndex;
+            }
+          }
+          // 예전 버전이 후원 메타 없이 저장한 같은 행은 새 줄을 만들지 않고 d를
+          // 보강한다. 이 경로는 동일 시각·본문일 때만 허용한다.
+          if (at === undefined && row.d) {
+            const legacy = list.findIndex(
+              (item) => !item?.d && item?.t === row.t && item?.m === row.m,
+            );
+            if (legacy >= 0) at = legacy;
+          }
           // 라이브 수집 시 실제 시각 대신 수집 순간이 저장된 행은 API 시각과
           // 몇 초 어긋날 수 있다. 다시보기 보강 행에 한해 같은 본문·5초 이내의
           // 미연결 행을 찾아 새 행을 만들지 않고 연결한다.
           if (at === undefined && row.n && row.v !== undefined) {
+            const donationKey = recapDonationMatchKey(row.d);
             const fuzzy = list.findIndex(
               (item) =>
-                !item?.d &&
                 !item?.n &&
                 item?.m === row.m &&
+                recapDonationMatchKey(item?.d) === donationKey &&
                 Math.abs((Number(item?.t) || 0) - row.t) <= 5000,
             );
             if (fuzzy >= 0) at = fuzzy;
@@ -36619,13 +38210,34 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               next.n = row.n;
               enriched = true;
             }
+            if (!next.i && row.i) {
+              next.i = row.i;
+              enriched = true;
+            }
+            if (!next.d && row.d) {
+              next.d = row.d;
+              enriched = true;
+            }
             if (enriched) {
               list[at] = next;
               changed = true;
             }
+            const nextIdentity = CHAT_RECAP_STORE_API.vodIdentityKey(next);
+            const nextFallback = CHAT_RECAP_STORE_API.vodFallbackKey(
+              next,
+              recapDonationMatchKey,
+            );
+            if (nextIdentity) vodIdentities.set(nextIdentity, at);
+            if (nextFallback && !vodFallbacks.has(nextFallback)) {
+              vodFallbacks.set(nextFallback, at);
+            }
             continue;
           }
           index.set(dedupe, list.length);
+          if (vodIdentity) vodIdentities.set(vodIdentity, list.length);
+          if (vodFallback && !vodFallbacks.has(vodFallback)) {
+            vodFallbacks.set(vodFallback, list.length);
+          }
           list.push(row);
           changed = true;
         }
@@ -36701,9 +38313,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const store = chatHistoryStore();
     if (!store) return;
     try {
-      const last = Number((await store.get(CHAT_RECAP_PRUNE_AT_KEY))?.[
-        CHAT_RECAP_PRUNE_AT_KEY
-      ]);
+      const last = Number(
+        (await store.get(CHAT_RECAP_PRUNE_AT_KEY))?.[CHAT_RECAP_PRUNE_AT_KEY],
+      );
       if (Date.now() - last < CHAT_RECAP_PRUNE_INTERVAL_MS) return;
       // 먼저 시각을 남겨 동시에 열린 다른 탭이 같은 전체 스캔을 반복하지 않게 한다.
       await store.set({ [CHAT_RECAP_PRUNE_AT_KEY]: Date.now() });
@@ -43377,8 +44989,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     const controlsPassed = Boolean(
       searchList &&
-      isVisible(searchList) &&
-      controls?.getBoundingClientRect().bottom < scrollBoundary + 16,
+        isVisible(searchList) &&
+        controls?.getBoundingClientRect().bottom < scrollBoundary + 16,
     );
     const scrollTop = getMainPageScrollTop();
     button.hidden =

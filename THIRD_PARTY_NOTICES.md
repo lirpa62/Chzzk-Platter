@@ -11,6 +11,16 @@ This extension includes `Chart.js` v4.4.7.
 - Bundled file: `src/chart.min.js`
 - Full license text: `LICENSES/Chart.js.txt`
 
+## html-to-image
+
+This extension includes `html-to-image` v1.11.13.
+
+- Project: https://github.com/bubkoo/html-to-image
+- License: MIT License
+- Bundled file: `src/html-to-image.min.js`
+- Full license text: `LICENSES/html-to-image.txt`
+- Copyright: Copyright (c) 2017-2025 W.Y.
+
 ## hls.js
 
 This extension includes `hls.js` v1.5.20.

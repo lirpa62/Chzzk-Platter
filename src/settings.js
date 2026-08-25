@@ -31,6 +31,7 @@
     "cheeseChatRecapChannelView",
     "cheeseChatRecapCumulative",
     "cheeseChatRecapDonScope",
+    "cheeseChatRecapPromptPicks",
     "cheeseChatRecapWordSort",
     "cheeseChatRecapWordType",
     "cheeseMasterEnabled",
@@ -8078,6 +8079,8 @@
     "chatRecapLockedEmojis",
     "chatRecapImportedVideos",
     "chatRecapVerifiedVideosV2",
+    "chatRecapVodEventLinksV3",
+    "chatRecapHistoryRevisionV1",
     "cheeseChatRecapPodiumAchievements",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
@@ -8191,6 +8194,18 @@
         ...new Set(value.map(String).filter((item) => allowed.has(item))),
       ];
       return order.length === 3 ? order : undefined;
+    }
+    if (key === "cheeseChatRecapPromptPicks") {
+      if (!Array.isArray(value)) return undefined;
+      const allowed = new Set([
+        "basic",
+        "channels",
+        "time",
+        "months",
+        "words",
+        "donation",
+      ]);
+      return [...new Set(value.map(String).filter((item) => allowed.has(item)))];
     }
     if (key === "cheeseLogPowerStatsGroup") {
       if (!value || typeof value !== "object" || Array.isArray(value)) {
