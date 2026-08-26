@@ -37,6 +37,82 @@
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   };
+  // 같은 이유로 표시/숨김도 이 함수로 통일한다. 마크업이 한 군데 어긋났을 때
+  // TypeError 로 화면 전체가 멈추는 일을 막는다(제보: refreshOnce 중단).
+  const setHidden = (id, hidden) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = hidden;
+  };
+
+  // ── 섹션 바로가기 ────────────────────────────────────────────────────────
+  // id 는 이미 이미지 저장용으로 붙어 있는 것을 그대로 쓴다(중복 정의하지 않는다).
+  const SECTION_NAV_ITEMS = [
+    ["crcExportSummary", "요약"],
+    ["crcExportChannels", "채널별 채팅"],
+    ["crcExportMultiChannel", "멀티 채널"],
+    ["crcExportChannelGraph", "채널 관계도"],
+    ["crcExportWhen", "활동 시간대"],
+    ["crcExportMonths", "월별 추이"],
+    ["crcExportWords", "자주 쓴 말"],
+  ];
+  let sectionNavObserver = null;
+
+  function setupSectionNav() {
+    const nav = $("crcSectionNav");
+    if (!nav) return;
+    const rows = SECTION_NAV_ITEMS.map(([id, label]) => ({
+      id,
+      label,
+      el: $(id),
+    })).filter((row) => row.el);
+    if (rows.length < 2) {
+      nav.hidden = true;
+      return;
+    }
+    nav.textContent = "";
+    for (const row of rows) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.navFor = row.id;
+      // ⚠ innerHTML 대신 DOM 으로 만든다(이 파일에는 escapeHtml 이 없다).
+      const dot = document.createElement("i");
+      dot.setAttribute("aria-hidden", "true");
+      const text = document.createElement("span");
+      text.textContent = row.label;
+      // 좁은 화면에서는 글자를 감추므로 툴팁으로 이름을 알려 준다.
+      button.dataset.tip = row.label;
+      button.setAttribute("aria-label", row.label);
+      button.append(dot, text);
+      button.addEventListener("click", () => {
+        row.el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      nav.append(button);
+    }
+    nav.hidden = false;
+
+    // 지금 화면에 보이는 섹션을 표시한다. ⚠ 스크롤 이벤트로 매번 위치를 재면
+    //   스크롤이 버벅인다 → IntersectionObserver 로 브라우저에 맡긴다.
+    sectionNavObserver?.disconnect();
+    const visible = new Set();
+    sectionNavObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) visible.add(entry.target.id);
+          else visible.delete(entry.target.id);
+        }
+        // 여러 섹션이 걸치면 목록 순서상 가장 위를 현재로 본다.
+        const current = rows.find((row) => visible.has(row.id))?.id || "";
+        for (const button of nav.querySelectorAll("[data-nav-for]")) {
+          button.setAttribute(
+            "aria-current",
+            String(button.dataset.navFor === current),
+          );
+        }
+      },
+      { rootMargin: "-20% 0px -60% 0px" },
+    );
+    for (const row of rows) sectionNavObserver.observe(row.el);
+  }
 
   function setupColorsCollapse() {
     const toggle = $("crcColorsToggle");
@@ -304,6 +380,17 @@
   });
   let wordStatsCache = emptyWordStats();
   let timeAggregateCache = null;
+  let multiChannelActivityCache = null;
+  let multiChannelSectionSort = "recent";
+  let multiChannelSectionLimit = 12;
+  let multiChannelCardSequence = 0;
+  let channelGraphModelCache = null;
+  let channelGraphMode = "relation";
+  let channelGraphPeriodIndex = 0;
+  let channelGraphPlayTimer = 0;
+  let channelGraphRenderFrame = 0;
+  let channelGraphRenderToken = 0;
+  let channelGraphExportSeq = 0; // 내보내기 복제본의 clipPath id 충돌 방지
   let subscribedRows = []; // 구독 중 채널(상세 팝업용)
   let donScope = "all"; // "all" | "following" — 후원·구독 가져올 범위
   const DON_SCOPE_KEY = "cheeseChatRecapDonScope";
@@ -1182,7 +1269,16 @@
       const channelId = String(it?.channelId || "");
       // 이모티콘 토큰을 먼저 떼어낸다(안에 공백이 없어 일반 분리로도 남지만,
       // 앞뒤 문장부호에 붙어 깨지는 경우가 있어 따로 센다).
-      const text = String(it?.m || "").replace(/\{:([^:}]+):\}/g, (_, key) => {
+      // 물음표만 친 채팅('?', '??', '???' …)은 '?' 하나로 센다.
+      // ⚠ '?' 는 아래 분리자에 들어 있어 그냥 두면 토큰이 통째로 사라진다.
+      //   다른 글자가 섞이면(예: '뭐임?') 제외한다 — 그건 물음표 자체가 아니라
+      //   문장이라 기존대로 낱말만 센다.
+      const rawText = String(it?.m || "");
+      if (/^[?？\s]*[?？][?？\s]*$/.test(rawText)) {
+        callback("?", channelId, it, itemIndex);
+        continue;
+      }
+      const text = rawText.replace(/\{:([^:}]+):\}/g, (_, key) => {
         callback(`:${key}:`, channelId, it, itemIndex);
         return " ";
       });
@@ -1370,6 +1466,11 @@
       "자주 쓴 단어·이모티콘(상위 20개) — 채팅 성향 분석에 씁니다",
     ],
     ["donation", "후원·구독", "후원 횟수와 구독 채널 수(금액은 넣지 않습니다)"],
+    [
+      "graph",
+      "채널 이동 패턴",
+      "어느 채널을 보다 어디로 옮겼는지 — 시청 동선이 드러나 기본은 꺼져 있습니다",
+    ],
   ];
 
   // 치지직 기본 이모티콘 뜻. AI 에게 {:d_126:} 같은 키만 주면 아무 의미가 없어
@@ -1630,6 +1731,8 @@
       "- 이 기록은 '채팅'이지 시청 시간이 아닙니다. 채널 비율도 시청 비율이 아니라 채팅 비율입니다.",
       "- 채팅이 없는 기간이 곧 안 본 기간은 아닙니다(설치 전 기록과 미수집 구간이 빠져 있습니다).",
       "- 시간대는 '채팅한 시각'일 뿐입니다. 수면 시간이나 직업을 추정하지 마세요.",
+      "- 멀티 채널 채팅은 서로 다른 채널의 채팅 시각이 가까운 구간일 뿐, 실제 동시 재생을 확정하지 않습니다.",
+      "- 채널 이동 패턴도 채팅 시각의 전후일 뿐입니다. 방송을 갈아탔다고 단정하지 마세요(동시 시청일 수 있습니다).",
       "- 월별 건수는 활동일과 함께 보세요. 건수가 준 것이 방송이 적었던 탓일 수 있습니다.",
       "- 자주 쓴 말은 토큰 빈도라 문맥과 반어법을 알 수 없습니다.",
       "- 이모티콘은 d_126 같은 키가 아니라 뜻으로 풀어 쓰고, 뜻이 없는 것은 넘어가세요.",
@@ -1667,6 +1770,13 @@
       if (cur) lines.push(`- 현재 연속 채팅: ${fmt(cur)}일`);
       const perDay = uniqueDays ? Math.round(items.length / uniqueDays) : 0;
       if (perDay) lines.push(`- 채팅한 날 하루 평균: 약 ${fmt(perDay)}회`);
+      const multi = multiChannelActivity(items);
+      if (multi.sessionCount) {
+        lines.push(
+          `- 멀티 채널 채팅: 한 세션 최대 ${fmt(multi.maxChannels)}개 채널, ${fmt(multi.sessionCount)}개 세션`,
+          `- 서로 다른 채널의 가장 짧은 채팅 간격: ${formatMultiChannelGap(multi.fastestGap)}`,
+        );
+      }
       lines.push("");
     }
 
@@ -1783,6 +1893,31 @@
           lines.push(
             "※ '뜻 미상'은 이름만으로 의미를 알 수 없는 이모티콘입니다." +
               " 뜻을 지어내지 말고, 그런 이모티콘을 쓴다는 사실만 참고하세요.",
+          );
+        }
+        lines.push("");
+      }
+    }
+
+    if (picked.has("graph") && items.length) {
+      // 관계도가 이미 계산해 둔 모델을 그대로 쓴다(추가 집계 없음).
+      const model = channelGraphModel(items);
+      const period = buildChannelGraphPeriod(model, "");
+      const links = (period.relationLinks || []).slice(0, 10);
+      if (links.length) {
+        includedSections += 1;
+        lines.push("[채널 이동 패턴] (상위 10개)");
+        lines.push(
+          `- 기준: 한 채널에서 채팅한 뒤 ${Math.round(MULTI_CHANNEL_SESSION_MS / 60000)}분 안에` +
+            " 다른 채널에서 채팅한 경우를 '이동'으로 봅니다.",
+        );
+        for (const link of links) {
+          const from = promptSafeText(channelGraphName(model, link.source));
+          const to = promptSafeText(channelGraphName(model, link.target));
+          const gap = Math.round((Number(link.averageGap) || 0) / 60000);
+          lines.push(
+            `- ${from} → ${to} · ${fmt(link.count)}회` +
+              (gap ? ` · 평균 ${gap}분 간격` : ""),
           );
         }
         lines.push("");
@@ -2063,6 +2198,14 @@
   // 평소에는 캡처용 DOM·캔버스를 유지하지 않아 리캡 집계 성능에 영향이 없다.
   const EXPORT_TARGETS = {
     channels: { title: "채널별 채팅", ids: ["crcExportChannels"] },
+    multiChannel: {
+      title: "멀티 채널 채팅",
+      ids: ["crcExportMultiChannel"],
+    },
+    channelGraph: {
+      title: "채널 관계도",
+      ids: ["crcExportChannelGraph"],
+    },
     when: { title: "활동 시간대", ids: ["crcExportWhen"] },
     months: { title: "월별 추이", ids: ["crcExportMonths"] },
     words: { title: "자주 쓴 말", ids: ["crcExportWords"] },
@@ -2075,11 +2218,19 @@
     { value: "list-expanded", label: "목록 모두 펼치기", kind: "list" },
     { value: "list-current", label: "목록 현재 상태", kind: "list" },
   ];
+  const MULTI_CHANNEL_EXPORT_VARIANTS = [
+    { value: "collapsed", label: "모두 접기" },
+    { value: "expanded", label: "모두 펼치기" },
+    { value: "current", label: "현재 상태" },
+  ];
+  const MULTI_CHANNEL_EXPORT_PAGE_SIZE = 12;
   const exportAssetCache = new Map();
   let exportingRecap = false;
   let channelRenderReady = Promise.resolve();
   let channelExportSelectionInitialized = false;
   let pendingChannelExportRequest = null;
+  let multiExportSelectionInitialized = false;
+  let pendingMultiExportRequest = null;
   const EXPORT_TRANSPARENT_PNG =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
 
@@ -2102,7 +2253,7 @@
 
   function setupExportIcons() {
     for (const button of document.querySelectorAll(
-      ".crc-section-export, #crcInfoExport",
+      ".crc-section-export, #crcInfoExport, #crcChannelTrendExport",
     )) {
       if (!button.firstChild) button.append(exportIcon());
     }
@@ -2367,10 +2518,9 @@
       if (!sourceGrid || !cloneGrid) continue;
       let columnCount = 0;
       if (selector === ".crc-podium") {
-        // auto-fit의 계산 스타일에는 사용되지 않는 접힌 0px 트랙도 남는다.
-        // 트랙 문자열을 세면 카드 3개가 4열의 왼쪽에 붙으므로 실제 카드
-        // 개수로 고정해 포디움 전체를 가운데에 배치한다.
-        columnCount = cloneGrid.children.length;
+        // 포디움은 카드 수와 무관하게 3칸 너비를 유지한다. 6개 보조 열에서
+        // 카드 하나가 2열을 차지하므로 1·2개일 때도 CSS의 중앙 배치가 유지된다.
+        columnCount = 6;
       } else {
         const tracks = getComputedStyle(sourceGrid).gridTemplateColumns.trim();
         if (!tracks || tracks === "none") continue;
@@ -2381,6 +2531,118 @@
       }
       if (!(columnCount > 0)) continue;
       cloneGrid.style.gridTemplateColumns = `repeat(${columnCount}, minmax(0, 1fr))`;
+    }
+  }
+
+  // html-to-image가 SVG를 다시 복제할 때 currentColor와 color-mix()가
+  // 외부 SVG 문맥에서 검정으로 해석될 수 있다. 캡처용 DOM이 실제 배치를
+  // 마친 뒤 계산된 색을 각 도형에 직접 고정해 화면과 같은 그래프를 남긴다.
+  function freezeExportChannelTrendColors(root) {
+    for (const trend of root.querySelectorAll(".crc-channel-trend")) {
+      const chart = trend.querySelector(".crc-channel-trend-chart");
+      if (!chart) continue;
+      const color = getComputedStyle(chart).color || "rgb(22, 143, 92)";
+      const gridFallback = cssVar("--popup-border", "#d8dade");
+      const surfaceFallback = cssVar("--popup-surface", "#ffffff");
+      chart.style.color = color;
+      for (const line of chart.querySelectorAll(".crc-channel-trend-line")) {
+        line.setAttribute("fill", "none");
+        line.setAttribute("stroke", color);
+        line.style.fill = "none";
+        line.style.stroke = color;
+      }
+      for (const area of chart.querySelectorAll(".crc-channel-trend-area")) {
+        const fill = withAlpha(color, 0.15);
+        area.setAttribute("fill", fill);
+        area.setAttribute("stroke", "none");
+        area.style.fill = fill;
+        area.style.stroke = "none";
+      }
+      for (const point of chart.querySelectorAll(".crc-channel-trend-point")) {
+        point.style.fill = surfaceFallback;
+        point.style.stroke = color;
+      }
+      for (const grid of chart.querySelectorAll(".crc-channel-trend-grid")) {
+        const stroke = getComputedStyle(grid).stroke;
+        const resolved = stroke && stroke !== "none" ? stroke : gridFallback;
+        grid.setAttribute("fill", "none");
+        grid.setAttribute("stroke", resolved);
+        grid.style.fill = "none";
+        grid.style.stroke = resolved;
+      }
+    }
+  }
+
+  // 채널 관계도도 같은 문제를 겪는다. 연결선 색은 color-mix(), 노드 테두리는
+  // --crc-node-color, 이름 외곽선은 --popup-surface 로만 정해져 있어 캡처본에서
+  // 선이 통째로 사라지거나 테두리를 잃는다. 계산된 색을 도형에 직접 박아 둔다.
+  function freezeExportChannelGraphColors(root) {
+    for (const svg of root.querySelectorAll("#crcChannelGraph")) {
+      // 호버 중에 내보내면 흐려진 상태(is-dim)가 그대로 굳는다.
+      for (const node of svg.querySelectorAll(".is-dim, .is-active")) {
+        node.classList.remove("is-dim", "is-active");
+      }
+      // 복제본은 원본과 clipPath id가 같다. 같은 문서에 둘 다 있으면 url(#id)가
+      // 원본 쪽으로 붙을 수 있어 프로필이 잘리지 않거나 사라진다.
+      const clipSuffix = `-export-${(channelGraphExportSeq += 1)}`;
+      for (const clip of svg.querySelectorAll("clipPath[id]")) {
+        const previous = clip.id;
+        clip.id = `${previous}${clipSuffix}`;
+        for (const user of svg.querySelectorAll(
+          `[clip-path="url(#${previous})"]`,
+        )) {
+          user.setAttribute("clip-path", `url(#${clip.id})`);
+        }
+      }
+      const surface = cssVar("--popup-surface", "#ffffff");
+      const text = cssVar("--popup-text", "#111827");
+      const brand = cssVar("--popup-brand", "#16a05c");
+      const freeze = (node, property, fallback) => {
+        const computed = getComputedStyle(node).getPropertyValue(property);
+        const value =
+          computed && computed !== "none" && computed !== "currentcolor"
+            ? computed.trim()
+            : fallback;
+        node.setAttribute(property, value);
+        node.style.setProperty(property, value);
+        return value;
+      };
+      for (const line of svg.querySelectorAll(".crc-channel-graph-link")) {
+        freeze(line, "stroke", brand);
+        line.setAttribute("fill", "none");
+        line.style.fill = "none";
+      }
+      // 히트 영역은 투명 상태 그대로여야 실제 선 위에 검은 띠가 얹히지 않는다.
+      for (const hit of svg.querySelectorAll(".crc-channel-graph-link-hit")) {
+        hit.setAttribute("stroke", "transparent");
+        hit.setAttribute("fill", "none");
+        hit.style.stroke = "transparent";
+        hit.style.fill = "none";
+      }
+      for (const ring of svg.querySelectorAll(".crc-channel-graph-node-ring")) {
+        // --crc-node-color 는 인라인 스타일로만 있어 계산값을 먼저 읽는다.
+        const ringColor =
+          getComputedStyle(ring).getPropertyValue("--crc-node-color").trim() ||
+          brand;
+        freeze(ring, "stroke", ringColor);
+        freeze(ring, "fill", surface);
+        freeze(ring, "stroke-width", "3px");
+      }
+      for (const label of svg.querySelectorAll(
+        ".crc-channel-graph-node-label",
+      )) {
+        freeze(label, "fill", text);
+        freeze(label, "stroke", surface);
+        freeze(label, "stroke-width", "4px");
+        label.setAttribute("paint-order", "stroke");
+        label.style.paintOrder = "stroke";
+        // text-anchor·font 는 CSS 로만 정해져 있어 복제본에서 기본값(start)으로
+        // 돌아간다. 그러면 이름이 프로필 가운데가 아니라 오른쪽으로 밀린다.
+        freeze(label, "text-anchor", "middle");
+        freeze(label, "font-size", "11px");
+        freeze(label, "font-weight", "700");
+        freeze(label, "stroke-linejoin", "round");
+      }
     }
   }
 
@@ -2477,6 +2739,13 @@
   }
 
   function exportSources(target, options = {}) {
+    if (Array.isArray(options.elements)) {
+      return {
+        title: options.title || "채팅 리캡",
+        elements: options.elements.filter(Boolean),
+        detail: Boolean(options.detail),
+      };
+    }
     if (target === "summary") {
       return {
         title: "채팅 리캡 요약",
@@ -2491,6 +2760,17 @@
         "리캡";
       return {
         title: `${detailLabel} 상세`,
+        elements: box ? [box] : [],
+        detail: true,
+      };
+    }
+    if (target === "channelTrend") {
+      const box = $("crcChannelTrendModal")?.querySelector(".crc-modal-box");
+      const channelTitle =
+        $("crcChannelTrendTitle")?.textContent?.trim() || "채널별 채팅량 추이";
+      const mode = channelTrendModalCumulative ? "누적" : "월별";
+      return {
+        title: `${channelTitle} · ${mode}`,
         elements: box ? [box] : [],
         detail: true,
       };
@@ -2623,10 +2903,13 @@
     const sheet = document.createElement("div");
     sheet.className = "crc-export-sheet";
     copyExportTheme(sheet);
-    const contentWidth = Math.max(
-      620,
-      ...elements.map((element) => element.getBoundingClientRect().width),
-    );
+    const requestedContentWidth = Number(options.contentWidth);
+    const contentWidth = Number.isFinite(requestedContentWidth)
+      ? Math.max(620, requestedContentWidth)
+      : Math.max(
+          620,
+          ...elements.map((element) => element.getBoundingClientRect().width),
+        );
     // sheet는 border-box이며 좌우 30px 패딩이 있다. 콘텐츠 폭만 그대로
     // 지정하면 원본 섹션보다 안쪽이 60px 좁아져 마지막 카드·차트가 잘린다.
     sheet.style.width = `${Math.ceil(contentWidth + 60)}px`;
@@ -2657,8 +2940,13 @@
       );
       clone
         .querySelectorAll(
-          ".crc-section-export, .crc-modal-head-actions, .lps-colors, .crc-view-row",
+          ".crc-section-export, .crc-modal-head-actions, .lps-colors, .crc-view-row, .crc-multi-channel-controls, .crc-multi-channel-route-actions, .crc-multi-channel-more, .crc-multi-channel-more-button, .crc-channel-graph-controls, .crc-channel-graph-timeline-controls",
         )
+        .forEach((node) => node.remove());
+      // 재생바는 캡처본에서 조작할 수 없는 데다 컨트롤을 지운 만큼 짧게
+      // 줄어들어 보기 나쁘다. 어느 기간을 담았는지만 글자로 남긴다.
+      clone
+        .querySelectorAll(".crc-channel-graph-timeline input[type='range']")
         .forEach((node) => node.remove());
       if (detail) {
         clone.style.maxHeight = "none";
@@ -2687,13 +2975,17 @@
       // 시트 폭이 달라졌을 때 이름 칸은 예전 픽셀 폭에 묶이고 빈 공간만
       // 늘어난다. 같은 문서의 CSS로 먼저 최종 배치를 만든 뒤 고정한다.
       await yieldToUi();
-      for (let pass = 0; pass < 3; pass += 1) {
-        const overflow = Math.ceil(sheet.scrollWidth - sheet.clientWidth);
-        if (overflow <= 1) break;
-        const currentWidth = sheet.getBoundingClientRect().width;
-        sheet.style.width = `${Math.ceil(currentWidth + overflow)}px`;
-        await yieldToUi();
+      if (!options.lockWidth) {
+        for (let pass = 0; pass < 3; pass += 1) {
+          const overflow = Math.ceil(sheet.scrollWidth - sheet.clientWidth);
+          if (overflow <= 1) break;
+          const currentWidth = sheet.getBoundingClientRect().width;
+          sheet.style.width = `${Math.ceil(currentWidth + overflow)}px`;
+          await yieldToUi();
+        }
       }
+      freezeExportChannelTrendColors(sheet);
+      freezeExportChannelGraphColors(sheet);
       // 외부 이미지는 먼저 data URL로 바꿔 캔버스 오염을 방지한다.
       await inlineExportAssets(sheet);
       await waitForExportProfiles([sheet], 5000);
@@ -2710,11 +3002,13 @@
       await yieldToUi();
       // 계산된 grid track이나 캔버스 폭이 원본보다 조금 더 클 수도 있다.
       // 실제 오버플로 폭을 최대 세 번 반영해 오른쪽 잘림을 남기지 않는다.
-      for (let pass = 0; pass < 3; pass += 1) {
-        const overflow = Math.ceil(sheet.scrollWidth - sheet.clientWidth);
-        if (overflow <= 1) break;
-        const currentWidth = sheet.getBoundingClientRect().width;
-        sheet.style.width = `${Math.ceil(currentWidth + overflow)}px`;
+      if (!options.lockWidth) {
+        for (let pass = 0; pass < 3; pass += 1) {
+          const overflow = Math.ceil(sheet.scrollWidth - sheet.clientWidth);
+          if (overflow <= 1) break;
+          const currentWidth = sheet.getBoundingClientRect().width;
+          sheet.style.width = `${Math.ceil(currentWidth + overflow)}px`;
+        }
       }
       const rect = sheet.getBoundingClientRect();
       const cssWidth = Math.ceil(rect.width);
@@ -2827,13 +3121,226 @@
     }
   }
 
-  async function exportRecap(target, button, { channelVariants = [] } = {}) {
+  function multiExportOptionInputs() {
+    return [...document.querySelectorAll("[data-multi-export-option]")];
+  }
+
+  function selectedMultiExportVariants() {
+    return multiExportOptionInputs()
+      .filter((input) => input.checked)
+      .map((input) => input.value);
+  }
+
+  function multiExportSessionTotal() {
+    return multiChannelActivity(lastData.items).sessions.length;
+  }
+
+  function selectedMultiExportLimit() {
+    const total = multiExportSessionTotal();
+    const requested = Number($("crcMultiExportLimit")?.value) || 0;
+    return Math.min(total, requested);
+  }
+
+  function syncMultiExportOptions() {
+    const options = multiExportOptionInputs();
+    const checked = options.filter((input) => input.checked).length;
+    const group = document.querySelector("[data-multi-export-group]");
+    if (group) {
+      group.checked = checked === options.length;
+      group.indeterminate = checked > 0 && checked < options.length;
+    }
+    const total = multiExportSessionTotal();
+    const slider = $("crcMultiExportLimit");
+    if (slider) {
+      const maximum = Math.max(
+        MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+        Math.ceil(total / MULTI_CHANNEL_EXPORT_PAGE_SIZE) *
+          MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+      );
+      slider.max = String(maximum);
+      slider.disabled = total < 1;
+      if (Number(slider.value) > maximum) slider.value = String(maximum);
+    }
+    const selected = selectedMultiExportLimit();
+    setText(
+      "crcMultiExportLimitOutput",
+      total ? `${fmt(selected)}개 / 전체 ${fmt(total)}개` : "저장할 세션 없음",
+    );
+    const pages = selected
+      ? Math.ceil(selected / MULTI_CHANNEL_EXPORT_PAGE_SIZE)
+      : 0;
+    const imageCount = checked * pages;
+    setText(
+      "crcMultiExportCount",
+      imageCount
+        ? `${fmt(imageCount)}개의 이미지로 나누어 저장합니다.`
+        : total
+          ? "저장할 상태를 선택하세요."
+          : "저장할 멀티 채널 세션이 없습니다.",
+    );
+    const start = $("crcMultiExportStart");
+    if (start) start.disabled = checked < 1 || selected < 1;
+  }
+
+  function openMultiExportModal(request) {
+    const modal = $("crcMultiExportModal");
+    if (!modal || exportingRecap) return;
+    pendingMultiExportRequest = request;
+    if (!multiExportSelectionInitialized) {
+      for (const input of multiExportOptionInputs()) {
+        input.checked = input.value === "current";
+      }
+      multiExportSelectionInitialized = true;
+    }
+    const slider = $("crcMultiExportLimit");
+    const total = multiExportSessionTotal();
+    if (slider) {
+      const initial = Math.min(
+        total,
+        Math.max(MULTI_CHANNEL_EXPORT_PAGE_SIZE, multiChannelSectionLimit),
+      );
+      slider.value = String(
+        Math.max(
+          MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+          Math.ceil(initial / MULTI_CHANNEL_EXPORT_PAGE_SIZE) *
+            MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+        ),
+      );
+    }
+    syncMultiExportOptions();
+    modal.hidden = false;
+  }
+
+  function closeMultiExportModal() {
+    const modal = $("crcMultiExportModal");
+    if (modal) modal.hidden = true;
+    pendingMultiExportRequest = null;
+  }
+
+  function multiChannelExportCard(session, mode) {
+    if (mode === "current") {
+      const live = [...($("crcMultiChannelSectionList")?.children || [])].find(
+        (card) =>
+          card.dataset.multiChannelSessionStart === String(session.start) &&
+          card.dataset.multiChannelSessionEnd === String(session.end),
+      );
+      if (live) return live.cloneNode(true);
+    }
+    const routeLimit =
+      mode === "expanded" || mode === "collapsed"
+        ? Math.max(1, session.route.length)
+        : 18;
+    const card = multiChannelSessionCard(session, routeLimit);
+    card.classList.add("is-section");
+    if (mode === "expanded") {
+      card.querySelector('[data-multi-channel-action="expand"]')?.click();
+    }
+    return card;
+  }
+
+  function buildMultiChannelExportSource(sessions, mode, start, total) {
+    const source = $("crcExportMultiChannel");
+    if (!source) return null;
+    // 화면이 넓거나 공백 없는 긴 채팅이 있어도 세션 카드가 과도하게
+    // 늘어나지 않도록, 멀티 채널 이미지는 읽기 좋은 2열 폭으로 고정한다.
+    const exportWidth = 960;
+    const clone = source.cloneNode(true);
+    clone.classList.add("crc-multi-channel-export-source");
+    clone.style.boxSizing = "border-box";
+    clone.style.width = `${exportWidth}px`;
+    const list = clone.querySelector(".crc-multi-channel-main-list");
+    if (!list) return null;
+    list.replaceChildren(
+      ...sessions.map((session) => multiChannelExportCard(session, mode)),
+    );
+    const count = clone.querySelector(
+      "#crcMultiChannelSectionCount, .crc-multi-channel-list-head > span",
+    );
+    if (count) {
+      count.textContent = `${fmt(start + 1)}-${fmt(
+        start + sessions.length,
+      )} / ${fmt(total)}개`;
+    }
+    clone.querySelector("#crcMultiChannelSectionEmpty")?.remove();
+    clone.querySelector("#crcMultiChannelSectionMore")?.remove();
+    clone
+      .querySelectorAll("[id]")
+      .forEach((node) => node.removeAttribute("id"));
+    const host = document.createElement("div");
+    host.style.cssText =
+      `position:fixed;left:-100000px;top:0;width:${exportWidth}px;` +
+      "opacity:0;pointer-events:none;z-index:-1";
+    host.append(clone);
+    document.body.append(host);
+    return { element: clone, exportWidth, host };
+  }
+
+  async function renderMultiChannelExportImages(selectedVariants, limit) {
+    const selected = new Set(selectedVariants || []);
+    const variants = MULTI_CHANNEL_EXPORT_VARIANTS.filter(({ value }) =>
+      selected.has(value),
+    );
+    const activity = multiChannelActivity(lastData.items);
+    const allSessions = sortedMultiChannelSessions(activity);
+    const sessions = allSessions.slice(0, Math.min(allSessions.length, limit));
+    if (!sessions.length) throw new Error("저장할 멀티 채널 세션이 없습니다.");
+    for (const { value, label } of variants) {
+      for (
+        let start = 0;
+        start < sessions.length;
+        start += MULTI_CHANNEL_EXPORT_PAGE_SIZE
+      ) {
+        const page = sessions.slice(
+          start,
+          start + MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+        );
+        const prepared = buildMultiChannelExportSource(
+          page,
+          value,
+          start,
+          sessions.length,
+        );
+        if (!prepared)
+          throw new Error("멀티 채널 내보내기를 준비하지 못했습니다.");
+        const pageLabel =
+          sessions.length > MULTI_CHANNEL_EXPORT_PAGE_SIZE
+            ? `${fmt(start + 1)}-${fmt(start + page.length)}`
+            : "";
+        try {
+          await renderExportImage("multiChannel", {
+            contentWidth: prepared.exportWidth,
+            elements: [prepared.element],
+            lockWidth: true,
+            title: ["멀티 채널 채팅", label, pageLabel]
+              .filter(Boolean)
+              .join(" · "),
+          });
+        } finally {
+          prepared.host.remove();
+        }
+      }
+    }
+  }
+
+  async function exportRecap(
+    target,
+    button,
+    { channelVariants = [], multiVariants = [], multiLimit = 0 } = {},
+  ) {
     if (exportingRecap) return;
     if (
       (target === "all" || target === "channels") &&
       channelVariants.length < 1
     ) {
       showExportStatus("저장할 채널별 이미지를 선택해 주세요.", true);
+      return;
+    }
+    if (
+      (target === "all" || target === "multiChannel") &&
+      multiExportSessionTotal() > 0 &&
+      (multiVariants.length < 1 || multiLimit < 1)
+    ) {
+      showExportStatus("저장할 멀티 채널 이미지를 선택해 주세요.", true);
       return;
     }
     exportingRecap = true;
@@ -2845,9 +3352,23 @@
     try {
       await requestExportImagePermissions();
       if (target === "all") {
-        for (const part of ["summary", "channels", "when", "months", "words"]) {
+        for (const part of [
+          "summary",
+          "channels",
+          "multiChannel",
+          "channelGraph",
+          "when",
+          "months",
+          "words",
+        ]) {
           if (part === "channels") {
             await renderChannelExportImages(channelVariants);
+          } else if (part === "multiChannel") {
+            if (multiExportSessionTotal() > 0) {
+              await renderMultiChannelExportImages(multiVariants, multiLimit);
+            } else {
+              await renderExportImage(part);
+            }
           } else {
             await renderExportImage(part);
           }
@@ -2857,6 +3378,17 @@
         await renderChannelExportImages(channelVariants);
         showExportStatus(
           `채널별 채팅 이미지 ${fmt(channelVariants.length)}장을 저장했습니다.`,
+        );
+      } else if (target === "multiChannel") {
+        await renderMultiChannelExportImages(multiVariants, multiLimit);
+        const pages = Math.ceil(
+          Math.min(multiExportSessionTotal(), multiLimit) /
+            MULTI_CHANNEL_EXPORT_PAGE_SIZE,
+        );
+        showExportStatus(
+          `멀티 채널 채팅 이미지 ${fmt(
+            multiVariants.length * pages,
+          )}장을 저장했습니다.`,
         );
       } else {
         await renderExportImage(target);
@@ -3059,6 +3591,120 @@
     return timeAggregateCache;
   }
 
+  const MULTI_CHANNEL_IMMEDIATE_MS = 30 * 1000;
+  const MULTI_CHANNEL_NEAR_MS = 5 * 60 * 1000;
+  const MULTI_CHANNEL_SESSION_MS = 10 * 60 * 1000;
+
+  function formatMultiChannelGap(milliseconds) {
+    const totalSeconds = Math.max(0, Math.round(Number(milliseconds) / 1000));
+    if (totalSeconds < 60) return `${fmt(totalSeconds)}초`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds
+      ? `${fmt(minutes)}분 ${fmt(seconds)}초`
+      : `${fmt(minutes)}분`;
+  }
+
+  // 서로 다른 채널의 채팅이 가까운 시각에 이어졌는지를 계산한다. 이는 실제
+  // 동시 재생 여부가 아니라 채팅 시각으로 추정한 활동 세션이라는 점을 UI에도
+  // 그대로 밝힌다. 정렬 O(n log n) 뒤에는 한 번만 순회하며 결과를 캐시한다.
+  function multiChannelActivity(items) {
+    if (multiChannelActivityCache?.items === items) {
+      return multiChannelActivityCache;
+    }
+    const events = (items || [])
+      .filter(
+        (item) =>
+          Number.isFinite(Number(item?.t)) && String(item?.channelId || ""),
+      )
+      .map((item) => ({
+        channelId: String(item.channelId),
+        message: String(item.m || ""),
+        t: Number(item.t),
+      }))
+      .sort((a, b) => a.t - b.t);
+    const sessions = [];
+    let immediateCount = 0;
+    let nearCount = 0;
+    let fastestGap = Infinity;
+    let current = [];
+
+    const finish = () => {
+      if (!current.length) return;
+      const channelIds = [...new Set(current.map((event) => event.channelId))];
+      if (channelIds.length < 2) {
+        current = [];
+        return;
+      }
+      const route = [];
+      let switchCount = 0;
+      let sessionFastest = Infinity;
+      for (let index = 0; index < current.length; index += 1) {
+        const event = current[index];
+        if (route.at(-1)?.channelId !== event.channelId) {
+          route.push({
+            ...event,
+            gapFromPrevious: route.length
+              ? event.t - current[index - 1].t
+              : null,
+          });
+        }
+        if (!index || current[index - 1].channelId === event.channelId)
+          continue;
+        switchCount += 1;
+        sessionFastest = Math.min(
+          sessionFastest,
+          event.t - current[index - 1].t,
+        );
+      }
+      sessions.push({
+        channelIds,
+        end: current.at(-1).t,
+        eventCount: current.length,
+        fastestGap: sessionFastest,
+        route,
+        start: current[0].t,
+        switchCount,
+      });
+      current = [];
+    };
+
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      const previous = events[index - 1];
+      const gap = previous ? event.t - previous.t : Infinity;
+      if (previous && gap > MULTI_CHANNEL_SESSION_MS) finish();
+      current.push(event);
+      if (!previous || previous.channelId === event.channelId) continue;
+      if (gap <= MULTI_CHANNEL_SESSION_MS) {
+        fastestGap = Math.min(fastestGap, gap);
+      }
+      if (gap <= MULTI_CHANNEL_IMMEDIATE_MS) immediateCount += 1;
+      if (gap <= MULTI_CHANNEL_NEAR_MS) nearCount += 1;
+    }
+    finish();
+
+    sessions.sort(
+      (a, b) =>
+        b.channelIds.length - a.channelIds.length ||
+        b.switchCount - a.switchCount ||
+        b.eventCount - a.eventCount ||
+        b.end - a.end,
+    );
+    const days = new Set(sessions.map((session) => localDayKey(session.start)));
+    multiChannelActivityCache = {
+      days: days.size,
+      fastestGap,
+      immediateCount,
+      items,
+      maxChannels: sessions[0]?.channelIds.length || 0,
+      nearCount,
+      sessionCount: sessions.length,
+      sessions,
+    };
+    return multiChannelActivityCache;
+  }
+
   function relatedChannelsForDay(items, day) {
     if (items === lastData.items) {
       return timeAggregate(items).channelsByDay.get(day) || new Map();
@@ -3155,6 +3801,1358 @@
     };
   }
 
+  function multiChannelTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString("ko-KR", {
+      hour: "2-digit",
+      hour12: false,
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }
+
+  function multiChannelSessionCard(session, routeLimit = 10) {
+    const card = document.createElement("article");
+    card.className = "crc-multi-channel-session";
+    card.dataset.multiChannelSessionStart = String(session.start);
+    card.dataset.multiChannelSessionEnd = String(session.end);
+    const cardId = `crc-multi-channel-card-${++multiChannelCardSequence}`;
+    const pageSize = Math.max(1, routeLimit);
+    const expanded = new Set();
+    let visibleCount = Math.min(pageSize, session.route.length);
+    const sessionHead = document.createElement("div");
+    sessionHead.className = "crc-multi-channel-session-head";
+    const date = document.createElement("strong");
+    const startDay = localDayKey(session.start);
+    const endDay = localDayKey(session.end);
+    const endText =
+      startDay === endDay
+        ? multiChannelTime(session.end)
+        : `${endDay} ${multiChannelTime(session.end)}`;
+    date.textContent = `${startDay} · ${multiChannelTime(session.start)} ~ ${endText}`;
+    const badge = document.createElement("span");
+    badge.textContent = `${fmt(session.channelIds.length)}개 채널`;
+    sessionHead.append(date, badge);
+
+    const routeHead = document.createElement("div");
+    routeHead.className = "crc-multi-channel-route-head";
+    const routeTitle = document.createElement("strong");
+    routeTitle.textContent = "채널 전환 흐름";
+    const routeActions = document.createElement("div");
+    routeActions.className = "crc-multi-channel-route-actions";
+    const expandAll = document.createElement("button");
+    expandAll.type = "button";
+    expandAll.dataset.multiChannelAction = "expand";
+    expandAll.innerHTML =
+      '<svg class="lucide lucide-chevrons-down" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"></path><path d="m7 13 5 5 5-5"></path></svg><span>모두 펼치기</span>';
+    const collapseAll = document.createElement("button");
+    collapseAll.type = "button";
+    collapseAll.dataset.multiChannelAction = "collapse";
+    collapseAll.innerHTML =
+      '<svg class="lucide lucide-chevrons-up" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"></path><path d="m17 18-5-5-5 5"></path></svg><span>모두 접기</span>';
+    routeActions.append(expandAll, collapseAll);
+    routeHead.append(routeTitle, routeActions);
+
+    const route = document.createElement("div");
+    route.className = "crc-multi-channel-route";
+    const details = document.createElement("div");
+    details.className = "crc-multi-channel-chat-list";
+    details.id = `${cardId}-details`;
+    details.hidden = true;
+
+    const chatDetail = (event) => {
+      const item = document.createElement("article");
+      item.className = "crc-multi-channel-chat";
+      item.style.setProperty("--crc-card-color", colorFor(event.channelId));
+      const head = document.createElement("div");
+      head.className = "crc-multi-channel-chat-head";
+      const channel = document.createElement("span");
+      channel.className = "crc-stat-name";
+      fillChannelName(channel, event.channelId, "");
+      const time = document.createElement("time");
+      time.dateTime = new Date(event.t).toISOString();
+      time.textContent = `${localDayKey(event.t)} ${multiChannelTime(event.t)}`;
+      head.append(channel, time);
+      const message = document.createElement("p");
+      message.className = "crc-multi-channel-chat-message";
+      if (event.message.trim()) appendMessageParts(message, event.message, 18);
+      else message.textContent = "내용이 없는 채팅입니다.";
+      item.append(head, message);
+      return item;
+    };
+
+    const renderDetails = () => {
+      const indexes = [...expanded]
+        .filter((index) => index < visibleCount)
+        .sort((a, b) => a - b);
+      details.replaceChildren(
+        ...indexes.map((index) => chatDetail(session.route[index])),
+      );
+      details.hidden = indexes.length < 1;
+      collapseAll.disabled = indexes.length < 1;
+      expandAll.disabled = indexes.length >= visibleCount;
+    };
+
+    const renderRoute = () => {
+      route.textContent = "";
+      const visibleRoute = session.route.slice(0, visibleCount);
+      visibleRoute.forEach((event, index) => {
+        if (index) {
+          const connector = document.createElement("span");
+          connector.className = "crc-multi-channel-connector";
+          const arrow = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg",
+          );
+          arrow.setAttribute("viewBox", "0 0 24 24");
+          arrow.setAttribute("width", "14");
+          arrow.setAttribute("height", "14");
+          arrow.setAttribute("fill", "none");
+          arrow.setAttribute("aria-hidden", "true");
+          arrow.innerHTML =
+            '<path d="m9 18 6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>';
+          const gap = document.createElement("small");
+          gap.textContent = formatMultiChannelGap(event.gapFromPrevious);
+          connector.append(arrow, gap);
+          route.append(connector);
+        }
+        const step = document.createElement("button");
+        step.type = "button";
+        step.className = "crc-multi-channel-step";
+        step.dataset.multiChannelIndex = String(index);
+        step.setAttribute("aria-controls", details.id);
+        step.setAttribute("aria-expanded", String(expanded.has(index)));
+        step.setAttribute(
+          "aria-label",
+          `${multiChannelTime(event.t)} 채팅 내역 ${
+            expanded.has(index) ? "접기" : "펼치기"
+          }`,
+        );
+        step.style.setProperty("--crc-card-color", colorFor(event.channelId));
+        const channel = document.createElement("span");
+        channel.className = "crc-multi-channel-name";
+        fillChannelName(channel, event.channelId, "");
+        const time = document.createElement("time");
+        time.dateTime = new Date(event.t).toISOString();
+        time.textContent = multiChannelTime(event.t);
+        step.append(channel, time);
+        route.append(step);
+      });
+      const remaining = session.route.length - visibleCount;
+      if (remaining > 0) {
+        const loadCount = Math.min(pageSize, remaining);
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "crc-multi-channel-more";
+        more.dataset.multiChannelAction = "more";
+        more.textContent = `+${fmt(loadCount)}`;
+        more.title = `남은 ${fmt(remaining)}개 중 ${fmt(loadCount)}개 더보기`;
+        more.setAttribute("aria-label", more.title);
+        route.append(more);
+      }
+    };
+
+    const reflectRouteButtons = () => {
+      for (const step of route.querySelectorAll("[data-multi-channel-index]")) {
+        const index = Number(step.dataset.multiChannelIndex);
+        const item = session.route[index];
+        const open = expanded.has(index);
+        step.setAttribute("aria-expanded", String(open));
+        step.setAttribute(
+          "aria-label",
+          `${multiChannelTime(item.t)} 채팅 내역 ${open ? "접기" : "펼치기"}`,
+        );
+      }
+    };
+
+    const meta = document.createElement("p");
+    meta.className = "crc-multi-channel-meta";
+    const duration = Math.max(0, session.end - session.start);
+    meta.textContent = [
+      `채팅 ${fmt(session.eventCount)}회`,
+      `채널 전환 ${fmt(session.switchCount)}회`,
+      `구간 ${formatMultiChannelGap(duration)}`,
+      Number.isFinite(session.fastestGap)
+        ? `최단 ${formatMultiChannelGap(session.fastestGap)}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    card.addEventListener("click", (event) => {
+      const step = event.target.closest?.("[data-multi-channel-index]");
+      if (step) {
+        const index = Number(step.dataset.multiChannelIndex);
+        if (expanded.has(index)) expanded.delete(index);
+        else expanded.add(index);
+        reflectRouteButtons();
+        renderDetails();
+        return;
+      }
+      const action = event.target.closest?.("[data-multi-channel-action]")
+        ?.dataset.multiChannelAction;
+      if (action === "more") {
+        visibleCount = Math.min(session.route.length, visibleCount + pageSize);
+        renderRoute();
+        renderDetails();
+      } else if (action === "expand") {
+        for (let index = 0; index < visibleCount; index += 1) {
+          expanded.add(index);
+        }
+        reflectRouteButtons();
+        renderDetails();
+      } else if (action === "collapse") {
+        expanded.clear();
+        reflectRouteButtons();
+        renderDetails();
+      }
+    });
+    renderRoute();
+    renderDetails();
+    card.append(sessionHead, routeHead, route, details, meta);
+    return card;
+  }
+
+  function multiChannelSessionSection(activity) {
+    const section = document.createElement("section");
+    section.className = "crc-multi-channel-section";
+    const head = document.createElement("div");
+    head.className = "crc-info-section-head";
+    const title = document.createElement("strong");
+    title.textContent = "대표 멀티 채널 세션";
+    const count = document.createElement("span");
+    const shown = Math.min(8, activity.sessions.length);
+    count.textContent = `${fmt(activity.sessions.length)}개 중 ${fmt(shown)}개`;
+    head.append(title, count);
+
+    const note = document.createElement("p");
+    note.className = "crc-multi-channel-note";
+    note.textContent =
+      "채팅 사이의 공백이 10분 이내인 구간을 한 세션으로 묶은 추정치입니다. 실제 동시 재생 여부와는 다를 수 있습니다.";
+
+    const list = document.createElement("div");
+    list.className = "crc-multi-channel-list";
+    list.append(
+      ...activity.sessions
+        .slice(0, 8)
+        .map((session) => multiChannelSessionCard(session)),
+    );
+    section.append(head, note, list);
+    return section;
+  }
+
+  function buildMultiChannelInfo() {
+    const activity = multiChannelActivity(lastData.items);
+    const nodes = [
+      infoStat("한 세션 최대", `${fmt(activity.maxChannels)}개 채널`),
+      infoStat("멀티 채널 세션", `${fmt(activity.sessionCount)}회`),
+      infoStat("활동한 날", `${fmt(activity.days)}일`),
+      infoStat("30초 이내 전환", `${fmt(activity.immediateCount)}회`),
+      infoStat("5분 이내 전환", `${fmt(activity.nearCount)}회`),
+      infoStat(
+        "가장 짧은 간격",
+        Number.isFinite(activity.fastestGap)
+          ? formatMultiChannelGap(activity.fastestGap)
+          : "-",
+      ),
+    ];
+    if (activity.sessions.length) {
+      nodes.push(multiChannelSessionSection(activity));
+    }
+    return { title: "멀티 채널 채팅", nodes };
+  }
+
+  function sortedMultiChannelSessions(activity) {
+    const sessions = activity.sessions.slice();
+    if (multiChannelSectionSort === "channels") {
+      sessions.sort(
+        (a, b) =>
+          b.channelIds.length - a.channelIds.length ||
+          b.switchCount - a.switchCount ||
+          b.end - a.end,
+      );
+    } else if (multiChannelSectionSort === "fastest") {
+      sessions.sort(
+        (a, b) =>
+          (Number.isFinite(a.fastestGap) ? a.fastestGap : Infinity) -
+            (Number.isFinite(b.fastestGap) ? b.fastestGap : Infinity) ||
+          b.channelIds.length - a.channelIds.length ||
+          b.end - a.end,
+      );
+    } else {
+      sessions.sort((a, b) => b.end - a.end);
+    }
+    return sessions;
+  }
+
+  function renderMultiChannelSection(items, reset = false) {
+    if (reset) multiChannelSectionLimit = 12;
+    const activity = multiChannelActivity(items);
+    const sessions = sortedMultiChannelSessions(activity);
+    const visible = sessions.slice(0, multiChannelSectionLimit);
+    setText("crcMultiSectionMax", `${fmt(activity.maxChannels)}개 채널`);
+    setText("crcMultiSectionSessions", `${fmt(activity.sessionCount)}회`);
+    setText("crcMultiSectionDays", `${fmt(activity.days)}일`);
+    setText("crcMultiSectionImmediate", `${fmt(activity.immediateCount)}회`);
+    setText("crcMultiSectionNear", `${fmt(activity.nearCount)}회`);
+    setText(
+      "crcMultiSectionFastest",
+      Number.isFinite(activity.fastestGap)
+        ? formatMultiChannelGap(activity.fastestGap)
+        : "-",
+    );
+    setText(
+      "crcMultiChannelSectionCount",
+      sessions.length > visible.length
+        ? `${fmt(sessions.length)}개 중 ${fmt(visible.length)}개`
+        : `${fmt(sessions.length)}개`,
+    );
+
+    const list = $("crcMultiChannelSectionList");
+    list?.replaceChildren(
+      ...visible.map((session) => {
+        const card = multiChannelSessionCard(session, 18);
+        card.classList.add("is-section");
+        return card;
+      }),
+    );
+    const empty = $("crcMultiChannelSectionEmpty");
+    if (empty) empty.hidden = sessions.length > 0;
+    const more = $("crcMultiChannelSectionMore");
+    if (more) {
+      more.hidden = visible.length >= sessions.length;
+      more.textContent = `세션 ${fmt(
+        Math.min(12, sessions.length - visible.length),
+      )}개 더보기`;
+    }
+  }
+
+  // ── 채널 관계도 ────────────────────────────────────────────────────────
+  // force simulation은 전체 기간에서 모드별로 한 번만 정착시킨다. 월을 바꿀
+  // 때마다 다시 돌리면 노드가 계속 튀고 CPU도 불필요하게 사용되므로, 시간축은
+  // 같은 좌표에서 크기와 연결만 바꾼다.
+  const CHANNEL_GRAPH_MAX_NODES = 50;
+  const CHANNEL_GRAPH_LINKS_PER_NODE = 5;
+  const CHANNEL_GRAPH_SIMILARITY_MIN = 0.32;
+  // 유사도는 요일·시간대 벡터의 코사인이라 표본이 적으면 쉽게 1.0 에 붙는다
+  // (실측: 각 1건짜리 두 채널이 같은 요일·시각이면 코사인 1.0 → 점수 0.7).
+  // 그런 착시를 막으려고 채팅이 이만큼 쌓인 채널만 유사도 대상으로 본다.
+  const CHANNEL_GRAPH_SIMILARITY_MIN_CHATS = 10;
+  const CHANNEL_GRAPH_PHYSICS_KEY = "cheeseChatRecapGraphPhysics";
+  // drag: 드래그할 때 물리 시뮬레이션 / play: 재생 중에도 / hideIdle: 재생 중
+  // 그 달에 활동 없는 채널 감추기.
+  let channelGraphPhysics = {
+    drag: true,
+    play: false,
+    hideIdle: false,
+    loop: true, // 마지막 달 뒤 처음으로 돌아갈지
+  };
+  const CHANNEL_GRAPH_WIDTH = 960;
+  const CHANNEL_GRAPH_HEIGHT = 560;
+  const CHANNEL_GRAPH_PADDING = 46;
+  // 배치·드래그·재생 시뮬레이션이 같은 간격을 쓰도록 한곳에 둔다. 값이 어긋나면
+  // 드래그한 뒤 노드가 배치와 다른 거리로 자리잡아 어색해진다.
+  const CHANNEL_GRAPH_LINK_DISTANCE = 150;
+  const CHANNEL_GRAPH_NODE_GAP = 18;
+
+  function channelGraphPairKey(a, b) {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  function channelGraphModel(items) {
+    if (channelGraphModelCache?.items === items) return channelGraphModelCache;
+    const counts = new Map();
+    const events = [];
+    for (const item of items || []) {
+      const channelId = String(item?.channelId || "");
+      const t = Number(item?.t);
+      if (!channelId || !Number.isFinite(t)) continue;
+      counts.set(channelId, (counts.get(channelId) || 0) + 1);
+      events.push({ channelId, t });
+    }
+    events.sort((a, b) => a.t - b.t);
+    const nodes = [...counts]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, CHANNEL_GRAPH_MAX_NODES)
+      .map(([id, count]) => ({ id, count }));
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const topEvents = events.filter((event) => nodeIds.has(event.channelId));
+    const eventsByMonth = new Map();
+    for (const event of topEvents) {
+      const key = monthKey(event.t);
+      if (!eventsByMonth.has(key)) eventsByMonth.set(key, []);
+      eventsByMonth.get(key).push(event);
+    }
+    const months = [...eventsByMonth.keys()].sort();
+    channelGraphModelCache = {
+      eventsByMonth,
+      items,
+      layouts: new Map(),
+      months,
+      nodes,
+      periodCache: new Map(),
+      profileInfo: new Map(),
+      profilePromises: new Map(),
+      topEvents,
+    };
+    return channelGraphModelCache;
+  }
+
+  function selectChannelGraphLinks(
+    candidates,
+    limit = CHANNEL_GRAPH_LINKS_PER_NODE,
+  ) {
+    const degree = new Map();
+    const selected = [];
+    for (const link of candidates) {
+      const sourceDegree = degree.get(link.source) || 0;
+      const targetDegree = degree.get(link.target) || 0;
+      if (sourceDegree >= limit || targetDegree >= limit) continue;
+      selected.push(link);
+      degree.set(link.source, sourceDegree + 1);
+      degree.set(link.target, targetDegree + 1);
+      if (selected.length >= CHANNEL_GRAPH_MAX_NODES * limit) break;
+    }
+    return selected;
+  }
+
+  // periodKey 형식: "" (전체) | "2025-06" (그 달 전체) | "2025-06@3/6" (그 달의
+  // 앞 3/6 구간까지만 누적). 마지막 형식은 자동 재생에서 월과 월 사이를 며칠
+  // 단위로 채워 값이 실제로 조금씩 자라 보이게 하려고 쓴다.
+  function buildChannelGraphPeriod(model, periodKey) {
+    const cacheKey = periodKey || "__all__";
+    if (model.periodCache.has(cacheKey)) return model.periodCache.get(cacheKey);
+    const [monthPart, stepPart] = String(periodKey || "").split("@");
+    const monthEvents = monthPart
+      ? model.eventsByMonth.get(monthPart) || []
+      : model.topEvents;
+    let events = monthEvents;
+    if (stepPart) {
+      // 그 달의 '며칠까지'를 시각 기준으로 자른다(이벤트는 시간순 정렬돼 있다).
+      const [stepRaw, totalRaw] = stepPart.split("/").map(Number);
+      const total = Math.max(1, totalRaw || 1);
+      const step = Math.max(1, Math.min(total, stepRaw || 1));
+      if (step < total && monthEvents.length) {
+        const first = monthEvents[0].t;
+        const last = monthEvents[monthEvents.length - 1].t;
+        const cutoff = first + ((last - first) * step) / total;
+        events = monthEvents.filter((event) => event.t <= cutoff);
+      }
+    }
+    const counts = new Map(model.nodes.map((node) => [node.id, 0]));
+    const vectors = new Map();
+    const activeDays = new Map();
+    for (const node of model.nodes) {
+      vectors.set(node.id, new Float64Array(31));
+      activeDays.set(node.id, new Set());
+    }
+    for (const event of events) {
+      counts.set(event.channelId, (counts.get(event.channelId) || 0) + 1);
+      const date = new Date(event.t);
+      const vector = vectors.get(event.channelId);
+      vector[date.getDay()] += 1;
+      vector[7 + date.getHours()] += 1;
+      activeDays.get(event.channelId).add(localDayKey(event.t));
+    }
+
+    const relationMap = new Map();
+    for (let index = 1; index < events.length; index += 1) {
+      const previous = events[index - 1];
+      const event = events[index];
+      const gap = event.t - previous.t;
+      if (
+        previous.channelId === event.channelId ||
+        gap < 0 ||
+        gap > MULTI_CHANNEL_SESSION_MS
+      ) {
+        continue;
+      }
+      const key = channelGraphPairKey(previous.channelId, event.channelId);
+      let row = relationMap.get(key);
+      if (!row) {
+        const [a, b] = key.split("|");
+        row = {
+          a,
+          ab: 0,
+          b,
+          ba: 0,
+          count: 0,
+          gapSum: 0,
+          minGap: Infinity,
+        };
+        relationMap.set(key, row);
+      }
+      row.count += 1;
+      row.gapSum += gap;
+      row.minGap = Math.min(row.minGap, gap);
+      if (previous.channelId === row.a) row.ab += 1;
+      else row.ba += 1;
+    }
+    const relationLinks = selectChannelGraphLinks(
+      [...relationMap.values()]
+        .map((row) => {
+          const forward = row.ab >= row.ba;
+          return {
+            averageGap: row.gapSum / row.count,
+            count: row.count,
+            dominantCount: Math.max(row.ab, row.ba),
+            minGap: row.minGap,
+            source: forward ? row.a : row.b,
+            target: forward ? row.b : row.a,
+            type: "relation",
+          };
+        })
+        .sort((a, b) => b.count - a.count || a.averageGap - b.averageGap),
+    );
+
+    const activeNodes = model.nodes.filter((node) => counts.get(node.id) > 0);
+    // ⚠ 표본이 적은 채널은 제외한다(위 상수 주석 참고). 노드 자체는 남기고
+    //   유사도 후보에서만 뺀다 — 관계(이동) 모드에는 영향을 주지 않는다.
+    const similarityNodes = activeNodes.filter(
+      (node) =>
+        (counts.get(node.id) || 0) >= CHANNEL_GRAPH_SIMILARITY_MIN_CHATS,
+    );
+    const similarityCandidates = [];
+    for (let left = 0; left < similarityNodes.length; left += 1) {
+      const a = similarityNodes[left].id;
+      const av = vectors.get(a);
+      let aNorm = 0;
+      for (const value of av) aNorm += value * value;
+      if (!aNorm) continue;
+      for (let right = left + 1; right < similarityNodes.length; right += 1) {
+        const b = similarityNodes[right].id;
+        const bv = vectors.get(b);
+        let dot = 0;
+        let bNorm = 0;
+        for (let index = 0; index < av.length; index += 1) {
+          dot += av[index] * bv[index];
+          bNorm += bv[index] * bv[index];
+        }
+        if (!bNorm) continue;
+        const cosine = dot / Math.sqrt(aNorm * bNorm);
+        const aDays = activeDays.get(a);
+        const bDays = activeDays.get(b);
+        let intersection = 0;
+        for (const day of aDays) if (bDays.has(day)) intersection += 1;
+        const union = aDays.size + bDays.size - intersection;
+        const dayOverlap = union ? intersection / union : 0;
+        const score = cosine * 0.7 + dayOverlap * 0.3;
+        if (score < CHANNEL_GRAPH_SIMILARITY_MIN) continue;
+        similarityCandidates.push({
+          cosine,
+          dayOverlap,
+          score,
+          source: a,
+          target: b,
+          type: "similarity",
+        });
+      }
+    }
+    similarityCandidates.sort((a, b) => b.score - a.score);
+    const result = {
+      activeDays,
+      counts,
+      events,
+      relationLinks,
+      similarityLinks: selectChannelGraphLinks(similarityCandidates, 3),
+    };
+    model.periodCache.set(cacheKey, result);
+    return result;
+  }
+
+  function channelGraphLayout(model, mode, reset = false) {
+    if (reset) model.layouts.delete(mode);
+    if (model.layouts.has(mode)) return model.layouts.get(mode);
+    const d3 = globalThis.d3;
+    const period = buildChannelGraphPeriod(model, "");
+    const links = (
+      mode === "similarity" ? period.similarityLinks : period.relationLinks
+    ).map((link) => ({ ...link }));
+    const maxCount = Math.max(1, ...model.nodes.map((node) => node.count));
+    const radius = d3.scaleSqrt().domain([1, maxCount]).range([13, 31]);
+    const nodes = model.nodes.map((node, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(1, model.nodes.length);
+      const orbit = Math.min(CHANNEL_GRAPH_WIDTH, CHANNEL_GRAPH_HEIGHT) * 0.31;
+      return {
+        ...node,
+        baseRadius: radius(Math.max(1, node.count)),
+        x: CHANNEL_GRAPH_WIDTH / 2 + Math.cos(angle) * orbit,
+        y: CHANNEL_GRAPH_HEIGHT / 2 + Math.sin(angle) * orbit,
+      };
+    });
+    const simulation = d3
+      .forceSimulation(nodes)
+      .force(
+        "link",
+        d3
+          .forceLink(links)
+          .id((node) => node.id)
+          // ⚠ 예전에는 연결이 강할수록 크게 당겨(최소 80px, strength 0.9) 링크가
+          //   많은 노드들이 한 덩어리로 뭉쳐 선을 구분할 수 없었다(제보).
+          //   거리 하한을 올리고 당김을 절반으로 낮춘다 — 강한 연결은 여전히
+          //   가깝지만 서로 붙어 버리지는 않는다.
+          //   (실측: 20노드 기준 링크 양끝 여백 중앙값 69px → 107px)
+          .distance((link) =>
+            mode === "similarity"
+              ? 170 - Math.min(45, link.score * 45)
+              : 165 - Math.min(40, Math.log2(link.count + 1) * 8),
+          )
+          .strength((link) =>
+            mode === "similarity"
+              ? Math.min(0.5, 0.16 + link.score * 0.34)
+              : Math.min(0.5, 0.15 + Math.log2(link.count + 1) * 0.07),
+          ),
+      )
+      // 밀어내는 힘을 키워 링크가 당기는 힘과 균형을 맞춘다.
+      .force("charge", d3.forceManyBody().strength(-300))
+      .force(
+        "center",
+        d3.forceCenter(CHANNEL_GRAPH_WIDTH / 2, CHANNEL_GRAPH_HEIGHT / 2),
+      )
+      .force("x", d3.forceX(CHANNEL_GRAPH_WIDTH / 2).strength(0.035))
+      .force("y", d3.forceY(CHANNEL_GRAPH_HEIGHT / 2).strength(0.05))
+      .force(
+        "collide",
+        // 노드 사이 최소 간격도 넓힌다(라벨이 겹치지 않을 만큼).
+        d3.forceCollide((node) => node.baseRadius + 18).iterations(2),
+      )
+      .stop();
+    for (let tick = 0; tick < 280; tick += 1) simulation.tick();
+    simulation.stop();
+    const positions = new Map();
+    for (const node of nodes) {
+      const x = Math.max(
+        CHANNEL_GRAPH_PADDING + node.baseRadius,
+        Math.min(
+          CHANNEL_GRAPH_WIDTH - CHANNEL_GRAPH_PADDING - node.baseRadius,
+          node.x,
+        ),
+      );
+      const y = Math.max(
+        CHANNEL_GRAPH_PADDING + node.baseRadius,
+        Math.min(
+          CHANNEL_GRAPH_HEIGHT - CHANNEL_GRAPH_PADDING - node.baseRadius,
+          node.y,
+        ),
+      );
+      positions.set(node.id, { baseX: x, baseY: y, x, y });
+    }
+    const layout = { positions };
+    model.layouts.set(mode, layout);
+    return layout;
+  }
+
+  function channelGraphName(model, channelId) {
+    return (
+      model.profileInfo.get(channelId)?.name ||
+      nameCache.get(channelId)?.name ||
+      `${channelId.slice(0, 6)}…`
+    );
+  }
+
+  function channelGraphLabel(model, channelId) {
+    const name = channelGraphName(model, channelId);
+    const characters = [...name];
+    return characters.length > 10
+      ? `${characters.slice(0, 10).join("")}…`
+      : name;
+  }
+
+  function ensureChannelGraphProfile(model, channelId, token) {
+    let task;
+    if (model.profileInfo.has(channelId)) {
+      task = Promise.resolve(model.profileInfo.get(channelId));
+    } else if (model.profilePromises.has(channelId)) {
+      task = model.profilePromises.get(channelId);
+    } else {
+      task = resolveDisplayChannelInfo(channelId)
+        .then((info) => {
+          model.profileInfo.set(channelId, info);
+          return info;
+        })
+        .catch(() => ({ name: "", imageUrl: "", verifiedMark: false }))
+        .finally(() => model.profilePromises.delete(channelId));
+      model.profilePromises.set(channelId, task);
+    }
+    return task.then((info) => {
+      if (token !== channelGraphRenderToken) return;
+      const svg = globalThis.d3?.select("#crcChannelGraph");
+      if (!svg) return;
+      svg
+        .selectAll(".crc-channel-graph-node")
+        .filter((node) => node.id === channelId)
+        .each(function updateNode(node) {
+          const group = globalThis.d3.select(this);
+          group
+            .select(".crc-channel-graph-node-label")
+            .text(channelGraphLabel(model, channelId));
+          group
+            .select(".crc-channel-graph-node-image")
+            .attr(
+              "href",
+              info.imageUrl ||
+                (isDarkTheme() ? DEFAULT_PROFILE_DARK : DEFAULT_PROFILE_LIGHT),
+            );
+          group
+            .select("title")
+            .text(`${info.name || channelId} · ${fmt(node.periodCount)}회`);
+        });
+      updateChannelGraphSummary(model);
+    });
+  }
+
+  function updateChannelGraphSummary(model) {
+    const current = model?.current;
+    if (!current) return;
+    setText("crcChannelGraphNodeCount", fmt(current.activeNodes.length));
+    setText("crcChannelGraphEdgeCount", fmt(current.links.length));
+    const top = current.links[0];
+    if (!top) {
+      setText("crcChannelGraphTopRelation", "표시할 연결이 없습니다");
+      return;
+    }
+    const source = channelGraphName(model, top.source);
+    const target = channelGraphName(model, top.target);
+    setText(
+      "crcChannelGraphTopRelation",
+      top.type === "similarity"
+        ? `${source} ↔ ${target} · ${Math.round(top.score * 100)}%`
+        : `${source} → ${target} · ${fmt(top.count)}회`,
+    );
+  }
+
+  function setChannelGraphTooltip(title, lines, clientX, clientY) {
+    const tooltip = $("crcChannelGraphWrap")?.querySelector(
+      ".crc-channel-graph-tooltip",
+    );
+    const wrap = $("crcChannelGraphWrap");
+    if (!tooltip || !wrap) return;
+    const strong = document.createElement("strong");
+    strong.textContent = title;
+    const body = document.createElement("span");
+    body.textContent = lines.filter(Boolean).join(" · ");
+    tooltip.replaceChildren(strong, body);
+    tooltip.hidden = false;
+    const rect = wrap.getBoundingClientRect();
+    const x = Number.isFinite(clientX) ? clientX - rect.left : rect.width / 2;
+    const y = Number.isFinite(clientY) ? clientY - rect.top : rect.height / 2;
+    tooltip.style.left = `${Math.max(0, Math.min(rect.width - 250, x))}px`;
+    tooltip.style.top = `${Math.max(0, Math.min(rect.height - 90, y))}px`;
+  }
+
+  function hideChannelGraphTooltip() {
+    const tooltip = $("crcChannelGraphWrap")?.querySelector(
+      ".crc-channel-graph-tooltip",
+    );
+    if (tooltip) tooltip.hidden = true;
+  }
+
+  function drawChannelGraph(model, periodKey) {
+    const d3 = globalThis.d3;
+    const svgElement = $("crcChannelGraph");
+    const empty = $("crcChannelGraphWrap")?.querySelector(
+      ".crc-channel-graph-empty",
+    );
+    if (!d3 || !svgElement) {
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = "관계도 라이브러리를 불러오지 못했습니다.";
+      }
+      return;
+    }
+    const token = ++channelGraphRenderToken;
+    const period = buildChannelGraphPeriod(model, periodKey);
+    const links = (
+      channelGraphMode === "similarity"
+        ? period.similarityLinks
+        : period.relationLinks
+    ).map((link) => ({ ...link }));
+    const activeNodes = model.nodes.filter(
+      (node) => period.counts.get(node.id) > 0,
+    );
+    model.current = { activeNodes, links, periodKey };
+    updateChannelGraphSummary(model);
+    const svg = d3.select(svgElement);
+    svg.selectAll("*").remove();
+    hideChannelGraphTooltip();
+    if (empty) empty.hidden = activeNodes.length >= 2;
+    svgElement.hidden = activeNodes.length < 2;
+    if (activeNodes.length < 2) return;
+
+    const layout = channelGraphLayout(model, channelGraphMode);
+    const maxCount = Math.max(
+      1,
+      ...activeNodes.map((node) => period.counts.get(node.id) || 0),
+    );
+    const radius = d3.scaleSqrt().domain([1, maxCount]).range([11, 33]);
+    const maxLink = Math.max(
+      1,
+      ...links.map((link) =>
+        link.type === "similarity" ? link.score : link.count,
+      ),
+    );
+    const linkWidth = d3.scaleSqrt().domain([0, maxLink]).range([1.2, 7]);
+    const defs = svg.append("defs");
+    const nodeRows = model.nodes.map((node) => ({
+      ...node,
+      periodCount: period.counts.get(node.id) || 0,
+      radius: period.counts.get(node.id)
+        ? radius(period.counts.get(node.id))
+        : 7,
+    }));
+    for (const [index, node] of nodeRows.entries()) {
+      defs
+        .append("clipPath")
+        .attr("id", `crc-channel-graph-clip-${index}`)
+        .append("circle")
+        .attr("r", Math.max(2, node.radius - 3));
+      node.clipId = `crc-channel-graph-clip-${index}`;
+    }
+    const linkLayer = svg.append("g").attr("aria-hidden", "true");
+    const hitLayer = svg.append("g");
+    const nodeLayer = svg.append("g");
+    const positionFor = (id) => layout.positions.get(id);
+    const linePosition = (selection) =>
+      selection
+        .attr("x1", (link) => positionFor(link.source)?.x || 0)
+        .attr("y1", (link) => positionFor(link.source)?.y || 0)
+        .attr("x2", (link) => positionFor(link.target)?.x || 0)
+        .attr("y2", (link) => positionFor(link.target)?.y || 0);
+    const lineKey = (link) => channelGraphPairKey(link.source, link.target);
+    const lines = linePosition(
+      linkLayer
+        .selectAll("line")
+        .data(links, lineKey)
+        .join("line")
+        .attr("class", "crc-channel-graph-link")
+        .attr("opacity", (link) =>
+          link.type === "similarity" ? 0.35 + link.score * 0.5 : 0.62,
+        )
+        .attr("stroke-width", (link) =>
+          linkWidth(link.type === "similarity" ? link.score : link.count),
+        ),
+    );
+    const hitLines = linePosition(
+      hitLayer
+        .selectAll("line")
+        .data(links, lineKey)
+        .join("line")
+        .attr("class", "crc-channel-graph-link-hit")
+        .attr("tabindex", 0),
+    );
+    const groups = nodeLayer
+      .selectAll("g")
+      .data(nodeRows, (node) => node.id)
+      .join("g")
+      .attr("class", "crc-channel-graph-node")
+      .attr("tabindex", 0)
+      .attr("role", "img")
+      .attr(
+        "aria-label",
+        (node) =>
+          `${channelGraphName(model, node.id)} ${fmt(node.periodCount)}회`,
+      )
+      .attr("opacity", (node) => {
+        if (node.periodCount) return 1;
+        // 재생 중 '활동 없는 채널 숨기기' 를 켜면 아예 감춘다(설정).
+        return channelGraphPlayTimer && channelGraphPhysics.hideIdle ? 0 : 0.1;
+      })
+      .attr("pointer-events", (node) =>
+        !node.periodCount &&
+        channelGraphPlayTimer &&
+        channelGraphPhysics.hideIdle
+          ? "none"
+          : null,
+      )
+      .attr("transform", (node) => {
+        const position = positionFor(node.id);
+        return `translate(${position.x},${position.y})`;
+      });
+    groups
+      .append("circle")
+      .attr("class", "crc-channel-graph-node-ring")
+      .attr("r", (node) => node.radius)
+      // 색을 바꿨을 때 다시 그리지 않고 이 원만 갱신할 수 있게 표시를 남긴다.
+      .attr("data-node-color-for", (node) => node.id)
+      .style("--crc-node-color", (node) => colorFor(node.id));
+    groups
+      .append("image")
+      .attr("class", "crc-channel-graph-node-image")
+      .attr("clip-path", (node) => `url(#${node.clipId})`)
+      .attr(
+        "href",
+        (node) =>
+          model.profileInfo.get(node.id)?.imageUrl ||
+          (isDarkTheme() ? DEFAULT_PROFILE_DARK : DEFAULT_PROFILE_LIGHT),
+      )
+      .attr("x", (node) => -node.radius + 3)
+      .attr("y", (node) => -node.radius + 3)
+      .attr("width", (node) => (node.radius - 3) * 2)
+      .attr("height", (node) => (node.radius - 3) * 2)
+      .attr("preserveAspectRatio", "xMidYMid slice");
+    groups
+      .append("text")
+      .attr("class", "crc-channel-graph-node-label")
+      .attr("y", (node) => node.radius + 15)
+      .text((node) => channelGraphLabel(model, node.id));
+
+    // ⚠ 드래그 중에는 노드가 커서 밑을 스쳐 지나가며 mouseenter/leave 가 연달아
+    //   발생한다. 그때마다 groups 전체의 is-dim 이 켜졌다 꺼져 깜빡였다(제보).
+    //   드래그가 끝날 때까지 호버 반응을 막는다.
+    let draggingNode = false;
+    const clearHighlight = () => {
+      if (draggingNode) return;
+      groups.classed("is-dim", false).classed("is-active", false);
+      lines.classed("is-dim", false);
+      hitLines.classed("is-dim", false);
+    };
+    const highlightNode = (node) => {
+      const connected = new Set([node.id]);
+      for (const link of links) {
+        if (link.source === node.id) connected.add(link.target);
+        if (link.target === node.id) connected.add(link.source);
+      }
+      groups
+        .classed("is-dim", (candidate) => !connected.has(candidate.id))
+        .classed("is-active", (candidate) => candidate.id === node.id);
+      lines.classed(
+        "is-dim",
+        (link) => link.source !== node.id && link.target !== node.id,
+      );
+      hitLines.classed(
+        "is-dim",
+        (link) => link.source !== node.id && link.target !== node.id,
+      );
+    };
+    const showNodeTooltip = (event, node) => {
+      if (draggingNode) return;
+      highlightNode(node);
+      const connected = links
+        .filter((link) => link.source === node.id || link.target === node.id)
+        .sort((a, b) =>
+          b.type === "similarity" ? b.score - a.score : b.count - a.count,
+        );
+      const strongest = connected[0];
+      const otherId = strongest
+        ? strongest.source === node.id
+          ? strongest.target
+          : strongest.source
+        : "";
+      setChannelGraphTooltip(
+        channelGraphName(model, node.id),
+        [
+          `채팅 ${fmt(node.periodCount)}회`,
+          strongest
+            ? `강한 연결 ${channelGraphName(model, otherId)}`
+            : "연결 없음",
+        ],
+        event?.clientX,
+        event?.clientY,
+      );
+    };
+    groups
+      .on("mouseenter focus", showNodeTooltip)
+      .on("mousemove", (event, node) => showNodeTooltip(event, node))
+      .on("mouseleave blur", () => {
+        clearHighlight();
+        hideChannelGraphTooltip();
+      });
+    const showLinkTooltip = (event, link) => {
+      if (draggingNode) return;
+      groups.classed(
+        "is-dim",
+        (node) => node.id !== link.source && node.id !== link.target,
+      );
+      lines.classed("is-dim", (candidate) => candidate !== link);
+      hitLines.classed("is-dim", (candidate) => candidate !== link);
+      setChannelGraphTooltip(
+        `${channelGraphName(model, link.source)} ${
+          link.type === "similarity" ? "↔" : "→"
+        } ${channelGraphName(model, link.target)}`,
+        link.type === "similarity"
+          ? [
+              `유사도 ${Math.round(link.score * 100)}%`,
+              `활동일 겹침 ${Math.round(link.dayOverlap * 100)}%`,
+            ]
+          : [
+              `전환 ${fmt(link.count)}회`,
+              `평균 ${formatMultiChannelGap(link.averageGap)}`,
+              `최단 ${formatMultiChannelGap(link.minGap)}`,
+            ],
+        event?.clientX,
+        event?.clientY,
+      );
+    };
+    hitLines
+      .on("mouseenter focus", showLinkTooltip)
+      .on("mousemove", showLinkTooltip)
+      .on("mouseleave blur", () => {
+        clearHighlight();
+        hideChannelGraphTooltip();
+      });
+    // ── 드래그: 끄는 동안만 물리 시뮬레이션을 깨운다 ───────────────────────
+    // ⚠ 평상시·재생 중에는 캐시된 좌표를 그대로 쓴다(이 파일 위 주석의 설계).
+    //   시뮬레이션을 항상 켜두면 월을 넘길 때마다 노드가 떠다녀 값 변화를
+    //   읽기 어렵고 CPU 도 계속 쓴다. 그래서 드래그 시작에 켜고 끝나면 멈춘다.
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    // ⚠ 노드 객체를 매 프레임 새로 만들면 d3 가 심어 둔 속도(vx/vy)가 0 으로
+    //   초기화돼 관성이 끊긴다. 재생 중에는 300ms 마다 이 함수가 도는데, 그때마다
+    //   멈췄다 다시 밀리기를 반복해 '뚝뚝 끊기다 급발진' 하는 느낌이 났다(제보).
+    //   → 모델에 노드 객체를 보관하고 좌표·반경만 갱신해 속도를 이어 간다.
+    if (!model.simNodePool) model.simNodePool = new Map();
+    const rowById = new Map(nodeRows.map((row) => [row.id, row]));
+    const simNodes = activeNodes.map((node) => {
+      const position = positionFor(node.id);
+      let row = model.simNodePool.get(node.id);
+      if (!row) {
+        row = {
+          id: node.id,
+          x: position?.x ?? CHANNEL_GRAPH_WIDTH / 2,
+          y: position?.y ?? CHANNEL_GRAPH_HEIGHT / 2,
+        };
+        model.simNodePool.set(node.id, row);
+      }
+      row.radius = rowById.get(node.id)?.radius || 7;
+      return row;
+    });
+    const simIndex = new Map(simNodes.map((node) => [node.id, node]));
+    const simGroups = groups.filter((node) => simIndex.has(node.id));
+    const simLinks = links
+      .filter((link) => simIndex.has(link.source) && simIndex.has(link.target))
+      .map((link) => ({ source: link.source, target: link.target }));
+
+    let dragSim = null;
+    const syncFromSim = () => {
+      for (const node of simNodes) {
+        const position = positionFor(node.id);
+        if (!position) continue;
+        // 화면 밖으로 나가지 않게 가둔다(정적 배치와 같은 여백 규칙).
+        node.x = clamp(
+          node.x,
+          CHANNEL_GRAPH_PADDING + node.radius,
+          CHANNEL_GRAPH_WIDTH - CHANNEL_GRAPH_PADDING - node.radius,
+        );
+        node.y = clamp(
+          node.y,
+          CHANNEL_GRAPH_PADDING + node.radius,
+          CHANNEL_GRAPH_HEIGHT - CHANNEL_GRAPH_PADDING - node.radius,
+        );
+        position.x = node.x;
+        position.y = node.y;
+      }
+      // ⚠ groups 는 전체 노드(비활성 포함)라 여기서 통째로 갱신하면 값이 같은
+      //   비활성 노드까지 매 tick 속성이 다시 쓰여 깜빡인다(제보).
+      //   시뮬레이션에 참여하는 노드만 옮긴다.
+      simGroups.attr(
+        "transform",
+        (node) =>
+          `translate(${positionFor(node.id).x},${positionFor(node.id).y})`,
+      );
+      linePosition(lines);
+      linePosition(hitLines);
+    };
+
+    groups.call(
+      d3
+        .drag()
+        .on("start", function dragStart(event, node) {
+          event.sourceEvent?.stopPropagation();
+          // ⚠ 재생 중에는 300ms 마다 그래프를 다시 그린다 → 드래그 중 시뮬레이션이
+          //   매번 폐기돼 노드가 튄다. 손을 대는 순간 재생을 멈춘다.
+          stopChannelGraphPlayback();
+          draggingNode = true;
+          // 끌기 시작하면 남아 있던 강조·툴팁을 정리한다(위 가드보다 먼저).
+          groups.classed("is-dim", false);
+          lines.classed("is-dim", false);
+          hitLines.classed("is-dim", false);
+          hideChannelGraphTooltip();
+          d3.select(this).classed("is-active", true);
+          // 설정에서 끄면 예전처럼 끌린 노드만 움직인다.
+          if (!channelGraphPhysics.drag) {
+            const target = simIndex.get(node.id);
+            if (target) {
+              target.fx = target.x;
+              target.fy = target.y;
+            }
+            return;
+          }
+          if (!dragSim) {
+            dragSim = d3
+              .forceSimulation(simNodes)
+              .force(
+                "link",
+                d3
+                  .forceLink(simLinks)
+                  .id((row) => row.id)
+                  .distance(CHANNEL_GRAPH_LINK_DISTANCE)
+                  .strength(0.35),
+              )
+              .force("charge", d3.forceManyBody().strength(-300))
+              .force(
+                "collide",
+                d3
+                  .forceCollide((row) => row.radius + CHANNEL_GRAPH_NODE_GAP)
+                  .iterations(2),
+              )
+              .on("tick", syncFromSim);
+          }
+          dragSim.alphaTarget(0.3).restart();
+          const target = simIndex.get(node.id);
+          if (target) {
+            target.fx = target.x;
+            target.fy = target.y;
+          }
+        })
+        .on("drag", function dragMove(event, node) {
+          const target = simIndex.get(node.id);
+          if (!target) return;
+          if (!channelGraphPhysics.drag) {
+            // 물리 없이: 이 노드만 옮기고 선을 다시 그린다(예전 동작).
+            const position = positionFor(node.id);
+            position.x = clamp(
+              event.x,
+              CHANNEL_GRAPH_PADDING + target.radius,
+              CHANNEL_GRAPH_WIDTH - CHANNEL_GRAPH_PADDING - target.radius,
+            );
+            position.y = clamp(
+              event.y,
+              CHANNEL_GRAPH_PADDING + target.radius,
+              CHANNEL_GRAPH_HEIGHT - CHANNEL_GRAPH_PADDING - target.radius,
+            );
+            target.x = position.x;
+            target.y = position.y;
+            d3.select(this).attr(
+              "transform",
+              `translate(${position.x},${position.y})`,
+            );
+            linePosition(lines);
+            linePosition(hitLines);
+            return;
+          }
+          target.fx = clamp(
+            event.x,
+            CHANNEL_GRAPH_PADDING + target.radius,
+            CHANNEL_GRAPH_WIDTH - CHANNEL_GRAPH_PADDING - target.radius,
+          );
+          target.fy = clamp(
+            event.y,
+            CHANNEL_GRAPH_PADDING + target.radius,
+            CHANNEL_GRAPH_HEIGHT - CHANNEL_GRAPH_PADDING - target.radius,
+          );
+        })
+        .on("end", function dragEnd(event, node) {
+          draggingNode = false;
+          d3.select(this).classed("is-active", false);
+          const target = simIndex.get(node.id);
+          if (target) {
+            // 놓은 자리에 그대로 둔다(고정 해제하면 원래대로 빨려간다).
+            target.fx = null;
+            target.fy = null;
+          }
+          // 잔여 움직임이 잦아들면 멈춘다 — 계속 돌면 CPU 를 계속 쓴다.
+          dragSim?.alphaTarget(0);
+        }),
+    );
+    // 재생 중 물리: 달이 바뀌면 노드가 새 자리를 찾아가게 한다(설정).
+    // ⚠ 매 프레임 이 함수가 다시 불리므로 시뮬레이션도 매번 새로 만든다.
+    //   alpha 를 낮게(0.12) 잡아 프레임 사이에 조금씩만 움직이게 한다 —
+    //   높이면 300ms 마다 크게 튀어 값 변화를 읽을 수 없다.
+    // ⚠ 링크가 없다고 건너뛰면 안 된다. 연결 없는 달에는 시뮬레이션이 아예 멈춰
+    //   노드가 굳었다가, 다음 달에 링크가 생기는 순간 밀린 힘이 한꺼번에 풀려
+    //   급발진했다(제보). charge·collide 만으로도 정리할 일이 있으므로 계속 돌린다.
+    // ⚠ 시뮬레이션도 매 프레임 새로 만들지 않는다. 새로 만들면 alpha 가 0.12 로
+    //   리셋돼 영원히 잦아들지 않고, 위 노드 객체의 속도도 함께 끊긴다.
+    //   하나를 유지하고 링크만 갈아 끼운 뒤 alpha 를 살짝 올린다.
+    if (channelGraphPlayTimer && channelGraphPhysics.play) {
+      if (!model.playSim) {
+        model.playSim = d3
+          .forceSimulation(simNodes)
+          .force("charge", d3.forceManyBody().strength(-260))
+          .force(
+            "collide",
+            d3
+              .forceCollide((row) => row.radius + CHANNEL_GRAPH_NODE_GAP)
+              .iterations(1),
+          )
+          .alphaDecay(0.05)
+          .on("tick", syncFromSim);
+        model.stopPlaySim = () => {
+          model.playSim?.on("tick", null);
+          model.playSim?.stop();
+          model.playSim = null;
+        };
+      } else {
+        model.playSim.nodes(simNodes).on("tick", syncFromSim);
+      }
+      model.playSim.force(
+        "link",
+        simLinks.length
+          ? d3
+              .forceLink(simLinks)
+              .id((row) => row.id)
+              .distance(CHANNEL_GRAPH_LINK_DISTANCE)
+              .strength(0.3)
+          : null,
+      );
+      // 달이 바뀌었으니 조금만 다시 데운다(크게 올리면 프레임마다 튄다).
+      model.playSim.alpha(Math.max(model.playSim.alpha(), 0.09)).restart();
+    } else {
+      model.stopPlaySim?.();
+      model.stopPlaySim = null;
+    }
+
+    // 이 그래프를 다시 그릴 때 이전 시뮬레이션이 남아 tick 을 쏘면 안 된다.
+    model.stopDragSim?.();
+    model.stopDragSim = () => {
+      dragSim?.on("tick", null);
+      dragSim?.stop();
+      dragSim = null;
+    };
+    for (const node of activeNodes) {
+      void ensureChannelGraphProfile(model, node.id, token);
+    }
+  }
+
+  function channelGraphPeriodLabel(model, index) {
+    if (!index) return "전체 기간";
+    const key = model.months[index - 1];
+    if (!key) return "전체 기간";
+    const [year, month] = key.split("-").map(Number);
+    return `${year}년 ${month}월`;
+  }
+
+  // subStep: 자동 재생에서만 넘어온다. 그 달의 앞 subStep/CHANNEL_GRAPH_SUB_STEPS
+  // 구간까지만 누적해 그린다(0 이나 미지정이면 달 전체).
+  function renderChannelGraph(items, reset = false, subStep = 0) {
+    if (reset) {
+      channelGraphPeriodIndex = 0;
+      // 정리를 먼저 하고 캐시를 비운다(clearRecapRuntimeData 와 같은 이유).
+      stopChannelGraphPlayback();
+      channelGraphModelCache?.stopDragSim?.();
+      channelGraphModelCache = null;
+    }
+    const model = channelGraphModel(items);
+    const slider = $("crcChannelGraphPeriod");
+    if (!slider) return;
+    channelGraphPeriodIndex = Math.max(
+      0,
+      Math.min(channelGraphPeriodIndex, model.months.length),
+    );
+    slider.max = String(model.months.length);
+    // ⚠ 재생 중에는 달 안에서도 썸이 조금씩 움직여야 부드럽다. range 는 step 에
+    //   맞춰 값을 스냅하므로(브라우저별 차이), value 만 소수로 넣으면 튄다
+    //   → 재생 중에만 step 을 잘게 하고 멈추면 1 로 되돌린다(수동 드래그는 월 단위).
+    if (channelGraphPlayTimer && subStep > 0) {
+      slider.step = String(1 / CHANNEL_GRAPH_SUB_STEPS);
+      const progress =
+        (subStep - CHANNEL_GRAPH_SUB_STEPS) / CHANNEL_GRAPH_SUB_STEPS;
+      slider.value = String(Math.max(0, channelGraphPeriodIndex + progress));
+    } else {
+      slider.step = "1";
+      slider.value = String(channelGraphPeriodIndex);
+    }
+    setText(
+      "crcChannelGraphPeriodLabel",
+      channelGraphPeriodLabel(model, channelGraphPeriodIndex),
+    );
+    const month = channelGraphPeriodIndex
+      ? model.months[channelGraphPeriodIndex - 1]
+      : "";
+    const partial =
+      month && subStep > 0 && subStep < CHANNEL_GRAPH_SUB_STEPS
+        ? `${month}@${subStep}/${CHANNEL_GRAPH_SUB_STEPS}`
+        : month;
+    drawChannelGraph(model, partial);
+  }
+
+  function queueChannelGraphRender() {
+    if (channelGraphRenderFrame) cancelAnimationFrame(channelGraphRenderFrame);
+    channelGraphRenderFrame = requestAnimationFrame(() => {
+      channelGraphRenderFrame = 0;
+      renderChannelGraph(lastData.items);
+    });
+  }
+
+  function stopChannelGraphPlayback() {
+    const wasPlaying = Boolean(channelGraphPlayTimer);
+    if (channelGraphPlayTimer) clearInterval(channelGraphPlayTimer);
+    channelGraphPlayTimer = 0;
+    const button = $("crcChannelGraphPlay");
+    button?.setAttribute("aria-pressed", "false");
+    if (button) button.setAttribute("aria-label", "월별 관계도 자동 재생");
+    // 재생용 물리 시뮬레이션도 멈춘다(계속 tick 하면 CPU 를 계속 쓴다).
+    channelGraphModelCache?.stopPlaySim?.();
+    if (channelGraphModelCache) channelGraphModelCache.stopPlaySim = null;
+    // 재생 중 감췄던 노드를 되돌리려면 한 번 다시 그려야 한다.
+    if (wasPlaying && channelGraphPhysics.hideIdle) queueChannelGraphRender();
+    // 재생 중 잘게 만든 눈금만 되돌린다(수동 조작은 월 단위여야 한다).
+    // ⚠ 여기서 value 까지 덮어쓰면 안 된다. 드래그의 input 핸들러가 이 함수를
+    //   먼저 부르는데, 그 시점의 channelGraphPeriodIndex 는 아직 '이전' 값이라
+    //   썸이 매번 원위치로 튕겨 조작이 불가능했다(제보).
+    //   값은 곧이어 renderChannelGraph 가 맞춘다.
+    const slider = $("crcChannelGraphPeriod");
+    if (slider) slider.step = "1";
+  }
+
+  // 한 달을 이만큼으로 쪼개 그린다. 30일을 다 그릴 필요는 없다 — 6단계(200ms)면
+  // 값이 자라는 게 보이고, 유사도 계산이 O(n²)라 더 늘리면 비용만 커진다.
+  // 한 달을 이만큼으로 쪼갠다. 잘게 나눌수록 값이 조금씩 자라 부드럽다.
+  // ⚠ 단계마다 buildChannelGraphPeriod 가 돌지만(유사도 O(n²)) periodCache 가
+  //   받아 주므로 같은 구간은 한 번만 계산된다 — 반복 재생 2회차부터는 캐시 히트.
+  const CHANNEL_GRAPH_SUB_STEPS = 16;
+  const CHANNEL_GRAPH_STEP_MS = 150; // 16 × 150ms = 월당 2.4초(1배속)
+  // 재생 배속. 버튼을 누를 때마다 이 순서로 돈다.
+  const CHANNEL_GRAPH_SPEEDS = [1, 1.5, 2, 4, 0.5];
+  let channelGraphSpeed = 1;
+  // ⚠ 배속을 바꿀 때 재생 위치를 잃지 않으려면 진행 상태가 클로저 밖에 있어야
+  //   한다. 안에 두면 타이머를 다시 걸 때 startChannelGraphPlayback 을 불러야
+  //   하고, 그러면 마지막 달에서 처음으로 점프한다.
+  let channelGraphPlayStep = 0;
+
+  function startChannelGraphPlayback() {
+    const model = channelGraphModel(lastData.items);
+    if (!model.months.length) return;
+    stopChannelGraphPlayback();
+    const button = $("crcChannelGraphPlay");
+    button?.setAttribute("aria-pressed", "true");
+    if (button) button.setAttribute("aria-label", "월별 관계도 자동 재생 중지");
+    if (
+      !channelGraphPeriodIndex ||
+      channelGraphPeriodIndex >= model.months.length
+    ) {
+      channelGraphPeriodIndex = 1;
+    }
+    // 월과 월 사이를 그 달의 앞부분부터 조금씩 누적해 채운다. 값이 실제로 자라
+    // 노드 반경·링크 굵기가 이어져 보인다(예전에는 달이 통째로 갈려 툭 끊겼다).
+    channelGraphPlayStep = CHANNEL_GRAPH_SUB_STEPS;
+    renderChannelGraph(lastData.items);
+    armChannelGraphPlayTimer(model);
+  }
+
+  // 타이머만 (다시) 건다. 배속을 바꿀 때 진행 위치를 유지하려고 분리했다.
+  function armChannelGraphPlayTimer(model) {
+    if (channelGraphPlayTimer) clearInterval(channelGraphPlayTimer);
+    channelGraphPlayTimer = setInterval(
+      () => {
+        if (document.hidden) {
+          stopChannelGraphPlayback();
+          return;
+        }
+        channelGraphPlayStep += 1;
+        if (channelGraphPlayStep > CHANNEL_GRAPH_SUB_STEPS) {
+          const atEnd = channelGraphPeriodIndex >= model.months.length;
+          // 반복이 꺼져 있으면 마지막 달을 다 보여 준 뒤 멈춘다.
+          if (atEnd && !channelGraphPhysics.loop) {
+            stopChannelGraphPlayback();
+            return;
+          }
+          channelGraphPlayStep = 1;
+          channelGraphPeriodIndex = atEnd ? 1 : channelGraphPeriodIndex + 1;
+        }
+        renderChannelGraph(lastData.items, false, channelGraphPlayStep);
+      },
+      Math.max(40, Math.round(CHANNEL_GRAPH_STEP_MS / channelGraphSpeed)),
+    );
+  }
+
   function renderSummary(items, donations) {
     const aggregate = timeAggregate(items);
     const byDay = aggregate.byDay;
@@ -3222,6 +5220,17 @@
       tintStatValue(totalEl, st.topId);
     }
     renderRisingWordSummary();
+    const multi = multiChannelActivity(items);
+    setText(
+      "crcMultiChannel",
+      multi.sessionCount ? `최대 ${fmt(multi.maxChannels)}개` : "없음",
+    );
+    setText(
+      "crcMultiChannelSub",
+      multi.sessionCount
+        ? `${fmt(multi.sessionCount)}개 세션 · 최단 ${formatMultiChannelGap(multi.fastestGap)}`
+        : "서로 다른 채널의 근접 채팅 기록이 없습니다",
+    );
 
     // ── 후원·구독 ────────────────────────────────────────────────────────
     let donCount = 0;
@@ -3390,9 +5399,15 @@
   }
 
   function startChannelRender(byChannel) {
-    channelRenderReady = renderChannels(byChannel).catch((error) => {
-      console.warn("[치즈 플래터] 채널별 리캡 렌더 실패", error);
-    });
+    channelRenderReady = renderChannels(byChannel)
+      .then(() => {
+        // ⚠ 채널 이름은 여기서 채워진다. 드롭다운은 그 전에 그려져 UID 만
+        //   들어가 있으므로(제보) 이름이 준비되면 라벨을 다시 만든다.
+        renderChannelMenus();
+      })
+      .catch((error) => {
+        console.warn("[치즈 플래터] 채널별 리캡 렌더 실패", error);
+      });
     return channelRenderReady;
   }
 
@@ -3463,6 +5478,7 @@
   let monthCumulative = false;
   let wordSort = "count";
   let wordType = "all";
+
   const CUMULATIVE_KEY = "cheeseChatRecapCumulative";
 
   // ── 월별 추이(선 차트 + 누적 토글) ──────────────────────────────────────
@@ -3470,26 +5486,13 @@
   function renderMonths(items) {
     const canvas = $("crcMonthChart");
     if (!canvas || typeof Chart === "undefined") return;
-    const byMonth = timeAggregate(items).byMonth;
-    // ⚠ 기록이 없는 달은 키가 없다. 그대로 이으면 빈 달이 접혀 추이가 왜곡된다
-    //   → 처음~마지막 사이를 0 으로 채운다.
-    const keys = [...byMonth.keys()].sort();
-    const labels = [];
-    const values = [];
-    if (keys.length) {
-      const [y0, m0] = keys[0].split("-").map(Number);
-      const [y1, m1] = keys[keys.length - 1].split("-").map(Number);
-      for (let y = y0, m = m0; y < y1 || (y === y1 && m <= m1);) {
-        const key = `${y}-${String(m).padStart(2, "0")}`;
-        labels.push(key);
-        values.push(byMonth.get(key) || 0);
-        m += 1;
-        if (m > 12) {
-          m = 1;
-          y += 1;
-        }
-      }
-    }
+    // 채널을 고르면 그 채널 채팅만으로 추이를 그린다.
+    const picked = channelMenuValue.months;
+    const scoped = picked
+      ? items.filter((it) => it.channelId === picked)
+      : items;
+    // ⚠ 기록이 없는 달은 0으로 채워 빈 기간이 접히지 않게 한다.
+    const { labels, values } = monthlyChatSeries(scoped);
     const data = monthCumulative
       ? values.reduce((acc, n) => {
           acc.push((acc[acc.length - 1] || 0) + n);
@@ -3499,12 +5502,19 @@
 
     const caption = $("crcMonthsCaption");
     if (caption) {
+      const scope = picked ? `${promptChannelName(picked)} · ` : "";
       caption.textContent = monthCumulative
-        ? "그때까지 쌓인 합계입니다."
-        : "달마다 남긴 채팅 수입니다.";
+        ? `${scope}그때까지 쌓인 합계입니다.`
+        : `${scope}달마다 남긴 채팅 수입니다.`;
     }
 
-    const brand = cssVar("--popup-brand-strong", "#168f5c");
+    // 채널을 고르면 그 채널 색으로 그린다(목록·카드와 같은 색이라 눈으로 이어진다).
+    // ⚠ 프로필에서 뽑은 색은 임의라 배경에 묻힐 수 있다 → readableInk 로 대비를
+    //   맞춘 값을 쓴다(요약 카드의 스트리머 이름과 같은 처리).
+    const brand = picked
+      ? readableInk(colorFor(picked), isDarkTheme()) ||
+        cssVar("--popup-brand-strong", "#168f5c")
+      : cssVar("--popup-brand-strong", "#168f5c");
     const line = cssVar("--popup-border", "#d8dade");
     const text = cssVar("--popup-text", "#26262c");
     const muted = cssVar("--popup-muted", "#7e7f85");
@@ -3741,20 +5751,101 @@
     ].join(".");
   }
 
+  // 채널 드롭다운 채우기. 채팅이 많은 채널부터 올린다.
+  // 채널 드롭다운(자주 쓴 말 / 월별 추이). 통나무파워의 .lps-sort 와 같은 모양이다.
+  // key → 현재 선택값. 값은 채널 UID, 빈 문자열은 '전체 채널'.
+  const channelMenuValue = { words: "", months: "" };
+
+  function channelMenuLabel(id) {
+    if (!id) return "전체 채널";
+    const name = promptChannelName(id);
+    const count = lastData.byChannel.get(id);
+    return count ? `${name} (${fmt(count)})` : name;
+  }
+
+  // ⚠ 이름은 startChannelRender 가 뒤늦게 채운다. 처음 그릴 때는 UID 뿐이라
+  //   그대로 두면 목록에 UID 가 나온다(제보) → 이름이 준비되면 다시 그린다.
+  function renderChannelMenus() {
+    const rows = [...lastData.byChannel.entries()].sort((a, b) => b[1] - a[1]);
+    for (const menu of document.querySelectorAll("[data-channel-menu]")) {
+      const key = menu.dataset.channelMenu;
+      const list = menu.querySelector(".lps-sort-list");
+      const label = menu.querySelector("[data-channel-label]");
+      if (!list) continue;
+      // 고른 채널이 사라졌으면(계정 전환 등) 전체로 되돌린다.
+      if (
+        channelMenuValue[key] &&
+        !lastData.byChannel.has(channelMenuValue[key])
+      ) {
+        channelMenuValue[key] = "";
+      }
+      const current = channelMenuValue[key] || "";
+      list.textContent = "";
+      const addOption = (id) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.dataset.channel = id;
+        li.setAttribute("aria-selected", String(id === current));
+        li.textContent = channelMenuLabel(id);
+        list.append(li);
+      };
+      addOption("");
+      for (const [id] of rows) addOption(id);
+      if (label) label.textContent = channelMenuLabel(current);
+    }
+  }
+
+  function closeChannelMenus(except) {
+    for (const menu of document.querySelectorAll("[data-channel-menu]")) {
+      if (menu === except) continue;
+      const list = menu.querySelector(".lps-sort-list");
+      const button = menu.querySelector(".lps-sort-button");
+      if (list) list.hidden = true;
+      button?.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  // 채널을 고르면 '채널 범위순'·'최근 급상승'은 낼 수 없다 → 버튼을 잠근다.
+  function reflectWordSortAvailability() {
+    for (const button of document.querySelectorAll("[data-word-sort]")) {
+      const locked =
+        Boolean(channelMenuValue.words) &&
+        (button.dataset.wordSort === "coverage" ||
+          button.dataset.wordSort === "rising");
+      button.disabled = locked;
+      button.title = locked
+        ? "채널을 고르면 전체 기준 지표라 쓸 수 없습니다."
+        : "";
+    }
+  }
+
   function renderWords() {
+    const wordChannel = channelMenuValue.words;
     const cache = wordStatsCache;
-    const filtered = cache.rows.filter(
+    // 채널을 고르면 그 채널에서 쓴 표현만, 건수도 그 채널 것으로 바꿔 센다.
+    // ⚠ stat.channels 는 Map(채널ID → 건수)라 원본을 건드리지 않고 사본을 만든다.
+    const byChannel = wordChannel
+      ? cache.rows
+          .filter((stat) => stat.channels?.has(wordChannel))
+          .map((stat) => ({
+            ...stat,
+            count: stat.channels.get(wordChannel) || 0,
+          }))
+      : cache.rows;
+    const filtered = byChannel.filter(
       (stat) => wordType === "all" || stat.type === wordType,
     );
     const eligible = filtered;
-    const rising = risingWordRows(wordType);
-    const sortable = wordSort === "rising" ? rising : eligible;
+    // 급상승은 최근/직전 30일 집계가 전체 기준이라 채널별로 쪼갤 수 없다.
+    // 채널을 고르면 빈도순으로만 보여 준다(아래에서 정렬 버튼도 잠근다).
+    const rising = wordChannel ? [] : risingWordRows(wordType);
+    const sortable = wordSort === "rising" && !wordChannel ? rising : eligible;
     sortable.sort((a, b) => {
-      if (wordSort === "coverage") {
+      if (wordSort === "coverage" && !wordChannel) {
         const channelDiff = b.channels.size - a.channels.size;
         if (channelDiff) return channelDiff;
       }
-      if (wordSort === "rising") {
+      if (wordSort === "rising" && !wordChannel) {
         const trendDiff =
           wordTrendScore(b, wordType) - wordTrendScore(a, wordType);
         if (trendDiff) return trendDiff;
@@ -3773,9 +5864,11 @@
       const li = document.createElement("li");
       li.className = "crc-word crc-word-empty";
       li.innerHTML = `<b>${
-        wordSort === "rising"
-          ? `최근 ${WORD_TREND_DAYS}일에 증가한 표현이 없습니다`
-          : "아직 셀 만큼 쌓이지 않았습니다"
+        wordChannel
+          ? "이 채널에서 셀 만큼 쌓이지 않았습니다"
+          : wordSort === "rising"
+            ? `최근 ${WORD_TREND_DAYS}일에 증가한 표현이 없습니다`
+            : "아직 셀 만큼 쌓이지 않았습니다"
       }</b>`;
       list.append(li);
       return;
@@ -3803,32 +5896,57 @@
         strong.append(document.createTextNode(suffix));
         return strong;
       };
-      const total = cache.totalByType[wordType] || 0;
-      const messageCount = cache.messagesByType[wordType] || 0;
-      summary("전체 표현 사용", `${fmt(total)}회`);
-      summary("서로 다른 표현", `${fmt(cache.uniqueByType[wordType] || 0)}개`);
-      summary(
-        "표현이 나온 채팅",
-        `${fmt(messageCount)}/${fmt(cache.itemCount)}개`,
-      );
-      const broad = wordSummary(
-        "가장 넓게 쓴 표현",
-        widest.word,
-        ` · ${widest.channels.size}/${cache.allChannels.size}개 채널`,
-      );
-      broad.title = broad.textContent;
-      if (topRising) {
-        const trend = wordSummary(
-          `최근 ${WORD_TREND_DAYS}일 급상승`,
-          topRising.word,
-          ` · ${wordTrendLabel(topRising, wordType)}`,
+      // ⚠ '표현이 나온 채팅'·'가장 넓게 쓴 표현'·'급상승'은 전체 기준으로만
+      //   집계돼 있어 채널별로 쪼갤 수 없다. 채널을 고르면 낼 수 있는 것만 낸다
+      //   (없는 값을 전체 수치로 채우면 그 채널 것으로 오해한다).
+      if (wordChannel) {
+        // ⚠ return 하면 아래 목록 렌더까지 건너뛴다 → else 로 갈라 놓는다.
+        const channelTotal = eligible.reduce((sum, s) => sum + s.count, 0);
+        summary("이 채널 표현 사용", `${fmt(channelTotal)}회`);
+        summary("서로 다른 표현", `${fmt(eligible.length)}개`);
+        const top = eligible[0];
+        if (top) {
+          const mostUsed = wordSummary(
+            "가장 많이 쓴 표현",
+            top.word,
+            ` · ${fmt(top.count)}회`,
+          );
+          mostUsed.title = mostUsed.textContent;
+        }
+      } else {
+        const total = cache.totalByType[wordType] || 0;
+        const messageCount = cache.messagesByType[wordType] || 0;
+        summary("전체 표현 사용", `${fmt(total)}회`);
+        summary(
+          "서로 다른 표현",
+          `${fmt(cache.uniqueByType[wordType] || 0)}개`,
         );
-        trend.title = trend.textContent;
+        summary(
+          "표현이 나온 채팅",
+          `${fmt(messageCount)}/${fmt(cache.itemCount)}개`,
+        );
+        const broad = wordSummary(
+          "가장 넓게 쓴 표현",
+          widest.word,
+          ` · ${widest.channels.size}/${cache.allChannels.size}개 채널`,
+        );
+        broad.title = broad.textContent;
+        if (topRising) {
+          const trend = wordSummary(
+            `최근 ${WORD_TREND_DAYS}일 급상승`,
+            topRising.word,
+            ` · ${wordTrendLabel(topRising, wordType)}`,
+          );
+          trend.title = trend.textContent;
+        }
       }
     }
 
     const maxCount = Math.max(...rows.map((stat) => stat.count), 1);
-    const selectedTotal = cache.totalByType[wordType] || 0;
+    // 비율의 분모도 보고 있는 범위와 맞춘다(채널을 고르면 그 채널 합).
+    const selectedTotal = wordChannel
+      ? eligible.reduce((sum, stat) => sum + stat.count, 0)
+      : cache.totalByType[wordType] || 0;
     for (const [index, stat] of rows.entries()) {
       const { word, count: n } = stat;
       const li = document.createElement("li");
@@ -4164,6 +6282,12 @@
   });
 
   let channelView = "card"; // "card" | "list" — 기본은 카드
+  let channelTrendCumulative = false;
+  const channelTrendData = new WeakMap();
+  let channelTrendModalChart = null;
+  let channelTrendModalSeries = null;
+  let channelTrendModalCumulative = false;
+  let channelTrendModalTrigger = null;
   const PODIUM_ACHIEVEMENTS_KEY = "cheeseChatRecapPodiumAchievements";
   const flippedChannelCards = new Set();
   let activeRecapAccountId = "";
@@ -4338,11 +6462,13 @@
     if (box.dataset.flipReady === "1") return;
     box.dataset.flipReady = "1";
     box.addEventListener("click", (event) => {
+      if (event.target?.closest?.(".crc-channel-trend")) return;
       const card = event.target?.closest?.(".crc-card[data-card-for]");
       if (card && box.contains(card)) toggleChannelCard(card);
     });
     box.addEventListener("keydown", (event) => {
       if (event.repeat || (event.key !== "Enter" && event.key !== " ")) return;
+      if (event.target?.closest?.(".crc-channel-trend")) return;
       const card = event.target?.closest?.(".crc-card[data-card-for]");
       if (!card || !box.contains(card)) return;
       event.preventDefault();
@@ -4350,7 +6476,15 @@
     });
   }
 
-  function channelCardSummary(channelId, count, rank) {
+  // 'N회' 아래에 붙는 전체 대비 비율. 목록 보기의 .crc-channel-share 와 문구를 맞춘다.
+  function channelCardShareNode(count, grand) {
+    const share = document.createElement("div");
+    share.className = "crc-card-share";
+    share.textContent = `전체 ${grand ? Math.round((count / grand) * 100) : 0}%`;
+    return share;
+  }
+
+  function channelCardSummary(channelId, count, rank, grand) {
     const fragment = document.createDocumentFragment();
     const head = document.createElement("div");
     head.className = "crc-card-head";
@@ -4372,7 +6506,7 @@
     const total = document.createElement("div");
     total.className = "crc-card-total";
     total.textContent = `${fmt(count)}회`;
-    fragment.append(head, total);
+    fragment.append(head, total, channelCardShareNode(count, grand));
     return fragment;
   }
 
@@ -4406,12 +6540,249 @@
     return formatHour12(peak);
   }
 
+  function monthlyChatSeries(items) {
+    const byMonth = new Map();
+    for (const item of items || []) {
+      const key = monthKey(item?.t);
+      if (!/^\d{4}-\d{2}$/.test(key)) continue;
+      byMonth.set(key, (byMonth.get(key) || 0) + 1);
+    }
+    const keys = [...byMonth.keys()].sort();
+    const labels = [];
+    const values = [];
+    if (!keys.length) return { labels, values };
+    const [y0, m0] = keys[0].split("-").map(Number);
+    const [y1, m1] = keys[keys.length - 1].split("-").map(Number);
+    for (let year = y0, month = m0; ;) {
+      const key = `${year}-${String(month).padStart(2, "0")}`;
+      labels.push(key);
+      values.push(byMonth.get(key) || 0);
+      if (year === y1 && month === m1) break;
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+    return { labels, values };
+  }
+
+  function renderChannelTrend(root) {
+    const series = channelTrendData.get(root);
+    if (!series?.labels?.length) {
+      root.hidden = true;
+      return;
+    }
+    root.hidden = false;
+    const values = channelTrendCumulative
+      ? series.values.reduce((rows, count) => {
+          rows.push((rows[rows.length - 1] || 0) + count);
+          return rows;
+        }, [])
+      : series.values;
+    const max = Math.max(1, ...values);
+    const width = 320;
+    const top = 7;
+    const bottom = 67;
+    const left = 7;
+    const right = width - 7;
+    const xAt = (index) =>
+      values.length === 1
+        ? width / 2
+        : left + ((right - left) * index) / (values.length - 1);
+    const yAt = (value) => bottom - ((bottom - top) * value) / max;
+    const points = values.map((value, index) => [xAt(index), yAt(value)]);
+    const linePoints =
+      points.length === 1
+        ? [
+            [left, points[0][1]],
+            [right, points[0][1]],
+          ]
+        : points;
+    const linePath = linePoints
+      .map(
+        ([x, y], index) =>
+          `${index ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`,
+      )
+      .join(" ");
+    const areaPath = `${linePath} L${linePoints.at(-1)[0].toFixed(2)} ${bottom} L${linePoints[0][0].toFixed(2)} ${bottom} Z`;
+    const latest = values.at(-1) || 0;
+    const summary = channelTrendCumulative
+      ? `누적 ${fmt(latest)}회 · ${fmt(values.length)}개월`
+      : `최근 ${fmt(latest)}회 · 월 최고 ${fmt(max)}회`;
+    const mode = channelTrendCumulative ? "누적" : "월별";
+    root.dataset.mode = channelTrendCumulative ? "cumulative" : "monthly";
+    root.setAttribute(
+      "aria-label",
+      `${series.channelName || "채널"} ${mode} 채팅량 추이. ${summary}. 확대해서 보기`,
+    );
+    root.textContent = "";
+
+    const head = document.createElement("div");
+    head.className = "crc-channel-trend-head";
+    const title = document.createElement("strong");
+    title.textContent = `${mode} 채팅량 추이`;
+    const note = document.createElement("span");
+    note.textContent = summary;
+    head.append(title, note);
+
+    const chart = document.createElement("div");
+    chart.className = "crc-channel-trend-chart";
+    chart.innerHTML = `
+      <svg viewBox="0 0 ${width} 74" preserveAspectRatio="none" aria-hidden="true">
+        <path class="crc-channel-trend-grid" d="M${left} ${top}H${right} M${left} ${(top + bottom) / 2}H${right} M${left} ${bottom}H${right}"></path>
+        <path class="crc-channel-trend-area" d="${areaPath}"></path>
+        <path class="crc-channel-trend-line" d="${linePath}"></path>
+      </svg>`;
+    if (points.length <= 18) {
+      const svg = chart.querySelector("svg");
+      for (const [x, y] of points) {
+        const point = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "circle",
+        );
+        point.classList.add("crc-channel-trend-point");
+        point.setAttribute("cx", x.toFixed(2));
+        point.setAttribute("cy", y.toFixed(2));
+        point.setAttribute("r", "2.5");
+        svg.append(point);
+      }
+    }
+    const axis = document.createElement("div");
+    axis.className = "crc-channel-trend-axis";
+    const first = document.createElement("span");
+    first.textContent = series.labels[0].replace("-", ".");
+    const last = document.createElement("span");
+    last.textContent = series.labels.at(-1).replace("-", ".");
+    axis.append(first, last);
+    root.append(head, chart, axis);
+  }
+
+  function channelTrendNode(channelId, chats) {
+    const root = document.createElement("section");
+    root.className = "crc-channel-trend";
+    root.dataset.channelTrend = channelId;
+    root.setAttribute("role", "button");
+    root.setAttribute("aria-haspopup", "dialog");
+    root.tabIndex = 0;
+    const series = monthlyChatSeries(chats);
+    series.channelId = channelId;
+    series.channelName = nameCache.get(channelId)?.name || "";
+    channelTrendData.set(root, series);
+    renderChannelTrend(root);
+    return root;
+  }
+
+  function renderAllChannelTrends() {
+    for (const root of document.querySelectorAll(".crc-channel-trend")) {
+      renderChannelTrend(root);
+    }
+  }
+
+  function renderChannelTrendModal() {
+    const canvas = $("crcChannelTrendChart");
+    const series = channelTrendModalSeries;
+    if (!canvas || !series?.labels?.length || typeof Chart === "undefined") {
+      return;
+    }
+    const data = channelTrendModalCumulative
+      ? series.values.reduce((rows, count) => {
+          rows.push((rows[rows.length - 1] || 0) + count);
+          return rows;
+        }, [])
+      : series.values;
+    const color = colorFor(series.channelId);
+    const line = cssVar("--popup-border", "#d8dade");
+    const text = cssVar("--popup-text", "#26262c");
+    const muted = cssVar("--popup-muted", "#7e7f85");
+    const name = nameCache.get(series.channelId)?.name || series.channelName;
+
+    setText("crcChannelTrendTitle", `${name || "채널"} 채팅량 추이`);
+    setText(
+      "crcChannelTrendCaption",
+      channelTrendModalCumulative
+        ? "그때까지 쌓인 채팅 합계입니다."
+        : "달마다 남긴 채팅 수입니다.",
+    );
+    for (const button of document.querySelectorAll(
+      "[data-channel-trend-modal-mode]",
+    )) {
+      button.setAttribute(
+        "aria-pressed",
+        String(
+          (button.dataset.channelTrendModalMode === "cumulative") ===
+            channelTrendModalCumulative,
+        ),
+      );
+    }
+
+    channelTrendModalChart?.destroy();
+    channelTrendModalChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: series.labels,
+        datasets: [
+          {
+            label: channelTrendModalCumulative ? "누적 채팅" : "채팅",
+            data,
+            borderColor: color,
+            backgroundColor: withAlpha(color, 0.14),
+            fill: true,
+            tension: 0.25,
+            pointRadius: series.labels.length > 24 ? 0 : 3,
+            pointHoverRadius: 5,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { ticks: { color: muted }, grid: { color: line } },
+          y: {
+            beginAtZero: true,
+            ticks: { color: muted, precision: 0 },
+            grid: { color: line },
+          },
+        },
+        plugins: { legend: { labels: { color: text, boxWidth: 12 } } },
+      },
+    });
+  }
+
+  function openChannelTrendModal(root) {
+    const series = channelTrendData.get(root);
+    const modal = $("crcChannelTrendModal");
+    if (!modal || !series?.labels?.length) return;
+    channelTrendModalSeries = series;
+    channelTrendModalCumulative = root.dataset.mode === "cumulative";
+    channelTrendModalTrigger = root;
+    modal.hidden = false;
+    renderChannelTrendModal();
+    $("crcChannelTrendClose")?.focus();
+  }
+
+  function closeChannelTrendModal() {
+    const modal = $("crcChannelTrendModal");
+    if (!modal || modal.hidden) return;
+    channelTrendModalChart?.destroy();
+    channelTrendModalChart = null;
+    channelTrendModalSeries = null;
+    modal.hidden = true;
+    const trigger = channelTrendModalTrigger;
+    channelTrendModalTrigger = null;
+    if (trigger?.isConnected) trigger.focus();
+  }
+
   function channelCardFront(
     channelId,
     count,
     rank,
     channelChats,
     channelDonations,
+    grand,
   ) {
     const chats = Array.isArray(channelChats) ? channelChats : [];
     const donations = Array.isArray(channelDonations) ? channelDonations : [];
@@ -4437,6 +6808,9 @@
     const total = document.createElement("div");
     total.className = "crc-card-total crc-card-front-total";
     total.textContent = `${fmt(count)}회`;
+
+    const share = channelCardShareNode(count, grand);
+    share.classList.add("crc-card-front-share");
 
     const range = document.createElement("span");
     range.className = "crc-card-front-range";
@@ -4480,7 +6854,7 @@
     peak.className = "crc-card-front-peak";
     peak.textContent = channelCardPeakHour(chats);
 
-    fragment.append(medal, img, name, total, range);
+    fragment.append(medal, img, name, total, share, range);
     const firstChats = channelFirstChatRecords(chats, donations);
     if (firstChats.length) {
       fragment.append(
@@ -4579,6 +6953,8 @@
     if (!box) return;
     setupChannelCardInteractions(box);
     const rows = [...byChannel.entries()].sort((a, b) => b[1] - a[1]);
+    // 목록 보기와 같은 기준(전체 저장 채팅 대비)으로 비율을 낸다.
+    const grand = [...byChannel.values()].reduce((a, b) => a + b, 0);
     const chatsByChannel = new Map();
     const donationsByChannel = new Map();
     for (const item of lastData.items) {
@@ -4620,12 +6996,13 @@
           rank,
           chatsByChannel.get(id) || [],
           donationsByChannel.get(id) || [],
+          grand,
         ),
       );
       const back = document.createElement("section");
       back.className = "crc-card-face crc-card-back";
       back.setAttribute("aria-hidden", "true");
-      back.append(channelCardSummary(id, count, rank));
+      back.append(channelCardSummary(id, count, rank, grand));
       // 기존 카드에 있던 상세 정보는 내용과 순서를 바꾸지 않고 뒷면에 둔다.
       const detail = document.createElement("div");
       detail.className = "crc-card-detail";
@@ -4797,6 +7174,15 @@
     for (const el of document.querySelectorAll(`[data-ink-for="${id}"]`)) {
       el.style.color = ink;
     }
+    // 월별 추이를 그 채널로 보고 있으면 차트 색도 바로 맞춘다.
+    if (channelMenuValue.months === id) renderMonths(lastData.items);
+    // 채널 관계도의 노드 테두리도 같은 색을 쓴다. ⚠ 전체를 다시 그리면 배치가
+    //   초기화돼 사용자가 옮겨 둔 위치가 날아간다 → 해당 노드만 바꾼다.
+    for (const el of document.querySelectorAll(
+      `[data-node-color-for="${id}"]`,
+    )) {
+      el.style.setProperty("--crc-node-color", color);
+    }
   }
 
   // 채널 하나의 요약을 그 줄 아래에 펼친다(다시 누르면 접는다).
@@ -4909,6 +7295,8 @@
     if (sent) out.push(stat("선물한 구독권", `${fmt(sent)}개`));
     if (recv) out.push(stat("선물받은 구독권", `${fmt(recv)}개`));
 
+    if (chats.length) out.push(channelTrendNode(channelId, chats));
+
     // 자주 쓴 말(이 채널 한정). ⚠ 이모티콘과 글자를 섞으면 둘 다 몇 개씩만
     //   보여 비교가 안 된다 → 따로 나눠 각각 상위 항목을 보여 준다.
     const all = countWords(chats, 0); // 상한 없이 받아 각각 따로 자른다
@@ -4975,7 +7363,7 @@
     const openChzzk = $("crcOpenChzzk");
     const rebuild = $("crcCatalogRebuild");
     state.hidden = authenticated;
-    if (!authenticated) $("crcNewRecords").hidden = true;
+    if (!authenticated) setNewRecordsDot(false);
     $("crcImport").disabled = !authenticated;
     $("crcDonationImport").disabled = !authenticated;
 
@@ -5013,9 +7401,9 @@
   function applyRecapLoadError() {
     const state = $("crcAccountState");
     state.hidden = false;
-    $("crcOpenChzzk").hidden = true;
-    $("crcCatalogRebuild").hidden = false;
-    $("crcNewRecords").hidden = true;
+    setHidden("crcOpenChzzk", true);
+    setHidden("crcCatalogRebuild", false);
+    setNewRecordsDot(false);
     $("crcImport").disabled = true;
     $("crcDonationImport").disabled = true;
     $("crcExportMenuButton").disabled = true;
@@ -5031,6 +7419,19 @@
     lastData = { items: [], donations: [], byChannel: new Map() };
     wordStatsCache = emptyWordStats();
     timeAggregateCache = null;
+    multiChannelActivityCache = null;
+    channelGraphPeriodIndex = 0;
+    channelGraphRenderToken += 1;
+    // ⚠ 캐시를 먼저 비우면 stopChannelGraphPlayback 이 모델에 닿지 못해
+    //   재생용 시뮬레이션이 살아남아 tick 을 계속 쏜다 → 정리 뒤에 비운다.
+    stopChannelGraphPlayback();
+    channelGraphModelCache?.stopDragSim?.();
+    channelGraphModelCache = null;
+    if (channelGraphRenderFrame) {
+      cancelAnimationFrame(channelGraphRenderFrame);
+      channelGraphRenderFrame = 0;
+    }
+    $("crcChannelGraph")?.replaceChildren();
     monthChart?.destroy();
     monthChart = null;
     polarChart?.destroy();
@@ -5043,10 +7444,24 @@
   let displayedAccountId = "";
   let displayedAccountNickname = "";
 
+  // 새 기록 점을 켜고 끄는 단일 창구.
+  function setNewRecordsDot(on) {
+    setHidden("crcNewRecords", !on);
+    const button = $("crcRefresh");
+    if (button) {
+      button.title = on ? "새 기록이 있습니다. 눌러서 반영하세요." : "";
+    }
+  }
+
   function refresh() {
     if (refreshInFlight) return refreshInFlight;
     refreshInFlight = refreshOnce().finally(() => {
       refreshInFlight = null;
+      // ⚠ 점 끄기는 refreshOnce '중간'이 아니라 '끝'에서 해야 한다.
+      //   읽는 동안(수백 ms~수 초) 라이브에서 채팅이 더 쌓이면 저장소 리스너가
+      //   점을 다시 켜는데, 그 결과가 방금 읽어 온 화면에는 이미 반영돼 있다
+      //   → 눌러도 점이 안 사라지는 것처럼 보였다(제보).
+      setNewRecordsDot(false);
     });
     return refreshInFlight;
   }
@@ -5056,10 +7471,10 @@
     const accountId = account.accountId;
     applyAccountState(account);
     if (accountId !== displayedAccountId) {
-      $("crcEmpty").hidden = true;
-      $("crcBody").hidden = true;
-      $("crcRange").hidden = true;
-      $("crcInfoModal").hidden = true;
+      setHidden("crcEmpty", true);
+      setHidden("crcBody", true);
+      setHidden("crcRange", true);
+      setHidden("crcInfoModal", true);
       followings = [];
       followingsLoaded = false;
       selected.clear();
@@ -5087,13 +7502,12 @@
       console.warn("[치즈 플래터] 채팅 리캡 저장소 읽기 실패", error);
       applyRecapLoadError();
       clearRecapRuntimeData();
-      $("crcEmpty").hidden = true;
-      $("crcBody").hidden = true;
-      $("crcRange").hidden = true;
+      setHidden("crcEmpty", true);
+      setHidden("crcBody", true);
+      setHidden("crcRange", true);
       return;
     }
     displayedAccountId = accountId;
-    $("crcNewRecords").hidden = true;
     lastData = data;
     await buildWordStats(data.items);
     const subscribedChannelRows = await subscribed;
@@ -5101,12 +7515,16 @@
     await fillMissingEmojis(accountId, data.items, subscribedChannelRows);
     // ⚠ 후원·구독만 있고 채팅이 없을 수도 있다(가져오기만 한 경우) → 둘 다 본다.
     const has = data.items.length > 0 || data.donations.length > 0;
-    $("crcEmpty").hidden = has;
-    $("crcBody").hidden = !has;
+    setHidden("crcEmpty", has);
+    setHidden("crcBody", !has);
+    if (has) setupSectionNav();
+    else setHidden("crcSectionNav", true);
+    // 새 후원·구독이 있는지 조용히 확인한다(요청 3회, 실패해도 무시).
+    void checkNewDonations(accountId).catch(() => {});
     $("crcExportMenuButton").disabled = !has;
     $("crcPrompt").disabled = !has;
     if (!has) {
-      $("crcRange").hidden = true;
+      setHidden("crcRange", true);
       return;
     }
     // 두 목록은 loadRecap에서 각각 정렬되어 있다. 기간 한 줄을 위해 다시 합쳐
@@ -5126,9 +7544,13 @@
     range.hidden = false;
     renderSummary(data.items, data.donations);
     renderSubscribed(subscribedChannelRows);
+    renderMultiChannelSection(data.items, true);
+    renderChannelGraph(data.items, true);
     renderHeatmap(data.items);
     renderMonths(data.items);
     renderPolar(data.items);
+    renderChannelMenus();
+    reflectWordSortAvailability();
     renderWords();
     void startChannelRender(data.byChannel);
     if (autoCheckedNewVodsFor !== accountId) {
@@ -5157,8 +7579,8 @@
   // 연속으로 이만큼 실패하면 멈춘다(일시적 오류 한두 건에는 반응하지 않게).
   const VOD_FAIL_STOP = 10;
   const NEW_VOD_CONCURRENCY = 3;
-  const DONATION_MAX_MONTHS = 60; // 후원 내역을 거슬러 볼 최대 개월(5년)
-  const DONATION_EMPTY_STOP = 6; // 이만큼 연속으로 비면 그 이전은 없다고 본다
+  const DONATION_HISTORY_START_YEAR = 2023;
+  const DONATION_HISTORY_START_MONTH = 1;
   let followings = [];
   let followingsLoaded = false;
   let selected = new Set();
@@ -5197,8 +7619,11 @@
 
       // 채널별 목록·카드는 팔로잉 요청보다 먼저 그려질 수 있다. 팔로잉 메타가
       // 도착하면 전체 재렌더링 없이 현재 이름 옆에 인증 마크만 보강한다.
+      // ⚠ data-channel 만으로 고르면 채널 드롭다운의 <li> 까지 걸린다. 그 목록은
+      //   textContent 로만 그려서 배지가 잠깐 붙었다가 다시 그릴 때 사라진다(제보).
+      //   이름 span 과 카드 이름만 고른다.
       const names = document.querySelectorAll(
-        `[data-channel="${id}"], .crc-card[data-card-for="${id}"] .crc-card-name`,
+        `.crc-channel-name[data-channel="${id}"], .crc-card[data-card-for="${id}"] .crc-card-name`,
       );
       for (const name of names) {
         if (!name.querySelector(".lps-mark")) name.append(verifiedMarkEl());
@@ -5363,11 +7788,12 @@
     const checkedAt = $("crcNewVodCheckedAt");
     const selectButton = $("crcSelectNewVods");
     const refreshButton = $("crcRefreshNewVods");
+    const showBadge = newVodBadgeOn && total > 0;
     if (count) {
       count.textContent = fmt(total);
-      count.hidden = total < 1;
+      count.hidden = !showBadge;
     }
-    importButton?.classList.toggle("has-new", total > 0);
+    importButton?.classList.toggle("has-new", showBadge);
     if (importButton) {
       importButton.setAttribute("aria-busy", String(checking));
       importButton.title = checking
@@ -5455,7 +7881,11 @@
     const seen = new Set();
     const size = 50;
     let reachedKnown = false;
-    for (let page = 0; page < VIDEO_PAGE_MAX; page += 1) {
+    // ⚠ 아는 영상이 없는 채널(eventLinks 에 없던 채널)은 중단 조건이 안 걸려
+    //   상한까지 계속 페이지를 넘긴다. 그런 채널은 첫 페이지만 본다 —
+    //   '새로 올라온 다시보기'는 어차피 목록 맨 앞에 있다.
+    const pageLimit = knownVideos.size ? VIDEO_PAGE_MAX : 1;
+    for (let page = 0; page < pageLimit; page += 1) {
       let content = null;
       try {
         const res = await fetch(
@@ -5573,7 +8003,17 @@
     newVodCheckAccountId = current;
     updateNewVodUi({ checking: true });
     const eventState = await loadEventLinkState(current);
+    const importedAll = await loadImported(current);
     const videosByChannel = importedVideosByChannel(eventState.links);
+    // ⚠ eventLinks 만 쓰면 감시 대상이 좁다. 이 키는 형식이 바뀌며 초기화된 적이
+    //   있어(V3), 예전에 가져온 영상은 imported 에만 남고 채널 정보가 없다
+    //   (실측: imported 12,296건인데 eventLinks 는 15건 → 감시 3채널).
+    //   기록이 있는 채널은 모두 후보로 삼고, eventLinks 는 '이미 아는 영상'
+    //   목록으로만 쓴다. 아는 영상이 없는 채널은 최신 것부터 새 영상으로 잡힌다.
+    for (const channelId of lastData.byChannel.keys()) {
+      if (!videosByChannel.has(channelId))
+        videosByChannel.set(channelId, new Set());
+    }
     const channelIds = [...videosByChannel.keys()];
     newVodCheckedChannels = channelIds.length;
     await ensureImportChannels(channelIds);
@@ -5596,7 +8036,10 @@
           const previous = newVodByChannel.get(channelId) || [];
           if (previous.length) next.set(channelId, previous);
         } else if (result.videos.length) {
-          next.set(channelId, result.videos);
+          // ⚠ eventLinks 에 없는 채널은 known 이 비어 있어 최근 영상이 전부
+          //   '새것'으로 잡힌다. imported 로 한 번 더 거른다(예전에 가져온 것).
+          const pending = result.videos.filter((no) => !importedAll.has(no));
+          if (pending.length) next.set(channelId, pending);
         }
         checked += 1;
         if (!silent) {
@@ -5746,8 +8189,10 @@
   // ⚠ 익명 후원은 userIdHash 가 'anonymous'라 채팅만으로 본인 판정이 안 된다.
   // 이 API의 내 결제 내역을 저장해 두면 다시보기 수집 때 시각·금액·종류·본문을
   // 함께 대조해 안전한 후보만 재생 위치와 연결한다.
-  //   size=505 는 실제 개수가 아니라 '한 번에 전부' 의 관용값 — 페이지가 필요 없다.
-  const HISTORY_SIZE = 505;
+  // 치지직 결제 내역 화면과 같은 페이지 크기를 사용한다. 서버는 큰 size를 전부
+  // 반환한다고 보장하지 않으므로 data/page/totalPages를 따라 끝까지 요청한다.
+  const HISTORY_SIZE = 10;
+  const HISTORY_PAGE_MAX = 1000;
 
   function parseHistoryDate(text) {
     // "2026-08-17 02:51:00" → epoch ms (로컬 시각으로 해석)
@@ -5758,84 +8203,221 @@
     return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
   }
 
-  // 한 달치 후원 내역. 반환: 채널별 { channelId: rows[] }
-  async function fetchDonationMonth(year, month) {
-    const byChannel = new Map();
-    try {
-      const res = await fetch(
-        `${API_BASE}/commercial/v1/product/purchase/history` +
-          `?page=0&size=${HISTORY_SIZE}&searchYear=${year}&searchMonth=${month}`,
-        { credentials: "include", headers: { accept: "application/json" } },
-      );
-      if (!res.ok) return byChannel;
-      const rows = (await res.json())?.content?.data;
-      for (const it of Array.isArray(rows) ? rows : []) {
-        const channelId = String(it?.channelId || "").toLowerCase();
-        const t = parseHistoryDate(it?.purchaseDate);
-        if (!/^[0-9a-f]{32}$/.test(channelId) || !t) continue;
-        // ⚠ donationType 을 화이트리스트로 거르지 않는다. PARTY 가 이 API 에
-        //   나오는지 아직 모르는데, 걸러 두면 나중에 와도 버려진다.
-        const d = {
-          kind: "DONATION",
-          type: String(it?.donationType || ""),
-          amount: Number(it?.payAmount) || 0,
-          src: "history",
-        };
-        const videoType = String(it?.donationVideoType || "");
-        if (videoType) d.videoType = videoType; // CHZZK_CLIP / YOUTUBE
-        const url = String(it?.donationVideoUrl || "");
-        if (url) d.videoUrl = url;
-        // 후원 메시지의 이모티콘 URL 도 사전에 모은다.
-        const emojis = it?.extras?.emojis;
-        if (emojis && typeof emojis === "object") {
-          for (const [k, v] of Object.entries(emojis)) {
-            if (typeof v === "string" && v) pendingEmojis[k] = v;
-          }
-        }
-        if (!byChannel.has(channelId)) byChannel.set(channelId, []);
-        byChannel.get(channelId).push({
-          t,
-          m: String(it?.donationText || ""),
-          d,
-        });
-      }
-    } catch {}
-    return byChannel;
+  function historyPageDone(content, rows, page) {
+    const totalPages = Number(content?.totalPages);
+    if (Number.isFinite(totalPages) && totalPages >= 0) {
+      return page + 1 >= totalPages;
+    }
+    return rows.length < HISTORY_SIZE;
   }
 
-  // 구독권 선물(받은/보낸). 전체를 한 번에 준다.
-  async function fetchGiftHistory(path, direction) {
-    const byChannel = new Map();
-    try {
-      const res = await fetch(
-        `${API_BASE}/commercial/v1/gift/subscription/${path}` +
-          `?page=0&size=${HISTORY_SIZE}`,
-        { credentials: "include", headers: { accept: "application/json" } },
-      );
-      if (!res.ok) return byChannel;
-      const rows = (await res.json())?.content?.data;
-      for (const it of Array.isArray(rows) ? rows : []) {
-        const channelId = String(it?.channelId || "").toLowerCase();
-        const t = parseHistoryDate(it?.historyDate);
-        if (!/^[0-9a-f]{32}$/.test(channelId) || !t) continue;
-        const d = {
-          kind: direction === "receive" ? "GIFT_RECEIVED" : "GIFT_SENT",
-          tier: Number(it?.tierNo) || 0,
-          month: Number(it?.month) || 0,
-          src: "history",
-        };
-        if (direction === "receive") {
-          d.anonymous = it?.isSenderAnonymous === true;
-          if (!d.anonymous) d.who = String(it?.senderNickname || "");
-        } else {
-          d.who = String(it?.firstReceiverNickname || "");
-          d.quantity = Number(it?.quantity) || 1;
+  function addHistoryRow(byChannel, channelId, row) {
+    if (!byChannel.has(channelId)) byChannel.set(channelId, []);
+    byChannel.get(channelId).push(row);
+  }
+
+  // 한 달치 후원 내역. 서버가 알려 주는 totalPages까지 순차 수집한다.
+  // ── 새 후원·구독 확인 ────────────────────────────────────────────────────
+  // ⚠ 전체를 다시 훑으면 페이지가 수십 개다. 각 목록의 '첫 페이지'만 받아
+  //   저장된 것보다 새로운 항목이 있는지만 본다(요청 3회).
+  // '다시보기' 버튼의 새 다시보기 배지를 보일지. 모달에서 끌 수 있다.
+  const NEW_VOD_BADGE_KEY = "chatRecapNewVodBadge";
+  let newVodBadgeOn = true;
+
+  async function peekLatestDonationAt() {
+    const query = new URLSearchParams({ page: "0", size: "10" });
+    const urls = [
+      `${API_BASE}/commercial/v1/gift/subscription/receive-history?${query}`,
+      `${API_BASE}/commercial/v1/gift/subscription/send-history?${query}`,
+    ];
+    const now = new Date();
+    const donationQuery = new URLSearchParams({
+      page: "0",
+      size: "10",
+      searchYear: String(now.getFullYear()),
+      searchMonth: String(now.getMonth() + 1),
+    });
+    urls.push(
+      `${API_BASE}/commercial/v1/product/purchase/history?${donationQuery}`,
+    );
+
+    let latest = 0;
+    let ok = false;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        if (!res.ok) continue;
+        const rows = (await res.json())?.content?.data;
+        if (!Array.isArray(rows)) continue;
+        ok = true;
+        for (const row of rows) {
+          // 결제 내역은 purchaseDate, 구독권 선물은 historyDate 다
+          // (가져오기 코드가 쓰는 필드와 같은 이름을 쓴다).
+          const at = parseHistoryDate(row?.purchaseDate || row?.historyDate);
+          if (at > latest) latest = at;
         }
-        if (!byChannel.has(channelId)) byChannel.set(channelId, []);
-        byChannel.get(channelId).push({ t, m: "", d });
+      } catch {}
+    }
+    return { ok, latest };
+  }
+
+  async function checkNewDonations(accountId) {
+    if (!accountId) return;
+    // ⚠ 가져오기를 한 번도 안 했으면 비교 기준이 없다. 그때는 전부 '새것'이라
+    //   점을 띄워 봐야 뜻이 없다 → 가져온 적이 있을 때만 확인한다(제보).
+    //   src:"history" 는 가져오기로만 생긴다(라이브 채팅은 src:"chat").
+    let stored = 0;
+    let imported = false;
+    for (const item of lastData.donations) {
+      if (item?.d?.src === "history") imported = true;
+      const at = Number(item?.t) || 0;
+      if (at > stored) stored = at;
+    }
+    if (!imported) {
+      setNewDonationDot(false);
+      return;
+    }
+    const { ok, latest } = await peekLatestDonationAt();
+    if (!ok || !latest) return;
+    // 두 값 모두 parseHistoryDate 로 같은 필드를 읽으므로 오차가 없다.
+    // 여유를 두면 방금 받은 선물을 놓친다.
+    setNewDonationDot(latest > stored);
+  }
+
+  function setNewDonationDot(on) {
+    setHidden("crcNewDonations", !on);
+    const button = $("crcDonationImport");
+    if (button) {
+      button.title = on ? "가져오지 않은 후원·구독 내역이 있습니다." : "";
+    }
+  }
+
+  async function fetchDonationMonth(year, month, onPage) {
+    const byChannel = new Map();
+    let ok = true;
+    let pages = 0;
+    for (let page = 0; page < HISTORY_PAGE_MAX; page += 1) {
+      if (cancelRequested) break;
+      try {
+        const query = new URLSearchParams({
+          page: String(page),
+          size: String(HISTORY_SIZE),
+          searchYear: String(year),
+          searchMonth: String(month),
+        });
+        const res = await fetch(
+          `${API_BASE}/commercial/v1/product/purchase/history?${query}`,
+          { credentials: "include", headers: { accept: "application/json" } },
+        );
+        if (!res.ok) {
+          ok = false;
+          break;
+        }
+        const content = (await res.json())?.content;
+        if (!content || !Array.isArray(content.data)) {
+          ok = false;
+          break;
+        }
+        const rows = content.data;
+        pages += 1;
+        onPage?.(page + 1, Number(content?.totalPages) || 0);
+        for (const it of rows) {
+          const channelId = String(it?.channelId || "").toLowerCase();
+          const t = parseHistoryDate(it?.purchaseDate);
+          if (!/^[0-9a-f]{32}$/.test(channelId) || !t) continue;
+          // ⚠ donationType 을 화이트리스트로 거르지 않는다. PARTY 가 이 API 에
+          //   나오는지 아직 모르는데, 걸러 두면 나중에 와도 버려진다.
+          const d = {
+            kind: "DONATION",
+            type: String(it?.donationType || ""),
+            amount: Number(it?.payAmount) || 0,
+            src: "history",
+          };
+          const videoType = String(it?.donationVideoType || "");
+          if (videoType) d.videoType = videoType; // CHZZK_CLIP / YOUTUBE
+          const url = String(it?.donationVideoUrl || "");
+          if (url) d.videoUrl = url;
+          // 후원 메시지의 이모티콘 URL 도 사전에 모은다.
+          const emojis = it?.extras?.emojis;
+          if (emojis && typeof emojis === "object") {
+            for (const [k, v] of Object.entries(emojis)) {
+              if (typeof v === "string" && v) pendingEmojis[k] = v;
+            }
+          }
+          addHistoryRow(byChannel, channelId, {
+            t,
+            m: String(it?.donationText || ""),
+            d,
+          });
+        }
+        if (!rows.length || historyPageDone(content, rows, page)) break;
+        if (page + 1 >= HISTORY_PAGE_MAX) ok = false;
+      } catch {
+        ok = false;
+        break;
       }
-    } catch {}
-    return byChannel;
+    }
+    return { byChannel, ok, pages };
+  }
+
+  // 구독권 선물(받은/보낸)도 원본 페이지와 같이 totalPages를 따라간다.
+  async function fetchGiftHistory(path, direction, onPage) {
+    const byChannel = new Map();
+    let ok = true;
+    let pages = 0;
+    for (let page = 0; page < HISTORY_PAGE_MAX; page += 1) {
+      if (cancelRequested) break;
+      try {
+        const query = new URLSearchParams({
+          page: String(page),
+          size: String(HISTORY_SIZE),
+        });
+        const res = await fetch(
+          `${API_BASE}/commercial/v1/gift/subscription/${path}?${query}`,
+          { credentials: "include", headers: { accept: "application/json" } },
+        );
+        if (!res.ok) {
+          ok = false;
+          break;
+        }
+        const content = (await res.json())?.content;
+        if (!content || !Array.isArray(content.data)) {
+          ok = false;
+          break;
+        }
+        const rows = content.data;
+        pages += 1;
+        onPage?.(page + 1, Number(content?.totalPages) || 0);
+        for (const it of rows) {
+          const channelId = String(it?.channelId || "").toLowerCase();
+          const t = parseHistoryDate(it?.historyDate);
+          if (!/^[0-9a-f]{32}$/.test(channelId) || !t) continue;
+          const d = {
+            kind: direction === "receive" ? "GIFT_RECEIVED" : "GIFT_SENT",
+            tier: Number(it?.tierNo) || 0,
+            month: Number(it?.month) || 0,
+            src: "history",
+          };
+          if (direction === "receive") {
+            d.anonymous = it?.isSenderAnonymous === true;
+            if (!d.anonymous) d.who = String(it?.senderNickname || "");
+          } else {
+            d.who = String(it?.firstReceiverNickname || "");
+            d.quantity = Number(it?.quantity) || 1;
+          }
+          addHistoryRow(byChannel, channelId, { t, m: "", d });
+        }
+        if (!rows.length || historyPageDone(content, rows, page)) break;
+        if (page + 1 >= HISTORY_PAGE_MAX) ok = false;
+      } catch {
+        ok = false;
+        break;
+      }
+    }
+    return { byChannel, ok, pages };
   }
 
   // 후원·구독 정보. 일반 채팅이면 null.
@@ -6609,7 +9191,7 @@
     queuedChannels = new Set(initial);
     activeChannelId = "";
     $("crcStart").disabled = true;
-    $("crcCancel").hidden = false;
+    setHidden("crcCancel", false);
     $("crcCancel").disabled = false;
     renderPickedList();
     renderFollowList($("crcChannelSearch")?.value || "");
@@ -6792,7 +9374,7 @@
       activeChannelId = "";
       queuedChannels.clear();
       $("crcStart").disabled = false;
-      $("crcCancel").hidden = true;
+      setHidden("crcCancel", true);
       setProgressBar(null);
       const spent = formatDuration((Date.now() - startedAt) / 1000);
       setProgress(
@@ -6809,7 +9391,7 @@
   }
 
   // 후원·구독권 내역을 훑어 로컬 기록에 합친다.
-  // 후원은 월 단위 API 라 최근 N개월을 돈다. 구독권은 한 번에 전부 온다.
+  // 후원은 월 단위 API로 최근 N개월을 돌고, 구독권과 함께 모든 페이지를 읽는다.
   // 후원 모달 전용 진행 표시(채널 선택 모달과 섞이지 않게 따로 둔다).
   function setDonProgress(text, ratio) {
     setText("crcDonProgress", text || "");
@@ -6837,9 +9419,11 @@
     importing = true;
     cancelRequested = false;
     $("crcDonStart").disabled = true;
-    $("crcDonCancel").hidden = false;
+    setHidden("crcDonCancel", false);
+    let checked = 0;
     let added = 0;
     let skipped = 0;
+    let failedSources = 0;
     const touchedChannels = new Set();
     const startedAt = Date.now();
     // 팔로잉만 가져오기. ⚠ 팔로잉 목록을 못 받았으면 거르지 않는다 — 빈 목록으로
@@ -6864,48 +9448,77 @@
       return false;
     };
     try {
-      // 1) 구독권 선물(받은/보낸) — 전체가 한 번에 온다.
+      // 1) 구독권 선물(받은/보낸) — 각 목록의 모든 페이지를 읽는다.
       for (const [path, dir, label] of [
         ["receive-history", "receive", "선물받은 구독권"],
         ["send-history", "send", "선물한 구독권"],
       ]) {
         if (cancelRequested) break;
         setDonProgress(`${label} 불러오는 중…`, 0.05);
-        const byChannel = await fetchGiftHistory(path, dir);
+        const result = await fetchGiftHistory(path, dir, (page, totalPages) => {
+          setDonProgress(
+            `${label} ${fmt(page)}/${fmt(totalPages || page)}페이지 불러오는 중…`,
+            0.05,
+          );
+        });
+        if (!result.ok) failedSources += 1;
+        const byChannel = result.byChannel;
         for (const [channelId, rows] of byChannel) {
           if (cancelRequested) break;
+          checked += rows.length;
           if (!keep(channelId)) continue;
           added += await mergeIntoStore(accountId, channelId, rows);
           if (rows.length) touchedChannels.add(channelId);
         }
       }
-      // 2) 후원 — 월 단위. 기록이 없는 달이 이어지면 멈춘다(과거로 무한히 가지 않게).
+      // 2) 후원 — API가 제공하는 2023년 1월부터 현재 월까지 모두 확인한다.
+      // 후원하지 않은 기간이 길어도 과거 내역을 놓치지 않도록 빈 달에는 중단하지 않는다.
       const now = new Date();
-      let emptyRun = 0;
-      for (let i = 0; i < DONATION_MAX_MONTHS; i += 1) {
+      const donationMonths = Math.max(
+        0,
+        (now.getFullYear() - DONATION_HISTORY_START_YEAR) * 12 +
+          now.getMonth() -
+          (DONATION_HISTORY_START_MONTH - 1) +
+          1,
+      );
+      let failedMonthRun = 0;
+      for (let i = 0; i < donationMonths; i += 1) {
         if (cancelRequested) break;
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const y = d.getFullYear();
         const mo = d.getMonth() + 1;
-        // 진행률은 '훑은 개월 / 상한' 으로 잡는다(끝을 미리 알 수 없다).
         setDonProgress(
           `후원 내역 ${y}년 ${mo}월 불러오는 중… (누적 ${fmt(added)}건)`,
-          0.1 + (i / DONATION_MAX_MONTHS) * 0.9,
+          0.1 + (i / donationMonths) * 0.9,
         );
-        const byChannel = await fetchDonationMonth(y, mo);
+        const result = await fetchDonationMonth(y, mo, (page, totalPages) => {
+          setDonProgress(
+            `후원 내역 ${y}년 ${mo}월 ${fmt(page)}/${fmt(totalPages || page)}페이지 ` +
+              `불러오는 중… (누적 ${fmt(added)}건)`,
+            0.1 + (i / donationMonths) * 0.9,
+          );
+        });
+        const byChannel = result.byChannel;
+        if (!result.ok) {
+          failedSources += 1;
+          failedMonthRun += 1;
+        } else {
+          failedMonthRun = 0;
+        }
         if (!byChannel.size) {
-          emptyRun += 1;
-          // 연속으로 비면 그 이전은 볼 필요가 없다고 본다.
-          if (emptyRun >= DONATION_EMPTY_STOP) break;
+          if (!result.ok) {
+            if (failedMonthRun >= 3) break;
+          }
           continue;
         }
-        emptyRun = 0;
         for (const [channelId, rows] of byChannel) {
           if (cancelRequested) break;
+          checked += rows.length;
           if (!keep(channelId)) continue;
           added += await mergeIntoStore(accountId, channelId, rows);
           if (rows.length) touchedChannels.add(channelId);
         }
+        if (failedMonthRun >= 3) break;
       }
     } finally {
       await bumpHistoryRevisions(accountId, touchedChannels);
@@ -6913,16 +9526,21 @@
       pendingEmojis = Object.create(null);
       importing = false;
       $("crcDonStart").disabled = false;
-      $("crcDonCancel").hidden = true;
+      setHidden("crcDonCancel", true);
       // 다 가져온 뒤에도 '가져오기' 로 남으면 또 눌러야 하나 싶다 → '완료'(닫기)로
       //   바꾼다. 중단한 경우는 이어서 다시 받을 수 있게 '가져오기' 로 둔다.
       setDonStartMode(cancelRequested ? "start" : "done");
+      if (!cancelRequested) setNewDonationDot(false);
       const sec = Math.round((Date.now() - startedAt) / 1000);
       setDonProgress(
         `${cancelRequested ? "중단했습니다" : "완료했습니다"}. ` +
-          `후원·구독권 ${fmt(added)}건을 가져왔습니다 (${sec}초).` +
+          `후원·구독권 ${fmt(checked)}건을 확인하고 새 기록 ${fmt(added)}건을 ` +
+          `가져왔습니다 (${sec}초).` +
           (skipped
             ? ` 팔로잉이 아닌 ${fmt(skipped)}개 채널은 건너뛰었습니다.`
+            : "") +
+          (failedSources
+            ? ` 일부 ${fmt(failedSources)}개 요청 구간은 불러오지 못해 다음 실행에서 다시 확인합니다.`
             : ""),
         1,
       );
@@ -6931,7 +9549,7 @@
   }
 
   function openImportModal() {
-    $("crcModal").hidden = false;
+    setHidden("crcModal", false);
     if (!importing) {
       newVodSelectionTouched = false;
       selected.clear();
@@ -6941,7 +9559,7 @@
     //   준다(초기화하면 진행 상황이 사라져 멈춘 것처럼 보인다).
     if (importing) {
       $("crcStart").disabled = true;
-      $("crcCancel").hidden = false;
+      setHidden("crcCancel", false);
       renderPickedList();
       renderFollowList($("crcChannelSearch")?.value || "");
       return;
@@ -6953,7 +9571,7 @@
     const search = $("crcChannelSearch");
     if (search) search.value = "";
     $("crcStart").disabled = false;
-    $("crcCancel").hidden = true;
+    setHidden("crcCancel", true);
     renderPickedList();
     if (followingsLoaded) {
       renderFollowList("");
@@ -7075,6 +9693,7 @@
 
   // 채널별 채팅 보기 전환(목록 ↔ 카드)
   const VIEW_KEY = "cheeseChatRecapChannelView";
+  const CHANNEL_TREND_KEY = "cheeseChatRecapChannelTrendCumulative";
   let cardExpressionResizeTimer = 0;
   window.addEventListener("resize", () => {
     clearTimeout(cardExpressionResizeTimer);
@@ -7091,15 +9710,82 @@
   }
   void (async () => {
     try {
-      const saved = (await chrome.storage.local.get(VIEW_KEY))?.[VIEW_KEY];
+      const stored = await chrome.storage.local.get([
+        VIEW_KEY,
+        CHANNEL_TREND_KEY,
+      ]);
+      const saved = stored?.[VIEW_KEY];
       // ⚠ 기본이 카드이므로 저장값이 'list' 인 경우도 반영해야 한다
       //   ('card' 만 보면 목록을 골라 둔 사람이 매번 카드로 돌아간다).
       if (saved === "card" || saved === "list") {
         channelView = saved;
         applyChannelView();
       }
+      channelTrendCumulative = stored?.[CHANNEL_TREND_KEY] === true;
+      for (const button of document.querySelectorAll(
+        "[data-channel-cumulative]",
+      )) {
+        button.setAttribute(
+          "aria-pressed",
+          String(
+            (button.dataset.channelCumulative === "on") ===
+              channelTrendCumulative,
+          ),
+        );
+      }
+      renderAllChannelTrends();
     } catch {}
   })();
+
+  for (const button of document.querySelectorAll("[data-channel-cumulative]")) {
+    button.addEventListener("click", () => {
+      channelTrendCumulative = button.dataset.channelCumulative === "on";
+      for (const peer of document.querySelectorAll(
+        "[data-channel-cumulative]",
+      )) {
+        peer.setAttribute("aria-pressed", String(peer === button));
+      }
+      try {
+        void chrome.storage.local.set({
+          [CHANNEL_TREND_KEY]: channelTrendCumulative,
+        });
+      } catch {}
+      renderAllChannelTrends();
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    const trend = event.target?.closest?.(".crc-channel-trend");
+    if (!trend) return;
+    openChannelTrendModal(trend);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const trend = event.target?.closest?.(".crc-channel-trend");
+    if (!trend) return;
+    event.preventDefault();
+    openChannelTrendModal(trend);
+  });
+  for (const button of document.querySelectorAll(
+    "[data-channel-trend-modal-mode]",
+  )) {
+    button.addEventListener("click", () => {
+      channelTrendModalCumulative =
+        button.dataset.channelTrendModalMode === "cumulative";
+      renderChannelTrendModal();
+    });
+  }
+  $("crcChannelTrendClose")?.addEventListener("click", closeChannelTrendModal);
+  $("crcChannelTrendModal")?.addEventListener("click", (event) => {
+    if (event.target === $("crcChannelTrendModal")) {
+      closeChannelTrendModal();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("crcChannelTrendModal")?.hidden) {
+      closeChannelTrendModal();
+    }
+  });
 
   // 폴라 차트 보기 전환(요일 ↔ 시간대)
   for (const btn of document.querySelectorAll("[data-polar]")) {
@@ -7152,6 +9838,49 @@
       renderWords();
     });
   }
+  // 채널 드롭다운: 버튼으로 열고, 항목을 고르면 해당 섹션만 다시 그린다.
+  document.addEventListener("click", (event) => {
+    const menu = event.target?.closest?.("[data-channel-menu]");
+    if (!menu) {
+      closeChannelMenus();
+      return;
+    }
+    const key = menu.dataset.channelMenu;
+    const list = menu.querySelector(".lps-sort-list");
+    const button = menu.querySelector(".lps-sort-button");
+
+    if (event.target.closest(".lps-sort-button")) {
+      const open = list?.hidden;
+      closeChannelMenus(menu);
+      if (list) list.hidden = !open;
+      button?.setAttribute("aria-expanded", String(Boolean(open)));
+      return;
+    }
+
+    const option = event.target.closest("[data-channel]");
+    if (!option) return;
+    const next = option.dataset.channel || "";
+    channelMenuValue[key] = lastData.byChannel.has(next) ? next : "";
+    closeChannelMenus();
+    renderChannelMenus();
+
+    if (key === "words") {
+      // 잠긴 정렬을 고른 채로 채널을 바꾸면 빈 목록이 된다 → 빈도순으로 되돌린다.
+      if (channelMenuValue.words && wordSort !== "count") {
+        wordSort = "count";
+        for (const b2 of document.querySelectorAll("[data-word-sort]")) {
+          b2.setAttribute(
+            "aria-pressed",
+            String(b2.dataset.wordSort === "count"),
+          );
+        }
+      }
+      reflectWordSortAvailability();
+      renderWords();
+      return;
+    }
+    if (key === "months") renderMonths(lastData.items);
+  });
   for (const btn of document.querySelectorAll("[data-word-type]")) {
     btn.addEventListener("click", () => {
       wordType = ["text", "emoji"].includes(btn.dataset.wordType)
@@ -7166,6 +9895,185 @@
       renderWords();
     });
   }
+
+  for (const btn of document.querySelectorAll("[data-multi-channel-sort]")) {
+    btn.addEventListener("click", () => {
+      multiChannelSectionSort = ["channels", "fastest"].includes(
+        btn.dataset.multiChannelSort,
+      )
+        ? btn.dataset.multiChannelSort
+        : "recent";
+      multiChannelSectionLimit = 12;
+      for (const other of document.querySelectorAll(
+        "[data-multi-channel-sort]",
+      )) {
+        other.setAttribute(
+          "aria-pressed",
+          String(other.dataset.multiChannelSort === multiChannelSectionSort),
+        );
+      }
+      renderMultiChannelSection(lastData.items);
+    });
+  }
+  $("crcMultiChannelSectionMore")?.addEventListener("click", () => {
+    multiChannelSectionLimit += 12;
+    renderMultiChannelSection(lastData.items);
+  });
+  for (const button of document.querySelectorAll("[data-channel-graph-mode]")) {
+    button.addEventListener("click", () => {
+      channelGraphMode =
+        button.dataset.channelGraphMode === "similarity"
+          ? "similarity"
+          : "relation";
+      for (const other of document.querySelectorAll(
+        "[data-channel-graph-mode]",
+      )) {
+        other.setAttribute(
+          "aria-pressed",
+          String(other.dataset.channelGraphMode === channelGraphMode),
+        );
+      }
+      stopChannelGraphPlayback();
+      renderChannelGraph(lastData.items);
+    });
+  }
+  // ── 관계도 설정 팝오버 ───────────────────────────────────────────────────
+  function closeGraphSettings() {
+    const menu = document.querySelector("[data-graph-settings]");
+    if (!menu) return;
+    menu.querySelector(".crc-graph-settings-popover").hidden = true;
+    $("crcChannelGraphSettings")?.setAttribute("aria-expanded", "false");
+  }
+
+  function reflectGraphPhysicsInputs() {
+    for (const input of document.querySelectorAll("[data-graph-physics]")) {
+      input.checked = Boolean(channelGraphPhysics[input.dataset.graphPhysics]);
+    }
+  }
+
+  $("crcChannelGraphSettings")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const menu = document.querySelector("[data-graph-settings]");
+    const popover = menu?.querySelector(".crc-graph-settings-popover");
+    if (!popover) return;
+    const willOpen = popover.hidden;
+    popover.hidden = !willOpen;
+    event.currentTarget.setAttribute("aria-expanded", String(willOpen));
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("[data-graph-settings]")) closeGraphSettings();
+  });
+  document.addEventListener("change", (event) => {
+    const input = event.target?.closest?.("[data-graph-physics]");
+    if (!input) return;
+    channelGraphPhysics = {
+      ...channelGraphPhysics,
+      [input.dataset.graphPhysics]: input.checked,
+    };
+    try {
+      void chrome.storage.local.set({
+        [CHANNEL_GRAPH_PHYSICS_KEY]: channelGraphPhysics,
+      });
+    } catch {}
+    queueChannelGraphRender();
+  });
+  void (async () => {
+    try {
+      const saved = (
+        await chrome.storage.local.get(CHANNEL_GRAPH_PHYSICS_KEY)
+      )?.[CHANNEL_GRAPH_PHYSICS_KEY];
+      if (saved && typeof saved === "object") {
+        channelGraphPhysics = {
+          drag: saved.drag !== false,
+          play: saved.play === true,
+          hideIdle: saved.hideIdle === true,
+          loop: saved.loop !== false,
+        };
+      }
+    } catch {}
+    reflectGraphPhysicsInputs();
+  })();
+
+  // 기간을 '전체 기간' 으로 되돌린다. 옆의 위치 초기화(crcChannelGraphReset)와
+  // 헷갈린다는 제보가 있어 재생 버튼 옆에 따로 둔다.
+  const CHANNEL_GRAPH_SPEED_KEY = "cheeseChatRecapGraphSpeed";
+
+  function reflectChannelGraphSpeed() {
+    const button = $("crcChannelGraphSpeed");
+    if (!button) return;
+    // 1.5x 처럼 소수점이 있을 때만 소수를 남긴다(1x, 2x 는 정수로).
+    button.textContent = `${channelGraphSpeed}x`;
+    button.dataset.tip = `재생 배속 ${channelGraphSpeed}x (눌러서 변경)`;
+  }
+
+  $("crcChannelGraphSpeed")?.addEventListener("click", () => {
+    const index = CHANNEL_GRAPH_SPEEDS.indexOf(channelGraphSpeed);
+    channelGraphSpeed =
+      CHANNEL_GRAPH_SPEEDS[(index + 1) % CHANNEL_GRAPH_SPEEDS.length];
+    reflectChannelGraphSpeed();
+    try {
+      void chrome.storage.local.set({
+        [CHANNEL_GRAPH_SPEED_KEY]: channelGraphSpeed,
+      });
+    } catch {}
+    // 재생 중이면 위치를 유지한 채 새 간격으로 타이머만 다시 건다.
+    if (channelGraphPlayTimer) {
+      armChannelGraphPlayTimer(channelGraphModel(lastData.items));
+    }
+  });
+  void (async () => {
+    try {
+      const saved = (await chrome.storage.local.get(CHANNEL_GRAPH_SPEED_KEY))?.[
+        CHANNEL_GRAPH_SPEED_KEY
+      ];
+      if (CHANNEL_GRAPH_SPEEDS.includes(saved)) channelGraphSpeed = saved;
+    } catch {}
+    reflectChannelGraphSpeed();
+  })();
+
+  $("crcNewVodBadge")?.addEventListener("change", (event) => {
+    newVodBadgeOn = event.target.checked;
+    try {
+      void chrome.storage.local.set({ [NEW_VOD_BADGE_KEY]: newVodBadgeOn });
+    } catch {}
+    updateNewVodUi();
+  });
+  void (async () => {
+    try {
+      const saved = (await chrome.storage.local.get(NEW_VOD_BADGE_KEY))?.[
+        NEW_VOD_BADGE_KEY
+      ];
+      if (saved === false) newVodBadgeOn = false;
+    } catch {}
+    const input = $("crcNewVodBadge");
+    if (input) input.checked = newVodBadgeOn;
+    updateNewVodUi();
+  })();
+
+  $("crcChannelGraphPeriodReset")?.addEventListener("click", () => {
+    stopChannelGraphPlayback();
+    channelGraphPeriodIndex = 0;
+    renderChannelGraph(lastData.items);
+  });
+  $("crcChannelGraphReset")?.addEventListener("click", () => {
+    const model = channelGraphModel(lastData.items);
+    channelGraphLayout(model, channelGraphMode, true);
+    renderChannelGraph(lastData.items);
+  });
+  $("crcChannelGraphPeriod")?.addEventListener("input", (event) => {
+    stopChannelGraphPlayback();
+    // ⚠ 재생 중이던 슬라이더는 눈금이 1/8 이라 소수가 들어올 수 있다 →
+    //   월 단위로 반올림한다(수동 조작은 달을 고르는 것이다).
+    channelGraphPeriodIndex = Math.max(
+      0,
+      Math.round(Number(event.currentTarget.value) || 0),
+    );
+    queueChannelGraphRender();
+  });
+  $("crcChannelGraphPlay")?.addEventListener("click", () => {
+    if (channelGraphPlayTimer) stopChannelGraphPlayback();
+    else startChannelGraphPlayback();
+  });
 
   // 요약 카드별 상세 내용. 저장된 기록만으로 만든다(추가 요청 없음).
   function buildInfo(key) {
@@ -7283,6 +10191,8 @@
           title: "이번 달 채팅",
           nodes: periodRows(starts.month, Infinity),
         };
+      case "crcMultiChannel":
+        return buildMultiChannelInfo();
       case "crcDonCount":
       case "crcDonTop":
         return {
@@ -7473,7 +10383,7 @@
   const closeInfoModal = () => {
     wordTrendChart?.destroy();
     wordTrendChart = null;
-    $("crcInfoModal").hidden = true;
+    setHidden("crcInfoModal", true);
   };
   // ── AI 분석 프롬프트 모달 ────────────────────────────────────────────────
   const PROMPT_PICK_KEY = "cheeseChatRecapPromptPicks";
@@ -7511,13 +10421,13 @@
   }
 
   const closePromptModal = () => {
-    $("crcPromptModal").hidden = true;
+    setHidden("crcPromptModal", true);
   };
 
   $("crcPrompt")?.addEventListener("click", () => {
     renderPromptPicks();
     refreshPromptPreview();
-    $("crcPromptModal").hidden = false;
+    setHidden("crcPromptModal", false);
   });
   $("crcPromptPicks")?.addEventListener("change", (e) => {
     const cb = e.target?.closest?.("[data-prompt-pick]");
@@ -7622,11 +10532,11 @@
   // ⚠ 예전에는 누르자마자 바로 가져오면서 채널 선택 모달을 띄웠다(엉뚱한 창).
   //   전용 모달을 열어 '가져오기' 를 한 번 더 누르게 한다.
   $("crcDonationImport")?.addEventListener("click", () => {
-    $("crcDonModal").hidden = false;
+    setHidden("crcDonModal", false);
     if (!importing) {
       setDonProgress("", 0);
       $("crcDonStart").disabled = false;
-      $("crcDonCancel").hidden = true;
+      setHidden("crcDonCancel", true);
       setDonStartMode("start");
     }
   });
@@ -7660,7 +10570,7 @@
   $("crcDonStart")?.addEventListener("click", () => {
     // 완료 상태에서는 같은 버튼이 '닫기' 로 동작한다.
     if ($("crcDonStart").dataset.mode === "done") {
-      $("crcDonModal").hidden = true;
+      setHidden("crcDonModal", true);
       setDonStartMode("start");
       setDonProgress("", 0);
       return;
@@ -7673,7 +10583,7 @@
   });
   // X·바깥 클릭으로 닫아도 다음에 열 때 '완료' 가 남아 있으면 안 된다.
   const closeDonModal = () => {
-    $("crcDonModal").hidden = true;
+    setHidden("crcDonModal", true);
     setDonStartMode("start");
     setDonProgress("", 0);
   };
@@ -7682,11 +10592,11 @@
     if (e.target === $("crcDonModal") && !importing) closeDonModal();
   });
   $("crcModalClose")?.addEventListener("click", () => {
-    $("crcModal").hidden = true;
+    setHidden("crcModal", true);
   });
   // 바깥을 눌러도 닫는다(가져오는 중에는 실수로 닫히지 않게 막는다).
   $("crcModal")?.addEventListener("click", (e) => {
-    if (e.target === $("crcModal") && !importing) $("crcModal").hidden = true;
+    if (e.target === $("crcModal") && !importing) setHidden("crcModal", true);
   });
   $("crcChannelSearch")?.addEventListener("input", (e) => {
     renderFollowList(e.target.value);
@@ -7772,11 +10682,48 @@
     if (!request || channelVariants.length < 1) return;
     const { target, button } = request;
     closeChannelExportModal();
+    if (target === "all" && multiExportSessionTotal() > 0) {
+      openMultiExportModal({ target, button, channelVariants });
+      return;
+    }
     void exportRecap(target, button, { channelVariants });
+  });
+  for (const input of multiExportOptionInputs()) {
+    input.addEventListener("change", syncMultiExportOptions);
+  }
+  document
+    .querySelector("[data-multi-export-group]")
+    ?.addEventListener("change", (event) => {
+      for (const input of multiExportOptionInputs()) {
+        input.checked = event.currentTarget.checked;
+      }
+      syncMultiExportOptions();
+    });
+  $("crcMultiExportLimit")?.addEventListener("input", syncMultiExportOptions);
+  $("crcMultiExportClose")?.addEventListener("click", closeMultiExportModal);
+  $("crcMultiExportCancel")?.addEventListener("click", closeMultiExportModal);
+  $("crcMultiExportModal")?.addEventListener("click", (event) => {
+    if (event.target === $("crcMultiExportModal")) closeMultiExportModal();
+  });
+  $("crcMultiExportStart")?.addEventListener("click", () => {
+    const request = pendingMultiExportRequest;
+    const multiVariants = selectedMultiExportVariants();
+    const multiLimit = selectedMultiExportLimit();
+    if (!request || multiVariants.length < 1 || multiLimit < 1) return;
+    const { target, button, channelVariants = [] } = request;
+    closeMultiExportModal();
+    void exportRecap(target, button, {
+      channelVariants,
+      multiVariants,
+      multiLimit,
+    });
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("crcChannelExportModal")?.hidden) {
       closeChannelExportModal();
+    }
+    if (event.key === "Escape" && !$("crcMultiExportModal")?.hidden) {
+      closeMultiExportModal();
     }
   });
   document.addEventListener("click", (event) => {
@@ -7789,10 +10736,17 @@
       openChannelExportModal(target, button);
       return;
     }
+    if (target === "multiChannel") {
+      openMultiExportModal({ target, button });
+      return;
+    }
     void exportRecap(target, button);
   });
   $("crcInfoExport")?.addEventListener("click", (event) => {
     void exportRecap("detail", event.currentTarget);
+  });
+  $("crcChannelTrendExport")?.addEventListener("click", (event) => {
+    void exportRecap("channelTrend", event.currentTarget);
   });
 
   reflectTheme();
@@ -7808,6 +10762,8 @@
     // 차트 색은 CSS 변수에서 읽어 굳어 있다 → 테마가 바뀌면 다시 그린다.
     renderMonths(lastData.items);
     renderPolar(lastData.items);
+    renderChannelGraph(lastData.items);
+    if (!$("crcChannelTrendModal")?.hidden) renderChannelTrendModal();
     if (
       !$("crcInfoModal")?.hidden &&
       $("crcInfoBody")?.dataset.infoKey === "crcWord"
@@ -7824,9 +10780,7 @@
     // 이름 조회 실패는 캐시하지 않으므로(resolveChannelInfo) 따로 비울 것이 없다.
     // 이모티콘 팩 조회는 다시 시도한다(한 번 실패하면 그대로 남는다).
     emojiPacksTried = false;
-    void withBusy(e.currentTarget, () => refresh());
-  });
-  $("crcNewRecords")?.addEventListener("click", (e) => {
+    // 새 기록 점은 refreshOnce() 가 끈다(중복 처리하지 않는다).
     void withBusy(e.currentTarget, () => refresh());
   });
   $("crcOpenChzzk")?.addEventListener("click", () => {
@@ -7867,11 +10821,16 @@
         (key) => key === catalogKey || key.startsWith(prefix),
       )
     ) {
-      $("crcNewRecords").hidden = false;
+      // 새로고침이 도는 중에 온 변경은 그 결과에 이미 담긴다 → 점을 켜지 않는다.
+      if (refreshInFlight) return;
+      setNewRecordsDot(true);
     }
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) return;
+    if (document.hidden) {
+      stopChannelGraphPlayback();
+      return;
+    }
     void (async () => {
       const account = await currentAccountDetail();
       // 정상 화면은 계정 경계가 달라졌을 때만 다시 집계한다. 로그아웃·오류

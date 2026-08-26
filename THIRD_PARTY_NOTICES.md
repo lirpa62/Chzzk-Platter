@@ -2,6 +2,16 @@
 
 This project includes third-party open source software.
 
+## D3
+
+This extension includes `D3` v7.9.0.
+
+- Project: https://github.com/d3/d3
+- License: ISC License
+- Bundled file: `src/d3.min.js`
+- Full license text: `LICENSES/D3.txt`
+- Copyright: Copyright 2010-2023 Mike Bostock
+
 ## Chart.js
 
 This extension includes `Chart.js` v4.4.7.

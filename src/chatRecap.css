@@ -67,16 +67,48 @@
   opacity: 0.45;
 }
 
-.crc-new-records {
-  gap: 6px;
+/* 새 기록 알림. 예전에는 '새 기록 있음' 이라는 별도 버튼이었는데, 누르면 하는 일이
+   새로고침과 똑같아 버튼만 하나 더 늘리는 셈이었다 → 새로고침 버튼의 배지로 옮겼다. */
+/* 점은 버튼 밖에 두고 이 래퍼를 기준으로 띄운다(withBusy 가 버튼 안쪽을
+   갈아 끼워도 점이 영향을 받지 않는다). */
+.crc-refresh-wrap,
+.crc-donation-wrap {
+  display: inline-flex;
+  position: relative;
 }
 
-.crc-new-records > span {
-  width: 7px;
-  height: 7px;
-  background: var(--popup-brand);
+.crc-new-dot {
+  /* 알림이라 브랜드색보다 붉은 계열이 눈에 잘 띈다. */
+  background: #e5484d;
+  border: 2px solid var(--popup-bg);
   border-radius: 50%;
-  flex: none;
+  height: 10px;
+  pointer-events: none; /* 버튼 클릭을 가리지 않는다 */
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 10px;
+}
+
+.crc-new-dot[hidden] {
+  display: none;
+}
+
+/* 새 기록이 있다는 걸 눈에 띄게 한다(과하지 않은 속도). */
+@media (prefers-reduced-motion: no-preference) {
+  .crc-new-dot {
+    animation: crc-new-dot-pulse 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes crc-new-dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(229 72 77 / 65%);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgb(229 72 77 / 0%);
+  }
 }
 
 /* ── 요약 카드 ───────────────────────────────────────────────────────────── */
@@ -373,27 +405,6 @@
   transform: rotate(90deg);
 }
 
-@media (max-width: 640px) {
-  .crc-channel {
-    grid-template-columns: 24px 32px minmax(0, 1fr) auto 18px;
-    gap: 8px 10px;
-    padding: 11px 12px;
-  }
-
-  .crc-channel-avatar-wrap {
-    height: 32px;
-    width: 32px;
-  }
-
-  .crc-channel-bar {
-    grid-column: 3 / 5;
-  }
-
-  .crc-channel-figures {
-    min-width: 58px;
-  }
-}
-
 /* 섹션 제목 + 오른쪽 토글 */
 .crc-section-head {
   align-items: center;
@@ -414,12 +425,6 @@
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 270px) minmax(0, 1fr);
-}
-
-@media (max-width: 720px) {
-  .crc-when {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .crc-polar-wrap {
@@ -713,16 +718,6 @@
 
 @media (max-width: 1100px) {
   .crc-words {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 760px) {
-  .crc-words {
-    grid-template-columns: 1fr;
-  }
-
-  .crc-word-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1281,6 +1276,153 @@ img.crc-emoji {
   width: fit-content;
 }
 
+.crc-channel-trend {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 5%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--crc-card-color, var(--popup-brand)) 22%,
+      var(--popup-border)
+    );
+  border-radius: 8px;
+  box-sizing: border-box;
+  flex-basis: 100%;
+  cursor: pointer;
+  min-width: 0;
+  padding: 9px 11px 7px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+  width: 100%;
+}
+
+.crc-channel-trend:hover {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 10%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-card-color, var(--popup-brand)) 42%,
+    var(--popup-border)
+  );
+}
+
+.crc-channel-trend:focus-visible {
+  box-shadow: 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--crc-card-color, var(--popup-brand)) 45%,
+      transparent
+    );
+  outline: none;
+}
+
+.crc-channel-trend-head {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.crc-channel-trend-head > strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.crc-channel-trend-head > span {
+  color: var(--popup-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-channel-trend-chart {
+  color: var(--crc-card-color, var(--popup-brand));
+  height: 74px;
+  margin-top: 5px;
+  width: 100%;
+}
+
+.crc-channel-trend-chart > svg {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+.crc-channel-trend-grid {
+  fill: none;
+  stroke: var(--popup-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.crc-channel-trend-area {
+  fill: color-mix(in srgb, currentColor 15%, transparent);
+  stroke: none;
+}
+
+.crc-channel-trend-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.crc-channel-trend-point {
+  fill: var(--popup-surface);
+  stroke: currentColor;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.crc-channel-trend-axis {
+  color: var(--popup-muted);
+  display: flex;
+  font-size: 9px;
+  justify-content: space-between;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.crc-channel-trend-modal-box {
+  box-sizing: border-box;
+  width: min(900px, 100%);
+}
+
+.crc-channel-trend-modal-head {
+  min-width: 0;
+}
+
+.crc-channel-trend-modal-actions {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.crc-channel-trend-modal-actions .crc-view-switch button {
+  min-width: 64px;
+}
+
+.crc-channel-trend-modal-chart {
+  height: min(52vh, 430px);
+  min-height: 280px;
+  position: relative;
+  width: 100%;
+}
+
 .crc-detail-first-chats .crc-first-chat > em {
   font-size: 11px;
   font-style: normal;
@@ -1446,11 +1588,29 @@ img.crc-emoji {
   align-items: end;
   display: grid;
   gap: 40px;
-  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   /* ⚠ 등수 그림자가 바깥으로 뻗는다(2등 왼쪽·3등 오른쪽 25px, 1등 번짐 36px)
      → 잘리지 않게 여백을 둔다. margin-bottom 대신 padding 으로 잡아야
      그림자가 다음 블록에 겹치지 않는다. */
   padding: 40px 40px 44px;
+}
+
+/* 카드 하나는 항상 포디움 3칸 중 한 칸만 차지한다. 카드 수가 적을 때도
+   3개일 때와 같은 너비를 유지하면서 묶음 전체를 가운데에 놓는다. */
+.crc-podium > .crc-card {
+  grid-column: span 2;
+}
+
+.crc-podium > .crc-card:only-child {
+  grid-column: 3 / span 2;
+}
+
+.crc-podium > .crc-card:first-child:nth-last-child(2) {
+  grid-column: 2 / span 2;
+}
+
+.crc-podium > .crc-card:nth-child(2):last-child {
+  grid-column: 4 / span 2;
 }
 
 .crc-card-grid {
@@ -1545,6 +1705,12 @@ img.crc-emoji {
   font-size: 36px !important;
   line-height: 1.15;
   margin-top: 6px;
+}
+
+/* 앞면은 글자가 전반적으로 커서 비율도 한 단계 키운다(뒷면 12px). */
+.crc-card-front-share {
+  font-size: 14px;
+  margin-top: 2px;
 }
 
 .crc-card-front-range {
@@ -1770,6 +1936,15 @@ img.crc-emoji {
   font-weight: 800;
 }
 
+/* 'N회' 바로 아래 전체 대비 비율. 목록 보기의 .crc-channel-share 와 같은 역할이라
+   같은 톤(muted)으로 두고, 위 숫자보다 확실히 작게 해 주종을 구분한다. */
+.crc-card-share {
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
 .crc-card-detail {
   border-top: 1px solid var(--popup-border);
   display: flex;
@@ -1785,6 +1960,14 @@ img.crc-emoji {
 
 .crc-card-detail .crc-detail-words {
   gap: 5px;
+}
+
+.crc-card-detail .crc-channel-trend {
+  padding: 8px 9px 6px;
+}
+
+.crc-card-detail .crc-channel-trend-chart {
+  height: 64px;
 }
 
 .crc-card-front-top {
@@ -1848,22 +2031,6 @@ img.crc-emoji {
   color: var(--popup-muted);
   font-size: 12px;
   font-style: normal;
-}
-
-@media (max-width: 760px) {
-  .crc-card-front {
-    min-height: 500px;
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  .crc-card-front-name {
-    font-size: 23px;
-  }
-
-  .crc-card-front-total {
-    font-size: 31px;
-  }
 }
 
 .crc-card-confetti {
@@ -1952,9 +2119,24 @@ img.crc-emoji {
 
 /* 보기 전환은 채널 색상 아래, 오른쪽 끝에 둔다. */
 .crc-view-row {
+  align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   justify-content: flex-end;
   margin-bottom: 10px;
+}
+
+.crc-view-row-control {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.crc-view-row-control > span {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 /* 자주 쓴 말·이모티콘 묶음의 제목 */
@@ -2087,6 +2269,700 @@ img.crc-emoji {
 .crc-info-section-head > span {
   color: var(--popup-muted);
   font-size: 11px;
+}
+
+#crcInfoBody[data-info-key="crcMultiChannel"] .crc-info-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.crc-multi-channel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.crc-multi-channel-note {
+  color: var(--popup-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.crc-multi-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.crc-multi-channel-session {
+  background: color-mix(in srgb, var(--popup-soft-bg) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--popup-border) 78%, transparent);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px 11px;
+}
+
+.crc-multi-channel-session-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.crc-multi-channel-session-head > strong {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.crc-multi-channel-session-head > span,
+.crc-multi-channel-more {
+  background: color-mix(in srgb, var(--popup-brand) 10%, var(--popup-surface));
+  border-radius: 999px;
+  color: var(--popup-brand-strong);
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 7px;
+}
+
+.crc-multi-channel-route-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.crc-multi-channel-route-head > strong {
+  color: var(--popup-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.crc-multi-channel-route-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.crc-multi-channel-route-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 9px;
+  gap: 2px;
+  padding: 3px 5px;
+}
+
+.crc-multi-channel-route-actions button:hover,
+.crc-multi-channel-route-actions button:focus-visible {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+.crc-multi-channel-route-actions button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.crc-multi-channel-route {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.crc-multi-channel-connector {
+  align-items: center;
+  color: var(--popup-muted);
+  display: inline-flex;
+  flex-direction: column;
+  flex: none;
+  gap: 1px;
+}
+
+.crc-multi-channel-connector > svg {
+  flex: none;
+}
+
+.crc-multi-channel-connector > small {
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.crc-multi-channel-step {
+  appearance: none;
+  align-items: center;
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color) 9%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--crc-card-color) 30%, var(--popup-border));
+  border-radius: 999px;
+  color: var(--popup-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 7px 4px 4px;
+}
+
+.crc-multi-channel-step:hover,
+.crc-multi-channel-step:focus-visible,
+.crc-multi-channel-step[aria-expanded="true"] {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color) 17%,
+    var(--popup-surface)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--crc-card-color) 58%,
+    var(--popup-border)
+  );
+}
+
+.crc-multi-channel-step:focus-visible {
+  outline: 2px solid var(--popup-brand);
+  outline-offset: 2px;
+}
+
+.crc-multi-channel-name {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.crc-multi-channel-name .crc-stat-avatar {
+  height: 18px;
+  width: 18px;
+}
+
+.crc-multi-channel-name .crc-stat-channel {
+  font-size: 11px;
+  max-width: 100px;
+}
+
+.crc-multi-channel-name .crc-stat-mark {
+  transform: scale(0.78);
+  transform-origin: center;
+}
+
+.crc-multi-channel-step time {
+  color: var(--popup-muted);
+  flex: none;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+button.crc-multi-channel-more {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.crc-multi-channel-more:hover,
+button.crc-multi-channel-more:focus-visible {
+  background: color-mix(in srgb, var(--popup-brand) 19%, var(--popup-surface));
+  color: var(--popup-text);
+}
+
+.crc-multi-channel-chat-list {
+  border-left: 2px solid color-mix(in srgb, var(--popup-brand) 38%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 9px;
+}
+
+.crc-multi-channel-chat-list[hidden] {
+  display: none;
+}
+
+.crc-multi-channel-chat {
+  background: color-mix(
+    in srgb,
+    var(--crc-card-color) 7%,
+    var(--popup-surface)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--crc-card-color) 24%, var(--popup-border));
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 9px;
+}
+
+.crc-multi-channel-chat-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.crc-multi-channel-chat-head .crc-stat-name {
+  font-size: 11px;
+}
+
+.crc-multi-channel-chat-head .crc-stat-avatar {
+  height: 18px;
+  width: 18px;
+}
+
+.crc-multi-channel-chat-head time {
+  color: var(--popup-muted);
+  flex: none;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.crc-multi-channel-chat-message {
+  color: var(--popup-text);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.crc-multi-channel-chat-message img {
+  height: 18px;
+  object-fit: contain;
+  vertical-align: middle;
+  width: 18px;
+}
+
+.crc-multi-channel-meta {
+  color: var(--popup-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.crc-multi-channel-main .crc-section-head {
+  align-items: flex-start;
+}
+
+.crc-multi-channel-main .crc-section-head > div:first-child {
+  min-width: 0;
+}
+
+.crc-multi-channel-main .crc-section-desc {
+  margin: 4px 0 0;
+  max-width: 760px;
+}
+
+.crc-multi-channel-controls .crc-view-switch {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.crc-multi-channel-controls .crc-view-switch button {
+  min-width: 78px;
+}
+
+.crc-multi-channel-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 16px 0 18px;
+}
+
+.crc-multi-channel-summary .crc-detail-item {
+  align-items: flex-start;
+  background: var(--popup-soft-bg);
+  border: 1px solid color-mix(in srgb, var(--popup-border) 72%, transparent);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px 12px;
+}
+
+.crc-multi-channel-summary .crc-detail-item > span {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.crc-multi-channel-summary .crc-detail-item > strong {
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.crc-multi-channel-list-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.crc-multi-channel-list-head > strong {
+  font-size: 13px;
+}
+
+.crc-multi-channel-list-head > span {
+  color: var(--popup-muted);
+  font-size: 11px;
+}
+
+.crc-multi-channel-main-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-export-sheet .crc-multi-channel-export-source,
+.crc-export-sheet .crc-multi-channel-export-source > *,
+.crc-export-sheet .crc-multi-channel-export-source .crc-multi-channel-session,
+.crc-export-sheet .crc-multi-channel-export-source .crc-multi-channel-chat-list,
+.crc-export-sheet .crc-multi-channel-export-source .crc-multi-channel-chat {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.crc-export-sheet .crc-multi-channel-export-source .crc-multi-channel-session,
+.crc-export-sheet .crc-multi-channel-export-source .crc-multi-channel-chat {
+  overflow: hidden;
+  width: 100%;
+}
+
+.crc-export-sheet
+  .crc-multi-channel-export-source
+  .crc-multi-channel-chat-message {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.crc-multi-channel-session.is-section {
+  background: color-mix(in srgb, var(--popup-soft-bg) 42%, transparent);
+  gap: 11px;
+  padding: 13px 14px;
+}
+
+.crc-multi-channel-session.is-section .crc-multi-channel-session-head > strong {
+  font-size: 12px;
+}
+
+.crc-multi-channel-session.is-section .crc-multi-channel-meta {
+  font-size: 11px;
+}
+
+.crc-multi-channel-more-button {
+  background: transparent;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 10px;
+  min-height: 34px;
+  width: 100%;
+}
+
+.crc-multi-channel-more-button:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+/* ── 채널 관계도 ─────────────────────────────────────────────────────── */
+.crc-channel-graph-section .crc-section-head > div:first-child {
+  min-width: 0;
+}
+
+.crc-channel-graph-section .crc-section-desc {
+  margin: 4px 0 0;
+  max-width: 760px;
+}
+
+.crc-channel-graph-controls {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 7px;
+}
+
+.crc-channel-graph-controls .crc-view-switch {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-channel-graph-controls .crc-view-switch button {
+  min-width: 76px;
+}
+
+.crc-channel-graph-timeline-controls {
+  display: flex;
+  gap: 5px;
+}
+
+.crc-channel-graph-reset,
+.crc-channel-graph-timeline-controls button {
+  align-items: center;
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.crc-channel-graph-reset:hover,
+.crc-channel-graph-timeline-controls button:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+.crc-channel-graph-timeline {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(72px, auto);
+  margin: 16px 0 10px;
+}
+
+.crc-channel-graph-timeline input[type="range"] {
+  accent-color: var(--popup-brand);
+  cursor: pointer;
+  min-width: 0;
+  width: 100%;
+}
+
+.crc-channel-graph-timeline output {
+  color: var(--popup-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  min-width: 76px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.crc-channel-graph-pause-icon,
+.crc-channel-graph-timeline-controls
+  button[aria-pressed="true"]
+  .crc-channel-graph-play-icon {
+  display: none;
+}
+
+.crc-channel-graph-timeline-controls
+  button[aria-pressed="true"]
+  .crc-channel-graph-pause-icon {
+  display: block;
+}
+
+.crc-channel-graph-stats {
+  align-items: center;
+  color: var(--popup-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 7px 14px;
+  margin-bottom: 8px;
+}
+
+.crc-channel-graph-stats > span {
+  min-width: 0;
+}
+
+.crc-channel-graph-stats strong {
+  color: var(--popup-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.crc-channel-graph-wrap {
+  aspect-ratio: 12 / 7;
+  background: color-mix(in srgb, var(--popup-soft-bg) 42%, transparent);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  min-height: 330px;
+  overflow: hidden;
+  position: relative;
+}
+
+.crc-channel-graph-wrap > svg {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  touch-action: none;
+  width: 100%;
+}
+
+.crc-channel-graph-link {
+  stroke: color-mix(in srgb, var(--popup-brand) 53%, var(--popup-muted));
+  stroke-linecap: round;
+  transition:
+    opacity 0.15s,
+    stroke-width 0.15s;
+}
+
+.crc-channel-graph-link-hit {
+  cursor: pointer;
+  stroke: transparent;
+  stroke-width: 14px;
+}
+
+.crc-channel-graph-node {
+  cursor: grab;
+  outline: none;
+}
+
+.crc-channel-graph-node:active {
+  cursor: grabbing;
+}
+
+.crc-channel-graph-node-ring {
+  fill: var(--popup-surface);
+  stroke: var(--crc-node-color, var(--popup-brand));
+  stroke-width: 3px;
+  transition:
+    opacity 0.15s,
+    r 0.18s;
+}
+
+.crc-channel-graph-node-image {
+  pointer-events: none;
+}
+
+.crc-channel-graph-node-label {
+  fill: var(--popup-text);
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  pointer-events: none;
+  stroke: var(--popup-surface);
+  stroke-linejoin: round;
+  stroke-width: 4px;
+  text-anchor: middle;
+}
+
+.crc-channel-graph-node.is-dim,
+.crc-channel-graph-link.is-dim,
+.crc-channel-graph-link-hit.is-dim {
+  opacity: 0.12;
+}
+
+.crc-channel-graph-node.is-active .crc-channel-graph-node-ring {
+  filter: drop-shadow(0 2px 5px rgb(0 0 0 / 22%));
+  stroke-width: 4px;
+}
+
+.crc-channel-graph-tooltip {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 18%);
+  color: var(--popup-text);
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: min(260px, calc(100% - 20px));
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(10px, 10px);
+  z-index: 4;
+}
+
+.crc-channel-graph-tooltip[hidden] {
+  display: none;
+}
+
+.crc-channel-graph-tooltip strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.crc-channel-graph-empty {
+  left: 50%;
+  margin: 0;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100% - 32px));
+}
+
+.crc-channel-graph-legend {
+  align-items: center;
+  color: var(--popup-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 10px;
+  gap: 7px 14px;
+  margin-top: 8px;
+}
+
+.crc-channel-graph-legend span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.crc-channel-graph-legend i {
+  display: inline-block;
+  flex: none;
+}
+
+.crc-channel-graph-legend .is-node {
+  background: var(--popup-surface);
+  border: 2px solid var(--popup-brand);
+  border-radius: 50%;
+  height: 10px;
+  width: 10px;
+}
+
+.crc-channel-graph-legend .is-link {
+  background: var(--popup-brand);
+  border-radius: 999px;
+  height: 3px;
+  width: 14px;
+}
+
+.crc-export-sheet .crc-channel-graph-section .crc-channel-graph-wrap {
+  min-height: 0;
+}
+
+/* 캡처본에는 재생 컨트롤과 재생바가 없다. 남은 기간 표시만 왼쪽에 붙인다. */
+.crc-export-sheet .crc-channel-graph-timeline {
+  grid-template-columns: auto;
+  justify-content: start;
+}
+
+.crc-export-sheet .crc-channel-graph-timeline output {
+  min-width: 0;
+  text-align: left;
+}
+
+.crc-export-sheet .crc-channel-graph-tooltip {
+  display: none;
 }
 
 .crc-word-detail-trend {
@@ -2364,6 +3240,10 @@ img.crc-emoji {
   width: min(620px, 100%);
 }
 
+.crc-multi-export-modal-box {
+  width: min(520px, 100%);
+}
+
 .crc-channel-export-options {
   display: grid;
   gap: 10px;
@@ -2420,6 +3300,52 @@ img.crc-emoji {
 .crc-channel-export-count {
   color: var(--popup-muted);
   font-size: 11px;
+  margin: 0;
+}
+
+.crc-multi-export-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.crc-multi-export-options .crc-channel-export-group-head {
+  grid-column: 1 / -1;
+}
+
+.crc-multi-export-limit {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.crc-multi-export-limit > div {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.crc-multi-export-limit strong,
+.crc-multi-export-limit output {
+  color: var(--popup-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.crc-multi-export-limit input[type="range"] {
+  accent-color: var(--popup-brand);
+  cursor: pointer;
+  margin: 0;
+  width: 100%;
+}
+
+.crc-multi-export-limit p {
+  color: var(--popup-muted);
+  font-size: 11px;
+  line-height: 1.55;
   margin: 0;
 }
 
@@ -2537,7 +3463,8 @@ img.crc-emoji {
   gap: 4px;
 }
 
-#crcInfoExport {
+#crcInfoExport,
+#crcChannelTrendExport {
   border: 1px solid transparent;
   height: 28px;
   justify-content: center;
@@ -2693,31 +3620,6 @@ img.crc-emoji {
   color: #fff;
 }
 
-@media (max-width: 720px) {
-  .crc-section-head,
-  .crc-section-actions {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .crc-section-actions {
-    width: 100%;
-  }
-
-  .crc-new-vod-panel {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .crc-new-vod-actions {
-    justify-content: flex-end;
-  }
-
-  .crc-channel-export-options {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* ── AI 분석 프롬프트 모달 ───────────────────────────────────────────────── */
 .crc-prompt-picks {
   display: grid;
@@ -2787,4 +3689,375 @@ img.crc-emoji {
   white-space: pre-wrap;
   width: 100%;
   word-break: break-word;
+}
+
+/* ── 자주 쓴 말: 채널 선택 ───────────────────────────────────────────────── */
+/* 채널 드롭다운. 골격과 색은 통나무파워의 .lps-sort 를 그대로 쓰고,
+   채널명이 길어질 수 있는 점만 여기서 손본다. */
+.crc-channel-menu .lps-sort-button {
+  max-width: 200px;
+}
+
+.crc-channel-menu [data-channel-label] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 채널이 많으면 목록이 화면을 넘어간다 → 스크롤로 가둔다. */
+.crc-channel-menu .lps-sort-list {
+  max-height: 320px;
+  min-width: 100%;
+  overflow-y: auto;
+  white-space: nowrap;
+}
+
+/* 채널을 고르면 쓸 수 없는 정렬 버튼 */
+.crc-word-sort-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ── 채널 관계도 설정 팝오버 ─────────────────────────────────────────────── */
+.crc-graph-settings {
+  position: relative;
+}
+
+.crc-graph-settings-popover {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 22%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 260px;
+  z-index: 20;
+}
+
+.crc-graph-settings-popover[hidden] {
+  display: none;
+}
+
+.crc-graph-settings-popover > strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.crc-graph-settings-popover label {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.crc-graph-settings-popover label > span:first-child {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 설정 화면의 .settings-switch 와 같은 모양의 토글. */
+.crc-toggle {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  position: relative;
+}
+
+.crc-toggle input {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.crc-toggle i {
+  background: var(--popup-dimmed-bg, var(--popup-border));
+  border-radius: 999px;
+  display: inline-block;
+  height: 20px;
+  position: relative;
+  transition: background 0.15s ease;
+  width: 36px;
+}
+
+.crc-toggle i::after {
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+  content: "";
+  height: 16px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 0.15s ease;
+  width: 16px;
+}
+
+.crc-toggle input:checked + i {
+  background: var(--popup-brand);
+}
+
+.crc-toggle input:checked + i::after {
+  transform: translateX(16px);
+}
+
+.crc-toggle input:focus-visible + i {
+  outline: 2px solid var(--popup-brand);
+  outline-offset: 2px;
+}
+
+.crc-graph-settings-popover em {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+/* ── 즉시 뜨는 커스텀 툴팁 ───────────────────────────────────────────────── */
+/* ⚠ 기본 title 은 브라우저가 1초쯤 뒤에 띄운다. 위치 초기화와 전체 기간을
+   헷갈린다는 제보가 있어 지연 없이 보이는 툴팁을 쓴다. */
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  background: rgb(0 0 0 / 88%);
+  border-radius: 6px;
+  color: #fff;
+  content: attr(data-tip);
+  font-size: 11px;
+  font-weight: 600;
+  left: 50%;
+  line-height: 1.4;
+  opacity: 0;
+  padding: 5px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  transform: translateX(-50%);
+  transition: opacity 0.1s ease;
+  white-space: nowrap;
+  z-index: 30;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  opacity: 1;
+}
+
+/* ── 섹션 바로가기 ───────────────────────────────────────────────────────── */
+/* 본문 오른쪽 바깥에 붙인다. ⚠ 화면이 좁으면 본문 위로 올라오므로 숨긴다. */
+.crc-section-nav {
+  display: none;
+}
+
+.crc-section-nav[hidden] {
+  display: none !important;
+}
+
+/* ── 좁은 화면: 막대만 ───────────────────────────────────────────────────
+   본문(1100px) 옆에 글자까지 넣을 공간은 없지만 막대는 들어간다.
+   이름은 호버 툴팁(data-tip)으로 보여 준다. */
+/* ⚠ 본문은 1020px 를 바닥으로 고정돼 있다. 창이 그보다 좁으면 본문이 넘쳐
+   가로 스크롤이 생기는데, 막대는 fixed 라 화면에 붙어 본문 위를 덮는다.
+   본문 오른쪽에 막대가 들어갈 여백이 생기는 1060px 부터만 보여 준다. */
+@media (min-width: 1060px) {
+  .crc-section-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: fixed;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+  }
+
+  .crc-section-nav button {
+    background: none;
+    border: 0;
+    cursor: pointer;
+    display: block;
+    font: inherit;
+    padding: 0;
+  }
+
+  /* 글자는 감추고 막대만 남긴다(세로로 긴 직사각형). */
+  .crc-section-nav button > span {
+    display: none;
+  }
+
+  .crc-section-nav button i {
+    background: var(--popup-border);
+    border-radius: 3px;
+    display: block;
+    height: 18px;
+    transition:
+      background 0.15s,
+      height 0.15s,
+      width 0.15s;
+    width: 5px;
+  }
+
+  .crc-section-nav button:hover i {
+    background: var(--popup-muted);
+  }
+
+  .crc-section-nav button[aria-current="true"] i {
+    background: var(--popup-brand);
+    height: 26px;
+    width: 6px;
+  }
+
+  /* 툴팁은 버튼 왼쪽에 띄운다(오른쪽은 창 밖이다). */
+  .crc-section-nav [data-tip]::after {
+    left: auto;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+  }
+}
+
+/* 본문(1020px) 옆에 글자까지 들어갈 만큼 넓으면 이름을 보여 준다. */
+@media (min-width: 1320px) {
+  .crc-section-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    left: calc(50% + 530px);
+    position: fixed;
+    right: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+  }
+
+  .crc-section-nav button {
+    align-items: center;
+    background: none;
+    border: 0;
+    color: var(--popup-muted);
+    cursor: pointer;
+    display: flex;
+    font: inherit;
+    font-size: 12px;
+    gap: 8px;
+    padding: 5px 8px;
+    text-align: left;
+  }
+
+  .crc-section-nav button > span {
+    display: inline;
+  }
+
+  .crc-section-nav button i {
+    background: var(--popup-border);
+    border-radius: 50%;
+    flex: none;
+    height: 7px;
+    transition:
+      background 0.15s,
+      transform 0.15s;
+    width: 7px;
+  }
+
+  .crc-section-nav button:hover {
+    color: var(--popup-text);
+  }
+
+  .crc-section-nav button:hover i {
+    background: var(--popup-muted);
+  }
+
+  .crc-section-nav button[aria-current="true"] {
+    color: var(--popup-text);
+    font-weight: 700;
+  }
+
+  .crc-section-nav button[aria-current="true"] i {
+    background: var(--popup-brand);
+    height: 7px;
+    transform: scale(1.5);
+    width: 7px;
+  }
+
+  /* 글자가 보이므로 툴팁은 필요 없다. */
+  .crc-section-nav [data-tip]::after {
+    content: none;
+  }
+}
+
+/* 재생 배속 버튼. 형제 버튼은 아이콘 전용(30px 정사각)이라 글자가 들어갈
+   폭을 따로 준다("1.5x" 가 가장 길다). */
+.crc-channel-graph-speed {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  min-width: 38px;
+  width: auto !important;
+}
+
+/* ── 헤더 버튼 정리 ──────────────────────────────────────────────────────── */
+/* 아이콘만 있는 버튼(새로고침). 정사각으로 두어 글자 버튼과 구분된다. */
+.crc-icon-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 0;
+  /* .lps-refresh 의 height 34px 과 맞춰 정사각으로 둔다. */
+  width: 34px;
+}
+
+/* 아이콘 + 짧은 라벨(다시보기 / 후원·구독) */
+#crcImport,
+#crcDonationImport {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* ⚠ 레이아웃 뼈대는 logPowerStats.css 의 .lps-shell(1100px)을 쓰는데, 리캡은
+   섹션이 많아 1020px 에서 구조가 흐트러지지 않게 맞춘다. 그 폭을 넘어서면
+   빈 여백만 늘어난다. */
+/* ⚠ 리캡은 섹션이 많아 좁은 폭에서 접기 시작하면 요소가 계속 짓눌린다.
+   1020px 를 바닥으로 두고 그보다 좁으면 창을 스크롤하게 한다 — 레이아웃이
+   변하지 않으니 요소 크기도 그대로다(제보). */
+.lps-shell {
+  max-width: 1020px;
+  min-width: 1020px;
+}
+
+/* ── 좁은 화면: 헤더 버튼 라벨 접기 ─────────────────────────────────────────
+   ⚠ .lps-header-actions 는 flex:none 이라 버튼이 안 줄어든다. 그래서 창이
+   좁아지면 제목만 계속 짓눌리다 735px 쯤에야 멈췄다(제보).
+   라벨을 감추고 아이콘만 남기면 버튼 묶음이 602px → 244px 로 준다. */
+/* 헤더 버튼은 라벨이 항상 보이므로 툴팁이 군더더기다. */
+.lps-header-actions [data-tip]::after {
+  content: none;
+}
+
+/* 새 다시보기 배지 on/off (가져오기 모달) */
+/* .crc-new-vod-actions 는 flex 라 이 라벨도 그 줄에 나란히 놓인다.
+   (패널이 이미 space-between 이므로 별도 마진은 필요 없다) */
+.crc-new-vod-badge-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding-right: 4px;
+  white-space: nowrap;
+}
+
+.crc-new-vod-badge-toggle > span:first-child {
+  color: var(--popup-muted);
+  font-size: 12px;
+  font-weight: 600;
 }

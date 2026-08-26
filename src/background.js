@@ -9,12 +9,17 @@ const CLIP_LIKE_API_BASE =
   "https://apis.naver.com/clip-viewer-web/like/v1/services/CHZZK/contents";
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 const COMMENT_TIMESTAMP_CACHE_TTL_MS = 30 * 60 * 1000;
-const COMMENT_TIMESTAMP_CACHE_VERSION = 4;
+// ⚠ 마커 상한 로직이 바뀌면 올린다. 안 올리면 예전에 80개로 잘린 결과가
+//   TTL(30분) 동안 그대로 쓰인다.
+const COMMENT_TIMESTAMP_CACHE_VERSION = 5;
 const SORT_METRIC_CACHE_TTL_MS = 30 * 60 * 1000;
 const PAGE_SIZE = 50;
 const CLIP_PAGE_SIZE = 50;
 const COMMENT_TIMESTAMP_PAGE_SIZE = 30;
 const COMMENT_TIMESTAMP_MAX_PAGES = 5;
+// 재생바에 찍을 마커 상한. 너무 많으면 재생바가 점으로 뒤덮여 못 쓴다.
+// ⚠ 긴 방송(9시간+)은 80개로는 앞부분만 채우고 끝나 뒤가 잘린다 → 넉넉히 잡는다.
+const COMMENT_TIMESTAMP_MAX_MARKERS = 300;
 const COMMENT_TIMESTAMP_CLUSTER_RANGE_SECONDS = 3;
 const SEARCH_CHANNEL_PAGE_SIZE = 33;
 const MAX_CONCURRENT_PAGE_REQUESTS = 3;
@@ -2286,10 +2291,23 @@ function buildTimestampMarkers(entries) {
   });
 
   const clusters = clusterTimestampCandidates(candidates);
-  return clusters
+  const markers = clusters
     .map(buildTimestampMarkerFromCluster)
-    .sort((a, b) => a.seconds - b.seconds)
-    .slice(0, 80);
+    .sort((a, b) => a.seconds - b.seconds);
+  if (markers.length <= COMMENT_TIMESTAMP_MAX_MARKERS) return markers;
+
+  // ⚠ 예전에는 시간순 정렬 뒤 앞에서 잘라(slice(0, 80)) 영상 뒷부분 마커가 통째로
+  //   사라졌다(제보: 9시간 영상에서 4:23:23 이후가 안 나옴 — 그 지점까지 80개가
+  //   찼기 때문). 상한이 필요하면 앞이 아니라 '덜 중요한 것'부터 버려야 한다.
+  //   댓글이 많이 달린 마커를 우선 남기고, 남긴 것을 다시 시간순으로 되돌린다.
+  const weight = (marker) =>
+    (Array.isArray(marker.comments) ? marker.comments.length : 0) +
+    (Number(marker.buffCount) || 0) / 100;
+  return markers
+    .slice()
+    .sort((a, b) => weight(b) - weight(a))
+    .slice(0, COMMENT_TIMESTAMP_MAX_MARKERS)
+    .sort((a, b) => a.seconds - b.seconds);
 }
 
 function clusterTimestampCandidates(candidates) {
@@ -4038,14 +4056,12 @@ async function lpAccountFor(hint) {
     .toLowerCase();
   const hinted = LP_ACCOUNT_RE.test(h) ? h : "";
   if (hinted) {
-    const hintChanged =
-      !!lpAccountHintSignal && lpAccountHintSignal !== hinted;
+    const hintChanged = !!lpAccountHintSignal && lpAccountHintSignal !== hinted;
     // 계정 정보 없이 시작한 요청이 도는 중 처음 힌트를 받았다면, 그 요청은 힌트
     // 이전 쿠키로 전송됐을 수 있다. 결과가 같을 가능성보다 계정 오귀속 방지가
     // 중요하므로 새 세대로 다시 확인한다.
     const unscopedRequest = !lpAccountHintSignal && !!lpAccountInFlight;
-    const cacheMismatch =
-      !!lpAccountCache.id && lpAccountCache.id !== hinted;
+    const cacheMismatch = !!lpAccountCache.id && lpAccountCache.id !== hinted;
     lpAccountHintSignal = hinted;
     if (hintChanged || unscopedRequest || cacheMismatch) {
       lpInvalidateAccount();
@@ -5796,7 +5812,9 @@ function normalizeChatRecapCatalog(value) {
         continue;
       }
       channels[channelId.toLowerCase()] = [
-        ...new Set(months.map(String).filter((m) => CHAT_RECAP_MONTH_RE.test(m))),
+        ...new Set(
+          months.map(String).filter((m) => CHAT_RECAP_MONTH_RE.test(m)),
+        ),
       ].sort();
     }
   }
@@ -5804,15 +5822,17 @@ function normalizeChatRecapCatalog(value) {
 }
 
 function mutateChatRecapCatalog(accountId, apply) {
-  const task = chatRecapCatalogTail.catch(() => {}).then(async () => {
-    const key = `${CHAT_RECAP_CATALOG_PREFIX}${accountId}`;
-    const stored = (await chrome.storage.local.get(key))?.[key];
-    const catalog = normalizeChatRecapCatalog(stored);
-    const changed = apply(catalog);
-    if (changed === false) return catalog;
-    await chrome.storage.local.set({ [key]: catalog });
-    return catalog;
-  });
+  const task = chatRecapCatalogTail
+    .catch(() => {})
+    .then(async () => {
+      const key = `${CHAT_RECAP_CATALOG_PREFIX}${accountId}`;
+      const stored = (await chrome.storage.local.get(key))?.[key];
+      const catalog = normalizeChatRecapCatalog(stored);
+      const changed = apply(catalog);
+      if (changed === false) return catalog;
+      await chrome.storage.local.set({ [key]: catalog });
+      return catalog;
+    });
   chatRecapCatalogTail = task.catch(() => {});
   return task;
 }

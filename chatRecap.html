@@ -27,41 +27,101 @@
           </p>
         </div>
         <div class="lps-header-actions">
+          <!-- ⚠ 점을 button 안에 두면 안 된다. withBusy 가 로딩 표시를 위해
+               btn.innerHTML 을 통째로 갈아 끼웠다가 되돌리는데, 그 과정에서
+               점 노드가 사라졌다 되살아나 '켜진 상태'로 복원된다(제보). -->
+          <span class="crc-refresh-wrap">
+            <button
+              type="button"
+              class="lps-refresh crc-icon-button"
+              id="crcRefresh"
+              aria-label="새로고침"
+              data-tip="새로고침"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
+            </button>
+            <span class="crc-new-dot" id="crcNewRecords" hidden>
+              <span class="lps-a11y">새 기록 있음</span>
+            </span>
+          </span>
           <button
             type="button"
             class="lps-refresh crc-new-vods-button"
             id="crcImport"
+            aria-label="다시보기에서 가져오기"
+            data-tip="다시보기에서 가져오기"
             disabled
           >
-            <span>다시보기에서 가져오기</span>
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 3v12" />
+              <path d="m7 10 5 5 5-5" />
+              <path d="M5 21h14" />
+            </svg>
+            <span>다시보기</span>
             <span class="crc-new-vods-count" id="crcNewVodsCount" hidden
               >0</span
             >
           </button>
-          <button
-            type="button"
-            class="lps-refresh"
-            id="crcDonationImport"
-            disabled
-          >
-            후원·구독 내역 가져오기
-          </button>
-          <button type="button" class="lps-refresh" id="crcRefresh">
-            새로고침
-          </button>
-          <button
-            type="button"
-            class="lps-refresh crc-new-records"
-            id="crcNewRecords"
-            hidden
-          >
-            <span aria-hidden="true"></span>새 기록 있음
-          </button>
+          <span class="crc-donation-wrap">
+            <button
+              type="button"
+              class="lps-refresh"
+              id="crcDonationImport"
+              aria-label="후원·구독 내역 가져오기"
+              data-tip="후원·구독 내역 가져오기"
+              disabled
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3v12" />
+                <path d="m7 10 5 5 5-5" />
+                <path d="M5 21h14" />
+              </svg>
+              <span>후원·구독</span>
+            </button>
+            <span class="crc-new-dot" id="crcNewDonations" hidden>
+              <span class="lps-a11y">새 후원·구독 내역 있음</span>
+            </span>
+          </span>
           <div class="crc-export-menu" data-recap-export-menu>
             <button
               type="button"
               class="lps-refresh"
               id="crcExportMenuButton"
+              aria-label="이미지 저장"
+              data-tip="이미지 저장"
               aria-haspopup="menu"
               aria-expanded="false"
               disabled
@@ -101,6 +161,20 @@
               <button type="button" role="menuitem" data-export-target="when">
                 활동 시간대
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-export-target="multiChannel"
+              >
+                멀티 채널 채팅
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-export-target="channelGraph"
+              >
+                채널 관계도
+              </button>
               <button type="button" role="menuitem" data-export-target="months">
                 월별 추이
               </button>
@@ -112,7 +186,14 @@
               </button>
             </div>
           </div>
-          <button type="button" class="lps-refresh" id="crcPrompt" disabled>
+          <button
+            type="button"
+            class="lps-refresh"
+            id="crcPrompt"
+            aria-label="AI 분석 프롬프트"
+            data-tip="AI 분석 프롬프트"
+            disabled
+          >
             <svg
               viewBox="0 0 24 24"
               width="15"
@@ -193,8 +274,21 @@
         라이브에서 채팅을 보내면 여기에 쌓입니다.
       </p>
 
+      <!-- 섹션 바로가기. 지금 보고 있는 섹션을 표시하고 눌러서 이동한다.
+           ⚠ 화면이 좁으면 본문을 가리므로 CSS 에서 숨긴다. -->
+      <nav
+        class="crc-section-nav"
+        id="crcSectionNav"
+        aria-label="섹션 바로가기"
+        hidden
+      ></nav>
       <div id="crcBody" hidden>
-        <section class="crc-summary" aria-label="요약" data-export-summary>
+        <section
+          class="crc-summary"
+          id="crcExportSummary"
+          aria-label="요약"
+          data-export-summary
+        >
           <div class="crc-stat" data-info="crcTotal">
             <span class="crc-stat-label">전체 채팅</span>
             <strong class="crc-stat-value" id="crcTotal">0</strong>
@@ -261,6 +355,13 @@
             >
             <span class="crc-stat-sub" id="crcRisingWordSub"
               >비교할 기록이 없습니다</span
+            >
+          </div>
+          <div class="crc-stat" data-info="crcMultiChannel">
+            <span class="crc-stat-label">멀티 채널 채팅</span>
+            <strong class="crc-stat-value" id="crcMultiChannel">-</strong>
+            <span class="crc-stat-sub" id="crcMultiChannelSub"
+              >서로 다른 채널의 채팅 간격으로 계산합니다</span
             >
           </div>
         </section>
@@ -361,62 +462,434 @@
             </div>
           </div>
           <div class="crc-view-row">
-            <div
-              class="lps-view-switch crc-view-switch"
-              role="group"
-              aria-label="채널별 채팅 표시 방식"
-            >
-              <button
-                type="button"
-                data-view="card"
-                aria-pressed="true"
-                title="카드로 봅니다(1~3등은 포디움)"
+            <div class="crc-view-row-control">
+              <span>그래프</span>
+              <div
+                class="lps-view-switch crc-view-switch"
+                role="group"
+                aria-label="채널별 채팅량 추이 표시 방식"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
+                <button
+                  type="button"
+                  data-channel-cumulative="off"
+                  aria-pressed="true"
                 >
-                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                  <rect x="14" y="3" width="7" height="7" rx="1.5" />
-                  <rect x="3" y="14" width="7" height="7" rx="1.5" />
-                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
-                </svg>
-                카드
-              </button>
-              <button
-                type="button"
-                data-view="list"
-                aria-pressed="false"
-                title="한 줄씩 목록으로 봅니다"
+                  월별
+                </button>
+                <button
+                  type="button"
+                  data-channel-cumulative="on"
+                  aria-pressed="false"
+                >
+                  누적
+                </button>
+              </div>
+            </div>
+            <div class="crc-view-row-control">
+              <span>보기</span>
+              <div
+                class="lps-view-switch crc-view-switch"
+                role="group"
+                aria-label="채널별 채팅 표시 방식"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
+                <button
+                  type="button"
+                  data-view="card"
+                  aria-pressed="true"
+                  title="카드로 봅니다(1~3등은 포디움)"
                 >
-                  <path d="M3 6h18" />
-                  <path d="M3 12h18" />
-                  <path d="M3 18h18" />
-                </svg>
-                목록
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  </svg>
+                  카드
+                </button>
+                <button
+                  type="button"
+                  data-view="list"
+                  aria-pressed="false"
+                  title="한 줄씩 목록으로 봅니다"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M3 12h18" />
+                    <path d="M3 18h18" />
+                  </svg>
+                  목록
+                </button>
+              </div>
             </div>
           </div>
           <div class="crc-cards" id="crcChannelCards"></div>
           <ol class="crc-channels" id="crcChannelList" hidden></ol>
+        </section>
+
+        <section
+          class="crc-section crc-multi-channel-main"
+          id="crcExportMultiChannel"
+          aria-label="멀티 채널 채팅 추정"
+        >
+          <div class="crc-section-head">
+            <div>
+              <h2 class="crc-section-title">멀티 채널 채팅</h2>
+              <p class="crc-section-desc">
+                서로 다른 채널에 가까운 시각으로 남긴 채팅을 하나의 활동
+                세션으로 묶습니다. 실제 동시 재생이나 시청 여부를 확정하는
+                지표는 아닙니다. <br />30초와 5분 수치는 각각 해당 간격 이내의
+                전환 횟수입니다.
+              </p>
+            </div>
+            <div class="crc-section-actions crc-multi-channel-controls">
+              <div
+                class="lps-view-switch crc-view-switch"
+                role="group"
+                aria-label="멀티 채널 채팅 정렬"
+              >
+                <button
+                  type="button"
+                  data-multi-channel-sort="recent"
+                  aria-pressed="true"
+                >
+                  최신순
+                </button>
+                <button
+                  type="button"
+                  data-multi-channel-sort="channels"
+                  aria-pressed="false"
+                >
+                  채널 많은 순
+                </button>
+                <button
+                  type="button"
+                  data-multi-channel-sort="fastest"
+                  aria-pressed="false"
+                >
+                  전환 빠른 순
+                </button>
+              </div>
+              <button
+                type="button"
+                class="crc-section-export"
+                data-export-target="multiChannel"
+                aria-label="멀티 채널 채팅 이미지 저장"
+                title="이미지 저장"
+              ></button>
+            </div>
+          </div>
+          <div class="crc-multi-channel-summary" aria-label="멀티 채널 요약">
+            <div class="crc-detail-item">
+              <span>한 세션 최대</span>
+              <strong id="crcMultiSectionMax">0개 채널</strong>
+            </div>
+            <div class="crc-detail-item">
+              <span>활동 세션</span>
+              <strong id="crcMultiSectionSessions">0회</strong>
+            </div>
+            <div class="crc-detail-item">
+              <span>활동한 날</span>
+              <strong id="crcMultiSectionDays">0일</strong>
+            </div>
+            <div class="crc-detail-item">
+              <span>30초 이내 전환</span>
+              <strong id="crcMultiSectionImmediate">0회</strong>
+            </div>
+            <div class="crc-detail-item">
+              <span>5분 이내 전환</span>
+              <strong id="crcMultiSectionNear">0회</strong>
+            </div>
+            <div class="crc-detail-item">
+              <span>가장 짧은 간격</span>
+              <strong id="crcMultiSectionFastest">-</strong>
+            </div>
+          </div>
+          <div class="crc-multi-channel-list-head">
+            <strong>활동 세션</strong>
+            <span id="crcMultiChannelSectionCount">0개</span>
+          </div>
+          <div
+            class="crc-multi-channel-list crc-multi-channel-main-list"
+            id="crcMultiChannelSectionList"
+          ></div>
+          <p class="crc-info-empty" id="crcMultiChannelSectionEmpty" hidden>
+            서로 다른 채널에 가까운 시각으로 남긴 채팅 기록이 없습니다.
+          </p>
+          <button
+            type="button"
+            class="crc-multi-channel-more-button"
+            id="crcMultiChannelSectionMore"
+            hidden
+          >
+            세션 더보기
+          </button>
+        </section>
+
+        <section
+          class="crc-section crc-channel-graph-section"
+          id="crcExportChannelGraph"
+          aria-label="채널 관계도 추정"
+        >
+          <div class="crc-section-head">
+            <div>
+              <h2 class="crc-section-title">채널 관계도</h2>
+              <p class="crc-section-desc">
+                내 채팅 기록에서 가까운 시간에 이동한 채널과 활동 패턴이 비슷한
+                채널을 시각화합니다. <br />스트리머 사이의 실제 관계나 동시 시청
+                여부를 의미하지 않습니다. <br /><b>활동 유사도</b>는 같은 시기에
+                봤는지가 아니라 <b>요일·시간대 습관</b>이 닮은 정도입니다(70%).
+                <br />활동일이 겹치는 정도는 30%만 반영하므로 시기가 전혀 달라도
+                비슷한 요일·시각에 채팅했다면 연결될 수 있습니다. <br />표본이
+                적으면 우연히 닮아 보이므로 채팅 10건 미만 채널은 유사도에서
+                제외합니다.
+              </p>
+            </div>
+            <div class="crc-section-actions crc-channel-graph-controls">
+              <div
+                class="lps-view-switch crc-view-switch"
+                role="group"
+                aria-label="채널 관계도 기준"
+              >
+                <button
+                  type="button"
+                  data-channel-graph-mode="relation"
+                  aria-pressed="true"
+                >
+                  전환 관계
+                </button>
+                <button
+                  type="button"
+                  data-channel-graph-mode="similarity"
+                  aria-pressed="false"
+                >
+                  활동 유사도
+                </button>
+              </div>
+              <button
+                type="button"
+                class="crc-channel-graph-reset"
+                id="crcChannelGraphReset"
+                aria-label="노드 위치 초기화"
+                data-tip="노드 위치 초기화 (기간은 그대로)"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="crc-section-export"
+                data-export-target="channelGraph"
+                aria-label="채널 관계도 이미지 저장"
+                title="이미지 저장"
+              ></button>
+              <div class="crc-graph-settings" data-graph-settings>
+                <button
+                  type="button"
+                  class="crc-channel-graph-reset"
+                  id="crcChannelGraphSettings"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                  aria-label="채널 관계도 설정"
+                  title="설정"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                      d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                    />
+                  </svg>
+                </button>
+                <div class="crc-graph-settings-popover" role="dialog" hidden>
+                  <strong>재생</strong>
+                  <label>
+                    <span>
+                      반복 재생
+                      <em>마지막 달까지 간 뒤 처음부터 다시 재생합니다.</em>
+                    </span>
+                    <span class="crc-toggle">
+                      <input
+                        type="checkbox"
+                        data-graph-physics="loop"
+                        checked
+                      />
+                      <i aria-hidden="true"></i>
+                    </span>
+                  </label>
+                  <label>
+                    <span>
+                      재생 중 활동 없는 채널 숨기기
+                      <em>그 달에 채팅하지 않은 채널을 감춥니다.</em>
+                    </span>
+                    <span class="crc-toggle">
+                      <input type="checkbox" data-graph-physics="hideIdle" />
+                      <i aria-hidden="true"></i>
+                    </span>
+                  </label>
+                  <strong>물리 시뮬레이션</strong>
+                  <label>
+                    <span>
+                      드래그할 때 사용
+                      <em>끌면 이어진 채널이 딸려옵니다.</em>
+                    </span>
+                    <span class="crc-toggle">
+                      <input
+                        type="checkbox"
+                        data-graph-physics="drag"
+                        checked
+                      />
+                      <i aria-hidden="true"></i>
+                    </span>
+                  </label>
+                  <label>
+                    <span>
+                      재생 중 사용
+                      <em>달이 바뀔 때 노드가 새 자리를 찾아갑니다.</em>
+                    </span>
+                    <span class="crc-toggle">
+                      <input type="checkbox" data-graph-physics="play" />
+                      <i aria-hidden="true"></i>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="crc-channel-graph-timeline">
+            <div class="crc-channel-graph-timeline-controls">
+              <button
+                type="button"
+                id="crcChannelGraphPlay"
+                aria-label="월별 관계도 자동 재생"
+                aria-pressed="false"
+              >
+                <svg
+                  class="crc-channel-graph-play-icon"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="m7 4 13 8-13 8z" />
+                </svg>
+                <svg
+                  class="crc-channel-graph-pause-icon"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                id="crcChannelGraphSpeed"
+                class="crc-channel-graph-speed"
+                aria-label="재생 배속 변경"
+                data-tip="재생 배속 (눌러서 변경)"
+              >
+                1x
+              </button>
+              <button
+                type="button"
+                id="crcChannelGraphPeriodReset"
+                aria-label="전체 기간으로 되돌리기"
+                data-tip="전체 기간으로 되돌리기"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M19 12H5" />
+                  <path d="m11 18-6-6 6-6" />
+                  <path d="M19 5v14" />
+                </svg>
+              </button>
+            </div>
+            <input
+              type="range"
+              id="crcChannelGraphPeriod"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+              aria-label="채널 관계도 기간"
+            />
+            <output id="crcChannelGraphPeriodLabel">전체 기간</output>
+          </div>
+          <div class="crc-channel-graph-stats" aria-label="관계도 요약">
+            <span>채널 <strong id="crcChannelGraphNodeCount">0</strong></span>
+            <span>연결 <strong id="crcChannelGraphEdgeCount">0</strong></span>
+            <span id="crcChannelGraphTopRelation">표시할 연결이 없습니다</span>
+          </div>
+          <div class="crc-channel-graph-wrap" id="crcChannelGraphWrap">
+            <svg
+              id="crcChannelGraph"
+              viewBox="0 0 960 560"
+              role="img"
+              aria-label="채널 관계도"
+            ></svg>
+            <p class="crc-info-empty crc-channel-graph-empty" hidden>
+              관계도를 만들 수 있는 채널 기록이 부족합니다.
+            </p>
+            <div class="crc-channel-graph-tooltip" role="tooltip" hidden></div>
+          </div>
+          <div class="crc-channel-graph-legend">
+            <span><i class="is-node"></i>원 크기: 선택 기간의 채팅량</span>
+            <span><i class="is-link"></i>선 굵기: 전환 빈도 또는 유사도</span>
+            <span>상위 50개 채널 · 프로필을 드래그하여 이동</span>
+          </div>
         </section>
 
         <section
@@ -464,6 +937,31 @@
           <div class="crc-section-head">
             <h2 class="crc-section-title">월별 추이</h2>
             <div class="crc-section-actions">
+              <div class="lps-sort crc-channel-menu" data-channel-menu="months">
+                <button
+                  type="button"
+                  class="lps-sort-button"
+                  id="crcMonthChannelButton"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  <span data-channel-label>전체 채널</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                <ul class="lps-sort-list" role="listbox" hidden></ul>
+              </div>
               <div
                 class="lps-view-switch crc-view-switch"
                 role="group"
@@ -502,6 +1000,34 @@
             <h2 class="crc-section-title">자주 쓴 말</h2>
             <div class="crc-section-actions">
               <div class="crc-word-controls">
+                <div
+                  class="lps-sort crc-channel-menu"
+                  data-channel-menu="words"
+                >
+                  <button
+                    type="button"
+                    class="lps-sort-button"
+                    id="crcWordChannelButton"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-channel-label>전체 채널</span>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <ul class="lps-sort-list" role="listbox" hidden></ul>
+                </div>
                 <div
                   class="lps-view-switch crc-view-switch crc-word-type-switch"
                   role="group"
@@ -700,6 +1226,13 @@
             >
           </div>
           <div class="crc-new-vod-actions">
+            <label class="crc-new-vod-badge-toggle">
+              <span>버튼에 배지 표시</span>
+              <span class="crc-toggle">
+                <input type="checkbox" id="crcNewVodBadge" checked />
+                <i aria-hidden="true"></i>
+              </span>
+            </label>
             <button
               type="button"
               class="crc-btn-ghost"
@@ -950,6 +1483,86 @@
       </div>
     </div>
 
+    <!-- 멀티 채널 채팅 이미지에 포함할 세션 상태·개수 선택 -->
+    <div class="crc-modal" id="crcMultiExportModal" hidden>
+      <div
+        class="crc-modal-box crc-modal-narrow crc-multi-export-modal-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="crcMultiExportTitle"
+      >
+        <div class="crc-modal-head">
+          <strong id="crcMultiExportTitle">멀티 채널 이미지 선택</strong>
+          <button type="button" id="crcMultiExportClose" aria-label="닫기">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M6 6l12 12M18 6 6 18"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+              ></path>
+            </svg>
+          </button>
+        </div>
+        <p class="crc-modal-desc">
+          저장할 세션 상태와 개수를 선택하세요. 한 이미지에는 최대 12개 세션을
+          담고, 그보다 많으면 여러 장으로 나누어 저장합니다.
+        </p>
+        <section class="crc-channel-export-group crc-multi-export-options">
+          <label class="crc-channel-export-group-head">
+            <input type="checkbox" data-multi-export-group />
+            <span>상태 3개 모두</span>
+          </label>
+          <label class="crc-channel-export-option">
+            <input type="checkbox" value="collapsed" data-multi-export-option />
+            <span>모두 접힌 상태</span>
+          </label>
+          <label class="crc-channel-export-option">
+            <input type="checkbox" value="expanded" data-multi-export-option />
+            <span>모두 펼친 상태</span>
+          </label>
+          <label class="crc-channel-export-option">
+            <input type="checkbox" value="current" data-multi-export-option />
+            <span>현재 상태</span>
+          </label>
+        </section>
+        <div class="crc-multi-export-limit">
+          <div>
+            <strong>저장할 세션</strong>
+            <output id="crcMultiExportLimitOutput">12개</output>
+          </div>
+          <input
+            type="range"
+            id="crcMultiExportLimit"
+            min="12"
+            max="12"
+            step="12"
+            value="12"
+            aria-label="저장할 멀티 채널 세션 개수"
+          />
+          <p>
+            현재 상태는 화면에 불러온 세션을 유지하며 아직 불러오지 않은 세션은
+            접힌 상태로 저장합니다.
+          </p>
+        </div>
+        <p class="crc-channel-export-count" id="crcMultiExportCount"></p>
+        <div class="crc-modal-actions">
+          <button type="button" class="crc-btn-ghost" id="crcMultiExportCancel">
+            취소
+          </button>
+          <button type="button" class="crc-btn" id="crcMultiExportStart">
+            선택 항목 저장
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 요약 카드·히트맵 칸을 눌렀을 때의 상세 팝업(읽기 전용) -->
     <!-- AI 분석 프롬프트: 담을 항목을 고르고 미리 본 뒤 복사한다.
          ⚠ 전송은 하지 않는다. 사용자가 붙여넣을 때만 외부로 나간다. -->
@@ -1005,6 +1618,74 @@
       </div>
     </div>
 
+    <div class="crc-modal" id="crcChannelTrendModal" hidden>
+      <div
+        class="crc-modal-box crc-channel-trend-modal-box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="crcChannelTrendTitle"
+      >
+        <div class="crc-modal-head crc-channel-trend-modal-head">
+          <div class="crc-info-title-wrap">
+            <span>채널별 채팅</span>
+            <strong id="crcChannelTrendTitle">채팅량 추이</strong>
+          </div>
+          <div class="crc-modal-head-actions crc-channel-trend-modal-actions">
+            <button
+              type="button"
+              id="crcChannelTrendExport"
+              aria-label="채널별 채팅량 추이 이미지 저장"
+              title="이미지 저장"
+            ></button>
+            <div
+              class="lps-view-switch crc-view-switch"
+              role="group"
+              aria-label="확대 그래프 표시 방식"
+            >
+              <button
+                type="button"
+                data-channel-trend-modal-mode="monthly"
+                aria-pressed="true"
+              >
+                월별
+              </button>
+              <button
+                type="button"
+                data-channel-trend-modal-mode="cumulative"
+                aria-pressed="false"
+              >
+                누적
+              </button>
+            </div>
+            <button
+              type="button"
+              id="crcChannelTrendClose"
+              aria-label="확대 그래프 닫기"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M6 6l12 12M18 6 6 18"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <p class="crc-modal-desc" id="crcChannelTrendCaption"></p>
+        <div class="crc-channel-trend-modal-chart">
+          <canvas id="crcChannelTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+
     <div class="crc-modal" id="crcInfoModal" hidden>
       <div
         class="crc-modal-box crc-modal-narrow"
@@ -1047,6 +1728,7 @@
     </div>
 
     <script src="src/coloris.min.js"></script>
+    <script src="src/d3.min.js"></script>
     <script src="src/html-to-image.min.js"></script>
     <script src="src/chatRecap.js"></script>
   </body>

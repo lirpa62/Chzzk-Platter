@@ -28,12 +28,17 @@
     "cheeseChatRecapRetentionDays",
     "cheeseChatRecapChannelColors",
     "cheeseChatRecapChannelColorsCustom",
+    "cheeseChatRecapChannelTrendCumulative",
     "cheeseChatRecapChannelView",
+    "cheeseChatRecapColorsCollapsed",
     "cheeseChatRecapCumulative",
     "cheeseChatRecapDonScope",
+    "cheeseChatRecapGraphPhysics",
+    "cheeseChatRecapGraphSpeed",
     "cheeseChatRecapPromptPicks",
     "cheeseChatRecapWordSort",
     "cheeseChatRecapWordType",
+    "chatRecapNewVodBadge",
     "cheeseMasterEnabled",
     "cheeseGlobalScrollTopFab",
     "cheeseSettingsKnownFeatures",
@@ -451,10 +456,7 @@
           const normalized = clampPopupWidth(saved);
           applyPopupWidth(normalized);
           try {
-            localStorage.setItem(
-              POPUP_WIDTH_MIRROR,
-              String(normalized),
-            );
+            localStorage.setItem(POPUP_WIDTH_MIRROR, String(normalized));
           } catch {}
           // 1.43.0에서 저장된 789~800px 값은 한 번만 안전 상한으로
           // 내린다. 정본도 맞춰 다음 실행에서 다시 보정하지 않게 한다.
@@ -1144,7 +1146,6 @@
   const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
   // 미설정 시 기본 체크인 항목. 기존 동작을 유지해야 하는 영역도 여기에 포함한다.
   const DEFAULT_CHECKED = new Set([
-    "clipLiveButton",
     "sbFollowFavEnabled",
     "sbFollowGroupEnabled",
     // 라운지 소식은 기본 숨김(체크=숨김). content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
@@ -8086,7 +8087,8 @@
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
     /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32})$/i;
   const isSettingsFullDataKey = (key) =>
-    SETTINGS_FULL_DATA_KEYS.has(key) || CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
+    SETTINGS_FULL_DATA_KEYS.has(key) ||
+    CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
   const SETTINGS_MEDIA_KEY_PATTERN =
     /^(?:audioMixer|videoFilter):[0-9a-f]{32}$/i;
   // NEW 읽음 상태는 설치별 UI 메타데이터이므로 설정 JSON으로 다른 브라우저에 옮기지 않는다.
@@ -8172,15 +8174,39 @@
 
   function normalizeImportedSettingValue(key, value) {
     if (key === POPUP_WIDTH_KEY) {
-      return Number.isFinite(Number(value)) ? clampPopupWidth(value) : undefined;
+      return Number.isFinite(Number(value))
+        ? clampPopupWidth(value)
+        : undefined;
     }
     if (
       key === "cheeseAudioMixer.autoSync" ||
       key === "cheeseVideoFilter.autoSharpen" ||
       key === "cheeseLogPowerBarEarnedOnly" ||
-      key === "cheeseLogPowerLineCumulative"
+      key === "cheeseLogPowerLineCumulative" ||
+      key === "cheeseChatRecapChannelTrendCumulative" ||
+      key === "cheeseChatRecapColorsCollapsed" ||
+      key === "chatRecapNewVodBadge"
     ) {
       return typeof value === "boolean" ? value : undefined;
+    }
+    if (key === "cheeseChatRecapChannelView") {
+      return value === "card" || value === "list" ? value : undefined;
+    }
+    if (key === "cheeseChatRecapGraphSpeed") {
+      // chatRecap.js 의 CHANNEL_GRAPH_SPEEDS 와 같은 목록.
+      return [1, 1.5, 2, 4, 0.5].includes(value) ? value : undefined;
+    }
+    if (key === "cheeseChatRecapGraphPhysics") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      // 기본값은 drag·loop 켜짐, play·hideIdle 꺼짐이다.
+      return {
+        drag: value.drag !== false,
+        play: value.play === true,
+        hideIdle: value.hideIdle === true,
+        loop: value.loop !== false,
+      };
     }
     if (key === "cheeseLogPowerStatsViewMode") {
       return value === "tree" || value === "explorer" || value === "calendar"
@@ -8197,6 +8223,8 @@
     }
     if (key === "cheeseChatRecapPromptPicks") {
       if (!Array.isArray(value)) return undefined;
+      // chatRecap.js 의 PROMPT_SECTIONS 와 같은 목록이어야 한다. 빠진 항목은
+      // 불러오기에서 조용히 사라지므로 섹션을 추가하면 여기도 같이 고친다.
       const allowed = new Set([
         "basic",
         "channels",
@@ -8204,8 +8232,11 @@
         "months",
         "words",
         "donation",
+        "graph",
       ]);
-      return [...new Set(value.map(String).filter((item) => allowed.has(item)))];
+      return [
+        ...new Set(value.map(String).filter((item) => allowed.has(item))),
+      ];
     }
     if (key === "cheeseLogPowerStatsGroup") {
       if (!value || typeof value !== "object" || Array.isArray(value)) {
