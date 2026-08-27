@@ -740,7 +740,9 @@
                   <span class="settings-item-name">최대 화질 자동 고정</span>
                   <span class="settings-item-desc"
                     >라이브·다시보기 시청 시 가장 높은 화질로 자동
-                    고정합니다(자동 화질이 낮아지는 것 방지, 체크=사용)</span
+                    고정합니다. 원본 해상도가 화면 해상도에 가까워지면 RTX VSR의
+                    업스케일 조건을 충족하지 않아 VSR 표시가 꺼질 수 있습니다(자동
+                    화질이 낮아지는 것 방지, 체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1711,7 +1713,9 @@
                 <label>
                   <span class="settings-item-name">비디오 필터 숨김</span>
                   <span class="settings-item-desc"
-                    >밝기·대비·선명도 등 화면 보정</span
+                    >밝기·대비·선명도 등 화면 보정. 화면 보정이 적용되는 동안 RTX
+                    VSR 같은 브라우저·그래픽 드라이버 영상 향상 기능이 동작하지 않을
+                    수 있습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3634,34 +3638,74 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >시청자 수를 LIVE 옆에 표시</span
-                  >
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="live-viewer-count-position"
+              >
+                <div>
+                  <span class="settings-item-name">시청자 수 위치</span>
                   <span class="settings-item-desc"
-                    >메인, 전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를
-                    LIVE 배지 옆에 표시합니다(체크=사용, 기본 꺼짐).</span
+                    >메인·주제 홈, 전체 방송, 카테고리, 팔로잉 라이브 카드의
+                    시청자 수 위치를 선택합니다. 원본은 치지직의 현재 배치를
+                    그대로 유지합니다.</span
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-live-viewer-count-inline />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">시청자 수 숨김</span>
-                  <span class="settings-item-desc"
-                    >메인, 전체 방송, 카테고리, 팔로잉 라이브 카드의 시청자 수를
-                    숨깁니다. 켜져 있는 동안 LIVE 옆 표시보다 우선
-                    적용됩니다(체크=숨김, 기본 꺼짐).</span
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-6"
+                  data-live-viewer-count-position
+                  role="radiogroup"
+                  aria-label="라이브 카드 시청자 수 위치"
+                >
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="native"
+                    role="radio"
+                    aria-checked="true"
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-live-viewer-count-hidden />
-                  <i aria-hidden="true"></i>
-                </label>
+                    원본
+                  </button>
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="top-left"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    좌측 상단
+                    <small>LIVE 옆</small>
+                  </button>
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="top-right"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    우측 상단
+                  </button>
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="bottom-left"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    좌측 하단
+                  </button>
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="bottom-right"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    우측 하단
+                  </button>
+                  <button
+                    type="button"
+                    data-live-viewer-count-position-value="hidden"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    숨김
+                  </button>
+                </div>
               </li>
               <li
                 class="settings-item settings-item-stacked settings-live-tag-item"
@@ -3747,6 +3791,41 @@
               </li>
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">헤더 자동 숨김</span>
+                  <span class="settings-item-desc"
+                    >헤더를 숨기고 화면 맨 위에 마우스를 대면 표시</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="headerAutoHide" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">정적 로고</span>
+                  <span class="settings-item-desc"
+                    >헤더의 움직이는 GIF 로고를 멈춰 정적 로고로
+                    표시(체크=정적)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="headerStaticLogo" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="layout"
+            aria-label="수신함 및 소식"
+          >
+            <h2 class="settings-group-title">수신함·소식</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name">라운지 소식 숨김</span>
                   <span class="settings-item-desc"
                     >헤더 알림 옆의 치지직 라운지 소식 버튼. 공지사항·업데이트
@@ -3755,6 +3834,24 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="loungeNews" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="lounge-news-dot"
+              >
+                <label>
+                  <span class="settings-item-name"
+                    >└ 라운지 새 글 알림 점 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >헤더 라운지 소식 버튼의 빨간 점만 숨깁니다. 새 글 확인과
+                    읽음 상태, 소식 창 내부의 탭 표시는 그대로 유지됩니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="loungeNewsDot" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -3829,6 +3926,27 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="inboxCommunityNews" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="inbox-community-dot"
+              >
+                <label>
+                  <span class="settings-item-name"
+                    >└ 커뮤니티 새 글 알림 점 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >헤더 수신함 버튼과 수신함 커뮤니티 소식 탭의 빨간 점을
+                    숨깁니다. 새 글 확인과 읽음 상태는 그대로 유지됩니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="inboxCommunityNewsDot"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -3931,28 +4049,21 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="inbox-log-power-dot"
+              >
                 <label>
-                  <span class="settings-item-name">헤더 자동 숨김</span>
+                  <span class="settings-item-name"
+                    >└ 통나무파워 새 내역 알림 점 숨김</span
+                  >
                   <span class="settings-item-desc"
-                    >헤더를 숨기고 화면 맨 위에 마우스를 대면 표시</span
+                    >수신함 통나무파워 탭의 빨간 점만 숨깁니다. 내역 기록과
+                    읽음 상태는 그대로 유지됩니다.</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="headerAutoHide" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">정적 로고</span>
-                  <span class="settings-item-desc"
-                    >헤더의 움직이는 GIF 로고를 멈춰 정적 로고로
-                    표시(체크=정적)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="headerStaticLogo" />
+                  <input type="checkbox" data-feature="inboxLogPowerDot" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

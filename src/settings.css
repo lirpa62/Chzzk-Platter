@@ -1117,6 +1117,7 @@ html.settings-tab-view .settings-item-desc {
   margin-left: auto;
 }
 
+.settings-segmented[data-live-viewer-count-position],
 .settings-item [data-update-notice-mode],
 .settings-item [data-cf-section-order],
 .settings-item [data-update-notice-duration] {

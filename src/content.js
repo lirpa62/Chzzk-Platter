@@ -2001,7 +2001,9 @@
     chatHideBadge: false, // 채팅 배지 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
     chatSplitNickname: false, // 일반 채팅의 닉네임 줄과 메시지 줄 분리
     loungeNews: false, // 헤더 치지직 라운지 소식 버튼(숨김 플래그 — true=숨김)
+    loungeNewsDot: false, // 헤더 라운지 소식 새 글 알림 점 숨김
     inboxCommunityNews: false, // 수신함 팔로잉 커뮤니티 탭(숨김 플래그)
+    inboxCommunityNewsDot: false, // 헤더 수신함·커뮤니티 탭 새 글 알림 점 숨김
     inboxLogPower: false, // 수신함 통나무파워 탭(숨김 플래그 — true=숨김)
     chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
@@ -12202,7 +12204,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">
         <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H12l-4.2 3.6A.75.75 0 0 1 6.6 19v-3H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" fill="currentColor"/>
       </svg>
-      <span data-recap-count>이 채널에서 내가 친 채팅 …</span>
+      <span data-recap-count>이 채널에서 내가 친 채팅 <span data-recap-count-value>…</span></span>
       <button type="button" data-recap-more class="${RECAP_DIALOG_ROW_CLASS}-more">보기</button>`;
     // 통나무파워 박스가 있으면 그 앞에, 없으면 묶음 끝에.
     const power = wrapper.querySelector("[class*='_power_wrapper_']");
@@ -12222,9 +12224,12 @@
     row.dataset.recapCount = String(recapCount);
     const label = row.querySelector("[data-recap-count]");
     if (label) {
-      label.textContent = recapCount
-        ? `이 채널에서 내가 친 채팅 ${recapCount.toLocaleString()}개`
-        : "이 채널에서 내가 친 채팅 없음";
+      const value = label.querySelector("[data-recap-count-value]");
+      if (value) {
+        value.textContent = recapCount
+          ? `${recapCount.toLocaleString()}개`
+          : "없음";
+      }
     }
     const more = row.querySelector("[data-recap-more]");
     if (more) more.hidden = !recapCount;
@@ -16206,6 +16211,7 @@
   let fillScreenStyledContents = null; // max-height/flex-shrink 를 건 부모(_contents_)
   let fillScreenStyledElSnapshot = null;
   let fillScreenStyledContentsSnapshot = null;
+  let fillScreenModeTransitionUntil = 0;
 
   function captureInlineStyleProperties(element, properties) {
     const snapshot = {};
@@ -16246,18 +16252,47 @@
   // 치지직 '넓은 화면'(viewmode)이 켜져 있는지 판정. 넓은 화면이면 영상 레이아웃이 달라져
   // 화면 채우기(영상 층 높이 강제)가 오히려 방해하므로 적용하지 않는다. viewmode 버튼은
   // 켜지면 checked 속성이 붙고 aria-label 이 '좁은 화면'(누르면 좁아짐)으로 바뀐다.
+  function playerControlName(button) {
+    if (!(button instanceof HTMLElement)) return "";
+    return [
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.textContent,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function isWideScreenModeOn() {
+    // 최근 치지직 UI는 버튼 클래스/aria-label 갱신보다 레이아웃의 _is_large_ 클래스가
+    // 먼저 붙는 경우가 있다. 플레이어 조상으로 범위를 한정해 해시가 바뀌어도 감지한다.
+    const playerBox = document.querySelector(
+      "div#layout-body #live_player_layout, div#layout-body #player_layout",
+    );
+    if (playerBox?.closest?.('[class*="_is_large_"]')) return true;
+
     const btn =
       document.querySelector(".pzp-pc__viewmode-button") ||
       document.querySelector(".pzp-pc-viewmode-button") ||
       document.querySelector(".pzp-viewmode-button") ||
       document.querySelector(
         "button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+      ) ||
+      Array.from(
+        document.querySelectorAll(
+          "#live_player_layout button, #player_layout button, .pzp-pc button",
+        ),
+      ).find((button) =>
+        /(?:^|\s)(?:넓은|좁은)\s*화면(?:\s|$)/.test(
+          playerControlName(button),
+        ),
       );
     if (!btn) return false;
     return (
       btn.hasAttribute("checked") ||
-      btn.getAttribute("aria-label") === "좁은 화면"
+      /좁은\s*화면/.test(playerControlName(btn))
     );
   }
 
@@ -16270,7 +16305,8 @@
       return true;
     }
 
-    const fullscreenSelector = ".pzp-pc--fullscreen";
+    const fullscreenSelector =
+      '.pzp-pc--fullscreen, [class*="_is_fullscreen_"], [class*="--fullscreen"]';
     const candidates = [target?.box, target?.el];
     if (
       candidates.some(
@@ -16309,8 +16345,15 @@
 
     const button = document.querySelector(
       ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
-    );
-    const label = button?.getAttribute("aria-label") || "";
+    ) ||
+      Array.from(
+        document.querySelectorAll(
+          "#live_player_layout button, #player_layout button, .pzp-pc button",
+        ),
+      ).find((candidate) =>
+        /전체\s*화면/.test(playerControlName(candidate)),
+      );
+    const label = playerControlName(button);
     return (
       button?.getAttribute("aria-pressed") === "true" ||
       button?.hasAttribute("checked") ||
@@ -16583,6 +16626,7 @@
     const on =
       FILL_SCREEN_ENABLED &&
       pageEnabled &&
+      Date.now() >= fillScreenModeTransitionUntil &&
       !isMini &&
       !isPip &&
       !isWide &&
@@ -16660,6 +16704,7 @@
   const VOD_MORE_MOVED_ATTR = "data-cheese-vod-more-moved";
   let vodMoreObserver = null;
   let vodMoreObserveRaf = 0;
+  let vodMoreFullscreenTransitionUntil = 0;
   // _content_right_의 원래 위치(off 시 복원용): 원래 부모 + 원래 다음 형제.
   let vodMoreOrigParent = null;
   let vodMoreOrigNextSibling = null;
@@ -16956,11 +17001,17 @@
   function applyVodMoreLayout() {
     const below = featureFlags.vodMoreBelow;
     const hide = featureFlags.vodMoreHide;
+    const suspendBelowForFullscreen =
+      below === true &&
+      hide !== true &&
+      location.pathname.startsWith("/video/") &&
+      (Date.now() < vodMoreFullscreenTransitionUntil ||
+        isPlayerFullscreenModeOn(getFillScreenTarget()));
     // 영상 더보기가 '영상 오른쪽 칸'에서 빠진 상태(아래로 이동 또는 숨김)를 <html> 에
     // 표시한다. 이때는 채팅 왼쪽 배치 시 영상정보 왼쪽이 비므로 CSS 로 margin 을 채운다.
     document.documentElement.classList.toggle(
       "cheese-vod-more-away",
-      below === true || hide === true,
+      (!suspendBelowForFullscreen && below === true) || hide === true,
     );
     // 숨김(우선): <style>로 _content_right_ 숨김. 이동은 불필요.
     let style = document.getElementById(VOD_MORE_STYLE_ID);
@@ -16976,6 +17027,17 @@
       if (style.textContent !== css) style.textContent = css;
       stopVodMoreObserver(); // 숨김이면 이동 옵저버 불필요
       applyVodPlayerFullWidth(true); // 채팅 없는 다시보기 폭 보정(빈칸 제거)
+      return;
+    }
+    // 넓은 화면에서 전체화면으로 전환할 때 _content_right_가 플레이어 아래에 남아 있으면,
+    // 치지직이 바깥 래퍼를 전체화면 대상으로 잡는 환경에서 정보 영역까지 높이 계산에
+    // 포함돼 영상이 가운데로 줄어들 수 있다. 전환 중/전체화면에서는 네이티브 위치로 잠시
+    // 복원하고, 전체화면을 빠져나오면 아래의 일반 분기가 다시 아래로 배치한다.
+    if (suspendBelowForFullscreen) {
+      style?.remove();
+      stopVodMoreObserver();
+      restoreVodMorePosition();
+      applyVodPlayerFullWidth(false);
       return;
     }
     // 여기 도달 = 숨김이 꺼진 상태. 다음에 다시 숨길 때 자동 재생을 또 끌 수 있도록
@@ -19896,7 +19958,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function syncLoungeDot() {
     const btn = document.getElementById(LOUNGE_BUTTON_ID);
-    btn?.classList.toggle("has-new", loungeHasAnyNew());
+    btn?.classList.toggle(
+      "has-new",
+      featureFlags.loungeNewsDot !== true && loungeHasAnyNew(),
+    );
     document
       .querySelectorAll(`#${LOUNGE_MODAL_ID} [data-lounge-tab]`)
       .forEach((el) => {
@@ -20370,6 +20435,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const shouldShow =
       featureFlagsLoaded &&
       featureFlags.inboxCommunityNews === false &&
+      featureFlags.inboxCommunityNewsDot !== true &&
       inboxCommunityHeaderUnread &&
       inboxButton;
 
@@ -28517,6 +28583,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 사용자가 저장한 값과 정확히 일치하는 카드를 숨긴다.
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+  const LIVE_VIEWER_COUNT_POSITION_KEY = "cheeseLiveViewerCountPosition";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
   const LIVE_VIEWER_COUNT_HIDDEN_KEY = "cheeseLiveViewerCountHidden";
   const LIVE_TAG_FILTER_BUTTON_CLASS = "cheese-live-tag-filter-button";
@@ -28525,12 +28592,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const LIVE_VIEWER_COUNT_INLINE_CLASS = "cheese-live-viewer-count-inline";
   const LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS =
     "cheese-live-viewer-count-inline-badge";
+  const LIVE_VIEWER_COUNT_ANCHOR_CLASS = "cheese-live-viewer-count-anchor";
+  const LIVE_VIEWER_COUNT_TOP_RIGHT_BADGE_CLASS =
+    "cheese-live-viewer-count-top-right-badge";
+  const LIVE_VIEWER_COUNT_BOTTOM_LEFT_BADGE_CLASS =
+    "cheese-live-viewer-count-bottom-left-badge";
+  const LIVE_VIEWER_COUNT_BOTTOM_RIGHT_BADGE_CLASS =
+    "cheese-live-viewer-count-bottom-right-badge";
   const LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS =
     "cheese-live-viewer-count-hidden-badge";
+  const LIVE_VIEWER_COUNT_POSITIONS = new Set([
+    "native",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+    "hidden",
+  ]);
+  const LIVE_VIEWER_COUNT_BADGE_CLASSES = [
+    LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS,
+    LIVE_VIEWER_COUNT_TOP_RIGHT_BADGE_CLASS,
+    LIVE_VIEWER_COUNT_BOTTOM_LEFT_BADGE_CLASS,
+    LIVE_VIEWER_COUNT_BOTTOM_RIGHT_BADGE_CLASS,
+    LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS,
+  ];
   let liveTagFilters = [];
   let liveTagFilterButtonOn = false;
-  let liveViewerCountInlineOn = false;
-  let liveViewerCountHiddenOn = false;
+  let liveViewerCountPosition = "native";
   const liveTagFilterSelected = new Set();
   let liveTagFilterRestoreFocus = null;
 
@@ -28589,6 +28677,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return sanitizeLiveTagFilters(String(value || "").split(/[,\n]+/));
   }
 
+  function normalizeLiveViewerCountPosition(value) {
+    return LIVE_VIEWER_COUNT_POSITIONS.has(value) ? value : "native";
+  }
+
+  function legacyLiveViewerCountPosition(data) {
+    if (data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true) return "hidden";
+    if (data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true) return "top-left";
+    return "native";
+  }
+
   function getLiveTagFilterPageKind() {
     const pathname = location.pathname.replace(/\/+$/, "") || "/";
     if (pathname === "/lives") return "lives";
@@ -28609,7 +28707,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (getLiveTagFilterPageKind()) return true;
     const pathname = location.pathname.replace(/\/+$/, "") || "/";
     return (
-      pathname === "/" || /^\/category\/[^/]+\/[^/]+\/lives$/i.test(pathname)
+      pathname === "/" ||
+      /^\/home\//i.test(pathname) ||
+      /^\/category\/[^/]+\/[^/]+\/lives$/i.test(pathname)
     );
   }
 
@@ -28774,7 +28874,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
-  function clearLiveViewerCountPlacement() {
+  function clearLiveViewerCountPlacement(preserveHidden = false) {
+    const badgeClasses = preserveHidden
+      ? LIVE_VIEWER_COUNT_BADGE_CLASSES.filter(
+          (className) => className !== LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS,
+        )
+      : LIVE_VIEWER_COUNT_BADGE_CLASSES;
     document
       .querySelectorAll(`.${LIVE_VIEWER_COUNT_INLINE_CLASS}`)
       .forEach((card) => {
@@ -28783,20 +28888,60 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         card.style.removeProperty("--cheese-live-viewer-count-top");
       });
     document
-      .querySelectorAll(`.${LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS}`)
+      .querySelectorAll(
+        badgeClasses.map((className) => `.${className}`).join(","),
+      )
       .forEach((badge) => {
-        badge.classList.remove(LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS);
+        badge.classList.remove(...badgeClasses);
         badge.style.removeProperty("--cheese-live-viewer-count-left");
         badge.style.removeProperty("--cheese-live-viewer-count-top");
       });
+    document
+      .querySelectorAll(`.${LIVE_VIEWER_COUNT_ANCHOR_CLASS}`)
+      .forEach((thumbnail) =>
+        thumbnail.classList.remove(LIVE_VIEWER_COUNT_ANCHOR_CLASS),
+      );
   }
 
-  function clearLiveViewerCountHidden() {
-    document
-      .querySelectorAll(`.${LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS}`)
-      .forEach((badge) =>
-        badge.classList.remove(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
+  // 메인 상단 라이브(캐러셀 _item_ > _status_, 단독 _inner_ > _badge_)는 카드와
+  // 마크업이 전혀 다르다. 썸네일이 링크가 아니고, 시청자 수가 썸네일 밖에 있으며,
+  // transform으로 슬라이드되는 구조라 위치를 옮기려고 기준점을 만들면 치지직
+  // 레이아웃이 무너졌다(제보: 화면이 검게 나옴). 그래서 이 영역은 좌표를 건드리지
+  // 않는 '숨김'만 지원한다.
+  function findLiveViewerCountHiddenOnlyTargets(scope) {
+    const badges = [];
+    const isCountText = (node) => {
+      // '시청자'처럼 스크린리더용 .blind 가 섞여 있으면 걷어내고 숫자만 본다.
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll(".blind").forEach((blind) => blind.remove());
+      return /^(?:\d[\d,.]*|\d+(?:\.\d+)?[만억])명$/.test(
+        String(clone.textContent || "").replace(/\s+/g, ""),
       );
+    };
+    // 1) 캐러셀: _item_ 안 _status_ 바의 em._count_
+    for (const item of scope.querySelectorAll(
+      'div[class*="_item_"]:has(> div[class*="_status_"])',
+    )) {
+      if (!item.querySelector('a[class*="_link_"][href^="/live/"]')) continue;
+      const countBadge = item.querySelector(
+        ':scope > div[class*="_status_"] em[class*="_count_"]',
+      );
+      if (countBadge && isCountText(countBadge)) badges.push(countBadge);
+    }
+    // 2) 단독 대형 라이브: _inner_ 안 _badge_ 의 숫자 span.
+    //    ⚠ 라이브 링크는 _inner_ 안이 아니라 형제로 놓여 있어 부모에서 찾는다.
+    for (const inner of scope.querySelectorAll(
+      'div[class*="_inner_"]:has(> div[class*="_badge_"])',
+    )) {
+      const holder = inner.parentElement || inner;
+      if (!holder.querySelector('a[class*="_link_"][href^="/live/"]')) continue;
+      const countBadge = [
+        ...(inner.querySelector(':scope > div[class*="_badge_"]')?.children ||
+          []),
+      ].find((child) => child.tagName === "SPAN" && isCountText(child));
+      if (countBadge) badges.push(countBadge);
+    }
+    return badges;
   }
 
   function findLiveViewerCountTargets(scope) {
@@ -28811,28 +28956,50 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const description = thumbnail.querySelector(
         'div[class*="_description_"]',
       );
-      const liveBadge = description?.querySelector("em");
-      const countBadge = thumbnail.querySelector('div[class*="_count_badge_"]');
+      const badgeArea = thumbnail.querySelector('div[class*="_badge_"]');
+      const badgeScope = badgeArea || description || thumbnail;
+      const liveBadge =
+        [...badgeScope.querySelectorAll("em")].find((em) =>
+          [...em.querySelectorAll(".blind")].some(
+            (blind) => blind.textContent?.trim().toUpperCase() === "LIVE",
+          ),
+        ) || null;
+      const legacyCountBadge = thumbnail.querySelector(
+        'div[class*="_count_badge_"]',
+      );
+      const countBadge =
+        legacyCountBadge ||
+        [...(badgeArea?.children || [])].find(
+          (child) =>
+            child.tagName === "SPAN" &&
+            /^(?:\d[\d,.]*|\d+(?:\.\d+)?[만억])명$/.test(
+              String(child.textContent || "").replace(/\s+/g, ""),
+            ),
+        );
       if (
         !card?.matches?.('div[class*="_container_"]') ||
-        !description ||
-        !liveBadge ||
-        !countBadge?.querySelector("span")
+        !countBadge ||
+        !/^(?:\d[\d,.]*|\d+(?:\.\d+)?[만억])명$/.test(
+          String(countBadge.textContent || "").replace(/\s+/g, ""),
+        )
       ) {
         continue;
       }
-      targets.push({ card, countBadge, liveBadge, thumbnail });
+      // '치지직 N일차' 배지는 우측 상단에 따로 놓인다. 시청자 수를 같은 자리로
+      // 옮기면 겹치므로(제보) 좌표를 잡을 때 이 배지를 피한다.
+      const nthDayBadge =
+        badgeArea?.querySelector('div[class*="_nth_day_"]') || null;
+      targets.push({ card, countBadge, liveBadge, thumbnail, nthDayBadge });
     }
     return targets;
   }
 
   function applyLiveViewerCountPlacement() {
     if (
-      (!liveViewerCountInlineOn && !liveViewerCountHiddenOn) ||
+      liveViewerCountPosition === "native" ||
       !isLiveViewerCountPlacementPage()
     ) {
       clearLiveViewerCountPlacement();
-      clearLiveViewerCountHidden();
       return;
     }
     const scope =
@@ -28841,14 +29008,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       document.body;
     if (!scope) {
       clearLiveViewerCountPlacement();
-      clearLiveViewerCountHidden();
       return;
     }
 
     const targets = findLiveViewerCountTargets(scope);
-    if (liveViewerCountHiddenOn) {
-      clearLiveViewerCountPlacement();
-      const activeBadges = new Set(targets.map(({ countBadge }) => countBadge));
+    if (liveViewerCountPosition === "hidden") {
+      // 숨김 클래스까지 매번 제거·재추가하면 카드 MutationObserver가 다시 실행되어
+      // 불필요한 갱신 루프가 생길 수 있으므로 다른 위치 클래스만 정리한다.
+      clearLiveViewerCountPlacement(true);
+      // 메인 상단 라이브는 위치 이동은 못 하지만 숨기는 것은 안전하다.
+      const activeBadges = new Set([
+        ...targets.map(({ countBadge }) => countBadge),
+        ...findLiveViewerCountHiddenOnlyTargets(scope),
+      ]);
       activeBadges.forEach((badge) =>
         badge.classList.add(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
       );
@@ -28862,57 +29034,144 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
 
-    clearLiveViewerCountHidden();
+    const fixedPositionClass =
+      liveViewerCountPosition === "top-right"
+        ? LIVE_VIEWER_COUNT_TOP_RIGHT_BADGE_CLASS
+        : liveViewerCountPosition === "bottom-left"
+          ? LIVE_VIEWER_COUNT_BOTTOM_LEFT_BADGE_CLASS
+          : liveViewerCountPosition === "bottom-right"
+            ? LIVE_VIEWER_COUNT_BOTTOM_RIGHT_BADGE_CLASS
+            : "";
+    const positionTargets = targets.filter(
+      ({ liveBadge }) => fixedPositionClass || liveBadge,
+    );
+    // ⚠ '숨김'에서 위치 지정으로 바꾸면 배지에 display:none이 남아 있어
+    //   getBoundingClientRect()가 전부 0으로 나온다. 그러면 아래 hasLayout이
+    //   false가 되어 좌표 계산을 건너뛰고, 한 번 더 눌러야 제자리를 찾았다(제보).
+    //   크기를 재기 전에 숨김을 먼저 걷어낸다.
+    positionTargets.forEach(({ countBadge }) =>
+      countBadge.classList.remove(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
+    );
+    // position:absolute 적용 뒤에도 offsetParent가 썸네일 밖으로 바뀌지 않도록 먼저
+    // 기준점을 만든다. 새 DOM의 _badge_가 별도 기준점이면 아래 좌표 보정이 이를 감안한다.
+    positionTargets.forEach(({ thumbnail }) =>
+      thumbnail.classList.add(LIVE_VIEWER_COUNT_ANCHOR_CLASS),
+    );
     const placements = [];
-    for (const { card, countBadge, liveBadge, thumbnail } of targets) {
-      // UI 변경으로 liveBadge.offsetParent가 description이 아닌 thumbnail이 될 수 있다.
-      // 실제 화면 좌표 차이를 사용하면 어느 쪽이 offsetParent여도 중복 합산되지 않는다.
+    for (const {
+      card,
+      countBadge,
+      liveBadge,
+      thumbnail,
+      nthDayBadge,
+    } of positionTargets) {
       const thumbnailRect = thumbnail.getBoundingClientRect();
-      const liveBadgeRect = liveBadge.getBoundingClientRect();
+      const countBadgeRect = countBadge.getBoundingClientRect();
+      const liveBadgeRect = liveBadge?.getBoundingClientRect();
+      const nthDayRect = nthDayBadge?.getBoundingClientRect();
+      const offsetParent = countBadge.offsetParent || thumbnail;
+      const offsetParentRect = offsetParent.getBoundingClientRect();
+      const offsetOriginLeft =
+        offsetParentRect.left +
+        (offsetParent.clientLeft || 0) -
+        (offsetParent.scrollLeft || 0);
+      const offsetOriginTop =
+        offsetParentRect.top +
+        (offsetParent.clientTop || 0) -
+        (offsetParent.scrollTop || 0);
       const hasLayout =
         thumbnailRect.width > 0 &&
         thumbnailRect.height > 0 &&
-        liveBadgeRect.width > 0 &&
-        liveBadgeRect.height > 0;
-      const left = hasLayout
-        ? liveBadgeRect.right - thumbnailRect.left + 4
-        : liveBadge.offsetLeft + liveBadge.offsetWidth + 4;
-      const top = hasLayout
-        ? liveBadgeRect.top - thumbnailRect.top
-        : liveBadge.offsetTop;
+        countBadgeRect.width > 0 &&
+        countBadgeRect.height > 0;
+      let targetLeft = countBadgeRect.left;
+      let targetTop = countBadgeRect.top;
+      if (hasLayout && fixedPositionClass) {
+        if (liveViewerCountPosition.endsWith("right")) {
+          targetLeft = thumbnailRect.right - countBadgeRect.width - 8;
+        } else {
+          targetLeft = thumbnailRect.left + 8;
+        }
+        if (liveViewerCountPosition.startsWith("bottom")) {
+          targetTop = thumbnailRect.bottom - countBadgeRect.height - 8;
+        } else {
+          targetTop = thumbnailRect.top + 8;
+        }
+      } else if (liveBadgeRect?.width > 0 && liveBadgeRect?.height > 0) {
+        targetLeft = liveBadgeRect.right + 4;
+        targetTop = liveBadgeRect.top;
+      }
+      // 'N일차' 배지와 겹치면 그 아래로 내린다. 위로 올리면 썸네일 밖으로
+      // 나가므로 항상 아래쪽으로만 피한다.
+      if (
+        hasLayout &&
+        nthDayRect?.width > 0 &&
+        nthDayRect?.height > 0 &&
+        targetLeft < nthDayRect.right &&
+        targetLeft + countBadgeRect.width > nthDayRect.left &&
+        targetTop < nthDayRect.bottom &&
+        targetTop + countBadgeRect.height > nthDayRect.top
+      ) {
+        targetTop = nthDayRect.bottom + 4;
+      }
       placements.push({
         card,
         countBadge,
-        leftValue: `${Math.round(left)}px`,
-        topValue: `${Math.round(top)}px`,
+        thumbnail,
+        badgeClass: fixedPositionClass || LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS,
+        leftValue: `${Math.round(targetLeft - offsetOriginLeft)}px`,
+        topValue: `${Math.round(targetTop - offsetOriginTop)}px`,
       });
     }
 
     // 모든 좌표를 먼저 읽은 뒤 스타일을 한 번에 써 카드별 강제 레이아웃 반복을 피한다.
     const activeCards = new Set();
     const activeBadges = new Set();
-    for (const { card, countBadge, leftValue, topValue } of placements) {
-      activeCards.add(card);
+    const activeAnchors = new Set(
+      positionTargets.map(({ thumbnail }) => thumbnail),
+    );
+    for (const {
+      card,
+      countBadge,
+      thumbnail,
+      badgeClass,
+      leftValue,
+      topValue,
+    } of placements) {
+      if (badgeClass === LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS) {
+        activeCards.add(card);
+        card.classList.add(LIVE_VIEWER_COUNT_INLINE_CLASS);
+      }
       activeBadges.add(countBadge);
-      card.classList.add(LIVE_VIEWER_COUNT_INLINE_CLASS);
-      countBadge.classList.add(LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS);
+      for (const className of LIVE_VIEWER_COUNT_BADGE_CLASSES) {
+        if (className !== badgeClass) countBadge.classList.remove(className);
+      }
+      countBadge.classList.add(badgeClass);
       if (
         countBadge.style.getPropertyValue("--cheese-live-viewer-count-left") !==
         leftValue
       ) {
-        countBadge.style.setProperty(
-          "--cheese-live-viewer-count-left",
-          leftValue,
-        );
+        if (leftValue) {
+          countBadge.style.setProperty(
+            "--cheese-live-viewer-count-left",
+            leftValue,
+          );
+        } else {
+          countBadge.style.removeProperty("--cheese-live-viewer-count-left");
+        }
       }
       if (
         countBadge.style.getPropertyValue("--cheese-live-viewer-count-top") !==
         topValue
       ) {
-        countBadge.style.setProperty(
-          "--cheese-live-viewer-count-top",
-          topValue,
-        );
+        if (topValue) {
+          countBadge.style.setProperty(
+            "--cheese-live-viewer-count-top",
+            topValue,
+          );
+        } else {
+          countBadge.style.removeProperty("--cheese-live-viewer-count-top");
+        }
       }
     }
     document
@@ -28924,12 +29183,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         card.style.removeProperty("--cheese-live-viewer-count-top");
       });
     document
-      .querySelectorAll(`.${LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS}`)
+      .querySelectorAll(
+        LIVE_VIEWER_COUNT_BADGE_CLASSES.map(
+          (className) => `.${className}`,
+        ).join(","),
+      )
       .forEach((badge) => {
         if (activeBadges.has(badge)) return;
-        badge.classList.remove(LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS);
+        badge.classList.remove(...LIVE_VIEWER_COUNT_BADGE_CLASSES);
         badge.style.removeProperty("--cheese-live-viewer-count-left");
         badge.style.removeProperty("--cheese-live-viewer-count-top");
+      });
+    document
+      .querySelectorAll(`.${LIVE_VIEWER_COUNT_ANCHOR_CLASS}`)
+      .forEach((thumbnail) => {
+        if (activeAnchors.has(thumbnail)) return;
+        thumbnail.classList.remove(LIVE_VIEWER_COUNT_ANCHOR_CLASS);
       });
   }
 
@@ -29150,18 +29419,30 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const data = await getBootData([
         LIVE_TAG_FILTERS_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
+        LIVE_VIEWER_COUNT_POSITION_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
         LIVE_VIEWER_COUNT_HIDDEN_KEY,
       ]);
       liveTagFilters = sanitizeLiveTagFilters(data?.[LIVE_TAG_FILTERS_KEY]);
       liveTagFilterButtonOn = data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
-      liveViewerCountInlineOn = data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
-      liveViewerCountHiddenOn = data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true;
+      const hasStoredPosition = LIVE_VIEWER_COUNT_POSITIONS.has(
+        data?.[LIVE_VIEWER_COUNT_POSITION_KEY],
+      );
+      liveViewerCountPosition = hasStoredPosition
+        ? data[LIVE_VIEWER_COUNT_POSITION_KEY]
+        : legacyLiveViewerCountPosition(data);
+      if (!hasStoredPosition) {
+        try {
+          const migration = chrome.storage?.local?.set({
+            [LIVE_VIEWER_COUNT_POSITION_KEY]: liveViewerCountPosition,
+          });
+          void Promise.resolve(migration).catch(() => {});
+        } catch {}
+      }
     } catch {
       liveTagFilters = [];
       liveTagFilterButtonOn = false;
-      liveViewerCountInlineOn = false;
-      liveViewerCountHiddenOn = false;
+      liveViewerCountPosition = "native";
     }
     ensureLiveTagFilterUi();
     applyLiveTagFilters();
@@ -29174,8 +29455,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         area !== "local" ||
         (!changes[LIVE_TAG_FILTERS_KEY] &&
           !changes[LIVE_TAG_FILTER_BUTTON_KEY] &&
-          !changes[LIVE_VIEWER_COUNT_INLINE_KEY] &&
-          !changes[LIVE_VIEWER_COUNT_HIDDEN_KEY])
+          !changes[LIVE_VIEWER_COUNT_POSITION_KEY])
       ) {
         return;
       }
@@ -29188,13 +29468,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         liveTagFilterButtonOn =
           changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue === true;
       }
-      if (changes[LIVE_VIEWER_COUNT_INLINE_KEY]) {
-        liveViewerCountInlineOn =
-          changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
-      }
-      if (changes[LIVE_VIEWER_COUNT_HIDDEN_KEY]) {
-        liveViewerCountHiddenOn =
-          changes[LIVE_VIEWER_COUNT_HIDDEN_KEY].newValue === true;
+      if (changes[LIVE_VIEWER_COUNT_POSITION_KEY]) {
+        liveViewerCountPosition = normalizeLiveViewerCountPosition(
+          changes[LIVE_VIEWER_COUNT_POSITION_KEY].newValue,
+        );
       }
       renderLiveTagFilterModal();
       ensureLiveTagFilterUi();
@@ -42802,6 +43079,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       COMMENT_TS_CLICK_DELAY_KEY,
       LIVE_TAG_FILTER_BUTTON_KEY,
       LIVE_TAG_FILTERS_KEY,
+      LIVE_VIEWER_COUNT_POSITION_KEY,
       LIVE_VIEWER_COUNT_INLINE_KEY,
       LIVE_VIEWER_COUNT_HIDDEN_KEY,
     ]),
@@ -44502,7 +44780,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
       applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
-      applyLiveViewerCountPlacement(); // 옵션 시 시청자 수를 LIVE 배지 옆에 배치
+      applyLiveViewerCountPlacement(); // 라이브 카드 시청자 수 위치 옵션 적용
       applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
       ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장
       ensureSearchRerank(); // 통합검색 동영상 섹션 재랭킹(옵션 시)
@@ -45174,9 +45452,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     { passive: true },
   );
   function scheduleFillScreenModeRecheck() {
-    requestAnimationFrame(() => applyFillScreen());
-    setTimeout(() => applyFillScreen(), 120);
-    setTimeout(() => applyFillScreen(), 300);
+    const recheck = () => {
+      applyFillScreen();
+      if (location.pathname.startsWith("/video/")) applyVodMoreLayout();
+    };
+    requestAnimationFrame(recheck);
+    setTimeout(recheck, 120);
+    setTimeout(recheck, 300);
+    setTimeout(recheck, 1000);
+  }
+  function beginFillScreenModeTransition(fullscreenToggle = false) {
+    // 넓은 화면/전체화면 전환이 현재 강제 높이를 기준으로 레이아웃을 잡지 않도록 네이티브
+    // 상태 변경보다 먼저 원복한다. 전환 신호가 늦는 환경에서는 짧은 정착 시간 동안 재적용도
+    // 막고, 마지막 재확인에서 좁은 화면으로 돌아온 경우에만 다시 적용한다.
+    fillScreenModeTransitionUntil = Date.now() + 800;
+    if (fullscreenToggle && location.pathname.startsWith("/video/")) {
+      vodMoreFullscreenTransitionUntil = Date.now() + 800;
+      // 치지직은 같은 클릭/키 이벤트 안에서 전체화면 크기를 계산할 수 있다. 다음 프레임까지
+      // 기다리지 않고 이동한 영상 더보기를 먼저 원위치로 돌려 계산 대상에서 제외한다.
+      applyVodMoreLayout();
+    }
+    clearFillScreenStyles();
+    scheduleFillScreenModeRecheck();
   }
 
   // 넓은 화면/전체화면 버튼 클릭 → 상태 전환 후 화면 채우기 재평가. 클릭 직후엔
@@ -45184,26 +45481,56 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   document.addEventListener(
     "click",
     (e) => {
-      const btn = e.target?.closest?.(
-        ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, .pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
-      );
+      const btn = e.target?.closest?.("button");
       if (!btn) return;
       if (
+        !btn.closest("#live_player_layout, #player_layout, .pzp-pc") ||
+        (!btn.matches(
+          ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, .pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
+        ) &&
+          !/(?:넓은|좁은|전체)\s*화면/.test(playerControlName(btn)))
+      ) {
+        return;
+      }
+      const name = playerControlName(btn);
+      const fullscreenToggle =
         btn.matches(
           ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
-        )
+        ) || /전체\s*화면/.test(name);
+      beginFillScreenModeTransition(fullscreenToggle);
+    },
+    true,
+  );
+  // 플레이어 기본 단축키 F로 전체화면을 전환할 때도 버튼 클릭과 같은 선원복을 한다.
+  // 이벤트는 막지 않아 치지직의 원래 전체화면 동작이 그대로 이어진다.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      const fullscreenToggle =
+        e.code === "KeyF" || e.key === "f" || e.key === "F";
+      const wideScreenToggle =
+        e.code === "KeyT" || e.key === "t" || e.key === "T";
+      if (!fullscreenToggle && !wideScreenToggle) return;
+      const active = document.activeElement;
+      if (
+        active?.isContentEditable ||
+        /^(?:INPUT|TEXTAREA|SELECT)$/.test(active?.tagName || "")
       ) {
-        // capture 단계에서 네이티브 Fullscreen 요청보다 먼저 강제 높이를 제거한다.
-        // 브라우저가 보정된 레이아웃 크기를 전체화면 기준으로 잡는 상황을 막는다.
-        clearFillScreenStyles();
+        return;
       }
-      scheduleFillScreenModeRecheck();
+      if (!/^\/(?:live|video)\//.test(location.pathname)) return;
+      if (!document.querySelector("video.webplayer-internal-video")) return;
+      beginFillScreenModeTransition(fullscreenToggle);
     },
     true,
   );
   // 전체화면 진입/이탈 시 화면 채우기를 재평가한다(전체화면이면 우리 높이 강제를 원복해야
   // 브라우저 전체화면이 정상 적용된다 — 치지직 업데이트로 재발한 문제 대응).
   function handleFillScreenFullscreenChange() {
+    if (location.pathname.startsWith("/video/")) {
+      vodMoreFullscreenTransitionUntil = Date.now() + 800;
+    }
     if (
       document.fullscreenElement ||
       document.webkitFullscreenElement ||

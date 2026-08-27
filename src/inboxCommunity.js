@@ -24,6 +24,7 @@
     "https://ssl.pstatic.net/static/nng/glive/image/default_profile_dark.png";
 
   let enabled = false;
+  let dotHidden = false;
   let active = false;
   let cache = { items: [], updatedAt: 0, loading: false, error: false };
   let readMap = {};
@@ -286,7 +287,7 @@
   }
 
   function syncUnreadDot() {
-    const unread = enabled && hasUnread();
+    const unread = enabled && !dotHidden && hasUnread();
     document.getElementById(TAB_ID)?.classList.toggle("has-new", unread);
     postParentUnread(unread);
   }
@@ -706,6 +707,7 @@
       enabled =
         data?.[MASTER_ENABLED_KEY] !== false &&
         hidden?.inboxCommunityNews === false;
+      dotHidden = hidden?.inboxCommunityNewsDot === true;
       cache = normalizeCache(data?.[CACHE_KEY]);
       cacheRevision += 1;
       openInNewTab = data?.[OPEN_NEW_TAB_KEY] === true;
@@ -717,6 +719,7 @@
       }
     } catch {
       enabled = false;
+      dotHidden = false;
     }
     ensureUi();
   }

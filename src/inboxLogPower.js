@@ -33,6 +33,7 @@
   // 비로그인이면 통나무파워 자체가 없다 → 탭을 아예 만들지 않는다.
   let loggedIn = false;
   let active = false;
+  let dotHidden = false;
   let entries = [];
   let readAt = 0;
   // 요약 막대의 기간 필터. 통계 페이지의 빠른 기간 버튼과 같은 기준을 쓴다.
@@ -200,7 +201,7 @@
   // 커뮤니티 소식 탭과 같은 방식: 노드를 붙이지 않고 has-new 클래스 + ::after.
   function syncTabDot() {
     // 탭이 열려 있는 동안에는 점을 띄우지 않는다(이미 보고 있는 내용이다).
-    const show = enabled && !active && hasUnread();
+    const show = enabled && !dotHidden && !active && hasUnread();
     document.getElementById(TAB_ID)?.classList.toggle("has-new", show);
   }
 
@@ -760,7 +761,13 @@
     // ⚠ 전용 숨김 플래그를 쓴다. 예전엔 chatLogPower(채팅창 배지 표시)를 함께 봤는데,
     // 그건 '채팅창에 배지를 띄울지'를 정하는 값이라 수신함 탭까지 좌우하는 건 맞지 않다.
     const next = master && hidden?.inboxLogPower !== true && loggedIn;
-    if (next === enabled) return;
+    const nextDotHidden = hidden?.inboxLogPowerDot === true;
+    const dotChanged = nextDotHidden !== dotHidden;
+    dotHidden = nextDotHidden;
+    if (next === enabled) {
+      if (dotChanged) syncTabDot();
+      return;
+    }
     enabled = next;
     if (enabled) {
       // ⚠ 순서 중요: loadReadAt 은 기준이 없을 때 latestAt() 을 쓰므로

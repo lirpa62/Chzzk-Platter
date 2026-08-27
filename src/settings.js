@@ -193,6 +193,7 @@
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
     "cheeseLiveSeekBarBottom",
+    "cheeseLiveViewerCountPosition",
     "cheeseLiveViewerCountInline",
     "cheeseLiveViewerCountHidden",
     "cheeseLiveTagFilterButton",
@@ -7745,16 +7746,14 @@
   // ── 전체 방송·팔로잉 라이브 제외 필터 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+  const LIVE_VIEWER_COUNT_POSITION_KEY = "cheeseLiveViewerCountPosition";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
   const LIVE_VIEWER_COUNT_HIDDEN_KEY = "cheeseLiveViewerCountHidden";
   const liveTagFilterButtonInput = document.querySelector(
     "[data-live-tag-filter-button]",
   );
-  const liveViewerCountInlineInput = document.querySelector(
-    "[data-live-viewer-count-inline]",
-  );
-  const liveViewerCountHiddenInput = document.querySelector(
-    "[data-live-viewer-count-hidden]",
+  const liveViewerCountPositionButtons = Array.from(
+    document.querySelectorAll("[data-live-viewer-count-position-value]"),
   );
   const liveTagForm = document.querySelector("[data-live-tag-form]");
   const liveTagInput = document.querySelector("[data-live-tag-input]");
@@ -7771,6 +7770,34 @@
   const liveTagRemoveAll = document.querySelector("[data-live-tag-remove-all]");
   let settingsLiveTagFilters = [];
   const settingsLiveTagSelected = new Set();
+
+  const LIVE_VIEWER_COUNT_POSITIONS = new Set([
+    "native",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+    "hidden",
+  ]);
+
+  function normalizeLiveViewerCountPosition(value) {
+    return LIVE_VIEWER_COUNT_POSITIONS.has(value) ? value : "native";
+  }
+
+  function legacyLiveViewerCountPosition(data) {
+    if (data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true) return "hidden";
+    if (data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true) return "top-left";
+    return "native";
+  }
+
+  function reflectLiveViewerCountPosition(value) {
+    const position = normalizeLiveViewerCountPosition(value);
+    liveViewerCountPositionButtons.forEach((button) => {
+      const active = button.dataset.liveViewerCountPositionValue === position;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
 
   function normalizeLiveTagFilter(value) {
     return String(value || "")
@@ -7871,23 +7898,13 @@
       [LIVE_TAG_FILTER_BUTTON_KEY]: liveTagFilterButtonInput.checked,
     });
   });
-  liveViewerCountInlineInput?.addEventListener("change", () => {
-    cachedStorageSet({
-      [LIVE_VIEWER_COUNT_INLINE_KEY]: liveViewerCountInlineInput.checked,
-    });
-  });
-  const reflectLiveViewerCountInlineAvailability = () => {
-    if (!liveViewerCountInlineInput) return;
-    const disabled = liveViewerCountHiddenInput?.checked === true;
-    liveViewerCountInlineInput.disabled = disabled;
-    liveViewerCountInlineInput
-      .closest(".settings-item")
-      ?.classList.toggle("is-locked", disabled);
-  };
-  liveViewerCountHiddenInput?.addEventListener("change", () => {
-    reflectLiveViewerCountInlineAvailability();
-    cachedStorageSet({
-      [LIVE_VIEWER_COUNT_HIDDEN_KEY]: liveViewerCountHiddenInput.checked,
+  liveViewerCountPositionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const position = normalizeLiveViewerCountPosition(
+        button.dataset.liveViewerCountPositionValue,
+      );
+      reflectLiveViewerCountPosition(position);
+      cachedStorageSet({ [LIVE_VIEWER_COUNT_POSITION_KEY]: position });
     });
   });
 
@@ -7965,6 +7982,7 @@
       const data = await cachedStorageGet([
         LIVE_TAG_FILTERS_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
+        LIVE_VIEWER_COUNT_POSITION_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
         LIVE_VIEWER_COUNT_HIDDEN_KEY,
       ]);
@@ -7975,25 +7993,21 @@
         liveTagFilterButtonInput.checked =
           data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
       }
-      if (liveViewerCountInlineInput) {
-        liveViewerCountInlineInput.checked =
-          data?.[LIVE_VIEWER_COUNT_INLINE_KEY] === true;
-      }
-      if (liveViewerCountHiddenInput) {
-        liveViewerCountHiddenInput.checked =
-          data?.[LIVE_VIEWER_COUNT_HIDDEN_KEY] === true;
+      const hasStoredPosition = LIVE_VIEWER_COUNT_POSITIONS.has(
+        data?.[LIVE_VIEWER_COUNT_POSITION_KEY],
+      );
+      const position = hasStoredPosition
+        ? data[LIVE_VIEWER_COUNT_POSITION_KEY]
+        : legacyLiveViewerCountPosition(data);
+      reflectLiveViewerCountPosition(position);
+      if (!hasStoredPosition) {
+        cachedStorageSet({ [LIVE_VIEWER_COUNT_POSITION_KEY]: position });
       }
     } catch {
       settingsLiveTagFilters = [];
       if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = false;
-      if (liveViewerCountInlineInput) {
-        liveViewerCountInlineInput.checked = false;
-      }
-      if (liveViewerCountHiddenInput) {
-        liveViewerCountHiddenInput.checked = false;
-      }
+      reflectLiveViewerCountPosition("native");
     }
-    reflectLiveViewerCountInlineAvailability();
     renderSettingsLiveTagFilters();
   }
 
@@ -8010,14 +8024,10 @@
         liveTagFilterButtonInput.checked =
           changes[LIVE_TAG_FILTER_BUTTON_KEY].newValue === true;
       }
-      if (changes[LIVE_VIEWER_COUNT_INLINE_KEY] && liveViewerCountInlineInput) {
-        liveViewerCountInlineInput.checked =
-          changes[LIVE_VIEWER_COUNT_INLINE_KEY].newValue === true;
-      }
-      if (changes[LIVE_VIEWER_COUNT_HIDDEN_KEY] && liveViewerCountHiddenInput) {
-        liveViewerCountHiddenInput.checked =
-          changes[LIVE_VIEWER_COUNT_HIDDEN_KEY].newValue === true;
-        reflectLiveViewerCountInlineAvailability();
+      if (changes[LIVE_VIEWER_COUNT_POSITION_KEY]) {
+        reflectLiveViewerCountPosition(
+          changes[LIVE_VIEWER_COUNT_POSITION_KEY].newValue,
+        );
       }
     });
   }
@@ -8177,6 +8187,9 @@
       return Number.isFinite(Number(value))
         ? clampPopupWidth(value)
         : undefined;
+    }
+    if (key === LIVE_VIEWER_COUNT_POSITION_KEY) {
+      return LIVE_VIEWER_COUNT_POSITIONS.has(value) ? value : undefined;
     }
     if (
       key === "cheeseAudioMixer.autoSync" ||
@@ -8479,6 +8492,14 @@
           const normalized = normalizeImportedSettingValue(key, value);
           if (normalized !== undefined) imported[key] = normalized;
         }
+      }
+      if (
+        imported[LIVE_VIEWER_COUNT_POSITION_KEY] === undefined &&
+        (imported[LIVE_VIEWER_COUNT_INLINE_KEY] !== undefined ||
+          imported[LIVE_VIEWER_COUNT_HIDDEN_KEY] !== undefined)
+      ) {
+        imported[LIVE_VIEWER_COUNT_POSITION_KEY] =
+          legacyLiveViewerCountPosition(imported);
       }
       const userDataStorage = payload?.userData?.storage;
       if (
@@ -10424,6 +10445,9 @@
     document.querySelectorAll("[data-lounge-refresh]"),
   );
   const loungeNewsInput = document.querySelector('[data-feature="loungeNews"]');
+  const inboxLogPowerInput = document.querySelector(
+    '[data-feature="inboxLogPower"]',
+  );
   const inboxCommunityNewsInput = document.querySelector(
     '[data-feature="inboxCommunityNews"]',
   );
@@ -10447,7 +10471,25 @@
       .getElementById("loungeRefresh")
       ?.closest(".settings-item")
       ?.classList.toggle("is-locked", disabled);
+    const loungeDotInput = document.querySelector(
+      '[data-feature="loungeNewsDot"]',
+    );
+    if (loungeDotInput) {
+      loungeDotInput.disabled = disabled;
+      loungeDotInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", disabled);
+    }
     const communityDisabled = communityInput?.checked === true;
+    const communityDotInput = document.querySelector(
+      '[data-feature="inboxCommunityNewsDot"]',
+    );
+    if (communityDotInput) {
+      communityDotInput.disabled = communityDisabled;
+      communityDotInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", communityDisabled);
+    }
     document
       .querySelectorAll("[data-inbox-community-refresh]")
       .forEach((btn) => {
@@ -10466,9 +10508,25 @@
         .closest(".settings-item")
         ?.classList.toggle("is-locked", communityDisabled);
     }
+    const logPowerDisabled =
+      document.querySelector('[data-feature="inboxLogPower"]')?.checked ===
+      true;
+    const logPowerDotInput = document.querySelector(
+      '[data-feature="inboxLogPowerDot"]',
+    );
+    if (logPowerDotInput) {
+      logPowerDotInput.disabled = logPowerDisabled;
+      logPowerDotInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", logPowerDisabled);
+    }
   }
   loungeNewsInput?.addEventListener("change", reflectLoungeRefreshAvailability);
   inboxCommunityNewsInput?.addEventListener(
+    "change",
+    reflectLoungeRefreshAvailability,
+  );
+  inboxLogPowerInput?.addEventListener(
     "change",
     reflectLoungeRefreshAvailability,
   );

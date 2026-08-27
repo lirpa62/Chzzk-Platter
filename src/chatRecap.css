@@ -956,6 +956,67 @@
   white-space: pre-line;
 }
 
+/* 긴 다시보기 한 편을 읽는 동안 전체 진행률이 멈춰 보여도 실제 요청과
+   페이지 순회가 계속되고 있음을 별도로 보여 준다. */
+.crc-vod-activity {
+  align-items: center;
+  background: color-mix(in srgb, var(--popup-brand) 8%, var(--popup-surface));
+  border: 1px solid
+    color-mix(in srgb, var(--popup-brand) 24%, var(--popup-border));
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 66px;
+  padding: 9px 11px;
+}
+
+.crc-vod-activity[hidden] {
+  display: none;
+}
+
+.crc-vod-activity-spinner {
+  animation: crc-vod-activity-spin 0.9s linear infinite;
+  color: var(--popup-brand);
+}
+
+.crc-vod-activity-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crc-vod-activity-copy strong {
+  color: var(--popup-text);
+  font-size: 12px;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crc-vod-activity-copy span {
+  color: var(--popup-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.crc-vod-activity-live {
+  color: var(--popup-brand-strong);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+@keyframes crc-vod-activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .crc-modal-actions {
   display: flex;
   gap: 8px;
@@ -1121,6 +1182,10 @@ img.crc-emoji {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .crc-vod-activity-spinner {
+    animation: none;
+  }
+
   .crc-progressbar-fill,
   .crc-progressbar-handle {
     transition: none;

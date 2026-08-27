@@ -632,6 +632,19 @@
     );
   }
 
+  // 실제 화면 변화가 없는 중립 상태에는 filter 속성을 아예 걸지 않는다. CSS의
+  // brightness(1) 같은 no-op도 video를 별도 합성 경로로 보낼 수 있어 RTX VSR 등
+  // 브라우저/드라이버의 영상 향상 기능과 불필요하게 경합할 수 있다.
+  function hasEffectiveFilter() {
+    const f = state.filters;
+    return (
+      round3(f.brightness * f.exposure) !== 1 ||
+      round3(f.contrast) !== 1 ||
+      round3(f.saturation) !== 1 ||
+      needsSvgFilter()
+    );
+  }
+
   // 필터를 video에 적용한다. 모든 보정을 video에 직접 CSS(밝기/대비/채도) + SVG
   // (색온도/색조/감마/톤/선명도)로 건다. canvas 오버레이를 쓰지 않으므로 전체화면·
   // 비율·컨트롤에 영향을 주지 않는다.
@@ -639,6 +652,10 @@
     const video = findVideo();
     if (!video) return;
     if (!state.enabled) {
+      clearFilter(video);
+      return;
+    }
+    if (!hasEffectiveFilter()) {
       clearFilter(video);
       return;
     }
@@ -978,6 +995,11 @@
     if (!state.enabled) return;
     const video = appliedVideo || findVideo();
     if (!video) return;
+    if (!hasEffectiveFilter()) {
+      clearFilter(video);
+      syncAutoSharpenStatus();
+      return;
+    }
     if (needsSvgFilter()) updateSvgFilter();
     else clearSvgFilter();
     const css = buildCssFilter();
@@ -999,6 +1021,12 @@
     if (!state.enabled) return;
     const video = findVideo();
     if (!video) return;
+    if (!hasEffectiveFilter()) {
+      if (appliedVideo || video.classList.contains("cheese-vf-target")) {
+        clearFilter(video);
+      }
+      return;
+    }
     if (
       video !== appliedVideo ||
       !video.classList.contains("cheese-vf-target")
@@ -2825,6 +2853,10 @@
       return false;
     }
     if (!state.enabled) {
+      return !appliedVideo && !document.querySelector("video.cheese-vf-target");
+    }
+
+    if (!hasEffectiveFilter()) {
       return !appliedVideo && !document.querySelector("video.cheese-vf-target");
     }
 

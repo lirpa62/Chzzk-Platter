@@ -7574,8 +7574,12 @@
   const HISTORY_REVISION_KEY = "chatRecapHistoryRevisionV1";
   const VOD_PAGE_MAX = 1500;
   const VIDEO_PAGE_MAX = 100; // 채널당 다시보기 목록 페이지 상한(50개 × 100)
-  // 동시에 훑을 다시보기 수. 서버 부담과 브라우저 연결 한도를 고려해 3.
-  const VOD_CONCURRENCY = 3;
+  // 수집 요청이 라이브·다시보기 재생과 같은 브라우저 자원을 공유한다. 평소에도
+  // 두 편까지만 훑고, 재생 탭이 있으면 한 편으로 낮춰 플레이어와 채팅을 우선한다.
+  const VOD_CONCURRENCY = 2;
+  const VOD_PLAYBACK_CONCURRENCY = 1;
+  const VOD_PLAYBACK_CHECK_TTL_MS = 5000;
+  const VOD_PLAYBACK_WORKER_WAIT_MS = 750;
   // 연속으로 이만큼 실패하면 멈춘다(일시적 오류 한두 건에는 반응하지 않게).
   const VOD_FAIL_STOP = 10;
   const NEW_VOD_CONCURRENCY = 3;
@@ -7591,6 +7595,11 @@
   let activeChannelId = ""; // 지금 수집 중인 채널
   let queuedChannels = new Set(); // 대기 중(아직 시작 안 한) 채널
   const doneChannels = new Set(); // 이번 실행에서 끝난 채널
+  let vodActivityTimer = 0;
+  let activeVodActivities = null;
+  let vodImportPlaybackActive = false;
+  let vodImportPlaybackCheckedAt = 0;
+  let vodImportPlaybackCheckPromise = null;
   let newVodByChannel = new Map();
   let newVodCheckAt = 0;
   let newVodCheckAccountId = "";
@@ -7723,7 +7732,11 @@
         const res = await fetch(
           `${API_BASE}/service/v1/channels/${channelId}/videos` +
             `?sortType=LATEST&pagingType=PAGE&page=${page}&size=${size}&publishDateAt=&videoType=`,
-          { credentials: "include", headers: { accept: "application/json" } },
+          {
+            credentials: "include",
+            headers: { accept: "application/json" },
+            priority: "low",
+          },
         );
         if (!res.ok) break;
         content = (await res.json())?.content;
@@ -8096,6 +8109,7 @@
     // 끝까지 읽었거나 채팅 미제공이 확정된 영상만 완료 캐시에 넣는다.
     rows.complete = false;
     let cursor = 0;
+    let scanned = 0;
     for (let page = 0; page < VOD_PAGE_MAX; page += 1) {
       if (cancelRequested) break;
       let content = null;
@@ -8103,7 +8117,12 @@
         const res = await fetch(
           `${API_BASE}/service/v1/videos/${videoNo}/chats` +
             `?playerMessageTime=${cursor}&previousVideoChatSize=50`,
-          { credentials: "include" },
+          {
+            credentials: "include",
+            // Chromium은 재생·채팅 요청보다 리캡 수집을 뒤로 보낼 수 있다.
+            // 미지원 브라우저는 알 수 없는 RequestInit 필드를 무시한다.
+            priority: "low",
+          },
         );
         if (!res.ok) {
           // 초창기에는 REPLAY여도 다시보기 채팅을 저장하지 않은 기간이 있었다.
@@ -8130,6 +8149,7 @@
         rows.complete = true;
         break;
       }
+      scanned += list.length;
       for (const m of list) {
         const code = Number(m?.messageTypeCode ?? 1);
         // ⚠ code 13 은 파티 순위 확정 안내(PARTY_DONATION_CONFIRM)다. 후원이
@@ -8175,12 +8195,16 @@
         });
       }
       const next = Number(content?.nextPlayerMessageTime);
+      onPage?.({
+        page: page + 1,
+        scanned,
+        matched: rows.length,
+      });
       if (!Number.isFinite(next) || next <= cursor) {
         rows.complete = true;
         break;
       }
       cursor = next;
-      onPage?.(page + 1);
     }
     return rows;
   }
@@ -9119,6 +9143,137 @@
     el.textContent = text || "";
   }
 
+  function renderVodActivity() {
+    const panel = $("crcVodActivity");
+    const title = $("crcVodActivityTitle");
+    const detail = $("crcVodActivityDetail");
+    const mode = $("crcVodActivityMode");
+    if (!panel || !title || !detail || !mode) return;
+    const activities = activeVodActivities
+      ? [...activeVodActivities.values()]
+      : [];
+    if (!activities.length) {
+      panel.hidden = true;
+      return;
+    }
+
+    const now = Date.now();
+    const pageCount = activities.reduce((sum, item) => sum + item.pages, 0);
+    const scannedCount = activities.reduce(
+      (sum, item) => sum + item.scanned,
+      0,
+    );
+    const matchedCount = activities.reduce(
+      (sum, item) => sum + item.matched,
+      0,
+    );
+    const startedAt = Math.min(...activities.map((item) => item.startedAt));
+    const lastResponseAt = Math.max(
+      ...activities.map((item) => item.lastResponseAt || 0),
+    );
+    const positions = activities
+      .map((item) => item.position)
+      .sort((a, b) => a - b)
+      .map((position) => fmt(position))
+      .join(", ");
+    const total = Math.max(...activities.map((item) => item.total));
+    const elapsed = formatDuration((now - startedAt) / 1000);
+    const responseAge = lastResponseAt
+      ? Math.max(0, Math.floor((now - lastResponseAt) / 1000))
+      : null;
+
+    title.textContent = vodImportPlaybackActive
+      ? "재생 탭을 우선하며 다시보기 채팅을 읽고 있습니다."
+      : `다시보기 ${activities.length}개에서 채팅을 읽고 있습니다.`;
+    mode.textContent = vodImportPlaybackActive ? "저부하 수집" : "수집 중";
+    const reading =
+      `영상 ${positions}/${fmt(total)} · 채팅 묶음 ${fmt(pageCount)}개 · ` +
+      `메시지 ${fmt(scannedCount)}개 확인 · 내 기록 ${fmt(matchedCount)}개`;
+    const activity =
+      responseAge == null
+        ? `첫 응답 대기 · ${elapsed} 경과`
+        : `${elapsed} 경과 · ${
+            responseAge < 2
+              ? "방금 응답 받음"
+              : `마지막 응답 ${fmt(responseAge)}초 전`
+          }`;
+    detail.textContent = `${reading}\n${activity}`;
+    panel.hidden = false;
+  }
+
+  function startVodActivity(activities) {
+    if (vodActivityTimer) clearInterval(vodActivityTimer);
+    activeVodActivities = activities;
+    renderVodActivity();
+    // 네트워크 응답 사이에도 경과 시간과 마지막 응답 시점을 갱신해 멈춘
+    // 화면처럼 보이지 않게 한다. DOM 갱신은 초당 한 번으로 제한한다.
+    vodActivityTimer = setInterval(renderVodActivity, 1000);
+  }
+
+  function stopVodActivity() {
+    if (vodActivityTimer) clearInterval(vodActivityTimer);
+    vodActivityTimer = 0;
+    activeVodActivities = null;
+    const panel = $("crcVodActivity");
+    if (panel) panel.hidden = true;
+  }
+
+  function isVodPlaybackTab(tab) {
+    if (!tab || tab.discarded === true || !tab.url) return false;
+    try {
+      const url = new URL(tab.url);
+      return (
+        url.origin === "https://chzzk.naver.com" &&
+        /^\/(?:live|video)\/[^/]+/.test(url.pathname)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async function refreshVodImportPlaybackMode(force = false) {
+    const now = Date.now();
+    if (
+      !force &&
+      now - vodImportPlaybackCheckedAt < VOD_PLAYBACK_CHECK_TTL_MS
+    ) {
+      return vodImportPlaybackActive;
+    }
+    if (vodImportPlaybackCheckPromise) return vodImportPlaybackCheckPromise;
+    vodImportPlaybackCheckPromise = (async () => {
+      try {
+        const tabs = await chrome.tabs.query({
+          url: "https://chzzk.naver.com/*",
+        });
+        vodImportPlaybackActive = tabs.some(isVodPlaybackTab);
+        vodImportPlaybackCheckedAt = Date.now();
+        renderVodActivity();
+      } catch {
+        // 탭 조회가 일시적으로 실패하면 직전 모드를 유지한다. 수집 자체를
+        // 실패시키거나 갑자기 동시 실행 수를 늘리지 않는다.
+      } finally {
+        vodImportPlaybackCheckPromise = null;
+      }
+      return vodImportPlaybackActive;
+    })();
+    return vodImportPlaybackCheckPromise;
+  }
+
+  async function waitForVodImportWorker(workerIndex, hasPending) {
+    for (;;) {
+      if (cancelRequested || !hasPending()) return false;
+      const playbackActive = await refreshVodImportPlaybackMode();
+      if (!playbackActive || workerIndex < VOD_PLAYBACK_CONCURRENCY) {
+        return true;
+      }
+      // 이미 요청 중인 영상은 끝까지 처리하고, 다음 영상부터 보조 작업자만
+      // 기다린다. 주 작업자는 계속 돌아 수집이 멈추지는 않는다.
+      await new Promise((resolve) =>
+        setTimeout(resolve, VOD_PLAYBACK_WORKER_WAIT_MS),
+      );
+    }
+  }
+
   // 남은 시간 추정. 지금까지 처리한 다시보기 1개당 평균 시간으로 곱한다.
   // (영상 길이가 제각각이라 정확하진 않지만, 경과 시간보다는 쓸모가 있다)
   function formatDuration(sec) {
@@ -9214,6 +9369,7 @@
     let channelsDone = 0;
     let newCacheChanged = false;
     const startedAt = Date.now();
+    await refreshVodImportPlaybackMode(true);
 
     // ⚠ 진행 중 추가된 채널도 처리해야 한다 → 고정 배열이 아니라 큐로 돈다.
     //   selected 에 새로 들어온 id 를 매 채널마다 뒤에 붙인다.
@@ -9251,8 +9407,8 @@
         );
         // ⚠ 한 영상 '안'의 페이징은 커서를 받아야 다음을 부를 수 있어 순차다.
         //   하지만 영상끼리는 독립이라 동시에 훑을 수 있다 → 작업자 풀로 돌린다.
-        //   동시 수를 크게 잡으면 서버 부담·브라우저 연결 한도(호스트당 6)에
-        //   걸리므로 팔로잉 조회와 같은 3으로 둔다.
+        //   평소 두 편, 재생 탭이 있으면 한 편만 처리해 플레이어 요청과 경쟁을
+        //   줄인다. 재생 탭 상태는 다음 영상을 시작할 때 다시 확인한다.
         const pending = [...new Set(videos)].filter((no) => {
           const value = String(no);
           if (newOnly) return !imported.has(value);
@@ -9266,20 +9422,45 @@
         vodsSkipped += videos.length - pending.length;
         let started = 0;
         let finished = 0;
-        const worker = async () => {
+        const vodActivities = new Map();
+        startVodActivity(vodActivities);
+        const worker = async (workerIndex) => {
           for (;;) {
             if (cancelRequested) return;
+            const allowed = await waitForVodImportWorker(
+              workerIndex,
+              () => started < pending.length,
+            );
+            if (!allowed) return;
             const idx = started;
             if (idx >= pending.length) return;
             started += 1;
             const videoNo = pending[idx];
+            vodActivities.set(String(videoNo), {
+              position: idx + 1,
+              total: pending.length,
+              pages: 0,
+              scanned: 0,
+              matched: 0,
+              startedAt: Date.now(),
+              lastResponseAt: 0,
+            });
+            renderVodActivity();
             await yieldToUi(); // 중단 클릭이 처리될 틈을 준다
             if (cancelRequested) return;
             const rows = await fetchMyChatsFromVideo(
               videoNo,
               accountId,
               historyMatcher,
-              () => {
+              (pageState) => {
+                const activity = vodActivities.get(String(videoNo));
+                if (activity) {
+                  activity.pages = pageState.page;
+                  activity.scanned = pageState.scanned;
+                  activity.matched = pageState.matched;
+                  activity.lastResponseAt = Date.now();
+                  renderVodActivity();
+                }
                 // 진행 문구는 완료 수 기준으로 적는다(동시에 여러 개가 도는데
                 // 각자 페이지 수를 쓰면 숫자가 널을 뛴다).
                 const perVod =
@@ -9300,6 +9481,8 @@
                 );
               },
             );
+            vodActivities.delete(String(videoNo));
+            renderVodActivity();
             if (cancelRequested) return;
             if (rows.failed) {
               failStreak += 1;
@@ -9347,9 +9530,10 @@
         await Promise.all(
           Array.from(
             { length: Math.min(VOD_CONCURRENCY, pending.length) },
-            () => worker(),
+            (_, workerIndex) => worker(workerIndex),
           ),
         );
+        stopVodActivity();
         channelsDone += 1;
         doneChannels.add(channelId);
         activeChannelId = "";
@@ -9365,6 +9549,7 @@
         renderFollowList($("crcChannelSearch")?.value || "");
       }
     } finally {
+      stopVodActivity();
       await saveImported(accountId, imported);
       await saveEventLinks(accountId, eventLinks);
       if (newOnly || newCacheChanged) await saveNewVodCheckCache(accountId);

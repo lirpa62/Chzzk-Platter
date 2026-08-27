@@ -5531,6 +5531,23 @@ html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
   transform: none !important;
 }
 
+.cheese-live-viewer-count-anchor {
+  position: relative !important;
+}
+
+.cheese-live-viewer-count-top-right-badge,
+.cheese-live-viewer-count-bottom-left-badge,
+.cheese-live-viewer-count-bottom-right-badge {
+  position: absolute !important;
+  top: var(--cheese-live-viewer-count-top) !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: var(--cheese-live-viewer-count-left) !important;
+  z-index: 2;
+  margin: 0 !important;
+  transform: none !important;
+}
+
 .cheese-live-viewer-count-hidden-badge {
   display: none !important;
 }
@@ -12709,6 +12726,15 @@ img.cheese-recap-emoji {
   gap: 6px;
 }
 
+.cheese-recap-profile-row [data-recap-count] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cheese-recap-profile-row [data-recap-count-value] {
+  white-space: nowrap;
+}
+
 .cheese-recap-profile-row-more {
   background: none;
   border: 1px solid currentColor;
@@ -12717,9 +12743,11 @@ img.cheese-recap-emoji {
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
+  flex: none;
   margin-left: auto;
   opacity: 0.75;
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
 .cheese-recap-profile-row-more:hover {
