@@ -139,6 +139,19 @@
   font-weight: 800;
 }
 
+/* 안내 문구형 모달(항상 켜기 중 끄기 확인). 입력창 대신 설명이 들어가 조금 넓다. */
+.cheese-vf-modal:has(.cheese-vf-modal-desc) {
+  max-width: 340px;
+}
+
+.cheese-vf-modal-desc {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: #c9d1dc;
+}
+
 .cheese-vf-modal input {
   box-sizing: border-box;
   width: 100%;

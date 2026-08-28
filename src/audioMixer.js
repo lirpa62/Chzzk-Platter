@@ -72,9 +72,6 @@
   };
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
-  let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
-  let mixerClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
-  let mixerBeginner = false; // 초보자용 원클릭: 클릭 시 패널 없이 기본 프리셋으로 바로 on/off
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
@@ -200,24 +197,6 @@
     gainPctOn = e.data.gainPct !== false;
     // 스크린샷 저장 전 미리보기(전역, 기본 OFF). 켜면 모달로 저장/취소 확인.
     screenshotPreviewOn = e.data.screenshotPreview === true;
-    // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF=패널만 토글).
-    mixerClickActivate = e.data.mixerClickActivate === true;
-    mixerClickNoPanel = e.data.mixerClickNoPanel === true;
-    // 초보자용 원클릭(전역, 기본 OFF). 켜지면 위 옵션·전역기본값과 무관하게 클릭 시
-    // 패널 없이 기본 프리셋으로 바로 on/off 한다.
-    const mixerBeginnerPrev = mixerBeginner;
-    mixerBeginner = e.data.mixerBeginner === true;
-    // 옵션을 방금 '켠' 순간, 믹서가 이미 켜져 있으면(다른 프리셋 사용 중) 즉시 기본
-    // 프리셋으로 교체한다(끄기 전까진 초보자 모드가 프리셋을 고정하므로). 꺼져 있으면
-    // 그대로 두고 다음 버튼 클릭 시 적용.
-    if (
-      mixerBeginner &&
-      !mixerBeginnerPrev &&
-      state.enabled &&
-      typeof applyPreset === "function"
-    ) {
-      applyPreset("default");
-    }
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
@@ -709,6 +688,8 @@
     comp: null,
     limiter: null,
     outputGain: null,
+    muteGain: null, // video.muted/volume=0 을 출력에 반영하는 최종단
+    muteMirrorVideo: null, // 위 반영을 위해 volumechange 를 듣고 있는 video
     video: null,
     connected: false,
     normTimer: 0, // 노멀라이저 분석 루프(setInterval) id
@@ -797,6 +778,7 @@
   let dirtyMode = "advanced";
   // head의 인라인 이름 입력창 열림 여부.
   let quickSaveOpen = false;
+  let alwaysOnOffAsk = false; // '항상 켜기' 중 패널 전원 끄기 확인 모달
   let graphRetryBlock = {
     video: null,
     pageKey: "",
@@ -967,7 +949,14 @@
       // threshold 를 넘어 찢어졌다 — 게인/​makeup 을 올릴수록 심해짐.)
       audio.comp.connect(audio.outputGain);
       audio.outputGain.connect(audio.limiter);
-      audio.limiter.connect(audio.ctx.destination);
+      // ⚠ 음소거 반영용 최종단. createMediaElementSource 로 오디오를 가져오면 소리가
+      //   video 가 아니라 AudioContext.destination 으로 나가므로 video.muted 가 더는
+      //   출력을 막지 못한다. 그대로 두면 플레이어에서 음소거해도 소리가 계속 났다(제보).
+      //   여기서 muted/volume=0 을 게인 0 으로 반영해 '음소거는 음소거'가 되게 한다.
+      audio.muteGain = audio.ctx.createGain();
+      audio.limiter.connect(audio.muteGain);
+      audio.muteGain.connect(audio.ctx.destination);
+      bindMuteMirror(video);
 
       audio.connected = true;
       applyState();
@@ -1015,6 +1004,8 @@
   function handleGraphBuildFailure(video, err) {
     stopNormalizerLoop();
     restoreSourceToDestination();
+    unbindMuteMirror(); // 실패했으면 음소거 미러도 정리(리스너 누수 방지)
+    audio.muteGain = null;
     audio.connected = false;
     audio.video = video || null;
     state.enabled = false;
@@ -1054,10 +1045,51 @@
   }
 
   function teardownGraph() {
+    // 리스너는 connected 여부와 무관하게 정리한다(video 교체 시 누수 방지).
+    unbindMuteMirror();
+    audio.muteGain = null;
     if (!audio.connected) return;
     stopNormalizerLoop();
     restoreSourceToDestination();
     audio.connected = false;
+  }
+
+  // 플레이어 음소거(또는 볼륨 0)를 그래프 출력에 반영한다.
+  // Web Audio 로 라우팅된 뒤에는 video.muted 가 소리를 막지 못하므로 여기서 대신 끊는다.
+  // ⚠ video.volume 은 그래프 입력 레벨에 이미 반영되므로 게인으로 또 곱하지 않는다.
+  //   여기서는 '완전 무음(muted 또는 volume 0)' 여부만 0/1 로 반영한다.
+  function syncMuteGain() {
+    if (!audio.muteGain || !audio.ctx) return;
+    const video = audio.muteMirrorVideo || audio.video;
+    const silent = Boolean(video?.muted) || Number(video?.volume) === 0;
+    const next = silent ? 0 : 1;
+    if (audio.muteGain.gain.value === next) return;
+    try {
+      // 뚝 끊기는 소리를 막기 위해 아주 짧게 램프한다.
+      const now = audio.ctx.currentTime;
+      audio.muteGain.gain.setTargetAtTime(next, now, 0.01);
+    } catch {
+      audio.muteGain.gain.value = next;
+    }
+  }
+
+  function bindMuteMirror(video) {
+    if (audio.muteMirrorVideo === video) {
+      syncMuteGain();
+      return;
+    }
+    unbindMuteMirror();
+    if (!(video instanceof HTMLMediaElement)) return;
+    audio.muteMirrorVideo = video;
+    video.addEventListener("volumechange", syncMuteGain);
+    syncMuteGain(); // 현재 상태를 즉시 반영(음소거해 둔 채 그래프가 붙는 경우)
+  }
+
+  function unbindMuteMirror() {
+    const previous = audio.muteMirrorVideo;
+    audio.muteMirrorVideo = null;
+    if (!previous) return;
+    previous.removeEventListener("volumechange", syncMuteGain);
   }
 
   function restoreSourceToDestination() {
@@ -1360,7 +1392,6 @@
   }
 
   function applyGlobalDefaultPreset() {
-    if (mixerBeginner) return false; // 초보자 모드는 기본 프리셋 고정 → 전역 기본값 무시
     if (!globalDefaultPreset.enabled) return false;
     const key = globalDefaultPreset.preset || "default";
     const snapshot = snapshotForPresetKey(key);
@@ -1473,6 +1504,25 @@
     state.preset = "custom";
   }
 
+  // 저장값의 dirtyFrom 으로 '수정된 프리셋' 상태를 복원한다.
+  // 저장된 프리셋이 custom 이 아니거나 원본 키가 사라졌으면(커스텀 삭제 등) 복원하지
+  // 않는다 — 그때는 종전대로 '사용자 설정'으로 보인다.
+  function restoreDirtyFromSaved() {
+    const from = String(state.dirtyFrom || "");
+    delete state.dirtyFrom; // state 에 남겨 두면 스냅샷 비교에 섞인다
+    if (state.preset !== "custom" || !from) {
+      clearPresetDirty();
+      return;
+    }
+    if (!isRealPreset(from)) {
+      clearPresetDirty();
+      return;
+    }
+    presetDirty = true;
+    dirtyFromKey = from;
+    dirtyFromName = presetDisplayName(from);
+  }
+
   function clearPresetDirty() {
     presetDirty = false;
     dirtyFromName = "";
@@ -1556,6 +1606,17 @@
   // 수정 후 호출: 현재 값이 '값 조정 전 프리셋'과 같아졌으면 dirty를 해제하고
   // state.preset을 그 프리셋으로 되돌린다(추가/초기화 버튼이 사라진다). 같지 않으면
   // 그대로 두고 false. 같아져서 정리했으면 true를 반환한다.
+  // 원본 프리셋과 견줘 '게인만' 다른지. 게인을 원본 값으로 맞춘 사본과 비교해,
+  // 나머지(EQ·컴프·리미터·노멀라이저)가 모두 같으면 게인만 바뀐 것이다.
+  function isGainOnlyDirty() {
+    if (!presetDirty || !dirtyFromKey) return false;
+    const base = baseSnapshotForDirty();
+    if (!base) return false;
+    const current = createMixerSnapshot();
+    if (current.gain === base.gain) return false; // 게인이 같으면 다른 곳이 바뀐 것
+    return snapshotsEqual({ ...current, gain: base.gain }, base);
+  }
+
   function reconcileDirtyAgainstBase() {
     if (!presetDirty || !dirtyFromKey) return false;
     const base = baseSnapshotForDirty();
@@ -2064,6 +2125,11 @@
   function snapshotChannelPreset() {
     return {
       preset: state.preset,
+      // ⚠ 값을 조금 만지면 state.preset 이 "custom" 으로 덮이는데, 예전엔 '무엇을
+      //   수정한 것인지'를 메모리(dirtyFromKey)에만 두어 새로고침하면 사라졌다.
+      //   그래서 게인만 바꿔도 다음 방문부터 툴팁이 '사용자 설정'으로만 나왔다(제보).
+      //   원본 프리셋 키를 함께 저장해 재방문에도 '수정된 노래 방송'을 유지한다.
+      dirtyFrom: presetDirty ? dirtyFromKey || "" : "",
       gain: state.gain,
       eq: [...state.eq],
       comp: { ...state.comp },
@@ -2087,6 +2153,7 @@
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
       preset: preset.preset,
+      dirtyFrom: String(preset.dirtyFrom || ""), // 수정 전 프리셋 키(툴팁 표시용)
       gain: preset.gain,
       eq: [...preset.eq],
       comp: { ...preset.comp },
@@ -2195,6 +2262,9 @@
         // 영구 저장값의 enabled는 사용하지 않는다. 같은 탭에서 이 페이지를 켜 둔
         // 기록만 복원해 새 탭 여러 개 중 하나가 임의로 켜지는 현상을 막는다.
         state.enabled = tabEnabledPageKeys.has(currentPageKey);
+        // '수정된 프리셋' 표시를 재방문에도 잇는다. preset 이 custom 인데 원본 키가
+        // 남아 있으면 dirty 상태로 되살린다(툴팁: '수정된 노래 방송').
+        restoreDirtyFromSaved();
         globalDefaultPreset = normalizeGlobalDefaultPreset(saved.globalDefault);
         // 기본값으로 등록된 커스텀이 더 이상 없으면(삭제됨) 등록 해제 → 원래 기본 복귀.
         if (
@@ -2369,6 +2439,8 @@
     }
     // 컴팩트 슬라이더 채움/툴팁 + 열려 있는 패널(고급 슬라이더 min/max)을 갱신.
     if (typeof syncMasterGain === "function") syncMasterGain();
+    // 클램프로 게인이 바뀌었으면 버튼 툴팁의 % 표기도 함께 갱신한다.
+    if (typeof syncMixerButtonLabel === "function") syncMixerButtonLabel();
     if (typeof refreshPanelContent === "function" && ui?.panel) {
       refreshPanelContent();
     }
@@ -2423,6 +2495,8 @@
     if (!wrap) wrap = createButtonControl();
     nativeVolume.insertAdjacentElement("afterend", wrap);
     syncUI();
+    // 버튼이 실제로 붙은 뒤에 조작 안내를 띄운다(최초 1회).
+    maybeShowGestureHint(wrap.querySelector(`.${BUTTON_CLASS}`));
   }
 
   function removeButton() {
@@ -2438,45 +2512,28 @@
     }
   }
 
-  // 믹서 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
-  // 클릭 = 믹서 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
+  // 믹서 버튼 좌클릭: 패널 없이 바로 on/off.
+  // (우클릭이 패널을 열므로 클릭 동작 관련 옵션은 두지 않는다. 처음 쓰는 사람도
+  //  좌클릭 한 번으로 켜지고, 세부 조정은 우클릭으로 이어지게 하려는 것.)
+  // ⚠ 프리셋은 강제로 바꾸지 않는다. 예전 '초보자용 원클릭'은 켤 때마다
+  //   applyPreset("default")를 불러 사용자가 고른 프리셋을 지웠다. 이제는 채널별로
+  //   저장된 마지막 프리셋 그대로 켠다(최초 사용 시에는 저장값이 기본 프리셋이다).
   function handleMixerButtonClick() {
-    // 초보자용 원클릭(최우선): clickActivate/noPanel/전역기본값과 무관하게 패널 없이
-    // '기본 프리셋으로 바로 on/off'. 켤 때 기본 프리셋을 강제 적용해 항상 동일 동작.
-    if (mixerBeginner) {
-      if (state.enabled && audio.connected) {
-        setEnabled(false);
-      } else if (!graphConflict) {
-        // 그래프를 '먼저' 켠다(클릭 직후 = 사용자 활성화가 살아 있을 때 buildGraph 성공률↑).
-        // 그다음 기본 프리셋 값을 반영한다(connected 면 값만 적용). 순서를 뒤집으면
-        // applyPreset 내부 처리 뒤에 buildGraph 가 불려 userActivation 창을 놓쳐 '되다
-        // 안되다' 하던 문제를 줄인다.
-        setEnabled(true);
-        if (state.enabled && audio.connected) applyPreset("default");
+    if (state.enabled && audio.connected) {
+      // '항상 켜기'는 말 그대로 항상 켜 두는 설정이므로 좌클릭으로 끄지 않는다.
+      // 끄려면 설정에서 옵션을 해제하거나 패널의 전원 토글을 쓰면 된다(그쪽은
+      // 채널별 opt-out을 남긴다). 여기서는 왜 안 꺼지는지만 알려 준다.
+      if (mixerAlwaysOn) {
+        showPresetOsd("'항상 켜기'가 켜져 있어 끌 수 없습니다", 2600);
+        return;
       }
+      setEnabled(false);
       return;
     }
-    if (!mixerClickActivate) {
-      togglePanel();
-      return;
-    }
-    // '패널 안 열기' 하위 옵션: 패널은 건드리지 않고 효과 enabled 만 토글한다(판정도
-    // 패널 열림이 아니라 state.enabled 기준). 클릭은 사용자 제스처라 AudioContext 활성화 가능.
-    if (mixerClickNoPanel) {
-      if (state.enabled) setEnabled(false);
-      else if (!graphConflict) setEnabled(true);
-      return;
-    }
-    const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
-    if (panelOpen) {
-      // 열려 있으면 끄고 닫는다. (믹서 숨김 기능이 아니라 효과 비활성)
-      if (state.enabled) setEnabled(false);
-      closePanel();
-    } else {
-      // 닫혀 있으면 켜고 연다. 클릭은 사용자 제스처라 AudioContext 활성화 가능.
-      if (!state.enabled && !graphConflict) setEnabled(true);
-      openPanel();
-    }
+    if (graphConflict) return;
+    // 그래프를 클릭 직후에 켠다 — 사용자 활성화(userActivation)가 살아 있어야
+    // buildGraph 성공률이 높다. 순서를 미루면 '되다 안 되다' 하는 문제가 생긴다.
+    setEnabled(true);
   }
 
   function openPanel() {
@@ -2486,6 +2543,7 @@
     customDialog = null;
     // 이름 입력창은 닫힌 상태로 시작한다(dirty 상태/버튼 표시는 유지).
     quickSaveOpen = false;
+    alwaysOnOffAsk = false;
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     const root = getPanelRoot(button) || findPlayer();
     if (!root) {
@@ -2829,7 +2887,26 @@
           </div>
         </section>
       </div>
-      ${renderQuickSaveModal()}`;
+      ${renderQuickSaveModal()}
+      ${renderAlwaysOnOffModal()}`;
+  }
+
+  // '항상 켜기'가 켜져 있는데 패널 전원을 끄려 할 때 뜨는 확인 모달.
+  // 좌클릭은 아예 끄지 못하게 막지만, 패널 토글은 '이 채널만 제외'라는 뜻이 있어
+  // 막지 않는다. 대신 무슨 일이 벌어지는지 분명히 알리고 확인을 받는다.
+  function renderAlwaysOnOffModal() {
+    if (!alwaysOnOffAsk) return "";
+    return `
+      <div class="cheese-mixer-modal-backdrop" data-action="alwayson-cancel">
+        <div class="cheese-mixer-modal" role="dialog" aria-label="오디오 믹서 끄기" data-modal-stop>
+          <strong>'항상 켜기'가 켜져 있습니다</strong>
+          <p class="cheese-mixer-modal-desc">그래도 오디오 믹서를 끕니다.<br>이 채널은 앞으로 '항상 켜기' 대상에서 제외되어 자동으로 켜지지 않습니다.<br>다시 켜면 제외가 해제됩니다.</p>
+          <div class="cheese-mixer-modal-actions">
+            <button type="button" class="cheese-mixer-custom-button is-primary" data-action="alwayson-confirm">끄기</button>
+            <button type="button" class="cheese-mixer-custom-button" data-action="alwayson-cancel">취소</button>
+          </div>
+        </div>
+      </div>`;
   }
 
   // "프리셋 추가" 클릭 시 패널 위에 뜨는 이름 입력 모달.
@@ -3244,7 +3321,7 @@
         const action = actionButton.dataset.action;
         // backdrop의 quicksave-cancel은 모달 내부 클릭에는 적용하지 않는다.
         if (
-          action === "quicksave-cancel" &&
+          (action === "quicksave-cancel" || action === "alwayson-cancel") &&
           actionButton.classList.contains("cheese-mixer-modal-backdrop") &&
           e.target.closest("[data-modal-stop]")
         ) {
@@ -3270,6 +3347,20 @@
         }
         if (action === "quicksave-cancel") {
           closeQuickSaveModal();
+          return;
+        }
+        if (action === "alwayson-confirm") {
+          // 확인을 받았으니 실제로 끄고, 이 채널을 '항상 켜기'에서 제외한다.
+          alwaysOnOffAsk = false;
+          state.userDisabled = true;
+          setEnabled(false);
+          saveState(); // opt-out 은 켜짐 여부와 무관하게 확실히 남긴다
+          refreshPanelContent();
+          return;
+        }
+        if (action === "alwayson-cancel") {
+          alwaysOnOffAsk = false;
+          refreshPanelContent();
           return;
         }
         if (handleCustomPresetAction(panel, actionButton)) {
@@ -3336,10 +3427,23 @@
         return;
       }
       if (t.dataset.action === "power") {
+        // '항상 켜기' 중 끄려 하면 무슨 일이 벌어지는지 먼저 확인받는다.
+        // (체크박스는 되돌려 두고, 확인을 누르면 그때 실제로 끈다.)
+        if (!t.checked && mixerAlwaysOn) {
+          t.checked = true;
+          alwaysOnOffAsk = true;
+          refreshPanelContent();
+          return;
+        }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기' 자동 활성화에서 제외(opt-out).
         // 다시 켜면 해제. per-channel로 저장돼 새로고침 후에도 의사 유지.
         state.userDisabled = !t.checked;
         setEnabled(t.checked);
+        // ⚠ setEnabled 는 video 가 없거나 그래프 생성이 실패하면 saveState 전에
+        //   빠져나간다. 그러면 방금 바꾼 userDisabled 가 저장되지 않아, 새로고침
+        //   후에도 예전 opt-out 이 되살아났다(제보). 켜짐 여부와 무관하게 이
+        //   '의사'는 반드시 남긴다.
+        saveState();
       } else if (t.dataset.action === "comp-toggle") {
         state.comp.enabled = t.checked;
         enterCustomFromEdit();
@@ -3586,6 +3690,10 @@
     syncPresetSelection();
     syncHead();
     syncMasterGain();
+    // ⚠ 툴팁에 게인 %를 병기하므로 값이 바뀔 때마다 라벨도 다시 만든다. 예전에는
+    //   라벨이 프리셋 이름에만 의존해 조절 중에는 바뀔 일이 없었지만, 지금은
+    //   갱신하지 않으면 이전 게인 값이 그대로 남는다(제보).
+    syncMixerButtonLabel();
     commitUserEditToChannelBase(); // 직접 조절 = 이 채널의 새 원본
     saveState();
   }
@@ -3694,16 +3802,22 @@
   // 버튼 툴팁/aria-label에 적용 중인 프리셋을 병기한다.
   //  - 꺼짐: "오디오 믹서"
   //  - 실제 프리셋 적용 중: "오디오 믹서 (OOO)"
-  //  - 프리셋을 수정한 상태(저장 안 함/게인 슬라이더 조절 포함): "오디오 믹서  (수정된 OOO)"
+  //  - 게인만 조절한 상태: "오디오 믹서 (OOO · 180%)"
+  //  - 그 밖에 프리셋을 수정한 상태(저장 안 함): "오디오 믹서 (수정된 OOO)"
   //  - 베이스 프리셋 없이 직접 설정한 상태: "오디오 믹서 (사용자 설정)"
+  // ⚠ '수정된 OOO' 표시는 채널 저장값의 dirtyFrom 으로 재방문에도 이어진다.
   function mixerButtonLabel() {
     const base = "오디오 믹서";
     // 꺼짐 상태에는 단축키를 병기해 기능(과 토글 방법)이 있음을 알린다.
     if (!state.enabled) return `${base} (Shift+A)`;
     if (presetDirty) {
-      return dirtyFromName
-        ? `${base} (수정된 ${dirtyFromName})`
-        : `${base} (사용자 설정)`;
+      if (!dirtyFromName) return `${base} (사용자 설정)`;
+      // 게인만 다르면 '수정된 X' 대신 'X · 180%' 로 무엇이 달라졌는지 바로 보여 준다
+      // (제보: 게인만 만졌는데 원래 프리셋을 알 수 없어 답답함).
+      if (isGainOnlyDirty()) {
+        return `${base} (${dirtyFromName} · ${Math.round(state.gain * 100)}%)`;
+      }
+      return `${base} (수정된 ${dirtyFromName})`;
     }
     const name = presetDisplayName(state.preset);
     if (name) return `${base} (${name})`;
@@ -3796,6 +3910,7 @@
         btn.blur();
         return;
       }
+      dismissGestureHint();
       handleMixerButtonClick();
       btn.blur();
       return;
@@ -6205,6 +6320,7 @@
         // 모달만 취소되도록 여기선 건드리지 않는다(모달 취소는 내부 리스너/모달 로직).
         const modalOpen =
           quickSaveOpen ||
+          alwaysOnOffAsk ||
           customCreatorOpen ||
           customExportOpen ||
           customImportOpen ||
@@ -7547,6 +7663,175 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
       openSyncMenu(btn);
+    },
+    true,
+  );
+
+  // ── 최초 1회 조작 안내 ───────────────────────────────────────────────────
+  // 좌/우클릭 동작이 바뀌었으므로(예전에는 클릭 = 패널) 버튼 옆에 한 번만 알려 준다.
+  // 기존 사용자·신규 사용자 모두 대상이며, 한 번 보거나 버튼을 쓰면 다시 뜨지 않는다.
+  const GESTURE_HINT_KEY = "cheeseMixerGestureHintSeen";
+  const GESTURE_HINT_CLASS = "cheese-gesture-hint";
+  let gestureHintShown = false;
+  function dismissGestureHint(persist = true) {
+    const hint = document.querySelector(
+      `.${GESTURE_HINT_CLASS}[data-for="mixer"]`,
+    );
+    if (hint) hint.remove();
+    if (!persist || gestureHintShown) return;
+    gestureHintShown = true;
+    try {
+      localStorage.setItem(GESTURE_HINT_KEY, "1");
+    } catch {}
+  }
+
+  function maybeShowGestureHint(btn) {
+    if (gestureHintShown || !btn) return;
+    try {
+      if (localStorage.getItem(GESTURE_HINT_KEY) === "1") {
+        gestureHintShown = true;
+        return;
+      }
+    } catch {
+      return; // localStorage를 못 쓰면 안내를 반복해 띄우지 않는다.
+    }
+    if (document.querySelector(`.${GESTURE_HINT_CLASS}[data-for="mixer"]`))
+      return;
+    const host = btn.parentElement;
+    if (!host) return;
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    const hint = document.createElement("div");
+    hint.className = GESTURE_HINT_CLASS;
+    hint.dataset.for = "mixer";
+    hint.innerHTML =
+      "<b>오디오 믹서</b>좌클릭 켜기·끄기 · 우클릭 설정 패널 · 휠 프리셋 전환";
+    host.appendChild(hint);
+    // 잠시 뒤 자동으로 사라진다(버튼을 쓰면 그때 바로 사라지고 다시 뜨지 않는다).
+    setTimeout(() => hint.remove(), 6000);
+  }
+
+  // ── 버튼 위 휠: 프리셋 빠른 전환 ─────────────────────────────────────────
+  // 내장 프리셋 + 커스텀 프리셋을 한 줄로 이어 휠로 넘긴다. 영상 위 휠 볼륨과는
+  // 겹치지 않는다 — isOverVideoArea()가 button을 이미 제외하고 있다.
+  function presetCycleList() {
+    return [
+      ...Object.entries(PRESETS).map(([key, p]) => ({
+        key,
+        label: p.label,
+        custom: false,
+      })),
+      ...normalizeCustomPresets(state.customPresets).map((p) => ({
+        key: p.id,
+        label: p.name,
+        custom: true,
+      })),
+    ];
+  }
+
+  function cyclePreset(direction) {
+    const list = presetCycleList();
+    if (!list.length) return;
+    const current = String(state.preset || "default");
+    const at = list.findIndex((item) => item.key === current);
+    // 목록에 없으면(삭제된 커스텀 등) 첫 항목부터 시작한다.
+    const next =
+      list[
+        (((at < 0 ? 0 : at + direction) % list.length) + list.length) %
+          list.length
+      ];
+    if (!next) return;
+    if (next.custom) applyCustomPreset(next.key);
+    else applyPreset(next.key);
+    showPresetOsd(next.label);
+  }
+
+  // 프리셋 전환·안내 표시. 화면 가운데 OSD 대신 버튼 바로 위 말풍선으로 띄운다
+  // (조작한 버튼 옆에 붙어야 무엇이 바뀌었는지 바로 읽힌다).
+  const PRESET_TIP_CLASS = "cheese-button-tip";
+  let presetTipTimer = 0;
+  // ms: 프리셋 이름은 짧게, 설명 문구는 읽을 시간을 준다.
+  function showPresetOsd(label, ms = 1200) {
+    const btn = document.querySelector(`.${BUTTON_CLASS}`);
+    const host = btn?.parentElement;
+    if (!host) return;
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    let tip = host.querySelector(`.${PRESET_TIP_CLASS}`);
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.className = PRESET_TIP_CLASS;
+      host.appendChild(tip);
+    }
+    tip.textContent = label;
+    tip.classList.add("is-on");
+    // 말풍선이 떠 있는 동안에는 컨트롤 바가 자동 숨김되지 않게 잡아 둔다.
+    keepControlsAlive(true);
+    clearTimeout(presetTipTimer);
+    presetTipTimer = setTimeout(() => {
+      tip.classList.remove("is-on");
+      keepControlsAlive(false);
+    }, ms);
+  }
+
+  // 휠 조작 중 치지직이 컨트롤 바를 숨기면 버튼이 사라져 연속 전환이 끊긴다.
+  // 재생바 호버 keep-alive와 같은 방식으로, 표시 중에는 클래스를 계속 붙여 둔다.
+  let controlsKeepAlive = false;
+  let controlsKeepAliveObserver = null;
+  function keepControlsAlive(on) {
+    const player = findPlayer();
+    if (!player) return;
+    controlsKeepAlive = on;
+    if (!on) {
+      controlsKeepAliveObserver?.disconnect();
+      controlsKeepAliveObserver = null;
+      return;
+    }
+    if (!player.classList.contains(CONTROLS_CLASS)) {
+      player.classList.add(CONTROLS_CLASS);
+    }
+    if (controlsKeepAliveObserver) return;
+    // 치지직이 클래스를 떼면 즉시 되붙인다(mousemove 합성으로는 먹지 않는다).
+    controlsKeepAliveObserver = new MutationObserver(() => {
+      if (!controlsKeepAlive) return;
+      if (!player.classList.contains(CONTROLS_CLASS)) {
+        player.classList.add(CONTROLS_CLASS);
+      }
+    });
+    controlsKeepAliveObserver.observe(player, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+
+  document.addEventListener(
+    "wheel",
+    (e) => {
+      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissGestureHint();
+      cyclePreset(e.deltaY < 0 ? -1 : 1);
+    },
+    { capture: true, passive: false },
+  );
+
+  // 믹서 버튼 우클릭 → 패널 열기(좌클릭은 즉시 on/off).
+  // 실시간 따라잡기 버튼과 같은 방식: capture 단계에서 native 플레이어 컨텍스트
+  // 메뉴를 먼저 차단한다.
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      dismissGestureHint();
+      togglePanel();
     },
     true,
   );

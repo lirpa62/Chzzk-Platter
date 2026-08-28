@@ -670,26 +670,11 @@
   // 이 옵션과 무관하며 settings에서 비활성화된다.
   const SCREENSHOT_DIRECT_SAVE_KEY = "cheeseScreenshotDirectSave";
   let screenshotDirectSave = true;
-  const MIXER_CLICK_ACTIVATE_KEY = "cheeseMixerClickActivate";
-  let mixerClickActivate = false; // 믹서 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
-  const MIXER_CLICK_NO_PANEL_KEY = "cheeseMixerClickNoPanel";
-  let mixerClickNoPanel = false; // 클릭 시 바로 켜기에서 패널 안 열기(전역, 기본 OFF)
-  const VIDEO_FILTER_CLICK_ACTIVATE_KEY = "cheeseVideoFilterClickActivate";
-  let videoFilterClickActivate = false; // 필터 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
-  const VIDEO_FILTER_CLICK_NO_PANEL_KEY = "cheeseVideoFilterClickNoPanel";
-  let videoFilterClickNoPanel = false; // 클릭 시 바로 켜기에서 패널 안 열기(전역, 기본 OFF)
   const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
   let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
   const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
     "cheeseVideoFilterGlobalDefaultMode";
   let videoFilterGlobalDefaultMode = "global"; // 필터 전역 기본값 재방문 동작
-  // 초보자용 원클릭(전역, 기본 OFF). 켜지면 버튼 클릭 시 패널 없이 바로 켜기 + 프리셋 고정
-  // (믹서=기본, 필터=화질 향상)으로 동작하고, 관련 세부 옵션(바로켜기·패널안열기·전역기본값·
-  // 재방문동작)은 무시된다. 설정에서 그 옵션들은 잠금(disabled) 처리된다.
-  const MIXER_BEGINNER_KEY = "cheeseMixerBeginner";
-  let mixerBeginner = false;
-  const VIDEO_FILTER_BEGINNER_KEY = "cheeseVideoFilterBeginner";
-  let videoFilterBeginner = false;
   // 오디오 믹서 게인 슬라이더 범위(전역). 기본 0.5~2(50%~200%).
   const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
   const MIXER_GAIN_MAX_KEY = "cheeseMixerGainMax";
@@ -1846,6 +1831,8 @@
   //   텍스트로 영구 보관해 통계·다시보기 조회에 쓴다.
   const CHAT_RECAP_ENABLED_KEY = "cheeseChatRecap";
   const CHAT_RECAP_RETENTION_KEY = "cheeseChatRecapRetentionDays"; // 0=무제한
+  const CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY =
+    "cheeseChatRecapPlayerButtonHidden";
   const CHAT_RECAP_STORE_PREFIX = "chatRecap:"; // + <accountId>:<channelId>:<YYYY-MM>
   const CHAT_RECAP_CATALOG_MESSAGE = "CHAT_RECAP_CATALOG";
   const CHAT_RECAP_EARLIEST_MONTH = "2023-12";
@@ -1858,6 +1845,7 @@
   const CHAT_RECAP_STORE_API = globalThis.CheeseChatRecapStore;
   let chatRecapOn = false;
   let chatRecapRetentionDays = 0;
+  let chatRecapPlayerButtonHidden = false;
 
   const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
   const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
@@ -2449,6 +2437,12 @@
   let commentTsClickAction = "close"; // 기본: 기존 동작 유지
   let commentTsClickDelaySec = COMMENT_TS_CLICK_DELAY_DEFAULT;
   let commentTsClickDelayTimer = 0; // 지연 닫기 타이머
+  // 다시보기 '내 채팅 기록'은 최초 1회 기존 타임스탬프 설정을 승계한 뒤 별도로 동작한다.
+  const CHAT_RECAP_CLICK_ACTION_KEY = "cheeseChatRecapClickAction";
+  const CHAT_RECAP_CLICK_DELAY_KEY = "cheeseChatRecapClickDelay";
+  let chatRecapClickAction = "close";
+  let chatRecapClickDelaySec = COMMENT_TS_CLICK_DELAY_DEFAULT;
+  let chatRecapClickDelayTimer = 0;
   const COMMENT_FEATURE_OFF_CLASS = "comment-timestamp-feature-off";
   const COMMENT_FEATURE_MENU_CLASS = "cheese-search-comment-feature-menu";
   const COMMENT_MARKER_RENDER_RETRY_LIMIT = 30;
@@ -6070,6 +6064,54 @@
     }
   }
 
+  let chatRecapClickLoaded = false;
+  let chatRecapClickLoadPromise = null;
+  function loadChatRecapClickAction() {
+    if (chatRecapClickLoaded) return Promise.resolve();
+    if (chatRecapClickLoadPromise) return chatRecapClickLoadPromise;
+    chatRecapClickLoadPromise = (async () => {
+      try {
+        if (!chrome.storage?.local) return;
+        const data = await getBootData([
+          CHAT_RECAP_CLICK_ACTION_KEY,
+          CHAT_RECAP_CLICK_DELAY_KEY,
+          COMMENT_TS_CLICK_ACTION_KEY,
+          COMMENT_TS_CLICK_DELAY_KEY,
+        ]);
+        const storedAction = data?.[CHAT_RECAP_CLICK_ACTION_KEY];
+        const legacyAction = data?.[COMMENT_TS_CLICK_ACTION_KEY];
+        chatRecapClickAction = COMMENT_TS_CLICK_ACTIONS.includes(storedAction)
+          ? storedAction
+          : COMMENT_TS_CLICK_ACTIONS.includes(legacyAction)
+            ? legacyAction
+            : "close";
+
+        const storedDelay = data?.[CHAT_RECAP_CLICK_DELAY_KEY];
+        const legacyDelay = data?.[COMMENT_TS_CLICK_DELAY_KEY];
+        chatRecapClickDelaySec = clampCommentTsClickDelay(
+          storedDelay !== undefined ? storedDelay : legacyDelay,
+        );
+
+        const migration = {};
+        if (storedAction === undefined) {
+          migration[CHAT_RECAP_CLICK_ACTION_KEY] = chatRecapClickAction;
+        }
+        if (storedDelay === undefined) {
+          migration[CHAT_RECAP_CLICK_DELAY_KEY] = chatRecapClickDelaySec;
+        }
+        if (Object.keys(migration).length) {
+          await chrome.storage.local.set(migration);
+        }
+      } catch {
+        // 설정을 읽지 못하면 이번 세션에는 기본값(close, 4초)을 사용한다.
+      } finally {
+        chatRecapClickLoaded = true;
+        chatRecapClickLoadPromise = null;
+      }
+    })();
+    return chatRecapClickLoadPromise;
+  }
+
   function setCommentMarkersEnabled(enabled) {
     commentMarkerState.markersEnabled = Boolean(enabled);
     if (chrome.storage?.local) {
@@ -6154,6 +6196,7 @@
   }
 
   function initCommentTimestampMarkers() {
+    void loadChatRecapClickAction();
     // 팝업에서 댓글 타임스탬프를 숨김 처리하면 버튼/마커/패널을 모두 제거하고 끝낸다.
     if (featureFlags.commentTimestamp) {
       closeCommentTimestampPanel();
@@ -8574,7 +8617,14 @@
     if (button?.classList?.contains(VIDEO_COMMENT_BUTTON_DISABLED_CLASS)) {
       return;
     }
-    const panel = document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`);
+    const recapPanel = document.querySelector(`.${RECAP_PANEL_CLASS}`);
+    if (recapPanel) {
+      closeChatRecapPanel();
+      return;
+    }
+    const panel = document.querySelector(
+      `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`,
+    );
     if (panel) {
       closeCommentTimestampPanel();
       return;
@@ -8679,11 +8729,17 @@
     clearCommentTsClickDelayTimer();
     stopCommentTimestampPanelTimeTracker();
     stopCommentTimestampPanelAnchorMonitor();
-    releaseCommentPanelControlsVisible();
-    document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)?.remove();
+    document
+      .querySelector(
+        `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`,
+      )
+      ?.remove();
     document
       .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
       ?.setAttribute("aria-expanded", "false");
+    if (!document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)) {
+      releaseCommentPanelControlsVisible();
+    }
   }
 
   function startCommentTimestampPanelAnchorMonitor() {
@@ -8992,18 +9048,26 @@
     }
     // 메뉴 바깥 클릭 → 메뉴 닫기(버튼 클릭은 자체 핸들러가 처리).
     const menu = event.target.closest(`.${COMMENT_FEATURE_MENU_CLASS}`);
-    const button = event.target.closest(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+    // ⚠ '내 채팅 기록' 버튼도 예외로 둔다. 예전엔 댓글 버튼만 예외라, 리캡 버튼 클릭이
+    //   '바깥 클릭'으로 판정돼 방금 연 패널을 그 자리에서 닫았다(제보: 채팅을 눌러 보기도
+    //   전에 닫힘). 버튼 자체 핸들러가 stopPropagation 하지만, 치지직이 버튼 노드를 다시
+    //   만들면 그 리스너가 사라져 이 document 핸들러만 남는다.
+    const button = event.target.closest(
+      `.${VIDEO_COMMENT_BUTTON_CLASS}, .${RECAP_BUTTON_CLASS}`,
+    );
     if (!menu && !button) closeCommentFeatureMenu();
 
     const panel = event.target.closest(`.${VIDEO_COMMENT_PANEL_CLASS}`);
     if (panel || button) return;
     closeCommentTimestampPanel();
+    closeChatRecapPanel();
   }
 
   function handleCommentTimestampKeydown(event) {
     if (event.key !== "Escape") return;
     closeCommentFeatureMenu();
     closeCommentTimestampPanel();
+    closeChatRecapPanel();
   }
 
   function scheduleCommentMarkerRender(delay = 120) {
@@ -9697,6 +9761,9 @@
   // ⚠ 재생바 마커는 쓰지 않는다(사용자 지시). 댓글 타임스탬프와 같은 팝오버를
   //   별도 버튼으로 연다. 패널 스타일·위치 계산은 그쪽 것을 그대로 재사용한다.
   let recapPanelItems = [];
+  let recapPanelTimeUpdateVideo = null;
+  let recapPanelTimeUpdateHandler = null;
+  let recapPanelCurrentIndex = "";
 
   // 이 다시보기에서 내가 남긴 채팅을 모은다.
   // ⚠ 로컬 기록을 쓰지 않는다. 다시보기 채팅 API 가 그 영상의 모든 채팅을
@@ -10287,8 +10354,26 @@
     return out;
   }
 
+  // '내 채팅 기록' 버튼 클릭(캡처 위임). 버튼 노드가 다시 만들어져도 계속 동작한다.
+  function handleChatRecapButtonClick(event, button) {
+    event.preventDefault();
+    event.stopPropagation();
+    button?.blur?.(); // 포커스 잔류로 스페이스가 버튼을 다시 누르는 것 방지
+    if (document.querySelector(`.${RECAP_PANEL_CLASS}`)) {
+      closeChatRecapPanel();
+    } else {
+      void openChatRecapPanel(button);
+    }
+  }
+
   function ensureChatRecapButton() {
-    if (!chatRecapOn || !getCurrentVideoNo()) return;
+    if (
+      !chatRecapOn ||
+      chatRecapPlayerButtonHidden ||
+      !getCurrentVideoNo()
+    ) {
+      return;
+    }
     const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
     if (!controls) return;
     if (controls.querySelector(`.${RECAP_BUTTON_CLASS}`)) return;
@@ -10305,23 +10390,33 @@
           <path d="M8 7.5h8M8 11h5" stroke="#111" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       </span>`;
-    button.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (document.querySelector(`.${RECAP_PANEL_CLASS}`)) {
-        closeChatRecapPanel();
-      } else {
-        void openChatRecapPanel(button);
-      }
-    });
+    // 클릭은 아래 캡처 위임(handleChatRecapButtonClick)이 처리한다. 버튼에 직접 달면
+    // 치지직이 컨트롤을 다시 그릴 때 리스너가 사라져, document 핸들러만 남아 패널이
+    // 열리자마자 닫히는 문제가 있었다(댓글 타임스탬프 버튼과 같은 이유).
     // 댓글 타임스탬프 버튼 옆에 둔다(없으면 컨트롤 끝).
     const commentBtn = controls.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
     if (commentBtn) commentBtn.after(button);
     else controls.prepend(button);
   }
 
+  function applyChatRecapPlayerButtonVisibility() {
+    if (
+      !chatRecapOn ||
+      chatRecapPlayerButtonHidden ||
+      !getCurrentVideoNo()
+    ) {
+      closeChatRecapPanel();
+      document
+        .querySelectorAll(`.${RECAP_BUTTON_CLASS}`)
+        .forEach((button) => button.remove());
+      return;
+    }
+    ensureChatRecapButton();
+  }
+
   async function openChatRecapPanel(anchor) {
     closeChatRecapPanel();
+    closeCommentTimestampPanel();
     const root = getCommentTimestampPanelRoot(anchor);
     if (!root) return;
     if (getComputedStyle(root).position === "static") {
@@ -10335,6 +10430,7 @@
     panel.setAttribute("aria-label", "내 채팅 기록");
     root.append(panel);
     keepCommentPanelControlsVisible(root);
+    startChatRecapPanelTimeTracker();
     panel.innerHTML = `
       <div class="cheese-search-comment-panel-head">
         <strong>내 채팅 기록</strong>
@@ -10368,6 +10464,8 @@
     panel
       .querySelector("[data-recap-close]")
       ?.addEventListener("click", closeChatRecapPanel);
+    await loadChatRecapClickAction();
+    if (!panel.isConnected) return;
     const reimportButton = panel.querySelector("[data-recap-reimport]");
     const reimportPopover = panel.querySelector(
       "[data-recap-reimport-popover]",
@@ -10527,11 +10625,12 @@
     if (recapPanelItems.length) {
       const list = document.createElement("ol");
       list.className = "cheese-search-comment-panel-list";
-      for (const item of recapPanelItems) {
+      recapPanelItems.forEach((item, index) => {
         const row = document.createElement("li");
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.recapSeek = String(item.seconds);
+        button.dataset.recapIndex = String(index);
         const time = document.createElement("span");
         time.textContent = formatSeconds(item.seconds);
         const message = document.createElement("strong");
@@ -10544,7 +10643,7 @@
         button.append(time, message);
         row.append(button);
         list.append(row);
-      }
+      });
       panel.append(list);
     } else {
       const empty = document.createElement("p");
@@ -10558,17 +10657,96 @@
     panel.querySelectorAll("[data-recap-seek]").forEach((btn) => {
       btn.addEventListener("click", () => {
         seekVideoToCommentTimestamp(Number(btn.dataset.recapSeek || 0));
-        // 댓글 팝오버와 같은 규칙을 따른다(닫기/유지/지연).
-        if (commentTsClickAction === "keep") return;
-        if (commentTsClickAction === "delay") {
-          window.setTimeout(
-            closeChatRecapPanel,
-            clampCommentTsClickDelay(commentTsClickDelaySec) * 1000,
-          );
+        updateChatRecapPanelCurrentItem();
+        clearChatRecapClickDelayTimer();
+        if (chatRecapClickAction === "keep") return;
+        if (chatRecapClickAction === "delay") {
+          chatRecapClickDelayTimer = window.setTimeout(() => {
+            chatRecapClickDelayTimer = 0;
+            closeChatRecapPanel();
+          }, clampCommentTsClickDelay(chatRecapClickDelaySec) * 1000);
           return;
         }
         closeChatRecapPanel();
       });
+    });
+    updateChatRecapPanelCurrentItem({ scroll: true });
+  }
+
+  function clearChatRecapClickDelayTimer() {
+    if (!chatRecapClickDelayTimer) return;
+    clearTimeout(chatRecapClickDelayTimer);
+    chatRecapClickDelayTimer = 0;
+  }
+
+  function startChatRecapPanelTimeTracker() {
+    stopChatRecapPanelTimeTracker();
+    const video = document.querySelector("video");
+    if (!video) return;
+    const handler = () => updateChatRecapPanelCurrentItem();
+    recapPanelTimeUpdateVideo = video;
+    recapPanelTimeUpdateHandler = handler;
+    video.addEventListener("timeupdate", handler);
+    video.addEventListener("seeked", handler);
+  }
+
+  function stopChatRecapPanelTimeTracker() {
+    if (recapPanelTimeUpdateVideo && recapPanelTimeUpdateHandler) {
+      recapPanelTimeUpdateVideo.removeEventListener(
+        "timeupdate",
+        recapPanelTimeUpdateHandler,
+      );
+      recapPanelTimeUpdateVideo.removeEventListener(
+        "seeked",
+        recapPanelTimeUpdateHandler,
+      );
+    }
+    recapPanelTimeUpdateVideo = null;
+    recapPanelTimeUpdateHandler = null;
+    recapPanelCurrentIndex = "";
+  }
+
+  function findCurrentChatRecapItemIndex() {
+    const currentTime = Number(document.querySelector("video")?.currentTime);
+    if (!Number.isFinite(currentTime)) return -1;
+    // 수집 결과는 시간순으로 정렬되어 있다. 항목이 많아도 timeupdate마다 전체를
+    // 훑지 않도록 현재 시각 이하의 마지막 항목을 이진 탐색한다.
+    let low = 0;
+    let high = recapPanelItems.length - 1;
+    let currentIndex = -1;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const seconds = Number(recapPanelItems[middle]?.seconds);
+      if (Number.isFinite(seconds) && seconds <= currentTime) {
+        currentIndex = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return currentIndex;
+  }
+
+  function updateChatRecapPanelCurrentItem({ scroll = false } = {}) {
+    const panel = document.querySelector(`.${RECAP_PANEL_CLASS}`);
+    if (!panel) return;
+    const index = findCurrentChatRecapItemIndex();
+    const currentIndex = index >= 0 ? String(index) : "";
+    const previousIndex = recapPanelCurrentIndex;
+    if (!scroll && currentIndex === previousIndex) return;
+    recapPanelCurrentIndex = currentIndex;
+    const shouldScroll =
+      currentIndex !== "" && (scroll || currentIndex !== previousIndex);
+
+    panel.querySelectorAll("[data-recap-index]").forEach((button) => {
+      const isCurrent = button.dataset.recapIndex === currentIndex;
+      button.classList.toggle("is-current", isCurrent);
+      if (isCurrent) {
+        button.setAttribute("aria-current", "true");
+        if (shouldScroll) scrollPanelListToButton(panel, button);
+      } else {
+        button.removeAttribute("aria-current");
+      }
     });
   }
 
@@ -12255,6 +12433,8 @@
   });
 
   function closeChatRecapPanel() {
+    clearChatRecapClickDelayTimer();
+    stopChatRecapPanelTimeTracker();
     document.querySelector(`.${RECAP_PANEL_CLASS}`)?.remove();
     document
       .querySelector(`.${RECAP_BUTTON_CLASS}`)
@@ -14042,6 +14222,33 @@
   }
 
   // ── 기능 표시/숨김 플래그 로드 + MAIN world 전달 ────────────────────────────
+  const BLOCKED_USER_SEARCH_CARD_CLASS = "cheese-blocked-user-search-card";
+
+  // 통합검색의 차단 채널 카드는 _is_block_ 표식 없이 기본 프로필 이미지와
+  // '차단한 유저' 문구만 남는다. 두 조건이 같은 카드 안에 있을 때만 자체 마커를
+  // 붙여, 실제로 기본 프로필을 사용하는 정상 채널은 숨기지 않는다.
+  function markBlockedUserSearchCards() {
+    if (!location.pathname.startsWith("/search")) return;
+    document
+      .querySelectorAll('img[src*="/glive/image/default_profile_"]')
+      .forEach((image) => {
+        if (image.closest(`.${BLOCKED_USER_SEARCH_CARD_CLASS}`)) return;
+        let candidate = image.parentElement;
+        for (let depth = 0; candidate && depth < 5; depth += 1) {
+          const hasBlockedLabel = Array.from(
+            candidate.querySelectorAll("strong"),
+          ).some(
+            (label) => label.textContent?.trim() === "차단한 유저",
+          );
+          if (hasBlockedLabel && candidate.children.length >= 2) {
+            candidate.classList.add(BLOCKED_USER_SEARCH_CARD_CLASS);
+            return;
+          }
+          candidate = candidate.parentElement;
+        }
+      });
+  }
+
   // 저장값에 명시된 boolean이면 그 값을 쓰고, 일부 기존 영역은 호환성을 위해 기본 ON.
   function applyFeatureFlags(value) {
     const obj = value && typeof value === "object" ? value : {};
@@ -14094,6 +14301,7 @@
       "cheese-hide-blocked-cards",
       featureFlags.hideBlockedCards === true,
     );
+    if (featureFlags.hideBlockedCards) markBlockedUserSearchCards();
     // 수신함 팝오버 폭 확장 게이트. 우리가 탭을 '둘 다' 추가했을 때만 넓힌다 —
     // 하나만 켜져 있으면 탭이 하나 늘 뿐이라 치지직 기본 450px 로 충분하다.
     // ⚠ 둘 다 숨김 플래그다(true=숨김).
@@ -16759,6 +16967,30 @@
   //
   // 붙이는 값은 우리가 계산하지 않는다 — 부모와 영상의 실제 폭 차이(=남는 공간)를 그대로
   // 쓴다. 폭이 다시 바뀌면 먼저 margin 을 걷어내고 재계산해 오염을 피한다.
+  // 넓은 화면(viewmode)·전체화면 여부. 두 경우 모두 영상이 가로를 꽉 채우므로
+  // 접힘 시프트(margin-left)를 붙이면 안 된다.
+  // ⚠ 넓은 화면은 전용 클래스가 없어 viewmode 버튼 상태로 판정한다. 켜지면 checked 가
+  //   붙고 aria-label 이 '좁은 화면'(누르면 좁아짐)으로 바뀐다.
+  function isVodWideOrFullscreen() {
+    if (
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.querySelector(
+        '.pzp-pc--fullscreen, [class*="_is_fullscreen_"], [class*="--fullscreen"]',
+      )
+    ) {
+      return true;
+    }
+    const viewmode = document.querySelector(
+      ".pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, button[aria-label='넓은 화면'], button[aria-label='좁은 화면']",
+    );
+    if (!viewmode) return false;
+    return (
+      viewmode.hasAttribute("checked") ||
+      viewmode.getAttribute("aria-label") === "좁은 화면"
+    );
+  }
+
   const VOD_SHIFT_ATTR = "data-cheese-vod-shift";
   let vodShiftTimer = 0;
   let vodShiftObserver = null;
@@ -16794,7 +17026,11 @@
     const want =
       document.documentElement.classList.contains("cheese-vod-more-left") &&
       isVodChatFoldedAway() &&
-      !findResizableChatAside();
+      !findResizableChatAside() &&
+      // ⚠ 넓은 화면·전체화면에서는 영상이 가로를 꽉 채워야 한다. 이때도 margin-left 를
+      //   붙여 두면 접혀 있던 채팅 폭만큼 왼쪽에 빈칸이 남고, 전체화면으로 가도 그
+      //   빈칸이 따라다닌다(제보). 두 모드에서는 시프트를 걷어낸다.
+      !isVodWideOrFullscreen();
     if (!want) {
       stopVodShiftWatch();
       clearVodPlayerShift(box);
@@ -16823,6 +17059,8 @@
       const el = findVodPlayerBox();
       if (!(el instanceof HTMLElement)) return;
       if (!isVodChatFoldedAway() || findResizableChatAside()) return;
+      // 기다리는 동안 넓은 화면·전체화면으로 바뀌었을 수 있다.
+      if (isVodWideOrFullscreen()) return;
       el.setAttribute(VOD_SHIFT_ATTR, "1");
       const parent = el.parentElement;
       if (!parent) return;
@@ -16867,15 +17105,22 @@
       if (!location.pathname.startsWith("/video/")) return;
       if (
         !e.target?.closest?.(
-          'button[aria-label="채팅 접기"], button[class*="_folded_button_"]',
+          'button[aria-label="채팅 접기"], button[class*="_folded_button_"], .pzp-pc__viewmode-button, .pzp-pc-viewmode-button, .pzp-viewmode-button, button[aria-label="넓은 화면"], button[aria-label="좁은 화면"]',
         )
       ) {
         return;
       }
       // 상태가 바뀌는 순간 우리 margin 과 감시를 모두 정리한 뒤 재평가한다.
+      // ⚠ 넓은 화면 버튼은 클릭 직후에는 아직 checked/aria-label 이 갱신되지 않는다.
+      //   다음 프레임에 다시 평가해야 새 상태가 반영된다.
       stopVodShiftWatch();
       clearVodPlayerShift();
       applyVodPlayerShift();
+      requestAnimationFrame(() => {
+        stopVodShiftWatch();
+        clearVodPlayerShift();
+        applyVodPlayerShift();
+      });
     },
     true,
   );
@@ -17822,12 +18067,10 @@
     html.cheese-chat-hide-mission-msg aside#vod-aside [class*="_item_"]:not([class*="_1u2rv_"] *):not([class*="_is_active_mission_"] *):not([class*="_nhfkh_"] *):has(> [class*="_container_"]:not([class*="_is_fixed_"]) [class*="_is_mission_"]) {
       display: none !important;
     }
-    /* 다시보기/커뮤니티 댓글 중 '내가 차단한 이용자의 댓글입니다.' 플레이스홀더 숨김.
-       차단/삭제 댓글은 일반 댓글(_wrap_ > _header_ + _content_)과 달리 _wrap_ 직계 자식이
-       _default_(프로필 이미지 + 안내 문구만) 구조다. 그 _default_ 를 직계로 가진 댓글 wrap
-       을 #commentArea 안에서만 숨긴다(다른 영역 영향 없음). */
-    html.cheese-hide-blocked-comment #commentArea [class*="_wrap_1woio_"]:has(> [class*="_default_1woio_"]),
-    html.cheese-hide-blocked-comment #commentArea [class*="_wrap_1woio_"]:has(> [class*="_default_"]) {
+    /* 다시보기/커뮤니티 댓글의 차단 안내 숨김. 치지직 클래스 해시 대신 안내 DOM을 확인해
+       JS가 붙인 안정적인 마커만 사용한다. */
+    html.cheese-hide-blocked-comment #commentArea [data-cheese-native-placeholder="1"],
+    html.cheese-hide-blocked-comment #commentArea .cheese-native-block-placeholder {
       display: none !important;
     }
     html.cheese-chat-left-position aside#aside-chatting,
@@ -37197,6 +37440,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       "cheese-hide-blocked-comment",
       hideBlockedCommentOn,
     );
+    // 설정을 켠 시점에 이미 렌더된 원본 안내도 즉시 찾아 안정적인 마커를 붙인다.
+    if (hideBlockedCommentOn) applyNativeBlockPlaceholders();
   }
 
   async function loadHideBlockedComment() {
@@ -37407,6 +37652,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_HISTORY_LIMIT_KEY,
         CHAT_RECAP_ENABLED_KEY,
         CHAT_RECAP_RETENTION_KEY,
+        CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
       chatHistoryOn = false;
@@ -37420,6 +37666,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       // 채팅 리캡은 기본 꺼짐(본인 채팅이라도 사용자가 켜는 선택을 하게 한다).
       chatRecapOn = data?.[CHAT_RECAP_ENABLED_KEY] === true;
+      chatRecapPlayerButtonHidden =
+        data?.[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY] === true;
       chatRecapRetentionDays = normalizeChatRecapRetention(
         data?.[CHAT_RECAP_RETENTION_KEY],
       );
@@ -37427,6 +37675,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         void ensureRecapVodChannel();
         void pruneChatRecap();
       }
+      applyChatRecapPlayerButtonVisibility();
       broadcastFeatureFlags();
       ensureChatHistory();
       void loadClipVault();
@@ -37580,18 +37829,45 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }, 150);
   }
 
+  const NATIVE_BLOCK_PLACEHOLDER_TEXT =
+    "내가 차단한 이용자의 댓글입니다.";
+
+  // 치지직이 직접 렌더한 차단 안내를 클래스 해시 없이 식별해 자체 마커를 붙인다.
+  // 기본 프로필 이미지와 정확한 안내 문구가 같은 컨테이너에 있는 경우만 대상으로 삼아
+  // 일반 댓글이나 다른 빈 상태 안내가 잘못 숨겨지지 않게 한다.
+  function markRenderedNativeBlockPlaceholders(area) {
+    area
+      .querySelectorAll(
+        'img[src*="/glive/image/default_profile_"], .cheese-native-block-placeholder > img',
+      )
+      .forEach((image) => {
+        const placeholder = image.parentElement;
+        if (!(placeholder instanceof HTMLElement)) return;
+        const hasExactLabel = Array.from(placeholder.children).some(
+          (child) =>
+            child !== image &&
+            child.textContent?.trim() === NATIVE_BLOCK_PLACEHOLDER_TEXT,
+        );
+        if (!hasExactLabel) return;
+        placeholder.classList.add("cheese-native-block-placeholder");
+        const wrap = placeholder.parentElement;
+        if (wrap instanceof HTMLElement && wrap !== area) {
+          wrap.dataset.cheeseNativePlaceholder = "1";
+        }
+      });
+  }
+
   // 치지직 자체 차단(privateUserBlock=true) 유저의 댓글 DOM 을 '내가 차단한 이용자의
   // 댓글입니다.' 플레이스홀더로 교체한다. 다시보기는 치지직 프론트가 이미 그려주지만
   // 커뮤니티는 원본을 그대로 노출해(실측) 양쪽 불일치했다 → 우리가 통일한다.
-  // 원본이 이미 플레이스홀더(_default_)면 건드리지 않는다(중복 방지).
-  const NATIVE_BLOCK_PLACEHOLDER_HTML = `<div class="_default_1woio_320 cheese-native-block-placeholder"><img class="_image_1woio_328" width="36" height="36" src="https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png"><div class="_text_1woio_192">내가 차단한 이용자의 댓글입니다.</div></div>`;
+  // 원본이 이미 플레이스홀더면 자체 마커만 붙이고 내용을 다시 만들지 않는다.
+  const NATIVE_BLOCK_PLACEHOLDER_HTML = `<div class="_default_1woio_320 cheese-native-block-placeholder"><img class="_image_1woio_328" width="36" height="36" src="https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png"><div class="_text_1woio_192">${NATIVE_BLOCK_PLACEHOLDER_TEXT}</div></div>`;
   function applyNativeBlockPlaceholders() {
     const area = document.getElementById("commentArea");
     if (!area) return;
+    markRenderedNativeBlockPlaceholders(area);
     area.querySelectorAll('[id^="commentBox-"]').forEach((wrap) => {
       if (wrap.dataset.cheeseNativePlaceholder === "1") return;
-      // 치지직이 이미 플레이스홀더로 그린 경우(_default_ 직계) 스킵.
-      if (wrap.querySelector(':scope > [class*="_default_"]')) return;
       const commentId = commentIdFromWrap(wrap);
       const user = commentUserMap.get(commentId);
       if (!user || !user.privateUserBlock) return;
@@ -42219,14 +42495,23 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 댓글 영역 관찰: 신규 댓글 렌더 시 버튼 재주입.
   let commentBlockObserver = null;
+  let commentBlockObservedArea = null;
   function ensureCommentBlockObserver() {
     const area = document.getElementById("commentArea");
     if (!area) return;
-    if (commentBlockObserver) return;
+    if (
+      commentBlockObserver &&
+      commentBlockObservedArea === area &&
+      area.isConnected
+    ) {
+      return;
+    }
+    commentBlockObserver?.disconnect();
     commentBlockObserver = new MutationObserver(() =>
       scheduleCommentBlockButtons(),
     );
     commentBlockObserver.observe(area, { childList: true, subtree: true });
+    commentBlockObservedArea = area;
     scheduleCommentBlockButtons();
   }
 
@@ -42884,14 +43169,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         actionOverlayPos, // OSD 종류별 표시/위치(볼륨/되감기/앞으로)
         gainPct, // 게인 조절 % 표시(전역)
         screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
-        mixerClickActivate, // 믹서 버튼 클릭 시 즉시 활성/비활성(전역)
-        mixerClickNoPanel, // 믹서 클릭 시 바로 켜기 - 패널 안 열기(전역)
-        videoFilterClickActivate, // 필터 버튼 클릭 시 즉시 활성/비활성(전역)
-        videoFilterClickNoPanel, // 필터 클릭 시 바로 켜기 - 패널 안 열기(전역)
         mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
         videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
-        mixerBeginner, // 오디오 믹서 초보자용 원클릭(전역)
-        videoFilterBeginner, // 비디오 필터 초보자용 원클릭(전역)
         mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
         mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
         mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
@@ -42954,14 +43233,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ACTION_OVERLAY_KEY,
     ACTION_OVERLAY_POS_KEY,
     GAIN_PCT_KEY,
-    MIXER_CLICK_ACTIVATE_KEY,
-    MIXER_CLICK_NO_PANEL_KEY,
-    VIDEO_FILTER_CLICK_ACTIVATE_KEY,
-    VIDEO_FILTER_CLICK_NO_PANEL_KEY,
     MIXER_GLOBAL_DEFAULT_MODE_KEY,
     VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
-    MIXER_BEGINNER_KEY,
-    VIDEO_FILTER_BEGINNER_KEY,
     MIXER_GAIN_MIN_KEY,
     MIXER_GAIN_MAX_KEY,
     MIXER_GAIN_STEP_KEY,
@@ -43032,6 +43305,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       CHAT_HISTORY_LIMIT_KEY,
       CHAT_RECAP_ENABLED_KEY,
       CHAT_RECAP_RETENTION_KEY,
+      CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
       FOLLOWER_EXACT_KEY,
       CHANNEL_LIVE_BUTTON_KEY,
       CHANNEL_LIVE_BUTTON_END_KEY,
@@ -43077,6 +43351,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       COMMENT_FEATURE_ENABLED_KEY,
       COMMENT_TS_CLICK_ACTION_KEY,
       COMMENT_TS_CLICK_DELAY_KEY,
+      CHAT_RECAP_CLICK_ACTION_KEY,
+      CHAT_RECAP_CLICK_DELAY_KEY,
       LIVE_TAG_FILTER_BUTTON_KEY,
       LIVE_TAG_FILTERS_KEY,
       LIVE_VIEWER_COUNT_POSITION_KEY,
@@ -43131,8 +43407,30 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  // 폐지된 설정 정리. 오디오 믹서·비디오 필터의 클릭 동작 옵션(초보자용 원클릭,
+  // 클릭 시 바로 켜기, 패널 안 열기)은 좌클릭 on/off · 우클릭 패널로 대체됐다.
+  // 남겨 두면 내보내기 파일에만 따라다니므로 한 번 지운다.
+  const RETIRED_CLICK_OPTION_KEYS = [
+    "cheeseMixerBeginner",
+    "cheeseMixerClickActivate",
+    "cheeseMixerClickNoPanel",
+    "cheeseVideoFilterBeginner",
+    "cheeseVideoFilterClickActivate",
+    "cheeseVideoFilterClickNoPanel",
+  ];
+  async function dropRetiredClickOptions() {
+    try {
+      const stored = await chrome.storage.local.get(RETIRED_CLICK_OPTION_KEYS);
+      const present = RETIRED_CLICK_OPTION_KEYS.filter(
+        (key) => stored?.[key] !== undefined,
+      );
+      if (present.length) await chrome.storage.local.remove(present);
+    } catch {}
+  }
+
   async function loadFeatureFlags() {
     if (!chrome.storage?.local) return;
+    void dropRetiredClickOptions();
     try {
       const data = await getBootData(FEATURE_FLAGS_KEYS);
       globalScrollTopFabOn = data?.[GLOBAL_SCROLL_TOP_FAB_KEY] === true;
@@ -43257,12 +43555,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[ACTION_OVERLAY_POS_KEY],
       );
       gainPct = data?.[GAIN_PCT_KEY] !== false;
-      mixerClickActivate = data?.[MIXER_CLICK_ACTIVATE_KEY] === true;
-      mixerClickNoPanel = data?.[MIXER_CLICK_NO_PANEL_KEY] === true;
-      videoFilterClickActivate =
-        data?.[VIDEO_FILTER_CLICK_ACTIVATE_KEY] === true;
-      videoFilterClickNoPanel =
-        data?.[VIDEO_FILTER_CLICK_NO_PANEL_KEY] === true;
       mixerGlobalDefaultMode =
         data?.[MIXER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
           ? "channel"
@@ -43271,8 +43563,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
           ? "channel"
           : "global";
-      mixerBeginner = data?.[MIXER_BEGINNER_KEY] === true;
-      videoFilterBeginner = data?.[VIDEO_FILTER_BEGINNER_KEY] === true;
       mixerGainMin = normalizeGainMin(data?.[MIXER_GAIN_MIN_KEY]);
       mixerGainMax = normalizeGainMax(data?.[MIXER_GAIN_MAX_KEY]);
       mixerGainStep = normalizeGainStep(data?.[MIXER_GAIN_STEP_KEY]);
@@ -43410,6 +43700,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[COMMENT_TS_CLICK_DELAY_KEY]) {
         commentTsClickDelaySec = clampCommentTsClickDelay(
           changes[COMMENT_TS_CLICK_DELAY_KEY].newValue,
+        );
+      }
+      if (changes[CHAT_RECAP_CLICK_ACTION_KEY]) {
+        const action = changes[CHAT_RECAP_CLICK_ACTION_KEY].newValue;
+        if (COMMENT_TS_CLICK_ACTIONS.includes(action)) {
+          chatRecapClickAction = action;
+        }
+        if (chatRecapClickAction !== "delay") {
+          clearChatRecapClickDelayTimer();
+        }
+      }
+      if (changes[CHAT_RECAP_CLICK_DELAY_KEY]) {
+        chatRecapClickDelaySec = clampCommentTsClickDelay(
+          changes[CHAT_RECAP_CLICK_DELAY_KEY].newValue,
         );
       }
       if (changes[SEARCH_RERANK_KEY]) {
@@ -43750,21 +44054,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         screenshotDirectSave =
           changes[SCREENSHOT_DIRECT_SAVE_KEY].newValue !== false;
       }
-      if (changes[MIXER_CLICK_ACTIVATE_KEY]) {
-        mixerClickActivate =
-          changes[MIXER_CLICK_ACTIVATE_KEY].newValue === true;
-      }
-      if (changes[MIXER_CLICK_NO_PANEL_KEY]) {
-        mixerClickNoPanel = changes[MIXER_CLICK_NO_PANEL_KEY].newValue === true;
-      }
-      if (changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY]) {
-        videoFilterClickActivate =
-          changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY].newValue === true;
-      }
-      if (changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY]) {
-        videoFilterClickNoPanel =
-          changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY].newValue === true;
-      }
       if (changes[MIXER_GLOBAL_DEFAULT_MODE_KEY]) {
         mixerGlobalDefaultMode =
           changes[MIXER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
@@ -43776,13 +44065,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
             ? "channel"
             : "global";
-      }
-      if (changes[MIXER_BEGINNER_KEY]) {
-        mixerBeginner = changes[MIXER_BEGINNER_KEY].newValue === true;
-      }
-      if (changes[VIDEO_FILTER_BEGINNER_KEY]) {
-        videoFilterBeginner =
-          changes[VIDEO_FILTER_BEGINNER_KEY].newValue === true;
       }
       if (changes[MIXER_GAIN_MIN_KEY]) {
         mixerGainMin = normalizeGainMin(changes[MIXER_GAIN_MIN_KEY].newValue);
@@ -44308,14 +44590,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[WHEEL_VOLUME_STEP_KEY] ||
         changes[GAIN_PCT_KEY] ||
         changes[SCREENSHOT_PREVIEW_KEY] ||
-        changes[MIXER_CLICK_ACTIVATE_KEY] ||
-        changes[MIXER_CLICK_NO_PANEL_KEY] ||
-        changes[VIDEO_FILTER_CLICK_ACTIVATE_KEY] ||
-        changes[VIDEO_FILTER_CLICK_NO_PANEL_KEY] ||
         changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
         changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
-        changes[MIXER_BEGINNER_KEY] ||
-        changes[VIDEO_FILTER_BEGINNER_KEY] ||
         changes[MIXER_GAIN_MIN_KEY] ||
         changes[MIXER_GAIN_MAX_KEY] ||
         changes[MIXER_GAIN_STEP_KEY] ||
@@ -44487,7 +44763,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[CHAT_RECAP_ENABLED_KEY]) {
         chatRecapOn = changes[CHAT_RECAP_ENABLED_KEY].newValue === true;
         if (chatRecapOn) void ensureRecapVodChannel();
+        applyChatRecapPlayerButtonVisibility();
         broadcastFeatureFlags();
+      }
+      if (changes[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY]) {
+        chatRecapPlayerButtonHidden =
+          changes[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY].newValue === true;
+        applyChatRecapPlayerButtonVisibility();
       }
       if (changes[CHAT_RECAP_RETENTION_KEY]) {
         chatRecapRetentionDays = normalizeChatRecapRetention(
@@ -44747,6 +45029,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function init() {
     if (isClipEditorContext()) return;
     ensureClipPageAutoplay();
+    if (featureFlags.hideBlockedCards) markBlockedUserSearchCards();
     ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
     ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰
     initCommentTimestampMarkers();
@@ -45539,6 +45822,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       clearFillScreenStyles();
     }
     scheduleFillScreenModeRecheck();
+    // 전체화면에서는 접힘 시프트(margin-left)를 걷어야 영상이 화면을 꽉 채운다.
+    // 이탈하면 다시 평가해 원래 배치로 돌아간다.
+    if (location.pathname.startsWith("/video/")) {
+      stopVodShiftWatch();
+      clearVodPlayerShift();
+      applyVodPlayerShift();
+    }
   }
   document.addEventListener(
     "fullscreenchange",
@@ -45591,6 +45881,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const btn = e.target?.closest?.(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
       if (!btn) return;
       handleCommentTimestampButtonContextMenu(e, btn);
+    },
+    true,
+  );
+  document.addEventListener(
+    "click",
+    (e) => {
+      const btn = e.target?.closest?.(`.${RECAP_BUTTON_CLASS}`);
+      if (!btn) return;
+      handleChatRecapButtonClick(e, btn);
     },
     true,
   );

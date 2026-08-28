@@ -120,10 +120,59 @@
   margin-bottom: 24px;
 }
 
+/* 넓은 리캡 화면에서는 기본 카드 폭을 1/6로 유지하고, 다섯 항목인 묶음은
+   마지막 빈칸 대신 전체 묶음을 가운데 배치한다. */
+@media (min-width: 900px) {
+  .crc-summary {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .crc-summary > .crc-stat {
+    grid-column: span 2;
+  }
+
+  #crcPeriodSummary,
+  #crcDonationCards {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  #crcPeriodSummary > .crc-stat,
+  #crcDonationCards > .crc-stat {
+    flex: 0 0 calc((100% - 40px) / 5);
+  }
+}
+
+/* 중간 폭에서는 첫 요약의 활동 지표 여덟 개를 4개씩 두 줄로 맞춘다. */
+@media (min-width: 900px) and (max-width: 1499px) {
+  #crcExportSummary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  #crcExportSummary > .crc-stat {
+    grid-column: auto;
+  }
+}
+
+/* 충분히 넓으면 여덟 활동 지표를 한 줄로 보여 연속·멀티 채팅을 붙여 둔다. */
+@media (min-width: 1500px) {
+  #crcExportSummary {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+
+  #crcExportSummary > .crc-stat {
+    grid-column: auto;
+  }
+}
+
 .crc-stat {
   background: var(--popup-surface);
   border: 1px solid var(--popup-border);
   border-radius: 12px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -334,6 +383,14 @@
   font-size: 11px;
   font-style: normal;
   margin-top: 2px;
+}
+
+.crc-channel-vod-share {
+  color: var(--popup-brand-strong);
+  font-size: 10px;
+  font-style: normal;
+  margin-top: 2px;
+  white-space: nowrap;
 }
 
 .crc-channel-meta {
@@ -768,6 +825,11 @@
   box-sizing: border-box;
   height: min(680px, calc(100vh - 40px));
   height: min(680px, calc(100dvh - 40px));
+}
+
+.crc-import-modal-box .crc-import-tab-panel[data-import-panel="import"] {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .crc-import-modal-box .crc-modal-panes {
@@ -2010,6 +2072,11 @@ img.crc-emoji {
   line-height: 1.3;
 }
 
+.crc-card-vod-share {
+  color: var(--popup-brand-strong);
+  font-size: 11px;
+}
+
 .crc-card-detail {
   border-top: 1px solid var(--popup-border);
   display: flex;
@@ -2334,6 +2401,41 @@ img.crc-emoji {
 .crc-info-section-head > span {
   color: var(--popup-muted);
   font-size: 11px;
+}
+
+.crc-vod-share-days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.crc-vod-share-day-list {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-vod-share-day-list > div {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border: 1px solid color-mix(in srgb, var(--popup-border) 72%, transparent);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.crc-vod-share-day-list span {
+  color: var(--popup-muted);
+  font-size: 11px;
+}
+
+.crc-vod-share-day-list strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 #crcInfoBody[data-info-key="crcMultiChannel"] .crc-info-metrics {
@@ -3472,16 +3574,86 @@ button.crc-multi-channel-more:focus-visible {
   }
 }
 
-.crc-new-vod-panel {
-  align-items: center;
-  background: color-mix(in srgb, var(--popup-brand) 7%, var(--popup-surface));
-  border: 1px solid
-    color-mix(in srgb, var(--popup-brand) 30%, var(--popup-border));
-  border-radius: 10px;
+.crc-import-tabs {
+  align-self: flex-start;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crc-import-tabs button {
+  min-width: 108px;
+}
+
+.crc-import-tabs button[aria-selected="true"] {
+  background: var(--popup-surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  color: var(--popup-brand-strong);
+  font-weight: 700;
+}
+
+.crc-import-tab-panel {
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.crc-import-tab-panel[hidden] {
+  display: none;
+}
+
+.crc-import-manage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.crc-vod-tools-body {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px 10px;
+}
+
+.crc-new-vod-panel,
+.crc-vod-stats-panel {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 8px 2px;
+}
+
+.crc-vod-stats-panel {
+  border-top: 1px solid var(--popup-border);
+}
+
+.crc-vod-stats-panel .crc-new-vod-copy {
+  flex: 1 1 280px;
+}
+
+.crc-new-vod-panel .crc-new-vod-copy {
+  flex: 1 1 180px;
+}
+
+.crc-vod-stats-panel strong {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.crc-vod-stats-panel span {
+  color: var(--popup-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.crc-vod-stats-panel .crc-btn-ghost {
+  flex: none;
+  margin-left: auto;
+  padding: 6px 10px;
 }
 
 .crc-new-vod-copy {

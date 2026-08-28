@@ -739,10 +739,10 @@
                 <label>
                   <span class="settings-item-name">최대 화질 자동 고정</span>
                   <span class="settings-item-desc"
-                    >라이브·다시보기 시청 시 가장 높은 화질로 자동
-                    고정합니다. 원본 해상도가 화면 해상도에 가까워지면 RTX VSR의
-                    업스케일 조건을 충족하지 않아 VSR 표시가 꺼질 수 있습니다(자동
-                    화질이 낮아지는 것 방지, 체크=사용)</span
+                    >라이브·다시보기 시청 시 가장 높은 화질로 자동 고정합니다.
+                    원본 해상도가 화면 해상도에 가까워지면 RTX VSR의 업스케일
+                    조건을 충족하지 않아 VSR 표시가 꺼질 수 있습니다(자동 화질이
+                    낮아지는 것 방지, 체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1452,7 +1452,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="audio-mixer-button-controls"
+              >
                 <label>
                   <span class="settings-item-name">오디오 믹서 항상 켜기</span>
                   <span class="settings-item-desc"
@@ -1465,47 +1468,21 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">초보자용 원클릭</span>
+              <li
+                class="settings-item settings-item-stacked"
+                data-mixer-exclude-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 항상 켜기 제외 채널</span>
                   <span class="settings-item-desc"
-                    >버튼 한 번으로 '기본 프리셋'을 바로 켜고/끕니다(패널은 열지
-                    않음). 켜면 아래 세부 옵션(바로 켜기·패널 안 열기·전역
-                    기본값·재방문 동작)은 잠깁니다(체크=사용)</span
+                    >패널에서 직접 끈 채널입니다. 이 채널에서는 오디오 믹서가
+                    자동으로 켜지지 않습니다. 제외를 해제하면 다시 '항상 켜기'가
+                    적용됩니다.</span
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-mixer-beginner />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >믹서 버튼 클릭 시 바로 켜기</span
-                  >
-                  <span class="settings-item-desc"
-                    >믹서 버튼을 누르면 즉시 활성화하며 패널을 열고, 다시 누르면
-                    비활성화(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-mixer-click-activate />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 패널은 열지 않기</span>
-                  <span class="settings-item-desc"
-                    >위 옵션이 켜져 있어도 클릭 시 패널은 열지 않고 효과만
-                    켜고/끕니다(체크=패널 안 열기)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-mixer-click-no-panel />
-                  <i aria-hidden="true"></i>
-                </label>
+                </div>
+                <div class="settings-exclude-list" data-mixer-exclude-list>
+                  <p class="settings-exclude-empty">제외된 채널이 없습니다.</p>
+                </div>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
@@ -1713,9 +1690,9 @@
                 <label>
                   <span class="settings-item-name">비디오 필터 숨김</span>
                   <span class="settings-item-desc"
-                    >밝기·대비·선명도 등 화면 보정. 화면 보정이 적용되는 동안 RTX
-                    VSR 같은 브라우저·그래픽 드라이버 영상 향상 기능이 동작하지 않을
-                    수 있습니다</span
+                    >밝기·대비·선명도 등 화면 보정. 화면 보정이 적용되는 동안
+                    RTX VSR 같은 브라우저·그래픽 드라이버 영상 향상 기능이
+                    동작하지 않을 수 있습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1723,7 +1700,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-new-feature="video-filter-button-controls"
+              >
                 <label>
                   <span class="settings-item-name">비디오 필터 항상 켜기</span>
                   <span class="settings-item-desc"
@@ -1736,48 +1716,24 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">초보자용 원클릭</span>
+              <li
+                class="settings-item settings-item-stacked"
+                data-video-filter-exclude-item
+              >
+                <div>
+                  <span class="settings-item-name">└ 항상 켜기 제외 채널</span>
                   <span class="settings-item-desc"
-                    >버튼 한 번으로 '화질 향상' 프리셋(선명도·대비·채도 자동
-                    조절)을 바로 켜고/끕니다(패널은 열지 않음). 켜면 아래 세부
-                    옵션(바로 켜기·패널 안 열기·전역 기본값·재방문 동작)은
-                    잠깁니다(체크=사용)</span
+                    >패널에서 직접 끈 채널입니다. 이 채널에서는 비디오 필터가
+                    자동으로 켜지지 않습니다. 제외를 해제하면 다시 '항상 켜기'가
+                    적용됩니다.</span
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-video-filter-beginner />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >필터 버튼 클릭 시 바로 켜기</span
-                  >
-                  <span class="settings-item-desc"
-                    >필터 버튼을 누르면 즉시 활성화하며 패널을 열고, 다시 누르면
-                    비활성화(체크=사용)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-video-filter-click-activate />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 패널은 열지 않기</span>
-                  <span class="settings-item-desc"
-                    >위 옵션이 켜져 있어도 클릭 시 패널은 열지 않고 효과만
-                    켜고/끕니다(체크=패널 안 열기)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-video-filter-click-no-panel />
-                  <i aria-hidden="true"></i>
-                </label>
+                </div>
+                <div
+                  class="settings-exclude-list"
+                  data-video-filter-exclude-list
+                >
+                  <p class="settings-exclude-empty">제외된 채널이 없습니다.</p>
+                </div>
               </li>
               <li class="settings-item settings-item-stacked">
                 <div>
@@ -2309,6 +2265,85 @@
                   <small>초</small>
                 </span>
               </li>
+              <li
+                class="settings-item"
+                data-new-feature="vod-chat-recap-player-controls"
+              >
+                <label>
+                  <span class="settings-item-name"
+                    >재생바 '내 채팅 기록' 숨김</span
+                  >
+                  <span class="settings-item-desc"
+                    >다시보기 플레이어의 버튼과 열린 팝오버만 숨깁니다. 채팅
+                    기록 수집과 리캡 페이지에는 영향을 주지 않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-recap-player-button-hidden />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 내 채팅 기록 클릭 시</span>
+                  <span class="settings-item-desc"
+                    >다시보기의 내 채팅 기록에서 항목을 클릭해 이동할 때
+                    팝오버를 닫을지 여부(기본 닫기)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="chatRecapClickAction"
+                  role="radiogroup"
+                  aria-label="내 채팅 기록 클릭 시 동작"
+                >
+                  <button
+                    type="button"
+                    data-chat-recap-click="close"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-recap-click="keep"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    유지
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-recap-click="delay"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    지연 닫기
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-chat-recap-delay-row hidden>
+                <label for="chatRecapClickDelayInput">
+                  <span class="settings-item-name">└─ 지연 닫기 시간</span>
+                  <span class="settings-item-desc"
+                    >클릭 후 이 시간이 지나면 내 채팅 기록 팝오버를
+                    닫습니다(1~10초)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="chatRecapClickDelayInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-chat-recap-click-delay
+                  />
+                  <small>초</small>
+                </span>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
@@ -2388,8 +2423,8 @@
                 <label>
                   <span class="settings-item-name">차단한 유저 카드 숨김</span>
                   <span class="settings-item-desc"
-                    >라이브·카테고리·동영상 탐색에서 '차단한 유저' 카드를
-                    자리표시 없이 완전히 숨김(체크=숨김)</span
+                    >통합검색과 라이브·카테고리·동영상 탐색에서 '차단한 유저'
+                    카드를 자리표시 없이 완전히 숨김(체크=숨김)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3837,10 +3872,7 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li
-                class="settings-item"
-                data-new-feature="lounge-news-dot"
-              >
+              <li class="settings-item" data-new-feature="lounge-news-dot">
                 <label>
                   <span class="settings-item-name"
                     >└ 라운지 새 글 알림 점 숨김</span
@@ -3929,10 +3961,7 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li
-                class="settings-item"
-                data-new-feature="inbox-community-dot"
-              >
+              <li class="settings-item" data-new-feature="inbox-community-dot">
                 <label>
                   <span class="settings-item-name"
                     >└ 커뮤니티 새 글 알림 점 숨김</span
@@ -3943,10 +3972,7 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="inboxCommunityNewsDot"
-                  />
+                  <input type="checkbox" data-feature="inboxCommunityNewsDot" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -4049,17 +4075,14 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li
-                class="settings-item"
-                data-new-feature="inbox-log-power-dot"
-              >
+              <li class="settings-item" data-new-feature="inbox-log-power-dot">
                 <label>
                   <span class="settings-item-name"
                     >└ 통나무파워 새 내역 알림 점 숨김</span
                   >
                   <span class="settings-item-desc"
-                    >수신함 통나무파워 탭의 빨간 점만 숨깁니다. 내역 기록과
-                    읽음 상태는 그대로 유지됩니다.</span
+                    >수신함 통나무파워 탭의 빨간 점만 숨깁니다. 내역 기록과 읽음
+                    상태는 그대로 유지됩니다.</span
                   >
                 </label>
                 <label class="settings-switch">

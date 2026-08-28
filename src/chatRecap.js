@@ -6,6 +6,7 @@
 
   const STORE_PREFIX = "chatRecap:";
   const CATALOG_PREFIX = "chatRecapCatalog:";
+  const VOD_CHAT_STATS_PREFIX = "chatRecapVodChatStatsV1:";
   const CATALOG_MESSAGE = "CHAT_RECAP_CATALOG";
   const STORE_API = globalThis.CheeseChatRecapStore;
   const STORE_CHUNK_MAX = 5000;
@@ -275,6 +276,144 @@
     }
   }
 
+  function emptyVodChatCoverage() {
+    return {
+      total: 0,
+      mine: 0,
+      videos: 0,
+      byChannel: new Map(),
+      byDay: new Map(),
+    };
+  }
+
+  function normalizeVodChatStat(raw) {
+    if (!raw || typeof raw !== "object" || raw.complete !== true) return null;
+    const total = Math.max(0, Math.floor(Number(raw.total) || 0));
+    const mine = Math.min(total, Math.max(0, Math.floor(Number(raw.mine) || 0)));
+    const days = {};
+    if (raw.days && typeof raw.days === "object") {
+      for (const [day, value] of Object.entries(raw.days)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+        const dayTotal = Math.max(0, Math.floor(Number(value?.total) || 0));
+        const dayMine = Math.min(
+          dayTotal,
+          Math.max(0, Math.floor(Number(value?.mine) || 0)),
+        );
+        if (dayTotal) days[day] = { total: dayTotal, mine: dayMine };
+      }
+    }
+    return {
+      complete: true,
+      total,
+      mine,
+      days,
+      scannedAt: Math.max(0, Number(raw.scannedAt) || 0),
+    };
+  }
+
+  function vodChatStatsKey(accountId, channelId) {
+    return `${VOD_CHAT_STATS_PREFIX}${accountId}:${channelId}`;
+  }
+
+  async function readVodChatStatsChannel(accountId, channelId) {
+    if (!HASH_RE.test(accountId) || !HASH_RE.test(channelId)) return {};
+    try {
+      const key = vodChatStatsKey(accountId, channelId);
+      const raw = (await chrome.storage.local.get(key))?.[key];
+      return raw?.videos && typeof raw.videos === "object" ? raw.videos : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function addVodChatCoverage(coverage, channelId, record) {
+    if (!record) return;
+    const channel = coverage.byChannel.get(channelId) || {
+      total: 0,
+      mine: 0,
+      videos: 0,
+      byDay: new Map(),
+    };
+    coverage.videos += 1;
+    coverage.total += record.total;
+    coverage.mine += record.mine;
+    channel.videos += 1;
+    channel.total += record.total;
+    channel.mine += record.mine;
+    for (const [day, value] of Object.entries(record.days)) {
+      const allDay = coverage.byDay.get(day) || { total: 0, mine: 0 };
+      allDay.total += value.total;
+      allDay.mine += value.mine;
+      coverage.byDay.set(day, allDay);
+      const channelDay = channel.byDay.get(day) || { total: 0, mine: 0 };
+      channelDay.total += value.total;
+      channelDay.mine += value.mine;
+      channel.byDay.set(day, channelDay);
+    }
+    coverage.byChannel.set(channelId, channel);
+  }
+
+  async function loadVodChatCoverage(accountId, channelIds) {
+    const coverage = emptyVodChatCoverage();
+    const channels = [...new Set(channelIds)].filter((id) => HASH_RE.test(id));
+    for (let index = 0; index < channels.length; index += STORAGE_READ_BATCH) {
+      const batch = channels.slice(index, index + STORAGE_READ_BATCH);
+      const keys = batch.map((channelId) =>
+        vodChatStatsKey(accountId, channelId),
+      );
+      let stored = {};
+      try {
+        stored = await chrome.storage.local.get(keys);
+      } catch {
+        continue;
+      }
+      for (const channelId of batch) {
+        const raw = stored?.[vodChatStatsKey(accountId, channelId)];
+        const videos = raw?.videos;
+        if (!videos || typeof videos !== "object") continue;
+        for (const value of Object.values(videos)) {
+          addVodChatCoverage(coverage, channelId, normalizeVodChatStat(value));
+        }
+      }
+      if (index + STORAGE_READ_BATCH < channels.length) await yieldToMain();
+    }
+    return coverage;
+  }
+
+  async function saveVodChatStat(
+    accountId,
+    channelId,
+    videoNo,
+    coverage,
+  ) {
+    if (!coverage?.complete) return false;
+    const key = vodChatStatsKey(accountId, channelId);
+    try {
+      const stored = (await chrome.storage.local.get(key))?.[key];
+      const videos = {
+        ...(stored?.videos && typeof stored.videos === "object"
+          ? stored.videos
+          : {}),
+      };
+      videos[String(videoNo)] = {
+        complete: true,
+        total: Math.max(0, Math.floor(Number(coverage.total) || 0)),
+        mine: Math.min(
+          Math.max(0, Math.floor(Number(coverage.total) || 0)),
+          Math.max(0, Math.floor(Number(coverage.mine) || 0)),
+        ),
+        days: coverage.days || {},
+        scannedAt: Date.now(),
+      };
+      await chrome.storage.local.set({
+        [key]: { version: 1, videos },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // 반환: { total, byChannel: Map<채널, 건수>, items: [{t, m, channelId}] }
   async function loadRecap(accountId) {
     const out = {
@@ -282,6 +421,7 @@
       donations: [],
       byChannel: new Map(),
       vodSeen: new Set(),
+      vodCoverage: emptyVodChatCoverage(),
     };
     if (!accountId) return out;
     const catalogKey = `${CATALOG_PREFIX}${accountId}`;
@@ -339,6 +479,10 @@
     }
     out.items.sort((a, b) => a.t - b.t);
     out.donations.sort((a, b) => a.t - b.t);
+    out.vodCoverage = await loadVodChatCoverage(
+      accountId,
+      out.byChannel.keys(),
+    );
     delete out.vodSeen;
     return out;
   }
@@ -367,7 +511,12 @@
   }
   let emojiMap = Object.create(null);
   // 마지막으로 불러온 기록. 채널 상세를 펼칠 때 다시 읽지 않으려고 들고 있는다.
-  let lastData = { items: [], donations: [], byChannel: new Map() };
+  let lastData = {
+    items: [],
+    donations: [],
+    byChannel: new Map(),
+    vodCoverage: emptyVodChatCoverage(),
+  };
   const emptyWordStats = () => ({
     rows: [],
     allChannels: new Set(),
@@ -1770,6 +1919,23 @@
       if (cur) lines.push(`- 현재 연속 채팅: ${fmt(cur)}일`);
       const perDay = uniqueDays ? Math.round(items.length / uniqueDays) : 0;
       if (perDay) lines.push(`- 채팅한 날 하루 평균: 약 ${fmt(perDay)}회`);
+      const coverage = lastData.vodCoverage || emptyVodChatCoverage();
+      if (coverage.total > 0) {
+        const uncovered = Math.max(0, items.length - coverage.mine);
+        lines.push(
+          `- 다시보기에서 확인된 내 채팅 비중: ${fmt(coverage.mine)}/${fmt(coverage.total)}회 (${vodCoveragePercent(coverage.mine, coverage.total)})`,
+          `- 전체 채팅을 확인한 다시보기: ${fmt(coverage.videos)}편`,
+        );
+        if (uncovered) {
+          lines.push(
+            `- 전체 채팅 분모를 확인하지 못한 내 채팅 기록: ${fmt(uncovered)}회 (실시간 수집 또는 아직 보강하지 않은 다시보기)`,
+          );
+        }
+      } else if (items.length) {
+        lines.push(
+          "- 내 채팅 비중: 확인 전 (실시간 수집 또는 통계 보강 전 기록은 전체 채팅 수를 알 수 없으며 다시보기 수집이 필요함)",
+        );
+      }
       const multi = multiChannelActivity(items);
       if (multi.sessionCount) {
         lines.push(
@@ -4060,6 +4226,71 @@
     return { title: "멀티 채널 채팅", nodes };
   }
 
+  function vodCoverageDayList(byDay, limit = 20) {
+    const section = document.createElement("section");
+    section.className = "crc-vod-share-days";
+    const head = document.createElement("div");
+    head.className = "crc-info-section-head";
+    const title = document.createElement("strong");
+    title.textContent = "최근 다시보기 날짜별 내 비중";
+    const count = document.createElement("span");
+    count.textContent = `${fmt(byDay.size)}일`;
+    head.append(title, count);
+    const list = document.createElement("div");
+    list.className = "crc-vod-share-day-list";
+    const rows = [...byDay.entries()]
+      .filter(([, value]) => value.total > 0)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, limit);
+    for (const [day, value] of rows) {
+      const row = document.createElement("div");
+      const label = document.createElement("span");
+      label.textContent = day;
+      const detail = document.createElement("strong");
+      detail.textContent = vodCoverageValue(value);
+      row.append(label, detail);
+      list.append(row);
+    }
+    section.append(head, list);
+    return section;
+  }
+
+  function buildVodCoverageInfo() {
+    const coverage = lastData.vodCoverage || emptyVodChatCoverage();
+    const uncovered = Math.max(0, lastData.items.length - coverage.mine);
+    const nodes = [
+      infoStat(
+        "다시보기 내 채팅 비중",
+        vodCoveragePercent(coverage.mine, coverage.total),
+      ),
+      infoStat("확인된 내 채팅", `${fmt(coverage.mine)}회`),
+      infoStat("확인된 전체 채팅", `${fmt(coverage.total)}회`),
+      infoStat("확인한 다시보기", `${fmt(coverage.videos)}편`),
+      infoStat("전체 채팅 미확인 기록", `${fmt(uncovered)}회`),
+    ];
+    const channels = [...coverage.byChannel.entries()]
+      .filter(([, value]) => value.total > 0)
+      .sort(
+        (a, b) =>
+          Number(b[1].total >= 50) - Number(a[1].total >= 50) ||
+          b[1].mine / b[1].total - a[1].mine / a[1].total ||
+          b[1].total - a[1].total,
+      )
+      .slice(0, 20);
+    channels.forEach(([channelId, value], index) => {
+      const row = infoChannelRow(
+        channelId,
+        vodCoverageValue(value),
+        index + 1,
+        value.mine / value.total,
+      );
+      row.dataset.sectionTitle = "채널별 내 채팅 비중";
+      nodes.push(row);
+    });
+    if (coverage.byDay.size) nodes.push(vodCoverageDayList(coverage.byDay));
+    return { title: "다시보기 내 채팅 비중", nodes };
+  }
+
   function sortedMultiChannelSessions(activity) {
     const sessions = activity.sessions.slice();
     if (multiChannelSectionSort === "channels") {
@@ -5153,6 +5384,43 @@
     );
   }
 
+  function vodCoveragePercent(mine, total) {
+    if (!(Number(total) > 0)) return "-";
+    return `${((Number(mine) / Number(total)) * 100).toLocaleString("ko-KR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })}%`;
+  }
+
+  function vodCoverageValue(coverage) {
+    if (!(coverage?.total > 0)) return "전체 채팅 확인 전";
+    return `${fmt(coverage.mine)}/${fmt(coverage.total)}회 · ${vodCoveragePercent(
+      coverage.mine,
+      coverage.total,
+    )}`;
+  }
+
+  function renderVodCoverageSummary(items) {
+    const coverage = lastData.vodCoverage || emptyVodChatCoverage();
+    setText(
+      "crcVodShare",
+      coverage.total
+        ? vodCoveragePercent(coverage.mine, coverage.total)
+        : "-",
+    );
+    const uncovered = Math.max(0, items.length - coverage.mine);
+    setText(
+      "crcVodShareSub",
+      coverage.total
+        ? `내 채팅 ${fmt(coverage.mine)}/${fmt(coverage.total)}회 · 다시보기 ${fmt(
+            coverage.videos,
+          )}편 기준${uncovered ? ` · 미확인 기록 ${fmt(uncovered)}회` : ""}`
+        : items.length
+          ? `전체 채팅 미확인 기록 ${fmt(items.length)}회 · 다시보기 수집 후 확인됩니다`
+          : "다시보기 전체 채팅 확인 전",
+    );
+  }
+
   function renderSummary(items, donations) {
     const aggregate = timeAggregate(items);
     const byDay = aggregate.byDay;
@@ -5160,6 +5428,7 @@
     for (const [k, n] of byDay) if (n > busiest[1]) busiest = [k, n];
 
     setText("crcTotal", fmt(items.length));
+    renderVodCoverageSummary(items);
     setText("crcDays", fmt(byDay.size));
     setText("crcBusiest", fmt(busiest[1]));
     const busiestByChannel =
@@ -5323,6 +5592,10 @@
     list.textContent = "";
     rows.forEach(([id, count], i) => {
       const li = document.createElement("li");
+      const coverage = lastData.vodCoverage?.byChannel?.get(id);
+      const coverageText = coverage?.total
+        ? `다시보기 내 비중 ${vodCoveragePercent(coverage.mine, coverage.total)}`
+        : "전체 채팅 미확인";
       // 눌러서 그 채널만의 요약을 펼친다.
       const btn = document.createElement("button");
       btn.type = "button";
@@ -5347,6 +5620,7 @@
         <span class="crc-channel-figures">
           <b class="crc-channel-count">${fmt(count)}회</b>
           <em class="crc-channel-share">전체 ${grand ? Math.round((count / grand) * 100) : 0}%</em>
+          <em class="crc-channel-vod-share">${coverageText}</em>
         </span>
         <svg class="crc-channel-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="m9 18 6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
         <span class="crc-channel-bar"><i style="width:${Math.max(2, (count / max) * 100)}%;background:${colorFor(id)}"></i></span>`;
@@ -6484,6 +6758,16 @@
     return share;
   }
 
+  function channelVodCoverageShareNode(channelId) {
+    const coverage = lastData.vodCoverage?.byChannel?.get(channelId);
+    const share = document.createElement("div");
+    share.className = "crc-card-share crc-card-vod-share";
+    share.textContent = coverage?.total
+      ? `다시보기 내 비중 ${vodCoveragePercent(coverage.mine, coverage.total)}`
+      : "전체 채팅 확인 전";
+    return share;
+  }
+
   function channelCardSummary(channelId, count, rank, grand) {
     const fragment = document.createDocumentFragment();
     const head = document.createElement("div");
@@ -6506,7 +6790,12 @@
     const total = document.createElement("div");
     total.className = "crc-card-total";
     total.textContent = `${fmt(count)}회`;
-    fragment.append(head, total, channelCardShareNode(count, grand));
+    fragment.append(
+      head,
+      total,
+      channelCardShareNode(count, grand),
+      channelVodCoverageShareNode(channelId),
+    );
     return fragment;
   }
 
@@ -7229,6 +7518,22 @@
     // ⚠ 값과 부가 정보를 따로 두면 가운데가 벌어져 읽기 어렵다(제보)
     //   → 'N회 (M일)' 처럼 한 덩어리로 붙인다.
     out.push(stat("채팅", `${fmt(chats.length)}회 (${fmt(days.size)}일)`));
+    const coverage = lastData.vodCoverage?.byChannel?.get(channelId);
+    if (coverage?.total) {
+      out.push(stat("다시보기 내 비중", vodCoverageValue(coverage)));
+      const latest = [...coverage.byDay.entries()]
+        .filter(([, value]) => value.total > 0)
+        .sort((a, b) => b[0].localeCompare(a[0]))[0];
+      if (latest) {
+        out.push(
+          stat(`${latest[0]} 비중`, vodCoverageValue(latest[1])),
+        );
+      }
+    } else {
+      // 라이브에서 실시간으로 저장한 기록만으로는 다른 이용자의 전체 채팅 수를
+      // 알 수 없다. 0%로 오해되지 않도록 미확인 상태를 명시한다.
+      out.push(stat("다시보기 내 비중", "전체 채팅 확인 전"));
+    }
     const firstChats = channelFirstChatRecords(chats, dons);
     if (firstChats.length) {
       out.push(
@@ -7416,7 +7721,12 @@
   }
 
   function clearRecapRuntimeData() {
-    lastData = { items: [], donations: [], byChannel: new Map() };
+    lastData = {
+      items: [],
+      donations: [],
+      byChannel: new Map(),
+      vodCoverage: emptyVodChatCoverage(),
+    };
     wordStatsCache = emptyWordStats();
     timeAggregateCache = null;
     multiChannelActivityCache = null;
@@ -7606,6 +7916,9 @@
   let newVodCheckedChannels = 0;
   let newVodChecking = false;
   let autoCheckedNewVodsFor = "";
+  let preparingVodStatsBackfill = false;
+  let importModalTab = "import";
+  let vodImportMode = "";
 
   function recapAccountMap(root, accountId) {
     const value = root && typeof root === "object" ? root[accountId] : null;
@@ -7801,6 +8114,7 @@
     const checkedAt = $("crcNewVodCheckedAt");
     const selectButton = $("crcSelectNewVods");
     const refreshButton = $("crcRefreshNewVods");
+    const backfillButton = $("crcBackfillVodStats");
     const showBadge = newVodBadgeOn && total > 0;
     if (count) {
       count.textContent = fmt(total);
@@ -7837,11 +8151,19 @@
     }
     if (selectButton) {
       selectButton.hidden = total < 1;
-      selectButton.disabled = checking || importing || total < 1;
+      selectButton.disabled =
+        checking || importing || preparingVodStatsBackfill || total < 1;
     }
-    if (refreshButton) refreshButton.disabled = checking || importing;
+    if (refreshButton) {
+      refreshButton.disabled =
+        checking || importing || preparingVodStatsBackfill;
+    }
+    if (backfillButton) {
+      backfillButton.disabled =
+        checking || importing || preparingVodStatsBackfill;
+    }
     preselectNewVodChannels();
-    if (followings.length) {
+    if (followings.length && importModalTab === "import") {
       renderFollowList($("crcChannelSearch")?.value || "");
       renderPickedList();
     }
@@ -7856,6 +8178,74 @@
       channels.get(id).add(String(videoNo));
     }
     return channels;
+  }
+
+  async function loadVodStatsBackfillTargets(accountId, channelFilter) {
+    const catalogKey = `${CATALOG_PREFIX}${accountId}`;
+    let catalog = normalizeRecapCatalog(
+      (await chrome.storage.local.get(catalogKey))?.[catalogKey],
+    );
+    if (!catalog) {
+      const all = (await chrome.storage.local.get(null)) || {};
+      catalog = await rebuildRecapCatalog(accountId, all);
+    }
+
+    const imported = await loadImported(accountId);
+    const eventState = await loadEventLinkState(accountId);
+    const candidates = importedVideosByChannel(eventState.links);
+    let checkedChannels = 0;
+    const catalogEntries = Object.entries(catalog || {}).filter(
+      ([channelId]) => !channelFilter || channelFilter.has(channelId),
+    );
+    for (const [channelId, months] of catalogEntries) {
+      const keys = months.map(
+        (month) => `${STORE_PREFIX}${accountId}:${channelId}:${month}`,
+      );
+      const values = await STORE_API.loadMonths(
+        chrome.storage.local,
+        keys,
+        STORAGE_READ_BATCH,
+      );
+      const videos = candidates.get(channelId) || new Set();
+      for (const key of keys) {
+        for (const item of values.get(key) || []) {
+          const videoNo = String(item?.n || "");
+          if (/^\d+$/.test(videoNo)) videos.add(videoNo);
+        }
+      }
+      if (videos.size) candidates.set(channelId, videos);
+      checkedChannels += 1;
+      setProgress(
+        `기존 기록 확인 중 ${fmt(checkedChannels)}/${fmt(catalogEntries.length)}개 채널`,
+      );
+      await yieldToMain();
+    }
+
+    const missing = new Map();
+    const candidateEntries = [...candidates].filter(
+      ([channelId]) => !channelFilter || channelFilter.has(channelId),
+    );
+    let checked = 0;
+    let missingCount = 0;
+    for (const [channelId, videos] of candidateEntries) {
+      const stats = await readVodChatStatsChannel(accountId, channelId);
+      const pending = [...videos].filter(
+        (videoNo) =>
+          imported.has(String(videoNo)) &&
+          !normalizeVodChatStat(stats[String(videoNo)]),
+      );
+      if (pending.length) {
+        missing.set(channelId, pending);
+        missingCount += pending.length;
+      }
+      checked += 1;
+      setProgress(
+        `전체 채팅 통계 확인 중 ${fmt(checked)}/${fmt(candidateEntries.length)}개 채널 · ` +
+          `${fmt(missingCount)}개 영상 필요`,
+      );
+      await yieldToMain();
+    }
+    return missing;
   }
 
   async function ensureImportChannels(channelIds) {
@@ -8108,6 +8498,15 @@
     rows.failed = false; // 첫 페이지부터 실패했는지(연속 실패 감지용)
     // 끝까지 읽었거나 채팅 미제공이 확정된 영상만 완료 캐시에 넣는다.
     rows.complete = false;
+    rows.coverage = {
+      complete: false,
+      total: 0,
+      mine: 0,
+      days: Object.create(null),
+    };
+    // 커서 경계에서 같은 메시지가 다시 포함돼도 전체 채팅 분모가 불어나지 않게 한다.
+    const coverageSeen = new Set();
+    const coverageSeenOrder = [];
     let cursor = 0;
     let scanned = 0;
     for (let page = 0; page < VOD_PAGE_MAX; page += 1) {
@@ -8158,10 +8557,35 @@
         const donation = chatDonationInfo(m, code);
         const text = String(m?.content || "").trim();
         const t = Number(m?.messageTime) || 0;
+        const senderHash = chatSenderHash(m);
+        // 비율의 분모는 일반 사용자가 작성한 채팅만 센다. 후원·구독 및 시스템
+        // 안내를 섞으면 채널마다 이벤트 빈도 차이가 비율에 반영돼 의미가 달라진다.
+        if (!donation && senderHash && text && t) {
+          const identity = vodChatMessageIdentity(m, text, null);
+          if (!identity || !coverageSeen.has(identity)) {
+            if (identity) {
+              coverageSeen.add(identity);
+              coverageSeenOrder.push(identity);
+              // 커서 경계 중복은 인접 페이지에서 생긴다. 긴 다시보기 전체의
+              // 식별자를 계속 들고 있지 않고 최근 범위만 보존해 메모리를 제한한다.
+              if (coverageSeenOrder.length > 500) {
+                coverageSeen.delete(coverageSeenOrder.shift());
+              }
+            }
+            rows.coverage.total += 1;
+            const mine = senderHash === accountId;
+            if (mine) rows.coverage.mine += 1;
+            const day = localDayKey(t);
+            const dayStat = rows.coverage.days[day] || { total: 0, mine: 0 };
+            dayStat.total += 1;
+            if (mine) dayStat.mine += 1;
+            rows.coverage.days[day] = dayStat;
+          }
+        }
         const historyMatch = donation
           ? historyMatcher?.match(t, text, donation)
           : null;
-        if (chatSenderHash(m) !== accountId && !historyMatch) continue;
+        if (senderHash !== accountId && !historyMatch) continue;
         // 후원·구독은 본문이 비어 있을 수 있다(파티 후원 등) → 금액만으로도 남긴다.
         if ((!text && !donation) || !t) continue;
         // 가져오기 경로에서도 이모티콘 URL 을 사전에 모은다.
@@ -8199,6 +8623,7 @@
         page: page + 1,
         scanned,
         matched: rows.length,
+        totalUserChats: rows.coverage.total,
       });
       if (!Number.isFinite(next) || next <= cursor) {
         rows.complete = true;
@@ -8206,6 +8631,7 @@
       }
       cursor = next;
     }
+    rows.coverage.complete = rows.complete;
     return rows;
   }
 
@@ -9167,6 +9593,10 @@
       (sum, item) => sum + item.matched,
       0,
     );
+    const userChatCount = activities.reduce(
+      (sum, item) => sum + (Number(item.totalUserChats) || 0),
+      0,
+    );
     const startedAt = Math.min(...activities.map((item) => item.startedAt));
     const lastResponseAt = Math.max(
       ...activities.map((item) => item.lastResponseAt || 0),
@@ -9188,7 +9618,8 @@
     mode.textContent = vodImportPlaybackActive ? "저부하 수집" : "수집 중";
     const reading =
       `영상 ${positions}/${fmt(total)} · 채팅 묶음 ${fmt(pageCount)}개 · ` +
-      `메시지 ${fmt(scannedCount)}개 확인 · 내 기록 ${fmt(matchedCount)}개`;
+      `메시지 ${fmt(scannedCount)}개 확인 · 사용자 채팅 ${fmt(userChatCount)}개 · ` +
+      `내 기록 ${fmt(matchedCount)}개`;
     const activity =
       responseAge == null
         ? `첫 응답 대기 · ${elapsed} 경과`
@@ -9308,48 +9739,99 @@
     }
   }
 
-  async function runImport({ newOnly = false } = {}) {
-    if (importing) return;
+  async function runImport({ newOnly = false, backfillStats = false } = {}) {
+    if (importing || preparingVodStatsBackfill) return;
+    if (backfillStats) {
+      preparingVodStatsBackfill = true;
+      $("crcStart").disabled = true;
+      $("crcBackfillVodStats").disabled = true;
+      updateNewVodUi();
+    }
     const accountId = await currentAccountId();
     if (!accountId) {
+      if (backfillStats) {
+        preparingVodStatsBackfill = false;
+        $("crcStart").disabled = false;
+        updateNewVodUi();
+      }
       setProgress("로그인 상태를 확인하지 못했습니다.");
       return;
     }
     const scope =
       document.querySelector("input[name='crcScope']:checked")?.value ||
       "selected";
-    const initial = newOnly
-      ? [...newVodByChannel.entries()]
-          .filter(([, videos]) => videos.length)
-          .map(([channelId]) => channelId)
-      : scope === "all"
-        ? followings.map((c) => c.channelId)
-        : followings.map((c) => c.channelId).filter((id) => selected.has(id));
+    let backfillVideosByChannel = null;
+    if (backfillStats) {
+      const channelFilter =
+        scope === "selected" && newVodSelectionTouched && selected.size
+          ? new Set(selected)
+          : null;
+      setProgress("기존 다시보기 기록을 확인하고 있습니다…");
+      try {
+        backfillVideosByChannel = await loadVodStatsBackfillTargets(
+          accountId,
+          channelFilter,
+        );
+        if (backfillVideosByChannel.size) {
+          await ensureImportChannels([...backfillVideosByChannel.keys()]);
+        }
+      } catch (error) {
+        console.warn("[치즈 플래터] 기존 다시보기 통계 확인 실패", error);
+        setProgress("기존 다시보기 기록을 확인하지 못했습니다.");
+        return;
+      } finally {
+        preparingVodStatsBackfill = false;
+        $("crcStart").disabled = false;
+        updateNewVodUi();
+      }
+      if (!backfillVideosByChannel.size) {
+        setProgress(
+          "선택 범위의 기존 다시보기는 전체 채팅 수가 모두 확인되어 있습니다.",
+        );
+        return;
+      }
+    }
+    const initial = backfillStats
+      ? [...backfillVideosByChannel.keys()]
+      : newOnly
+        ? [...newVodByChannel.entries()]
+            .filter(([, videos]) => videos.length)
+            .map(([channelId]) => channelId)
+        : scope === "all"
+          ? followings.map((c) => c.channelId)
+          : followings
+              .map((c) => c.channelId)
+              .filter((id) => selected.has(id));
     if (!initial.length) {
       setProgress("가져올 채널을 선택해 주세요.");
       return;
     }
     // 전체 범위면 화면과 맞도록 선택 표시도 채운다(무엇을 처리 중인지 보이게).
-    if (!newOnly && scope === "all") {
+    if (!newOnly && !backfillStats && scope === "all") {
       for (const id of initial) selected.add(id);
     }
-    if (newOnly) {
+    if (newOnly || backfillStats) {
       selected.clear();
       for (const id of initial) selected.add(id);
     }
     // 0 = 전체(제한 없음).
     const perChannel = vodLimitValue();
 
+    vodImportMode = backfillStats ? "manage" : "import";
+    setImportModalTab(vodImportMode);
     importing = true;
     cancelRequested = false;
     doneChannels.clear();
     queuedChannels = new Set(initial);
     activeChannelId = "";
     $("crcStart").disabled = true;
+    $("crcBackfillVodStats").disabled = true;
     setHidden("crcCancel", false);
     $("crcCancel").disabled = false;
-    renderPickedList();
-    renderFollowList($("crcChannelSearch")?.value || "");
+    if (!backfillStats) {
+      renderPickedList();
+      renderFollowList($("crcChannelSearch")?.value || "");
+    }
 
     const imported = await loadImported(accountId);
     if (newOnly) {
@@ -9366,6 +9848,8 @@
     let totalAdded = 0;
     let vodsDone = 0;
     let vodsSkipped = 0;
+    let vodStatsSaved = 0;
+    let vodStatsFailed = 0;
     let channelsDone = 0;
     let newCacheChanged = false;
     const startedAt = Date.now();
@@ -9393,17 +9877,31 @@
         activeChannelId = channelId;
         const channel = followings.find((c) => c.channelId === channelId);
         const name = channel?.name || channelId;
-        renderPickedList();
-        renderFollowList($("crcChannelSearch")?.value || "");
+        if (!backfillStats) {
+          renderPickedList();
+          renderFollowList($("crcChannelSearch")?.value || "");
+        }
 
-        setProgress(`${name} · 다시보기 목록 확인 중…`);
-        const videos = newOnly
-          ? [...(newVodByChannel.get(channelId) || [])]
-          : await fetchRecentVideos(channelId, perChannel);
+        setProgress(
+          backfillStats
+            ? `${name} · 기존 다시보기 전체 채팅 통계 준비 중…`
+            : `${name} · 다시보기 목록 확인 중…`,
+        );
+        const videos = backfillStats
+          ? [...(backfillVideosByChannel.get(channelId) || [])]
+          : newOnly
+            ? [...(newVodByChannel.get(channelId) || [])]
+            : await fetchRecentVideos(channelId, perChannel);
         if (cancelRequested) break;
         const historyRevision = Number(historyRevisions[channelId]) || 0;
-        const historyMatcher = createHistoryMatcher(
-          await loadHistoryCandidates(accountId, channelId),
+        const historyMatcher = backfillStats
+          ? null
+          : createHistoryMatcher(
+              await loadHistoryCandidates(accountId, channelId),
+            );
+        const storedVodStats = await readVodChatStatsChannel(
+          accountId,
+          channelId,
         );
         // ⚠ 한 영상 '안'의 페이징은 커서를 받아야 다음을 부를 수 있어 순차다.
         //   하지만 영상끼리는 독립이라 동시에 훑을 수 있다 → 작업자 풀로 돌린다.
@@ -9412,6 +9910,9 @@
         const pending = [...new Set(videos)].filter((no) => {
           const value = String(no);
           if (newOnly) return !imported.has(value);
+          if (backfillStats) {
+            return !normalizeVodChatStat(storedVodStats[value]);
+          }
           const linked = eventLinks[value];
           const eventLinkCurrent =
             linked &&
@@ -9442,6 +9943,7 @@
               pages: 0,
               scanned: 0,
               matched: 0,
+              totalUserChats: 0,
               startedAt: Date.now(),
               lastResponseAt: 0,
             });
@@ -9458,6 +9960,7 @@
                   activity.pages = pageState.page;
                   activity.scanned = pageState.scanned;
                   activity.matched = pageState.matched;
+                  activity.totalUserChats = pageState.totalUserChats;
                   activity.lastResponseAt = Date.now();
                   renderVodActivity();
                 }
@@ -9476,8 +9979,11 @@
                   Math.max(1, channelsDone + 1 + queue.length);
                 setProgressBar(overall, channel);
                 setProgress(
-                  `${name} · 다시보기 ${finished}/${pending.length} 읽는 중…` +
-                    ` 누적 ${fmt(totalAdded)}개${eta ? ` · 남은 시간 약 ${eta}` : ""}`,
+                  backfillStats
+                    ? `${name} · 기존 다시보기 ${finished}/${pending.length} 전체 채팅 수 확인 중…` +
+                        `${eta ? ` 남은 시간 약 ${eta}` : ""}`
+                    : `${name} · 다시보기 ${finished}/${pending.length} 읽는 중…` +
+                        ` 누적 ${fmt(totalAdded)}개${eta ? ` · 남은 시간 약 ${eta}` : ""}`,
                 );
               },
             );
@@ -9500,14 +10006,28 @@
             // ⚠ 저장은 같은 월 청크를 읽고 쓰므로 동시에 하면 서로 덮어쓴다
             //   → 쓰기만 직렬화한다(읽기는 이미 병렬로 끝났다).
             // ⚠ 한 번 실패해 체인이 rejected 로 굳으면 이후 저장이 전부
-            //   건너뛰어진다 → 꼬리는 항상 정상 상태로 되돌린다(통나무파워의
-            //   쓰기 큐와 같은 방식).
+            //   건너뛰어진다 → 꼬리는 항상 정상 상태로 되돌린다.
+            let coverageSaved = !rows.complete;
             const task = mergeTail.then(async () => {
-              totalAdded += await mergeIntoStore(accountId, channelId, rows);
+              // 기존 통계 보강은 분모만 채운다. 이미 저장된 내 채팅 기록을 다시
+              // 병합하지 않아 과거 데이터와 중복될 여지를 만들지 않는다.
+              const added = backfillStats
+                ? 0
+                : await mergeIntoStore(accountId, channelId, rows);
+              if (rows.complete) {
+                coverageSaved = await saveVodChatStat(
+                  accountId,
+                  channelId,
+                  videoNo,
+                  rows.coverage,
+                );
+              }
+              return added;
             });
             mergeTail = task.catch(() => {});
-            await task;
-            if (rows.complete) {
+            totalAdded += await task;
+            if (rows.complete && coverageSaved) {
+              vodStatsSaved += 1;
               const value = String(videoNo);
               imported.add(value);
               eventLinks[value] = {
@@ -9522,6 +10042,10 @@
                 else newVodByChannel.delete(channelId);
                 newCacheChanged = true;
               }
+            } else if (rows.complete) {
+              // 내 채팅 병합은 멱등이라 다음 실행에서 다시 읽어도 중복되지 않는다.
+              // 분모 저장에 실패한 영상은 완료 취급하지 않고 재시도 대상으로 둔다.
+              vodStatsFailed += 1;
             }
             vodsDone += 1;
             finished += 1;
@@ -9538,15 +10062,17 @@
         doneChannels.add(channelId);
         activeChannelId = "";
         // 도는 동안 새로 고른 채널을 큐 뒤에 붙인다.
-        if (!newOnly) {
+        if (!newOnly && !backfillStats) {
           for (const id of selected) {
             if (handled.has(id) || queue.includes(id)) continue;
             queue.push(id);
             queuedChannels.add(id);
           }
         }
-        renderPickedList();
-        renderFollowList($("crcChannelSearch")?.value || "");
+        if (!backfillStats) {
+          renderPickedList();
+          renderFollowList($("crcChannelSearch")?.value || "");
+        }
       }
     } finally {
       stopVodActivity();
@@ -9556,20 +10082,33 @@
       await saveEmojiMap(accountId, pendingEmojis);
       pendingEmojis = Object.create(null);
       importing = false;
+      vodImportMode = "";
       activeChannelId = "";
       queuedChannels.clear();
       $("crcStart").disabled = false;
+      $("crcBackfillVodStats").disabled = false;
       setHidden("crcCancel", true);
       setProgressBar(null);
       const spent = formatDuration((Date.now() - startedAt) / 1000);
+      const backfillRetryCount = Math.max(0, vodsDone - vodStatsSaved);
+      const completion = backfillStats
+        ? `기존 다시보기 ${fmt(vodsDone)}개를 처리해 ${fmt(vodStatsSaved)}개의 전체 채팅 수를 확인했습니다 (${spent}).`
+        : `다시보기 ${fmt(vodsDone)}개에서 채팅 ${fmt(totalAdded)}개를 가져왔습니다.\n` +
+          `완료된 다시보기 ${fmt(vodsSkipped)}개는 건너뛰었습니다 (${spent}).`;
       setProgress(
         (abortReason ? `${abortReason} ` : "") +
           `${cancelRequested ? "중단했습니다" : "완료했습니다"}. ` +
-          `다시보기 ${fmt(vodsDone)}개에서 채팅 ${fmt(totalAdded)}개를 가져왔습니다.\n` +
-          `완료된 다시보기 ${fmt(vodsSkipped)}개는 건너뛰었습니다 (${spent}).`,
+          completion +
+          (backfillStats && backfillRetryCount
+            ? ` 확인하지 못한 ${fmt(backfillRetryCount)}개 영상은 다음 실행에서 다시 시도합니다.`
+            : vodStatsFailed
+              ? ` 전체 채팅 통계를 저장하지 못한 ${fmt(vodStatsFailed)}개 영상은 다음 실행에서 다시 확인합니다.`
+              : ""),
       );
-      renderPickedList();
-      renderFollowList($("crcChannelSearch")?.value || "");
+      if (importModalTab === "import") {
+        renderPickedList();
+        renderFollowList($("crcChannelSearch")?.value || "");
+      }
       updateNewVodUi();
       await refresh();
     }
@@ -9733,8 +10272,32 @@
     }
   }
 
+  function setImportModalTab(nextTab) {
+    importModalTab = nextTab === "manage" ? "manage" : "import";
+    for (const button of document.querySelectorAll("[data-import-tab]")) {
+      const selectedTab = button.dataset.importTab === importModalTab;
+      button.setAttribute(
+        "aria-selected",
+        String(selectedTab),
+      );
+      button.tabIndex = selectedTab ? 0 : -1;
+    }
+    for (const panel of document.querySelectorAll("[data-import-panel]")) {
+      panel.hidden = panel.dataset.importPanel !== importModalTab;
+    }
+    const start = $("crcStart");
+    if (start) start.hidden = importModalTab !== "import";
+    if (importModalTab === "import" && followings.length) {
+      renderFollowList($("crcChannelSearch")?.value || "");
+      renderPickedList();
+    }
+  }
+
   function openImportModal() {
     setHidden("crcModal", false);
+    setImportModalTab(
+      importing && vodImportMode === "manage" ? "manage" : "import",
+    );
     if (!importing) {
       newVodSelectionTouched = false;
       selected.clear();
@@ -9745,8 +10308,10 @@
     if (importing) {
       $("crcStart").disabled = true;
       setHidden("crcCancel", false);
-      renderPickedList();
-      renderFollowList($("crcChannelSearch")?.value || "");
+      if (importModalTab === "import") {
+        renderPickedList();
+        renderFollowList($("crcChannelSearch")?.value || "");
+      }
       return;
     }
     // 닫았다 다시 연 경우는 새로 시작하는 것으로 본다. 검색어·선택이 남아 있으면
@@ -9756,6 +10321,7 @@
     const search = $("crcChannelSearch");
     if (search) search.value = "";
     $("crcStart").disabled = false;
+    $("crcBackfillVodStats").disabled = false;
     setHidden("crcCancel", true);
     renderPickedList();
     if (followingsLoaded) {
@@ -10293,6 +10859,8 @@
     const starts = periodStarts();
 
     switch (key) {
+      case "crcVodShare":
+        return buildVodCoverageInfo();
       case "crcTotal":
       case "crcChannels":
         return {
@@ -10698,6 +11266,28 @@
   updateTopFab();
 
   setupVodLimitMenu();
+  for (const button of document.querySelectorAll("[data-import-tab]")) {
+    button.addEventListener("click", () => {
+      setImportModalTab(button.dataset.importTab);
+    });
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      const tabs = [...document.querySelectorAll("[data-import-tab]")];
+      const current = tabs.indexOf(event.currentTarget);
+      const next =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+      event.preventDefault();
+      setImportModalTab(tabs[next].dataset.importTab);
+      tabs[next].focus();
+    });
+  }
   $("crcImport")?.addEventListener("click", openImportModal);
   $("crcRefreshNewVods")?.addEventListener("click", () => {
     void checkNewVods({ force: true });
@@ -10709,8 +11299,12 @@
     if (selectedScope) selectedScope.checked = true;
     newVodSelectionTouched = false;
     preselectNewVodChannels();
+    setImportModalTab("import");
     renderPickedList();
     renderFollowList($("crcChannelSearch")?.value || "");
+  });
+  $("crcBackfillVodStats")?.addEventListener("click", () => {
+    void runImport({ backfillStats: true });
   });
   // 후원·구독권은 고를 것이 없다(내 결제 내역 전체) → 모달 없이 바로 실행하고
   // 진행 상황만 모달에서 보여 준다.
@@ -10777,11 +11371,17 @@
     if (e.target === $("crcDonModal") && !importing) closeDonModal();
   });
   $("crcModalClose")?.addEventListener("click", () => {
-    setHidden("crcModal", true);
+    if (!preparingVodStatsBackfill) setHidden("crcModal", true);
   });
   // 바깥을 눌러도 닫는다(가져오는 중에는 실수로 닫히지 않게 막는다).
   $("crcModal")?.addEventListener("click", (e) => {
-    if (e.target === $("crcModal") && !importing) setHidden("crcModal", true);
+    if (
+      e.target === $("crcModal") &&
+      !importing &&
+      !preparingVodStatsBackfill
+    ) {
+      setHidden("crcModal", true);
+    }
   });
   $("crcChannelSearch")?.addEventListener("input", (e) => {
     renderFollowList(e.target.value);
@@ -11001,9 +11601,13 @@
     if (areaName !== "local" || !displayedAccountId) return;
     const prefix = `${STORE_PREFIX}${displayedAccountId}:`;
     const catalogKey = `${CATALOG_PREFIX}${displayedAccountId}`;
+    const vodStatsPrefix = `${VOD_CHAT_STATS_PREFIX}${displayedAccountId}:`;
     if (
       Object.keys(changes).some(
-        (key) => key === catalogKey || key.startsWith(prefix),
+        (key) =>
+          key === catalogKey ||
+          key.startsWith(prefix) ||
+          key.startsWith(vodStatsPrefix),
       )
     ) {
       // 새로고침이 도는 중에 온 변경은 그 결과에 이미 담긴다 → 점을 켜지 않는다.

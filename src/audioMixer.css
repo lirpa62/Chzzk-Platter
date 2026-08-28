@@ -429,6 +429,19 @@
   color: #fff;
 }
 
+/* 안내 문구형 모달(항상 켜기 중 끄기 확인). 입력창 대신 설명이 들어가 조금 넓다. */
+.cheese-mixer-modal:has(.cheese-mixer-modal-desc) {
+  max-width: 340px;
+}
+
+.cheese-mixer-modal-desc {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: #c9d1dc;
+}
+
 .cheese-mixer-modal input {
   box-sizing: border-box;
   width: 100%;
@@ -1764,5 +1777,145 @@
   white-space: nowrap;
 }
 #cheese-action-overlay .cheese-ao-text:empty {
+  display: none;
+}
+
+/* ── 최초 1회 조작 안내(버튼 옆 말풍선) ──────────────────────────────────
+   좌/우클릭 동작이 바뀐 것을 알린다. 버튼 래퍼 기준 절대배치라 컨트롤 바가
+   숨겨지면 함께 사라진다. */
+.cheese-gesture-hint {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 버튼 폭에 눌려 줄바꿈되지 않도록 내용 폭을 확보한다(.cheese-button-tip 동일).
+     좁은 플레이어에서는 nowrap 이면 잘리므로 상한에서만 줄바꿈을 허용한다. */
+  width: max-content;
+  max-width: min(80vw, 420px);
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(20, 22, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  animation: cheese-gesture-hint-in 0.18s ease;
+}
+
+.cheese-gesture-hint > b {
+  color: #00ffa3;
+  font-weight: 700;
+}
+
+/* 말풍선 꼬리 */
+.cheese-gesture-hint::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(20, 22, 26, 0.96);
+}
+
+@keyframes cheese-gesture-hint-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+
+/* ── 버튼 옆 말풍선(프리셋 전환·'항상 켜기' 안내) ─────────────────────
+   조작한 버튼 바로 위에 붙는다. 최초 안내(.cheese-gesture-hint)와 같은 모양이되
+   자동으로 사라지는 짧은 피드백용이다. */
+.cheese-button-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  /* ⚠ absolute 요소는 포함 블록(버튼) 폭에 맞춰 줄어든다. 버튼이 35~49px밖에
+     안 되므로 width를 주지 않으면 글자마다 줄바꿈되어 세로로 길어진다.
+     max-content로 내용 폭을 확보하고 max-width로만 상한을 둔다. */
+  width: max-content;
+  max-width: min(60vw, 320px);
+  padding: 7px 11px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+  color: #fff;
+  background: rgba(20, 22, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.14s ease,
+    visibility 0.14s;
+}
+
+/* 말풍선 꼬리 */
+.cheese-button-tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(20, 22, 26, 0.96);
+}
+
+.cheese-button-tip.is-on {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 왼쪽 컨트롤 그룹의 버튼은 중앙정렬 말풍선이 화면 왼쪽으로 넘쳐 잘린다.
+   native 툴팁과 같은 방식으로 버튼 왼쪽 가장자리 기준으로 clamp 한다. */
+.pzp-pc__bottom-buttons-left .cheese-button-tip,
+.pzp-pc__bottom-buttons-left .cheese-gesture-hint {
+  left: 0;
+  transform: none;
+}
+
+/* 꼬리는 버튼 중앙을 가리켜야 하므로 clamp 후에도 버튼 폭의 절반 위치에 둔다.
+   믹서 래퍼 ~49px, 필터 버튼 ~35px 라 각각의 절반을 쓴다. */
+.pzp-pc__bottom-buttons-left
+  .cheese-audio-mixer-control
+  .cheese-button-tip::after,
+.pzp-pc__bottom-buttons-left
+  .cheese-audio-mixer-control
+  .cheese-gesture-hint::after {
+  left: 24px;
+  transform: none;
+}
+
+.pzp-pc__bottom-buttons-left
+  .cheese-video-filter-button
+  .cheese-button-tip::after,
+.pzp-pc__bottom-buttons-left
+  .cheese-video-filter-button
+  .cheese-gesture-hint::after {
+  left: 18px;
+  transform: none;
+}
+
+/* 말풍선이 떠 있는 동안에는 같은 자리에 뜨는 native 툴팁을 감춘다(겹침 방지). */
+.cheese-audio-mixer-control:has(.cheese-button-tip.is-on)
+  .cheese-audio-mixer-button
+  .pzp-button__tooltip,
+.cheese-video-filter-button:has(.cheese-button-tip.is-on) .pzp-button__tooltip {
   display: none;
 }

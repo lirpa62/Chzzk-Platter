@@ -52,28 +52,13 @@
   const featureFlags = { videoFilter: false };
   // 비디오 필터 항상 켜기(전역). 켜져 있으면 채널 설정 로드 후 자동 활성화한다.
   let videoFilterAlwaysOn = false;
-  let vfClickActivate = false; // 버튼 클릭 시 즉시 활성/비활성(전역, 기본 OFF)
-  let vfClickNoPanel = false; // 위 옵션 시 패널을 열지 않고 효과만 토글(전역, 기본 OFF)
-  let vfBeginner = false; // 초보자용 원클릭: 클릭 시 패널 없이 '화질 향상' 프리셋으로 바로 on/off
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags")
       return;
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
-    vfClickActivate = e.data.videoFilterClickActivate === true;
-    vfClickNoPanel = e.data.videoFilterClickNoPanel === true;
-    const vfBeginnerPrev = vfBeginner;
-    vfBeginner = e.data.videoFilterBeginner === true;
     globalDefaultMode =
       e.data.videoFilterGlobalDefaultMode === "channel" ? "channel" : "global";
-    // 옵션을 방금 '켠' 순간, 필터가 이미 켜져 있으면(다른 프리셋 사용 중) 즉시 '화질
-    // 향상' 프리셋 + auto-sharpen 으로 교체한다. 꺼져 있으면 다음 버튼 클릭 시 적용.
-    if (vfBeginner && !vfBeginnerPrev && state.enabled) {
-      if (typeof applyPreset === "function") applyPreset("beginner");
-      if (typeof setAutoSharpen === "function" && !autoSharpenEnabled) {
-        setAutoSharpen(true);
-      }
-    }
     if (typeof tick === "function") tick();
     if (typeof maybeAutoEnableFilter === "function") maybeAutoEnableFilter();
   });
@@ -201,7 +186,7 @@
     // 모든 값이 중립(보정 없음)인 원본 상태. 켜도 화면 변화가 없는 게 정상이며,
     // 다른 프리셋에서 보정 없는 상태로 되돌리는 기준점이다.
     default: { label: "원본", filters: {} },
-    // 초보자용 원클릭 전용: 전반적 화질 향상(선명도·대비·채도·그림자 소폭↑). 장르 특화가
+    // 최초 사용 시의 기본 프리셋: 전반적 화질 향상(선명도·대비·채도·그림자 소폭↑). 장르 특화가
     // 아니라 어떤 방송에도 무난하게 또렷해지는 정도로 잡는다(game/sports 사이 수준). 이
     // 프리셋을 적용할 때 auto-sharpen 도 함께 켜 저사양에서 끊기면 선명도가 자동 저감된다.
     beginner: {
@@ -352,10 +337,14 @@
     },
   };
 
+  // ⚠ 초기 프리셋은 '원본'이 아니라 '화질 향상'이다. default 프리셋은 모든 값이
+  //   중립이라 처음 좌클릭으로 켜면 화면이 그대로여서 "켜져도 아무 일이 없다"고
+  //   느끼게 된다. 예전 초보자용 원클릭이 강제하던 값을 초기값으로 옮긴 것.
   const DEFAULT_STATE = () => ({
     enabled: false,
-    preset: "default",
-    filters: neutralFilters(),
+    preset: "beginner",
+    // 프리셋 filters는 부분집합이라 빠진 키를 중립값으로 채워야 한다.
+    filters: { ...neutralFilters(), ...PRESETS.beginner.filters },
     customPresets: [],
     userDisabled: false, // 이 채널에서 사용자가 직접 끔(항상 켜기 opt-out)
     userPickedPreset: false, // 이 채널에서 사용자가 프리셋을 직접 고름
@@ -426,6 +415,7 @@
   let dirtyFromName = "";
   let dirtyFromKey = "";
   let quickSaveOpen = false;
+  let alwaysOnOffAsk = false; // '항상 켜기' 중 패널 전원 끄기 확인 모달
 
   // ── 페이지 식별 / 채널id 해석 (오디오 믹서와 동일) ────────────────────────
   function getPageKey() {
@@ -1139,7 +1129,6 @@
   }
 
   function applyGlobalDefaultPreset() {
-    if (vfBeginner) return false; // 초보자 모드는 화질 향상 프리셋 고정 → 전역 기본값 무시
     if (!globalDefaultPreset.enabled) return false;
     const key = globalDefaultPreset.preset || "default";
     const snapshot = snapshotForPresetKey(key);
@@ -1783,6 +1772,8 @@
       anchor.insertAdjacentElement("afterend", wrap);
     }
     syncButton();
+    // 버튼이 실제로 붙은 뒤에 조작 안내를 띄운다(최초 1회).
+    maybeShowGestureHint(wrap.querySelector(`.${BUTTON_CLASS}`));
   }
 
   function removeButton() {
@@ -1797,38 +1788,22 @@
     }
   }
 
-  // 필터 버튼 클릭 처리. 기본은 패널만 토글. '클릭 시 즉시 활성' 옵션이 켜져 있으면
-  // 클릭 = 필터 활성 + 패널 열기, 재클릭 = 비활성 + 패널 닫기(패널 열림 상태 기준).
+  // 필터 버튼 좌클릭: 패널 없이 바로 on/off(우클릭이 패널을 연다).
+  // ⚠ 오디오 믹서와 마찬가지로 프리셋을 강제로 바꾸지 않는다. 예전 '초보자용
+  //   원클릭'은 켤 때마다 applyPreset("beginner")로 사용자가 고른 프리셋을 지웠다.
+  //   이제는 저장된 마지막 프리셋 그대로 켠다(최초 사용 시 기본값이 '화질 향상').
   function handleButtonClick() {
-    // 초보자용 원클릭(최우선): clickActivate/noPanel/전역기본값과 무관하게 패널 없이
-    // '화질 향상' 프리셋 + auto-sharpen 으로 바로 on/off.
-    if (vfBeginner) {
-      if (state.enabled) {
-        setEnabled(false);
-      } else {
-        applyPreset("beginner"); // 화질 향상 프리셋 고정
-        if (!autoSharpenEnabled) setAutoSharpen(true); // 끊김 시 자동 선명도 저감
-        setEnabled(true);
+    if (state.enabled) {
+      // '항상 켜기'는 말 그대로 항상 켜 두는 설정이므로 좌클릭으로 끄지 않는다.
+      // 끄려면 설정에서 옵션을 해제하거나 패널의 전원 토글을 쓴다(채널별 opt-out).
+      if (videoFilterAlwaysOn) {
+        showPresetOsd("'항상 켜기'가 켜져 있어 끌 수 없습니다", 2600);
+        return;
       }
+      setEnabled(false);
       return;
     }
-    if (!vfClickActivate) {
-      togglePanel();
-      return;
-    }
-    // '패널 안 열기' 하위 옵션: 패널은 건드리지 않고 효과 enabled 만 토글한다.
-    if (vfClickNoPanel) {
-      setEnabled(!state.enabled);
-      return;
-    }
-    const panelOpen = !!(ui?.panel && document.body.contains(ui.panel));
-    if (panelOpen) {
-      if (state.enabled) setEnabled(false);
-      closePanel();
-    } else {
-      if (!state.enabled) setEnabled(true);
-      openPanel();
-    }
+    setEnabled(true);
   }
 
   function openPanel() {
@@ -1840,6 +1815,7 @@
     customImportOpen = false;
     customShareMsg = null;
     quickSaveOpen = false;
+    alwaysOnOffAsk = false;
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     const root = getPanelRoot(button) || findPlayer();
     if (!root) {
@@ -2103,7 +2079,8 @@
           <button type="button" class="cheese-vf-custom-button cheese-vf-reset-all" data-action="reset-all">모든 값 초기화</button>
         </section>
       </div>
-      ${renderQuickSaveModal()}`;
+      ${renderQuickSaveModal()}
+      ${renderAlwaysOnOffModal()}`;
   }
 
   function renderParamRow(key) {
@@ -2132,6 +2109,22 @@
       return v > 0 ? `+${v}` : String(v);
     }
     return String(Math.round(n * 1000) / 1000);
+  }
+
+  // '항상 켜기'가 켜져 있는데 패널 전원을 끄려 할 때 뜨는 확인 모달.
+  function renderAlwaysOnOffModal() {
+    if (!alwaysOnOffAsk) return "";
+    return `
+      <div class="cheese-vf-modal-backdrop" data-action="alwayson-cancel">
+        <div class="cheese-vf-modal" role="dialog" aria-label="비디오 필터 끄기" data-modal-stop>
+          <strong>'항상 켜기'가 켜져 있습니다</strong>
+          <p class="cheese-vf-modal-desc">그래도 비디오 필터를 끕니다.<br>이 채널은 앞으로 '항상 켜기' 대상에서 제외되어 자동으로 켜지지 않습니다.<br>다시 켜면 제외가 해제됩니다.</p>
+          <div class="cheese-vf-modal-actions">
+            <button type="button" class="cheese-vf-custom-button is-primary" data-action="alwayson-confirm">끄기</button>
+            <button type="button" class="cheese-vf-custom-button" data-action="alwayson-cancel">취소</button>
+          </div>
+        </div>
+      </div>`;
   }
 
   function renderQuickSaveModal() {
@@ -2375,7 +2368,7 @@
       if (actionButton) {
         const action = actionButton.dataset.action;
         if (
-          action === "quicksave-cancel" &&
+          (action === "quicksave-cancel" || action === "alwayson-cancel") &&
           actionButton.classList.contains("cheese-vf-modal-backdrop") &&
           e.target.closest("[data-modal-stop]")
         ) {
@@ -2405,6 +2398,19 @@
         }
         if (action === "quicksave-cancel") {
           closeQuickSaveModal();
+          return;
+        }
+        if (action === "alwayson-confirm") {
+          alwaysOnOffAsk = false;
+          state.userDisabled = true;
+          setEnabled(false);
+          saveState(); // opt-out 은 확실히 남긴다(믹서와 동일)
+          refreshPanelContent();
+          return;
+        }
+        if (action === "alwayson-cancel") {
+          alwaysOnOffAsk = false;
+          refreshPanelContent();
           return;
         }
         if (handleCustomPresetAction(panel, actionButton)) {
@@ -2446,6 +2452,13 @@
         return;
       }
       if (t.dataset.action === "power") {
+        // '항상 켜기' 중 끄려 하면 먼저 확인받는다(체크박스는 되돌려 둔다).
+        if (!t.checked && videoFilterAlwaysOn) {
+          t.checked = true;
+          alwaysOnOffAsk = true;
+          refreshPanelContent();
+          return;
+        }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기'에서 opt-out(다시 안 켜짐).
         // 다시 켜면 opt-out 해제. setEnabled가 saveState로 함께 저장한다.
         state.userDisabled = !t.checked;
@@ -2732,12 +2745,175 @@
       : "";
   }
 
+  // ── 최초 1회 조작 안내 ───────────────────────────────────────────────────
+  // 좌/우클릭 동작이 바뀌었으므로(예전에는 클릭 = 패널) 버튼 옆에 한 번만 알려 준다.
+  const GESTURE_HINT_KEY = "cheeseVideoFilterGestureHintSeen";
+  const GESTURE_HINT_CLASS = "cheese-gesture-hint";
+  let gestureHintShown = false;
+  function dismissGestureHint(persist = true) {
+    const hint = document.querySelector(
+      `.${GESTURE_HINT_CLASS}[data-for="video-filter"]`,
+    );
+    if (hint) hint.remove();
+    if (!persist || gestureHintShown) return;
+    gestureHintShown = true;
+    try {
+      localStorage.setItem(GESTURE_HINT_KEY, "1");
+    } catch {}
+  }
+
+  function maybeShowGestureHint(btn) {
+    if (gestureHintShown || !btn) return;
+    try {
+      if (localStorage.getItem(GESTURE_HINT_KEY) === "1") {
+        gestureHintShown = true;
+        return;
+      }
+    } catch {
+      return; // localStorage를 못 쓰면 안내를 반복해 띄우지 않는다.
+    }
+    if (
+      document.querySelector(`.${GESTURE_HINT_CLASS}[data-for="video-filter"]`)
+    )
+      return;
+    // 필터는 버튼 자체가 컨트롤이라 부모(컨트롤 바)가 아닌 버튼 안에 붙인다.
+    const host = btn;
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    const hint = document.createElement("div");
+    hint.className = GESTURE_HINT_CLASS;
+    hint.dataset.for = "video-filter";
+    hint.innerHTML =
+      "<b>비디오 필터</b>좌클릭 켜기·끄기 · 우클릭 설정 패널 · 휠 프리셋 전환";
+    host.appendChild(hint);
+    setTimeout(() => hint.remove(), 6000);
+  }
+
+  // ── 버튼 위 휠: 프리셋 빠른 전환 ─────────────────────────────────────────
+  function presetCycleList() {
+    return [
+      ...Object.entries(PRESETS).map(([key, p]) => ({
+        key,
+        label: p.label,
+        custom: false,
+      })),
+      ...normalizeCustomPresets(state.customPresets).map((p) => ({
+        key: p.id,
+        label: p.name,
+        custom: true,
+      })),
+    ];
+  }
+
+  function cyclePreset(direction) {
+    const list = presetCycleList();
+    if (!list.length) return;
+    const current = String(state.preset || "default");
+    const at = list.findIndex((item) => item.key === current);
+    const next =
+      list[
+        (((at < 0 ? 0 : at + direction) % list.length) + list.length) %
+          list.length
+      ];
+    if (!next) return;
+    if (next.custom) applyCustomPreset(next.key);
+    else applyPreset(next.key);
+    showPresetOsd(next.label);
+  }
+
+  // 프리셋 전환·안내 표시. 화면 가운데 OSD 대신 버튼 바로 위 말풍선으로 띄운다.
+  const PRESET_TIP_CLASS = "cheese-button-tip";
+  let presetTipTimer = 0;
+  // ms: 프리셋 이름은 짧게, 설명 문구는 읽을 시간을 준다.
+  function showPresetOsd(label, ms = 1200) {
+    // ⚠ 필터는 오디오 믹서와 달리 래퍼 없이 버튼 자체가 CONTROL_CLASS다.
+    //   parentElement(컨트롤 바)에 붙이면 위치 기준이 어긋나므로 버튼 안에 둔다.
+    const host = document.querySelector(`.${BUTTON_CLASS}`);
+    if (!host) return;
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    let tip = host.querySelector(`.${PRESET_TIP_CLASS}`);
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.className = PRESET_TIP_CLASS;
+      host.appendChild(tip);
+    }
+    tip.textContent = label;
+    tip.classList.add("is-on");
+    keepControlsAlive(true);
+    clearTimeout(presetTipTimer);
+    presetTipTimer = setTimeout(() => {
+      tip.classList.remove("is-on");
+      keepControlsAlive(false);
+    }, ms);
+  }
+
+  // 휠 조작 중 컨트롤 바가 숨겨지면 버튼이 사라져 연속 전환이 끊긴다.
+  let controlsKeepAlive = false;
+  let controlsKeepAliveObserver = null;
+  function keepControlsAlive(on) {
+    const player = findPlayer();
+    if (!player) return;
+    controlsKeepAlive = on;
+    if (!on) {
+      controlsKeepAliveObserver?.disconnect();
+      controlsKeepAliveObserver = null;
+      return;
+    }
+    if (!player.classList.contains(CONTROLS_CLASS)) {
+      player.classList.add(CONTROLS_CLASS);
+    }
+    if (controlsKeepAliveObserver) return;
+    controlsKeepAliveObserver = new MutationObserver(() => {
+      if (!controlsKeepAlive) return;
+      if (!player.classList.contains(CONTROLS_CLASS)) {
+        player.classList.add(CONTROLS_CLASS);
+      }
+    });
+    controlsKeepAliveObserver.observe(player, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+
+  document.addEventListener(
+    "wheel",
+    (e) => {
+      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissGestureHint();
+      cyclePreset(e.deltaY < 0 ? -1 : 1);
+    },
+    { capture: true, passive: false },
+  );
+
+  // 필터 버튼 우클릭 → 패널 열기(좌클릭은 즉시 on/off).
+  // capture 단계에서 native 플레이어 컨텍스트 메뉴를 먼저 차단한다.
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      dismissGestureHint();
+      togglePanel();
+    },
+    true,
+  );
+
   // 버튼 클릭 위임(document 레벨).
   document.addEventListener("click", (e) => {
     const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
     if (btn) {
       e.preventDefault();
       e.stopPropagation();
+      dismissGestureHint();
       handleButtonClick();
       return;
     }
@@ -2797,6 +2973,7 @@
       if (!panelOpen) return;
       const modalOpen =
         quickSaveOpen ||
+        alwaysOnOffAsk ||
         customCreatorOpen ||
         customExportOpen ||
         customImportOpen ||

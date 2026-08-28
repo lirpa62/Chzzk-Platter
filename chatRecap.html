@@ -293,6 +293,13 @@
             <span class="crc-stat-label">전체 채팅</span>
             <strong class="crc-stat-value" id="crcTotal">0</strong>
           </div>
+          <div class="crc-stat" data-info="crcVodShare">
+            <span class="crc-stat-label">다시보기 내 비중</span>
+            <strong class="crc-stat-value" id="crcVodShare">-</strong>
+            <span class="crc-stat-sub" id="crcVodShareSub"
+              >다시보기 전체 채팅 확인 전</span
+            >
+          </div>
           <div class="crc-stat" data-info="crcChannels">
             <span class="crc-stat-label">채팅한 채널</span>
             <strong class="crc-stat-value" id="crcChannels">0</strong>
@@ -321,10 +328,18 @@
             <strong class="crc-stat-value" id="crcStreak">0</strong>
             <span class="crc-stat-sub" id="crcStreakTop"></span>
           </div>
+          <div class="crc-stat" data-info="crcMultiChannel">
+            <span class="crc-stat-label">멀티 채널 채팅</span>
+            <strong class="crc-stat-value" id="crcMultiChannel">-</strong>
+            <span class="crc-stat-sub" id="crcMultiChannelSub"
+              >서로 다른 채널의 채팅 간격으로 계산합니다</span
+            >
+          </div>
         </section>
 
         <section
           class="crc-summary"
+          id="crcPeriodSummary"
           aria-label="기간별 채팅"
           data-export-summary
         >
@@ -355,13 +370,6 @@
             >
             <span class="crc-stat-sub" id="crcRisingWordSub"
               >비교할 기록이 없습니다</span
-            >
-          </div>
-          <div class="crc-stat" data-info="crcMultiChannel">
-            <span class="crc-stat-label">멀티 채널 채팅</span>
-            <strong class="crc-stat-value" id="crcMultiChannel">-</strong>
-            <span class="crc-stat-sub" id="crcMultiChannelSub"
-              >서로 다른 채널의 채팅 간격으로 계산합니다</span
             >
           </div>
         </section>
@@ -1160,120 +1168,203 @@
           </button>
         </div>
 
-        <p class="crc-modal-desc">
-          팔로잉 채널의 다시보기를 훑어 <b>내가 남긴 채팅</b>만 가져옵니다.
-          다시보기 채팅은 순차로만 읽을 수 있어 시간이 걸립니다(3시간 영상 약
-          20초). 이미 가져온 영상은 건너뛰므로 중단했다가 다시 실행해도
-          이어집니다. 이 탭을 열어 둔 채 다른 일을 하셔도 됩니다.
-        </p>
-
-        <div class="crc-modal-scope">
-          <label class="crc-radio">
-            <input type="radio" name="crcScope" value="selected" checked />
-            <span>선택한 채널만</span>
-          </label>
-          <label class="crc-radio">
-            <input type="radio" name="crcScope" value="all" />
-            <span>전체 팔로잉</span>
-          </label>
+        <div
+          class="lps-view-switch crc-import-tabs"
+          role="tablist"
+          aria-label="다시보기 가져오기 작업"
+        >
+          <button
+            type="button"
+            role="tab"
+            id="crcImportTabImport"
+            data-import-tab="import"
+            aria-controls="crcImportPanelImport"
+            aria-selected="true"
+          >
+            채팅 가져오기
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="crcImportTabManage"
+            data-import-tab="manage"
+            aria-controls="crcImportPanelManage"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            다시보기 관리
+          </button>
         </div>
 
-        <div class="crc-modal-limit">
-          <span id="crcVodLimitLabel">채널당 최근 다시보기</span>
-          <!-- 기본 select 대신 커스텀 팝오버(내역 페이지 정렬 메뉴와 같은 형태) -->
-          <div class="lps-sort crc-select" data-vod-limit-menu>
-            <button
-              type="button"
-              class="lps-sort-button"
-              id="crcVodLimit"
-              aria-haspopup="listbox"
-              aria-expanded="false"
-              aria-labelledby="crcVodLimitLabel crcVodLimit"
-              data-value="5"
-            >
-              <span data-vod-limit-label>5개</span>
-              <svg
-                viewBox="0 0 24 24"
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
-            <ul class="lps-sort-list" role="listbox" hidden>
-              <li role="option" data-limit="3" aria-selected="false">3개</li>
-              <li role="option" data-limit="5" aria-selected="true">5개</li>
-              <li role="option" data-limit="10" aria-selected="false">10개</li>
-              <li role="option" data-limit="20" aria-selected="false">20개</li>
-              <li role="option" data-limit="0" aria-selected="false">전체</li>
-            </ul>
-          </div>
-        </div>
+        <div
+          class="crc-import-tab-panel"
+          id="crcImportPanelImport"
+          role="tabpanel"
+          aria-labelledby="crcImportTabImport"
+          data-import-panel="import"
+        >
+          <p class="crc-modal-desc">
+            팔로잉 채널의 다시보기를 훑어 <b>내가 남긴 채팅</b>만 가져옵니다.
+            다시보기 채팅은 순차로만 읽을 수 있어 시간이 걸립니다(3시간 영상
+            약 20초). 이미 가져온 영상은 건너뛰므로 중단했다가 다시 실행해도
+            이어집니다. 이 탭을 열어 둔 채 다른 일을 하셔도 됩니다.
+          </p>
 
-        <div class="crc-new-vod-panel" id="crcNewVodPanel">
-          <div class="crc-new-vod-copy">
-            <strong id="crcNewVodStatus"
-              >새 다시보기를 확인하지 않았습니다.</strong
-            >
-            <span id="crcNewVodCheckedAt"
-              >수집한 적이 있는 스트리머를 기준으로 확인합니다.</span
-            >
-          </div>
-          <div class="crc-new-vod-actions">
-            <label class="crc-new-vod-badge-toggle">
-              <span>버튼에 배지 표시</span>
-              <span class="crc-toggle">
-                <input type="checkbox" id="crcNewVodBadge" checked />
-                <i aria-hidden="true"></i>
-              </span>
+          <div class="crc-modal-scope">
+            <label class="crc-radio">
+              <input type="radio" name="crcScope" value="selected" checked />
+              <span>선택한 채널만</span>
             </label>
-            <button
-              type="button"
-              class="crc-btn-ghost"
-              id="crcSelectNewVods"
-              title="채널당 최근 다시보기 개수와 관계없이 발견된 새 다시보기를 모두 선택합니다."
-              hidden
-            >
-              새 다시보기 채널 선택
-            </button>
-            <button type="button" class="crc-btn-ghost" id="crcRefreshNewVods">
-              새로 확인
-            </button>
+            <label class="crc-radio">
+              <input type="radio" name="crcScope" value="all" />
+              <span>전체 팔로잉</span>
+            </label>
+          </div>
+
+          <div class="crc-modal-limit">
+            <span id="crcVodLimitLabel">채널당 최근 다시보기</span>
+            <!-- 기본 select 대신 커스텀 팝오버(내역 페이지 정렬 메뉴와 같은 형태) -->
+            <div class="lps-sort crc-select" data-vod-limit-menu>
+              <button
+                type="button"
+                class="lps-sort-button"
+                id="crcVodLimit"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-labelledby="crcVodLimitLabel crcVodLimit"
+                data-value="5"
+              >
+                <span data-vod-limit-label>5개</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              <ul class="lps-sort-list" role="listbox" hidden>
+                <li role="option" data-limit="3" aria-selected="false">
+                  3개
+                </li>
+                <li role="option" data-limit="5" aria-selected="true">
+                  5개
+                </li>
+                <li role="option" data-limit="10" aria-selected="false">
+                  10개
+                </li>
+                <li role="option" data-limit="20" aria-selected="false">
+                  20개
+                </li>
+                <li role="option" data-limit="0" aria-selected="false">
+                  전체
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- 왼쪽: 고를 수 있는 채널 / 오른쪽: 고른 채널 -->
+          <div class="crc-modal-panes">
+            <div class="crc-modal-list-wrap">
+              <input
+                type="search"
+                id="crcChannelSearch"
+                class="crc-modal-search"
+                placeholder="채널 검색"
+                aria-label="채널 검색"
+              />
+              <ul class="crc-modal-list" id="crcFollowList">
+                <li class="crc-modal-loading">
+                  팔로잉 목록을 불러오는 중입니다…
+                </li>
+              </ul>
+            </div>
+            <div class="crc-modal-list-wrap">
+              <div class="crc-picked-head">
+                <span id="crcPickedCount">선택한 채널 0개</span>
+                <button type="button" class="crc-clear" id="crcClearPicked">
+                  모두 해제
+                </button>
+              </div>
+              <ul class="crc-modal-list" id="crcPickedList">
+                <li class="crc-modal-loading">왼쪽에서 채널을 고르세요.</li>
+              </ul>
+            </div>
           </div>
         </div>
 
-        <!-- 왼쪽: 고를 수 있는 채널 / 오른쪽: 고른 채널(무엇을 골랐는지 보이게) -->
-        <div class="crc-modal-panes">
-          <div class="crc-modal-list-wrap">
-            <input
-              type="search"
-              id="crcChannelSearch"
-              class="crc-modal-search"
-              placeholder="채널 검색"
-              aria-label="채널 검색"
-            />
-            <ul class="crc-modal-list" id="crcFollowList">
-              <li class="crc-modal-loading">
-                팔로잉 목록을 불러오는 중입니다…
-              </li>
-            </ul>
-          </div>
-          <div class="crc-modal-list-wrap">
-            <div class="crc-picked-head">
-              <span id="crcPickedCount">선택한 채널 0개</span>
-              <button type="button" class="crc-clear" id="crcClearPicked">
-                모두 해제
+        <div
+          class="crc-import-tab-panel crc-import-manage"
+          id="crcImportPanelManage"
+          role="tabpanel"
+          aria-labelledby="crcImportTabManage"
+          data-import-panel="manage"
+          hidden
+        >
+          <p class="crc-modal-desc">
+            새 다시보기를 확인하거나, 이전에 가져온 다시보기의 전체 채팅 수를
+            보강합니다.
+          </p>
+          <div class="crc-vod-tools-body">
+            <div class="crc-new-vod-panel" id="crcNewVodPanel">
+              <div class="crc-new-vod-copy">
+                <strong id="crcNewVodStatus"
+                  >새 다시보기를 확인하지 않았습니다.</strong
+                >
+                <span id="crcNewVodCheckedAt"
+                  >수집한 적이 있는 스트리머를 기준으로 확인합니다.</span
+                >
+              </div>
+              <div class="crc-new-vod-actions">
+                <label class="crc-new-vod-badge-toggle">
+                  <span>버튼에 배지 표시</span>
+                  <span class="crc-toggle">
+                    <input type="checkbox" id="crcNewVodBadge" checked />
+                    <i aria-hidden="true"></i>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  class="crc-btn-ghost"
+                  id="crcSelectNewVods"
+                  title="채널당 최근 다시보기 개수와 관계없이 발견된 새 다시보기를 모두 선택합니다."
+                  hidden
+                >
+                  새 다시보기 채널 선택
+                </button>
+                <button
+                  type="button"
+                  class="crc-btn-ghost"
+                  id="crcRefreshNewVods"
+                >
+                  새로 확인
+                </button>
+              </div>
+            </div>
+
+            <div class="crc-vod-stats-panel">
+              <div class="crc-new-vod-copy">
+                <strong>기존 다시보기 전체 채팅 수</strong>
+                <span
+                  >이미 가져온 기록 중 통계가 없는 다시보기만 다시 읽습니다.
+                  가져오기 탭에서 채널을 직접 선택한 경우 해당 채널만, 그 외에는
+                  기존 내역 전체를 확인합니다.</span
+                >
+              </div>
+              <button
+                type="button"
+                class="crc-btn-ghost"
+                id="crcBackfillVodStats"
+              >
+                전체 채팅 수 확인
               </button>
             </div>
-            <ul class="crc-modal-list" id="crcPickedList">
-              <li class="crc-modal-loading">왼쪽에서 채널을 고르세요.</li>
-            </ul>
           </div>
         </div>
 

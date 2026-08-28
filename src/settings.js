@@ -26,6 +26,7 @@
     "cheeseSettingsPopupWidth",
     "cheeseChatRecap",
     "cheeseChatRecapRetentionDays",
+    "cheeseChatRecapPlayerButtonHidden",
     "cheeseChatRecapChannelColors",
     "cheeseChatRecapChannelColorsCustom",
     "cheeseChatRecapChannelTrendCumulative",
@@ -208,9 +209,6 @@
     "cheeseAudioMixer.autoSync",
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
-    "cheeseMixerBeginner",
-    "cheeseMixerClickActivate",
-    "cheeseMixerClickNoPanel",
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
     "cheeseMixerGainStep",
@@ -251,9 +249,6 @@
     "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
     "cheeseVideoFilter.autoSharpen",
-    "cheeseVideoFilterBeginner",
-    "cheeseVideoFilterClickActivate",
-    "cheeseVideoFilterClickNoPanel",
     "cheeseVideoFilterGlobalDefaultMode",
     "cheeseVodAutoplayOff",
     "cheeseVolumePct",
@@ -264,6 +259,8 @@
     "cheeseWheelVolumeStep",
     "cheeseCommentTimestampClickAction",
     "cheeseCommentTimestampClickDelay",
+    "cheeseChatRecapClickAction",
+    "cheeseChatRecapClickDelay",
     "cheeseGainPct",
     "cheeseWideScreenAuto",
     "audioMixer:presets",
@@ -315,94 +312,6 @@
     try {
       chrome.storage?.local?.remove(list);
     } catch {}
-  }
-
-  // 요소를 강제 잠금/해제(초보자 원클릭 기준). 원래 disabled 값을 dataset 에 보관했다가
-  // 해제 시 복원해 항상 켜기 등 기존 잠금과 공존한다.
-  function setBeginnerLock(el, on) {
-    if (!el) return;
-    const item = el.closest(".settings-item");
-    if (on) {
-      if (el.dataset.preBeginnerDisabled === undefined) {
-        el.dataset.preBeginnerDisabled = el.disabled ? "1" : "0";
-      }
-      el.disabled = true;
-      item?.classList.add("is-locked", "is-beginner-locked");
-    } else {
-      if (el.dataset.preBeginnerDisabled !== undefined) {
-        el.disabled = el.dataset.preBeginnerDisabled === "1";
-        delete el.dataset.preBeginnerDisabled;
-      }
-      item?.classList.remove("is-beginner-locked");
-      if (!el.disabled) item?.classList.remove("is-locked");
-    }
-  }
-
-  // '초보자용 원클릭' 토글 바인딩: 로드/저장 + 켜지면 관련 세부 옵션(lockSels)을 잠근다.
-  // exclusiveSel(항상 켜기)과는 상호 배타 — 초보자 ON 이면 항상 켜기를 끄고 잠그고,
-  // 항상 켜기 ON 이면 초보자를 끄고 잠근다(둘 다 켜면 패널을 못 여는 충돌 방지).
-  function bindBeginnerOneClick({
-    inputSel,
-    key,
-    lockSels,
-    exclusiveSel,
-    exclusiveKey,
-  }) {
-    const input = document.querySelector(inputSel);
-    if (!input) return;
-    const lockEls = lockSels
-      .map((s) => document.querySelector(s))
-      .filter(Boolean);
-    const exclusiveEl = exclusiveSel
-      ? document.querySelector(exclusiveSel)
-      : null;
-
-    // 초보자 ON → 하위 옵션 + 항상 켜기 잠금.
-    function applyBeginnerLock(on) {
-      lockEls.forEach((el) => setBeginnerLock(el, on));
-      if (exclusiveEl) setBeginnerLock(exclusiveEl, on);
-    }
-    (async () => {
-      let on = false; // 기본 OFF
-      let alwaysOn = false;
-      try {
-        const d = await cachedStorageGet([key, exclusiveKey].filter(Boolean));
-        on = d?.[key] === true;
-        alwaysOn = exclusiveKey ? d?.[exclusiveKey] === true : false;
-      } catch {}
-      // 상호 배타: 항상 켜기가 이미 켜져 있으면 초보자는 강제로 꺼진 상태 + 잠금.
-      // (과거에 둘 다 켜둔 사용자 정리 — storage 에도 off 를 반영해 MAIN 과 일치.)
-      if (alwaysOn && on) {
-        on = false;
-        try {
-          cachedStorageSet({ [key]: false });
-        } catch {}
-      }
-      input.checked = on;
-      applyBeginnerLock(on);
-      if (exclusiveEl) setBeginnerLock(input, alwaysOn); // 항상 켜기 ON → 초보자 잠금
-    })();
-    input.addEventListener("change", () => {
-      try {
-        cachedStorageSet({ [key]: input.checked });
-      } catch {}
-      applyBeginnerLock(input.checked);
-    });
-
-    // 반대 방향: 항상 켜기 ON → 초보자 원클릭을 끄고 잠근다. 항상 켜기 OFF → 초보자 잠금 해제.
-    if (exclusiveEl) {
-      exclusiveEl.addEventListener("change", () => {
-        const alwaysOn = !!exclusiveEl.checked;
-        if (alwaysOn && input.checked) {
-          input.checked = false;
-          try {
-            cachedStorageSet({ [key]: false });
-          } catch {}
-          applyBeginnerLock(false); // 초보자 꺼짐 → 하위 잠금 해제
-        }
-        setBeginnerLock(input, alwaysOn);
-      });
-    }
   }
 
   // ── 팝업 폭 조절 ──────────────────────────────────────────────────────────
@@ -2479,6 +2388,164 @@
   });
   loadMixerAlwaysOn();
 
+  // ── '항상 켜기' 제외 채널 목록(오디오 믹서 / 비디오 필터 공용) ────────────
+  // 패널에서 직접 끈 채널은 per-channel 저장값에 userDisabled=true 로 남는다
+  // (키: audioMixer:<채널해시> / videoFilter:<채널해시>). 그 채널들을 모아 보여
+  // 주고, 여기서 해제하면 다시 '항상 켜기' 대상이 된다.
+  function setupAlwaysOnExcludeList({ kind, prefix, label }) {
+    const list = document.querySelector(`[data-${kind}-exclude-list]`);
+    const item = document.querySelector(`[data-${kind}-exclude-item]`);
+    if (!list) return;
+    const HASH_RE = /^[0-9a-f]{32}$/i;
+    const nameCache = new Map();
+
+    async function fetchChannelName(hash) {
+      if (nameCache.has(hash)) return nameCache.get(hash);
+      let info = { name: "", imageUrl: "" };
+      try {
+        const res = await fetch(
+          `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(hash)}`,
+          { credentials: "include" },
+        );
+        if (res.ok) {
+          const content = (await res.json())?.content;
+          info = {
+            name: String(content?.channelName || ""),
+            imageUrl: String(content?.channelImageUrl || ""),
+          };
+        }
+      } catch {}
+      nameCache.set(hash, info);
+      return info;
+    }
+
+    async function excludedChannels() {
+      // 채팅 리캡처럼 큰 사용자 데이터까지 값으로 읽지 않도록, 지원되는 브라우저에서는
+      // 먼저 키만 확인한 뒤 채널 설정만 가져온다. getKeys 미지원 환경만 전체 조회로 폴백한다.
+      if (typeof chrome.storage.local.getKeys === "function") {
+        const keys = (await chrome.storage.local.getKeys()).filter((key) => {
+          if (!key.startsWith(prefix)) return false;
+          return HASH_RE.test(key.slice(prefix.length));
+        });
+        if (!keys.length) return [];
+        const stored = await chrome.storage.local.get(keys);
+        return keys
+          .filter((key) => stored?.[key]?.userDisabled === true)
+          .map((key) => key.slice(prefix.length));
+      }
+
+      const all = await chrome.storage.local.get(null);
+      return Object.entries(all)
+        .filter(([key, value]) => {
+          if (!key.startsWith(prefix)) return false;
+          const hash = key.slice(prefix.length);
+          return HASH_RE.test(hash) && value?.userDisabled === true;
+        })
+        .map(([key]) => key.slice(prefix.length));
+    }
+
+    async function unexclude(hash) {
+      const key = `${prefix}${hash}`;
+      try {
+        const stored = (await chrome.storage.local.get(key))?.[key];
+        if (!stored || typeof stored !== "object") return;
+        await chrome.storage.local.set({
+          [key]: { ...stored, userDisabled: false },
+        });
+      } catch {}
+    }
+
+    async function render() {
+      let hashes = [];
+      try {
+        hashes = await excludedChannels();
+      } catch {}
+      // 목록이 비면 항목 자체를 감춰 설정 화면을 어지럽히지 않는다.
+      if (item) item.hidden = hashes.length === 0;
+      list.textContent = "";
+      if (!hashes.length) {
+        const empty = document.createElement("p");
+        empty.className = "settings-exclude-empty";
+        empty.textContent = "제외된 채널이 없습니다.";
+        list.append(empty);
+        return;
+      }
+      // 이름은 뒤늦게 채운다(먼저 행을 그려 두고 조회되는 대로 교체).
+      const rows = new Map();
+      for (const hash of hashes) {
+        const row = document.createElement("div");
+        row.className = "settings-exclude-row";
+        const img = document.createElement("img");
+        img.alt = "";
+        img.loading = "lazy";
+        img.hidden = true;
+        const name = document.createElement("span");
+        name.className = "settings-exclude-name";
+        name.textContent = `${hash.slice(0, 8)}…`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "제외 해제";
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          await unexclude(hash);
+          await render();
+        });
+        row.append(img, name, button);
+        list.append(row);
+        rows.set(hash, { img, name });
+      }
+      // ⚠ 채널 수가 많으면 한 번에 다 요청하지 않는다(동시 6개 워커 풀).
+      const CONCURRENCY = 6;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < hashes.length) {
+          const hash = hashes[cursor++];
+          const info = await fetchChannelName(hash);
+          const row = rows.get(hash);
+          if (!row) continue;
+          if (info.name) row.name.textContent = info.name;
+          if (info.imageUrl) {
+            row.img.src = info.imageUrl;
+            row.img.hidden = false;
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, hashes.length) }, worker),
+      );
+    }
+
+    void render();
+    // 플레이어에서 끄거나 켜면 즉시 반영한다.
+    let renderTimer = 0;
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local") return;
+      const changed = Object.entries(changes).some(([key, value]) => {
+        if (!key.startsWith(prefix)) return false;
+        const hash = key.slice(prefix.length);
+        if (!HASH_RE.test(hash)) return false;
+        return (
+          value?.oldValue?.userDisabled !== value?.newValue?.userDisabled
+        );
+      });
+      if (!changed) return;
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(() => void render(), 100);
+    });
+    return { render, label };
+  }
+
+  setupAlwaysOnExcludeList({
+    kind: "mixer",
+    prefix: "audioMixer:",
+    label: "오디오 믹서",
+  });
+  setupAlwaysOnExcludeList({
+    kind: "video-filter",
+    prefix: "videoFilter:",
+    label: "비디오 필터",
+  });
+
   // ── 오디오 믹서 전역 기본값(채널 무관) ────────────────────────────────────
   const AUDIO_MIXER_PRESETS_KEY = "audioMixer:presets";
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
@@ -3774,186 +3841,6 @@
     wheelVolumeStepInput.addEventListener("change", save);
     wheelVolumeStepInput.addEventListener("blur", save);
   }
-
-  // ── 믹서 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
-  const mixerClickActivateInput = document.querySelector(
-    "[data-mixer-click-activate]",
-  );
-  if (mixerClickActivateInput) {
-    const KEY = "cheeseMixerClickActivate";
-    (async () => {
-      let on = false; // 기본 OFF
-      try {
-        const d = await cachedStorageGet(KEY);
-        on = d?.[KEY] === true;
-      } catch {}
-      mixerClickActivateInput.checked = on;
-    })();
-    mixerClickActivateInput.addEventListener("change", () => {
-      try {
-        cachedStorageSet({ [KEY]: mixerClickActivateInput.checked });
-      } catch {}
-    });
-
-    // '오디오 믹서 항상 켜기'가 켜져 있으면 믹서는 이미 자동 활성화되므로 '클릭 시
-    // 바로 켜기'는 의미가 없다 → 이 토글을 비활성화(잠금)한다.
-    function setMixerClickActivateLock(alwaysOn) {
-      mixerClickActivateInput.disabled = alwaysOn;
-      mixerClickActivateInput
-        .closest(".settings-item")
-        ?.classList.toggle("is-locked", alwaysOn);
-    }
-    // 항상 켜기 토글을 이 화면에서 바꾸면 즉시 반영.
-    mixerAlwaysOnInput?.addEventListener("change", () =>
-      setMixerClickActivateLock(!!mixerAlwaysOnInput.checked),
-    );
-    // 초기값은 storage에서 직접 읽어 확정(load 비동기 완료 타이밍에 의존하지 않게).
-    (async () => {
-      let alwaysOn = false;
-      try {
-        const d = await cachedStorageGet(MIXER_ALWAYS_ON_KEY);
-        alwaysOn = d?.[MIXER_ALWAYS_ON_KEY] === true;
-      } catch {}
-      setMixerClickActivateLock(alwaysOn);
-    })();
-
-    // 하위: '패널은 열지 않기'. 부모('클릭 시 바로 켜기')가 켜져 있을 때만 의미 있으므로,
-    // 부모가 꺼져 있으면 비활성화한다.
-    const noPanelInput = document.querySelector("[data-mixer-click-no-panel]");
-    if (noPanelInput) {
-      const NP_KEY = "cheeseMixerClickNoPanel";
-      function reflectNoPanelEnabled() {
-        const parentOn =
-          !!mixerClickActivateInput.checked &&
-          !mixerClickActivateInput.disabled;
-        noPanelInput.disabled = !parentOn;
-        noPanelInput
-          .closest(".settings-item")
-          ?.classList.toggle("is-locked", !parentOn);
-      }
-      (async () => {
-        let on = false;
-        try {
-          const d = await cachedStorageGet(NP_KEY);
-          on = d?.[NP_KEY] === true;
-        } catch {}
-        noPanelInput.checked = on;
-        reflectNoPanelEnabled();
-      })();
-      noPanelInput.addEventListener("change", () => {
-        try {
-          cachedStorageSet({ [NP_KEY]: noPanelInput.checked });
-        } catch {}
-      });
-      mixerClickActivateInput.addEventListener("change", reflectNoPanelEnabled);
-      mixerAlwaysOnInput?.addEventListener("change", reflectNoPanelEnabled);
-    }
-  }
-
-  // ── 오디오 믹서 초보자용 원클릭(전역, 기본 OFF) ───────────────────────────
-  // 켜지면 관련 세부 옵션(바로 켜기·패널 안 열기·전역 기본값·재방문 동작)을 잠근다.
-  bindBeginnerOneClick({
-    inputSel: "[data-mixer-beginner]",
-    key: "cheeseMixerBeginner",
-    lockSels: [
-      "[data-mixer-click-activate]",
-      "[data-mixer-click-no-panel]",
-      "[data-mixer-global-default-enabled]",
-      "[data-mixer-global-default-mode]",
-    ],
-    exclusiveSel: "[data-mixer-always-on]",
-    exclusiveKey: "cheeseMixerAlwaysOn",
-  });
-
-  // ── 필터 버튼 클릭 시 바로 켜기(전역, 기본 OFF) ───────────────────────────
-  const vfClickActivateInput = document.querySelector(
-    "[data-video-filter-click-activate]",
-  );
-  if (vfClickActivateInput) {
-    const KEY = "cheeseVideoFilterClickActivate";
-    (async () => {
-      let on = false; // 기본 OFF
-      try {
-        const d = await cachedStorageGet(KEY);
-        on = d?.[KEY] === true;
-      } catch {}
-      vfClickActivateInput.checked = on;
-    })();
-    vfClickActivateInput.addEventListener("change", () => {
-      try {
-        cachedStorageSet({ [KEY]: vfClickActivateInput.checked });
-      } catch {}
-    });
-
-    // '비디오 필터 항상 켜기'가 켜져 있으면 필터는 이미 자동 활성화되므로 '클릭 시
-    // 바로 켜기'는 의미가 없다 → 이 토글을 비활성화(잠금)한다.
-    function setVfClickActivateLock(alwaysOn) {
-      vfClickActivateInput.disabled = alwaysOn;
-      vfClickActivateInput
-        .closest(".settings-item")
-        ?.classList.toggle("is-locked", alwaysOn);
-    }
-    videoFilterAlwaysOnInput?.addEventListener("change", () =>
-      setVfClickActivateLock(!!videoFilterAlwaysOnInput.checked),
-    );
-    (async () => {
-      let alwaysOn = false;
-      try {
-        const d = await cachedStorageGet(VIDEO_FILTER_ALWAYS_ON_KEY);
-        alwaysOn = d?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
-      } catch {}
-      setVfClickActivateLock(alwaysOn);
-    })();
-
-    // 하위: '패널은 열지 않기'. 부모가 켜져 있을 때만 활성.
-    const vfNoPanelInput = document.querySelector(
-      "[data-video-filter-click-no-panel]",
-    );
-    if (vfNoPanelInput) {
-      const NP_KEY = "cheeseVideoFilterClickNoPanel";
-      function reflectVfNoPanelEnabled() {
-        const parentOn =
-          !!vfClickActivateInput.checked && !vfClickActivateInput.disabled;
-        vfNoPanelInput.disabled = !parentOn;
-        vfNoPanelInput
-          .closest(".settings-item")
-          ?.classList.toggle("is-locked", !parentOn);
-      }
-      (async () => {
-        let on = false;
-        try {
-          const d = await cachedStorageGet(NP_KEY);
-          on = d?.[NP_KEY] === true;
-        } catch {}
-        vfNoPanelInput.checked = on;
-        reflectVfNoPanelEnabled();
-      })();
-      vfNoPanelInput.addEventListener("change", () => {
-        try {
-          cachedStorageSet({ [NP_KEY]: vfNoPanelInput.checked });
-        } catch {}
-      });
-      vfClickActivateInput.addEventListener("change", reflectVfNoPanelEnabled);
-      videoFilterAlwaysOnInput?.addEventListener(
-        "change",
-        reflectVfNoPanelEnabled,
-      );
-    }
-  }
-
-  // ── 비디오 필터 초보자용 원클릭(전역, 기본 OFF) ───────────────────────────
-  bindBeginnerOneClick({
-    inputSel: "[data-video-filter-beginner]",
-    key: "cheeseVideoFilterBeginner",
-    lockSels: [
-      "[data-video-filter-click-activate]",
-      "[data-video-filter-click-no-panel]",
-      "[data-video-filter-global-default-enabled]",
-      "[data-video-filter-global-default-mode]",
-    ],
-    exclusiveSel: "[data-video-filter-always-on]",
-    exclusiveKey: "cheeseVideoFilterAlwaysOn",
-  });
 
   // ── 전역 기본값 재방문 동작(global=전역값 우선 | channel=직접 선택 우선) ─────
   const mixerGlobalDefaultModeGroup = document.querySelector(
@@ -8095,7 +7982,7 @@
     "cheeseChatRecapPodiumAchievements",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
-    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32})$/i;
+    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32})$/i;
   const isSettingsFullDataKey = (key) =>
     SETTINGS_FULL_DATA_KEYS.has(key) ||
     CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
@@ -9620,6 +9507,96 @@
     commentTsDelayInput.addEventListener("blur", save);
   }
   loadCommentTsClick();
+
+  // ── 다시보기 내 채팅 기록 클릭 시 팝오버 동작 ─────────────────────────────
+  // 기존 설치에서는 댓글 타임스탬프 설정을 한 번 승계한 뒤 독립적으로 저장한다.
+  const CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY =
+    "cheeseChatRecapPlayerButtonHidden";
+  const CHAT_RECAP_CLICK_ACTION_KEY = "cheeseChatRecapClickAction";
+  const CHAT_RECAP_CLICK_DELAY_KEY = "cheeseChatRecapClickDelay";
+  const chatRecapClickButtons = Array.from(
+    document.querySelectorAll("[data-chat-recap-click]"),
+  );
+  const chatRecapDelayRow = document.querySelector(
+    "[data-chat-recap-delay-row]",
+  );
+  const chatRecapDelayInput = document.querySelector(
+    "[data-chat-recap-click-delay]",
+  );
+  const chatRecapPlayerButtonHiddenInput = document.querySelector(
+    "[data-chat-recap-player-button-hidden]",
+  );
+  function reflectChatRecapClick(action) {
+    const value = COMMENT_TS_CLICK_ACTIONS.includes(action) ? action : "close";
+    chatRecapClickButtons.forEach((button) => {
+      const active = button.dataset.chatRecapClick === value;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+    if (chatRecapDelayRow) chatRecapDelayRow.hidden = value !== "delay";
+  }
+  async function loadChatRecapClick() {
+    let action = "close";
+    let delay = COMMENT_TS_CLICK_DELAY_DEFAULT;
+    try {
+      const data = await cachedStorageGet([
+        CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
+        CHAT_RECAP_CLICK_ACTION_KEY,
+        CHAT_RECAP_CLICK_DELAY_KEY,
+        COMMENT_TS_CLICK_ACTION_KEY,
+        COMMENT_TS_CLICK_DELAY_KEY,
+      ]);
+      if (chatRecapPlayerButtonHiddenInput) {
+        chatRecapPlayerButtonHiddenInput.checked =
+          data?.[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY] === true;
+      }
+      const storedAction = data?.[CHAT_RECAP_CLICK_ACTION_KEY];
+      const legacyAction = data?.[COMMENT_TS_CLICK_ACTION_KEY];
+      action = COMMENT_TS_CLICK_ACTIONS.includes(storedAction)
+        ? storedAction
+        : COMMENT_TS_CLICK_ACTIONS.includes(legacyAction)
+          ? legacyAction
+          : "close";
+      const storedDelay = data?.[CHAT_RECAP_CLICK_DELAY_KEY];
+      const legacyDelay = data?.[COMMENT_TS_CLICK_DELAY_KEY];
+      delay = clampCommentTsDelay(
+        storedDelay !== undefined ? storedDelay : legacyDelay,
+      );
+      const migration = {};
+      if (storedAction === undefined) {
+        migration[CHAT_RECAP_CLICK_ACTION_KEY] = action;
+      }
+      if (storedDelay === undefined) {
+        migration[CHAT_RECAP_CLICK_DELAY_KEY] = delay;
+      }
+      if (Object.keys(migration).length) cachedStorageSet(migration);
+    } catch {}
+    reflectChatRecapClick(action);
+    if (chatRecapDelayInput) chatRecapDelayInput.value = String(delay);
+  }
+  chatRecapClickButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.chatRecapClick;
+      reflectChatRecapClick(action);
+      cachedStorageSet({ [CHAT_RECAP_CLICK_ACTION_KEY]: action });
+    });
+  });
+  chatRecapPlayerButtonHiddenInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY]:
+        chatRecapPlayerButtonHiddenInput.checked,
+    });
+  });
+  if (chatRecapDelayInput) {
+    const save = () => {
+      const value = clampCommentTsDelay(chatRecapDelayInput.value);
+      chatRecapDelayInput.value = String(value);
+      cachedStorageSet({ [CHAT_RECAP_CLICK_DELAY_KEY]: value });
+    };
+    chatRecapDelayInput.addEventListener("change", save);
+    chatRecapDelayInput.addEventListener("blur", save);
+  }
+  loadChatRecapClick();
 
   // ── 메인 진입 시 팔로우로 이동(기본 OFF) ──────────────────────────────────
   const ROOT_TO_FOLLOWING_KEY = "cheeseRootToFollowing";

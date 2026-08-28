@@ -1042,6 +1042,8 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-item:has([data-mixer-global-default-mode]),
+.settings-item:has([data-mixer-exclude-list]),
+.settings-item:has([data-video-filter-exclude-list]),
 .settings-item:has([data-player-button-side]),
 .settings-item:has([data-video-filter-global-default-mode]),
 .settings-item:has([data-player-button-order]),
@@ -1100,6 +1102,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has(#searchLiveRerankDefaultSort),
 .settings-item:has(#followPreviewBadgePos),
 .settings-item:has(#rootToFollowingLogoMode),
+.settings-item:has(#chatRecapClickAction),
 .settings-item:has([data-update-notice-mode]) {
   flex-direction: column;
 }
@@ -1113,6 +1116,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item #cardLivePreviewPosition,
 .settings-item #searchLiveRerankDefaultSort,
 .settings-item #followPreviewBadgePos,
+.settings-item #chatRecapClickAction,
 .settings-item #rootToFollowingLogoMode {
   margin-left: auto;
 }
@@ -2825,4 +2829,68 @@ body > .clr-picker .clr-preview {
 /* 기간 제한 없음일 때 일수 입력은 흐리게(값은 남겨 두어 해제 시 복원된다). */
 .settings-item.is-off .settings-custom-input {
   opacity: 0.45;
+}
+
+/* ── '항상 켜기' 제외 채널 목록 ─────────────────────────────────────────
+   패널에서 직접 끈 채널(userDisabled)을 모아 보여 주고, 여기서 제외를 풀면
+   그 채널에 다시 '항상 켜기'가 적용된다. */
+.settings-exclude-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.settings-exclude-empty {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--popup-muted);
+  font-size: 12px;
+}
+
+.settings-exclude-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--popup-border-soft);
+  border-radius: 8px;
+  background: var(--popup-soft-bg);
+}
+
+.settings-exclude-row img {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.settings-exclude-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-exclude-row button {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--popup-text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-exclude-row button:hover {
+  background: var(--popup-dimmed-bg);
 }

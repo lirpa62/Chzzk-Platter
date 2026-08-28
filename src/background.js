@@ -9,9 +9,9 @@ const CLIP_LIKE_API_BASE =
   "https://apis.naver.com/clip-viewer-web/like/v1/services/CHZZK/contents";
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 const COMMENT_TIMESTAMP_CACHE_TTL_MS = 30 * 60 * 1000;
-// ⚠ 마커 상한 로직이 바뀌면 올린다. 안 올리면 예전에 80개로 잘린 결과가
+// ⚠ 마커 생성·필터 규칙이 바뀌면 올린다. 안 올리면 이전 규칙의 결과가
 //   TTL(30분) 동안 그대로 쓰인다.
-const COMMENT_TIMESTAMP_CACHE_VERSION = 5;
+const COMMENT_TIMESTAMP_CACHE_VERSION = 6;
 const SORT_METRIC_CACHE_TTL_MS = 30 * 60 * 1000;
 const PAGE_SIZE = 50;
 const CLIP_PAGE_SIZE = 50;
@@ -2249,6 +2249,10 @@ function collectCommentEntries(items, sourceType = "comment") {
   if (!Array.isArray(items)) return [];
   const entries = [];
   items.forEach((item) => {
+    // 치지직이 차단 안내로 대체하는 댓글은 원문을 볼 수 없으며, 원 댓글이 차단된
+    // 경우 그 아래 답글도 화면에서 함께 사라진다. 타임스탬프 후보에서도 스레드째
+    // 제외해 재생바 마커와 댓글 목록이 실제 표시 상태와 일치하게 한다.
+    if (item?.user?.privateUserBlock === true) return;
     const entry = toCommentEntry(item, sourceType);
     if (entry) entries.push(entry);
     entries.push(...collectCommentEntries(item?.replyComments, "reply"));

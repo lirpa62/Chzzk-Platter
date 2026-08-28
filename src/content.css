@@ -8182,6 +8182,12 @@ html.cheese-hide-blocked-cards [class*="_item_"]:has(> [class*="_is_block_"]) {
   display: none !important;
 }
 
+/* 통합검색 채널 결과는 _is_block_ 없이 기본 프로필과 '차단한 유저' 문구만 렌더한다.
+   content.js가 구조를 확인해 붙인 마커로 숨겨 클래스 해시 변경의 영향을 받지 않는다. */
+html.cheese-hide-blocked-cards .cheese-blocked-user-search-card {
+  display: none !important;
+}
+
 /* 다시보기 등록일/방송 시작 추정 시각: 원본 호버 툴팁(_label_)은 우리 마커로 숨기고(React
    노드의 텍스트/자식은 안 건드림 — SPA 전환 크래시 방지), 전체 날짜·시각은 아래 우리
    body-fixed 툴팁으로 표시한다. */
@@ -10837,8 +10843,8 @@ html.cheese-player-hide-liveRewind
 
 #header .cheese-inbox-community-header-dot {
   position: absolute;
-  top: 5px;
-  right: 6px;
+  top: 6px;
+  right: 8px;
   width: 8px;
   height: 8px;
   border: 2px solid var(--cheese-platter-background-neutral-base);
