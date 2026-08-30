@@ -9763,7 +9763,12 @@
 
   // content.js 와 같은 형식으로 월별 청크에 합친다. 다시보기 행은 메시지 ID 또는
   // 영상+재생 위치+본문을 함께 사용해 절대 시각이 흔들려도 중복 저장하지 않는다.
-  async function mergeIntoStore(accountId, channelId, rows) {
+  async function mergeIntoStore(
+    accountId,
+    channelId,
+    rows,
+    { completeVideoNo = "" } = {},
+  ) {
     if (!rows.length) return 0;
     const byMonth = new Map();
     for (const r of rows) {
@@ -9789,6 +9794,26 @@
         items.splice(0, items.length, ...compacted.items);
       }
       const initialItemCount = items.length;
+      if (completeVideoNo) {
+        const reconciled = STORE_API.reconcileCompleteVodRows(
+          items,
+          list,
+          completeVideoNo,
+          recapDonationStorageKey,
+        );
+        const finalItems = reconciled.items.sort(
+          (a, b) => (Number(a.t) || 0) - (Number(b.t) || 0),
+        );
+        added += reconciled.added;
+        await STORE_API.writeMerged(
+          chrome.storage.local,
+          mergeState,
+          finalItems,
+          STORE_CHUNK_MAX,
+        );
+        catalogMonths.push(month);
+        continue;
+      }
       // ⚠ 위와 같은 이유로, 이미 있는 줄이면 v·n 만 보강한다.
       // ⚠ 후원은 본문이 비어 있을 수 있어(파티) t|m 만으로는 서로 뭉개진다 →
       //   종류·금액까지 키에 넣는다.
@@ -10813,7 +10838,9 @@
               // 병합하지 않아 과거 데이터와 중복될 여지를 만들지 않는다.
               const added = backfillStats
                 ? 0
-                : await mergeIntoStore(accountId, channelId, rows);
+                : await mergeIntoStore(accountId, channelId, rows, {
+                    completeVideoNo: rows.complete ? String(videoNo) : "",
+                  });
               if (rows.complete) {
                 coverageSaved = await saveVodChatStat(
                   accountId,

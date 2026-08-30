@@ -200,6 +200,156 @@
     return { items, changed };
   }
 
+  function mergeVodRow(current, incoming) {
+    const next = { ...current };
+    if (Number(incoming?.t) > 0) next.t = incoming.t;
+    if (incoming?.m !== undefined) next.m = incoming.m;
+    if (incoming?.n) next.n = incoming.n;
+    if (incoming?.v !== undefined) next.v = incoming.v;
+    if (incoming?.i) next.i = incoming.i;
+    if (
+      incoming?.d &&
+      (!next.d ||
+        incoming.d.src === "history" ||
+        next.d?.src !== "history")
+    ) {
+      const keepPendingTime = next.d?.src === "mission";
+      next.d = keepPendingTime
+        ? { ...incoming.d, src: "mission" }
+        : incoming.d;
+      if (keepPendingTime && Number(current?.t) > 0) next.t = current.t;
+    }
+    return next;
+  }
+
+  function takeUnused(indexes, used) {
+    for (const index of indexes || []) {
+      if (used.has(index)) continue;
+      used.add(index);
+      return index;
+    }
+    return undefined;
+  }
+
+  // 끝까지 읽은 한 다시보기는 기존 행에 단순 추가하지 않고 수집 결과와 일대일로
+  // 맞춘다. API 재조회 때 합성 메시지 ID나 절대 시각이 달라져도 같은 영상 위치의
+  // 행이 계속 쌓이지 않으며, 같은 초에 같은 문구를 실제로 여러 번 보낸 경우에는
+  // 이번 응답에 들어 있는 개수만큼 각각 보존한다.
+  function reconcileCompleteVodRows(
+    sourceItems,
+    incomingRows,
+    videoNo,
+    donationKeyOf = () => "",
+  ) {
+    const targetVideoNo = String(videoNo || "");
+    if (!/^\d+$/.test(targetVideoNo)) {
+      return { items: (sourceItems || []).slice(), changed: false, added: 0 };
+    }
+
+    const compactedIncoming = compactVodRows(incomingRows, donationKeyOf);
+    const incoming = compactedIncoming.items.filter(
+      (item) => String(item?.n || "") === targetVideoNo,
+    );
+    const items = (sourceItems || []).map((item) => ({ ...item }));
+    const targetIndexes = [];
+    const identityIndexes = new Map();
+    const fallbackIndexes = new Map();
+    const unlinkedBySecond = new Map();
+
+    const addIndex = (map, key, index) => {
+      if (!key) return;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(index);
+    };
+
+    items.forEach((item, index) => {
+      if (String(item?.n || "") === targetVideoNo) {
+        targetIndexes.push(index);
+        addIndex(identityIndexes, vodIdentityKey(item), index);
+        addIndex(fallbackIndexes, vodFallbackKey(item, donationKeyOf), index);
+      } else if (!item?.n) {
+        const second = Math.floor((Number(item?.t) || 0) / 1000);
+        if (second > 0) addIndex(unlinkedBySecond, second, index);
+      }
+    });
+
+    const used = new Set();
+    let added = 0;
+    for (const row of incoming) {
+      let index = takeUnused(identityIndexes.get(vodIdentityKey(row)), used);
+      if (index === undefined) {
+        index = takeUnused(
+          fallbackIndexes.get(vodFallbackKey(row, donationKeyOf)),
+          used,
+        );
+      }
+      if (index === undefined) {
+        const rowTime = Number(row?.t) || 0;
+        const rowDonation = String(donationKeyOf(row?.d) || "");
+        const rowSecond = Math.floor(rowTime / 1000);
+        const nearby = [];
+        for (let second = rowSecond - 5; second <= rowSecond + 5; second += 1) {
+          nearby.push(...(unlinkedBySecond.get(second) || []));
+        }
+        const matches = nearby
+          .filter((candidate) => !used.has(candidate))
+          .map((candidate) => {
+            const item = items[candidate];
+            const itemDonation = String(donationKeyOf(item?.d) || "");
+            const delta = Math.abs((Number(item?.t) || 0) - rowTime);
+            const textCompatible =
+              !item?.m || !row?.m || String(item.m) === String(row.m);
+            const donationCompatible =
+              rowDonation === itemDonation || !rowDonation || !itemDonation;
+            return { candidate, delta, textCompatible, donationCompatible };
+          })
+          .filter(
+            ({ delta, textCompatible, donationCompatible }) =>
+              delta <= 5000 && textCompatible && donationCompatible,
+          )
+          .sort((a, b) => a.delta - b.delta);
+        if (
+          matches.length &&
+          (!matches[1] || matches[1].delta > matches[0].delta)
+        ) {
+          index = matches[0].candidate;
+          used.add(index);
+        }
+      }
+      if (index === undefined) {
+        items.push({ ...row });
+        added += 1;
+      } else {
+        items[index] = mergeVodRow(items[index], row);
+      }
+    }
+
+    const targetSet = new Set(targetIndexes);
+    const reconciled = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (!targetSet.has(index) || used.has(index)) {
+        reconciled.push(item);
+        continue;
+      }
+      // 결제 내역·미션은 채팅 API에서 빠질 수 있으므로 기록 자체는 보존하되,
+      // 잘못된 다시보기 연결만 떼어 다음 수집 때 다시 대조할 수 있게 한다.
+      if (item?.d) {
+        const { n, v, i, ...unlinked } = item;
+        reconciled.push(unlinked);
+      }
+    }
+
+    return {
+      items: reconciled,
+      changed:
+        compactedIncoming.changed ||
+        incoming.length > 0 ||
+        targetIndexes.length > 0,
+      added,
+    };
+  }
+
   async function writeMerged(
     storage,
     state,
@@ -272,6 +422,7 @@
     parseKey,
     readForMerge,
     compactVodRows,
+    reconcileCompleteVodRows,
     vodFallbackKey,
     vodIdentityKey,
     writeMerged,

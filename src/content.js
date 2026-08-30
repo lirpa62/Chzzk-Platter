@@ -38977,6 +38977,26 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (compacted.changed) {
           list.splice(0, list.length, ...compacted.items);
         }
+        if (batchVideoNo) {
+          const reconciled = CHAT_RECAP_STORE_API.reconcileCompleteVodRows(
+            list,
+            rows,
+            batchVideoNo,
+            recapDonationMatchKey,
+          );
+          catalogMonths.push(month);
+          if (!reconciled.changed) continue;
+          reconciled.items.sort(
+            (a, b) => (Number(a.t) || 0) - (Number(b.t) || 0),
+          );
+          await CHAT_RECAP_STORE_API.writeMerged(
+            store,
+            mergeState,
+            reconciled.items,
+            CHAT_RECAP_CHUNK_MAX,
+          );
+          continue;
+        }
         // 중복 제거 키: 시각+본문+후원 정보. 같은 메시지를 두 번 받아도 한 줄만
         // 남기되, 본문이 빈 구독·후원 여러 건을 서로 같은 행으로 오인하지 않는다.
         // ⚠ 같은 채팅(t|m)이 이미 있어도, 기존에 재생 오프셋(v)이 없고 새로

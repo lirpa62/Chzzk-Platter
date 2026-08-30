@@ -108,6 +108,66 @@ async function appendRows(rows) {
   assert.equal(distinctVod.changed, false);
   assert.equal(distinctVod.items.length, 2);
 
+  // 완료된 영상을 다시 읽을 때 서버 ID가 달라져도 같은 위치의 행은 일대일로
+  // 교체한다. 과거 재수집으로 불어난 행은 줄이되 실제 연속 입력 두 건은 보존한다.
+  const reconciledVod = api.reconcileCompleteVodRows(
+    [
+      { t: 3000, m: "반복", n: "123", v: 20, i: "id:old-a" },
+      { t: 3100, m: "반복", n: "123", v: 20, i: "id:old-b" },
+      { t: 3200, m: "반복", n: "123", v: 20, i: "id:stale-a" },
+      { t: 3300, m: "반복", n: "123", v: 20, i: "id:stale-b" },
+      { t: 4000, m: "다른 영상", n: "456", v: 20, i: "id:other" },
+    ],
+    [
+      { t: 3050, m: "반복", n: "123", v: 20, i: "id:new-a" },
+      { t: 3150, m: "반복", n: "123", v: 20, i: "id:new-b" },
+    ],
+    "123",
+  );
+  assert.equal(reconciledVod.items.length, 3);
+  assert.equal(
+    reconciledVod.items.filter((row) => row.n === "123").length,
+    2,
+  );
+  assert.deepEqual(
+    reconciledVod.items
+      .filter((row) => row.n === "123")
+      .map((row) => row.i),
+    ["id:new-a", "id:new-b"],
+  );
+  assert.equal(reconciledVod.added, 0);
+
+  const repeatedReconcile = api.reconcileCompleteVodRows(
+    reconciledVod.items,
+    [
+      { t: 3050, m: "반복", n: "123", v: 20, i: "id:new-a" },
+      { t: 3150, m: "반복", n: "123", v: 20, i: "id:new-b" },
+    ],
+    "123",
+  );
+  assert.equal(repeatedReconcile.items.length, 3);
+  assert.equal(repeatedReconcile.added, 0);
+
+  // 다시보기와 연결된 결제 내역이 새 응답에서 빠지더라도 내역은 지우지 않고
+  // 영상 연결만 해제한다.
+  const preservedDonation = api.reconcileCompleteVodRows(
+    [
+      {
+        t: 5000,
+        m: "후원",
+        n: "123",
+        v: 30,
+        i: "id:donation",
+        d: { kind: "DONATION", src: "history", amount: 1000 },
+      },
+    ],
+    [],
+    "123",
+  );
+  assert.equal(preservedDonation.items.length, 1);
+  assert.equal(preservedDonation.items[0].n, undefined);
+  assert.equal(preservedDonation.items[0].d.amount, 1000);
+
   console.log("chatRecapStore tests passed");
 })().catch((error) => {
   console.error(error);
