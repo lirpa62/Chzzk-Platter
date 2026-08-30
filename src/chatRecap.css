@@ -131,36 +131,50 @@
     grid-column: span 2;
   }
 
+  /* ⚠ 항목 수가 묶음마다 다르다(기간 5개, 후원·구독 각 3개). 예전에는 5로 나눈
+     고정값이라 3개짜리 묶음이 좁게 남았다(제보). 개수별로 폭을 나눠 준다.
+     gap 10px × (개수-1) 을 빼야 딱 맞는다. */
   #crcPeriodSummary,
-  #crcDonationCards {
+  #crcDonationCards,
+  #crcSubscriptionCards {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
   }
 
   #crcPeriodSummary > .crc-stat,
-  #crcDonationCards > .crc-stat {
+  #crcDonationCards > .crc-stat,
+  #crcSubscriptionCards > .crc-stat {
+    /* 기본(5개) — 아래 :has() 규칙이 개수에 맞게 덮어쓴다. */
     flex: 0 0 calc((100% - 40px) / 5);
+  }
+
+  /* ⚠ #crcExportSummary 는 grid 로 따로 배치하므로 건드리지 않는다.
+     flex 로 가운데 정렬하는 세 묶음에만 적용한다. */
+  #crcPeriodSummary:has(> .crc-stat:nth-child(3):last-child) > .crc-stat,
+  #crcDonationCards:has(> .crc-stat:nth-child(3):last-child) > .crc-stat,
+  #crcSubscriptionCards:has(> .crc-stat:nth-child(3):last-child) > .crc-stat {
+    flex: 0 0 calc((100% - 20px) / 3);
+  }
+
+  #crcPeriodSummary:has(> .crc-stat:nth-child(4):last-child) > .crc-stat,
+  #crcDonationCards:has(> .crc-stat:nth-child(4):last-child) > .crc-stat,
+  #crcSubscriptionCards:has(> .crc-stat:nth-child(4):last-child) > .crc-stat {
+    flex: 0 0 calc((100% - 30px) / 4);
+  }
+
+  #crcPeriodSummary:has(> .crc-stat:nth-child(6):last-child) > .crc-stat,
+  #crcDonationCards:has(> .crc-stat:nth-child(6):last-child) > .crc-stat,
+  #crcSubscriptionCards:has(> .crc-stat:nth-child(6):last-child) > .crc-stat {
+    flex: 0 0 calc((100% - 50px) / 6);
   }
 }
 
 /* 중간 폭에서는 첫 요약의 활동 지표 여덟 개를 4개씩 두 줄로 맞춘다. */
-@media (min-width: 900px) and (max-width: 1499px) {
+@media (min-width: 900px) {
   #crcExportSummary {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  #crcExportSummary > .crc-stat {
-    grid-column: auto;
-  }
-}
-
-/* 충분히 넓으면 여덟 활동 지표를 한 줄로 보여 연속·멀티 채팅을 붙여 둔다. */
-@media (min-width: 1500px) {
-  #crcExportSummary {
-    display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
   }
 
   #crcExportSummary > .crc-stat {
@@ -4297,4 +4311,113 @@ button.crc-multi-channel-more:focus-visible {
   color: var(--popup-muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* ── 후원·구독 섹션(자주 쓴 말 아래) ────────────────────────────────────
+   종류 분포는 도넛, 채널별 순위는 가로 막대(통나무파워 '상위 10'과 같은 형태).
+   ⚠ 금액은 표시하지 않는다(요약 카드와 같은 정책 — 심리적 부담 방지). */
+.crc-don-charts {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+.crc-don-chart-box {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: 10px;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 12px;
+}
+
+.crc-don-chart-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.crc-don-chart-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.crc-don-chart-head .crc-don-chart-title {
+  margin: 0;
+}
+
+.crc-don-donut-wrap {
+  height: 220px;
+}
+
+/* 막대 10개가 겹쳐 보이지 않도록 넉넉히 잡는다(막대당 ~34px + 축·여백). */
+.crc-don-bar-wrap {
+  height: 380px;
+}
+
+/* 월별 추이는 두 차트 아래 한 줄을 통째로 쓴다. */
+.crc-don-trend-box {
+  grid-column: 1 / -1;
+}
+
+/* 채널 메뉴 + 월별·누적 전환을 한 줄에 둔다(좁아지면 자연스럽게 줄바꿈). */
+.crc-don-trend-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crc-don-trend-wrap {
+  height: 260px;
+}
+
+.crc-don-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.crc-don-empty {
+  color: var(--popup-muted);
+  font-size: 12px;
+  margin: 8px 0 0;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .crc-don-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 종류 선택 칩. 눌린 것은 aria-pressed 로 표시한다(상태와 스타일을 한 곳에서 관리). */
+.crc-chip {
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 999px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.crc-chip:hover {
+  color: var(--popup-text);
+}
+
+.crc-chip[aria-pressed="true"] {
+  background: var(--popup-brand);
+  border-color: var(--popup-brand);
+  color: #fff;
 }

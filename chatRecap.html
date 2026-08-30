@@ -392,6 +392,19 @@
             >
             <span class="crc-stat-sub" id="crcDonTopSub"></span>
           </div>
+          <div class="crc-stat" data-info="crcDonTopType">
+            <span class="crc-stat-label">가장 많이 후원한 종류</span>
+            <strong class="crc-stat-value" id="crcDonTopType">-</strong>
+            <span class="crc-stat-sub" id="crcDonTopTypeSub"></span>
+          </div>
+        </section>
+
+        <section
+          class="crc-summary"
+          aria-label="구독"
+          id="crcSubscriptionCards"
+          data-export-summary
+        >
           <div class="crc-stat" data-info="crcSubbed">
             <span class="crc-stat-label">구독 중인 채널</span>
             <strong class="crc-stat-value" id="crcSubbed">0</strong>
@@ -1112,6 +1125,138 @@
           <div class="crc-word-overview" id="crcWordOverview"></div>
           <ol class="crc-words" id="crcWords"></ol>
         </section>
+
+        <section
+          class="crc-section"
+          id="crcExportDonations"
+          aria-label="후원·구독"
+        >
+          <div class="crc-section-head">
+            <h2 class="crc-section-title">후원·구독</h2>
+            <div
+              class="lps-view-switch crc-view-switch"
+              role="group"
+              aria-label="후원·구독 전환"
+            >
+              <button
+                type="button"
+                data-don-mode="donation"
+                aria-pressed="true"
+              >
+                후원
+              </button>
+              <button
+                type="button"
+                data-don-mode="subscription"
+                aria-pressed="false"
+              >
+                구독
+              </button>
+            </div>
+          </div>
+          <p class="crc-section-desc">
+            내 채팅 기록과 후원·구독 내역에서 모은 자료입니다.
+            <br />금액은 표시하지 않고 횟수와 비중만 보여 줍니다. <br />채널별
+            목록은 후원 횟수가 많은 순입니다.
+          </p>
+          <div class="crc-word-overview" id="crcDonOverview"></div>
+          <div class="crc-don-charts">
+            <div class="crc-don-chart-box">
+              <h3 class="crc-don-chart-title" id="crcDonDonutTitle">
+                후원 종류
+              </h3>
+              <div class="crc-chart-wrap crc-don-donut-wrap">
+                <canvas
+                  id="crcDonTypeChart"
+                  aria-label="후원 종류 분포"
+                ></canvas>
+              </div>
+            </div>
+            <div class="crc-don-chart-box">
+              <div class="crc-don-chart-head">
+                <h3 class="crc-don-chart-title">채널별 상위 10</h3>
+                <div
+                  class="crc-don-chips"
+                  id="crcDonTypeChips"
+                  role="group"
+                  aria-label="후원 종류 선택"
+                ></div>
+              </div>
+              <div class="crc-chart-wrap crc-don-bar-wrap">
+                <canvas
+                  id="crcDonChannelChart"
+                  aria-label="채널별 후원 상위 10"
+                ></canvas>
+              </div>
+              <p class="crc-don-empty" id="crcDonChannelEmpty" hidden>
+                해당하는 후원 기록이 없습니다.
+              </p>
+            </div>
+          </div>
+          <div class="crc-don-chart-box crc-don-trend-box" id="crcDonTrendBox">
+            <div class="crc-don-chart-head">
+              <h3 class="crc-don-chart-title" id="crcDonTrendTitle">
+                월별 추이
+              </h3>
+              <div class="crc-don-trend-controls">
+                <div
+                  class="lps-sort crc-channel-menu"
+                  data-channel-menu="donations"
+                >
+                  <button
+                    type="button"
+                    class="lps-sort-button"
+                    id="crcDonChannelButton"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                  >
+                    <span data-channel-label>전체 채널</span>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <ul class="lps-sort-list" role="listbox" hidden></ul>
+                </div>
+                <div
+                  class="lps-view-switch crc-view-switch"
+                  role="group"
+                  aria-label="월별 추이 표시 방식"
+                >
+                  <button
+                    type="button"
+                    data-don-trend="monthly"
+                    aria-pressed="true"
+                  >
+                    월별
+                  </button>
+                  <button
+                    type="button"
+                    data-don-trend="cumulative"
+                    aria-pressed="false"
+                  >
+                    누적
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="crc-chart-wrap crc-don-trend-wrap">
+              <canvas id="crcDonTrendChart" aria-label="월별 추이"></canvas>
+            </div>
+            <p class="crc-don-empty" id="crcDonTrendEmpty" hidden>
+              표시할 기록이 없습니다.
+            </p>
+          </div>
+        </section>
       </div>
     </main>
 
@@ -1205,8 +1350,8 @@
         >
           <p class="crc-modal-desc">
             팔로잉 채널의 다시보기를 훑어 <b>내가 남긴 채팅</b>만 가져옵니다.
-            다시보기 채팅은 순차로만 읽을 수 있어 시간이 걸립니다(3시간 영상
-            약 20초). 이미 가져온 영상은 건너뛰므로 중단했다가 다시 실행해도
+            다시보기 채팅은 순차로만 읽을 수 있어 시간이 걸립니다(3시간 영상 약
+            20초). 이미 가져온 영상은 건너뛰므로 중단했다가 다시 실행해도
             이어집니다. 이 탭을 열어 둔 채 다른 일을 하셔도 됩니다.
           </p>
 
@@ -1250,21 +1395,15 @@
                 </svg>
               </button>
               <ul class="lps-sort-list" role="listbox" hidden>
-                <li role="option" data-limit="3" aria-selected="false">
-                  3개
-                </li>
-                <li role="option" data-limit="5" aria-selected="true">
-                  5개
-                </li>
+                <li role="option" data-limit="3" aria-selected="false">3개</li>
+                <li role="option" data-limit="5" aria-selected="true">5개</li>
                 <li role="option" data-limit="10" aria-selected="false">
                   10개
                 </li>
                 <li role="option" data-limit="20" aria-selected="false">
                   20개
                 </li>
-                <li role="option" data-limit="0" aria-selected="false">
-                  전체
-                </li>
+                <li role="option" data-limit="0" aria-selected="false">전체</li>
               </ul>
             </div>
           </div>
@@ -1376,7 +1515,12 @@
           hidden
         ></p>
 
-        <div class="crc-vod-activity" id="crcVodActivity" aria-live="off" hidden>
+        <div
+          class="crc-vod-activity"
+          id="crcVodActivity"
+          aria-live="off"
+          hidden
+        >
           <svg
             class="crc-vod-activity-spinner"
             viewBox="0 0 24 24"
@@ -1391,7 +1535,9 @@
             <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
           </svg>
           <div class="crc-vod-activity-copy">
-            <strong id="crcVodActivityTitle">다시보기 채팅을 읽고 있습니다.</strong>
+            <strong id="crcVodActivityTitle"
+              >다시보기 채팅을 읽고 있습니다.</strong
+            >
             <span id="crcVodActivityDetail"></span>
           </div>
           <span class="crc-vod-activity-live" id="crcVodActivityMode"

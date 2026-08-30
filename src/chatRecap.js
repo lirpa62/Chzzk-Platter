@@ -55,6 +55,7 @@
     ["crcExportWhen", "활동 시간대"],
     ["crcExportMonths", "월별 추이"],
     ["crcExportWords", "자주 쓴 말"],
+    ["crcExportDonations", "후원·구독"],
   ];
   let sectionNavObserver = null;
 
@@ -289,7 +290,10 @@
   function normalizeVodChatStat(raw) {
     if (!raw || typeof raw !== "object" || raw.complete !== true) return null;
     const total = Math.max(0, Math.floor(Number(raw.total) || 0));
-    const mine = Math.min(total, Math.max(0, Math.floor(Number(raw.mine) || 0)));
+    const mine = Math.min(
+      total,
+      Math.max(0, Math.floor(Number(raw.mine) || 0)),
+    );
     const days = {};
     if (raw.days && typeof raw.days === "object") {
       for (const [day, value] of Object.entries(raw.days)) {
@@ -380,12 +384,7 @@
     return coverage;
   }
 
-  async function saveVodChatStat(
-    accountId,
-    channelId,
-    videoNo,
-    coverage,
-  ) {
+  async function saveVodChatStat(accountId, channelId, videoNo, coverage) {
     if (!coverage?.complete) return false;
     const key = vodChatStatsKey(accountId, channelId);
     try {
@@ -541,6 +540,7 @@
   let channelGraphRenderToken = 0;
   let channelGraphExportSeq = 0; // 내보내기 복제본의 clipPath id 충돌 방지
   let subscribedRows = []; // 구독 중 채널(상세 팝업용)
+  let expiredSubscribedRows = []; // 과거 구독(만료·해지) — 후원·구독 섹션용
   let donScope = "all"; // "all" | "following" — 후원·구독 가져올 범위
   const DON_SCOPE_KEY = "cheeseChatRecapDonScope";
   // 구독하지 않아 못 쓰는 이모티콘 { 키: 채널UID }. 이미지 대신 잠금으로 그린다.
@@ -895,6 +895,32 @@
         .filter(
           (r) => HASH_RE.test(r.channelId) && (!r.until || r.until >= now),
         );
+    } catch {
+      return [];
+    }
+  }
+
+  // 과거에 구독했다가 끝난 채널(만료·해지). '구독한 채널 개월 수'의 근거다.
+  // ⚠ 현재 구독 목록과 겹칠 수 있으므로(재구독 등) 합칠 때 채널당 최대 개월 수를 쓴다.
+  async function fetchExpiredSubscribedChannels() {
+    try {
+      const res = await fetch(
+        `${API_BASE}/commercial/v1/subscribe/channels/expired`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return [];
+      const rows = (await res.json())?.content;
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .map((r) => ({
+          channelId: String(r?.channelId || "").toLowerCase(),
+          name: String(r?.channelName || ""),
+          imageUrl: String(r?.channelImageUrl || ""),
+          verifiedMark: r?.verifiedMark === true,
+          tierName: String(r?.tierName || ""),
+          months: Number(r?.totalMonth) || 0,
+        }))
+        .filter((r) => HASH_RE.test(r.channelId));
     } catch {
       return [];
     }
@@ -2165,6 +2191,24 @@
     let top = ["", 0];
     for (const [id, n] of byChannel) if (n > top[1]) top = [id, n];
     return { total, topId: top[0], topCount: top[1] };
+  }
+
+  // 후원 종류 표시명. content.js 의 DONATION_TYPE_LABEL 과 문구를 맞춘다.
+  // ⚠ 모르는 종류(치지직이 새로 추가)는 버리지 않고 '기타 후원'으로 묶는다.
+  const DONATION_TYPE_LABEL = {
+    CHAT: "채팅 후원",
+    VIDEO: "영상 후원",
+    // ⚠ 미션은 두 갈래다(실측). 미션을 직접 건 것과, 남이 건 미션에 상금을 보탠 것.
+    //   대기 중에는 donations/missions/my/active 에만 있다가 성공·실패가 확정되면
+    //   purchase/history 로 넘어온다.
+    MISSION_ALONE: "미션 후원",
+    MISSION_PARTICIPATION: "미션 상금 쌓기",
+    MISSION: "미션 후원", // 구버전 기록 호환
+    PARTY: "파티 후원",
+  };
+  function donationTypeLabel(type) {
+    const key = String(type || "").toUpperCase();
+    return DONATION_TYPE_LABEL[key] || (key ? "기타 후원" : "채팅 후원");
   }
 
   function topMapEntry(map) {
@@ -5404,9 +5448,7 @@
     const coverage = lastData.vodCoverage || emptyVodChatCoverage();
     setText(
       "crcVodShare",
-      coverage.total
-        ? vodCoveragePercent(coverage.mine, coverage.total)
-        : "-",
+      coverage.total ? vodCoveragePercent(coverage.mine, coverage.total) : "-",
     );
     const uncovered = Math.max(0, items.length - coverage.mine);
     setText(
@@ -5506,6 +5548,15 @@
     let giftSent = 0;
     let giftRecv = 0;
     const donByChannel = new Map();
+    const donByType = new Map();
+    // 칩으로 종류를 고르면 그 종류의 채널 순위만 보여 준다.
+    const donByChannelType = new Map(); // 종류 → Map(채널, 횟수)
+    // 월별 추이용: 월 → 종류 → 횟수. 채널 필터(칩)와도 맞물린다.
+    const donByMonth = new Map(); // 월 → 총 횟수
+    const donByMonthType = new Map(); // 종류 → Map(월, 횟수)
+    // 채널 메뉴로 좁혀 볼 수 있게 채널별로도 나눠 둔다.
+    const donByMonthChannel = new Map(); // 채널 → Map(월, 횟수)
+    const donByMonthChannelType = new Map(); // `채널|종류` → Map(월, 횟수)
     const sentByChannel = new Map();
     const recvByChannel = new Map();
     const bump = (map, id, n) => map.set(id, (map.get(id) || 0) + n);
@@ -5516,6 +5567,27 @@
         // ⚠ 금액은 보여 주지 않는다(사용자 요청 — 심리적 부담). 대신 어느 채널에
         //   얼마나 자주 했는지 비율로 보여 주므로 횟수로 센다.
         bump(donByChannel, it.channelId, 1);
+        const typeLabel = donationTypeLabel(d.type);
+        bump(donByType, typeLabel, 1);
+        if (!donByChannelType.has(typeLabel)) {
+          donByChannelType.set(typeLabel, new Map());
+        }
+        bump(donByChannelType.get(typeLabel), it.channelId, 1);
+        const month = monthKey(it.t);
+        bump(donByMonth, month, 1);
+        if (!donByMonthType.has(typeLabel)) {
+          donByMonthType.set(typeLabel, new Map());
+        }
+        bump(donByMonthType.get(typeLabel), month, 1);
+        if (!donByMonthChannel.has(it.channelId)) {
+          donByMonthChannel.set(it.channelId, new Map());
+        }
+        bump(donByMonthChannel.get(it.channelId), month, 1);
+        const pairKey = `${it.channelId}|${typeLabel}`;
+        if (!donByMonthChannelType.has(pairKey)) {
+          donByMonthChannelType.set(pairKey, new Map());
+        }
+        bump(donByMonthChannelType.get(pairKey), month, 1);
       } else if (d.kind === "GIFT_SENT") {
         const q = Number(d.quantity) || 1;
         giftSent += q;
@@ -5525,11 +5597,14 @@
         bump(recvByChannel, it.channelId, 1);
       }
     }
-    // 후원·구독 기록이 아예 없으면 그 묶음을 감춘다(빈 카드만 늘어놓지 않게).
-    const cards = $("crcDonationCards");
-    if (cards) {
-      cards.hidden = !donCount && !giftSent && !giftRecv;
-    }
+    // 기록이 아예 없으면 그 묶음을 감춘다(빈 카드만 늘어놓지 않게).
+    // 후원 줄과 구독 줄을 따로 판단한다 — 한쪽만 있는 사람도 있다.
+    const donCards = $("crcDonationCards");
+    if (donCards) donCards.hidden = !donCount;
+    // ⚠ 구독 중 채널 수는 renderSubscribed 가 따로 채운다(별도 API). 여기서는
+    //   구독권 선물만 알 수 있으므로, 구독 줄 표시 판단은 그쪽에 맡긴다.
+    subscriptionGiftCounts = { sent: giftSent, recv: giftRecv };
+    syncSubscriptionCardsVisibility();
     setText("crcDonCount", `${fmt(donCount)}회`);
     setText(
       "crcDonChannels",
@@ -5550,6 +5625,15 @@
       tintStatValue($("crcDonTop"), "");
       $("crcDonTopSub").textContent = "";
     }
+    const [donTopType, donTopTypeN] = topMapEntry(donByType);
+    if (donTopType) {
+      setText("crcDonTopType", donTopType);
+      const pct = donCount ? Math.round((donTopTypeN / donCount) * 100) : 0;
+      setText("crcDonTopTypeSub", `${fmt(donTopTypeN)}회 · 전체의 ${pct}%`);
+    } else {
+      setText("crcDonTopType", "-");
+      setText("crcDonTopTypeSub", "");
+    }
     const [sentTopId, sentTopN] = topMapEntry(sentByChannel);
     if (sentTopId)
       fillChannelName($("crcGiftSentTop"), sentTopId, ` ${fmt(sentTopN)}개`);
@@ -5560,6 +5644,587 @@
       fillChannelName($("crcGiftRecvTop"), recvTopId, ` ${fmt(recvTopN)}개`);
     else $("crcGiftRecvTop").textContent = "";
     tintStatValue($("crcGiftRecv"), recvTopId);
+
+    renderDonationSection({
+      donCount,
+      giftSent,
+      giftRecv,
+      donByType,
+      donByChannel,
+      donByChannelType,
+      donByMonth,
+      donByMonthType,
+      donByMonthChannel,
+      donByMonthChannelType,
+      sentByChannel,
+      recvByChannel,
+    });
+  }
+
+  // 자주 쓴 말 아래의 '후원·구독' 섹션.
+  // 종류 분포는 도넛, 채널별 순위는 가로 막대(통나무파워 '상위 10'과 같은 형태).
+  // 칩으로 종류를 골라 채널 순위를 좁혀 본다.
+  // ⚠ 금액은 넣지 않는다(요약 카드와 같은 정책 — 심리적 부담).
+  let donationStats = null;
+  let donationTypeFilter = ""; // "" = 전체
+  let donationMode = "donation"; // "donation" | "subscription"
+  let subscriptionFilter = "subscribed"; // 구독 모드의 칩
+
+  // 구독 모드의 칩 4종.
+  //  - subscribed : 구독한 채널 개월 수(과거 포함 — expired API + 현재 구독 병합)
+  //  - active     : 구독 중인 채널 개월 수
+  //  - giftSent   : 선물한 구독권
+  //  - giftRecv   : 선물받은 구독권
+  const SUBSCRIPTION_CHIPS = [
+    ["subscribed", "구독한 채널 개월 수", "개월"],
+    ["active", "구독 중인 채널 개월 수", "개월"],
+    ["giftSent", "선물한 구독권", "개"],
+    ["giftRecv", "선물받은 구독권", "개"],
+  ];
+
+  // 칩별 채널 → 값. 도넛·막대가 같은 자료를 쓴다.
+  function subscriptionSeries(kind) {
+    const map = new Map();
+    const bump = (id, n) => {
+      if (!id || !n) return;
+      map.set(id, (map.get(id) || 0) + n);
+    };
+    if (kind === "active") {
+      for (const row of subscribedRows) bump(row.channelId, row.months);
+      return map;
+    }
+    if (kind === "subscribed") {
+      // ⚠ 만료 목록과 현재 목록에 같은 채널이 있을 수 있다(끊었다 다시 구독).
+      //   개월 수를 더하면 중복이므로 채널당 '최대값'을 쓴다.
+      const best = new Map();
+      for (const row of [...expiredSubscribedRows, ...subscribedRows]) {
+        const cur = best.get(row.channelId) || 0;
+        if (row.months > cur) best.set(row.channelId, row.months);
+      }
+      return best;
+    }
+    const source =
+      kind === "giftSent"
+        ? donationStats?.sentByChannel
+        : donationStats?.recvByChannel;
+    for (const [id, n] of source || []) bump(id, n);
+    return map;
+  }
+  let donTypeChart = null;
+  let donChannelChart = null;
+  let donChannelChartToken = 0; // 늦게 온 이름이 새 차트를 덮지 않게 하는 표식
+  let donTypeChartToken = 0;
+  let donTrendChart = null;
+  let donationTrendCumulative = false;
+
+  function renderDonationSection(stats) {
+    const section = $("crcExportDonations");
+    if (!section) return;
+    donationStats = stats;
+    const { donCount, giftSent, giftRecv, donByChannel } = stats;
+    const empty = !donCount && !giftSent && !giftRecv;
+    section.hidden = empty;
+    if (empty) {
+      donTypeChart?.destroy();
+      donTypeChart = null;
+      donChannelChart?.destroy();
+      donChannelChart = null;
+      donTrendChart?.destroy();
+      donTrendChart = null;
+      return;
+    }
+
+    const overview = $("crcDonOverview");
+    if (overview) {
+      const rows = [
+        ["후원", `${fmt(donCount)}회`],
+        ["후원한 채널", `${fmt(donByChannel.size)}개`],
+        ["선물한 구독권", `${fmt(giftSent)}개`],
+        ["선물받은 구독권", `${fmt(giftRecv)}개`],
+      ];
+      overview.textContent = "";
+      for (const [label, value] of rows) {
+        // .crc-word-overview > div 규칙이 그대로 적용된다(별도 클래스 불필요).
+        const cell = document.createElement("div");
+        const name = document.createElement("span");
+        name.textContent = label;
+        const strong = document.createElement("strong");
+        strong.textContent = value;
+        cell.append(name, strong);
+        overview.append(cell);
+      }
+    }
+
+    // 고른 종류가 사라졌으면(기간 변경 등) 전체로 되돌린다.
+    if (donationTypeFilter && !stats.donByType.has(donationTypeFilter)) {
+      donationTypeFilter = "";
+    }
+    bindDonationModeToggle();
+    renderDonationTypeChips();
+    renderDonationTypeChart();
+    renderDonationChannelChart();
+    renderDonationTrendChart();
+  }
+
+  // 후원 ⇄ 구독 토글. 위임으로 한 번만 붙인다(섹션은 여러 번 다시 그려진다).
+  let donationModeBound = false;
+  function bindDonationModeToggle() {
+    if (donationModeBound) return;
+    donationModeBound = true;
+    document.addEventListener("click", (event) => {
+      const modeButton = event.target.closest?.("[data-don-mode]");
+      if (modeButton) {
+        event.preventDefault();
+        setDonationMode(modeButton.dataset.donMode);
+        return;
+      }
+      const trendButton = event.target.closest?.("[data-don-trend]");
+      if (!trendButton) return;
+      event.preventDefault();
+      const next = trendButton.dataset.donTrend === "cumulative";
+      if (donationTrendCumulative === next) return;
+      donationTrendCumulative = next;
+      for (const button of document.querySelectorAll("[data-don-trend]")) {
+        button.setAttribute(
+          "aria-pressed",
+          String((button.dataset.donTrend === "cumulative") === next),
+        );
+      }
+      renderDonationTrendChart();
+    });
+  }
+
+  function renderDonationTypeChips() {
+    const box = $("crcDonTypeChips");
+    if (!box || !donationStats) return;
+    box.textContent = "";
+    const makeChip = (key, label, count, unit, active, onPick) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "crc-chip";
+      chip.setAttribute("aria-pressed", String(active));
+      chip.textContent =
+        count === null ? label : `${label} ${fmt(count)}${unit}`;
+      chip.addEventListener("click", onPick);
+      box.append(chip);
+    };
+
+    if (donationMode === "subscription") {
+      for (const [key, label, unit] of SUBSCRIPTION_CHIPS) {
+        const series = subscriptionSeries(key);
+        const total = [...series.values()].reduce((a, b) => a + b, 0);
+        makeChip(key, label, total, unit, subscriptionFilter === key, () => {
+          subscriptionFilter = key;
+          renderDonationTypeChips();
+          renderDonationTypeChart();
+          renderDonationChannelChart();
+        });
+      }
+      return;
+    }
+
+    const { donByType, donCount } = donationStats;
+    const entries = [...donByType.entries()].sort((a, b) => b[1] - a[1]);
+    makeChip("", "전체", donCount, "회", donationTypeFilter === "", () => {
+      donationTypeFilter = "";
+      renderDonationTypeChips();
+      renderDonationChannelChart();
+      renderDonationTrendChart();
+    });
+    for (const [label, count] of entries) {
+      makeChip(label, label, count, "회", donationTypeFilter === label, () => {
+        donationTypeFilter = donationTypeFilter === label ? "" : label;
+        renderDonationTypeChips();
+        renderDonationChannelChart();
+        renderDonationTrendChart();
+      });
+    }
+  }
+
+  // 현재 모드·칩에 해당하는 채널별 값과 단위.
+  function donationChartSeries() {
+    if (donationMode === "subscription") {
+      const chip = SUBSCRIPTION_CHIPS.find(
+        ([key]) => key === subscriptionFilter,
+      );
+      return {
+        map: subscriptionSeries(subscriptionFilter),
+        unit: chip?.[2] || "",
+      };
+    }
+    const map = donationTypeFilter
+      ? donationStats.donByChannelType.get(donationTypeFilter) || new Map()
+      : donationStats.donByChannel;
+    return { map, unit: "회" };
+  }
+
+  function setDonationMode(mode) {
+    const next = mode === "subscription" ? "subscription" : "donation";
+    if (donationMode === next) return;
+    donationMode = next;
+    for (const button of document.querySelectorAll("[data-don-mode]")) {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.donMode === next),
+      );
+    }
+    setText(
+      "crcDonDonutTitle",
+      next === "subscription" ? "구독 분포" : "후원 종류",
+    );
+    renderDonationTypeChips();
+    renderDonationTypeChart();
+    renderDonationChannelChart();
+  }
+
+  function renderDonationTypeChart() {
+    const canvas = $("crcDonTypeChart");
+    if (!canvas || typeof Chart === "undefined" || !donationStats) return;
+    // 후원 모드: 종류별 분포 / 구독 모드: 채널별 분포(상위 8 + 기타).
+    // 조각마다 채널 id 를 같이 들고 다닌다 — 구독 모드에서 채널색을 쓰기 위해서다.
+    let entries; // [라벨, 값, 채널id?]
+    let unit = "회";
+    if (donationMode === "subscription") {
+      const series = donationChartSeries();
+      unit = series.unit;
+      const sorted = [...series.map.entries()].sort((a, b) => b[1] - a[1]);
+      const top = sorted.slice(0, 8);
+      const restTotal = sorted.slice(8).reduce((sum, [, v]) => sum + v, 0);
+      entries = top.map(([id, v]) => [promptChannelName(id), v, id]);
+      if (restTotal) entries.push(["기타", restTotal, ""]);
+    } else {
+      entries = [...donationStats.donByType.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, count]) => [label, count, ""]);
+    }
+    const labels = entries.map(([label]) => label);
+    const values = entries.map(([, count]) => count);
+    const sliceChannelIds = entries.map(([, , id]) => id || "");
+    const total = values.reduce((sum, value) => sum + value, 0);
+    const brand = cssVar("--popup-brand", "#1aab7a");
+    const line = cssVar("--popup-border", "#d8dade");
+    const text = cssVar("--popup-text", "#26262c");
+    const muted = cssVar("--popup-muted", "#7e7f85");
+    const peak = Math.max(...values, 1);
+    const topLabel = labels[0] || "기록 없음";
+    const topValue = values[0] || 0;
+
+    // 가운데 글자. ⚠ afterDatasetsDraw 에 둔다 — afterDraw 면 내장 툴팁 위에 그려져
+    //   툴팁을 가린다(요일·시간대 도넛에서 같은 문제를 겪었다).
+    const centerTextPlugin = {
+      id: "crcDonCenterText",
+      afterDatasetsDraw(chart) {
+        const area = chart.chartArea;
+        if (!area) return;
+        const { ctx } = chart;
+        const x = (area.left + area.right) / 2;
+        const y = (area.top + area.bottom) / 2;
+        const maxWidth = Math.max(70, (area.right - area.left) * 0.42);
+        const fontFamily = getComputedStyle(canvas).fontFamily || "sans-serif";
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = muted;
+        ctx.font = `600 10px ${fontFamily}`;
+        ctx.fillText(
+          donationMode === "subscription" ? "가장 많은 채널" : "가장 많은 종류",
+          x,
+          y - 22,
+          maxWidth,
+        );
+        ctx.fillStyle = text;
+        ctx.font = `700 13px ${fontFamily}`;
+        // ⚠ 라벨은 나중에 실제 채널명으로 교체될 수 있다(UID → 이름).
+        //   생성 시점 값을 고정하면 가운데 글자만 UID로 남는다 → 그릴 때 읽는다.
+        ctx.fillText(chart.data.labels?.[0] || topLabel, x, y - 3, maxWidth);
+        ctx.font = `800 18px ${fontFamily}`;
+        ctx.fillText(`${fmt(topValue)}${unit}`, x, y + 20, maxWidth);
+        ctx.restore();
+      },
+    };
+
+    donTypeChart?.destroy();
+    const donutToken = ++donTypeChartToken;
+    donTypeChart = new Chart(canvas, {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: values,
+            // 구독 모드는 조각이 곧 채널이므로 채널색을 쓴다(막대·목록과 색이 맞는다).
+            // '기타'와 후원 모드(종류별)는 브랜드색 농담으로 비중을 나타낸다.
+            backgroundColor: values.map((value, index) => {
+              const channelId = sliceChannelIds[index];
+              if (channelId) return colorFor(channelId);
+              return withAlpha(
+                brand,
+                value ? 0.28 + (value / peak) * 0.62 : 0.1,
+              );
+            }),
+            borderColor: line,
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        cutout: "66%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "rgba(0, 0, 0, 0.9)",
+            callbacks: {
+              label(context) {
+                const value = Number(context.raw) || 0;
+                const ratio = total ? Math.round((value / total) * 100) : 0;
+                return ` ${context.label}: ${fmt(value)}${unit} (${ratio}%)`;
+              },
+            },
+          },
+        },
+      },
+      plugins: [centerTextPlugin],
+    });
+    // 구독 모드의 조각은 채널이라 이름이 늦게 올 수 있다(막대와 같은 처리).
+    if (donationMode === "subscription") {
+      void fillDonutChannelLabels(sliceChannelIds, donutToken);
+    }
+  }
+
+  async function fillDonutChannelLabels(channelIds, token) {
+    const names = await Promise.all(
+      channelIds.map(async (id) => {
+        if (!id) return "";
+        try {
+          const info = await resolveDisplayChannelInfo(id);
+          return info?.name || "";
+        } catch {
+          return "";
+        }
+      }),
+    );
+    if (token !== donTypeChartToken || !donTypeChart) return;
+    let changed = false;
+    names.forEach((name, index) => {
+      if (!name || donTypeChart.data.labels[index] === name) return;
+      donTypeChart.data.labels[index] = name;
+      changed = true;
+    });
+    if (changed) donTypeChart.update("none");
+  }
+
+  function renderDonationChannelChart() {
+    const canvas = $("crcDonChannelChart");
+    const emptyNote = $("crcDonChannelEmpty");
+    if (!canvas || typeof Chart === "undefined" || !donationStats) return;
+    const { map: source, unit } = donationChartSeries();
+    const rows = [...source.entries()]
+      .map(([channelId, count]) => ({ channelId, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const wrap = canvas.parentElement;
+    if (emptyNote) {
+      emptyNote.hidden = rows.length > 0;
+      emptyNote.textContent =
+        donationMode === "subscription"
+          ? "해당하는 구독 기록이 없습니다."
+          : "해당하는 후원 기록이 없습니다.";
+    }
+    if (wrap) wrap.hidden = rows.length === 0;
+    donChannelChart?.destroy();
+    donChannelChart = null;
+    if (!rows.length) return;
+
+    const line = cssVar("--popup-border", "#d8dade");
+    const text = cssVar("--popup-text", "#26262c");
+    const muted = cssVar("--popup-muted", "#7e7f85");
+    // ⚠ 이름이 아직 캐시에 없으면 promptChannelName 이 '채널 abc12345' 처럼 UID
+    //   조각을 돌려준다(제보). 먼저 그리고, 조회되는 대로 라벨만 갈아 끼운다.
+    const chartToken = ++donChannelChartToken;
+    donChannelChart = new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: rows.map((r) => promptChannelName(r.channelId)),
+        datasets: [
+          {
+            label: donationMode === "subscription" ? "구독" : "후원",
+            data: rows.map((r) => r.count),
+            // 채널색을 그대로 써 다른 차트·목록과 색이 맞는다.
+            backgroundColor: rows.map((r) => colorFor(r.channelId)),
+            borderWidth: 0,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: {
+            ticks: { color: muted, precision: 0 },
+            grid: { color: line },
+          },
+          y: { ticks: { color: text }, grid: { display: false } },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(context) {
+                const value = Number(context.parsed.x) || 0;
+                const total = rows.reduce((sum, r) => sum + r.count, 0);
+                const ratio = total ? Math.round((value / total) * 100) : 0;
+                return ` ${fmt(value)}${unit} · 상위 10 중 ${ratio}%`;
+              },
+            },
+          },
+        },
+      },
+    });
+    void fillDonationChannelLabels(rows, chartToken);
+  }
+
+  // 월별 추이. 후원만 시각(t)이 있어 그릴 수 있다 — 구독 개월 수·구독권 선물은
+  // 월 단위 시점이 없으므로 구독 모드에서는 이 상자를 감춘다.
+  function renderDonationTrendChart() {
+    const box = $("crcDonTrendBox");
+    const canvas = $("crcDonTrendChart");
+    const emptyNote = $("crcDonTrendEmpty");
+    if (!box || !canvas || typeof Chart === "undefined" || !donationStats) {
+      return;
+    }
+    if (donationMode === "subscription") {
+      box.hidden = true;
+      donTrendChart?.destroy();
+      donTrendChart = null;
+      return;
+    }
+    box.hidden = false;
+
+    // 채널 메뉴(전체/특정 채널) × 칩(전체/종류) 조합으로 자료를 고른다.
+    const channelId = channelMenuValue.donations || "";
+    let source;
+    if (channelId && donationTypeFilter) {
+      source =
+        donationStats.donByMonthChannelType.get(
+          `${channelId}|${donationTypeFilter}`,
+        ) || new Map();
+    } else if (channelId) {
+      source = donationStats.donByMonthChannel.get(channelId) || new Map();
+    } else if (donationTypeFilter) {
+      source =
+        donationStats.donByMonthType.get(donationTypeFilter) || new Map();
+    } else {
+      source = donationStats.donByMonth;
+    }
+    // 기록이 없는 달도 0 으로 채워 선이 끊기지 않게 한다.
+    const months = [...source.keys()].sort();
+    const labels = [];
+    if (months.length) {
+      const [firstY, firstM] = months[0].split("-").map(Number);
+      const [lastY, lastM] = months[months.length - 1].split("-").map(Number);
+      const cursor = new Date(firstY, firstM - 1, 1);
+      const last = new Date(lastY, lastM - 1, 1);
+      while (cursor <= last) {
+        labels.push(monthKey(cursor.getTime()));
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+    }
+    const monthly = labels.map((month) => source.get(month) || 0);
+    const values = donationTrendCumulative
+      ? monthly.reduce((rows, count) => {
+          rows.push((rows[rows.length - 1] || 0) + count);
+          return rows;
+        }, [])
+      : monthly;
+
+    const wrap = canvas.parentElement;
+    if (emptyNote) emptyNote.hidden = labels.length > 0;
+    if (wrap) wrap.hidden = labels.length === 0;
+    donTrendChart?.destroy();
+    donTrendChart = null;
+    if (!labels.length) return;
+
+    const titleParts = ["월별 추이"];
+    if (channelId) titleParts.push(promptChannelName(channelId));
+    if (donationTypeFilter) titleParts.push(donationTypeFilter);
+    setText("crcDonTrendTitle", titleParts.join(" · "));
+    // 채널을 고르면 그 채널색으로 그린다(다른 차트·목록과 색이 맞는다).
+    const seriesColor = channelId
+      ? colorFor(channelId)
+      : cssVar("--popup-brand", "#1aab7a");
+    const line = cssVar("--popup-border", "#d8dade");
+    const text = cssVar("--popup-text", "#26262c");
+    const muted = cssVar("--popup-muted", "#7e7f85");
+    donTrendChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: donationTrendCumulative ? "누적 후원" : "후원",
+            data: values,
+            borderColor: seriesColor,
+            backgroundColor: withAlpha(seriesColor, 0.14),
+            fill: true,
+            tension: 0.25,
+            pointRadius: labels.length > 24 ? 0 : 3,
+            pointHoverRadius: 5,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { ticks: { color: muted }, grid: { color: line } },
+          y: {
+            beginAtZero: true,
+            ticks: { color: muted, precision: 0 },
+            grid: { color: line },
+          },
+        },
+        plugins: {
+          legend: { labels: { color: text, boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              label: (item) => ` ${fmt(Number(item.parsed.y) || 0)}회`,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  // 채널 이름을 뒤늦게 채운다(다른 목록과 같은 방식 — 먼저 그리고 조회되는 대로 교체).
+  // ⚠ 순차 await 하면 채널 수만큼 왕복을 기다린다 → 병렬로 받고 한 번에 갱신한다.
+  //   그 사이 칩을 바꿔 차트가 새로 그려졌으면(토큰 불일치) 버린다.
+  async function fillDonationChannelLabels(rows, token) {
+    const names = await Promise.all(
+      rows.map(async (row) => {
+        try {
+          const info = await resolveDisplayChannelInfo(row.channelId);
+          return info?.name || "";
+        } catch {
+          return "";
+        }
+      }),
+    );
+    if (token !== donChannelChartToken || !donChannelChart) return;
+    let changed = false;
+    names.forEach((name, index) => {
+      if (!name || donChannelChart.data.labels[index] === name) return;
+      donChannelChart.data.labels[index] = name;
+      changed = true;
+    });
+    if (changed) donChannelChart.update("none");
   }
 
   async function renderChannels(byChannel) {
@@ -6028,7 +6693,7 @@
   // 채널 드롭다운 채우기. 채팅이 많은 채널부터 올린다.
   // 채널 드롭다운(자주 쓴 말 / 월별 추이). 통나무파워의 .lps-sort 와 같은 모양이다.
   // key → 현재 선택값. 값은 채널 UID, 빈 문자열은 '전체 채널'.
-  const channelMenuValue = { words: "", months: "" };
+  const channelMenuValue = { words: "", months: "", donations: "" };
 
   function channelMenuLabel(id) {
     if (!id) return "전체 채널";
@@ -6040,17 +6705,23 @@
   // ⚠ 이름은 startChannelRender 가 뒤늦게 채운다. 처음 그릴 때는 UID 뿐이라
   //   그대로 두면 목록에 UID 가 나온다(제보) → 이름이 준비되면 다시 그린다.
   function renderChannelMenus() {
-    const rows = [...lastData.byChannel.entries()].sort((a, b) => b[1] - a[1]);
+    const chatRows = [...lastData.byChannel.entries()].sort(
+      (a, b) => b[1] - a[1],
+    );
+    // ⚠ 후원 메뉴는 채팅 수가 아니라 '후원한 채널' 기준이다. 채팅은 없고 후원만
+    //   한 채널이 있어서, 채팅 기준 목록만 쓰면 그 채널을 고를 수 없다.
+    const donationRows = donationStats
+      ? [...donationStats.donByChannel.entries()].sort((a, b) => b[1] - a[1])
+      : [];
     for (const menu of document.querySelectorAll("[data-channel-menu]")) {
       const key = menu.dataset.channelMenu;
       const list = menu.querySelector(".lps-sort-list");
       const label = menu.querySelector("[data-channel-label]");
       if (!list) continue;
-      // 고른 채널이 사라졌으면(계정 전환 등) 전체로 되돌린다.
-      if (
-        channelMenuValue[key] &&
-        !lastData.byChannel.has(channelMenuValue[key])
-      ) {
+      const rows = key === "donations" ? donationRows : chatRows;
+      const known = new Set(rows.map(([id]) => id));
+      // 고른 채널이 사라졌으면(계정 전환·기간 변경 등) 전체로 되돌린다.
+      if (channelMenuValue[key] && !known.has(channelMenuValue[key])) {
         channelMenuValue[key] = "";
       }
       const current = channelMenuValue[key] || "";
@@ -6060,13 +6731,29 @@
         li.setAttribute("role", "option");
         li.dataset.channel = id;
         li.setAttribute("aria-selected", String(id === current));
-        li.textContent = channelMenuLabel(id);
+        li.textContent =
+          key === "donations"
+            ? donationMenuLabel(id, rows)
+            : channelMenuLabel(id);
         list.append(li);
       };
       addOption("");
       for (const [id] of rows) addOption(id);
-      if (label) label.textContent = channelMenuLabel(current);
+      if (label) {
+        label.textContent =
+          key === "donations"
+            ? donationMenuLabel(current, rows)
+            : channelMenuLabel(current);
+      }
     }
+  }
+
+  // 후원 메뉴의 항목 문구. 괄호 안 숫자는 채팅이 아니라 후원 횟수다.
+  function donationMenuLabel(id, rows) {
+    if (!id) return "전체 채널";
+    const name = promptChannelName(id);
+    const count = rows.find(([rowId]) => rowId === id)?.[1] || 0;
+    return count ? `${name} (${fmt(count)})` : name;
   }
 
   function closeChannelMenus(except) {
@@ -7525,9 +8212,7 @@
         .filter(([, value]) => value.total > 0)
         .sort((a, b) => b[0].localeCompare(a[0]))[0];
       if (latest) {
-        out.push(
-          stat(`${latest[0]} 비중`, vodCoverageValue(latest[1])),
-        );
+        out.push(stat(`${latest[0]} 비중`, vodCoverageValue(latest[1])));
       }
     } else {
       // 라이브에서 실시간으로 저장한 기록만으로는 다른 이용자의 전체 채팅 수를
@@ -7635,9 +8320,24 @@
     return out;
   }
 
+  // 구독 줄(구독 중 채널 + 구독권 선물) 표시 여부. 두 값이 서로 다른 경로로
+  // 채워지므로(구독=별도 API, 선물=후원 내역) 마지막에 들어온 값으로 함께 판단한다.
+  let subscriptionGiftCounts = { sent: 0, recv: 0 };
+  let subscribedChannelCount = 0;
+  function syncSubscriptionCardsVisibility() {
+    const el = $("crcSubscriptionCards");
+    if (!el) return;
+    el.hidden =
+      !subscribedChannelCount &&
+      !subscriptionGiftCounts.sent &&
+      !subscriptionGiftCounts.recv;
+  }
+
   // 구독 중 채널 카드. 이름 조회를 아끼도록 응답의 이름·이미지를 캐시에 넣는다.
   function renderSubscribed(rows) {
     subscribedRows = rows || []; // 상세 팝업에서 다시 쓴다
+    subscribedChannelCount = rows.length;
+    syncSubscriptionCardsVisibility();
     setText("crcSubbed", `${fmt(rows.length)}개`);
     const sub = $("crcSubbedTop");
     if (!rows.length) {
@@ -7805,6 +8505,8 @@
     await loadEmojiMap(accountId);
     // 구독 목록은 잠금 판정과 요약 카드가 함께 쓴다. 따로 두 번 요청하지 않는다.
     const subscribed = fetchSubscribedChannels();
+    // 만료(과거) 구독은 후원·구독 섹션의 '구독한 채널 개월 수'에만 쓴다 → 병렬로.
+    const expiredSubscribed = fetchExpiredSubscribedChannels();
     let data;
     try {
       data = await loadRecap(accountId);
@@ -7821,6 +8523,7 @@
     lastData = data;
     await buildWordStats(data.items);
     const subscribedChannelRows = await subscribed;
+    expiredSubscribedRows = await expiredSubscribed;
     // 사전에 없는 이모티콘이 있으면 팩에서 채운다(첫 조회 때 한 번).
     await fillMissingEmojis(accountId, data.items, subscribedChannelRows);
     // ⚠ 후원·구독만 있고 채팅이 없을 수도 있다(가져오기만 한 경우) → 둘 다 본다.
@@ -9027,7 +9730,10 @@
     if (explicit !== "") return `id:${String(explicit)}`.slice(0, 500);
     const offset = Number(message?.playerMessageTime);
     if (!Number.isFinite(offset)) return "";
-    return `vod:${chatSenderHash(message)}|${offset}|${String(text || "")}|${recapDonationStorageKey(donation)}`.slice(
+    // ⚠ 후원 키를 넣지 않는다(content.js 의 recapVodMessageIdentity 와 같은 이유).
+    //   후원 정보가 붙기 전/후로 키가 달라지면 재수집 때 같은 채팅이 중복 저장된다.
+    //   donation 은 호출부 호환을 위해 남겨 둔다.
+    return `vod:${chatSenderHash(message)}|${offset}|${String(text || "")}`.slice(
       0,
       500,
     );
@@ -9322,6 +10028,102 @@
       };
       await chrome.storage.local.set({ [EVENT_LINK_KEY]: root });
     } catch {}
+  }
+
+  // ── 취소·거절된 미션 후원 정리 ────────────────────────────────────────────
+  // ⚠ 미션 후원은 요청을 건 순간(missionDonate.js 훅)에 먼저 저장된다. 그런데
+  //   미션이 취소·거절되면 환불되어 purchase/history 에 오지 않으므로, 실제로는
+  //   나가지 않은 후원이 기록에 남는다. 후원 내역을 가져올 때 한 번만 대조해
+  //   정리한다(상시 폴링을 두지 않기 위해 이 시점에 붙인다).
+  //
+  // ⚠ status 값은 확정된 실측 자료가 없다. rejected/canceled 계열로 추정하되,
+  //   '모르는 값이면 지우지 않는다'를 원칙으로 한다. 잘못 지우면 사용자의 실제
+  //   후원 기록이 조용히 사라지는데, 남겨 두는 쪽은 눈에 보이기라도 한다.
+  const MISSION_DEAD_RE = /^(REJECT|CANCEL|REFUND|FAIL|EXPIRE)/;
+  const MISSION_ALIVE_RE = /^(PENDING|WAIT|APPROVE|ACCEPT|COMPLETE|SUCCESS)/;
+
+  function missionStatusOf(row) {
+    const raw =
+      row?.status ??
+      row?.missionStatus ??
+      row?.missionDonationStatus ??
+      row?.donationStatus ??
+      "";
+    return String(raw).toUpperCase();
+  }
+
+  // 대기 목록에서 '살아 있는' 미션의 id 집합. 조회에 실패하면 null 을 돌려
+  // 호출부가 정리를 통째로 건너뛰게 한다(모르면 아무것도 하지 않는다).
+  async function fetchActiveMissionIds() {
+    try {
+      const res = await fetch(
+        `${API_BASE}/commercial/v1/donations/missions/my/active`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return null;
+      const content = (await res.json())?.content;
+      const rows = Array.isArray(content)
+        ? content
+        : Array.isArray(content?.data)
+          ? content.data
+          : null;
+      if (!rows) return null;
+      const alive = new Set();
+      const dead = new Set();
+      for (const row of rows) {
+        const id = String(
+          row?.missionDonationId || row?.donationId || row?.id || "",
+        );
+        if (!id) continue;
+        const status = missionStatusOf(row);
+        // 상태를 못 읽으면 살아 있는 것으로 본다(보수적).
+        if (MISSION_DEAD_RE.test(status)) dead.add(id);
+        else alive.add(id);
+      }
+      return { alive, dead };
+    } catch {
+      return null;
+    }
+  }
+
+  // 취소·거절이 확인된 대기 미션 기록을 지운다. 지운 건수를 돌려준다.
+  // ⚠ 지우는 대상은 아주 좁다. (1) 훅이 남긴 대기 기록(src:"mission")이고
+  //   (2) 아직 확정분과 합쳐지지 않았으며 (3) 대기 목록에서 '취소·거절'로
+  //   명시된 id 여야 한다. 하나라도 어긋나면 남긴다.
+  async function dropRejectedMissions(accountId, channelIds, statuses) {
+    if (!statuses || !statuses.dead.size) return 0;
+    const catalogKey = `${CATALOG_PREFIX}${accountId}`;
+    const catalog = normalizeRecapCatalog(
+      (await chrome.storage.local.get(catalogKey))?.[catalogKey],
+    );
+    if (!catalog) return 0;
+    let removed = 0;
+    for (const channelId of channelIds) {
+      for (const month of catalog[channelId] || []) {
+        const key = `${STORE_PREFIX}${accountId}:${channelId}:${month}`;
+        const mergeState = await STORE_API.readForMerge(
+          chrome.storage.local,
+          key,
+          [],
+        );
+        const items = mergeState.items;
+        const kept = items.filter((it) => {
+          if (it?.d?.src !== "mission") return true;
+          const id = String(it?.d?.missionId || "");
+          if (!id) return true; // id 를 못 받은 기록은 판단 불가 → 유지
+          return !statuses.dead.has(id);
+        });
+        if (kept.length === items.length) continue;
+        removed += items.length - kept.length;
+        await STORE_API.writeMerged(
+          chrome.storage.local,
+          mergeState,
+          kept,
+          STORE_CHUNK_MAX,
+        );
+      }
+    }
+    return removed;
   }
 
   async function bumpHistoryRevisions(accountId, channelIds) {
@@ -9799,9 +10601,7 @@
             .map(([channelId]) => channelId)
         : scope === "all"
           ? followings.map((c) => c.channelId)
-          : followings
-              .map((c) => c.channelId)
-              .filter((id) => selected.has(id));
+          : followings.map((c) => c.channelId).filter((id) => selected.has(id));
     if (!initial.length) {
       setProgress("가져올 채널을 선택해 주세요.");
       return;
@@ -10245,6 +11045,29 @@
         if (failedMonthRun >= 3) break;
       }
     } finally {
+      // 취소·거절된 미션 후원 정리. 이번 가져오기에서 건드린 채널만이 아니라
+      // 대기 기록이 남아 있을 수 있는 모든 채널을 본다(취소된 건은 결제 내역에
+      // 오지 않아 touchedChannels 에 들어오지 않는다).
+      try {
+        const statuses = await fetchActiveMissionIds();
+        if (statuses?.dead.size) {
+          const catalogKey = `${CATALOG_PREFIX}${accountId}`;
+          const catalog = normalizeRecapCatalog(
+            (await chrome.storage.local.get(catalogKey))?.[catalogKey],
+          );
+          const dropped = await dropRejectedMissions(
+            accountId,
+            Object.keys(catalog || {}),
+            statuses,
+          );
+          // 지운 채널도 revision 을 올려 다시보기 캐시가 갱신되게 한다.
+          if (dropped) {
+            for (const id of Object.keys(catalog || {})) {
+              touchedChannels.add(id);
+            }
+          }
+        }
+      } catch {}
       await bumpHistoryRevisions(accountId, touchedChannels);
       await saveEmojiMap(accountId, pendingEmojis);
       pendingEmojis = Object.create(null);
@@ -10276,10 +11099,7 @@
     importModalTab = nextTab === "manage" ? "manage" : "import";
     for (const button of document.querySelectorAll("[data-import-tab]")) {
       const selectedTab = button.dataset.importTab === importModalTab;
-      button.setAttribute(
-        "aria-selected",
-        String(selectedTab),
-      );
+      button.setAttribute("aria-selected", String(selectedTab));
       button.tabIndex = selectedTab ? 0 : -1;
     }
     for (const panel of document.querySelectorAll("[data-import-panel]")) {
@@ -10611,7 +11431,13 @@
     const option = event.target.closest("[data-channel]");
     if (!option) return;
     const next = option.dataset.channel || "";
-    channelMenuValue[key] = lastData.byChannel.has(next) ? next : "";
+    // ⚠ 후원 메뉴는 '후원한 채널' 기준이라 채팅 목록(byChannel)에 없을 수 있다.
+    //   채팅 기준으로만 검사하면 후원만 한 채널이 선택되지 않는다.
+    const valid =
+      key === "donations"
+        ? Boolean(donationStats?.donByChannel?.has(next))
+        : lastData.byChannel.has(next);
+    channelMenuValue[key] = valid ? next : "";
     closeChannelMenus();
     renderChannelMenus();
 
@@ -10631,6 +11457,7 @@
       return;
     }
     if (key === "months") renderMonths(lastData.items);
+    if (key === "donations") renderDonationTrendChart();
   });
   for (const btn of document.querySelectorAll("[data-word-type]")) {
     btn.addEventListener("click", () => {
@@ -10837,13 +11664,17 @@
 
     // 후원·구독권을 채널별로 모은다.
     const donBy = new Map();
+    const donByTypeInfo = new Map();
     const sentBy = new Map();
     const recvBy = new Map();
     for (const it of dons) {
       const k = it.d?.kind;
       const id = it.channelId;
-      if (k === "DONATION") donBy.set(id, (donBy.get(id) || 0) + 1);
-      else if (k === "GIFT_SENT")
+      if (k === "DONATION") {
+        donBy.set(id, (donBy.get(id) || 0) + 1);
+        const label = donationTypeLabel(it.d?.type);
+        donByTypeInfo.set(label, (donByTypeInfo.get(label) || 0) + 1);
+      } else if (k === "GIFT_SENT")
         sentBy.set(id, (sentBy.get(id) || 0) + (Number(it.d.quantity) || 1));
       else if (k === "GIFT_RECEIVED") recvBy.set(id, (recvBy.get(id) || 0) + 1);
     }
@@ -10959,6 +11790,26 @@
             ...infoTopChannels(donBy, "회"),
           ],
         };
+      case "crcDonTopType": {
+        const total = [...donByTypeInfo.values()].reduce((a, b) => a + b, 0);
+        return {
+          title: "후원 종류",
+          nodes: [
+            infoStat("후원", `${fmt(total)}회`),
+            infoStat("종류", `${fmt(donByTypeInfo.size)}가지`),
+            ...[...donByTypeInfo.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([label, count]) =>
+                infoStat(
+                  label,
+                  `${fmt(count)}회 · 전체의 ${
+                    total ? Math.round((count / total) * 100) : 0
+                  }%`,
+                ),
+              ),
+          ],
+        };
+      }
       case "crcSubbed":
         return {
           title: "구독 중인 채널",

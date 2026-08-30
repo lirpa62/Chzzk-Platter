@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "치즈 플래터 - Chzzk Platter",
   "short_name": "ChzzkPlatter",
-  "version": "1.48.0",
+  "version": "1.49.0",
   "description": "치지직 검색, 플레이어, 오디오 믹서, 채팅, 팔로잉, 레이아웃을 한 접시에 담은 통합 편의 확장 프로그램",
   "icons": {
     "16": "icons/icon-16.png",
@@ -153,7 +153,11 @@
         "https://chzzk.naver.com/embed/clip/*",
         "https://chzzk.naver.com/clip-editor*"
       ],
-      "js": ["src/commentBlock.js", "src/logPowerDonate.js"],
+      "js": [
+        "src/commentBlock.js",
+        "src/logPowerDonate.js",
+        "src/missionDonate.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true

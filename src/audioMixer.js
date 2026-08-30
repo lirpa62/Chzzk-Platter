@@ -60,6 +60,10 @@
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
   let wheelVolumeRightClick = false; // 우클릭(오른쪽 버튼)을 누른 채 휠일 때만 조절(기본 OFF)
+  let wheelVolumeScope = "video"; // 휠 범위: video | button | both (기본 video)
+  // 믹서 버튼 위 휠이 무엇을 바꿀지: preset(프리셋 전환) | gain(게인 조절).
+  // 기본 preset — 기존 동작 그대로.
+  let mixerWheelAction = "preset";
   let wheelVolumeStep = 0.05; // 휠 한 틱당 볼륨 변화량(0.01~0.10, 기본 0.05=5%)
   let actionOverlayOn = true; // 조작(음량·게인 슬라이더/휠 볼륨/시크) 화면 피드백(전역, 기본 ON)
   // OSD(조작 오버레이) 종류별 표시 on/off + 위치(중심 기준 %). 볼륨은 전체 화면 기준,
@@ -187,6 +191,13 @@
     }
     wheelVolumeOn = e.data.wheelVolume === true; // 기본 OFF
     wheelVolumeRightClick = e.data.wheelVolumeRightClick === true; // 기본 OFF
+    // 휠이 먹히는 범위. 알 수 없는 값이면 기존 동작(영상 위)으로 둔다.
+    wheelVolumeScope = ["video", "button", "both"].includes(
+      e.data.wheelVolumeScope,
+    )
+      ? e.data.wheelVolumeScope
+      : "video";
+    mixerWheelAction = e.data.mixerWheelAction === "gain" ? "gain" : "preset";
     // 휠 볼륨 조절 간격(% 1~10 → 0.01~0.10). 범위 밖/미설정이면 5%.
     {
       const s = Number(e.data.wheelVolumeStep);
@@ -469,12 +480,9 @@
   // - targetLevel: 노멀라이저 목표 RMS, limiter: 리미터 threshold(dB)
   const PRESETS = {
     default: {
-      // 기본: 적당한 컴프로 큰 소리를 억제하고 makeup 으로 체감 음량을 키운다. 예전
-      // 기본(threshold -50 / ratio 12 / makeup 12dB)은 조용한 소리까지 과증폭돼 찢어졌고,
-      // 그 반동으로 너무 약하게(makeup 2dB) 낮췄더니 믹서 on/off 차이가 거의 없었다.
-      // 큰 소리만 적당히 압축(threshold -24, ratio 4)해 다이내믹을 살리고, 음량은
-      // makeup 8dB(≈2.5배)로 키운다(음량 키우기는 threshold/ratio 가 아니라 makeup 담당).
-      // 리미터로 클리핑(찢어짐)을 막는다.
+      // makeup 0 이라 컴프레서가 누른 만큼이 그대로 출력 음량 감소로 나타난다
+      // (threshold -50 / ratio 12 는 상시 압축에 가깝다). 음량을 키우려면 makeup
+      // 이나 플레이어 게인으로 따로 올린다.
       label: "기본",
       gain: 1,
       eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -482,12 +490,12 @@
       targetLevel: 0.12,
       comp: {
         enabled: true,
-        threshold: -24,
-        knee: 24,
-        ratio: 4,
-        attack: 0.003,
+        threshold: -50,
+        knee: 40,
+        ratio: 12,
+        attack: 0,
         release: 0.25,
-        makeup: 8,
+        makeup: 0,
       },
       limiter: -1,
     },
@@ -681,7 +689,7 @@
   const audio = {
     ctx: null,
     source: null,
-    inputGain: null,
+    masterGain: null, // 최종 음량(컴프레서·makeup 뒤)
     analyser: null, // 노멀라이저용 RMS 측정 탭
     normGain: null, // 노멀라이저가 조정하는 자동 게인
     eqFilters: [],
@@ -889,15 +897,21 @@
     return player?.querySelector("video") || document.querySelector("video");
   }
 
-  // 그래프: source → inputGain → normGain → [EQ peaking ×10] → comp → outputGain(makeup) → limiter → destination
-  //         analyser는 normGain 입력(inputGain 출력)에서 RMS를 측정해 normGain을 자동 조정한다.
-  //         리미터는 makeup 뒤(최종단)에 둬 makeup·게인으로 키운 신호의 클리핑을 막는다.
+  // 그래프: source → normGain → [EQ peaking ×10] → comp → outputGain(makeup)
+  //         → masterGain → limiter → muteGain → destination
+  //         analyser는 normGain 입력(source 출력)에서 RMS를 측정해 normGain을 자동 조정한다.
+  //         리미터는 makeup·마스터 게인 뒤(최종단)에 둬 키운 신호의 클리핑을 막는다.
+  //
+  // ⚠ 마스터 게인은 컴프레서 '뒤'에 둔다. 예전엔 맨 앞(inputGain)이었는데, 압축기
+  //   앞에서 키우면 키운 만큼을 압축기가 도로 깎았다(ratio 12 기준 증폭분의 11/12).
+  //   그래서 게인을 올려도 음량이 거의 안 커지고 압축만 깊어져 소리가 먹먹해졌다(제보).
+  //   압축 → 보정(makeup) → 최종 음량(마스터 게인) → 리미터 순이 의도한 신호 흐름이다.
   function buildGraph(video) {
     if (audio.connected && audio.video === video) return true;
     if (isGraphRetryBlocked(video)) return false;
     if (!canStartAudioContext()) return false;
     try {
-      audio.ctx ||= new AudioContext();
+      audio.ctx ||= createAudioContext();
       if (audio.ctx.state === "suspended") {
         audio.ctx.resume().catch(() => {});
       }
@@ -909,7 +923,7 @@
       audio.source = getMediaElementSource(video);
       audio.video = video;
 
-      audio.inputGain = audio.ctx.createGain();
+      audio.masterGain = audio.ctx.createGain();
       audio.normGain = audio.ctx.createGain();
       audio.analyser = audio.ctx.createAnalyser();
       audio.analyser.fftSize = 1024;
@@ -934,21 +948,24 @@
       // 체인 연결
       let node = audio.source;
       node.disconnect();
-      node.connect(audio.inputGain);
-      audio.inputGain.connect(audio.normGain);
-      audio.inputGain.connect(audio.analyser); // 측정 탭(소리 경로엔 영향 없음)
+      // ⚠ 노멀라이저 측정은 마스터 게인이 실리지 않은 '원본' 신호를 본다. 게인을 뒤로
+      //   옮겼으므로 측정 지점도 source 출력이 된다(게인을 올릴 때마다 노멀라이저가
+      //   되받아 깎는 되먹임을 피한다).
+      node.connect(audio.normGain);
+      node.connect(audio.analyser); // 측정 탭(소리 경로엔 영향 없음)
       node = audio.normGain;
       audio.eqFilters.forEach((f) => {
         node.connect(f);
         node = f;
       });
       node.connect(audio.comp);
-      // 리미터를 makeup(outputGain) '뒤'에 둔다. makeup 으로 키운 최종 신호를 리미터가
-      // 제한해야 클리핑(찢어짐)을 실제로 막는다. (이전엔 comp→limiter→outputGain 순이라
+      // 리미터를 makeup·마스터 게인 '뒤'에 둔다. 키운 최종 신호를 리미터가 제한해야
+      // 클리핑(찢어짐)을 실제로 막는다. (예전엔 comp→limiter→outputGain 순이라
       // 리미터가 makeup 앞에 있어, makeup 배율이 리미터 뒤에서 곱해져 최종 출력이 리미터
       // threshold 를 넘어 찢어졌다 — 게인/​makeup 을 올릴수록 심해짐.)
       audio.comp.connect(audio.outputGain);
-      audio.outputGain.connect(audio.limiter);
+      audio.outputGain.connect(audio.masterGain);
+      audio.masterGain.connect(audio.limiter);
       // ⚠ 음소거 반영용 최종단. createMediaElementSource 로 오디오를 가져오면 소리가
       //   video 가 아니라 AudioContext.destination 으로 나가므로 video.muted 가 더는
       //   출력을 막지 못한다. 그대로 두면 플레이어에서 음소거해도 소리가 계속 났다(제보).
@@ -1092,6 +1109,23 @@
     previous.removeEventListener("volumechange", syncMuteGain);
   }
 
+  // AudioContext 생성. 반드시 이 함수를 쓴다(세 곳에서 만들어 옵션이 갈리지 않게).
+  // ⚠ 옵션 없이 만들면 브라우저가 latencyHint "interactive" 로 아주 작은 버퍼를 잡는다.
+  //   게임·녹화 등으로 CPU 가 바쁠 때 오디오 스레드가 버퍼를 제때 못 채우면 언더런이
+  //   나고, 그게 "지직" 하는 노이즈·소리 튐으로 들린다(제보: 렉 걸릴 때 소리가 튄다).
+  //   방송 시청은 실시간 상호작용이 필요 없으므로 "playback" 으로 버퍼를 키운다.
+  //   지연이 수십 ms 늘지만 시청에는 체감되지 않고, 언더런은 크게 줄어든다.
+  function createAudioContext() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) throw new Error("AudioContext unsupported");
+    try {
+      return new Ctx({ latencyHint: "playback" });
+    } catch {
+      // 옵션을 못 받는 구형 구현은 기본값으로 만든다.
+      return new Ctx();
+    }
+  }
+
   function restoreSourceToDestination() {
     try {
       if (!audio.source || !audio.ctx) return;
@@ -1148,7 +1182,9 @@
       clearInterval(audio.normTimer);
       audio.normTimer = 0;
     }
-    if (audio.normGain && audio.ctx) {
+    // applyState 가 부를 때마다 오디오 파라미터 이벤트를 예약하지 않도록,
+    // 이미 1배면 건너뛴다(멱등).
+    if (audio.normGain && audio.ctx && audio.normGain.gain.value !== 1) {
       try {
         audio.normGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.1);
       } catch {}
@@ -1187,7 +1223,7 @@
 
   function applyState() {
     if (!audio.connected) return;
-    audio.inputGain.gain.value = state.gain;
+    audio.masterGain.gain.value = state.gain;
     state.eq.forEach((db, i) => {
       if (audio.eqFilters[i]) audio.eqFilters[i].gain.value = db;
     });
@@ -1207,9 +1243,13 @@
       : 0;
     audio.limiter.ratio.value = state.limiter.enabled ? 20 : 1;
     // 노멀라이저 on/off 에 맞춰 분석 루프를 시작/정지(꺼지면 rAF 부하 0).
+    // ⚠ 끌 때는 타이머 유무와 상관없이 정리한다. 예전엔 normTimer 가 있을 때만
+    //   stopNormalizerLoop 을 불렀는데, 루프가 이미 멈춘 뒤(그래프 재구성·탭 전환 등)
+    //   normGain 에는 마지막 보정값이 남아 있다. 그 상태로 노멀라이저를 끈 프리셋을
+    //   적용하면 최대 -12dB(NORM_MIN_GAIN 0.25)가 계속 걸려 소리가 작게 들렸다.
     if (state.normalizer?.enabled) {
       if (!audio.normTimer) startNormalizerLoop();
-    } else if (audio.normTimer) {
+    } else {
       stopNormalizerLoop();
     }
   }
@@ -4153,7 +4193,7 @@
     // AudioContext가 running이 되면 저장 설정 로드 시점과 관계없이 자동 활성화를 재시도한다.
     if (mixerAlwaysOn) {
       try {
-        audio.ctx ||= new AudioContext();
+        audio.ctx ||= createAudioContext();
         if (audio.ctx.state === "suspended") {
           audio.ctx
             .resume()
@@ -4216,7 +4256,7 @@
     if (!audio.ctx) {
       if (!autoplayLikelyAllowed(video)) return;
       try {
-        audio.ctx = new AudioContext();
+        audio.ctx = createAudioContext();
       } catch {
         return;
       }
@@ -7651,21 +7691,8 @@
     toggleSyncCatchUp();
   });
 
-  // 우클릭 → 자동 따라잡기 토글 메뉴
-  // capture 단계 + stopImmediatePropagation으로 native 플레이어 컨텍스트 메뉴가
-  // 함께 뜨는 것을 막는다(native 리스너에 도달하기 전에 차단).
-  document.addEventListener(
-    "contextmenu",
-    (e) => {
-      const btn = e.target.closest?.(`.${SYNC_BUTTON_CLASS}`);
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      openSyncMenu(btn);
-    },
-    true,
-  );
+  // 우클릭 → 자동 따라잡기 토글 메뉴. 등록은 아래 ensureContextMenuHandlers 가
+  // 믹서 버튼 것과 함께 처리한다(document 교체 시 재등록을 한곳에서 관리).
 
   // ── 최초 1회 조작 안내 ───────────────────────────────────────────────────
   // 좌/우클릭 동작이 바뀌었으므로(예전에는 클릭 = 패널) 버튼 옆에 한 번만 알려 준다.
@@ -7747,6 +7774,24 @@
     showPresetOsd(next.label);
   }
 
+  // 버튼 위 휠로 게인만 조절(설정: 믹서 휠 동작 = gain). 슬라이더를 끌 때와 같은
+  // 경로(handleSlider)를 타므로 저장·툴팁·패널 동기화가 모두 따라온다.
+  // ⚠ 믹서가 꺼져 있으면 게인을 바꿔도 소리에 반영되지 않는다 → 안내만 띄운다.
+  function nudgeGain(direction) {
+    if (!state.enabled) {
+      showPresetOsd("믹서를 켜야 게인을 조절할 수 있습니다", 2000);
+      return;
+    }
+    const next = quantizeGain(state.gain + direction * GAIN_STEP);
+    if (next === state.gain) {
+      // 이미 끝에 닿았으면 현재 값만 다시 보여 준다(무반응처럼 보이지 않게).
+      showPresetOsd(`게인 ${Math.round(state.gain * 100)}%`);
+      return;
+    }
+    handleSlider("gain", next);
+    showPresetOsd(`게인 ${Math.round(next * 100)}%`);
+  }
+
   // 프리셋 전환·안내 표시. 화면 가운데 OSD 대신 버튼 바로 위 말풍선으로 띄운다
   // (조작한 버튼 옆에 붙어야 무엇이 바뀌었는지 바로 읽힌다).
   const PRESET_TIP_CLASS = "cheese-button-tip";
@@ -7813,8 +7858,13 @@
       if (!btn) return;
       e.preventDefault();
       e.stopPropagation();
+      // 네이티브 휠 볼륨도 document capture에 등록된다. stopPropagation만으로는 같은
+      // 노드의 다음 리스너가 실행되므로, 믹서 버튼의 휠은 여기서 완전히 소비한다.
+      e.stopImmediatePropagation();
       dismissGestureHint();
-      cyclePreset(e.deltaY < 0 ? -1 : 1);
+      const direction = e.deltaY < 0 ? 1 : -1; // 위로 = 올림
+      if (mixerWheelAction === "gain") nudgeGain(direction);
+      else cyclePreset(-direction); // 프리셋은 위로 = 이전 항목(기존 동작)
     },
     { capture: true, passive: false },
   );
@@ -7822,19 +7872,40 @@
   // 믹서 버튼 우클릭 → 패널 열기(좌클릭은 즉시 on/off).
   // 실시간 따라잡기 버튼과 같은 방식: capture 단계에서 native 플레이어 컨텍스트
   // 메뉴를 먼저 차단한다.
-  document.addEventListener(
-    "contextmenu",
-    (e) => {
-      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      dismissGestureHint();
-      togglePanel();
-    },
-    true,
-  );
+  //
+  // ⚠ 익명 함수로 한 번만 등록하지 않는다(제보: 등록 코드는 실행됐는데 실제 우클릭
+  //   때 콜백이 돌지 않고, 활성 document 의 리스너 목록에도 없었다). 이 스크립트는
+  //   masterEnabled() 의 await 뒤에 등록하므로, 그 사이 document 가 바뀌면(프레임
+  //   재생성·bfcache 복원 등) 등록이 옛 document 에 남는다. 이름 있는 핸들러로 두고
+  //   현재 document 에 없으면 다시 붙인다.
+  function onMixerContextMenu(e) {
+    const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    dismissGestureHint();
+    togglePanel();
+  }
+  function onSyncContextMenu(e) {
+    const btn = e.target.closest?.(`.${SYNC_BUTTON_CLASS}`);
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    openSyncMenu(btn);
+  }
+  // 같은 document 에 중복 등록되지 않도록 마지막으로 붙인 document 를 기억한다
+  // (addEventListener 는 같은 함수+같은 옵션이면 무시하지만, document 가 바뀌었을
+  //  때만 다시 붙이는 편이 의도가 분명하다).
+  let ctxMenuBoundDoc = null;
+  function ensureContextMenuHandlers() {
+    if (ctxMenuBoundDoc === document) return;
+    ctxMenuBoundDoc = document;
+    document.addEventListener("contextmenu", onMixerContextMenu, true);
+    document.addEventListener("contextmenu", onSyncContextMenu, true);
+  }
+  ensureContextMenuHandlers();
 
   function openSyncMenu(btn) {
     closeSyncMenu();
@@ -7915,22 +7986,64 @@
   let nativeVolumeOsdSlider = null;
   let nativeVolumeOsdPointerId = null;
   let nativeVolumeOsdUntil = 0;
+  const NATIVE_WHEEL_CONTROLS_HOLDER = "native-wheel-volume";
+  let nativeWheelControlsReleaseTimer = 0;
+
+  function eventTargetElement(target) {
+    return target instanceof Element
+      ? target
+      : target?.parentElement instanceof Element
+        ? target.parentElement
+        : null;
+  }
+
+  // 문서의 첫 플레이어가 아니라 이벤트가 실제로 발생한 플레이어를 찾는다. 광고·PIP·
+  // 재생 준비용 플레이어가 함께 있으면 findPlayer()는 다른 루트를 반환할 수 있다.
+  function playerOfEventTarget(target) {
+    const el = eventTargetElement(target);
+    if (!el) return null;
+    const own = el.closest(".pzp-pc, .webplayer-internal-core");
+    if (own) return own;
+    const fallback = findPlayer();
+    return fallback?.contains(el) ? fallback : null;
+  }
+
+  function videoOfEventTarget(target) {
+    const el = eventTargetElement(target);
+    if (el instanceof HTMLVideoElement) return el;
+    const player = playerOfEventTarget(el);
+    if (!player) return null;
+    const videos = [...player.querySelectorAll("video")];
+    if (!videos.length) return null;
+    // 같은 플레이어 안에도 광고/교체 전 video가 잠깐 공존할 수 있다. 화면에 보이는
+    // 영상 중 면적이 가장 큰 것을 현재 조작 대상으로 삼는다.
+    const visible = videos
+      .filter((video) => {
+        if (!video.isConnected || video.ended) return false;
+        const rect = video.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = getComputedStyle(video);
+        return style.display !== "none" && style.visibility !== "hidden";
+      })
+      .sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        return br.width * br.height - ar.width * ar.height;
+      });
+    return visible[0] || videos.find((video) => !video.ended) || videos[0];
+  }
 
   // 우리 게인 컨트롤이 아닌 native 볼륨 컨트롤 래퍼를 찾는다(이벤트 target 기준).
   function nativeVolumeWrapOf(target) {
     // document 위임(capture)으로 모든 pointer/wheel/key 이벤트에서 불린다. target이
     // Element가 아니거나(문서/텍스트노드) closest가 없을 수 있어 전부 방어한다 —
     // 여기서 throw하면 capture 리스너가 깨져 다른 동작까지 영향을 준다.
-    const el =
-      target instanceof Element
-        ? target
-        : target?.parentElement instanceof Element
-          ? target.parentElement
-          : null;
-    const wrap = el?.closest?.(".pzp-pc__volume-control") || null;
+    const el = eventTargetElement(target);
+    const wrap =
+      el?.closest?.(".pzp-pc__volume-control, .pzp-pc-volume-control") || null;
     if (!wrap || wrap.classList?.contains?.(CONTROL_CLASS)) return null;
-    const player = findPlayer();
-    if (!player || !player.contains(wrap)) return null;
+    const player = playerOfEventTarget(wrap);
+    if (!player) return null;
     return wrap;
   }
 
@@ -7949,17 +8062,12 @@
   }
 
   function nativeVolumeSliderOfTarget(target) {
-    const el =
-      target instanceof Element
-        ? target
-        : target?.parentElement instanceof Element
-          ? target.parentElement
-          : null;
+    const el = eventTargetElement(target);
     const slider = el?.closest?.(
       ".pzp-pc__volume-slider:not([data-master-gain])",
     );
     if (!slider || slider.closest(`.${CONTROL_CLASS}`)) return null;
-    return findPlayer()?.contains(slider) ? slider : null;
+    return playerOfEventTarget(slider) ? slider : null;
   }
 
   function armNativeVolumeOsd(slider, duration = Infinity) {
@@ -8107,14 +8215,16 @@
   // 조절 간격(한 틱당 변화량)은 wheelVolumeStep(설정, 1~10% → 0.01~0.10).
   // 이벤트 target 이 플레이어 영상 영역 안인지(볼륨 컨트롤/설정 패널 등 UI 위는 제외).
   function isOverVideoArea(target) {
-    const el = target instanceof Element ? target : target?.parentElement;
-    if (!(el instanceof Element)) return null;
-    const player = findPlayer();
-    if (!player || !player.contains(el)) return null;
+    const el = eventTargetElement(target);
+    if (!el) return null;
+    const player = playerOfEventTarget(el);
+    if (!player) return null;
     // 컨트롤/설정/볼륨 등 상호작용 UI 위에서는 페이지 기본 동작을 방해하지 않는다.
+    // [class*='pzp-pc__control']은 최근 플레이어에서 영상 위 전체 오버레이까지 잡을 수
+    // 있어 제외한다. 실제 컨트롤 바와 상호작용 요소만 좁게 거른다.
     if (
       el.closest(
-        ".pzp-pc__volume-control, .pzp-pc__bottom, [class*='setting'], [class*='pzp-pc__control'], button, input, [role='slider']",
+        ".pzp-pc__volume-control, .pzp-pc-volume-control, .pzp-pc__bottom, [class*='setting'], button, a, input, select, textarea, [role='slider'], [role='menu'], [role='dialog']",
       )
     ) {
       return null;
@@ -8122,32 +8232,86 @@
     // 영상 영역(.pzp-pc__video) 우선, 없으면 플레이어 루트 안이면 허용.
     return el.closest(".pzp-pc__video") || player;
   }
+  // 볼륨 버튼(스피커 아이콘)과 그 옆 슬라이더를 감싸는 영역. 여기 위에서의 휠은
+  // 'button' 범위일 때만 볼륨 조절로 쓴다.
+  // ⚠ isOverVideoArea 는 .pzp-pc__volume-control 을 일부러 제외하므로 그쪽과 겹치지
+  //   않는다. 두 판정은 배타적이다.
+  // ⚠ 직접 판정하지 않고 nativeVolumeWrapOf 를 그대로 쓴다. 우리 믹서 래퍼도
+  //   native 와 같은 pzp-pc__volume-control 클래스를 달고 있어서(native CSS 재사용),
+  //   클래스만 보면 믹서 버튼·게인 슬라이더까지 '볼륨 컨트롤'로 잡힌다. 그 구분은
+  //   볼륨 툴팁이 이미 검증된 방식으로 하고 있으므로 같은 함수를 공유한다.
+  function isOverVolumeControl(target) {
+    const el = eventTargetElement(target);
+    if (!el || !playerOfEventTarget(el)) return false;
+    // 믹서 래퍼는 native CSS를 재사용하려고 동일한 volume-control/button 클래스를
+    // 가진다. 보조 버튼 판정보다 먼저 제외하지 않으면 프리셋 전환과 native 볼륨이
+    // 한 번의 휠 입력에 함께 실행된다.
+    if (el.closest(`.${CONTROL_CLASS}`)) return false;
+    if (nativeVolumeWrapOf(el)) return true;
+    // 래퍼 클래스가 바뀐 배치에서도 스피커 버튼 자체는 안정 클래스/접근성 이름으로
+    // 식별한다.
+    return !!el.closest(
+      ".pzp-pc__volume-button, .pzp-pc-volume-button, button[aria-label*='음소거'], button[aria-label*='볼륨'], button[aria-label*='소리']",
+    );
+  }
+  // 지금 설정에서 이 지점의 휠을 볼륨 조절로 쓸지.
+  function wheelVolumeTargetOk(target) {
+    const overVideo = wheelVolumeScope !== "button" && isOverVideoArea(target);
+    if (overVideo) return true;
+    return wheelVolumeScope !== "video" && !!isOverVolumeControl(target);
+  }
+  function keepNativeWheelControlsVisible(target) {
+    if (nativeWheelControlsReleaseTimer) {
+      clearTimeout(nativeWheelControlsReleaseTimer);
+      nativeWheelControlsReleaseTimer = 0;
+    }
+    const player = playerOfEventTarget(target);
+    if (!player) return;
+    keepControlsVisible(player, NATIVE_WHEEL_CONTROLS_HOLDER);
+    // 연속 휠 입력마다 갱신한다. 마지막 입력의 툴팁이 사라진 뒤 native 자동 숨김으로
+    // 돌아가게 해, 조절 중에는 볼륨 아이콘과 하단 컨트롤이 사라지지 않게 한다.
+    nativeWheelControlsReleaseTimer = window.setTimeout(() => {
+      nativeWheelControlsReleaseTimer = 0;
+      releaseControlsVisible(NATIVE_WHEEL_CONTROLS_HOLDER);
+    }, VOLUME_TOOLTIP_HIDE_MS + 150);
+  }
   // 조절 후 볼륨 % 툴팁을 잠깐 띄워 피드백(native 볼륨 컨트롤 위치에 표시).
-  function flashVolumeTooltip() {
-    const slider = findNativeVolumeSlider();
+  function flashVolumeTooltip(target) {
+    const targetWrap = nativeVolumeWrapOf(target);
+    const slider = sliderOf(targetWrap) || findNativeVolumeSlider();
     if (!slider) return;
-    const wrap = slider.closest(".pzp-pc__volume-control");
+    const wrap =
+      targetWrap ||
+      slider.closest(".pzp-pc__volume-control, .pzp-pc-volume-control");
     if (!wrap) return;
     ensureVolumeTooltip();
     showVolumeTooltip(wrap);
   }
-  // 우클릭+휠 볼륨 조절을 쓴 뒤 버튼을 떼면 뜨는 contextmenu 를 막기 위한 것.
-  // 실측 이벤트 순서: mousedown(2) → wheel(buttons=2) → mouseup(2) → contextmenu.
-  // wheel 로 볼륨을 조절한 '시각'을 기록하고, 그 직후(창) 오는 contextmenu 를 억제한다
-  // (플래그만으로는 다른 리스너/타이밍 간섭 시 놓칠 수 있어 시각 창으로 확실히 잡는다).
-  let rightWheelUsedAt = 0;
+  function onWheelVolumeContextMenu(e) {
+    if (!wheelVolumeOn || !wheelVolumeRightClick) return;
+    // 우클릭을 길게 누르면 wheel 이벤트보다 contextmenu가 먼저 발생할 수 있다.
+    // 해당 옵션이 켜진 동안에는 설정한 휠 적용 영역을 우클릭+휠 제스처 영역으로
+    // 예약한다. 플레이어 밖과 적용 영역 밖의 일반 우클릭 메뉴는 그대로 유지한다.
+    if (!wheelVolumeTargetOk(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   function onVideoWheelVolume(e) {
     if (!wheelVolumeOn) return;
     // '우클릭 중에만' 옵션: 오른쪽 버튼(buttons 비트 2)이 눌린 상태의 휠만 처리한다.
     // (옵션 OFF면 기존대로 버튼 무관하게 휠로 조절.)
     if (wheelVolumeRightClick && !(e.buttons & 2)) return;
-    if (!isOverVideoArea(e.target)) return;
-    const video = findVideo();
+    if (!wheelVolumeTargetOk(e.target)) return;
+    const video = videoOfEventTarget(e.target);
     if (!(video instanceof HTMLVideoElement)) return;
-    // 페이지 스크롤 대신 볼륨을 조절한다(영상 위에서만).
+    // 페이지 스크롤 대신 볼륨을 조절한다.
     e.preventDefault();
-    // 우클릭+휠을 썼으면, 곧 오는 contextmenu 를 억제하기 위해 시각을 기록한다.
-    if (wheelVolumeRightClick) rightWheelUsedAt = Date.now();
+    // ⚠ 볼륨 컨트롤 위에서는 전파도 끊는다. 치지직이 슬라이더에 자체 휠 처리를
+    //   두고 있으면 우리 조절과 겹쳐 한 틱에 두 번 움직인다(캡처 단계라
+    //   preventDefault 만으로는 뒤따르는 리스너가 그대로 실행된다).
+    //   영상 위에서는 기존 동작을 바꾸지 않으려고 전파를 끊지 않는다.
+    if (isOverVolumeControl(e.target)) e.stopPropagation();
     // deltaY<0(위로) = 볼륨↑, deltaY>0(아래로) = 볼륨↓.
     const dir = e.deltaY < 0 ? 1 : -1;
     let v = video.volume + dir * wheelVolumeStep;
@@ -8155,7 +8319,8 @@
     // 올릴 때 음소거 상태면 해제(직관적). 0으로 내려가면 자연히 무음.
     if (dir > 0 && video.muted) video.muted = false;
     video.volume = v; // UI 슬라이더(aria-valuenow)는 이 값으로 자동 동기화됨(실측)
-    flashVolumeTooltip();
+    keepNativeWheelControlsVisible(e.target);
+    flashVolumeTooltip(e.target);
     const muted = video.muted || v === 0;
     // ⚠ 표시 % 는 방금 설정한 v 를 그대로 쓴다. video.volume 설정 직후 native 슬라이더의
     // aria-valuenow 는 아직 '이전 값'이라(치지직 비동기 갱신), 슬라이더를 읽으면 한 틱
@@ -8259,25 +8424,18 @@
       capture: true,
       passive: false,
     });
-    // 우클릭+휠로 볼륨을 조절한 직후(2초 내) 오는 contextmenu 를 억제한다. 휠을 안 쓴
-    // 순수 우클릭은 rightWheelUsedAt 이 오래됐거나 0 이라 메뉴가 정상적으로 뜬다.
-    document.addEventListener(
-      "contextmenu",
-      (e) => {
-        if (rightWheelUsedAt && Date.now() - rightWheelUsedAt < 2000) {
-          e.preventDefault();
-          e.stopPropagation();
-          rightWheelUsedAt = 0;
-        }
-      },
-      true,
-    );
+    // 우클릭을 길게 누르면 wheel보다 contextmenu가 먼저 뜰 수 있으므로, 우클릭 전용
+    // 옵션이 켜진 플레이어 영역에서는 메뉴를 선제적으로 억제한다.
+    document.addEventListener("contextmenu", onWheelVolumeContextMenu, true);
   }
 
   // tick fast-path 판정: 같은 페이지에서 우리 버튼·효과가 이미 모두 안정 상태인가.
   // 안정이면 tick의 무거운 ensure들을 건너뛴다(라이브 채팅 변이로 자주 깨어나므로).
   // 하나라도 애매하면 false를 반환해 full tick으로 보정한다(버튼 누락 방지).
   function isTickStable() {
+    // 휠 볼륨/볼륨 툴팁 위임은 UI 버튼 상태와 무관한 필수 바인딩이다. 확장 업데이트나
+    // 빠른 SPA 전환에서 버튼들이 먼저 안정돼도 리스너가 빠진 상태를 안정으로 보지 않는다.
+    if (!volumeDelegationBound) return false;
     const player = findPlayer();
     if (!player) return false; // 플레이어 없으면 full tick(자동활성화 등 처리 필요)
     const controls = player.querySelector(".pzp-pc__bottom-buttons-right");
@@ -8364,6 +8522,9 @@
   }
 
   function tick() {
+    // document 가 바뀌었으면 우클릭 핸들러를 다시 붙인다(같은 document 면 즉시 반환
+    // 하므로 비용은 참조 비교 한 번). 제보: 등록은 됐는데 실제로는 리스너가 없었음.
+    ensureContextMenuHandlers();
     // 클립 만들기(클립 에디터)에선 오디오 믹서를 개입시키지 않는다. seeker 드래그로
     // DOM 이 매 프레임 바뀌는데 여기서 video 탐색/그래프 판정을 돌리면 영상이 버벅인다.
     if (isClipEditorContext()) {
@@ -8712,5 +8873,9 @@
     subtree: true,
   });
   window.addEventListener("pagehide", flushPendingStateSave);
+  // 휠 볼륨은 플레이어 버튼 생성 여부와 독립된 document 위임 기능이다. tick이 클립
+  // 에디터/비플레이어 경로에서 일찍 끝나거나 UI를 이미 안정 상태로 판단해도 빠지지 않게
+  // 부트스트랩에서 먼저 등록한다(함수 내부 멱등 가드로 중복 등록되지 않음).
+  bindVolumeTooltipDelegation();
   tick();
 })();

@@ -3381,6 +3381,9 @@ html.cheese-cf-on
   min-width: 0;
   max-width: 100%;
   width: 100%;
+  /* harvest 한 네이티브 링크의 클릭 영역이 행보다 넓어져도 플레이어까지 침범하지 않게
+     전용 목록의 페인트·히트 테스트 영역을 사이드바 안에서 자른다. */
+  overflow-x: clip;
 }
 /* ⚠ 전환 깜빡임 방지: 네이티브 _is_expanded_ 클래스가 우리 아이템에 붙는 데 1프레임
    시차가 있어(사이드바는 이미 펼침) 그 순간 레이아웃이 깨졌다. 원본 클래스에 의존하지
@@ -5223,8 +5226,18 @@ body > .clr-picker {
   }
 }
 
+#cheese-custom-follow .cheese-cf-item {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: clip;
+}
 .cheese-cf-inner {
   position: relative; /* a._item_link_ absolute 기준 + 별표 위치 기준 */
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 /* ── 폴백 스타일(네이티브 클래스 없을 때만 대략 표시) ── */
 .cheese-cf-inner:not([class*="_item_"]) {
@@ -5436,8 +5449,13 @@ html.cheese-channel-profile-radius-enabled
   );
 }
 .cheese-cf-link {
-  position: absolute;
-  inset: 0;
+  position: absolute !important;
+  inset: 0 !important;
+  box-sizing: border-box;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
   z-index: 1;
   border-radius: inherit;
 }
@@ -5500,6 +5518,42 @@ html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav [class*="_count_"],
 html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
   margin-right: 20px;
 }
+/* 구역별 별표 표시 방식(data-cf-star). 기본은 hover 라 위 규칙 그대로 두고,
+   always/hidden 만 덮어쓴다. 구역 단위라 즐겨찾기·그룹·팔로잉이 서로 독립적이다. */
+[data-cf-star="always"] .cheese-follow-fav {
+  opacity: 1;
+}
+[data-cf-star="always"] [class*="_count_"],
+[data-cf-star="always"] .cheese-cf-count {
+  margin-right: 20px;
+}
+/* 숨김: 호버해도 나타나지 않는다. 시청자수 여백도 되돌려 네이티브와 같게 둔다.
+   ⚠ opacity:0 이 아니라 display:none 이어야 한다. 별표는 position:absolute 로
+   시청자수 위에 겹쳐 있어서, 투명하게만 두면 글자 위에 계속 얹혀 보인다(제보:
+   그룹·팔로잉에서 겹침). 접힘 상태의 비-즐겨찾기 별표도 같은 이유로 display:none.
+   ⚠ '별표 항상 표시'(html.cheese-cf-favstar)보다 뒤에 와야 구역 설정이 이긴다. */
+[data-cf-star="hidden"] .cheese-follow-fav,
+html.cheese-cf-favstar
+  #cheese-custom-follow
+  [data-cf-star="hidden"]
+  .cheese-follow-fav.is-fav {
+  display: none;
+}
+[data-cf-star="hidden"] .cheese-cf-item:hover [class*="_count_"],
+[data-cf-star="hidden"] .cheese-cf-item:hover .cheese-cf-count,
+html.cheese-cf-favstar
+  #cheese-custom-follow
+  [data-cf-star="hidden"]
+  .cheese-cf-fav
+  [class*="_count_"],
+html.cheese-cf-favstar
+  #cheese-custom-follow
+  [data-cf-star="hidden"]
+  .cheese-cf-fav
+  .cheese-cf-count {
+  margin-right: 0;
+}
+
 .cheese-follow-fav.is-fav,
 .cheese-follow-fav:hover {
   color: #ffcc33;
@@ -6135,6 +6189,14 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
   z-index: 3;
   cursor: default; /* 접힘 상태는 표시 전용(해제 불가) */
   pointer-events: none;
+}
+/* 구역에서 '숨김'을 골랐으면 접힘 상태의 즐겨찾기 배지도 띄우지 않는다.
+   바로 위 규칙이 !important 라 여기서도 !important 로 맞선다(뒤에 와야 이긴다). */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  [data-cf-star="hidden"]
+  .cheese-follow-fav.is-fav {
+  display: none !important;
 }
 #sidebar:not([class*="_is_expanded_"])
   #cheese-custom-follow
@@ -12675,6 +12737,25 @@ html.cheese-inbox-wide div[class*="_item_"] > div[class*="_layer_"] > iframe {
   word-break: break-word;
 }
 
+/* 이모티콘이 연달아 오면 서로 붙어 한 덩어리로 보인다. 내 채팅 기록 목록에서만
+   간격을 준다(img.cheese-recap-emoji 기본 스타일은 다른 곳과 공유하므로 그대로 둔다).
+   ⚠ 클래스는 cheese-recap-emoji 다 — appendRecapMessage 가 붙인다.
+   목록은 두 곳(팝오버 뷰 / 검색 창)이라 둘 다 지정한다. */
+.cheese-recap-dialog-view-row img.cheese-recap-emoji,
+.cheese-recap-search-window-row img.cheese-recap-emoji {
+  margin: 0 2px;
+}
+
+.cheese-recap-dialog-view-row img.cheese-recap-emoji:first-child,
+.cheese-recap-search-window-row img.cheese-recap-emoji:first-child {
+  margin-left: 0;
+}
+
+.cheese-recap-dialog-view-row img.cheese-recap-emoji:last-child,
+.cheese-recap-search-window-row img.cheese-recap-emoji:last-child {
+  margin-right: 0;
+}
+
 .cheese-recap-dialog-view-sentinel {
   font-size: 11px;
   min-height: 24px;
@@ -13230,6 +13311,39 @@ img.cheese-recap-emoji {
 
 /* 후원·구독 배지. 금액대별 색은 badge-moa-chat 과 같은 구간·색을 쓴다.
    (1,000,000+ brick / 500,000+ camel / 100,000+ green / 10,000+ cyan / 1+ violet) */
+/* 내 채팅 기록 패널의 갈래 토글(채팅/후원/구독). 갈래가 둘 이상일 때만 그린다. */
+.cheese-recap-filter-bar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 13px;
+}
+
+.cheese-recap-filter-chip {
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.cheese-recap-filter-chip:hover,
+.cheese-recap-filter-chip:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.cheese-recap-filter-chip.is-on {
+  background: #1aab7a;
+  color: #fff;
+}
+
 .cheese-recap-donation {
   border-radius: 5px;
   color: #fff;

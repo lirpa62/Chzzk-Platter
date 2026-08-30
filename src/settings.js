@@ -118,6 +118,8 @@
     "cheeseFollowingLiveSortRemember",
     "cheesePipDisable",
     "cheeseVodChatGraph",
+    "cheeseVodChatGraphAuto",
+    "cheeseVodChatGraphAutoCollect",
     "cheeseVodChatGraphColors",
     "cheeseFollowCleanup",
     "cheeseFollowOpenNewTab",
@@ -165,6 +167,9 @@
     "cheeseInboxCommunityReadMap",
     "cheeseFollowCustomSort",
     "cheeseFollowFavSortMode",
+    "cheeseFollowStarModeFavorites",
+    "cheeseFollowStarModeGroups",
+    "cheeseFollowStarModeFollowing",
     "cheeseFollowFavOrder",
     "cheeseFollowFavMeta",
     "cheeseFollowCustomInitial",
@@ -212,6 +217,7 @@
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
     "cheeseMixerGainStep",
+    "cheeseMixerWheelAction",
     "cheeseMixerGlobalDefaultMode",
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
@@ -254,6 +260,7 @@
     "cheeseVolumePct",
     "cheeseWheelVolume",
     "cheeseWheelVolumeRightClick",
+    "cheeseWheelVolumeScope",
     "cheeseActionOverlay",
     "cheeseActionOverlayPos",
     "cheeseWheelVolumeStep",
@@ -2524,9 +2531,7 @@
         if (!key.startsWith(prefix)) return false;
         const hash = key.slice(prefix.length);
         if (!HASH_RE.test(hash)) return false;
-        return (
-          value?.oldValue?.userDisabled !== value?.newValue?.userDisabled
-        );
+        return value?.oldValue?.userDisabled !== value?.newValue?.userDisabled;
       });
       if (!changed) return;
       clearTimeout(renderTimer);
@@ -3718,6 +3723,15 @@
       } catch {}
     });
   }
+  // 휠이 먹히는 곳(영상 위/버튼 위/둘 다). bindStringSegmented 는 함수 선언이라
+  // 아래에 정의돼 있어도 호이스팅되어 여기서 쓸 수 있다.
+  bindStringSegmented(
+    document.querySelector("[data-wheel-volume-scope]"),
+    "wheel-volume-scope-value",
+    "cheeseWheelVolumeScope",
+    ["video", "button", "both"],
+    "video",
+  );
   // 조작 화면 피드백 오버레이(전역, 기본 ON).
   const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
   const actionOverlayInput = document.querySelector("[data-action-overlay]");
@@ -4133,6 +4147,14 @@
   );
 
   // 플레이어 빠른 게인과 믹서 패널 게인 슬라이더의 공통 조절 간격(1~10%, 기본 5).
+  // 믹서 버튼 위 휠 동작(프리셋 전환/게인 조절).
+  bindStringSegmented(
+    document.querySelector("[data-mixer-wheel-action]"),
+    "mixer-wheel-action-value",
+    "cheeseMixerWheelAction",
+    ["preset", "gain"],
+    "preset",
+  );
   const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
   const mixerGainStepInput = document.querySelector("[data-mixer-gain-step]");
   function clampMixerGainStep(v) {
@@ -4408,6 +4430,17 @@
     },
   );
   // setupCfFavOrderEditor() 호출은 cfFavMeta/cfFavOrder(let) 선언 뒤로 옮겼다(TDZ 방지).
+
+  // 구역별 별표 버튼 표시 방식(항상/호버/숨김). 기본은 기존 동작인 호버.
+  for (const section of ["favorites", "groups", "following"]) {
+    bindStringSegmented(
+      document.querySelector(`[data-cf-star-${section}]`),
+      `cf-star-${section}-value`,
+      `cheeseFollowStarMode${section[0].toUpperCase()}${section.slice(1)}`,
+      ["always", "hover", "hidden"],
+      "hover",
+    );
+  }
 
   // 전용 팔로잉 목록 초기/더보기 개수(숫자 입력, 1~200).
   function bindCustomFollowCount(selector, storageKey, def, max = 200) {
@@ -7264,6 +7297,62 @@
   });
   loadVodChatGraph();
 
+  // 자동 표시(캐시가 있을 때) + 하위 옵션(캐시가 없어도 자동 수집).
+  // 상위(채팅 활성도)가 꺼져 있으면 둘 다, 자동 표시가 꺼져 있으면 자동 수집을 잠근다.
+  const VOD_CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
+  const VOD_CHAT_GRAPH_AUTO_COLLECT_KEY = "cheeseVodChatGraphAutoCollect";
+  const vodChatGraphAutoInput = document.querySelector(
+    "[data-vod-chat-graph-auto]",
+  );
+  const vodChatGraphAutoCollectInput = document.querySelector(
+    "[data-vod-chat-graph-auto-collect]",
+  );
+
+  function syncVodChatGraphAutoLock() {
+    const graphOn = vodChatGraphInput?.checked === true;
+    const autoOn = vodChatGraphAutoInput?.checked === true;
+    if (vodChatGraphAutoInput) vodChatGraphAutoInput.disabled = !graphOn;
+    if (vodChatGraphAutoCollectInput) {
+      vodChatGraphAutoCollectInput.disabled = !graphOn || !autoOn;
+    }
+  }
+
+  async function loadVodChatGraphAuto() {
+    let auto = false;
+    let autoCollect = false;
+    try {
+      const data = await cachedStorageGet([
+        VOD_CHAT_GRAPH_AUTO_KEY,
+        VOD_CHAT_GRAPH_AUTO_COLLECT_KEY,
+      ]);
+      auto = data?.[VOD_CHAT_GRAPH_AUTO_KEY] === true;
+      autoCollect = data?.[VOD_CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
+    } catch {}
+    if (vodChatGraphAutoInput) vodChatGraphAutoInput.checked = auto;
+    if (vodChatGraphAutoCollectInput) {
+      vodChatGraphAutoCollectInput.checked = autoCollect;
+    }
+    syncVodChatGraphAutoLock();
+  }
+
+  vodChatGraphAutoInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VOD_CHAT_GRAPH_AUTO_KEY]: vodChatGraphAutoInput.checked,
+      });
+    } catch {}
+    syncVodChatGraphAutoLock();
+  });
+  vodChatGraphAutoCollectInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VOD_CHAT_GRAPH_AUTO_COLLECT_KEY]: vodChatGraphAutoCollectInput.checked,
+      });
+    } catch {}
+  });
+  vodChatGraphInput?.addEventListener("change", syncVodChatGraphAutoLock);
+  loadVodChatGraphAuto();
+
   // 채팅 활성도 그래프의 후원·구독 색(Coloris). 기본값은 content.css 와 맞춘다.
   const VOD_CHAT_GRAPH_COLORS_KEY = "cheeseVodChatGraphColors";
   const VOD_CHAT_GRAPH_COLORS_DEFAULT = {
@@ -7979,6 +8068,7 @@
     "chatRecapVerifiedVideosV2",
     "chatRecapVodEventLinksV3",
     "chatRecapHistoryRevisionV1",
+    "chatRecapNewVideosV1",
     "cheeseChatRecapPodiumAchievements",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =

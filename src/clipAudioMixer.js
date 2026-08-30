@@ -14,9 +14,7 @@
   const ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const SELECTED_PRESET_KEY = "cheeseClipAudioMixerPreset";
-  const EQ_BANDS = [
-    60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000,
-  ];
+  const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
   const BUTTON_CLASS = "cheese-clip-audio-mixer-button";
   const SLOT_CLASS = "cheese-clip-audio-mixer-slot";
   const STACK_CLASS = "cheese-clip-media-tool-stack";
@@ -39,8 +37,7 @@
   const NORM_INTERVAL_MS = 100;
   const TRANSITION_REVEAL_DELAY_MS = 500;
   const TRANSITION_BROADCAST_INTERVAL_MS = 80;
-  const TRANSITION_CHANNEL_NAME =
-    "cheese-platter-clip-audio-mixer-transition";
+  const TRANSITION_CHANNEL_NAME = "cheese-platter-clip-audio-mixer-transition";
   const FRAME_ACTIVITY_MESSAGE = "cheese-platter-clip-frame-activity";
   const FRAME_ACTIVITY_FALLBACK_MS = 1500;
 
@@ -220,7 +217,7 @@
   const audio = {
     ctx: null,
     source: null,
-    inputGain: null,
+    masterGain: null, // 최종 음량(컴프레서·makeup 뒤)
     normGain: null,
     analyser: null,
     eqFilters: [],
@@ -342,18 +339,13 @@
           normalizer?.enabled === undefined
             ? DEFAULT_SNAPSHOT.normalizer.enabled
             : normalizer.enabled === true,
-        target: finite(
-          normalizer?.target,
-          DEFAULT_SNAPSHOT.normalizer.target,
-        ),
+        target: finite(normalizer?.target, DEFAULT_SNAPSHOT.normalizer.target),
       },
     };
   }
 
   function resolveSelectedPreset(data) {
-    const presets = Array.isArray(data?.[PRESETS_KEY])
-      ? data[PRESETS_KEY]
-      : [];
+    const presets = Array.isArray(data?.[PRESETS_KEY]) ? data[PRESETS_KEY] : [];
     const requested = String(data?.[SELECTED_PRESET_KEY] || "default");
     const selectedCustom = presets.find(
       (preset) => String(preset?.id || "") === requested,
@@ -369,9 +361,7 @@
     const defaultCustomId = String(data?.[DEFAULT_CUSTOM_KEY] || "");
     const defaultCustom =
       requested === "default"
-        ? presets.find(
-            (preset) => String(preset?.id || "") === defaultCustomId,
-          )
+        ? presets.find((preset) => String(preset?.id || "") === defaultCustomId)
         : null;
     if (defaultCustom) {
       return {
@@ -469,10 +459,7 @@
     const action = enabled && audio.connected ? "끄기" : "켜기";
     const label = `오디오 믹서 ${action} (${presetLabel} 프리셋)`;
     button.setAttribute("aria-label", label);
-    button.setAttribute(
-      "aria-pressed",
-      String(enabled && audio.connected),
-    );
+    button.setAttribute("aria-pressed", String(enabled && audio.connected));
     if (tooltip) {
       tooltip.innerHTML =
         `<strong class="${TOOLTIP_CLASS}-title"></strong>` +
@@ -556,10 +543,7 @@
     const buttonRect = nativeButton.getBoundingClientRect();
     const groupRect = nativeGroup.getBoundingClientRect();
     const toolStyle = getComputedStyle(toolTop);
-    const gap = finite(
-      parseFloat(toolStyle.rowGap || toolStyle.gap),
-      16,
-    );
+    const gap = finite(parseFloat(toolStyle.rowGap || toolStyle.gap), 16);
     const toolCount = Math.max(1, stack.children.length);
     const stackHeight = toolCount * 48 + (toolCount - 1) * gap;
     const fitsAbove = groupRect.top - gap - stackHeight >= 0;
@@ -701,9 +685,7 @@
     }
     slot.hidden = false;
     if (anchorToolTop !== toolTop) {
-      anchorToolTop?.removeAttribute(
-        "data-cheese-clip-audio-mixer-toolbar",
-      );
+      anchorToolTop?.removeAttribute("data-cheese-clip-audio-mixer-toolbar");
       toolTop.setAttribute("data-cheese-clip-audio-mixer-toolbar", "");
       anchorToolTop = toolTop;
     }
@@ -838,18 +820,14 @@
         4,
         Math.max(0.25, presetSnapshot.normalizer.target / rms),
       );
-      audio.normGain.gain.setTargetAtTime(
-        desired,
-        audio.ctx.currentTime,
-        0.6,
-      );
+      audio.normGain.gain.setTargetAtTime(desired, audio.ctx.currentTime, 0.6);
     }, NORM_INTERVAL_MS);
   }
 
   function applySnapshot() {
     if (!audio.connected) return;
 
-    audio.inputGain.gain.value = presetSnapshot.gain;
+    audio.masterGain.gain.value = presetSnapshot.gain;
     presetSnapshot.eq.forEach((gain, index) => {
       if (audio.eqFilters[index]) audio.eqFilters[index].gain.value = gain;
     });
@@ -890,7 +868,7 @@
       }
     } catch {}
     const nodes = [
-      audio.inputGain,
+      audio.masterGain,
       audio.normGain,
       audio.analyser,
       ...audio.eqFilters,
@@ -903,7 +881,7 @@
         node?.disconnect();
       } catch {}
     }
-    audio.inputGain = null;
+    audio.masterGain = null;
     audio.normGain = null;
     audio.analyser = null;
     audio.eqFilters = [];
@@ -927,11 +905,24 @@
     updateButton();
   }
 
+  // AudioContext 생성(라이브 믹서와 동일 정책).
+  // ⚠ 옵션 없이 만들면 아주 작은 버퍼를 잡아, CPU 가 바쁠 때 언더런으로 소리가 튄다.
+  //   시청 용도라 "playback" 으로 버퍼를 키운다(지연은 체감되지 않는다).
+  function createAudioContext() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) throw new Error("AudioContext unsupported");
+    try {
+      return new Ctx({ latencyHint: "playback" });
+    } catch {
+      return new Ctx();
+    }
+  }
+
   function connectGraph(video) {
     if (!frameActive) return false;
     try {
       graphError = "";
-      audio.ctx ||= new AudioContext();
+      audio.ctx ||= createAudioContext();
       if (audio.ctx.state !== "running") {
         audio.ctx.resume().catch(() => {});
       }
@@ -945,7 +936,7 @@
       audio.source = getMediaSource(video);
       audio.video = video;
       bindNormalizerVideo(video);
-      audio.inputGain = audio.ctx.createGain();
+      audio.masterGain = audio.ctx.createGain();
       audio.normGain = audio.ctx.createGain();
       audio.analyser = audio.ctx.createAnalyser();
       audio.analyser.fftSize = 1024;
@@ -965,9 +956,11 @@
       audio.limiter.release.value = 0.1;
 
       audio.source.disconnect();
-      audio.source.connect(audio.inputGain);
-      audio.inputGain.connect(audio.normGain);
-      audio.inputGain.connect(audio.analyser);
+      // ⚠ 마스터 게인은 컴프레서 뒤에 둔다(라이브 믹서와 동일). 압축기 앞에서 키우면
+      //   키운 만큼을 압축기가 도로 깎아 음량이 안 커지고 소리만 먹먹해진다.
+      //   노멀라이저 측정은 게인이 실리지 않은 원본 신호를 본다.
+      audio.source.connect(audio.normGain);
+      audio.source.connect(audio.analyser);
       let node = audio.normGain;
       for (const filter of audio.eqFilters) {
         node.connect(filter);
@@ -975,7 +968,8 @@
       }
       node.connect(audio.comp);
       audio.comp.connect(audio.outputGain);
-      audio.outputGain.connect(audio.limiter);
+      audio.outputGain.connect(audio.masterGain);
+      audio.masterGain.connect(audio.limiter);
       audio.limiter.connect(audio.ctx.destination);
 
       audio.connected = true;
@@ -1047,7 +1041,7 @@
     }
 
     try {
-      audio.ctx ||= new AudioContext();
+      audio.ctx ||= createAudioContext();
     } catch (error) {
       autoEnableSuppressed = true;
       showGraphError(error);
@@ -1141,12 +1135,7 @@
 
   function sync() {
     syncTimer = 0;
-    if (
-      !frameActive ||
-      !masterEnabled ||
-      featureHidden ||
-      !featureEnabled
-    ) {
+    if (!frameActive || !masterEnabled || featureHidden || !featureEnabled) {
       return;
     }
 
@@ -1215,11 +1204,7 @@
       ) {
         return;
       }
-      if (
-        routeChanged ||
-        !slot?.isConnected ||
-        !anchorGroup?.isConnected
-      ) {
+      if (routeChanged || !slot?.isConnected || !anchorGroup?.isConnected) {
         scheduleSync();
       }
     }, ROUTE_CHECK_MS);

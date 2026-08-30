@@ -162,6 +162,7 @@
 
   let chatRowObserver = null;
   let observedChatContainers = []; // 현재 감시 중인 채팅 컨테이너(교체 감지용)
+  let observedBlindInPlaceMutations = false;
   let retryTimer = 0;
   const rowRetryState = new WeakMap();
   const ROW_RETRY_DELAYS = [50, 150, 350, 700];
@@ -578,9 +579,7 @@
       items,
       // 새로 보거나 URL이 바뀐 항목만 보낸다. 전체 사전을 매번 복사하면 오래 연
       // 탭에서 메시지 크기와 직렬화 비용이 계속 커진다.
-      ...(Object.keys(pendingEmojis).length
-        ? { emojis: pendingEmojis }
-        : {}),
+      ...(Object.keys(pendingEmojis).length ? { emojis: pendingEmojis } : {}),
     };
     try {
       const target =
@@ -1949,12 +1948,14 @@
         chatRowObserver = null;
       }
       observedChatContainers = [];
+      observedBlindInPlaceMutations = false;
       clearPendingChatRows();
       scheduleRetry();
       return;
     }
     clearRetry();
     if (chatRowObserver) chatRowObserver.disconnect();
+    const watchBlindInPlaceMutations = isBlindRestoreActive();
     chatRowObserver = new MutationObserver((mutations) => {
       if (document.hidden || !anyChatEnhanceOn()) return;
       // ⚠ 관리자 전용 공지 검사는 노드마다 querySelectorAll + textContent 를 돈다.
@@ -1973,23 +1974,49 @@
         adminOnlyChatLatched = true;
       }
       for (const mutation of mutations) {
-        if (mutation.type !== "childList") continue;
-        const invalidate = !isExtensionOnlyMutation(mutation);
+        if (mutation.type === "childList") {
+          const invalidate = !isExtensionOnlyMutation(mutation);
+          const targetRow = findChatRowForNode(mutation.target);
+          if (targetRow) queueChatRow(targetRow, invalidate);
+          mutation.addedNodes.forEach((node) => {
+            if (!(node instanceof Element)) return;
+            collectChatRows(node).forEach((row) =>
+              queueChatRow(row, invalidate),
+            );
+          });
+          continue;
+        }
+        // 블라인드 처리는 기존 행을 교체하지 않고 _is_hidden_ 클래스와 텍스트 노드만
+        // 바꾸는 경우가 있다. childList만 보던 이전 감시기는 이 경로를 놓쳐 같은 방송
+        // 안에서도 복구 여부가 달라졌다. 복원 기능이 켜졌을 때, 숨김 행의 native 변경만
+        // 기존 제한 큐로 보낸다. 확장이 복원하며 만든 변경은 루프 방지를 위해 제외한다.
+        if (!watchBlindInPlaceMutations || isOwnedChatNode(mutation.target)) {
+          continue;
+        }
         const targetRow = findChatRowForNode(mutation.target);
-        if (targetRow) queueChatRow(targetRow, invalidate);
-        mutation.addedNodes.forEach((node) => {
-          if (!(node instanceof Element)) return;
-          collectChatRows(node).forEach((row) => queueChatRow(row, invalidate));
-        });
+        if (
+          targetRow &&
+          (isHiddenRow(targetRow) || restoredRowInfo.has(targetRow))
+        ) {
+          queueChatRow(targetRow, true);
+        }
       }
       // 플로팅 새 채팅 버튼은 채팅 행이 아니라 별도 요소라 위 경로에 안 잡힌다.
       // 내용이 계속 바뀌므로 변이가 있을 때마다 다시 판정한다(선택자 1회 조회라 가볍다).
       if (hideChatNickname || hideChatBadge) applyFloatingNicknameHide();
     });
-    containers.forEach((c) =>
-      chatRowObserver.observe(c, { childList: true, subtree: true }),
-    );
+    const observerOptions = watchBlindInPlaceMutations
+      ? {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["class"],
+          characterData: true,
+        }
+      : { childList: true, subtree: true };
+    containers.forEach((c) => chatRowObserver.observe(c, observerOptions));
     observedChatContainers = containers;
+    observedBlindInPlaceMutations = watchBlindInPlaceMutations;
     sweepExistingRows();
   }
 
@@ -1997,6 +2024,7 @@
   // 현재 찾아지는 컨테이너 집합과 달라졌으면(개수 변화 포함) 건강하지 않다고 본다.
   function isChatObserverHealthy() {
     if (!chatRowObserver || observedChatContainers.length === 0) return false;
+    if (observedBlindInPlaceMutations !== isBlindRestoreActive()) return false;
     if (observedChatContainers.some((c) => !c.isConnected)) return false;
     const current = findChatListContainers();
     if (current.length !== observedChatContainers.length) return false;
@@ -2027,6 +2055,7 @@
       chatRowObserver = null;
     }
     observedChatContainers = [];
+    observedBlindInPlaceMutations = false;
     clearRetry();
     clearPendingChatRows();
   }
@@ -2200,6 +2229,7 @@
       restoreRowMessageIdentity = new WeakMap();
       restoreUnavailableRows = new WeakSet();
       if (!anyChatEnhanceOn()) stopChatRowObserver();
+      else ensureChatRowObserver();
     }
   }
 

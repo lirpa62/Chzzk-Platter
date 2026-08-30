@@ -30,9 +30,7 @@
     if (!source.startsWith(prefix)) return null;
     const match = source
       .slice(prefix.length)
-      .match(
-        /^([0-9a-f]{32}):([0-9a-f]{32}):(\d{4}-\d{2})(?::part:(\d+))?$/i,
-      );
+      .match(/^([0-9a-f]{32}):([0-9a-f]{32}):(\d{4}-\d{2})(?::part:(\d+))?$/i);
     if (!match || !ACCOUNT_RE.test(match[1]) || !ACCOUNT_RE.test(match[2])) {
       return null;
     }
@@ -80,10 +78,7 @@
       Object.assign(values, await getBatched(storage, extraKeys, batchSize));
     }
     return new Map(
-      unique.map((baseKey) => [
-        baseKey,
-        monthItemsFromValues(baseKey, values),
-      ]),
+      unique.map((baseKey) => [baseKey, monthItemsFromValues(baseKey, values)]),
     );
   }
 
@@ -125,21 +120,19 @@
   function vodIdentityKey(item) {
     const videoNo = String(item?.n || "");
     const identity = String(item?.i || "");
-    return /^\d+$/.test(videoNo) && identity
-      ? `${videoNo}|${identity}`
-      : "";
+    return /^\d+$/.test(videoNo) && identity ? `${videoNo}|${identity}` : "";
   }
 
-  function vodFallbackKey(item, donationKeyOf = () => "") {
+  // ⚠ 후원 키(donationKeyOf)를 이 키에 넣으면 안 된다. 같은 메시지라도 '후원 정보가
+  //   붙기 전/후'로 키가 달라져, 재수집 때 서로 다른 행으로 쌓인다(제보: 이미 가져온
+  //   다시보기를 다시 모으면서 같은 채팅이 중복 표시). 영상+재생위치+본문이면 같은
+  //   메시지로 보고, 후원 정보는 병합 쪽에서 채워 넣는다.
+  //   인자는 호출부 호환을 위해 남겨 두되 키에는 반영하지 않는다.
+  function vodFallbackKey(item) {
     const videoNo = String(item?.n || "");
     const offset = Number(item?.v);
     if (!/^\d+$/.test(videoNo) || !Number.isFinite(offset)) return "";
-    return JSON.stringify([
-      videoNo,
-      Math.round(offset),
-      String(item?.m || ""),
-      String(donationKeyOf(item?.d) || ""),
-    ]);
+    return JSON.stringify([videoNo, Math.round(offset), String(item?.m || "")]);
   }
 
   // 예전 버전은 다시보기 메시지를 절대 시각(t)으로만 구분했다. API 재조회 때
@@ -185,8 +178,19 @@
         item?.d &&
         (!next.d || (item.d.src === "history" && next.d?.src !== "history"))
       ) {
-        next.d = item.d;
-        if (item.d.src === "history" && Number(item?.t) > 0) next.t = item.t;
+        // ⚠ 미션은 확정 시각으로 덮어쓰면 안 된다. purchase/history 의 시각은
+        //   성공·실패·거절이 확정된 순간이라 내가 후원한 시점과 다르다(제보).
+        //   대기 때 잡아 둔 시각(src:"mission")이 있으면 그쪽을 유지하고,
+        //   종류·금액만 확정본으로 갱신한다.
+        const keepPendingTime = next.d?.src === "mission";
+        next.d = keepPendingTime ? { ...item.d, src: "mission" } : item.d;
+        if (
+          !keepPendingTime &&
+          item.d.src === "history" &&
+          Number(item?.t) > 0
+        ) {
+          next.t = item.t;
+        }
       }
       items[index] = next;
       const nextIdentity = vodIdentityKey(next);
@@ -202,7 +206,10 @@
     sourceItems,
     chunkMax = DEFAULT_CHUNK_MAX,
   ) {
-    const max = Math.max(100, Math.floor(Number(chunkMax) || DEFAULT_CHUNK_MAX));
+    const max = Math.max(
+      100,
+      Math.floor(Number(chunkMax) || DEFAULT_CHUNK_MAX),
+    );
     const baseKey = state.baseKey;
     const items = sortItems(sourceItems.slice());
     const now = Date.now();
@@ -224,9 +231,8 @@
       await storage.set(writes);
       if (state.parts > nextParts) {
         await storage.remove(
-          Array.from(
-            { length: state.parts - nextParts },
-            (_, index) => partKey(baseKey, nextParts + index + 1),
+          Array.from({ length: state.parts - nextParts }, (_, index) =>
+            partKey(baseKey, nextParts + index + 1),
           ),
         );
       }

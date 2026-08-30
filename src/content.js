@@ -624,6 +624,11 @@
   let wheelVolume = false;
   const WHEEL_VOLUME_RIGHTCLICK_KEY = "cheeseWheelVolumeRightClick";
   let wheelVolumeRightClick = false; // 우클릭 누른 채 휠일 때만 볼륨 조절(기본 OFF)
+  // 휠이 먹히는 범위: video(영상 위) · button(볼륨 버튼 위) · both.
+  // 기본은 video — 기존 동작 그대로다.
+  const WHEEL_VOLUME_SCOPE_KEY = "cheeseWheelVolumeScope";
+  const WHEEL_VOLUME_SCOPES = ["video", "button", "both"];
+  let wheelVolumeScope = "video";
   // 조작(휠 볼륨/되감기/앞으로) 시 플레이어 중앙 반투명 피드백 오버레이(전역, 기본 ON).
   // MAIN world(audioMixer.js)가 표시. content.js 는 플래그 로드/브로드캐스트만.
   const ACTION_OVERLAY_KEY = "cheeseActionOverlay";
@@ -679,6 +684,9 @@
   const MIXER_GAIN_MIN_KEY = "cheeseMixerGainMin";
   const MIXER_GAIN_MAX_KEY = "cheeseMixerGainMax";
   const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
+  // 믹서 버튼 위 휠 동작: preset(프리셋 전환) | gain(게인 조절). 기본 preset.
+  const MIXER_WHEEL_ACTION_KEY = "cheeseMixerWheelAction";
+  let mixerWheelAction = "preset";
   let mixerGainMin = 0.5;
   let mixerGainMax = 2;
   let mixerGainStep = 5;
@@ -2145,6 +2153,20 @@
   const CUSTOM_FOLLOW_GROUP_INITIAL_KEY = "cheeseFollowGroupInitial";
   const CUSTOM_FOLLOW_GROUP_MORE_KEY = "cheeseFollowGroupMore";
   const CUSTOM_FOLLOW_FAVORITES_KEY = "cheeseFollowFavorites";
+  // 별표(즐겨찾기 버튼) 표시 방식 — 구역별로 따로 둔다. always/hover/hidden.
+  // ⚠ 기존 sbFollowFavStar(별표 항상 표시)는 '즐겨찾기한 항목'만 항상 보이게 하는
+  //   전역 옵션이라 역할이 다르다. 여기는 구역 안 모든 항목의 버튼 노출 방식이다.
+  const CUSTOM_FOLLOW_STAR_KEYS = {
+    favorites: "cheeseFollowStarModeFavorites",
+    groups: "cheeseFollowStarModeGroups",
+    following: "cheeseFollowStarModeFollowing",
+  };
+  const CUSTOM_FOLLOW_STAR_MODES = ["hover", "always", "hidden"];
+  const customFollowStarMode = {
+    favorites: "hover",
+    groups: "hover",
+    following: "hover",
+  };
   const CUSTOM_FOLLOW_SORTS = [
     "popular",
     "recent",
@@ -8730,9 +8752,7 @@
     stopCommentTimestampPanelTimeTracker();
     stopCommentTimestampPanelAnchorMonitor();
     document
-      .querySelector(
-        `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`,
-      )
+      .querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`)
       ?.remove();
     document
       .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
@@ -9224,6 +9244,13 @@
   //
   // ⚠ previousVideoChatSize 를 0 으로 두면 페이징이 진행되지 않는다(실측). 50 을 준다.
   const CHAT_GRAPH_KEY = "cheeseVodChatGraph";
+  // 자동 표시(전역). 다시보기에 들어가면 버튼을 누르지 않아도 그래프를 띄운다.
+  //  - auto(기본 OFF): 켜면 '이미 모아 둔' 영상만 자동 표시(수집은 하지 않는다).
+  //  - autoCollect(기본 OFF): 캐시가 없어도 자동으로 수집까지 한다.
+  // ⚠ 수집은 영상 길이에 따라 수십 초~1~2분이 걸리고 API 를 수백 번 부른다.
+  //   그래서 '캐시가 있을 때만'을 기본으로 두고, 전수 수집은 따로 켜게 나눈다.
+  const CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
+  const CHAT_GRAPH_AUTO_COLLECT_KEY = "cheeseVodChatGraphAutoCollect";
   const CHAT_GRAPH_LAYER_CLASS = "cheese-chat-graph-layer";
   const CHAT_GRAPH_BUTTON_CLASS = "cheese-chat-graph-button";
   const CHAT_GRAPH_CACHE_PREFIX = "cheeseVodChatGraphCache:";
@@ -9244,6 +9271,9 @@
   const CHAT_TYPE_SUBSCRIPTION = 11;
 
   let chatGraphOn = false; // 설정(기본 OFF). 켜면 버튼만 나타난다.
+  let chatGraphAuto = false; // 자동 표시(캐시가 있을 때)
+  let chatGraphAutoCollect = false; // 캐시가 없어도 자동 수집
+  let chatGraphAutoTriedVideo = ""; // 이 영상에서 자동 표시를 이미 시도했는지
   const chatGraphState = {
     videoNo: "",
     bins: null, // [{chat, donation, subscription}]
@@ -9617,6 +9647,34 @@
       chatGraphState.shown = false;
       removeChatGraphLayer();
     }
+    // 영상이 바뀌면 자동 표시를 다시 한 번 시도할 수 있게 한다.
+    if (chatGraphAutoTriedVideo && chatGraphAutoTriedVideo !== videoNo) {
+      chatGraphAutoTriedVideo = "";
+    }
+  }
+
+  // 다시보기 진입 시 그래프를 자동으로 띄운다(옵션).
+  // ⚠ 영상당 1회만 시도한다. tick 은 DOM 변이마다 도는데 매번 재시도하면 수집이
+  //   중복으로 돌거나, 사용자가 버튼으로 닫아 둔 그래프를 계속 되살린다.
+  async function maybeAutoShowChatGraph() {
+    if (!chatGraphOn || !chatGraphAuto) return;
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo || chatGraphAutoTriedVideo === videoNo) return;
+    if (chatGraphState.loading || chatGraphState.shown) return;
+    // 재생바(길이)가 준비되기 전에는 구간을 나눌 수 없다 → 다음 tick 에 다시 본다.
+    const slider = findPlayerSliderProgressWrap();
+    if (!slider || !getPlayerDuration(slider)) return;
+    // 캐시가 없고 자동 수집도 아니면 건드리지 않는다(버튼으로 직접 켜야 한다).
+    if (!chatGraphAutoCollect) {
+      const cached =
+        chatGraphState.videoNo === videoNo && chatGraphState.bins
+          ? chatGraphState.bins
+          : await loadChatGraphCache(videoNo);
+      if (!cached) return; // 시도 표시를 남기지 않는다 — 캐시가 생기면 그때 뜬다
+      if (getCurrentVideoNo() !== videoNo) return;
+    }
+    chatGraphAutoTriedVideo = videoNo;
+    await toggleChatGraph();
   }
 
   function renderCommentMarker(marker, duration) {
@@ -9764,6 +9822,8 @@
   let recapPanelTimeUpdateVideo = null;
   let recapPanelTimeUpdateHandler = null;
   let recapPanelCurrentIndex = "";
+  // 패널 안에서만 쓰는 임시 상태다(저장하지 않는다). 패널을 닫으면 전체로 돌아간다.
+  let recapPanelFilter = "all";
 
   // 이 다시보기에서 내가 남긴 채팅을 모은다.
   // ⚠ 로컬 기록을 쓰지 않는다. 다시보기 채팅 API 가 그 영상의 모든 채팅을
@@ -9813,6 +9873,47 @@
       : {};
   }
 
+  // MAIN world(missionDonate.js)가 미션 후원 요청을 잡아 알려 준다.
+  // ⚠ 확정되면 purchase/history 로 넘어오지만 그 시각은 '확정된 순간'이라
+  //   다시보기 위치를 잡을 수 없다(제보). 여기서 '건 순간'을 남겨 둔다.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data?.source !== "cheese-mission-donate") return;
+    if (event.data?.type !== "mission") return;
+    const channelId = String(event.data.channelId || "").toLowerCase();
+    const at = Number(event.data.at) || 0;
+    const amount = Number(event.data.amount) || 0;
+    if (!/^[0-9a-f]{32}$/.test(channelId) || !at || amount <= 0) return;
+    const type = String(event.data.donationType || "").toUpperCase();
+    void (async () => {
+      const accountId = currentClipVaultAccountId();
+      if (!accountId) return;
+      await saveChatRecapBatch(accountId, channelId, [
+        {
+          t: at,
+          m: "",
+          d: {
+            kind: "DONATION",
+            // 미션 후원(MISSION_ALONE)과 미션 상금 쌓기(MISSION_PARTICIPATION)는
+            // 경로가 같고 donationType 으로만 갈린다.
+            type: type || "MISSION_ALONE",
+            amount,
+            ...(event.data.anonymous === true ? { anonymous: true } : {}),
+            // 대기 중 기록임을 표시한다. 나중에 purchase/history 로 확정분이
+            // 오면 종류·금액은 그쪽을 정본으로 삼되 시각은 이쪽을 유지한다.
+            src: "mission",
+            ...(event.data.missionId
+              ? { missionId: String(event.data.missionId) }
+              : {}),
+            ...(event.data.relatedMissionId
+              ? { relatedMissionId: String(event.data.relatedMissionId) }
+              : {}),
+          },
+        },
+      ]);
+    })();
+  });
+
   async function recapVideoEventLinkState(accountId, videoNo, channelId) {
     const store = chatHistoryStore();
     if (!store || !accountId || !videoNo || !channelId) {
@@ -9828,7 +9929,10 @@
         accountId,
       );
       const revision = Number(revisions[channelId]) || 0;
-      const links = recapAccountMap(data?.[CHAT_RECAP_EVENT_LINK_KEY], accountId);
+      const links = recapAccountMap(
+        data?.[CHAT_RECAP_EVENT_LINK_KEY],
+        accountId,
+      );
       const linked = links[String(videoNo)];
       return {
         current:
@@ -9859,7 +9963,11 @@
     }
   }
 
-  async function markRecapVideoImported(accountId, videoNo, channelIdHint = "") {
+  async function markRecapVideoImported(
+    accountId,
+    videoNo,
+    channelIdHint = "",
+  ) {
     const store = chatHistoryStore();
     if (!store || !accountId || !videoNo) return false;
     try {
@@ -10005,13 +10113,11 @@
         typeof data[CHAT_RECAP_VERIFIED_KEY] === "object"
           ? data[CHAT_RECAP_VERIFIED_KEY]
           : {};
-      imported[accountId] = (Array.isArray(imported[accountId])
-        ? imported[accountId]
-        : []
+      imported[accountId] = (
+        Array.isArray(imported[accountId]) ? imported[accountId] : []
       ).filter((value) => String(value) !== targetVideoNo);
-      verified[accountId] = (Array.isArray(verified[accountId])
-        ? verified[accountId]
-        : []
+      verified[accountId] = (
+        Array.isArray(verified[accountId]) ? verified[accountId] : []
       ).filter((value) => String(value) !== targetVideoNo);
       const eventLinks =
         data?.[CHAT_RECAP_EVENT_LINK_KEY] &&
@@ -10049,6 +10155,78 @@
     }
   }
 
+  // 이 다시보기의 방송 시작 시각. seek preview 가 이미 받아 뒀으면 그걸 쓰고,
+  // 아직이면(패널을 먼저 열었을 때) 직접 한 번 받아 온다. 보정값이 있으면 우선한다.
+  // 같은 영상에서 두 경로(캐시 로드·신규 수집)가 각각 부르므로 결과를 한 칸만
+  // 들고 있는다. 영상을 옮기면 덮어써져 누적되지 않는다.
+  const recapVodStartAtCache = { videoNo: "", at: 0 };
+
+  async function recapVodStartAt(videoNo) {
+    const corrected = vodChatCorrections.get(String(videoNo))?.startAt;
+    if (Number(corrected) > 0) return Number(corrected);
+    if (
+      seekPreviewState.videoNo === String(videoNo) &&
+      Number(seekPreviewState.liveOpenAt) > 0
+    ) {
+      return Number(seekPreviewState.liveOpenAt);
+    }
+    if (
+      recapVodStartAtCache.videoNo === String(videoNo) &&
+      recapVodStartAtCache.at > 0
+    ) {
+      return recapVodStartAtCache.at;
+    }
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/service/v2/videos/${videoNo}`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return 0;
+      const c = (await res.json())?.content || {};
+      // 업로드 영상은 liveOpenDate 가 없다 → 환산 불가(0을 돌려 건너뛴다).
+      const at = parsePublishDate(c.liveOpenDate) || 0;
+      recapVodStartAtCache.videoNo = String(videoNo);
+      recapVodStartAtCache.at = at;
+      return at;
+    } catch {
+      return 0;
+    }
+  }
+
+  // 채팅에 뜨지 않는 기록(구독권 선물 받음, 대기 미션 등)은 다시보기 채팅 API 로는
+  // 절대 나오지 않는다(제보: 라이브엔 보이는데 다시보기엔 없음). 절대 시각만 있는
+  // 로컬 기록을 방송 시작 시각 기준으로 재생 위치로 환산해 목록에 끼워 넣는다.
+  function recapOffscreenRows(storedItems, videoNo, startAt, durationSec) {
+    if (!(startAt > 0)) return [];
+    const rows = [];
+    for (const item of storedItems || []) {
+      // 이미 다시보기 위치가 붙은 행은 채팅 경로가 담당한다.
+      if (item?.n || Number.isFinite(Number(item?.v))) continue;
+      const kind = String(item?.d?.kind || "");
+      // 채팅으로도 오는 종류(일반 후원·구독)는 중복이 되므로 넣지 않는다.
+      // 채팅에 대응 메시지가 없는 것만 대상으로 한다.
+      const offscreen =
+        kind === "GIFT_RECEIVED" ||
+        kind === "GIFT_SENT" ||
+        item?.d?.src === "mission";
+      if (!offscreen) continue;
+      const at = Number(item?.t) || 0;
+      if (!at) continue;
+      const seconds = Math.round((at - startAt) / 1000);
+      if (seconds < 0) continue;
+      // 영상 길이를 알면 그 밖의 기록은 이 영상 것이 아니다.
+      if (durationSec > 0 && seconds > durationSec) continue;
+      rows.push({
+        t: at,
+        m: String(item?.m || ""),
+        v: seconds,
+        n: String(videoNo),
+        d: { ...item.d },
+      });
+    }
+    return rows;
+  }
+
   async function loadRecapFromLocal(accountId, videoNo) {
     const channelId = currentRecapChannelId();
     if (!channelId || !(await isRecapVideoImported(accountId, videoNo))) {
@@ -10065,6 +10243,16 @@
       channelId,
     );
     const storedRows = [];
+    // 채팅에 없는 기록(선물 받음·대기 미션)은 시각으로 환산해 함께 넣는다.
+    const startAt = await recapVodStartAt(videoNo);
+    storedRows.push(
+      ...recapOffscreenRows(
+        channelItems,
+        videoNo,
+        startAt,
+        Number(document.querySelector("video")?.duration) || 0,
+      ),
+    );
     for (const it of channelItems) {
       // 이 영상에서 가져온 것만(n = videoNo). n 이 없으면 라이브 수집분이라
       // 재생 위치를 알 수 없어 목록에 못 쓴다.
@@ -10089,12 +10277,7 @@
       recapDonationMatchKey,
     );
     if (compacted.changed) {
-      await saveChatRecapBatch(
-        accountId,
-        channelId,
-        compacted.items,
-        videoNo,
-      );
+      await saveChatRecapBatch(accountId, channelId, compacted.items, videoNo);
     }
     const rows = compacted.items.map((item) => ({
       seconds: Number(item.v),
@@ -10122,6 +10305,7 @@
     }
   }
 
+  // donation 은 호출부 호환을 위해 남겨 두되 키에는 반영하지 않는다(아래 주석 참고).
   function recapVodMessageIdentity(message, text, donation) {
     const explicit =
       message?.key ||
@@ -10134,7 +10318,12 @@
     if (explicit !== "") return `id:${String(explicit)}`.slice(0, 500);
     const offset = Number(message?.playerMessageTime);
     if (!Number.isFinite(offset)) return "";
-    return `vod:${recapChatHash(message)}|${offset}|${String(text || "")}|${recapDonationMatchKey(donation)}`.slice(
+    // ⚠ 후원 키를 넣으면 안 된다(vodFallbackKey 와 같은 이유). 후원 내역을 가져오면
+    //   채널 revision 이 올라가 이미 수집한 다시보기를 다시 모으는데, 그때 같은 채팅에
+    //   후원 정보가 붙으면 키가 달라져 별개 메시지로 쌓인다(제보: 이미 가져온 채팅이
+    //   중복 표시). 발신자+재생위치+본문이면 같은 메시지로 보고, 후원 정보는
+    //   compactVodRows 병합 쪽에서 채워 넣는다.
+    return `vod:${recapChatHash(message)}|${offset}|${String(text || "")}`.slice(
       0,
       500,
     );
@@ -10261,11 +10450,7 @@
         const historyMatch = donation
           ? historyMatcher.match(messageTime, text, donation)
           : null;
-        if (
-          recapChatHash(m) !== accountId &&
-          !exactLocal &&
-          !historyMatch
-        ) {
+        if (recapChatHash(m) !== accountId && !exactLocal && !historyMatch) {
           continue;
         }
         const matchedText = String(historyMatch?.m || text).trim();
@@ -10296,6 +10481,25 @@
       }
     }
     onProgress?.(1);
+    // 채팅에 뜨지 않는 기록(선물 받음·대기 미션)을 시각으로 환산해 합친다.
+    if (completed) {
+      const startAt = await recapVodStartAt(videoNo);
+      for (const row of recapOffscreenRows(
+        storedChannelItems,
+        videoNo,
+        startAt,
+        duration,
+      )) {
+        rows.push({
+          seconds: Number(row.v),
+          text: String(row.m || ""),
+          t: Number(row.t) || 0,
+          type: CHAT_TYPE_DONATION,
+          d: row.d,
+          emojis: null,
+        });
+      }
+    }
     // 같은 시각+본문 중복 제거 후 시간순.
     const seen = new Set();
     const out = [];
@@ -10367,11 +10571,7 @@
   }
 
   function ensureChatRecapButton() {
-    if (
-      !chatRecapOn ||
-      chatRecapPlayerButtonHidden ||
-      !getCurrentVideoNo()
-    ) {
+    if (!chatRecapOn || chatRecapPlayerButtonHidden || !getCurrentVideoNo()) {
       return;
     }
     const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
@@ -10400,11 +10600,7 @@
   }
 
   function applyChatRecapPlayerButtonVisibility() {
-    if (
-      !chatRecapOn ||
-      chatRecapPlayerButtonHidden ||
-      !getCurrentVideoNo()
-    ) {
+    if (!chatRecapOn || chatRecapPlayerButtonHidden || !getCurrentVideoNo()) {
       closeChatRecapPanel();
       document
         .querySelectorAll(`.${RECAP_BUTTON_CLASS}`)
@@ -10473,10 +10669,7 @@
     reimportButton?.addEventListener("click", () => {
       if (reimportButton.disabled || !reimportPopover) return;
       reimportPopover.hidden = !reimportPopover.hidden;
-      panel.classList.toggle(
-        "is-reimport-confirming",
-        !reimportPopover.hidden,
-      );
+      panel.classList.toggle("is-reimport-confirming", !reimportPopover.hidden);
     });
     panel
       .querySelector("[data-recap-reimport-cancel]")
@@ -10609,6 +10802,42 @@
     return out;
   }
 
+  // 이 영상에 있는 갈래만 칩으로 그린다. 채팅만 있는 영상에서는 아예 만들지 않아
+  // 기존 화면 그대로 보인다.
+  function renderRecapFilterBar(panel, counts) {
+    const kinds = RECAP_FILTERS.filter(
+      ([key]) => key !== "all" && counts.get(key),
+    );
+    if (kinds.length < 2) return null;
+    const bar = document.createElement("div");
+    bar.className = "cheese-recap-filter-bar";
+    const total = recapPanelItems.length;
+    [
+      ["all", "전체", total],
+      ...kinds.map(([k, l]) => [k, l, counts.get(k)]),
+    ].forEach(([key, label, count]) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "cheese-recap-filter-chip";
+      chip.dataset.recapFilter = String(key);
+      chip.textContent = `${label} ${Number(count).toLocaleString()}`;
+      const on = recapPanelFilter === key;
+      chip.classList.toggle("is-on", on);
+      chip.setAttribute("aria-pressed", on ? "true" : "false");
+      // ⚠ 다시 그리면 이 칩이 문서에서 떨어져 나간다. 그 뒤 document 핸들러가
+      //   event.target.closest(패널)로 판정하면 떨어진 노드라 패널을 못 찾아
+      //   '바깥 클릭'으로 오판해 방금 누른 패널을 닫는다(제보). 전파를 끊는다.
+      chip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (recapPanelFilter === key) return;
+        recapPanelFilter = String(key);
+        renderChatRecapPanel(panel);
+      });
+      bar.append(chip);
+    });
+    return bar;
+  }
+
   function renderChatRecapPanel(panel) {
     // 제목 옆에 총 개수를 표시한다.
     const title = panel.querySelector(
@@ -10622,10 +10851,27 @@
     const head = panel.querySelector(".cheese-search-comment-panel-head");
     panel.replaceChildren();
     if (head) panel.append(head);
-    if (recapPanelItems.length) {
+    // 원래 순번(index)을 들고 다닌다. 재생 위치 추적은 recapPanelItems 기준이라
+    // 걸러낸 뒤 번호를 다시 매기면 현재 항목 표시가 어긋난다.
+    const counts = new Map();
+    recapPanelItems.forEach((item) => {
+      const group = recapItemGroup(item);
+      counts.set(group, (counts.get(group) || 0) + 1);
+    });
+    if (!counts.has(recapPanelFilter)) recapPanelFilter = "all";
+    const filterBar = renderRecapFilterBar(panel, counts);
+    if (filterBar) panel.append(filterBar);
+    const visible = recapPanelItems
+      .map((item, index) => ({ item, index }))
+      .filter(
+        ({ item }) =>
+          recapPanelFilter === "all" ||
+          recapItemGroup(item) === recapPanelFilter,
+      );
+    if (visible.length) {
       const list = document.createElement("ol");
       list.className = "cheese-search-comment-panel-list";
-      recapPanelItems.forEach((item, index) => {
+      visible.forEach(({ item, index }) => {
         const row = document.createElement("li");
         const button = document.createElement("button");
         button.type = "button";
@@ -10648,7 +10894,9 @@
     } else {
       const empty = document.createElement("p");
       empty.className = "cheese-search-comment-panel-status";
-      empty.textContent = "이 영상에서 남긴 채팅이 없습니다.";
+      empty.textContent = recapPanelItems.length
+        ? "이 갈래에 해당하는 기록이 없습니다."
+        : "이 영상에서 남긴 채팅이 없습니다.";
       panel.append(empty);
     }
     panel
@@ -10661,10 +10909,13 @@
         clearChatRecapClickDelayTimer();
         if (chatRecapClickAction === "keep") return;
         if (chatRecapClickAction === "delay") {
-          chatRecapClickDelayTimer = window.setTimeout(() => {
-            chatRecapClickDelayTimer = 0;
-            closeChatRecapPanel();
-          }, clampCommentTsClickDelay(chatRecapClickDelaySec) * 1000);
+          chatRecapClickDelayTimer = window.setTimeout(
+            () => {
+              chatRecapClickDelayTimer = 0;
+              closeChatRecapPanel();
+            },
+            clampCommentTsClickDelay(chatRecapClickDelaySec) * 1000,
+          );
           return;
         }
         closeChatRecapPanel();
@@ -10926,7 +11177,12 @@
   const DONATION_TYPE_LABEL = {
     CHAT: "채팅 후원",
     VIDEO: "영상 후원",
-    MISSION: "미션 후원",
+    // ⚠ 미션은 두 갈래다(실측). 미션을 직접 건 것과, 남이 건 미션에 상금을 보탠 것.
+    //   대기 중에는 donations/missions/my/active 에만 있다가 성공·실패가 확정되면
+    //   purchase/history 로 넘어온다.
+    MISSION_ALONE: "미션 후원",
+    MISSION_PARTICIPATION: "미션 상금 쌓기",
+    MISSION: "미션 후원", // 구버전 기록 호환
     PARTY: "파티 후원",
   };
 
@@ -11037,11 +11293,7 @@
   function createRecapHistoryMatcher(items) {
     const candidates = [];
     for (const item of Array.isArray(items) ? items : []) {
-      if (
-        item?.n ||
-        !(Number(item?.t) > 0) ||
-        item?.d?.src !== "history"
-      ) {
+      if (item?.n || !(Number(item?.t) > 0) || item?.d?.src !== "history") {
         continue;
       }
       candidates.push(item);
@@ -11088,6 +11340,35 @@
   }
 
   // 후원·구독 배지. 일반 채팅이면 null.
+  // 패널 위쪽 토글이 쓰는 갈래다. 배지가 붙는 기준(donationBadgeEl)과 같은 갈래를
+  // 써야 "채팅만"에 후원이 섞이지 않는다.
+  function recapItemGroup(item) {
+    const d = item?.d;
+    if (!d || typeof d !== "object") return "chat";
+    if (d.kind === "DONATION") {
+      const type = String(d.type || "").toUpperCase();
+      if (type === "VIDEO") return "video";
+      if (type.startsWith("MISSION")) return "mission";
+      if (type === "PARTY") return "party";
+      return "donation"; // CHAT 후원과 알 수 없는 종류
+    }
+    if (d.kind === "SUBSCRIPTION") return "subscription";
+    if (d.kind === "GIFT_RECEIVED" || d.kind === "GIFT_SENT") return "gift";
+    return "chat";
+  }
+
+  // 순서는 고정이되, 이 영상에 없는 갈래의 칩은 그리지 않는다.
+  const RECAP_FILTERS = [
+    ["all", "전체"],
+    ["chat", "채팅"],
+    ["donation", "채팅 후원"],
+    ["video", "영상 후원"],
+    ["mission", "미션 후원"],
+    ["party", "파티 후원"],
+    ["subscription", "구독"],
+    ["gift", "구독권"],
+  ];
+
   function donationBadgeEl(d) {
     if (!d || typeof d !== "object") return null;
     const el = document.createElement("b");
@@ -11099,6 +11380,8 @@
         ? `${label} ${Number(d.amount).toLocaleString()}`
         : label;
       if (d.type === "PARTY" && d.partyName) el.title = d.partyName;
+      // 내가 익명으로 한 후원. 배지 문구는 그대로 두고 툴팁으로만 알린다.
+      if (d.anonymous) el.title = "익명으로 후원";
       if (d.videoType)
         el.title = d.videoType === "YOUTUBE" ? "YouTube" : "클립";
     } else if (d.kind === "SUBSCRIPTION") {
@@ -11271,9 +11554,7 @@
           recapSearchChannelCache.get(channelId) ||
           channelId.slice(0, 8),
       ),
-      imageUrl: String(
-        remote?.channelImageUrl || followed?.imageUrl || "",
-      ),
+      imageUrl: String(remote?.channelImageUrl || followed?.imageUrl || ""),
       verifiedMark:
         remote?.verifiedMark === true || followed?.verifiedMark === true,
     };
@@ -11329,9 +11610,9 @@
 
   async function restoreRecapSearchWindowSize(windowEl) {
     try {
-      const saved = (await chrome.storage.local.get(
-        RECAP_SEARCH_WINDOW_SIZE_KEY,
-      ))?.[RECAP_SEARCH_WINDOW_SIZE_KEY];
+      const saved = (
+        await chrome.storage.local.get(RECAP_SEARCH_WINDOW_SIZE_KEY)
+      )?.[RECAP_SEARCH_WINDOW_SIZE_KEY];
       const maxWidth = Math.max(320, innerWidth - 16);
       const maxHeight = Math.max(280, innerHeight - 16);
       const width = Number(saved?.width);
@@ -11372,8 +11653,7 @@
       if (event.button !== 0) return;
       const rect = windowEl.getBoundingClientRect();
       nativeResize =
-        rect.right - event.clientX <= 18 &&
-        rect.bottom - event.clientY <= 18;
+        rect.right - event.clientX <= 18 && rect.bottom - event.clientY <= 18;
     };
     const onPointerUp = () => {
       if (!nativeResize) return;
@@ -11520,10 +11800,7 @@
         values.recapTo &&
         values.recapFrom > values.recapTo
       ) {
-        setValue(
-          changedType === "recapFrom" ? "recapTo" : "recapFrom",
-          "",
-        );
+        setValue(changedType === "recapFrom" ? "recapTo" : "recapFrom", "");
       }
     };
     const applyRange = (preset) => {
@@ -11926,9 +12203,7 @@
     };
     channelToggle.addEventListener("click", () => {
       const nextOpen = channelMenu.hidden;
-      windowEl
-        .querySelectorAll("[data-date-picker]")
-        .forEach(closeDatePicker);
+      windowEl.querySelectorAll("[data-date-picker]").forEach(closeDatePicker);
       channelMenu.hidden = !nextOpen;
       channelToggle.setAttribute("aria-expanded", String(nextOpen));
     });
@@ -11973,10 +12248,7 @@
     document.addEventListener("pointerdown", onChannelOutsidePointerDown);
     const previousCleanup = recapSearchWindowCleanup;
     recapSearchWindowCleanup = () => {
-      document.removeEventListener(
-        "pointerdown",
-        onChannelOutsidePointerDown,
-      );
+      document.removeEventListener("pointerdown", onChannelOutsidePointerDown);
       previousCleanup?.();
     };
     void (async () => {
@@ -12116,9 +12388,7 @@
     windowEl
       .querySelector("[data-recap-search-run]")
       ?.addEventListener("click", () => void runSearch());
-    const keywordInput = windowEl.querySelector(
-      "[data-recap-search-keyword]",
-    );
+    const keywordInput = windowEl.querySelector("[data-recap-search-keyword]");
     let hadKeyword = false;
     keywordInput?.addEventListener("input", () => {
       const hasKeyword = Boolean(String(keywordInput.value || "").trim());
@@ -12435,6 +12705,7 @@
   function closeChatRecapPanel() {
     clearChatRecapClickDelayTimer();
     stopChatRecapPanelTimeTracker();
+    recapPanelFilter = "all";
     document.querySelector(`.${RECAP_PANEL_CLASS}`)?.remove();
     document
       .querySelector(`.${RECAP_BUTTON_CLASS}`)
@@ -14237,9 +14508,7 @@
         for (let depth = 0; candidate && depth < 5; depth += 1) {
           const hasBlockedLabel = Array.from(
             candidate.querySelectorAll("strong"),
-          ).some(
-            (label) => label.textContent?.trim() === "차단한 유저",
-          );
+          ).some((label) => label.textContent?.trim() === "차단한 유저");
           if (hasBlockedLabel && candidate.children.length >= 2) {
             candidate.classList.add(BLOCKED_USER_SEARCH_CARD_CLASS);
             return;
@@ -15141,8 +15410,8 @@
   function supportsChatDocumentPip() {
     return Boolean(
       IS_TOP_FRAME &&
-        window.isSecureContext &&
-        window.documentPictureInPicture?.requestWindow,
+      window.isSecureContext &&
+      window.documentPictureInPicture?.requestWindow,
     );
   }
 
@@ -16493,14 +16762,11 @@
           "#live_player_layout button, #player_layout button, .pzp-pc button",
         ),
       ).find((button) =>
-        /(?:^|\s)(?:넓은|좁은)\s*화면(?:\s|$)/.test(
-          playerControlName(button),
-        ),
+        /(?:^|\s)(?:넓은|좁은)\s*화면(?:\s|$)/.test(playerControlName(button)),
       );
     if (!btn) return false;
     return (
-      btn.hasAttribute("checked") ||
-      /좁은\s*화면/.test(playerControlName(btn))
+      btn.hasAttribute("checked") || /좁은\s*화면/.test(playerControlName(btn))
     );
   }
 
@@ -16551,16 +16817,15 @@
       }
     }
 
-    const button = document.querySelector(
-      ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
-    ) ||
+    const button =
+      document.querySelector(
+        ".pzp-pc__fullscreen-button, .pzp-pc-fullscreen-button, .pzp-fullscreen-button",
+      ) ||
       Array.from(
         document.querySelectorAll(
           "#live_player_layout button, #player_layout button, .pzp-pc button",
         ),
-      ).find((candidate) =>
-        /전체\s*화면/.test(playerControlName(candidate)),
-      );
+      ).find((candidate) => /전체\s*화면/.test(playerControlName(candidate)));
     const label = playerControlName(button);
     return (
       button?.getAttribute("aria-pressed") === "true" ||
@@ -19038,6 +19303,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const addedItems = new Set();
     mutations.forEach((mutation) => {
       if (mutation.type !== "childList" || !mutation.addedNodes.length) return;
+      // ⚠ 우리가 찾는 것은 '원본 ul 의 직계 li' 뿐이다. 변이 대상이 원본 ul 과
+      //   무관한 가지면(전용 목록 등) 그 안을 훑을 이유가 없다. 예전엔 모든 추가
+      //   노드에 querySelectorAll("li") 를 돌려, 전용 목록을 다시 그릴 때마다
+      //   <li> 수백 개를 전수 조사했다(팔로우가 많을수록 이동이 느려짐).
+      //   단, 치지직이 원본 ul 을 통째로 새로 붙이는 배치는 target 이 그 부모이므로
+      //   'ul 을 품은 노드가 추가된 경우'도 함께 허용한다.
+      const insideOriginal =
+        mutation.target === originalUl || originalUl.contains(mutation.target);
+      const bringsOriginal =
+        !insideOriginal &&
+        [...mutation.addedNodes].some(
+          (node) =>
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node === originalUl || node.contains?.(originalUl)),
+        );
+      if (!insideOriginal && !bringsOriginal) return;
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType !== Node.ELEMENT_NODE) return;
         if (node.tagName === "LI" && node.parentElement === originalUl) {
@@ -21171,9 +21452,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       node.matches?.(
         "#cheese-custom-follow, #cheese-custom-follow *, .cheese-cf-header-ctrl, .cheese-cf-header-ctrl *, .cheese-custom-follow-orig-hidden",
       ) ||
-        node.closest?.(
-          "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
-        ),
+      node.closest?.(
+        "#cheese-custom-follow, .cheese-cf-header-ctrl, .cheese-custom-follow-orig-hidden",
+      ),
     );
   }
 
@@ -21195,20 +21476,24 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     sidebarObservedRoot = sidebar;
     sidebarWasExpanded = isSidebarExpanded(sidebar);
     sidebarObserver = new MutationObserver((mutations) => {
-      // React가 새 행/더보기 버튼을 붙인 직후, 브라우저가 다음 프레임을 그리기 전에
-      // 오프라인 행과 자동 펼침 버튼의 시각 상태를 먼저 확정한다. 아래 30ms 작업은 전체
-      // 섹션·헤더·전용 목록 보정을 계속 담당한다.
-      applyFollowOfflineFromMutations(mutations);
-      syncFollowAutoExpandVisualState();
       // 전용 목록의 innerHTML 교체와 헤더 컨트롤 주입은 이 옵저버가 다시 보정할 대상이
       // 아니다. 우리 변이만 들어온 배치는 무시해 갱신 1회가 후속 사이드바 검사를 만드는
       // 자가 발화를 차단한다.
+      // ⚠ 이 판정을 아래 두 작업보다 '먼저' 한다. 예전엔 뒤에 있었는데, 우리 목록을
+      //   다시 그리면 그 <li> 수백 개가 addedNodes 로 들어와 applyFollowOfflineFromMutations
+      //   가 매 배치 전수 조사를 했다(제보: 팔로우 300개 + 그룹에서 탭 이동이 느림).
+      //   우리가 만든 변이는 애초에 훑을 이유가 없다.
       if (
         mutations.length &&
         mutations.every(isCustomFollowOwnedSidebarMutation)
       ) {
         return;
       }
+      // React가 새 행/더보기 버튼을 붙인 직후, 브라우저가 다음 프레임을 그리기 전에
+      // 오프라인 행과 자동 펼침 버튼의 시각 상태를 먼저 확정한다. 아래 30ms 작업은 전체
+      // 섹션·헤더·전용 목록 보정을 계속 담당한다.
+      applyFollowOfflineFromMutations(mutations);
+      syncFollowAutoExpandVisualState();
       // 짧은 디바운스로 묶는다(30ms). subtree:true 라 사이드바 재렌더·라이브 채팅 등으로
       // 초당 수십 번 콜백이 올 수 있는데, 각 함수가 멱등이어도 매 콜백 실행은 낭비다. 한
       // 프레임 남짓 모아 1회만 재적용한다. 접힘↔펼침 전환은 최종 상태만 보면 되므로
@@ -23610,7 +23895,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           strong !== label &&
           Boolean(
             strong.compareDocumentPosition(bar) &
-              Node.DOCUMENT_POSITION_FOLLOWING,
+            Node.DOCUMENT_POSITION_FOLLOWING,
           ),
       )
       .at(-1);
@@ -25492,13 +25777,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
 
     const viewerCount = Number(live.concurrentUserCount) || 0;
+    // ⚠ 카드 구조가 바뀌어 시청자 수는 _badge_ 안 <span> 에 들어 있다. 예전 셀렉터
+    //   (_count_badge_ / _description_)만 보면 배지를 못 찾아 갱신이 통째로 건너뛰고,
+    //   템플릿(첫 카드)의 숫자가 모든 복제 카드에 그대로 남았다(제보: 전부 같은 값).
+    //   현재·과거 구조를 모두 훑고, 마지막엔 'N명' 형태의 텍스트로 찾는다.
     const viewerBadge =
       li.querySelector('div[class*="_count_badge_"] span:not(.blind)') ||
       [
         ...(thumbnail?.querySelectorAll(
-          'div[class*="_description_"] span:not(.blind)',
+          'div[class*="_badge_"] > span:not(.blind), div[class*="_description_"] span:not(.blind)',
         ) || []),
-      ].find((span) => /(?:명|시청)/.test(span.textContent));
+      ].find((span) => /(?:명|시청)/.test(span.textContent)) ||
+      [...li.querySelectorAll("span:not(.blind)")].find((span) =>
+        /^\s*(?:\d[\d,.]*|\d+(?:\.\d+)?[만억])명\s*$/.test(span.textContent),
+      );
     if (viewerBadge) {
       [...viewerBadge.childNodes]
         .filter((node) => node.nodeType === Node.TEXT_NODE)
@@ -30144,7 +30436,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         : "") +
       `</div>` +
       countHtml +
-      `<a class="${c(h?.link, "cheese-cf-link")}" draggable="false" href="${escapeAttribute(href)}" aria-label="${escapeAttribute(item.name)}"></a>` +
+      // 네이티브 링크 클래스를 harvest 했더라도 우리 식별자는 항상 남긴다. 네이티브
+      // 해시 클래스의 absolute 영역이 사이드바 밖으로 커지는 배치에서 자체 경계 규칙을
+      // 적용하지 못하면, 투명 링크가 플레이어 컨트롤 클릭까지 가로챌 수 있다.
+      `<a class="cheese-cf-link ${c(h?.link, "")}" draggable="false" href="${escapeAttribute(href)}" aria-label="${escapeAttribute(item.name)}"></a>` +
       (featureFlags.sbFollowFavEnabled
         ? `<button type="button" class="cheese-follow-fav${fav ? " is-fav" : ""}" data-fav-id="${escapeAttribute(item.channelId)}" aria-pressed="${fav}" aria-label="${fav ? "즐겨찾기 해제" : "즐겨찾기"}" title="${fav ? "즐겨찾기 해제" : "즐겨찾기"}">${LUCIDE_STAR_ICON}</button>`
         : "") +
@@ -30491,7 +30786,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           `</div>`
         : "";
     return (
-      `<div class="cheese-cf-groups${areaCollapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}">` +
+      `<div class="cheese-cf-groups${areaCollapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-star="${escapeAttribute(customFollowStarMode.groups || "hover")}">` +
       `<div class="cheese-cf-group-toolbar">` +
       `<button type="button" class="cheese-cf-groups-toggle" data-cf-groups-toggle aria-expanded="${String(!areaCollapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-groups-chevron") +
@@ -31615,6 +31910,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       featureFlags.sbFollowFavLiveFirst ? 1 : 0,
       isSidebarExpanded() ? 1 : 0,
       featureFlags.sbFollowFavStar ? 1 : 0,
+      customFollowStarMode.favorites,
+      customFollowStarMode.groups,
+      customFollowStarMode.following,
       featureFlags.sbFollowFavStyle ? 1 : 0,
       featureFlags.sbFollowFavBar ? 1 : 0,
       featureFlags.sbFollowGroupEnabled ? 1 : 0,
@@ -31856,7 +32154,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .map((item) => createCustomFollowItemHtml(item, h, expandedNow))
       .join("");
     return (
-      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="${key}">` +
+      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
       `<div class="cheese-cf-section-toolbar">` +
       `<button type="button" data-cf-section-toggle="${key}" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
@@ -37829,8 +38127,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }, 150);
   }
 
-  const NATIVE_BLOCK_PLACEHOLDER_TEXT =
-    "내가 차단한 이용자의 댓글입니다.";
+  const NATIVE_BLOCK_PLACEHOLDER_TEXT = "내가 차단한 이용자의 댓글입니다.";
 
   // 치지직이 직접 렌더한 차단 안내를 클래스 해시 없이 식별해 자체 마커를 붙인다.
   // 기본 프로필 이미지와 정확한 안내 문구가 같은 컨테이너에 있는 경우만 대상으로 삼아
@@ -38317,9 +38614,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     return Boolean(
       row.matches(`.${CHAT_HIDE_CLASSES.chatHideMission}`) ||
-        row.querySelector(
-          `.${CHAT_HIDE_CLASSES.chatHideMission}, button[class*="_mission_button_"]`,
-        ),
+      row.querySelector(
+        `.${CHAT_HIDE_CLASSES.chatHideMission}, button[class*="_mission_button_"]`,
+      ),
     );
   }
 
@@ -38333,9 +38630,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     return Boolean(
       row.hasAttribute(CHAT_HISTORY_MARK) ||
-        row.querySelector(
-          '[class*="_chatting_message_"], [class*="_nickname_"], [class*="_message_"], [class*="_event_"]',
-        ),
+      row.querySelector(
+        '[class*="_chatting_message_"], [class*="_nickname_"], [class*="_message_"], [class*="_event_"]',
+      ),
     );
   }
 
@@ -42933,6 +43230,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       : CUSTOM_FOLLOW_SORT_DEFAULT;
     const favOrder = data?.[CUSTOM_FOLLOW_FAV_ORDER_KEY];
     if (Array.isArray(favOrder)) customFollowFavOrder = favOrder.map(String);
+    for (const [section, key] of Object.entries(CUSTOM_FOLLOW_STAR_KEYS)) {
+      const mode = data?.[key];
+      customFollowStarMode[section] = CUSTOM_FOLLOW_STAR_MODES.includes(mode)
+        ? mode
+        : "hover";
+    }
     customFollowInitial = clampCustomFollowCount(
       data?.[CUSTOM_FOLLOW_INITIAL_KEY],
       CUSTOM_FOLLOW_INITIAL_DEFAULT,
@@ -43003,6 +43306,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CUSTOM_FOLLOW_SORT_KEY,
         CUSTOM_FOLLOW_FAV_SORT_KEY,
         CUSTOM_FOLLOW_FAV_ORDER_KEY,
+        ...Object.values(CUSTOM_FOLLOW_STAR_KEYS),
         CUSTOM_FOLLOW_INITIAL_KEY,
         CUSTOM_FOLLOW_MORE_KEY,
         CUSTOM_FOLLOW_FAV_INITIAL_KEY,
@@ -43164,6 +43468,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         volumePct, // 볼륨 조절 % 표시(전역)
         wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
         wheelVolumeRightClick, // 우클릭+휠일 때만 볼륨 조절
+        wheelVolumeScope, // 휠이 먹히는 범위(video/button/both)
         wheelVolumeStep, // 휠 볼륨 조절 간격(%, 1~10)
         actionOverlay, // 조작(휠 볼륨/시크) 화면 피드백 오버레이(전역)
         actionOverlayPos, // OSD 종류별 표시/위치(볼륨/되감기/앞으로)
@@ -43174,6 +43479,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
         mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
         mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
+        mixerWheelAction, // 믹서 버튼 위 휠 동작(preset/gain)
         seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
         clipEditorArrowStep, // 클립 에디터 seeker 방향키 이동 간격(초, 1~5)
         clipEditorShiftArrowStep, // Shift+방향키 미세 이동 간격(초, 0.1~0.9)
@@ -43229,6 +43535,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     VOLUME_PCT_KEY,
     WHEEL_VOLUME_KEY,
     WHEEL_VOLUME_RIGHTCLICK_KEY,
+    WHEEL_VOLUME_SCOPE_KEY,
     WHEEL_VOLUME_STEP_KEY,
     ACTION_OVERLAY_KEY,
     ACTION_OVERLAY_POS_KEY,
@@ -43238,6 +43545,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     MIXER_GAIN_MIN_KEY,
     MIXER_GAIN_MAX_KEY,
     MIXER_GAIN_STEP_KEY,
+    MIXER_WHEEL_ACTION_KEY,
     SEEK_STEP_KEY,
     CLIP_EDITOR_ARROW_STEP_KEY,
     CLIP_EDITOR_SHIFT_STEP_KEY,
@@ -43549,6 +43857,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
       wheelVolume = data?.[WHEEL_VOLUME_KEY] === true; // 미설정=기본 OFF
       wheelVolumeRightClick = data?.[WHEEL_VOLUME_RIGHTCLICK_KEY] === true; // 기본 OFF
+      wheelVolumeScope = WHEEL_VOLUME_SCOPES.includes(
+        data?.[WHEEL_VOLUME_SCOPE_KEY],
+      )
+        ? data[WHEEL_VOLUME_SCOPE_KEY]
+        : "video";
       wheelVolumeStep = normalizeWheelVolumeStep(data?.[WHEEL_VOLUME_STEP_KEY]);
       actionOverlay = data?.[ACTION_OVERLAY_KEY] !== false; // 미설정=기본 ON
       actionOverlayPos = normalizeActionOverlayPos(
@@ -43566,6 +43879,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       mixerGainMin = normalizeGainMin(data?.[MIXER_GAIN_MIN_KEY]);
       mixerGainMax = normalizeGainMax(data?.[MIXER_GAIN_MAX_KEY]);
       mixerGainStep = normalizeGainStep(data?.[MIXER_GAIN_STEP_KEY]);
+      mixerWheelAction =
+        data?.[MIXER_WHEEL_ACTION_KEY] === "gain" ? "gain" : "preset";
       syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
       const custom = data?.[SYNC_CUSTOM_KEY];
       syncCustomValue = custom && typeof custom === "object" ? custom : null;
@@ -44029,6 +44344,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         wheelVolumeRightClick =
           changes[WHEEL_VOLUME_RIGHTCLICK_KEY].newValue === true;
       }
+      if (changes[WHEEL_VOLUME_SCOPE_KEY]) {
+        const next = changes[WHEEL_VOLUME_SCOPE_KEY].newValue;
+        wheelVolumeScope = WHEEL_VOLUME_SCOPES.includes(next) ? next : "video";
+        broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
+      }
       if (changes[WHEEL_VOLUME_STEP_KEY]) {
         wheelVolumeStep = normalizeWheelVolumeStep(
           changes[WHEEL_VOLUME_STEP_KEY].newValue,
@@ -44076,6 +44396,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         mixerGainStep = normalizeGainStep(
           changes[MIXER_GAIN_STEP_KEY].newValue,
         );
+      }
+      if (changes[MIXER_WHEEL_ACTION_KEY]) {
+        mixerWheelAction =
+          changes[MIXER_WHEEL_ACTION_KEY].newValue === "gain"
+            ? "gain"
+            : "preset";
+        broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
       }
       if (changes[SEEK_STEP_KEY]) {
         seekStepValue = normalizeSeekStep(changes[SEEK_STEP_KEY].newValue);
@@ -44518,6 +44845,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[CHAT_GRAPH_COLORS_KEY]) {
         applyChatGraphColors(changes[CHAT_GRAPH_COLORS_KEY].newValue);
       }
+      if (changes[CHAT_GRAPH_AUTO_KEY]) {
+        chatGraphAuto = changes[CHAT_GRAPH_AUTO_KEY].newValue === true;
+        chatGraphAutoTriedVideo = ""; // 방금 켰으면 지금 영상부터 적용
+      }
+      if (changes[CHAT_GRAPH_AUTO_COLLECT_KEY]) {
+        chatGraphAutoCollect =
+          changes[CHAT_GRAPH_AUTO_COLLECT_KEY].newValue === true;
+        chatGraphAutoTriedVideo = "";
+      }
       if (changes[CHAT_GRAPH_ENABLED_KEY]) {
         chatGraphOn = changes[CHAT_GRAPH_ENABLED_KEY].newValue === true;
         if (!chatGraphOn) {
@@ -44639,9 +44975,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[CUSTOM_FOLLOW_GROUP_ORDER_KEY] ||
         changes[CUSTOM_FOLLOW_GROUP_TAG_HIDE_OFFLINE_KEY] ||
         changes[CUSTOM_FOLLOW_GROUP_EXCLUDED_TAGS_KEY] ||
-        changes[CUSTOM_FOLLOW_GROUP_OFFLINE_OVERRIDES_KEY]
+        changes[CUSTOM_FOLLOW_GROUP_OFFLINE_OVERRIDES_KEY] ||
+        Object.values(CUSTOM_FOLLOW_STAR_KEYS).some((key) => changes[key])
       ) {
         applyCustomFollowSettings({
+          ...Object.fromEntries(
+            Object.entries(CUSTOM_FOLLOW_STAR_KEYS).map(([section, key]) => [
+              key,
+              changes[key]?.newValue ?? customFollowStarMode[section],
+            ]),
+          ),
           [CUSTOM_FOLLOW_SORT_KEY]:
             changes[CUSTOM_FOLLOW_SORT_KEY]?.newValue ?? customFollowSort,
           [CUSTOM_FOLLOW_FAV_SORT_KEY]:
@@ -45018,10 +45361,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         PIP_DISABLE_KEY,
         CHAT_GRAPH_ENABLED_KEY,
         CHAT_GRAPH_COLORS_KEY,
+        CHAT_GRAPH_AUTO_KEY,
+        CHAT_GRAPH_AUTO_COLLECT_KEY,
       ]);
       followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] !== false;
       pipDisableOn = data?.[PIP_DISABLE_KEY] === true;
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
+      chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
+      chatGraphAutoCollect = data?.[CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
     } catch {}
   })();
@@ -45095,6 +45442,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyPipDisable(); // PIP 전환 끄기(옵션)
     resetChatGraphIfVideoChanged(); // 다시보기가 바뀌면 그래프 초기화
     ensureChatGraphButton(); // 채팅 활성도 버튼(옵션, 기본 OFF)
+    void maybeAutoShowChatGraph(); // 자동 표시(옵션) — 영상당 1회만 시도
 
     cleanupStudioMakeClipViewIfInactive();
 
@@ -45550,8 +45898,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     const controlsPassed = Boolean(
       searchList &&
-        isVisible(searchList) &&
-        controls?.getBoundingClientRect().bottom < scrollBoundary + 16,
+      isVisible(searchList) &&
+      controls?.getBoundingClientRect().bottom < scrollBoundary + 16,
     );
     const scrollTop = getMainPageScrollTop();
     button.hidden =
