@@ -1850,6 +1850,13 @@ body > .clr-picker .clr-preview {
   min-width: 0;
 }
 
+.settings-osd-row:has([data-chat-history-limit]) {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 84px auto;
+  gap: 5px;
+  width: 100%;
+}
+
 /* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본
    동작(hover/focus 시에만 표시)에 맡기고 강제 표시하지 않는다(다른 설정 인풋과 동일). */
 .settings-osd-row .settings-custom-input {
