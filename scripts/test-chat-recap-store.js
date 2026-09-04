@@ -168,6 +168,65 @@ async function appendRows(rows) {
   assert.equal(preservedDonation.items[0].n, undefined);
   assert.equal(preservedDonation.items[0].d.amount, 1000);
 
+  // 방장·매니저의 제목 변경 명령은 같은 제목의 성공 안내까지 확인된 경우만
+  // 저장한다. API 페이지가 역순으로 들어와도 재생 위치순으로 판정해야 한다.
+  const titleTracker = api.createVodTitleChangeTracker();
+  titleTracker.add({
+    content: "방송 제목이 변경되었습니다: [배그] 오늘도 치킨",
+    playerMessageTime: 105_000,
+    messageTime: 1_105_000,
+  });
+  titleTracker.add({
+    content: "!방제변경 [배그]  오늘도 치킨",
+    playerMessageTime: 100_000,
+    messageTime: 1_100_000,
+    profile: JSON.stringify({ userRoleCode: "streaming_channel_manager" }),
+  });
+  titleTracker.add({
+    content: "!제목변경 실패할 제목",
+    playerMessageTime: 200_000,
+    messageTime: 1_200_000,
+    profile: { userRoleCode: "streamer" },
+  });
+  titleTracker.add({
+    content: "방송 제목이 변경되었습니다: 실패할 제목",
+    playerMessageTime: 261_001,
+    messageTime: 1_261_001,
+  });
+  titleTracker.add({
+    content: "!방송제목변경 일반 시청자 제목",
+    playerMessageTime: 300_000,
+    messageTime: 1_300_000,
+    profile: { userRoleCode: "common_user" },
+  });
+  titleTracker.add({
+    content: "방송 제목이 변경되었습니다: 일반 시청자 제목",
+    playerMessageTime: 301_000,
+    messageTime: 1_301_000,
+  });
+  titleTracker.add({
+    content: "방송 제목이 변경되었습니다: 같은 시각 제목",
+    playerMessageTime: 400_000,
+  });
+  titleTracker.add({
+    content: "!방재변경 같은 시각 제목",
+    playerMessageTime: 400_000,
+    profile: { userRoleCode: "streamer" },
+  });
+  assert.deepEqual(titleTracker.finish(), [
+    { v: 105, t: 1_105_000, title: "[배그] 오늘도 치킨" },
+    { v: 400, t: 0, title: "같은 시각 제목" },
+  ]);
+
+  await api.saveVodTitleChanges(storage, "123", titleTracker.finish());
+  assert.deepEqual(await api.loadVodTitleChanges(storage, "123"), {
+    complete: true,
+    items: [
+      { v: 105, t: 1_105_000, title: "[배그] 오늘도 치킨" },
+      { v: 400, t: 0, title: "같은 시각 제목" },
+    ],
+  });
+
   console.log("chatRecapStore tests passed");
 })().catch((error) => {
   console.error(error);

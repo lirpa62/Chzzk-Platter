@@ -27,6 +27,8 @@
     "cheeseChatRecap",
     "cheeseChatRecapRetentionDays",
     "cheeseChatRecapPlayerButtonHidden",
+    "cheeseChatHistory",
+    "cheeseChatHistoryLimit",
     "cheeseChatRecapChannelColors",
     "cheeseChatRecapChannelColorsCustom",
     "cheeseChatRecapChannelTrendCumulative",
@@ -85,12 +87,19 @@
     "cheeseLogPowerBarEarnedOnly",
     "cheeseLogPowerLineCumulative",
     "cheeseLogPowerChartColors",
+    "cheeseLogPowerChartColorsCustom",
+    "cheeseLogPowerStatsColorsCollapsed",
     "cheeseClipVaultAccountIds",
     "cheeseClipVaultActiveAccount",
     "cheeseClipVaultLimit",
     "cheeseClipVaultSort",
     "cheeseClipVaultGroupByStreamer",
     "cheeseClipVaultGroupByDate",
+    "cheeseVideoVaultAccountIds",
+    "cheeseVideoVaultActiveAccount",
+    "cheeseVideoVaultSort",
+    "cheeseVideoVaultGroupByStreamer",
+    "cheeseVideoVaultGroupByDate",
     "cheeseCardLivePreview",
     "cheeseCardLivePreviewPosition",
     "cheeseCardPreviewAudio",
@@ -130,6 +139,8 @@
     "cheesePopupPlayerSizeW",
     "cheesePopupPlayerSizeH",
     "cheesePopupPlayerWide",
+    "cheesePopupPlayerStartWithoutChat",
+    "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
@@ -268,6 +279,7 @@
     "cheeseCommentTimestampClickDelay",
     "cheeseChatRecapClickAction",
     "cheeseChatRecapClickDelay",
+    "cheeseRecapSearchWindowSize",
     "cheeseGainPct",
     "cheeseWideScreenAuto",
     "audioMixer:presets",
@@ -3174,6 +3186,87 @@
     }
   });
 
+  // ── 채팅 이어보기(방송별 session 버퍼) ───────────────────────────────────
+  const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
+  const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
+  const CHAT_HISTORY_LIMIT_DEFAULT = 200;
+  const CHAT_HISTORY_LIMIT_MIN = 50;
+  const CHAT_HISTORY_LIMIT_MAX = 500;
+  const chatHistoryInput = document.querySelector("[data-chat-history]");
+  const chatHistoryRange = document.querySelector(
+    "[data-chat-history-limit]",
+  );
+  const chatHistoryNumber = document.querySelector(
+    "[data-chat-history-limit-num]",
+  );
+  const chatHistoryReset = document.querySelector(
+    "[data-chat-history-limit-reset]",
+  );
+
+  function normalizeChatHistoryLimit(value) {
+    if (value == null || value === "") return CHAT_HISTORY_LIMIT_DEFAULT;
+    const number = Math.round(Number(value));
+    if (!Number.isFinite(number)) return CHAT_HISTORY_LIMIT_DEFAULT;
+    return Math.min(
+      CHAT_HISTORY_LIMIT_MAX,
+      Math.max(CHAT_HISTORY_LIMIT_MIN, number),
+    );
+  }
+
+  function reflectChatHistoryLimit(value) {
+    const normalized = normalizeChatHistoryLimit(value);
+    if (chatHistoryRange) chatHistoryRange.value = String(normalized);
+    if (chatHistoryNumber) chatHistoryNumber.value = String(normalized);
+  }
+
+  function reflectChatHistoryAvailability() {
+    const disabled = chatHistoryInput?.checked !== true;
+    [chatHistoryRange, chatHistoryNumber, chatHistoryReset].forEach(
+      (element) => {
+        if (element) element.disabled = disabled;
+      },
+    );
+    document
+      .querySelector("[data-chat-history-limit-item]")
+      ?.classList.toggle("is-locked", disabled);
+  }
+
+  function saveChatHistoryLimit(value) {
+    const normalized = normalizeChatHistoryLimit(value);
+    reflectChatHistoryLimit(normalized);
+    cachedStorageSet({ [CHAT_HISTORY_LIMIT_KEY]: normalized });
+  }
+
+  chatHistoryInput?.addEventListener("change", () => {
+    cachedStorageSet({
+      [CHAT_HISTORY_ENABLED_KEY]: chatHistoryInput.checked,
+    });
+    reflectChatHistoryAvailability();
+  });
+  chatHistoryRange?.addEventListener("input", () =>
+    reflectChatHistoryLimit(chatHistoryRange.value),
+  );
+  chatHistoryRange?.addEventListener("change", () =>
+    saveChatHistoryLimit(chatHistoryRange.value),
+  );
+  chatHistoryNumber?.addEventListener("change", () =>
+    saveChatHistoryLimit(chatHistoryNumber.value),
+  );
+  chatHistoryReset?.addEventListener("click", () =>
+    saveChatHistoryLimit(CHAT_HISTORY_LIMIT_DEFAULT),
+  );
+  void (async () => {
+    const data = await cachedStorageGet([
+      CHAT_HISTORY_ENABLED_KEY,
+      CHAT_HISTORY_LIMIT_KEY,
+    ]);
+    if (chatHistoryInput) {
+      chatHistoryInput.checked = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
+    }
+    reflectChatHistoryLimit(data?.[CHAT_HISTORY_LIMIT_KEY]);
+    reflectChatHistoryAvailability();
+  })();
+
   // ── 비디오 필터 항상 켜기(전역) ───────────────────────────────────────────
   // 체크=항상 켜기(채널 진입 시 자동 활성화). 채널별로 직접 끄면 그 채널은 유지.
   const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
@@ -3298,6 +3391,9 @@
   const CLIP_VAULT_ACCOUNT_KEY_PREFIX = "cheeseClipVault:";
   const CLIP_VAULT_ACCOUNT_IDS_KEY = "cheeseClipVaultAccountIds";
   const CLIP_VAULT_ACTIVE_ACCOUNT_KEY = "cheeseClipVaultActiveAccount";
+  const VIDEO_VAULT_ACCOUNT_KEY_PREFIX = "cheeseVideoVault:";
+  const VIDEO_VAULT_ACCOUNT_IDS_KEY = "cheeseVideoVaultAccountIds";
+  const VIDEO_VAULT_ACTIVE_ACCOUNT_KEY = "cheeseVideoVaultActiveAccount";
   const CV_LIMIT_DEFAULT = 500;
   const CV_LIMIT_MIN = 50;
   const CV_LIMIT_MAX = 100000;
@@ -3685,7 +3781,35 @@
 
   // ── 휠로 볼륨 조절(전역, 기본 OFF) ────────────────────────────────────────
   const WHEEL_VOLUME_KEY = "cheeseWheelVolume";
+  const WHEEL_VOLUME_RIGHTCLICK_KEY = "cheeseWheelVolumeRightClick";
   const wheelVolumeInput = document.querySelector("[data-wheel-volume]");
+  const wheelVolumeRcInput = document.querySelector(
+    "[data-wheel-volume-rightclick]",
+  );
+  const wheelVolumeScopeGroup = document.querySelector(
+    "[data-wheel-volume-scope]",
+  );
+
+  function reflectWheelVolumeDependencies() {
+    const disabled = !wheelVolumeInput?.checked;
+    if (wheelVolumeRcInput) {
+      wheelVolumeRcInput.disabled = disabled;
+      wheelVolumeRcInput
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", disabled);
+    }
+    if (wheelVolumeScopeGroup) {
+      wheelVolumeScopeGroup.setAttribute("aria-disabled", String(disabled));
+      wheelVolumeScopeGroup
+        .closest(".settings-item")
+        ?.classList.toggle("is-locked", disabled);
+      wheelVolumeScopeGroup.querySelectorAll("button").forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+  }
+
+  reflectWheelVolumeDependencies();
   if (wheelVolumeInput) {
     (async () => {
       let on = false; // 기본 꺼짐
@@ -3694,18 +3818,16 @@
         on = d?.[WHEEL_VOLUME_KEY] === true;
       } catch {}
       wheelVolumeInput.checked = on;
+      reflectWheelVolumeDependencies();
     })();
     wheelVolumeInput.addEventListener("change", () => {
+      reflectWheelVolumeDependencies();
       try {
         cachedStorageSet({ [WHEEL_VOLUME_KEY]: wheelVolumeInput.checked });
       } catch {}
     });
   }
   // 우클릭 중에만 휠 볼륨 조절(기본 OFF).
-  const WHEEL_VOLUME_RIGHTCLICK_KEY = "cheeseWheelVolumeRightClick";
-  const wheelVolumeRcInput = document.querySelector(
-    "[data-wheel-volume-rightclick]",
-  );
   if (wheelVolumeRcInput) {
     (async () => {
       let on = false;
@@ -3726,7 +3848,7 @@
   // 휠이 먹히는 곳(영상 위/버튼 위/둘 다). bindStringSegmented 는 함수 선언이라
   // 아래에 정의돼 있어도 호이스팅되어 여기서 쓸 수 있다.
   bindStringSegmented(
-    document.querySelector("[data-wheel-volume-scope]"),
+    wheelVolumeScopeGroup,
     "wheel-volume-scope-value",
     "cheeseWheelVolumeScope",
     ["video", "button", "both"],
@@ -4017,11 +4139,39 @@
     commitPx(hInput, H_KEY);
   }
 
+  const popupPlayerStartWithoutChatInput = document.querySelector(
+    "[data-popup-player-start-without-chat]",
+  );
+  const popupPlayerStartWithoutChat16x9Input = document.querySelector(
+    "[data-popup-player-start-without-chat-16-9]",
+  );
+
+  function reflectPopupPlayerStartWithoutChatDependencies() {
+    const disabled = !popupPlayerStartWithoutChatInput?.checked;
+    if (!popupPlayerStartWithoutChat16x9Input) return;
+    popupPlayerStartWithoutChat16x9Input.disabled = disabled;
+    popupPlayerStartWithoutChat16x9Input
+      .closest(".settings-item")
+      ?.classList.toggle("is-locked", disabled);
+  }
+
+  reflectPopupPlayerStartWithoutChatDependencies();
+
   // 팝업 플레이어의 나머지 체크박스들. [셀렉터, 키, 기본 ON 여부].
   // 좁은 창을 고려해 자주 쓰는 버튼만 기본 ON, 나머지는 기본 OFF.
   [
     ["[data-player-disable-hidden]", "cheesePlayerDisableHidden", true],
     ["[data-popup-player-wide]", "cheesePopupPlayerWide", true],
+    [
+      "[data-popup-player-start-without-chat]",
+      "cheesePopupPlayerStartWithoutChat",
+      false,
+    ],
+    [
+      "[data-popup-player-start-without-chat-16-9]",
+      "cheesePopupPlayerStartWithoutChat16x9",
+      false,
+    ],
     ["[data-popup-player-scroll]", "cheesePopupPlayerScroll", false],
     ["[data-popup-player-btn-mixer]", "cheesePopupPlayerBtnMixer", true],
     ["[data-popup-player-btn-filter]", "cheesePopupPlayerBtnFilter", true],
@@ -4051,8 +4201,14 @@
         on = defaultOn ? d?.[key] !== false : d?.[key] === true;
       } catch {}
       input.checked = on;
+      if (input === popupPlayerStartWithoutChatInput) {
+        reflectPopupPlayerStartWithoutChatDependencies();
+      }
     })();
     input.addEventListener("change", () => {
+      if (input === popupPlayerStartWithoutChatInput) {
+        reflectPopupPlayerStartWithoutChatDependencies();
+      }
       try {
         cachedStorageSet({ [key]: input.checked });
       } catch {}
@@ -8072,7 +8228,7 @@
     "cheeseChatRecapPodiumAchievements",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
-    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32})$/i;
+    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32}|cheeseVodTitleChangesV1:\d+)$/i;
   const isSettingsFullDataKey = (key) =>
     SETTINGS_FULL_DATA_KEYS.has(key) ||
     CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
@@ -8087,6 +8243,8 @@
     // 메타데이터다. 보관함 본문은 clipVaultAccounts로 따로 전송한다.
     CLIP_VAULT_ACCOUNT_IDS_KEY,
     CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
+    VIDEO_VAULT_ACCOUNT_IDS_KEY,
+    VIDEO_VAULT_ACTIVE_ACCOUNT_KEY,
   ].forEach((key) => SETTINGS_TRANSFER_KEYS.delete(key));
   const settingsExportButton = document.querySelector("[data-settings-export]");
   const settingsFullExportButton = document.querySelector(
@@ -8256,6 +8414,34 @@
         });
       return colors;
     }
+    if (key === "cheeseLogPowerChartColorsCustom") {
+      if (!Array.isArray(value)) return undefined;
+      return [
+        ...new Set(
+          value
+            .slice(0, 1000)
+            .map((name) => String(name || "").trim().slice(0, 100))
+            .filter(Boolean),
+        ),
+      ];
+    }
+    if (key === "cheeseLogPowerStatsColorsCollapsed") {
+      return typeof value === "boolean" ? value : undefined;
+    }
+    if (key === "cheeseRecapSearchWindowSize") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      const width = Number(value.width);
+      const height = Number(value.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return undefined;
+      }
+      return {
+        width: Math.min(4000, Math.max(320, Math.round(width))),
+        height: Math.min(4000, Math.max(280, Math.round(height))),
+      };
+    }
     const cloned = cloneSafeTransferValue(value);
     if (cloned === undefined) return undefined;
     const current = storageCacheData?.[key];
@@ -8348,6 +8534,140 @@
     return accounts;
   }
 
+  function normalizeTransferVideoVault(value) {
+    if (!Array.isArray(value)) return null;
+    const output = [];
+    const seen = new Set();
+    value.forEach((raw) => {
+      const videoNo = String(raw?.videoNo || "").trim();
+      if (!/^\d+$/.test(videoNo) || seen.has(videoNo)) return;
+      seen.add(videoNo);
+      const rawChannelName = String(raw?.channelName || "")
+        .trim()
+        .slice(0, 100);
+      const channelName = /^(?:채널 정보 없음|알 수 없는 채널)$/.test(
+        rawChannelName,
+      )
+        ? ""
+        : rawChannelName;
+      const adultKnown =
+        raw?.adultKnown === true || typeof raw?.adult === "boolean";
+      const duration = String(raw?.duration || "").trim().slice(0, 30);
+      const durationParts = duration.split(":").map(Number);
+      const parsedDuration =
+        durationParts.length >= 2 &&
+        durationParts.length <= 3 &&
+        durationParts.every((part) => Number.isFinite(part) && part >= 0)
+          ? durationParts.reduce((total, part) => total * 60 + part, 0)
+          : 0;
+      const tags = [
+        ...new Set(
+          (Array.isArray(raw?.tags) ? raw.tags : [])
+            .map((tag) => String(tag || "").trim())
+            .filter(Boolean),
+        ),
+      ]
+        .slice(0, 20)
+        .map((tag) => tag.slice(0, 50));
+      output.push({
+        videoNo,
+        title: String(raw?.title || "").trim().slice(0, 300),
+        thumb: String(raw?.thumb || "").trim().slice(0, 1500),
+        channelName,
+        channelId: normalizeCvAccountId(raw?.channelId),
+        channelImageUrl: String(raw?.channelImageUrl || "")
+          .trim()
+          .slice(0, 1500),
+        verifiedMark: raw?.verifiedMark === true,
+        duration,
+        durationSeconds: Math.max(
+          0,
+          Number(raw?.durationSeconds) || parsedDuration,
+        ),
+        readCount: Math.max(0, Number(raw?.readCount) || 0),
+        livePv: Math.max(0, Number(raw?.livePv) || 0),
+        publishDateAt: Math.max(0, Number(raw?.publishDateAt) || 0),
+        badgeLabel: String(raw?.badgeLabel || "다시보기")
+          .trim()
+          .slice(0, 30),
+        categoryType: String(raw?.categoryType || "").trim().slice(0, 30),
+        videoCategory: String(raw?.videoCategory || "")
+          .trim()
+          .slice(0, 100),
+        videoCategoryValue: String(raw?.videoCategoryValue || "")
+          .trim()
+          .slice(0, 100),
+        tags,
+        watchTimeline:
+          raw?.watchTimeline == null
+            ? null
+            : Math.max(0, Number(raw.watchTimeline) || 0),
+        adult: raw?.adult === true,
+        adultKnown,
+        metaKnown:
+          raw?.metaKnown === true && Boolean(channelName) && adultKnown,
+        detailFetchedAt: Math.max(0, Number(raw?.detailFetchedAt) || 0),
+        at: Number(raw?.at) || Date.now(),
+      });
+    });
+    output.sort((a, b) => b.at - a.at);
+    return output.slice(0, 5000);
+  }
+
+  function normalizeTransferVideoVaultAccounts(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const accounts = {};
+    Object.entries(value).forEach(([rawAccountId, vault]) => {
+      const accountId = normalizeCvAccountId(rawAccountId);
+      const normalized = normalizeTransferVideoVault(vault);
+      if (accountId && normalized) accounts[accountId] = normalized;
+    });
+    return accounts;
+  }
+
+  async function readTransferVideoVaultAccounts(snapshot = null) {
+    const metadata =
+      snapshot ||
+      (await chrome.storage.local.get([
+        VIDEO_VAULT_ACCOUNT_IDS_KEY,
+        VIDEO_VAULT_ACTIVE_ACCOUNT_KEY,
+      ]));
+    const ids = new Set(
+      (Array.isArray(metadata?.[VIDEO_VAULT_ACCOUNT_IDS_KEY])
+        ? metadata[VIDEO_VAULT_ACCOUNT_IDS_KEY]
+        : []
+      )
+        .map(normalizeCvAccountId)
+        .filter(Boolean),
+    );
+    const active = normalizeCvAccountId(
+      metadata?.[VIDEO_VAULT_ACTIVE_ACCOUNT_KEY],
+    );
+    if (active) ids.add(active);
+    if (snapshot) {
+      Object.keys(snapshot).forEach((key) => {
+        if (!key.startsWith(VIDEO_VAULT_ACCOUNT_KEY_PREFIX)) return;
+        const accountId = normalizeCvAccountId(
+          key.slice(VIDEO_VAULT_ACCOUNT_KEY_PREFIX.length),
+        );
+        if (accountId) ids.add(accountId);
+      });
+    }
+    if (!ids.size) return {};
+    const keys = [...ids].map(
+      (accountId) => `${VIDEO_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`,
+    );
+    const stored = snapshot || (await chrome.storage.local.get(keys));
+    const accounts = {};
+    ids.forEach((accountId) => {
+      const normalized = normalizeTransferVideoVault(
+        stored?.[`${VIDEO_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`],
+      );
+      if (normalized) accounts[accountId] = normalized;
+    });
+    return accounts;
+  }
+
   function collectTransferMediaSettings(snapshot) {
     const mediaSettings = {};
     Object.entries(snapshot || {}).forEach(([key, value]) => {
@@ -8393,6 +8713,7 @@
         payload.userData = {
           storage,
           clipVaultAccounts: await readTransferClipVaultAccounts(snapshot),
+          videoVaultAccounts: await readTransferVideoVaultAccounts(snapshot),
           mediaSettings: collectTransferMediaSettings(snapshot),
         };
       }
@@ -8512,9 +8833,13 @@
       const clipVaultAccounts = normalizeTransferClipVaultAccounts(
         payload?.userData?.clipVaultAccounts || payload.clipVaultAccounts,
       );
+      const videoVaultAccounts = normalizeTransferVideoVaultAccounts(
+        payload?.userData?.videoVaultAccounts || payload.videoVaultAccounts,
+      );
       if (
         !Object.keys(imported).length &&
-        !Object.keys(clipVaultAccounts).length
+        !Object.keys(clipVaultAccounts).length &&
+        !Object.keys(videoVaultAccounts).length
       ) {
         throw new Error("empty-settings");
       }
@@ -8536,6 +8861,25 @@
           imported[`${CLIP_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`] = vault;
         });
         imported[CLIP_VAULT_ACCOUNT_IDS_KEY] = [...accountIds];
+      }
+
+      if (Object.keys(videoVaultAccounts).length) {
+        const existingMetadata = await chrome.storage.local.get(
+          VIDEO_VAULT_ACCOUNT_IDS_KEY,
+        );
+        const accountIds = new Set(
+          (Array.isArray(existingMetadata?.[VIDEO_VAULT_ACCOUNT_IDS_KEY])
+            ? existingMetadata[VIDEO_VAULT_ACCOUNT_IDS_KEY]
+            : []
+          )
+            .map(normalizeCvAccountId)
+            .filter(Boolean),
+        );
+        Object.entries(videoVaultAccounts).forEach(([accountId, vault]) => {
+          accountIds.add(accountId);
+          imported[`${VIDEO_VAULT_ACCOUNT_KEY_PREFIX}${accountId}`] = vault;
+        });
+        imported[VIDEO_VAULT_ACCOUNT_IDS_KEY] = [...accountIds];
       }
 
       // ⚠ 통나무파워 내역은 background 가 단일 작성자다. 여기서 통째로 덮으면

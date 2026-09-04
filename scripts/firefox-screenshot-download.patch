@@ -1,6 +1,6 @@
 --- a/src/background.js
 +++ b/src/background.js
-@@ -4455,7 +4455,43 @@
+@@ -5839,7 +5839,43 @@
      adult: p?.adult === true || d?.adult === true,
      // 상세 정보 요청이 성공했다면 adult 필드가 생략된 응답도 일반 클립으로 취급한다.
      adultKnown: true,
@@ -43,8 +43,8 @@
 +  }
  }
  
- chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-@@ -4690,46 +4726,75 @@
+ // 채팅 리캡은 채널·월별 키로 나뉜다. storage API에는 prefix 조회가 없어 리캡
+@@ -6467,37 +6503,24 @@
    if (message.type === "CHEESE_SCREENSHOT_SAVE") {
      const { url, filename } = message;
      const saveAs = message.saveAs === true; // 기본 false=바로 저장
@@ -63,7 +63,13 @@
      try {
 -      chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
 -        if (chrome.runtime.lastError || downloadId == null) {
--          sendResponse({ ok: false, reason: "start-failed" });
+-          // ⚠ 크롬이 준 실제 사유를 버리지 않는다. 파일명에 못 쓰는 문자가 있으면
+-          //   여기서 "Invalid filename" 이 온다(제보: 특정 방송에서만 저장 실패).
+-          sendResponse({
+-            ok: false,
+-            reason: "start-failed",
+-            detail: String(chrome.runtime.lastError?.message || ""),
+-          });
 -          return;
 -        }
 +      const waitForResult = (downloadId) => {
@@ -78,10 +84,14 @@
 +          if (state === "complete") {
              finish({ ok: true, saved: true });
 -          } else if (s === "interrupted") {
+-            // ⚠ 중단 사유를 구분한다. USER_CANCELED 만 '취소'고, 디스크 부족·권한
+-            //   거부 등은 진짜 실패다. 예전엔 전부 '저장을 취소했어요'로 뭉뚱그려
+-            //   사용자가 원인을 알 수 없었다.
 +          } else if (state === "interrupted") {
-             finish({ ok: true, saved: false }); // 사용자가 취소 등
-           }
-         };
+             const why = String(delta.error?.current || "");
+             if (why && why !== "USER_CANCELED" && why !== "USER_SHUTDOWN") {
+               finish({ ok: false, reason: "interrupted", detail: why });
+@@ -6509,18 +6532,51 @@
          const finish = (result) => {
            if (settled) return;
            settled = true;
@@ -98,6 +108,9 @@
          // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
          const timeoutMs = saveAs ? 300000 : 15000;
 -        setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
+-      });
+-    } catch {
+-      sendResponse({ ok: false, reason: "exception" });
 +        timeoutId = setTimeout(
 +          () => finish({ ok: true, saved: true }),
 +          timeoutMs,
@@ -120,7 +133,7 @@
 +            sendResponse({
 +              ok: false,
 +              reason: "start-failed",
-+              error: String(error?.message || error || ""),
++              detail: String(error?.message || error || ""),
 +            });
 +          },
 +        );
@@ -131,16 +144,14 @@
 +      sendResponse({
 +        ok: false,
 +        reason: "exception",
-+        error: String(error?.message || error || ""),
-       });
--    } catch {
--      sendResponse({ ok: false, reason: "exception" });
++        detail: String(error?.message || error || ""),
++      });
      }
      return true; // 비동기 응답
    }
 --- a/src/content.js
 +++ b/src/content.js
-@@ -41916,46 +41916,79 @@
+@@ -49955,58 +49955,91 @@
      }
    }
  
@@ -198,7 +209,7 @@
 +            console.warn("[치즈] Firefox 스크린샷 저장 API 실패", {
 +              runtimeError: runtimeError?.message || "",
 +              reason: resp?.reason || "",
-+              error: resp?.error || "",
++              detail: resp?.detail || "",
 +            });
 +            const fallbackSaved = downloadScreenshotWithAnchor(
 +              data.dataURL,
@@ -209,6 +220,14 @@
 +              reqId,
 +              ok: fallbackSaved,
 +              saved: fallbackSaved,
++              reason: fallbackSaved
++                ? ""
++                : runtimeError
++                  ? "disconnected"
++                  : String(resp?.reason || "start-failed"),
++              detail: runtimeError
++                ? String(runtimeError.message || "")
++                : String(resp?.detail || ""),
 +            });
 +            return;
 +          }
@@ -217,12 +236,24 @@
              reqId,
              ok,
 -            saved: ok ? resp.saved !== false : false,
+-            // 실패 사유를 그대로 넘긴다. 예전엔 ok 만 보고 버려서 '저장하지
+-            // 못했어요' 하나에 원인 6가지가 뭉쳐 있었다(제보: 왜 실패했는지
+-            // 알 수 없음).
+-            reason: chrome.runtime.lastError
+-              ? "disconnected"
+-              : String(resp?.reason || ""),
+-            detail: chrome.runtime.lastError
+-              ? String(chrome.runtime.lastError.message || "")
+-              : String(resp?.detail || ""),
 +            saved: resp.saved !== false,
++            reason: String(resp?.reason || ""),
++            detail: String(resp?.detail || ""),
            });
          },
        );
-     } catch {
+-    } catch (err) {
 -      replyAndCleanup({
++    } catch (error) {
 +      const fallbackSaved = downloadScreenshotWithAnchor(
 +        data.dataURL,
 +        data.filename,
@@ -232,8 +263,13 @@
          reqId,
 -        ok: false,
 -        saved: false,
+-        // 확장을 새로고침·업데이트한 뒤 페이지를 그대로 두면 여기로 온다.
+-        reason: "disconnected",
+-        detail: String(err?.message || ""),
 +        ok: fallbackSaved,
 +        saved: fallbackSaved,
++        reason: fallbackSaved ? "" : "disconnected",
++        detail: fallbackSaved ? "" : String(error?.message || ""),
        });
      }
    });

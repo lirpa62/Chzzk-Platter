@@ -330,7 +330,7 @@
             </div>
           </div>
         </label>
-        <label class="popup-field">
+        <div class="popup-field">
           <span>시작일</span>
           <div class="popup-date-picker" data-date-picker="dateFrom">
             <input id="dateFromInput" type="hidden" />
@@ -412,6 +412,70 @@
                 ><span>목</span><span>금</span><span>토</span>
               </div>
               <div class="popup-calendar-grid" data-calendar-grid></div>
+              <div class="popup-calendar-time" data-clip-time-row hidden>
+                <span class="popup-calendar-time-label">시간</span>
+                <div
+                  class="popup-time-picker"
+                  data-time-picker="dateFrom"
+                  role="group"
+                  aria-label="시작 시간"
+                >
+                  <span class="popup-time-period" role="group" aria-label="시작 오전 오후">
+                    <button type="button" class="is-selected" data-time-period="am" aria-pressed="true" disabled>오전</button>
+                    <button type="button" data-time-period="pm" aria-pressed="false" disabled>오후</button>
+                  </span>
+                  <div class="popup-time-segment" data-time-segment="hour">
+                    <input
+                      type="text"
+                      value="12"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      maxlength="2"
+                      autocomplete="off"
+                      role="spinbutton"
+                      aria-valuemin="1"
+                      aria-valuemax="12"
+                      aria-valuenow="12"
+                      data-time-part-input="hour"
+                      aria-label="시작 시"
+                      disabled
+                    />
+                    <span class="popup-time-spin-controls">
+                      <button type="button" data-time-step-part="hour" data-time-step="1" aria-label="시작 시 한 시간 늘리기" tabindex="-1" disabled><svg class="lucide lucide-chevron-up" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                      <button type="button" data-time-step-part="hour" data-time-step="-1" aria-label="시작 시 한 시간 줄이기" tabindex="-1" disabled><svg class="lucide lucide-chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                    </span>
+                  </div>
+                  <span class="popup-time-unit" aria-hidden="true">시</span>
+                  <div class="popup-time-segment" data-time-segment="minute">
+                    <input
+                      type="text"
+                      value="00"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      maxlength="2"
+                      autocomplete="off"
+                      role="spinbutton"
+                      aria-valuemin="0"
+                      aria-valuemax="59"
+                      aria-valuenow="0"
+                      data-time-part-input="minute"
+                      aria-label="시작 분"
+                      disabled
+                    />
+                    <span class="popup-time-spin-controls">
+                      <button type="button" data-time-step-part="minute" data-time-step="1" aria-label="시작 분 1분 늘리기" tabindex="-1" disabled><svg class="lucide lucide-chevron-up" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                      <button type="button" data-time-step-part="minute" data-time-step="-1" aria-label="시작 분 1분 줄이기" tabindex="-1" disabled><svg class="lucide lucide-chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                    </span>
+                  </div>
+                  <span class="popup-time-unit" aria-hidden="true">분</span>
+                  <input
+                    id="timeFromInput"
+                    type="hidden"
+                    value="00:00"
+                    data-time-input="dateFrom"
+                  />
+                </div>
+              </div>
               <div class="popup-calendar-actions">
                 <button type="button" data-calendar-action="clear">
                   초기화
@@ -420,8 +484,8 @@
               </div>
             </div>
           </div>
-        </label>
-        <label class="popup-field">
+        </div>
+        <div class="popup-field">
           <span>종료일</span>
           <div class="popup-date-picker" data-date-picker="dateTo">
             <input id="dateToInput" type="hidden" />
@@ -503,6 +567,70 @@
                 ><span>목</span><span>금</span><span>토</span>
               </div>
               <div class="popup-calendar-grid" data-calendar-grid></div>
+              <div class="popup-calendar-time" data-clip-time-row hidden>
+                <span class="popup-calendar-time-label">시간</span>
+                <div
+                  class="popup-time-picker"
+                  data-time-picker="dateTo"
+                  role="group"
+                  aria-label="종료 시간"
+                >
+                  <span class="popup-time-period" role="group" aria-label="종료 오전 오후">
+                    <button type="button" data-time-period="am" aria-pressed="false" disabled>오전</button>
+                    <button type="button" class="is-selected" data-time-period="pm" aria-pressed="true" disabled>오후</button>
+                  </span>
+                  <div class="popup-time-segment" data-time-segment="hour">
+                    <input
+                      type="text"
+                      value="11"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      maxlength="2"
+                      autocomplete="off"
+                      role="spinbutton"
+                      aria-valuemin="1"
+                      aria-valuemax="12"
+                      aria-valuenow="11"
+                      data-time-part-input="hour"
+                      aria-label="종료 시"
+                      disabled
+                    />
+                    <span class="popup-time-spin-controls">
+                      <button type="button" data-time-step-part="hour" data-time-step="1" aria-label="종료 시 한 시간 늘리기" tabindex="-1" disabled><svg class="lucide lucide-chevron-up" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                      <button type="button" data-time-step-part="hour" data-time-step="-1" aria-label="종료 시 한 시간 줄이기" tabindex="-1" disabled><svg class="lucide lucide-chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                    </span>
+                  </div>
+                  <span class="popup-time-unit" aria-hidden="true">시</span>
+                  <div class="popup-time-segment" data-time-segment="minute">
+                    <input
+                      type="text"
+                      value="59"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      maxlength="2"
+                      autocomplete="off"
+                      role="spinbutton"
+                      aria-valuemin="0"
+                      aria-valuemax="59"
+                      aria-valuenow="59"
+                      data-time-part-input="minute"
+                      aria-label="종료 분"
+                      disabled
+                    />
+                    <span class="popup-time-spin-controls">
+                      <button type="button" data-time-step-part="minute" data-time-step="1" aria-label="종료 분 1분 늘리기" tabindex="-1" disabled><svg class="lucide lucide-chevron-up" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                      <button type="button" data-time-step-part="minute" data-time-step="-1" aria-label="종료 분 1분 줄이기" tabindex="-1" disabled><svg class="lucide lucide-chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+                    </span>
+                  </div>
+                  <span class="popup-time-unit" aria-hidden="true">분</span>
+                  <input
+                    id="timeToInput"
+                    type="hidden"
+                    value="23:59"
+                    data-time-input="dateTo"
+                  />
+                </div>
+              </div>
               <div class="popup-calendar-actions">
                 <button type="button" data-calendar-action="clear">
                   초기화
@@ -511,7 +639,7 @@
               </div>
             </div>
           </div>
-        </label>
+        </div>
         <div class="popup-field popup-duration-field">
           <span>영상 길이</span>
           <div class="popup-duration-picker" id="durationPicker">

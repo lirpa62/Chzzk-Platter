@@ -81,6 +81,27 @@
   const oglinkStates = new WeakMap();
   const autoplayVisibility = new Map();
   const autoplayReleaseTimers = new WeakMap();
+  // 중복 링크 정리 대기 키(스캔 1회당 한 번에 처리).
+  const pendingCleanupKeys = new Set();
+
+  // ⚠ 위 세 Map(metadataRequests·metadataCache·thumbnailDimensionRequests)은 키가
+  //   mediaKey·이미지 URL 이라 WeakMap 으로 못 바꾼다. 상한이 없으면 글이 많은 게시판을
+  //   길게 스크롤할수록 계속 쌓인다(응답 객체·Promise 를 붙잡는다). 원본 확장과 같은
+  //   방식으로 LRU 상한을 둔다.
+  // Map 은 삽입 순서를 지키므로 가장 오래된 항목부터 덜어내면 LRU 가 된다.
+  const CACHE_LIMIT = 200;
+  function setWithLimit(cache, key, value) {
+    cache.delete(key);
+    cache.set(key, value);
+
+    while (cache.size > CACHE_LIMIT) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey === undefined) break;
+      cache.delete(oldestKey);
+    }
+
+    return value;
+  }
 
   function getCandidateValues(element) {
     const values = OBSERVED_ATTRIBUTES.map((attribute) =>
@@ -230,7 +251,19 @@
     autoplayReleaseTimers.delete(player);
   }
 
-  function scheduleAutoplayRelease(player, frame) {
+  // ⚠ iframe 요소를 클로저에 붙잡지 않는다. 이 타이머는 플레이어가 화면에 보이는
+  //   동안 30초마다 스스로 다시 예약되는데, 예전에는 처음 받은 frame 을 그대로
+  //   넘겨 재예약했다. 그 사이 프레임이 교체되면(setPlayerAutoplay → 재마운트)
+  //   떨어져 나간 옛 iframe 이 타이머 클로저에 남아 회수되지 않는다. 발화 시점에
+  //   현재 프레임을 다시 찾는다.
+  function currentPlayerFrame(player) {
+    const frame = player.querySelector(
+      ":scope iframe.cheese-cafe-player__frame",
+    );
+    return frame instanceof HTMLIFrameElement ? frame : null;
+  }
+
+  function scheduleAutoplayRelease(player) {
     clearAutoplayRelease(player);
     const timer = window.setTimeout(() => {
       autoplayReleaseTimers.delete(player);
@@ -243,13 +276,14 @@
       }
 
       if ((autoplayVisibility.get(player) || 0) > 0) {
-        scheduleAutoplayRelease(player, frame);
+        scheduleAutoplayRelease(player);
         return;
       }
 
       // 제거 전에 정리 신호를 보낸다 — iframe 이 떨어져 나가면 pagehide 가 안 올 수 있어
       // embed 쪽 타이머·리스너가 남는다.
-      if (frame.isConnected) {
+      const frame = currentPlayerFrame(player);
+      if (frame?.isConnected) {
         postPlayerCommand(frame, "release");
         frame.remove();
       }
@@ -274,15 +308,10 @@
     if (player.dataset.cheeseCafeAutoplayMode === mode) return;
     player.dataset.cheeseCafeAutoplayMode = mode;
     if (!active) {
-      const frame = player.querySelector(
-        ":scope iframe.cheese-cafe-player__frame",
-      );
-      if (
-        frame instanceof HTMLIFrameElement &&
-        player.dataset.cheeseCafeAutoplayInitialized === "true"
-      ) {
+      const frame = currentPlayerFrame(player);
+      if (frame && player.dataset.cheeseCafeAutoplayInitialized === "true") {
         postPlayerCommand(frame, "pause");
-        scheduleAutoplayRelease(player, frame);
+        scheduleAutoplayRelease(player);
       }
       return;
     }
@@ -582,7 +611,8 @@
   function loadThumbnailDimensions(thumbnailImageUrl) {
     if (!thumbnailImageUrl) return Promise.resolve(null);
     if (!thumbnailDimensionRequests.has(thumbnailImageUrl)) {
-      thumbnailDimensionRequests.set(
+      setWithLimit(
+        thumbnailDimensionRequests,
         thumbnailImageUrl,
         new Promise((resolve) => {
           const image = new Image();
@@ -707,20 +737,54 @@
     };
   }
 
+  // ⚠ 여기서 바로 지우지 않고 키만 모아 둔다(원본 확장과 같은 방식). 예전에는 클립
+  //   하나를 변환할 때마다 문서 전체를 두 번씩(standalone 표식 + 본문 문단) 훑어서,
+  //   한 글에 클립이 N 개면 문서 전체 질의가 2N 번 돌았다. 스캔이 끝날 때 한 번만
+  //   훑도록 모아 처리한다.
   function removeStandaloneClipComponents(mediaKey) {
+    pendingCleanupKeys.add(mediaKey);
+  }
+
+  function flushStandaloneClipCleanup() {
+    if (!pendingCleanupKeys.size) return;
+
+    const mediaKeys = new Set(pendingCleanupKeys);
+    pendingCleanupKeys.clear();
+
+    mediaKeys.forEach((mediaKey) => {
+      document
+        .querySelectorAll(`[data-cheese-cafe-standalone="${mediaKey}"]`)
+        .forEach((component) => component.remove());
+    });
+
+    // 한 se-text 컴포넌트 안에 `본문 문단 + 링크 전용 문단`이 함께 있을 수 있다.
+    // getStandaloneClip(component)는 이때 링크 문단을 target으로 돌려주는데, 예전 코드는
+    // target을 무시하고 component 전체를 지워 위쪽 본문까지 사라지게 했다. DOM을 지우기
+    // 전에 실제 target만 수집하고, 부모·자식이 함께 잡힌 경우에는 가장 바깥 target만 지운다.
+    const targets = new Set();
     document
-      .querySelectorAll(`[data-cheese-cafe-standalone="${mediaKey}"]`)
-      .forEach((component) => component.remove());
+      .querySelectorAll(
+        `${TEXT_COMPONENT_SELECTOR}, ${TEXT_PARAGRAPH_SELECTOR}`,
+      )
+      .forEach((container) => {
+        if (!container.isConnected) return;
+        const standalone = getStandaloneClip(container);
+        if (
+          standalone &&
+          mediaKeys.has(standalone.mediaKey) &&
+          standalone.target instanceof Element
+        ) {
+          targets.add(standalone.target);
+        }
+      });
 
-    document.querySelectorAll(TEXT_COMPONENT_SELECTOR).forEach((component) => {
-      if (getStandaloneClip(component)?.mediaKey === mediaKey)
-        component.remove();
-    });
-
-    document.querySelectorAll(TEXT_PARAGRAPH_SELECTOR).forEach((paragraph) => {
-      if (getStandaloneClip(paragraph)?.mediaKey === mediaKey)
-        paragraph.remove();
-    });
+    const removals = [...targets].filter(
+      (target) =>
+        ![...targets].some(
+          (other) => other !== target && other.contains(target),
+        ),
+    );
+    removals.forEach((target) => target.remove());
   }
 
   function hasOglinkForMedia(mediaKey) {
@@ -747,7 +811,7 @@
     requestMediaMetadata(mediaInfo.media).then((metadata) => {
       if (!metadata || !card.isConnected) return;
 
-      metadataCache.set(mediaInfo.mediaKey, metadata);
+      setWithLimit(metadataCache, mediaInfo.mediaKey, metadata);
 
       const currentTitle = card.querySelector(OGLINK_TITLE_SELECTOR);
       if (currentTitle) {
@@ -942,7 +1006,7 @@
         );
       });
 
-      metadataRequests.set(mediaKey, request);
+      setWithLimit(metadataRequests, mediaKey, request);
     }
 
     return metadataRequests.get(mediaKey);
@@ -961,7 +1025,7 @@
     requestMediaMetadata(state.media).then((metadata) => {
       if (!metadata || !oglink.isConnected) return;
 
-      metadataCache.set(state.mediaKey, metadata);
+      setWithLimit(metadataCache, state.mediaKey, metadata);
 
       const currentTitle = oglink.querySelector(OGLINK_TITLE_SELECTOR);
       if (currentTitle)
@@ -979,6 +1043,11 @@
       const mediaInfo = getCandidateMedia(candidate);
       if (!mediaInfo) continue;
 
+      // 이미 이 미디어로 변환을 끝낸 카드는 다시 훑지 않는다. 스캔은 초기 렌더
+      // 동안 여러 번(타이머 재시도 + 변경 감지) 도는데, 매번 문서 전체를 훑으면
+      // 클립 수에 제곱으로 비용이 늘어난다(원본 확장과 같은 가드).
+      if (oglink.dataset.cheeseCafeMediaKey === mediaInfo.mediaKey) return;
+
       let state = oglinkStates.get(oglink);
       if (!state || state.mediaKey !== mediaInfo.mediaKey) {
         state = {
@@ -995,6 +1064,7 @@
         .forEach((element) => element.remove());
 
       oglink.classList.add("cheese-cafe-oglink");
+      oglink.dataset.cheeseCafeMediaKey = mediaInfo.mediaKey;
       removeStandaloneClipComponents(mediaInfo.mediaKey);
       updateOglinkTitle(oglink, state);
 
@@ -1016,6 +1086,10 @@
     }
 
     root.querySelectorAll(OGLINK_SELECTOR).forEach(replaceOglinkThumbnail);
+
+    // 중복 링크 정리는 남은 링크를 플레이어로 바꾸기 전에 끝내야 한다. 순서가
+    // 뒤바뀌면 오글링크가 이미 있는 클립이 플레이어로 한 번 더 만들어진다.
+    flushStandaloneClipCleanup();
 
     findStandaloneClipContainers(root).forEach(replaceStandaloneClipComponent);
   }

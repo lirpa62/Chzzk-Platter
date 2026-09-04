@@ -177,6 +177,7 @@
   const OWNED_CHAT_NODE_SELECTOR =
     ".cheese-chat-time, .cheese-chat-os, .cheese-blind-restored-text, .cheese-blind-emoji";
   const pendingChatRows = new Set();
+  const pendingHiddenChatIdentityRows = new WeakSet();
   const PENDING_CHAT_ROW_MAX = 240;
   const ROW_BATCH_MAX = 40;
   const ROW_BATCH_BUDGET_MS = 6;
@@ -282,11 +283,45 @@
       return "";
     }
     row.setAttribute(CHAT_HISTORY_ID_ATTR, id);
+    const epochMs = readChatEpochMs(chatMessage);
+    if (epochMs) {
+      // 시간 표시 옵션과 무관하게 저장 순서의 기준은 남긴다. 사용자가 과거 채팅을
+      // 스크롤해 다시 불러와도 content.js가 실제 시각으로 합칠 수 있다.
+      row.setAttribute(CHAT_HISTORY_EPOCH_ATTR, String(epochMs));
+    } else {
+      // 가상 목록이 행을 재사용했는데 새 메시지에 실제 시각이 없다면 직전 메시지의
+      // 시각을 물려주지 않는다. 시각 없는 항목은 최초 관측 순서로만 정렬한다.
+      row.removeAttribute(CHAT_HISTORY_EPOCH_ATTR);
+    }
     // 이전 메시지 연결은 content.js가 완성된 과거→최신 스냅샷에서 만든다. 여기서
     // DOM 형제를 사용하면 column-reverse 목록의 처리 순서에 따라 값이 비거나 반대로
     // 연결될 수 있다.
     row.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_ATTR);
     return id;
+  }
+
+  function syncHiddenChatHistoryIdentity(row) {
+    if (
+      !chatHistoryCaptureOn ||
+      !(row instanceof HTMLElement) ||
+      !row.isConnected ||
+      row.hasAttribute(CHAT_HISTORY_ROW_ATTR)
+    ) {
+      return;
+    }
+    const chatMessage = getChatMessage(row);
+    if (chatMessage) {
+      syncChatHistoryIdentity(row, chatMessage);
+      return;
+    }
+    if (pendingHiddenChatIdentityRows.has(row)) return;
+    pendingHiddenChatIdentityRows.add(row);
+    queueMicrotask(() => {
+      pendingHiddenChatIdentityRows.delete(row);
+      if (!document.hidden || !row.isConnected || !chatHistoryCaptureOn) return;
+      const retryMessage = getChatMessage(row);
+      if (retryMessage) syncChatHistoryIdentity(row, retryMessage);
+    });
   }
 
   function resetRestoreStateForReusedRow(row, chatMessage) {
@@ -386,6 +421,9 @@
       chatMessage.time,
       chatMessage.messageTime,
       chatMessage.createTime,
+      chatMessage.createDate,
+      chatMessage.createdAt,
+      chatMessage.createdDate,
       chatMessage.ctime,
       chatMessage.regTime,
       chatMessage.msgTime,
@@ -394,6 +432,10 @@
       const n = Number(value);
       // 2001년 이후(ms)만 타당한 실제 시각으로 인정
       if (Number.isFinite(n) && n > 1e12) return n;
+      if (typeof value === "string") {
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed) && parsed > 1e12) return parsed;
+      }
     }
     return null;
   }
@@ -1535,8 +1577,7 @@
     if (
       !(row instanceof HTMLElement) ||
       !row.isConnected ||
-      !anyChatEnhanceOn() ||
-      document.hidden
+      !anyChatEnhanceOn()
     ) {
       return;
     }
@@ -1546,6 +1587,20 @@
       // 재사용하므로, 이걸 남겨두면 새 메시지가 들어와도 이전 사용자의 역할 판정
       // 결과(.cheese-chat-nick-shown)가 그대로 유지된다.
       delete row.dataset.cheeseNickDone;
+      if (document.hidden && chatHistoryCaptureOn) {
+        // 새 메시지 props를 아직 읽지 못하더라도 직전 메시지 ID로 새 HTML을 덮어쓰지
+        // 않게 한다. 이후 props가 준비된 변이에서 새 ID와 시각을 다시 붙인다.
+        row.removeAttribute(CHAT_HISTORY_ID_ATTR);
+        row.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_ATTR);
+        row.removeAttribute(CHAT_HISTORY_EPOCH_ATTR);
+      }
+    }
+    // 백그라운드 탭에서는 rAF 기반 채팅 꾸미기 작업을 쉬게 하되, 이어보기의 안정 ID와
+    // 실제 시각은 즉시 남긴다. 이 단계마저 건너뛰면 가상 목록이 다음 메시지로 행을
+    // 재사용한 뒤에야 탭이 깨어나 중간 구간을 영구히 놓친다.
+    if (document.hidden) {
+      syncHiddenChatHistoryIdentity(row);
+      return;
     }
     pendingChatRows.add(row);
     // 긴 가상 스크롤 중 화면에서 이미 사라진 행을 계속 붙잡아 두지 않는다. 최신 행만
@@ -1957,12 +2012,15 @@
     if (chatRowObserver) chatRowObserver.disconnect();
     const watchBlindInPlaceMutations = isBlindRestoreActive();
     chatRowObserver = new MutationObserver((mutations) => {
-      if (document.hidden || !anyChatEnhanceOn()) return;
+      if (!anyChatEnhanceOn()) return;
+      const captureOnly = document.hidden;
+      if (captureOnly && !chatHistoryCaptureOn) return;
       // ⚠ 관리자 전용 공지 검사는 노드마다 querySelectorAll + textContent 를 돈다.
       // 과거 채팅 탐색 중에는 가상 목록이 행을 대량 교체하므로, 이 검사까지 매 변이마다
       // 돌리면 저사양에서 영상 디코딩을 밀어낸다. 공지는 '새 채팅으로 도착'하는 것이라
       // 스크롤 입력 중에는 건너뛰고, 입력이 멎은 뒤 처리 경로에서 다시 확인한다.
       if (
+        !captureOnly &&
         performance.now() >= chatScrollActiveUntil &&
         mutations.some((mutation) =>
           [...mutation.addedNodes].some(containsAdminOnlyChatNotice),
@@ -1986,6 +2044,7 @@
           });
           continue;
         }
+        if (captureOnly) continue;
         // 블라인드 처리는 기존 행을 교체하지 않고 _is_hidden_ 클래스와 텍스트 노드만
         // 바꾸는 경우가 있다. childList만 보던 이전 감시기는 이 경로를 놓쳐 같은 방송
         // 안에서도 복구 여부가 달라졌다. 복원 기능이 켜졌을 때, 숨김 행의 native 변경만

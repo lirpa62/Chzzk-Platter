@@ -62,8 +62,13 @@ const UPDATE_NOTICE_TOAST_POSITION_KEY = "cheeseUpdateNoticeToastPosition";
 const UPDATE_NOTICE_DEFAULT_MODE = "fixed";
 const UPDATE_NOTICE_DEFAULT_DURATION_SEC = 3;
 const UPDATE_NOTICE_DEFAULT_TOAST_POSITION = "top-center";
-const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
-const CHAT_HISTORY_STORAGE_PREFIX = "cheeseChatHistory:";
+const CHAT_HISTORY_LEGACY_STORAGE_PREFIX = "cheeseChatHistory:";
+const CHAT_HISTORY_SESSION_PREFIX = "cheeseChatHistoryV4:";
+const CHAT_HISTORY_STORAGE_VERSION = 4;
+const CHAT_HISTORY_LIMIT_MIN = 50;
+const CHAT_HISTORY_LIMIT_MAX = 500;
+const CHAT_HISTORY_LIMIT_DEFAULT = 200;
+const CHAT_HISTORY_ROW_HTML_MAX = 64 * 1024;
 const UPDATE_NOTICE_MODES = new Set(["fixed", "temporary", "toast"]);
 const UPDATE_NOTICE_DURATIONS = new Set([3, 5, 10, 15]);
 const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
@@ -103,12 +108,6 @@ const masterStateReady = chrome.storage.local
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[MASTER_ENABLED_KEY]) {
     masterEnabled = changes[MASTER_ENABLED_KEY].newValue !== false;
-  }
-  if (
-    area === "local" &&
-    changes[CHAT_HISTORY_ENABLED_KEY]?.newValue === true
-  ) {
-    void disableChatHistory();
   }
 });
 
@@ -179,43 +178,24 @@ try {
     .catch(() => {});
 } catch {}
 
-async function disableChatHistory(clearRecords = false) {
-  try {
-    const state = await chrome.storage.local.get(CHAT_HISTORY_ENABLED_KEY);
-    if (state?.[CHAT_HISTORY_ENABLED_KEY] !== false) {
-      await chrome.storage.local.set({ [CHAT_HISTORY_ENABLED_KEY]: false });
-    }
-  } catch {}
-  if (!clearRecords) return;
+async function clearLegacyChatHistory() {
   try {
     const all = await chrome.storage.local.get(null);
     const keys = Object.keys(all || {}).filter((key) =>
-      key.startsWith(CHAT_HISTORY_STORAGE_PREFIX),
+      key.startsWith(CHAT_HISTORY_LEGACY_STORAGE_PREFIX),
     );
     if (keys.length) await chrome.storage.local.remove(keys);
   } catch {}
-  try {
-    const all = await chrome.storage.session.get(null);
-    const keys = Object.keys(all || {}).filter((key) =>
-      key.startsWith(CHAT_HISTORY_STORAGE_PREFIX),
-    );
-    if (keys.length) await chrome.storage.session.remove(keys);
-  } catch {}
 }
-
-// 채팅 이어보기는 복원 순서와 중복 문제가 해결될 때까지 노출하지 않는다. 이전에 기능을
-// 켠 사용자도 서비스 워커 시작과 확장 업데이트에서 끄고 남은 기록을 함께 정리한다.
-void disableChatHistory();
-chrome.runtime.onStartup.addListener(() => {
-  void disableChatHistory(true);
-});
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   // 설치 직후에는 항상, 업데이트 때는 사용자 설정에 따라 안내를 띄운다. 이미 열려 있던
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
   if (details.reason !== "install" && details.reason !== "update") return;
 
-  await disableChatHistory(true);
+  // v3까지는 치지직의 React 채팅 목록에 복제 행을 직접 넣었다. 새 구현은
+  // storage.session의 방송별 버퍼만 쓰므로 업데이트 때 남은 로컬 복제본을 정리한다.
+  await clearLegacyChatHistory();
 
   // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
   // 설정 페이지가 data-new-feature로 선언한 기능 중 아직 확인하지 않은 항목만 표시한다.
@@ -3649,6 +3629,11 @@ const LP_WATCH_STATE_PREFIX = "logpower_watch_reward_state:";
 const LP_WATCH_ALARM_PREFIX = "logpower:watch-reward:";
 const LP_WATCH_INTERVAL_MIN = 1;
 const LP_WATCH_ACTIVE_TTL_MS = 6 * 60 * 1000; // 적립 활성 6분
+// 1시간 경계에서는 1시간 보상과 마지막 5분 보상의 반영 시점이 갈려, 마지막
+// 5분 보상이 이전 적립보다 약 10분 뒤에 관측되기도 한다. 적립 중 UI는 기존처럼
+// 6분 뒤 끄되, 내역 묶음은 조금 더 기다려 11회+1회로 갈라지지 않게 한다.
+const LP_WATCH_RUN_IDLE_MS = 12 * 60 * 1000;
+const LP_WATCH_CYCLE_TICKS = 12;
 const LP_WATCH_MISS_LIMIT = Math.ceil(
   LP_WATCH_ACTIVE_TTL_MS / (LP_WATCH_INTERVAL_MIN * 60 * 1000),
 );
@@ -4539,7 +4524,15 @@ async function lpGetRun() {
     const v = (await chrome.storage.local.get(LP_RUN_KEY))?.[LP_RUN_KEY];
     if (v && typeof v === "object") return v;
   } catch {}
-  return { prev: null, curr: null, cnt: 0, amount: 0, at: 0, accountId: null };
+  return {
+    prev: null,
+    curr: null,
+    cnt: 0,
+    amount: 0,
+    at: 0,
+    lastTickAt: 0,
+    accountId: null,
+  };
 }
 
 // ⚠ 저장 실패를 삼키면 호출부가 '누적됨'으로 보고 넘어가 그 회차가 사라진다.
@@ -4582,6 +4575,7 @@ async function lpFlushRunLocked(onlyChannelId) {
       cnt: 0,
       amount: 0,
       at: 0,
+      lastTickAt: 0,
       accountId: run.accountId ?? null,
     });
     return true;
@@ -4595,6 +4589,7 @@ async function lpFlushRunLocked(onlyChannelId) {
         cnt: 0,
         amount: 0,
         at: 0,
+        lastTickAt: 0,
         accountId: run?.accountId ?? null,
       });
     }
@@ -4657,6 +4652,7 @@ async function lpFlushRunLocked(onlyChannelId) {
     cnt: 0,
     amount: 0,
     at: 0,
+    lastTickAt: 0,
     accountId,
   });
   if (cleared) return true;
@@ -4670,10 +4666,25 @@ async function lpFlushRunLocked(onlyChannelId) {
 }
 
 // 5분 보상 1회 감지. 같은 채널이면 누적, 채널이 바뀌면 이전 채널을 먼저 확정한다.
-async function lpNoteFiveMin(channelId, amount, accountHint, seen) {
+async function lpNoteFiveMin(channelId, amount, accountHint, seen, count = 1) {
   return lpWithRunLock(() =>
-    lpNoteFiveMinLocked(channelId, amount, accountHint, seen),
+    lpNoteFiveMinLocked(channelId, amount, accountHint, seen, count),
   );
+}
+
+// 적립 중 표시는 6분 뒤 꺼도 되지만, 내역까지 그때 확정하면 1시간 경계에서
+// 늦게 반영된 마지막 5분 보상이 다음 묶음으로 갈라진다. 마지막 적립 이후의
+// 실제 유휴 시간으로 판단하며, 확인과 확정을 같은 run 락에서 처리한다.
+async function lpFlushIdleRun(channelId, now = Date.now()) {
+  return lpWithRunLock(async () => {
+    const run = await lpGetRun();
+    if (run?.curr !== channelId || run?.flushedId) return true;
+    if (!(Number(run?.cnt) > 0) || !(Number(run?.amount) > 0)) return true;
+    // lastTickAt 도입 전에 시작된 묶음은 at을 폴백으로 사용한다.
+    const lastTickAt = Number(run?.lastTickAt || run?.at || 0);
+    if (!lastTickAt || now - lastTickAt < LP_WATCH_RUN_IDLE_MS) return true;
+    return lpFlushRunLocked(channelId);
+  });
 }
 
 // 시청 상태 저장이 확인됐다 → 임시 기준(seen)을 더 쓰지 않는다.
@@ -4697,7 +4708,13 @@ async function lpConfirmRunSeen(channelId, token) {
 
 // 반환: 저장한 묶음의 승인 토큰. 실패하면 null/false이며 호출부가 lastAmount를
 // 올리면 안 된다.
-async function lpNoteFiveMinLocked(channelId, amount, accountHint, seen) {
+async function lpNoteFiveMinLocked(
+  channelId,
+  amount,
+  accountHint,
+  seen,
+  count = 1,
+) {
   const run = await lpGetRun();
   // ⚠ 같은 보유량을 두 번 반영하지 않는다. 누적은 성공했는데 시청 상태 저장이
   //   실패하면 lastAmount 가 그대로라 다음 주기에 같은 delta 가 다시 들어온다.
@@ -4708,7 +4725,11 @@ async function lpNoteFiveMinLocked(channelId, amount, accountHint, seen) {
     Number(run.seen) === seen &&
     run.seenPending === true
   ) {
-    return { runId: String(run.runId || ""), seen };
+    return {
+      runId: String(run.runId || ""),
+      seen,
+      watchCount: Number(run.cnt || 0),
+    };
   }
   // ⚠ 락 안이므로 lpFlushRun(락 획득)을 부르면 교착된다 → Locked 판을 부른다.
   // ⚠ 선행 flush 가 실패하면(계정 미확인·로그 저장 실패) 이전 묶음이 기록되지
@@ -4731,12 +4752,14 @@ async function lpNoteFiveMinLocked(channelId, amount, accountHint, seen) {
   //   확정된 묶음은 이어받지 않고 새 묶음으로 시작한다.
   const same = cur.curr === channelId && !cur.flushedId;
   const at = same && cur.at ? cur.at : Date.now();
+  const tickCount = Math.max(1, Math.floor(Number(count) || 1));
   const nextRun = {
     prev: cur.prev ?? null,
     curr: channelId,
-    cnt: (same ? cur.cnt : 0) + 1,
+    cnt: (same ? cur.cnt : 0) + tickCount,
     amount: (same ? cur.amount : 0) + amount,
     at,
+    lastTickAt: Date.now(),
     // ⚠ 묶음 고유 id. 예전에는 flush 때 at 으로 만들었는데, 초기화가 실패해
     //   같은 at 이 재사용되면 id 가 겹쳐 뒤 금액이 통째로 무시됐다. 누적을
     //   시작할 때 한 번 정하고, 새 묶음이면 반드시 새 값을 쓴다.
@@ -4753,6 +4776,7 @@ async function lpNoteFiveMinLocked(channelId, amount, accountHint, seen) {
   return {
     runId: String(nextRun.runId || ""),
     seen: Number(nextRun.seen),
+    watchCount: Number(nextRun.cnt || 0),
   };
 }
 
@@ -5325,6 +5349,11 @@ async function lpCheckProgress(channelId) {
     // 저장이 확인돼야 임시 기준(seen)을 놓는다.
     if (await lpSetWatchState(channelId, next)) {
       await lpConfirmRunSeen(channelId, note);
+      // 1시간 보상과 마지막 5분 보상이 따로 반영돼도 12회가 찬 시점에
+      // 즉시 확정한다. 예전에는 6분 유휴 판정이 먼저 와 11회+1회로 갈렸다.
+      if (Number(note.watchCount || 0) >= LP_WATCH_CYCLE_TICKS) {
+        await lpFlushRun(channelId);
+      }
     }
     // 이 채널이 활성 적립 채널로 확정됨 → 다른 채널의 적립·1시간 타이머 정리.
     await lpClearOtherChannels(channelId, owner);
@@ -5345,7 +5374,13 @@ async function lpCheckProgress(channelId) {
     if (rest > 0 && rest % unit === 0 && rest / unit <= 12) {
       next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
       next.misses = 0;
-      const note = await lpNoteFiveMin(channelId, rest, owner, amount);
+      const note = await lpNoteFiveMin(
+        channelId,
+        rest,
+        owner,
+        amount,
+        rest / unit,
+      );
       if (!note) return;
       // ⚠ 위와 같다 — 저장 확인 전에는 flush 하지 않는다.
       if (!(await lpSetWatchState(channelId, next))) return;
@@ -5365,10 +5400,13 @@ async function lpCheckProgress(channelId) {
     if (ticks <= 12) {
       next.activeUntil = now + LP_WATCH_ACTIVE_TTL_MS;
       next.misses = 0;
-      const note = await lpNoteFiveMin(channelId, delta, owner, amount);
+      const note = await lpNoteFiveMin(channelId, delta, owner, amount, ticks);
       if (!note) return;
       if (await lpSetWatchState(channelId, next)) {
         await lpConfirmRunSeen(channelId, note);
+        if (Number(note.watchCount || 0) >= LP_WATCH_CYCLE_TICKS) {
+          await lpFlushRun(channelId);
+        }
       }
       await lpClearOtherChannels(channelId, owner);
       lpBroadcast(lpStateToStatus(next, true));
@@ -5384,10 +5422,15 @@ async function lpCheckProgress(channelId) {
   if (stateSaved && pendingSeenToken) {
     await lpConfirmRunSeen(channelId, pendingSeenToken);
   }
-  if (wasActive && Number(next.activeUntil || 0) <= now) {
-    // 적립이 끊겼다 → 쌓인 연속분을 확정한다. 여기서 안 하면 다른 채널을 볼
-    // 때까지(며칠 뒤일 수도) 기록이 안 남는다.
-    await lpFlushRun(channelId);
+  const inactive = Number(next.activeUntil || 0) <= now;
+  if (inactive) {
+    // 적립 중 UI는 기존처럼 6분 뒤 끄되, 내역은 마지막 5분 적립 이후 12분을
+    // 기다린다. 1시간 경계에서 마지막 회차가 늦게 도착하는 정상 흐름을
+    // 시청 종료로 오인하지 않기 위함이다. 전환 순간 이후에도 매 알람에서
+    // 확인해야 유예 시간이 지난 묶음이 결국 확정된다.
+    await lpFlushIdleRun(channelId, now);
+  }
+  if (wasActive && inactive) {
     lpBroadcast(lpStateToStatus(next, false));
   }
 }
@@ -5807,6 +5850,135 @@ const CHAT_RECAP_ACCOUNT_RE = /^[0-9a-f]{32}$/i;
 const CHAT_RECAP_MONTH_RE = /^\d{4}-\d{2}$/;
 let chatRecapCatalogTail = Promise.resolve();
 
+const chatHistoryWriteTails = new Map();
+
+function normalizeChatHistoryLimit(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return CHAT_HISTORY_LIMIT_DEFAULT;
+  return Math.min(
+    CHAT_HISTORY_LIMIT_MAX,
+    Math.max(CHAT_HISTORY_LIMIT_MIN, number),
+  );
+}
+
+function normalizeChatHistoryScope(value) {
+  const scope = String(value || "").trim();
+  return /^[0-9a-f]{32}:[0-9]+$/i.test(scope) ? scope.toLowerCase() : "";
+}
+
+function chatHistorySessionKey(scope) {
+  return `${CHAT_HISTORY_SESSION_PREFIX}${scope}`;
+}
+
+function normalizeChatHistoryItem(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const id = String(value.id || "").trim();
+  const html = typeof value.html === "string" ? value.html : "";
+  if (!id || id.length > 512 || !html || html.length > CHAT_HISTORY_ROW_HTML_MAX) {
+    return null;
+  }
+  const previousId = String(value.previousId || "").trim();
+  const time = Number(value.time);
+  return {
+    id,
+    previousId:
+      previousId && previousId !== id && previousId.length <= 512
+        ? previousId
+        : "",
+    html,
+    time: Number.isFinite(time) && time > 0 ? Math.round(time) : 0,
+  };
+}
+
+function mergeChatHistoryItems(storedItems, incomingItems, limit) {
+  const orderedIds = [];
+  const byId = new Map();
+  const add = (raw) => {
+    const item = normalizeChatHistoryItem(raw);
+    if (!item) return;
+    const current = byId.get(item.id);
+    if (!current) orderedIds.push(item.id);
+    byId.set(
+      item.id,
+      current
+        ? {
+            ...current,
+            ...item,
+            previousId: item.previousId || current.previousId || "",
+            time: item.time || current.time || 0,
+          }
+        : item,
+    );
+  };
+  (Array.isArray(storedItems) ? storedItems : []).forEach(add);
+  (Array.isArray(incomingItems) ? incomingItems : []).forEach(add);
+
+  const order = new Map(orderedIds.map((id, index) => [id, index]));
+  const merged = [...byId.values()].sort((a, b) => {
+    if (a.time && b.time && a.time !== b.time) return a.time - b.time;
+    return (order.get(a.id) || 0) - (order.get(b.id) || 0);
+  });
+  const limited = merged.slice(-normalizeChatHistoryLimit(limit));
+  return limited.map((item, index) => ({
+    ...item,
+    previousId: index ? limited[index - 1].id : "",
+  }));
+}
+
+function enqueueChatHistory(scope, task) {
+  const previous = chatHistoryWriteTails.get(scope) || Promise.resolve();
+  const result = previous.catch(() => {}).then(task);
+  const tail = result.catch(() => {});
+  chatHistoryWriteTails.set(scope, tail);
+  void tail.finally(() => {
+    if (chatHistoryWriteTails.get(scope) === tail) {
+      chatHistoryWriteTails.delete(scope);
+    }
+  });
+  return result;
+}
+
+async function dropOldestChatHistorySession(keepKey) {
+  const all = await chrome.storage.session.get(null);
+  let oldestKey = "";
+  let oldestAt = Infinity;
+  for (const [key, value] of Object.entries(all || {})) {
+    if (!key.startsWith(CHAT_HISTORY_SESSION_PREFIX) || key === keepKey) continue;
+    const at = Number(value?.at) || 0;
+    if (at < oldestAt) {
+      oldestAt = at;
+      oldestKey = key;
+    }
+  }
+  if (!oldestKey) return false;
+  await chrome.storage.session.remove(oldestKey);
+  return true;
+}
+
+async function writeChatHistorySession(scope, incomingItems, limit) {
+  const key = chatHistorySessionKey(scope);
+  const stored = (await chrome.storage.session.get(key))?.[key];
+  let items = mergeChatHistoryItems(stored?.items, incomingItems, limit);
+  while (items.length) {
+    try {
+      await chrome.storage.session.set({
+        [key]: {
+          version: CHAT_HISTORY_STORAGE_VERSION,
+          at: Date.now(),
+          items,
+        },
+      });
+      return items;
+    } catch (error) {
+      if (!/quota|exceed/i.test(String(error?.message || error))) throw error;
+      if (await dropOldestChatHistorySession(key)) continue;
+      items = items.slice(Math.max(1, Math.floor(items.length * 0.1)));
+    }
+  }
+  await chrome.storage.session.remove(key);
+  return [];
+}
+
 function normalizeChatRecapCatalog(value) {
   const channels = {};
   const raw = value?.channels;
@@ -5843,6 +6015,44 @@ function mutateChatRecapCatalog(accountId, apply) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
+    return false;
+  }
+
+  if (message.type === "CHAT_HISTORY_BUFFER") {
+    const scope = normalizeChatHistoryScope(message.scope);
+    if (!scope) {
+      sendResponse?.({ ok: false, reason: "invalid-scope" });
+      return false;
+    }
+    const op = String(message.op || "");
+    if (op === "GET") {
+      void enqueueChatHistory(scope, async () => {
+        const key = chatHistorySessionKey(scope);
+        const stored = (await chrome.storage.session.get(key))?.[key];
+        return Number(stored?.version) === CHAT_HISTORY_STORAGE_VERSION
+          ? mergeChatHistoryItems([], stored.items, message.limit)
+          : [];
+      })
+        .then((items) => sendResponse?.({ ok: true, items }))
+        .catch((error) =>
+          sendResponse?.({ ok: false, reason: String(error?.message || error) }),
+        );
+      return true;
+    }
+    if (op === "UPSERT") {
+      const incoming = Array.isArray(message.items)
+        ? message.items.slice(-CHAT_HISTORY_LIMIT_MAX)
+        : [];
+      void enqueueChatHistory(scope, () =>
+        writeChatHistorySession(scope, incoming, message.limit),
+      )
+        .then((items) => sendResponse?.({ ok: true, items }))
+        .catch((error) =>
+          sendResponse?.({ ok: false, reason: String(error?.message || error) }),
+        );
+      return true;
+    }
+    sendResponse?.({ ok: false, reason: "unknown-op" });
     return false;
   }
 
@@ -6268,7 +6478,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
         if (chrome.runtime.lastError || downloadId == null) {
-          sendResponse({ ok: false, reason: "start-failed" });
+          // ⚠ 크롬이 준 실제 사유를 버리지 않는다. 파일명에 못 쓰는 문자가 있으면
+          //   여기서 "Invalid filename" 이 온다(제보: 특정 방송에서만 저장 실패).
+          sendResponse({
+            ok: false,
+            reason: "start-failed",
+            detail: String(chrome.runtime.lastError?.message || ""),
+          });
           return;
         }
         // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
@@ -6279,7 +6495,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (s === "complete") {
             finish({ ok: true, saved: true });
           } else if (s === "interrupted") {
-            finish({ ok: true, saved: false }); // 사용자가 취소 등
+            // ⚠ 중단 사유를 구분한다. USER_CANCELED 만 '취소'고, 디스크 부족·권한
+            //   거부 등은 진짜 실패다. 예전엔 전부 '저장을 취소했어요'로 뭉뚱그려
+            //   사용자가 원인을 알 수 없었다.
+            const why = String(delta.error?.current || "");
+            if (why && why !== "USER_CANCELED" && why !== "USER_SHUTDOWN") {
+              finish({ ok: false, reason: "interrupted", detail: why });
+            } else {
+              finish({ ok: true, saved: false }); // 사용자가 취소
+            }
           }
         };
         const finish = (result) => {

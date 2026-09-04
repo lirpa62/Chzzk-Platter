@@ -3130,6 +3130,7 @@
   const CHAT_STREAM_SELECTOR =
     "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
   let tickTimer = 0;
+  let tickIdleHandle = 0;
   let observer = null;
 
   function isChatStreamOnlyMutation(mutation) {
@@ -3162,21 +3163,24 @@
   }
 
   function scheduleTick(mutations) {
-    // ⚠ 필터가 켜져 있는 동안에는 채팅 전용 변이라도 건너뛰지 않는다. tick 이 플레이어
-    // 재렌더 후 필터를 다시 입히는 역할을 하는데, 조용한 방송에서 채팅 변이까지 걸러
-    // 버리면 tick 이 오지 않아 필터가 풀린 채로 남는다.
-    if (
-      !state.enabled &&
-      mutations?.length &&
-      mutations.every(isChatStreamOnlyMutation)
-    ) {
+    // 플레이어 재렌더 자체의 DOM 변이는 별도로 감지되므로, 필터가 켜져 있어도 채팅
+    // 행 변화만으로 플레이어와 canvas를 다시 탐색하지 않는다.
+    if (mutations?.length && mutations.every(isChatStreamOnlyMutation)) {
       return;
     }
-    if (document.hidden || tickTimer) return;
+    if (document.hidden || tickTimer || tickIdleHandle) return;
     tickTimer = window.setTimeout(() => {
       tickTimer = 0;
       if (document.hidden) return;
-      tick();
+      const run = () => {
+        tickIdleHandle = 0;
+        if (!document.hidden) tick();
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        tickIdleHandle = window.requestIdleCallback(run, { timeout: 500 });
+      } else {
+        run();
+      }
     }, TICK_THROTTLE_MS);
   }
 
@@ -3195,6 +3199,10 @@
     if (tickTimer) {
       clearTimeout(tickTimer);
       tickTimer = 0;
+    }
+    if (tickIdleHandle) {
+      window.cancelIdleCallback?.(tickIdleHandle);
+      tickIdleHandle = 0;
     }
   }
 

@@ -242,6 +242,9 @@
   const IS_POPUP_PLAYER_FRAME =
     !IS_TOP_FRAME &&
     new URLSearchParams(location.search).get("cheesePopup") === "1";
+  const POPUP_PLAYER_START_WITHOUT_CHAT_FRAME =
+    IS_POPUP_PLAYER_FRAME &&
+    new URLSearchParams(location.search).get("cheesePopupChatFolded") === "1";
   const CLIP_PAGE_AUTOPLAY_PARAM = "cheesePlatterAutoplay";
   const clipPageAutoplayState = {
     pathname: "",
@@ -536,6 +539,7 @@
     liveOpenAt: 0, // 라이브 시작 시각(ms). 0이면 미확보/없음
     liveOpenAtCorrected: false, // 다시보기 채팅 시각으로 보정했는지
     publishAt: 0, // 등록일(ms). 0이면 미확보/없음
+    titleChanges: [], // 재생 위치별 확정된 방송 제목 변경 이력
     fetching: false,
     observer: null,
     observedRoot: null, // 현재 observe 중인 플레이어 루트(재렌더 시 재부착 판단용)
@@ -1014,6 +1018,7 @@
   const POPUP_PLAYER_AUDIO_MODES = ["mute", "first", "all"];
   const POPUP_PLAYER_AUDIO_DEFAULT = "first";
   const POPUP_PLAYER_CLASS = "cheese-popup-player";
+  const POPUP_PLAYER_FRAME_STATUS_SOURCE = "cheese-popup-player-frame-status";
   // 초기 크기(px). 프리셋(정사각) 또는 커스텀 가로·세로. 열린 뒤에는 자유 리사이즈.
   const POPUP_PLAYER_SIZE_KEY = "cheesePopupPlayerSize"; // 프리셋 값 또는 "custom"
   const POPUP_PLAYER_SIZE_ALLOWED = [400, 510, 640, 800];
@@ -1024,6 +1029,11 @@
   const POPUP_PLAYER_SIZE_MAX = 2000;
   // 팝업에서 넓은 화면 자동 적용(기본 ON).
   const POPUP_PLAYER_WIDE_KEY = "cheesePopupPlayerWide";
+  // 새 팝업을 치지직 채팅이 접힌 상태로 시작(기본 OFF).
+  const POPUP_PLAYER_START_WITHOUT_CHAT_KEY =
+    "cheesePopupPlayerStartWithoutChat";
+  const POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY =
+    "cheesePopupPlayerStartWithoutChat16x9";
   // 팝업 iframe 내부 스크롤 허용(기본 OFF).
   const POPUP_PLAYER_SCROLL_KEY = "cheesePopupPlayerScroll";
   // 팝업 안에서 표시할 우리 버튼(믹서/필터/따라잡기). 나머지는 항상 숨김.
@@ -1044,6 +1054,8 @@
   let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
   let popupPlayerSize = POPUP_PLAYER_SIZE_DEFAULT;
   let popupPlayerWide = true;
+  let popupPlayerStartWithoutChat = false;
+  let popupPlayerStartWithoutChat16x9 = false;
   let popupPlayerScroll = false;
   let popupPlayerSizeW = POPUP_PLAYER_SIZE_DEFAULT;
   let popupPlayerSizeH = POPUP_PLAYER_SIZE_DEFAULT;
@@ -1079,13 +1091,20 @@
     if (!Number.isFinite(n)) return POPUP_PLAYER_SIZE_DEFAULT;
     return Math.min(POPUP_PLAYER_SIZE_MAX, Math.max(POPUP_PLAYER_SIZE_MIN, n));
   }
-  // 실제 적용할 초기 {w,h}. 프리셋은 정사각, 커스텀은 저장된 가로·세로.
+  // 실제 적용할 초기 {w,h}. 기본은 프리셋 정사각/커스텀 저장값이며, 채팅 없이 시작할
+  // 때의 16:9 옵션이 켜져 있으면 가로값만 유지하고 높이를 다시 계산한다.
   function getPopupPlayerInitialSize() {
+    let size;
     if (popupPlayerSize === "custom") {
-      return { w: popupPlayerSizeW, h: popupPlayerSizeH };
+      size = { w: popupPlayerSizeW, h: popupPlayerSizeH };
+    } else {
+      const n = Number(popupPlayerSize) || POPUP_PLAYER_SIZE_DEFAULT;
+      size = { w: n, h: n };
     }
-    const n = Number(popupPlayerSize) || POPUP_PLAYER_SIZE_DEFAULT;
-    return { w: n, h: n };
+    if (popupPlayerStartWithoutChat && popupPlayerStartWithoutChat16x9) {
+      size.h = Math.max(160, Math.round((size.w * 9) / 16));
+    }
+    return size;
   }
   // 사이드바 팔로잉 채널 호버 시 라이브 영상 미리보기(전역, 기본 ON). content.js 전용.
   const FOLLOW_PREVIEW_KEY = "cheeseFollowPreview";
@@ -1832,6 +1851,26 @@
     title: "제목순",
     channel: "채널명순",
   });
+  // ── 다시보기 보관함 ──────────────────────────────────────────────────────
+  // 클립 보관함과 저장 키를 분리한다. 다시보기 번호는 숫자이고 카드 구조도 달라서
+  // 하나의 스키마로 합치면 마이그레이션과 중복 판정이 오히려 불안정해진다.
+  const VIDEO_VAULT_ACCOUNT_KEY_PREFIX = "cheeseVideoVault:";
+  const VIDEO_VAULT_ACCOUNT_IDS_KEY = "cheeseVideoVaultAccountIds";
+  const VIDEO_VAULT_ACTIVE_ACCOUNT_KEY = "cheeseVideoVaultActiveAccount";
+  const VIDEO_VAULT_SORT_KEY = "cheeseVideoVaultSort";
+  const VIDEO_VAULT_GROUP_STREAMER_KEY = "cheeseVideoVaultGroupByStreamer";
+  const VIDEO_VAULT_GROUP_DATE_KEY = "cheeseVideoVaultGroupByDate";
+  const VIDEO_VAULT_PAGE_SIZE = 60;
+  const VIDEO_VAULT_LIMIT = 5000;
+  const VIDEO_VAULT_DETAIL_TTL_MS = 10 * 60 * 1000;
+  const VIDEO_VAULT_DETAIL_RETRY_MS = 60 * 1000;
+  const VIDEO_VAULT_DETAIL_CONCURRENCY = 3;
+  const VIDEO_VAULT_SORTS = Object.freeze({
+    "saved-desc": "최근 저장순",
+    "saved-asc": "오래된 저장순",
+    title: "제목순",
+    channel: "채널명순",
+  });
 
   // ── 채팅 리캡(본인 채팅 로컬 기록) ────────────────────────────────────────
   // ⚠ 위의 cheeseChatHistory 와는 다른 기능이다. 그건 '채팅 이어보기'용으로 모든
@@ -1854,20 +1893,17 @@
   let chatRecapOn = false;
   let chatRecapRetentionDays = 0;
   let chatRecapPlayerButtonHidden = false;
+  let chatRecapOpenPanel = null;
+  let chatRecapOpenVideoNo = "";
 
   const CHAT_HISTORY_ENABLED_KEY = "cheeseChatHistory";
   const CHAT_HISTORY_LIMIT_KEY = "cheeseChatHistoryLimit";
-  const CHAT_HISTORY_STORE_PREFIX = "cheeseChatHistory:"; // + channelId
+  const CHAT_HISTORY_MESSAGE_TYPE = "CHAT_HISTORY_BUFFER";
   const CHAT_HISTORY_LIMIT_DEFAULT = 200;
   const CHAT_HISTORY_LIMIT_MIN = 50;
   const CHAT_HISTORY_LIMIT_MAX = 500;
   const CHAT_HISTORY_ROW_HTML_MAX = 64 * 1024;
-  const CHAT_HISTORY_RESTORE_BATCH_MAX = 50;
-  const CHAT_HISTORY_STORAGE_VERSION = 3;
-  // 확장 업데이트 때도 이어지도록 storage.local에 저장하고, 브라우저가 새로 시작될 때
-  // background가 이 접두어의 기록만 지운다. quota 방어는 비정상적으로 큰 기록이나
-  // unlimitedStorage가 적용되지 않는 환경을 위해 그대로 둔다.
-  const CHAT_HISTORY_EVICT_RATIO = 0.1; // 초과 시 오래된 쪽부터 10%씩 버리고 재시도
+  const CHAT_HISTORY_RENDER_BATCH = 50;
   const CHAT_HISTORY_MARK = "data-cheese-chat-history";
   const CHAT_HISTORY_EPOCH_MARK = "data-cheese-history-epoch-ms";
   const CHAT_HISTORY_OS_MARK = "data-cheese-history-os";
@@ -2004,6 +2040,7 @@
     chatRestoreBlind: false, // 가려진(클린봇/블라인드) 채팅 원문 복원(chatTimestamp.js)
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
     clipVault: false, // /clips 헤더의 클립 보관함(즐겨찾기·좋아요) 버튼
+    videoVault: false, // /videos·팔로잉 동영상의 다시보기 보관함
     chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
     chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
     chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
@@ -2050,6 +2087,7 @@
     sbFollowFavAutoExpand: false, // 전용 목록의 즐겨찾기를 처음부터 전부 펼쳐 표시
     sbFollowGroupEnabled: true, // 전용 목록에서 그룹 영역 표시(기본 ON)
     sbFollowGroupAutoExpand: false, // 전용 목록의 그룹을 처음부터 전부 펼쳐 표시
+    sbFollowGroupCompactHeader: false, // 그룹 액션을 더보기 메뉴로 모아 헤더를 한 줄로 표시
     sbFollowGroupExclusive: false, // 그룹에 속한 채널을 '팔로잉' 목록에서 숨김
     sbFollowCustomOffline: false, // 전용 팔로잉 목록 일반 그룹에서 오프라인 채널 숨김
     sbFollowCustomFavoriteOffline: false, // 전용 팔로잉 목록 즐겨찾기 그룹에서 오프라인 채널 숨김
@@ -2293,6 +2331,14 @@
       "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMTc2/MDAxNzY3MDgyMDEyNDAw.DmMhs-TROPuxmXoT-fur1EUdbl74UsFGaG4D_0TN9NMg.gaAhW1wR3LsotwdAIn3K8Bx5-7pwZ_-UO39gWYO4NLEg.PNG/2%EC%9C%84.png",
     "2025chzzkcup_3":
       "https://nng-phinf.pstatic.net/MjAyNTEyMzBfMjg0/MDAxNzY3MDgyMTQxMjkw.yqUbAh_oHqq4ERj59MXoLakFSNSOL9ov7oN5HG0O9N4g.vDSQBKar0DZ0uxDtQ-4JM_U_xD9t1iaEy6JVxxUHizQg.PNG/3%EC%9C%84.png",
+    "2026chzzkopencup_1":
+      "https://nng-phinf.pstatic.net/MjAyNjA4MzFfMjA4/MDAxNzg4MTUyNDYzNzIx.n4bUzo6SJ4S8n31pkbB3_gI9OmJZF48jR6t0ZERGayAg.0PXwykFB7voFglPiPurnjTxCnJNvqCNSKQFrjJK2mVog.PNG/1%EC%9C%84.png?type=f120_120_na",
+    "2026chzzkopencup_2":
+      "https://nng-phinf.pstatic.net/MjAyNjA4MzFfMTIz/MDAxNzg4MTUyNjkyODQy.YH27ysL9OHVKiri3UvOzoGOaYvqnBJUCbulz4SsVPM4g.XU1ocFsNd9YK5a2YjVgI4GGE7-mVI92G-QitPI3tHDog.PNG/2%EC%9C%84.png?type=f120_120_na",
+    "2026chzzkopencup_3":
+      "https://nng-phinf.pstatic.net/MjAyNjA4MzFfOTUg/MDAxNzg4MTUyODE3MDM2.grjB2YLSzNM4yBNlsxia_XD9d-ozxxoBAeb-jqa6JcQg.e7VBfF-gOrYQaB_dYe3xWIX63y-dkoqkayYV45ej5qEg.PNG/3%EC%9C%84.png?type=f120_120_na",
+    "2026chzzkopencup_4":
+      "https://nng-phinf.pstatic.net/MjAyNjA4MzFfMjM5/MDAxNzg4MTUyOTM2MjU1.hkR7clu52DuHfOUXt2m4d3eRrDMhg3vS1_-81KcIWXkg.Hl1mOCp2cfqXD_q6S9SoqEyfWiQiMQdcymDGn83hYckg.PNG/4-10%EC%9C%84.png?type=f120_120_na",
     chistival_overcooked:
       "https://nng-phinf.pstatic.net/MjAyNTA4MjVfMjkx/MDAxNzU2MDk4MDg5MTYz.OB6AzJj3XW235D3_RoL-RCc0RIQyMl5HbZmRWJTBwdwg.p2TicS08K052ZCv_VosAn4seKuMu7cNLInBpZJU9jlAg.PNG/%EC%B9%98%EC%8A%A4%ED%8B%B0%EB%B2%8C_5%ED%9A%8C%EC%B0%A8_%EC%98%A4%EB%B2%84%EC%BF%A1%EB%93%9C2_128px.png",
     chstival_pubg_1:
@@ -2355,6 +2401,10 @@
     "2025chzzkcup_1": "2025 치지직컵 우승:도개걸운모",
     "2025chzzkcup_2": "2025 치지직 2위:앰큐베이턱",
     "2025chzzkcup_3": "2025 치지직 3위:부산행",
+    "2026chzzkopencup_1": "2026 치지직 오픈컵 우승 : 24시간이 모자라",
+    "2026chzzkopencup_2": "2026 치지직 오픈컵 2위 : 영명보의 이리교실",
+    "2026chzzkopencup_3": "2026 치지직 오픈컵 3위 : 루미널의 자존심",
+    "2026chzzkopencup_4": "2026 치지직 오픈컵 참가상",
     chistival_overcooked: "치스티벌_오버쿡드2 우승 팀장",
     chstival_pubg_1: "치스티벌_배틀그라운드 우승 팀장",
     chstival_head_1: "치스티벌_헤드뱅어즈:리듬로얄 우승 팀장",
@@ -2605,6 +2655,7 @@
 
   const observerState = {
     initTimer: 0,
+    initIdleHandle: 0,
     studioMakeClipInitTimer: 0,
   };
 
@@ -2750,8 +2801,8 @@
         </div>
       </label>
     </div>
-    ${createDatePicker("dateFrom", "시작일")}
-    ${createDatePicker("dateTo", "종료일")}
+    ${createDatePicker("dateFrom", "시작일", true, false, isClipContent())}
+    ${createDatePicker("dateTo", "종료일", true, false, isClipContent())}
     ${
       isVideoLike
         ? `<div class="cheese-search-duration-picker" data-duration-picker>
@@ -2813,6 +2864,8 @@
     shell.dataset.sort = "latest";
     shell.dataset.duration = "all";
     shell.dataset.videoType = "all";
+    shell.dataset.timeFrom = "00:00";
+    shell.dataset.timeTo = "23:59";
 
     shell
       .querySelector(".cheese-search-input")
@@ -2828,6 +2881,15 @@
       .addEventListener("click", handleSearchHelpClick);
     shell.querySelectorAll("[data-date-picker]").forEach((picker) => {
       picker.addEventListener("click", handleDatePickerClick);
+    });
+    shell.querySelectorAll("[data-time-picker]").forEach((picker) => {
+      picker.addEventListener("click", handleTimeStepperClick);
+      picker.addEventListener("change", handleTimePartChange);
+      picker.addEventListener("keydown", handleTimePartKeydown);
+      picker.addEventListener("focusin", handleTimePartFocus);
+      picker.addEventListener("wheel", handleTimePartWheel, {
+        passive: false,
+      });
     });
     shell
       .querySelector("[data-sort-picker]")
@@ -2908,7 +2970,9 @@
     label,
     includePresets = true,
     includeDayShortcuts = false,
+    includeTime = false,
   ) {
+    const defaultTime = type === "dateTo" ? "23:59" : "00:00";
     return `
     <div class="cheese-search-date-picker" data-date-picker="${type}">
       <button type="button" class="cheese-search-control cheese-search-date-trigger" data-action="date-toggle" aria-haspopup="dialog" aria-expanded="false">
@@ -2936,6 +3000,14 @@
           <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
         </div>
         <div class="cheese-search-calendar-grid" data-calendar-grid></div>
+        ${
+          includeTime
+            ? `<div class="cheese-search-calendar-time">
+          <span class="cheese-search-calendar-time-label">시간</span>
+          ${createCustomTimePicker(type, label, defaultTime)}
+        </div>`
+            : ""
+        }
         <div class="cheese-search-calendar-actions">
           <button type="button" data-calendar-action="clear">초기화</button>
           ${
@@ -2949,6 +3021,35 @@
       </div>
     </div>
   `;
+  }
+
+  function createCustomTimePicker(type, label, value) {
+    const { period, hour, minute, normalized } = getTwelveHourParts(value);
+    return `<div class="cheese-search-time-picker" data-time-picker="${type}" role="group" aria-label="${label} 시간">
+      <span class="cheese-search-time-period" role="group" aria-label="${label} 오전 오후">
+        <button type="button" class="${period === "am" ? "is-selected" : ""}" data-time-period="am" aria-pressed="${period === "am"}" disabled>오전</button>
+        <button type="button" class="${period === "pm" ? "is-selected" : ""}" data-time-period="pm" aria-pressed="${period === "pm"}" disabled>오후</button>
+      </span>
+      <div class="cheese-search-time-segment" data-time-segment="hour">
+        <input type="text" value="${hour}" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" role="spinbutton" aria-valuemin="1" aria-valuemax="12" aria-valuenow="${Number(hour)}" data-time-part-input="hour" aria-label="${label} 시" disabled>
+        ${createTimeSpinControls(label, "hour")}
+      </div>
+      <span class="cheese-search-time-unit" aria-hidden="true">시</span>
+      <div class="cheese-search-time-segment" data-time-segment="minute">
+        <input type="text" value="${minute}" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" role="spinbutton" aria-valuemin="0" aria-valuemax="59" aria-valuenow="${Number(minute)}" data-time-part-input="minute" aria-label="${label} 분" disabled>
+        ${createTimeSpinControls(label, "minute")}
+      </div>
+      <span class="cheese-search-time-unit" aria-hidden="true">분</span>
+      <input type="hidden" value="${normalized}" data-time-input="${type}">
+    </div>`;
+  }
+
+  function createTimeSpinControls(label, part) {
+    const unit = part === "hour" ? "시 한 시간" : "분 1분";
+    return `<span class="cheese-search-time-spin-controls">
+      <button type="button" data-time-step-part="${part}" data-time-step="1" aria-label="${label} ${unit} 늘리기" tabindex="-1" disabled><svg class="lucide lucide-chevron-up" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m18 15-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      <button type="button" data-time-step-part="${part}" data-time-step="-1" aria-label="${label} ${unit} 줄이기" tabindex="-1" disabled><svg class="lucide lucide-chevron-down" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+    </span>`;
   }
 
   function createCalendarNavIcon(direction) {
@@ -3847,6 +3948,8 @@
       controls.categoryFilter,
       controls.dateFrom,
       controls.dateTo,
+      controls.timeFrom,
+      controls.timeTo,
       controls.duration,
       controls.videoType,
       controls.sort,
@@ -3955,8 +4058,15 @@
       return filteredVideosCache.result;
     }
 
-    const dateFrom = controls.dateFrom ? getDayStart(controls.dateFrom) : 0;
-    const dateTo = controls.dateTo ? getDayEnd(controls.dateTo) : 0;
+    const dateFrom = controls.dateFrom
+      ? getDayStart(
+          controls.dateFrom,
+          isClipContent() ? controls.timeFrom : "00:00",
+        )
+      : 0;
+    const dateTo = controls.dateTo
+      ? getDayEnd(controls.dateTo, isClipContent() ? controls.timeTo : "23:59")
+      : 0;
     const searchOptions = getSearchOptions();
 
     const result = state.videos
@@ -4066,6 +4176,8 @@
       categoryFilter: shell.dataset.categoryFilter || "",
       dateFrom: shell.dataset.dateFrom || "",
       dateTo: shell.dataset.dateTo || "",
+      timeFrom: shell.dataset.timeFrom || "00:00",
+      timeTo: shell.dataset.timeTo || "23:59",
       duration: shell.dataset.duration || "all",
       videoType: shell.dataset.videoType || "all",
       sort: shell.dataset.sort || "latest",
@@ -4436,6 +4548,8 @@
     state.visibleCount = RESULT_INITIAL_RENDER_COUNT;
     setDateValue(shell, "dateFrom", "");
     setDateValue(shell, "dateTo", "");
+    setTimeValue(shell, "dateFrom", "00:00");
+    setTimeValue(shell, "dateTo", "23:59");
     resetCalendarMonthsToCurrent();
     setDurationValue(shell, "all");
     setVideoTypeValue(shell, "all");
@@ -4610,6 +4724,8 @@
       query: "",
       dateFrom: "",
       dateTo: "",
+      timeFrom: "00:00",
+      timeTo: "23:59",
       duration: "all",
       videoType: "all",
       sort: "latest",
@@ -4625,6 +4741,8 @@
     url.searchParams.set("categoryFilter", controls.categoryFilter || "");
     url.searchParams.set("dateFrom", controls.dateFrom);
     url.searchParams.set("dateTo", controls.dateTo);
+    url.searchParams.set("timeFrom", controls.timeFrom);
+    url.searchParams.set("timeTo", controls.timeTo);
     url.searchParams.set("duration", controls.duration);
     url.searchParams.set("videoTypeFilter", controls.videoType);
     url.searchParams.set("sort", controls.sort);
@@ -4864,7 +4982,12 @@
     if (action.date) {
       setDateValue(shell, type, action.date);
       normalizeDateRange(shell, type);
-      closeDatePicker(picker);
+      normalizeTimeRange(shell, type);
+      if (picker.querySelector("[data-time-input]")) {
+        keepDatePickerOpen(picker);
+      } else {
+        closeDatePicker(picker);
+      }
       renderAllCalendars(shell);
       if (isStudioShell) {
         handleStudioDateFilterChange(shell);
@@ -4872,6 +4995,153 @@
       }
       handleFilterChange();
     }
+  }
+
+  function handleTimeStepperClick(event) {
+    const periodButton = event.target.closest("[data-time-period]");
+    if (periodButton && !periodButton.disabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      commitCustomTimePeriod(
+        periodButton.closest("[data-time-picker]"),
+        periodButton.dataset.timePeriod,
+      );
+      return;
+    }
+    const button = event.target.closest("[data-time-step-part]");
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    stepCustomTimePicker(
+      button.closest("[data-time-picker]"),
+      button.dataset.timeStepPart,
+      Number(button.dataset.timeStep),
+    );
+  }
+
+  function handleTimePartChange(event) {
+    const input = event.target.closest("[data-time-part-input]");
+    if (!input || input.disabled) return;
+    commitCustomTimePart(input);
+  }
+
+  function handleTimePartKeydown(event) {
+    const input = event.target.closest("[data-time-part-input]");
+    if (!input || input.disabled) return;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      stepCustomTimePicker(
+        input.closest("[data-time-picker]"),
+        input.dataset.timePartInput,
+        event.key === "ArrowUp" ? 1 : -1,
+      );
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+  }
+
+  function handleTimePartFocus(event) {
+    event.target.closest("[data-time-part-input]")?.select();
+  }
+
+  function handleTimePartWheel(event) {
+    const picker = event.currentTarget;
+    const input = picker?.querySelector("[data-time-part-input]:focus");
+    if (!input || input.disabled || !event.deltaY) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const now = performance.now();
+    const last = Number(input.dataset.timeWheelAt || 0);
+    if (last && now - last < 70) return;
+    input.dataset.timeWheelAt = String(now);
+    stepCustomTimePicker(
+      picker,
+      input.dataset.timePartInput,
+      event.deltaY < 0 ? 1 : -1,
+    );
+  }
+
+  function stepCustomTimePicker(picker, part, delta) {
+    const shell = picker?.closest(".cheese-search-shell");
+    const type = picker?.dataset.timePicker;
+    const timeInput = picker?.querySelector("[data-time-input]");
+    if (!shell || !type || !timeInput || !isClipContent()) return;
+    const [hour, minute] = normalizeTimeValue(
+      timeInput.value,
+      defaultTimeForDateType(type),
+    )
+      .split(":")
+      .map(Number);
+    const amount =
+      (Number.isFinite(delta) ? delta : 0) * (part === "hour" ? 60 : 1);
+    const total = (hour * 60 + minute + amount + 1440) % 1440;
+    commitCustomTimePicker(
+      shell,
+      type,
+      `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`,
+    );
+  }
+
+  function commitCustomTimePeriod(picker, period) {
+    const shell = picker?.closest(".cheese-search-shell");
+    const type = picker?.dataset.timePicker;
+    const timeInput = picker?.querySelector("[data-time-input]");
+    if (!shell || !type || !timeInput || !["am", "pm"].includes(period)) {
+      return;
+    }
+    const [hour, minute] = normalizeTimeValue(
+      timeInput.value,
+      defaultTimeForDateType(type),
+    )
+      .split(":")
+      .map(Number);
+    const nextHour = (hour % 12) + (period === "pm" ? 12 : 0);
+    if (nextHour === hour) return;
+    commitCustomTimePicker(
+      shell,
+      type,
+      `${String(nextHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    );
+  }
+
+  function commitCustomTimePart(input) {
+    const picker = input.closest("[data-time-picker]");
+    const shell = picker?.closest(".cheese-search-shell");
+    const type = picker?.dataset.timePicker;
+    const timeInput = picker?.querySelector("[data-time-input]");
+    const part = input.dataset.timePartInput;
+    if (!shell || !type || !timeInput || !isClipContent()) return;
+    const [currentHour, currentMinute] = normalizeTimeValue(
+      timeInput.value,
+      defaultTimeForDateType(type),
+    )
+      .split(":")
+      .map(Number);
+    const digits = String(input.value || "").replace(/\D/g, "");
+    const currentHour12 = currentHour % 12 || 12;
+    const fallback = part === "hour" ? currentHour12 : currentMinute;
+    const minimum = part === "hour" ? 1 : 0;
+    const maximum = part === "hour" ? 12 : 59;
+    const parsed = digits ? Number(digits) : fallback;
+    const value = Math.min(maximum, Math.max(minimum, parsed));
+    const hour =
+      part === "hour"
+        ? (value % 12) + (currentHour >= 12 ? 12 : 0)
+        : currentHour;
+    const minute = part === "minute" ? value : currentMinute;
+    commitCustomTimePicker(
+      shell,
+      type,
+      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+    );
+  }
+
+  function commitCustomTimePicker(shell, type, value) {
+    setTimeValue(shell, type, value);
+    normalizeTimeRange(shell, type);
+    handleFilterChange();
   }
 
   function refreshClipLoadingView() {
@@ -4900,6 +5170,8 @@
     const start = toDateKey(startDate);
     setDateValue(shell, "dateFrom", start);
     setDateValue(shell, "dateTo", end);
+    setTimeValue(shell, "dateFrom", "00:00");
+    setTimeValue(shell, "dateTo", "23:59");
     state.calendarMonths.dateFrom = getMonthStart(startDate);
     state.calendarMonths.dateTo = getMonthStart(today);
   }
@@ -5150,9 +5422,101 @@
 
   function setDateValue(shell, type, value) {
     shell.dataset[type] = value;
+    const timeInput = shell.querySelector(`[data-time-input="${type}"]`);
+    if (timeInput) {
+      if (!value) setTimeValue(shell, type, defaultTimeForDateType(type));
+      setCustomTimePickerDisabled(timeInput, !value);
+    }
+    updateDateTimeLabel(shell, type);
+  }
+
+  function defaultTimeForDateType(type) {
+    return type === "dateTo" ? "23:59" : "00:00";
+  }
+
+  function normalizeTimeValue(value, fallback = "00:00") {
+    const match = String(value || "").match(/^(\d{2}):(\d{2})$/);
+    if (!match) return fallback;
+    const hour = Math.min(23, Math.max(0, Number(match[1])));
+    const minute = Math.min(59, Math.max(0, Number(match[2])));
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+
+  function getTwelveHourParts(value, fallback = "00:00") {
+    const normalized = normalizeTimeValue(value, fallback);
+    const [hour24, minute] = normalized.split(":");
+    const hourNumber = Number(hour24);
+    return {
+      normalized,
+      period: hourNumber >= 12 ? "pm" : "am",
+      hour: String(hourNumber % 12 || 12).padStart(2, "0"),
+      minute,
+    };
+  }
+
+  function formatTwelveHourTime(value, fallback = "00:00") {
+    const { period, hour, minute } = getTwelveHourParts(value, fallback);
+    return `${period === "pm" ? "오후" : "오전"} ${Number(hour)}:${minute}`;
+  }
+
+  function setTimeValue(shell, type, value) {
+    const key = type === "dateTo" ? "timeTo" : "timeFrom";
+    const normalized = normalizeTimeValue(value, defaultTimeForDateType(type));
+    shell.dataset[key] = normalized;
+    const input = shell.querySelector(`[data-time-input="${type}"]`);
+    if (input) {
+      input.value = normalized;
+      const picker = input.closest("[data-time-picker]");
+      const { period, hour, minute } = getTwelveHourParts(normalized);
+      const hourInput = picker?.querySelector('[data-time-part-input="hour"]');
+      const minuteInput = picker?.querySelector(
+        '[data-time-part-input="minute"]',
+      );
+      if (hourInput) {
+        hourInput.value = hour;
+        hourInput.setAttribute("aria-valuenow", String(Number(hour)));
+        hourInput.setAttribute(
+          "aria-valuetext",
+          `${period === "pm" ? "오후" : "오전"} ${Number(hour)}시`,
+        );
+      }
+      if (minuteInput) {
+        minuteInput.value = minute;
+        minuteInput.setAttribute("aria-valuenow", String(Number(minute)));
+        minuteInput.setAttribute("aria-valuetext", `${Number(minute)}분`);
+      }
+      picker?.querySelectorAll("[data-time-period]").forEach((button) => {
+        const selected = button.dataset.timePeriod === period;
+        button.classList.toggle("is-selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+    }
+    updateDateTimeLabel(shell, type);
+  }
+
+  function setCustomTimePickerDisabled(timeInput, disabled) {
+    const picker = timeInput?.closest("[data-time-picker]");
+    picker?.classList.toggle("is-disabled", disabled);
+    picker
+      ?.querySelectorAll("button, [data-time-part-input]")
+      .forEach((control) => {
+        control.disabled = disabled;
+      });
+  }
+
+  function updateDateTimeLabel(shell, type) {
     const label = shell.querySelector(`[data-date-label="${type}"]`);
     if (!label) return;
-    label.textContent = value ? formatDateLabel(value) : "선택 안 함";
+    const value = shell.dataset[type] || "";
+    if (!value) {
+      label.textContent = "선택 안 함";
+      return;
+    }
+    const timeInput = shell.querySelector(`[data-time-input="${type}"]`);
+    const key = type === "dateTo" ? "timeTo" : "timeFrom";
+    label.textContent = timeInput
+      ? `${formatDateLabel(value)} ${formatTwelveHourTime(shell.dataset[key], defaultTimeForDateType(type))}`
+      : formatDateLabel(value);
   }
 
   function normalizeDateRange(shell, changedType) {
@@ -5164,6 +5528,20 @@
       setDateValue(shell, "dateTo", "");
     } else {
       setDateValue(shell, "dateFrom", "");
+    }
+  }
+
+  function normalizeTimeRange(shell, changedType) {
+    const dateFrom = shell.dataset.dateFrom || "";
+    const dateTo = shell.dataset.dateTo || "";
+    if (!dateFrom || dateFrom !== dateTo) return;
+    const timeFrom = shell.dataset.timeFrom || "00:00";
+    const timeTo = shell.dataset.timeTo || "23:59";
+    if (timeFrom <= timeTo) return;
+    if (changedType === "dateFrom") {
+      setTimeValue(shell, "dateTo", timeFrom);
+    } else {
+      setTimeValue(shell, "dateFrom", timeTo);
     }
   }
 
@@ -5318,12 +5696,16 @@
     return `${year}-${month}-${day}`;
   }
 
-  function getDayStart(value) {
-    return new Date(`${value}T00:00:00+09:00`).getTime();
+  function getDayStart(value, time = "00:00") {
+    return new Date(
+      `${value}T${normalizeTimeValue(time, "00:00")}:00+09:00`,
+    ).getTime();
   }
 
-  function getDayEnd(value) {
-    return new Date(`${value}T23:59:59.999+09:00`).getTime();
+  function getDayEnd(value, time = "23:59") {
+    return new Date(
+      `${value}T${normalizeTimeValue(time, "23:59")}:59.999+09:00`,
+    ).getTime();
   }
 
   function formatDateLabel(value) {
@@ -6233,6 +6615,7 @@
     void loadCommentTsClickAction();
     const videoNo = getCurrentVideoNo();
     if (!videoNo) {
+      closeChatRecapPanel();
       resetCommentTimestampMarkers();
       return;
     }
@@ -6243,8 +6626,11 @@
       commentMarkerState.loadingVideoNo = videoNo;
       ensureCommentTimestampButton();
       ensureChatRecapButton();
-      // 영상이 바뀌면 리캡 패널을 닫고 채널 힌트를 다시 잡는다.
-      closeChatRecapPanel();
+      // 댓글 마커 상태만 내부적으로 재초기화될 수도 있다. 실제로 다른 영상으로 이동한
+      // 경우에만 리캡 패널을 닫아, 같은 영상에서 열린 패널이 간헐적으로 사라지지 않게 한다.
+      if (chatRecapOpenVideoNo && chatRecapOpenVideoNo !== videoNo) {
+        closeChatRecapPanel();
+      }
       if (chatRecapOn) void ensureRecapVodChannel();
       void loadCommentTimestampMarkers(videoNo);
       return;
@@ -6274,6 +6660,7 @@
       seekPreviewState.liveOpenAt = 0;
       seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
+      seekPreviewState.titleChanges = [];
       hideVideoInfoTooltip(); // 다시보기 이탈 → 우리 툴팁 숨김
       return;
     }
@@ -6282,6 +6669,7 @@
       seekPreviewState.liveOpenAt = 0;
       seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
+      seekPreviewState.titleChanges = [];
       hideVideoInfoTooltip(); // 영상 전환 → 이전 영상 툴팁 숨김
       videoInfoHoverTrigger = null;
       // 새 영상 진입 → 자동 재생 끄기 재적용 허용(영상마다 스위치가 새로 렌더됨).
@@ -6292,11 +6680,36 @@
         if (correction) applyVodChatCorrectionToViews(videoNo, correction);
       });
       void fetchVideoDates(videoNo);
+      void loadSeekPreviewTitleChanges(videoNo);
     }
     startSeekPreviewObserver();
     // 등록일 라벨 마킹은 매 mutation 이 아니라 init 주기(뮤테이션 디바운스)면 충분하다 —
     // 라벨은 SPA 전환/재렌더 때만 새로 생긴다.
     updateVideoInfoLabel();
+  }
+
+  async function loadSeekPreviewTitleChanges(videoNo) {
+    try {
+      const record = await CHAT_RECAP_STORE_API.loadVodTitleChanges(
+        chrome.storage.local,
+        videoNo,
+      );
+      if (seekPreviewState.videoNo !== videoNo) return record;
+      seekPreviewState.titleChanges = record.items;
+      updateSeekPreviewRealtime();
+      return record;
+    } catch {
+      return { complete: false, items: [] };
+    }
+  }
+
+  function vodTitleAtOffset(offsetSeconds) {
+    let title = "";
+    for (const change of seekPreviewState.titleChanges) {
+      if (Number(change?.v) > offsetSeconds) break;
+      title = String(change?.title || "");
+    }
+    return title;
   }
 
   async function fetchVideoDates(videoNo) {
@@ -6401,7 +6814,8 @@
     document.documentElement.classList.toggle("cheese-vod-portrait", portrait);
   }
 
-  // 현재 떠 있는 seek preview의 시간 아래에 방송 당시 추정 시각을 병기/갱신한다.
+  // 현재 떠 있는 seek preview의 시간 아래에 방송 당시 추정 시각과 그 시점의
+  // 확정된 변경 제목을 병기/갱신한다.
   function updateSeekPreviewRealtime() {
     updateVodPortraitClass();
     // 팝업에서 숨김 처리하면 이미 붙은 병기 줄을 제거하고 끝낸다.
@@ -6426,14 +6840,17 @@
     if (!Number.isFinite(seconds)) return;
     const label = formatBroadcastClock(seekPreviewState.liveOpenAt, seconds);
     const source = seekPreviewState.liveOpenAtCorrected ? "chat" : "estimate";
+    const broadcastTitle = vodTitleAtOffset(seconds);
     if (existing) {
       if (
         existing.dataset.label !== label ||
-        existing.dataset.source !== source
+        existing.dataset.source !== source ||
+        existing.dataset.broadcastTitle !== broadcastTitle
       ) {
         existing.dataset.label = label;
         existing.dataset.source = source;
-        setSeekRealtimeContent(existing, label);
+        existing.dataset.broadcastTitle = broadcastTitle;
+        setSeekRealtimeContent(existing, label, broadcastTitle);
       }
       existing.title = seekPreviewState.liveOpenAtCorrected
         ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
@@ -6444,16 +6861,17 @@
     span.className = SEEK_PREVIEW_REALTIME_CLASS;
     span.dataset.label = label;
     span.dataset.source = source;
+    span.dataset.broadcastTitle = broadcastTitle;
     span.title = seekPreviewState.liveOpenAtCorrected
       ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
       : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
-    setSeekRealtimeContent(span, label);
+    setSeekRealtimeContent(span, label, broadcastTitle);
     timeEl.appendChild(span);
   }
 
   // 실제시각 라벨을 '날짜 / 시각' 두 줄로 나눠 넣는다(한 줄이면 preview 폭을 넓혀 세로
   // 방송·재생바 끝에서 화면 밖으로 짤렸다). "YY.MM.DD. 오전/오후 H:MM:SS" → 날짜부 + 시각부.
-  function setSeekRealtimeContent(el, label) {
+  function setSeekRealtimeContent(el, label, broadcastTitle = "") {
     el.textContent = "";
     const m = String(label).match(/^(.+?\.)\s+(.+)$/); // "26.07.20." | "오후 4:06:50"
     const datePart = m ? m[1] : label;
@@ -6467,6 +6885,13 @@
       t.className = "cheese-seek-realtime-time";
       t.textContent = timePart;
       el.appendChild(t);
+    }
+    if (broadcastTitle) {
+      const title = document.createElement("span");
+      title.className = "cheese-seek-realtime-title";
+      title.textContent = broadcastTitle;
+      title.title = `이 시점의 방송 제목: ${broadcastTitle}`;
+      el.appendChild(title);
     }
     // '추정' 배지는 넣지 않는다 — 같은 내용을 span 의 title 툴팁이 이미 안내한다.
   }
@@ -8639,8 +9064,9 @@
     if (button?.classList?.contains(VIDEO_COMMENT_BUTTON_DISABLED_CLASS)) {
       return;
     }
-    const recapPanel = document.querySelector(`.${RECAP_PANEL_CLASS}`);
-    if (recapPanel) {
+    // 플레이어 루트 교체로 패널이 잠시 DOM에서 떨어진 동안에도 열린 세션으로 본다.
+    // DOM 존재 여부만 보면 댓글 패널과 리캡 패널이 동시에 열릴 수 있다.
+    if (chatRecapOpenPanel) {
       closeChatRecapPanel();
       return;
     }
@@ -9274,6 +9700,8 @@
   let chatGraphAuto = false; // 자동 표시(캐시가 있을 때)
   let chatGraphAutoCollect = false; // 캐시가 없어도 자동 수집
   let chatGraphAutoTriedVideo = ""; // 이 영상에서 자동 표시를 이미 시도했는지
+  let chatGraphAutoCheckingVideo = ""; // 캐시 확인 중인 영상(중복 비동기 실행 방지)
+  let chatGraphAutoCheckVersion = 0; // 설정·영상 변경 전 시작한 확인 결과 무효화
   const chatGraphState = {
     videoNo: "",
     bins: null, // [{chat, donation, subscription}]
@@ -9357,8 +9785,11 @@
       donation: 0,
       subscription: 0,
     }));
+    const titleChangeTracker =
+      CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     const totalMs = duration * 1000;
     let cursor = 0;
+    let completed = false;
     for (let page = 0; page < CHAT_GRAPH_MAX_PAGES; page += 1) {
       const url =
         `https://api.chzzk.naver.com/service/v1/videos/${videoNo}/chats` +
@@ -9367,7 +9798,10 @@
       try {
         // eslint-disable-next-line no-await-in-loop
         const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) break;
+        if (!res.ok) {
+          if (res.status === 400) completed = true;
+          break;
+        }
         // eslint-disable-next-line no-await-in-loop
         content = (await res.json())?.content;
       } catch {
@@ -9377,8 +9811,12 @@
       //   최대 1500회까지 계속 받는다(긴 방송은 80초 넘게).
       if (chatGraphState.cancel || getCurrentVideoNo() !== videoNo) break;
       const list = content?.videoChats;
-      if (!Array.isArray(list) || !list.length) break;
+      if (!Array.isArray(list) || !list.length) {
+        completed = true;
+        break;
+      }
       for (const m of list) {
+        titleChangeTracker.add(m);
         const at = Number(m?.playerMessageTime);
         if (!Number.isFinite(at) || at < 0) continue;
         const idx = Math.min(
@@ -9393,9 +9831,23 @@
         else if (code === CHAT_TYPE_SUBSCRIPTION) bin.subscription += 1;
       }
       const next = Number(content?.nextPlayerMessageTime);
-      if (!Number.isFinite(next) || next <= cursor) break;
+      if (!Number.isFinite(next) || next <= cursor) {
+        completed = true;
+        break;
+      }
       cursor = next;
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
+    }
+    if (completed) {
+      try {
+        await CHAT_RECAP_STORE_API.saveVodTitleChanges(
+          chrome.storage.local,
+          videoNo,
+          titleChangeTracker.finish(),
+        );
+      } catch {
+        // 그래프 자체는 정상 수집됐으므로 제목 메타데이터 실패만 무시한다.
+      }
     }
     onProgress?.(1);
     return bins;
@@ -9550,8 +10002,13 @@
       );
       return;
     }
+    const titleChangeRecord = await loadSeekPreviewTitleChanges(videoNo);
     // 이미 모아 둔 게 있으면 바로 보여 준다.
-    if (chatGraphState.videoNo === videoNo && chatGraphState.bins) {
+    if (
+      chatGraphState.videoNo === videoNo &&
+      chatGraphState.bins &&
+      titleChangeRecord.complete
+    ) {
       chatGraphState.shown = true;
       renderChatGraph();
       updateChatGraphButton(
@@ -9572,7 +10029,7 @@
     updateChatGraphButton(document.querySelector(btnSel));
     try {
       let bins = await loadChatGraphCache(videoNo);
-      if (!bins) {
+      if (!bins || !titleChangeRecord.complete) {
         bins = await collectChatGraph(videoNo, duration, (p) => {
           chatGraphState.progress = p;
           updateChatGraphButton(document.querySelector(btnSel));
@@ -9648,8 +10105,13 @@
       removeChatGraphLayer();
     }
     // 영상이 바뀌면 자동 표시를 다시 한 번 시도할 수 있게 한다.
-    if (chatGraphAutoTriedVideo && chatGraphAutoTriedVideo !== videoNo) {
+    if (
+      (chatGraphAutoTriedVideo && chatGraphAutoTriedVideo !== videoNo) ||
+      (chatGraphAutoCheckingVideo && chatGraphAutoCheckingVideo !== videoNo)
+    ) {
       chatGraphAutoTriedVideo = "";
+      chatGraphAutoCheckingVideo = "";
+      chatGraphAutoCheckVersion += 1;
     }
   }
 
@@ -9659,22 +10121,46 @@
   async function maybeAutoShowChatGraph() {
     if (!chatGraphOn || !chatGraphAuto) return;
     const videoNo = getCurrentVideoNo();
-    if (!videoNo || chatGraphAutoTriedVideo === videoNo) return;
-    if (chatGraphState.loading || chatGraphState.shown) return;
-    // 재생바(길이)가 준비되기 전에는 구간을 나눌 수 없다 → 다음 tick 에 다시 본다.
-    const slider = findPlayerSliderProgressWrap();
-    if (!slider || !getPlayerDuration(slider)) return;
-    // 캐시가 없고 자동 수집도 아니면 건드리지 않는다(버튼으로 직접 켜야 한다).
-    if (!chatGraphAutoCollect) {
-      const cached =
-        chatGraphState.videoNo === videoNo && chatGraphState.bins
-          ? chatGraphState.bins
-          : await loadChatGraphCache(videoNo);
-      if (!cached) return; // 시도 표시를 남기지 않는다 — 캐시가 생기면 그때 뜬다
-      if (getCurrentVideoNo() !== videoNo) return;
+    if (
+      !videoNo ||
+      chatGraphAutoTriedVideo === videoNo ||
+      chatGraphAutoCheckingVideo === videoNo
+    ) {
+      return;
     }
-    chatGraphAutoTriedVideo = videoNo;
-    await toggleChatGraph();
+    if (chatGraphState.loading || chatGraphState.shown) return;
+    const checkVersion = chatGraphAutoCheckVersion;
+    chatGraphAutoCheckingVideo = videoNo;
+    try {
+      // 재생바(길이)가 준비되기 전에는 구간을 나눌 수 없다 → 다음 tick 에 다시 본다.
+      const slider = findPlayerSliderProgressWrap();
+      if (!slider || !getPlayerDuration(slider)) return;
+      // 캐시가 없고 자동 수집도 아니면 건드리지 않는다(버튼으로 직접 켜야 한다).
+      if (!chatGraphAutoCollect) {
+        const cached =
+          chatGraphState.videoNo === videoNo && chatGraphState.bins
+            ? chatGraphState.bins
+            : await loadChatGraphCache(videoNo);
+        if (!cached) return; // 시도 표시를 남기지 않는다 — 캐시가 생기면 그때 뜬다
+      }
+      if (
+        checkVersion !== chatGraphAutoCheckVersion ||
+        !chatGraphOn ||
+        !chatGraphAuto ||
+        getCurrentVideoNo() !== videoNo
+      ) {
+        return;
+      }
+      chatGraphAutoTriedVideo = videoNo;
+      await toggleChatGraph();
+    } finally {
+      if (
+        checkVersion === chatGraphAutoCheckVersion &&
+        chatGraphAutoCheckingVideo === videoNo
+      ) {
+        chatGraphAutoCheckingVideo = "";
+      }
+    }
   }
 
   function renderCommentMarker(marker, duration) {
@@ -10339,6 +10825,7 @@
     const channelId = currentRecapChannelId();
     // 업로드 영상에는 채팅이 없다(채팅 API 400) → 훑지 않는다.
     if (await fetchIsUploadVideo(videoNo)) return [];
+    const titleChangeRecord = await loadSeekPreviewTitleChanges(videoNo);
     // 캐시가 있으면 즉시(같은 영상을 다시 열 때 수백 요청을 반복하지 않는다).
     const cached = recapVodCache.get(videoNo);
     if (cached) {
@@ -10347,7 +10834,7 @@
         videoNo,
         channelId,
       );
-      if (eventLink.current) {
+      if (eventLink.current && titleChangeRecord.complete) {
         setRecapVodCache(videoNo, cached);
         return cached;
       }
@@ -10359,7 +10846,7 @@
     //   (긴 방송은 수백 요청). 가져오기 완료 표시가 있을 때만 로컬을 쓴다 —
     //   표시가 곧 '이 영상 분량이 온전하다'는 보장이다.
     const localRows = await loadRecapFromLocal(accountId, videoNo);
-    if (localRows) {
+    if (localRows && titleChangeRecord.complete) {
       setRecapVodCache(videoNo, localRows);
       onProgress?.(1);
       return localRows;
@@ -10393,6 +10880,8 @@
     const duration = Number(document.querySelector("video")?.duration) || 0;
     const totalMs = duration > 0 ? duration * 1000 : 0;
     const rows = [];
+    const titleChangeTracker =
+      CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     let cursor = 0;
     let completed = false;
     let firstMessageTime = Infinity;
@@ -10424,6 +10913,7 @@
         break;
       }
       for (const m of list) {
+        titleChangeTracker.add(m);
         const rawMessageTime = Number(m?.messageTime) || 0;
         if (rawMessageTime > 0) {
           firstMessageTime = Math.min(firstMessageTime, rawMessageTime);
@@ -10481,6 +10971,17 @@
       }
     }
     onProgress?.(1);
+    if (completed) {
+      try {
+        await CHAT_RECAP_STORE_API.saveVodTitleChanges(
+          chrome.storage.local,
+          videoNo,
+          titleChangeTracker.finish(),
+        );
+      } catch {
+        // 제목 이력 저장 실패가 내 채팅 기록 표시를 막지는 않는다.
+      }
+    }
     // 채팅에 뜨지 않는 기록(선물 받음·대기 미션)을 시각으로 환산해 합친다.
     if (completed) {
       const startAt = await recapVodStartAt(videoNo);
@@ -10563,7 +11064,7 @@
     event.preventDefault();
     event.stopPropagation();
     button?.blur?.(); // 포커스 잔류로 스페이스가 버튼을 다시 누르는 것 방지
-    if (document.querySelector(`.${RECAP_PANEL_CLASS}`)) {
+    if (chatRecapOpenPanel) {
       closeChatRecapPanel();
     } else {
       void openChatRecapPanel(button);
@@ -10599,6 +11100,52 @@
     else controls.prepend(button);
   }
 
+  function isChatRecapPanelSessionActive(panel, videoNo) {
+    return (
+      !!panel &&
+      panel === chatRecapOpenPanel &&
+      !!videoNo &&
+      videoNo === chatRecapOpenVideoNo &&
+      getCurrentVideoNo() === videoNo
+    );
+  }
+
+  // 치지직이 화질 전환·컨트롤 갱신 중 플레이어 루트를 통째로 교체하면 그 안에
+  // 주입한 패널도 문서에서 떨어진다. 같은 영상의 활성 패널은 새 루트에 다시 붙여
+  // 로딩 결과와 사용자가 보던 상태를 유지한다. 별도 관찰자는 만들지 않고 기존
+  // 전역 DOM 갱신 주기에서 호출한다.
+  function ensureOpenChatRecapPanelConnected(
+    panel = chatRecapOpenPanel,
+    videoNo = chatRecapOpenVideoNo,
+  ) {
+    if (!isChatRecapPanelSessionActive(panel, videoNo)) return false;
+
+    ensureChatRecapButton();
+    const anchor = document.querySelector(`.${RECAP_BUTTON_CLASS}`);
+    const root = getCommentTimestampPanelRoot(anchor);
+    if (!root) return false;
+
+    if (!panel.isConnected) {
+      if (getComputedStyle(root).position === "static") {
+        root.style.position = "relative";
+      }
+      root.style.overflow = "visible";
+      root.append(panel);
+      keepCommentPanelControlsVisible(root);
+      startChatRecapPanelTimeTracker();
+      positionCommentTimestampPanel(panel, root);
+    }
+    anchor?.setAttribute("aria-expanded", "true");
+    return panel.isConnected;
+  }
+
+  function positionOpenChatRecapPanel(panel = chatRecapOpenPanel) {
+    if (!panel?.isConnected) return;
+    const anchor = document.querySelector(`.${RECAP_BUTTON_CLASS}`);
+    const root = getCommentTimestampPanelRoot(anchor);
+    if (root) positionCommentTimestampPanel(panel, root);
+  }
+
   function applyChatRecapPlayerButtonVisibility() {
     if (!chatRecapOn || chatRecapPlayerButtonHidden || !getCurrentVideoNo()) {
       closeChatRecapPanel();
@@ -10613,6 +11160,8 @@
   async function openChatRecapPanel(anchor) {
     closeChatRecapPanel();
     closeCommentTimestampPanel();
+    const openVideoNo = getCurrentVideoNo();
+    if (!openVideoNo) return;
     const root = getCommentTimestampPanelRoot(anchor);
     if (!root) return;
     if (getComputedStyle(root).position === "static") {
@@ -10624,6 +11173,8 @@
     panel.className = `${VIDEO_COMMENT_PANEL_CLASS} ${RECAP_PANEL_CLASS}`;
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-label", "내 채팅 기록");
+    chatRecapOpenPanel = panel;
+    chatRecapOpenVideoNo = openVideoNo;
     root.append(panel);
     keepCommentPanelControlsVisible(root);
     startChatRecapPanelTimeTracker();
@@ -10661,7 +11212,7 @@
       .querySelector("[data-recap-close]")
       ?.addEventListener("click", closeChatRecapPanel);
     await loadChatRecapClickAction();
-    if (!panel.isConnected) return;
+    if (!ensureOpenChatRecapPanelConnected(panel, openVideoNo)) return;
     const reimportButton = panel.querySelector("[data-recap-reimport]");
     const reimportPopover = panel.querySelector(
       "[data-recap-reimport-popover]",
@@ -10709,7 +11260,7 @@
           channelId,
           videoNo,
         );
-        if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+        if (!ensureOpenChatRecapPanelConnected(panel, videoNo)) return;
         if (!cleared.ok) {
           clearingStatus.textContent =
             "기록을 정리하지 못했습니다. 잠시 후 다시 시도해주세요.";
@@ -10718,13 +11269,16 @@
         }
         clearingStatus.textContent = `기존 기록 ${cleared.removed.toLocaleString()}개를 정리했습니다. 다시 수집하는 중입니다.`;
         recapPanelItems = await loadRecapForCurrentVideo((ratio) => {
-          if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+          if (!isChatRecapPanelSessionActive(panel, videoNo)) return;
+          if (!panel.isConnected) {
+            ensureOpenChatRecapPanelConnected(panel, videoNo);
+          }
           clearingStatus.textContent = `다시 수집하는 중입니다… ${Math.round(ratio * 100)}%`;
         });
-        if (!panel.isConnected || getCurrentVideoNo() !== videoNo) return;
+        if (!ensureOpenChatRecapPanelConnected(panel, videoNo)) return;
         renderChatRecapPanel(panel);
         if (reimportButton) reimportButton.disabled = false;
-        positionCommentTimestampPanel(panel, root);
+        positionOpenChatRecapPanel(panel);
       });
 
     // 이모티콘 사전·구독 여부를 먼저 채운다(없으면 {:키:} 가 글자로 남는다).
@@ -10734,14 +11288,19 @@
     // ⚠ 긴 방송은 채팅 페이지가 수백 개다(순차 요청). 진행률을 보여 준다.
     const status = panel.querySelector(".cheese-search-comment-panel-status");
     recapPanelItems = await loadRecapForCurrentVideo((ratio) => {
-      if (!panel.isConnected || !status) return;
+      if (!isChatRecapPanelSessionActive(panel, openVideoNo) || !status) {
+        return;
+      }
+      if (!panel.isConnected) {
+        ensureOpenChatRecapPanelConnected(panel, openVideoNo);
+      }
       status.textContent = `내 채팅을 찾는 중입니다… ${Math.round(ratio * 100)}%`;
     });
     await emojiReady;
-    if (!panel.isConnected) return;
+    if (!ensureOpenChatRecapPanelConnected(panel, openVideoNo)) return;
     renderChatRecapPanel(panel);
     if (reimportButton) reimportButton.disabled = false;
-    positionCommentTimestampPanel(panel, root);
+    positionOpenChatRecapPanel(panel);
   }
 
   // {:key:} 토큰을 <img> 로 바꾼다(나머지 텍스트는 그대로 이스케이프).
@@ -12706,7 +13265,13 @@
     clearChatRecapClickDelayTimer();
     stopChatRecapPanelTimeTracker();
     recapPanelFilter = "all";
-    document.querySelector(`.${RECAP_PANEL_CLASS}`)?.remove();
+    const activePanel = chatRecapOpenPanel;
+    chatRecapOpenPanel = null;
+    chatRecapOpenVideoNo = "";
+    activePanel?.remove();
+    document
+      .querySelectorAll(`.${RECAP_PANEL_CLASS}`)
+      .forEach((panel) => panel.remove());
     document
       .querySelector(`.${RECAP_BUTTON_CLASS}`)
       ?.setAttribute("aria-expanded", "false");
@@ -14500,10 +15065,31 @@
   // 붙여, 실제로 기본 프로필을 사용하는 정상 채널은 숨기지 않는다.
   function markBlockedUserSearchCards() {
     if (!location.pathname.startsWith("/search")) return;
+
+    // React가 검색 카드를 재사용하면 이전 렌더에서 붙인 마커가 정상 카드에 남을 수
+    // 있다. 현재 DOM에 차단 문구가 없는 마커는 먼저 걷어낸다.
+    document
+      .querySelectorAll(`.${BLOCKED_USER_SEARCH_CARD_CLASS}`)
+      .forEach((card) => {
+        const hasBlockedLabel = Array.from(
+          card.querySelectorAll("strong"),
+        ).some((label) => label.textContent?.trim() === "차단한 유저");
+        const hasDefaultProfile = card.querySelector(
+          'img[src*="/glive/image/default_profile_"]',
+        );
+        if (!hasBlockedLabel || !hasDefaultProfile) {
+          card.classList.remove(BLOCKED_USER_SEARCH_CARD_CLASS);
+        }
+      });
+
     document
       .querySelectorAll('img[src*="/glive/image/default_profile_"]')
       .forEach((image) => {
         if (image.closest(`.${BLOCKED_USER_SEARCH_CARD_CLASS}`)) return;
+        // 한 카드의 기본 프로필에서 목록 전체까지 올라가 다른 카드의 '차단한 유저'
+        // 문구를 잡지 않도록 탐색 범위를 해당 결과 카드 안으로 제한한다.
+        const boundary =
+          image.closest("li") || image.closest('[class*="_area_"]');
         let candidate = image.parentElement;
         for (let depth = 0; candidate && depth < 5; depth += 1) {
           const hasBlockedLabel = Array.from(
@@ -14513,6 +15099,7 @@
             candidate.classList.add(BLOCKED_USER_SEARCH_CARD_CLASS);
             return;
           }
+          if (candidate === boundary) break;
           candidate = candidate.parentElement;
         }
       });
@@ -14562,6 +15149,10 @@
     ensurePipChat(); // PIP 채팅 토글 즉시 반영
     ensureClipVaultButton();
     ensureClipVaultCardButtons();
+    ensureVideoVaultAccount();
+    ensureVideoVaultButton();
+    ensureVideoVaultCardButtons();
+    ensureVideoVaultDetailButton();
     syncClipFavToFrame();
     applyPlayerHideOnlyClasses();
     // 차단한 유저 카드 숨김: <html>에 게이트 클래스만 토글, 실제 숨김은 content.css의
@@ -14606,8 +15197,9 @@
     applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
     // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
     updateSeekPreviewRealtime();
-    // 격리 월드 기능 즉시 반영(검색 게이트 + 댓글 타임스탬프; init이 후자도 호출).
-    init();
+    // 루트 클래스와 채팅 CSS는 위에서 즉시 반영했다. 수십 개 ensure를 도는 두 번째
+    // 전체 init은 유휴 큐로 합쳐 라이브 플레이어의 첫 로딩과 경쟁하지 않게 한다.
+    scheduleInitFromMutations();
     // 팔로잉 자동 펼치기: 옵션이 켜져 있으면(그리고 이번 세션에 직접 접지 않았으면)
     // 클릭 없이 즉시 펼침 시작. 꺼져 있고 진행 중인 드라이버가 있으면 멈춘다(이미
     // 펼쳐진 목록은 그대로 두고 더 이상 자동 펼침만 안 함).
@@ -17155,7 +17747,21 @@
     if (isVod && el.style.maxHeight !== "none") {
       el.style.setProperty("max-height", "none", "important");
     }
-    const idealH = Math.round((boxW * 9) / 16);
+    const widthBasedHeight = Math.round((boxW * 9) / 16);
+    // 21:9처럼 폭이 매우 넓은 화면에서는 폭만 기준으로 16:9 높이를 만들면 플레이어가
+    // 브라우저 세로 영역보다 커져 영상이 확대된 것처럼 보이고, 아래쪽이 화면 밖으로
+    // 밀린다. 플레이어의 현재 상단부터 뷰포트 하단까지를 상한으로 두어 일반 16:9
+    // 화면에서는 종전대로 채우고, 울트라와이드에서만 과도한 확대를 막는다.
+    const viewportHeight =
+      window.visualViewport?.height ||
+      window.innerHeight ||
+      document.documentElement.clientHeight;
+    const boxTop = Math.max(0, videoBox.getBoundingClientRect().top);
+    const availableHeight = Math.floor(viewportHeight - boxTop);
+    const idealH =
+      availableHeight > 0
+        ? Math.min(widthBasedHeight, availableHeight)
+        : widthBasedHeight;
     const value = `${idealH}px`;
     // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
     // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
@@ -17780,12 +18386,217 @@
     const a = aside || getLiveChatAside();
     return !!a && [...a.classList].some((c) => c.startsWith("_is_folded_"));
   }
+  let popupPlayerChatFoldAttempts = 0;
+  let popupPlayerChatFoldDone = false;
+  let popupPlayerChatFoldWaitStartedAt = 0;
+  let popupPlayerChatFoldEnforceStartedAt = 0;
+  let popupPlayerChatFoldTimer = 0;
+  const POPUP_PLAYER_CHAT_FOLD_READY_TIMEOUT_MS = 30000;
+  const POPUP_PLAYER_CHAT_FOLD_ENFORCE_MS = 8000;
+  const POPUP_PLAYER_CHAT_FOLD_MAX_ENFORCE_MS = 15000;
+  const POPUP_PLAYER_CHAT_FOLD_RETRY_MS = 500;
+  const POPUP_PLAYER_CHAT_FOLD_MAX_ATTEMPTS = 16;
+
+  function isElementVisiblyRendered(element) {
+    if (!(element instanceof Element) || !element.isConnected) return false;
+    const style = getComputedStyle(element);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse"
+    ) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function isRenderedChatFoldButton(button) {
+    return (
+      button instanceof HTMLButtonElement && isElementVisiblyRendered(button)
+    );
+  }
+
+  function getPopupPlayerChatFoldButton() {
+    return (
+      [...document.querySelectorAll('button[aria-label="채팅 접기"]')].find(
+        isRenderedChatFoldButton,
+      ) || null
+    );
+  }
+
+  function isPopupPlayerChatFolded() {
+    if (isChatFolded()) return true;
+    if (
+      [...document.querySelectorAll('button[class*="_folded_button_"]')].some(
+        isRenderedChatFoldButton,
+      )
+    ) {
+      return true;
+    }
+    return [...document.querySelectorAll("button")].some(
+      (button) =>
+        isRenderedChatFoldButton(button) &&
+        (button.textContent || "").trim() === "채팅 (J)",
+    );
+  }
+
+  function notifyPopupPlayerInitialChatFoldReady() {
+    if (!POPUP_PLAYER_START_WITHOUT_CHAT_FRAME || window.parent === window) {
+      return;
+    }
+    try {
+      window.parent.postMessage(
+        {
+          source: POPUP_PLAYER_FRAME_STATUS_SOURCE,
+          type: "initial-chat-fold-complete",
+          folded: isPopupPlayerChatFolded(),
+        },
+        location.origin,
+      );
+    } catch {}
+  }
+
+  function finishPopupPlayerInitialChatFold() {
+    if (popupPlayerChatFoldDone) return;
+    popupPlayerChatFoldDone = true;
+    if (popupPlayerChatFoldTimer) {
+      clearTimeout(popupPlayerChatFoldTimer);
+      popupPlayerChatFoldTimer = 0;
+    }
+    notifyPopupPlayerInitialChatFoldReady();
+  }
+
+  function schedulePopupPlayerInitialChatFold(
+    delay = POPUP_PLAYER_CHAT_FOLD_RETRY_MS,
+  ) {
+    if (popupPlayerChatFoldDone || popupPlayerChatFoldTimer) return;
+    popupPlayerChatFoldTimer = window.setTimeout(() => {
+      popupPlayerChatFoldTimer = 0;
+      applyPopupPlayerInitialChatFold();
+    }, delay);
+  }
+
+  function isChatFoldToggleButton(button) {
+    if (!(button instanceof HTMLButtonElement)) return false;
+    return (
+      button.getAttribute("aria-label") === "채팅 접기" ||
+      String(button.className || "").includes("_folded_button_") ||
+      (button.textContent || "").trim() === "채팅 (J)"
+    );
+  }
+
+  // 새 팝업에서만 네이티브 '채팅 접기' 버튼을 사용한다. 느린 렌더링에서 첫 click 이
+  // 무시되거나 치지직 초기화가 채팅을 다시 펼칠 수 있어, 준비 완료 후 짧은 안정화 구간
+  // 동안만 상태를 재확인한다. 안정화가 끝난 뒤에는 사용자의 접기/펼치기에 간섭하지 않는다.
+  function applyPopupPlayerInitialChatFold() {
+    if (
+      !POPUP_PLAYER_START_WITHOUT_CHAT_FRAME ||
+      popupPlayerChatFoldDone ||
+      !location.pathname.startsWith("/live/")
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!popupPlayerChatFoldWaitStartedAt) {
+      popupPlayerChatFoldWaitStartedAt = now;
+    }
+    // 영상 광고 중에는 치지직이 채팅을 강제로 펼쳐 접기 click 을 무시할 수 있다.
+    // 광고 시간을 준비/재시도 상한에 포함하지 않고, 종료 후 새 안정화 구간을 시작한다.
+    if (isAdPlaying()) {
+      popupPlayerChatFoldWaitStartedAt = now;
+      popupPlayerChatFoldEnforceStartedAt = 0;
+      popupPlayerChatFoldAttempts = 0;
+      schedulePopupPlayerInitialChatFold(1000);
+      return;
+    }
+    const folded = isPopupPlayerChatFolded();
+    // 치지직은 접기 버튼과 채팅 aside 를 서로 다른 렌더 단계에서 만들 수 있다.
+    // 제공된 DOM의 안정적인 aria-label 버튼 자체가 보이면 준비된 것으로 판단한다.
+    const button = getPopupPlayerChatFoldButton();
+    const controlsReady = !!button;
+
+    if (!popupPlayerChatFoldEnforceStartedAt && (folded || controlsReady)) {
+      popupPlayerChatFoldEnforceStartedAt = now;
+    }
+
+    if (!popupPlayerChatFoldEnforceStartedAt) {
+      if (
+        now - popupPlayerChatFoldWaitStartedAt >=
+        POPUP_PLAYER_CHAT_FOLD_READY_TIMEOUT_MS
+      ) {
+        finishPopupPlayerInitialChatFold();
+        return;
+      }
+      schedulePopupPlayerInitialChatFold();
+      return;
+    }
+
+    const enforceElapsed = now - popupPlayerChatFoldEnforceStartedAt;
+    if (folded && enforceElapsed >= POPUP_PLAYER_CHAT_FOLD_ENFORCE_MS) {
+      finishPopupPlayerInitialChatFold();
+      return;
+    }
+
+    if (!folded && controlsReady) {
+      if (popupPlayerChatFoldAttempts >= POPUP_PLAYER_CHAT_FOLD_MAX_ATTEMPTS) {
+        finishPopupPlayerInitialChatFold();
+        return;
+      }
+      popupPlayerChatFoldAttempts += 1;
+      button.click();
+    }
+    if (enforceElapsed >= POPUP_PLAYER_CHAT_FOLD_MAX_ENFORCE_MS) {
+      finishPopupPlayerInitialChatFold();
+      return;
+    }
+    schedulePopupPlayerInitialChatFold();
+  }
+
+  if (POPUP_PLAYER_START_WITHOUT_CHAT_FRAME) {
+    // 초기 안정화 중이라도 사용자가 직접 토글하면 그 의사를 우선한다. programmatic
+    // button.click()은 isTrusted=false라 이 경로에 들어오지 않는다.
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (popupPlayerChatFoldDone || !event.isTrusted) return;
+        const button = event.target?.closest?.("button");
+        if (isChatFoldToggleButton(button)) {
+          finishPopupPlayerInitialChatFold();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          popupPlayerChatFoldDone ||
+          !event.isTrusted ||
+          event.code !== "KeyJ" ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey
+        ) {
+          return;
+        }
+        const target = event.target;
+        if (
+          target?.isContentEditable ||
+          /^(?:INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || "")
+        ) {
+          return;
+        }
+        finishPopupPlayerInitialChatFold();
+      },
+      true,
+    );
+  }
   // 입장/중간(영상) 광고 재생 중인지. 광고 중엔 치지직이 채팅창을 강제로 펼쳐두고 우리
   // 접기 클릭도 무시하므로, 접힘 복원/저장을 이 동안 보류한다(광고 종료 후 처리).
-  //   ⚠ 채팅창 내부 '배너 광고'는 pzp-ad류 클래스를 갖기도 해, 영상 광고가 끝난 뒤에도
-  //   오탐되어 영영 '광고 중'으로 남는다. 그래서 감지는 '영상 플레이어 영역의 광고'로만
-  //   한정한다: 영상 광고 컨테이너(data-role="adVideoContainerEl")와 그 SKIP 버튼만 본다.
-  //   이 마커들은 영상 플레이어 안에만 있고 채팅 aside 안에는 없다(배너 오탐 방지).
+  //   ⚠ 채팅창 내부 배너와 재생이 끝난 숨김 광고 DOM도 pzp-ad류 클래스를 가질 수 있다.
+  //   채팅 aside 밖에 있으면서 실제 화면에 렌더된 마커만 영상 광고로 판정한다.
   // 광고 마커 셀렉터. 실측(로그) 결과 광고 로딩 초기~재생 내내 안정적으로 존재하는 건
   // pzp 광고 클래스와 clickThrough 버튼이고, 재생이 안정되면 adVideoContainerEl/skipBtn 도
   // 붙는다. 어느 단계든 놓치지 않도록 이들을 모두 후보로 본다.
@@ -17795,7 +18606,14 @@
     const els = document.querySelectorAll(AD_MARKER_SEL);
     for (const el of els) {
       // 채팅 aside 내부 요소(채팅 배너 광고 등)는 영상 광고 판정에서 제외(오탐 차단).
-      if (!el.closest("aside#aside-chatting, aside#vod-aside")) return true;
+      // 치지직은 광고가 끝난 뒤에도 display:none 상태의 pzp-ad DOM 을 남겨두므로,
+      // 단순 존재 여부로 판정하면 팝업의 초기 채팅 접기 등이 영구히 보류된다.
+      if (
+        !el.closest("aside#aside-chatting, aside#vod-aside") &&
+        isElementVisiblyRendered(el)
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -17875,6 +18693,10 @@
   // 라이브 진입 시 저장된 접힘 상태로 복원(채널별 1회). 저장 상태가 접힘인데 현재
   // 펼침이면(또는 반대) 접기 버튼을 클릭한다.
   function applyChatFoldPersist() {
+    if (POPUP_PLAYER_START_WITHOUT_CHAT_FRAME) {
+      stopChatFoldObserver();
+      return;
+    }
     if (!chatFoldPersistOn) {
       stopChatFoldObserver();
       return;
@@ -18492,6 +19314,7 @@
   function isOwnChatMutation(mutation) {
     const t = mutation.target;
     if (!(t instanceof Element)) return false;
+    if (t.closest("[data-cheese-chat-history-ui]")) return true;
     // 우리 마커가 붙은/리사이저인 요소의 변경은 우리가 일으킨 것.
     const cls = typeof t.className === "string" ? t.className : "";
     if (
@@ -21846,7 +22669,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ? "확인 중"
         : phase === "live"
           ? "라이브"
-          : "오프라인";
+          : "오프라인(채팅)";
 
     // 채널 프로필 헤더의 이름(_name_18tzy_ 등, 해시는 빌드마다 변함) 클래스를 harvest 해
     // 우리 버튼에도 부여한다 → 채널명과 동일한 글자 스타일. 못 찾으면 폴백 _title_ 클래스.
@@ -22609,12 +23432,49 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
   }
 
+  function applyCategoryVideoAdultDecoration(thumbnailLink, adult) {
+    if (!thumbnailLink) return;
+
+    // 복제한 네이티브 카드가 가진 성인 상태를 먼저 지운 뒤 API 값을 기준으로
+    // 다시 적용한다. CSS 모듈 해시가 바뀌어도 `_is_adult_` 토큰은 유지된다.
+    Array.from(thumbnailLink.classList).forEach((className) => {
+      if (/(?:^|_)is_adult(?:_|$)/i.test(className)) {
+        thumbnailLink.classList.remove(className);
+      }
+    });
+    thumbnailLink
+      .querySelectorAll(":scope > .cheese-category-video-adult")
+      .forEach((node) => node.remove());
+    Array.from(thumbnailLink.querySelectorAll(":scope > .blind")).forEach(
+      (node) => {
+        if (/^19\s*연령\s*제한$/.test(node.textContent.trim())) node.remove();
+      },
+    );
+
+    thumbnailLink.classList.toggle(
+      "cheese-category-video-adult-thumbnail",
+      adult,
+    );
+    if (!adult) return;
+
+    thumbnailLink.insertAdjacentHTML(
+      "beforeend",
+      renderClipAdultArea({
+        areaClass: "",
+        descriptionClass: "",
+        extraAreaClass: "cheese-category-video-adult",
+        extraDescriptionClass: "cheese-category-video-adult-label",
+      }),
+    );
+  }
+
   function patchCategoryVideoNativeCard(template, video) {
     if (!template) return null;
     const card = template.cloneNode(true);
     const videoNo = String(video?.videoNo || video?.videoId || "").trim();
     if (!videoNo) return null;
     const videoHref = `/video/${encodeURIComponent(videoNo)}`;
+    const adult = isAdultVideo(video);
     const channel = video?.channel || {};
     const channelId = String(channel?.channelId || "").trim();
     const channelName = String(channel?.channelName || "채널 정보 없음").trim();
@@ -22636,6 +23496,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     });
     if (thumbnailLink) {
       thumbnailLink.title = String(video?.videoTitle || "");
+      thumbnailLink.dataset.cheeseVideoAdult = String(adult);
+      applyCategoryVideoAdultDecoration(thumbnailLink, adult);
       const image = thumbnailLink.querySelector('img[width="100%"], img');
       const thumbnailUrl = getThumbnailImageUrl(video);
       if (image && thumbnailUrl) {
@@ -22855,6 +23717,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     list.append(fragment);
     categoryVideoFilterState.renderedCount = end;
+    ensureVideoVaultCardButtons();
     categoryVideoFilterState.resultSentinel?.toggleAttribute(
       "hidden",
       end >= categoryVideoFilterState.filteredItems.length,
@@ -22887,7 +23750,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document
       .querySelectorAll(`.${CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS}`)
       .forEach((element) => {
-        if (!hidden || !section?.contains(element)) {
+        if (
+          !hidden ||
+          !section?.contains(element) ||
+          element.closest(`#${VIDEO_VAULT_PANEL_ID}`)
+        ) {
           element.classList.remove(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
         }
       });
@@ -22895,6 +23762,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     section.querySelectorAll("ul").forEach((list) => {
       if (
         !list.matches("[data-cvf-result-list]") &&
+        !list.closest(`#${VIDEO_VAULT_PANEL_ID}`) &&
         list.querySelector('a[href^="/video/"]')
       ) {
         list.classList.add(CATEGORY_VIDEO_NATIVE_HIDDEN_CLASS);
@@ -23674,6 +24542,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     items: [], // fetch+dedupe 풀(각 항목에 __score/__origIndex 부여)
     sort: "score", // score(추천) | read(조회수) | recent(최신) | original(원본)
     visible: SEARCH_RERANK_INITIAL,
+    sortMenuOpen: false,
   };
 
   const SEARCH_SECTION_TOP_ICON = `
@@ -23905,8 +24774,172 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  // 재정렬 목록은 치지직이 화면에 렌더한 결과가 아니라 검색 API의 원본 후보를 다시
+  // 그린다. 따라서 네이티브 목록에서 이미 적용된 차단 필터를 별도로 승계해야 한다.
+  const SEARCH_RERANK_BLOCK_CACHE_MS = 5 * 60 * 1000;
+  let searchRerankBlockedUserIds = new Set();
+  let searchRerankBlockedUsersLoadedAt = 0;
+  let searchRerankBlockedUsersPromise = null;
+
+  function normalizeSearchRerankUserId(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function searchRerankItemChannelId(item) {
+    return normalizeSearchRerankUserId(
+      item?.channel?.channelId ||
+        item?.streamer?.channelId ||
+        item?.live?.channelId ||
+        item?.liveInfo?.channelId ||
+        item?.video?.channelId ||
+        item?.user?.userIdHash,
+    );
+  }
+
+  function isSearchRerankBlockedItem(item) {
+    const candidates = [
+      item,
+      item?.channel,
+      item?.streamer,
+      item?.live,
+      item?.liveInfo,
+      item?.video,
+      item?.user,
+      item?.channel?.personalData,
+      item?.streamer?.personalData,
+    ];
+    if (
+      candidates.some(
+        (candidate) =>
+          candidate &&
+          [
+            candidate.privateUserBlock,
+            candidate.isPrivateUserBlock,
+            candidate.isBlocked,
+            candidate.blocked,
+          ].some((value) => value === true || value === "true"),
+      )
+    ) {
+      return true;
+    }
+
+    const channelName = String(
+      item?.channel?.channelName || item?.streamer?.channelName || "",
+    ).trim();
+    const resultTitle = String(
+      item?.live?.liveTitle ||
+        item?.liveInfo?.liveTitle ||
+        item?.video?.videoTitle ||
+        "",
+    ).trim();
+    if (
+      channelName === "차단한 유저" ||
+      /^차단한 유저의 (?:라이브|동영상)입니다/.test(resultTitle)
+    ) {
+      return true;
+    }
+
+    const channelId = searchRerankItemChannelId(item);
+    return Boolean(
+      channelId &&
+      (searchRerankBlockedUserIds.has(channelId) ||
+        commentBlockHashSet.has(channelId)),
+    );
+  }
+
+  function resetSearchRerankBlockedUsers() {
+    searchRerankBlockedUsersLoadedAt = 0;
+    searchRerankBlockedUserIds = new Set(
+      commentBlocks
+        .map((block) => normalizeSearchRerankUserId(block?.userIdHash))
+        .filter(Boolean),
+    );
+  }
+
+  async function ensureSearchRerankBlockedUsers() {
+    if (
+      searchRerankBlockedUsersLoadedAt &&
+      Date.now() - searchRerankBlockedUsersLoadedAt <
+        SEARCH_RERANK_BLOCK_CACHE_MS
+    ) {
+      return searchRerankBlockedUserIds;
+    }
+    if (searchRerankBlockedUsersPromise) {
+      return searchRerankBlockedUsersPromise;
+    }
+
+    searchRerankBlockedUsersPromise = (async () => {
+      const blockedIds = new Set(
+        commentBlocks
+          .map((block) => normalizeSearchRerankUserId(block?.userIdHash))
+          .filter(Boolean),
+      );
+      try {
+        const stored = await chrome.storage?.local?.get(COMMENT_BLOCK_KEY);
+        const localBlocks = stored?.[COMMENT_BLOCK_KEY];
+        if (Array.isArray(localBlocks)) {
+          localBlocks.forEach((block) => {
+            const id = normalizeSearchRerankUserId(block?.userIdHash);
+            if (id) blockedIds.add(id);
+          });
+        }
+      } catch {}
+
+      try {
+        // 치지직 자체 차단 목록도 병합한다. 재정렬 API는 이 목록을 적용하지 않은
+        // 후보를 반환할 수 있어, 로그인 사용자의 차단 hash를 직접 대조한다.
+        const response = await fetch(
+          "https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks?limit=500&offset=0",
+          { credentials: "include", headers: { accept: "application/json" } },
+        );
+        if (response.ok) {
+          const json = await response.json();
+          const rows = json?.content?.blockUsers;
+          if (Array.isArray(rows)) {
+            rows.forEach((row) => {
+              const id = normalizeSearchRerankUserId(
+                row?.userIdHash || row?.channelId,
+              );
+              if (id) blockedIds.add(id);
+            });
+          }
+        }
+      } catch {}
+
+      searchRerankBlockedUserIds = blockedIds;
+      searchRerankBlockedUsersLoadedAt = Date.now();
+      return blockedIds;
+    })().finally(() => {
+      searchRerankBlockedUsersPromise = null;
+    });
+    return searchRerankBlockedUsersPromise;
+  }
+
+  function isBlockedSearchRerankTemplate(card, hrefPrefix) {
+    if (!card || !card.querySelector(`a[href^="${hrefPrefix}"]`)) return true;
+    if (
+      card.matches('[class*="_is_block_"]') ||
+      card.querySelector('[class*="_is_block_"]') ||
+      card.classList.contains(BLOCKED_USER_SEARCH_CARD_CLASS)
+    ) {
+      return true;
+    }
+    return /차단한 유저(?:의 (?:라이브|동영상)입니다)?/.test(
+      card.textContent || "",
+    );
+  }
+
+  function findSearchRerankTemplate(cards, hrefPrefix) {
+    return [...(cards || [])].find(
+      (card) => !isBlockedSearchRerankTemplate(card, hrefPrefix),
+    );
+  }
+
   // 검색 API 를 size=50 × 최대 4페이지 호출해 풀을 만든다(videoNo 중복 제거).
   async function fetchSearchRerankPool(keyword) {
+    await ensureSearchRerankBlockedUsers();
     const out = [];
     const seen = new Set();
     // 최대 개수는 설정(50~1000, 기본 200). 페이지당 50개씩 필요한 만큼만 호출한다.
@@ -23924,7 +24957,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (!Array.isArray(data) || !data.length) break;
       for (const it of data) {
         const no = it?.video?.videoNo;
-        if (!no || seen.has(no)) continue;
+        if (!no || seen.has(no) || isSearchRerankBlockedItem(it)) continue;
         seen.add(no);
         out.push(it);
       }
@@ -24044,45 +25077,91 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return m ? `${m[1]}.${m[2]}` : "";
   }
 
-  // 썸네일 오버레이(_description_)의 'N회 시청된 라이브' 배지를 livePv 로 채운다.
-  // livePv<=0 이면 오버레이 자체를 제거(업로드 영상 등). thumbA = 썸네일 <a>.
+  function isSearchRerankLivePvBadge(element) {
+    return (
+      element instanceof HTMLElement &&
+      /회\s*시청된\s*라이브/.test(
+        String(element.textContent || "").replace(/\s+/g, " "),
+      )
+    );
+  }
+
+  // 썸네일 오버레이의 'N회 시청된 라이브' 배지를 livePv 로 채운다. 현재 카드는
+  // _badge_ 를 쓰고 과거 카드는 _description_ 을 쓰므로, 클래스 해시가 아닌 구조와
+  // 문구로 찾는다. livePv<=0 이면 시청 배지만 제거한다. thumbA = 썸네일 <a>.
   function setSearchRerankLiveBadge(thumbA, livePv) {
-    const desc = thumbA.querySelector('div[class*="_description_"]');
+    const areas = [
+      thumbA.querySelector('div[class*="_badge_"]'),
+      thumbA.querySelector('div[class*="_description_"]'),
+    ].filter((area, index, list) => area && list.indexOf(area) === index);
+    const badges = areas.flatMap((area) => [
+      ...area.querySelectorAll("span:not(.blind)"),
+    ]);
+    const livePvBadges = badges.filter(isSearchRerankLivePvBadge);
+
     if (livePv <= 0) {
-      desc?.remove();
+      livePvBadges.forEach((badge) => badge.remove());
+      areas.forEach((area) => {
+        if (!String(area.textContent || "").trim() && !area.children.length) {
+          area.remove();
+        }
+      });
       return;
     }
     const text = `${formatCompactCount(livePv)}회 시청된 라이브`;
-    if (desc) {
-      // 원본 배지 span(_container_1o5pg_ → 개편 후 _container_g43cd_). '다시보기' em 등 다른
-      // 자식은 항목 데이터가 없으니 제거하고 시청 배지만 남긴다.
-      const badge = desc.querySelector(
-        'span[class*="_container_1o5pg_"], span[class*="_container_g43cd_"]',
-      );
-      if (badge) {
-        // 우리 fallback CSS 가 잡을 전용 클래스 부여(원본 배지 클래스 해시 변경에 안 흔들림).
-        badge.classList.add(SEARCH_RERANK_BADGE_CLASS);
-        badge.textContent = text;
-        desc.querySelectorAll("em").forEach((el) => el.remove());
-        // 배지 span 만 남기고 나머지 텍스트/노드 정리(중복 방지).
-        [...desc.children].forEach((c) => {
-          if (c !== badge) c.remove();
-        });
-        return;
-      }
-    }
-    // 클론 템플릿에 오버레이가 없었던 카드 → 원본 클래스로 새로 만든다. 페이지 어딘가의
-    // 실제 배지 클래스를 하베스트하고, 못 찾으면 알려진 클래스로 폴백.
-    const sampleBadge = document.querySelector(
-      'div[class*="_description_"] span[class*="_container_1o5pg_"], div[class*="_description_"] span[class*="_container_g43cd_"]',
+    const areaWithLivePv = areas.find((area) =>
+      [...area.querySelectorAll("span:not(.blind)")].some(
+        isSearchRerankLivePvBadge,
+      ),
     );
-    const descCls =
-      document.querySelector(
-        'a[class*="_thumbnail_"] div[class*="_description_"]',
-      )?.className || "_description_ul5zy_432";
-    const badgeCls = sampleBadge?.className || "_container_g43cd_2";
+    const targetArea =
+      areaWithLivePv ||
+      areas.find((area) =>
+        [...area.children].some(
+          (child) =>
+            child.tagName === "SPAN" && !child.classList.contains("blind"),
+        ),
+      ) ||
+      areas[0];
+
+    if (targetArea) {
+      let badge = livePvBadges[0];
+      if (!badge) {
+        badge = [...targetArea.children].find(
+          (child) =>
+            child.tagName === "SPAN" && !child.classList.contains("blind"),
+        );
+      }
+      if (!badge) {
+        badge = document.createElement("span");
+        const sampleBadge = [
+          ...document.querySelectorAll(
+            'div[class*="_badge_"] span:not(.blind), div[class*="_description_"] span:not(.blind)',
+          ),
+        ].find(isSearchRerankLivePvBadge);
+        badge.className = sampleBadge?.className || "_container_bhwhs_2";
+        targetArea.appendChild(badge);
+      }
+      badge.classList.add(SEARCH_RERANK_BADGE_CLASS);
+      badge.textContent = text;
+      livePvBadges.slice(1).forEach((duplicate) => duplicate.remove());
+      return;
+    }
+
+    // 클론 템플릿에 오버레이가 없었던 카드라면 실제 시청 배지의 영역과 클래스를
+    // 하베스트해 새로 만든다. 현재 _badge_ 를 우선하고 과거 _description_ 으로 폴백한다.
+    const sampleBadge = [
+      ...document.querySelectorAll(
+        'div[class*="_badge_"] span:not(.blind), div[class*="_description_"] span:not(.blind)',
+      ),
+    ].find(isSearchRerankLivePvBadge);
+    const sampleArea = sampleBadge?.closest(
+      'div[class*="_badge_"], div[class*="_description_"]',
+    );
+    const areaCls = sampleArea?.className || "_badge_1tt32_432";
+    const badgeCls = sampleBadge?.className || "_container_bhwhs_2";
     const overlay = document.createElement("div");
-    overlay.className = descCls;
+    overlay.className = areaCls;
     const span = document.createElement("span");
     span.className = `${badgeCls} ${SEARCH_RERANK_BADGE_CLASS}`;
     span.textContent = text;
@@ -24310,10 +25389,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       const time = thumbA.querySelector('span[class*="_time_"]');
       if (time) time.textContent = formatSearchRerankDuration(v.duration);
-      // 썸네일 오버레이(_description_): livePv > 0 이면 'N회 시청된 라이브' 배지를 채우고,
-      // 아니면(업로드 영상 등 livePv 없음) 오버레이를 제거한다. 원본 구조는
-      // _description_ > span._container_1o5pg_2 (배지 텍스트). 클론 템플릿이 어떤 카드였든
-      // (배지 유무·다시보기 em 유무) 이 규칙으로 통일한다.
+      // 썸네일의 라이브 시청 배지를 API livePv로 다시 채운다. 최신 카드는
+      // _badge_, 이전 카드는 _description_ 영역을 쓴다. 클론 템플릿의 배지 값은
+      // 절대 재사용하지 않고, livePv가 없으면 복제된 시청 배지를 제거한다.
       setSearchRerankLiveBadge(thumbA, Number(v.livePv) || 0);
       const blind = thumbA.querySelector("span.blind");
       if (blind)
@@ -24400,6 +25478,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     searchRerankState.keyword = "";
     searchRerankState.items = [];
     searchRerankState.visible = SEARCH_RERANK_INITIAL;
+    searchRerankState.sortMenuOpen = false;
   }
 
   // 피커 라벨/선택 표시를 현재 정렬 값으로 동기화.
@@ -24432,6 +25511,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             "[data-rerank-sort-picker], [data-live-rerank-sort-picker]",
           );
           if (picker?.contains(e.target)) return;
+          if (picker?.matches("[data-rerank-sort-picker]")) {
+            searchRerankState.sortMenuOpen = false;
+          } else if (picker?.matches("[data-live-rerank-sort-picker]")) {
+            searchLiveRerankState.sortMenuOpen = false;
+          }
           menu.hidden = true;
           picker
             ?.querySelector(".cheese-search-sort-trigger")
@@ -25362,7 +26446,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const section = findSearchVideoSection();
     if (!section) return;
     const listWrap = section.querySelector('div[class*="_wrapper_"]');
-    const templateLi = listWrap?.querySelector("ul li");
+    const templateLi = findSearchRerankTemplate(
+      listWrap?.querySelectorAll("ul li"),
+      "/video/",
+    );
     if (!listWrap || !templateLi) return; // 네이티브 결과 없음 → 개입 안 함
     // 네이티브 카드가 가진 완성된 인증/업적 <i>를 먼저 수집한다. 배지가 React에 의해
     // 늦게 추가되면 전역 DOM 옵저버가 ensureSearchRerank를 다시 호출하고 revision이 올라
@@ -25409,12 +26496,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const menu = bar.querySelector(".cheese-search-sort-menu");
       trigger.addEventListener("click", () => {
         const open = menu.hidden;
+        searchRerankState.sortMenuOpen = open;
         menu.hidden = !open;
         trigger.setAttribute("aria-expanded", String(open));
       });
       menu.addEventListener("click", (e) => {
         const opt = e.target.closest("[data-rerank-sort]");
         if (!opt) return;
+        searchRerankState.sortMenuOpen = false;
         menu.hidden = true;
         trigger.setAttribute("aria-expanded", "false");
         searchRerankState.sort = opt.dataset.rerankSort;
@@ -25427,6 +26516,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       listWrap.before(bar);
       bindSearchRerankPickerClose();
     }
+    // 치지직 React가 검색 목록 래퍼를 교체하면 재정렬 바도 새로 만들어진다.
+    // 사용자가 열어 둔 정렬 메뉴는 그 재생성만으로 닫히지 않게 상태를 복원한다.
+    const sortMenu = bar.querySelector(".cheese-search-sort-menu");
+    const sortTrigger = bar.querySelector(".cheese-search-sort-trigger");
+    if (sortMenu) sortMenu.hidden = !searchRerankState.sortMenuOpen;
+    sortTrigger?.setAttribute(
+      "aria-expanded",
+      String(searchRerankState.sortMenuOpen),
+    );
     harvestSearchRerankLabelFont(section, bar);
     updateSearchRerankPicker(bar);
 
@@ -25574,6 +26672,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     sort: "score",
     initial: SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
     visible: SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
+    sortMenuOpen: false,
   };
 
   function findSearchLiveSection() {
@@ -25622,6 +26721,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   async function fetchSearchLiveRerankPool(keyword) {
+    await ensureSearchRerankBlockedUsers();
     const out = [];
     const seen = new Set();
     let offset = 0;
@@ -25643,7 +26743,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       for (const raw of data) {
         const item = normalizeSearchLiveItem(raw, out.length);
         const key = `${item?.channel?.channelId || ""}:${item?.live?.liveId || ""}`;
-        if (!item || seen.has(key)) continue;
+        if (!item || seen.has(key) || isSearchRerankBlockedItem(item)) continue;
         seen.add(key);
         out.push(item);
         if (out.length >= SEARCH_LIVE_RERANK_POOL_MAX) break;
@@ -25855,7 +26955,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function renderSearchLiveRerank() {
     const section = findSearchLiveSection();
     const nativeList = findSearchLiveNativeList(section);
-    const template = nativeList?.querySelector(":scope > li");
+    const template = findSearchRerankTemplate(
+      nativeList?.querySelectorAll(":scope > li"),
+      "/live/",
+    );
     if (
       !section ||
       !nativeList ||
@@ -25897,12 +27000,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const menu = bar.querySelector(".cheese-search-sort-menu");
       trigger.addEventListener("click", () => {
         const open = menu.hidden;
+        searchLiveRerankState.sortMenuOpen = open;
         menu.hidden = !open;
         trigger.setAttribute("aria-expanded", String(open));
       });
       menu.addEventListener("click", (event) => {
         const option = event.target.closest("[data-live-rerank-sort]");
         if (!option) return;
+        searchLiveRerankState.sortMenuOpen = false;
         searchLiveRerankState.sort = normalizeSearchLiveRerankSort(
           option.dataset.liveRerankSort,
         );
@@ -25917,6 +27022,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       nativeListWrap?.before(bar);
       bindSearchRerankPickerClose();
     }
+    const sortMenu = bar.querySelector(".cheese-search-sort-menu");
+    const sortTrigger = bar.querySelector(".cheese-search-sort-trigger");
+    if (sortMenu) sortMenu.hidden = !searchLiveRerankState.sortMenuOpen;
+    sortTrigger?.setAttribute(
+      "aria-expanded",
+      String(searchLiveRerankState.sortMenuOpen),
+    );
     harvestSearchRerankLabelFont(section, bar);
     updateSearchLiveRerankPicker(bar);
 
@@ -26010,6 +27122,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     searchLiveRerankState.items = [];
     searchLiveRerankState.initial = SEARCH_LIVE_RERANK_INITIAL_FALLBACK;
     searchLiveRerankState.visible = SEARCH_LIVE_RERANK_INITIAL_FALLBACK;
+    searchLiveRerankState.sortMenuOpen = false;
   }
 
   function ensureSearchLiveRerank() {
@@ -29124,6 +30237,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const LIVE_TAG_FILTER_BUTTON_CLASS = "cheese-live-tag-filter-button";
   const LIVE_TAG_FILTER_MODAL_ID = "cheese-live-tag-filter-modal";
   const LIVE_TAG_FILTER_HIDDEN_CLASS = "cheese-live-tag-filter-hidden";
+  const LIVE_TAG_FILTER_PAGINATION_CLASS =
+    "cheese-live-tag-filter-pagination-anchor";
   const LIVE_VIEWER_COUNT_INLINE_CLASS = "cheese-live-viewer-count-inline";
   const LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS =
     "cheese-live-viewer-count-inline-badge";
@@ -29154,6 +30269,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let liveTagFilters = [];
   let liveTagFilterButtonOn = false;
   let liveViewerCountPosition = "native";
+  let liveTagFilterPaginationFrame = 0;
   const liveTagFilterSelected = new Set();
   let liveTagFilterRestoreFocus = null;
 
@@ -29362,13 +30478,34 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         `.${LIVE_TAG_FILTER_HIDDEN_CLASS}, [data-cheese-live-tag-filter-hidden]`,
       )
       .forEach((card) => {
-        card.classList.remove(LIVE_TAG_FILTER_HIDDEN_CLASS);
+        card.classList.remove(
+          LIVE_TAG_FILTER_HIDDEN_CLASS,
+          LIVE_TAG_FILTER_PAGINATION_CLASS,
+        );
         if (card.dataset.cheeseLiveTagFilterHidden === "1") {
-          if (card.dataset.cheeseLiveTagFilterWasHidden !== "1") {
+          if (card.dataset.cheeseLiveTagFilterWasHidden === "1") {
+            card.setAttribute("hidden", "");
+          } else {
             card.removeAttribute("hidden");
+          }
+          if (card.dataset.cheeseLiveTagFilterHadAriaHidden === "1") {
+            card.setAttribute(
+              "aria-hidden",
+              card.dataset.cheeseLiveTagFilterAriaHidden ?? "",
+            );
+          } else {
+            card.removeAttribute("aria-hidden");
+          }
+          if (card.dataset.cheeseLiveTagFilterWasInert === "1") {
+            card.setAttribute("inert", "");
+          } else {
+            card.removeAttribute("inert");
           }
           delete card.dataset.cheeseLiveTagFilterHidden;
           delete card.dataset.cheeseLiveTagFilterWasHidden;
+          delete card.dataset.cheeseLiveTagFilterHadAriaHidden;
+          delete card.dataset.cheeseLiveTagFilterAriaHidden;
+          delete card.dataset.cheeseLiveTagFilterWasInert;
         }
       });
   }
@@ -29376,10 +30513,76 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function hideLiveTagFilterCard(card) {
     if (card.dataset.cheeseLiveTagFilterHidden !== "1") {
       card.dataset.cheeseLiveTagFilterWasHidden = card.hidden ? "1" : "0";
+      card.dataset.cheeseLiveTagFilterHadAriaHidden = card.hasAttribute(
+        "aria-hidden",
+      )
+        ? "1"
+        : "0";
+      if (card.hasAttribute("aria-hidden")) {
+        card.dataset.cheeseLiveTagFilterAriaHidden =
+          card.getAttribute("aria-hidden") || "";
+      }
+      card.dataset.cheeseLiveTagFilterWasInert = card.hasAttribute("inert")
+        ? "1"
+        : "0";
     }
     card.dataset.cheeseLiveTagFilterHidden = "1";
-    card.hidden = true;
+    // display:none/hidden은 치지직이 다음 페이지를 불러오기 위해 관찰하는 마지막
+    // 카드의 렌더 박스까지 없앤다. CSS에서 1px의 투명한 관찰 지점만 남긴다.
+    card.removeAttribute("hidden");
+    card.setAttribute("aria-hidden", "true");
+    card.setAttribute("inert", "");
     card.classList.add(LIVE_TAG_FILTER_HIDDEN_CLASS);
+  }
+
+  function preserveLiveTagFilterPaginationAnchors(hiddenCards) {
+    const parents = new Set(
+      [...hiddenCards].map((card) => card.parentElement).filter(Boolean),
+    );
+    let lastAnchor = null;
+    for (const parent of parents) {
+      const cards = [...parent.children].filter(
+        (child) =>
+          child.tagName === "LI" && child.querySelector?.('a[href^="/live/"]'),
+      );
+      const lastCard = cards.at(-1);
+      if (!lastCard || !hiddenCards.has(lastCard)) continue;
+      lastCard.classList.add(LIVE_TAG_FILTER_PAGINATION_CLASS);
+      lastAnchor = lastCard;
+    }
+    return lastAnchor;
+  }
+
+  function scheduleLiveTagFilterPaginationCheck(lastHiddenCard) {
+    if (liveTagFilterPaginationFrame || !lastHiddenCard) return;
+    liveTagFilterPaginationFrame = requestAnimationFrame(() => {
+      liveTagFilterPaginationFrame = 0;
+      if (
+        !lastHiddenCard.isConnected ||
+        !getLiveTagFilterPageKind() ||
+        !liveTagFilters.length
+      ) {
+        return;
+      }
+
+      // IntersectionObserver는 레이아웃 변화 자체로 다시 판정된다. 일부 치지직 빌드는
+      // 스크롤 이벤트로 하단 도달 여부를 검사하므로 실제 위치를 바꾸지 않고 해당
+      // 컨테이너에도 한 번 알려, 필터로 화면이 짧아진 경우 다음 묶음을 계속 요청한다.
+      const targets = new Set([
+        window,
+        document,
+        document.documentElement,
+        document.body,
+      ]);
+      let current = lastHiddenCard.parentElement;
+      while (current) {
+        if (/(auto|scroll|overlay)/.test(getComputedStyle(current).overflowY)) {
+          targets.add(current);
+        }
+        current = current.parentElement;
+      }
+      targets.forEach((target) => target?.dispatchEvent(new Event("scroll")));
+    });
   }
 
   function applyLiveTagFilters() {
@@ -29396,6 +30599,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const filterNodes = scope.querySelectorAll(
       'a[href*="tags="], a[href*="/category/"][href*="/lives"], span[class*="_tag_"]',
     );
+    const hiddenCards = new Set();
     for (const node of filterNodes) {
       if (
         !getLiveFilterValuesFromNode(node).some((value) => filterSet.has(value))
@@ -29405,8 +30609,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const card = node.closest("li");
       if (card?.querySelector('a[href^="/live/"]')) {
         hideLiveTagFilterCard(card);
+        hiddenCards.add(card);
       }
     }
+    scheduleLiveTagFilterPaginationCheck(
+      preserveLiveTagFilterPaginationAnchors(hiddenCards),
+    );
   }
 
   function clearLiveViewerCountPlacement(preserveHidden = false) {
@@ -30323,6 +31531,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
     "trash-2":
       '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+    ellipsis:
+      '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
     "grip-vertical":
@@ -30713,7 +31923,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       : Math.min(customFollowGroupShown, groups.length);
     const shownGroups = groups.slice(0, shownCount);
     const sectionsHtml = shownGroups
-      .map((group) => {
+      .map((group, groupIndex) => {
         const collapsed = Object.prototype.hasOwnProperty.call(
           customFollowGroupCollapsed,
           group.key,
@@ -30731,7 +31941,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const orderKey = String(group.key || "");
         const dragHandle = `<span class="cheese-cf-group-drag-handle" draggable="true" data-cf-sidebar-group-drag="${escapeAttribute(orderKey)}" aria-label="${escapeAttribute(group.name)} 그룹 순서 이동" title="드래그하여 그룹 순서 변경">${customFollowLucideIcon("grip-vertical", 15)}</span>`;
         const editLabel = group.automatic
-          ? "현재 구성으로 커스텀 그룹 만들기"
+          ? "커스텀 그룹으로 저장"
           : "그룹 수정";
         const deleteLabel = group.automatic ? "자동 그룹 제외" : "그룹 삭제";
         const offlineLabel = group.offlineHidden
@@ -30740,15 +31950,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const offlineAction = group.offlineOnly
           ? ""
           : `<button type="button" data-cf-group-offline="${escapeAttribute(group.key)}" aria-pressed="${String(group.offlineHidden)}" aria-label="${offlineLabel}" title="${offlineLabel}">${customFollowLucideIcon(group.offlineHidden ? "eye-off" : "eye", 15)}</button>`;
-        const quickActions = collapsed
+        const compactHeader = featureFlags.sbFollowGroupCompactHeader;
+        const compactMenuId = `cheese-cf-group-actions-${groupIndex}`;
+        const compactOfflineAction = group.offlineOnly
           ? ""
-          : `<div class="cheese-cf-group-actions">` +
-            offlineAction +
-            `<button type="button" data-cf-group-edit="${escapeAttribute(group.key)}" aria-label="${editLabel}" title="${editLabel}">${customFollowLucideIcon("pencil", 14)}</button>` +
-            `<button type="button" data-cf-group-delete="${escapeAttribute(group.key)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${deleteLabel}" title="${deleteLabel}">${customFollowLucideIcon("trash-2", 14)}</button>` +
-            `</div>`;
+          : `<button type="button" role="menuitem" data-cf-group-offline="${escapeAttribute(group.key)}" aria-pressed="${String(group.offlineHidden)}">${customFollowLucideIcon(group.offlineHidden ? "eye-off" : "eye", 15)}<span>${offlineLabel}</span></button>`;
+        const quickActions = compactHeader
+          ? `<div class="cheese-cf-group-actions cheese-cf-group-actions-compact">` +
+            `<button type="button" class="cheese-cf-group-actions-toggle" data-cf-group-actions-toggle="${escapeAttribute(group.key)}" aria-haspopup="menu" aria-expanded="false" aria-controls="${compactMenuId}" aria-label="${escapeAttribute(group.name)} 그룹 메뉴" title="그룹 메뉴">${customFollowLucideIcon("ellipsis", 16)}</button>` +
+            `<div id="${compactMenuId}" class="cheese-cf-group-actions-menu" role="menu" hidden>` +
+            compactOfflineAction +
+            `<button type="button" role="menuitem" data-cf-group-edit="${escapeAttribute(group.key)}">${customFollowLucideIcon("pencil", 14)}<span>${editLabel}</span></button>` +
+            `<button type="button" role="menuitem" data-cf-group-delete="${escapeAttribute(group.key)}" aria-haspopup="dialog" aria-expanded="false">${customFollowLucideIcon("trash-2", 14)}<span>${deleteLabel}</span></button>` +
+            `</div></div>`
+          : collapsed
+            ? ""
+            : `<div class="cheese-cf-group-actions">` +
+              offlineAction +
+              `<button type="button" data-cf-group-edit="${escapeAttribute(group.key)}" aria-label="${editLabel}" title="${editLabel}">${customFollowLucideIcon("pencil", 14)}</button>` +
+              `<button type="button" data-cf-group-delete="${escapeAttribute(group.key)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${deleteLabel}" title="${deleteLabel}">${customFollowLucideIcon("trash-2", 14)}</button>` +
+              `</div>`;
         return (
-          `<section class="cheese-cf-group${collapsed ? " is-collapsed" : ""}" data-cf-group-key="${escapeAttribute(group.key)}" data-cf-group-order-key="${escapeAttribute(orderKey)}" style="--cheese-cf-group-color:${escapeAttribute(color)}">` +
+          `<section class="cheese-cf-group${collapsed ? " is-collapsed" : ""}${compactHeader ? " is-compact-header" : ""}" data-cf-group-key="${escapeAttribute(group.key)}" data-cf-group-order-key="${escapeAttribute(orderKey)}" style="--cheese-cf-group-color:${escapeAttribute(color)}">` +
           `<div class="cheese-cf-group-header">` +
           dragHandle +
           `<button type="button" class="cheese-cf-group-toggle" data-cf-group-toggle="${escapeAttribute(group.key)}" aria-expanded="${String(!collapsed)}" title="${escapeAttribute(group.name)}">` +
@@ -31916,6 +33139,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       featureFlags.sbFollowFavStyle ? 1 : 0,
       featureFlags.sbFollowFavBar ? 1 : 0,
       featureFlags.sbFollowGroupEnabled ? 1 : 0,
+      featureFlags.sbFollowGroupCompactHeader ? 1 : 0,
       featureFlags.sbFollowGroupExclusive ? 1 : 0,
       featureFlags.sbFollowGroupSubscribe ? 1 : 0,
       featureFlags.sbFollowGroupOfflineAuto ? 1 : 0,
@@ -32324,6 +33548,35 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ).find((group) => group.key === groupKey);
   }
 
+  function closeCustomFollowGroupActionsMenus(restoreFocus = false) {
+    const menus = document.querySelectorAll(
+      `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-actions-menu:not([hidden])`,
+    );
+    let focusTarget = null;
+    menus.forEach((menu) => {
+      const trigger = menu
+        .closest(".cheese-cf-group-header")
+        ?.querySelector("[data-cf-group-actions-toggle]");
+      trigger?.setAttribute("aria-expanded", "false");
+      menu.hidden = true;
+      if (!focusTarget && trigger?.isConnected) focusTarget = trigger;
+    });
+    if (restoreFocus) focusTarget?.focus();
+  }
+
+  function toggleCustomFollowGroupActionsMenu(button) {
+    const header = button?.closest?.(".cheese-cf-group-header");
+    const menu = header?.querySelector(".cheese-cf-group-actions-menu");
+    if (!header || !menu) return;
+    const shouldOpen = menu.hidden;
+    closeCustomFollowGroupActionsMenus();
+    closeCustomFollowGroupDeletePopover();
+    if (!shouldOpen) return;
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => menu.querySelector("button")?.focus());
+  }
+
   function closeCustomFollowGroupDeletePopover(restoreFocus = false) {
     const popover = document.querySelector(
       `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-delete-popover`,
@@ -32333,7 +33586,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const trigger = header?.querySelector("[data-cf-group-delete]");
     trigger?.setAttribute("aria-expanded", "false");
     popover.remove();
-    if (restoreFocus && trigger?.isConnected) trigger.focus();
+    if (restoreFocus) {
+      const focusTarget = trigger?.closest("[hidden]")
+        ? header?.querySelector("[data-cf-group-actions-toggle]")
+        : trigger;
+      focusTarget?.focus();
+    }
   }
 
   function openCustomFollowGroupDeletePopover(button) {
@@ -32428,6 +33686,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.addEventListener(
       "click",
       (e) => {
+        const groupActionsMenu = document.querySelector(
+          `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-actions-menu:not([hidden])`,
+        );
+        if (
+          groupActionsMenu &&
+          !e.target.closest?.(".cheese-cf-group-actions-menu") &&
+          !e.target.closest?.("[data-cf-group-actions-toggle]")
+        ) {
+          closeCustomFollowGroupActionsMenus();
+        }
         const deletePopover = document.querySelector(
           `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-delete-popover`,
         );
@@ -32451,6 +33719,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
         const nav = e.target.closest?.("#" + CUSTOM_FOLLOW_NAV_ID);
         if (!nav) return;
+        const groupActionsToggle = e.target.closest?.(
+          "[data-cf-group-actions-toggle]",
+        );
+        if (groupActionsToggle) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleCustomFollowGroupActionsMenu(groupActionsToggle);
+          return;
+        }
         const groupDeleteCancel = e.target.closest?.(
           "[data-cf-group-delete-cancel]",
         );
@@ -32552,6 +33829,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (groupOffline) {
           e.preventDefault();
           e.stopPropagation();
+          closeCustomFollowGroupActionsMenus();
           const key = groupOffline.dataset.cfGroupOffline || "";
           if (!key) return;
           setCustomFollowGroupOfflineHidden(
@@ -32564,6 +33842,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (groupEdit) {
           e.preventDefault();
           e.stopPropagation();
+          closeCustomFollowGroupActionsMenus();
           const key = groupEdit.dataset.cfGroupEdit || "";
           const displayGroup = getCustomFollowDisplayGroup(key);
           if (!displayGroup) return;
@@ -32585,6 +33864,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (groupDelete) {
           e.preventDefault();
           e.stopPropagation();
+          closeCustomFollowGroupActionsMenus();
           openCustomFollowGroupDeletePopover(groupDelete);
           return;
         }
@@ -32699,17 +33979,58 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.addEventListener(
       "keydown",
       (event) => {
+        const openActionsMenu = document.querySelector(
+          `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-actions-menu:not([hidden])`,
+        );
         if (
-          event.key !== "Escape" ||
+          openActionsMenu?.contains(event.target) &&
+          ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+        ) {
+          const items = [...openActionsMenu.querySelectorAll("button")];
+          if (!items.length) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const current = Math.max(0, items.indexOf(event.target));
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? items.length - 1
+                : event.key === "ArrowUp"
+                  ? (current - 1 + items.length) % items.length
+                  : (current + 1) % items.length;
+          items[next]?.focus();
+          return;
+        }
+        if (event.key !== "Escape") return;
+        if (openActionsMenu) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeCustomFollowGroupActionsMenus(true);
+          return;
+        }
+        if (
           !document.querySelector(
             `#${CUSTOM_FOLLOW_NAV_ID} .cheese-cf-group-delete-popover`,
           )
-        ) {
+        )
           return;
-        }
         event.preventDefault();
         event.stopPropagation();
         closeCustomFollowGroupDeletePopover(true);
+      },
+      true,
+    );
+    document.addEventListener(
+      "focusin",
+      (event) => {
+        if (
+          event.target.closest?.(".cheese-cf-group-actions-menu") ||
+          event.target.closest?.("[data-cf-group-actions-toggle]")
+        ) {
+          return;
+        }
+        closeCustomFollowGroupActionsMenus();
       },
       true,
     );
@@ -33180,6 +34501,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 사이드바・헤더 같은 최상위 전용 기능이 중복 주입되면 안 되기 때문이다.
     const url = new URL(href, location.origin);
     url.searchParams.set("cheesePopup", "1");
+    if (popupPlayerStartWithoutChat) {
+      url.searchParams.set("cheesePopupChatFolded", "1");
+    }
     frame.src = url.pathname + url.search;
     // ⚠ allow 에 fullscreen 을 넣으면 allowFullscreen 속성은 무시되고 콘솔 경고가 뜬다
     // ("Allow attribute will take precedence over 'allowfullscreen'"). allow 만 쓴다.
@@ -33187,6 +34511,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyPopupPlayerFrameScrolling(frame);
     frame.title = "치지직 팝업 플레이어";
     popup.appendChild(frame);
+
+    let preparingOverlay = null;
+    if (popupPlayerStartWithoutChat) {
+      popup.classList.add("is-preparing");
+      preparingOverlay = document.createElement("div");
+      preparingOverlay.className = "cheese-popup-player__preparing";
+      preparingOverlay.setAttribute("role", "status");
+      preparingOverlay.setAttribute("aria-live", "polite");
+      preparingOverlay.innerHTML = `
+        <svg class="cheese-popup-player__preparing-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>팝업 플레이어 준비 중</span>
+      `;
+      popup.appendChild(preparingOverlay);
+    }
 
     const bar = document.createElement("div");
     bar.className = "cheese-popup-player__bar";
@@ -33208,6 +34548,40 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       frame.src = "about:blank"; // 재생 즉시 중단(리소스 해제)
     };
+
+    if (preparingOverlay) {
+      let preparingTimeout = 0;
+      const finishPreparing = () => {
+        if (!preparingOverlay) return;
+        popup.classList.remove("is-preparing");
+        preparingOverlay.remove();
+        preparingOverlay = null;
+        window.removeEventListener("message", onFrameStatus);
+        if (preparingTimeout) {
+          clearTimeout(preparingTimeout);
+          preparingTimeout = 0;
+        }
+      };
+      const onFrameStatus = (event) => {
+        if (
+          event.origin !== location.origin ||
+          event.source !== frame.contentWindow ||
+          event.data?.source !== POPUP_PLAYER_FRAME_STATUS_SOURCE ||
+          event.data?.type !== "initial-chat-fold-complete"
+        ) {
+          return;
+        }
+        finishPreparing();
+      };
+      window.addEventListener("message", onFrameStatus);
+      // 콘텐츠 스크립트가 중단되거나 치지직 UI를 끝내 찾지 못해도 팝업을 영구히
+      // 가리지 않는다. 정상 경로에서는 내부 프레임의 완료 신호가 먼저 제거한다.
+      preparingTimeout = window.setTimeout(finishPreparing, 45000);
+      cleanups.push(() => {
+        window.removeEventListener("message", onFrameStatus);
+        if (preparingTimeout) clearTimeout(preparingTimeout);
+      });
+    }
     closeBtn.addEventListener("click", () => {
       popup.__cheeseCleanup();
       popup.remove();
@@ -35089,6 +36463,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         POPUP_PLAYER_SIZE_W_KEY,
         POPUP_PLAYER_SIZE_H_KEY,
         POPUP_PLAYER_WIDE_KEY,
+        POPUP_PLAYER_START_WITHOUT_CHAT_KEY,
+        POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY,
         POPUP_PLAYER_SCROLL_KEY,
         POPUP_PLAYER_BTN_MIXER_KEY,
         POPUP_PLAYER_BTN_FILTER_KEY,
@@ -35113,6 +36489,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[POPUP_PLAYER_SIZE_H_KEY],
       );
       popupPlayerWide = data?.[POPUP_PLAYER_WIDE_KEY] !== false; // 기본 ON
+      popupPlayerStartWithoutChat =
+        data?.[POPUP_PLAYER_START_WITHOUT_CHAT_KEY] === true;
+      popupPlayerStartWithoutChat16x9 =
+        data?.[POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY] === true;
       popupPlayerScroll = data?.[POPUP_PLAYER_SCROLL_KEY] === true; // 기본 OFF
       applyPopupPlayerScrollMode();
       popupPlayerBtnMixer = data?.[POPUP_PLAYER_BTN_MIXER_KEY] !== false;
@@ -37953,12 +39333,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
-      chatHistoryOn = false;
-      if (data?.[CHAT_HISTORY_ENABLED_KEY] === true) {
-        chrome.storage.local
-          .set({ [CHAT_HISTORY_ENABLED_KEY]: false })
-          .catch(() => {});
-      }
+      chatHistoryOn = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
       chatHistoryLimit = normalizeChatHistoryLimit(
         data?.[CHAT_HISTORY_LIMIT_KEY],
       );
@@ -38533,32 +39908,41 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // world 가 hash 로 막지만, ① 페이지 진입 시 이미 있던 메시지 ② 다시보기 재생 중 렌더되는
   // 메시지는 여기서 닉네임으로 처리한다. 신규 추가 노드만 검사해 부하를 낮춘다.
   // ── 채팅 이어보기 구현 ─────────────────────────────────────────────────────
-  // 저장 단위는 채널별 키 하나(cheeseChatHistory:<channelId>). 렌더된 행 HTML은
-  // 그대로 보관하되, MAIN world가 읽은 React 메시지 ID와 이전 메시지 ID를 함께
-  // 저장한다. HTML만 비교하면 시간/기기 아이콘이나 React 재렌더링으로 같은 채팅을
-  // 다른 행으로 오인해 중복·순서 뒤섞임이 생긴다.
+  // MAIN world가 읽은 안정 메시지 ID는 유지하되, 복원 행은 치지직 React 목록에 넣지
+  // 않는다. 방송별 session 버퍼를 확장 소유 패널에서만 렌더해 가상 목록과 충돌하지 않게 한다.
   let chatHistoryChannelId = null;
+  let chatHistoryScope = "";
+  let chatHistoryScopeGeneration = 0;
+  let chatHistoryScopePending = false;
+  let chatHistoryScopeAttemptAt = 0;
+  let chatHistoryScopeRetryTimer = 0;
   let chatHistoryBuffer = [];
   let chatHistorySaveTimer = 0;
-  let chatHistoryRestored = false;
   let chatHistoryObserver = null;
   let chatHistoryObservedList = null;
   let chatHistoryObservedRowParent = null;
-  let chatHistoryRestoreGeneration = 0;
-  let chatHistoryRestoringRowParent = null;
-  let chatHistoryRestoreReadFailures = 0;
-  let chatHistoryScrollParent = null;
-  let chatHistoryScrollTimer = 0;
-  let chatHistoryInsertInProgress = false;
-  let chatHistoryReconcileQueued = false;
   let chatHistoryContextInvalidated = false;
   let chatHistoryStorageErrorLogged = false;
   let chatHistorySaveQueue = Promise.resolve();
-  let chatHistoryWasHidden = false;
-  let chatHistorySkipNextRestore = false;
-  let chatHistoryVisibilityTimers = [];
   let chatHistoryCaptureFrame = 0;
+  let chatHistoryCaptureDelayTimer = 0;
+  let chatHistoryFullCapturePending = false;
+  const chatHistoryPendingCaptureRows = new Set();
   let chatHistoryRefreshIdentityByRow = new WeakMap();
+  let chatHistoryPanel = null;
+  let chatHistoryLauncher = null;
+  let chatHistoryPanelList = null;
+  let chatHistoryPanelItems = [];
+  let chatHistoryPanelRenderedStart = 0;
+  let chatHistoryPanelOpen = false;
+  let chatHistoryResizeObserver = null;
+  let chatHistoryPositionFrame = 0;
+  let chatHistoryInlineParent = null;
+  let chatHistoryInlineNativeList = null;
+  let chatHistoryNativeScrollElement = null;
+  let chatHistoryNativeScrollFrame = 0;
+  let chatHistoryNativeColumnReverse = false;
+  let chatHistoryNativeScrollActiveUntil = 0;
 
   function normalizeChatHistoryLimit(value) {
     if (value == null || value === "") return CHAT_HISTORY_LIMIT_DEFAULT;
@@ -38568,10 +39952,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       CHAT_HISTORY_LIMIT_MAX,
       Math.max(CHAT_HISTORY_LIMIT_MIN, n),
     );
-  }
-
-  function chatHistoryKey(channelId) {
-    return `${CHAT_HISTORY_STORE_PREFIX}${channelId}`;
   }
 
   function currentLiveChannelId() {
@@ -38743,6 +40123,102 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function chatHistoryRowsChronological(parent) {
     const rows = chatHistoryRows(parent);
     return isChatHistoryColumnReverse(parent) ? rows.reverse() : rows;
+  }
+
+  function chatHistoryScrollableElement() {
+    const aside = document.querySelector("aside#aside-chatting");
+    const rowParent = chatHistoryObservedRowParent;
+    if (!aside || !rowParent?.isConnected) return null;
+    const overflowCandidates = [];
+    const sizeCandidates = [];
+    for (
+      let node = rowParent;
+      node instanceof HTMLElement;
+      node = node.parentElement
+    ) {
+      const style = getComputedStyle(node);
+      if (/^(auto|scroll|overlay)$/.test(style.overflowY)) {
+        overflowCandidates.push(node);
+      }
+      if (node.scrollHeight > node.clientHeight + 2) sizeCandidates.push(node);
+      if (node === aside) break;
+    }
+    return (
+      overflowCandidates.find(
+        (node) => node.scrollHeight > node.clientHeight + 2,
+      ) ||
+      overflowCandidates[0] ||
+      sizeCandidates.at(-1) ||
+      null
+    );
+  }
+
+  function isChatHistoryAtNativeOldestEdge() {
+    const scroller = chatHistoryNativeScrollElement;
+    const rowParent = chatHistoryObservedRowParent;
+    if (!scroller?.isConnected || !rowParent?.isConnected) return false;
+    // 스크롤 중 모든 행을 수집하고 getBoundingClientRect()를 읽으면 치지직의 가상
+    // 목록 갱신과 강제 레이아웃이 맞물린다. 연결할 때 캐시한 목록 방향과 스크롤 값만
+    // 사용해 상단 도달 여부를 판정한다.
+    const maxScroll = Math.max(
+      0,
+      scroller.scrollHeight - scroller.clientHeight,
+    );
+    if (maxScroll <= 3) return true;
+    const current = Number(scroller.scrollTop) || 0;
+    return chatHistoryNativeColumnReverse
+      ? Math.abs(current) >= maxScroll - 48
+      : current <= 48;
+  }
+
+  function updateChatHistoryLauncherVisibility() {
+    if (!chatHistoryLauncher) return;
+    chatHistoryLauncher.hidden =
+      !chatHistoryOn ||
+      chatHistoryPanelOpen ||
+      chatHistoryPanelItems.length === 0 ||
+      !isChatHistoryAtNativeOldestEdge();
+  }
+
+  function scheduleChatHistoryLauncherVisibility() {
+    chatHistoryNativeScrollActiveUntil = performance.now() + 180;
+    if (chatHistoryNativeScrollFrame) return;
+    chatHistoryNativeScrollFrame = requestAnimationFrame(() => {
+      chatHistoryNativeScrollFrame = 0;
+      updateChatHistoryLauncherVisibility();
+    });
+  }
+
+  function bindChatHistoryNativeScroll() {
+    const next = chatHistoryScrollableElement();
+    chatHistoryNativeColumnReverse = isChatHistoryColumnReverse(
+      chatHistoryObservedRowParent,
+    );
+    if (chatHistoryNativeScrollElement === next) return;
+    chatHistoryNativeScrollElement?.removeEventListener(
+      "scroll",
+      scheduleChatHistoryLauncherVisibility,
+    );
+    chatHistoryNativeScrollElement = next;
+    chatHistoryNativeScrollElement?.addEventListener(
+      "scroll",
+      scheduleChatHistoryLauncherVisibility,
+      { passive: true },
+    );
+  }
+
+  function unbindChatHistoryNativeScroll() {
+    chatHistoryNativeScrollElement?.removeEventListener(
+      "scroll",
+      scheduleChatHistoryLauncherVisibility,
+    );
+    chatHistoryNativeScrollElement = null;
+    chatHistoryNativeColumnReverse = false;
+    chatHistoryNativeScrollActiveUntil = 0;
+    if (chatHistoryNativeScrollFrame) {
+      cancelAnimationFrame(chatHistoryNativeScrollFrame);
+      chatHistoryNativeScrollFrame = 0;
+    }
   }
 
   // 실제 스크롤 wrapper는 column-reverse다. DOM 앞쪽이 화면 아래의 최신 채팅이고,
@@ -39260,124 +40736,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       clearTimeout(chatHistorySaveTimer);
       chatHistorySaveTimer = 0;
     }
-    if (chatHistoryScrollTimer) {
-      clearTimeout(chatHistoryScrollTimer);
-      chatHistoryScrollTimer = 0;
-    }
     if (chatHistoryCaptureFrame) {
-      cancelAnimationFrame(chatHistoryCaptureFrame);
+      if (chatHistoryCaptureFrame > 0) {
+        cancelAnimationFrame(chatHistoryCaptureFrame);
+      }
       chatHistoryCaptureFrame = 0;
     }
+    if (chatHistoryCaptureDelayTimer) {
+      clearTimeout(chatHistoryCaptureDelayTimer);
+      chatHistoryCaptureDelayTimer = 0;
+    }
+    chatHistoryFullCapturePending = false;
+    chatHistoryPendingCaptureRows.clear();
     chatHistoryObserver?.disconnect();
     chatHistoryObserver = null;
-    chatHistoryScrollParent?.removeEventListener("scroll", onChatHistoryScroll);
-    chatHistoryScrollParent = null;
-  }
-
-  // 한도(10MB)에 닿으면 set() 이 던진다. 그냥 삼키면 '조용히 저장이 안 되는' 상태가
-  // 되므로, 참고 구현과 같은 방식으로 오래된 쪽부터 덜어내며 재시도한다.
-  // ⚠ 자기 채널만 줄여서는 부족하다 — 여러 채널이 각각 가득 차 있으면 총량이 문제다.
-  // 그래서 먼저 '가장 오래 안 본 다른 채널'을 통째로 버린 뒤, 그래도 안 되면 자기 것을 줄인다.
-  async function saveChatHistoryWithEviction(key, items) {
-    const store = chatHistoryStore();
-    if (!store) return;
-    let attempt = items;
-    while (attempt.length > 0) {
-      try {
-        await store.set({
-          [key]: {
-            version: CHAT_HISTORY_STORAGE_VERSION,
-            at: Date.now(),
-            items: attempt,
-          },
-        });
-        chatHistoryStorageErrorLogged = false;
-        return;
-      } catch (error) {
-        if (isChatHistoryContextInvalidated(error)) {
-          // 업데이트 뒤에는 이전 콘텐츠 스크립트를 되살릴 수 없다. 같은 실패를 계속
-          // 출력하지 말고 현재 인스턴스의 관찰·저장만 조용히 끝낸다.
-          stopChatHistoryAfterContextInvalidation();
-          return;
-        }
-        // ⚠ 용량 초과가 아닌 오류(권한 등)까지 '덜어내며 재시도'하면, 아무리 줄여도
-        // 실패하므로 배열을 0 까지 갉아먹고 조용히 끝난다. 용량 문제일 때만 덜어낸다.
-        if (!/quota|QUOTA|exceed/i.test(String(error?.message || ""))) {
-          if (!chatHistoryStorageErrorLogged) {
-            chatHistoryStorageErrorLogged = true;
-            console.warn(
-              "[치즈] 채팅 이어보기 저장 실패:",
-              error?.message || error,
-            );
-          }
-          return;
-        }
-        if (await dropOldestOtherChatHistory(key)) continue; // 남 먼저 정리
-        const drop = Math.max(
-          1,
-          Math.floor(attempt.length * CHAT_HISTORY_EVICT_RATIO),
-        );
-        attempt = attempt.slice(drop); // 오래된 쪽(앞)부터 버린다
-      }
-    }
-    // 끝까지 못 넣으면 이 채널 기록은 지운다(빈 껍데기를 남기지 않는다).
-    try {
-      await store.remove(key);
-    } catch {}
-  }
-
-  // 가장 오래 안 본 다른 채널 기록 하나를 버린다. 버렸으면 true.
-  async function dropOldestOtherChatHistory(keepKey) {
-    const store = chatHistoryStore();
-    if (!store) return false;
-    try {
-      const all = await store.get(null);
-      let oldestKey = null;
-      let oldestAt = Infinity;
-      for (const [k, v] of Object.entries(all || {})) {
-        if (!k.startsWith(CHAT_HISTORY_STORE_PREFIX) || k === keepKey) continue;
-        const at = Number(v?.at) || 0;
-        if (at < oldestAt) {
-          oldestAt = at;
-          oldestKey = k;
-        }
-      }
-      if (!oldestKey) return false;
-      await store.remove(oldestKey);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function flushChatHistory() {
-    if (
-      chatHistoryContextInvalidated ||
-      !chatHistoryOn ||
-      !chatHistoryChannelId
-    ) {
-      return chatHistorySaveQueue;
-    }
-    if (chatHistorySaveTimer) {
-      clearTimeout(chatHistorySaveTimer);
-      chatHistorySaveTimer = 0;
-    }
-    const items = chatHistoryBuffer.slice(-chatHistoryLimit);
-    // 채팅 DOM이 아직 뜨지 않은 새 페이지가 곧바로 종료되는 경우, 빈 배열로 이전
-    // 기록을 덮어쓰지 않는다. 저장 요청도 순서대로 실행해 늦게 끝난 옛 스냅샷이 최신
-    // 스냅샷을 되돌리는 경쟁 조건을 막는다.
-    if (!items.length) return chatHistorySaveQueue;
-    const key = chatHistoryKey(chatHistoryChannelId);
-    chatHistorySaveQueue = chatHistorySaveQueue
-      .catch(() => {})
-      .then(() => saveChatHistoryWithEviction(key, items));
-    return chatHistorySaveQueue;
-  }
-
-  function removeRestoredChatHistoryRows(root = document) {
-    root
-      .querySelectorAll?.(`[${CHAT_HISTORY_MARK}]`)
-      .forEach((row) => row.remove());
+    chatHistoryResizeObserver?.disconnect();
+    unbindChatHistoryNativeScroll();
+    detachChatHistoryInlineElements();
+    chatHistoryLauncher?.remove();
+    chatHistoryPanel?.remove();
+    chatHistoryLauncher = null;
+    chatHistoryPanel = null;
+    chatHistoryPanelList = null;
   }
 
   function isStoredChatMissionHtml(html) {
@@ -39397,7 +40777,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const html = typeof raw.html === "string" ? raw.html : "";
     if (!id || !html || html.length > CHAT_HISTORY_ROW_HTML_MAX) return null;
     const previousId = normalizeChatHistoryId(raw.previousId);
-    return { id, previousId: previousId === id ? "" : previousId, html };
+    const time = Number(raw.time);
+    return {
+      id,
+      previousId: previousId === id ? "" : previousId,
+      html,
+      time: Number.isFinite(time) && time > 0 ? Math.round(time) : 0,
+    };
   }
 
   function normalizeChatHistoryItems(raw) {
@@ -39420,9 +40806,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ...previous,
         ...item,
         previousId: item.previousId || previous.previousId || "",
+        time: item.time || previous.time || 0,
       };
     });
-    const limited = items.slice(-chatHistoryLimit);
+    const ordered = items
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        if (a.item.time && b.item.time && a.item.time !== b.item.time) {
+          return a.item.time - b.item.time;
+        }
+        return a.index - b.index;
+      })
+      .map(({ item }) => item);
+    const limited = ordered.slice(-chatHistoryLimit);
     // ID 연결은 MAIN world의 비동기 행 처리 순서가 아니라, 확정된 과거→최신 배열에서
     // 다시 만든다. 저장 내용을 진단하거나 향후 일부 구간을 병합할 때도 일관된 체인이
     // 유지된다.
@@ -39433,10 +40829,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 새로 들어온 행을 버퍼에 담는다. 복원된 행은 다시 담지 않는다(중복 누적 방지).
-  // ⚠ 저장 전에 '우리가 덧붙인 것'은 걷어내되, 복제 행에서 다시 얻을 수 없는 실제
-  // 전송 시각과 작성 기기 종류는 행 속성으로 보존한다. 복원 행에는 React props가 없어
-  // 이 값까지 버리면 시간/기기 표시가 영구히 사라진다. 화면 요소 자체는 저장하지 않아
-  // 표시 형식이나 사용자 아이콘이 바뀌어도 복원 시 현재 설정으로 다시 그릴 수 있다.
+  // 실제 전송 시각과 작성 기기 종류를 행 속성으로 보존한다. 독립 패널은 치지직 채팅
+  // 옵저버 밖에 있어 시간·기기 표시를 다시 만들 수 없으므로, 현재 행에 이미 붙은 표시
+  // 요소도 함께 저장한다.
   function cleanChatRowForStore(row) {
     const epoch =
       row
@@ -39453,9 +40848,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       row.getAttribute?.(CHAT_HISTORY_PREVIOUS_ID_MARK),
     );
     const clone = row.cloneNode(true);
-    clone
-      .querySelectorAll(".cheese-chat-time, .cheese-chat-os")
-      .forEach((el) => el.remove());
     const strip = (el) => {
       for (const name of el.getAttributeNames()) {
         if (name.startsWith("data-cheese")) el.removeAttribute(name);
@@ -39465,6 +40857,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     clone
       .querySelectorAll("[data-cheese-os-done], [data-cheese-row-done]")
       .forEach(strip);
+    clone
+      .querySelectorAll("script, style, iframe, object, embed, form")
+      .forEach((element) => element.remove());
+    [clone, ...clone.querySelectorAll("*")].forEach((element) => {
+      for (const name of element.getAttributeNames()) {
+        if (/^on/i.test(name)) element.removeAttribute(name);
+        if (
+          /^(?:href|src|action|formaction)$/i.test(name) &&
+          /^\s*javascript:/i.test(element.getAttribute(name) || "")
+        ) {
+          element.removeAttribute(name);
+        }
+      }
+    });
     if (/^\d{13}$/.test(epoch)) {
       clone.setAttribute(CHAT_HISTORY_EPOCH_MARK, epoch);
     }
@@ -39487,7 +40893,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const previousId = normalizeChatHistoryId(
       row.getAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK),
     );
-    return { id, previousId: previousId === id ? "" : previousId, html };
+    const time = Number(row.getAttribute(CHAT_HISTORY_EPOCH_MARK));
+    return {
+      id,
+      previousId: previousId === id ? "" : previousId,
+      html,
+      time: Number.isFinite(time) && time > 0 ? Math.round(time) : 0,
+    };
   }
 
   // content.js와 MAIN world의 채팅 강화 옵저버는 같은 DOM 변이를 서로 다른 순서로
@@ -39509,7 +40921,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (!refreshedItem || refreshedItem.id !== state.item.id) return;
       if (
         refreshedItem.html === state.item.html &&
-        refreshedItem.previousId === state.item.previousId
+        refreshedItem.previousId === state.item.previousId &&
+        (!refreshedItem.time || refreshedItem.time === state.item.time)
       ) {
         return;
       }
@@ -39522,6 +40935,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ...previous,
         ...refreshedItem,
         previousId: refreshedItem.previousId || previous.previousId || "",
+        time: refreshedItem.time || previous.time || 0,
       };
       state.item = refreshedItem;
       scheduleChatHistorySave();
@@ -39530,6 +40944,34 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 번째 패스에서 반영한다. 두 번으로 상한을 고정해 폭주 채팅에서도 타이머가 늘지 않는다.
     window.setTimeout(refresh, 250);
     window.setTimeout(refresh, 1400);
+  }
+
+  function captureChatHistoryRows(rows) {
+    const nativeRows = Array.from(rows || []).filter(
+      (row) =>
+        row?.isConnected &&
+        !row.hasAttribute(CHAT_HISTORY_MARK) &&
+        isChatHistoryMessageRow(row),
+    );
+    if (!nativeRows.length) return false;
+
+    const snapshots = [];
+    for (const row of nativeRows) {
+      const item = chatHistoryItemFromRow(row);
+      // 시스템 공지처럼 안정 ID를 얻을 수 없는 행 하나 때문에 일반 채팅 수집 전체가
+      // 멈추지 않게 한다. 저장 가능한 행은 실제 시각으로 정렬하므로 부분 스냅샷도 안전하다.
+      if (!item) continue;
+      snapshots.push(item);
+      refreshCapturedChatHistoryRow(row, item);
+    }
+    if (!snapshots.length) return false;
+
+    const merged = mergeChatHistorySequences(chatHistoryBuffer, snapshots);
+    if (chatHistorySequencesEqual(chatHistoryBuffer, merged)) return false;
+    chatHistoryBuffer = merged;
+    scheduleChatHistorySave();
+    updateChatHistoryPanel();
+    return true;
   }
 
   function captureRenderedChatHistoryRows(rowParent) {
@@ -39541,634 +40983,101 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ) {
       return false;
     }
-    const nativeRows = chatHistoryRowsChronological(rowParent).filter(
-      (row) =>
-        !row.hasAttribute(CHAT_HISTORY_MARK) && isChatHistoryMessageRow(row),
-    );
-    if (!nativeRows.length) return false;
-
-    const snapshots = [];
-    for (const row of nativeRows) {
-      const item = chatHistoryItemFromRow(row);
-      // MAIN world의 ID 스윕이 끝나기 전에 일부 행만 저장하면 column-reverse DOM
-      // 순서가 버퍼에 섞일 수 있다. 전체 네이티브 행이 ID를 받은 뒤 한 번에 합친다.
-      if (!item) return false;
-      snapshots.push(item);
-      refreshCapturedChatHistoryRow(row, item);
-    }
-
-    chatHistoryBuffer = mergeChatHistorySequences(chatHistoryBuffer, snapshots);
-    scheduleChatHistorySave();
-    return true;
+    return captureChatHistoryRows(chatHistoryRowsChronological(rowParent));
   }
 
-  function scheduleChatHistoryCaptureSnapshot(rowParent) {
-    if (
-      chatHistoryContextInvalidated ||
-      !chatHistoryOn ||
-      isChatHistoryScrolledBack() ||
-      chatHistoryCaptureFrame
-    ) {
+  function scheduleChatHistoryCaptureSnapshot(rowParent, changedRows = null) {
+    if (chatHistoryContextInvalidated || !chatHistoryOn) {
       return;
     }
-    chatHistoryCaptureFrame = requestAnimationFrame(() => {
+    if (changedRows !== null) {
+      changedRows.forEach((row) => {
+        if (row instanceof Element) chatHistoryPendingCaptureRows.add(row);
+      });
+      if (!chatHistoryPendingCaptureRows.size) return;
+    } else {
+      chatHistoryFullCapturePending = true;
+    }
+    // 가상 목록은 위로 스크롤하는 동안 같은 행들을 연속 재사용한다. 화면에 보이는
+    // 탭에서는 짧게 디바운스해 DOM 복제와 HTML 직렬화를 스크롤 프레임 밖에서 한 번만
+    // 수행한다. 숨김 탭은 행이 곧 재사용될 수 있으므로 기존처럼 즉시 보존한다.
+    if (!document.hidden && changedRows !== null) {
+      if (chatHistoryCaptureDelayTimer) return;
+      const wait = Math.max(
+        80,
+        chatHistoryNativeScrollActiveUntil - performance.now(),
+      );
+      chatHistoryCaptureDelayTimer = window.setTimeout(() => {
+        chatHistoryCaptureDelayTimer = 0;
+        scheduleChatHistoryCaptureSnapshot(rowParent, new Set());
+      }, wait);
+      return;
+    }
+    if (chatHistoryCaptureFrame) return;
+    const capture = () => {
       chatHistoryCaptureFrame = 0;
       const parent = chatHistoryObservedRowParent;
-      if (
-        parent !== rowParent ||
-        !parent?.isConnected ||
-        isChatHistoryScrolledBack()
-      ) {
+      if (parent !== rowParent || !parent?.isConnected) {
+        chatHistoryFullCapturePending = false;
+        chatHistoryPendingCaptureRows.clear();
         return;
       }
+      const fullCapture = chatHistoryFullCapturePending;
+      chatHistoryFullCapturePending = false;
+      if (!fullCapture && chatHistoryPendingCaptureRows.size) {
+        const rows = [...chatHistoryPendingCaptureRows];
+        chatHistoryPendingCaptureRows.clear();
+        captureChatHistoryRows(rows);
+        return;
+      }
+      chatHistoryPendingCaptureRows.clear();
       captureRenderedChatHistoryRows(parent);
-    });
-  }
-
-  function finishChatHistoryInsert() {
-    chatHistoryInsertInProgress = false;
-    if (chatHistoryReconcileQueued) scheduleChatHistoryReconcile(0);
-  }
-
-  // 현재 화면의 네이티브 채팅 순서를 권위 있는 꼬리 구간으로 사용한다. 저장 기록과
-  // 하나라도 겹치면 그 앞의 과거 기록만 보존하고 현재 구간을 시간순으로 다시 붙인다.
-  // 이 방식은 새로고침 직후 ID 부여 순서 때문에 뒤집혀 저장된 v2 버퍼도 교정한다.
-  function mergeChatHistorySequences(storedItems, currentItems) {
-    const stored = normalizeChatHistoryItems(storedItems);
-    const current = normalizeChatHistoryItems(currentItems);
-    if (!stored.length) return current.slice(-chatHistoryLimit);
-    if (!current.length) return stored.slice(-chatHistoryLimit);
-
-    const storedIndexById = new Map(
-      stored.map((item, index) => [item.id, index]),
-    );
-    let firstStoredOverlap = -1;
-    for (const item of current) {
-      const index = storedIndexById.get(item.id);
-      if (index == null) continue;
-      if (firstStoredOverlap < 0 || index < firstStoredOverlap) {
-        firstStoredOverlap = index;
-      }
-    }
-
-    if (firstStoredOverlap < 0) {
-      return normalizeChatHistoryItems([...stored, ...current]).slice(
-        -chatHistoryLimit,
-      );
-    }
-
-    const currentIds = new Set(current.map((item) => item.id));
-    const older = stored
-      .slice(0, firstStoredOverlap)
-      .filter((item) => !currentIds.has(item.id));
-    return normalizeChatHistoryItems([...older, ...current]).slice(
-      -chatHistoryLimit,
-    );
-  }
-
-  function missingChatHistoryItems(desiredItems, presentItems) {
-    const presentIds = new Set(
-      normalizeChatHistoryItems(presentItems).map((item) => item.id),
-    );
-    return normalizeChatHistoryItems(desiredItems).filter(
-      (item) => !presentIds.has(item.id),
-    );
-  }
-
-  // column-reverse 목록의 DOM 뒤쪽에 과거 행을 붙인다. 최초에는 현재 채팅과 가까운
-  // 기록부터 제한적으로 복원하고, 과거 끝까지 스크롤했을 때 다음 묶음을 보충한다.
-  // 저장 한도 500개를 한꺼번에 넣으면 치지직 가상 목록의 높이 계산이 흔들려 현재
-  // 채팅 영역이 통째로 화면 밖으로 밀릴 수 있다.
-  function appendChatHistoryRows(items, rowParent, generation) {
-    if (!items.length) return;
-    if (chatHistoryInsertInProgress) {
-      chatHistoryReconcileQueued = true;
-      return;
-    }
-    chatHistoryInsertInProgress = true;
-    const pendingItems = normalizeChatHistoryItems(items).slice(
-      -CHAT_HISTORY_RESTORE_BATCH_MAX,
-    );
-    const frag = document.createDocumentFragment();
-    const temp = document.createElement("div");
-    let index = 0;
-    const CHUNK = 25;
-    const step = () => {
-      if (
-        generation !== chatHistoryRestoreGeneration ||
-        rowParent !== chatHistoryObservedRowParent ||
-        !rowParent.isConnected
-      ) {
-        finishChatHistoryInsert();
-        return;
-      }
-      const chunk = pendingItems.slice(index, index + CHUNK);
-      temp.innerHTML = chunk.map((item) => item.html).join("");
-      let itemIndex = 0;
-      while (temp.firstElementChild) {
-        const el = temp.firstElementChild;
-        const item = chunk[itemIndex++];
-        if (
-          !item ||
-          isStoredChatMissionHtml(el.outerHTML) ||
-          !isChatHistoryMessageRow(el)
-        ) {
-          el.remove();
-          continue;
-        }
-        el.setAttribute(CHAT_HISTORY_MARK, "1");
-        el.setAttribute(CHAT_HISTORY_ID_MARK, item.id);
-        if (item.previousId) {
-          el.setAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK, item.previousId);
-        } else {
-          el.removeAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK);
-        }
-        frag.appendChild(el);
-      }
-      index += CHUNK;
-      if (index < pendingItems.length) {
-        requestAnimationFrame(step);
-        return;
-      }
-      const keepCurrentChatVisible = !isChatHistoryScrolledBack();
-      const scrollParent = chatHistoryScrollParent?.isConnected
-        ? chatHistoryScrollParent
-        : rowParent;
-      if (isChatHistoryColumnReverse(rowParent)) {
-        Array.from(frag.children)
-          .reverse()
-          .forEach((el) => rowParent.appendChild(el));
-      } else {
-        // 일반 방향 목록은 과거→현재 순서이므로 복원 기록을 첫 채팅 행 앞에 둔다.
-        // _list_bottom_ 같은 센티널이 앞에 있어도 그 위치는 건드리지 않는다.
-        const firstChatRow = chatHistoryRows(rowParent)[0] || null;
-        rowParent.insertBefore(frag, firstChatRow);
-      }
-      if (keepCurrentChatVisible) {
-        scrollParent.scrollTop = isChatHistoryColumnReverse(scrollParent)
-          ? 0
-          : scrollParent.scrollHeight;
-      }
-      finishChatHistoryInsert();
     };
-    requestAnimationFrame(step);
-  }
-
-  // 치지직은 같은 페이지에서 위로 스크롤해도 네이티브 채팅 DOM을 최대 200행 정도만
-  // 유지한다. 저장 한도가 더 크면 현재 네이티브 행을 우선 남기고, 버퍼에만 있는 과거
-  // 행을 보충한다. 새로고침 뒤 치지직이 같은 행을 다시 불러온 경우에는 복원 복제본을
-  // 제거해 중복과 DOM 증가를 막는다.
-  function reconcileChatHistoryRows() {
-    chatHistoryReconcileQueued = false;
-    if (chatHistoryInsertInProgress || !chatHistoryOn) {
-      chatHistoryReconcileQueued = chatHistoryInsertInProgress;
+    if (document.hidden) {
+      // 숨겨진 탭에서는 requestAnimationFrame이 수초 이상 멈출 수 있다. MAIN world가
+      // ID를 붙인 같은 마이크로태스크 체크포인트에서 스냅샷을 떠서 React 가상 목록이
+      // 행을 다음 메시지로 재사용하기 전에 보존한다.
+      chatHistoryCaptureFrame = -1;
+      queueMicrotask(() => {
+        if (chatHistoryCaptureFrame === -1) capture();
+      });
       return;
     }
-    const rowParent = chatHistoryObservedRowParent;
-    if (!rowParent?.isConnected || !isChatHistoryNearOldestEdge()) return;
-
-    const desired = normalizeChatHistoryItems(
-      chatHistoryBuffer.slice(-chatHistoryLimit),
-    );
-    const desiredIds = new Set(desired.map((item) => item.id));
-
-    const rows = chatHistoryRows(rowParent);
-    const nativeIds = new Set(
-      rows
-        .filter((row) => !row.hasAttribute(CHAT_HISTORY_MARK))
-        .map(chatHistoryItemFromRow)
-        .filter(Boolean)
-        .map((item) => item.id),
-    );
-
-    // 같은 ID의 네이티브 채팅이 다시 내려오면 원본을 우선한다. HTML이 달라져도
-    // 복원 복제본을 즉시 걷어, 스크롤 왕복 뒤 중복이 남지 않게 한다.
-    rows.forEach((row) => {
-      if (!row.hasAttribute(CHAT_HISTORY_MARK)) return;
-      const item = chatHistoryItemFromRow(row);
-      if (!item || !desiredIds.has(item.id) || nativeIds.has(item.id)) {
-        row.remove();
-      }
-    });
-
-    const missing = missingChatHistoryItems(
-      desired,
-      chatHistoryRows(rowParent).map(chatHistoryItemFromRow).filter(Boolean),
-    );
-    appendChatHistoryRows(missing, rowParent, chatHistoryRestoreGeneration);
+    chatHistoryCaptureFrame = requestAnimationFrame(capture);
   }
 
-  function scheduleChatHistoryReconcile(delay = 120) {
-    chatHistoryReconcileQueued = true;
-    if (chatHistoryScrollTimer) return;
-    chatHistoryScrollTimer = window.setTimeout(() => {
-      chatHistoryScrollTimer = 0;
-      reconcileChatHistoryRows();
-    }, delay);
+  // 가상 목록에서 현재 행이나 과거 행이 어느 순서로 다시 렌더돼도 ID 합집합을 만든 뒤
+  // 실제 전송 시각으로 정렬한다. HTML은 나중에 관측한 행을 우선해 강화 UI도 갱신한다.
+  function mergeChatHistorySequences(storedItems, currentItems) {
+    return normalizeChatHistoryItems([
+      ...(Array.isArray(storedItems) ? storedItems : []),
+      ...(Array.isArray(currentItems) ? currentItems : []),
+    ]).slice(-chatHistoryLimit);
   }
 
-  function onChatHistoryScroll() {
-    if (isChatHistoryNearOldestEdge()) {
-      scheduleChatHistoryReconcile();
-    }
-  }
-
-  function isChatHistoryScrolledBack() {
-    const parent = chatHistoryScrollParent;
-    if (!parent?.isConnected) return false;
-    const style = getComputedStyle(parent);
-    if (style.flexDirection === "column-reverse") {
-      return parent.scrollTop < -1;
-    }
-    const distanceFromBottom =
-      parent.scrollHeight - parent.clientHeight - parent.scrollTop;
-    return distanceFromBottom > 1;
-  }
-
-  function isChatHistoryNearOldestEdge() {
-    const parent = chatHistoryScrollParent;
-    if (!parent?.isConnected || !isChatHistoryScrolledBack()) return false;
-    const threshold = Math.max(80, Math.min(240, parent.clientHeight * 0.25));
-    const maxScroll = Math.max(0, parent.scrollHeight - parent.clientHeight);
-    if (isChatHistoryColumnReverse(parent)) {
-      return maxScroll + parent.scrollTop <= threshold;
-    }
-    return parent.scrollTop <= threshold;
-  }
-
-  function findChatHistoryScrollParent(rowParent, list) {
-    let node = rowParent;
-    const aside = list?.closest?.("aside#aside-chatting");
-    while (node instanceof Element) {
-      const style = getComputedStyle(node);
-      if (
-        /(auto|scroll|overlay)/.test(style.overflowY) &&
-        node.clientHeight > 0
-      ) {
-        return node;
-      }
-      if (node === list || node === aside) break;
-      node = node.parentElement;
-    }
-    return rowParent;
-  }
-
-  function setChatHistoryScrollParent(parent) {
-    if (chatHistoryScrollParent === parent) return;
-    chatHistoryScrollParent?.removeEventListener("scroll", onChatHistoryScroll);
-    chatHistoryScrollParent = parent;
-    chatHistoryScrollParent?.addEventListener("scroll", onChatHistoryScroll, {
-      passive: true,
-    });
-  }
-
-  function scrollChatHistoryToLatest(scrollParent, rowParent) {
-    if (!(scrollParent instanceof Element) || !scrollParent.isConnected) return;
-    const reverse =
-      isChatHistoryColumnReverse(rowParent) ||
-      isChatHistoryColumnReverse(scrollParent);
-    requestAnimationFrame(() => {
-      if (!scrollParent.isConnected) return;
-      scrollParent.scrollTop = reverse ? 0 : scrollParent.scrollHeight;
-    });
-  }
-
-  function clearChatHistoryVisibilityTimers() {
-    chatHistoryVisibilityTimers.forEach(clearTimeout);
-    chatHistoryVisibilityTimers = [];
-  }
-
-  // 숨은 탭에서 치지직이 가상 채팅 목록을 교체하면 이전 wrapper에는 복원 행만 남을 수
-  // 있다. 복귀 시 그 행을 화면에서 걷고 최신 위치로 돌아간 뒤 네이티브 wrapper를 다시
-  // 찾는다. 저장 버퍼는 유지하므로 과거 끝까지 스크롤하면 이어보기 행이 다시 보충된다.
-  function reconnectChatHistoryAfterVisibility() {
-    if (document.hidden || !chatHistoryOn || !currentLiveChannelId()) {
-      return;
-    }
-    const previousScrollParent = chatHistoryScrollParent;
-    const previousRowParent = chatHistoryObservedRowParent;
-    stopChatHistory();
-    removeRestoredChatHistoryRows(
-      document.querySelector("aside#aside-chatting") || document,
-    );
-    scrollChatHistoryToLatest(previousScrollParent, previousRowParent);
-    chatHistorySkipNextRestore = true;
-    ensureChatHistory();
-
-    clearChatHistoryVisibilityTimers();
-    [150, 600, 1500].forEach((delay) => {
-      chatHistoryVisibilityTimers.push(
-        window.setTimeout(() => {
-          if (!document.hidden && chatHistoryOn) ensureChatHistory();
-        }, delay),
+  function chatHistorySequencesEqual(left, right) {
+    if (left === right) return true;
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    if (left.length !== right.length) return false;
+    return left.every((item, index) => {
+      const other = right[index];
+      return (
+        item?.id === other?.id &&
+        item?.previousId === other?.previousId &&
+        item?.time === other?.time &&
+        item?.html === other?.html
       );
     });
-  }
-
-  // 현재 치지직 라이브 채팅은 화면에 필요한 20여 행만 유지하는 가상화 목록이다.
-  // 예전처럼 200행이 채워질 때까지 22초 이상 기다리면 복원이 고장 난 것처럼 보인다.
-  // 대신 실제 행 부모가 잠시 안정될 때까지만 기다리고, SPA 재렌더로 목록이 교체되면
-  // 이 작업을 취소해 새 목록에서 다시 시작한다.
-  function waitChatListSettled(list, rowParent, generation) {
-    return new Promise((resolve) => {
-      let last = chatHistoryRows(rowParent).length;
-      let stable = 0;
-      let waited = 0;
-      const MIN_WAIT = 2000;
-      const MAX_WAIT = 8000;
-      const tick = () => {
-        if (
-          generation !== chatHistoryRestoreGeneration ||
-          list !== chatHistoryObservedList ||
-          rowParent !== chatHistoryObservedRowParent ||
-          !list.isConnected ||
-          !rowParent.isConnected
-        ) {
-          resolve(false);
-          return;
-        }
-        const now = chatHistoryRows(rowParent).length;
-        stable = now === last ? stable + 1 : 0;
-        last = now;
-        waited += 400;
-        if ((stable >= 4 && waited >= MIN_WAIT) || waited >= MAX_WAIT) {
-          resolve(true);
-          return;
-        }
-        setTimeout(tick, 400);
-      };
-      setTimeout(tick, 400);
-    });
-  }
-
-  async function restoreChatHistory(channelId, list, rowParent) {
-    if (chatHistoryRestored || chatHistoryRestoringRowParent === rowParent) {
-      return;
-    }
-    const generation = chatHistoryRestoreGeneration;
-    chatHistoryRestoringRowParent = rowParent;
-    try {
-      // SPA로 채널을 나갔다가 곧바로 돌아온 경우, 직전 페이지 상태를 저장하는 큐가
-      // 끝난 뒤 읽어야 방금 떠난 채널의 최신 기록을 놓치지 않는다.
-      await chatHistorySaveQueue.catch(() => {});
-      if (
-        chatHistoryContextInvalidated ||
-        generation !== chatHistoryRestoreGeneration ||
-        rowParent !== chatHistoryObservedRowParent
-      ) {
-        return;
-      }
-      const store = chatHistoryStore();
-      if (!store) {
-        chatHistoryRestored = true;
-        return;
-      }
-      let stored = null;
-      try {
-        const data = await store.get(chatHistoryKey(channelId));
-        stored = data?.[chatHistoryKey(channelId)];
-        chatHistoryRestoreReadFailures = 0;
-      } catch (error) {
-        if (isChatHistoryContextInvalidated(error)) {
-          stopChatHistoryAfterContextInvalidation();
-          return;
-        }
-        // 일시적인 저장소 읽기 실패는 다음 DOM 갱신에서 제한적으로 다시 시도한다.
-        // 실패를 복원 완료로 확정하면 해당 탭에서는 영영 기록을 읽지 못하고, 무제한
-        // 재시도하면 미지원 환경에서 타이머가 남는다.
-        chatHistoryRestoreReadFailures += 1;
-        if (chatHistoryRestoreReadFailures <= 3) {
-          window.setTimeout(() => {
-            if (
-              generation === chatHistoryRestoreGeneration &&
-              rowParent === chatHistoryObservedRowParent
-            ) {
-              ensureChatHistory();
-            }
-          }, 400 * chatHistoryRestoreReadFailures);
-        } else {
-          chatHistoryRestored = true;
-        }
-        return;
-      }
-      // v1은 HTML 문자열만 저장했고, 시험판 v2는 초기 ID 부여 순서가 버퍼에 섞일 수
-      // 있었다. 그대로 복원하면 중복·역순이 남으므로 이전 형식은 한 번 정리하고
-      // 완성된 시간순 스냅샷을 쓰는 v3 기록부터 다시 쌓는다.
-      if (stored && Number(stored.version) !== CHAT_HISTORY_STORAGE_VERSION) {
-        try {
-          await store.remove(chatHistoryKey(channelId));
-        } catch {}
-      }
-      const items =
-        Number(stored?.version) === CHAT_HISTORY_STORAGE_VERSION
-          ? normalizeChatHistoryItems(stored.items).filter(
-              (item) => !isStoredChatMissionHtml(item.html),
-            )
-          : [];
-      // 첫 방문은 복원할 데이터가 없으므로 기다리지 않는다. 현재 행은 옵저버를 붙일 때
-      // 이미 버퍼에 담았고 3초 뒤 저장된다.
-      if (!items.length) {
-        chatHistoryRestored = true;
-        return;
-      }
-      const settled = await waitChatListSettled(list, rowParent, generation);
-      if (!settled) return;
-      const currentRows = chatHistoryRows(rowParent);
-      const currentItems = chatHistoryBuffer.length
-        ? chatHistoryBuffer.slice()
-        : chatHistoryRowsChronological(rowParent)
-            .map(chatHistoryItemFromRow)
-            .filter(Boolean);
-      const merged = mergeChatHistorySequences(items, currentItems);
-      const fresh = missingChatHistoryItems(
-        merged,
-        currentRows.map(chatHistoryItemFromRow).filter(Boolean),
-      );
-      chatHistoryRestored = true;
-      // 저장 기록과 현재 네이티브 채팅을 합친 뒤 한도를 적용한다. 저장된 500개에
-      // 새 채팅 20여 개를 그대로 더해 DOM이 500개를 넘는 상황을 막는다.
-      chatHistoryBuffer = merged;
-      scheduleChatHistorySave();
-      if (fresh.length) appendChatHistoryRows(fresh, rowParent, generation);
-    } finally {
-      if (
-        generation === chatHistoryRestoreGeneration &&
-        chatHistoryRestoringRowParent === rowParent
-      ) {
-        chatHistoryRestoringRowParent = null;
-      }
-    }
-  }
-
-  function stopChatHistory() {
-    chatHistoryRestoreGeneration += 1;
-    chatHistoryRestoringRowParent = null;
-    chatHistoryRestoreReadFailures = 0;
-    chatHistoryRestored = false;
-    if (chatHistoryObserver) {
-      chatHistoryObserver.disconnect();
-      chatHistoryObserver = null;
-    }
-    chatHistoryObservedList = null;
-    chatHistoryObservedRowParent = null;
-    setChatHistoryScrollParent(null);
-    chatHistoryReconcileQueued = false;
-    if (chatHistoryScrollTimer) {
-      clearTimeout(chatHistoryScrollTimer);
-      chatHistoryScrollTimer = 0;
-    }
-    if (chatHistoryCaptureFrame) {
-      cancelAnimationFrame(chatHistoryCaptureFrame);
-      chatHistoryCaptureFrame = 0;
-    }
-    if (chatHistorySaveTimer) {
-      clearTimeout(chatHistorySaveTimer);
-      chatHistorySaveTimer = 0;
-      flushChatHistory();
-    }
-  }
-
-  function ensureChatHistory() {
-    if (!IS_TOP_FRAME || chatHistoryContextInvalidated) return;
-    const channelId = chatHistoryOn ? currentLiveChannelId() : null;
-    if (!channelId) {
-      if (chatHistoryChannelId) {
-        flushChatHistory();
-        stopChatHistory();
-        removeRestoredChatHistoryRows();
-        chatHistoryChannelId = null;
-        chatHistoryBuffer = [];
-        chatHistoryRestored = false;
-      }
-      chatHistorySkipNextRestore = false;
-      return;
-    }
-    // 채널이 바뀌면 이전 채널 기록을 저장하고 상태를 갈아끼운다.
-    if (chatHistoryChannelId && chatHistoryChannelId !== channelId) {
-      flushChatHistory();
-      stopChatHistory();
-      removeRestoredChatHistoryRows();
-      chatHistoryBuffer = [];
-      chatHistoryRestored = false;
-      chatHistorySkipNextRestore = false;
-    }
-    chatHistoryChannelId = channelId;
-
-    const list = chatHistoryListEl();
-    if (!list) {
-      if (chatHistoryObservedList) stopChatHistory();
-      return;
-    }
-    const rowParent = chatHistoryRowParent(list);
-    if (!rowParent) return;
-
-    // role=log 또는 실제 행 wrapper 중 하나라도 교체되면 이전 대기 작업을 취소하고
-    // 새 목록에 옵저버와 복원을 다시 연결한다.
-    if (
-      chatHistoryObservedList !== list ||
-      chatHistoryObservedRowParent !== rowParent
-    ) {
-      stopChatHistory();
-      chatHistoryObservedList = list;
-      chatHistoryObservedRowParent = rowParent;
-      chatHistoryObserver = new MutationObserver((muts) => {
-        const parent = chatHistoryObservedRowParent;
-        if (!parent?.isConnected) {
-          queueMicrotask(ensureChatHistory);
-          return;
-        }
-        let chatRowsChanged = false;
-        // 위로 스크롤할 때 추가되는 행은 새 채팅이 아니라 치지직이 다시 불러온
-        // 과거 200개다. 이를 새 메시지처럼 버퍼 끝에 넣으면 최신 기록을 밀어내므로
-        // 화면 하단에 있을 때 렌더된 행만 새 기록으로 수집한다.
-        const shouldCaptureNative = !isChatHistoryScrolledBack();
-        for (const m of muts) {
-          if (m.type === "attributes") {
-            const row = m.target;
-            if (
-              shouldCaptureNative &&
-              row instanceof Element &&
-              row.parentElement === parent &&
-              !row.hasAttribute(CHAT_HISTORY_MARK)
-            ) {
-              // MAIN world가 여러 행에 ID를 붙이는 동안 개별 행을 DOM 순서대로
-              // 저장하지 않는다. 같은 프레임의 속성 변이를 하나로 묶어 과거→최신
-              // 스냅샷으로 수집한다.
-              scheduleChatHistoryCaptureSnapshot(parent);
-            }
-            continue;
-          }
-          m.removedNodes.forEach((node) => {
-            if (
-              m.target === parent &&
-              node.nodeType === 1 &&
-              node.matches?.('[class*="_item_"]')
-            ) {
-              chatRowsChanged = true;
-            }
-          });
-          m.addedNodes.forEach((node) => {
-            if (node.nodeType !== 1) return;
-            if (
-              node.parentElement === parent &&
-              node.matches?.('[class*="_item_"]')
-            ) {
-              chatRowsChanged = true;
-              if (shouldCaptureNative) {
-                scheduleChatHistoryCaptureSnapshot(parent);
-              }
-              return;
-            }
-            node.querySelectorAll?.('[class*="_item_"]').forEach((el) => {
-              if (el.parentElement === parent) {
-                chatRowsChanged = true;
-                if (shouldCaptureNative) {
-                  scheduleChatHistoryCaptureSnapshot(parent);
-                }
-              }
-            });
-          });
-        }
-        if (chatRowsChanged && isChatHistoryNearOldestEdge()) {
-          scheduleChatHistoryReconcile(300);
-        }
-      });
-      chatHistoryObserver.observe(list, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: [CHAT_HISTORY_ID_MARK, CHAT_HISTORY_PREVIOUS_ID_MARK],
-      });
-      setChatHistoryScrollParent(findChatHistoryScrollParent(rowParent, list));
-      // 진입 당시 이미 렌더된 행도 바로 저장한다. 예전에는 복원 대기(최대 40초)가
-      // 끝난 뒤에야 담아서 짧게 보고 이동하면 기록이 하나도 남지 않았다.
-      // DOM 방향과 무관하게 버퍼는 항상 과거→최신 순서로 유지한다.
-      scheduleChatHistoryCaptureSnapshot(rowParent);
-    }
-
-    if (chatHistorySkipNextRestore) {
-      chatHistoryRestored = true;
-      chatHistorySkipNextRestore = false;
-      scrollChatHistoryToLatest(chatHistoryScrollParent, rowParent);
-    }
-
-    if (!chatHistoryRestored) {
-      void restoreChatHistory(channelId, list, rowParent);
-    }
   }
 
   // 탭을 닫거나 이동할 때 버퍼를 흘려보낸다(디바운스 대기 중이던 분량 보존).
   document.addEventListener("visibilitychange", () => {
     if (!chatHistoryOn) return;
     if (document.visibilityState === "hidden") {
-      chatHistoryWasHidden = true;
-      clearChatHistoryVisibilityTimers();
       void flushChatHistory();
       return;
     }
-    if (!chatHistoryWasHidden) return;
-    chatHistoryWasHidden = false;
-    reconnectChatHistoryAfterVisibility();
+    ensureChatHistory();
   });
 
   function chatHistoryMutationNeedsReconnect(mutation) {
@@ -40178,6 +41087,23 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ? mutation.target
         : mutation.target?.parentElement;
     if (!target?.closest("aside#aside-chatting")) return false;
+    if (
+      (chatHistoryLauncher && !chatHistoryLauncher.isConnected) ||
+      (chatHistoryPanel && !chatHistoryPanel.isConnected) ||
+      (chatHistoryInlineParent && !chatHistoryInlineParent.isConnected) ||
+      (chatHistoryInlineNativeList && !chatHistoryInlineNativeList.isConnected)
+    ) {
+      return true;
+    }
+    // 일반 채팅 추가·가상 행 재사용은 이미 전용 옵저버가 처리한다. 전역 옵저버에서도
+    // 같은 subtree를 다시 훑지 않고, 실제 목록 wrapper가 바뀐 변이만 아래에서 검사한다.
+    if (
+      chatHistoryObservedRowParent?.isConnected &&
+      (target === chatHistoryObservedRowParent ||
+        chatHistoryObservedRowParent.contains(target))
+    ) {
+      return false;
+    }
     const candidates = [];
     mutation.addedNodes.forEach((node) => {
       if (!(node instanceof Element)) return;
@@ -40204,6 +41130,600 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   window.addEventListener("pagehide", () => {
     if (chatHistoryOn) void flushChatHistory();
   });
+
+  // ── 채팅 이어보기 v4: 네이티브 목록과 나란히 둔 확장 소유 기록 영역 ─────────
+  // 기존의 ID 수집·정규화 코드는 재사용하되, 치지직 React 행 부모에는 어떤 노드도
+  // 삽입하지 않는다. 네이티브 목록 바로 앞의 형제로 붙여 한 채팅창처럼 이어 보인다.
+  function chatHistoryMessage(payload) {
+    if (chatHistoryContextInvalidated) return Promise.resolve(null);
+    try {
+      if (!chrome.runtime?.id) {
+        stopChatHistoryAfterContextInvalidation();
+        return Promise.resolve(null);
+      }
+      return chrome.runtime
+        .sendMessage({
+          type: CHAT_HISTORY_MESSAGE_TYPE,
+          ...payload,
+        })
+        .catch((error) => {
+          if (isChatHistoryContextInvalidated(error)) {
+            stopChatHistoryAfterContextInvalidation();
+          }
+          return null;
+        });
+    } catch (error) {
+      if (isChatHistoryContextInvalidated(error)) {
+        stopChatHistoryAfterContextInvalidation();
+      }
+      return Promise.resolve(null);
+    }
+  }
+
+  function readChatHistoryLiveIdFromDom(channelId) {
+    const normalizedChannel = String(channelId || "").toLowerCase();
+    for (const element of document.querySelectorAll("[data-nlog-params]")) {
+      const raw = element.getAttribute("data-nlog-params");
+      if (!raw || !raw.includes("content_id")) continue;
+      try {
+        const data = JSON.parse(raw);
+        const source = String(data?.content_source2 || "").toLowerCase();
+        const liveId = String(data?.content_id || "").trim();
+        if (source === normalizedChannel && /^\d+$/.test(liveId)) return liveId;
+      } catch {}
+    }
+    return "";
+  }
+
+  async function fetchChatHistoryLiveId(channelId) {
+    try {
+      const response = await fetch(
+        `https://api.chzzk.naver.com/service/v3/channels/${encodeURIComponent(channelId)}/live-detail`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!response.ok) return "";
+      const content = (await response.json())?.content || {};
+      const openedAt = Date.parse(
+        content.openDate || content.liveOpenDate || content.liveStartDate || "",
+      );
+      const liveId = String(
+        content.liveId ||
+          content.liveNo ||
+          (Number.isFinite(openedAt) ? openedAt : ""),
+      ).trim();
+      return /^\d+$/.test(liveId) ? liveId : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function currentChatHistoryNativeIds() {
+    const parent = chatHistoryObservedRowParent;
+    if (!parent?.isConnected) return new Set();
+    return new Set(
+      chatHistoryRows(parent)
+        .filter((row) => !row.hasAttribute(CHAT_HISTORY_MARK))
+        .map((row) =>
+          normalizeChatHistoryId(row.getAttribute(CHAT_HISTORY_ID_MARK)),
+        )
+        .filter(Boolean),
+    );
+  }
+
+  function getChatHistoryPanelItems() {
+    const nativeIds = currentChatHistoryNativeIds();
+    return normalizeChatHistoryItems(chatHistoryBuffer)
+      .filter((item) => !nativeIds.has(item.id))
+      .filter((item) => !isStoredChatMissionHtml(item.html));
+  }
+
+  function createChatHistoryPanelRow(item) {
+    const template = document.createElement("template");
+    template.innerHTML = item.html;
+    const row = template.content.firstElementChild;
+    if (!row || !isChatHistoryMessageRow(row)) return null;
+    row.classList.add("cheese-chat-history-panel-row");
+    row.setAttribute(CHAT_HISTORY_MARK, "1");
+    row.setAttribute(CHAT_HISTORY_ID_MARK, item.id);
+    if (item.previousId) {
+      row.setAttribute(CHAT_HISTORY_PREVIOUS_ID_MARK, item.previousId);
+    }
+    if (item.time) row.setAttribute(CHAT_HISTORY_EPOCH_MARK, String(item.time));
+    row
+      .querySelectorAll("button, input, textarea, select, [tabindex]")
+      .forEach((element) => {
+        element.setAttribute("tabindex", "-1");
+        element.setAttribute("aria-disabled", "true");
+      });
+    return row;
+  }
+
+  function appendChatHistoryPanelItems(start, end, prepend = false) {
+    if (!chatHistoryPanelList) return;
+    const fragment = document.createDocumentFragment();
+    chatHistoryPanelItems.slice(start, end).forEach((item) => {
+      const row = createChatHistoryPanelRow(item);
+      if (row) fragment.appendChild(row);
+    });
+    if (!prepend) {
+      chatHistoryPanelList.appendChild(fragment);
+      return;
+    }
+    const oldHeight = chatHistoryPanelList.scrollHeight;
+    chatHistoryPanelList.prepend(fragment);
+    chatHistoryPanelList.scrollTop +=
+      chatHistoryPanelList.scrollHeight - oldHeight;
+  }
+
+  function renderChatHistoryPanel(reset = true, preserveScroll = false) {
+    if (!chatHistoryPanel || !chatHistoryPanelList) return;
+    chatHistoryPanelItems = getChatHistoryPanelItems();
+    const count = chatHistoryPanelItems.length;
+    chatHistoryPanel.querySelector("[data-chat-history-count]").textContent =
+      `${count.toLocaleString("ko-KR")}개`;
+    if (!reset) return;
+    const previousTop = chatHistoryPanelList.scrollTop;
+    const wasNearBottom =
+      chatHistoryPanelList.scrollHeight -
+        chatHistoryPanelList.clientHeight -
+        previousTop <
+      48;
+    chatHistoryPanelList.replaceChildren();
+    chatHistoryPanelRenderedStart = Math.max(
+      0,
+      count - CHAT_HISTORY_RENDER_BATCH,
+    );
+    appendChatHistoryPanelItems(chatHistoryPanelRenderedStart, count);
+    chatHistoryPanelList.scrollTop =
+      preserveScroll && !wasNearBottom
+        ? previousTop
+        : chatHistoryPanelList.scrollHeight;
+  }
+
+  function closeChatHistoryPanel({ focus = false } = {}) {
+    chatHistoryPanelOpen = false;
+    chatHistoryPanel?.classList.remove("is-open");
+    chatHistoryPanel?.setAttribute("aria-hidden", "true");
+    chatHistoryLauncher?.setAttribute("aria-expanded", "false");
+    updateChatHistoryPanel();
+    if (focus) chatHistoryLauncher?.focus();
+  }
+
+  function openChatHistoryPanel() {
+    if (!chatHistoryPanelItems.length) return;
+    chatHistoryPanelOpen = true;
+    chatHistoryPanel?.classList.add("is-open", "is-preparing");
+    chatHistoryPanel?.setAttribute("aria-hidden", "false");
+    chatHistoryLauncher?.setAttribute("aria-expanded", "true");
+    updateChatHistoryLauncherVisibility();
+    syncChatHistoryPanelPosition();
+    renderChatHistoryPanel(true);
+    // display:none 상태에서 렌더하면 첫 프레임에 목록 최상단이 보였다가 최하단으로
+    // 튈 수 있다. 인라인 영역을 숨긴 채 레이아웃과 스크롤을 먼저 확정한다.
+    void chatHistoryPanel?.offsetHeight;
+    if (chatHistoryPanelList) {
+      chatHistoryPanelList.scrollTop = chatHistoryPanelList.scrollHeight;
+    }
+    chatHistoryPanel?.classList.remove("is-preparing");
+    chatHistoryPanel?.querySelector("[data-chat-history-close]")?.focus();
+  }
+
+  function ensureChatHistoryPanelElements() {
+    if (!chatHistoryLauncher || !chatHistoryPanel) {
+      chatHistoryLauncher?.remove();
+      chatHistoryPanel?.remove();
+
+      const launcher = document.createElement("button");
+      launcher.type = "button";
+      launcher.className = "cheese-chat-history-launcher";
+      launcher.dataset.cheeseChatHistoryUi = "launcher";
+      launcher.setAttribute("aria-expanded", "false");
+      launcher.setAttribute("aria-controls", "cheese-chat-history-panel");
+      launcher.innerHTML =
+        '<svg class="lucide lucide-history" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg><span>이전 채팅</span><b data-chat-history-launcher-count>0</b>';
+      launcher.addEventListener("click", () => {
+        if (chatHistoryPanelOpen) closeChatHistoryPanel();
+        else openChatHistoryPanel();
+      });
+
+      const panel = document.createElement("section");
+      panel.id = "cheese-chat-history-panel";
+      panel.className = "cheese-chat-history-panel";
+      panel.dataset.cheeseChatHistoryUi = "panel";
+      panel.setAttribute("role", "region");
+      panel.setAttribute("aria-label", "이전 채팅");
+      panel.setAttribute("aria-hidden", "true");
+      panel.innerHTML = `
+      <header class="cheese-chat-history-panel-head">
+        <span>
+          <strong>이전 채팅</strong>
+          <small data-chat-history-count>0개</small>
+        </span>
+        <button type="button" class="cheese-chat-history-icon-button" data-chat-history-close data-label="닫기" aria-label="닫기">
+          <svg class="lucide lucide-x" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="cheese-chat-history-panel-notice">현재 방송을 보던 동안 저장된 채팅입니다. 위로 스크롤하면 더 오래된 기록을 이어서 불러옵니다.</div>
+      <div class="cheese-chat-history-panel-list" data-chat-history-list></div>`;
+      panel
+        .querySelector("[data-chat-history-close]")
+        ?.addEventListener("click", () =>
+          closeChatHistoryPanel({ focus: true }),
+        );
+      panel.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeChatHistoryPanel({ focus: true });
+        }
+      });
+      chatHistoryPanelList = panel.querySelector("[data-chat-history-list]");
+      chatHistoryPanelList?.addEventListener("scroll", () => {
+        if (
+          chatHistoryPanelList.scrollTop > 80 ||
+          chatHistoryPanelRenderedStart <= 0
+        ) {
+          return;
+        }
+        const nextStart = Math.max(
+          0,
+          chatHistoryPanelRenderedStart - CHAT_HISTORY_RENDER_BATCH,
+        );
+        appendChatHistoryPanelItems(
+          nextStart,
+          chatHistoryPanelRenderedStart,
+          true,
+        );
+        chatHistoryPanelRenderedStart = nextStart;
+      });
+      chatHistoryLauncher = launcher;
+      chatHistoryPanel = panel;
+    }
+
+    attachChatHistoryInlineElements();
+  }
+
+  function detachChatHistoryInlineElements() {
+    chatHistoryInlineParent?.classList.remove(
+      "cheese-chat-history-inline-parent",
+    );
+    chatHistoryInlineNativeList?.classList.remove(
+      "cheese-chat-history-native-list",
+    );
+    chatHistoryInlineParent = null;
+    chatHistoryInlineNativeList = null;
+  }
+
+  function attachChatHistoryInlineElements() {
+    const list = chatHistoryObservedList?.isConnected
+      ? chatHistoryObservedList
+      : chatHistoryListEl();
+    const parent = list?.parentElement;
+    if (!list || !parent || !chatHistoryLauncher || !chatHistoryPanel) {
+      return false;
+    }
+
+    if (
+      chatHistoryInlineParent !== parent ||
+      chatHistoryInlineNativeList !== list
+    ) {
+      detachChatHistoryInlineElements();
+      chatHistoryInlineParent = parent;
+      chatHistoryInlineNativeList = list;
+    }
+    parent.classList.add("cheese-chat-history-inline-parent");
+    list.classList.add("cheese-chat-history-native-list");
+
+    // 치지직 React가 채팅 목록을 다시 그리면 형제 노드가 떨어질 수 있다. 같은 노드를
+    // 다시 삽입해 이벤트와 읽던 위치를 유지하고, 네이티브 목록 내부는 건드리지 않는다.
+    if (chatHistoryLauncher.parentElement !== parent) {
+      parent.insertBefore(chatHistoryLauncher, list);
+    }
+    if (
+      chatHistoryPanel.parentElement !== parent ||
+      chatHistoryPanel.nextElementSibling !== list
+    ) {
+      parent.insertBefore(chatHistoryPanel, list);
+    }
+    return true;
+  }
+
+  function syncChatHistoryPanelPosition() {
+    if (chatHistoryPositionFrame) return;
+    chatHistoryPositionFrame = requestAnimationFrame(() => {
+      chatHistoryPositionFrame = 0;
+      const aside = document.querySelector("aside#aside-chatting");
+      const list = chatHistoryObservedList?.isConnected
+        ? chatHistoryObservedList
+        : chatHistoryListEl();
+      const visible =
+        chatHistoryOn &&
+        aside &&
+        aside.getClientRects().length &&
+        list?.getClientRects().length;
+      if (!visible) {
+        if (chatHistoryLauncher) chatHistoryLauncher.hidden = true;
+        if (chatHistoryPanelOpen) closeChatHistoryPanel();
+        return;
+      }
+      ensureChatHistoryPanelElements();
+      updateChatHistoryLauncherVisibility();
+    });
+  }
+
+  function updateChatHistoryPanel() {
+    if (!chatHistoryOn) return;
+    ensureChatHistoryPanelElements();
+    const nextItems = getChatHistoryPanelItems();
+    const count = nextItems.length;
+    const countElement = chatHistoryLauncher?.querySelector(
+      "[data-chat-history-launcher-count]",
+    );
+    if (countElement) countElement.textContent = count.toLocaleString("ko-KR");
+    // 열린 패널의 스냅샷은 사용자가 닫을 때까지 유지한다. 폭주 채팅마다 최대 50개
+    // 행을 다시 만드는 비용과 읽던 위치가 움직이는 문제를 함께 피한다.
+    if (!chatHistoryPanelOpen) chatHistoryPanelItems = nextItems;
+    updateChatHistoryLauncherVisibility();
+    syncChatHistoryPanelPosition();
+  }
+
+  function bindChatHistoryPositionObserver() {
+    const aside = document.querySelector("aside#aside-chatting");
+    if (!aside) return;
+    if (!chatHistoryResizeObserver) {
+      chatHistoryResizeObserver = new ResizeObserver(
+        syncChatHistoryPanelPosition,
+      );
+      window.addEventListener("resize", syncChatHistoryPanelPosition, {
+        passive: true,
+      });
+    }
+    chatHistoryResizeObserver.disconnect();
+    chatHistoryResizeObserver.observe(aside);
+    bindChatHistoryNativeScroll();
+    syncChatHistoryPanelPosition();
+  }
+
+  async function activateChatHistoryScope(channelId, liveId) {
+    const scope = `${String(channelId).toLowerCase()}:${liveId}`;
+    if (scope === chatHistoryScope) return;
+    const generation = ++chatHistoryScopeGeneration;
+    const preserveUnsaved = chatHistoryScope ? [] : chatHistoryBuffer.slice();
+    await flushChatHistory();
+    if (
+      generation !== chatHistoryScopeGeneration ||
+      channelId !== chatHistoryChannelId
+    ) {
+      return;
+    }
+    chatHistoryScope = scope;
+    if (chatHistoryScopeRetryTimer) {
+      clearTimeout(chatHistoryScopeRetryTimer);
+      chatHistoryScopeRetryTimer = 0;
+    }
+    chatHistoryBuffer = preserveUnsaved;
+    const response = await chatHistoryMessage({
+      op: "GET",
+      scope,
+      limit: chatHistoryLimit,
+    });
+    if (
+      generation !== chatHistoryScopeGeneration ||
+      scope !== chatHistoryScope
+    ) {
+      return;
+    }
+    if (response?.ok && Array.isArray(response.items)) {
+      chatHistoryBuffer = mergeChatHistorySequences(
+        response.items,
+        chatHistoryBuffer,
+      );
+    }
+    scheduleChatHistoryCaptureSnapshot(chatHistoryObservedRowParent);
+    updateChatHistoryPanel();
+    scheduleChatHistorySave();
+  }
+
+  async function resolveChatHistoryScope(channelId) {
+    if (chatHistoryScopePending) return;
+    const now = Date.now();
+    if (now - chatHistoryScopeAttemptAt < 3000) return;
+    chatHistoryScopePending = true;
+    chatHistoryScopeAttemptAt = now;
+    try {
+      const liveId =
+        readChatHistoryLiveIdFromDom(channelId) ||
+        (await fetchChatHistoryLiveId(channelId));
+      if (liveId && channelId === chatHistoryChannelId && chatHistoryOn) {
+        await activateChatHistoryScope(channelId, liveId);
+      }
+    } finally {
+      chatHistoryScopePending = false;
+      if (
+        !chatHistoryScope &&
+        chatHistoryOn &&
+        channelId === chatHistoryChannelId &&
+        !chatHistoryScopeRetryTimer
+      ) {
+        chatHistoryScopeRetryTimer = window.setTimeout(() => {
+          chatHistoryScopeRetryTimer = 0;
+          void resolveChatHistoryScope(channelId);
+        }, 5000);
+      }
+    }
+  }
+
+  function flushChatHistory() {
+    if (
+      chatHistoryContextInvalidated ||
+      !chatHistoryScope ||
+      !chatHistoryBuffer.length
+    ) {
+      return chatHistorySaveQueue;
+    }
+    if (chatHistorySaveTimer) {
+      clearTimeout(chatHistorySaveTimer);
+      chatHistorySaveTimer = 0;
+    }
+    const scope = chatHistoryScope;
+    const items =
+      normalizeChatHistoryItems(chatHistoryBuffer).slice(-chatHistoryLimit);
+    chatHistorySaveQueue = chatHistorySaveQueue
+      .catch(() => {})
+      .then(async () => {
+        const response = await chatHistoryMessage({
+          op: "UPSERT",
+          scope,
+          limit: chatHistoryLimit,
+          items,
+        });
+        if (response?.ok) {
+          chatHistoryStorageErrorLogged = false;
+          if (scope === chatHistoryScope && Array.isArray(response.items)) {
+            // 저장 요청을 보낸 뒤 응답을 기다리는 동안에도 새 채팅은 계속 들어온다.
+            // 응답 스냅샷으로 통째로 교체하면 그 사이 항목이 사라지므로 현재 버퍼와
+            // 다시 합친다. 다음 디바운스 저장이 아직 서버에 없는 항목을 이어서 반영한다.
+            chatHistoryBuffer = mergeChatHistorySequences(
+              response.items,
+              chatHistoryBuffer,
+            );
+            updateChatHistoryPanel();
+          }
+          return;
+        }
+        if (!chatHistoryStorageErrorLogged && response?.reason) {
+          chatHistoryStorageErrorLogged = true;
+          console.warn("[치즈] 채팅 이어보기 저장 실패:", response.reason);
+        }
+      });
+    return chatHistorySaveQueue;
+  }
+
+  function stopChatHistory() {
+    chatHistoryObserver?.disconnect();
+    chatHistoryObserver = null;
+    chatHistoryObservedList = null;
+    chatHistoryObservedRowParent = null;
+    unbindChatHistoryNativeScroll();
+    if (chatHistoryCaptureFrame) {
+      if (chatHistoryCaptureFrame > 0) {
+        cancelAnimationFrame(chatHistoryCaptureFrame);
+      }
+      chatHistoryCaptureFrame = 0;
+    }
+    if (chatHistoryCaptureDelayTimer) {
+      clearTimeout(chatHistoryCaptureDelayTimer);
+      chatHistoryCaptureDelayTimer = 0;
+    }
+    chatHistoryFullCapturePending = false;
+    chatHistoryPendingCaptureRows.clear();
+    if (chatHistoryPositionFrame) {
+      cancelAnimationFrame(chatHistoryPositionFrame);
+      chatHistoryPositionFrame = 0;
+    }
+    chatHistoryRefreshIdentityByRow = new WeakMap();
+  }
+
+  function resetChatHistoryRuntime() {
+    void flushChatHistory();
+    stopChatHistory();
+    chatHistoryScopeGeneration += 1;
+    chatHistoryScopePending = false;
+    chatHistoryScopeAttemptAt = 0;
+    if (chatHistoryScopeRetryTimer) {
+      clearTimeout(chatHistoryScopeRetryTimer);
+      chatHistoryScopeRetryTimer = 0;
+    }
+    chatHistoryChannelId = null;
+    chatHistoryScope = "";
+    chatHistoryBuffer = [];
+    chatHistoryPanelItems = [];
+    closeChatHistoryPanel();
+    detachChatHistoryInlineElements();
+    chatHistoryLauncher?.remove();
+    chatHistoryPanel?.remove();
+    chatHistoryLauncher = null;
+    chatHistoryPanel = null;
+    chatHistoryPanelList = null;
+    chatHistoryResizeObserver?.disconnect();
+  }
+
+  function ensureChatHistory() {
+    if (!IS_TOP_FRAME || chatHistoryContextInvalidated) return;
+    const channelId = chatHistoryOn ? currentLiveChannelId() : "";
+    if (!channelId) {
+      if (chatHistoryChannelId || chatHistoryPanel) resetChatHistoryRuntime();
+      return;
+    }
+    if (chatHistoryChannelId && chatHistoryChannelId !== channelId) {
+      resetChatHistoryRuntime();
+    }
+    chatHistoryChannelId = channelId;
+
+    const detectedLiveId = readChatHistoryLiveIdFromDom(channelId);
+    if (
+      detectedLiveId &&
+      chatHistoryScope &&
+      chatHistoryScope !== `${channelId}:${detectedLiveId}`
+    ) {
+      void activateChatHistoryScope(channelId, detectedLiveId);
+    } else if (!chatHistoryScope) {
+      void resolveChatHistoryScope(channelId);
+    }
+
+    const list = chatHistoryListEl();
+    const rowParent = chatHistoryRowParent(list);
+    if (!list || !rowParent) {
+      if (chatHistoryObservedList && !chatHistoryObservedList.isConnected) {
+        stopChatHistory();
+      }
+      syncChatHistoryPanelPosition();
+      return;
+    }
+    if (
+      chatHistoryObservedList !== list ||
+      chatHistoryObservedRowParent !== rowParent
+    ) {
+      stopChatHistory();
+      chatHistoryObservedList = list;
+      chatHistoryObservedRowParent = rowParent;
+      chatHistoryObserver = new MutationObserver((mutations) => {
+        const currentParent = chatHistoryObservedRowParent;
+        if (!currentParent?.isConnected) {
+          queueMicrotask(ensureChatHistory);
+          return;
+        }
+        const changedRows = new Set();
+        const addRow = (node) => {
+          const element =
+            node instanceof Element ? node : node?.parentElement || null;
+          if (!element) return;
+          const row = element.matches?.('[class*="_item_"]')
+            ? element
+            : element.closest?.('[class*="_item_"]');
+          if (row && currentParent.contains(row)) changedRows.add(row);
+          element
+            .querySelectorAll?.('[class*="_item_"]')
+            .forEach((candidate) => {
+              if (currentParent.contains(candidate)) changedRows.add(candidate);
+            });
+        };
+        mutations.forEach((mutation) => {
+          addRow(mutation.target);
+          mutation.addedNodes.forEach(addRow);
+        });
+        scheduleChatHistoryCaptureSnapshot(currentParent, changedRows);
+      });
+      chatHistoryObserver.observe(list, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [CHAT_HISTORY_ID_MARK, CHAT_HISTORY_PREVIOUS_ID_MARK],
+      });
+      scheduleChatHistoryCaptureSnapshot(rowParent);
+    }
+    bindChatHistoryPositionObserver();
+    updateChatHistoryPanel();
+  }
 
   let chatMsgObserver = null;
   let chatMsgObservedAsides = new WeakSet();
@@ -40768,6 +42288,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       "1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 " +
       "0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879" +
       'L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>' +
+      "</svg>"
+    );
+  }
+
+  function videoVaultArchiveSvg(active = false) {
+    return (
+      '<svg class="lucide lucide-archive" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" ' +
+      'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+      `data-active="${String(active)}">` +
+      '<rect width="20" height="5" x="2" y="3" rx="1"/>' +
+      '<path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>' +
+      '<path d="M10 12h4"/>' +
       "</svg>"
     );
   }
@@ -42757,6 +44289,1560 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return true;
   }
 
+  // ── 다시보기 보관함 ──────────────────────────────────────────────────────
+  // 항목: { videoNo, title, thumb, channelName, channelId, duration, at }
+  let videoVault = [];
+  let videoVaultLoaded = false;
+  let videoVaultLoadPending = false;
+  let videoVaultAccountId = "";
+  let videoVaultLoadGeneration = 0;
+  let videoVaultSaveTimer = 0;
+  let videoVaultSaveAccountId = "";
+  let videoVaultOpen = false;
+  let videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+  let videoVaultSearch = "";
+  let videoVaultSort = "saved-desc";
+  let videoVaultGroupByStreamer = false;
+  let videoVaultGroupByDate = false;
+  let videoVaultRenderSig = "";
+  let videoVaultSearchTimer = 0;
+  let videoVaultClickBound = false;
+  const videoVaultCollapsedStreamerGroups = new Set();
+  const videoVaultMetaRetryAt = new Map();
+  const videoVaultChannelBackfillPending = new Set();
+  const videoVaultDetailPending = new Set();
+  const videoVaultDetailRetryAt = new Map();
+  const videoVaultDetailQueue = [];
+  let videoVaultDetailActive = 0;
+  const VIDEO_VAULT_BTN_ID = "cheese-video-vault-btn";
+  const VIDEO_VAULT_PANEL_ID = "cheese-video-vault-panel";
+  const VIDEO_VAULT_CARD_MARK = "data-cheese-video-vault";
+  const VIDEO_VAULT_PAGE_BUTTON_CLASS = "cheese-video-vault-page-button";
+  const VIDEO_VAULT_CATEGORY_MOUNT_CLASS = "cheese-video-vault-category-mount";
+
+  function videoVaultStorageKey(accountId = videoVaultAccountId) {
+    const id = normalizeClipVaultAccountId(accountId);
+    return id ? `${VIDEO_VAULT_ACCOUNT_KEY_PREFIX}${id}` : "";
+  }
+
+  function isVideoVaultListPage() {
+    if (/^\/videos\/?$/.test(location.pathname)) return true;
+    if (getCategoryVideoContext()) return true;
+    if (!/^\/following\/?$/.test(location.pathname)) return false;
+    return new URLSearchParams(location.search).get("tab") === "VIDEO";
+  }
+
+  function getVideoVaultDetailVideoNo() {
+    return location.pathname.match(/^\/video\/(\d+)(?:[/?#]|$)/)?.[1] || "";
+  }
+
+  function isVideoVaultAvailable() {
+    return (
+      featureFlags.videoVault === true &&
+      videoVaultLoaded &&
+      Boolean(videoVaultAccountId)
+    );
+  }
+
+  function videoNoFromHref(href) {
+    try {
+      const url = new URL(String(href || ""), location.origin);
+      if (url.origin !== location.origin) return "";
+      return url.pathname.match(/^\/video\/(\d+)(?:[/?#]|$)/)?.[1] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function videoVaultDurationSeconds(value) {
+    if (Number.isFinite(Number(value)) && String(value).trim() !== "") {
+      return Math.max(0, Math.floor(Number(value)));
+    }
+    const parts = String(value || "")
+      .trim()
+      .split(":")
+      .map(Number);
+    if (
+      parts.length < 2 ||
+      parts.length > 3 ||
+      parts.some((part) => !Number.isFinite(part) || part < 0)
+    ) {
+      return 0;
+    }
+    return parts.reduce((total, part) => total * 60 + part, 0);
+  }
+
+  function normalizeVideoVaultTags(value) {
+    const source = Array.isArray(value) ? value : [];
+    return [
+      ...new Set(
+        source.map((tag) =>
+          String(tag?.tagName || tag?.name || tag || "").trim(),
+        ),
+      ),
+    ]
+      .filter(Boolean)
+      .slice(0, 20)
+      .map((tag) => tag.slice(0, 50));
+  }
+
+  function normalizeVideoVaultItem(raw) {
+    const videoNo = String(raw?.videoNo || "").trim();
+    if (!/^\d+$/.test(videoNo)) return null;
+    const rawChannelName = String(raw?.channelName || "")
+      .trim()
+      .slice(0, 100);
+    const channelName = /^(?:채널 정보 없음|알 수 없는 채널)$/.test(
+      rawChannelName,
+    )
+      ? ""
+      : rawChannelName;
+    const adultKnown =
+      raw?.adultKnown === true || typeof raw?.adult === "boolean";
+    const duration = String(raw?.duration || "")
+      .trim()
+      .slice(0, 30);
+    const durationSeconds = videoVaultDurationSeconds(
+      raw?.durationSeconds || duration,
+    );
+    const watchTimeline = normalizeWatchTimelineSeconds(
+      raw?.watchTimeline,
+      durationSeconds,
+    );
+    return {
+      videoNo,
+      title: String(raw?.title || "")
+        .trim()
+        .slice(0, 300),
+      thumb: String(raw?.thumb || "")
+        .trim()
+        .slice(0, 1500),
+      channelName,
+      channelId: normalizeClipVaultAccountId(raw?.channelId),
+      channelImageUrl: String(raw?.channelImageUrl || "")
+        .trim()
+        .slice(0, 1500),
+      verifiedMark: raw?.verifiedMark === true,
+      duration,
+      durationSeconds,
+      readCount: Math.max(0, Number(raw?.readCount) || 0),
+      livePv: Math.max(0, Number(raw?.livePv) || 0),
+      publishDateAt:
+        Number(raw?.publishDateAt) || parsePublishDate(raw?.publishDate) || 0,
+      badgeLabel: String(raw?.badgeLabel || "다시보기")
+        .trim()
+        .slice(0, 30),
+      categoryType: String(raw?.categoryType || "")
+        .trim()
+        .slice(0, 30),
+      videoCategory: String(raw?.videoCategory || "")
+        .trim()
+        .slice(0, 100),
+      videoCategoryValue: String(raw?.videoCategoryValue || "")
+        .trim()
+        .slice(0, 100),
+      tags: normalizeVideoVaultTags(raw?.tags),
+      watchTimeline,
+      adult: raw?.adult === true,
+      adultKnown,
+      // 초기 구현에서 프로필 이미지 링크의 blind 문구만 읽은 뒤 metaKnown=true로
+      // 저장된 항목이 있다. 실제 채널명이 있어야만 보정 완료로 인정한다.
+      metaKnown: raw?.metaKnown === true && Boolean(channelName) && adultKnown,
+      detailFetchedAt: Math.max(0, Number(raw?.detailFetchedAt) || 0),
+      at: Number(raw?.at) || Date.now(),
+    };
+  }
+
+  function normalizeVideoVault(value) {
+    const source = Array.isArray(value) ? value : [];
+    const seen = new Set();
+    const output = [];
+    source.forEach((raw) => {
+      const item = normalizeVideoVaultItem(raw);
+      if (!item || seen.has(item.videoNo)) return;
+      seen.add(item.videoNo);
+      output.push(item);
+    });
+    output.sort((a, b) => b.at - a.at);
+    return output.slice(0, VIDEO_VAULT_LIMIT);
+  }
+
+  function videoVaultHas(videoNo) {
+    return (
+      isVideoVaultAvailable() &&
+      videoVault.some((item) => item.videoNo === String(videoNo || ""))
+    );
+  }
+
+  function flushVideoVaultSave() {
+    if (videoVaultSaveTimer) clearTimeout(videoVaultSaveTimer);
+    videoVaultSaveTimer = 0;
+    const accountId = normalizeClipVaultAccountId(
+      videoVaultSaveAccountId || videoVaultAccountId,
+    );
+    videoVaultSaveAccountId = "";
+    const key = videoVaultStorageKey(accountId);
+    if (!key || !videoVaultLoaded) return;
+    try {
+      chrome.storage?.local?.set({ [key]: videoVault });
+    } catch {}
+  }
+
+  function saveVideoVault() {
+    if (!videoVaultLoaded || !videoVaultAccountId) return;
+    videoVaultSaveAccountId = videoVaultAccountId;
+    if (videoVaultSaveTimer) return;
+    videoVaultSaveTimer = window.setTimeout(flushVideoVaultSave, 400);
+  }
+
+  async function loadVideoVault(
+    requestedAccountId = currentClipVaultAccountId(),
+  ) {
+    if (!IS_TOP_FRAME || !chrome.storage?.local) return;
+    const accountId = normalizeClipVaultAccountId(requestedAccountId);
+    if (
+      accountId === videoVaultAccountId &&
+      (videoVaultLoaded || videoVaultLoadPending)
+    ) {
+      return;
+    }
+    flushVideoVaultSave();
+    videoVaultAccountId = accountId;
+    videoVaultLoaded = false;
+    videoVaultLoadPending = true;
+    videoVault = [];
+    videoVaultMetaRetryAt.clear();
+    videoVaultRenderSig = "";
+    closeVideoVaultPanel({ focusButton: false });
+    clearVideoVaultCardDecorations();
+    const generation = ++videoVaultLoadGeneration;
+    if (!accountId) {
+      videoVaultLoaded = true;
+      videoVaultLoadPending = false;
+      ensureVideoVaultButton();
+      ensureVideoVaultDetailButton();
+      return;
+    }
+    const key = videoVaultStorageKey(accountId);
+    try {
+      const data = await chrome.storage.local.get([
+        key,
+        VIDEO_VAULT_ACCOUNT_IDS_KEY,
+        VIDEO_VAULT_SORT_KEY,
+        VIDEO_VAULT_GROUP_STREAMER_KEY,
+        VIDEO_VAULT_GROUP_DATE_KEY,
+      ]);
+      if (
+        generation !== videoVaultLoadGeneration ||
+        accountId !== videoVaultAccountId
+      ) {
+        return;
+      }
+      videoVault = normalizeVideoVault(data?.[key]);
+      videoVaultSort = Object.hasOwn(
+        VIDEO_VAULT_SORTS,
+        data?.[VIDEO_VAULT_SORT_KEY],
+      )
+        ? data[VIDEO_VAULT_SORT_KEY]
+        : "saved-desc";
+      videoVaultGroupByStreamer =
+        data?.[VIDEO_VAULT_GROUP_STREAMER_KEY] === true;
+      videoVaultGroupByDate = data?.[VIDEO_VAULT_GROUP_DATE_KEY] === true;
+      const accountIds = normalizeClipVaultAccountIds(
+        data?.[VIDEO_VAULT_ACCOUNT_IDS_KEY],
+      );
+      if (!accountIds.includes(accountId)) accountIds.push(accountId);
+      await chrome.storage.local.set({
+        [key]: videoVault,
+        [VIDEO_VAULT_ACCOUNT_IDS_KEY]: accountIds,
+        [VIDEO_VAULT_ACTIVE_ACCOUNT_KEY]: accountId,
+      });
+    } catch {
+      videoVault = [];
+      videoVaultGroupByStreamer = false;
+      videoVaultGroupByDate = false;
+    }
+    if (
+      generation !== videoVaultLoadGeneration ||
+      accountId !== videoVaultAccountId
+    ) {
+      return;
+    }
+    videoVaultLoaded = true;
+    videoVaultLoadPending = false;
+    ensureVideoVaultButton();
+    ensureVideoVaultCardButtons();
+    ensureVideoVaultDetailButton();
+    renderVideoVaultPanel();
+  }
+
+  function ensureVideoVaultAccount() {
+    if (!IS_TOP_FRAME) return;
+    const accountId = currentClipVaultAccountId();
+    if (
+      accountId === videoVaultAccountId &&
+      (videoVaultLoaded || videoVaultLoadPending)
+    ) {
+      return;
+    }
+    void loadVideoVault(accountId);
+  }
+
+  if (IS_TOP_FRAME) {
+    window.addEventListener("pagehide", flushVideoVaultSave);
+    window.addEventListener("focus", ensureVideoVaultAccount);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) ensureVideoVaultAccount();
+    });
+  }
+
+  function visibleVideoVaultText(element) {
+    if (!(element instanceof Element)) return "";
+    const clone = element.cloneNode(true);
+    clone
+      .querySelectorAll('.blind, [class*="_tooltip_"], svg')
+      .forEach((node) => node.remove());
+    return String(clone.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function videoVaultCardLinks() {
+    if (!isVideoVaultListPage()) return [];
+    const candidates = [
+      ...document.querySelectorAll(
+        'a[href^="/video/"], a[href*="chzzk.naver.com/video/"]',
+      ),
+    ].filter(
+      (link) =>
+        !link.closest(`#${VIDEO_VAULT_PANEL_ID}`) &&
+        Boolean(videoNoFromHref(link.getAttribute("href"))),
+    );
+    const cards = new Map();
+    candidates.forEach((link) => {
+      const card = link.closest("li") || link.parentElement || link;
+      const score =
+        (link.matches('[class*="_thumbnail_"], [class*="_image_"]') ? 8 : 0) +
+        (link.querySelector("img") ? 6 : 0) +
+        (link.querySelector('[class*="_duration_"], [class*="_time_"]')
+          ? 2
+          : 0);
+      const previous = cards.get(card);
+      if (!previous || score > previous.score) cards.set(card, { link, score });
+    });
+    return [...cards.values()].map(({ link }) => link);
+  }
+
+  function readVideoCardMeta(link) {
+    if (!(link instanceof HTMLElement)) return null;
+    const videoNo = videoNoFromHref(link.getAttribute("href"));
+    if (!videoNo) return null;
+    const card = link.closest("li") || link.parentElement || link;
+    const sameVideoLinks = [
+      ...card.querySelectorAll('a[href*="/video/"]'),
+    ].filter(
+      (candidate) =>
+        videoNoFromHref(candidate.getAttribute("href")) === videoNo,
+    );
+    const titleLink =
+      sameVideoLinks.find((candidate) =>
+        candidate.matches('[class*="_title_"], [class*="_name_"]'),
+      ) || sameVideoLinks.find((candidate) => !candidate.querySelector("img"));
+    const image = link.querySelector("img") || card.querySelector("img");
+    const channelLinks = [...card.querySelectorAll('a[href^="/"]')].filter(
+      (candidate) =>
+        /^\/[0-9a-f]{32}(?:[/?#]|$)/i.test(
+          candidate.getAttribute("href") || "",
+        ),
+    );
+    // 프로필 이미지 링크가 채널명 링크보다 먼저 온다. 프로필 링크에는 blind 문구만
+    // 있어 visibleVideoVaultText()가 비므로, 실제 이름이 보이는 링크를 우선한다.
+    const channelLink =
+      channelLinks.find((candidate) => visibleVideoVaultText(candidate)) ||
+      channelLinks[0];
+    const profileLink = channelLinks.find((candidate) =>
+      candidate.querySelector("img"),
+    );
+    const profileImage = profileLink?.querySelector("img");
+    const channelBlindText = String(channelLink?.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const channelName =
+      visibleVideoVaultText(channelLink) ||
+      channelBlindText.match(/^(.+?)\s*채널로 이동$/)?.[1]?.trim() ||
+      "";
+    const nlogElement = card.matches("[data-nlog-params]")
+      ? card
+      : card.querySelector("[data-nlog-params]");
+    let nlogChannelId = "";
+    try {
+      const params = JSON.parse(nlogElement?.getAttribute("data-nlog-params"));
+      nlogChannelId = normalizeClipVaultAccountId(params?.content_source2);
+    } catch {}
+    const durationEl = card.querySelector(
+      '[class*="_duration_"], [class*="_time_"]',
+    );
+    const duration = visibleVideoVaultText(durationEl);
+    const durationSeconds = videoVaultDurationSeconds(duration);
+    const cardText = String(card.textContent || "").replace(/\s+/g, " ");
+    const readCountMatch = cardText.match(
+      /조회수\s*([0-9.,]+\s*(?:억|만|천)?)\s*회?/,
+    );
+    const livePvMatch = cardText.match(
+      /([0-9.,]+\s*(?:억|만|천)?)\s*회\s*시청된\s*라이브/,
+    );
+    const badgeArea = link.querySelector(
+      'div[class*="_badge_"], div[class*="_description_"]',
+    );
+    const badgeLabel =
+      visibleVideoVaultText(badgeArea?.querySelector("em")) || "다시보기";
+    const categoryLink = [...card.querySelectorAll('a[href*="/category/"]')]
+      .map((anchor) => {
+        const href = anchor.getAttribute("href") || "";
+        const match = href.match(
+          /\/category\/([^/?#]+)\/([^/?#]+)\/(?:videos|clips|lives)/,
+        );
+        return match
+          ? {
+              type: decodeURIComponent(match[1]),
+              id: decodeURIComponent(match[2]),
+              value: visibleVideoVaultText(anchor),
+            }
+          : null;
+      })
+      .find(Boolean);
+    const tags = [...card.querySelectorAll('a[href*="tags="]')]
+      .map((anchor) => {
+        try {
+          return (
+            new URL(
+              anchor.getAttribute("href") || "",
+              location.origin,
+            ).searchParams.get("tags") || visibleVideoVaultText(anchor)
+          );
+        } catch {
+          return visibleVideoVaultText(anchor);
+        }
+      })
+      .filter(Boolean);
+    const timeline = card.querySelector(
+      '[class*="watch_timeline"], [class*="watch-timeline"]',
+    );
+    const timelineFill = timeline?.firstElementChild;
+    const timelinePercent = Number.parseFloat(timelineFill?.style?.width || "");
+    const declaredAdult = link.getAttribute("data-cheese-video-adult");
+    const hasDeclaredAdult = /^(?:true|false)$/.test(declaredAdult || "");
+    const adult = hasDeclaredAdult
+      ? declaredAdult === "true"
+      : Boolean(
+          link.matches('[class*="_is_adult_"]') ||
+          card.querySelector(
+            '[class*="_is_adult_"], [class*="_age_restriction_"]',
+          ) ||
+          /19\s*연령\s*제한/.test(card.textContent || ""),
+        );
+    const normalized = normalizeVideoVaultItem({
+      videoNo,
+      title:
+        visibleVideoVaultText(titleLink) ||
+        image?.getAttribute("alt") ||
+        `다시보기 ${videoNo}`,
+      thumb: image?.currentSrc || image?.src || "",
+      channelName,
+      channelId:
+        (channelLink?.getAttribute("href") || "").match(
+          /^\/([0-9a-f]{32})(?:[/?#]|$)/i,
+        )?.[1] || nlogChannelId,
+      channelImageUrl: profileImage?.currentSrc || profileImage?.src || "",
+      verifiedMark: Boolean(
+        channelLink
+          ?.querySelector(".blind")
+          ?.textContent?.includes("인증 마크") ||
+        [...(channelLink?.querySelectorAll(".blind") || [])].some(
+          (node) => node.textContent.trim() === "인증 마크",
+        ),
+      ),
+      duration,
+      durationSeconds,
+      readCount: parseClipVaultMetric(readCountMatch?.[1]),
+      livePv: parseClipVaultMetric(livePvMatch?.[1]),
+      badgeLabel,
+      categoryType: categoryLink?.type || "",
+      videoCategory: categoryLink?.id || "",
+      videoCategoryValue: categoryLink?.value || "",
+      tags,
+      watchTimeline:
+        Number.isFinite(timelinePercent) && durationSeconds > 0
+          ? (timelinePercent / 100) * durationSeconds
+          : null,
+      adult,
+      adultKnown: true,
+      metaKnown: Boolean(channelName),
+      at: Date.now(),
+    });
+    if (normalized && hasDeclaredAdult) normalized.adultAuthoritative = true;
+    return normalized;
+  }
+
+  function mergeVideoVaultCardMeta(meta) {
+    if (!meta?.videoNo || !videoVaultHas(meta.videoNo)) return false;
+    let changed = false;
+    videoVault = videoVault.map((item) => {
+      if (item.videoNo !== meta.videoNo) return item;
+      const merged = {
+        ...item,
+        title: item.title || meta.title || "",
+        thumb: item.thumb || meta.thumb || "",
+        channelName: item.channelName || meta.channelName || "",
+        channelId: item.channelId || meta.channelId || "",
+        channelImageUrl: item.channelImageUrl || meta.channelImageUrl || "",
+        verifiedMark: item.verifiedMark || meta.verifiedMark === true,
+        duration: item.duration || meta.duration || "",
+        durationSeconds: item.durationSeconds || meta.durationSeconds || 0,
+        readCount: meta.readCount || item.readCount || 0,
+        livePv: meta.livePv || item.livePv || 0,
+        badgeLabel: meta.badgeLabel || item.badgeLabel || "다시보기",
+        categoryType: meta.categoryType || item.categoryType || "",
+        videoCategory: meta.videoCategory || item.videoCategory || "",
+        videoCategoryValue:
+          meta.videoCategoryValue || item.videoCategoryValue || "",
+        tags: meta.tags?.length ? meta.tags : item.tags,
+        watchTimeline:
+          meta.watchTimeline != null ? meta.watchTimeline : item.watchTimeline,
+        adult: meta.adultAuthoritative
+          ? meta.adult === true
+          : item.adultKnown
+            ? item.adult
+            : meta.adult === true,
+        adultKnown:
+          meta.adultAuthoritative ||
+          item.adultKnown ||
+          meta.adultKnown === true,
+        metaKnown: item.metaKnown || meta.metaKnown === true,
+      };
+      if (
+        merged.title !== item.title ||
+        merged.thumb !== item.thumb ||
+        merged.channelName !== item.channelName ||
+        merged.channelId !== item.channelId ||
+        merged.channelImageUrl !== item.channelImageUrl ||
+        merged.verifiedMark !== item.verifiedMark ||
+        merged.duration !== item.duration ||
+        merged.durationSeconds !== item.durationSeconds ||
+        merged.readCount !== item.readCount ||
+        merged.livePv !== item.livePv ||
+        merged.badgeLabel !== item.badgeLabel ||
+        merged.categoryType !== item.categoryType ||
+        merged.videoCategory !== item.videoCategory ||
+        merged.videoCategoryValue !== item.videoCategoryValue ||
+        JSON.stringify(merged.tags) !== JSON.stringify(item.tags) ||
+        merged.watchTimeline !== item.watchTimeline ||
+        merged.adult !== item.adult ||
+        merged.adultKnown !== item.adultKnown ||
+        merged.metaKnown !== item.metaKnown
+      ) {
+        changed = true;
+      }
+      return merged;
+    });
+    return changed;
+  }
+
+  function addVideoVaultItem(meta) {
+    if (!isVideoVaultAvailable()) return false;
+    const item = normalizeVideoVaultItem({ ...meta, at: Date.now() });
+    if (!item || videoVaultHas(item.videoNo)) return false;
+    videoVault.unshift(item);
+    if (videoVault.length > VIDEO_VAULT_LIMIT) {
+      videoVault.length = VIDEO_VAULT_LIMIT;
+    }
+    videoVaultRenderSig = "";
+    saveVideoVault();
+    return true;
+  }
+
+  function removeVideoVaultItem(videoNo) {
+    if (!isVideoVaultAvailable()) return false;
+    const before = videoVault.length;
+    videoVault = videoVault.filter(
+      (item) => item.videoNo !== String(videoNo || ""),
+    );
+    if (videoVault.length === before) return false;
+    videoVaultRenderSig = "";
+    saveVideoVault();
+    return true;
+  }
+
+  function clearVideoVaultCardDecorations() {
+    document.querySelectorAll(`[${VIDEO_VAULT_CARD_MARK}]`).forEach((link) => {
+      link.removeAttribute(VIDEO_VAULT_CARD_MARK);
+      link.classList.remove("cheese-video-vault-card-anchor");
+      link
+        .querySelector(".cheese-video-vault-archive, .cheese-video-vault-star")
+        ?.remove();
+    });
+  }
+
+  function ensureVideoVaultCardButtons() {
+    if (!IS_TOP_FRAME || !isVideoVaultAvailable() || !isVideoVaultListPage()) {
+      clearVideoVaultCardDecorations();
+      return;
+    }
+    let metadataChanged = false;
+    videoVaultCardLinks().forEach((link) => {
+      const videoNo = videoNoFromHref(link.getAttribute("href"));
+      if (!videoNo) return;
+      const saved = videoVault.find((item) => item.videoNo === videoNo);
+      const declaredAdult = link.getAttribute("data-cheese-video-adult");
+      const hasDeclaredAdult = /^(?:true|false)$/.test(declaredAdult || "");
+      const needsAdultCorrection =
+        saved && hasDeclaredAdult && saved.adult !== (declaredAdult === "true");
+      if (
+        saved &&
+        (needsAdultCorrection ||
+          (!saved.metaKnown && (!saved.channelName || !saved.adultKnown))) &&
+        Number(videoVaultMetaRetryAt.get(videoNo) || 0) <= Date.now()
+      ) {
+        const meta = readVideoCardMeta(link);
+        if (meta && mergeVideoVaultCardMeta(meta)) metadataChanged = true;
+        if (meta?.metaKnown) videoVaultMetaRetryAt.delete(videoNo);
+        else videoVaultMetaRetryAt.set(videoNo, Date.now() + 5000);
+      }
+      if (getComputedStyle(link).position === "static") {
+        link.classList.add("cheese-video-vault-card-anchor");
+      }
+      link.setAttribute(VIDEO_VAULT_CARD_MARK, "1");
+      let archiveButton = link.querySelector(
+        ":scope > .cheese-video-vault-archive, :scope > .cheese-video-vault-star",
+      );
+      if (!archiveButton) {
+        archiveButton = document.createElement("button");
+        archiveButton.type = "button";
+        link.appendChild(archiveButton);
+      }
+      archiveButton.classList.remove("cheese-video-vault-star");
+      archiveButton.classList.add("cheese-video-vault-archive");
+      const on = videoVaultHas(videoNo);
+      archiveButton.setAttribute(
+        "aria-label",
+        on ? "다시보기 보관함에서 제거" : "다시보기 보관함에 추가",
+      );
+      archiveButton.title = on
+        ? "다시보기 보관함에서 제거"
+        : "다시보기 보관함에 추가";
+      if (archiveButton.dataset.on !== String(on)) {
+        archiveButton.dataset.on = String(on);
+        archiveButton.classList.toggle("is-on", on);
+        archiveButton.setAttribute("aria-pressed", String(on));
+        archiveButton.innerHTML = videoVaultArchiveSvg(on);
+      }
+    });
+    if (metadataChanged) {
+      videoVaultRenderSig = "";
+      saveVideoVault();
+      renderVideoVaultPanel();
+    }
+  }
+
+  function findCategoryVideoVaultAction(section) {
+    const headings = Array.from(document.querySelectorAll("h2"));
+    for (const heading of headings) {
+      let container = heading.parentElement;
+      for (let depth = 0; container && depth < 5; depth += 1) {
+        const followButton = Array.from(
+          container.querySelectorAll("button"),
+        ).find((button) =>
+          /^(팔로우|팔로잉)$/.test(visibleVideoVaultText(button)),
+        );
+        if (followButton) {
+          const action = followButton.parentElement?.parentElement;
+          if (!action || !container.contains(action)) break;
+          document
+            .querySelectorAll(".cheese-video-vault-category-action")
+            .forEach((node) => {
+              if (node !== action)
+                node.classList.remove("cheese-video-vault-category-action");
+            });
+          action.classList.add("cheese-video-vault-category-action");
+          const host = Array.from(section.children).find((child) =>
+            child.contains(action),
+          );
+          return { action, host: host || null, title: heading };
+        }
+        container = container.parentElement;
+      }
+    }
+    return null;
+  }
+
+  function findVideoVaultHost() {
+    if (!isVideoVaultListPage()) return null;
+    const categoryContext = getCategoryVideoContext();
+    if (categoryContext) {
+      const { activeTab, section, anchor } = getCategoryVideoElements();
+      if (!activeTab || !section || !anchor) return null;
+      const categoryAction = findCategoryVideoVaultAction(section);
+      if (categoryAction?.host) {
+        section
+          .querySelector(`:scope > .${VIDEO_VAULT_CATEGORY_MOUNT_CLASS}`)
+          ?.remove();
+        return {
+          section,
+          header: categoryAction.action,
+          host: categoryAction.host,
+          title: categoryAction.title,
+        };
+      }
+      let mount = section.querySelector(
+        `:scope > .${VIDEO_VAULT_CATEGORY_MOUNT_CLASS}`,
+      );
+      if (!mount) {
+        mount = document.createElement("div");
+        mount.className = VIDEO_VAULT_CATEGORY_MOUNT_CLASS;
+        anchor.after(mount);
+      }
+      return {
+        section,
+        header: categoryAction?.action || mount,
+        host: mount,
+        title: categoryAction?.title || activeTab,
+      };
+    }
+    const root = document.querySelector("div#layout-body") || document.body;
+    const expectedTitle = /^\/videos\/?$/.test(location.pathname)
+      ? "전체 방송"
+      : "팔로잉";
+    const titles = [...root.querySelectorAll("strong")].filter(
+      (node) => visibleVideoVaultText(node) === expectedTitle,
+    );
+    // /following 에서는 사이드바에도 '팔로잉'이 있어 텍스트만으로 첫 요소를 고르면
+    // 엉뚱한 헤더에 붙을 수 있다. 같은 조상 안에 /video/<번호> 카드가 있는 제목만 쓴다.
+    for (const title of titles) {
+      const header =
+        title.closest('div[class*="_header_"]') || title.parentElement;
+      if (!header) continue;
+      let section = null;
+      let parent = header.parentElement;
+      for (let depth = 0; parent && depth < 7; depth += 1) {
+        if (parent.querySelector('a[href^="/video/"]')) {
+          section = parent;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (!section) continue;
+      const host =
+        header.parentElement === section
+          ? header
+          : [...section.children].find((child) => child.contains(header));
+      if (host) return { section, header, host, title };
+    }
+    // 목록이 비어 있어 /video/ 링크가 하나도 없는 경우에도 저장된 보관함은 열 수
+    // 있어야 한다. 사이드바·내비게이션만 제외하고 실제 페이지 section을 폴백한다.
+    for (const title of titles) {
+      if (title.closest("aside, nav")) continue;
+      const header =
+        title.closest('div[class*="_header_"]') || title.parentElement;
+      const section = header?.closest("section");
+      if (!header || !section) continue;
+      const host =
+        header.parentElement === section
+          ? header
+          : [...section.children].find((child) => child.contains(header));
+      if (host) return { section, header, host, title };
+    }
+    return null;
+  }
+
+  function clearVideoVaultViewClasses() {
+    document
+      .querySelectorAll(".cheese-video-vault-active")
+      .forEach((node) => node.classList.remove("cheese-video-vault-active"));
+    document
+      .querySelectorAll(".cheese-video-vault-host")
+      .forEach((node) => node.classList.remove("cheese-video-vault-host"));
+  }
+
+  function ensureVideoVaultButton() {
+    if (!IS_TOP_FRAME) return;
+    const existing = document.getElementById(VIDEO_VAULT_BTN_ID);
+    if (!isVideoVaultAvailable() || !isVideoVaultListPage()) {
+      existing?.remove();
+      closeVideoVaultPanel({ focusButton: false });
+      document
+        .querySelectorAll(`.${VIDEO_VAULT_CATEGORY_MOUNT_CLASS}`)
+        .forEach((mount) => mount.remove());
+      document
+        .querySelectorAll(".cheese-video-vault-category-action")
+        .forEach((node) =>
+          node.classList.remove("cheese-video-vault-category-action"),
+        );
+      return;
+    }
+    const target = findVideoVaultHost();
+    if (!target) return;
+    const fontFamily = getComputedStyle(target.title).fontFamily;
+    if (fontFamily) {
+      target.section.style.setProperty(
+        "--cheese-video-vault-font-family",
+        fontFamily,
+      );
+    }
+    if (videoVaultOpen && !document.getElementById(VIDEO_VAULT_PANEL_ID)) {
+      openVideoVaultPanel();
+    }
+    const panel = document.getElementById(VIDEO_VAULT_PANEL_ID);
+    if (videoVaultOpen && panel) {
+      clearVideoVaultViewClasses();
+      target.section.classList.add("cheese-video-vault-active");
+      target.host.classList.add("cheese-video-vault-host");
+      if (
+        panel.parentElement !== target.section ||
+        target.host.nextElementSibling !== panel
+      ) {
+        target.host.after(panel);
+      }
+    }
+    const positionMatches = existing?.parentElement === target.header;
+    if (existing && positionMatches) {
+      existing.setAttribute("aria-expanded", String(videoVaultOpen));
+      return;
+    }
+    const button = existing || document.createElement("button");
+    button.id = VIDEO_VAULT_BTN_ID;
+    button.type = "button";
+    button.setAttribute("aria-label", "내 다시보기 보관함");
+    button.setAttribute("aria-controls", VIDEO_VAULT_PANEL_ID);
+    button.setAttribute("aria-expanded", String(videoVaultOpen));
+    button.title = "내 다시보기 보관함";
+    button.innerHTML = `${videoVaultArchiveSvg(videoVaultOpen)}<span>보관함</span>`;
+    target.header.appendChild(button);
+  }
+
+  function closeVideoVaultPanel({ focusButton = true } = {}) {
+    document.getElementById(VIDEO_VAULT_PANEL_ID)?.remove();
+    videoVaultOpen = false;
+    videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+    videoVaultRenderSig = "";
+    clearTimeout(videoVaultSearchTimer);
+    videoVaultSearchTimer = 0;
+    clearVideoVaultViewClasses();
+    const button = document.getElementById(VIDEO_VAULT_BTN_ID);
+    button?.setAttribute("aria-expanded", "false");
+    if (focusButton) requestAnimationFrame(() => button?.focus());
+  }
+
+  function openVideoVaultPanel() {
+    if (!isVideoVaultAvailable()) return;
+    const target = findVideoVaultHost();
+    if (!target) return;
+    document.getElementById(VIDEO_VAULT_PANEL_ID)?.remove();
+    clearVideoVaultViewClasses();
+    videoVaultOpen = true;
+    const panel = document.createElement("section");
+    panel.id = VIDEO_VAULT_PANEL_ID;
+    panel.className = "cheese-video-vault-panel";
+    panel.classList.toggle(
+      "cheese-video-vault-panel-category",
+      !!getCategoryVideoContext(),
+    );
+    panel.setAttribute("aria-label", "내 다시보기 보관함");
+    panel.innerHTML =
+      `<div class="cheese-video-vault-head"><strong>내 다시보기 보관함</strong>` +
+      `<button type="button" data-video-vault-close aria-label="보관함 닫기" title="보관함 닫기">${clipVaultXSvg()}</button></div>` +
+      `<div class="cheese-video-vault-toolbar">` +
+      `<input type="search" data-video-vault-search placeholder="제목 또는 채널 검색" aria-label="다시보기 보관함 검색">` +
+      `<div class="cheese-video-vault-sort" data-video-vault-sort-picker>` +
+      `<button type="button" data-video-vault-sort-trigger aria-haspopup="listbox" aria-expanded="false"><span data-video-vault-sort-label></span>${clipVaultChevronSvg()}</button>` +
+      `<div class="cheese-video-vault-sort-menu" data-video-vault-sort-menu role="listbox" hidden>` +
+      Object.entries(VIDEO_VAULT_SORTS)
+        .map(
+          ([value, label]) =>
+            `<button type="button" role="option" data-video-vault-sort="${value}" aria-selected="${String(value === videoVaultSort)}">${label}</button>`,
+        )
+        .join("") +
+      `</div></div>` +
+      `<label class="cheese-video-vault-group-toggle">` +
+      `<input type="checkbox" data-video-vault-group-date${videoVaultGroupByDate ? " checked" : ""}>` +
+      `<i aria-hidden="true"></i><span>날짜별 모아보기</span></label>` +
+      `<label class="cheese-video-vault-group-toggle">` +
+      `<input type="checkbox" data-video-vault-group-streamer${videoVaultGroupByStreamer ? " checked" : ""}>` +
+      `<i aria-hidden="true"></i><span>스트리머별 모아보기</span></label>` +
+      `</div>` +
+      `<p class="cheese-video-vault-summary" data-video-vault-summary aria-live="polite"></p>` +
+      `<ul class="cheese-video-vault-grid"></ul>` +
+      `<div class="cheese-video-vault-more"><button type="button" data-video-vault-more hidden></button></div>`;
+    target.section.classList.add("cheese-video-vault-active");
+    target.host.classList.add("cheese-video-vault-host");
+    target.section.insertBefore(panel, target.host.nextSibling);
+    document
+      .getElementById(VIDEO_VAULT_BTN_ID)
+      ?.setAttribute("aria-expanded", "true");
+    bindVideoVaultPanel(panel);
+    videoVaultRenderSig = "";
+    renderVideoVaultPanel();
+  }
+
+  function filteredVideoVaultItems() {
+    const query = normalizeClipVaultSearchText(videoVaultSearch);
+    const items = query
+      ? videoVault.filter((item) =>
+          normalizeClipVaultSearchText(
+            `${item.title} ${item.channelName}`,
+          ).includes(query),
+        )
+      : videoVault.slice();
+    if (videoVaultSort === "saved-asc") items.reverse();
+    if (videoVaultSort === "title" || videoVaultSort === "channel") {
+      const collator = new Intl.Collator("ko", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      items.sort((a, b) => {
+        const first = videoVaultSort === "title" ? "title" : "channelName";
+        return (
+          collator.compare(a[first] || "", b[first] || "") ||
+          collator.compare(a.title || "", b.title || "") ||
+          b.at - a.at
+        );
+      });
+    }
+    return items;
+  }
+
+  function backfillVideoVaultChannelName(item) {
+    if (item?.channelName || !item?.channelId || !videoVaultAccountId) return;
+    const accountId = videoVaultAccountId;
+    const pendingKey = `${accountId}:${item.channelId}`;
+    if (videoVaultChannelBackfillPending.has(pendingKey)) return;
+    videoVaultChannelBackfillPending.add(pendingKey);
+    void resolveChannelMeta(item.channelId)
+      .then((meta) => {
+        const channelName = String(meta?.channelName || "").trim();
+        if (!channelName || videoVaultAccountId !== accountId) return;
+        let changed = false;
+        videoVault = videoVault.map((saved) => {
+          if (saved.channelId !== item.channelId || saved.channelName) {
+            return saved;
+          }
+          changed = true;
+          return {
+            ...saved,
+            channelName,
+            metaKnown: saved.adultKnown === true,
+          };
+        });
+        if (!changed) return;
+        videoVaultRenderSig = "";
+        saveVideoVault();
+        renderVideoVaultPanel();
+      })
+      .finally(() => videoVaultChannelBackfillPending.delete(pendingKey));
+  }
+
+  function mergeVideoVaultDetail(videoNo, content, accountId) {
+    if (!content || videoVaultAccountId !== accountId) return false;
+    const channel = content.channel || content.ownerChannel || {};
+    const durationSeconds = videoVaultDurationSeconds(content.duration);
+    const hasWatchTimeline = Object.hasOwn(content, "watchTimeline");
+    let changed = false;
+    videoVault = videoVault.map((saved) => {
+      if (saved.videoNo !== videoNo) return saved;
+      const next = normalizeVideoVaultItem({
+        ...saved,
+        title: String(content.videoTitle || saved.title || "").trim(),
+        thumb: String(content.thumbnailImageUrl || saved.thumb || "").trim(),
+        channelName: String(
+          channel.channelName || saved.channelName || "",
+        ).trim(),
+        channelId: String(channel.channelId || saved.channelId || "").trim(),
+        channelImageUrl: String(
+          channel.channelImageUrl || saved.channelImageUrl || "",
+        ).trim(),
+        verifiedMark:
+          channel.verifiedMark === true || saved.verifiedMark === true,
+        duration:
+          durationSeconds > 0
+            ? formatDuration(durationSeconds)
+            : saved.duration,
+        durationSeconds: durationSeconds || saved.durationSeconds,
+        readCount: getViewCount(content),
+        livePv: getLivePvCount(content),
+        publishDateAt: getItemTime(content),
+        badgeLabel: getVideoTypeLabel(content),
+        categoryType: content.categoryType || saved.categoryType,
+        videoCategory: content.videoCategory || saved.videoCategory,
+        videoCategoryValue:
+          content.videoCategoryValue || saved.videoCategoryValue,
+        tags: Array.isArray(content.tags) ? content.tags : saved.tags,
+        watchTimeline: hasWatchTimeline
+          ? content.watchTimeline
+          : saved.watchTimeline,
+        adult:
+          content.adult === true ||
+          String(content.adult || "").toLowerCase() === "true",
+        adultKnown: true,
+        metaKnown: Boolean(channel.channelName || saved.channelName),
+        detailFetchedAt: Date.now(),
+        at: saved.at,
+      });
+      if (!next) return saved;
+      if (JSON.stringify(next) !== JSON.stringify(saved)) changed = true;
+      return next;
+    });
+    return changed;
+  }
+
+  function processVideoVaultDetailQueue() {
+    while (
+      videoVaultDetailActive < VIDEO_VAULT_DETAIL_CONCURRENCY &&
+      videoVaultDetailQueue.length
+    ) {
+      const task = videoVaultDetailQueue.shift();
+      if (!task) break;
+      videoVaultDetailActive += 1;
+      void fetch(
+        `https://api.chzzk.naver.com/service/v2/videos/${encodeURIComponent(task.videoNo)}`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      )
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`video-detail-${response.status}`);
+          const content = (await response.json())?.content;
+          if (!content) throw new Error("video-detail-empty");
+          videoVaultDetailRetryAt.delete(task.key);
+          if (!mergeVideoVaultDetail(task.videoNo, content, task.accountId)) {
+            return;
+          }
+          videoVaultRenderSig = "";
+          saveVideoVault();
+          renderVideoVaultPanel();
+        })
+        .catch(() => {
+          videoVaultDetailRetryAt.set(
+            task.key,
+            Date.now() + VIDEO_VAULT_DETAIL_RETRY_MS,
+          );
+        })
+        .finally(() => {
+          videoVaultDetailPending.delete(task.key);
+          videoVaultDetailActive = Math.max(0, videoVaultDetailActive - 1);
+          processVideoVaultDetailQueue();
+        });
+    }
+  }
+
+  function scheduleVideoVaultDetail(item) {
+    if (!item?.videoNo || !videoVaultAccountId) return;
+    if (
+      Number(item.detailFetchedAt || 0) + VIDEO_VAULT_DETAIL_TTL_MS >
+      Date.now()
+    ) {
+      return;
+    }
+    const accountId = videoVaultAccountId;
+    const key = `${accountId}:${item.videoNo}`;
+    if (
+      videoVaultDetailPending.has(key) ||
+      Number(videoVaultDetailRetryAt.get(key) || 0) > Date.now()
+    ) {
+      return;
+    }
+    videoVaultDetailPending.add(key);
+    videoVaultDetailQueue.push({ key, accountId, videoNo: item.videoNo });
+    processVideoVaultDetailQueue();
+  }
+
+  function getVideoVaultDetailButtonContext() {
+    const videoNo = getVideoVaultDetailVideoNo();
+    if (!videoNo) return null;
+    const scope = document.querySelector("main") || document.body;
+    const pageFavorite = scope.querySelector(
+      `.${CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS}`,
+    );
+    if (pageFavorite?.isConnected) {
+      return {
+        videoNo,
+        channelId: normalizeClipVaultAccountId(pageFavorite.dataset.channelId),
+        target: pageFavorite,
+        styleSource: pageFavorite,
+      };
+    }
+
+    const followingButton = findFollowingActionButtons(scope)[0];
+    const controls = followingButton?.closest?.('div[class*="_control_"]');
+    const target = findActionButtonByBlindText(controls, "더보기 메뉴");
+    if (!target) return null;
+    return {
+      videoNo,
+      channelId: getCustomFollowPageChannelId(controls),
+      target,
+      styleSource: target,
+    };
+  }
+
+  function readVideoVaultDetailPageMeta(context) {
+    const videoNo = String(context?.videoNo || "");
+    if (!videoNo) return null;
+    const channelId = normalizeClipVaultAccountId(context?.channelId);
+    const channelLink = channelId
+      ? document.querySelector(`main a[href="/${CSS.escape(channelId)}"]`)
+      : null;
+    const profileImage = channelLink?.querySelector("img");
+    const channelName = visibleVideoVaultText(channelLink);
+    const title =
+      visibleVideoVaultText(document.querySelector("main h1")) ||
+      String(document.querySelector('meta[property="og:title"]')?.content || "")
+        .replace(/\s*[-|]\s*CHZZK\s*$/i, "")
+        .trim();
+    const thumb = String(
+      document.querySelector('meta[property="og:image"]')?.content || "",
+    ).trim();
+    const adult = /19\s*연령\s*제한/.test(
+      String(document.querySelector("main")?.textContent || ""),
+    );
+    return normalizeVideoVaultItem({
+      videoNo,
+      title: title || `다시보기 ${videoNo}`,
+      thumb,
+      channelId,
+      channelName,
+      channelImageUrl: profileImage?.currentSrc || profileImage?.src || "",
+      verifiedMark: [...(channelLink?.querySelectorAll(".blind") || [])].some(
+        (node) => node.textContent.trim() === "인증 마크",
+      ),
+      ...(adult ? { adult: true, adultKnown: true } : {}),
+      metaKnown: false,
+      at: Date.now(),
+    });
+  }
+
+  function ensureVideoVaultDetailButton() {
+    const existing = document.querySelector(
+      `.${VIDEO_VAULT_PAGE_BUTTON_CLASS}`,
+    );
+    const supportedPage = Boolean(getVideoVaultDetailVideoNo());
+    const enabled = isVideoVaultAvailable() && supportedPage;
+    const context = enabled ? getVideoVaultDetailButtonContext() : null;
+    if (!context) {
+      if (!enabled || !supportedPage) existing?.remove();
+      return;
+    }
+
+    let button = existing;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentContext = getVideoVaultDetailButtonContext();
+        if (!currentContext) return;
+        if (videoVaultHas(currentContext.videoNo)) {
+          removeVideoVaultItem(currentContext.videoNo);
+        } else {
+          const meta = readVideoVaultDetailPageMeta(currentContext);
+          if (!meta || !addVideoVaultItem(meta)) return;
+          const saved = videoVault.find(
+            (item) => item.videoNo === currentContext.videoNo,
+          );
+          if (saved) scheduleVideoVaultDetail(saved);
+        }
+        ensureVideoVaultDetailButton();
+        ensureVideoVaultCardButtons();
+        renderVideoVaultPanel();
+      });
+    }
+
+    const on = videoVaultHas(context.videoNo);
+    const nativeClasses = [...context.styleSource.classList].filter(
+      (name) =>
+        !name.startsWith("cheese-") && name !== "is-fav" && name !== "is-on",
+    );
+    button.className = `${nativeClasses.join(" ")} ${VIDEO_VAULT_PAGE_BUTTON_CLASS}${on ? " is-on" : ""}`;
+    button.dataset.videoNo = context.videoNo;
+    button.setAttribute("aria-pressed", String(on));
+    button.setAttribute(
+      "aria-label",
+      on ? "다시보기 보관함에서 제거" : "다시보기 보관함에 추가",
+    );
+    button.title = on
+      ? "내 다시보기 보관함에서 제거"
+      : "내 다시보기 보관함에 추가";
+    button.innerHTML = videoVaultArchiveSvg(on);
+
+    if (
+      button.parentElement !== context.target.parentElement ||
+      context.target.nextElementSibling !== button
+    ) {
+      context.target.after(button);
+    }
+  }
+
+  function formatVideoVaultRelativeTime(time) {
+    const elapsed = Math.max(0, Date.now() - Number(time || 0));
+    if (!time) return "";
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds < 60) return "방금 전";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
+    if (seconds < 30 * 86400) return `${Math.floor(seconds / 86400)}일 전`;
+    if (seconds < 365 * 86400) {
+      return `${Math.floor(seconds / (30 * 86400))}개월 전`;
+    }
+    return `${Math.floor(seconds / (365 * 86400))}년 전`;
+  }
+
+  function renderVideoVaultCard(item) {
+    backfillVideoVaultChannelName(item);
+    scheduleVideoVaultDetail(item);
+    const adultArea = item.adult
+      ? renderClipAdultArea({
+          areaClass: "",
+          descriptionClass: "",
+          extraAreaClass: "cheese-video-vault-adult",
+          extraDescriptionClass: "cheese-video-vault-adult-label",
+        })
+      : "";
+    const watchTimelineBar = renderWatchTimelineBar(
+      {
+        watchTimeline: item.watchTimeline,
+        duration: item.durationSeconds,
+      },
+      "cheese-video-vault",
+    );
+    const profileUrl =
+      item.channelImageUrl ||
+      (document.documentElement.classList.contains("theme_dark")
+        ? "https://ssl.pstatic.net/static/nng/glive/image/default_profile_dark.png"
+        : "https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png");
+    const channelHref = item.channelId
+      ? `/${encodeURIComponent(item.channelId)}`
+      : "";
+    const channelName = item.channelName || "채널 정보 없음";
+    const channelProfile = channelHref
+      ? `<a class="cheese-video-vault-profile" href="${channelHref}" aria-label="${escapeAttribute(channelName)} 채널로 이동"><img src="${escapeAttribute(profileUrl)}" alt="" loading="lazy" draggable="false"></a>`
+      : `<span class="cheese-video-vault-profile"><img src="${escapeAttribute(profileUrl)}" alt="" loading="lazy" draggable="false"></span>`;
+    const officialMark = item.verifiedMark
+      ? `<i class="cheese-video-vault-official" aria-hidden="true"></i><span class="blind">인증 마크</span>`
+      : "";
+    const channelText = channelHref
+      ? `<a class="cheese-video-vault-channel" href="${channelHref}"><span>${escapeHtml(channelName)}</span>${officialMark}</a>`
+      : `<span class="cheese-video-vault-channel"><span>${escapeHtml(channelName)}</span>${officialMark}</span>`;
+    const livePvBadge = item.livePv
+      ? `<span>${formatCompactCount(item.livePv)}회 시청된 라이브</span>`
+      : "";
+    const relativeTime = formatVideoVaultRelativeTime(item.publishDateAt);
+    const infoParts = [];
+    if (item.readCount > 0) {
+      infoParts.push(`조회수 ${formatCompactCount(item.readCount)}회`);
+    }
+    if (relativeTime) infoParts.push(relativeTime);
+    const categoryHref =
+      item.categoryType && item.videoCategory
+        ? `/category/${encodeURIComponent(item.categoryType)}/${encodeURIComponent(item.videoCategory)}/videos`
+        : "";
+    const category =
+      categoryHref && item.videoCategoryValue
+        ? `<a class="cheese-video-vault-category" href="${categoryHref}">${escapeHtml(item.videoCategoryValue)}</a>`
+        : "";
+    const tags = item.tags
+      .slice(0, 5)
+      .map(
+        (tag) =>
+          `<a class="cheese-video-vault-tag" href="/videos?tags=${encodeURIComponent(tag)}">${escapeHtml(tag)}</a>`,
+      )
+      .join("");
+    return (
+      `<li class="cheese-video-vault-item">` +
+      `<a href="/video/${item.videoNo}" class="cheese-video-vault-thumb-link" aria-label="${escapeAttribute(item.title || `다시보기 ${item.videoNo}`)}">` +
+      `<div class="cheese-video-vault-thumb${item.adult ? " is-adult" : ""}">` +
+      `${item.thumb ? `<img src="${escapeAttribute(item.thumb)}" alt="" loading="lazy" draggable="false">` : ""}` +
+      adultArea +
+      `<span class="cheese-video-vault-badges"><em>${escapeHtml(item.badgeLabel || "다시보기")}</em>${livePvBadge}</span>` +
+      `${item.duration ? `<small>${escapeHtml(item.duration)}</small>` : ""}` +
+      `${watchTimelineBar}</div></a>` +
+      `<div class="cheese-video-vault-card-body">${channelProfile}<div class="cheese-video-vault-card-copy">` +
+      `<a class="cheese-video-vault-title" href="/video/${item.videoNo}"><strong>${escapeHtml(item.title || `다시보기 ${item.videoNo}`)}</strong></a>` +
+      `${channelText}` +
+      `${infoParts.length ? `<span class="cheese-video-vault-info">${escapeHtml(infoParts.join(" · "))}</span>` : ""}` +
+      `${category || tags ? `<div class="cheese-video-vault-taxonomy">${category}${tags}</div>` : ""}` +
+      `<span class="cheese-video-vault-saved">${new Date(item.at).toLocaleDateString("ko-KR")} 저장</span>` +
+      `</div></div><button type="button" class="cheese-video-vault-del" data-video-no="${item.videoNo}" aria-label="보관함에서 제거" title="보관함에서 제거">${videoVaultArchiveSvg(true)}</button></li>`
+    );
+  }
+
+  function renderVideoVaultDateGroups(items) {
+    const groups = groupClipVaultItems(items, clipVaultDateGroup);
+    const direction = videoVaultSort === "saved-asc" ? 1 : -1;
+    groups.sort((a, b) => {
+      if (a.sortValue == null) return 1;
+      if (b.sortValue == null) return -1;
+      return (a.sortValue - b.sortValue) * direction;
+    });
+    return groups
+      .map(
+        (group) =>
+          `<li class="cheese-video-vault-date-group">` +
+          `<h3>${escapeHtml(group.label)}<small>${group.items.length.toLocaleString("ko-KR")}</small></h3>` +
+          `<ul class="cheese-video-vault-grid cheese-video-vault-group-grid">${group.items.map(renderVideoVaultCard).join("")}</ul></li>`,
+      )
+      .join("");
+  }
+
+  function renderVideoVaultPanel() {
+    const panel = document.getElementById(VIDEO_VAULT_PANEL_ID);
+    if (!panel) {
+      videoVaultRenderSig = "";
+      return;
+    }
+    if (!isVideoVaultAvailable()) {
+      closeVideoVaultPanel({ focusButton: false });
+      return;
+    }
+    const items = filteredVideoVaultItems();
+    const shown = items.slice(0, videoVaultVisibleCount);
+    const summary = panel.querySelector("[data-video-vault-summary]");
+    if (summary) {
+      summary.textContent = videoVaultSearch.trim()
+        ? `${items.length.toLocaleString("ko-KR")}개 검색됨 · 전체 ${videoVault.length.toLocaleString("ko-KR")}개`
+        : `전체 ${videoVault.length.toLocaleString("ko-KR")}개 · 계정별 최대 ${VIDEO_VAULT_LIMIT.toLocaleString("ko-KR")}개`;
+    }
+    const more = panel.querySelector("[data-video-vault-more]");
+    if (more) {
+      const remaining = Math.max(0, items.length - shown.length);
+      more.hidden = remaining === 0;
+      more.textContent = remaining
+        ? `더보기 (${Math.min(VIDEO_VAULT_PAGE_SIZE, remaining).toLocaleString("ko-KR")}개)`
+        : "";
+    }
+    const grid = panel.querySelector(".cheese-video-vault-grid");
+    if (!grid) return;
+    const sig = `${videoVaultSort}|group:${videoVaultGroupByStreamer}:${videoVaultGroupByDate}|${normalizeClipVaultSearchText(videoVaultSearch)}|${shown
+      .map(
+        (item) =>
+          `${item.videoNo}:${item.title}:${item.thumb}:${item.channelName}:${item.channelId}:${item.channelImageUrl}:${item.verifiedMark}:${item.duration}:${item.durationSeconds}:${item.readCount}:${item.livePv}:${item.publishDateAt}:${item.badgeLabel}:${item.categoryType}:${item.videoCategory}:${item.videoCategoryValue}:${item.tags.join(";")}:${item.watchTimeline}:${item.adultKnown}:${item.adult}:${item.metaKnown}:${item.detailFetchedAt}:${item.at}`,
+      )
+      .join(",")}`;
+    if (sig === videoVaultRenderSig) return;
+    videoVaultRenderSig = sig;
+    if (!shown.length) {
+      grid.innerHTML = `<li class="cheese-video-vault-empty">${videoVaultSearch.trim() ? "일치하는 다시보기가 없습니다." : "즐겨찾기한 다시보기가 없습니다."}</li>`;
+      return;
+    }
+    if (videoVaultGroupByStreamer) {
+      const groups = groupClipVaultItemsByStreamer(shown);
+      grid.innerHTML = groups
+        .map((group) => {
+          const collapsed = videoVaultCollapsedStreamerGroups.has(group.key);
+          const cards = videoVaultGroupByDate
+            ? renderVideoVaultDateGroups(group.items)
+            : group.items.map(renderVideoVaultCard).join("");
+          return (
+            `<li class="cheese-video-vault-group"><details data-video-vault-streamer-group="${escapeAttribute(group.key)}"${collapsed ? "" : " open"}>` +
+            `<summary>${clipVaultFolderSvg()}<span>${escapeHtml(group.label)}</span><small>${group.items.length.toLocaleString("ko-KR")}</small>${clipVaultChevronSvg()}</summary>` +
+            `<ul class="cheese-video-vault-grid cheese-video-vault-group-grid">${cards}</ul>` +
+            `</details></li>`
+          );
+        })
+        .join("");
+      grid
+        .querySelectorAll("details[data-video-vault-streamer-group]")
+        .forEach((details) => {
+          details.addEventListener("toggle", () => {
+            const key = details.dataset.videoVaultStreamerGroup || "unknown";
+            if (details.open) videoVaultCollapsedStreamerGroups.delete(key);
+            else videoVaultCollapsedStreamerGroups.add(key);
+          });
+        });
+    } else if (videoVaultGroupByDate) {
+      grid.innerHTML = renderVideoVaultDateGroups(shown);
+    } else {
+      grid.innerHTML = shown.map(renderVideoVaultCard).join("");
+    }
+  }
+
+  function bindVideoVaultPanel(panel) {
+    const search = panel.querySelector("[data-video-vault-search]");
+    if (search) {
+      search.value = videoVaultSearch;
+      search.addEventListener("input", () => {
+        videoVaultSearch = search.value;
+        videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+        clearTimeout(videoVaultSearchTimer);
+        videoVaultSearchTimer = window.setTimeout(() => {
+          videoVaultRenderSig = "";
+          renderVideoVaultPanel();
+        }, 120);
+      });
+    }
+    const trigger = panel.querySelector("[data-video-vault-sort-trigger]");
+    const menu = panel.querySelector("[data-video-vault-sort-menu]");
+    const label = panel.querySelector("[data-video-vault-sort-label]");
+    if (label) label.textContent = VIDEO_VAULT_SORTS[videoVaultSort];
+    trigger?.addEventListener("click", () => {
+      const open = menu?.hidden === true;
+      if (menu) menu.hidden = !open;
+      trigger.setAttribute("aria-expanded", String(open));
+    });
+    menu?.addEventListener("click", (event) => {
+      const option = event.target.closest("[data-video-vault-sort]");
+      const value = option?.dataset.videoVaultSort;
+      if (!Object.hasOwn(VIDEO_VAULT_SORTS, value)) return;
+      videoVaultSort = value;
+      try {
+        chrome.storage?.local?.set({ [VIDEO_VAULT_SORT_KEY]: value });
+      } catch {}
+      videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+      videoVaultRenderSig = "";
+      if (label) label.textContent = VIDEO_VAULT_SORTS[value];
+      menu.hidden = true;
+      trigger?.setAttribute("aria-expanded", "false");
+      renderVideoVaultPanel();
+    });
+    const streamerGroupToggle = panel.querySelector(
+      "[data-video-vault-group-streamer]",
+    );
+    const dateGroupToggle = panel.querySelector(
+      "[data-video-vault-group-date]",
+    );
+    const saveGroupMode = () => {
+      try {
+        chrome.storage?.local?.set({
+          [VIDEO_VAULT_GROUP_STREAMER_KEY]: videoVaultGroupByStreamer,
+          [VIDEO_VAULT_GROUP_DATE_KEY]: videoVaultGroupByDate,
+        });
+      } catch {}
+      videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+      videoVaultRenderSig = "";
+      renderVideoVaultPanel();
+    };
+    streamerGroupToggle?.addEventListener("change", () => {
+      videoVaultGroupByStreamer = streamerGroupToggle.checked;
+      saveGroupMode();
+    });
+    dateGroupToggle?.addEventListener("change", () => {
+      videoVaultGroupByDate = dateGroupToggle.checked;
+      saveGroupMode();
+    });
+  }
+
+  function toggleVideoVaultCardArchive(archiveButton) {
+    const link = archiveButton?.closest?.("a[href]");
+    const meta = readVideoCardMeta(link);
+    if (!meta) return;
+    const on = videoVaultHas(meta.videoNo);
+    if (on) removeVideoVaultItem(meta.videoNo);
+    else addVideoVaultItem(meta);
+    archiveButton.dataset.on = String(!on);
+    archiveButton.classList.toggle("is-on", !on);
+    archiveButton.setAttribute("aria-pressed", String(!on));
+    archiveButton.setAttribute(
+      "aria-label",
+      !on ? "다시보기 보관함에서 제거" : "다시보기 보관함에 추가",
+    );
+    archiveButton.title = !on
+      ? "다시보기 보관함에서 제거"
+      : "다시보기 보관함에 추가";
+    archiveButton.innerHTML = videoVaultArchiveSvg(!on);
+    renderVideoVaultPanel();
+  }
+
+  function ensureVideoVaultClicks() {
+    if (videoVaultClickBound) return;
+    videoVaultClickBound = true;
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!isVideoVaultAvailable() || event.button !== 0) return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (!target.closest("[data-video-vault-sort-picker]")) {
+          const menu = document.querySelector("[data-video-vault-sort-menu]");
+          if (menu && !menu.hidden) menu.hidden = true;
+          document
+            .querySelector("[data-video-vault-sort-trigger]")
+            ?.setAttribute("aria-expanded", "false");
+        }
+        const archiveButton = target.closest(
+          ".cheese-video-vault-archive, .cheese-video-vault-star",
+        );
+        const del = target.closest(".cheese-video-vault-del");
+        if (!archiveButton && !del) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (del) {
+          removeVideoVaultItem(del.dataset.videoNo);
+          renderVideoVaultPanel();
+          ensureVideoVaultCardButtons();
+          return;
+        }
+        toggleVideoVaultCardArchive(archiveButton);
+      },
+      true,
+    );
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (!isVideoVaultAvailable()) return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const archiveButton = target.closest(
+          ".cheese-video-vault-archive, .cheese-video-vault-star",
+        );
+        const del = target.closest(".cheese-video-vault-del");
+        if (archiveButton || del) {
+          event.preventDefault();
+          event.stopPropagation();
+          // 키보드 Enter/Space는 pointerdown 없이 click(detail=0)만 발생한다.
+          if (event.detail === 0) {
+            if (del) {
+              removeVideoVaultItem(del.dataset.videoNo);
+              renderVideoVaultPanel();
+              ensureVideoVaultCardButtons();
+            } else {
+              toggleVideoVaultCardArchive(archiveButton);
+            }
+          }
+          return;
+        }
+        if (target.closest(`#${VIDEO_VAULT_BTN_ID}`)) {
+          event.preventDefault();
+          if (videoVaultOpen) closeVideoVaultPanel();
+          else openVideoVaultPanel();
+          return;
+        }
+        if (target.closest("[data-video-vault-close]")) {
+          event.preventDefault();
+          closeVideoVaultPanel();
+          return;
+        }
+        if (target.closest("[data-video-vault-more]")) {
+          event.preventDefault();
+          videoVaultVisibleCount += VIDEO_VAULT_PAGE_SIZE;
+          videoVaultRenderSig = "";
+          renderVideoVaultPanel();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape" || !videoVaultOpen) return;
+        const menu = document.querySelector("[data-video-vault-sort-menu]");
+        if (menu && !menu.hidden) {
+          menu.hidden = true;
+          document
+            .querySelector("[data-video-vault-sort-trigger]")
+            ?.setAttribute("aria-expanded", "false");
+          return;
+        }
+        closeVideoVaultPanel();
+      },
+      true,
+    );
+  }
+
   function ensureChatMsgObserver() {
     if (!commentBlockNicknameSet.size && !chatWordFilterRegexes.length) {
       if (chatMsgObserver) {
@@ -42776,11 +45862,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         for (const m of muts) {
           m.addedNodes.forEach((node) => {
             if (node.nodeType !== 1) return;
+            if (
+              node.matches?.("[data-cheese-chat-history-ui]") ||
+              node.closest?.("[data-cheese-chat-history-ui]")
+            ) {
+              return;
+            }
             // 추가된 노드가 채팅 항목이거나 그 안에 항목을 포함.
             if (node.matches?.('[class*="_item_"]')) applyChatBlockToItem(node);
-            node
-              .querySelectorAll?.('[class*="_item_"]')
-              .forEach((it) => applyChatBlockToItem(it));
+            node.querySelectorAll?.('[class*="_item_"]').forEach((it) => {
+              if (!it.closest("[data-cheese-chat-history-ui]")) {
+                applyChatBlockToItem(it);
+              }
+            });
           });
         }
       });
@@ -43958,6 +47052,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   if (chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
+      const vodTitleKey = CHAT_RECAP_STORE_API.vodTitleChangeKey(
+        seekPreviewState.videoNo,
+      );
+      if (vodTitleKey && changes[vodTitleKey]) {
+        const value = changes[vodTitleKey].newValue;
+        seekPreviewState.titleChanges =
+          CHAT_RECAP_STORE_API.normalizeVodTitleChanges(value);
+        updateSeekPreviewRealtime();
+      }
       if (changes[GLOBAL_SCROLL_TOP_FAB_KEY]) {
         globalScrollTopFabOn =
           changes[GLOBAL_SCROLL_TOP_FAB_KEY].newValue === true;
@@ -44588,6 +47691,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[POPUP_PLAYER_WIDE_KEY]) {
         popupPlayerWide = changes[POPUP_PLAYER_WIDE_KEY].newValue !== false;
       }
+      if (changes[POPUP_PLAYER_START_WITHOUT_CHAT_KEY]) {
+        popupPlayerStartWithoutChat =
+          changes[POPUP_PLAYER_START_WITHOUT_CHAT_KEY].newValue === true;
+      }
+      if (changes[POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY]) {
+        popupPlayerStartWithoutChat16x9 =
+          changes[POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY].newValue === true;
+      }
       if (changes[POPUP_PLAYER_SCROLL_KEY]) {
         popupPlayerScroll = changes[POPUP_PLAYER_SCROLL_KEY].newValue === true;
         applyPopupPlayerScrollMode();
@@ -44819,6 +47930,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const list = changes[COMMENT_BLOCK_KEY].newValue;
         commentBlocks = Array.isArray(list) ? list : [];
         rebuildCommentBlockSet();
+        resetSearchRerankBlockedUsers();
+        // 이미 그린 재정렬 풀에도 새 차단 상태를 즉시 반영한다. 차단 해제 시에는
+        // 다음 ensure 호출에서 API 풀을 다시 받아 빠졌던 채널을 복원한다.
+        searchRerankState.items = searchRerankState.items.filter(
+          (item) => !isSearchRerankBlockedItem(item),
+        );
+        searchLiveRerankState.items = searchLiveRerankState.items.filter(
+          (item) => !isSearchRerankBlockedItem(item),
+        );
+        searchRerankState.fetchedFor = "";
+        searchLiveRerankState.fetchedFor = "";
         ensureChatMsgObserver();
         const newNick = new Map(
           commentBlocks.map((b) => [String(b.userIdHash), b.nickname || ""]),
@@ -44880,7 +48002,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           chatGraphState.shown = false;
           removeChatGraphLayer();
         }
+      }
+      if (
+        changes[CHAT_GRAPH_ENABLED_KEY] ||
+        changes[CHAT_GRAPH_AUTO_KEY] ||
+        changes[CHAT_GRAPH_AUTO_COLLECT_KEY]
+      ) {
+        // 설정 JSON 불러오기는 세 키를 한 번에 바꾼다. 변수만 갱신하면 다음 DOM tick이
+        // 올 때까지 자동 표시·수집이 시작되지 않으므로 변경 묶음 처리 뒤 즉시 재평가한다.
+        chatGraphAutoCheckingVideo = "";
+        chatGraphAutoCheckVersion += 1;
         ensureChatGraphButton();
+        void maybeAutoShowChatGraph();
       }
       if (changes[FOLLOW_SORT_ENABLED_KEY]) {
         followingLiveSortOn =
@@ -45141,22 +48274,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         void pruneChatRecap();
       }
       if (changes[CHAT_HISTORY_ENABLED_KEY]) {
-        chatHistoryOn = false;
-        if (changes[CHAT_HISTORY_ENABLED_KEY].newValue === true) {
-          chrome.storage.local
-            .set({ [CHAT_HISTORY_ENABLED_KEY]: false })
-            .catch(() => {});
-        }
+        chatHistoryOn = changes[CHAT_HISTORY_ENABLED_KEY].newValue === true;
         broadcastFeatureFlags();
         if (!chatHistoryOn) {
-          clearChatHistoryVisibilityTimers();
-          stopChatHistory();
-          removeRestoredChatHistoryRows();
-          chatHistoryChannelId = null;
-          chatHistoryBuffer = [];
-          chatHistoryRestored = false;
-          chatHistoryWasHidden = false;
-          chatHistorySkipNextRestore = false;
+          resetChatHistoryRuntime();
         }
         ensureChatHistory();
       }
@@ -45189,6 +48310,41 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[CLIP_VAULT_LIMIT_KEY].newValue,
         );
       }
+      const videoVaultAccountKey = videoVaultStorageKey();
+      if (videoVaultAccountKey && changes[videoVaultAccountKey]) {
+        videoVault = normalizeVideoVault(
+          changes[videoVaultAccountKey].newValue,
+        );
+        videoVaultRenderSig = "";
+        renderVideoVaultPanel();
+        ensureVideoVaultCardButtons();
+        ensureVideoVaultDetailButton();
+      }
+      if (changes[VIDEO_VAULT_SORT_KEY]) {
+        const value = changes[VIDEO_VAULT_SORT_KEY].newValue;
+        videoVaultSort = Object.hasOwn(VIDEO_VAULT_SORTS, value)
+          ? value
+          : "saved-desc";
+        videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+        videoVaultRenderSig = "";
+        renderVideoVaultPanel();
+      }
+      if (
+        changes[VIDEO_VAULT_GROUP_STREAMER_KEY] ||
+        changes[VIDEO_VAULT_GROUP_DATE_KEY]
+      ) {
+        if (changes[VIDEO_VAULT_GROUP_STREAMER_KEY]) {
+          videoVaultGroupByStreamer =
+            changes[VIDEO_VAULT_GROUP_STREAMER_KEY].newValue === true;
+        }
+        if (changes[VIDEO_VAULT_GROUP_DATE_KEY]) {
+          videoVaultGroupByDate =
+            changes[VIDEO_VAULT_GROUP_DATE_KEY].newValue === true;
+        }
+        videoVaultVisibleCount = VIDEO_VAULT_PAGE_SIZE;
+        videoVaultRenderSig = "";
+        renderVideoVaultPanel();
+      }
       if (changes[CLIP_VAULT_SORT_KEY]) {
         const value = changes[CLIP_VAULT_SORT_KEY].newValue;
         clipVaultSort = Object.hasOwn(CLIP_VAULT_SORTS, value)
@@ -45218,6 +48374,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatHistoryLimit = normalizeChatHistoryLimit(
           changes[CHAT_HISTORY_LIMIT_KEY].newValue,
         );
+        chatHistoryBuffer = normalizeChatHistoryItems(chatHistoryBuffer);
+        updateChatHistoryPanel();
+        scheduleChatHistorySave();
       }
       if (changes[FOLLOWER_EXACT_KEY]) {
         setFollowerExact(changes[FOLLOWER_EXACT_KEY].newValue === true);
@@ -45390,6 +48549,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
       chatGraphAutoCollect = data?.[CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
+      // init()은 저장소 응답보다 먼저 실행될 수 있다. 특히 설정을 막 불러온 새 설치에서는
+      // 기본값(false)으로 첫 init이 끝난 뒤 DOM 변이가 없으면 버튼·자동 수집이 영영
+      // 시작되지 않는다. 저장값을 읽은 시점에 현재 플레이어를 한 번 더 적용한다.
+      ensureChatGraphButton();
+      void maybeAutoShowChatGraph();
     } catch {}
   })();
 
@@ -45400,6 +48564,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ensureCommentBlockObserver(); // 댓글 영역(다시보기/커뮤니티)에 차단 버튼 주입 관찰
     ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰
     initCommentTimestampMarkers();
+    ensureOpenChatRecapPanelConnected();
     initSeekPreviewRealtime();
     initLiveDetailStartTooltip();
     ensureFollowerCountHover(); // "팔로워 8.9만명" 호버 시 정확한 수 표시
@@ -45418,7 +48583,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       applyHeaderAutoHide(); // 자동 숨김 켜져 있으면 새 헤더 요소에 리스너 보정
       ensureLoungeButton(); // 헤더 알림 옆 라운지 소식 버튼 보장(SPA 재렌더 대응)
       ensurePipChat(); // PIP 전환 시 채팅 iframe 패널 보장/정리
-      ensureChatHistory(); // 채팅 이어보기: 수집 옵저버 보장 + 최초 1회 복원
+      ensureChatHistory(); // 채팅 이어보기: 수집 옵저버와 독립 패널 보장
       ensureClipVaultAccount(); // 로그인 계정별 보관함 로드/전환
       ensureClipVaultClicks(); // 클립 보관함 클릭 위임(1회)
       ensureClipVaultButton(); // /clips 헤더의 보관함 버튼
@@ -45426,8 +48591,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       backfillClipVaultMeta(); // 좋아요로 담긴 uid-only 항목에 카드 메타 채우기
       ensureClipFavBridge(); // 재생 iframe 과의 즐겨찾기 브리지(1회)
       syncClipFavToFrame(); // 현재 클립 uid·담김 상태를 iframe 에 전달
+      ensureVideoVaultAccount(); // 로그인 계정별 다시보기 보관함 로드/전환
+      ensureVideoVaultClicks(); // 다시보기 보관함 클릭 위임(1회)
+      ensureVideoVaultButton(); // /videos·팔로잉·카테고리 동영상의 보관함 버튼
+      ensureVideoVaultCardButtons(); // 다시보기 카드별 보관 아이콘
       ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
       ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
+      ensureVideoVaultDetailButton(); // 다시보기 상세 액션 영역의 보관함 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
       applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
       applyLiveViewerCountPlacement(); // 라이브 카드 시청자 수 위치 옵션 적용
@@ -45442,6 +48612,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyChatStackedClass(); // 상하 분할 시 채팅 입력창 높이 제한(채팅 기능 무관, 항상)
     ensureChatPopupPipButton(); // 독립 채팅 팝업의 항상 위 Document PiP 버튼 보장
     applyChatFoldPersist(); // 채팅창 접힘 상태 유지(옵션 시, 라이브 진입 1회 복원)
+    applyPopupPlayerInitialChatFold(); // 새 팝업을 채팅 없이 시작(옵션 시, 초기 네이티브 접힘 안정화)
     ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
     applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
     applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
@@ -45991,14 +49162,25 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function scheduleInitFromMutations(mutations) {
-    if (cleanupStudioMakeClipViewIfInactive()) {
+    if (mutations?.length && cleanupStudioMakeClipViewIfInactive()) {
       return;
     }
     const chatHistoryNeedsReconnect = mutations?.some(
       chatHistoryMutationNeedsReconnect,
     );
+    if (chatHistoryNeedsReconnect) {
+      // 일반 UI 초기화는 숨김 탭에서 쉬지만, 이어보기 옵저버가 교체된 채팅 목록을 놓치면
+      // 그 사이 기록은 복구할 수 없다. 두 world의 경량 옵저버만 즉시 재연결한다.
+      ensureChatHistory();
+      broadcastFeatureFlags();
+    }
+    const chatRecapNeedsReconnect =
+      !!chatRecapOpenPanel &&
+      !chatRecapOpenPanel.isConnected &&
+      chatRecapOpenVideoNo === getCurrentVideoNo();
     if (
       !chatHistoryNeedsReconnect &&
+      !chatRecapNeedsReconnect &&
       mutations?.length &&
       mutations.every(
         (mutation) =>
@@ -46008,7 +49190,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ) {
       return;
     }
-    if (observerState.initTimer) return;
+    if (observerState.initTimer || observerState.initIdleHandle) return;
     // 디바운스 250ms: 채팅 폭주 방송에서 변이가 상시 발생하므로, 예전 120ms 때는 init(수십
     // 개의 ensure* 실행)이 초당 ~8회 돌아 누적 부하가 컸다(프로파일 실측 — audioMixer tick과
     // 함께 간헐 버퍼링·렌더러 메모리 증가의 원인). UI 보정은 4회/초로 충분하다.
@@ -46017,7 +49199,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // 백그라운드 탭에선 UI 보정(버튼/카드 주입 등)이 무의미하다 — 건너뛴다. 탭이 다시
       // 보이면 다음 변이(채팅 등으로 상시 발생)가 곧바로 init을 다시 돌린다.
       if (document.hidden) return;
-      init();
+      const run = () => {
+        observerState.initIdleHandle = 0;
+        if (!document.hidden) init();
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        // 라이브 진입 직후에는 플레이어 디코더와 React 초기 렌더를 먼저 양보한다.
+        // timeout을 둬 조용한 페이지에서도 확장 UI 보정이 빠지지는 않게 한다.
+        observerState.initIdleHandle = window.requestIdleCallback(run, {
+          timeout: 700,
+        });
+      } else {
+        observerState.initIdleHandle = window.setTimeout(run, 0);
+      }
     }, 250);
   }
 
@@ -46261,6 +49455,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     },
     true,
   );
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && chatRecapOpenPanel?.isConnected === false) {
+      ensureOpenChatRecapPanelConnected();
+    }
+  });
   document.addEventListener("click", handleStudioMoreCaptureClick, true);
   document.addEventListener("click", handleStudioDocumentClick);
   document.addEventListener("keydown", handleCommentTimestampKeydown);
@@ -46787,15 +49986,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             reqId,
             ok,
             saved: ok ? resp.saved !== false : false,
+            // 실패 사유를 그대로 넘긴다. 예전엔 ok 만 보고 버려서 '저장하지
+            // 못했어요' 하나에 원인 6가지가 뭉쳐 있었다(제보: 왜 실패했는지
+            // 알 수 없음).
+            reason: chrome.runtime.lastError
+              ? "disconnected"
+              : String(resp?.reason || ""),
+            detail: chrome.runtime.lastError
+              ? String(chrome.runtime.lastError.message || "")
+              : String(resp?.detail || ""),
           });
         },
       );
-    } catch {
+    } catch (err) {
       replyAndCleanup({
         source: "cheese-screenshot-save-result",
         reqId,
         ok: false,
         saved: false,
+        // 확장을 새로고침·업데이트한 뒤 페이지를 그대로 두면 여기로 온다.
+        reason: "disconnected",
+        detail: String(err?.message || ""),
       });
     }
   });

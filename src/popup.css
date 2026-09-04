@@ -256,7 +256,7 @@ body {
 body[data-content-type="clips"] .popup-controls {
   grid-template-columns:
     minmax(175px, 1.25fr) minmax(205px, 1.1fr)
-    115px 115px 125px;
+    140px 140px 125px;
 }
 
 .popup-field {
@@ -914,6 +914,12 @@ body[data-content-type="clips"] .popup-controls {
   cursor: pointer;
 }
 
+.popup-date-trigger [data-date-label] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .popup-date-trigger::after {
   content: "";
   width: 6px;
@@ -1125,6 +1131,184 @@ body[data-content-type="clips"] .popup-controls {
   background: var(--popup-brand);
   color: var(--popup-inverse-text);
   font-weight: 700;
+}
+
+.popup-calendar-time {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--popup-border);
+  color: var(--popup-muted);
+  font-size: 12px;
+}
+
+.popup-calendar-time[hidden] {
+  display: none;
+}
+
+.popup-time-picker {
+  display: inline-grid;
+  grid-template-columns: 60px 48px auto 48px auto;
+  align-items: center;
+  justify-content: end;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 2px 7px;
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  background: var(--popup-control-bg);
+  color: var(--popup-text);
+  min-width: 0;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.popup-time-picker:focus-within {
+  border-color: var(--popup-brand);
+  box-shadow: 0 0 0 3px var(--popup-focus-ring);
+}
+
+.popup-time-segment {
+  display: grid;
+  grid-template-columns: 30px 16px;
+  align-items: stretch;
+  height: 32px;
+  border-radius: 5px;
+  transition: background-color 0.15s ease;
+}
+
+.popup-time-segment:hover,
+.popup-time-segment:focus-within {
+  background: var(--popup-soft-bg);
+}
+
+.popup-field .popup-time-picker input[data-time-part-input] {
+  box-sizing: border-box;
+  width: 30px;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  appearance: textfield;
+}
+
+.popup-field
+  .popup-time-picker
+  input[data-time-part-input]:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.popup-time-unit {
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.popup-time-period {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: 60px;
+  height: 28px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--popup-soft-bg);
+}
+
+.popup-time-period button {
+  min-width: 0;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  outline: 0;
+  background: transparent;
+  color: var(--popup-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.popup-time-period button.is-selected {
+  background: var(--popup-control-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  color: var(--popup-text);
+}
+
+.popup-time-period button:hover:not(:disabled) {
+  color: var(--popup-text);
+}
+
+.popup-time-period button:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--popup-brand);
+}
+
+.popup-time-spin-controls {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  width: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.popup-time-segment:hover .popup-time-spin-controls,
+.popup-time-segment:focus-within .popup-time-spin-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.popup-time-spin-controls button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  outline: 0;
+  background: transparent;
+  color: var(--popup-muted-strong);
+  cursor: pointer;
+}
+
+.popup-time-spin-controls button:hover:not(:disabled) {
+  background: var(--popup-control-bg);
+  color: var(--popup-brand);
+}
+
+.popup-time-picker.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.popup-time-picker.is-disabled .popup-time-segment:hover {
+  background: transparent;
+}
+
+.popup-time-picker.is-disabled .popup-time-period button {
+  cursor: not-allowed;
+}
+
+.popup-time-picker button:disabled,
+.popup-field .popup-time-picker input[data-time-part-input]:disabled {
+  cursor: not-allowed;
 }
 
 .popup-calendar-actions {

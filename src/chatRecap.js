@@ -9198,6 +9198,7 @@
     onPage,
   ) {
     const rows = [];
+    const titleChangeTracker = STORE_API.createVodTitleChangeTracker();
     rows.failed = false; // 첫 페이지부터 실패했는지(연속 실패 감지용)
     // 끝까지 읽었거나 채팅 미제공이 확정된 영상만 완료 캐시에 넣는다.
     rows.complete = false;
@@ -9253,6 +9254,7 @@
       }
       scanned += list.length;
       for (const m of list) {
+        titleChangeTracker.add(m);
         const code = Number(m?.messageTypeCode ?? 1);
         // ⚠ code 13 은 파티 순위 확정 안내(PARTY_DONATION_CONFIRM)다. 후원이
         //   아니므로 기록하지 않는다(실측으로 확인).
@@ -9335,6 +9337,7 @@
       cursor = next;
     }
     rows.coverage.complete = rows.complete;
+    rows.titleChanges = titleChangeTracker.finish();
     return rows;
   }
 
@@ -9489,6 +9492,17 @@
             amount: Number(it?.payAmount) || 0,
             src: "history",
           };
+          const missionId = String(
+            it?.missionDonationId || it?.donationId || it?.id || "",
+          );
+          const relatedMissionId = String(
+            it?.relatedMissionDonationId ||
+              it?.targetMissionDonationId ||
+              it?.parentMissionDonationId ||
+              "",
+          );
+          if (missionId) d.missionId = missionId;
+          if (relatedMissionId) d.relatedMissionId = relatedMissionId;
           const videoType = String(it?.donationVideoType || "");
           if (videoType) d.videoType = videoType; // CHZZK_CLIP / YOUTUBE
           const url = String(it?.donationVideoUrl || "");
@@ -9746,6 +9760,83 @@
     return `${kind}|${d.amount ?? d.tier ?? ""}`;
   }
 
+  function missionIdsOf(d) {
+    if (!d || !String(d.type || "").toUpperCase().startsWith("MISSION")) {
+      return [];
+    }
+    return [d.missionId, d.relatedMissionId]
+      .map((value) => String(value || ""))
+      .filter(Boolean);
+  }
+
+  function missionDonationMatch(a, b) {
+    const aIds = missionIdsOf(a?.d);
+    const bIds = new Set(missionIdsOf(b?.d));
+    if (!aIds.length || !bIds.size) return false;
+    if (!aIds.some((id) => bIds.has(id))) return false;
+    return (
+      Number(a?.d?.amount) === Number(b?.d?.amount) &&
+      String(a?.d?.type || "").toUpperCase() ===
+        String(b?.d?.type || "").toUpperCase()
+    );
+  }
+
+  function mergeDonationHistoryRow(current, incoming) {
+    if (incoming?.d?.src !== "history" || current?.d?.src === "history") {
+      return { ...current, ...incoming };
+    }
+    if (current?.d?.src !== "mission") return { ...current, ...incoming };
+    return {
+      ...current,
+      ...incoming,
+      // 결제 내역의 시각은 미션 성공·실패 확정 시각일 수 있다. 요청 훅이
+      // 남긴 최초 후원 시각을 유지하고 확정 시각은 메타데이터로만 보관한다.
+      t: current.t,
+      m: incoming.m || current.m,
+      d: {
+        ...current.d,
+        ...incoming.d,
+        src: "mission",
+        settledAt: incoming.t,
+      },
+    };
+  }
+
+  function sameRecapStoredRow(a, b) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object") {
+      return false;
+    }
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => {
+      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+      if (key !== "d") return a[key] === b[key];
+      const aDonation = a.d;
+      const bDonation = b.d;
+      if (aDonation === bDonation) return true;
+      if (
+        !aDonation ||
+        !bDonation ||
+        typeof aDonation !== "object" ||
+        typeof bDonation !== "object"
+      ) {
+        return false;
+      }
+      const aDonationKeys = Object.keys(aDonation);
+      const bDonationKeys = Object.keys(bDonation);
+      return (
+        aDonationKeys.length === bDonationKeys.length &&
+        aDonationKeys.every(
+          (donationKey) =>
+            Object.prototype.hasOwnProperty.call(bDonation, donationKey) &&
+            aDonation[donationKey] === bDonation[donationKey],
+        )
+      );
+    });
+  }
+
   function recapDedupeKey(e) {
     const d = e?.d;
     if (!d) return `${e.t}|${e.m}`;
@@ -9761,15 +9852,95 @@
     return `${minute}|${kind}|${d.amount ?? d.tier ?? ""}`;
   }
 
+  // 월말을 넘어 확정된 미션은 대기 행과 결제 내역 행의 저장 월이 다르다. ID가
+  // 명확히 같은 행만 기존 월 청크에서 먼저 갱신하고, 판정할 수 없는 행은 원래
+  // 병합 경로에 그대로 넘긴다.
+  async function mergeSettledMissionsAcrossMonths(
+    accountId,
+    channelId,
+    rows,
+  ) {
+    const candidates = rows.filter(
+      (row) => row?.d?.src === "history" && missionIdsOf(row.d).length,
+    );
+    if (!candidates.length) return { rows, changed: false };
+    try {
+      const catalogKey = `${CATALOG_PREFIX}${accountId}`;
+      const catalog = normalizeRecapCatalog(
+        (await chrome.storage.local.get(catalogKey))?.[catalogKey],
+      );
+      const months = catalog?.[channelId] || [];
+      if (!months.length) return { rows, changed: false };
+      const matched = new Set();
+      let anyChanged = false;
+      for (const month of months) {
+        const key = `${STORE_PREFIX}${accountId}:${channelId}:${month}`;
+        const mergeState = await STORE_API.readForMerge(
+          chrome.storage.local,
+          key,
+          [],
+        );
+        const items = mergeState.items;
+        let changed = false;
+        for (const row of candidates) {
+          if (matched.has(row)) continue;
+          const index = items.findIndex((item) =>
+            missionDonationMatch(item, row),
+          );
+          if (index < 0) continue;
+          const next = mergeDonationHistoryRow(items[index], row);
+          if (!sameRecapStoredRow(items[index], next)) {
+            items[index] = next;
+            changed = true;
+            anyChanged = true;
+          }
+          matched.add(row);
+        }
+        if (changed) {
+          await STORE_API.writeMerged(
+            chrome.storage.local,
+            mergeState,
+            items.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0)),
+            STORE_CHUNK_MAX,
+          );
+        }
+        if (matched.size === candidates.length) break;
+      }
+      return {
+        rows: matched.size ? rows.filter((row) => !matched.has(row)) : rows,
+        changed: anyChanged,
+      };
+    } catch {
+      return { rows, changed: false };
+    }
+  }
+
+  function mergeIntoStoreResult(added, changed, reportChanges) {
+    return reportChanges ? { added, changed } : added;
+  }
+
   // content.js 와 같은 형식으로 월별 청크에 합친다. 다시보기 행은 메시지 ID 또는
   // 영상+재생 위치+본문을 함께 사용해 절대 시각이 흔들려도 중복 저장하지 않는다.
   async function mergeIntoStore(
     accountId,
     channelId,
     rows,
-    { completeVideoNo = "" } = {},
+    { completeVideoNo = "", reportChanges = false } = {},
   ) {
-    if (!rows.length) return 0;
+    if (!rows.length) return mergeIntoStoreResult(0, false, reportChanges);
+    let changed = false;
+    if (!completeVideoNo) {
+      const settled = await mergeSettledMissionsAcrossMonths(
+        accountId,
+        channelId,
+        rows,
+      );
+      rows = settled.rows;
+      changed = settled.changed;
+      if (!rows.length) {
+        return mergeIntoStoreResult(0, changed, reportChanges);
+      }
+    }
     const byMonth = new Map();
     for (const r of rows) {
       const k = monthKey(r.t);
@@ -9792,6 +9963,7 @@
       );
       if (compacted.changed) {
         items.splice(0, items.length, ...compacted.items);
+        changed = true;
       }
       const initialItemCount = items.length;
       if (completeVideoNo) {
@@ -9805,6 +9977,7 @@
           (a, b) => (Number(a.t) || 0) - (Number(b.t) || 0),
         );
         added += reconciled.added;
+        changed ||= reconciled.changed;
         await STORE_API.writeMerged(
           chrome.storage.local,
           mergeState,
@@ -9872,7 +10045,10 @@
             if (!next.i && r.i) next.i = r.i;
             if (!next.d && r.d) next.d = r.d;
           }
-          items[vodAt] = next;
+          if (!sameRecapStoredRow(current, next)) {
+            items[vodAt] = next;
+            changed = true;
+          }
           const nextIdentity = STORE_API.vodIdentityKey(next);
           const nextFallback = STORE_API.vodFallbackKey(
             next,
@@ -9881,6 +10057,19 @@
           if (nextIdentity) vodIdentities.set(nextIdentity, vodAt);
           if (nextFallback && !vodFallbacks.has(nextFallback)) {
             vodFallbacks.set(nextFallback, vodAt);
+          }
+          continue;
+        }
+        // 미션은 건 시각과 성공·실패 확정 시각이 멀리 떨어질 수 있으므로 분 단위
+        // 슬롯보다 응답/결제 내역의 미션 ID를 먼저 맞춘다.
+        const missionAt = items.findIndex((item) =>
+          missionDonationMatch(item, r),
+        );
+        if (missionAt >= 0) {
+          const next = mergeDonationHistoryRow(items[missionAt], r);
+          if (!sameRecapStoredRow(items[missionAt], next)) {
+            items[missionAt] = next;
+            changed = true;
           }
           continue;
         }
@@ -9911,17 +10100,22 @@
           const cur = items[at];
           // 결제 내역이 더 정확하다(익명·본문·영상 정보) → 그것으로 교체.
           if (r.d?.src === "history" && cur.d?.src !== "history") {
-            items[at] = { ...cur, ...r };
+            items[at] = mergeDonationHistoryRow(cur, r);
+            changed = true;
           } else if (r.n && r.v !== undefined) {
             // 결제 내역이 먼저 들어온 경우에도 다시보기 번호와 재생 위치는
             // 보강한다. 예전에는 여기서 바로 continue 해 익명 내역이 다시보기
             // 패널에 영원히 나타나지 않았다.
-            items[at] = {
+            const next = {
               ...cur,
               v: cur.v === undefined ? r.v : cur.v,
               n: cur.n || r.n,
               ...(cur.i || r.i ? { i: cur.i || r.i } : {}),
             };
+            if (!sameRecapStoredRow(cur, next)) {
+              items[at] = next;
+              changed = true;
+            }
           }
           continue;
         }
@@ -9958,7 +10152,10 @@
             next.i = r.i;
             enriched = true;
           }
-          if (enriched) items[at] = next;
+          if (enriched) {
+            items[at] = next;
+            changed = true;
+          }
           continue;
         }
         index.set(dedupe, items.length);
@@ -9967,11 +10164,13 @@
           donationSlots.get(slot).push(items.length);
         }
         items.push(r);
+        changed = true;
       }
       const finalCompacted = STORE_API.compactVodRows(
         items,
         recapDonationStorageKey,
       );
+      changed ||= finalCompacted.changed;
       const finalItems = finalCompacted.items.sort(
         (a, b) => (Number(a.t) || 0) - (Number(b.t) || 0),
       );
@@ -9987,7 +10186,7 @@
     if (catalogMonths.length) {
       await registerRecapCatalog(accountId, channelId, catalogMonths);
     }
-    return added;
+    return mergeIntoStoreResult(added, changed, reportChanges);
   }
 
   // 모은 이모티콘 URL 을 계정 사전에 합친다(content.js 와 같은 키).
@@ -10111,18 +10310,21 @@
     }
   }
 
-  // 취소·거절이 확인된 대기 미션 기록을 지운다. 지운 건수를 돌려준다.
+  // 취소·거절이 확인된 대기 미션 기록을 지우고 건수와 변경 채널을 돌려준다.
   // ⚠ 지우는 대상은 아주 좁다. (1) 훅이 남긴 대기 기록(src:"mission")이고
   //   (2) 아직 확정분과 합쳐지지 않았으며 (3) 대기 목록에서 '취소·거절'로
   //   명시된 id 여야 한다. 하나라도 어긋나면 남긴다.
   async function dropRejectedMissions(accountId, channelIds, statuses) {
-    if (!statuses || !statuses.dead.size) return 0;
+    if (!statuses || !statuses.dead.size) {
+      return { removed: 0, channelIds: new Set() };
+    }
     const catalogKey = `${CATALOG_PREFIX}${accountId}`;
     const catalog = normalizeRecapCatalog(
       (await chrome.storage.local.get(catalogKey))?.[catalogKey],
     );
-    if (!catalog) return 0;
+    if (!catalog) return { removed: 0, channelIds: new Set() };
     let removed = 0;
+    const changedChannels = new Set();
     for (const channelId of channelIds) {
       for (const month of catalog[channelId] || []) {
         const key = `${STORE_PREFIX}${accountId}:${channelId}:${month}`;
@@ -10140,6 +10342,7 @@
         });
         if (kept.length === items.length) continue;
         removed += items.length - kept.length;
+        changedChannels.add(channelId);
         await STORE_API.writeMerged(
           chrome.storage.local,
           mergeState,
@@ -10148,7 +10351,7 @@
         );
       }
     }
-    return removed;
+    return { removed, channelIds: changedChannels };
   }
 
   async function bumpHistoryRevisions(accountId, channelIds) {
@@ -10728,6 +10931,14 @@
           accountId,
           channelId,
         );
+        let storedVodTitles = {};
+        if (!newOnly) {
+          try {
+            storedVodTitles = await chrome.storage.local.get(
+              videos.map((no) => STORE_API.vodTitleChangeKey(no)),
+            );
+          } catch {}
+        }
         // ⚠ 한 영상 '안'의 페이징은 커서를 받아야 다음을 부를 수 있어 순차다.
         //   하지만 영상끼리는 독립이라 동시에 훑을 수 있다 → 작업자 풀로 돌린다.
         //   평소 두 편, 재생 탭이 있으면 한 편만 처리해 플레이어 요청과 경쟁을
@@ -10735,6 +10946,8 @@
         const pending = [...new Set(videos)].filter((no) => {
           const value = String(no);
           if (newOnly) return !imported.has(value);
+          const titleKey = STORE_API.vodTitleChangeKey(value);
+          if (storedVodTitles?.[titleKey]?.complete !== true) return true;
           if (backfillStats) {
             return !normalizeVodChatStat(storedVodStats[value]);
           }
@@ -10848,6 +11061,15 @@
                   videoNo,
                   rows.coverage,
                 );
+                try {
+                  await STORE_API.saveVodTitleChanges(
+                    chrome.storage.local,
+                    videoNo,
+                    rows.titleChanges,
+                  );
+                } catch {
+                  // 제목 메타데이터 저장 실패가 내 채팅 가져오기까지 막지는 않는다.
+                }
               }
               return added;
             });
@@ -10975,6 +11197,8 @@
     let added = 0;
     let skipped = 0;
     let failedSources = 0;
+    // 다시보기 완료 캐시는 이 집합의 revision이 바뀔 때만 무효화한다. API가 매번
+    // 반환하는 기존 결제 내역이 아니라 로컬 저장 내용이 실제 달라진 채널만 넣는다.
     const touchedChannels = new Set();
     const startedAt = Date.now();
     // 팔로잉만 가져오기. ⚠ 팔로잉 목록을 못 받았으면 거르지 않는다 — 빈 목록으로
@@ -11018,8 +11242,11 @@
           if (cancelRequested) break;
           checked += rows.length;
           if (!keep(channelId)) continue;
-          added += await mergeIntoStore(accountId, channelId, rows);
-          if (rows.length) touchedChannels.add(channelId);
+          const merged = await mergeIntoStore(accountId, channelId, rows, {
+            reportChanges: true,
+          });
+          added += merged.added;
+          if (merged.changed) touchedChannels.add(channelId);
         }
       }
       // 2) 후원 — API가 제공하는 2023년 1월부터 현재 월까지 모두 확인한다.
@@ -11066,8 +11293,11 @@
           if (cancelRequested) break;
           checked += rows.length;
           if (!keep(channelId)) continue;
-          added += await mergeIntoStore(accountId, channelId, rows);
-          if (rows.length) touchedChannels.add(channelId);
+          const merged = await mergeIntoStore(accountId, channelId, rows, {
+            reportChanges: true,
+          });
+          added += merged.added;
+          if (merged.changed) touchedChannels.add(channelId);
         }
         if (failedMonthRun >= 3) break;
       }
@@ -11087,11 +11317,10 @@
             Object.keys(catalog || {}),
             statuses,
           );
-          // 지운 채널도 revision 을 올려 다시보기 캐시가 갱신되게 한다.
-          if (dropped) {
-            for (const id of Object.keys(catalog || {})) {
-              touchedChannels.add(id);
-            }
+          // 실제로 미션 행을 지운 채널만 다시보기 연결을 다시 확인한다. 예전에는
+          // 삭제가 하나라도 있으면 전체 카탈로그를 무효화해 모든 채널을 재수집했다.
+          if (dropped.removed) {
+            for (const id of dropped.channelIds) touchedChannels.add(id);
           }
         }
       } catch {}

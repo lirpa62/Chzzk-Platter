@@ -5598,12 +5598,27 @@
   }
 
   // 파일명에 못 쓰는 문자 정리 + 길이 제한.
+  // ⚠ 크롬 chrome.downloads 는 파일명이 조금만 어긋나도 'Invalid filename' 으로
+  //   다운로드를 시작조차 하지 않는다(제보: 특정 방송에서만 저장 실패). 금지문자
+  //   치환만으로는 부족해서 아래까지 함께 막는다.
+  //     · 제어문자(방송 제목에 섞여 오는 경우가 있다)
+  //     · 앞뒤 점 — ".." 로 시작하면 상위 경로로 해석된다
+  //     · 치환 결과가 비거나 점만 남는 경우
   function sanitizeScreenshotName(name) {
-    return String(name || "chzzk")
+    const cleaned = String(name || "chzzk")
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]/g, "")
       .replace(/[\\/:*?"<>|]/g, "_")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 120);
+      .replace(/\.{2,}/g, ".") // 연속된 점은 하나로(".." 상위 경로 해석 방지)
+      .replace(/^\.+/, "") // 앞의 점 제거(숨김파일)
+      .replace(/\.+$/, "") // 뒤의 점 제거(윈도우가 거부)
+      .trim()
+      .slice(0, 120)
+      .trim()
+      .replace(/\.+$/, ""); // 잘린 뒤 다시 점으로 끝날 수 있다
+    return cleaned || "chzzk";
   }
 
   // document.title(치지직: "제목 - 채널명" 등)에서 접미사를 걷어내 기본 파일명으로 쓴다.
@@ -5625,7 +5640,12 @@
     const cb = screenshotSaveCallbacks.get(d.reqId);
     if (cb) {
       screenshotSaveCallbacks.delete(d.reqId);
-      cb({ ok: d.ok === true, saved: d.saved === true });
+      cb({
+        ok: d.ok === true,
+        saved: d.saved === true,
+        reason: String(d.reason || ""),
+        detail: String(d.detail || ""),
+      });
     }
   });
 
@@ -5681,6 +5701,33 @@
     }
   }
 
+  // 실패 사유 → 사용자가 뭘 해야 할지 알 수 있는 짧은 말. 모르는 코드는 그대로 노출해
+  // 제보 때 단서가 되게 한다(제보: '저장하지 못했어요'만 뜨고 원인을 알 수 없었음).
+  function screenshotFailReason(result) {
+    const detail = String(result?.detail || "");
+    const reason = String(result?.reason || "");
+    // 크롬이 파일명을 거부하는 경우가 가장 흔하다(방송 제목의 특수문자).
+    if (/invalid.*filename|filename.*invalid/i.test(detail)) {
+      return "파일 이름 문제";
+    }
+    if (result?.timeout) return "응답 없음";
+    switch (reason) {
+      case "invalid":
+        return "이미지 형식 문제";
+      case "start-failed":
+        return detail ? `저장 시작 실패 · ${detail}` : "저장 시작 실패";
+      case "interrupted":
+        // FILE_ACCESS_DENIED / FILE_NO_SPACE 같은 크롬 코드를 그대로 보여 준다.
+        return `중단됨 · ${detail}`;
+      case "disconnected":
+        return "확장 연결 끊김 · 새로고침 필요";
+      case "exception":
+        return "내부 오류";
+      default:
+        return detail || reason || "";
+    }
+  }
+
   // 저장 결과에 따라 정확한 토스트. saved=true만 '저장했어요', 취소/실패는 그에 맞게.
   function onScreenshotSaved(result) {
     if (result.saved) {
@@ -5688,7 +5735,11 @@
     } else if (result.ok) {
       showScreenshotToast(false, "저장을 취소했어요"); // 다운로드 대화상자에서 취소 등
     } else {
-      showScreenshotToast(false, "저장하지 못했어요");
+      const why = screenshotFailReason(result);
+      showScreenshotToast(
+        false,
+        why ? `저장하지 못했어요 (${why})` : "저장하지 못했어요",
+      );
     }
   }
 
@@ -8808,6 +8859,7 @@
   const CHAT_STREAM_SELECTOR =
     "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container']";
   let tickTimer = 0;
+  let tickIdleHandle = 0;
   function isChatStreamOnlyMutation(mutation) {
     const target =
       mutation.target instanceof Element
@@ -8837,34 +8889,26 @@
     );
   }
   function scheduleTick(mutations) {
-    // ⚠ 채팅 전용 변이는 건너뛰어 부하를 줄이지만, 그러면 '채팅 변이가 tick 을 계속
-    // 깨워 준다'는 전제가 깨진다. tick 은 ensureEnabledGraph 로 플레이어 재렌더·PIP
-    // 전환 후 믹서를 다시 붙이는 역할도 하므로, 효과가 켜져 있는 동안에는 건너뛰지
-    // 않는다(안 그러면 조용한 방송에서 믹서가 풀린 채로 남는다).
-    // ⚠ syncCatchUp 은 아래쪽에서 let 으로 선언돼, 옵저버가 모듈 본문 완료 전에
-    // 발화하면 TDZ 오류가 난다(typeof 로도 못 막는다). try 로 감싸 안전하게 읽는다.
-    let effectActive = state.enabled === true;
-    if (!effectActive) {
-      try {
-        effectActive = syncCatchUp != null;
-      } catch {
-        effectActive = false;
-      }
-    }
-    if (
-      !effectActive &&
-      mutations?.length &&
-      mutations.every(isChatStreamOnlyMutation)
-    ) {
+    // 플레이어 재렌더는 플레이어 쪽 DOM 변이로 별도 감지된다. 믹서가 켜져 있어도
+    // 채팅 행 변화만으로 플레이어 탐색과 그래프 점검을 반복하지 않는다.
+    if (mutations?.length && mutations.every(isChatStreamOnlyMutation)) {
       return;
     }
-    if (tickTimer) return;
+    if (tickTimer || tickIdleHandle) return;
     tickTimer = window.setTimeout(() => {
       tickTimer = 0;
-      // 백그라운드 탭에선 UI 보정이 무의미하다(버튼은 어차피 안 보임) — tick을 건너뛴다.
-      // 탭이 다시 보이면 다음 변이(채팅 등으로 상시 발생)가 곧바로 tick을 다시 돌린다.
+      // 백그라운드 탭에선 UI 보정이 무의미하다. 복귀 시 visibilitychange 경로가 현재
+      // 플레이어 상태를 한 번 전부 보정한다.
       if (document.hidden) return;
-      tick();
+      const run = () => {
+        tickIdleHandle = 0;
+        if (!document.hidden) tick();
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        tickIdleHandle = window.requestIdleCallback(run, { timeout: 500 });
+      } else {
+        run();
+      }
     }, 250);
   }
   const observer = new MutationObserver(scheduleTick);

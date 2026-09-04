@@ -3022,6 +3022,9 @@
   async function activeWatchInfo() {
     const now = Date.now();
     const out = [];
+    // 타이머가 일시정지된 채널은 session의 activeUntil이 잠시 남아 있더라도
+    // 실제 적립 중으로 표시하면 안 된다. 타이머를 읽은 뒤 최종 결과에서 뺀다.
+    const pausedTimerIds = new Set();
     // ⚠ 다른 계정의 추적·타이머까지 '적립 중'으로 띄우면 거짓말이 된다.
     //   (계정 도입 전 상태는 accountId 가 비어 있다 → 내 것으로 본다.)
     const me = await resolveAccountForFilter();
@@ -3054,17 +3057,23 @@
         : {};
       for (const [k, v] of Object.entries(loc || {})) {
         if (!k.startsWith("cheeseLogPowerHourTimer:")) continue;
-        // leftAt > 0 = 페이지를 떠나 일시정지된 상태. 남은 시간은 보존되지만
-        // 지금 도는 건 아니므로 배지에는 넣지 않는다.
-        if (Number(v?.leftAt) > 0) continue;
-        if (!(Number(v?.endsAt) > now)) continue;
-        if (!mine(v)) continue;
         const id = k.slice("cheeseLogPowerHourTimer:".length);
+        if (!mine(v)) continue;
+        // leftAt > 0 = 페이지를 떠나 일시정지된 상태. 남은 시간은 보존되지만
+        // 지금 도는 건 아니므로 타이머뿐 아니라 같은 채널의 잔여 active 상태도
+        // 배지에서 제외한다.
+        if (Number(v?.leftAt) > 0) {
+          pausedTimerIds.add(id);
+          continue;
+        }
+        if (!(Number(v?.endsAt) > now)) continue;
         if (out.some((x) => x.channelId === id)) continue;
         out.push({ channelId: id, kind: "timer", endsAt: Number(v.endsAt) });
       }
     } catch {}
-    return out.filter((x) => x.channelId);
+    return out.filter(
+      (x) => x.channelId && !pausedTimerIds.has(String(x.channelId)),
+    );
   }
 
   // 채널명은 내역·보유량에서 먼저 찾는다. 둘 다 없으면(처음 보는 채널) API 로

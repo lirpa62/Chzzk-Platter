@@ -48,6 +48,7 @@
   --cheese-platter-surface-neutral-weaker: #fff;
   --cheese-platter-surface-neutral-weakest: #f0f1f2;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+  --cheese-platter-surface-neutral-black-static-rgb: 0, 0, 0;
   --cheese-platter-surface-function-nickname-yellow: #fbf0d1;
 }
 
@@ -154,6 +155,7 @@ html.cheese-channel-live-profile-custom
   --cheese-platter-surface-neutral-weaker: #1c1d1f;
   --cheese-platter-surface-neutral-weakest: #0e0f10;
   --cheese-platter-surface-neutral-alpha-inverse-stronger-static: #000c;
+  --cheese-platter-surface-neutral-black-static-rgb: 0, 0, 0;
   --cheese-platter-surface-function-nickname-yellow: #473508;
 }
 
@@ -442,6 +444,61 @@ html.cheese-channel-live-profile-custom
 .cheese-category-video-load-more-button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.cheese-category-video-adult-thumbnail {
+  position: relative;
+}
+
+.cheese-category-video-adult-thumbnail::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(
+    var(
+      --sem-color-surface-neutral-black-static-rgb,
+      var(--cheese-platter-surface-neutral-black-static-rgb)
+    ),
+    0.2
+  ) !important;
+  pointer-events: none;
+}
+
+.cheese-category-video-adult {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--sem-color-content-neutral-primary-static, #fff);
+  text-align: center;
+  pointer-events: none;
+}
+
+.cheese-category-video-adult svg {
+  display: block;
+  width: 38px;
+  height: 38px;
+  flex: none;
+}
+
+.cheese-category-video-adult-label {
+  color: inherit;
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.cheese-category-video-adult-thumbnail > div[class*="_badge_"],
+.cheese-category-video-adult-thumbnail > span[class*="_time_"],
+.cheese-category-video-adult-thumbnail > .cheese-video-vault-archive {
+  z-index: 3;
 }
 
 .cheese-search-shell.has-progress-label {
@@ -1214,6 +1271,15 @@ html.cheese-channel-live-profile-custom
   cursor: pointer;
 }
 
+.cheese-search-date-picker:has([data-time-input])
+  .cheese-search-date-trigger {
+  min-width: 190px;
+}
+
+.cheese-search-date-trigger [data-date-label] {
+  white-space: nowrap;
+}
+
 .cheese-search-date-trigger:focus {
   box-shadow: rgba(0, 199, 60, 0.18) 0px 0px 0px 3px;
   border-color: var(
@@ -1502,6 +1568,219 @@ html.cheese-channel-live-profile-custom
   background: #00c73c;
   color: #fff;
   font-weight: 700;
+}
+
+.cheese-search-calendar-time {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+}
+
+.cheese-search-time-picker {
+  display: inline-grid;
+  grid-template-columns: 60px 48px auto 48px auto;
+  align-items: center;
+  justify-content: end;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 2px 7px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+  min-width: 0;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cheese-search-time-picker:focus-within {
+  border-color: #00c73c;
+  box-shadow: 0 0 0 3px rgba(0, 199, 60, 0.18);
+}
+
+.cheese-search-time-segment {
+  display: grid;
+  grid-template-columns: 30px 16px;
+  align-items: stretch;
+  height: 32px;
+  border-radius: 5px;
+  transition: background-color 0.15s ease;
+}
+
+.cheese-search-time-segment:hover,
+.cheese-search-time-segment:focus-within {
+  background: var(
+    --sem-color-surface-neutral-subtle,
+    var(--cheese-platter-surface-neutral-subtle)
+  );
+}
+
+.cheese-search-time-picker input[data-time-part-input] {
+  box-sizing: border-box;
+  width: 30px;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  appearance: textfield;
+}
+
+.cheese-search-time-unit {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cheese-search-time-period {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: 60px;
+  height: 28px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(
+    --sem-color-surface-neutral-subtle,
+    var(--cheese-platter-surface-neutral-subtle)
+  );
+}
+
+.cheese-search-time-period button {
+  min-width: 0;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 4px;
+  outline: 0;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cheese-search-time-period button.is-selected {
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+}
+
+.cheese-search-time-period button:hover:not(:disabled) {
+  color: var(
+    --sem-color-content-neutral-warm-strong,
+    var(--cheese-platter-content-neutral-warm-strong)
+  );
+}
+
+.cheese-search-time-period button:focus-visible {
+  box-shadow: inset 0 0 0 1px #00c73c;
+}
+
+.cheese-search-time-spin-controls {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  width: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.cheese-search-time-segment:hover .cheese-search-time-spin-controls,
+.cheese-search-time-segment:focus-within .cheese-search-time-spin-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cheese-search-time-spin-controls button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  outline: 0;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  cursor: pointer;
+}
+
+.cheese-search-time-spin-controls button:hover:not(:disabled) {
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  color: #00c73c;
+}
+
+.cheese-search-time-picker.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.cheese-search-time-picker.is-disabled
+  .cheese-search-time-segment:hover {
+  background: transparent;
+}
+
+.cheese-search-time-picker.is-disabled
+  .cheese-search-time-period button {
+  cursor: not-allowed;
+}
+
+.cheese-search-time-picker button:disabled,
+.cheese-search-time-picker input[data-time-part-input]:disabled {
+  cursor: not-allowed;
 }
 
 .cheese-search-calendar-actions {
@@ -3213,10 +3492,15 @@ html.cheese-vod-portrait
   }
 }
 
-/* seek preview 방송 당시 추정 시각 병기(시간 아래 줄, '날짜 / 시각' 두 줄).
+/* seek preview 방송 당시 추정 시각 병기(시간 아래 줄, 날짜/시각과 변경 제목).
    ⚠ 예전엔 한 줄(nowrap)이라 긴 텍스트가 __time 폭을 크게 넓혀(58→147px) 세로 방송·
    재생바 끝에서 preview 가 짤렸다. 두 줄로 나눠 폭을 줄이고, 우리 라벨 폭이 __time(preview)
    폭에 영향을 주지 않도록 width:0 + min-width:100% 로 '부모 폭에 맞추되 넓히진 않게' 한다. */
+.pzp-pc__seeking-preview:has(.cheese-search-seek-realtime)
+  .pzp-seeking-preview__description {
+  overflow: visible;
+}
+
 .cheese-search-seek-realtime {
   /* ⚠ 폭 억제: 콘텐츠로 부모(preview)를 넓히지 않도록 0 폭 기준 + 부모 폭 100% 채움. */
   display: flex;
@@ -3245,6 +3529,25 @@ html.cheese-vod-portrait
 .cheese-seek-realtime-date,
 .cheese-seek-realtime-time {
   white-space: nowrap;
+}
+.cheese-seek-realtime-title {
+  display: -webkit-box;
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  margin-top: 3px;
+  padding-top: 4px;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 /* 세로 방송: preview 가 좁아 실제시각 텍스트가 툴팁 밖으로 나갔다 → 더 작고 촘촘하게. */
 html.cheese-vod-portrait .cheese-search-seek-realtime {
@@ -3670,6 +3973,78 @@ html.cheese-cf-on
 
 .cheese-cf-group-actions button[aria-pressed="true"] {
   color: var(--cheese-cf-group-color);
+}
+
+.cheese-cf-group.is-compact-header .cheese-cf-group-header {
+  grid-template-columns: 22px minmax(0, 1fr) 26px;
+}
+
+.cheese-cf-group-actions-compact {
+  position: relative;
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: stretch;
+  padding: 0 2px 0 0;
+}
+
+.cheese-cf-group-actions-compact > .cheese-cf-group-actions-toggle {
+  width: 24px;
+  height: 28px;
+}
+
+.cheese-cf-group-actions-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 2px;
+  z-index: 12;
+  display: grid;
+  box-sizing: border-box;
+  width: 176px;
+  padding: 5px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-base,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 7px;
+  background: var(
+    --sem-color-background-neutral-weak,
+    var(--cheese-platter-background-neutral-weak, #202226)
+  );
+  box-shadow: 0 8px 22px rgb(0 0 0 / 28%);
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary, #f2f4f5)
+  );
+}
+
+.cheese-cf-group-actions-menu[hidden] {
+  display: none;
+}
+
+.cheese-cf-group-actions .cheese-cf-group-actions-menu button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.cheese-cf-group-actions-menu button span {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-cf-group:has(.cheese-cf-group-actions-menu:not([hidden])) {
+  position: relative;
+  z-index: 11;
 }
 
 .cheese-cf-group-delete-popover {
@@ -5571,6 +5946,27 @@ html.cheese-cf-favstar
 .cheese-live-tag-filter-hidden,
 [data-cheese-live-tag-filter-hidden="1"] {
   display: none !important;
+}
+
+/* 마지막 카드가 제외 대상이면 치지직의 무한 스크롤 관찰 지점까지 사라진다.
+   해당 카드에만 레이아웃을 차지하지 않는 1px 관찰 지점을 남긴다. */
+.cheese-live-tag-filter-hidden.cheese-live-tag-filter-pagination-anchor,
+[data-cheese-live-tag-filter-hidden="1"].cheese-live-tag-filter-pagination-anchor {
+  position: absolute !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 1px !important;
+  min-width: 0 !important;
+  max-width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  max-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .cheese-live-viewer-count-inline [class*="_count_badge_"],
@@ -7674,15 +8070,19 @@ html.cheese-chat-nickname-message-split
 }
 
 /* 채팅 작성 기기(PC/AOS/IOS) 아이콘. 시간 표시와 같은 톤의 회색으로 두어 눈에
-   띄지 않게 한다(강조하면 조롱 소재가 되기 쉬움). 크기는 em 기준이라 채팅 폰트
-   배율(cheeseChatFontScale)을 그대로 따라간다. */
+   띄지 않게 한다(강조하면 조롱 소재가 되기 쉬움). 삽입 위치의 글꼴을 상속하면 일부
+   채팅 DOM에서 커스텀 이미지가 크게 튈 수 있어, 13px 기준 박스에 채팅 배율만 적용한다. */
 .cheese-chat-os {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  width: calc(12.88px * var(--cheese-chat-font-scale, 1));
+  height: calc(12.88px * var(--cheese-chat-font-scale, 1));
   margin-right: 4px;
-  flex-shrink: 0;
+  flex: 0 0 calc(12.88px * var(--cheese-chat-font-scale, 1));
   vertical-align: -0.12em;
+  overflow: hidden;
   color: var(
     --sem-color-content-neutral-cool-base,
     var(--cheese-platter-content-neutral-cool-base)
@@ -7692,8 +8092,11 @@ html.cheese-chat-nickname-message-split
 
 .cheese-chat-os :is(svg, img) {
   display: block;
-  width: 0.92em;
-  height: 0.92em;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  flex: none;
 }
 
 .cheese-chat-os img {
@@ -7704,8 +8107,8 @@ html.cheese-chat-nickname-message-split
    같은 크기로 두면 폰·사과가 눈에 띄게 커 보인다. 세로가 꽉 찬 둘만 살짝 줄인다. */
 .cheese-chat-os[data-os="AOS"] svg,
 .cheese-chat-os[data-os="IOS"] svg {
-  width: 0.82em;
-  height: 0.82em;
+  width: 89% !important;
+  height: 89% !important;
 }
 
 /* 채팅창 접힘 상태 복원 마스킹: 저장된 상태가 '접힘'인데 치지직이 로드 시 자체
@@ -10611,6 +11014,36 @@ html.cheese-vod-chapter-hide
   border: 0;
 }
 
+.cheese-popup-player__preparing {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgb(14 15 16 / 96%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: 0;
+}
+
+.cheese-popup-player__preparing-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  animation: cheese-popup-player-preparing-spin 0.8s linear infinite;
+}
+
+@keyframes cheese-popup-player-preparing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* 채널 링크를 팝업 플레이어로 옮기는 동안 브라우저 기본 링크·이미지 dragstart를
    만들지 않는다. CrxMouse 등의 Super Drag와 같은 입력을 공유하지 않기 위한 처리다. */
 .cheese-popup-player-drag-source,
@@ -10682,6 +11115,7 @@ html.cheese-popup-player-channel-dragging * {
 /* 상단 드래그 바 — 평소엔 거의 안 보이다가 호버 시 드러난다. */
 .cheese-popup-player__bar {
   position: absolute;
+  z-index: 3;
   top: 0;
   left: 0;
   right: 0;
@@ -12468,6 +12902,775 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
   height: 17px;
 }
 
+/* ── 다시보기 보관함(/videos, /following?tab=VIDEO, 카테고리 동영상) ───── */
+.cheese-video-vault-active
+  > :not(.cheese-video-vault-host):not(.cheese-video-vault-panel) {
+  display: none !important;
+}
+
+.cheese-video-vault-category-mount {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 30px 0;
+}
+
+.cheese-video-vault-category-mount #cheese-video-vault-btn {
+  margin-left: 0;
+}
+
+.cheese-video-vault-category-action #cheese-video-vault-btn {
+  display: flex;
+  margin: 8px 6px 0 0;
+  min-width: 89px;
+}
+
+.cheese-video-vault-page-button {
+  flex: 0 0 auto;
+  line-height: 0;
+  background: var(--cheese-platter-border-neutral-strong-static) !important;
+  color: var(--cheese-platter-content-neutral-primary-static) !important;
+}
+
+.cheese-video-vault-page-button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.cheese-video-vault-page-button:hover,
+.cheese-video-vault-page-button.is-on {
+  color: #ffcc33 !important;
+}
+
+#cheese-video-vault-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 84px;
+  height: 30px;
+  margin-left: 10px;
+  padding: 0 11px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 15px;
+  background: transparent;
+  color: inherit;
+  font-family: var(--cheese-video-vault-font-family, inherit);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#cheese-video-vault-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+#cheese-video-vault-btn:hover,
+#cheese-video-vault-btn[aria-expanded="true"] {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.theme_dark #cheese-video-vault-btn:hover,
+.theme_dark #cheese-video-vault-btn[aria-expanded="true"] {
+  color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-video-vault-panel {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 18px 0 4px;
+  font-family: var(--cheese-video-vault-font-family, inherit);
+}
+
+.cheese-video-vault-panel-category {
+  margin: 0 auto;
+  padding: 28px 30px 50px;
+}
+
+.cheese-video-vault-head {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  margin-bottom: 12px;
+}
+
+.cheese-video-vault-head > strong {
+  min-width: 0;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.cheese-video-vault-head > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cheese-video-vault-head > button:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.cheese-video-vault-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.cheese-video-vault-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 7px;
+  min-height: 36px;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cheese-video-vault-group-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cheese-video-vault-group-toggle i {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(127, 127, 127, 0.28);
+  transition: background 0.14s ease;
+}
+
+.cheese-video-vault-group-toggle i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.14s ease;
+}
+
+.cheese-video-vault-group-toggle input:checked + i {
+  background: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-video-vault-group-toggle input:checked + i::after {
+  transform: translateX(16px);
+}
+
+.cheese-video-vault-group-toggle input:focus-visible + i {
+  outline: 2px solid var(--cheese-platter-border-brand-base, #32bb81);
+  outline-offset: 2px;
+}
+
+.cheese-video-vault-toolbar input[type="search"],
+.cheese-video-vault-toolbar button {
+  box-sizing: border-box;
+  height: 36px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: var(--cheese-platter-background-neutral-base, transparent);
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.cheese-video-vault-toolbar input[type="search"] {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 480px;
+  padding: 0 11px;
+}
+
+.cheese-video-vault-toolbar input[type="search"]:focus,
+.cheese-video-vault-toolbar button:focus-visible {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+}
+
+.cheese-video-vault-sort {
+  position: relative;
+  flex: none;
+}
+
+.cheese-video-vault-sort > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 126px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.cheese-video-vault-sort-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  right: 0;
+  box-sizing: border-box;
+  min-width: 150px;
+  padding: 5px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: var(--cheese-platter-background-neutral-base, #fff);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+}
+
+.theme_dark .cheese-video-vault-sort-menu {
+  background: var(--cheese-platter-background-neutral-base, #1c1d1f);
+}
+
+.cheese-video-vault-sort-menu[hidden] {
+  display: none;
+}
+
+.cheese-video-vault-sort-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cheese-video-vault-sort-menu button:hover,
+.cheese-video-vault-sort-menu button[aria-selected="true"] {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.cheese-video-vault-summary {
+  min-height: 18px;
+  margin: 0 0 12px;
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-video-vault-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cheese-video-vault-item {
+  position: relative;
+  min-width: 0;
+}
+
+.cheese-video-vault-grid > .cheese-video-vault-date-group,
+.cheese-video-vault-grid > .cheese-video-vault-group {
+  grid-column: 1 / -1;
+}
+
+.cheese-video-vault-date-group > h3,
+.cheese-video-vault-group summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  margin: 2px 0 9px;
+  color: inherit;
+  font-family: var(--cheese-video-vault-font-family, inherit);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cheese-video-vault-date-group > h3 small,
+.cheese-video-vault-group summary small {
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-video-vault-group details {
+  min-width: 0;
+}
+
+.cheese-video-vault-group summary {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 5px;
+  border-radius: 4px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.cheese-video-vault-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.cheese-video-vault-group summary:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.cheese-video-vault-group summary > span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-video-vault-group summary > .cheese-clip-vault-group-chevron {
+  flex: none;
+  margin-left: auto;
+  transition: transform 0.14s ease;
+}
+
+.cheese-video-vault-group details:not([open]) .cheese-clip-vault-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.cheese-video-vault-group-grid {
+  margin-bottom: 10px;
+}
+
+.cheese-video-vault-link,
+.cheese-video-vault-thumb-link,
+.cheese-video-vault-title,
+.cheese-video-vault-profile,
+.cheese-video-vault-channel {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cheese-video-vault-thumb {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.cheese-video-vault-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cheese-video-vault-thumb.is-adult::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background-color: rgba(
+    var(
+      --sem-color-surface-neutral-black-static-rgb,
+      var(--cheese-platter-surface-neutral-black-static-rgb)
+    ),
+    0.2
+  );
+  pointer-events: none;
+}
+
+.cheese-video-vault-adult {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.cheese-video-vault-adult svg {
+  display: block;
+  width: 38px;
+  height: 38px;
+  flex: none;
+}
+
+.cheese-video-vault-adult-label {
+  color: inherit;
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.cheese-video-vault-thumb small {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  z-index: 3;
+}
+
+.cheese-video-vault-badges {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  left: 7px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 48px);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.cheese-video-vault-badges em,
+.cheese-video-vault-badges span {
+  overflow: hidden;
+  box-sizing: border-box;
+  height: 20px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.76);
+  font-style: normal;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-video-vault-badges em {
+  flex: none;
+  background: #5b47e8;
+}
+
+.cheese-video-vault-badges span {
+  min-width: 0;
+}
+
+.cheese-video-vault-watch-timeline {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
+.cheese-video-vault-watch-timeline > span {
+  display: block;
+  height: 100%;
+  background: var(--cheese-platter-background-brand-base, #00c73c);
+}
+
+.cheese-video-vault-card-body {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 9px;
+  min-width: 0;
+  margin-top: 9px;
+}
+
+.cheese-video-vault-profile {
+  overflow: hidden;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.cheese-video-vault-profile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cheese-video-vault-card-copy {
+  min-width: 0;
+}
+
+.cheese-video-vault-title > strong {
+  overflow: hidden;
+  display: -webkit-box;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cheese-video-vault-channel,
+.cheese-video-vault-info,
+.cheese-video-vault-saved {
+  overflow: hidden;
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-video-vault-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  color: inherit;
+  font-weight: 600;
+}
+
+.cheese-video-vault-channel > span:first-child {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-video-vault-official {
+  display: inline-block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+}
+
+.cheese-video-vault-info {
+  margin-top: 2px;
+}
+
+.cheese-video-vault-saved {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.cheese-video-vault-taxonomy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.cheese-video-vault-category,
+.cheese-video-vault-tag {
+  overflow: hidden;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 22px;
+  padding: 1px 7px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-video-vault-category {
+  border-color: transparent;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.cheese-video-vault-title:hover,
+.cheese-video-vault-channel:hover,
+.cheese-video-vault-category:hover,
+.cheese-video-vault-tag:hover {
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.cheese-video-vault-del,
+.cheese-video-vault-archive {
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.14s ease,
+    transform 0.14s ease;
+}
+
+.cheese-video-vault-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: #ffcc33;
+}
+
+.cheese-video-vault-card-anchor {
+  position: relative;
+}
+
+.cheese-video-vault-archive {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+
+a[data-cheese-video-vault]:hover .cheese-video-vault-archive,
+.cheese-video-vault-archive:focus-visible,
+.cheese-video-vault-archive.is-on {
+  opacity: 1;
+}
+
+.cheese-video-vault-archive.is-on {
+  color: #ffcc33;
+}
+
+.cheese-video-vault-del:hover,
+.cheese-video-vault-archive:hover,
+.cheese-video-vault-del:focus-visible,
+.cheese-video-vault-archive:focus-visible {
+  background: rgba(0, 0, 0, 0.78);
+  transform: scale(1.08);
+}
+
+.cheese-video-vault-del svg,
+.cheese-video-vault-archive svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  pointer-events: none;
+}
+
+.cheese-video-vault-empty {
+  grid-column: 1 / -1;
+  padding: 72px 0;
+  color: var(--cheese-platter-border-neutral-strong-static, #697183);
+  font-size: 13px;
+  text-align: center;
+}
+
+.cheese-video-vault-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.cheese-video-vault-more button {
+  min-width: 160px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cheese-video-vault-more button:hover {
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+}
+
+.cheese-video-vault-more button[hidden] {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .cheese-video-vault-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 735px) {
+  #cheese-video-vault-btn {
+    min-width: 0;
+  }
+
+  #cheese-video-vault-btn span {
+    display: none;
+  }
+
+  .cheese-video-vault-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cheese-video-vault-toolbar input[type="search"],
+  .cheese-video-vault-sort,
+  .cheese-video-vault-sort > button {
+    width: 100%;
+    max-width: none;
+  }
+
+  .cheese-video-vault-sort-menu {
+    right: auto;
+    left: 0;
+    width: 100%;
+  }
+
+  .cheese-video-vault-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .cheese-video-vault-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ── 수신함 팝오버 폭 확장 ────────────────────────────────────────────────
    통나무파워 탭이 붙으면 탭이 하나 늘고 내역 항목도 길어져 치지직 기본 450px 로는
    좁다. 폭을 정하는 건 iframe 이 아니라 그 부모 레이어다(실측: div._layer_ = 450px,
@@ -13381,4 +14584,192 @@ img.cheese-recap-emoji {
 }
 .cheese-recap-donation.is-gift {
   background: #3e34af;
+}
+
+/* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ───────── */
+.cheese-chat-history-inline-parent {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.cheese-chat-history-native-list {
+  flex: 1 1 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.cheese-chat-history-launcher {
+  align-items: center;
+  background: var(--cheese-platter-surface-neutral-weaker, #fff);
+  border: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px var(--cheese-platter-shadow-strong, #0000001a);
+  color: var(--cheese-platter-content-neutral-cool-strong, #2e3033);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  height: 30px;
+  justify-content: center;
+  margin: 7px auto;
+  padding: 0 8px;
+  flex: 0 0 30px;
+  position: relative;
+  white-space: nowrap;
+  width: 104px;
+  z-index: 1;
+}
+
+.cheese-chat-history-launcher[hidden] {
+  display: none;
+}
+
+.cheese-chat-history-launcher:hover,
+.cheese-chat-history-launcher:focus-visible {
+  background: var(--cheese-platter-surface-neutral-weakest, #f0f1f2);
+  border-color: var(--cheese-platter-border-brand-base, #32bb81);
+  outline: none;
+}
+
+.cheese-chat-history-launcher b {
+  color: var(--cheese-platter-content-brand-base, #168f5c);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-chat-history-panel {
+  background: var(--cheese-platter-background-neutral-base, #fff);
+  border-bottom: 1px solid
+    var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-top: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  box-sizing: border-box;
+  color: var(--cheese-platter-content-neutral-primary, #0e0f10);
+  display: none;
+  flex: 0 1 46%;
+  flex-direction: column;
+  height: 46%;
+  max-height: 420px;
+  min-height: 190px;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.cheese-chat-history-panel.is-open {
+  display: flex;
+}
+
+.cheese-chat-history-panel.is-preparing {
+  visibility: hidden;
+}
+
+.cheese-chat-history-panel-head {
+  align-items: center;
+  border-bottom: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
+  display: flex;
+  flex: none;
+  height: 52px;
+  justify-content: space-between;
+  padding: 0 12px 0 15px;
+}
+
+.cheese-chat-history-panel-head > span {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.cheese-chat-history-panel-head strong {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.cheese-chat-history-panel-head small {
+  color: var(--cheese-platter-content-neutral-cool-weak, #6d6e70);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cheese-chat-history-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  width: 32px;
+}
+
+.cheese-chat-history-icon-button:hover,
+.cheese-chat-history-icon-button:focus-visible {
+  background: var(--cheese-platter-surface-interaction-lighten-hovered, #0000000d);
+  outline: none;
+}
+
+.cheese-chat-history-icon-button::after {
+  background: rgba(
+    var(--cheese-platter-surface-neutral-black-static-rgb, 0, 0, 0),
+    0.8
+  );
+  border-radius: 4px;
+  color: #fff;
+  content: attr(data-label);
+  font-size: 11px;
+  opacity: 0;
+  padding: 5px 7px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.cheese-chat-history-icon-button:hover::after,
+.cheese-chat-history-icon-button:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.cheese-chat-history-panel-notice {
+  background: var(--cheese-platter-surface-neutral-weakest, #f0f1f2);
+  color: var(--cheese-platter-content-neutral-cool-weak, #6d6e70);
+  flex: none;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 7px 14px;
+}
+
+.cheese-chat-history-panel-list {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 0 12px;
+}
+
+.cheese-chat-history-panel-row {
+  box-sizing: border-box;
+  flex: none !important;
+  max-width: 100%;
+  pointer-events: none;
+  width: 100% !important;
+}
+
+.cheese-chat-history-panel-row * {
+  max-width: 100%;
 }

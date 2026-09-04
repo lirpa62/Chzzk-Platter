@@ -5,6 +5,9 @@
 
   const DEFAULT_CHUNK_MAX = 5000;
   const PART_SUFFIX = ":part:";
+  const VOD_TITLE_CHANGE_PREFIX = "cheeseVodTitleChangesV1:";
+  const VOD_TITLE_CHANGE_MATCH_WINDOW_MS = 60 * 1000;
+  const VOD_TITLE_CHANGE_MAX = 500;
   const ACCOUNT_RE = /^[0-9a-f]{32}$/i;
   const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -350,6 +353,160 @@
     };
   }
 
+  function vodTitleChangeKey(videoNo) {
+    const value = String(videoNo || "");
+    return /^\d+$/.test(value) ? `${VOD_TITLE_CHANGE_PREFIX}${value}` : "";
+  }
+
+  function normalizeVodTitleText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300);
+  }
+
+  function normalizeVodTitleChanges(value) {
+    const source = Array.isArray(value)
+      ? value
+      : Array.isArray(value?.items)
+        ? value.items
+        : [];
+    const seen = new Set();
+    return source
+      .map((item) => {
+        const v = Math.max(0, Math.round(Number(item?.v)));
+        const t = Math.max(0, Math.round(Number(item?.t) || 0));
+        const title = normalizeVodTitleText(item?.title);
+        return Number.isFinite(v) && title ? { v, t, title } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.v - b.v || a.t - b.t)
+      .filter((item) => {
+        const key = `${item.v}|${item.title}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(-VOD_TITLE_CHANGE_MAX);
+  }
+
+  function parseVodChatProfile(message) {
+    const raw = message?.profile;
+    if (raw && typeof raw === "object") return raw;
+    if (typeof raw !== "string" || !raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isVodTitleChangeAuthor(message) {
+    const profile = parseVodChatProfile(message);
+    const role = String(
+      message?.userRoleCode ||
+        message?.userRole ||
+        profile?.userRoleCode ||
+        profile?.userRole ||
+        "",
+    ).toLowerCase();
+    return role.includes("streamer") || role.includes("manager");
+  }
+
+  function vodTitleChangeEntry(message, kind, title) {
+    const playerMessageTime = Number(message?.playerMessageTime);
+    if (!Number.isFinite(playerMessageTime) || playerMessageTime < 0) {
+      return null;
+    }
+    return {
+      kind,
+      vMs: Math.round(playerMessageTime),
+      t: Math.max(0, Math.round(Number(message?.messageTime) || 0)),
+      title: normalizeVodTitleText(title),
+    };
+  }
+
+  // 방장·매니저의 명령과 치지직의 성공 안내가 모두 확인된 경우만 제목 변경으로
+  // 확정한다. 메시지는 API 페이지 순서와 무관하게 마지막에 재생 위치순으로 맞춘다.
+  function createVodTitleChangeTracker() {
+    const entries = [];
+    return Object.freeze({
+      add(message) {
+        const text = String(message?.content || "").trim();
+        if (!text) return;
+        const command = text.match(
+          /^!(?:방제변경|방재변경|방송제목변경|제목변경)\s+([\s\S]+)$/,
+        );
+        if (command && isVodTitleChangeAuthor(message)) {
+          const entry = vodTitleChangeEntry(message, "command", command[1]);
+          if (entry?.title) entries.push(entry);
+          return;
+        }
+        const response = text.match(
+          /^방송\s*제목이\s*변경되었습니다\s*:\s*([\s\S]+)$/,
+        );
+        if (response) {
+          const entry = vodTitleChangeEntry(message, "response", response[1]);
+          if (entry?.title) entries.push(entry);
+        }
+      },
+      finish() {
+        const ordered = entries
+          .slice()
+          .sort((a, b) => a.vMs - b.vMs || a.t - b.t);
+        const commands = ordered.filter((entry) => entry.kind === "command");
+        const responses = ordered.filter((entry) => entry.kind === "response");
+        const used = new Set();
+        const changes = [];
+        for (const entry of responses) {
+          for (let index = commands.length - 1; index >= 0; index -= 1) {
+            if (used.has(index)) continue;
+            const command = commands[index];
+            const delta = entry.vMs - command.vMs;
+            if (delta < 0 || delta > VOD_TITLE_CHANGE_MATCH_WINDOW_MS) {
+              continue;
+            }
+            if (command.title !== entry.title) continue;
+            used.add(index);
+            changes.push({
+              v: Math.round(entry.vMs / 1000),
+              t: entry.t,
+              title: entry.title,
+            });
+            break;
+          }
+        }
+        return normalizeVodTitleChanges(changes);
+      },
+    });
+  }
+
+  async function loadVodTitleChanges(storage, videoNo) {
+    const key = vodTitleChangeKey(videoNo);
+    if (!key) return { complete: false, items: [] };
+    const value = (await storage.get(key))?.[key];
+    return {
+      complete: value?.complete === true,
+      items: normalizeVodTitleChanges(value),
+    };
+  }
+
+  async function saveVodTitleChanges(storage, videoNo, items) {
+    const key = vodTitleChangeKey(videoNo);
+    if (!key) return false;
+    await storage.set({
+      [key]: {
+        v: 1,
+        at: Date.now(),
+        complete: true,
+        items: normalizeVodTitleChanges(items),
+      },
+    });
+    return true;
+  }
+
   async function writeMerged(
     storage,
     state,
@@ -423,6 +580,11 @@
     readForMerge,
     compactVodRows,
     reconcileCompleteVodRows,
+    createVodTitleChangeTracker,
+    loadVodTitleChanges,
+    normalizeVodTitleChanges,
+    saveVodTitleChanges,
+    vodTitleChangeKey,
     vodFallbackKey,
     vodIdentityKey,
     writeMerged,

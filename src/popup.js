@@ -26,6 +26,10 @@ const elements = {
   queryHelpPanel: document.getElementById("queryHelpPanel"),
   dateFrom: document.getElementById("dateFromInput"),
   dateTo: document.getElementById("dateToInput"),
+  timeFrom: document.getElementById("timeFromInput"),
+  timeTo: document.getElementById("timeToInput"),
+  timeRows: document.querySelectorAll("[data-clip-time-row]"),
+  timePickers: document.querySelectorAll("[data-time-picker]"),
   datePickers: document.querySelectorAll("[data-date-picker]"),
   durationPicker: document.getElementById("durationPicker"),
   durationField: document.querySelector(".popup-duration-field"),
@@ -121,6 +125,8 @@ elements.query.value = params.get("q") || "";
 setCategoryFilter(params.get("categoryFilter") || "");
 setDateValue("dateFrom", params.get("dateFrom") || "");
 setDateValue("dateTo", params.get("dateTo") || "");
+setTimeValue("dateFrom", params.get("timeFrom") || "00:00");
+setTimeValue("dateTo", params.get("timeTo") || "23:59");
 setDurationValue(params.get("duration") || "all");
 setVideoTypeValue(params.get("videoTypeFilter") || "all");
 setSortValue(params.get("sort") || getInitialSortValue());
@@ -662,6 +668,7 @@ function scheduleProgressRender() {
 
 function renderProgressClipCards() {
   if (activeContentType !== "clips") return;
+  syncFilterUrl();
   syncResultsMode();
 
   const signature = getResultSignature();
@@ -1222,9 +1229,17 @@ function getFilteredVideos() {
   }
 
   const dateFrom = elements.dateFrom.value
-    ? getDayStart(elements.dateFrom.value)
+    ? getDayStart(
+        elements.dateFrom.value,
+        activeContentType === "clips" ? elements.timeFrom.value : "00:00",
+      )
     : 0;
-  const dateTo = elements.dateTo.value ? getDayEnd(elements.dateTo.value) : 0;
+  const dateTo = elements.dateTo.value
+    ? getDayEnd(
+        elements.dateTo.value,
+        activeContentType === "clips" ? elements.timeTo.value : "23:59",
+      )
+    : 0;
   const searchOptions = getSearchOptions();
 
   const result = videos
@@ -1313,6 +1328,8 @@ function getResultSignature() {
     elements.categoryChip.dataset.categoryFilter || "",
     elements.dateFrom.value,
     elements.dateTo.value,
+    elements.timeFrom.value,
+    elements.timeTo.value,
     elements.durationPicker.dataset.duration || "all",
     elements.videoTypePicker.dataset.videoType || "all",
     elements.sortPicker.dataset.sort || "latest",
@@ -1627,12 +1644,16 @@ function parsePublishDate(value) {
   return new Date(text.replace(" ", "T") + "+09:00").getTime();
 }
 
-function getDayStart(value) {
-  return new Date(`${value}T00:00:00+09:00`).getTime();
+function getDayStart(value, time = "00:00") {
+  return new Date(
+    `${value}T${normalizeTimeValue(time, "00:00")}:00+09:00`,
+  ).getTime();
 }
 
-function getDayEnd(value) {
-  return new Date(`${value}T23:59:59.999+09:00`).getTime();
+function getDayEnd(value, time = "23:59") {
+  return new Date(
+    `${value}T${normalizeTimeValue(time, "23:59")}:59.999+09:00`,
+  ).getTime();
 }
 
 function formatDateLabel(value) {
@@ -2117,6 +2138,13 @@ elements.streamerReset.addEventListener("click", handleSearchReset);
 elements.datePickers.forEach((picker) => {
   picker.addEventListener("click", handleDatePickerClick);
 });
+elements.timePickers.forEach((picker) => {
+  picker.addEventListener("click", handleTimeStepperClick);
+  picker.addEventListener("change", handleTimePartChange);
+  picker.addEventListener("keydown", handleTimePartKeydown);
+  picker.addEventListener("focusin", handleTimePartFocus);
+  picker.addEventListener("wheel", handleTimePartWheel, { passive: false });
+});
 elements.durationPicker.addEventListener("click", handleDurationClick);
 elements.videoTypePicker.addEventListener("click", handleVideoTypeClick);
 elements.sortPicker.addEventListener("click", handleSortClick);
@@ -2425,6 +2453,8 @@ function resetFilters() {
   visibleCount = RESULT_INITIAL_RENDER_COUNT;
   setDateValue("dateFrom", "");
   setDateValue("dateTo", "");
+  setTimeValue("dateFrom", "00:00");
+  setTimeValue("dateTo", "23:59");
   resetCalendarMonthsToCurrent();
   setDurationValue("all");
   setVideoTypeValue("all");
@@ -2463,6 +2493,8 @@ function syncFilterUrl() {
   );
   url.searchParams.set("dateFrom", elements.dateFrom.value);
   url.searchParams.set("dateTo", elements.dateTo.value);
+  url.searchParams.set("timeFrom", elements.timeFrom.value);
+  url.searchParams.set("timeTo", elements.timeTo.value);
   url.searchParams.set(
     "duration",
     elements.durationPicker.dataset.duration || "all",
@@ -2668,10 +2700,154 @@ function handleDatePickerClick(event) {
   if (action.date) {
     setDateValue(type, action.date);
     normalizeDateRange(type);
-    closeDatePicker(picker);
+    normalizeTimeRange(type);
+    if (activeContentType === "clips") {
+      keepDatePickerOpen(picker);
+    } else {
+      closeDatePicker(picker);
+    }
     renderAllCalendars();
     handleFilterChange();
   }
+}
+
+function handleTimeStepperClick(event) {
+  const periodButton = event.target.closest("[data-time-period]");
+  if (periodButton && !periodButton.disabled) {
+    event.preventDefault();
+    event.stopPropagation();
+    commitCustomTimePeriod(
+      periodButton.closest("[data-time-picker]"),
+      periodButton.dataset.timePeriod,
+    );
+    return;
+  }
+  const button = event.target.closest("[data-time-step-part]");
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  event.stopPropagation();
+  stepCustomTimePicker(
+    button.closest("[data-time-picker]"),
+    button.dataset.timeStepPart,
+    Number(button.dataset.timeStep),
+  );
+}
+
+function handleTimePartChange(event) {
+  const input = event.target.closest("[data-time-part-input]");
+  if (!input || input.disabled) return;
+  commitCustomTimePart(input);
+}
+
+function handleTimePartKeydown(event) {
+  const input = event.target.closest("[data-time-part-input]");
+  if (!input || input.disabled) return;
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    event.preventDefault();
+    event.stopPropagation();
+    stepCustomTimePicker(
+      input.closest("[data-time-picker]"),
+      input.dataset.timePartInput,
+      event.key === "ArrowUp" ? 1 : -1,
+    );
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    input.blur();
+  }
+}
+
+function handleTimePartFocus(event) {
+  event.target.closest("[data-time-part-input]")?.select();
+}
+
+function handleTimePartWheel(event) {
+  const picker = event.currentTarget;
+  const input = picker?.querySelector("[data-time-part-input]:focus");
+  if (!input || input.disabled || !event.deltaY) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const now = performance.now();
+  const last = Number(input.dataset.timeWheelAt || 0);
+  if (last && now - last < 70) return;
+  input.dataset.timeWheelAt = String(now);
+  stepCustomTimePicker(
+    picker,
+    input.dataset.timePartInput,
+    event.deltaY < 0 ? 1 : -1,
+  );
+}
+
+function stepCustomTimePicker(picker, part, delta) {
+  const type = picker?.dataset.timePicker;
+  const timeInput = picker?.querySelector("[data-time-input]");
+  if (!type || !timeInput || activeContentType !== "clips") return;
+  const [hour, minute] = normalizeTimeValue(
+    timeInput.value,
+    defaultTimeForDateType(type),
+  )
+    .split(":")
+    .map(Number);
+  const amount =
+    (Number.isFinite(delta) ? delta : 0) * (part === "hour" ? 60 : 1);
+  const total = (hour * 60 + minute + amount + 1440) % 1440;
+  commitCustomTimePicker(
+    type,
+    `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`,
+  );
+}
+
+function commitCustomTimePeriod(picker, period) {
+  const type = picker?.dataset.timePicker;
+  const timeInput = picker?.querySelector("[data-time-input]");
+  if (!type || !timeInput || !["am", "pm"].includes(period)) return;
+  const [hour, minute] = normalizeTimeValue(
+    timeInput.value,
+    defaultTimeForDateType(type),
+  )
+    .split(":")
+    .map(Number);
+  const nextHour = (hour % 12) + (period === "pm" ? 12 : 0);
+  if (nextHour === hour) return;
+  commitCustomTimePicker(
+    type,
+    `${String(nextHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+  );
+}
+
+function commitCustomTimePart(input) {
+  const picker = input.closest("[data-time-picker]");
+  const type = picker?.dataset.timePicker;
+  const timeInput = picker?.querySelector("[data-time-input]");
+  const part = input.dataset.timePartInput;
+  if (!type || !timeInput || activeContentType !== "clips") return;
+  const [currentHour, currentMinute] = normalizeTimeValue(
+    timeInput.value,
+    defaultTimeForDateType(type),
+  )
+    .split(":")
+    .map(Number);
+  const digits = String(input.value || "").replace(/\D/g, "");
+  const currentHour12 = currentHour % 12 || 12;
+  const fallback = part === "hour" ? currentHour12 : currentMinute;
+  const minimum = part === "hour" ? 1 : 0;
+  const maximum = part === "hour" ? 12 : 59;
+  const parsed = digits ? Number(digits) : fallback;
+  const value = Math.min(maximum, Math.max(minimum, parsed));
+  const hour =
+    part === "hour"
+      ? (value % 12) + (currentHour >= 12 ? 12 : 0)
+      : currentHour;
+  const minute = part === "minute" ? value : currentMinute;
+  commitCustomTimePicker(
+    type,
+    `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+  );
+}
+
+function commitCustomTimePicker(type, value) {
+  setTimeValue(type, value);
+  normalizeTimeRange(type);
+  handleFilterChange();
 }
 
 function refreshClipLoadingView() {
@@ -2740,6 +2916,8 @@ function applyRangePreset(preset) {
 
   setDateValue("dateFrom", toDateKey(startDate));
   setDateValue("dateTo", end);
+  setTimeValue("dateFrom", "00:00");
+  setTimeValue("dateTo", "23:59");
   calendarMonths.dateFrom = getMonthStart(startDate);
   calendarMonths.dateTo = getMonthStart(today);
 }
@@ -2749,14 +2927,101 @@ function setDateValue(type, value) {
   if (!input) return;
   input.value = value;
 
-  const label = document.querySelector(`[data-date-label="${type}"]`);
-  if (label) {
-    label.textContent = value ? formatDateLabel(value) : "선택 안 함";
+  const timeInput = type === "dateFrom" ? elements.timeFrom : elements.timeTo;
+  if (timeInput) {
+    if (!value) setTimeValue(type, defaultTimeForDateType(type));
+    setCustomTimePickerDisabled(
+      timeInput,
+      activeContentType !== "clips" || !value,
+    );
   }
+
+  updateDateTimeLabel(type);
 
   if (value) {
     calendarMonths[type] = getMonthStart(new Date(`${value}T00:00:00+09:00`));
   }
+}
+
+function defaultTimeForDateType(type) {
+  return type === "dateTo" ? "23:59" : "00:00";
+}
+
+function normalizeTimeValue(value, fallback = "00:00") {
+  const match = String(value || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) return fallback;
+  const hour = Math.min(23, Math.max(0, Number(match[1])));
+  const minute = Math.min(59, Math.max(0, Number(match[2])));
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function getTwelveHourParts(value, fallback = "00:00") {
+  const normalized = normalizeTimeValue(value, fallback);
+  const [hour24, minute] = normalized.split(":");
+  const hourNumber = Number(hour24);
+  return {
+    normalized,
+    period: hourNumber >= 12 ? "pm" : "am",
+    hour: String(hourNumber % 12 || 12).padStart(2, "0"),
+    minute,
+  };
+}
+
+function formatTwelveHourTime(value, fallback = "00:00") {
+  const { period, hour, minute } = getTwelveHourParts(value, fallback);
+  return `${period === "pm" ? "오후" : "오전"} ${Number(hour)}:${minute}`;
+}
+
+function setTimeValue(type, value) {
+  const input = type === "dateFrom" ? elements.timeFrom : elements.timeTo;
+  if (!input) return;
+  const normalized = normalizeTimeValue(value, defaultTimeForDateType(type));
+  input.value = normalized;
+  const picker = input.closest("[data-time-picker]");
+  const { period, hour, minute } = getTwelveHourParts(normalized);
+  const hourInput = picker?.querySelector('[data-time-part-input="hour"]');
+  const minuteInput = picker?.querySelector(
+    '[data-time-part-input="minute"]',
+  );
+  if (hourInput) {
+    hourInput.value = hour;
+    hourInput.setAttribute("aria-valuenow", String(Number(hour)));
+    hourInput.setAttribute(
+      "aria-valuetext",
+      `${period === "pm" ? "오후" : "오전"} ${Number(hour)}시`,
+    );
+  }
+  if (minuteInput) {
+    minuteInput.value = minute;
+    minuteInput.setAttribute("aria-valuenow", String(Number(minute)));
+    minuteInput.setAttribute("aria-valuetext", `${Number(minute)}분`);
+  }
+  picker?.querySelectorAll("[data-time-period]").forEach((button) => {
+    const selected = button.dataset.timePeriod === period;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  updateDateTimeLabel(type);
+}
+
+function setCustomTimePickerDisabled(timeInput, disabled) {
+  const picker = timeInput?.closest("[data-time-picker]");
+  picker?.classList.toggle("is-disabled", disabled);
+  picker
+    ?.querySelectorAll("button, [data-time-part-input]")
+    .forEach((control) => {
+      control.disabled = disabled;
+    });
+}
+
+function updateDateTimeLabel(type) {
+  const dateInput = type === "dateFrom" ? elements.dateFrom : elements.dateTo;
+  const timeInput = type === "dateFrom" ? elements.timeFrom : elements.timeTo;
+  const label = document.querySelector(`[data-date-label="${type}"]`);
+  if (!label || !dateInput) return;
+  label.textContent = dateInput.value
+    ? `${formatDateLabel(dateInput.value)}${activeContentType === "clips" ? ` ${formatTwelveHourTime(timeInput?.value, defaultTimeForDateType(type))}` : ""}`
+    : "선택 안 함";
 }
 
 function normalizeDateRange(changedType) {
@@ -2768,6 +3033,20 @@ function normalizeDateRange(changedType) {
     setDateValue("dateTo", "");
   } else {
     setDateValue("dateFrom", "");
+  }
+}
+
+function normalizeTimeRange(changedType) {
+  const dateFrom = elements.dateFrom.value;
+  const dateTo = elements.dateTo.value;
+  if (!dateFrom || dateFrom !== dateTo) return;
+  const timeFrom = elements.timeFrom.value || "00:00";
+  const timeTo = elements.timeTo.value || "23:59";
+  if (timeFrom <= timeTo) return;
+  if (changedType === "dateFrom") {
+    setTimeValue("dateTo", timeFrom);
+  } else {
+    setTimeValue("dateFrom", timeTo);
   }
 }
 
@@ -2975,6 +3254,9 @@ function initializeContentMode() {
   elements.durationField.hidden = activeContentType === "clips";
   elements.videoTypePicker.closest(".popup-video-type-field").hidden =
     activeContentType === "clips";
+  elements.timeRows.forEach((row) => {
+    row.hidden = activeContentType !== "clips";
+  });
   elements.datePickers.forEach((picker) => {
     const presets = picker.querySelector(".popup-calendar-presets");
     if (presets) presets.hidden = false;
