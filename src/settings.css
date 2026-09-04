@@ -1064,6 +1064,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-chat-word-filter]),
 .settings-item:has([data-chat-recap-retention]),
 .settings-item:has([data-search-live-rerank-w-rel]),
+.settings-item:has([data-chat-history-limit]),
 .settings-item:has([data-mixer-gain-max]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
