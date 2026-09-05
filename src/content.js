@@ -518,6 +518,7 @@
   // 시작 추정 시각(liveOpenDate) + preview 시간으로 계산한 당시 추정 시각을 병기.
   const SEEK_PREVIEW_TIME_SELECTOR = ".pzp-seeking-preview__time";
   const SEEK_PREVIEW_REALTIME_CLASS = "cheese-search-seek-realtime";
+  const VOD_TITLE_PROGRESS_CLASS = "cheese-vod-title-progress";
   const VOD_CHAT_TIME_ANCHOR_SOURCE = "cheese-vod-chat-time-anchor";
   const VOD_CHAT_CORRECTION_KEY = "cheeseVodChatTimeCorrections";
   const VOD_CHAT_CORRECTION_MAX = 300;
@@ -1781,6 +1782,10 @@
   // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
   const CARD_DATE_TOOLTIP_KEY = "cheeseCardDateTooltip";
   let cardDateTooltipOn = true;
+  // 다시보기 채팅에서 방장·매니저의 방송 제목 변경을 확인해 seek preview에 표시한다.
+  // 채팅 활성도와 실제 시각 병기 설정에서 독립된 opt-in 기능이다.
+  const VOD_TITLE_CHANGES_KEY = "cheeseVodTitleChanges";
+  let vodTitleChangesOn = false;
   // 다시보기 AI 생성 챕터 숨김(전역, 기본 OFF=표시). 치지직이 일부 다시보기에 자동 생성하는
   // 챕터(재생바 분할 + 좌하단 챕터 제목)가 스포가 될 수 있다는 피드백 → 옵션으로 숨김.
   // 켜면 html 에 cheese-vod-chapter-hide 클래스를 붙이고 CSS(content.css)가 숨긴다.
@@ -6680,7 +6685,7 @@
         if (correction) applyVodChatCorrectionToViews(videoNo, correction);
       });
       void fetchVideoDates(videoNo);
-      void loadSeekPreviewTitleChanges(videoNo);
+      if (vodTitleChangesOn) void ensureVodTitleChanges(videoNo);
     }
     startSeekPreviewObserver();
     // 등록일 라벨 마킹은 매 mutation 이 아니라 init 주기(뮤테이션 디바운스)면 충분하다 —
@@ -6700,6 +6705,161 @@
       return record;
     } catch {
       return { complete: false, items: [] };
+    }
+  }
+
+  const vodTitleChangesCollection = {
+    videoNo: "",
+    promise: null,
+    progress: 0,
+    completeTimer: 0,
+  };
+
+  function removeVodTitleChangesProgress(delay = 0) {
+    if (vodTitleChangesCollection.completeTimer) {
+      clearTimeout(vodTitleChangesCollection.completeTimer);
+      vodTitleChangesCollection.completeTimer = 0;
+    }
+    const remove = () => {
+      document
+        .querySelectorAll(`.${VOD_TITLE_PROGRESS_CLASS}`)
+        .forEach((element) => element.remove());
+    };
+    if (!delay) {
+      remove();
+      return;
+    }
+    vodTitleChangesCollection.completeTimer = window.setTimeout(() => {
+      vodTitleChangesCollection.completeTimer = 0;
+      remove();
+    }, delay);
+  }
+
+  function updateVodTitleChangesProgress(progress, complete = false) {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo || vodTitleChangesCollection.videoNo !== videoNo) return;
+    // 채팅 활성도 버튼이 같은 공유 작업의 진행률을 이미 표시하고 있으면 별도 상태를
+    // 하나 더 만들지 않는다.
+    if (chatGraphState.loading && chatGraphState.videoNo === videoNo) {
+      document
+        .querySelectorAll(`.${VOD_TITLE_PROGRESS_CLASS}`)
+        .forEach((element) => element.remove());
+      return;
+    }
+    const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls) return;
+    let status = controls.querySelector(`.${VOD_TITLE_PROGRESS_CLASS}`);
+    if (!status) {
+      status = document.createElement("span");
+      status.className = `${VOD_TITLE_PROGRESS_CLASS} pzp-pc__setting-button pzp-pc-ui-button`;
+      status.setAttribute("role", "progressbar");
+      status.innerHTML = `
+        <span class="pzp-button__tooltip pzp-button__tooltip--top"></span>
+        <span class="pzp-ui-icon" aria-hidden="true">
+          <svg class="lucide lucide-file-text pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="8" x2="16" y1="13" y2="13"></line>
+            <line x1="8" x2="16" y1="17" y2="17"></line>
+          </svg>
+        </span>
+        <span class="cheese-chat-graph-progress" aria-hidden="true"></span>
+      `;
+      const clipButton = controls.querySelector(".custom__clip-button");
+      controls.insertBefore(status, clipButton || controls.firstChild);
+    }
+    const normalized = Math.max(0, Math.min(1, Number(progress) || 0));
+    const percent = complete
+      ? 100
+      : Math.min(99, Math.floor(normalized * 100));
+    const label = complete
+      ? "방송 제목 변경 확인 완료"
+      : `방송 제목 변경 확인 ${percent}%`;
+    status.classList.toggle("is-complete", complete);
+    status.setAttribute("aria-label", label);
+    status.setAttribute("aria-valuemin", "0");
+    status.setAttribute("aria-valuemax", "100");
+    status.setAttribute("aria-valuenow", String(percent));
+    status.querySelector(".pzp-button__tooltip").textContent = label;
+    status.querySelector(".cheese-chat-graph-progress").textContent =
+      `${percent}%`;
+  }
+
+  function syncVodTitleChangesProgress() {
+    if (
+      vodTitleChangesCollection.promise &&
+      vodTitleChangesCollection.videoNo === getCurrentVideoNo()
+    ) {
+      updateVodTitleChangesProgress(vodTitleChangesCollection.progress);
+    }
+  }
+
+  // 제목 변경은 별도 API가 없어 다시보기 채팅을 끝까지 훑어야 확정할 수 있다. 결과는
+  // 영상별로 저장한다. 같은 순회에서 채팅 활성도 집계도 함께 캐시해 두 기능이 API를
+  // 중복 호출하지 않게 한다.
+  async function collectVodTitleChanges(videoNo) {
+    let duration = 0;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (!vodTitleChangesOn || getCurrentVideoNo() !== videoNo) return null;
+      duration = getPlayerDuration(findPlayerSliderProgressWrap());
+      if (duration > 0) break;
+      // 플레이어 메타데이터가 준비되기 전이면 퍼센트를 계산할 수 없다.
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!duration) return null;
+    const result = await collectVodChatDataShared(
+      videoNo,
+      duration,
+      (progress) => {
+        vodTitleChangesCollection.progress = progress;
+        updateVodTitleChangesProgress(progress);
+      },
+    );
+    if (!result?.complete || !vodTitleChangesOn) return null;
+    const record = await loadSeekPreviewTitleChanges(videoNo);
+    vodTitleChangesCollection.progress = 1;
+    updateVodTitleChangesProgress(1, true);
+    return record.items;
+  }
+
+  async function ensureVodTitleChanges(videoNo = getCurrentVideoNo()) {
+    if (!vodTitleChangesOn || !videoNo) {
+      updateSeekPreviewRealtime();
+      return;
+    }
+    const record = await loadSeekPreviewTitleChanges(videoNo);
+    if (
+      record.complete ||
+      !vodTitleChangesOn ||
+      getCurrentVideoNo() !== videoNo
+    ) {
+      return;
+    }
+    if (
+      vodTitleChangesCollection.videoNo === videoNo &&
+      vodTitleChangesCollection.promise
+    ) {
+      return vodTitleChangesCollection.promise;
+    }
+    if (await fetchIsUploadVideo(videoNo)) return;
+    const promise = collectVodTitleChanges(videoNo);
+    vodTitleChangesCollection.videoNo = videoNo;
+    vodTitleChangesCollection.promise = promise;
+    vodTitleChangesCollection.progress = 0;
+    updateVodTitleChangesProgress(0);
+    try {
+      const items = await promise;
+      if (items) removeVodTitleChangesProgress(1800);
+      else removeVodTitleChangesProgress();
+    } catch {
+      // 일시적인 API 실패는 완료로 저장하지 않아 다음 진입 때 다시 확인한다.
+      removeVodTitleChangesProgress();
+    } finally {
+      if (vodTitleChangesCollection.promise === promise) {
+        vodTitleChangesCollection.videoNo = "";
+        vodTitleChangesCollection.promise = null;
+      }
     }
   }
 
@@ -6747,7 +6907,12 @@
   // 페이드 순간에도 mutation 감시가 없어 원본과 동일하다.
   let seekPreviewPointerScheduled = false;
   function onSeekPreviewPointerMove() {
-    if (!seekPreviewState.videoNo || !seekPreviewState.liveOpenAt) return;
+    if (
+      !seekPreviewState.videoNo ||
+      (!seekPreviewState.liveOpenAt && !vodTitleChangesOn)
+    ) {
+      return;
+    }
     if (seekPreviewPointerScheduled) return;
     seekPreviewPointerScheduled = true;
     requestAnimationFrame(() => {
@@ -6818,14 +6983,6 @@
   // 확정된 변경 제목을 병기/갱신한다.
   function updateSeekPreviewRealtime() {
     updateVodPortraitClass();
-    // 팝업에서 숨김 처리하면 이미 붙은 병기 줄을 제거하고 끝낸다.
-    if (featureFlags.seekPreviewRealtime) {
-      document
-        .querySelectorAll(`.${SEEK_PREVIEW_REALTIME_CLASS}`)
-        .forEach((el) => el.remove());
-      return;
-    }
-    if (!seekPreviewState.liveOpenAt) return;
     const timeEl = document.querySelector(SEEK_PREVIEW_TIME_SELECTOR);
     if (!timeEl) return;
     // 우리가 추가한 줄(있으면)을 제외한 '순수 시간' 텍스트만 파싱한다. textContent replace
@@ -6838,9 +6995,23 @@
     });
     const seconds = parseClockToSeconds(baseText);
     if (!Number.isFinite(seconds)) return;
-    const label = formatBroadcastClock(seekPreviewState.liveOpenAt, seconds);
+    const showRealtime = !featureFlags.seekPreviewRealtime;
+    const broadcastTitle = vodTitleChangesOn
+      ? vodTitleAtOffset(seconds)
+      : "";
+    const label = showRealtime && seekPreviewState.liveOpenAt
+      ? formatBroadcastClock(seekPreviewState.liveOpenAt, seconds)
+      : "";
+    if (!label && !broadcastTitle) {
+      existing?.remove();
+      return;
+    }
     const source = seekPreviewState.liveOpenAtCorrected ? "chat" : "estimate";
-    const broadcastTitle = vodTitleAtOffset(seconds);
+    const tooltip = label
+      ? seekPreviewState.liveOpenAtCorrected
+        ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
+        : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다."
+      : `이 시점의 방송 제목: ${broadcastTitle}`;
     if (existing) {
       if (
         existing.dataset.label !== label ||
@@ -6852,9 +7023,7 @@
         existing.dataset.broadcastTitle = broadcastTitle;
         setSeekRealtimeContent(existing, label, broadcastTitle);
       }
-      existing.title = seekPreviewState.liveOpenAtCorrected
-        ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
-        : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
+      existing.title = tooltip;
       return;
     }
     const span = document.createElement("span");
@@ -6862,9 +7031,7 @@
     span.dataset.label = label;
     span.dataset.source = source;
     span.dataset.broadcastTitle = broadcastTitle;
-    span.title = seekPreviewState.liveOpenAtCorrected
-      ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
-      : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다.";
+    span.title = tooltip;
     setSeekRealtimeContent(span, label, broadcastTitle);
     timeEl.appendChild(span);
   }
@@ -6873,13 +7040,16 @@
   // 방송·재생바 끝에서 화면 밖으로 짤렸다). "YY.MM.DD. 오전/오후 H:MM:SS" → 날짜부 + 시각부.
   function setSeekRealtimeContent(el, label, broadcastTitle = "") {
     el.textContent = "";
+    el.classList.toggle("is-title-only", !label && Boolean(broadcastTitle));
     const m = String(label).match(/^(.+?\.)\s+(.+)$/); // "26.07.20." | "오후 4:06:50"
     const datePart = m ? m[1] : label;
     const timePart = m ? m[2] : "";
-    const d = document.createElement("span");
-    d.className = "cheese-seek-realtime-date";
-    d.textContent = datePart;
-    el.appendChild(d);
+    if (datePart) {
+      const d = document.createElement("span");
+      d.className = "cheese-seek-realtime-date";
+      d.textContent = datePart;
+      el.appendChild(d);
+    }
     if (timePart) {
       const t = document.createElement("span");
       t.className = "cheese-seek-realtime-time";
@@ -9710,6 +9880,59 @@
     shown: false,
     cancel: false, // 수집 중 버튼을 다시 누르면 중단한다(전수는 몇십 초 걸린다).
   };
+  // 방송 제목 확인과 채팅 활성도가 같은 영상을 동시에 요청하면 하나의 순회를 공유한다.
+  // 제목 확인이 먼저 실행된 경우에도 bins를 캐시하므로 나중에 활성도를 켤 때 재수집하지 않는다.
+  const vodChatScanCoordinator = {
+    videoNo: "",
+    promise: null,
+    progress: 0,
+    listeners: new Set(),
+    cancel: false,
+  };
+
+  function collectVodChatDataShared(videoNo, duration, onProgress) {
+    if (
+      vodChatScanCoordinator.videoNo === videoNo &&
+      vodChatScanCoordinator.promise
+    ) {
+      if (typeof onProgress === "function") {
+        vodChatScanCoordinator.listeners.add(onProgress);
+        onProgress(vodChatScanCoordinator.progress);
+      }
+      return vodChatScanCoordinator.promise;
+    }
+
+    vodChatScanCoordinator.videoNo = videoNo;
+    vodChatScanCoordinator.progress = 0;
+    vodChatScanCoordinator.cancel = false;
+    vodChatScanCoordinator.listeners = new Set();
+    if (typeof onProgress === "function") {
+      vodChatScanCoordinator.listeners.add(onProgress);
+    }
+    const promise = Promise.resolve().then(async () => {
+      const result = await collectChatGraph(videoNo, duration, (progress) => {
+        vodChatScanCoordinator.progress = progress;
+        vodChatScanCoordinator.listeners.forEach((listener) => {
+          try {
+            listener(progress);
+          } catch {}
+        });
+      });
+      if (result.complete) await saveChatGraphCache(videoNo, result.bins);
+      return result;
+    });
+    vodChatScanCoordinator.promise = promise;
+    const clear = () => {
+      if (vodChatScanCoordinator.promise !== promise) return;
+      vodChatScanCoordinator.videoNo = "";
+      vodChatScanCoordinator.promise = null;
+      vodChatScanCoordinator.progress = 0;
+      vodChatScanCoordinator.listeners.clear();
+      vodChatScanCoordinator.cancel = false;
+    };
+    promise.then(clear, clear);
+    return promise;
+  }
 
   async function loadChatGraphCache(videoNo) {
     try {
@@ -9809,8 +10032,15 @@
       }
       // ⚠ 영상을 옮기면 즉시 멈춘다. 안 그러면 보이지도 않는 영상의 채팅을
       //   최대 1500회까지 계속 받는다(긴 방송은 80초 넘게).
-      if (chatGraphState.cancel || getCurrentVideoNo() !== videoNo) break;
-      const list = content?.videoChats;
+      if (
+        vodChatScanCoordinator.cancel ||
+        getCurrentVideoNo() !== videoNo
+      ) {
+        break;
+      }
+      const list = Array.isArray(content?.videoChats)
+        ? content.videoChats
+        : content?.previousVideoChats;
       if (!Array.isArray(list) || !list.length) {
         completed = true;
         break;
@@ -9838,7 +10068,11 @@
       cursor = next;
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
     }
-    if (completed) {
+    const complete =
+      completed &&
+      !vodChatScanCoordinator.cancel &&
+      getCurrentVideoNo() === videoNo;
+    if (complete) {
       try {
         await CHAT_RECAP_STORE_API.saveVodTitleChanges(
           chrome.storage.local,
@@ -9849,8 +10083,8 @@
         // 그래프 자체는 정상 수집됐으므로 제목 메타데이터 실패만 무시한다.
       }
     }
-    onProgress?.(1);
-    return bins;
+    onProgress?.(complete ? 1 : Math.max(0, Math.min(1, cursor / totalMs)));
+    return { bins, complete };
   }
 
   // 사용자 지정 색을 CSS 변수로 흘려보낸다(CSS 는 var 폴백으로 기본색을 갖는다).
@@ -9992,6 +10226,9 @@
     // 수집 중 다시 누르면 중단한다 — 긴 영상은 1~2분 걸릴 수 있다.
     if (chatGraphState.loading) {
       chatGraphState.cancel = true;
+      if (vodChatScanCoordinator.videoNo === videoNo) {
+        vodChatScanCoordinator.cancel = true;
+      }
       return;
     }
     if (chatGraphState.shown) {
@@ -10025,21 +10262,22 @@
     chatGraphState.cancel = false;
     chatGraphState.progress = 0;
     chatGraphState.videoNo = videoNo;
+    syncVodTitleChangesProgress();
     const btnSel = `.${CHAT_GRAPH_BUTTON_CLASS}`;
     updateChatGraphButton(document.querySelector(btnSel));
     try {
       let bins = await loadChatGraphCache(videoNo);
       if (!bins || !titleChangeRecord.complete) {
-        bins = await collectChatGraph(videoNo, duration, (p) => {
+        const result = await collectVodChatDataShared(videoNo, duration, (p) => {
           chatGraphState.progress = p;
           updateChatGraphButton(document.querySelector(btnSel));
         });
         // 중단된 결과는 뒷부분이 비어 있다 → 캐시하면 다음에도 반쪽이 뜬다.
-        if (chatGraphState.cancel) {
+        if (!result?.complete || chatGraphState.cancel) {
           chatGraphState.bins = null;
           return;
         }
-        await saveChatGraphCache(videoNo, bins);
+        bins = result.bins;
       }
       // 그 사이 다른 영상으로 옮겼으면 버린다.
       if (getCurrentVideoNo() !== videoNo) return;
@@ -46756,6 +46994,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       CARD_PREVIEW_DEFAULT_VOLUME_KEY,
       CARD_PREVIEW_WHEEL_DELAY_KEY,
       CARD_DATE_TOOLTIP_KEY,
+      VOD_TITLE_CHANGES_KEY,
       VOD_CHAPTER_HIDE_KEY,
       HIDE_BLOCKED_COMMENT_KEY,
       COMMENT_BLOCK_KEY,
@@ -47974,6 +48213,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (cardDateTooltipOn) bindCardDateTooltip();
         else unbindCardDateTooltip();
       }
+      if (changes[VOD_TITLE_CHANGES_KEY]) {
+        vodTitleChangesOn = changes[VOD_TITLE_CHANGES_KEY].newValue === true;
+        updateSeekPreviewRealtime();
+        if (vodTitleChangesOn) {
+          void ensureVodTitleChanges();
+        } else {
+          removeVodTitleChangesProgress();
+          if (
+            vodTitleChangesCollection.promise &&
+            !chatGraphState.loading &&
+            vodChatScanCoordinator.videoNo === getCurrentVideoNo()
+          ) {
+            vodChatScanCoordinator.cancel = true;
+          }
+        }
+      }
       if (changes[FOLLOW_CHANNEL_TOOLTIP_KEY]) {
         followChannelTooltipOn =
           changes[FOLLOW_CHANNEL_TOOLTIP_KEY].newValue === true;
@@ -48542,18 +48797,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_GRAPH_COLORS_KEY,
         CHAT_GRAPH_AUTO_KEY,
         CHAT_GRAPH_AUTO_COLLECT_KEY,
+        VOD_TITLE_CHANGES_KEY,
       ]);
       followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] !== false;
       pipDisableOn = data?.[PIP_DISABLE_KEY] === true;
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
       chatGraphAutoCollect = data?.[CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
+      vodTitleChangesOn = data?.[VOD_TITLE_CHANGES_KEY] === true; // 기본 OFF
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
       // init()은 저장소 응답보다 먼저 실행될 수 있다. 특히 설정을 막 불러온 새 설치에서는
       // 기본값(false)으로 첫 init이 끝난 뒤 DOM 변이가 없으면 버튼·자동 수집이 영영
       // 시작되지 않는다. 저장값을 읽은 시점에 현재 플레이어를 한 번 더 적용한다.
       ensureChatGraphButton();
       void maybeAutoShowChatGraph();
+      if (vodTitleChangesOn) void ensureVodTitleChanges();
     } catch {}
   })();
 
@@ -48566,6 +48824,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     initCommentTimestampMarkers();
     ensureOpenChatRecapPanelConnected();
     initSeekPreviewRealtime();
+    syncVodTitleChangesProgress();
     initLiveDetailStartTooltip();
     ensureFollowerCountHover(); // "팔로워 8.9만명" 호버 시 정확한 수 표시
     ensureProfileStudioLink(); // 헤더 '삭제된 클립 보기' 옆 스튜디오 링크

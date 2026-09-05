@@ -74,6 +74,7 @@
     "cheeseClipEditorBoundaryStepS",
     "cheeseClipEditorBoundaryOuterStepS",
     "cheeseCardDateTooltip",
+    "cheeseVodTitleChanges",
     "cheeseVodChapterHide",
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
@@ -7508,6 +7509,30 @@
   });
   vodChatGraphInput?.addEventListener("change", syncVodChatGraphAutoLock);
   loadVodChatGraphAuto();
+
+  // 다시보기 채팅의 방송 제목 변경 이력 확인(기본 OFF).
+  const VOD_TITLE_CHANGES_KEY = "cheeseVodTitleChanges";
+  const vodTitleChangesInput = document.querySelector(
+    "[data-vod-title-changes]",
+  );
+
+  async function loadVodTitleChanges() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(VOD_TITLE_CHANGES_KEY);
+      on = data?.[VOD_TITLE_CHANGES_KEY] === true;
+    } catch {}
+    if (vodTitleChangesInput) vodTitleChangesInput.checked = on;
+  }
+
+  vodTitleChangesInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VOD_TITLE_CHANGES_KEY]: vodTitleChangesInput.checked,
+      });
+    } catch {}
+  });
+  loadVodTitleChanges();
 
   // 채팅 활성도 그래프의 후원·구독 색(Coloris). 기본값은 content.css 와 맞춘다.
   const VOD_CHAT_GRAPH_COLORS_KEY = "cheeseVodChatGraphColors";

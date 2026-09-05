@@ -3549,6 +3549,12 @@ html.cheese-vod-portrait
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+.cheese-search-seek-realtime.is-title-only .cheese-seek-realtime-title {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 11px;
+}
 /* 세로 방송: preview 가 좁아 실제시각 텍스트가 툴팁 밖으로 나갔다 → 더 작고 촘촘하게. */
 html.cheese-vod-portrait .cheese-search-seek-realtime {
   font-size: 10.5px;
@@ -13809,6 +13815,21 @@ html.cheese-inbox-wide div[class*="_item_"] > div[class*="_layer_"] > iframe {
   position: relative;
 }
 
+.cheese-vod-title-progress {
+  position: relative;
+  color: #25df97;
+  cursor: default;
+}
+
+.cheese-vod-title-progress .pzp-ui-icon {
+  animation: cheese-chat-graph-pulse 1s ease-in-out infinite;
+}
+
+.cheese-vod-title-progress.is-complete .pzp-ui-icon {
+  animation: none;
+  opacity: 1;
+}
+
 /* 수집 중에도 클릭은 살려 둔다(다시 누르면 중단). 아이콘 맥동으로 진행 중임을 알린다. */
 
 .cheese-chat-graph-button.is-loading .pzp-ui-icon {
@@ -13826,7 +13847,8 @@ html.cheese-inbox-wide div[class*="_item_"] > div[class*="_layer_"] > iframe {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cheese-chat-graph-button.is-loading .pzp-ui-icon {
+  .cheese-chat-graph-button.is-loading .pzp-ui-icon,
+  .cheese-vod-title-progress .pzp-ui-icon {
     animation: none;
     opacity: 0.6;
   }
