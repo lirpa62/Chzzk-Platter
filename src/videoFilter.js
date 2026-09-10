@@ -2957,7 +2957,12 @@
       if (!document.querySelector(".webplayer-internal-video")) return;
       e.preventDefault();
       e.stopPropagation();
-      handleButtonClick();
+      // ⚠ '항상 켜기'면 좌클릭과 같은 on/off 는 의미가 없다(끌 수 없다는 안내만 뜬다).
+      //   그 상태에서 단축키는 패널을 연다 — 안 그러면 팝업 플레이어처럼 버튼을 누르기
+      //   번거로운 곳에서 설정을 바꿀 방법이 없다(제보: 단축키가 안 먹는 것처럼 보임).
+      //   마우스 클릭 동작은 기존 그대로 둔다.
+      if (videoFilterAlwaysOn) togglePanel();
+      else handleButtonClick();
     },
     true,
   );

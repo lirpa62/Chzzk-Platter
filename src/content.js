@@ -519,17 +519,6 @@
   const SEEK_PREVIEW_TIME_SELECTOR = ".pzp-seeking-preview__time";
   const SEEK_PREVIEW_REALTIME_CLASS = "cheese-search-seek-realtime";
   const VOD_TITLE_PROGRESS_CLASS = "cheese-vod-title-progress";
-  const VOD_CHAT_TIME_ANCHOR_SOURCE = "cheese-vod-chat-time-anchor";
-  const VOD_CHAT_CORRECTION_KEY = "cheeseVodChatTimeCorrections";
-  const VOD_CHAT_CORRECTION_MAX = 300;
-  const VOD_CHAT_CORRECTION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
-  const VOD_CHAT_CORRECTION_MIN_SAMPLES = 3;
-  const VOD_CHAT_CORRECTION_MAX_SPREAD_MS = 3000;
-  const vodChatCorrections = new Map(); // videoNo → 보정된 방송 시작 시각
-  const vodChatAnchorSamples = new Map(); // 현재 세션에서 받은 원시 기준점
-  let vodChatCorrectionsLoaded = false;
-  let vodChatCorrectionsLoadPromise = null;
-  let vodChatCorrectionsSaveTimer = 0;
   // 영상 정보 영역의 등록일/방송 시작 추정 시각 툴팁(._label_..._77) 교체 대상.
   const VIDEO_INFO_LABEL_SELECTOR = '[class*="_label_"]';
   // 라이브 상세 영역의 시청자/스트리밍 시간 메타에 붙이는 라이브 시작일 툴팁.
@@ -538,7 +527,6 @@
   const seekPreviewState = {
     videoNo: "",
     liveOpenAt: 0, // 라이브 시작 시각(ms). 0이면 미확보/없음
-    liveOpenAtCorrected: false, // 다시보기 채팅 시각으로 보정했는지
     publishAt: 0, // 등록일(ms). 0이면 미확보/없음
     titleChanges: [], // 재생 위치별 확정된 방송 제목 변경 이력
     fetching: false,
@@ -759,6 +747,9 @@
     "rewind",
     "sync",
     "forward",
+    "speed",
+    "commentTs",
+    "chatRecap",
     "tabMute",
     "screenshot",
     "streamStats",
@@ -767,6 +758,9 @@
     streamStats: "right",
     tabMute: "right",
     screenshot: "right",
+    speed: "right",
+    commentTs: "right",
+    chatRecap: "right",
     rewind: "right",
     forward: "right",
     sync: "right",
@@ -858,6 +852,11 @@
           side[k] = srcSide[k];
       }
     }
+    // ⚠ 댓글 타임스탬프·내 채팅 기록은 오른쪽 컨트롤에 직접 만들어져서 왼쪽으로는
+    //   실제로 옮겨지지 않는다. 저장값이 left 여도 오른쪽으로 강제해, 설정 화면과
+    //   실제 배치가 어긋나지 않게 한다(설정 UI 도 왼쪽 드롭을 막는다).
+    side.commentTs = "right";
+    side.chatRecap = "right";
     // slot: 각 key 가 붙는 네이티브 앵커 { grp, after }. 저장값 우선, 없거나 앵커가
     // 그룹 허용 목록 밖이면 기본으로 보정. grp 는 side 와 일치하도록 강제(정합성).
     const savedSlot = v && typeof v === "object" ? v.slot : null;
@@ -1895,6 +1894,7 @@
   // 한 저장 키의 상한. 초과분은 chatRecapStore가 :part:N 키로 보존한다.
   const CHAT_RECAP_CHUNK_MAX = 5000;
   const CHAT_RECAP_STORE_API = globalThis.CheeseChatRecapStore;
+  const CHAT_ACTIVITY_ANALYSIS_API = globalThis.CheeseChatActivityAnalysis;
   let chatRecapOn = false;
   let chatRecapRetentionDays = 0;
   let chatRecapPlayerButtonHidden = false;
@@ -2059,6 +2059,7 @@
     vodMoreHide: false, // 다시보기 '영상 더보기' 정보 영역 숨김
     tabMute: false, // 플레이어 우측 컨트롤의 '탭 음소거' 버튼 숨김
     screenshotButton: false, // 플레이어 컨트롤의 '스크린샷' 버튼 숨김(true=숨김, 기본 표시)
+    speedButton: false, // 다시보기 '재생 속도' 버튼 숨김(true=숨김, 기본 표시)
     hideBlockedCards: false, // 차단한 유저 카드(_is_block_)를 탐색/검색 목록에서 완전히 숨김
     clipEditorPrecision: false, // 클립 에디터 시간 눈금·정밀 구간 조정
     commentTimestamp: false,
@@ -2550,6 +2551,8 @@
     "#cheese-custom-follow",
     ".cheese-cf-header-ctrl",
     ".cheese-cf-page-favorite",
+    ".cheese-memo-window",
+    ".cheese-memo-button",
     ".cheese-live-tag-filter-button",
     ".cheese-live-tag-filter-overlay",
     ".cheese-category-video-filter",
@@ -6663,7 +6666,6 @@
       teardownSeekPreviewObserver();
       seekPreviewState.videoNo = "";
       seekPreviewState.liveOpenAt = 0;
-      seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
       seekPreviewState.titleChanges = [];
       hideVideoInfoTooltip(); // 다시보기 이탈 → 우리 툴팁 숨김
@@ -6672,7 +6674,6 @@
     if (seekPreviewState.videoNo !== videoNo) {
       seekPreviewState.videoNo = videoNo;
       seekPreviewState.liveOpenAt = 0;
-      seekPreviewState.liveOpenAtCorrected = false;
       seekPreviewState.publishAt = 0;
       seekPreviewState.titleChanges = [];
       hideVideoInfoTooltip(); // 영상 전환 → 이전 영상 툴팁 숨김
@@ -6680,10 +6681,6 @@
       // 새 영상 진입 → 자동 재생 끄기 재적용 허용(영상마다 스위치가 새로 렌더됨).
       vodAutoplaySettingApplied = false;
       vodAutoplayTurnedOff = false;
-      void loadVodChatCorrections().then(() => {
-        const correction = vodChatCorrections.get(videoNo);
-        if (correction) applyVodChatCorrectionToViews(videoNo, correction);
-      });
       void fetchVideoDates(videoNo);
       if (vodTitleChangesOn) void ensureVodTitleChanges(videoNo);
     }
@@ -6726,11 +6723,19 @@
         .forEach((element) => element.remove());
     };
     if (!delay) {
+      // 지연 없이 지우면 더 보여 줄 것이 없다 → 소유권도 바로 놓는다.
+      if (!vodTitleChangesCollection.promise) {
+        vodTitleChangesCollection.videoNo = "";
+      }
       remove();
       return;
     }
     vodTitleChangesCollection.completeTimer = window.setTimeout(() => {
       vodTitleChangesCollection.completeTimer = 0;
+      // 완료 표시를 거두는 시점에 소유권도 함께 놓는다(위 finally 참고).
+      if (!vodTitleChangesCollection.promise) {
+        vodTitleChangesCollection.videoNo = "";
+      }
       remove();
     }, delay);
   }
@@ -6785,12 +6790,21 @@
       `${percent}%`;
   }
 
+  // ⚠ 채팅 활성도가 같은 공유 수집을 돌리는 동안에는 이 진행률을 잠시 지운다
+  //   (updateVodTitleChangesProgress 의 중복 표시 방지). 그런데 그 사이 제목 수집이
+  //   먼저 끝나 promise 가 비면, 예전에는 아래 조건에 걸려 아무것도 다시 그리지
+  //   않아 버튼이 영영 사라졌다(제보: 간혹 진행률 버튼이 안 보임).
+  //   → 아직 완료 표시를 보여 줄 시간이 남아 있으면(completeTimer) 그것도 복구한다.
   function syncVodTitleChangesProgress() {
-    if (
-      vodTitleChangesCollection.promise &&
-      vodTitleChangesCollection.videoNo === getCurrentVideoNo()
-    ) {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo || vodTitleChangesCollection.videoNo !== videoNo) return;
+    if (vodTitleChangesCollection.promise) {
       updateVodTitleChangesProgress(vodTitleChangesCollection.progress);
+      return;
+    }
+    // 수집은 끝났지만 완료 표시를 아직 거두지 않은 구간.
+    if (vodTitleChangesCollection.completeTimer) {
+      updateVodTitleChangesProgress(1, true);
     }
   }
 
@@ -6857,8 +6871,13 @@
       removeVodTitleChangesProgress();
     } finally {
       if (vodTitleChangesCollection.promise === promise) {
-        vodTitleChangesCollection.videoNo = "";
         vodTitleChangesCollection.promise = null;
+        // ⚠ videoNo 는 완료 표시(1.8초)가 끝난 뒤에 비운다. 먼저 비우면 그동안
+        //   syncVodTitleChangesProgress 가 이 영상을 자기 것으로 못 알아봐,
+        //   채팅 활성도가 잠시 가져갔던 자리를 되돌려 놓지 못한다.
+        if (!vodTitleChangesCollection.completeTimer) {
+          vodTitleChangesCollection.videoNo = "";
+        }
       }
     }
   }
@@ -6884,11 +6903,9 @@
       const json = await res.json();
       if (seekPreviewState.videoNo !== videoNo) return; // 그새 영상 전환됨
       const c = json?.content || {};
-      const correction = vodChatCorrections.get(videoNo);
-      // 라이브 다시보기는 liveOpenDate 보유, 업로드 영상은 publishDate만.
-      seekPreviewState.liveOpenAt =
-        correction?.startAt || parsePublishDate(c.liveOpenDate) || 0;
-      seekPreviewState.liveOpenAtCorrected = Boolean(correction?.startAt);
+      // ⚠ liveOpenDate 는 라이브 당시의 실제 방송 시작 시각이다(실측 확인).
+      //   업로드 영상은 이 값이 없고 publishDate 만 있다.
+      seekPreviewState.liveOpenAt = parsePublishDate(c.liveOpenDate) || 0;
       seekPreviewState.publishAt = parsePublishDate(c.publishDate) || 0;
       // 이미 떠 있는 seek preview / 정보 툴팁에 즉시 반영.
       updateSeekPreviewRealtime();
@@ -7006,11 +7023,11 @@
       existing?.remove();
       return;
     }
-    const source = seekPreviewState.liveOpenAtCorrected ? "chat" : "estimate";
+    // ⚠ liveOpenDate 는 라이브 당시의 실제 방송 시작 시각이다(실측 확인). 예전에는
+    //   추정으로 보고 다시보기 채팅으로 보정했지만, 그럴 필요가 없어 표기도 단순화했다.
+    const source = "live-open";
     const tooltip = label
-      ? seekPreviewState.liveOpenAtCorrected
-        ? "다시보기 채팅의 실제 전송 시각과 영상 재생 위치로 보정한 시각입니다."
-        : "다시보기 등록 시각과 영상 길이를 바탕으로 계산한 추정 시각입니다."
+      ? "라이브 방송 시작 시각과 재생 위치로 계산한 실제 시각입니다."
       : `이 시점의 방송 제목: ${broadcastTitle}`;
     if (existing) {
       if (
@@ -7085,19 +7102,9 @@
       );
     }
     if (seekPreviewState.liveOpenAt) {
-      if (seekPreviewState.liveOpenAtCorrected) {
-        parts.push(
-          `방송 시작 시각(채팅 기준) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
-        );
-        parts.push(
-          "※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.",
-        );
-      } else {
-        parts.push(
-          `방송 시작 시각(추정) : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
-        );
-        parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
-      }
+      parts.push(
+        `방송 시작 시각 : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
+      );
     }
     return parts.join("<br>");
   }
@@ -9653,6 +9660,11 @@
   }
 
   function handleCommentTimestampDocumentClick(event) {
+    // ⚠ 코드가 쏜 클릭(.click())은 무시한다. 팔로우 자동 갱신이 사이드바의 '새로고침'
+    //   버튼을 주기적으로 누르는데, 그게 '바깥 클릭'으로 판정돼 열어 둔 '내 채팅 기록'
+    //   패널이 스스로 닫혔다(제보: 자동 갱신을 켜면 창이 꺼짐).
+    //   진짜 사용자 클릭만 isTrusted=true 다.
+    if (!event.isTrusted) return;
     // 기능 켜기/끄기 메뉴 항목 클릭 → 토글.
     const featureToggle = event.target.closest("[data-comment-feature-toggle]");
     if (featureToggle) {
@@ -9851,6 +9863,16 @@
   const CHAT_GRAPH_BUTTON_CLASS = "cheese-chat-graph-button";
   const CHAT_GRAPH_CACHE_PREFIX = "cheeseVodChatGraphCache:";
   const CHAT_GRAPH_BINS = 300; // 구간 수. 재생바 폭보다 촘촘하면 의미가 없다.
+  // ── peak 구간 채팅 특징 ──────────────────────────────────────────────────────
+  // 활성도 수집이 이미 훑는 일반 사용자 채팅만 로컬 분석 모듈에 넘긴다. 사용자
+  // 식별 정보와 원문 채팅은 캐시에 저장하지 않는다.
+  const CHAT_PEAK_TOP_BINS = 5; // 보여 줄 peak 구간 수(채팅·후원 각각)
+  const CHAT_PEAK_TOP_PHRASES = 3; // 구간당 반복 문장
+  const CHAT_PEAK_TOP_KEYWORDS = 3; // 구간당 빈도·특징 키워드
+  const CHAT_PEAK_TOP_EMOJIS = 3; // 구간당 이모티콘
+  const CHAT_PEAK_MIN_PHRASE_COUNT = 5;
+  const CHAT_PEAK_MIN_KEYWORD_COUNT = 2;
+  const CHAT_PEAK_MIN_EMOTICON_COUNT = 2;
   // 순차 수집 상한(무한 루프 방지용 안전장치).
   // ⚠ 예전 60 은 너무 낮았다 — 채팅이 몰리는 영상은 페이지당 1분도 못 나가서
   //   14.4시간 영상이 6% 만 수집되고 나머지가 바닥으로 그려졌다(제보, 실측 984페이지).
@@ -9875,6 +9897,9 @@
   const chatGraphState = {
     videoNo: "",
     bins: null, // [{chat, donation, subscription}]
+    peaks: null, // 구간별 문장·키워드·이모티콘·특징어. 예전 캐시면 null.
+    overall: null, // 영상 전체 상위 문장·키워드·이모티콘. 예전 캐시면 null.
+    emojiUrls: {}, // 이모티콘 키 → 이미지 URL
     loading: false,
     progress: 0, // 0~1. 수집 중 버튼에 퍼센트로 보여 준다.
     shown: false,
@@ -9918,7 +9943,7 @@
           } catch {}
         });
       });
-      if (result.complete) await saveChatGraphCache(videoNo, result.bins);
+      if (result.complete) await saveChatGraphCache(videoNo, result);
       return result;
     });
     vodChatScanCoordinator.promise = promise;
@@ -9934,24 +9959,51 @@
     return promise;
   }
 
+  // 분석 스키마가 다른 캐시는 그래프만 재사용한다. 특징 정보 때문에 채팅을 자동으로
+  // 다시 요청하지 않고, 사용자가 팝오버의 '다시 수집'을 고를 때만 갱신한다.
   async function loadChatGraphCache(videoNo) {
     try {
       const key = `${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`;
       const v = (await chrome.storage.local.get(key))?.[key];
-      return Array.isArray(v?.bins) ? v.bins : null;
+      if (!Array.isArray(v?.bins)) return null;
+      const analysisCurrent =
+        Number(v.analysisVersion) ===
+        Number(CHAT_ACTIVITY_ANALYSIS_API?.SCHEMA_VERSION);
+      return {
+        bins: v.bins,
+        peaks: analysisCurrent && Array.isArray(v.peaks) ? v.peaks : null,
+        overall:
+          analysisCurrent && v.overall && typeof v.overall === "object"
+            ? v.overall
+            : null,
+        emojiUrls:
+          analysisCurrent && v.emojiUrls && typeof v.emojiUrls === "object"
+            ? v.emojiUrls
+            : {},
+      };
     } catch {
       return null;
     }
   }
 
-  // 캐시 보관 개수. 영상 1편당 약 12KB 라, 삭제가 없으면 계속 쌓인다.
+  // 캐시 보관 개수. 특징 후보까지 저장하므로 삭제가 없으면 계속 쌓인다.
   const CHAT_GRAPH_CACHE_MAX = 60;
 
-  async function saveChatGraphCache(videoNo, bins) {
+  async function saveChatGraphCache(videoNo, result) {
     // 원본 채팅(수천 건)은 버리고 집계만 남긴다.
     try {
       await chrome.storage.local.set({
-        [`${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`]: { at: Date.now(), bins },
+        [`${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`]: {
+          at: Date.now(),
+          bins: result.bins,
+          analysisVersion:
+            Number(result.analysisVersion) ||
+            Number(CHAT_ACTIVITY_ANALYSIS_API?.SCHEMA_VERSION) ||
+            0,
+          peaks: result.peaks || null,
+          overall: result.overall || null,
+          emojiUrls: result.emojiUrls || {},
+        },
       });
       // 오래된 것부터 정리한다. ⚠ 이 함수는 버튼을 눌러 수집을 마친 뒤에만
       //   호출되므로(수십 초에 한 번) 전체 스캔 비용이 문제되지 않는다.
@@ -10008,6 +10060,9 @@
       donation: 0,
       subscription: 0,
     }));
+    const chatAnalysis = CHAT_ACTIVITY_ANALYSIS_API?.createAccumulator(
+      CHAT_GRAPH_BINS,
+    );
     const titleChangeTracker =
       CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     const totalMs = duration * 1000;
@@ -10056,9 +10111,17 @@
         if (idx < 0) continue;
         const bin = bins[idx];
         bin.chat += 1;
-        const code = Number(m?.messageTypeCode);
+        const code = Number(m?.messageTypeCode ?? 1);
         if (code === CHAT_TYPE_DONATION) bin.donation += 1;
         else if (code === CHAT_TYPE_SUBSCRIPTION) bin.subscription += 1;
+        // UID·닉네임은 넘기지 않는다. 일반 사용자 메시지인지 여부만 확인해
+        // 기존 활성도 수집의 같은 순회에서 통계에 더한다.
+        CHAT_ACTIVITY_ANALYSIS_API?.addChatMessage(chatAnalysis, {
+          bucketIndex: idx,
+          text: m?.content,
+          emojis: recapChatEmojis(m),
+          analyzable: code === 1 && Boolean(recapChatHash(m)),
+        });
       }
       const next = Number(content?.nextPlayerMessageTime);
       if (!Number.isFinite(next) || next <= cursor) {
@@ -10084,7 +10147,24 @@
       }
     }
     onProgress?.(complete ? 1 : Math.max(0, Math.min(1, cursor / totalMs)));
-    return { bins, complete };
+    // 완료된 데이터만 정리한다. 24개 bucket마다 메인 스레드에 양보해 큰 영상에서
+    // 플레이어가 마지막 TF-IDF 정렬 때문에 오래 멈추지 않게 한다.
+    const analysis =
+      complete && chatAnalysis
+        ? await CHAT_ACTIVITY_ANALYSIS_API.finalizeAccumulatorAsync(chatAnalysis, {
+            shouldCancel: () =>
+              vodChatScanCoordinator.cancel || getCurrentVideoNo() !== videoNo,
+          })
+        : null;
+    const analysisCancelled = complete && chatAnalysis && !analysis;
+    return {
+      bins,
+      complete: complete && !analysisCancelled,
+      analysisVersion: analysis?.schemaVersion || 0,
+      peaks: analysis?.buckets || null,
+      overall: analysis?.overall || null,
+      emojiUrls: analysis?.emojiUrls || {},
+    };
   }
 
   // 사용자 지정 색을 CSS 변수로 흘려보낸다(CSS 는 var 폴백으로 기본색을 갖는다).
@@ -10266,8 +10346,8 @@
     const btnSel = `.${CHAT_GRAPH_BUTTON_CLASS}`;
     updateChatGraphButton(document.querySelector(btnSel));
     try {
-      let bins = await loadChatGraphCache(videoNo);
-      if (!bins || !titleChangeRecord.complete) {
+      let cached = await loadChatGraphCache(videoNo);
+      if (!cached || !titleChangeRecord.complete) {
         const result = await collectVodChatDataShared(videoNo, duration, (p) => {
           chatGraphState.progress = p;
           updateChatGraphButton(document.querySelector(btnSel));
@@ -10277,12 +10357,21 @@
           chatGraphState.bins = null;
           return;
         }
-        bins = result.bins;
+        cached = {
+          bins: result.bins,
+          peaks: result.peaks || null,
+          overall: result.overall || null,
+          emojiUrls: result.emojiUrls || {},
+        };
       }
       // 그 사이 다른 영상으로 옮겼으면 버린다.
       if (getCurrentVideoNo() !== videoNo) return;
-      chatGraphState.bins = bins;
-      chatGraphState.shown = true;
+      chatGraphState.peaks = cached.peaks;
+      chatGraphState.overall = cached.overall || null;
+      chatGraphState.emojiUrls = cached.emojiUrls || {};
+      chatGraphState.bins = cached.bins;
+      // 수집 도중 설정이 꺼졌다면 결과만 캐시하고 UI는 다시 열지 않는다.
+      chatGraphState.shown = chatGraphOn;
       renderChatGraph();
     } finally {
       chatGraphState.loading = false;
@@ -10328,19 +10417,311 @@
       e.stopPropagation();
       void toggleChatGraph();
     });
+    // 우클릭 → 구간 요약 팝오버. 네이티브 컨텍스트 메뉴는 막는다.
+    button.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (document.querySelector(`.${CHAT_PEAK_POPOVER_CLASS}`)) {
+        closeChatPeakPopover();
+      } else {
+        openChatPeakPopover(e.currentTarget);
+      }
+      // 우클릭은 버튼에 포커스를 남긴다 → 툴팁·강조가 고정돼 보인다(배속 버튼과 같은 이유).
+      e.currentTarget.blur();
+    });
     const clipButton = controls.querySelector(".custom__clip-button");
     controls.insertBefore(button, clipButton || controls.firstChild);
     updateChatGraphButton(button);
   }
 
   // 영상이 바뀌면 모아 둔 집계와 표시를 버린다.
+  // ── peak 구간 팝오버(활성도 버튼 우클릭) ────────────────────────────────
+  const CHAT_PEAK_POPOVER_CLASS = "cheese-chat-peak-popover";
+
+  function closeChatPeakPopover() {
+    document
+      .querySelectorAll(`.${CHAT_PEAK_POPOVER_CLASS}`)
+      .forEach((el) => el.remove());
+  }
+
+  // 활성도 상위 구간을 고른다. 이웃한 칸이 함께 뽑히면 같은 장면이 여러 번 나오므로
+  // 이미 고른 구간 주변은 건너뛴다(최소 간격).
+  function pickChatPeaks(bins, field, count) {
+    const gap = Math.max(2, Math.round(CHAT_GRAPH_BINS / 40));
+    const rows = bins
+      .map((bin, idx) => ({ idx, value: Number(bin?.[field]) || 0 }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value);
+    const picked = [];
+    for (const row of rows) {
+      if (picked.length >= count) break;
+      if (picked.some((p) => Math.abs(p.idx - row.idx) < gap)) continue;
+      picked.push(row);
+    }
+    return picked.sort((a, b) => a.idx - b.idx);
+  }
+
+  function chatPeakRange(idx, duration) {
+    return {
+      start: Math.max(0, Math.floor((idx / CHAT_GRAPH_BINS) * duration)),
+      end: Math.max(
+        0,
+        Math.min(
+          Math.ceil(duration),
+          Math.ceil(((idx + 1) / CHAT_GRAPH_BINS) * duration),
+        ),
+      ),
+    };
+  }
+
+  function renderChatTextInsightItems(rows, minCount, limit, emojiUrls, phrase) {
+    return (rows || [])
+      .filter((row) => (Number(row?.count) || 0) >= minCount)
+      .slice(0, limit)
+      .map((row) => {
+        const value = String(row?.term || row?.key || "");
+        if (!value) return "";
+        const text = phrase
+          ? renderRecapMessageHtml(value, emojiUrls)
+          : escapeHtml(value);
+        return (
+          `<span class="cheese-peak-word${phrase ? " is-phrase" : ""}">` +
+          `<span class="cheese-peak-phrase">${text}</span>` +
+          `<b>${Number(row.count).toLocaleString()}</b></span>`
+        );
+      })
+      .join("");
+  }
+
+  function renderChatEmoticonInsightItems(rows, emojiUrls) {
+    return (rows || [])
+      .filter(
+        (row) =>
+          (Number(row?.count) || 0) >= CHAT_PEAK_MIN_EMOTICON_COUNT,
+      )
+      .slice(0, CHAT_PEAK_TOP_EMOJIS)
+      .map((row) => {
+        const key = String(row?.id || row?.key || "");
+        if (!key) return "";
+        const url = row?.imageUrl || emojiUrls?.[key];
+        return url
+          ? `<span class="cheese-peak-emoji">` +
+            `<img src="${escapeAttribute(url)}" alt="${escapeAttribute(row?.name || key)}" loading="lazy"><b>${Number(row.count).toLocaleString()}</b></span>`
+          : `<span class="cheese-peak-emoji">` +
+            `${escapeHtml(row?.name || key)}<b>${Number(row.count).toLocaleString()}</b></span>`;
+      })
+      .join("");
+  }
+
+  function renderChatInsightGroup(title, items, description = "") {
+    if (!items) return "";
+    const titleAttribute = description
+      ? ` title="${escapeAttribute(description)}"`
+      : "";
+    return (
+      `<div class="cheese-peak-insight-group"><h5${titleAttribute}>${escapeHtml(title)}</h5>` +
+      `<div class="cheese-peak-items">${items}</div></div>`
+    );
+  }
+
+  function renderChatPeakItems(peak, emojiUrls, overall = false) {
+    if (!peak) return "";
+    const phrases = renderChatTextInsightItems(
+      peak.phrases,
+      CHAT_PEAK_MIN_PHRASE_COUNT,
+      CHAT_PEAK_TOP_PHRASES,
+      emojiUrls,
+      true,
+    );
+    const keywords = renderChatTextInsightItems(
+      peak.topKeywords,
+      CHAT_PEAK_MIN_KEYWORD_COUNT,
+      CHAT_PEAK_TOP_KEYWORDS,
+      emojiUrls,
+      false,
+    );
+    const emoticons = renderChatEmoticonInsightItems(
+      peak.topEmoticons,
+      emojiUrls,
+    );
+    const features = overall
+      ? ""
+      : renderChatTextInsightItems(
+          peak.tfidfKeywords,
+          CHAT_PEAK_MIN_KEYWORD_COUNT,
+          CHAT_PEAK_TOP_KEYWORDS,
+          emojiUrls,
+          false,
+        );
+    return (
+      renderChatInsightGroup("반복된 문장", phrases) +
+      renderChatInsightGroup("많이 사용한 키워드", keywords) +
+      renderChatInsightGroup(
+        "이 구간의 특징어",
+        features,
+        "상위 빈도 키워드를 제외하고, 전체 방송과 비교해 이 시간대에서 상대적으로 자주 사용된 단어입니다.",
+      ) +
+      renderChatInsightGroup("많이 사용한 이모티콘", emoticons)
+    );
+  }
+
+  // 영상 전체 상위 — 구간과 무관하게 이 방송에서 제일 많이 나온 항목.
+  function renderChatOverallSection(overall, emojiUrls) {
+    const items = renderChatPeakItems(overall, emojiUrls, true);
+    if (!items) return "";
+    return (
+      `<div class="cheese-peak-section cheese-peak-overall">` +
+      `<h4>영상 전체에서 많이 나온 항목</h4>${items}</div>`
+    );
+  }
+
+  function renderChatPeakSection(title, field, bins, peaks, emojiUrls, duration) {
+    const picked = pickChatPeaks(bins, field, CHAT_PEAK_TOP_BINS);
+    if (!picked.length) {
+      return (
+        `<div class="cheese-peak-section"><h4>${escapeHtml(title)}</h4>` +
+        `<p class="cheese-peak-none">해당하는 구간이 없습니다.</p></div>`
+      );
+    }
+    const rows = picked
+      .map((row) => {
+        const range = chatPeakRange(row.idx, duration);
+        const items = renderChatPeakItems(peaks?.[row.idx], emojiUrls);
+        return (
+          `<li><button type="button" data-peak-seek="${range.start}">` +
+          `<time>${escapeHtml(formatSeconds(range.start))} ~ ${escapeHtml(formatSeconds(range.end))}</time>` +
+          `<small>채팅 ${row.value.toLocaleString()}개</small></button>` +
+          (items || `<p class="cheese-peak-none">분석할 일반 채팅이 부족합니다.</p>`) +
+          `</li>`
+        );
+      })
+      .join("");
+    return (
+      `<div class="cheese-peak-section"><h4>${escapeHtml(title)}</h4>` +
+      `<ul>${rows}</ul></div>`
+    );
+  }
+
+  // 예전 방식으로 모아 둔 기록을 새 집계로 갈아 끼운다.
+  // ⚠ 캐시를 먼저 지운다. toggleChatGraph 는 캐시가 있으면 그대로 쓰기 때문에
+  //   지우지 않으면 아무리 눌러도 옛 결과가 다시 뜬다.
+  async function rescanChatGraph() {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo || chatGraphState.loading) return;
+    try {
+      await chrome.storage.local.remove(
+        `${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`,
+      );
+    } catch {
+      // 캐시를 못 지워도 아래에서 새로 모으면 덮어쓴다.
+    }
+    chatGraphState.bins = null;
+    chatGraphState.peaks = null;
+    chatGraphState.overall = null;
+    chatGraphState.emojiUrls = {};
+    // 켜져 있으면 한 번 꺼야 toggleChatGraph 가 수집 경로로 들어간다.
+    if (chatGraphState.shown) {
+      chatGraphState.shown = false;
+      renderChatGraph();
+    }
+    await toggleChatGraph();
+  }
+
+  function openChatPeakPopover(button) {
+    closeChatPeakPopover();
+    const host = button?.parentElement;
+    if (!host) return;
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    const el = document.createElement("div");
+    el.className = CHAT_PEAK_POPOVER_CLASS;
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", "채팅 활성도 구간 요약");
+
+    const bins = chatGraphState.bins;
+    let body;
+    if (!Array.isArray(bins) || !bins.length) {
+      body = `<p class="cheese-peak-none">먼저 채팅 활성도를 수집해 주세요.</p>`;
+    } else if (!chatGraphState.peaks) {
+      // 예전 캐시에는 구간별 특징 집계가 없다. 재수집을 강요하지 않고 안내만 한다.
+      body =
+        `<p class="cheese-peak-none">이 영상은 예전 방식으로 모아 둔 기록이라 ` +
+        `채팅 특징 통계가 없습니다. 위 '다시 수집'을 누르면 볼 수 있습니다.</p>`;
+    } else {
+      body =
+        // 후원 구간은 따로 보여 주지 않는다 — 후원이 몰린 자리의 말은
+        //   대개 채팅 peak 와 겹치거나 유의미한 결과가 없었다.
+        (chatGraphState.overall
+          ? renderChatOverallSection(
+              chatGraphState.overall,
+              chatGraphState.emojiUrls,
+            )
+          : "") +
+        renderChatPeakSection(
+          "채팅이 몰린 구간",
+          "chat",
+          bins,
+          chatGraphState.peaks,
+          chatGraphState.emojiUrls,
+          duration,
+        );
+    }
+    el.innerHTML =
+      `<div class="cheese-peak-head"><strong>구간 요약</strong>` +
+      `<button type="button" data-peak-rescan>다시 수집</button>` +
+      `<button type="button" data-peak-close aria-label="닫기">✕</button></div>` +
+      `<div class="cheese-peak-body">${body}</div>`;
+    if (getComputedStyle(host).position === "static") {
+      host.style.position = "relative";
+    }
+    host.appendChild(el);
+
+    el.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-peak-close]")) {
+        closeChatPeakPopover();
+        return;
+      }
+      if (target.closest("[data-peak-rescan]")) {
+        closeChatPeakPopover();
+        rescanChatGraph();
+        return;
+      }
+      const seek = target.closest("[data-peak-seek]");
+      if (seek) {
+        seekVideoToCommentTimestamp(Number(seek.dataset.peakSeek) || 0);
+      }
+    });
+  }
+
+  // 팝오버 바깥을 누르거나 Esc 면 닫는다. 합성 클릭은 무시한다(자동 갱신 등).
+  document.addEventListener("click", (event) => {
+    if (!event.isTrusted) return;
+    if (!document.querySelector(`.${CHAT_PEAK_POPOVER_CLASS}`)) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest(`.${CHAT_PEAK_POPOVER_CLASS}`)) return;
+    if (target.closest(`.${CHAT_GRAPH_BUTTON_CLASS}`)) return;
+    closeChatPeakPopover();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeChatPeakPopover();
+  });
+
   function resetChatGraphIfVideoChanged() {
     const videoNo = getCurrentVideoNo();
     if (chatGraphState.videoNo && chatGraphState.videoNo !== videoNo) {
       chatGraphState.videoNo = "";
       chatGraphState.bins = null;
+      chatGraphState.peaks = null;
+      chatGraphState.overall = null;
+      chatGraphState.emojiUrls = {};
       chatGraphState.shown = false;
       removeChatGraphLayer();
+      closeChatPeakPopover();
     }
     // 영상이 바뀌면 자동 표시를 다시 한 번 시도할 수 있게 한다.
     if (
@@ -10886,8 +11267,6 @@
   const recapVodStartAtCache = { videoNo: "", at: 0 };
 
   async function recapVodStartAt(videoNo) {
-    const corrected = vodChatCorrections.get(String(videoNo))?.startAt;
-    if (Number(corrected) > 0) return Number(corrected);
     if (
       seekPreviewState.videoNo === String(videoNo) &&
       Number(seekPreviewState.liveOpenAt) > 0
@@ -30264,6 +30643,752 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   const CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS = "cheese-cf-page-favorite";
 
+  // Lucide notebook-pen.
+  const MEMO_ICON = `<svg class="cheese-memo-svg lucide" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4M2 10h4M2 14h4M2 18h4"/><path d="M18.4 2.6a2 2 0 0 1 3 3L16 11l-4 1 1-4Z"/></svg>`;
+  const MEMO_ENABLED_KEY = "cheeseTimelineMemoOn";
+  let memoButtonOn = true; // 설정(기본 켜짐)
+
+  // ── 타임라인 메모 ──────────────────────────────────────────────────────────
+  // 라이브·다시보기를 보며 "시각 + 내용"을 모아 두었다가, 다시보기 댓글에 한 번에
+  // 붙여넣기 위한 기능. 치지직 댓글은 "1:20:14 내용" 형태를 타임라인으로 인식한다.
+  //
+  // ⚠ 라이브에서의 시각 계산: (메모한 순간 − 방송 시작 시각). 절대 시각을 쓰지 않아
+  //   방송 시작과 '다시보기 0초'의 차이가 계산에 끼어들지 않는다.
+  // ⚠ 그래도 보정(offsetSec)은 남긴다. 라이브는 live-status 의 openDate 를, 다시보기는
+  //   videos 의 liveOpenDate 를 쓰는데 두 값이 같다는 근거가 아직 없다. 게다가 메모를
+  //   누르는 시점은 사람의 반응만큼 늦는다. 항목마다가 아니라 '방송 단위'로 민다.
+  const MEMO_BUTTON_CLASS = "cheese-memo-button";
+  const MEMO_WINDOW_CLASS = "cheese-memo-window";
+  const MEMO_STORE_KEY = "cheeseTimelineMemoV1";
+  const MEMO_WINDOW_RECT_KEY = "cheeseTimelineMemoRect";
+  const MEMO_COPY_LIMIT = 5000;
+  const MEMO_SESSION_MAX = 200; // 방송(회차) 보관 상한
+  const MEMO_ITEM_MAX = 2000; // 한 방송의 항목 상한
+  const MEMO_TEXT_MAX = 500;
+  // 라이브 openDate 와 다시보기 liveOpenDate 가 이 안에 있으면 같은 방송으로 본다.
+  // ⚠ 예전에는 시작 시각을 못 믿어 ±10분을 뒀는데, liveOpenDate 가 라이브 당시의
+  //   실제 시작 시각임이 확인돼(실측) 좁혔다. 넓게 두면 방송을 끊고 곧바로 다시 켠
+  //   '다음 회차'가 이전 회차로 합쳐진다. 서로 다른 API 사이의 초 단위 차이만 흡수한다.
+  const MEMO_MATCH_WINDOW_MS = 60 * 1000;
+
+  let memoSessions = []; // [{ id, channelId, channelName, startAt, offsetSec, items }]
+  let memoLoaded = false;
+  let memoActiveId = "";
+  let memoPickerOpen = false; // 방송 선택 드롭다운 열림 여부(커스텀 목록)
+  // 창 위치·크기. 저장소를 기다리면 기본 위치에 떴다가 옮겨져 깜빡인다(제보) →
+  // 한 번 읽어 메모리에 들고 있다가 다음부터는 만들 때 바로 적용한다.
+  let memoWindowRect = null;
+  let memoWindowRectLoaded = false;
+  let memoWindowCleanup = null;
+  let memoSaveTimer = 0;
+
+  const memoTime = (sec) => {
+    const s = Math.max(0, Math.floor(Number(sec) || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const x = s % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${p(m)}:${p(x)}` : `${m}:${p(x)}`;
+  };
+
+  // 보정(offsetSec)을 반영한 최종 재생 위치. 음수로 내려가지 않는다.
+  // 보정은 방송 하나에 통째로 걸린다(항목마다 따로 밀지 않는다).
+  const memoItemSec = (session, item) =>
+    Math.max(0, Math.round(Number(item?.sec) || 0) + (session?.offsetSec || 0));
+
+  // "9/1(월) 20:14" — 같은 채널의 여러 방송을 고르기 위한 표기.
+  const memoSessionLabel = (session) => {
+    const d = new Date(session.startAt);
+    const week = "일월화수목금토"[d.getDay()];
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${d.getDate()}(${week}) ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  // 이 채널의 방송을 최신순으로. 메모가 없는 것은 목록에 두지 않는다.
+  const memoChannelSessions = (channelId) =>
+    memoSessions
+      .filter((s) => s.channelId === channelId && s.items.length)
+      .sort((a, b) => b.startAt - a.startAt);
+
+  const memoLine = (session, item) =>
+    `${memoTime(memoItemSec(session, item))} ${String(item?.text || "").trim()}`;
+
+  // ⚠ 항목(시간+내용)은 절대 쪼개지 않는다. 5000자에 시간만 걸치거나 내용 일부만
+  //   걸쳐도 그 항목 전체를 다음 쪽으로 넘긴다(요청). 한 항목이 혼자 상한을 넘으면
+  //   자기 쪽을 따로 갖되 자르지는 않는다 — UI 에서 그 쪽을 표시해 알린다.
+  function memoPaginate(session, limit = MEMO_COPY_LIMIT) {
+    const pages = [];
+    let current = "";
+    for (const item of session?.items || []) {
+      const line = memoLine(session, item);
+      const next = current ? `${current}\n${line}` : line;
+      if (next.length <= limit) {
+        current = next;
+        continue;
+      }
+      if (current) pages.push(current);
+      current = line;
+    }
+    if (current) pages.push(current);
+    return pages;
+  }
+
+  function normalizeMemoSession(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const channelId = String(raw.channelId || "").toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(channelId)) return null;
+    const startAt = Number(raw.startAt) || 0;
+    if (!startAt) return null;
+    const items = (Array.isArray(raw.items) ? raw.items : [])
+      .map((item) => {
+        const sec = Math.max(0, Math.round(Number(item?.sec)));
+        if (!Number.isFinite(sec)) return null;
+        return {
+          sec,
+          text: String(item?.text || "").slice(0, MEMO_TEXT_MAX),
+          at: Number(item?.at) || 0,
+        };
+      })
+      .filter(Boolean)
+      .slice(-MEMO_ITEM_MAX);
+    return {
+      id: String(raw.id || `${channelId}:${startAt}`),
+      channelId,
+      channelName: String(raw.channelName || "").slice(0, 100),
+      title: String(raw.title || "").slice(0, 200),
+      startAt,
+      offsetSec: Math.max(
+        -3600,
+        Math.min(3600, Math.round(Number(raw.offsetSec) || 0)),
+      ),
+      items,
+    };
+  }
+
+  async function loadMemoSessions() {
+    if (memoLoaded) return memoSessions;
+    const store = chatHistoryStore();
+    if (!store) return memoSessions;
+    try {
+      const data = await store.get(MEMO_STORE_KEY);
+      const raw = data?.[MEMO_STORE_KEY];
+      memoSessions = (Array.isArray(raw) ? raw : [])
+        .map(normalizeMemoSession)
+        .filter(Boolean)
+        .slice(-MEMO_SESSION_MAX);
+    } catch {
+      memoSessions = [];
+    }
+    memoLoaded = true;
+    return memoSessions;
+  }
+
+  function saveMemoSessions() {
+    clearTimeout(memoSaveTimer);
+    memoSaveTimer = window.setTimeout(() => {
+      memoSaveTimer = 0;
+      const store = chatHistoryStore();
+      if (!store) return;
+      try {
+        // 빈 방송은 저장하지 않는다(버튼만 눌러 보고 만 경우).
+        const keep = memoSessions
+          .filter((s) => s.items.length)
+          .slice(-MEMO_SESSION_MAX);
+        store.set({ [MEMO_STORE_KEY]: keep });
+      } catch {}
+    }, 400);
+  }
+
+  // 지금 페이지가 가리키는 방송. 라이브면 openDate, 다시보기면 liveOpenDate 기준으로
+  // 같은 방송을 찾고, 없으면 새로 만든다(라이브에서만 생성 — 다시보기는 이어쓰기만).
+  function findMemoSession(channelId, startAt, { create = false } = {}) {
+    if (!channelId || !startAt) return null;
+    let best = null;
+    let bestGap = Infinity;
+    for (const session of memoSessions) {
+      if (session.channelId !== channelId) continue;
+      const gap = Math.abs(session.startAt - startAt);
+      if (gap <= MEMO_MATCH_WINDOW_MS && gap < bestGap) {
+        best = session;
+        bestGap = gap;
+      }
+    }
+    if (best || !create) return best;
+    const session = {
+      id: `${channelId}:${startAt}`,
+      channelId,
+      channelName: "",
+      title: "",
+      startAt,
+      offsetSec: 0,
+      items: [],
+    };
+    memoSessions.push(session);
+    if (memoSessions.length > MEMO_SESSION_MAX) memoSessions.shift();
+    return session;
+  }
+
+  // 지금 페이지의 방송 맥락. 라이브면 openDate, 다시보기면 liveOpenDate 를 쓴다.
+  //   live : sec = (지금 − 방송 시작) / 1000
+  //   vod  : sec = video.currentTime
+  function memoContext() {
+    const liveId = getCurrentLiveChannelId();
+    if (liveId) {
+      const startAt =
+        liveDetailState.channelId === liveId ? liveDetailState.liveOpenAt : 0;
+      return { kind: "live", channelId: liveId, startAt };
+    }
+    const videoNo = getCurrentVideoNo();
+    if (videoNo) {
+      return {
+        kind: "vod",
+        channelId: currentRecapChannelId(),
+        startAt: seekPreviewState.liveOpenAt || 0,
+      };
+    }
+    return null;
+  }
+
+  // ⚠ 채널 id 와 방송 시작 시각은 다른 기능이 비동기로 채워 넣는다. 버튼을 누른
+  //   시점에 아직 비어 있으면 창이 안 뜨고, 그 사이 값이 채워져 두세 번째 클릭에서야
+  //   열렸다(제보). 여기서 직접 받아 와 첫 클릭에 바로 열리게 한다.
+  async function memoContextReady() {
+    const liveId = getCurrentLiveChannelId();
+    if (liveId) {
+      if (liveDetailState.channelId !== liveId || !liveDetailState.liveOpenAt) {
+        await fetchLiveDetailStartDate(liveId).catch(() => {});
+      }
+      return memoContext();
+    }
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo) return null;
+    if (!currentRecapChannelId()) {
+      await ensureRecapVodChannel().catch(() => {});
+    }
+    if (!seekPreviewState.liveOpenAt) {
+      const startAt = await recapVodStartAt(videoNo);
+      if (startAt && getCurrentVideoNo() === videoNo) {
+        seekPreviewState.liveOpenAt = startAt;
+      }
+    }
+    return memoContext();
+  }
+
+  // 지금 이 순간의 재생 위치(초). 실패하면 null.
+  function memoCurrentSec(context) {
+    if (!context) return null;
+    if (context.kind === "vod") {
+      const t = Number(document.querySelector("video")?.currentTime);
+      return Number.isFinite(t) && t >= 0 ? Math.round(t) : null;
+    }
+    if (!context.startAt) return null;
+    return Math.max(0, Math.round((Date.now() - context.startAt) / 1000));
+  }
+
+  function memoActiveSession() {
+    return memoSessions.find((s) => s.id === memoActiveId) || null;
+  }
+
+  // ⚠ 창을 먼저 '동기적으로' 만든 뒤 내용을 채운다. 예전에는 저장소·API 를 모두
+  //   기다린 다음 만들어서, 그 사이 다시 누르면 창이 아직 없어 open 이 한 번 더
+  //   돌거나(중복) 세 번째 클릭에서 닫혀 버렸다(제보: 간헐적으로 한 번에 안 열림).
+  function openMemoWindow() {
+    let win = document.querySelector(`.${MEMO_WINDOW_CLASS}`);
+    if (!win) {
+      win = document.createElement("div");
+      win.className = memoWindowRectLoaded
+        ? MEMO_WINDOW_CLASS
+        : `${MEMO_WINDOW_CLASS} is-placing`;
+      win.setAttribute("role", "dialog");
+      win.setAttribute("aria-label", "타임라인 메모");
+      win.innerHTML =
+        `<div class="cheese-memo-head"><strong>타임라인 메모</strong>` +
+        `<span class="cheese-memo-sub">불러오는 중…</span>` +
+        `<button type="button" data-memo-close aria-label="닫기">✕</button></div>`;
+      document.body.appendChild(win);
+      memoWindowCleanup = bindMemoWindow(win);
+      if (memoWindowRectLoaded) applyMemoWindowRect(win, memoWindowRect);
+      else void restoreMemoWindowRect(win);
+    }
+    void fillMemoWindow();
+  }
+
+  // 저장소·API 를 기다려 내용을 채운다. 그 사이 창이 닫혔으면 조용히 그만둔다.
+  async function fillMemoWindow() {
+    await loadMemoSessions();
+    const context = await memoContextReady();
+    if (!document.querySelector(`.${MEMO_WINDOW_CLASS}`)) return;
+    if (!context?.channelId) {
+      memoActiveId = "";
+      renderMemoWindow();
+      return;
+    }
+    // ⚠ 다시보기에서도 새로 만들 수 있어야 한다. 라이브를 놓쳤거나 그때 메모하지
+    //   않은 방송도 다시보기를 보며 적을 수 있어야 하기 때문(제보). 시작 시각을
+    //   아는 경우(라이브 다시보기)에만 만든다 — 업로드 영상은 기준점이 없다.
+    const session = findMemoSession(context.channelId, context.startAt, {
+      create: Boolean(context.startAt),
+    });
+    // 이미 다른 방송을 골라 둔 상태면 그 선택을 존중한다(내용 채우기가 늦게 끝나도
+    // 사용자가 고른 방송으로 되돌아가지 않게).
+    if (session && !memoActiveSession()) memoActiveId = session.id;
+    if (session && !session.channelName) {
+      void resolveChannelName(context.channelId).then((name) => {
+        if (!name || !document.querySelector(`.${MEMO_WINDOW_CLASS}`)) return;
+        session.channelName = name;
+        saveMemoSessions();
+        renderMemoWindow();
+      });
+    }
+    renderMemoWindow();
+  }
+
+  function closeMemoWindow() {
+    memoPickerOpen = false; // 다음에 열 때 목록이 펼쳐진 채로 뜨지 않게
+    memoWindowCleanup?.();
+    memoWindowCleanup = null;
+    document.querySelector(`.${MEMO_WINDOW_CLASS}`)?.remove();
+  }
+
+  function renderMemoWindow() {
+    const win = document.querySelector(`.${MEMO_WINDOW_CLASS}`);
+    if (!win) return;
+    const context = memoContext();
+    const session = memoActiveSession();
+    const pages = session ? memoPaginate(session) : [];
+    const over = pages.some((p) => p.length > MEMO_COPY_LIMIT);
+    const canAdd = memoCurrentSec(context) !== null;
+
+    const rows = session?.items.length
+      ? session.items
+          .map(
+            (item, index) =>
+              `<li data-memo-row="${index}">` +
+              `<button type="button" data-memo-seek="${memoItemSec(session, item)}" title="이 위치로 이동">${escapeHtml(memoTime(memoItemSec(session, item)))}</button>` +
+              `<input type="text" data-memo-text="${index}" value="${escapeAttribute(item.text)}" maxlength="${MEMO_TEXT_MAX}" placeholder="내용을 입력하세요">` +
+              `<button type="button" data-memo-del="${index}" aria-label="삭제" title="삭제">✕</button>` +
+              `</li>`,
+          )
+          .join("")
+      : `<li class="cheese-memo-empty">아직 메모가 없습니다. ${
+          context?.kind === "live"
+            ? "방송을 보다가 '지금 시각 추가'를 누르세요."
+            : "재생 중 '지금 시각 추가'를 누르세요."
+        }</li>`;
+
+    const pageButtons = pages.length
+      ? pages
+          .map(
+            (p, i) =>
+              `<button type="button" data-memo-copy="${i}"${p.length > MEMO_COPY_LIMIT ? ' class="is-over"' : ""}>` +
+              `${i + 1}쪽 복사 <small>${p.length.toLocaleString()}자</small></button>`,
+          )
+          .join("")
+      : "";
+
+    // 같은 채널의 다른 방송(다른 날짜)으로 전환하는 목록.
+    // ⚠ 지금 보고 있는 방송이 목록에 없을 수 있다(메모가 아직 0개). 그때도 항목으로
+    //   넣어 줘야 다른 방송을 골랐다가 되돌아올 수 있다. 예전에는 이 항목이 빠져
+    //   목록이 1개로 줄면 드롭다운 자체가 사라졌다(제보).
+    const pickerRows = context?.channelId
+      ? memoChannelSessions(context.channelId)
+      : [];
+    // ⚠ '지금 보고 있는 방송'을 기준으로 넣는다. 활성 방송(session)으로 판단하면
+    //   드롭다운에서 지난 방송을 고르는 순간 현재 방송이 목록에서 빠졌다(제보).
+    //   메모가 0개여도 목록에 있어야 되돌아올 수 있다.
+    const currentSession = context?.channelId
+      ? findMemoSession(context.channelId, context.startAt)
+      : null;
+    for (const extra of [currentSession, session]) {
+      if (extra && !pickerRows.some((x) => x.id === extra.id)) {
+        pickerRows.unshift(extra);
+      }
+    }
+    // ⚠ 네이티브 select 는 옵션 목록 스타일을 브라우저가 정해 창 테마와 겉돈다.
+    //   버튼 + 목록으로 직접 그린다(memoPickerOpen 이 열림 상태를 들고 있다).
+    const active = pickerRows.find((x) => x.id === memoActiveId) || session;
+    const picker = pickerRows.length
+      ? `<div class="cheese-memo-picker${memoPickerOpen ? " is-open" : ""}">` +
+        `<button type="button" data-memo-picker aria-haspopup="listbox" aria-expanded="${memoPickerOpen ? "true" : "false"}">` +
+        `<span>${escapeHtml(active ? memoSessionLabel(active) : "방송 선택")}</span>` +
+        `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>` +
+        `</button>` +
+        (memoPickerOpen
+          ? `<ul role="listbox">` +
+            pickerRows
+              .map(
+                (x) =>
+                  `<li role="option" aria-selected="${x.id === memoActiveId ? "true" : "false"}">` +
+                  `<button type="button" data-memo-pick="${escapeAttribute(x.id)}"${x.id === memoActiveId ? ' class="is-active"' : ""}>` +
+                  `<span>${escapeHtml(memoSessionLabel(x))}</span>` +
+                  `<small>${x.items.length}개</small></button></li>`,
+              )
+              .join("") +
+            `</ul>`
+          : "") +
+        `</div>`
+      : "";
+
+    win.innerHTML =
+      `<div class="cheese-memo-head">` +
+      `<strong>타임라인 메모</strong>` +
+      `<span class="cheese-memo-sub">${escapeHtml(session?.channelName || "")}${
+        session ? ` · ${memoSessionLabel(session)}` : ""
+      }</span>` +
+      picker +
+      `<button type="button" data-memo-close aria-label="닫기">✕</button>` +
+      `</div>` +
+      (session
+        ? `<div class="cheese-memo-tools">` +
+          `<button type="button" data-memo-add${canAdd ? "" : " disabled"}>지금 시각 추가</button>` +
+          `<span class="cheese-memo-offset">` +
+          `보정 <button type="button" data-memo-offset="-5">−5초</button>` +
+          `<button type="button" data-memo-offset="-1">−1</button>` +
+          `<b>${session.offsetSec > 0 ? "+" : ""}${session.offsetSec}초</b>` +
+          `<button type="button" data-memo-offset="1">+1</button>` +
+          `<button type="button" data-memo-offset="5">+5초</button>` +
+          `<button type="button" data-memo-offset="0" title="보정 초기화">↺</button>` +
+          `</span></div>`
+        : `<p class="cheese-memo-note">이 방송의 메모가 없습니다. 라이브를 보는 중에 메모를 시작하면 나중에 이 다시보기에서 이어서 볼 수 있습니다.</p>`) +
+      `<ul class="cheese-memo-list">${rows}</ul>` +
+      (pageButtons
+        ? `<div class="cheese-memo-copy">${pageButtons}` +
+          `<span class="cheese-memo-clear">` +
+          `<button type="button" data-memo-clear="one">이 방송 비우기</button>` +
+          (memoSessions.length > 1
+            ? `<button type="button" data-memo-clear="all">전체 비우기</button>`
+            : "") +
+          `</span>` +
+          (over
+            ? `<small class="cheese-memo-warn">5,000자를 넘는 쪽이 있습니다. 그 쪽은 한 번에 붙여넣지 못할 수 있습니다.</small>`
+            : "") +
+          `</div>`
+        : "");
+  }
+
+  function bindMemoWindow(win) {
+    const onClick = (event) => {
+      const t = event.target;
+      if (!(t instanceof Element)) return;
+      const session = memoActiveSession();
+
+      if (t.closest("[data-memo-close]")) {
+        closeMemoWindow();
+        return;
+      }
+      if (t.closest("[data-memo-picker]")) {
+        memoPickerOpen = !memoPickerOpen;
+        renderMemoWindow();
+        return;
+      }
+      const pick = t.closest("[data-memo-pick]");
+      if (pick) {
+        memoActiveId = pick.dataset.memoPick || "";
+        memoPickerOpen = false;
+        renderMemoWindow();
+        return;
+      }
+      // 목록 밖을 누르면 닫는다(창 안 아무 곳이나).
+      if (memoPickerOpen) {
+        memoPickerOpen = false;
+        renderMemoWindow();
+      }
+      if (t.closest("[data-memo-add]")) {
+        const context = memoContext();
+        const sec = memoCurrentSec(context);
+        if (sec == null || !context?.channelId) return;
+        // ⚠ 지금 보고 있는 방송에 넣는다. 드롭다운으로 지난 방송을 펼쳐 둔 상태에서
+        //   추가하면 그쪽에 들어가 버려, 현재 다시보기에는 아무것도 못 적었다(제보).
+        //   대상이 활성 방송과 다르면 활성도 함께 옮겨 결과가 바로 보이게 한다.
+        const target = findMemoSession(context.channelId, context.startAt, {
+          create: Boolean(context.startAt),
+        });
+        if (!target) return;
+        if (memoActiveId !== target.id) {
+          memoActiveId = target.id;
+          memoPickerOpen = false;
+        }
+        target.items.push({ sec, text: "", at: Date.now() });
+        target.items.sort((a, b) => a.sec - b.sec);
+        if (target.items.length > MEMO_ITEM_MAX) target.items.shift();
+        saveMemoSessions();
+        renderMemoWindow();
+        // 방금 추가한 항목에 바로 입력할 수 있게 포커스를 준다.
+        const index = target.items.findIndex((it) => it.sec === sec);
+        win.querySelector(`[data-memo-text="${index}"]`)?.focus();
+        return;
+      }
+      const offsetBtn = t.closest("[data-memo-offset]");
+      if (offsetBtn && session) {
+        const delta = Number(offsetBtn.dataset.memoOffset);
+        session.offsetSec = delta
+          ? Math.max(-3600, Math.min(3600, session.offsetSec + delta))
+          : 0;
+        saveMemoSessions();
+        renderMemoWindow();
+        return;
+      }
+      const del = t.closest("[data-memo-del]");
+      if (del && session) {
+        session.items.splice(Number(del.dataset.memoDel), 1);
+        saveMemoSessions();
+        renderMemoWindow();
+        return;
+      }
+      const seek = t.closest("[data-memo-seek]");
+      if (seek) {
+        // 다시보기에서만 이동한다(라이브는 그 위치로 갈 수 없다).
+        if (getCurrentVideoNo()) {
+          seekVideoToCommentTimestamp(Number(seek.dataset.memoSeek) || 0);
+        }
+        return;
+      }
+      // ⚠ 비우기는 되돌릴 수 없다. 한 번 더 눌러 확인하게 한다(모달 없이).
+      const clear = t.closest("[data-memo-clear]");
+      if (clear) {
+        const scope = clear.dataset.memoClear;
+        if (clear.dataset.armed !== "1") {
+          win
+            .querySelectorAll("[data-memo-clear]")
+            .forEach((b) => delete b.dataset.armed);
+          clear.dataset.armed = "1";
+          clear.textContent =
+            scope === "all" ? "정말 전체 비울까요?" : "정말 비울까요?";
+          setTimeout(() => {
+            if (clear.isConnected && clear.dataset.armed === "1") {
+              renderMemoWindow(); // 3초 안에 안 누르면 되돌린다
+            }
+          }, 3000);
+          return;
+        }
+        if (scope === "all") {
+          memoSessions = [];
+          memoActiveId = "";
+        } else if (session) {
+          memoSessions = memoSessions.filter((x) => x.id !== session.id);
+          memoActiveId = "";
+        }
+        saveMemoSessions();
+        renderMemoWindow();
+        return;
+      }
+      const copy = t.closest("[data-memo-copy]");
+      if (copy && session) {
+        const pages = memoPaginate(session);
+        const text = pages[Number(copy.dataset.memoCopy)] || "";
+        if (!text) return;
+        void navigator.clipboard
+          ?.writeText(text)
+          .then(() => {
+            copy.classList.add("is-done");
+            setTimeout(() => copy.classList.remove("is-done"), 1200);
+          })
+          .catch(() => {});
+      }
+    };
+    const onInput = (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const index = Number(input.dataset.memoText);
+      const session = memoActiveSession();
+      if (!session || !Number.isFinite(index)) return;
+      const item = session.items[index];
+      if (!item) return;
+      item.text = input.value.slice(0, MEMO_TEXT_MAX);
+      saveMemoSessions();
+      // ⚠ 여기서 전체를 다시 그리면 입력 중 커서가 튄다. 글자 수 표시만 갱신한다.
+      const sub = win.querySelector(".cheese-memo-copy");
+      if (sub) {
+        const pages = memoPaginate(session);
+        win.querySelectorAll("[data-memo-copy]").forEach((btn, i) => {
+          const small = btn.querySelector("small");
+          if (small && pages[i]) {
+            small.textContent = `${pages[i].length.toLocaleString()}자`;
+          }
+        });
+      }
+    };
+    win.addEventListener("click", onClick);
+    win.addEventListener("input", onInput);
+    const dragCleanup = bindMemoWindowDrag(win);
+    const rectCleanup = bindMemoWindowRect(win);
+    return () => {
+      win.removeEventListener("click", onClick);
+      win.removeEventListener("input", onInput);
+      dragCleanup();
+      rectCleanup();
+    };
+  }
+
+  // 창 위치·크기 기억(채팅 리캡 검색창과 같은 방식).
+  // 저장된 값이 이미 있으면 '그리기 전에' 그대로 적용한다(깜빡임 없음).
+  function applyMemoWindowRect(win, rect) {
+    if (!rect || typeof rect !== "object") return;
+    const w = Number(rect.w);
+    const h = Number(rect.h);
+    const left = Number(rect.left);
+    const top = Number(rect.top);
+    if (Number.isFinite(w) && w > 200) win.style.width = `${w}px`;
+    if (Number.isFinite(h) && h > 160) win.style.height = `${h}px`;
+    // 창 밖으로 나가 있으면 화면 안으로 당긴다(모니터 구성이 바뀐 경우).
+    if (Number.isFinite(left) && Number.isFinite(top)) {
+      win.style.left = `${Math.min(Math.max(8, left), Math.max(8, innerWidth - 120))}px`;
+      win.style.top = `${Math.min(Math.max(8, top), Math.max(8, innerHeight - 60))}px`;
+      win.style.right = "auto";
+      win.style.bottom = "auto";
+    }
+  }
+
+  // 최초 1회만 저장소를 읽는다. 그때는 창을 잠깐 감춰 두고(is-placing) 적용 뒤 보인다.
+  async function restoreMemoWindowRect(win) {
+    if (memoWindowRectLoaded) {
+      applyMemoWindowRect(win, memoWindowRect);
+      win.classList.remove("is-placing");
+      return;
+    }
+    const store = chatHistoryStore();
+    if (!store) {
+      memoWindowRectLoaded = true;
+      win.classList.remove("is-placing");
+      return;
+    }
+    try {
+      const data = await store.get(MEMO_WINDOW_RECT_KEY);
+      const rect = data?.[MEMO_WINDOW_RECT_KEY];
+      if (rect && typeof rect === "object") memoWindowRect = rect;
+    } catch {}
+    memoWindowRectLoaded = true;
+    if (!win.isConnected) return;
+    applyMemoWindowRect(win, memoWindowRect);
+    win.classList.remove("is-placing");
+  }
+
+  function saveMemoWindowRect(win) {
+    const store = chatHistoryStore();
+    if (!store) return;
+    const rect = win.getBoundingClientRect();
+    memoWindowRect = {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    };
+    memoWindowRectLoaded = true;
+    try {
+      store.set({ [MEMO_WINDOW_RECT_KEY]: memoWindowRect });
+    } catch {}
+  }
+
+  // 크기 조절은 CSS resize 로 맡기고, 놓는 순간에만 저장한다(리사이즈 중 저장 폭주 방지).
+  function bindMemoWindowRect(win) {
+    let resizing = false;
+    const onDown = (event) => {
+      if (event.button !== 0) return;
+      const rect = win.getBoundingClientRect();
+      resizing =
+        rect.right - event.clientX <= 18 && rect.bottom - event.clientY <= 18;
+    };
+    const onUp = () => {
+      if (!resizing) return;
+      resizing = false;
+      saveMemoWindowRect(win);
+    };
+    win.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      win.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }
+
+  function bindMemoWindowDrag(win) {
+    let drag = null;
+    const move = (event) => {
+      if (!drag) return;
+      const maxLeft = Math.max(8, innerWidth - win.offsetWidth - 8);
+      const maxTop = Math.max(8, innerHeight - 64);
+      win.style.left = `${Math.min(maxLeft, Math.max(8, drag.left + event.clientX - drag.x))}px`;
+      win.style.top = `${Math.min(maxTop, Math.max(8, drag.top + event.clientY - drag.y))}px`;
+      win.style.right = "auto";
+      win.style.bottom = "auto";
+    };
+    const up = () => {
+      if (!drag) return;
+      drag = null;
+      win.querySelector(".cheese-memo-head")?.classList.remove("is-dragging");
+      saveMemoWindowRect(win);
+    };
+    const down = (event) => {
+      const head = event.target.closest?.(".cheese-memo-head");
+      if (!head || event.button !== 0) return;
+      // ⚠ 머리말 안의 조작 요소는 드래그로 삼지 않는다. select 를 빠뜨려 두면
+      //   아래 preventDefault 가 드롭다운이 열리는 것까지 막는다(제보: 방송 선택이
+      //   눌리지 않음).
+      if (event.target.closest("button, input, select, textarea, a")) return;
+      const rect = win.getBoundingClientRect();
+      drag = {
+        x: event.clientX,
+        y: event.clientY,
+        left: rect.left,
+        top: rect.top,
+      };
+      head.classList.add("is-dragging");
+      event.preventDefault();
+    };
+    win.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      win.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }
+
+  // 즐겨찾기 버튼 옆에 메모 버튼을 둔다. 배치·스타일 수집 방식은 즐겨찾기 버튼과 같다.
+  function ensureMemoButton() {
+    const existing = [...document.querySelectorAll(`.${MEMO_BUTTON_CLASS}`)];
+    const supported = /^\/(?:live|video)\//.test(location.pathname);
+    if (!memoButtonOn || !supported) {
+      existing.forEach((b) => b.remove());
+      if (!supported) closeMemoWindow();
+      return;
+    }
+    const favorite = document.querySelector(
+      `.${CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS}`,
+    );
+    // 즐겨찾기 버튼이 있으면 그 옆에, 없으면 같은 액션 영역을 직접 찾는다.
+    const anchor = favorite || null;
+    if (!anchor) {
+      existing.forEach((b) => b.remove());
+      return;
+    }
+    let button = existing[0];
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.innerHTML = MEMO_ICON;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (document.querySelector(`.${MEMO_WINDOW_CLASS}`)) closeMemoWindow();
+        else openMemoWindow();
+      });
+    }
+    existing.slice(1).forEach((b) => b.remove());
+    const nativeClasses = [...anchor.classList].filter(
+      (name) => !name.startsWith("cheese-") && name !== "is-fav",
+    );
+    button.className = `${nativeClasses.join(" ")} ${MEMO_BUTTON_CLASS}`;
+    button.setAttribute("aria-label", "타임라인 메모");
+    button.title = "타임라인 메모";
+    if (anchor.nextElementSibling !== button) anchor.after(button);
+  }
+
   function normalizeActionButtonText(value) {
     return String(value || "")
       .replace(/\s+/g, "")
@@ -34748,6 +35873,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
     applyPopupPlayerFrameScrolling(frame);
     frame.title = "치지직 팝업 플레이어";
+    // 띄우자마자 팝업 프레임에 포커스를 준다 — 곧바로 단축키를 쓸 수 있게(위 mousedown
+    // 주석 참고). 사용자가 부모를 클릭하면 자연히 포커스가 되돌아간다.
+    frame.addEventListener(
+      "load",
+      () => {
+        try {
+          frame.contentWindow?.focus();
+        } catch {}
+      },
+      { once: true },
+    );
     popup.appendChild(frame);
 
     let preparingOverlay = null;
@@ -34859,9 +35995,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // 남고, 그 클로저가 제거된 popup 을 계속 참조해 누수가 된다. 정리 훅에 등록한다.
       cleanups.push(onMouseUp);
     });
-    // 클릭 시 맨 앞으로.
+    // 클릭 시 맨 앞으로 + 팝업 프레임에 포커스.
+    // ⚠ 키보드 이벤트는 '포커스된 문서'에서만 발생한다. 부모(라이브 페이지)에 포커스가
+    //   남아 있으면 팝업 안의 단축키(Shift+A/V, 방향키 seek)가 아예 호출되지 않는다
+    //   (제보: 팝업에서 방향키·오디오 믹서가 안 먹음). 팝업을 조작하면 그 프레임으로
+    //   포커스를 넘겨, 그 뒤 키 입력이 팝업 안에서 처리되게 한다. 부모를 클릭하면
+    //   자연히 부모로 되돌아간다.
     popup.addEventListener("mousedown", () => {
       popup.style.zIndex = String(++popupPlayerZIndex);
+      try {
+        frame.contentWindow?.focus();
+      } catch {
+        // 교차 출처면 접근이 막힐 수 있다 — 그때는 조용히 넘어간다.
+      }
     });
 
     // 리사이즈 핸들 — 미리보기와 동일한 아크 아이콘. CSS resize 대신 직접 구현해야
@@ -37069,273 +38215,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const cardDateCache = new Map(); // videoNo → {publishAt, liveOpenAt} (null=실패/없음)
   const cardDateFetching = new Set(); // 중복 요청 방지
 
-  function normalizeVodChatCorrection(value) {
-    const startAt = Math.round(Number(value?.startAt));
-    const sampleCount = Math.round(Number(value?.sampleCount));
-    const spreadMs = Math.max(0, Math.round(Number(value?.spreadMs)));
-    const updatedAt = Math.round(Number(value?.updatedAt));
-    if (
-      !Number.isFinite(startAt) ||
-      startAt <= 978307200000 ||
-      !Number.isFinite(sampleCount) ||
-      sampleCount < VOD_CHAT_CORRECTION_MIN_SAMPLES ||
-      !Number.isFinite(spreadMs) ||
-      spreadMs > VOD_CHAT_CORRECTION_MAX_SPREAD_MS ||
-      !Number.isFinite(updatedAt) ||
-      updatedAt <= 0 ||
-      Date.now() - updatedAt > VOD_CHAT_CORRECTION_TTL_MS
-    ) {
-      return null;
-    }
-    return { startAt, sampleCount, spreadMs, updatedAt };
-  }
-
-  function applyVodChatCorrectionToViews(videoNo, correction) {
-    if (!videoNo || !correction?.startAt) return;
-    if (seekPreviewState.videoNo === videoNo) {
-      seekPreviewState.liveOpenAt = correction.startAt;
-      seekPreviewState.liveOpenAtCorrected = true;
-      updateSeekPreviewRealtime();
-      updateVideoInfoLabel();
-      if (videoInfoHoverTrigger) {
-        showVideoInfoTooltip(videoInfoHoverTrigger);
-      }
-    }
-
-    if (cardDateCache.has(videoNo)) {
-      const current = cardDateCache.get(videoNo);
-      cardDateCache.set(videoNo, {
-        publishAt: Number(current?.publishAt) || 0,
-        liveOpenAt: correction.startAt,
-        liveOpenAtCorrected: true,
-      });
-      if (
-        cardDateHoverInfo &&
-        cardDateHoverTarget &&
-        cardDateHoverVideoNo === videoNo
-      ) {
-        renderCardDateTooltip(cardDateHoverInfo, cardDateHoverTarget, videoNo);
-      }
-    }
-  }
-
-  async function loadVodChatCorrections() {
-    if (vodChatCorrectionsLoaded) return vodChatCorrections;
-    if (vodChatCorrectionsLoadPromise) return vodChatCorrectionsLoadPromise;
-    vodChatCorrectionsLoadPromise = (async () => {
-      try {
-        const data = await chrome.storage.local.get(VOD_CHAT_CORRECTION_KEY);
-        const raw = data?.[VOD_CHAT_CORRECTION_KEY];
-        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-          Object.entries(raw).forEach(([videoNo, value]) => {
-            if (!/^\d+$/.test(videoNo)) return;
-            const correction = normalizeVodChatCorrection(value);
-            if (correction) vodChatCorrections.set(videoNo, correction);
-          });
-        }
-      } catch {
-        // 캐시를 읽지 못하면 현재 페이지 표본만 사용한다.
-      } finally {
-        vodChatCorrectionsLoaded = true;
-        vodChatCorrectionsLoadPromise = null;
-      }
-
-      const currentVideoNo = getCurrentVideoNo();
-      const current = vodChatCorrections.get(currentVideoNo);
-      if (current) applyVodChatCorrectionToViews(currentVideoNo, current);
-      cardDateCache.forEach((value, videoNo) => {
-        const correction = vodChatCorrections.get(videoNo);
-        if (correction) applyVodChatCorrectionToViews(videoNo, correction);
-      });
-      return vodChatCorrections;
-    })();
-    return vodChatCorrectionsLoadPromise;
-  }
-
-  function scheduleVodChatCorrectionsSave() {
-    if (vodChatCorrectionsSaveTimer) clearTimeout(vodChatCorrectionsSaveTimer);
-    vodChatCorrectionsSaveTimer = window.setTimeout(() => {
-      vodChatCorrectionsSaveTimer = 0;
-      const entries = [...vodChatCorrections.entries()]
-        .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
-        .slice(0, VOD_CHAT_CORRECTION_MAX);
-      vodChatCorrections.clear();
-      const value = {};
-      entries.forEach(([videoNo, correction]) => {
-        vodChatCorrections.set(videoNo, correction);
-        value[videoNo] = correction;
-      });
-      try {
-        chrome.storage.local.set({ [VOD_CHAT_CORRECTION_KEY]: value });
-      } catch {}
-    }, 300);
-  }
-
-  function medianNumber(values) {
-    if (!values.length) return NaN;
-    const sorted = [...values].sort((a, b) => a - b);
-    const middle = Math.floor(sorted.length / 2);
-    return sorted.length % 2
-      ? sorted[middle]
-      : (sorted[middle - 1] + sorted[middle]) / 2;
-  }
-
-  function evaluateVodChatTimeScale(samples, scale, durationMs) {
-    const maxOffset = Number.isFinite(durationMs)
-      ? durationMs + 10 * 60 * 1000
-      : 7 * 24 * 60 * 60 * 1000;
-    const rows = samples
-      .map((sample) => ({
-        offsetMs: sample.playerMessageTime * scale,
-        startAt: sample.messageEpochMs - sample.playerMessageTime * scale,
-      }))
-      .filter(
-        (row) =>
-          Number.isFinite(row.offsetMs) &&
-          row.offsetMs >= 0 &&
-          row.offsetMs <= maxOffset &&
-          Number.isFinite(row.startAt) &&
-          row.startAt > 978307200000 &&
-          row.startAt < Date.now() + 60 * 60 * 1000,
-      );
-    if (rows.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
-
-    const center = medianNumber(rows.map((row) => row.startAt));
-    const inliers = rows.filter(
-      (row) =>
-        Math.abs(row.startAt - center) <= VOD_CHAT_CORRECTION_MAX_SPREAD_MS * 2,
-    );
-    if (inliers.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
-
-    const startAt = medianNumber(inliers.map((row) => row.startAt));
-    const spreadMs = Math.max(
-      ...inliers.map((row) => Math.abs(row.startAt - startAt)),
-    );
-    if (spreadMs > VOD_CHAT_CORRECTION_MAX_SPREAD_MS) return null;
-
-    return {
-      startAt: Math.round(startAt),
-      sampleCount: inliers.length,
-      spreadMs: Math.round(spreadMs),
-      dropped: rows.length - inliers.length,
-      scale,
-    };
-  }
-
-  function buildVodChatCorrection(samples) {
-    if (samples.length < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
-    const distinctOffsets = new Set(
-      samples.map((sample) => String(sample.playerMessageTime)),
-    );
-    if (distinctOffsets.size < VOD_CHAT_CORRECTION_MIN_SAMPLES) return null;
-
-    const video = document.querySelector(
-      "video.webplayer-internal-video, .pzp-pc video, video",
-    );
-    const durationMs =
-      video instanceof HTMLVideoElement && Number.isFinite(video.duration)
-        ? video.duration * 1000
-        : NaN;
-    const candidates = [
-      evaluateVodChatTimeScale(samples, 1, durationMs),
-      evaluateVodChatTimeScale(samples, 1000, durationMs),
-    ]
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          a.spreadMs + a.dropped * 1000 - (b.spreadMs + b.dropped * 1000),
-      );
-    if (!candidates.length) return null;
-    if (candidates.length > 1) {
-      const firstScore = candidates[0].spreadMs + candidates[0].dropped * 1000;
-      const secondScore = candidates[1].spreadMs + candidates[1].dropped * 1000;
-      // 두 단위가 비슷하게 맞으면 표본이 더 벌어질 때까지 성급히 결정하지 않는다.
-      if (secondScore - firstScore < 500) return null;
-    }
-
-    const correction = candidates[0];
-    const publishAt = seekPreviewState.publishAt;
-    if (publishAt) {
-      if (correction.startAt > publishAt + 60 * 60 * 1000) return null;
-      const oldestPlausible =
-        publishAt -
-        (Number.isFinite(durationMs) ? durationMs : 0) -
-        48 * 60 * 60 * 1000;
-      if (correction.startAt < oldestPlausible) return null;
-    }
-    return correction;
-  }
-
-  function addVodChatTimeAnchor(data) {
-    const videoNo = String(data?.videoNo || "");
-    const messageEpochMs = Number(data?.messageEpochMs);
-    const playerMessageTime = Number(data?.playerMessageTime);
-    if (
-      !/^\d+$/.test(videoNo) ||
-      videoNo !== getCurrentVideoNo() ||
-      !Number.isFinite(messageEpochMs) ||
-      messageEpochMs <= 978307200000 ||
-      !Number.isFinite(playerMessageTime) ||
-      playerMessageTime < 0
-    ) {
-      return;
-    }
-
-    let samples = vodChatAnchorSamples.get(videoNo);
-    if (!samples) {
-      if (vodChatAnchorSamples.size >= 12) {
-        const oldestVideoNo = vodChatAnchorSamples.keys().next().value;
-        if (oldestVideoNo !== undefined) {
-          vodChatAnchorSamples.delete(oldestVideoNo);
-        }
-      }
-      samples = [];
-      vodChatAnchorSamples.set(videoNo, samples);
-    }
-    const key = `${messageEpochMs}|${playerMessageTime}`;
-    if (samples.some((sample) => sample.key === key)) return;
-    samples.push({ key, messageEpochMs, playerMessageTime });
-    if (samples.length > 24) samples.splice(0, samples.length - 24);
-
-    const correction = buildVodChatCorrection(samples);
-    if (!correction) return;
-    const current = vodChatCorrections.get(videoNo);
-    if (
-      current &&
-      current.sampleCount >= correction.sampleCount &&
-      current.spreadMs <= correction.spreadMs &&
-      Math.abs(current.startAt - correction.startAt) <= 500
-    ) {
-      applyVodChatCorrectionToViews(videoNo, current);
-      return;
-    }
-
-    const next = {
-      startAt: correction.startAt,
-      sampleCount: correction.sampleCount,
-      spreadMs: correction.spreadMs,
-      updatedAt: Date.now(),
-    };
-    vodChatCorrections.set(videoNo, next);
-    applyVodChatCorrectionToViews(videoNo, next);
-    scheduleVodChatCorrectionsSave();
-  }
-
-  window.addEventListener("message", (event) => {
-    if (
-      !IS_TOP_FRAME ||
-      event.origin !== location.origin ||
-      event.data?.source !== VOD_CHAT_TIME_ANCHOR_SOURCE
-    ) {
-      return;
-    }
-    void loadVodChatCorrections().then(() => {
-      addVodChatTimeAnchor(event.data);
-    });
-  });
-
-  if (IS_TOP_FRAME) void loadVodChatCorrections();
-
   // 정보 줄 요소가 속한 카드에서 videoNo를 추출한다(_information_은 /video/ 앵커의
   // 형제라 카드 컨테이너로 올라가 앵커를 찾는다). 못 찾으면 "".
   function cardVideoNoFromInfo(info) {
@@ -37399,27 +38278,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         { credentials: "include", headers: { accept: "application/json" } },
       );
       if (!res.ok) {
-        const correction = vodChatCorrections.get(videoNo);
-        cardDateCache.set(
-          videoNo,
-          correction
-            ? {
-                publishAt: 0,
-                liveOpenAt: correction.startAt,
-                liveOpenAtCorrected: true,
-              }
-            : null,
-        );
+        cardDateCache.set(videoNo, null);
         return;
       }
       const json = await res.json();
       const c = json?.content || {};
-      const correction = vodChatCorrections.get(videoNo);
       cardDateCache.set(videoNo, {
         publishAt: parsePublishDate(c.publishDate) || 0,
-        liveOpenAt:
-          correction?.startAt || parsePublishDate(c.liveOpenDate) || 0,
-        liveOpenAtCorrected: Boolean(correction?.startAt),
+        liveOpenAt: parsePublishDate(c.liveOpenDate) || 0,
       });
     } catch {
       cardDateCache.set(videoNo, null);
@@ -37483,19 +38349,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (dates.publishAt)
       parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
     if (dates.liveOpenAt) {
-      if (dates.liveOpenAtCorrected) {
-        parts.push(
-          `방송 시작 시각(채팅 기준) : ${formatKstClock(dates.liveOpenAt)}`,
-        );
-        parts.push(
-          "※ 다시보기 채팅의 전송 시각과 영상 재생 위치로 보정했습니다.",
-        );
-      } else {
-        parts.push(
-          `방송 시작 시각(추정) : ${formatKstClock(dates.liveOpenAt)}`,
-        );
-        parts.push("※ 업로드 처리 시간에 따라 실제 시각과 다를 수 있습니다.");
-      }
+      parts.push(`방송 시작 시각 : ${formatKstClock(dates.liveOpenAt)}`);
     }
     if (!parts.length) return;
     const label = getCardDateFloatEl();
@@ -46768,6 +47622,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     "streamStats",
     "tabMute",
     "screenshotButton",
+    "speedButton",
   ];
 
   // 기본 플레이어에서 '기능도 끄기'를 껐을 때, 숨김 대상 버튼을 CSS 로만 숨기기 위한
@@ -46888,6 +47743,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     WHEEL_VOLUME_KEY,
     WHEEL_VOLUME_RIGHTCLICK_KEY,
     WHEEL_VOLUME_SCOPE_KEY,
+    MEMO_ENABLED_KEY,
     WHEEL_VOLUME_STEP_KEY,
     ACTION_OVERLAY_KEY,
     ACTION_OVERLAY_POS_KEY,
@@ -47072,6 +47928,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 클릭 시 바로 켜기, 패널 안 열기)은 좌클릭 on/off · 우클릭 패널로 대체됐다.
   // 남겨 두면 내보내기 파일에만 따라다니므로 한 번 지운다.
   const RETIRED_CLICK_OPTION_KEYS = [
+    // 다시보기 채팅으로 방송 시작 시각을 보정하던 캐시. liveOpenDate 가 실제
+    // 시작 시각임이 확인돼 보정 자체를 걷어냈다(저장된 값도 정리한다).
+    "cheeseVodChatTimeCorrections",
     "cheeseMixerBeginner",
     "cheeseMixerClickActivate",
     "cheeseMixerClickNoPanel",
@@ -47210,6 +48069,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       volumePct = data?.[VOLUME_PCT_KEY] !== false; // 미설정=기본 ON
       wheelVolume = data?.[WHEEL_VOLUME_KEY] === true; // 미설정=기본 OFF
       wheelVolumeRightClick = data?.[WHEEL_VOLUME_RIGHTCLICK_KEY] === true; // 기본 OFF
+      memoButtonOn = data?.[MEMO_ENABLED_KEY] !== false; // 기본 켜짐
       wheelVolumeScope = WHEEL_VOLUME_SCOPES.includes(
         data?.[WHEEL_VOLUME_SCOPE_KEY],
       )
@@ -47706,6 +48566,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         wheelVolumeRightClick =
           changes[WHEEL_VOLUME_RIGHTCLICK_KEY].newValue === true;
       }
+      if (changes[MEMO_ENABLED_KEY]) {
+        memoButtonOn = changes[MEMO_ENABLED_KEY].newValue !== false;
+        ensureMemoButton();
+        if (!memoButtonOn) closeMemoWindow();
+      }
       if (changes[WHEEL_VOLUME_SCOPE_KEY]) {
         const next = changes[WHEEL_VOLUME_SCOPE_KEY].newValue;
         wheelVolumeScope = WHEEL_VOLUME_SCOPES.includes(next) ? next : "video";
@@ -47929,6 +48794,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[POPUP_PLAYER_WIDE_KEY]) {
         popupPlayerWide = changes[POPUP_PLAYER_WIDE_KEY].newValue !== false;
+        // ⚠ 이 값은 wideScreenAuto 플래그로 MAIN world 에 전달된다. 알리지 않으면
+        //   팝업 안 audioMixer.js 가 예전 값을 계속 써서 설정을 바꿔도 넓은 화면이
+        //   적용되지 않았다(제보). 버튼·최대화질 쪽은 이미 알리고 있었다.
+        if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
       }
       if (changes[POPUP_PLAYER_START_WITHOUT_CHAT_KEY]) {
         popupPlayerStartWithoutChat =
@@ -48256,6 +49125,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (!chatGraphOn) {
           chatGraphState.shown = false;
           removeChatGraphLayer();
+          closeChatPeakPopover();
+          // 방송 제목 변경 확인도 꺼져 있다면 이 전수 순회를 계속할 이유가 없다.
+          // 두 기능이 공유 중이면 제목 기록을 위해 수집을 끝까지 유지한다.
+          if (!vodTitleChangesOn && chatGraphState.loading) {
+            chatGraphState.cancel = true;
+            vodChatScanCoordinator.cancel = true;
+          }
         }
       }
       if (
@@ -48856,6 +49732,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ensureVideoVaultCardButtons(); // 다시보기 카드별 보관 아이콘
       ensureChannelLiveButton(); // 채널 홈 탭리스트에 라이브 바로가기 버튼 보장
       ensureCustomFollowPageFavoriteButton(); // 팔로잉 채널 페이지 액션 영역의 즐겨찾기 버튼 보장
+      ensureMemoButton(); // 즐겨찾기 버튼 옆 타임라인 메모 버튼
       ensureVideoVaultDetailButton(); // 다시보기 상세 액션 영역의 보관함 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
       applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용

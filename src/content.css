@@ -1271,8 +1271,7 @@ html.cheese-channel-live-profile-custom
   cursor: pointer;
 }
 
-.cheese-search-date-picker:has([data-time-input])
-  .cheese-search-date-trigger {
+.cheese-search-date-picker:has([data-time-input]) .cheese-search-date-trigger {
   min-width: 190px;
 }
 
@@ -1768,13 +1767,11 @@ html.cheese-channel-live-profile-custom
   opacity: 0.45;
 }
 
-.cheese-search-time-picker.is-disabled
-  .cheese-search-time-segment:hover {
+.cheese-search-time-picker.is-disabled .cheese-search-time-segment:hover {
   background: transparent;
 }
 
-.cheese-search-time-picker.is-disabled
-  .cheese-search-time-period button {
+.cheese-search-time-picker.is-disabled .cheese-search-time-period button {
   cursor: not-allowed;
 }
 
@@ -5802,6 +5799,19 @@ html.cheese-channel-profile-radius-enabled
   gap: 3px;
   font-size: 13px;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+}
+/* ⚠ 이름 래퍼. 폴백(네이티브 클래스를 아직 harvest 못 한 상태)에서 이 규칙이 없어
+   .cheese-cf-name(display:flex) 의 자식이 줄어들지 못했고, 이름이 한 글자씩 세로로
+   쪼개져 보였다(제보: 브라우저 시작 탭으로 열면 '김뿡/마인/크래/프트'). min-width:0
+   이 있어야 flex 자식이 부모 폭 아래로 줄어든다. */
+.cheese-cf-ellipsis {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
 }
 .cheese-cf-text {
   overflow: hidden;
@@ -14664,8 +14674,7 @@ img.cheese-recap-emoji {
 
 .cheese-chat-history-panel {
   background: var(--cheese-platter-background-neutral-base, #fff);
-  border-bottom: 1px solid
-    var(--cheese-platter-border-neutral-base, #c0c1c2);
+  border-bottom: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
   border-top: 1px solid var(--cheese-platter-border-neutral-base, #c0c1c2);
   box-sizing: border-box;
   color: var(--cheese-platter-content-neutral-primary, #0e0f10);
@@ -14735,7 +14744,10 @@ img.cheese-recap-emoji {
 
 .cheese-chat-history-icon-button:hover,
 .cheese-chat-history-icon-button:focus-visible {
-  background: var(--cheese-platter-surface-interaction-lighten-hovered, #0000000d);
+  background: var(
+    --cheese-platter-surface-interaction-lighten-hovered,
+    #0000000d
+  );
   outline: none;
 }
 
@@ -14755,7 +14767,9 @@ img.cheese-recap-emoji {
   right: 0;
   top: calc(100% + 4px);
   transform: translateY(-2px);
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   white-space: nowrap;
   z-index: 2;
 }
@@ -14794,4 +14808,585 @@ img.cheese-recap-emoji {
 
 .cheese-chat-history-panel-row * {
   max-width: 100%;
+}
+
+/* ── 타임라인 메모 창 ─────────────────────────────────────────────────────── */
+/* 라이브·다시보기를 보며 "시각 + 내용"을 모아 두고, 다시보기 댓글에 5,000자씩
+   나눠 붙여넣기 위한 창. 위치·크기는 채팅 리캡 검색창과 같은 방식으로 기억한다.
+   ⚠ 색은 자체 토큰으로 정의한다. 치지직 변수를 직접 쓰면 라이트/다크에서 값이
+   비거나 대비가 뒤집혀 눈이 아팠다(제보). 다크 판정은 치지직이 붙이는
+   .theme_dark 클래스를 따른다(prefers-color-scheme 은 치지직 설정과 어긋난다). */
+.cheese-memo-window {
+  --memo-bg: #ffffff;
+  --memo-surface: #f6f7f8;
+  --memo-border: #dcdfe3;
+  --memo-text: #17191c;
+  --memo-muted: #6b7178;
+  --memo-accent: #00b843;
+  --memo-accent-text: #ffffff;
+  --memo-danger: #d64535;
+
+  background: var(--memo-bg);
+  border: 1px solid var(--memo-border);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgb(0 0 0 / 22%);
+  color: var(--memo-text);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: min(520px, calc(100vh - 40px));
+  left: max(20px, calc(50vw - 230px));
+  max-height: calc(100vh - 16px);
+  max-width: calc(100vw - 16px);
+  min-height: 260px;
+  min-width: 320px;
+  overflow: hidden;
+  position: fixed;
+  resize: both;
+  top: 20px;
+  width: min(460px, calc(100vw - 40px));
+  z-index: 2147483000;
+}
+
+.theme_dark .cheese-memo-window,
+html.theme_dark .cheese-memo-window {
+  --memo-bg: #17191c;
+  --memo-surface: #212429;
+  --memo-border: #333840;
+  --memo-text: #eceef0;
+  --memo-muted: #9aa1a9;
+  --memo-accent: #00e693;
+  --memo-accent-text: #10221a;
+  --memo-danger: #ff6f61;
+
+  box-shadow: 0 14px 40px rgb(0 0 0 / 50%);
+}
+
+/* 저장된 위치를 처음 읽는 동안만 감춘다. 기본 위치에 떴다가 옮겨지면 깜빡인다.
+   (두 번째부터는 메모리 캐시로 바로 적용해 이 클래스가 붙지 않는다.) */
+.cheese-memo-window.is-placing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cheese-memo-head {
+  align-items: center;
+  border-bottom: 1px solid var(--memo-border);
+  cursor: grab;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  user-select: none;
+}
+.cheese-memo-head.is-dragging {
+  cursor: grabbing;
+}
+.cheese-memo-head strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+.cheese-memo-sub {
+  color: var(--memo-muted);
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-memo-head [data-memo-close] {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--memo-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 5px 7px;
+}
+.cheese-memo-head [data-memo-close]:hover {
+  background: var(--memo-surface);
+  color: var(--memo-text);
+}
+
+/* 방송 선택 드롭다운(커스텀). 네이티브 select 는 옵션 목록을 브라우저가 그려
+   창 테마와 겉돌고, 다크에서 특히 어색했다(제보) → 버튼 + 목록으로 직접 그린다. */
+.cheese-memo-picker {
+  flex: none;
+  position: relative;
+}
+.cheese-memo-picker > button {
+  align-items: center;
+  background: var(--memo-surface);
+  border: 1px solid var(--memo-border);
+  border-radius: 6px;
+  color: var(--memo-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 5px;
+  max-width: 180px;
+  padding: 5px 7px;
+}
+.cheese-memo-picker > button:hover,
+.cheese-memo-picker.is-open > button {
+  border-color: var(--memo-accent);
+}
+.cheese-memo-picker > button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-memo-picker > button svg {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+.cheese-memo-picker.is-open > button svg {
+  transform: rotate(180deg);
+}
+.cheese-memo-picker ul {
+  background: var(--memo-bg);
+  border: 1px solid var(--memo-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  list-style: none;
+  margin: 0;
+  max-height: 240px;
+  min-width: 100%;
+  overflow-y: auto;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  white-space: nowrap;
+  z-index: 5;
+}
+.cheese-memo-picker li button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--memo-text);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+.cheese-memo-picker li button:hover {
+  background: var(--memo-surface);
+}
+.cheese-memo-picker li button.is-active {
+  color: var(--memo-accent);
+  font-weight: 700;
+}
+.cheese-memo-picker li small {
+  color: var(--memo-muted);
+  margin-left: auto;
+}
+
+.cheese-memo-tools {
+  align-items: center;
+  border-bottom: 1px solid var(--memo-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.cheese-memo-tools [data-memo-add] {
+  background: var(--memo-accent);
+  border: 0;
+  border-radius: 6px;
+  color: var(--memo-accent-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+.cheese-memo-tools [data-memo-add]:disabled {
+  background: var(--memo-surface);
+  color: var(--memo-muted);
+  cursor: not-allowed;
+}
+/* 보정: 라이브 시작 시각이 실제와 어긋날 때 방송 전체를 통째로 민다. */
+.cheese-memo-offset {
+  align-items: center;
+  color: var(--memo-muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 3px;
+  margin-left: auto;
+}
+.cheese-memo-offset button {
+  background: var(--memo-surface);
+  border: 1px solid var(--memo-border);
+  border-radius: 5px;
+  color: var(--memo-text);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+.cheese-memo-offset button:hover {
+  border-color: var(--memo-accent);
+  color: var(--memo-accent);
+}
+.cheese-memo-offset b {
+  color: var(--memo-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: center;
+}
+
+.cheese-memo-list {
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+.cheese-memo-list li {
+  align-items: center;
+  border-radius: 6px;
+  display: flex;
+  gap: 6px;
+  padding: 3px 4px;
+}
+.cheese-memo-list li:hover {
+  background: var(--memo-surface);
+}
+.cheese-memo-list [data-memo-seek] {
+  background: var(--memo-surface);
+  border: 1px solid var(--memo-border);
+  border-radius: 5px;
+  color: var(--memo-text);
+  cursor: pointer;
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  padding: 4px 6px;
+}
+.cheese-memo-list [data-memo-seek]:hover {
+  border-color: var(--memo-accent);
+  color: var(--memo-accent);
+}
+.cheese-memo-list input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--memo-text);
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  padding: 5px 6px;
+}
+.cheese-memo-list input::placeholder {
+  color: var(--memo-muted);
+}
+.cheese-memo-list input:focus {
+  background: var(--memo-bg);
+  border-color: var(--memo-accent);
+  outline: none;
+}
+.cheese-memo-list [data-memo-del] {
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--memo-muted);
+  cursor: pointer;
+  flex: none;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.cheese-memo-list [data-memo-del]:hover {
+  background: var(--memo-danger);
+  color: #fff;
+}
+.cheese-memo-empty,
+.cheese-memo-note {
+  color: var(--memo-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 12px;
+}
+
+.cheese-memo-copy {
+  align-items: center;
+  border-top: 1px solid var(--memo-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+}
+.cheese-memo-copy button {
+  background: var(--memo-surface);
+  border: 1px solid var(--memo-border);
+  border-radius: 6px;
+  color: var(--memo-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+.cheese-memo-copy button:hover {
+  border-color: var(--memo-accent);
+}
+.cheese-memo-copy button small {
+  color: var(--memo-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.cheese-memo-copy button.is-done {
+  background: var(--memo-accent);
+  border-color: var(--memo-accent);
+  color: var(--memo-accent-text);
+}
+.cheese-memo-copy button.is-done small {
+  color: inherit;
+  opacity: 0.8;
+}
+/* 5,000자를 넘는 쪽(항목을 쪼개지 않기 때문에 생길 수 있다). */
+.cheese-memo-copy button.is-over {
+  border-color: var(--memo-danger);
+}
+/* 비우기: 한 번 더 눌러야 실행된다(되돌릴 수 없어서). */
+.cheese-memo-clear {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.cheese-memo-clear button {
+  background: none;
+  border: 1px solid var(--memo-border);
+  border-radius: 6px;
+  color: var(--memo-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+.cheese-memo-clear button:hover {
+  border-color: var(--memo-danger);
+  color: var(--memo-danger);
+}
+.cheese-memo-clear button[data-armed="1"] {
+  background: var(--memo-danger);
+  border-color: var(--memo-danger);
+  color: #fff;
+  font-weight: 700;
+}
+.cheese-memo-warn {
+  color: var(--memo-danger);
+  flex: 1 0 100%;
+  font-size: 11px;
+}
+
+/* ── 채팅 활성도 구간 요약 팝오버(버튼 우클릭) ───────────────────────────── */
+/* 색은 메모 창과 같은 방식으로 자체 토큰 + .theme_dark 로 정한다(치지직 변수는
+   라이트/다크에서 비거나 대비가 뒤집히는 경우가 있다). */
+.cheese-chat-peak-popover {
+  --peak-bg: #ffffff;
+  --peak-surface: #f6f7f8;
+  --peak-border: #dcdfe3;
+  --peak-text: #17191c;
+  --peak-muted: #6b7178;
+  --peak-accent: #00b843;
+
+  background: var(--peak-bg);
+  border: 1px solid var(--peak-border);
+  border-radius: 10px;
+  bottom: calc(100% + 10px);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
+  color: var(--peak-text);
+  max-height: 60vh;
+  overflow: hidden;
+  position: absolute;
+  right: 0;
+  width: max-content;
+  min-width: 280px;
+  max-width: min(92vw, 420px);
+  z-index: 2147483000;
+}
+
+.theme_dark .cheese-chat-peak-popover,
+html.theme_dark .cheese-chat-peak-popover {
+  --peak-bg: #17191c;
+  --peak-surface: #212429;
+  --peak-border: #333840;
+  --peak-text: #eceef0;
+  --peak-muted: #9aa1a9;
+  --peak-accent: #00e693;
+
+  box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+}
+
+.cheese-peak-head {
+  align-items: center;
+  border-bottom: 1px solid var(--peak-border);
+  display: flex;
+  gap: 6px;
+  padding: 9px 11px;
+}
+/* 헤더의 '다시 수집' — 닫기 버튼 왼쪽. 강조하지 않는다(자주 쓰는 버튼이 아니다). */
+.cheese-peak-head [data-peak-rescan] {
+  background: var(--peak-chip-bg, rgba(127, 127, 127, 0.16));
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  margin-left: auto;
+  padding: 3px 8px;
+}
+.cheese-peak-head [data-peak-rescan]:hover {
+  background: var(--peak-chip-hover, rgba(127, 127, 127, 0.28));
+}
+.cheese-peak-head strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+.cheese-peak-head button {
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--peak-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+.cheese-peak-head button:hover {
+  background: var(--peak-surface);
+  color: var(--peak-text);
+}
+
+.cheese-peak-body {
+  max-height: calc(60vh - 42px);
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+}
+.cheese-peak-section + .cheese-peak-section {
+  border-top: 1px solid var(--peak-border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.cheese-peak-section h4 {
+  color: var(--peak-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  padding: 0 3px;
+}
+.cheese-peak-insight-group + .cheese-peak-insight-group {
+  margin-top: 6px;
+}
+.cheese-peak-insight-group h5 {
+  color: var(--peak-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 0 0 3px;
+  padding: 0 3px;
+}
+.cheese-peak-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cheese-peak-section li {
+  border-radius: 6px;
+  padding: 6px 3px;
+}
+.cheese-peak-section li:hover {
+  background: var(--peak-surface);
+}
+.cheese-peak-section li button {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  padding: 0 3px 2px;
+  width: 100%;
+}
+.cheese-peak-section time {
+  color: var(--peak-accent);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.cheese-peak-section li small {
+  color: var(--peak-muted);
+  font-size: 12px;
+}
+.cheese-peak-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 3px;
+}
+.cheese-peak-word,
+.cheese-peak-emoji {
+  align-items: center;
+  background: var(--peak-surface);
+  border-radius: 5px;
+  display: inline-flex;
+  font-size: 13px;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 8px;
+}
+/* 문장이 길면 칩 하나가 한 줄을 통째로 쓴다 — 옆 칩과 뒤엉키지 않게. */
+.cheese-peak-word {
+  align-items: baseline;
+}
+.cheese-peak-word:not(.is-phrase) .cheese-peak-phrase {
+  white-space: nowrap;
+}
+.cheese-peak-emoji img {
+  display: block;
+  height: 24px;
+  width: 24px;
+}
+/* 문장 칩 안의 치지직 이모티콘({:d_42:})도 그림으로 그린다. 글자와 같은 줄에
+   놓이도록 inline 으로 두고 높이만 맞춘다. */
+/* 문장을 자르지 않는다. 툴팁을 없앤 대신 전체를 보여 줘야 하므로
+   긴 문장은 여러 줄로 흐르게 둔다. */
+.cheese-peak-phrase {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+.cheese-peak-phrase img {
+  height: 22px;
+  vertical-align: -5px;
+  width: 22px;
+}
+/* 횟수는 문장 끝에 붙어 있어야 한다 — 혼자 다음 줄로 떨어지면 뭔지 모른다. */
+.cheese-peak-word b,
+.cheese-peak-emoji b {
+  color: var(--peak-muted);
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+.cheese-peak-none {
+  color: var(--peak-muted);
+  font-size: 12px;
+  margin: 0;
+  padding: 6px 4px;
+}
+
+/* 영상 전체 상위. 구간 목록과 성격이 달라 아래에 경계선을 둔다. */
+.cheese-peak-overall {
+  border-bottom: 1px solid var(--peak-border);
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+}
+.cheese-peak-overall .cheese-peak-items {
+  padding-top: 2px;
 }

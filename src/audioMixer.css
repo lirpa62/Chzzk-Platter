@@ -10,6 +10,36 @@
   color: #ff5454;
 }
 
+/* 재생 속도 버튼(다시보기): 아이콘 대신 현재 배속을 글자로 보여 준다.
+   설정 > 재생 속도를 두 단계 들어가지 않고 바로 바꾸기 위한 버튼이라,
+   '지금 몇 배속인지'가 한눈에 보이는 게 아이콘보다 중요하다. */
+/* 버튼 래퍼(배치 이동 단위). 다른 네이티브 버튼과 세로 정렬을 맞춘다. */
+.cheese-speed-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.cheese-speed-button .pzp-ui-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cheese-speed-button .cheese-speed-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums; /* 1x ↔ 1.25x 전환 시 폭이 덜 흔들린다 */
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+/* 1배속이 아닐 때만 강조 — 평소에는 다른 버튼과 같은 톤으로 둔다. */
+.cheese-speed-button.is-active {
+  color: #00ffa3;
+}
+
 /* ── 스크린샷: 결과 토스트 + 저장 전 미리보기 모달 ────────────────────────── */
 /* 결과 토스트(화면 하단 중앙에서 떠오름). 성공=초록, 실패=빨강 강조. */
 .cheese-screenshot-toast {
@@ -1724,6 +1754,7 @@
 .pzp-pc__bottom-buttons-left .cheese-stream-stats-button .pzp-button__tooltip,
 .pzp-pc__bottom-buttons-left .cheese-tab-mute-button .pzp-button__tooltip,
 .pzp-pc__bottom-buttons-left .cheese-screenshot-button .pzp-button__tooltip,
+.pzp-pc__bottom-buttons-left .cheese-speed-button .pzp-button__tooltip,
 .pzp-pc__bottom-buttons-left .cheese-live-rewind-button .pzp-button__tooltip,
 .pzp-pc__bottom-buttons-left .cheese-live-forward-button .pzp-button__tooltip,
 .pzp-pc__bottom-buttons-left .cheese-live-sync-button .pzp-button__tooltip {

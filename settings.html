@@ -610,9 +610,10 @@
             <p class="settings-group-desc">
               설정만 내보내면 기능 설정, 커스텀 프리셋, 즐겨찾기·그룹, 사용자
               차단과 채팅 필터를 JSON 파일로 저장합니다. 사용자 데이터 포함
-              백업에는 통나무파워 내역, 계정별 클립 보관함과 채널별 오디오
-              믹서·비디오 필터 선택도 함께 담습니다. 캐시, 로그인 자격 증명과
-              실행 중인 타이머는 포함하지 않습니다.
+              백업에는 통나무파워 내역, 계정별 클립·다시보기 보관함, 채팅 리캡,
+              방송 제목 이력, 타임라인 메모와 채널별 오디오 믹서·비디오 필터
+              선택도 함께 담습니다. 캐시, 로그인 자격 증명과 실행 중인 타이머는
+              포함하지 않습니다.
             </p>
             <div class="settings-transfer-actions">
               <button
@@ -779,8 +780,9 @@
                 <label>
                   <span class="settings-item-name">라이브 화면 채우기</span>
                   <span class="settings-item-desc"
-                    >브라우저 높이를 넘지 않는 범위에서 라이브 영상 높이를 조절해
-                    좌우 레터박스를 최소화합니다(체크=사용, 기본 꺼짐)</span
+                    >브라우저 높이를 넘지 않는 범위에서 라이브 영상 높이를
+                    조절해 좌우 레터박스를 최소화합니다(체크=사용, 기본
+                    꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -898,14 +900,19 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item settings-item-stacked">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="player-button-order-vod"
+              >
                 <div>
                   <span class="settings-item-name">버튼 순서·위치</span>
                   <span class="settings-item-desc"
                     >플레이어 하단 버튼을 왼쪽/오른쪽 그룹으로 나누고, 드래그로
                     순서를 바꿉니다. 회색 칩은 이동할 수 없는 기본
                     버튼(재생·볼륨·클립·PIP·설정 등)으로, 내 버튼을 그
-                    사이사이로 끌어 넣을 수 있습니다</span
+                    사이사이로 끌어 넣을 수 있습니다. 초록빛 칩은 다시보기에서만
+                    나타나는 버튼이며, 그중 댓글 타임스탬프와 내 채팅 기록은
+                    오른쪽에만 놓을 수 있습니다</span
                   >
                 </div>
                 <div class="settings-button-order" data-player-button-order>
@@ -2157,9 +2164,9 @@
                   <span class="settings-item-desc"
                     >전체 방송과 팔로잉 동영상 목록의 카드에 보관 아이콘을
                     추가하고, 제목 옆 보관함 버튼에서 저장한 다시보기를
-                    검색·정렬하거나 날짜·스트리머별로 모아볼 수 있습니다. 로그인한
-                    계정별로 나누어 최대 5,000개까지 보관합니다(체크=사용, 기본
-                    꺼짐)</span
+                    검색·정렬하거나 날짜·스트리머별로 모아볼 수 있습니다.
+                    로그인한 계정별로 나누어 최대 5,000개까지
+                    보관합니다(체크=사용, 기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2167,13 +2174,74 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="vod-chat-activity">
+              <li class="settings-item" data-new-feature="timeline-memo">
+                <label>
+                  <span class="settings-item-name">타임라인 메모</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기의 즐겨찾기 버튼 옆에 메모 버튼을
+                    추가합니다. 보면서 "시각 + 내용"을 모아 두었다가 다시보기
+                    댓글에 붙여넣을 수 있게 5,000자씩 나눠 복사합니다.
+                    라이브에서 적은 메모는 그 방송의 다시보기에서
+                    이어집니다(전용 팔로잉 목록의 즐겨찾기 버튼이 켜져 있어야
+                    함, 체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-timeline-memo />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-memo-manage-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">저장된 메모</span>
+                  <span class="settings-item-desc"
+                    >채널·방송별로 저장한 메모입니다. 필요 없는 것을 골라
+                    지우거나 전체를 비울 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-memo-list" data-memo-manage-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-memo-manage-delete disabled>
+                    선택 삭제
+                  </button>
+                  <button type="button" data-memo-manage-clear>
+                    전체 삭제
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-new-feature="vod-speed">
+                <label>
+                  <span class="settings-item-name">재생 속도 버튼</span>
+                  <span class="settings-item-desc"
+                    >다시보기 플레이어에 현재 배속을 표시하는 버튼을 추가합니다.
+                    설정 메뉴를 거치지 않고 클릭으로 다음 단계(0.25~2배,
+                    치지직과 같은 8단계), 휠로 조절, 우클릭으로 1배속
+                    복귀합니다. 단축키는 Shift + &gt; / &lt; / ?
+                    입니다(체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-speed-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="vod-chat-activity-insights"
+              >
                 <label>
                   <span class="settings-item-name">채팅 활성도</span>
                   <span class="settings-item-desc"
                     >다시보기 플레이어에 '채팅 활성도' 버튼을 추가합니다. 버튼을
                     누르면 채팅을 모아 재생바 위에 구간별 밀도를 그리고, 치즈
-                    후원·구독 구간을 함께 표시합니다(체크=사용, 기본 꺼짐)</span
+                    후원·구독 구간을 함께 표시합니다. 버튼을 우클릭하면 영상
+                    전체와 채팅이 몰린 구간의 반복 문장·키워드·이모티콘·특징어를
+                    확인할 수 있습니다. 분석은 브라우저 안에서만 처리합니다(체크=사용,
+                    기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2270,10 +2338,11 @@
                   <span class="settings-item-desc"
                     >방장·매니저가 채팅봇 명령어로 제목을 변경하고 성공 안내가
                     채팅에 남은 경우만 확인하여 재생바 미리보기에 표시합니다.
-                    방송 시작 당시의 최초 제목은 확인할 수 없습니다. 채팅 활성도와
-                    추정 시각 표시 설정에 관계없이 동작하며, 처음 확인하는 영상은
-                    진행률을 플레이어에 표시합니다. 긴 영상에서는 시간이 걸릴 수
-                    있습니다(체크=사용, 기본 꺼짐)</span
+                    방송 시작 당시의 최초 제목은 확인할 수 없습니다. 채팅
+                    활성도와 방송 시각 표시 설정에 관계없이 동작하며, 처음
+                    확인하는 영상은 진행률을 플레이어에 표시합니다. 긴
+                    영상에서는 시간이 걸릴 수 있습니다(체크=사용, 기본
+                    꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2518,10 +2587,10 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name"
-                    >미리보기 방송 시각(추정) 숨김</span
+                    >미리보기 방송 시각 숨김</span
                   >
                   <span class="settings-item-desc"
-                    >등록 시각과 영상 길이를 바탕으로 계산한 방송 당시 추정
+                    >방송 시작 시각과 재생 위치로 계산한 그 장면의 실제
                     시각</span
                   >
                 </label>
@@ -2537,7 +2606,7 @@
                   >
                   <span class="settings-item-desc"
                     >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
-                    방송 시작 추정 시각을 표시(체크=사용)</span
+                    방송 시작 시각을 표시(체크=사용)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -6392,7 +6461,9 @@
                 data-new-feature="popup-player-start-without-chat"
               >
                 <label>
-                  <span class="settings-item-name">└ 채팅 없이 시작 (실험)</span>
+                  <span class="settings-item-name"
+                    >└ 채팅 없이 시작 (실험)</span
+                  >
                   <span class="settings-item-desc"
                     >팝업을 열면 치지직의 채팅 접기 버튼을 눌러 영상만
                     표시합니다. 팝업을 연 뒤에는 채팅을 다시 펼칠 수
@@ -7765,10 +7836,10 @@
                   <span class="settings-item-name">채팅 이어보기</span>
                   <span class="settings-item-desc"
                     >현재 브라우저 세션에서 방송을 보는 동안 지나간 채팅을
-                    방송별로 저장하고, 같은 방송의 <b>이전 채팅</b> 패널에서 다시
-                    보여줍니다. 치지직 기본 채팅 목록의 개수나 동작은 변경하지
-                    않으며 브라우저를 완전히 닫거나 확장을 다시 불러오면 기록이
-                    사라집니다(기본 꺼짐)</span
+                    방송별로 저장하고, 같은 방송의 <b>이전 채팅</b> 패널에서
+                    다시 보여줍니다. 치지직 기본 채팅 목록의 개수나 동작은
+                    변경하지 않으며 브라우저를 완전히 닫거나 확장을 다시
+                    불러오면 기록이 사라집니다(기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -7784,9 +7855,9 @@
                 <div>
                   <span class="settings-item-name">└ 저장할 채팅 수</span>
                   <span class="settings-item-desc"
-                    >방송마다 보관할 최근 채팅 개수입니다(50~500개, 기본
-                    200개). 패널은 50개씩 나눠 그려 채팅이 많은 방송에서도 한 번에
-                    모든 DOM을 만들지 않습니다.</span
+                    >방송마다 보관할 최근 채팅 개수입니다(50~500개, 기본 200개).
+                    패널은 50개씩 나눠 그려 채팅이 많은 방송에서도 한 번에 모든
+                    DOM을 만들지 않습니다.</span
                   >
                 </div>
                 <div class="settings-osd-row">

@@ -51,6 +51,7 @@
     vodGlobalArrowSeek: false,
     tabMute: false,
     screenshotButton: false, // 스크린샷 버튼 숨김(true=숨김, 기본 표시)
+    speedButton: false, // 재생 속도 버튼 숨김(true=숨김, 기본 표시)
   };
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
@@ -87,6 +88,9 @@
     "rewind",
     "sync",
     "forward",
+    "speed",
+    "commentTs",
+    "chatRecap",
     "tabMute",
     "screenshot",
     "streamStats",
@@ -99,6 +103,9 @@
       rewind: "right",
       forward: "right",
       sync: "right",
+      speed: "right",
+      commentTs: "right",
+      chatRecap: "right",
     },
     order: {
       left: [],
@@ -106,6 +113,9 @@
         "rewind",
         "sync",
         "forward",
+        "speed",
+        "commentTs",
+        "chatRecap",
         "tabMute",
         "screenshot",
         "streamStats",
@@ -120,6 +130,9 @@
       rewind: { grp: "right", after: "custom__shop-button" },
       forward: { grp: "right", after: "custom__shop-button" },
       sync: { grp: "right", after: "custom__shop-button" },
+      speed: { grp: "right", after: "custom__shop-button" },
+      commentTs: { grp: "right", after: "custom__shop-button" },
+      chatRecap: { grp: "right", after: "custom__shop-button" },
     },
   };
   // 그룹별 네이티브 앵커 클래스(DOM 순서). arrangePlayerButtons 가 이 순서로 앵커를
@@ -155,6 +168,7 @@
     featureFlags.vodGlobalArrowSeek = f.vodGlobalArrowSeek === true;
     featureFlags.tabMute = f.tabMute === true;
     featureFlags.screenshotButton = f.screenshotButton === true;
+    featureFlags.speedButton = f.speedButton === true;
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
     const mixerAlwaysOnPrev = mixerAlwaysOn;
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
@@ -341,6 +355,17 @@
   let tabMutedState = false; // content.js 응답으로 동기화되는 현재 탭 음소거 상태
   // 스크린샷 버튼(현재 재생 프레임을 PNG로 저장). 표준 canvas.drawImage 기법.
   const SCREENSHOT_BUTTON_CLASS = "cheese-screenshot-button";
+  // 다시보기 재생 속도 버튼(설정 메뉴를 거치지 않고 바로 전환).
+  // ⚠ 단계는 치지직 네이티브 설정과 같게 둔다(0.25~2, 0.25 간격). 우리가 임의로
+  //   더 넓히면 네이티브 메뉴에 없는 값이 걸려 두 UI 표시가 어긋난다.
+  const SPEED_BUTTON_CLASS = "cheese-speed-button";
+  const SPEED_CONTROL_CLASS = "cheese-speed-control";
+  // ⚠ 아래 둘은 content.js(ISOLATED)가 만드는 버튼이다. 우리가 만들지는 않지만
+  //   arrangePlayerButtons 는 클래스로 찾아 옮기므로 배치 대상에 포함할 수 있다.
+  const COMMENT_TS_BUTTON_CLASS = "cheese-search-comment-timestamp-button";
+  const CHAT_RECAP_BUTTON_CLASS = "cheese-chat-recap-button";
+  const SPEED_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  const SPEED_DEFAULT = 1;
   // 음량 슬라이더 조절 시 현재 % 값을 보여주는 툴팁.
   const VOLUME_TOOLTIP_CLASS = "cheese-volume-tooltip";
   const VOLUME_TOOLTIP_HIDE_MS = 700; // 조작 멈춘 뒤 이 시간 후 숨김
@@ -5307,6 +5332,10 @@
     streamStats: [STATS_BUTTON_CLASS],
     tabMute: [TAB_MUTE_BUTTON_CLASS],
     screenshot: [SCREENSHOT_BUTTON_CLASS],
+    // 재생 속도는 말풍선 기준점 때문에 래퍼로 감싸므로 래퍼를 옮긴다.
+    speed: [SPEED_CONTROL_CLASS],
+    commentTs: [COMMENT_TS_BUTTON_CLASS],
+    chatRecap: [CHAT_RECAP_BUTTON_CLASS],
     rewind: [REWIND_BUTTON_CLASS],
     forward: [FORWARD_BUTTON_CLASS],
     sync: [SYNC_BUTTON_CLASS],
@@ -6323,6 +6352,35 @@
     true,
   );
 
+  // 재생 속도 단축키(다시보기 전용). 유튜브와 같은 키를 쓴다.
+  //   Shift + >  빠르게 / Shift + <  느리게 / Shift + ?  1배속 복귀
+  // ⚠ 자판 배열·조합에 따라 e.key 가 ">" 로 올 수도, "." 로 올 수도 있어 둘 다 본다.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.ctrlKey || e.altKey || e.metaKey || !e.shiftKey) return;
+      if (!isVodSeekPage() || featureFlags.speedButton) return;
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
+        return;
+      if (!document.querySelector(".webplayer-internal-video")) return;
+      const key = e.key;
+      let handled = true;
+      if (key === ">" || key === "." || e.code === "Period") {
+        stepPlaybackSpeed(1);
+      } else if (key === "<" || key === "," || e.code === "Comma") {
+        stepPlaybackSpeed(-1);
+      } else if (key === "?" || key === "/" || e.code === "Slash") {
+        resetPlaybackSpeed();
+      } else {
+        handled = false;
+      }
+      if (!handled) return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+
   // 오디오 믹서 단축키(Shift+A). 믹서 버튼이 표시된 상태에서 타이핑 중이 아닐 때만,
   // 버튼 클릭과 동일하게 동작(패널 토글 또는 즉시 활성화 옵션 반영).
   document.addEventListener(
@@ -6337,7 +6395,12 @@
       if (!document.querySelector(".webplayer-internal-video")) return;
       e.preventDefault();
       e.stopPropagation();
-      handleMixerButtonClick();
+      // ⚠ '항상 켜기'면 좌클릭과 같은 on/off 는 의미가 없다(끌 수 없다는 안내만 뜬다).
+      //   그 상태에서 단축키는 패널을 연다 — 안 그러면 팝업 플레이어처럼 버튼을 누르기
+      //   번거로운 곳에서 설정을 바꿀 방법이 없다(제보: 단축키가 안 먹는 것처럼 보임).
+      //   마우스 클릭 동작은 기존 그대로 둔다.
+      if (mixerAlwaysOn) togglePanel();
+      else handleMixerButtonClick();
     },
     true,
   );
@@ -7449,6 +7512,165 @@
       if (core && "playbackRate" in core) core.playbackRate = rate;
     } catch {}
     return video?.playbackRate ?? rate;
+  }
+
+  // ── 다시보기 재생 속도 ────────────────────────────────────────────────────
+  // 설정 > 재생 속도를 두 단계 들어가야 하는 번거로움을 없앤다(제보). 유튜브식
+  // '꾹 눌러 2배속'은 만들지 않는다 — 치지직은 화면을 눌렀다 떼면 일시정지라
+  // 기본 동작과 부딪친다.
+  function currentPlaybackRate() {
+    const rate = Number(findVideo()?.playbackRate);
+    return Number.isFinite(rate) && rate > 0 ? rate : SPEED_DEFAULT;
+  }
+
+  // 소수점 오차를 감안해 가장 가까운 단계를 찾는다(네이티브 메뉴로 바꾼 값도 잡힌다).
+  function nearestSpeedIndex(rate) {
+    let best = SPEED_STEPS.indexOf(SPEED_DEFAULT);
+    let diff = Infinity;
+    SPEED_STEPS.forEach((step, index) => {
+      const d = Math.abs(step - rate);
+      if (d < diff) {
+        diff = d;
+        best = index;
+      }
+    });
+    return best;
+  }
+
+  const formatSpeed = (rate) =>
+    `${Number(rate) % 1 === 0 ? Number(rate).toFixed(0) : String(Number(rate))}x`;
+
+  function applyPlaybackSpeed(rate) {
+    const video = findVideo();
+    if (!video) return null;
+    // ⚠ 라이브 따라잡기가 배속을 쓰고 있으면 건드리지 않는다. 서로 덮어쓰면
+    //   따라잡기가 끝나며 사용자가 고른 속도까지 1로 되돌린다.
+    //   (다시보기 전용 버튼이라 실제로 겹칠 일은 거의 없지만 방어해 둔다.)
+    if (syncCatchUp && syncCatchUp.video === video) return null;
+    const applied = setPlaybackRate(findCorePlayer(), video, rate);
+    syncSpeedButton();
+    return applied;
+  }
+
+  // ⚠ 별도 말풍선(showPresetOsd)은 띄우지 않는다. 버튼 라벨에 현재 배속이 그대로
+  //   보이고 호버 툴팁에도 값이 들어가 있어 중복이다. 게다가 말풍선은 떠 있는 동안
+  //   keepControlsAlive 로 컨트롤 바를 붙잡는데, 우클릭처럼 포인터가 움직이지 않는
+  //   조작에서는 그 사이 네이티브 툴팁이 그대로 고정돼 보였다(제보).
+  function stepPlaybackSpeed(direction) {
+    const index = nearestSpeedIndex(currentPlaybackRate());
+    const next = Math.min(
+      SPEED_STEPS.length - 1,
+      Math.max(0, index + (direction > 0 ? 1 : -1)),
+    );
+    applyPlaybackSpeed(SPEED_STEPS[next]);
+  }
+
+  function resetPlaybackSpeed() {
+    applyPlaybackSpeed(SPEED_DEFAULT);
+  }
+
+  // 버튼 클릭: 다음 단계로 순환(2배속 다음은 0.25 로 돌아온다).
+  function cyclePlaybackSpeed() {
+    const index = nearestSpeedIndex(currentPlaybackRate());
+    applyPlaybackSpeed(SPEED_STEPS[(index + 1) % SPEED_STEPS.length]);
+  }
+
+  function createSpeedButton() {
+    const btn = document.createElement("button");
+    btn.className = `${SPEED_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    btn.type = "button";
+    // ⚠ 라벨을 .pzp-ui-icon 으로 감싼다. 치지직 툴팁은 이 래퍼를 기준으로 위치가
+    //   잡혀서, 맨 span 만 두면 툴팁이 버튼이 아닌 엉뚱한 곳에 뜬다(제보).
+    btn.innerHTML =
+      `<span class="pzp-button__tooltip pzp-button__tooltip--top"></span>` +
+      `<span class="pzp-ui-icon"><span class="cheese-speed-label" aria-hidden="true"></span></span>`;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cyclePlaybackSpeed();
+      // 믹서 버튼과 같은 처리 — 포커스가 남으면 마우스를 떼도 강조가 유지된다.
+      btn.blur();
+    });
+    // 우클릭 = 1배속으로 즉시 복귀. 네이티브 컨텍스트 메뉴는 막는다.
+    // ⚠ 우클릭은 버튼에 포커스를 남긴다. 치지직은 :focus 를 호버와 같게 칠하고
+    //   툴팁도 그대로 띄우므로, 마우스를 떼도 강조·툴팁이 고정돼 보인다(제보).
+    //   좌클릭은 뒤이어 다른 곳을 누르며 자연히 풀리지만 우클릭은 그럴 일이
+    //   없어서, 동작을 마친 뒤 포커스를 직접 놓아 준다.
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resetPlaybackSpeed();
+      btn.blur();
+    });
+    // 버튼 위 휠로도 단계 이동(믹서 버튼과 같은 조작감).
+    btn.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        stepPlaybackSpeed(e.deltaY < 0 ? 1 : -1);
+      },
+      { passive: false },
+    );
+    return btn;
+  }
+
+  // 현재 속도를 버튼 라벨·툴팁에 반영. 1배속이면 눈에 띄지 않게 둔다.
+  function syncSpeedButton() {
+    const btn = document.querySelector(`.${SPEED_BUTTON_CLASS}`);
+    if (!btn) return;
+    const rate = currentPlaybackRate();
+    const text = formatSpeed(rate);
+    const label = btn.querySelector(".cheese-speed-label");
+    if (label) label.textContent = text;
+    const isDefault = Math.abs(rate - SPEED_DEFAULT) < 0.01;
+    btn.classList.toggle("is-active", !isDefault);
+    const tip = `재생 속도 ${text} · 클릭 전환 · 휠 조절 · 우클릭 1x`;
+    btn.setAttribute("aria-label", tip);
+    const tooltip = btn.querySelector(".pzp-button__tooltip");
+    if (tooltip) tooltip.textContent = tip;
+  }
+
+  function ensureSpeedButton() {
+    // 다시보기 전용 — 라이브는 배속 개념이 없고 따라잡기와 충돌한다.
+    if (!isVodSeekPage() || featureFlags.speedButton) {
+      removeSpeedButton();
+      return;
+    }
+    const player = findPlayer();
+    if (!player) return;
+    const controls = sideControls(player, "speed");
+    if (!controls) return;
+    // ⚠ 존재 확인은 '이 그룹 안'이 아니라 플레이어 전체에서 한다. 예전에는 대상
+    //   그룹만 봐서, 배치를 왼쪽으로 옮기면 오른쪽 원본은 그대로 둔 채 왼쪽에
+    //   새 버튼을 하나 더 만들었다(제보: 옮긴 자리에 빈 아이콘이 생김).
+    //   ⚠ 찾는 대상도 버튼이 아니라 '래퍼'여야 한다 — arrangePlayerButtons 가
+    //   옮기는 단위가 래퍼라, 버튼만 보면 래퍼가 어디 있는지 알 수 없다.
+    let wrap = player.querySelector(`.${SPEED_CONTROL_CLASS}`);
+    if (!wrap) {
+      // 말풍선은 없앴지만, 래퍼는 배치 이동 단위이자 세로 정렬 기준으로 남긴다.
+      wrap = document.createElement("div");
+      wrap.className = SPEED_CONTROL_CLASS;
+      wrap.appendChild(createSpeedButton());
+    }
+    if (wrap.parentElement !== controls) {
+      const anchor =
+        controls.querySelector(`.${SCREENSHOT_BUTTON_CLASS}`) ||
+        controls.querySelector(".custom__clip-button") ||
+        controls.firstChild;
+      controls.insertBefore(wrap, insertAnchorFor(controls, "speed", anchor));
+    }
+    syncSpeedButton();
+  }
+
+  function removeSpeedButton() {
+    document
+      .querySelectorAll(`.${SPEED_CONTROL_CLASS}`)
+      .forEach((b) => b.remove());
+    // 래퍼 없이 남은 예전 버튼도 정리한다.
+    document
+      .querySelectorAll(`.${SPEED_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
   }
 
   function startSyncCatchUp() {
@@ -8728,6 +8950,8 @@
     } else {
       ensureScreenshotButton();
     }
+    // 재생 속도 버튼(다시보기 전용). 내부에서 페이지·설정을 판정한다.
+    ensureSpeedButton();
     // 우리 버튼들을 order 대로 정렬(순서 이미 맞으면 no-op). 재렌더로 순서가 흐트러져도
     // 다음 tick 에서 복구된다.
     arrangePlayerButtons();

@@ -273,6 +273,9 @@
     "cheeseWheelVolume",
     "cheeseWheelVolumeRightClick",
     "cheeseWheelVolumeScope",
+    "cheeseTimelineMemoOn",
+    "cheeseTimelineMemoV1",
+    "cheeseTimelineMemoRect",
     "cheeseActionOverlay",
     "cheeseActionOverlayPos",
     "cheeseWheelVolumeStep",
@@ -7454,6 +7457,174 @@
   });
   loadVodChatGraph();
 
+  // 재생 속도 버튼(다시보기). 저장 키는 다른 플레이어 버튼과 같은 '숨김' 플래그
+  // (cheeseFeatureHidden.speedButton)를 쓰되, 다시보기 탭에서는 '사용' 스위치로
+  // 보여 준다(같은 탭의 다른 항목들과 방향을 맞춘다) → 값만 뒤집어 저장한다.
+  const vodSpeedButtonInput = document.querySelector("[data-vod-speed-button]");
+  async function loadVodSpeedButton() {
+    let hidden = false; // 기본 표시
+    try {
+      const data = await cachedStorageGet(FEATURE_HIDDEN_KEY);
+      const map = data?.[FEATURE_HIDDEN_KEY];
+      hidden = map && typeof map === "object" && map.speedButton === true;
+    } catch {}
+    if (vodSpeedButtonInput) vodSpeedButtonInput.checked = !hidden;
+  }
+  vodSpeedButtonInput?.addEventListener("change", async () => {
+    try {
+      const data = await cachedStorageGet(FEATURE_HIDDEN_KEY);
+      const map =
+        data?.[FEATURE_HIDDEN_KEY] &&
+        typeof data[FEATURE_HIDDEN_KEY] === "object"
+          ? { ...data[FEATURE_HIDDEN_KEY] }
+          : {};
+      map.speedButton = !vodSpeedButtonInput.checked;
+      cachedStorageSet({ [FEATURE_HIDDEN_KEY]: map });
+    } catch {}
+  });
+  loadVodSpeedButton();
+
+  // 타임라인 메모(라이브·다시보기 메모 → 다시보기 댓글 붙여넣기). 기본 켜짐.
+  const TIMELINE_MEMO_KEY = "cheeseTimelineMemoOn";
+  const timelineMemoInput = document.querySelector("[data-timeline-memo]");
+  async function loadTimelineMemo() {
+    let on = true;
+    try {
+      const d = await cachedStorageGet(TIMELINE_MEMO_KEY);
+      on = d?.[TIMELINE_MEMO_KEY] !== false;
+    } catch {}
+    if (timelineMemoInput) timelineMemoInput.checked = on;
+  }
+  timelineMemoInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [TIMELINE_MEMO_KEY]: timelineMemoInput.checked });
+    } catch {}
+  });
+  loadTimelineMemo();
+
+  // 저장된 메모 관리(채널·방송별 목록 + 선택/전체 삭제).
+  const TIMELINE_MEMO_STORE_KEY = "cheeseTimelineMemoV1";
+  const memoManageList = document.querySelector("[data-memo-manage-list]");
+  const memoManageDelete = document.querySelector("[data-memo-manage-delete]");
+  const memoManageClear = document.querySelector("[data-memo-manage-clear]");
+  const memoManageRow = document.querySelector("[data-memo-manage-row]");
+
+  const memoManageLabel = (session) => {
+    const d = new Date(Number(session?.startAt) || 0);
+    const week = "일월화수목금토"[d.getDay()] || "";
+    const p2 = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}.${p2(d.getMonth() + 1)}.${p2(d.getDate())}(${week}) ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  };
+
+  function syncMemoManageButtons() {
+    if (!memoManageDelete) return;
+    const checked = memoManageList
+      ? memoManageList.querySelectorAll("input:checked").length
+      : 0;
+    memoManageDelete.disabled = checked === 0;
+    memoManageDelete.textContent = checked
+      ? `선택 삭제 (${checked})`
+      : "선택 삭제";
+  }
+
+  async function renderMemoManage() {
+    if (!memoManageList) return;
+    let sessions = [];
+    try {
+      const d = await cachedStorageGet(TIMELINE_MEMO_STORE_KEY);
+      const raw = d?.[TIMELINE_MEMO_STORE_KEY];
+      sessions = Array.isArray(raw) ? raw : [];
+    } catch {}
+    // 채널별로 묶고, 채널 안에서는 최신 방송부터.
+    const byChannel = new Map();
+    for (const session of sessions) {
+      if (!session?.channelId || !Array.isArray(session.items)) continue;
+      if (!session.items.length) continue;
+      if (!byChannel.has(session.channelId)) {
+        byChannel.set(session.channelId, []);
+      }
+      byChannel.get(session.channelId).push(session);
+    }
+    if (!byChannel.size) {
+      memoManageList.innerHTML =
+        '<p class="settings-memo-empty">저장된 메모가 없습니다.</p>';
+      if (memoManageClear) memoManageClear.disabled = true;
+      syncMemoManageButtons();
+      return;
+    }
+    if (memoManageClear) memoManageClear.disabled = false;
+    const groups = [...byChannel.entries()].sort(
+      (a, b) =>
+        Math.max(...b[1].map((x) => x.startAt || 0)) -
+        Math.max(...a[1].map((x) => x.startAt || 0)),
+    );
+    memoManageList.innerHTML = groups
+      .map(([channelId, list]) => {
+        const name =
+          list.find((x) => x.channelName)?.channelName ||
+          `채널 ${channelId.slice(0, 8)}`;
+        const total = list.reduce((sum, x) => sum + x.items.length, 0);
+        const rows = list
+          .sort((a, b) => (b.startAt || 0) - (a.startAt || 0))
+          .map(
+            (x) =>
+              `<li><label><input type="checkbox" value="${escapeHtml(String(x.id || ''))}">` +
+              `<span>${escapeHtml(memoManageLabel(x))}</span>` +
+              `<small>${x.items.length}개</small></label></li>`,
+          )
+          .join("");
+        return (
+          `<div class="settings-memo-group">` +
+          `<div class="settings-memo-channel">${escapeHtml(name)}` +
+          `<small>${list.length}개 방송 · 메모 ${total}개</small></div>` +
+          `<ul>${rows}</ul></div>`
+        );
+      })
+      .join("");
+    syncMemoManageButtons();
+  }
+
+  memoManageList?.addEventListener("change", syncMemoManageButtons);
+
+  memoManageDelete?.addEventListener("click", async () => {
+    const ids = new Set(
+      [...memoManageList.querySelectorAll("input:checked")].map((i) => i.value),
+    );
+    if (!ids.size) return;
+    try {
+      const d = await cachedStorageGet(TIMELINE_MEMO_STORE_KEY);
+      const raw = Array.isArray(d?.[TIMELINE_MEMO_STORE_KEY])
+        ? d[TIMELINE_MEMO_STORE_KEY]
+        : [];
+      cachedStorageSet({
+        [TIMELINE_MEMO_STORE_KEY]: raw.filter((x) => !ids.has(x?.id)),
+      });
+    } catch {}
+    void renderMemoManage();
+  });
+
+  // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다(메모 창과 같은 방식).
+  memoManageClear?.addEventListener("click", () => {
+    if (memoManageClear.dataset.armed !== "1") {
+      memoManageClear.dataset.armed = "1";
+      memoManageClear.textContent = "정말 전체 삭제할까요?";
+      setTimeout(() => {
+        if (!memoManageClear.isConnected) return;
+        delete memoManageClear.dataset.armed;
+        memoManageClear.textContent = "전체 삭제";
+      }, 3000);
+      return;
+    }
+    delete memoManageClear.dataset.armed;
+    memoManageClear.textContent = "전체 삭제";
+    try {
+      cachedStorageSet({ [TIMELINE_MEMO_STORE_KEY]: [] });
+    } catch {}
+    void renderMemoManage();
+  });
+
+  if (memoManageRow) void renderMemoManage();
+
   // 자동 표시(캐시가 있을 때) + 하위 옵션(캐시가 없어도 자동 수집).
   // 상위(채팅 활성도)가 꺼져 있으면 둘 다, 자동 표시가 꺼져 있으면 자동 수집을 잠근다.
   const VOD_CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
@@ -8239,6 +8410,7 @@
   const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
   const SETTINGS_FULL_DATA_KEYS = new Set([
     "cheeseClipVault", // 계정별 저장 이전의 레거시 보관함
+    "cheeseTimelineMemoV1",
     "cheeseLogPowerLog",
     "cheeseLogPowerReadAt",
     "cheeseLogPowerStatsExplorerKnownIds",
@@ -8270,6 +8442,8 @@
     CLIP_VAULT_ACTIVE_ACCOUNT_KEY,
     VIDEO_VAULT_ACCOUNT_IDS_KEY,
     VIDEO_VAULT_ACTIVE_ACCOUNT_KEY,
+    // 메모 내용은 기능 설정이 아니라 사용자가 작성한 기록이므로 전체 백업으로만 옮긴다.
+    "cheeseTimelineMemoV1",
   ].forEach((key) => SETTINGS_TRANSFER_KEYS.delete(key));
   const settingsExportButton = document.querySelector("[data-settings-export]");
   const settingsFullExportButton = document.querySelector(
@@ -10129,6 +10303,9 @@
     "rewind",
     "sync",
     "forward",
+    "speed",
+    "commentTs",
+    "chatRecap",
     "tabMute",
     "screenshot",
     "streamStats",
@@ -10137,6 +10314,9 @@
     streamStats: "스트림 정보",
     tabMute: "탭 음소거",
     screenshot: "스크린샷",
+    speed: "재생 속도",
+    commentTs: "댓글 타임스탬프",
+    chatRecap: "내 채팅 기록",
     rewind: "되감기",
     forward: "앞으로",
     sync: "실시간 따라잡기",
@@ -10227,6 +10407,11 @@
             side[k] = srcSide[k];
         }
       }
+      // ⚠ 오른쪽 전용 버튼은 저장값이 left 여도 되돌린다. 예전 설정이나 불러온
+      //   파일에 left 가 들어 있어도 실제 배치는 오른쪽이므로 표시를 맞춘다.
+      for (const k of ["commentTs", "chatRecap"]) {
+        if (PLAYER_BTN_KEYS.includes(k)) side[k] = "right";
+      }
       const savedOrder =
         saved && typeof saved === "object" ? saved.order : null;
       const outOrder = { left: [], right: [] };
@@ -10262,9 +10447,14 @@
       return { order: outOrder, slot: outSlot };
     }
 
+    // 다시보기에서만 나타나는 버튼. 라이브에서는 자리에 없으므로 배경색을 달리해
+    // 다른 칩과 구분한다(요청).
+    const VOD_ONLY_KEYS = new Set(["speed", "commentTs", "chatRecap"]);
+
     function makeItem(key) {
       const li = document.createElement("li");
       li.className = "settings-order-item";
+      if (VOD_ONLY_KEYS.has(key)) li.classList.add("settings-order-vod");
       li.draggable = true;
       li.dataset.btnKey = key;
       li.innerHTML =
@@ -10376,9 +10566,20 @@
     // 드롭 지점(항목 위/아래 또는 빈 목록) 계산해 미리 삽입 위치를 잡는다.
     // 오디오 믹서·비디오 필터는 '한 묶음'이라 그 사이에는 놓을 수 없다: 삽입 후보가
     // 묶음 사이(=필터 칩 앞)면 묶음 앞(믹서 칩 앞)으로 스냅한다.
+    // 오른쪽 그룹에만 놓을 수 있는 버튼. 댓글 타임스탬프·내 채팅 기록은 content.js
+    // 가 오른쪽 컨트롤(.pzp-pc__bottom-buttons-right)에 직접 만들어서, 왼쪽으로
+    // 옮겨도 실제로는 옮겨지지 않는다(제보) → UI 에서 아예 막아 표시와 실제를 맞춘다.
+    const RIGHT_ONLY_KEYS = new Set(["commentTs", "chatRecap"]);
+    const isRightOnly = (el) => RIGHT_ONLY_KEYS.has(el?.dataset?.btnKey);
+
     function dragOverList(ul, e) {
       e.preventDefault();
       if (!dragEl) return;
+      // 왼쪽 목록에는 받지 않는다(드롭 자체를 무시 → 원래 자리에 남는다).
+      if (ul === listLeft && isRightOnly(dragEl)) {
+        e.dataTransfer && (e.dataTransfer.dropEffect = "none");
+        return;
+      }
       let after = getDragAfterElement(ul, e.clientY);
       after = snapPastMixerFilter(ul, after);
       after = snapAfterPlayback(ul, after);
