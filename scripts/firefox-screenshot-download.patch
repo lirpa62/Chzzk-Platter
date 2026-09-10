@@ -188,9 +188,9 @@
 -        // 다운로드가 시작된 뒤 revoke(너무 일찍 지우면 다운로드가 깨질 수 있어 지연).
 -        setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
 -      }
--      window.postMessage(payload, location.origin);
+-      window.postMessage(payload, BRIDGE_ORIGIN);
 -    };
-+    const reply = (payload) => window.postMessage(payload, location.origin);
++    const reply = (payload) => window.postMessage(payload, BRIDGE_ORIGIN);
      try {
        chrome.runtime.sendMessage(
          {

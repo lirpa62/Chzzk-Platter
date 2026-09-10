@@ -28,18 +28,58 @@
 
   if (isClipEditorContext()) return;
 
-  async function masterEnabled() {
-    const root = document.documentElement;
-    for (let i = 0; i < 100; i += 1) {
-      if (root?.dataset.cheesePlatterMasterReady === "1") break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return !root?.hasAttribute("data-cheese-platter-disabled");
-  }
-  if (!(await masterEnabled())) return;
+  // 팝업을 만든 부모 프레임은 저장값을 이미 알고 있으므로 URL로 넓은 화면 설정을
+  // 넘긴다. ISOLATED world의 설정 브리지가 준비되기 전에도 이 값으로 바로 시작한다.
+  const pageParams = new URLSearchParams(location.search);
+  const popupWideParam = pageParams.get("cheesePopupWide");
+  const popupWideParamKnown =
+    pageParams.get("cheesePopup") === "1" &&
+    (popupWideParam === "1" || popupWideParam === "0");
 
+  // masterGate.js(ISOLATED, document_start)가 chrome.storage 를 읽고 루트에
+  // data-cheese-platter-master-ready 를 세울 때까지 기다린다.
+  // ⚠ 예전에는 10ms × 100회 = 1초 고정 폴링이었는데, 이 대기가 setTimeout 기반이라
+  // (1) MV3 서비스워커 콜드 스타트가 느리거나 다른 확장이 많아 storage 응답이 늦고,
+  // (2) 팝업 iframe 처럼 비활성/백그라운드 프레임이라 타이머가 1초 이상으로 clamp 되면
+  // 1초를 넘겨 타임아웃됐다. 그 경우 아직 속성이 없어 '켜짐'으로 통과는 하지만,
+  // 게이트가 실제로 꺼져 있었다면 뒤늦게 붙는 disabled 속성을 놓쳤다.
+  // 그래서 MutationObserver 로 속성이 붙는 즉시 깨어나게 하고, 타임아웃도 10초로 늘린다.
+  function masterEnabled() {
+    const root = document.documentElement;
+    if (!root) return Promise.resolve(true);
+    const ready = () => root.dataset.cheesePlatterMasterReady === "1";
+    const verdict = () => !root.hasAttribute("data-cheese-platter-disabled");
+    if (ready()) return Promise.resolve(verdict());
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        resolve(verdict());
+      };
+      const observer = new MutationObserver(() => {
+        if (ready()) finish();
+      });
+      observer.observe(root, {
+        attributes: true,
+        attributeFilter: [
+          "data-cheese-platter-master-ready",
+          "data-cheese-platter-disabled",
+        ],
+      });
+      const timer = setTimeout(finish, 10000);
+      if (ready()) finish(); // observe 등록 직전에 세팅됐을 수 있다
+    });
+  }
+  // ⚠ 중복 주입 가드는 await 앞에 둔다. await 뒤에 두면 같은 프레임에 스크립트가
+  // 두 번 주입됐을 때 두 인스턴스가 모두 게이트를 통과한 뒤에야 가드에 닿아,
+  // 그 사이 document 가 교체되면 잘못된 root 를 읽는 경쟁이 생긴다.
   if (window.__cheeseAudioMixerLoaded) return;
   window.__cheeseAudioMixerLoaded = true;
+
+  if (!(await masterEnabled())) return;
 
   // 팝업 기능 표시/숨김 플래그(content.js가 chrome.storage에서 읽어 postMessage로 전달).
   const featureFlags = {
@@ -56,7 +96,9 @@
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
   let mixerAlwaysOn = false;
-  let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
+  let wideScreenAuto = popupWideParamKnown && popupWideParam === "1";
+  // 위 값이 content.js 의 저장값 로드를 거친 것인지(로드 전 false = '아직 모름').
+  let wideScreenSettingsLoaded = popupWideParamKnown;
   let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
@@ -156,9 +198,38 @@
   };
   let forceFullTick = false; // 다음 tick에서 fast-path를 건너뛰고 full로 돌린다(플래그 변경 등)
   let userGestureSeen = false;
+  // content.js 로부터 플래그를 한 번이라도 받았는지. 받기 전까지 재요청한다.
+  let featureFlagsReceived = false;
+
+  // 같은 창 안의 MAIN↔ISOLATED 브리지용 targetOrigin.
+  // ⚠ location.origin 을 쓰면 안 된다. 다른 확장이 프레임 document 를 교체하거나
+  // about:blank 를 경유하는 순간 origin 이 "null" 문자열이 되어, 브라우저가 메시지를
+  // 에러 없이 조용히 폐기한다(팝업 프레임에서 버튼·기능·단축키가 통째로 죽던 원인).
+  // 같은 창(window→window)이고 수신부가 모두 e.source !== window 로 검증하므로
+  // "*" 로 보내도 외부에 노출되지 않는다.
+  const BRIDGE_ORIGIN = "*";
+
+  // 플래그를 받을 때까지 재요청. content.js 의 리스너 등록보다 우리가 빨랐던 경우를
+  // 복구한다(첫 요청은 즉시, 이후 200ms 간격으로 최대 약 10초).
+  function requestFeatureFlagsUntilReceived() {
+    let tries = 0;
+    const ask = () => {
+      if (featureFlagsReceived) return;
+      try {
+        window.postMessage(
+          { source: "cheese-feature-flags-request" },
+          BRIDGE_ORIGIN,
+        );
+      } catch {}
+      tries += 1;
+      if (tries < 50) setTimeout(ask, 200);
+    };
+    ask();
+  }
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags")
       return;
+    featureFlagsReceived = true; // 재요청 루프 정지(아래 requestFeatureFlagsUntilReceived)
     const f = e.data.flags || {};
     featureFlags.audioMixer = f.audioMixer === true;
     featureFlags.streamStats = f.streamStats === true;
@@ -181,8 +252,24 @@
       if (typeof bindVideoAutoEnable === "function") bindVideoAutoEnable();
       if (typeof maybeAutoEnableMixer === "function") maybeAutoEnableMixer();
     }
-    // 넓은 화면 자동 적용(전역). 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다.
-    wideScreenAuto = e.data.wideScreenAuto === true;
+    // 넓은 화면 자동 적용(전역). 팝업은 부모가 URL로 넘긴 확정값을 먼저 사용한다.
+    // 설정 로드 전 브리지 응답(settingsLoaded=false)이 그 값을 기본값으로 덮지 않게 하고,
+    // 실제 저장값을 읽은 응답부터는 열린 팝업에서도 변경 사항을 반영한다.
+    const incomingWideSettingsLoaded = e.data.settingsLoaded === true;
+    if (incomingWideSettingsLoaded || !popupWideParamKnown) {
+      const previousWideScreenAuto = wideScreenAuto;
+      const previousWideScreenSettingsLoaded = wideScreenSettingsLoaded;
+      wideScreenAuto = e.data.wideScreenAuto === true;
+      wideScreenSettingsLoaded = incomingWideSettingsLoaded;
+      if (
+        wideScreenAuto &&
+        wideScreenSettingsLoaded &&
+        (!previousWideScreenAuto || !previousWideScreenSettingsLoaded) &&
+        currentPageKey
+      ) {
+        resetWideScreenAttempt();
+      }
+    }
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
     // 볼륨/게인 % 표시(전역, 미설정=기본 ON). 끄면 조절 시 % 툴팁을 띄우지 않는다.
     volumePctOn = e.data.volumePct !== false;
@@ -234,6 +321,8 @@
     // 전역 기본값 재방문 동작(global | channel, 기본 global).
     globalDefaultMode =
       e.data.mixerGlobalDefaultMode === "channel" ? "channel" : "global";
+    globalGainDefaultMode =
+      e.data.mixerGlobalGainDefaultMode === "channel" ? "channel" : "global";
     // 게인 슬라이더 범위와 조절 간격(전역). 값이 바뀌면 현재 게인을 새 범위로
     // 클램프하고 플레이어/패널 슬라이더를 다시 그려 즉시 반영한다.
     updateGainRange(
@@ -318,10 +407,12 @@
     if (typeof maybeAutoEnableMixer === "function") maybeAutoEnableMixer();
   });
   // 로드 직후 현재 플래그를 요청한다(content.js의 초기 송신을 놓쳤을 수 있으므로).
-  window.postMessage(
-    { source: "cheese-feature-flags-request" },
-    location.origin,
-  );
+  // ⚠ content.js(ISOLATED)와 이 파일(MAIN)은 둘 다 document_idle 이지만 서로 다른
+  // content_scripts 항목이라 주입 순서가 보장되지 않는다. 요청이 content.js 의 리스너
+  // 등록보다 먼저 날아가면 그 요청은 아무도 받지 못하고 사라져, 플래그가 초기값(전부
+  // false=숨김 아님이지만 팝업 버튼 설정은 미반영)에 머문 채 버튼이 아예 안 생겼다.
+  // 그래서 플래그를 실제로 받을 때까지 짧은 간격으로 재요청한다.
+  requestFeatureFlagsUntilReceived();
 
   // content.js(격리 월드)가 background로부터 받은 탭 음소거 상태를 돌려준다.
   window.addEventListener("message", (e) => {
@@ -334,13 +425,13 @@
   function requestTabMuteToggle() {
     window.postMessage(
       { source: "cheese-tab-mute", type: "toggle" },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
   function requestTabMuteQuery() {
     window.postMessage(
       { source: "cheese-tab-mute", type: "query" },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -699,6 +790,9 @@
     // 사용자가 이 채널에서 프리셋을 직접 골랐는지. '직접 선택 우선' 모드에서
     // true인 채널은 전역 기본값 대신 채널 저장값을 쓴다.
     userPickedPreset: false,
+    // 이 채널에서 마스터 게인을 직접 조절했는지. 전역 게인의 '직접 조절 우선'
+    // 모드에서만 사용하며, 프리셋 선택은 직접 게인 조절로 세지 않는다.
+    userPickedGain: false,
     preset: "default",
     gain: 1,
     eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -741,7 +835,13 @@
   // 느린 환경에서 플레이어 자체가 늦게 뜨는 동안은 마감을 연장한다. 그 연장의 상한과
   // 대기 시작 시각(미디어 전환 때 갱신) — 무한 대기 방지.
   let wideScreenWaitStartedAt = 0;
+  const WIDE_SCREEN_RETRY_WINDOW_MS = 8000;
+  const WIDE_SCREEN_CLICK_RETRY_MS = 1000;
+  // 매우 느린 네트워크에서는 팝업 플레이어 컨트롤도 10초 뒤에 나타날 수 있다. 준비
+  // 오버레이는 부모의 별도 상한으로 먼저 내려가되, 버튼 감시는 기존처럼 최대 60초 유지한다.
   const WIDE_SCREEN_MAX_WAIT_MS = 60000;
+  let wideScreenLastClickAt = 0;
+  let wideScreenClickAttempts = 0;
   // 넓은 화면 적용 대기 폴링. tick 은 DOM 변이가 있어야 도는데, 플레이어가 자리를 잡고
   // 조용해지면 변이가 멈춰 마감(8초)까지 재시도가 한 번도 안 일어날 수 있다(팝업에서
   // 적용이 1~2초 걸리기도 하고 10초 넘게 걸리기도 하던 원인). 적용 전까지만 짧게 돈다.
@@ -759,11 +859,20 @@
       // 안 떴으면 마감 연장' 로직에 도달하지 못한다(느린 환경에서 자동 적용 실패의
       // 직접 원인). 판정은 maybeAutoWideScreen 에 맡기고, 여기선 상한만 지킨다.
       if (Date.now() - wideScreenWaitStartedAt > WIDE_SCREEN_MAX_WAIT_MS) {
-        stopWideScreenPolling();
+        settleWideScreenAttempt();
         return;
       }
       maybeAutoWideScreen();
-    }, 200);
+    }, 100);
+  }
+  function resetWideScreenAttempt() {
+    const now = Date.now();
+    wideScreenAppliedForPage = null;
+    wideScreenRetryUntil = now + WIDE_SCREEN_RETRY_WINDOW_MS;
+    wideScreenWaitStartedAt = now;
+    wideScreenLastClickAt = 0;
+    wideScreenClickAttempts = 0;
+    stopWideScreenPolling();
   }
   // 현재 미디어의 저장 설정(프리셋 등) 로드 완료 여부. '항상 켜기' 자동 활성화는
   // 이게 true일 때만 시도해, 저장된 프리셋이 적용되기 전에 기본 프리셋으로 켜지는
@@ -792,9 +901,11 @@
   const PRESET_SHARE_VERSION = 1;
   // settings 플레이어 탭에서 지정하는 채널 무관 전역 기본 프리셋.
   let globalDefaultPreset = { enabled: false, preset: "default" };
+  let globalGainDefault = { enabled: false, gain: 1 };
   // 전역 기본값 재방문 동작: "global"=재진입 시 항상 전역값, "channel"=채널에서 직접
   // 고른 게 있으면 그걸(없으면 전역값). settings에서 선택(기본 global).
   let globalDefaultMode = "global";
+  let globalGainDefaultMode = "global";
   // 채널의 '원래 선택'(전역 기본값 적용 전) 스냅샷. 전역 기본값이 켜진 동안엔 이 값을
   // 채널 저장에 쓴다(전역값이 채널 저장을 덮어쓰지 않게). 전역 해제 시 이 값으로 복원.
   let channelBaseState = null;
@@ -1371,7 +1482,9 @@
         state.normalizer = snapshot.normalizer;
         clearPresetDirty();
         state.userPickedPreset = true; // 사용자가 직접 고름
+        state.userPickedGain = false;
         channelBaseState = snapshotChannelPreset(); // 사용자 선택 → 채널 원본 갱신
+        applyGlobalGainDefault(channelBaseState.gain);
         applyState();
         saveState();
         syncUI();
@@ -1392,7 +1505,9 @@
     // userPickedPreset을 세운다(전역 기본값이 켜져 있어도, 이 선택이 채널 저장·전역
     // 해제 시 복원값이 되고, '직접 선택 우선' 모드에선 재진입 시 이 값이 적용되게).
     state.userPickedPreset = true;
+    state.userPickedGain = false;
     channelBaseState = snapshotChannelPreset();
+    applyGlobalGainDefault(channelBaseState.gain);
     applyState();
     saveState();
     syncUI();
@@ -1421,6 +1536,15 @@
     return {
       enabled: config.enabled === true,
       preset: String(config.preset || "default"),
+    };
+  }
+
+  function normalizeGlobalGainDefault(value) {
+    const config = value && typeof value === "object" ? value : {};
+    const gain = Number(config.gain);
+    return {
+      enabled: config.enabled === true,
+      gain: Number.isFinite(gain) ? Math.min(3, Math.max(0, gain)) : 1,
     };
   }
 
@@ -1462,6 +1586,37 @@
     const snapshot = snapshotForPresetKey(key);
     if (!snapshot) return false;
     return applySnapshotToState(key, snapshot);
+  }
+
+  function applyGlobalGainDefault(channelGain = state.gain) {
+    if (!globalGainDefault.enabled) return false;
+    const useChannelGain =
+      globalGainDefaultMode === "channel" && state.userPickedGain === true;
+    const requestedGain = Number(
+      useChannelGain ? channelGain : globalGainDefault.gain,
+    );
+    // feature-flags보다 저장 상태가 먼저 도착할 수 있다. 이때 기본 상한(200%)으로
+    // 250~300% 값을 성급히 줄이지 않고, 실제 범위를 받은 updateGainRange가 정리한다.
+    const nextGain = gainRangeReceived
+      ? quantizeGain(requestedGain)
+      : Math.round((Number.isFinite(requestedGain) ? requestedGain : 1) * 100) /
+        100;
+    if (state.gain === nextGain) return false;
+    state.gain = nextGain;
+    return true;
+  }
+
+  // 전역 프리셋과 전역 게인은 서로 독립된 설정이다. 프리셋 적용이 게인도 포함하므로
+  // 프리셋을 먼저 적용한 뒤 게인 정책을 마지막에 적용한다. '직접 조절 우선'일 때는
+  // 전역 프리셋 적용 전의 채널 게인을 복원한다.
+  function applyConfiguredGlobalDefaults() {
+    const channelGain = Number(channelBaseState?.gain ?? state.gain);
+    let changed = false;
+    const useChannelPreset =
+      globalDefaultMode === "channel" && state.userPickedPreset === true;
+    if (!useChannelPreset) changed = applyGlobalDefaultPreset() || changed;
+    changed = applyGlobalGainDefault(channelGain) || changed;
+    return changed;
   }
 
   // 기본값 등록/해제.
@@ -1883,6 +2038,12 @@
     state.normalizer = snapshot.normalizer;
     state.preset = saved.id;
     clearPresetDirty();
+    if (!options.keepDraft) {
+      state.userPickedPreset = true;
+      state.userPickedGain = false;
+      channelBaseState = snapshotChannelPreset();
+      applyGlobalGainDefault(channelBaseState.gain);
+    }
     applyState();
     if (!options.keepDraft) saveState();
     syncUI();
@@ -2155,7 +2316,7 @@
     const packet = pendingStateSave;
     pendingStateSave = null;
     if (!packet) return;
-    window.postMessage(packet, location.origin);
+    window.postMessage(packet, BRIDGE_ORIGIN);
   }
 
   // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 전역
@@ -2204,11 +2365,12 @@
   }
 
   function serializeState(opts) {
-    // 전역 기본값이 켜져 있으면 현재 state.preset/값은 '전역값'이므로, 채널 저장엔
-    // 채널의 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮어쓰지 않게).
+    // 전역 프리셋 또는 전역 게인이 켜져 있으면 현재 state 값에는 전역값이 섞이므로,
+    // 채널 저장엔 원래 선택(channelBaseState)을 쓴다(전역값이 채널 저장을 덮지 않게).
     // enabled/userDisabled/customPresets 등 나머지는 현재 state를 저장한다.
     const preset =
-      globalDefaultPreset.enabled && channelBaseState
+      (globalDefaultPreset.enabled || globalGainDefault.enabled) &&
+      channelBaseState
         ? channelBaseState
         : snapshotChannelPreset();
     const out = {
@@ -2217,6 +2379,7 @@
       enabled: false,
       userDisabled: state.userDisabled === true,
       userPickedPreset: state.userPickedPreset === true,
+      userPickedGain: state.userPickedGain === true,
       preset: preset.preset,
       dirtyFrom: String(preset.dirtyFrom || ""), // 수정 전 프리셋 키(툴팁 표시용)
       gain: preset.gain,
@@ -2244,7 +2407,7 @@
         channelId: mediaId,
         requestId,
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
     // MAIN/격리 world의 초기화 순서가 느린 환경에서는 첫 요청이 content 브리지보다 먼저
     // 나갈 수 있다. 저장 설정을 받기 전일 때만 최대 횟수까지 다시 요청한다.
@@ -2304,6 +2467,7 @@
               enabled: state.enabled,
               userDisabled: state.userDisabled,
               userPickedPreset: state.userPickedPreset,
+              userPickedGain: state.userPickedGain,
               preset: state.preset,
               gain: state.gain,
               eq: [...state.eq],
@@ -2331,6 +2495,9 @@
         // 남아 있으면 dirty 상태로 되살린다(툴팁: '수정된 노래 방송').
         restoreDirtyFromSaved();
         globalDefaultPreset = normalizeGlobalDefaultPreset(saved.globalDefault);
+        globalGainDefault = normalizeGlobalGainDefault(
+          saved.globalGainDefault,
+        );
         // 기본값으로 등록된 커스텀이 더 이상 없으면(삭제됨) 등록 해제 → 원래 기본 복귀.
         if (
           state.defaultCustomId &&
@@ -2360,12 +2527,9 @@
         // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 기본값이 켜진 동안 채널
         // 저장이 전역값으로 덮어써지지 않게 하고, 전역 해제 시 이 값으로 복원한다.
         channelBaseState = snapshotChannelPreset();
-        // 전역 기본값 적용 여부: 'channel'(직접 선택 우선) 모드이고 이 채널에서 사용자가
-        // 프리셋을 직접 골랐으면(userPickedPreset) 채널값을 유지, 그 외엔 전역값 적용.
-        // (기본 'global' 모드는 항상 전역값.) enabled/userDisabled는 채널값 유지.
-        const useChannelPick =
-          globalDefaultMode === "channel" && state.userPickedPreset === true;
-        if (!locallyEditedState && !useChannelPick) applyGlobalDefaultPreset();
+        // 프리셋과 게인의 전역 정책을 각각 적용한다. 로드 응답을 기다리는 동안 사용자가
+        // 값을 바꿨다면 그 조작이 우선이며, 저장 응답으로 다시 덮어쓰지 않는다.
+        if (!locallyEditedState) applyConfiguredGlobalDefaults();
         // userDisabled 채널인데 로드 전 자동 활성화가 먼저 켰을 수 있다(레이스).
         // 저장된 의사를 존중해 확실히 끈다.
         if (state.userDisabled && audio.connected) {
@@ -2384,7 +2548,8 @@
       // 같은 탭에서 복원된 enabled 상태도 클릭 없이 이어지도록 재생 기반 resume을 시도한다.
       bindVideoAutoEnable();
     } else if (e.data.type === "globals-changed") {
-      const prevEnabled = globalDefaultPreset.enabled;
+      const prevPresetEnabled = globalDefaultPreset.enabled;
+      const prevGainEnabled = globalGainDefault.enabled;
       const next = e.data.state || {};
       state.customPresets = normalizeCustomPresets(next.customPresets);
       state.defaultCustomId = String(next.defaultCustomId || "");
@@ -2395,11 +2560,20 @@
         state.defaultCustomId = "";
       }
       globalDefaultPreset = normalizeGlobalDefaultPreset(next.globalDefault);
-      if (!globalDefaultPreset.enabled) {
-        if (prevEnabled && currentMediaId) beginStateLoad(currentMediaId);
+      globalGainDefault = normalizeGlobalGainDefault(next.globalGainDefault);
+      // 전역값을 끄면 전역 적용 전 채널 저장값부터 다시 불러온 뒤, 아직 켜진 다른
+      // 전역 설정만 재적용한다. 현재 화면의 전역값을 채널값으로 오인하는 것을 막는다.
+      if (
+        (prevPresetEnabled && !globalDefaultPreset.enabled) ||
+        (prevGainEnabled && !globalGainDefault.enabled)
+      ) {
+        if (currentMediaId) beginStateLoad(currentMediaId);
         return;
       }
-      if (applyGlobalDefaultPreset()) {
+      if (
+        (globalDefaultPreset.enabled || globalGainDefault.enabled) &&
+        applyConfiguredGlobalDefaults()
+      ) {
         if (state.enabled) ensureEnabledGraph();
         else applyState();
         syncUI();
@@ -3712,6 +3886,7 @@
     switch (key) {
       case "gain":
         state.gain = quantizeGain(value);
+        state.userPickedGain = true;
         break;
       case "bass":
         applyEqGroup("bass", value);
@@ -5699,7 +5874,7 @@
         dataURL,
         filename: `${name}.png`,
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -6548,7 +6723,7 @@
           type: "save-auto-sync",
           enabled: autoSyncEnabled,
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     }
     updateSyncButtonState();
@@ -6561,7 +6736,7 @@
         type: "load-auto-sync",
         fallback: autoSyncEnabled,
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -8859,10 +9034,7 @@
       currentPageKey = pageKey;
       currentMediaId = null; // 채널id는 아래에서 비동기로 해석
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
-      wideScreenAppliedForPage = null;
-      wideScreenRetryUntil = Date.now() + 8000;
-      wideScreenWaitStartedAt = Date.now(); // 연장 상한 계산 기준
-      stopWideScreenPolling(); // 이전 미디어의 폴링은 끊고, 아래 tick 에서 새로 시작
+      resetWideScreenAttempt();
 
       // 새 미디어 → 최대 화질 자동 고정 상태 리셋(이전 영상의 수동 존중을 새 영상까지
       // 끌고 가지 않는다).
@@ -8989,8 +9161,13 @@
 
   // 넓은 화면이 이미 켜져 있는지 판정. pzp-button--clicked는 두 상태 모두 붙어 있어
   // 쓸 수 없다. 켜지면 checked 속성이 붙고 aria-label이 '좁은 화면'(누르면 좁아짐)
-  // 으로 바뀐다 — 이 둘로 판정한다.
+  // 으로 바뀐다. 최근 UI는 이 둘보다 레이아웃의 _is_large_ 클래스가 먼저 바뀌므로
+  // 함께 판정해야 상태 반영 중 버튼을 다시 눌러 좁은 화면으로 돌아가는 일을 막을 수 있다.
   function isWideScreenOn(btn) {
+    const playerBox = document.querySelector(
+      "div#layout-body #live_player_layout, div#layout-body #player_layout",
+    );
+    if (playerBox?.closest?.('[class*="_is_large_"]')) return true;
     if (!btn) return false;
     return (
       btn.hasAttribute("checked") ||
@@ -8998,39 +9175,102 @@
     );
   }
 
+  // 컨트롤 바는 마우스가 빠지면 opacity:0이 되지만, React 버튼과 클릭 핸들러는 이미
+  // 준비된 상태다. 팝업의 준비 오버레이가 포인터를 가리는 동안에도 클릭할 수 있도록
+  // 가시성 대신 DOM 연결·상태 라벨만 확인한다.
+  function isViewModeButtonReady(btn) {
+    if (!(btn instanceof HTMLElement)) return false;
+    if (!document.documentElement.contains(btn) || btn.disabled) return false;
+    const label = btn.getAttribute("aria-label");
+    return (
+      btn.hasAttribute("checked") ||
+      label === "넓은 화면" ||
+      label === "좁은 화면"
+    );
+  }
+
   // '넓은 화면 자동 적용'이 켜져 있으면 플레이어 진입 시 viewmode를 1회 켠다. 이미
   // 켜져 있으면 클릭하지 않는다(토글 무한루프 방지). 버튼이 아직 없으면 재시도
   // 마감 시각까지 다음 tick에서 다시 시도한다. 미디어당 1회만 적용한다.
+  // 팝업 '준비 중' 오버레이를 내리기 위한 신호. 넓은 화면 자동 적용이 끝났거나(적용/
+  // 이미 켜짐) 더 시도하지 않기로 한 순간(마감·비대상 페이지) 한 번만 알린다.
+  // content.js(격리 월드)가 받아 부모 창으로 중계한다.
+  let wideScreenNotified = false;
+  function notifyWideScreenSettled() {
+    if (wideScreenNotified) return;
+    wideScreenNotified = true;
+    try {
+      window.postMessage(
+        { source: "cheese-wide-screen-settled" },
+        BRIDGE_ORIGIN,
+      );
+    } catch {}
+  }
+
+  function settleWideScreenAttempt(waitForLayout = false) {
+    const settledPageKey = currentPageKey;
+    wideScreenAppliedForPage = settledPageKey;
+    wideScreenLastClickAt = 0;
+    wideScreenClickAttempts = 0;
+    stopWideScreenPolling();
+    const notify = () => {
+      if (currentPageKey === settledPageKey) notifyWideScreenSettled();
+    };
+    if (!waitForLayout) {
+      notify();
+      return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(notify));
+  }
+
   function maybeAutoWideScreen() {
-    if (!wideScreenAuto) return;
+    // ⚠ 자동 적용이 꺼져 있으면 '기다릴 것이 없다'고 즉시 알린다. 알리지 않으면 부모의
+    // '준비 중' 오버레이가 올 리 없는 신호를 타임아웃까지 기다린다.
+    // 단 저장값 로드 전의 false 는 '꺼짐'이 아니라 '아직 모름'이다. 그걸로 알려버리면
+    // 로드가 끝나기도 전에 오버레이가 걷혀, 켜 둔 사람에게도 오버레이가 순간 번쩍이고
+    // 사라진다(제보 증상). 로드가 끝난 뒤의 false 만 '꺼짐'으로 확정한다.
+    if (!wideScreenSettingsLoaded) return;
+    if (!wideScreenAuto) {
+      stopWideScreenPolling();
+      notifyWideScreenSettled();
+      return;
+    }
     if (!currentPageKey) return; // 라이브/다시보기 페이지에서만
     // ⚠ currentPageKey 는 PIP 유지 경로에서 남아 있을 수 있다. 현재 URL 이 실제로
     // 라이브/다시보기가 아니면 클릭하지 않는다 — 메인에서 viewmode 를 눌러 치지직이
     // body 에 overflow:hidden 을 남기는 것을 막는다(2중 안전장치).
     if (!getPageKey()) {
       stopWideScreenPolling();
+      notifyWideScreenSettled(); // 대상 페이지가 아님 — 오버레이를 붙잡지 않는다
       return;
     }
     if (wideScreenAppliedForPage === currentPageKey) {
       stopWideScreenPolling();
       return; // 이미 이 미디어에 적용함
     }
+    const now = Date.now();
+    if (!wideScreenWaitStartedAt) resetWideScreenAttempt();
     const btn = findViewModeButton();
-    if (!btn || !isElementRendered(btn)) {
+    if (!isViewModeButtonReady(btn)) {
       // ⚠ 마감(8초)은 '페이지 전환 시점' 기준이라, 사양·네트워크가 느려 플레이어가
       // 늦게 뜨면 버튼이 나타나기도 전에 만료돼 자동 적용이 통째로 취소됐다.
-      // 플레이어(video)가 아직 준비되지 않았다면 아직 '늦은' 것이 아니므로 마감을
-      // 미뤄 준다. 상한(WIDE_SCREEN_MAX_WAIT_MS)까지만 연장해 무한 대기는 막는다.
-      if (
-        !document.querySelector(".webplayer-internal-video") &&
-        Date.now() - wideScreenWaitStartedAt < WIDE_SCREEN_MAX_WAIT_MS
-      ) {
-        wideScreenRetryUntil = Date.now() + 8000;
+      // 아직 viewmode 버튼이 없다는 건 컨트롤 UI 가 덜 준비됐다는 뜻이므로 '늦은' 게
+      // 아니다. 상한(WIDE_SCREEN_MAX_WAIT_MS)까지만 연장해 무한 대기는 막는다.
+      //
+      // ⚠ 예전엔 여기 조건이 '<video> 가 아직 없을 때'였다. 그런데 팝업 iframe 처럼
+      // 스크립트가 늦게 시작하는 경로에서는 첫 tick 시점에 video 는 이미 붙어 있고
+      // 컨트롤(viewmode 버튼)만 늦게 붙는 구간이 흔하다. 그 구간에서는 연장이 한 번도
+      // 걸리지 않아, 페이지 전환 기준 8초가 그대로 만료돼 자동 적용이 취소됐다
+      // (팝업 넓은 화면이 간헐적으로만 먹던 원인). 판정 기준을 '버튼 유무'로 맞춘다.
+      if (now - wideScreenWaitStartedAt < WIDE_SCREEN_MAX_WAIT_MS) {
+        wideScreenRetryUntil = now + WIDE_SCREEN_RETRY_WINDOW_MS;
       }
       // 버튼이 아직 없음 — 재시도 마감 전이면 다시 시도한다.
-      if (Date.now() > wideScreenRetryUntil) {
-        wideScreenAppliedForPage = currentPageKey; // 마감 → 더 시도 안 함
-        stopWideScreenPolling();
+      if (
+        now - wideScreenWaitStartedAt >= WIDE_SCREEN_MAX_WAIT_MS ||
+        now > wideScreenRetryUntil
+      ) {
+        settleWideScreenAttempt(); // 끝내 못 찾음 — 오버레이는 내려준다
       } else {
         // ⚠ tick 은 DOM 변이가 있어야 돌아간다. 플레이어가 자리를 잡고 조용해지면
         // 변이가 멈춰, 마감(8초)까지 재시도가 '한 번도' 일어나지 않을 수 있다.
@@ -9039,13 +9279,32 @@
       }
       return;
     }
-    if (!isWideScreenOn(btn)) {
+    const alreadyOn = isWideScreenOn(btn);
+    if (alreadyOn) {
+      settleWideScreenAttempt(wideScreenClickAttempts > 0);
+      return;
+    }
+
+    // 설정 브리지가 늦게 확정된 경우에는 페이지 진입 때 만든 8초 창이 이미 지났을 수
+    // 있다. 첫 클릭 기회는 항상 보장하고, 그 뒤 제한 시간 안에서만 재시도한다.
+    if (!wideScreenClickAttempts && now > wideScreenRetryUntil) {
+      wideScreenRetryUntil = now + WIDE_SCREEN_RETRY_WINDOW_MS;
+      wideScreenWaitStartedAt = now;
+    }
+    if (now > wideScreenRetryUntil) {
+      settleWideScreenAttempt();
+      return;
+    }
+    if (now - wideScreenLastClickAt >= WIDE_SCREEN_CLICK_RETRY_MS) {
       try {
         btn.click();
+        wideScreenClickAttempts += 1;
+        wideScreenLastClickAt = now;
       } catch {}
     }
-    wideScreenAppliedForPage = currentPageKey; // 1회 적용 완료(켜져 있었어도 소진)
-    stopWideScreenPolling();
+    // 클릭 직후 완료로 간주하지 않는다. React가 상태를 반영해 aria-label이
+    // '좁은 화면'으로 바뀔 때까지 확인하며, 첫 클릭이 유실되면 제한적으로 다시 누른다.
+    startWideScreenPolling();
   }
 
   // 페이지의 채널id를 비동기로 확보한 뒤 해당 채널 설정을 로드한다. 해석 도중

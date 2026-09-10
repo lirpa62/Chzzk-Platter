@@ -28,13 +28,38 @@
 
   if (isClipEditorContext()) return;
 
-  async function masterEnabled() {
+  // masterGate.js(ISOLATED, document_start)가 루트에 준비 표시를 세울 때까지 기다린다.
+  // 예전의 10ms x 100회(=1초) 고정 폴링은 서비스워커 콜드 스타트가 느리거나 팝업
+  // iframe 처럼 비활성 프레임이라 타이머가 clamp 되면 타임아웃됐다.
+  // MutationObserver 로 즉시 깨어나게 하고 타임아웃도 10초로 늘린다.
+  function masterEnabled() {
     const root = document.documentElement;
-    for (let i = 0; i < 100; i += 1) {
-      if (root?.dataset.cheesePlatterMasterReady === "1") break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return !root?.hasAttribute("data-cheese-platter-disabled");
+    if (!root) return Promise.resolve(true);
+    const ready = () => root.dataset.cheesePlatterMasterReady === "1";
+    const verdict = () => !root.hasAttribute("data-cheese-platter-disabled");
+    if (ready()) return Promise.resolve(verdict());
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        resolve(verdict());
+      };
+      const observer = new MutationObserver(() => {
+        if (ready()) finish();
+      });
+      observer.observe(root, {
+        attributes: true,
+        attributeFilter: [
+          "data-cheese-platter-master-ready",
+          "data-cheese-platter-disabled",
+        ],
+      });
+      const timer = setTimeout(finish, 10000);
+      if (ready()) finish(); // observe 등록 직전에 세팅됐을 수 있다
+    });
   }
   if (!(await masterEnabled())) return;
 
@@ -592,7 +617,7 @@
       target.postMessage(payload, location.origin);
     } catch {
       try {
-        window.postMessage(payload, location.origin);
+        window.postMessage(payload, "*"); // 같은 창 폴백(위 주석 참고)
       } catch {}
     }
   }
@@ -2244,10 +2269,10 @@
   let flagRequestTimer = 0;
   let flagRequestTries = 0;
   function requestFlagsOnce() {
-    window.postMessage(
-      { source: "cheese-feature-flags-request" },
-      location.origin,
-    );
+    // ⚠ targetOrigin 에 location.origin 을 쓰면 안 된다. 다른 확장이 프레임 document 를
+    // 교체하거나 about:blank 를 경유하면 origin 이 "null" 이 되어 메시지가 조용히 버려진다.
+    // 같은 창이고 수신부가 e.source !== window 로 검증하므로 "*" 로도 안전하다.
+    window.postMessage({ source: "cheese-feature-flags-request" }, "*");
   }
   function stopFlagRequestRetry() {
     if (flagRequestTimer) {

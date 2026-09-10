@@ -554,6 +554,14 @@
     "inboxCommunityNews",
   ]);
   const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
+  // 같은 창 안의 ISOLATED↔MAIN 브리지용 targetOrigin.
+  // ⚠ location.origin 을 쓰면 안 된다. 다른 확장이 프레임 document 를 교체하거나
+  // about:blank 를 경유하는 순간 origin 이 "null" 문자열이 되어, 브라우저가 메시지를
+  // 에러 없이 조용히 폐기한다(팝업 프레임에서 버튼·기능·단축키가 통째로 죽던 원인).
+  // 같은 창(window→window)이고 수신부가 모두 e.source !== window 로 검증하므로
+  // "*" 로 보내도 외부에 노출되지 않는다. ⚠ 다른 프레임(window.parent/top)으로 보내는
+  // 메시지에는 쓰지 말 것 — 그쪽은 실제로 오리진을 좁혀야 한다.
+  const BRIDGE_ORIGIN = "*";
   let featureFlagsLoaded = false;
   const GLOBAL_SCROLL_TOP_FAB_KEY = "cheeseGlobalScrollTopFab";
   let globalScrollTopFabOn = false;
@@ -670,6 +678,9 @@
   let screenshotDirectSave = true;
   const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
   let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
+  const MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY =
+    "cheeseMixerGlobalGainDefaultMode";
+  let mixerGlobalGainDefaultMode = "global"; // 전역 게인 재방문 동작(global | channel)
   const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
     "cheeseVideoFilterGlobalDefaultMode";
   let videoFilterGlobalDefaultMode = "global"; // 필터 전역 기본값 재방문 동작
@@ -1050,6 +1061,9 @@
   const POPUP_PLAYER_MAXQ_KEY = "cheesePopupPlayerMaxQuality";
   // 숨긴 버튼의 기능까지 끌지(기본 OFF=표시만 숨기고 단축키는 동작).
   const POPUP_PLAYER_DISABLE_HIDDEN_KEY = "cheesePopupPlayerDisableHidden";
+  // 팝업 관련 저장값(넓은 화면 등)을 실제로 읽어왔는지. 읽기 전 브로드캐스트는 기본값을
+  // 담고 나가므로, MAIN world 가 그걸 '설정이 꺼짐'으로 오해하지 않게 함께 알린다.
+  let popupPlayerSettingsLoaded = false;
   let popupPlayerOn = false;
   let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
   let popupPlayerSize = POPUP_PLAYER_SIZE_DEFAULT;
@@ -2124,6 +2138,13 @@
   // (각 true=표시). 미설정 시 기본 표시 항목은 HEADER_NAV_DEFAULT_SHOWN.
   const HEADER_NAV_KEY = "cheeseHeaderNav";
   const HEADER_NAV_CONTAINER_ID = "cheese-header-nav";
+  const HEADER_NAV_RESPONSIVE_HIDDEN_CLASS =
+    "cheese-header-nav-responsive-hidden";
+  const HEADER_NAV_RESPONSIVE_EMPTY_CLASS =
+    "cheese-header-nav-responsive-empty";
+  const HEADER_LOUNGE_RESPONSIVE_HIDDEN_CLASS =
+    "cheese-header-lounge-responsive-hidden";
+  const HEADER_NAV_SEARCH_GAP_PX = 12;
   const HEADER_FOLLOW_CONTAINER_ID = "cheese-header-follow";
   // ── 치지직 라운지 소식 ────────────────────────────────────────────────────────
   // 헤더 알림 버튼 오른쪽에 armchair 아이콘을 두고, 클릭하면 아래로 탭 모달을 연다.
@@ -19074,6 +19095,33 @@
     } catch {}
   }
 
+  // ── 넓은 화면 자동 적용 완료를 부모(팝업 창)에 중계 ──────────────────────────
+  // 실제 적용은 MAIN world(audioMixer.js)가 하므로, 그 완료 신호를 받아 부모로 넘긴다.
+  // 부모는 이 신호를 받을 때까지 '준비 중' 오버레이를 유지한다.
+  let popupPlayerWideNotified = false;
+  function notifyPopupPlayerWideReady() {
+    if (popupPlayerWideNotified) return;
+    if (!IS_POPUP_PLAYER_FRAME || window.parent === window) return;
+    popupPlayerWideNotified = true;
+    try {
+      window.parent.postMessage(
+        {
+          source: POPUP_PLAYER_FRAME_STATUS_SOURCE,
+          type: "initial-wide-screen-complete",
+        },
+        location.origin,
+      );
+    } catch {}
+  }
+
+  if (IS_POPUP_PLAYER_FRAME) {
+    window.addEventListener("message", (event) => {
+      if (event.source !== window) return;
+      if (event.data?.source !== "cheese-wide-screen-settled") return;
+      notifyPopupPlayerWideReady();
+    });
+  }
+
   function finishPopupPlayerInitialChatFold() {
     if (popupPlayerChatFoldDone) return;
     popupPlayerChatFoldDone = true;
@@ -20794,12 +20842,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function getSidebarNavLabel(nav) {
+    // 접힌 사이드바의 새 DOM은 팔로잉 같은 섹션에서 _header_/_title_을 아예
+    // 렌더하지 않고 nav의 aria-label("팔로우")만 남긴다. 접근성 라벨을 먼저
+    // 포함해야 접힌 상태에서도 섹션 숨김·오프라인 처리·전용 목록 주입이 유지된다.
+    const ariaLabel = nav.getAttribute("aria-label") || "";
     const titleText =
       nav.querySelector('[class*="_title_"]')?.textContent || "";
     const blindText = Array.from(nav.querySelectorAll(".blind"))
       .map((el) => el.textContent || "")
       .join(" ");
-    return (titleText + " " + blindText).replace(/\s+/g, "");
+    return (ariaLabel + " " + titleText + " " + blindText).replace(
+      /\s+/g,
+      "",
+    );
   }
 
   function findSidebarFollowNav() {
@@ -22546,6 +22601,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       box.addEventListener("pointerover", onLoungeLabelHarvest, true);
     }
     syncLoungeDot();
+    scheduleHeaderNavFit();
   }
 
   function shouldRefreshLoungeNews() {
@@ -22992,8 +23048,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 스튜디오 버튼을 숨기지 않으면(=버튼이 보임) 헤더 우측 공간이 좁아 바로가기를
   // 최대 3개까지만 표시한다. 스튜디오 버튼 숨김(headerStudio=true)이면 제한 없음.
-  // ⚠ 라운지 소식 버튼은 이 제한과 무관하다 — 대신 검색창 우측 여백을 늘려 자리를
-  // 만든다(applyLoungeSearchPadding).
+  // 라운지 소식 등 다른 우측 버튼까지 포함한 실제 여유 공간은 아래의 좌표 기반
+  // 반응형 보정에서 처리한다.
   const HEADER_NAV_MAX_WITH_STUDIO = 3;
   function getShownHeaderNavItems() {
     const shown = HEADER_NAV_ITEMS.filter(isHeaderNavItemVisible);
@@ -23002,6 +23058,88 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return shown.slice(0, HEADER_NAV_MAX_WITH_STUDIO);
     }
     return shown;
+  }
+
+  let headerNavFitRaf = 0;
+  let headerNavResizeBound = false;
+
+  function fitHeaderNavToAvailableSpace() {
+    headerNavFitRaf = 0;
+    const header = document.getElementById("header");
+    if (!header) return;
+
+    const container = header.querySelector(`#${HEADER_NAV_CONTAINER_ID}`);
+    const loungeButton = header.querySelector(`#${LOUNGE_BUTTON_ID}`);
+    const loungeItem =
+      loungeButton?.closest(".cheese-lounge-header-item") || loungeButton;
+    loungeItem?.classList.remove(HEADER_LOUNGE_RESPONSIVE_HIDDEN_CLASS);
+
+    const items = container
+      ? Array.from(container.querySelectorAll(".cheese-header-nav-item"))
+      : [];
+    for (const item of items) {
+      item.classList.remove(HEADER_NAV_RESPONSIVE_HIDDEN_CLASS);
+    }
+    container?.classList.remove(HEADER_NAV_RESPONSIVE_EMPTY_CLASS);
+
+    const searchForm = header.querySelector('form[role="search"]');
+    if (!searchForm) return;
+
+    const studioAnchor = header.querySelector(
+      'a[href*="studio.chzzk.naver.com"]',
+    );
+    const studioBox =
+      studioAnchor?.closest('[class*="_box_"]') || studioAnchor;
+    const actionHost =
+      container?.closest('[class*="_section_"]') ||
+      studioBox?.parentElement ||
+      loungeItem?.closest('[class*="_section_"]');
+
+    const overlapsSearch = () => {
+      const searchRect = searchForm.getBoundingClientRect();
+      if (searchRect.width <= 0 || !actionHost) return false;
+      const firstVisibleAction = Array.from(actionHost.children).find(
+        (child) => {
+          const rect = child.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        },
+      );
+      if (!firstVisibleAction) return false;
+      const actionRect = firstVisibleAction.getBoundingClientRect();
+      return searchRect.right + HEADER_NAV_SEARCH_GAP_PX > actionRect.left;
+    };
+
+    const fitNavItems = () => {
+      if (!container || !items.length) return;
+      for (const item of items) {
+        item.classList.remove(HEADER_NAV_RESPONSIVE_HIDDEN_CLASS);
+      }
+      container.classList.remove(HEADER_NAV_RESPONSIVE_EMPTY_CLASS);
+
+      for (let index = items.length - 1; index >= 0; index -= 1) {
+        if (!overlapsSearch()) break;
+        items[index].classList.add(HEADER_NAV_RESPONSIVE_HIDDEN_CLASS);
+        container.classList.toggle(
+          HEADER_NAV_RESPONSIVE_EMPTY_CLASS,
+          index === 0,
+        );
+      }
+    };
+
+    // 치지직 검색창은 좁은 폭에서 우측 액션 영역과 독립적으로 중앙 폭을 유지한다.
+    // 우선 뒤쪽 바로가기를 줄이고, 그래도 스튜디오/기본 액션과 겹치면 추가 주입된
+    // 라운지 버튼을 숨긴다. 확보된 폭으로 바로가기를 다시 계산해 가능한 항목은 복원한다.
+    fitNavItems();
+    if (overlapsSearch() && loungeItem) {
+      loungeItem.classList.add(HEADER_LOUNGE_RESPONSIVE_HIDDEN_CLASS);
+      if (document.getElementById(LOUNGE_MODAL_ID)) closeLoungeModal();
+      fitNavItems();
+    }
+  }
+
+  function scheduleHeaderNavFit() {
+    if (headerNavFitRaf) cancelAnimationFrame(headerNavFitRaf);
+    headerNavFitRaf = requestAnimationFrame(fitHeaderNavToAvailableSpace);
   }
 
   // 표시 항목이 하나라도 있으면 헤더에 미니 네비를 보장한다(사이드바 전체 숨김이거나,
@@ -23058,7 +23196,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 스튜디오 버튼이 보이면 최대 3개로 캡(getShownHeaderNavItems).
     const shownItems = getShownHeaderNavItems();
     const sig = shownItems.map((it) => it.key).join(",");
-    if (container.dataset.sig === sig) return;
+    if (container.dataset.sig === sig) {
+      scheduleHeaderNavFit();
+      return;
+    }
     container.dataset.sig = sig;
 
     const html = shownItems
@@ -23070,6 +23211,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       )
       .join("");
     if (container.innerHTML !== html) container.innerHTML = html;
+    scheduleHeaderNavFit();
   }
 
   // 헤더 미니 네비 클릭 → 전체 리로드 대신 치지직 SPA 라우터로 부분 네비게이션.
@@ -35864,6 +36006,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 사이드바・헤더 같은 최상위 전용 기능이 중복 주입되면 안 되기 때문이다.
     const url = new URL(href, location.origin);
     url.searchParams.set("cheesePopup", "1");
+    // 부모는 팝업 설정을 이미 읽은 상태다. iframe 안 설정 브리지를 다시 기다리지 않고
+    // 넓은 화면 적용을 바로 시작할 수 있도록 확정값을 함께 전달한다.
+    url.searchParams.set("cheesePopupWide", popupPlayerWide ? "1" : "0");
     if (popupPlayerStartWithoutChat) {
       url.searchParams.set("cheesePopupChatFolded", "1");
     }
@@ -35886,8 +36031,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     popup.appendChild(frame);
 
+    // '준비 중' 오버레이는 초기 세팅이 눈에 띄게 진행되는 옵션에만 붙인다.
+    // 채팅 접기와 넓은 화면 자동 적용은 둘 다 레이아웃이 한 번 크게 바뀌므로,
+    // 켜져 있는 항목이 모두 끝날 때까지 가려 전환 과정을 감춘다.
+    const waitChatFold = popupPlayerStartWithoutChat;
+    const waitWideScreen = popupPlayerWide;
     let preparingOverlay = null;
-    if (popupPlayerStartWithoutChat) {
+    if (waitChatFold || waitWideScreen) {
       popup.classList.add("is-preparing");
       preparingOverlay = document.createElement("div");
       preparingOverlay.className = "cheese-popup-player__preparing";
@@ -35936,21 +36086,31 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           preparingTimeout = 0;
         }
       };
+      // 켜져 있는 항목이 모두 끝나야 오버레이를 내린다. 각 신호는 프레임 안에서
+      // 한 번씩만 오고, 먼저 온 쪽을 지운 뒤 남은 게 없을 때 걷는다.
+      const pending = new Set();
+      if (waitChatFold) pending.add("initial-chat-fold-complete");
+      if (waitWideScreen) pending.add("initial-wide-screen-complete");
       const onFrameStatus = (event) => {
         if (
           event.origin !== location.origin ||
           event.source !== frame.contentWindow ||
-          event.data?.source !== POPUP_PLAYER_FRAME_STATUS_SOURCE ||
-          event.data?.type !== "initial-chat-fold-complete"
+          event.data?.source !== POPUP_PLAYER_FRAME_STATUS_SOURCE
         ) {
           return;
         }
-        finishPreparing();
+        pending.delete(event.data?.type);
+        if (pending.size === 0) finishPreparing();
       };
       window.addEventListener("message", onFrameStatus);
       // 콘텐츠 스크립트가 중단되거나 치지직 UI를 끝내 찾지 못해도 팝업을 영구히
       // 가리지 않는다. 정상 경로에서는 내부 프레임의 완료 신호가 먼저 제거한다.
-      preparingTimeout = window.setTimeout(finishPreparing, 45000);
+      // 채팅 접기는 자체 안정화 구간이 길어(최대 30s 준비 + 15s 강제) 45초를 유지하고,
+      // 넓은 화면만 기다리는 경우엔 그렇게 오래 가릴 이유가 없어 짧게 끊는다.
+      preparingTimeout = window.setTimeout(
+        finishPreparing,
+        waitChatFold ? 45000 : 12000,
+      );
       cleanups.push(() => {
         window.removeEventListener("message", onFrameStatus);
         if (preparingTimeout) clearTimeout(preparingTimeout);
@@ -37892,6 +38052,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       popupPlayerDisableHidden =
         data?.[POPUP_PLAYER_DISABLE_HIDDEN_KEY] === true;
       applyPopupPlayerButtonClasses();
+      popupPlayerSettingsLoaded = true;
       // 팝업 프레임은 위 값들이 기능 플래그·최대 화질에 반영되므로, 로드 완료 후 한 번
       // 더 알린다(로드 전에 MAIN world 가 요청했다면 기본값을 받았을 수 있다).
       if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
@@ -37941,6 +38102,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
     } catch {}
     applyFollowPreviewHeaderVisibility();
+    // 저장값 읽기가 실패(catch)했더라도 '더 기다려도 값이 안 온다'는 건 확정이므로
+    // 로드 완료로 표시하고 한 번 더 알린다. 그래야 MAIN world 가 기본값 기준으로라도
+    // 판단을 끝내고, 부모의 '준비 중' 오버레이가 타임아웃까지 매달리지 않는다.
+    if (!popupPlayerSettingsLoaded) {
+      popupPlayerSettingsLoaded = true;
+      if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
+    }
     // 팔로잉 미리보기 또는 카드 플레이어 미리보기 중 하나라도 켜져 있으면 호버 감지를
     // 바인딩한다(둘이 같은 인프라를 공유). 둘 다 꺼지면 미리보기를 닫는다.
     if (followPreviewOn || cardLivePreviewOn) bindFollowPreviewHover();
@@ -37949,12 +38117,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // ── 라이브 탐색 카드 호버 미리보기 음소거 토글(우클릭) ─────────────────────
   // 치지직이 카드(a[href^="/live/"]) 호버 시 주입하는 음소거 video(.webplayer-internal-
-  // video) 위에서 **우클릭**하면 음소거를 토글한다. 버튼 오버레이는 두지 않는다 —
-  // video 부모는 React DOM이라 버튼 주입 시 무한 재렌더, body 오버레이는 마우스가
-  // 카드를 벗어난 것으로 판정돼 치지직이 미리보기를 멈춘다. 우클릭은 카드 위에 마우스가
-  // 머문 채라 미리보기가 안 멈추고, 네비게이션도 안 유발해 capture로 안정적이다.
+  // video)를 버튼·슬라이더·우클릭·휠로 조작한다. React가 자주 교체하는 webplayer
+  // 내부가 아니라 바깥쪽 카드 player 래퍼에 컨트롤을 붙여 네이티브 hover를 유지한다.
   const CARD_PREVIEW_VIDEO_SEL = "video.webplayer-internal-video";
+  const CARD_PREVIEW_VOLUME_CONTROL_CLASS =
+    "cheese-card-preview-volume-control";
   let cardPreviewBound = false;
+  let cardPreviewAudibleVideo = null;
+  let cardPreviewVolumeControl = null;
+  let cardPreviewVolumeVideo = null;
+  let cardPreviewVolumeHost = null;
+  let cardPreviewVolumeAnchor = null;
+  let cardPreviewControlObserver = null;
+  let cardPreviewControlRaf = 0;
 
   // 카드 미리보기 video인지(우리 미리보기/플레이어 PIP 제외). 카드 링크 안의 것만.
   function isCardPreviewVideo(v) {
@@ -37964,9 +38139,317 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return Boolean(v.closest('a[href^="/live/"]'));
   }
 
+  // 메인 히어로/일반 라이브 카드는 썸네일 링크와 제목 링크가 같은 li 안의 형제다.
+  // 링크 하나가 아니라 카드 최상위 항목을 호버 경계로 사용해야 설명 영역을 오갈 때
+  // 잘못 이탈한 것으로 보지 않고, 실제 카드 밖으로 나갔을 때만 음소거할 수 있다.
+  function cardPreviewCardAtTarget(target) {
+    const element = target instanceof Element ? target : target?.parentElement;
+    const item = element?.closest?.(
+      'li[class*="_item_"], li[data-nlog-area]',
+    );
+    if (
+      item &&
+      !item.closest(".pzp, #cheese-follow-preview") &&
+      item.querySelector('a[href^="/live/"]')
+    ) {
+      return item;
+    }
+    const anchor = element?.closest?.('a[href^="/live/"]');
+    if (!anchor || anchor.closest(".pzp, #cheese-follow-preview")) return null;
+    return (
+      anchor.closest('li[class*="_item_"], li[data-nlog-area]') ||
+      anchor.closest("[data-nlog-area]") ||
+      anchor
+    );
+  }
+
+  function muteTrackedCardPreview(card = null) {
+    const videos = new Set();
+    if (cardPreviewAudibleVideo) videos.add(cardPreviewAudibleVideo);
+    card?.querySelectorAll?.(CARD_PREVIEW_VIDEO_SEL).forEach((video) => {
+      if (isCardPreviewVideo(video)) videos.add(video);
+    });
+    for (const video of videos) {
+      // 별도 치즈 플래터 미리보기가 잠시 음소거한 영상이라면, 닫힐 때 과거의
+      // unmuted 상태를 되살리지 않도록 복원 상태도 함께 음소거로 갱신한다.
+      if (followPreviewState.nativeCardAudio?.video === video) {
+        followPreviewState.nativeCardAudio.muted = true;
+      }
+      try {
+        video.muted = true;
+      } catch {}
+    }
+    cardPreviewAudibleVideo = null;
+  }
+
+  function markCardPreviewAudible(video) {
+    if (cardPreviewAudibleVideo && cardPreviewAudibleVideo !== video) {
+      muteTrackedCardPreview();
+    }
+    cardPreviewAudibleVideo = video;
+  }
+
+  const CARD_PREVIEW_VOLUME_ICON = `<svg class="lucide lucide-volume-2" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>`;
+  const CARD_PREVIEW_MUTED_ICON = `<svg class="lucide lucide-volume-x" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="m22 9-6 6"></path><path d="m16 9 6 6"></path></svg>`;
+
+  function syncCardPreviewVolumeControl(video = cardPreviewVolumeVideo) {
+    const control = cardPreviewVolumeControl;
+    if (!control || !video || video !== cardPreviewVolumeVideo) return;
+    const muted = Boolean(video.muted || video.volume === 0);
+    // video.muted는 volume 값을 바꾸지 않으므로(대개 100 유지), 음소거 중에는
+    // 슬라이더도 0으로 보여 실제 출력 상태와 UI가 어긋나지 않게 한다.
+    const volume = muted
+      ? 0
+      : Math.round((Number(video.volume) || 0) * 100);
+    const button = control.querySelector("button");
+    const slider = control.querySelector('input[type="range"]');
+    if (button) {
+      const label = muted ? "카드 미리보기 음소거 해제" : "카드 미리보기 음소거";
+      const mutedState = String(muted);
+      if (button.dataset.muted !== mutedState) {
+        button.dataset.muted = mutedState;
+        button.innerHTML = muted
+          ? CARD_PREVIEW_MUTED_ICON
+          : CARD_PREVIEW_VOLUME_ICON;
+      }
+      button.setAttribute("aria-label", label);
+      button.setAttribute("title", label);
+      button.setAttribute("aria-pressed", String(muted));
+    }
+    if (slider) {
+      slider.value = String(volume);
+      slider.setAttribute("aria-valuetext", `${volume}%`);
+      slider.style.setProperty("--cheese-card-preview-volume", `${volume}%`);
+    }
+    control.classList.toggle("is-muted", muted);
+  }
+
+  function onCardPreviewVolumeChange() {
+    syncCardPreviewVolumeControl();
+  }
+
+  function bindCardPreviewVolumeVideo(video) {
+    if (!video || video === cardPreviewVolumeVideo) return;
+    cardPreviewVolumeVideo?.removeEventListener(
+      "volumechange",
+      onCardPreviewVolumeChange,
+    );
+    cardPreviewVolumeVideo = video;
+    video.addEventListener("volumechange", onCardPreviewVolumeChange);
+  }
+
+  function resolveCardPreviewVolumeVideo(anchor) {
+    const current = anchor?.querySelector?.(CARD_PREVIEW_VIDEO_SEL);
+    if (current && isCardPreviewVideo(current)) {
+      bindCardPreviewVolumeVideo(current);
+      return current;
+    }
+    return cardPreviewVolumeVideo?.isConnected
+      ? cardPreviewVolumeVideo
+      : null;
+  }
+
+  function setCardPreviewVolumeControlDismissed(dismissed) {
+    const control = cardPreviewVolumeControl;
+    if (!control) return;
+    control.classList.toggle("is-dismissed", dismissed);
+    if (dismissed) control.dataset.dismissedAt = String(Date.now());
+    else delete control.dataset.dismissedAt;
+    const tabIndex = dismissed ? -1 : 0;
+    const button = control.querySelector("button");
+    const slider = control.querySelector('input[type="range"]');
+    if (button) button.tabIndex = tabIndex;
+    if (slider) slider.tabIndex = tabIndex;
+    if (dismissed && control.contains(document.activeElement)) {
+      document.activeElement?.blur?.();
+    }
+  }
+
+  function removeCardPreviewVolumeControl() {
+    cardPreviewVolumeVideo?.removeEventListener(
+      "volumechange",
+      onCardPreviewVolumeChange,
+    );
+    cardPreviewVolumeControl?.remove();
+    cardPreviewVolumeAnchor?.removeEventListener(
+      "dragstart",
+      preventCardPreviewAnchorDrag,
+      true,
+    );
+    cardPreviewVolumeAnchor?.classList.remove(
+      "cheese-card-preview-volume-anchor",
+    );
+    cardPreviewVolumeHost?.classList.remove(
+      "cheese-card-preview-volume-host",
+    );
+    cardPreviewVolumeControl = null;
+    cardPreviewVolumeVideo = null;
+    cardPreviewVolumeHost = null;
+    cardPreviewVolumeAnchor = null;
+  }
+
+  function preventCardPreviewAnchorDrag(event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function syncCardPreviewControlForCard(card = cardPreviewHoverCard) {
+    if (!card || card !== cardPreviewHoverCard || !card.isConnected) return;
+    const video = card.querySelector(CARD_PREVIEW_VIDEO_SEL);
+    if (video && isCardPreviewVideo(video)) {
+      mountCardPreviewVolumeControl(card, video);
+    } else {
+      removeCardPreviewVolumeControl();
+    }
+  }
+
+  function observeCardPreviewControl(card) {
+    cardPreviewControlObserver?.disconnect();
+    cardPreviewControlObserver = null;
+    if (cardPreviewControlRaf) {
+      cancelAnimationFrame(cardPreviewControlRaf);
+      cardPreviewControlRaf = 0;
+    }
+    if (!card) return;
+    cardPreviewControlObserver = new MutationObserver(() => {
+      if (cardPreviewControlRaf) return;
+      cardPreviewControlRaf = requestAnimationFrame(() => {
+        cardPreviewControlRaf = 0;
+        syncCardPreviewControlForCard(card);
+      });
+    });
+    cardPreviewControlObserver.observe(card, {
+      childList: true,
+      subtree: true,
+    });
+    syncCardPreviewControlForCard(card);
+  }
+
+  function mountCardPreviewVolumeControl(card, video) {
+    if (!card || !video || !isCardPreviewVideo(video)) return;
+    const anchor = video.closest('a[href^="/live/"]');
+    if (!anchor || !card.contains(anchor)) return;
+    // 메인 히어로의 _player_는 캐러셀 렌더링 중 통째로 교체되므로 바깥쪽 hero
+    // container에 둔다. 일반 카드는 player 안에 두어 컨트롤 이동 중 hover를 유지한다.
+    const heroHost = anchor.closest(
+      '[class*="_container_"][class*="_hero_"]',
+    );
+    const host = heroHost || video.closest('[class*="_player_"]') || anchor;
+    if (
+      cardPreviewVolumeControl?.isConnected &&
+      cardPreviewVolumeVideo === video &&
+      cardPreviewVolumeControl.parentElement === host
+    ) {
+      syncCardPreviewVolumeControl(video);
+      return;
+    }
+
+    removeCardPreviewVolumeControl();
+    const control = document.createElement("div");
+    control.className = CARD_PREVIEW_VOLUME_CONTROL_CLASS;
+    control.setAttribute("data-cheese-card-preview-volume", "1");
+    control.draggable = false;
+    control.innerHTML = `
+      <button type="button"></button>
+      <input type="range" min="0" max="100" step="1" aria-label="카드 미리보기 음량" />
+    `;
+
+    const button = control.querySelector("button");
+    const slider = control.querySelector('input[type="range"]');
+    if (button) button.draggable = false;
+    if (slider) slider.draggable = false;
+    const stopCardPointer = (event) => event.stopPropagation();
+    for (const target of [button, slider]) {
+      if (!target) continue;
+      for (const type of [
+        "pointerdown",
+        "pointerup",
+        "mousedown",
+        "mouseup",
+        "keydown",
+        "keyup",
+      ]) {
+        target.addEventListener(type, stopCardPointer);
+      }
+      target.addEventListener("dragstart", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    }
+    button?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const currentVideo = resolveCardPreviewVolumeVideo(anchor);
+      if (!currentVideo) return;
+      if (currentVideo.muted || currentVideo.volume === 0) {
+        currentVideo.volume = cardPreviewDefaultVolume;
+        markCardPreviewAudible(currentVideo);
+        currentVideo.muted = false;
+      } else {
+        currentVideo.muted = true;
+        if (cardPreviewAudibleVideo === currentVideo) {
+          cardPreviewAudibleVideo = null;
+        }
+      }
+      syncCardPreviewVolumeControl(currentVideo);
+    });
+    slider?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    slider?.addEventListener("input", (event) => {
+      event.stopPropagation();
+      const currentVideo = resolveCardPreviewVolumeVideo(anchor);
+      if (!currentVideo) return;
+      const volume = Math.max(0, Math.min(100, Number(slider.value) || 0));
+      currentVideo.volume = volume / 100;
+      currentVideo.muted = volume === 0;
+      if (volume > 0) markCardPreviewAudible(currentVideo);
+      else if (cardPreviewAudibleVideo === currentVideo) {
+        cardPreviewAudibleVideo = null;
+      }
+      syncCardPreviewVolumeControl(currentVideo);
+    });
+    slider?.addEventListener("change", (event) => {
+      event.stopPropagation();
+      setCardPreviewVolumeControlDismissed(true);
+    });
+    control.addEventListener("mouseenter", () => {
+      setCardPreviewVolumeControlDismissed(false);
+    });
+    control.addEventListener("pointermove", () => {
+      const dismissedAt = Number(control.dataset.dismissedAt) || 0;
+      if (
+        control.classList.contains("is-dismissed") &&
+        Date.now() - dismissedAt > 200
+      ) {
+        setCardPreviewVolumeControlDismissed(false);
+      }
+    });
+
+    cardPreviewVolumeControl = control;
+    cardPreviewVolumeHost = host;
+    cardPreviewVolumeAnchor = anchor;
+    bindCardPreviewVolumeVideo(video);
+    anchor.classList.add("cheese-card-preview-volume-anchor");
+    anchor.addEventListener(
+      "dragstart",
+      preventCardPreviewAnchorDrag,
+      true,
+    );
+    if (getComputedStyle(host).position === "static") {
+      host.classList.add("cheese-card-preview-volume-host");
+    }
+    host.appendChild(control);
+    syncCardPreviewVolumeControl(video);
+  }
+
   // document capture 우클릭: 카드 미리보기 video 위면 기본 메뉴 막고 음소거 토글.
   // 이벤트 지점의 카드 미리보기 video를 찾는다(target 직접 또는 카드 안의 video).
   function cardPreviewVideoAtEvent(e) {
+    if (cardPreviewVolumeControl?.contains(e.target)) {
+      return resolveCardPreviewVolumeVideo(cardPreviewVolumeAnchor);
+    }
     if (
       e.target?.matches?.(CARD_PREVIEW_VIDEO_SEL) &&
       isCardPreviewVideo(e.target)
@@ -37987,14 +38470,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     e.stopImmediatePropagation();
     if (followPreviewState.nativeCardAudio?.video === video) {
       video.muted = true;
+      if (cardPreviewAudibleVideo === video) cardPreviewAudibleVideo = null;
       return;
     }
     if (video.muted || video.volume === 0) {
+      markCardPreviewAudible(video);
       video.volume = cardPreviewDefaultVolume;
       video.muted = false;
     } else {
       video.muted = true;
+      if (cardPreviewAudibleVideo === video) cardPreviewAudibleVideo = null;
     }
+    syncCardPreviewVolumeControl(video);
   }
 
   // 휠: 카드 미리보기 video 위면 음량 ±5%(올리면 자동 음소거 해제). 페이지 스크롤 막음.
@@ -38007,7 +38494,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 스크롤로 카드를 스칠 때 걸리지 않게 한다(스크롤로 카드가 바뀌면 진입 시각 리셋됨).
     const delayMs = Math.max(0, cardPreviewWheelDelaySec) * 1000;
     if (delayMs > 0) {
-      const card = e.target?.closest?.('a[href^="/live/"]');
+      const card = cardPreviewCardAtTarget(e.target);
       // 현재 휠이 발생한 카드가 우리가 추적 중인 호버 카드와 같고, 머문 시간이 지연 이상일 때만.
       const dwell =
         card && card === cardPreviewHoverCard && cardPreviewHoverEnteredAt
@@ -38029,6 +38516,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 음량을 올리면 자동 음소거 해제, 0으로 내리면 음소거.
     if (dir > 0 && video.muted) video.muted = false;
     if (vol === 0) video.muted = true;
+    if (!video.muted && vol > 0) markCardPreviewAudible(video);
+    else if (cardPreviewAudibleVideo === video) cardPreviewAudibleVideo = null;
+    syncCardPreviewVolumeControl(video);
   }
 
   // 조작 안내(우클릭=음소거, 휠=음량)를 **커스텀 툴팁**으로 표시. title 속성은 표시/
@@ -38037,7 +38527,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 안 멈춘다. 미리보기 video가 실제 있는 카드에만, 세션당 1회, N초 뒤 페이드아웃.
   const CARD_HINT_ID = "cheese-card-hint";
   const CARD_HINT_TEXT =
-    "치지직 기본 미리보기 · 우클릭: 음소거 전환 · 휠: 음량 조절";
+    "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 휠: 음량";
   const CARD_HINT_SHOW_MS = 3000; // 표시 후 이 시간 뒤 사라짐
   // 스크롤 중엔 힌트를 숨기고, 스크롤이 멎은 뒤 이 시간이 지나야 다시 띄운다(스크롤 시
   // 카드가 이동하는데 힌트가 따라다니던 문제 방지).
@@ -38092,6 +38582,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     const v = card.querySelector(CARD_PREVIEW_VIDEO_SEL);
     if (v && isCardPreviewVideo(v)) {
+      mountCardPreviewVolumeControl(card, v);
       const el = ensureCardHintEl();
       const r = v.getBoundingClientRect();
       // video 상단 중앙에 배치(가로 중앙, 위에서 살짝 안쪽).
@@ -38115,18 +38606,43 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function onCardPreviewMouseOver(e) {
     if (!cardPreviewAudioOn) return;
-    const card = e.target?.closest?.('a[href^="/live/"]');
-    // 메인 플레이어/우리 미리보기 안의 링크는 제외.
-    if (
-      card &&
-      (card.closest(".pzp") || card.closest("#cheese-follow-preview"))
-    )
-      return;
-    if (card === cardPreviewHoverCard) return; // 같은 카드 계속 호버 → 그대로
+    const card = cardPreviewCardAtTarget(e.target);
+    if (card === cardPreviewHoverCard) {
+      const video = card?.querySelector?.(CARD_PREVIEW_VIDEO_SEL);
+      if (video) mountCardPreviewVolumeControl(card, video);
+      return; // 같은 카드 계속 호버 → 그대로
+    }
+    if (cardPreviewHoverCard) muteTrackedCardPreview(cardPreviewHoverCard);
+    removeCardPreviewVolumeControl();
     hideCardHint(); // 다른 카드/이탈 → 이전 툴팁·타이머 정리
     cardPreviewHoverCard = card || null;
     cardPreviewHoverEnteredAt = card ? Date.now() : 0; // 진입 시각(휠 지연 판정용)
+    observeCardPreviewControl(card);
     if (card) tryShowCardHint(card, 10); // ~1.5초 폴링 후 표시
+  }
+
+  function clearCardPreviewHover() {
+    if (cardPreviewHoverCard || cardPreviewAudibleVideo) {
+      muteTrackedCardPreview(cardPreviewHoverCard);
+    }
+    hideCardHint();
+    observeCardPreviewControl(null);
+    removeCardPreviewVolumeControl();
+    cardPreviewHoverCard = null;
+    cardPreviewHoverEnteredAt = 0;
+  }
+
+  function onCardPreviewMouseOut(e) {
+    const card = cardPreviewHoverCard;
+    const target = e.target instanceof Node ? e.target : null;
+    if (!card || !target || !card.contains(target)) return;
+    const next = e.relatedTarget;
+    if (next instanceof Node && card.contains(next)) return;
+    clearCardPreviewHover();
+  }
+
+  function onCardPreviewVisibilityChange() {
+    if (document.hidden) clearCardPreviewHover();
   }
 
   function bindCardPreviewAudio() {
@@ -38143,6 +38659,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.addEventListener("mouseover", onCardPreviewMouseOver, {
       passive: true,
     });
+    document.addEventListener("mouseout", onCardPreviewMouseOut, {
+      passive: true,
+    });
+    document.addEventListener(
+      "visibilitychange",
+      onCardPreviewVisibilityChange,
+    );
+    window.addEventListener("blur", clearCardPreviewHover);
     // 스크롤 시 힌트를 즉시 숨기고(따라다님 방지) 스크롤 시각 기록. capture 로 어떤
     // 스크롤 컨테이너의 스크롤이든 잡는다.
     document.addEventListener("scroll", onCardHintScroll, {
@@ -38167,10 +38691,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       capture: true,
     });
     document.removeEventListener("mouseover", onCardPreviewMouseOver);
+    document.removeEventListener("mouseout", onCardPreviewMouseOut);
+    document.removeEventListener(
+      "visibilitychange",
+      onCardPreviewVisibilityChange,
+    );
+    window.removeEventListener("blur", clearCardPreviewHover);
     document.removeEventListener("scroll", onCardHintScroll, { capture: true });
-    hideCardHint();
+    clearCardPreviewHover();
     document.getElementById(CARD_HINT_ID)?.remove();
-    cardPreviewHoverCard = null;
   }
 
   function normalizeCardPreviewWheelDelay(v) {
@@ -47221,6 +47750,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function ensureHeaderObserver() {
     const header = document.getElementById("header");
     if (!header) return;
+    if (!headerNavResizeBound) {
+      headerNavResizeBound = true;
+      window.addEventListener("resize", scheduleHeaderNavFit, {
+        passive: true,
+      });
+    }
     if (headerObservedRoot === header && headerObserver) return;
     if (headerObserver) headerObserver.disconnect();
     headerObservedRoot = header;
@@ -47666,6 +48201,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 전역값과 무관하게 켠다(작은 창에서 레터박스를 줄이는 게 기본 기대 동작).
         wideScreenAuto:
           IS_POPUP_PLAYER_FRAME && popupPlayerWide ? true : wideScreenAuto,
+        // 위 wideScreenAuto 가 '저장값을 읽은 결과'인지. 일반 페이지 값은
+        // loadFeatureFlags, 팝업 전용 값은 loadFollowPreview가 각각 확정한다.
+        settingsLoaded: IS_POPUP_PLAYER_FRAME
+          ? popupPlayerSettingsLoaded
+          : featureFlagsLoaded,
         // 라이브 되감기 바 표시. 이 값은 표시뿐 아니라 '방향키 seek 허용' 판정에도 쓰인다
         // (seekHotkeyAllowed: 바 또는 되감기/앞으로 버튼 중 하나만 켜져 있어도 허용).
         // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
@@ -47682,6 +48222,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         gainPct, // 게인 조절 % 표시(전역)
         screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
         mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
+        mixerGlobalGainDefaultMode, // 전역 게인 재방문 동작(global | channel)
         videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
         mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
         mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
@@ -47711,7 +48252,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatOsCustomIcons, // {PC,AOS,IOS}: 정제된 사용자 SVG/WebP(없으면 기본 아이콘)
         chatOsIconPosition, // before | after (채팅 시간 기준)
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -47749,6 +48290,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ACTION_OVERLAY_POS_KEY,
     GAIN_PCT_KEY,
     MIXER_GLOBAL_DEFAULT_MODE_KEY,
+    MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY,
     VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY,
     MIXER_GAIN_MIN_KEY,
     MIXER_GAIN_MAX_KEY,
@@ -48083,6 +48625,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       gainPct = data?.[GAIN_PCT_KEY] !== false;
       mixerGlobalDefaultMode =
         data?.[MIXER_GLOBAL_DEFAULT_MODE_KEY] === "channel"
+          ? "channel"
+          : "global";
+      mixerGlobalGainDefaultMode =
+        data?.[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY] === "channel"
           ? "channel"
           : "global";
       videoFilterGlobalDefaultMode =
@@ -48604,6 +49150,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[MIXER_GLOBAL_DEFAULT_MODE_KEY]) {
         mixerGlobalDefaultMode =
           changes[MIXER_GLOBAL_DEFAULT_MODE_KEY].newValue === "channel"
+            ? "channel"
+            : "global";
+      }
+      if (changes[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY]) {
+        mixerGlobalGainDefaultMode =
+          changes[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY].newValue === "channel"
             ? "channel"
             : "global";
       }
@@ -49211,6 +49763,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[GAIN_PCT_KEY] ||
         changes[SCREENSHOT_PREVIEW_KEY] ||
         changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
+        changes[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY] ||
         changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
         changes[MIXER_GAIN_MIN_KEY] ||
         changes[MIXER_GAIN_MAX_KEY] ||
@@ -50888,6 +51441,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const AUDIO_MIXER_DEFAULT_CUSTOM_KEY = "audioMixer:defaultCustomId";
   // 채널 저장값보다 우선 적용할 전역 기본 프리셋 설정.
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
+  // 프리셋과 독립적으로 적용할 전역 마스터 게인 설정.
+  const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY =
+    "audioMixer:globalGainDefault";
   const AUDIO_MIXER_AUTO_SYNC_KEY = "cheeseAudioMixer.autoSync";
   // Firefox에서 연속 slider input의 storage.set 완료 순서가 뒤섞이지 않게 직렬화한다.
   // load는 앞서 받은 save가 모두 끝난 뒤 실행돼 채널 전환 직전 마지막 값이 보장된다.
@@ -50914,7 +51470,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               type: "auto-sync-loaded",
               enabled,
             },
-            location.origin,
+            BRIDGE_ORIGIN,
           );
         })
         .catch(() => {});
@@ -50933,9 +51489,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (data.type === "save") {
       try {
         const incoming = data.state || {};
-        // customPresets·defaultCustomId·globalDefault는 전역으로, 나머지는 per-media로 분리 저장.
-        const { customPresets, defaultCustomId, globalDefault, ...perMedia } =
-          incoming;
+        // 공유 설정은 전역으로, 나머지는 per-media로 분리 저장한다.
+        const {
+          customPresets,
+          defaultCustomId,
+          globalDefault,
+          globalGainDefault,
+          ...perMedia
+        } = incoming;
         const toSet = { [key]: perMedia };
         if (Array.isArray(customPresets)) {
           toSet[AUDIO_MIXER_PRESETS_KEY] = customPresets;
@@ -50945,6 +51506,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
         if (globalDefault && typeof globalDefault === "object") {
           toSet[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] = globalDefault;
+        }
+        if (globalGainDefault && typeof globalGainDefault === "object") {
+          toSet[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY] = globalGainDefault;
         }
         audioMixerStorageQueue = audioMixerStorageQueue
           .catch(() => {})
@@ -50961,6 +51525,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             AUDIO_MIXER_PRESETS_KEY,
             AUDIO_MIXER_DEFAULT_CUSTOM_KEY,
             AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
+            AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY,
           ]),
         )
         .then((result) => {
@@ -50971,6 +51536,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           );
           const globalDefault =
             result?.[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] || null;
+          const globalGainDefault =
+            result?.[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY] || null;
           // per-media 설정에 전역 커스텀 프리셋·기본값 id를 합쳐서 반환.
           const merged = saved
             ? {
@@ -50978,8 +51545,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
                 customPresets: presets,
                 defaultCustomId,
                 globalDefault,
+                globalGainDefault,
               }
-            : { customPresets: presets, defaultCustomId, globalDefault };
+            : {
+                customPresets: presets,
+                defaultCustomId,
+                globalDefault,
+                globalGainDefault,
+              };
           window.postMessage(
             {
               source: "cheese-audio-mixer-content",
@@ -50988,7 +51561,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               requestId,
               state: merged,
             },
-            location.origin,
+            BRIDGE_ORIGIN,
           );
         })
         .catch(() => {});
@@ -51002,6 +51575,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         AUDIO_MIXER_PRESETS_KEY,
         AUDIO_MIXER_DEFAULT_CUSTOM_KEY,
         AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
+        AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY,
       ]);
       window.postMessage(
         {
@@ -51013,9 +51587,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               result?.[AUDIO_MIXER_DEFAULT_CUSTOM_KEY] || "",
             ),
             globalDefault: result?.[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] || null,
+            globalGainDefault:
+              result?.[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY] || null,
           },
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     } catch {}
   }
@@ -51029,13 +51605,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           type: "auto-sync-loaded",
           enabled: changes[AUDIO_MIXER_AUTO_SYNC_KEY].newValue === true,
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     }
     if (
       changes[AUDIO_MIXER_PRESETS_KEY] ||
       changes[AUDIO_MIXER_DEFAULT_CUSTOM_KEY] ||
-      changes[AUDIO_MIXER_GLOBAL_DEFAULT_KEY]
+      changes[AUDIO_MIXER_GLOBAL_DEFAULT_KEY] ||
+      changes[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY]
     ) {
       void broadcastAudioMixerGlobals();
     }
@@ -51052,7 +51629,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           if (chrome.runtime.lastError || !resp?.ok) return;
           window.postMessage(
             { source: "cheese-tab-mute-content", muted: resp.muted === true },
-            location.origin,
+            BRIDGE_ORIGIN,
           );
         },
       );
@@ -51105,7 +51682,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 다운로드가 시작된 뒤 revoke(너무 일찍 지우면 다운로드가 깨질 수 있어 지연).
         setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
       }
-      window.postMessage(payload, location.origin);
+      window.postMessage(payload, BRIDGE_ORIGIN);
     };
     try {
       chrome.runtime.sendMessage(
@@ -51177,7 +51754,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               type: "auto-sharpen-loaded",
               enabled,
             },
-            location.origin,
+            BRIDGE_ORIGIN,
           );
         })
         .catch(() => {});
@@ -51225,7 +51802,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
                 channelId,
                 state: merged,
               },
-              location.origin,
+              BRIDGE_ORIGIN,
             );
           },
         );
@@ -51249,7 +51826,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             globalDefault: result?.[VIDEO_FILTER_GLOBAL_DEFAULT_KEY] || null,
           },
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     } catch {}
   }
@@ -51263,7 +51840,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           type: "auto-sharpen-loaded",
           enabled: changes[VIDEO_FILTER_AUTO_SHARPEN_KEY].newValue === true,
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     }
     if (

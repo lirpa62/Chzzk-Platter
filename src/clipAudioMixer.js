@@ -238,6 +238,7 @@
   let selectedPreset = "default";
   let presetLabel = "기본";
   let presetSnapshot = cloneSnapshot(DEFAULT_SNAPSHOT);
+  let presetOptions = [];
   let enabled = false;
   let autoEnableArmed = false;
   let autoEnableSuppressed = false;
@@ -379,6 +380,58 @@
     };
   }
 
+  function buildPresetOptions(data) {
+    const customPresets = Array.isArray(data?.[PRESETS_KEY])
+      ? data[PRESETS_KEY].filter(
+          (preset) => preset && String(preset.id || "").trim(),
+        )
+      : [];
+    const defaultCustomId = String(data?.[DEFAULT_CUSTOM_KEY] || "");
+    const defaultCustom = customPresets.find(
+      (preset) => String(preset.id || "") === defaultCustomId,
+    );
+    return [
+      ...Object.entries(BUILT_IN_PRESETS).map(([key, preset]) => {
+        if (key === "default" && defaultCustom) {
+          return {
+            key,
+            label: String(defaultCustom.name || preset.label),
+            snapshot: cloneSnapshot(defaultCustom.snapshot),
+          };
+        }
+        return {
+          key,
+          label: preset.label,
+          snapshot: cloneSnapshot(preset),
+        };
+      }),
+      ...customPresets.map((preset) => ({
+        key: String(preset.id),
+        label: String(preset.name || "커스텀"),
+        snapshot: cloneSnapshot(preset.snapshot),
+      })),
+    ];
+  }
+
+  function cyclePreset(direction) {
+    if (!presetOptions.length || !direction) return;
+    const currentIndex = presetOptions.findIndex(
+      (preset) => preset.key === selectedPreset,
+    );
+    const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+    const nextIndex =
+      (((baseIndex + direction) % presetOptions.length) +
+        presetOptions.length) %
+      presetOptions.length;
+    const nextPreset = presetOptions[nextIndex];
+    if (!nextPreset) return;
+    selectedPreset = nextPreset.key;
+    presetLabel = nextPreset.label;
+    presetSnapshot = cloneSnapshot(nextPreset.snapshot);
+    applySnapshot();
+    updateButton();
+  }
+
   function applyStoredSettings(data) {
     const previousAlwaysOn = alwaysOn;
     masterEnabled = data?.[MASTER_KEY] !== false;
@@ -388,6 +441,7 @@
       hidden.audioMixer === true;
     featureEnabled = data?.[ENABLED_KEY] !== false;
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
+    presetOptions = buildPresetOptions(data);
     const preset = resolveSelectedPreset(data);
     selectedPreset = preset.key;
     presetLabel = preset.label;
@@ -607,7 +661,17 @@
     } catch {}
   }
 
-  function broadcastTransitionStart() {
+  function isMediaToolGesture(event) {
+    const target = event?.target;
+    return (
+      target instanceof Element && Boolean(target.closest(`.${STACK_CLASS}`))
+    );
+  }
+
+  function broadcastTransitionStart(event) {
+    // 버튼 위 휠도 클립 전환 제스처로 간주하면 공용 도구 스택이 잠시 숨었다가
+    // 다시 배치된다. 확장 도구를 조작하는 동안에는 현재 클립을 유지한다.
+    if (isMediaToolGesture(event)) return;
     hideButtonDuringTransition();
     const wait =
       TRANSITION_BROADCAST_INTERVAL_MS -
@@ -637,7 +701,7 @@
     ) {
       return;
     }
-    broadcastTransitionStart();
+    broadcastTransitionStart(event);
   }
 
   function startTransitionChannel() {
@@ -1133,6 +1197,27 @@
     updateButton();
   }
 
+  function onButtonWheel(event) {
+    if (!event.target?.closest?.(`.${BUTTON_CLASS}`) || event.deltaY === 0) {
+      return;
+    }
+    if (
+      !frameActive ||
+      !masterEnabled ||
+      featureHidden ||
+      !featureEnabled ||
+      graphError ||
+      !(enabled && audio.connected)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    // 설정의 시작 기본값은 유지하고 현재 클립 프레임에만 즉시 적용한다.
+    cyclePreset(event.deltaY < 0 ? -1 : 1);
+  }
+
   function sync() {
     syncTimer = 0;
     if (!frameActive || !masterEnabled || featureHidden || !featureEnabled) {
@@ -1309,6 +1394,10 @@
   window.addEventListener("resize", scheduleSync);
   window.visualViewport?.addEventListener("resize", scheduleSync);
   window.addEventListener(TOOL_LAYOUT_EVENT, scheduleSharedToolLayout);
+  document.addEventListener("wheel", onButtonWheel, {
+    capture: true,
+    passive: false,
+  });
   window.addEventListener("wheel", broadcastTransitionStart, {
     capture: true,
     passive: true,

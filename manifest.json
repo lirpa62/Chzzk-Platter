@@ -177,6 +177,13 @@
       "all_frames": true
     },
     {
+      "matches": ["https://chzzk.naver.com/embed/clip/*"],
+      "js": ["src/embedClipMixer.js"],
+      "css": ["src/embedClipMixer.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
       "matches": ["https://game.naver.com/profile*"],
       "js": ["src/profileClipSize.js"],
       "run_at": "document_start",

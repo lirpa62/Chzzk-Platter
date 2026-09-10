@@ -1,0 +1,137 @@
+/* 치즈 플래터 - 임베드 클립 오디오 믹서 버튼.
+   pzp 네이티브 버튼(.pzp-button) 옆에 붙으므로 크기·정렬은 네이티브 규격을 따르고,
+   우리 아이콘 색/활성 표시만 덧입힌다. 임베드는 항상 어두운 플레이어 배경이라
+   라이트/다크 분기가 필요 없다. */
+
+button.cheese-embed-clip-mixer-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  opacity: 0.9;
+  cursor: pointer;
+  appearance: none;
+  position: relative;
+  /* 네이티브 툴팁이 버튼 밖으로 나가도 잘리지 않게 한다. */
+  overflow: visible;
+}
+
+button.cheese-embed-clip-mixer-button:hover,
+button.cheese-embed-clip-mixer-button:focus-visible {
+  opacity: 1;
+}
+
+button.cheese-embed-clip-mixer-button > .cheese-embed-clip-mixer-button-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+button.cheese-embed-clip-mixer-button svg {
+  display: block;
+}
+
+/* 표시등 색은 치지직 네이티브 믹서(audioMixer.css .cheese-audio-mixer-active-dot)와
+   같은 규약을 쓴다 — 꺼짐은 회색으로 '있지만 꺼짐'을 보이고, 켜짐만 브랜드 그린.
+   아이콘 본체는 흰색을 유지해야 하므로 currentColor 를 쓰지 않고 fill 을 직접 준다. */
+.cheese-embed-clip-mixer-dot {
+  fill: #838285;
+  transition: fill 0.12s ease;
+}
+
+button.cheese-embed-clip-mixer-button.is-active .cheese-embed-clip-mixer-dot {
+  fill: #00ffa3;
+}
+
+button.cheese-embed-clip-mixer-button.is-error .cheese-embed-clip-mixer-dot {
+  fill: #ff6b6b;
+}
+
+/* 컨트롤 바가 숨을 때 우리 버튼만 남지 않도록 네이티브와 같이 사라진다.
+   pzp 는 컨트롤 표시 중에만 .pzp-pc--controls 를 붙인다. */
+.pzp-pc:not(.pzp-pc--controls) button.cheese-embed-clip-mixer-button {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 툴팁은 네이티브 .pzp-button__tooltip 스타일을 그대로 쓰되, 내용이 길어
+   잘리지 않도록 줄바꿈만 막는다. */
+button.cheese-embed-clip-mixer-button .pzp-button__tooltip {
+  white-space: nowrap;
+}
+
+/* ── 믹서 컨트롤 래퍼(버튼 + 게인 슬라이더) ──────────────────────────────
+   네이티브 볼륨 컨트롤 바로 오른쪽에 붙는다. .pzp-pc__volume-control 클래스를
+   함께 달아 정렬·간격은 네이티브 규격을 물려받는다. */
+.cheese-embed-clip-mixer-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* 게인 슬라이더 — 네이티브 볼륨 슬라이더 클래스를 그대로 쓰므로 모양은 치지직
+   CSS 가 그린다. 우리는 펼침/접힘만 얹는다. is-open 은 JS(syncGainVisibility)가
+   '믹서 켜짐 + (호버 || 드래그 중)'일 때만 붙인다 — 네이티브 볼륨과 같은 동작. */
+.cheese-embed-clip-mixer-gain {
+  width: 0 !important;
+  min-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transition:
+    width 0.16s ease,
+    opacity 0.16s ease,
+    margin 0.16s ease;
+}
+
+.cheese-embed-clip-mixer-control.is-open .cheese-embed-clip-mixer-gain {
+  width: 64px !important;
+  min-width: 64px !important;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 컨트롤 바가 숨을 때는 슬라이더도 함께 사라진다.
+   ⚠ 조절 중에는 JS(keepControlsAlive)가 .pzp-pc--controls 를 계속 붙여 두므로
+   이 규칙에 걸리지 않는다 — 그래서 드래그 도중 슬라이더가 사라지지 않는다. */
+.pzp-pc:not(.pzp-pc--controls) .cheese-embed-clip-mixer-gain {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 브라우저 title은 드래그 중 바뀐 값을 즉시 다시 그리지 않는다. 프리셋 전환에는
+   사용하지 않고, 게인 슬라이더를 직접 조절하는 동안에만 현재 값을 표시한다. */
+.cheese-embed-clip-mixer-gain-tooltip {
+  position: absolute;
+  right: 32px;
+  bottom: 52px;
+  z-index: 40;
+  padding: 5px 10px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(50%) translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.cheese-embed-clip-mixer-gain-tooltip.is-visible {
+  opacity: 1;
+  transform: translateX(50%) translateY(0);
+}

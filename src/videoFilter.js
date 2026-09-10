@@ -35,26 +35,65 @@
 
   if (isClipEditorContext()) return;
 
-  async function masterEnabled() {
+  // masterGate.js(ISOLATED, document_start)가 루트에 준비 표시를 세울 때까지 기다린다.
+  // 예전의 10ms × 100회(=1초) 고정 폴링은 서비스워커 콜드 스타트가 느리거나 팝업
+  // iframe 처럼 비활성 프레임이라 타이머가 clamp 되면 타임아웃됐다.
+  // MutationObserver 로 즉시 깨어나게 하고 타임아웃도 10초로 늘린다.
+  function masterEnabled() {
     const root = document.documentElement;
-    for (let i = 0; i < 100; i += 1) {
-      if (root?.dataset.cheesePlatterMasterReady === "1") break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return !root?.hasAttribute("data-cheese-platter-disabled");
+    if (!root) return Promise.resolve(true);
+    const ready = () => root.dataset.cheesePlatterMasterReady === "1";
+    const verdict = () => !root.hasAttribute("data-cheese-platter-disabled");
+    if (ready()) return Promise.resolve(verdict());
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        resolve(verdict());
+      };
+      const observer = new MutationObserver(() => {
+        if (ready()) finish();
+      });
+      observer.observe(root, {
+        attributes: true,
+        attributeFilter: [
+          "data-cheese-platter-master-ready",
+          "data-cheese-platter-disabled",
+        ],
+      });
+      const timer = setTimeout(finish, 10000);
+      if (ready()) finish(); // observe 등록 직전에 세팅됐을 수 있다
+    });
   }
-  if (!(await masterEnabled())) return;
-
+  // ⚠ 중복 주입 가드는 await 앞에 둔다. await 뒤에 두면 같은 프레임에 스크립트가
+  // 두 번 주입됐을 때 두 인스턴스가 모두 게이트를 통과한 뒤에야 가드에 닿아,
+  // 그 사이 document 가 교체되면 잘못된 root 를 읽는 경쟁이 생긴다.
   if (window.__cheeseVideoFilterLoaded) return;
   window.__cheeseVideoFilterLoaded = true;
+
+  if (!(await masterEnabled())) return;
 
   // 팝업 기능 표시/숨김 플래그(content.js가 chrome.storage에서 읽어 postMessage로 전달).
   const featureFlags = { videoFilter: false };
   // 비디오 필터 항상 켜기(전역). 켜져 있으면 채널 설정 로드 후 자동 활성화한다.
   let videoFilterAlwaysOn = false;
+  // content.js 로부터 플래그를 한 번이라도 받았는지. 받기 전까지 재요청한다.
+  let featureFlagsReceived = false;
+
+  // 같은 창 안의 MAIN↔ISOLATED 브리지용 targetOrigin.
+  // ⚠ location.origin 을 쓰면 안 된다. 다른 확장이 프레임 document 를 교체하거나
+  // about:blank 를 경유하는 순간 origin 이 "null" 문자열이 되어, 브라우저가 메시지를
+  // 에러 없이 조용히 폐기한다(팝업 프레임에서 버튼·기능·단축키가 통째로 죽던 원인).
+  // 같은 창(window→window)이고 수신부가 모두 e.source !== window 로 검증하므로
+  // "*" 로 보내도 외부에 노출되지 않는다.
+  const BRIDGE_ORIGIN = "*";
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.data?.source !== "cheese-feature-flags")
       return;
+    featureFlagsReceived = true; // 재요청 루프 정지
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
     globalDefaultMode =
@@ -62,10 +101,25 @@
     if (typeof tick === "function") tick();
     if (typeof maybeAutoEnableFilter === "function") maybeAutoEnableFilter();
   });
-  window.postMessage(
-    { source: "cheese-feature-flags-request" },
-    location.origin,
-  );
+  // 플래그를 받을 때까지 재요청한다. content.js(ISOLATED)와 이 파일(MAIN)은 둘 다
+  // document_idle 이지만 서로 다른 content_scripts 항목이라 주입 순서가 보장되지 않아,
+  // 첫 요청이 content.js 의 리스너 등록보다 먼저 나가면 그대로 유실됐다.
+  // (첫 요청은 즉시, 이후 200ms 간격으로 최대 약 10초)
+  (function requestFeatureFlagsUntilReceived() {
+    let tries = 0;
+    const ask = () => {
+      if (featureFlagsReceived) return;
+      try {
+        window.postMessage(
+          { source: "cheese-feature-flags-request" },
+          BRIDGE_ORIGIN,
+        );
+      } catch {}
+      tries += 1;
+      if (tries < 50) setTimeout(ask, 200);
+    };
+    ask();
+  })();
 
   const PANEL_ID = "cheese-video-filter-panel";
   const BUTTON_CLASS = "cheese-video-filter-button";
@@ -818,7 +872,7 @@
           type: "save-auto-sharpen",
           enabled: autoSharpenEnabled,
         },
-        location.origin,
+        BRIDGE_ORIGIN,
       );
     }
     if (!autoSharpenEnabled) {
@@ -841,7 +895,7 @@
         type: "load-auto-sharpen",
         fallback: autoSharpenEnabled,
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -1599,7 +1653,7 @@
         channelId: currentMediaId,
         state: serializeState(opts),
       },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
   }
 
@@ -1631,7 +1685,7 @@
     if (!mediaId) return;
     window.postMessage(
       { source: "cheese-video-filter", type: "load", channelId: mediaId },
-      location.origin,
+      BRIDGE_ORIGIN,
     );
     // MAIN/격리 world가 document_idle에 각각 주입되므로 아주 느린 초기화에서는 첫 요청이
     // 브리지 리스너보다 먼저 나갈 수 있다. 응답 전일 때만 제한적으로 다시 요청한다.

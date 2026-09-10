@@ -66,6 +66,15 @@
     "cheeseClipAudioMixerEnabled",
     "cheeseClipAudioMixerAlwaysOn",
     "cheeseClipAudioMixerPreset",
+    "cheeseEmbedClipMixerHidden",
+    "cheeseEmbedClipMixerAlwaysOn",
+    "cheeseEmbedClipMixerPreset",
+    "cheeseEmbedClipMixerDefaultPreset",
+    "cheeseEmbedClipMixerDefaultGain",
+    "cheeseEmbedClipGainPct",
+    "cheeseEmbedClipGainStep",
+    "cheeseEmbedClipGainMin",
+    "cheeseEmbedClipGainMax",
     "cheeseClipVideoFilterEnabled",
     "cheeseClipVideoFilterAlwaysOn",
     "cheeseClipVideoFilterPreset",
@@ -231,6 +240,7 @@
     "cheeseMixerGainStep",
     "cheeseMixerWheelAction",
     "cheeseMixerGlobalDefaultMode",
+    "cheeseMixerGlobalGainDefaultMode",
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
@@ -288,6 +298,7 @@
     "cheeseWideScreenAuto",
     "audioMixer:presets",
     "audioMixer:globalDefault",
+    "audioMixer:globalGainDefault",
     "audioMixer:defaultCustomId",
     "videoFilter:presets",
     "videoFilter:globalDefault",
@@ -1342,9 +1353,36 @@
     if (event.target.closest("[data-clip-editor-step-picker]")) return;
     closeAllClipEditorStepPickers();
   });
-  window.addEventListener("resize", () => closeAllClipEditorStepPickers());
-  panelsScroll?.addEventListener("scroll", () =>
-    closeAllClipEditorStepPickers(),
+  let clipEditorStepPositionFrame = 0;
+  function scheduleClipEditorStepPickerPosition() {
+    cancelAnimationFrame(clipEditorStepPositionFrame);
+    clipEditorStepPositionFrame = requestAnimationFrame(() => {
+      clipEditorStepPositionFrame = 0;
+      const panelRect = panelsScroll?.getBoundingClientRect();
+      clipEditorStepPickers.forEach((picker) => {
+        if (!picker.classList.contains("is-open")) return;
+        const trigger = picker.querySelector(
+          "[data-clip-editor-step-trigger]",
+        );
+        const rect = trigger?.getBoundingClientRect();
+        if (
+          !rect ||
+          (panelRect &&
+            (rect.bottom < panelRect.top || rect.top > panelRect.bottom))
+        ) {
+          closeClipEditorStepPicker(picker);
+          return;
+        }
+        positionClipEditorStepList(picker);
+      });
+    });
+  }
+  // 확장 아이콘 팝업은 내부 고정 요소를 표시할 때 viewport resize/미세 스크롤을
+  // 발생시킬 수 있다. 이 이벤트에서 닫으면 방금 연 메뉴가 즉시 사라지므로 재배치한다.
+  window.addEventListener("resize", scheduleClipEditorStepPickerPosition);
+  panelsScroll?.addEventListener(
+    "scroll",
+    scheduleClipEditorStepPickerPosition,
   );
 
   // ── 채팅 시간 표시 형식·테마별 글자 색상 ───────────────────────────────────
@@ -2570,6 +2608,14 @@
   // ── 오디오 믹서 전역 기본값(채널 무관) ────────────────────────────────────
   const AUDIO_MIXER_PRESETS_KEY = "audioMixer:presets";
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
+  const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY =
+    "audioMixer:globalGainDefault";
+  const MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY =
+    "cheeseMixerGlobalGainDefaultMode";
+  const EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY =
+    "cheeseEmbedClipMixerDefaultPreset";
+  const EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY =
+    "cheeseEmbedClipMixerDefaultGain";
   const CLIP_AUDIO_MIXER_ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const CLIP_AUDIO_MIXER_ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const CLIP_AUDIO_MIXER_PRESET_KEY = "cheeseClipAudioMixerPreset";
@@ -2606,6 +2652,13 @@
     ["night", "야간 시청"],
     ["cinema", "시네마틱"],
   ];
+  const EMBED_CLIP_MIXER_BUILT_IN_PRESETS = [
+    ["default", "기본", 1.08],
+    ["musicOriginal", "음악 균형", 1.1],
+    ["musicRich", "음악 생동감", 1.1],
+    ["bassBoost", "저음 강화", 1.06],
+    ["vocalBoost", "보컬 강조", 1.08],
+  ];
   const mixerGlobalDefaultEnabledInput = document.querySelector(
     "[data-mixer-global-default-enabled]",
   );
@@ -2630,7 +2683,15 @@
   let videoFilterGlobalDefault = { enabled: false, preset: "default" };
   let clipAudioMixerPreset = { enabled: true, preset: "default" };
   let clipVideoFilterPreset = { enabled: true, preset: "beginner" };
-  const GLOBAL_DEFAULT_PICKER_TYPES = ["audio", "video", "clip", "clip-video"];
+  let embedClipMixerDefaultPreset = { enabled: true, preset: "default" };
+  const GLOBAL_DEFAULT_PICKER_TYPES = [
+    "audio",
+    "video",
+    "clip",
+    "clip-video",
+    "embed",
+  ];
+  const globalDefaultPortalState = new Map();
 
   function normalizeGlobalDefaultConfig(value) {
     const cfg = value && typeof value === "object" ? value : {};
@@ -2643,16 +2704,19 @@
   function globalDefaultConfig(type) {
     if (type === "clip") return clipAudioMixerPreset;
     if (type === "clip-video") return clipVideoFilterPreset;
+    if (type === "embed") return embedClipMixerDefaultPreset;
     return type === "video" ? videoFilterGlobalDefault : mixerGlobalDefault;
   }
 
   function globalDefaultBuiltIns(type) {
+    if (type === "embed") return EMBED_CLIP_MIXER_BUILT_IN_PRESETS;
     return type === "video" || type === "clip-video"
       ? VIDEO_FILTER_BUILT_IN_PRESETS
       : MIXER_BUILT_IN_PRESETS;
   }
 
   function globalDefaultCustoms(type) {
+    if (type === "embed") return [];
     return type === "video" || type === "clip-video"
       ? videoFilterCustomPresets
       : mixerCustomPresets;
@@ -2661,13 +2725,14 @@
   function globalDefaultStorageKey(type) {
     if (type === "clip") return CLIP_AUDIO_MIXER_PRESET_KEY;
     if (type === "clip-video") return CLIP_VIDEO_FILTER_PRESET_KEY;
+    if (type === "embed") return EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY;
     return type === "video"
       ? VIDEO_FILTER_GLOBAL_DEFAULT_KEY
       : AUDIO_MIXER_GLOBAL_DEFAULT_KEY;
   }
 
   function globalDefaultEnabledInput(type) {
-    if (type === "clip" || type === "clip-video") return null;
+    if (isAlwaysEnabledPresetPicker(type)) return null;
     return type === "video"
       ? videoFilterGlobalDefaultEnabledInput
       : mixerGlobalDefaultEnabledInput;
@@ -2677,6 +2742,10 @@
     return type === "clip-video"
       ? "beginner"
       : globalDefaultBuiltIns(type)[0][0];
+  }
+
+  function isAlwaysEnabledPresetPicker(type) {
+    return type === "clip" || type === "clip-video" || type === "embed";
   }
 
   function escapeHtml(value) {
@@ -2690,6 +2759,44 @@
 
   function globalDefaultRoot(type) {
     return document.querySelector(`[data-global-default-picker="${type}"]`);
+  }
+
+  function globalDefaultList(type, root = globalDefaultRoot(type)) {
+    return (
+      globalDefaultPortalState.get(type)?.list ||
+      root?.querySelector("[data-global-default-list]") ||
+      null
+    );
+  }
+
+  function portalGlobalDefaultList(type, root, list) {
+    if (!root || !list || globalDefaultPortalState.has(type)) return;
+    globalDefaultPortalState.set(type, {
+      list,
+      parent: list.parentNode,
+      nextSibling: list.nextSibling,
+    });
+    list.dataset.globalDefaultPortal = type;
+    document.body.appendChild(list);
+  }
+
+  function restoreGlobalDefaultList(type) {
+    const saved = globalDefaultPortalState.get(type);
+    if (!saved) return;
+    const { list, parent, nextSibling } = saved;
+    delete list.dataset.globalDefaultPortal;
+    list.style.removeProperty("left");
+    list.style.removeProperty("top");
+    list.style.removeProperty("min-width");
+    list.style.removeProperty("max-height");
+    if (parent?.isConnected) {
+      if (nextSibling?.parentNode === parent) {
+        parent.insertBefore(list, nextSibling);
+      } else {
+        parent.appendChild(list);
+      }
+    }
+    globalDefaultPortalState.delete(type);
   }
 
   function globalDefaultOptionExists(type, value) {
@@ -2712,11 +2819,12 @@
   function closeGlobalDefaultPicker(type) {
     const root = globalDefaultRoot(type);
     if (!root) return;
-    const list = root.querySelector("[data-global-default-list]");
+    const list = globalDefaultList(type, root);
     const trigger = root.querySelector("[data-global-default-trigger]");
     root.classList.remove("is-open");
     if (list) list.hidden = true;
     trigger?.setAttribute("aria-expanded", "false");
+    restoreGlobalDefaultList(type);
   }
 
   function closeAllGlobalDefaultPickers(exceptType = "") {
@@ -2725,18 +2833,28 @@
     });
   }
 
-  function positionGlobalDefaultList(root) {
+  function positionGlobalDefaultList(
+    root,
+    type = root?.dataset.globalDefaultPicker,
+  ) {
     const trigger = root.querySelector("[data-global-default-trigger]");
-    const list = root.querySelector("[data-global-default-list]");
+    const list = globalDefaultList(type, root);
     if (!trigger || !list) return;
     const rect = trigger.getBoundingClientRect();
+    const viewportPadding = 12;
+    const optionHeight = Math.min(list.scrollHeight || 320, 360);
+    const below = window.innerHeight - rect.bottom - viewportPadding;
+    const above = rect.top - viewportPadding;
+    const openAbove = below < 140 && above > below;
+    const available = Math.max(140, openAbove ? above : below);
     list.style.left = `${Math.round(rect.left)}px`;
-    list.style.top = `${Math.round(rect.bottom + 4)}px`;
-    list.style.minWidth = `${Math.round(rect.width)}px`;
-    list.style.maxHeight = `${Math.max(
-      140,
-      window.innerHeight - rect.bottom - 16,
+    list.style.top = `${Math.round(
+      openAbove
+        ? Math.max(viewportPadding, rect.top - Math.min(optionHeight, available) - 4)
+        : rect.bottom + 4,
     )}px`;
+    list.style.minWidth = `${Math.round(rect.width)}px`;
+    list.style.maxHeight = `${Math.min(optionHeight, available)}px`;
   }
 
   function renderGlobalDefaultPicker(type) {
@@ -2749,7 +2867,7 @@
       : fallback;
     config.preset = selected;
     const label = root.querySelector("[data-global-default-label]");
-    const list = root.querySelector("[data-global-default-list]");
+    const list = globalDefaultList(type, root);
     const trigger = root.querySelector("[data-global-default-trigger]");
     if (label) label.textContent = globalDefaultOptionLabel(type, selected);
     if (!list) return;
@@ -2778,7 +2896,9 @@
         ? `<li class="settings-popover-group" role="presentation">커스텀 프리셋</li>${customs}`
         : "");
     trigger?.setAttribute("data-value", selected);
-    if (root.classList.contains("is-open")) positionGlobalDefaultList(root);
+    if (root.classList.contains("is-open")) {
+      positionGlobalDefaultList(root, type);
+    }
   }
 
   function syncGlobalDefaultUI(type) {
@@ -2787,16 +2907,16 @@
     const root = globalDefaultRoot(type);
     const trigger = root?.querySelector("[data-global-default-trigger]");
     if (input) input.checked = config.enabled;
-    const isClipPicker = type === "clip" || type === "clip-video";
-    if (trigger) trigger.disabled = !isClipPicker && !config.enabled;
-    if (!isClipPicker && !config.enabled) closeGlobalDefaultPicker(type);
+    const alwaysEnabled = isAlwaysEnabledPresetPicker(type);
+    if (trigger) trigger.disabled = !alwaysEnabled && !config.enabled;
+    if (!alwaysEnabled && !config.enabled) closeGlobalDefaultPicker(type);
     renderGlobalDefaultPicker(type);
   }
 
   function saveGlobalDefault(type) {
     const config = globalDefaultConfig(type);
-    const isClipPicker = type === "clip" || type === "clip-video";
-    config.enabled = isClipPicker
+    const alwaysEnabled = isAlwaysEnabledPresetPicker(type);
+    config.enabled = alwaysEnabled
       ? true
       : globalDefaultEnabledInput(type)?.checked === true;
     // preset은 이미 config.preset에 반영돼 있다(옵션 클릭/로드 시 설정). 트리거의
@@ -2807,7 +2927,7 @@
     syncGlobalDefaultUI(type);
     try {
       cachedStorageSet({
-        [globalDefaultStorageKey(type)]: isClipPicker
+        [globalDefaultStorageKey(type)]: alwaysEnabled
           ? config.preset
           : { ...config },
       });
@@ -2817,27 +2937,32 @@
   function openGlobalDefaultPicker(type) {
     const root = globalDefaultRoot(type);
     const trigger = root?.querySelector("[data-global-default-trigger]");
-    const list = root?.querySelector("[data-global-default-list]");
+    const list = globalDefaultList(type, root);
     if (!root || !trigger || !list || trigger.disabled) return;
     closeAllGlobalDefaultPickers(type);
     renderGlobalDefaultPicker(type);
     root.classList.add("is-open");
     trigger.setAttribute("aria-expanded", "true");
     list.hidden = false;
-    positionGlobalDefaultList(root);
+    portalGlobalDefaultList(type, root, list);
+    positionGlobalDefaultList(root, type);
   }
 
   GLOBAL_DEFAULT_PICKER_TYPES.forEach((type) => {
     const root = globalDefaultRoot(type);
     root
       ?.querySelector("[data-global-default-trigger]")
-      ?.addEventListener("click", () => {
+      ?.addEventListener("click", (event) => {
+        // 목록을 body 포털로 옮기는 동안에도 이 클릭이 상위의 범용 닫기
+        // 핸들러까지 전달되지 않게 한다.
+        event.stopPropagation();
         if (root.classList.contains("is-open")) closeGlobalDefaultPicker(type);
         else openGlobalDefaultPicker(type);
       });
     root
       ?.querySelector("[data-global-default-list]")
       ?.addEventListener("click", (event) => {
+        event.stopPropagation();
         const option = event.target.closest("[data-global-default-option]");
         if (!option) return;
         const config = globalDefaultConfig(type);
@@ -2887,13 +3012,39 @@
   });
 
   document.addEventListener("click", (event) => {
-    if (event.target.closest("[data-global-default-picker]")) return;
+    if (
+      event.target.closest(
+        "[data-global-default-picker], [data-global-default-list]",
+      )
+    )
+      return;
     closeAllGlobalDefaultPickers();
   });
-  window.addEventListener("resize", () => closeAllGlobalDefaultPickers());
-  panelsScroll?.addEventListener("scroll", () =>
-    closeAllGlobalDefaultPickers(),
-  );
+  let globalDefaultPositionFrame = 0;
+  function scheduleGlobalDefaultPickerPosition() {
+    cancelAnimationFrame(globalDefaultPositionFrame);
+    globalDefaultPositionFrame = requestAnimationFrame(() => {
+      globalDefaultPositionFrame = 0;
+      GLOBAL_DEFAULT_PICKER_TYPES.forEach((type) => {
+        const root = globalDefaultRoot(type);
+        if (!root?.classList.contains("is-open")) return;
+        const trigger = root.querySelector("[data-global-default-trigger]");
+        const panelRect = panelsScroll?.getBoundingClientRect();
+        const rect = trigger?.getBoundingClientRect();
+        if (
+          !rect ||
+          (panelRect &&
+            (rect.bottom < panelRect.top || rect.top > panelRect.bottom))
+        ) {
+          closeGlobalDefaultPicker(type);
+          return;
+        }
+        positionGlobalDefaultList(root, type);
+      });
+    });
+  }
+  window.addEventListener("resize", scheduleGlobalDefaultPickerPosition);
+  panelsScroll?.addEventListener("scroll", scheduleGlobalDefaultPickerPosition);
 
   async function loadGlobalDefaults() {
     try {
@@ -2906,6 +3057,8 @@
         CLIP_VIDEO_FILTER_ENABLED_KEY,
         CLIP_VIDEO_FILTER_ALWAYS_ON_KEY,
         CLIP_VIDEO_FILTER_PRESET_KEY,
+        EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY,
+        "cheeseEmbedClipMixerPreset",
         VIDEO_FILTER_PRESETS_KEY,
         VIDEO_FILTER_GLOBAL_DEFAULT_KEY,
       ]);
@@ -2922,6 +3075,14 @@
       clipVideoFilterPreset = {
         enabled: true,
         preset: String(data?.[CLIP_VIDEO_FILTER_PRESET_KEY] || "beginner"),
+      };
+      embedClipMixerDefaultPreset = {
+        enabled: true,
+        preset: String(
+          data?.[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY] ||
+            data?.cheeseEmbedClipMixerPreset ||
+            "default",
+        ),
       };
       if (clipAudioMixerEnabledInput) {
         clipAudioMixerEnabledInput.checked =
@@ -2952,6 +3113,7 @@
       videoFilterGlobalDefault = { enabled: false, preset: "default" };
       clipAudioMixerPreset = { enabled: true, preset: "default" };
       clipVideoFilterPreset = { enabled: true, preset: "beginner" };
+      embedClipMixerDefaultPreset = { enabled: true, preset: "default" };
       if (clipAudioMixerEnabledInput) {
         clipAudioMixerEnabledInput.checked = true;
       }
@@ -2969,6 +3131,7 @@
     syncGlobalDefaultUI("video");
     syncGlobalDefaultUI("clip");
     syncGlobalDefaultUI("clip-video");
+    syncGlobalDefaultUI("embed");
   }
 
   loadGlobalDefaults();
@@ -3188,6 +3351,15 @@
       );
       syncGlobalDefaultUI("video");
     }
+    if (changes[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY]) {
+      embedClipMixerDefaultPreset = {
+        enabled: true,
+        preset: String(
+          changes[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY].newValue || "default",
+        ),
+      };
+      syncGlobalDefaultUI("embed");
+    }
   });
 
   // ── 채팅 이어보기(방송별 session 버퍼) ───────────────────────────────────
@@ -3197,9 +3369,7 @@
   const CHAT_HISTORY_LIMIT_MIN = 50;
   const CHAT_HISTORY_LIMIT_MAX = 500;
   const chatHistoryInput = document.querySelector("[data-chat-history]");
-  const chatHistoryRange = document.querySelector(
-    "[data-chat-history-limit]",
-  );
+  const chatHistoryRange = document.querySelector("[data-chat-history-limit]");
   const chatHistoryNumber = document.querySelector(
     "[data-chat-history-limit-num]",
   );
@@ -4018,6 +4188,48 @@
     });
   }
 
+  // ── 전역 게인 기본값 재방문 동작 ─────────────────────────────────────────
+  const mixerGlobalGainDefaultModeGroup = document.querySelector(
+    "[data-mixer-global-gain-default-mode]",
+  );
+  if (mixerGlobalGainDefaultModeGroup) {
+    const modeButtons = Array.from(
+      mixerGlobalGainDefaultModeGroup.querySelectorAll(
+        "[data-gain-mode-value]",
+      ),
+    );
+    function reflectGlobalGainMode(mode) {
+      const value = mode === "channel" ? "channel" : "global";
+      modeButtons.forEach((button) => {
+        const active = button.dataset.gainModeValue === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "global";
+      try {
+        const data = await cachedStorageGet(
+          MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY,
+        );
+        if (data?.[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY] === "channel") {
+          mode = "channel";
+        }
+      } catch {}
+      reflectGlobalGainMode(mode);
+    })();
+    modeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const mode =
+          button.dataset.gainModeValue === "channel" ? "channel" : "global";
+        reflectGlobalGainMode(mode);
+        try {
+          cachedStorageSet({ [MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY]: mode });
+        } catch {}
+      });
+    });
+  }
+
   // ── 팝업 플레이어(사이드바 채널 드래그 → 떠 있는 창) ──────────────────────
   const popupPlayerInput = document.querySelector("[data-popup-player]");
   if (popupPlayerInput) {
@@ -4342,6 +4554,525 @@
     };
     mixerGainStepInput.addEventListener("change", saveMixerGainStep);
     mixerGainStepInput.addEventListener("blur", saveMixerGainStep);
+  }
+
+  // ── 오디오 믹서 전역 게인 기본값 ─────────────────────────────────────────
+  // 플레이어의 게인 범위/간격 설정을 그대로 공유한다. 저장값은 플레이어 상태와
+  // 같은 배율(1=100%)로 두어 표시 단위와 오디오 처리 단위가 섞이지 않게 한다.
+  const mixerGlobalGainDefaultRoot = document.querySelector(
+    "[data-mixer-global-gain-default]",
+  );
+  const mixerGlobalGainDefaultEnabled = mixerGlobalGainDefaultRoot?.querySelector(
+    "[data-mixer-global-gain-default-enabled]",
+  );
+  const mixerGlobalGainDefaultRange = mixerGlobalGainDefaultRoot?.querySelector(
+    "[data-mixer-global-gain-default-range]",
+  );
+  const mixerGlobalGainDefaultInput = mixerGlobalGainDefaultRoot?.querySelector(
+    "[data-mixer-global-gain-default-input]",
+  );
+  const mixerGlobalGainDefaultReset = mixerGlobalGainDefaultRoot?.querySelector(
+    "[data-mixer-global-gain-default-reset]",
+  );
+  let mixerGlobalGainDefault = { enabled: false, gain: 1 };
+  let mixerGlobalGainMinPct = 50;
+  let mixerGlobalGainMaxPct = 200;
+  let mixerGlobalGainStepPct = 5;
+
+  function normalizeMixerGlobalGainDefault(value) {
+    const config = value && typeof value === "object" ? value : {};
+    const gain = Number(config.gain);
+    return {
+      enabled: config.enabled === true,
+      gain: Number.isFinite(gain) ? Math.min(3, Math.max(0, gain)) : 1,
+    };
+  }
+
+  function normalizeMixerGlobalGainBounds(min, max, step) {
+    const normalizedMin = [0, 0.1, 0.25, 0.5].includes(Number(min))
+      ? Number(min)
+      : 0.5;
+    const normalizedMax = [2, 3].includes(Number(max)) ? Number(max) : 2;
+    mixerGlobalGainMinPct = Math.round(normalizedMin * 100);
+    mixerGlobalGainMaxPct = Math.round(normalizedMax * 100);
+    mixerGlobalGainStepPct = clampMixerGainStep(step);
+  }
+
+  function clampMixerGlobalGainPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 100;
+    const clamped = Math.min(
+      mixerGlobalGainMaxPct,
+      Math.max(mixerGlobalGainMinPct, numeric),
+    );
+    if (
+      clamped === mixerGlobalGainMinPct ||
+      clamped === mixerGlobalGainMaxPct
+    ) {
+      return clamped;
+    }
+    return Math.min(
+      mixerGlobalGainMaxPct,
+      Math.max(
+        mixerGlobalGainMinPct,
+        100 +
+          Math.round((clamped - 100) / mixerGlobalGainStepPct) *
+            mixerGlobalGainStepPct,
+      ),
+    );
+  }
+
+  function reflectMixerGlobalGainDefault() {
+    if (!mixerGlobalGainDefaultRoot) return;
+    const percent = clampMixerGlobalGainPercent(
+      mixerGlobalGainDefault.gain * 100,
+    );
+    mixerGlobalGainDefault.gain = percent / 100;
+    mixerGlobalGainDefaultEnabled.checked = mixerGlobalGainDefault.enabled;
+    [mixerGlobalGainDefaultRange, mixerGlobalGainDefaultInput].forEach(
+      (control) => {
+        control.min = String(mixerGlobalGainMinPct);
+        control.max = String(mixerGlobalGainMaxPct);
+        control.value = String(percent);
+      },
+    );
+    // range의 native step은 min을 기준으로 계산하지만 플레이어 게인은 100%를
+    // 기준으로 양자화한다. range는 1% 단위로 받고 아래 input 핸들러에서 같은
+    // quantizer를 거쳐 두 UI가 항상 동일한 값에 멈추게 한다.
+    mixerGlobalGainDefaultRange.step = "1";
+    mixerGlobalGainDefaultInput.step = String(mixerGlobalGainStepPct);
+  }
+
+  function saveMixerGlobalGainDefault() {
+    if (!mixerGlobalGainDefaultRoot) return;
+    const percent = clampMixerGlobalGainPercent(
+      mixerGlobalGainDefaultInput.value,
+    );
+    mixerGlobalGainDefault = {
+      enabled: mixerGlobalGainDefaultEnabled.checked === true,
+      gain: percent / 100,
+    };
+    reflectMixerGlobalGainDefault();
+    try {
+      cachedStorageSet({
+        [AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY]: {
+          ...mixerGlobalGainDefault,
+        },
+      });
+    } catch {}
+  }
+
+  if (mixerGlobalGainDefaultRoot) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet([
+          AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY,
+          "cheeseMixerGainMin",
+          "cheeseMixerGainMax",
+          MIXER_GAIN_STEP_KEY,
+        ]);
+        normalizeMixerGlobalGainBounds(
+          data?.cheeseMixerGainMin,
+          data?.cheeseMixerGainMax,
+          data?.[MIXER_GAIN_STEP_KEY],
+        );
+        mixerGlobalGainDefault = normalizeMixerGlobalGainDefault(
+          data?.[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY],
+        );
+      } catch {}
+      reflectMixerGlobalGainDefault();
+    })();
+
+    mixerGlobalGainDefaultEnabled.addEventListener(
+      "change",
+      saveMixerGlobalGainDefault,
+    );
+    mixerGlobalGainDefaultRange.addEventListener("input", () => {
+      const percent = clampMixerGlobalGainPercent(
+        mixerGlobalGainDefaultRange.value,
+      );
+      mixerGlobalGainDefaultRange.value = String(percent);
+      mixerGlobalGainDefaultInput.value = String(percent);
+    });
+    mixerGlobalGainDefaultRange.addEventListener(
+      "change",
+      saveMixerGlobalGainDefault,
+    );
+    mixerGlobalGainDefaultInput.addEventListener("input", () => {
+      const value = Number(mixerGlobalGainDefaultInput.value);
+      if (Number.isFinite(value)) {
+        mixerGlobalGainDefaultRange.value = String(
+          clampMixerGlobalGainPercent(value),
+        );
+      }
+    });
+    mixerGlobalGainDefaultInput.addEventListener(
+      "change",
+      saveMixerGlobalGainDefault,
+    );
+    mixerGlobalGainDefaultInput.addEventListener(
+      "blur",
+      saveMixerGlobalGainDefault,
+    );
+    mixerGlobalGainDefaultReset.addEventListener("click", () => {
+      mixerGlobalGainDefaultInput.value = "100";
+      saveMixerGlobalGainDefault();
+    });
+
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY]) {
+        mixerGlobalGainDefault = normalizeMixerGlobalGainDefault(
+          changes[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY].newValue,
+        );
+      }
+      if (
+        changes.cheeseMixerGainMin ||
+        changes.cheeseMixerGainMax ||
+        changes[MIXER_GAIN_STEP_KEY]
+      ) {
+        normalizeMixerGlobalGainBounds(
+          changes.cheeseMixerGainMin?.newValue ??
+            storageCacheData?.cheeseMixerGainMin,
+          changes.cheeseMixerGainMax?.newValue ??
+            storageCacheData?.cheeseMixerGainMax,
+          changes[MIXER_GAIN_STEP_KEY]?.newValue ??
+            storageCacheData?.[MIXER_GAIN_STEP_KEY],
+        );
+        const previousGain = mixerGlobalGainDefault.gain;
+        mixerGlobalGainDefault.gain =
+          clampMixerGlobalGainPercent(previousGain * 100) / 100;
+        if (mixerGlobalGainDefault.gain !== previousGain) {
+          try {
+            cachedStorageSet({
+              [AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY]: {
+                ...mixerGlobalGainDefault,
+              },
+            });
+          } catch {}
+        }
+      }
+      reflectMixerGlobalGainDefault();
+    });
+  }
+
+  // ── 임베드 클립(embed/clip) 전용 오디오 믹서 ──────────────────────────────
+  // 외부 사이트(카페·피쿠 등)에 퍼간 치지직 클립 플레이어에만 적용된다. 치지직
+  // 사이트 안의 믹서와 완전히 독립된 키를 쓴다(프리셋 목록만 공유).
+  const EMBED_CLIP_MIXER_HIDDEN_KEY = "cheeseEmbedClipMixerHidden";
+  const EMBED_CLIP_MIXER_ALWAYS_ON_KEY = "cheeseEmbedClipMixerAlwaysOn";
+  const EMBED_CLIP_GAIN_STEP_KEY = "cheeseEmbedClipGainStep";
+
+  // 숨김 스위치는 '체크=숨김'이라 기본값이 false(=표시)다.
+  function bindEmbedClipToggle(selector, key, defaultOn) {
+    const input = document.querySelector(selector);
+    if (!input) return;
+    (async () => {
+      let on = defaultOn;
+      try {
+        const d = await cachedStorageGet(key);
+        if (typeof d?.[key] === "boolean") on = d[key];
+      } catch {}
+      input.checked = on;
+    })();
+    input.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [key]: input.checked });
+      } catch {}
+    });
+  }
+  bindEmbedClipToggle(
+    "[data-embed-clip-mixer-hidden]",
+    EMBED_CLIP_MIXER_HIDDEN_KEY,
+    false,
+  );
+  bindEmbedClipToggle(
+    "[data-embed-clip-mixer-always-on]",
+    EMBED_CLIP_MIXER_ALWAYS_ON_KEY,
+    false,
+  );
+  bindPctToggle("[data-embed-clip-gain-pct]", "cheeseEmbedClipGainPct");
+
+  bindGainRangeSegmented(
+    document.querySelector("[data-embed-clip-gain-min]"),
+    "embed-clip-gain-min-value",
+    "cheeseEmbedClipGainMin",
+    [0.5, 0.25, 0.1, 0],
+    0.5,
+  );
+  bindGainRangeSegmented(
+    document.querySelector("[data-embed-clip-gain-max]"),
+    "embed-clip-gain-max-value",
+    "cheeseEmbedClipGainMax",
+    [2, 3],
+    2,
+  );
+
+  const embedClipGainStepInput = document.querySelector(
+    "[data-embed-clip-gain-step]",
+  );
+  if (embedClipGainStepInput) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet(EMBED_CLIP_GAIN_STEP_KEY);
+        embedClipGainStepInput.value = String(
+          clampMixerGainStep(data?.[EMBED_CLIP_GAIN_STEP_KEY] ?? 5),
+        );
+      } catch {
+        embedClipGainStepInput.value = "5";
+      }
+    })();
+    const saveEmbedClipGainStep = () => {
+      const value = clampMixerGainStep(embedClipGainStepInput.value);
+      embedClipGainStepInput.value = String(value);
+      try {
+        cachedStorageSet({ [EMBED_CLIP_GAIN_STEP_KEY]: value });
+      } catch {}
+    };
+    embedClipGainStepInput.addEventListener("change", saveEmbedClipGainStep);
+    embedClipGainStepInput.addEventListener("blur", saveEmbedClipGainStep);
+  }
+
+  // 임베드 믹서를 켤 때 적용할 게인. 저장값이 없으면 선택한 프리셋 자체의 gain을
+  // 사용해 기존 사용자에게 음량 변화가 생기지 않는다.
+  const embedClipDefaultGainRoot = document.querySelector(
+    "[data-embed-clip-default-gain]",
+  );
+  const embedClipDefaultGainRange = embedClipDefaultGainRoot?.querySelector(
+    "[data-embed-clip-default-gain-range]",
+  );
+  const embedClipDefaultGainInput = embedClipDefaultGainRoot?.querySelector(
+    "[data-embed-clip-default-gain-input]",
+  );
+  const embedClipDefaultGainReset = embedClipDefaultGainRoot?.querySelector(
+    "[data-embed-clip-default-gain-reset]",
+  );
+  let embedClipDefaultGain = null;
+  let embedClipDefaultPresetKey = "default";
+  let embedClipDefaultGainMinPct = 50;
+  let embedClipDefaultGainMaxPct = 200;
+  let embedClipDefaultGainStepPct = 5;
+
+  function normalizeEmbedClipDefaultPreset(value) {
+    const key = String(value || "default");
+    return EMBED_CLIP_MIXER_BUILT_IN_PRESETS.some(
+      ([presetKey]) => presetKey === key,
+    )
+      ? key
+      : "default";
+  }
+
+  function embedClipPresetGain(key = embedClipDefaultPresetKey) {
+    return (
+      EMBED_CLIP_MIXER_BUILT_IN_PRESETS.find(
+        ([presetKey]) => presetKey === key,
+      )?.[2] ?? 1.08
+    );
+  }
+
+  function normalizeEmbedClipDefaultGainBounds(min, max, step) {
+    const normalizedMin = [0, 0.1, 0.25, 0.5].includes(Number(min))
+      ? Number(min)
+      : 0.5;
+    const normalizedMax = [2, 3].includes(Number(max)) ? Number(max) : 2;
+    embedClipDefaultGainMinPct = Math.round(normalizedMin * 100);
+    embedClipDefaultGainMaxPct = Math.round(normalizedMax * 100);
+    embedClipDefaultGainStepPct = clampMixerGainStep(step);
+  }
+
+  function clampEmbedClipDefaultGainPercent(value) {
+    const numeric = Number(value);
+    const fallback = Math.round(embedClipPresetGain() * 100);
+    const clamped = Math.min(
+      embedClipDefaultGainMaxPct,
+      Math.max(
+        embedClipDefaultGainMinPct,
+        Number.isFinite(numeric) ? numeric : fallback,
+      ),
+    );
+    if (
+      clamped === embedClipDefaultGainMinPct ||
+      clamped === embedClipDefaultGainMaxPct
+    ) {
+      return clamped;
+    }
+    return Math.min(
+      embedClipDefaultGainMaxPct,
+      Math.max(
+        embedClipDefaultGainMinPct,
+        100 +
+          Math.round((clamped - 100) / embedClipDefaultGainStepPct) *
+            embedClipDefaultGainStepPct,
+      ),
+    );
+  }
+
+  function reflectEmbedClipDefaultGain() {
+    if (!embedClipDefaultGainRoot) return;
+    const sourceGain =
+      embedClipDefaultGain === null
+        ? embedClipPresetGain()
+        : embedClipDefaultGain;
+    const percent =
+      embedClipDefaultGain === null
+        ? Math.min(
+            embedClipDefaultGainMaxPct,
+            Math.max(
+              embedClipDefaultGainMinPct,
+              Math.round(sourceGain * 100),
+            ),
+          )
+        : clampEmbedClipDefaultGainPercent(sourceGain * 100);
+    [embedClipDefaultGainRange, embedClipDefaultGainInput].forEach(
+      (control) => {
+        control.min = String(embedClipDefaultGainMinPct);
+        control.max = String(embedClipDefaultGainMaxPct);
+        control.value = String(percent);
+      },
+    );
+    embedClipDefaultGainRange.step = "1";
+    embedClipDefaultGainInput.step = String(embedClipDefaultGainStepPct);
+    embedClipDefaultGainReset.disabled = embedClipDefaultGain === null;
+  }
+
+  function saveEmbedClipDefaultGain() {
+    if (!embedClipDefaultGainRoot) return;
+    const presetPercent = Math.min(
+      embedClipDefaultGainMaxPct,
+      Math.max(
+        embedClipDefaultGainMinPct,
+        Math.round(embedClipPresetGain() * 100),
+      ),
+    );
+    if (
+      embedClipDefaultGain === null &&
+      Number(embedClipDefaultGainInput.value) === presetPercent
+    ) {
+      reflectEmbedClipDefaultGain();
+      return;
+    }
+    const percent = clampEmbedClipDefaultGainPercent(
+      embedClipDefaultGainInput.value,
+    );
+    embedClipDefaultGain = percent / 100;
+    reflectEmbedClipDefaultGain();
+    try {
+      cachedStorageSet({
+        [EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY]: embedClipDefaultGain,
+      });
+    } catch {}
+  }
+
+  if (embedClipDefaultGainRoot) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet([
+          EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY,
+          EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY,
+          "cheeseEmbedClipMixerPreset",
+          "cheeseEmbedClipGainMin",
+          "cheeseEmbedClipGainMax",
+          EMBED_CLIP_GAIN_STEP_KEY,
+        ]);
+        embedClipDefaultPresetKey = normalizeEmbedClipDefaultPreset(
+          data?.[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY] ||
+            data?.cheeseEmbedClipMixerPreset,
+        );
+        const savedGain = data?.[EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY];
+        embedClipDefaultGain =
+          typeof savedGain === "number" && Number.isFinite(savedGain)
+            ? savedGain
+            : null;
+        normalizeEmbedClipDefaultGainBounds(
+          data?.cheeseEmbedClipGainMin,
+          data?.cheeseEmbedClipGainMax,
+          data?.[EMBED_CLIP_GAIN_STEP_KEY],
+        );
+      } catch {}
+      reflectEmbedClipDefaultGain();
+    })();
+
+    embedClipDefaultGainRange.addEventListener("input", () => {
+      const percent = clampEmbedClipDefaultGainPercent(
+        embedClipDefaultGainRange.value,
+      );
+      embedClipDefaultGainRange.value = String(percent);
+      embedClipDefaultGainInput.value = String(percent);
+    });
+    embedClipDefaultGainRange.addEventListener(
+      "change",
+      saveEmbedClipDefaultGain,
+    );
+    embedClipDefaultGainInput.addEventListener("input", () => {
+      const value = Number(embedClipDefaultGainInput.value);
+      if (Number.isFinite(value)) {
+        embedClipDefaultGainRange.value = String(
+          clampEmbedClipDefaultGainPercent(value),
+        );
+      }
+    });
+    embedClipDefaultGainInput.addEventListener(
+      "change",
+      saveEmbedClipDefaultGain,
+    );
+    embedClipDefaultGainInput.addEventListener(
+      "blur",
+      saveEmbedClipDefaultGain,
+    );
+    embedClipDefaultGainReset.addEventListener("click", () => {
+      embedClipDefaultGain = null;
+      cachedStorageRemove(EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY);
+      reflectEmbedClipDefaultGain();
+    });
+
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY]) {
+        embedClipDefaultPresetKey = normalizeEmbedClipDefaultPreset(
+          changes[EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY].newValue,
+        );
+      }
+      if (changes[EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY]) {
+        const value = changes[EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY].newValue;
+        embedClipDefaultGain =
+          typeof value === "number" && Number.isFinite(value) ? value : null;
+      }
+      if (changes.cheeseEmbedClipGainMin) {
+        embedClipDefaultGainMinPct = Math.round(
+          ([0, 0.1, 0.25, 0.5].includes(
+            Number(changes.cheeseEmbedClipGainMin.newValue),
+          )
+            ? Number(changes.cheeseEmbedClipGainMin.newValue)
+            : 0.5) * 100,
+        );
+      }
+      if (changes.cheeseEmbedClipGainMax) {
+        embedClipDefaultGainMaxPct =
+          (Number(changes.cheeseEmbedClipGainMax.newValue) === 3 ? 3 : 2) *
+          100;
+      }
+      if (changes[EMBED_CLIP_GAIN_STEP_KEY]) {
+        embedClipDefaultGainStepPct = clampMixerGainStep(
+          changes[EMBED_CLIP_GAIN_STEP_KEY].newValue,
+        );
+      }
+      if (
+        embedClipDefaultGain !== null &&
+        (changes.cheeseEmbedClipGainMin ||
+          changes.cheeseEmbedClipGainMax ||
+          changes[EMBED_CLIP_GAIN_STEP_KEY])
+      ) {
+        const previous = embedClipDefaultGain;
+        embedClipDefaultGain =
+          clampEmbedClipDefaultGainPercent(previous * 100) / 100;
+        if (embedClipDefaultGain !== previous) {
+          cachedStorageSet({
+            [EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY]: embedClipDefaultGain,
+          });
+        }
+      }
+      reflectEmbedClipDefaultGain();
+    });
   }
 
   // 문자열 값 세그먼티드(정렬 기준 등). bindGainRangeSegmented의 문자열 버전.
@@ -6115,6 +6846,26 @@
         closeCategoryVideoCandidatePicker();
       }
     });
+    let categoryVideoCandidatePositionFrame = 0;
+    const scheduleCategoryVideoCandidatePosition = () => {
+      if (!categoryVideoCandidatePicker.classList.contains("is-open")) return;
+      cancelAnimationFrame(categoryVideoCandidatePositionFrame);
+      categoryVideoCandidatePositionFrame = requestAnimationFrame(() => {
+        categoryVideoCandidatePositionFrame = 0;
+        if (!categoryVideoCandidatePicker.classList.contains("is-open")) return;
+        const rect = categoryVideoCandidateTrigger?.getBoundingClientRect();
+        const panelRect = panelsScroll?.getBoundingClientRect();
+        if (
+          !rect ||
+          (panelRect &&
+            (rect.bottom < panelRect.top || rect.top > panelRect.bottom))
+        ) {
+          closeCategoryVideoCandidatePicker();
+          return;
+        }
+        positionCategoryVideoCandidateList();
+      });
+    };
     document.addEventListener(
       "scroll",
       (event) => {
@@ -6122,12 +6873,12 @@
           categoryVideoCandidatePicker.classList.contains("is-open") &&
           !categoryVideoCandidateList?.contains(event.target)
         ) {
-          closeCategoryVideoCandidatePicker();
+          scheduleCategoryVideoCandidatePosition();
         }
       },
       true,
     );
-    window.addEventListener("resize", closeCategoryVideoCandidatePicker);
+    window.addEventListener("resize", scheduleCategoryVideoCandidatePosition);
   }
 
   // ── 탭 복귀 시 검색 자동 초기화(전역, 기본 OFF) ───────────────────────────
@@ -7568,7 +8319,7 @@
           .sort((a, b) => (b.startAt || 0) - (a.startAt || 0))
           .map(
             (x) =>
-              `<li><label><input type="checkbox" value="${escapeHtml(String(x.id || ''))}">` +
+              `<li><label><input type="checkbox" value="${escapeHtml(String(x.id || ""))}">` +
               `<span>${escapeHtml(memoManageLabel(x))}</span>` +
               `<small>${x.items.length}개</small></label></li>`,
           )
@@ -8525,6 +9276,33 @@
     if (key === LIVE_VIEWER_COUNT_POSITION_KEY) {
       return LIVE_VIEWER_COUNT_POSITIONS.has(value) ? value : undefined;
     }
+    if (key === AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      const gain = Number(value.gain);
+      if (!Number.isFinite(gain)) return undefined;
+      return {
+        enabled: value.enabled === true,
+        gain: Math.min(3, Math.max(0, gain)),
+      };
+    }
+    if (key === MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY) {
+      return value === "channel" || value === "global" ? value : undefined;
+    }
+    if (key === EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY) {
+      const preset = String(value || "");
+      return EMBED_CLIP_MIXER_BUILT_IN_PRESETS.some(
+        ([presetKey]) => presetKey === preset,
+      )
+        ? preset
+        : undefined;
+    }
+    if (key === EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY) {
+      if (typeof value !== "number") return undefined;
+      const gain = Number(value);
+      return Number.isFinite(gain) ? Math.min(3, Math.max(0, gain)) : undefined;
+    }
     if (
       key === "cheeseAudioMixer.autoSync" ||
       key === "cheeseVideoFilter.autoSharpen" ||
@@ -8619,7 +9397,11 @@
         ...new Set(
           value
             .slice(0, 1000)
-            .map((name) => String(name || "").trim().slice(0, 100))
+            .map((name) =>
+              String(name || "")
+                .trim()
+                .slice(0, 100),
+            )
             .filter(Boolean),
         ),
       ];
@@ -8751,7 +9533,9 @@
         : rawChannelName;
       const adultKnown =
         raw?.adultKnown === true || typeof raw?.adult === "boolean";
-      const duration = String(raw?.duration || "").trim().slice(0, 30);
+      const duration = String(raw?.duration || "")
+        .trim()
+        .slice(0, 30);
       const durationParts = duration.split(":").map(Number);
       const parsedDuration =
         durationParts.length >= 2 &&
@@ -8770,8 +9554,12 @@
         .map((tag) => tag.slice(0, 50));
       output.push({
         videoNo,
-        title: String(raw?.title || "").trim().slice(0, 300),
-        thumb: String(raw?.thumb || "").trim().slice(0, 1500),
+        title: String(raw?.title || "")
+          .trim()
+          .slice(0, 300),
+        thumb: String(raw?.thumb || "")
+          .trim()
+          .slice(0, 1500),
         channelName,
         channelId: normalizeCvAccountId(raw?.channelId),
         channelImageUrl: String(raw?.channelImageUrl || "")
@@ -8789,7 +9577,9 @@
         badgeLabel: String(raw?.badgeLabel || "다시보기")
           .trim()
           .slice(0, 30),
-        categoryType: String(raw?.categoryType || "").trim().slice(0, 30),
+        categoryType: String(raw?.categoryType || "")
+          .trim()
+          .slice(0, 30),
         videoCategory: String(raw?.videoCategory || "")
           .trim()
           .slice(0, 100),

@@ -1042,7 +1042,12 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-item:has([data-mixer-global-default-mode]),
+.settings-item:has([data-mixer-global-gain-default]),
+.settings-item:has([data-mixer-global-gain-default-mode]),
 .settings-item:has([data-mixer-exclude-list]),
+.settings-item:has([data-embed-clip-gain-min]),
+.settings-item:has([data-embed-clip-gain-max]),
+.settings-item:has([data-embed-clip-default-gain]),
 .settings-item:has([data-video-filter-exclude-list]),
 .settings-item:has([data-player-button-side]),
 .settings-item:has([data-video-filter-global-default-mode]),
@@ -1073,7 +1078,12 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-item [data-mixer-global-default-mode],
+.settings-item [data-mixer-global-gain-default],
+.settings-item [data-mixer-global-gain-default-mode],
 .settings-item [data-video-filter-global-default-mode],
+.settings-item [data-embed-clip-gain-min],
+.settings-item [data-embed-clip-gain-max],
+.settings-item [data-embed-clip-default-gain],
 .settings-item [data-chat-time-format],
 .settings-item [data-cf-group-placement],
 .settings-item [data-popup-player-audio],
@@ -1855,6 +1865,33 @@ body > .clr-picker .clr-preview {
   grid-template-columns: minmax(120px, 1fr) 84px auto;
   gap: 5px;
   width: 100%;
+}
+
+.settings-global-gain-controls {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.settings-global-gain-controls .settings-osd-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 84px auto;
+  width: 100%;
+  gap: 5px;
+}
+
+.settings-embed-clip-default-gain {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 84px auto;
+  width: 100%;
+  gap: 5px;
+}
+
+.settings-embed-clip-default-gain .settings-order-reset:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* OSD 숫자 인풋: '100%'가 안 짤리게 폭만 넉넉히 확보한다. 스핀 버튼은 브라우저 기본

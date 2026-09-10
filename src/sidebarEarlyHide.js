@@ -139,13 +139,16 @@
   let labelFlags = null; // 숨겨야 할 키워드 목록(설정 로드 후 채움)
 
   function navLabel(nav) {
+    // 접힌 새 사이드바는 섹션 제목 대신 nav aria-label만 남긴다. content.js와
+    // 같은 기준으로 읽어 document_start 단계의 숨김 처리도 접힘 상태에서 유지한다.
+    const ariaLabel = nav.getAttribute("aria-label") || "";
     const title = nav.querySelector('[class*="_title_"]');
     const titleText = title ? title.textContent || "" : "";
     let blind = "";
     nav.querySelectorAll(".blind").forEach((el) => {
       blind += " " + (el.textContent || "");
     });
-    return (titleText + " " + blind).replace(/\s+/g, "");
+    return (ariaLabel + " " + titleText + " " + blind).replace(/\s+/g, "");
   }
 
   // 사이드바 nav 를 하나라도 처리했으면 true(→ 옵저버 조기 해제 신호).

@@ -31,18 +31,46 @@
 
   if (isClipEditorContext()) return;
 
-  async function masterEnabled() {
+  // masterGate.js(ISOLATED, document_start)가 루트에 준비 표시를 세울 때까지 기다린다.
+  // 예전의 10ms x 100회(=1초) 고정 폴링은 서비스워커 콜드 스타트가 느리거나 팝업
+  // iframe 처럼 비활성 프레임이라 타이머가 clamp 되면 타임아웃됐다.
+  // MutationObserver 로 즉시 깨어나게 하고 타임아웃도 10초로 늘린다.
+  function masterEnabled() {
     const root = document.documentElement;
-    for (let i = 0; i < 100; i += 1) {
-      if (root?.dataset.cheesePlatterMasterReady === "1") break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return !root?.hasAttribute("data-cheese-platter-disabled");
+    if (!root) return Promise.resolve(true);
+    const ready = () => root.dataset.cheesePlatterMasterReady === "1";
+    const verdict = () => !root.hasAttribute("data-cheese-platter-disabled");
+    if (ready()) return Promise.resolve(verdict());
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        resolve(verdict());
+      };
+      const observer = new MutationObserver(() => {
+        if (ready()) finish();
+      });
+      observer.observe(root, {
+        attributes: true,
+        attributeFilter: [
+          "data-cheese-platter-master-ready",
+          "data-cheese-platter-disabled",
+        ],
+      });
+      const timer = setTimeout(finish, 10000);
+      if (ready()) finish(); // observe 등록 직전에 세팅됐을 수 있다
+    });
   }
-  if (!(await masterEnabled())) return;
-
+  // ⚠ 중복 주입 가드는 await 앞에 둔다. await 뒤에 두면 같은 프레임에 스크립트가
+  // 두 번 주입됐을 때 두 인스턴스가 모두 게이트를 통과한 뒤에야 가드에 닿아,
+  // 그 사이 document 가 교체되면 잘못된 root 를 읽는 경쟁이 생긴다.
   if (window.__cheeseCommentBlockLoaded) return;
   window.__cheeseCommentBlockLoaded = true;
+
+  if (!(await masterEnabled())) return;
 
   const originalFetch = window.fetch;
   const originalJSONParse = JSON.parse;

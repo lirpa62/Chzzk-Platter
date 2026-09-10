@@ -198,6 +198,7 @@
   let selectedPreset = "beginner";
   let presetLabel = "화질 향상";
   let filters = normalizeFilters(BUILT_IN_PRESETS.beginner.filters);
+  let presetOptions = [];
   let appliedVideo = null;
   let button = null;
   let tooltip = null;
@@ -292,6 +293,46 @@
     };
   }
 
+  function buildPresetOptions(data) {
+    const customPresets = Array.isArray(data?.[PRESETS_KEY])
+      ? data[PRESETS_KEY].filter(
+          (preset) => preset && String(preset.id || "").trim(),
+        )
+      : [];
+    return [
+      ...Object.entries(BUILT_IN_PRESETS).map(([key, preset]) => ({
+        key,
+        label: preset.label,
+        filters: normalizeFilters(preset.filters),
+      })),
+      ...customPresets.map((preset) => ({
+        key: String(preset.id),
+        label: String(preset.name || "커스텀"),
+        filters: normalizeFilters(preset.filters || preset),
+      })),
+    ];
+  }
+
+  function cyclePreset(direction) {
+    if (!presetOptions.length || !direction) return;
+    const currentIndex = presetOptions.findIndex(
+      (preset) => preset.key === selectedPreset,
+    );
+    const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+    const nextIndex =
+      (((baseIndex + direction) % presetOptions.length) +
+        presetOptions.length) %
+      presetOptions.length;
+    const nextPreset = presetOptions[nextIndex];
+    if (!nextPreset) return;
+    selectedPreset = nextPreset.key;
+    presetLabel = nextPreset.label;
+    filters = normalizeFilters(nextPreset.filters);
+    sharpnessScale = 1;
+    applyFilter(findActiveVideo());
+    updateButton();
+  }
+
   function applyStoredSettings(data) {
     const previousAlwaysOn = alwaysOn;
     const previousPreset = selectedPreset;
@@ -302,6 +343,7 @@
       hidden.videoFilter === true;
     featureEnabled = data?.[ENABLED_KEY] !== false;
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
+    presetOptions = buildPresetOptions(data);
     const preset = resolveSelectedPreset(data);
     selectedPreset = preset.key;
     presetLabel = preset.label;
@@ -801,6 +843,26 @@
     updateButton();
   }
 
+  function onButtonWheel(event) {
+    if (!event.target?.closest?.(`.${BUTTON_CLASS}`) || event.deltaY === 0) {
+      return;
+    }
+    if (
+      !frameActive ||
+      !masterEnabled ||
+      featureHidden ||
+      !featureEnabled ||
+      !(enabled && appliedVideo)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    // 설정의 시작 기본값은 유지하고 현재 클립 프레임에만 즉시 적용한다.
+    cyclePreset(event.deltaY < 0 ? -1 : 1);
+  }
+
   function revealButtonAfterTransition() {
     transitionRevealTimer = 0;
     if (!frameActive) return;
@@ -820,6 +882,17 @@
       revealButtonAfterTransition,
       TRANSITION_REVEAL_DELAY_MS,
     );
+  }
+
+  function handleTransitionGesture(event) {
+    const target = event?.target;
+    if (
+      target instanceof Element &&
+      Boolean(target.closest(`.${STACK_CLASS}`))
+    ) {
+      return;
+    }
+    hideButtonDuringTransition();
   }
 
   function startTransitionChannel() {
@@ -998,11 +1071,15 @@
   window.addEventListener("resize", scheduleSync);
   window.visualViewport?.addEventListener("resize", scheduleSync);
   window.addEventListener(TOOL_LAYOUT_EVENT, scheduleSharedToolLayout);
-  window.addEventListener("wheel", hideButtonDuringTransition, {
+  document.addEventListener("wheel", onButtonWheel, {
+    capture: true,
+    passive: false,
+  });
+  window.addEventListener("wheel", handleTransitionGesture, {
     capture: true,
     passive: true,
   });
-  window.addEventListener("touchmove", hideButtonDuringTransition, {
+  window.addEventListener("touchmove", handleTransitionGesture, {
     capture: true,
     passive: true,
   });

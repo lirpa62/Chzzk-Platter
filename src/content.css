@@ -6662,6 +6662,32 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  position: relative;
+  flex: 0 0 auto;
+  margin-right: 6px;
+  padding-right: 12px;
+  white-space: nowrap;
+}
+
+/* 치지직의 스튜디오 버튼 위치와 무관하게 바로가기와 우측 기본 액션을 구분한다. */
+#cheese-header-nav::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 1px;
+  height: 20px;
+  background: var(
+    --sem-color-border-neutral-base,
+    var(--cheese-platter-border-neutral-base, rgba(127, 127, 127, 0.32))
+  );
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+#cheese-header-nav .cheese-header-nav-responsive-hidden,
+#cheese-header-nav.cheese-header-nav-responsive-empty {
+  display: none !important;
 }
 
 #cheese-header-nav .cheese-header-nav-item {
@@ -7703,6 +7729,160 @@ html.cheese-channel-live-profile-custom
 #cheese-card-hint.is-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* 치지직 기본 카드 미리보기 음량 컨트롤. 일반 카드는 player 래퍼, 메인
+   히어로 카드는 캐러셀 교체 밖의 hero container에 두어 조작 상태를 유지한다. */
+.cheese-card-preview-volume-host {
+  position: relative;
+}
+
+.cheese-card-preview-volume-anchor {
+  -webkit-user-drag: none;
+}
+
+.cheese-card-preview-volume-control {
+  position: absolute;
+  z-index: 2147483000;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
+  cursor: default;
+  isolation: isolate;
+  pointer-events: auto !important;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.cheese-card-preview-volume-control.is-dismissed {
+  top: 5px;
+  right: 5px;
+  width: 44px;
+  min-height: 44px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cheese-card-preview-volume-control.is-dismissed button,
+.cheese-card-preview-volume-control.is-dismissed input[type="range"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.cheese-card-preview-volume-control.is-dismissed input[type="range"] {
+  height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+.cheese-card-preview-volume-control button {
+  display: inline-flex;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  pointer-events: auto !important;
+  -webkit-user-drag: none;
+}
+
+.cheese-card-preview-volume-control button:hover,
+.cheese-card-preview-volume-control button:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.cheese-card-preview-volume-control button:focus-visible,
+.cheese-card-preview-volume-control input:focus-visible {
+  outline: 2px solid #00ffa3;
+  outline-offset: -2px;
+}
+
+.cheese-card-preview-volume-control input[type="range"] {
+  width: 24px;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    to top,
+    #00ffa3 0 var(--cheese-card-preview-volume, 50%),
+    rgba(255, 255, 255, 0.38) var(--cheese-card-preview-volume, 50%) 100%
+  );
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 4px 100%;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  cursor: pointer;
+  pointer-events: auto !important;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition:
+    height 0.16s ease,
+    margin 0.16s ease,
+    opacity 0.12s ease;
+}
+
+.cheese-card-preview-volume-control:hover input[type="range"],
+.cheese-card-preview-volume-control:focus-within input[type="range"] {
+  width: 24px;
+  height: 88px;
+  margin: 10px 0;
+  opacity: 1;
+  overflow: visible;
+}
+
+.cheese-card-preview-volume-control input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #00ffa3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.cheese-card-preview-volume-control input[type="range"]::-moz-range-track {
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.cheese-card-preview-volume-control input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #00ffa3;
+}
+
+.cheese-card-preview-volume-control input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #00ffa3;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* 채팅 입력창 높이 제한 — 채팅 팝업(/live/<id>/chat) 또는 영상/채팅이 상하로
@@ -11318,6 +11498,10 @@ html.cheese-player-hide-liveRewind
    헤더가 부분 재렌더될 때 투명한 color를 상속하는 경우가 있어 아이콘 색만 명시한다. */
 .cheese-lounge-header-item {
   flex: none;
+}
+
+.cheese-lounge-header-item.cheese-header-lounge-responsive-hidden {
+  display: none !important;
 }
 
 #cheese-lounge-button {
