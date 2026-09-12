@@ -15429,6 +15429,8 @@ html.theme_dark .cheese-memo-window {
   color: #fff;
 }
 
+/* 스크롤 모양은 댓글 타임스탬프 패널(.cheese-search-comment-panel-list)과 맞춘다.
+   헤더를 이미 같은 클래스로 쓰고 있는데 스크롤바만 브라우저 기본이라 겉돌았다. */
 .cheese-peak-body {
   max-height: calc(
     var(--cheese-search-comment-panel-max-height, min(430px, 100vh - 140px)) -
@@ -15436,6 +15438,37 @@ html.theme_dark .cheese-memo-window {
   );
   overflow-y: auto;
   padding: 6px 8px 10px;
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.cheese-peak-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cheese-peak-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+
+.cheese-peak-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+
+.cheese-peak-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
 }
 .cheese-peak-section + .cheese-peak-section {
   border-top: 1px solid var(--peak-border);
