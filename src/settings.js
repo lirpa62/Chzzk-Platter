@@ -952,8 +952,36 @@
     });
     // 선택한 탭의 그룹 목차만 펼친다.
     tabOutline.sync(active);
+    // 선택한 탭을 탭 목록의 가운데쯤으로 옮긴다(위아래 끝은 자연히 덜 움직인다).
+    centerActiveTab(active);
     // 탭 전환 시 우측 패널 스크롤을 최상단으로(이전 위치 잔류 방지).
     if (panelsScroll) panelsScroll.scrollTop = 0;
+  }
+
+  // 선택한 탭 버튼이 탭 목록의 세로 가운데에 오도록 스크롤한다.
+  // ⚠ 목차가 펼쳐지며 높이가 바뀌므로 다음 프레임에 계산한다.
+  // ⚠ 좁은 화면(가로 탭 줄)에서는 세로 스크롤이 없어 아무 일도 하지 않는다.
+  //   scrollTop 을 건드려도 무해하지만 굳이 계산하지 않는다.
+  function centerActiveTab(tab) {
+    const nav = document.querySelector(".settings-tabs");
+    if (!nav) return;
+    // ⚠ rAF 한 번으로는 목차 높이가 아직 0 이다(hidden 해제 직후라 레이아웃
+    //   반영 전). 두 번 기다려 펼쳐진 높이를 읽는다 — 실측에서 한 번만 쓰면
+    //   목표가 190px 어긋났다.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const button = nav.querySelector(`[data-tab="${tab}"]`);
+      if (!button) return;
+      const room = nav.scrollHeight - nav.clientHeight;
+      if (room <= 0) return; // 스크롤이 없으면(모두 보이면) 그대로 둔다
+      // 요청대로 '선택한 탭 버튼'을 가운데에 둔다.
+      // ⚠ 버튼+목차 덩어리의 중심을 맞추는 방법도 시도했지만, 목차가 길면
+      //   버튼이 중앙에서 190px 까지 밀려 올라가 오히려 가운데로 안 보였다
+      //   (실측). 목차는 버튼 아래에 따라오면 충분하다.
+      // 범위를 벗어나면 0~room 으로 잘라, 맨 위·맨 아래 탭은 자연히 덜 움직인다.
+      const target =
+        button.offsetTop - nav.clientHeight / 2 + button.offsetHeight / 2;
+      nav.scrollTo({ top: Math.max(0, Math.min(room, target)), behavior: "smooth" });
+    }));
   }
 
   tabButtons.forEach((btn) =>

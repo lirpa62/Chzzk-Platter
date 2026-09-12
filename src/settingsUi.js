@@ -474,7 +474,13 @@
     for (const section of root.querySelectorAll(
       `section.settings-group[data-panel="${tab}"]`,
     )) {
-      if (!section.querySelector("li.settings-item")) continue;
+      // ⚠ '항목이 있는가'를 li.settings-item 으로만 보면 안 된다. 설정 이동,
+      //   실시간 따라잡기 민감도, 헤더 팔로우처럼 li 없이 버튼·슬라이더로만
+      //   이루어진 그룹이 목차에서 통째로 빠진다(제보: 일반 탭에 '설정 이동'
+      //   이 없다). 조작할 게 하나라도 있으면 그룹으로 센다.
+      if (!section.querySelector("li.settings-item, button, input, select, textarea")) {
+        continue;
+      }
       const titles = [...section.querySelectorAll(".settings-group-title")];
       if (titles.length <= 1) out.push({ title: titles[0] || null, target: section });
       else for (const title of titles) out.push({ title, target: title });
