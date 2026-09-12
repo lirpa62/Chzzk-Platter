@@ -3623,6 +3623,31 @@
   });
   loadLiveSeekBar();
 
+  // ── 라이브 멈춤 자동 복구(전역, 기본 OFF) ────────────────────────────────
+  // 다른 탭에 오래 머물다 돌아오면 영상이 로딩 상태로 굳는 증상이 있다(제보).
+  // 실측: 재생 위치가 버퍼 끝보다 앞이라 데이터가 없고 seek 이 끝나지 않는다.
+  // 원인이 우리 코드인지 치지직 플레이어인지 확정되지 않아 기본 OFF 로 둔다.
+  const LIVE_STALL_RECOVERY_KEY = "cheeseLiveStallRecovery";
+  const liveStallRecoveryInput = document.querySelector(
+    "[data-live-stall-recovery]",
+  );
+  async function loadLiveStallRecovery() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(LIVE_STALL_RECOVERY_KEY);
+      on = data?.[LIVE_STALL_RECOVERY_KEY] === true;
+    } catch {}
+    if (liveStallRecoveryInput) liveStallRecoveryInput.checked = on;
+  }
+  liveStallRecoveryInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [LIVE_STALL_RECOVERY_KEY]: liveStallRecoveryInput.checked,
+      });
+    } catch {}
+  });
+  loadLiveStallRecovery();
+
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
   // ── 클립 보관함 개수 ──────────────────────────────────────────────────────

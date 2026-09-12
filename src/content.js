@@ -606,7 +606,9 @@
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
+  const LIVE_STALL_RECOVERY_KEY = "cheeseLiveStallRecovery";
   let liveSeekBar = false; // 라이브 되감기 바 표시(전역, 기본 OFF)
+  let liveStallRecovery = false; // 라이브 멈춤 자동 복구(전역, 기본 OFF)
   // 되감기 바의 화면 아래쪽 여백(px). 기본 60 은 치지직 타임머신 재생바와 겹치지 않는
   // 위치다(실측). 값을 낮추면 겹칠 수 있어 설정 설명에 안내를 둔다.
   const LIVE_SEEK_BAR_BOTTOM_KEY = "cheeseLiveSeekBarBottom";
@@ -49887,6 +49889,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
         // 되어 방향키까지 막힌다. 반대로 바가 표시되는 동안에는 방향키가 그대로 동작한다.
         liveSeekBar: getEffectiveLiveSeekBar(),
+        liveStallRecovery, // 라이브 멈춤 자동 복구(전역)
         liveSeekBarBottom, // 되감기 바 하단 여백(px)
         volumePct, // 볼륨 조절 % 표시(전역)
         wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
@@ -49954,6 +49957,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     VIDEO_FILTER_DEFAULT_ON_KEY,
     WIDE_SCREEN_AUTO_KEY,
     LIVE_SEEK_BAR_KEY,
+    LIVE_STALL_RECOVERY_KEY,
     LIVE_SEEK_BAR_BOTTOM_KEY,
     PIP_CHAT_HEIGHT_KEY,
     PIP_LAYOUT_KEY,
@@ -50335,6 +50339,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       videoFilterDefaultOn = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
       wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
       liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] === true; // 미설정=기본 OFF
+      liveStallRecovery = data?.[LIVE_STALL_RECOVERY_KEY] === true;
       liveSeekBarBottom = normalizeLiveSeekBarBottom(
         data?.[LIVE_SEEK_BAR_BOTTOM_KEY],
       );
@@ -50814,7 +50819,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
       }
       if (changes[LIVE_SEEK_BAR_KEY]) {
-        liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
+        liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue === true;
+      }
+      if (changes[LIVE_STALL_RECOVERY_KEY]) {
+        liveStallRecovery = changes[LIVE_STALL_RECOVERY_KEY].newValue === true;
       }
       if (changes[PIP_CHAT_HEIGHT_KEY]) {
         pipChatHeight = normalizePipChatHeight(
@@ -51507,6 +51515,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[VIDEO_FILTER_DEFAULT_ON_KEY] ||
         changes[WIDE_SCREEN_AUTO_KEY] ||
         changes[LIVE_SEEK_BAR_KEY] ||
+        changes[LIVE_STALL_RECOVERY_KEY] ||
         changes[VOLUME_PCT_KEY] ||
         changes[WHEEL_VOLUME_KEY] ||
         changes[WHEEL_VOLUME_RIGHTCLICK_KEY] ||
