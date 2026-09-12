@@ -213,6 +213,21 @@ html.settings-tab-view .settings-resizer {
   color: var(--popup-brand-strong);
 }
 
+/* '바로 실행' 항목(채팅 리캡·통나무파워 내역). 그룹 이동이 아니라 별도 화면을
+   여는 것이라, 선 위쪽에 따로 두고 화살표로 구분한다. */
+.settings-tab-outline-item.is-action {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--popup-border);
+  border-radius: 0 0 6px 6px;
+  color: var(--popup-brand-strong);
+}
+
+.settings-tab-outline-item.is-action::after {
+  content: " ↗";
+  opacity: 0.7;
+}
+
 /* 목차로 이동한 그룹을 잠깐 강조해, 어디로 왔는지 눈으로 잡히게 한다.
    제목에 직접 붙는 경우(한 섹션에 제목이 여럿인 탭)와 섹션에 붙는 경우 모두 처리. */
 .settings-group-title.is-group-flash,
@@ -737,6 +752,21 @@ html.settings-tab-view .settings-group-title {
 
 html.settings-tab-view .settings-item {
   padding: 14px 16px;
+}
+
+/* ⚠ 위의 padding 단축 지정이 자식 행의 padding-left(들여쓰기)를 16px 로
+   되돌린다. 그래서 새 탭으로 열면 하위 옵션이 왼쪽 선에 붙어 보였다(제보).
+   탭 모드에서도 깊이만큼 들여쓴다(팝업의 34/52/70 + 좌우 여백 차이 16-8). */
+html.settings-tab-view .settings-item-child {
+  padding-left: 42px;
+}
+
+html.settings-tab-view .settings-item-child[data-settings-depth="2"] {
+  padding-left: 60px;
+}
+
+html.settings-tab-view .settings-item-child[data-settings-depth="3"] {
+  padding-left: 78px;
 }
 
 html.settings-tab-view .settings-item-desc {
@@ -1343,7 +1373,6 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-integrated-search-clips-weights-reset]),
 .settings-item[data-chat-time-color-item],
 .settings-item:has([data-update-notice-duration]),
-.settings-item:has([data-category-video-candidate-picker]),
 .settings-item:has([data-fp-color-reset]),
 .settings-item:has([data-live-seek-bar-bottom]),
 .settings-item:has([data-chat-word-filter]),
@@ -1394,6 +1423,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has(#followPreviewBadgePos),
 .settings-item:has(#rootToFollowingLogoMode),
 .settings-item:has(#chatRecapClickAction),
+.settings-item:has(#settingsTabOrderList),
 .settings-item:has([data-update-notice-mode]) {
   flex-direction: column;
 }
@@ -1413,9 +1443,38 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-segmented[data-live-viewer-count-position],
+.settings-segmented[data-mixer-gain-min],
+.settings-segmented[data-mixer-gain-max],
+.settings-segmented[data-video-filter-global-default-mode],
+.settings-segmented#autoReliveMaxHours,
+.settings-segmented#commentTsClickAction,
+.settings-segmented#chatRecapClickAction,
+.settings-segmented#searchLiveRerankDefaultSort,
+.settings-segmented#integratedSearchClipMatchMode,
+.settings-segmented#integratedSearchClipSourcePreset,
+.settings-segmented#integratedSearchClipDateFilter,
+.settings-segmented#integratedSearchClipDefaultSort,
+.settings-segmented#loungeRefresh,
+.settings-segmented#inboxCommunityRefresh,
+.settings-segmented#followPreviewBadgePos,
+.settings-segmented#cardLivePreviewPosition,
+.settings-segmented#rootToFollowingLogoMode,
+.settings-segmented[data-popup-player-audio],
+.settings-segmented[data-popup-player-size],
+.settings-segmented[data-chat-recap-retention],
+.settings-segmented[data-logpower-progress-mode],
+.settings-segmented[data-logpower-timer-mode],
+.settings-segmented[data-embed-clip-gain-min],
+.settings-segmented[data-embed-clip-gain-max],
+.settings-segmented[data-cf-fav-sort],
+.settings-segmented[data-cf-sort],
+.settings-segmented[data-cf-star-favorites],
+.settings-segmented[data-cf-star-groups],
+.settings-segmented[data-cf-star-following],
 .settings-item [data-update-notice-mode],
 .settings-item [data-affinity-order],
 .settings-item [data-cf-section-order],
+.settings-item [data-settings-tab-order],
 .settings-item [data-update-notice-duration] {
   width: 100%;
 }
@@ -1983,7 +2042,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-channel-profile-range-control .settings-custom-input {
   box-sizing: border-box;
-  width: 72px;
+  width: 80px;
   min-width: 72px;
   padding: 6px 8px;
 }

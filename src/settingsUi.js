@@ -466,6 +466,13 @@
   //   목차가 자동으로 따라오고, 마크업이 두 곳으로 갈라지지 않는다.
   const GROUP_FLASH_MS = 1200;
 
+  // 목차 맨 아래에 두는 '바로 실행' 항목. 그룹으로 이동하는 게 아니라 버튼을
+  // 대신 눌러 준다(채팅 리캡·통나무파워 내역처럼 별도 화면을 여는 것).
+  const TAB_ACTIONS = [
+    ["chat", "#openChatRecap"],
+    ["logpower", "#openLogStats"],
+  ];
+
   // ⚠ 그룹 제목이 '섹션마다 하나'인 탭과 '한 섹션 안에 여러 개'인 탭이 섞여 있다
   //   (예: 플레이어는 섹션 분리, 전용 팔로잉·검색은 한 섹션에 제목 5개).
   //   그래서 섹션이 아니라 '제목'을 기준으로 모은다 — 두 형태를 모두 잡는다.
@@ -512,6 +519,17 @@
         link.textContent = plainName(title);
         list.append(link);
       });
+      for (const [actionTab, selector] of TAB_ACTIONS) {
+        if (actionTab !== tab) continue;
+        const source = root.querySelector(selector);
+        if (!source) continue;
+        const link = root.createElement("button");
+        link.type = "button";
+        link.className = "settings-tab-outline-item is-action";
+        link.dataset.settingsActionLink = selector;
+        link.textContent = plainName(source);
+        list.append(link);
+      }
       if (!list.children.length) continue;
       button.after(list);
       button.setAttribute("aria-expanded", "false");
@@ -519,6 +537,12 @@
     }
 
     tabsNav.addEventListener("click", (event) => {
+      // '바로 실행' 항목은 원래 버튼을 대신 누른다(스크롤하지 않는다).
+      const action = event.target.closest?.("[data-settings-action-link]");
+      if (action) {
+        root.querySelector(action.dataset.settingsActionLink)?.click();
+        return;
+      }
       const link = event.target.closest?.("[data-settings-group-link]");
       if (!link) return;
       const section = root.getElementById(link.dataset.settingsGroupLink);

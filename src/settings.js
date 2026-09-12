@@ -222,6 +222,7 @@
     "cheeseLiveStallRecovery",
     "cheeseSettingsRememberTab",
     "cheeseSettingsRememberExpanded",
+    "cheeseSettingsTabOrder",
     "cheeseLiveSeekBarBottom",
     "cheeseLiveViewerCountPosition",
     "cheeseLiveViewerCountInline",
@@ -3662,6 +3663,156 @@
     } catch {}
   });
   loadLiveStallRecovery();
+  // ── 왼쪽 탭 순서 편집('목록 배치 순서'와 같은 UI) ───────────────────────
+  // ⚠ '전체'는 순서에서 빼고 항상 맨 위에 둔다. 모든 설정을 한 번에 보는
+  //   기본 화면이라 자리를 옮길 이유가 없다.
+  const TAB_ORDER_KEY = "cheeseSettingsTabOrder";
+  const tabOrderList = document.getElementById("settingsTabOrderList");
+  const orderableTabs = () =>
+    tabButtons.map((b) => b.dataset.tab).filter((t) => t && t !== "all");
+  const tabLabel = (tab) => {
+    const b = tabButtons.find((x) => x.dataset.tab === tab);
+    if (!b) return tab;
+    const copy = b.cloneNode(true);
+    copy.querySelectorAll("button, .settings-tab-outline, .settings-tab-new-badge")
+      .forEach((el) => el.remove());
+    return (copy.textContent || tab).replace(/\s+/g, " ").trim();
+  };
+  let settingsTabOrder = orderableTabs();
+
+  // 저장값 + 현재 탭 목록을 합친다(없어진 탭은 빼고, 새 탭은 뒤에 붙인다).
+  function normalizeTabOrder(saved) {
+    const valid = orderableTabs();
+    const seen = new Set();
+    const out = [];
+    for (const tab of Array.isArray(saved) ? saved : []) {
+      if (valid.includes(tab) && !seen.has(tab)) {
+        out.push(tab);
+        seen.add(tab);
+      }
+    }
+    for (const tab of valid) if (!seen.has(tab)) out.push(tab);
+    return out;
+  }
+
+  function applyTabOrder() {
+    const nav = document.querySelector(".settings-tabs");
+    if (!nav) return;
+    for (const tab of settingsTabOrder) {
+      const button = tabButtons.find((b) => b.dataset.tab === tab);
+      if (!button) continue;
+      // 목차(아코디언)는 버튼 바로 뒤에 붙어 있으므로 함께 옮긴다.
+      const outline = button.nextElementSibling?.classList.contains(
+        "settings-tab-outline",
+      )
+        ? button.nextElementSibling
+        : null;
+      nav.append(button);
+      if (outline) nav.append(outline);
+    }
+  }
+
+  function renderTabOrder() {
+    if (!tabOrderList) return;
+    tabOrderList.innerHTML = settingsTabOrder
+      .map((tab, i) => {
+        const last = i === settingsTabOrder.length - 1;
+        return (
+          `<li class="cf-fav-order-item" draggable="true" data-id="${escapeHtml(tab)}">` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-name">${escapeHtml(tabLabel(tab))}</span>` +
+          `<span class="cf-fav-order-btns">` +
+          `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" class="cf-fav-order-down" data-dir="down" aria-label="아래로" title="아래로"${last ? " disabled" : ""}>↓</button>` +
+          `</span></li>`
+        );
+      })
+      .join("");
+  }
+
+  function saveTabOrder() {
+    try {
+      cachedStorageSet({ [TAB_ORDER_KEY]: settingsTabOrder });
+    } catch {}
+  }
+
+  function commitTabOrder(next) {
+    settingsTabOrder = normalizeTabOrder(next);
+    applyTabOrder();
+    renderTabOrder();
+    saveTabOrder();
+  }
+
+  function moveTab(tab, dir) {
+    const i = settingsTabOrder.indexOf(tab);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= settingsTabOrder.length) return;
+    const next = [...settingsTabOrder];
+    [next[i], next[j]] = [next[j], next[i]];
+    commitTabOrder(next);
+  }
+
+  if (tabOrderList) {
+    tabOrderList.addEventListener("click", (e) => {
+      const btn = e.target.closest?.("button[data-dir]");
+      const li = btn?.closest(".cf-fav-order-item");
+      if (li) moveTab(li.dataset.id, btn.dataset.dir);
+    });
+    // 드래그 정렬 — 목록 배치 순서와 같은 방식(실시간 insertBefore + dragend 저장).
+    let dragEl = null;
+    const dragAfter = (y) => {
+      const items = [
+        ...tabOrderList.querySelectorAll(
+          ".cf-fav-order-item:not(.cf-fav-order-dragging)",
+        ),
+      ];
+      let closest = { offset: -Infinity, el: null };
+      for (const child of items) {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) closest = { offset, el: child };
+      }
+      return closest.el;
+    };
+    tabOrderList.addEventListener("dragstart", (e) => {
+      const li = e.target.closest?.(".cf-fav-order-item");
+      if (!li) return;
+      dragEl = li;
+      e.dataTransfer.effectAllowed = "move";
+      requestAnimationFrame(() => li.classList.add("cf-fav-order-dragging"));
+    });
+    tabOrderList.addEventListener("dragover", (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const after = dragAfter(e.clientY);
+      if (after == null) tabOrderList.appendChild(dragEl);
+      else if (after !== dragEl) tabOrderList.insertBefore(dragEl, after);
+    });
+    // ⚠ 저장은 dragend 에서 한다(목록 배치 순서와 같은 이유 — drop 은 여백에
+    //   놓으면 발생하지 않아 화면과 저장값이 어긋난다).
+    tabOrderList.addEventListener("dragend", () => {
+      if (!dragEl) return;
+      dragEl.classList.remove("cf-fav-order-dragging");
+      dragEl = null;
+      commitTabOrder(
+        [...tabOrderList.querySelectorAll(".cf-fav-order-item")].map(
+          (li) => li.dataset.id,
+        ),
+      );
+    });
+  }
+
+  (async () => {
+    let saved = null;
+    try {
+      saved = (await cachedStorageGet(TAB_ORDER_KEY))?.[TAB_ORDER_KEY];
+    } catch {}
+    settingsTabOrder = normalizeTabOrder(saved);
+    applyTabOrder();
+    renderTabOrder();
+  })();
+
 
   // ── 설정 화면: 마지막 탭 / 펼친 세부 설정 기억(둘 다 기본 꺼짐) ──────────
   // ⚠ 복원은 첫 페인트 전에 일어나야 해서 settingsUi.js 가 localStorage 사본을
