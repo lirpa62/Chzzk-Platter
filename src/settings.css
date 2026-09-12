@@ -162,6 +162,68 @@ html.settings-tab-view .settings-resizer {
     color 0.12s ease;
 }
 
+/* ── 탭 아래 그룹 목차(아코디언) ─────────────────────────────────────────
+   탭을 누르면 그 아래로 하위 그룹이 펼쳐진다. 오른쪽 목록은 그대로 두고,
+   누르면 해당 그룹 위치로 스크롤한다(목차 역할). */
+/* ⚠ display 를 주면 hidden 속성(UA 의 display:none)을 이겨서 항상 보인다.
+   [hidden] 일 때는 확실히 숨긴다 — 실측에서 접힌 탭 목차가 그대로 렌더됐다. */
+.settings-tab-outline[hidden] {
+  display: none !important;
+}
+
+.settings-tab-outline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--popup-border);
+  margin-left: 11px;
+}
+
+.settings-tab-outline-item {
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--popup-dim-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  text-align: left;
+  word-break: keep-all;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.settings-tab-outline-item:hover {
+  background: var(--popup-soft-bg);
+  color: var(--popup-text);
+}
+
+.settings-tab-outline-item.is-active {
+  color: var(--popup-brand-strong);
+}
+
+/* 목차로 이동한 그룹을 잠깐 강조해, 어디로 왔는지 눈으로 잡히게 한다.
+   제목에 직접 붙는 경우(한 섹션에 제목이 여럿인 탭)와 섹션에 붙는 경우 모두 처리. */
+.settings-group-title.is-group-flash,
+.settings-group.is-group-flash > .settings-group-title {
+  animation: cheese-group-flash 1.2s ease;
+}
+
+@keyframes cheese-group-flash {
+  0%,
+  40% {
+    color: var(--popup-brand-strong);
+  }
+  100% {
+    color: inherit;
+  }
+}
+
 .settings-tab:hover {
   background: var(--popup-soft-bg);
 }
@@ -515,6 +577,13 @@ html.settings-tab-view .settings-layout {
   html.settings-tab-view .settings-tab {
     flex: 0 0 auto;
     white-space: nowrap;
+  }
+  /* ⚠ 좁은 화면에서는 탭이 '가로 스크롤 줄'이 된다. 세로로 쌓이는 그룹 목차를
+     여기에 두면 탭 줄이 높아져 오른쪽 패널 높이를 잡아먹는다(기존 테스트가
+     tabs.height<70 으로 지킨다). 이 모드에서는 목차를 숨긴다 — 탭을 누르면
+     예전처럼 바로 내용이 보이므로 기능 손실은 없다. */
+  html.settings-tab-view .settings-tab-outline {
+    display: none !important;
   }
 }
 

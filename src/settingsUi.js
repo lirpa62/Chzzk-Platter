@@ -330,8 +330,102 @@
     });
   }
 
+  // ── 왼쪽 탭 아래 그룹 목차(아코디언) ──────────────────────────────────────
+  // 탭을 폴더처럼 쓰되 '한 단계 더 클릭'을 강요하지 않는다. 탭을 누르면 예전처럼
+  // 오른쪽에 탭 전체가 뜨고, 그 아래 하위 그룹이 펼쳐진다. 그룹을 누르면 해당
+  // 위치로 스크롤 + 잠깐 강조한다 — 긴 탭에서 빠르게 점프하는 목차 역할이다.
+  //
+  // ⚠ 그룹이 하나뿐인 탭에는 목차를 만들지 않는다. 항목이 곧 그룹이라 클릭만
+  //   늘고 얻는 게 없다(측정: 19개 탭 중 6개가 그룹 1개).
+  // ⚠ 그룹 링크는 HTML 에 적지 않고 DOM 에서 만든다. 그래야 그룹을 추가·분할해도
+  //   목차가 자동으로 따라오고, 마크업이 두 곳으로 갈라지지 않는다.
+  const GROUP_FLASH_MS = 1200;
+
+  // ⚠ 그룹 제목이 '섹션마다 하나'인 탭과 '한 섹션 안에 여러 개'인 탭이 섞여 있다
+  //   (예: 플레이어는 섹션 분리, 전용 팔로잉·검색은 한 섹션에 제목 5개).
+  //   그래서 섹션이 아니라 '제목'을 기준으로 모은다 — 두 형태를 모두 잡는다.
+  function tabGroups(root, tab) {
+    const out = [];
+    for (const section of root.querySelectorAll(
+      `section.settings-group[data-panel="${tab}"]`,
+    )) {
+      if (!section.querySelector("li.settings-item")) continue;
+      const titles = [...section.querySelectorAll(".settings-group-title")];
+      if (titles.length <= 1) out.push({ title: titles[0] || null, target: section });
+      else for (const title of titles) out.push({ title, target: title });
+    }
+    return out.filter((entry) => entry.title);
+  }
+
+  function createTabOutline(root, tabsNav, onJump) {
+    if (!tabsNav) return { sync() {} };
+    // ⚠ 멱등. 두 번 불려도 목차가 겹쳐 생기지 않게 이전 것을 먼저 지운다.
+    tabsNav.querySelectorAll(".settings-tab-outline").forEach((el) => el.remove());
+    const listByTab = new Map();
+
+    for (const button of [...tabsNav.querySelectorAll("[data-tab]")]) {
+      const tab = button.dataset.tab;
+      if (!tab || tab === "all") continue;
+      const groups = tabGroups(root, tab);
+      if (groups.length < 2) continue; // 그룹 1개 = 목차가 의미 없다
+
+      const list = root.createElement("div");
+      list.className = "settings-tab-outline";
+      list.hidden = true;
+      groups.forEach(({ title, target }, index) => {
+        if (!target.id) target.id = `settings-group-${tab}-${index}`;
+        const link = root.createElement("button");
+        link.type = "button";
+        link.className = "settings-tab-outline-item";
+        link.dataset.settingsGroupLink = target.id;
+        link.textContent = plainName(title);
+        list.append(link);
+      });
+      if (!list.children.length) continue;
+      button.after(list);
+      button.setAttribute("aria-expanded", "false");
+      listByTab.set(tab, list);
+    }
+
+    tabsNav.addEventListener("click", (event) => {
+      const link = event.target.closest?.("[data-settings-group-link]");
+      if (!link) return;
+      const section = root.getElementById(link.dataset.settingsGroupLink);
+      if (!section) return;
+      // 오른쪽 목록을 바꾸지 않는다. 해당 그룹으로 이동만 한다.
+      section.scrollIntoView({ block: "start", behavior: "smooth" });
+      const flash = section.classList.contains("settings-group-title")
+        ? section
+        : section.querySelector(".settings-group-title") || section;
+      flash.classList.add("is-group-flash");
+      root.defaultView?.setTimeout(
+        () => flash.classList.remove("is-group-flash"),
+        GROUP_FLASH_MS,
+      );
+      for (const other of tabsNav.querySelectorAll(".settings-tab-outline-item")) {
+        other.classList.toggle("is-active", other === link);
+      }
+      onJump?.(section);
+    });
+
+    return {
+      sync(activeTab) {
+        for (const [tab, list] of listByTab) {
+          const open = tab === activeTab;
+          list.hidden = !open;
+          const button = tabsNav.querySelector(`[data-tab="${tab}"]`);
+          button?.setAttribute("aria-expanded", String(open));
+          if (!open) {
+            list.querySelectorAll(".is-active").forEach((el) => el.classList.remove("is-active"));
+          }
+        }
+      },
+    };
+  }
+
   globalThis.CheeseSettingsUi = {
     readLastTab, rememberTab, createSearch, prepareHelp, createDisclosures,
+    createTabOutline,
     checkedFromStored, storedFromChecked,
   };
 })();

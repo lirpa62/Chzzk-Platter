@@ -930,6 +930,11 @@
   }
 
   let activeTab = "all"; // 검색 종료 시 복귀할 현재 탭
+  // 왼쪽 탭 아래 그룹 목차(아코디언). 그룹이 2개 이상인 탭에만 생긴다.
+  const tabOutline = CheeseSettingsUi.createTabOutline(
+    document,
+    document.querySelector(".settings-tabs"),
+  );
   function selectTab(tab) {
     const valid = tabButtons.some((b) => b.dataset.tab === tab);
     const active = valid ? tab : "all";
@@ -943,12 +948,16 @@
       // '전체'는 모든 패널 표시. 그 외엔 일치하는 패널만.
       panel.hidden = active !== "all" && panel.dataset.panel !== active;
     });
+    // 선택한 탭의 그룹 목차만 펼친다.
+    tabOutline.sync(active);
     // 탭 전환 시 우측 패널 스크롤을 최상단으로(이전 위치 잔류 방지).
     if (panelsScroll) panelsScroll.scrollTop = 0;
   }
 
   tabButtons.forEach((btn) =>
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (event) => {
+      // 그룹 목차 클릭은 아래 nav 위임에서 처리한다(탭 전환/검색 종료 없음).
+      if (event.target.closest?.("[data-settings-group-link]")) return;
       // 새 탭의 항목 옆 NEW를 실제로 볼 수 있도록, 진입 순간이 아니라 이전 탭을
       // 떠날 때 확인 처리한다. 같은 탭을 다시 누르는 것도 확인 동작으로 본다.
       const previousTab = activeTab;
