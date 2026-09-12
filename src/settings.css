@@ -516,9 +516,38 @@ html.settings-tab-view .settings-resizer {
   top: 0;
   right: 0;
   bottom: 0;
-  border-left: 2px solid var(--popup-accent, #03c75a);
+  border-left: 4px solid var(--popup-accent, #03c75a);
   background: color-mix(in srgb, var(--popup-soft-bg) 60%, transparent);
   pointer-events: none;
+}
+
+/* 형제 자식 사이 구분선. 자식이 여럿일 때 어디서 한 항목이 끝나는지 보여 준다.
+   ⚠ 배경을 번갈아 칠하는(줄무늬) 방법도 검토했지만 효과가 없었다. --popup-soft-bg
+     가 라이트 테마에서 rgba(0,0,0,0.06) 이라 두 단계로 나눠도 알파 차이가 4%
+     수준이라 눈에 안 띄고(실측), 진하게 하면 높이가 74~309px 로 제각각인 행들이
+     얼룩덜룩해진다. 구분선은 행 높이와 무관하게 똑같이 작동한다.
+   ⚠ 첫 자식 위에는 긋지 않는다(부모와 맞닿는 경계는 이미 배경이 구분한다).
+     인접 선택자로 '앞에 자식이 있을 때'만 그린다. */
+.settings-item-child + .settings-item-child::after {
+  content: "";
+  position: absolute;
+  left: 18px; /* 왼쪽 세로선(14px + 4px) 바로 옆부터 */
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--popup-border);
+  pointer-events: none;
+}
+
+/* ⚠ 깊은 자식은 세로선도 안쪽으로 들어간다(14 → 32 → 50px). 구분선을 18px 에
+   고정하면 자기 묶음보다 왼쪽으로 삐져나온다(실측: d2 에서 세로선 32px,
+   구분선 18px). 깊이에 맞춰 같이 들어간다. */
+.settings-item-child + .settings-item-child[data-settings-depth="2"]::after {
+  left: 36px;
+}
+
+.settings-item-child + .settings-item-child[data-settings-depth="3"]::after {
+  left: 54px;
 }
 
 /* 깊이가 늘면 선과 배경이 함께 안쪽으로 들어간다. */
@@ -559,13 +588,17 @@ html.settings-tab-view .settings-resizer {
 
 /* 마지막 자식의 아래 모서리를 둥글려 '묶음이 여기서 끝난다'를 보여 준다.
    배경을 ::before 가 그리므로 모서리도 거기에 준다. */
-.settings-item-child.is-last-child::before {
+/* .settings-item-child.is-last-child::before {
   border-bottom-left-radius: 8px;
-}
+} */
 
 /* 펼친 부모는 '열린 폴더'처럼 — 아래 자식 묶음과 이어진다. */
-.settings-item-parent:has(> label > .settings-item-name > [aria-expanded="true"]),
-.settings-item-parent:has(> div > .settings-item-name > [aria-expanded="true"]) {
+.settings-item-parent:has(
+  > label > .settings-item-name > [aria-expanded="true"]
+),
+.settings-item-parent:has(
+  > div > .settings-item-name > [aria-expanded="true"]
+) {
   background: color-mix(in srgb, var(--popup-soft-bg) 70%, transparent);
 }
 
