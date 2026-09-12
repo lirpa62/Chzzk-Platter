@@ -33925,6 +33925,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 전용 팔로잉 목록 아이템 HTML — 네이티브 li 구조를 그대로 모방하고 harvest 한 네이티브
   // 클래스를 얹어 네이티브 CSS 가 적용되게 한다. 별표만 우리 요소로 링크(_item_link_) 위에 얹음.
+  // 프로필 이미지 URL → 치지직 리사이즈 썸네일.
+  // ⚠ 원본을 그대로 쓰면 안 된다. 채널 프로필 원본은 수백 KB 라, 모달에서 팔로잉
+  //   수십~수백 개를 한꺼번에 그리면 28px 자리에 원본이 줄줄이 내려오며 눈에 보이게
+  //   늦다(제보: 캐릭터 선택창·그룹 추가창 프로필이 느리게 뜬다). 사이드바 목록은
+  //   처음부터 type=f120_120_na 로 요청해서 빠른데, 모달만 빠져 있었다.
+  //   같은 URL 을 쓰면 사이드바가 이미 받아 둔 것을 브라우저 캐시에서 재사용한다.
+  function customFollowProfileThumb(imageUrl) {
+    if (!imageUrl) return "";
+    return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`;
+  }
+
   function createCustomFollowItemHtml(
     item,
     h,
@@ -33935,9 +33946,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const href = live
       ? `/live/${encodeURIComponent(item.channelId)}`
       : `/${encodeURIComponent(item.channelId)}`;
-    const imageUrl = item.imageUrl
-      ? `${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
-      : "";
+    const imageUrl = customFollowProfileThumb(item.imageUrl);
     const fav =
       featureFlags.sbFollowFavEnabled &&
       customFollowFavorites.has(item.channelId);
@@ -34670,7 +34679,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .map((channel) => {
         const selected = state.selected.has(channel.channelId);
         const image = channel.imageUrl
-          ? `<img src="${escapeAttribute(channel.imageUrl)}" alt="" width="28" height="28" draggable="false">`
+          ? `<img src="${escapeAttribute(customFollowProfileThumb(channel.imageUrl))}" alt="" width="28" height="28" draggable="false" loading="lazy" decoding="async">`
           : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
         const tags = normalizeCustomFollowTags(channel.tags);
         return (
@@ -35243,7 +35252,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const scopes = customFollowSquares.get(channel.channelId);
         const on = Boolean(scopes?.size);
         const image = channel.imageUrl
-          ? `<img src="${escapeAttribute(channel.imageUrl)}" alt="" width="28" height="28" draggable="false">`
+          ? `<img src="${escapeAttribute(customFollowProfileThumb(channel.imageUrl))}" alt="" width="28" height="28" draggable="false" loading="lazy" decoding="async">`
           : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
         // 채널마다 적용할 영역을 따로 고른다(중복 가능).
         const chips = CUSTOM_FOLLOW_SQUARE_SCOPES.map(([key, label]) => {
@@ -35422,22 +35431,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       } else if (button.matches("[data-cf-modal-placement-move]")) {
         const dir = button.dataset.cfModalPlacementMove;
         const key = button.dataset.cfSection;
-        const current = [
-          ...(CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
-            CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"]),
-        ];
+        const current = customFollowDisplayOrder();
         const i = current.indexOf(key);
         const j = dir === "up" ? i - 1 : i + 1;
         if (i < 0 || j < 0 || j >= current.length) return;
         [current[i], current[j]] = [current[j], current[i]];
-        const placement = customFollowOrderToPlacement(current);
-        customFollowGroupPlacement = placement;
-        customFollowVersion += 1;
-        try {
-          chrome.storage?.local?.set({
-            [CUSTOM_FOLLOW_GROUP_PLACEMENT_KEY]: placement,
-          });
-        } catch {}
+        saveCustomFollowDisplayOrder(current);
         ensureCustomFollowList();
         renderCustomFollowGroupModal();
       } else if (button.matches("[data-cf-modal-tag-exclusion]")) {
@@ -36255,14 +36254,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     groups: "그룹",
     favorites: "즐겨찾기",
     following: "팔로잉",
+    affinity: AFFINITY_LABEL,
   };
+
+  // 모달·사이드바가 함께 쓰는 '보이는 순서'. 세 섹션은 조합 키로, 친밀도는 끼울
+  //   자리(affinityIndex)로 저장된다 — 설정 화면의 cfDisplayOrder 와 같은 방식이다.
+  // ⚠ 친밀도를 세 섹션의 조합 키에 넣으면 6가지가 24가지로 불어난다. 그래서
+  //   위치만 따로 들고, 보여 줄 때만 합친다.
+  function customFollowDisplayOrder() {
+    const base = [
+      ...(CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
+        CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"]),
+    ];
+    if (!affinityOn) return base;
+    base.splice(Math.min(affinityIndex, base.length), 0, "affinity");
+    return base;
+  }
+
+  // 합친 순서 → 저장. 친밀도는 자리만, 나머지는 기존 조합 키 그대로.
+  function saveCustomFollowDisplayOrder(display) {
+    const base = display.filter((k) => k !== "affinity");
+    const index = display.indexOf("affinity");
+    const placement = customFollowOrderToPlacement(base);
+    customFollowGroupPlacement = placement;
+    const payload = { [CUSTOM_FOLLOW_GROUP_PLACEMENT_KEY]: placement };
+    if (index >= 0) {
+      affinityIndex = index;
+      payload[AFFINITY_INDEX_KEY] = index;
+    }
+    customFollowVersion += 1;
+    try {
+      chrome.storage?.local?.set(payload);
+    } catch {}
+  }
 
   // 모달에서는 위/아래 버튼으로 순서를 바꾼다(설정 화면의 순서 편집기와 같은 개념).
   // 조합 6개를 나열하는 것보다 '지금 순서'가 그대로 보여 이해하기 쉽다.
   function customFollowPlacementOptionsHtml() {
-    const order =
-      CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
-      CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"];
+    const order = customFollowDisplayOrder();
     return order
       .map((key, i) => {
         const last = i === order.length - 1;
