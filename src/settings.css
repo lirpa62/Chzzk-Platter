@@ -493,56 +493,50 @@ html.settings-tab-view .settings-resizer {
   display: none !important;
 }
 
-/* ── 세부 설정을 '하위 폴더가 열린' 모양으로 ─────────────────────────────
-   예전에는 이름 앞의 '└' 문자만으로 계층을 나타내 자식 행이 부모와 같은 높이에
-   평평하게 놓였다. 들여쓰기 + 세로 연결선으로 소속을 눈에 보이게 한다.
+/* ── 세부 설정을 '하위 폴더' 모양으로 ────────────────────────────────────
+   전용 팔로잉 목록의 그룹과 같은 인상: 브랜드색 왼쪽 띠로 묶음을 표시하고,
+   그 안에 자식이 들여쓰기돼 들어간다.
    ⚠ 마크업은 그대로다. settingsUi.js 가 클래스만 얹는다. */
 .settings-item-child {
   position: relative;
-  padding-left: 26px;
+  padding-left: 22px;
   background: color-mix(in srgb, var(--popup-soft-bg) 45%, transparent);
+  /* 그룹의 왼쪽 띠(.cheese-cf-group 의 border-left 와 같은 역할). */
+  box-shadow: inset 2px 0 0 var(--popup-accent, #03c75a);
 }
 
+/* 2단계부터는 띠를 하나 더 둔다 — 들여쓰기만으로는 토글 열에 묻혀 깊이가
+   눈에 안 들어온다(실측 스크린샷). 바깥 띠는 옅게 둬 소속을 보여 준다. */
 .settings-item-child[data-settings-depth="2"] {
-  padding-left: 44px;
+  padding-left: 40px;
+  box-shadow:
+    inset 2px 0 0 color-mix(in srgb, var(--popup-accent, #03c75a) 40%, transparent),
+    inset 20px 0 0 -18px var(--popup-accent, #03c75a);
 }
 
 .settings-item-child[data-settings-depth="3"] {
-  padding-left: 62px;
+  padding-left: 58px;
+  box-shadow:
+    inset 2px 0 0 color-mix(in srgb, var(--popup-accent, #03c75a) 25%, transparent),
+    inset 20px 0 0 -18px color-mix(in srgb, var(--popup-accent, #03c75a) 40%, transparent),
+    inset 38px 0 0 -36px var(--popup-accent, #03c75a);
 }
 
-/* ⚠ 연결선은 이름 앞의 '└' 문자와 겹쳐 보인다(실측 스크린샷). 그 문자는 검색이
-   '자식에는 부모 경로가 있다'를 검증하는 데 쓰여 지울 수 없으므로, 겹치는 쪽인
-   갈래선을 지우고 들여쓰기 + 세로선만 남긴다. */
-.settings-item-child::after {
-  content: none;
+/* ⚠ 이름 앞의 '└' 는 지우지 않는다 — 검색이 '자식에는 부모 경로가 있다'를
+   이 문자로 검증한다(scripts/test-settings-ui.cjs). settingsUi.js 가 그 글자만
+   <span> 으로 감싸고, 여기서 투명하게 만들어 눈에만 안 보이게 한다.
+   ⚠ 이름 전체에 color:transparent 를 주면 안 된다 — 이름이 텍스트 노드 하나라
+     제목까지 통째로 사라진다(실측 확인). */
+.settings-branch-mark {
+  color: transparent;
 }
 
-/* 세로 연결선 — 부모에서 내려와 마지막 자식에서 끊긴다. */
-.settings-item-child::before {
-  content: "";
-  position: absolute;
-  left: 13px;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--popup-border);
+/* 마지막 자식의 아래 모서리를 둥글려 '묶음이 여기서 끝난다'를 보여 준다. */
+.settings-item-child.is-last-child {
+  border-bottom-left-radius: 8px;
 }
 
-.settings-item-child[data-settings-depth="2"]::before {
-  left: 31px;
-}
-
-.settings-item-child[data-settings-depth="3"]::before {
-  left: 49px;
-}
-
-.settings-item-child.is-last-child::before {
-  bottom: auto;
-  height: 18px;
-}
-
-/* 펼친 부모는 '열린 폴더'처럼 보이게 — 아래 자식과 이어진 느낌을 준다. */
+/* 펼친 부모는 '열린 폴더'처럼 — 아래 자식 묶음과 이어진다. */
 .settings-item-parent:has(> label > .settings-item-name > [aria-expanded="true"]),
 .settings-item-parent:has(> div > .settings-item-name > [aria-expanded="true"]) {
   background: color-mix(in srgb, var(--popup-soft-bg) 70%, transparent);

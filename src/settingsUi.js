@@ -128,11 +128,31 @@
   // 표현해 CSS 가 자식을 구분할 수 없었다(들여쓰기·연결선을 줄 수 없었다).
   // ⚠ 마크업은 그대로 두고 클래스만 얹는다 — 검색·접기 로직이 .settings-item 을
   //   평평한 목록으로 보는 전제를 깨지 않는다.
+  // 이름 맨 앞의 '└'(및 뒤따르는 공백)만 <span> 으로 감싼다. 그 글자는 검색이
+  // 계층을 검증하는 데 쓰여 지울 수 없어, 감싼 뒤 CSS 로 투명하게 만든다.
+  // ⚠ 이름은 대개 텍스트 노드 하나라 이름 전체를 투명하게 하면 제목까지 사라진다.
+  function wrapBranchMark(row) {
+    const name = row.querySelector(".settings-item-name");
+    if (!name || name.querySelector(".settings-branch-mark")) return;
+    for (const node of [...name.childNodes]) {
+      if (node.nodeType !== 3) continue;
+      const m = node.textContent.match(/^(\s*(?:&nbsp;|\u00a0|\s)*└\s?)/);
+      if (!m) continue;
+      const mark = name.ownerDocument.createElement("span");
+      mark.className = "settings-branch-mark";
+      mark.textContent = m[1];
+      node.textContent = node.textContent.slice(m[1].length);
+      node.parentNode.insertBefore(mark, node);
+      return;
+    }
+  }
+
   function markHierarchy(root, parents) {
     for (const [row, parent] of parents) {
       const depth = ancestorRows(row, parents).length;
       row.classList.add("settings-item-child");
       row.dataset.settingsDepth = String(Math.min(depth, 3));
+      wrapBranchMark(row);
       parent.classList.add("settings-item-parent");
     }
     // 같은 부모의 마지막 자식을 표시한다(연결선을 거기서 끊기 위해).
