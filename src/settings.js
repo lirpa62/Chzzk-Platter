@@ -2545,6 +2545,9 @@
       } catch {}
       // 목록이 비면 항목 자체를 감춰 설정 화면을 어지럽히지 않는다.
       if (item) item.hidden = hashes.length === 0;
+      // 그 행이 유일한 자식이라, 숨기고 나면 펼치기 버튼도 감춰야 한다
+      // (눌러도 아무것도 안 나오는 버튼이 남는다 — 제보).
+      settingsDisclosures?.refresh?.();
       list.textContent = "";
       if (!hashes.length) {
         const empty = document.createElement("p");

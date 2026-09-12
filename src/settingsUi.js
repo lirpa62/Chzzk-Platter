@@ -216,9 +216,23 @@
         button.title = searchRows ? "검색 중에는 세부 설정을 펼쳐서 표시합니다" : `${action}${hasNew ? " (새 설정 있음)" : ""}`;
       });
     }
+    // 펼쳐도 보여 줄 게 없으면(모든 자식이 다른 이유로 숨겨져 있으면) 버튼 자체를
+    // 감춘다. 예: '항상 켜기 제외 채널'은 제외된 채널이 없으면 settings.js 가 행을
+    // 숨기는데, 그때 펼치기 버튼만 남아 눌러도 아무 일이 없었다(제보).
+    // ⚠ is-feature-collapsed 는 '우리가 접어서' 숨긴 것이라 제외하고 판단한다.
+    //   그걸 세면 접혀 있을 때마다 버튼이 사라져 다시 펼칠 수 없다.
+    function hasVisibleMember(members) {
+      return members.some(
+        (row) => !row.hidden && !row.classList.contains("is-search-hidden"),
+      );
+    }
     function render() {
       groups.forEach(({ id, button, label, members }) => {
-        const open = expanded.has(id) || Boolean(searchRows && members.some((row) => searchRows.has(row)));
+        const usable = hasVisibleMember(members);
+        button.hidden = !usable;
+        const open =
+          usable &&
+          (expanded.has(id) || Boolean(searchRows && members.some((row) => searchRows.has(row))));
         button.setAttribute("aria-expanded", String(open));
         button.setAttribute("aria-label", `${label} 세부 설정 ${open ? "접기" : "펼치기"}`);
         button.disabled = Boolean(searchRows);
@@ -229,6 +243,9 @@
     render();
     return {
       refreshBadges,
+      // 자식 행이 나중에 숨겨지거나 다시 나타나면(예: 제외 채널 목록이 비거나
+      // 채워지면) 다시 불러 펼치기 버튼 표시를 맞춘다.
+      refresh: render,
       search: (rows) => { searchRows = rows; render(); },
     };
   }
