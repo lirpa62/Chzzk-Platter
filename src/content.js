@@ -584,7 +584,9 @@
   let syncCooldownCustom = null; // {base, max}(초) 또는 null
   // 오디오 믹서 '항상 켜기'(전역). MAIN world(audioMixer)에 함께 전달.
   const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
+  const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
   let mixerAlwaysOn = false;
+  let mixerDefaultOn = false; // 오디오 믹서 기본 켜짐(전역, 끄기는 자유)
   // 시청 시 최대 화질 자동 고정(전역, 기본 OFF). MAIN world(audioMixer.js)가 corePlayer로 적용.
   const MAX_QUALITY_KEY = "cheeseMaxQuality";
   let maxQualityAuto = false;
@@ -49854,6 +49856,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         syncCooldownEnabled, // 자동 따라잡기 쿨다운 on/off
         syncCooldownCustom, // {base,max}(초) 또는 null
         mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
+        mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
         // 최대 화질 자동 고정. 팝업 프레임은 전역값과 무관하게 팝업 설정을 따른다
         // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
         maxQualityAuto: IS_POPUP_PLAYER_FRAME
@@ -49935,6 +49938,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     SYNC_COOLDOWN_ENABLED_KEY,
     SYNC_COOLDOWN_CUSTOM_KEY,
     MIXER_ALWAYS_ON_KEY,
+    MIXER_DEFAULT_ON_KEY,
     MAX_QUALITY_KEY,
     MAX_QUALITY_RESPECT_KEY,
     VIDEO_FILTER_ALWAYS_ON_KEY,
@@ -50314,11 +50318,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[SYNC_COOLDOWN_CUSTOM_KEY],
       );
       mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
+      mixerDefaultOn = data?.[MIXER_DEFAULT_ON_KEY] === true;
       maxQualityAuto = data?.[MAX_QUALITY_KEY] === true;
       maxQualityRespectManual = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 기본 ON
       videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
       wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
-      liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] !== false; // 미설정=기본 ON
+      liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] === true; // 미설정=기본 OFF
       liveSeekBarBottom = normalizeLiveSeekBarBottom(
         data?.[LIVE_SEEK_BAR_BOTTOM_KEY],
       );
@@ -50402,6 +50407,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[MIXER_ALWAYS_ON_KEY]) {
         mixerAlwaysOn = changes[MIXER_ALWAYS_ON_KEY].newValue === true;
+      }
+      if (changes[MIXER_DEFAULT_ON_KEY]) {
+        mixerDefaultOn = changes[MIXER_DEFAULT_ON_KEY].newValue === true;
       }
       if (changes[MAX_QUALITY_KEY]) {
         maxQualityAuto = changes[MAX_QUALITY_KEY].newValue === true;
@@ -51477,6 +51485,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[SYNC_COOLDOWN_ENABLED_KEY] ||
         changes[SYNC_COOLDOWN_CUSTOM_KEY] ||
         changes[MIXER_ALWAYS_ON_KEY] ||
+        changes[MIXER_DEFAULT_ON_KEY] ||
         changes[MAX_QUALITY_KEY] ||
         changes[MAX_QUALITY_RESPECT_KEY] ||
         changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||

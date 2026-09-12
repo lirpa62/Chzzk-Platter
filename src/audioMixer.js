@@ -96,10 +96,18 @@
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
   let mixerAlwaysOn = false;
+  // '기본 켜짐'(전역). 들어올 때 켜 두되, 좌클릭으로 자유롭게 끌 수 있고 끄더라도
+  // 그 채널을 제외 목록에 남기지 않는다 — '항상 켜기'와 다른 점이 이 두 가지다.
+  // (제보: 켜진 채로 시작하고 싶은데 '항상 켜기'뿐이라, 켜면 끌 수가 없었다.)
+  let mixerDefaultOn = false;
+  // '기본 켜짐'에서 이번 페이지 동안 사용자가 직접 끈 적이 있는지. 저장하지 않는다 —
+  // 다음 방문에는 다시 켜진 채로 시작하는 게 '기본값'이라는 말에 맞다.
+  // (저장되는 state.userDisabled 는 '항상 켜기'의 채널 제외용이라 성격이 다르다.)
+  let mixerDefaultOffThisPage = false;
   let wideScreenAuto = popupWideParamKnown && popupWideParam === "1";
   // 위 값이 content.js 의 저장값 로드를 거친 것인지(로드 전 false = '아직 모름').
   let wideScreenSettingsLoaded = popupWideParamKnown;
-  let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
+  let liveSeekBarOn = false; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 OFF)
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
   let wheelVolumeRightClick = false; // 우클릭(오른쪽 버튼)을 누른 채 휠일 때만 조절(기본 OFF)
@@ -248,7 +256,13 @@
     // 리스너만으로는 자동 활성화가 걸리지 않아 '항상 켜기'인데도 믹서가 풀린 채 남았다.
     // 플래그를 받은 시점(= 값이 처음 도착하거나 켜진 순간)에 현재 재생 상태로 즉시
     // 한 번 시도한다.
-    if (mixerAlwaysOn && !mixerAlwaysOnPrev) {
+    // '기본 켜짐'도 같은 자동 활성화 경로를 탄다(끄는 방식만 다르다).
+    const mixerDefaultOnPrev = mixerDefaultOn;
+    mixerDefaultOn = e.data.mixerDefaultOn === true;
+    if (
+      (mixerAlwaysOn && !mixerAlwaysOnPrev) ||
+      (mixerDefaultOn && !mixerDefaultOnPrev)
+    ) {
       if (typeof bindVideoAutoEnable === "function") bindVideoAutoEnable();
       if (typeof maybeAutoEnableMixer === "function") maybeAutoEnableMixer();
     }
@@ -331,7 +345,7 @@
       e.data.mixerGainStep,
     );
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
-    liveSeekBarOn = e.data.liveSeekBar !== false;
+    liveSeekBarOn = e.data.liveSeekBar === true;
     // 되감기 바 하단 여백(px). CSS 변수로 넘겨 위치만 바꾼다(치지직 DOM 은 안 건드림).
     const bottom = Math.round(Number(e.data.liveSeekBarBottom));
     if (Number.isFinite(bottom)) {
@@ -1471,10 +1485,15 @@
   // 시엔 시도하지 않는다. 충돌이면 setEnabled→buildGraph 실패가 graphConflict를
   // 세워 재시도가 멈추므로 무한 루프가 되지 않는다.
   function maybeAutoEnableMixer() {
-    if (!mixerAlwaysOn) return;
+    if (!mixerAlwaysOn && !mixerDefaultOn) return;
     if (!userGestureSeen) return; // 제스처 전엔 대기
     if (!stateLoaded) return; // 저장 프리셋 로드 전엔 대기(기본 프리셋 오활성 방지)
-    if (state.userDisabled) return; // 이 채널은 사용자가 직접 끔(opt-out)
+    // 이번 페이지에서 직접 껐으면 다시 켜지 않는다(세션 한정, 저장 안 함).
+    if (mixerDefaultOffThisPage) return;
+    // ⚠ 저장된 채널 제외(userDisabled)는 '항상 켜기'의 장치다. '기본 켜짐'만
+    //   켜진 경우에는 매번 켜진 채로 시작해야 해서 예전 기록으로 막지 않는다.
+    //   둘 다 켜져 있으면 더 엄격한 '항상 켜기' 규칙을 따른다(제외를 존중).
+    if (state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) return;
     if (featureFlags.audioMixer) return; // 믹서 기능 숨김 상태면 자동 활성 안 함
     if (graphConflict) return; // 이미 충돌 판정 → 재시도 금지
     if (state.enabled && audio.connected) return; // 이미 동작 중
@@ -2779,11 +2798,18 @@
     if (state.enabled && audio.connected) {
       // '항상 켜기'는 말 그대로 항상 켜 두는 설정이므로 좌클릭으로 끄지 않는다.
       // 끄려면 설정에서 옵션을 해제하거나 패널의 전원 토글을 쓰면 된다(그쪽은
-      // 채널별 opt-out을 남긴다). 여기서는 왜 안 꺼지는지만 알려 준다.
+      // 채널별 opt-out을 남긴다).
+      // ⚠ 예전에는 "끌 수 없습니다"라고만 알렸다. 실제로는 패널 전원 토글로 끌 수
+      //   있는데 그 경로를 말해 주지 않아, 아예 못 끄는 기능으로 오해됐다(제보:
+      //   "끄고 싶을 때 끌 수가 없어요"). 어디서 끌 수 있는지까지 알려 준다.
       if (mixerAlwaysOn) {
-        showPresetOsd("'항상 켜기'가 켜져 있어 끌 수 없습니다", 2600);
+        showPresetOsd("'항상 켜기' 중 — 패널의 전원 버튼으로 끌 수 있습니다", 3200);
         return;
       }
+      // '기본 켜짐'은 좌클릭으로 그냥 꺼진다(막지 않는다). 다만 이번 페이지 동안
+      // 자동 활성화가 곧바로 다시 켜지 않도록 의사를 기억한다 — 저장은 하지 않아
+      // 다음 방문에는 다시 켜진 채로 시작한다.
+      if (mixerDefaultOn) mixerDefaultOffThisPage = true;
       setEnabled(false);
       return;
     }
@@ -3692,6 +3718,15 @@
           refreshPanelContent();
           return;
         }
+        // '기본 켜짐'(항상 켜기 아님)에서는 이번 페이지 동안만 기억하고, 저장되는
+        // 채널 제외(userDisabled)는 건드리지 않는다 — 설정의 '항상 켜기 제외 채널'
+        // 목록에 엉뚱하게 쌓이면 나중에 '항상 켜기'로 바꿨을 때 그 채널만 안 켜진다.
+        if (mixerDefaultOn && !mixerAlwaysOn) {
+          mixerDefaultOffThisPage = !t.checked;
+          setEnabled(t.checked);
+          saveState();
+          return;
+        }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기' 자동 활성화에서 제외(opt-out).
         // 다시 켜면 해제. per-channel로 저장돼 새로고침 후에도 의사 유지.
         state.userDisabled = !t.checked;
@@ -4453,8 +4488,10 @@
   // 이 페이지를 켠 채 이동했다 돌아온 경우. 둘 다 저장 프리셋 로드 후 판단한다.
   function wantsAutoEnable() {
     if (userGestureSeen) return false;
-    if (state.userDisabled) return false; // 이 채널은 직접 끔
-    if (mixerAlwaysOn) return true;
+    if (mixerDefaultOffThisPage) return false; // 이번 페이지에서 직접 끔
+    // 저장된 채널 제외는 '항상 켜기'의 장치(위 maybeAutoEnableMixer 와 같은 규칙).
+    if (state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) return false;
+    if (mixerAlwaysOn || mixerDefaultOn) return true;
     return stateLoaded && state.enabled === true; // 현재 탭에서 복원한 켠 상태
   }
   const boundAutoEnableVideos = new WeakSet();
@@ -9180,13 +9217,14 @@
     // 자동 넓은 화면 적용이 아직 남아 있으면(이 미디어에 미적용) full tick 필요.
     if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey)
       return false;
-    // '항상 켜기'가 켜졌는데 아직 자동 활성화 전이면 full tick.
+    // '항상 켜기'/'기본 켜짐'이 켜졌는데 아직 자동 활성화 전이면 full tick.
     if (
-      mixerAlwaysOn &&
+      (mixerAlwaysOn || mixerDefaultOn) &&
       userGestureSeen &&
       stateLoaded &&
       !audio.connected &&
-      !state.userDisabled &&
+      !mixerDefaultOffThisPage &&
+      !(state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) &&
       !featureFlags.audioMixer &&
       !graphConflict
     ) {

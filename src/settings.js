@@ -232,6 +232,7 @@
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
     "cheeseMixerAlwaysOn",
+    "cheeseMixerDefaultOn",
     "cheeseAudioMixer.autoSync",
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
@@ -2457,6 +2458,30 @@
     } catch {}
   });
   loadMixerAlwaysOn();
+
+  // ── 오디오 믹서 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
+  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
+  // '항상 켜기 제외 채널'에 남기지 않는다(다음 방문엔 다시 켜진 채로 시작).
+  const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
+  const mixerDefaultOnInput = document.querySelector("[data-mixer-default-on]");
+
+  async function loadMixerDefaultOn() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(MIXER_DEFAULT_ON_KEY);
+      on = data?.[MIXER_DEFAULT_ON_KEY] === true;
+    } catch {}
+    if (mixerDefaultOnInput) mixerDefaultOnInput.checked = on;
+  }
+
+  mixerDefaultOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [MIXER_DEFAULT_ON_KEY]: mixerDefaultOnInput.checked,
+      });
+    } catch {}
+  });
+  loadMixerDefaultOn();
 
   // ── '항상 켜기' 제외 채널 목록(오디오 믹서 / 비디오 필터 공용) ────────────
   // 패널에서 직접 끈 채널은 per-channel 저장값에 userDisabled=true 로 남는다
