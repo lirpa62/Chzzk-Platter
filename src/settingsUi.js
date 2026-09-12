@@ -167,6 +167,45 @@
     }
   }
 
+  // 상위 옵션이 꺼져 있으면 하위 옵션을 잠근다(.is-locked + 컨트롤 disabled).
+  // 예전에는 기능마다 settings.js 가 따로 처리해, 빠뜨린 곳에서는 상위를 꺼도
+  // 하위를 그대로 조작할 수 있었다(실측: 토글 부모 36쌍 중 12쌍).
+  // 여기서 부모-자식 관계를 이미 알고 있으므로 한 곳에서 일괄 처리한다.
+  //
+  // ⚠ 부모가 on/off 토글(체크박스)일 때만 적용한다. 부모가 선택지(라디오·피커)면
+  //   '꺼짐'이라는 상태가 없어 잠글 근거가 없다.
+  // ⚠ 조상 중 하나라도 꺼져 있으면 잠근다. 2단계 자식은 부모가 켜져 있어도
+  //   조부모가 꺼져 있으면 어차피 동작하지 않는다.
+  // ⚠ 이미 다른 이유로 disabled 인 컨트롤을 우리가 풀어 주면 안 된다. 우리가 끈
+  //   것만 되돌리도록 표시해 둔다.
+  const LOCK_OWNED = "cheeseLockOwned";
+
+  function parentToggleOff(row, parents) {
+    for (let parent = parents.get(row); parent; parent = parents.get(parent)) {
+      const input = parent.querySelector('input[type="checkbox"]');
+      if (input && !input.checked) return true;
+    }
+    return false;
+  }
+
+  function applyLocks(root, parents) {
+    for (const row of parents.keys()) {
+      const locked = parentToggleOff(row, parents);
+      row.classList.toggle("is-locked", locked);
+      for (const control of row.querySelectorAll("input, select, button, textarea")) {
+        if (locked) {
+          if (!control.disabled) {
+            control.disabled = true;
+            control.dataset[LOCK_OWNED] = "1";
+          }
+        } else if (control.dataset[LOCK_OWNED]) {
+          control.disabled = false;
+          delete control.dataset[LOCK_OWNED];
+        }
+      }
+    }
+  }
+
   function createDisclosures(root, storage) {
     const parents = createParents(root);
     markHierarchy(root, parents);
@@ -238,9 +277,15 @@
         button.disabled = Boolean(searchRows);
         members.forEach((row) => row.classList.toggle("is-feature-collapsed", !open));
       });
+      applyLocks(root, parents);
       refreshBadges();
     }
     render();
+    // 부모 토글이 바뀌면 즉시 잠금을 다시 계산한다(설정 저장과 무관하게 화면만).
+    root.addEventListener("change", (event) => {
+      if (!event.target?.matches?.('input[type="checkbox"]')) return;
+      applyLocks(root, parents);
+    });
     return {
       refreshBadges,
       // 자식 행이 나중에 숨겨지거나 다시 나타나면(예: 제외 채널 목록이 비거나
