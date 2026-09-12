@@ -80,6 +80,13 @@
   const featureFlags = { videoFilter: false };
   // 비디오 필터 항상 켜기(전역). 켜져 있으면 채널 설정 로드 후 자동 활성화한다.
   let videoFilterAlwaysOn = false;
+  // 비디오 필터 '기본 켜짐'(전역). 들어올 때 켜 두되, 좌클릭으로 자유롭게 끌 수 있고
+  // 끄더라도 그 채널을 제외 목록에 남기지 않는다 — '항상 켜기'와 다른 점이 이 둘이다.
+  // (오디오 믹서와 같은 규칙. 제보: 켜진 채로 시작하고 싶은데 끄는 방법이 없었다.)
+  let videoFilterDefaultOn = false;
+  // '기본 켜짐'에서 이번 페이지 동안 직접 껐는지. 저장하지 않는다 — 다음 방문에는
+  // 다시 켜진 채로 시작하는 게 '기본값'이라는 말에 맞다.
+  let videoFilterDefaultOffThisPage = false;
   // content.js 로부터 플래그를 한 번이라도 받았는지. 받기 전까지 재요청한다.
   let featureFlagsReceived = false;
 
@@ -96,6 +103,7 @@
     featureFlagsReceived = true; // 재요청 루프 정지
     featureFlags.videoFilter = e.data.flags?.videoFilter === true;
     videoFilterAlwaysOn = e.data.videoFilterAlwaysOn === true;
+    videoFilterDefaultOn = e.data.videoFilterDefaultOn === true;
     globalDefaultMode =
       e.data.videoFilterGlobalDefaultMode === "channel" ? "channel" : "global";
     if (typeof tick === "function") tick();
@@ -1100,10 +1108,17 @@
   // 사용자가 이 채널에서 직접 끈 경우(userDisabled)는 존중한다. 비디오 필터는
   // CSS/SVG 기반이라 오디오처럼 제스처/AudioContext 게이트가 필요 없다.
   function maybeAutoEnableFilter() {
-    if (!videoFilterAlwaysOn) return;
+    if (!videoFilterAlwaysOn && !videoFilterDefaultOn) return;
     if (!stateLoaded) return; // 채널 프리셋/직접 끔 상태를 먼저 복원
     if (featureFlags.videoFilter) return; // 기능 숨김 상태면 자동 활성 안 함
-    if (state.userDisabled) return; // 이 채널은 사용자가 직접 끔(opt-out)
+    // 이번 페이지에서 직접 껐으면 다시 켜지 않는다(세션 한정, 저장 안 함).
+    if (videoFilterDefaultOffThisPage) return;
+    // ⚠ 저장된 채널 제외(userDisabled)는 '항상 켜기'의 장치다. '기본 켜짐'만 켜진
+    //   경우에는 매번 켜진 채로 시작해야 해서 예전 기록으로 막지 않는다. 둘 다
+    //   켜져 있으면 더 엄격한 '항상 켜기' 규칙을 따른다.
+    if (state.userDisabled && (videoFilterAlwaysOn || !videoFilterDefaultOn)) {
+      return;
+    }
     if (state.enabled) return; // 이미 켜짐
     if (!findVideo()) return; // video 준비 전이면 다음 기회
     setEnabled(true);
@@ -1860,10 +1875,18 @@
     if (state.enabled) {
       // '항상 켜기'는 말 그대로 항상 켜 두는 설정이므로 좌클릭으로 끄지 않는다.
       // 끄려면 설정에서 옵션을 해제하거나 패널의 전원 토글을 쓴다(채널별 opt-out).
+      // ⚠ 예전에는 "끌 수 없습니다"라고만 알렸다. 실제로는 패널 전원 토글로 끌 수
+      //   있는데 그 경로를 말해 주지 않아 아예 못 끄는 기능으로 오해됐다(제보).
       if (videoFilterAlwaysOn) {
-        showPresetOsd("'항상 켜기'가 켜져 있어 끌 수 없습니다", 2600);
+        showPresetOsd(
+          "'항상 켜기' 중 — 패널의 전원 버튼으로 끌 수 있습니다",
+          3200,
+        );
         return;
       }
+      // '기본 켜짐'은 좌클릭으로 그냥 꺼진다. 이번 페이지 동안만 기억해 자동
+      // 활성화가 곧바로 다시 켜지 않게 하고, 저장하지 않아 다음 방문엔 다시 켜진다.
+      if (videoFilterDefaultOn) videoFilterDefaultOffThisPage = true;
       setEnabled(false);
       return;
     }
@@ -2523,6 +2546,14 @@
           refreshPanelContent();
           return;
         }
+        // '기본 켜짐'(항상 켜기 아님)에서는 이번 페이지 동안만 기억하고, 저장되는
+        // 채널 제외(userDisabled)는 건드리지 않는다 — 설정의 '항상 켜기 제외 채널'
+        // 목록에 쌓이면 나중에 '항상 켜기'로 바꿨을 때 그 채널만 안 켜진다.
+        if (videoFilterDefaultOn && !videoFilterAlwaysOn) {
+          videoFilterDefaultOffThisPage = !t.checked;
+          setEnabled(t.checked);
+          return;
+        }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기'에서 opt-out(다시 안 켜짐).
         // 다시 켜면 opt-out 해제. setEnabled가 saveState로 함께 저장한다.
         state.userDisabled = !t.checked;
@@ -3090,11 +3121,13 @@
         return false;
       }
     }
+    // '항상 켜기'/'기본 켜짐'이 켜졌는데 아직 자동 활성화 전이면 full tick 필요.
     if (
-      videoFilterAlwaysOn &&
+      (videoFilterAlwaysOn || videoFilterDefaultOn) &&
       stateLoaded &&
       !state.enabled &&
-      !state.userDisabled
+      !videoFilterDefaultOffThisPage &&
+      !(state.userDisabled && (videoFilterAlwaysOn || !videoFilterDefaultOn))
     ) {
       return false;
     }

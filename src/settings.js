@@ -277,6 +277,7 @@
     "cheeseSyncCooldownEnabled",
     "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
+    "cheeseVideoFilterDefaultOn",
     "cheeseVideoFilter.autoSharpen",
     "cheeseVideoFilterGlobalDefaultMode",
     "cheeseVodAutoplayOff",
@@ -3499,6 +3500,32 @@
     } catch {}
   });
   loadVideoFilterAlwaysOn();
+
+  // ── 비디오 필터 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
+  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
+  // '항상 켜기 제외 채널'에 남기지 않는다(오디오 믹서의 같은 옵션과 동일 규칙).
+  const VIDEO_FILTER_DEFAULT_ON_KEY = "cheeseVideoFilterDefaultOn";
+  const videoFilterDefaultOnInput = document.querySelector(
+    "[data-video-filter-default-on]",
+  );
+
+  async function loadVideoFilterDefaultOn() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(VIDEO_FILTER_DEFAULT_ON_KEY);
+      on = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
+    } catch {}
+    if (videoFilterDefaultOnInput) videoFilterDefaultOnInput.checked = on;
+  }
+
+  videoFilterDefaultOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VIDEO_FILTER_DEFAULT_ON_KEY]: videoFilterDefaultOnInput.checked,
+      });
+    } catch {}
+  });
+  loadVideoFilterDefaultOn();
 
   // ── 넓은 화면 자동 적용(전역, 진입 시 viewmode 자동 켜기) ──────────────────
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";

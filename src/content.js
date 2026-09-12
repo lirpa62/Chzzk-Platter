@@ -595,10 +595,12 @@
   let maxQualityRespectManual = true;
   const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
   let videoFilterAlwaysOn = false;
+  const VIDEO_FILTER_DEFAULT_ON_KEY = "cheeseVideoFilterDefaultOn";
+  let videoFilterDefaultOn = false; // 비디오 필터 기본 켜짐(전역, 끄기는 자유)
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
-  let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
+  let liveSeekBar = false; // 라이브 되감기 바 표시(전역, 기본 OFF)
   // 되감기 바의 화면 아래쪽 여백(px). 기본 60 은 치지직 타임머신 재생바와 겹치지 않는
   // 위치다(실측). 값을 낮추면 겹칠 수 있어 설정 설명에 안내를 둔다.
   const LIVE_SEEK_BAR_BOTTOM_KEY = "cheeseLiveSeekBarBottom";
@@ -49864,6 +49866,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           : maxQualityAuto,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
+        videoFilterDefaultOn, // 비디오 필터 기본 켜짐(전역)
         // 넓은 화면 자동 적용(전역). 팝업 플레이어 프레임에서는 팝업 설정이 켜져 있으면
         // 전역값과 무관하게 켠다(작은 창에서 레터박스를 줄이는 게 기본 기대 동작).
         wideScreenAuto:
@@ -49942,6 +49945,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     MAX_QUALITY_KEY,
     MAX_QUALITY_RESPECT_KEY,
     VIDEO_FILTER_ALWAYS_ON_KEY,
+    VIDEO_FILTER_DEFAULT_ON_KEY,
     WIDE_SCREEN_AUTO_KEY,
     LIVE_SEEK_BAR_KEY,
     LIVE_SEEK_BAR_BOTTOM_KEY,
@@ -50322,6 +50326,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       maxQualityAuto = data?.[MAX_QUALITY_KEY] === true;
       maxQualityRespectManual = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 기본 ON
       videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
+      videoFilterDefaultOn = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
       wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
       liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] === true; // 미설정=기본 OFF
       liveSeekBarBottom = normalizeLiveSeekBarBottom(
@@ -50782,6 +50787,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[VIDEO_FILTER_ALWAYS_ON_KEY]) {
         videoFilterAlwaysOn =
           changes[VIDEO_FILTER_ALWAYS_ON_KEY].newValue === true;
+      }
+      if (changes[VIDEO_FILTER_DEFAULT_ON_KEY]) {
+        videoFilterDefaultOn =
+          changes[VIDEO_FILTER_DEFAULT_ON_KEY].newValue === true;
       }
       if (changes[WIDE_SCREEN_AUTO_KEY]) {
         wideScreenAuto = changes[WIDE_SCREEN_AUTO_KEY].newValue === true;
@@ -51489,6 +51498,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[MAX_QUALITY_KEY] ||
         changes[MAX_QUALITY_RESPECT_KEY] ||
         changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
+        changes[VIDEO_FILTER_DEFAULT_ON_KEY] ||
         changes[WIDE_SCREEN_AUTO_KEY] ||
         changes[LIVE_SEEK_BAR_KEY] ||
         changes[VOLUME_PCT_KEY] ||
