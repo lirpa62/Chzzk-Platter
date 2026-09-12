@@ -84,6 +84,22 @@ const UPDATE_NOTICE_TOAST_POSITIONS = new Set([
 ]);
 const MASTER_ENABLED_KEY = "cheeseMasterEnabled";
 const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
+const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
+// 1.52.0 에서 기본값을 OFF 로 바꾼 항목들. 기존 사용자는 종전(ON) 상태를 유지한다.
+const DEFAULT_OFF_MIGRATION_KEYS = [
+  "cheeseFollowCleanup", // 팔로잉 정리 버튼
+  "cheeseFollowingLiveSortRemember", // 라이브 정렬 기억
+  "cheeseClipVideoFilterEnabled", // 클립 비디오 필터 사용
+];
+// 위와 같은 취지지만 저장 형태가 다르다. 이 넷은 cheeseFeatureHidden 객체 안에
+// 'true=숨김' 으로 들어간다(키가 없으면 코드의 기본값을 따른다).
+const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
+const DEFAULT_HIDDEN_MIGRATION_KEYS = [
+  "liveSync", // 실시간 따라잡기
+  "liveRewind", // 라이브 되감기
+  "searchVideos", // 다시보기 검색
+  "searchClips", // 클립 검색
+];
 const SETTINGS_NEW_FEATURE_BASELINE_KEY =
   "cheeseSettingsNewFeatureBaselinePending";
 const SETTINGS_NEW_FEATURE_UPDATE_KEY = "cheeseSettingsNewFeatureUpdatePending";
@@ -236,6 +252,55 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     }
   } catch (error) {
     console.warn("제외 필터 버튼 기본값을 초기화하지 못했습니다.", error);
+  }
+
+  // 되감기 바도 예전 기본값이 ON이었다. 같은 방식으로 기존 사용자는 종전 상태를
+  // 유지하고(업데이트=ON), 신규 설치만 OFF로 시작한다.
+  try {
+    const stored = await chrome.storage.local.get(LIVE_SEEK_BAR_KEY);
+    if (
+      !Object.prototype.hasOwnProperty.call(stored || {}, LIVE_SEEK_BAR_KEY)
+    ) {
+      await chrome.storage.local.set({
+        [LIVE_SEEK_BAR_KEY]: details.reason === "update",
+      });
+    }
+  } catch (error) {
+    console.warn("되감기 바 기본값을 초기화하지 못했습니다.", error);
+  }
+
+  // 기본값을 OFF 로 바꾼 항목들. 저장값이 없는 기존 사용자는 업데이트 시 종전
+  // 동작(ON)을 명시 저장해 유지하고, 신규 설치만 새 기본값(OFF)으로 시작한다.
+  try {
+    const stored = await chrome.storage.local.get(DEFAULT_OFF_MIGRATION_KEYS);
+    const patch = {};
+    for (const key of DEFAULT_OFF_MIGRATION_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(stored || {}, key)) {
+        patch[key] = details.reason === "update";
+      }
+    }
+    if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+  } catch (error) {
+    console.warn("기본값 변경 항목을 초기화하지 못했습니다.", error);
+  }
+
+  // 기본 숨김으로 바꾼 기능들(cheeseFeatureHidden 안의 'true=숨김').
+  // ⚠ 업데이트 사용자는 false(=보임)를 명시 저장해야 한다. 키가 없으면 새 기본값인
+  //   '숨김'이 적용돼, 쓰던 버튼이 업데이트 후 갑자기 사라진다.
+  try {
+    const stored = await chrome.storage.local.get(FEATURE_HIDDEN_KEY);
+    const current = stored?.[FEATURE_HIDDEN_KEY];
+    const next = current && typeof current === "object" ? { ...current } : {};
+    let changed = false;
+    for (const key of DEFAULT_HIDDEN_MIGRATION_KEYS) {
+      if (typeof next[key] !== "boolean") {
+        next[key] = details.reason !== "update"; // 신규 설치만 숨김
+        changed = true;
+      }
+    }
+    if (changed) await chrome.storage.local.set({ [FEATURE_HIDDEN_KEY]: next });
+  } catch (error) {
+    console.warn("기본 숨김 기능을 초기화하지 못했습니다.", error);
   }
 
   try {

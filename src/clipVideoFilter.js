@@ -191,7 +191,7 @@
 
   let masterEnabled = true;
   let featureHidden = false;
-  let featureEnabled = true;
+  let featureEnabled = false; // 기본 OFF
   let alwaysOn = false;
   let enabled = false;
   let autoEnableSuppressed = false;
@@ -341,7 +341,7 @@
     featureHidden =
       Boolean(hidden && typeof hidden === "object") &&
       hidden.videoFilter === true;
-    featureEnabled = data?.[ENABLED_KEY] !== false;
+    featureEnabled = data?.[ENABLED_KEY] === true; // 미설정=기본 OFF
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
     presetOptions = buildPresetOptions(data);
     const preset = resolveSelectedPreset(data);

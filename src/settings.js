@@ -1107,6 +1107,11 @@
     "loungeNews",
     // 수신함 커뮤니티 소식도 채널별 요청이 필요하므로 opt-in 으로 둔다.
     "inboxCommunityNews",
+    // 아래 네 가지도 기본 숨김. content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
+    "liveSync",
+    "liveRewind",
+    "searchVideos",
+    "searchClips",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -3129,7 +3134,7 @@
       }
       if (clipVideoFilterEnabledInput) {
         clipVideoFilterEnabledInput.checked =
-          data?.[CLIP_VIDEO_FILTER_ENABLED_KEY] !== false;
+          data?.[CLIP_VIDEO_FILTER_ENABLED_KEY] === true;
       }
       if (clipVideoFilterAlwaysOnInput) {
         clipVideoFilterAlwaysOnInput.checked =
@@ -9141,10 +9146,10 @@
     "[data-following-live-sort]",
   );
   async function loadFollowingLiveSort() {
-    let on = true; // 미설정/true=ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(FOLLOWING_LIVE_SORT_KEY);
-      on = data?.[FOLLOWING_LIVE_SORT_KEY] !== false;
+      on = data?.[FOLLOWING_LIVE_SORT_KEY] === true;
     } catch {}
     if (followingLiveSortInput) followingLiveSortInput.checked = on;
   }
@@ -9157,14 +9162,14 @@
   });
   loadFollowingLiveSort();
 
-  // 팔로잉 정리 버튼(기본 ON).
+  // 팔로잉 정리 버튼(기본 OFF).
   const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
   const followCleanupInput = document.querySelector("[data-follow-cleanup]");
   async function loadFollowCleanup() {
-    let on = true; // 미설정/true=ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(FOLLOW_CLEANUP_KEY);
-      on = data?.[FOLLOW_CLEANUP_KEY] !== false;
+      on = data?.[FOLLOW_CLEANUP_KEY] === true;
     } catch {}
     if (followCleanupInput) followCleanupInput.checked = on;
   }

@@ -552,6 +552,12 @@
     // 네이버 게임 수신함 안의 팔로잉 커뮤니티 탭도 채널별 API 요청이 필요하므로
     // 기존 사용자에게 자동으로 켜지지 않게 기본 숨김으로 둔다.
     "inboxCommunityNews",
+    // 아래 네 가지도 기본 숨김(원하는 사람만 켠다). 플레이어 버튼과 검색 화면이
+    // 처음부터 여러 개 붙어 있으면 치지직 기본 UI 와 달라 부담스럽다는 판단.
+    "liveSync",
+    "liveRewind",
+    "searchVideos",
+    "searchClips",
   ]);
   const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
   // 같은 창 안의 ISOLATED↔MAIN 브리지용 targetOrigin.
@@ -2020,7 +2026,7 @@
   // 팔로잉 정리 도구: following?tab=CHANNEL 목록 앞에 '팔로잉 정리' 버튼을 추가해, 최근
   // 방송일 필터로 대상 채널을 모아 개별/선택/필터 전체 언팔로우하는 모달(전역, 기본 ON).
   const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
-  let followCleanupOn = true;
+  let followCleanupOn = false; // 기본 OFF
   // 채팅창 접힘 상태 유지(전역, 기본 OFF). 사용자가 치지직 '채팅 접기' 버튼으로 접으면
   // 그 상태를 저장하고, 새로고침·재접속 후 라이브 진입 시 저장 상태로 복원한다(트위치처럼).
   // content.js 전용. 자동 숨김(가장자리 슬라이드)과는 별개 기능이다.
@@ -17553,7 +17559,7 @@
   // 팔로잉 LIVE 정렬 기억 on/off. ⚠ 아래 프리페치 목록(getBootData)에서 참조하므로
   // 그보다 앞에 선언해야 한다(const 는 호이스팅돼도 TDZ 라 접근 시 오류).
   const FOLLOW_SORT_ENABLED_KEY = "cheeseFollowingLiveSortRemember";
-  let followingLiveSortOn = true; // 기본 ON(미설정=켜짐)
+  let followingLiveSortOn = false; // 기본 OFF(미설정=꺼짐)
   let pipDisableOn = false;
   // 다시보기 채팅 활성도 그래프. ⚠ 프리페치 목록에서 참조하므로 그보다 앞에 선언한다.
   const CHAT_GRAPH_ENABLED_KEY = "cheeseVodChatGraph";
@@ -42090,7 +42096,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!chrome.storage?.local) return;
     try {
       const data = await getBootData([FOLLOW_CLEANUP_KEY]);
-      followCleanupOn = data?.[FOLLOW_CLEANUP_KEY] !== false; // 미설정/true=ON
+      followCleanupOn = data?.[FOLLOW_CLEANUP_KEY] === true; // 미설정=기본 OFF
     } catch {}
     ensureFollowCleanupButton();
   }
@@ -51443,10 +51449,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[FOLLOW_SORT_ENABLED_KEY]) {
         followingLiveSortOn =
-          changes[FOLLOW_SORT_ENABLED_KEY].newValue !== false;
+          changes[FOLLOW_SORT_ENABLED_KEY].newValue === true;
       }
       if (changes[FOLLOW_CLEANUP_KEY]) {
-        followCleanupOn = changes[FOLLOW_CLEANUP_KEY].newValue !== false;
+        followCleanupOn = changes[FOLLOW_CLEANUP_KEY].newValue === true;
         if (!followCleanupOn) closeFollowCleanupModal();
         ensureFollowCleanupButton(); // 버튼 재주입/제거
       }
@@ -52003,7 +52009,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ROLE_CHAT_BOTS_KEY,
         VOD_TITLE_CHANGES_KEY,
       ]);
-      followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] !== false;
+      followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] === true;
       pipDisableOn = data?.[PIP_DISABLE_KEY] === true;
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
