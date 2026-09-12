@@ -430,6 +430,152 @@
 
   // 방장·매니저의 명령과 치지직의 성공 안내가 모두 확인된 경우만 제목 변경으로
   // 확정한다. 메시지는 API 페이지 순서와 무관하게 마지막에 재생 위치순으로 맞춘다.
+  // ── 방장·매니저 채팅 타임라인 ─────────────────────────────────────────────
+  // 기본 봇 목록. 설정에서 이용자가 편집한다(여기 값은 '처음 한 번'의 기본값).
+  // ⚠ 닉네임에 '봇'이 들어가는지로 거르지 않는다 — '봇치더락', '로봇물고기' 처럼
+  //   평범한 닉네임이 걸린다. 정확히 일치하는 이름만 뺀다.
+  const DEFAULT_VOD_ROLE_CHAT_BOTS = Object.freeze([
+    "빵떡",
+    "뚜봇",
+    "뚜이봇",
+    "뚜삼봇",
+    "뚜사봇",
+    "뚜오봇",
+    "뚜육봇",
+    "뚜칠봇",
+    "뚜팔봇",
+    "뚜구봇",
+    "나디아 봇",
+    "다람쥐 봇",
+    "악몽봇",
+    "쁘띠봇",
+    "화릴봇",
+    "스텔라이브 봇",
+    "픽셀봇",
+    "인챈트 봇",
+  ]);
+
+  // 닉네임 비교용 정규화. 공백 차이("나디아 봇" / "나디아봇")로 어긋나지 않게 한다.
+  function normalizeVodRoleBotName(name) {
+    return String(name || "")
+      .replace(/\s+/g, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  // 어떤 역할로 잡혔는지 돌려준다(표시에 아이콘을 달기 위해).
+  // ⚠ 우선순위: 방장 > 매니저 > 파트너. 방장이면서 파트너인 경우가 흔한데,
+  //   그때는 '그 방송의 주인'이라는 정보가 더 유용하다.
+  function vodRoleChatKind(message) {
+    const profile = parseVodChatProfile(message);
+    const role = String(
+      message?.userRoleCode ||
+        message?.userRole ||
+        profile?.userRoleCode ||
+        profile?.userRole ||
+        "",
+    ).toLowerCase();
+    if (role.includes("streamer")) return "streamer";
+    if (role.includes("manager")) return "manager";
+    // 파트너는 역할 코드가 아니라 인증 마크로 구분한다(일반 시청자여도 붙는다).
+    if (profile?.verifiedMark === true) return "partner";
+    return "";
+  }
+
+  // 치지직이 프로필에 실어 주는 배지·타이틀을 그대로 쓴다.
+  // ⚠ 배지 이미지는 치지직 도메인만 받는다. 프로필은 서버가 준 값이지만
+  //   그대로 <img src> 에 넣는 값이라, 엉뚱한 출처면 무시하는 편이 안전하다.
+  function vodRoleChatBadgeUrl(profile) {
+    const url = String(profile?.badge?.imageUrl || "").trim();
+    return /^https:\/\/[a-z0-9.-]*\.(?:pstatic\.net|naver\.com)\//i.test(url)
+      ? url
+      : "";
+  }
+
+  // 타이틀 색(#RGB/#RRGGBB)만 통과시킨다. 임의 문자열이 style 에 들어가지 않게.
+  function vodRoleChatTitleColor(profile) {
+    const color = String(profile?.title?.color || "").trim();
+    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? color : "";
+  }
+
+  function vodRoleChatNickname(message) {
+    const profile = parseVodChatProfile(message);
+    return String(profile?.nickname || message?.nickname || "").trim();
+  }
+
+  // 방장·매니저·파트너가 남긴 채팅만 시각과 함께 모은다.
+  // ⚠ 닉네임은 '이번에 보여 줄 목록'에만 담는다. 저장하지 않는다(특정인의 발언이
+  //   로컬에 아카이브로 쌓이지 않게 한다).
+  // 메시지에 딸려 온 이모티콘 맵({key: url}). 표시할 때 그림으로 그리는 데 쓴다.
+  function vodRoleChatEmojis(message) {
+    try {
+      const extras =
+        typeof message?.extras === "string"
+          ? JSON.parse(message.extras)
+          : message?.extras;
+      const map = extras?.emojis;
+      if (!map || typeof map !== "object") return null;
+      const out = {};
+      for (const [key, url] of Object.entries(map)) {
+        // 배지와 같은 이유로 출처를 확인한다(그대로 <img src> 에 들어간다).
+        if (
+          typeof url === "string" &&
+          /^https:\/\/[a-z0-9.-]*\.(?:pstatic\.net|naver\.com)\//i.test(url)
+        ) {
+          out[String(key)] = url;
+        }
+      }
+      return Object.keys(out).length ? out : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function createVodRoleChatTracker(options) {
+    const bots = new Set(
+      (Array.isArray(options?.bots) ? options.bots : DEFAULT_VOD_ROLE_CHAT_BOTS)
+        .map(normalizeVodRoleBotName)
+        .filter(Boolean),
+    );
+    const limit = Math.max(1, Number(options?.limit) || 300);
+    const entries = [];
+    return Object.freeze({
+      add(message) {
+        const kind = vodRoleChatKind(message);
+        if (!kind) return; // 방장·매니저·파트너만
+        const text = String(message?.content || "").trim();
+        if (!text) return;
+        const nickname = vodRoleChatNickname(message);
+        if (bots.has(normalizeVodRoleBotName(nickname))) return;
+        const playerMessageTime = Number(message?.playerMessageTime);
+        if (!Number.isFinite(playerMessageTime) || playerMessageTime < 0) {
+          return;
+        }
+        const profile = parseVodChatProfile(message);
+        entries.push({
+          vMs: Math.round(playerMessageTime),
+          kind,
+          nickname,
+          // 치지직이 준 역할 배지·타이틀. 없으면 빈 값이고, 표시 쪽에서
+          //   기호 폴백으로 넘어간다.
+          badge: vodRoleChatBadgeUrl(profile),
+          titleName: String(profile?.title?.name || "").trim().slice(0, 20),
+          titleColor: vodRoleChatTitleColor(profile),
+          emojis: vodRoleChatEmojis(message),
+          // 너무 긴 채팅은 목록에서 의미가 없다. 화면에서도 잘린다.
+          text: text.replace(/\s+/g, " ").slice(0, 200),
+        });
+      },
+      finish() {
+        // 시간순. 너무 많으면 앞쪽(이른 시각)부터 남긴다.
+        return entries
+          .slice()
+          .sort((a, b) => a.vMs - b.vMs)
+          .slice(0, limit);
+      },
+    });
+  }
+
   function createVodTitleChangeTracker() {
     const entries = [];
     return Object.freeze({
@@ -481,6 +627,55 @@
         return normalizeVodTitleChanges(changes);
       },
     });
+  }
+
+  // 방장·매니저·파트너 채팅은 활성도 통계와 별도로 보관한다.
+  // ⚠ 같이 넣으면 한쪽만 다시 모으고 싶어도 전부 다시 모아야 한다.
+  function vodRoleChatKey(videoNo) {
+    const id = String(videoNo || "").trim();
+    return id ? `cheeseVodRoleChat:${id}` : "";
+  }
+
+  function normalizeVodRoleChats(value) {
+    const items = Array.isArray(value?.items) ? value.items : [];
+    return items
+      .map((row) => ({
+        vMs: Math.max(0, Math.round(Number(row?.vMs) || 0)),
+        kind: String(row?.kind || ""),
+        nickname: String(row?.nickname || ""),
+        badge: String(row?.badge || ""),
+        titleName: String(row?.titleName || ""),
+        titleColor: String(row?.titleColor || ""),
+        emojis:
+          row?.emojis && typeof row.emojis === "object" ? row.emojis : null,
+        text: String(row?.text || ""),
+      }))
+      .filter((row) => row.text && row.kind)
+      .sort((a, b) => a.vMs - b.vMs);
+  }
+
+  async function loadVodRoleChats(storage, videoNo) {
+    const key = vodRoleChatKey(videoNo);
+    if (!key) return { complete: false, items: [] };
+    const value = (await storage.get(key))?.[key];
+    return {
+      complete: value?.complete === true,
+      items: normalizeVodRoleChats(value),
+    };
+  }
+
+  async function saveVodRoleChats(storage, videoNo, items) {
+    const key = vodRoleChatKey(videoNo);
+    if (!key) return false;
+    await storage.set({
+      [key]: {
+        v: 1,
+        at: Date.now(),
+        complete: true,
+        items: normalizeVodRoleChats({ items }),
+      },
+    });
+    return true;
   }
 
   async function loadVodTitleChanges(storage, videoNo) {
@@ -581,6 +776,13 @@
     compactVodRows,
     reconcileCompleteVodRows,
     createVodTitleChangeTracker,
+    createVodRoleChatTracker,
+    vodRoleChatKind,
+    vodRoleChatKey,
+    loadVodRoleChats,
+    saveVodRoleChats,
+    normalizeVodRoleChats,
+    DEFAULT_VOD_ROLE_CHAT_BOTS,
     loadVodTitleChanges,
     normalizeVodTitleChanges,
     saveVodTitleChanges,

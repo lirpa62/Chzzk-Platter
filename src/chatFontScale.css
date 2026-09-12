@@ -1077,3 +1077,162 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is([class*="_information_y1pxo_"], [class*="_information_16ttf_"]) {
   align-items: center !important;
 }
+
+/* 새 고정 메시지(_container_85wp6_)의 작성자 배지는 이미지뿐 아니라 18px 아이콘
+   컨테이너도 함께 확대해야 한다. 컨테이너가 네이티브 크기에 머물면 커진 이미지가
+   닉네임 영역으로 넘치므로 실제 레이아웃 크기와 오른쪽 여백을 모두 배율에 맞춘다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_85wp6_"]
+  [class*="_name_85wp6_"]
+  [class*="_wrapper_"] {
+  margin-right: calc(4px * var(--cheese-chat-font-scale)) !important;
+}
+
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_85wp6_"]
+  [class*="_name_85wp6_"]
+  [class*="_wrapper_"]
+  > [class*="_icon_"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  height: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  min-width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  flex: 0 0
+    calc(var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)) !important;
+}
+
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  [class*="_container_85wp6_"]
+  [class*="_name_85wp6_"]
+  [class*="_wrapper_"]
+  > [class*="_icon_"]
+  :is([class*="_container_"], img, svg) {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  min-width: 0 !important;
+  object-fit: contain !important;
+}
+
+/* (F) 역할 기반 특수 메시지 폴백.
+   치지직이 카드 해시를 gb6rb -> 126f6 처럼 바꾸더라도 닉네임 메타데이터에 남는
+   _is_donation_/_is_mission_/_is_subscription_ 역할로 실제 카드 루트를 식별한다.
+   일반 채팅(_is_message_)과 프로필 다이얼로그는 이 조건에 들어오지 않는다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  )
+  > [class*="_container_"]:has(
+    [class*="_container_"][class*="_is_donation_"],
+    [class*="_container_"][class*="_is_mission_"],
+    [class*="_container_"][class*="_is_subscription_"]
+  ) {
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* 새 카드 모듈은 본문·금액·닉네임마다 고정 font-size를 다시 지정하므로 상속에만
+   기대지 않고 의미 역할이 드러나는 내부 노드에도 같은 절대 기준을 적용한다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  )
+  > [class*="_container_"]:has(
+    [class*="_container_"][class*="_is_donation_"],
+    [class*="_container_"][class*="_is_mission_"],
+    [class*="_container_"][class*="_is_subscription_"]
+  )
+  :is(
+    [class*="_header_"],
+    [class*="_row_"],
+    [class*="_text_"],
+    [class*="_word_"],
+    [class*="_money_"],
+    [class*="_description_"],
+    [class*="_detail_"],
+    [class*="_nickname_"],
+    button[class*="_name_"],
+    button[class*="_profile_button_"],
+    em[class*="_ellipsis_"]
+  ) {
+  font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
+  line-height: calc(19px * var(--cheese-chat-font-scale)) !important;
+}
+
+/* _wrapper_1mc5x_ 같은 새 닉네임 배지 래퍼도 해시와 무관하게 18px 기준으로 조절한다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_"][class*="_is_donation_"],
+    [class*="_container_"][class*="_is_mission_"],
+    [class*="_container_"][class*="_is_subscription_"]
+  )
+  > [class*="_wrapper_"]
+  > [class*="_icon_"] {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  height: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  min-width: calc(
+    var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)
+  ) !important;
+  flex: 0 0
+    calc(var(--cheese-chat-badge-icon-size) * var(--cheese-chat-font-scale)) !important;
+}
+
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_container_"][class*="_is_donation_"],
+    [class*="_container_"][class*="_is_mission_"],
+    [class*="_container_"][class*="_is_subscription_"]
+  )
+  > [class*="_wrapper_"]
+  > [class*="_icon_"]
+  :is([class*="_container_"], img, svg) {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  min-width: 0 !important;
+  object-fit: contain !important;
+}
+
+/* 미션 금액 앞의 치즈 SVG는 닉네임 배지가 아니므로 네이티브 16px 기준을 유지한다. */
+html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
+  :is(aside#aside-chatting, aside#vod-aside)
+  :is(
+    [class*="_item_"],
+    [class*="live_chatting_list_item"],
+    [class*="vod_chatting_item"]
+  )
+  > [class*="_container_"]:has([class*="_is_mission_"])
+  [class*="_money_"]
+  > svg {
+  width: calc(16px * var(--cheese-chat-font-scale)) !important;
+  height: calc(16px * var(--cheese-chat-font-scale)) !important;
+}

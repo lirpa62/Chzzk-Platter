@@ -84,6 +84,23 @@
   // 채팅 배지(등급·후원·구독 등) 숨김. 닉네임 숨김과 독립된 옵션이며, 역할 예외는
   // 닉네임 쪽과 동일하게 적용한다(방장·매니저·파트너는 배지도 남긴다).
   let hideChatBadge = false;
+  // 채팅 이모티콘 숨김/차단.
+  //  - hideChatEmoticon: 채팅 스트림의 이모티콘을 전부 숨긴다.
+  //  - blockedEmoticons: 특정 이모티콘만 숨긴다(Alt+클릭으로 추가).
+  // ⚠ 이모티콘 창이 아니라 '채팅 스트림'이 대상이다. 이모티콘 창 정리는 별도
+  //   확장(치모티콘 정리)의 영역이라 건드리지 않는다.
+  let hideChatEmoticon = false;
+  let blockedEmoticons = new Set();
+  // Alt+클릭 차단 사용 여부(설정, 기본 켬).
+  let emoticonAltClickOn = true;
+  // ⚠ '치모티콘 정리'가 같은 조작(채팅 이모티콘 Alt+클릭)을 제공한다. 우리는
+  //   document 에 캡처로 붙어 있어 항상 먼저 가로채는데, 그러면 그쪽을 쓰는 분은
+  //   조작이 안 먹고 차단 목록이 두 군데로 갈린다. 감지되면 우리가 양보한다.
+  //   판정은 그 확장이 로드 직후 head 에 넣는 <style> 로 한다(이모티콘 창을 열지
+  //   않아도 존재한다). ISOLATED/MAIN world 가 달라도 DOM 은 공유된다.
+  function cheemoticonCleanerPresent() {
+    return Boolean(document.getElementById("cheemoticon-size-style"));
+  }
 
   // 다시보기 채팅은 이미 블라인드 처리된 기록만 내려와 React props에도 원문이 없다.
   // 복원을 시도해도 성공할 수 없고, 빠른 탐색 중 재사용되는 행을 계속 분석하면 채팅
@@ -1932,6 +1949,8 @@
       chatHistoryCaptureOn ||
       hideChatNickname ||
       hideChatBadge ||
+      hideChatEmoticon ||
+      blockedEmoticons.size > 0 ||
       isBlindRestoreActive() ||
       chatRecapReady()
     );
@@ -2100,6 +2119,227 @@
     }
   }
 
+  // 이모티콘 창이 열리면 키↔URL 짝을 거둔다. 창은 클릭으로 열리므로 그때만 훑는다
+  //   (상시 감시를 붙이지 않는다). 거둔 게 있으면 차단 규칙을 다시 만든다.
+  document.addEventListener(
+    "click",
+    () => {
+      // 창이 그려지는 데 한 프레임 걸린다.
+      requestAnimationFrame(() => {
+        if (!blockedEmoticons.size && !hideChatEmoticon) return;
+        if (harvestEmoticonKeyUrls()) applyEmoticonBlockStyle();
+      });
+    },
+    true,
+  );
+
+  // Alt + 클릭으로 그 이모티콘을 차단한다(치모티콘 정리와 같은 조작감).
+  // ⚠ 이모티콘 창이 아니라 채팅 스트림의 이미지만 대상으로 한다.
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!event.altKey || !event.isTrusted) return;
+      if (!emoticonAltClickOn || cheemoticonCleanerPresent()) return;
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      if (!img.closest(CHAT_EMOTICON_SCOPE)) return;
+      const found = chatEmoticonKeyOf(img);
+      const key = found.key || (found.src ? `url:${found.src}` : "");
+      if (!key) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // 저장은 content.js(격리 월드)가 한다 — 우리는 알리기만 한다.
+      try {
+        const target =
+          window.top && window.top.location.origin === location.origin
+            ? window.top
+            : window;
+        target.postMessage(
+          { source: "cheese-chat-emoticon-block", key },
+          location.origin,
+        );
+      } catch {
+        try {
+          window.postMessage(
+            { source: "cheese-chat-emoticon-block", key },
+            "*",
+          );
+        } catch {}
+      }
+      // 저장 왕복을 기다리지 않고 바로 숨긴다(응답감).
+      if (!blockedEmoticons.has(key)) {
+        blockedEmoticons.add(key);
+        applyEmoticonBlockStyle();
+      }
+    },
+    true,
+  );
+
+  // 차단 이모티콘용 <style>. 키마다 규칙을 만들기보다 한 벌로 묶어 주입한다.
+  const EMOTICON_BLOCK_STYLE_ID = "cheese-chat-emoticon-block";
+  // 채팅 메시지 안의 이모티콘 이미지(치모티콘 정리와 같은 선택자 계열).
+  const CHAT_EMOTICON_SCOPE =
+    '[class*="live_chatting_message_text__"],' +
+    '[class*="live_chatting_scroll_message__"],' +
+    '[class*="_chatting_message_"]';
+
+  function emoticonBlockCss() {
+    if (!blockedEmoticons.size) return "";
+    // alt 는 "{:key:}" 형태다. CSS 문자열 이스케이프만 하면 되고, 키는 영숫자·_ 뿐이라
+    //   선택자 주입 위험이 없다(아래 sanitize 에서 한 번 더 거른다).
+    const selectors = [];
+    for (const entry of blockedEmoticons) {
+      // ⚠ 채팅 스트림 img 에는 alt 가 없다. 키로 저장된 항목도 결국 URL 로 걸어야
+      //   한다 — 사전에서 찾아 바꾼다. 사전이 아직 없으면(이모티콘 창을 한 번도
+      //   열지 않음) alt 규칙도 함께 넣어 둔다(다시보기 등 alt 가 있는 곳 대비).
+      const matches = [];
+      if (entry.startsWith("url:")) {
+        matches.push(`img[src^="${entry.slice(4)}"]`);
+      } else {
+        const url = emoticonKeyUrls.get(entry);
+        if (url) matches.push(`img[src^="${url}"]`);
+        matches.push(`img[alt="{:${entry}:}"]`);
+      }
+      for (const match of matches) {
+        for (const scope of CHAT_EMOTICON_SCOPE.split(",")) {
+          selectors.push(`${scope.trim()} ${match}`);
+        }
+      }
+    }
+    return `${selectors.join(",\n")} { display: none !important; }`;
+  }
+
+  function applyEmoticonBlockStyle() {
+    let el = document.getElementById(EMOTICON_BLOCK_STYLE_ID);
+    const css = emoticonBlockCss();
+    if (!css) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("style");
+      el.id = EMOTICON_BLOCK_STYLE_ID;
+      (document.head || document.documentElement).appendChild(el);
+    }
+    if (el.textContent !== css) el.textContent = css;
+  }
+
+  // 이모티콘 키는 영숫자·밑줄만 쓴다. 그 밖의 값은 버린다(선택자 안전).
+  function sanitizeEmoticonKey(value) {
+    const key = String(value || "").trim();
+    return /^[A-Za-z0-9_]{1,64}$/.test(key) ? key : "";
+  }
+
+  // 채팅 스트림 이모티콘에서 키를 뽑는다.
+  // ⚠ alt 가 "{:key:}" 인 건 '이모티콘 창' 쪽이고, 채팅 스트림 이미지에는 그 alt 가
+  //   없을 수 있다(제보: Alt+클릭이 안 먹힘). 그때는 이미지 URL 의 파일명을 쓴다 —
+  //   같은 이모티콘은 URL 이 같으므로 안정적인 식별자가 된다.
+  function chatEmoticonKeyOf(img) {
+    const fromAlt = sanitizeEmoticonKey(
+      (String(img?.alt || "").match(/^\{:([^:}]+):\}$/) || [])[1],
+    );
+    if (fromAlt) return { key: fromAlt, src: "" };
+    // 파일명에서 확장자·타임스탬프를 떼어 낸 이름은 키와 다를 수 있다. 그래서
+    //   키 대신 'URL 자체'를 식별자로 쓰고, 숨김도 src 기준으로 건다.
+    const raw = stripEmoticonUrlQuery(
+      String(img?.currentSrc || img?.src || ""),
+    );
+    if (!raw) return { key: "", src: "" };
+    // 사전에 있으면 사람이 읽을 수 있는 키로 저장한다(설정 목록에 이름으로 뜬다).
+    for (const [key, url] of emoticonKeyUrls) {
+      if (url === raw) return { key, src: raw };
+    }
+    return { key: "", src: raw };
+  }
+
+  // 키(d_42) → 이미지 URL 사전.
+  // ⚠ 채팅 스트림 img 에는 alt 가 없고, 파일명도 키와 다르다(d_42 → b_02.gif).
+  //   그래서 설정에 키를 직접 적어도 채팅에서 찾을 수가 없었다(제보).
+  //   이모티콘 창에는 id="emoji_<키>" 와 src 가 함께 있으므로 거기서 짝을 거둔다.
+  const emoticonKeyUrls = new Map();
+  const EMOTICON_KEY_URL_CACHE_MAX = 4096;
+
+  function cacheEmoticonKeyUrl(key, url) {
+    emoticonKeyUrls.delete(key);
+    emoticonKeyUrls.set(key, url);
+    // 차단 규칙에서 참조하는 URL은 유지하고 일반 조회 사전만 제한한다.
+    const limit = EMOTICON_KEY_URL_CACHE_MAX + blockedEmoticons.size;
+    if (emoticonKeyUrls.size <= limit) return;
+    for (const oldest of emoticonKeyUrls.keys()) {
+      if (blockedEmoticons.has(oldest)) continue;
+      emoticonKeyUrls.delete(oldest);
+      if (emoticonKeyUrls.size <= limit) break;
+    }
+  }
+
+  function harvestEmoticonKeyUrls(root = document) {
+    const items = root.querySelectorAll?.('[id^="emoji_"] img[src]');
+    if (!items?.length) return false;
+    let added = false;
+    for (const img of items) {
+      const key = sanitizeEmoticonKey(
+        img.closest('[id^="emoji_"]')?.id?.slice(6),
+      );
+      if (!key || emoticonKeyUrls.has(key)) continue;
+      const url = stripEmoticonUrlQuery(img.getAttribute("src") || "");
+      if (!url) continue;
+      cacheEmoticonKeyUrl(key, url);
+      added = true;
+    }
+    return added;
+  }
+
+  function stripEmoticonUrlQuery(raw) {
+    if (!raw) return "";
+    try {
+      const url = new URL(raw, location.href);
+      url.search = "";
+      return url.href;
+    } catch {
+      return raw.split("?")[0];
+    }
+  }
+
+  // 저장 형식: 영숫자 키는 그대로, URL 식별자는 "url:" 접두사를 붙인다.
+  function normalizeEmoticonEntry(value) {
+    const raw = String(value || "").trim();
+    if (raw.startsWith("url:")) {
+      const url = raw.slice(4);
+      return /^https:\/\/[\w.-]+\/[^"'\s]*$/.test(url) ? raw : "";
+    }
+    return sanitizeEmoticonKey(raw);
+  }
+
+  function setHideChatEmoticon(next) {
+    next = next === true;
+    document.documentElement.classList.toggle(
+      "cheese-chat-emoticon-hide-on",
+      next,
+    );
+    if (next === hideChatEmoticon) return;
+    hideChatEmoticon = next;
+    if (!next && !anyChatEnhanceOn()) stopChatRowObserver();
+    else if (next && !isChatObserverHealthy()) ensureChatRowObserver();
+  }
+
+  function setBlockedEmoticons(list) {
+    const next = new Set(
+      (Array.isArray(list) ? list : [])
+        .map(normalizeEmoticonEntry)
+        .filter(Boolean),
+    );
+    const changed =
+      next.size !== blockedEmoticons.size ||
+      [...next].some((key) => !blockedEmoticons.has(key));
+    blockedEmoticons = next;
+    applyEmoticonBlockStyle();
+    if (!changed) return;
+    if (!blockedEmoticons.size && !anyChatEnhanceOn()) stopChatRowObserver();
+    else if (blockedEmoticons.size && !isChatObserverHealthy()) {
+      ensureChatRowObserver();
+    }
+  }
+
   function setHideChatBadge(next) {
     next = next === true;
     // 게이트 클래스는 값이 같아도 항상 맞춰둔다(초기 로드 시 반영 누락 방지).
@@ -2254,6 +2494,9 @@
     setShowChatOsIcon(f.chatShowOsIcon === true);
     setHideChatNickname(f.chatHideNickname === true);
     setHideChatBadge(f.chatHideBadge === true);
+    setHideChatEmoticon(f.chatHideEmoticon === true);
+    emoticonAltClickOn = f.chatEmoticonAltClick !== false; // 기본 켬
+    setBlockedEmoticons(e.data.chatBlockedEmoticons);
     setRestoreBlindedChat(f.chatRestoreBlind === true);
     setChatHistoryCapture(e.data.chatHistoryEnabled === true);
     // 채팅 리캡: 켜짐 여부 + 내 계정 + (다시보기용) 채널 힌트.

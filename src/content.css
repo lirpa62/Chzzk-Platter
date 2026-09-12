@@ -6059,6 +6059,25 @@ html.cheese-live-tag-filter-lock body {
   overflow: hidden !important;
 }
 
+/* 사라진 세로 스크롤바 폭만큼 자리를 메운다. 이게 없으면 모달을 여는 순간
+   페이지가 스크롤바 폭(보통 15px)만큼 넓어지며 배경이 옆으로 튄다.
+   --cheese-modal-scroll-gap 은 잠글 때 실측해서 넣는다(오버레이 스크롤바나
+   스크롤이 없는 페이지에서는 아예 설정하지 않아 0 이 된다). */
+html.cheese-live-tag-filter-lock,
+html.cheese-cf-group-modal-lock,
+html.cheese-fcln-lock {
+  padding-right: var(--cheese-modal-scroll-gap, 0px) !important;
+}
+
+/* position:fixed 는 html 의 padding 을 무시한다(컨테이닝 블록이 뷰포트).
+   치지직 헤더·사이드바가 그래서 따로 밀어 줘야 한다. 붙이는 판단은 잠글 때
+   JS 가 한다(오른쪽 끝에 닿은 fixed 요소만). */
+html.cheese-live-tag-filter-lock .cheese-modal-scroll-shift,
+html.cheese-cf-group-modal-lock .cheese-modal-scroll-shift,
+html.cheese-fcln-lock .cheese-modal-scroll-shift {
+  margin-right: var(--cheese-modal-scroll-gap, 0px) !important;
+}
+
 .cheese-live-tag-filter-overlay {
   position: fixed;
   inset: 0;
@@ -15365,87 +15384,56 @@ html.theme_dark .cheese-memo-window {
   font-size: 11px;
 }
 
-/* ── 채팅 활성도 구간 요약 팝오버(버튼 우클릭) ───────────────────────────── */
-/* 색은 메모 창과 같은 방식으로 자체 토큰 + .theme_dark 로 정한다(치지직 변수는
-   라이트/다크에서 비거나 대비가 뒤집히는 경우가 있다). */
+/* ── 구간 요약 · 방장·매니저 채팅 패널 ──────────────────────────────────── */
+/* 껍데기(배경·테두리·폭)는 댓글 타임스탬프 패널 클래스가 담당한다. 여기서는
+   그 위에 얹히는 속 내용의 색만 정한다.
+   ⚠ 그 패널은 라이트/다크 구분 없이 어두운 배경이라, 토큰도 한 벌만 둔다.
+   예전에는 .theme_dark 로 색을 뒤집었는데 이제 배경이 항상 어둡다. */
 .cheese-chat-peak-popover {
-  --peak-bg: #ffffff;
-  --peak-surface: #f6f7f8;
-  --peak-border: #dcdfe3;
-  --peak-text: #17191c;
-  --peak-muted: #6b7178;
-  --peak-accent: #00b843;
-
-  background: var(--peak-bg);
-  border: 1px solid var(--peak-border);
-  border-radius: 10px;
-  bottom: calc(100% + 10px);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
-  color: var(--peak-text);
-  max-height: 60vh;
-  overflow: hidden;
-  position: absolute;
-  right: 0;
-  width: max-content;
-  min-width: 280px;
-  max-width: min(92vw, 420px);
-  z-index: 2147483000;
-}
-
-.theme_dark .cheese-chat-peak-popover,
-html.theme_dark .cheese-chat-peak-popover {
-  --peak-bg: #17191c;
-  --peak-surface: #212429;
-  --peak-border: #333840;
-  --peak-text: #eceef0;
-  --peak-muted: #9aa1a9;
+  --peak-surface: rgba(255, 255, 255, 0.1);
+  --peak-border: rgba(255, 255, 255, 0.12);
+  --peak-text: #fff;
+  --peak-muted: rgba(255, 255, 255, 0.62);
   --peak-accent: #00e693;
 
-  box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+  bottom: calc(100% + 10px);
+  right: 0;
 }
-
-.cheese-peak-head {
-  align-items: center;
-  border-bottom: 1px solid var(--peak-border);
-  display: flex;
-  gap: 6px;
-  padding: 9px 11px;
-}
-/* 헤더의 '다시 수집' — 닫기 버튼 왼쪽. 강조하지 않는다(자주 쓰는 버튼이 아니다). */
-.cheese-peak-head [data-peak-rescan] {
-  background: var(--peak-chip-bg, rgba(127, 127, 127, 0.16));
+/* 헤더의 '다시 수집'/'모으기' — 닫기 버튼 왼쪽. 강조하지 않는다. */
+.cheese-search-comment-panel-head [data-peak-rescan] {
+  background: rgba(255, 255, 255, 0.12);
   border: 0;
-  border-radius: 4px;
-  color: inherit;
+  border-radius: 5px;
+  color: #fff;
   cursor: pointer;
   font-size: 11px;
-  margin-left: auto;
-  padding: 3px 8px;
+  margin-right: 4px;
+  padding: 4px 9px;
+  white-space: nowrap;
 }
-.cheese-peak-head [data-peak-rescan]:hover {
-  background: var(--peak-chip-hover, rgba(127, 127, 127, 0.28));
+.cheese-search-comment-panel-head [data-peak-rescan]:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
-.cheese-peak-head strong {
-  font-size: 13px;
-  font-weight: 800;
-}
-.cheese-peak-head button {
+.cheese-search-comment-panel-head [data-peak-close] {
+  align-items: center;
   background: none;
   border: 0;
   border-radius: 5px;
-  color: var(--peak-muted);
+  color: rgba(255, 255, 255, 0.62);
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 4px 6px;
+  display: inline-flex;
+  padding: 4px;
 }
-.cheese-peak-head button:hover {
-  background: var(--peak-surface);
-  color: var(--peak-text);
+.cheese-search-comment-panel-head [data-peak-close]:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 
 .cheese-peak-body {
-  max-height: calc(60vh - 42px);
+  max-height: calc(
+    var(--cheese-search-comment-panel-max-height, min(430px, 100vh - 140px)) -
+      48px
+  );
   overflow-y: auto;
   padding: 6px 8px 10px;
 }
@@ -15574,3 +15562,387 @@ html.theme_dark .cheese-chat-peak-popover {
 .cheese-peak-overall .cheese-peak-items {
   padding-top: 2px;
 }
+
+/* 방장·매니저 채팅 타임라인. 구간 목록과 달리 본문 한 줄이 따라붙는다. */
+.cheese-peak-role li {
+  display: block;
+}
+.cheese-peak-role li button {
+  justify-content: flex-start;
+  align-items: center;
+}
+.cheese-peak-role li small {
+  font-weight: 700;
+}
+.cheese-peak-role-text {
+  color: var(--peak-text);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 0 3px 2px;
+}
+
+/* 역할 뱃지. 치지직 배지 그림이 있으면 <img>, 없으면 기호 <i> 로 같은 자리를
+   쓴다. 읽어 주는 이름은 .blind 로 따로 둔다. */
+.cheese-peak-role-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1;
+}
+img.cheese-peak-role-badge {
+  height: 16px;
+  object-fit: contain;
+  width: 16px;
+}
+.cheese-peak-role-badge[data-role="streamer"] {
+  color: #f5c518;
+}
+.cheese-peak-role-badge[data-role="manager"] {
+  color: #4c9aff;
+}
+.cheese-peak-role-badge[data-role="partner"] {
+  color: #2bc47d;
+}
+
+/* 방장·매니저 채팅 본문의 치지직 이모티콘. */
+.cheese-peak-role-text img {
+  height: 22px;
+  vertical-align: -5px;
+  width: 22px;
+}
+
+/* ── 내 채팅 기록 패널의 탭(내 채팅 / 방장·매니저) ──────────────────────── */
+.cheese-recap-tab-bar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+}
+.cheese-recap-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+.cheese-recap-tab:hover {
+  color: #fff;
+}
+.cheese-recap-tab.is-on {
+  border-bottom-color: #00e693;
+  color: #fff;
+}
+/* 모으기/중단 버튼 */
+.cheese-recap-role-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px 0;
+}
+.cheese-recap-role-collect {
+  background: rgba(255, 255, 255, 0.12);
+  border: 0;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 10px;
+}
+.cheese-recap-role-collect:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+/* 발화자(배지 + 닉네임)는 본문 앞에 붙는다. */
+.cheese-recap-role-who {
+  align-items: center;
+  display: inline-flex;
+  font-style: normal;
+  gap: 3px;
+  margin-right: 5px;
+}
+.cheese-recap-role-who b {
+  font-weight: 700;
+}
+
+/* 재정렬 카드가 성인 영상인데 복제한 템플릿에 표식이 없던 경우의 보강.
+   네이티브와 같은 공식 배지 이미지를 썸네일 위에 깐다. */
+.cheese-search-rerank-is-adult a[class*="_thumbnail_"] {
+  position: relative;
+}
+.cheese-search-rerank-is-adult a[class*="_thumbnail_"]::before {
+  background: url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png)
+    50% / contain no-repeat;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+/* '치지직 N일차' 배지 폴백. 네이티브 클래스를 거두지 못했을 때만 쓰인다
+   (네이티브 _container_/_nth_day_ 규칙과 같은 모양). */
+.cheese-search-nth-day-wrap {
+  flex: none;
+  margin-left: auto;
+}
+.cheese-search-nth-day-label {
+  align-items: center;
+  backdrop-filter: blur(100px);
+  background-color: var(
+    --sem-color-surface-neutral-alpha-inverse-stronger-static,
+    rgba(0, 0, 0, 0.6)
+  );
+  border-radius: 4px;
+  color: var(--sem-color-content-brand-base-static, #00ffa3);
+  display: inline-flex;
+  flex: none;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  line-height: 20px;
+  padding: 0 4px;
+  vertical-align: top;
+  -webkit-backdrop-filter: blur(100px);
+}
+
+/* 파티 배지·참여자 링크 폴백(네이티브 클래스를 거두지 못했을 때만 쓰인다).
+   프로필은 이미 position:relative 라 좌표 기준이 된다. */
+.cheese-cf-party-icon {
+  bottom: -1px;
+  color: var(
+    --sem-color-content-brand-base-static,
+    var(--cheese-platter-content-brand-base, #00ffa3)
+  );
+  position: absolute;
+  right: -1px;
+  z-index: 1;
+}
+.cheese-cf-participant {
+  color: var(
+    --sem-color-content-neutral-tertiary,
+    var(--cheese-platter-content-neutral-tertiary, #9aa1a9)
+  );
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+.cheese-cf-participant:hover {
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary, #fff)
+  );
+}
+
+/* ── 사각 프로필(캐릭터 선택창 느낌) ──────────────────────────────────────
+   접힌 사이드바에서만 적용한다. 펼치면 네이티브와 같은 원형으로 돌아온다.
+   ⚠ 펼침 판정은 기존 규칙과 같은 #sidebar[class*="_is_expanded_"] 를 :not() 으로
+   뒤집어 쓴다. 클래스는 항상 붙여 두고 여기서만 갈라, 전환 때 다시 그리지 않는다.
+   ⚠ '채널 프로필 모서리' 기능이 .cheese-channel-profile-radius-target 에
+   !important 로 radius 를 걸기 때문에, 여기서도 !important 가 필요하다. */
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-square,
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-square
+  img {
+  border-radius: 0 !important;
+}
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-square {
+  flex: none;
+}
+
+/* 모달 목록의 미리보기: 고른 채널은 실제 적용될 사각 모양으로 보여 준다. */
+.cheese-cf-group-modal-profile.cheese-cf-square-preview,
+.cheese-cf-group-modal-profile.cheese-cf-square-preview img {
+  border-radius: 0;
+}
+
+/* ── 캐릭터 선택창 설정 모달 ─────────────────────────────────────────────── */
+/* 그룹 모달 body 는 자식 간격이 없다(그쪽은 form 이 자체 여백을 갖는다).
+   여기서는 div 를 그대로 쌓으므로 간격을 직접 준다. */
+.cheese-cf-square-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cheese-cf-square-body .cheese-cf-group-modal-channel-count {
+  margin: 0;
+}
+/* 고른 채널 모아 보기 */
+.cheese-cf-square-picked {
+  background: rgba(127, 127, 127, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+}
+.cheese-cf-square-picked-empty {
+  color: var(
+    --cheese-platter-content-neutral-tertiary,
+    rgba(255, 255, 255, 0.5)
+  );
+  font-size: 12px;
+  margin: 0;
+}
+.cheese-cf-square-picked-head {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  opacity: 0.75;
+}
+.cheese-cf-square-picked-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 칩: 누르면 바로 빠진다. */
+.cheese-cf-square-chip {
+  align-items: center;
+  background: rgba(127, 127, 127, 0.16);
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 7px 4px 4px;
+}
+.cheese-cf-square-chip:hover {
+  background: rgba(127, 127, 127, 0.28);
+}
+/* 칩 안의 프로필도 각지게 — 적용될 모양 그대로 보여 준다. */
+.cheese-cf-square-chip-profile,
+.cheese-cf-square-chip-profile img {
+  border-radius: 0;
+  display: block;
+  height: 22px;
+  object-fit: cover;
+  width: 22px;
+}
+.cheese-cf-square-chip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-cf-square-chip svg {
+  flex: none;
+  opacity: 0.6;
+}
+
+/* 채널마다 적용할 영역 고르기(중복 선택).
+   ⚠ 바탕이 되는 _channel 은 체크박스가 있던 시절의 4열 그리드다. 이 행에는
+   체크박스가 없으므로 '채널 묶음 | 칩' 두 열로 다시 잡는다. */
+.cheese-cf-square-row {
+  cursor: default;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+/* 프로필 위, 채널명 아래 */
+.cheese-cf-square-who {
+  align-items: center;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  min-width: 0;
+}
+.cheese-cf-square-who .cheese-cf-group-modal-channel-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 영역 칩 2×2. 네 개가 한 줄로 늘어서면 채널명 칸이 너무 좁아지고, flex-wrap 에
+   맡기면 폭에 따라 3+1 처럼 어긋난다. 두 칸으로 고정한다. */
+.cheese-cf-square-scopes-list {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* 칩이 제 칸을 꽉 채우게 — 글자 길이가 달라도 격자가 흐트러지지 않는다. */
+.cheese-cf-square-scopes-list .cheese-cf-square-scope {
+  text-align: center;
+  width: 100%;
+}
+.cheese-cf-square-scope {
+  background: rgba(127, 127, 127, 0.16);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 9px;
+}
+.cheese-cf-square-scope:hover {
+  background: rgba(127, 127, 127, 0.28);
+}
+.cheese-cf-square-scope.is-on {
+  background: var(--cheese-platter-surface-brand-weak, rgba(0, 255, 163, 0.16));
+  border-color: var(--cheese-platter-content-brand-base, #00ffa3);
+  color: var(--cheese-platter-content-brand-base, #00ffa3);
+  font-weight: 700;
+}
+/* 고른 채널 칩에 적용 영역을 같이 적는다. */
+.cheese-cf-square-chip-scopes {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* 채팅 스트림의 이모티콘 전체 숨김. 차단(개별)은 chatTimestamp.js 가 만드는
+   #cheese-chat-emoticon-block 스타일이 따로 담당한다. */
+html.cheese-chat-emoticon-hide-on
+  :is(
+    [class*="live_chatting_message_text__"],
+    [class*="live_chatting_scroll_message__"],
+    [class*="_chatting_message_"]
+  )
+  img {
+  display: none !important;
+}
+
+/* 댓글 닉네임 우클릭 메뉴. 차단 팝오버와 같은 껍데기 색을 쓰되 한 줄짜리라 작다. */
+.cheese-comment-nick-menu {
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base, #1f2738)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--sem-color-content-neutral-warm-strong, #eef1f6);
+  font-size: 13px;
+  padding: 4px;
+  position: fixed;
+  z-index: 2147483646;
+}
+.cheese-comment-nick-menu button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 7px;
+  padding: 7px 10px;
+  white-space: nowrap;
+  width: 100%;
+}
+.cheese-comment-nick-menu button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.cheese-comment-nick-menu svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+/* ── 전용 팔로잉 '친밀도' 섹션 ─────────────────────────────────────────────
+   헤더·접기 UI 는 즐겨찾기/팔로잉과 같은 클래스를 그대로 쓴다(별도 스타일 없음).
+   예전에는 '방송 중 / 그 외' 라벨을 자체 스타일로 그렸는데, 폰트색이 테마와
+   맞지 않았고(제보) 같은 채널이 두 번 보이는 문제도 있어 없앴다. */
