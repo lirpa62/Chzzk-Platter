@@ -124,8 +124,32 @@
     return chain;
   }
 
+  // 부모-자식 관계를 클래스로 남긴다. 예전에는 이름 앞의 '└' 문자만으로 계층을
+  // 표현해 CSS 가 자식을 구분할 수 없었다(들여쓰기·연결선을 줄 수 없었다).
+  // ⚠ 마크업은 그대로 두고 클래스만 얹는다 — 검색·접기 로직이 .settings-item 을
+  //   평평한 목록으로 보는 전제를 깨지 않는다.
+  function markHierarchy(root, parents) {
+    for (const [row, parent] of parents) {
+      const depth = ancestorRows(row, parents).length;
+      row.classList.add("settings-item-child");
+      row.dataset.settingsDepth = String(Math.min(depth, 3));
+      parent.classList.add("settings-item-parent");
+    }
+    // 같은 부모의 마지막 자식을 표시한다(연결선을 거기서 끊기 위해).
+    const byParent = new Map();
+    for (const [row, parent] of parents) {
+      if (!byParent.has(parent)) byParent.set(parent, []);
+      byParent.get(parent).push(row);
+    }
+    for (const rows of byParent.values()) {
+      rows.forEach((row) => row.classList.remove("is-last-child"));
+      rows[rows.length - 1]?.classList.add("is-last-child");
+    }
+  }
+
   function createDisclosures(root, storage) {
     const parents = createParents(root);
+    markHierarchy(root, parents);
     const expanded = new Set();
     try {
       const saved = JSON.parse(storage.getItem(EXPANDED_KEY));
