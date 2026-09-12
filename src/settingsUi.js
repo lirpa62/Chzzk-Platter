@@ -2,6 +2,20 @@
 (() => {
   "use strict";
   const LAST_TAB_KEY = "cheeseSettingsLastTab";
+  // 마지막 탭·펼침 상태를 '기억할지' 여부. 둘 다 기본 꺼짐(열 때마다 초기화).
+  // ⚠ chrome.storage 는 비동기라 첫 페인트 뒤에 값이 온다. 복원은 그 전에
+  //   일어나야 해서 localStorage 사본을 읽는다(팝업 폭과 같은 방식).
+  //   정본은 chrome.storage 이고 settings.js 가 두 곳에 함께 적는다.
+  const REMEMBER_TAB_KEY = "cheeseSettingsRememberTab";
+  const REMEMBER_EXPANDED_KEY = "cheeseSettingsRememberExpanded";
+
+  function readFlag(storage, key) {
+    try {
+      return storage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  }
   const EXPANDED_KEY = "cheeseSettingsExpandedFeatures";
   const DISCLOSURES = [
     ["update-notice", "[data-update-notice-enabled]"],
@@ -77,7 +91,9 @@
   ];
 
   function readLastTab(storage, validTabs, requested) {
+    // URL 로 탭을 지정한 경우(새 탭으로 열기)는 옵션과 무관하게 그 탭을 연다.
     if (validTabs.includes(requested)) return requested;
+    if (!readFlag(storage, REMEMBER_TAB_KEY)) return "all";
     try {
       const saved = storage.getItem(LAST_TAB_KEY);
       if (validTabs.includes(saved)) return saved;
@@ -210,12 +226,15 @@
     const parents = createParents(root);
     markHierarchy(root, parents);
     const expanded = new Set();
-    try {
-      const saved = JSON.parse(storage.getItem(EXPANDED_KEY));
-      if (Array.isArray(saved)) saved.forEach((id) => {
-        if (DISCLOSURES.some(([key]) => key === id)) expanded.add(id);
-      });
-    } catch {}
+    // 기억 옵션이 꺼져 있으면 저장값을 읽지 않는다(항상 접힌 채로 시작).
+    if (readFlag(storage, REMEMBER_EXPANDED_KEY)) {
+      try {
+        const saved = JSON.parse(storage.getItem(EXPANDED_KEY));
+        if (Array.isArray(saved)) saved.forEach((id) => {
+          if (DISCLOSURES.some(([key]) => key === id)) expanded.add(id);
+        });
+      } catch {}
+    }
     const groups = [];
     let searchRows = null;
     for (const [id, selector] of DISCLOSURES) {

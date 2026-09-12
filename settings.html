@@ -609,6 +609,42 @@
           <section
             class="settings-group"
             data-panel="general"
+            aria-label="설정 화면"
+          >
+            <h2 class="settings-group-title">설정 화면</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">마지막 탭 기억</span>
+                  <span class="settings-item-desc"
+                    >설정을 다시 열면 마지막으로 보던 탭으로 엽니다. 꺼두면 항상
+                    '전체'로 엽니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-settings-remember-tab />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">펼친 세부 설정 기억</span>
+                  <span class="settings-item-desc"
+                    >펼쳐 둔 세부 설정을 다음에 열 때도 그대로 펼칩니다. 꺼두면
+                    항상 접힌 채로 엽니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-settings-remember-expanded />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="general"
             aria-label="설정 내보내기 및 불러오기"
           >
             <h2

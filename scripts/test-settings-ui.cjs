@@ -51,7 +51,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const preferences=new Map([['cheeseSettingsLastTab','chat']]);
+      // 마지막 탭·펼침 복원은 이제 옵션(둘 다 기본 꺼짐)이다. 이 테스트는 '복원이
+      // 동작하는가'를 보므로 두 옵션을 켠 상태로 둔다.
+      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1']]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
       window.saved={cheeseSettingsKnownFeatures:[],cheeseSettingsNewFeatureUpdatePending:true,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false};
       window.writes=[];

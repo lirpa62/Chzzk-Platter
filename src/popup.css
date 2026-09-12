@@ -34,6 +34,8 @@
   --popup-inverse-text: #fff;
   --popup-alert-text: #ff5454;
   --popup-text-violet: #3e34af;
+  /* 설정 슬라이더 색(accent-color). 보라 계열로 통일한다. */
+  --popup-slider-accent: #5b4bd6;
   --popup-text-yellow: #e8d536;
   --popup-empty-bg: #fff;
   --popup-error: #d92d20;
@@ -69,6 +71,7 @@
   --popup-inverse-text: #fff;
   --popup-alert-text: #ff5454;
   --popup-text-violet: #7a7aff;
+  --popup-slider-accent: #8b7dff;
   --popup-empty-bg: #171a1d;
   --popup-error: #ff6b60;
   --popup-alert: #ff5454;

@@ -592,16 +592,6 @@ html.settings-tab-view .settings-resizer {
   border-bottom-left-radius: 8px;
 } */
 
-/* 펼친 부모는 '열린 폴더'처럼 — 아래 자식 묶음과 이어진다. */
-.settings-item-parent:has(
-  > label > .settings-item-name > [aria-expanded="true"]
-),
-.settings-item-parent:has(
-  > div > .settings-item-name > [aria-expanded="true"]
-) {
-  background: color-mix(in srgb, var(--popup-soft-bg) 70%, transparent);
-}
-
 .settings-disclosure-button {
   position: relative;
   display: inline-flex;
@@ -1509,7 +1499,7 @@ html.settings-tab-view .settings-item-desc {
 }
 .settings-volume-slider {
   width: 180px;
-  accent-color: var(--popup-brand);
+  accent-color: var(--popup-slider-accent, #5b4bd6);
   cursor: pointer;
 }
 
@@ -1643,7 +1633,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-clip-source-row > input[type="range"] {
   width: 100%;
   min-width: 0;
-  accent-color: var(--popup-brand);
+  accent-color: var(--popup-slider-accent, #5b4bd6);
 }
 
 .settings-clip-source-row .settings-custom-input {
@@ -1987,7 +1977,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-channel-profile-slider {
   width: 75px;
-  accent-color: var(--popup-brand);
+  accent-color: var(--popup-slider-accent, #5b4bd6);
   cursor: pointer;
 }
 
@@ -2126,7 +2116,7 @@ body > .clr-picker .clr-preview {
   flex: 1 1 auto;
   min-width: 0;
   height: 4px;
-  accent-color: var(--popup-brand);
+  accent-color: var(--popup-slider-accent, #5b4bd6);
   cursor: pointer;
 }
 

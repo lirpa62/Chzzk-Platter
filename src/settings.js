@@ -220,6 +220,8 @@
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
     "cheeseLiveStallRecovery",
+    "cheeseSettingsRememberTab",
+    "cheeseSettingsRememberExpanded",
     "cheeseLiveSeekBarBottom",
     "cheeseLiveViewerCountPosition",
     "cheeseLiveViewerCountInline",
@@ -3632,6 +3634,57 @@
     } catch {}
   });
   loadLiveStallRecovery();
+
+  // ── 설정 화면: 마지막 탭 / 펼친 세부 설정 기억(둘 다 기본 꺼짐) ──────────
+  // ⚠ 복원은 첫 페인트 전에 일어나야 해서 settingsUi.js 가 localStorage 사본을
+  //   읽는다. 정본은 chrome.storage 이므로 두 곳에 함께 적는다(팝업 폭과 같은 방식).
+  const SETTINGS_MEMORY_OPTIONS = [
+    ["cheeseSettingsRememberTab", "[data-settings-remember-tab]"],
+    ["cheeseSettingsRememberExpanded", "[data-settings-remember-expanded]"],
+  ];
+  for (const [key, selector] of SETTINGS_MEMORY_OPTIONS) {
+    const input = document.querySelector(selector);
+    if (!input) continue;
+    (async () => {
+      let on = false;
+      try {
+        const data = await cachedStorageGet(key);
+        on = data?.[key] === true;
+      } catch {}
+      input.checked = on;
+      // ⚠ 여기서 사본을 덮어쓰면 안 된다. chrome.storage 가 아직 비어 있는
+      //   첫 실행에서 사용자가 켜 둔 사본을 "0" 으로 지워버린다(실측: 기존
+      //   테스트의 복원 검사가 깨졌다). 사본은 사용자가 토글할 때만 적는다.
+      //   정본(chrome.storage)에 값이 있을 때만 사본을 맞춰 둔다.
+      try {
+        if (localStorage.getItem(key) !== (on ? "1" : "0")) {
+          const data = await cachedStorageGet(key);
+          if (typeof data?.[key] === "boolean") {
+            localStorage.setItem(key, on ? "1" : "0");
+          }
+        }
+      } catch {}
+    })();
+    input.addEventListener("change", () => {
+      const on = input.checked;
+      try {
+        cachedStorageSet({ [key]: on });
+      } catch {}
+      try {
+        localStorage.setItem(key, on ? "1" : "0");
+      } catch {}
+      // 기억을 끄면 남아 있던 값도 지운다(다음에 열 때 확실히 초기 상태).
+      if (!on) {
+        try {
+          localStorage.removeItem(
+            key === "cheeseSettingsRememberTab"
+              ? "cheeseSettingsLastTab"
+              : "cheeseSettingsExpandedFeatures",
+          );
+        } catch {}
+      }
+    });
+  }
 
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
