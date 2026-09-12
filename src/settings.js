@@ -219,6 +219,7 @@
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
+    "cheeseLiveStallRecovery",
     "cheeseLiveSeekBarBottom",
     "cheeseLiveViewerCountPosition",
     "cheeseLiveViewerCountInline",
@@ -822,6 +823,7 @@
     return item?.closest?.("[data-panel]")?.dataset?.panel || "";
   }
 
+  let settingsDisclosures = null;
   function renderNewFeatureBadges() {
     newFeatureItems.forEach((item) => {
       item.classList.toggle(
@@ -855,6 +857,7 @@
       );
       button.appendChild(badge);
     });
+    settingsDisclosures?.refreshBadges();
   }
 
   const newFeatureReady = (async () => {
@@ -907,7 +910,8 @@
     }
     const ids = new Set(
       newFeatureItems
-        .filter((item) => newFeatureItemTab(item) === tab)
+        .filter((item) => newFeatureItemTab(item) === tab &&
+          !item.closest(".is-feature-collapsed, .is-search-hidden, .settings-item[hidden]"))
         .map(newFeatureItemId)
         .filter((id) => newFeatureState.pending.has(id)),
     );
@@ -954,13 +958,16 @@
         applySettingsSearch("");
       }
       selectTab(btn.dataset.tab);
+      CheeseSettingsUi.rememberTab(localStorage, activeTab);
       markNewFeatureTabSeen(previousTab);
     }),
   );
   const requestedSettingsTab = isSettingsTabView
     ? settingsPageParams.get("tab")
-    : "all";
-  selectTab(requestedSettingsTab || "all");
+    : null;
+  selectTab(CheeseSettingsUi.readLastTab(
+    localStorage, tabButtons.map((button) => button.dataset.tab), requestedSettingsTab,
+  ));
 
   openSettingsTabButton?.addEventListener("click", () => {
     const settingsUrl = new URL(chrome.runtime.getURL("settings.html"));
@@ -999,16 +1006,14 @@
     markNewFeatureTabSeen(activeTab);
   });
 
-  // ── 설정 검색: 이름+설명 텍스트로 항목을 필터링(검색 중엔 전체 탭에서 찾는다). ──
+  // 상세 설명도 검색하며 명시적인 부모 항목을 함께 표시한다.
+  CheeseSettingsUi.prepareHelp(document);
+  settingsDisclosures = CheeseSettingsUi.createDisclosures(document, localStorage);
   const searchInput = document.querySelector("[data-settings-search]");
   const searchClear = document.querySelector("[data-settings-search-clear]");
   const searchEmpty = document.querySelector("[data-settings-search-empty]");
-  const searchItems = Array.from(document.querySelectorAll(".settings-item"));
-  const searchGroups = Array.from(document.querySelectorAll(".settings-group"));
-  // 하이라이트 대상: 각 항목의 이름/설명 요소. 원본 텍스트를 보존해 검색 종료 시 복원.
-  const searchHighlightEls = Array.from(
-    document.querySelectorAll(".settings-item-name, .settings-item-desc"),
-  ).map((el) => ({ el, text: el.textContent || "" }));
+  const searchSummary = document.querySelector("[data-settings-search-summary]");
+  const settingsSearch = CheeseSettingsUi.createSearch(document, settingsDisclosures);
 
   function escapeHtml(s) {
     return s.replace(
@@ -1026,31 +1031,12 @@
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
-  // 요소 텍스트에서 q(대소문자 무시) 매칭 부분을 <mark>로 감싼다(원본은 이스케이프).
-  function highlightEl(el, original, q) {
-    if (!q) {
-      el.textContent = original;
-      return;
-    }
-    const re = new RegExp(escapeRegExp(q), "gi");
-    el.innerHTML = escapeHtml(original).replace(
-      re,
-      (m) => `<mark class="settings-search-mark">${m}</mark>`,
-    );
-  }
-  function clearHighlights() {
-    searchHighlightEls.forEach(({ el, text }) => {
-      el.textContent = text;
-    });
-  }
-
   function applySettingsSearch(rawQuery) {
     const q = rawQuery.trim().toLowerCase();
     if (searchClear) searchClear.hidden = q === "";
+    if (searchSummary) searchSummary.hidden = q === "";
     if (q === "") {
-      // 검색 종료: 하이라이트 제거 + 항목/그룹 표시 원복 + 현재 탭 필터 복귀.
-      clearHighlights();
-      searchItems.forEach((el) => (el.hidden = false));
+      settingsSearch.clear();
       if (searchEmpty) searchEmpty.hidden = true;
       selectTab(activeTab);
       return;
@@ -1060,24 +1046,9 @@
       btn.classList.remove("is-active");
       btn.setAttribute("aria-selected", "false");
     });
-    let anyMatch = false;
-    searchItems.forEach((item) => {
-      const text = (item.textContent || "").toLowerCase();
-      const hit = text.includes(q);
-      item.hidden = !hit;
-      if (hit) anyMatch = true;
-    });
-    // 이름/설명에 하이라이트 적용(보이는 항목만; 숨긴 항목은 원본 유지).
-    searchHighlightEls.forEach(({ el, text }) => {
-      const inHidden = el.closest(".settings-item")?.hidden;
-      highlightEl(el, text, inHidden ? "" : q);
-    });
-    // 항목이 하나도 안 남은 그룹(그리고 그 그룹 제목)은 통째로 숨긴다.
-    searchGroups.forEach((group) => {
-      const hasVisible = group.querySelector(".settings-item:not([hidden])");
-      group.hidden = !hasVisible;
-    });
-    if (searchEmpty) searchEmpty.hidden = anyMatch;
+    const count = settingsSearch.apply(q);
+    if (searchEmpty) searchEmpty.hidden = count > 0;
+    if (searchSummary) searchSummary.textContent = `검색 결과 ${count}개`;
     if (panelsScroll) panelsScroll.scrollTop = 0;
   }
 
@@ -1280,7 +1251,9 @@
     inputs.forEach((input) => {
       const key = input.dataset.feature;
       const v = saved[key];
-      input.checked = typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key);
+      input.checked = CheeseSettingsUi.checkedFromStored(
+        input, typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key),
+      );
     });
     reflectClipEditorStepAvailability();
     reflectChatTimeFormatAvailability();
@@ -1293,7 +1266,7 @@
     if (!featureFlagsLoaded) return;
     const flags = {};
     inputs.forEach((input) => {
-      flags[input.dataset.feature] = input.checked;
+      flags[input.dataset.feature] = CheeseSettingsUi.storedFromChecked(input);
     });
     try {
       cachedStorageSet({ [FEATURE_HIDDEN_KEY]: flags });
@@ -3601,14 +3574,14 @@
   loadMaxQuality();
   loadMaxQualityRespect();
 
-  // ── 라이브 되감기 바 표시(전역, 기본 ON) ─────────────────────────────────
+  // ── 라이브 되감기 바 표시(전역, 기본 OFF) ─────────────────────────────────
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
   const liveSeekBarInput = document.querySelector("[data-live-seek-bar]");
   async function loadLiveSeekBar() {
-    let on = true; // 미설정=기본 ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(LIVE_SEEK_BAR_KEY);
-      on = data?.[LIVE_SEEK_BAR_KEY] !== false;
+      on = data?.[LIVE_SEEK_BAR_KEY] === true;
     } catch {}
     if (liveSeekBarInput) liveSeekBarInput.checked = on;
     // 체크 상태가 정해진 뒤 하위 항목(위치) 잠금을 다시 평가한다.
