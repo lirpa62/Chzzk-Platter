@@ -13,7 +13,8 @@ if (window.location.pathname.endsWith("/settings.html")) {
     try {
       const saved = Number(localStorage.getItem("cheeseSettingsPopupWidth"));
       if (Number.isFinite(saved) && saved > 0) {
-        const w = Math.min(788, Math.max(420, Math.round(saved)));
+        // ⚠ 하한은 settings.js 의 POPUP_WIDTH_MIN 과 같아야 한다(현재 460).
+        const w = Math.min(788, Math.max(460, Math.round(saved)));
         document.documentElement.style.setProperty(
           "--settings-popup-w",
           w + "px",

@@ -1,5 +1,9 @@
 /* 치즈 플래터 - 기능 설정 팝업 스타일 (popup.css 변수 재사용) */
 html {
+  /* 설정 전체 글자 크기의 기준. 모든 font-size 가 rem 이라 이 값만 바꾸면
+     글자가 비례해서 커진다(여백·테두리는 px 그대로라 레이아웃이 무너지지 않는다).
+     제보: 글자가 작아 시인성이 떨어진다 → 16px 기준을 17px 로 올렸다. */
+  font-size: 17px;
   /* Firefox 등 표준 커스텀 스크롤바 색(thumb / track) */
   scrollbar-color: var(--popup-brand) var(--popup-soft-bg);
   scrollbar-width: thin;
@@ -7,7 +11,7 @@ html {
      유지된다(settings.js 가 --settings-popup-w 를 덮어쓴다).
      ⚠ 확장 팝업의 800px 한도에는 스크롤바 영역도 포함되어
      안전한 콘텐츠 폭은 788px 이다. */
-  --settings-popup-w: 500px;
+  --settings-popup-w: 600px;
   width: var(--settings-popup-w);
   min-width: var(--settings-popup-w);
   /* 788px 상한에서 손잡이를 더 끌어도 루트 스크롤 영역을 만들지 않는다.
@@ -120,7 +124,9 @@ html.settings-tab-view .settings-resizer {
 /* 좌측 탭 + 우측 패널 분리 레이아웃 — 남은 높이를 채우고, 탭/패널 각자 스크롤 */
 .settings-layout {
   display: grid;
-  grid-template-columns: 128px 1fr;
+  /* 탭 열을 넓혀 탭 이름과 그룹 목차가 두 줄로 접히는 일을 줄인다
+     (예: '볼륨·조작 화면 피드백'). */
+  grid-template-columns: 152px 1fr;
   /* 행 높이를 그리드 셀(남은 높이)로 고정한다. align-items:start 로 두면 탭 목록이
      길어질 때(탭이 많아짐) 컬럼이 셀 높이를 넘어 아래로 밀려나 하단이 잘렸다.
      minmax(0,1fr) 로 단일 행이 셀을 정확히 채우고 자식 overflow 를 허용한다. */
@@ -154,7 +160,7 @@ html.settings-tab-view .settings-resizer {
   border-radius: 8px;
   background: transparent;
   color: var(--popup-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   cursor: pointer;
   transition:
@@ -188,7 +194,7 @@ html.settings-tab-view .settings-resizer {
   background: transparent;
   color: var(--popup-dim-text);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   padding: 6px 8px;
   text-align: left;
@@ -247,7 +253,7 @@ html.settings-tab-view .settings-resizer {
   border-radius: 4px;
   background: color-mix(in srgb, var(--popup-brand) 13%, transparent);
   color: var(--popup-brand-strong);
-  font-size: 9px;
+  font-size: 0.625rem;
   font-weight: 800;
   line-height: 14px;
   letter-spacing: 0;
@@ -313,13 +319,13 @@ html.settings-tab-view .settings-resizer {
 
 .settings-header h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 800;
 }
 
 .settings-subtitle {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-muted);
 }
 
@@ -328,7 +334,7 @@ html.settings-tab-view .settings-resizer {
   padding: 10px 11px;
   border-radius: 8px;
   background: var(--popup-soft-bg);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--popup-text);
 }
@@ -353,7 +359,7 @@ html.settings-tab-view .settings-resizer {
   border: 1px solid var(--popup-border);
   background: var(--popup-bg);
   color: var(--popup-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   outline: none;
 }
 .settings-search-input:focus {
@@ -374,7 +380,7 @@ html.settings-tab-view .settings-resizer {
   border-radius: 50%;
   background: var(--popup-soft-bg);
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 .settings-search-clear:hover {
@@ -383,7 +389,7 @@ html.settings-tab-view .settings-resizer {
 .settings-search-empty {
   margin: 24px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--popup-muted);
 }
 /* 검색어 매칭 하이라이트 */
@@ -401,7 +407,7 @@ html.settings-tab-view .settings-resizer {
 
 .settings-group-title {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 800;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -450,18 +456,18 @@ html.settings-tab-view .settings-resizer {
 }
 
 .settings-item-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
 .settings-item-desc {
-  font-size: 11px;
+  font-size: 0.75rem;
   color: var(--popup-muted);
 }
 
 .settings-search-summary {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-muted);
 }
 
@@ -469,7 +475,7 @@ html.settings-tab-view .settings-resizer {
   display: block;
   margin-bottom: 4px;
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: 0;
@@ -588,18 +594,18 @@ html.settings-tab-view .settings-layout {
 }
 
 html.settings-tab-view .settings-header h1 {
-  font-size: 22px;
+  font-size: 1.375rem;
 }
 
 html.settings-tab-view .settings-subtitle,
 html.settings-tab-view .settings-hint {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 html.settings-tab-view .settings-search-input,
 html.settings-tab-view .settings-tab,
 html.settings-tab-view .settings-item-name {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 html.settings-tab-view .settings-tab {
@@ -612,7 +618,7 @@ html.settings-tab-view .settings-group {
 
 html.settings-tab-view .settings-group-title {
   margin-bottom: 8px;
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 html.settings-tab-view .settings-item {
@@ -620,7 +626,7 @@ html.settings-tab-view .settings-item {
 }
 
 html.settings-tab-view .settings-item-desc {
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.55;
 }
 
@@ -667,7 +673,7 @@ html.settings-tab-view .settings-item-desc {
   border: 1px solid rgba(3, 199, 90, 0.28);
   border-radius: 7px;
   background: rgba(3, 199, 90, 0.07);
-  font-size: 11px;
+  font-size: 0.75rem;
   line-height: 1.55;
   color: var(--popup-text);
 }
@@ -677,7 +683,7 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-info-panel strong {
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -686,7 +692,7 @@ html.settings-tab-view .settings-item-desc {
   border-radius: 4px;
   background: rgba(127, 127, 127, 0.18);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
+  font-size: 0.6562rem;
   word-break: break-all;
 }
 
@@ -719,7 +725,7 @@ html.settings-tab-view .settings-item-desc {
   outline: 0;
   background: var(--popup-surface);
   color: var(--popup-fg);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-live-tag-form input:focus {
@@ -734,7 +740,7 @@ html.settings-tab-view .settings-item-desc {
   border-radius: 7px;
   background: transparent;
   color: var(--popup-fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -769,7 +775,7 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-live-tag-bulk > label {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -783,7 +789,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-live-tag-bulk > span:not(.settings-live-tag-spacer) {
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
 }
 
 .settings-live-tag-spacer {
@@ -824,7 +830,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-live-tag-row > label span {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -854,7 +860,7 @@ html.settings-tab-view .settings-item-desc {
   margin: 0;
   padding: 16px 0 8px;
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   text-align: center;
 }
 
@@ -947,7 +953,7 @@ html.settings-tab-view .settings-item-desc {
   gap: 10px;
 }
 .settings-button-side-row > span {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-text);
 }
 .settings-button-side-row .settings-segmented {
@@ -1000,7 +1006,7 @@ html.settings-tab-view .settings-item-desc {
   border-radius: 8px;
   background: var(--popup-surface);
   color: var(--popup-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   cursor: pointer;
   transition:
@@ -1026,7 +1032,7 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-popover-caret {
-  font-size: 10px;
+  font-size: 0.6875rem;
   color: var(--popup-muted);
   transition: transform 0.12s ease;
 }
@@ -1062,7 +1068,7 @@ html.settings-tab-view .settings-item-desc {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   color: var(--popup-text);
   cursor: pointer;
@@ -1073,7 +1079,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-popover-group {
   padding: 6px 10px 4px;
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 800;
   cursor: default;
 }
@@ -1099,7 +1105,7 @@ html.settings-tab-view .settings-item-desc {
 /* 그룹 설명 문구 */
 .settings-group-desc {
   margin: 8px 2px;
-  font-size: 11px;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--popup-muted);
 }
@@ -1149,7 +1155,7 @@ html.settings-tab-view .settings-item-desc {
 /* 그룹 내 소제목(예: 자동 종료) */
 .settings-subgroup-title {
   margin: 12px 0 6px;
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-muted);
 }
@@ -1161,7 +1167,7 @@ html.settings-tab-view .settings-item-desc {
   border-radius: 8px;
   border: 1px solid var(--popup-warn-border, rgba(255, 170, 60, 0.5));
   background: var(--popup-warn-bg, rgba(255, 170, 60, 0.12));
-  font-size: 11px;
+  font-size: 0.75rem;
   line-height: 1.5;
   color: var(--popup-text);
 }
@@ -1195,7 +1201,7 @@ html.settings-tab-view .settings-item-desc {
   gap: 4px;
   flex: 1;
   min-width: 110px;
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-muted);
 }
@@ -1404,7 +1410,7 @@ html.settings-tab-view .settings-item-desc {
   border: 0;
   background: transparent;
   color: var(--popup-text);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 700;
   outline: none;
   -moz-appearance: textfield;
@@ -1435,7 +1441,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-custom-input small {
   flex: none;
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--popup-muted);
 }
@@ -1493,14 +1499,14 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-clip-source-row > span:first-child {
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-muted);
 }
 
 .settings-clip-source-row > span:first-child small {
   display: block;
-  font-size: 9px;
+  font-size: 0.625rem;
   font-weight: 600;
 }
 
@@ -1530,7 +1536,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-clip-source-effective {
   color: var(--popup-muted);
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.45;
   white-space: pre-line;
@@ -1566,7 +1572,7 @@ html.settings-tab-view .settings-item-desc {
   gap: 5px;
   min-width: 0;
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -1595,7 +1601,7 @@ html.settings-tab-view .settings-item-desc {
   background: var(--popup-surface);
   color: var(--popup-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
@@ -1663,7 +1669,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-chat-os-custom-head strong {
   overflow: hidden;
   color: var(--popup-text);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1735,7 +1741,7 @@ html.settings-tab-view .settings-item-desc {
   background: var(--popup-surface);
   color: var(--popup-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
+  font-size: 0.6875rem;
   line-height: 1.45;
   resize: vertical;
 }
@@ -1754,7 +1760,7 @@ html.settings-tab-view .settings-item-desc {
   overflow: hidden;
   min-width: 0;
   color: var(--popup-muted);
-  font-size: 10px;
+  font-size: 0.6875rem;
   line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1822,7 +1828,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-channel-profile-preview-label {
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -1839,7 +1845,7 @@ html.settings-tab-view .settings-item-desc {
   justify-content: flex-end;
   gap: 10px;
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -1893,7 +1899,7 @@ html.settings-tab-view .settings-item-desc {
   background: var(--popup-surface);
   color: var(--popup-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
@@ -1931,7 +1937,7 @@ body > .clr-picker input.clr-color {
   background: var(--popup-bg);
   color: var(--popup-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 body > .clr-picker input.clr-color:focus {
@@ -1988,7 +1994,7 @@ body > .clr-picker .clr-preview {
 .settings-osd-axis {
   flex: none;
   width: 28px;
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-muted);
 }
@@ -2086,7 +2092,7 @@ body > .clr-picker .clr-preview {
   border-radius: 8px;
   background: var(--popup-surface);
   color: var(--popup-text);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   cursor: pointer;
   transition:
@@ -2096,7 +2102,7 @@ body > .clr-picker .clr-preview {
 }
 
 .settings-segmented button small {
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--popup-muted);
 }
@@ -2147,7 +2153,7 @@ body > .clr-picker .clr-preview {
   min-width: 0;
 }
 .settings-order-title {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-muted);
   margin-bottom: 6px;
@@ -2173,7 +2179,7 @@ body > .clr-picker .clr-preview {
   border-radius: 6px;
   background: var(--popup-bg);
   border: 1px solid var(--popup-border);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: grab;
   user-select: none;
 }
@@ -2185,7 +2191,7 @@ body > .clr-picker .clr-preview {
 }
 .settings-order-grip {
   color: var(--popup-muted);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1;
 }
 .settings-order-label {
@@ -2215,7 +2221,7 @@ body > .clr-picker .clr-preview {
   cursor: default;
 }
 .settings-order-item.settings-order-native .settings-order-label {
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 /* 위치 초기화 버튼 행 */
 .settings-order-actions {
@@ -2224,7 +2230,7 @@ body > .clr-picker .clr-preview {
   margin-top: 8px;
 }
 .settings-order-reset {
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid var(--popup-border);
@@ -2259,7 +2265,7 @@ body > .clr-picker .clr-preview {
   border-radius: 8px;
   background: var(--popup-bg);
   color: var(--popup-text);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2293,7 +2299,7 @@ body > .clr-picker .clr-preview {
 .settings-osd-reset {
   margin-left: 6px;
   padding: 1px 7px;
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-weight: 700;
   border-radius: 5px;
   border: 1px solid var(--popup-border);
@@ -2324,7 +2330,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: var(--popup-bg);
   color: var(--popup-fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .settings-cbm-adduid input:focus {
   outline: 0;
@@ -2337,7 +2343,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-alert);
   background: var(--popup-alert);
   color: #fff;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2357,7 +2363,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: var(--popup-bg);
   color: var(--popup-fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .settings-cbm-adduid-reason:focus {
   outline: 0;
@@ -2368,7 +2374,7 @@ body > .clr-picker .clr-preview {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-fg-soft, var(--popup-fg));
   cursor: pointer;
 }
@@ -2379,7 +2385,7 @@ body > .clr-picker .clr-preview {
 .settings-cbm-adduid-hint {
   min-height: 16px;
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-fg-soft, var(--popup-fg));
 }
 .settings-cbm-adduid-hint[data-kind="error"] {
@@ -2403,7 +2409,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: transparent;
   color: var(--popup-fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
@@ -2424,7 +2430,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: var(--popup-bg);
   color: var(--popup-fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .settings-cbm-search input:focus {
   outline: 0;
@@ -2528,14 +2534,14 @@ body > .clr-picker .clr-preview {
 }
 .settings-cbm-name {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--popup-fg);
   word-break: break-all;
   overflow-wrap: anywhere;
 }
 .settings-cbm-native {
   display: inline-block;
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: #fff;
   background: #ff5b5b;
@@ -2544,14 +2550,14 @@ body > .clr-picker .clr-preview {
 }
 .settings-cbm-reason {
   margin-top: 3px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-fg);
   opacity: 0.85;
   word-break: break-word;
 }
 .settings-cbm-date {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 0.75rem;
   color: var(--popup-muted);
 }
 .settings-cbm-remove {
@@ -2561,7 +2567,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: transparent;
   color: var(--popup-fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2574,7 +2580,7 @@ body > .clr-picker .clr-preview {
 .settings-cbm-empty {
   padding: 20px 4px;
   text-align: center;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--popup-muted);
 }
 /* 검색 결과 없음/구조 안정용: 이때는 가상화를 끄고(list static) noresult 를 정상 흐름에 둔다. */
@@ -2594,7 +2600,7 @@ body > .clr-picker .clr-preview {
   border-radius: 10px;
   background: var(--popup-brand);
   color: #fff;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1.4;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
@@ -2615,7 +2621,7 @@ body > .clr-picker .clr-preview {
 
 .settings-cbm-hash {
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--popup-muted);
   word-break: break-all;
@@ -2646,12 +2652,12 @@ body > .clr-picker .clr-preview {
 }
 .cbm-modal-title {
   font-weight: 800;
-  font-size: 15px;
+  font-size: 0.9375rem;
   margin-bottom: 10px;
 }
 .cbm-modal-body {
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.55;
   color: var(--popup-fg);
 }
@@ -2667,7 +2673,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: transparent;
   color: var(--popup-fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2702,7 +2708,7 @@ body > .clr-picker .clr-preview {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--popup-fg);
   cursor: pointer;
@@ -2715,7 +2721,7 @@ body > .clr-picker .clr-preview {
   cursor: pointer;
 }
 .settings-cbm-selcount {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-muted);
 }
 .settings-cbm-bulk-spacer {
@@ -2728,7 +2734,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   background: transparent;
   color: var(--popup-fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2750,7 +2756,7 @@ body > .clr-picker .clr-preview {
   border: 0;
   background: transparent;
   color: var(--popup-brand-strong);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2764,7 +2770,7 @@ body > .clr-picker .clr-preview {
   background: var(--popup-soft-bg);
 }
 .settings-cbm-hist-item {
-  font-size: 11px;
+  font-size: 0.75rem;
   color: var(--popup-fg);
   padding: 2px 0;
 }
@@ -2799,7 +2805,7 @@ body > .clr-picker .clr-preview {
 }
 .cf-fav-order-handle {
   color: var(--popup-fg-weak, #888);
-  font-size: 12px;
+  font-size: 0.75rem;
   letter-spacing: -2px;
   flex: none;
   user-select: none;
@@ -2819,7 +2825,7 @@ body > .clr-picker .clr-preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-fg);
 }
 .cf-fav-order-btns {
@@ -2842,7 +2848,7 @@ body > .clr-picker .clr-preview {
   cursor: default;
 }
 .cf-fav-order-empty {
-  font-size: 11px;
+  font-size: 0.75rem;
   color: var(--popup-fg-weak, #888);
   padding: 6px 0;
   list-style: none;
@@ -2865,7 +2871,7 @@ body > .clr-picker .clr-preview {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--popup-fg);
   cursor: pointer;
 }
@@ -2901,7 +2907,7 @@ body > .clr-picker .clr-preview {
   outline: 0;
   background: var(--popup-surface);
   color: var(--popup-text);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-word-filter-add input[type="text"]:focus {
@@ -2933,7 +2939,7 @@ body > .clr-picker .clr-preview {
   border-radius: 7px;
   background: var(--popup-help-bg);
   color: var(--popup-brand-strong);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -2946,7 +2952,7 @@ body > .clr-picker .clr-preview {
 .settings-word-filter-error {
   margin: 0;
   color: var(--popup-alert-text, #ff5454);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 
@@ -2960,7 +2966,7 @@ body > .clr-picker .clr-preview {
   outline: 0;
   background: var(--popup-surface);
   color: var(--popup-text);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-word-filter-search input[type="search"]:focus {
@@ -2977,7 +2983,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   border-radius: 6px;
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 
@@ -2990,7 +2996,7 @@ body > .clr-picker .clr-preview {
 .settings-word-filter-count {
   margin: 0;
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -3010,7 +3016,7 @@ body > .clr-picker .clr-preview {
 .settings-word-filter-empty {
   padding: 8px 2px;
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-word-filter-item {
@@ -3031,7 +3037,7 @@ body > .clr-picker .clr-preview {
   border-radius: 5px;
   background: var(--popup-soft-bg);
   color: var(--popup-muted);
-  font-size: 11px;
+  font-size: 0.75rem;
   text-align: center;
 }
 
@@ -3043,7 +3049,7 @@ body > .clr-picker .clr-preview {
   white-space: nowrap;
   color: var(--popup-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-word-filter-item button {
@@ -3055,7 +3061,7 @@ body > .clr-picker .clr-preview {
   border-radius: 6px;
   background: transparent;
   color: var(--popup-muted);
-  font-size: 16px;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -3076,7 +3082,7 @@ body > .clr-picker .clr-preview {
   border-radius: 8px;
   background: transparent;
   color: var(--popup-brand-strong);
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -3108,7 +3114,7 @@ body > .clr-picker .clr-preview {
   margin: 0;
   padding: 10px 0;
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .settings-exclude-row {
@@ -3135,7 +3141,7 @@ body > .clr-picker .clr-preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -3146,7 +3152,7 @@ body > .clr-picker .clr-preview {
   border-radius: 6px;
   background: transparent;
   color: var(--popup-text);
-  font-size: 11px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
 }
@@ -3173,7 +3179,7 @@ body > .clr-picker .clr-preview {
 .settings-memo-channel {
   align-items: baseline;
   display: flex;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 700;
   gap: 6px;
   padding: 5px 6px 3px;
@@ -3192,7 +3198,7 @@ body > .clr-picker .clr-preview {
   border-radius: 4px;
   cursor: pointer;
   display: flex;
-  font-size: 12px;
+  font-size: 0.75rem;
   gap: 6px;
   padding: 4px 6px;
 }
@@ -3205,7 +3211,7 @@ body > .clr-picker .clr-preview {
 }
 .settings-memo-empty {
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   margin: 0;
   padding: 10px 6px;
 }
@@ -3221,7 +3227,7 @@ body > .clr-picker .clr-preview {
   border-radius: 6px;
   color: inherit;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 6px 10px;
 }
 .settings-memo-actions button:disabled {
@@ -3249,7 +3255,7 @@ body > .clr-picker .clr-preview {
   border-radius: 6px;
   color: inherit;
   flex: 1 1 auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   min-width: 0;
   padding: 6px 8px;
 }
@@ -3260,7 +3266,7 @@ body > .clr-picker .clr-preview {
   color: inherit;
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 6px 12px;
 }
 .settings-bot-input button:disabled,
@@ -3282,7 +3288,7 @@ body > .clr-picker .clr-preview {
   border: 1px solid var(--popup-border);
   border-radius: 999px;
   display: inline-flex;
-  font-size: 12px;
+  font-size: 0.75rem;
   gap: 2px;
   padding: 3px 4px 3px 10px;
 }
@@ -3292,7 +3298,7 @@ body > .clr-picker .clr-preview {
   border-radius: 999px;
   color: var(--popup-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 0.75rem;
   line-height: 1;
   padding: 3px 5px;
 }
@@ -3324,7 +3330,7 @@ body > .clr-picker .clr-preview {
 .cf-fav-order-weight {
   color: var(--popup-muted);
   flex: none;
-  font-size: 11px;
+  font-size: 0.75rem;
   margin-left: 6px;
 }
 [data-affinity-sub].is-locked {

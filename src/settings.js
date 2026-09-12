@@ -365,8 +365,8 @@
   // ⚠ 브라우저의 800px 팝업 한도에 스크롤바 영역이 포함된다.
   //   789px부터 루트 스크롤이 생길 수 있어 안전한 콘텐츠 폭으로 제한한다.
   const POPUP_WIDTH_KEY = "cheeseSettingsPopupWidth";
-  const POPUP_WIDTH_DEFAULT = 500;
-  const POPUP_WIDTH_MIN = 420;
+  const POPUP_WIDTH_DEFAULT = 600;
+  const POPUP_WIDTH_MIN = 460;
   const POPUP_WIDTH_MAX = 788;
 
   function clampPopupWidth(px) {
