@@ -14821,18 +14821,32 @@ img.cheese-recap-emoji {
   background: #3e34af;
 }
 
-/* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ───────── */
-.cheese-chat-history-inline-parent {
+/* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ─────────
+   ⚠ 접힌 채팅창에는 적용하지 않는다. 치지직은 '채팅 접기' 시 이 컨테이너를
+     display:none 으로 감추는데, 우리가 display:flex !important 를 걸어 두면
+     그 숨김을 이겨서 접기가 아예 동작하지 않는다(제보: 채팅 이어보기를 켜면
+     채팅창 접기가 안 됨). 실측: 접어도 컨테이너가 계속 보이고 48px 로 줄어든
+     aside 밖으로 채팅이 비어져 나온다.
+     :has() 가 아니라 조상 클래스로 거른다 — aside 가 조상이라 이걸로 충분하고
+     :has() 는 채팅처럼 자주 바뀌는 트리에서 비싸다. */
+aside:not([class*="_is_folded_"]) .cheese-chat-history-inline-parent {
   display: flex !important;
   flex-direction: column !important;
   min-height: 0 !important;
   overflow: hidden !important;
 }
 
-.cheese-chat-history-native-list {
+aside:not([class*="_is_folded_"]) .cheese-chat-history-native-list {
   flex: 1 1 0 !important;
   height: auto !important;
   min-height: 0 !important;
+}
+
+/* 접힌 채팅창에서는 우리 런처·패널도 같이 사라져야 한다. 컨테이너가 숨겨져도
+   이들은 별도 규칙(position 등)을 가져 남을 수 있다. */
+aside[class*="_is_folded_"] .cheese-chat-history-launcher,
+aside[class*="_is_folded_"] .cheese-chat-history-panel {
+  display: none !important;
 }
 
 .cheese-chat-history-launcher {

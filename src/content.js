@@ -19012,12 +19012,31 @@
       window.visualViewport?.height ||
       window.innerHeight ||
       document.documentElement.clientHeight;
+    // ⚠ boxTop 은 우리가 방금 준 height 때문에 흔들릴 수 있다. 특히 헤더 자동 숨김이
+    //   켜져 있으면 마우스가 플레이어에 올라갈 때마다 헤더가 peek 되면서 영상 상단이
+    //   헤더 높이(60px)만큼 오르내리고, 그때마다 availableHeight 가 달라져 높이가
+    //   681 ↔ 621 로 요동친다(실측). 그 진동이 곧 제보된 '계속 깜빡임'이다.
+    //   → 마지막으로 적용한 높이와 1~2px 차이면 무시하고, 그보다 크게 달라질 때만
+    //     새 값을 쓴다. 진짜 레이아웃 변화(채팅 접기·창 크기)는 60px 단위라 그대로 반영된다.
     const boxTop = Math.max(0, videoBox.getBoundingClientRect().top);
     const availableHeight = Math.floor(viewportHeight - boxTop);
-    const idealH =
+    let idealH =
       availableHeight > 0
         ? Math.min(widthBasedHeight, availableHeight)
         : widthBasedHeight;
+    // 헤더 자동 숨김의 peek 은 '오버레이'라 영상 크기를 바꿀 이유가 없다. peek 으로
+    //   생긴 상단 이동분은 되돌려, 마우스가 오갈 때 높이가 바뀌지 않게 한다.
+    if (featureFlags.headerAutoHide) {
+      // ⚠ HEADER_PEEK_CLASS 상수는 이 함수보다 뒤에 const 로 선언돼 있다. 여기서
+      //   참조하면 초기화 순서에 따라 TDZ 예외가 날 수 있어 문자열을 직접 쓴다.
+      const peeking = document.querySelector("header#header.cheese-header-peek");
+      if (peeking instanceof HTMLElement) {
+        const peekH = Math.round(peeking.getBoundingClientRect().height);
+        if (peekH > 0) {
+          idealH = Math.min(widthBasedHeight, availableHeight + peekH);
+        }
+      }
+    }
     const value = `${idealH}px`;
     // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
     // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
