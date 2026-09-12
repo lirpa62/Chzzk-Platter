@@ -219,6 +219,7 @@
     "cheeseHeaderFollowCount",
     "cheeseHeaderNav",
     "cheeseLiveSeekBar",
+    "cheeseLiveStallRecovery",
     "cheeseLiveSeekBarBottom",
     "cheeseLiveViewerCountPosition",
     "cheeseLiveViewerCountInline",
@@ -232,6 +233,7 @@
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
     "cheeseMixerAlwaysOn",
+    "cheeseMixerDefaultOn",
     "cheeseAudioMixer.autoSync",
     "cheeseMaxQuality",
     "cheeseMaxQualityRespectManual",
@@ -276,6 +278,7 @@
     "cheeseSyncCooldownEnabled",
     "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
+    "cheeseVideoFilterDefaultOn",
     "cheeseVideoFilter.autoSharpen",
     "cheeseVideoFilterGlobalDefaultMode",
     "cheeseVodAutoplayOff",
@@ -820,6 +823,7 @@
     return item?.closest?.("[data-panel]")?.dataset?.panel || "";
   }
 
+  let settingsDisclosures = null;
   function renderNewFeatureBadges() {
     newFeatureItems.forEach((item) => {
       item.classList.toggle(
@@ -853,6 +857,7 @@
       );
       button.appendChild(badge);
     });
+    settingsDisclosures?.refreshBadges();
   }
 
   const newFeatureReady = (async () => {
@@ -905,7 +910,8 @@
     }
     const ids = new Set(
       newFeatureItems
-        .filter((item) => newFeatureItemTab(item) === tab)
+        .filter((item) => newFeatureItemTab(item) === tab &&
+          !item.closest(".is-feature-collapsed, .is-search-hidden, .settings-item[hidden]"))
         .map(newFeatureItemId)
         .filter((id) => newFeatureState.pending.has(id)),
     );
@@ -952,13 +958,16 @@
         applySettingsSearch("");
       }
       selectTab(btn.dataset.tab);
+      CheeseSettingsUi.rememberTab(localStorage, activeTab);
       markNewFeatureTabSeen(previousTab);
     }),
   );
   const requestedSettingsTab = isSettingsTabView
     ? settingsPageParams.get("tab")
-    : "all";
-  selectTab(requestedSettingsTab || "all");
+    : null;
+  selectTab(CheeseSettingsUi.readLastTab(
+    localStorage, tabButtons.map((button) => button.dataset.tab), requestedSettingsTab,
+  ));
 
   openSettingsTabButton?.addEventListener("click", () => {
     const settingsUrl = new URL(chrome.runtime.getURL("settings.html"));
@@ -997,16 +1006,14 @@
     markNewFeatureTabSeen(activeTab);
   });
 
-  // ── 설정 검색: 이름+설명 텍스트로 항목을 필터링(검색 중엔 전체 탭에서 찾는다). ──
+  // 상세 설명도 검색하며 명시적인 부모 항목을 함께 표시한다.
+  CheeseSettingsUi.prepareHelp(document);
+  settingsDisclosures = CheeseSettingsUi.createDisclosures(document, localStorage);
   const searchInput = document.querySelector("[data-settings-search]");
   const searchClear = document.querySelector("[data-settings-search-clear]");
   const searchEmpty = document.querySelector("[data-settings-search-empty]");
-  const searchItems = Array.from(document.querySelectorAll(".settings-item"));
-  const searchGroups = Array.from(document.querySelectorAll(".settings-group"));
-  // 하이라이트 대상: 각 항목의 이름/설명 요소. 원본 텍스트를 보존해 검색 종료 시 복원.
-  const searchHighlightEls = Array.from(
-    document.querySelectorAll(".settings-item-name, .settings-item-desc"),
-  ).map((el) => ({ el, text: el.textContent || "" }));
+  const searchSummary = document.querySelector("[data-settings-search-summary]");
+  const settingsSearch = CheeseSettingsUi.createSearch(document, settingsDisclosures);
 
   function escapeHtml(s) {
     return s.replace(
@@ -1024,31 +1031,12 @@
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
-  // 요소 텍스트에서 q(대소문자 무시) 매칭 부분을 <mark>로 감싼다(원본은 이스케이프).
-  function highlightEl(el, original, q) {
-    if (!q) {
-      el.textContent = original;
-      return;
-    }
-    const re = new RegExp(escapeRegExp(q), "gi");
-    el.innerHTML = escapeHtml(original).replace(
-      re,
-      (m) => `<mark class="settings-search-mark">${m}</mark>`,
-    );
-  }
-  function clearHighlights() {
-    searchHighlightEls.forEach(({ el, text }) => {
-      el.textContent = text;
-    });
-  }
-
   function applySettingsSearch(rawQuery) {
     const q = rawQuery.trim().toLowerCase();
     if (searchClear) searchClear.hidden = q === "";
+    if (searchSummary) searchSummary.hidden = q === "";
     if (q === "") {
-      // 검색 종료: 하이라이트 제거 + 항목/그룹 표시 원복 + 현재 탭 필터 복귀.
-      clearHighlights();
-      searchItems.forEach((el) => (el.hidden = false));
+      settingsSearch.clear();
       if (searchEmpty) searchEmpty.hidden = true;
       selectTab(activeTab);
       return;
@@ -1058,24 +1046,9 @@
       btn.classList.remove("is-active");
       btn.setAttribute("aria-selected", "false");
     });
-    let anyMatch = false;
-    searchItems.forEach((item) => {
-      const text = (item.textContent || "").toLowerCase();
-      const hit = text.includes(q);
-      item.hidden = !hit;
-      if (hit) anyMatch = true;
-    });
-    // 이름/설명에 하이라이트 적용(보이는 항목만; 숨긴 항목은 원본 유지).
-    searchHighlightEls.forEach(({ el, text }) => {
-      const inHidden = el.closest(".settings-item")?.hidden;
-      highlightEl(el, text, inHidden ? "" : q);
-    });
-    // 항목이 하나도 안 남은 그룹(그리고 그 그룹 제목)은 통째로 숨긴다.
-    searchGroups.forEach((group) => {
-      const hasVisible = group.querySelector(".settings-item:not([hidden])");
-      group.hidden = !hasVisible;
-    });
-    if (searchEmpty) searchEmpty.hidden = anyMatch;
+    const count = settingsSearch.apply(q);
+    if (searchEmpty) searchEmpty.hidden = count > 0;
+    if (searchSummary) searchSummary.textContent = `검색 결과 ${count}개`;
     if (panelsScroll) panelsScroll.scrollTop = 0;
   }
 
@@ -1105,6 +1078,11 @@
     "loungeNews",
     // 수신함 커뮤니티 소식도 채널별 요청이 필요하므로 opt-in 으로 둔다.
     "inboxCommunityNews",
+    // 아래 네 가지도 기본 숨김. content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
+    "liveSync",
+    "liveRewind",
+    "searchVideos",
+    "searchClips",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -1273,7 +1251,9 @@
     inputs.forEach((input) => {
       const key = input.dataset.feature;
       const v = saved[key];
-      input.checked = typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key);
+      input.checked = CheeseSettingsUi.checkedFromStored(
+        input, typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key),
+      );
     });
     reflectClipEditorStepAvailability();
     reflectChatTimeFormatAvailability();
@@ -1286,7 +1266,7 @@
     if (!featureFlagsLoaded) return;
     const flags = {};
     inputs.forEach((input) => {
-      flags[input.dataset.feature] = input.checked;
+      flags[input.dataset.feature] = CheeseSettingsUi.storedFromChecked(input);
     });
     try {
       cachedStorageSet({ [FEATURE_HIDDEN_KEY]: flags });
@@ -2458,6 +2438,30 @@
   });
   loadMixerAlwaysOn();
 
+  // ── 오디오 믹서 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
+  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
+  // '항상 켜기 제외 채널'에 남기지 않는다(다음 방문엔 다시 켜진 채로 시작).
+  const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
+  const mixerDefaultOnInput = document.querySelector("[data-mixer-default-on]");
+
+  async function loadMixerDefaultOn() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(MIXER_DEFAULT_ON_KEY);
+      on = data?.[MIXER_DEFAULT_ON_KEY] === true;
+    } catch {}
+    if (mixerDefaultOnInput) mixerDefaultOnInput.checked = on;
+  }
+
+  mixerDefaultOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [MIXER_DEFAULT_ON_KEY]: mixerDefaultOnInput.checked,
+      });
+    } catch {}
+  });
+  loadMixerDefaultOn();
+
   // ── '항상 켜기' 제외 채널 목록(오디오 믹서 / 비디오 필터 공용) ────────────
   // 패널에서 직접 끈 채널은 per-channel 저장값에 userDisabled=true 로 남는다
   // (키: audioMixer:<채널해시> / videoFilter:<채널해시>). 그 채널들을 모아 보여
@@ -3103,7 +3107,7 @@
       }
       if (clipVideoFilterEnabledInput) {
         clipVideoFilterEnabledInput.checked =
-          data?.[CLIP_VIDEO_FILTER_ENABLED_KEY] !== false;
+          data?.[CLIP_VIDEO_FILTER_ENABLED_KEY] === true;
       }
       if (clipVideoFilterAlwaysOnInput) {
         clipVideoFilterAlwaysOnInput.checked =
@@ -3475,6 +3479,32 @@
   });
   loadVideoFilterAlwaysOn();
 
+  // ── 비디오 필터 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
+  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
+  // '항상 켜기 제외 채널'에 남기지 않는다(오디오 믹서의 같은 옵션과 동일 규칙).
+  const VIDEO_FILTER_DEFAULT_ON_KEY = "cheeseVideoFilterDefaultOn";
+  const videoFilterDefaultOnInput = document.querySelector(
+    "[data-video-filter-default-on]",
+  );
+
+  async function loadVideoFilterDefaultOn() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(VIDEO_FILTER_DEFAULT_ON_KEY);
+      on = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
+    } catch {}
+    if (videoFilterDefaultOnInput) videoFilterDefaultOnInput.checked = on;
+  }
+
+  videoFilterDefaultOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [VIDEO_FILTER_DEFAULT_ON_KEY]: videoFilterDefaultOnInput.checked,
+      });
+    } catch {}
+  });
+  loadVideoFilterDefaultOn();
+
   // ── 넓은 화면 자동 적용(전역, 진입 시 viewmode 자동 켜기) ──────────────────
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
   const wideScreenAutoInput = document.querySelector("[data-wide-screen-auto]");
@@ -3544,14 +3574,14 @@
   loadMaxQuality();
   loadMaxQualityRespect();
 
-  // ── 라이브 되감기 바 표시(전역, 기본 ON) ─────────────────────────────────
+  // ── 라이브 되감기 바 표시(전역, 기본 OFF) ─────────────────────────────────
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
   const liveSeekBarInput = document.querySelector("[data-live-seek-bar]");
   async function loadLiveSeekBar() {
-    let on = true; // 미설정=기본 ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(LIVE_SEEK_BAR_KEY);
-      on = data?.[LIVE_SEEK_BAR_KEY] !== false;
+      on = data?.[LIVE_SEEK_BAR_KEY] === true;
     } catch {}
     if (liveSeekBarInput) liveSeekBarInput.checked = on;
     // 체크 상태가 정해진 뒤 하위 항목(위치) 잠금을 다시 평가한다.
@@ -3565,6 +3595,31 @@
     } catch {}
   });
   loadLiveSeekBar();
+
+  // ── 라이브 멈춤 자동 복구(전역, 기본 OFF) ────────────────────────────────
+  // 다른 탭에 오래 머물다 돌아오면 영상이 로딩 상태로 굳는 증상이 있다(제보).
+  // 실측: 재생 위치가 버퍼 끝보다 앞이라 데이터가 없고 seek 이 끝나지 않는다.
+  // 원인이 우리 코드인지 치지직 플레이어인지 확정되지 않아 기본 OFF 로 둔다.
+  const LIVE_STALL_RECOVERY_KEY = "cheeseLiveStallRecovery";
+  const liveStallRecoveryInput = document.querySelector(
+    "[data-live-stall-recovery]",
+  );
+  async function loadLiveStallRecovery() {
+    let on = false;
+    try {
+      const data = await cachedStorageGet(LIVE_STALL_RECOVERY_KEY);
+      on = data?.[LIVE_STALL_RECOVERY_KEY] === true;
+    } catch {}
+    if (liveStallRecoveryInput) liveStallRecoveryInput.checked = on;
+  }
+  liveStallRecoveryInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [LIVE_STALL_RECOVERY_KEY]: liveStallRecoveryInput.checked,
+      });
+    } catch {}
+  });
+  loadLiveStallRecovery();
 
   // ── 채팅 단어·정규식 필터 ─────────────────────────────────────────────────
   // 저장 형태: [{ pattern, regex }]. 정규식은 추가 시점에 컴파일해 검증한다.
@@ -9089,10 +9144,10 @@
     "[data-following-live-sort]",
   );
   async function loadFollowingLiveSort() {
-    let on = true; // 미설정/true=ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(FOLLOWING_LIVE_SORT_KEY);
-      on = data?.[FOLLOWING_LIVE_SORT_KEY] !== false;
+      on = data?.[FOLLOWING_LIVE_SORT_KEY] === true;
     } catch {}
     if (followingLiveSortInput) followingLiveSortInput.checked = on;
   }
@@ -9105,14 +9160,14 @@
   });
   loadFollowingLiveSort();
 
-  // 팔로잉 정리 버튼(기본 ON).
+  // 팔로잉 정리 버튼(기본 OFF).
   const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
   const followCleanupInput = document.querySelector("[data-follow-cleanup]");
   async function loadFollowCleanup() {
-    let on = true; // 미설정/true=ON
+    let on = false; // 미설정=기본 OFF
     try {
       const data = await cachedStorageGet(FOLLOW_CLEANUP_KEY);
-      on = data?.[FOLLOW_CLEANUP_KEY] !== false;
+      on = data?.[FOLLOW_CLEANUP_KEY] === true;
     } catch {}
     if (followCleanupInput) followCleanupInput.checked = on;
   }

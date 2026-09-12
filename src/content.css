@@ -14821,18 +14821,32 @@ img.cheese-recap-emoji {
   background: #3e34af;
 }
 
-/* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ───────── */
-.cheese-chat-history-inline-parent {
+/* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ─────────
+   ⚠ 접힌 채팅창에는 적용하지 않는다. 치지직은 '채팅 접기' 시 이 컨테이너를
+     display:none 으로 감추는데, 우리가 display:flex !important 를 걸어 두면
+     그 숨김을 이겨서 접기가 아예 동작하지 않는다(제보: 채팅 이어보기를 켜면
+     채팅창 접기가 안 됨). 실측: 접어도 컨테이너가 계속 보이고 48px 로 줄어든
+     aside 밖으로 채팅이 비어져 나온다.
+     :has() 가 아니라 조상 클래스로 거른다 — aside 가 조상이라 이걸로 충분하고
+     :has() 는 채팅처럼 자주 바뀌는 트리에서 비싸다. */
+aside:not([class*="_is_folded_"]) .cheese-chat-history-inline-parent {
   display: flex !important;
   flex-direction: column !important;
   min-height: 0 !important;
   overflow: hidden !important;
 }
 
-.cheese-chat-history-native-list {
+aside:not([class*="_is_folded_"]) .cheese-chat-history-native-list {
   flex: 1 1 0 !important;
   height: auto !important;
   min-height: 0 !important;
+}
+
+/* 접힌 채팅창에서는 우리 런처·패널도 같이 사라져야 한다. 컨테이너가 숨겨져도
+   이들은 별도 규칙(position 등)을 가져 남을 수 있다. */
+aside[class*="_is_folded_"] .cheese-chat-history-launcher,
+aside[class*="_is_folded_"] .cheese-chat-history-panel {
+  display: none !important;
 }
 
 .cheese-chat-history-launcher {
@@ -15429,6 +15443,8 @@ html.theme_dark .cheese-memo-window {
   color: #fff;
 }
 
+/* 스크롤 모양은 댓글 타임스탬프 패널(.cheese-search-comment-panel-list)과 맞춘다.
+   헤더를 이미 같은 클래스로 쓰고 있는데 스크롤바만 브라우저 기본이라 겉돌았다. */
 .cheese-peak-body {
   max-height: calc(
     var(--cheese-search-comment-panel-max-height, min(430px, 100vh - 140px)) -
@@ -15436,6 +15452,37 @@ html.theme_dark .cheese-memo-window {
   );
   overflow-y: auto;
   padding: 6px 8px 10px;
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.cheese-peak-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cheese-peak-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+
+.cheese-peak-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+
+.cheese-peak-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
 }
 .cheese-peak-section + .cheese-peak-section {
   border-top: 1px solid var(--peak-border);
@@ -15946,3 +15993,109 @@ html.cheese-chat-emoticon-hide-on
    헤더·접기 UI 는 즐겨찾기/팔로잉과 같은 클래스를 그대로 쓴다(별도 스타일 없음).
    예전에는 '방송 중 / 그 외' 라벨을 자체 스타일로 그렸는데, 폰트색이 테마와
    맞지 않았고(제보) 같은 채널이 두 번 보이는 문제도 있어 없앴다. */
+
+/* ── 팝오버·모달 스크롤바 공통 ─────────────────────────────────────────────
+   댓글 타임스탬프 패널(.cheese-search-comment-panel-list)이 기준이고, 구간 요약도
+   거기에 맞췄다. 나머지 팝오버·모달 목록은 브라우저 기본 스크롤바를 쓰고 있어
+   같은 계열인데도 따로 놀았다. 기준과 같은 값을 한 곳에서 준다.
+   ⚠ 선언을 목록마다 복사하지 않는다. 값이 갈라지면 '같은 계열'이 다시 깨진다.
+   ⚠ 기준(.cheese-search-comment-panel-list)과 .cheese-peak-body 는 각자 규칙이
+     이미 있어 여기 넣지 않는다 — 중복 선언은 나중에 한쪽만 고치는 사고를 부른다.
+   ⚠ #cheese-lounge-modal .cheese-lounge-tabs 는 가로 스크롤바를 의도적으로 숨기는
+     곳이라 제외한다. */
+#cheese-lounge-modal .cheese-lounge-body,
+.cheese-cf-group-modal-body,
+.cheese-cf-group-modal-channel-list,
+.cheese-cf-group-modal-sources > div:last-child,
+.cheese-chat-history-panel-list,
+.cheese-fcln-list,
+.cheese-live-tag-filter-list,
+.cheese-logpower-popup-rows,
+.cheese-logpower-popup-table,
+.cheese-memo-list,
+.cheese-memo-picker ul,
+.cheese-search-options-body,
+.cheese-search-studio-menu {
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+/* ⚠ height 도 같이 준다. .cheese-search-studio-menu 는 overflow: auto(양축)라
+   가로 스크롤바가 생길 수 있는데, width 만 주면 가로 막대는 기본 두께로 남는다. */
+#cheese-lounge-modal .cheese-lounge-body::-webkit-scrollbar,
+.cheese-cf-group-modal-body::-webkit-scrollbar,
+.cheese-cf-group-modal-channel-list::-webkit-scrollbar,
+.cheese-cf-group-modal-sources > div:last-child::-webkit-scrollbar,
+.cheese-chat-history-panel-list::-webkit-scrollbar,
+.cheese-fcln-list::-webkit-scrollbar,
+.cheese-live-tag-filter-list::-webkit-scrollbar,
+.cheese-logpower-popup-rows::-webkit-scrollbar,
+.cheese-logpower-popup-table::-webkit-scrollbar,
+.cheese-memo-list::-webkit-scrollbar,
+.cheese-memo-picker ul::-webkit-scrollbar,
+.cheese-search-options-body::-webkit-scrollbar,
+.cheese-search-studio-menu::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+#cheese-lounge-modal .cheese-lounge-body::-webkit-scrollbar-track,
+.cheese-cf-group-modal-body::-webkit-scrollbar-track,
+.cheese-cf-group-modal-channel-list::-webkit-scrollbar-track,
+.cheese-cf-group-modal-sources > div:last-child::-webkit-scrollbar-track,
+.cheese-chat-history-panel-list::-webkit-scrollbar-track,
+.cheese-fcln-list::-webkit-scrollbar-track,
+.cheese-live-tag-filter-list::-webkit-scrollbar-track,
+.cheese-logpower-popup-rows::-webkit-scrollbar-track,
+.cheese-logpower-popup-table::-webkit-scrollbar-track,
+.cheese-memo-list::-webkit-scrollbar-track,
+.cheese-memo-picker ul::-webkit-scrollbar-track,
+.cheese-search-options-body::-webkit-scrollbar-track,
+.cheese-search-studio-menu::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+
+#cheese-lounge-modal .cheese-lounge-body::-webkit-scrollbar-thumb,
+.cheese-cf-group-modal-body::-webkit-scrollbar-thumb,
+.cheese-cf-group-modal-channel-list::-webkit-scrollbar-thumb,
+.cheese-cf-group-modal-sources > div:last-child::-webkit-scrollbar-thumb,
+.cheese-chat-history-panel-list::-webkit-scrollbar-thumb,
+.cheese-fcln-list::-webkit-scrollbar-thumb,
+.cheese-live-tag-filter-list::-webkit-scrollbar-thumb,
+.cheese-logpower-popup-rows::-webkit-scrollbar-thumb,
+.cheese-logpower-popup-table::-webkit-scrollbar-thumb,
+.cheese-memo-list::-webkit-scrollbar-thumb,
+.cheese-memo-picker ul::-webkit-scrollbar-thumb,
+.cheese-search-options-body::-webkit-scrollbar-thumb,
+.cheese-search-studio-menu::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+
+#cheese-lounge-modal .cheese-lounge-body::-webkit-scrollbar-thumb:hover,
+.cheese-cf-group-modal-body::-webkit-scrollbar-thumb:hover,
+.cheese-cf-group-modal-channel-list::-webkit-scrollbar-thumb:hover,
+.cheese-cf-group-modal-sources > div:last-child::-webkit-scrollbar-thumb:hover,
+.cheese-chat-history-panel-list::-webkit-scrollbar-thumb:hover,
+.cheese-fcln-list::-webkit-scrollbar-thumb:hover,
+.cheese-live-tag-filter-list::-webkit-scrollbar-thumb:hover,
+.cheese-logpower-popup-rows::-webkit-scrollbar-thumb:hover,
+.cheese-logpower-popup-table::-webkit-scrollbar-thumb:hover,
+.cheese-memo-list::-webkit-scrollbar-thumb:hover,
+.cheese-memo-picker ul::-webkit-scrollbar-thumb:hover,
+.cheese-search-options-body::-webkit-scrollbar-thumb:hover,
+.cheese-search-studio-menu::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
+}

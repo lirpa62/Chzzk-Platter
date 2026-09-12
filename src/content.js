@@ -552,6 +552,12 @@
     // 네이버 게임 수신함 안의 팔로잉 커뮤니티 탭도 채널별 API 요청이 필요하므로
     // 기존 사용자에게 자동으로 켜지지 않게 기본 숨김으로 둔다.
     "inboxCommunityNews",
+    // 아래 네 가지도 기본 숨김(원하는 사람만 켠다). 플레이어 버튼과 검색 화면이
+    // 처음부터 여러 개 붙어 있으면 치지직 기본 UI 와 달라 부담스럽다는 판단.
+    "liveSync",
+    "liveRewind",
+    "searchVideos",
+    "searchClips",
   ]);
   const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
   // 같은 창 안의 ISOLATED↔MAIN 브리지용 targetOrigin.
@@ -584,7 +590,9 @@
   let syncCooldownCustom = null; // {base, max}(초) 또는 null
   // 오디오 믹서 '항상 켜기'(전역). MAIN world(audioMixer)에 함께 전달.
   const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
+  const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
   let mixerAlwaysOn = false;
+  let mixerDefaultOn = false; // 오디오 믹서 기본 켜짐(전역, 끄기는 자유)
   // 시청 시 최대 화질 자동 고정(전역, 기본 OFF). MAIN world(audioMixer.js)가 corePlayer로 적용.
   const MAX_QUALITY_KEY = "cheeseMaxQuality";
   let maxQualityAuto = false;
@@ -593,10 +601,14 @@
   let maxQualityRespectManual = true;
   const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
   let videoFilterAlwaysOn = false;
+  const VIDEO_FILTER_DEFAULT_ON_KEY = "cheeseVideoFilterDefaultOn";
+  let videoFilterDefaultOn = false; // 비디오 필터 기본 켜짐(전역, 끄기는 자유)
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";
   let wideScreenAuto = false; // 넓은 화면(viewmode) 진입 시 자동 적용(전역)
   const LIVE_SEEK_BAR_KEY = "cheeseLiveSeekBar";
-  let liveSeekBar = true; // 라이브 되감기 바 표시(전역, 기본 ON)
+  const LIVE_STALL_RECOVERY_KEY = "cheeseLiveStallRecovery";
+  let liveSeekBar = false; // 라이브 되감기 바 표시(전역, 기본 OFF)
+  let liveStallRecovery = false; // 라이브 멈춤 자동 복구(전역, 기본 OFF)
   // 되감기 바의 화면 아래쪽 여백(px). 기본 60 은 치지직 타임머신 재생바와 겹치지 않는
   // 위치다(실측). 값을 낮추면 겹칠 수 있어 설정 설명에 안내를 둔다.
   const LIVE_SEEK_BAR_BOTTOM_KEY = "cheeseLiveSeekBarBottom";
@@ -2016,7 +2028,7 @@
   // 팔로잉 정리 도구: following?tab=CHANNEL 목록 앞에 '팔로잉 정리' 버튼을 추가해, 최근
   // 방송일 필터로 대상 채널을 모아 개별/선택/필터 전체 언팔로우하는 모달(전역, 기본 ON).
   const FOLLOW_CLEANUP_KEY = "cheeseFollowCleanup";
-  let followCleanupOn = true;
+  let followCleanupOn = false; // 기본 OFF
   // 채팅창 접힘 상태 유지(전역, 기본 OFF). 사용자가 치지직 '채팅 접기' 버튼으로 접으면
   // 그 상태를 저장하고, 새로고침·재접속 후 라이브 진입 시 저장 상태로 복원한다(트위치처럼).
   // content.js 전용. 자동 숨김(가장자리 슬라이드)과는 별개 기능이다.
@@ -17549,7 +17561,7 @@
   // 팔로잉 LIVE 정렬 기억 on/off. ⚠ 아래 프리페치 목록(getBootData)에서 참조하므로
   // 그보다 앞에 선언해야 한다(const 는 호이스팅돼도 TDZ 라 접근 시 오류).
   const FOLLOW_SORT_ENABLED_KEY = "cheeseFollowingLiveSortRemember";
-  let followingLiveSortOn = true; // 기본 ON(미설정=켜짐)
+  let followingLiveSortOn = false; // 기본 OFF(미설정=꺼짐)
   let pipDisableOn = false;
   // 다시보기 채팅 활성도 그래프. ⚠ 프리페치 목록에서 참조하므로 그보다 앞에 선언한다.
   const CHAT_GRAPH_ENABLED_KEY = "cheeseVodChatGraph";
@@ -19012,12 +19024,31 @@
       window.visualViewport?.height ||
       window.innerHeight ||
       document.documentElement.clientHeight;
+    // ⚠ boxTop 은 우리가 방금 준 height 때문에 흔들릴 수 있다. 특히 헤더 자동 숨김이
+    //   켜져 있으면 마우스가 플레이어에 올라갈 때마다 헤더가 peek 되면서 영상 상단이
+    //   헤더 높이(60px)만큼 오르내리고, 그때마다 availableHeight 가 달라져 높이가
+    //   681 ↔ 621 로 요동친다(실측). 그 진동이 곧 제보된 '계속 깜빡임'이다.
+    //   → 마지막으로 적용한 높이와 1~2px 차이면 무시하고, 그보다 크게 달라질 때만
+    //     새 값을 쓴다. 진짜 레이아웃 변화(채팅 접기·창 크기)는 60px 단위라 그대로 반영된다.
     const boxTop = Math.max(0, videoBox.getBoundingClientRect().top);
     const availableHeight = Math.floor(viewportHeight - boxTop);
-    const idealH =
+    let idealH =
       availableHeight > 0
         ? Math.min(widthBasedHeight, availableHeight)
         : widthBasedHeight;
+    // 헤더 자동 숨김의 peek 은 '오버레이'라 영상 크기를 바꿀 이유가 없다. peek 으로
+    //   생긴 상단 이동분은 되돌려, 마우스가 오갈 때 높이가 바뀌지 않게 한다.
+    if (featureFlags.headerAutoHide) {
+      // ⚠ HEADER_PEEK_CLASS 상수는 이 함수보다 뒤에 const 로 선언돼 있다. 여기서
+      //   참조하면 초기화 순서에 따라 TDZ 예외가 날 수 있어 문자열을 직접 쓴다.
+      const peeking = document.querySelector("header#header.cheese-header-peek");
+      if (peeking instanceof HTMLElement) {
+        const peekH = Math.round(peeking.getBoundingClientRect().height);
+        if (peekH > 0) {
+          idealH = Math.min(widthBasedHeight, availableHeight + peekH);
+        }
+      }
+    }
     const value = `${idealH}px`;
     // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
     // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
@@ -33894,6 +33925,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 전용 팔로잉 목록 아이템 HTML — 네이티브 li 구조를 그대로 모방하고 harvest 한 네이티브
   // 클래스를 얹어 네이티브 CSS 가 적용되게 한다. 별표만 우리 요소로 링크(_item_link_) 위에 얹음.
+  // 프로필 이미지 URL → 치지직 리사이즈 썸네일.
+  // ⚠ 원본을 그대로 쓰면 안 된다. 채널 프로필 원본은 수백 KB 라, 모달에서 팔로잉
+  //   수십~수백 개를 한꺼번에 그리면 28px 자리에 원본이 줄줄이 내려오며 눈에 보이게
+  //   늦다(제보: 캐릭터 선택창·그룹 추가창 프로필이 느리게 뜬다). 사이드바 목록은
+  //   처음부터 type=f120_120_na 로 요청해서 빠른데, 모달만 빠져 있었다.
+  //   같은 URL 을 쓰면 사이드바가 이미 받아 둔 것을 브라우저 캐시에서 재사용한다.
+  function customFollowProfileThumb(imageUrl) {
+    if (!imageUrl) return "";
+    return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`;
+  }
+
   function createCustomFollowItemHtml(
     item,
     h,
@@ -33904,9 +33946,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const href = live
       ? `/live/${encodeURIComponent(item.channelId)}`
       : `/${encodeURIComponent(item.channelId)}`;
-    const imageUrl = item.imageUrl
-      ? `${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}type=f120_120_na`
-      : "";
+    const imageUrl = customFollowProfileThumb(item.imageUrl);
     const fav =
       featureFlags.sbFollowFavEnabled &&
       customFollowFavorites.has(item.channelId);
@@ -34639,7 +34679,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .map((channel) => {
         const selected = state.selected.has(channel.channelId);
         const image = channel.imageUrl
-          ? `<img src="${escapeAttribute(channel.imageUrl)}" alt="" width="28" height="28" draggable="false">`
+          ? `<img src="${escapeAttribute(customFollowProfileThumb(channel.imageUrl))}" alt="" width="28" height="28" draggable="false" loading="lazy" decoding="async">`
           : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
         const tags = normalizeCustomFollowTags(channel.tags);
         return (
@@ -35212,7 +35252,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const scopes = customFollowSquares.get(channel.channelId);
         const on = Boolean(scopes?.size);
         const image = channel.imageUrl
-          ? `<img src="${escapeAttribute(channel.imageUrl)}" alt="" width="28" height="28" draggable="false">`
+          ? `<img src="${escapeAttribute(customFollowProfileThumb(channel.imageUrl))}" alt="" width="28" height="28" draggable="false" loading="lazy" decoding="async">`
           : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
         // 채널마다 적용할 영역을 따로 고른다(중복 가능).
         const chips = CUSTOM_FOLLOW_SQUARE_SCOPES.map(([key, label]) => {
@@ -35391,22 +35431,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       } else if (button.matches("[data-cf-modal-placement-move]")) {
         const dir = button.dataset.cfModalPlacementMove;
         const key = button.dataset.cfSection;
-        const current = [
-          ...(CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
-            CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"]),
-        ];
+        const current = customFollowDisplayOrder();
         const i = current.indexOf(key);
         const j = dir === "up" ? i - 1 : i + 1;
         if (i < 0 || j < 0 || j >= current.length) return;
         [current[i], current[j]] = [current[j], current[i]];
-        const placement = customFollowOrderToPlacement(current);
-        customFollowGroupPlacement = placement;
-        customFollowVersion += 1;
-        try {
-          chrome.storage?.local?.set({
-            [CUSTOM_FOLLOW_GROUP_PLACEMENT_KEY]: placement,
-          });
-        } catch {}
+        saveCustomFollowDisplayOrder(current);
         ensureCustomFollowList();
         renderCustomFollowGroupModal();
       } else if (button.matches("[data-cf-modal-tag-exclusion]")) {
@@ -36224,14 +36254,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     groups: "그룹",
     favorites: "즐겨찾기",
     following: "팔로잉",
+    affinity: AFFINITY_LABEL,
   };
+
+  // 모달·사이드바가 함께 쓰는 '보이는 순서'. 세 섹션은 조합 키로, 친밀도는 끼울
+  //   자리(affinityIndex)로 저장된다 — 설정 화면의 cfDisplayOrder 와 같은 방식이다.
+  // ⚠ 친밀도를 세 섹션의 조합 키에 넣으면 6가지가 24가지로 불어난다. 그래서
+  //   위치만 따로 들고, 보여 줄 때만 합친다.
+  function customFollowDisplayOrder() {
+    const base = [
+      ...(CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
+        CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"]),
+    ];
+    if (!affinityOn) return base;
+    base.splice(Math.min(affinityIndex, base.length), 0, "affinity");
+    return base;
+  }
+
+  // 합친 순서 → 저장. 친밀도는 자리만, 나머지는 기존 조합 키 그대로.
+  function saveCustomFollowDisplayOrder(display) {
+    const base = display.filter((k) => k !== "affinity");
+    const index = display.indexOf("affinity");
+    const placement = customFollowOrderToPlacement(base);
+    customFollowGroupPlacement = placement;
+    const payload = { [CUSTOM_FOLLOW_GROUP_PLACEMENT_KEY]: placement };
+    if (index >= 0) {
+      affinityIndex = index;
+      payload[AFFINITY_INDEX_KEY] = index;
+    }
+    customFollowVersion += 1;
+    try {
+      chrome.storage?.local?.set(payload);
+    } catch {}
+  }
 
   // 모달에서는 위/아래 버튼으로 순서를 바꾼다(설정 화면의 순서 편집기와 같은 개념).
   // 조합 6개를 나열하는 것보다 '지금 순서'가 그대로 보여 이해하기 쉽다.
   function customFollowPlacementOptionsHtml() {
-    const order =
-      CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
-      CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"];
+    const order = customFollowDisplayOrder();
     return order
       .map((key, i) => {
         const last = i === order.length - 1;
@@ -42067,7 +42127,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!chrome.storage?.local) return;
     try {
       const data = await getBootData([FOLLOW_CLEANUP_KEY]);
-      followCleanupOn = data?.[FOLLOW_CLEANUP_KEY] !== false; // 미설정/true=ON
+      followCleanupOn = data?.[FOLLOW_CLEANUP_KEY] === true; // 미설정=기본 OFF
     } catch {}
     ensureFollowCleanupButton();
   }
@@ -49835,6 +49895,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         syncCooldownEnabled, // 자동 따라잡기 쿨다운 on/off
         syncCooldownCustom, // {base,max}(초) 또는 null
         mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
+        mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
         // 최대 화질 자동 고정. 팝업 프레임은 전역값과 무관하게 팝업 설정을 따른다
         // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
         maxQualityAuto: IS_POPUP_PLAYER_FRAME
@@ -49842,6 +49903,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           : maxQualityAuto,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
+        videoFilterDefaultOn, // 비디오 필터 기본 켜짐(전역)
         // 넓은 화면 자동 적용(전역). 팝업 플레이어 프레임에서는 팝업 설정이 켜져 있으면
         // 전역값과 무관하게 켠다(작은 창에서 레터박스를 줄이는 게 기본 기대 동작).
         wideScreenAuto:
@@ -49856,6 +49918,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
         // 되어 방향키까지 막힌다. 반대로 바가 표시되는 동안에는 방향키가 그대로 동작한다.
         liveSeekBar: getEffectiveLiveSeekBar(),
+        liveStallRecovery, // 라이브 멈춤 자동 복구(전역)
         liveSeekBarBottom, // 되감기 바 하단 여백(px)
         volumePct, // 볼륨 조절 % 표시(전역)
         wheelVolume, // 영상 위 휠로 볼륨 조절(전역)
@@ -49916,11 +49979,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     SYNC_COOLDOWN_ENABLED_KEY,
     SYNC_COOLDOWN_CUSTOM_KEY,
     MIXER_ALWAYS_ON_KEY,
+    MIXER_DEFAULT_ON_KEY,
     MAX_QUALITY_KEY,
     MAX_QUALITY_RESPECT_KEY,
     VIDEO_FILTER_ALWAYS_ON_KEY,
+    VIDEO_FILTER_DEFAULT_ON_KEY,
     WIDE_SCREEN_AUTO_KEY,
     LIVE_SEEK_BAR_KEY,
+    LIVE_STALL_RECOVERY_KEY,
     LIVE_SEEK_BAR_BOTTOM_KEY,
     PIP_CHAT_HEIGHT_KEY,
     PIP_LAYOUT_KEY,
@@ -50295,11 +50361,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[SYNC_COOLDOWN_CUSTOM_KEY],
       );
       mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
+      mixerDefaultOn = data?.[MIXER_DEFAULT_ON_KEY] === true;
       maxQualityAuto = data?.[MAX_QUALITY_KEY] === true;
       maxQualityRespectManual = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 기본 ON
       videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
+      videoFilterDefaultOn = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
       wideScreenAuto = data?.[WIDE_SCREEN_AUTO_KEY] === true;
-      liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] !== false; // 미설정=기본 ON
+      liveSeekBar = data?.[LIVE_SEEK_BAR_KEY] === true; // 미설정=기본 OFF
+      liveStallRecovery = data?.[LIVE_STALL_RECOVERY_KEY] === true;
       liveSeekBarBottom = normalizeLiveSeekBarBottom(
         data?.[LIVE_SEEK_BAR_BOTTOM_KEY],
       );
@@ -50383,6 +50452,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[MIXER_ALWAYS_ON_KEY]) {
         mixerAlwaysOn = changes[MIXER_ALWAYS_ON_KEY].newValue === true;
+      }
+      if (changes[MIXER_DEFAULT_ON_KEY]) {
+        mixerDefaultOn = changes[MIXER_DEFAULT_ON_KEY].newValue === true;
       }
       if (changes[MAX_QUALITY_KEY]) {
         maxQualityAuto = changes[MAX_QUALITY_KEY].newValue === true;
@@ -50756,6 +50828,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         videoFilterAlwaysOn =
           changes[VIDEO_FILTER_ALWAYS_ON_KEY].newValue === true;
       }
+      if (changes[VIDEO_FILTER_DEFAULT_ON_KEY]) {
+        videoFilterDefaultOn =
+          changes[VIDEO_FILTER_DEFAULT_ON_KEY].newValue === true;
+      }
       if (changes[WIDE_SCREEN_AUTO_KEY]) {
         wideScreenAuto = changes[WIDE_SCREEN_AUTO_KEY].newValue === true;
       }
@@ -50772,7 +50848,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
       }
       if (changes[LIVE_SEEK_BAR_KEY]) {
-        liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue !== false;
+        liveSeekBar = changes[LIVE_SEEK_BAR_KEY].newValue === true;
+      }
+      if (changes[LIVE_STALL_RECOVERY_KEY]) {
+        liveStallRecovery = changes[LIVE_STALL_RECOVERY_KEY].newValue === true;
       }
       if (changes[PIP_CHAT_HEIGHT_KEY]) {
         pipChatHeight = normalizePipChatHeight(
@@ -51407,10 +51486,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[FOLLOW_SORT_ENABLED_KEY]) {
         followingLiveSortOn =
-          changes[FOLLOW_SORT_ENABLED_KEY].newValue !== false;
+          changes[FOLLOW_SORT_ENABLED_KEY].newValue === true;
       }
       if (changes[FOLLOW_CLEANUP_KEY]) {
-        followCleanupOn = changes[FOLLOW_CLEANUP_KEY].newValue !== false;
+        followCleanupOn = changes[FOLLOW_CLEANUP_KEY].newValue === true;
         if (!followCleanupOn) closeFollowCleanupModal();
         ensureFollowCleanupButton(); // 버튼 재주입/제거
       }
@@ -51458,11 +51537,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[SYNC_COOLDOWN_ENABLED_KEY] ||
         changes[SYNC_COOLDOWN_CUSTOM_KEY] ||
         changes[MIXER_ALWAYS_ON_KEY] ||
+        changes[MIXER_DEFAULT_ON_KEY] ||
         changes[MAX_QUALITY_KEY] ||
         changes[MAX_QUALITY_RESPECT_KEY] ||
         changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
+        changes[VIDEO_FILTER_DEFAULT_ON_KEY] ||
         changes[WIDE_SCREEN_AUTO_KEY] ||
         changes[LIVE_SEEK_BAR_KEY] ||
+        changes[LIVE_STALL_RECOVERY_KEY] ||
         changes[VOLUME_PCT_KEY] ||
         changes[WHEEL_VOLUME_KEY] ||
         changes[WHEEL_VOLUME_RIGHTCLICK_KEY] ||
@@ -51965,7 +52047,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ROLE_CHAT_BOTS_KEY,
         VOD_TITLE_CHANGES_KEY,
       ]);
-      followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] !== false;
+      followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] === true;
       pipDisableOn = data?.[PIP_DISABLE_KEY] === true;
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF

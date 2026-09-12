@@ -148,6 +148,7 @@ html.settings-tab-view .settings-resizer {
   gap: 7px;
   appearance: none;
   text-align: left;
+  word-break: keep-all;
   padding: 9px 11px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -396,6 +397,76 @@ html.settings-tab-view .settings-resizer {
   color: var(--popup-muted);
 }
 
+.settings-search-summary {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--popup-muted);
+}
+
+.settings-search-path {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--popup-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-search-path[hidden],
+.settings-search-summary[hidden],
+.settings-item[hidden],
+.settings-item.is-feature-collapsed,
+.settings-item.is-search-hidden { display: none !important; }
+
+.settings-disclosure-button {
+  position: relative;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--popup-muted);
+  vertical-align: middle;
+  cursor: pointer;
+}
+.settings-disclosure-button:hover:not(:disabled) { background: var(--popup-soft-bg); }
+.settings-disclosure-button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.settings-disclosure-button:focus-visible {
+  outline: 2px solid var(--popup-accent, #03c75a);
+  outline-offset: 2px;
+}
+.settings-disclosure-button:disabled { cursor: default; }
+.settings-disclosure-button.has-new-setting::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--popup-accent, #03c75a);
+}
+
+.settings-item.is-search-context {
+  border-inline-start: 2px solid var(--popup-border);
+}
+
+.settings-item-name, .settings-item-desc, .settings-info-panel {
+  overflow-wrap: anywhere;
+}
+
+.settings-info-button:focus-visible {
+  outline: 2px solid var(--popup-accent, #03c75a);
+  outline-offset: 2px;
+}
+
 /* 설정 팝업의 새 탭 보기. 팝업 고정 크기는 유지하고 넓은 화면에서만 읽기 편한
    여백과 글자 크기를 사용한다. */
 html.settings-tab-view {
@@ -426,6 +497,25 @@ html.settings-tab-view .settings-open-tab-button {
 html.settings-tab-view .settings-layout {
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 24px;
+}
+
+@media (max-width: 640px) {
+  html.settings-tab-view .settings-shell { padding: 16px; }
+  html.settings-tab-view .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+  html.settings-tab-view .settings-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+  }
+  html.settings-tab-view .settings-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 html.settings-tab-view .settings-header h1 {
@@ -465,7 +555,7 @@ html.settings-tab-view .settings-item-desc {
   line-height: 1.55;
 }
 
-@media (max-width: 760px) {
+@media (min-width: 641px) and (max-width: 760px) {
   html.settings-tab-view .settings-shell {
     padding: 16px;
   }

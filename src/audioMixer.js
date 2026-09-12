@@ -96,10 +96,20 @@
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
   let mixerAlwaysOn = false;
+  // '기본 켜짐'(전역). 들어올 때 켜 두되, 좌클릭으로 자유롭게 끌 수 있고 끄더라도
+  // 그 채널을 제외 목록에 남기지 않는다 — '항상 켜기'와 다른 점이 이 두 가지다.
+  // (제보: 켜진 채로 시작하고 싶은데 '항상 켜기'뿐이라, 켜면 끌 수가 없었다.)
+  let mixerDefaultOn = false;
+  // '기본 켜짐'에서 이번 페이지 동안 사용자가 직접 끈 적이 있는지. 저장하지 않는다 —
+  // 다음 방문에는 다시 켜진 채로 시작하는 게 '기본값'이라는 말에 맞다.
+  // (저장되는 state.userDisabled 는 '항상 켜기'의 채널 제외용이라 성격이 다르다.)
+  let mixerDefaultOffThisPage = false;
   let wideScreenAuto = popupWideParamKnown && popupWideParam === "1";
   // 위 값이 content.js 의 저장값 로드를 거친 것인지(로드 전 false = '아직 모름').
   let wideScreenSettingsLoaded = popupWideParamKnown;
-  let liveSeekBarOn = true; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 ON)
+  let liveSeekBarOn = false; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 OFF)
+  // 라이브 멈춤 자동 복구(전역, 기본 OFF). 원인이 확정되지 않아 켠 사용자에게만 동작한다.
+  let liveStallRecoveryOn = false;
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
   let wheelVolumeOn = false; // 영상 위 마우스 휠로 볼륨 조절(전역, 기본 OFF)
   let wheelVolumeRightClick = false; // 우클릭(오른쪽 버튼)을 누른 채 휠일 때만 조절(기본 OFF)
@@ -248,7 +258,13 @@
     // 리스너만으로는 자동 활성화가 걸리지 않아 '항상 켜기'인데도 믹서가 풀린 채 남았다.
     // 플래그를 받은 시점(= 값이 처음 도착하거나 켜진 순간)에 현재 재생 상태로 즉시
     // 한 번 시도한다.
-    if (mixerAlwaysOn && !mixerAlwaysOnPrev) {
+    // '기본 켜짐'도 같은 자동 활성화 경로를 탄다(끄는 방식만 다르다).
+    const mixerDefaultOnPrev = mixerDefaultOn;
+    mixerDefaultOn = e.data.mixerDefaultOn === true;
+    if (
+      (mixerAlwaysOn && !mixerAlwaysOnPrev) ||
+      (mixerDefaultOn && !mixerDefaultOnPrev)
+    ) {
       if (typeof bindVideoAutoEnable === "function") bindVideoAutoEnable();
       if (typeof maybeAutoEnableMixer === "function") maybeAutoEnableMixer();
     }
@@ -331,7 +347,12 @@
       e.data.mixerGainStep,
     );
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
-    liveSeekBarOn = e.data.liveSeekBar !== false;
+    liveSeekBarOn = e.data.liveSeekBar === true;
+    const stallPrev = liveStallRecoveryOn;
+    liveStallRecoveryOn = e.data.liveStallRecovery === true;
+    if (liveStallRecoveryOn !== stallPrev) {
+      if (typeof applyLiveStallRecovery === "function") applyLiveStallRecovery();
+    }
     // 되감기 바 하단 여백(px). CSS 변수로 넘겨 위치만 바꾼다(치지직 DOM 은 안 건드림).
     const bottom = Math.round(Number(e.data.liveSeekBarBottom));
     if (Number.isFinite(bottom)) {
@@ -1471,10 +1492,15 @@
   // 시엔 시도하지 않는다. 충돌이면 setEnabled→buildGraph 실패가 graphConflict를
   // 세워 재시도가 멈추므로 무한 루프가 되지 않는다.
   function maybeAutoEnableMixer() {
-    if (!mixerAlwaysOn) return;
+    if (!mixerAlwaysOn && !mixerDefaultOn) return;
     if (!userGestureSeen) return; // 제스처 전엔 대기
     if (!stateLoaded) return; // 저장 프리셋 로드 전엔 대기(기본 프리셋 오활성 방지)
-    if (state.userDisabled) return; // 이 채널은 사용자가 직접 끔(opt-out)
+    // 이번 페이지에서 직접 껐으면 다시 켜지 않는다(세션 한정, 저장 안 함).
+    if (mixerDefaultOffThisPage) return;
+    // ⚠ 저장된 채널 제외(userDisabled)는 '항상 켜기'의 장치다. '기본 켜짐'만
+    //   켜진 경우에는 매번 켜진 채로 시작해야 해서 예전 기록으로 막지 않는다.
+    //   둘 다 켜져 있으면 더 엄격한 '항상 켜기' 규칙을 따른다(제외를 존중).
+    if (state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) return;
     if (featureFlags.audioMixer) return; // 믹서 기능 숨김 상태면 자동 활성 안 함
     if (graphConflict) return; // 이미 충돌 판정 → 재시도 금지
     if (state.enabled && audio.connected) return; // 이미 동작 중
@@ -2779,11 +2805,18 @@
     if (state.enabled && audio.connected) {
       // '항상 켜기'는 말 그대로 항상 켜 두는 설정이므로 좌클릭으로 끄지 않는다.
       // 끄려면 설정에서 옵션을 해제하거나 패널의 전원 토글을 쓰면 된다(그쪽은
-      // 채널별 opt-out을 남긴다). 여기서는 왜 안 꺼지는지만 알려 준다.
+      // 채널별 opt-out을 남긴다).
+      // ⚠ 예전에는 "끌 수 없습니다"라고만 알렸다. 실제로는 패널 전원 토글로 끌 수
+      //   있는데 그 경로를 말해 주지 않아, 아예 못 끄는 기능으로 오해됐다(제보:
+      //   "끄고 싶을 때 끌 수가 없어요"). 어디서 끌 수 있는지까지 알려 준다.
       if (mixerAlwaysOn) {
-        showPresetOsd("'항상 켜기'가 켜져 있어 끌 수 없습니다", 2600);
+        showPresetOsd("'항상 켜기' 중 — 패널의 전원 버튼으로 끌 수 있습니다", 3200);
         return;
       }
+      // '기본 켜짐'은 좌클릭으로 그냥 꺼진다(막지 않는다). 다만 이번 페이지 동안
+      // 자동 활성화가 곧바로 다시 켜지 않도록 의사를 기억한다 — 저장은 하지 않아
+      // 다음 방문에는 다시 켜진 채로 시작한다.
+      if (mixerDefaultOn) mixerDefaultOffThisPage = true;
       setEnabled(false);
       return;
     }
@@ -3692,6 +3725,15 @@
           refreshPanelContent();
           return;
         }
+        // '기본 켜짐'(항상 켜기 아님)에서는 이번 페이지 동안만 기억하고, 저장되는
+        // 채널 제외(userDisabled)는 건드리지 않는다 — 설정의 '항상 켜기 제외 채널'
+        // 목록에 엉뚱하게 쌓이면 나중에 '항상 켜기'로 바꿨을 때 그 채널만 안 켜진다.
+        if (mixerDefaultOn && !mixerAlwaysOn) {
+          mixerDefaultOffThisPage = !t.checked;
+          setEnabled(t.checked);
+          saveState();
+          return;
+        }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기' 자동 활성화에서 제외(opt-out).
         // 다시 켜면 해제. per-channel로 저장돼 새로고침 후에도 의사 유지.
         state.userDisabled = !t.checked;
@@ -4453,8 +4495,10 @@
   // 이 페이지를 켠 채 이동했다 돌아온 경우. 둘 다 저장 프리셋 로드 후 판단한다.
   function wantsAutoEnable() {
     if (userGestureSeen) return false;
-    if (state.userDisabled) return false; // 이 채널은 직접 끔
-    if (mixerAlwaysOn) return true;
+    if (mixerDefaultOffThisPage) return false; // 이번 페이지에서 직접 끔
+    // 저장된 채널 제외는 '항상 켜기'의 장치(위 maybeAutoEnableMixer 와 같은 규칙).
+    if (state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) return false;
+    if (mixerAlwaysOn || mixerDefaultOn) return true;
     return stateLoaded && state.enabled === true; // 현재 탭에서 복원한 켠 상태
   }
   const boundAutoEnableVideos = new WeakSet();
@@ -7535,6 +7579,129 @@
     }
   }
 
+  // ── 라이브 멈춤 자동 복구(옵션, 기본 OFF) ────────────────────────────────
+  // 증상(제보 + 실측 로그): 다른 탭에 오래 머물다 돌아오면 영상이 로딩 상태로 굳고
+  // 새로고침 전에는 풀리지 않는다. 채팅은 멀쩡하다.
+  //
+  // 실측한 상태(멈춘 순간):
+  //   DVR 시작 15984 / 버퍼 끝 16878.00 / 현재 위치 16880.64 / 라이브 엣지 16894.65
+  //   readyState=1, seeking=true(22초 동안 안 풀림), hls=IDLE, bufferAhead=-2.64
+  // → 재생 위치가 '버퍼 끝보다 앞'이라 그 지점 데이터가 없고, seek 이 완료되지
+  //   못한 채 영원히 seeking 으로 남는다. 라이브 엣지(seekEnd)는 계속 흐르므로
+  //   스트림 수신 자체는 살아 있다.
+  //
+  // ⚠ 라이브 엣지로 점프하면 안 된다. 실측 로그에서 그 점프가 한 번 일어났지만
+  //   여전히 버퍼보다 앞이라 똑같이 다시 굳었다. 반드시 '버퍼 안쪽'으로 되돌린다
+  //   (사용자가 크게 되감으면 풀리는 것과 같은 원리 — 제보로 확인).
+  // ⚠ 원인이 우리 코드인지 치지직 플레이어인지는 아직 확정되지 않았다. 그래서
+  //   기본 OFF 옵션으로 두고, 켠 사용자에게만 동작한다.
+  const STALL_CHECK_MS = 1000;
+  const STALL_MIN_MS = 8000; // 이 시간 이상 지속돼야 '멈춤'으로 본다
+  const STALL_BUFFER_BACK_S = 1.5; // 버퍼 끝에서 이만큼 안쪽으로 되돌린다
+  const STALL_MAX_FIX = 3; // 같은 정체 구간에서 최대 시도 횟수
+  let stallTimer = 0;
+  let stallSince = 0; // 멈춤으로 보이기 시작한 시각
+  let stallLastTime = -1; // 직전 관측한 currentTime
+  let stallFixes = 0; // 이 정체에서 시도한 횟수
+  let stallLastFixAt = 0;
+
+  function resetStallWatch() {
+    stallSince = 0;
+    stallLastTime = -1;
+    stallFixes = 0;
+  }
+
+  // 지금 '멈춤'인가. 재생 위치가 버퍼 밖이거나(데이터 없음), seek 이 안 끝나는 상태.
+  function looksStalled(video) {
+    if (!video || video.paused || video.ended) return false;
+    if (video.readyState >= 3) return false; // 충분한 데이터가 있으면 멈춤 아님
+    let end = null;
+    try {
+      if (video.buffered?.length) {
+        end = video.buffered.end(video.buffered.length - 1);
+      }
+    } catch {
+      return false;
+    }
+    if (!Number.isFinite(end)) return false;
+    // 버퍼 끝보다 앞(=그 지점 데이터 없음) 이거나, seek 이 끝나지 않는 중.
+    return video.currentTime > end || video.seeking === true;
+  }
+
+  // 버퍼 안쪽으로 되돌려 seek 을 끊어낸다. 성공하면 true.
+  function recoverFromStall(video) {
+    let end = null;
+    let start = null;
+    try {
+      if (!video.buffered?.length) return false;
+      end = video.buffered.end(video.buffered.length - 1);
+      start = video.buffered.start(0);
+    } catch {
+      return false;
+    }
+    if (!Number.isFinite(end) || !Number.isFinite(start)) return false;
+    const target = Math.max(start, end - STALL_BUFFER_BACK_S);
+    if (!Number.isFinite(target) || target <= 0) return false;
+    // ⚠ 우리가 일으킨 seek 임을 표시한다. 안 그러면 onUserSeeked 가 '사용자가
+    //   되감았다'로 보고 자동 따라잡기를 한참 멈춰 세운다.
+    ourSeekUntil = Date.now() + 3000;
+    try {
+      video.currentTime = target;
+    } catch {
+      return false;
+    }
+    stallFixes += 1;
+    stallLastFixAt = Date.now();
+    return true;
+  }
+
+  function stallTick() {
+    if (!liveStallRecoveryOn) return;
+    if (!location.pathname.startsWith("/live/")) {
+      resetStallWatch();
+      return;
+    }
+    const video = findVideo();
+    if (!video) {
+      resetStallWatch();
+      return;
+    }
+    const now = Date.now();
+    const ct = video.currentTime;
+    // 재생이 진행 중이면(시간이 흐르면) 정상 — 상태를 비운다.
+    if (stallLastTime >= 0 && Math.abs(ct - stallLastTime) > 0.05) {
+      resetStallWatch();
+      stallLastTime = ct;
+      return;
+    }
+    stallLastTime = ct;
+    if (!looksStalled(video)) {
+      resetStallWatch();
+      return;
+    }
+    if (!stallSince) stallSince = now;
+    if (now - stallSince < STALL_MIN_MS) return; // 잠깐의 버퍼링은 그냥 둔다
+    if (stallFixes >= STALL_MAX_FIX) return; // 반복 시도 방지
+    if (now - stallLastFixAt < STALL_MIN_MS) return; // 시도 간 간격
+    if (recoverFromStall(video)) {
+      showPresetOsd("재생이 멈춰 있어 되돌렸습니다", 2200);
+    }
+  }
+
+  function startStallWatch() {
+    if (stallTimer || !liveStallRecoveryOn) return;
+    stallTimer = window.setInterval(stallTick, STALL_CHECK_MS);
+  }
+  function stopStallWatch() {
+    if (stallTimer) window.clearInterval(stallTimer);
+    stallTimer = 0;
+    resetStallWatch();
+  }
+  function applyLiveStallRecovery() {
+    if (liveStallRecoveryOn) startStallWatch();
+    else stopStallWatch();
+  }
+
   function startSyncCheck() {
     if (syncCheckTimer) return;
     syncCheckTimer = window.setInterval(updateSyncButtonState, SYNC_CHECK_MS);
@@ -9180,13 +9347,14 @@
     // 자동 넓은 화면 적용이 아직 남아 있으면(이 미디어에 미적용) full tick 필요.
     if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey)
       return false;
-    // '항상 켜기'가 켜졌는데 아직 자동 활성화 전이면 full tick.
+    // '항상 켜기'/'기본 켜짐'이 켜졌는데 아직 자동 활성화 전이면 full tick.
     if (
-      mixerAlwaysOn &&
+      (mixerAlwaysOn || mixerDefaultOn) &&
       userGestureSeen &&
       stateLoaded &&
       !audio.connected &&
-      !state.userDisabled &&
+      !mixerDefaultOffThisPage &&
+      !(state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) &&
       !featureFlags.audioMixer &&
       !graphConflict
     ) {
@@ -9340,6 +9508,8 @@
     // 되감기 바는 되감기/앞으로 '버튼'(liveRewind)과 독립 — 버튼을 숨겨도 바는 유지한다.
     // 그래서 버튼 분기 밖에서 항상 재평가한다(내부는 liveSeekBarOn 만 따름).
     applyLiveSeekBar();
+    // 멈춤 복구 감시도 버튼과 무관하다(따라잡기 버튼을 숨겨도 동작해야 한다).
+    applyLiveStallRecovery();
     if (featureFlags.tabMute) {
       removeTabMuteButton();
     } else {
