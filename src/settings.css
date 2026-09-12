@@ -494,32 +494,58 @@ html.settings-tab-view .settings-resizer {
 }
 
 /* ── 세부 설정을 '하위 폴더' 모양으로 ────────────────────────────────────
-   전용 팔로잉 목록의 그룹과 같은 인상: 브랜드색 왼쪽 띠로 묶음을 표시하고,
-   그 안에 자식이 들여쓰기돼 들어간다.
+   전용 팔로잉 목록의 그룹과 같은 인상. 다만 행 맨 왼쪽(테두리 자리)이 아니라
+   조금 안쪽에 선을 긋고, 배경도 그 선에서부터 시작해 '한 칸 들어간 묶음'으로
+   보이게 한다.
+   ⚠ 배경은 .settings-item-child 가 아니라 ::before 가 그린다. 행 전체에
+     background 를 주면 선 왼쪽(바깥 여백)까지 칠해져 묶음이 안쪽에서
+     시작하는 느낌이 사라진다.
    ⚠ 마크업은 그대로다. settingsUi.js 가 클래스만 얹는다. */
 .settings-item-child {
   position: relative;
-  padding-left: 22px;
-  background: color-mix(in srgb, var(--popup-soft-bg) 45%, transparent);
-  /* 그룹의 왼쪽 띠(.cheese-cf-group 의 border-left 와 같은 역할). */
-  box-shadow: inset 2px 0 0 var(--popup-accent, #03c75a);
+  padding-left: 34px;
+  /* 행 자체에는 배경·테두리를 두지 않는다(아래 ::before 가 담당). */
+  background: transparent;
 }
 
-/* 2단계부터는 띠를 하나 더 둔다 — 들여쓰기만으로는 토글 열에 묻혀 깊이가
-   눈에 안 들어온다(실측 스크린샷). 바깥 띠는 옅게 둬 소속을 보여 준다. */
+/* 선 + 배경을 함께 그린다. left 가 선의 위치이자 배경의 시작점이다. */
+.settings-item-child::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border-left: 2px solid var(--popup-accent, #03c75a);
+  background: color-mix(in srgb, var(--popup-soft-bg) 60%, transparent);
+  pointer-events: none;
+}
+
+/* 깊이가 늘면 선과 배경이 함께 안쪽으로 들어간다. */
 .settings-item-child[data-settings-depth="2"] {
-  padding-left: 40px;
-  box-shadow:
-    inset 2px 0 0 color-mix(in srgb, var(--popup-accent, #03c75a) 40%, transparent),
-    inset 20px 0 0 -18px var(--popup-accent, #03c75a);
+  padding-left: 52px;
+}
+
+.settings-item-child[data-settings-depth="2"]::before {
+  left: 32px;
+  border-left-color: color-mix(
+    in srgb,
+    var(--popup-accent, #03c75a) 55%,
+    transparent
+  );
 }
 
 .settings-item-child[data-settings-depth="3"] {
-  padding-left: 58px;
-  box-shadow:
-    inset 2px 0 0 color-mix(in srgb, var(--popup-accent, #03c75a) 25%, transparent),
-    inset 20px 0 0 -18px color-mix(in srgb, var(--popup-accent, #03c75a) 40%, transparent),
-    inset 38px 0 0 -36px var(--popup-accent, #03c75a);
+  padding-left: 70px;
+}
+
+.settings-item-child[data-settings-depth="3"]::before {
+  left: 50px;
+  border-left-color: color-mix(
+    in srgb,
+    var(--popup-accent, #03c75a) 35%,
+    transparent
+  );
 }
 
 /* ⚠ 이름 앞의 '└' 는 지우지 않는다 — 검색이 '자식에는 부모 경로가 있다'를
@@ -531,8 +557,9 @@ html.settings-tab-view .settings-resizer {
   color: transparent;
 }
 
-/* 마지막 자식의 아래 모서리를 둥글려 '묶음이 여기서 끝난다'를 보여 준다. */
-.settings-item-child.is-last-child {
+/* 마지막 자식의 아래 모서리를 둥글려 '묶음이 여기서 끝난다'를 보여 준다.
+   배경을 ::before 가 그리므로 모서리도 거기에 준다. */
+.settings-item-child.is-last-child::before {
   border-bottom-left-radius: 8px;
 }
 
