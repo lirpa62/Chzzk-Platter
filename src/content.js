@@ -1132,7 +1132,7 @@
   // 미리보기 볼륨(0~1, 기본 1). 음소거 해제 상태에서 이 값으로 재생.
   const FOLLOW_PREVIEW_VOLUME_KEY = "cheeseFollowPreviewVolume";
   let followPreviewVolume = 1;
-  let followPreviewGuardBound = false; // volumechange 재해제 리스너 1회 등록 여부
+  const followPreviewGuardVideos = new WeakSet(); // video별 볼륨 가드 1회 등록
   let followPreviewVolumeGuard = false; // 우리가 muted/volume 되돌리는 중(재진입 방지)
   // 이 미리보기에서 사용자가 controls 로 소리를 직접 조작했는지. true 면 재해제 가드를
   // 끈다 — 가드는 '브라우저 자동재생 정책이 되돌린 음소거'를 복구하려는 것이지, 사용자의
@@ -1934,6 +1934,10 @@
   const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
   // 단어 필터로 숨긴 항목 표시값(차단 닉네임과 구분해 복원 판정에 쓴다).
   const CHAT_WORD_FILTER_MARK = "\u0000word-filter";
+  // 런타임 상한. 저장 용량이 아니라 성능 때문이다 — 채팅 1줄당 규칙 전체를 매칭하므로
+  // 비용이 규칙 수에 선형으로 늘어난다. 설정 UI 쪽 CWF_MAX 와 같은 값을 유지해야 한다
+  // (한쪽만 올리면 저장은 되는데 적용은 안 되는 조용한 버그가 된다).
+  const CHAT_WORD_FILTER_MAX = 2000;
   let chatWordFilters = []; // 정규화된 원본
   let chatWordFilterRegexes = []; // 컴파일된 RegExp 목록(런타임용)
 
@@ -1948,7 +1952,7 @@
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ pattern, regex: item?.regex === true });
-      if (out.length >= 200) break; // 상한(설정 폭주 방지)
+      if (out.length >= CHAT_WORD_FILTER_MAX) break; // 상한(설정 폭주 방지)
     }
     return out;
   }
@@ -2050,6 +2054,10 @@
     chatShowOsIcon: false, // 채팅 작성 기기(PC/AOS/IOS) 아이콘 표시(chatTimestamp.js)
     chatHideNickname: false, // 채팅 닉네임 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
     chatHideBadge: false, // 채팅 배지 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
+    chatHideEmoticon: false, // 채팅 스트림의 이모티콘 전체 숨김(chatTimestamp.js)
+    // Alt+클릭으로 이모티콘 차단(기본 켬). ⚠ 다른 플래그와 달리 true 가 기본이라
+    //   getEffectiveFeatureFlags 의 기본값 병합에 의존한다.
+    chatEmoticonAltClick: true,
     chatSplitNickname: false, // 일반 채팅의 닉네임 줄과 메시지 줄 분리
     loungeNews: false, // 헤더 치지직 라운지 소식 버튼(숨김 플래그 — true=숨김)
     loungeNewsDot: false, // 헤더 라운지 소식 새 글 알림 점 숨김
@@ -2218,6 +2226,33 @@
   const CUSTOM_FOLLOW_GROUP_INITIAL_KEY = "cheeseFollowGroupInitial";
   const CUSTOM_FOLLOW_GROUP_MORE_KEY = "cheeseFollowGroupMore";
   const CUSTOM_FOLLOW_FAVORITES_KEY = "cheeseFollowFavorites";
+  // 접힘 상태에서 프로필을 사각형으로 보여 줄 채널(캐릭터 선택창 느낌).
+  const CUSTOM_FOLLOW_SQUARE_KEY = "cheeseFollowSquareChannels";
+  // '친밀도' 섹션(통나무파워·후원·내 채팅·구독 개월).
+  const AFFINITY_ON_KEY = "cheeseFollowAffinityOn";
+  const AFFINITY_ORDER_KEY = "cheeseFollowAffinityOrder"; // 가중치 순서(지표 키 배열)
+  const AFFINITY_HIDE_OFFLINE_KEY = "cheeseFollowAffinityHideOffline";
+  const AFFINITY_LABEL = "친밀도";
+  const AFFINITY_MAX = 10; // 점수 상위 몇 개까지 후보로 둘지
+  const AFFINITY_INITIAL_KEY = "cheeseFollowAffinityInitial";
+  const AFFINITY_MORE_KEY = "cheeseFollowAffinityMore";
+  const AFFINITY_INITIAL_DEFAULT = 3;
+  const AFFINITY_MORE_DEFAULT = 3;
+  const AFFINITY_DEFAULT_ORDER = Object.freeze([
+    "logPower",
+    "donation",
+    "chat",
+    "subscribe",
+  ]);
+  // 채팅에서 숨길 이모티콘 키 목록(Alt+클릭으로 추가, 설정에서 관리).
+  const CHAT_BLOCKED_EMOTICONS_KEY = "cheeseChatBlockedEmoticons";
+  // 사각 프로필을 어느 영역에 적용할지(중복 선택). 기본은 세 곳 모두.
+  const CUSTOM_FOLLOW_SQUARE_SCOPES = Object.freeze([
+    ["favorites", "즐겨찾기"],
+    ["groups", "그룹"],
+    ["following", "팔로잉"],
+    ["affinity", "친밀도"],
+  ]);
   // 별표(즐겨찾기 버튼) 표시 방식 — 구역별로 따로 둔다. always/hover/hidden.
   // ⚠ 기존 sbFollowFavStar(별표 항상 표시)는 '즐겨찾기한 항목'만 항상 보이게 하는
   //   전역 옵션이라 역할이 다르다. 여기는 구역 안 모든 항목의 버튼 노출 방식이다.
@@ -2231,6 +2266,7 @@
     favorites: "hover",
     groups: "hover",
     following: "hover",
+    affinity: "hover",
   };
   const CUSTOM_FOLLOW_SORTS = [
     "popular",
@@ -2285,6 +2321,9 @@
   // 전용 팔로잉 목록의 세 영역(그룹/즐겨찾기/팔로잉) 배치 순서.
   // ⚠ 기존 값 "groups-first"/"favorites-first" 는 팔로잉이 항상 마지막이라는 뜻이었다.
   // 하위 호환을 위해 그대로 두고, 팔로잉 위치까지 고르는 조합을 추가한다.
+  // 친밀도 섹션 위치. 저장 형식이 '이름 붙은 6조합'이라 네 번째를 담을 수 없어,
+  //   '몇 번째에 끼울지'만 따로 저장한다(0 = 맨 위).
+  const AFFINITY_INDEX_KEY = "cheeseFollowAffinityIndex";
   const CUSTOM_FOLLOW_SECTION_ORDERS = {
     "groups-first": ["groups", "favorites", "following"],
     "favorites-first": ["favorites", "groups", "following"],
@@ -2317,6 +2356,21 @@
   let customFollowGroupInitial = CUSTOM_FOLLOW_GROUP_INITIAL_DEFAULT;
   let customFollowGroupMore = CUSTOM_FOLLOW_GROUP_MORE_DEFAULT;
   let customFollowFavorites = new Set(); // 즐겨찾기 channelId
+  // 사각 프로필: channelId → 적용할 영역 Set. 채널마다 영역을 따로 고른다.
+  // ⚠ 저장은 { channelId: ["favorites", ...] } 평범한 객체로 한다(Set 은 직렬화 불가).
+  let customFollowSquares = new Map();
+  let chatBlockedEmoticons = [];
+  let affinityOn = false; // 기본 OFF(수집이 필요한 기능이라 켜서 쓴다)
+  let affinityOrder = [...AFFINITY_DEFAULT_ORDER];
+  let affinityHideOffline = false;
+  let affinityIndex = 0;
+  let affinityInitial = AFFINITY_INITIAL_DEFAULT;
+  let affinityMore = AFFINITY_MORE_DEFAULT;
+  let affinityShown = AFFINITY_INITIAL_DEFAULT;
+  // 계산 결과 캐시. 목록을 그릴 때마다 다시 모으지 않는다.
+  let affinityScored = null;
+  let affinityLoading = false;
+  let affinityLoadedAt = 0;
   let customFollowItems = []; // 병합·정규화된 팔로잉 배열
   let customFollowVersion = 0; // 데이터가 실제 바뀔 때만 증가(sig 무효화)
   let customFollowDataReady = false; // 최초 팔로잉 응답 또는 점진 목록이 반영됐는지
@@ -4803,18 +4857,17 @@
     if (!channelId) return null;
     if (channelMetaCache.has(channelId)) return channelMetaCache.get(channelId);
     try {
-      const res = await fetch(
+      const json = await fetchLogPowerResponse(
         `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}`,
-        { credentials: "include" },
       );
-      if (res.ok) {
-        const c = (await res.json())?.content;
+      if (json?.content) {
+        const c = json.content;
         const meta = {
           channelName: String(c?.channelName || "").trim(),
           channelImageUrl: String(c?.channelImageUrl || "").trim(),
           verifiedMark: c?.verifiedMark === true,
         };
-        channelMetaCache.set(channelId, meta);
+        mapSetCapped(channelMetaCache, channelId, meta, 300);
         return meta;
       }
     } catch {}
@@ -4823,19 +4876,17 @@
 
   async function resolveChannelName(channelId) {
     const fromDom = getCurrentChannelName();
-    if (fromDom) return fromDom;
+    if (fromDom && channelId === getLogPowerChannelId()) return fromDom;
     if (!channelId) return "";
     if (channelNameCache.has(channelId)) return channelNameCache.get(channelId);
     try {
-      const res = await fetch(
+      const json = await fetchLogPowerResponse(
         `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}`,
-        { credentials: "include" },
       );
-      if (res.ok) {
-        const json = await res.json();
+      if (json?.content) {
         const name = String(json?.content?.channelName || "").trim();
         if (name) {
-          channelNameCache.set(channelId, name);
+          mapSetCapped(channelNameCache, channelId, name, 300);
           return name;
         }
       }
@@ -6453,6 +6504,89 @@
     return escapeHtml(value).replace(/`/g, "&#096;");
   }
 
+  // ── 모달 배경 스크롤 잠금 ────────────────────────────────────────────────
+  // ⚠ overflow:hidden 만 걸면 세로 스크롤바가 사라지면서 그 폭(보통 15px)만큼
+  //   페이지가 갑자기 넓어진다 — 모달을 열 때 배경이 옆으로 튀는 깜빡임의 원인.
+  //   스크롤바가 차지하던 폭을 padding 으로 메워 레이아웃 폭을 그대로 유지한다.
+  // ⚠ scrollbar-gutter:stable 은 쓰지 않는다. 잠그기 '전부터' 자리를 잡아 둬야
+  //   효과가 있는데 여기서는 잠그는 순간에 붙이므로 이미 늦다.
+  // ⚠ 겹쳐 열리는 모달이 있어 '잠근 클래스'를 집합으로 센다. 먼저 연 모달이
+  //   닫혀도 뒤에 남은 모달이 있으면 잠금을 풀지 않는다.
+  // ⚠ 개수가 아니라 집합인 이유: 닫기 함수 중 일부는 모달이 열려 있지 않아도
+  //   그냥 호출된다(early return 이 없다). 숫자를 세면 그때마다 깎여 어긋난다.
+  const modalScrollLocks = new Set();
+
+  // 실제 스크롤바 폭. 브라우저·OS·'스크롤 시에만 표시' 설정에 따라 다르고,
+  //   오버레이 스크롤바(맥 기본)면 0 이라 보정이 아예 필요 없다.
+  function scrollbarWidth() {
+    return window.innerWidth - document.documentElement.clientWidth;
+  }
+
+  // ⚠ position:fixed 는 컨테이닝 블록이 뷰포트라 html 의 padding 을 무시한다.
+  //   치지직 헤더·사이드바가 여기 해당해서, padding 보정만으로는 본문은 멈춰도
+  //   헤더가 스크롤바 폭만큼 튄다(실측: 785 → 800px).
+  //   오른쪽 끝에 붙어 있는 fixed 요소에만 같은 폭의 margin 을 준다.
+  // ⚠ body 의 '직계 자식'만 본다. 전체를 훑으면 요소마다 getComputedStyle 이
+  //   필요해 라이브 목록(16,000 노드)에서 6ms 가 든다 — 모달 여는 순간에 그대로
+  //   보이는 지연이다. 헤더·사이드바는 최상위에 있어 직계만 봐도 잡힌다(실측:
+  //   0.00ms, 같은 요소를 찾는다).
+  const MODAL_SHIFT_CLASS = "cheese-modal-scroll-shift";
+
+  function markFixedEdgeElements() {
+    const viewportRight = document.documentElement.clientWidth;
+    for (const el of document.body.children) {
+      // 우리 모달 껍데기는 건드리지 않는다(딤머가 스크롤바 자리까지 덮어야 한다).
+      if (el.classList.contains(MODAL_SHIFT_CLASS)) continue;
+      let position = "";
+      try {
+        position = getComputedStyle(el).position;
+      } catch {
+        continue;
+      }
+      if (position !== "fixed") continue;
+      // 오른쪽 끝에 닿아 있지 않으면 스크롤바가 사라져도 움직이지 않는다.
+      if (Math.abs(el.getBoundingClientRect().right - viewportRight) > 1) {
+        continue;
+      }
+      el.classList.add(MODAL_SHIFT_CLASS);
+    }
+  }
+
+  function clearFixedEdgeElements() {
+    for (const el of document.querySelectorAll(`.${MODAL_SHIFT_CLASS}`)) {
+      el.classList.remove(MODAL_SHIFT_CLASS);
+    }
+  }
+
+  function lockModalScroll(lockClass) {
+    const root = document.documentElement;
+    if (modalScrollLocks.has(lockClass)) return;
+    if (!modalScrollLocks.size) {
+      // ⚠ 폭은 '아직 잠그기 전'에 재야 한다. 잠근 뒤에는 스크롤바가 이미
+      //   사라져 항상 0 이 나온다.
+      const gap = scrollbarWidth();
+      // 0 이면(오버레이 스크롤바·스크롤 없는 페이지) 보정할 게 없다.
+      if (gap > 0) {
+        root.style.setProperty("--cheese-modal-scroll-gap", `${gap}px`);
+        markFixedEdgeElements();
+      } else {
+        root.style.removeProperty("--cheese-modal-scroll-gap");
+      }
+    }
+    modalScrollLocks.add(lockClass);
+    root.classList.add(lockClass);
+  }
+
+  function unlockModalScroll(lockClass) {
+    const root = document.documentElement;
+    root.classList.remove(lockClass);
+    if (!modalScrollLocks.delete(lockClass)) return;
+    if (!modalScrollLocks.size) {
+      clearFixedEdgeElements();
+      root.style.removeProperty("--cheese-modal-scroll-gap");
+    }
+  }
+
   // 마커 표시 설정을 storage에서 1회 로드해 메모리에 캐시한다(없으면 디폴트 ON 유지).
   let commentMarkersEnabledLoaded = false;
   async function loadCommentMarkersEnabled() {
@@ -7470,17 +7604,43 @@
     return false;
   }
 
-  // 개별 채널 log-power의 content.amount를 직접 조회. {amount} 객체 또는 null(실패).
-  async function fetchChannelLogPowerContent(channelId) {
+  const logPowerContentRequests = new Map();
+
+  // JSON 본문 수신까지 제한한다. PUT은 본문 없이 HTTP 성공 여부만 확인한다.
+  async function fetchLogPowerResponse(url, options = {}, readJson = true) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const res = await fetch(
+      const res = await fetch(url, {
+        credentials: "include",
+        ...options,
+        signal: controller.signal,
+      });
+      return readJson ? (res.ok ? await res.json() : null) : res;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // 배지와 자동 획득이 동시에 조회하면 진행 중인 GET만 공유한다(완료 후 캐시 없음).
+  function fetchChannelLogPowerContent(channelId) {
+    if (logPowerContentRequests.has(channelId)) {
+      return logPowerContentRequests.get(channelId);
+    }
+    const request = loadChannelLogPowerContent(channelId).finally(() => {
+      if (logPowerContentRequests.get(channelId) === request) {
+        logPowerContentRequests.delete(channelId);
+      }
+    });
+    logPowerContentRequests.set(channelId, request);
+    return request;
+  }
+
+  async function loadChannelLogPowerContent(channelId) {
+    try {
+      const json = await fetchLogPowerResponse(
         `${LOGPOWER_CHANNEL_BASE}/${channelId}/log-power`,
-        {
-          credentials: "include",
-        },
       );
-      if (!res.ok) return null;
-      const json = await res.json();
       return json?.content || null;
     } catch {
       return null;
@@ -7491,12 +7651,9 @@
   // status==="OPEN" && closeDate 없음. 조회 실패면 null(불확실 → 호출부에서 보수적 처리).
   async function isLogPowerChannelLive(channelId) {
     try {
-      const res = await fetch(
+      const json = await fetchLogPowerResponse(
         `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
-        { credentials: "include" },
       );
-      if (!res.ok) return null;
-      const json = await res.json();
       const c = json?.content;
       if (!c) return null;
       return c.status === "OPEN" && !c.closeDate;
@@ -7914,14 +8071,16 @@
           textEl.textContent = "-";
         }
       } else {
-        textEl.textContent = formatCompactPower(amount);
+        const text = formatCompactPower(amount);
+        if (textEl.textContent !== text) textEl.textContent = text;
         textEl.removeAttribute("title"); // 값은 툴팁에 표시(네이티브 title 중복 제거)
       }
     }
     // 툴팁에 정확한 보유량을 천단위 콤마로 병기('통나무 파워' 아래 줄).
     const tipValue = badge.querySelector(".cheese-logpower-tooltip-value");
     if (tipValue && amount != null) {
-      tipValue.textContent = `(${(Number(amount) || 0).toLocaleString("ko-KR")})`;
+      const text = `(${(Number(amount) || 0).toLocaleString("ko-KR")})`;
+      if (tipValue.textContent !== text) tipValue.textContent = text;
     }
   }
 
@@ -7944,7 +8103,7 @@
   // fetch가 느리거나 실패해도 배지/값이 깜빡이지 않는다.
   async function refreshLogPowerBadge() {
     const channelId = getCurrentLiveChannelId();
-    if (!channelId) {
+    if (!channelId || !featureFlags.chatLogPower) {
       removeLogPowerBadge();
       return;
     }
@@ -7952,7 +8111,7 @@
     ensureLogPowerBadge();
     // 2) 캐시 기반 값(실패해도 직전 캐시 유지).
     const amount = await fetchLogPowerBalanceCached(channelId);
-    if (channelId !== getCurrentLiveChannelId()) return;
+    if (!featureFlags.chatLogPower || channelId !== getCurrentLiveChannelId()) return;
     // 3) 값이 있을 때만 텍스트 갱신(con-chzzk: amt != null).
     if (amount != null) {
       renderLogPowerBadge(amount);
@@ -8004,12 +8163,23 @@
   // 영역이 아직 없으면 1초 폴링으로 나타날 때까지 대기(전체 감시 안 함).
   function ensureLogPowerBadgeObserver() {
     if (
+      !getCurrentLiveChannelId() ||
+      !(featureFlags.chatLogPower || featureFlags.chatLogPowerAuto)
+    ) {
+      stopLogPowerBadgeObserver();
+      return;
+    }
+    if (
       logPowerBadgeObserver &&
       logPowerObservedArea &&
       logPowerObservedArea.isConnected
     ) {
       return; // 살아있는 영역 감시 중 → 유지
     }
+    // 새 입력 영역이 아직 없어도 분리된 DOM을 계속 참조하지 않는다.
+    if (logPowerBadgeObserver) logPowerBadgeObserver.disconnect();
+    logPowerBadgeObserver = null;
+    logPowerObservedArea = null;
     const area = findLogPowerInputArea();
     if (area) {
       if (logPowerAreaWaitTimer) {
@@ -8163,27 +8333,20 @@
     "SUBSCRIPTION_GIFT_MONTHLY",
   ]);
   const LOGPOWER_CLAIM_POLL_MS = 60000; // 1분마다 적격 claim 확인
+  const LOGPOWER_CACHE_CHANNEL_LIMIT = 100;
+  const LOGPOWER_SEEN_CLAIM_LIMIT = 256;
   let logPowerClaimTimer = 0;
+  let logPowerClaimGeneration = 0;
+  const logPowerClaimRequests = new Map();
   const logPowerSeenClaims = new Map(); // channelId → Set(claimId)
 
   async function fetchLogPowerClaims(channelId) {
-    try {
-      const res = await fetch(`${LOGPOWER_CLAIM_BASE}/${channelId}/log-power`, {
-        credentials: "include",
-      });
-      if (!res.ok) return [];
-      const json = await res.json();
-      const claims = json?.content?.claims;
-      return Array.isArray(claims) ? claims : [];
-    } catch {
-      return [];
-    }
+    const content = await fetchChannelLogPowerContent(channelId);
+    return Array.isArray(content?.claims) ? content.claims : [];
   }
 
   // 채널별 보상 단가(claim-list). 5분·1시간 보상의 amount 를 준다.
-  // ⚠ 1시간 보상을 받았다는 건 그 1시간 동안 5분 보상도 모두 받았다는 뜻이다. 그 합계를
-  // 내역에 함께 남기려면 단가가 필요하다. 1.2 배로 상수화하지 않는다 — 단가(현재 10/100)는
-  // 치지직이 바꿀 수 있고, 그러면 기록이 조용히 틀어진다.
+  // 실제 획득액의 부스팅 배수 계산에 사용한다. 5분 보상 횟수는 여기서 추정하지 않는다.
   const logPowerUnitCache = new Map();
   async function fetchLogPowerUnits(channelId) {
     if (!channelId) return null;
@@ -8191,12 +8354,10 @@
       return logPowerUnitCache.get(channelId);
     }
     try {
-      const res = await fetch(
+      const json = await fetchLogPowerResponse(
         `${LOGPOWER_CLAIM_BASE}/${encodeURIComponent(channelId)}/log-power/claim-list`,
-        { credentials: "include" },
       );
-      if (!res.ok) return null;
-      const rows = (await res.json())?.content?.claimList;
+      const rows = json?.content?.claimList;
       if (!Array.isArray(rows)) return null;
       const rowOf = (type) =>
         rows.find((r) => String(r?.claimType || "").toUpperCase() === type);
@@ -8219,7 +8380,7 @@
         donateDailyCap: capOf("DONATE"),
         giftDailyCap: capOf("SUBSCRIPTION_GIFT"),
       };
-      logPowerUnitCache.set(channelId, units);
+      mapSetCapped(logPowerUnitCache, channelId, units, LOGPOWER_CACHE_CHANNEL_LIMIT);
       return units;
     } catch {
       return null;
@@ -8230,10 +8391,13 @@
   // (영구 오류: 만료·권한 등 4xx) 호출부에서 판단한다. 네트워크 예외는 status:0.
   async function putLogPowerClaim(channelId, claimId) {
     try {
-      const res = await fetch(
+      const res = await fetchLogPowerResponse(
         `${LOGPOWER_CLAIM_BASE}/${channelId}/log-power/claims/${claimId}`,
-        { method: "PUT", credentials: "include" },
+        { method: "PUT" },
+        false,
       );
+      // 수령 도중 시작된 GET은 이전 잔액일 수 있어, 이후 조회에서는 공유하지 않는다.
+      if (res.ok) logPowerContentRequests.delete(channelId);
       return { ok: res.ok, status: res.status };
     } catch {
       return { ok: false, status: 0 };
@@ -8279,7 +8443,7 @@
     // 자동 획득이 켜졌을 때만 API 수령 + 팝업 치움(꺼져 있으면 사용자가 직접 받도록 둠).
     // 자동 획득은 '보유 통나무파워 표시'와 독립된 옵션이다. 배지를 숨긴 사용자는
     // chatLogPower=false이므로 두 플래그를 함께 요구하면 보상 버튼을 전혀 처리하지 못한다.
-    if (!featureFlags.chatLogPowerAuto) return;
+    if (!featureFlags.chatLogPowerAuto || isRadioModeActive()) return;
     const now = Date.now();
     if (now - logPowerRewardHandledAt < 5000) return; // 과열 방지(5초 쿨다운)
     logPowerRewardHandledAt = now;
@@ -8292,25 +8456,43 @@
 
   // 보상 팝업이 떠 있는 동안 채팅 너비 리사이저의 클릭 가로채기를 끈다(<html> 클래스).
   function setChatResizerClickThrough(on) {
+    if (document.documentElement.classList.contains("cheese-chat-reward-popup-open") === !!on) return;
     document.documentElement.classList.toggle(
       "cheese-chat-reward-popup-open",
       !!on,
     );
   }
 
-  async function claimLogPowerForCurrentChannel() {
+  function canClaimLogPower(channelId) {
+    return !!channelId && featureFlags.chatLogPowerAuto &&
+      channelId === getLogPowerChannelId() &&
+      !(getCurrentLiveChannelId() && isRadioModeActive());
+  }
+
+  function claimLogPowerForCurrentChannel() {
+    const channelId = getLogPowerChannelId();
+    if (!canClaimLogPower(channelId)) return Promise.resolve();
+    if (logPowerClaimRequests.has(channelId)) return logPowerClaimRequests.get(channelId);
+    const generation = logPowerClaimGeneration;
+    const isCurrent = () => generation === logPowerClaimGeneration && canClaimLogPower(channelId);
+    const request = collectLogPowerClaims(channelId, isCurrent)
+      .catch(() => {})
+      .finally(() => logPowerClaimRequests.delete(channelId));
+    logPowerClaimRequests.set(channelId, request);
+    return request;
+  }
+
+  async function collectLogPowerClaims(channelId, isCurrent) {
     // ⚠ 라이브 전용 ID 를 쓰면 채널 홈에서 팔로우해도 여기서 바로 빠져나가
     //    팔로우 보상(claims 의 FOLLOW)을 영영 못 받는다(제보) → 폴링과 같은
     //    범위(getLogPowerChannelId)를 쓴다.
-    const channelId = getLogPowerChannelId();
-    if (!channelId) return;
     const claims = await fetchLogPowerClaims(channelId);
-    if (channelId !== getLogPowerChannelId()) return; // 채널 전환됨
+    if (!isCurrent()) return;
     let seen = logPowerSeenClaims.get(channelId);
     if (!seen) {
       seen = new Set();
-      logPowerSeenClaims.set(channelId, seen);
     }
+    mapSetCapped(logPowerSeenClaims, channelId, seen, LOGPOWER_CACHE_CHANNEL_LIMIT);
     const eligible = claims.filter(
       (c) =>
         c?.claimId &&
@@ -8326,13 +8508,18 @@
     const otherClaims = [];
 
     for (const c of eligible) {
+      if (!isCurrent()) break;
+      if (seen.has(c.claimId)) continue;
       const { ok, status } = await putLogPowerClaim(channelId, c.claimId);
       // seen 기록 정책: 성공(획득 완료)이거나 4xx(만료·권한 등 재시도해도 소용없는 영구
-      // 오류)면 기록해 더 안 시도한다. 5xx/네트워크(status 0)는 일시 오류로 보고 기록하지
+      // 오류)면 기록해 더 안 시도한다. 408/429/5xx/네트워크(status 0)는 일시 오류로 보고 기록하지
       // 않아 다음 폴링에서 재시도한다. (예전엔 성공/실패 무관 미리 기록해, 한 번 실패한
       // claim이 seen에 박혀 '배달 완료' 팝업이 계속 떠도 자동 획득이 안 되던 문제가 있었다.)
-      const permanent = status >= 400 && status < 500;
-      if (ok || permanent) seen.add(c.claimId);
+      const permanent = status >= 400 && status < 500 && status !== 408 && status !== 429;
+      if (ok || permanent) {
+        seen.add(c.claimId);
+        while (seen.size > LOGPOWER_SEEN_CLAIM_LIMIT) seen.delete(seen.values().next().value);
+      }
       if (ok) {
         gained += Number(c.amount) || 0;
         // 1시간 시청 보상이면 60분 카운트다운 타이머 시작.
@@ -8371,7 +8558,7 @@
       }
     }
     if (hourRewardAmount > 0) {
-      startWatchHourTimer(channelId);
+      if (isCurrent()) startWatchHourTimer(channelId);
       // 내역 기록은 토스트 옵션과 무관하게 남긴다 — 알림을 끄고 쓰는 사용자도
       // 내역은 보고 싶어 한다(제보).
       const logMeta = await resolveChannelMeta(channelId);
@@ -8438,6 +8625,7 @@
     }
     // 채널이 바뀌었으면(또는 첫 진입) 즉시 1회 시도.
     if (channelId !== logPowerClaimChannelId) {
+      logPowerClaimGeneration++;
       logPowerClaimChannelId = channelId;
       claimLogPowerForCurrentChannel();
     }
@@ -8461,6 +8649,7 @@
   }
 
   function stopLogPowerClaimTimer() {
+    logPowerClaimGeneration++;
     if (logPowerClaimTimer) {
       window.clearInterval(logPowerClaimTimer);
       logPowerClaimTimer = 0;
@@ -8774,11 +8963,12 @@
       updateLogPowerIndicators();
       return;
     }
+    if (document.hidden) return; // 만료는 절대 시각으로 판정하고, 숨김 중 DOM 갱신만 생략한다.
     const timeStr = formatTimer(remaining);
     const timeEl = badge?.querySelector(".cheese-logpower-time");
-    if (timeEl) timeEl.textContent = timeStr;
+    if (timeEl && timeEl.textContent !== timeStr) timeEl.textContent = timeStr;
     const tipTimeEl = badge?.querySelector(".cheese-logpower-tip-time");
-    if (tipTimeEl) tipTimeEl.textContent = timeStr;
+    if (tipTimeEl && tipTimeEl.textContent !== timeStr) tipTimeEl.textContent = timeStr;
     updateLogPowerIndicators();
     // 1시간 타이머가 도는 동안 1분마다 라이브 종료를 확인한다(5분 적립 체크보다 빠른
     // 감지). 종료면 적립·타이머 모두 정리. 탭이 숨김이면 건너뛴다.
@@ -8944,16 +9134,20 @@
     // 위치별 반영: badge=인라인 span, tooltip=툴팁 안 줄. off면 둘 다 숨김.
     const tipProgress = badge.querySelector(".cheese-logpower-tip-progress");
     const tipTimer = badge.querySelector(".cheese-logpower-tip-timer");
-    if (progress)
-      progress.hidden = !(progressOn && logPowerProgressMode === "badge");
-    if (tipProgress)
-      tipProgress.hidden = !(progressOn && logPowerProgressMode === "tooltip");
-    if (timer) timer.hidden = !(timerOn && logPowerTimerMode === "badge");
-    if (tipTimer)
-      tipTimer.hidden = !(timerOn && logPowerTimerMode === "tooltip");
+    for (const [element, visible] of [
+      [progress, progressOn && logPowerProgressMode === "badge"],
+      [tipProgress, progressOn && logPowerProgressMode === "tooltip"],
+      [timer, timerOn && logPowerTimerMode === "badge"],
+      [tipTimer, timerOn && logPowerTimerMode === "tooltip"],
+    ]) {
+      if (element && element.hidden !== !visible) element.hidden = !visible;
+    }
     // '적립 중 색 변경' 옵션이 켜져 있고 실제 적립 중(타이머/진행 무관하게 active)이면
     // 배지 텍스트 색을 적립 색으로 바꾼다(is-earning 클래스 → CSS 처리).
-    badge.classList.toggle("is-earning", logPowerEarningColor && active);
+    const earning = !!(logPowerEarningColor && active);
+    if (badge.classList.contains("is-earning") !== earning) {
+      badge.classList.toggle("is-earning", earning);
+    }
   }
 
   // ── 1시간 보상 획득 토스트 ──────────────────────────────────────────────────
@@ -9880,6 +10074,9 @@
   //   그래서 '캐시가 있을 때만'을 기본으로 두고, 전수 수집은 따로 켜게 나눈다.
   const CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
   const CHAT_GRAPH_AUTO_COLLECT_KEY = "cheeseVodChatGraphAutoCollect";
+  const ROLE_CHAT_ON_KEY = "cheeseVodRoleChatOn";
+  const ROLE_CHAT_MAX_PAGES = 1500;
+  const ROLE_CHAT_BOTS_KEY = "cheeseVodRoleChatBots";
   const CHAT_GRAPH_LAYER_CLASS = "cheese-chat-graph-layer";
   const CHAT_GRAPH_BUTTON_CLASS = "cheese-chat-graph-button";
   const CHAT_GRAPH_CACHE_PREFIX = "cheeseVodChatGraphCache:";
@@ -9912,6 +10109,19 @@
   let chatGraphOn = false; // 설정(기본 OFF). 켜면 버튼만 나타난다.
   let chatGraphAuto = false; // 자동 표시(캐시가 있을 때)
   let chatGraphAutoCollect = false; // 캐시가 없어도 자동 수집
+  let vodRoleChatOn = true; // 방장·매니저 채팅 타임라인
+  // 내 채팅 기록 패널의 현재 탭("mine" | "role").
+  let recapPanelTab = "mine";
+  // 활성도와 완전히 분리된 상태. 한쪽을 다시 모아도 다른 쪽은 그대로다.
+  const roleChatState = {
+    videoNo: "",
+    items: null, // 수집·복원된 목록. 없으면 null.
+    loading: false,
+    progress: 0,
+    cancel: false,
+  };
+  // 설정에서 편집한다. 비어 있으면 기본 목록을 쓴다.
+  let vodRoleChatBots = [...CHAT_RECAP_STORE_API.DEFAULT_VOD_ROLE_CHAT_BOTS];
   let chatGraphAutoTriedVideo = ""; // 이 영상에서 자동 표시를 이미 시도했는지
   let chatGraphAutoCheckingVideo = ""; // 캐시 확인 중인 영상(중복 비동기 실행 방지)
   let chatGraphAutoCheckVersion = 0; // 설정·영상 변경 전 시작한 확인 결과 무효화
@@ -10186,6 +10396,14 @@
       overall: analysis?.overall || null,
       emojiUrls: analysis?.emojiUrls || {},
     };
+  }
+
+  // 설정의 봇 목록을 반영한다. 저장된 값이 없으면(첫 실행) 기본 목록을 쓴다.
+  // ⚠ 빈 배열은 '전부 지웠다'는 뜻이므로 기본값으로 되돌리지 않는다.
+  function applyVodRoleChatBots(value) {
+    vodRoleChatBots = Array.isArray(value)
+      ? value.map((name) => String(name || "").trim()).filter(Boolean)
+      : [...CHAT_RECAP_STORE_API.DEFAULT_VOD_ROLE_CHAT_BOTS];
   }
 
   // 사용자 지정 색을 CSS 변수로 흘려보낸다(CSS 는 var 폴백으로 기본색을 갖는다).
@@ -10596,6 +10814,177 @@
     );
   }
 
+  // 역할 뱃지. 아이콘만으로 구분되게 색을 달리하고, 읽어 주는 이름도 붙인다.
+  const CHAT_ROLE_BADGES = {
+    streamer: { icon: "★", label: "방장" },
+    manager: { icon: "◆", label: "매니저" },
+    partner: { icon: "✓", label: "파트너" },
+  };
+
+  // 방장·매니저·파트너 채팅 타임라인. 공지·진행 안내가 대부분이라 "그 방송에서
+  //   무슨 일이 있었나"를 시간순으로 따라갈 수 있다.
+  // ⚠ 닉네임을 보여 주긴 하지만 저장하지는 않는다(chatGraphState 에만 있고
+  //   캐시에 넣지 않는다). 새로고침하면 사라지고, 다시 수집해야 다시 나온다.
+  // 방장·매니저·파트너 채팅만 따로 모은다.
+  // ⚠ 활성도와 같은 API 를 쓰지만 독립적으로 돈다. 한쪽을 다시 모아도 다른 쪽은
+  //   건드리지 않는다 — 예전에는 둘이 한 캐시에 묶여 있어 타임라인만 갱신하려
+  //   해도 구간 통계 전체를 다시 모아야 했다.
+  async function collectVodRoleChats(videoNo, onProgress) {
+    const tracker = CHAT_RECAP_STORE_API.createVodRoleChatTracker({
+      bots: vodRoleChatBots,
+    });
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    const totalMs = Math.max(1, duration * 1000);
+    let cursor = 0;
+    let completed = false;
+    for (let page = 0; page < ROLE_CHAT_MAX_PAGES; page += 1) {
+      const url =
+        `https://api.chzzk.naver.com/service/v1/videos/${videoNo}/chats` +
+        `?playerMessageTime=${cursor}&previousVideoChatSize=50`;
+      let content = null;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) {
+          if (res.status === 400) completed = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        content = (await res.json())?.content;
+      } catch {
+        break;
+      }
+      // 영상을 옮기거나 중단을 누르면 즉시 멈춘다.
+      if (roleChatState.cancel || getCurrentVideoNo() !== videoNo) break;
+      const list = Array.isArray(content?.videoChats)
+        ? content.videoChats
+        : content?.previousVideoChats;
+      if (!Array.isArray(list) || !list.length) {
+        completed = true;
+        break;
+      }
+      for (const m of list) tracker.add(m);
+      const next = Number(content?.nextPlayerMessageTime);
+      if (!Number.isFinite(next) || next <= cursor) {
+        completed = true;
+        break;
+      }
+      cursor = next;
+      onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
+    }
+    const complete =
+      completed && !roleChatState.cancel && getCurrentVideoNo() === videoNo;
+    onProgress?.(complete ? 1 : Math.max(0, Math.min(1, cursor / totalMs)));
+    return { complete, items: tracker.finish() };
+  }
+
+  // 저장된 게 있으면 그걸 쓰고, 없으면 모은다.
+  async function ensureVodRoleChats(force) {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo || roleChatState.loading) return;
+    roleChatState.videoNo = videoNo;
+    if (!force) {
+      try {
+        const saved = await CHAT_RECAP_STORE_API.loadVodRoleChats(
+          chrome.storage.local,
+          videoNo,
+        );
+        if (saved.complete) {
+          roleChatState.items = saved.items;
+          return;
+        }
+      } catch {
+        // 저장된 걸 못 읽으면 새로 모은다.
+      }
+    }
+    roleChatState.loading = true;
+    roleChatState.cancel = false;
+    roleChatState.progress = 0;
+    try {
+      const result = await collectVodRoleChats(videoNo, (p) => {
+        roleChatState.progress = p;
+        // 방장·매니저 탭이 열려 있으면 진행률만 갱신한다. 통째로 다시 그리면
+        //   목록이 매번 새로 만들어져 스크롤이 튄다.
+        const label = document.querySelector(".cheese-recap-role-collect");
+        if (label && roleChatState.loading) {
+          label.textContent = `중단 (${Math.round(p * 100)}%)`;
+        }
+        const status = document.querySelector(
+          `.${RECAP_PANEL_CLASS} .cheese-search-comment-panel-status`,
+        );
+        if (status && roleChatState.loading) {
+          status.textContent = `모으는 중입니다… ${Math.round(p * 100)}%`;
+        }
+      });
+      if (getCurrentVideoNo() !== videoNo) return;
+      if (!result.complete) return; // 중단된 결과는 저장하지 않는다
+      roleChatState.items = result.items;
+      try {
+        await CHAT_RECAP_STORE_API.saveVodRoleChats(
+          chrome.storage.local,
+          videoNo,
+          result.items,
+        );
+      } catch {
+        // 저장 실패해도 이번 화면에는 보여 준다.
+      }
+    } finally {
+      roleChatState.loading = false;
+      roleChatState.cancel = false;
+    }
+  }
+
+  // 영상이 바뀌면 비운다(다른 방송의 타임라인이 남아 있으면 안 된다).
+  function resetRoleChatIfVideoChanged() {
+    const videoNo = getCurrentVideoNo();
+    if (roleChatState.videoNo && roleChatState.videoNo !== videoNo) {
+      roleChatState.videoNo = "";
+      roleChatState.items = null;
+      roleChatState.loading = false;
+      roleChatState.cancel = true;
+      roleChatState.progress = 0;
+      recapPanelTab = "mine";
+    }
+  }
+
+  function renderChatRoleTabBody(rows, duration) {
+    if (!Array.isArray(rows) || !rows.length) return "";
+    const items = rows
+      .map((row) => {
+        const sec = Math.max(0, Math.round(Number(row?.vMs || 0) / 1000));
+        if (duration && sec > duration + 5) return ""; // 길이를 벗어난 행은 버린다
+        const fallback =
+          CHAT_ROLE_BADGES[row?.kind] || CHAT_ROLE_BADGES.manager;
+        // 치지직이 준 배지 그림이 있으면 그걸 쓰고, 없으면 기호로 대신한다.
+        const label = String(row?.titleName || fallback.label);
+        const badge = row?.badge
+          ? `<img class="cheese-peak-role-badge" src="${escapeAttribute(row.badge)}" ` +
+            `alt="" loading="lazy" decoding="async">`
+          : `<i class="cheese-peak-role-badge" data-role="${escapeAttribute(row?.kind || "")}" ` +
+            `aria-hidden="true">${fallback.icon}</i>`;
+        // 타이틀 색을 닉네임에 입힌다(치지직 채팅과 같은 인상).
+        const color = row?.titleColor
+          ? ` style="color:${escapeAttribute(row.titleColor)}"`
+          : "";
+        return (
+          `<li><button type="button" data-peak-seek="${sec}">` +
+          `<time>${escapeHtml(formatSeconds(sec))}</time>` +
+          badge +
+          `<span class="blind">${escapeHtml(label)}</span>` +
+          `<small${color}>${escapeHtml(String(row?.nickname || ""))}</small></button>` +
+          // ⚠ {:d_42:} 는 그림으로. renderRecapMessageHtml 이 미구독 이모티콘
+          //   처리(이름만 표시)까지 담당한다 — 내 채팅 기록과 같은 규칙.
+          `<p class="cheese-peak-role-text">${renderRecapMessageHtml(row?.text, row?.emojis)}</p></li>`
+        );
+      })
+      .join("");
+    if (!items) return "";
+    return `<div class="cheese-peak-section cheese-peak-role"><ul>${items}</ul></div>`;
+  }
+
   function renderChatPeakSection(title, field, bins, peaks, emojiUrls, duration) {
     const picked = pickChatPeaks(bins, field, CHAT_PEAK_TOP_BINS);
     if (!picked.length) {
@@ -10657,7 +11046,8 @@
       getPlayerDuration(findPlayerSliderProgressWrap()) ||
       0;
     const el = document.createElement("div");
-    el.className = CHAT_PEAK_POPOVER_CLASS;
+    // 댓글 타임스탬프·내 채팅 기록과 같은 껍데기를 쓴다.
+    el.className = `${VIDEO_COMMENT_PANEL_CLASS} ${CHAT_PEAK_POPOVER_CLASS}`;
     el.setAttribute("role", "dialog");
     el.setAttribute("aria-label", "채팅 활성도 구간 요약");
 
@@ -10690,9 +11080,14 @@
         );
     }
     el.innerHTML =
-      `<div class="cheese-peak-head"><strong>구간 요약</strong>` +
+      `<div class="cheese-search-comment-panel-head">` +
+      `<strong>구간 요약</strong>` +
+      `<div class="cheese-recap-panel-head-actions">` +
       `<button type="button" data-peak-rescan>다시 수집</button>` +
-      `<button type="button" data-peak-close aria-label="닫기">✕</button></div>` +
+      `<button type="button" data-peak-close aria-label="닫기">` +
+      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
+      `<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>` +
+      `</svg></button></div></div>` +
       `<div class="cheese-peak-body">${body}</div>`;
     if (getComputedStyle(host).position === "static") {
       host.style.position = "relative";
@@ -12001,6 +12396,184 @@
 
   // 이 영상에 있는 갈래만 칩으로 그린다. 채팅만 있는 영상에서는 아예 만들지 않아
   // 기존 화면 그대로 보인다.
+  // 내 채팅 / 방장·매니저 탭. 설정이 꺼져 있으면 탭 자체를 만들지 않는다.
+  function renderRecapTabBar(panel) {
+    if (!vodRoleChatOn || !getCurrentVideoNo()) return null;
+    const bar = document.createElement("div");
+    bar.className = "cheese-recap-tab-bar";
+    bar.setAttribute("role", "tablist");
+    [
+      ["mine", "내 채팅"],
+      ["role", "방장·매니저"],
+    ].forEach(([key, label]) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "cheese-recap-tab";
+      tab.dataset.recapTab = key;
+      tab.textContent = label;
+      const on = recapPanelTab === key;
+      tab.classList.toggle("is-on", on);
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      // ⚠ 필터 칩과 같은 이유로 전파를 끊는다. 다시 그리면 이 버튼이 문서에서
+      //   떨어져 나가 document 핸들러가 '바깥 클릭'으로 오판한다.
+      tab.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (recapPanelTab === key) return;
+        recapPanelTab = key;
+        // ⚠ 탭마다 순번 체계가 다르다. 비워 두지 않으면 이전 탭의 순번과 같다는
+        //   이유로 갱신을 건너뛰어 현재 항목 표시가 안 붙는다.
+        recapPanelCurrentIndex = "";
+        renderChatRecapPanel(panel);
+        if (key !== "role") return;
+        // ⚠ 이모티콘 사전을 먼저 채워야 {:키:} 가 그림으로 나온다. 다시보기
+        //   API 의 extras.emojis 는 비어 오는 경우가 많아(실측 {}) 메시지에
+        //   딸린 맵만으로는 부족하다 — '내 채팅' 탭이 열릴 때와 같은 이유다.
+        const ready = Promise.all([
+          loadDialogEmojiMap(currentClipVaultAccountId()),
+          Array.isArray(roleChatState.items) ? null : ensureVodRoleChats(false),
+        ]);
+        void ready.then(() => {
+          if (panel.isConnected && recapPanelTab === "role") {
+            renderChatRecapPanel(panel);
+          }
+        });
+      });
+      bar.append(tab);
+    });
+    return bar;
+  }
+
+  // 방장·매니저 탭 본문. 목록 모양은 내 채팅 기록과 같은 클래스를 쓴다.
+  function renderRecapRolePanelBody(panel) {
+    const title = panel.querySelector(
+      ".cheese-search-comment-panel-head strong",
+    );
+    const rows = Array.isArray(roleChatState.items)
+      ? roleChatState.items
+      : null;
+    if (title) {
+      title.textContent = rows?.length
+        ? `방장·매니저 채팅 ${rows.length.toLocaleString()}개`
+        : "방장·매니저 채팅";
+    }
+    const status = (text) => {
+      const p = document.createElement("p");
+      p.className = "cheese-search-comment-panel-status";
+      p.textContent = text;
+      panel.append(p);
+    };
+    // 모으기/중단 버튼. 수집은 이 탭에서만 한다.
+    const actions = document.createElement("div");
+    actions.className = "cheese-recap-role-actions";
+    const collect = document.createElement("button");
+    collect.type = "button";
+    collect.className = "cheese-recap-role-collect";
+    collect.textContent = roleChatState.loading
+      ? `중단 (${Math.round(roleChatState.progress * 100)}%)`
+      : rows
+        ? "다시 모으기"
+        : "모으기";
+    collect.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (roleChatState.loading) {
+        roleChatState.cancel = true;
+        return;
+      }
+      void Promise.all([
+        ensureVodRoleChats(true),
+        loadDialogEmojiMap(currentClipVaultAccountId()),
+      ]).then(() => {
+        if (panel.isConnected && recapPanelTab === "role") {
+          renderChatRecapPanel(panel);
+        }
+      });
+      renderChatRecapPanel(panel);
+    });
+    actions.append(collect);
+    panel.append(actions);
+
+    if (roleChatState.loading) {
+      status(`모으는 중입니다… ${Math.round(roleChatState.progress * 100)}%`);
+      return;
+    }
+    if (!rows) {
+      status("아직 모으지 않았습니다. '모으기'를 눌러 주세요.");
+      return;
+    }
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    // ⚠ 원래 순번(index)을 들고 다닌다. 재생 위치 추적은 roleChatState.items
+    //   기준이라, 걸러낸 뒤 번호를 다시 매기면 현재 항목 표시가 어긋난다
+    //   (내 채팅 탭이 같은 이유로 쓰는 방식).
+    const visible = rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => {
+        const sec = Math.round(Number(row?.vMs || 0) / 1000);
+        return !duration || sec <= duration + 5;
+      });
+    if (!visible.length) {
+      status("방장·매니저·파트너 채팅이 없습니다.");
+      return;
+    }
+    const list = document.createElement("ol");
+    list.className = "cheese-search-comment-panel-list cheese-recap-role-list";
+    for (const { row, index } of visible) {
+      const sec = Math.max(0, Math.round(Number(row?.vMs || 0) / 1000));
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.recapSeek = String(sec);
+      button.dataset.recapIndex = String(index);
+      const time = document.createElement("span");
+      time.textContent = formatSeconds(sec);
+      const message = document.createElement("strong");
+      const who = document.createElement("em");
+      who.className = "cheese-recap-role-who";
+      const fallback = CHAT_ROLE_BADGES[row?.kind] || CHAT_ROLE_BADGES.manager;
+      if (row?.badge) {
+        const img = document.createElement("img");
+        img.className = "cheese-peak-role-badge";
+        img.src = row.badge;
+        img.alt = "";
+        img.loading = "lazy";
+        who.append(img);
+      } else {
+        const icon = document.createElement("i");
+        icon.className = "cheese-peak-role-badge";
+        icon.dataset.role = String(row?.kind || "");
+        icon.textContent = fallback.icon;
+        icon.setAttribute("aria-hidden", "true");
+        who.append(icon);
+      }
+      const name = document.createElement("b");
+      name.textContent = String(row?.nickname || "");
+      if (row?.titleColor) name.style.color = row.titleColor;
+      who.append(name);
+      message.append(who);
+      // ⚠ {:d_42:} 는 그림으로. 미구독 이모티콘 처리까지 이 함수가 담당한다.
+      message.insertAdjacentHTML(
+        "beforeend",
+        renderRecapMessageHtml(row?.text, row?.emojis),
+      );
+      button.append(time, message);
+      li.append(button);
+      list.append(li);
+    }
+    panel.append(list);
+    panel.querySelectorAll("[data-recap-seek]").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        seekVideoToCommentTimestamp(Number(btn.dataset.recapSeek || 0));
+        updateChatRecapPanelCurrentItem();
+      });
+    });
+    // 방금 그린 목록에 현재 재생 위치를 반영한다(스크롤도 맞춘다).
+    updateChatRecapPanelCurrentItem({ scroll: true });
+  }
+
   function renderRecapFilterBar(panel, counts) {
     const kinds = RECAP_FILTERS.filter(
       ([key]) => key !== "all" && counts.get(key),
@@ -12048,6 +12621,14 @@
     const head = panel.querySelector(".cheese-search-comment-panel-head");
     panel.replaceChildren();
     if (head) panel.append(head);
+    // 방장·매니저 채팅은 같은 패널의 다른 탭으로 본다. 영상을 보며 시간순으로
+    //   훑는다는 쓰임이 같아서다.
+    const tabBar = renderRecapTabBar(panel);
+    if (tabBar) panel.append(tabBar);
+    if (tabBar && recapPanelTab === "role") {
+      renderRecapRolePanelBody(panel);
+      return;
+    }
     // 원래 순번(index)을 들고 다닌다. 재생 위치 추적은 recapPanelItems 기준이라
     // 걸러낸 뒤 번호를 다시 매기면 현재 항목 표시가 어긋난다.
     const counts = new Map();
@@ -12154,18 +12735,31 @@
     recapPanelCurrentIndex = "";
   }
 
+  // 지금 보고 있는 탭의 항목들을 '초' 배열로 돌려준다. 두 탭 모두 시간순이라
+  //   같은 이진 탐색을 쓸 수 있다(방장·매니저는 vMs, 내 채팅은 seconds).
+  function currentRecapTrackSeconds() {
+    if (recapPanelTab === "role") {
+      const rows = Array.isArray(roleChatState.items)
+        ? roleChatState.items
+        : [];
+      return rows.map((row) => Math.round(Number(row?.vMs || 0) / 1000));
+    }
+    return recapPanelItems.map((item) => Number(item?.seconds));
+  }
+
   function findCurrentChatRecapItemIndex() {
     const currentTime = Number(document.querySelector("video")?.currentTime);
     if (!Number.isFinite(currentTime)) return -1;
     // 수집 결과는 시간순으로 정렬되어 있다. 항목이 많아도 timeupdate마다 전체를
     // 훑지 않도록 현재 시각 이하의 마지막 항목을 이진 탐색한다.
+    const seconds = currentRecapTrackSeconds();
     let low = 0;
-    let high = recapPanelItems.length - 1;
+    let high = seconds.length - 1;
     let currentIndex = -1;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
-      const seconds = Number(recapPanelItems[middle]?.seconds);
-      if (Number.isFinite(seconds) && seconds <= currentTime) {
+      const at = Number(seconds[middle]);
+      if (Number.isFinite(at) && at <= currentTime) {
         currentIndex = middle;
         low = middle + 1;
       } else {
@@ -16173,6 +16767,16 @@
       if (node.matches('[role="log"], [role="dialog"], [role="alertdialog"]')) {
         break;
       }
+      // 새 채팅 UI는 고정 메시지(_fixed_)와 진행 중인 미션 패널을 같은 상위 래퍼의
+      // 형제로 둔다. 그 래퍼까지 candidate를 올리면 미션 숨김이 고정 메시지까지 함께
+      // 없앤다. 고정 영역 자체 또는 고정 영역을 품은 공통 조상은 경계로 삼는다.
+      if (
+        node !== first &&
+        (node.matches('[class*="_fixed_"]') ||
+          node.querySelector('[class*="_fixed_"]'))
+      ) {
+        break;
+      }
       if (
         node !== first &&
         node.querySelector(
@@ -16220,18 +16824,32 @@
           });
       }
       if (chatFeatureActive("chatHideMission")) {
+        const missionButtons = aside.querySelectorAll(
+          "button[class*='_mission_button_']",
+        );
+        // 이전 DOM 구조에서 공통 부모에 붙은 마커가 남아 있더라도 새 판정 결과와
+        // 다르면 먼저 제거한다. 옵션을 껐다 켜거나 SPA 이동을 기다리지 않고 복구된다.
         aside
-          .querySelectorAll("button[class*='_mission_button_']")
-          .forEach((btn) => {
-            // 미션 후원 팝업(role=dialog/alertdialog) 안에도 '진행 중인 미션 보러 가기'
-            // 버튼(_mission_button_)이 있다. 그 버튼의 조상 컨테이너를 숨기면 후원 팝업
-            // 전체가 사라져 후원이 불가능해진다 → 팝업 내부 버튼은 제외한다. 우리가
-            // 숨기려는 건 채팅창 상단의 상시 '진행 중인 미션' 패널뿐이다.
-            if (btn.closest('[role="dialog"], [role="alertdialog"]')) return;
-            findChatMissionPanel(btn, aside)?.classList.add(
-              CHAT_HIDE_CLASSES.chatHideMission,
+          .querySelectorAll(`.${CHAT_HIDE_CLASSES.chatHideMission}`)
+          .forEach((marked) => {
+            const btn = marked.querySelector(
+              "button[class*='_mission_button_']",
             );
+            const panel = btn ? findChatMissionPanel(btn, aside) : null;
+            if (panel !== marked) {
+              marked.classList.remove(CHAT_HIDE_CLASSES.chatHideMission);
+            }
           });
+        missionButtons.forEach((btn) => {
+          // 미션 후원 팝업(role=dialog/alertdialog) 안에도 '진행 중인 미션 보러 가기'
+          // 버튼(_mission_button_)이 있다. 그 버튼의 조상 컨테이너를 숨기면 후원 팝업
+          // 전체가 사라져 후원이 불가능해진다 → 팝업 내부 버튼은 제외한다. 우리가
+          // 숨기려는 건 채팅창 상단의 상시 '진행 중인 미션' 패널뿐이다.
+          if (btn.closest('[role="dialog"], [role="alertdialog"]')) return;
+          findChatMissionPanel(btn, aside)?.classList.add(
+            CHAT_HIDE_CLASSES.chatHideMission,
+          );
+        });
       }
       if (chatFeatureActive("chatHidePrediction")) {
         aside.querySelectorAll("[class*='_status_']").forEach((status) => {
@@ -20249,6 +20867,15 @@
     right: calc(25px + var(--cheese-sidebar-right-width, 80px)) !important;
   }
 }`,
+          // ⚠ '메뉴 확장' 버튼의 툴팁은 _label_left_ 가 left:0 으로 왼쪽에 고정한다.
+          //   버튼이 화면 오른쪽 끝으로 가면 툴팁이 오른쪽으로 자라 화면 밖으로
+          //   밀린다(제보). 기준을 오른쪽으로 뒤집어 버튼 안쪽으로 펼치게 한다.
+          //   사이드바 안의 같은 버튼(접힘 상태)도 오른쪽 끝에 있으므로 함께 뒤집는다.
+          `header#header button[aria-controls="navigation"] [class*="_label_"],
+aside#sidebar button[aria-controls="navigation"] [class*="_label_"] {
+  left: auto !important;
+  right: 0 !important;
+}`,
           `header#header :has(> button[aria-controls="navigation"]) { position: static !important; }`,
           `header#header button[aria-controls="navigation"] {
   position: absolute !important;
@@ -20453,8 +21080,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const root = document.documentElement;
     const sidebarRightVisible =
       featureFlags.sidebarRight && !featureFlags.sidebar && !!sidebar;
+    const on = featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar;
+    const expanded = on && isSidebarExpanded(sidebar);
+    // 좌표 읽기를 스타일 쓰기보다 먼저 모아 같은 패스 안의 강제 재측정을 피한다.
+    const measuredWidth = sidebarRightVisible || expanded
+      ? Math.round(sidebar.getBoundingClientRect().width)
+      : 0;
     if (sidebarRightVisible) {
-      const measuredWidth = Math.round(sidebar.getBoundingClientRect().width);
       const width = measuredWidth > 0 ? measuredWidth : 80;
       const value = `${width}px`;
       if (
@@ -20465,26 +21097,24 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     } else {
       root.style.removeProperty("--cheese-sidebar-right-width");
     }
-    const on = featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar; // 숨김이면 무의미
-    const expanded = on && isSidebarExpanded(sidebar);
-    if (!expanded) {
-      // 조건 불충족(옵션 off/숨김/접힘) → 규칙 제거해 치지직 기본 레이아웃 복원.
-      if (style) style.textContent = "";
-      return;
-    }
-    const width = Math.round(sidebar.getBoundingClientRect().width);
-    // 측정값이 비정상(0 또는 좁은 아이콘 폭 이하)이면 아직 펼침 전이므로 건너뛴다.
-    if (!width || width <= 80) {
-      if (style) style.textContent = "";
-      return;
-    }
-    if (!style) {
+    if (!style && on) {
       style = document.createElement("style");
       style.id = SIDEBAR_PUSH_STYLE_ID;
       (document.head || document.documentElement).appendChild(style);
     }
+    if (!expanded) {
+      // 옵션 off/숨김/접힘이면 치지직 기본 레이아웃과 전환으로 복원한다.
+      if (style?.textContent) style.textContent = "";
+      return;
+    }
+    const width = measuredWidth;
+    // 측정값이 비정상(0 또는 좁은 아이콘 폭 이하)이면 아직 펼침 전이므로 건너뛴다.
+    if (!width || width <= 80) {
+      if (style?.textContent) style.textContent = "";
+      return;
+    }
     const side = featureFlags.sidebarRight ? "padding-right" : "padding-left";
-    // transition으로 밀어내기를 부드럽게(펼침/접힘 애니메이션과 어울리게).
+    // 본문만 뒤늦게 즉시 이동하면 사이드바 전환과 분리되어 끊겨 보일 수 있다.
     const css =
       `div#layout-body { ${side}: ${width}px !important;` +
       ` transition: padding 0.2s ease !important; }`;
@@ -20620,10 +21250,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
   function onHeaderScroll(e) {
-    // 사이드바 스크롤은 본문 sticky 위치와 무관하다. capture 리스너까지 전파된 이벤트를
+    // 사이드바와 채팅 스크롤은 본문 sticky 위치와 무관하다. capture 리스너의 이벤트를
     // 여기서 끝내 전역 querySelector와 CSS 변수 계산을 반복하지 않는다.
     const target = e?.target;
-    if (target instanceof Element && target.closest("aside#sidebar")) return;
+    if (
+      target instanceof Element &&
+      target.closest("aside#sidebar, aside#aside-chatting, aside#vod-aside")
+    ) return;
     // rAF로 합쳐 과도한 변수 갱신/스래싱 방지(멱등 비교).
     if (headerScrollRaf) return;
     headerScrollRaf = requestAnimationFrame(updateStickyShift);
@@ -21282,9 +21915,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       count: formatHeaderFollowCount(item?.liveInfo?.concurrentUserCount),
       countRaw: Number.isFinite(countRawNum) ? countRawNum : null,
       openDate: parsePublishDate(item?.liveInfo?.openDate) || null,
+      // 파티 정보(사이드바 네이티브가 프로필에 초록 배지 + 참여 인원을 그린다).
+      party: normalizeCustomFollowParty(item?.liveInfo?.party),
       tags: normalizeCustomFollowTags(rawTags),
       tagsKnown: Array.isArray(rawTags),
     };
+  }
+
+  // 파티 정보. 실측 payload: { partyNo: 22801, memberCount: 3 }.
+  // ⚠ partyNo 가 없으면 참여자 링크를 만들 수 없으므로 파티가 아닌 것으로 본다.
+  function normalizeCustomFollowParty(party) {
+    if (!party || typeof party !== "object") return null;
+    // partyNo 가 정본. 나머지는 구조가 바뀔 경우를 위한 보조.
+    const partyNo = Number(party.partyNo ?? party.partyLiveNo ?? party.no) || 0;
+    if (!partyNo) return null;
+    const total = Number(
+      party.memberCount ?? party.participantCount ?? party.count ?? 0,
+    );
+    if (!Number.isFinite(total) || total <= 0) return { partyNo, others: 0 };
+    // ⚠ memberCount 는 방송 주인을 포함한 전체 인원이다. 네이티브는 '+N' 으로
+    //   주인을 뺀 나머지를 보여 준다(확인: memberCount 3 → '+2').
+    return { partyNo, others: Math.max(0, total - 1) };
   }
 
   async function refreshHeaderFollowLiveInfo() {
@@ -22818,7 +23469,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 이동 시 미리보기/커스텀 툴팁을 정리한다. 헤더 자동 숨김 상태에서 팔로우 채널을
     // 클릭해 이동하면 헤더가 숨겨지는데, 마우스는 그대로라 hover 기반 툴팁과 body 에
     // fixed 로 뜬 미리보기가 남았다.
-    dismissHeaderFollowHover();
+    dismissHeaderFollowHover(event);
     spaNavigate(href);
   }
 
@@ -22885,8 +23536,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   });
 
   // 헤더 팔로우 아이템의 미리보기·커스텀 툴팁을 즉시 정리한다(클릭 이동 시).
-  function dismissHeaderFollowHover() {
-    closeFollowPreview(); // body fixed 미리보기 닫기(hover 무관하게 남던 것)
+  function dismissHeaderFollowHover(event) {
+    dismissFollowPreviewForNavigation(event);
     // 이동 직후 잠깐은 미리보기 재오픈을 억제한다(헤더 재렌더로 mouseover 가 다시 나
     // 미리보기가 마우스를 따라 새로 뜨는 것 방지).
     followPreviewOpenSuppressUntil =
@@ -25298,6 +25949,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     keyword: "", // 현재 fetch 대상 검색어
     fetchedFor: "", // fetch 완료된 검색어
     fetching: false,
+    controller: null,
+    sortedCache: null,
     items: [], // fetch+dedupe 풀(각 항목에 __score/__origIndex 부여)
     sort: "score", // score(추천) | read(조회수) | recent(최신) | original(원본)
     visible: SEARCH_RERANK_INITIAL,
@@ -25697,18 +26350,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 검색 API 를 size=50 × 최대 4페이지 호출해 풀을 만든다(videoNo 중복 제거).
-  async function fetchSearchRerankPool(keyword) {
+  async function fetchSearchRerankPool(keyword, signal) {
     await ensureSearchRerankBlockedUsers();
+    if (signal?.aborted) return [];
     const out = [];
     const seen = new Set();
     // 최대 개수는 설정(50~1000, 기본 200). 페이지당 50개씩 필요한 만큼만 호출한다.
     const poolMax = normalizeSearchRerankPoolMax(searchRerankPoolMax);
     const maxPages = Math.ceil(poolMax / 50);
     for (let page = 0; page < maxPages; page++) {
+      if (signal?.aborted) return [];
       if (out.length >= poolMax) break;
       const res = await fetch(
         `https://api.chzzk.naver.com/service/v1/search/videos?keyword=${encodeURIComponent(keyword)}&offset=${page * 50}&size=50`,
-        { credentials: "include", headers: { accept: "application/json" } },
+        { credentials: "include", headers: { accept: "application/json" }, signal },
       );
       if (!res.ok) break;
       const json = await res.json();
@@ -25783,6 +26438,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function buildSearchRerankScores(items, keyword) {
+    searchRerankState.sortedCache = null;
     const norm = normalizeSearchRerankText(keyword);
     const tokens = norm.split(" ").filter(Boolean);
     items.forEach((it, i) => {
@@ -25801,6 +26457,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   ];
 
   function sortedSearchRerankItems() {
+    const cached = searchRerankState.sortedCache;
+    if (cached?.source === searchRerankState.items && cached.sort === searchRerankState.sort) {
+      return cached.items;
+    }
     const items = searchRerankState.items.slice();
     const s = searchRerankState.sort;
     if (s === "read") {
@@ -25818,6 +26478,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     } else {
       items.sort((a, b) => b.__score - a.__score);
     }
+    searchRerankState.sortedCache = { source: searchRerankState.items, sort: s, items };
     return items;
   }
 
@@ -26134,6 +26795,40 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 네이티브 li 클론에 항목 데이터를 채운다(클래스는 클론이 그대로 보존 → 스타일 동일).
+  // 복제 카드의 19세 연령 제한 표시를 실제 값에 맞춘다.
+  // ⚠ 카드는 '첫 번째 네이티브 카드'를 복제해 만든다. 그 카드가 성인 영상이면
+  //   표식(_is_adult_ 클래스·blind 문구·오버레이)이 모든 복제본에 따라붙어
+  //   전부 19세로 보인다 — 시청자 수가 같은 값으로 복제되던 것과 같은 원인이다.
+  //   그래서 켜는 쪽뿐 아니라 '끄는' 쪽도 반드시 처리한다.
+  function setSearchRerankAdult(li, isAdult) {
+    if (!li) return;
+    const ADULT_TOKEN = /_is_adult_|_age_restriction_/;
+    // 해시가 바뀌어도 토큰은 유지된다(기존 코드와 같은 전제).
+    const mark = (el) => {
+      if (!el) return;
+      for (const cls of [...el.classList]) {
+        if (ADULT_TOKEN.test(cls)) el.classList.remove(cls);
+      }
+    };
+    if (!isAdult) {
+      mark(li);
+      li.querySelectorAll(
+        '[class*="_is_adult_"], [class*="_age_restriction_"]',
+      ).forEach((el) => {
+        // 오버레이 전용 요소면 통째로 지우고, 카드 일부면 표식만 뗀다.
+        if (el.matches('[class*="_age_restriction_"]')) el.remove();
+        else mark(el);
+      });
+      // "19 연령 제한" 안내 문구도 함께 지운다(스크린리더에 남으면 안 된다).
+      li.querySelectorAll("span.blind, em").forEach((el) => {
+        if (/19\s*연령\s*제한/.test(el.textContent || "")) el.remove();
+      });
+      return;
+    }
+    // 성인 영상인데 템플릿이 일반 카드였다면 표식이 없다. 우리 클래스로 보강한다.
+    li.classList.add("cheese-search-rerank-is-adult");
+  }
+
   function fillSearchRerankCard(li, item) {
     const v = item?.video || {};
     const ch = item?.channel || {};
@@ -26152,6 +26847,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // _badge_, 이전 카드는 _description_ 영역을 쓴다. 클론 템플릿의 배지 값은
       // 절대 재사용하지 않고, livePv가 없으면 복제된 시청 배지를 제거한다.
       setSearchRerankLiveBadge(thumbA, Number(v.livePv) || 0);
+      setSearchRerankAdult(li, isAdultVideo(v));
       const blind = thumbA.querySelector("span.blind");
       if (blind)
         blind.textContent = `${ch.channelName || ""}동영상 엔드로 이동`;
@@ -26222,6 +26918,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 우리 리스트/컨트롤을 제거하고 네이티브를 원복한다.
   function cleanupSearchRerank() {
+    searchRerankState.controller?.abort();
+    searchRerankState.controller = null;
+    searchRerankState.fetching = false;
+    searchRerankState.sortedCache = null;
     findSearchVideoSection()
       ?.querySelector(":scope > .cheese-search-section-top-wrap")
       ?.remove();
@@ -26241,17 +26941,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 피커 라벨/선택 표시를 현재 정렬 값으로 동기화.
+  function setSearchRerankMoreLabel(button, label) {
+    const textNodes = [...button.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE);
+    if (textNodes.length === 1 && textNodes[0].textContent === label) return;
+    textNodes.forEach((node) => node.remove());
+    button.insertBefore(document.createTextNode(label), button.querySelector("svg"));
+  }
+
   function updateSearchRerankPicker(bar) {
     const cur =
       SEARCH_RERANK_SORTS.find((o) => o.value === searchRerankState.sort) ||
       SEARCH_RERANK_SORTS[0];
     const label = bar.querySelector("[data-rerank-sort-label]");
-    if (label) label.textContent = cur.label;
+    if (label && label.textContent !== cur.label) label.textContent = cur.label;
     bar.querySelectorAll("[data-rerank-sort]").forEach((opt) => {
-      opt.setAttribute(
-        "aria-selected",
-        String(opt.dataset.rerankSort === cur.value),
-      );
+      const selected = String(opt.dataset.rerankSort === cur.value);
+      if (opt.getAttribute("aria-selected") !== selected) opt.setAttribute("aria-selected", selected);
     });
   }
 
@@ -27345,17 +28050,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const btn = moreWrap.querySelector("button");
       if (btn) {
         const collapsed = visible >= items.length; // 다 펼쳐진 상태
-        btn.setAttribute("aria-expanded", String(collapsed));
-        // blind span + svg 는 유지하고, 사이의 텍스트 노드(라벨)만 교체.
-        [...btn.childNodes]
-          .filter((n) => n.nodeType === Node.TEXT_NODE)
-          .forEach((n) => n.remove());
-        const svg = btn.querySelector("svg");
+        const expanded = String(collapsed);
+        if (btn.getAttribute("aria-expanded") !== expanded) btn.setAttribute("aria-expanded", expanded);
         // 더보기 상태면 라벨 뒤(svg 앞)에 남은 개수를 함께 표시. 접기 상태는 '접기'만.
         const remaining = items.length - visible;
         const labelText = collapsed ? "접기" : `더보기 (${remaining}개)`;
-        if (svg) btn.insertBefore(document.createTextNode(labelText), svg);
-        else btn.appendChild(document.createTextNode(labelText));
+        setSearchRerankMoreLabel(btn, labelText);
       }
     } else {
       moreWrap?.remove();
@@ -27373,6 +28073,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const keyword = searchRerank ? getSearchRerankKeyword() : "";
     if (!keyword || !findSearchVideoSection()) {
       if (
+        searchRerankState.keyword || searchRerankState.controller ||
         document.querySelector(".cheese-search-rerank-list") ||
         document.querySelector(`.${SEARCH_RERANK_HIDDEN_CLASS}`)
       ) {
@@ -27381,7 +28082,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     if (searchRerankState.fetchedFor === keyword) {
-      renderSearchRerank(); // React 재렌더로 지워졌으면 복구(시그니처로 멱등)
+      if (searchRerankState.items.length) renderSearchRerank();
       return;
     }
     if (searchRerankState.fetching && searchRerankState.keyword === keyword) {
@@ -27391,10 +28092,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     cleanupSearchRerank();
     searchRerankState.keyword = keyword;
     searchRerankState.fetching = true;
-    fetchSearchRerankPool(keyword)
+    const controller = new AbortController();
+    searchRerankState.controller = controller;
+    fetchSearchRerankPool(keyword, controller.signal)
       .then((items) => {
+        if (controller.signal.aborted || searchRerankState.controller !== controller) return;
         searchRerankState.fetching = false;
-        if (searchRerankState.keyword !== keyword) return; // 그새 검색어 변경
+        searchRerankState.fetchedFor = keyword; // 빈 결과도 완료로 기록해 반복 수집을 막는다.
         if (!items.length) return; // 결과 없음 → 네이티브 그대로
         buildSearchRerankScores(items, keyword);
         searchRerankState.items = items;
@@ -27406,7 +28110,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         renderSearchRerank();
       })
       .catch(() => {
+        if (controller.signal.aborted || searchRerankState.controller !== controller) return;
         searchRerankState.fetching = false;
+        searchRerankState.fetchedFor = keyword; // 실패 시 원본을 유지하고 자동 재시도 폭주 방지
       });
   }
 
@@ -27417,6 +28123,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const SEARCH_LIVE_RERANK_PAGE_SIZE = 50;
   const SEARCH_LIVE_RERANK_POOL_MAX = 200;
   const SEARCH_LIVE_RERANK_MORE_STEP = 12;
+  // 첫 방송 N일차 배지를 달아 줄 기간. 이 날짜를 넘으면 붙이지 않는다.
+  const SEARCH_LIVE_RERANK_NTH_DAY_MAX = 100;
+  // 네이티브 카드에서 거둬 온 클래스(빌드마다 해시가 바뀐다). 못 거두면 폴백.
+  const searchRerankNthDayClasses = {
+    wrap: "cheese-search-nth-day-wrap",
+    label: "cheese-search-nth-day-label",
+  };
   const SEARCH_LIVE_RERANK_SORTS = [
     { value: "score", label: "추천순" },
     { value: "viewers", label: "시청자순" },
@@ -27427,6 +28140,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     keyword: "",
     fetchedFor: "",
     fetching: false,
+    controller: null,
+    sortedCache: null,
     items: [],
     sort: "score",
     initial: SEARCH_LIVE_RERANK_INITIAL_FALLBACK,
@@ -27479,13 +28194,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     };
   }
 
-  async function fetchSearchLiveRerankPool(keyword) {
+  async function fetchSearchLiveRerankPool(keyword, signal) {
     await ensureSearchRerankBlockedUsers();
+    if (signal?.aborted) return [];
     const out = [];
     const seen = new Set();
     let offset = 0;
     let pageCount = 0;
     while (out.length < SEARCH_LIVE_RERANK_POOL_MAX && pageCount < 20) {
+      if (signal?.aborted) return [];
       pageCount += 1;
       const size = Math.min(
         SEARCH_LIVE_RERANK_PAGE_SIZE,
@@ -27493,7 +28210,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       const response = await fetch(
         `https://api.chzzk.naver.com/service/v1/search/lives?keyword=${encodeURIComponent(keyword)}&offset=${offset}&size=${size}`,
-        { credentials: "include", headers: { accept: "application/json" } },
+        { credentials: "include", headers: { accept: "application/json" }, signal },
       );
       if (!response.ok) break;
       const json = await response.json();
@@ -27553,6 +28270,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function buildSearchLiveRerankScores(items, keyword) {
+    searchLiveRerankState.sortedCache = null;
     const phrase = normalizeSearchRerankText(keyword);
     const tokens = phrase.split(" ").filter(Boolean);
     items.forEach((item, index) => {
@@ -27562,6 +28280,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function sortedSearchLiveRerankItems() {
+    const cached = searchLiveRerankState.sortedCache;
+    if (cached?.source === searchLiveRerankState.items && cached.sort === searchLiveRerankState.sort) {
+      return cached.items;
+    }
     const items = searchLiveRerankState.items.slice();
     if (searchLiveRerankState.sort === "viewers") {
       items.sort(
@@ -27581,6 +28303,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         (a, b) => b.__score - a.__score || a.__origIndex - b.__origIndex,
       );
     }
+    searchLiveRerankState.sortedCache = {
+      source: searchLiveRerankState.items, sort: searchLiveRerankState.sort, items,
+    };
     return items;
   }
 
@@ -27589,6 +28314,57 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       live.liveImageUrl || live.defaultThumbnailImageUrl || "",
     );
     return url.replace("{type}", "480");
+  }
+
+  // 네이티브 카드에 'N일차' 배지가 하나라도 있으면 그 클래스를 거둬 둔다.
+  // ⚠ 우리가 만든 배지는 제외한다. 안 그러면 폴백 클래스를 다시 거둬 굳어진다.
+  function harvestSearchRerankNthDayClasses() {
+    const wrap = [...document.querySelectorAll('div[class*="_nth_day_"]')].find(
+      (el) => !el.closest(".cheese-search-nth-day"),
+    );
+    if (!wrap) return;
+    const label = wrap.querySelector('em[class*="_nth_day_"], em');
+    if (wrap.className) searchRerankNthDayClasses.wrap = wrap.className;
+    if (label?.className) searchRerankNthDayClasses.label = label.className;
+  }
+
+  // 첫 방송일로부터 며칠째인지. 오늘이 1일차다(치지직 표기와 맞춘다).
+  // ⚠ 날짜 문자열은 "2026-06-27 18:58:13" 형태다. Safari 등에서 Date 파싱이
+  //   흔들리지 않도록 직접 쪼갠다.
+  function searchLiveRerankNthDay(firstBroadcastDate) {
+    const m = String(firstBroadcastDate || "").match(
+      /^(\d{4})-(\d{2})-(\d{2})/,
+    );
+    if (!m) return 0;
+    const start = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!Number.isFinite(start.getTime())) return 0;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // 자정 기준 날짜 차이 → 시각·서머타임에 흔들리지 않는다.
+    const days = Math.floor((today - start) / 86400000) + 1;
+    return days >= 1 ? days : 0;
+  }
+
+  // '치지직 N일차' 배지. 네이티브 카드에서 클래스를 거둬 쓰고, 없으면 우리 것.
+  function setSearchLiveRerankNthDay(li, channel) {
+    const thumbnail = li.querySelector('a[class*="_thumbnail_"]');
+    const badgeArea =
+      thumbnail?.querySelector('div[class*="_badge_"]') || thumbnail;
+    li.querySelectorAll(".cheese-search-nth-day").forEach((el) => el.remove());
+    // 복제 템플릿에 네이티브 배지가 딸려 왔으면 지운다(다른 채널 값이다).
+    badgeArea
+      ?.querySelectorAll('div[class*="_nth_day_"]')
+      .forEach((el) => el.remove());
+    if (!badgeArea) return;
+    const days = searchLiveRerankNthDay(channel?.firstBroadcastDate);
+    if (!days || days > SEARCH_LIVE_RERANK_NTH_DAY_MAX) return;
+    const wrap = document.createElement("div");
+    wrap.className = `cheese-search-nth-day ${searchRerankNthDayClasses.wrap}`;
+    const em = document.createElement("em");
+    em.className = searchRerankNthDayClasses.label;
+    em.textContent = `${days.toLocaleString("ko-KR")}일차`;
+    wrap.appendChild(em);
+    badgeArea.appendChild(wrap);
   }
 
   function fillSearchLiveRerankCard(li, item) {
@@ -27600,6 +28376,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       anchor.setAttribute("href", liveHref);
     });
 
+    setSearchRerankAdult(li, isAdultVideo(live));
+    setSearchLiveRerankNthDay(li, channel);
     const thumbnail = li.querySelector('a[class*="_thumbnail_"]');
     if (thumbnail) {
       thumbnail.setAttribute("href", liveHref);
@@ -27702,12 +28480,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         (option) => option.value === searchLiveRerankState.sort,
       ) || SEARCH_LIVE_RERANK_SORTS[0];
     const label = bar.querySelector("[data-live-rerank-sort-label]");
-    if (label) label.textContent = current.label;
+    if (label && label.textContent !== current.label) label.textContent = current.label;
     bar.querySelectorAll("[data-live-rerank-sort]").forEach((option) => {
-      option.setAttribute(
-        "aria-selected",
-        String(option.dataset.liveRerankSort === current.value),
-      );
+      const selected = String(option.dataset.liveRerankSort === current.value);
+      if (option.getAttribute("aria-selected") !== selected) option.setAttribute("aria-selected", selected);
     });
   }
 
@@ -27727,6 +28503,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     harvestSearchRerankNativeChannelIcons();
+    harvestSearchRerankNthDayClasses();
     const nativeMoreButton = [...section.querySelectorAll("button")].find(
       (button) =>
         !button.closest(".cheese-search-live-rerank-more") &&
@@ -27839,16 +28616,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const button = moreWrap.querySelector("button");
       if (button) {
         const expanded = visible >= items.length;
-        button.setAttribute("aria-expanded", String(expanded));
-        [...button.childNodes]
-          .filter((node) => node.nodeType === Node.TEXT_NODE)
-          .forEach((node) => node.remove());
-        const svg = button.querySelector("svg");
+        const expandedValue = String(expanded);
+        if (button.getAttribute("aria-expanded") !== expandedValue) button.setAttribute("aria-expanded", expandedValue);
         const label = expanded
           ? "접기"
           : `더보기 (${items.length - visible}개)`;
-        if (svg) button.insertBefore(document.createTextNode(label), svg);
-        else button.appendChild(document.createTextNode(label));
+        setSearchRerankMoreLabel(button, label);
       }
     } else {
       moreWrap?.remove();
@@ -27862,6 +28635,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function cleanupSearchLiveRerank() {
+    searchLiveRerankState.controller?.abort();
+    searchLiveRerankState.controller = null;
+    searchLiveRerankState.sortedCache = null;
     findSearchLiveSection()
       ?.querySelector(":scope > .cheese-search-section-top-wrap")
       ?.remove();
@@ -27889,6 +28665,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const section = findSearchLiveSection();
     if (!keyword || !section) {
       if (
+        searchLiveRerankState.keyword || searchLiveRerankState.controller ||
         document.querySelector(".cheese-search-live-rerank-list") ||
         document.querySelector(`.${SEARCH_LIVE_RERANK_HIDDEN_CLASS}`)
       ) {
@@ -27915,9 +28692,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     searchLiveRerankState.visible = searchLiveRerankState.initial;
     searchLiveRerankState.keyword = keyword;
     searchLiveRerankState.fetching = true;
-    fetchSearchLiveRerankPool(keyword)
+    const controller = new AbortController();
+    searchLiveRerankState.controller = controller;
+    fetchSearchLiveRerankPool(keyword, controller.signal)
       .then((items) => {
-        if (searchLiveRerankState.keyword !== keyword) return;
+        if (controller.signal.aborted || searchLiveRerankState.controller !== controller) return;
         searchLiveRerankState.fetching = false;
         buildSearchLiveRerankScores(items, keyword);
         searchLiveRerankState.items = items;
@@ -27928,7 +28707,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (items.length) renderSearchLiveRerank();
       })
       .catch(() => {
-        if (searchLiveRerankState.keyword === keyword) {
+        if (!controller.signal.aborted && searchLiveRerankState.controller === controller) {
           searchLiveRerankState.fetching = false;
           searchLiveRerankState.fetchedFor = keyword;
         }
@@ -30526,6 +31305,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     playbackCache: new Map(), // channelId → {m3u8, at}
     fetching: "",
     fetchController: null,
+    session: 0,
+    viewersController: null,
+    mediaGeneration: 0,
+    mediaCleanup: null,
+    mediaVideo: null,
     openTimer: 0,
     closeTimer: 0,
     tooltipPositionTimer: 0,
@@ -30771,6 +31555,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ),
       count: clean(li.querySelector('[class*="_count_"]')?.className),
       link: clean(li.querySelector('[class*="_item_link_"]')?.className),
+      // ⚠ 파티 클래스는 '파티 중인 채널'에서만 얻을 수 있다. 아이콘 클래스와 같은
+      //   이유로 목록 전체에서 찾는다(첫 항목이 파티가 아닐 수 있다).
+      iconParty: clean(
+        ul.querySelector('svg[class*="_icon_party_"]')?.className?.baseVal ||
+          ul.querySelector('svg[class*="_icon_party_"]')?.getAttribute("class"),
+      ),
+      participant: clean(
+        ul.querySelector('[class*="_participant_"]')?.className,
+      ),
     };
     // _is_expanded_ 는 렌더 시 실시간 조회(getCustomFollowExpandedNow)하므로, harvest 는
     // 나머지 정적 클래스만 담는다. 완전본(정보 영역 포함)이면 complete 로 표시해, 이후 완전본이
@@ -30782,6 +31575,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // Lucide Star. 채움(is-fav)은 CSS에서 fill: currentColor로, 비었을 때는 stroke만 표시한다.
   const LUCIDE_STAR_ICON = `<svg class="cheese-cf-star-svg lucide lucide-star" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>`;
+
+  // 치지직 파티 아이콘(프로필 위 초록 배지). 네이티브와 같은 path 를 쓴다.
+  // ⚠ mask id 는 인스턴스마다 고유해야 한다. 같은 id 가 여러 개면 브라우저가
+  //   '문서 첫 번째 mask' 를 참조해, 그 SVG 가 숨겨질 때 나머지가 통째로 깨진다
+  //   (fixPartyIconMasks 주석의 그 문제). 여기서도 처음부터 고유값을 넣는다.
+  let customFollowPartySeq = 0;
+  function customFollowPartyIcon(cls) {
+    const id = `cheese-cf-party-mask-${++customFollowPartySeq}`;
+    return (
+      `<svg width="12" height="12" viewBox="0 0 14 15" fill="none" xmlns="http://www.w3.org/2000/svg"` +
+      ` class="${escapeAttribute(cls)}" data-cheese-mask-fixed="1" aria-hidden="true">` +
+      `<mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="15" height="15" style="mask-type:alpha">` +
+      `<path d="M5.19165 11.2372C4.18078 11.2372 2.5471 11.15 2.05623 11.0629C1.77418 11.0128 1.69487 10.7723 1.69165 10.655C1.90383 7.79919 4.00803 7.16679 5.19108 7.17326L5.19165 11.2372Z" fill="white"></path>` +
+      `<path d="M5.19279 7.17326C6.37584 7.16682 8.47939 7.79887 8.69165 10.6545C8.68854 10.7717 8.60989 11.0127 8.32764 11.0629C7.83691 11.15 6.2026 11.2372 5.19165 11.2372L5.19279 7.17326Z" fill="white"></path>` +
+      `<path d="M9.50968 7.62386C10.4784 7.6185 12.2012 8.13869 12.3751 10.4881C12.3725 10.5846 12.3081 10.7829 12.0771 10.8242C11.6769 10.8956 10.3485 10.966 9.51994 10.9666C9.54948 10.8577 9.56395 10.7578 9.56608 10.6778L9.56779 10.6334L9.56437 10.5895C9.55216 10.4252 9.53273 10.2665 9.50968 10.1127V7.62386Z" fill="white"></path>` +
+      `<path d="M9.50855 10.1076C9.36149 9.13211 9.00387 8.36853 8.51847 7.78849C8.87462 7.66652 9.22412 7.62287 9.50855 7.62443V10.1076Z" fill="white"></path>` +
+      `<path d="M9.50968 4.27938C10.3151 4.27938 10.9679 4.93236 10.968 5.73771C10.968 6.54311 10.3151 7.19605 9.50968 7.19605C8.70428 7.19605 8.05137 6.54311 8.05135 5.73771C8.05143 4.93236 8.70432 4.27938 9.50968 4.27938Z" fill="white"></path>` +
+      `<path d="M5.16089 3.22949C6.12739 3.22949 6.91089 4.01299 6.91089 4.97949C6.91089 5.94599 6.12739 6.72949 5.16089 6.72949C4.19439 6.72949 3.41089 5.94599 3.41089 4.97949C3.41089 4.01299 4.19439 3.22949 5.16089 3.22949Z" fill="white"></path>` +
+      `</mask><g mask="url(#${id})"><rect y="0.312988" width="14.0003" height="14" fill="currentColor"></rect></g></svg>`
+    );
+  }
 
   const CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS = "cheese-cf-page-favorite";
 
@@ -32522,7 +33336,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const overlay = document.getElementById(LIVE_TAG_FILTER_MODAL_ID);
     if (!overlay) return;
     overlay.remove();
-    document.documentElement.classList.remove("cheese-live-tag-filter-lock");
+    unlockModalScroll("cheese-live-tag-filter-lock");
     if (restoreFocus && liveTagFilterRestoreFocus?.isConnected) {
       liveTagFilterRestoreFocus.focus();
     }
@@ -32568,7 +33382,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       <p class="cheese-live-tag-filter-empty" data-live-tag-filter-empty>추가한 제외 항목이 없습니다.</p>
     </div>`;
     document.body.appendChild(overlay);
-    document.documentElement.classList.add("cheese-live-tag-filter-lock");
+    lockModalScroll("cheese-live-tag-filter-lock");
 
     const input = overlay.querySelector("[data-live-tag-filter-input]");
     overlay
@@ -33039,6 +33853,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ellipsis:
       '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    "square-user-round":
+      '<path d="M18 21a6 6 0 0 0-12 0"/><circle cx="12" cy="11" r="4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
     "grip-vertical":
       '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
@@ -33082,7 +33898,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     item,
     h,
     expandedNow,
-    { grouped = false } = {},
+    { grouped = false, section = "following" } = {},
   ) {
     const live = item.live;
     const href = live
@@ -33095,9 +33911,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       featureFlags.sbFollowFavEnabled &&
       customFollowFavorites.has(item.channelId);
     const c = (native, fallback) => (h && native ? native : fallback); // harvest 우선, 없으면 폴백
-    const profileCls = live
-      ? c(h?.profileLive, "cheese-cf-profile is-live")
-      : c(h?.profile, "cheese-cf-profile");
+    // 사각 프로필(접힘 상태 전용). 클래스만 붙이고 실제 적용 여부는 CSS 가
+    //   판단한다 — 펼침/접힘 전환마다 다시 그리지 않아도 되게.
+    const squareCls = customFollowSquares.get(item.channelId)?.has(section)
+      ? " cheese-cf-square"
+      : "";
+    const profileCls =
+      (live
+        ? c(h?.profileLive, "cheese-cf-profile is-live")
+        : c(h?.profile, "cheese-cf-profile")) + squareCls;
     // 인증마크 + 업적 배지: 네이티브는 모두 _icon_ 에 background-image(인라인). harvest 한
     // _icon_ 클래스를 쓰고, 인증마크는 클래스 기본 배경, 배지는 인라인 background-image.
     const iconCls = c(h?.icon, "cheese-cf-official");
@@ -33109,6 +33931,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const badgeHtml = firstBadge
       ? `<i class="${iconCls}" style="width:13px;height:13px;background-image:url('${escapeAttribute(firstBadge)}')" aria-hidden="true"></i>`
       : "";
+    // 파티 배지·참여자 링크. 라이브일 때만 의미가 있다.
+    const party = live ? item.party : null;
+    const partyIconHtml = party
+      ? customFollowPartyIcon(c(h?.iconParty, "cheese-cf-party-icon")) +
+        `<span class="blind">파티 진행중</span>`
+      : "";
+    // ⚠ 접힌 상태에는 이름 영역이 없다. 그때는 링크를 만들지 않는다(네이티브와 같다).
+    const partyLinkHtml =
+      party && party.others > 0
+        ? `<a class="${c(h?.participant, "cheese-cf-participant")}" href="/party-lives/${encodeURIComponent(party.partyNo)}">` +
+          `<span class="blind">파티 참여자</span>+${party.others}` +
+          `<span class="blind">파티 방송 전체보기로 이동</span></a>`
+        : "";
     const countHtml =
       live && item.countText
         ? `<em class="${c(h?.count, "cheese-cf-count")}">${escapeHtml(item.countText)}</em>`
@@ -33136,6 +33971,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ? `<img width="26" height="26" src="${escapeAttribute(imageUrl)}" alt="" draggable="false">`
         : `<img class="cheese-cf-default-profile cheese-cf-default-profile-light" width="26" height="26" src="${CUSTOM_FOLLOW_DEFAULT_PROFILE_LIGHT_URL}" alt="" draggable="false">` +
           `<img class="cheese-cf-default-profile cheese-cf-default-profile-dark" width="26" height="26" src="${CUSTOM_FOLLOW_DEFAULT_PROFILE_DARK_URL}" alt="" draggable="false">`) +
+      partyIconHtml +
       `<span class="blind">${live ? "LIVE" : "오프라인"}</span>` +
       `</div>` +
       `<div class="${c(h?.information, "cheese-cf-info")}">` +
@@ -33145,6 +33981,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       officialHtml +
       badgeHtml +
       `</span>` +
+      partyLinkHtml +
       `</strong>` +
       (live && item.category
         ? `<span class="${c(h?.description, "cheese-cf-desc")}">${escapeHtml(item.category)}</span>`
@@ -33440,6 +34277,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           .map((item) =>
             createCustomFollowItemHtml(item, h, expandedNow, {
               grouped: true,
+              section: "groups",
             }),
           )
           .join("");
@@ -34260,12 +35098,256 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     removeCustomFollowGroup(state.editingId, { updateModal: true });
   }
 
+  // ── 사각 프로필 설정 모달 ────────────────────────────────────────────────
+  // 그룹 모달과 같은 껍데기·클래스를 쓴다(별도 CSS 를 만들지 않는다).
+  const CUSTOM_FOLLOW_SQUARE_MODAL_ID = "cheese-cf-square-modal";
+  let customFollowSquareModalRestoreFocus = null;
+  let customFollowSquareModalQuery = "";
+
+  function closeCustomFollowSquareModal(restoreFocus = true) {
+    document.getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)?.remove();
+    unlockModalScroll("cheese-cf-group-modal-lock");
+    customFollowSquareModalQuery = "";
+    if (restoreFocus && customFollowSquareModalRestoreFocus?.isConnected) {
+      customFollowSquareModalRestoreFocus.focus();
+    }
+    customFollowSquareModalRestoreFocus = null;
+  }
+
+  function saveCustomFollowSquares() {
+    try {
+      chrome.storage?.local?.set({
+        [CUSTOM_FOLLOW_SQUARE_KEY]: customFollowSquaresToStore(),
+      });
+    } catch {
+      // 저장 실패해도 이번 세션 표시는 유지된다.
+    }
+  }
+
+  // 고른 채널만 위에 따로 모아 보여 준다. 목록이 길어도 무엇을 골랐는지 한눈에
+  //   보이고, 칩을 눌러 바로 뺄 수 있다.
+  function renderCustomFollowSquareModalPicked() {
+    const wrap = document
+      .getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)
+      ?.querySelector("[data-cf-square-picked]");
+    if (!wrap) return;
+    // ⚠ 팔로우가 풀린 채널이 목록에 남아 있을 수 있다. 이름을 못 찾으면 건너뛰되
+    //   저장값은 건드리지 않는다(다시 팔로우하면 되살아난다).
+    const picked = customFollowItems.filter(
+      (item) => customFollowSquares.get(item.channelId)?.size,
+    );
+    if (!picked.length) {
+      wrap.innerHTML =
+        '<p class="cheese-cf-square-picked-empty">아직 고른 채널이 없습니다.</p>';
+      return;
+    }
+    wrap.innerHTML =
+      `<div class="cheese-cf-square-picked-head">고른 채널 ${picked.length}개</div>` +
+      `<div class="cheese-cf-square-picked-list">` +
+      picked
+        .map((item) => {
+          // 어느 영역에 적용 중인지 한눈에 보이게 이름을 함께 적는다.
+          const scopes = customFollowSquares.get(item.channelId) || new Set();
+          const scopeLabels = CUSTOM_FOLLOW_SQUARE_SCOPES.filter(([key]) =>
+            scopes.has(key),
+          )
+            .map(([, label]) => label)
+            .join("·");
+          const image = item.imageUrl
+            ? `<img src="${escapeAttribute(item.imageUrl)}" alt="" width="22" height="22" draggable="false">`
+            : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
+          return (
+            `<button type="button" class="cheese-cf-square-chip" data-cf-square-remove="${escapeAttribute(item.channelId)}" ` +
+            `title="${escapeAttribute(item.name)} 빼기" aria-label="${escapeAttribute(item.name)} 빼기">` +
+            `<span class="cheese-cf-square-chip-profile">${image}</span>` +
+            `<span class="cheese-cf-square-chip-name">${escapeHtml(item.name)}</span>` +
+            `<small class="cheese-cf-square-chip-scopes">${escapeHtml(scopeLabels)}</small>` +
+            `${customFollowLucideIcon("x", 13)}</button>`
+          );
+        })
+        .join("") +
+      `</div>`;
+  }
+
+  function renderCustomFollowSquareModalChannels() {
+    const list = document
+      .getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)
+      ?.querySelector("[data-cf-square-list]");
+    if (!list) return;
+    const query = customFollowSquareModalQuery.trim().toLowerCase();
+    // ⚠ 가나다순. 사이드바 목록은 라이브·인기순으로 계속 뒤바뀌어서, 이 모달에서는
+    //   찾던 채널이 매번 다른 자리에 있었다. 이름순이면 자리가 고정된다.
+    //   filter 가 새 배열을 돌려주므로 sort 해도 customFollowItems 는 안 바뀐다.
+    const channels = customFollowItems
+      .filter(
+        (item) =>
+          !query ||
+          String(item.name || "")
+            .toLowerCase()
+            .includes(query),
+      )
+      .sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), "ko", {
+          numeric: true,
+        }),
+      );
+    const count = document
+      .getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)
+      ?.querySelector("[data-cf-square-count]");
+    if (count) {
+      count.textContent =
+        `${customFollowSquares.size}개 선택` +
+        (channels.length !== customFollowItems.length
+          ? ` · 검색 결과 ${channels.length}개`
+          : "");
+    }
+    if (!channels.length) {
+      list.innerHTML = customFollowItems.length
+        ? '<p class="cheese-cf-group-modal-empty">검색 결과가 없습니다.</p>'
+        : '<p class="cheese-cf-group-modal-empty">표시할 팔로잉 채널이 없습니다.</p>';
+      return;
+    }
+    list.innerHTML = channels
+      .map((channel) => {
+        const scopes = customFollowSquares.get(channel.channelId);
+        const on = Boolean(scopes?.size);
+        const image = channel.imageUrl
+          ? `<img src="${escapeAttribute(channel.imageUrl)}" alt="" width="28" height="28" draggable="false">`
+          : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
+        // 채널마다 적용할 영역을 따로 고른다(중복 가능).
+        const chips = CUSTOM_FOLLOW_SQUARE_SCOPES.map(([key, label]) => {
+          const picked = scopes?.has(key) === true;
+          return (
+            `<button type="button" class="cheese-cf-square-scope${picked ? " is-on" : ""}" ` +
+            `data-cf-square-scope="${escapeAttribute(channel.channelId)}:${key}" ` +
+            `aria-pressed="${picked}">${escapeHtml(label)}</button>`
+          );
+        }).join("");
+        return (
+          `<div class="cheese-cf-group-modal-channel cheese-cf-square-row${on ? " is-selected" : ""}" ` +
+          `data-cf-square-row="${escapeAttribute(channel.channelId)}">` +
+          // 프로필·채널명은 세로로 묶고, 칩은 그 오른쪽에 둔다.
+          `<span class="cheese-cf-square-who">` +
+          // 미리보기: 고르면 실제로 적용될 모양 그대로 보여 준다.
+          `<span class="cheese-cf-group-modal-profile${channel.live ? " is-live" : ""}${on ? " cheese-cf-square-preview" : ""}">${image}</span>` +
+          `<span class="cheese-cf-group-modal-channel-name">${escapeHtml(channel.name)}</span>` +
+          `</span>` +
+          `<span class="cheese-cf-square-scopes-list">${chips}</span>` +
+          `</div>`
+        );
+      })
+      .join("");
+  }
+
+  function openCustomFollowSquareModal(trigger) {
+    if (document.getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)) return;
+    customFollowSquareModalRestoreFocus = trigger || document.activeElement;
+    customFollowSquareModalQuery = "";
+    const overlay = document.createElement("div");
+    overlay.id = CUSTOM_FOLLOW_SQUARE_MODAL_ID;
+    overlay.className = "cheese-cf-group-modal";
+    overlay.innerHTML = `
+      <div class="cheese-cf-group-modal-dialog is-editor" role="dialog" aria-modal="true" aria-label="프로필 모양 설정">
+        <header class="cheese-cf-group-modal-head">
+          <strong>캐릭터 선택창</strong>
+          <button type="button" data-cf-square-close aria-label="닫기" title="닫기">${customFollowLucideIcon("x", 20)}</button>
+        </header>
+        <div class="cheese-cf-group-modal-body cheese-cf-square-body">
+          <div class="cheese-cf-group-modal-list-head">
+            <span>채널마다 <b>즐겨찾기·그룹·팔로잉</b> 중 적용할 곳을 고르세요(중복 가능). 사이드바를 <b>접었을 때</b> 프로필이 각진 네모로 나와, 격투 게임 캐릭터 선택창처럼 보입니다. 펼치면 원래 동그란 모양으로 돌아옵니다.</span>
+            <button type="button" data-cf-square-clear>전체 해제</button>
+          </div>
+          <div class="cheese-cf-square-picked" data-cf-square-picked></div>
+          <div class="cheese-cf-group-modal-channel-tools">
+            <input type="search" data-cf-square-search placeholder="채널명 검색" autocomplete="off" aria-label="채널명 검색">
+          </div>
+          <p class="cheese-cf-group-modal-channel-count" data-cf-square-count></p>
+          <div class="cheese-cf-group-modal-channel-list" data-cf-square-list></div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    lockModalScroll("cheese-cf-group-modal-lock");
+    renderCustomFollowSquareModalChannels();
+    renderCustomFollowSquareModalPicked();
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        closeCustomFollowSquareModal();
+        return;
+      }
+      const button = event.target.closest?.("button");
+      if (!button) return;
+      if (button.matches("[data-cf-square-close]")) {
+        closeCustomFollowSquareModal();
+      } else if (button.matches("[data-cf-square-clear]")) {
+        if (!customFollowSquares.size) return;
+        customFollowSquares.clear();
+        saveCustomFollowSquares();
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+        renderCustomFollowSquareModalChannels();
+        renderCustomFollowSquareModalPicked();
+      } else if (button.matches("[data-cf-square-scope]")) {
+        const [channelId, scope] = String(
+          button.dataset.cfSquareScope || "",
+        ).split(":");
+        if (!channelId || !scope) return;
+        const scopes = customFollowSquares.get(channelId) || new Set();
+        if (scopes.has(scope)) scopes.delete(scope);
+        else scopes.add(scope);
+        // 영역을 전부 끄면 그 채널은 목록에서 뺀다(= 선택 해제).
+        if (scopes.size) customFollowSquares.set(channelId, scopes);
+        else customFollowSquares.delete(channelId);
+        saveCustomFollowSquares();
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+        // 누른 행만 고쳐 그린다(목록을 통째로 다시 그리면 스크롤이 튄다).
+        button.classList.toggle("is-on", scopes.has(scope));
+        button.setAttribute("aria-pressed", String(scopes.has(scope)));
+        const row = button.closest("[data-cf-square-row]");
+        row?.classList.toggle("is-selected", scopes.size > 0);
+        row
+          ?.querySelector(".cheese-cf-group-modal-profile")
+          ?.classList.toggle("cheese-cf-square-preview", scopes.size > 0);
+        renderCustomFollowSquareModalPicked();
+        const count = overlay.querySelector("[data-cf-square-count]");
+        if (count) count.textContent = `${customFollowSquares.size}개 선택`;
+      } else if (button.matches("[data-cf-square-remove]")) {
+        const id = button.dataset.cfSquareRemove;
+        if (!customFollowSquares.delete(id)) return; // Map.delete 도 같은 방식
+        saveCustomFollowSquares();
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+        renderCustomFollowSquareModalChannels();
+        renderCustomFollowSquareModalPicked();
+      }
+    });
+    overlay.addEventListener("input", (event) => {
+      if (!event.target.matches?.("[data-cf-square-search]")) return;
+      customFollowSquareModalQuery = event.target.value || "";
+      renderCustomFollowSquareModalChannels();
+    });
+    overlay.querySelector("[data-cf-square-search]")?.focus();
+    // Esc 로 닫기. ⚠ 모달이 사라지면 핸들러도 같이 뗀다(누수 방지).
+    const onSquareKey = (event) => {
+      if (event.key !== "Escape") return;
+      if (!document.getElementById(CUSTOM_FOLLOW_SQUARE_MODAL_ID)) {
+        document.removeEventListener("keydown", onSquareKey, true);
+        return;
+      }
+      event.stopPropagation();
+      document.removeEventListener("keydown", onSquareKey, true);
+      closeCustomFollowSquareModal();
+    };
+    document.addEventListener("keydown", onSquareKey, true);
+  }
+
   function closeCustomFollowGroupModal(restoreFocus = true) {
     clearTimeout(customFollowGroupTagSearchTimer);
     customFollowGroupTagSearchTimer = 0;
     customFollowGroupTagSearchToken += 1;
     document.getElementById(CUSTOM_FOLLOW_GROUP_MODAL_ID)?.remove();
-    document.documentElement.classList.remove("cheese-cf-group-modal-lock");
+    unlockModalScroll("cheese-cf-group-modal-lock");
     try {
       window.Coloris?.close();
     } catch {}
@@ -34294,7 +35376,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     overlay.id = CUSTOM_FOLLOW_GROUP_MODAL_ID;
     overlay.className = "cheese-cf-group-modal";
     document.body.appendChild(overlay);
-    document.documentElement.classList.add("cheese-cf-group-modal-lock");
+    lockModalScroll("cheese-cf-group-modal-lock");
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) {
         closeCustomFollowGroupModal();
@@ -34611,8 +35693,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 전용 팔로잉 목록의 현재 상태 시그니처(자가발화 방지 — 값이 같으면 재렌더 skip).
   function customFollowSig(visibleCount, shown) {
     const favSig = [...customFollowFavorites].sort().join(",");
+    // ⚠ 사각 프로필 목록도 넣어야 한다. 없으면 접기/펼치기처럼 sig 를 새로 계산하는
+    //   경로에서 예전 값과 같아져 DOM 재생성이 통째로 건너뛰고, 클래스가 빠진
+    //   항목이 그대로 남는다(제보: 접었다 펴면 적용이 풀린다).
+    const affinitySig = affinityOn
+      ? `${affinityOrder.join(",")}:${affinityScored?.length || 0}:${affinityLoadedAt}:${affinityHideOffline ? 1 : 0}:${affinityIndex}:${affinityShown}:${affinityInitial}:${affinityMore}`
+      : "-";
+    const squareSig = JSON.stringify(
+      [...customFollowSquares]
+        .map(([id, scopes]) => [id, [...scopes].sort()])
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1)),
+    );
     return [
       customFollowVersion,
+      squareSig,
+      affinitySig,
       customFollowSort,
       featureFlags.sbFollowFavSort ? customFollowFavSort : "-",
       featureFlags.sbFollowFavSort && customFollowFavSort === "custom"
@@ -34853,6 +35948,112 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return (cls.match(/\S*_is_expanded_\S*/g) || []).join(" ");
   }
 
+  // ── '친밀도' 섹션 ───────────────────────────────────────────────────────
+  const AFFINITY_API = globalThis.CheeseChannelAffinity;
+  const AFFINITY_DATA_API = globalThis.CheeseChannelAffinityData;
+  // 계산 결과 수명. 통나무파워·채팅은 로컬이라 싸지만, 구독·후원은 API 라
+  //   목록을 그릴 때마다 다시 모으면 안 된다.
+  const AFFINITY_TTL_MS = 10 * 60 * 1000;
+
+  // 지표를 모아 점수를 낸다. 이미 계산했고 아직 신선하면 건너뛴다.
+  async function ensureAffinityScores({ force = false } = {}) {
+    if (!affinityOn || !AFFINITY_API || !AFFINITY_DATA_API) return;
+    if (affinityLoading) return;
+    if (
+      !force &&
+      affinityScored &&
+      Date.now() - affinityLoadedAt < AFFINITY_TTL_MS
+    ) {
+      return;
+    }
+    affinityLoading = true;
+    try {
+      const accountId = currentClipVaultAccountId();
+      // ⚠ 내 채팅 기록을 쓰지 않으면 그 지표는 아예 수집하지 않는다(요청·조회 0).
+      const skip = chatRecapOn ? [] : ["chat"];
+      const metrics = await AFFINITY_DATA_API.collectMetrics(
+        chrome.storage.local,
+        accountId,
+        {
+          skip,
+          parseKey: CHAT_RECAP_STORE_API.parseKey,
+          donationMonths: AFFINITY_API.DONATION_MONTHS,
+          force,
+        },
+      );
+      affinityScored = AFFINITY_API.scoreChannels(metrics, {
+        order: affinityOrder,
+        skip,
+      });
+      affinityLoadedAt = Date.now();
+      customFollowVersion += 1;
+      ensureCustomFollowList();
+    } catch {
+      affinityScored = null;
+    } finally {
+      affinityLoading = false;
+    }
+  }
+
+  // 친밀도 섹션. 즐겨찾기·팔로잉과 같은 툴바(접기/펼치기)를 쓴다.
+  // ⚠ 오프라인도 순서대로 함께 배치한다. 예전에는 '방송 중'과 '그 외'로 나눴는데
+  //   같은 채널이 두 번 보이는 문제가 있었고(제보), 나누지 않으면 점수 순서가
+  //   그대로 드러나 읽기도 쉽다. 오프라인을 빼고 싶으면 설정에서 숨긴다.
+  function renderCustomFollowAffinity(h, expandedNow) {
+    if (!affinityOn || !AFFINITY_API) return "";
+    if (!Array.isArray(affinityScored) || !affinityScored.length) return "";
+    const byId = new Map(
+      customFollowItems.map((item) => [item.channelId, item]),
+    );
+    // 팔로우가 풀린 채널은 목록에 없다 → 건너뛴다(저장값은 그대로 둔다).
+    let scored = affinityScored.filter((row) => byId.has(row.channelId));
+    if (affinityHideOffline) {
+      scored = scored.filter((row) => byId.get(row.channelId)?.live === true);
+    }
+    if (!scored.length) return "";
+    const pool = scored
+      .slice(0, AFFINITY_MAX)
+      .map((row) => byId.get(row.channelId));
+    const collapsed = customFollowGroupCollapsed.affinity === true;
+    const shownCount = Math.min(affinityShown, pool.length);
+    const items = pool.slice(0, shownCount);
+    const hasMore = shownCount < pool.length;
+    const canCollapse = shownCount > affinityInitial;
+    // 즐겨찾기·팔로잉과 같은 더보기/접기 바.
+    const moreHtml =
+      hasMore || canCollapse
+        ? `<div class="cheese-cf-area-more-bar">` +
+          (hasMore
+            ? `<button type="button" data-cf-section-more="affinity:expand">더보기 <small>(${pool.length - shownCount})</small></button>`
+            : "") +
+          (canCollapse
+            ? `<button type="button" data-cf-section-more="affinity:collapse">접기</button>`
+            : "") +
+          `</div>`
+        : "";
+    const listHtml = items
+      .map((item) =>
+        createCustomFollowItemHtml(item, h, expandedNow, {
+          section: "affinity",
+        }),
+      )
+      .join("");
+    return (
+      `<section class="cheese-cf-channel-section cheese-cf-affinity${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="affinity" data-cf-star="${escapeAttribute(customFollowStarMode.affinity || "hover")}">` +
+      `<div class="cheese-cf-section-toolbar">` +
+      `<button type="button" data-cf-section-toggle="affinity" aria-expanded="${String(!collapsed)}">` +
+      customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
+      `<span>${escapeHtml(AFFINITY_LABEL)}</span><small>${shownCount}/${pool.length}</small>` +
+      `</button>` +
+      `</div>` +
+      `<div class="cheese-cf-section-body">` +
+      moreHtml +
+      `<ul class="cheese-cf-list${h ? " " + h.ul : ""}">${listHtml}</ul>` +
+      `</div>` +
+      `</section>`
+    );
+  }
+
   function renderCustomFollowChannelSection({
     key,
     label,
@@ -34880,7 +36081,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           `</div>`
         : "";
     const listHtml = visibleItems
-      .map((item) => createCustomFollowItemHtml(item, h, expandedNow))
+      .map((item) =>
+        createCustomFollowItemHtml(item, h, expandedNow, { section: key }),
+      )
       .join("");
     return (
       `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
@@ -34903,10 +36106,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const origNav =
       ourNav.closest('nav[class*="_section_"]') || ourNav.parentElement;
     const expandedNow = getCustomFollowExpandedNow(origNav);
+    // 데이터 버전과 설정 입력만으로 변경을 먼저 판정한다. 기존에는 같은 목록도
+    // 매 호출마다 정렬하고 그룹을 만든 뒤에야 렌더 생략 여부를 확인했다.
+    const sig =
+      customFollowSig(customFollowItems.length, customFollowShown) +
+      ":" + (expandedNow || "") + ":" + (h ? 1 : 0);
+    if (ourNav.dataset.sig === sig) return;
     const visible = getCustomFollowVisibleItems();
     const autoExpand = isCustomFollowAutoExpandActive();
     const favoritesEnabled = featureFlags.sbFollowFavEnabled;
     const groupsEnabled = featureFlags.sbFollowGroupEnabled;
+    const displayGroups = groupsEnabled
+      ? buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems())
+      : [];
     const favoriteItems = favoritesEnabled
       ? visible.filter((item) => customFollowFavorites.has(item.channelId))
       : [];
@@ -34918,7 +36130,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const groupedIds =
       groupsEnabled && featureFlags.sbFollowGroupExclusive
         ? new Set(
-            buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems())
+            displayGroups
               .filter((group) => !group.offlineOnly)
               .flatMap((group) =>
                 (group.allItems || group.items).map((item) => item.channelId),
@@ -34936,15 +36148,6 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const regularShown = autoExpand
       ? regularItems.length
       : Math.min(customFollowShown, regularItems.length);
-    // sig 에 expandedNow·harvest 유무를 포함 → _is_expanded_ 가 붙거나 harvest 가 확보되는
-    // 순간(펼침 진입) 재렌더된다.
-    const sig =
-      customFollowSig(visible.length, regularShown) +
-      ":" +
-      (expandedNow ? 1 : 0) +
-      ":" +
-      (h ? 1 : 0);
-    if (ourNav.dataset.sig === sig) return; // 변화 없음 → DOM 미변경(자가발화 차단)
     ourNav.dataset.sig = sig;
 
     if (!customFollowDataReady) {
@@ -34955,9 +36158,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ourNav.innerHTML =
         (groupsEnabled
           ? renderCustomFollowGroups(
-              buildCustomFollowDisplayGroups(
-                getCustomFollowGroupVisibleItems(),
-              ),
+              displayGroups,
               h,
               expandedNow,
             )
@@ -34966,7 +36167,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     const groupsHtml = groupsEnabled
       ? renderCustomFollowGroups(
-          buildCustomFollowDisplayGroups(getCustomFollowGroupVisibleItems()),
+          displayGroups,
           h,
           expandedNow,
         )
@@ -34999,7 +36200,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const order =
       CUSTOM_FOLLOW_SECTION_ORDERS[customFollowGroupPlacement] ||
       CUSTOM_FOLLOW_SECTION_ORDERS["groups-first"];
-    ourNav.innerHTML = order.map((key) => sectionHtml[key]).join("");
+    // ⚠ 추천 섹션은 순서 설정(groups/favorites/following)과 별개로 항상 맨 위에
+    //   둔다. 세 섹션의 6가지 순서 조합에 네 번째를 끼우면 조합이 24가지로 불어난다.
+    // 친밀도는 '목록 배치 순서'에서 정한 자리에 끼운다.
+    const parts = order.map((key) => sectionHtml[key]);
+    const affinityHtml = renderCustomFollowAffinity(h, expandedNow);
+    if (affinityHtml) {
+      parts.splice(Math.min(affinityIndex, parts.length), 0, affinityHtml);
+    }
+    ourNav.innerHTML = parts.join("");
     // ⚠ innerHTML 재구성으로 링크가 통째로 교체된다 → draggable 속성도 함께 사라진다.
     // init() 에서만 표시하면 이후 재렌더(그룹 접기/더보기 등)에서 팝업 드래그가 죽는다.
     ensurePopupPlayerDraggable();
@@ -35220,6 +36429,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           e.stopPropagation();
           const act = ctrl.dataset.cfCtrl;
           if (act === "refresh") void refreshCustomFollowList();
+          else if (act === "square") openCustomFollowSquareModal(ctrl);
           return;
         }
         const nav = e.target.closest?.("#" + CUSTOM_FOLLOW_NAV_ID);
@@ -35285,7 +36495,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           e.preventDefault();
           e.stopPropagation();
           const key = sectionToggle.dataset.cfSectionToggle || "";
-          if (key !== "favorites" && key !== "following") return;
+          if (
+            key !== "favorites" &&
+            key !== "following" &&
+            key !== "affinity"
+          ) {
+            return;
+          }
           customFollowGroupCollapsed[key] =
             sectionToggle.getAttribute("aria-expanded") === "true";
           try {
@@ -35313,6 +36529,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
                 featureFlags.sbFollowFavAutoExpand;
               customFollowFavShown = customFollowFavInitial;
             }
+          } else if (key === "affinity") {
+            if (action === "expand") affinityShown += affinityMore;
+            else affinityShown = affinityInitial;
           } else if (key === "following") {
             if (action === "expand") {
               customFollowAutoExpandSuppressed = false;
@@ -35467,6 +36686,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           // 않게 한다. spaNavigate가 만드는 네이티브 링크 클릭은 별도 이벤트라 영향 없다.
           e.stopImmediatePropagation?.();
           // '방송 시청 중 팔로잉 새 탭으로 열기' 옵션은 전용 목록에서도 동일하게 적용한다.
+          dismissFollowPreviewForNavigation(e);
           if (
             followOpenNewTabOn &&
             location.pathname.startsWith("/live/") &&
@@ -36668,7 +37888,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const bar = existing || document.createElement("div");
     bar.className = CUSTOM_FOLLOW_CTRL_CLASS;
     bar.dataset.sig = sig;
-    bar.innerHTML = `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>`;
+    // ⚠ 세팅 버튼은 펼침 상태에만 둔다. 접힘 헤더는 아이콘 하나 폭이라 두 개가
+    //   들어가면 넘친다(새로고침만 남긴다).
+    bar.innerHTML =
+      `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>` +
+      (collapsed
+        ? ""
+        : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="square" title="캐릭터 선택창 설정" aria-label="캐릭터 선택창 설정">${customFollowLucideIcon("square-user-round", 15)}</button>`);
     // 상태 바뀌면 재배치. 접힘 시 nav 직속이되 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
     if (bar.parentElement !== parent) {
       if (collapsed) {
@@ -36720,6 +37946,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (typeof e.stopImmediatePropagation === "function") {
       e.stopImmediatePropagation();
     }
+    dismissFollowPreviewForNavigation(e);
     window.open(`/live/${encodeURIComponent(channelId)}`, "_blank", "noopener");
   }
 
@@ -36750,6 +37977,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const controller = new AbortController();
     followPreviewState.fetching = channelId;
     followPreviewState.fetchController = controller;
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const res = await fetch(
         `https://api.chzzk.naver.com/service/v3/channels/${encodeURIComponent(channelId)}/live-detail`,
@@ -36761,6 +37989,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       if (!res.ok) return null;
       const json = await res.json();
+      if (controller.signal.aborted || followPreviewState.fetchController !== controller) return null;
       const c = json?.content;
       if (c?.status !== "OPEN") return null;
       const raw = c?.livePlaybackJson;
@@ -36794,6 +38023,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     } catch {
       return null;
     } finally {
+      clearTimeout(timeout);
       if (followPreviewState.fetchController === controller) {
         followPreviewState.fetchController = null;
         followPreviewState.fetching = "";
@@ -37131,6 +38361,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
   async function openFollowPreview(li, channelId, anchorKind = "following") {
     if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
+    if (followPreviewNavigationPointer || Date.now() < followPreviewOpenSuppressUntil) return;
+    if (!li?.isConnected) return;
+    const pathname = location.pathname;
+    const session = ++followPreviewState.session;
+    abortFollowPreviewFetch();
+    stopFollowPreviewElapsedTimer();
+    stopFollowPreviewViewersTimer();
+    teardownFollowPreviewMedia();
     followPreviewState.currentChannelId = channelId;
     followPreviewState.anchor = li;
     followPreviewState.anchorKind = anchorKind;
@@ -37141,6 +38379,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 한다(고정 중엔 호버로 안 열리니 movedPos가 안 남는다 — 이건 호버 신규 진입).
     followPreviewState.movedPos = null;
     const el = ensureFollowPreviewEl();
+    const oldThumb = el.querySelector(".cheese-follow-preview-thumb");
+    if (oldThumb) {
+      oldThumb.onload = null;
+      oldThumb.onerror = null;
+      oldThumb.removeAttribute("src");
+    }
     applyFollowPreviewHeaderFont(el); // 헤더 폰트 배율 반영(재사용 경로 포함)
     el.classList.toggle("is-thumb-only", followPreviewThumbOnly);
     el.classList.toggle("cheese-fp-full-title", followPreviewFullTitle);
@@ -37156,8 +38400,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     el.classList.remove("is-ready");
 
     const data = await fetchLivePreviewData(channelId);
+    if (pathname !== location.pathname) {
+      syncFollowPreviewNavigation();
+      return;
+    }
     // 그새 호버가 바뀌었거나(채널 불일치) 클릭 이동 억제 창에 들어갔으면 중단.
-    if (followPreviewState.currentChannelId !== channelId) return;
+    if (followPreviewState.session !== session || !el.isConnected) return;
     if (Date.now() < followPreviewOpenSuppressUntil) {
       closeFollowPreview();
       return;
@@ -37318,6 +38566,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function startFollowPreviewElapsedTimer(el) {
     stopFollowPreviewElapsedTimer();
     followPreviewState.elapsedTimer = setInterval(() => {
+      if (!el.isConnected) {
+        closeFollowPreview();
+        return;
+      }
+      if (document.hidden) return;
       // 우측(meta-side)과 중앙 하단(옵션) 복제본이 있을 수 있어 모두 갱신한다.
       el.querySelectorAll(".cheese-follow-preview-meta-elapsed").forEach(
         (span) => {
@@ -37344,6 +38597,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function startFollowPreviewViewersTimer(el, channelId) {
     stopFollowPreviewViewersTimer();
     followPreviewState.viewersTimer = setInterval(() => {
+      if (!el.isConnected) {
+        closeFollowPreview();
+        return;
+      }
       // 탭 비활성이면 스킵(부담↓), 다른 채널로 바뀌었으면 중단.
       if (document.hidden) return;
       if (followPreviewState.currentChannelId !== channelId) return;
@@ -37352,6 +38609,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function stopFollowPreviewViewersTimer() {
+    followPreviewState.viewersController?.abort();
+    followPreviewState.viewersController = null;
     if (followPreviewState.viewersTimer) {
       clearInterval(followPreviewState.viewersTimer);
       followPreviewState.viewersTimer = 0;
@@ -37377,6 +38636,41 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 마우스를 따라 새로 뜨는 것을 막는다.
   let followPreviewOpenSuppressUntil = 0;
   const FOLLOW_PREVIEW_CLICK_SUPPRESS_MS = 800;
+  let followPreviewNavigationPointer = null;
+  let followPreviewPagePath = location.pathname;
+
+  function dismissFollowPreviewForNavigation(event) {
+    const found = getFollowPreviewAnchor(event?.target);
+    // DOM을 보관하지 않고 채널/좌표만 기억해 재렌더링 후에도 억제를 유지한다.
+    if (event || !followPreviewNavigationPointer) {
+      followPreviewNavigationPointer = {
+        channelId: found?.channelId || followPreviewState.currentChannelId,
+        x: Number.isFinite(event?.clientX) ? event.clientX : null,
+        y: Number.isFinite(event?.clientY) ? event.clientY : null,
+      };
+    }
+    suppressFollowPreviewOpen();
+    closeFollowPreview();
+  }
+
+  function onFollowPreviewNavigationPointerMove(event) {
+    const blocked = followPreviewNavigationPointer;
+    if (!blocked || !event.isTrusted) return;
+    if (blocked.x === event.clientX && blocked.y === event.clientY) return;
+    const found = getFollowPreviewAnchor(event.target);
+    if (found && found.channelId === blocked.channelId) return;
+    followPreviewNavigationPointer = null;
+    followPreviewOpenSuppressUntil = 0;
+    if (found) onFollowPreviewMouseOver(event);
+  }
+
+  function syncFollowPreviewNavigation() {
+    if (followPreviewPagePath === location.pathname) return;
+    followPreviewPagePath = location.pathname;
+    if (followPreviewState.currentChannelId || followPreviewState.openTimer) {
+      dismissFollowPreviewForNavigation();
+    }
+  }
 
   // 미리보기 오픈 억제 창을 지금부터 다시 건다(팝업 드래그 등에서 호출).
   function suppressFollowPreviewOpen(ms = FOLLOW_PREVIEW_CLICK_SUPPRESS_MS) {
@@ -37391,14 +38685,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   async function refreshFollowPreviewViewers(el, channelId) {
+    if (document.hidden || !el.isConnected ||
+        followPreviewState.currentChannelId !== channelId ||
+        followPreviewState.viewersController) return;
+    const session = followPreviewState.session;
+    const controller = new AbortController();
+    followPreviewState.viewersController = controller;
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const res = await fetch(
         `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
-        { credentials: "include", headers: { accept: "application/json" } },
+        { credentials: "include", headers: { accept: "application/json" }, signal: controller.signal },
       );
       if (!res.ok) return;
       const json = await res.json();
-      if (followPreviewState.currentChannelId !== channelId) return;
+      if (controller.signal.aborted || followPreviewState.session !== session || !el.isConnected) return;
       const n = Number(json?.content?.concurrentUserCount);
       if (!Number.isFinite(n)) return;
       const formatted = new Intl.NumberFormat("ko-KR").format(n);
@@ -37423,6 +38724,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
     } catch {
       // 실패 시 이전 값 유지.
+    } finally {
+      clearTimeout(timeout);
+      if (followPreviewState.viewersController === controller) {
+        followPreviewState.viewersController = null;
+      }
     }
   }
 
@@ -37449,24 +38755,35 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (typeof Hls !== "undefined") return Promise.resolve(true);
     if (hlsLoadPromise) return hlsLoadPromise;
     hlsLoadPromise = new Promise((resolve) => {
+      let done = false;
+      let poll = 0;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(deadline);
+        if (poll) clearInterval(poll);
+        resolve(ok);
+      };
+      // 주입 응답 자체가 오지 않는 경우에도 기다리던 패널 참조를 해제한다.
+      const deadline = setTimeout(() => finish(false), 3500);
       try {
         chrome.runtime.sendMessage({ type: "CHEESE_LOAD_HLS" }, () => {
           void chrome.runtime.lastError;
-          // 주입 후 Hls 가 스코프에 나타날 때까지 짧게 폴링(최대 ~3초).
-          let tries = 0;
-          const t = setInterval(() => {
-            if (typeof Hls !== "undefined") {
-              clearInterval(t);
-              resolve(true);
-            } else if (++tries > 60) {
-              clearInterval(t);
-              resolve(false); // 실패 → 네이티브 폴백
-            }
+          if (done) return;
+          if (typeof Hls !== "undefined") {
+            finish(true);
+            return;
+          }
+          poll = setInterval(() => {
+            if (typeof Hls !== "undefined") finish(true);
           }, 50);
         });
       } catch {
-        resolve(false);
+        finish(false);
       }
+    }).then((ok) => {
+      if (!ok) hlsLoadPromise = null; // 다음 미리보기에서 주입 재시도 가능
+      return ok;
     });
     return hlsLoadPromise;
   }
@@ -37475,6 +38792,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const video = el.querySelector(".cheese-follow-preview-video");
     if (!video) return;
     teardownFollowPreviewMedia(video); // 이전 연결 정리
+    followPreviewState.mediaVideo = video;
+    const session = followPreviewState.session;
+    const generation = followPreviewState.mediaGeneration;
+    const isSessionCurrent = () => el.isConnected &&
+      followPreviewState.session === session && followPreviewState.currentChannelId === channelId;
+    const isCurrent = () => isSessionCurrent() && followPreviewState.mediaGeneration === generation;
     // HLS가 첫 프레임을 준비하는 동안 검은 배경 대신 API의 라이브 스냅샷을 보여준다.
     // poster는 loadeddata 이후 브라우저가 실제 영상 프레임으로 자연스럽게 교체한다.
     const poster = makeFreshFollowPreviewThumbUrl(thumb);
@@ -37491,8 +38814,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // '소리 켜기 고정'인데도 hls attach/자동재생 정책으로 video 가 다시 음소거되는 일이
     // 잦다. volumechange 를 감시해, 소리 켜기 설정이면 muted 로 돌아갈 때마다 즉시
     // 재해제하고 저장 볼륨을 복구한다(guard 로 우리 변경이 콜백을 재트리거하지 않게).
-    if (!followPreviewGuardBound) {
-      followPreviewGuardBound = true;
+    if (!followPreviewGuardVideos.has(video)) {
+      followPreviewGuardVideos.add(video);
       // 사용자가 controls 로 직접 조작하면 그 시점부터 가드를 끈다. volumechange 만으로는
       // '브라우저가 되돌린 음소거'와 '사용자가 누른 음소거'를 구분할 수 없어서, 예전엔
       // 사용자가 음소거하거나 볼륨을 낮춰도 가드가 즉시 되돌려 놨다.
@@ -37523,22 +38846,24 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       });
     }
     const onReady = () => {
-      if (followPreviewState.currentChannelId === channelId) {
+      if (isCurrent()) {
         el.classList.remove("is-loading");
         el.classList.add("is-ready");
       }
     };
     // 영상 로드가 끝내 실패하면 썸네일로 대체해 보여준다(빈 검은 화면 방지).
     const fallbackToThumb = () => {
-      if (followPreviewState.currentChannelId !== channelId) return;
+      if (!isSessionCurrent()) return;
       teardownFollowPreviewMedia(video);
       el.classList.add("is-thumb-only"); // 영상 숨기고 썸네일 이미지 표시
       showFollowPreviewThumb(el, thumb, channelId);
     };
     const onError = (opts) => {
+      if (!isCurrent()) return;
       // 실패한 hls 인스턴스를 먼저 파괴한다(안 그러면 죽은 스트림이 403 등을 계속
       // 재시도하며 부하를 만든다).
       teardownFollowPreviewMedia(video);
+      const retryGeneration = followPreviewState.mediaGeneration;
       // 암호화 스트림 키 실패 등 '재시도해도 소용없는' 에러는 바로 썸네일 폴백.
       if (opts?.noRetry || followPreviewState.retried) {
         fallbackToThumb();
@@ -37548,7 +38873,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       followPreviewState.playbackCache.delete(channelId);
       void (async () => {
         const fresh = await fetchLivePreviewData(channelId);
-        if (followPreviewState.currentChannelId !== channelId) return;
+        if (!isSessionCurrent() || followPreviewState.mediaGeneration !== retryGeneration) return;
         if (fresh?.m3u8) {
           renderFollowPreviewMeta(el, fresh.meta);
           attachFollowPreviewSource(
@@ -37563,6 +38888,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
       })();
     };
+    let nativeJumpEdge = null;
+    followPreviewState.mediaCleanup = () => {
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("error", onError);
+      if (nativeJumpEdge) video.removeEventListener("loadeddata", nativeJumpEdge);
+    };
     video.addEventListener("loadeddata", onReady, { once: true });
     video.addEventListener("error", onError, { once: true });
 
@@ -37572,7 +38903,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     void (async () => {
       await ensureHlsLoaded();
       // 로드 중 미리보기가 다른 채널로 바뀌었으면 중단(오래된 attach 방지).
-      if (followPreviewState.currentChannelId !== channelId) return;
+      if (!isCurrent()) return;
       if (typeof Hls !== "undefined" && Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -37580,6 +38911,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           startLevel: -1, // MANIFEST_PARSED에서 최고 레벨로 직접 지정
           autoStartLoad: true,
           capLevelToPlayerSize: false, // 작은 미리보기라도 고화질 시작 허용
+          backBufferLength: 30, // 미리보기에서 이미 재생한 구간을 계속 보관하지 않는다.
           // '라이브 최신 재생' 옵션이 켜져 있으면 라이브 엣지에 최대한 붙인다(기본 3세그먼트
           // 뒤 → 세그먼트가 길면 20~30초 지연되던 '30초 전부터 나온다' 피드백 대응).
           // 1세그먼트만 뒤로 두고, 지연이 커지면 자동으로 엣지로 따라잡게 최대 지연도 낮춘다.
@@ -37598,6 +38930,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 부하(LCP/INP 악화)를 만든다 → 키 에러이거나 non-fatal 이 누적되면 중단·폴백한다.
         let hlsErrCount = 0;
         hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (!isCurrent()) return;
           const detail = String(data?.details || "");
           const isKeyError =
             detail.includes("KEY") || detail.includes("keyLoad");
@@ -37614,6 +38947,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           if (++hlsErrCount >= 5) onError({ noRetry: true });
         });
         hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+          if (!isCurrent()) return;
           // 가장 높은 화질로 시작(레벨 인덱스가 클수록 보통 고화질).
           const levels = data?.levels || hls.levels || [];
           if (levels.length) {
@@ -37636,6 +38970,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 엣지 근처를 유지하므로, 매 세그먼트마다 seek 하지 않는다(버벅임 방지).
         let jumpedToEdge = false;
         const jumpToLiveEdge = () => {
+          if (!isCurrent()) return;
           if (jumpedToEdge) return;
           try {
             const target =
@@ -37663,7 +38998,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 켜져 있으면 재생 시작 시 라이브 엣지(seekable 끝)로 점프해 최신 지점부터 나오게 한다.
         video.src = m3u8;
         if (followPreviewLiveEdge) {
-          const nativeJumpEdge = () => {
+          nativeJumpEdge = () => {
+            if (!isCurrent()) return;
             try {
               if (video.seekable?.length) {
                 const end = video.seekable.end(video.seekable.length - 1);
@@ -37683,28 +39019,35 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 재생 불가 환경 → 닫지 않고 썸네일로 대체.
         fallbackToThumb();
       }
-    })();
+    })().catch(() => onError({ noRetry: true }));
   }
 
   // video/hls 연결 해제(스트림 끊기).
   function teardownFollowPreviewMedia(video) {
+    followPreviewState.mediaGeneration++;
+    followPreviewState.mediaCleanup?.();
+    followPreviewState.mediaCleanup = null;
+    const previous = followPreviewState.mediaVideo;
+    followPreviewState.mediaVideo = null;
     if (followPreviewState.hls) {
       try {
         followPreviewState.hls.destroy();
       } catch {}
       followPreviewState.hls = null;
     }
-    if (video) {
+    for (const element of new Set([previous, video])) {
+      if (!element) continue;
       try {
-        video.pause();
-        video.removeAttribute("src");
-        video.removeAttribute("poster");
-        video.load();
+        element.pause();
+        element.removeAttribute("src");
+        element.removeAttribute("poster");
+        element.load();
       } catch {}
     }
   }
 
   function closeFollowPreview() {
+    followPreviewState.session++;
     restoreNativeCardPreviewAudio();
     followPreviewState.currentChannelId = "";
     followPreviewState.anchor = null;
@@ -37720,10 +39063,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     stopFollowPreviewViewersTimer();
     stopFollowPreviewMaxLifeTimer();
     const el = document.getElementById(FOLLOW_PREVIEW_ID);
-    if (!el) return;
-    const video = el.querySelector(".cheese-follow-preview-video");
+    const video = el?.querySelector(".cheese-follow-preview-video");
     teardownFollowPreviewMedia(video);
-    el.remove();
+    const img = el?.querySelector(".cheese-follow-preview-thumb");
+    if (img) {
+      img.onload = null;
+      img.onerror = null;
+      img.removeAttribute("src");
+    }
+    followPreviewState.lastMeta = null;
+    el?.remove();
   }
 
   // 잠깐의 유예 후 닫기(li↔패널 사이 이동 시 깜빡임 방지). 드래그 리사이즈 중엔
@@ -37855,6 +39204,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 위임 호버. 라이브 팔로잉(사이드바/헤더) 진입 → 디바운스 후 미리보기.
   function onFollowPreviewMouseOver(e) {
     if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
+    syncFollowPreviewNavigation();
+    if (followPreviewNavigationPointer) return;
     // 클릭 이동 직후 억제 창 동안엔 미리보기를 열지 않는다(마우스 따라 잔존 방지).
     if (Date.now() < followPreviewOpenSuppressUntil) return;
     // 즐겨찾기 커스텀 순서 드래그 중이면 미리보기를 열지 않는다(드래그 방해 방지).
@@ -37870,8 +39221,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 방금 자동 종료된 같은 채널이면 재오픈 억제(li를 벗어나야 풀림).
     if (found.channelId === followPreviewSuppressedChannelId) return;
     clearFollowPreviewOpenTimer();
+    const pathname = location.pathname;
     const tryOpen = () => {
       followPreviewState.openTimer = 0;
+      if (pathname !== location.pathname) {
+        syncFollowPreviewNavigation();
+        return;
+      }
+      if (followPreviewNavigationPointer || !found.anchor.isConnected) return;
       // 스크롤 중/직후면 아직 열지 않고, 스크롤이 멈춰 조용해질 때까지 재확인한다.
       const sinceScroll = Date.now() - followPreviewLastScrollAt;
       if (sinceScroll < FOLLOW_PREVIEW_SCROLL_QUIET_MS) {
@@ -37918,9 +39275,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (e.target?.closest?.(`#${FOLLOW_PREVIEW_ID}`)) return; // 패널 내부 클릭은 유지
     // 팔로잉 채널(앵커)을 클릭해 이동하면 마우스가 그 자리에 남아 미리보기가 계속 떠
     // 있다. 앵커 클릭 시 즉시 닫는다(호버 오픈 대기도 취소). 고정 여부와 무관하게 정리.
-    if (getFollowPreviewAnchor(e.target)) {
-      clearFollowPreviewOpenTimer();
-      closeFollowPreview();
+    if (e.target?.closest?.("a[href]") && getFollowPreviewAnchor(e.target)) {
+      dismissFollowPreviewForNavigation(e);
       return;
     }
     if (!followPreviewState.pinned) return;
@@ -37936,7 +39292,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.addEventListener("mouseout", onFollowPreviewMouseOut, {
       passive: true,
     });
-    document.addEventListener("click", onFollowPreviewDocClick, true);
+    // document 캡처의 채널 이동 핸들러가 전파를 중단하기 전에 정리한다.
+    window.addEventListener("click", onFollowPreviewDocClick, true);
+    window.addEventListener("pointermove", onFollowPreviewNavigationPointerMove, { passive: true });
+    window.addEventListener("popstate", syncFollowPreviewNavigation);
     // 사이드바 내부 스크롤은 버블하지 않으므로 capture 로 document 에서 감지한다.
     // 스크롤 중/직후엔 미리보기 오픈을 미룬다(onFollowPreviewMouseOver 참고).
     document.addEventListener("scroll", onFollowPreviewScroll, {
@@ -39471,7 +40830,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .filter(Boolean);
   }
 
-  async function fetchAllFollowings({ onFirstPage } = {}) {
+  async function fetchAllFollowings({ onFirstPage, shouldContinue = () => true } = {}) {
     const pageSize = 505;
     const fetchPage = async (page) => {
       const url = `${FOLLOW_CLEANUP_API_BASE}/service/v1/channels/followings?page=${page}&size=${pageSize}&sortType=FOLLOW`;
@@ -39510,6 +40869,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const concurrency = 3;
     const pageFailures = [];
     for (let page = 1; page < totalPage; page += concurrency) {
+      // 중단된 자동 갱신의 부분 목록은 전체 목록으로 확정하지 않는다.
+      if (!shouldContinue()) return null;
       const pageNumbers = Array.from(
         { length: Math.min(concurrency, totalPage - page) },
         (_, index) => page + index,
@@ -39578,6 +40939,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         countRaw: live && Number.isFinite(live.countRaw) ? live.countRaw : null,
         countText: live?.count || "",
         openDate: live?.openDate || null,
+        party: live?.party || null,
         tags: liveTagsKnown
           ? normalizeCustomFollowTags(live.tags)
           : cachedTags || [],
@@ -39607,6 +40969,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         countRaw: Number.isFinite(live.countRaw) ? live.countRaw : null,
         countText: live.count || "",
         openDate: live.openDate || null,
+        party: live.party || null,
         tags: liveTagsKnown
           ? normalizeCustomFollowTags(live.tags)
           : cachedTags || [],
@@ -39679,6 +41042,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         item.countRaw,
         item.countText,
         item.openDate,
+        item.party?.partyNo || 0,
+        item.party?.others || 0,
         item.tags || [],
         item.tagsKnown === true,
         item.subscribed === true,
@@ -39780,7 +41145,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     let cursor = 0;
     const worker = async () => {
       while (cursor < targets.length) {
-        if (document.hidden) return; // 백그라운드면 중단
+        if (!canRefreshCustomFollowList()) return;
         await fetchOne(targets[cursor++]);
       }
     };
@@ -39913,6 +41278,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     customFollowItems = nextItems;
     customFollowItemsSignature = nextSignature;
+    // 추천 점수는 목록이 준비된 뒤 한 번만 모은다(TTL 안에서는 건너뛴다).
+    if (affinityOn) void ensureAffinityScores();
     saveCustomFollowFavMeta(); // 즐겨찾기 이름/이미지가 달라질 때만 로컬 저장
     customFollowVersion += 1;
     ensureCustomFollowList();
@@ -39952,6 +41319,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       try {
         all = await fetchAllFollowings({
+          shouldContinue: canRefreshCustomFollowList,
           onFirstPage(firstPage) {
             firstPageItems = firstPage;
             if (hadItemsAtStart) return;
@@ -40015,14 +41383,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 즐겨찾기 상단 고정을 반영한 정렬. mode 별 비교 + favorite 안정 분리.
   // 한 그룹 내부의 mode 별 비교 함수.
-  function customFollowModeCmp(a, b, mode) {
+  function customFollowModeCmp(a, b, mode, customOrderRanks) {
     const liveRank = (it) => (it.live ? 0 : 1);
     const byName = (x, y) => x.name.localeCompare(y.name, "ko");
     switch (mode) {
       case "custom": {
         // 커스텀 순서: customFollowFavOrder 배열의 인덱스 순(없으면 뒤로 + 이름순).
-        const ia = customFollowFavOrder.indexOf(a.channelId);
-        const ib = customFollowFavOrder.indexOf(b.channelId);
+        const ia = customOrderRanks
+          ? (customOrderRanks.get(a.channelId) ?? -1)
+          : customFollowFavOrder.indexOf(a.channelId);
+        const ib = customOrderRanks
+          ? (customOrderRanks.get(b.channelId) ?? -1)
+          : customFollowFavOrder.indexOf(b.channelId);
         const ra = ia < 0 ? Infinity : ia;
         const rb = ib < 0 ? Infinity : ib;
         return ra - rb || byName(a, b);
@@ -40062,16 +41434,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 즐겨찾기 그룹은 옵션(sbFollowFavSort) ON 이면 별도 기준(customFollowFavSort)으로,
     // OFF 면 일반 정렬 기준(mode)으로 정렬한다.
     const favMode = featureFlags.sbFollowFavSort ? customFollowFavSort : mode;
+    // 비교마다 전체 순서 배열을 검색하지 않는다. 정렬 호출 안에서만 유지해
+    // 드래그로 순서를 바꿔도 오래된 순위가 남지 않게 한다.
+    let customOrderRanks;
+    if (mode === "custom" || favMode === "custom") {
+      customOrderRanks = new Map();
+      customFollowFavOrder.forEach((id, index) => {
+        if (!customOrderRanks.has(id)) customOrderRanks.set(id, index);
+      });
+    }
     const cmp = (a, b) => {
-      if (favRank(a) !== favRank(b)) return favRank(a) - favRank(b); // 즐겨찾기 먼저
-      const favorite = favRank(a) === 0;
+      const rankA = favRank(a);
+      const rankB = favRank(b);
+      if (rankA !== rankB) return rankA - rankB; // 즐겨찾기 먼저
+      const favorite = rankA === 0;
       // 선택한 즐겨찾기 정렬 결과 안에서 방송 중/오프라인을 안정적으로 분리한다.
       // 같은 상태끼리는 아래 정렬 기준(커스텀 순서 포함)을 그대로 따른다.
       if (favorite && featureFlags.sbFollowFavLiveFirst && a.live !== b.live) {
         return a.live ? -1 : 1;
       }
       const groupMode = favorite ? favMode : mode; // 그룹별 정렬 기준
-      return customFollowModeCmp(a, b, groupMode);
+      return customFollowModeCmp(a, b, groupMode, customOrderRanks);
     };
     return items.slice().sort(cmp);
   }
@@ -40259,7 +41642,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       </div>
     </div>`;
     document.body.appendChild(overlay);
-    document.documentElement.classList.add("cheese-fcln-lock");
+    lockModalScroll("cheese-fcln-lock");
 
     // 닫기 핸들러(딤머/버튼/ESC).
     overlay.addEventListener("click", (e) => {
@@ -40397,7 +41780,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     followCleanupState.open = false;
     followCleanupState.loadToken++; // 진행 중 로드 취소
     document.removeEventListener("keydown", onFollowCleanupKeydown, true);
-    document.documentElement.classList.remove("cheese-fcln-lock");
+    unlockModalScroll("cheese-fcln-lock");
     document.getElementById(FOLLOW_CLEANUP_MODAL_ID)?.remove();
   }
 
@@ -40954,6 +42337,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
+      // 차단 이모티콘 목록. 플래그 전달 전에 채워야 첫 방송부터 적용된다.
+      await loadChatBlockedEmoticons();
       chatHistoryOn = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
       chatHistoryLimit = normalizeChatHistoryLimit(
         data?.[CHAT_HISTORY_LIMIT_KEY],
@@ -41199,6 +42584,84 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       host.insertBefore(btn, host.firstChild);
     });
   }
+
+  // ── 댓글 닉네임 우클릭 → 차단 버튼 팝오버 ─────────────────────────────────
+  // 다시보기·클립·커뮤니티 댓글에서 닉네임을 우클릭하면 작은 '차단' 버튼이 뜨고,
+  //   그걸 누르면 기존 차단 팝오버로 이어진다.
+  // ⚠ 헤더에 이미 차단 버튼이 있지만 '더보기' 옆이라 눈에 잘 안 띈다. 우클릭은
+  //   채팅 프로필과 같은 조작감을 주는 보조 경로다.
+  const COMMENT_NICK_MENU_ID = "cheese-comment-nick-menu";
+
+  function closeCommentNickMenu() {
+    document.getElementById(COMMENT_NICK_MENU_ID)?.remove();
+  }
+
+  function openCommentNickMenu(event, userHash, nickname) {
+    closeCommentNickMenu();
+    const menu = document.createElement("div");
+    menu.id = COMMENT_NICK_MENU_ID;
+    menu.className = "cheese-comment-nick-menu";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.innerHTML =
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
+      `<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>` +
+      `<path d="M5.6 5.6l12.8 12.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>` +
+      `</svg><span>${escapeHtml(nickname || "이 사용자")}님 차단</span>`;
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // ⚠ 차단 팝오버를 먼저 연 뒤 이 메뉴를 지운다. 순서가 반대면 앵커가 문서에서
+      //   떨어져 나가 위치 계산이 어긋난다.
+      openCommentBlockPopover(button, userHash, nickname);
+      closeCommentNickMenu();
+    });
+    menu.appendChild(button);
+    document.body.appendChild(menu);
+    // 커서 위치에 띄우되 화면 밖으로 나가지 않게 되민다.
+    const rect = menu.getBoundingClientRect();
+    const x = Math.min(event.clientX, window.innerWidth - rect.width - 8);
+    const y = Math.min(event.clientY, window.innerHeight - rect.height - 8);
+    menu.style.left = `${Math.max(8, x)}px`;
+    menu.style.top = `${Math.max(8, y)}px`;
+  }
+
+  // 댓글 영역의 닉네임 우클릭. 치지직 기본 메뉴는 막는다.
+  document.addEventListener("contextmenu", (event) => {
+    if (!event.isTrusted) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    // 댓글 안인지 먼저 본다(다시보기·클립·커뮤니티 모두 id="commentBox-..." 를 쓴다).
+    const wrap = target.closest('[id^="commentBox-"]');
+    if (!wrap) return;
+    // 닉네임 영역인지 확인. ⚠ _information_ 뒤 해시는 빌드마다 바뀌므로 토큰만 본다.
+    //   그 클래스를 못 찾는 구조라면 프로필 링크(채널 이동)로도 인정한다.
+    const nameBtn =
+      target.closest('[class*="_information_"]') ||
+      target.closest('a[href^="/"][class*="_nickname_"]') ||
+      target.closest('[class*="_nickname_"]');
+    if (!nameBtn) return;
+    const user = commentUserMap.get(commentIdFromWrap(wrap));
+    if (!user?.userIdHash) return; // 맵이 아직 없으면 기본 메뉴를 그대로 둔다
+    event.preventDefault();
+    event.stopPropagation();
+    openCommentNickMenu(event, user.userIdHash, user.nickname || "");
+  });
+
+  // 바깥 클릭·Esc 로 닫는다(차단 팝오버와 같은 방식).
+  document.addEventListener("click", (event) => {
+    if (!document.getElementById(COMMENT_NICK_MENU_ID)) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest(`#${COMMENT_NICK_MENU_ID}`)
+    ) {
+      return;
+    }
+    closeCommentNickMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCommentNickMenu();
+  });
 
   function onCommentBlockButtonClick(e) {
     e.preventDefault();
@@ -42529,11 +43992,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function refreshCapturedChatHistoryRow(row, originalItem) {
     if (chatHistoryRefreshIdentityByRow.get(row) === originalItem.id) return;
     chatHistoryRefreshIdentityByRow.set(row, originalItem.id);
+    const generation = chatHistoryScopeGeneration;
     const state = { item: originalItem };
     const refresh = () => {
       if (
         chatHistoryContextInvalidated ||
         !chatHistoryOn ||
+        generation !== chatHistoryScopeGeneration ||
+        !row.isConnected ||
         row.hasAttribute?.(CHAT_HISTORY_MARK)
       ) {
         return;
@@ -42630,25 +44096,57 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       chatHistoryCaptureDelayTimer = window.setTimeout(() => {
         chatHistoryCaptureDelayTimer = 0;
-        scheduleChatHistoryCaptureSnapshot(rowParent, new Set());
+        flushPendingChatHistoryCapture(rowParent);
       }, wait);
       return;
+    }
+    flushPendingChatHistoryCapture(rowParent);
+  }
+
+  // 대기 종료 후에는 큐를 비운다. enqueue를 다시 호출하면 80ms 타이머만 재예약된다.
+  function flushPendingChatHistoryCapture(rowParent) {
+    if (chatHistoryContextInvalidated || !chatHistoryOn) return;
+    if (document.hidden) {
+      if (chatHistoryCaptureDelayTimer) {
+        clearTimeout(chatHistoryCaptureDelayTimer);
+        chatHistoryCaptureDelayTimer = 0;
+      }
+      if (chatHistoryCaptureFrame > 0) {
+        cancelAnimationFrame(chatHistoryCaptureFrame);
+        chatHistoryCaptureFrame = 0;
+      }
+    } else {
+      const scrollWait = chatHistoryNativeScrollActiveUntil - performance.now();
+      if (scrollWait > 0) {
+        if (!chatHistoryCaptureDelayTimer) {
+          chatHistoryCaptureDelayTimer = window.setTimeout(() => {
+            chatHistoryCaptureDelayTimer = 0;
+            flushPendingChatHistoryCapture(rowParent);
+          }, Math.ceil(scrollWait));
+        }
+        return;
+      }
     }
     if (chatHistoryCaptureFrame) return;
     const capture = () => {
       chatHistoryCaptureFrame = 0;
       const parent = chatHistoryObservedRowParent;
-      if (parent !== rowParent || !parent?.isConnected) {
+      if (
+        chatHistoryContextInvalidated ||
+        !chatHistoryOn ||
+        parent !== rowParent ||
+        !parent?.isConnected
+      ) {
         chatHistoryFullCapturePending = false;
         chatHistoryPendingCaptureRows.clear();
         return;
       }
       const fullCapture = chatHistoryFullCapturePending;
       chatHistoryFullCapturePending = false;
-      if (!fullCapture && chatHistoryPendingCaptureRows.size) {
+      if (!fullCapture) {
         const rows = [...chatHistoryPendingCaptureRows];
         chatHistoryPendingCaptureRows.clear();
-        captureChatHistoryRows(rows);
+        if (rows.length) captureChatHistoryRows(rows);
         return;
       }
       chatHistoryPendingCaptureRows.clear();
@@ -43268,6 +44766,32 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     chatHistoryResizeObserver?.disconnect();
   }
 
+  function collectChangedChatHistoryRows(mutations, rowParent) {
+    const rows = new Set();
+    const addRow = (node, includeDescendants = false) => {
+      const element =
+        node instanceof Element ? node : node?.parentElement || null;
+      if (!element) return;
+      const row = element.closest?.('[class*="_item_"]');
+      if (row && rowParent.contains(row)) {
+        rows.add(row);
+        return;
+      }
+      // 목록 자체는 매 채팅 추가의 target이다. 새로 붙은 subtree만 내려가야
+      // 이미 표시 중인 모든 행을 반복 복제/직렬화하지 않는다.
+      if (includeDescendants) {
+        element.querySelectorAll?.('[class*="_item_"]').forEach((candidate) => {
+          if (rowParent.contains(candidate)) rows.add(candidate);
+        });
+      }
+    };
+    mutations.forEach((mutation) => {
+      addRow(mutation.target);
+      mutation.addedNodes.forEach((node) => addRow(node, true));
+    });
+    return rows;
+  }
+
   function ensureChatHistory() {
     if (!IS_TOP_FRAME || chatHistoryContextInvalidated) return;
     const channelId = chatHistoryOn ? currentLiveChannelId() : "";
@@ -43313,25 +44837,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           queueMicrotask(ensureChatHistory);
           return;
         }
-        const changedRows = new Set();
-        const addRow = (node) => {
-          const element =
-            node instanceof Element ? node : node?.parentElement || null;
-          if (!element) return;
-          const row = element.matches?.('[class*="_item_"]')
-            ? element
-            : element.closest?.('[class*="_item_"]');
-          if (row && currentParent.contains(row)) changedRows.add(row);
-          element
-            .querySelectorAll?.('[class*="_item_"]')
-            .forEach((candidate) => {
-              if (currentParent.contains(candidate)) changedRows.add(candidate);
-            });
-        };
-        mutations.forEach((mutation) => {
-          addRow(mutation.target);
-          mutation.addedNodes.forEach(addRow);
-        });
+        const changedRows = collectChangedChatHistoryRows(mutations, currentParent);
         scheduleChatHistoryCaptureSnapshot(currentParent, changedRows);
       });
       chatHistoryObserver.observe(list, {
@@ -47820,7 +49326,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let sectionRefreshSchedule = false;
 
   function clickFollowRefresh() {
-    if (document.hidden) return;
+    if (!IS_TOP_FRAME || document.hidden) return;
     // 전용 팔로잉 목록이 켜져 있으면 이 기존 팔로우 갱신은 '비활성화'한다(전용 목록은
     // 자체 주기 타이머 cheeseFollowCustomRefreshSec 로 갱신). 사이드바가 보이는 상태에서만
     // 해당(숨김이면 헤더 팔로잉은 아래 분기가 처리). 헤더 팔로잉 캐러셀 갱신은 계속 허용.
@@ -47845,7 +49351,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // (API 직접 호출은 치지직 React 상태를 못 바꿔 사이드바/툴팁이 갱신되지 않으므로
     //  쓰지 않는다.)
     const btn = nav.querySelector('button[aria-label="새로고침"]');
-    if (btn) btn.click();
+    if (btn && !btn.disabled && btn.getAttribute("aria-busy") !== "true") {
+      btn.click();
+    }
     // 같은 주기에 '인기 카테고리'/'다가오는 방송 일정' 섹션도 옵션이 켜져 있으면 새로고침.
     // (사이드바 숨김이면 위에서 이미 return 됐으므로 여기선 사이드바가 보이는 상태.)
     if (sectionRefreshCategory) clickSectionRefreshByLabel("인기카테고리");
@@ -47877,7 +49385,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function startFollowRefreshTimer() {
     stopFollowRefreshTimer();
-    if (!followRefreshSec) return;
+    if (!IS_TOP_FRAME || !followRefreshSec) return;
     followRefreshAlternate = false;
     const tick = () => {
       clickFollowRefresh();
@@ -47960,6 +49468,69 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!Number.isFinite(n)) return def;
     return Math.min(max, Math.max(CUSTOM_FOLLOW_COUNT_MIN, n));
   }
+  // 저장값 → Map(channelId → 영역 Set).
+  // ⚠ 예전 형식(채널 배열)도 읽는다. 그때는 세 영역 모두 적용으로 본다.
+  // 가중치 순서. 알 수 없는 키는 버리고, 빠진 지표는 뒤에 기본 순서로 채운다.
+  // ⚠ 빠진 지표를 버리면 가중치 0 이 되어 그 지표가 조용히 무시된다. 사용자가
+  //   의도적으로 뺀 건지 저장이 낡은 건지 구분할 수 없으므로 채워 넣는다.
+  // 표시 개수·증가량. 1~10 만 허용한다(후보가 AFFINITY_MAX 개라 그 위는 의미 없다).
+  function sanitizeAffinityCount(value, fallback) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n >= 1 && n <= AFFINITY_MAX ? n : fallback;
+  }
+
+  // 0~3(3섹션 사이 네 자리). 범위 밖이면 맨 위.
+  function sanitizeAffinityIndex(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0;
+  }
+
+  function sanitizeAffinityOrder(value) {
+    const known = new Set(AFFINITY_DEFAULT_ORDER);
+    const seen = new Set();
+    const out = [];
+    for (const key of Array.isArray(value) ? value : []) {
+      const k = String(key || "");
+      if (known.has(k) && !seen.has(k)) {
+        seen.add(k);
+        out.push(k);
+      }
+    }
+    for (const k of AFFINITY_DEFAULT_ORDER) if (!seen.has(k)) out.push(k);
+    return out;
+  }
+
+  function sanitizeCustomFollowSquares(value) {
+    const out = new Map();
+    const allScopes = CUSTOM_FOLLOW_SQUARE_SCOPES.map(([key]) => key);
+    if (Array.isArray(value)) {
+      for (const id of value) {
+        const channelId = String(id || "");
+        if (channelId) out.set(channelId, new Set(allScopes));
+      }
+      return out;
+    }
+    if (!value || typeof value !== "object") return out;
+    for (const [id, scopes] of Object.entries(value)) {
+      const channelId = String(id || "");
+      if (!channelId) continue;
+      const picked = (Array.isArray(scopes) ? scopes : [])
+        .map(String)
+        .filter((key) => allScopes.includes(key));
+      // 영역을 하나도 안 고른 채널은 저장하지 않는다(= 선택 해제와 같다).
+      if (picked.length) out.set(channelId, new Set(picked));
+    }
+    return out;
+  }
+
+  function customFollowSquaresToStore() {
+    const out = {};
+    for (const [id, scopes] of customFollowSquares) {
+      if (scopes.size) out[id] = [...scopes];
+    }
+    return out;
+  }
+
   function applyCustomFollowSettings(data) {
     const sort = data?.[CUSTOM_FOLLOW_SORT_KEY];
     customFollowSort = CUSTOM_FOLLOW_SORTS.includes(sort)
@@ -48014,6 +49585,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     customFollowFavorites = new Set(
       Array.isArray(favs) ? favs.map(String) : [],
     );
+    customFollowSquares = sanitizeCustomFollowSquares(
+      data?.[CUSTOM_FOLLOW_SQUARE_KEY],
+    );
+    affinityOn = data?.[AFFINITY_ON_KEY] === true; // 기본 OFF
+    affinityHideOffline = data?.[AFFINITY_HIDE_OFFLINE_KEY] === true;
+    affinityIndex = sanitizeAffinityIndex(data?.[AFFINITY_INDEX_KEY]);
+    affinityInitial = sanitizeAffinityCount(
+      data?.[AFFINITY_INITIAL_KEY],
+      AFFINITY_INITIAL_DEFAULT,
+    );
+    affinityMore = sanitizeAffinityCount(
+      data?.[AFFINITY_MORE_KEY],
+      AFFINITY_MORE_DEFAULT,
+    );
+    if (affinityShown < affinityInitial) affinityShown = affinityInitial;
+    affinityOrder = sanitizeAffinityOrder(data?.[AFFINITY_ORDER_KEY]);
     customFollowGroupCustomIcons = sanitizeCustomFollowGroupCustomIcons(
       data?.[CUSTOM_FOLLOW_GROUP_CUSTOM_ICONS_KEY],
     );
@@ -48055,6 +49642,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CUSTOM_FOLLOW_GROUP_INITIAL_KEY,
         CUSTOM_FOLLOW_GROUP_MORE_KEY,
         CUSTOM_FOLLOW_FAVORITES_KEY,
+        CUSTOM_FOLLOW_SQUARE_KEY,
+        AFFINITY_ON_KEY,
+        AFFINITY_ORDER_KEY,
+        AFFINITY_HIDE_OFFLINE_KEY,
+        AFFINITY_INDEX_KEY,
+        AFFINITY_INITIAL_KEY,
+        AFFINITY_MORE_KEY,
         CUSTOM_FOLLOW_GROUP_CUSTOM_ICONS_KEY,
         CUSTOM_FOLLOW_GROUPS_KEY,
         CUSTOM_FOLLOW_GROUP_COLLAPSED_KEY,
@@ -48173,6 +49767,56 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  // 차단 항목은 두 형태다(MAIN 월드와 같은 규칙).
+  //  - 영숫자 키: 이모티콘 창 alt 에서 얻은 "d_42" 같은 이름
+  //  - "url:https://..." : 채팅 스트림 이미지에는 alt 가 없어 URL 로 식별한다
+  function sanitizeChatEmoticonKey(value) {
+    const raw = String(value || "").trim();
+    if (raw.startsWith("url:")) {
+      const url = raw.slice(4);
+      return /^https:\/\/[\w.-]+\/[^"'\s]*$/.test(url) ? raw : "";
+    }
+    return /^[A-Za-z0-9_]{1,64}$/.test(raw) ? raw : "";
+  }
+
+  // 상한을 둔다. 차단 목록이 커지면 CSS 규칙도 같이 커진다.
+  const CHAT_BLOCKED_EMOTICONS_MAX = 300;
+
+  async function loadChatBlockedEmoticons() {
+    try {
+      const data = await chrome.storage.local.get(CHAT_BLOCKED_EMOTICONS_KEY);
+      const list = data?.[CHAT_BLOCKED_EMOTICONS_KEY];
+      chatBlockedEmoticons = (Array.isArray(list) ? list : [])
+        .map(sanitizeChatEmoticonKey)
+        .filter(Boolean)
+        .slice(0, CHAT_BLOCKED_EMOTICONS_MAX);
+    } catch {
+      chatBlockedEmoticons = [];
+    }
+  }
+
+  function saveChatBlockedEmoticons() {
+    try {
+      chrome.storage?.local?.set({
+        [CHAT_BLOCKED_EMOTICONS_KEY]: chatBlockedEmoticons,
+      });
+    } catch {
+      // 저장 실패해도 이번 세션 표시는 유지된다.
+    }
+  }
+
+  // MAIN 월드(chatTimestamp.js)의 Alt+클릭 알림을 받아 저장한다.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window && event.source !== window.top) return;
+    if (event.data?.source !== "cheese-chat-emoticon-block") return;
+    const key = sanitizeChatEmoticonKey(event.data.key);
+    if (!key || chatBlockedEmoticons.includes(key)) return;
+    if (chatBlockedEmoticons.length >= CHAT_BLOCKED_EMOTICONS_MAX) return;
+    chatBlockedEmoticons = [...chatBlockedEmoticons, key];
+    saveChatBlockedEmoticons();
+    broadcastFeatureFlags();
+  });
+
   function broadcastFeatureFlags() {
     window.postMessage(
       {
@@ -48183,6 +49827,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatRecapEnabled: chatRecapOn,
         chatRecapAccountId: chatRecapOn ? currentClipVaultAccountId() : "",
         chatRecapChannelId: chatRecapOn ? currentRecapChannelId() : "",
+        chatBlockedEmoticons, // 채팅에서 숨길 이모티콘 키 목록
         syncPreset: syncPresetValue,
         syncCustom: syncCustomValue, // {enable,target} 또는 null
         syncRate: syncRateValue, // 따라잡기 배속(1.2/1.5/2/3)
@@ -48784,6 +50429,58 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         commentTsClickDelaySec = clampCommentTsClickDelay(
           changes[COMMENT_TS_CLICK_DELAY_KEY].newValue,
         );
+      }
+      if (changes[AFFINITY_ON_KEY]) {
+        affinityOn = changes[AFFINITY_ON_KEY].newValue === true;
+        // 끄면 계산 결과도 버린다(켤 때 최신 값으로 다시 모은다).
+        if (!affinityOn) affinityScored = null;
+        affinityLoadedAt = 0;
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+        if (affinityOn) void ensureAffinityScores();
+      }
+      if (changes[AFFINITY_INITIAL_KEY] || changes[AFFINITY_MORE_KEY]) {
+        affinityInitial = sanitizeAffinityCount(
+          changes[AFFINITY_INITIAL_KEY]?.newValue ?? affinityInitial,
+          AFFINITY_INITIAL_DEFAULT,
+        );
+        affinityMore = sanitizeAffinityCount(
+          changes[AFFINITY_MORE_KEY]?.newValue ?? affinityMore,
+          AFFINITY_MORE_DEFAULT,
+        );
+        // 초기 개수를 바꾸면 펼쳐 둔 것도 그 값으로 되돌린다(즐겨찾기와 같은 동작).
+        affinityShown = affinityInitial;
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+      }
+      if (changes[AFFINITY_INDEX_KEY]) {
+        affinityIndex = sanitizeAffinityIndex(
+          changes[AFFINITY_INDEX_KEY].newValue,
+        );
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+      }
+      if (changes[AFFINITY_HIDE_OFFLINE_KEY]) {
+        affinityHideOffline =
+          changes[AFFINITY_HIDE_OFFLINE_KEY].newValue === true;
+        customFollowVersion += 1;
+        ensureCustomFollowList();
+      }
+      if (changes[AFFINITY_ORDER_KEY]) {
+        affinityOrder = sanitizeAffinityOrder(
+          changes[AFFINITY_ORDER_KEY].newValue,
+        );
+        // 가중치만 바뀌었으므로 다시 모으지 않고 점수만 다시 낸다.
+        affinityLoadedAt = 0;
+        if (affinityOn) void ensureAffinityScores();
+      }
+      if (changes[CHAT_BLOCKED_EMOTICONS_KEY]) {
+        const list = changes[CHAT_BLOCKED_EMOTICONS_KEY].newValue;
+        chatBlockedEmoticons = (Array.isArray(list) ? list : [])
+          .map(sanitizeChatEmoticonKey)
+          .filter(Boolean)
+          .slice(0, CHAT_BLOCKED_EMOTICONS_MAX);
+        broadcastFeatureFlags();
       }
       if (changes[CHAT_RECAP_CLICK_ACTION_KEY]) {
         const action = changes[CHAT_RECAP_CLICK_ACTION_KEY].newValue;
@@ -49672,6 +51369,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[CHAT_GRAPH_AUTO_COLLECT_KEY].newValue === true;
         chatGraphAutoTriedVideo = "";
       }
+      if (changes[ROLE_CHAT_ON_KEY]) {
+        vodRoleChatOn = changes[ROLE_CHAT_ON_KEY].newValue !== false;
+        // 탭이 사라지면 내 채팅으로 되돌린다.
+        if (!vodRoleChatOn) recapPanelTab = "mine";
+      }
+      if (changes[ROLE_CHAT_BOTS_KEY]) {
+        // ⚠ 이미 수집한 목록에 소급 적용하려면 다시 수집해야 한다. 봇 목록은
+        //   수집 단계에서 거르기 때문이다(저장하지 않는 데이터라 되걸를 수 없다).
+        applyVodRoleChatBots(changes[ROLE_CHAT_BOTS_KEY].newValue);
+      }
       if (changes[CHAT_GRAPH_ENABLED_KEY]) {
         chatGraphOn = changes[CHAT_GRAPH_ENABLED_KEY].newValue === true;
         if (!chatGraphOn) {
@@ -49805,6 +51512,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[CUSTOM_FOLLOW_GROUP_INITIAL_KEY] ||
         changes[CUSTOM_FOLLOW_GROUP_MORE_KEY] ||
         changes[CUSTOM_FOLLOW_FAVORITES_KEY] ||
+        changes[CUSTOM_FOLLOW_SQUARE_KEY] ||
+        changes[AFFINITY_ON_KEY] ||
+        changes[AFFINITY_ORDER_KEY] ||
+        changes[AFFINITY_HIDE_OFFLINE_KEY] ||
+        changes[AFFINITY_INDEX_KEY] ||
+        changes[AFFINITY_INITIAL_KEY] ||
+        changes[AFFINITY_MORE_KEY] ||
         changes[CUSTOM_FOLLOW_GROUP_CUSTOM_ICONS_KEY] ||
         changes[CUSTOM_FOLLOW_GROUPS_KEY] ||
         changes[CUSTOM_FOLLOW_GROUP_COLLAPSED_KEY] ||
@@ -49847,6 +51561,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             customFollowGroupMore,
           [CUSTOM_FOLLOW_FAVORITES_KEY]: changes[CUSTOM_FOLLOW_FAVORITES_KEY]
             ?.newValue ?? [...customFollowFavorites],
+          // ⚠ 여기 빠뜨리면 applyCustomFollowSettings 가 undefined 로 읽어 설정이
+          //   통째로 날아간다. 접기/펼치기가 COLLAPSED_KEY 를 쓰면서 이 핸들러를
+          //   깨우기 때문에, 접었다 펴면 사각 설정이 지워졌다(제보).
+          [CUSTOM_FOLLOW_SQUARE_KEY]:
+            changes[CUSTOM_FOLLOW_SQUARE_KEY]?.newValue ??
+            customFollowSquaresToStore(),
+          // ⚠ 사각 프로필과 같은 이유로 반드시 넣는다. 빠지면 applyCustomFollowSettings
+          //   가 undefined 로 읽어 '친밀도'가 꺼지고 다시 안 나타난다(제보:
+          //   즐겨찾기·그룹·팔로잉을 접으면 사라진다 — 접기가 이 핸들러를 깨운다).
+          [AFFINITY_ON_KEY]: changes[AFFINITY_ON_KEY]?.newValue ?? affinityOn,
+          [AFFINITY_ORDER_KEY]: changes[AFFINITY_ORDER_KEY]?.newValue ?? [
+            ...affinityOrder,
+          ],
+          [AFFINITY_HIDE_OFFLINE_KEY]:
+            changes[AFFINITY_HIDE_OFFLINE_KEY]?.newValue ?? affinityHideOffline,
+          [AFFINITY_INDEX_KEY]:
+            changes[AFFINITY_INDEX_KEY]?.newValue ?? affinityIndex,
+          [AFFINITY_INITIAL_KEY]:
+            changes[AFFINITY_INITIAL_KEY]?.newValue ?? affinityInitial,
+          [AFFINITY_MORE_KEY]:
+            changes[AFFINITY_MORE_KEY]?.newValue ?? affinityMore,
           [CUSTOM_FOLLOW_GROUP_CUSTOM_ICONS_KEY]:
             changes[CUSTOM_FOLLOW_GROUP_CUSTOM_ICONS_KEY]?.newValue ??
             getStoredCustomFollowGroupCustomIcons(),
@@ -50226,6 +51961,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_GRAPH_COLORS_KEY,
         CHAT_GRAPH_AUTO_KEY,
         CHAT_GRAPH_AUTO_COLLECT_KEY,
+        ROLE_CHAT_ON_KEY,
+        ROLE_CHAT_BOTS_KEY,
         VOD_TITLE_CHANGES_KEY,
       ]);
       followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] !== false;
@@ -50233,6 +51970,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
       chatGraphAutoCollect = data?.[CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
+      vodRoleChatOn = data?.[ROLE_CHAT_ON_KEY] !== false; // 기본 ON
+      applyVodRoleChatBots(data?.[ROLE_CHAT_BOTS_KEY]);
       vodTitleChangesOn = data?.[VOD_TITLE_CHANGES_KEY] === true; // 기본 OFF
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
       // init()은 저장소 응답보다 먼저 실행될 수 있다. 특히 설정을 막 불러온 새 설치에서는
@@ -50245,6 +51984,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   })();
 
   function init() {
+    syncFollowPreviewNavigation();
     if (isClipEditorContext()) return;
     ensureClipPageAutoplay();
     if (featureFlags.hideBlockedCards) markBlockedUserSearchCards();
@@ -50322,6 +52062,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyPipDisable(); // PIP 전환 끄기(옵션)
     resetChatGraphIfVideoChanged(); // 다시보기가 바뀌면 그래프 초기화
     ensureChatGraphButton(); // 채팅 활성도 버튼(옵션, 기본 OFF)
+    resetRoleChatIfVideoChanged(); // 방장·매니저 채팅도 영상별로 초기화
     void maybeAutoShowChatGraph(); // 자동 표시(옵션) — 영상당 1회만 시도
 
     cleanupStudioMakeClipViewIfInactive();
@@ -51673,14 +53414,26 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const data = event.data;
     if (!data || data.source !== "cheese-screenshot-save") return;
     const reqId = data.reqId;
-    const saveAs = !screenshotDirectSave; // 바로 저장 OFF면 '다른 이름으로 저장' 대화상자
-    // 대화상자가 필요하면 Blob URL로(그래야 saveAs가 먹는다), 아니면 data URL 그대로.
-    const blobURL = saveAs ? dataURLToBlobURL(data.dataURL) : null;
+    // ⚠ forceSaveAs 는 '파일명을 크롬이 거부해서 다시 시도하는' 경우다. 설정과
+    //   무관하게 대화상자를 띄워 사용자가 직접 이름을 정하게 한다(안전장치).
+    const saveAs = data.forceSaveAs === true || !screenshotDirectSave;
+    // MAIN → content 구간은 Blob으로 전달해 Base64 생성·복사·재디코딩을 피한다.
+    // 이전 MAIN 스크립트와의 호환을 위해 dataURL 경로도 유지한다.
+    const blobURL = data.blob instanceof Blob && data.blob.type === "image/png"
+      ? URL.createObjectURL(data.blob)
+      : saveAs ? dataURLToBlobURL(data.dataURL) : null;
     const url = blobURL || data.dataURL;
+    const revoke = () => { if (blobURL) URL.revokeObjectURL(blobURL); };
+    let cleanupTimer = blobURL ? setTimeout(revoke, saveAs ? 360000 : 80000) : 0;
     const replyAndCleanup = (payload) => {
       if (blobURL) {
-        // 다운로드가 시작된 뒤 revoke(너무 일찍 지우면 다운로드가 깨질 수 있어 지연).
-        setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
+        clearTimeout(cleanupTimer);
+        // 완료/취소가 확인되면 즉시 해제. 응답 미상일 때만 다운로드를 잠시 더 기다린다.
+        if (payload.reason === "timeout" || payload.reason === "disconnected") {
+          cleanupTimer = setTimeout(revoke, 60000);
+        } else {
+          revoke();
+        }
       }
       window.postMessage(payload, BRIDGE_ORIGIN);
     };

@@ -3653,6 +3653,21 @@ const LP_SUBSCRIBE_URL =
   "https://api.chzzk.naver.com/commercial/v1/subscribe/channels";
 const LP_CHANNELS_PREFIX = "https://api.chzzk.naver.com/service/v1/channels";
 
+// 응답 헤더뿐 아니라 JSON 본문 대기도 제한해 주기 검사 요청이 쌓이지 않게 한다.
+async function lpFetchJson(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, {
+      credentials: "include",
+      signal: controller.signal,
+    });
+    return response.ok ? await response.json() : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function lpWatchStateKey(channelId) {
   return `${LP_WATCH_STATE_PREFIX}${channelId}`;
 }
@@ -3731,9 +3746,7 @@ function lpTierToAmount(tier) {
 // 구독 tier로 예상 시청 보상액(없으면 null → [10,12,20] 폴백).
 async function lpFetchExpectedAmount(channelId) {
   try {
-    const res = await fetch(LP_SUBSCRIBE_URL, { credentials: "include" });
-    if (!res.ok) return null;
-    const json = await res.json();
+    const json = await lpFetchJson(LP_SUBSCRIBE_URL);
     const list = Array.isArray(json?.content) ? json.content : [];
     const item = list.find((x) => String(x?.channelId) === String(channelId));
     if (!item) return null;
@@ -3750,11 +3763,7 @@ async function lpFetchExpectedAmount(channelId) {
 // 현재 보유량(raw). 못 찾으면 undefined(0과 구분 — 오탐 방지).
 async function lpFetchAmount(channelId) {
   try {
-    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}/log-power`, {
-      credentials: "include",
-    });
-    if (!res.ok) return undefined;
-    const json = await res.json();
+    const json = await lpFetchJson(`${LP_CHANNELS_PREFIX}/${channelId}/log-power`);
     const amount = Number(json?.content?.amount);
     return Number.isFinite(amount) ? amount : undefined;
   } catch {
@@ -3766,11 +3775,7 @@ async function lpIsChannelLive(channelId) {
   try {
     // 채널 기본 정보 API 의 content.openLive 로 방송 여부 판단(가볍고 확실).
     // 과거 /live-status 경로는 Not Found 를 반환해 항상 null(불확실)이 나왔다.
-    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}`, {
-      credentials: "include",
-    });
-    if (!res.ok) return null; // 불확실
-    const json = await res.json();
+    const json = await lpFetchJson(`${LP_CHANNELS_PREFIX}/${channelId}`);
     const c = json?.content;
     if (!c || typeof c.openLive !== "boolean") return null;
     return c.openLive;
@@ -3880,11 +3885,7 @@ async function lpStartTracking({ channelId, initialAmount, accountHint }) {
 // 채널 표시 정보(이름/프로필). 기록에 남겨야 통계에서 id 대신 이름이 보인다.
 async function lpFetchChannelMeta(channelId) {
   try {
-    const res = await fetch(`${LP_CHANNELS_PREFIX}/${channelId}`, {
-      credentials: "include",
-    });
-    if (!res.ok) return null;
-    const c = (await res.json())?.content;
+    const c = (await lpFetchJson(`${LP_CHANNELS_PREFIX}/${channelId}`))?.content;
     if (!c) return null;
     return {
       channelName: String(c.channelName || ""),
@@ -4000,9 +4001,8 @@ async function lpFetchAccountId() {
   const gen = lpAccountGen;
   lpAccountInFlight = (async () => {
     try {
-      const res = await fetch(LP_USER_STATUS_URL, { credentials: "include" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const hash = String((await res.json())?.content?.userIdHash || "").trim();
+      const json = await lpFetchJson(LP_USER_STATUS_URL);
+      const hash = String(json?.content?.userIdHash || "").trim();
       if (!LP_ACCOUNT_RE.test(hash)) throw new Error("no-hash");
       // ⚠ 요청 도중 계정 전환 신호가 왔다 → 이 결과는 낡았다. 캐시에 넣지 않고
       //   버린다(호출부는 null 을 받아 '모르면 미룬다'로 처리한다).
@@ -5202,7 +5202,17 @@ async function lpClearOtherChannels(activeChannelId, ownerHint) {
 }
 
 // 주기 알람 — 보유량 delta로 적립 판정.
-async function lpCheckProgress(channelId) {
+const lpProgressRequests = new Map();
+function lpCheckProgress(channelId) {
+  if (lpProgressRequests.has(channelId)) return lpProgressRequests.get(channelId);
+  const request = lpCollectProgress(channelId)
+    .catch(() => {}) // 실패한 검사는 다음 알람에서 재시도한다.
+    .finally(() => lpProgressRequests.delete(channelId));
+  lpProgressRequests.set(channelId, request);
+  return request;
+}
+
+async function lpCollectProgress(channelId) {
   const state = await lpGetWatchState(channelId);
   if (!state) {
     try {
@@ -6467,7 +6477,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHEESE_SCREENSHOT_SAVE") {
     const { url, filename } = message;
     const saveAs = message.saveAs === true; // 기본 false=바로 저장
-    // data:(바로 저장용) 또는 blob:(대화상자용, content가 변환) URL만 허용.
+    // content가 만든 blob: URL과 이전 스크립트의 data: URL만 허용.
     if (
       typeof url !== "string" ||
       !(url.startsWith("data:image") || url.startsWith("blob:"))
@@ -6489,6 +6499,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
         let settled = false;
+        let completionTimer = 0;
         const onChanged = (delta) => {
           if (delta.id !== downloadId || !delta.state) return;
           const s = delta.state.current;
@@ -6509,6 +6520,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const finish = (result) => {
           if (settled) return;
           settled = true;
+          clearTimeout(completionTimer);
           chrome.downloads.onChanged.removeListener(onChanged);
           sendResponse(result);
         };
@@ -6517,7 +6529,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
         // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
         const timeoutMs = saveAs ? 300000 : 15000;
-        setTimeout(() => finish({ ok: true, saved: true }), timeoutMs);
+        completionTimer = setTimeout(
+          () => finish({ ok: false, saved: false, reason: "timeout" }),
+          timeoutMs,
+        );
       });
     } catch {
       sendResponse({ ok: false, reason: "exception" });

@@ -504,7 +504,13 @@
       const videoNo = pageKey.slice(6);
       if (videoChannelCache.has(videoNo)) return videoChannelCache.get(videoNo);
       const fromApi = await fetchChannelIdFromApi(videoNo);
-      if (fromApi) videoChannelCache.set(videoNo, fromApi);
+      if (fromApi) {
+        videoChannelCache.set(videoNo, fromApi);
+        // 오디오 믹서와 같은 탭 내 상한. 채널 설정 저장소는 변경하지 않는다.
+        while (videoChannelCache.size > 300) {
+          videoChannelCache.delete(videoChannelCache.keys().next().value);
+        }
+      }
       return fromApi;
     }
     return null;
@@ -953,7 +959,7 @@
     )
       return;
     const video = appliedVideo || findVideo();
-    if (!video) return;
+    if (!video?.isConnected) return;
     if (frameMon.video !== video) resetFrameSample(video);
     scheduleNextFrameSample();
   }
@@ -968,7 +974,11 @@
 
   function sampleVideoFrameQuality() {
     const video = appliedVideo || findVideo();
-    if (!video || video !== frameMon.video) {
+    if (!video?.isConnected) {
+      stopFrameMonitor();
+      return;
+    }
+    if (video !== frameMon.video) {
       resetFrameSample(video);
       scheduleNextFrameSample();
       return;
@@ -3290,7 +3300,6 @@
       stopObserver();
       stopFrameMonitor();
     },
-    { once: true },
   );
 
   startObserver();

@@ -1053,6 +1053,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-video-filter-global-default-mode]),
 .settings-item:has([data-player-button-order]),
 .settings-item:has([data-chat-time-format]),
+.settings-item:has([data-affinity-order]),
 .settings-item:has(.settings-custom-row [data-search-rerank-w-rel]),
 .settings-item:has([data-follow-preview-hide-part]),
 .settings-item:has([data-popup-player-audio]),
@@ -1134,6 +1135,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-segmented[data-live-viewer-count-position],
 .settings-item [data-update-notice-mode],
+.settings-item [data-affinity-order],
 .settings-item [data-cf-section-order],
 .settings-item [data-update-notice-duration] {
   width: 100%;
@@ -2789,6 +2791,52 @@ body > .clr-picker .clr-preview {
   line-height: 1.5;
 }
 
+.settings-word-filter-search input[type="search"] {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-size: 12px;
+}
+
+.settings-word-filter-search input[type="search"]:focus {
+  border-color: var(--popup-brand-strong);
+}
+
+.settings-word-filter-search input[type="search"]::placeholder {
+  color: var(--popup-muted);
+}
+
+.settings-word-filter-notice {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  color: var(--popup-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-word-filter-notice[data-level="danger"] {
+  border-color: var(--popup-alert, #e5484d);
+  background: var(--popup-alert-bg, rgba(229, 72, 77, 0.12));
+  color: var(--popup-alert-text, #c4262d);
+}
+
+.settings-word-filter-count {
+  margin: 0;
+  color: var(--popup-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .settings-word-filter-list {
   display: flex;
   flex-direction: column;
@@ -3027,4 +3075,99 @@ body > .clr-picker .clr-preview {
   border-color: #d64535;
   color: #fff;
   font-weight: 700;
+}
+
+/* 제외할 봇 목록. 기존 메모 관리 UI 와 같은 토큰을 쓴다. */
+.settings-bot-input {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+.settings-bot-input input {
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  color: inherit;
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+.settings-bot-input button {
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.settings-bot-input button:disabled,
+.settings-bot-input input:disabled {
+  color: var(--popup-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.settings-bot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  width: 100%;
+}
+.settings-bot-chip {
+  align-items: center;
+  background: var(--popup-soft-bg);
+  border: 1px solid var(--popup-border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
+}
+.settings-bot-chip button {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: var(--popup-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+}
+.settings-bot-chip button:hover {
+  color: inherit;
+}
+/* 상위 옵션이 꺼져 있으면 흐리게 — 잠긴 다른 하위 항목과 같은 처리. */
+[data-role-bot-row].is-locked {
+  opacity: 0.55;
+}
+
+/* 차단 이모티콘 칩: URL 항목은 그림 + 파일명으로 보여 준다. */
+.settings-emoticon-thumb {
+  border-radius: 3px;
+  flex: none;
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
+}
+.settings-emoticon-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 친밀도 지표 중요도 — '목록 배치 순서'(cf-fav-order-list)와 같은 UI 를 쓴다.
+   가중치 배지만 덧붙인다. */
+.cf-fav-order-weight {
+  color: var(--popup-muted);
+  flex: none;
+  font-size: 11px;
+  margin-left: 6px;
+}
+[data-affinity-sub].is-locked {
+  opacity: 0.55;
 }

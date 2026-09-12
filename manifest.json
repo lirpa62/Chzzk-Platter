@@ -78,6 +78,8 @@
         "src/searchQuery.js",
         "src/chatRecapStore.js",
         "src/chatActivityAnalysis.js",
+        "src/channelAffinity.js",
+        "src/channelAffinityData.js",
         "src/content.js",
         "src/subscribeBadge.js"
       ],

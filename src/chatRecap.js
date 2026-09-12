@@ -2996,12 +2996,24 @@
     };
   }
 
+  // ⚠ 크롬 chrome.downloads 는 파일명에 보이지 않는 문자가 섞이면
+  //   'Invalid filename' 으로 저장을 시작하지 않는다(제보: 방송 제목에
+  //   ZWJ 로 이은 이모지가 있을 때 실패). 스크린샷과 같은 규칙을 쓴다.
+  //   이모지 자체는 살려 둔다 — 보이지 않는 서식문자만 걷어낸다.
   function exportFilePart(text) {
-    return String(text || "chat-recap")
-      .trim()
-      .replace(/[\\/:*?"<>|]+/g, "-")
-      .replace(/\s+/g, "-")
-      .slice(0, 70);
+    return (
+      String(text || "chat-recap")
+        .trim()
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\u0000-\u001f\u007f]/g, "")
+        .replace(/\p{Cf}/gu, "") // ZWJ·방향지정 등
+        .replace(/[\\/:*?"<>|]+/g, "-")
+        .replace(/\s+/g, "-")
+        .slice(0, 70)
+        // ⚠ slice 는 UTF-16 코드유닛 기준이라 이모지를 반으로 가를 수 있다.
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+        .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "") || "chat-recap"
+    );
   }
 
   function showExportStatus(message, error = false) {
@@ -3089,18 +3101,41 @@
     }
   }
 
+  // 파일명 때문에 거부당했는가. 문구가 크롬 버전·로캘에 따라 달라질 수 있어
+  //   'Invalid filename' 외의 표현도 함께 본다.
+  function isExportFilenameError(message) {
+    return /invalid.*filename|filename.*invalid|파일\s*이름|잘못된.*파일/i.test(
+      String(message || ""),
+    );
+  }
+
   async function downloadExportBlob(blob, title) {
     const url = URL.createObjectURL(blob);
     const day = new Date().toISOString().slice(0, 10);
-    const filename = `Cheese-Platter/chat-recap/${day}-${exportFilePart(title)}.png`;
-    await new Promise((resolve, reject) => {
-      chrome.downloads.download({ url, filename, saveAs: false }, (id) => {
-        const error = chrome.runtime.lastError;
-        if (error || id == null)
-          reject(new Error(error?.message || "download-failed"));
-        else resolve(id);
+    const start = (filename, saveAs) =>
+      new Promise((resolve, reject) => {
+        chrome.downloads.download({ url, filename, saveAs }, (id) => {
+          const error = chrome.runtime.lastError;
+          if (error || id == null)
+            reject(new Error(error?.message || "download-failed"));
+          else resolve(id);
+        });
       });
-    }).finally(() => setTimeout(() => URL.revokeObjectURL(url), 1000));
+
+    const filename = `Cheese-Platter/chat-recap/${day}-${exportFilePart(title)}.png`;
+    try {
+      await start(filename, false);
+    } catch (error) {
+      // ⚠ 안전장치: 정리 규칙으로 못 거른 문자가 남아 크롬이 파일명을 거부하면
+      //   조용히 실패하지 않는다. 확실히 안전한 ASCII 이름을 기본값으로 넣고
+      //   '다른 이름으로 저장' 대화상자를 띄워 사용자가 직접 정하게 한다.
+      //   (스크린샷 저장과 같은 방식)
+      if (!isExportFilenameError(error?.message)) throw error;
+      showExportStatus("파일 이름 문제 · 이름을 정해 주세요", true);
+      await start(`Cheese-Platter/chat-recap/${day}-chat-recap.png`, true);
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
   }
 
   async function renderExportImage(target, options = {}) {

@@ -303,6 +303,15 @@
     "videoFilter:presets",
     "videoFilter:globalDefault",
     "hiddenChannels",
+    // ⚠ 프리페치 목록에 없으면 cachedStorageGet 이 빈 값을 돌려준다. 치지직 탭에서
+    //   Alt+클릭으로 차단해도 설정 화면에는 안 보였다(제보).
+    "cheeseChatBlockedEmoticons",
+    "cheeseFollowAffinityOn",
+    "cheeseFollowAffinityOrder",
+    "cheeseFollowAffinityHideOffline",
+    "cheeseFollowAffinityIndex",
+    "cheeseFollowAffinityInitial",
+    "cheeseFollowAffinityMore",
   ];
   let storageCacheData = null;
   const storagePrefetch = (async () => {
@@ -3754,13 +3763,25 @@
   } catch {}
 
   const CHAT_WORD_FILTER_KEY = "cheeseChatWordFilters";
-  const CWF_MAX = 200;
+  // 상한은 저장 용량이 아니라 성능 때문이다 — 채팅 1줄당 규칙 전체를 정규식 매칭하므로
+  // 비용이 규칙 수에 선형으로 늘어난다. content.js 의 CHAT_WORD_FILTER_MAX 와 같은 값을
+  // 유지해야 한다(한쪽만 올리면 저장은 되는데 적용은 안 되는 조용한 버그가 된다).
+  const CWF_MAX = 2000;
+  // 이 개수를 넘으면 채팅이 많은 방송에서 체감될 수 있다고 미리 알린다(차단은 안 함).
+  const CWF_NOTICE_AT = 300;
   let chatWordFilters = [];
   const cwfInput = document.querySelector("[data-cwf-input]");
   const cwfRegex = document.querySelector("[data-cwf-regex]");
   const cwfAdd = document.querySelector("[data-cwf-add]");
   const cwfList = document.querySelector("[data-cwf-list]");
   const cwfError = document.querySelector("[data-cwf-error]");
+  const cwfCount = document.querySelector("[data-cwf-count]");
+  const cwfNotice = document.querySelector("[data-cwf-notice]");
+  const cwfSearch = document.querySelector("[data-cwf-search]");
+  const cwfSearchRow = document.querySelector("[data-cwf-search-row]");
+  // 규칙이 이만큼 쌓이면 목록에서 찾기 어려워지므로 검색칸을 노출한다.
+  const CWF_SEARCH_AT = 20;
+  let cwfQuery = "";
 
   function cwfShowError(message) {
     if (!cwfError) return;
@@ -3768,15 +3789,59 @@
     cwfError.hidden = !message;
   }
 
+  // 규칙 개수와 성능 안내를 갱신한다. 안내는 '느려질 수 있다'는 고지일 뿐 추가를 막지
+  // 않는다 — 실제 비용은 개수보다 패턴 모양(중첩 반복 등)에 더 크게 좌우된다.
+  function cwfUpdateStatus() {
+    const n = chatWordFilters.length;
+    if (cwfCount) {
+      cwfCount.textContent = `${n.toLocaleString("ko-KR")} / ${CWF_MAX.toLocaleString("ko-KR")}개`;
+    }
+    if (!cwfNotice) return;
+    if (n >= CWF_MAX) {
+      cwfNotice.textContent = `상한(${CWF_MAX.toLocaleString("ko-KR")}개)에 도달했습니다. 더 추가하려면 쓰지 않는 규칙을 먼저 지워주세요.`;
+      cwfNotice.dataset.level = "danger";
+      cwfNotice.hidden = false;
+      return;
+    }
+    if (n >= CWF_NOTICE_AT) {
+      cwfNotice.textContent = `규칙이 ${n.toLocaleString("ko-KR")}개입니다. 채팅 한 줄마다 규칙 전체를 검사하므로, 채팅이 빠른 방송에서는 느려질 수 있습니다. 복잡한 정규식일수록 영향이 큽니다.`;
+      cwfNotice.dataset.level = "warn";
+      cwfNotice.hidden = false;
+      return;
+    }
+    cwfNotice.hidden = true;
+  }
+
   function cwfRender() {
+    cwfUpdateStatus();
+    // 검색칸은 규칙이 충분히 쌓였을 때만 보인다. 숨길 때는 검색어도 비워, 다시 나타날 때
+    // 예전 검색어로 걸러진 목록이 보이는 일을 막는다.
+    if (cwfSearchRow) {
+      const showSearch = chatWordFilters.length >= CWF_SEARCH_AT;
+      cwfSearchRow.hidden = !showSearch;
+      if (!showSearch && cwfQuery) {
+        cwfQuery = "";
+        if (cwfSearch) cwfSearch.value = "";
+      }
+    }
     if (!cwfList) return;
     if (!chatWordFilters.length) {
       cwfList.innerHTML = `<li class="settings-word-filter-empty">등록된 규칙이 없습니다.</li>`;
       return;
     }
-    cwfList.innerHTML = chatWordFilters
+    const q = cwfQuery.toLowerCase();
+    // ⚠ data-cwf-remove 는 chatWordFilters 의 '원본 인덱스'다. 검색으로 걸러 그릴 때
+    // 보이는 순번을 쓰면 엉뚱한 규칙이 지워지므로 원본 인덱스를 그대로 유지한다.
+    const rows = chatWordFilters
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => !q || f.pattern.toLowerCase().includes(q));
+    if (!rows.length) {
+      cwfList.innerHTML = `<li class="settings-word-filter-empty">검색 결과가 없습니다.</li>`;
+      return;
+    }
+    cwfList.innerHTML = rows
       .map(
-        (f, i) =>
+        ({ f, i }) =>
           `<li class="settings-word-filter-item">` +
           `<span class="settings-word-filter-kind">${f.regex ? ".*" : "가나"}</span>` +
           `<span class="settings-word-filter-pattern">${escapeHtml(f.pattern)}</span>` +
@@ -3808,7 +3873,9 @@
       }
     }
     if (chatWordFilters.length >= CWF_MAX) {
-      cwfShowError(`규칙은 최대 ${CWF_MAX}개까지 등록할 수 있습니다.`);
+      cwfShowError(
+        `규칙은 최대 ${CWF_MAX.toLocaleString("ko-KR")}개까지 등록할 수 있습니다.`,
+      );
       return;
     }
     const dup = chatWordFilters.some(
@@ -3824,6 +3891,11 @@
     cwfRender();
     cwfSave();
   }
+
+  cwfSearch?.addEventListener("input", () => {
+    cwfQuery = String(cwfSearch.value || "").trim();
+    cwfRender();
+  });
 
   cwfAdd?.addEventListener("click", cwfAddCurrent);
   cwfInput?.addEventListener("keydown", (e) => {
@@ -5139,8 +5211,26 @@
     groups: "그룹",
     favorites: "즐겨찾기",
     following: "팔로잉",
+    affinity: "친밀도",
   };
+  // ⚠ 저장 형식이 '이름 붙은 6조합' 이라 네 번째 섹션을 담을 수 없다(24조합이 된다).
+  //   친밀도는 '몇 번째에 끼울지'만 따로 저장하고, 기존 3섹션 키는 그대로 둔다.
+  const CF_AFFINITY_INDEX_KEY = "cheeseFollowAffinityIndex";
+  let cfAffinityIndex = 0; // 0 = 맨 위
+  let cfAffinityOn = false; // 꺼져 있으면 순서 목록에 넣지 않는다
   let cfSectionOrder = CF_SECTION_ORDERS["groups-first"];
+
+  async function loadCfAffinityIndex() {
+    try {
+      const data = await cachedStorageGet(CF_AFFINITY_INDEX_KEY);
+      const n = Number(data?.[CF_AFFINITY_INDEX_KEY]);
+      // 0~3 만 의미가 있다(3섹션 사이 네 자리).
+      cfAffinityIndex = Number.isInteger(n) && n >= 0 && n <= 3 ? n : 0;
+    } catch {
+      cfAffinityIndex = 0;
+    }
+  }
+  void loadCfAffinityIndex();
 
   // 순서 배열 → 저장할 키. 6개 조합이 전부 정의돼 있어 항상 하나가 맞는다.
   function cfSectionOrderToKey(order) {
@@ -5155,9 +5245,10 @@
   function renderCfSectionOrder() {
     const listEl = document.getElementById("cfSectionOrderList");
     if (!listEl) return;
-    listEl.innerHTML = cfSectionOrder
+    const display = cfDisplayOrder();
+    listEl.innerHTML = display
       .map((key, i) => {
-        const last = i === cfSectionOrder.length - 1;
+        const last = i === display.length - 1;
         return (
           `<li class="cf-fav-order-item" draggable="true" data-id="${key}">` +
           `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
@@ -5179,15 +5270,36 @@
     } catch {}
   }
 
-  function moveCfSection(key, dir) {
-    const i = cfSectionOrder.indexOf(key);
-    const j = dir === "up" ? i - 1 : i + 1;
-    if (i < 0 || j < 0 || j >= cfSectionOrder.length) return;
-    const next = [...cfSectionOrder];
-    [next[i], next[j]] = [next[j], next[i]];
-    cfSectionOrder = next;
-    renderCfSectionOrder();
+  // 화면에 보여 줄 순서 = 기본 3섹션에 친밀도를 cfAffinityIndex 자리에 끼운 것.
+  function cfDisplayOrder() {
+    if (!cfAffinityOn) return [...cfSectionOrder];
+    const out = [...cfSectionOrder];
+    out.splice(Math.min(cfAffinityIndex, out.length), 0, "affinity");
+    return out;
+  }
+
+  // 합친 순서 → 저장. 친밀도는 위치만, 나머지는 기존 키 그대로.
+  function saveCfDisplayOrder(display) {
+    const base = display.filter((k) => k !== "affinity");
+    const index = display.indexOf("affinity");
+    cfSectionOrder = base;
+    if (index >= 0) cfAffinityIndex = index;
     saveCfSectionOrder();
+    if (index >= 0) {
+      try {
+        cachedStorageSet({ [CF_AFFINITY_INDEX_KEY]: cfAffinityIndex });
+      } catch {}
+    }
+  }
+
+  function moveCfSection(key, dir) {
+    const display = cfDisplayOrder();
+    const i = display.indexOf(key);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= display.length) return;
+    [display[i], display[j]] = [display[j], display[i]];
+    saveCfDisplayOrder(display);
+    renderCfSectionOrder();
   }
 
   function setupCfSectionOrderEditor() {
@@ -5240,11 +5352,14 @@
       const next = [...listEl.querySelectorAll(".cf-fav-order-item")].map(
         (li) => li.dataset.id,
       );
-      if (next.length !== cfSectionOrder.length) return;
-      const changed = next.some((k, i) => k !== cfSectionOrder[i]);
-      cfSectionOrder = next;
+      // ⚠ 친밀도가 켜져 있으면 목록이 4칸이다. 기존 3칸 기준으로 비교하면
+      //   항상 길이가 안 맞아 드래그가 저장되지 않는다.
+      const before = cfDisplayOrder();
+      if (next.length !== before.length) return;
+      const changed = next.some((k, i) => k !== before[i]);
+      saveCfDisplayOrder(next);
       renderCfSectionOrder(); // 화살표 비활성 상태 갱신
-      if (changed) saveCfSectionOrder();
+      if (!changed) return;
     };
     listEl.addEventListener("drop", (e) => {
       if (!dragEl) return;
@@ -8431,6 +8546,456 @@
   });
   vodChatGraphInput?.addEventListener("change", syncVodChatGraphAutoLock);
   loadVodChatGraphAuto();
+
+  // ── 방장·매니저 채팅(기본 ON) + 제외할 봇 목록 ─────────────────────────────
+  const VOD_ROLE_CHAT_KEY = "cheeseVodRoleChatOn";
+  const VOD_ROLE_BOTS_KEY = "cheeseVodRoleChatBots";
+  // ⚠ content.js 와 같은 값을 유지해야 한다(설정을 한 번도 건드리지 않은 이용자와
+  //   '기본값으로'를 누른 이용자가 같은 목록을 보게 된다).
+  const DEFAULT_ROLE_BOTS = [
+    "빵떡",
+    "뚜봇",
+    "뚜이봇",
+    "뚜삼봇",
+    "뚜사봇",
+    "뚜오봇",
+    "뚜육봇",
+    "뚜칠봇",
+    "뚜팔봇",
+    "뚜구봇",
+    "나디아 봇",
+    "다람쥐 봇",
+    "악몽봇",
+    "쁘띠봇",
+    "화릴봇",
+    "스텔라이브 봇",
+    "픽셀봇",
+    "인챈트 봇",
+  ];
+  const vodRoleChatInput = document.querySelector("[data-vod-role-chat]");
+  const roleBotRow = document.querySelector("[data-role-bot-row]");
+  const roleBotList = document.querySelector("[data-role-bot-list]");
+  const roleBotInput = document.querySelector("[data-role-bot-input]");
+  const roleBotAdd = document.querySelector("[data-role-bot-add]");
+  const roleBotReset = document.querySelector("[data-role-bot-reset]");
+  let roleBots = [...DEFAULT_ROLE_BOTS];
+
+  // ⚠ 채팅 활성도와 독립이다. 예전에는 활성도 팝오버 안에 있어서 함께 잠갔지만
+  //   지금은 별도 버튼·별도 저장이라 자기 토글만 본다.
+  function syncRoleBotLock() {
+    const on = vodRoleChatInput?.checked === true;
+    if (roleBotRow) roleBotRow.classList.toggle("is-locked", !on);
+    for (const el of [roleBotInput, roleBotAdd, roleBotReset]) {
+      if (el) el.disabled = !on;
+    }
+  }
+
+  function renderRoleBots() {
+    if (!roleBotList) return;
+    if (!roleBots.length) {
+      roleBotList.innerHTML =
+        '<p class="settings-memo-empty">제외할 봇이 없습니다.</p>';
+      return;
+    }
+    roleBotList.innerHTML = roleBots
+      .map(
+        (name, index) =>
+          `<span class="settings-bot-chip">${escapeHtml(name)}` +
+          `<button type="button" data-role-bot-remove="${index}" ` +
+          `aria-label="${escapeHtml(name)} 삭제">✕</button></span>`,
+      )
+      .join("");
+  }
+
+  function saveRoleBots() {
+    try {
+      cachedStorageSet({ [VOD_ROLE_BOTS_KEY]: roleBots });
+    } catch {}
+  }
+
+  function addRoleBot() {
+    const name = String(roleBotInput?.value || "").trim();
+    if (!name) return;
+    // 공백만 다른 이름은 같은 것으로 본다("나디아 봇" / "나디아봇").
+    const key = name.replace(/\s+/g, "").toLowerCase();
+    if (roleBots.some((x) => x.replace(/\s+/g, "").toLowerCase() === key)) {
+      if (roleBotInput) roleBotInput.value = "";
+      return;
+    }
+    roleBots.push(name);
+    if (roleBotInput) roleBotInput.value = "";
+    renderRoleBots();
+    saveRoleBots();
+  }
+
+  async function loadVodRoleChat() {
+    let on = true;
+    try {
+      const data = await cachedStorageGet([
+        VOD_ROLE_CHAT_KEY,
+        VOD_ROLE_BOTS_KEY,
+      ]);
+      on = data?.[VOD_ROLE_CHAT_KEY] !== false; // 기본 ON
+      const stored = data?.[VOD_ROLE_BOTS_KEY];
+      // ⚠ 빈 배열은 '전부 지웠다'는 뜻이라 기본값으로 되돌리지 않는다.
+      roleBots = Array.isArray(stored)
+        ? stored.map((x) => String(x || "").trim()).filter(Boolean)
+        : [...DEFAULT_ROLE_BOTS];
+    } catch {}
+    if (vodRoleChatInput) vodRoleChatInput.checked = on;
+    renderRoleBots();
+    syncRoleBotLock();
+  }
+
+  vodRoleChatInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [VOD_ROLE_CHAT_KEY]: vodRoleChatInput.checked });
+    } catch {}
+    syncRoleBotLock();
+  });
+  roleBotAdd?.addEventListener("click", addRoleBot);
+  roleBotInput?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault(); // 설정 폼이 통째로 제출되지 않게 한다
+    addRoleBot();
+  });
+  roleBotList?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-role-bot-remove]");
+    if (!btn) return;
+    const index = Number(btn.dataset.roleBotRemove);
+    if (!Number.isInteger(index)) return;
+    roleBots.splice(index, 1);
+    renderRoleBots();
+    saveRoleBots();
+  });
+  roleBotReset?.addEventListener("click", () => {
+    roleBots = [...DEFAULT_ROLE_BOTS];
+    renderRoleBots();
+    saveRoleBots();
+  });
+  loadVodRoleChat();
+
+  // ── 전용 팔로잉 '친밀도' 목록 ────────────────────────────────────────────
+  const AFFINITY_ON_KEY = "cheeseFollowAffinityOn";
+  const AFFINITY_ORDER_KEY = "cheeseFollowAffinityOrder";
+  const AFFINITY_HIDE_OFFLINE_KEY = "cheeseFollowAffinityHideOffline";
+  // content.js 와 같은 기본 순서를 유지해야 한다.
+  const AFFINITY_METRICS = [
+    ["logPower", "통나무파워"],
+    ["donation", "후원 횟수"],
+    ["chat", "내 채팅"],
+    ["subscribe", "구독 개월"],
+  ];
+  const affinityOnInput = document.querySelector("[data-affinity-on]");
+  const affinityHideOfflineInput = document.querySelector(
+    "[data-affinity-hide-offline]",
+  );
+  const affinityOrderList = document.querySelector("[data-affinity-order]");
+  const affinityInitialInput = document.querySelector(
+    "[data-affinity-initial]",
+  );
+  const affinityMoreInput = document.querySelector("[data-affinity-more]");
+  const AFFINITY_INITIAL_KEY = "cheeseFollowAffinityInitial";
+  const AFFINITY_MORE_KEY = "cheeseFollowAffinityMore";
+  const AFFINITY_COUNT_MAX = 10;
+  const affinitySubRows = document.querySelectorAll("[data-affinity-sub]");
+  let affinityOrder = AFFINITY_METRICS.map(([k]) => k);
+
+  // content.js 와 같은 규칙(1~10).
+  function sanitizeAffinityCount(value, fallback) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n >= 1 && n <= AFFINITY_COUNT_MAX
+      ? n
+      : fallback;
+  }
+
+  function sanitizeAffinityOrder(value) {
+    const known = new Set(AFFINITY_METRICS.map(([k]) => k));
+    const seen = new Set();
+    const out = [];
+    for (const key of Array.isArray(value) ? value : []) {
+      const k = String(key || "");
+      if (known.has(k) && !seen.has(k)) {
+        seen.add(k);
+        out.push(k);
+      }
+    }
+    // ⚠ 빠진 지표를 버리면 가중치 0 이 되어 조용히 무시된다. 뒤에 채워 넣는다.
+    for (const [k] of AFFINITY_METRICS) if (!seen.has(k)) out.push(k);
+    return out;
+  }
+
+  // 목록 배치 순서(cfSectionOrderList)와 같은 마크업을 쓴다.
+  function renderAffinityOrder() {
+    if (!affinityOrderList) return;
+    const label = Object.fromEntries(AFFINITY_METRICS);
+    affinityOrderList.innerHTML = affinityOrder
+      .map((key, i) => {
+        const last = i === affinityOrder.length - 1;
+        // 가중치는 '남은 개수 - 순번'. 4개면 4·3·2·1.
+        const weight = affinityOrder.length - i;
+        return (
+          `<li class="cf-fav-order-item" data-id="${escapeHtml(key)}">` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-name">${escapeHtml(label[key] || key)}</span>` +
+          `<small class="cf-fav-order-weight">×${weight}</small>` +
+          `<span class="cf-fav-order-btns">` +
+          `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" class="cf-fav-order-down" data-dir="down" aria-label="아래로" title="아래로"${last ? " disabled" : ""}>↓</button>` +
+          `</span></li>`
+        );
+      })
+      .join("");
+  }
+
+  function syncAffinityLock() {
+    const on = affinityOnInput?.checked === true;
+    affinitySubRows.forEach((row) => row.classList.toggle("is-locked", !on));
+    if (affinityHideOfflineInput) affinityHideOfflineInput.disabled = !on;
+    if (affinityInitialInput) affinityInitialInput.disabled = !on;
+    if (affinityMoreInput) affinityMoreInput.disabled = !on;
+    affinityOrderList?.querySelectorAll("button").forEach((b) => {
+      if (!on) b.disabled = true;
+    });
+  }
+
+  async function loadAffinity() {
+    let on = false;
+    let hideOffline = false;
+    try {
+      const data = await cachedStorageGet([
+        AFFINITY_ON_KEY,
+        AFFINITY_ORDER_KEY,
+        AFFINITY_HIDE_OFFLINE_KEY,
+        AFFINITY_INITIAL_KEY,
+        AFFINITY_MORE_KEY,
+      ]);
+      on = data?.[AFFINITY_ON_KEY] === true;
+      hideOffline = data?.[AFFINITY_HIDE_OFFLINE_KEY] === true;
+      affinityOrder = sanitizeAffinityOrder(data?.[AFFINITY_ORDER_KEY]);
+      if (affinityInitialInput) {
+        affinityInitialInput.value = String(
+          sanitizeAffinityCount(data?.[AFFINITY_INITIAL_KEY], 3),
+        );
+      }
+      if (affinityMoreInput) {
+        affinityMoreInput.value = String(
+          sanitizeAffinityCount(data?.[AFFINITY_MORE_KEY], 3),
+        );
+      }
+    } catch {}
+    if (affinityOnInput) affinityOnInput.checked = on;
+    if (affinityHideOfflineInput)
+      affinityHideOfflineInput.checked = hideOffline;
+    renderAffinityOrder();
+    syncAffinityLock();
+    // 순서 편집기에 '친밀도' 칸을 넣거나 뺀다.
+    cfAffinityOn = on;
+    renderCfSectionOrder();
+  }
+
+  affinityOnInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [AFFINITY_ON_KEY]: affinityOnInput.checked });
+    } catch {}
+    syncAffinityLock();
+    cfAffinityOn = affinityOnInput.checked;
+    renderCfSectionOrder();
+  });
+  affinityHideOfflineInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [AFFINITY_HIDE_OFFLINE_KEY]: affinityHideOfflineInput.checked,
+      });
+    } catch {}
+  });
+  affinityOrderList?.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-dir]");
+    if (!btn || btn.disabled) return;
+    const key = btn.closest("[data-id]")?.dataset.id;
+    const i = affinityOrder.indexOf(key);
+    const j = btn.dataset.dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= affinityOrder.length) return;
+    const next = [...affinityOrder];
+    [next[i], next[j]] = [next[j], next[i]];
+    affinityOrder = next;
+    renderAffinityOrder();
+    syncAffinityLock();
+    try {
+      cachedStorageSet({ [AFFINITY_ORDER_KEY]: affinityOrder });
+    } catch {}
+  });
+  // ⚠ change 에서만 저장한다. input 마다 저장하면 타이핑 중간값(예: 1 → 12 의 '1')이
+  //   저장돼 목록이 깜빡인다.
+  const bindAffinityCount = (input, key, fallback) => {
+    input?.addEventListener("change", () => {
+      const next = sanitizeAffinityCount(input.value, fallback);
+      input.value = String(next); // 범위 밖 입력을 되돌려 보여 준다
+      try {
+        cachedStorageSet({ [key]: next });
+      } catch {}
+    });
+  };
+  bindAffinityCount(affinityInitialInput, AFFINITY_INITIAL_KEY, 3);
+  bindAffinityCount(affinityMoreInput, AFFINITY_MORE_KEY, 3);
+
+  if (affinityOnInput) void loadAffinity();
+
+  // ── 채팅 이모티콘 차단 목록 ────────────────────────────────────────────────
+  // Alt+클릭으로 추가된 목록을 여기서 확인·편집한다. 저장 키는 content.js 와 공유.
+  const CHAT_BLOCKED_EMOTICONS_KEY = "cheeseChatBlockedEmoticons";
+  const CHAT_BLOCKED_EMOTICONS_MAX = 300;
+  const emoBlockRow = document.querySelector("[data-emoticon-block-row]");
+  const emoBlockList = document.querySelector("[data-emoticon-block-list]");
+  const emoBlockInput = document.querySelector("[data-emoticon-block-input]");
+  const emoBlockAdd = document.querySelector("[data-emoticon-block-add]");
+  const emoBlockClear = document.querySelector("[data-emoticon-block-clear]");
+  let blockedEmoticons = [];
+
+  // content.js·chatTimestamp.js 와 같은 규칙(선택자 안전).
+  // 채팅 스트림 이모티콘은 alt 가 없어 "url:https://..." 형태로도 저장된다.
+  const sanitizeEmoticonKey = (value) => {
+    const raw = String(value || "").trim();
+    if (raw.startsWith("url:")) {
+      const url = raw.slice(4);
+      return /^https:\/\/[\w.-]+\/[^"'\s]*$/.test(url) ? raw : "";
+    }
+    const key = raw.replace(/^\{:|:\}$/g, "");
+    return /^[A-Za-z0-9_]{1,64}$/.test(key) ? key : "";
+  };
+
+  function renderBlockedEmoticons() {
+    if (!emoBlockList) return;
+    if (!blockedEmoticons.length) {
+      emoBlockList.innerHTML =
+        '<p class="settings-memo-empty">차단한 이모티콘이 없습니다.</p>';
+      return;
+    }
+    emoBlockList.innerHTML = blockedEmoticons
+      .map((key, index) => {
+        // URL 항목은 그대로 두면 칩이 한 줄을 다 먹는다. 그림과 파일명만 보여 준다.
+        const isUrl = key.startsWith("url:");
+        const url = isUrl ? key.slice(4) : "";
+        // ⚠ URL 항목의 파일명은 이모티콘 키와 다르다(d_42 → b_02.gif). 파일명을
+        //   키처럼 보여 주면 그 이름으로 다시 입력했을 때 안 먹혀 혼란스럽다.
+        //   그림을 보여 주는 게 목적이므로 이름은 '이미지'로만 표시한다.
+        const label = isUrl
+          ? decodeURIComponent(url.split("/").pop() || url).replace(
+              /\.(?:gif|png|webp|jpe?g)$/i,
+              "",
+            )
+          : key;
+        const shown = isUrl ? `이미지 (${label})` : label;
+        const thumb = isUrl
+          ? `<img class="settings-emoticon-thumb" src="${escapeHtml(url)}" alt="" ` +
+            `width="20" height="20" loading="lazy">`
+          : "";
+        return (
+          `<span class="settings-bot-chip" title="${escapeHtml(isUrl ? url : label)}">` +
+          thumb +
+          `<span class="settings-emoticon-name">${escapeHtml(shown)}</span>` +
+          `<button type="button" data-emoticon-block-remove="${index}" ` +
+          `aria-label="${escapeHtml(label)} 차단 해제">✕</button></span>`
+        );
+      })
+      .join("");
+  }
+
+  function saveBlockedEmoticons() {
+    try {
+      cachedStorageSet({ [CHAT_BLOCKED_EMOTICONS_KEY]: blockedEmoticons });
+    } catch {}
+  }
+
+  function addBlockedEmoticon() {
+    const key = sanitizeEmoticonKey(emoBlockInput?.value);
+    if (emoBlockInput) emoBlockInput.value = "";
+    if (!key || blockedEmoticons.includes(key)) return;
+    if (blockedEmoticons.length >= CHAT_BLOCKED_EMOTICONS_MAX) return;
+    blockedEmoticons.push(key);
+    renderBlockedEmoticons();
+    saveBlockedEmoticons();
+  }
+
+  async function loadBlockedEmoticons() {
+    try {
+      const data = await cachedStorageGet(CHAT_BLOCKED_EMOTICONS_KEY);
+      const list = data?.[CHAT_BLOCKED_EMOTICONS_KEY];
+      blockedEmoticons = (Array.isArray(list) ? list : [])
+        .map(sanitizeEmoticonKey)
+        .filter(Boolean)
+        .slice(0, CHAT_BLOCKED_EMOTICONS_MAX);
+    } catch {
+      blockedEmoticons = [];
+    }
+    renderBlockedEmoticons();
+  }
+
+  emoBlockAdd?.addEventListener("click", addBlockedEmoticon);
+  emoBlockInput?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault(); // 설정 폼이 통째로 제출되지 않게
+    addBlockedEmoticon();
+  });
+  emoBlockList?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-emoticon-block-remove]");
+    if (!btn) return;
+    const index = Number(btn.dataset.emoticonBlockRemove);
+    if (!Number.isInteger(index)) return;
+    blockedEmoticons.splice(index, 1);
+    renderBlockedEmoticons();
+    saveBlockedEmoticons();
+  });
+  emoBlockClear?.addEventListener("click", () => {
+    if (!blockedEmoticons.length) return;
+    blockedEmoticons = [];
+    renderBlockedEmoticons();
+    saveBlockedEmoticons();
+  });
+  // ⚠ 설정 화면은 열 때 읽은 캐시로 그린다. Alt+클릭 차단은 치지직 탭에서
+  //   일어나므로, 저장소 변화를 듣지 않으면 이 목록에 영영 안 나타난다(제보).
+  //   설정 창을 열어 둔 채 차단해도 바로 보이게 한다.
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || !changes[CHAT_BLOCKED_EMOTICONS_KEY]) return;
+      const list = changes[CHAT_BLOCKED_EMOTICONS_KEY].newValue;
+      blockedEmoticons = (Array.isArray(list) ? list : [])
+        .map(sanitizeEmoticonKey)
+        .filter(Boolean)
+        .slice(0, CHAT_BLOCKED_EMOTICONS_MAX);
+      renderBlockedEmoticons();
+    });
+  } catch {}
+  // '치모티콘 정리'가 설치돼 있으면 Alt+클릭은 그쪽이 처리한다. 열려 있는 치지직
+  //   탭에서 그 확장이 넣는 <style> 을 찾아 안내를 띄운다.
+  // ⚠ 탭이 하나도 없으면 판정할 수 없다 — 그때는 안내를 띄우지 않는다(오해 방지).
+  async function detectCheemoticonCleaner() {
+    const notice = document.querySelector("[data-cheemo-notice]");
+    if (!notice) return;
+    try {
+      const tabs = await new Promise((resolve) =>
+        chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, resolve),
+      );
+      for (const tab of tabs || []) {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () =>
+            Boolean(document.getElementById("cheemoticon-size-style")),
+        });
+        if (res?.result === true) {
+          notice.hidden = false;
+          return;
+        }
+      }
+    } catch {
+      // 권한·탭 문제로 확인하지 못하면 조용히 넘어간다.
+    }
+  }
+
+  if (emoBlockRow) {
+    void loadBlockedEmoticons();
+    void detectCheemoticonCleaner();
+  }
 
   // 다시보기 채팅의 방송 제목 변경 이력 확인(기본 OFF).
   const VOD_TITLE_CHANGES_KEY = "cheeseVodTitleChanges";

@@ -473,6 +473,7 @@
   const SYNC_BUTTON_CLASS = "cheese-live-sync-button";
   const SYNC_MENU_ID = "cheese-live-sync-menu";
   const SYNC_CHECK_MS = 1000; // 버튼 활성/비활성 갱신 주기
+  const SYNC_CATCH_UP_CHECK_MS = 250;
   let SYNC_RATE = 1.5; // 따라잡기 배속(설정으로 변경 가능: 1.2/1.5/2/3)
   // 따라잡기 방식: "rate"=배속으로 서서히(기본) | "jump"=라이브 엣지로 즉시 점프.
   // 제보: "배속 말고 원클릭으로 맨 앞으로 땡기는 방식도 있으면 좋겠다".
@@ -1155,11 +1156,7 @@
   }
 
   function handleGraphBuildFailure(video, err) {
-    stopNormalizerLoop();
-    restoreSourceToDestination();
-    unbindMuteMirror(); // 실패했으면 음소거 미러도 정리(리스너 누수 방지)
-    audio.muteGain = null;
-    audio.connected = false;
+    teardownGraph();
     audio.video = video || null;
     state.enabled = false;
     if (currentPageKey) tabEnabledPageKeys.delete(currentPageKey);
@@ -1200,10 +1197,21 @@
   function teardownGraph() {
     // 리스너는 connected 여부와 무관하게 정리한다(video 교체 시 누수 방지).
     unbindMuteMirror();
-    audio.muteGain = null;
-    if (!audio.connected) return;
     stopNormalizerLoop();
-    restoreSourceToDestination();
+    if (audio.connected || audio.normGain || audio.masterGain || audio.eqFilters.length) {
+      restoreSourceToDestination();
+    }
+    // 구성 도중 실패한 그래프도 정리한다. 소스와 컨텍스트는 원음 재생/재연결에 필요하다.
+    for (const node of audio.eqFilters) {
+      try { node.disconnect(); } catch {}
+    }
+    audio.eqFilters = [];
+    for (const key of [
+      "masterGain", "analyser", "normGain", "comp", "limiter", "outputGain", "muteGain",
+    ]) {
+      try { audio[key]?.disconnect(); } catch {}
+      audio[key] = null;
+    }
     audio.connected = false;
   }
 
@@ -1294,6 +1302,10 @@
         stopNormalizerLoop(); // 내부에서 게인 1 복귀 + 타이머 정리
         return;
       }
+      if (
+        !audio.video?.isConnected || audio.video.paused || audio.video.ended ||
+        audio.ctx?.state !== "running"
+      ) return;
       audio.analyser.getFloatTimeDomainData(buf);
       let sum = 0;
       for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -1342,7 +1354,12 @@
     }
   }
   function recoverMixerForForeground() {
-    if (document.hidden) return;
+    if (document.hidden) {
+      stopMixerObserver();
+      stopSeekBarRender();
+      return;
+    }
+    startMixerObserver();
     resumeAudioForForeground();
     if (isClipEditorContext()) return;
     // 치즈나우 같은 외부 확장이 백그라운드 탭을 만든 경우, 숨겨진 동안 플레이어가
@@ -1352,6 +1369,7 @@
     tick();
     bindVideoAutoEnable();
     maybeAutoEnableMixer();
+    startSeekBarRender();
   }
   document.addEventListener("visibilitychange", recoverMixerForForeground);
   window.addEventListener("pageshow", recoverMixerForForeground);
@@ -5806,12 +5824,21 @@
   //   다운로드를 시작조차 하지 않는다(제보: 특정 방송에서만 저장 실패). 금지문자
   //   치환만으로는 부족해서 아래까지 함께 막는다.
   //     · 제어문자(방송 제목에 섞여 오는 경우가 있다)
+  //     · 보이지 않는 서식문자(\p{Cf}) — ZWJ·방향지정 등
+  //     · 짝이 깨진 서러게이트 — 길이를 자를 때 이모지가 반쪽으로 남는 경우
   //     · 앞뒤 점 — ".." 로 시작하면 상위 경로로 해석된다
   //     · 치환 결과가 비거나 점만 남는 경우
+  //
+  // ⚠ 이모지 자체는 지우지 않는다. 여러 글자를 ZWJ(U+200D)로 이어 만든
+  //   이모지가 문제였다(제보). ZWJ 는 눈에 보이지 않지만 서식문자라
+  //   크롬이 파일명으로 거부한다. ZWJ 만 걷어내면 낱개 이모지로 풀려 보이긴
+  //   하지만 저장은 된다 — 이모지를 통째로 지우는 것보다 낫다.
   function sanitizeScreenshotName(name) {
     const cleaned = String(name || "chzzk")
       // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001f\u007f]/g, "")
+      // 보이지 않는 서식문자(ZWJ·방향지정 등). 크롬이 파일명에서 거부한다.
+      .replace(/\p{Cf}/gu, "")
       .replace(/[\\/:*?"<>|]/g, "_")
       .replace(/\s+/g, " ")
       .trim()
@@ -5820,6 +5847,10 @@
       .replace(/\.+$/, "") // 뒤의 점 제거(윈도우가 거부)
       .trim()
       .slice(0, 120)
+      // ⚠ slice 는 UTF-16 코드유닛 기준이라 이모지 한 자를 반으로 가를 수
+      //   있다. 혼자 남은 서러게이트도 'Invalid filename' 이 된다.
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+      .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
       .trim()
       .replace(/\.+$/, ""); // 잘린 뒤 다시 점으로 끝날 수 있다
     return cleaned || "chzzk";
@@ -5844,7 +5875,8 @@
     const cb = screenshotSaveCallbacks.get(d.reqId);
     if (cb) {
       screenshotSaveCallbacks.delete(d.reqId);
-      cb({
+      window.clearTimeout(cb.timer);
+      cb.done({
         ok: d.ok === true,
         saved: d.saved === true,
         reason: String(d.reason || ""),
@@ -5853,55 +5885,103 @@
     }
   });
 
-  // dataURL을 파일로 저장한다. background의 chrome.downloads(saveAs:false)로 대화상자
+  // Blob을 파일로 저장한다. background의 chrome.downloads(saveAs:false)로 대화상자
   // 없이 바로 저장하고, 실제 완료/취소 결과를 done(result)로 알려준다. done은 선택.
-  function downloadScreenshot(dataURL, name, done) {
+  function downloadScreenshot(blob, name, done, options = {}) {
     const reqId = ++screenshotReqSeq;
+    const forceSaveAs = options.forceSaveAs === true;
     if (typeof done === "function") {
-      screenshotSaveCallbacks.set(reqId, done);
-      // 브릿지/응답이 유실될 경우 대비 타임아웃(20초).
-      window.setTimeout(() => {
-        if (screenshotSaveCallbacks.has(reqId)) {
-          screenshotSaveCallbacks.delete(reqId);
-          done({ ok: false, saved: false, timeout: true });
-        }
-      }, 20000);
+      // 브릿지/응답이 유실될 경우 대비 타임아웃. 대화상자는 사용자가 오래 열어
+      // 둘 수 있어 background의 대화상자 대기(5분)보다 넉넉히 잡는다.
+      const timer = window.setTimeout(
+        () => {
+          if (screenshotSaveCallbacks.has(reqId)) {
+            screenshotSaveCallbacks.delete(reqId);
+            done({ ok: false, saved: false, timeout: true });
+          }
+        },
+        360000, // 실제 저장 대화상자 여부는 content 설정이 결정한다.
+      );
+      screenshotSaveCallbacks.set(reqId, { done, timer });
     }
     window.postMessage(
       {
         source: "cheese-screenshot-save",
         reqId,
-        dataURL,
+        blob,
         filename: `${name}.png`,
+        forceSaveAs,
       },
       BRIDGE_ORIGIN,
     );
   }
 
-  function takeScreenshot() {
+  // 파일명 때문에 실패했는가. 크롬이 주는 문구가 버전·로캘에 따라 달라질 수 있어
+  //   'Invalid filename' 뿐 아니라 파일명을 가리키는 다른 표현도 함께 본다.
+  function isScreenshotFilenameError(result) {
+    if (!result || result.ok === true) return false;
+    const detail = String(result.detail || "");
+    return /invalid.*filename|filename.*invalid|파일\s*이름|잘못된.*파일/i.test(
+      detail,
+    );
+  }
+
+  // ⚠ 안전장치: 정리 규칙으로도 못 거른 문자가 파일명에 남아 크롬이 거부하면,
+  //   조용히 실패하지 말고 '다른 이름으로 저장' 대화상자를 띄워 사용자가 직접
+  //   이름을 정하게 한다. 제목에서 딴 이름 대신 확실히 안전한 이름을 기본값으로
+  //   넣어 준다(대화상자에서 그대로 저장해도 성공하도록).
+  function retryScreenshotWithDialog(blob) {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const safe =
+      `chzzk_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+      `_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    showScreenshotToast(false, "파일 이름 문제 · 이름을 정해 주세요");
+    downloadScreenshot(blob, safe, onScreenshotSaved, { forceSaveAs: true });
+  }
+
+  function encodeScreenshotCanvas(canvas) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("PNG encoding failed"));
+      }, "image/png");
+    }).finally(() => {
+      canvas.width = 0;
+      canvas.height = 0;
+    });
+  }
+
+  let screenshotCaptureBusy = false;
+  async function takeScreenshot() {
+    if (screenshotCaptureBusy) return;
     const video = document.querySelector(".webplayer-internal-video");
-    if (!(video instanceof HTMLVideoElement) || !video.videoWidth) {
+    if (!(video instanceof HTMLVideoElement) || !video.videoWidth || !video.videoHeight) {
       showScreenshotToast(false, "재생 중인 화면이 없어요");
       return;
     }
-    let dataURL;
+    screenshotCaptureBusy = true;
+    const name = screenshotBaseName();
+    const preview = screenshotPreviewOn;
+    const canvas = document.createElement("canvas");
     try {
-      const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("no 2d context");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      dataURL = canvas.toDataURL("image/png"); // taint면 여기서 throw
+      const blob = await encodeScreenshotCanvas(canvas);
+      if (preview) {
+        openScreenshotPreview(blob, name);
+      } else {
+        downloadScreenshot(blob, name, (r) => onScreenshotSaved(r, blob));
+      }
     } catch (err) {
       showScreenshotToast(false, "스크린샷을 만들 수 없어요");
-      return;
-    }
-    const name = screenshotBaseName();
-    if (screenshotPreviewOn) {
-      openScreenshotPreview(dataURL, name); // 저장/취소 확인 팝오버
-    } else {
-      downloadScreenshot(dataURL, name, onScreenshotSaved);
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+      screenshotCaptureBusy = false;
     }
   }
 
@@ -5916,6 +5996,8 @@
     }
     if (result?.timeout) return "응답 없음";
     switch (reason) {
+      case "timeout":
+        return "저장 완료 확인 지연 · 다운로드 목록을 확인해 주세요";
       case "invalid":
         return "이미지 형식 문제";
       case "start-failed":
@@ -5933,18 +6015,30 @@
   }
 
   // 저장 결과에 따라 정확한 토스트. saved=true만 '저장했어요', 취소/실패는 그에 맞게.
-  function onScreenshotSaved(result) {
+  // retryData: 파일명 문제로 실패했을 때 다시 저장할 이미지. 넘기면 안전장치가
+  //   동작한다(대화상자로 재시도). 재시도 자체의 결과에는 넘기지 않아 무한 반복을
+  //   막는다.
+  function onScreenshotSaved(result, retryData) {
     if (result.saved) {
       showScreenshotToast(true, "스크린샷을 저장했어요");
-    } else if (result.ok) {
-      showScreenshotToast(false, "저장을 취소했어요"); // 다운로드 대화상자에서 취소 등
-    } else {
-      const why = screenshotFailReason(result);
-      showScreenshotToast(
-        false,
-        why ? `저장하지 못했어요 (${why})` : "저장하지 못했어요",
-      );
+      return;
     }
+    if (result.ok) {
+      showScreenshotToast(false, "저장을 취소했어요"); // 다운로드 대화상자에서 취소 등
+      return;
+    }
+    // ⚠ 파일명이 문제라면 그냥 실패로 끝내지 않는다. 제목에서 딴 이름에 크롬이
+    //   거부하는 문자가 남아 있어도, 대화상자로 사용자가 이름을 정해 저장할 수
+    //   있게 한 번 더 기회를 준다(제보: 이모지 제목에서 저장 실패).
+    if (retryData && isScreenshotFilenameError(result)) {
+      retryScreenshotWithDialog(retryData);
+      return;
+    }
+    const why = screenshotFailReason(result);
+    showScreenshotToast(
+      false,
+      why ? `저장하지 못했어요 (${why})` : "저장하지 못했어요",
+    );
   }
 
   // ── 저장 전 미리보기 팝오버(드래그 이동 + 리사이즈, 위치·크기 기억) ───────────
@@ -6019,7 +6113,7 @@
     return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
-  function cropScreenshotDataURL(image, crop) {
+  function cropScreenshotBlob(image, crop) {
     const naturalWidth = image.naturalWidth;
     const naturalHeight = image.naturalHeight;
     if (!(naturalWidth > 0) || !(naturalHeight > 0)) {
@@ -6057,10 +6151,10 @@
       canvas.width,
       canvas.height,
     );
-    return canvas.toDataURL("image/png");
+    return encodeScreenshotCanvas(canvas);
   }
 
-  function openScreenshotPreview(dataURL, name) {
+  function openScreenshotPreview(blob, name) {
     closeScreenshotPreview(true); // 이전 미리보기 교체는 취소 아님 → 토스트 안 띄움
     const win = document.createElement("div");
     win.id = SCREENSHOT_MODAL_ID;
@@ -6225,7 +6319,8 @@
     }
 
     image.addEventListener("load", renderCropSelection);
-    image.src = dataURL;
+    const previewURL = URL.createObjectURL(blob);
+    image.src = previewURL;
     cropToggle.addEventListener("click", () => {
       setCropEnabled(!cropEnabled);
     });
@@ -6258,19 +6353,25 @@
     win
       .querySelector(".cheese-screenshot-cancel")
       .addEventListener("click", () => closeScreenshotPreview());
-    saveButton.addEventListener("click", () => {
-      let output = dataURL;
+    saveButton.addEventListener("click", async () => {
+      if (saveButton.disabled) return;
+      saveButton.disabled = true;
+      let output = blob;
       let outputName = name;
       if (cropEnabled) {
         try {
-          output = cropScreenshotDataURL(image, crop);
+          output = await cropScreenshotBlob(image, crop);
           outputName = `${name}_crop`;
         } catch {
-          showScreenshotToast(false, "선택 영역을 만들 수 없어요");
+          if (win.isConnected) showScreenshotToast(false, "선택 영역을 만들 수 없어요");
+          saveButton.disabled = false;
           return;
         }
       }
-      downloadScreenshot(output, outputName, onScreenshotSaved);
+      if (!win.isConnected) return; // 인코딩 중 취소하거나 새 미리보기로 교체됨
+      downloadScreenshot(output, outputName, (r) =>
+        onScreenshotSaved(r, output),
+      );
       closeScreenshotPreview(true); // 저장으로 닫음 → 취소 토스트 안 띄움
     });
 
@@ -6281,7 +6382,11 @@
         : null;
     cropResizeObserver?.observe(body);
     cropResizeObserver?.observe(image);
-    win.__cheeseScreenshotCleanup = () => cropResizeObserver?.disconnect();
+    win.__cheeseScreenshotCleanup = () => {
+      cropResizeObserver?.disconnect();
+      image.removeAttribute("src");
+      URL.revokeObjectURL(previewURL);
+    };
     renderCropSelection();
     bindScreenshotDrag(win, win.querySelector(".cheese-screenshot-win-header"));
     // CSS resize:both 로 크기를 바꾼 뒤 마우스를 놓는 순간(pointerup) 크기 저장.
@@ -7266,8 +7371,14 @@
   }
 
   function startSeekBarRender() {
-    if (seekBarRaf) return;
+    if (seekBarRaf || document.hidden) return;
     const loop = () => {
+      seekBarRaf = 0;
+      const bar = document.querySelector(`.${SEEK_BAR_CLASS}`);
+      if (
+        document.hidden || !liveSeekBarOn || !location.pathname.startsWith("/live/") ||
+        !bar || (!bar.classList.contains("is-visible") && !seekBarDragging)
+      ) return;
       renderSeekBar();
       seekBarRaf = requestAnimationFrame(loop);
     };
@@ -7290,13 +7401,15 @@
     const playhead = bar.querySelector(`.${SEEK_BAR_CLASS}__playhead`);
     const w = getSeekWindow();
     if (!w) {
-      bar.classList.add("is-empty");
-      bar.classList.remove("is-live-edge");
+      if (!bar.classList.contains("is-empty")) bar.classList.add("is-empty");
+      if (bar.classList.contains("is-live-edge")) bar.classList.remove("is-live-edge");
       seekBarLiveEdgeVisual = false;
       seekBarLastVisualP = NaN;
       return;
     }
-    bar.classList.remove("is-empty");
+    // classList.remove도 같은 상태에서 MutationRecord를 만든다. 매 프레임
+    // 상태가 같으면 DOM 쓰기를 생략한다(위치 값의 멱등 검사보다 먼저 실행되는 부분).
+    if (bar.classList.contains("is-empty")) bar.classList.remove("is-empty");
     // 오버레이 폭 전체 = seekable(start~라이브 엣지). playhead는 현재 재생 위치 비율.
     const span = w.end - w.start || 1;
     const behind = Math.max(0, w.end - w.video.currentTime);
@@ -7440,13 +7553,13 @@
     }
   }
 
-  // 버튼 툴팁 텍스트 갱신(지연 숫자 표시). 따라잡는 중엔 rAF 루프가 자주 호출해
-  // 호버 상태에서 숫자가 실시간으로 줄어드는 걸 볼 수 있다.
+  // 표시값이 같으면 텍스트 노드를 교체하지 않아 전역 DOM 옵저버를 깨우지 않는다.
   function setSyncTooltip(btn, lat, { catching = false } = {}) {
     const tip = btn?.querySelector(".pzp-button__tooltip");
     if (!tip) return;
+    let text;
     if (catching) {
-      tip.textContent = Number.isFinite(lat)
+      text = Number.isFinite(lat)
         ? `따라잡는 중… (지연 ${lat.toFixed(1)}초)`
         : "따라잡는 중…";
     } else if (
@@ -7454,12 +7567,13 @@
       (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S)
     ) {
       // 점프 모드는 항상 '이동'이라고 알린다(배속으로 서서히 줄지 않으므로).
-      tip.textContent = `라이브로 이동 (지연 ${formatLatency(lat)})`;
+      text = `라이브로 이동 (지연 ${formatLatency(lat)})`;
     } else {
-      tip.textContent = Number.isFinite(lat)
+      text = Number.isFinite(lat)
         ? `실시간 따라잡기 (지연 ${lat.toFixed(1)}초)`
         : "실시간 따라잡기";
     }
+    if (tip.textContent !== text) tip.textContent = text;
   }
 
   // 지연을 사람이 읽기 쉽게: 60초 미만은 초, 이상은 분:초.
@@ -7477,7 +7591,7 @@
     // 자동 모드 표시(우클릭 메뉴로 토글). 자동이면 버튼에 표식을 둔다.
     btn.classList.toggle("is-auto", autoSyncEnabled);
     if (syncCatchUp) {
-      // 따라잡는 중엔 항상 활성(클릭 시 중단). 툴팁은 rAF 루프가 갱신한다.
+      // 따라잡는 중엔 항상 활성(클릭 시 중단). 툴팁은 따라잡기 타이머가 갱신한다.
       btn.disabled = false;
       btn.classList.add("is-active");
       setSyncIcon(btn, false);
@@ -7543,7 +7657,9 @@
     if (showStop) {
       btn.disabled = false;
       const tip = btn.querySelector(".pzp-button__tooltip");
-      if (tip) tip.textContent = "자동 따라잡기 해제";
+      if (tip && tip.textContent !== "자동 따라잡기 해제") {
+        tip.textContent = "자동 따라잡기 해제";
+      }
     } else {
       setSyncTooltip(btn, overThreshold ? lat : null);
     }
@@ -7627,7 +7743,7 @@
   function canFreshEntryCatchUp() {
     const video = findVideo();
     if (!video) return false;
-    if (video.paused || video.seeking) return false;
+    if (video.paused || video.seeking || video.readyState < 3) return false;
     return true;
   }
 
@@ -7665,7 +7781,7 @@
     if (Date.now() < autoCatchUpPauseUntil) return false;
     const video = findVideo();
     if (!video) return false;
-    if (video.paused || video.seeking) return false;
+    if (video.paused || video.seeking || video.readyState < 3) return false;
     return true;
   }
 
@@ -7849,9 +7965,10 @@
   }
 
   function startSyncCatchUp() {
+    if (syncCatchUp) return;
     const core = findCorePlayer();
     const video = findVideo();
-    if (!core || !video) return;
+    if (!core || !video || video.paused || video.seeking || video.readyState < 3) return;
     const lat = getLiveLatencySeconds(core);
     if (!Number.isFinite(lat) || lat < syncCfg.enable) return;
 
@@ -7882,8 +7999,13 @@
     if (player) keepControlsVisible(player, "sync");
     updateSyncButtonState();
 
+    const session = syncCatchUp;
     const loop = () => {
-      if (!syncCatchUp) return;
+      if (syncCatchUp !== session) return;
+      if (!video.isConnected || video.paused || video.seeking || video.readyState < 3) {
+        stopSyncCatchUp();
+        return;
+      }
       const cur = getLiveLatencySeconds(syncCatchUp.core);
       const tnow = Date.now();
       const elapsed = tnow - syncCatchUp.startedAt;
@@ -7912,16 +8034,20 @@
         return;
       }
       // 호버 중 실시간 지연을 보여줘 숫자가 줄어드는 게 보이게 한다.
-      const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
-      setSyncTooltip(btn, cur, { catching: true });
-      syncCatchUp.raf = requestAnimationFrame(loop);
+      if (!document.hidden) {
+        const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
+        setSyncTooltip(btn, cur, { catching: true });
+      }
+      session.timer = window.setTimeout(loop, SYNC_CATCH_UP_CHECK_MS);
     };
-    syncCatchUp.raf = requestAnimationFrame(loop);
+    // 숨김 탭에서 멈추는 rAF에 배속 원복을 의존하지 않는다. 타이머가 지연돼도
+    // 다음 실행에서 실제 경과 시간과 현재 지연으로 종료 여부를 판단한다.
+    session.timer = window.setTimeout(loop, SYNC_CATCH_UP_CHECK_MS);
   }
 
   function stopSyncCatchUp() {
     if (!syncCatchUp) return;
-    if (syncCatchUp.raf) cancelAnimationFrame(syncCatchUp.raf);
+    if (syncCatchUp.timer) window.clearTimeout(syncCatchUp.timer);
     // ⚠ 예전에는 '현재 배속 === SYNC_RATE' 일 때만 원복했다. 그런데 Video Speed
     //    Controller 같은 확장은 ratechange 를 듣고 값을 자기 것으로 덮어쓴다.
     //    그러면 이 조건이 거짓이 되어 원복을 건너뛰고 배속이 걸린 채 남았다(제보).
@@ -8398,8 +8524,7 @@
   // aria-valuenow가 드래그 중 갱신되므로 그 값을 읽어 표시한다(믹서 on/off 무관, 항상).
   let volumeTooltipHideTimer = 0;
 
-  function findNativeVolumeSlider() {
-    const player = findPlayer();
+  function findNativeVolumeSlider(player = findPlayer()) {
     if (!player) return null;
     // 우리 마스터 게인 슬라이더(data-master-gain)는 제외하고 native만 찾는다.
     const sliders = player.querySelectorAll(".pzp-pc__volume-slider");
@@ -8412,16 +8537,14 @@
   }
 
   function volumePercentOf(slider) {
-    const now = Number(slider.getAttribute("aria-valuenow"));
-    if (Number.isFinite(now)) return Math.round(now);
-    // 폴백: progress scale에서 계산.
-    const prog = slider.querySelector(".pzp-ui-progress__volume");
-    const scale = Number(
-      getComputedStyle(prog || slider).getPropertyValue(
-        "--pzp-ui-progress__scale",
-      ),
-    );
-    return Number.isFinite(scale) ? Math.round(scale * 100) : 0;
+    const video = videoOfEventTarget(slider) || findVideo();
+    const pending = nativeWheelVolumeStateOf(video);
+    // video.volume 반영 직후 native aria-valuenow는 한 프레임 이상 이전 값에 머물 수
+    // 있다. 그 짧은 동안에는 휠 처리에서 확정한 표시값을 그대로 공유한다.
+    if (pending) return pending.percent;
+    if (video?.muted) return 0;
+    const percent = nativeSliderPercent(slider);
+    return Number.isFinite(percent) ? Math.round(percent) : 0;
   }
 
   // ── 볼륨 슬라이더 % 툴팁(위임 방식) ────────────────────────────────────────
@@ -8538,7 +8661,7 @@
       currentPct === previousPct
     )
       return;
-    const video = findVideo();
+    const video = videoOfEventTarget(slider) || findVideo();
     const muted = Boolean(video?.muted) || currentPct === 0;
     showActionOverlay(
       muted ? "mute" : currentPct > previousPct ? "volUp" : "volDown",
@@ -8547,16 +8670,19 @@
     );
   }
 
-  function setVolumeTooltipText(wrap) {
+  function setVolumeTooltipText(wrap, percent) {
     const tip = volumeTipOf(wrap);
     const slider = sliderOf(wrap);
     if (!tip || !slider) return;
-    const next = `${volumePercentOf(slider)}%`;
+    const value = Number.isFinite(percent)
+      ? Math.min(100, Math.max(0, Math.round(percent)))
+      : volumePercentOf(slider);
+    const next = `${value}%`;
     if (tip.textContent !== next) tip.textContent = next;
   }
 
   // 이미 보이는 중이면 is-visible 재부여 안 함(transform transition 재시작 방지=떨림).
-  function showVolumeTooltip(wrap) {
+  function showVolumeTooltip(wrap, percent) {
     const tip = volumeTipOf(wrap);
     if (!tip) return;
     if (!volumePctOn) {
@@ -8564,7 +8690,7 @@
       tip.classList.remove("is-visible");
       return;
     }
-    setVolumeTooltipText(wrap);
+    setVolumeTooltipText(wrap, percent);
     if (!tip.classList.contains("is-visible")) tip.classList.add("is-visible");
     scheduleVolumeTooltipHide(tip);
   }
@@ -8582,8 +8708,8 @@
   }
 
   // 툴팁 span + aria-valuenow 옵저버를 native 볼륨 래퍼에 멱등 보장.
-  function ensureVolumeTooltip() {
-    const slider = findNativeVolumeSlider();
+  function ensureVolumeTooltip(sliderHint) {
+    const slider = sliderHint || findNativeVolumeSlider();
     if (!slider) return;
     const anchor = slider.closest(".pzp-pc__volume-control") || slider;
     if (anchor.dataset.cheeseVolTip === "1" && volumeTipOf(anchor)) return;
@@ -8637,7 +8763,7 @@
   function onVolumePointerDown(e) {
     const slider = nativeVolumeSliderOfTarget(e.target);
     if (!slider) return;
-    ensureVolumeTooltip();
+    ensureVolumeTooltip(slider);
     nativeVolumeOsdPointerId = e.pointerId;
     armNativeVolumeOsd(slider);
   }
@@ -8724,16 +8850,18 @@
     }, VOLUME_TOOLTIP_HIDE_MS + 150);
   }
   // 조절 후 볼륨 % 툴팁을 잠깐 띄워 피드백(native 볼륨 컨트롤 위치에 표시).
-  function flashVolumeTooltip(target) {
+  function flashVolumeTooltip(target, percent) {
     const targetWrap = nativeVolumeWrapOf(target);
-    const slider = sliderOf(targetWrap) || findNativeVolumeSlider();
+    const player = playerOfEventTarget(target);
+    const slider =
+      sliderOf(targetWrap) || findNativeVolumeSlider(player || undefined);
     if (!slider) return;
     const wrap =
       targetWrap ||
       slider.closest(".pzp-pc__volume-control, .pzp-pc-volume-control");
     if (!wrap) return;
-    ensureVolumeTooltip();
-    showVolumeTooltip(wrap);
+    ensureVolumeTooltip(slider);
+    showVolumeTooltip(wrap, percent);
   }
   function onWheelVolumeContextMenu(e) {
     if (!wheelVolumeOn || !wheelVolumeRightClick) return;
@@ -8743,6 +8871,86 @@
     if (!wheelVolumeTargetOk(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
+  }
+
+  // 이 플레이어에서 '슬라이더 100%' 에 해당하는 video.volume 상한.
+  // ⚠ 다시보기는 video.volume 을 그대로 쓰지 않는다. 실측: volume 0.5 → 슬라이더 74,
+  //   0.85 → 125 로 약 1.47 배를 곱해 표시한다(네이티브 드래그도 동일). 그래서 네이티브
+  //   슬라이더는 volume 0.68(=1/1.47)에서 이미 100% 다.
+  //   우리가 1.0 까지 올리면 슬라이더가 147% 가 되고 핸들이 라인 밖으로 나간다(제보).
+  //   라이브는 배율이 1 이라 증상이 없었다.
+  //   슬라이더가 알려 주는 배율로 상한을 되돌려 계산한다.
+  const nativeVolumeCalibrationByVideo = new WeakMap();
+  const nativeWheelVolumeStateByVideo = new WeakMap();
+  const NATIVE_WHEEL_VALUE_SYNC_MS = 1200;
+
+  function nativeWheelVolumeStateOf(video) {
+    if (!(video instanceof HTMLVideoElement)) return null;
+    const state = nativeWheelVolumeStateByVideo.get(video);
+    if (!state) return null;
+    if (
+      Date.now() > state.until ||
+      Math.abs(Number(video.volume) - state.volume) > 0.005
+    ) {
+      nativeWheelVolumeStateByVideo.delete(video);
+      return null;
+    }
+    return state;
+  }
+
+  function nativeSliderPercent(slider) {
+    if (!slider) return NaN;
+    const nowAttr = slider.getAttribute("aria-valuenow");
+    const maxAttr = slider.getAttribute("aria-valuemax");
+    const now = nowAttr == null ? NaN : Number(nowAttr);
+    const max = maxAttr == null ? NaN : Number(maxAttr);
+    if (Number.isFinite(now) && Number.isFinite(max) && max > 0) {
+      return Math.min(100, Math.max(0, (now / max) * 100));
+    }
+    if (Number.isFinite(now)) return Math.min(100, Math.max(0, now));
+    const prog = slider?.querySelector?.(".pzp-ui-progress__volume");
+    const scale = Number(
+      getComputedStyle(prog || slider).getPropertyValue(
+        "--pzp-ui-progress__scale",
+      ),
+    );
+    return Number.isFinite(scale)
+      ? Math.min(100, Math.max(0, scale * 100))
+      : NaN;
+  }
+
+  function playerVolumeCeiling(video, slider) {
+    const pending = nativeWheelVolumeStateOf(video);
+    if (pending) return pending.ceiling;
+    const player = playerOfEventTarget(slider || video);
+    const ownSlider = slider || findNativeVolumeSlider(player || undefined);
+    const percent = nativeSliderPercent(ownSlider);
+    const vol = Number(video?.volume);
+    // 표시값/실제볼륨 = 배율. 볼륨이 0에 가까우면 반올림 오차가 커져 쓰지 않는다.
+    if (
+      Number.isFinite(percent) &&
+      percent >= 1 &&
+      Number.isFinite(vol) &&
+      vol >= 0.01
+    ) {
+      const ceiling = Math.max(0.05, Math.min(1, vol / (percent / 100)));
+      nativeVolumeCalibrationByVideo.set(video, ceiling);
+      return ceiling;
+    }
+    return nativeVolumeCalibrationByVideo.get(video) || 1;
+  }
+
+  // 현재 값이 29%처럼 간격 밖에 있으면 휠 방향에서 가장 가까운 격자(30%/25%)로
+  // 먼저 맞춘다. 이미 격자 위면 정확히 한 단계 이동한다.
+  function nextWheelVolumePercent(current, step, direction) {
+    const safeStep = Math.min(10, Math.max(1, Math.round(step)));
+    const value = Math.min(100, Math.max(0, Number(current) || 0));
+    const epsilon = 1e-7;
+    const next =
+      direction > 0
+        ? (Math.floor(value / safeStep + epsilon) + 1) * safeStep
+        : (Math.ceil(value / safeStep - epsilon) - 1) * safeStep;
+    return Math.min(100, Math.max(0, next));
   }
 
   function onVideoWheelVolume(e) {
@@ -8762,18 +8970,36 @@
     if (isOverVolumeControl(e.target)) e.stopPropagation();
     // deltaY<0(위로) = 볼륨↑, deltaY>0(아래로) = 볼륨↓.
     const dir = e.deltaY < 0 ? 1 : -1;
-    let v = video.volume + dir * wheelVolumeStep;
-    v = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+    const player = playerOfEventTarget(e.target);
+    const slider = findNativeVolumeSlider(player || undefined);
+    const ceiling = playerVolumeCeiling(video, slider);
+    const pending = nativeWheelVolumeStateOf(video);
+    const sliderPct = nativeSliderPercent(slider);
+    const currentPct = pending
+      ? pending.percent
+      : Number.isFinite(sliderPct)
+        ? sliderPct
+        : (video.volume / ceiling) * 100;
+    const stepPct = Math.round(wheelVolumeStep * 100);
+    const pct = nextWheelVolumePercent(currentPct, stepPct, dir);
+    const v = Math.max(
+      0,
+      Math.min(ceiling, Math.round(ceiling * (pct / 100) * 10000) / 10000),
+    );
     // 올릴 때 음소거 상태면 해제(직관적). 0으로 내려가면 자연히 무음.
     if (dir > 0 && video.muted) video.muted = false;
     video.volume = v; // UI 슬라이더(aria-valuenow)는 이 값으로 자동 동기화됨(실측)
+    nativeWheelVolumeStateByVideo.set(video, {
+      ceiling,
+      percent: pct,
+      volume: v,
+      until: Date.now() + NATIVE_WHEEL_VALUE_SYNC_MS,
+    });
     keepNativeWheelControlsVisible(e.target);
-    flashVolumeTooltip(e.target);
+    flashVolumeTooltip(e.target, pct);
     const muted = video.muted || v === 0;
-    // ⚠ 표시 % 는 방금 설정한 v 를 그대로 쓴다. video.volume 설정 직후 native 슬라이더의
-    // aria-valuenow 는 아직 '이전 값'이라(치지직 비동기 갱신), 슬라이더를 읽으면 한 틱
-    // 뒤처진 값이 나온다(실측: 실제35%인데 30% 표시). v 가 곧 정확한 목표값이다.
-    const pct = Math.round(v * 100);
+    // 툴팁과 OSD 모두 위에서 확정한 동일한 격자값을 쓴다. native aria-valuenow는
+    // 비동기로 바뀌므로 조절 직후 다시 읽지 않는다.
     showActionOverlay(
       muted ? "mute" : dir > 0 ? "volUp" : "volDown",
       `${pct}%`,
@@ -8977,6 +9203,7 @@
     // DOM 이 매 프레임 바뀌는데 여기서 video 탐색/그래프 판정을 돌리면 영상이 버벅인다.
     if (isClipEditorContext()) {
       if (seekCheckTimer) removeSeekButtons();
+      removeSeekBar();
       return;
     }
     const pageKey = getPageKey();
@@ -9005,6 +9232,7 @@
       // 벗어난 뒤라 치지직의 해제 로직이 돌지 않아 스크롤이 잠긴다(제보 재현 경로).
       // 라이브 URL 을 벗어난 순간 폴링은 무조건 멈춘다 — 그래프 유지와 무관하다.
       stopWideScreenPolling();
+      removeSeekBar();
       clearStrayScrollLock(); // 치지직이 남긴 inline overflow:hidden 회수
       if (keepGraph) {
         if (!featureFlags.audioMixer) ensureEnabledGraph();
@@ -9372,6 +9600,7 @@
     );
   }
   function scheduleTick(mutations) {
+    if (document.hidden) return;
     // 플레이어 재렌더는 플레이어 쪽 DOM 변이로 별도 감지된다. 믹서가 켜져 있어도
     // 채팅 행 변화만으로 플레이어 탐색과 그래프 점검을 반복하지 않는다.
     if (mutations?.length && mutations.every(isChatStreamOnlyMutation)) {
@@ -9394,12 +9623,26 @@
       }
     }, 250);
   }
-  const observer = new MutationObserver(scheduleTick);
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
+  let observer = null;
+  function startMixerObserver() {
+    if (observer || document.hidden) return;
+    observer = new MutationObserver(scheduleTick);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+  function stopMixerObserver() {
+    observer?.disconnect();
+    observer = null;
+    if (tickTimer) clearTimeout(tickTimer);
+    tickTimer = 0;
+    if (tickIdleHandle) window.cancelIdleCallback?.(tickIdleHandle);
+    tickIdleHandle = 0;
+  }
+  window.addEventListener("pagehide", () => {
+    flushPendingStateSave();
+    stopMixerObserver();
+    stopSeekBarRender();
   });
-  window.addEventListener("pagehide", flushPendingStateSave);
+  startMixerObserver();
   // 휠 볼륨은 플레이어 버튼 생성 여부와 독립된 document 위임 기능이다. tick이 클립
   // 에디터/비플레이어 경로에서 일찍 끝나거나 UI를 이미 안정 상태로 판단해도 빠지지 않게
   // 부트스트랩에서 먼저 등록한다(함수 내부 멱등 가드로 중복 등록되지 않음).

@@ -972,28 +972,62 @@
     closeAllBadgeOverlay();
   }
 
-  // 좁은 부트스트랩 옵저버: body 하위 변화 시 팝업 등장을 감지해 강화 시도.
-  // rAF 디바운스로 프레임당 1회만 실행(대량 mutation 폭주 방지). 기능이 꺼져 있으면
-  // 아예 붙이지 않아 상시 부하를 없앤다(토글 켜질 때 부착, 꺼질 때 해제).
-  let scheduled = false;
+  // 구독 팝업과 관계없는 채팅 변이는 제외한다. 전역 제목 탐색을 프레임마다
+  // 반복하지 않도록 나머지 변화도 250ms 단위로 합친다.
+  function isSubscribeChatMutation(mutation) {
+    const target =
+      mutation.target instanceof Element
+        ? mutation.target
+        : mutation.target?.parentElement;
+    const popupSelector = "[role='dialog'], [role='alertdialog'], #popup_contents";
+    if (!target || target.closest(popupSelector)) return false;
+    const stream = target.closest(
+      "[role='log'], [class*='live_chatting_list_container'], [class*='vod_chatting_list_container'], [class*='_chatting_message_']",
+    );
+    if (!stream) return false;
+    const messageSelector = "[class*='_chatting_message_']";
+    const row = target.closest("[class*='_item_']");
+    if (!target.closest(messageSelector) && !row?.querySelector(messageSelector)) {
+      const changed = [...mutation.addedNodes, ...mutation.removedNodes];
+      // role 없는 팝업도 있으므로 목록 안의 변화 전체를 제외하지 않는다.
+      // 목록 바로 아래에서는 일반 채팅 행의 추가/제거만 건너뛴다.
+      if (!changed.length || !changed.every((node) =>
+        node instanceof Element &&
+        node.matches("[class*='_item_']") && node.querySelector(messageSelector),
+      )) return false;
+    }
+    // 프로필/구독 팝업이 채팅 목록 안에 삽입되는 경우는 놓치지 않는다.
+    return ![...mutation.addedNodes].some((node) =>
+      node instanceof Element &&
+      (node.matches(popupSelector) || node.querySelector(popupSelector)),
+    );
+  }
+
+  let scheduled = 0;
   let observer = null;
   function startObserver() {
     if (observer) return;
-    observer = new MutationObserver(() => {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(() => {
-        scheduled = false;
-        void tryEnhance();
-      });
+    observer = new MutationObserver((mutations) => {
+      if (
+        document.hidden || scheduled || mutations.every(isSubscribeChatMutation)
+      ) return;
+      scheduled = window.setTimeout(() => {
+        scheduled = 0;
+        if (!document.hidden) void tryEnhance();
+      }, 250);
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
   function stopObserver() {
-    if (!observer) return;
-    observer.disconnect();
+    observer?.disconnect();
     observer = null;
+    if (scheduled) window.clearTimeout(scheduled);
+    scheduled = 0;
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && enabled) void tryEnhance();
+  });
 
   // ── 기능 토글 로드 & 반영 ───────────────────────────────────────────────────
   function applyEnabled(next) {

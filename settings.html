@@ -290,6 +290,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="chatBlock"
+            role="tab"
+            aria-selected="false"
+          >
+            채팅 차단
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="logpower"
             role="tab"
             aria-selected="false"
@@ -2379,6 +2388,51 @@
                   <input type="checkbox" data-vod-chat-graph-auto-collect />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item" data-new-feature="vod-role-chat">
+                <label>
+                  <span class="settings-item-name"
+                    >방장·매니저·파트너 채팅</span
+                  >
+                  <span class="settings-item-desc"
+                    >'내 채팅 기록' 패널에 '방장·매니저' 탭을 추가해
+                    방장·매니저와 파트너(인증 마크)가 남긴 채팅을 시간순으로
+                    보여줍니다. 공지나 진행 안내를 따라가기 좋습니다. 채팅
+                    활성도와 따로 모으고 따로 저장하므로, 한쪽을 다시 모아도
+                    다른 쪽은 그대로입니다(체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-role-chat />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-role-bot-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">└ 제외할 봇</span>
+                  <span class="settings-item-desc"
+                    >여기 적은 이름과 정확히 같은 닉네임은 목록에서 뺍니다.
+                    채널마다 봇 이름이 달라 직접 추가·삭제할 수 있습니다. 바꾼
+                    뒤에는 '다시 수집'을 눌러야 반영됩니다.</span
+                  >
+                </div>
+                <div class="settings-bot-input">
+                  <input
+                    type="text"
+                    data-role-bot-input
+                    placeholder="봇 닉네임"
+                    maxlength="40"
+                  />
+                  <button type="button" data-role-bot-add>추가</button>
+                </div>
+                <div class="settings-bot-list" data-role-bot-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-role-bot-reset>기본값으로</button>
+                </div>
               </li>
               <li class="settings-item">
                 <div
@@ -4874,6 +4928,7 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+
               <li
                 class="settings-item settings-item-stacked"
                 data-new-feature="following-section-order"
@@ -4881,8 +4936,9 @@
                 <div>
                   <span class="settings-item-name">목록 배치 순서</span>
                   <span class="settings-item-desc"
-                    >전용 팔로잉 목록의 그룹·즐겨찾기·팔로잉 영역을 드래그하거나
-                    화살표로 옮겨 표시 순서를 정합니다.</span
+                    >전용 팔로잉 목록의 그룹·즐겨찾기·팔로잉(친밀도를 켜면 함께)
+                    영역을 드래그하거나 화살표로 옮겨 표시 순서를
+                    정합니다.</span
                   >
                 </div>
                 <ul
@@ -5078,7 +5134,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">초기 표시 개수</span>
+                  <span class="settings-item-name">└ 초기 표시 개수</span>
                   <span class="settings-item-desc"
                     >즐겨찾기 영역의 '더보기' 전에 보여줄 채널 수(1~200)</span
                   >
@@ -5097,7 +5153,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">더보기 증가량</span>
+                  <span class="settings-item-name">└ 더보기 증가량</span>
                   <span class="settings-item-desc"
                     >즐겨찾기 영역의 '더보기'를 누를 때 추가할 채널
                     수(1~200)</span
@@ -5674,6 +5730,111 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              친밀도
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="cf-affinity">
+                <label>
+                  <span class="settings-item-name">친밀도 목록 사용</span>
+                  <span class="settings-item-desc"
+                    >목록에 '친밀도' 영역을 추가해 내가 많이 활동한 채널을 모아
+                    보여줍니다. 통나무파워·후원 횟수·내 채팅·구독 개월을 등수로
+                    환산해 점수를 매기고 상위 10개를 순서대로 보여줍니다. 후원은
+                    최근 3개월만 세고 금액은 보지 않습니다. 내 채팅 기록을 쓰지
+                    않으면 그 지표는 빠집니다(체크=사용, 기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-affinity-on />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-affinity-sub
+                data-new-feature="cf-affinity"
+              >
+                <label>
+                  <span class="settings-item-name">└ 오프라인 숨김</span>
+                  <span class="settings-item-desc"
+                    >친밀도 목록에서 방송 중이 아닌 채널을 숨깁니다(체크=숨김,
+                    기본 꺼짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-affinity-hide-offline />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-affinity-sub
+                data-new-feature="cf-affinity"
+              >
+                <div>
+                  <span class="settings-item-name">└ 지표 중요도</span>
+                  <span class="settings-item-desc"
+                    >위에 있을수록 점수에 크게 반영됩니다. 화살표로 순서를
+                    바꾸세요.</span
+                  >
+                </div>
+                <ul
+                  class="cf-fav-order-list"
+                  data-affinity-order
+                  aria-label="친밀도 지표 중요도 순서"
+                ></ul>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-affinity-sub
+                data-new-feature="cf-affinity"
+              >
+                <div>
+                  <span class="settings-item-name">초기 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >처음에 보여 줄 채널 수입니다(1~10, 기본 3개).</span
+                  >
+                </div>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-affinity-initial
+                    aria-label="친밀도 초기 표시 개수"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-affinity-sub
+                data-new-feature="cf-affinity"
+              >
+                <div>
+                  <span class="settings-item-name">더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >'더보기'를 누를 때마다 늘어날 개수입니다(1~10, 기본
+                    3개).</span
+                  >
+                </div>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-affinity-more
+                    aria-label="친밀도 더보기 증가량"
+                  />
+                  <small>개</small>
+                </span>
               </li>
             </ul>
             <h2 class="settings-group-title" style="margin-top: 14px">
@@ -8098,6 +8259,105 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">가려진 채팅 표시</span>
+                  <span class="settings-item-desc"
+                    >클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다.
+                    다시보기에서는 원문이 함께 내려오는 클린봇 메시지만
+                    복원되며, 블라인드 처리된 메시지는 원문이 남지 않아 그대로
+                    표시됩니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatRestoreBlind" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="chatBlock"
+            aria-label="이모티콘 숨김·차단"
+          >
+            <h2 class="settings-group-title">이모티콘</h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="chat-emoticon-hide">
+                <label>
+                  <span class="settings-item-name">이모티콘 숨김</span>
+                  <span class="settings-item-desc"
+                    >채팅에 올라오는 이모티콘을 모두 숨깁니다. 특정 이모티콘만
+                    가리려면 아래 '이모티콘 차단'을 쓰세요(체크=숨김)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideEmoticon" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="chat-emoticon-hide">
+                <label>
+                  <span class="settings-item-name">Alt + 클릭으로 차단</span>
+                  <span class="settings-item-desc"
+                    >채팅의 이모티콘을 <b>Alt + 클릭</b>(Mac 은
+                    <b>Option + 클릭</b>)해서 바로 차단합니다. '치모티콘 정리'
+                    확장을 함께 쓰면 그쪽과 겹치므로, 감지되면 이 기능은
+                    자동으로 양보합니다(체크=사용, 기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatEmoticonAltClick" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-emoticon-block-row
+                data-new-feature="chat-emoticon-hide"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">└ 이모티콘 차단</span>
+                  <span class="settings-item-desc"
+                    >채팅에서 보고 싶지 않은 이모티콘 위에서
+                    <b>Alt + 클릭</b>(Mac 은 <b>Option + 클릭</b>)하면 그
+                    이모티콘만 가려집니다. 이름으로 직접 추가할 수도 있지만,
+                    이모티콘 창을 한 번 열어 둬야 이름을 알아볼 수
+                    있습니다.</span
+                  >
+                </div>
+                <p class="settings-item-desc" data-cheemo-notice hidden>
+                  '치모티콘 정리' 확장이 감지되어 <b>Alt + 클릭</b>은 그쪽에서
+                  처리합니다. 아래 목록은 치즈 플래터가 차단한 것만 보여줍니다.
+                </p>
+                <div class="settings-bot-input">
+                  <input
+                    type="text"
+                    data-emoticon-block-input
+                    placeholder="이모티콘 이름 (예: d_42)"
+                    maxlength="64"
+                  />
+                  <button type="button" data-emoticon-block-add>추가</button>
+                </div>
+                <div class="settings-bot-list" data-emoticon-block-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-emoticon-block-clear>
+                    전체 해제
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="chatBlock"
+            aria-label="단어·정규식으로 채팅 숨김"
+          >
+            <h2 class="settings-group-title">단어·정규식</h2>
+            <ul class="settings-list">
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name"
@@ -8164,6 +8424,13 @@
                       표시입니다. 정규식이 올바르지 않으면 추가되지 않고 오류
                       메시지가 표시됩니다.</span
                     >
+                    <span
+                      >규칙은 최대 <b>2,000개</b>까지 등록할 수 있습니다. 채팅
+                      한 줄마다 규칙 전체를 검사하는 구조라, 규칙이 많아지면
+                      채팅이 빠른 방송에서 느려질 수 있어 둔 상한입니다. 꼭
+                      정규식이 필요한 경우가 아니라면 <b>정규식</b> 체크를 끄고
+                      단어로 등록하는 편이 가장 가볍습니다.</span
+                    >
                   </span>
                 </div>
                 <div class="settings-word-filter" data-chat-word-filter>
@@ -8185,23 +8452,24 @@
                     data-cwf-error
                     hidden
                   ></p>
+                  <p
+                    class="settings-word-filter-notice"
+                    data-cwf-notice
+                    hidden
+                  ></p>
+                  <div class="settings-word-filter-search" data-cwf-search-row>
+                    <input
+                      type="search"
+                      data-cwf-search
+                      placeholder="등록된 규칙 검색"
+                      aria-label="등록된 규칙 검색"
+                    />
+                  </div>
+                  <p class="settings-word-filter-count">
+                    <span data-cwf-count></span>
+                  </p>
                   <ul class="settings-word-filter-list" data-cwf-list></ul>
                 </div>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">가려진 채팅 표시</span>
-                  <span class="settings-item-desc"
-                    >클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다.
-                    다시보기에서는 원문이 함께 내려오는 클린봇 메시지만
-                    복원되며, 블라인드 처리된 메시지는 원문이 남지 않아 그대로
-                    표시됩니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="chatRestoreBlind" />
-                  <i aria-hidden="true"></i>
-                </label>
               </li>
             </ul>
           </section>
