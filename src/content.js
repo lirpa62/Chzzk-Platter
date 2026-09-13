@@ -40332,11 +40332,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function ensureCardHintEl() {
     let el = document.getElementById(CARD_HINT_ID);
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = CARD_HINT_ID;
-    el.textContent = cardHintText();
-    document.body.appendChild(el);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = CARD_HINT_ID;
+      document.body.appendChild(el);
+    }
+    // ⚠ 만들 때 한 번만 쓰면 설정을 바꿔도 예전 문구가 그대로 남는다. 띄울 때마다
+    //   지금 설정으로 다시 쓴다(요소는 재사용).
+    const text = cardHintText();
+    if (el.textContent !== text) el.textContent = text;
     return el;
   }
 
@@ -40508,6 +40512,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CARD_PREVIEW_AUDIO_KEY,
         CARD_PREVIEW_DEFAULT_VOLUME_KEY,
         CARD_PREVIEW_WHEEL_DELAY_KEY,
+        CARD_PREVIEW_WHEEL_MODE_KEY,
       ]);
       cardPreviewAudioOn = data?.[CARD_PREVIEW_AUDIO_KEY] !== false; // 미설정/true=ON
       cardPreviewDefaultVolume = normalizeCardPreviewDefaultVolume(
@@ -40515,6 +40520,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
         data?.[CARD_PREVIEW_WHEEL_DELAY_KEY],
+      );
+      // ⚠ 이 줄이 빠지면 storage 에 저장된 값이 있어도 페이지를 새로 열 때마다
+      //   기본값("wheel")으로 시작한다 — '사용 안 함'이 먹지 않던 원인.
+      cardPreviewWheelMode = normalizeCardPreviewWheelMode(
+        data?.[CARD_PREVIEW_WHEEL_MODE_KEY],
       );
     } catch {}
     if (cardPreviewAudioOn) bindCardPreviewAudio();
