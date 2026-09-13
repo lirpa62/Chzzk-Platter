@@ -34452,8 +34452,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         customFollowGroupSortKey === CUSTOM_FOLLOW_FAV_SORT_TARGET;
     // draggable 은 기본 false — 꾹 누르면(long-press) JS 가 동적으로 켠다(짧은 클릭은
     // 채널 이동 유지). 클래스로 '순서 편집 가능 항목'을 식별한다.
+    // ⚠ 순서 편집 모드에서는 꾹 누르기(long-press) 없이 바로 끌 수 있게 한다.
+    //   그 모드에서는 채널 이동이 목적이 아니라, 기다렸다 끌면 뻑뻑하다.
+    //   dragready 까지 미리 붙여 두면 링크 클릭도 함께 막힌다(CSS 가 처리).
     const dragAttr = dragOn
-      ? ` class="cheese-cf-item ${c(h?.li, "")} cheese-cf-fav cheese-cf-draggable"`
+      ? ` class="cheese-cf-item ${c(h?.li, "")} cheese-cf-fav cheese-cf-draggable cheese-cf-dragready" draggable="true"`
       : ` class="cheese-cf-item ${c(h?.li, "")}${fav ? " cheese-cf-fav" : ""}"`;
     return (
       `<li${dragAttr} data-channel-id="${escapeAttribute(item.channelId)}" data-live="${live ? "1" : "0"}">` +
@@ -34809,16 +34812,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 직접 정한 순서를 유지할 수 없다.
         const sortingNow = customFollowGroupSortKey === group.key;
         const sortLabel = sortingNow
-          ? "순서 편집 끝내기"
+          ? "순서 편집 완료"
           : group.manualOrder
             ? "채널 순서 편집 (직접 정렬 중)"
             : "채널 순서 편집";
         const sortAction = group.automatic
           ? ""
-          : `<button type="button" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}" aria-label="${sortLabel}" title="${sortLabel}">${customFollowLucideIcon("arrow-up-down", 15)}</button>`;
+          : `<button type="button" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}" aria-label="${sortLabel}" title="${sortLabel}">${customFollowLucideIcon(sortingNow ? "check" : "arrow-up-down", 15)}</button>`;
         const compactSortAction = group.automatic
           ? ""
-          : `<button type="button" role="menuitem" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}">${customFollowLucideIcon("arrow-up-down", 15)}<span>${sortLabel}</span></button>`;
+          : `<button type="button" role="menuitem" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}">${customFollowLucideIcon(sortingNow ? "check" : "arrow-up-down", 15)}<span>${sortLabel}</span></button>`;
         const compactHeader = featureFlags.sbFollowGroupCompactHeader;
         const compactMenuId = `cheese-cf-group-actions-${groupIndex}`;
         const compactOfflineAction = group.offlineOnly
@@ -36613,9 +36616,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       customFollowFavSort === "custom";
     const favSorting =
       favSortable && customFollowGroupSortKey === CUSTOM_FOLLOW_FAV_SORT_TARGET;
-    const favSortLabel = favSorting ? "순서 편집 끝내기" : "즐겨찾기 순서 편집";
+    const favSortLabel = favSorting ? "순서 편집 완료" : "즐겨찾기 순서 편집";
     const favSortAction = favSortable
-      ? `<button type="button" class="cheese-cf-section-sort" data-cf-section-sort="${CUSTOM_FOLLOW_FAV_SORT_TARGET}" aria-pressed="${String(favSorting)}" aria-label="${favSortLabel}" title="${favSortLabel}">${customFollowLucideIcon("arrow-up-down", 15)}</button>`
+      ? `<button type="button" class="cheese-cf-section-sort" data-cf-section-sort="${CUSTOM_FOLLOW_FAV_SORT_TARGET}" aria-pressed="${String(favSorting)}" aria-label="${favSortLabel}" title="${favSortLabel}">${customFollowLucideIcon(favSorting ? "check" : "arrow-up-down", 15)}</button>`
       : "";
     return (
       `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${favSorting ? " is-sorting" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section="${key}" data-cf-section-order="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
@@ -37739,6 +37742,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     let pressY = 0;
     const clearDragReady = () => {
       document.querySelectorAll(".cheese-cf-dragready").forEach((el) => {
+        // ⚠ 순서 편집 중인 목록의 항목은 렌더에서 이미 dragready 로 만든다
+        //   (꾹 누르지 않고 바로 끌게). 여기서 벗기면 한 번 누른 뒤로 못 끈다.
+        if (el.closest(".cheese-cf-group.is-sorting, .is-sorting")) return;
         el.classList.remove("cheese-cf-dragready");
         el.removeAttribute("draggable");
       });
@@ -38481,6 +38487,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 우리 새로고침 컨트롤을 주입한다. 클릭은 document 위임 처리.
   const CUSTOM_FOLLOW_CTRL_CLASS = "cheese-cf-header-ctrl";
   const CF_SVG_REFRESH = `<svg width="15" height="15" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
+  // 커서(y) 기준으로 '이 요소 앞에 넣어야 할' 형제를 찾는다. 없으면 맨 뒤.
+  // 설정 화면의 순서 편집기와 같은 방식이라 조작감이 같다(여백에서도 반응한다).
+  function customFollowDragAfter(root, selector, dragging, y) {
+    const items = [...root.querySelectorAll(selector)].filter(
+      (el) => el !== dragging,
+    );
+    let closest = { offset: -Infinity, el: null };
+    for (const child of items) {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset)
+        closest = { offset, el: child };
+    }
+    return closest.el;
+  }
+
   // 섹션 드래그. 그룹 순서 드래그와 같은 방식이되 대상이 '섹션'이다.
   let draggedSectionKey = "";
   let draggedSectionEl = null;
@@ -38508,14 +38530,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       "dragover",
       (event) => {
         if (!draggedSectionEl?.isConnected) return;
-        const over = event.target?.closest?.("[data-cf-section-order]");
         const nav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
-        if (!over || !nav?.contains(over) || over === draggedSectionEl) return;
+        if (!nav?.contains(event.target)) return;
         event.preventDefault();
-        // 커서가 대상의 위쪽 절반이면 앞에, 아래쪽이면 뒤에 끼운다.
-        const box = over.getBoundingClientRect();
-        const before = event.clientY < box.top + box.height / 2;
-        nav.insertBefore(draggedSectionEl, before ? over : over.nextSibling);
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        // ⚠ '대상 위에 정확히 올렸을 때만' 옮기면 뻑뻑하다(섹션 사이 여백·감춘
+        //   본문 위에서는 반응이 없다). 설정의 '목록 배치 순서'와 같이 커서에
+        //   가장 가까운 자리를 찾아 넣는다.
+        const after = customFollowDragAfter(
+          nav,
+          "[data-cf-section-order]",
+          draggedSectionEl,
+          event.clientY,
+        );
+        if (after == null) nav.appendChild(draggedSectionEl);
+        else if (after !== draggedSectionEl)
+          nav.insertBefore(draggedSectionEl, after);
       },
       true,
     );
@@ -38564,12 +38594,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     document.addEventListener(
       "pointerdown",
       (event) => {
-        if (!customFollowSectionSorting) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
-        if (target.closest?.('[data-cf-ctrl="section-sort"]')) return;
-        if (target.closest?.("[data-cf-section-order]")) return;
-        toggleCustomFollowSectionSort();
+        if (customFollowSectionSorting) {
+          if (
+            !target.closest?.('[data-cf-ctrl="section-sort"]') &&
+            !target.closest?.("[data-cf-section-order]")
+          ) {
+            toggleCustomFollowSectionSort();
+          }
+          return;
+        }
+        // 항목 단위 편집(그룹 안 채널·즐겨찾기)도 같은 방식으로 끝낸다.
+        // ⚠ 편집 중인 목록 자신과 그 편집 버튼은 제외한다 — 켜자마자 꺼지거나
+        //   끌기 시작이 끊긴다.
+        if (!customFollowGroupSortKey) return;
+        if (target.closest?.("[data-cf-group-sort], [data-cf-section-sort]"))
+          return;
+        if (target.closest?.(".cheese-cf-group.is-sorting")) return;
+        if (target.closest?.(".cheese-cf-channel-section.is-sorting")) return;
+        customFollowGroupSortKey = "";
+        customFollowVersion += 1;
+        ensureCustomFollowList();
       },
       true,
     );

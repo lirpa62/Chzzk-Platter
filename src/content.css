@@ -5912,7 +5912,7 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-channel-section.is-sorting {
   outline: 1px dashed var(--cheese-cf-group-color, #888);
   outline-offset: 2px;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
 }
 /* 순서 편집 버튼은 토글 버튼 뒤(툴바 끝)에 붙는다.
    ⚠ .cheese-cf-section-toolbar > button 이 display:grid + width:100% 를 주므로
@@ -5970,7 +5970,7 @@ html.cheese-channel-profile-radius-enabled
       var(--cheese-platter-content-neutral-cool-weak, #888)
     );
   outline-offset: 2px;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
 }
 .is-section-dragging {
   opacity: 0.45;
