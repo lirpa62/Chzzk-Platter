@@ -38357,10 +38357,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       existing?.remove();
       return;
     }
+    // ⚠ 접힌 사이드바에서는 치지직이 _header_ 를 아예 렌더하지 않는다
+    //   (getSidebarNavLabel 주석 참고). 예전에는 여기서 return 해 버려서 접힘
+    //   상태에 새로고침 버튼이 나오지 않았다(제보). 헤더가 없으면 nav 에 직접 붙인다.
     const header = origNav.querySelector('[class*="_header_"]');
-    if (!header) return;
     // 네이티브 새로고침/접기 버튼 숨김(마커 → CSS). 클릭 시 원본 목록 재출현 방지.
-    header
+    (header || origNav)
       .querySelectorAll(
         'button[aria-label="새로고침"], button[aria-label*="접기"], button[aria-expanded]',
       )
@@ -38369,7 +38371,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const collapsed = !isSidebarExpanded();
     const sig = collapsed ? "1" : "0";
     // 부착 대상: 펼침이면 헤더(우측 인라인), 접힘이면 원본 nav 직접.
-    const parent = collapsed ? origNav : header;
+    // 헤더가 없는 접힘 DOM 에서도 nav 직속이라 그대로 동작한다.
+    const parent = collapsed || !header ? origNav : header;
     if (
       existing &&
       existing.dataset.sig === sig &&
@@ -38386,11 +38389,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       (collapsed
         ? ""
         : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="square" title="캐릭터 선택창 설정" aria-label="캐릭터 선택창 설정">${customFollowLucideIcon("square-user-round", 15)}</button>`);
-    // 상태 바뀌면 재배치. 접힘 시 nav 직속이되 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
+    // 상태 바뀌면 재배치. nav 직속일 때는 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
+    // 헤더가 없는 접힘 DOM 이면 nav 의 맨 앞이 곧 목록 위다.
     if (bar.parentElement !== parent) {
-      if (collapsed) {
-        const headerEl = origNav.querySelector('[class*="_header_"]');
-        if (headerEl && headerEl.parentElement === parent) headerEl.after(bar);
+      if (parent === origNav) {
+        if (header && header.parentElement === parent) header.after(bar);
         else parent.insertBefore(bar, parent.firstChild);
       } else {
         parent.appendChild(bar);
