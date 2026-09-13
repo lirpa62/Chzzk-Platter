@@ -397,48 +397,40 @@ test("chat and sidebar scrolling do not schedule header layout reads", () => {
 
 test("header peek keeps fill-screen height anchored to the hidden layout", () => {
   class Box {}
-  const box = new Box();
+  const firstBox = new Box();
+  const replacementBox = new Box();
+  let box = firstBox;
   let top = 100;
-  let peeking = false;
-  let settles = 0;
-  box.getBoundingClientRect = () => ({ top });
+  firstBox.id = "live_player_layout";
+  replacementBox.id = "live_player_layout";
+  firstBox.getBoundingClientRect = () => ({ top });
+  replacementBox.getBoundingClientRect = () => ({ top });
   const h = clockContext({
     HTMLElement: Box,
     featureFlags: { headerAutoHide: true },
-    HEADER_PEEK_TRANSITION_MS: 200,
+    headerOffsetPx: 0,
     getFillScreenTarget: () => ({ box }),
-    document: {
-      querySelector: () => (peeking ? new Box() : null),
-    },
-    applyFillScreen: () => { settles += 1; },
+    location: { pathname: "/live/channel-id" },
+    document: {},
   });
   vm.runInContext(section(content,
-    "  let fillScreenTopReferenceBox = null;",
+    '  let fillScreenTopReferenceKey = "";',
     "  function captureInlineStyleProperties("), h.context);
 
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
-  h.context.lockFillScreenTopForHeaderTransition(true);
-  peeking = true;
+  assert.equal(h.context.getStableFillScreenTop(firstBox), 100);
+  h.context.lockFillScreenTopForHeaderTransition();
   top = 160;
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
-  h.advance(250);
-  assert.equal(settles, 1);
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
-
-  h.context.lockFillScreenTopForHeaderTransition(false);
-  peeking = false;
+  assert.equal(h.context.getStableFillScreenTop(firstBox), 100);
+  // 호버 중 치지직이 플레이어 DOM을 교체해도 peek로 밀린 좌표를 새 기준으로 삼지 않는다.
+  box = replacementBox;
+  assert.equal(h.context.getStableFillScreenTop(replacementBox), 100);
+  // 헤더가 다시 숨겨진 뒤에도 같은 페이지의 일시적인 좌표는 기준을 바꾸지 않는다.
+  h.context.lockFillScreenTopForHeaderTransition();
   top = 135;
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
-  h.context.lockFillScreenTopForHeaderTransition(true);
-  peeking = true;
-  top = 150;
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
-  h.context.lockFillScreenTopForHeaderTransition(false);
-  peeking = false;
-  top = 100;
-  h.advance(250);
-  assert.equal(settles, 2);
-  assert.equal(h.context.getStableFillScreenTop(box), 100);
+  assert.equal(h.context.getStableFillScreenTop(replacementBox), 100);
+  // 페이지 또는 헤더 배너 기준이 바뀌면 새 레이아웃을 다시 측정한다.
+  h.context.headerOffsetPx = 51;
+  assert.equal(h.context.getStableFillScreenTop(replacementBox), 135);
 });
 
 test("fill-screen top follows real layout changes when header auto-hide is off", () => {
@@ -455,11 +447,44 @@ test("fill-screen top follows real layout changes when header auto-hide is off",
     applyFillScreen() {},
   });
   vm.runInContext(section(content,
-    "  let fillScreenTopReferenceBox = null;",
+    '  let fillScreenTopReferenceKey = "";',
     "  function captureInlineStyleProperties("), h.context);
   assert.equal(h.context.getStableFillScreenTop(box), 80);
   top = 140;
   assert.equal(h.context.getStableFillScreenTop(box), 140);
+});
+
+test("managed fill-screen height is not mistaken for fullscreen after resize", () => {
+  class Box {
+    matches() { return false; }
+    closest() { return null; }
+    querySelector() { return null; }
+    getBoundingClientRect() {
+      return { left: 0, top: 0, right: 1360, bottom: 800 };
+    }
+  }
+  const box = new Box();
+  const context = vm.createContext({
+    HTMLElement: Box,
+    fillScreenStyledEl: box,
+    window: { innerWidth: 1360, innerHeight: 768 },
+    document: {
+      fullscreenElement: null,
+      webkitFullscreenElement: null,
+      webkitIsFullScreen: false,
+      documentElement: { clientWidth: 1360, clientHeight: 768 },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    playerControlName: () => "",
+  });
+  vm.runInContext(section(content,
+    "  function isPlayerFullscreenModeOn(",
+    "  // ── 리방/오류 시 자동 새로고침"), context);
+
+  assert.equal(context.isPlayerFullscreenModeOn({ box, el: box }), false);
+  context.fillScreenStyledEl = null;
+  assert.equal(context.isPlayerFullscreenModeOn({ box, el: box }), true);
 });
 
 test("unchanged custom following skips sorting and grouping; changed inputs render", () => {

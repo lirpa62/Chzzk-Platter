@@ -18843,59 +18843,36 @@
   let fillScreenModeTransitionUntil = 0;
   let fillScreenTopReferenceKey = "";
   let fillScreenTopReference = null;
-  let fillScreenHeaderTransitionUntil = 0;
-  let fillScreenHeaderSettleTimer = 0;
 
   function clearFillScreenTopReference() {
     fillScreenTopReferenceKey = "";
     fillScreenTopReference = null;
-    fillScreenHeaderTransitionUntil = 0;
-    if (fillScreenHeaderSettleTimer) {
-      clearTimeout(fillScreenHeaderSettleTimer);
-      fillScreenHeaderSettleTimer = 0;
-    }
   }
 
   function getFillScreenTopReferenceKey(videoBox) {
     const pathname = globalThis.location?.pathname || "";
     const boxId = videoBox?.id || "player";
-    return `${pathname}|${boxId}`;
+    const headerOffset =
+      typeof headerOffsetPx !== "undefined" ? headerOffsetPx : 0;
+    return `${pathname}|${boxId}|${headerOffset}`;
   }
 
-  // 헤더 자동 숨김의 표시 전환 직전에 영상 상단 좌표를 고정한다. 헤더가 나타나는 동안
-  // 치지직 레이아웃이 일시적으로 플레이어를 아래로 밀더라도 화면 채우기 높이 계산은 이
-  // 좌표를 계속 사용한다. 숨김 전환에서는 이미 저장한 숨김 상태 좌표를 유지한다.
-  function lockFillScreenTopForHeaderTransition(show) {
+  // 헤더 표시 전환 직전에 숨김 상태의 영상 상단 좌표를 확보한다. 같은 페이지에서는
+  // 치지직의 일시적인 플레이어 이동이나 DOM 교체로 이 기준을 다시 측정하지 않는다.
+  function lockFillScreenTopForHeaderTransition() {
     if (!featureFlags.headerAutoHide) return;
     const target = getFillScreenTarget();
     const box = target?.box instanceof HTMLElement ? target.box : target?.el;
     if (!(box instanceof HTMLElement)) return;
     const measured = Math.max(0, box.getBoundingClientRect().top);
     const referenceKey = getFillScreenTopReferenceKey(box);
-    if (fillScreenTopReferenceKey !== referenceKey) {
+    if (
+      fillScreenTopReferenceKey !== referenceKey ||
+      !Number.isFinite(fillScreenTopReference)
+    ) {
       fillScreenTopReferenceKey = referenceKey;
       fillScreenTopReference = measured;
     }
-    // 전환이 끝나기 전에 빠르게 다시 표시되면 현재 좌표는 애니메이션 중간값이다.
-    // 그때는 기존 기준을 덮어쓰지 않고, 완전히 숨겨진 상태에서 시작할 때만 갱신한다.
-    if (
-      (show && Date.now() >= fillScreenHeaderTransitionUntil) ||
-      !Number.isFinite(fillScreenTopReference)
-    ) {
-      fillScreenTopReference = measured;
-    }
-    fillScreenHeaderTransitionUntil =
-      Date.now() + HEADER_PEEK_TRANSITION_MS + 50;
-    if (fillScreenHeaderSettleTimer) {
-      clearTimeout(fillScreenHeaderSettleTimer);
-    }
-    fillScreenHeaderSettleTimer = window.setTimeout(() => {
-      fillScreenHeaderSettleTimer = 0;
-      fillScreenHeaderTransitionUntil = 0;
-      // 숨김 전환이 끝났다면 최종 좌표를 기준값으로 정착시킨다. 표시 중에는 기존
-      // 숨김 상태 좌표를 계속 보존한다.
-      applyFillScreen();
-    }, HEADER_PEEK_TRANSITION_MS + 50);
   }
 
   function getStableFillScreenTop(videoBox) {
@@ -18908,13 +18885,6 @@
     }
     if (fillScreenTopReferenceKey !== referenceKey) {
       fillScreenTopReferenceKey = referenceKey;
-      fillScreenTopReference = measured;
-    }
-    const peeking = Boolean(
-      (typeof headerPeekShown !== "undefined" && headerPeekShown) ||
-      document.querySelector("header#header.cheese-header-peek"),
-    );
-    if (!peeking && Date.now() >= fillScreenHeaderTransitionUntil) {
       fillScreenTopReference = measured;
     }
     return Number.isFinite(fillScreenTopReference)
@@ -19034,7 +19004,10 @@
       window.innerWidth || document.documentElement.clientWidth;
     const viewportHeight =
       window.innerHeight || document.documentElement.clientHeight;
-    if (viewportWidth > 0 && viewportHeight > 0) {
+    // 화면 채우기가 이미 관리하는 높이는 Device Toolbar/창 크기 전환 직후 새 뷰포트보다
+    // 잠시 클 수 있다. 이를 전체 화면으로 오인하면 강제 높이를 지웠다가 다시 적용한다.
+    const hasManagedCandidate = candidates.includes(fillScreenStyledEl);
+    if (!hasManagedCandidate && viewportWidth > 0 && viewportHeight > 0) {
       for (const element of candidates) {
         if (!(element instanceof HTMLElement)) continue;
         const rect = element.getBoundingClientRect();
@@ -21569,7 +21542,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 표시로 전환할 땐 현재 배너 오프셋을 먼저 반영(배너 유무가 바뀌었을 수 있음).
     if (show) updateHeaderOffsetVar(header);
     if (show === headerPeekShown) return;
-    lockFillScreenTopForHeaderTransition(show);
+    lockFillScreenTopForHeaderTransition();
     headerPeekShown = show;
     header.classList.toggle(HEADER_PEEK_CLASS, show);
     if (show) scheduleHeaderFollowRefreshAfterReveal();
