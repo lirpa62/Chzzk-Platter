@@ -5911,7 +5911,7 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-group.is-sorting {
   outline: 1px dashed var(--cheese-cf-group-color, #888);
   outline-offset: 2px;
-  border-radius: 8px;
+  border-radius: 0 8px 8px 0;
 }
 .cheese-cf-group.is-sorting .cheese-cf-group-list::before {
   content: "꾹 눌러 끌어다 순서를 바꾸세요";

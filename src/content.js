@@ -2443,6 +2443,14 @@
   let customFollowGroupOrder = []; // custom:/auto:/tag: 그룹을 합친 사이드바 순서
   // 지금 채널 순서를 편집 중인 그룹 키(""=편집 중 아님). 화면 상태라 저장하지 않는다.
   let customFollowGroupSortKey = "";
+  // 이 요소가 '순서 편집 중인 그룹' 안에 있는가. 편집 중에는 호버 미리보기·툴팁을
+  // 막는다(끌고 가는 동안 패널이 떠서 놓을 자리를 가린다).
+  // ⚠ DOM 으로 판정한다. 편집 중인 그룹에만 is-sorting 이 붙으므로 다른 그룹과
+  //   '팔로잉' 목록의 미리보기는 그대로 동작한다.
+  function isCustomFollowSortingTarget(node) {
+    if (!customFollowGroupSortKey) return false;
+    return Boolean(node?.closest?.(".cheese-cf-group.is-sorting"));
+  }
   let customFollowGroupTagHideOffline = true;
   let customFollowGroupExcludedTags = new Set();
   let customFollowGroupOfflineOverrides = {};
@@ -37069,6 +37077,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           // (한 번에 한 그룹만 편집 — 여러 목록이 동시에 흔들리면 헷갈린다).
           customFollowGroupSortKey =
             customFollowGroupSortKey === key ? "" : key;
+          // 편집을 시작하는 순간 이미 떠 있던 미리보기는 닫는다(막기만 하면
+          // 직전에 열린 패널이 그대로 남아 놓을 자리를 가린다).
+          if (
+            customFollowGroupSortKey &&
+            typeof closeFollowPreview === "function"
+          ) {
+            closeFollowPreview();
+          }
           customFollowVersion += 1;
           ensureCustomFollowList();
           return;
@@ -38929,6 +38945,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
   async function openFollowPreview(li, channelId, anchorKind = "following") {
     if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
+    // 순서 편집 중에는 미리보기를 띄우지 않는다. 끌고 가는 동안 큰 패널이 따라
+    // 떠서 놓을 자리를 가린다.
+    if (isCustomFollowSortingTarget(li)) return;
     if (
       followPreviewNavigationPointer ||
       Date.now() < followPreviewOpenSuppressUntil
@@ -41082,6 +41101,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     //    툴팁을 함께 띄운다. 일반 미리보기에서는 기존처럼 중복 툴팁을 생략한다.
     //    라이브 채널은 헤더 팔로잉 툴팁(이름/카테고리/제목/시청자수), 오프라인은 채널 정보
     //    툴팁(방송일 등)을 쓴다 — cfLive 플래그로 showFollowChannelTooltip 이 분기한다.
+    // 순서 편집 중인 그룹의 항목에는 툴팁도 띄우지 않는다(미리보기와 같은 이유).
+    if (isCustomFollowSortingTarget(target)) return null;
     if (!followPreviewOn || followPreviewHideHeader) {
       const cfItem = target?.closest?.(".cheese-cf-item");
       if (cfItem) {
