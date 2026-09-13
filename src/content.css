@@ -4316,6 +4316,27 @@ html.cheese-cf-on
   margin-bottom: 5px;
 }
 
+/* 접힘 상태는 좌우 여백이 0 이다(실측: nav 42px, 네이티브 프로필 40px 이 꽉 참).
+   ① 그룹 왼쪽 색 바(2px)와 프로필이 간격 0 으로 맞붙고,
+   ② 호버 시 굵어지는 프로필 링이 nav 의 overflow-x: clip 경계에 걸려 잘린다.
+   프로필을 줄이면 네이티브와 크기가 어긋나므로, 목록 쪽에 좌우 여백을 준다.
+   ⚠ 그룹은 색 바가 왼쪽을 차지하므로 왼쪽을 조금 더 준다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group-list {
+  padding-left: 5px;
+  padding-right: 3px;
+}
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-list {
+  padding-left: 3px;
+  padding-right: 3px;
+}
+/* 링이 잘리지 않도록 항목 자신은 자르지 않는다(실측에서 .cheese-cf-item 이
+   clip 조상으로 잡혔다). nav 의 clip 은 플레이어 침범 방지용이라 유지한다. */
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-item {
+  overflow: visible;
+}
+
 #sidebar:not([class*="_is_expanded_"])
   #cheese-custom-follow
   .cheese-cf-group-toolbar
