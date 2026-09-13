@@ -86,7 +86,7 @@
     ["[data-popup-player-size]", "[data-popup-player-size-w]"],
     ["[data-popup-player-start-without-chat]", "[data-popup-player-start-without-chat-16-9]"],
     ["[data-card-live-preview]", "#cardLivePreviewPosition"],
-    ["[data-card-preview-audio]", "[data-card-preview-default-volume], [data-card-preview-wheel-delay]"],
+    ["[data-card-preview-audio]", "[data-card-preview-default-volume], [data-card-preview-wheel-mode], [data-card-preview-wheel-delay]"],
     ["[data-channel-live-button]", "[data-channel-live-button-end]"],
     ["[data-channel-profile-radius-enabled]", "[data-channel-profile-radius]"],
     ["[data-channel-live-profile-custom]", "[data-channel-live-profile-angle]"],

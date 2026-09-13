@@ -116,6 +116,7 @@
     "cheeseCardPreviewAudio",
     "cheeseCardPreviewDefaultVolume",
     "cheeseCardPreviewWheelDelaySec",
+    "cheeseCardPreviewWheelMode",
     "cheeseFollowerExact",
     "cheeseChannelLiveButton",
     "cheeseChannelLiveButtonEnd",
@@ -9724,9 +9725,40 @@
 
   // 하위 음량 설정. 부모(카드 미리보기 음량)가 꺼져 있으면 모두 비활성화.
   const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
+  const CARD_PREVIEW_WHEEL_MODE_KEY = "cheeseCardPreviewWheelMode";
   const cardWheelDelayInput = document.querySelector(
     "[data-card-preview-wheel-delay]",
   );
+  const cardWheelModeGroup = document.querySelector(
+    "[data-card-preview-wheel-mode]",
+  );
+  let cardWheelMode = "wheel";
+  function normalizeCardWheelMode(v) {
+    return v === "rightclick" || v === "off" ? v : "wheel";
+  }
+  function reflectCardWheelMode() {
+    cardWheelModeGroup
+      ?.querySelectorAll("[data-card-preview-wheel-mode-value]")
+      .forEach((button) => {
+        const on = button.dataset.cardPreviewWheelModeValue === cardWheelMode;
+        button.classList.toggle("is-active", on);
+        button.setAttribute("aria-checked", String(on));
+      });
+    reflectCardPreviewAudioChildrenEnabled();
+  }
+  cardWheelModeGroup
+    ?.querySelectorAll("[data-card-preview-wheel-mode-value]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        cardWheelMode = normalizeCardWheelMode(
+          button.dataset.cardPreviewWheelModeValue,
+        );
+        reflectCardWheelMode();
+        try {
+          cachedStorageSet({ [CARD_PREVIEW_WHEEL_MODE_KEY]: cardWheelMode });
+        } catch {}
+      });
+    });
   function clampCardWheelDelay(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return 1;
@@ -9741,19 +9773,34 @@
       cardDefaultVolumeInput.disabled = !parentOn;
     }
     cardDefaultVolumeItem?.classList.toggle("is-locked", !parentOn);
-    if (cardWheelDelayInput) cardWheelDelayInput.disabled = !parentOn;
-    cardWheelDelayInput
+    cardWheelModeGroup
+      ?.querySelectorAll("[data-card-preview-wheel-mode-value]")
+      .forEach((button) => {
+        button.disabled = !parentOn;
+      });
+    cardWheelModeGroup
       ?.closest(".settings-item")
       ?.classList.toggle("is-locked", !parentOn);
+    // ⚠ 활성 지연은 '휠' 방식에서만 쓰인다. 우클릭+휠은 의도가 분명해 지연을
+    //   두지 않고, 사용 안 함이면 휠 자체를 안 가로챈다 → 그때는 잠근다.
+    const delayUsed = parentOn && cardWheelMode === "wheel";
+    if (cardWheelDelayInput) cardWheelDelayInput.disabled = !delayUsed;
+    cardWheelDelayInput
+      ?.closest(".settings-item")
+      ?.classList.toggle("is-locked", !delayUsed);
   }
   async function loadCardWheelDelay() {
     let v = 1;
     try {
-      const d = await cachedStorageGet(CARD_PREVIEW_WHEEL_DELAY_KEY);
+      const d = await cachedStorageGet([
+        CARD_PREVIEW_WHEEL_DELAY_KEY,
+        CARD_PREVIEW_WHEEL_MODE_KEY,
+      ]);
       v = clampCardWheelDelay(d?.[CARD_PREVIEW_WHEEL_DELAY_KEY] ?? 1);
+      cardWheelMode = normalizeCardWheelMode(d?.[CARD_PREVIEW_WHEEL_MODE_KEY]);
     } catch {}
     if (cardWheelDelayInput) cardWheelDelayInput.value = String(v);
-    reflectCardPreviewAudioChildrenEnabled();
+    reflectCardWheelMode();
   }
   if (cardWheelDelayInput) {
     const saveDelay = () => {

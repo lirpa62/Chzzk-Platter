@@ -1808,6 +1808,20 @@
   const CARD_PREVIEW_WHEEL_DELAY_KEY = "cheeseCardPreviewWheelDelaySec";
   let cardPreviewWheelDelaySec = 1;
   let cardPreviewHoverEnteredAt = 0; // 현재 카드에 진입한 시각(ms)
+  // 카드 미리보기에서 휠이 음량을 조절하는 방식.
+  //   wheel(기본): 지금까지처럼 그냥 휠 → 음량
+  //   rightclick: 우클릭을 누른 채 휠일 때만 음량(플레이어의 같은 옵션과 맞춤)
+  //   off: 휠로는 조절하지 않음(버튼·슬라이더·우클릭 음소거만)
+  // ⚠ 제보: 스크롤 중 카드를 스치면 휠이 음량으로 먹혀 스크롤이 막힌다. 그렇다고
+  //   기능을 끄면 음량을 조절할 방법이 사라진다.
+  const CARD_PREVIEW_WHEEL_MODE_KEY = "cheeseCardPreviewWheelMode";
+  let cardPreviewWheelMode = "wheel";
+  function normalizeCardPreviewWheelMode(value) {
+    return value === "rightclick" || value === "off" ? value : "wheel";
+  }
+  // 우클릭+휠로 음량을 조절한 직후의 contextmenu·우클릭 음소거를 한 번 건너뛴다.
+  // 안 그러면 버튼을 떼는 순간 음소거까지 토글돼 두 동작이 겹친다.
+  let cardPreviewRightWheelUsedAt = 0;
   // 라이브 탐색 카드 호버 시 별도 플레이어(팔로잉 미리보기 인프라 재사용)로 미리보기(전역,
   // 기본 OFF). 켜면 카드 호버가 팔로잉 미리보기와 동일한 패널을 띄운다. content.js 전용.
   const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
@@ -40219,6 +40233,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
+    // 방금 우클릭+휠로 음량을 조절했다면 이번 우클릭은 그 제스처의 일부다.
+    // 메뉴만 막고 음소거는 토글하지 않는다(휠 한 번에 음량+음소거가 겹치지 않게).
+    if (
+      cardPreviewWheelMode === "rightclick" &&
+      Date.now() - cardPreviewRightWheelUsedAt < 700
+    ) {
+      cardPreviewRightWheelUsedAt = 0;
+      return;
+    }
     if (followPreviewState.nativeCardAudio?.video === video) {
       video.muted = true;
       if (cardPreviewAudibleVideo === video) cardPreviewAudibleVideo = null;
@@ -40239,11 +40262,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const CARD_PREVIEW_WHEEL_STEP = 0.05;
   function onCardPreviewWheelCapture(e) {
     if (!cardPreviewAudioOn) return;
+    if (cardPreviewWheelMode === "off") return; // 휠은 언제나 페이지 스크롤
     const video = cardPreviewVideoAtEvent(e);
     if (!video) return;
+    // '우클릭+휠' 모드: 오른쪽 버튼(buttons 비트 2)이 눌린 휠만 음량으로 본다.
+    // 플레이어의 같은 옵션과 판정 방식을 맞춘다.
+    if (cardPreviewWheelMode === "rightclick") {
+      if (!(e.buttons & 2)) return; // 그냥 휠 → 페이지 스크롤 그대로
+      cardPreviewRightWheelUsedAt = Date.now();
+    }
     // 카드에 충분히 머문 뒤에만 휠을 음량 조절로 가로챈다. 그 전엔 스크롤을 통과시켜
     // 스크롤로 카드를 스칠 때 걸리지 않게 한다(스크롤로 카드가 바뀌면 진입 시각 리셋됨).
-    const delayMs = Math.max(0, cardPreviewWheelDelaySec) * 1000;
+    // ⚠ 우클릭+휠은 사용자가 의도를 분명히 밝힌 제스처라 지연을 두지 않는다.
+    const delayMs =
+      cardPreviewWheelMode === "rightclick"
+        ? 0
+        : Math.max(0, cardPreviewWheelDelaySec) * 1000;
     if (delayMs > 0) {
       const card = cardPreviewCardAtTarget(e.target);
       // 현재 휠이 발생한 카드가 우리가 추적 중인 호버 카드와 같고, 머문 시간이 지연 이상일 때만.
@@ -40277,8 +40311,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 안 닫힘). body 직속 div(pointer-events:none)라 마우스 이벤트를 안 가로채 미리보기가
   // 안 멈춘다. 미리보기 video가 실제 있는 카드에만, 세션당 1회, N초 뒤 페이드아웃.
   const CARD_HINT_ID = "cheese-card-hint";
-  const CARD_HINT_TEXT =
-    "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 휠: 음량";
+  // 조작 방식이 설정에 따라 달라지므로 문구도 함께 바꾼다(안내와 실제가 어긋나지 않게).
+  function cardHintText() {
+    if (cardPreviewWheelMode === "off") {
+      return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거";
+    }
+    if (cardPreviewWheelMode === "rightclick") {
+      return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 우클릭+휠: 음량";
+    }
+    return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 휠: 음량";
+  }
   const CARD_HINT_SHOW_MS = 3000; // 표시 후 이 시간 뒤 사라짐
   // 스크롤 중엔 힌트를 숨기고, 스크롤이 멎은 뒤 이 시간이 지나야 다시 띄운다(스크롤 시
   // 카드가 이동하는데 힌트가 따라다니던 문제 방지).
@@ -40293,7 +40335,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (el) return el;
     el = document.createElement("div");
     el.id = CARD_HINT_ID;
-    el.textContent = CARD_HINT_TEXT;
+    el.textContent = cardHintText();
     document.body.appendChild(el);
     return el;
   }
@@ -50443,6 +50485,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       CARD_PREVIEW_AUDIO_KEY,
       CARD_PREVIEW_DEFAULT_VOLUME_KEY,
       CARD_PREVIEW_WHEEL_DELAY_KEY,
+      CARD_PREVIEW_WHEEL_MODE_KEY,
       CARD_DATE_TOOLTIP_KEY,
       VOD_TITLE_CHANGES_KEY,
       VOD_CHAPTER_HIDE_KEY,
@@ -51658,6 +51701,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[CARD_PREVIEW_WHEEL_DELAY_KEY]) {
         cardPreviewWheelDelaySec = normalizeCardPreviewWheelDelay(
           changes[CARD_PREVIEW_WHEEL_DELAY_KEY].newValue,
+        );
+      }
+      if (changes[CARD_PREVIEW_WHEEL_MODE_KEY]) {
+        cardPreviewWheelMode = normalizeCardPreviewWheelMode(
+          changes[CARD_PREVIEW_WHEEL_MODE_KEY].newValue,
         );
       }
       if (changes[CARD_LIVE_PREVIEW_KEY]) {

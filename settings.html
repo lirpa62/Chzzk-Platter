@@ -7513,14 +7513,73 @@
                   </span>
                 </div>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="card-preview-wheel-mode"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">└ 휠 음량 조절 방식</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="카드 미리보기에서 휠이 음량을 조절하는 방식을 고릅니다."
+                    >카드 미리보기 위에서 휠을 굴렸을 때의 동작입니다.
+                    <span><b>휠</b>은 바로 음량을 조절하고</span>
+                    <span
+                      ><b>우클릭 + 휠</b>은 오른쪽 버튼을 누른 채 굴릴 때만
+                      조절합니다(그냥 휠은 페이지 스크롤 그대로 — 플레이어의 '휠
+                      볼륨 조절'과 같은 방식).</span
+                    >
+                    <span
+                      ><b>사용 안 함</b>은 휠로는 조절하지 않고 음량
+                      버튼·슬라이더와 우클릭 음소거만 씁니다.</span
+                    ></span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-card-preview-wheel-mode
+                  role="radiogroup"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-card-preview-wheel-mode-value="wheel"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    휠
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-card-preview-wheel-mode-value="rightclick"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    우클릭 + 휠
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-card-preview-wheel-mode-value="off"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    사용 안 함
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-card-preview-wheel-delay-item>
                 <label for="cardPreviewWheelDelayInput">
                   <span class="settings-item-name">└ 휠 음량 활성 지연</span>
                   <span
                     class="settings-item-desc"
                     data-settings-summary="이 시간만큼 올려둔 뒤에만 휠이 음량을 조절합니다."
                     >카드에 마우스를 이 시간만큼 올려둔 뒤에만 휠이 음량 조절로
-                    동작합니다(그 전엔 스크롤 통과, 0=즉시, 0~5초)</span
+                    동작합니다(그 전엔 스크롤 통과, 0=즉시, 0~5초). 위에서 '휠'
+                    방식일 때만 쓰입니다.</span
                   >
                 </label>
                 <span class="settings-custom-input">
@@ -7542,7 +7601,8 @@
               재생되는 치지직 기본 미리보기를 조작합니다. 치즈 플래터의 별도
               미리보기 창이 열리면 소리가 겹치지 않도록 치지직 기본 미리보기는
               잠시 음소거됩니다. 스크롤 중 휠이 음량으로 걸리는 게 불편하면 위
-              '휠 음량 활성 지연'을 늘리세요.
+              '휠 음량 조절 방식'을 '우클릭 + 휠'로 바꾸거나 '휠 음량 활성
+              지연'을 늘리세요.
             </p>
           </section>
 
