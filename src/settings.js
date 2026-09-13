@@ -9826,12 +9826,33 @@
     cardWheelDelayInput.addEventListener("blur", saveDelay);
   }
 
-  // ⚠ settingsUi 의 applyLocks 도 이 행의 is-locked 를 건드린다(부모 기준). 그쪽은
-  //   root 의 change 리스너라 여기보다 늦게 돌아 방식 기준 잠금을 지워 버린다.
-  //   그래서 그 뒤에 한 번 더 우리 기준으로 맞춘다(제보: 다시 열면 잠금이 풀림).
-  cardPreviewAudioInput?.addEventListener("change", () => {
-    queueMicrotask(reflectCardPreviewAudioChildrenEnabled);
-  });
+  // ⚠ 이 행의 잠금은 주인이 둘이다. settingsUi 의 applyLocks 가 부모(카드 미리보기
+  //   음량)만 보고 is-locked/disabled 를 다시 계산하는데, 그게 '휠 음량 조절 방식'
+  //   기준 잠금을 지운다. applyLocks 는 부모 토글뿐 아니라 제외 목록 렌더 같은
+  //   비동기 경로(settingsDisclosures.refresh)에서도 돌아, 트리거를 하나씩
+  //   따라다니면 놓친다(제보: 다시 열면 풀려 있다).
+  //   그래서 행 자체를 지켜보다가 우리 기준과 어긋나면 즉시 되돌린다.
+  if (cardWheelDelayInput) {
+    const delayRow = cardWheelDelayInput.closest(".settings-item");
+    if (delayRow) {
+      let fixing = false;
+      new MutationObserver(() => {
+        if (fixing || cardWheelMode === null) return;
+        const parentOn = !!cardPreviewAudioInput?.checked;
+        const delayUsed = parentOn && cardWheelMode === "wheel";
+        const locked = delayRow.classList.contains("is-locked");
+        if (
+          locked === !delayUsed &&
+          cardWheelDelayInput.disabled === !delayUsed
+        ) {
+          return; // 이미 우리 기준과 같다
+        }
+        fixing = true;
+        reflectCardPreviewAudioChildrenEnabled();
+        fixing = false;
+      }).observe(delayRow, { attributes: true, attributeFilter: ["class"] });
+    }
+  }
   cardPreviewAudioInput?.addEventListener("change", () => {
     try {
       cachedStorageSet({
