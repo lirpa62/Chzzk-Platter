@@ -21,10 +21,10 @@
     ["update-notice", "[data-update-notice-enabled]"],
     ["wheel-volume", "[data-wheel-volume]"],
     ["action-overlay", "[data-action-overlay]"],
-    ["mixer-exclusions", "[data-mixer-always-on]"],
+    ["mixer-exclusions", "[data-mixer-auto-enable]"],
     ["mixer-default", "[data-mixer-global-default-enabled]"],
     ["mixer-gain", "[data-mixer-global-gain-default-enabled]"],
-    ["filter-exclusions", "[data-video-filter-always-on]"],
+    ["filter-exclusions", "[data-video-filter-auto-enable]"],
     ["affinity", "[data-affinity-on]"],
     ["vod-activity", "[data-vod-chat-graph]"],
     ["vod-role-chat", "[data-vod-role-chat]"],
@@ -50,10 +50,10 @@
     ["[data-action-overlay]", "[data-osd-group]"],
     ["[data-ad-mini-unmute]", "[data-ad-mini-keep-muted]"],
     ["[data-auto-reload-on-relive]", "#autoReliveMaxHours"],
-    ["[data-mixer-always-on]", "[data-mixer-exclude-item]"],
+    ["[data-mixer-auto-enable]", "[data-mixer-exclude-item]"],
     ["[data-mixer-global-default-enabled]", "[data-mixer-global-default-mode]"],
     ["[data-mixer-global-gain-default-enabled]", "[data-mixer-global-gain-default-mode]"],
-    ["[data-video-filter-always-on]", "[data-video-filter-exclude-item]"],
+    ["[data-video-filter-auto-enable]", "[data-video-filter-exclude-item]"],
     ["[data-video-filter-global-default-enabled]", "[data-video-filter-global-default-mode]"],
     // 다른 탭 알림은 토스트를 끄면 애초에 뜰 곳이 없다 → 부모가 꺼지면 잠근다.
     ['[data-feature="chatLogPowerToast"]', '[data-feature="chatLogPowerToastOtherTabs"]'],
@@ -291,7 +291,7 @@
       });
     }
     // 펼쳐도 보여 줄 게 없으면(모든 자식이 다른 이유로 숨겨져 있으면) 버튼 자체를
-    // 감춘다. 예: '항상 켜기 제외 채널'은 제외된 채널이 없으면 settings.js 가 행을
+    // 감춘다. 예: '자동 활성화 제외 채널'은 제외된 채널이 없으면 settings.js 가 행을
     // 숨기는데, 그때 펼치기 버튼만 남아 눌러도 아무 일이 없었다.
     // ⚠ is-feature-collapsed 는 '우리가 접어서' 숨긴 것이라 제외하고 판단한다.
     //   그걸 세면 접혀 있을 때마다 버튼이 사라져 다시 펼칠 수 없다.

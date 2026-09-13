@@ -1677,52 +1677,82 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">오디오 믹서 기본 켜짐</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="켜진 상태로 시작하되 버튼으로 언제든 끌 수 있습니다."
-                    >켜진 상태로 시작하되 믹서 버튼을 눌러 언제든 끌 수
-                    있습니다. 끄더라도 제외 채널로 등록되지 않아 다음 방문에는
-                    다시 켜집니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-mixer-default-on />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
               <li
-                class="settings-item"
+                class="settings-item settings-item-stacked"
                 data-new-feature="audio-mixer-button-controls"
+                data-settings-search-aliases="오디오 믹서 기본 켜짐 오디오 믹서 항상 켜기"
               >
-                <label>
-                  <span class="settings-item-name">오디오 믹서 항상 켜기</span>
+                <div style="width: 100%">
+                  <span class="settings-item-name"
+                    >오디오 믹서 자동 활성화</span
+                  >
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="채널에 들어가면 믹서를 자동으로 켭니다."
-                    >페이지에서 처음 조작할 때 믹서를 켭니다. 버튼으로는 꺼지지
-                    않고 패널의 전원 버튼으로 끄면 그 채널은 제외 목록에
-                    남습니다. 충돌이 감지되면 해제됩니다.</span
+                    data-settings-summary="페이지 진입 시 믹서를 자동으로 켜는 방식을 선택합니다."
+                    >수동 버튼은 모든 모드에서 사용할 수 있습니다.
+                    <span
+                      ><b>방문 시 켜기</b>는 그 페이지에서 자유롭게 끌 수
+                      있고</span
+                    >
+                    <span
+                      ><b>항상 켜기</b>는 패널에서 끈 채널을 자동 활성화
+                      대상에서 제외합니다.</span
+                    >
+                  </span>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-mixer-auto-enable
+                  role="radiogroup"
+                  aria-label="오디오 믹서 자동 활성화"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-auto-enable-value="off"
+                    role="radio"
+                    aria-checked="true"
+                    title="자동으로 켜지 않으며 필요할 때 버튼으로 사용합니다."
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-mixer-always-on />
-                  <i aria-hidden="true"></i>
-                </label>
+                    자동 켜기 안 함
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-auto-enable-value="default"
+                    role="radio"
+                    aria-checked="false"
+                    title="페이지 진입 시 켜고, 해당 페이지에서는 버튼으로 자유롭게 끕니다."
+                  >
+                    방문 시 켜기
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-auto-enable-value="always"
+                    role="radio"
+                    aria-checked="false"
+                    title="항상 자동으로 켜며, 패널에서 끈 채널은 제외합니다."
+                  >
+                    항상 켜기
+                  </button>
+                </div>
               </li>
               <li
                 class="settings-item settings-item-stacked"
                 data-mixer-exclude-item
+                hidden
               >
                 <div>
-                  <span class="settings-item-name">└ 항상 켜기 제외 채널</span>
+                  <span class="settings-item-name"
+                    >└ 자동 활성화 제외 채널</span
+                  >
                   <span
                     class="settings-item-desc"
                     data-settings-summary="패널에서 직접 끈 채널입니다. 자동으로 켜지지 않습니다."
                     >직접 믹서를 끈 채널은 자동으로 켜지 않습니다. 목록에서
-                    제거하면 다시 적용됩니다.</span
+                    제거하면 다시 항상 켜기가 적용됩니다.</span
                   >
                 </div>
                 <div class="settings-exclude-list" data-mixer-exclude-list>
@@ -2160,47 +2190,77 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">비디오 필터 기본 켜짐</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="켜진 상태로 시작하되 버튼으로 언제든 끌 수 있습니다."
-                    >켜진 상태로 시작하되 필터 버튼을 눌러 언제든 끌 수
-                    있습니다. 끄더라도 제외 채널로 등록되지 않아 다음 방문에는
-                    다시 켜집니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-video-filter-default-on />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
               <li
-                class="settings-item"
+                class="settings-item settings-item-stacked"
                 data-new-feature="video-filter-button-controls"
+                data-settings-search-aliases="비디오 필터 기본 켜짐 비디오 필터 항상 켜기"
               >
-                <label>
-                  <span class="settings-item-name">비디오 필터 항상 켜기</span>
+                <div style="width: 100%">
+                  <span class="settings-item-name"
+                    >비디오 필터 자동 활성화</span
+                  >
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="채널에 들어가면 필터를 자동으로 켭니다."
-                    >채널 진입 시 비디오 필터 자동 활성화. 버튼으로는 꺼지지
-                    않고 패널의 전원 버튼으로 끄면 그 채널은 제외 목록에
-                    남습니다.</span
+                    data-settings-summary="페이지 진입 시 필터를 자동으로 켜는 방식을 선택합니다."
+                    >수동 버튼은 모든 모드에서 사용할 수 있습니다.
+                    <span
+                      ><b>방문 시 켜기</b>는 그 페이지에서 자유롭게 끌 수
+                      있고</span
+                    >
+                    <span
+                      ><b>항상 켜기</b>는 패널에서 끈 채널을 자동 활성화
+                      대상에서 제외합니다.</span
+                    >
+                  </span>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-video-filter-auto-enable
+                  role="radiogroup"
+                  aria-label="비디오 필터 자동 활성화"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-auto-enable-value="off"
+                    role="radio"
+                    aria-checked="true"
+                    title="자동으로 켜지 않으며 필요할 때 버튼으로 사용합니다."
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-video-filter-always-on />
-                  <i aria-hidden="true"></i>
-                </label>
+                    자동 켜기 안 함
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-auto-enable-value="default"
+                    role="radio"
+                    aria-checked="false"
+                    title="페이지 진입 시 켜고, 해당 페이지에서는 버튼으로 자유롭게 끕니다."
+                  >
+                    방문 시 켜기
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-auto-enable-value="always"
+                    role="radio"
+                    aria-checked="false"
+                    title="항상 자동으로 켜며, 패널에서 끈 채널은 제외합니다."
+                  >
+                    항상 켜기
+                  </button>
+                </div>
               </li>
               <li
                 class="settings-item settings-item-stacked"
                 data-video-filter-exclude-item
+                hidden
               >
                 <div>
-                  <span class="settings-item-name">└ 항상 켜기 제외 채널</span>
+                  <span class="settings-item-name"
+                    >└ 자동 활성화 제외 채널</span
+                  >
                   <span class="settings-item-desc"
                     >패널에서 직접 끈 채널입니다. 이 채널에서는 비디오 필터가
                     자동으로 켜지지 않습니다. 제외를 해제하면 다시 '항상 켜기'가

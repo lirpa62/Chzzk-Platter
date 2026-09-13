@@ -2583,52 +2583,74 @@
     syncCustomFollowLock();
   }
 
-  // ── 오디오 믹서 항상 켜기(전역) ───────────────────────────────────────────
-  // data-feature와 별개 키. 체크=항상 켜기(첫 제스처 후 자동 활성화).
+  // ── 오디오 믹서 자동 활성화(전역) ─────────────────────────────────────────
+  // 저장 형식은 기존 두 boolean을 유지해 이전 설정 파일과 런타임을 그대로 지원한다.
   const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
-  const mixerAlwaysOnInput = document.querySelector("[data-mixer-always-on]");
-
-  async function loadMixerAlwaysOn() {
-    let on = false;
-    try {
-      const data = await cachedStorageGet(MIXER_ALWAYS_ON_KEY);
-      on = data?.[MIXER_ALWAYS_ON_KEY] === true;
-    } catch {}
-    if (mixerAlwaysOnInput) mixerAlwaysOnInput.checked = on;
-  }
-
-  mixerAlwaysOnInput?.addEventListener("change", () => {
-    try {
-      cachedStorageSet({
-        [MIXER_ALWAYS_ON_KEY]: mixerAlwaysOnInput.checked,
-      });
-    } catch {}
-  });
-  loadMixerAlwaysOn();
-
-  // ── 오디오 믹서 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
-  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
-  // '항상 켜기 제외 채널'에 남기지 않는다(다음 방문엔 다시 켜진 채로 시작).
   const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
-  const mixerDefaultOnInput = document.querySelector("[data-mixer-default-on]");
 
-  async function loadMixerDefaultOn() {
-    let on = false;
-    try {
-      const data = await cachedStorageGet(MIXER_DEFAULT_ON_KEY);
-      on = data?.[MIXER_DEFAULT_ON_KEY] === true;
-    } catch {}
-    if (mixerDefaultOnInput) mixerDefaultOnInput.checked = on;
+  function setupAutoEnableMode({
+    groupSelector,
+    excludeItemSelector,
+    alwaysOnKey,
+    defaultOnKey,
+  }) {
+    const group = document.querySelector(groupSelector);
+    if (!group) return;
+    const buttons = [...group.querySelectorAll("[data-auto-enable-value]")];
+    const excludeItem = document.querySelector(excludeItemSelector);
+    const validModes = new Set(["off", "default", "always"]);
+    let userSelected = false;
+
+    function reflect(mode) {
+      for (const button of buttons) {
+        const active = button.dataset.autoEnableValue === mode;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      }
+      if (excludeItem) {
+        excludeItem.dataset.autoEnableMode = mode;
+        excludeItem.hidden =
+          mode !== "always" || excludeItem.dataset.hasExclusions !== "true";
+      }
+      settingsDisclosures?.refresh?.();
+    }
+
+    group.addEventListener("click", (event) => {
+      const button = event.target.closest?.("[data-auto-enable-value]");
+      if (!button || !group.contains(button)) return;
+      const mode = button.dataset.autoEnableValue;
+      if (!validModes.has(mode)) return;
+      userSelected = true;
+      reflect(mode);
+      try {
+        cachedStorageSet({
+          [alwaysOnKey]: mode === "always",
+          [defaultOnKey]: mode === "default",
+        });
+      } catch {}
+    });
+
+    void (async () => {
+      let data = {};
+      try {
+        data = await cachedStorageGet([alwaysOnKey, defaultOnKey]);
+      } catch {}
+      const mode =
+        data?.[alwaysOnKey] === true
+          ? "always"
+          : data?.[defaultOnKey] === true
+            ? "default"
+            : "off";
+      if (!userSelected) reflect(mode);
+    })();
   }
 
-  mixerDefaultOnInput?.addEventListener("change", () => {
-    try {
-      cachedStorageSet({
-        [MIXER_DEFAULT_ON_KEY]: mixerDefaultOnInput.checked,
-      });
-    } catch {}
+  setupAutoEnableMode({
+    groupSelector: "[data-mixer-auto-enable]",
+    excludeItemSelector: "[data-mixer-exclude-item]",
+    alwaysOnKey: MIXER_ALWAYS_ON_KEY,
+    defaultOnKey: MIXER_DEFAULT_ON_KEY,
   });
-  loadMixerDefaultOn();
 
   // ── '항상 켜기' 제외 채널 목록(오디오 믹서 / 비디오 필터 공용) ────────────
   // 패널에서 직접 끈 채널은 per-channel 저장값에 userDisabled=true 로 남는다
@@ -2702,8 +2724,12 @@
       try {
         hashes = await excludedChannels();
       } catch {}
-      // 목록이 비면 항목 자체를 감춰 설정 화면을 어지럽히지 않는다.
-      if (item) item.hidden = hashes.length === 0;
+      // 제외 목록은 '항상 켜기' 모드에서 실제 항목이 있을 때만 표시한다.
+      if (item) {
+        item.dataset.hasExclusions = String(hashes.length > 0);
+        item.hidden =
+          item.dataset.autoEnableMode !== "always" || hashes.length === 0;
+      }
       // 그 행이 유일한 자식이면 내용 없는 펼치기 버튼도 함께 감춰야 한다.
       settingsDisclosures?.refresh?.();
       list.textContent = "";
@@ -3625,56 +3651,16 @@
     reflectChatHistoryAvailability();
   })();
 
-  // ── 비디오 필터 항상 켜기(전역) ───────────────────────────────────────────
-  // 체크=항상 켜기(채널 진입 시 자동 활성화). 채널별로 직접 끄면 그 채널은 유지.
+  // ── 비디오 필터 자동 활성화(전역) ─────────────────────────────────────────
   const VIDEO_FILTER_ALWAYS_ON_KEY = "cheeseVideoFilterAlwaysOn";
-  const videoFilterAlwaysOnInput = document.querySelector(
-    "[data-video-filter-always-on]",
-  );
-
-  async function loadVideoFilterAlwaysOn() {
-    let on = false;
-    try {
-      const data = await cachedStorageGet(VIDEO_FILTER_ALWAYS_ON_KEY);
-      on = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
-    } catch {}
-    if (videoFilterAlwaysOnInput) videoFilterAlwaysOnInput.checked = on;
-  }
-
-  videoFilterAlwaysOnInput?.addEventListener("change", () => {
-    try {
-      cachedStorageSet({
-        [VIDEO_FILTER_ALWAYS_ON_KEY]: videoFilterAlwaysOnInput.checked,
-      });
-    } catch {}
-  });
-  loadVideoFilterAlwaysOn();
-
-  // ── 비디오 필터 기본 켜짐(전역, 기본 OFF) ────────────────────────────────
-  // '항상 켜기'와 다른 점: 좌클릭으로 자유롭게 끌 수 있고, 끄더라도 그 채널을
-  // '항상 켜기 제외 채널'에 남기지 않는다(오디오 믹서의 같은 옵션과 동일 규칙).
   const VIDEO_FILTER_DEFAULT_ON_KEY = "cheeseVideoFilterDefaultOn";
-  const videoFilterDefaultOnInput = document.querySelector(
-    "[data-video-filter-default-on]",
-  );
 
-  async function loadVideoFilterDefaultOn() {
-    let on = false;
-    try {
-      const data = await cachedStorageGet(VIDEO_FILTER_DEFAULT_ON_KEY);
-      on = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
-    } catch {}
-    if (videoFilterDefaultOnInput) videoFilterDefaultOnInput.checked = on;
-  }
-
-  videoFilterDefaultOnInput?.addEventListener("change", () => {
-    try {
-      cachedStorageSet({
-        [VIDEO_FILTER_DEFAULT_ON_KEY]: videoFilterDefaultOnInput.checked,
-      });
-    } catch {}
+  setupAutoEnableMode({
+    groupSelector: "[data-video-filter-auto-enable]",
+    excludeItemSelector: "[data-video-filter-exclude-item]",
+    alwaysOnKey: VIDEO_FILTER_ALWAYS_ON_KEY,
+    defaultOnKey: VIDEO_FILTER_DEFAULT_ON_KEY,
   });
-  loadVideoFilterDefaultOn();
 
   // ── 넓은 화면 자동 적용(전역, 진입 시 viewmode 자동 켜기) ──────────────────
   const WIDE_SCREEN_AUTO_KEY = "cheeseWideScreenAuto";

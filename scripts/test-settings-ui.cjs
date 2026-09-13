@@ -55,7 +55,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       // 동작하는가'를 보므로 두 옵션을 켠 상태로 둔다.
       const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1']]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
-      window.saved={cheeseSettingsKnownFeatures:[],cheeseSettingsNewFeatureUpdatePending:true,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false};
+      window.saved={cheeseSettingsKnownFeatures:[],cheeseSettingsNewFeatureUpdatePending:true,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false,
+        cheeseMixerAlwaysOn:true,cheeseMixerDefaultOn:true,cheeseVideoFilterAlwaysOn:false,cheeseVideoFilterDefaultOn:true,
+        'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
         storage:{local:{get:async()=>structuredClone(saved),set:obj=>{writes.push(structuredClone(obj));Object.assign(saved,obj);return Promise.resolve();},remove:async()=>{},getKeys:async()=>Object.keys(saved)},onChanged:{addListener:()=>{}}},
@@ -200,6 +202,28 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(CheeseSettingsUi.storedFromChecked(el)===value,'roundtrip failed: '+el.dataset.feature);el.checked=old;
       }
       search('오디오 믹서 숨김');check(shown(row('[data-feature="audioMixer"]')),'old toggle label not searchable');search('');
+    `);
+    await test('auto-enable modes preserve legacy keys and remain mutually exclusive',`
+      const mixer=document.querySelector('[data-mixer-auto-enable]');
+      const filter=document.querySelector('[data-video-filter-auto-enable]');
+      const selected=group=>group.querySelector('[aria-checked="true"]')?.dataset.autoEnableValue;
+      check(selected(mixer)==='always','legacy mixer precedence must prefer always');
+      check(selected(filter)==='default','legacy filter default mode not restored');
+      check(!document.querySelector('[data-mixer-exclude-item]').hidden,'mixer exclusions hidden in always mode');
+      check(document.querySelector('[data-video-filter-exclude-item]').hidden,'filter exclusions visible outside always mode');
+      mixer.querySelector('[data-auto-enable-value="default"]').click();
+      check(saved.cheeseMixerAlwaysOn===false&&saved.cheeseMixerDefaultOn===true,'mixer default mode keys invalid');
+      check(document.querySelector('[data-mixer-exclude-item]').hidden,'mixer exclusions remained visible in default mode');
+      mixer.querySelector('[data-auto-enable-value="off"]').click();
+      check(saved.cheeseMixerAlwaysOn===false&&saved.cheeseMixerDefaultOn===false,'mixer off mode keys invalid');
+      filter.querySelector('[data-auto-enable-value="always"]').click();
+      check(saved.cheeseVideoFilterAlwaysOn===true&&saved.cheeseVideoFilterDefaultOn===false,'filter always mode keys invalid');
+      check(selected(filter)==='always','filter selected state not reflected');
+      check(document.querySelector('[data-video-filter-exclude-item]').hidden,'empty filter exclusions visible in always mode');
+      check(!shown(document.querySelector('[data-settings-disclosure="filter-exclusions"]')),'empty filter disclosure button visible');
+      search('비디오 필터 기본 켜짐');
+      check(shown(row('[data-video-filter-auto-enable]')),'legacy auto-enable name not searchable');
+      search('');
     `);
     await test('preset popover still opens after repeated searches',`
       document.querySelector('[data-tab="mixer"]').click();

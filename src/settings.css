@@ -643,6 +643,9 @@ html.settings-tab-view .settings-resizer {
   vertical-align: middle;
   cursor: pointer;
 }
+.settings-disclosure-button[hidden] {
+  display: none !important;
+}
 .settings-disclosure-button:hover:not(:disabled) {
   background: var(--popup-soft-bg);
 }
@@ -1373,7 +1376,9 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-mixer-global-default-mode]),
 .settings-item:has([data-mixer-global-gain-default]),
 .settings-item:has([data-mixer-global-gain-default-mode]),
+.settings-item:has([data-mixer-auto-enable]),
 .settings-item:has([data-mixer-exclude-list]),
+.settings-item:has([data-video-filter-auto-enable]),
 .settings-item:has([data-embed-clip-gain-min]),
 .settings-item:has([data-embed-clip-gain-max]),
 .settings-item:has([data-embed-clip-default-gain]),
