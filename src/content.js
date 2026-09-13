@@ -34762,6 +34762,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   // 섹션 순서 편집용 드래그 핸들. 편집 모드가 아니면 아예 만들지 않는다.
+  // 편집 중에는 툴바(제목 줄) 전체를 끌 수 있게 한다. 손잡이만 끌리면 '버튼이
+  // 따라 움직인다'는 느낌이 안 난다(설정의 목록 배치 순서와 같은 조작감).
+  function customFollowSectionSortAttrs(key) {
+    if (!customFollowSectionSorting) return "";
+    return ` draggable="true" data-cf-section-drag="${escapeAttribute(key)}"`;
+  }
+
   function customFollowSectionDragHandle(key, label) {
     if (!customFollowSectionSorting) return "";
     return (
@@ -34884,7 +34891,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         : "";
     return (
       `<div class="cheese-cf-groups${areaCollapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section-order="groups" data-cf-star="${escapeAttribute(customFollowStarMode.groups || "hover")}">` +
-      `<div class="cheese-cf-group-toolbar">` +
+      `<div class="cheese-cf-group-toolbar"${customFollowSectionSortAttrs("groups")}>` +
       customFollowSectionDragHandle("groups", "그룹") +
       `<button type="button" class="cheese-cf-groups-toggle" data-cf-groups-toggle aria-expanded="${String(!areaCollapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-groups-chevron") +
@@ -36562,7 +36569,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .join("");
     return (
       `<section class="cheese-cf-channel-section cheese-cf-affinity${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section="affinity" data-cf-section-order="affinity" data-cf-star="${escapeAttribute(customFollowStarMode.affinity || "hover")}">` +
-      `<div class="cheese-cf-section-toolbar">` +
+      `<div class="cheese-cf-section-toolbar"${customFollowSectionSortAttrs("affinity")}>` +
       customFollowSectionDragHandle("affinity", AFFINITY_LABEL) +
       `<button type="button" data-cf-section-toggle="affinity" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
@@ -36622,7 +36629,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       : "";
     return (
       `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${favSorting ? " is-sorting" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section="${key}" data-cf-section-order="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
-      `<div class="cheese-cf-section-toolbar">` +
+      `<div class="cheese-cf-section-toolbar"${customFollowSectionSortAttrs(key)}>` +
       customFollowSectionDragHandle(key, label) +
       `<button type="button" data-cf-section-toggle="${key}" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
@@ -37619,20 +37626,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         popupFallbackLastX = e.clientX;
         popupFallbackLastY = e.clientY;
       }
-      // 우리 목록 영역 위에서만 반응(다른 곳으로 드래그 시 이동 안 함).
-      if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID)) return;
+      // ⚠ 순서 편집 중에는 목록 밖으로 나가도 계속 따라가야 한다. 예전에는 여기서
+      //   빠져나가 항목이 마지막 자리에 얼어붙었고, 그 상태로 저장돼 '원하는
+      //   순서로 안 놓인다'는 제보가 됐다. reorderToY 는 y 만 보고 목록 안에서
+      //   자리를 잡으므로 범위를 벗어난 y 도 안전하다(맨 위/맨 아래로 붙는다).
+      const inNav = Boolean(e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID));
+      if (!inNav && !customFollowGroupSortKey) return;
       e.preventDefault(); // drop 허용
       if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
       lastOverY = e.clientY;
       if (!overRaf) overRaf = requestAnimationFrame(reorderToY);
     };
-    const onDrop = (e) => {
-      if (!customFollowDragEl) return;
-      const listEl = customFollowDragEl.parentElement;
-      if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID) || !listEl) return;
-      popupFallbackHandled = true;
-      e.preventDefault();
-      e.stopPropagation();
+    // 지금 DOM 순서를 저장한다(drop 과 dragend 가 함께 쓴다).
+    // ⚠ 목록 밖에서 손을 떼면 drop 이 오지 않는다. 그때 저장하지 않으면 화면은
+    //   새 순서인데 저장은 옛 순서로 남아 '원하는 순서로 안 놓인다'가 된다.
+    const commitItemOrder = (listEl) => {
+      if (!listEl) return;
       const ids = [...listEl.querySelectorAll(".cheese-cf-draggable")].map(
         (li) => li.dataset.channelId,
       );
@@ -37682,6 +37691,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ensureCustomFollowList();
       }, 250);
     };
+    const onDrop = (e) => {
+      if (!customFollowDragEl) return;
+      const listEl = customFollowDragEl.parentElement;
+      if (!e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID) || !listEl) return;
+      popupFallbackHandled = true;
+      e.preventDefault();
+      e.stopPropagation();
+      commitItemOrder(listEl);
+    };
     const onEnd = (e) => {
       const href = popupFallbackHref;
       const handled = popupFallbackHandled;
@@ -37699,8 +37717,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const endedInCustomList = Boolean(
         endTarget?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID),
       );
+      // ⚠ 순서 편집 중에는 팝업 플레이어를 절대 열지 않는다. 사이드바 밖에서 손을 떼면
+      //   handled/endedInCustomList 가 모두 false 라 순서만 바꾸려던 드래그가 방송을
+      //   띄워버린다.
       const shouldOpenPopup =
         popupPlayerOn &&
+        !customFollowGroupSortKey &&
         href.startsWith("/live/") &&
         !handled &&
         !endedInCustomList &&
@@ -37709,6 +37731,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (overRaf) {
         cancelAnimationFrame(overRaf);
         overRaf = 0;
+      }
+      // ⚠ 사이드바 밖(빈 공간 포함)에서 손을 떼면 drop 이 아예 오지 않는다. 순서 편집
+      //   중이라면 여기서 현재 DOM 순서를 저장해야 화면과 저장값이 어긋나지 않는다.
+      if (customFollowGroupSortKey && customFollowDragEl && !handled) {
+        commitItemOrder(customFollowDragEl.parentElement);
       }
       document
         .querySelectorAll(".cheese-cf-dragging")
