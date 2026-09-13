@@ -7852,13 +7852,6 @@ html.cheese-channel-live-profile-custom
 #cheese-follow-preview.is-loading .cheese-follow-preview-video {
   pointer-events: none;
 }
-/* ⚠ controls 를 켠 video 는 버퍼링 중 크롬이 '회전하는 원' 스피너를 직접 그린다.
-   우리 3-dot 펄스와 겹쳐 로딩 표시가 두 개로 보였다. 네이티브 스피너만 감춘다
-   (로딩 표시는 우리 것 하나로 통일 — 컨트롤 막대 자체는 그대로 둔다). */
-#cheese-follow-preview
-  .cheese-follow-preview-video::-webkit-media-controls-loading-panel {
-  display: none !important;
-}
 
 /* 썸네일 이미지(기본 숨김, 썸네일 모드에서만 표시) */
 #cheese-follow-preview .cheese-follow-preview-thumb {

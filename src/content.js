@@ -38944,7 +38944,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // 영상 본문(썸네일 모드면 video 대신 img 표시).
       `<div class="cheese-follow-preview-body">` +
       `<div class="cheese-follow-preview-loading" aria-hidden="true"><i></i><i></i><i></i></div>` +
-      `<video class="cheese-follow-preview-video" muted autoplay playsinline controls controlslist="nodownload noremoteplayback noplaybackrate"></video>` +
+      `<video class="cheese-follow-preview-video" muted autoplay playsinline controlslist="nodownload noremoteplayback noplaybackrate"></video>` +
       `<img class="cheese-follow-preview-thumb" alt="" />` +
       // 영상 위 시청자 수 뱃지(치지직 라이브 카드식). 카드 레이아웃일 때만 CSS로 표시.
       `<div class="cheese-follow-preview-live-badge" aria-hidden="true"><i></i><b></b></div>` +
@@ -39298,8 +39298,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyFollowPreviewHiddenParts(el);
     positionFollowPreview(el, li, anchorKind);
     scheduleFollowPreviewTooltipPosition(el, li, anchorKind);
-    el.classList.add("is-loading");
-    el.classList.remove("is-ready");
+    setFollowPreviewLoading(el, true);
 
     const data = await fetchLivePreviewData(channelId);
     if (pathname !== location.pathname) {
@@ -39329,26 +39328,39 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  // 로딩 표시를 한 곳에서 관리한다.
+  // ⚠ controls 를 켠 video 는 버퍼링 중 크롬이 '회전하는 원' 스피너를 직접 그린다.
+  //   우리 3-dot 펄스와 겹쳐 로딩 표시가 두 개로 보인다. CSS 로
+  //   ::-webkit-media-controls-loading-panel 을 숨기는 방법은 통하지 않는다
+  //   (실측: 규칙은 남지만 적용되지 않아 computed display 가 그대로 inline).
+  //   그래서 로딩이 끝난 뒤에 controls 를 붙인다 — 스피너가 뜰 창 자체를 없앤다.
+  function setFollowPreviewLoading(el, loading) {
+    if (!el) return;
+    el.classList.toggle("is-loading", loading);
+    el.classList.toggle("is-ready", !loading);
+    const video = el.querySelector(".cheese-follow-preview-video");
+    if (!video) return;
+    if (loading) video.removeAttribute("controls");
+    else video.setAttribute("controls", "");
+  }
+
   // 썸네일 모드 표시(이미지 로드되면 ready). 영상과 달리 소리/트래픽이 없다.
   function showFollowPreviewThumb(el, thumbUrl, channelId) {
     const img = el.querySelector(".cheese-follow-preview-thumb");
     if (!img) return;
     if (!thumbUrl) {
       // 썸네일이 없으면 그냥 ready 처리(빈 영역).
-      el.classList.remove("is-loading");
-      el.classList.add("is-ready");
+      setFollowPreviewLoading(el, false);
       return;
     }
     img.onload = () => {
       if (followPreviewState.currentChannelId === channelId) {
-        el.classList.remove("is-loading");
-        el.classList.add("is-ready");
+        setFollowPreviewLoading(el, false);
       }
     };
     img.onerror = () => {
       if (followPreviewState.currentChannelId === channelId) {
-        el.classList.remove("is-loading");
-        el.classList.add("is-ready");
+        setFollowPreviewLoading(el, false);
       }
     };
     // 캐시 무력화로 최신 스냅샷(라이브 진행 중 갱신).
@@ -39765,8 +39777,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     const onReady = () => {
       if (isCurrent()) {
-        el.classList.remove("is-loading");
-        el.classList.add("is-ready");
+        setFollowPreviewLoading(el, false);
       }
     };
     // 영상 로드가 끝내 실패하면 썸네일로 대체해 보여준다(빈 검은 화면 방지).
