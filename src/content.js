@@ -558,6 +558,8 @@
     "liveRewind",
     "searchVideos",
     "searchClips",
+    // 재생 속도 버튼도 기본 숨김.
+    "speedButton",
   ]);
   const FEATURE_FLAGS_MESSAGE = "cheese-feature-flags";
   // 같은 창 안의 ISOLATED↔MAIN 브리지용 targetOrigin.

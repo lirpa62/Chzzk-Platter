@@ -25,6 +25,7 @@
     ["mixer-default", "[data-mixer-global-default-enabled]"],
     ["mixer-gain", "[data-mixer-global-gain-default-enabled]"],
     ["filter-exclusions", "[data-video-filter-always-on]"],
+    ["affinity", "[data-affinity-on]"],
     ["vod-activity", "[data-vod-chat-graph]"],
     ["vod-role-chat", "[data-vod-role-chat]"],
     ["chat-time", '[data-feature="chatShowTime"]'],

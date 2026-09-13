@@ -655,6 +655,13 @@
                   data-settings-tab-order
                   aria-label="설정 탭 배치 순서"
                 ></ul>
+                <button
+                  type="button"
+                  class="settings-order-reset"
+                  data-settings-tab-order-reset
+                >
+                  기본 순서로
+                </button>
               </li>
             </ul>
           </section>
@@ -9335,15 +9342,11 @@
                   <span class="settings-item-name">클립 비디오 필터 사용</span>
                   <span class="settings-item-desc"
                     >클립 페이지에 원클릭 비디오 필터 버튼을 표시하고 효과를
-                    적용합니다(기본 켜짐)</span
+                    적용합니다</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-clip-video-filter-enabled
-                    checked
-                  />
+                  <input type="checkbox" data-clip-video-filter-enabled />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

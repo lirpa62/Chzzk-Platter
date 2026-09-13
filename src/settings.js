@@ -1123,6 +1123,7 @@
     "liveRewind",
     "searchVideos",
     "searchClips",
+    "speedButton",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -3802,6 +3803,58 @@
       );
     });
   }
+
+  // ── '전체'에서 스크롤하면 현재 보이는 탭을 표시한다 ─────────────────────
+  // ⚠ '전체'일 때만 의미가 있다. 한 탭만 볼 때는 이미 그 탭이 is-active 다.
+  // ⚠ is-active 와 다른 클래스를 쓴다. 선택(클릭)과 '지금 보고 있는 위치'는
+  //   다른 개념이라, 같은 클래스를 쓰면 탭을 눌렀을 때 표시가 엉킨다.
+  function setupScrollSpy() {
+    if (!panelsScroll) return;
+    let frame = 0;
+    const clear = () => {
+      tabButtons.forEach((b) => b.classList.remove("is-in-view"));
+    };
+    const update = () => {
+      frame = 0;
+      if (activeTab !== "all") {
+        clear();
+        return;
+      }
+      // 패널 위쪽 기준선(1/3 지점)을 지나간 것 중 마지막 섹션이 '지금 보는 곳'.
+      const line = panelsScroll.getBoundingClientRect().top +
+        panelsScroll.clientHeight / 3;
+      let current = "";
+      for (const panel of panels) {
+        if (panel.hidden) continue;
+        const box = panel.getBoundingClientRect();
+        if (box.top <= line) current = panel.dataset.panel || current;
+        else break;
+      }
+      tabButtons.forEach((b) => {
+        b.classList.toggle(
+          "is-in-view",
+          !!current && b.dataset.tab === current,
+        );
+      });
+    };
+    panelsScroll.addEventListener(
+      "scroll",
+      () => {
+        if (frame) return;
+        frame = requestAnimationFrame(update);
+      },
+      { passive: true },
+    );
+    update();
+  }
+  setupScrollSpy();
+
+  // 기본 순서로 되돌린다(저장값을 지우고 마크업 순서를 다시 쓴다).
+  document
+    .querySelector("[data-settings-tab-order-reset]")
+    ?.addEventListener("click", () => {
+      commitTabOrder(orderableTabs());
+    });
 
   (async () => {
     let saved = null;
@@ -8627,11 +8680,13 @@
   // 보여 준다(같은 탭의 다른 항목들과 방향을 맞춘다) → 값만 뒤집어 저장한다.
   const vodSpeedButtonInput = document.querySelector("[data-vod-speed-button]");
   async function loadVodSpeedButton() {
-    let hidden = false; // 기본 표시
+    let hidden = true; // 기본 숨김(content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다)
     try {
       const data = await cachedStorageGet(FEATURE_HIDDEN_KEY);
       const map = data?.[FEATURE_HIDDEN_KEY];
-      hidden = map && typeof map === "object" && map.speedButton === true;
+      if (map && typeof map === "object" && typeof map.speedButton === "boolean") {
+        hidden = map.speedButton;
+      }
     } catch {}
     if (vodSpeedButtonInput) vodSpeedButtonInput.checked = !hidden;
   }
