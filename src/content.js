@@ -32374,7 +32374,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       `.${CUSTOM_FOLLOW_PAGE_FAVORITE_CLASS}`,
     );
     // 즐겨찾기 버튼이 있으면 그 옆에, 없으면 같은 액션 영역을 직접 찾는다.
-    const anchor = favorite || null;
+    // ⚠ 예전에는 즐겨찾기 버튼이 없으면 그대로 포기해서, 전용 팔로잉 목록이나
+    //   즐겨찾기를 끈 사용자에게는 메모 버튼이 아예 뜨지 않았다(제보). 메모는
+    //   즐겨찾기와 무관한 기능이므로 액션 영역만 찾으면 된다.
+    let anchor = favorite;
+    if (!anchor) {
+      const scope =
+        document.querySelector("main") ||
+        document.getElementById("layout-body");
+      const followingButton = findFollowingActionButtons(scope)[0];
+      const controls = followingButton?.closest?.('div[class*="_control_"]');
+      anchor = controls
+        ? findActionButtonByBlindText(controls, "더보기 메뉴")
+        : null;
+    }
     if (!anchor) {
       existing.forEach((b) => b.remove());
       return;

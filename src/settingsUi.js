@@ -30,6 +30,8 @@
     ["vod-role-chat", "[data-vod-role-chat]"],
     ["logpower-toast", '[data-feature="chatLogPowerToast"]'],
     ["page-favorite", '[data-feature="sbFollowPageFavoriteButton"]'],
+    ["fav-enabled", '[data-feature="sbFollowFavEnabled"]'],
+    ["group-enabled", '[data-feature="sbFollowGroupEnabled"]'],
     ["lounge-news", '[data-feature="loungeNews"]'],
     ["inbox-community", '[data-feature="inboxCommunityNews"]'],
     ["inbox-logpower", '[data-feature="inboxLogPower"]'],
@@ -74,6 +76,8 @@
     //   끼어 있어 화면상으로는 자동 펼치기의 하위처럼 보였다(잠기지 않는다는
     //   제보의 원인). 개수는 자동 펼치기를 꺼야 비로소 쓰이므로 그 하위가 아니다.
     ['[data-feature="sbFollowFavEnabled"]', '[data-cf-fav-initial], [data-cf-fav-more], [data-feature="sbFollowFavAutoExpand"]'],
+    // 즐겨찾기와 같은 구성: 사용 → (개수 둘, 자동 펼치기).
+    ['[data-feature="sbFollowGroupEnabled"]', '[data-cf-group-initial], [data-cf-group-more], [data-feature="sbFollowGroupAutoExpand"]'],
     ['[data-feature="sbFollowGroupTags"]', "[data-cf-group-tag-hide-offline]"],
     ["[data-affinity-on]", "[data-affinity-hide-offline], [data-affinity-initial], [data-affinity-more], [data-settings-affinity-weights]"],
     ["[data-follow-preview-card-layout]", "#followPreviewBadgePos"],

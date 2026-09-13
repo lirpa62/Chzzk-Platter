@@ -2491,65 +2491,6 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="timeline-memo">
-                <label>
-                  <span class="settings-item-name">타임라인 메모</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="즐겨찾기 버튼 옆에 메모 버튼을 추가합니다."
-                    >라이브·다시보기의 즐겨찾기 버튼 옆에 메모 버튼을
-                    추가합니다. 보면서 "시각 + 내용"을 모아 두었다가 다시보기
-                    댓글에 붙여넣을 수 있게 5,000자씩 나눠 복사합니다.
-                    라이브에서 적은 메모는 그 방송의 다시보기에서
-                    이어집니다(전용 팔로잉 목록의 즐겨찾기 버튼이 켜져 있어야
-                    함, 기본 켜짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-timeline-memo />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li
-                class="settings-item settings-item-stacked"
-                style="flex-direction: column; gap: 0"
-                data-memo-manage-row
-              >
-                <div style="width: 100%">
-                  <span class="settings-item-name">저장된 메모</span>
-                  <span class="settings-item-desc"
-                    >채널·방송별로 저장한 메모입니다. 필요 없는 것을 골라
-                    지우거나 전체를 비울 수 있습니다.</span
-                  >
-                </div>
-                <div class="settings-memo-list" data-memo-manage-list></div>
-                <div class="settings-memo-actions">
-                  <button type="button" data-memo-manage-delete disabled>
-                    선택 삭제
-                  </button>
-                  <button type="button" data-memo-manage-clear>
-                    전체 삭제
-                  </button>
-                </div>
-              </li>
-              <li class="settings-item" data-new-feature="vod-speed">
-                <label>
-                  <span class="settings-item-name">재생 속도 버튼</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="다시보기 플레이어에 배속 버튼을 추가합니다."
-                    >다시보기 플레이어에 현재 배속을 표시하는 버튼을 추가합니다.
-                    설정 메뉴를 거치지 않고 클릭으로 다음 단계(0.25~2배,
-                    치지직과 같은 8단계), 휠로 조절, 우클릭으로 1배속
-                    복귀합니다. 단축키는 Shift + &gt; / &lt; / ? 입니다(기본
-                    켜짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-vod-speed-button />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
             </ul>
           </section>
 
@@ -2774,6 +2715,24 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item" data-new-feature="vod-speed">
+                <label>
+                  <span class="settings-item-name">재생 속도 버튼</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기 플레이어에 배속 버튼을 추가합니다."
+                    >다시보기 플레이어에 현재 배속을 표시하는 버튼을 추가합니다.
+                    설정 메뉴를 거치지 않고 클릭으로 다음 단계(0.25~2배,
+                    치지직과 같은 8단계), 휠로 조절, 우클릭으로 1배속
+                    복귀합니다. 단축키는 Shift + &gt; / &lt; / ? 입니다(기본
+                    켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-speed-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">다시보기 화면 채우기</span>
@@ -2827,6 +2786,56 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-vod-autoplay-off />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="미리보기 방송 시각 숨김"
+                    >탐색바 썸네일 실제 시각 표시</span
+                  >
+                  <span class="settings-item-desc"
+                    >재생바에 마우스를 올렸을 때 뜨는 썸네일에, 방송 시작 시각과
+                    재생 위치로 계산한 그 장면의 실제 시각을 함께
+                    표시합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="seekPreviewRealtime"
+                    data-feature-inverted
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >다시보기 카드 날짜 툴팁</span
+                  >
+                  <span class="settings-item-desc"
+                    >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
+                    방송 시작 시각을 표시</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-card-date-tooltip />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">AI 챕터 숨김</span>
+                  <span class="settings-item-desc"
+                    >일부 다시보기에 자동 생성되는 AI 챕터를 숨깁니다. 내용
+                    스포가 싫을 때 사용</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-chapter-hide />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2997,48 +3006,44 @@
                   <small>초</small>
                 </span>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="timeline-memo">
                 <label>
-                  <span class="settings-item-name"
-                    >미리보기 방송 시각 숨김</span
-                  >
-                  <span class="settings-item-desc"
-                    >방송 시작 시각과 재생 위치로 계산한 그 장면의 실제
-                    시각</span
+                  <span class="settings-item-name">타임라인 메모</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="라이브·다시보기 액션 영역에 메모 버튼을 추가합니다."
+                    >라이브·다시보기의 채널 액션 영역에 메모 버튼을 추가합니다.
+                    보면서 "시각 + 내용"을 모아 두었다가 다시보기 댓글에
+                    붙여넣을 수 있게 5,000자씩 나눠 복사합니다. 라이브에서 적은
+                    메모는 그 방송의 다시보기에서 이어집니다(기본 켜짐)</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="seekPreviewRealtime" />
+                  <input type="checkbox" data-timeline-memo />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >다시보기 카드 날짜 툴팁</span
-                  >
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-memo-manage-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">저장된 메모</span>
                   <span class="settings-item-desc"
-                    >채널 다시보기 목록 카드의 정보 줄에 마우스를 올리면 등록일·
-                    방송 시작 시각을 표시</span
+                    >채널·방송별로 저장한 메모입니다. 필요 없는 것을 골라
+                    지우거나 전체를 비울 수 있습니다.</span
                   >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-card-date-tooltip />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">AI 챕터 숨김</span>
-                  <span class="settings-item-desc"
-                    >일부 다시보기에 자동 생성되는 AI 챕터를 숨깁니다. 내용
-                    스포가 싫을 때 사용</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-vod-chapter-hide />
-                  <i aria-hidden="true"></i>
-                </label>
+                </div>
+                <div class="settings-memo-list" data-memo-manage-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-memo-manage-delete disabled>
+                    선택 삭제
+                  </button>
+                  <button type="button" data-memo-manage-clear>
+                    전체 삭제
+                  </button>
+                </div>
               </li>
             </ul>
           </section>
@@ -5899,7 +5904,45 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">그룹 자동 펼치기</span>
+                  <span class="settings-item-name">└ 초기 표시 개수</span>
+                  <span class="settings-item-desc"
+                    >그룹 영역의 '더보기' 전에 보여줄 그룹 수(1~30)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-group-initial
+                    min="1"
+                    max="30"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 더보기 증가량</span>
+                  <span class="settings-item-desc"
+                    >그룹 영역의 '더보기'를 누를 때 추가할 그룹 수(1~30)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    data-cf-group-more
+                    min="1"
+                    max="30"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                  <small>개</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 그룹 자동 펼치기</span>
                   <span
                     class="settings-item-desc"
                     data-settings-summary="그룹 영역을 처음부터 펼쳐서 표시합니다."
@@ -5960,44 +6003,6 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">초기 표시 개수</span>
-                  <span class="settings-item-desc"
-                    >그룹 영역의 '더보기' 전에 보여줄 그룹 수(1~30)</span
-                  >
-                </label>
-                <span class="settings-custom-input">
-                  <input
-                    type="number"
-                    data-cf-group-initial
-                    min="1"
-                    max="30"
-                    step="1"
-                    inputmode="numeric"
-                  />
-                  <small>개</small>
-                </span>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">더보기 증가량</span>
-                  <span class="settings-item-desc"
-                    >그룹 영역의 '더보기'를 누를 때 추가할 그룹 수(1~30)</span
-                  >
-                </label>
-                <span class="settings-custom-input">
-                  <input
-                    type="number"
-                    data-cf-group-more
-                    min="1"
-                    max="30"
-                    step="1"
-                    inputmode="numeric"
-                  />
-                  <small>개</small>
-                </span>
               </li>
               <li class="settings-item">
                 <label>
