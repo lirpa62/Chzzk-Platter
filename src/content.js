@@ -38548,6 +38548,27 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           try {
             event.dataTransfer.setData("text/plain", draggedSectionKey);
           } catch {}
+          // ⚠ 손잡이(span)에서 끌기 시작하면 브라우저가 '그 span 만' 스냅샷해
+          //   따라다닌다 — 버튼은 제자리에 남아 손잡이만 움직이는 것처럼 보인다.
+          //   툴바 줄 전체를 끌고 있는 그림으로 지정해 덩어리째 움직이게 한다.
+          const toolbar = handle.matches(".cheese-cf-section-drag")
+            ? handle.closest(
+                ".cheese-cf-section-toolbar, .cheese-cf-group-toolbar",
+              )
+            : handle;
+          if (
+            toolbar &&
+            typeof event.dataTransfer.setDragImage === "function"
+          ) {
+            const rect = toolbar.getBoundingClientRect();
+            try {
+              event.dataTransfer.setDragImage(
+                toolbar,
+                event.clientX - rect.left,
+                event.clientY - rect.top,
+              );
+            } catch {}
+          }
         }
         draggedSectionEl.classList.add("is-section-dragging");
       },

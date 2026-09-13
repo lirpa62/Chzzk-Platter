@@ -6012,11 +6012,9 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-group-toolbar:has(.cheese-cf-section-drag):active {
   cursor: grabbing;
 }
-/* 끌고 있는 목록의 툴바는 흐리게(설정 편집기와 같은 표시). */
-.is-section-dragging .cheese-cf-section-toolbar,
-.is-section-dragging .cheese-cf-group-toolbar {
-  opacity: 0.4;
-}
+/* ⚠ 끌고 있는 툴바를 여기서 또 흐리게 하지 않는다. 부모 .is-section-dragging 이
+   이미 0.45 라 겹치면 0.18 까지 내려가고, 그 흐려진 상태가 그대로 '끌고 다니는
+   그림'으로 찍혀 무엇을 옮기는지 보이지 않는다. */
 /* 접힘(아이콘만)에서는 숨긴다. 그룹의 순서 편집 버튼과 같은 이유 — 폭이 좁고,
    접으면 편집 모드도 해제되므로 버튼이 남아 있을 이유가 없다. */
 #sidebar:not([class*="_is_expanded_"])
