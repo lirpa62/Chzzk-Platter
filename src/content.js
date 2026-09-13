@@ -23941,6 +23941,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         customFollowAutoExpandSuppressed = false;
         customFollowFavAutoExpandSuppressed = false;
         customFollowGroupAutoExpandSuppressed = false;
+      } else {
+        // 접으면 채널 순서 편집을 끝낸다. 접힘에서는 그룹 액션(순서 편집 버튼)이
+        // CSS 로 숨겨져 편집을 끝낼 방법이 없고, 아이콘만 남은 좁은 폭에서는
+        // 안내 문구와 점선 테두리도 자리만 차지한다. 지금까지 끌어 놓은 순서는
+        // 이미 저장돼 있으므로 그대로 보인다.
+        customFollowGroupSortKey = "";
       }
       // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
       scheduleSidebarPushSettle();
