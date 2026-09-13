@@ -12041,8 +12041,10 @@
         COMMENT_TS_CLICK_DELAY_KEY,
       ]);
       if (chatRecapPlayerButtonHiddenInput) {
+        // ⚠ 저장 키는 '숨김'(true=숨김) 그대로고 화면 문구만 '표시'다.
+        //   체크 = 표시 = 저장값 false.
         chatRecapPlayerButtonHiddenInput.checked =
-          data?.[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY] === true;
+          data?.[CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY] !== true;
       }
       const storedAction = data?.[CHAT_RECAP_CLICK_ACTION_KEY];
       const legacyAction = data?.[COMMENT_TS_CLICK_ACTION_KEY];
@@ -12077,8 +12079,9 @@
   });
   chatRecapPlayerButtonHiddenInput?.addEventListener("change", () => {
     cachedStorageSet({
+      // 체크 = 표시 → 저장값(숨김)은 그 반대다.
       [CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY]:
-        chatRecapPlayerButtonHiddenInput.checked,
+        !chatRecapPlayerButtonHiddenInput.checked,
     });
   });
   if (chatRecapDelayInput) {

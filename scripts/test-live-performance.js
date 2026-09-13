@@ -395,6 +395,73 @@ test("chat and sidebar scrolling do not schedule header layout reads", () => {
   assert.equal(updates, 1);
 });
 
+test("header peek keeps fill-screen height anchored to the hidden layout", () => {
+  class Box {}
+  const box = new Box();
+  let top = 100;
+  let peeking = false;
+  let settles = 0;
+  box.getBoundingClientRect = () => ({ top });
+  const h = clockContext({
+    HTMLElement: Box,
+    featureFlags: { headerAutoHide: true },
+    HEADER_PEEK_TRANSITION_MS: 200,
+    getFillScreenTarget: () => ({ box }),
+    document: {
+      querySelector: () => (peeking ? new Box() : null),
+    },
+    applyFillScreen: () => { settles += 1; },
+  });
+  vm.runInContext(section(content,
+    "  let fillScreenTopReferenceBox = null;",
+    "  function captureInlineStyleProperties("), h.context);
+
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+  h.context.lockFillScreenTopForHeaderTransition(true);
+  peeking = true;
+  top = 160;
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+  h.advance(250);
+  assert.equal(settles, 1);
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+
+  h.context.lockFillScreenTopForHeaderTransition(false);
+  peeking = false;
+  top = 135;
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+  h.context.lockFillScreenTopForHeaderTransition(true);
+  peeking = true;
+  top = 150;
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+  h.context.lockFillScreenTopForHeaderTransition(false);
+  peeking = false;
+  top = 100;
+  h.advance(250);
+  assert.equal(settles, 2);
+  assert.equal(h.context.getStableFillScreenTop(box), 100);
+});
+
+test("fill-screen top follows real layout changes when header auto-hide is off", () => {
+  class Box {}
+  const box = new Box();
+  let top = 80;
+  box.getBoundingClientRect = () => ({ top });
+  const h = clockContext({
+    HTMLElement: Box,
+    featureFlags: { headerAutoHide: false },
+    HEADER_PEEK_TRANSITION_MS: 200,
+    getFillScreenTarget: () => ({ box }),
+    document: { querySelector: () => null },
+    applyFillScreen() {},
+  });
+  vm.runInContext(section(content,
+    "  let fillScreenTopReferenceBox = null;",
+    "  function captureInlineStyleProperties("), h.context);
+  assert.equal(h.context.getStableFillScreenTop(box), 80);
+  top = 140;
+  assert.equal(h.context.getStableFillScreenTop(box), 140);
+});
+
 test("unchanged custom following skips sorting and grouping; changed inputs render", () => {
   let sorts = 0;
   let groups = 0;

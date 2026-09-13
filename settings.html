@@ -2561,55 +2561,6 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="vod-role-chat">
-                <label>
-                  <span class="settings-item-name"
-                    >방장·매니저·파트너 채팅</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="내 채팅 기록 패널에서 방장·매니저·인증 채널의 채팅도 확인합니다. 채팅 활성도와 별도로 수집합니다."
-                    >'내 채팅 기록' 패널에 '방장·매니저' 탭을 추가해
-                    방장·매니저와 파트너(인증 마크)가 남긴 채팅을 시간순으로
-                    보여줍니다. 공지나 진행 안내를 따라가기 좋습니다. 채팅
-                    활성도와 따로 모으고 따로 저장하므로, 한쪽을 다시 모아도
-                    다른 쪽은 그대로입니다(기본 켜짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-vod-role-chat />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li
-                class="settings-item settings-item-stacked"
-                style="flex-direction: column; gap: 0"
-                data-role-bot-row
-              >
-                <div style="width: 100%">
-                  <span class="settings-item-name">└ 제외할 봇</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="여기 적은 닉네임은 목록에서 뺍니다."
-                    >여기 적은 이름과 정확히 같은 닉네임은 목록에서 뺍니다.
-                    채널마다 봇 이름이 달라 직접 추가·삭제할 수 있습니다. 바꾼
-                    뒤에는 '다시 수집'을 눌러야 반영됩니다.</span
-                  >
-                </div>
-                <div class="settings-bot-input">
-                  <input
-                    type="text"
-                    data-role-bot-input
-                    placeholder="봇 닉네임"
-                    maxlength="40"
-                  />
-                  <button type="button" data-role-bot-add>추가</button>
-                </div>
-                <div class="settings-bot-list" data-role-bot-list></div>
-                <div class="settings-memo-actions">
-                  <button type="button" data-role-bot-reset>기본값으로</button>
-                </div>
-              </li>
               <li class="settings-item">
                 <div
                   class="settings-chat-time-color-editor"
@@ -2660,13 +2611,13 @@
                   <span class="settings-item-name">방송 제목 변경 확인</span>
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="방송 중 바뀐 제목을 재생바 미리보기에 표시합니다."
+                    data-settings-summary="방송 중 바뀐 제목을 재생바 썸네일에 표시합니다."
                     >방장·매니저가 채팅봇 명령어로 제목을 변경하고 성공 안내가
-                    채팅에 남은 경우만 확인하여 재생바 미리보기에 표시합니다.
-                    방송 시작 당시의 최초 제목은 확인할 수 없습니다. 채팅
-                    활성도와 방송 시각 표시 설정에 관계없이 동작하며, 처음
-                    확인하는 영상은 진행률을 플레이어에 표시합니다. 긴
-                    영상에서는 시간이 걸릴 수 있습니다</span
+                    채팅에 남은 경우만 확인하여 재생바 썸네일에 표시합니다. 방송
+                    시작 당시의 최초 제목은 확인할 수 없습니다. 채팅 활성도와
+                    방송 시각 표시 설정에 관계없이 동작하며, 처음 확인하는
+                    영상은 진행률을 플레이어에 표시합니다. 긴 영상에서는 시간이
+                    걸릴 수 있습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2794,7 +2745,7 @@
                   <span
                     class="settings-item-name"
                     data-settings-search-aliases="미리보기 방송 시각 숨김"
-                    >탐색바 썸네일 실제 시각 표시</span
+                    >재생바 썸네일 실제 시각 표시</span
                   >
                   <span class="settings-item-desc"
                     >재생바에 마우스를 올렸을 때 뜨는 썸네일에, 방송 시작 시각과
@@ -2932,12 +2883,14 @@
                 data-new-feature="vod-chat-recap-player-controls"
               >
                 <label>
-                  <span class="settings-item-name"
-                    >재생바 '내 채팅 기록' 숨김</span
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생바 '내 채팅 기록' 숨김"
+                    >재생바 '내 채팅 기록' 표시</span
                   >
                   <span class="settings-item-desc"
-                    >다시보기 플레이어의 버튼과 열린 팝오버만 숨깁니다. 채팅
-                    기록 수집과 리캡 페이지에는 영향을 주지 않습니다</span
+                    >다시보기 플레이어에 '내 채팅 기록' 버튼을 표시합니다. 꺼도
+                    채팅 기록 수집과 리캡 페이지에는 영향을 주지 않습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3005,6 +2958,55 @@
                   />
                   <small>초</small>
                 </span>
+              </li>
+              <li class="settings-item" data-new-feature="vod-role-chat">
+                <label>
+                  <span class="settings-item-name"
+                    >방장·매니저·파트너 채팅</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기 플레이어에 방장·매니저·파트너 채팅 버튼을 추가합니다."
+                    >다시보기 플레이어에 전용 버튼을 추가해 방장·매니저와
+                    파트너(인증 마크)가 남긴 채팅을 시간순으로 보여줍니다.
+                    공지나 진행 안내를 따라가기 좋습니다. 채팅 활성도와 따로
+                    모으고 따로 저장하므로, 한쪽을 다시 모아도 다른 쪽은
+                    그대로입니다(기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-role-chat />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-role-bot-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">└ 제외할 봇</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="여기 적은 닉네임은 목록에서 뺍니다."
+                    >여기 적은 이름과 정확히 같은 닉네임은 목록에서 뺍니다.
+                    채널마다 봇 이름이 달라 직접 추가·삭제할 수 있습니다. 바꾼
+                    뒤에는 '다시 수집'을 눌러야 반영됩니다.</span
+                  >
+                </div>
+                <div class="settings-bot-input">
+                  <input
+                    type="text"
+                    data-role-bot-input
+                    placeholder="봇 닉네임"
+                    maxlength="40"
+                  />
+                  <button type="button" data-role-bot-add>추가</button>
+                </div>
+                <div class="settings-bot-list" data-role-bot-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-role-bot-reset>기본값으로</button>
+                </div>
               </li>
               <li class="settings-item" data-new-feature="timeline-memo">
                 <label>

@@ -513,6 +513,10 @@
   // 채팅 리캡 조회 버튼/패널(댓글 타임스탬프와 같은 팝오버 형태, 별도 버튼).
   const RECAP_BUTTON_CLASS = "cheese-chat-recap-button";
   const RECAP_PANEL_CLASS = "cheese-chat-recap-panel";
+  // 방장·매니저·파트너 채팅. 예전에는 위 패널 안의 탭이었지만, 쓰임이 달라
+  // 별도 버튼으로 분리했다(패널 모양은 그대로 같은 클래스를 쓴다).
+  const ROLE_CHAT_BUTTON_CLASS = "cheese-role-chat-button";
+  const ROLE_CHAT_PANEL_CLASS = "cheese-role-chat-panel";
   // ── seek preview 방송 당시 추정 시각 병기 ───────────────────────────────────
   // 다시보기 재생바 호버 시 뜨는 seek preview의 시간(.pzp-seeking-preview__time) 아래에
   // 시작 추정 시각(liveOpenDate) + preview 시간으로 계산한 당시 추정 시각을 병기.
@@ -9495,12 +9499,13 @@
     }
     // 플레이어 루트 교체로 패널이 잠시 DOM에서 떨어진 동안에도 열린 세션으로 본다.
     // DOM 존재 여부만 보면 댓글 패널과 리캡 패널이 동시에 열릴 수 있다.
-    if (chatRecapOpenPanel) {
+    if (chatRecapOpenPanel || roleChatOpenPanel) {
       closeChatRecapPanel();
+      closeRoleChatPanel();
       return;
     }
     const panel = document.querySelector(
-      `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`,
+      `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`,
     );
     if (panel) {
       closeCommentTimestampPanel();
@@ -9607,7 +9612,7 @@
     stopCommentTimestampPanelTimeTracker();
     stopCommentTimestampPanelAnchorMonitor();
     document
-      .querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})`)
+      .querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`)
       ?.remove();
     document
       .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
@@ -10147,8 +10152,9 @@
   let chatGraphAuto = false; // 자동 표시(캐시가 있을 때)
   let chatGraphAutoCollect = false; // 캐시가 없어도 자동 수집
   let vodRoleChatOn = true; // 방장·매니저 채팅 타임라인
-  // 내 채팅 기록 패널의 현재 탭("mine" | "role").
-  let recapPanelTab = "mine";
+  // 방장·매니저·파트너 채팅 패널(별도 버튼으로 연다).
+  let roleChatOpenPanel = null;
+  let roleChatOpenVideoNo = "";
   // 활성도와 완전히 분리된 상태. 한쪽을 다시 모아도 다른 쪽은 그대로다.
   const roleChatState = {
     videoNo: "",
@@ -10692,6 +10698,8 @@
       e.preventDefault();
       e.stopPropagation();
       void toggleChatGraph();
+      // 켜 둔 다른 기능의 수집도 미리 시작한다(두 번 기다리지 않게).
+      if (!chatGraphState.shown) void prefetchVodChatCompanions("graph");
     });
     // 우클릭 → 구간 요약 팝오버. 네이티브 컨텍스트 메뉴는 막는다.
     button.addEventListener("contextmenu", (e) => {
@@ -10950,7 +10958,7 @@
           label.textContent = `중단 (${Math.round(p * 100)}%)`;
         }
         const status = document.querySelector(
-          `.${RECAP_PANEL_CLASS} .cheese-search-comment-panel-status`,
+          `.${ROLE_CHAT_PANEL_CLASS} .cheese-search-comment-panel-status`,
         );
         if (status && roleChatState.loading) {
           status.textContent = `모으는 중입니다… ${Math.round(p * 100)}%`;
@@ -10983,7 +10991,7 @@
       roleChatState.loading = false;
       roleChatState.cancel = true;
       roleChatState.progress = 0;
-      recapPanelTab = "mine";
+      roleChatPanelCurrentIndex = "";
     }
   }
 
@@ -11380,6 +11388,7 @@
   let recapPanelTimeUpdateVideo = null;
   let recapPanelTimeUpdateHandler = null;
   let recapPanelCurrentIndex = "";
+  let roleChatPanelCurrentIndex = ""; // 방장·매니저 패널의 현재 항목(별도 추적)
   // 패널 안에서만 쓰는 임시 상태다(저장하지 않는다). 패널을 닫으면 전체로 돌아간다.
   let recapPanelFilter = "all";
 
@@ -11923,33 +11932,17 @@
     }
 
     // 라이브에서 먼저 저장된 기록에는 다시보기 번호와 재생 위치가 없다. API의
-    // 발신자 해시가 비거나 달라져도 전송 시각+본문이 정확히 같으면 내가 저장한
-    // 채팅으로 볼 수 있으므로 보조 판정에 사용한다.
+    // 발신자 해시가 비거나 달라져도 전송 시각이 가깝고 본문이 같은 한 행을 찾아
+    // 보조 판정에 사용한다.
     const storedChannelItems = channelId
       ? await loadStoredRecapChannelItems(accountId, channelId)
       : [];
-    const storedExact = new Set();
-    const storedTimesByText = new Map();
-    for (const item of storedChannelItems) {
-      if (!(Number(item?.t) > 0) || (!item?.m && !item?.d)) continue;
-      // 결제 내역(src=history)은 아래의 일대일 복합 매처가 담당한다. 단순
-      // 시각+본문 집합에 넣으면 같은 결제 한 건이 여러 채팅과 연결될 수 있다.
-      if (item?.d?.src === "history") continue;
-      const text = String(item?.m || "").trim();
-      const at = Number(item.t);
-      const donationKey = recapDonationMatchKey(item.d);
-      storedExact.add(`${at}|${text}|${donationKey}`);
-      const contentKey = `${text}|${donationKey}`;
-      if (!storedTimesByText.has(contentKey)) {
-        storedTimesByText.set(contentKey, []);
-      }
-      storedTimesByText.get(contentKey).push(at);
-    }
     const historyMatcher = createRecapHistoryMatcher(storedChannelItems);
 
     const duration = Number(document.querySelector("video")?.duration) || 0;
     const totalMs = duration > 0 ? duration * 1000 : 0;
-    const rows = [];
+    const vodCandidates = [];
+    const candidateKeys = new Set();
     const titleChangeTracker =
       CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     let cursor = 0;
@@ -11996,38 +11989,40 @@
         const donation = recapChatDonationInfo(m, type);
         if (!text && !donation) continue;
         const messageTime = rawMessageTime;
-        // 라이브 DOM에서 실제 시각을 못 읽은 행은 수집 순간(Date.now())으로
-        // 저장된다. API 시각과 최대 몇 초 어긋날 수 있어 같은 본문은 5초 안까지
-        // 보조 일치로 인정한다.
-        const donationKey = recapDonationMatchKey(donation);
-        const contentKey = `${text}|${donationKey}`;
-        const exactLocal =
-          storedExact.has(`${messageTime}|${contentKey}`) ||
-          (messageTime > 0 &&
-            (storedTimesByText.get(contentKey) || []).some(
-              (time) => Math.abs(time - messageTime) <= 5000,
-            ));
+        const identity = recapVodMessageIdentity(m, text, donation);
+        // API 페이지 경계에서 같은 메시지가 다시 포함돼도 로컬 행 매칭 전에 한 번만
+        // 후보로 둔다. 그렇지 않으면 반복 응답이 서로 다른 라이브 행을 차지할 수 있다.
+        const candidateKey = identity
+          ? `i:${identity}`
+          : `${messageTime}|${at}|${text}|${recapDonationMatchKey(donation)}`;
+        if (candidateKeys.has(candidateKey)) continue;
+        candidateKeys.add(candidateKey);
         const historyMatch = donation
           ? historyMatcher.match(messageTime, text, donation)
           : null;
-        if (recapChatHash(m) !== accountId && !exactLocal && !historyMatch) {
-          continue;
-        }
+        const mineByHash = recapChatHash(m) === accountId;
         const matchedText = String(historyMatch?.m || text).trim();
         const matchedDonation = historyMatch?.d
           ? { ...donation, ...historyMatch.d, src: "history" }
           : donation;
-        const identity = recapVodMessageIdentity(m, text, donation);
-        rows.push({
-          seconds: Math.round(at / 1000),
-          text: matchedText,
-          // 결제 내역 행을 정본으로 써야 기존 행에 n·v가 붙고 중복이 생기지 않는다.
-          t: Number(historyMatch?.t) || messageTime,
-          type,
-          ...(identity ? { i: identity } : {}),
-          ...(matchedDonation ? { d: matchedDonation } : {}),
-          // {:d_108:} 같은 토큰을 이미지로 그리려면 키→URL 맵이 필요하다.
-          emojis: recapChatEmojis(m),
+        vodCandidates.push({
+          match: {
+            t: messageTime,
+            m: text,
+            d: donation,
+            preferred: mineByHash || Boolean(historyMatch),
+          },
+          row: {
+            seconds: Math.round(at / 1000),
+            text: matchedText,
+            // 결제 내역 행을 정본으로 써야 기존 행에 n·v가 붙고 중복이 생기지 않는다.
+            t: Number(historyMatch?.t) || messageTime,
+            type,
+            ...(identity ? { i: identity } : {}),
+            ...(matchedDonation ? { d: matchedDonation } : {}),
+            // {:d_108:} 같은 토큰을 이미지로 그리려면 키→URL 맵이 필요하다.
+            emojis: recapChatEmojis(m),
+          },
         });
       }
       const next = Number(content?.nextPlayerMessageTime);
@@ -12041,6 +12036,22 @@
       }
     }
     onProgress?.(1);
+    // 라이브 DOM에서 저장한 시각은 실제 전송 시각과 몇 초 어긋날 수 있다. 같은
+    // 본문·후원 정보의 API 후보를 5초 안에서 찾되, 로컬 한 행을 한 번만 소비한다.
+    // 계정 해시나 결제 내역으로 확정된 후보가 먼저 로컬 행을 차지하므로 주변의 다른
+    // 이용자가 같은 문구를 쓴 채팅이 중복으로 섞이지 않는다.
+    const localMatches = CHAT_RECAP_STORE_API.matchUnlinkedLiveRows(
+      storedChannelItems,
+      vodCandidates.map((candidate) => candidate.match),
+      recapDonationMatchKey,
+      5000,
+    );
+    const rows = vodCandidates
+      .filter(
+        (candidate, index) =>
+          candidate.match.preferred || localMatches.has(index),
+      )
+      .map((candidate) => candidate.row);
     if (completed) {
       try {
         await CHAT_RECAP_STORE_API.saveVodTitleChanges(
@@ -12138,6 +12149,7 @@
       closeChatRecapPanel();
     } else {
       void openChatRecapPanel(button);
+      void prefetchVodChatCompanions("mine");
     }
   }
 
@@ -12227,8 +12239,219 @@
     ensureChatRecapButton();
   }
 
+  // ── 켜 둔 기능들의 수집을 함께 시작한다 ───────────────────────────────────
+  // 내 채팅 기록 / 방장·매니저 채팅 / 채팅 활성도는 각자 다시보기 채팅을 훑는다.
+  // 하나만 눌러 한참 기다린 뒤 다른 걸 눌러 또 기다리는 일을 없애려고, 누른
+  // 김에 켜져 있는 나머지 수집도 백그라운드로 굴린다.
+  // ⚠ 화면에 띄우지는 않는다(누른 패널만 연다). 시야를 가리지 않게 하려는 것.
+  // ⚠ 이미 수집 중이거나 저장된 게 있으면 각 함수가 알아서 건너뛴다.
+  async function prefetchVodChatCompanions(origin) {
+    if (!getCurrentVideoNo()) return;
+    const jobs = [];
+    if (origin !== "role" && vodRoleChatOn && !roleChatState.loading) {
+      jobs.push(ensureVodRoleChats(false));
+    }
+    if (origin !== "mine" && chatRecapOn && !chatRecapPlayerButtonHidden) {
+      jobs.push(loadRecapForCurrentVideo());
+    }
+    if (origin !== "graph" && chatGraphOn && !chatGraphState.loading) {
+      jobs.push(prefetchChatGraphData());
+    }
+    // 각각 실패해도 나머지는 계속한다(부가 작업이라 조용히 넘어간다).
+    await Promise.allSettled(jobs);
+  }
+
+  // 활성도 데이터만 미리 모은다(그래프는 켜지 않는다).
+  async function prefetchChatGraphData() {
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo) return;
+    if (chatGraphState.videoNo === videoNo && chatGraphState.bins) return;
+    const cached = await loadChatGraphCache(videoNo);
+    if (cached?.bins) return; // 캐시가 있으면 누를 때 바로 그린다
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    if (!duration) return;
+    // 제목 확인과 같은 순회를 공유한다.
+    await collectVodChatDataShared(videoNo, duration);
+  }
+
+  // ── 방장·매니저·파트너 채팅 버튼/패널 ──────────────────────────────────────
+  // 내 채팅 기록과 같은 팝오버를 쓰되 버튼과 상태만 따로 둔다. 예전에는 내 채팅
+  // 기록 패널의 탭이었는데, 보려는 대상이 달라 진입로를 나눴다.
+  function ensureRoleChatButton() {
+    if (!vodRoleChatOn || !getCurrentVideoNo()) return;
+    const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
+    if (!controls) return;
+    if (controls.querySelector(`.${ROLE_CHAT_BUTTON_CLASS}`)) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `${ROLE_CHAT_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    button.setAttribute("aria-label", "방장·매니저·파트너 채팅");
+    button.setAttribute("aria-expanded", "false");
+    // lucide sword.
+    button.innerHTML = `
+      <span class="pzp-button__tooltip pzp-button__tooltip--top">방장·매니저·파트너 채팅</span>
+      <span class="pzp-ui-icon">
+        <svg class="pzp-ui-icon__svg lucide lucide-sword" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"></polyline>
+          <line x1="13" x2="19" y1="19" y2="13"></line>
+          <line x1="16" x2="20" y1="16" y2="20"></line>
+          <line x1="19" x2="21" y1="21" y2="19"></line>
+        </svg>
+      </span>`;
+    // 클릭은 캡처 위임이 처리한다(내 채팅 기록 버튼과 같은 이유 — 치지직이
+    // 컨트롤을 다시 그리면 버튼에 직접 단 리스너가 사라진다).
+    const recapBtn = controls.querySelector(`.${RECAP_BUTTON_CLASS}`);
+    const commentBtn = controls.querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`);
+    const anchor = recapBtn || commentBtn;
+    if (anchor) anchor.after(button);
+    else controls.prepend(button);
+  }
+
+  function applyRoleChatButtonVisibility() {
+    if (!vodRoleChatOn || !getCurrentVideoNo()) {
+      closeRoleChatPanel();
+      document
+        .querySelectorAll(`.${ROLE_CHAT_BUTTON_CLASS}`)
+        .forEach((button) => button.remove());
+      return;
+    }
+    ensureRoleChatButton();
+  }
+
+  function isRoleChatPanelSessionActive(panel, videoNo) {
+    return (
+      !!panel &&
+      panel === roleChatOpenPanel &&
+      !!videoNo &&
+      videoNo === roleChatOpenVideoNo &&
+      getCurrentVideoNo() === videoNo
+    );
+  }
+
+  function closeRoleChatPanel() {
+    const activePanel = roleChatOpenPanel;
+    roleChatOpenPanel = null;
+    roleChatOpenVideoNo = "";
+    roleChatPanelCurrentIndex = "";
+    activePanel?.remove();
+    document
+      .querySelectorAll(`.${ROLE_CHAT_PANEL_CLASS}`)
+      .forEach((panel) => panel.remove());
+    document
+      .querySelector(`.${ROLE_CHAT_BUTTON_CLASS}`)
+      ?.setAttribute("aria-expanded", "false");
+    if (!document.querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}`)) {
+      releaseCommentPanelControlsVisible();
+    }
+  }
+
+  // 치지직이 플레이어 루트를 갈아 끼워도 열린 패널을 다시 붙인다
+  // (내 채팅 기록 패널과 같은 이유·같은 방식).
+  function ensureOpenRoleChatPanelConnected(
+    panel = roleChatOpenPanel,
+    videoNo = roleChatOpenVideoNo,
+  ) {
+    if (!isRoleChatPanelSessionActive(panel, videoNo)) return false;
+    ensureRoleChatButton();
+    const anchor = document.querySelector(`.${ROLE_CHAT_BUTTON_CLASS}`);
+    const root = getCommentTimestampPanelRoot(anchor);
+    if (!root) return false;
+    if (!panel.isConnected) {
+      if (getComputedStyle(root).position === "static") {
+        root.style.position = "relative";
+      }
+      root.style.overflow = "visible";
+      root.append(panel);
+      keepCommentPanelControlsVisible(root);
+      startChatRecapPanelTimeTracker();
+      positionCommentTimestampPanel(panel, root);
+    }
+    anchor?.setAttribute("aria-expanded", "true");
+    return panel.isConnected;
+  }
+
+  // 패널 본문을 다시 그린다(머리글은 남긴다).
+  function renderRoleChatPanel(panel) {
+    const head = panel.querySelector(".cheese-search-comment-panel-head");
+    panel.replaceChildren();
+    if (head) panel.append(head);
+    renderRecapRolePanelBody(panel);
+    updateRecapPanelCurrentItemFor("role", { scroll: true });
+  }
+
+  async function openRoleChatPanel(anchor) {
+    closeRoleChatPanel();
+    // 팝오버끼리 겹치지 않게 한 번에 하나만 연다(내 채팅 기록과 같은 규칙).
+    closeChatRecapPanel();
+    closeCommentTimestampPanel();
+    const openVideoNo = getCurrentVideoNo();
+    if (!openVideoNo) return;
+    const root = getCommentTimestampPanelRoot(anchor);
+    if (!root) return;
+    if (getComputedStyle(root).position === "static") {
+      root.style.position = "relative";
+    }
+    root.style.overflow = "visible";
+    const panel = document.createElement("div");
+    // 모양은 내 채팅 기록 패널과 같게 한다(요청: 같은 UI).
+    panel.className = `${VIDEO_COMMENT_PANEL_CLASS} ${ROLE_CHAT_PANEL_CLASS}`;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "방장·매니저·파트너 채팅");
+    roleChatOpenPanel = panel;
+    roleChatOpenVideoNo = openVideoNo;
+    root.append(panel);
+    keepCommentPanelControlsVisible(root);
+    startChatRecapPanelTimeTracker();
+    panel.innerHTML = `
+      <div class="cheese-search-comment-panel-head">
+        <strong>방장·매니저 채팅</strong>
+        <div class="cheese-recap-panel-head-actions">
+          <button type="button" data-role-chat-close aria-label="닫기">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p class="cheese-search-comment-panel-status">불러오는 중입니다.</p>`;
+    positionCommentTimestampPanel(panel, root);
+    anchor?.setAttribute("aria-expanded", "true");
+    panel
+      .querySelector("[data-role-chat-close]")
+      ?.addEventListener("click", closeRoleChatPanel);
+    await loadChatRecapClickAction();
+    if (!ensureOpenRoleChatPanelConnected(panel, openVideoNo)) return;
+    // 이모티콘 사전을 먼저 채워야 {:키:} 가 그림으로 나온다(내 채팅과 같은 이유).
+    const ready = Promise.all([
+      loadDialogEmojiMap(currentClipVaultAccountId()),
+      Array.isArray(roleChatState.items) ? null : ensureVodRoleChats(false),
+    ]);
+    renderRoleChatPanel(panel);
+    await ready;
+    if (!ensureOpenRoleChatPanelConnected(panel, openVideoNo)) return;
+    renderRoleChatPanel(panel);
+    positionCommentTimestampPanel(panel, root);
+  }
+
+  function handleRoleChatButtonClick(event, button) {
+    event.preventDefault();
+    event.stopPropagation();
+    button?.blur?.();
+    if (roleChatOpenPanel) {
+      closeRoleChatPanel();
+    } else {
+      void openRoleChatPanel(button);
+      // 함께 켜 둔 다른 기능의 수집도 미리 시작한다(두 번 기다리지 않게).
+      void prefetchVodChatCompanions("role");
+    }
+  }
+
   async function openChatRecapPanel(anchor) {
     closeChatRecapPanel();
+    closeRoleChatPanel();
     closeCommentTimestampPanel();
     const openVideoNo = getCurrentVideoNo();
     if (!openVideoNo) return;
@@ -12431,57 +12654,7 @@
     return out;
   }
 
-  // 이 영상에 있는 갈래만 칩으로 그린다. 채팅만 있는 영상에서는 아예 만들지 않아
-  // 기존 화면 그대로 보인다.
-  // 내 채팅 / 방장·매니저 탭. 설정이 꺼져 있으면 탭 자체를 만들지 않는다.
-  function renderRecapTabBar(panel) {
-    if (!vodRoleChatOn || !getCurrentVideoNo()) return null;
-    const bar = document.createElement("div");
-    bar.className = "cheese-recap-tab-bar";
-    bar.setAttribute("role", "tablist");
-    [
-      ["mine", "내 채팅"],
-      ["role", "방장·매니저"],
-    ].forEach(([key, label]) => {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "cheese-recap-tab";
-      tab.dataset.recapTab = key;
-      tab.textContent = label;
-      const on = recapPanelTab === key;
-      tab.classList.toggle("is-on", on);
-      tab.setAttribute("role", "tab");
-      tab.setAttribute("aria-selected", on ? "true" : "false");
-      // ⚠ 필터 칩과 같은 이유로 전파를 끊는다. 다시 그리면 이 버튼이 문서에서
-      //   떨어져 나가 document 핸들러가 '바깥 클릭'으로 오판한다.
-      tab.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (recapPanelTab === key) return;
-        recapPanelTab = key;
-        // ⚠ 탭마다 순번 체계가 다르다. 비워 두지 않으면 이전 탭의 순번과 같다는
-        //   이유로 갱신을 건너뛰어 현재 항목 표시가 안 붙는다.
-        recapPanelCurrentIndex = "";
-        renderChatRecapPanel(panel);
-        if (key !== "role") return;
-        // ⚠ 이모티콘 사전을 먼저 채워야 {:키:} 가 그림으로 나온다. 다시보기
-        //   API 의 extras.emojis 는 비어 오는 경우가 많아(실측 {}) 메시지에
-        //   딸린 맵만으로는 부족하다 — '내 채팅' 탭이 열릴 때와 같은 이유다.
-        const ready = Promise.all([
-          loadDialogEmojiMap(currentClipVaultAccountId()),
-          Array.isArray(roleChatState.items) ? null : ensureVodRoleChats(false),
-        ]);
-        void ready.then(() => {
-          if (panel.isConnected && recapPanelTab === "role") {
-            renderChatRecapPanel(panel);
-          }
-        });
-      });
-      bar.append(tab);
-    });
-    return bar;
-  }
-
-  // 방장·매니저 탭 본문. 목록 모양은 내 채팅 기록과 같은 클래스를 쓴다.
+  // 방장·매니저 패널 본문. 목록 모양은 내 채팅 기록과 같은 클래스를 쓴다.
   function renderRecapRolePanelBody(panel) {
     const title = panel.querySelector(
       ".cheese-search-comment-panel-head strong",
@@ -12521,11 +12694,9 @@
         ensureVodRoleChats(true),
         loadDialogEmojiMap(currentClipVaultAccountId()),
       ]).then(() => {
-        if (panel.isConnected && recapPanelTab === "role") {
-          renderChatRecapPanel(panel);
-        }
+        if (panel.isConnected) renderRoleChatPanel(panel);
       });
-      renderChatRecapPanel(panel);
+      renderRoleChatPanel(panel);
     });
     actions.append(collect);
     panel.append(actions);
@@ -12658,14 +12829,8 @@
     const head = panel.querySelector(".cheese-search-comment-panel-head");
     panel.replaceChildren();
     if (head) panel.append(head);
-    // 방장·매니저 채팅은 같은 패널의 다른 탭으로 본다. 영상을 보며 시간순으로
-    //   훑는다는 쓰임이 같아서다.
-    const tabBar = renderRecapTabBar(panel);
-    if (tabBar) panel.append(tabBar);
-    if (tabBar && recapPanelTab === "role") {
-      renderRecapRolePanelBody(panel);
-      return;
-    }
+    // ⚠ 예전에는 여기서 '내 채팅 / 방장·매니저' 탭을 그렸다. 방장·매니저는
+    //   이제 전용 버튼·패널로 분리돼서 이 패널은 내 채팅만 다룬다.
     // 원래 순번(index)을 들고 다닌다. 재생 위치 추적은 recapPanelItems 기준이라
     // 걸러낸 뒤 번호를 다시 매기면 현재 항목 표시가 어긋난다.
     const counts = new Map();
@@ -12772,10 +12937,12 @@
     recapPanelCurrentIndex = "";
   }
 
-  // 지금 보고 있는 탭의 항목들을 '초' 배열로 돌려준다. 두 탭 모두 시간순이라
-  //   같은 이진 탐색을 쓸 수 있다(방장·매니저는 vMs, 내 채팅은 seconds).
-  function currentRecapTrackSeconds() {
-    if (recapPanelTab === "role") {
+  // 패널별 항목을 '초' 배열로 돌려준다. 둘 다 시간순이라 같은 이진 탐색을
+  //   쓸 수 있다(방장·매니저는 vMs, 내 채팅은 seconds).
+  // ⚠ 예전에는 recapPanelTab 을 봤다. 이제 두 패널이 동시에 열릴 수 있어
+  //   '어느 패널을 위한 계산인지'를 인자로 받아야 한다.
+  function currentRecapTrackSeconds(kind) {
+    if (kind === "role") {
       const rows = Array.isArray(roleChatState.items)
         ? roleChatState.items
         : [];
@@ -12784,12 +12951,12 @@
     return recapPanelItems.map((item) => Number(item?.seconds));
   }
 
-  function findCurrentChatRecapItemIndex() {
+  function findCurrentChatRecapItemIndex(kind) {
     const currentTime = Number(document.querySelector("video")?.currentTime);
     if (!Number.isFinite(currentTime)) return -1;
     // 수집 결과는 시간순으로 정렬되어 있다. 항목이 많아도 timeupdate마다 전체를
     // 훑지 않도록 현재 시각 이하의 마지막 항목을 이진 탐색한다.
-    const seconds = currentRecapTrackSeconds();
+    const seconds = currentRecapTrackSeconds(kind);
     let low = 0;
     let high = seconds.length - 1;
     let currentIndex = -1;
@@ -12807,13 +12974,24 @@
   }
 
   function updateChatRecapPanelCurrentItem({ scroll = false } = {}) {
-    const panel = document.querySelector(`.${RECAP_PANEL_CLASS}`);
+    // 두 패널이 함께 열려 있을 수 있다. 각자 자기 목록 기준으로 현재 항목을
+    // 표시한다(진행 위치 기억도 패널별로 따로 둔다).
+    updateRecapPanelCurrentItemFor("mine", { scroll });
+    updateRecapPanelCurrentItemFor("role", { scroll });
+  }
+
+  function updateRecapPanelCurrentItemFor(kind, { scroll = false } = {}) {
+    const panel = document.querySelector(
+      `.${kind === "role" ? ROLE_CHAT_PANEL_CLASS : RECAP_PANEL_CLASS}`,
+    );
     if (!panel) return;
-    const index = findCurrentChatRecapItemIndex();
+    const index = findCurrentChatRecapItemIndex(kind);
     const currentIndex = index >= 0 ? String(index) : "";
-    const previousIndex = recapPanelCurrentIndex;
+    const previousIndex =
+      kind === "role" ? roleChatPanelCurrentIndex : recapPanelCurrentIndex;
     if (!scroll && currentIndex === previousIndex) return;
-    recapPanelCurrentIndex = currentIndex;
+    if (kind === "role") roleChatPanelCurrentIndex = currentIndex;
+    else recapPanelCurrentIndex = currentIndex;
     const shouldScroll =
       currentIndex !== "" && (scroll || currentIndex !== previousIndex);
 
@@ -18574,6 +18752,79 @@
   let fillScreenStyledElSnapshot = null;
   let fillScreenStyledContentsSnapshot = null;
   let fillScreenModeTransitionUntil = 0;
+  let fillScreenTopReferenceBox = null;
+  let fillScreenTopReference = null;
+  let fillScreenHeaderTransitionUntil = 0;
+  let fillScreenHeaderSettleTimer = 0;
+
+  function clearFillScreenTopReference() {
+    fillScreenTopReferenceBox = null;
+    fillScreenTopReference = null;
+    fillScreenHeaderTransitionUntil = 0;
+    if (fillScreenHeaderSettleTimer) {
+      clearTimeout(fillScreenHeaderSettleTimer);
+      fillScreenHeaderSettleTimer = 0;
+    }
+  }
+
+  // 헤더 자동 숨김의 표시 전환 직전에 영상 상단 좌표를 고정한다. 헤더가 나타나는 동안
+  // 치지직 레이아웃이 일시적으로 플레이어를 아래로 밀더라도 화면 채우기 높이 계산은 이
+  // 좌표를 계속 사용한다. 숨김 전환에서는 이미 저장한 숨김 상태 좌표를 유지한다.
+  function lockFillScreenTopForHeaderTransition(show) {
+    if (!featureFlags.headerAutoHide) return;
+    const target = getFillScreenTarget();
+    const box = target?.box instanceof HTMLElement ? target.box : target?.el;
+    if (!(box instanceof HTMLElement)) return;
+    if (fillScreenTopReferenceBox !== box) {
+      fillScreenTopReferenceBox = box;
+      fillScreenTopReference = null;
+    }
+    // 전환이 끝나기 전에 빠르게 다시 표시되면 현재 좌표는 애니메이션 중간값이다.
+    // 그때는 기존 기준을 덮어쓰지 않고, 완전히 숨겨진 상태에서 시작할 때만 갱신한다.
+    if (
+      (show && Date.now() >= fillScreenHeaderTransitionUntil) ||
+      !Number.isFinite(fillScreenTopReference)
+    ) {
+      fillScreenTopReference = Math.max(0, box.getBoundingClientRect().top);
+    }
+    fillScreenHeaderTransitionUntil =
+      Date.now() + HEADER_PEEK_TRANSITION_MS + 50;
+    if (fillScreenHeaderSettleTimer) {
+      clearTimeout(fillScreenHeaderSettleTimer);
+    }
+    fillScreenHeaderSettleTimer = window.setTimeout(() => {
+      fillScreenHeaderSettleTimer = 0;
+      fillScreenHeaderTransitionUntil = 0;
+      // 숨김 전환이 끝났다면 최종 좌표를 기준값으로 정착시킨다. 표시 중에는 기존
+      // 숨김 상태 좌표를 계속 보존한다.
+      applyFillScreen();
+    }, HEADER_PEEK_TRANSITION_MS + 50);
+  }
+
+  function getStableFillScreenTop(videoBox) {
+    const measured = Math.max(0, videoBox.getBoundingClientRect().top);
+    if (!featureFlags.headerAutoHide) {
+      fillScreenTopReferenceBox = videoBox;
+      fillScreenTopReference = measured;
+      return measured;
+    }
+    if (fillScreenTopReferenceBox !== videoBox) {
+      fillScreenTopReferenceBox = videoBox;
+      fillScreenTopReference = measured;
+    }
+    const peeking = document.querySelector(
+      "header#header.cheese-header-peek",
+    );
+    if (
+      !(peeking instanceof HTMLElement) &&
+      Date.now() >= fillScreenHeaderTransitionUntil
+    ) {
+      fillScreenTopReference = measured;
+    }
+    return Number.isFinite(fillScreenTopReference)
+      ? fillScreenTopReference
+      : measured;
+  }
 
   function captureInlineStyleProperties(element, properties) {
     const snapshot = {};
@@ -19049,31 +19300,14 @@
       window.visualViewport?.height ||
       window.innerHeight ||
       document.documentElement.clientHeight;
-    // ⚠ boxTop 은 우리가 방금 준 height 때문에 흔들릴 수 있다. 특히 헤더 자동 숨김이
-    //   켜져 있으면 마우스가 플레이어에 올라갈 때마다 헤더가 peek 되면서 영상 상단이
-    //   헤더 높이(60px)만큼 오르내리고, 그때마다 availableHeight 가 달라져 높이가
-    //   681 ↔ 621 로 요동친다(실측). 그 진동이 곧 제보된 '계속 깜빡임'이다.
-    //   → 마지막으로 적용한 높이와 1~2px 차이면 무시하고, 그보다 크게 달라질 때만
-    //     새 값을 쓴다. 진짜 레이아웃 변화(채팅 접기·창 크기)는 60px 단위라 그대로 반영된다.
-    const boxTop = Math.max(0, videoBox.getBoundingClientRect().top);
+    // 헤더 자동 숨김이 켜진 동안에는 peek 시작 직전의 상단 좌표를 사용한다. 전환 중의
+    // 중간 좌표나 표시 상태 좌표로 availableHeight를 다시 계산하면 높이가 계속 진동한다.
+    const boxTop = getStableFillScreenTop(videoBox);
     const availableHeight = Math.floor(viewportHeight - boxTop);
-    let idealH =
+    const idealH =
       availableHeight > 0
         ? Math.min(widthBasedHeight, availableHeight)
         : widthBasedHeight;
-    // 헤더 자동 숨김의 peek 은 '오버레이'라 영상 크기를 바꿀 이유가 없다. peek 으로
-    //   생긴 상단 이동분은 되돌려, 마우스가 오갈 때 높이가 바뀌지 않게 한다.
-    if (featureFlags.headerAutoHide) {
-      // ⚠ HEADER_PEEK_CLASS 상수는 이 함수보다 뒤에 const 로 선언돼 있다. 여기서
-      //   참조하면 초기화 순서에 따라 TDZ 예외가 날 수 있어 문자열을 직접 쓴다.
-      const peeking = document.querySelector("header#header.cheese-header-peek");
-      if (peeking instanceof HTMLElement) {
-        const peekH = Math.round(peeking.getBoundingClientRect().height);
-        if (peekH > 0) {
-          idealH = Math.min(widthBasedHeight, availableHeight + peekH);
-        }
-      }
-    }
     const value = `${idealH}px`;
     // 영상 영역(_player_)은 부모(_contents_, flex column)의 flex-shrink:1 자식이라, height 를
     // 줘도 부모 높이가 부족하면 눌려서 안 먹는다. flex-shrink:0 을 함께 줘 우리가 정한
@@ -21241,6 +21475,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 표시로 전환할 땐 현재 배너 오프셋을 먼저 반영(배너 유무가 바뀌었을 수 있음).
     if (show) updateHeaderOffsetVar(header);
     if (show === headerPeekShown) return;
+    lockFillScreenTopForHeaderTransition(show);
     headerPeekShown = show;
     header.classList.toggle(HEADER_PEEK_CLASS, show);
     if (show) scheduleHeaderFollowRefreshAfterReveal();
@@ -21361,6 +21596,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     headerPeekPinned = false;
     setHeaderPeek(false); // peek 클래스 제거(기능 끄면 CSS도 빠져 원상복구)
     headerOffsetPx = 0;
+    clearFillScreenTopReference();
     document.documentElement.style.removeProperty("--cheese-header-offset"); // 변수 정리
     document.body.classList.remove("cheese-has-banner"); // 배너 마커 정리
     document.documentElement.style.removeProperty("--cheese-sticky-shift"); // 보정량 정리
@@ -42482,6 +42718,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         void pruneChatRecap();
       }
       applyChatRecapPlayerButtonVisibility();
+      applyRoleChatButtonVisibility();
       broadcastFeatureFlags();
       ensureChatHistory();
       void loadClipVault();
@@ -51525,8 +51762,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[ROLE_CHAT_ON_KEY]) {
         vodRoleChatOn = changes[ROLE_CHAT_ON_KEY].newValue !== false;
-        // 탭이 사라지면 내 채팅으로 되돌린다.
-        if (!vodRoleChatOn) recapPanelTab = "mine";
+        // 끄면 버튼과 열려 있던 패널을 즉시 정리한다.
+        applyRoleChatButtonVisibility();
       }
       if (changes[ROLE_CHAT_BOTS_KEY]) {
         // ⚠ 이미 수집한 목록에 소급 적용하려면 다시 수집해야 한다. 봇 목록은
@@ -52149,6 +52386,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ensureChatMsgObserver(); // 채팅 메시지에 차단 유저(닉네임) 숨김 적용 관찰
     initCommentTimestampMarkers();
     ensureOpenChatRecapPanelConnected();
+    applyRoleChatButtonVisibility();
+    ensureOpenRoleChatPanelConnected();
     initSeekPreviewRealtime();
     syncVodTitleChangesProgress();
     initLiveDetailStartTooltip();
@@ -53042,9 +53281,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     },
     true,
   );
+  document.addEventListener(
+    "click",
+    (e) => {
+      const btn = e.target?.closest?.(`.${ROLE_CHAT_BUTTON_CLASS}`);
+      if (!btn) return;
+      handleRoleChatButtonClick(e, btn);
+    },
+    true,
+  );
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && chatRecapOpenPanel?.isConnected === false) {
       ensureOpenChatRecapPanelConnected();
+    }
+    if (!document.hidden && roleChatOpenPanel?.isConnected === false) {
+      ensureOpenRoleChatPanelConnected();
     }
   });
   document.addEventListener("click", handleStudioMoreCaptureClick, true);

@@ -108,6 +108,46 @@ async function appendRows(rows) {
   assert.equal(distinctVod.changed, false);
   assert.equal(distinctVod.items.length, 2);
 
+  // 라이브에서 한 번 저장한 채팅은 같은 문구가 5초 안에 여러 번 보여도 가장
+  // 가까운 다시보기 후보 하나에만 연결한다.
+  const oneLiveMatch = api.matchUnlinkedLiveRows(
+    [{ t: 10_000, m: "같은 채팅" }],
+    [
+      { t: 9_000, m: "같은 채팅" },
+      { t: 10_000, m: "같은 채팅" },
+      { t: 11_000, m: "같은 채팅" },
+    ],
+  );
+  assert.deepEqual([...oneLiveMatch], [1]);
+
+  // 계정 해시로 확정된 후보는 조금 더 멀어도 먼저 라이브 행을 소비한다. 같은
+  // 문구를 쓴 주변 이용자의 채팅이 로컬 보조 판정으로 추가되는 것을 막는다.
+  const preferredLiveMatch = api.matchUnlinkedLiveRows(
+    [{ t: 20_000, m: "ㅋㅋㅋ" }],
+    [
+      { t: 20_000, m: "ㅋㅋㅋ" },
+      { t: 20_700, m: "ㅋㅋㅋ", preferred: true },
+    ],
+  );
+  assert.deepEqual([...preferredLiveMatch], [1]);
+
+  // 실제로 두 번 친 동일 문구는 라이브 기록 수만큼 보존한다. 이미 다시보기와
+  // 연결된 행과 결제 내역 정본은 보조 판정에 다시 쓰지 않는다.
+  const repeatedLiveMatch = api.matchUnlinkedLiveRows(
+    [
+      { t: 30_000, m: "반복" },
+      { t: 31_000, m: "반복" },
+      { t: 31_500, m: "반복", n: "123", v: 10 },
+      { t: 32_000, m: "반복", d: { src: "history" } },
+    ],
+    [
+      { t: 29_000, m: "반복" },
+      { t: 30_000, m: "반복", preferred: true },
+      { t: 31_000, m: "반복" },
+    ],
+  );
+  assert.deepEqual([...repeatedLiveMatch].sort((a, b) => a - b), [1, 2]);
+
   // 완료된 영상을 다시 읽을 때 서버 ID가 달라져도 같은 위치의 행은 일대일로
   // 교체한다. 과거 재수집으로 불어난 행은 줄이되 실제 연속 입력 두 건은 보존한다.
   const reconciledVod = api.reconcileCompleteVodRows(

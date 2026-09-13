@@ -234,6 +234,117 @@
     return undefined;
   }
 
+  function liveRowMatchKey(item, donationKeyOf) {
+    const text = String(
+      item?.m !== undefined ? item.m : item?.text || "",
+    ).trim();
+    return JSON.stringify([text, String(donationKeyOf(item?.d) || "")]);
+  }
+
+  // 라이브에서 먼저 저장한 한 행은 다시보기 API의 한 행에만 연결한다. 예전에는
+  // 같은 본문이 5초 안에 있기만 하면 API 후보마다 통과해, 한 번 친 채팅이 1초
+  // 간격의 여러 행으로 보일 수 있었다. 계정 해시 등으로 이미 확정된 후보가 있으면
+  // 그 후보가 로컬 행을 먼저 차지하고, 남은 행만 시각이 가장 가까운 후보와 맞춘다.
+  function matchUnlinkedLiveRows(
+    sourceItems,
+    candidateRows,
+    donationKeyOf = () => "",
+    maxDeltaMs = 5000,
+  ) {
+    const windowMs = Math.max(0, Number(maxDeltaMs) || 0);
+    const sourceGroups = new Map();
+    for (let index = 0; index < (sourceItems || []).length; index += 1) {
+      const item = sourceItems[index];
+      const hasOffset =
+        item?.v !== undefined &&
+        item?.v !== null &&
+        item?.v !== "" &&
+        Number.isFinite(Number(item.v));
+      if (
+        item?.n ||
+        hasOffset ||
+        item?.d?.src === "history" ||
+        !(Number(item?.t) > 0) ||
+        (!item?.m && !item?.d)
+      ) {
+        continue;
+      }
+      const key = liveRowMatchKey(item, donationKeyOf);
+      if (!sourceGroups.has(key)) sourceGroups.set(key, []);
+      sourceGroups.get(key).push({ index, time: Number(item.t) });
+    }
+
+    const candidateGroups = new Map();
+    for (let index = 0; index < (candidateRows || []).length; index += 1) {
+      const item = candidateRows[index];
+      const time = Number(item?.t) || 0;
+      if (!time) continue;
+      const key = liveRowMatchKey(item, donationKeyOf);
+      if (!sourceGroups.has(key)) continue;
+      if (!candidateGroups.has(key)) candidateGroups.set(key, []);
+      candidateGroups.get(key).push({
+        index,
+        time,
+        preferred: item?.preferred === true,
+      });
+    }
+
+    const usedSources = new Set();
+    const matchedCandidates = new Set();
+    const matchPass = (sources, candidates, preferred) => {
+      const pairs = [];
+      const sortedSources = sources
+        .slice()
+        .sort((a, b) => a.time - b.time || a.index - b.index);
+      const lowerBound = (time) => {
+        let low = 0;
+        let high = sortedSources.length;
+        while (low < high) {
+          const middle = (low + high) >> 1;
+          if (sortedSources[middle].time < time) low = middle + 1;
+          else high = middle;
+        }
+        return low;
+      };
+      for (const candidate of candidates) {
+        if (candidate.preferred !== preferred) continue;
+        const endTime = candidate.time + windowMs;
+        for (
+          let index = lowerBound(candidate.time - windowMs);
+          index < sortedSources.length && sortedSources[index].time <= endTime;
+          index += 1
+        ) {
+          const source = sortedSources[index];
+          const delta = Math.abs(source.time - candidate.time);
+          pairs.push({ source, candidate, delta });
+        }
+      }
+      pairs.sort(
+        (a, b) =>
+          a.delta - b.delta ||
+          a.candidate.index - b.candidate.index ||
+          a.source.index - b.source.index,
+      );
+      for (const pair of pairs) {
+        if (
+          usedSources.has(pair.source.index) ||
+          matchedCandidates.has(pair.candidate.index)
+        ) {
+          continue;
+        }
+        usedSources.add(pair.source.index);
+        matchedCandidates.add(pair.candidate.index);
+      }
+    };
+
+    for (const [key, candidates] of candidateGroups) {
+      const sources = sourceGroups.get(key) || [];
+      matchPass(sources, candidates, true);
+      matchPass(sources, candidates, false);
+    }
+    return matchedCandidates;
+  }
+
   // 끝까지 읽은 한 다시보기는 기존 행에 단순 추가하지 않고 수집 결과와 일대일로
   // 맞춘다. API 재조회 때 합성 메시지 ID나 절대 시각이 달라져도 같은 영상 위치의
   // 행이 계속 쌓이지 않으며, 같은 초에 같은 문구를 실제로 여러 번 보낸 경우에는
@@ -774,6 +885,7 @@
     parseKey,
     readForMerge,
     compactVodRows,
+    matchUnlinkedLiveRows,
     reconcileCompleteVodRows,
     createVodTitleChangeTracker,
     createVodRoleChatTracker,
