@@ -5905,6 +5905,27 @@ html.cheese-channel-profile-radius-enabled
   opacity: 0.4;
   cursor: grabbing;
 }
+/* 채널 순서 편집 중인 그룹: 편집 대상임을 테두리로 알리고, 버튼도 눌린 상태로 둔다.
+   ⚠ 항목을 꾹 눌러야 드래그가 시작되므로(짧은 클릭은 채널 이동) 안내가 없으면
+   '왜 안 끌리지' 싶다. 목록 위에 한 줄 안내를 붙인다. */
+.cheese-cf-group.is-sorting {
+  outline: 1px dashed var(--cheese-cf-group-color, #888);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.cheese-cf-group.is-sorting .cheese-cf-group-list::before {
+  content: "꾹 눌러 끌어다 순서를 바꾸세요";
+  display: block;
+  padding: 2px 8px 4px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  font-size: 11px;
+}
+.cheese-cf-group-actions [data-cf-group-sort][aria-pressed="true"] {
+  color: var(--cheese-cf-group-color, inherit);
+}
 /* 호버 시(또는 '별표 항상 표시' 옵션이면) 별표 노출 + 시청자수를 별표 폭만큼 왼쪽으로
    밀어 겹침 방지. 별표가 안 보일 땐 여백도 없어 네이티브와 동일. */
 .cheese-cf-item:hover .cheese-follow-fav,

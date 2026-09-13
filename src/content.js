@@ -2441,6 +2441,8 @@
   let customFollowGroupCollapsed = {}; // group key → true(접힘)
   let customFollowGroupPlacement = "groups-first";
   let customFollowGroupOrder = []; // custom:/auto:/tag: 그룹을 합친 사이드바 순서
+  // 지금 채널 순서를 편집 중인 그룹 키(""=편집 중 아님). 화면 상태라 저장하지 않는다.
+  let customFollowGroupSortKey = "";
   let customFollowGroupTagHideOffline = true;
   let customFollowGroupExcludedTags = new Set();
   let customFollowGroupOfflineOverrides = {};
@@ -34211,6 +34213,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         color: sanitizeCustomFollowGroupColor(raw.color),
         icon: isCustomFollowGroupIcon(raw.icon) ? raw.icon : "folder",
         channelIds,
+        // ⚠ 여기서 빠뜨리면 저장·로드 때마다 '직접 정렬' 표시가 지워진다.
+        manualOrder: raw.manualOrder === true,
       });
       if (groups.length >= CUSTOM_FOLLOW_GROUP_MAX) break;
     }
@@ -34296,6 +34300,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     "square-user-round":
       '<path d="M18 21a6 6 0 0 0-12 0"/><circle cx="12" cy="11" r="4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
     "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    // lucide arrow-up-down — 채널 순서 편집 버튼.
+    "arrow-up-down":
+      '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
     "grip-vertical":
       '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
@@ -34349,7 +34356,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     item,
     h,
     expandedNow,
-    { grouped = false, section = "following" } = {},
+    { grouped = false, section = "following", sortingGroup = false } = {},
   ) {
     const live = item.live;
     const href = live
@@ -34402,11 +34409,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const expandedCls = expandedNow ? " " + expandedNow : "";
     // 커스텀 순서 드래그: 즐겨찾기 별도정렬 ON + custom 모드 + 이 항목이 즐겨찾기일 때.
     // 접힘 상태(아이콘만)에서도 현재 표시 중인 즐겨찾기는 재정렬할 수 있다.
-    const dragOn =
-      !grouped &&
-      featureFlags.sbFollowFavSort &&
-      customFollowFavSort === "custom" &&
-      fav;
+    // 그룹 항목은 그 그룹이 '순서 편집 중'일 때만 끌 수 있다(같은 long-press 방식).
+    const dragOn = grouped
+      ? sortingGroup
+      : featureFlags.sbFollowFavSort &&
+        customFollowFavSort === "custom" &&
+        fav;
     // draggable 은 기본 false — 꾹 누르면(long-press) JS 가 동적으로 켠다(짧은 클릭은
     // 채널 이동 유지). 클래스로 '순서 편집 가능 항목'을 식별한다.
     const dragAttr = dragOn
@@ -34627,6 +34635,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       icon: group.icon,
       automatic: false,
       defaultCollapsed: false,
+      // 이 그룹만 채널 순서를 직접 정한 상태인지. channelIds 순서를 그대로 쓴다.
+      manualOrder: group.manualOrder === true,
       items: group.channelIds
         .map((channelId) => byId.get(channelId))
         .filter(Boolean),
@@ -34687,14 +34697,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const offlineHidden = group.offlineOnly
           ? false
           : isCustomFollowGroupOfflineHidden(group.key);
-        const allItems = prioritizeLiveCustomFollowItems(
-          customFollowSort === "popular"
-            ? sortCustomFollow(group.items, "popular")
-            : group.items
-                .slice()
-                .sort((a, b) => customFollowModeCmp(a, b, customFollowSort)),
-          featureFlags.sbFollowGroupLiveFirst,
-        );
+        // ⚠ '직접 정렬' 그룹은 정렬도, 방송 중 우선도 적용하지 않는다. 사용자가
+        //   직접 끌어다 놓은 자리가 자꾸 바뀌면 편집한 보람이 없다.
+        const allItems = group.manualOrder
+          ? group.items.slice()
+          : prioritizeLiveCustomFollowItems(
+              customFollowSort === "popular"
+                ? sortCustomFollow(group.items, "popular")
+                : group.items
+                    .slice()
+                    .sort((a, b) =>
+                      customFollowModeCmp(a, b, customFollowSort),
+                    ),
+              featureFlags.sbFollowGroupLiveFirst,
+            );
         return {
           ...group,
           offlineHidden,
@@ -34727,6 +34743,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             createCustomFollowItemHtml(item, h, expandedNow, {
               grouped: true,
               section: "groups",
+              sortingGroup: customFollowGroupSortKey === group.key,
             }),
           )
           .join("");
@@ -34742,6 +34759,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const offlineAction = group.offlineOnly
           ? ""
           : `<button type="button" data-cf-group-offline="${escapeAttribute(group.key)}" aria-pressed="${String(group.offlineHidden)}" aria-label="${offlineLabel}" title="${offlineLabel}">${customFollowLucideIcon(group.offlineHidden ? "eye-off" : "eye", 15)}</button>`;
+        // 채널 순서 편집(커스텀 그룹만). 자동 그룹은 구성원이 그때그때 바뀌어
+        // 직접 정한 순서를 유지할 수 없다.
+        const sortingNow = customFollowGroupSortKey === group.key;
+        const sortLabel = sortingNow
+          ? "순서 편집 끝내기"
+          : group.manualOrder
+            ? "채널 순서 편집 (직접 정렬 중)"
+            : "채널 순서 편집";
+        const sortAction = group.automatic
+          ? ""
+          : `<button type="button" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}" aria-label="${sortLabel}" title="${sortLabel}">${customFollowLucideIcon("arrow-up-down", 15)}</button>`;
+        const compactSortAction = group.automatic
+          ? ""
+          : `<button type="button" role="menuitem" data-cf-group-sort="${escapeAttribute(group.key)}" aria-pressed="${String(sortingNow)}">${customFollowLucideIcon("arrow-up-down", 15)}<span>${sortLabel}</span></button>`;
         const compactHeader = featureFlags.sbFollowGroupCompactHeader;
         const compactMenuId = `cheese-cf-group-actions-${groupIndex}`;
         const compactOfflineAction = group.offlineOnly
@@ -34752,6 +34783,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             `<button type="button" class="cheese-cf-group-actions-toggle" data-cf-group-actions-toggle="${escapeAttribute(group.key)}" aria-haspopup="menu" aria-expanded="false" aria-controls="${compactMenuId}" aria-label="${escapeAttribute(group.name)} 그룹 메뉴" title="그룹 메뉴">${customFollowLucideIcon("ellipsis", 16)}</button>` +
             `<div id="${compactMenuId}" class="cheese-cf-group-actions-menu" role="menu" hidden>` +
             compactOfflineAction +
+            compactSortAction +
             `<button type="button" role="menuitem" data-cf-group-edit="${escapeAttribute(group.key)}">${customFollowLucideIcon("pencil", 14)}<span>${editLabel}</span></button>` +
             `<button type="button" role="menuitem" data-cf-group-delete="${escapeAttribute(group.key)}" aria-haspopup="dialog" aria-expanded="false">${customFollowLucideIcon("trash-2", 14)}<span>${deleteLabel}</span></button>` +
             `</div></div>`
@@ -34759,11 +34791,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             ? ""
             : `<div class="cheese-cf-group-actions">` +
               offlineAction +
+              sortAction +
               `<button type="button" data-cf-group-edit="${escapeAttribute(group.key)}" aria-label="${editLabel}" title="${editLabel}">${customFollowLucideIcon("pencil", 14)}</button>` +
               `<button type="button" data-cf-group-delete="${escapeAttribute(group.key)}" aria-haspopup="dialog" aria-expanded="false" aria-label="${deleteLabel}" title="${deleteLabel}">${customFollowLucideIcon("trash-2", 14)}</button>` +
               `</div>`;
         return (
-          `<section class="cheese-cf-group${collapsed ? " is-collapsed" : ""}${compactHeader ? " is-compact-header" : ""}" data-cf-group-key="${escapeAttribute(group.key)}" data-cf-group-order-key="${escapeAttribute(orderKey)}" style="--cheese-cf-group-color:${escapeAttribute(color)}">` +
+          `<section class="cheese-cf-group${collapsed ? " is-collapsed" : ""}${compactHeader ? " is-compact-header" : ""}${sortingNow ? " is-sorting" : ""}" data-cf-group-key="${escapeAttribute(group.key)}" data-cf-group-order-key="${escapeAttribute(orderKey)}" style="--cheese-cf-group-color:${escapeAttribute(color)}">` +
           `<div class="cheese-cf-group-header">` +
           dragHandle +
           `<button type="button" class="cheese-cf-group-toggle" data-cf-group-toggle="${escapeAttribute(group.key)}" aria-expanded="${String(!collapsed)}" title="${escapeAttribute(group.name)}">` +
@@ -37026,6 +37059,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           );
           return;
         }
+        const groupSort = e.target.closest?.("[data-cf-group-sort]");
+        if (groupSort) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeCustomFollowGroupActionsMenus();
+          const key = groupSort.dataset.cfGroupSort || "";
+          // 같은 그룹을 다시 누르면 편집 종료. 다른 그룹을 누르면 그쪽으로 옮긴다
+          // (한 번에 한 그룹만 편집 — 여러 목록이 동시에 흔들리면 헷갈린다).
+          customFollowGroupSortKey =
+            customFollowGroupSortKey === key ? "" : key;
+          customFollowVersion += 1;
+          ensureCustomFollowList();
+          return;
+        }
         const groupEdit = e.target.closest?.("[data-cf-group-edit]");
         if (groupEdit) {
           e.preventDefault();
@@ -37494,17 +37541,40 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       popupFallbackHandled = true;
       e.preventDefault();
       e.stopPropagation();
-      // 현재 DOM 상의 즐겨찾기 순서를 읽되, 오프라인 숨김으로 보이지 않는 즐겨찾기는
-      // 기존 커스텀 순서에 그대로 보존한다.
       const ids = [...listEl.querySelectorAll(".cheese-cf-draggable")].map(
         (li) => li.dataset.channelId,
       );
-      customFollowFavOrder = mergeVisibleFavoriteOrder(ids);
-      try {
-        chrome.storage?.local?.set({
-          [CUSTOM_FOLLOW_FAV_ORDER_KEY]: customFollowFavOrder,
-        });
-      } catch {}
+      // 그룹 안에서 끈 경우: 그 그룹의 channelIds 순서를 갱신한다.
+      // ⚠ 오프라인 숨김 등으로 화면에 없는 채널은 기존 순서 뒤쪽에 그대로 남긴다.
+      //   보이는 것만으로 덮어쓰면 숨겨 둔 채널이 그룹에서 사라진다.
+      const groupSection = listEl.closest?.("[data-cf-group-key]");
+      const groupKey = groupSection?.dataset.cfGroupKey || "";
+      if (groupKey.startsWith("custom:")) {
+        const groupId = groupKey.slice(7);
+        const target = customFollowGroups.find((g) => g.id === groupId);
+        if (target) {
+          const visible = new Set(ids);
+          target.channelIds = [
+            ...ids,
+            ...target.channelIds.filter((id) => !visible.has(id)),
+          ];
+          target.manualOrder = true; // 이제 이 그룹은 직접 정한 순서를 쓴다
+          try {
+            chrome.storage?.local?.set({
+              [CUSTOM_FOLLOW_GROUPS_KEY]: customFollowGroups,
+            });
+          } catch {}
+        }
+      } else {
+        // 현재 DOM 상의 즐겨찾기 순서를 읽되, 오프라인 숨김으로 보이지 않는 즐겨찾기는
+        // 기존 커스텀 순서에 그대로 보존한다.
+        customFollowFavOrder = mergeVisibleFavoriteOrder(ids);
+        try {
+          chrome.storage?.local?.set({
+            [CUSTOM_FOLLOW_FAV_ORDER_KEY]: customFollowFavOrder,
+          });
+        } catch {}
+      }
       // ⚠ 재렌더 전에 드래그 상태를 비운다(재렌더로 li 교체 시 dragend 가 안 와 잔존하는 버그).
       customFollowDragEl = null;
       customFollowDragId = "";
