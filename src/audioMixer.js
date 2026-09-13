@@ -6929,6 +6929,19 @@
     return location.pathname.startsWith("/live/");
   }
 
+  // 치지직 '타임머신'(기본 되감기 재생바)을 쓸 수 있는 방송인지.
+  // 플레이어 루트에 pzp-pc--seekable 이 붙는다(제보·실측). 이 방송에서는 치지직이
+  // 자체 재생바로 과거 탐색을 제공하므로 우리 되감기 바는 겹치기만 한다.
+  // ⚠ 클래스를 못 찾으면 false 를 돌려준다. 판정에 실패했다고 바를 숨기면
+  //   타임머신이 없는 방송에서 기능이 조용히 사라진다 — 켠 대로 두는 쪽이 안전하다.
+  function hasChzzkTimemachine() {
+    if (!isLiveSeekPage()) return false;
+    const player =
+      document.querySelector(".pzp-pc--seekable") ||
+      findPlayer()?.closest?.(".pzp-pc--seekable");
+    return Boolean(player);
+  }
+
   function isVodSeekPage() {
     return location.pathname.startsWith("/video/");
   }
@@ -7283,6 +7296,12 @@
     // (featureFlags.liveRewind)은 플레이어의 되감기/앞으로 '버튼'만 숨기는 것이고, 바는
     // 별개다. 버튼을 숨겨도 탐색할 수 있도록 바는 유지한다.
     if (!liveSeekBarOn) {
+      removeSeekBar();
+      return;
+    }
+    // 타임머신을 쓸 수 있는 방송이면 치지직 재생바가 이미 있으므로 우리 바는 뺀다
+    // (설정은 그대로 두고 이 방송에서만 접는다).
+    if (hasChzzkTimemachine()) {
       removeSeekBar();
       return;
     }
@@ -9348,6 +9367,13 @@
       !graphConflict
     ) {
       return false;
+    }
+    // 되감기 바: '있어야 할 상태'와 실제가 다르면 안정이 아니다.
+    // ⚠ 타임머신 여부(pzp-pc--seekable)는 재생 중에 붙거나 떨어질 수 있다. 여기서
+    //   보지 않으면 이미 안정된 tick 이 early return 해서 바가 그대로 남는다.
+    if (isLive) {
+      const wantSeekBar = liveSeekBarOn && !hasChzzkTimemachine();
+      if (wantSeekBar !== has(SEEK_BAR_CLASS)) return false;
     }
     return true;
   }
