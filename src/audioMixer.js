@@ -592,6 +592,18 @@
   function currentEqGroups() {
     return EQ_GROUPS_BY_MODE[eqBandMode] || EQ_GROUPS_BY_MODE.chzzk;
   }
+  // 주파수 표기(1000 → 1k, 31.5 → 31.5Hz).
+  function fmtHz(freq) {
+    return freq >= 1000 ? `${freq / 1000}kHz` : `${freq}Hz`;
+  }
+  // 정보 팝오버 문구. 대역에 따라 달라지는 것만 여기서 만들고 나머지는 그대로.
+  function infoText(key) {
+    if (key === "group-eq") {
+      const bands = currentEqBands();
+      return `이퀄라이저(EQ). 소리를 주파수 대역(저음~고음)으로 나눠 각 대역을 키우거나 줄여 음색을 조절합니다. 10개 밴드는 왼쪽이 저음(${fmtHz(bands[0])}), 오른쪽이 고음(${fmtHz(bands[bands.length - 1])})입니다. 지금 배치는 '${EQ_BAND_MODE_LABELS[eqBandMode]}'입니다.`;
+    }
+    return INFO_TEXT[key] || "";
+  }
   // 그룹의 대표 밴드 인덱스 = 가중치가 가장 큰(1.0) 밴드. 표시값으로 쓴다.
   function eqGroupLeadBand(groupKey) {
     const g = currentEqGroups()[groupKey];
@@ -633,8 +645,9 @@
     "normalizer-target":
       "음량 균일화의 목표 레벨입니다. 높일수록 전체 음량을 더 크게 끌어올려 평준화하고, 낮추면 더 조용한 기준으로 맞춥니다.",
     // 전문가 모드 그룹 제목용 개념 설명
-    "group-eq":
-      "이퀄라이저(EQ). 소리를 주파수 대역(저음~고음)으로 나눠 각 대역을 키우거나 줄여 음색을 조절합니다. 10개 밴드는 왼쪽이 저음(60Hz), 오른쪽이 고음(16kHz)입니다.",
+    // ⚠ group-eq 는 대역 배치에 따라 양 끝 주파수가 달라진다. 고정 문구로 두면
+    //   ISO 로 바꿔도 60Hz 라고 적혀 있다(제보). infoText() 가 지금 배치로 만든다.
+    "group-eq": "",
     "group-gain":
       "음량(게인). 모든 처리를 거치기 전 입력 신호의 전체 크기를 조절합니다. 기본 볼륨이 너무 작거나 클 때 여기서 맞춥니다.",
     "group-comp":
@@ -1479,15 +1492,54 @@
     return target.eqByMode[key];
   }
 
+  // 지금 EQ 가 '고른 프리셋 그대로'이면, 그 프리셋의 새 배치 값을 돌려준다.
+  // 값을 직접 만진 상태(presetDirty)면 null — 사용자가 맞춘 값을 덮으면 안 된다.
+  // ⚠ 커스텀 프리셋은 eqType 기준으로 변환한다(내장은 배치별 전용 값이 있다).
+  function presetEqForMode(mode) {
+    if (presetDirty) return null;
+    const key = state.preset;
+    if (!key || key === "custom") return null;
+    const previous = eqBandMode;
+    // '기본' 칩이 커스텀으로 대체돼 있으면 그 커스텀이 실제 출처다.
+    const replaced = key === "default" ? effectiveDefaultCustom() : null;
+    const builtIn = replaced ? null : PRESETS[key];
+    if (builtIn) {
+      // 지금 값이 이 프리셋 그대로일 때만 새 배치 값으로 갈아 끼운다.
+      return sameEq(state.eq, builtInPresetEq(builtIn, previous))
+        ? builtInPresetEq(builtIn, mode)
+        : null;
+    }
+    const custom =
+      replaced ||
+      normalizeCustomPresets(state.customPresets).find((p) => p.id === key);
+    if (!custom) return null;
+    const base = cloneMixerSnapshot(custom.snapshot).eq;
+    const here = convertEqBetweenModes(base, custom.eqType, previous);
+    if (!sameEq(state.eq, here)) return null;
+    return convertEqBetweenModes(base, custom.eqType, mode);
+  }
+
+  function sameEq(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    return (
+      a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.05)
+    );
+  }
+
   // EQ 대역 모드 변경. 지금 값을 원래 모드 칸에 넣어 두고 새 모드 값을 꺼내 쓴다.
   // ⚠ 필터의 frequency 는 생성 시점 값이라 그냥 두면 예전 주파수로 남는다. 이미
   //   연결돼 있으면 각 필터의 frequency 를 새 대역으로 다시 써 준다.
   function applyEqBandMode(next) {
     const mode = normalizeEqBandMode(next);
     if (mode === eqBandMode) return false;
+    // 프리셋을 고른 상태(값을 따로 만지지 않음)라면 그 프리셋의 새 배치 값을 쓴다.
+    // ⚠ eqByMode 는 '사용자가 직접 만진 값'만 담는다. 프리셋만 고른 채 모드를
+    //   바꾸면 반대쪽 칸이 비어 있어 EQ 가 통째로 0 으로 보였다(제보).
+    const fromPreset = presetEqForMode(mode);
     eqBucket(state, eqBandMode).splice(0, 10, ...state.eq);
     eqBandMode = mode;
-    state.eq = [...eqBucket(state, mode)];
+    state.eq = fromPreset || [...eqBucket(state, mode)];
+    if (fromPreset) eqBucket(state, mode).splice(0, 10, ...fromPreset);
     const bands = currentEqBands();
     if (audio.connected) {
       audio.eqFilters.forEach((filter, i) => {
@@ -1919,8 +1971,8 @@
   //   비워 두는 게 핵심인데, 보간하면 저역 강조가 125Hz 까지 번져 먹먹해진다.
   //   '값이 프리셋과 같은가' 비교도 이 함수를 거치므로 dirty 판정과 어긋나지 않는다.
   // ⚠ eqIso 가 없는 프리셋(나중에 추가된 것 등)은 보간으로 대신한다.
-  function builtInPresetEq(p) {
-    if (eqBandMode !== "iso") return [...p.eq];
+  function builtInPresetEq(p, mode = eqBandMode) {
+    if (mode !== "iso") return [...p.eq];
     if (Array.isArray(p.eqIso) && p.eqIso.length === 10) return [...p.eqIso];
     return convertEqBetweenModes(p.eq, "chzzk", "iso");
   }
@@ -3553,7 +3605,7 @@
   // 전문가 탭에서만 쓴다 — 고급 탭의 저음/고음/선명도는 applyEqGroup 이 0.1 로 반올림해
   // 저장하므로 정밀 입력의 이득이 없다.
   function renderAdvancedRow(label, key, min, max, step, value, numeric) {
-    const info = INFO_TEXT[key] ? infoIcon(key) : "";
+    const info = infoText(key) ? infoIcon(key) : "";
     // step="any"(게인)는 number 입력에도 그대로 넘긴다(브라우저가 임의 소수 허용).
     const out = numeric
       ? `<input type="number" class="cheese-mixer-row-num" min="${min}" max="${max}" step="${step}" value="${fmtNum(value)}" data-output="${key}" data-num-input="${key}" aria-label="${label} 값">`
@@ -3615,7 +3667,7 @@
 
   // 토글 행: info 아이콘을 label 바깥에 두어 체크박스 토글과 분리한다.
   function renderToggleRow(label, infoKey, action, checked) {
-    const info = INFO_TEXT[infoKey] ? infoIcon(infoKey) : "";
+    const info = infoText(infoKey) ? infoIcon(infoKey) : "";
     return `
       <div class="cheese-mixer-toggle-row">
         <span class="cheese-mixer-toggle-label">${label}${info}</span>
@@ -3627,7 +3679,7 @@
   }
 
   function groupHeading(label, infoKey, extra = "") {
-    const info = infoKey && INFO_TEXT[infoKey] ? infoIcon(infoKey) : "";
+    const info = infoKey && infoText(infoKey) ? infoIcon(infoKey) : "";
     return `<h4 class="cheese-mixer-group-heading">${label}${info}${extra}</h4>`;
   }
 
@@ -4093,7 +4145,7 @@
       return;
     }
     closeInfoPopover(panel);
-    const text = INFO_TEXT[key];
+    const text = infoText(key);
     if (!text) return;
 
     const pop = document.createElement("div");

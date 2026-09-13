@@ -1499,6 +1499,10 @@ html.settings-tab-view .settings-item-desc {
   width: 100%;
 }
 
+.settings-segmented [data-live-viewer-count-position-value] {
+  justify-content: center;
+}
+
 .settings-item[data-update-notice-duration-row][hidden],
 .settings-item[data-update-notice-toast-position-row][hidden] {
   display: none;
@@ -1625,6 +1629,11 @@ html.settings-tab-view .settings-item-desc {
 
 #logPowerClickAction {
   margin-bottom: 5px;
+}
+
+#logPowerClickAction [data-logpower-click] {
+  word-break: keep-all;
+  justify-content: center;
 }
 
 .settings-custom-input input::-webkit-outer-spin-button,
