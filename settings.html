@@ -1465,15 +1465,18 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >숨긴 버튼의 기능도 끄기</span
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="숨긴 버튼의 기능도 끄기"
+                    >끈 버튼은 단축키도 끄기</span
                   >
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="숨긴 버튼의 단축키와 기능도 함께 끕니다. 끄면 버튼만 숨깁니다."
-                    >켜면(기본) 위에서 숨긴 버튼의 기능과 단축키까지 함께
-                    끕니다. 끄면 버튼만 숨기고 단축키(Shift+A/S/M/I/F, 방향키)는
-                    그대로 사용할 수 있습니다</span
+                    data-settings-summary="'표시'를 끈 버튼은 단축키로도 동작하지 않게 합니다."
+                    >켜면(기본) 위에서 '표시'를 끈 버튼은 단축키로도 동작하지
+                    않습니다. 끄면 버튼만 화면에서 사라지고
+                    단축키(Shift+A/S/M/I/F, 방향키)는 그대로 쓸 수
+                    있습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -7226,15 +7229,17 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >숨긴 버튼의 기능도 끄기</span
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="숨긴 버튼의 기능도 끄기"
+                    >끈 버튼은 단축키도 끄기</span
                   >
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="숨긴 버튼의 단축키까지 함께 끕니다."
-                    >끄면(기본) 버튼만 숨기고 단축키는 그대로 동작합니다. 켜면
-                    위에서 끈 버튼의 기능 자체를 꺼서 단축키로도 동작하지
-                    않습니다</span
+                    data-settings-summary="'표시'를 끈 버튼은 단축키로도 동작하지 않게 합니다."
+                    >끄면(기본) 버튼만 팝업에서 사라지고 단축키는 그대로
+                    동작합니다. 켜면 위에서 '표시'를 끈 버튼은 단축키로도
+                    동작하지 않습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -8430,6 +8435,108 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">가려진 채팅 표시</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다."
+                    >클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다.
+                    다시보기에서는 원문이 함께 내려오는 클린봇 메시지만
+                    복원되며, 블라인드 처리된 메시지는 원문이 남지 않아 그대로
+                    표시됩니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatRestoreBlind" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="chat"
+            aria-label="채팅 크기"
+          >
+            <h2 class="settings-group-title">채팅 크기</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label for="chatFontScaleInput" id="chatFontScaleLabel">
+                  <span class="settings-item-name">채팅 폰트 크기</span>
+                  <span class="settings-item-desc"
+                    >채팅 글자·이모티콘·배지 크기 배율(80~200%)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="chatFontScaleInput"
+                    min="80"
+                    max="200"
+                    step="5"
+                    inputmode="numeric"
+                    data-chat-font-scale
+                  />
+                  <small>%</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >후원·구독 등 메시지도 조절</span
+                  >
+                  <span class="settings-item-desc"
+                    >채팅창의 후원·구독·미션·고정 메시지의 글자·아이콘 크기도 위
+                    배율로 함께 조절</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-font-scale-special />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              채팅창이 열려 있는 라이브/다시보기에서 동작합니다. 너비는 채팅창
+              왼쪽 경계를 드래그해 조절하며 전역으로 저장됩니다.
+            </p>
+            <p class="settings-notice">
+              <strong>배지 모아 챗</strong> 확장이 채팅창을 제어 중이면 충돌을
+              막기 위해 이 기능들이 자동으로 양보합니다(배지 모아 챗이 켜진 동안
+              우리 채팅 정리는 적용되지 않음). 배지 모아 챗을 끄면 다시
+              적용됩니다.
+            </p>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="chat"
+            aria-label="채팅 보조 기능 및 필터"
+          >
+            <h2 class="settings-group-title">채팅 보조 기능·필터</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >치지직 미니플레이어(PIP)에 채팅 표시</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="PIP로 바뀐 영상 안에 채팅을 함께 표시합니다."
+                    >라이브를 보다가 다른 페이지로 이동해 영상이 PIP로 바뀌면,
+                    PIP 안에 채팅을 이어 붙여 함께 봅니다. PIP 영상을 드래그해
+                    위치를 옮기고, 오른쪽 아래 손잡이로 영상 크기를, 채팅 아래쪽
+                    손잡이로 채팅 높이를 각각 조절할 수 있으며 마지막 상태를
+                    저장합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="pipChat" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item" data-new-feature="chat-history-v4">
                 <label>
                   <span class="settings-item-name">채팅 이어보기</span>
@@ -8581,53 +8688,6 @@
               </svg>
               채팅 리캡 열기
             </button>
-          </section>
-
-          <section
-            class="settings-group"
-            data-panel="chat"
-            aria-label="채팅 보조 기능 및 필터"
-          >
-            <h2 class="settings-group-title">채팅 보조 기능·필터</h2>
-            <ul class="settings-list">
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >치지직 미니플레이어(PIP)에 채팅 표시</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="PIP로 바뀐 영상 안에 채팅을 함께 표시합니다."
-                    >라이브를 보다가 다른 페이지로 이동해 영상이 PIP로 바뀌면,
-                    PIP 안에 채팅을 이어 붙여 함께 봅니다. PIP 영상을 드래그해
-                    위치를 옮기고, 오른쪽 아래 손잡이로 영상 크기를, 채팅 아래쪽
-                    손잡이로 채팅 높이를 각각 조절할 수 있으며 마지막 상태를
-                    저장합니다</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="pipChat" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">가려진 채팅 표시</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다."
-                    >클린봇·블라인드로 가려진 메시지를 원문으로 표시합니다.
-                    다시보기에서는 원문이 함께 내려오는 클린봇 메시지만
-                    복원되며, 블라인드 처리된 메시지는 원문이 남지 않아 그대로
-                    표시됩니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="chatRestoreBlind" />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-            </ul>
           </section>
 
           <section
@@ -8837,61 +8897,6 @@
 
           <section
             class="settings-group"
-            data-panel="chat"
-            aria-label="채팅 크기"
-          >
-            <h2 class="settings-group-title">채팅 크기</h2>
-            <ul class="settings-list">
-              <li class="settings-item">
-                <label for="chatFontScaleInput" id="chatFontScaleLabel">
-                  <span class="settings-item-name">채팅 폰트 크기</span>
-                  <span class="settings-item-desc"
-                    >채팅 글자·이모티콘·배지 크기 배율(80~200%)</span
-                  >
-                </label>
-                <span class="settings-custom-input">
-                  <input
-                    type="number"
-                    id="chatFontScaleInput"
-                    min="80"
-                    max="200"
-                    step="5"
-                    inputmode="numeric"
-                    data-chat-font-scale
-                  />
-                  <small>%</small>
-                </span>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name"
-                    >후원·구독 등 메시지도 조절</span
-                  >
-                  <span class="settings-item-desc"
-                    >채팅창의 후원·구독·미션·고정 메시지의 글자·아이콘 크기도 위
-                    배율로 함께 조절</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-chat-font-scale-special />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-            </ul>
-            <p class="settings-group-desc">
-              채팅창이 열려 있는 라이브/다시보기에서 동작합니다. 너비는 채팅창
-              왼쪽 경계를 드래그해 조절하며 전역으로 저장됩니다.
-            </p>
-            <p class="settings-notice">
-              <strong>배지 모아 챗</strong> 확장이 채팅창을 제어 중이면 충돌을
-              막기 위해 이 기능들이 자동으로 양보합니다(배지 모아 챗이 켜진 동안
-              우리 채팅 정리는 적용되지 않음). 배지 모아 챗을 끄면 다시
-              적용됩니다.
-            </p>
-          </section>
-
-          <section
-            class="settings-group"
             data-panel="logpower"
             aria-label="통나무파워"
           >
@@ -8936,12 +8941,14 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">다른 탭의 획득도 알림</span>
+                  <span class="settings-item-name"
+                    >└ 다른 탭의 획득도 알림</span
+                  >
                   <span
                     class="settings-item-desc"
                     data-settings-summary="다른 탭에서 보상을 받아도 지금 탭에 알립니다."
                     >다른 치지직 탭에서 1시간 보상을 획득하면 지금 보고 있는
-                    탭에도 알림 표시(‘획득 토스트 알림’이 켜져 있어야 함)</span
+                    탭에도 알림을 표시합니다</span
                   >
                 </label>
                 <label class="settings-switch">

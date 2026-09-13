@@ -28,6 +28,7 @@
     ["affinity", "[data-affinity-on]"],
     ["vod-activity", "[data-vod-chat-graph]"],
     ["vod-role-chat", "[data-vod-role-chat]"],
+    ["logpower-toast", '[data-feature="chatLogPowerToast"]'],
     ["chat-time", '[data-feature="chatShowTime"]'],
     ["chat-device", '[data-feature="chatShowOsIcon"]'],
     ["popup-player", "[data-popup-player]"],
@@ -48,6 +49,8 @@
     ["[data-mixer-global-gain-default-enabled]", "[data-mixer-global-gain-default-mode]"],
     ["[data-video-filter-always-on]", "[data-video-filter-exclude-item]"],
     ["[data-video-filter-global-default-enabled]", "[data-video-filter-global-default-mode]"],
+    // 다른 탭 알림은 토스트를 끄면 애초에 뜰 곳이 없다 → 부모가 꺼지면 잠근다.
+    ['[data-feature="chatLogPowerToast"]', '[data-feature="chatLogPowerToastOtherTabs"]'],
     ["[data-vod-chat-graph]", "[data-vod-chat-graph-auto], [data-vod-chat-graph-colors]"],
     ["[data-vod-chat-graph-auto]", "[data-vod-chat-graph-auto-collect]"],
     ["[data-vod-role-chat]", "[data-role-bot-row]"],
