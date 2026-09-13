@@ -5912,7 +5912,7 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-channel-section.is-sorting {
   outline: 1px dashed var(--cheese-cf-group-color, #888);
   outline-offset: 2px;
-  border-radius: 8px;
+  border-radius: 0 8px 8px 0;
 }
 /* 순서 편집 버튼은 토글 버튼 뒤(툴바 끝)에 붙는다.
    ⚠ .cheese-cf-section-toolbar > button 이 display:grid + width:100% 를 주므로
@@ -5961,17 +5961,9 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-section-drag:active {
   cursor: grabbing;
 }
-/* 편집 중인 목록은 점선으로 묶어 '옮길 수 있는 덩어리'임을 보여 준다. */
-.cheese-cf-channel-section.is-section-sorting,
-.cheese-cf-groups.is-section-sorting {
-  outline: 1px dashed
-    var(
-      --sem-color-content-neutral-cool-weak,
-      var(--cheese-platter-content-neutral-cool-weak, #888)
-    );
-  outline-offset: 2px;
-  border-radius: 8px;
-}
+/* 끌고 있는 목록은 흐리게 — 어느 덩어리를 옮기는 중인지 보여 준다.
+   ⚠ 목록 순서 편집에는 테두리를 두지 않는다. 본문을 감춰 툴바만 남는 화면이라
+   테두리까지 그리면 번잡하다(항목 편집은 목록 안이라 테두리로 범위를 보여 준다). */
 .is-section-dragging {
   opacity: 0.45;
 }
