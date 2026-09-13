@@ -5908,10 +5908,15 @@ html.cheese-channel-profile-radius-enabled
 /* 채널 순서 편집 중인 그룹: 편집 대상임을 테두리로 알리고, 버튼도 눌린 상태로 둔다.
    ⚠ 항목을 꾹 눌러야 드래그가 시작되므로(짧은 클릭은 채널 이동) 안내가 없으면
    '왜 안 끌리지' 싶다. 목록 위에 한 줄 안내를 붙인다. */
+/* ⚠ 점선을 바깥쪽(outline-offset: 양수)에 그리면 오른쪽 선이 잘린다.
+   #cheese-custom-follow 가 overflow-x: clip 이고(하베스트한 네이티브 링크가
+   플레이어를 침범하지 않게 하는 규칙) 이 요소는 폭이 100% 라, 바깥으로 2px
+   나간 선이 잘리는 영역에 걸린다(실측: 클립 308px / 점선 끝 311px).
+   폭을 줄이는 대신 선을 안쪽에 그려 100% 폭을 유지한다(실측: 점선 끝 308px). */
 .cheese-cf-group.is-sorting,
 .cheese-cf-channel-section.is-sorting {
   outline: 1px dashed var(--cheese-cf-group-color, #888);
-  outline-offset: 2px;
+  outline-offset: -1px;
   border-radius: 0 8px 8px 0;
 }
 /* 순서 편집 버튼은 토글 버튼 뒤(툴바 끝)에 붙는다.
