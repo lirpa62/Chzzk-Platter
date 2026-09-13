@@ -5989,6 +5989,12 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-groups.is-section-sorting .cheese-cf-groups-chevron {
   opacity: 0.25;
 }
+/* 순서 편집 중에는 목록 단위 조작 버튼을 감춘다. 지금은 '목록을 옮기는' 작업만
+   하는 화면이라, 그룹 관리·즐겨찾기 순서 편집이 함께 눌리면 맥락이 섞인다. */
+.cheese-cf-groups.is-section-sorting [data-cf-group-manage],
+.cheese-cf-channel-section.is-section-sorting .cheese-cf-section-sort {
+  display: none !important;
+}
 /* 툴바가 핸들 + 토글(+ 순서 버튼)을 나란히 놓게 한다. */
 .cheese-cf-section-toolbar:has(.cheese-cf-section-drag),
 .cheese-cf-group-toolbar:has(.cheese-cf-section-drag) {

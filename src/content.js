@@ -34332,6 +34332,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // lucide arrow-up-down — 채널 순서 편집 버튼.
     "arrow-up-down":
       '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+    // lucide check — 편집 모드일 때의 '완료' 아이콘.
+    check: '<path d="M20 6 9 17l-5-5"/>',
     "grip-vertical":
       '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
@@ -38543,11 +38545,25 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       true,
     );
     document.addEventListener("dragend", finish, true);
+
+    // 편집 중인 목록 밖을 누르면 편집을 끝낸다(완료 버튼을 못 찾아도 빠져나갈 수
+    // 있게). ⚠ 순서 편집 버튼 자신과 목록 안(핸들·툴바)은 제외한다 — 그걸 누른
+    // 것까지 '바깥'으로 보면 켜자마자 꺼지거나 드래그가 끊긴다.
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!customFollowSectionSorting) return;
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest?.('[data-cf-ctrl="section-sort"]')) return;
+        if (target.closest?.("[data-cf-section-order]")) return;
+        toggleCustomFollowSectionSort();
+      },
+      true,
+    );
   }
 
-  // 섹션 순서 편집 모드 토글.
-  // ⚠ 켤 때 모든 섹션을 접는다. 펼친 채로는 목록이 길어 끌어 옮길 자리가 화면
-  //   밖으로 나간다. 끌 때는 켜기 직전의 접힘 상태를 그대로 되돌린다.
+  // 섹션 순서 편집 모드 토글. 본문을 감추는 건 CSS(is-section-sorting)가 한다.
   function toggleCustomFollowSectionSort() {
     customFollowSectionSorting = !customFollowSectionSorting;
     if (customFollowSectionSorting) {
@@ -38626,7 +38642,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>` +
       (collapsed
         ? ""
-        : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="section-sort" aria-pressed="${String(customFollowSectionSorting)}" title="${customFollowSectionSorting ? "목록 순서 편집 끝내기" : "목록 순서 편집"}" aria-label="${customFollowSectionSorting ? "목록 순서 편집 끝내기" : "목록 순서 편집"}">${customFollowLucideIcon("arrow-up-down", 15)}</button>` +
+        : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="section-sort" aria-pressed="${String(customFollowSectionSorting)}" title="${customFollowSectionSorting ? "목록 순서 편집 완료" : "목록 순서 편집"}" aria-label="${customFollowSectionSorting ? "목록 순서 편집 완료" : "목록 순서 편집"}">${customFollowLucideIcon(customFollowSectionSorting ? "check" : "arrow-up-down", 15)}</button>` +
           `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="square" title="캐릭터 선택창 설정" aria-label="캐릭터 선택창 설정">${customFollowLucideIcon("square-user-round", 15)}</button>`);
     // 상태 바뀌면 재배치. nav 직속일 때는 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
     // 헤더가 없는 접힘 DOM 이면 nav 의 맨 앞이 곧 목록 위다.
