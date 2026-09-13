@@ -75,6 +75,7 @@
     "cheeseEmbedClipGainStep",
     "cheeseEmbedClipGainMin",
     "cheeseEmbedClipGainMax",
+    "cheeseEmbedClipMixerWheelAction",
     "cheeseClipVideoFilterEnabled",
     "cheeseClipVideoFilterAlwaysOn",
     "cheeseClipVideoFilterPreset",
@@ -5351,6 +5352,15 @@
     false,
   );
   bindPctToggle("[data-embed-clip-gain-pct]", "cheeseEmbedClipGainPct");
+  // 임베드 클립 믹서 버튼 위 휠 동작(프리셋 전환/게인 조절).
+  // ⚠ 라이브 믹서(cheeseMixerWheelAction)와 별개 키다 — 따로 정할 수 있다.
+  bindStringSegmented(
+    document.querySelector("[data-embed-clip-mixer-wheel-action]"),
+    "embed-clip-mixer-wheel-action-value",
+    "cheeseEmbedClipMixerWheelAction",
+    ["preset", "gain"],
+    "preset",
+  );
 
   bindGainRangeSegmented(
     document.querySelector("[data-embed-clip-gain-min]"),

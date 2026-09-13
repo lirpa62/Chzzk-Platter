@@ -1963,8 +1963,7 @@
                     data-settings-summary="믹서 버튼 위에서 휠을 굴렸을 때 할 일을 정합니다."
                     >오디오 믹서 버튼에 마우스를 올리고 휠을 굴렸을 때 할
                     일입니다. 프리셋 전환=다음·이전 프리셋으로 게인 조절=위
-                    간격만큼 게인을 올리거나 내림(기본 프리셋 전환). 외부
-                    사이트의 임베드 클립 믹서에도 같이 적용됩니다.</span
+                    간격만큼 게인을 올리거나 내림(기본 프리셋 전환)</span
                   >
                 </div>
                 <div
@@ -10172,6 +10171,47 @@
                   />
                   <small>%</small>
                 </span>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="embed-clip-mixer-wheel-action"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">믹서 버튼 위 휠 동작</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="임베드 클립 믹서 버튼 위에서 휠을 굴렸을 때 할 일을 정합니다."
+                    >임베드 클립 믹서 버튼에 마우스를 올리고 휠을 굴렸을 때 할
+                    일입니다. 프리셋 전환=다음·이전 프리셋으로 게인 조절=위
+                    간격만큼 게인을 올리거나 내림(기본 프리셋 전환)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-embed-clip-mixer-wheel-action
+                  role="radiogroup"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-embed-clip-mixer-wheel-action-value="preset"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    프리셋 전환
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-embed-clip-mixer-wheel-action-value="gain"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    게인 조절
+                  </button>
+                </div>
               </li>
 
               <li class="settings-item settings-item-stacked">

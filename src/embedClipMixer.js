@@ -27,9 +27,9 @@
   const GAIN_STEP_KEY = "cheeseEmbedClipGainStep";
   const GAIN_MIN_KEY = "cheeseEmbedClipGainMin";
   const GAIN_MAX_KEY = "cheeseEmbedClipGainMax";
-  // 믹서 버튼 위 휠 동작(프리셋 전환 | 게인 조절). 라이브 믹서와 같은 설정을 공유한다
-  // — 임베드라고 다르게 동작하면 오히려 헷갈린다.
-  const WHEEL_ACTION_KEY = "cheeseMixerWheelAction";
+  // 믹서 버튼 위 휠 동작(프리셋 전환 | 게인 조절). 임베드 전용 설정이다
+  // — 라이브 믹서와 따로 정할 수 있다.
+  const WHEEL_ACTION_KEY = "cheeseEmbedClipMixerWheelAction";
 
   const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
   const BUTTON_CLASS = "cheese-embed-clip-mixer-button";
@@ -1311,7 +1311,7 @@
       event.stopPropagation();
       event.stopImmediatePropagation();
       if (event.deltaY === 0) return;
-      // 라이브 믹서와 같은 방향·같은 설정을 따른다.
+      // 방향은 라이브 믹서와 같게 맞춘다(설정은 임베드 전용).
       // 위로 = 올림(게인) / 이전 항목(프리셋).
       const direction = event.deltaY < 0 ? 1 : -1;
       if (mixerWheelAction === "gain") {
