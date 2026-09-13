@@ -1114,6 +1114,11 @@
   const DEFAULT_CHECKED = new Set([
     "sbFollowFavEnabled",
     "sbFollowGroupEnabled",
+    // 즐겨찾기 버튼을 둘 페이지. 부모를 켜면 네 곳 모두가 기본이다.
+    "sbFollowPageFavLive",
+    "sbFollowPageFavVideo",
+    "sbFollowPageFavChannel",
+    "sbFollowPageFavSearch",
     // 라운지 소식은 기본 숨김(체크=숨김). content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
     "loungeNews",
     // 수신함 커뮤니티 소식도 채널별 요청이 필요하므로 opt-in 으로 둔다.

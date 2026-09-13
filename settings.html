@@ -5484,9 +5484,12 @@
                   <span class="settings-item-name"
                     >라이브·다시보기·채널·검색에 즐겨찾기 버튼 추가</span
                   >
-                  <span class="settings-item-desc"
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="팔로잉 채널의 방송·채널·검색 결과에서 즐겨찾기를 바로 켜고 끕니다."
                     >전용 팔로잉 목록을 사용할 때 팔로잉 채널의 방송·채널·검색
-                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다.</span
+                    결과에서 즐겨찾기를 바로 추가하거나 해제합니다. 아래에서
+                    버튼을 둘 곳을 골라 쓸 수 있습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -5494,6 +5497,57 @@
                     type="checkbox"
                     data-feature="sbFollowPageFavoriteButton"
                   />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 라이브</span>
+                  <span class="settings-item-desc"
+                    >라이브 방송 화면의 액션 영역에 표시합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowPageFavLive" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 다시보기</span>
+                  <span class="settings-item-desc"
+                    >다시보기 화면의 액션 영역에 표시합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowPageFavVideo" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 채널</span>
+                  <span class="settings-item-desc"
+                    >채널 홈의 액션 영역에 표시합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowPageFavChannel"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">└ 검색</span>
+                  <span class="settings-item-desc"
+                    >검색 결과의 채널 항목에 표시합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowPageFavSearch" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

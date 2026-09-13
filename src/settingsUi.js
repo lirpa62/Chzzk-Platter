@@ -29,6 +29,7 @@
     ["vod-activity", "[data-vod-chat-graph]"],
     ["vod-role-chat", "[data-vod-role-chat]"],
     ["logpower-toast", '[data-feature="chatLogPowerToast"]'],
+    ["page-favorite", '[data-feature="sbFollowPageFavoriteButton"]'],
     ["lounge-news", '[data-feature="loungeNews"]'],
     ["inbox-community", '[data-feature="inboxCommunityNews"]'],
     ["inbox-logpower", '[data-feature="inboxLogPower"]'],
@@ -54,6 +55,7 @@
     ["[data-video-filter-global-default-enabled]", "[data-video-filter-global-default-mode]"],
     // 다른 탭 알림은 토스트를 끄면 애초에 뜰 곳이 없다 → 부모가 꺼지면 잠근다.
     ['[data-feature="chatLogPowerToast"]', '[data-feature="chatLogPowerToastOtherTabs"]'],
+    ['[data-feature="sbFollowPageFavoriteButton"]', '[data-feature="sbFollowPageFavLive"], [data-feature="sbFollowPageFavVideo"], [data-feature="sbFollowPageFavChannel"], [data-feature="sbFollowPageFavSearch"]'],
     ["[data-vod-chat-graph]", "[data-vod-chat-graph-auto], [data-vod-chat-graph-colors]"],
     ["[data-vod-chat-graph-auto]", "[data-vod-chat-graph-auto-collect]"],
     ["[data-vod-role-chat]", "[data-role-bot-row]"],

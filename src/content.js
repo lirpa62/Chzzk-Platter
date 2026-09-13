@@ -546,6 +546,12 @@
   const FEATURE_DEFAULT_TRUE = new Set([
     "sbFollowFavEnabled",
     "sbFollowGroupEnabled",
+    // '즐겨찾기 버튼 추가'의 페이지별 하위 옵션. 부모를 켜면 예전처럼 네 곳 모두
+    // 나오는 게 기본이고, 필요 없는 곳만 끄는 방식이다.
+    "sbFollowPageFavLive",
+    "sbFollowPageFavVideo",
+    "sbFollowPageFavChannel",
+    "sbFollowPageFavSearch",
     // 라운지 소식은 '숨김'이 기본(원하는 사람만 켠다 — 헤더에 버튼이 하나 더 늘고
     // 주기적으로 라운지 API 를 호출하므로 opt-in 이 맞다).
     "loungeNews",
@@ -2134,7 +2140,12 @@
     sbFollowGroupExclusive: false, // 그룹에 속한 채널을 '팔로잉' 목록에서 숨김
     sbFollowCustomOffline: false, // 전용 팔로잉 목록 일반 그룹에서 오프라인 채널 숨김
     sbFollowCustomFavoriteOffline: false, // 전용 팔로잉 목록 즐겨찾기 그룹에서 오프라인 채널 숨김
-    sbFollowPageFavoriteButton: false, // 라이브·다시보기·채널 액션 영역에 즐겨찾기 버튼 표시
+    sbFollowPageFavoriteButton: false, // 라이브·다시보기·채널·검색에 즐겨찾기 버튼 표시
+    // 위 옵션을 켰을 때 어느 페이지에 버튼을 둘지(넷 다 기본 ON = 예전과 같은 동작).
+    sbFollowPageFavLive: true, // 라이브(/live/)
+    sbFollowPageFavVideo: true, // 다시보기(/video/)
+    sbFollowPageFavChannel: true, // 채널 홈
+    sbFollowPageFavSearch: true, // 검색 결과(/search)
     sbFollowFavStar: false, // 즐겨찾기 구분: 별표 항상 표시
     sbFollowFavStyle: false, // 즐겨찾기 구분: 항목 테두리/배경색
     sbFollowFavBar: false, // 즐겨찾기 구분: 그룹 구분 바
@@ -32449,9 +32460,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return "";
   }
 
+  // 지금 페이지가 어느 종류인지. 어디에도 해당하지 않으면 "".
+  function getCustomFollowPageFavoriteKind() {
+    if (location.pathname === "/search") return "search";
+    if (/^\/live\//.test(location.pathname)) return "live";
+    if (/^\/video\//.test(location.pathname)) return "video";
+    return getChannelHomeId() ? "channel" : "";
+  }
+
+  // 페이지 종류별 하위 옵션. 부모가 꺼져 있으면 여기까지 오지 않는다.
+  const CUSTOM_FOLLOW_PAGE_FAVORITE_FLAGS = {
+    live: "sbFollowPageFavLive",
+    video: "sbFollowPageFavVideo",
+    channel: "sbFollowPageFavChannel",
+    search: "sbFollowPageFavSearch",
+  };
+
+  function isCustomFollowPageFavoriteKindOn(kind) {
+    const flag = CUSTOM_FOLLOW_PAGE_FAVORITE_FLAGS[kind];
+    return Boolean(flag) && featureFlags[flag] !== false;
+  }
+
   function getCustomFollowPageFavoriteContexts() {
     const scope =
       document.querySelector("main") || document.getElementById("layout-body");
+    if (!isCustomFollowPageFavoriteKindOn(getCustomFollowPageFavoriteKind())) {
+      return [];
+    }
     if (location.pathname === "/search") {
       const seenControls = new Set();
       return findFollowingActionButtons(scope).flatMap((followingButton) => {
@@ -32512,10 +32547,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       featureFlags.sbFollowCustom === true &&
       featureFlags.sbFollowFavEnabled === true &&
       featureFlags.sbFollowPageFavoriteButton === true;
-    const supportedPage =
-      location.pathname === "/search" ||
-      /^\/(?:live|video)\//.test(location.pathname) ||
-      Boolean(getChannelHomeId());
+    // ⚠ 하위 옵션으로 이 페이지를 껐으면 '지원하지 않는 페이지'와 같게 다뤄야
+    //   한다. 아니면 아래에서 버튼을 보존해 버려 꺼도 남아 있는다.
+    const supportedPage = isCustomFollowPageFavoriteKindOn(
+      getCustomFollowPageFavoriteKind(),
+    );
     const contexts = enabled ? getCustomFollowPageFavoriteContexts() : [];
     if (!contexts.length) {
       // 지원 페이지의 액션 영역은 호버 툴팁과 SPA 렌더 중 잠깐 탐색되지 않을 수
