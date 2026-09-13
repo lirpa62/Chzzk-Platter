@@ -1992,6 +1992,51 @@
                   </button>
                 </div>
               </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="mixer-eq-band-mode"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">이퀄라이저 대역</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="전문가 모드 10밴드 EQ의 주파수 배치를 고릅니다."
+                    >전문가 탭 10밴드 EQ의 주파수 배치입니다.
+                    <b>치즈 플래터 기본</b>은 60Hz~16kHz(기존 배치),
+                    <b>표준 10밴드</b>는 ISO 1옥타브 간격(31.5Hz~16kHz)으로
+                    간격이 고르고 더 낮은 저음까지 다룹니다. 두 배치는
+                    슬라이더가 가리키는 주파수가 달라서 값을
+                    <b>각각 따로 기억</b>합니다 — 바꿔도 예전에 맞춰 둔 값은
+                    그대로 남고, 되돌리면 다시 나타납니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-mixer-eq-band-mode
+                  role="radiogroup"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mixer-eq-band-mode-value="chzzk"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    치즈 플래터 기본
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mixer-eq-band-mode-value="iso"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    표준 10밴드 (ISO)
+                  </button>
+                </div>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">게인 슬라이더 최소</span>

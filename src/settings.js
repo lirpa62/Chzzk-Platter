@@ -245,6 +245,7 @@
     "cheeseMixerGainMax",
     "cheeseMixerGainStep",
     "cheeseMixerWheelAction",
+    "cheeseMixerEqBandMode",
     "cheeseMixerGlobalDefaultMode",
     "cheeseMixerGlobalGainDefaultMode",
     "cheesePlayerButtonSide",
@@ -5075,6 +5076,14 @@
     "cheeseMixerWheelAction",
     ["preset", "gain"],
     "preset",
+  );
+  // 전문가 모드 10밴드 EQ의 주파수 배치(기존 배치 / ISO 1옥타브).
+  bindStringSegmented(
+    document.querySelector("[data-mixer-eq-band-mode]"),
+    "mixer-eq-band-mode-value",
+    "cheeseMixerEqBandMode",
+    ["chzzk", "iso"],
+    "chzzk",
   );
   const MIXER_GAIN_STEP_KEY = "cheeseMixerGainStep";
   const mixerGainStepInput = document.querySelector("[data-mixer-gain-step]");

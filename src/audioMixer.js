@@ -373,6 +373,13 @@
         e.data.syncCooldownCustom,
         e.data.syncMode,
       );
+    // EQ 대역 배치(전역). 바뀌면 값 보관함을 갈아 끼우고 패널을 다시 그린다.
+    if (typeof e.data.eqBandMode === "string") {
+      if (applyEqBandMode(e.data.eqBandMode)) {
+        if (document.getElementById(PANEL_ID)) renderPanel();
+        saveState();
+      }
+    }
     // 되감기 간격(3~60초). 바뀌면 이미 떠 있는 버튼 라벨/아이콘 갱신.
     const ns = Number(e.data.seekStepS);
     if (Number.isFinite(ns) && ns >= 3 && ns <= 60) {
@@ -540,14 +547,61 @@
   const PANEL_ANCHOR_CHECK_MS = 250;
   const PANEL_AUTO_CLOSE_DELAY_MS = 4000;
   const CUSTOM_PRESET_NAME_MAX_LENGTH = 7;
-  const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
+  // 10밴드 EQ 의 주파수 배치. 두 가지 중 하나를 전역 설정으로 고른다.
+  // - chzzk(기본): 예전부터 쓰던 배치. 이미 저장된 값·프리셋이 이 기준이라 기본이다.
+  // - iso: 일반적인 10밴드 EQ(ISO 1옥타브 간격). 31.5Hz 까지 내려가고 간격이 고르다.
+  // ⚠ 두 배치는 밴드 수만 같고 의미가 다르다. 같은 인덱스의 dB 값을 그대로 옮기면
+  //   전혀 다른 소리가 나므로, 모드별로 값을 따로 보관한다(state.eqByMode).
+  const EQ_BAND_SETS = {
+    chzzk: [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000],
+    iso: [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+  };
+  const EQ_BAND_MODES = Object.keys(EQ_BAND_SETS);
+  const EQ_BAND_MODE_LABELS = {
+    chzzk: "치즈 플래터 기본",
+    iso: "표준 10밴드 (ISO)",
+  };
+  let eqBandMode = "chzzk"; // content.js 가 전역 설정에서 전달한다.
+  function normalizeEqBandMode(value) {
+    return EQ_BAND_MODES.includes(value) ? value : "chzzk";
+  }
+  // 지금 모드의 주파수 목록. EQ_BANDS 를 쓰던 자리를 모두 이걸로 바꾼다.
+  function currentEqBands() {
+    return EQ_BAND_SETS[eqBandMode] || EQ_BAND_SETS.chzzk;
+  }
   // 고급 슬라이더(저음/선명도/고음)가 함께 움직이는 EQ 밴드 그룹과 밴드별 가중치.
   // 단일 밴드만 움직이던 방식보다 자연스러운 쉘프 형태가 된다.
-  const EQ_GROUPS = {
-    bass: { bands: [0, 1, 2], weights: [1, 0.8, 0.5] },
-    clarity: { bands: [3, 4, 5], weights: [0.6, 1, 0.7] },
-    treble: { bands: [6, 7, 8, 9], weights: [0.5, 0.8, 1, 1] },
+  // ⚠ 인덱스 기준이라 대역 배치가 바뀌면 가리키는 주파수도 바뀐다. ISO 배치에
+  //   chzzk 용 인덱스를 그대로 쓰면 '선명도'가 250~1k(목소리 존재감 대역을 벗어남),
+  //   '고음'이 2k 부터가 되어 의미가 어긋난다. 모드별로 따로 둔다.
+  const EQ_GROUPS_BY_MODE = {
+    // 60/170/310 · 600/1k/3k · 6k/12k/14k/16k
+    chzzk: {
+      bass: { bands: [0, 1, 2], weights: [1, 0.8, 0.5] },
+      clarity: { bands: [3, 4, 5], weights: [0.6, 1, 0.7] },
+      treble: { bands: [6, 7, 8, 9], weights: [0.5, 0.8, 1, 1] },
+    },
+    // 31.5/63/125 · 500/1k/2k · 4k/8k/16k. 250Hz 는 저음과 중음 사이라 어느 쪽에도
+    // 넣지 않는다(올리면 먹먹해지는 대역이라 함께 움직이지 않는 편이 낫다).
+    iso: {
+      bass: { bands: [0, 1, 2], weights: [0.7, 1, 0.8] },
+      clarity: { bands: [4, 5, 6], weights: [0.6, 1, 0.7] },
+      treble: { bands: [7, 8, 9], weights: [0.7, 1, 0.9] },
+    },
   };
+  function currentEqGroups() {
+    return EQ_GROUPS_BY_MODE[eqBandMode] || EQ_GROUPS_BY_MODE.chzzk;
+  }
+  // 그룹의 대표 밴드 인덱스 = 가중치가 가장 큰(1.0) 밴드. 표시값으로 쓴다.
+  function eqGroupLeadBand(groupKey) {
+    const g = currentEqGroups()[groupKey];
+    if (!g) return 0;
+    let best = 0;
+    g.weights.forEach((w, i) => {
+      if (w > g.weights[best]) best = i;
+    });
+    return g.bands[best];
+  }
 
   // 고급 슬라이더·전문가 모드 각 항목의 역할/조절 효과 설명(info 아이콘 클릭 시 표시).
   const INFO_TEXT = {
@@ -816,7 +870,15 @@
     userPickedGain: false,
     preset: "default",
     gain: 1,
+    // 지금 모드의 값. 아래 eqByMode 의 현재 모드 항목과 같은 내용을 들고 있다
+    // (기존 코드가 전부 state.eq 를 읽고 써서 그대로 둔다).
     eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    // 모드별로 따로 보관한다. 대역이 다르면 같은 인덱스라도 다른 주파수라서,
+    // 하나를 옮겨 쓰면 소리가 엉뚱해진다.
+    eqByMode: {
+      chzzk: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      iso: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    },
     comp: { ...PRESETS.default.comp },
     limiter: { enabled: true, threshold: -1 },
     normalizer: { enabled: true, target: 0.12 },
@@ -1085,7 +1147,7 @@
       audio.analyser = audio.ctx.createAnalyser();
       audio.analyser.fftSize = 1024;
       audio.analyser.smoothingTimeConstant = 0.8;
-      audio.eqFilters = EQ_BANDS.map((freq) => {
+      audio.eqFilters = currentEqBands().map((freq) => {
         const f = audio.ctx.createBiquadFilter();
         f.type = "peaking";
         f.frequency.value = freq;
@@ -1394,6 +1456,39 @@
   document.addEventListener("visibilitychange", recoverMixerForForeground);
   window.addEventListener("pageshow", recoverMixerForForeground);
   window.addEventListener("focus", resumeAudioForForeground);
+
+  // state.eqByMode 를 안전하게 읽는다(예전 저장값에는 없다).
+  function eqBucket(target, mode) {
+    if (!target.eqByMode || typeof target.eqByMode !== "object") {
+      target.eqByMode = {};
+    }
+    const key = normalizeEqBandMode(mode);
+    if (!Array.isArray(target.eqByMode[key])) {
+      target.eqByMode[key] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+    return target.eqByMode[key];
+  }
+
+  // EQ 대역 모드 변경. 지금 값을 원래 모드 칸에 넣어 두고 새 모드 값을 꺼내 쓴다.
+  // ⚠ 필터의 frequency 는 생성 시점 값이라 그냥 두면 예전 주파수로 남는다. 이미
+  //   연결돼 있으면 각 필터의 frequency 를 새 대역으로 다시 써 준다.
+  function applyEqBandMode(next) {
+    const mode = normalizeEqBandMode(next);
+    if (mode === eqBandMode) return false;
+    eqBucket(state, eqBandMode).splice(0, 10, ...state.eq);
+    eqBandMode = mode;
+    state.eq = [...eqBucket(state, mode)];
+    const bands = currentEqBands();
+    if (audio.connected) {
+      audio.eqFilters.forEach((filter, i) => {
+        if (filter && Number.isFinite(bands[i])) {
+          filter.frequency.value = bands[i];
+        }
+      });
+    }
+    applyState();
+    return true;
+  }
 
   function applyState() {
     if (!audio.connected) return;
@@ -2430,6 +2525,15 @@
       comp: { ...preset.comp },
       limiter: { ...preset.limiter },
       normalizer: { ...preset.normalizer },
+      // 대역 모드별 EQ. 위 eq 는 '지금 모드'의 값이고, 이건 반대쪽 모드까지 함께
+      // 들고 있는다(모드를 오갈 때 예전에 맞춰 둔 값이 살아 있게).
+      // ⚠ 지금 모드 칸은 현재 값으로 덮어써야 한다. state.eqByMode 는 모드를
+      //   바꾸는 순간에만 갱신되므로 그대로 저장하면 방금 만진 값이 빠진다.
+      eqByMode: {
+        ...state.eqByMode,
+        [eqBandMode]: [...preset.eq],
+      },
+      eqBandMode,
     };
     // 전역 데이터는 실제 커스텀 프리셋 추가/수정/삭제 때만 저장한다. 일반 게인/EQ 저장에
     // 같은 배열을 매번 포함하면 Firefox의 storage.onChanged가 이를 변경으로 알려 현재
@@ -2531,6 +2635,18 @@
           customPresets: normalizeCustomPresets(saved.customPresets),
           defaultCustomId: String(saved.defaultCustomId || ""),
         };
+        // 대역 모드별 EQ 복원. 저장된 eq 는 '저장 당시 모드'의 값이라, 지금 모드가
+        // 그때와 다르면 그대로 쓰면 안 된다(같은 인덱스라도 주파수가 다르다).
+        // ⚠ eqByMode 가 없는 예전 저장값은 저장 당시 모드 칸에만 넣는다. 반대쪽
+        //   모드는 건드리지 않아야 '아직 안 만진 대역'이 0 으로 남는다.
+        const savedMode = normalizeEqBandMode(saved.eqBandMode);
+        state.eqByMode = {
+          ...DEFAULT_STATE().eqByMode,
+          ...(saved.eqByMode && typeof saved.eqByMode === "object"
+            ? saved.eqByMode
+            : { [savedMode]: Array.isArray(saved.eq) ? [...saved.eq] : [] }),
+        };
+        state.eq = [...eqBucket(state, eqBandMode)];
         // 영구 저장값의 enabled는 사용하지 않는다. 같은 탭에서 이 페이지를 켜 둔
         // 기록만 복원해 새 탭 여러 개 중 하나가 임의로 켜지는 현상을 막는다.
         state.enabled = tabEnabledPageKeys.has(currentPageKey);
@@ -3100,7 +3216,7 @@
           `<button type="button" class="cheese-mixer-preset" data-preset="${key}">${key === "default" ? escapeHtml(defaultPresetLabel()) : p.label}</button>`,
       )
       .join("");
-    const eqSliders = EQ_BANDS.map(
+    const eqSliders = currentEqBands().map(
       (freq, i) => `
       <div class="cheese-mixer-eq-band">
         <output class="cheese-mixer-eq-value" data-eq-output="${i}">${fmtDb(state.eq[i])}</output>
@@ -3931,7 +4047,7 @@
 
   // 고급 그룹 슬라이더 값을 밴드별 가중치로 EQ에 반영한다.
   function applyEqGroup(groupKey, value) {
-    const g = EQ_GROUPS[groupKey];
+    const g = currentEqGroups()[groupKey];
     if (!g) return;
     g.bands.forEach((band, i) => {
       state.eq[band] = Math.round(value * g.weights[i] * 10) / 10;
@@ -4037,12 +4153,12 @@
       case "gain":
         return state.gain;
       // 그룹의 대표 밴드(가중치 1.0)를 표시값으로 쓴다.
+      // ⚠ 예전에는 0/8/4 로 박아 뒀는데 그건 chzzk 배치의 가중치 1.0 자리다.
+      //   대역 모드가 바뀌면 대표 밴드도 달라져서 그룹 정의에서 찾아 쓴다.
       case "bass":
-        return state.eq[0];
       case "treble":
-        return state.eq[8];
       case "clarity":
-        return state.eq[4];
+        return state.eq[eqGroupLeadBand(key)];
       case "comp-threshold":
         return state.comp.threshold;
       case "comp-knee":

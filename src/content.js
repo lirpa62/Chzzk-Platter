@@ -715,6 +715,9 @@
   // 믹서 버튼 위 휠 동작: preset(프리셋 전환) | gain(게인 조절). 기본 preset.
   const MIXER_WHEEL_ACTION_KEY = "cheeseMixerWheelAction";
   let mixerWheelAction = "preset";
+  // EQ 10밴드 주파수 배치: chzzk(기존) | iso(표준 1옥타브). 기본 chzzk.
+  const MIXER_EQ_BAND_MODE_KEY = "cheeseMixerEqBandMode";
+  let mixerEqBandMode = "chzzk";
   let mixerGainMin = 0.5;
   let mixerGainMax = 2;
   let mixerGainStep = 5;
@@ -50272,6 +50275,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
         mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
         mixerWheelAction, // 믹서 버튼 위 휠 동작(preset/gain)
+        eqBandMode: mixerEqBandMode, // EQ 10밴드 주파수 배치(chzzk/iso)
         seekStepS: seekStepValue, // 되감기/앞으로 간격(초)
         clipEditorArrowStep, // 클립 에디터 seeker 방향키 이동 간격(초, 1~5)
         clipEditorShiftArrowStep, // Shift+방향키 미세 이동 간격(초, 0.1~0.9)
@@ -50343,6 +50347,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     MIXER_GAIN_MAX_KEY,
     MIXER_GAIN_STEP_KEY,
     MIXER_WHEEL_ACTION_KEY,
+    MIXER_EQ_BAND_MODE_KEY,
     SEEK_STEP_KEY,
     CLIP_EDITOR_ARROW_STEP_KEY,
     CLIP_EDITOR_SHIFT_STEP_KEY,
@@ -50688,6 +50693,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       mixerGainStep = normalizeGainStep(data?.[MIXER_GAIN_STEP_KEY]);
       mixerWheelAction =
         data?.[MIXER_WHEEL_ACTION_KEY] === "gain" ? "gain" : "preset";
+      mixerEqBandMode =
+        data?.[MIXER_EQ_BAND_MODE_KEY] === "iso" ? "iso" : "chzzk";
       syncPresetValue = normalizeSyncPresetValue(data?.[SYNC_PRESET_KEY]);
       const custom = data?.[SYNC_CUSTOM_KEY];
       syncCustomValue = custom && typeof custom === "object" ? custom : null;
@@ -51294,6 +51301,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[MIXER_WHEEL_ACTION_KEY].newValue === "gain"
             ? "gain"
             : "preset";
+        broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
+      }
+      if (changes[MIXER_EQ_BAND_MODE_KEY]) {
+        mixerEqBandMode =
+          changes[MIXER_EQ_BAND_MODE_KEY].newValue === "iso" ? "iso" : "chzzk";
         broadcastFeatureFlags(); // MAIN world(audioMixer.js)에 즉시 반영
       }
       if (changes[SEEK_STEP_KEY]) {
