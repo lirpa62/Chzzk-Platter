@@ -27,6 +27,9 @@
   const GAIN_STEP_KEY = "cheeseEmbedClipGainStep";
   const GAIN_MIN_KEY = "cheeseEmbedClipGainMin";
   const GAIN_MAX_KEY = "cheeseEmbedClipGainMax";
+  // 믹서 버튼 위 휠 동작(프리셋 전환 | 게인 조절). 라이브 믹서와 같은 설정을 공유한다
+  // — 임베드라고 다르게 동작하면 오히려 헷갈린다.
+  const WHEEL_ACTION_KEY = "cheeseMixerWheelAction";
 
   const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
   const BUTTON_CLASS = "cheese-embed-clip-mixer-button";
@@ -280,6 +283,7 @@
   let syncTimer = 0;
   // 설정(임베드 전용). 값은 applyStoredSettings 에서 채운다.
   let gainPctOn = true;
+  let mixerWheelAction = "preset";
   let gainStep = 5; // %
   let gainMin = 0.5;
   let gainMax = 2;
@@ -431,6 +435,7 @@
     featureHidden = data?.[HIDDEN_KEY] === true;
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
     gainPctOn = data?.[GAIN_PCT_KEY] !== false; // 미설정=표시
+    mixerWheelAction = data?.[WHEEL_ACTION_KEY] === "gain" ? "gain" : "preset";
     gainStep = clampGainStep(data?.[GAIN_STEP_KEY]);
     gainMin = GAIN_MIN_ALLOWED.includes(Number(data?.[GAIN_MIN_KEY]))
       ? Number(data[GAIN_MIN_KEY])
@@ -479,6 +484,7 @@
         SELECTED_PRESET_KEY,
         DEFAULT_PRESET_KEY,
         DEFAULT_GAIN_KEY,
+        WHEEL_ACTION_KEY,
       ]);
       applyStoredSettings(data);
     } catch {
@@ -1305,8 +1311,17 @@
       event.stopPropagation();
       event.stopImmediatePropagation();
       if (event.deltaY === 0) return;
-      // 라이브 믹서와 같은 방향: 위로 굴리면 이전, 아래로 굴리면 다음 프리셋이다.
-      cyclePreset(event.deltaY < 0 ? -1 : 1);
+      // 라이브 믹서와 같은 방향·같은 설정을 따른다.
+      // 위로 = 올림(게인) / 이전 항목(프리셋).
+      const direction = event.deltaY < 0 ? 1 : -1;
+      if (mixerWheelAction === "gain") {
+        nudgeGain(direction);
+        // 프리셋은 버튼 라벨이 바뀌어 눈에 보이지만 게인은 표시가 없다.
+        // 값 말풍선을 띄워 조작이 먹혔는지 알 수 있게 한다(끝값이라 변화가
+        // 없을 때도 현재 값을 보여 주므로 무반응처럼 보이지 않는다).
+        showGainTooltip();
+        hideGainTooltip(900);
+      } else cyclePreset(-direction);
     },
     { capture: true, passive: false },
   );
@@ -1387,6 +1402,7 @@
       SELECTED_PRESET_KEY,
       DEFAULT_PRESET_KEY,
       DEFAULT_GAIN_KEY,
+      WHEEL_ACTION_KEY,
     ];
     if (watched.some((key) => key in changes)) loadSettings();
   });
