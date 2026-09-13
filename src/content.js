@@ -9420,7 +9420,7 @@
       button.innerHTML = `
       <span class="pzp-button__tooltip pzp-button__tooltip--top">댓글 타임스탬프</span>
       <span class="pzp-ui-icon cheese-search-comment-timestamp-icon">
-      <svg class="pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <svg class="pzp-ui-icon__svg" width="18" height="18" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
         <g clip-path="url(#clip0_88_32943)">
         <path d="M7.96094 26.8867C8.41797 26.8867 8.75781 26.6523 9.30859 26.1367L13.5391 22.2695H21.4609C24.9531 22.2695 26.8281 20.3477 26.8281 16.9141V7.9375C26.8281 4.50391 24.9531 2.57031 21.4609 2.57031H6.36719C2.875 2.57031 1 4.49219 1 7.9375V16.9141C1 20.3594 2.875 22.2695 6.36719 22.2695H6.91797V25.6797C6.91797 26.4062 7.29297 26.8867 7.96094 26.8867Z" fill="white"/>
         <path d="M19.8438 14.1484C18.8828 14.1484 18.1094 13.375 18.1094 12.4141C18.1094 11.4531 18.8828 10.6797 19.8438 10.6797C20.8047 10.6797 21.5781 11.4531 21.5781 12.4141C21.5781 13.375 20.8047 14.1484 19.8438 14.1484Z" fill="black"/>
@@ -10685,7 +10685,7 @@
     button.innerHTML = `
       <span class="pzp-button__tooltip pzp-button__tooltip--top">채팅 활성도 보기</span>
       <span class="pzp-ui-icon">
-        <svg class="pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <svg class="pzp-ui-icon__svg" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <rect x="2" y="11" width="2.6" height="7" rx="1" fill="currentColor"/>
           <rect x="6" y="7" width="2.6" height="11" rx="1" fill="currentColor"/>
           <rect x="10" y="2" width="2.6" height="16" rx="1" fill="currentColor"/>
@@ -10951,11 +10951,17 @@
     try {
       const result = await collectVodRoleChats(videoNo, (p) => {
         roleChatState.progress = p;
-        // 방장·매니저 탭이 열려 있으면 진행률만 갱신한다. 통째로 다시 그리면
-        //   목록이 매번 새로 만들어져 스크롤이 튄다.
-        const label = document.querySelector(".cheese-recap-role-collect");
-        if (label && roleChatState.loading) {
-          label.textContent = `중단 (${Math.round(p * 100)}%)`;
+        // 패널이 열려 있으면 진행률만 갱신한다. 통째로 다시 그리면 목록이 매번
+        //   새로 만들어져 스크롤이 튄다.
+        // ⚠ 버튼은 이제 SVG 아이콘이다. textContent 로 쓰면 아이콘이 지워지므로
+        //   진행률 전용 span 에만 넣는다.
+        const button = document.querySelector("[data-role-chat-collect]");
+        if (button && roleChatState.loading) {
+          const text = `중단 (${Math.round(p * 100)}%)`;
+          button.setAttribute("aria-label", text);
+          button.title = text;
+          const slot = button.querySelector(".cheese-recap-role-collect-progress");
+          if (slot) slot.textContent = `${Math.round(p * 100)}%`;
         }
         const status = document.querySelector(
           `.${ROLE_CHAT_PANEL_CLASS} .cheese-search-comment-panel-status`,
@@ -11128,7 +11134,11 @@
       `<div class="cheese-search-comment-panel-head">` +
       `<strong>구간 요약</strong>` +
       `<div class="cheese-recap-panel-head-actions">` +
-      `<button type="button" data-peak-rescan>다시 수집</button>` +
+      `<button type="button" data-peak-rescan aria-label="다시 수집" title="다시 수집">` +
+      `<svg class="lucide lucide-rotate-cw" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<path d="M21 12a9 9 0 0 1-15.74 6"></path><path d="M3 12a9 9 0 0 1 15.74-6"></path>` +
+      `<path d="M18 2v4h-4"></path><path d="M6 22v-4h4"></path>` +
+      `</svg></button>` +
       `<button type="button" data-peak-close aria-label="닫기">` +
       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
       `<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>` +
@@ -12168,7 +12178,7 @@
     button.innerHTML = `
       <span class="pzp-button__tooltip pzp-button__tooltip--top">내 채팅 기록</span>
       <span class="pzp-ui-icon">
-        <svg class="pzp-ui-icon__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg class="pzp-ui-icon__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H12l-4.2 3.6A.75.75 0 0 1 6.6 19v-3H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" fill="currentColor"/>
           <path d="M8 7.5h8M8 11h5" stroke="#111" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
@@ -12294,7 +12304,7 @@
     button.innerHTML = `
       <span class="pzp-button__tooltip pzp-button__tooltip--top">방장·매니저·파트너 채팅</span>
       <span class="pzp-ui-icon">
-        <svg class="pzp-ui-icon__svg lucide lucide-sword" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg class="pzp-ui-icon__svg lucide lucide-sword" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"></polyline>
           <line x1="13" x2="19" y1="19" y2="13"></line>
           <line x1="16" x2="20" y1="16" y2="20"></line>
@@ -12373,6 +12383,24 @@
     return panel.isConnected;
   }
 
+  // 헤더의 모으기 버튼 상태를 맞춘다. 아이콘만 두고 상태는 라벨·진행률로 알린다
+  // (예전에는 본문에 '모으기 / 다시 모으기 / 중단 (n%)' 글자 버튼이 있었다).
+  function syncRoleChatCollectButton(panel, rows) {
+    const button = panel.querySelector("[data-role-chat-collect]");
+    if (!button) return;
+    const percent = Math.round(roleChatState.progress * 100);
+    const label = roleChatState.loading
+      ? `중단 (${percent}%)`
+      : rows
+        ? "다시 모으기"
+        : "모으기";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.classList.toggle("is-loading", roleChatState.loading);
+    const progress = button.querySelector(".cheese-recap-role-collect-progress");
+    if (progress) progress.textContent = roleChatState.loading ? `${percent}%` : "";
+  }
+
   // 패널 본문을 다시 그린다(머리글은 남긴다).
   function renderRoleChatPanel(panel) {
     const head = panel.querySelector(".cheese-search-comment-panel-head");
@@ -12409,6 +12437,15 @@
       <div class="cheese-search-comment-panel-head">
         <strong>방장·매니저 채팅</strong>
         <div class="cheese-recap-panel-head-actions">
+          <button type="button" data-role-chat-collect class="cheese-recap-role-collect" aria-label="모으기" title="모으기">
+            <svg class="lucide lucide-rotate-cw" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 1-15.74 6"></path>
+              <path d="M3 12a9 9 0 0 1 15.74-6"></path>
+              <path d="M18 2v4h-4"></path>
+              <path d="M6 22v-4h4"></path>
+            </svg>
+            <span class="cheese-recap-role-collect-progress" aria-hidden="true"></span>
+          </button>
           <button type="button" data-role-chat-close aria-label="닫기">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
@@ -12422,6 +12459,22 @@
     panel
       .querySelector("[data-role-chat-close]")
       ?.addEventListener("click", closeRoleChatPanel);
+    panel
+      .querySelector("[data-role-chat-collect]")
+      ?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (roleChatState.loading) {
+          roleChatState.cancel = true;
+          return;
+        }
+        void Promise.all([
+          ensureVodRoleChats(true),
+          loadDialogEmojiMap(currentClipVaultAccountId()),
+        ]).then(() => {
+          if (panel.isConnected) renderRoleChatPanel(panel);
+        });
+        renderRoleChatPanel(panel);
+      });
     await loadChatRecapClickAction();
     if (!ensureOpenRoleChatPanelConnected(panel, openVideoNo)) return;
     // 이모티콘 사전을 먼저 채워야 {:키:} 가 그림으로 나온다(내 채팅과 같은 이유).
@@ -12673,33 +12726,8 @@
       p.textContent = text;
       panel.append(p);
     };
-    // 모으기/중단 버튼. 수집은 이 탭에서만 한다.
-    const actions = document.createElement("div");
-    actions.className = "cheese-recap-role-actions";
-    const collect = document.createElement("button");
-    collect.type = "button";
-    collect.className = "cheese-recap-role-collect";
-    collect.textContent = roleChatState.loading
-      ? `중단 (${Math.round(roleChatState.progress * 100)}%)`
-      : rows
-        ? "다시 모으기"
-        : "모으기";
-    collect.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (roleChatState.loading) {
-        roleChatState.cancel = true;
-        return;
-      }
-      void Promise.all([
-        ensureVodRoleChats(true),
-        loadDialogEmojiMap(currentClipVaultAccountId()),
-      ]).then(() => {
-        if (panel.isConnected) renderRoleChatPanel(panel);
-      });
-      renderRoleChatPanel(panel);
-    });
-    actions.append(collect);
-    panel.append(actions);
+    // 모으기/중단은 헤더의 아이콘 버튼이 맡는다(내 채팅 기록 패널과 같은 자리).
+    syncRoleChatCollectButton(panel, rows);
 
     if (roleChatState.loading) {
       status(`모으는 중입니다… ${Math.round(roleChatState.progress * 100)}%`);
