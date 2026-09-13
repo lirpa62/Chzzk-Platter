@@ -16070,20 +16070,49 @@ img.cheese-peak-role-badge {
   gap: 6px;
 }
 /* 칩: 누르면 채널 목록에서 그 채널 위치로 이동한다(빼기는 행의 영역 칩에서). */
+/* 칩은 감싸는 span 이고 안에 버튼 둘(본체=이동, x=빼기)이 들어간다.
+   ⚠ 버튼 안에 버튼을 둘 수 없어 이렇게 나눴다. */
 .cheese-cf-square-chip {
   align-items: center;
   background: rgba(127, 127, 127, 0.16);
-  border: 0;
   border-radius: 6px;
-  color: inherit;
-  cursor: pointer;
   display: inline-flex;
   font-size: 12px;
-  gap: 5px;
-  padding: 4px 7px 4px 4px;
+  overflow: hidden;
 }
 .cheese-cf-square-chip:hover {
   background: rgba(127, 127, 127, 0.28);
+}
+/* 본체: 누르면 그 채널 위치로 이동한다. */
+.cheese-cf-square-chip-main {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 5px;
+  padding: 4px 3px 4px 4px;
+}
+/* x: 이것만 설정을 뺀다. 실수로 누르지 않게 평소엔 흐리게. */
+.cheese-cf-square-chip-remove {
+  align-items: center;
+  align-self: stretch;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  padding: 4px 6px;
+}
+.cheese-cf-square-chip-remove:hover,
+.cheese-cf-square-chip-remove:focus-visible {
+  background: rgba(255, 90, 90, 0.22);
+}
+.cheese-cf-square-chip-remove:hover svg,
+.cheese-cf-square-chip-remove:focus-visible svg {
+  opacity: 1;
 }
 /* 칩 안의 프로필도 각지게 — 적용될 모양 그대로 보여 준다. */
 .cheese-cf-square-chip-profile,
