@@ -2603,37 +2603,60 @@
                   </button>
                 </div>
               </li>
-              <li
-                class="settings-item"
-                data-new-feature="vod-title-change-history"
-              >
+              <li class="settings-item" data-new-feature="vod-role-chat">
                 <label>
-                  <span class="settings-item-name">방송 제목 변경 확인</span>
+                  <span class="settings-item-name"
+                    >방장·매니저·파트너 채팅</span
+                  >
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="방송 중 바뀐 제목을 재생바 썸네일에 표시합니다."
-                    >방장·매니저가 채팅봇 명령어로 제목을 변경하고 성공 안내가
-                    채팅에 남은 경우만 확인하여 재생바 썸네일에 표시합니다. 방송
-                    시작 당시의 최초 제목은 확인할 수 없습니다. 채팅 활성도와
-                    방송 시각 표시 설정에 관계없이 동작하며, 처음 확인하는
-                    영상은 진행률을 플레이어에 표시합니다. 긴 영상에서는 시간이
-                    걸릴 수 있습니다</span
+                    data-settings-summary="다시보기 플레이어에 방장·매니저·파트너 채팅 버튼을 추가합니다."
+                    >다시보기 플레이어에 전용 버튼을 추가해 방장·매니저와
+                    파트너(인증 마크)가 남긴 채팅을 시간순으로 보여줍니다.
+                    공지나 진행 안내를 따라가기 좋습니다. 채팅 활성도와 따로
+                    모으고 따로 저장하므로, 한쪽을 다시 모아도 다른 쪽은
+                    그대로입니다(기본 켜짐)</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-vod-title-changes />
+                  <input type="checkbox" data-vod-role-chat />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-role-bot-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">└ 제외할 봇</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="여기 적은 닉네임은 목록에서 뺍니다."
+                    >여기 적은 이름과 정확히 같은 닉네임은 목록에서 뺍니다.
+                    채널마다 봇 이름이 달라 직접 추가·삭제할 수 있습니다. 바꾼
+                    뒤에는 '다시 수집'을 눌러야 반영됩니다.</span
+                  >
+                </div>
+                <div class="settings-bot-input">
+                  <input
+                    type="text"
+                    data-role-bot-input
+                    placeholder="봇 닉네임"
+                    maxlength="40"
+                  />
+                  <button type="button" data-role-bot-add>추가</button>
+                </div>
+                <div class="settings-bot-list" data-role-bot-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-role-bot-reset>기본값으로</button>
+                </div>
               </li>
             </ul>
           </section>
 
-          <section
-            class="settings-group"
-            data-panel="vod"
-            aria-label="재생·화면"
-          >
-            <h2 class="settings-group-title">재생·화면</h2>
+          <section class="settings-group" data-panel="vod" aria-label="재생">
+            <h2 class="settings-group-title">재생</h2>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -2684,6 +2707,115 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li
+                class="settings-item"
+                data-new-feature="vod-chat-recap-player-controls"
+              >
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생바 '내 채팅 기록' 숨김"
+                    >재생바 '내 채팅 기록' 표시</span
+                  >
+                  <span class="settings-item-desc"
+                    >다시보기 플레이어에 '내 채팅 기록' 버튼을 표시합니다. 꺼도
+                    채팅 기록 수집과 리캡 페이지에는 영향을 주지 않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-recap-player-button-hidden />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 내 채팅 기록 클릭 시</span>
+                  <span class="settings-item-desc"
+                    >다시보기의 내 채팅 기록에서 항목을 클릭해 이동할 때
+                    팝오버를 닫을지 여부(기본 닫기)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  id="chatRecapClickAction"
+                  role="radiogroup"
+                  aria-label="내 채팅 기록 클릭 시 동작"
+                >
+                  <button
+                    type="button"
+                    data-chat-recap-click="close"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-recap-click="keep"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    유지
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-recap-click="delay"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    지연 닫기
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-chat-recap-delay-row hidden>
+                <label for="chatRecapClickDelayInput">
+                  <span class="settings-item-name">└─ 지연 닫기 시간</span>
+                  <span class="settings-item-desc"
+                    >클릭 후 이 시간이 지나면 내 채팅 기록 팝오버를
+                    닫습니다(1~10초)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="chatRecapClickDelayInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-chat-recap-click-delay
+                  />
+                  <small>초</small>
+                </span>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name"
+                    >자동 재생 사용 설정 끄기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="영상 더보기의 '자동 재생 사용 설정'을 자동으로 끕니다."
+                    >영상 더보기의 '자동 재생 사용 설정'을 자동으로 끕니다(영상
+                    더보기 숨김이 아닐 때만). 해제해도 자동 재생이 다시 켜지지는
+                    않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-autoplay-off />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="vod"
+            aria-label="화면·표시"
+          >
+            <h2 class="settings-group-title">화면·표시</h2>
+            <ul class="settings-list">
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">다시보기 화면 채우기</span>
@@ -2724,24 +2856,6 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >자동 재생 사용 설정 끄기</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="영상 더보기의 '자동 재생 사용 설정'을 자동으로 끕니다."
-                    >영상 더보기의 '자동 재생 사용 설정'을 자동으로 끕니다(영상
-                    더보기 숨김이 아닐 때만). 해제해도 자동 재생이 다시 켜지지는
-                    않습니다</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-vod-autoplay-off />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
                   <span
                     class="settings-item-name"
                     data-settings-search-aliases="미리보기 방송 시각 숨김"
@@ -2759,6 +2873,28 @@
                     data-feature="seekPreviewRealtime"
                     data-feature-inverted
                   />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="vod-title-change-history"
+              >
+                <label>
+                  <span class="settings-item-name">방송 제목 변경 확인</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="방송 중 바뀐 제목을 재생바 썸네일에 표시합니다."
+                    >방장·매니저가 채팅봇 명령어로 제목을 변경하고 성공 안내가
+                    채팅에 남은 경우만 확인하여 재생바 썸네일에 표시합니다. 방송
+                    시작 당시의 최초 제목은 확인할 수 없습니다. 채팅 활성도와
+                    방송 시각 표시 설정에 관계없이 동작하며, 처음 확인하는
+                    영상은 진행률을 플레이어에 표시합니다. 긴 영상에서는 시간이
+                    걸릴 수 있습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-vod-title-changes />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2877,136 +3013,6 @@
                   />
                   <small>초</small>
                 </span>
-              </li>
-              <li
-                class="settings-item"
-                data-new-feature="vod-chat-recap-player-controls"
-              >
-                <label>
-                  <span
-                    class="settings-item-name"
-                    data-settings-search-aliases="재생바 '내 채팅 기록' 숨김"
-                    >재생바 '내 채팅 기록' 표시</span
-                  >
-                  <span class="settings-item-desc"
-                    >다시보기 플레이어에 '내 채팅 기록' 버튼을 표시합니다. 꺼도
-                    채팅 기록 수집과 리캡 페이지에는 영향을 주지 않습니다</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-chat-recap-player-button-hidden />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item settings-item-stacked">
-                <div>
-                  <span class="settings-item-name">└ 내 채팅 기록 클릭 시</span>
-                  <span class="settings-item-desc"
-                    >다시보기의 내 채팅 기록에서 항목을 클릭해 이동할 때
-                    팝오버를 닫을지 여부(기본 닫기)</span
-                  >
-                </div>
-                <div
-                  class="settings-segmented settings-segmented-3"
-                  id="chatRecapClickAction"
-                  role="radiogroup"
-                  aria-label="내 채팅 기록 클릭 시 동작"
-                >
-                  <button
-                    type="button"
-                    data-chat-recap-click="close"
-                    role="radio"
-                    aria-checked="true"
-                  >
-                    닫기
-                  </button>
-                  <button
-                    type="button"
-                    data-chat-recap-click="keep"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    유지
-                  </button>
-                  <button
-                    type="button"
-                    data-chat-recap-click="delay"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    지연 닫기
-                  </button>
-                </div>
-              </li>
-              <li class="settings-item" data-chat-recap-delay-row hidden>
-                <label for="chatRecapClickDelayInput">
-                  <span class="settings-item-name">└─ 지연 닫기 시간</span>
-                  <span class="settings-item-desc"
-                    >클릭 후 이 시간이 지나면 내 채팅 기록 팝오버를
-                    닫습니다(1~10초)</span
-                  >
-                </label>
-                <span class="settings-custom-input">
-                  <input
-                    type="number"
-                    id="chatRecapClickDelayInput"
-                    min="1"
-                    max="10"
-                    step="1"
-                    inputmode="numeric"
-                    data-chat-recap-click-delay
-                  />
-                  <small>초</small>
-                </span>
-              </li>
-              <li class="settings-item" data-new-feature="vod-role-chat">
-                <label>
-                  <span class="settings-item-name"
-                    >방장·매니저·파트너 채팅</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="다시보기 플레이어에 방장·매니저·파트너 채팅 버튼을 추가합니다."
-                    >다시보기 플레이어에 전용 버튼을 추가해 방장·매니저와
-                    파트너(인증 마크)가 남긴 채팅을 시간순으로 보여줍니다.
-                    공지나 진행 안내를 따라가기 좋습니다. 채팅 활성도와 따로
-                    모으고 따로 저장하므로, 한쪽을 다시 모아도 다른 쪽은
-                    그대로입니다(기본 켜짐)</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-vod-role-chat />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li
-                class="settings-item settings-item-stacked"
-                style="flex-direction: column; gap: 0"
-                data-role-bot-row
-              >
-                <div style="width: 100%">
-                  <span class="settings-item-name">└ 제외할 봇</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="여기 적은 닉네임은 목록에서 뺍니다."
-                    >여기 적은 이름과 정확히 같은 닉네임은 목록에서 뺍니다.
-                    채널마다 봇 이름이 달라 직접 추가·삭제할 수 있습니다. 바꾼
-                    뒤에는 '다시 수집'을 눌러야 반영됩니다.</span
-                  >
-                </div>
-                <div class="settings-bot-input">
-                  <input
-                    type="text"
-                    data-role-bot-input
-                    placeholder="봇 닉네임"
-                    maxlength="40"
-                  />
-                  <button type="button" data-role-bot-add>추가</button>
-                </div>
-                <div class="settings-bot-list" data-role-bot-list></div>
-                <div class="settings-memo-actions">
-                  <button type="button" data-role-bot-reset>기본값으로</button>
-                </div>
               </li>
               <li class="settings-item" data-new-feature="timeline-memo">
                 <label>
