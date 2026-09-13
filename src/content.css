@@ -5981,6 +5981,14 @@ html.cheese-channel-profile-radius-enabled
 .cheese-cf-groups.is-section-sorting .cheese-cf-groups-chevron {
   opacity: 0.25;
 }
+/* 순서 편집 중에는 영역 구분선(has-divider)을 잠시 감춘다. 본문을 감춰 툴바만
+   남은 화면이라 구분선이 툴바에 바싹 붙어 번잡하고, 섹션을 옮기는 동안에는
+   '어디가 맨 위인지'도 계속 바뀌어 선 위치가 따라 흔들린다. 편집을 끝내면
+   클래스는 그대로이므로 원래대로 돌아온다. */
+.cheese-cf-channel-section.has-divider.is-section-sorting,
+.cheese-cf-groups.has-divider.is-section-sorting {
+  border-top: 0;
+}
 /* 순서 편집 중에는 목록 단위 조작 버튼을 감춘다. 지금은 '목록을 옮기는' 작업만
    하는 화면이라, 그룹 관리·즐겨찾기 순서 편집이 함께 눌리면 맥락이 섞인다. */
 .cheese-cf-groups.is-section-sorting [data-cf-group-manage],
