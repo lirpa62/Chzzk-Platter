@@ -5016,7 +5016,7 @@
                   ></i
                 ></label>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-sb-follow-band="start">
                 <label
                   ><span class="settings-item-name">팔로잉 목록</span></label
                 >
@@ -5026,7 +5026,7 @@
                   ></i
                 ></label>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-sb-follow-band>
                 <label>
                   <span class="settings-item-name">팔로잉 오프라인 숨김</span>
                   <span class="settings-item-desc"
@@ -5039,7 +5039,7 @@
                   ></i
                 ></label>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-sb-follow-band="end">
                 <label>
                   <span class="settings-item-name"
                     >기본 팔로잉 목록 자동 펼치기</span
@@ -8629,7 +8629,7 @@
                   >
                 </div>
                 <div
-                  class="settings-segmented settings-segmented-3"
+                  class="settings-segmented settings-segmented-4"
                   data-chat-recap-retention
                   role="radiogroup"
                 >
@@ -8656,6 +8656,14 @@
                     aria-checked="false"
                   >
                     90일
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-recap-retention-value="30"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    30일
                   </button>
                 </div>
               </li>

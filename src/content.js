@@ -43451,7 +43451,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 보관 기간: 0(무제한) / 90 / 365 만 허용한다.
   function normalizeChatRecapRetention(raw) {
     const n = Number(raw);
-    return n === 90 || n === 365 ? n : 0;
+    // ⚠ 여기 없는 값은 조용히 0(무제한)이 된다. 설정 화면에 보관 기간을
+    //   추가하면 이 목록에도 반드시 같이 넣어야 한다.
+    return n === 30 || n === 90 || n === 365 ? n : 0;
   }
 
   function chatRecapMonthKey(at) {

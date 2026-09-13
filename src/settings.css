@@ -460,6 +460,22 @@ html.settings-tab-view .settings-resizer {
   border-top: 1px solid var(--popup-border-soft);
 }
 
+/* 사이드바 '팔로잉 목록' 세 줄은 서로 맞물려 동작해서 위아래를 굵게 묶어 둔다.
+   ⚠ 위 규칙(.settings-item + .settings-item)보다 뒤에 와야 border-top 을 이긴다.
+   ⚠ 첫 줄이 목록 맨 위면 인접 규칙이 적용되지 않으므로 start 에도 직접 준다. */
+.settings-item[data-sb-follow-band="start"] {
+  border-top: 2px solid var(--popup-border);
+}
+
+.settings-item[data-sb-follow-band="end"] {
+  border-bottom: 2px solid var(--popup-border);
+}
+
+/* 굵은 아래 테두리 바로 다음 줄의 얇은 선을 지운다(2px + 1px 로 겹쳐 보인다). */
+.settings-item[data-sb-follow-band="end"] + .settings-item {
+  border-top: 0;
+}
+
 .settings-item > label:first-child {
   display: flex;
   flex-direction: column;

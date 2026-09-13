@@ -1299,6 +1299,8 @@
     reflectClipEditorStepAvailability();
     reflectChatTimeFormatAvailability();
     reflectLoungeRefreshAvailability();
+    // 전제 조건 잠금은 이 함수보다 뒤에서 정의된다(저장값이 채워진 지금 맞춘다).
+    syncPrereqLocks?.();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -2455,6 +2457,124 @@
     } catch {}
     refreshHeaderNavLimit();
   })();
+
+  // ── 전제 조건이 꺼지면 딸린 설정을 잠근다 ─────────────────────────────────
+  // ⚠ settingsUi 의 FAMILIES 는 '같은 목록 안의 하위 항목'을 다룬다. 여기서는
+  //   다른 그룹·다른 섹션 전체를 잠가야 해서(예: 주제 탭 숨김 → 헤더 팔로우
+  //   그룹) 별도로 처리한다. FAMILIES 에 넣으면 남의 섹션 항목에 '└' 들여쓰기
+  //   까지 붙어 버린다.
+  // ⚠ 이미 다른 이유로 disabled 인 컨트롤을 건드리면 안 된다. 우리가 끈 것만
+  //   표시해 두고 그것만 되돌린다(settingsUi 의 cheeseLockOwned 와 같은 방식).
+  const PREREQ_LOCK_OWNED = "cheesePrereqLockOwned";
+  function setPrereqLocked(elements, locked) {
+    for (const el of elements) {
+      if (!el) continue;
+      el.classList.toggle("is-locked", locked);
+      for (const control of el.querySelectorAll(
+        "input, select, button, textarea",
+      )) {
+        if (locked) {
+          if (!control.disabled) {
+            control.disabled = true;
+            control.dataset[PREREQ_LOCK_OWNED] = "1";
+          }
+        } else if (control.dataset[PREREQ_LOCK_OWNED]) {
+          control.disabled = false;
+          delete control.dataset[PREREQ_LOCK_OWNED];
+        }
+      }
+    }
+  }
+
+  // 잠글 대상을 '그 컨트롤이 속한 행 또는 그룹'으로 모은다.
+  function prereqTargets(selectors, { groups = [] } = {}) {
+    const rows = [];
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        const row = el.closest(".settings-item") || el;
+        if (!rows.includes(row)) rows.push(row);
+      }
+    }
+    for (const selector of groups) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (!rows.includes(el)) rows.push(el);
+      }
+    }
+    return rows;
+  }
+
+  function bindPrereqLock(sourceSelector, targets, { invert = false } = {}) {
+    const source = document.querySelector(sourceSelector);
+    if (!source || !targets.length) return () => {};
+    const sync = () => {
+      // source 는 '숨김' 토글이라 켜짐 = 조건 충족인 경우가 있다(invert=false).
+      setPrereqLocked(targets, invert ? source.checked : !source.checked);
+    };
+    source.addEventListener("change", sync);
+    return sync;
+  }
+
+  // (1) 주제 탭을 숨기지 않으면 헤더 팔로우가 아예 뜨지 않는다.
+  //     content.js ensureHeaderFollowNav: sidebar && headerTopicTabs && !sbFollow
+  //     ⚠ 헤더 바로가기는 주제 탭과 무관하다(사이드바 숨김 조건만 본다).
+  const syncHeaderFollowLock = bindPrereqLock(
+    '[data-feature="headerTopicTabs"]',
+    prereqTargets([], { groups: ['[aria-label="헤더 팔로우"]'] }),
+  );
+
+  // (2) 사이드바를 통째로 숨기면 사이드바 안의 설정은 손댈 곳이 없다.
+  //     '팔로잉 새 탭으로 열기'는 사이드바가 아니라 방송 시청 중 동작이라 제외.
+  //     자동 갱신도 잠근다 — clickFollowRefresh 가 featureFlags.sidebar 에서
+  //     즉시 빠져나오므로 실제로도 동작하지 않는다.
+  const syncSidebarLock = bindPrereqLock(
+    '[data-feature="sidebar"]',
+    prereqTargets([], {
+      groups: [
+        '[aria-label="사이드바 항목"]',
+        '[aria-label="팔로우 채널 갱신"]',
+      ],
+    }),
+    { invert: true },
+  );
+
+  // (3) 전용 팔로잉 목록을 끄면 그 아래 설정 전부가 의미를 잃는다.
+  //     자동 갱신 주기도 startCustomFollowRefreshTimer 가 sbFollowCustom 을
+  //     보고 타이머를 걸지 않는다.
+  const customFollowMaster = document.querySelector(
+    '[data-feature="sbFollowCustom"]',
+  );
+  const customFollowSection = customFollowMaster?.closest(".settings-group");
+  const syncCustomFollowLock = (() => {
+    if (!customFollowMaster || !customFollowSection) return () => {};
+    const masterRow = customFollowMaster.closest(".settings-item");
+    const targets = [
+      ...customFollowSection.querySelectorAll(".settings-item"),
+    ].filter((row) => row !== masterRow);
+    // ⚠ '자동 갱신 주기'의 세그먼트·커스텀 입력은 li 가 아니라 섹션 바로 아래의
+    //   div 다. .settings-item 만 모으면 통째로 빠진다(실제로 빠뜨렸었다).
+    for (const el of customFollowSection.children) {
+      if (el === masterRow || el.tagName === "H2" || el.tagName === "P")
+        continue;
+      if (el.contains(customFollowMaster)) continue;
+      if (el.querySelector("input, select, button, textarea")) targets.push(el);
+    }
+    // 전용 팔로잉 탭의 다른 섹션들도 함께 잠근다.
+    for (const group of document.querySelectorAll(
+      '[data-panel="customfollow"]',
+    )) {
+      if (group !== customFollowSection) targets.push(group);
+    }
+    const sync = () => setPrereqLocked(targets, !customFollowMaster.checked);
+    customFollowMaster.addEventListener("change", sync);
+    return sync;
+  })();
+
+  // 저장값이 채워진 뒤에 한 번 맞춘다(체크박스 초기 상태가 반영된 다음).
+  function syncPrereqLocks() {
+    syncHeaderFollowLock();
+    syncSidebarLock();
+    syncCustomFollowLock();
+  }
 
   // ── 오디오 믹서 항상 켜기(전역) ───────────────────────────────────────────
   // data-feature와 별개 키. 체크=항상 켜기(첫 제스처 후 자동 활성화).
