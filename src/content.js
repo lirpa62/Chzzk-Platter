@@ -12300,6 +12300,9 @@
     button.setAttribute("aria-label", "방장·매니저·파트너 채팅");
     button.setAttribute("aria-expanded", "false");
     // lucide sword.
+    // ⚠ 아래 svg 의 width/height 는 실제 크기를 정하지 않는다. 치지직의
+    //   .pzp-ui-icon__svg { width:100%; height:100% } 가 이겨서 아이콘 상자를
+    //   그대로 채운다. 크기는 content.css 의 .pzp-ui-icon padding 으로 정한다.
     button.innerHTML = `
       <span class="pzp-button__tooltip pzp-button__tooltip--top">방장·매니저·파트너 채팅</span>
       <span class="pzp-ui-icon">

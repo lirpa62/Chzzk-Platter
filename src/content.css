@@ -2830,13 +2830,23 @@ html.cheese-channel-live-profile-custom
   word-break: keep-all;
 }
 
-.cheese-search-comment-timestamp-button .pzp-ui-icon {
-  padding: 5px;
+/* 플레이어 버튼 아이콘을 치지직 기본(32px)보다 살짝 작게.
+   ⚠ svg 의 width/height 속성으로는 줄지 않는다. 치지직의
+   .pzp-ui-icon__svg { width:100%; height:100% } 가 이겨서 아이콘 상자
+   (.pzp-ui-icon, 32px)를 그대로 채우기 때문이다. 상자에 padding 을 줘야
+   실제로 작아진다(box-sizing:border-box 로 상자 크기는 그대로 둔다). */
+.cheese-search-comment-timestamp-button .pzp-ui-icon,
+.cheese-chat-recap-button .pzp-ui-icon,
+.cheese-role-chat-button .pzp-ui-icon,
+.cheese-chat-graph-button .pzp-ui-icon {
+  box-sizing: border-box;
+  padding: 7px;
 }
 
+/* 마커가 있을 때도 같은 크기를 쓴다(이 규칙이 위 padding 을 이긴다). */
 .cheese-search-comment-timestamp-button.has-markers
   .cheese-search-comment-timestamp-icon {
-  padding: 5px;
+  padding: 7px;
 }
 
 .cheese-search-comment-timestamp-button.is-loading
