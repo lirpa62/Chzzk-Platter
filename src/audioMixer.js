@@ -1614,7 +1614,10 @@
         state.preset = "default";
         const snapshot = cloneMixerSnapshot(custom.snapshot);
         state.gain = snapshot.gain;
-        state.eq = snapshot.eq;
+        state.eq =
+          custom.eqType === eqBandMode
+            ? snapshot.eq
+            : convertEqBetweenModes(snapshot.eq, custom.eqType, eqBandMode);
         state.comp = snapshot.comp;
         state.limiter = snapshot.limiter;
         state.normalizer = snapshot.normalizer;
@@ -1901,11 +1904,15 @@
 
   // 내장 프리셋 정의(p) → 정규화된 믹서 스냅샷. applyPreset과 동일한 변환을 써서
   // '되돌리기/동일여부 비교'가 실제 적용값과 정확히 일치하게 한다.
+  // ⚠ 내장 프리셋의 eq 는 모두 chzzk 배치 기준으로 적혀 있다. ISO 배치에서
+  //   그대로 쓰면 의도한 대역이 아닌 곳이 올라간다(예: '노래 방송'의 고음
+  //   강조가 엉뚱한 자리로 간다). 여기서 한 번에 지금 배치로 옮긴다.
+  //   '값이 프리셋과 같은가' 비교도 이 함수를 거치므로 같이 맞춰진다.
   function builtInPresetSnapshot(p) {
     const defaultState = DEFAULT_STATE();
     return cloneMixerSnapshot({
       gain: p.gain,
-      eq: [...p.eq],
+      eq: convertEqBetweenModes(p.eq, "chzzk", eqBandMode),
       comp: { ...p.comp },
       limiter: normalizePresetLimiter(p.limiter, defaultState.limiter),
       normalizer: {
@@ -2032,8 +2039,39 @@
       id: String(preset.id || createPresetId()),
       name,
       mode,
+      // 이 EQ 값이 어느 주파수 배치에서 만들어졌는지. 없으면 기존 배치로 본다
+      // (이 필드가 생기기 전에 저장된 프리셋은 모두 chzzk 배치였다).
+      eqType: normalizeEqBandMode(preset.eqType),
       snapshot: cloneMixerSnapshot(preset.snapshot || preset),
     };
+  }
+
+  // 다른 배치에서 만든 EQ 값을 지금 배치로 옮긴다. 주파수를 기준으로 삼아
+  // 로그 주파수 축에서 선형 보간한다(사람이 듣는 간격에 가깝다).
+  // ⚠ 값을 인덱스째로 옮기면 안 된다. 예컨대 8번은 chzzk 에서 14kHz(공기감)지만
+  //   ISO 에서는 8kHz(치찰음)라 의도와 다른 대역이 올라간다.
+  function convertEqBetweenModes(values, fromMode, toMode) {
+    const from = EQ_BAND_SETS[normalizeEqBandMode(fromMode)];
+    const to = EQ_BAND_SETS[normalizeEqBandMode(toMode)];
+    const src = Array.isArray(values) ? values : [];
+    if (from === to) return src.slice(0, 10);
+    return to.map((freq) => {
+      const x = Math.log2(freq);
+      // 목표 주파수를 사이에 둔 두 원본 밴드를 찾는다.
+      let hi = from.findIndex((f) => Math.log2(f) >= x);
+      if (hi < 0) hi = from.length - 1; // 원본 최고음보다 위 → 마지막 값 유지
+      if (hi === 0) return round1(Number(src[0]) || 0); // 최저음보다 아래
+      const lo = hi - 1;
+      const a = Math.log2(from[lo]);
+      const b = Math.log2(from[hi]);
+      const t = b === a ? 0 : (x - a) / (b - a);
+      const va = Number(src[lo]) || 0;
+      const vb = Number(src[hi]) || 0;
+      return round1(va + (vb - va) * t);
+    });
+  }
+  function round1(n) {
+    return Math.round(n * 10) / 10;
   }
 
   function createPresetId() {
@@ -2100,6 +2138,7 @@
       id: customDraft.id || createPresetId(),
       name,
       mode: customDraft.mode === "expert" ? "expert" : "advanced",
+      eqType: eqBandMode, // 지금 배치 기준으로 저장(다른 배치에선 변환해 쓴다)
       snapshot: createMixerSnapshot(),
     };
     const presets = normalizeCustomPresets(state.customPresets);
@@ -2146,6 +2185,9 @@
       id: createPresetId(),
       name,
       mode: dirtyMode === "expert" ? "expert" : "advanced",
+      // 지금 배치를 함께 남긴다. 나중에 다른 배치에서 이 프리셋을 고르면
+      // 주파수를 맞춰 옮겨 같은 음색으로 들리게 한다.
+      eqType: eqBandMode,
       snapshot: createMixerSnapshot(),
     };
     const presets = normalizeCustomPresets(state.customPresets);
@@ -2170,7 +2212,11 @@
     if (!options.keepDraft) ensureMixerEnabled();
     const snapshot = cloneMixerSnapshot(saved.snapshot);
     state.gain = snapshot.gain;
-    state.eq = snapshot.eq;
+    // 다른 배치에서 만든 프리셋이면 주파수를 맞춰 옮긴다(같은 음색 의도 유지).
+    state.eq =
+      saved.eqType === eqBandMode
+        ? snapshot.eq
+        : convertEqBetweenModes(snapshot.eq, saved.eqType, eqBandMode);
     state.comp = snapshot.comp;
     state.limiter = snapshot.limiter;
     state.normalizer = snapshot.normalizer;
