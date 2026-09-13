@@ -1314,14 +1314,10 @@
       // 방향은 라이브 믹서와 같게 맞춘다(설정은 임베드 전용).
       // 위로 = 올림(게인) / 이전 항목(프리셋).
       const direction = event.deltaY < 0 ? 1 : -1;
-      if (mixerWheelAction === "gain") {
-        nudgeGain(direction);
-        // 프리셋은 버튼 라벨이 바뀌어 눈에 보이지만 게인은 표시가 없다.
-        // 값 말풍선을 띄워 조작이 먹혔는지 알 수 있게 한다(끝값이라 변화가
-        // 없을 때도 현재 값을 보여 주므로 무반응처럼 보이지 않는다).
-        showGainTooltip();
-        hideGainTooltip(900);
-      } else cyclePreset(-direction);
+      // 게인 값은 setGain → updateButton 으로 버튼 툴팁에 바로 반영된다
+      // ('오디오 믹서 (프리셋 · 108%)'). 별도 말풍선은 겹쳐서 방해만 된다.
+      if (mixerWheelAction === "gain") nudgeGain(direction);
+      else cyclePreset(-direction);
     },
     { capture: true, passive: false },
   );
