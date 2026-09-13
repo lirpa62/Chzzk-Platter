@@ -88,6 +88,7 @@
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
     "cheeseChatProfileBlockButton",
+    "cheeseCommentNickMenu",
     "cheeseChatWordFilters",
     "cheeseLogPowerLogDays",
     "cheeseLogPowerLogDaysLast",
@@ -3324,7 +3325,8 @@
     document.querySelectorAll("[data-logpower-click]"),
   );
   function normalizeLpClick(v) {
-    return v === "navigate" || v === "none" ? v : "popup";
+    // ⚠ content.js normalizeLogPowerClickAction 과 목록을 맞춰야 한다.
+    return v === "navigate" || v === "none" || v === "stats" ? v : "popup";
   }
   function reflectLpClick(action) {
     const v = normalizeLpClick(action);
@@ -9866,6 +9868,30 @@
     } catch {}
   });
   loadChatProfileBlockButton();
+
+  // 댓글 닉네임 우클릭 → 차단 버튼. 이미 있던 동작이라 기본 ON 이다.
+  const COMMENT_NICK_MENU_KEY = "cheeseCommentNickMenu";
+  const commentNickMenuInput = document.querySelector(
+    "[data-comment-nick-menu]",
+  );
+
+  async function loadCommentNickMenu() {
+    let on = true; // 미설정 = 켜짐(content.js 와 맞춘다)
+    try {
+      const data = await cachedStorageGet(COMMENT_NICK_MENU_KEY);
+      on = data?.[COMMENT_NICK_MENU_KEY] !== false;
+    } catch {}
+    if (commentNickMenuInput) commentNickMenuInput.checked = on;
+  }
+
+  commentNickMenuInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [COMMENT_NICK_MENU_KEY]: commentNickMenuInput.checked,
+      });
+    } catch {}
+  });
+  loadCommentNickMenu();
 
   // ── 전체 방송·팔로잉 라이브 제외 필터 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";

@@ -70,7 +70,10 @@
     ['[data-feature="loungeNews"]', '[data-feature="loungeNewsDot"], #loungeRefresh'],
     ['[data-feature="inboxCommunityNews"]', '[data-feature="inboxCommunityNewsDot"], [data-inbox-community-new-tab], #inboxCommunityRefresh'],
     ['[data-feature="inboxLogPower"]', '[data-feature="inboxLogPowerDot"]'],
-    ['[data-feature="sbFollowFavEnabled"]', "[data-cf-fav-initial], [data-cf-fav-more]"],
+    // ⚠ 자동 펼치기도 즐겨찾기 사용의 하위다. 예전에는 두 개수 옵션 '사이에'
+    //   끼어 있어 화면상으로는 자동 펼치기의 하위처럼 보였다(잠기지 않는다는
+    //   제보의 원인). 개수는 자동 펼치기를 꺼야 비로소 쓰이므로 그 하위가 아니다.
+    ['[data-feature="sbFollowFavEnabled"]', '[data-cf-fav-initial], [data-cf-fav-more], [data-feature="sbFollowFavAutoExpand"]'],
     ['[data-feature="sbFollowGroupTags"]', "[data-cf-group-tag-hide-offline]"],
     ["[data-affinity-on]", "[data-affinity-hide-offline], [data-affinity-initial], [data-affinity-more], [data-settings-affinity-weights]"],
     ["[data-follow-preview-card-layout]", "#followPreviewBadgePos"],

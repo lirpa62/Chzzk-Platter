@@ -1837,6 +1837,10 @@
   const COMMENT_BLOCK_KEY = "cheeseCommentBlocks";
   const CHAT_PROFILE_BLOCK_BUTTON_KEY = "cheeseChatProfileBlockButton";
   let chatProfileBlockButtonOn = false; // 기본 OFF: 명시적으로 켠 경우에만 주입
+  // 다시보기·클립·커뮤니티 댓글 닉네임 우클릭 → 차단 버튼. 이미 있던 동작이라
+  // 기본 ON 이다(끄면 치지직 기본 우클릭 메뉴가 그대로 나온다).
+  const COMMENT_NICK_MENU_KEY = "cheeseCommentNickMenu";
+  let commentNickMenuOn = true;
   let commentBlocks = []; // 차단 목록(원본 배열)
   let commentBlockHashSet = new Set(); // 빠른 조회용 userIdHash 집합
   let commentBlockNicknameSet = new Set(); // 채팅 DOM 숨김용 닉네임 집합(hash 없어 닉네임 기반)
@@ -7437,7 +7441,7 @@
   }
   const LOGPOWER_PAGE_URL = "https://game.naver.com/profile#channel_power";
   function normalizeLogPowerClickAction(v) {
-    return v === "navigate" || v === "none" ? v : "popup";
+    return v === "navigate" || v === "none" || v === "stats" ? v : "popup";
   }
   // 상위 N개 보유량 팝업 관련(con-chzzk showLogPowerBalancesPopup 이식).
   const LOGPOWER_POPUP_LIMIT_KEY = "cheeseLogPowerPopupLimit";
@@ -7739,6 +7743,13 @@
     if (logPowerClickAction === "navigate") {
       try {
         window.open(LOGPOWER_PAGE_URL, "_blank", "noopener");
+      } catch {}
+      return;
+    }
+    // 통나무파워 내역(확장 내부 페이지). 팝업 안의 '획득 내역 보기'와 같은 곳.
+    if (logPowerClickAction === "stats") {
+      try {
+        window.open(chrome.runtime.getURL("logPowerStats.html"), "_blank");
       } catch {}
       return;
     }
@@ -42291,16 +42302,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const data = await getBootData([
         COMMENT_BLOCK_KEY,
         CHAT_PROFILE_BLOCK_BUTTON_KEY,
+        COMMENT_NICK_MENU_KEY,
         CHAT_WORD_FILTER_KEY,
       ]);
       const list = data?.[COMMENT_BLOCK_KEY];
       commentBlocks = Array.isArray(list) ? list : [];
       chatProfileBlockButtonOn = data?.[CHAT_PROFILE_BLOCK_BUTTON_KEY] === true;
+      commentNickMenuOn = data?.[COMMENT_NICK_MENU_KEY] !== false; // 기본 ON
       chatWordFilters = normalizeChatWordFilters(data?.[CHAT_WORD_FILTER_KEY]);
       compileChatWordFilters();
     } catch {
       commentBlocks = [];
       chatProfileBlockButtonOn = false;
+      commentNickMenuOn = true; // 읽기 실패 시에도 기본값(ON)을 지킨다
       chatWordFilters = [];
       compileChatWordFilters();
     }
@@ -42729,6 +42743,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 댓글 영역의 닉네임 우클릭. 치지직 기본 메뉴는 막는다.
   document.addEventListener("contextmenu", (event) => {
     if (!event.isTrusted) return;
+    if (!commentNickMenuOn) return; // 끄면 치지직 기본 메뉴를 그대로 둔다
     const target = event.target;
     if (!(target instanceof Element)) return;
     // 댓글 안인지 먼저 본다(다시보기·클립·커뮤니티 모두 id="commentBox-..." 를 쓴다).
@@ -50150,6 +50165,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       HIDE_BLOCKED_COMMENT_KEY,
       COMMENT_BLOCK_KEY,
       CHAT_PROFILE_BLOCK_BUTTON_KEY,
+      COMMENT_NICK_MENU_KEY,
       CHAT_WORD_FILTER_KEY,
       FOLLOW_CHANNEL_TOOLTIP_KEY,
       FOLLOW_SORT_ENABLED_KEY,
@@ -51387,6 +51403,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatProfileBlockButtonOn =
           changes[CHAT_PROFILE_BLOCK_BUTTON_KEY].newValue === true;
         syncChatProfileBlockButtonFeature();
+      }
+      if (changes[COMMENT_NICK_MENU_KEY]) {
+        commentNickMenuOn = changes[COMMENT_NICK_MENU_KEY].newValue !== false;
+        if (!commentNickMenuOn) closeCommentNickMenu();
       }
       if (changes[CHAT_WORD_FILTER_KEY]) {
         chatWordFilters = normalizeChatWordFilters(
