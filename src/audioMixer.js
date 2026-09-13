@@ -677,6 +677,7 @@
       label: "기본",
       gain: 1,
       eq: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      eqIso: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       normalizer: false,
       targetLevel: 0.12,
       comp: {
@@ -696,6 +697,7 @@
       label: "저챗·라디오",
       gain: 1,
       eq: [-2, -1.5, -0.5, 1.5, 2, 2.5, 2, 1, 0, -1],
+      eqIso: [-2, -2, -1, 0, 0.5, 2, 2.5, 2, 1, 0],
       normalizer: true,
       targetLevel: 0.1,
       comp: {
@@ -714,6 +716,7 @@
       label: "게임 방송",
       gain: 1,
       eq: [2, 1.6, 1, 0, 1, 2, 2, 1.6, 1, 0.5],
+      eqIso: [2, 2, 1.2, 0, 0.5, 1.5, 2, 2, 1.5, 0.5],
       normalizer: true,
       targetLevel: 0.11,
       comp: {
@@ -733,6 +736,7 @@
       label: "야외방송",
       gain: 1.1,
       eq: [-4, -3, -1.5, 1, 3, 2.5, 1.5, 0.5, -0.5, -1],
+      eqIso: [-5, -4, -2.5, -0.5, 1, 2.5, 3, 2, 0.5, -1],
       normalizer: true,
       targetLevel: 0.13,
       comp: {
@@ -751,6 +755,7 @@
       label: "노래 방송",
       gain: 1,
       eq: [3, 2.4, 1.5, -0.5, 0, 1, 2, 3, 2.4, 1.5],
+      eqIso: [3, 2.5, 1.5, 0, -0.5, 0, 1, 2, 2.5, 1.5],
       normalizer: true,
       targetLevel: 0.09,
       comp: {
@@ -770,6 +775,7 @@
       label: "클래식·재즈",
       gain: 1,
       eq: [1.5, 1, 0.5, 0, 0, 0.5, 1, 2, 1.5, 1],
+      eqIso: [1.5, 1.2, 0.6, 0, 0, 0, 0.5, 1, 1.5, 1],
       normalizer: true,
       targetLevel: 0.08,
       comp: {
@@ -788,6 +794,7 @@
       label: "영화·드라마",
       gain: 1.1,
       eq: [3, 2, 1, 1.5, 2, 1.5, 1, 1.6, 1, 0.5],
+      eqIso: [3, 2.5, 1.2, 0.5, 1.5, 2, 1.5, 1.2, 1, 0.5],
       normalizer: true,
       targetLevel: 0.12,
       comp: {
@@ -807,6 +814,7 @@
       label: "애니",
       gain: 1.05,
       eq: [1, 0.5, 0, 1, 2, 1.5, 1, 1.5, 1.5, 1],
+      eqIso: [1, 0.8, 0.2, 0.5, 1.5, 2, 1.5, 1.2, 1.2, 1],
       normalizer: true,
       targetLevel: 0.11,
       comp: {
@@ -825,6 +833,7 @@
       label: "스포츠",
       gain: 1,
       eq: [0.5, 0, 0, 1.5, 2.5, 2, 1.5, 1, 0.5, 0],
+      eqIso: [0.5, 0.3, 0, 0.5, 2, 2.5, 2, 1.2, 0.5, 0],
       normalizer: true,
       targetLevel: 0.12,
       comp: {
@@ -843,6 +852,7 @@
       label: "ASMR",
       gain: 1.3,
       eq: [-3, -2.4, -1, 1, 2, 3, 4, 4.8, 4, 3],
+      eqIso: [-3, -3, -1.5, 0, 1, 2.5, 3.5, 4.5, 4.5, 3],
       normalizer: true,
       targetLevel: 0.07,
       comp: {
@@ -1904,15 +1914,22 @@
 
   // 내장 프리셋 정의(p) → 정규화된 믹서 스냅샷. applyPreset과 동일한 변환을 써서
   // '되돌리기/동일여부 비교'가 실제 적용값과 정확히 일치하게 한다.
-  // ⚠ 내장 프리셋의 eq 는 모두 chzzk 배치 기준으로 적혀 있다. ISO 배치에서
-  //   그대로 쓰면 의도한 대역이 아닌 곳이 올라간다(예: '노래 방송'의 고음
-  //   강조가 엉뚱한 자리로 간다). 여기서 한 번에 지금 배치로 옮긴다.
-  //   '값이 프리셋과 같은가' 비교도 이 함수를 거치므로 같이 맞춰진다.
+  // 내장 프리셋은 배치별 값을 각각 손으로 맞춰 두었다(eq = chzzk, eqIso = ISO).
+  // ⚠ 보간으로 옮기면 의도가 흐려진다. 예컨대 '노래 방송'은 보컬 자리(1k 부근)를
+  //   비워 두는 게 핵심인데, 보간하면 저역 강조가 125Hz 까지 번져 먹먹해진다.
+  //   '값이 프리셋과 같은가' 비교도 이 함수를 거치므로 dirty 판정과 어긋나지 않는다.
+  // ⚠ eqIso 가 없는 프리셋(나중에 추가된 것 등)은 보간으로 대신한다.
+  function builtInPresetEq(p) {
+    if (eqBandMode !== "iso") return [...p.eq];
+    if (Array.isArray(p.eqIso) && p.eqIso.length === 10) return [...p.eqIso];
+    return convertEqBetweenModes(p.eq, "chzzk", "iso");
+  }
+
   function builtInPresetSnapshot(p) {
     const defaultState = DEFAULT_STATE();
     return cloneMixerSnapshot({
       gain: p.gain,
-      eq: convertEqBetweenModes(p.eq, "chzzk", eqBandMode),
+      eq: builtInPresetEq(p),
       comp: { ...p.comp },
       limiter: normalizePresetLimiter(p.limiter, defaultState.limiter),
       normalizer: {
