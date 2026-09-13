@@ -5944,8 +5944,51 @@ html.cheese-channel-profile-radius-enabled
     var(--cheese-platter-content-neutral-primary)
   );
 }
+/* ── 목록(친밀도·그룹·즐겨찾기·팔로잉) 순서 편집 ── */
+.cheese-cf-section-drag {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 22px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  cursor: grab;
+  user-select: none;
+}
+.cheese-cf-section-drag:active {
+  cursor: grabbing;
+}
+/* 편집 중인 목록은 점선으로 묶어 '옮길 수 있는 덩어리'임을 보여 준다. */
+.cheese-cf-channel-section.is-section-sorting,
+.cheese-cf-groups.is-section-sorting {
+  outline: 1px dashed
+    var(
+      --sem-color-content-neutral-cool-weak,
+      var(--cheese-platter-content-neutral-cool-weak, #888)
+    );
+  outline-offset: 2px;
+  border-radius: 0 8px 8px 0;
+}
+.is-section-dragging {
+  opacity: 0.45;
+}
+/* 툴바가 핸들 + 토글(+ 순서 버튼)을 나란히 놓게 한다. */
+.cheese-cf-section-toolbar:has(.cheese-cf-section-drag),
+.cheese-cf-group-toolbar:has(.cheese-cf-section-drag) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 /* 접힘(아이콘만)에서는 숨긴다. 그룹의 순서 편집 버튼과 같은 이유 — 폭이 좁고,
    접으면 편집 모드도 해제되므로 버튼이 남아 있을 이유가 없다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-section-drag {
+  display: none !important;
+}
 #sidebar:not([class*="_is_expanded_"])
   #cheese-custom-follow
   .cheese-cf-section-toolbar

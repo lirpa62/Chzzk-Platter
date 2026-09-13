@@ -2445,6 +2445,11 @@
   // 즐겨찾기 영역도 같은 변수를 쓴다(한 번에 한 곳만 편집).
   const CUSTOM_FOLLOW_FAV_SORT_TARGET = "section:favorites";
   let customFollowGroupSortKey = "";
+  // 섹션(친밀도·그룹·즐겨찾기·팔로잉) 순서 편집 모드.
+  // ⚠ 편집 중에는 모든 섹션을 접어 한 화면에 보이게 한다. 펼친 채로는 목록이
+  //   길어 끌어 옮길 자리가 화면 밖으로 나간다. 끝나면 원래 접힘 상태로 되돌린다.
+  let customFollowSectionSorting = false;
+  let customFollowSectionSortCollapseBackup = null;
   // 이 요소가 '순서 편집 중인 그룹' 안에 있는가. 편집 중에는 호버 미리보기·툴팁을
   // 막는다(끌고 가는 동안 패널이 떠서 놓을 자리를 가린다).
   // ⚠ DOM 으로 판정한다. 편집 중인 그룹에만 is-sorting 이 붙으므로 다른 그룹과
@@ -23953,6 +23958,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 안내 문구와 점선 테두리도 자리만 차지한다. 지금까지 끌어 놓은 순서는
         // 이미 저장돼 있으므로 그대로 보인다.
         customFollowGroupSortKey = "";
+        // 목록 순서 편집도 같은 이유로 끝낸다. 접어 뒀던 섹션은 원래대로 되돌린다.
+        if (customFollowSectionSorting) toggleCustomFollowSectionSort();
       }
       // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
       scheduleSidebarPushSettle();
@@ -34747,6 +34754,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
   }
 
+  // 섹션 순서 편집용 드래그 핸들. 편집 모드가 아니면 아예 만들지 않는다.
+  function customFollowSectionDragHandle(key, label) {
+    if (!customFollowSectionSorting) return "";
+    return (
+      `<span class="cheese-cf-section-drag" draggable="true" data-cf-section-drag="${escapeAttribute(key)}"` +
+      ` aria-label="${escapeAttribute(label)} 순서 이동" title="드래그하여 목록 순서 변경">` +
+      customFollowLucideIcon("grip-vertical", 15) +
+      `</span>`
+    );
+  }
+
   function renderCustomFollowGroups(groups, h, expandedNow) {
     const areaCollapsed = customFollowGroupCollapsed.area === true;
     const shownCount = isCustomFollowGroupAutoExpandActive()
@@ -34858,8 +34876,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           `</div>`
         : "";
     return (
-      `<div class="cheese-cf-groups${areaCollapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-star="${escapeAttribute(customFollowStarMode.groups || "hover")}">` +
+      `<div class="cheese-cf-groups${areaCollapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section-order="groups" data-cf-star="${escapeAttribute(customFollowStarMode.groups || "hover")}">` +
       `<div class="cheese-cf-group-toolbar">` +
+      customFollowSectionDragHandle("groups", "그룹") +
       `<button type="button" class="cheese-cf-groups-toggle" data-cf-groups-toggle aria-expanded="${String(!areaCollapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-groups-chevron") +
       `<span>그룹</span><small>${shownCount}/${groups.length}</small>` +
@@ -36535,8 +36554,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       )
       .join("");
     return (
-      `<section class="cheese-cf-channel-section cheese-cf-affinity${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="affinity" data-cf-star="${escapeAttribute(customFollowStarMode.affinity || "hover")}">` +
+      `<section class="cheese-cf-channel-section cheese-cf-affinity${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section="affinity" data-cf-section-order="affinity" data-cf-star="${escapeAttribute(customFollowStarMode.affinity || "hover")}">` +
       `<div class="cheese-cf-section-toolbar">` +
+      customFollowSectionDragHandle("affinity", AFFINITY_LABEL) +
       `<button type="button" data-cf-section-toggle="affinity" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
       `<span>${escapeHtml(AFFINITY_LABEL)}</span><small>${shownCount}/${pool.length}</small>` +
@@ -36594,8 +36614,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ? `<button type="button" class="cheese-cf-section-sort" data-cf-section-sort="${CUSTOM_FOLLOW_FAV_SORT_TARGET}" aria-pressed="${String(favSorting)}" aria-label="${favSortLabel}" title="${favSortLabel}">${customFollowLucideIcon("arrow-up-down", 15)}</button>`
       : "";
     return (
-      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${favSorting ? " is-sorting" : ""}" data-cf-section="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
+      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${favSorting ? " is-sorting" : ""}${customFollowSectionSorting ? " is-section-sorting" : ""}" data-cf-section="${key}" data-cf-section-order="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
       `<div class="cheese-cf-section-toolbar">` +
+      customFollowSectionDragHandle(key, label) +
       `<button type="button" data-cf-section-toggle="${key}" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
       `<span>${label}</span><small>${shownCount}/${items.length}</small>` +
@@ -36964,6 +36985,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           const act = ctrl.dataset.cfCtrl;
           if (act === "refresh") spinCustomFollowRefresh(ctrl);
           else if (act === "square") openCustomFollowSquareModal(ctrl);
+          else if (act === "section-sort") toggleCustomFollowSectionSort();
           return;
         }
         const nav = e.target.closest?.("#" + CUSTOM_FOLLOW_NAV_ID);
@@ -37334,6 +37356,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     bindCustomFollowDragSort();
     bindCustomFollowGroupDragSort();
+    bindCustomFollowSectionDrag();
   }
 
   // 사이드바의 커스텀·구독·태그 그룹을 함께 재정렬한다. 동적으로 사라진 자동 그룹의
@@ -38454,6 +38477,102 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 우리 새로고침 컨트롤을 주입한다. 클릭은 document 위임 처리.
   const CUSTOM_FOLLOW_CTRL_CLASS = "cheese-cf-header-ctrl";
   const CF_SVG_REFRESH = `<svg width="15" height="15" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
+  // 섹션 드래그. 그룹 순서 드래그와 같은 방식이되 대상이 '섹션'이다.
+  let draggedSectionKey = "";
+  let draggedSectionEl = null;
+  function bindCustomFollowSectionDrag() {
+    document.addEventListener(
+      "dragstart",
+      (event) => {
+        if (!customFollowSectionSorting) return;
+        const handle = event.target?.closest?.("[data-cf-section-drag]");
+        if (!handle?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID)) return;
+        draggedSectionEl = handle.closest("[data-cf-section-order]");
+        if (!draggedSectionEl) return;
+        draggedSectionKey = String(handle.dataset.cfSectionDrag || "");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          try {
+            event.dataTransfer.setData("text/plain", draggedSectionKey);
+          } catch {}
+        }
+        draggedSectionEl.classList.add("is-section-dragging");
+      },
+      true,
+    );
+    document.addEventListener(
+      "dragover",
+      (event) => {
+        if (!draggedSectionEl?.isConnected) return;
+        const over = event.target?.closest?.("[data-cf-section-order]");
+        const nav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
+        if (!over || !nav?.contains(over) || over === draggedSectionEl) return;
+        event.preventDefault();
+        // 커서가 대상의 위쪽 절반이면 앞에, 아래쪽이면 뒤에 끼운다.
+        const box = over.getBoundingClientRect();
+        const before = event.clientY < box.top + box.height / 2;
+        nav.insertBefore(draggedSectionEl, before ? over : over.nextSibling);
+      },
+      true,
+    );
+    const finish = () => {
+      if (!draggedSectionEl) return;
+      draggedSectionEl.classList.remove("is-section-dragging");
+      draggedSectionEl = null;
+      draggedSectionKey = "";
+    };
+    document.addEventListener(
+      "drop",
+      (event) => {
+        if (!draggedSectionEl?.isConnected) return;
+        const nav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
+        if (!nav?.contains(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const order = [...nav.querySelectorAll("[data-cf-section-order]")]
+          .map((el) => el.dataset.cfSectionOrder)
+          .filter(Boolean);
+        finish();
+        // ⚠ 세 섹션(그룹·즐겨찾기·팔로잉)만 조합 키로 저장되고 친밀도는 자리만
+        //   저장된다. saveCustomFollowDisplayOrder 가 그 변환을 담당한다.
+        saveCustomFollowDisplayOrder(order);
+        ensureCustomFollowList();
+      },
+      true,
+    );
+    document.addEventListener("dragend", finish, true);
+  }
+
+  // 섹션 순서 편집 모드 토글.
+  // ⚠ 켤 때 모든 섹션을 접는다. 펼친 채로는 목록이 길어 끌어 옮길 자리가 화면
+  //   밖으로 나간다. 끌 때는 켜기 직전의 접힘 상태를 그대로 되돌린다.
+  function toggleCustomFollowSectionSort() {
+    if (customFollowSectionSorting) {
+      customFollowSectionSorting = false;
+      if (customFollowSectionSortCollapseBackup) {
+        customFollowGroupCollapsed = customFollowSectionSortCollapseBackup;
+        customFollowSectionSortCollapseBackup = null;
+        try {
+          chrome.storage?.local?.set({
+            [CUSTOM_FOLLOW_GROUP_COLLAPSED_KEY]: customFollowGroupCollapsed,
+          });
+        } catch {}
+      }
+    } else {
+      customFollowSectionSorting = true;
+      // 항목 단위 편집과 겹치지 않게 그쪽은 끈다(한 번에 한 가지만).
+      customFollowGroupSortKey = "";
+      customFollowSectionSortCollapseBackup = { ...customFollowGroupCollapsed };
+      for (const key of customFollowDisplayOrder()) {
+        customFollowGroupCollapsed[key] = true;
+      }
+      if (typeof closeFollowPreview === "function") closeFollowPreview();
+    }
+    customFollowVersion += 1;
+    ensureCustomFollowList();
+    ensureCustomFollowCollapsedControls();
+  }
+
   // 새로고침을 눌렀다는 걸 알 수 있게 아이콘을 돌린다.
   // ⚠ 실제 갱신이 끝날 때까지 돌리되, 캐시가 있어 순식간에 끝나면 깜빡하고 마는
   //   것처럼 보인다. 최소 한 바퀴는 돌려 '눌렀다'는 느낌을 남긴다.
@@ -38520,7 +38639,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="refresh" title="팔로잉 새로고침" aria-label="팔로잉 새로고침">${CF_SVG_REFRESH}</button>` +
       (collapsed
         ? ""
-        : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="square" title="캐릭터 선택창 설정" aria-label="캐릭터 선택창 설정">${customFollowLucideIcon("square-user-round", 15)}</button>`);
+        : `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="section-sort" aria-pressed="${String(customFollowSectionSorting)}" title="${customFollowSectionSorting ? "목록 순서 편집 끝내기" : "목록 순서 편집"}" aria-label="${customFollowSectionSorting ? "목록 순서 편집 끝내기" : "목록 순서 편집"}">${customFollowLucideIcon("arrow-up-down", 15)}</button>` +
+          `<button type="button" class="cheese-cf-ctrl-btn" data-cf-ctrl="square" title="캐릭터 선택창 설정" aria-label="캐릭터 선택창 설정">${customFollowLucideIcon("square-user-round", 15)}</button>`);
     // 상태 바뀌면 재배치. nav 직속일 때는 '헤더 다음, 우리 목록 앞'(위쪽)에 둔다.
     // 헤더가 없는 접힘 DOM 이면 nav 의 맨 앞이 곧 목록 위다.
     if (bar.parentElement !== parent) {
