@@ -9732,15 +9732,21 @@
   const cardWheelModeGroup = document.querySelector(
     "[data-card-preview-wheel-mode]",
   );
-  let cardWheelMode = "wheel";
+  // ⚠ 아직 저장값을 읽기 전인지 구분해야 한다. 이 값이 기본("wheel")으로 남아
+  //   있는 동안 다른 로드가 끝나면서 잠금을 다시 계산하면, 잠겨 있어야 할
+  //   '활성 지연'이 풀린다(제보: 다시 열면 잠금이 풀려 있다). 로드 전에는
+  //   잠금 상태를 건드리지 않는다.
+  let cardWheelMode = null;
   function normalizeCardWheelMode(v) {
     return v === "rightclick" || v === "off" ? v : "wheel";
   }
   function reflectCardWheelMode() {
+    // 아직 못 읽었으면 마크업의 기본 표시(휠)를 그대로 둔다.
+    const shown = cardWheelMode ?? "wheel";
     cardWheelModeGroup
       ?.querySelectorAll("[data-card-preview-wheel-mode-value]")
       .forEach((button) => {
-        const on = button.dataset.cardPreviewWheelModeValue === cardWheelMode;
+        const on = button.dataset.cardPreviewWheelModeValue === shown;
         button.classList.toggle("is-active", on);
         button.setAttribute("aria-checked", String(on));
       });
@@ -9783,6 +9789,9 @@
       ?.classList.toggle("is-locked", !parentOn);
     // ⚠ 활성 지연은 '휠' 방식에서만 쓰인다. 우클릭+휠은 의도가 분명해 지연을
     //   두지 않고, 사용 안 함이면 휠 자체를 안 가로챈다 → 그때는 잠근다.
+    // ⚠ 방식을 아직 못 읽었으면(null) 잠금을 손대지 않는다. 여러 로드가 동시에
+    //   끝나는 순서에 따라 기본값으로 계산해 잠금이 풀려 버린다.
+    if (cardWheelMode === null) return;
     const delayUsed = parentOn && cardWheelMode === "wheel";
     if (cardWheelDelayInput) cardWheelDelayInput.disabled = !delayUsed;
     cardWheelDelayInput
@@ -9798,7 +9807,10 @@
       ]);
       v = clampCardWheelDelay(d?.[CARD_PREVIEW_WHEEL_DELAY_KEY] ?? 1);
       cardWheelMode = normalizeCardWheelMode(d?.[CARD_PREVIEW_WHEEL_MODE_KEY]);
-    } catch {}
+    } catch {
+      // 못 읽었어도 null 로 두면 잠금 계산이 영영 멈춘다 → 기본값으로 확정한다.
+      cardWheelMode = "wheel";
+    }
     if (cardWheelDelayInput) cardWheelDelayInput.value = String(v);
     reflectCardWheelMode();
   }
@@ -9814,6 +9826,12 @@
     cardWheelDelayInput.addEventListener("blur", saveDelay);
   }
 
+  // ⚠ settingsUi 의 applyLocks 도 이 행의 is-locked 를 건드린다(부모 기준). 그쪽은
+  //   root 의 change 리스너라 여기보다 늦게 돌아 방식 기준 잠금을 지워 버린다.
+  //   그래서 그 뒤에 한 번 더 우리 기준으로 맞춘다(제보: 다시 열면 잠금이 풀림).
+  cardPreviewAudioInput?.addEventListener("change", () => {
+    queueMicrotask(reflectCardPreviewAudioChildrenEnabled);
+  });
   cardPreviewAudioInput?.addEventListener("change", () => {
     try {
       cachedStorageSet({

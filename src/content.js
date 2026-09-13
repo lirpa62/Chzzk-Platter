@@ -702,8 +702,7 @@
   let screenshotDirectSave = true;
   const MIXER_GLOBAL_DEFAULT_MODE_KEY = "cheeseMixerGlobalDefaultMode";
   let mixerGlobalDefaultMode = "global"; // 전역 기본값 재방문 동작(global | channel)
-  const MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY =
-    "cheeseMixerGlobalGainDefaultMode";
+  const MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY = "cheeseMixerGlobalGainDefaultMode";
   let mixerGlobalGainDefaultMode = "global"; // 전역 게인 재방문 동작(global | channel)
   const VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY =
     "cheeseVideoFilterGlobalDefaultMode";
@@ -6980,9 +6979,7 @@
       controls.insertBefore(status, clipButton || controls.firstChild);
     }
     const normalized = Math.max(0, Math.min(1, Number(progress) || 0));
-    const percent = complete
-      ? 100
-      : Math.min(99, Math.floor(normalized * 100));
+    const percent = complete ? 100 : Math.min(99, Math.floor(normalized * 100));
     const label = complete
       ? "방송 제목 변경 확인 완료"
       : `방송 제목 변경 확인 ${percent}%`;
@@ -7219,12 +7216,11 @@
     const seconds = parseClockToSeconds(baseText);
     if (!Number.isFinite(seconds)) return;
     const showRealtime = !featureFlags.seekPreviewRealtime;
-    const broadcastTitle = vodTitleChangesOn
-      ? vodTitleAtOffset(seconds)
-      : "";
-    const label = showRealtime && seekPreviewState.liveOpenAt
-      ? formatBroadcastClock(seekPreviewState.liveOpenAt, seconds)
-      : "";
+    const broadcastTitle = vodTitleChangesOn ? vodTitleAtOffset(seconds) : "";
+    const label =
+      showRealtime && seekPreviewState.liveOpenAt
+        ? formatBroadcastClock(seekPreviewState.liveOpenAt, seconds)
+        : "";
     if (!label && !broadcastTitle) {
       existing?.remove();
       return;
@@ -8169,7 +8165,8 @@
     ensureLogPowerBadge();
     // 2) 캐시 기반 값(실패해도 직전 캐시 유지).
     const amount = await fetchLogPowerBalanceCached(channelId);
-    if (!featureFlags.chatLogPower || channelId !== getCurrentLiveChannelId()) return;
+    if (!featureFlags.chatLogPower || channelId !== getCurrentLiveChannelId())
+      return;
     // 3) 값이 있을 때만 텍스트 갱신(con-chzzk: amt != null).
     if (amount != null) {
       renderLogPowerBadge(amount);
@@ -8438,7 +8435,12 @@
         donateDailyCap: capOf("DONATE"),
         giftDailyCap: capOf("SUBSCRIPTION_GIFT"),
       };
-      mapSetCapped(logPowerUnitCache, channelId, units, LOGPOWER_CACHE_CHANNEL_LIMIT);
+      mapSetCapped(
+        logPowerUnitCache,
+        channelId,
+        units,
+        LOGPOWER_CACHE_CHANNEL_LIMIT,
+      );
       return units;
     } catch {
       return null;
@@ -8514,7 +8516,12 @@
 
   // 보상 팝업이 떠 있는 동안 채팅 너비 리사이저의 클릭 가로채기를 끈다(<html> 클래스).
   function setChatResizerClickThrough(on) {
-    if (document.documentElement.classList.contains("cheese-chat-reward-popup-open") === !!on) return;
+    if (
+      document.documentElement.classList.contains(
+        "cheese-chat-reward-popup-open",
+      ) === !!on
+    )
+      return;
     document.documentElement.classList.toggle(
       "cheese-chat-reward-popup-open",
       !!on,
@@ -8522,17 +8529,22 @@
   }
 
   function canClaimLogPower(channelId) {
-    return !!channelId && featureFlags.chatLogPowerAuto &&
+    return (
+      !!channelId &&
+      featureFlags.chatLogPowerAuto &&
       channelId === getLogPowerChannelId() &&
-      !(getCurrentLiveChannelId() && isRadioModeActive());
+      !(getCurrentLiveChannelId() && isRadioModeActive())
+    );
   }
 
   function claimLogPowerForCurrentChannel() {
     const channelId = getLogPowerChannelId();
     if (!canClaimLogPower(channelId)) return Promise.resolve();
-    if (logPowerClaimRequests.has(channelId)) return logPowerClaimRequests.get(channelId);
+    if (logPowerClaimRequests.has(channelId))
+      return logPowerClaimRequests.get(channelId);
     const generation = logPowerClaimGeneration;
-    const isCurrent = () => generation === logPowerClaimGeneration && canClaimLogPower(channelId);
+    const isCurrent = () =>
+      generation === logPowerClaimGeneration && canClaimLogPower(channelId);
     const request = collectLogPowerClaims(channelId, isCurrent)
       .catch(() => {})
       .finally(() => logPowerClaimRequests.delete(channelId));
@@ -8550,7 +8562,12 @@
     if (!seen) {
       seen = new Set();
     }
-    mapSetCapped(logPowerSeenClaims, channelId, seen, LOGPOWER_CACHE_CHANNEL_LIMIT);
+    mapSetCapped(
+      logPowerSeenClaims,
+      channelId,
+      seen,
+      LOGPOWER_CACHE_CHANNEL_LIMIT,
+    );
     const eligible = claims.filter(
       (c) =>
         c?.claimId &&
@@ -8573,10 +8590,12 @@
       // 오류)면 기록해 더 안 시도한다. 408/429/5xx/네트워크(status 0)는 일시 오류로 보고 기록하지
       // 않아 다음 폴링에서 재시도한다. (예전엔 성공/실패 무관 미리 기록해, 한 번 실패한
       // claim이 seen에 박혀 '배달 완료' 팝업이 계속 떠도 자동 획득이 안 되던 문제가 있었다.)
-      const permanent = status >= 400 && status < 500 && status !== 408 && status !== 429;
+      const permanent =
+        status >= 400 && status < 500 && status !== 408 && status !== 429;
       if (ok || permanent) {
         seen.add(c.claimId);
-        while (seen.size > LOGPOWER_SEEN_CLAIM_LIMIT) seen.delete(seen.values().next().value);
+        while (seen.size > LOGPOWER_SEEN_CLAIM_LIMIT)
+          seen.delete(seen.values().next().value);
       }
       if (ok) {
         gained += Number(c.amount) || 0;
@@ -9025,7 +9044,8 @@
     const timeEl = badge?.querySelector(".cheese-logpower-time");
     if (timeEl && timeEl.textContent !== timeStr) timeEl.textContent = timeStr;
     const tipTimeEl = badge?.querySelector(".cheese-logpower-tip-time");
-    if (tipTimeEl && tipTimeEl.textContent !== timeStr) tipTimeEl.textContent = timeStr;
+    if (tipTimeEl && tipTimeEl.textContent !== timeStr)
+      tipTimeEl.textContent = timeStr;
     updateLogPowerIndicators();
     // 1시간 타이머가 도는 동안 1분마다 라이브 종료를 확인한다(5분 적립 체크보다 빠른
     // 감지). 종료면 적립·타이머 모두 정리. 탭이 숨김이면 건너뛴다.
@@ -9628,7 +9648,9 @@
     stopCommentTimestampPanelTimeTracker();
     stopCommentTimestampPanelAnchorMonitor();
     document
-      .querySelector(`.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`)
+      .querySelector(
+        `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`,
+      )
       ?.remove();
     document
       .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
@@ -10350,9 +10372,8 @@
       donation: 0,
       subscription: 0,
     }));
-    const chatAnalysis = CHAT_ACTIVITY_ANALYSIS_API?.createAccumulator(
-      CHAT_GRAPH_BINS,
-    );
+    const chatAnalysis =
+      CHAT_ACTIVITY_ANALYSIS_API?.createAccumulator(CHAT_GRAPH_BINS);
     const titleChangeTracker =
       CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     const totalMs = duration * 1000;
@@ -10377,10 +10398,7 @@
       }
       // ⚠ 영상을 옮기면 즉시 멈춘다. 안 그러면 보이지도 않는 영상의 채팅을
       //   최대 1500회까지 계속 받는다(긴 방송은 80초 넘게).
-      if (
-        vodChatScanCoordinator.cancel ||
-        getCurrentVideoNo() !== videoNo
-      ) {
+      if (vodChatScanCoordinator.cancel || getCurrentVideoNo() !== videoNo) {
         break;
       }
       const list = Array.isArray(content?.videoChats)
@@ -10441,10 +10459,14 @@
     // 플레이어가 마지막 TF-IDF 정렬 때문에 오래 멈추지 않게 한다.
     const analysis =
       complete && chatAnalysis
-        ? await CHAT_ACTIVITY_ANALYSIS_API.finalizeAccumulatorAsync(chatAnalysis, {
-            shouldCancel: () =>
-              vodChatScanCoordinator.cancel || getCurrentVideoNo() !== videoNo,
-          })
+        ? await CHAT_ACTIVITY_ANALYSIS_API.finalizeAccumulatorAsync(
+            chatAnalysis,
+            {
+              shouldCancel: () =>
+                vodChatScanCoordinator.cancel ||
+                getCurrentVideoNo() !== videoNo,
+            },
+          )
         : null;
     const analysisCancelled = complete && chatAnalysis && !analysis;
     return {
@@ -10646,10 +10668,14 @@
     try {
       let cached = await loadChatGraphCache(videoNo);
       if (!cached || !titleChangeRecord.complete) {
-        const result = await collectVodChatDataShared(videoNo, duration, (p) => {
-          chatGraphState.progress = p;
-          updateChatGraphButton(document.querySelector(btnSel));
-        });
+        const result = await collectVodChatDataShared(
+          videoNo,
+          duration,
+          (p) => {
+            chatGraphState.progress = p;
+            updateChatGraphButton(document.querySelector(btnSel));
+          },
+        );
         // 중단된 결과는 뒷부분이 비어 있다 → 캐시하면 다음에도 반쪽이 뜬다.
         if (!result?.complete || chatGraphState.cancel) {
           chatGraphState.bins = null;
@@ -10774,7 +10800,13 @@
     };
   }
 
-  function renderChatTextInsightItems(rows, minCount, limit, emojiUrls, phrase) {
+  function renderChatTextInsightItems(
+    rows,
+    minCount,
+    limit,
+    emojiUrls,
+    phrase,
+  ) {
     return (rows || [])
       .filter((row) => (Number(row?.count) || 0) >= minCount)
       .slice(0, limit)
@@ -10796,8 +10828,7 @@
   function renderChatEmoticonInsightItems(rows, emojiUrls) {
     return (rows || [])
       .filter(
-        (row) =>
-          (Number(row?.count) || 0) >= CHAT_PEAK_MIN_EMOTICON_COUNT,
+        (row) => (Number(row?.count) || 0) >= CHAT_PEAK_MIN_EMOTICON_COUNT,
       )
       .slice(0, CHAT_PEAK_TOP_EMOJIS)
       .map((row) => {
@@ -10806,9 +10837,9 @@
         const url = row?.imageUrl || emojiUrls?.[key];
         return url
           ? `<span class="cheese-peak-emoji">` +
-            `<img src="${escapeAttribute(url)}" alt="${escapeAttribute(row?.name || key)}" loading="lazy"><b>${Number(row.count).toLocaleString()}</b></span>`
+              `<img src="${escapeAttribute(url)}" alt="${escapeAttribute(row?.name || key)}" loading="lazy"><b>${Number(row.count).toLocaleString()}</b></span>`
           : `<span class="cheese-peak-emoji">` +
-            `${escapeHtml(row?.name || key)}<b>${Number(row.count).toLocaleString()}</b></span>`;
+              `${escapeHtml(row?.name || key)}<b>${Number(row.count).toLocaleString()}</b></span>`;
       })
       .join("");
   }
@@ -10976,7 +11007,9 @@
           const text = `중단 (${Math.round(p * 100)}%)`;
           button.setAttribute("aria-label", text);
           button.title = text;
-          const slot = button.querySelector(".cheese-recap-role-collect-progress");
+          const slot = button.querySelector(
+            ".cheese-recap-role-collect-progress",
+          );
           if (slot) slot.textContent = `${Math.round(p * 100)}%`;
         }
         const status = document.querySelector(
@@ -11052,7 +11085,14 @@
     return `<div class="cheese-peak-section cheese-peak-role"><ul>${items}</ul></div>`;
   }
 
-  function renderChatPeakSection(title, field, bins, peaks, emojiUrls, duration) {
+  function renderChatPeakSection(
+    title,
+    field,
+    bins,
+    peaks,
+    emojiUrls,
+    duration,
+  ) {
     const picked = pickChatPeaks(bins, field, CHAT_PEAK_TOP_BINS);
     if (!picked.length) {
       return (
@@ -11068,7 +11108,8 @@
           `<li><button type="button" data-peak-seek="${range.start}">` +
           `<time>${escapeHtml(formatSeconds(range.start))} ~ ${escapeHtml(formatSeconds(range.end))}</time>` +
           `<small>채팅 ${row.value.toLocaleString()}개</small></button>` +
-          (items || `<p class="cheese-peak-none">분석할 일반 채팅이 부족합니다.</p>`) +
+          (items ||
+            `<p class="cheese-peak-none">분석할 일반 채팅이 부족합니다.</p>`) +
           `</li>`
         );
       })
@@ -11086,9 +11127,7 @@
     const videoNo = getCurrentVideoNo();
     if (!videoNo || chatGraphState.loading) return;
     try {
-      await chrome.storage.local.remove(
-        `${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`,
-      );
+      await chrome.storage.local.remove(`${CHAT_GRAPH_CACHE_PREFIX}${videoNo}`);
     } catch {
       // 캐시를 못 지워도 아래에서 새로 모으면 덮어쓴다.
     }
@@ -12416,8 +12455,11 @@
     button.setAttribute("aria-label", label);
     button.title = label;
     button.classList.toggle("is-loading", roleChatState.loading);
-    const progress = button.querySelector(".cheese-recap-role-collect-progress");
-    if (progress) progress.textContent = roleChatState.loading ? `${percent}%` : "";
+    const progress = button.querySelector(
+      ".cheese-recap-role-collect-progress",
+    );
+    if (progress)
+      progress.textContent = roleChatState.loading ? `${percent}%` : "";
   }
 
   // 패널 본문을 다시 그린다(머리글은 남긴다).
@@ -18799,19 +18841,25 @@
   let fillScreenStyledElSnapshot = null;
   let fillScreenStyledContentsSnapshot = null;
   let fillScreenModeTransitionUntil = 0;
-  let fillScreenTopReferenceBox = null;
+  let fillScreenTopReferenceKey = "";
   let fillScreenTopReference = null;
   let fillScreenHeaderTransitionUntil = 0;
   let fillScreenHeaderSettleTimer = 0;
 
   function clearFillScreenTopReference() {
-    fillScreenTopReferenceBox = null;
+    fillScreenTopReferenceKey = "";
     fillScreenTopReference = null;
     fillScreenHeaderTransitionUntil = 0;
     if (fillScreenHeaderSettleTimer) {
       clearTimeout(fillScreenHeaderSettleTimer);
       fillScreenHeaderSettleTimer = 0;
     }
+  }
+
+  function getFillScreenTopReferenceKey(videoBox) {
+    const pathname = globalThis.location?.pathname || "";
+    const boxId = videoBox?.id || "player";
+    return `${pathname}|${boxId}`;
   }
 
   // 헤더 자동 숨김의 표시 전환 직전에 영상 상단 좌표를 고정한다. 헤더가 나타나는 동안
@@ -18822,9 +18870,11 @@
     const target = getFillScreenTarget();
     const box = target?.box instanceof HTMLElement ? target.box : target?.el;
     if (!(box instanceof HTMLElement)) return;
-    if (fillScreenTopReferenceBox !== box) {
-      fillScreenTopReferenceBox = box;
-      fillScreenTopReference = null;
+    const measured = Math.max(0, box.getBoundingClientRect().top);
+    const referenceKey = getFillScreenTopReferenceKey(box);
+    if (fillScreenTopReferenceKey !== referenceKey) {
+      fillScreenTopReferenceKey = referenceKey;
+      fillScreenTopReference = measured;
     }
     // 전환이 끝나기 전에 빠르게 다시 표시되면 현재 좌표는 애니메이션 중간값이다.
     // 그때는 기존 기준을 덮어쓰지 않고, 완전히 숨겨진 상태에서 시작할 때만 갱신한다.
@@ -18832,7 +18882,7 @@
       (show && Date.now() >= fillScreenHeaderTransitionUntil) ||
       !Number.isFinite(fillScreenTopReference)
     ) {
-      fillScreenTopReference = Math.max(0, box.getBoundingClientRect().top);
+      fillScreenTopReference = measured;
     }
     fillScreenHeaderTransitionUntil =
       Date.now() + HEADER_PEEK_TRANSITION_MS + 50;
@@ -18850,22 +18900,21 @@
 
   function getStableFillScreenTop(videoBox) {
     const measured = Math.max(0, videoBox.getBoundingClientRect().top);
+    const referenceKey = getFillScreenTopReferenceKey(videoBox);
     if (!featureFlags.headerAutoHide) {
-      fillScreenTopReferenceBox = videoBox;
+      fillScreenTopReferenceKey = referenceKey;
       fillScreenTopReference = measured;
       return measured;
     }
-    if (fillScreenTopReferenceBox !== videoBox) {
-      fillScreenTopReferenceBox = videoBox;
+    if (fillScreenTopReferenceKey !== referenceKey) {
+      fillScreenTopReferenceKey = referenceKey;
       fillScreenTopReference = measured;
     }
-    const peeking = document.querySelector(
-      "header#header.cheese-header-peek",
+    const peeking = Boolean(
+      (typeof headerPeekShown !== "undefined" && headerPeekShown) ||
+      document.querySelector("header#header.cheese-header-peek"),
     );
-    if (
-      !(peeking instanceof HTMLElement) &&
-      Date.now() >= fillScreenHeaderTransitionUntil
-    ) {
+    if (!peeking && Date.now() >= fillScreenHeaderTransitionUntil) {
       fillScreenTopReference = measured;
     }
     return Number.isFinite(fillScreenTopReference)
@@ -21285,11 +21334,8 @@ header#header :has(> form[role="search"])::before { width: 0 !important; }`,
         `header#header :has(> nav[aria-label="주제 탭"]) > :not(#${HEADER_FOLLOW_CONTAINER_ID}) { display: none !important; }`,
       );
     }
-    // 헤더 자동 숨김 — 평소엔 헤더를 흐름에서 빼서(position:absolute) 그 60px 높이를
-    // 아래 콘텐츠가 회수하게 하고, 위로 밀어 올려(translateY -100%) 화면 밖으로 숨긴다.
-    // JS가 상단 호버존 감지 시 cheese-header-peek를 붙이면 sticky로 복귀해 다시 60px를
-    // 차지하며 슬라이드로 나타난다. 사이드바(fixed)는 흐름과 무관해 그대로 상단 공간 사용.
-    // transition으로 슬라이드 + 콘텐츠 자리 이동을 부드럽게. !important로 치지직 sticky를 이김.
+    // 헤더 자동 숨김은 fixed 오버레이로 처리해 표시 여부가 콘텐츠 흐름에 영향을 주지 않는다.
+    // JS는 cheese-header-peek 클래스만 전환하며, 플레이어 높이와 상단 위치는 그대로 유지된다.
     if (featureFlags.headerAutoHide) {
       // ── 오버레이 방식 ──────────────────────────────────────────────────────
       // peek(헤더 표시/숨김)할 때 콘텐츠/사이드바를 밀지 않는다 → 레이아웃 변화 0
@@ -21420,9 +21466,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const on = featureFlags.sidebarPush && !featureFlags.sidebar && !!sidebar;
     const expanded = on && isSidebarExpanded(sidebar);
     // 좌표 읽기를 스타일 쓰기보다 먼저 모아 같은 패스 안의 강제 재측정을 피한다.
-    const measuredWidth = sidebarRightVisible || expanded
-      ? Math.round(sidebar.getBoundingClientRect().width)
-      : 0;
+    const measuredWidth =
+      sidebarRightVisible || expanded
+        ? Math.round(sidebar.getBoundingClientRect().width)
+        : 0;
     if (sidebarRightVisible) {
       const width = measuredWidth > 0 ? measuredWidth : 80;
       const value = `${width}px`;
@@ -21594,7 +21641,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (
       target instanceof Element &&
       target.closest("aside#sidebar, aside#aside-chatting, aside#vod-aside")
-    ) return;
+    )
+      return;
     // rAF로 합쳐 과도한 변수 갱신/스래싱 방지(멱등 비교).
     if (headerScrollRaf) return;
     headerScrollRaf = requestAnimationFrame(updateStickyShift);
@@ -21682,8 +21730,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     header.addEventListener("focusin", onHeaderAreaEnter);
     header.addEventListener("focusout", onHeaderAreaLeave);
     headerAutoHideBoundEl = header;
-    // 새 요소엔 peek 클래스가 없으니 캐시를 실제 상태(숨김)로 맞춘다(멱등 토글 동기화).
-    headerPeekShown = header.classList.contains(HEADER_PEEK_CLASS);
+    // SPA 렌더링으로 헤더 요소가 교체돼도 진행 중인 표시 상태를 새 요소에 이어 붙인다.
+    header.classList.toggle(HEADER_PEEK_CLASS, headerPeekShown);
   }
 
   // 사이드바 메뉴 항목/섹션에 숨김 마커 클래스를 부여/제거한다. 클래스 해시는
@@ -21823,10 +21871,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const blindText = Array.from(nav.querySelectorAll(".blind"))
       .map((el) => el.textContent || "")
       .join(" ");
-    return (ariaLabel + " " + titleText + " " + blindText).replace(
-      /\s+/g,
-      "",
-    );
+    return (ariaLabel + " " + titleText + " " + blindText).replace(/\s+/g, "");
   }
 
   function findSidebarFollowNav() {
@@ -24078,8 +24123,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const studioAnchor = header.querySelector(
       'a[href*="studio.chzzk.naver.com"]',
     );
-    const studioBox =
-      studioAnchor?.closest('[class*="_box_"]') || studioAnchor;
+    const studioBox = studioAnchor?.closest('[class*="_box_"]') || studioAnchor;
     const actionHost =
       container?.closest('[class*="_section_"]') ||
       studioBox?.parentElement ||
@@ -26702,7 +26746,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (out.length >= poolMax) break;
       const res = await fetch(
         `https://api.chzzk.naver.com/service/v1/search/videos?keyword=${encodeURIComponent(keyword)}&offset=${page * 50}&size=50`,
-        { credentials: "include", headers: { accept: "application/json" }, signal },
+        {
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal,
+        },
       );
       if (!res.ok) break;
       const json = await res.json();
@@ -26797,7 +26845,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function sortedSearchRerankItems() {
     const cached = searchRerankState.sortedCache;
-    if (cached?.source === searchRerankState.items && cached.sort === searchRerankState.sort) {
+    if (
+      cached?.source === searchRerankState.items &&
+      cached.sort === searchRerankState.sort
+    ) {
       return cached.items;
     }
     const items = searchRerankState.items.slice();
@@ -26817,7 +26868,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     } else {
       items.sort((a, b) => b.__score - a.__score);
     }
-    searchRerankState.sortedCache = { source: searchRerankState.items, sort: s, items };
+    searchRerankState.sortedCache = {
+      source: searchRerankState.items,
+      sort: s,
+      items,
+    };
     return items;
   }
 
@@ -27281,10 +27336,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 피커 라벨/선택 표시를 현재 정렬 값으로 동기화.
   function setSearchRerankMoreLabel(button, label) {
-    const textNodes = [...button.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE);
+    const textNodes = [...button.childNodes].filter(
+      (node) => node.nodeType === Node.TEXT_NODE,
+    );
     if (textNodes.length === 1 && textNodes[0].textContent === label) return;
     textNodes.forEach((node) => node.remove());
-    button.insertBefore(document.createTextNode(label), button.querySelector("svg"));
+    button.insertBefore(
+      document.createTextNode(label),
+      button.querySelector("svg"),
+    );
   }
 
   function updateSearchRerankPicker(bar) {
@@ -27295,7 +27355,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (label && label.textContent !== cur.label) label.textContent = cur.label;
     bar.querySelectorAll("[data-rerank-sort]").forEach((opt) => {
       const selected = String(opt.dataset.rerankSort === cur.value);
-      if (opt.getAttribute("aria-selected") !== selected) opt.setAttribute("aria-selected", selected);
+      if (opt.getAttribute("aria-selected") !== selected)
+        opt.setAttribute("aria-selected", selected);
     });
   }
 
@@ -28390,7 +28451,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (btn) {
         const collapsed = visible >= items.length; // 다 펼쳐진 상태
         const expanded = String(collapsed);
-        if (btn.getAttribute("aria-expanded") !== expanded) btn.setAttribute("aria-expanded", expanded);
+        if (btn.getAttribute("aria-expanded") !== expanded)
+          btn.setAttribute("aria-expanded", expanded);
         // 더보기 상태면 라벨 뒤(svg 앞)에 남은 개수를 함께 표시. 접기 상태는 '접기'만.
         const remaining = items.length - visible;
         const labelText = collapsed ? "접기" : `더보기 (${remaining}개)`;
@@ -28412,7 +28474,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const keyword = searchRerank ? getSearchRerankKeyword() : "";
     if (!keyword || !findSearchVideoSection()) {
       if (
-        searchRerankState.keyword || searchRerankState.controller ||
+        searchRerankState.keyword ||
+        searchRerankState.controller ||
         document.querySelector(".cheese-search-rerank-list") ||
         document.querySelector(`.${SEARCH_RERANK_HIDDEN_CLASS}`)
       ) {
@@ -28435,7 +28498,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     searchRerankState.controller = controller;
     fetchSearchRerankPool(keyword, controller.signal)
       .then((items) => {
-        if (controller.signal.aborted || searchRerankState.controller !== controller) return;
+        if (
+          controller.signal.aborted ||
+          searchRerankState.controller !== controller
+        )
+          return;
         searchRerankState.fetching = false;
         searchRerankState.fetchedFor = keyword; // 빈 결과도 완료로 기록해 반복 수집을 막는다.
         if (!items.length) return; // 결과 없음 → 네이티브 그대로
@@ -28449,7 +28516,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         renderSearchRerank();
       })
       .catch(() => {
-        if (controller.signal.aborted || searchRerankState.controller !== controller) return;
+        if (
+          controller.signal.aborted ||
+          searchRerankState.controller !== controller
+        )
+          return;
         searchRerankState.fetching = false;
         searchRerankState.fetchedFor = keyword; // 실패 시 원본을 유지하고 자동 재시도 폭주 방지
       });
@@ -28549,7 +28620,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       const response = await fetch(
         `https://api.chzzk.naver.com/service/v1/search/lives?keyword=${encodeURIComponent(keyword)}&offset=${offset}&size=${size}`,
-        { credentials: "include", headers: { accept: "application/json" }, signal },
+        {
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal,
+        },
       );
       if (!response.ok) break;
       const json = await response.json();
@@ -28620,7 +28695,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function sortedSearchLiveRerankItems() {
     const cached = searchLiveRerankState.sortedCache;
-    if (cached?.source === searchLiveRerankState.items && cached.sort === searchLiveRerankState.sort) {
+    if (
+      cached?.source === searchLiveRerankState.items &&
+      cached.sort === searchLiveRerankState.sort
+    ) {
       return cached.items;
     }
     const items = searchLiveRerankState.items.slice();
@@ -28643,7 +28721,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
     }
     searchLiveRerankState.sortedCache = {
-      source: searchLiveRerankState.items, sort: searchLiveRerankState.sort, items,
+      source: searchLiveRerankState.items,
+      sort: searchLiveRerankState.sort,
+      items,
     };
     return items;
   }
@@ -28819,10 +28899,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         (option) => option.value === searchLiveRerankState.sort,
       ) || SEARCH_LIVE_RERANK_SORTS[0];
     const label = bar.querySelector("[data-live-rerank-sort-label]");
-    if (label && label.textContent !== current.label) label.textContent = current.label;
+    if (label && label.textContent !== current.label)
+      label.textContent = current.label;
     bar.querySelectorAll("[data-live-rerank-sort]").forEach((option) => {
       const selected = String(option.dataset.liveRerankSort === current.value);
-      if (option.getAttribute("aria-selected") !== selected) option.setAttribute("aria-selected", selected);
+      if (option.getAttribute("aria-selected") !== selected)
+        option.setAttribute("aria-selected", selected);
     });
   }
 
@@ -28956,7 +29038,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (button) {
         const expanded = visible >= items.length;
         const expandedValue = String(expanded);
-        if (button.getAttribute("aria-expanded") !== expandedValue) button.setAttribute("aria-expanded", expandedValue);
+        if (button.getAttribute("aria-expanded") !== expandedValue)
+          button.setAttribute("aria-expanded", expandedValue);
         const label = expanded
           ? "접기"
           : `더보기 (${items.length - visible}개)`;
@@ -29004,7 +29087,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const section = findSearchLiveSection();
     if (!keyword || !section) {
       if (
-        searchLiveRerankState.keyword || searchLiveRerankState.controller ||
+        searchLiveRerankState.keyword ||
+        searchLiveRerankState.controller ||
         document.querySelector(".cheese-search-live-rerank-list") ||
         document.querySelector(`.${SEARCH_LIVE_RERANK_HIDDEN_CLASS}`)
       ) {
@@ -29035,7 +29119,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     searchLiveRerankState.controller = controller;
     fetchSearchLiveRerankPool(keyword, controller.signal)
       .then((items) => {
-        if (controller.signal.aborted || searchLiveRerankState.controller !== controller) return;
+        if (
+          controller.signal.aborted ||
+          searchLiveRerankState.controller !== controller
+        )
+          return;
         searchLiveRerankState.fetching = false;
         buildSearchLiveRerankScores(items, keyword);
         searchLiveRerankState.items = items;
@@ -29046,7 +29134,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (items.length) renderSearchLiveRerank();
       })
       .catch(() => {
-        if (!controller.signal.aborted && searchLiveRerankState.controller === controller) {
+        if (
+          !controller.signal.aborted &&
+          searchLiveRerankState.controller === controller
+        ) {
           searchLiveRerankState.fetching = false;
           searchLiveRerankState.fetchedFor = keyword;
         }
@@ -36485,7 +36576,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 매 호출마다 정렬하고 그룹을 만든 뒤에야 렌더 생략 여부를 확인했다.
     const sig =
       customFollowSig(customFollowItems.length, customFollowShown) +
-      ":" + (expandedNow || "") + ":" + (h ? 1 : 0);
+      ":" +
+      (expandedNow || "") +
+      ":" +
+      (h ? 1 : 0);
     if (ourNav.dataset.sig === sig) return;
     const visible = getCustomFollowVisibleItems();
     const autoExpand = isCustomFollowAutoExpandActive();
@@ -36532,20 +36626,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!visible.length) {
       ourNav.innerHTML =
         (groupsEnabled
-          ? renderCustomFollowGroups(
-              displayGroups,
-              h,
-              expandedNow,
-            )
+          ? renderCustomFollowGroups(displayGroups, h, expandedNow)
           : "") + `<div class="cheese-cf-empty">표시할 채널이 없습니다.</div>`;
       return;
     }
     const groupsHtml = groupsEnabled
-      ? renderCustomFollowGroups(
-          displayGroups,
-          h,
-          expandedNow,
-        )
+      ? renderCustomFollowGroups(displayGroups, h, expandedNow)
       : "";
     const favoritesHtml = favoritesEnabled
       ? renderCustomFollowChannelSection({
@@ -38394,7 +38480,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       if (!res.ok) return null;
       const json = await res.json();
-      if (controller.signal.aborted || followPreviewState.fetchController !== controller) return null;
+      if (
+        controller.signal.aborted ||
+        followPreviewState.fetchController !== controller
+      )
+        return null;
       const c = json?.content;
       if (c?.status !== "OPEN") return null;
       const raw = c?.livePlaybackJson;
@@ -38766,7 +38856,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
   async function openFollowPreview(li, channelId, anchorKind = "following") {
     if ((!followPreviewOn && !cardLivePreviewOn) || document.hidden) return;
-    if (followPreviewNavigationPointer || Date.now() < followPreviewOpenSuppressUntil) return;
+    if (
+      followPreviewNavigationPointer ||
+      Date.now() < followPreviewOpenSuppressUntil
+    )
+      return;
     if (!li?.isConnected) return;
     const pathname = location.pathname;
     const session = ++followPreviewState.session;
@@ -39090,9 +39184,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   async function refreshFollowPreviewViewers(el, channelId) {
-    if (document.hidden || !el.isConnected ||
-        followPreviewState.currentChannelId !== channelId ||
-        followPreviewState.viewersController) return;
+    if (
+      document.hidden ||
+      !el.isConnected ||
+      followPreviewState.currentChannelId !== channelId ||
+      followPreviewState.viewersController
+    )
+      return;
     const session = followPreviewState.session;
     const controller = new AbortController();
     followPreviewState.viewersController = controller;
@@ -39100,11 +39198,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     try {
       const res = await fetch(
         `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
-        { credentials: "include", headers: { accept: "application/json" }, signal: controller.signal },
+        {
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        },
       );
       if (!res.ok) return;
       const json = await res.json();
-      if (controller.signal.aborted || followPreviewState.session !== session || !el.isConnected) return;
+      if (
+        controller.signal.aborted ||
+        followPreviewState.session !== session ||
+        !el.isConnected
+      )
+        return;
       const n = Number(json?.content?.concurrentUserCount);
       if (!Number.isFinite(n)) return;
       const formatted = new Intl.NumberFormat("ko-KR").format(n);
@@ -39200,9 +39307,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     followPreviewState.mediaVideo = video;
     const session = followPreviewState.session;
     const generation = followPreviewState.mediaGeneration;
-    const isSessionCurrent = () => el.isConnected &&
-      followPreviewState.session === session && followPreviewState.currentChannelId === channelId;
-    const isCurrent = () => isSessionCurrent() && followPreviewState.mediaGeneration === generation;
+    const isSessionCurrent = () =>
+      el.isConnected &&
+      followPreviewState.session === session &&
+      followPreviewState.currentChannelId === channelId;
+    const isCurrent = () =>
+      isSessionCurrent() && followPreviewState.mediaGeneration === generation;
     // HLS가 첫 프레임을 준비하는 동안 검은 배경 대신 API의 라이브 스냅샷을 보여준다.
     // poster는 loadeddata 이후 브라우저가 실제 영상 프레임으로 자연스럽게 교체한다.
     const poster = makeFreshFollowPreviewThumbUrl(thumb);
@@ -39278,7 +39388,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       followPreviewState.playbackCache.delete(channelId);
       void (async () => {
         const fresh = await fetchLivePreviewData(channelId);
-        if (!isSessionCurrent() || followPreviewState.mediaGeneration !== retryGeneration) return;
+        if (
+          !isSessionCurrent() ||
+          followPreviewState.mediaGeneration !== retryGeneration
+        )
+          return;
         if (fresh?.m3u8) {
           renderFollowPreviewMeta(el, fresh.meta);
           attachFollowPreviewSource(
@@ -39297,7 +39411,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     followPreviewState.mediaCleanup = () => {
       video.removeEventListener("loadeddata", onReady);
       video.removeEventListener("error", onError);
-      if (nativeJumpEdge) video.removeEventListener("loadeddata", nativeJumpEdge);
+      if (nativeJumpEdge)
+        video.removeEventListener("loadeddata", nativeJumpEdge);
     };
     video.addEventListener("loadeddata", onReady, { once: true });
     video.addEventListener("error", onError, { once: true });
@@ -39699,7 +39814,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     });
     // document 캡처의 채널 이동 핸들러가 전파를 중단하기 전에 정리한다.
     window.addEventListener("click", onFollowPreviewDocClick, true);
-    window.addEventListener("pointermove", onFollowPreviewNavigationPointerMove, { passive: true });
+    window.addEventListener(
+      "pointermove",
+      onFollowPreviewNavigationPointerMove,
+      { passive: true },
+    );
     window.addEventListener("popstate", syncFollowPreviewNavigation);
     // 사이드바 내부 스크롤은 버블하지 않으므로 capture 로 document 에서 감지한다.
     // 스크롤 중/직후엔 미리보기 오픈을 미룬다(onFollowPreviewMouseOver 참고).
@@ -39909,9 +40028,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 잘못 이탈한 것으로 보지 않고, 실제 카드 밖으로 나갔을 때만 음소거할 수 있다.
   function cardPreviewCardAtTarget(target) {
     const element = target instanceof Element ? target : target?.parentElement;
-    const item = element?.closest?.(
-      'li[class*="_item_"], li[data-nlog-area]',
-    );
+    const item = element?.closest?.('li[class*="_item_"], li[data-nlog-area]');
     if (
       item &&
       !item.closest(".pzp, #cheese-follow-preview") &&
@@ -39963,13 +40080,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const muted = Boolean(video.muted || video.volume === 0);
     // video.muted는 volume 값을 바꾸지 않으므로(대개 100 유지), 음소거 중에는
     // 슬라이더도 0으로 보여 실제 출력 상태와 UI가 어긋나지 않게 한다.
-    const volume = muted
-      ? 0
-      : Math.round((Number(video.volume) || 0) * 100);
+    const volume = muted ? 0 : Math.round((Number(video.volume) || 0) * 100);
     const button = control.querySelector("button");
     const slider = control.querySelector('input[type="range"]');
     if (button) {
-      const label = muted ? "카드 미리보기 음소거 해제" : "카드 미리보기 음소거";
+      const label = muted
+        ? "카드 미리보기 음소거 해제"
+        : "카드 미리보기 음소거";
       const mutedState = String(muted);
       if (button.dataset.muted !== mutedState) {
         button.dataset.muted = mutedState;
@@ -40009,9 +40126,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       bindCardPreviewVolumeVideo(current);
       return current;
     }
-    return cardPreviewVolumeVideo?.isConnected
-      ? cardPreviewVolumeVideo
-      : null;
+    return cardPreviewVolumeVideo?.isConnected ? cardPreviewVolumeVideo : null;
   }
 
   function setCardPreviewVolumeControlDismissed(dismissed) {
@@ -40044,9 +40159,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     cardPreviewVolumeAnchor?.classList.remove(
       "cheese-card-preview-volume-anchor",
     );
-    cardPreviewVolumeHost?.classList.remove(
-      "cheese-card-preview-volume-host",
-    );
+    cardPreviewVolumeHost?.classList.remove("cheese-card-preview-volume-host");
     cardPreviewVolumeControl = null;
     cardPreviewVolumeVideo = null;
     cardPreviewVolumeHost = null;
@@ -40096,9 +40209,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!anchor || !card.contains(anchor)) return;
     // 메인 히어로의 _player_는 캐러셀 렌더링 중 통째로 교체되므로 바깥쪽 hero
     // container에 둔다. 일반 카드는 player 안에 두어 컨트롤 이동 중 hover를 유지한다.
-    const heroHost = anchor.closest(
-      '[class*="_container_"][class*="_hero_"]',
-    );
+    const heroHost = anchor.closest('[class*="_container_"][class*="_hero_"]');
     const host = heroHost || video.closest('[class*="_player_"]') || anchor;
     if (
       cardPreviewVolumeControl?.isConnected &&
@@ -40197,11 +40308,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     cardPreviewVolumeAnchor = anchor;
     bindCardPreviewVolumeVideo(video);
     anchor.classList.add("cheese-card-preview-volume-anchor");
-    anchor.addEventListener(
-      "dragstart",
-      preventCardPreviewAnchorDrag,
-      true,
-    );
+    anchor.addEventListener("dragstart", preventCardPreviewAnchorDrag, true);
     if (getComputedStyle(host).position === "static") {
       host.classList.add("cheese-card-preview-volume-host");
     }
@@ -40314,12 +40421,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 조작 방식이 설정에 따라 달라지므로 문구도 함께 바꾼다(안내와 실제가 어긋나지 않게).
   function cardHintText() {
     if (cardPreviewWheelMode === "off") {
-      return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거";
+      return "음량 버튼/슬라이더 · 우클릭: 음소거";
     }
     if (cardPreviewWheelMode === "rightclick") {
-      return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 우클릭+휠: 음량";
+      return "음량 버튼/슬라이더 · 우클릭: 음소거 · 우클릭+휠: 음량";
     }
-    return "치지직 기본 미리보기 · 음량 버튼/슬라이더 · 우클릭: 음소거 · 휠: 음량";
+    return "음량 버튼/슬라이더 · 우클릭: 음소거 · 휠: 음량";
   }
   const CARD_HINT_SHOW_MS = 3000; // 표시 후 이 시간 뒤 사라짐
   // 스크롤 중엔 힌트를 숨기고, 스크롤이 멎은 뒤 이 시간이 지나야 다시 띄운다(스크롤 시
@@ -41274,7 +41381,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .filter(Boolean);
   }
 
-  async function fetchAllFollowings({ onFirstPage, shouldContinue = () => true } = {}) {
+  async function fetchAllFollowings({
+    onFirstPage,
+    shouldContinue = () => true,
+  } = {}) {
     const pageSize = 505;
     const fetchPage = async (page) => {
       const url = `${FOLLOW_CLEANUP_API_BASE}/service/v1/channels/followings?page=${page}&size=${pageSize}&sortType=FOLLOW`;
@@ -45288,7 +45398,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           queueMicrotask(ensureChatHistory);
           return;
         }
-        const changedRows = collectChangedChatHistoryRows(mutations, currentParent);
+        const changedRows = collectChangedChatHistoryRows(
+          mutations,
+          currentParent,
+        );
         scheduleChatHistoryCaptureSnapshot(currentParent, changedRows);
       });
       chatHistoryObserver.observe(list, {
@@ -53689,8 +53802,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 채널 저장값보다 우선 적용할 전역 기본 프리셋 설정.
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
   // 프리셋과 독립적으로 적용할 전역 마스터 게인 설정.
-  const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY =
-    "audioMixer:globalGainDefault";
+  const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY = "audioMixer:globalGainDefault";
   const AUDIO_MIXER_AUTO_SYNC_KEY = "cheeseAudioMixer.autoSync";
   // Firefox에서 연속 slider input의 storage.set 완료 순서가 뒤섞이지 않게 직렬화한다.
   // load는 앞서 받은 save가 모두 끝난 뒤 실행돼 채널 전환 직전 마지막 값이 보장된다.
@@ -53935,12 +54047,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const saveAs = data.forceSaveAs === true || !screenshotDirectSave;
     // MAIN → content 구간은 Blob으로 전달해 Base64 생성·복사·재디코딩을 피한다.
     // 이전 MAIN 스크립트와의 호환을 위해 dataURL 경로도 유지한다.
-    const blobURL = data.blob instanceof Blob && data.blob.type === "image/png"
-      ? URL.createObjectURL(data.blob)
-      : saveAs ? dataURLToBlobURL(data.dataURL) : null;
+    const blobURL =
+      data.blob instanceof Blob && data.blob.type === "image/png"
+        ? URL.createObjectURL(data.blob)
+        : saveAs
+          ? dataURLToBlobURL(data.dataURL)
+          : null;
     const url = blobURL || data.dataURL;
-    const revoke = () => { if (blobURL) URL.revokeObjectURL(blobURL); };
-    let cleanupTimer = blobURL ? setTimeout(revoke, saveAs ? 360000 : 80000) : 0;
+    const revoke = () => {
+      if (blobURL) URL.revokeObjectURL(blobURL);
+    };
+    let cleanupTimer = blobURL
+      ? setTimeout(revoke, saveAs ? 360000 : 80000)
+      : 0;
     const replyAndCleanup = (payload) => {
       if (blobURL) {
         clearTimeout(cleanupTimer);
