@@ -16045,10 +16045,15 @@ img.cheese-peak-role-badge {
   border-radius: 8px;
   padding: 10px;
 }
+/* ⚠ --cheese-platter-content-neutral-tertiary 는 이 파일에 정의돼 있지 않다.
+   그것만 쓰면 항상 폴백(흰색 반투명)이 적용돼, 라이트 모드에서 대비가 1.06:1 로
+   배경과 전혀 구분되지 않았다. 다른 규칙과 같이 치지직 실제 토큰을 먼저 쓰고,
+   폴백은 양쪽 테마에서 모두 읽히는 값으로 둔다
+   (실측: #7f868e → 다크 3.83:1 / 라이트 3.30:1, 둘 다 3:1 이상). */
 .cheese-cf-square-picked-empty {
   color: var(
-    --cheese-platter-content-neutral-tertiary,
-    rgba(255, 255, 255, 0.5)
+    --sem-color-content-neutral-tertiary,
+    var(--cheese-platter-content-neutral-tertiary, #7f868e)
   );
   font-size: 12px;
   margin: 0;
@@ -16064,7 +16069,7 @@ img.cheese-peak-role-badge {
   flex-wrap: wrap;
   gap: 6px;
 }
-/* 칩: 누르면 바로 빠진다. */
+/* 칩: 누르면 채널 목록에서 그 채널 위치로 이동한다(빼기는 행의 영역 칩에서). */
 .cheese-cf-square-chip {
   align-items: center;
   background: rgba(127, 127, 127, 0.16);
@@ -16107,6 +16112,27 @@ img.cheese-peak-role-badge {
   cursor: default;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
+}
+/* 고른 채널 칩으로 이동했을 때 어디로 갔는지 잠깐 강조한다.
+   ⚠ 움직임 최소화 설정을 켠 사용자에게는 깜빡임 대신 정지된 강조만 남긴다. */
+.cheese-cf-square-row.is-jump-target {
+  animation: cheese-cf-square-jump 1.2s ease-out;
+  border-radius: 8px;
+}
+@keyframes cheese-cf-square-jump {
+  0%,
+  60% {
+    background: var(--sem-color-surface-brand-weak, rgba(0, 255, 163, 0.22));
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cheese-cf-square-row.is-jump-target {
+    animation: none;
+    background: var(--sem-color-surface-brand-weak, rgba(0, 255, 163, 0.22));
+  }
 }
 /* 프로필 위, 채널명 아래 */
 .cheese-cf-square-who {

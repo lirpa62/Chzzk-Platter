@@ -34339,6 +34339,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
     "eye-off":
       '<path d="m2 2 20 20"/><path d="M6.71 6.71C4.07 8.1 2.5 10.5 2 12c1.5 4.5 5 7 10 7 1.7 0 3.18-.3 4.46-.83"/><path d="M10.73 5.08A10.8 10.8 0 0 1 12 5c5 0 8.5 2.5 10 7a11.6 11.6 0 0 1-1.12 2.18"/><path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"/>',
+    // lucide locate-fixed — 고른 채널 칩에서 '그 채널 위치로 이동'.
+    "locate-fixed":
+      '<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>',
   });
 
   function customFollowLucideIcon(icon, size = 17, className = "") {
@@ -35696,12 +35699,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             ? `<img src="${escapeAttribute(item.imageUrl)}" alt="" width="22" height="22" draggable="false">`
             : '<span class="cheese-cf-group-modal-profile-empty" aria-hidden="true"></span>';
           return (
-            `<button type="button" class="cheese-cf-square-chip" data-cf-square-remove="${escapeAttribute(item.channelId)}" ` +
-            `title="${escapeAttribute(item.name)} 빼기" aria-label="${escapeAttribute(item.name)} 빼기">` +
+            `<button type="button" class="cheese-cf-square-chip" data-cf-square-jump="${escapeAttribute(item.channelId)}" ` +
+            `title="${escapeAttribute(item.name)} 위치로 이동" aria-label="${escapeAttribute(item.name)} 위치로 이동">` +
             `<span class="cheese-cf-square-chip-profile">${image}</span>` +
             `<span class="cheese-cf-square-chip-name">${escapeHtml(item.name)}</span>` +
             `<small class="cheese-cf-square-chip-scopes">${escapeHtml(scopeLabels)}</small>` +
-            `${customFollowLucideIcon("x", 13)}</button>`
+            `${customFollowLucideIcon("locate-fixed", 13)}</button>`
           );
         })
         .join("") +
@@ -35851,14 +35854,28 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         renderCustomFollowSquareModalPicked();
         const count = overlay.querySelector("[data-cf-square-count]");
         if (count) count.textContent = `${customFollowSquares.size}개 선택`;
-      } else if (button.matches("[data-cf-square-remove]")) {
-        const id = button.dataset.cfSquareRemove;
-        if (!customFollowSquares.delete(id)) return; // Map.delete 도 같은 방식
-        saveCustomFollowSquares();
-        customFollowVersion += 1;
-        ensureCustomFollowList();
-        renderCustomFollowSquareModalChannels();
-        renderCustomFollowSquareModalPicked();
+      } else if (button.matches("[data-cf-square-jump]")) {
+        // 칩은 '빼기'가 아니라 '그 채널 위치로 이동'이다. 빼기는 행의 영역 칩을
+        // 다시 눌러서 한다 — 칩을 잘못 눌러 설정이 통째로 사라지지 않게.
+        const id = button.dataset.cfSquareJump;
+        // ⚠ 검색 중이면 대상 행이 걸러져 있을 수 있다. 검색어를 비우고 다시 그린 뒤
+        //   찾아야 '눌렀는데 아무 일도 없다'가 되지 않는다.
+        if (customFollowSquareModalQuery) {
+          customFollowSquareModalQuery = "";
+          const search = overlay.querySelector("[data-cf-square-search]");
+          if (search) search.value = "";
+          renderCustomFollowSquareModalChannels();
+        }
+        const row = overlay.querySelector(
+          `[data-cf-square-row="${CSS.escape(id)}"]`,
+        );
+        if (!row) return;
+        row.scrollIntoView({ block: "center", behavior: "smooth" });
+        // 어디로 갔는지 눈에 띄게 잠깐 강조한다.
+        row.classList.remove("is-jump-target");
+        void row.offsetWidth; // 연속 클릭 시 애니메이션 재시작
+        row.classList.add("is-jump-target");
+        setTimeout(() => row.classList.remove("is-jump-target"), 1200);
       }
     });
     overlay.addEventListener("input", (event) => {
