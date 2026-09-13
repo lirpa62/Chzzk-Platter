@@ -38519,32 +38519,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       },
       true,
     );
-    const finish = () => {
+    // 지금 DOM 순서를 저장한다. dragover 가 이미 요소를 옮겨 놨으므로 읽기만 하면 된다.
+    // ⚠ 세 섹션(그룹·즐겨찾기·팔로잉)만 조합 키로 저장되고 친밀도는 자리만
+    //   저장된다. saveCustomFollowDisplayOrder 가 그 변환을 담당한다.
+    const commitSectionOrder = () => {
+      const nav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
+      if (!nav) return;
+      const order = [...nav.querySelectorAll("[data-cf-section-order]")]
+        .map((el) => el.dataset.cfSectionOrder)
+        .filter(Boolean);
+      if (order.length) saveCustomFollowDisplayOrder(order);
+    };
+    const finish = (commit) => {
       if (!draggedSectionEl) return;
       draggedSectionEl.classList.remove("is-section-dragging");
       draggedSectionEl = null;
       draggedSectionKey = "";
+      if (commit) {
+        commitSectionOrder();
+        ensureCustomFollowList();
+      }
     };
     document.addEventListener(
       "drop",
       (event) => {
         if (!draggedSectionEl?.isConnected) return;
         const nav = document.getElementById(CUSTOM_FOLLOW_NAV_ID);
-        if (!nav?.contains(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const order = [...nav.querySelectorAll("[data-cf-section-order]")]
-          .map((el) => el.dataset.cfSectionOrder)
-          .filter(Boolean);
-        finish();
-        // ⚠ 세 섹션(그룹·즐겨찾기·팔로잉)만 조합 키로 저장되고 친밀도는 자리만
-        //   저장된다. saveCustomFollowDisplayOrder 가 그 변환을 담당한다.
-        saveCustomFollowDisplayOrder(order);
-        ensureCustomFollowList();
+        if (nav?.contains(event.target)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        finish(true);
       },
       true,
     );
-    document.addEventListener("dragend", finish, true);
+    // ⚠ drop 이 항상 오지는 않는다. 편집 중에는 목록 본문을 감춰 빈 여백이 많아,
+    //   섹션 밖에 놓으면 drop 없이 dragend 만 온다. 그때 저장을 안 하면 화면은
+    //   새 순서인데 저장은 옛 순서로 남아, 다음 렌더에서 되돌아간다(제보).
+    document.addEventListener("dragend", () => finish(true), true);
 
     // 편집 중인 목록 밖을 누르면 편집을 끝낸다(완료 버튼을 못 찾아도 빠져나갈 수
     // 있게). ⚠ 순서 편집 버튼 자신과 목록 안(핸들·툴바)은 제외한다 — 그걸 누른
@@ -38623,7 +38635,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .forEach((b) => (b.dataset.cfNativeBtn = "1"));
     // 펼침 상태에서는 헤더 우측, 접힘 상태에서는 좁은 헤더 아래에 새로고침을 둔다.
     const collapsed = !isSidebarExpanded();
-    const sig = collapsed ? "1" : "0";
+    // ⚠ sig 에 편집 모드도 넣어야 한다. 접힘 여부만 보면 아래 '멱등' 분기에서
+    //   그대로 반환해, 편집을 켜고 꺼도 버튼이 예전 아이콘·라벨 그대로 남는다.
+    const sig =
+      (collapsed ? "1" : "0") + (customFollowSectionSorting ? "s" : "");
     // 부착 대상: 펼침이면 헤더(우측 인라인), 접힘이면 원본 nav 직접.
     // 헤더가 없는 접힘 DOM 에서도 nav 직속이라 그대로 동작한다.
     const parent = collapsed || !header ? origNav : header;
