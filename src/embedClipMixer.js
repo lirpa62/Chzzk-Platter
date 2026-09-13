@@ -31,7 +31,15 @@
   // — 라이브 믹서와 따로 정할 수 있다.
   const WHEEL_ACTION_KEY = "cheeseEmbedClipMixerWheelAction";
 
-  const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
+  // EQ 주파수 배치. 커스텀 프리셋은 저장될 때 자기가 어느 배치인지(eqType) 함께
+  // 기록하므로, 임베드에는 '전환' UI 가 필요 없다 — 고른 프리셋의 배치를 따라간다.
+  const EQ_BAND_SETS = {
+    chzzk: [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000],
+    iso: [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+  };
+  const EQ_BANDS = EQ_BAND_SETS.chzzk; // 내장 프리셋은 모두 기본 배치 기준이다.
+  // 라이브 믹서가 만든 커스텀 프리셋(모든 채널 공유 전역 키). 읽기만 한다.
+  const CUSTOM_PRESETS_KEY = "audioMixer:presets";
   const BUTTON_CLASS = "cheese-embed-clip-mixer-button";
   const ICON_CLASS = "cheese-embed-clip-mixer-button-icon";
   // ⚠ 네이티브 볼륨 컨트롤과 같은 클래스를 함께 달아 정렬/간격을 물려받는다.
@@ -39,6 +47,7 @@
   const CONTROL_CLASS = "cheese-embed-clip-mixer-control";
   const GAIN_SLIDER_CLASS = "cheese-embed-clip-mixer-gain";
   const GAIN_TOOLTIP_CLASS = "cheese-embed-clip-mixer-gain-tooltip";
+  const PANEL_CLASS = "cheese-embed-clip-mixer-panel";
   // pzp 는 컨트롤 바가 보이는 동안에만 이 클래스를 붙인다.
   const CONTROLS_CLASS = "pzp-pc--controls";
   const CONTROLS_SELECTOR = ".pzp-pc__bottom-buttons-right";
@@ -284,6 +293,10 @@
   // 설정(임베드 전용). 값은 applyStoredSettings 에서 채운다.
   let gainPctOn = true;
   let mixerWheelAction = "preset";
+  // 라이브 믹서에서 만든 커스텀 프리셋(읽기 전용). 패널에서 고르기만 한다.
+  let customPresets = [];
+  // 지금 울리고 있는 EQ 주파수 배치("chzzk" | "iso").
+  let activeEqType = "chzzk";
   let gainStep = 5; // %
   let gainMin = 0.5;
   let gainMax = 2;
@@ -388,12 +401,54 @@
     return Object.prototype.hasOwnProperty.call(PRESETS, key) ? key : "default";
   }
 
+  // 커스텀 프리셋은 "custom:<id>" 로 가리킨다(내장 키와 섞이지 않게).
+  const CUSTOM_PREFIX = "custom:";
+  // 라이브 믹서가 저장한 모양을 그대로 읽는다(쓰지는 않는다).
+  // ⚠ eqType 이 없던 시절 값은 모두 기본 배치였다 — 그렇게 취급한다.
+  function normalizeCustomPresets(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((preset) => {
+        if (!preset || typeof preset !== "object") return null;
+        const id = String(preset.id || "");
+        const name = String(preset.name || "").trim();
+        if (!id || !name) return null;
+        const snapshot = preset.snapshot || preset;
+        if (!Array.isArray(snapshot?.eq)) return null;
+        return {
+          id,
+          name,
+          eqType: preset.eqType === "iso" ? "iso" : "chzzk",
+          snapshot: cloneSnapshot(snapshot),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function customPresetById(id) {
+    return customPresets.find((preset) => preset.id === id) || null;
+  }
   function setPresetState(value) {
+    const raw = String(value || "");
+    if (raw.startsWith(CUSTOM_PREFIX)) {
+      const custom = customPresetById(raw.slice(CUSTOM_PREFIX.length));
+      // 고르고 나서 라이브 믹서에서 지웠을 수 있다. 그러면 내장 기본으로 떨어진다.
+      if (!custom) return setPresetState("default");
+      if (raw === selectedPresetKey) return false;
+      selectedPresetKey = raw;
+      presetLabel = custom.name;
+      presetSnapshot = cloneSnapshot(custom.snapshot);
+      activeEqType = custom.eqType === "iso" ? "iso" : "chzzk";
+      userGain = null;
+      return true;
+    }
     const key = normalizePresetKey(value);
     if (key === selectedPresetKey) return false;
     selectedPresetKey = key;
     presetLabel = PRESETS[key].label;
     presetSnapshot = cloneSnapshot(PRESETS[key]);
+    // 내장 프리셋 값은 모두 기본 배치에서 조율됐다.
+    activeEqType = "chzzk";
     // 일반 믹서와 마찬가지로 프리셋을 바꾸면 그 프리셋의 기본 게인부터 시작한다.
     userGain = null;
     return true;
@@ -404,6 +459,7 @@
     selectedPresetKey = key;
     presetLabel = PRESETS[key].label;
     presetSnapshot = cloneSnapshot(PRESETS[key]);
+    activeEqType = "chzzk"; // 기본값은 내장 프리셋이라 항상 기본 배치다.
     userGain =
       defaultGain === null
         ? null
@@ -414,8 +470,12 @@
     const changed = setPresetState(value);
     if (changed && enabled && audio.connected) applySnapshot();
     if (changed) updateButton();
+    // 휠로 바꿔도 열려 있는 패널의 체크 표시가 따라가야 한다.
+    if (changed && panel) renderPanel();
   }
 
+  // ⚠ 휠은 내장 프리셋만 순환한다. 커스텀까지 섞으면 목록이 사용자마다 달라져
+  //   몇 번 굴려야 할지 예측할 수 없다. 커스텀은 패널에서 고른다.
   function cyclePreset(direction) {
     const currentIndex = PRESET_ORDER.indexOf(selectedPresetKey);
     const baseIndex = currentIndex < 0 ? 0 : currentIndex;
@@ -436,6 +496,16 @@
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
     gainPctOn = data?.[GAIN_PCT_KEY] !== false; // 미설정=표시
     mixerWheelAction = data?.[WHEEL_ACTION_KEY] === "gain" ? "gain" : "preset";
+    customPresets = normalizeCustomPresets(data?.[CUSTOM_PRESETS_KEY]);
+    // 치지직 탭에서 커스텀을 추가·삭제하면 열려 있는 패널도 따라 갱신한다.
+    if (panel) renderPanel();
+    // 고른 커스텀이 라이브 믹서에서 지워졌으면 내장 기본으로 되돌린다.
+    if (
+      selectedPresetKey.startsWith(CUSTOM_PREFIX) &&
+      !customPresetById(selectedPresetKey.slice(CUSTOM_PREFIX.length))
+    ) {
+      setPresetState("default");
+    }
     gainStep = clampGainStep(data?.[GAIN_STEP_KEY]);
     gainMin = GAIN_MIN_ALLOWED.includes(Number(data?.[GAIN_MIN_KEY]))
       ? Number(data[GAIN_MIN_KEY])
@@ -485,6 +555,7 @@
         DEFAULT_PRESET_KEY,
         DEFAULT_GAIN_KEY,
         WHEEL_ACTION_KEY,
+        CUSTOM_PRESETS_KEY,
       ]);
       applyStoredSettings(data);
     } catch {
@@ -617,6 +688,7 @@
   }
 
   function removeButton() {
+    closePanel();
     // 컨트롤 바를 붙잡고 있었다면 반드시 놓아 준다(옵저버 누수 방지).
     keepControlsAlive(false);
     if (gainTooltipHideTimer) {
@@ -735,8 +807,18 @@
     if (!audio.connected) return;
 
     audio.masterGain.gain.value = currentGain();
+    // ⚠ 밴드 수는 같지만 배치가 다르면 같은 dB 값이 전혀 다른 소리가 된다.
+    //   게인만 바꾸면 ISO 커스텀이 기본 주파수에 걸려 엉뚱하게 울린다.
+    //   프리셋이 들고 온 배치로 주파수부터 맞춘 뒤 게인을 얹는다.
+    const bands = EQ_BAND_SETS[activeEqType] || EQ_BANDS;
     presetSnapshot.eq.forEach((gain, index) => {
-      if (audio.eqFilters[index]) audio.eqFilters[index].gain.value = gain;
+      const filter = audio.eqFilters[index];
+      if (!filter) return;
+      const frequency = bands[index];
+      if (Number.isFinite(frequency) && filter.frequency.value !== frequency) {
+        filter.frequency.value = frequency;
+      }
+      filter.gain.value = gain;
     });
 
     const comp = presetSnapshot.comp;
@@ -1101,6 +1183,116 @@
   // 네이티브 볼륨 슬라이더와 같은 마크업/클래스로 만든다. pzp 는 <input type=range>가
   // 아니라 div 구조에 --pzp-ui-progress__scale 변수로 채움을 그리므로, 그대로 흉내내야
   // 임베드 컨트롤 바에서 같은 모양이 된다.
+  // 커스텀 프리셋 이름은 사용자가 직접 입력한 값이라 그대로 넣으면 안 된다.
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/"/g, "&quot;");
+  }
+
+  // 우클릭으로 여는 프리셋 선택 패널.
+  // ⚠ 임베드는 외부 사이트의 작은 iframe 이라 라이브 믹서의 전체 패널(슬라이더
+  //   수십 개)을 띄울 공간이 없다. 여기서는 '고르기'만 한다 — 세부 조절은
+  //   치지직에서 커스텀 프리셋으로 만들어 두고 그걸 고르는 흐름이다.
+  let panel = null;
+
+  function closePanel() {
+    if (!panel) return;
+    panel.remove();
+    panel = null;
+    document.removeEventListener("pointerdown", onPanelOutside, true);
+    document.removeEventListener("keydown", onPanelKey, true);
+  }
+
+  function onPanelOutside(event) {
+    if (!panel) return;
+    if (panel.contains(event.target)) return;
+    // 버튼 자체는 토글이므로 여기서 닫지 않는다(중복 처리 방지).
+    if (event.target?.closest?.(`.${BUTTON_CLASS}`)) return;
+    closePanel();
+  }
+
+  function onPanelKey(event) {
+    if (event.key !== "Escape" || !panel) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePanel();
+    button?.focus?.();
+  }
+
+  function presetRowHtml(key, label, hint) {
+    const on = key === selectedPresetKey;
+    return (
+      `<button type="button" class="${PANEL_CLASS}-item${on ? " is-on" : ""}" ` +
+      `data-preset-key="${escapeAttr(key)}" role="menuitemradio" ` +
+      `aria-checked="${on}">` +
+      `<span class="${PANEL_CLASS}-name">${escapeHtml(label)}</span>` +
+      (hint
+        ? `<small class="${PANEL_CLASS}-hint">${escapeHtml(hint)}</small>`
+        : "") +
+      `</button>`
+    );
+  }
+
+  function renderPanel() {
+    if (!panel) return;
+    const builtIn = PRESET_ORDER.map((key) =>
+      presetRowHtml(key, PRESETS[key].label, ""),
+    ).join("");
+    const custom = customPresets.length
+      ? customPresets
+          .map((preset) =>
+            presetRowHtml(
+              `${CUSTOM_PREFIX}${preset.id}`,
+              preset.name,
+              preset.eqType === "iso" ? "ISO" : "",
+            ),
+          )
+          .join("")
+      : `<p class="${PANEL_CLASS}-empty">치지직에서 만든 커스텀 프리셋이 여기에 나타납니다.</p>`;
+    panel.innerHTML =
+      // ⚠ 내장 프리셋 중 하나가 '기본'이라 그룹 제목을 '기본'으로 두면
+      //   '기본 / 기본' 으로 겹쳐 읽힌다.
+      `<div class="${PANEL_CLASS}-group-title">기본 제공</div>` +
+      `<div class="${PANEL_CLASS}-group">${builtIn}</div>` +
+      `<div class="${PANEL_CLASS}-group-title">커스텀</div>` +
+      `<div class="${PANEL_CLASS}-group">${custom}</div>`;
+  }
+
+  function openPanel() {
+    if (!control) return;
+    closePanel();
+    panel = document.createElement("div");
+    panel.className = PANEL_CLASS;
+    panel.setAttribute("role", "menu");
+    panel.setAttribute("aria-label", "오디오 믹서 프리셋");
+    renderPanel();
+    panel.addEventListener("click", (event) => {
+      const item = event.target?.closest?.(`.${PANEL_CLASS}-item`);
+      if (!item) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectPreset(item.dataset.presetKey);
+      closePanel();
+    });
+    // 패널 안 클릭이 플레이어(재생/일시정지)로 새지 않게 막는다.
+    for (const type of ["pointerdown", "dblclick"]) {
+      panel.addEventListener(type, (event) => event.stopPropagation());
+    }
+    control.appendChild(panel);
+    document.addEventListener("pointerdown", onPanelOutside, true);
+    document.addEventListener("keydown", onPanelKey, true);
+  }
+
+  function togglePanel() {
+    if (panel) closePanel();
+    else openPanel();
+  }
+
   function ensureGainSlider() {
     if (!control) return null;
     if (gainSlider?.isConnected) {
@@ -1297,6 +1489,21 @@
     updateButton();
   }
 
+  // 믹서 버튼 우클릭 → 프리셋 패널(좌클릭은 on/off). 라이브 믹서와 같은 규약이다.
+  // ⚠ capture 단계에서 네이티브 플레이어 컨텍스트 메뉴를 먼저 막는다.
+  document.addEventListener(
+    "contextmenu",
+    (event) => {
+      if (!event.target?.closest?.(`.${BUTTON_CLASS}`)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (!masterEnabled || featureHidden) return;
+      togglePanel();
+    },
+    true,
+  );
+
   // ⚠ capture + passive:false 로 등록해야 preventDefault 로 페이지 스크롤을 막을 수
   //   있다. 임베드는 부모 페이지(피쿠 등)가 스크롤되므로 특히 중요하다.
   document.addEventListener(
@@ -1399,6 +1606,7 @@
       DEFAULT_PRESET_KEY,
       DEFAULT_GAIN_KEY,
       WHEEL_ACTION_KEY,
+      CUSTOM_PRESETS_KEY,
     ];
     if (watched.some((key) => key in changes)) loadSettings();
   });
