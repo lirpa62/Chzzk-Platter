@@ -53671,6 +53671,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         .catch(() => {});
       return;
     }
+    // 믹서 패널의 EQ 대역 전환 버튼. 전역 설정이라 설정 화면·다른 탭과 함께
+    // 맞춰지도록 여기서 저장한다(storage.onChanged 가 나머지를 전파한다).
+    if (data.type === "set-eq-band-mode") {
+      const mode = data.mode === "iso" ? "iso" : "chzzk";
+      mixerEqBandMode = mode;
+      void chrome.storage.local
+        .set({ [MIXER_EQ_BAND_MODE_KEY]: mode })
+        .catch(() => {});
+      return;
+    }
     const channelId = String(data.channelId || "").trim();
     if (!channelId) return;
     const key = `${AUDIO_MIXER_STORAGE_PREFIX}${channelId}`;

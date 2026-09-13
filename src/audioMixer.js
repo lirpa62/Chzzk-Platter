@@ -3306,7 +3306,7 @@
         </section>
         <section class="cheese-mixer-pane ${activeTab === "expert" ? "is-active" : ""}" data-pane="expert">
           ${renderCustomDraftBar("expert")}
-          ${groupHeading("이퀄라이저 (10밴드)", "group-eq")}
+          ${groupHeading("이퀄라이저 (10밴드)", "group-eq", eqBandModeToggle())}
           <div class="cheese-mixer-eq">${eqSliders}</div>
 
           ${groupHeading("음량", "group-gain")}
@@ -3609,9 +3609,19 @@
       </div>`;
   }
 
-  function groupHeading(label, infoKey) {
+  function groupHeading(label, infoKey, extra = "") {
     const info = infoKey && INFO_TEXT[infoKey] ? infoIcon(infoKey) : "";
-    return `<h4 class="cheese-mixer-group-heading">${label}${info}</h4>`;
+    return `<h4 class="cheese-mixer-group-heading">${label}${info}${extra}</h4>`;
+  }
+
+  // EQ 헤더의 대역 전환 버튼. 지금 배치를 보여 주고 누르면 반대쪽으로 바꾼다.
+  // ⚠ 여기서 바꾸는 값은 전역 설정(cheeseMixerEqBandMode)이다. 패널에서만
+  //   바꾸고 끝내면 설정 화면과 어긋나므로 content.js 로 저장을 요청한다.
+  function eqBandModeToggle() {
+    const next = eqBandMode === "iso" ? "chzzk" : "iso";
+    const label = eqBandMode === "iso" ? "ISO" : "기본";
+    const title = `이퀄라이저 대역: ${EQ_BAND_MODE_LABELS[eqBandMode]} → 눌러서 ${EQ_BAND_MODE_LABELS[next]}(으)로 전환`;
+    return `<button type="button" class="cheese-mixer-eq-band-toggle" data-action="eq-band-mode" title="${escapeAttribute(title)}" aria-label="${escapeAttribute(title)}">${label}</button>`;
   }
 
   // EQ 값 표시: +가 붙는 부호 + 소수 한 자리(0은 "0")
@@ -3783,6 +3793,23 @@
         }
         if (action === "preset-reset") {
           resetToBasePreset();
+          return;
+        }
+        if (action === "eq-band-mode") {
+          const next = eqBandMode === "iso" ? "chzzk" : "iso";
+          if (applyEqBandMode(next)) {
+            saveState();
+            refreshPanelContent();
+          }
+          // 전역 설정이라 설정 화면과 다른 탭에도 반영되도록 저장을 맡긴다.
+          window.postMessage(
+            {
+              source: "cheese-audio-mixer",
+              type: "set-eq-band-mode",
+              mode: next,
+            },
+            location.origin,
+          );
           return;
         }
         if (action === "quicksave-open") {
