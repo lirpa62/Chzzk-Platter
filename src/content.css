@@ -5975,6 +5975,20 @@ html.cheese-channel-profile-radius-enabled
 .is-section-dragging {
   opacity: 0.45;
 }
+/* 편집 중에는 툴바(제목 줄)만 남기고 본문을 감춘다. 목록이 길면 끌어 옮길 자리가
+   화면 밖으로 나가기 때문이다.
+   ⚠ '접기' 상태를 건드리지 않고 보여 주는 방식만 바꾼다 — 편집을 끝내면 원래
+   펼침/접힘이 그대로 돌아온다. */
+.cheese-cf-channel-section.is-section-sorting .cheese-cf-section-body,
+.cheese-cf-groups.is-section-sorting .cheese-cf-group-body,
+.cheese-cf-groups.is-section-sorting > .cheese-cf-area-more-bar {
+  display: none !important;
+}
+/* 본문이 없으니 셰브론(접기/펼치기 표시)도 의미가 없다. */
+.cheese-cf-channel-section.is-section-sorting .cheese-cf-section-chevron,
+.cheese-cf-groups.is-section-sorting .cheese-cf-groups-chevron {
+  opacity: 0.25;
+}
 /* 툴바가 핸들 + 토글(+ 순서 버튼)을 나란히 놓게 한다. */
 .cheese-cf-section-toolbar:has(.cheese-cf-section-drag),
 .cheese-cf-group-toolbar:has(.cheese-cf-section-drag) {

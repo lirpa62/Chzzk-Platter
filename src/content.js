@@ -2446,10 +2446,12 @@
   const CUSTOM_FOLLOW_FAV_SORT_TARGET = "section:favorites";
   let customFollowGroupSortKey = "";
   // 섹션(친밀도·그룹·즐겨찾기·팔로잉) 순서 편집 모드.
-  // ⚠ 편집 중에는 모든 섹션을 접어 한 화면에 보이게 한다. 펼친 채로는 목록이
-  //   길어 끌어 옮길 자리가 화면 밖으로 나간다. 끝나면 원래 접힘 상태로 되돌린다.
+  // ⚠ 편집 중에는 각 목록의 본문을 CSS 로 감추고 툴바(제목 줄)만 남긴다. 펼친
+  //   채로는 목록이 길어 끌어 옮길 자리가 화면 밖으로 나간다.
+  //   ⚠ '접기'(customFollowGroupCollapsed)를 건드리지 않는다 — 그건 사용자가
+  //     정한 상태라, 편집을 위해 바꿨다가 되돌리면 저장 경합이 생긴다.
+  //     보여 주는 방식만 바꾸므로 편집을 끝내면 원래 모습이 그대로 돌아온다.
   let customFollowSectionSorting = false;
-  let customFollowSectionSortCollapseBackup = null;
   // 이 요소가 '순서 편집 중인 그룹' 안에 있는가. 편집 중에는 호버 미리보기·툴팁을
   // 막는다(끌고 가는 동안 패널이 떠서 놓을 자리를 가린다).
   // ⚠ DOM 으로 판정한다. 편집 중인 그룹에만 is-sorting 이 붙으므로 다른 그룹과
@@ -23958,7 +23960,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 안내 문구와 점선 테두리도 자리만 차지한다. 지금까지 끌어 놓은 순서는
         // 이미 저장돼 있으므로 그대로 보인다.
         customFollowGroupSortKey = "";
-        // 목록 순서 편집도 같은 이유로 끝낸다. 접어 뒀던 섹션은 원래대로 되돌린다.
+        // 목록 순서 편집도 같은 이유로 끝낸다(본문이 다시 보인다).
         if (customFollowSectionSorting) toggleCustomFollowSectionSort();
       }
       // 펼침/접힘 애니메이션이 끝난 최종 폭에 맞춰 밀어내기 폭을 보정한다.
@@ -38547,25 +38549,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // ⚠ 켤 때 모든 섹션을 접는다. 펼친 채로는 목록이 길어 끌어 옮길 자리가 화면
   //   밖으로 나간다. 끌 때는 켜기 직전의 접힘 상태를 그대로 되돌린다.
   function toggleCustomFollowSectionSort() {
+    customFollowSectionSorting = !customFollowSectionSorting;
     if (customFollowSectionSorting) {
-      customFollowSectionSorting = false;
-      if (customFollowSectionSortCollapseBackup) {
-        customFollowGroupCollapsed = customFollowSectionSortCollapseBackup;
-        customFollowSectionSortCollapseBackup = null;
-        try {
-          chrome.storage?.local?.set({
-            [CUSTOM_FOLLOW_GROUP_COLLAPSED_KEY]: customFollowGroupCollapsed,
-          });
-        } catch {}
-      }
-    } else {
-      customFollowSectionSorting = true;
       // 항목 단위 편집과 겹치지 않게 그쪽은 끈다(한 번에 한 가지만).
       customFollowGroupSortKey = "";
-      customFollowSectionSortCollapseBackup = { ...customFollowGroupCollapsed };
-      for (const key of customFollowDisplayOrder()) {
-        customFollowGroupCollapsed[key] = true;
-      }
       if (typeof closeFollowPreview === "function") closeFollowPreview();
     }
     customFollowVersion += 1;
