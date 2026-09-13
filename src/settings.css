@@ -2203,7 +2203,7 @@ body > .clr-picker .clr-preview {
 
 .settings-osd-row:has([data-live-seek-bar-bottom]) {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 8px;
   width: 100%;
   align-items: center;
@@ -2436,10 +2436,6 @@ body > .clr-picker .clr-preview {
 .settings-order-reset:hover {
   color: var(--popup-fg, inherit);
   border-color: var(--popup-muted);
-}
-.settings-order-reset[data-live-seek-bar-bottom-reset] {
-  grid-column: 1 / -1;
-  justify-self: end;
 }
 
 .settings-transfer-actions {

@@ -4933,10 +4933,11 @@
       false,
     ],
     ["[data-popup-player-scroll]", "cheesePopupPlayerScroll", false],
+    // 팝업 창이 좁아 기본으로는 오디오 믹서 하나만 둔다.
     ["[data-popup-player-btn-mixer]", "cheesePopupPlayerBtnMixer", true],
-    ["[data-popup-player-btn-filter]", "cheesePopupPlayerBtnFilter", true],
-    ["[data-popup-player-btn-sync]", "cheesePopupPlayerBtnSync", true],
-    ["[data-popup-player-seekbar]", "cheesePopupPlayerSeekBar", true],
+    ["[data-popup-player-btn-filter]", "cheesePopupPlayerBtnFilter", false],
+    ["[data-popup-player-btn-sync]", "cheesePopupPlayerBtnSync", false],
+    ["[data-popup-player-seekbar]", "cheesePopupPlayerSeekBar", false],
     ["[data-popup-player-btn-stats]", "cheesePopupPlayerBtnStats", false],
     [
       "[data-popup-player-btn-screenshot]",

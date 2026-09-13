@@ -1087,10 +1087,11 @@
   let popupPlayerScroll = false;
   let popupPlayerSizeW = POPUP_PLAYER_SIZE_DEFAULT;
   let popupPlayerSizeH = POPUP_PLAYER_SIZE_DEFAULT;
+  // 팝업 창이 좁아 기본으로 두는 버튼은 오디오 믹서 하나뿐이다.
   let popupPlayerBtnMixer = true;
-  let popupPlayerBtnFilter = true;
-  let popupPlayerBtnSync = true;
-  let popupPlayerSeekBar = true;
+  let popupPlayerBtnFilter = false;
+  let popupPlayerBtnSync = false;
+  let popupPlayerSeekBar = false;
   let popupPlayerBtnStats = false;
   let popupPlayerBtnScreenshot = false;
   let popupPlayerBtnRewind = false;
@@ -39460,11 +39461,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY] === true;
       popupPlayerScroll = data?.[POPUP_PLAYER_SCROLL_KEY] === true; // 기본 OFF
       applyPopupPlayerScrollMode();
+      // 오디오 믹서만 기본 ON(!== false 로 판정).
       popupPlayerBtnMixer = data?.[POPUP_PLAYER_BTN_MIXER_KEY] !== false;
-      popupPlayerBtnFilter = data?.[POPUP_PLAYER_BTN_FILTER_KEY] !== false;
-      popupPlayerBtnSync = data?.[POPUP_PLAYER_BTN_SYNC_KEY] !== false;
-      popupPlayerSeekBar = data?.[POPUP_PLAYER_SEEKBAR_KEY] !== false;
-      // 아래 넷은 기본 OFF(=== true 로 판정).
+      popupPlayerBtnFilter = data?.[POPUP_PLAYER_BTN_FILTER_KEY] === true;
+      popupPlayerBtnSync = data?.[POPUP_PLAYER_BTN_SYNC_KEY] === true;
+      popupPlayerSeekBar = data?.[POPUP_PLAYER_SEEKBAR_KEY] === true;
+      // 아래 넷도 기본 OFF(=== true 로 판정).
       popupPlayerBtnStats = data?.[POPUP_PLAYER_BTN_STATS_KEY] === true;
       popupPlayerBtnScreenshot = data?.[POPUP_PLAYER_BTN_SHOT_KEY] === true;
       popupPlayerBtnRewind = data?.[POPUP_PLAYER_BTN_REWIND_KEY] === true;
@@ -51147,9 +51149,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       let popupBtnChanged = false;
       for (const [key, set, defaultOn] of [
         [POPUP_PLAYER_BTN_MIXER_KEY, (v) => (popupPlayerBtnMixer = v), true],
-        [POPUP_PLAYER_BTN_FILTER_KEY, (v) => (popupPlayerBtnFilter = v), true],
-        [POPUP_PLAYER_BTN_SYNC_KEY, (v) => (popupPlayerBtnSync = v), true],
-        [POPUP_PLAYER_SEEKBAR_KEY, (v) => (popupPlayerSeekBar = v), true],
+        [POPUP_PLAYER_BTN_FILTER_KEY, (v) => (popupPlayerBtnFilter = v), false],
+        [POPUP_PLAYER_BTN_SYNC_KEY, (v) => (popupPlayerBtnSync = v), false],
+        [POPUP_PLAYER_SEEKBAR_KEY, (v) => (popupPlayerSeekBar = v), false],
         [POPUP_PLAYER_BTN_STATS_KEY, (v) => (popupPlayerBtnStats = v), false],
         [
           POPUP_PLAYER_BTN_SHOT_KEY,
