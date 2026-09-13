@@ -36919,7 +36919,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           e.preventDefault();
           e.stopPropagation();
           const act = ctrl.dataset.cfCtrl;
-          if (act === "refresh") void refreshCustomFollowList();
+          if (act === "refresh") spinCustomFollowRefresh(ctrl);
           else if (act === "square") openCustomFollowSquareModal(ctrl);
           return;
         }
@@ -38349,6 +38349,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 우리 새로고침 컨트롤을 주입한다. 클릭은 document 위임 처리.
   const CUSTOM_FOLLOW_CTRL_CLASS = "cheese-cf-header-ctrl";
   const CF_SVG_REFRESH = `<svg width="15" height="15" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>`;
+  // 새로고침을 눌렀다는 걸 알 수 있게 아이콘을 돌린다.
+  // ⚠ 실제 갱신이 끝날 때까지 돌리되, 캐시가 있어 순식간에 끝나면 깜빡하고 마는
+  //   것처럼 보인다. 최소 한 바퀴는 돌려 '눌렀다'는 느낌을 남긴다.
+  // ⚠ 버튼은 접힘/펼침 전환 때 다시 그려질 수 있다. 클래스는 그때 사라지지만
+  //   재진입 가드(customFollowRefreshSpinning)로 중복 실행만 막으면 충분하다.
+  const CF_REFRESH_SPIN_MIN_MS = 600;
+  let customFollowRefreshSpinning = false;
+  function spinCustomFollowRefresh(button) {
+    if (customFollowRefreshSpinning) return;
+    customFollowRefreshSpinning = true;
+    const startedAt = Date.now();
+    button.classList.add("is-refreshing");
+    const stop = () => {
+      const rest = CF_REFRESH_SPIN_MIN_MS - (Date.now() - startedAt);
+      const done = () => {
+        customFollowRefreshSpinning = false;
+        // 다시 그려졌을 수 있으니 지금 문서에 있는 버튼에서 모두 뗀다.
+        document
+          .querySelectorAll(".cheese-cf-ctrl-btn.is-refreshing")
+          .forEach((el) => el.classList.remove("is-refreshing"));
+      };
+      if (rest > 0) setTimeout(done, rest);
+      else done();
+    };
+    void Promise.resolve(refreshCustomFollowList()).then(stop, stop);
+  }
+
   function ensureCustomFollowCollapsedControls() {
     const gateOn = featureFlags.sbFollowCustom && !featureFlags.sidebar;
     const origNav = findSidebarFollowNav();

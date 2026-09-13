@@ -6484,6 +6484,29 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
     var(--cheese-platter-content-neutral-primary)
   );
 }
+/* ⚠ 버튼이 inline-flex 라 svg 가 flex 아이템으로 가로만 줄어든다(실측 10x15).
+   정사각이 아니면 회전할 때 찌그러져 보이므로 줄어들지 않게 고정한다. */
+.cheese-cf-ctrl-btn svg {
+  flex: none;
+}
+/* 새로고침을 누르면 아이콘을 돌려 '눌렸다'는 것을 알린다(접힘·펼침 공통).
+   ⚠ 버튼이 아니라 svg 를 돌린다. 버튼째 돌리면 호버 배경(원형)까지 함께 돌아
+   테두리가 흔들려 보인다. */
+.cheese-cf-ctrl-btn.is-refreshing svg {
+  animation: cheese-cf-refresh-spin 0.6s linear infinite;
+}
+@keyframes cheese-cf-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 모션을 줄이는 설정이면 회전 대신 흐려짐으로 알린다. */
+@media (prefers-reduced-motion: reduce) {
+  .cheese-cf-ctrl-btn.is-refreshing svg {
+    animation: none;
+    opacity: 0.5;
+  }
+}
 /* 더보기/접기 문구 버튼 바(헤더 아래·목록 위쪽). 둘 다 가능하면 나란히. */
 /* ── 전용 팔로잉 목록 '맨 위로' FAB ── */
 /* 우리 nav 안 마지막 자식. sticky bottom 으로 스크롤 컨테이너 하단 우측에 떠 있는다.
