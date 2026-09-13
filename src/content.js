@@ -2442,6 +2442,8 @@
   let customFollowGroupPlacement = "groups-first";
   let customFollowGroupOrder = []; // custom:/auto:/tag: 그룹을 합친 사이드바 순서
   // 지금 채널 순서를 편집 중인 그룹 키(""=편집 중 아님). 화면 상태라 저장하지 않는다.
+  // 즐겨찾기 영역도 같은 변수를 쓴다(한 번에 한 곳만 편집).
+  const CUSTOM_FOLLOW_FAV_SORT_TARGET = "section:favorites";
   let customFollowGroupSortKey = "";
   // 이 요소가 '순서 편집 중인 그룹' 안에 있는가. 편집 중에는 호버 미리보기·툴팁을
   // 막는다(끌고 가는 동안 패널이 떠서 놓을 자리를 가린다).
@@ -2449,7 +2451,11 @@
   //   '팔로잉' 목록의 미리보기는 그대로 동작한다.
   function isCustomFollowSortingTarget(node) {
     if (!customFollowGroupSortKey) return false;
-    return Boolean(node?.closest?.(".cheese-cf-group.is-sorting"));
+    return Boolean(
+      node?.closest?.(
+        ".cheese-cf-group.is-sorting, .cheese-cf-channel-section.is-sorting",
+      ),
+    );
   }
   let customFollowGroupTagHideOffline = true;
   let customFollowGroupExcludedTags = new Set();
@@ -34424,11 +34430,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 커스텀 순서 드래그: 즐겨찾기 별도정렬 ON + custom 모드 + 이 항목이 즐겨찾기일 때.
     // 접힘 상태(아이콘만)에서도 현재 표시 중인 즐겨찾기는 재정렬할 수 있다.
     // 그룹 항목은 그 그룹이 '순서 편집 중'일 때만 끌 수 있다(같은 long-press 방식).
+    // 그룹 항목은 그 그룹이, 즐겨찾기는 즐겨찾기 영역이 '순서 편집 중'일 때만
+    // 끌 수 있다. 예전에는 커스텀 정렬이면 항상 끌 수 있어, 채널을 누르려다
+    // 실수로 순서가 바뀌기 쉬웠다.
     const dragOn = grouped
       ? sortingGroup
       : featureFlags.sbFollowFavSort &&
         customFollowFavSort === "custom" &&
-        fav;
+        fav &&
+        customFollowGroupSortKey === CUSTOM_FOLLOW_FAV_SORT_TARGET;
     // draggable 은 기본 false — 꾹 누르면(long-press) JS 가 동적으로 켠다(짧은 클릭은
     // 채널 이동 유지). 클래스로 '순서 편집 가능 항목'을 식별한다.
     const dragAttr = dragOn
@@ -36571,13 +36581,26 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         createCustomFollowItemHtml(item, h, expandedNow, { section: key }),
       )
       .join("");
+    // 즐겨찾기를 '직접 지정' 순서로 쓸 때만 순서 편집 버튼을 둔다. 다른 정렬
+    // 기준에서는 끌어도 다시 정렬돼 의미가 없다.
+    const favSortable =
+      key === "favorites" &&
+      featureFlags.sbFollowFavSort &&
+      customFollowFavSort === "custom";
+    const favSorting =
+      favSortable && customFollowGroupSortKey === CUSTOM_FOLLOW_FAV_SORT_TARGET;
+    const favSortLabel = favSorting ? "순서 편집 끝내기" : "즐겨찾기 순서 편집";
+    const favSortAction = favSortable
+      ? `<button type="button" class="cheese-cf-section-sort" data-cf-section-sort="${CUSTOM_FOLLOW_FAV_SORT_TARGET}" aria-pressed="${String(favSorting)}" aria-label="${favSortLabel}" title="${favSortLabel}">${customFollowLucideIcon("arrow-up-down", 15)}</button>`
+      : "";
     return (
-      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}" data-cf-section="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
+      `<section class="cheese-cf-channel-section${collapsed ? " is-collapsed" : ""}${featureFlags.sbFollowFavBar ? " has-divider" : ""}${favSorting ? " is-sorting" : ""}" data-cf-section="${key}" data-cf-star="${escapeAttribute(customFollowStarMode[key] || "hover")}">` +
       `<div class="cheese-cf-section-toolbar">` +
       `<button type="button" data-cf-section-toggle="${key}" aria-expanded="${String(!collapsed)}">` +
       customFollowLucideIcon("chevron-down", 17, "cheese-cf-section-chevron") +
       `<span>${label}</span><small>${shownCount}/${items.length}</small>` +
       `</button>` +
+      favSortAction +
       `</div>` +
       `<div class="cheese-cf-section-body">` +
       moreHtml +
@@ -37071,6 +37094,23 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             key,
             !isCustomFollowGroupOfflineHidden(key),
           );
+          return;
+        }
+        const sectionSort = e.target.closest?.("[data-cf-section-sort]");
+        if (sectionSort) {
+          e.preventDefault();
+          e.stopPropagation();
+          const key = sectionSort.dataset.cfSectionSort || "";
+          customFollowGroupSortKey =
+            customFollowGroupSortKey === key ? "" : key;
+          if (
+            customFollowGroupSortKey &&
+            typeof closeFollowPreview === "function"
+          ) {
+            closeFollowPreview();
+          }
+          customFollowVersion += 1;
+          ensureCustomFollowList();
           return;
         }
         const groupSort = e.target.closest?.("[data-cf-group-sort]");

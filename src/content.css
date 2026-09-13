@@ -5908,11 +5908,60 @@ html.cheese-channel-profile-radius-enabled
 /* 채널 순서 편집 중인 그룹: 편집 대상임을 테두리로 알리고, 버튼도 눌린 상태로 둔다.
    ⚠ 항목을 꾹 눌러야 드래그가 시작되므로(짧은 클릭은 채널 이동) 안내가 없으면
    '왜 안 끌리지' 싶다. 목록 위에 한 줄 안내를 붙인다. */
-.cheese-cf-group.is-sorting {
+.cheese-cf-group.is-sorting,
+.cheese-cf-channel-section.is-sorting {
   outline: 1px dashed var(--cheese-cf-group-color, #888);
   outline-offset: 2px;
   border-radius: 0 8px 8px 0;
 }
+/* 순서 편집 버튼은 토글 버튼 뒤(툴바 끝)에 붙는다.
+   ⚠ .cheese-cf-section-toolbar > button 이 display:grid + width:100% 를 주므로
+   같은 자식 선택자로 받아 이겨야 한다(실측: 안 그러면 729px 로 늘어난다). */
+.cheese-cf-section-toolbar > button.cheese-cf-section-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  margin-left: auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  cursor: pointer;
+}
+.cheese-cf-section-toolbar > button.cheese-cf-section-sort:hover,
+.cheese-cf-section-toolbar
+  > button.cheese-cf-section-sort[aria-pressed="true"] {
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
+}
+/* 접힘(아이콘만)에서는 숨긴다. 그룹의 순서 편집 버튼과 같은 이유 — 폭이 좁고,
+   접으면 편집 모드도 해제되므로 버튼이 남아 있을 이유가 없다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-section-toolbar
+  > button.cheese-cf-section-sort {
+  display: none !important;
+}
+/* 툴바가 토글 버튼과 순서 버튼 두 개를 나란히 놓도록(원래는 버튼 하나 전제). */
+.cheese-cf-section-toolbar:has(.cheese-cf-section-sort) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cheese-cf-section-toolbar:has(.cheese-cf-section-sort) > button:first-child {
+  min-width: 0;
+}
+.cheese-cf-channel-section.is-sorting .cheese-cf-list::before,
 .cheese-cf-group.is-sorting .cheese-cf-group-list::before {
   content: "꾹 눌러 끌어다 순서를 바꾸세요";
   display: block;
