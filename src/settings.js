@@ -311,7 +311,7 @@
     "videoFilter:globalDefault",
     "hiddenChannels",
     // ⚠ 프리페치 목록에 없으면 cachedStorageGet 이 빈 값을 돌려준다. 치지직 탭에서
-    //   Alt+클릭으로 차단해도 설정 화면에는 안 보였다(제보).
+    //   Alt+클릭으로 차단해도 설정 화면에는 안 보였다.
     "cheeseChatBlockedEmoticons",
     "cheeseFollowAffinityOn",
     "cheeseFollowAffinityOrder",
@@ -975,10 +975,8 @@
       if (!button) return;
       const room = nav.scrollHeight - nav.clientHeight;
       if (room <= 0) return; // 스크롤이 없으면(모두 보이면) 그대로 둔다
-      // 요청대로 '선택한 탭 버튼'을 가운데에 둔다.
-      // ⚠ 버튼+목차 덩어리의 중심을 맞추는 방법도 시도했지만, 목차가 길면
-      //   버튼이 중앙에서 190px 까지 밀려 올라가 오히려 가운데로 안 보였다
-      //   (실측). 목차는 버튼 아래에 따라오면 충분하다.
+      // 선택한 탭 버튼 자체를 가운데에 둔다. 버튼+목차 덩어리의 중심을 맞추면
+      // 목차가 길 때 버튼이 중앙에서 크게 밀려 올라간다.
       // 범위를 벗어나면 0~room 으로 잘라, 맨 위·맨 아래 탭은 자연히 덜 움직인다.
       const target =
         button.offsetTop - nav.clientHeight / 2 + button.offsetHeight / 2;
@@ -2703,8 +2701,7 @@
       } catch {}
       // 목록이 비면 항목 자체를 감춰 설정 화면을 어지럽히지 않는다.
       if (item) item.hidden = hashes.length === 0;
-      // 그 행이 유일한 자식이라, 숨기고 나면 펼치기 버튼도 감춰야 한다
-      // (눌러도 아무것도 안 나오는 버튼이 남는다 — 제보).
+      // 그 행이 유일한 자식이면 내용 없는 펼치기 버튼도 함께 감춰야 한다.
       settingsDisclosures?.refresh?.();
       list.textContent = "";
       if (!hashes.length) {
@@ -3768,7 +3765,7 @@
   loadLiveSeekBar();
 
   // ── 라이브 멈춤 자동 복구(전역, 기본 OFF) ────────────────────────────────
-  // 다른 탭에 오래 머물다 돌아오면 영상이 로딩 상태로 굳는 증상이 있다(제보).
+  // 다른 탭에 오래 머물다 돌아오면 영상이 로딩 상태로 굳는 증상이 있다.
   // 실측: 재생 위치가 버퍼 끝보다 앞이라 데이터가 없고 seek 이 끝나지 않는다.
   // 원인이 우리 코드인지 치지직 플레이어인지 확정되지 않아 기본 OFF 로 둔다.
   const LIVE_STALL_RECOVERY_KEY = "cheeseLiveStallRecovery";
@@ -5826,7 +5823,7 @@
     });
     // ⚠ 저장은 drop 이 아니라 dragend 에서 한다. dragover 가 DOM 을 실시간으로 옮기므로
     // 목록은 이미 새 순서인데, 커서를 항목 사이 여백이나 목록 밖에서 놓으면 drop 이
-    // 발생하지 않아 저장만 건너뛴다 → 화면과 저장값이 어긋난다(제보).
+    // 발생하지 않아 저장만 건너뛴다 → 화면과 저장값이 어긋난다.
     // dragend 는 취소(ESC)를 포함해 항상 발생하므로 여기서 현재 DOM 순서를 확정한다.
     const commitCfSectionOrder = () => {
       const next = [...listEl.querySelectorAll(".cf-fav-order-item")].map(
@@ -9435,7 +9432,7 @@
     saveBlockedEmoticons();
   });
   // ⚠ 설정 화면은 열 때 읽은 캐시로 그린다. Alt+클릭 차단은 치지직 탭에서
-  //   일어나므로, 저장소 변화를 듣지 않으면 이 목록에 영영 안 나타난다(제보).
+  //   일어나므로, 저장소 변화를 듣지 않으면 이 목록에 영영 안 나타난다.
   //   설정 창을 열어 둔 채 차단해도 바로 보이게 한다.
   try {
     chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -12311,8 +12308,7 @@
       return { order: outOrder, slot: outSlot };
     }
 
-    // 다시보기에서만 나타나는 버튼. 라이브에서는 자리에 없으므로 배경색을 달리해
-    // 다른 칩과 구분한다(요청).
+    // 다시보기에서만 나타나는 버튼은 라이브 버튼과 배경색을 달리한다.
     const VOD_ONLY_KEYS = new Set(["speed", "commentTs", "chatRecap"]);
 
     function makeItem(key) {
@@ -12432,7 +12428,7 @@
     // 묶음 사이(=필터 칩 앞)면 묶음 앞(믹서 칩 앞)으로 스냅한다.
     // 오른쪽 그룹에만 놓을 수 있는 버튼. 댓글 타임스탬프·내 채팅 기록은 content.js
     // 가 오른쪽 컨트롤(.pzp-pc__bottom-buttons-right)에 직접 만들어서, 왼쪽으로
-    // 옮겨도 실제로는 옮겨지지 않는다(제보) → UI 에서 아예 막아 표시와 실제를 맞춘다.
+    // 옮겨도 실제로는 옮겨지지 않는다 → UI 에서 아예 막아 표시와 실제를 맞춘다.
     const RIGHT_ONLY_KEYS = new Set(["commentTs", "chatRecap"]);
     const isRightOnly = (el) => RIGHT_ONLY_KEYS.has(el?.dataset?.btnKey);
 
@@ -12729,7 +12725,7 @@
 
   // ── 따라잡기 배속(1.2/1.5/2/3, 기본 1.5) ──────────────────────────────────
   // ── 따라잡기 방식(배속 / 즉시 라이브로 이동) ───────────────────────────────
-  // 제보: "배속 말고 원클릭으로 맨 앞으로 땡기는 방식도 있으면 좋겠다".
+  // 따라잡기 방식은 배속과 라이브 엣지 즉시 이동을 지원한다.
   const SYNC_MODE_KEY = "cheeseSyncMode";
   const SYNC_MODE_ALLOWED = ["rate", "jump"];
   const syncModeButtons = Array.from(

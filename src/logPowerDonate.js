@@ -108,7 +108,7 @@
   }
 
   // ⚠ 팔로우하고 곧바로 페이지를 벗어나면 content.js 폴링(최대 60초)이 그 채널을
-  //   더 이상 보지 않아 보상을 놓친다(제보). 팔로우 요청을 잡은 즉시 그 채널의
+  //   더 이상 보지 않아 보상을 놓친다. 팔로우 요청을 잡은 즉시 그 채널의
   //   claims 를 훑어 PUT 하면 이탈해도 처리된다.
   async function claimFollowNow(channelId) {
     try {
@@ -185,7 +185,7 @@
     return true;
   }
 
-  // ⚠ 후원은 응답 즉시 반영되지 않는다. 실측(제보): donate 응답과 같은 초에 읽은
+  // ⚠ 후원은 응답 즉시 반영되지 않는다. 실측: donate 응답과 같은 초에 읽은
   //   log-power 는 268490(미반영), 14초 뒤에야 268510(+20)이 됐다. 그래서 후원도
   //   선물처럼 '오를 때까지' 몇 번 다시 읽어야 한다. 한 번만 읽으면 delta=0 으로
   //   보고 조용히 버리게 된다 — 후원이 전혀 기록되지 않던 원인이다.
@@ -278,7 +278,7 @@
     ).toUpperCase();
     if (claim && method === "PUT") {
       // ⚠ 응답의 content.amount 는 '지급액'이 아니라 지급 후 보유량이다. 그대로 쓰면
-      //   이미 갖고 있던 만큼이 더해져 기록된다(기존 10 + 팔로우 300 → 310, 제보).
+      //   이미 갖고 있던 만큼이 더해져 기록된다(기존 10 + 팔로우 300 → 310).
       //   그래서 PUT 직전 보유량을 읽어 두고 차액을 지급액으로 삼는다.
       const beforeClaim = await readBalance(claim[1]);
       const response = await originalFetch.apply(this, arguments);

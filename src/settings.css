@@ -1,8 +1,6 @@
 /* 치즈 플래터 - 기능 설정 팝업 스타일 (popup.css 변수 재사용) */
 html {
-  /* 설정 전체 글자 크기의 기준. 모든 font-size 가 rem 이라 이 값만 바꾸면
-     글자가 비례해서 커진다(여백·테두리는 px 그대로라 레이아웃이 무너지지 않는다).
-     제보: 글자가 작아 시인성이 떨어진다 → 16px 기준을 17px 로 올렸다. */
+  /* 모든 rem 글자 크기의 기준. 여백과 테두리는 px로 유지한다. */
   font-size: 17px;
   /* Firefox 등 표준 커스텀 스크롤바 색(thumb / track) */
   scrollbar-color: var(--popup-brand) var(--popup-soft-bg);
@@ -777,7 +775,7 @@ html.settings-tab-view .settings-item {
 }
 
 /* ⚠ 위의 padding 단축 지정이 자식 행의 padding-left(들여쓰기)를 16px 로
-   되돌린다. 그래서 새 탭으로 열면 하위 옵션이 왼쪽 선에 붙어 보였다(제보).
+   되돌린다. 그래서 새 탭으로 열면 하위 옵션이 왼쪽 선에 붙어 보였다.
    탭 모드에서도 깊이만큼 들여쓴다(팝업의 34/52/70 + 좌우 여백 차이 16-8). */
 html.settings-tab-view .settings-item-child {
   padding-left: 42px;
@@ -2303,7 +2301,7 @@ body > .clr-picker .clr-preview {
 }
 
 /* ⚠ 예전에는 nowrap 이었다. 설명이 길어 열 최소 너비가 커지면서 세그먼트가
-   창 밖으로 나갔다(제보). 좁을 때는 줄바꿈해 안에 맞춘다. */
+   창 밖으로 나갔다. 좁을 때는 줄바꿈해 안에 맞춘다. */
 #integratedSearchClipMatchMode button small {
   white-space: normal;
   text-align: center;

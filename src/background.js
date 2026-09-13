@@ -2346,7 +2346,7 @@ function buildTimestampMarkers(entries) {
   if (markers.length <= COMMENT_TIMESTAMP_MAX_MARKERS) return markers;
 
   // ⚠ 예전에는 시간순 정렬 뒤 앞에서 잘라(slice(0, 80)) 영상 뒷부분 마커가 통째로
-  //   사라졌다(제보: 9시간 영상에서 4:23:23 이후가 안 나옴 — 그 지점까지 80개가
+  //   사라졌다(9시간 영상에서 4:23:23 이후가 안 나옴 — 그 지점까지 80개가
   //   찼기 때문). 상한이 필요하면 앞이 아니라 '덜 중요한 것'부터 버려야 한다.
   //   댓글이 많이 달린 마커를 우선 남기고, 남긴 것을 다시 시간순으로 되돌린다.
   const weight = (marker) =>
@@ -3707,7 +3707,7 @@ const LP_WATCH_AMOUNTS = [10, 12, 20]; // tier0/1/2 시청 보상액
 // ⚠ 1시간을 채우는 순간 치지직은 5분 보상과 1시간 보상을 [함께] 준다.
 //   그래서 그 주기의 delta 는 10+100=110 처럼 합쳐진 값으로 온다. 예전엔 이 값이
 //   targets 에 없어 5분 보상으로 인식되지 않았고, 마지막 12회째가 통째로 누락됐다
-//   (제보: 11회 110 만 기록되고 12회째가 사라짐).
+//   (11회 110 만 기록되고 12회째가 사라짐).
 //   합계값은 5분 단독(10/12/20)·1시간 단독(100/120/200) 어느 것과도 겹치지 않는다.
 const LP_WATCH_COMBO = new Map([
   [110, 10],
@@ -4174,7 +4174,7 @@ function lpSameEntry(it, accountId, id) {
 
 // 사용자가 직접 고치거나 지우는 경우에 쓴다.
 // ⚠ 계정 도입 전 기록은 accountId 가 비어 있다. 엄격히 비교하면 못 찾아서
-//   수정이 '새 항목 추가'가 된다(제보: 기타 적립과 5분 시청이 둘 다 남음).
+//   수정이 '새 항목 추가'가 된다(기타 적립과 5분 시청이 둘 다 남음).
 //   같은 id 면 레거시도 같은 기록으로 보고, 수정하면서 현재 계정에 귀속시킨다.
 function lpSameOrLegacy(it, accountId, id) {
   if (it?.id !== id) return false;
@@ -4327,7 +4327,7 @@ function lpNormalizeEntry(entry, accountId) {
       : {}),
     // ⚠ 5분 묶음은 at(시작)과 실제 적립 시점이 최대 1시간 벌어진다. 보정이
     //   기준 시각과 대조할 때 at 을 쓰면 '기준 이후에 들어온 기록'을 못 세어
-    //   같은 금액을 기타 적립으로 또 잡는다(제보: 둥그레 기타 +96).
+    //   같은 금액을 기타 적립으로 다시 잡는다.
     //   묶음이 끝난 시각을 함께 남겨 그쪽으로 판정한다.
     ...(Number(entry?.endAt) > 0 ? { endAt: Number(entry.endAt) } : {}),
     // 보유량 비교로 찾아낸 기록. 실제 획득 시각이 아니라 '감지 시각'이라
@@ -4554,15 +4554,15 @@ async function lpAppendLog(entry) {
 // ── 연속 5분 보상 묶기 ──────────────────────────────────────────────────────
 // 1시간을 채우면 WATCH_1_HOUR 한 건(+fiveMinAmount 12회분)으로 기록되지만, 중간에
 // 채널을 옮기거나 시청을 멈추면 그때까지 받은 5분 보상이 어디에도 안 남아 '기타
-// 적립'으로 샜다(제보). 그렇다고 5분마다 한 건씩 남기면 기록이 12배가 된다.
+// 적립'으로 샜다. 그렇다고 5분마다 한 건씩 남기면 기록이 12배가 된다.
 //
 // 그래서 (prev, curr, cnt) 로 '같은 채널에서 연속으로 받은 횟수'만 세어 두고,
 // 흐름이 끊길 때 한 건으로 묶어 기록한다.
 //   (null,null,0) → (null,A,1) → (A,A,2) → (A,B,1) 이 순간 A×2 를 기록
 //
 // ⚠ local 에 둔다. session 은 브라우저 세션이 끝나면 비고, 그보다 먼저 서비스
-//   워커가 잠들었다 깨는 사이에도 유실될 수 있다. 실제로 session 에 두었더니
-//   5분마다 run 이 초기화돼 보상이 낱개로 기록됐다(제보: 엘시v +10 이 55건).
+//   워커가 잠들었다 깨는 사이에도 유실될 수 있다. session에 두면 워커 재시작마다
+//   run이 초기화되어 보상이 낱개로 기록될 수 있다.
 //   watch state 는 매 폴링마다 다시 쓰여서 티가 안 났지만, run 은 누적값이라
 //   한 번만 사라져도 묶임이 깨진다.
 const LP_RUN_KEY = "cheeseLogPowerFiveMinRun";
@@ -4613,10 +4613,7 @@ async function lpSetRun(run) {
 
 // 쌓인 연속분을 WATCH_5_MIN 한 건으로 남긴다. 남길 게 없으면 아무것도 안 한다.
 // onlyChannelId: 그 채널의 묶음일 때만 확정한다.
-// ⚠ 채널을 가리지 않으면 '다른 채널의 종료 처리'가 지금 쌓이는 묶음을 밀어낸다.
-//   실측(제보): 둥그레(구독) 라이브가 끝나고 서새봄(미구독)으로 적립이 넘어갔는데,
-//   둥그레 알람이 살아 있어 주기적으로 flush 를 유발해 서새봄 보상이 5분마다
-//   1회씩 낱개로 기록됐다.
+// 이전 채널의 알람이 새 채널의 묶음을 확정하지 않도록 채널을 확인한다.
 async function lpFlushRun(onlyChannelId) {
   return lpWithRunLock(() => lpFlushRunLocked(onlyChannelId));
 }
@@ -4960,7 +4957,7 @@ async function lpActiveChannelIds(balances, log, accountId) {
       if (!k.startsWith(LP_WATCH_STATE_PREFIX)) continue;
       // ⚠ activeUntil 이 지나도 알람은 살아 있어 그 채널의 보상이 계속 들어올 수
       //   있다. 그런데 PC 가 다른 채널을 보고 있으면 delta 판정이 늦어, 그 사이
-      //   보유량만 오른 상태를 '설명 안 됨'으로 잡았다(제보: 카린 기타 +24).
+      //   보유량만 오른 상태를 설명되지 않은 변동으로 잡을 수 있다.
       //   추적 state 가 남아 있는 채널은 계정이 같으면 전부 제외한다.
       if (accountId && v?.accountId && v.accountId !== accountId) continue;
       ids.add(k.slice(LP_WATCH_STATE_PREFIX.length));
@@ -5016,7 +5013,7 @@ function lpReconcileOnce() {
 async function lpReconcile() {
   // ⚠ 캐시된 계정으로 비교하면 전환 직후 이전 계정 기준과 대조해 큰 허위 기록이
   //   생긴다. 보정 전에는 항상 새로 확인한다.
-  // 사용자가 요청한 보정은 캐시·실패 기록을 모두 건너뛰고 새로 확인한다.
+  // 수동 보정은 캐시와 실패 기록을 건너뛰고 새로 확인한다.
   lpInvalidateAccount();
   const accountId = await lpFetchAccountId();
   // 계정을 모르면 비교하지 않는다 — 남의 계정 기준과 대조하면 허위 기록이 된다.
@@ -5044,7 +5041,7 @@ async function lpReconcile() {
   const run = await lpGetRun();
   // ⚠ 누적 중인 run 이 있는 채널은 기준을 갱신하면 안 된다. 차액 계산에서 빼도
   //   기준에는 run 이 포함된 보유량이 저장돼, 나중에 flush 로 내역에 들어오면
-  //   같은 금액이 한 번 더 빠진다(제보: 둥그레 기타 사용 -36).
+  //   같은 금액이 한 번 더 빠진다.
   // 다른 계정의 run 때문에 이 계정 감지가 막히면 안 된다.
   // ⚠ flushedId 가 있는 묶음은 이미 내역에 들어가 있다(초기화만 실패한 상태).
   //   그 채널까지 제외하면 실제 다른 기기 적립을 계속 못 잡는다 — 제외는
@@ -5059,7 +5056,7 @@ async function lpReconcile() {
   }
   // ⚠ 예측 베팅은 보유량이 먼저 줄고 기록이 몇십 초 뒤에 붙는다. 그 틈에 비교하면
   //   베팅이 '기타 사용'으로 잡히고, 뒤이어 진짜 기록이 들어와 되돌리는 보정까지
-  //   생긴다(제보: 큐베 -50 → 예측 베팅 -50 → +50).
+  //   잘못된 차감과 되돌림 기록이 연이어 생긴다.
   //   정산 대기 중인 예측이 있는 채널은 건드리지 않는다.
   try {
     const aw = (
@@ -5155,7 +5152,7 @@ async function lpReconcile() {
       count = rows.length;
       // ⚠ 유예 중인 채널은 기준도 갱신하지 않는다. 갱신하면 묶음 도중의 보유량이
       //   기준으로 굳어, 나중에 그 묶음이 확정될 때 이미 기준에 포함된 몫이
-      //   중복으로 계산된다(제보: 둥그레 기타 +96).
+      //   중복으로 계산된다.
       for (const id of hot) skipForSnapshot.add(id);
       if (!rows.length) return false;
       return LP_WRITE_OPS.APPEND_AUTO_BATCH(list, { entries: rows }, accountId);
@@ -5233,7 +5230,7 @@ async function lpClearOtherChannels(activeChannelId, ownerHint) {
     // 2) 다른 채널의 1시간 타이머는 '일시정지'한다.
     //    ⚠ 예전엔 키를 지웠는데, 그러면 잠깐 다른 채널을 보고 돌아와도 타이머가
     //      처음부터 다시 시작됐다. 치지직은 시청 시간을 누적으로 세므로(실측: 채널을
-    //      옮겼다 돌아오면 이어서 1시간이 찬다) 남은 시간을 보존해야 맞다(제보).
+    //      옮겼다 돌아오면 이어서 1시간이 찬다) 남은 시간을 보존해야 맞다.
     //      leftAt 을 찍어 두면 content 의 restoreWatchHourTimer 가 그 시점부터 재개한다.
     //    ⚠ 예전엔 storage.local 전체(get(null))를 읽었다. 이 함수는 5분 보상마다
     //      호출되는데 local 에는 통나무파워 내역이 통째로 들어 있어, 기록이 쌓일수록
@@ -5436,8 +5433,8 @@ async function lpCollectProgress(channelId) {
     return;
   }
   // ⚠ 절전·잠자기에서 깨면 그 사이 폴링이 멈춰 있어 보상이 여러 번 쌓인 채로
-  //   온다(제보: 27분 자고 나니 delta 72 = 6회분). 단일 값·콤보만 보던 예전에는
-  //   이 delta 를 놓쳐 '기타 적립'으로 샜다. 단가의 배수면 그 횟수만큼 인정한다.
+  //   온다. 단일 값과 고정 조합만 보면 누적 차액을 놓칠 수 있으므로 단가의
+  //   배수면 그 횟수만큼 인정한다.
   //   ⚠ 콤보(132 등)는 위에서 이미 처리했다 — 순서를 바꾸면 안 된다.
   const unit = state.expectedAmount || 0;
   // 자는 동안 1시간이 차면 '1시간 보상 + 5분 n회'가 한꺼번에 온다.
@@ -5511,7 +5508,7 @@ async function lpCollectProgress(channelId) {
 }
 
 // ── 다른 기기 적립 자동 감지(60분) ──────────────────────────────────────────
-// ⚠ 모바일 시청분은 PC 확장이 감지할 수 없다(제보: 모라라·아오토라). 내역 탭을
+// 모바일 시청분은 PC 확장이 직접 감지할 수 없다. 내역 탭을
 //   열 때만 맞추면 며칠치가 한 건으로 뭉치므로, 주기적으로 확인한다.
 //   치지직 탭 유무는 보지 않는다 — 모바일로 볼 때 PC 탭이 열려 있을 이유가 없다.
 const LP_RECONCILE_ALARM = "logpower:reconcile";
@@ -6553,8 +6550,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
         if (chrome.runtime.lastError || downloadId == null) {
-          // ⚠ 크롬이 준 실제 사유를 버리지 않는다. 파일명에 못 쓰는 문자가 있으면
-          //   여기서 "Invalid filename" 이 온다(제보: 특정 방송에서만 저장 실패).
+          // 파일명 오류 등 브라우저가 반환한 실패 사유를 그대로 전달한다.
           sendResponse({
             ok: false,
             reason: "start-failed",

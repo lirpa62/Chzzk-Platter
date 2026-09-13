@@ -1824,8 +1824,8 @@
   // 채팅 활성도와 실제 시각 병기 설정에서 독립된 opt-in 기능이다.
   const VOD_TITLE_CHANGES_KEY = "cheeseVodTitleChanges";
   let vodTitleChangesOn = false;
-  // 다시보기 AI 생성 챕터 숨김(전역, 기본 OFF=표시). 치지직이 일부 다시보기에 자동 생성하는
-  // 챕터(재생바 분할 + 좌하단 챕터 제목)가 스포가 될 수 있다는 피드백 → 옵션으로 숨김.
+  // 다시보기 AI 생성 챕터 숨김(전역, 기본 OFF=표시). 자동 생성된 챕터가 내용을
+  // 미리 드러내지 않도록 재생바 분할과 좌하단 챕터 제목을 함께 숨긴다.
   // 켜면 html 에 cheese-vod-chapter-hide 클래스를 붙이고 CSS(content.css)가 숨긴다.
   const VOD_CHAPTER_HIDE_KEY = "cheeseVodChapterHide";
   let vodChapterHideOn = false;
@@ -6982,7 +6982,7 @@
   // ⚠ 채팅 활성도가 같은 공유 수집을 돌리는 동안에는 이 진행률을 잠시 지운다
   //   (updateVodTitleChangesProgress 의 중복 표시 방지). 그런데 그 사이 제목 수집이
   //   먼저 끝나 promise 가 비면, 예전에는 아래 조건에 걸려 아무것도 다시 그리지
-  //   않아 버튼이 영영 사라졌다(제보: 간혹 진행률 버튼이 안 보임).
+  //   않아 버튼이 영영 사라졌다(간혹 진행률 버튼이 안 보임).
   //   → 아직 완료 표시를 보여 줄 시간이 남아 있으면(completeTimer) 그것도 복구한다.
   function syncVodTitleChangesProgress() {
     const videoNo = getCurrentVideoNo();
@@ -7399,7 +7399,7 @@
   }
 
   // 적립 claim 폴링용 채널 ID. ⚠ getCurrentLiveChannelId 는 /live/ 전용이라
-  // 채널 홈에서 팔로우하면 폴링이 아예 돌지 않아 팔로우 보상을 놓쳤다(제보).
+  // 채널 홈에서 팔로우하면 폴링이 아예 돌지 않아 팔로우 보상을 놓쳤다.
   // 팔로우·후원 보상은 라이브가 아니어도 생기므로 /channel/<id> 와 /<id> 도 받는다.
   // (con-chzzk 도 같은 방식으로 live/ 를 선택적으로 매칭한다.)
   function getLogPowerChannelId() {
@@ -8364,7 +8364,7 @@
   // seen 추적으로 같은 claim 반복 PUT을 줄인다(메모리, 채널별).
   const LOGPOWER_CLAIM_BASE = "https://api.chzzk.naver.com/service/v1/channels";
   // 시청 외 적립 유형. ⚠ 후원·구독선물은 claims 로 내려오지 않는 것으로 확인됐다
-  // (제보: 후원 직후에도 claims: []). 여기 걸리는 건 사실상 FOLLOW 정도지만,
+  // (후원 직후에도 claims: []). 여기 걸리는 건 사실상 FOLLOW 정도지만,
   // 서버가 언젠가 내려주면 그대로 기록되도록 목록은 유지한다.
   const LOGPOWER_OTHER_CLAIM_TYPES = new Set([
     "FOLLOW",
@@ -8525,7 +8525,7 @@
 
   async function collectLogPowerClaims(channelId, isCurrent) {
     // ⚠ 라이브 전용 ID 를 쓰면 채널 홈에서 팔로우해도 여기서 바로 빠져나가
-    //    팔로우 보상(claims 의 FOLLOW)을 영영 못 받는다(제보) → 폴링과 같은
+    //    팔로우 보상(claims 의 FOLLOW)을 영영 못 받는다 → 폴링과 같은
     //    범위(getLogPowerChannelId)를 쓴다.
     const claims = await fetchLogPowerClaims(channelId);
     if (!isCurrent()) return;
@@ -8600,8 +8600,7 @@
     }
     if (hourRewardAmount > 0) {
       if (isCurrent()) startWatchHourTimer(channelId);
-      // 내역 기록은 토스트 옵션과 무관하게 남긴다 — 알림을 끄고 쓰는 사용자도
-      // 내역은 보고 싶어 한다(제보).
+      // 토스트 표시 여부와 적립 내역 기록은 서로 독립적으로 처리한다.
       const logMeta = await resolveChannelMeta(channelId);
       // ⚠ claims 의 amount 는 '구독 부스팅이 반영된 실제 지급액'이다(실측: 티어1 120,
       // 티어2 200, 미구독 100). 반면 claim-list 의 amount 는 부스팅 전 기본 단가다.
@@ -8611,7 +8610,7 @@
       const boost = hourUnit > 0 ? hourRewardAmount / hourUnit : 1;
       // ⚠ 예전에는 여기서 5분 보상 12회분을 추정해 fiveMinAmount 로 함께 남겼다.
       //   이제 5분 보상은 background 가 받을 때마다 실측으로 세어 따로 기록하므로
-      //   여기서 또 더하면 같은 보상이 두 번 잡힌다(제보: 모라라 132 중복).
+      //   여기서 다시 더하면 같은 보상이 중복된다.
       void appendLogPowerLog({
         id: hourClaimId,
         at: Date.now(),
@@ -8703,7 +8702,7 @@
   // 요청하고, background broadcast(LOG_POWER_WATCH_REWARD_STATUS)를 받아 배지의 적립
   // 슬롯을 토글한다. 1시간 타이머(아래)는 claim 폴링과 함께 content가 그대로 담당한다.
   // ── 통나무파워 획득 내역 ───────────────────────────────────────────────────
-  // 치지직은 '언제 얼마나 받았는지'를 볼 방법을 주지 않는다(제보). 그래서 1시간 시청
+  // 치지직은 '언제 얼마나 받았는지'를 볼 방법을 주지 않는다. 그래서 1시간 시청
   // 보상을 획득하는 순간을 우리가 기록해 둔다.
   //
   // ⚠ 이 기록은 '자동 획득'이 켜져 있을 때만 쌓인다 — 획득 시점을 아는 경로가
@@ -8793,7 +8792,7 @@
   // 남은 시간부터 재개한다. 단 이탈 시간이 이 값을 넘으면 타이머를 종료한다.
   // ⚠ 30분이었는데 1시간으로 늘렸다. 다른 채널을 잠깐 보고 돌아오면 이어서 채워야
   //   하는데(치지직은 시청 시간을 누적으로 센다 — 실측: 채널을 옮겼다 돌아오니
-  //   87분 만에 1시간 보상이 들어왔다), 30분이 넘으면 타이머가 초기화됐다(제보).
+  //   87분 만에 1시간 보상이 들어왔다), 30분이 넘으면 타이머가 초기화됐다.
   const LOGPOWER_HOUR_AWAY_LIMIT_MS = 60 * 60 * 1000; // 이탈 허용 1시간
   let logPowerHourAccountId = ""; // 현재 도는 타이머의 소유 계정
   let logPowerHourInterval = 0; // 1초 카운트다운 인터벌
@@ -9919,7 +9918,7 @@
   function handleCommentTimestampDocumentClick(event) {
     // ⚠ 코드가 쏜 클릭(.click())은 무시한다. 팔로우 자동 갱신이 사이드바의 '새로고침'
     //   버튼을 주기적으로 누르는데, 그게 '바깥 클릭'으로 판정돼 열어 둔 '내 채팅 기록'
-    //   패널이 스스로 닫혔다(제보: 자동 갱신을 켜면 창이 꺼짐).
+    //   패널이 스스로 닫혔다(자동 갱신을 켜면 창이 꺼짐).
     //   진짜 사용자 클릭만 isTrusted=true 다.
     if (!event.isTrusted) return;
     // 기능 켜기/끄기 메뉴 항목 클릭 → 토글.
@@ -9934,7 +9933,7 @@
     // 메뉴 바깥 클릭 → 메뉴 닫기(버튼 클릭은 자체 핸들러가 처리).
     const menu = event.target.closest(`.${COMMENT_FEATURE_MENU_CLASS}`);
     // ⚠ '내 채팅 기록' 버튼도 예외로 둔다. 예전엔 댓글 버튼만 예외라, 리캡 버튼 클릭이
-    //   '바깥 클릭'으로 판정돼 방금 연 패널을 그 자리에서 닫았다(제보: 채팅을 눌러 보기도
+    //   '바깥 클릭'으로 판정돼 방금 연 패널을 그 자리에서 닫았다(채팅을 눌러 보기도
     //   전에 닫힘). 버튼 자체 핸들러가 stopPropagation 하지만, 치지직이 버튼 노드를 다시
     //   만들면 그 리스너가 사라져 이 document 핸들러만 남는다.
     const button = event.target.closest(
@@ -10135,7 +10134,7 @@
   const CHAT_PEAK_MIN_EMOTICON_COUNT = 2;
   // 순차 수집 상한(무한 루프 방지용 안전장치).
   // ⚠ 예전 60 은 너무 낮았다 — 채팅이 몰리는 영상은 페이지당 1분도 못 나가서
-  //   14.4시간 영상이 6% 만 수집되고 나머지가 바닥으로 그려졌다(제보, 실측 984페이지).
+  //   14.4시간 영상이 6% 만 수집되고 나머지가 바닥으로 그려졌다(실측 984페이지).
   const CHAT_GRAPH_MAX_PAGES = 1500;
   // 후원·구독을 area 로 그릴 최소 구간 수. 이보다 드물면 선으로 찍는다.
   // ⚠ 실측: 후원 125건은 area 가 흐름을 보여 주지만, 구독 8건은 292/300 구간이 0 이라
@@ -10293,8 +10292,8 @@
     } catch {}
   }
 
-  // 업로드 영상(videoType: UPLOAD)에는 채팅이 없다 — 채팅 API 가 400 을 준다
-  // (제보로 확인). 영상별로 한 번만 조회해 캐시한다.
+  // 업로드 영상(videoType: UPLOAD)은 채팅 API가 400을 반환한다. 영상별로 한 번만
+  // 조회해 캐시한다.
   const uploadVideoCache = new Map(); // videoNo → true(업로드) | false(다시보기)
   const UPLOAD_VIDEO_CACHE_MAX = 100;
 
@@ -10321,7 +10320,7 @@
 
   // 채팅을 끝까지 훑어 구간별로 센다. duration 은 초 단위.
   //
-  // ⚠ 표본(구간마다 200건을 떠서 밀도만 재는 방식)도 만들어 봤지만 부정확했다(제보).
+  // ⚠ 표본(구간마다 200건을 떠서 밀도만 재는 방식)도 만들어 봤지만 부정확했다.
   //   표본은 지점 사이를 보간할 뿐이라 그 사이의 실제 변동을 못 본다. 게다가 표본을
   //   전수와 비슷한 정확도까지 늘리면 요청 수도 비슷해져 이점이 사라진다.
   //   → 느려도 전부 센다. 대신 진행률을 보여 주고 결과를 캐시해 두 번째부터는 즉시.
@@ -10530,7 +10529,7 @@
         return `<polygon class="cheese-chat-graph-fill ${cls}" points="0,${H} ${pts} ${W},${H}"/>`;
       }
       // ⚠ 선 모드는 자체 정규화하면 안 된다. 후원이 1건뿐인 영상에서 그 1건이
-      //   최대치(=채팅 peak 높이)로 그려져 '많아 보이는' 착시가 생겼다(제보).
+      //   최대치(=채팅 peak 높이)로 그려져 '많아 보이는' 착시가 생겼다.
       //   채팅과 같은 축을 써서 높이가 실제 건수를 뜻하게 한다.
       return bins
         .map((b, i) => {
@@ -11452,7 +11451,7 @@
 
   // MAIN world(missionDonate.js)가 미션 후원 요청을 잡아 알려 준다.
   // ⚠ 확정되면 purchase/history 로 넘어오지만 그 시각은 '확정된 순간'이라
-  //   다시보기 위치를 잡을 수 없다(제보). 여기서 '건 순간'을 남겨 둔다.
+  //   다시보기 위치를 잡을 수 없다. 여기서 '건 순간'을 남겨 둔다.
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data?.source !== "cheese-mission-donate") return;
@@ -11769,7 +11768,7 @@
   }
 
   // 채팅에 뜨지 않는 기록(구독권 선물 받음, 대기 미션 등)은 다시보기 채팅 API 로는
-  // 절대 나오지 않는다(제보: 라이브엔 보이는데 다시보기엔 없음). 절대 시각만 있는
+  // 절대 나오지 않는다(라이브엔 보이는데 다시보기엔 없음). 절대 시각만 있는
   // 로컬 기록을 방송 시작 시각 기준으로 재생 위치로 환산해 목록에 끼워 넣는다.
   function recapOffscreenRows(storedItems, videoNo, startAt, durationSec) {
     if (!(startAt > 0)) return [];
@@ -11895,7 +11894,7 @@
     if (!Number.isFinite(offset)) return "";
     // ⚠ 후원 키를 넣으면 안 된다(vodFallbackKey 와 같은 이유). 후원 내역을 가져오면
     //   채널 revision 이 올라가 이미 수집한 다시보기를 다시 모으는데, 그때 같은 채팅에
-    //   후원 정보가 붙으면 키가 달라져 별개 메시지로 쌓인다(제보: 이미 가져온 채팅이
+    //   후원 정보가 붙으면 키가 달라져 별개 메시지로 쌓인다(이미 가져온 채팅이
     //   중복 표시). 발신자+재생위치+본문이면 같은 메시지로 보고, 후원 정보는
     //   compactVodRows 병합 쪽에서 채워 넣는다.
     return `vod:${recapChatHash(message)}|${offset}|${String(text || "")}`.slice(
@@ -12424,7 +12423,7 @@
     }
     root.style.overflow = "visible";
     const panel = document.createElement("div");
-    // 모양은 내 채팅 기록 패널과 같게 한다(요청: 같은 UI).
+    // 내 채팅 기록 패널과 같은 모양을 사용한다.
     panel.className = `${VIDEO_COMMENT_PANEL_CLASS} ${ROLE_CHAT_PANEL_CLASS}`;
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-label", "방장·매니저·파트너 채팅");
@@ -12685,7 +12684,7 @@
       const key = String(match[1] || "").trim();
       // ⚠ 메시지에 딸려 온 맵(extras.emojis)만 보면 안 된다. 다시보기 API 는
       //   이 값을 비워 보내는 경우가 많고(실측 {}), 리캡 '가져오기'로 저장된
-      //   기록에는 아예 없다 → 구독 중인데도 글자로 보였다(제보).
+      //   기록에는 아예 없다 → 구독 중인데도 글자로 보였다.
       //   라이브 대화상자와 같은 저장 사전(dlgEmojiMap)을 함께 본다.
       const url = (map && map[key]) || dlgEmojiMap[key];
       if (key in dlgLockedEmojis) {
@@ -12832,7 +12831,7 @@
       chip.setAttribute("aria-pressed", on ? "true" : "false");
       // ⚠ 다시 그리면 이 칩이 문서에서 떨어져 나간다. 그 뒤 document 핸들러가
       //   event.target.closest(패널)로 판정하면 떨어진 노드라 패널을 못 찾아
-      //   '바깥 클릭'으로 오판해 방금 누른 패널을 닫는다(제보). 전파를 끊는다.
+      //   '바깥 클릭'으로 오판해 방금 누른 패널을 닫는다. 전파를 끊는다.
       chip.addEventListener("click", (event) => {
         event.stopPropagation();
         if (recapPanelFilter === key) return;
@@ -16825,7 +16824,7 @@
   let chatButtonWrap = true;
   // 구버전 moa 호환 폴백. ⚠ 이 마커들은 '이미 렌더된 채팅 요소'에 박히므로, 사용자가
   // moa 기능을 끈 뒤에도 스크롤백에 그대로 남는다. 그대로 신뢰하면 한 번 켰다 끈 것만으로
-  // 우리 기능이 영영 잠기는 한쪽 방향 래치가 된다(제보: '가려진 채팅 표시'가 계속 비활성).
+  // 우리 기능이 영영 잠기는 한쪽 방향 래치가 된다('가려진 채팅 표시'가 계속 비활성).
   //
   // 신버전 moa 는 기능을 켜면 <html>에 *-enabled 클래스를 반드시 붙인다. 그러므로
   // moa 가 붙인 <html> 클래스가 하나라도 보이면(=신버전) 폴백은 쓰지 않고 위의 enabled
@@ -17029,7 +17028,7 @@
         break;
       }
       // ⚠ 승부예측 패널을 품은 조상까지 올라가면 미션만 끄려는데 예측도 같이
-      //   사라진다(제보). 파티(_icon_party_)는 위에서 막고 있었는데 예측이
+      //   사라진다. 파티(_icon_party_)는 위에서 막고 있었는데 예측이
       //   빠져 있었다 → 예측 패널이 함께 들어 있으면 더 올라가지 않는다.
       if (node !== first && containsPredictionPanel(node)) break;
       if (node.querySelector('button[class*="_mission_button_"]')) {
@@ -19474,7 +19473,7 @@
       !findResizableChatAside() &&
       // ⚠ 넓은 화면·전체화면에서는 영상이 가로를 꽉 채워야 한다. 이때도 margin-left 를
       //   붙여 두면 접혀 있던 채팅 폭만큼 왼쪽에 빈칸이 남고, 전체화면으로 가도 그
-      //   빈칸이 따라다닌다(제보). 두 모드에서는 시프트를 걷어낸다.
+      //   빈칸이 따라다닌다. 두 모드에서는 시프트를 걷어낸다.
       !isVodWideOrFullscreen();
     if (!want) {
       stopVodShiftWatch();
@@ -19579,7 +19578,7 @@
     // 그래서 접힘 중에 우리가 폭을 덮으면 그 배치를 깨뜨린다.
     //
     // 단 '아래 배치'를 켜면 우리가 _content_right_ 를 댓글 앞으로 옮겨 버리므로, 채팅이
-    // 비운 자리를 채울 것이 없어 빈칸으로 남는다(제보). 이때는 접힘도 '채팅 없음'과
+    // 비운 자리를 채울 것이 없어 빈칸으로 남는다. 이때는 접힘도 '채팅 없음'과
     // 같이 취급해 영상이 전체 폭을 쓰게 한다.
     const foldedAway = isVodChatFoldedAway();
     const moreMoved =
@@ -19681,7 +19680,7 @@
     right.removeAttribute(VOD_MORE_MOVED_ATTR);
     // ⚠ 치지직은 영상 더보기를 영상 옆에 붙이려고 인라인 margin-top(음수)을 쓴다.
     // 우리가 아래로 옮겨 둔 동안 그 값이 '옮겨진 위치' 기준으로 남아 있는데, 원위치로
-    // 되돌릴 때 그대로 두면 영상 위로 올라와 겹친다(제보: 아래 배치를 켰다 끄면 겹침).
+    // 되돌릴 때 그대로 두면 영상 위로 올라와 겹친다(아래 배치를 켰다 끄면 겹침).
     // 값을 우리가 계산하지 않고 지우기만 하면 치지직이 곧 올바르게 다시 쓴다.
     right.style.removeProperty("margin-top");
     vodMoreOrigParent = null;
@@ -21187,7 +21186,7 @@
 }`,
           // ⚠ '메뉴 확장' 버튼의 툴팁은 _label_left_ 가 left:0 으로 왼쪽에 고정한다.
           //   버튼이 화면 오른쪽 끝으로 가면 툴팁이 오른쪽으로 자라 화면 밖으로
-          //   밀린다(제보). 기준을 오른쪽으로 뒤집어 버튼 안쪽으로 펼치게 한다.
+          //   밀린다. 기준을 오른쪽으로 뒤집어 버튼 안쪽으로 펼치게 한다.
           //   사이드바 안의 같은 버튼(접힘 상태)도 오른쪽 끝에 있으므로 함께 뒤집는다.
           `header#header button[aria-controls="navigation"] [class*="_label_"],
 aside#sidebar button[aria-controls="navigation"] [class*="_label_"] {
@@ -23344,7 +23343,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!header) return null;
     // ⚠ 프로필 팝오버도 header 안에 있다. 그 안에는 .blind="New"(내 프라임 콘텐츠)
     //   와 svg mask(내 통나무 파워)를 가진 버튼이 있어 아래 폴백에 걸린다. 그러면
-    //   라운지 버튼이 수신함 옆이 아니라 팝오버 안으로 들어간다(제보).
+    //   라운지 버튼이 수신함 옆이 아니라 팝오버 안으로 들어간다.
     //   → 메뉴 항목(role=menuitem)과 팝오버 내부 버튼은 후보에서 뺀다.
     const buttons = Array.from(header.querySelectorAll("button")).filter(
       (button) =>
@@ -23353,7 +23352,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 팝오버 판정은 해시 클래스가 아니라 구조로 한다(해시는 배포마다 바뀐다).
         // 프로필 메뉴는 role=menubar 목록이고, 그 조상에 프로필 버튼이 있다.
         !button.closest('[role="menubar"]') &&
-        // ⚠ 툴팁 안의 '닫기' 버튼을 수신함으로 오인해 붉은 점이 그 위에 붙었다(제보).
+        // ⚠ 툴팁 안의 '닫기' 버튼을 수신함으로 오인해 붉은 점이 그 위에 붙었다.
         //   툴팁은 화살표(_arrow_)·꼬리(_tail_)를 가진 말풍선이라 그 구조로 배제한다.
         //   해시(_tooltip_12cr4_)에 기대지 않는다 — 배포마다 바뀐다.
         !button.closest('[class*="_tooltip_"]') &&
@@ -23486,7 +23485,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (!anchorItem || !box) return;
     let btn = document.getElementById(LOUNGE_BUTTON_ID);
     let item = btn?.parentElement;
-    // 이전 버전이 팝오버 안에 붙여 둔 버튼이 남아 있으면 걷어낸다(제보).
+    // 이전 버전이 팝오버 안에 붙여 둔 버튼이 남아 있으면 걷어낸다.
     if (btn && isInsideProfilePopover(btn)) {
       item?.remove();
       btn = null;
@@ -23948,7 +23947,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // 자가 발화를 차단한다.
       // ⚠ 이 판정을 아래 두 작업보다 '먼저' 한다. 예전엔 뒤에 있었는데, 우리 목록을
       //   다시 그리면 그 <li> 수백 개가 addedNodes 로 들어와 applyFollowOfflineFromMutations
-      //   가 매 배치 전수 조사를 했다(제보: 팔로우 300개 + 그룹에서 탭 이동이 느림).
+      //   가 매 배치 전수 조사를 했다(팔로우 300개 + 그룹에서 탭 이동이 느림).
       //   우리가 만든 변이는 애초에 훑을 이유가 없다.
       if (
         mutations.length &&
@@ -24465,7 +24464,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     // 조회 트리거. ⚠ 예전엔 `if (!status)` 였는데, 한 번 캐시가 차면 이 호출 자체가
     // 사라져 fetch 안의 30초 TTL 에 영영 도달하지 못했다 → 채널 페이지에 머무는 동안
-    // 라이브↔오프라인 전환이 반영되지 않았다(제보). TTL 판단은 fetch 쪽에 맡기고
+    // 라이브↔오프라인 전환이 반영되지 않았다. TTL 판단은 fetch 쪽에 맡기고
     // 여기서는 항상 부른다(캐시가 신선하면 즉시 return 하므로 네트워크 비용 없음).
     void fetchChannelLiveStatus(channelId);
   }
@@ -28736,7 +28735,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const viewerCount = Number(live.concurrentUserCount) || 0;
     // ⚠ 카드 구조가 바뀌어 시청자 수는 _badge_ 안 <span> 에 들어 있다. 예전 셀렉터
     //   (_count_badge_ / _description_)만 보면 배지를 못 찾아 갱신이 통째로 건너뛰고,
-    //   템플릿(첫 카드)의 숫자가 모든 복제 카드에 그대로 남았다(제보: 전부 같은 값).
+    //   템플릿(첫 카드)의 숫자가 모든 복제 카드에 그대로 남았다(전부 같은 값).
     //   현재·과거 구조를 모두 훑고, 마지막엔 'N명' 형태의 텍스트로 찾는다.
     const viewerBadge =
       li.querySelector('div[class*="_count_badge_"] span:not(.blind)') ||
@@ -31864,7 +31863,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       // 예전엔 첫 li 의 이름 영역만 봤는데, 그 채널에 배지가 없으면 icon 이 빈 값이 되고
       // 모든 항목이 스타일 없는 폴백(cheese-cf-official)으로 그려져 마크가 사라졌다.
       // 목록은 라이브/오프라인에 따라 순서가 바뀌므로, 어떤 채널이 맨 앞에 오느냐에 따라
-      // 증상이 생겼다 사라졌다 했다(제보). 목록 전체에서 처음 발견되는 아이콘을 쓴다.
+      // 증상이 생겼다 사라졌다 했다. 목록 전체에서 처음 발견되는 아이콘을 쓴다.
       icon:
         clean(nameEl?.querySelector('[class*="_icon_"]')?.className) ||
         clean(
@@ -31951,7 +31950,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let memoLoaded = false;
   let memoActiveId = "";
   let memoPickerOpen = false; // 방송 선택 드롭다운 열림 여부(커스텀 목록)
-  // 창 위치·크기. 저장소를 기다리면 기본 위치에 떴다가 옮겨져 깜빡인다(제보) →
+  // 창 위치·크기. 저장소를 기다리면 기본 위치에 떴다가 옮겨져 깜빡인다 →
   // 한 번 읽어 메모리에 들고 있다가 다음부터는 만들 때 바로 적용한다.
   let memoWindowRect = null;
   let memoWindowRectLoaded = false;
@@ -31989,9 +31988,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const memoLine = (session, item) =>
     `${memoTime(memoItemSec(session, item))} ${String(item?.text || "").trim()}`;
 
-  // ⚠ 항목(시간+내용)은 절대 쪼개지 않는다. 5000자에 시간만 걸치거나 내용 일부만
-  //   걸쳐도 그 항목 전체를 다음 쪽으로 넘긴다(요청). 한 항목이 혼자 상한을 넘으면
-  //   자기 쪽을 따로 갖되 자르지는 않는다 — UI 에서 그 쪽을 표시해 알린다.
+  // 시간과 내용은 한 항목으로 유지한다. 글자 수 상한을 넘는 항목은 자르지 않고
+  // 별도 페이지에 배치한 뒤 UI에서 초과 상태를 알린다.
   function memoPaginate(session, limit = MEMO_COPY_LIMIT) {
     const pages = [];
     let current = "";
@@ -32127,7 +32125,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // ⚠ 채널 id 와 방송 시작 시각은 다른 기능이 비동기로 채워 넣는다. 버튼을 누른
   //   시점에 아직 비어 있으면 창이 안 뜨고, 그 사이 값이 채워져 두세 번째 클릭에서야
-  //   열렸다(제보). 여기서 직접 받아 와 첫 클릭에 바로 열리게 한다.
+  //   열렸다. 여기서 직접 받아 와 첫 클릭에 바로 열리게 한다.
   async function memoContextReady() {
     const liveId = getCurrentLiveChannelId();
     if (liveId) {
@@ -32167,7 +32165,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // ⚠ 창을 먼저 '동기적으로' 만든 뒤 내용을 채운다. 예전에는 저장소·API 를 모두
   //   기다린 다음 만들어서, 그 사이 다시 누르면 창이 아직 없어 open 이 한 번 더
-  //   돌거나(중복) 세 번째 클릭에서 닫혀 버렸다(제보: 간헐적으로 한 번에 안 열림).
+  //   돌거나(중복) 세 번째 클릭에서 닫혀 버렸다(간헐적으로 한 번에 안 열림).
   function openMemoWindow() {
     let win = document.querySelector(`.${MEMO_WINDOW_CLASS}`);
     if (!win) {
@@ -32200,7 +32198,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return;
     }
     // ⚠ 다시보기에서도 새로 만들 수 있어야 한다. 라이브를 놓쳤거나 그때 메모하지
-    //   않은 방송도 다시보기를 보며 적을 수 있어야 하기 때문(제보). 시작 시각을
+    //   않은 방송도 다시보기를 보며 적을 수 있어야 하기 때문. 시작 시각을
     //   아는 경우(라이브 다시보기)에만 만든다 — 업로드 영상은 기준점이 없다.
     const session = findMemoSession(context.channelId, context.startAt, {
       create: Boolean(context.startAt),
@@ -32265,12 +32263,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 같은 채널의 다른 방송(다른 날짜)으로 전환하는 목록.
     // ⚠ 지금 보고 있는 방송이 목록에 없을 수 있다(메모가 아직 0개). 그때도 항목으로
     //   넣어 줘야 다른 방송을 골랐다가 되돌아올 수 있다. 예전에는 이 항목이 빠져
-    //   목록이 1개로 줄면 드롭다운 자체가 사라졌다(제보).
+    //   목록이 1개로 줄면 드롭다운 자체가 사라졌다.
     const pickerRows = context?.channelId
       ? memoChannelSessions(context.channelId)
       : [];
     // ⚠ '지금 보고 있는 방송'을 기준으로 넣는다. 활성 방송(session)으로 판단하면
-    //   드롭다운에서 지난 방송을 고르는 순간 현재 방송이 목록에서 빠졌다(제보).
+    //   드롭다운에서 지난 방송을 고르는 순간 현재 방송이 목록에서 빠졌다.
     //   메모가 0개여도 목록에 있어야 되돌아올 수 있다.
     const currentSession = context?.channelId
       ? findMemoSession(context.channelId, context.startAt)
@@ -32374,7 +32372,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const sec = memoCurrentSec(context);
         if (sec == null || !context?.channelId) return;
         // ⚠ 지금 보고 있는 방송에 넣는다. 드롭다운으로 지난 방송을 펼쳐 둔 상태에서
-        //   추가하면 그쪽에 들어가 버려, 현재 다시보기에는 아무것도 못 적었다(제보).
+        //   추가하면 그쪽에 들어가 버려, 현재 다시보기에는 아무것도 못 적었다.
         //   대상이 활성 방송과 다르면 활성도 함께 옮겨 결과가 바로 보이게 한다.
         const target = findMemoSession(context.channelId, context.startAt, {
           create: Boolean(context.startAt),
@@ -32600,7 +32598,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const head = event.target.closest?.(".cheese-memo-head");
       if (!head || event.button !== 0) return;
       // ⚠ 머리말 안의 조작 요소는 드래그로 삼지 않는다. select 를 빠뜨려 두면
-      //   아래 preventDefault 가 드롭다운이 열리는 것까지 막는다(제보: 방송 선택이
+      //   아래 preventDefault 가 드롭다운이 열리는 것까지 막는다(방송 선택이
       //   눌리지 않음).
       if (event.target.closest("button, input, select, textarea, a")) return;
       const rect = win.getBoundingClientRect();
@@ -32639,7 +32637,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     // 즐겨찾기 버튼이 있으면 그 옆에, 없으면 같은 액션 영역을 직접 찾는다.
     // ⚠ 예전에는 즐겨찾기 버튼이 없으면 그대로 포기해서, 전용 팔로잉 목록이나
-    //   즐겨찾기를 끈 사용자에게는 메모 버튼이 아예 뜨지 않았다(제보). 메모는
+    //   즐겨찾기를 끈 사용자에게는 메모 버튼이 아예 뜨지 않았다. 메모는
     //   즐겨찾기와 무관한 기능이므로 액션 영역만 찾으면 된다.
     let anchor = favorite;
     if (!anchor) {
@@ -33326,7 +33324,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 메인 상단 라이브(캐러셀 _item_ > _status_, 단독 _inner_ > _badge_)는 카드와
   // 마크업이 전혀 다르다. 썸네일이 링크가 아니고, 시청자 수가 썸네일 밖에 있으며,
   // transform으로 슬라이드되는 구조라 위치를 옮기려고 기준점을 만들면 치지직
-  // 레이아웃이 무너졌다(제보: 화면이 검게 나옴). 그래서 이 영역은 좌표를 건드리지
+  // 레이아웃이 무너졌다(화면이 검게 나옴). 그래서 이 영역은 좌표를 건드리지
   // 않는 '숨김'만 지원한다.
   function findLiveViewerCountHiddenOnlyTargets(scope) {
     const badges = [];
@@ -33406,7 +33404,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         continue;
       }
       // '치지직 N일차' 배지는 우측 상단에 따로 놓인다. 시청자 수를 같은 자리로
-      // 옮기면 겹치므로(제보) 좌표를 잡을 때 이 배지를 피한다.
+      // 옮기면 겹치므로 좌표를 잡을 때 이 배지를 피한다.
       const nthDayBadge =
         badgeArea?.querySelector('div[class*="_nth_day_"]') || null;
       targets.push({ card, countBadge, liveBadge, thumbnail, nthDayBadge });
@@ -33467,7 +33465,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
     // ⚠ '숨김'에서 위치 지정으로 바꾸면 배지에 display:none이 남아 있어
     //   getBoundingClientRect()가 전부 0으로 나온다. 그러면 아래 hasLayout이
-    //   false가 되어 좌표 계산을 건너뛰고, 한 번 더 눌러야 제자리를 찾았다(제보).
+    //   false가 되어 좌표 계산을 건너뛰고, 한 번 더 눌러야 제자리를 찾았다.
     //   크기를 재기 전에 숨김을 먼저 걷어낸다.
     positionTargets.forEach(({ countBadge }) =>
       countBadge.classList.remove(LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS),
@@ -34255,7 +34253,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 프로필 이미지 URL → 치지직 리사이즈 썸네일.
   // ⚠ 원본을 그대로 쓰면 안 된다. 채널 프로필 원본은 수백 KB 라, 모달에서 팔로잉
   //   수십~수백 개를 한꺼번에 그리면 28px 자리에 원본이 줄줄이 내려오며 눈에 보이게
-  //   늦다(제보: 캐릭터 선택창·그룹 추가창 프로필이 느리게 뜬다). 사이드바 목록은
+  //   늦다(캐릭터 선택창·그룹 추가창 프로필이 느리게 뜬다). 사이드바 목록은
   //   처음부터 type=f120_120_na 로 요청해서 빠른데, 모달만 빠져 있었다.
   //   같은 URL 을 쓰면 사이드바가 이미 받아 둔 것을 브라우저 캐시에서 재사용한다.
   function customFollowProfileThumb(imageUrl) {
@@ -36052,7 +36050,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const favSig = [...customFollowFavorites].sort().join(",");
     // ⚠ 사각 프로필 목록도 넣어야 한다. 없으면 접기/펼치기처럼 sig 를 새로 계산하는
     //   경로에서 예전 값과 같아져 DOM 재생성이 통째로 건너뛰고, 클래스가 빠진
-    //   항목이 그대로 남는다(제보: 접었다 펴면 적용이 풀린다).
+    //   항목이 그대로 남는다(접었다 펴면 적용이 풀린다).
     const affinitySig = affinityOn
       ? `${affinityOrder.join(",")}:${affinityScored?.length || 0}:${affinityLoadedAt}:${affinityHideOffline ? 1 : 0}:${affinityIndex}:${affinityShown}:${affinityInitial}:${affinityMore}`
       : "-";
@@ -36354,7 +36352,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   // 친밀도 섹션. 즐겨찾기·팔로잉과 같은 툴바(접기/펼치기)를 쓴다.
   // ⚠ 오프라인도 순서대로 함께 배치한다. 예전에는 '방송 중'과 '그 외'로 나눴는데
-  //   같은 채널이 두 번 보이는 문제가 있었고(제보), 나누지 않으면 점수 순서가
+  //   같은 채널이 두 번 보이는 문제가 있었고, 나누지 않으면 점수 순서가
   //   그대로 드러나 읽기도 쉽다. 오프라인을 빼고 싶으면 설정에서 숨긴다.
   function renderCustomFollowAffinity(h, expandedNow) {
     if (!affinityOn || !AFFINITY_API) return "";
@@ -37765,7 +37763,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 클릭 시 맨 앞으로 + 팝업 프레임에 포커스.
     // ⚠ 키보드 이벤트는 '포커스된 문서'에서만 발생한다. 부모(라이브 페이지)에 포커스가
     //   남아 있으면 팝업 안의 단축키(Shift+A/V, 방향키 seek)가 아예 호출되지 않는다
-    //   (제보: 팝업에서 방향키·오디오 믹서가 안 먹음). 팝업을 조작하면 그 프레임으로
+    //   (팝업에서 방향키·오디오 믹서가 안 먹음). 팝업을 조작하면 그 프레임으로
     //   포커스를 넘겨, 그 뒤 키 입력이 팝업 안에서 처리되게 한다. 부모를 클릭하면
     //   자연히 부모로 되돌아간다.
     popup.addEventListener("mousedown", () => {
@@ -39299,8 +39297,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           autoStartLoad: true,
           capLevelToPlayerSize: false, // 작은 미리보기라도 고화질 시작 허용
           backBufferLength: 30, // 미리보기에서 이미 재생한 구간을 계속 보관하지 않는다.
-          // '라이브 최신 재생' 옵션이 켜져 있으면 라이브 엣지에 최대한 붙인다(기본 3세그먼트
-          // 뒤 → 세그먼트가 길면 20~30초 지연되던 '30초 전부터 나온다' 피드백 대응).
+          // '라이브 최신 재생' 옵션이 켜져 있으면 라이브 엣지에 최대한 붙인다. 기본값은
+          // 세그먼트 길이에 따라 20~30초까지 지연될 수 있다.
           // 1세그먼트만 뒤로 두고, 지연이 커지면 자동으로 엣지로 따라잡게 최대 지연도 낮춘다.
           // 옵션이 꺼져 있으면 hls.js 기본값(안정적이나 지연 큼)을 쓴다.
           ...(followPreviewLiveEdge
@@ -46764,7 +46762,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function backfillClipVaultMeta() {
     if (!isClipVaultAvailable()) return;
     // ⚠ 제목만 보면 안 된다. 재생 화면에서 담은 항목은 og 메타로 제목·썸네일은 있어도
-    // 채널명·재생수가 비어 있다(제보: 채널명/재생수가 안 보일 때가 있음).
+    // 채널명·재생수가 비어 있다(채널명/재생수가 안 보일 때가 있음).
     const isIncomplete = (it) =>
       !it.title ||
       !it.thumb ||
@@ -46775,7 +46773,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const need = CLIP_VAULT_KINDS.some((k) => clipVault[k].some(isIncomplete));
     if (!need) return;
     // ⚠ 우리 패널의 카드는 치지직 클래스를 복제하므로 같은 셀렉터에 걸린다. 그걸 읽으면
-    // '제목 없음'인 우리 카드를 원본으로 착각해 메타가 영영 안 채워진다(제보: 패널을
+    // '제목 없음'인 우리 카드를 원본으로 착각해 메타가 영영 안 채워진다(패널을
     // 열어 둔 채로는 안 채워지고, 닫았다 열면 채워짐). 우리 패널은 제외한다.
     const byUid = new Map();
     if (isClipCardListPage()) {
@@ -47630,7 +47628,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         if (b) {
           // ⚠ 멱등 필수. 예전엔 매 패스(4회/초) innerHTML 을 다시 써서 SVG 노드가
           // 계속 교체됐고, mousedown~mouseup 사이에 교체되면 click 이 아예 발생하지
-          // 않는다(제보: 별표가 한 번에 안 눌리고 2~3번 눌러야 동작).
+          // 않는다(별표가 한 번에 안 눌리고 2~3번 눌러야 동작).
           const on = clipVaultHas("fav", uid);
           if (b.dataset.on !== String(on)) {
             b.dataset.on = String(on);
@@ -47665,7 +47663,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // pointerdown 시각을 남겨 두면, 그 직후의 재렌더/복원을 잠깐 미룰 수 있다.
     // ⚠ 삭제(×)와 별표는 여기서 처리한다. click 을 기다리면 그 사이 목록이 다시 그려져
     // 눌린 노드가 사라지고, 그러면 click 이 우리 버튼이 아니라 카드 <a> 로 가서 클립
-    // 페이지로 이동해 버린다(제보). pointerdown 은 노드 교체보다 먼저 발생한다.
+    // 페이지로 이동해 버린다. pointerdown 은 노드 교체보다 먼저 발생한다.
     document.addEventListener(
       "pointerdown",
       (e) => {
@@ -49475,7 +49473,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ...document.querySelectorAll('[role="alertdialog"][aria-modal="true"]'),
     ];
     // ⚠ 해시를 고정으로 박으면 치지직 배포마다 깨진다. 실제로 _9iogl_ → _ns3zq_ 로
-    // 바뀌면서, 새 빌드를 먼저 받은 사용자만 차단 버튼이 사라졌다(제보). 그래서
+    // 바뀌면서, 새 빌드를 먼저 받은 사용자만 차단 버튼이 사라졌다. 그래서
     // '해시가 무엇이든' 역할 클래스 이름만 보고 찾는다. 마지막에 열린 다이얼로그부터
     // 확인해 이전 프로필 팝업이 DOM에 잠시 남아 있어도 현재 팝업을 우선한다.
     for (let index = dialogs.length - 1; index >= 0; index -= 1) {
@@ -49496,7 +49494,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const CHAT_BLOCK_REINJECT_WINDOW_MS = 1500;
 
   // ⚠ 치지직 CSS module 해시(_9iogl_ → _ns3zq_ …)는 배포마다 바뀌고 사용자별로 순차
-  // 적용된다. 해시를 박아 두면 새 빌드를 먼저 받은 사용자에게만 기능이 사라진다(제보).
+  // 적용된다. 해시를 박아 두면 새 빌드를 먼저 받은 사용자에게만 기능이 사라진다.
   // 아래는 모두 해시를 뺀 '역할 이름'만으로 찾는다.
   function findChatProfileMenuList(pop) {
     return (
@@ -51460,7 +51458,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         popupPlayerWide = changes[POPUP_PLAYER_WIDE_KEY].newValue !== false;
         // ⚠ 이 값은 wideScreenAuto 플래그로 MAIN world 에 전달된다. 알리지 않으면
         //   팝업 안 audioMixer.js 가 예전 값을 계속 써서 설정을 바꿔도 넓은 화면이
-        //   적용되지 않았다(제보). 버튼·최대화질 쪽은 이미 알리고 있었다.
+        //   적용되지 않았다. 버튼·최대화질 쪽은 이미 알리고 있었다.
         if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
       }
       if (changes[POPUP_PLAYER_START_WITHOUT_CHAT_KEY]) {
@@ -51985,13 +51983,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             ?.newValue ?? [...customFollowFavorites],
           // ⚠ 여기 빠뜨리면 applyCustomFollowSettings 가 undefined 로 읽어 설정이
           //   통째로 날아간다. 접기/펼치기가 COLLAPSED_KEY 를 쓰면서 이 핸들러를
-          //   깨우기 때문에, 접었다 펴면 사각 설정이 지워졌다(제보).
+          //   깨우기 때문에, 접었다 펴면 사각 설정이 지워졌다.
           [CUSTOM_FOLLOW_SQUARE_KEY]:
             changes[CUSTOM_FOLLOW_SQUARE_KEY]?.newValue ??
             customFollowSquaresToStore(),
-          // ⚠ 사각 프로필과 같은 이유로 반드시 넣는다. 빠지면 applyCustomFollowSettings
-          //   가 undefined 로 읽어 '친밀도'가 꺼지고 다시 안 나타난다(제보:
-          //   즐겨찾기·그룹·팔로잉을 접으면 사라진다 — 접기가 이 핸들러를 깨운다).
+          // 사각 프로필과 마찬가지로 현재 값을 넘겨야 한다. 생략하면
+          // applyCustomFollowSettings가 undefined를 읽어 친밀도 설정을 초기화한다.
           [AFFINITY_ON_KEY]: changes[AFFINITY_ON_KEY]?.newValue ?? affinityOn,
           [AFFINITY_ORDER_KEY]: changes[AFFINITY_ORDER_KEY]?.newValue ?? [
             ...affinityOrder,
@@ -53888,9 +53885,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             reqId,
             ok,
             saved: ok ? resp.saved !== false : false,
-            // 실패 사유를 그대로 넘긴다. 예전엔 ok 만 보고 버려서 '저장하지
-            // 못했어요' 하나에 원인 6가지가 뭉쳐 있었다(제보: 왜 실패했는지
-            // 알 수 없음).
+            // 저장 실패 유형을 구분할 수 있도록 런타임 사유를 그대로 넘긴다.
             reason: chrome.runtime.lastError
               ? "disconnected"
               : String(resp?.reason || ""),

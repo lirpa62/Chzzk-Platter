@@ -1,9 +1,8 @@
 /* 수신함 '통나무파워' 탭.
    ⚠ 이 문서에는 content.css 가 주입되지 않는다(game.naver.com). 여기서 쓰는 색은
    커뮤니티 소식 탭(inboxCommunity.css)과 같은 방식으로 자체 정의한다. */
-/* 수신함은 원래 문서 자체가 목록을 스크롤한다. 우리 탭이 열리면 섹션 안에서만
-   스크롤해야 헤더·탭 바가 고정되고 iframe html 에 별도 스크롤바가 생기지 않는다
-   (제보: 커뮤니티 소식과 같은 증상). 커뮤니티 탭과 동일한 처리다. */
+/* 우리 탭에서는 섹션 안에서만 스크롤해 헤더와 탭 바를 고정하고 iframe 문서의
+   별도 스크롤바를 막는다. */
 html.cheese-inbox-logpower-active,
 html.cheese-inbox-logpower-active body,
 html.cheese-inbox-logpower-active #root {
@@ -12,9 +11,8 @@ html.cheese-inbox-logpower-active #root {
   overflow: hidden;
 }
 
-/* ⚠ 기본은 숨김. hidden 속성만으로는 치지직 섹션 CSS(display 지정)에 밀려 보인다
-   (제보: 다른 탭인데도 하단에 내용이 표시됨). 커뮤니티 소식 탭과 같이 .is-active
-   클래스로만 보이게 한다. */
+/* 치지직 섹션의 display 규칙이 hidden 속성을 덮으므로 .is-active 클래스가 있는
+   탭만 표시한다. */
 .cheese-inbox-logpower-section {
   display: none;
   flex-direction: column;

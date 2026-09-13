@@ -12,9 +12,8 @@
   function isWriteUrl(url) {
     return (
       /\/articles\/write/i.test(url) || // /ca-fe/cafes/{id}/articles/write
-      // ⚠ 수정 화면의 실제 경로는 /modify 다(제보로 확인:
-      //    /ca-fe/cafes/31342874/articles/8/modify). 예전엔 /edit 만 막고 있어
-      //    수정 화면에서 본문이 사라지는 문제가 남아 있었다. 둘 다 막는다.
+      // 수정 화면은 /edit 또는 /modify 경로를 사용한다. 두 경로 모두 편집 중인
+      // 본문을 변환 대상에서 제외한다.
       /\/articles\/\d+\/(?:edit|modify)/i.test(url) ||
       /ArticleWrite|ArticleUpdate|ArticleModify/i.test(url) // 구 에디터
     );
@@ -1077,7 +1076,7 @@
   function scan(root) {
     if (!(root instanceof Document || root instanceof Element)) return;
     // ⚠ 카페는 SPA 라 '글 보기 → 수정'으로 넘어가도 스크립트가 다시 로드되지 않는다.
-    //    로드 시점의 판정만 믿으면 수정 화면에서 본문이 사라진다(제보) → 매번 확인.
+    //    로드 시점의 판정만 믿으면 수정 화면에서 본문이 사라진다 → 매번 확인.
     if (isCafeWritePage()) return;
 
     if (root instanceof Element) {

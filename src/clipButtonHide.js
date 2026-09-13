@@ -382,11 +382,11 @@
       btn.type = "button";
       btn.className = `${like.className.replace(/\S*type_like\S*/g, "").trim()} ${CLIP_FAV_BTN_CLASS}`;
       // ⚠ 원형 배경과 아이콘 색은 button 이 아니라 안쪽 span(icon_wrap)·svg(icon)
-      //   규칙에 걸려 있다. svg 만 넣으면 배경이 빠진다(제보).
+      //   규칙에 걸려 있다. svg 만 넣으면 배경이 빠진다.
       //   클래스가 webpack 해시라 하드코딩할 수 없어 좋아요 버튼에서 harvest 한다.
       // ⚠ .className 을 쓰면 안 된다. SVG 요소의 className 은 문자열이 아니라
       //   SVGAnimatedString 객체여서 dataset 에 넣으면
-      //   '[object SVGAnimatedString]' 이 저장된다(제보).
+      //   '[object SVGAnimatedString]' 이 저장된다.
       //   getAttribute("class") 는 HTML·SVG 양쪽 모두 문자열을 준다.
       const harvestClass = (selector) =>
         like.querySelector(selector)?.getAttribute("class") || "";

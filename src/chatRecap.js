@@ -39,7 +39,7 @@
     if (el) el.textContent = text;
   };
   // 같은 이유로 표시/숨김도 이 함수로 통일한다. 마크업이 한 군데 어긋났을 때
-  // TypeError 로 화면 전체가 멈추는 일을 막는다(제보: refreshOnce 중단).
+  // TypeError 로 화면 전체가 멈추는 일을 막는다(refreshOnce 중단).
   const setHidden = (id, hidden) => {
     const el = document.getElementById(id);
     if (el) el.hidden = hidden;
@@ -812,7 +812,7 @@
   // 값: { name, verifiedMark } — verifiedMark=null 은 아직 확인하지 않은 상태다.
   const nameCache = new Map();
   // ⚠ 중복 요청을 막겠다고 '빈 값'을 미리 넣으면, 조회가 끝나기 전에 부른 쪽은
-  //   그 빈 값을 받아 이름이 영영 안 나온다(제보: 같은 채널이 한 곳에서만 보임).
+  //   그 빈 값을 받아 이름이 영영 안 나온다(같은 채널이 한 곳에서만 보임).
   //   진행 중인 Promise 를 캐시해 나중 호출자도 같은 조회를 기다리게 한다.
   const nameInflight = new Map();
 
@@ -931,7 +931,7 @@
   // 채널 id 를 키로 쓴다(내역 쪽은 채널명 기준이지만 여기서는 id 가 정본이다).
   const COLOR_KEY = "cheeseChatRecapChannelColors";
   // 사용자가 직접 고른 채널. ⚠ 색값만으로는 직접 고른 것인지 프로필에서 뽑은
-  //   것인지 알 수 없어, 예전에는 '프로필에서 색 추출'이 커스텀 색을 덮어썼다(제보).
+  //   것인지 알 수 없어, 예전에는 '프로필에서 색 추출'이 커스텀 색을 덮어썼다.
   const COLOR_CUSTOM_KEY = "cheeseChatRecapChannelColorsCustom";
   const channelColors = new Map();
   const customColored = new Set();
@@ -1263,7 +1263,7 @@
       }
       if (!tw) return "";
       // ⚠ hex 로 돌려준다. Coloris 를 format:"hex" 로 쓰는데 rgb() 문자열을 넣으면
-      // 입력칸이 좁아 값이 잘려 보인다(제보). 저장 형식도 hex 로 통일한다.
+      // 입력칸이 좁아 값이 잘려 보인다. 저장 형식도 hex 로 통일한다.
       const to = (x) => Math.min(255, Math.max(0, Math.round(x / tw)));
       const hex = (x) => to(x).toString(16).padStart(2, "0");
       return `#${hex(rr)}${hex(gg)}${hex(bb)}`;
@@ -1426,8 +1426,7 @@
     let t = String(word || "");
     // 1) 자모 늘임 꼬리: 캬ㅑㅑㅑ → 캬, 안녕하세요오오 → 안녕하세요
     t = t.replace(/([가-힣])[ㅏ-ㅣ]{2,}$/, "$1");
-    // 2) 같은 글자 4번 이상 → 3번. ㅋ / ㅋㅋ / ㅋㅋㅋ 은 쓰임이 달라 그대로 둔다
-    //    (사용자 요청 — 1·2·3글자를 각각 다른 표현으로 본다).
+    // 2) 같은 글자 4번 이상 → 3번. ㅋ / ㅋㅋ / ㅋㅋㅋ 은 서로 다른 표현으로 본다.
     t = t.replace(/(.)\1{3,}/g, "$1$1$1");
     // 3) 서로 다른 2~4글자 묶음의 반복: ㅇㅎㅇㅎ → ㅇㅎ, 아이고아이고 → 아이고
     //    ⚠ 한 글자로만 된 묶음(ㅋㅋㅋ)은 건너뛴다. 2)에서 이미 정리했고,
@@ -1676,7 +1675,7 @@
     mlb_62: "의심(눈초리)",
   });
 
-  // ⚠ 구독 이모티콘 이름은 한글을 '영타로 그대로 친' 경우가 많다(제보).
+  // ⚠ 구독 이모티콘 이름은 한글을 '영타로 그대로 친' 경우가 많다.
   //   예: dunggeureRmflqkrtn → Rmflqkrtn → ㄱㅡㄹㅣㅂㅏㄱㅅㅜ → '그리박수'.
   //   두벌식 자판 배열로 되돌린 뒤 음절로 조합하면 뜻이 드러난다.
   const QWERTY_TO_JAMO = Object.freeze({
@@ -1801,7 +1800,7 @@
   // 치지직 기본 팩은 d_12 / chky_4 / mlb_62 처럼 '접두어_숫자' 꼴이다.
   // 스트리머 구독 팩은 이름이 붙는다(dunggeureRock2, karinCheer2, d3Clap).
   // ⚠ 구독 이모티콘을 썼다는 것 자체가 '그 채널을 구독 중이었다'는 신호라
-  //   뜻을 알아냈더라도 이 구분은 남겨야 한다(제보).
+  //   뜻을 알아냈더라도 이 구분은 남겨야 한다.
   function isBuiltinEmojiKey(key) {
     return /^(?:d|chky|mlb)_\d+$/i.test(String(key || "").trim());
   }
@@ -1877,9 +1876,7 @@
       Intl.DateTimeFormat().resolvedOptions().timeZone || "브라우저 현지 시간";
 
     lines.push(
-      // ⚠ 안전장치를 늘리다가 결과가 사무적인 리포트가 돼 버렸다(제보).
-      //   '틀린 단정을 막는 것' 과 '재미있게 읽히는 것' 은 상충하지 않는다.
-      //   사실을 틀리게 만드는 원칙만 남기고, 목소리를 죽이는 지시는 뺀다.
+      // 사실성 제약은 유지하되 지나치게 사무적인 문체는 피한다.
       "당신은 시청 기록을 읽고 그 사람의 취향과 습관을 흥미롭게 짚어 주는 분석가입니다.",
       "아래는 한 사람이 치지직(한국 스트리밍 플랫폼)에서 남긴 채팅 기록의 통계입니다.",
       "연말 결산처럼, 본인이 읽으면서 '맞네' 하고 무릎을 칠 만한 리캡을 써 주세요.",
@@ -2061,7 +2058,7 @@
         // 키만 주면 AI 가 해석할 수 없다 → 뜻과 출처를 나란히 적는다.
         // ⚠ 뜻을 알아내도 '구독 전용' 표시는 지우지 않는다. 뜻과 출처는 다른
         //   정보이고, 구독 전용을 쓴다는 것 자체가 그 채널을 구독 중이었다는
-        //   신호라서다(제보).
+        //   신호라서다.
         let unknown = 0;
         let subscriptionOnly = 0;
         for (const row of emojis) {
@@ -2997,7 +2994,7 @@
   }
 
   // ⚠ 크롬 chrome.downloads 는 파일명에 보이지 않는 문자가 섞이면
-  //   'Invalid filename' 으로 저장을 시작하지 않는다(제보: 방송 제목에
+  //   'Invalid filename' 으로 저장을 시작하지 않는다(방송 제목에
   //   ZWJ 로 이은 이모지가 있을 때 실패). 스크린샷과 같은 규칙을 쓴다.
   //   이모지 자체는 살려 둔다 — 보이지 않는 서식문자만 걷어낸다.
   function exportFilePart(text) {
@@ -4696,7 +4693,7 @@
           .forceLink(links)
           .id((node) => node.id)
           // ⚠ 예전에는 연결이 강할수록 크게 당겨(최소 80px, strength 0.9) 링크가
-          //   많은 노드들이 한 덩어리로 뭉쳐 선을 구분할 수 없었다(제보).
+          //   많은 노드들이 한 덩어리로 뭉쳐 선을 구분할 수 없었다.
           //   거리 하한을 올리고 당김을 절반으로 낮춘다 — 강한 연결은 여전히
           //   가깝지만 서로 붙어 버리지는 않는다.
           //   (실측: 20노드 기준 링크 양끝 여백 중앙값 69px → 107px)
@@ -5005,7 +5002,7 @@
       .text((node) => channelGraphLabel(model, node.id));
 
     // ⚠ 드래그 중에는 노드가 커서 밑을 스쳐 지나가며 mouseenter/leave 가 연달아
-    //   발생한다. 그때마다 groups 전체의 is-dim 이 켜졌다 꺼져 깜빡였다(제보).
+    //   발생한다. 그때마다 groups 전체의 is-dim 이 켜졌다 꺼져 깜빡였다.
     //   드래그가 끝날 때까지 호버 반응을 막는다.
     let draggingNode = false;
     const clearHighlight = () => {
@@ -5105,7 +5102,7 @@
     const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
     // ⚠ 노드 객체를 매 프레임 새로 만들면 d3 가 심어 둔 속도(vx/vy)가 0 으로
     //   초기화돼 관성이 끊긴다. 재생 중에는 300ms 마다 이 함수가 도는데, 그때마다
-    //   멈췄다 다시 밀리기를 반복해 '뚝뚝 끊기다 급발진' 하는 느낌이 났다(제보).
+    //   멈췄다 다시 밀리기를 반복해 '뚝뚝 끊기다 급발진' 하는 느낌이 났다.
     //   → 모델에 노드 객체를 보관하고 좌표·반경만 갱신해 속도를 이어 간다.
     if (!model.simNodePool) model.simNodePool = new Map();
     const rowById = new Map(nodeRows.map((row) => [row.id, row]));
@@ -5149,7 +5146,7 @@
         position.y = node.y;
       }
       // ⚠ groups 는 전체 노드(비활성 포함)라 여기서 통째로 갱신하면 값이 같은
-      //   비활성 노드까지 매 tick 속성이 다시 쓰여 깜빡인다(제보).
+      //   비활성 노드까지 매 tick 속성이 다시 쓰여 깜빡인다.
       //   시뮬레이션에 참여하는 노드만 옮긴다.
       simGroups.attr(
         "transform",
@@ -5267,7 +5264,7 @@
     //   높이면 300ms 마다 크게 튀어 값 변화를 읽을 수 없다.
     // ⚠ 링크가 없다고 건너뛰면 안 된다. 연결 없는 달에는 시뮬레이션이 아예 멈춰
     //   노드가 굳었다가, 다음 달에 링크가 생기는 순간 밀린 힘이 한꺼번에 풀려
-    //   급발진했다(제보). charge·collide 만으로도 정리할 일이 있으므로 계속 돌린다.
+    //   급발진했다. charge·collide 만으로도 정리할 일이 있으므로 계속 돌린다.
     // ⚠ 시뮬레이션도 매 프레임 새로 만들지 않는다. 새로 만들면 alpha 가 0.12 로
     //   리셋돼 영원히 잦아들지 않고, 위 노드 객체의 속도도 함께 끊긴다.
     //   하나를 유지하고 링크만 갈아 끼운 뒤 alpha 를 살짝 올린다.
@@ -5396,7 +5393,7 @@
     // 재생 중 잘게 만든 눈금만 되돌린다(수동 조작은 월 단위여야 한다).
     // ⚠ 여기서 value 까지 덮어쓰면 안 된다. 드래그의 input 핸들러가 이 함수를
     //   먼저 부르는데, 그 시점의 channelGraphPeriodIndex 는 아직 '이전' 값이라
-    //   썸이 매번 원위치로 튕겨 조작이 불가능했다(제보).
+    //   썸이 매번 원위치로 튕겨 조작이 불가능했다.
     //   값은 곧이어 renderChannelGraph 가 맞춘다.
     const slider = $("crcChannelGraphPeriod");
     if (slider) slider.step = "1";
@@ -5599,8 +5596,7 @@
       const d = it.d || {};
       if (d.kind === "DONATION") {
         donCount += 1;
-        // ⚠ 금액은 보여 주지 않는다(사용자 요청 — 심리적 부담). 대신 어느 채널에
-        //   얼마나 자주 했는지 비율로 보여 주므로 횟수로 센다.
+        // 금액은 노출하지 않고 채널별 빈도를 비교할 수 있도록 횟수만 센다.
         bump(donByChannel, it.channelId, 1);
         const typeLabel = donationTypeLabel(d.type);
         bump(donByType, typeLabel, 1);
@@ -6078,7 +6074,7 @@
     const text = cssVar("--popup-text", "#26262c");
     const muted = cssVar("--popup-muted", "#7e7f85");
     // ⚠ 이름이 아직 캐시에 없으면 promptChannelName 이 '채널 abc12345' 처럼 UID
-    //   조각을 돌려준다(제보). 먼저 그리고, 조회되는 대로 라벨만 갈아 끼운다.
+    //   조각을 돌려준다. 먼저 그리고, 조회되는 대로 라벨만 갈아 끼운다.
     const chartToken = ++donChannelChartToken;
     donChannelChart = new Chart(canvas, {
       type: "bar",
@@ -6376,7 +6372,7 @@
     channelRenderReady = renderChannels(byChannel)
       .then(() => {
         // ⚠ 채널 이름은 여기서 채워진다. 드롭다운은 그 전에 그려져 UID 만
-        //   들어가 있으므로(제보) 이름이 준비되면 라벨을 다시 만든다.
+        //   들어가 있으므로 이름이 준비되면 라벨을 다시 만든다.
         renderChannelMenus();
       })
       .catch((error) => {
@@ -6568,7 +6564,7 @@
       // ⚠ afterDraw 를 쓰면 안 된다. Chart.js 의 툴팁 플러그인도 afterDraw 에서
       //   그리는데(chart.min.js 의 id:"tooltip" 확인), 같은 훅에서는 등록 순서대로
       //   실행돼 내장 툴팁보다 이 플러그인이 '나중에' 그려진다.
-      //   → 가운데 글자가 툴팁을 덮어 툴팁 내용이 가려졌다(제보).
+      //   → 가운데 글자가 툴팁을 덮어 툴팁 내용이 가려졌다.
       //   afterDatasetsDraw 는 draw() 안에서 툴팁보다 먼저 실행된다.
       afterDatasetsDraw(chart) {
         const area = chart.chartArea;
@@ -6738,7 +6734,7 @@
   }
 
   // ⚠ 이름은 startChannelRender 가 뒤늦게 채운다. 처음 그릴 때는 UID 뿐이라
-  //   그대로 두면 목록에 UID 가 나온다(제보) → 이름이 준비되면 다시 그린다.
+  //   그대로 두면 목록에 UID 가 나온다 → 이름이 준비되면 다시 그린다.
   function renderChannelMenus() {
     const chatRows = [...lastData.byChannel.entries()].sort(
       (a, b) => b[1] - a[1],
@@ -7198,7 +7194,7 @@
   // Coloris 는 입력을 .clr-field 로 감싸고 그 배경으로 현재 색을 보여 주는데,
   // 그 배경은 input 이벤트에서만 갱신한다(coloris.min.js 의 q 함수).
   // ⚠ input.value 에 대입만 하면 이벤트가 발생하지 않아 스와치가 옛 색으로
-  //   남는다(제보: 추출해도 색이 안 바뀌고, 클릭하거나 새로고침해야 반영).
+  //   남는다(추출해도 색이 안 바뀌고, 클릭하거나 새로고침해야 반영).
   // ⚠ change 가 아니라 input 이어야 한다 — change 를 쏘면 우리 저장 핸들러가
   //   돌아 추출한 색이 '직접 고른 색'으로 잠겨 버린다.
   function setColorInputValue(input, value) {
@@ -8237,7 +8233,7 @@
 
     // 채팅
     const days = new Set(chats.map((it) => localDayKey(it.t)));
-    // ⚠ 값과 부가 정보를 따로 두면 가운데가 벌어져 읽기 어렵다(제보)
+    // ⚠ 값과 부가 정보를 따로 두면 가운데가 벌어져 읽기 어렵다
     //   → 'N회 (M일)' 처럼 한 덩어리로 붙인다.
     out.push(stat("채팅", `${fmt(chats.length)}회 (${fmt(days.size)}일)`));
     const coverage = lastData.vodCoverage?.byChannel?.get(channelId);
@@ -8505,7 +8501,7 @@
       // ⚠ 점 끄기는 refreshOnce '중간'이 아니라 '끝'에서 해야 한다.
       //   읽는 동안(수백 ms~수 초) 라이브에서 채팅이 더 쌓이면 저장소 리스너가
       //   점을 다시 켜는데, 그 결과가 방금 읽어 온 화면에는 이미 반영돼 있다
-      //   → 눌러도 점이 안 사라지는 것처럼 보였다(제보).
+      //   → 눌러도 점이 안 사라지는 것처럼 보였다.
       setNewRecordsDot(false);
     });
     return refreshInFlight;
@@ -8680,7 +8676,7 @@
       // 채널별 목록·카드는 팔로잉 요청보다 먼저 그려질 수 있다. 팔로잉 메타가
       // 도착하면 전체 재렌더링 없이 현재 이름 옆에 인증 마크만 보강한다.
       // ⚠ data-channel 만으로 고르면 채널 드롭다운의 <li> 까지 걸린다. 그 목록은
-      //   textContent 로만 그려서 배지가 잠깐 붙었다가 다시 그릴 때 사라진다(제보).
+      //   textContent 로만 그려서 배지가 잠깐 붙었다가 다시 그릴 때 사라진다.
       //   이름 span 과 카드 이름만 고른다.
       const names = document.querySelectorAll(
         `.crc-channel-name[data-channel="${id}"], .crc-card[data-card-for="${id}"] .crc-card-name`,
@@ -8798,7 +8794,7 @@
       if (!Array.isArray(list) || !list.length) break;
       for (const v of list) {
         // ⚠ 업로드 영상(videoType: UPLOAD)에는 채팅이 없다. 채팅 API 를 부르면
-        //   400 이 돌아온다(제보로 확인) → 다시보기(REPLAY)만 남긴다.
+        //   400 이 돌아오므로 다시보기(REPLAY)만 남긴다.
         //   다만 초창기 REPLAY 중에도 저장된 채팅이 없어 400인 영상이 있으므로,
         //   아래 채팅 요청에서 400을 '미제공'으로 별도 처리한다.
         //   ⚠ 응답에서 직접 거른다. 요청의 videoType 파라미터에만 기대면
@@ -9458,7 +9454,7 @@
   async function checkNewDonations(accountId) {
     if (!accountId) return;
     // ⚠ 가져오기를 한 번도 안 했으면 비교 기준이 없다. 그때는 전부 '새것'이라
-    //   점을 띄워 봐야 뜻이 없다 → 가져온 적이 있을 때만 확인한다(제보).
+    //   점을 띄워 봐야 뜻이 없다 → 가져온 적이 있을 때만 확인한다.
     //   src:"history" 는 가져오기로만 생긴다(라이브 채팅은 src:"chat").
     let stored = 0;
     let imported = false;
@@ -10529,7 +10525,7 @@
       return { locked: true, active: false, state: "대기" };
     }
     // ⚠ 여기까지 온 채널은 '고르지 않은 것'과 '가져오는 중에 새로 고른 것'
-    //   두 가지다. 예전엔 둘 다 '추가됨' 이 붙어 목록 전체에 라벨이 달렸다(제보).
+    //   두 가지다. 예전엔 둘 다 '추가됨' 이 붙어 목록 전체에 라벨이 달렸다.
     //   고른 것만 표시한다.
     if (selected.has(id)) {
       return { locked: false, active: false, state: "추가됨" };
@@ -10923,7 +10919,7 @@
     const queue = [...initial];
     const handled = new Set();
     // ⚠ API 가 계속 400 을 주면(권한·정책 변경 등) 영상마다 즉시 실패하며
-    //   수만 건을 헛도는데, 화면은 그대로라 멈춘 것처럼 보인다(제보).
+    //   수만 건을 헛도는데, 화면은 그대로라 멈춘 것처럼 보인다.
     //   연속으로 실패하면 원인을 알리고 멈춘다.
     let failStreak = 0;
     let abortReason = "";
@@ -11426,7 +11422,7 @@
       return;
     }
     // 닫았다 다시 연 경우는 새로 시작하는 것으로 본다. 검색어·선택이 남아 있으면
-    // 목록이 걸러진 채로 보여 '왜 채널이 적지?' 가 된다(제보).
+    // 목록이 걸러진 채로 보여 '왜 채널이 적지?' 가 된다.
     // 범위·개수 설정은 같은 값으로 반복하는 일이 많아 그대로 둔다.
     setProgress("");
     const search = $("crcChannelSearch");
@@ -11864,7 +11860,7 @@
   })();
 
   // 기간을 '전체 기간' 으로 되돌린다. 옆의 위치 초기화(crcChannelGraphReset)와
-  // 헷갈린다는 제보가 있어 재생 버튼 옆에 따로 둔다.
+  // 혼동을 줄이기 위해 재생 버튼 옆에 따로 둔다.
   const CHANNEL_GRAPH_SPEED_KEY = "cheeseChatRecapGraphSpeed";
 
   function reflectChannelGraphSpeed() {

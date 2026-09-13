@@ -5802,10 +5802,8 @@ html.cheese-channel-profile-radius-enabled
   min-width: 0;
   overflow: hidden;
 }
-/* ⚠ 이름 래퍼. 폴백(네이티브 클래스를 아직 harvest 못 한 상태)에서 이 규칙이 없어
-   .cheese-cf-name(display:flex) 의 자식이 줄어들지 못했고, 이름이 한 글자씩 세로로
-   쪼개져 보였다(제보: 브라우저 시작 탭으로 열면 '김뿡/마인/크래/프트'). min-width:0
-   이 있어야 flex 자식이 부모 폭 아래로 줄어든다. */
+/* 네이티브 클래스를 아직 찾지 못한 폴백에서도 이름 래퍼가 부모 폭 아래로 줄어들게
+   한다. */
 .cheese-cf-ellipsis {
   display: flex;
   align-items: center;
@@ -5918,11 +5916,9 @@ html.cheese-cf-favstar #cheese-custom-follow .cheese-cf-fav .cheese-cf-count {
 [data-cf-star="always"] .cheese-cf-count {
   margin-right: 20px;
 }
-/* 숨김: 호버해도 나타나지 않는다. 시청자수 여백도 되돌려 네이티브와 같게 둔다.
-   ⚠ opacity:0 이 아니라 display:none 이어야 한다. 별표는 position:absolute 로
-   시청자수 위에 겹쳐 있어서, 투명하게만 두면 글자 위에 계속 얹혀 보인다(제보:
-   그룹·팔로잉에서 겹침). 접힘 상태의 비-즐겨찾기 별표도 같은 이유로 display:none.
-   ⚠ '별표 항상 표시'(html.cheese-cf-favstar)보다 뒤에 와야 구역 설정이 이긴다. */
+/* 숨긴 별표는 클릭 영역까지 제거하도록 display:none을 사용한다. 접힘 상태의
+   비-즐겨찾기 별표도 같은 방식으로 처리한다. '별표 항상 표시' 규칙보다 뒤에 두어
+   구역별 설정이 우선하게 한다. */
 [data-cf-star="hidden"] .cheese-follow-fav,
 html.cheese-cf-favstar
   #cheese-custom-follow
@@ -10805,8 +10801,8 @@ html.cheese-inbox-community-lightbox-open {
 }
 
 /* ══ 다시보기 AI 생성 챕터 숨김 ═══════════════════════════════════════════════
-   치지직이 일부 다시보기에 자동 생성하는 AI 챕터가 스포가 될 수 있다는 피드백 →
-   설정 토글(기본 OFF=표시). 켜면 content.js 가 html 에 cheese-vod-chapter-hide 를
+   자동 생성된 AI 챕터가 내용을 미리 드러낼 수 있어 설정으로 숨길 수 있게 한다.
+   기본값은 표시다. 켜면 content.js 가 html 에 cheese-vod-chapter-hide 를
    붙이고 여기서 숨긴다. 챕터 UI는 세 곳:
    1) 좌하단 챕터 제목(.pzp-pc__chapter-title / .pzp-chapter-title)
    2) 탐색 미리보기 등 chapter 계열 표시(클래스명에 chapter 포함)
@@ -13897,7 +13893,7 @@ a[data-cheese-video-vault]:hover .cheese-video-vault-archive,
 
    ⚠ 예전엔 :has(> iframe[src*="notify"]) 로 레이어를 지목했는데, 치지직은 레이어를
    먼저 그리고 iframe 을 나중에 넣는다. 그동안은 :has 가 성립하지 않아 450px 로 한 번
-   보였다가 넓어졌다(제보: 열 때 폭이 튄다). iframe 을 조건에서 빼고, 폭이 450px 인
+   보였다가 넓어졌다(열 때 폭이 튄다). iframe 을 조건에서 빼고, 폭이 450px 인
    레이어를 직접 지목해 처음부터 500px 로 그린다. */
 /* ⚠ div[class*="_layer_"] 만 쓰면 사이트 곳곳의 다른 레이어까지 걸린다. 수신함
    팝오버는 헤더 아이콘 묶음(_box_ > _item_) 안에 있고 폭이 450px 로 고정돼 있어,
@@ -14824,7 +14820,7 @@ img.cheese-recap-emoji {
 /* ── 채팅 이어보기: 네이티브 목록 바로 위의 확장 소유 인라인 영역 ─────────
    ⚠ 접힌 채팅창에는 적용하지 않는다. 치지직은 '채팅 접기' 시 이 컨테이너를
      display:none 으로 감추는데, 우리가 display:flex !important 를 걸어 두면
-     그 숨김을 이겨서 접기가 아예 동작하지 않는다(제보: 채팅 이어보기를 켜면
+     그 숨김을 이겨서 접기가 아예 동작하지 않는다(채팅 이어보기를 켜면
      채팅창 접기가 안 됨). 실측: 접어도 컨테이너가 계속 보이고 48px 로 줄어든
      aside 밖으로 채팅이 비어져 나온다.
      :has() 가 아니라 조상 클래스로 거른다 — aside 가 조상이라 이걸로 충분하고
@@ -15031,7 +15027,7 @@ aside[class*="_is_folded_"] .cheese-chat-history-panel {
 /* 라이브·다시보기를 보며 "시각 + 내용"을 모아 두고, 다시보기 댓글에 5,000자씩
    나눠 붙여넣기 위한 창. 위치·크기는 채팅 리캡 검색창과 같은 방식으로 기억한다.
    ⚠ 색은 자체 토큰으로 정의한다. 치지직 변수를 직접 쓰면 라이트/다크에서 값이
-   비거나 대비가 뒤집혀 눈이 아팠다(제보). 다크 판정은 치지직이 붙이는
+   비거나 대비가 뒤집혀 눈이 아팠다. 다크 판정은 치지직이 붙이는
    .theme_dark 클래스를 따른다(prefers-color-scheme 은 치지직 설정과 어긋난다). */
 .cheese-memo-window {
   --memo-bg: #ffffff;
@@ -15125,7 +15121,7 @@ html.theme_dark .cheese-memo-window {
 }
 
 /* 방송 선택 드롭다운(커스텀). 네이티브 select 는 옵션 목록을 브라우저가 그려
-   창 테마와 겉돌고, 다크에서 특히 어색했다(제보) → 버튼 + 목록으로 직접 그린다. */
+   창 테마와 겉돌고, 다크에서 특히 어색했다 → 버튼 + 목록으로 직접 그린다. */
 .cheese-memo-picker {
   flex: none;
   position: relative;
@@ -16001,7 +15997,7 @@ html.cheese-chat-emoticon-hide-on
 /* ── 전용 팔로잉 '친밀도' 섹션 ─────────────────────────────────────────────
    헤더·접기 UI 는 즐겨찾기/팔로잉과 같은 클래스를 그대로 쓴다(별도 스타일 없음).
    예전에는 '방송 중 / 그 외' 라벨을 자체 스타일로 그렸는데, 폰트색이 테마와
-   맞지 않았고(제보) 같은 채널이 두 번 보이는 문제도 있어 없앴다. */
+   맞지 않았고 같은 채널이 두 번 보이는 문제도 있어 없앴다. */
 
 /* ── 팝오버·모달 스크롤바 공통 ─────────────────────────────────────────────
    댓글 타임스탬프 패널(.cheese-search-comment-panel-list)이 기준이고, 구간 요약도

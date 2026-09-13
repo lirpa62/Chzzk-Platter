@@ -74,7 +74,7 @@
     ['[data-feature="inboxLogPower"]', '[data-feature="inboxLogPowerDot"]'],
     // ⚠ 자동 펼치기도 즐겨찾기 사용의 하위다. 예전에는 두 개수 옵션 '사이에'
     //   끼어 있어 화면상으로는 자동 펼치기의 하위처럼 보였다(잠기지 않는다는
-    //   제보의 원인). 개수는 자동 펼치기를 꺼야 비로소 쓰이므로 그 하위가 아니다.
+    //   문제의 원인). 개수는 자동 펼치기를 꺼야 비로소 쓰이므로 그 하위가 아니다.
     ['[data-feature="sbFollowFavEnabled"]', '[data-cf-fav-initial], [data-cf-fav-more], [data-feature="sbFollowFavAutoExpand"]'],
     // 즐겨찾기와 같은 구성: 사용 → (개수 둘, 자동 펼치기).
     ['[data-feature="sbFollowGroupEnabled"]', '[data-cf-group-initial], [data-cf-group-more], [data-feature="sbFollowGroupAutoExpand"]'],
@@ -292,7 +292,7 @@
     }
     // 펼쳐도 보여 줄 게 없으면(모든 자식이 다른 이유로 숨겨져 있으면) 버튼 자체를
     // 감춘다. 예: '항상 켜기 제외 채널'은 제외된 채널이 없으면 settings.js 가 행을
-    // 숨기는데, 그때 펼치기 버튼만 남아 눌러도 아무 일이 없었다(제보).
+    // 숨기는데, 그때 펼치기 버튼만 남아 눌러도 아무 일이 없었다.
     // ⚠ is-feature-collapsed 는 '우리가 접어서' 숨긴 것이라 제외하고 판단한다.
     //   그걸 세면 접혀 있을 때마다 버튼이 사라져 다시 펼칠 수 없다.
     function hasVisibleMember(members) {
@@ -499,7 +499,7 @@
     )) {
       // ⚠ '항목이 있는가'를 li.settings-item 으로만 보면 안 된다. 설정 이동,
       //   실시간 따라잡기 민감도, 헤더 팔로우처럼 li 없이 버튼·슬라이더로만
-      //   이루어진 그룹이 목차에서 통째로 빠진다(제보: 일반 탭에 '설정 이동'
+      //   이루어진 그룹이 목차에서 통째로 빠진다(일반 탭에 '설정 이동'
       //   이 없다). 조작할 게 하나라도 있으면 그룹으로 센다.
       if (!section.querySelector("li.settings-item, button, input, select, textarea")) {
         continue;

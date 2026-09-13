@@ -1,5 +1,5 @@
 // 치즈 플래터 - 수신함 '통나무파워' 탭
-// 치지직은 통나무파워를 언제 얼마나 받았는지 볼 방법을 주지 않는다(제보). content.js 가
+// 치지직은 통나무파워를 언제 얼마나 받았는지 볼 방법을 주지 않는다. content.js 가
 // 1시간 시청 보상을 획득하는 순간 storage 에 남겨 둔 기록을, 여기서 수신함 탭으로 보여 준다.
 //
 // ⚠ 커뮤니티 소식 탭(inboxCommunity.js)과 같은 문서에서 함께 돈다. 서로의 DOM 을 건드리지
@@ -93,7 +93,7 @@
         watchCount: Number(it?.watchCount) || 0,
         autoDetected: it?.autoDetected === true,
         // ⚠ 예측 상세용 필드. 여기서 안 옮기면 저장소에 있어도 화면에서 사라진다
-        //   (제보: 수신함에서 예측 상세가 안 보임).
+        //   (수신함에서 예측 상세가 안 보임).
         predictionTitle: String(it?.predictionTitle || ""),
         selectedOptionNo: Number(it?.selectedOptionNo) || 0,
         winningOptionNo: Number(it?.winningOptionNo) || 0,
@@ -286,7 +286,7 @@
     WATCH_5_MIN: "5분 시청 보상",
   };
   // ⚠ '1시간 + 5분 합계' 두 줄은 1시간 보상에만 해당한다. WATCH_ 접두사로 묶으면
-  //   WATCH_5_MIN 까지 걸려 5분 보상이 '1시간 보상'으로 표시된다(제보).
+  //   WATCH_5_MIN 까지 걸려 5분 보상이 '1시간 보상'으로 표시된다.
   const isHourClaim = (t) => !t || t === "WATCH_1_HOUR";
   const PRED_TYPES = new Set([
     "PREDICTION_BET",

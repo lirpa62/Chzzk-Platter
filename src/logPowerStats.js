@@ -556,7 +556,7 @@
       .sort((a, b) => b.st.net - a.st.net)
       .map((r) => {
         const st = r.st;
-        // ⚠ 카드 하나가 250px 남짓이라 한 줄로는 다 안 들어간다(제보).
+        // ⚠ 카드 하나가 250px 남짓이라 한 줄로는 다 안 들어간다.
         //   1행: 채널명 + 순수익, 2행: 지표를 라벨/값 쌍으로 흘려 넣는다.
         const chips = [
           [
@@ -611,7 +611,7 @@
       (e) => e.channelName || "채널",
     );
     // ⚠ 구형식 기록은 1시간 보상 한 줄에 5분 합계(fiveMinAmount)가 함께 들어 있다.
-    //   그대로 종류별로 묶으면 그 5분분까지 '1시간 시청'으로 잡힌다(제보).
+    //   그대로 종류별로 묶으면 그 5분분까지 '1시간 시청'으로 잡힌다.
     //   집계 전에 두 몫으로 쪼갠다 — 저장된 기록은 건드리지 않는다.
     const typeList = [];
     for (const e of list) {
@@ -635,7 +635,7 @@
     // 손실은 비율에서 뺐으므로 총액만 따로 알린다.
     // ⚠ 이 값은 '나간 금액의 합'이지 순손익이 아니다. 예측 취소 환급이나 적중
     //   배당 같은 되돌아온 금액은 빠져 있어, 그것만 보면 실제보다 많이 잃은 것처럼
-    //   보인다(제보: 베팅 합 -280 인데 취소·적중을 더하면 실제는 -37).
+    //   보인다(베팅 합 -280 인데 취소·적중을 더하면 실제는 -37).
     //   그래서 되돌아온 금액이 있으면 순손익을 함께 보여 준다.
     let loss = 0;
     let regain = 0;
@@ -923,7 +923,7 @@
       `<div class="lps-row-sub">` +
       // 시청 보상은 '1시간 + 5분 합계', 그 외는 유형 이름 한 줄.
       // ⚠ '1시간 + 5분 합계' 두 줄은 1시간 보상 전용이다. isWatchClaim 은
-      //   WATCH_5_MIN 도 참이라 그대로 쓰면 5분 기록이 '1시간'으로 표시된다(제보).
+      //   WATCH_5_MIN 도 참이라 그대로 쓰면 5분 기록이 '1시간'으로 표시된다.
       (isHourClaim(e.claimType)
         ? `<span>1시간 <b>${fmt(e.amount)}</b></span>` +
           (e.fiveMinAmount
@@ -1007,8 +1007,7 @@
   function render() {
     renderCards();
     renderRangeNote();
-    // ⚠ 막대 차트도 기간을 반영하므로 함께 다시 그린다(예전엔 라인만 갱신해
-    //   기간을 바꿔도 막대가 그대로였다 — 제보).
+    // 막대 차트도 기간을 반영하므로 라인 차트와 함께 다시 그린다.
     // ⚠ 라인을 먼저 그린다. 라인이 상위 N 채널의 기본색을 순서대로 정해 두면
     //   막대가 같은 색을 쓴다(반대 순서면 첫 그림에서 색이 어긋난다).
     renderLineChart();
@@ -2123,7 +2122,7 @@
       showTierNote();
       // 이미 고른 종류가 시청 보상이면 배수를 반영해 다시 채운다.
       // ⚠ 수정 중에는 건드리지 않는다. 저장된 금액(예: 5분 시청 48 = 12×4회)을
-      //   단가로 덮어써 기존 값이 사라진다(제보).
+      //   단가로 덮어써 기존 값이 사라진다.
       if (!editingId && isWatchClaim(currentType())) {
         spinWrite($f("lpsFieldAmount"), unitFor(currentType()));
         if (currentType() === "WATCH_1_HOUR") {
@@ -2169,7 +2168,7 @@
     el.hidden = false; // 초기 hidden 속성을 걷어낸다(이후엔 클래스로만 제어)
     el.classList.toggle("is-shown", shown);
     // ⚠ aria-hidden 을 쓰면 안 된다. '맨 위로'를 누른 뒤 스크롤이 0 이 되면
-    //   포커스를 가진 채로 숨겨지는데, 브라우저가 그 조합을 차단한다(제보).
+    //   포커스를 가진 채로 숨겨지는데, 브라우저가 그 조합을 차단한다.
     //   inert 는 포커스까지 막고 접근성 트리에서도 빼며, 안에 포커스가 있으면
     //   알아서 해제한다 — 경고문이 직접 권하는 속성이다.
     if (shown) el.removeAttribute("inert");
@@ -2497,7 +2496,7 @@
   }
 
   // 시청 보상일 때만 '5분 합계'가 의미 있다. '직접 입력'이면 이름 칸을 연다.
-  // 손실 종류면 음수 입력을 허용한다(기본은 1 이상이라 음수가 막혔다 — 제보).
+  // 손실 종류는 음수 입력을 허용한다.
   function syncAmountSign() {
     const el = $f("lpsFieldAmount");
     if (!el) return;
@@ -2656,13 +2655,13 @@
       amount: Math.round(amount),
       fiveMinAmount: Math.round(five),
       // ⚠ 부스팅은 시청 보상에만 붙는다. 종류를 바꿔 저장하면 예전 값(기타=1)이
-      //   그대로 남아 배지가 안 뜬다(제보).
+      //   그대로 남아 배지가 안 뜬다.
       //   티어 상태(pickedTier)는 조회가 늦으면 아직 0 일 수 있으므로, 실제로
       //   저장하는 금액에서 역산한다 — 배지와 숫자가 항상 서로 맞는다.
       boost: boostOf(type, prev?.boost),
       claimType: type,
       // ⚠ 5분 묶음의 회차 수는 금액에서 다시 센다. 그대로 두면 금액만 고쳤을 때
-      //   예전 회차가 남아 '+60 인데 12회'처럼 어긋난다(제보).
+      //   예전 회차가 남아 '+60 인데 12회'처럼 어긋난다.
       //   단가로 안 나눠떨어지면(임의 입력) 회차를 지운다.
       watchCount: watchCountFor(
         type,
@@ -2901,7 +2900,7 @@
   const COLOR_KEY = "cheeseLogPowerChartColors";
   // 사용자가 직접 고른 채널. ⚠ 추출은 이 채널을 건드리지 않는다 — 색값만 봐서는
   //   직접 고른 것인지 추출된 것인지 구분할 수 없어, 예전에는 '프로필에서 색
-  //   추출'이 커스텀 색을 덮어썼다(제보).
+  //   추출'이 커스텀 색을 덮어썼다.
   const COLOR_CUSTOM_KEY = "cheeseLogPowerChartColorsCustom";
   const channelColors = new Map();
   const customColored = new Set();
@@ -3298,7 +3297,7 @@
       }
       if (!tw) return "";
       // ⚠ hex 로 돌려준다. Coloris 를 format:"hex" 로 쓰는데 rgb() 문자열을 넣으면
-      // 입력칸이 좁아 값이 잘려 보인다(제보). 저장 형식도 hex 로 통일한다.
+      // 입력칸이 좁아 값이 잘려 보인다. 저장 형식도 hex 로 통일한다.
       const to = (x) => Math.min(255, Math.max(0, Math.round(x / tw)));
       const hex = (x) => to(x).toString(16).padStart(2, "0");
       return `#${hex(rr)}${hex(gg)}${hex(bb)}`;
@@ -3409,7 +3408,7 @@
 
   // 버튼을 '처리 중'으로 바꾼다. 라벨을 3-dot pulse 로 갈아 끼우고 되돌린다.
   // ⚠ 최소 표시 시간을 둔다. 응답이 빠르면 점이 깜빡이지도 않아 눌렀는지
-  //   알 수 없다(제보). 짧게라도 보여야 동작했다는 게 전달된다.
+  //   알 수 없다. 짧게라도 보여야 동작했다는 게 전달된다.
   const BUSY_MIN_MS = 400;
 
   async function withBusy(btn, run) {
@@ -3741,7 +3740,7 @@
     const sparse = (arr) => {
       if (!hourly) return arr;
       // ⚠ 배열 밖은 undefined 다. `!== 0` 으로 비교하면 참이 되어 0시·23시에
-      //   엉뚱한 점이 찍힌다(제보) → 실제 값이 있는 칸인지로 판정한다.
+      //   엉뚱한 점이 찍힌다 → 실제 값이 있는 칸인지로 판정한다.
       const has = (x) => typeof x === "number" && x !== 0;
       return arr.map((v, i) => {
         if (v !== 0) return v; // 음수(예측 손실)도 실제 값이다
@@ -4162,7 +4161,7 @@
     const typeOpt = e.target.closest?.("#lpsTypeList [data-type]");
     if (typeOpt) {
       // ⚠ 수정 중에는 금액을 덮지 않는다. 이미 들어 있는 실제 값(기타 적립 500 등)이
-      //   종류 단가로 바뀌면 다시 입력해야 한다(제보). 새로 추가할 때만 채운다.
+      //   종류 단가로 바뀌면 다시 입력해야 한다. 새로 추가할 때만 채운다.
       setTypeChoice(typeOpt.dataset.type, { fill: !editingId });
       closeTypeList();
       if (typeChoice === "__custom") $f("lpsFieldTypeCustom")?.focus();
@@ -4227,7 +4226,7 @@
     }
     // 목록 행을 누르면 그 항목을 수정한다(채널 묶음 보기에서는 개별 항목이 없다).
     // ⚠ 행 안의 '예측 상세'(details/summary)는 제외한다. 펼치려고 눌렀는데
-    //   수정 팝업까지 뜬다(제보).
+    //   수정 팝업까지 뜬다.
     if (e.target.closest?.(".lps-pred")) return;
     const row = e.target.closest?.(".lps-row[data-entry-id]");
     if (row) {
@@ -4653,7 +4652,7 @@
   // 적립 중 배지: 상태가 storage 로 오가므로 변경을 구독하고, 타이머 만료는
   // 이벤트가 없어 30초마다 한 번 더 확인한다.
   // ⚠ 첫 렌더는 load() 뒤에 한다. 곧바로 부르면 entries 가 비어 있어 채널명을
-  //   못 찾고 id 가 잠깐 보인다(제보).
+  //   못 찾고 id 가 잠깐 보인다.
   setInterval(() => void renderActiveBadge(), 30000);
   chrome.storage?.onChanged?.addListener((changes, area) => {
     const hit = Object.keys(changes || {}).some(

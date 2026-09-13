@@ -22,8 +22,8 @@
    ⚠ 닉네임 컨테이너 게이트는 해시(_o04z9_/_zw6kq_)만 나열하지 않는다. 치지직이
    빌드마다 해시를 바꾸므로(예: _container_1mc5x_) 일반형
    [class*="_container_"]:is(_is_message_, _is_ellipsis_) 을 함께 둔다.
-   제보: 하단 고정 메시지의 닉네임·배지만 배율을 안 받았는데, 그 컨테이너가
-   _is_message_ 없이 _is_ellipsis_ 만 달고 있어 일반형에도 안 걸렸던 것. */
+   하단 고정 메시지는 _is_message_ 없이 _is_ellipsis_ 만 사용하므로 일반형도
+   함께 선택한다. */
 :root {
   --cheese-chat-font-scale: 1;
   --cheese-chat-badge-icon-size: 18px;
