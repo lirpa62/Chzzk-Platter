@@ -9165,9 +9165,20 @@
     //   (실측: imported 12,296건인데 eventLinks 는 15건 → 감시 3채널).
     //   기록이 있는 채널은 모두 후보로 삼고, eventLinks 는 '이미 아는 영상'
     //   목록으로만 쓴다. 아는 영상이 없는 채널은 최신 것부터 새 영상으로 잡힌다.
+    // ⚠ byChannel 은 '일반 채팅'만 센다(appendRecapChunk). 후원·구독만 남긴
+    //   채널은 여기에 없어 후보에서 통째로 빠졌다. 기록이 있는 채널은 갈래를
+    //   가리지 않고 모두 후보로 삼는다.
     for (const channelId of lastData.byChannel.keys()) {
       if (!videosByChannel.has(channelId))
         videosByChannel.set(channelId, new Set());
+    }
+    for (const list of [lastData.items, lastData.donations]) {
+      for (const item of Array.isArray(list) ? list : []) {
+        const channelId = item?.channelId;
+        if (channelId && !videosByChannel.has(channelId)) {
+          videosByChannel.set(channelId, new Set());
+        }
+      }
     }
     // ⚠ 최근에 전혀 채팅하지 않은 채널까지 매번 확인하면 요청만 늘고 얻는 게 없다.
     //   '다시보기 관리' 탭에서 고른 기간 안에 채팅(라이브·후원 포함)한 채널만
@@ -11533,25 +11544,38 @@
     list.textContent = "";
     for (const [id, entry] of groups) {
       const label = document.createElement("label");
-      label.className = "crc-purge-row";
+      label.className = "crc-purge-card";
       label.dataset.purgeRow = id;
       const input = document.createElement("input");
       input.type = "checkbox";
       input.value = id;
+      const avatar = document.createElement("img");
+      avatar.className = "crc-purge-avatar";
+      avatar.alt = "";
+      avatar.loading = "lazy";
+      avatar.decoding = "async";
+      const cached = nameCache.get(entry.channelId);
+      if (cached?.imageUrl) avatar.src = cached.imageUrl;
+      else avatar.classList.add("is-empty");
       const name = document.createElement("span");
-      name.textContent =
-        nameCache.get(entry.channelId)?.name ||
-        `채널 ${entry.channelId.slice(0, 8)}`;
+      name.className = "crc-purge-name";
+      name.textContent = cached?.name || `채널 ${entry.channelId.slice(0, 8)}`;
       const detail = document.createElement("small");
+      detail.className = "crc-purge-detail";
       detail.textContent = entry.months.size
         ? `${entry.months.size}개월 · 채팅 ${fmt(entry.rows)}개`
         : "다시보기 통계만";
-      label.append(input, name, detail);
+      label.append(input, avatar, name, detail);
       list.append(label);
-      // 이름을 모르는 채널만 따로 조회한다(이미 아는 채널은 즉시 표시된다).
-      if (!nameCache.get(entry.channelId)?.name) {
+      // 이름·프로필을 모르는 채널만 따로 조회한다(아는 채널은 즉시 표시된다).
+      if (!cached?.name || !cached?.imageUrl) {
         void resolveDisplayChannelInfo(entry.channelId).then((info) => {
-          if (info?.name && name.isConnected) name.textContent = info.name;
+          if (!info || !name.isConnected) return;
+          if (info.name) name.textContent = info.name;
+          if (info.imageUrl) {
+            avatar.src = info.imageUrl;
+            avatar.classList.remove("is-empty");
+          }
         });
       }
     }

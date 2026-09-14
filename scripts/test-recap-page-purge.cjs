@@ -75,6 +75,54 @@ ok(
   "모달을 열 때마다 전수 조회하지 않는다",
 );
 
+console.log("[목록] 카드 형태로 배치한다");
+const css = fs.readFileSync(
+  path.join(__dirname, "..", "src", "chatRecap.css"),
+  "utf8",
+);
+ok(
+  /\.crc-purge-list \{[^}]*display: grid/.test(css),
+  "그리드로 한 줄에 여러 개를 놓는다",
+);
+ok(
+  /grid-template-columns: repeat\(auto-fill, minmax\(92px, 1fr\)\)/.test(css),
+  "폭에 따라 3~5개가 자동으로 깔린다",
+);
+ok(
+  /\.crc-purge-list \{[^}]*align-items: start/.test(css),
+  "행 높이가 늘어나지 않는다(여백 과다 방지)",
+);
+ok(
+  /\.crc-purge-card \{[^}]*flex-direction: column/.test(css),
+  "카드는 세로 배치다",
+);
+ok(/\.crc-purge-avatar \{/.test(css), "프로필 이미지를 넣는다");
+ok(
+  /avatar\.className = "crc-purge-avatar"/.test(src),
+  "렌더에서 프로필을 만든다",
+);
+ok(/if \(info\.imageUrl\) \{/.test(src), "조회 결과의 프로필도 반영한다");
+
+console.log("[버튼] 삭제 버튼을 붙여 둔다");
+ok(
+  /\.crc-purge-actions \{[^}]*gap: 6px/.test(css),
+  "선택 삭제·전체 삭제가 붙어 있다",
+);
+ok(
+  /\.crc-new-vod-actions \{[^}]*flex-wrap: wrap/.test(css),
+  "확인 대상 줄이 한 줄로 넘치지 않는다",
+);
+
+console.log("[후보] 기록 갈래를 가리지 않는다");
+const candidates = src.slice(
+  src.indexOf("    // ⚠ byChannel 은 '일반 채팅'만 센다(appendRecapChunk)."),
+  src.indexOf("    if (newVodRecentDays > 0) {"),
+);
+ok(
+  /lastData\.items/.test(candidates) && /lastData\.donations/.test(candidates),
+  "후원만 남긴 채널도 후보에 넣는다(byChannel 은 일반 채팅만 센다)",
+);
+
 console.log("[새 다시보기] 확인 대상 기간을 고를 수 있다");
 ok(
   /const NEW_VOD_RECENT_DAYS_ALLOWED = \[3, 7, 0\];/.test(src),
