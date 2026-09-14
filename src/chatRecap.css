@@ -3672,6 +3672,10 @@ button.crc-multi-channel-more:focus-visible {
   /* ⚠ 남는 높이를 가져가게 하지 않는다(flex: 1 로 늘리면 목록 위아래가 빈다).
      화면이 낮을 때만 줄어들도록 shrink 만 허용한다. */
   flex: 0 1 auto;
+  /* ⚠ .crc-vod-stats-panel 의 justify-content: space-between 을 그대로 물려받으면
+     세로 배치에서 설명·목록·버튼이 위아래로 벌어진다(목록 주변이 비어 보이는 원인).
+     위에서부터 차곡차곡 쌓는다. */
+  justify-content: flex-start;
   min-height: 0;
 }
 /* ⚠ 같은 특성도(0,2,0)의 .crc-vod-stats-panel .crc-new-vod-copy 가 아래쪽에
@@ -3697,9 +3701,10 @@ button.crc-multi-channel-more:focus-visible {
   font-size: 12px;
   gap: 6px;
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  /* 카드 두 줄(약 99px × 2 + 간격)까지 보이고 그 이상은 스크롤한다.
-     ⚠ 이 값이 곧 목록의 높이가 된다 — 크게 두면 카드가 적을 때 아래가 빈다. */
-  max-height: 216px;
+  /* ⚠ 이 값이 곧 목록의 높이가 된다(내용이 적어도 줄어들지 않는다 — 여러 방법을
+     시도했지만 그리드가 이 상자를 채운다). 카드 한 줄이 약 111px 이므로 한 줄에
+     맞춰 두고, 채널이 많으면 목록 안에서 스크롤한다. */
+  max-height: 111px;
   overflow-y: auto;
   padding: 6px;
 }

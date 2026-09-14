@@ -142,8 +142,12 @@ ok(
   "목록에 최소 높이를 두지 않는다(카드가 적을 때 아래가 비지 않게)",
 );
 ok(
-  /\.crc-purge-list \{[^}]*max-height: 216px/.test(css),
-  "카드 두 줄까지 보이고 그 이상은 스크롤한다",
+  /\.crc-purge-list \{[^}]*max-height: 111px/.test(css),
+  "목록은 카드 한 줄 높이만 쓰고 그 이상은 스크롤한다(아래가 비지 않게)",
+);
+ok(
+  /\.crc-recap-purge \{[^}]*justify-content: flex-start/.test(css),
+  "세로 배치에서 설명·목록·버튼이 위아래로 벌어지지 않는다",
 );
 
 console.log("[스켈레톤] 불러오는 동안 자리표시자를 깐다");
