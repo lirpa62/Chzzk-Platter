@@ -3627,7 +3627,12 @@ button.crc-multi-channel-more:focus-visible {
   border-radius: 9px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* ⚠ overflow: hidden 이면 내용이 상자보다 길 때 아래쪽이 잘린 채 스크롤도
+     되지 않는다. 기록 삭제 카드 목록이 들어오면서 그 아래 삭제 버튼이
+     잘려 보이지 않았다. 넘치면 세로로 스크롤한다. */
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 4px 10px;
 }
 
@@ -3732,11 +3737,16 @@ button.crc-multi-channel-more:focus-visible {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-/* 선택 삭제·전체 삭제는 짝이므로 붙여 둔다(양끝으로 벌리지 않는다). */
+/* 선택 삭제·전체 삭제는 짝이므로 붙여 둔다(양끝으로 벌리지 않는다).
+   ⚠ .crc-vod-stats-panel .crc-btn-ghost 의 margin-left: auto 가 버튼마다
+   걸려 둘이 153px 씩 벌어졌다(실측). 이 줄에서는 고정 간격으로 되돌린다. */
 .crc-purge-actions {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+}
+.crc-recap-purge .crc-purge-actions .crc-btn-ghost {
+  margin-left: 5px;
 }
 
 .crc-vod-stats-panel .crc-new-vod-copy {
