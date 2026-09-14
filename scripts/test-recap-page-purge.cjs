@@ -142,8 +142,14 @@ ok(
   "목록에 최소 높이를 두지 않는다(카드가 적을 때 아래가 비지 않게)",
 );
 ok(
-  /\.crc-purge-list \{[^}]*max-height: 111px/.test(css),
-  "목록은 카드 한 줄 높이만 쓰고 그 이상은 스크롤한다(아래가 비지 않게)",
+  /\.crc-purge-list \{[^}]*max-height: min\(321px, 32vh\)/.test(css),
+  "목록은 카드 두세 줄까지 쓰고(화면이 낮으면 줄어든다) 그 이상은 스크롤한다",
+);
+ok(
+  /:has\(\[data-import-panel="import"\]:not\(\[hidden\]\)\) \{[^}]*min\(680px/.test(
+    css,
+  ),
+  "채팅 가져오기 탭 높이는 예전(680px) 그대로다",
 );
 ok(
   /\.crc-recap-purge \{[^}]*justify-content: flex-start/.test(css),
