@@ -9175,25 +9175,114 @@
     void decorateRecapManageNames(groups);
   }
 
-  // 채널명은 API 로 따로 채운다(없어도 해시로 구분은 된다).
-  async function decorateRecapManageNames(groups) {
-    for (const [id, entry] of groups.slice(0, 40)) {
-      let name = "";
-      try {
-        const res = await fetch(
-          `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(entry.channelId)}`,
-          { credentials: "include" },
-        );
-        if (res.ok) {
-          name = String((await res.json())?.content?.channelName || "");
+  // 채널 상세 API 가 이름을 주지 않는 채널이 있다(폐쇄·개명·비공개 등). 그때는
+  // 팔로잉·구독 목록에 남아 있는 이름으로 메운다. 세 곳 모두 실패한 채널만
+  // 해시 8자리로 남는다.
+  const recapNameFallback = new Map();
+  let recapNameFallbackLoaded = false;
+
+  async function loadRecapNameFallback() {
+    if (recapNameFallbackLoaded) return recapNameFallback;
+    recapNameFallbackLoaded = true;
+    const take = (rows) => {
+      for (const row of Array.isArray(rows) ? rows : []) {
+        // 팔로잉은 {channel:{...}}, 구독 목록은 행 자체가 채널이다.
+        const channel = row?.channel || row;
+        const id = String(channel?.channelId || "").toLowerCase();
+        const name = String(channel?.channelName || "").trim();
+        if (/^[0-9a-f]{32}$/.test(id) && name && !recapNameFallback.has(id)) {
+          recapNameFallback.set(id, name);
         }
-      } catch {}
-      if (!name || !recapManageList?.isConnected) continue;
+      }
+    };
+    const readJson = async (url) => {
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          headers: { accept: "application/json" },
+        });
+        return res.ok ? (await res.json())?.content : null;
+      } catch {
+        return null;
+      }
+    };
+    const followingsUrl = (page) =>
+      `https://api.chzzk.naver.com/service/v1/channels/followings?page=${page}&size=505&sortType=FOLLOW`;
+    await Promise.all([
+      (async () => {
+        const first = await readJson(followingsUrl(0));
+        take(first?.followingList);
+        const totalPage = Math.max(1, Number(first?.totalPage) || 1);
+        // 팔로잉이 많은 계정도 있으므로 나머지 페이지도 따라간다(상한은 둔다).
+        for (let page = 1; page < Math.min(totalPage, 10); page += 1) {
+          take((await readJson(followingsUrl(page)))?.followingList);
+        }
+      })(),
+      (async () => {
+        take(
+          await readJson(
+            "https://api.chzzk.naver.com/commercial/v1/subscribe/channels",
+          ),
+        );
+      })(),
+      (async () => {
+        take(
+          await readJson(
+            "https://api.chzzk.naver.com/commercial/v1/subscribe/channels/expired",
+          ),
+        );
+      })(),
+    ]);
+    return recapNameFallback;
+  }
+
+  async function fetchRecapChannelName(channelId) {
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(channelId)}`,
+        { credentials: "include" },
+      );
+      if (res.ok) {
+        const name = String(
+          (await res.json())?.content?.channelName || "",
+        ).trim();
+        if (name) return name;
+      }
+    } catch {}
+    return "";
+  }
+
+  // ⚠ 채널마다 한 건씩 순차로 부르면 목록이 길 때 이름이 한참 뒤에 채워진다.
+  //   차단 목록과 같은 방식으로 동시 6개 워커 풀을 쓴다.
+  async function decorateRecapManageNames(groups) {
+    const paint = (id, name) => {
+      if (!name || !recapManageList?.isConnected) return;
       const input = recapManageList.querySelector(
         `input[value="${CSS.escape(id)}"]`,
       );
       const span = input?.parentElement?.querySelector("span");
       if (span) span.textContent = name;
+    };
+    const pending = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < groups.length) {
+        const [id, entry] = groups[cursor++];
+        const name = await fetchRecapChannelName(entry.channelId);
+        if (name) paint(id, name);
+        else pending.push([id, entry.channelId]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(6, groups.length) }, worker),
+    );
+    // 상세 API 가 비운 채널만 팔로잉·구독 목록으로 메운다.
+    // ⚠ 미리 받아 두지 않는다. 모든 채널이 이름을 주는 계정에서는 팔로잉
+    //   페이지까지 부르는 요청이 통째로 낭비된다.
+    if (!pending.length) return;
+    const fallback = await loadRecapNameFallback();
+    for (const [id, channelId] of pending) {
+      paint(id, fallback.get(channelId) || "");
     }
   }
 
