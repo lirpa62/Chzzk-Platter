@@ -245,12 +245,6 @@
   // 같은 본문이 5초 안에 있기만 하면 API 후보마다 통과해, 한 번 친 채팅이 1초
   // 간격의 여러 행으로 보일 수 있었다. 계정 해시 등으로 이미 확정된 후보가 있으면
   // 그 후보가 로컬 행을 먼저 차지하고, 남은 행만 시각이 가장 가까운 후보와 맞춘다.
-  // 후원·구독은 종류·금액·티어·개월까지 키에 들어가 같은 값이 우연히 겹칠 확률이
-  // 일반 채팅보다 훨씬 낮다. 라이브 DOM 시각이 서버 시각과 크게 어긋난 경우
-  // (서버 시각 필드가 없어 Date.now() 로 떨어진 행)에도 합칠 수 있게 창을 넓힌다.
-  // ⚠ 일반 채팅은 같은 문구가 흔해 창을 넓히면 오히려 남의 채팅과 엮인다 — 그대로 둔다.
-  const DONATION_MATCH_WINDOW_MS = 60000;
-
   function matchUnlinkedLiveRows(
     sourceItems,
     candidateRows,
@@ -258,10 +252,6 @@
     maxDeltaMs = 5000,
   ) {
     const windowMs = Math.max(0, Number(maxDeltaMs) || 0);
-    const donationWindowMs = Math.max(windowMs, DONATION_MATCH_WINDOW_MS);
-    // 그 행이 후원·구독인지로 창 크기를 고른다.
-    const windowFor = (item) =>
-      donationKeyOf(item?.d) ? donationWindowMs : windowMs;
     const sourceGroups = new Map();
     for (let index = 0; index < (sourceItems || []).length; index += 1) {
       const item = sourceItems[index];
@@ -296,7 +286,6 @@
         index,
         time,
         preferred: item?.preferred === true,
-        window: windowFor(item),
       });
     }
 
@@ -319,10 +308,9 @@
       };
       for (const candidate of candidates) {
         if (candidate.preferred !== preferred) continue;
-        const candidateWindow = Number(candidate.window) || windowMs;
-        const endTime = candidate.time + candidateWindow;
+        const endTime = candidate.time + windowMs;
         for (
-          let index = lowerBound(candidate.time - candidateWindow);
+          let index = lowerBound(candidate.time - windowMs);
           index < sortedSources.length && sortedSources[index].time <= endTime;
           index += 1
         ) {
@@ -413,15 +401,8 @@
         const rowTime = Number(row?.t) || 0;
         const rowDonation = String(donationKeyOf(row?.d) || "");
         const rowSecond = Math.floor(rowTime / 1000);
-        // 후원·구독은 식별 정보가 강해 더 넓게 본다(matchUnlinkedLiveRows 와 같은 이유).
-        const spanMs = rowDonation ? DONATION_MATCH_WINDOW_MS : 5000;
-        const spanSeconds = Math.ceil(spanMs / 1000);
         const nearby = [];
-        for (
-          let second = rowSecond - spanSeconds;
-          second <= rowSecond + spanSeconds;
-          second += 1
-        ) {
+        for (let second = rowSecond - 5; second <= rowSecond + 5; second += 1) {
           nearby.push(...(unlinkedBySecond.get(second) || []));
         }
         const matches = nearby
@@ -438,7 +419,7 @@
           })
           .filter(
             ({ delta, textCompatible, donationCompatible }) =>
-              delta <= spanMs && textCompatible && donationCompatible,
+              delta <= 5000 && textCompatible && donationCompatible,
           )
           .sort((a, b) => a.delta - b.delta);
         if (

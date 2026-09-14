@@ -287,15 +287,36 @@ async function appendRows(rows) {
     src: "chat",
   };
 
-  // 6초 차이(예전 창 밖) — 후원은 합쳐진다.
+  // 결제 내역(src:"history")으로 시각이 정정되면 라이브 줄과 다시보기 줄이 합쳐진다.
+  // ⚠ 합치는 창 자체는 5초 그대로다. 시각을 맞추는 일은 결제 내역 API 가 한다
+  //   (purchaseDate 는 초가 절삭돼 채팅 시각과 수십 초까지 벌어진다).
   assert.equal(
     api.reconcileCompleteVodRows(
-      [{ t: 10_000, m: "감사합니다", d: { ...DONATION } }],
-      [{ t: 16_000, m: "감사합니다", v: 30, n: "777", d: { ...DONATION } }],
+      [{ t: 10_000, m: "감사합니다", d: { ...DONATION, src: "history" } }],
+      [
+        {
+          t: 10_000,
+          m: "감사합니다",
+          v: 30,
+          n: "777",
+          d: { ...DONATION, src: "history" },
+        },
+      ],
       "777",
       donKey,
     ).items.length,
     1,
+  );
+
+  // 시각이 정정되지 않은 채 크게 어긋나면 합치지 않는다(남의 후원과 엮이면 안 된다).
+  assert.equal(
+    api.reconcileCompleteVodRows(
+      [{ t: 10_000, m: "감사합니다", d: { ...DONATION } }],
+      [{ t: 60_000, m: "감사합니다", v: 30, n: "777", d: { ...DONATION } }],
+      "777",
+      donKey,
+    ).items.length,
+    2,
   );
 
   // 같은 조건의 일반 채팅은 합치지 않는다(남의 채팅과 엮이면 안 된다).

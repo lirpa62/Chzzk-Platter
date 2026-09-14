@@ -9660,11 +9660,19 @@
       .trim();
   }
 
+  // 결제 내역(purchaseDate)은 초가 00 으로 내려오는 경우가 많다(실측 "02:51:00").
+  // 그래서 같은 후원이라도 채팅 시각과 수십 초까지 벌어진다. 금액·종류·본문이
+  // 모두 맞는 후원은 그 차이로 다른 결제가 될 수 없으므로, 분 단위 오차까지 본다.
+  // ⚠ 창만 넓히는 게 아니라 '식별 정보가 확인된 경우'에만 넓힌다. 금액이 없거나
+  //   종류가 어긋나면 아래 검사에서 먼저 걸러진다.
+  const HISTORY_DONATION_MAX_DELTA_MS = 90000;
+  const HISTORY_SUBSCRIPTION_MAX_DELTA_MS = 90000;
+
   function historyMatchScore(candidate, messageTime, text, donation) {
     const history = candidate?.d;
     if (!history || history.src !== "history" || !donation) return null;
     const delta = Math.abs((Number(candidate.t) || 0) - messageTime);
-    if (!messageTime || delta > 5000) return null;
+    if (!messageTime || delta > HISTORY_DONATION_MAX_DELTA_MS) return null;
 
     if (history.kind === "DONATION") {
       if (donation.kind !== "DONATION") return null;
@@ -9695,7 +9703,7 @@
     ) {
       return null;
     }
-    if (delta > 2500) return null;
+    if (delta > HISTORY_SUBSCRIPTION_MAX_DELTA_MS) return null;
     const historyTier = Number(history.tier) || 0;
     const chatTier = Number(donation.tier) || 0;
     const historyMonth = Number(history.month) || 0;
