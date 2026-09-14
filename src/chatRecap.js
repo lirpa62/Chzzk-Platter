@@ -814,6 +814,18 @@
 
   // 채널 이름은 기록에 없다(용량 때문에 저장하지 않는다) → 필요할 때만 조회.
   // 값: { name, verifiedMark } — verifiedMark=null 은 아직 확인하지 않은 상태다.
+  // 프로필 이미지 URL → 치지직 리사이즈 썸네일.
+  // ⚠ 원본을 그대로 쓰면 안 된다. 채널 프로필 원본은 수백 KB 라, 이 페이지처럼
+  //   채널 수십~수백 개를 한꺼번에 그리면 작은 자리에 원본이 줄줄이 내려오며
+  //   눈에 보이게 늦다. 사이드바·모달과 같은 크기로 요청하면 브라우저가 이미
+  //   받아 둔 것을 캐시에서 재사용한다.
+  function profileThumb(imageUrl) {
+    const url = String(imageUrl || "");
+    if (!url) return "";
+    if (/[?&]type=/.test(url)) return url; // 이미 크기가 지정된 URL
+    return `${url}${url.includes("?") ? "&" : "?"}type=f120_120_na`;
+  }
+
   const nameCache = new Map();
   // ⚠ 중복 요청을 막겠다고 '빈 값'을 미리 넣으면, 조회가 끝나기 전에 부른 쪽은
   //   그 빈 값을 받아 이름이 영영 안 나온다(같은 채널이 한 곳에서만 보임).
@@ -2251,7 +2263,7 @@
       if (!info) return;
       if (info.name) name.textContent = info.name;
       if (info.imageUrl) {
-        img.src = info.imageUrl;
+        img.src = profileThumb(info.imageUrl);
         img.hidden = false;
       }
       if (info.verifiedMark && !markEl) {
@@ -4799,7 +4811,7 @@
             .select(".crc-channel-graph-node-image")
             .attr(
               "href",
-              info.imageUrl ||
+              profileThumb(info.imageUrl) ||
                 (isDarkTheme() ? DEFAULT_PROFILE_DARK : DEFAULT_PROFILE_LIGHT),
             );
           group
@@ -4991,7 +5003,7 @@
       .attr(
         "href",
         (node) =>
-          model.profileInfo.get(node.id)?.imageUrl ||
+          profileThumb(model.profileInfo.get(node.id)?.imageUrl) ||
           (isDarkTheme() ? DEFAULT_PROFILE_DARK : DEFAULT_PROFILE_LIGHT),
       )
       .attr("x", (node) => -node.radius + 3)
@@ -6366,7 +6378,7 @@
             },
             { once: true },
           );
-          avatar.src = info.imageUrl;
+          avatar.src = profileThumb(info.imageUrl);
         }
       }),
     );
@@ -8047,7 +8059,7 @@
         }
         if (info.imageUrl) {
           for (const img of el.querySelectorAll(".crc-card-avatar")) {
-            img.src = info.imageUrl;
+            img.src = profileThumb(info.imageUrl);
             img.hidden = false;
           }
         }
@@ -10552,7 +10564,7 @@
     avatarBox.className = "crc-row-avatar";
     if (c.imageUrl) {
       const img0 = document.createElement("img");
-      img0.src = c.imageUrl;
+      img0.src = profileThumb(c.imageUrl);
       img0.alt = "";
       img0.loading = "lazy";
       avatarBox.append(img0);
@@ -10866,7 +10878,8 @@
     handle.style.left = `${pct}%`;
     // 핸들은 지금 수집 중인 채널의 프로필. 없으면 숨긴다(깨진 이미지 방지).
     if (channel?.imageUrl) {
-      if (handle.src !== channel.imageUrl) handle.src = channel.imageUrl;
+      const handleSrc = profileThumb(channel.imageUrl);
+      if (handle.src !== handleSrc) handle.src = handleSrc;
       handle.hidden = false;
       handle.title = channel.name || "";
     } else {
@@ -11582,7 +11595,7 @@
       avatar.loading = "lazy";
       avatar.decoding = "async";
       const cached = nameCache.get(entry.channelId);
-      if (cached?.imageUrl) avatar.src = cached.imageUrl;
+      if (cached?.imageUrl) avatar.src = profileThumb(cached.imageUrl);
       else avatar.classList.add("is-empty");
       const name = document.createElement("span");
       name.className = "crc-purge-name";
@@ -11600,7 +11613,7 @@
           if (!info || !name.isConnected) return;
           if (info.name) name.textContent = info.name;
           if (info.imageUrl) {
-            avatar.src = info.imageUrl;
+            avatar.src = profileThumb(info.imageUrl);
             avatar.classList.remove("is-empty");
           }
         });
