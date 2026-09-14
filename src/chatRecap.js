@@ -9023,6 +9023,11 @@
     const videos = [];
     const seen = new Set();
     const size = 50;
+    // 아는 영상을 만나면 그 아래(더 오래된 쪽)는 이미 훑은 것으로 보고 멈춘다.
+    // ⚠ 다만 '아는 영상이 연속으로 이어진다'는 보장이 없다. 최신 영상만 가져오고
+    //   그 아래를 건너뛴 경우, 목록 첫 줄에서 바로 멈춰 그 밑의 새 영상을 전부
+    //   놓친다(실측: 맨 위가 이미 가져온 영상이면 새 영상 3개가 잡히지 않음).
+    //   한 페이지는 끝까지 보고, 페이지를 더 넘길지만 이 값으로 정한다.
     let reachedKnown = false;
     // ⚠ 아는 영상이 없는 채널(eventLinks 에 없던 채널)은 중단 조건이 안 걸려
     //   상한까지 계속 페이지를 넘긴다. 그런 채널은 첫 페이지만 본다 —
@@ -9051,8 +9056,9 @@
         if (!/^\d+$/.test(videoNo) || seen.has(videoNo)) continue;
         seen.add(videoNo);
         if (knownVideos.has(videoNo)) {
+          // 이 페이지의 나머지도 마저 본다(아래에 아직 안 가져온 영상이 있을 수 있다).
           reachedKnown = true;
-          break;
+          continue;
         }
         videos.push(videoNo);
         if (videos.length >= NEW_VOD_SCAN_MAX) break;
