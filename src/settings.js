@@ -31,6 +31,8 @@
     "cheeseChatRecapWordSort",
     "cheeseChatRecapWordType",
     "chatRecapNewVodBadge",
+    // 새 다시보기 확인 대상 기간(3·7일 또는 기간 없음=0).
+    "chatRecapNewVodRecentDays",
     "cheeseMasterEnabled",
     "cheeseGlobalScrollTopFab",
     "cheeseSettingsKnownFeatures",
@@ -10892,6 +10894,11 @@
       key === "chatRecapNewVodBadge"
     ) {
       return typeof value === "boolean" ? value : undefined;
+    }
+    if (key === "chatRecapNewVodRecentDays") {
+      // chatRecap.js 의 NEW_VOD_RECENT_DAYS_ALLOWED 와 같은 목록.
+      const days = Number(value);
+      return [3, 7, 0].includes(days) ? days : undefined;
     }
     if (key === "cheeseChatRecapChannelView") {
       return value === "card" || value === "list" ? value : undefined;

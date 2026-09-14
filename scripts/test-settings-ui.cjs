@@ -16,6 +16,8 @@ for (const key of [
   'cheeseVodRoleChatOn',
   'cheeseVodRoleChatBots',
   'cheeseFollowSquareChannels',
+  // 리캡 페이지에서 고르는 값이라 설정 화면에는 없지만 내보내기에는 들어가야 한다.
+  'chatRecapNewVodRecentDays',
 ]) {
   assert.match(settingsSource, new RegExp(`SETTINGS_STORAGE_KEYS[\\s\\S]*?"${key}"`));
 }
