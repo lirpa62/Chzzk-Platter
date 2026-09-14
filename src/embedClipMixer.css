@@ -380,3 +380,11 @@ button.cheese-embed-clip-mixer-button .pzp-button__tooltip {
   color: rgba(255, 255, 255, 0.55);
   font-size: 12px;
 }
+/* 어디서 프리셋을 만드는지 알려 주는 안내. 본문보다 한 단계 흐리게. */
+.cheese-embed-clip-mixer-panel-empty span {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  line-height: 1.45;
+}

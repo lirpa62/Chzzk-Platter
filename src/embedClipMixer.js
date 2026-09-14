@@ -1326,7 +1326,10 @@
                 presetRowHtml(`${CUSTOM_PREFIX}${preset.id}`, preset.name),
               )
               .join("")
-          : `<p class="${PANEL_CLASS}-empty">저장된 커스텀 프리셋이 없습니다.</p>`
+          : // 이 패널은 고르기만 한다(프리셋 추가는 없다). 어디서 만드는지 알려 준다.
+            `<p class="${PANEL_CLASS}-empty">저장된 커스텀 프리셋이 없습니다.` +
+            `<span>치지직 라이브·다시보기 플레이어의 오디오 믹서에서 만들면 ` +
+            `여기에도 나타납니다.</span></p>`
         : PRESET_ORDER.map((key) =>
             presetRowHtml(key, PRESETS[key].label),
           ).join("");

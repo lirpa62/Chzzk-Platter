@@ -4,6 +4,29 @@ const { readFileSync, mkdtempSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 
+// 커스텀 탭의 빈 상태: 이 패널은 고르기만 하므로 어디서 만드는지 알려 줘야 한다.
+// (프리셋이 하나라도 있으면 이 문구가 안 보이므로 소스에서 확인한다.)
+{
+  const mixerSource = readFileSync(
+    join(__dirname, "..", "src", "embedClipMixer.js"),
+    "utf8",
+  );
+  const emptyBlock = mixerSource.slice(
+    mixerSource.indexOf("저장된 커스텀 프리셋이 없습니다."),
+    mixerSource.indexOf("저장된 커스텀 프리셋이 없습니다.") + 400,
+  );
+  assert.match(emptyBlock, /라이브·다시보기 플레이어의 오디오 믹서에서 만들면/);
+  assert.match(emptyBlock, /<span>/);
+  const mixerCss = readFileSync(
+    join(__dirname, "..", "src", "embedClipMixer.css"),
+    "utf8",
+  );
+  assert.match(
+    mixerCss,
+    /\.cheese-embed-clip-mixer-panel-empty span \{[^}]*display: block/,
+  );
+}
+
 const profile = mkdtempSync(join(tmpdir(), "cheese-embed-mixer-"));
 const browser = spawn(
   process.env.CHROME_BIN ||
