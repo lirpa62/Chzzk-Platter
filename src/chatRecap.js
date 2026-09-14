@@ -8878,7 +8878,9 @@
         : newVodCheckAt
           ? `${new Date(newVodCheckAt).toLocaleString("ko-KR")} 확인` +
             (failed ? ` · ${fmt(failed)}개 채널 확인 실패` : "")
-          : "최근 일주일 안에 채팅한 스트리머를 기준으로 확인합니다.";
+          : newVodRecentDays > 0
+            ? `최근 ${newVodRecentDays}일 안에 채팅한 스트리머를 기준으로 확인합니다.`
+            : "수집한 적이 있는 스트리머를 기준으로 확인합니다.";
       if (!checking && newVodCheckAt && newVodCheckedChannels < 1) {
         checkedAt.textContent = "완료된 다시보기와 연결된 스트리머가 없습니다.";
       }
@@ -9105,9 +9107,21 @@
     } catch {}
   }
 
-  // 새 다시보기 확인 대상: 최근 이 기간 안에 채팅(라이브 포함)이 있는 채널.
-  // 오래 보지 않은 채널까지 매번 훑으면 채널 수만큼 요청이 늘고 결과는 거의 없다.
-  const NEW_VOD_RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  // ⚠ 저장값을 확인 직전에 읽는다. 페이지 진입 직후의 자동 확인이 옵션 로드보다
+  //   먼저 돌 수 있어, 미리 읽어 두는 방식으로는 저장한 기간이 첫 확인에 적용되지
+  //   않는다.
+  async function loadNewVodRecentDays() {
+    try {
+      const saved = (await chrome.storage.local.get(NEW_VOD_RECENT_KEY))?.[
+        NEW_VOD_RECENT_KEY
+      ];
+      if (NEW_VOD_RECENT_DAYS_ALLOWED.includes(Number(saved))) {
+        newVodRecentDays = Number(saved);
+      }
+    } catch {}
+    return newVodRecentDays;
+  }
+
   async function checkNewVods({
     accountId = "",
     force = false,
@@ -9140,6 +9154,7 @@
       }
     }
     newVodChecking = true;
+    await loadNewVodRecentDays();
     newVodCheckAccountId = current;
     updateNewVodUi({ checking: true });
     const eventState = await loadEventLinkState(current);
@@ -9155,24 +9170,26 @@
         videosByChannel.set(channelId, new Set());
     }
     // ⚠ 최근에 전혀 채팅하지 않은 채널까지 매번 확인하면 요청만 늘고 얻는 게 없다.
-    //   기록이 오래된 채널은 후보에서 뺀다. 다만 '이미 아는 영상' 목록(eventLinks)에
-    //   있는 채널은 가져오다 만 것일 수 있어 남긴다.
-    const recentCutoff = Date.now() - NEW_VOD_RECENT_WINDOW_MS;
-    const lastChatAt = new Map();
-    for (const list of [lastData.items, lastData.donations]) {
-      for (const item of Array.isArray(list) ? list : []) {
-        const channelId = item?.channelId;
-        const at = Number(item?.t) || 0;
-        if (!channelId || !at) continue;
-        if (at > (lastChatAt.get(channelId) || 0))
-          lastChatAt.set(channelId, at);
+    //   '다시보기 관리' 탭에서 고른 기간 안에 채팅(라이브·후원 포함)한 채널만
+    //   확인한다. '상관 없음'(0)이면 기록이 있는 모든 채널을 확인한다.
+    if (newVodRecentDays > 0) {
+      const recentCutoff = Date.now() - newVodRecentDays * 24 * 60 * 60 * 1000;
+      const lastChatAt = new Map();
+      for (const list of [lastData.items, lastData.donations]) {
+        for (const item of Array.isArray(list) ? list : []) {
+          const channelId = item?.channelId;
+          const at = Number(item?.t) || 0;
+          if (!channelId || !at) continue;
+          if (at > (lastChatAt.get(channelId) || 0))
+            lastChatAt.set(channelId, at);
+        }
       }
-    }
-    const knownVideoChannels = importedVideosByChannel(eventState.links);
-    for (const channelId of [...videosByChannel.keys()]) {
-      if (knownVideoChannels.has(channelId)) continue;
-      if ((lastChatAt.get(channelId) || 0) >= recentCutoff) continue;
-      videosByChannel.delete(channelId);
+      for (const channelId of [...videosByChannel.keys()]) {
+        if ((lastChatAt.get(channelId) || 0) >= recentCutoff) {
+          continue;
+        }
+        videosByChannel.delete(channelId);
+      }
     }
     const channelIds = [...videosByChannel.keys()];
     newVodCheckedChannels = channelIds.length;
@@ -9432,6 +9449,11 @@
   //   저장된 것보다 새로운 항목이 있는지만 본다(요청 3회).
   // '다시보기' 버튼의 새 다시보기 배지를 보일지. 모달에서 끌 수 있다.
   const NEW_VOD_BADGE_KEY = "chatRecapNewVodBadge";
+  // 새 다시보기 확인 대상 기간. 오래 보지 않은 채널까지 매번 훑으면 채널 수만큼
+  // 요청이 늘고 결과는 거의 없다. 0 이면 기간을 보지 않고 모두 확인한다.
+  const NEW_VOD_RECENT_KEY = "chatRecapNewVodRecentDays";
+  const NEW_VOD_RECENT_DAYS_ALLOWED = [3, 7, 0];
+  let newVodRecentDays = 7;
   let newVodBadgeOn = true;
 
   async function peekLatestDonationAt() {
@@ -12153,6 +12175,34 @@
     const input = $("crcNewVodBadge");
     if (input) input.checked = newVodBadgeOn;
     updateNewVodUi();
+  })();
+
+  function reflectNewVodRecent() {
+    for (const button of document.querySelectorAll("[data-new-vod-recent]")) {
+      const value = Number(button.dataset.newVodRecent);
+      button.setAttribute("aria-pressed", String(value === newVodRecentDays));
+    }
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("[data-new-vod-recent]");
+    if (!button) return;
+    const value = Number(button.dataset.newVodRecent);
+    if (!NEW_VOD_RECENT_DAYS_ALLOWED.includes(value)) return;
+    if (value === newVodRecentDays) return;
+    newVodRecentDays = value;
+    reflectNewVodRecent();
+    updateNewVodUi(); // 안내 문구를 새 기간으로 바꾼다
+    try {
+      void chrome.storage.local.set({ [NEW_VOD_RECENT_KEY]: value });
+    } catch {}
+    // 대상이 바뀌었으니 캐시를 쓰지 않고 다시 확인한다(좁히면 줄고 넓히면 는다).
+    void checkNewVods({ force: true, silent: true });
+  });
+
+  void (async () => {
+    await loadNewVodRecentDays();
+    reflectNewVodRecent();
   })();
 
   $("crcChannelGraphPeriodReset")?.addEventListener("click", () => {

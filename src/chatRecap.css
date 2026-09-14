@@ -4358,6 +4358,18 @@ button.crc-multi-channel-more:focus-visible {
 /* 새 다시보기 배지 on/off (가져오기 모달) */
 /* .crc-new-vod-actions 는 flex 라 이 라벨도 그 줄에 나란히 놓인다.
    (패널이 이미 space-between 이므로 별도 마진은 필요 없다) */
+/* 새 다시보기 확인 대상 기간. 배지 토글과 같은 줄에 놓는다. */
+.crc-new-vod-recent {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+.crc-new-vod-recent > span:first-child {
+  color: var(--popup-muted);
+  font-size: 12px;
+}
+
 .crc-new-vod-badge-toggle {
   align-items: center;
   cursor: pointer;

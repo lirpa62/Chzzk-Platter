@@ -75,33 +75,48 @@ ok(
   "모달을 열 때마다 전수 조회하지 않는다",
 );
 
-console.log("[새 다시보기] 최근 채팅이 있는 채널만 확인한다");
+console.log("[새 다시보기] 확인 대상 기간을 고를 수 있다");
 ok(
-  /const NEW_VOD_RECENT_WINDOW_MS = 7 \* 24 \* 60 \* 60 \* 1000;/.test(src),
-  "기준이 일주일이다",
+  /const NEW_VOD_RECENT_DAYS_ALLOWED = \[3, 7, 0\];/.test(src),
+  "선택지는 3일·7일·상관없음이다",
 );
-const check = src.slice(
-  src.indexOf(
-    "    const recentCutoff = Date.now() - NEW_VOD_RECENT_WINDOW_MS;",
-  ),
+ok(/let newVodRecentDays = 7;/.test(src), "기본값은 7일이다");
+ok(
+  /const NEW_VOD_RECENT_KEY = "chatRecapNewVodRecentDays";/.test(src),
+  "선택한 기간을 저장한다",
+);
+for (const value of ["3", "7", "0"]) {
+  ok(
+    new RegExp(`data-new-vod-recent="${value}"`).test(html),
+    `관리 탭에 ${value === "0" ? "상관 없음" : `최근 ${value}일`} 버튼이 있다`,
+  );
+}
+const filter = src.slice(
+  src.indexOf("    if (newVodRecentDays > 0) {"),
   src.indexOf("    const channelIds = [...videosByChannel.keys()];"),
 );
+ok(Boolean(filter.trim()), "기간 필터 블록이 있다");
 ok(
-  /lastData\.items/.test(check) && /lastData\.donations/.test(check),
+  /lastData\.items/.test(filter) && /lastData\.donations/.test(filter),
   "채팅과 후원 기록의 시각을 모두 본다",
 );
 ok(
-  /knownVideoChannels\.has\(channelId\)\) continue;/.test(check),
-  "이미 아는 영상이 있는 채널은 남긴다(가져오다 만 경우)",
+  !/knownVideoChannels/.test(filter),
+  "아는 영상이 있어도 기간을 벗어나면 뺀다(예외 없음)",
 );
 ok(
-  /videosByChannel\.delete\(channelId\)/.test(check),
-  "오래된 채널만 후보에서 뺀다",
+  /videosByChannel\.delete\(channelId\)/.test(filter),
+  "기간을 벗어난 채널만 후보에서 뺀다",
 );
 ok(
-  /최근 일주일 안에 채팅한 스트리머/.test(html) &&
-    /최근 일주일 안에 채팅한 스트리머/.test(src),
-  "안내 문구도 기준에 맞췄다",
+  /await loadNewVodRecentDays\(\);/.test(
+    src.slice(src.indexOf("    newVodChecking = true;")),
+  ),
+  "확인 직전에 저장값을 읽는다(첫 확인에도 적용된다)",
+);
+ok(
+  /void checkNewVods\(\{ force: true, silent: true \}\);/.test(src),
+  "기간을 바꾸면 캐시를 쓰지 않고 다시 확인한다",
 );
 
 console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");

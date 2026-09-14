@@ -1457,10 +1457,40 @@
                   >새 다시보기를 확인하지 않았습니다.</strong
                 >
                 <span id="crcNewVodCheckedAt"
-                  >최근 일주일 안에 채팅한 스트리머를 기준으로 확인합니다.</span
+                  >최근 7일 안에 채팅한 스트리머를 기준으로 확인합니다.</span
                 >
               </div>
               <div class="crc-new-vod-actions">
+                <span class="crc-new-vod-recent">
+                  <span>확인 대상</span>
+                  <span
+                    class="lps-view-switch crc-view-switch"
+                    role="group"
+                    aria-label="새 다시보기 확인 대상 기간"
+                  >
+                    <button
+                      type="button"
+                      data-new-vod-recent="3"
+                      aria-pressed="false"
+                    >
+                      최근 3일
+                    </button>
+                    <button
+                      type="button"
+                      data-new-vod-recent="7"
+                      aria-pressed="true"
+                    >
+                      최근 7일
+                    </button>
+                    <button
+                      type="button"
+                      data-new-vod-recent="0"
+                      aria-pressed="false"
+                    >
+                      상관 없음
+                    </button>
+                  </span>
+                </span>
                 <label class="crc-new-vod-badge-toggle">
                   <span>버튼에 배지 표시</span>
                   <span class="crc-toggle">
