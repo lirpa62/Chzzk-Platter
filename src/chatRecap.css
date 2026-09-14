@@ -3753,6 +3753,27 @@ button.crc-multi-channel-more:focus-visible {
   flex: 1 1 280px;
 }
 
+/* 새 다시보기 패널: 위 줄(상태 문구 + 확인 버튼) / 아래 줄(확인 대상·배지)로
+   나눈다. 버튼을 문구 오른쪽 끝에 붙여 둔다. */
+.crc-new-vod-panel {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 8px;
+}
+.crc-new-vod-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  width: 100%;
+}
+.crc-new-vod-head-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
 .crc-new-vod-panel .crc-new-vod-copy {
   flex: 1 1 180px;
 }

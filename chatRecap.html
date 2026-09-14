@@ -1452,13 +1452,33 @@
           </p>
           <div class="crc-vod-tools-body">
             <div class="crc-new-vod-panel" id="crcNewVodPanel">
-              <div class="crc-new-vod-copy">
-                <strong id="crcNewVodStatus"
-                  >새 다시보기를 확인하지 않았습니다.</strong
-                >
-                <span id="crcNewVodCheckedAt"
-                  >최근 7일 안에 채팅한 스트리머를 기준으로 확인합니다.</span
-                >
+              <div class="crc-new-vod-head">
+                <div class="crc-new-vod-copy">
+                  <strong id="crcNewVodStatus"
+                    >새 다시보기를 확인하지 않았습니다.</strong
+                  >
+                  <span id="crcNewVodCheckedAt"
+                    >최근 7일 안에 채팅한 스트리머를 기준으로 확인합니다.</span
+                  >
+                </div>
+                <div class="crc-new-vod-head-actions">
+                  <button
+                    type="button"
+                    class="crc-btn-ghost"
+                    id="crcSelectNewVods"
+                    title="채널당 최근 다시보기 개수와 관계없이 발견된 새 다시보기를 모두 선택합니다."
+                    hidden
+                  >
+                    새 다시보기 채널 선택
+                  </button>
+                  <button
+                    type="button"
+                    class="crc-btn-ghost"
+                    id="crcRefreshNewVods"
+                  >
+                    새로 확인
+                  </button>
+                </div>
               </div>
               <div class="crc-new-vod-actions">
                 <span class="crc-new-vod-recent">
@@ -1487,7 +1507,7 @@
                       data-new-vod-recent="0"
                       aria-pressed="false"
                     >
-                      상관 없음
+                      기간 없음
                     </button>
                   </span>
                 </span>
@@ -1498,22 +1518,6 @@
                     <i aria-hidden="true"></i>
                   </span>
                 </label>
-                <button
-                  type="button"
-                  class="crc-btn-ghost"
-                  id="crcSelectNewVods"
-                  title="채널당 최근 다시보기 개수와 관계없이 발견된 새 다시보기를 모두 선택합니다."
-                  hidden
-                >
-                  새 다시보기 채널 선택
-                </button>
-                <button
-                  type="button"
-                  class="crc-btn-ghost"
-                  id="crcRefreshNewVods"
-                >
-                  새로 확인
-                </button>
               </div>
             </div>
 

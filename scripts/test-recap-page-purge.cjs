@@ -160,7 +160,7 @@ ok(
 for (const value of ["3", "7", "0"]) {
   ok(
     new RegExp(`data-new-vod-recent="${value}"`).test(html),
-    `관리 탭에 ${value === "0" ? "상관 없음" : `최근 ${value}일`} 버튼이 있다`,
+    `관리 탭에 ${value === "0" ? "기간 없음" : `최근 ${value}일`} 버튼이 있다`,
   );
 }
 const filter = src.slice(
