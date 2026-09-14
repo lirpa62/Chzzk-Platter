@@ -267,6 +267,97 @@ async function appendRows(rows) {
     ],
   });
 
+  // ── 라이브 수집 행 ↔ 다시보기 가져오기 행 합치기 ────────────────────────
+  // 후원·구독은 종류·금액·티어까지 맞아야 같은 행으로 보므로 시각이 크게 어긋나도
+  // 합친다. 일반 채팅은 같은 문구가 흔해 기존 5초 창을 유지한다.
+  const donKey = (value) =>
+    !value || typeof value !== "object"
+      ? ""
+      : [
+          value.kind,
+          value.type,
+          Number(value.amount) || 0,
+          Number(value.month) || 0,
+          Number(value.tier) || 0,
+        ].join(":");
+  const DONATION = {
+    kind: "DONATION",
+    type: "CHAT",
+    amount: 1000,
+    src: "chat",
+  };
+
+  // 6초 차이(예전 창 밖) — 후원은 합쳐진다.
+  assert.equal(
+    api.reconcileCompleteVodRows(
+      [{ t: 10_000, m: "감사합니다", d: { ...DONATION } }],
+      [{ t: 16_000, m: "감사합니다", v: 30, n: "777", d: { ...DONATION } }],
+      "777",
+      donKey,
+    ).items.length,
+    1,
+  );
+
+  // 같은 조건의 일반 채팅은 합치지 않는다(남의 채팅과 엮이면 안 된다).
+  assert.equal(
+    api.reconcileCompleteVodRows(
+      [{ t: 10_000, m: "ㅋㅋ" }],
+      [{ t: 16_000, m: "ㅋㅋ", v: 30, n: "777" }],
+      "777",
+      donKey,
+    ).items.length,
+    2,
+  );
+
+  // 같은 금액 후원 2건은 각각 짝지어 2행으로 남는다(한 줄로 뭉치지 않는다).
+  assert.equal(
+    api.reconcileCompleteVodRows(
+      [
+        { t: 10_000, m: "감사", d: { ...DONATION } },
+        { t: 40_000, m: "감사", d: { ...DONATION } },
+      ],
+      [
+        { t: 10_200, m: "감사", v: 10, n: "777", d: { ...DONATION } },
+        { t: 40_200, m: "감사", v: 40, n: "777", d: { ...DONATION } },
+      ],
+      "777",
+      donKey,
+    ).items.length,
+    2,
+  );
+
+  // 이미 가져온 다시보기를 여러 번 다시 모아도 행이 늘지 않는다.
+  let repeated = [{ t: 1000, m: "안녕", v: 10, n: "777", i: "id:1" }];
+  for (let round = 0; round < 5; round += 1) {
+    repeated = api.reconcileCompleteVodRows(
+      repeated,
+      [{ t: 1000, m: "안녕", v: 10, n: "777", i: "id:1" }],
+      "777",
+      donKey,
+    ).items;
+  }
+  assert.equal(repeated.length, 1);
+
+  // 재수집에서 후원 정보가 붙으면 새 행이 아니라 기존 행이 채워진다.
+  const enriched = api.reconcileCompleteVodRows(
+    [{ t: 2000, m: "감사합니다", v: 20, n: "777", i: "id:2" }],
+    [
+      {
+        t: 2000,
+        m: "감사합니다",
+        v: 20,
+        n: "777",
+        i: "id:2",
+        d: { ...DONATION },
+      },
+    ],
+    "777",
+    donKey,
+  );
+  assert.equal(enriched.items.length, 1);
+  assert.equal(enriched.added, 0);
+  assert.ok(enriched.items[0].d);
+
   console.log("chatRecapStore tests passed");
 })().catch((error) => {
   console.error(error);

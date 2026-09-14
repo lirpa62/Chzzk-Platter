@@ -40,6 +40,7 @@
     ["popup-player", "[data-popup-player]"],
     ["preview-colors", "[data-settings-preview-colors]"],
     ["clip-precision", '[data-feature="clipEditorPrecision"]'],
+    ["chat-recap", "[data-chat-recap-enabled]"],
     // 자식이 여럿인데 접기 버튼이 없던 상위 옵션들. 하위가 길게 이어져 그룹의
     // 경계가 보이지 않았다.
     ["search-live-rerank", "[data-search-live-rerank]"],
@@ -104,7 +105,7 @@
     ['[data-feature="chatShowTime"]', "[data-chat-time-format], [data-chat-time-color-enabled]"],
     ['[data-feature="chatShowOsIcon"]', "[data-chat-os-position], [data-chat-os-image-input]"],
     ["[data-chat-history]", "[data-chat-history-limit]"],
-    ["[data-chat-recap-enabled]", "[data-chat-recap-retention]"],
+    ["[data-chat-recap-enabled]", "[data-chat-recap-retention], [data-recap-manage-list]"],
     ['[data-feature="chatEmoticonAltClick"]', "[data-emoticon-block-input]"],
     ['[data-feature="clipVault"]', "[data-clip-vault-limit]"],
     ["[data-clip-audio-mixer-enabled]", "[data-clip-audio-mixer-always-on], [data-settings-clip-mixer-preset]"],

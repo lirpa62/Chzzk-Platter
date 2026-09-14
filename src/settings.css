@@ -3391,6 +3391,28 @@ body > .clr-picker .clr-preview {
   color: var(--popup-muted);
   font-weight: 400;
 }
+/* 채팅 기록 삭제 목록: 채널 줄 자체가 체크박스 라벨이다(방송 단위 하위 목록이 없다). */
+label.settings-memo-channel {
+  align-items: center;
+  cursor: pointer;
+  padding: 6px;
+}
+label.settings-memo-channel input {
+  flex: none;
+  margin: 0;
+}
+label.settings-memo-channel span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+label.settings-memo-channel small {
+  margin-left: auto;
+  white-space: nowrap;
+}
+label.settings-memo-channel:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.12));
+}
 .settings-memo-list ul {
   list-style: none;
   margin: 0;

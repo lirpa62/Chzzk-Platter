@@ -9072,6 +9072,209 @@
 
   if (memoManageRow) void renderMemoManage();
 
+  // ── 저장된 채팅 기록 삭제(채널 단위 / 전체) ──────────────────────────────
+  // ⚠ 리캡 본문은 chatRecap:<계정>:<채널>:<월>[:part:N] 로 흩어져 있고, 카탈로그
+  //   (chatRecapCatalog:<계정>)와 다시보기 통계(chatRecapVodChatStatsV1:...)가
+  //   같은 채널을 따로 가리킨다. 한 곳만 지우면 목록에는 남아 다시 계산되므로
+  //   같은 채널의 세 갈래를 함께 지운다.
+  const recapManageRow = document.querySelector("[data-recap-manage-row]");
+  const recapManageList = document.querySelector("[data-recap-manage-list]");
+  const recapManageDelete = document.querySelector(
+    "[data-recap-manage-delete]",
+  );
+  const recapManageClear = document.querySelector("[data-recap-manage-clear]");
+  const RECAP_ROW_RE =
+    /^chatRecap:([0-9a-f]{32}):([0-9a-f]{32}):(\d{4}-\d{2})(?::part:\d+)?$/i;
+  const RECAP_STATS_RE =
+    /^chatRecapVodChatStatsV1:([0-9a-f]{32}):([0-9a-f]{32})$/i;
+
+  function syncRecapManageButtons() {
+    if (!recapManageDelete) return;
+    const checked = recapManageList
+      ? recapManageList.querySelectorAll("input:checked").length
+      : 0;
+    recapManageDelete.disabled = checked === 0;
+    recapManageDelete.textContent = checked
+      ? `선택 삭제 (${checked})`
+      : "선택 삭제";
+  }
+
+  // 저장소 전체를 훑어 채널별로 키와 월 수를 모은다.
+  async function collectRecapChannels() {
+    const byChannel = new Map();
+    let snapshot = {};
+    try {
+      snapshot = (await chrome.storage.local.get(null)) || {};
+    } catch {
+      return byChannel;
+    }
+    for (const key of Object.keys(snapshot)) {
+      const row = RECAP_ROW_RE.exec(key);
+      const stats = row ? null : RECAP_STATS_RE.exec(key);
+      const match = row || stats;
+      if (!match) continue;
+      const accountId = match[1].toLowerCase();
+      const channelId = match[2].toLowerCase();
+      const id = `${accountId}:${channelId}`;
+      if (!byChannel.has(id)) {
+        byChannel.set(id, {
+          accountId,
+          channelId,
+          keys: [],
+          months: new Set(),
+          rows: 0,
+        });
+      }
+      const entry = byChannel.get(id);
+      entry.keys.push(key);
+      if (row) {
+        entry.months.add(row[3]);
+        const value = snapshot[key];
+        const items = Array.isArray(value?.items) ? value.items : [];
+        entry.rows += items.length;
+      }
+    }
+    return byChannel;
+  }
+
+  let recapManageChannels = new Map();
+
+  async function renderRecapManage() {
+    if (!recapManageList) return;
+    recapManageList.innerHTML =
+      '<p class="settings-memo-empty">불러오는 중…</p>';
+    recapManageChannels = await collectRecapChannels();
+    if (!recapManageChannels.size) {
+      recapManageList.innerHTML =
+        '<p class="settings-memo-empty">저장된 채팅 기록이 없습니다.</p>';
+      if (recapManageClear) recapManageClear.disabled = true;
+      syncRecapManageButtons();
+      return;
+    }
+    if (recapManageClear) recapManageClear.disabled = false;
+    const groups = [...recapManageChannels.entries()].sort(
+      (a, b) => b[1].rows - a[1].rows,
+    );
+    recapManageList.innerHTML = groups
+      .map(([id, entry]) => {
+        const name = `채널 ${entry.channelId.slice(0, 8)}`;
+        const months = entry.months.size;
+        const detail = months
+          ? `${months}개월 · 채팅 ${entry.rows.toLocaleString("ko-KR")}개`
+          : "다시보기 통계만";
+        return (
+          `<div class="settings-memo-group">` +
+          `<label class="settings-memo-channel">` +
+          `<input type="checkbox" value="${escapeHtml(id)}">` +
+          `<span>${escapeHtml(name)}</span>` +
+          `<small>${escapeHtml(detail)}</small></label></div>`
+        );
+      })
+      .join("");
+    syncRecapManageButtons();
+    void decorateRecapManageNames(groups);
+  }
+
+  // 채널명은 API 로 따로 채운다(없어도 해시로 구분은 된다).
+  async function decorateRecapManageNames(groups) {
+    for (const [id, entry] of groups.slice(0, 40)) {
+      let name = "";
+      try {
+        const res = await fetch(
+          `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(entry.channelId)}`,
+          { credentials: "include" },
+        );
+        if (res.ok) {
+          name = String((await res.json())?.content?.channelName || "");
+        }
+      } catch {}
+      if (!name || !recapManageList?.isConnected) continue;
+      const input = recapManageList.querySelector(
+        `input[value="${CSS.escape(id)}"]`,
+      );
+      const span = input?.parentElement?.querySelector("span");
+      if (span) span.textContent = name;
+    }
+  }
+
+  async function removeRecapChannels(ids) {
+    const keys = [];
+    const byAccount = new Map();
+    for (const id of ids) {
+      const entry = recapManageChannels.get(id);
+      if (!entry) continue;
+      keys.push(...entry.keys);
+      if (!byAccount.has(entry.accountId)) byAccount.set(entry.accountId, []);
+      byAccount.get(entry.accountId).push(entry.channelId);
+    }
+    if (!keys.length) return;
+    try {
+      await chrome.storage.local.remove(keys);
+    } catch {}
+    // 카탈로그에서도 그 채널을 빼야 목록이 다시 살아나지 않는다.
+    for (const [accountId, channels] of byAccount) {
+      const catalogKey = `chatRecapCatalog:${accountId}`;
+      try {
+        const stored = (await chrome.storage.local.get(catalogKey))?.[
+          catalogKey
+        ];
+        if (!stored || typeof stored !== "object") continue;
+        const next = { ...stored, channels: { ...(stored.channels || {}) } };
+        for (const channelId of channels) delete next.channels[channelId];
+        if (Object.keys(next.channels).length) {
+          await chrome.storage.local.set({ [catalogKey]: next });
+        } else {
+          await chrome.storage.local.remove(catalogKey);
+        }
+      } catch {}
+    }
+  }
+
+  recapManageList?.addEventListener("change", syncRecapManageButtons);
+
+  recapManageDelete?.addEventListener("click", async () => {
+    const ids = [...recapManageList.querySelectorAll("input:checked")].map(
+      (input) => input.value,
+    );
+    if (!ids.length) return;
+    recapManageDelete.disabled = true;
+    await removeRecapChannels(ids);
+    settingsToast(`${ids.length}개 채널의 채팅 기록을 삭제했습니다.`);
+    void renderRecapManage();
+  });
+
+  // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다(저장된 메모와 같은 방식).
+  recapManageClear?.addEventListener("click", async () => {
+    if (recapManageClear.dataset.armed !== "1") {
+      recapManageClear.dataset.armed = "1";
+      recapManageClear.textContent = "정말 전체 삭제할까요?";
+      setTimeout(() => {
+        if (!recapManageClear.isConnected) return;
+        delete recapManageClear.dataset.armed;
+        recapManageClear.textContent = "전체 삭제";
+      }, 3000);
+      return;
+    }
+    delete recapManageClear.dataset.armed;
+    recapManageClear.textContent = "전체 삭제";
+    recapManageClear.disabled = true;
+    await removeRecapChannels([...recapManageChannels.keys()]);
+    // 가져오기 완료 표식까지 비워야 다시보기를 처음부터 다시 모을 수 있다.
+    try {
+      await chrome.storage.local.remove([
+        "chatRecapImportedVideos",
+        "chatRecapVerifiedVideosV2",
+        "chatRecapVodEventLinksV3",
+        "chatRecapHistoryRevisionV1",
+        "chatRecapNewVideosV1",
+      ]);
+    } catch {}
+    settingsToast("저장된 채팅 기록을 모두 삭제했습니다.");
+    void renderRecapManage();
+  });
+
+  if (recapManageRow) void renderRecapManage();
+
   // 자동 표시(캐시가 있을 때) + 하위 옵션(캐시가 없어도 자동 수집).
   // 상위(채팅 활성도)가 꺼져 있으면 둘 다, 자동 표시가 꺼져 있으면 자동 수집을 잠근다.
   const VOD_CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
