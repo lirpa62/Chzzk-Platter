@@ -127,6 +127,44 @@ ok(
 );
 ok(/if \(info\.imageUrl\) \{/.test(src), "조회 결과의 프로필도 반영한다");
 
+console.log("[모달 높이] 관리 탭에 바깥 스크롤이 생기지 않게 한다");
+ok(
+  /\.crc-import-modal-box \{[^}]*max-height: min\(820px/.test(css),
+  "모달 높이를 올렸다(.crc-modal-box 의 680px max-height 를 함께 덮는다)",
+);
+ok(
+  /\.crc-recap-purge \{[^}]*flex: 1 1 auto/.test(css),
+  "기록 삭제 패널이 남는 높이를 가져간다",
+);
+ok(
+  /\.crc-purge-list \{[^}]*flex: 1 1 auto/.test(css) &&
+    /\.crc-purge-list \{[^}]*min-height: 96px/.test(css),
+  "화면이 낮으면 목록이 먼저 줄어든다(최소 높이는 지킨다)",
+);
+
+console.log("[스켈레톤] 불러오는 동안 자리표시자를 깐다");
+ok(
+  /crc-purge-card is-skeleton/.test(src),
+  "실제 카드와 같은 자리의 스켈레톤 카드를 만든다",
+);
+ok(
+  !/list\.textContent = "불러오는 중…"/.test(src),
+  "'불러오는 중' 글자 한 줄로 대신하지 않는다",
+);
+ok(
+  /list\.setAttribute\("aria-busy", "true"\)/.test(src) &&
+    /list\.removeAttribute\("aria-busy"\)/.test(src),
+  "읽는 동안 aria-busy 로 알린다",
+);
+ok(
+  /\.crc-skeleton-box,\s*\n\.crc-skeleton-line \{/.test(css),
+  "스켈레톤 스타일이 있다",
+);
+ok(
+  /@media \(prefers-reduced-motion: reduce\)[\s\S]*?crc-skeleton/.test(css),
+  "움직임 최소화 설정에서는 깜빡이지 않는다",
+);
+
 console.log("[버튼] 삭제 버튼을 붙여 둔다");
 ok(
   /\.crc-purge-actions \{[^}]*gap: 6px/.test(css),

@@ -11541,8 +11541,25 @@
   async function renderPurgeList() {
     const list = $("crcPurgeList");
     if (!list) return;
-    list.textContent = "불러오는 중…";
+    // 저장소 전수 조회는 기록이 많으면 한참 걸린다. 글자 한 줄 대신 실제 카드와
+    // 같은 자리를 차지하는 자리표시자를 깔아 목록이 갑자기 튀어나오지 않게 한다.
+    list.textContent = "";
+    list.setAttribute("aria-busy", "true");
+    for (let index = 0; index < 8; index += 1) {
+      const card = document.createElement("div");
+      card.className = "crc-purge-card is-skeleton";
+      card.setAttribute("aria-hidden", "true");
+      const avatar = document.createElement("span");
+      avatar.className = "crc-purge-avatar crc-skeleton-box";
+      const name = document.createElement("span");
+      name.className = "crc-purge-name crc-skeleton-line";
+      const detail = document.createElement("span");
+      detail.className = "crc-purge-detail crc-skeleton-line is-short";
+      card.append(avatar, name, detail);
+      list.append(card);
+    }
     purgeChannels = await collectPurgeChannels();
+    list.removeAttribute("aria-busy");
     if (!purgeChannels.size) {
       list.textContent = "저장된 채팅 기록이 없습니다.";
       syncPurgeButtons();
