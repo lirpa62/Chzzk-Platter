@@ -75,6 +75,22 @@ ok(
   "모달을 열 때마다 전수 조회하지 않는다",
 );
 
+console.log("[카탈로그] :part:N 청크를 놓치지 않는다");
+const rebuild = src.slice(
+  src.indexOf("  async function rebuildRecapCatalog(accountId, all) {"),
+  src.indexOf("  const catalogKnown = new Set();"),
+);
+ok(
+  /STORE_API\.parseKey\(key, STORE_PREFIX\)/.test(rebuild),
+  "저장소와 같은 규칙으로 키를 읽는다",
+);
+// 주석에는 원인 설명으로 남아 있으므로 주석을 뺀 코드에서만 확인한다.
+const rebuildCode = rebuild.replace(/\/\/[^\n]*/g, "");
+ok(
+  !/lastIndexOf/.test(rebuildCode),
+  "코드에서 lastIndexOf 로 자르지 않는다(월이 '3' 으로 읽히던 원인)",
+);
+
 console.log("[목록] 카드 형태로 배치한다");
 const css = fs.readFileSync(
   path.join(__dirname, "..", "src", "chatRecap.css"),
@@ -97,6 +113,14 @@ ok(
   "카드는 세로 배치다",
 );
 ok(/\.crc-purge-avatar \{/.test(css), "프로필 이미지를 넣는다");
+ok(
+  /\.crc-purge-detail \{[^}]*white-space: normal/.test(css),
+  "개월·채팅 수는 한 줄로 자르지 않고 접는다",
+);
+ok(
+  /\.crc-new-vod-recent \.lps-view-switch \{[^}]*display: flex/.test(css),
+  "확인 대상 스위치는 flex 로 내용에 맞춘다",
+);
 ok(
   /avatar\.className = "crc-purge-avatar"/.test(src),
   "렌더에서 프로필을 만든다",

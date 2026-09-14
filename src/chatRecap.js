@@ -200,10 +200,14 @@
     const channels = {};
     for (const key of Object.keys(all || {})) {
       if (!key.startsWith(prefix)) continue;
-      const rest = key.slice(prefix.length);
-      const split = rest.lastIndexOf(":");
-      const channelId = rest.slice(0, split).toLowerCase();
-      const month = rest.slice(split + 1);
+      // ⚠ lastIndexOf(":") 로 자르면 '...:2026-09:part:3' 에서 월이 '3' 으로
+      //   읽혀 정규식에 걸러진다. 5,000건이 넘는 달은 :part:N 으로 쪼개지므로,
+      //   그 달의 기록이 통째로 카탈로그에서 빠졌다(채팅 수가 모자라 보이고,
+      //   그 채널이 새 다시보기 후보에서도 사라진다). 저장소와 같은 규칙으로 읽는다.
+      const parsed = STORE_API.parseKey(key, STORE_PREFIX);
+      if (!parsed || parsed.accountId !== accountId) continue;
+      const channelId = parsed.channelId;
+      const month = parsed.month;
       if (!HASH_RE.test(channelId) || !/^\d{4}-\d{2}$/.test(month)) continue;
       if (!channels[channelId]) channels[channelId] = [];
       channels[channelId].push(month);
