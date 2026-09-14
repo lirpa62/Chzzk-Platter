@@ -3645,10 +3645,18 @@ button.crc-multi-channel-more:focus-visible {
   border-top: 1px solid var(--popup-border);
 }
 
-/* 저장된 기록 삭제: 목록과 버튼을 세로로 쌓는다(다른 관리 패널은 한 줄 배치다). */
+/* 저장된 기록 삭제: 목록과 버튼을 세로로 쌓는다(다른 관리 패널은 한 줄 배치다).
+   ⚠ .crc-vod-stats-panel 의 설명 블록에는 flex: 1 1 280px 이 걸려 있다. 가로
+   배치에서는 '최소 너비 280px' 이지만 세로로 쌓으면 그 값이 '높이'가 되어
+   설명이 280px 로 부풀고 목록이 화면 밖으로 밀린다(실측: 설명 h=280). */
 .crc-recap-purge {
   align-items: stretch;
   flex-direction: column;
+}
+/* ⚠ 같은 특성도(0,2,0)의 .crc-vod-stats-panel .crc-new-vod-copy 가 아래쪽에
+   있어 순서로는 진다. 클래스를 하나 더 붙여 특성도로 이긴다. */
+.crc-vod-stats-panel.crc-recap-purge .crc-new-vod-copy {
+  flex: 0 0 auto;
 }
 .crc-purge-list {
   border: 1px solid var(--popup-border);
