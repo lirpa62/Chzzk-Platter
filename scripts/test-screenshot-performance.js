@@ -109,7 +109,7 @@ test("unanswered save releases callback at its deadline", () => {
   assert.equal(vm.runInContext("screenshotSaveCallbacks.size", context), 0);
 });
 
-test("content bridge forwards only a Blob URL and revokes it on completion", () => {
+test("Chromium content bridge forwards only a Blob URL and revokes it on completion", () => {
   const marker = content.indexOf('if (!data || data.source !== "cheese-screenshot-save")');
   const from = content.lastIndexOf('  window.addEventListener("message", (event) => {', marker);
   const to = content.indexOf("\n  });", marker) + 6;
@@ -118,6 +118,7 @@ test("content bridge forwards only a Blob URL and revokes it on completion", () 
   let next = 0;
   const window = { addEventListener: (event, cb) => { listener = cb; }, postMessage() {} };
   const context = vm.createContext({ window, Blob, screenshotDirectSave: true, BRIDGE_ORIGIN: "fixture",
+    isFirefoxExtensionRuntime: () => false, downloadScreenshotWithAnchor: () => false,
     URL: { createObjectURL: (blob) => { assert.equal(blob.type, "image/png"); return "blob:fixture"; }, revokeObjectURL: (url) => revoked.push(url) },
     chrome: { runtime: { sendMessage: (payload, cb) => { request = payload; callback = cb; } } },
     setTimeout: (cb) => { timers.set(++next, cb); return next; }, clearTimeout: (id) => timers.delete(id),
@@ -133,11 +134,35 @@ test("content bridge forwards only a Blob URL and revokes it on completion", () 
   assert.equal(timers.size, 0);
 });
 
+test("Firefox content bridge converts a Blob to a data URL", async () => {
+  const marker = content.indexOf('if (!data || data.source !== "cheese-screenshot-save")');
+  const from = content.lastIndexOf('  window.addEventListener("message", (event) => {', marker);
+  const to = content.indexOf("\n  });", marker) + 6;
+  let listener, request;
+  const window = { addEventListener: (event, cb) => { listener = cb; }, postMessage() {} };
+  const context = vm.createContext({ window, Blob, screenshotDirectSave: true, BRIDGE_ORIGIN: "fixture",
+    isFirefoxExtensionRuntime: () => true,
+    screenshotBlobToDataURL: async () => "data:image/png;base64,ZmlyZWZveA==",
+    downloadScreenshotWithAnchor: () => false,
+    chrome: { runtime: { sendMessage: (payload) => { request = payload; } } },
+    setTimeout: () => 1, clearTimeout() {}, URL: { revokeObjectURL() {} },
+  });
+  vm.runInContext(content.slice(from, to), context);
+  listener({ source: window, data: { source: "cheese-screenshot-save", reqId: 1, filename: "test.png",
+    blob: new Blob(["fixture"], { type: "image/png" }) } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(request.url, "data:image/png;base64,ZmlyZWZveA==");
+  assert.equal(request.saveAs, false);
+});
+
 for (const outcome of ["complete", "timeout", "interrupted"]) {
   test(`background ${outcome} releases its listener/timer and reports truthful status`, () => {
     const timers = new Map(), listeners = new Set(), replies = [];
     let next = 0;
     const context = vm.createContext({
+      isFirefoxDownloadRuntime: () => false,
+      screenshotDataURLToBlob: () => null,
+      startScreenshotDownload: (options, done) => done(null, 42),
       chrome: { runtime: {}, downloads: {
         download: (options, callback) => callback(42),
         onChanged: { addListener: (cb) => listeners.add(cb), removeListener: (cb) => listeners.delete(cb) },

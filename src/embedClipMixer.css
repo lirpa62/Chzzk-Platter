@@ -136,20 +136,16 @@ button.cheese-embed-clip-mixer-button .pzp-button__tooltip {
   transform: translateX(50%) translateY(0);
 }
 
-/* 우클릭으로 여는 프리셋 선택 패널.
-   ⚠ 임베드는 외부 사이트의 작은 iframe 이라 공간이 좁다. 고르기만 하는 목록이라
-   폭을 좁게 두고, 커스텀이 많아지면 안에서 스크롤한다(플레이어를 넘지 않게). */
+/* 작은 임베드 프레임 안에서 사용하는 프리셋 선택 패널. */
 .cheese-embed-clip-mixer-panel {
-  position: absolute;
-  right: 0;
-  bottom: 48px;
+  position: fixed;
+  top: 0;
+  left: 0;
   z-index: 45;
   box-sizing: border-box;
-  min-width: 148px;
-  max-width: 220px;
-  max-height: min(260px, 60vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  width: min(224px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
   padding: 6px;
   border-radius: 10px;
   background: rgba(20, 21, 23, 0.96);
@@ -160,16 +156,184 @@ button.cheese-embed-clip-mixer-button .pzp-button__tooltip {
   text-align: left;
 }
 
-.cheese-embed-clip-mixer-panel-group-title {
-  padding: 4px 8px 2px;
+.cheese-embed-clip-mixer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding-left: 5px;
+}
+
+.cheese-embed-clip-mixer-panel-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cheese-embed-clip-mixer-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.cheese-embed-clip-mixer-panel-close:hover,
+.cheese-embed-clip-mixer-panel-close:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.cheese-embed-clip-mixer-panel-section-label {
+  padding: 3px 4px 5px;
   color: rgba(255, 255, 255, 0.5);
   font-size: 11px;
   font-weight: 700;
 }
 
-.cheese-embed-clip-mixer-panel-group {
+.cheese-embed-clip-mixer-panel-modes,
+.cheese-embed-clip-mixer-panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cheese-embed-clip-mixer-panel-mode-option {
+  position: relative;
+  min-width: 0;
+}
+
+.cheese-embed-clip-mixer-panel-tabs {
+  margin-top: 7px;
+}
+
+.cheese-embed-clip-mixer-panel-mode,
+.cheese-embed-clip-mixer-panel-tab {
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cheese-embed-clip-mixer-panel-mode {
+  width: 100%;
+  padding-right: 27px;
+}
+
+.cheese-embed-clip-mixer-panel-info {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+}
+
+.cheese-embed-clip-mixer-panel-info:hover,
+.cheese-embed-clip-mixer-panel-info:focus-visible,
+.cheese-embed-clip-mixer-panel-info.is-on {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.cheese-embed-clip-mixer-panel-mode-info {
+  margin-top: 4px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.cheese-embed-clip-mixer-panel-mode:hover,
+.cheese-embed-clip-mixer-panel-mode:focus-visible,
+.cheese-embed-clip-mixer-panel-tab:hover,
+.cheese-embed-clip-mixer-panel-tab:focus-visible {
+  color: #fff;
+}
+
+.cheese-embed-clip-mixer-panel-mode.is-on,
+.cheese-embed-clip-mixer-panel-tab.is-on {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.cheese-embed-clip-mixer-panel-list {
   display: flex;
   flex-direction: column;
+  margin-top: 4px;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.cheese-embed-clip-mixer-panel-list.is-builtin {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.cheese-embed-clip-mixer-panel-list.is-custom {
+  max-height: min(150px, calc(100vh - 150px));
+  overflow-y: auto;
+}
+
+.cheese-embed-clip-mixer-panel-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cheese-embed-clip-mixer-panel-list::-webkit-scrollbar-track {
+  margin: 8px 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cheese-embed-clip-mixer-panel-list::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+}
+
+.cheese-embed-clip-mixer-panel-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
 }
 
 .cheese-embed-clip-mixer-panel-item {
@@ -208,17 +372,6 @@ button.cheese-embed-clip-mixer-button .pzp-button__tooltip {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ISO 배치로 만든 커스텀임을 알려 주는 꼬리표. */
-.cheese-embed-clip-mixer-panel-hint {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .cheese-embed-clip-mixer-panel-empty {

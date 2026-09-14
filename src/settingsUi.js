@@ -40,6 +40,14 @@
     ["popup-player", "[data-popup-player]"],
     ["preview-colors", "[data-settings-preview-colors]"],
     ["clip-precision", '[data-feature="clipEditorPrecision"]'],
+    // 자식이 여럿인데 접기 버튼이 없던 상위 옵션들. 하위가 길게 이어져 그룹의
+    // 경계가 보이지 않았다.
+    ["search-live-rerank", "[data-search-live-rerank]"],
+    ["search-rerank", "[data-search-rerank]"],
+    ["search-clips", "[data-integrated-search-clips]"],
+    ["card-preview-audio", "[data-card-preview-audio]"],
+    ["clip-mixer", "[data-clip-audio-mixer-enabled]"],
+    ["clip-filter", "[data-clip-video-filter-enabled]"],
   ];
   // Explicit ownership, not inferred from row order or the decorative branch character.
   const FAMILIES = [
@@ -69,6 +77,8 @@
     ["[data-category-video-filter]", "[data-category-video-candidate-picker]"],
     ["[data-search-live-rerank]", "#searchLiveRerankDefaultSort, [data-search-live-rerank-w-rel]"],
     ["[data-search-rerank]", "#searchRerankDefaultSort, [data-search-rerank-w-rel], [data-search-rerank-pool], [data-search-rerank-more-step]"],
+    // 통합검색 라이브·동영상과 같은 구성: 결과 표시가 꺼지면 나머지는 쓰이지 않는다.
+    ["[data-integrated-search-clips]", "[data-integrated-search-clips-direct-play], #integratedSearchClipMatchMode, [data-integrated-search-clips-source-preset], #integratedSearchClipDateFilter, #integratedSearchClipDefaultSort, [data-integrated-search-clips-candidate-limit-slider], [data-integrated-search-clips-more-step], [data-integrated-search-clips-w-title]"],
     ['[data-feature="loungeNews"]', '[data-feature="loungeNewsDot"], #loungeRefresh'],
     ['[data-feature="inboxCommunityNews"]', '[data-feature="inboxCommunityNewsDot"], [data-inbox-community-new-tab], #inboxCommunityRefresh'],
     ['[data-feature="inboxLogPower"]', '[data-feature="inboxLogPowerDot"]'],
@@ -99,10 +109,11 @@
     ['[data-feature="clipVault"]', "[data-clip-vault-limit]"],
     ["[data-clip-audio-mixer-enabled]", "[data-clip-audio-mixer-always-on], [data-settings-clip-mixer-preset]"],
     ["[data-clip-video-filter-enabled]", "[data-clip-video-filter-always-on], [data-settings-clip-filter-preset]"],
+    ["[data-embed-clip-default-preset-enabled]", '[data-global-default-picker="embed"]'],
+    ["[data-embed-clip-default-gain-enabled]", "[data-embed-clip-default-gain]"],
     ['[data-feature="clipEditorPrecision"]', "[data-clip-editor-step-picker]"],
     ["[data-cafe-now]", "[data-cafe-now-autoplay]"],
     ["[data-cafe-now-autoplay]", "[data-cafe-now-autoplay-muted]"],
-    ["[data-embed-clip-mixer-always-on]", "[data-settings-embed-mixer-preset], [data-embed-clip-default-gain-range]"],
     ["[data-chat-font-scale]", "[data-chat-font-scale-special]"],
   ];
 

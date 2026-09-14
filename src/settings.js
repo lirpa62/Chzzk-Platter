@@ -1,7 +1,4 @@
-// 치즈 플래터 - 기능 설정 팝업
-// 확장 아이콘 클릭 시 뜨는 전용 설정 페이지. 8개 기능의 표시/숨김을 전역
-// (chrome.storage.local `cheeseFeatureHidden`)으로 저장한다. content.js가
-// storage.onChanged로 즉시 반영하므로 열린 치지직 탭에 바로 적용된다.
+// 치즈 플래터 설정 페이지
 (() => {
   "use strict";
 
@@ -12,16 +9,8 @@
     isSettingsTabView,
   );
 
-  // ── storage 일괄 프리페치 + 캐시 ──────────────────────────────────────────
-  // 예전엔 각 옵션이 chrome.storage.local.get(단일키) 를 개별 호출해, 팝업을 열 때
-  // 수십 번의 IPC 가 몰려 콜드 스타트에서 렌더가 버벅였다. 팝업 시작 시 get(null) 로
-  // 전체를 1회만 읽어 캐시하고, 각 옵션의 로드는 이 캐시에서 즉시 값을 꺼낸다.
-  // set 시 캐시도 함께 갱신하고, 외부 변경(onChanged)은 캐시에 반영한다.
-  // 설정 팝업이 쓰는 키만 프리페치한다. get(null) 로 전체를 읽으면 background 가 저장한
-  // 대용량 캐시(cache:* 청크 등)까지 역직렬화해 팝업이 오히려 느려진다(캐시가 쌓일수록
-  // 심해짐). 아래 목록은 설정 관련 키(cheese*/audioMixer:*/videoFilter:*)만 담는다.
-  // 새 옵션을 추가하면 이 배열에도 그 키를 넣어야 로드된다(누락 시 그 옵션만 기본값으로
-  // 뜰 뿐, 다른 값은 안전).
+  // 설정 키만 한 번에 읽어 대용량 런타임 캐시의 역직렬화를 피한다.
+  // 새 옵션은 내보내기·불러오기에도 쓰이는 이 목록에 함께 등록한다.
   const SETTINGS_STORAGE_KEYS = [
     "cheeseSettingsPopupWidth",
     "cheeseChatRecap",
@@ -68,14 +57,19 @@
     "cheeseClipAudioMixerPreset",
     "cheeseEmbedClipMixerHidden",
     "cheeseEmbedClipMixerAlwaysOn",
+    "cheeseEmbedClipMixerDefaultOn",
     "cheeseEmbedClipMixerPreset",
     "cheeseEmbedClipMixerDefaultPreset",
+    "cheeseEmbedClipMixerDefaultPresetEnabled",
     "cheeseEmbedClipMixerDefaultGain",
+    "cheeseEmbedClipMixerDefaultGainEnabled",
+    "cheeseEmbedClipMixerGain",
     "cheeseEmbedClipGainPct",
     "cheeseEmbedClipGainStep",
     "cheeseEmbedClipGainMin",
     "cheeseEmbedClipGainMax",
     "cheeseEmbedClipMixerWheelAction",
+    "cheeseEmbedClipMixerEqBandMode",
     "cheeseClipVideoFilterEnabled",
     "cheeseClipVideoFilterAlwaysOn",
     "cheeseClipVideoFilterPreset",
@@ -143,6 +137,11 @@
     "cheeseVodChatGraphAuto",
     "cheeseVodChatGraphAutoCollect",
     "cheeseVodChatGraphColors",
+    // 방장·매니저·파트너 채팅(설정 화면에서 켜고, 봇 목록도 여기서 관리한다).
+    "cheeseVodRoleChatOn",
+    "cheeseVodRoleChatBots",
+    // 접힌 사이드바에서 사각 프로필로 볼 채널(설정의 '캐릭터 선택창'에서 고른다).
+    "cheeseFollowSquareChannels",
     "cheeseFollowCleanup",
     "cheeseFollowOpenNewTab",
     "cheesePlayerDisableHidden",
@@ -2597,7 +2596,9 @@
     const group = document.querySelector(groupSelector);
     if (!group) return;
     const buttons = [...group.querySelectorAll("[data-auto-enable-value]")];
-    const excludeItem = document.querySelector(excludeItemSelector);
+    const excludeItem = excludeItemSelector
+      ? document.querySelector(excludeItemSelector)
+      : null;
     const validModes = new Set(["off", "default", "always"]);
     let userSelected = false;
 
@@ -2823,8 +2824,13 @@
     "cheeseMixerGlobalGainDefaultMode";
   const EMBED_CLIP_MIXER_DEFAULT_PRESET_KEY =
     "cheeseEmbedClipMixerDefaultPreset";
+  const EMBED_CLIP_MIXER_DEFAULT_PRESET_ENABLED_KEY =
+    "cheeseEmbedClipMixerDefaultPresetEnabled";
   const EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY =
     "cheeseEmbedClipMixerDefaultGain";
+  const EMBED_CLIP_MIXER_DEFAULT_GAIN_ENABLED_KEY =
+    "cheeseEmbedClipMixerDefaultGainEnabled";
+  const EMBED_CLIP_MIXER_GAIN_KEY = "cheeseEmbedClipMixerGain";
   const CLIP_AUDIO_MIXER_ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const CLIP_AUDIO_MIXER_ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const CLIP_AUDIO_MIXER_PRESET_KEY = "cheeseClipAudioMixerPreset";
@@ -2885,6 +2891,12 @@
   );
   const clipVideoFilterEnabledInput = document.querySelector(
     "[data-clip-video-filter-enabled]",
+  );
+  const embedClipDefaultPresetEnabledInput = document.querySelector(
+    "[data-embed-clip-default-preset-enabled]",
+  );
+  const embedClipDefaultGainEnabledInput = document.querySelector(
+    "[data-embed-clip-default-gain-enabled]",
   );
   let mixerCustomPresets = [];
   let mixerGlobalDefault = { enabled: false, preset: "default" };
@@ -3117,7 +3129,12 @@
     const trigger = root?.querySelector("[data-global-default-trigger]");
     if (input) input.checked = config.enabled;
     const alwaysEnabled = isAlwaysEnabledPresetPicker(type);
-    if (trigger) trigger.disabled = !alwaysEnabled && !config.enabled;
+    if (trigger) {
+      trigger.disabled =
+        type === "embed"
+          ? embedClipDefaultPresetEnabledInput?.checked === false
+          : !alwaysEnabled && !config.enabled;
+    }
     if (!alwaysEnabled && !config.enabled) closeGlobalDefaultPicker(type);
     renderGlobalDefaultPicker(type);
   }
@@ -5307,23 +5324,37 @@
   // 사이트 안의 믹서와 완전히 독립된 키를 쓴다(프리셋 목록만 공유).
   const EMBED_CLIP_MIXER_HIDDEN_KEY = "cheeseEmbedClipMixerHidden";
   const EMBED_CLIP_MIXER_ALWAYS_ON_KEY = "cheeseEmbedClipMixerAlwaysOn";
+  const EMBED_CLIP_MIXER_DEFAULT_ON_KEY = "cheeseEmbedClipMixerDefaultOn";
   const EMBED_CLIP_GAIN_STEP_KEY = "cheeseEmbedClipGainStep";
 
-  // 숨김 스위치는 '체크=숨김'이라 기본값이 false(=표시)다.
-  function bindEmbedClipToggle(selector, key, defaultOn) {
+  // inverted는 기존 Hidden 키와 화면의 표시 스위치 극성을 맞춘다.
+  function bindEmbedClipToggle(
+    selector,
+    key,
+    defaultOn,
+    inverted = false,
+    onReflect,
+  ) {
     const input = document.querySelector(selector);
     if (!input) return;
+    const reflect = (storedValue) => {
+      input.checked = inverted ? !storedValue : storedValue;
+      onReflect?.(input.checked);
+    };
     (async () => {
       let on = defaultOn;
       try {
         const d = await cachedStorageGet(key);
         if (typeof d?.[key] === "boolean") on = d[key];
       } catch {}
-      input.checked = on;
+      reflect(on);
     })();
     input.addEventListener("change", () => {
+      onReflect?.(input.checked);
       try {
-        cachedStorageSet({ [key]: input.checked });
+        cachedStorageSet({
+          [key]: inverted ? !input.checked : input.checked,
+        });
       } catch {}
     });
   }
@@ -5331,11 +5362,72 @@
     "[data-embed-clip-mixer-hidden]",
     EMBED_CLIP_MIXER_HIDDEN_KEY,
     false,
+    true,
+  );
+  const embedClipMixerAutoEnableInput = document.querySelector(
+    "[data-embed-clip-mixer-auto-enable]",
+  );
+  if (embedClipMixerAutoEnableInput) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet([
+          EMBED_CLIP_MIXER_ALWAYS_ON_KEY,
+          EMBED_CLIP_MIXER_DEFAULT_ON_KEY,
+        ]);
+        embedClipMixerAutoEnableInput.checked =
+          data?.[EMBED_CLIP_MIXER_ALWAYS_ON_KEY] === true ||
+          data?.[EMBED_CLIP_MIXER_DEFAULT_ON_KEY] === true;
+      } catch {
+        embedClipMixerAutoEnableInput.checked = false;
+      }
+    })();
+    embedClipMixerAutoEnableInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({
+          [EMBED_CLIP_MIXER_ALWAYS_ON_KEY]:
+            embedClipMixerAutoEnableInput.checked,
+          [EMBED_CLIP_MIXER_DEFAULT_ON_KEY]: false,
+        });
+      } catch {}
+    });
+  }
+
+  function reflectEmbedClipDefaultControl(selector, enabled) {
+    const control = document.querySelector(selector);
+    const row = control?.closest(".settings-item");
+    if (!control || !row) return;
+    row.classList.toggle("is-locked", !enabled);
+    control
+      .querySelectorAll("input, select, button, textarea")
+      .forEach((element) => {
+        element.disabled = !enabled;
+      });
+  }
+  bindEmbedClipToggle(
+    "[data-embed-clip-default-preset-enabled]",
+    EMBED_CLIP_MIXER_DEFAULT_PRESET_ENABLED_KEY,
+    true,
+    false,
+    (enabled) => {
+      reflectEmbedClipDefaultControl(
+        '[data-global-default-picker="embed"]',
+        enabled,
+      );
+      syncGlobalDefaultUI("embed");
+    },
   );
   bindEmbedClipToggle(
-    "[data-embed-clip-mixer-always-on]",
-    EMBED_CLIP_MIXER_ALWAYS_ON_KEY,
+    "[data-embed-clip-default-gain-enabled]",
+    EMBED_CLIP_MIXER_DEFAULT_GAIN_ENABLED_KEY,
+    true,
     false,
+    (enabled) => {
+      reflectEmbedClipDefaultControl(
+        "[data-embed-clip-default-gain]",
+        enabled,
+      );
+      reflectEmbedClipDefaultGain();
+    },
   );
   bindPctToggle("[data-embed-clip-gain-pct]", "cheeseEmbedClipGainPct");
   // 임베드 클립 믹서 버튼 위 휠 동작(프리셋 전환/게인 조절).
@@ -5487,7 +5579,11 @@
     );
     embedClipDefaultGainRange.step = "1";
     embedClipDefaultGainInput.step = String(embedClipDefaultGainStepPct);
-    embedClipDefaultGainReset.disabled = embedClipDefaultGain === null;
+    const controlsEnabled = embedClipDefaultGainEnabledInput?.checked !== false;
+    embedClipDefaultGainRange.disabled = !controlsEnabled;
+    embedClipDefaultGainInput.disabled = !controlsEnabled;
+    embedClipDefaultGainReset.disabled =
+      !controlsEnabled || embedClipDefaultGain === null;
   }
 
   function saveEmbedClipDefaultGain() {
@@ -9728,10 +9824,7 @@
   const cardWheelModeGroup = document.querySelector(
     "[data-card-preview-wheel-mode]",
   );
-  // ⚠ 아직 저장값을 읽기 전인지 구분해야 한다. 이 값이 기본("wheel")으로 남아
-  //   있는 동안 다른 로드가 끝나면서 잠금을 다시 계산하면, 잠겨 있어야 할
-  //   '활성 지연'이 풀린다(제보: 다시 열면 잠금이 풀려 있다). 로드 전에는
-  //   잠금 상태를 건드리지 않는다.
+  // 저장값을 읽기 전에는 기본 표시를 유지하고 하위 설정의 잠금을 갱신하지 않는다.
   let cardWheelMode = null;
   function normalizeCardWheelMode(v) {
     return v === "rightclick" || v === "off" ? v : "wheel";
@@ -9822,12 +9915,7 @@
     cardWheelDelayInput.addEventListener("blur", saveDelay);
   }
 
-  // ⚠ 이 행의 잠금은 주인이 둘이다. settingsUi 의 applyLocks 가 부모(카드 미리보기
-  //   음량)만 보고 is-locked/disabled 를 다시 계산하는데, 그게 '휠 음량 조절 방식'
-  //   기준 잠금을 지운다. applyLocks 는 부모 토글뿐 아니라 제외 목록 렌더 같은
-  //   비동기 경로(settingsDisclosures.refresh)에서도 돌아, 트리거를 하나씩
-  //   따라다니면 놓친다(제보: 다시 열면 풀려 있다).
-  //   그래서 행 자체를 지켜보다가 우리 기준과 어긋나면 즉시 되돌린다.
+  // 공통 부모 잠금 갱신이 휠 방식의 잠금을 덮어쓸 수 있어 행 상태도 함께 감시한다.
   if (cardWheelDelayInput) {
     const delayRow = cardWheelDelayInput.closest(".settings-item");
     if (delayRow) {
@@ -10457,7 +10545,10 @@
         ? preset
         : undefined;
     }
-    if (key === EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY) {
+    if (
+      key === EMBED_CLIP_MIXER_DEFAULT_GAIN_KEY ||
+      key === EMBED_CLIP_MIXER_GAIN_KEY
+    ) {
       if (typeof value !== "number") return undefined;
       const gain = Number(value);
       return Number.isFinite(gain) ? Math.min(3, Math.max(0, gain)) : undefined;
@@ -10465,6 +10556,8 @@
     if (
       key === "cheeseAudioMixer.autoSync" ||
       key === "cheeseVideoFilter.autoSharpen" ||
+      key === EMBED_CLIP_MIXER_DEFAULT_PRESET_ENABLED_KEY ||
+      key === EMBED_CLIP_MIXER_DEFAULT_GAIN_ENABLED_KEY ||
       key === "cheeseLogPowerBarEarnedOnly" ||
       key === "cheeseLogPowerLineCumulative" ||
       key === "cheeseChatRecapChannelTrendCumulative" ||

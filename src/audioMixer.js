@@ -644,9 +644,7 @@
       "리미터가 막기 시작하는 최대 음량(dB)입니다. 낮출수록 더 일찍 막아 전체 음량이 안정되지만 너무 낮추면 답답해질 수 있어요.",
     "normalizer-target":
       "음량 균일화의 목표 레벨입니다. 높일수록 전체 음량을 더 크게 끌어올려 평준화하고, 낮추면 더 조용한 기준으로 맞춥니다.",
-    // 전문가 모드 그룹 제목용 개념 설명
-    // ⚠ group-eq 는 대역 배치에 따라 양 끝 주파수가 달라진다. 고정 문구로 두면
-    //   ISO 로 바꿔도 60Hz 라고 적혀 있다(제보). infoText() 가 지금 배치로 만든다.
+    // EQ 설명은 현재 대역 배치의 양 끝 주파수를 기준으로 동적으로 만든다.
     "group-eq": "",
     "group-gain":
       "음량(게인). 모든 처리를 거치기 전 입력 신호의 전체 크기를 조절합니다. 기본 볼륨이 너무 작거나 클 때 여기서 맞춥니다.",
@@ -1532,9 +1530,7 @@
   function applyEqBandMode(next) {
     const mode = normalizeEqBandMode(next);
     if (mode === eqBandMode) return false;
-    // 프리셋을 고른 상태(값을 따로 만지지 않음)라면 그 프리셋의 새 배치 값을 쓴다.
-    // ⚠ eqByMode 는 '사용자가 직접 만진 값'만 담는다. 프리셋만 고른 채 모드를
-    //   바꾸면 반대쪽 칸이 비어 있어 EQ 가 통째로 0 으로 보였다(제보).
+    // 직접 조절한 값이 없으면 선택한 프리셋의 새 대역 값을 사용한다.
     const fromPreset = presetEqForMode(mode);
     eqBucket(state, eqBandMode).splice(0, 10, ...state.eq);
     eqBandMode = mode;
@@ -7187,11 +7183,8 @@
     return location.pathname.startsWith("/live/");
   }
 
-  // 치지직 '타임머신'(기본 되감기 재생바)을 쓸 수 있는 방송인지.
-  // 플레이어 루트에 pzp-pc--seekable 이 붙는다(제보·실측). 이 방송에서는 치지직이
-  // 자체 재생바로 과거 탐색을 제공하므로 우리 되감기 바는 겹치기만 한다.
-  // ⚠ 클래스를 못 찾으면 false 를 돌려준다. 판정에 실패했다고 바를 숨기면
-  //   타임머신이 없는 방송에서 기능이 조용히 사라진다 — 켠 대로 두는 쪽이 안전하다.
+  // 치지직 타임머신이 제공되면 자체 재생바와 겹치지 않도록 되감기 바를 숨긴다.
+  // 식별 클래스가 없을 때는 타임머신이 없는 방송으로 간주한다.
   function hasChzzkTimemachine() {
     if (!isLiveSeekPage()) return false;
     const player =

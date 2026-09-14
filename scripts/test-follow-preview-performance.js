@@ -195,6 +195,7 @@ test("A-B-A metadata responses only attach the latest session and stop old media
     followPreviewThumbOnly: false, followPreviewFullTitle: false, followPreviewHeaderBottom: false,
     followPreviewCardLayout: false, followPreviewBadgePos: "top", followPreviewOpenSuppressUntil: 0,
     followPreviewNavigationPointer: null, location: { pathname: "/live/current" },
+    isCustomFollowSortingTarget: () => false,
     syncFollowPreviewNavigation: () => {},
     ensureFollowPreviewEl: () => el,
     teardownFollowPreviewMedia: () => stopped++,

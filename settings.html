@@ -10089,9 +10089,13 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">오디오 믹서 숨김</span>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="오디오 믹서 숨김"
+                    >오디오 믹서 표시</span
+                  >
                   <span class="settings-item-desc"
-                    >임베드 클립 플레이어의 오디오 믹서 버튼을 숨깁니다</span
+                    >임베드 클립 플레이어에 오디오 믹서 버튼을 표시합니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -10099,36 +10103,55 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li
+                class="settings-item"
+                data-settings-search-aliases="임베드 클립 오디오 믹서 기본 켜짐 임베드 클립 오디오 믹서 항상 켜기 방문 시 켜기"
+              >
                 <label>
-                  <span class="settings-item-name">오디오 믹서 항상 켜기</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="임베드 클립에서 첫 조작 시 믹서를 자동으로 켭니다."
-                    >임베드 클립에서 첫 조작 시 믹서를 자동 활성화합니다. 외부
-                    사이트는 브라우저 정책상 클릭 전에는 켜지지 않습니다</span
+                  <span class="settings-item-name"
+                    >오디오 믹서 자동 활성화</span
+                  >
+                  <span class="settings-item-desc"
+                    >외부 사이트에서 첫 사용자 조작 후 믹서를 자동으로 켭니다.
+                    자동으로 켜진 뒤에도 버튼으로 끌 수 있습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-embed-clip-mixer-always-on />
+                  <input type="checkbox" data-embed-clip-mixer-auto-enable />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li
-                class="settings-item settings-item-stacked"
+                class="settings-item"
                 data-new-feature="embed-clip-mixer-defaults"
               >
-                <div>
+                <label>
+                  <span class="settings-item-name">기본 프리셋 적용</span>
+                  <span class="settings-item-desc"
+                    >믹서를 켤 때 아래에서 선택한 프리셋을 적용합니다. 끄면
+                    마지막으로 사용한 프리셋을 이어서 사용합니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-embed-clip-default-preset-enabled
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span
                     class="settings-item-name"
                     data-settings-embed-mixer-preset
-                    >└ 오디오 믹서 기본 프리셋</span
+                    >기본 프리셋</span
                   >
                   <span class="settings-item-desc"
-                    >임베드 클립에서 믹서를 수동 또는 자동으로 켤 때 적용할
-                    프리셋</span
+                    >임베드 클립 오디오 믹서를 켤 때 사용할 프리셋</span
                   >
-                </div>
+                </label>
                 <div
                   class="settings-popover settings-preset-picker"
                   data-global-default-picker="embed"
@@ -10153,14 +10176,28 @@
                   ></ul>
                 </div>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">게인 기본값 적용</span>
+                  <span class="settings-item-desc"
+                    >믹서를 켤 때 아래 게인을 적용합니다. 끄면 마지막으로 조절한
+                    게인을 이어서 사용합니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-embed-clip-default-gain-enabled
+                    checked
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item settings-item-stacked">
                 <div>
-                  <span class="settings-item-name"
-                    >└ 오디오 믹서 게인 기본값</span
-                  >
+                  <span class="settings-item-name">게인 기본값</span>
                   <span class="settings-item-desc"
-                    >믹서를 켤 때 적용할 게인입니다. 지정하지 않으면 선택한
-                    프리셋의 게인을 사용합니다.</span
+                    >지정하지 않으면 활성화할 프리셋 자체의 게인을 사용합니다.</span
                   >
                 </div>
                 <div

@@ -2842,6 +2842,9 @@ html.cheese-channel-live-profile-custom
   box-sizing: border-box;
   padding: 7px;
 }
+.cheese-chat-recap-button .pzp-ui-icon {
+  padding: 3px;
+}
 
 /* 마커가 있을 때도 같은 크기를 쓴다(이 규칙이 위 padding 을 이긴다). */
 .cheese-search-comment-timestamp-button.has-markers

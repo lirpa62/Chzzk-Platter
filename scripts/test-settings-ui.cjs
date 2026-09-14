@@ -3,6 +3,26 @@ const { readFileSync, mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const assert = require('node:assert/strict');
+const settingsSource = readFileSync('src/settings.js', 'utf8');
+for (const key of [
+  'cheeseEmbedClipMixerAlwaysOn',
+  'cheeseEmbedClipMixerDefaultOn',
+  'cheeseEmbedClipMixerDefaultPreset',
+  'cheeseEmbedClipMixerDefaultPresetEnabled',
+  'cheeseEmbedClipMixerDefaultGain',
+  'cheeseEmbedClipMixerDefaultGainEnabled',
+  'cheeseEmbedClipMixerGain',
+  // 설정 화면에서 켜고 끄는데 전송 목록에는 빠져 있던 키들(내보내기·불러오기 누락).
+  'cheeseVodRoleChatOn',
+  'cheeseVodRoleChatBots',
+  'cheeseFollowSquareChannels',
+]) {
+  assert.match(settingsSource, new RegExp(`SETTINGS_STORAGE_KEYS[\\s\\S]*?"${key}"`));
+}
+assert.match(
+  settingsSource,
+  /SETTINGS_TRANSFER_KEYS\s*=\s*new Set\(SETTINGS_STORAGE_KEYS\)/,
+);
 const dir = mkdtempSync(join(tmpdir(), 'cheese-settings-ui-'));
 const browser = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
@@ -51,12 +71,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      // 마지막 탭·펼침 복원은 이제 옵션(둘 다 기본 꺼짐)이다. 이 테스트는 '복원이
-      // 동작하는가'를 보므로 두 옵션을 켠 상태로 둔다.
       const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1']]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
       window.saved={cheeseSettingsKnownFeatures:[],cheeseSettingsNewFeatureUpdatePending:true,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false,
         cheeseMixerAlwaysOn:true,cheeseMixerDefaultOn:true,cheeseVideoFilterAlwaysOn:false,cheeseVideoFilterDefaultOn:true,
+        cheeseEmbedClipMixerAlwaysOn:true,cheeseEmbedClipMixerDefaultOn:true,
+        cheeseEmbedClipMixerDefaultPresetEnabled:false,cheeseEmbedClipMixerDefaultGainEnabled:true,
         'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
@@ -162,11 +182,15 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     `);
     await test('search preserves existing buttons, markup, listeners, and dynamic descriptions',`
       search('');
-      window.infoButton=document.querySelector('[data-settings-info="clip-click"]');
+      window.infoButton=document.querySelector('[data-settings-info="chat-word-filter"]');
       window.infoSvg=infoButton.querySelector('svg');
       let clicked=0;infoButton.addEventListener('click',()=>clicked++);
       for(let i=0;i<5;i++){search('클립');search('');}
-      check(document.querySelector('[data-settings-info="clip-click"]')===infoButton && infoButton.querySelector('svg')===infoSvg,'button or SVG replaced');
+      check(document.querySelector('[data-settings-info="chat-word-filter"]')===infoButton && infoButton.querySelector('svg')===infoSvg,'button or SVG replaced');
+      window.childInfo=document.querySelector('[data-settings-info="clip-click"]');
+      check(childInfo,'child info button missing');
+      for(let i=0;i<3;i++){search('클립');search('');}
+      check(document.querySelector('[data-settings-info="clip-click"]')===childInfo,'child button replaced');
       check(document.querySelector('.settings-item-desc code'),'code markup erased');
       infoButton.click();check(clicked===1&&infoButton.getAttribute('aria-expanded')==='true','listener lost');
       const dynamic=document.querySelector('[data-screenshot-direct-save-desc]');
@@ -203,12 +227,14 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       }
       search('오디오 믹서 숨김');check(shown(row('[data-feature="audioMixer"]')),'old toggle label not searchable');search('');
     `);
-    await test('auto-enable modes preserve legacy keys and remain mutually exclusive',`
+    await test('auto-enable modes preserve legacy keys and embed defaults stay independent',`
       const mixer=document.querySelector('[data-mixer-auto-enable]');
       const filter=document.querySelector('[data-video-filter-auto-enable]');
+      const embed=document.querySelector('[data-embed-clip-mixer-auto-enable]');
       const selected=group=>group.querySelector('[aria-checked="true"]')?.dataset.autoEnableValue;
       check(selected(mixer)==='always','legacy mixer precedence must prefer always');
       check(selected(filter)==='default','legacy filter default mode not restored');
+      check(embed.checked,'legacy embed auto-enable value not restored');
       check(!document.querySelector('[data-mixer-exclude-item]').hidden,'mixer exclusions hidden in always mode');
       check(document.querySelector('[data-video-filter-exclude-item]').hidden,'filter exclusions visible outside always mode');
       mixer.querySelector('[data-auto-enable-value="default"]').click();
@@ -221,6 +247,20 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(selected(filter)==='always','filter selected state not reflected');
       check(document.querySelector('[data-video-filter-exclude-item]').hidden,'empty filter exclusions visible in always mode');
       check(!shown(document.querySelector('[data-settings-disclosure="filter-exclusions"]')),'empty filter disclosure button visible');
+      embed.checked=false;embed.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseEmbedClipMixerAlwaysOn===false&&saved.cheeseEmbedClipMixerDefaultOn===false,'embed mixer off mode keys invalid');
+      embed.checked=true;embed.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseEmbedClipMixerAlwaysOn===true&&saved.cheeseEmbedClipMixerDefaultOn===false,'embed mixer on mode keys invalid');
+      const presetEnabled=document.querySelector('[data-embed-clip-default-preset-enabled]');
+      const gainEnabled=document.querySelector('[data-embed-clip-default-gain-enabled]');
+      const embedPresetRow=row('[data-settings-embed-mixer-preset]');
+      const embedGainRow=row('[data-embed-clip-default-gain-range]');
+      check(!presetEnabled.checked&&embedPresetRow.classList.contains('is-locked'),'disabled embed default preset remained editable');
+      check(gainEnabled.checked&&!embedGainRow.classList.contains('is-locked'),'enabled embed default gain was locked');
+      presetEnabled.checked=true;presetEnabled.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseEmbedClipMixerDefaultPresetEnabled===true&&!embedPresetRow.classList.contains('is-locked'),'embed preset enable did not unlock its value');
+      gainEnabled.checked=false;gainEnabled.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseEmbedClipMixerDefaultGainEnabled===false&&embedGainRow.classList.contains('is-locked'),'embed gain disable did not lock its value');
       search('비디오 필터 기본 켜짐');
       check(shown(row('[data-video-filter-auto-enable]')),'legacy auto-enable name not searchable');
       search('');

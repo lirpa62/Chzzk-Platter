@@ -5878,6 +5878,55 @@ function cafeNormalizeClipDetail(payload) {
     adultKnown: true,
   };
 }
+
+function isFirefoxDownloadRuntime() {
+  return (
+    typeof browser !== "undefined" &&
+    typeof browser.downloads?.download === "function"
+  );
+}
+
+function screenshotDataURLToBlob(dataURL) {
+  if (typeof dataURL !== "string" || !dataURL.startsWith("data:image")) {
+    return null;
+  }
+  try {
+    const commaIndex = dataURL.indexOf(",");
+    if (commaIndex < 0) return null;
+    const header = dataURL.slice(0, commaIndex);
+    const encoded = dataURL.slice(commaIndex + 1);
+    const mime = /data:(.*?)(;base64)?$/.exec(header)?.[1] || "image/png";
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+function startScreenshotDownload(options, done) {
+  if (isFirefoxDownloadRuntime()) {
+    try {
+      Promise.resolve(browser.downloads.download(options)).then(
+        (downloadId) => done(null, downloadId),
+        (error) => done(error || new Error("download failed"), null),
+      );
+    } catch (error) {
+      done(error, null);
+    }
+    return;
+  }
+  try {
+    chrome.downloads.download(options, (downloadId) => {
+      const detail = String(chrome.runtime.lastError?.message || "");
+      done(detail ? new Error(detail) : null, downloadId);
+    });
+  } catch (error) {
+    done(error, null);
+  }
+}
+
 async function cafeFetchClipPlayInfo(clipId) {
   const res = await fetch(
     `${CAFE_CLIP_PLAY_INFO_PREFIX}${encodeURIComponent(clipId)}`,
@@ -6539,64 +6588,87 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CHEESE_SCREENSHOT_SAVE") {
     const { url, filename } = message;
     const saveAs = message.saveAs === true; // 기본 false=바로 저장
-    // content가 만든 blob: URL과 이전 스크립트의 data: URL만 허용.
+    const firefox = isFirefoxDownloadRuntime();
     if (
       typeof url !== "string" ||
-      !(url.startsWith("data:image") || url.startsWith("blob:"))
+      !(url.startsWith("data:image") || (!firefox && url.startsWith("blob:")))
     ) {
       sendResponse({ ok: false, reason: "invalid" });
       return false;
     }
+    const localBlob = firefox ? screenshotDataURLToBlob(url) : null;
+    const localBlobURL = localBlob ? URL.createObjectURL(localBlob) : null;
+    const downloadsApi = firefox ? browser.downloads : chrome.downloads;
+    const releaseLocalBlob = () => {
+      if (localBlobURL) URL.revokeObjectURL(localBlobURL);
+    };
     try {
-      chrome.downloads.download({ url, filename, saveAs }, (downloadId) => {
-        if (chrome.runtime.lastError || downloadId == null) {
-          // 파일명 오류 등 브라우저가 반환한 실패 사유를 그대로 전달한다.
-          sendResponse({
-            ok: false,
-            reason: "start-failed",
-            detail: String(chrome.runtime.lastError?.message || ""),
-          });
-          return;
-        }
-        // 완료/중단(취소)까지 기다렸다가 결과를 알려준다.
+      const waitForResult = (downloadId) => {
         let settled = false;
         let completionTimer = 0;
-        const onChanged = (delta) => {
-          if (delta.id !== downloadId || !delta.state) return;
-          const s = delta.state.current;
-          if (s === "complete") {
-            finish({ ok: true, saved: true });
-          } else if (s === "interrupted") {
-            // ⚠ 중단 사유를 구분한다. USER_CANCELED 만 '취소'고, 디스크 부족·권한
-            //   거부 등은 진짜 실패다. 예전엔 전부 '저장을 취소했어요'로 뭉뚱그려
-            //   사용자가 원인을 알 수 없었다.
-            const why = String(delta.error?.current || "");
-            if (why && why !== "USER_CANCELED" && why !== "USER_SHUTDOWN") {
-              finish({ ok: false, reason: "interrupted", detail: why });
-            } else {
-              finish({ ok: true, saved: false }); // 사용자가 취소
-            }
-          }
-        };
         const finish = (result) => {
           if (settled) return;
           settled = true;
           clearTimeout(completionTimer);
-          chrome.downloads.onChanged.removeListener(onChanged);
+          downloadsApi.onChanged.removeListener(onChanged);
+          releaseLocalBlob();
           sendResponse(result);
         };
-        chrome.downloads.onChanged.addListener(onChanged);
-        // 혹시 onChanged가 안 오는 환경 대비 타임아웃. saveAs(대화상자)는 사용자가
-        // 오래 열어둘 수 있어 넉넉히(5분), 바로 저장은 짧게(15초). 타임아웃 응답은
-        // '시작됨'만 알 뿐 저장 확정이 아니므로 saved는 단정하지 않고 미상 처리.
+        const onChanged = (delta) => {
+          if (delta.id !== downloadId || !delta.state) return;
+          const state = delta.state.current;
+          if (state === "complete") {
+            finish({ ok: true, saved: true });
+          } else if (state === "interrupted") {
+            const detail = String(delta.error?.current || "");
+            if (
+              detail &&
+              detail !== "USER_CANCELED" &&
+              detail !== "USER_SHUTDOWN"
+            ) {
+              finish({ ok: false, reason: "interrupted", detail });
+            } else {
+              finish({ ok: true, saved: false });
+            }
+          }
+        };
+        downloadsApi.onChanged.addListener(onChanged);
         const timeoutMs = saveAs ? 300000 : 15000;
         completionTimer = setTimeout(
           () => finish({ ok: false, saved: false, reason: "timeout" }),
           timeoutMs,
         );
+      };
+
+      const start = (downloadURL, retryDataURL) => {
+        startScreenshotDownload(
+          { url: downloadURL, filename, saveAs },
+          (error, downloadId) => {
+            if (!error && downloadId != null) {
+              waitForResult(downloadId);
+              return;
+            }
+            if (retryDataURL && downloadURL !== url) {
+              start(url, false);
+              return;
+            }
+            releaseLocalBlob();
+            sendResponse({
+              ok: false,
+              reason: "start-failed",
+              detail: String(error?.message || error || ""),
+            });
+          },
+        );
+      };
+      start(localBlobURL || url, Boolean(localBlobURL));
+    } catch (error) {
+      releaseLocalBlob();
+      sendResponse({
+        ok: false,
+        reason: "exception",
+        detail: String(error?.message || error || ""),
       });
-    } catch {
-      sendResponse({ ok: false, reason: "exception" });
     }
     return true; // 비동기 응답
   }

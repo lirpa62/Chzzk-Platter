@@ -1811,8 +1811,7 @@
   //   wheel(기본): 지금까지처럼 그냥 휠 → 음량
   //   rightclick: 우클릭을 누른 채 휠일 때만 음량(플레이어의 같은 옵션과 맞춤)
   //   off: 휠로는 조절하지 않음(버튼·슬라이더·우클릭 음소거만)
-  // ⚠ 제보: 스크롤 중 카드를 스치면 휠이 음량으로 먹혀 스크롤이 막힌다. 그렇다고
-  //   기능을 끄면 음량을 조절할 방법이 사라진다.
+  // 카드 진입 직후의 휠은 페이지 스크롤로 통과시킬 수 있다.
   const CARD_PREVIEW_WHEEL_MODE_KEY = "cheeseCardPreviewWheelMode";
   let cardPreviewWheelMode = "wheel";
   function normalizeCardPreviewWheelMode(value) {
@@ -36531,7 +36530,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     affinityLoading = true;
     try {
       const accountId = currentClipVaultAccountId();
-      // ⚠ 내 채팅 기록을 쓰지 않으면 그 지표는 아예 수집하지 않는다(요청·조회 0).
+      // 내 채팅 기록을 사용하지 않으면 관련 지표 수집도 건너뛴다.
       const skip = chatRecapOn ? [] : ["chat"];
       const metrics = await AFFINITY_DATA_API.collectMetrics(
         chrome.storage.local,
@@ -37659,10 +37658,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         popupFallbackLastX = e.clientX;
         popupFallbackLastY = e.clientY;
       }
-      // ⚠ 순서 편집 중에는 목록 밖으로 나가도 계속 따라가야 한다. 예전에는 여기서
-      //   빠져나가 항목이 마지막 자리에 얼어붙었고, 그 상태로 저장돼 '원하는
-      //   순서로 안 놓인다'는 제보가 됐다. reorderToY 는 y 만 보고 목록 안에서
-      //   자리를 잡으므로 범위를 벗어난 y 도 안전하다(맨 위/맨 아래로 붙는다).
+      // 순서 편집 중에는 목록 밖에서도 포인터의 y 좌표로 맨 위나 아래까지 이동한다.
       const inNav = Boolean(e.target?.closest?.("#" + CUSTOM_FOLLOW_NAV_ID));
       if (!inNav && !customFollowGroupSortKey) return;
       e.preventDefault(); // drop 허용
@@ -37671,8 +37667,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (!overRaf) overRaf = requestAnimationFrame(reorderToY);
     };
     // 지금 DOM 순서를 저장한다(drop 과 dragend 가 함께 쓴다).
-    // ⚠ 목록 밖에서 손을 떼면 drop 이 오지 않는다. 그때 저장하지 않으면 화면은
-    //   새 순서인데 저장은 옛 순서로 남아 '원하는 순서로 안 놓인다'가 된다.
+    // 목록 밖에서 dragend만 발생해도 현재 DOM 순서를 저장한다.
     const commitItemOrder = (listEl) => {
       if (!listEl) return;
       const ids = [...listEl.querySelectorAll(".cheese-cf-draggable")].map(
@@ -38664,9 +38659,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       },
       true,
     );
-    // ⚠ drop 이 항상 오지는 않는다. 편집 중에는 목록 본문을 감춰 빈 여백이 많아,
-    //   섹션 밖에 놓으면 drop 없이 dragend 만 온다. 그때 저장을 안 하면 화면은
-    //   새 순서인데 저장은 옛 순서로 남아, 다음 렌더에서 되돌아간다(제보).
+    // 섹션 밖에서 놓으면 drop 없이 dragend만 발생할 수 있다.
     document.addEventListener("dragend", () => finish(true), true);
 
     // 편집 중인 목록 밖을 누르면 편집을 끝낸다(완료 버튼을 못 찾아도 빠져나갈 수
@@ -38750,9 +38743,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       existing?.remove();
       return;
     }
-    // ⚠ 접힌 사이드바에서는 치지직이 _header_ 를 아예 렌더하지 않는다
-    //   (getSidebarNavLabel 주석 참고). 예전에는 여기서 return 해 버려서 접힘
-    //   상태에 새로고침 버튼이 나오지 않았다(제보). 헤더가 없으면 nav 에 직접 붙인다.
+    // 접힌 사이드바는 헤더를 렌더하지 않으므로 컨트롤을 nav에 직접 붙인다.
     const header = origNav.querySelector('[class*="_header_"]');
     // 네이티브 새로고침/접기 버튼 숨김(마커 → CSS). 클릭 시 원본 목록 재출현 방지.
     (header || origNav)
@@ -54453,77 +54444,190 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  function isFirefoxExtensionRuntime() {
+    return (
+      typeof browser !== "undefined" &&
+      typeof browser.runtime?.getBrowserInfo === "function"
+    );
+  }
+
+  function screenshotBlobToDataURL(blob) {
+    return new Promise((resolve) => {
+      if (!(blob instanceof Blob)) {
+        resolve("");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function downloadScreenshotWithAnchor(blob, dataURL, filename) {
+    const blobURL =
+      blob instanceof Blob
+        ? URL.createObjectURL(blob)
+        : dataURLToBlobURL(dataURL);
+    if (!blobURL) return false;
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = blobURL;
+      anchor.download = String(filename || "chzzk.png");
+      anchor.hidden = true;
+      (document.documentElement || document.body).appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(blobURL), 60000);
+      return true;
+    } catch {
+      URL.revokeObjectURL(blobURL);
+      return false;
+    }
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.source !== "cheese-screenshot-save") return;
-    const reqId = data.reqId;
-    // ⚠ forceSaveAs 는 '파일명을 크롬이 거부해서 다시 시도하는' 경우다. 설정과
-    //   무관하게 대화상자를 띄워 사용자가 직접 이름을 정하게 한다(안전장치).
-    const saveAs = data.forceSaveAs === true || !screenshotDirectSave;
-    // MAIN → content 구간은 Blob으로 전달해 Base64 생성·복사·재디코딩을 피한다.
-    // 이전 MAIN 스크립트와의 호환을 위해 dataURL 경로도 유지한다.
-    const blobURL =
-      data.blob instanceof Blob && data.blob.type === "image/png"
-        ? URL.createObjectURL(data.blob)
-        : saveAs
-          ? dataURLToBlobURL(data.dataURL)
+    void (async () => {
+      const reqId = data.reqId;
+      const firefox = isFirefoxExtensionRuntime();
+      // 파일명 오류로 재시도할 때는 저장 대화상자에서 직접 이름을 정하게 한다.
+      const saveAs = data.forceSaveAs === true || !screenshotDirectSave;
+      const screenshotBlob =
+        data.blob instanceof Blob && data.blob.type === "image/png"
+          ? data.blob
           : null;
-    const url = blobURL || data.dataURL;
-    const revoke = () => {
-      if (blobURL) URL.revokeObjectURL(blobURL);
-    };
-    let cleanupTimer = blobURL
-      ? setTimeout(revoke, saveAs ? 360000 : 80000)
-      : 0;
-    const replyAndCleanup = (payload) => {
-      if (blobURL) {
-        clearTimeout(cleanupTimer);
-        // 완료/취소가 확인되면 즉시 해제. 응답 미상일 때만 다운로드를 잠시 더 기다린다.
-        if (payload.reason === "timeout" || payload.reason === "disconnected") {
-          cleanupTimer = setTimeout(revoke, 60000);
-        } else {
-          revoke();
-        }
-      }
-      window.postMessage(payload, BRIDGE_ORIGIN);
-    };
-    try {
-      chrome.runtime.sendMessage(
-        {
-          type: "CHEESE_SCREENSHOT_SAVE",
-          url,
-          filename: data.filename,
-          saveAs,
-        },
-        (resp) => {
-          const ok = !chrome.runtime.lastError && resp?.ok === true;
-          replyAndCleanup({
+      const dataURL = firefox
+        ? screenshotBlob
+          ? await screenshotBlobToDataURL(screenshotBlob)
+          : String(data.dataURL || "")
+        : String(data.dataURL || "");
+      const blobURL = !firefox
+        ? screenshotBlob
+          ? URL.createObjectURL(data.blob)
+          : saveAs
+            ? dataURLToBlobURL(dataURL)
+            : null
+        : null;
+      const url = firefox ? dataURL : blobURL || dataURL;
+      if (!url) {
+        window.postMessage(
+          {
             source: "cheese-screenshot-save-result",
             reqId,
-            ok,
-            saved: ok ? resp.saved !== false : false,
-            // 저장 실패 유형을 구분할 수 있도록 런타임 사유를 그대로 넘긴다.
-            reason: chrome.runtime.lastError
-              ? "disconnected"
-              : String(resp?.reason || ""),
-            detail: chrome.runtime.lastError
-              ? String(chrome.runtime.lastError.message || "")
-              : String(resp?.detail || ""),
-          });
-        },
-      );
-    } catch (err) {
-      replyAndCleanup({
-        source: "cheese-screenshot-save-result",
-        reqId,
-        ok: false,
-        saved: false,
-        // 확장을 새로고침·업데이트한 뒤 페이지를 그대로 두면 여기로 온다.
-        reason: "disconnected",
-        detail: String(err?.message || ""),
-      });
-    }
+            ok: false,
+            saved: false,
+            reason: "invalid",
+            detail: "",
+          },
+          BRIDGE_ORIGIN,
+        );
+        return;
+      }
+      const revoke = () => {
+        if (blobURL) URL.revokeObjectURL(blobURL);
+      };
+      let cleanupTimer = blobURL
+        ? setTimeout(revoke, saveAs ? 360000 : 80000)
+        : 0;
+      const replyAndCleanup = (payload) => {
+        if (blobURL) {
+          clearTimeout(cleanupTimer);
+          if (
+            payload.reason === "timeout" ||
+            payload.reason === "disconnected"
+          ) {
+            cleanupTimer = setTimeout(revoke, 60000);
+          } else {
+            revoke();
+          }
+        }
+        window.postMessage(payload, BRIDGE_ORIGIN);
+      };
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: "CHEESE_SCREENSHOT_SAVE",
+            url,
+            filename: data.filename,
+            saveAs,
+          },
+          (resp) => {
+            const runtimeError = chrome.runtime.lastError;
+            const ok = !runtimeError && resp?.ok === true;
+            if (!ok && firefox) {
+              revoke();
+              const fallbackSaved = downloadScreenshotWithAnchor(
+                screenshotBlob,
+                dataURL,
+                data.filename,
+              );
+              window.postMessage(
+                {
+                  source: "cheese-screenshot-save-result",
+                  reqId,
+                  ok: fallbackSaved,
+                  saved: fallbackSaved,
+                  reason: fallbackSaved
+                    ? ""
+                    : runtimeError
+                      ? "disconnected"
+                      : String(resp?.reason || "start-failed"),
+                  detail: runtimeError
+                    ? String(runtimeError.message || "")
+                    : String(resp?.detail || ""),
+                },
+                BRIDGE_ORIGIN,
+              );
+              return;
+            }
+            replyAndCleanup({
+              source: "cheese-screenshot-save-result",
+              reqId,
+              ok,
+              saved: ok ? resp.saved !== false : false,
+              reason: runtimeError
+                ? "disconnected"
+                : String(resp?.reason || ""),
+              detail: runtimeError
+                ? String(runtimeError.message || "")
+                : String(resp?.detail || ""),
+            });
+          },
+        );
+      } catch (err) {
+        if (firefox) {
+          revoke();
+          const fallbackSaved = downloadScreenshotWithAnchor(
+            screenshotBlob,
+            dataURL,
+            data.filename,
+          );
+          window.postMessage(
+            {
+              source: "cheese-screenshot-save-result",
+              reqId,
+              ok: fallbackSaved,
+              saved: fallbackSaved,
+              reason: fallbackSaved ? "" : "disconnected",
+              detail: fallbackSaved ? "" : String(err?.message || ""),
+            },
+            BRIDGE_ORIGIN,
+          );
+          return;
+        }
+        replyAndCleanup({
+          source: "cheese-screenshot-save-result",
+          reqId,
+          ok: false,
+          saved: false,
+          reason: "disconnected",
+          detail: String(err?.message || ""),
+        });
+      }
+    })();
   });
 
   // ── 비디오 필터 설정 저장 브릿지 ─────────────────────────────────────────────
