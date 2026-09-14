@@ -379,6 +379,88 @@ async function appendRows(rows) {
   assert.equal(enriched.added, 0);
   assert.ok(enriched.items[0].d);
 
+  // ── :part:N 분할 저장에서 기록이 사라지지 않는지 ─────────────────────────
+  // 한 달에 5,000건이 넘으면 오래된 쪽이 :part:N 으로 밀린다. 그 과정에서
+  // 유실·중복이 생기면 '라이브에서 본 채팅 수'와 리캡 집계가 어긋난다.
+  {
+    const splitKey = `chatRecap:${"a".repeat(32)}:${"b".repeat(32)}:2026-09`;
+    const chunk = 100; // 분할을 강제하기 위한 작은 값
+    const splitValues = Object.create(null);
+    const splitStorage = {
+      async get(keys) {
+        if (keys == null) return structuredClone(splitValues);
+        const list = Array.isArray(keys) ? keys : [keys];
+        return Object.fromEntries(
+          list
+            .filter((key) => key in splitValues)
+            .map((key) => [key, structuredClone(splitValues[key])]),
+        );
+      },
+      async set(object) {
+        Object.assign(splitValues, structuredClone(object));
+      },
+      async remove(keys) {
+        for (const key of Array.isArray(keys) ? keys : [keys]) {
+          delete splitValues[key];
+        }
+      },
+    };
+    const addRows = async (rows) => {
+      const state = await api.readForMerge(splitStorage, splitKey, rows);
+      const seen = new Map(state.items.map((it) => [`${it.t}|${it.m}`, it]));
+      for (const row of rows) seen.set(`${row.t}|${row.m}`, row);
+      await api.writeMerged(splitStorage, state, [...seen.values()], chunk);
+    };
+
+    // 1,000건을 10건씩 나눠 넣는다(라이브 수집과 같은 모양).
+    for (let batch = 0; batch < 100; batch += 1) {
+      await addRows(
+        Array.from({ length: 10 }, (_, offset) => {
+          const index = batch * 10 + offset;
+          return { t: 1_000_000 + index * 1000, m: `m${index}` };
+        }),
+      );
+    }
+    let loaded = await api.loadMonth(splitStorage, splitKey);
+    assert.equal(loaded.length, 1000);
+    assert.equal(new Set(loaded.map((it) => it.m)).size, 1000);
+    assert.ok(splitValues[splitKey].parts > 0);
+
+    // 이미 쪼개진 뒤 '오래된' 기록이 들어와도(다시보기 가져오기) 기존 것이 남는다.
+    await addRows([{ t: 1_000_500, m: "old-insert" }]);
+    loaded = await api.loadMonth(splitStorage, splitKey);
+    assert.equal(loaded.length, 1001);
+    const afterInsert = new Set(loaded.map((it) => it.m));
+    for (let index = 0; index < 1000; index += 1) {
+      assert.ok(afterInsert.has(`m${index}`), `m${index} 유실`);
+    }
+
+    // 최신 기록만 추가하는 경로(보관 파트를 읽지 않음)에서도 파트가 깨지지 않는다.
+    await addRows([{ t: 9_000_000, m: "newest" }]);
+    loaded = await api.loadMonth(splitStorage, splitKey);
+    assert.equal(loaded.length, 1002);
+    const afterNewest = new Set(loaded.map((it) => it.m));
+    for (let index = 0; index < 1000; index += 1) {
+      assert.ok(afterNewest.has(`m${index}`), `m${index} 유실(최신 추가)`);
+    }
+
+    // parts 값과 실제 파트 키 수가 같아야 한다(어긋나면 뒤쪽 파트가 안 읽힌다).
+    const partKeyCount = Object.keys(splitValues).filter((key) =>
+      key.startsWith(`${splitKey}:part:`),
+    ).length;
+    assert.equal(splitValues[splitKey].parts, partKeyCount);
+    let total = splitValues[splitKey].items.length;
+    for (let index = 1; index <= partKeyCount; index += 1) {
+      total += splitValues[`${splitKey}:part:${index}`].items.length;
+    }
+    assert.equal(total, 1002);
+
+    // 시간순 정렬이 유지된다.
+    for (let index = 1; index < loaded.length; index += 1) {
+      assert.ok(Number(loaded[index - 1].t) <= Number(loaded[index].t));
+    }
+  }
+
   console.log("chatRecapStore tests passed");
 })().catch((error) => {
   console.error(error);
