@@ -133,13 +133,17 @@ ok(
   "모달 높이를 올렸다(.crc-modal-box 의 680px max-height 를 함께 덮는다)",
 );
 ok(
-  /\.crc-recap-purge \{[^}]*flex: 1 1 auto/.test(css),
-  "기록 삭제 패널이 남는 높이를 가져간다",
+  /\.crc-recap-purge \{[^}]*flex: 0 1 auto/.test(css),
+  "기록 삭제 패널이 남는 높이를 억지로 차지하지 않는다",
 );
 ok(
-  /\.crc-purge-list \{[^}]*flex: 1 1 auto/.test(css) &&
-    /\.crc-purge-list \{[^}]*min-height: 96px/.test(css),
-  "화면이 낮으면 목록이 먼저 줄어든다(최소 높이는 지킨다)",
+  /\.crc-purge-list \{[^}]*flex: 0 0 auto/.test(css) &&
+    !/\.crc-purge-list \{[^}]*min-height/.test(css),
+  "목록에 최소 높이를 두지 않는다(카드가 적을 때 아래가 비지 않게)",
+);
+ok(
+  /\.crc-purge-list \{[^}]*max-height: 216px/.test(css),
+  "카드 두 줄까지 보이고 그 이상은 스크롤한다",
 );
 
 console.log("[스켈레톤] 불러오는 동안 자리표시자를 깐다");
