@@ -3391,6 +3391,13 @@ body > .clr-picker .clr-preview {
   color: var(--popup-muted);
   font-weight: 400;
 }
+/* 삭제 중인 행. 지워질 것이 확정되기 전까지 자리는 두되 조작은 막는다
+   (전체를 다시 그리지 않으므로 나머지 행은 그대로 남는다). */
+.settings-memo-group.is-removing {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
 /* 채팅 기록 삭제 목록: 채널 줄 자체가 체크박스 라벨이다(방송 단위 하위 목록이 없다). */
 label.settings-memo-channel {
   align-items: center;

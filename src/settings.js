@@ -9163,7 +9163,8 @@
           ? `${months}개월 · 채팅 ${entry.rows.toLocaleString("ko-KR")}개`
           : "다시보기 통계만";
         return (
-          `<div class="settings-memo-group">` +
+          // 행을 따로 지울 수 있게 id 를 붙인다(선택 삭제는 전체를 다시 그리지 않는다).
+          `<div class="settings-memo-group" data-recap-row="${escapeHtml(id)}">` +
           `<label class="settings-memo-channel">` +
           `<input type="checkbox" value="${escapeHtml(id)}">` +
           `<span>${escapeHtml(name)}</span>` +
@@ -9297,10 +9298,11 @@
       byAccount.get(entry.accountId).push(entry.channelId);
     }
     if (!keys.length) return;
-    try {
-      await chrome.storage.local.remove(keys);
-    } catch {}
+    // ⚠ 본문 삭제 실패는 삼키지 않는다. 호출부가 목록에서 행을 지울지 되돌릴지
+    //   판단해야 한다(지워지지 않았는데 행만 사라지면 화면과 저장소가 어긋난다).
+    await chrome.storage.local.remove(keys);
     // 카탈로그에서도 그 채널을 빼야 목록이 다시 살아나지 않는다.
+    // 여기부터는 실패해도 본문은 이미 지워졌으므로 행은 없앤다(다음 열람 때 정리된다).
     for (const [accountId, channels] of byAccount) {
       const catalogKey = `chatRecapCatalog:${accountId}`;
       try {
@@ -9321,15 +9323,42 @@
 
   recapManageList?.addEventListener("change", syncRecapManageButtons);
 
+  // ⚠ 선택 삭제는 목록 전체를 다시 그리지 않는다. 전체 렌더는 저장소를 통째로
+  //   다시 읽고 채널명도 다시 조회해서, 지우지 않은 행까지 잠깐 사라졌다 돌아오고
+  //   스크롤 위치도 잃는다. 고른 행만 먼저 숨기고 끝나면 그 행만 없앤다.
   recapManageDelete?.addEventListener("click", async () => {
-    const ids = [...recapManageList.querySelectorAll("input:checked")].map(
-      (input) => input.value,
-    );
+    const inputs = [...recapManageList.querySelectorAll("input:checked")];
+    const ids = inputs.map((input) => input.value);
     if (!ids.length) return;
     recapManageDelete.disabled = true;
-    await removeRecapChannels(ids);
+    const rows = ids
+      .map((id) =>
+        recapManageList.querySelector(`[data-recap-row="${CSS.escape(id)}"]`),
+      )
+      .filter(Boolean);
+    rows.forEach((row) => row.classList.add("is-removing"));
+    let failed = false;
+    try {
+      await removeRecapChannels(ids);
+    } catch {
+      failed = true;
+    }
+    if (failed) {
+      // 지우지 못했으면 숨김을 되돌린다(목록과 저장소가 어긋나지 않게).
+      rows.forEach((row) => row.classList.remove("is-removing"));
+      syncRecapManageButtons();
+      settingsToast("채팅 기록을 삭제하지 못했습니다.");
+      return;
+    }
+    rows.forEach((row) => row.remove());
+    ids.forEach((id) => recapManageChannels.delete(id));
     settingsToast(`${ids.length}개 채널의 채팅 기록을 삭제했습니다.`);
-    void renderRecapManage();
+    if (!recapManageChannels.size) {
+      recapManageList.innerHTML =
+        '<p class="settings-memo-empty">저장된 채팅 기록이 없습니다.</p>';
+      if (recapManageClear) recapManageClear.disabled = true;
+    }
+    syncRecapManageButtons();
   });
 
   // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다(저장된 메모와 같은 방식).
@@ -9347,7 +9376,13 @@
     delete recapManageClear.dataset.armed;
     recapManageClear.textContent = "전체 삭제";
     recapManageClear.disabled = true;
-    await removeRecapChannels([...recapManageChannels.keys()]);
+    try {
+      await removeRecapChannels([...recapManageChannels.keys()]);
+    } catch {
+      recapManageClear.disabled = false;
+      settingsToast("채팅 기록을 삭제하지 못했습니다.");
+      return;
+    }
     // 가져오기 완료 표식까지 비워야 다시보기를 처음부터 다시 모을 수 있다.
     try {
       await chrome.storage.local.remove([
