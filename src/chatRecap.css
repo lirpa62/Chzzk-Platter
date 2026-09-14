@@ -3645,6 +3645,58 @@ button.crc-multi-channel-more:focus-visible {
   border-top: 1px solid var(--popup-border);
 }
 
+/* 저장된 기록 삭제: 목록과 버튼을 세로로 쌓는다(다른 관리 패널은 한 줄 배치다). */
+.crc-recap-purge {
+  align-items: stretch;
+  flex-direction: column;
+}
+.crc-purge-list {
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.crc-purge-row {
+  align-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+}
+.crc-purge-row:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.12));
+}
+.crc-purge-row input {
+  flex: none;
+  margin: 0;
+}
+.crc-purge-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crc-purge-row small {
+  color: var(--popup-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+/* 삭제 중인 행. 지워질 것이 확정되기 전까지 자리는 두되 조작은 막는다. */
+.crc-purge-row.is-removing {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.crc-purge-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .crc-vod-stats-panel .crc-new-vod-copy {
   flex: 1 1 280px;
 }

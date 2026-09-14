@@ -8878,7 +8878,7 @@
         : newVodCheckAt
           ? `${new Date(newVodCheckAt).toLocaleString("ko-KR")} 확인` +
             (failed ? ` · ${fmt(failed)}개 채널 확인 실패` : "")
-          : "수집한 적이 있는 스트리머를 기준으로 확인합니다.";
+          : "최근 일주일 안에 채팅한 스트리머를 기준으로 확인합니다.";
       if (!checking && newVodCheckAt && newVodCheckedChannels < 1) {
         checkedAt.textContent = "완료된 다시보기와 연결된 스트리머가 없습니다.";
       }
@@ -9105,6 +9105,9 @@
     } catch {}
   }
 
+  // 새 다시보기 확인 대상: 최근 이 기간 안에 채팅(라이브 포함)이 있는 채널.
+  // 오래 보지 않은 채널까지 매번 훑으면 채널 수만큼 요청이 늘고 결과는 거의 없다.
+  const NEW_VOD_RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
   async function checkNewVods({
     accountId = "",
     force = false,
@@ -9150,6 +9153,26 @@
     for (const channelId of lastData.byChannel.keys()) {
       if (!videosByChannel.has(channelId))
         videosByChannel.set(channelId, new Set());
+    }
+    // ⚠ 최근에 전혀 채팅하지 않은 채널까지 매번 확인하면 요청만 늘고 얻는 게 없다.
+    //   기록이 오래된 채널은 후보에서 뺀다. 다만 '이미 아는 영상' 목록(eventLinks)에
+    //   있는 채널은 가져오다 만 것일 수 있어 남긴다.
+    const recentCutoff = Date.now() - NEW_VOD_RECENT_WINDOW_MS;
+    const lastChatAt = new Map();
+    for (const list of [lastData.items, lastData.donations]) {
+      for (const item of Array.isArray(list) ? list : []) {
+        const channelId = item?.channelId;
+        const at = Number(item?.t) || 0;
+        if (!channelId || !at) continue;
+        if (at > (lastChatAt.get(channelId) || 0))
+          lastChatAt.set(channelId, at);
+      }
+    }
+    const knownVideoChannels = importedVideosByChannel(eventState.links);
+    for (const channelId of [...videosByChannel.keys()]) {
+      if (knownVideoChannels.has(channelId)) continue;
+      if ((lastChatAt.get(channelId) || 0) >= recentCutoff) continue;
+      videosByChannel.delete(channelId);
     }
     const channelIds = [...videosByChannel.keys()];
     newVodCheckedChannels = channelIds.length;
@@ -11402,10 +11425,219 @@
     }
     const start = $("crcStart");
     if (start) start.hidden = importModalTab !== "import";
+    // 관리 탭을 볼 때만 저장소를 훑는다(모달을 열 때마다 전수 조회하지 않는다).
+    if (importModalTab === "manage") void renderPurgeList();
     if (importModalTab === "import" && followings.length) {
       renderFollowList($("crcChannelSearch")?.value || "");
       renderPickedList();
     }
+  }
+
+  // ── 저장된 채팅 기록 삭제(채널 단위 / 전체) ──────────────────────────────
+  // ⚠ 리캡 본문은 chatRecap:<계정>:<채널>:<월>[:part:N] 로 흩어져 있고, 카탈로그와
+  //   다시보기 통계가 같은 채널을 따로 가리킨다. 한 곳만 지우면 목록에 남아 다시
+  //   계산되므로 세 갈래를 함께 지운다(설정 화면의 같은 기능과 동일한 규칙).
+  const PURGE_ROW_RE =
+    /^chatRecap:([0-9a-f]{32}):([0-9a-f]{32}):(\d{4}-\d{2})(?::part:\d+)?$/i;
+  const PURGE_STATS_RE =
+    /^chatRecapVodChatStatsV1:([0-9a-f]{32}):([0-9a-f]{32})$/i;
+  let purgeChannels = new Map();
+
+  async function collectPurgeChannels() {
+    const byChannel = new Map();
+    let snapshot = {};
+    try {
+      snapshot = (await chrome.storage.local.get(null)) || {};
+    } catch {
+      return byChannel;
+    }
+    for (const key of Object.keys(snapshot)) {
+      const row = PURGE_ROW_RE.exec(key);
+      const stats = row ? null : PURGE_STATS_RE.exec(key);
+      const match = row || stats;
+      if (!match) continue;
+      const accountId = match[1].toLowerCase();
+      const channelId = match[2].toLowerCase();
+      const id = `${accountId}:${channelId}`;
+      if (!byChannel.has(id)) {
+        byChannel.set(id, {
+          accountId,
+          channelId,
+          keys: [],
+          months: new Set(),
+          rows: 0,
+        });
+      }
+      const entry = byChannel.get(id);
+      entry.keys.push(key);
+      if (row) {
+        entry.months.add(row[3]);
+        const items = snapshot[key]?.items;
+        if (Array.isArray(items)) entry.rows += items.length;
+      }
+    }
+    return byChannel;
+  }
+
+  function syncPurgeButtons() {
+    const list = $("crcPurgeList");
+    const selected = list
+      ? list.querySelectorAll("input:checked").length
+      : 0;
+    const selectedButton = $("crcPurgeSelected");
+    if (selectedButton) {
+      selectedButton.disabled = selected === 0;
+      selectedButton.textContent = selected
+        ? `선택 삭제 (${selected})`
+        : "선택 삭제";
+    }
+    const allButton = $("crcPurgeAll");
+    if (allButton) allButton.disabled = purgeChannels.size === 0;
+  }
+
+  async function renderPurgeList() {
+    const list = $("crcPurgeList");
+    if (!list) return;
+    list.textContent = "불러오는 중…";
+    purgeChannels = await collectPurgeChannels();
+    if (!purgeChannels.size) {
+      list.textContent = "저장된 채팅 기록이 없습니다.";
+      syncPurgeButtons();
+      return;
+    }
+    const groups = [...purgeChannels.entries()].sort(
+      (a, b) => b[1].rows - a[1].rows,
+    );
+    list.textContent = "";
+    for (const [id, entry] of groups) {
+      const label = document.createElement("label");
+      label.className = "crc-purge-row";
+      label.dataset.purgeRow = id;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = id;
+      const name = document.createElement("span");
+      name.textContent =
+        nameCache.get(entry.channelId)?.name ||
+        `채널 ${entry.channelId.slice(0, 8)}`;
+      const detail = document.createElement("small");
+      detail.textContent = entry.months.size
+        ? `${entry.months.size}개월 · 채팅 ${fmt(entry.rows)}개`
+        : "다시보기 통계만";
+      label.append(input, name, detail);
+      list.append(label);
+      // 이름을 모르는 채널만 따로 조회한다(이미 아는 채널은 즉시 표시된다).
+      if (!nameCache.get(entry.channelId)?.name) {
+        void resolveDisplayChannelInfo(entry.channelId).then((info) => {
+          if (info?.name && name.isConnected) name.textContent = info.name;
+        });
+      }
+    }
+    syncPurgeButtons();
+  }
+
+  async function purgeRecapChannels(ids) {
+    const keys = [];
+    const byAccount = new Map();
+    for (const id of ids) {
+      const entry = purgeChannels.get(id);
+      if (!entry) continue;
+      keys.push(...entry.keys);
+      if (!byAccount.has(entry.accountId)) byAccount.set(entry.accountId, []);
+      byAccount.get(entry.accountId).push(entry.channelId);
+    }
+    if (!keys.length) return;
+    // ⚠ 본문 삭제 실패는 삼키지 않는다. 지워지지 않았는데 행만 사라지면
+    //   화면과 저장소가 어긋난다.
+    await chrome.storage.local.remove(keys);
+    for (const [accountId, channels] of byAccount) {
+      const catalogKey = `chatRecapCatalog:${accountId}`;
+      try {
+        const stored = (await chrome.storage.local.get(catalogKey))?.[
+          catalogKey
+        ];
+        if (!stored || typeof stored !== "object") continue;
+        const next = { ...stored, channels: { ...(stored.channels || {}) } };
+        for (const channelId of channels) delete next.channels[channelId];
+        if (Object.keys(next.channels).length) {
+          await chrome.storage.local.set({ [catalogKey]: next });
+        } else {
+          await chrome.storage.local.remove(catalogKey);
+        }
+      } catch {}
+    }
+  }
+
+  // ⚠ 선택 삭제는 목록 전체를 다시 그리지 않는다. 고른 행만 먼저 흐리게 하고
+  //   끝나면 그 행만 없앤다(나머지 행과 이미 채운 채널명이 그대로 남는다).
+  function bindPurgeControls() {
+    const list = $("crcPurgeList");
+    list?.addEventListener("change", syncPurgeButtons);
+
+    $("crcPurgeSelected")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const ids = [...(list?.querySelectorAll("input:checked") || [])].map(
+        (input) => input.value,
+      );
+      if (!ids.length) return;
+      button.disabled = true;
+      const rows = ids
+        .map((id) =>
+          list?.querySelector(`[data-purge-row="${CSS.escape(id)}"]`),
+        )
+        .filter(Boolean);
+      rows.forEach((row) => row.classList.add("is-removing"));
+      try {
+        await purgeRecapChannels(ids);
+      } catch {
+        rows.forEach((row) => row.classList.remove("is-removing"));
+        syncPurgeButtons();
+        return;
+      }
+      rows.forEach((row) => row.remove());
+      ids.forEach((id) => purgeChannels.delete(id));
+      if (!purgeChannels.size && list) {
+        list.textContent = "저장된 채팅 기록이 없습니다.";
+      }
+      syncPurgeButtons();
+    });
+
+    // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다.
+    $("crcPurgeAll")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      if (button.dataset.armed !== "1") {
+        button.dataset.armed = "1";
+        button.textContent = "정말 전체 삭제할까요?";
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          delete button.dataset.armed;
+          button.textContent = "전체 삭제";
+        }, 3000);
+        return;
+      }
+      delete button.dataset.armed;
+      button.textContent = "전체 삭제";
+      button.disabled = true;
+      try {
+        await purgeRecapChannels([...purgeChannels.keys()]);
+      } catch {
+        button.disabled = false;
+        return;
+      }
+      // 가져오기 완료 표식까지 비워야 다시보기를 처음부터 다시 모을 수 있다.
+      try {
+        await chrome.storage.local.remove([
+          "chatRecapImportedVideos",
+          "chatRecapVerifiedVideosV2",
+          "chatRecapVodEventLinksV3",
+          "chatRecapHistoryRevisionV1",
+          "chatRecapNewVideosV1",
+        ]);
+      } catch {}
+      purgeChannels = new Map();
+      if (list) list.textContent = "저장된 채팅 기록이 없습니다.";
+      syncPurgeButtons();
+    });
   }
 
   function openImportModal() {
@@ -12435,6 +12667,7 @@
     });
   }
   $("crcImport")?.addEventListener("click", openImportModal);
+  bindPurgeControls();
   $("crcRefreshNewVods")?.addEventListener("click", () => {
     void checkNewVods({ force: true });
   });

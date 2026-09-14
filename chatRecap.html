@@ -1457,7 +1457,7 @@
                   >새 다시보기를 확인하지 않았습니다.</strong
                 >
                 <span id="crcNewVodCheckedAt"
-                  >수집한 적이 있는 스트리머를 기준으로 확인합니다.</span
+                  >최근 일주일 안에 채팅한 스트리머를 기준으로 확인합니다.</span
                 >
               </div>
               <div class="crc-new-vod-actions">
@@ -1503,6 +1503,30 @@
               >
                 전체 채팅 수 확인
               </button>
+            </div>
+
+            <div class="crc-vod-stats-panel crc-recap-purge">
+              <div class="crc-new-vod-copy">
+                <strong>저장된 채팅 기록 삭제</strong>
+                <span
+                  >채널을 골라 지우거나 전체를 비웁니다. 지운 기록은 되돌릴 수
+                  없으며, 다시보기에서 다시 가져올 수 있습니다.</span
+                >
+              </div>
+              <div class="crc-purge-list" id="crcPurgeList"></div>
+              <div class="crc-purge-actions">
+                <button
+                  type="button"
+                  class="crc-btn-ghost"
+                  id="crcPurgeSelected"
+                  disabled
+                >
+                  선택 삭제
+                </button>
+                <button type="button" class="crc-btn-ghost" id="crcPurgeAll">
+                  전체 삭제
+                </button>
+              </div>
             </div>
           </div>
         </div>
