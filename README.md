@@ -648,6 +648,21 @@ node --test scripts/test-follow-preview-performance.js
 node --test scripts/test-screenshot-performance.js
 node scripts/test-chat-recap-store.js
 node scripts/test-chat-activity-analysis.js
+node scripts/test-recap-history-match.cjs
+node scripts/test-recap-page-purge.cjs
+node scripts/test-recap-delete-rows.cjs
+node scripts/test-recap-channel-names.cjs
+node scripts/test-recap-profile-thumb.cjs
+node scripts/test-new-vod-detect.cjs
+node scripts/test-follow-tooltip-hitbox.cjs
+```
+
+아래 두 가지는 헤드리스 Chrome 으로 실제 화면을 띄워 확인합니다. `CHROME_BIN`
+환경 변수로 실행 파일 경로를 지정할 수 있습니다.
+
+```bash
+node scripts/test-settings-ui.cjs
+node scripts/test-embed-clip-mixer.cjs
 ```
 
 라이브 성능 회귀 검증은 채팅 수집 큐의 종료·스크롤 대기·목록 교체·변경 행 선별, 배속 따라잡기의 실행 간격·종료 조건, 시청 페이지의 사이드바 폭 보정, 헤더 스크롤 처리 및 팔로잉 갱신 생략 조건을 확인합니다. 실제 네트워크 지연, GPU 부하, 영상 프레임 드롭은 실방송에서 별도로 비교해야 합니다.
@@ -657,6 +672,8 @@ node scripts/test-chat-activity-analysis.js
 미리보기 검증은 모의 HLS·네이티브 재생 경로에서 100회 전환 시 리스너와 활성 인스턴스 수, 늦은 오류·응답 차단, 닫기 시 미디어 해제, 조회 중복 방지와 주입 시간 제한을 확인합니다. 실제 영상 디코딩·GPU 메모리 사용량은 별도 실방송 검증이 필요합니다.
 
 스크린샷 검증은 비동기 PNG 인코딩·원본 픽셀 기준 자르기, 캡처 중 중복 클릭 방지, Blob 저장 전달과 다운로드 응답·시간 초과 시 타이머 정리를 확인합니다.
+
+채팅 리캡 검증은 후원·구독을 결제 내역과 대조하는 시각 보정 범위, 저장된 기록 삭제 시 월별 기록·통계·목록 정보 정리와 선택 삭제의 부분 갱신, 채널명 조회 실패 시의 대체 경로, 프로필 썸네일 요청 크기, 이미 가져온 다시보기 아래의 새 영상 탐지를 확인합니다. 설정 화면과 임베드 클립 믹서 검증은 헤드리스 Chrome 에서 실제 렌더링·클릭 동작과 설정 전송 목록 등록 여부를 확인합니다.
 
 사이드바 본문 밀기는 기존 전환 애니메이션을 유지하되, 같은 처리 내 폭 측정과 동일한 스타일의 재작성을 줄입니다. 채팅창 스크롤은 헤더 위치 계산에서 제외하며, 전용 팔로잉 목록은 데이터와 설정이 같으면 정렬·그룹 구성을 생략합니다. 실제 목록 내용이 변경되면 DOM을 다시 구성하므로 많은 채널을 짧은 간격으로 갱신할 때의 부담까지 없어지는 것은 아닙니다.
 
