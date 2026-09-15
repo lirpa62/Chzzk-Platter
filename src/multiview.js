@@ -11,6 +11,9 @@
   const API = "https://api.chzzk.naver.com";
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
   const MAX_CHANNELS = 6; // 메인 1 + 보조 5
+  // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
+  // 검색은 입력마다 달라지므로 캐시하지 않는다.
+  const LIST_TTL_MS = 20000;
   const WATCH_PAGE = "multiviewWatch.html";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
@@ -144,6 +147,17 @@
     liveImageUrl: String(
       live?.liveImageUrl || live?.defaultThumbnailImageUrl || "",
     ).replace("{type}", "480"),
+    // 자동 태그 그룹에 쓴다. 응답마다 키 이름이 달라 사이드바와 같은 순서로 본다.
+    tags: (Array.isArray(live?.tags)
+      ? live.tags
+      : Array.isArray(live?.liveTagList)
+        ? live.liveTagList
+        : Array.isArray(live?.tagList)
+          ? live.tagList
+          : []
+    )
+      .map((t) => String(t || "").trim())
+      .filter(Boolean),
   });
 
   // ⚠ 팔로잉 응답은 `content.followingList` 다(`content.data` 가 아니다). 항목도
@@ -152,7 +166,7 @@
   async function loadFollowing() {
     const c = await getJson(`${API}/service/v1/channels/followings/live`);
     const rows = Array.isArray(c?.followingList) ? c.followingList : [];
-    return rows
+    const live = rows
       .filter((r) => r?.streamer?.openLive === true)
       .map((r) =>
         normalize(
@@ -164,6 +178,8 @@
         ),
       )
       .filter((r) => r.channelId);
+    // 이 응답에는 방송 썸네일이 없어 라이브 목록에서 채운다.
+    return withLiveInfo(live);
   }
 
   async function loadAll() {
@@ -172,16 +188,66 @@
     return rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId);
   }
 
+  // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 지금 방송 중인 채널
+  //   이름을 정확히 넣어도 0건이 온다(실측) — 방송 제목만 훑는 것으로 보인다.
+  //   대신 이 응답에는 방송 정보가 없어 아래에서 라이브 목록으로 채운다.
   async function search(keyword) {
     if (!keyword.trim()) return [];
     const c = await getJson(
-      `${API}/service/v1/search/lives?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
+      `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
     );
     const rows = Array.isArray(c?.data) ? c.data : [];
-    // 검색 응답은 {channel, live} 로 한 겹 더 감싸여 있다.
-    return rows
-      .map((r) => normalize(r?.channel, r?.live))
-      .filter((r) => r.channelId);
+    const live = rows
+      .map((r) => r?.channel)
+      .filter((ch) => ch?.channelId && ch.openLive === true)
+      .map((ch) => normalize(ch, null));
+    return withLiveInfo(live);
+  }
+
+  // 라이브 목록(썸네일·제목·시청자 수가 들어 있다)에서 부족한 정보를 채운다.
+  //
+  // ⚠ 팔로잉·전용 팔로잉 응답(liveInfo)과 채널 검색 응답에는 방송 썸네일이 없다.
+  //   그래서 프로필 이미지만 보였다. 라이브 목록 한 번으로 한꺼번에 메운다
+  //   (채널마다 live-detail 을 부르면 6개만 해도 요청이 6번 더 생긴다).
+  let liveIndexCache = { at: 0, map: null };
+  async function liveIndex() {
+    if (liveIndexCache.map && Date.now() - liveIndexCache.at < LIST_TTL_MS) {
+      return liveIndexCache.map;
+    }
+    const map = new Map();
+    try {
+      // 상위 목록이라 모든 채널을 덮지는 못한다. 없으면 프로필로 대체된다.
+      const c = await getJson(`${API}/service/v1/lives?size=50`);
+      for (const r of Array.isArray(c?.data) ? c.data : []) {
+        const id = String(r?.channel?.channelId || "").toLowerCase();
+        if (id) map.set(id, r);
+      }
+    } catch {}
+    liveIndexCache = { at: Date.now(), map };
+    return map;
+  }
+
+  async function withLiveInfo(rows) {
+    if (!rows.length) return rows;
+    const needs = rows.some((r) => !r.liveImageUrl);
+    if (!needs) return rows;
+    const index = await liveIndex();
+    if (!index.size) return rows;
+    return rows.map((r) => {
+      const hit = index.get(r.channelId);
+      if (!hit) return r;
+      const filled = normalize(hit.channel, hit);
+      return {
+        ...r,
+        // 원본에 값이 있으면 그대로 두고, 빈 것만 채운다.
+        liveImageUrl: r.liveImageUrl || filled.liveImageUrl,
+        liveTitle: r.liveTitle || filled.liveTitle,
+        category: r.category || filled.category,
+        viewers: r.viewers || filled.viewers,
+        adult: r.adult || filled.adult,
+        tags: r.tags?.length ? r.tags : filled.tags,
+      };
+    });
   }
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
@@ -193,12 +259,15 @@
     let favorites = [];
     let groups = [];
     let groupOrder = [];
+    let flags = {};
     try {
       const d = await chrome.storage.local.get([
         "cheeseFollowFavorites",
         "cheeseFollowCustomGroups",
         "cheeseFollowGroupOrder",
+        "cheeseFeatureHidden",
       ]);
+      flags = d?.cheeseFeatureHidden || {};
       favorites = Array.isArray(d?.cheeseFollowFavorites)
         ? d.cheeseFollowFavorites
         : [];
@@ -258,6 +327,49 @@
       });
     }
 
+    // 자동 '구독' 그룹. 사이드바의 sbFollowGroupSubscribe 와 같은 조건에서만 만든다.
+    if (flags.sbFollowGroupEnabled === true && flags.sbFollowGroupSubscribe === true) {
+      const subscribed = await loadSubscribedIds();
+      const rows = take([...subscribed]);
+      if (rows.length) {
+        sections.push({
+          id: "auto:subscription",
+          label: "구독",
+          icon: "star",
+          rows,
+        });
+      }
+    }
+
+    // 자동 태그 그룹. 같은 태그를 가진 채널을 묶는다(사이드바와 같은 규칙).
+    if (flags.sbFollowGroupEnabled === true && flags.sbFollowGroupTags === true) {
+      const byTag = new Map();
+      for (const row of live) {
+        if (used.has(row.channelId)) continue;
+        for (const tag of row.tags || []) {
+          const key = tag.toLowerCase();
+          if (!byTag.has(key)) byTag.set(key, { name: tag, rows: [] });
+          byTag.get(key).rows.push(row);
+        }
+      }
+      // 두 채널 이상 묶이는 태그만, 많이 묶인 순으로 최대 20개.
+      const tagGroups = [...byTag.entries()]
+        .filter(([, v]) => v.rows.length >= 2)
+        .sort((a, b) => b[1].rows.length - a[1].rows.length)
+        .slice(0, 20);
+      for (const [key, entry] of tagGroups) {
+        const rows = take(entry.rows.map((r) => r.channelId));
+        if (rows.length) {
+          sections.push({
+            id: `tag:${key}`,
+            label: `#${entry.name}`,
+            icon: "folder",
+            rows,
+          });
+        }
+      }
+    }
+
     // 친밀도(내 활동순). 사이드바의 '내 활동순' 과 같은 점수 계산을 쓰되, 여기서는
     // 저장소에 있는 지표(통나무파워·내 채팅)만 쓴다.
     // ⚠ 구독 개월·후원 횟수는 치지직 API 를 직접 불러야 하는데 확장 페이지에서는
@@ -286,11 +398,24 @@
     return sections;
   }
 
-  // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
-  // 검색은 입력마다 달라지므로 캐시하지 않는다.
-  const LIST_TTL_MS = 20000;
-
   // 모든 목록을 '구역 배열' 로 통일한다. 전용 팔로잉만 여러 구역이고 나머지는 하나다.
+  // 구독 중인 채널 id. 자동 '구독' 그룹에 쓴다.
+  async function loadSubscribedIds() {
+    const out = new Set();
+    try {
+      const c = await getJson(
+        `${API}/commercial/v1/subscribe/channels?page=0&size=100`,
+      );
+      for (const row of Array.isArray(c?.data) ? c.data : []) {
+        const id = String(
+          row?.channel?.channelId || row?.channelId || "",
+        ).toLowerCase();
+        if (HASH_RE.test(id)) out.add(id);
+      }
+    } catch {}
+    return out;
+  }
+
   // 친밀도 구역. 저장소 지표만으로 점수를 내 상위 채널을 고른다.
   const AFFINITY_MAX = 12;
   async function loadAffinitySection(live, used) {

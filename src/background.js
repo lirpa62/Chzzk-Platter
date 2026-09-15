@@ -6146,7 +6146,11 @@ const MULTIVIEW_API_ORIGIN = "https://api.chzzk.naver.com";
 const MULTIVIEW_API_PATHS = new Set([
   "/service/v1/channels/followings/live",
   "/service/v1/lives",
-  "/service/v1/search/lives",
+  // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 방송 제목만 훑는지
+  //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
+  "/service/v1/search/channels",
+  // 전용 팔로잉의 '구독' 자동 그룹을 멀티뷰에서도 보여 주려면 구독 목록이 필요하다.
+  "/commercial/v1/subscribe/channels",
 ]);
 
 async function fetchMultiviewApi(rawUrl) {

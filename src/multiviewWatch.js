@@ -45,6 +45,8 @@
     chatChannelId: "",
     chatSide: "",
     mainHighQuality: true,
+    // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
+    chatFollowsMain: true,
   };
 
   // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
@@ -271,6 +273,8 @@
     if (before) postState(before, false);
     postState(channelId, true);
     clearAudioNotice(channelId);
+    // 메인을 따라가도록 해 뒀으면 채팅도 같이 옮긴다.
+    if (state.chatFollowsMain) applyChat(channelId);
     applyLayout();
   }
 
@@ -346,11 +350,31 @@
         ),
       )
       .join("");
-    // 배치는 지금 채널 수에 맞는 것만.
+    // 배치는 지금 채널 수에 맞는 것만. 이름만으로는 모양이 안 그려지므로 작은
+    // 미리보기를 함께 둔다(고르기 화면과 같은 트랙 계산을 쓴다).
     $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length)
-      .map((l) =>
-        optionRow(l.id, l.label, l.id === state.layoutId, "data-mv-set-layout"),
-      )
+      .map((l) => {
+        const on = l.id === state.layoutId;
+        const tracks = LAYOUTS.solveTracks(l);
+        const columns = tracks ? tracks.columns : l.columns;
+        const rows = tracks ? tracks.rows : l.rows;
+        return (
+          `<button type="button" role="option" aria-selected="${on}"` +
+          ` class="mv-pop-option mv-pop-option-layout${on ? " is-on" : ""}"` +
+          ` data-mv-set-layout="${esc(l.id)}">` +
+          `<span class="mv-layout-preview" style="grid-template-columns:${esc(columns)};` +
+          `grid-template-rows:${esc(rows)};` +
+          `aspect-ratio:${tracks ? esc(String(tracks.ratio)) : "16/9"};` +
+          `grid-template-areas:${esc(l.areas.join(" "))}">` +
+          LAYOUTS.SLOTS.slice(0, l.aux + 1)
+            .map(
+              (slot) =>
+                `<i style="grid-area:${slot}"${slot === "m" ? ' class="is-main"' : ""}></i>`,
+            )
+            .join("") +
+          `</span><span class="mv-pop-option-label">${esc(l.label)}</span></button>`
+        );
+      })
       .join("");
   }
 
@@ -510,6 +534,15 @@
     if (setLayoutEl) {
       setLayout(setLayoutEl.dataset.mvSetLayout);
       closePopovers(null);
+      return;
+    }
+    if (target.closest?.("#mvChatFollow")) {
+      state.chatFollowsMain = !state.chatFollowsMain;
+      const button = $("mvChatFollow");
+      button.setAttribute("aria-pressed", String(state.chatFollowsMain));
+      // 켠 순간 이미 어긋나 있으면 바로 맞춰 준다.
+      if (state.chatFollowsMain) applyChat(state.mainId);
+      renderTopbar();
       return;
     }
     if (target.closest?.("#mvChatToggle")) {

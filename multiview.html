@@ -12,7 +12,48 @@
     <!-- 채널 고르기: 멀티뷰를 시작하기 전 화면 -->
     <main class="mv-setup" id="mvSetup">
       <header class="mv-setup-head">
-        <h1>멀티뷰</h1>
+        <div class="mv-setup-head-row">
+          <h1>멀티뷰</h1>
+          <button
+            type="button"
+            class="mv-theme-toggle"
+            id="mvTheme"
+            aria-pressed="false"
+            aria-label="다크 모드로 전환"
+            title="테마 전환"
+          >
+            <svg
+              class="mv-theme-sun"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4"></circle>
+              <path
+                d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+              ></path>
+            </svg>
+            <svg
+              class="mv-theme-moon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+            </svg>
+          </button>
+        </div>
         <p class="mv-setup-desc">
           여러 방송을 한 화면에서 봅니다. 메인 채널은 소리가 켜진 채로 시작하고
           나머지는 음소거됩니다. 화질은 480p로 시작해 화면마다 따로 올릴 수
@@ -77,6 +118,7 @@
     </main>
 
     <!-- 친밀도 구역 점수 계산에 쓴다(전용 팔로잉 탭에서만 동작). -->
+    <script src="src/multiviewTheme.js"></script>
     <script src="src/chatRecapStore.js"></script>
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>

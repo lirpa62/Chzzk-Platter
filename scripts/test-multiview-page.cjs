@@ -147,9 +147,10 @@ const checks = [];
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           liveCategoryValue:'게임',
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
-      if(p.endsWith('/search/lives'))return {data:channels.map(c=>({channel:c,
-        live:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
-          liveCategoryValue:'게임'}}))};
+      // 채널 검색은 search/channels 를 쓴다(방송 정보는 없고 openLive 만 있다).
+      if(p.endsWith('/search/channels'))return {data:channels.map(c=>({
+        channel:{...c,openLive:true}}))};
+      if(p.endsWith('/subscribe/channels'))return {data:[]};
       return {data:channels.map(c=>({channel:c,liveTitle:c.liveTitle,
         concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임'}))};
     };
@@ -498,7 +499,9 @@ const checks = [];
 
   await test(
     "메인을 바꿔도 프레임을 다시 걸지 않고 상태 메시지만 보낸다",
-    `const before=window.frameSrcs.length;
+    `// 영상 프레임만 센다. 채팅 프레임은 '메인 따라가기' 로 같이 바뀌는 게 정상이다.
+     const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
      window.sentMessages.length=0;
      const cells=[...document.querySelectorAll('.mv-cell')];
      const sub=cells.find(c=>!c.classList.contains('is-main'));
@@ -507,8 +510,11 @@ const checks = [];
      sub.querySelector('[data-mv-promote]').click();
      await wait(100);
      // 핵심: 방송이 다시 로드되면 안 된다.
-     check(window.frameSrcs.length===before,
-       '메인 변경으로 프레임이 다시 걸렸다('+(window.frameSrcs.length-before)+'개)');
+     check(videoSrcs().length===before,
+       '메인 변경으로 영상 프레임이 다시 걸렸다('+(videoSrcs().length-before)+'개)');
+     // 채팅은 메인을 따라가야 한다.
+     const chat=[...window.frameSrcs].reverse().find(s=>s.includes('cheeseMultiChat=1'));
+     check(chat.includes(subId),'채팅이 새 메인을 따라가지 않았다');
      // 대신 두 칸에 상태 지시가 가야 한다.
      const msgs=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE');
      check(msgs.length===2,'상태 메시지가 2개가 아니라 '+msgs.length+'개');
@@ -573,6 +579,48 @@ const checks = [];
        data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id}}));
      check(cell.dataset.status==='ready','준비 신호를 받고도 덮개가 남았다');
      check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
+  );
+
+  await test(
+    "메인 따라가기를 끄면 채팅이 메인을 따라가지 않는다",
+    `const follow=document.getElementById('mvChatFollow');
+     check(follow.getAttribute('aria-pressed')==='true','기본이 켜짐이 아니다');
+     follow.click();
+     check(follow.getAttribute('aria-pressed')==='false','꺼지지 않았다');
+     const chatBefore=[...window.frameSrcs].reverse()
+       .find(s=>s.includes('cheeseMultiChat=1'));
+     // 끈 상태에서 메인을 바꾸면 채팅은 그대로여야 한다.
+     const other=[...document.querySelectorAll('.mv-cell')]
+       .find(c=>!c.classList.contains('is-main'));
+     other.querySelector('[data-mv-promote]').click();
+     await wait(100);
+     const chatAfter=[...window.frameSrcs].reverse()
+       .find(s=>s.includes('cheeseMultiChat=1'));
+     check(chatAfter===chatBefore,'꺼져 있는데 채팅이 따라갔다');
+     // 다시 켜면 그 순간 메인에 맞춘다.
+     follow.click();
+     await wait(100);
+     const chatNow=[...window.frameSrcs].reverse()
+       .find(s=>s.includes('cheeseMultiChat=1'));
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     check(chatNow.includes(mainId),'다시 켰는데 메인에 맞추지 않았다');`,
+  );
+
+  await test(
+    "배치 팝오버 항목에 미리보기가 함께 나온다",
+    `document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     const opts=[...document.querySelectorAll('[data-mv-set-layout]')];
+     check(opts.length>0,'배치 항목이 없다');
+     for(const o of opts){
+       const pv=o.querySelector('.mv-layout-preview');
+       check(pv,o.dataset.mvSetLayout+' 항목에 미리보기가 없다');
+       check(pv.style.gridTemplateColumns,'미리보기에 열 정보가 없다');
+       // 항목 밖으로 나가면 안 된다.
+       const orect=o.getBoundingClientRect(), prect=pv.getBoundingClientRect();
+       check(prect.right<=orect.right+1 && prect.left>=orect.left-1,
+         o.dataset.mvSetLayout+' 미리보기가 항목 밖으로 나갔다');
+     }
+     document.body.click();`,
   );
 
   await test(

@@ -243,6 +243,7 @@
         "src/multiview.css",
         "src/multiview.js",
         "src/multiviewWatch.js",
+        "src/multiviewTheme.js",
         "src/multiviewLayouts.js"
       ],
       "matches": [

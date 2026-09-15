@@ -72,6 +72,46 @@
         ></div>
       </div>
 
+      <button
+        type="button"
+        class="mv-theme-toggle"
+        id="mvTheme"
+        aria-pressed="false"
+        aria-label="다크 모드로 전환"
+        title="테마 전환"
+      >
+        <svg
+          class="mv-theme-sun"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="4"></circle>
+          <path
+            d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+          ></path>
+        </svg>
+        <svg
+          class="mv-theme-moon"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+        </svg>
+      </button>
+
       <button type="button" class="mv-topbar-back" id="mvBack">
         채널 다시 고르기
       </button>
@@ -84,6 +124,15 @@
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
           <span class="mv-chat-title" id="mvChatTitle"></span>
+          <button
+            type="button"
+            class="mv-chat-follow"
+            id="mvChatFollow"
+            aria-pressed="true"
+            title="메인 채널을 바꾸면 채팅도 같이 바꾼다"
+          >
+            메인 따라가기
+          </button>
           <button type="button" id="mvChatToggle" aria-label="채팅 접기">
             접기
           </button>
@@ -101,6 +150,7 @@
       볼 채널 정보를 찾지 못했습니다. 채널 고르기 화면에서 다시 시작하세요.
     </p>
 
+    <script src="src/multiviewTheme.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>
