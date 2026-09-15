@@ -274,6 +274,14 @@ body {
   opacity: 0.45;
 }
 
+/* ── 시청 화면(multiviewWatch.html) ────────────────────────────────── */
+.mv-watch-body {
+  overflow: hidden;
+}
+.mv-watch-empty {
+  padding: 40px 16px;
+}
+
 /* ── 실행 화면 ─────────────────────────────────────────────────────── */
 /* ⚠ 채팅을 격자 안에 넣지 않는다. 바깥 flex 로 감싸야 채팅을 접었다 펴도
    프레임 격자가 다시 계산되지 않는다(리플로우 중 재생이 끊길 수 있다). */
@@ -289,11 +297,29 @@ body {
   min-height: 0;
   min-width: 0;
 }
+/* 모든 화면은 16:9 를 지킨다. 칸의 모양이 어떻든(세로로 길든 가로로 넓든)
+   안쪽 상자를 16:9 로 잡고 남는 자리는 검은 여백으로 둔다. 칸에 그냥 100% 로
+   채우면 배치에 따라 화면이 늘어나거나 눌린다. */
 .mv-cell {
+  align-items: center;
   background: #000;
+  /* 안쪽 상자가 칸 크기를 기준으로 16:9 를 계산할 수 있게 컨테이너로 선언한다. */
+  container-type: size;
+  display: flex;
+  justify-content: center;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
   position: relative;
+}
+.mv-cell-inner {
+  /* 칸보다 커지지 않는 선에서 가장 크게 16:9 를 잡는다.
+     ⚠ aspect-ratio + max-height/width 조합은 flex 자식에서 믿을 수 없다.
+     width:100% 를 주면 납작한 칸에서 옆으로 늘어나고(실측 5.70), height:100%
+     를 주면 좁은 칸에서 세로로 늘어난다(실측 0.36). 칸 크기를 직접 받아
+     min() 으로 계산하면 배치와 무관하게 정확히 16:9 가 된다. */
+  height: min(100%, (100cqw * 9 / 16));
+  width: min(100%, (100cqh * 16 / 9));
 }
 .mv-cell iframe {
   border: 0;

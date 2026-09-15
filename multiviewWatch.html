@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 멀티뷰 시청</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/multiview.css" />
+  </head>
+  <body class="mv-watch-body">
+    <main class="mv-stage" id="mvStage">
+      <div class="mv-frames" id="mvFrames"></div>
+      <aside class="mv-chat" id="mvChat">
+        <div class="mv-chat-head">
+          <select id="mvChatChannel" aria-label="채팅을 볼 채널"></select>
+          <button type="button" id="mvChatToggle" aria-label="채팅 접기">
+            접기
+          </button>
+        </div>
+        <iframe
+          id="mvChatFrame"
+          title="채팅"
+          allow="autoplay"
+          referrerpolicy="origin"
+        ></iframe>
+      </aside>
+      <div class="mv-toolbar" id="mvToolbar">
+        <button type="button" id="mvBack">채널 다시 고르기</button>
+      </div>
+    </main>
+
+    <p class="mv-empty mv-watch-empty" id="mvWatchEmpty" hidden>
+      볼 채널 정보를 찾지 못했습니다. 채널 고르기 화면에서 다시 시작하세요.
+    </p>
+
+    <script src="src/multiviewLayouts.js"></script>
+    <script src="src/multiviewWatch.js"></script>
+  </body>
+</html>

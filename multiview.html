@@ -77,28 +77,6 @@
       </div>
     </main>
 
-    <!-- 실행 화면: 프레임 격자 + 채팅 -->
-    <main class="mv-stage" id="mvStage" hidden>
-      <div class="mv-frames" id="mvFrames"></div>
-      <aside class="mv-chat" id="mvChat">
-        <div class="mv-chat-head">
-          <select id="mvChatChannel" aria-label="채팅을 볼 채널"></select>
-          <button type="button" id="mvChatToggle" aria-label="채팅 접기">
-            접기
-          </button>
-        </div>
-        <iframe
-          id="mvChatFrame"
-          title="채팅"
-          allow="autoplay"
-          referrerpolicy="origin"
-        ></iframe>
-      </aside>
-      <div class="mv-toolbar" id="mvToolbar">
-        <button type="button" id="mvBack">채널 다시 고르기</button>
-      </div>
-    </main>
-
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiview.js"></script>
   </body>

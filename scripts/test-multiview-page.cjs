@@ -107,9 +107,22 @@ const checks = [];
       set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
       get(){return this.getAttribute('data-test-src')||'';},
     });
-    window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p},
-      storage:{local:{get:async()=>({}),set:async()=>{},remove:async()=>{}},
-        onChanged:{addListener:()=>{}}}};
+    window.sessionStore={};window.openedTabs=[];
+    window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
+      // 목록 API 는 배경 스크립트가 중계한다(확장 페이지 직접 fetch 는 CORS 로 막힘).
+      sendMessage:async(msg)=>{
+        if(msg?.type!=='MULTIVIEW_API')return {ok:false,reason:'unknown'};
+        return {ok:true,content:window.__apiContent(msg.url)};
+      }},
+      storage:{local:{get:async()=>({
+          // 전용 팔로잉은 즐겨찾기·그룹에 든 채널만 추린다.
+          cheeseFollowFavorites:['aaaa0000000000000000000000000001'],
+          cheeseFollowCustomGroups:[{channelIds:['aaaa0000000000000000000000000002']}],
+        }),set:async()=>{},remove:async()=>{}},
+        session:{get:async(k)=>({[k]:window.sessionStore[k]}),
+          set:async(o)=>{Object.assign(window.sessionStore,o);}},
+        onChanged:{addListener:()=>{}}},
+      tabs:{create:(o)=>{window.openedTabs.push(o.url);}}};
     // 치지직 API 스텁: 팔로잉 3채널.
     const channels=[
       {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나',
@@ -119,12 +132,20 @@ const checks = [];
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋',
         channelImageUrl:'',liveTitle:'방송3',concurrentUserCount:300},
     ];
-    window.fetch=async(url)=>({ok:true,status:200,json:async()=>({code:200,
-      content:{data:channels.map(c=>({channel:c,liveTitle:c.liveTitle,
-        concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임'})),
-        followingList:channels.map(c=>({channel:c,streamer:{openLive:true},
-          liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount}})),
-        totalCount:channels.length}})});
+    // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
+    // 전체는 data, 검색은 data[].{live,channel}.
+    window.__apiContent=(url)=>{
+      const p=new URL(url).pathname;
+      if(p.endsWith('/followings/live'))return {followingList:channels.map(c=>({
+        channelId:c.channelId,channel:c,streamer:{openLive:true},
+        liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
+          liveCategoryValue:'게임'}}))};
+      if(p.endsWith('/search/lives'))return {data:channels.map(c=>({channel:c,
+        live:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
+          liveCategoryValue:'게임'}}))};
+      return {data:channels.map(c=>({channel:c,liveTitle:c.liveTitle,
+        concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임'}))};
+    };
   `);
   const style = readFileSync("src/multiview.css", "utf8");
   await evaluate(
@@ -182,11 +203,71 @@ const checks = [];
   );
 
   await test(
-    "시작하면 프레임이 생기고 메인만 소리가 켜진다",
+    "세 목록(팔로잉·전용 팔로잉·검색)이 모두 채널을 불러온다",
+    `for(const src of ['following','custom','search']){
+       document.querySelector('[data-mv-source="'+src+'"]').click();
+       if(src==='search'){
+         const box=document.getElementById('mvSearch');
+         box.value='테스트';
+         box.dispatchEvent(new Event('input',{bubbles:true}));
+       }
+       await wait(400);
+       const n=document.querySelectorAll('#mvChannelList .mv-channel').length;
+       check(n>0, src+' 목록이 비어 있다');
+     }
+     // 다시 팔로잉으로 돌려놓는다.
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(200);`,
+  );
+
+  await test(
+    "시작하면 구성을 넘기고 시청 화면을 새 탭으로 연다",
     `document.getElementById('mvStart').click();
      await wait(200);
-     check(document.getElementById('mvStage').hidden===false,'스테이지가 안 보임');
-     const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const setup=window.sessionStore['cheeseMultiviewSetup'];
+     check(setup,'구성이 세션에 저장되지 않았다');
+     check(setup.chosen.length===2,'넘긴 채널이 2개가 아니다');
+     check(setup.layoutId,'배치가 비어 있다');
+     check(window.openedTabs.length===1,'새 탭이 열리지 않았다');
+     check(window.openedTabs[0].includes('multiviewWatch.html'),
+       '연 주소가 시청 화면이 아니다: '+window.openedTabs[0]);`,
+  );
+
+  assert.deepEqual(await evaluate("errors"), [], "고르기 화면 조작 중 오류");
+  checks.push("고르기 화면 조작 중 오류가 없다");
+
+  // ── 시청 화면 ────────────────────────────────────────────────────────
+  // 넘겨받은 구성으로 실제 프레임을 만드는지 확인한다.
+  const setup = await evaluate("window.sessionStore['cheeseMultiviewSetup']");
+  await evaluate(
+    "document.documentElement.innerHTML = " +
+      JSON.stringify(readFileSync("multiviewWatch.html", "utf8")),
+  );
+  await evaluate(`
+    document.querySelectorAll('script,link').forEach(el=>el.remove());
+    window.errors=[];
+    addEventListener('error',e=>errors.push(e.message));
+    addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+    window.frameSrcs=[];
+    Object.defineProperty(HTMLIFrameElement.prototype,'src',{
+      set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
+      get(){return this.getAttribute('data-test-src')||'';},
+    });
+    window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p},
+      storage:{session:{get:async(k)=>({[k]:${JSON.stringify(setup)}})}}};
+    window.check=(v,m)=>{if(!v)throw Error(m)};
+    window.wait=ms=>new Promise(r=>setTimeout(r,ms));
+  `);
+  await evaluate(
+    `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
+  );
+  await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewWatch.js", "utf8"));
+  await evaluate("new Promise(r=>setTimeout(r,300))");
+
+  await test(
+    "시청 화면이 프레임을 만들고 메인만 소리가 켜진다",
+    `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      check(srcs.length===2,'멀티뷰 프레임이 2개가 아니라 '+srcs.length+'개');
      const mains=srcs.filter(s=>s.includes('cheeseMultiMain=1'));
      check(mains.length===1,'메인 프레임이 1개가 아니라 '+mains.length+'개');
@@ -196,7 +277,7 @@ const checks = [];
   );
 
   await test(
-    "메인 고화질 체크 시 메인에는 화질 상한이 붙지 않는다",
+    "메인 고화질 선택 시 메인에는 화질 상한이 붙지 않는다",
     `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const main=srcs.find(s=>s.includes('cheeseMultiMain=1'));
      const sub=srcs.find(s=>s.includes('cheeseMultiMain=0'));
@@ -205,15 +286,29 @@ const checks = [];
   );
 
   await test(
-    "채널 다시 고르기로 돌아가면 프레임이 정리된다",
-    `document.getElementById('mvBack').click();
-     await wait(100);
-     check(document.getElementById('mvSetup').hidden===false,'설정 화면이 안 보임');
-     check(document.querySelectorAll('#mvFrames iframe').length===0,'프레임이 남아 있다');`,
+    "채팅은 전용 채팅 주소를 쓴다",
+    `const chat=window.frameSrcs.find(s=>s.includes('cheeseMultiChat=1'));
+     check(chat,'채팅 프레임이 없다');
+     check(/\\/live\\/[0-9a-f]{32}\\/chat/.test(chat),
+       '채팅 주소가 /live/<id>/chat 이 아니다: '+chat);
+     check(!chat.includes('cheeseMultiQuality'),
+       '채팅 전용 페이지에는 화질 지시가 필요 없다');`,
   );
 
-  assert.deepEqual(await evaluate("errors"), [], "조작 중 오류 발생");
-  checks.push("조작 중 오류가 없다");
+  await test(
+    "모든 칸이 16:9 로 렌더된다",
+    `const boxes=[...document.querySelectorAll('.mv-cell-inner')];
+     check(boxes.length===2,'칸이 2개가 아니다');
+     for(const b of boxes){
+       const r=b.getBoundingClientRect();
+       const ratio=r.width/r.height;
+       check(Math.abs(ratio-16/9)<0.02,
+         '16:9 가 아니다: '+Math.round(r.width)+'x'+Math.round(r.height));
+     }`,
+  );
+
+  assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
+  checks.push("시청 화면 조작 중 오류가 없다");
 
   for (const name of checks) console.log(`  PASS ${name}`);
   console.log("\n전부 통과");

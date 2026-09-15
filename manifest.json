@@ -239,8 +239,10 @@
         "src/coloris.min.js",
         "src/coloris.min.css",
         "multiview.html",
+        "multiviewWatch.html",
         "src/multiview.css",
         "src/multiview.js",
+        "src/multiviewWatch.js",
         "src/multiviewLayouts.js"
       ],
       "matches": [

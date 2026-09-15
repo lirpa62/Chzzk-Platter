@@ -244,16 +244,14 @@
   const MULTIVIEW_PARAMS = new URLSearchParams(location.search);
   const IS_MULTIVIEW_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMulti") === "1";
-  // 채팅만 보여 주는 프레임(멀티뷰 채팅 칸). 이 칸도 /live/ 페이지를 통째로 띄우므로
-  // 영상·소리가 함께 산다 → 음소거·화질 상한은 영상 칸과 똑같이 적용해야 한다.
+  // 채팅 칸(멀티뷰). 채팅 전용 페이지(/live/<id>/chat)라 영상이 없으므로 음소거·
+  // 화질 지시는 필요 없고, 최상위 UI 억제만 영상 칸과 똑같이 적용한다.
   const IS_MULTIVIEW_CHAT_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiChat") === "1";
-  // 음소거·화질 지시는 영상 칸과 채팅 칸 양쪽 모두에서 읽는다.
-  const IS_ANY_MULTIVIEW_FRAME = IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME;
   const MULTIVIEW_START_MUTED =
-    IS_ANY_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
+    IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
   // 480 이면 그 높이 이하 트랙 중 가장 높은 것을 고른다(작은 칸에 1080p 는 낭비).
-  const MULTIVIEW_QUALITY = IS_ANY_MULTIVIEW_FRAME
+  const MULTIVIEW_QUALITY = IS_MULTIVIEW_FRAME
     ? Number(MULTIVIEW_PARAMS.get("cheeseMultiQuality")) || 0
     : 0;
 
@@ -50990,7 +50988,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
         // 멀티뷰 프레임은 전역 최대화질 고정을 끈다(작은 칸 여러 개를 동시에 최고
         // 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다). 대신 아래 상한을 쓴다.
-        maxQualityAuto: IS_ANY_MULTIVIEW_FRAME
+        maxQualityAuto: IS_MULTIVIEW_FRAME
           ? false
           : IS_POPUP_PLAYER_FRAME
             ? popupPlayerMaxQuality

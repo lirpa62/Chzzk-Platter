@@ -11,6 +11,9 @@
   const API = "https://api.chzzk.naver.com";
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
   const MAX_CHANNELS = 6; // 메인 1 + 보조 5
+  const WATCH_PAGE = "multiviewWatch.html";
+  // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키.
+  const HANDOFF_KEY = "cheeseMultiviewSetup";
   const HASH_RE = /^[0-9a-f]{32}$/i;
 
   const $ = (id) => document.getElementById(id);
@@ -18,7 +21,6 @@
     source: "following",
     chosen: [], // [{channelId, channelName, channelImageUrl, liveTitle, viewers}]
     layoutId: "",
-    chatChannelId: "",
     chatSide: "",
     mainHighQuality: true,
     listCache: new Map(),
@@ -46,13 +48,16 @@
     return `${s}${s.includes("?") ? "&" : "?"}type=f120_120_na`;
   };
 
+  // ⚠ 확장 페이지에서 치지직 API 를 직접 fetch 하면 Origin 이 chrome-extension://
+  //   으로 붙어 403 "Invalid CORS request" 가 돌아온다(팔로잉·전체·검색 모두).
+  //   서비스 워커의 fetch 는 Origin 을 붙이지 않으므로 배경 스크립트에 중계시킨다.
   async function getJson(url) {
-    const res = await fetch(url, {
-      credentials: "include",
-      headers: { accept: "application/json" },
+    const reply = await chrome.runtime.sendMessage({
+      type: "MULTIVIEW_API",
+      url,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json())?.content ?? null;
+    if (!reply?.ok) throw new Error(reply?.reason || "요청 실패");
+    return reply.content ?? null;
   }
 
   // ── 채널 목록 ──────────────────────────────────────────────────────────
@@ -66,10 +71,24 @@
     adult: live?.adult === true,
   });
 
+  // ⚠ 팔로잉 응답은 `content.followingList` 다(`content.data` 가 아니다). 항목도
+  //   모양이 달라 채널 정보는 최상위·`channel`, 방송 정보는 `liveInfo` 에 있다.
+  //   오프라인 채널도 함께 내려오므로 `streamer.openLive` 로 걸러야 한다.
   async function loadFollowing() {
     const c = await getJson(`${API}/service/v1/channels/followings/live`);
-    const rows = Array.isArray(c?.data) ? c.data : [];
-    return rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId);
+    const rows = Array.isArray(c?.followingList) ? c.followingList : [];
+    return rows
+      .filter((r) => r?.streamer?.openLive === true)
+      .map((r) =>
+        normalize(
+          {
+            ...(r?.channel || {}),
+            channelId: r?.channelId || r?.channel?.channelId,
+          },
+          r?.liveInfo,
+        ),
+      )
+      .filter((r) => r.channelId);
   }
 
   async function loadAll() {
@@ -233,85 +252,27 @@
   }
 
   // ── 실행 ───────────────────────────────────────────────────────────────
-  // 프레임에 줄 URL. 팝업 플레이어와 같은 방식으로 쿼리에 지시를 담는다.
-  function frameUrl(channel, isMain) {
-    const url = new URL(`/live/${channel.channelId}`, "https://chzzk.naver.com");
-    url.searchParams.set("cheeseMulti", "1");
-    url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
-    // 메인만 소리, 나머지는 음소거로 시작한다.
-    url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
-    // 화질: 기본 480p. 메인만 높은 화질을 쓰도록 선택했으면 메인은 지정하지 않는다
-    // (프레임 쪽이 최대 화질 설정을 따른다).
-    if (!(isMain && state.mainHighQuality)) {
-      url.searchParams.set("cheeseMultiQuality", "480");
-    }
-    return url.toString();
-  }
-
-  function start() {
+  // 고른 구성을 세션 저장소로 넘기고 시청 화면을 새 탭에서 연다. 주소에 담기엔
+  // 채널 목록이 길어 세션 저장소를 쓴다.
+  async function start() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     if (!layout || state.chosen.length < 2) return;
-    state.chatChannelId = state.chosen[0].channelId;
-
-    const frames = $("mvFrames");
-    frames.style.gridTemplateColumns = layout.columns;
-    frames.style.gridTemplateRows = layout.rows;
-    frames.style.gridTemplateAreas = layout.areas.join(" ");
-    frames.innerHTML = "";
-    state.chosen.forEach((channel, index) => {
-      const slot = LAYOUTS.SLOTS[index];
-      const cell = document.createElement("div");
-      cell.className = "mv-cell" + (index === 0 ? " is-main" : "");
-      cell.style.gridArea = slot;
-      cell.dataset.channelId = channel.channelId;
-      const frame = document.createElement("iframe");
-      frame.src = frameUrl(channel, index === 0);
-      frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-      frame.title = `${channel.channelName} 방송`;
-      frame.referrerPolicy = "origin";
-      cell.appendChild(frame);
-      frames.appendChild(cell);
-    });
-
-    const { direction, side } = LAYOUTS.stageStyle(layout, state.chatSide);
-    state.chatSide = side;
-    const stage = $("mvStage");
-    stage.style.flexDirection = direction;
-    stage.dataset.chatSide = side;
-
-    const select = $("mvChatChannel");
-    select.innerHTML = state.chosen
-      .map(
-        (c, i) =>
-          `<option value="${esc(c.channelId)}">${esc(c.channelName)}${i === 0 ? " (메인)" : ""}</option>`,
-      )
-      .join("");
-    applyChat(state.chatChannelId);
-
-    $("mvSetup").hidden = true;
-    stage.hidden = false;
-  }
-
-  function applyChat(channelId) {
-    state.chatChannelId = channelId;
-    const url = new URL(`/live/${channelId}`, "https://chzzk.naver.com");
-    url.searchParams.set("cheeseMultiChat", "1");
-    // 채팅 칸도 /live/ 페이지를 통째로 띄우므로 영상·소리가 같이 산다. 소리는 메인
-    // 칸에서 이미 나오니 여기는 반드시 음소거하고, 화질도 가장 낮게 묶는다.
-    url.searchParams.set("cheeseMultiMuted", "1");
-    url.searchParams.set("cheeseMultiQuality", "144");
-    $("mvChatFrame").src = url.toString();
-  }
-
-  function backToSetup() {
-    // ⚠ src 를 비워 프레임을 확실히 내린다. hidden 만으로는 재생·소켓이 계속 돈다.
-    for (const frame of document.querySelectorAll("#mvFrames iframe")) {
-      frame.src = "about:blank";
+    const { side } = LAYOUTS.stageStyle(layout, state.chatSide);
+    const setup = {
+      chosen: state.chosen,
+      layoutId: state.layoutId,
+      chatSide: side,
+      mainHighQuality: state.mainHighQuality,
+    };
+    try {
+      await chrome.storage.session.set({ [HANDOFF_KEY]: setup });
+    } catch (error) {
+      alert("시청 화면으로 넘기지 못했습니다: " + (error?.message || error));
+      return;
     }
-    $("mvChatFrame").src = "about:blank";
-    $("mvFrames").innerHTML = "";
-    $("mvStage").hidden = true;
-    $("mvSetup").hidden = false;
+    const url = chrome.runtime.getURL(WATCH_PAGE);
+    if (chrome.tabs?.create) chrome.tabs.create({ url });
+    else window.open(url, "_blank", "noopener");
   }
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
@@ -346,17 +307,7 @@
       renderLayouts();
       return;
     }
-    if (event.target.closest?.("#mvStart")) start();
-    if (event.target.closest?.("#mvBack")) backToSetup();
-    if (event.target.closest?.("#mvChatToggle")) {
-      const stage = $("mvStage");
-      const folded = stage.classList.toggle("is-chat-folded");
-      $("mvChatToggle").textContent = folded ? "펼치기" : "접기";
-    }
-  });
-
-  $("mvChatChannel")?.addEventListener("change", (event) => {
-    applyChat(event.target.value);
+    if (event.target.closest?.("#mvStart")) void start();
   });
 
   let searchTimer = 0;
