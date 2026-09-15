@@ -467,10 +467,20 @@ const checks = [];
     });
     // 프레임으로 나가는 지시를 기록한다(교차 출처라 실제로는 못 가므로 흉내).
     window.sentMessages=[];
+    // ⚠ 부모가 event.source 와 iframe.contentWindow 를 '같은 객체인지' 로 비교하므로
+    //   접근할 때마다 새 객체를 주면 안 된다. iframe 마다 하나를 만들어 재사용한다.
+    const frameWindows=new WeakMap();
     Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',{
-      get(){const self=this;return {postMessage:(data,origin)=>{
-        window.sentMessages.push({channelId:self.closest('.mv-cell')?.dataset.channelId,data,origin});
-      }};},
+      get(){
+        if(!frameWindows.has(this)){
+          const self=this;
+          frameWindows.set(this,{postMessage:(data,origin)=>{
+            window.sentMessages.push(
+              {channelId:self.closest('.mv-cell')?.dataset.channelId,data,origin});
+          }});
+        }
+        return frameWindows.get(this);
+      },
     });
     window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
     // 빠른 바꾸기의 후보 목록도 중계로 받는다(고르기 화면과 같은 경로).
@@ -670,18 +680,38 @@ const checks = [];
     "프레임 준비 신호를 받으면 로딩 덮개가 걷힌다",
     `const cell=document.querySelector('.mv-cell');
      const id=cell.dataset.channelId;
+     const win=cell.querySelector('iframe').contentWindow;
+     // ⚠ MessageEvent 의 source 는 진짜 window 만 받는다. 스텁 객체를 넣을 수 없어
+     //   이벤트를 만든 뒤 source 를 직접 정의한다.
+     const send=(o,d,src)=>{
+       const e=new MessageEvent('message',{origin:o,data:d});
+       Object.defineProperty(e,'source',{value:src===undefined?win:src});
+       window.dispatchEvent(e);
+     };
+     const READY={source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id};
      check(cell.dataset.status==='loading','처음 상태가 loading 이 아니다');
      check(!cell.querySelector('.mv-cell-status').hidden,'로딩 덮개가 없다');
-     // 치지직 출처에서 온 준비 신호만 받아야 한다.
-     window.dispatchEvent(new MessageEvent('message',{
-       origin:'https://evil.invalid',
-       data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id}}));
+     // 치지직 출처에서 온 것만 받아야 한다.
+     send('https://evil.invalid',READY);
      check(cell.dataset.status==='loading','다른 출처 신호를 받아들였다');
-     window.dispatchEvent(new MessageEvent('message',{
-       origin:'https://chzzk.naver.com',
-       data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id}}));
+     // ⚠ 그 칸의 프레임에서 온 것만 받아야 한다(남의 channelId 사칭 차단).
+     send('https://chzzk.naver.com',READY,window);
+     check(cell.dataset.status==='loading','다른 창이 보낸 신호를 받아들였다');
+     // 모르는 타입도 무시한다.
+     send('https://chzzk.naver.com',
+       {source:'cheese-platter-multiview',type:'EVAL',channelId:id});
+     check(cell.dataset.status==='loading','모르는 타입을 처리했다');
+     // 제대로 된 신호.
+     window.sentMessages.length=0;
+     send('https://chzzk.naver.com',READY);
      check(cell.dataset.status==='ready','준비 신호를 받고도 덮개가 남았다');
-     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
+     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');
+     // ⚠ 준비 신호를 받으면 현재 상태를 다시 내려 줘야 한다(그 전 지시는 유실 가능).
+     const resync=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE'
+       && m.data.channelId===id);
+     check(resync.length===1,'준비 후 상태 재전송이 없다('+resync.length+'회)');
+     const isMain=cell.classList.contains('is-main');
+     check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');`,
   );
 
   await test(
@@ -783,6 +813,32 @@ const checks = [];
   );
 
   await test(
+    "방송 종료 신호를 받으면 칸을 지우지 않고 안내만 띄운다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const target=cells.find(c=>!c.classList.contains('is-main')) || cells[0];
+     const id=target.dataset.channelId;
+     const mainBefore=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'FRAME_ENDED',channelId:id}});
+      Object.defineProperty(e,'source',
+        {value:target.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(100);
+     check(target.isConnected,'종료됐다고 칸을 지웠다');
+     check(target.dataset.status==='ended','상태가 ended 가 아니다');
+     const text=target.querySelector('.mv-cell-status-text').textContent;
+     check(text.includes('종료'),'종료 안내 문구가 아니다: '+text);
+     check(target.querySelector('[data-mv-retry]'),'다시 불러오기 버튼이 없다');
+     check(document.querySelector('.mv-cell.is-main').dataset.channelId===mainBefore,
+       '메인이 자동으로 바뀌었다');
+     check(videoSrcs().length===before,'종료 신호로 프레임이 다시 걸렸다');
+     check(document.querySelectorAll('.mv-cell').length===cells.length,
+       '다른 칸이 영향을 받았다');`,
+  );
+
+  await test(
     "칸을 끌어 자리를 바꿔도 프레임을 다시 걸지 않는다",
     `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const before=videoSrcs().length;
@@ -824,9 +880,14 @@ const checks = [];
     `// 채팅 프레임은 교차 출처라 부모가 직접 만질 수 없다. 지시를 보내야 한다.
      window.sentMessages.length=0;
      // 프레임이 준비됐다고 알려 오면 지금 테마를 보낸다.
-     window.dispatchEvent(new MessageEvent('message',{
-       origin:'https://chzzk.naver.com',
-       data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}}));
+     const chatReady=()=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}});
+       Object.defineProperty(e,'source',
+         {value:document.getElementById('mvChatFrame').contentWindow});
+       window.dispatchEvent(e);
+     };
+     chatReady();
      await wait(100);
      let msgs=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_CHAT_VIEW');
      check(msgs.length>=1,'준비 신호를 받고도 테마를 안 보냈다');
@@ -842,6 +903,31 @@ const checks = [];
      check(msgs[msgs.length-1].data.dark===(was!=='dark'),
        '알린 테마가 화면과 다르다');
      document.documentElement.dataset.theme=was;`,
+  );
+
+  await test(
+    "채팅 준비 전에는 덮개를 보이고 준비되면 걷는다",
+    `const box=document.getElementById('mvChatStatus');
+     const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     // 채널을 바꾸면 '연결 중' 이 뜬다.
+     document.querySelector('[data-mv-pop-toggle="chat"]').click();
+     const other=[...document.querySelectorAll('[data-mv-set-chat]')]
+       .find(o=>!o.classList.contains('is-on'));
+     other.click();
+     await wait(100);
+     check(!box.hidden,'채팅 연결 중 덮개가 없다');
+     check(box.textContent.includes('연결'),'연결 중 문구가 아니다');
+     // 준비 신호가 오면 걷힌다.
+     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}});
+     Object.defineProperty(e,'source',
+       {value:document.getElementById('mvChatFrame').contentWindow});
+     window.dispatchEvent(e);
+     await wait(50);
+     check(box.hidden,'준비됐는데 덮개가 남았다');
+     // 채팅을 다시 걸어도 영상은 그대로다.
+     check(videoSrcs().length===before,'채팅 때문에 영상이 다시 걸렸다');`,
   );
 
   await test(

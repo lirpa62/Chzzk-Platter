@@ -95,6 +95,12 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
+      "js": ["src/multiviewTray.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://chzzk.naver.com/*"],
       "exclude_matches": [
         "https://chzzk.naver.com/embed/clip/*",
         "https://chzzk.naver.com/clip-editor*"

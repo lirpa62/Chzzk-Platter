@@ -110,14 +110,64 @@
     attributeFilter: ["data-theme"],
   });
 
-  function applyChat(channelId) {
-    if (state.chatChannelId === channelId && $("mvChatFrame").src) return;
+  // 채팅 준비 감시.
+  // ⚠ iframe.onload 만으로는 '준비됨' 을 알 수 없다. 치지직 채팅은 SPA 라 껍데기만
+  //   먼저 뜬다. 그래서 프레임이 보내는 CHAT_FRAME_READY 를 기준으로 삼는다.
+  // ⚠ 채널을 빠르게 바꾸면 이전 프레임의 늦은 신호·시간 초과가 지금 상태를 덮을 수
+  //   있다. 세대 번호로 그때 것만 받는다.
+  const CHAT_READY_TIMEOUT_MS = 12000;
+  let chatGeneration = 0;
+  let chatAutoRetried = false;
+  let chatReadyTimer = 0;
+
+  function setChatStatus(status, message) {
+    const box = $("mvChatStatus");
+    if (!box) return;
+    if (status === "ready") {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    if (status === "loading") {
+      box.innerHTML = '<span class="mv-cell-status-text">채팅 연결 중…</span>';
+      return;
+    }
+    box.innerHTML =
+      `<span class="mv-cell-status-text">${esc(message || "채팅을 불러오지 못했습니다.")}</span>` +
+      '<button type="button" class="mv-cell-retry" id="mvChatRetry">다시 연결</button>';
+  }
+
+  function loadChat(channelId, { retry = false } = {}) {
+    const generation = ++chatGeneration;
+    if (!retry) chatAutoRetried = false;
     state.chatChannelId = channelId;
+    setChatStatus("loading");
     // 채팅 전용 페이지를 쓴다(/live/<id>/chat). 영상이 없는 화면이라 소리·화질을
     // 따로 억제할 필요가 없고, 라이브 페이지를 통째로 띄우는 것보다 훨씬 가볍다.
-    const url = new URL(`/live/${channelId}/chat`, "https://chzzk.naver.com");
+    const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN);
     url.searchParams.set("cheeseMultiChat", "1");
+    // 다시 연결할 때 같은 주소면 브라우저가 무시할 수 있어 값을 하나 바꾼다.
+    if (retry) url.searchParams.set("cheeseRetry", String(generation));
     $("mvChatFrame").src = url.toString();
+
+    clearTimeout(chatReadyTimer);
+    chatReadyTimer = setTimeout(() => {
+      if (generation !== chatGeneration) return; // 이미 다른 채널로 넘어갔다
+      if (!chatAutoRetried) {
+        // 자동 재연결은 딱 한 번만 한다(무한 재시도 금지).
+        chatAutoRetried = true;
+        loadChat(channelId, { retry: true });
+        return;
+      }
+      setChatStatus("error");
+    }, CHAT_READY_TIMEOUT_MS);
+    return generation;
+  }
+
+  function applyChat(channelId) {
+    if (state.chatChannelId === channelId && $("mvChatFrame").src) return;
+    loadChat(channelId);
   }
 
   // 칸(iframe)은 채널마다 하나씩 만들어 두고 배치가 바뀌어도 '자리'만 옮긴다.
@@ -145,9 +195,16 @@
         '<span class="mv-cell-status-text">불러오는 중…</span>';
       return;
     }
-    // 실패: 사용자가 직접 눌렀을 때만 다시 불러온다(자동 반복 금지).
+    // ⚠ '종료' 와 '실패' 는 다른 상태다. 종료는 방송이 끝난 것이고, 실패는 플레이어를
+    //   못 불러온 것이라 안내 문구가 달라야 한다. 둘 다 사용자가 직접 눌렀을 때만
+    //   다시 불러온다(자동 반복 금지).
+    const text =
+      message ||
+      (status === "ended"
+        ? "방송이 종료되었습니다."
+        : "플레이어를 불러오지 못했습니다.");
     overlay.innerHTML =
-      `<span class="mv-cell-status-text">${esc(message || "플레이어를 불러오지 못했습니다.")}</span>` +
+      `<span class="mv-cell-status-text">${esc(text)}</span>` +
       `<button type="button" class="mv-cell-retry" data-mv-retry="${esc(channelId)}">다시 불러오기</button>`;
   }
 
@@ -157,7 +214,9 @@
       channelId,
       setTimeout(() => {
         // 아직 준비 신호를 못 받았을 때만 실패로 본다.
-        if (cells.get(channelId)?.dataset.status !== "ready") {
+        // ⚠ 이미 준비됐거나 방송이 끝난 칸은 건드리지 않는다(종료를 실패로 덮지 않는다).
+        const now = cells.get(channelId)?.dataset.status;
+        if (now !== "ready" && now !== "ended") {
           setCellStatus(channelId, "error", "플레이어를 불러오지 못했습니다.");
         }
       }, FRAME_READY_TIMEOUT_MS),
@@ -321,8 +380,19 @@
     if (channelId === state.mainId || !cells.has(channelId)) return;
     const before = state.mainId;
     state.mainId = channelId;
+    // ⚠ chosen[0] 이 곧 메인이라는 약속을 지킨다. 안 맞추면 '채널 다시 고르기' 로
+    //   돌아갔을 때 예전 메인이 다시 첫 번째로 보인다.
+    const main = state.chosen.find((c) => c.channelId === channelId);
+    if (main) {
+      state.chosen = [
+        main,
+        ...state.chosen.filter((c) => c.channelId !== channelId),
+      ];
+    }
     if (before) postState(before, false);
     postState(channelId, true);
+    // 이전 메인에 남아 있던 '소리를 켜려면 클릭' 도 함께 지운다.
+    if (before) clearAudioNotice(before);
     clearAudioNotice(channelId);
     // 메인을 따라가도록 해 뒀으면 채팅도 같이 옮긴다.
     if (state.chatFollowsMain) applyChat(channelId);
@@ -831,6 +901,12 @@
       else closeQuick();
       return;
     }
+    if (target.closest?.("#mvChatRetry")) {
+      // 사용자가 직접 누른 경우에만 다시 연결한다(영상 프레임은 건드리지 않는다).
+      chatAutoRetried = false;
+      loadChat(state.chatChannelId, { retry: true });
+      return;
+    }
     if (target.closest?.("#mvQuickClose")) {
       closeQuick();
       return;
@@ -929,31 +1005,58 @@
     closeQuick();
   });
 
-  // 프레임이 보내는 상태 신호. 치지직 출처에서 온 것만 받는다.
+  // 프레임이 보내는 상태 신호.
+  // 검증 순서: 형태 → 출처 → 이름 → 타입 → 채널 → 그 채널의 프레임에서 왔는지.
+  const FRAME_MESSAGE_TYPES = new Set([
+    "FRAME_READY",
+    "FRAME_ENDED",
+    "AUDIO_INTERACTION_REQUIRED",
+  ]);
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
     if (!data || typeof data !== "object") return;
     if (data.source !== MULTIVIEW_MESSAGE) return;
+    if (!FRAME_MESSAGE_TYPES.has(data.type)) return;
     const channelId = String(data.channelId || "").toLowerCase();
     if (!HASH_RE.test(channelId) || !cells.has(channelId)) return;
+    // ⚠ 정말 그 칸의 프레임이 보낸 것인지 확인한다. 다른 프레임이 남의 channelId 로
+    //   보내는 것을 막는다.
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame || event.source !== frame.contentWindow) return;
+
     if (data.type === "FRAME_READY") {
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       setCellStatus(channelId, "ready");
+      // ⚠ 프레임이 준비되기 전에 보낸 지시는 (리스너가 붙기 전이라) 유실됐을 수 있다.
+      //   주소의 쿼리는 '처음 상태' 일 뿐이고 최종 기준은 지금 부모 상태다.
+      //   그래서 준비 신호를 받는 즉시 현재 상태를 다시 내려 준다.
+      postState(channelId, channelId === state.mainId);
+      return;
+    }
+    if (data.type === "FRAME_ENDED") {
+      // 방송 종료. 칸을 지우거나 다른 채널을 자동으로 메인으로 올리지 않는다.
+      setCellStatus(channelId, "ended");
       return;
     }
     if (data.type === "AUDIO_INTERACTION_REQUIRED") {
-      showAudioNotice(channelId);
+      // 소리를 켜야 하는 건 메인뿐이다. 보조 칸에는 안내를 띄우지 않는다.
+      if (channelId === state.mainId) showAudioNotice(channelId);
     }
   });
 
-  // 채팅 칸이 준비되면 테마를 보낸다(채널을 바꿔 새로 뜰 때마다 온다).
+  // 채팅 칸이 준비되면 덮개를 걷고 테마를 보낸다(채널을 바꿔 새로 뜰 때마다 온다).
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
     if (data?.source !== MULTIVIEW_MESSAGE) return;
     if (data.type !== "CHAT_FRAME_READY") return;
+    // ⚠ 정말 채팅 프레임이 보낸 것인지 확인한다.
+    const frame = $("mvChatFrame");
+    if (!frame || event.source !== frame.contentWindow) return;
+    clearTimeout(chatReadyTimer);
+    setChatStatus("ready");
     postChatView();
   });
 

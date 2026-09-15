@@ -257,6 +257,15 @@
   // 화질 지시로 받을 수 있는 값만 허용한다. "high" 는 상한 없음(사용자 최대화질 설정을
   // 그대로 따른다), 숫자는 그 높이 이하 중 가장 높은 트랙을 고른다.
   const MULTIVIEW_QUALITY_VALUES = new Set(["high", "480"]);
+  // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
+  // 접두사 비교로는 부족하다.
+  const MULTIVIEW_PARENT_ORIGIN = (() => {
+    try {
+      return chrome.runtime.getURL("").replace(/\/$/, "");
+    } catch {
+      return "";
+    }
+  })();
 
   // ⚠ 메인 변경 때 프레임을 다시 로드하지 않으려면 이 값들이 바뀔 수 있어야 한다.
   //   쿼리는 '처음 상태' 일 뿐이고, 이후에는 부모 메시지로 갱신된다.
@@ -18837,11 +18846,16 @@
   // 직접 음소거로 존중한다.
   const AD_UNMUTE_SETTLE_MS = 1500;
   function setAdUnmuteMutedFalse(v) {
+    // 멀티뷰에서는 어떤 경로로도 여기서 소리를 켜지 않는다(부모가 정한다).
+    if (IS_MULTIVIEW_FRAME) return;
     adUnmuteSelfChanging = true;
     v.muted = false;
     adUnmuteSelfChanging = false;
   }
   function onAdMiniplayerVolumeChange(e) {
+    // ⚠ 멀티뷰에서는 소리 주인을 부모가 정한다. 이 기능이 보조 칸을 임의로 켜면
+    //   메인만 소리 나는 규칙이 깨진다(광고 중 aux 가 갑자기 들린다).
+    if (IS_MULTIVIEW_FRAME) return;
     if (!adMiniplayerUnmute) return;
     if (adUnmuteSelfChanging) return; // 우리가 유발한 변경 — 무시
     const v = e.currentTarget;
@@ -18884,6 +18898,7 @@
       adUnmuteObservedVideo = null;
       adUnmuteSuppressed = false; // 새 미니플레이어 세션에서는 다시 자동 해제
     }
+    if (IS_MULTIVIEW_FRAME) return; // 멀티뷰는 부모가 소리를 관리한다
     if (!adMiniplayerUnmute || !(video instanceof HTMLVideoElement)) return;
     if (adUnmuteObservedVideo !== video) {
       video.addEventListener("volumechange", onAdMiniplayerVolumeChange);
@@ -20271,63 +20286,82 @@
   //   부모는 src 를 건드리지 않고 postMessage 로 상태만 바꾼다. 교차 출처라 부모가
   //   프레임 DOM 을 만질 수 없으므로 실제 적용은 여기(프레임 안)에서 한다.
   if (IS_MULTIVIEW_FRAME) {
-    // 음소거 유지: 치지직 플레이어는 초기화 도중 video 를 교체하거나 저장된 볼륨을
-    // 다시 적용해 음소거를 푼다. 그래서 '지금 음소거여야 하는' 동안 반복해서 건다.
-    // 사용자가 직접 소리를 켜면(신뢰된 조작) 그 의사를 우선해 강제를 멈춘다.
+    // 사용자가 이 칸에서 직접 소리를 켰는지. 켰으면 잠시 존중하되, 부모가 메인/보조를
+    // 다시 지정하면 그 지시를 우선한다(부모가 소리 주인을 정한다).
     let muteOverriddenByUser = false;
-    let muteTimer = 0;
 
-    const applyMultiviewMute = () => {
-      if (!multiviewMuted || muteOverriddenByUser) return;
-      for (const video of document.querySelectorAll("video")) {
-        if (!video.muted) video.muted = true;
+    // ⚠ 치지직은 SPA·재연결·화질 전환·광고로 <video> 를 통째로 교체한다. 예전에는
+    //   400ms 폴링으로 20초만 버텼는데, 오래 보면 그 뒤 교체분에는 적용되지 않았다.
+    //   지금은 video 를 붙들고 교체를 감지해 그때마다 현재 상태를 다시 건다.
+    let currentVideo = null;
+
+    const applyAudioToVideo = (video) => {
+      if (!(video instanceof HTMLMediaElement)) return;
+      if (multiviewMuted) {
+        if (!muteOverriddenByUser && !video.muted) video.muted = true;
+        return;
       }
-    };
-    const stopMuteLoop = () => {
-      if (!muteTimer) return;
-      clearInterval(muteTimer);
-      muteTimer = 0;
-    };
-    const startMuteLoop = () => {
-      stopMuteLoop();
-      if (!multiviewMuted || muteOverriddenByUser) return;
-      applyMultiviewMute();
-      muteTimer = setInterval(applyMultiviewMute, 400);
-      // 재생이 안정된 뒤에는 강제를 멈춘다(그 뒤로는 사용자 조작 영역).
-      setTimeout(stopMuteLoop, 20000);
-    };
-    // 소리를 켜라는 지시: muted 를 직접 풀고, 막히면 부모에 알린다.
-    const applyMultiviewUnmute = () => {
-      stopMuteLoop();
-      const videos = document.querySelectorAll("video");
-      for (const video of videos) {
-        video.muted = false;
-        // 자동재생 정책으로 소리 있는 재생이 막히면 play() 가 거부된다.
-        if (video.paused) {
-          const played = video.play();
-          if (played?.catch) {
-            played.catch(() => {
-              // ⚠ 확실히 '사용자 제스처가 필요하다'고 판단되는 경우만 알린다.
-              //   치지직 플레이어 내부 상태를 추측하지 않는다.
-              if (video.muted || video.paused) notifyParent("AUDIO_INTERACTION_REQUIRED");
-            });
+      if (video.muted) video.muted = false;
+      if (video.paused) {
+        const played = video.play();
+        played?.catch?.(() => {
+          // 자동재생 정책으로 소리 있는 재생이 막힌 경우만 알린다.
+          // ⚠ 플레이어 내부 상태를 추측하지 않는다.
+          if (video.muted || video.paused) {
+            notifyParent("AUDIO_INTERACTION_REQUIRED");
           }
-        }
+        });
       }
     };
 
+    // 사용자가 직접 볼륨을 만졌는지 가린다. 우리가 바꾼 건 무시해야 하므로,
+    // '지시한 상태와 어긋나게 바뀐 경우' 만 사용자 조작으로 본다.
+    const onVolumeChange = (event) => {
+      const video = event.currentTarget;
+      if (!(video instanceof HTMLMediaElement)) return;
+      if (multiviewMuted && !video.muted) muteOverriddenByUser = true;
+    };
+
+    const attachMultiviewVideo = (video) => {
+      if (!(video instanceof HTMLMediaElement) || video === currentVideo) return;
+      currentVideo?.removeEventListener("volumechange", onVolumeChange);
+      currentVideo = video;
+      video.addEventListener("volumechange", onVolumeChange);
+      applyAudioToVideo(video);
+    };
+
+    const syncMultiviewVideo = () => {
+      // 붙들고 있던 video 가 문서에서 떨어졌으면 교체된 것이다.
+      if (currentVideo && !currentVideo.isConnected) currentVideo = null;
+      const video = document.querySelector("video");
+      if (video) attachMultiviewVideo(video);
+      else if (currentVideo) applyAudioToVideo(currentVideo);
+    };
+
+    // 플레이어 영역만 감시한다(문서 전체를 고빈도로 보지 않는다).
+    let videoObserver = null;
+    const observeVideoHost = () => {
+      const host =
+        document.getElementById("live_player_layout") ||
+        document.querySelector('[class*="_player_"]') ||
+        document.body;
+      if (!host) return;
+      videoObserver?.disconnect();
+      videoObserver = new MutationObserver(syncMultiviewVideo);
+      videoObserver.observe(host, { childList: true, subtree: true });
+    };
+
+    // 사용자가 소리 관련 조작을 하면 그 의사를 기록한다.
     document.addEventListener(
       "click",
       (event) => {
         if (!event.isTrusted) return;
-        // 음소거/볼륨 관련 조작만 해제 신호로 본다.
         if (
           event.target?.closest?.(
             ".pzp-pc-volume-button, .pzp-volume-button, .pzp-pc-volume",
           )
         ) {
           muteOverriddenByUser = true;
-          stopMuteLoop();
         }
       },
       true,
@@ -20338,7 +20372,6 @@
         if (!event.isTrusted) return;
         if (event.code === "KeyM" || event.code === "ArrowUp") {
           muteOverriddenByUser = true;
-          stopMuteLoop();
         }
       },
       true,
@@ -20349,22 +20382,32 @@
       try {
         window.parent.postMessage(
           { source: MULTIVIEW_MESSAGE, type, channelId: MULTIVIEW_CHANNEL_ID },
-          "*",
+          // ⚠ "*" 로 보내지 않는다. 우리 확장 페이지에만 간다.
+          MULTIVIEW_PARENT_ORIGIN,
         );
       } catch {}
     }
 
+    // 방송 종료 감지. 이미 검증된 종료 화면 판정을 그대로 쓴다(구조 + 문구 이중 확인).
+    // 한 번만 알린다.
+    let endedNotified = false;
+    const checkEnded = () => {
+      if (endedNotified) return;
+      if (typeof isReliveEndScreenVisible !== "function") return;
+      if (!isReliveEndScreenVisible()) return;
+      endedNotified = true;
+      notifyParent("FRAME_ENDED");
+    };
+
     // 부모 지시 수신. 아무 페이지나 보낸 메시지를 실행하지 않도록 형태를 모두 확인한다.
     window.addEventListener("message", (event) => {
-      // 부모 프레임이 보낸 것만 받는다(다른 프레임·자기 자신은 무시).
       if (event.source !== window.parent) return;
-      // 확장 페이지가 보낸 것인지. 확장 출처는 origin 이 chrome-extension:// 이다.
-      if (!String(event.origin || "").startsWith("chrome-extension://")) return;
+      // ⚠ 우리 확장의 정확한 출처만 받는다(다른 확장도 chrome-extension:// 이다).
+      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
       if (data.type !== "SET_MULTIVIEW_STATE") return;
-      // 이 프레임이 맡은 채널 지시인지.
       if (
         typeof data.channelId !== "string" ||
         data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
@@ -20374,27 +20417,36 @@
       if (typeof data.muted !== "boolean") return;
       if (!MULTIVIEW_QUALITY_VALUES.has(String(data.quality))) return;
 
-      const nextMuted = data.muted;
       const nextQuality = String(data.quality) === "high" ? 0 : 480;
       const qualityChanged = nextQuality !== multiviewQuality;
       multiviewQuality = nextQuality;
-
-      if (nextMuted !== multiviewMuted) {
-        multiviewMuted = nextMuted;
-        // 지시가 오면 사용자의 이전 수동 조작보다 이 지시를 우선한다
-        // (메인이 바뀌었다는 뜻이므로 소리 상태를 다시 잡아야 한다).
-        muteOverriddenByUser = false;
-        if (nextMuted) startMuteLoop();
-        else applyMultiviewUnmute();
-      }
+      // 부모 지시는 사용자의 이전 수동 조작보다 우선한다(메인이 바뀌었다는 뜻이다).
+      multiviewMuted = data.muted;
+      muteOverriddenByUser = false;
+      syncMultiviewVideo();
+      if (currentVideo) applyAudioToVideo(currentVideo);
       // 화질 상한은 기능 플래그로 전달된다. 다시 알려 audioMixer 가 재적용하게 한다.
       if (qualityChanged) broadcastFeatureFlags();
     });
 
-    // 초기 음소거 시작.
-    startMuteLoop();
+    // 초기 상태 적용 + 감시 시작.
+    const bootstrapMultiviewFrame = () => {
+      syncMultiviewVideo();
+      observeVideoHost();
+      checkEnded();
+    };
+    bootstrapMultiviewFrame();
+    // 플레이어가 늦게 뜨는 경우를 위한 짧은 보조 확인(무한 폴링이 아니다).
+    let bootstrapTries = 0;
+    const bootstrapTimer = setInterval(() => {
+      bootstrapTries += 1;
+      bootstrapMultiviewFrame();
+      if (currentVideo || bootstrapTries >= 20) clearInterval(bootstrapTimer);
+    }, 500);
+    // 종료 화면은 방송 중에도 나중에 뜰 수 있어 느슨하게 확인한다.
+    setInterval(checkEnded, 5000);
 
-    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 로딩 덮개를 걷는다.
+    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 현재 상태를 다시 준다.
     // ⚠ 치지직 DOM 으로 재생 여부를 단정하지 않는다. 우리 스크립트가 붙어 지시를
     //   받을 수 있게 된 시점만 알린다(그 이상은 추측이 된다).
     if (document.readyState === "complete") notifyParent("FRAME_READY");
@@ -20440,7 +20492,8 @@
 
     window.addEventListener("message", (event) => {
       if (event.source !== window.parent) return;
-      if (!String(event.origin || "").startsWith("chrome-extension://")) return;
+      // ⚠ 우리 확장의 정확한 출처만 받는다.
+      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
@@ -20464,7 +20517,7 @@
       try {
         window.parent.postMessage(
           { source: MULTIVIEW_MESSAGE, type: "CHAT_FRAME_READY" },
-          "*",
+          MULTIVIEW_PARENT_ORIGIN,
         );
       } catch {}
     };

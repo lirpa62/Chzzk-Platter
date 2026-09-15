@@ -713,6 +713,58 @@ body {
   color: var(--popup-brand, #00ffa3);
 }
 
+/* 칸 상태 덮개(불러오는 중 / 실패 / 방송 종료).
+   ⚠ flex 자식으로 끼면 영상 칸을 밀어내 16:9 가 흔들린다. 반드시 영상 위를 덮는
+   overlay 여야 한다. */
+.mv-cell-status {
+  align-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  display: grid;
+  gap: 8px;
+  inset: 0;
+  justify-items: center;
+  padding: 12px;
+  position: absolute;
+  text-align: center;
+  z-index: 3;
+}
+.mv-cell-status-text {
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* 방송 종료는 실패와 구분되게 조금 다르게 보인다(덜 경고처럼). */
+.mv-cell[data-status="ended"] .mv-cell-status {
+  background: rgba(0, 0, 0, 0.8);
+}
+.mv-cell[data-status="ended"] .mv-cell-status-text {
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-cell-retry,
+.mv-cell-unmute {
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.mv-cell-retry:hover,
+.mv-cell-unmute:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+/* 소리 켜기 안내는 덮개가 아니라 영상 아래쪽에 띄운다(화면을 가리지 않는다). */
+.mv-cell-unmute {
+  bottom: 10px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 4;
+}
+
 /* 자리 바꾸기 손잡이. 평소엔 숨고 칸에 마우스를 올리면 나타난다.
    ⚠ iframe 위에서는 드래그 이벤트가 부모로 오지 않아(교차 출처) 이 손잡이가
    필요하다. 영상 위에 얹어야 하므로 z-index 로 띄운다. */
@@ -800,6 +852,33 @@ body {
 .mv-chat-follow[aria-pressed="true"] {
   border-color: var(--popup-brand, #00ffa3);
   color: var(--popup-brand-strong, #00ffa3);
+}
+/* 채팅 프레임과 덮개를 겹쳐 놓는다(덮개가 채팅을 밀어내지 않게). */
+.mv-chat-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.mv-chat-body iframe {
+  border: 0;
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-chat-status {
+  align-content: center;
+  background: var(--popup-bg, #141517);
+  display: grid;
+  gap: 8px;
+  inset: 0;
+  justify-items: center;
+  padding: 12px;
+  position: absolute;
+  text-align: center;
+  z-index: 2;
+}
+.mv-chat-status .mv-cell-status-text {
+  color: var(--popup-muted, #9aa1a9);
 }
 .mv-chat-title {
   flex: 1 1 auto;
@@ -1091,7 +1170,8 @@ body {
 .mv-stage.is-chat-folded .mv-chat-resize {
   display: none;
 }
-.mv-stage.is-chat-folded .mv-chat iframe {
+/* 접으면 채팅 본문(프레임 + 덮개)을 통째로 숨긴다. 머리말만 남는다. */
+.mv-stage.is-chat-folded .mv-chat-body {
   display: none;
 }
 .mv-stage.is-chat-folded .mv-chat {

@@ -6159,6 +6159,103 @@ const MULTIVIEW_API_PATHS = new Set([
 const MULTIVIEW_LIVE_DETAIL_RE =
   /^\/service\/v3\/channels\/[0-9a-f]{32}\/live-detail$/i;
 
+// ── 멀티뷰 담아두기(스테이징) ──────────────────────────────────────────────
+// 여러 치지직 탭에서 같은 목록을 보고 고칠 수 있어야 하므로 배경 스크립트가 정본을
+// 들고 있고, 저장은 chrome.storage.session 에 한다(브라우저를 닫으면 사라진다).
+const MULTIVIEW_STAGED_KEY = "cheeseMultiviewStaged";
+const MULTIVIEW_STAGED_MAX = 6;
+const MULTIVIEW_CHANNEL_RE = /^[0-9a-f]{32}$/i;
+
+// ⚠ 읽고-고치고-쓰는 사이에 다른 탭 쓰기가 끼면 변경이 사라진다. 모든 쓰기를 한 줄로
+//   세워 그 사이를 없앤다.
+let stagedWriteQueue = Promise.resolve();
+function enqueueStagedWrite(task) {
+  const result = stagedWriteQueue.then(task, task);
+  stagedWriteQueue = result.then(
+    () => {},
+    () => {},
+  );
+  return result;
+}
+
+function sanitizeStagedItem(raw) {
+  const channelId = String(raw?.channelId || "").toLowerCase();
+  if (!MULTIVIEW_CHANNEL_RE.test(channelId)) return null;
+  return {
+    channelId,
+    channelName: String(raw?.channelName ?? "").slice(0, 60),
+    channelImageUrl: String(raw?.channelImageUrl ?? "").slice(0, 500),
+  };
+}
+
+async function readStaged() {
+  try {
+    const data = await chrome.storage.session.get(MULTIVIEW_STAGED_KEY);
+    const rows = data?.[MULTIVIEW_STAGED_KEY];
+    if (!Array.isArray(rows)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of rows) {
+      const item = sanitizeStagedItem(raw);
+      if (!item || seen.has(item.channelId)) continue;
+      seen.add(item.channelId);
+      out.push(item);
+      if (out.length >= MULTIVIEW_STAGED_MAX) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function writeStaged(items) {
+  await chrome.storage.session.set({ [MULTIVIEW_STAGED_KEY]: items });
+  return items;
+}
+
+// ⚠ 대상은 항상 channelId 로 고른다. 다른 탭에서 목록이 바뀌면 순번은 어긋난다.
+async function handleStagedMessage(message) {
+  const op = String(message?.op || "");
+  if (op === "GET") return readStaged();
+
+  return enqueueStagedWrite(async () => {
+    const current = await readStaged();
+    if (op === "ADD") {
+      const item = sanitizeStagedItem(message.item);
+      if (!item) throw new Error("invalid-channel");
+      if (current.some((c) => c.channelId === item.channelId)) return current;
+      if (current.length >= MULTIVIEW_STAGED_MAX) {
+        // 목록은 그대로 두고 가득 찼다고 알린다.
+        const error = new Error("full");
+        error.items = current;
+        throw error;
+      }
+      return writeStaged([...current, item]);
+    }
+    if (op === "REMOVE") {
+      const channelId = String(message.channelId || "").toLowerCase();
+      return writeStaged(current.filter((c) => c.channelId !== channelId));
+    }
+    if (op === "CLEAR") return writeStaged([]);
+    if (op === "REORDER") {
+      const order = Array.isArray(message.order) ? message.order : [];
+      const byId = new Map(current.map((c) => [c.channelId, c]));
+      const next = [];
+      for (const raw of order) {
+        const id = String(raw || "").toLowerCase();
+        const item = byId.get(id);
+        if (!item) continue;
+        byId.delete(id);
+        next.push(item);
+      }
+      // ⚠ 순서를 보내는 사이 다른 탭이 새로 담았을 수 있다. 빠뜨리지 말고 뒤에 붙인다.
+      for (const leftover of byId.values()) next.push(leftover);
+      return writeStaged(next);
+    }
+    throw new Error("unknown-op");
+  });
+}
+
 async function fetchMultiviewApi(rawUrl) {
   let url;
   try {
@@ -6184,6 +6281,15 @@ async function fetchMultiviewApi(rawUrl) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (message.type === "MULTIVIEW_STAGED") {
+    handleStagedMessage(message)
+      .then((items) => sendResponse?.({ ok: true, items }))
+      .catch((error) =>
+        sendResponse?.({ ok: false, reason: String(error?.message || error) }),
+      );
+    return true;
   }
 
   if (message.type === "MULTIVIEW_API") {
