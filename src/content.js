@@ -248,10 +248,22 @@
   // 화질 지시는 필요 없고, 최상위 UI 억제만 영상 칸과 똑같이 적용한다.
   const IS_MULTIVIEW_CHAT_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiChat") === "1";
-  const MULTIVIEW_START_MUTED =
+  // 이 프레임이 맡은 채널. 부모가 보내는 지시가 이 프레임 것인지 확인하는 데 쓴다.
+  const MULTIVIEW_CHANNEL_ID = (
+    location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || ""
+  ).toLowerCase();
+  // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
+  const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
+  // 화질 지시로 받을 수 있는 값만 허용한다. "high" 는 상한 없음(사용자 최대화질 설정을
+  // 그대로 따른다), 숫자는 그 높이 이하 중 가장 높은 트랙을 고른다.
+  const MULTIVIEW_QUALITY_VALUES = new Set(["high", "480"]);
+
+  // ⚠ 메인 변경 때 프레임을 다시 로드하지 않으려면 이 값들이 바뀔 수 있어야 한다.
+  //   쿼리는 '처음 상태' 일 뿐이고, 이후에는 부모 메시지로 갱신된다.
+  let multiviewMuted =
     IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
   // 480 이면 그 높이 이하 트랙 중 가장 높은 것을 고른다(작은 칸에 1080p 는 낭비).
-  const MULTIVIEW_QUALITY = IS_MULTIVIEW_FRAME
+  let multiviewQuality = IS_MULTIVIEW_FRAME
     ? Number(MULTIVIEW_PARAMS.get("cheeseMultiQuality")) || 0
     : 0;
 
@@ -20252,18 +20264,58 @@
     schedulePopupPlayerInitialChatFold();
   }
 
-  // 멀티뷰 보조 칸 음소거. 메인만 소리가 나고 나머지는 음소거로 시작한다.
+  // ── 멀티뷰 프레임 제어 ───────────────────────────────────────────────────
+  // 부모(확장 페이지)의 지시를 받아 이 프레임의 음소거·화질을 바꾼다.
   //
-  // ⚠ 한 번만 muted=true 로 두면 안 된다. 치지직 플레이어는 초기화 도중 video 를
-  //   교체하거나 저장된 볼륨을 다시 적용해 음소거가 풀린다. 그래서 재생이 안정될
-  //   때까지 반복해서 건다. 다만 사용자가 직접 음소거를 풀면 그 의사를 우선해야
-  //   하므로, 신뢰된 조작(isTrusted)이 오면 즉시 멈춘다.
-  if (MULTIVIEW_START_MUTED) {
-    let multiviewMuteDone = false;
-    const stopMultiviewMute = () => {
-      multiviewMuteDone = true;
+  // ⚠ 메인 채널을 바꿀 때 프레임을 다시 로드하면 방송이 처음부터 다시 뜬다. 그래서
+  //   부모는 src 를 건드리지 않고 postMessage 로 상태만 바꾼다. 교차 출처라 부모가
+  //   프레임 DOM 을 만질 수 없으므로 실제 적용은 여기(프레임 안)에서 한다.
+  if (IS_MULTIVIEW_FRAME) {
+    // 음소거 유지: 치지직 플레이어는 초기화 도중 video 를 교체하거나 저장된 볼륨을
+    // 다시 적용해 음소거를 푼다. 그래서 '지금 음소거여야 하는' 동안 반복해서 건다.
+    // 사용자가 직접 소리를 켜면(신뢰된 조작) 그 의사를 우선해 강제를 멈춘다.
+    let muteOverriddenByUser = false;
+    let muteTimer = 0;
+
+    const applyMultiviewMute = () => {
+      if (!multiviewMuted || muteOverriddenByUser) return;
+      for (const video of document.querySelectorAll("video")) {
+        if (!video.muted) video.muted = true;
+      }
     };
-    // 사용자가 직접 소리를 켜면(클릭·키보드) 더는 강제하지 않는다.
+    const stopMuteLoop = () => {
+      if (!muteTimer) return;
+      clearInterval(muteTimer);
+      muteTimer = 0;
+    };
+    const startMuteLoop = () => {
+      stopMuteLoop();
+      if (!multiviewMuted || muteOverriddenByUser) return;
+      applyMultiviewMute();
+      muteTimer = setInterval(applyMultiviewMute, 400);
+      // 재생이 안정된 뒤에는 강제를 멈춘다(그 뒤로는 사용자 조작 영역).
+      setTimeout(stopMuteLoop, 20000);
+    };
+    // 소리를 켜라는 지시: muted 를 직접 풀고, 막히면 부모에 알린다.
+    const applyMultiviewUnmute = () => {
+      stopMuteLoop();
+      const videos = document.querySelectorAll("video");
+      for (const video of videos) {
+        video.muted = false;
+        // 자동재생 정책으로 소리 있는 재생이 막히면 play() 가 거부된다.
+        if (video.paused) {
+          const played = video.play();
+          if (played?.catch) {
+            played.catch(() => {
+              // ⚠ 확실히 '사용자 제스처가 필요하다'고 판단되는 경우만 알린다.
+              //   치지직 플레이어 내부 상태를 추측하지 않는다.
+              if (video.muted || video.paused) notifyParent("AUDIO_INTERACTION_REQUIRED");
+            });
+          }
+        }
+      }
+    };
+
     document.addEventListener(
       "click",
       (event) => {
@@ -20274,7 +20326,8 @@
             ".pzp-pc-volume-button, .pzp-volume-button, .pzp-pc-volume",
           )
         ) {
-          stopMultiviewMute();
+          muteOverriddenByUser = true;
+          stopMuteLoop();
         }
       },
       true,
@@ -20284,30 +20337,68 @@
       (event) => {
         if (!event.isTrusted) return;
         if (event.code === "KeyM" || event.code === "ArrowUp") {
-          stopMultiviewMute();
+          muteOverriddenByUser = true;
+          stopMuteLoop();
         }
       },
       true,
     );
-    const applyMultiviewMute = () => {
-      if (multiviewMuteDone) return;
-      for (const video of document.querySelectorAll("video")) {
-        if (!video.muted) video.muted = true;
-      }
-    };
-    applyMultiviewMute();
-    const muteTimer = setInterval(() => {
-      if (multiviewMuteDone) {
-        clearInterval(muteTimer);
+
+    function notifyParent(type) {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage(
+          { source: MULTIVIEW_MESSAGE, type, channelId: MULTIVIEW_CHANNEL_ID },
+          "*",
+        );
+      } catch {}
+    }
+
+    // 부모 지시 수신. 아무 페이지나 보낸 메시지를 실행하지 않도록 형태를 모두 확인한다.
+    window.addEventListener("message", (event) => {
+      // 부모 프레임이 보낸 것만 받는다(다른 프레임·자기 자신은 무시).
+      if (event.source !== window.parent) return;
+      // 확장 페이지가 보낸 것인지. 확장 출처는 origin 이 chrome-extension:// 이다.
+      if (!String(event.origin || "").startsWith("chrome-extension://")) return;
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== MULTIVIEW_MESSAGE) return;
+      if (data.type !== "SET_MULTIVIEW_STATE") return;
+      // 이 프레임이 맡은 채널 지시인지.
+      if (
+        typeof data.channelId !== "string" ||
+        data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
+      ) {
         return;
       }
-      applyMultiviewMute();
-    }, 400);
-    // 재생이 충분히 안정된 뒤에는 강제를 멈춘다(그 뒤로는 사용자 조작 영역).
-    setTimeout(() => {
-      stopMultiviewMute();
-      clearInterval(muteTimer);
-    }, 20000);
+      if (typeof data.muted !== "boolean") return;
+      if (!MULTIVIEW_QUALITY_VALUES.has(String(data.quality))) return;
+
+      const nextMuted = data.muted;
+      const nextQuality = String(data.quality) === "high" ? 0 : 480;
+      const qualityChanged = nextQuality !== multiviewQuality;
+      multiviewQuality = nextQuality;
+
+      if (nextMuted !== multiviewMuted) {
+        multiviewMuted = nextMuted;
+        // 지시가 오면 사용자의 이전 수동 조작보다 이 지시를 우선한다
+        // (메인이 바뀌었다는 뜻이므로 소리 상태를 다시 잡아야 한다).
+        muteOverriddenByUser = false;
+        if (nextMuted) startMuteLoop();
+        else applyMultiviewUnmute();
+      }
+      // 화질 상한은 기능 플래그로 전달된다. 다시 알려 audioMixer 가 재적용하게 한다.
+      if (qualityChanged) broadcastFeatureFlags();
+    });
+
+    // 초기 음소거 시작.
+    startMuteLoop();
+
+    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 로딩 덮개를 걷는다.
+    // ⚠ 치지직 DOM 으로 재생 여부를 단정하지 않는다. 우리 스크립트가 붙어 지시를
+    //   받을 수 있게 된 시점만 알린다(그 이상은 추측이 된다).
+    if (document.readyState === "complete") notifyParent("FRAME_READY");
+    else window.addEventListener("load", () => notifyParent("FRAME_READY"));
   }
 
   if (POPUP_PLAYER_START_WITHOUT_CHAT_FRAME) {
@@ -50988,14 +51079,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
         // 멀티뷰 프레임은 전역 최대화질 고정을 끈다(작은 칸 여러 개를 동시에 최고
         // 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다). 대신 아래 상한을 쓴다.
+        // 멀티뷰: 상한이 걸린 칸(보조)은 전역 최대화질 고정을 끈다. 작은 칸 여러 개를
+        // 동시에 최고 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다.
+        // ⚠ 상한이 풀린 칸(메인)은 전역 설정을 그대로 따라야 한다. 여기서 false 로
+        //   묶어 두면 보조→메인으로 올린 칸이 480p 에 머문다(상한만 풀려서는 화질을
+        //   다시 올릴 트리거가 없다).
         maxQualityAuto: IS_MULTIVIEW_FRAME
-          ? false
+          ? multiviewQuality === 0 && maxQualityAuto
           : IS_POPUP_PLAYER_FRAME
             ? popupPlayerMaxQuality
             : maxQualityAuto,
         // 화질 상한(px). 멀티뷰에서만 쓰며 0 이면 상한 없음. 메인을 고화질로 시작하는
         // 경우엔 부모가 이 쿼리를 붙이지 않으므로 0 이 되어 상한이 걸리지 않는다.
-        maxQualityCap: MULTIVIEW_QUALITY,
+        maxQualityCap: multiviewQuality,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
         videoFilterDefaultOn, // 비디오 필터 기본 켜짐(전역)

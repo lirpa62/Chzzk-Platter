@@ -330,7 +330,15 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
+    const maxQualityCapPrev = maxQualityCap;
     maxQualityCap = Number(e.data.maxQualityCap) || 0;
+    // 상한이 바뀌면(멀티뷰 메인 전환) 이전 상한으로 고정해 둔 기록을 지운다.
+    // ⚠ 안 지우면 '수동 변경 존중' 이 우리가 건 480p 를 사용자 선택으로 오해해
+    //   이후 화질 조정을 막는다.
+    if (maxQualityCap !== maxQualityCapPrev) {
+      maxQualitySetHeight = 0;
+      maxQualityRespectedPage = null;
+    }
     if (
       (maxQualityAuto || maxQualityCap > 0) &&
       typeof applyMaxQuality === "function"

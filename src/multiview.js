@@ -12,12 +12,15 @@
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
   const MAX_CHANNELS = 6; // 메인 1 + 보조 5
   const WATCH_PAGE = "multiviewWatch.html";
-  // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키.
-  const HANDOFF_KEY = "cheeseMultiviewSetup";
+  // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
+  // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
+  //   서로 구성을 덮어쓴다.
+  const HANDOFF_PREFIX = "cheeseMultiviewSetup";
   const HASH_RE = /^[0-9a-f]{32}$/i;
 
   const $ = (id) => document.getElementById(id);
   const state = {
+    handoffId: "",
     source: "following",
     chosen: [], // [{channelId, channelName, channelImageUrl, liveTitle, viewers}]
     layoutId: "",
@@ -39,6 +42,27 @@
         })[c],
     );
   const fmt = (n) => Number(n || 0).toLocaleString("ko-KR");
+
+  function newHandoffId() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    // randomUUID 가 없을 때의 대비(충돌만 피하면 된다).
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  // 이미지 주소는 API 가 준 문자열이다. esc() 는 따옴표 탈출만 막고 스킴은 못 막으므로
+  // http(s) 가 아니면 아예 쓰지 않는다(javascript:, data: 등이 src 로 들어가는 것 차단).
+  function safeImageUrl(url) {
+    const raw = String(url || "").trim();
+    if (!raw) return "";
+    try {
+      const parsed = new URL(raw, location.href);
+      return parsed.protocol === "https:" || parsed.protocol === "http:"
+        ? parsed.toString()
+        : "";
+    } catch {
+      return "";
+    }
+  }
 
   // 프로필 원본은 수백 KB 다. 목록에 수십 개를 그리므로 리사이즈본을 쓴다.
   const thumb = (url) => {
@@ -198,10 +222,15 @@
     return sections;
   }
 
+  // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
+  // 검색은 입력마다 달라지므로 캐시하지 않는다.
+  const LIST_TTL_MS = 20000;
+
   // 모든 목록을 '구역 배열' 로 통일한다. 전용 팔로잉만 여러 구역이고 나머지는 하나다.
   async function listFor(source, keyword = "") {
     const key = source === "search" ? `search:${keyword}` : source;
-    if (state.listCache.has(key)) return state.listCache.get(key);
+    const cached = state.listCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
     let sections;
     if (source === "custom") {
       sections = await loadCustomSections();
@@ -214,26 +243,42 @@
             : await search(keyword);
       sections = rows.length ? [{ id: source, label: "", rows }] : [];
     }
-    state.listCache.set(key, sections);
+    if (source !== "search") {
+      state.listCache.set(key, {
+        value: sections,
+        expiresAt: Date.now() + LIST_TTL_MS,
+      });
+    }
     return sections;
   }
 
+  // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다("에"→"에리"→"에리스" 를 빠르게
+  //   치면 먼저 보낸 "에" 응답이 나중에 도착해 최신 결과를 덮을 수 있다).
+  //   요청마다 번호를 매겨 마지막 요청의 응답만 그린다.
+  let listRequestId = 0;
+
   async function renderList() {
+    const requestId = ++listRequestId;
+    // 요청 시점의 값을 붙잡는다(기다리는 동안 사용자가 탭·검색어를 바꿀 수 있다).
+    const source = state.source;
+    const keyword = $("mvSearch").value;
     const box = $("mvChannelList");
     box.setAttribute("aria-busy", "true");
     box.innerHTML = '<p class="mv-empty">불러오는 중…</p>';
     let sections = [];
     try {
-      sections = await listFor(state.source, $("mvSearch").value);
+      sections = await listFor(source, keyword);
     } catch (error) {
+      if (requestId !== listRequestId) return;
       box.removeAttribute("aria-busy");
       box.innerHTML = `<p class="mv-empty">목록을 불러오지 못했습니다. (${esc(error.message)})</p>`;
       return;
     }
+    if (requestId !== listRequestId) return; // 더 최신 요청이 있다 → 버린다
     box.removeAttribute("aria-busy");
     if (!sections.length) {
       box.innerHTML =
-        state.source === "search"
+        source === "search"
           ? '<p class="mv-empty">검색어를 입력하세요.</p>'
           : '<p class="mv-empty">지금 방송 중인 채널이 없습니다.</p>';
       box.__rows = [];
@@ -267,13 +312,15 @@
       `data-mv-pick="${esc(r.channelId)}"${full ? " disabled" : ""}>` +
       `<span class="mv-card-thumb">` +
       (thumbUrl
-        ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy">`
+        ? `<img src="${esc(safeImageUrl(thumbUrl))}" alt="" loading="lazy">`
         : `<span class="mv-card-thumb-empty"></span>`) +
       `<span class="mv-card-viewers">${fmt(r.viewers)}명</span>` +
+      // 성인 방송 표시. 치지직의 기존 인증 흐름을 그대로 쓰고 여기서는 알리기만 한다.
+      (r.adult ? `<span class="mv-card-adult">19+</span>` : "") +
       (on ? `<span class="mv-card-picked">선택됨</span>` : "") +
       `</span>` +
       `<span class="mv-card-body">` +
-      `<img class="mv-card-avatar" src="${esc(thumb(r.channelImageUrl))}" alt="" loading="lazy">` +
+      `<img class="mv-card-avatar" src="${esc(safeImageUrl(thumb(r.channelImageUrl)))}" alt="" loading="lazy">` +
       `<span class="mv-card-text">` +
       `<span class="mv-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-card-name">${esc(r.channelName)}</span>` +
@@ -293,7 +340,7 @@
         (c, i) =>
           `<li class="mv-chosen-item" draggable="true" data-mv-chosen="${esc(c.channelId)}">` +
           `<span class="mv-chosen-rank">${i === 0 ? "메인" : i}</span>` +
-          `<img src="${esc(thumb(c.channelImageUrl))}" alt="" loading="lazy">` +
+          `<img src="${esc(safeImageUrl(thumb(c.channelImageUrl)))}" alt="" loading="lazy">` +
           `<span class="mv-chosen-name">${esc(c.channelName)}</span>` +
           `<button type="button" class="mv-chosen-remove" data-mv-remove="${esc(c.channelId)}" ` +
           `aria-label="${esc(c.channelName)} 빼기">×</button></li>`,
@@ -314,12 +361,20 @@
     }
     if (!list.some((l) => l.id === state.layoutId)) state.layoutId = list[0].id;
     box.innerHTML = list
-      .map(
-        (l) =>
+      .map((l) => {
+        // ⚠ 미리보기도 시청 화면과 같은 트랙 계산을 써야 한다. l.columns 를 그대로
+        //   쓰면 '오른쪽 1' 이 3:1 로 보이지만 실제로는 모든 칸을 16:9 로 맞추느라
+        //   1:1 이 되어, 고르기 전후의 모양이 달라진다.
+        const tracks = LAYOUTS.solveTracks(l);
+        const columns = tracks ? tracks.columns : l.columns;
+        const rows = tracks ? tracks.rows : l.rows;
+        return (
           `<button type="button" class="mv-layout${l.id === state.layoutId ? " is-on" : ""}" ` +
           `data-mv-layout="${esc(l.id)}" role="radio" ` +
           `aria-checked="${l.id === state.layoutId}">` +
-          `<span class="mv-layout-preview" style="grid-template-columns:${esc(l.columns)};` +
+          `<span class="mv-layout-preview" style="grid-template-columns:${esc(columns)};` +
+          `grid-template-rows:${esc(rows)};` +
+          `aspect-ratio:${tracks ? esc(String(tracks.ratio)) : "16/9"};` +
           `grid-template-areas:${esc(l.areas.join(" "))}">` +
           LAYOUTS.SLOTS.slice(0, l.aux + 1)
             .map(
@@ -327,8 +382,9 @@
                 `<i style="grid-area:${s}"${s === "m" ? ' class="is-main"' : ""}></i>`,
             )
             .join("") +
-          `</span><span class="mv-layout-label">${esc(l.label)}</span></button>`,
-      )
+          `</span><span class="mv-layout-label">${esc(l.label)}</span></button>`
+        );
+      })
       .join("");
   }
 
@@ -356,15 +412,21 @@
       chatSide: side,
       mainHighQuality: state.mainHighQuality,
     };
+    // 기존 멀티뷰를 고치는 중이면 그 id 를 이어 쓰고, 새로 시작하면 새 id 를 만든다.
+    const handoffId = state.handoffId || newHandoffId();
     try {
-      await chrome.storage.session.set({ [HANDOFF_KEY]: setup });
+      await chrome.storage.session.set({
+        [`${HANDOFF_PREFIX}:${handoffId}`]: setup,
+      });
     } catch (error) {
       alert("시청 화면으로 넘기지 못했습니다: " + (error?.message || error));
       return;
     }
-    const url = chrome.runtime.getURL(WATCH_PAGE);
-    if (chrome.tabs?.create) chrome.tabs.create({ url });
-    else window.open(url, "_blank", "noopener");
+    const url = new URL(chrome.runtime.getURL(WATCH_PAGE));
+    url.searchParams.set("setup", handoffId);
+    const href = url.toString();
+    if (chrome.tabs?.create) chrome.tabs.create({ url: href });
+    else window.open(href, "_blank", "noopener");
   }
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
@@ -432,18 +494,45 @@
     const to = state.chosen.findIndex(
       (c) => c.channelId === target.dataset.mvChosen,
     );
+    dragId = "";
     if (from < 0 || to < 0 || from === to) return;
     const [moved] = state.chosen.splice(from, 1);
     state.chosen.splice(to, 0, moved);
-    dragId = "";
     renderChosen();
     void renderList();
   });
+  // ⚠ 엉뚱한 곳에 놓거나 취소해도 여기로는 반드시 온다. 여기서 비우지 않으면
+  //   다음 클릭이 이전 드래그 상태로 처리될 수 있다.
+  document.addEventListener("dragend", () => {
+    dragId = "";
+  });
 
   // 시작
-  document
-    .querySelector('[data-mv-source="following"]')
-    ?.setAttribute("aria-selected", "true");
-  renderChosen();
-  void renderList();
+  (async () => {
+    // '채널 다시 고르기' 로 돌아온 경우: 주소의 setup id 로 이전 구성을 복원한다.
+    const handoffId = new URLSearchParams(location.search).get("setup") || "";
+    if (/^[A-Za-z0-9-]{1,64}$/.test(handoffId)) {
+      state.handoffId = handoffId;
+      try {
+        const key = `${HANDOFF_PREFIX}:${handoffId}`;
+        const stored = (await chrome.storage.session.get(key))?.[key];
+        const chosen = (Array.isArray(stored?.chosen) ? stored.chosen : [])
+          .filter((c) => c && HASH_RE.test(String(c.channelId || "")))
+          .slice(0, MAX_CHANNELS);
+        if (chosen.length) {
+          state.chosen = chosen;
+          if (stored.layoutId) state.layoutId = String(stored.layoutId);
+          if (stored.chatSide) state.chatSide = String(stored.chatSide);
+          state.mainHighQuality = stored.mainHighQuality !== false;
+          const box = $("mvMainHighQuality");
+          if (box) box.checked = state.mainHighQuality;
+        }
+      } catch {}
+    }
+    document
+      .querySelector('[data-mv-source="following"]')
+      ?.setAttribute("aria-selected", "true");
+    renderChosen();
+    await renderList();
+  })();
 })();

@@ -10,8 +10,18 @@
 
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
   const SETUP_PAGE = "multiview.html";
-  // 고른 구성을 주소에 담기엔 길다. 세션 저장소로 넘기고 이 키로 읽는다.
-  const HANDOFF_KEY = "cheeseMultiviewSetup";
+  // 고른 구성을 주소에 담기엔 길다. 세션 저장소로 넘기고 이 id 로 읽는다.
+  // ⚠ 고정 키를 쓰면 멀티뷰 탭을 두 개 열었을 때 서로 구성을 덮어쓴다. 탭마다
+  //   다른 id 를 주소로 받아 그 키만 읽는다.
+  const HANDOFF_PREFIX = "cheeseMultiviewSetup";
+  const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
+  const CHZZK_ORIGIN = "https://chzzk.naver.com";
+  const HASH_RE = /^[0-9a-f]{32}$/i;
+  // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
+  const FRAME_READY_TIMEOUT_MS = 20000;
+  // 4개 이상일 때만 아주 짧게 시차를 준다. 동시에 6개를 붙이면 초기 요청이 몰린다.
+  const FRAME_STAGGER_MS = 100;
+  const FRAME_STAGGER_MIN_COUNT = 4;
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
@@ -28,6 +38,7 @@
     );
 
   const state = {
+    handoffId: "",
     chosen: [],
     layoutId: "",
     mainId: "",
@@ -36,22 +47,42 @@
     mainHighQuality: true,
   };
 
-  // 프레임에 줄 URL. 팝업 플레이어와 같은 방식으로 쿼리에 지시를 담는다.
+  // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
+  // 보낸다(주소를 다시 넣으면 방송이 처음부터 로드된다).
   function frameUrl(channel, isMain, mainHighQuality) {
-    const url = new URL(
-      `/live/${channel.channelId}`,
-      "https://chzzk.naver.com",
-    );
+    const url = new URL(`/live/${channel.channelId}`, CHZZK_ORIGIN);
     url.searchParams.set("cheeseMulti", "1");
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 메인만 소리, 나머지는 음소거로 시작한다.
     url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
-    // 화질: 기본 480p. 메인만 높은 화질을 쓰도록 골랐으면 메인은 지정하지 않는다
-    // (프레임 쪽이 최대 화질 설정을 따른다).
+    // 화질: 보조는 480p 상한. 메인을 높은 화질로 고른 경우엔 상한을 걸지 않는다
+    // (프레임 쪽이 사용자의 최대 화질 설정을 따른다).
+    //
+    // ⚠ 360p 는 넣지 않는다. 치지직 화질 목록에 실제로 있는지 이 코드만으로
+    //   확인할 수 없어, 없는 값을 상한으로 주면 '이하 중 최고' 규칙이 가장 낮은
+    //   트랙으로 떨어뜨린다. 480p 가 확인된 값이라 채널 수와 무관하게 이것만 쓴다.
     if (!(isMain && mainHighQuality)) {
       url.searchParams.set("cheeseMultiQuality", "480");
     }
     return url.toString();
+  }
+
+  // 프레임에 상태를 지시한다. src 를 건드리지 않으므로 방송이 다시 로드되지 않는다.
+  function postState(channelId, isMain) {
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          source: MULTIVIEW_MESSAGE,
+          type: "SET_MULTIVIEW_STATE",
+          channelId,
+          muted: !isMain,
+          quality: isMain && state.mainHighQuality ? "high" : "480",
+        },
+        CHZZK_ORIGIN,
+      );
+    } catch {}
   }
 
   function applyChat(channelId) {
@@ -69,27 +100,103 @@
   //   변경은 화면을 재배치할 뿐이므로 기존 프레임을 그대로 살려 둔다.
   const cells = new Map(); // channelId -> .mv-cell 요소
 
+  // 프레임 상태 관리. 준비 신호가 제때 안 오면 '다시 불러오기' 를 띄운다.
+  const frameTimers = new Map(); // channelId -> timeout id
+
+  function setCellStatus(channelId, status, message) {
+    const cell = cells.get(channelId);
+    if (!cell) return;
+    const overlay = cell.querySelector(".mv-cell-status");
+    if (!overlay) return;
+    cell.dataset.status = status;
+    if (status === "ready") {
+      overlay.hidden = true;
+      overlay.innerHTML = "";
+      return;
+    }
+    overlay.hidden = false;
+    if (status === "loading") {
+      overlay.innerHTML =
+        '<span class="mv-cell-status-text">불러오는 중…</span>';
+      return;
+    }
+    // 실패: 사용자가 직접 눌렀을 때만 다시 불러온다(자동 반복 금지).
+    overlay.innerHTML =
+      `<span class="mv-cell-status-text">${esc(message || "플레이어를 불러오지 못했습니다.")}</span>` +
+      `<button type="button" class="mv-cell-retry" data-mv-retry="${esc(channelId)}">다시 불러오기</button>`;
+  }
+
+  function armReadyTimeout(channelId) {
+    clearTimeout(frameTimers.get(channelId));
+    frameTimers.set(
+      channelId,
+      setTimeout(() => {
+        // 아직 준비 신호를 못 받았을 때만 실패로 본다.
+        if (cells.get(channelId)?.dataset.status !== "ready") {
+          setCellStatus(channelId, "error", "플레이어를 불러오지 못했습니다.");
+        }
+      }, FRAME_READY_TIMEOUT_MS),
+    );
+  }
+
+  // 소리 켜기가 막혔을 때의 안내(자동재생 정책). 사용자가 누르면 다시 지시한다.
+  function showAudioNotice(channelId) {
+    const cell = cells.get(channelId);
+    if (!cell || channelId !== state.mainId) return;
+    if (cell.querySelector("[data-mv-unmute]")) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mv-cell-unmute";
+    button.dataset.mvUnmute = channelId;
+    button.textContent = "소리를 켜려면 클릭";
+    cell.appendChild(button);
+  }
+
+  function clearAudioNotice(channelId) {
+    cells.get(channelId)?.querySelector("[data-mv-unmute]")?.remove();
+  }
+
+  // 사용자가 명시적으로 눌렀을 때만 해당 프레임을 다시 불러온다.
+  function reloadFrame(channelId) {
+    const channel = state.chosen.find((c) => c.channelId === channelId);
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!channel || !frame) return;
+    setCellStatus(channelId, "loading");
+    frame.src = frameUrl(
+      channel,
+      channelId === state.mainId,
+      state.mainHighQuality,
+    );
+    armReadyTimeout(channelId);
+  }
+
   function ensureCells() {
     const frames = $("mvFrames");
-    for (const channel of state.chosen) {
-      if (cells.has(channel.channelId)) continue;
+    const ordered = orderedChannels();
+    // 4개 이상이면 아주 짧은 시차를 준다. 6개를 한 번에 붙이면 초기 요청이 몰려
+    // CPU·네트워크가 튄다. 2~3개는 체감될 만큼 느려지지 않도록 시차를 두지 않는다.
+    const stagger =
+      ordered.length >= FRAME_STAGGER_MIN_COUNT ? FRAME_STAGGER_MS : 0;
+    ordered.forEach((channel, index) => {
+      if (cells.has(channel.channelId)) return;
+      const isMain = channel.channelId === state.mainId;
       const cell = document.createElement("div");
       cell.className = "mv-cell";
       cell.dataset.channelId = channel.channelId;
+      cell.dataset.status = "loading";
       // 칸이 이미 16:9 면(정확 배치) 상자는 칸을 그대로 꽉 채운다. 아닌 배치에서는
       // 상자가 16:9 를 지키고 남는 자리가 여백으로 남는다.
       const box = document.createElement("div");
       box.className = "mv-cell-inner";
       const frame = document.createElement("iframe");
-      frame.src = frameUrl(
-        channel,
-        channel.channelId === state.mainId,
-        state.mainHighQuality,
-      );
       frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
       frame.title = `${channel.channelName} 방송`;
       frame.referrerPolicy = "origin";
       box.appendChild(frame);
+
+      const overlay = document.createElement("div");
+      overlay.className = "mv-cell-status";
+
       // 칸 안에서 바로 메인으로 올리는 버튼.
       const promote = document.createElement("button");
       promote.type = "button";
@@ -104,10 +211,18 @@
         '<path d="M3 9h18"></path><path d="M9 21V9"></path></svg>' +
         "<span>메인으로</span>";
       cell.appendChild(box);
+      cell.appendChild(overlay);
       cell.appendChild(promote);
       cells.set(channel.channelId, cell);
       frames.appendChild(cell);
-    }
+      setCellStatus(channel.channelId, "loading");
+
+      const src = frameUrl(channel, isMain, state.mainHighQuality);
+      const delay = stagger * index;
+      if (delay) setTimeout(() => (frame.src = src), delay);
+      else frame.src = src;
+      armReadyTimeout(channel.channelId);
+    });
   }
 
   // 메인이 맨 앞에 오도록 정렬한 순서. 슬롯은 이 순서대로 붙인다.
@@ -146,18 +261,16 @@
     renderTopbar();
   }
 
-  // 메인 변경: 소리와 화질 지시가 달라지므로 해당 두 프레임만 다시 건다.
-  // ⚠ 나머지 프레임은 손대지 않는다(건드리면 방송이 다시 로드된다).
+  // 메인 변경: 소리·화질 지시만 바꾼다.
+  // ⚠ iframe src 를 절대 다시 넣지 않는다. 넣으면 치지직 페이지가 통째로 다시 로드돼
+  //   방송이 처음부터 시작된다. 상태만 postMessage 로 보내고 프레임은 그대로 둔다.
   function setMain(channelId) {
-    if (channelId === state.mainId) return;
+    if (channelId === state.mainId || !cells.has(channelId)) return;
     const before = state.mainId;
     state.mainId = channelId;
-    for (const id of [before, channelId]) {
-      const channel = state.chosen.find((c) => c.channelId === id);
-      const frame = cells.get(id)?.querySelector("iframe");
-      if (!channel || !frame) continue;
-      frame.src = frameUrl(channel, id === channelId, state.mainHighQuality);
-    }
+    if (before) postState(before, false);
+    postState(channelId, true);
+    clearAudioNotice(channelId);
     applyLayout();
   }
 
@@ -264,19 +377,19 @@
     button.setAttribute("aria-expanded", String(open));
   }
 
+  function showEmpty() {
+    $("mvStage").hidden = true;
+    $("mvTopbar").hidden = true;
+    $("mvWatchEmpty").hidden = false;
+  }
+
   function render(setup) {
-    const layout = LAYOUTS.layoutById(setup.layoutId);
-    if (!layout || !Array.isArray(setup.chosen) || setup.chosen.length < 2) {
-      $("mvStage").hidden = true;
-      $("mvWatchEmpty").hidden = false;
-      return;
-    }
     state.chosen = setup.chosen;
     state.layoutId = setup.layoutId;
     state.mainId = setup.chosen[0].channelId;
     state.chatChannelId = setup.chosen[0].channelId;
-    state.chatSide = setup.chatSide || "";
-    state.mainHighQuality = setup.mainHighQuality !== false;
+    state.chatSide = setup.chatSide;
+    state.mainHighQuality = setup.mainHighQuality;
 
     ensureCells();
     applyLayout();
@@ -284,18 +397,82 @@
     $("mvTopbar").hidden = false;
   }
 
-  function backToSetup() {
+  // 세션에서 읽은 구성을 그대로 믿지 않는다. 형태가 어긋나면 고칠 수 있는 건 고치고,
+  // 못 고치면 null 을 돌려 빈 화면 안내를 띄운다.
+  function validateSetup(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const seen = new Set();
+    const chosen = (Array.isArray(raw.chosen) ? raw.chosen : [])
+      .filter((c) => c && typeof c === "object")
+      .map((c) => ({
+        channelId: String(c.channelId || "").toLowerCase(),
+        channelName: String(c.channelName ?? ""),
+        channelImageUrl: String(c.channelImageUrl ?? ""),
+      }))
+      .filter((c) => {
+        if (!HASH_RE.test(c.channelId) || seen.has(c.channelId)) return false;
+        seen.add(c.channelId);
+        return true;
+      })
+      .slice(0, 6);
+    if (chosen.length < 2) return null;
+
+    // 배치는 '지금 채널 수에 허용되는 것' 중에서만 고른다. 어긋나면 첫 배치로.
+    const allowed = LAYOUTS.layoutsFor(chosen.length);
+    if (!allowed.length) return null;
+    const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
+    // 채팅 자리도 그 배치가 허용하는 값만.
+    const chatSide = layout.chat?.includes(raw.chatSide)
+      ? raw.chatSide
+      : layout.chat?.[0] || "right";
+    return {
+      chosen,
+      layoutId: layout.id,
+      chatSide,
+      mainHighQuality: raw.mainHighQuality !== false,
+    };
+  }
+
+  async function backToSetup() {
+    // 지금 구성을 그대로 되돌려 준다. 고르기 화면이 이 id 를 읽어 선택을 복원한다.
+    if (state.handoffId) {
+      try {
+        await chrome.storage.session.set({
+          [`${HANDOFF_PREFIX}:${state.handoffId}`]: {
+            chosen: state.chosen,
+            layoutId: state.layoutId,
+            chatSide: state.chatSide,
+            mainHighQuality: state.mainHighQuality,
+          },
+        });
+      } catch {}
+    }
     // ⚠ src 를 비워 프레임을 확실히 내린다. 그냥 이동하면 재생·소켓이 잠깐 더 산다.
     for (const frame of document.querySelectorAll("iframe")) {
       frame.src = "about:blank";
     }
-    location.href = chrome.runtime.getURL(SETUP_PAGE);
+    const url = new URL(chrome.runtime.getURL(SETUP_PAGE));
+    if (state.handoffId) url.searchParams.set("setup", state.handoffId);
+    location.href = url.toString();
   }
 
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (target.closest?.("#mvBack")) {
-      backToSetup();
+      void backToSetup();
+      return;
+    }
+    const retry = target.closest?.("[data-mv-retry]");
+    if (retry) {
+      // 사용자가 직접 누른 경우에만 다시 불러온다(자동 반복 없음).
+      reloadFrame(retry.dataset.mvRetry);
+      return;
+    }
+    const unmute = target.closest?.("[data-mv-unmute]");
+    if (unmute) {
+      const id = unmute.dataset.mvUnmute;
+      clearAudioNotice(id);
+      postState(id, id === state.mainId);
       return;
     }
     // ⚠ 팝오버는 버튼(.mv-pop-button)을 눌렀을 때만 연다. 패널 안이나 그 주변을
@@ -336,6 +513,9 @@
       return;
     }
     if (target.closest?.("#mvChatToggle")) {
+      // ⚠ 채팅 접기 = UI 만 숨김. iframe 은 그대로 살아 있어 채팅 연결도 유지된다.
+      //   src 를 비우면 다시 펼 때 채팅이 재연결돼 그동안의 대화를 놓친다.
+      //   연결까지 끊는 '채팅 끄기' 가 필요하면 별도 동작으로 나눈다.
       const stage = $("mvStage");
       const folded = stage.classList.toggle("is-chat-folded");
       const button = $("mvChatToggle");
@@ -351,17 +531,44 @@
     if (event.key === "Escape") closePopovers(null);
   });
 
-  (async () => {
-    let setup = null;
-    try {
-      const d = await chrome.storage.session.get(HANDOFF_KEY);
-      setup = d?.[HANDOFF_KEY] || null;
-    } catch {}
-    if (!setup) {
-      $("mvStage").hidden = true;
-      $("mvWatchEmpty").hidden = false;
+  // 프레임이 보내는 상태 신호. 치지직 출처에서 온 것만 받는다.
+  window.addEventListener("message", (event) => {
+    if (event.origin !== CHZZK_ORIGIN) return;
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.source !== MULTIVIEW_MESSAGE) return;
+    const channelId = String(data.channelId || "").toLowerCase();
+    if (!HASH_RE.test(channelId) || !cells.has(channelId)) return;
+    if (data.type === "FRAME_READY") {
+      clearTimeout(frameTimers.get(channelId));
+      frameTimers.delete(channelId);
+      setCellStatus(channelId, "ready");
       return;
     }
+    if (data.type === "AUDIO_INTERACTION_REQUIRED") {
+      showAudioNotice(channelId);
+    }
+  });
+
+  (async () => {
+    // 주소로 받은 id 에 해당하는 구성만 읽는다(탭마다 다르다).
+    const handoffId = new URLSearchParams(location.search).get("setup") || "";
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(handoffId)) {
+      showEmpty();
+      return;
+    }
+    const key = `${HANDOFF_PREFIX}:${handoffId}`;
+    let stored = null;
+    try {
+      const d = await chrome.storage.session.get(key);
+      stored = d?.[key] || null;
+    } catch {}
+    const setup = validateSetup(stored);
+    if (!setup) {
+      showEmpty();
+      return;
+    }
+    state.handoffId = handoffId;
     render(setup);
   })();
 })();

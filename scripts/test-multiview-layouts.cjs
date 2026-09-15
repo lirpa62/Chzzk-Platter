@@ -62,5 +62,46 @@ ok(
   "허용하지 않는 자리를 주면 기본값으로 되돌린다",
 );
 
+console.log("\n[layoutById] 없는 id 는 null");
+ok(L.layoutById("없는배치") === null, "모르는 id 는 null 을 돌려준다");
+ok(L.layoutById(right.id) === right, "id 로 같은 배치를 찾는다");
+
+console.log("\n[solveTracks] 모든 칸이 16:9 가 되는 트랙을 푼다");
+// 레터박스를 없애려면 칸 자체가 16:9 여야 한다. 해가 있는 배치는 트랙을 돌려주고,
+// 해가 없는 배치(전체 폭 띠 + 16:9 메인)는 null 을 돌려줘야 한다.
+const NO_SOLUTION = new Set([
+  "right-bottom",
+  "left-bottom",
+  "right-top",
+  "left-top",
+]);
+for (const layout of L.LAYOUTS) {
+  const tracks = L.solveTracks(layout);
+  if (NO_SOLUTION.has(layout.id)) {
+    ok(tracks === null, `${layout.id}: 해가 없어 null`);
+    continue;
+  }
+  if (!tracks) {
+    ok(false, `${layout.id}: 트랙을 풀지 못했다`);
+    continue;
+  }
+  // 푼 트랙대로 놓았을 때 각 칸이 실제로 16:9 인지 직접 계산해 확인한다.
+  const widths = tracks.columns.split(/\s+/).map((v) => parseFloat(v));
+  const rowCount = tracks.rows.split(/\s+/).length;
+  const { spans } = L.slotSpans(layout);
+  let allSquare = true;
+  for (const span of Object.values(spans)) {
+    let w = 0;
+    for (let c = span.c0; c <= span.c1; c += 1) w += widths[c];
+    const h = span.r1 - span.r0 + 1;
+    if (Math.abs(w / h - 16 / 9) > 1e-6) allSquare = false;
+  }
+  ok(
+    allSquare,
+    `${layout.id}: 모든 칸이 16:9 (전체 ${tracks.ratio.toFixed(3)})`,
+  );
+  ok(rowCount === layout.areas.length, `${layout.id}: 행 수가 areas 와 맞는다`);
+}
+
 console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");
 process.exit(fails ? 1 : 0);

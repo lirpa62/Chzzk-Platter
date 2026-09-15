@@ -155,6 +155,17 @@ body {
   padding: 2px 5px;
   position: absolute;
 }
+.mv-card-adult {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 6px;
+  color: #ff8a8a;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  position: absolute;
+  right: 6px;
+}
 .mv-card-picked {
   background: var(--popup-brand, #00ffa3);
   border-radius: 4px;
@@ -313,11 +324,14 @@ body {
 .mv-layout.is-on {
   border-color: var(--popup-brand, #00ffa3);
 }
+/* 미리보기는 실제 적용될 트랙 계산 결과를 그대로 쓴다(인라인 style 로 들어온다).
+   ⚠ height 를 고정하면 인라인 aspect-ratio 가 무시돼 실제 모양과 달라진다. */
 .mv-layout-preview {
   display: grid;
   gap: 2px;
-  height: 40px;
+  max-height: 54px;
   width: 100%;
+  justify-self: center;
 }
 .mv-layout-preview i {
   background: var(--popup-border, #34383d);
@@ -361,6 +375,11 @@ body {
 }
 
 /* 최상단 조작 막대 */
+/* 좁은 창에서도 항목이 사라지지 않게 한다.
+   ⚠ 막대 자체에 overflow 를 걸면 안 된다. overflow-x:auto 를 주면 overflow-y 도
+   auto 로 계산돼(한 축만 visible 일 수 없다) 아래로 펼쳐지는 팝오버 패널이 잘린다
+   (실측: 패널이 막대 아래로 160px 넘어감). 대신 항목이 줄어들지 않게만 하고,
+   정말 좁으면 버튼 폭을 줄여 감당한다. */
 .mv-topbar {
   align-items: center;
   background: var(--popup-soft-bg, #1b1d20);
@@ -369,6 +388,19 @@ body {
   flex: none;
   gap: 6px;
   padding: 6px 8px;
+}
+.mv-topbar > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* 좁아지면 라벨(메인 채널/채팅/…)을 감추고 값만 남겨 버튼 수를 유지한다. */
+@media (max-width: 720px) {
+  .mv-pop-label {
+    display: none;
+  }
+  .mv-pop-button {
+    max-width: 120px;
+  }
 }
 .mv-topbar-back {
   background: none;
@@ -555,10 +587,6 @@ body {
   height: 100%;
   width: 100%;
 }
-.mv-frames.is-exact .mv-cell-inner {
-  height: 100%;
-  width: 100%;
-}
 /* 모든 화면은 16:9 를 지킨다. 칸의 모양이 어떻든(세로로 길든 가로로 넓든)
    안쪽 상자를 16:9 로 잡고 남는 자리는 검은 여백으로 둔다. 칸에 그냥 100% 로
    채우면 배치에 따라 화면이 늘어나거나 눌린다. */
@@ -582,6 +610,14 @@ body {
      min() 으로 계산하면 배치와 무관하게 정확히 16:9 가 된다. */
   height: min(100%, (100cqw * 9 / 16));
   width: min(100%, (100cqh * 16 / 9));
+}
+/* 칸 자체가 이미 정확히 16:9 인 배치(is-exact)에서는 상자가 칸을 그대로 채운다.
+   ⚠ 이 규칙은 위 min() 보다 뒤에 와야 이긴다(특이성이 같으면 순서가 결정한다).
+   앞에 두면 min() 이 이겨, 반올림으로 칸이 1px 납작해진 순간 상자가 그만큼
+   좁아지면서 좌우에 검은 여백이 생긴다. */
+.mv-frames.is-exact .mv-cell-inner {
+  height: 100%;
+  width: 100%;
 }
 .mv-cell iframe {
   border: 0;

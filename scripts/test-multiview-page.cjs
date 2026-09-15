@@ -258,16 +258,48 @@ const checks = [];
   );
 
   await test(
+    "배치 미리보기가 실제 적용될 트랙 계산을 그대로 쓴다",
+    `const L=window.CheeseMultiviewLayouts;
+     const previews=[...document.querySelectorAll('#mvLayoutGrid .mv-layout')];
+     check(previews.length>0,'미리보기가 없다');
+     for(const p of previews){
+       const id=p.dataset.mvLayout;
+       const layout=L.layoutById(id);
+       const tracks=L.solveTracks(layout);
+       const box=p.querySelector('.mv-layout-preview');
+       const want=tracks?tracks.columns:layout.columns;
+       // 브라우저가 fr 값을 반올림해 다시 쓰므로(1.777778fr → 1.77778fr) 숫자로 비교한다.
+       const nums=(v)=>String(v).trim().split(/\\s+/).map(x=>parseFloat(x));
+       const got=nums(box.style.gridTemplateColumns), exp=nums(want);
+       check(got.length===exp.length &&
+         got.every((n,i)=>Math.abs(n-exp[i])<0.001),
+         id+' 미리보기 열이 실제와 다르다: '+box.style.gridTemplateColumns+' vs '+want);
+       // 행도 반영돼야 한다(예전에는 열만 썼다).
+       check(box.style.gridTemplateRows,id+' 미리보기에 행이 없다');
+     }`,
+  );
+
+  await test(
     "시작하면 구성을 넘기고 시청 화면을 새 탭으로 연다",
     `document.getElementById('mvStart').click();
      await wait(200);
-     const setup=window.sessionStore['cheeseMultiviewSetup'];
-     check(setup,'구성이 세션에 저장되지 않았다');
+     // 고정 키가 아니라 탭마다 다른 id 로 저장돼야 한다.
+     const keys=Object.keys(window.sessionStore)
+       .filter(k=>k.startsWith('cheeseMultiviewSetup:'));
+     check(keys.length===1,'세션 키가 1개가 아니라 '+keys.length+'개');
+     check(!window.sessionStore['cheeseMultiviewSetup'],
+       '고정 키에 저장됐다(탭끼리 덮어쓴다)');
+     const setup=window.sessionStore[keys[0]];
      check(setup.chosen.length===2,'넘긴 채널이 2개가 아니다');
      check(setup.layoutId,'배치가 비어 있다');
      check(window.openedTabs.length===1,'새 탭이 열리지 않았다');
-     check(window.openedTabs[0].includes('multiviewWatch.html'),
-       '연 주소가 시청 화면이 아니다: '+window.openedTabs[0]);`,
+     const opened=window.openedTabs[0];
+     check(opened.includes('multiviewWatch.html'),'연 주소가 시청 화면이 아니다: '+opened);
+     // 주소의 setup id 와 저장 키가 맞아야 시청 화면이 그 구성을 찾는다.
+     const id=new URL(opened).searchParams.get('setup');
+     check(id && keys[0]==='cheeseMultiviewSetup:'+id,
+       '주소의 setup id 와 저장 키가 다르다: '+opened+' / '+keys[0]);
+     window.__handoffId=id;`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "고르기 화면 조작 중 오류");
@@ -275,7 +307,10 @@ const checks = [];
 
   // ── 시청 화면 ────────────────────────────────────────────────────────
   // 넘겨받은 구성으로 실제 프레임을 만드는지 확인한다.
-  const setup = await evaluate("window.sessionStore['cheeseMultiviewSetup']");
+  const handoffId = await evaluate("window.__handoffId");
+  const setup = await evaluate(
+    "window.sessionStore['cheeseMultiviewSetup:'+window.__handoffId]",
+  );
   await evaluate(
     "document.documentElement.innerHTML = " +
       JSON.stringify(readFileSync("multiviewWatch.html", "utf8")),
@@ -290,8 +325,27 @@ const checks = [];
       set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
       get(){return this.getAttribute('data-test-src')||'';},
     });
+    // 프레임으로 나가는 지시를 기록한다(교차 출처라 실제로는 못 가므로 흉내).
+    window.sentMessages=[];
+    Object.defineProperty(HTMLIFrameElement.prototype,'contentWindow',{
+      get(){const self=this;return {postMessage:(data,origin)=>{
+        window.sentMessages.push({channelId:self.closest('.mv-cell')?.dataset.channelId,data,origin});
+      }};},
+    });
+    window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p},
-      storage:{session:{get:async(k)=>({[k]:${JSON.stringify(setup)}})}}};
+      storage:{session:{
+        get:async(k)=>({[k]:window.sessionStore[k]}),
+        set:async(o)=>{Object.assign(window.sessionStore,o);},
+      }}};
+    // 시청 화면은 location.search 의 setup id 를 읽는다. about:blank 문서는
+    // search 를 가질 수 없고 location 도 재정의할 수 없어, 빈 search 로 만든
+    // URLSearchParams 만 이 값으로 바꿔치기한다(테스트 전용 흉내).
+    const RealUSP=window.URLSearchParams;
+    window.URLSearchParams=function(init){
+      return new RealUSP(init===''||init===undefined?'setup=${handoffId}':init);
+    };
+    window.URLSearchParams.prototype=RealUSP.prototype;
     window.check=(v,m)=>{if(!v)throw Error(m)};
     window.wait=ms=>new Promise(r=>setTimeout(r,ms));
     window.closeAll=()=>{document.body.click();};
@@ -382,24 +436,32 @@ const checks = [];
   );
 
   await test(
-    "메인을 바꾸면 해당 두 칸만 다시 걸리고 나머지는 그대로다",
+    "메인을 바꿔도 프레임을 다시 걸지 않고 상태 메시지만 보낸다",
     `const before=window.frameSrcs.length;
+     window.sentMessages.length=0;
      const cells=[...document.querySelectorAll('.mv-cell')];
      const sub=cells.find(c=>!c.classList.contains('is-main'));
      const subId=sub.dataset.channelId;
+     const prevMain=document.querySelector('.mv-cell.is-main').dataset.channelId;
      sub.querySelector('[data-mv-promote]').click();
      await wait(100);
-     // 메인 2개(이전·새) 프레임만 src 가 다시 걸려야 한다.
-     const added=window.frameSrcs.length-before;
-     check(added===2,'다시 걸린 프레임이 2개가 아니라 '+added+'개');
+     // 핵심: 방송이 다시 로드되면 안 된다.
+     check(window.frameSrcs.length===before,
+       '메인 변경으로 프레임이 다시 걸렸다('+(window.frameSrcs.length-before)+'개)');
+     // 대신 두 칸에 상태 지시가 가야 한다.
+     const msgs=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE');
+     check(msgs.length===2,'상태 메시지가 2개가 아니라 '+msgs.length+'개');
+     const toNew=msgs.find(m=>m.data.channelId===subId);
+     const toOld=msgs.find(m=>m.data.channelId===prevMain);
+     check(toNew && toNew.data.muted===false,'새 메인에 소리 켜기 지시가 없다');
+     check(toNew.data.quality==='high','새 메인 화질 지시가 high 가 아니다');
+     check(toOld && toOld.data.muted===true,'이전 메인에 음소거 지시가 없다');
+     check(toOld.data.quality==='480','이전 메인 화질 지시가 480 이 아니다');
+     // 보내는 대상 origin 을 치지직으로 한정해야 한다.
+     check(msgs.every(m=>m.origin==='https://chzzk.naver.com'),
+       '메시지 대상 origin 이 치지직이 아니다');
      const nowMain=document.querySelector('.mv-cell.is-main');
-     check(nowMain.dataset.channelId===subId,'메인 표시가 옮겨가지 않았다');
-     const newSrcs=window.frameSrcs.slice(-2);
-     const promoted=newSrcs.find(s=>s.includes(subId));
-     check(promoted.includes('cheeseMultiMain=1'),'새 메인이 메인으로 안 걸렸다');
-     check(promoted.includes('cheeseMultiMuted=0'),'새 메인이 음소거로 걸렸다');
-     const demoted=newSrcs.find(s=>!s.includes(subId));
-     check(demoted.includes('cheeseMultiMuted=1'),'이전 메인이 음소거로 안 바뀌었다');`,
+     check(nowMain.dataset.channelId===subId,'메인 표시가 옮겨가지 않았다');`,
   );
 
   await test(
@@ -435,15 +497,30 @@ const checks = [];
   );
 
   await test(
-    "모든 칸이 16:9 로 렌더된다",
-    `const boxes=[...document.querySelectorAll('.mv-cell-inner')];
-     check(boxes.length===2,'칸이 2개가 아니다');
-     for(const b of boxes){
-       const r=b.getBoundingClientRect();
-       const ratio=r.width/r.height;
-       check(Math.abs(ratio-16/9)<0.02,
-         '16:9 가 아니다: '+Math.round(r.width)+'x'+Math.round(r.height));
-     }`,
+    "프레임 준비 신호를 받으면 로딩 덮개가 걷힌다",
+    `const cell=document.querySelector('.mv-cell');
+     const id=cell.dataset.channelId;
+     check(cell.dataset.status==='loading','처음 상태가 loading 이 아니다');
+     check(!cell.querySelector('.mv-cell-status').hidden,'로딩 덮개가 없다');
+     // 치지직 출처에서 온 준비 신호만 받아야 한다.
+     window.dispatchEvent(new MessageEvent('message',{
+       origin:'https://evil.invalid',
+       data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id}}));
+     check(cell.dataset.status==='loading','다른 출처 신호를 받아들였다');
+     window.dispatchEvent(new MessageEvent('message',{
+       origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:id}}));
+     check(cell.dataset.status==='ready','준비 신호를 받고도 덮개가 남았다');
+     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
+  );
+
+  await test(
+    "칸마다 16:9 상자가 만들어진다",
+    `// 실제 비율·레터박스 측정은 test-multiview-aspect.cjs 가 18개 배치 전부를
+     // 다룬다. 여기서는 구조만 확인한다.
+     const boxes=[...document.querySelectorAll('.mv-cell-inner')];
+     check(boxes.length===2,'칸이 2개가 아니라 '+boxes.length+'개');
+     check(boxes.every(b=>b.querySelector('iframe')),'상자 안에 프레임이 없다');`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
