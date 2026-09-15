@@ -61,66 +61,145 @@ body {
   border-radius: 10px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 14px;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px;
+  padding: 10px;
 }
-.mv-channel {
-  align-items: center;
+
+/* 구역(즐겨찾기·그룹·팔로잉) */
+.mv-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 목록을 스크롤해도 구역 이름이 위에 붙어 있게 한다.
+   ⚠ 배경을 주지 않으면 아래 카드가 글자 뒤로 비쳐 보인다. */
+.mv-section-head {
+  align-items: baseline;
+  background: var(--popup-bg, #141517);
+  display: flex;
+  gap: 6px;
+  margin: -10px -10px 0;
+  padding: 10px 12px 6px;
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+}
+.mv-section-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+.mv-section-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
+
+/* 라이브 방송 카드 */
+.mv-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.mv-card {
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   color: inherit;
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   font: inherit;
-  gap: 10px;
-  padding: 7px 8px;
+  gap: 7px;
+  padding: 0;
   text-align: left;
-  width: 100%;
 }
-.mv-channel:hover:not(:disabled) {
-  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
-}
-.mv-channel:disabled {
+.mv-card:disabled {
   cursor: default;
   opacity: 0.4;
 }
-.mv-channel.is-on {
-  background: var(--popup-brand-soft, rgba(0, 255, 163, 0.14));
+.mv-card-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 8px;
+  display: block;
+  overflow: hidden;
+  position: relative;
 }
-.mv-channel-avatar {
+.mv-card-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.mv-card-thumb-empty {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-card:hover:not(:disabled) .mv-card-thumb {
+  outline: 2px solid var(--popup-border, #34383d);
+  outline-offset: -2px;
+}
+.mv-card.is-on .mv-card-thumb {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+.mv-card-viewers {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 6px;
+  color: #fff;
+  font-size: 11px;
+  left: 6px;
+  padding: 2px 5px;
+  position: absolute;
+}
+.mv-card-picked {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #05170f;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+.mv-card-body {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.mv-card-avatar {
   border-radius: 50%;
   flex: none;
-  height: 32px;
+  height: 30px;
   object-fit: cover;
-  width: 32px;
+  width: 30px;
 }
-.mv-channel-body {
+.mv-card-text {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
-.mv-channel-name {
+.mv-card-title {
+  font-size: 12.5px;
   font-weight: 600;
+  /* 제목은 두 줄까지 보여 준다. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.mv-card-name,
+.mv-card-category {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.mv-channel-title {
-  color: var(--popup-muted, #9aa1a9);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mv-channel-viewers {
-  color: var(--popup-muted, #9aa1a9);
-  flex: none;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
 }
 .mv-empty {
   color: var(--popup-muted, #9aa1a9);

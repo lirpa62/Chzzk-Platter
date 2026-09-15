@@ -117,7 +117,11 @@ const checks = [];
       storage:{local:{get:async()=>({
           // 전용 팔로잉은 즐겨찾기·그룹에 든 채널만 추린다.
           cheeseFollowFavorites:['aaaa0000000000000000000000000001'],
-          cheeseFollowCustomGroups:[{channelIds:['aaaa0000000000000000000000000002']}],
+          cheeseFollowCustomGroups:[
+            {id:'g1',name:'친구',channelIds:['aaaa0000000000000000000000000002']},
+            {id:'g2',name:'게임',channelIds:['aaaa0000000000000000000000000003']},
+          ],
+          cheeseFollowGroupOrder:['g2','g1'],
         }),set:async()=>{},remove:async()=>{}},
         session:{get:async(k)=>({[k]:window.sessionStore[k]}),
           set:async(o)=>{Object.assign(window.sessionStore,o);}},
@@ -131,6 +135,8 @@ const checks = [];
         channelImageUrl:'',liveTitle:'방송2',concurrentUserCount:200},
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋',
         channelImageUrl:'',liveTitle:'방송3',concurrentUserCount:300},
+      {channelId:'aaaa0000000000000000000000000004',channelName:'채널넷',
+        channelImageUrl:'',liveTitle:'방송4',concurrentUserCount:400},
     ];
     // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
     // 전체는 data, 검색은 data[].{live,channel}.
@@ -139,7 +145,8 @@ const checks = [];
       if(p.endsWith('/followings/live'))return {followingList:channels.map(c=>({
         channelId:c.channelId,channel:c,streamer:{openLive:true},
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
-          liveCategoryValue:'게임'}}))};
+          liveCategoryValue:'게임',
+          liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
       if(p.endsWith('/search/lives'))return {data:channels.map(c=>({channel:c,
         live:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           liveCategoryValue:'게임'}}))};
@@ -176,15 +183,45 @@ const checks = [];
 
   await test(
     "팔로잉 채널 목록이 렌더된다",
-    `const items=document.querySelectorAll('#mvChannelList .mv-channel');
-     check(items.length===3,'채널 3개가 아니라 '+items.length+'개');`,
+    `const items=document.querySelectorAll('#mvChannelList .mv-card');
+     check(items.length===4,'채널 4개가 아니라 '+items.length+'개');`,
+  );
+
+  await test(
+    "카드에 썸네일·시청자 수·제목이 함께 나온다",
+    `const card=document.querySelector('#mvChannelList .mv-card');
+     check(card.querySelector('.mv-card-thumb img'),'썸네일이 없다');
+     const src=card.querySelector('.mv-card-thumb img').getAttribute('src');
+     check(!src.includes('{type}'),'썸네일 {type} 이 치환되지 않았다: '+src);
+     check(card.querySelector('.mv-card-viewers'),'시청자 수가 없다');
+     check(card.querySelector('.mv-card-title').textContent.trim(),'제목이 비었다');
+     check(card.querySelector('.mv-card-name').textContent.trim(),'채널명이 비었다');`,
+  );
+
+  await test(
+    "전용 팔로잉은 즐겨찾기·그룹·나머지로 구분되고 그룹 순서를 따른다",
+    `document.querySelector('[data-mv-source="custom"]').click();
+     await wait(400);
+     const heads=[...document.querySelectorAll('#mvChannelList .mv-section-name')]
+       .map(el=>el.textContent);
+     check(heads[0]==='즐겨찾기','첫 구역이 즐겨찾기가 아니다: '+heads.join(','));
+     // cheeseFollowGroupOrder 가 ['g2','g1'] 이므로 게임(g2)이 친구(g1)보다 먼저다.
+     check(heads.indexOf('게임')<heads.indexOf('친구'),
+       '그룹 순서가 저장된 순서를 안 따른다: '+heads.join(','));
+     check(heads.includes('팔로잉'),'나머지 팔로잉 구역이 없다: '+heads.join(','));
+     // 같은 채널이 두 구역에 중복으로 들어가면 안 된다.
+     const ids=[...document.querySelectorAll('#mvChannelList .mv-card')]
+       .map(el=>el.dataset.mvPick);
+     check(new Set(ids).size===ids.length,'같은 채널이 여러 구역에 중복됐다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);`,
   );
 
   await test(
     "채널을 고르면 고른 목록과 개수가 갱신된다",
     // ⚠ 한 번 고를 때마다 목록을 다시 그리므로(선택 표시 갱신), 이전에 받아둔
     //   버튼 노드는 DOM 에서 떨어져 클릭이 먹지 않는다. 매번 다시 찾는다.
-    `const at=i=>document.querySelectorAll('#mvChannelList .mv-channel')[i];
+    `const at=i=>document.querySelectorAll('#mvChannelList .mv-card')[i];
      at(0).click();
      await wait(50);
      at(1).click();
@@ -212,7 +249,7 @@ const checks = [];
          box.dispatchEvent(new Event('input',{bubbles:true}));
        }
        await wait(400);
-       const n=document.querySelectorAll('#mvChannelList .mv-channel').length;
+       const n=document.querySelectorAll('#mvChannelList .mv-card').length;
        check(n>0, src+' 목록이 비어 있다');
      }
      // 다시 팔로잉으로 돌려놓는다.
@@ -257,6 +294,7 @@ const checks = [];
       storage:{session:{get:async(k)=>({[k]:${JSON.stringify(setup)}})}}};
     window.check=(v,m)=>{if(!v)throw Error(m)};
     window.wait=ms=>new Promise(r=>setTimeout(r,ms));
+    window.closeAll=()=>{document.body.click();};
   `);
   await evaluate(
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
@@ -315,6 +353,32 @@ const checks = [];
        '현재 선택 표시가 1개가 아니다');
      document.body.click();
      check(panel.hidden,'바깥 클릭으로 닫히지 않았다');`,
+  );
+
+  await test(
+    "팝오버는 버튼을 눌러야만 열리고 그 밖을 누르면 닫힌다",
+    `closeAll();
+     const panel=document.getElementById('mvMainPanel');
+     // 1) 버튼이 아닌 곳을 눌러서 열리면 안 된다.
+     document.getElementById('mvTopbar').click();
+     check(panel.hidden,'막대를 눌렀는데 팝오버가 열렸다');
+     document.querySelector('[data-mv-pop="main"]').click();
+     check(panel.hidden,'래퍼를 눌렀는데 팝오버가 열렸다');
+     // 2) 버튼 안의 글자(span)를 눌러도 열려야 한다.
+     document.querySelector('[data-mv-pop-toggle="main"] .mv-pop-value').click();
+     check(!panel.hidden,'버튼 안 글자를 눌렀는데 안 열렸다');
+     // 3) 열린 상태에서 '팝오버 래퍼의 버튼 바깥'을 누르면 닫혀야 한다.
+     //    (예전 규칙은 .mv-pop 전체를 바깥으로 안 쳐서 닫히지 않았다.)
+     document.querySelector('[data-mv-pop="side"]').click();
+     check(panel.hidden,'다른 팝오버 래퍼를 눌렀는데 안 닫혔다');
+     // 4) 패널 안의 빈 곳을 누르면 닫히지 않아야 한다(항목을 고르는 중).
+     document.querySelector('[data-mv-pop-toggle="main"]').click();
+     check(!panel.hidden,'다시 열리지 않았다');
+     panel.click();
+     check(!panel.hidden,'패널 안을 눌렀는데 닫혔다');
+     // 5) 버튼을 다시 누르면 닫힌다.
+     document.querySelector('[data-mv-pop-toggle="main"]').click();
+     check(panel.hidden,'다시 눌렀는데 안 닫혔다');`,
   );
 
   await test(

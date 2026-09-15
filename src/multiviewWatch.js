@@ -236,12 +236,7 @@
     // 배치는 지금 채널 수에 맞는 것만.
     $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length)
       .map((l) =>
-        optionRow(
-          l.id,
-          l.label,
-          l.id === state.layoutId,
-          "data-mv-set-layout",
-        ),
+        optionRow(l.id, l.label, l.id === state.layoutId, "data-mv-set-layout"),
       )
       .join("");
   }
@@ -250,10 +245,9 @@
     for (const pop of document.querySelectorAll("[data-mv-pop]")) {
       const name = pop.dataset.mvPop;
       if (name === except) continue;
-      pop.querySelector("[data-mv-pop-toggle]")?.setAttribute(
-        "aria-expanded",
-        "false",
-      );
+      pop
+        .querySelector("[data-mv-pop-toggle]")
+        ?.setAttribute("aria-expanded", "false");
       const panel = pop.querySelector(".mv-pop-panel");
       if (panel) panel.hidden = true;
     }
@@ -304,7 +298,9 @@
       backToSetup();
       return;
     }
-    const toggle = target.closest?.("[data-mv-pop-toggle]");
+    // ⚠ 팝오버는 버튼(.mv-pop-button)을 눌렀을 때만 연다. 패널 안이나 그 주변을
+    //   눌러서 열리면 안 된다.
+    const toggle = target.closest?.(".mv-pop-button[data-mv-pop-toggle]");
     if (toggle) {
       togglePopover(toggle.dataset.mvPopToggle);
       return;
@@ -347,8 +343,8 @@
       button.setAttribute("aria-label", folded ? "채팅 펴기" : "채팅 접기");
       return;
     }
-    // 바깥을 누르면 열린 팝오버를 닫는다.
-    if (!target.closest?.(".mv-pop")) closePopovers(null);
+    // 패널 안의 빈 곳을 누른 게 아니면(=바깥) 열린 팝오버를 닫는다.
+    if (!target.closest?.(".mv-pop-panel")) closePopovers(null);
   });
 
   document.addEventListener("keydown", (event) => {
