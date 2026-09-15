@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 멀티뷰</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/multiview.css" />
+  </head>
+  <body>
+    <!-- 채널 고르기: 멀티뷰를 시작하기 전 화면 -->
+    <main class="mv-setup" id="mvSetup">
+      <header class="mv-setup-head">
+        <h1>멀티뷰</h1>
+        <p class="mv-setup-desc">
+          여러 방송을 한 화면에서 봅니다. 메인 채널은 소리가 켜진 채로 시작하고
+          나머지는 음소거됩니다. 화질은 480p로 시작해 화면마다 따로 올릴 수
+          있습니다.
+        </p>
+      </header>
+
+      <div class="mv-setup-body">
+        <section class="mv-pick" aria-label="채널 고르기">
+          <div class="lps-view-switch mv-source-tabs" role="tablist">
+            <button type="button" role="tab" data-mv-source="following">
+              팔로잉
+            </button>
+            <button type="button" role="tab" data-mv-source="custom">
+              전용 팔로잉
+            </button>
+            <button type="button" role="tab" data-mv-source="all">
+              전체 라이브
+            </button>
+            <button type="button" role="tab" data-mv-source="search">
+              검색
+            </button>
+          </div>
+          <input
+            type="search"
+            class="mv-search"
+            id="mvSearch"
+            placeholder="채널 이름으로 찾기"
+            hidden
+          />
+          <div class="mv-channel-list" id="mvChannelList" aria-busy="true">
+            <p class="mv-empty">불러오는 중…</p>
+          </div>
+        </section>
+
+        <aside class="mv-chosen" aria-label="고른 채널">
+          <div class="mv-chosen-head">
+            <strong>고른 채널</strong>
+            <span id="mvChosenCount">0 / 6</span>
+          </div>
+          <p class="mv-hint">
+            맨 위가 메인 채널입니다. 끌어서 순서를 바꿀 수 있습니다.
+          </p>
+          <ol class="mv-chosen-list" id="mvChosenList"></ol>
+
+          <div class="mv-layout-pick">
+            <strong>배치</strong>
+            <div class="mv-layout-grid" id="mvLayoutGrid" role="radiogroup">
+              <!-- 고른 채널 수에 맞는 배치만 렌더한다 -->
+            </div>
+          </div>
+
+          <label class="mv-main-quality">
+            <input type="checkbox" id="mvMainHighQuality" checked />
+            <span>메인 채널만 높은 화질로 시작</span>
+          </label>
+
+          <button type="button" class="mv-start" id="mvStart" disabled>
+            멀티뷰 시작
+          </button>
+        </aside>
+      </div>
+    </main>
+
+    <!-- 실행 화면: 프레임 격자 + 채팅 -->
+    <main class="mv-stage" id="mvStage" hidden>
+      <div class="mv-frames" id="mvFrames"></div>
+      <aside class="mv-chat" id="mvChat">
+        <div class="mv-chat-head">
+          <select id="mvChatChannel" aria-label="채팅을 볼 채널"></select>
+          <button type="button" id="mvChatToggle" aria-label="채팅 접기">
+            접기
+          </button>
+        </div>
+        <iframe
+          id="mvChatFrame"
+          title="채팅"
+          allow="autoplay"
+          referrerpolicy="origin"
+        ></iframe>
+      </aside>
+      <div class="mv-toolbar" id="mvToolbar">
+        <button type="button" id="mvBack">채널 다시 고르기</button>
+      </div>
+    </main>
+
+    <script src="src/multiview.js"></script>
+  </body>
+</html>
