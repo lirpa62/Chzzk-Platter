@@ -130,6 +130,9 @@
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
+  // 화질 상한(px height). 멀티뷰 프레임처럼 작은 칸에서 고화질이 낭비일 때 쓴다.
+  // 0 이면 상한 없음. 상한이 있으면 '이하 중 가장 높은' 트랙을 고른다.
+  let maxQualityCap = 0;
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
   // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
@@ -327,7 +330,11 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
-    if (maxQualityAuto && typeof applyMaxQuality === "function") {
+    maxQualityCap = Number(e.data.maxQualityCap) || 0;
+    if (
+      (maxQualityAuto || maxQualityCap > 0) &&
+      typeof applyMaxQuality === "function"
+    ) {
       // 옵션을 방금 켠 경우 현재 video 에 이벤트를 바인딩해 두면, 다음 재생/전환에서
       // 곧바로 최고화질이 걸린다. 이미 재생 중이면 applyMaxQuality 가 즉시 처리.
       if (typeof bindMaxQualityEvents === "function") bindMaxQualityEvents();
@@ -4936,23 +4943,40 @@
     const m = txt.match(/(\d{3,4})\s*p/i);
     return m ? Number(m[1]) : 0;
   }
-  // 화질 메뉴에서 '최고 화질 항목이 이미 선택(--checked)돼 있는지'.
-  function isMaxQualityMenuChecked() {
+  // 화질 메뉴에서 목표 화질 항목(li)과 그 height 를 찾는다.
+  // cap>0 이면 'cap 이하 중 가장 높은' 항목을 고른다(멀티뷰처럼 화질 상한이 있는 경우).
+  // cap 이하가 하나도 없으면 가장 낮은 항목으로 내린다. cap=0 이면 최고 화질.
+  function findQualityMenuTarget(cap = 0) {
     const list = document.querySelector(
       ".pzp-setting-quality-pane__list-container",
     );
-    if (!list) return false;
+    if (!list) return null;
     let bestLi = null;
     let bestH = 0;
+    let lowLi = null;
+    let lowH = 0;
     for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
       const h = qualityItemHeight(li);
+      if (h <= 0) continue;
+      if (!lowLi || h < lowH) {
+        lowH = h;
+        lowLi = li;
+      }
+      if (cap > 0 && h > cap) continue;
       if (h > bestH) {
         bestH = h;
         bestLi = li;
       }
     }
+    if (!bestLi && cap > 0 && lowLi) return { li: lowLi, height: lowH };
+    return bestLi ? { li: bestLi, height: bestH } : null;
+  }
+  // 화질 메뉴에서 '목표 화질 항목이 이미 선택(--checked)돼 있는지'.
+  function isMaxQualityMenuChecked(cap = 0) {
+    const target = findQualityMenuTarget(cap);
     return (
-      !!bestLi && bestLi.classList.contains("pzp-ui-setting-pane-item--checked")
+      !!target &&
+      target.li.classList.contains("pzp-ui-setting-pane-item--checked")
     );
   }
   let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
@@ -4965,21 +4989,10 @@
   // 으로 처리하고(그리드 포함), (b) 화질 메뉴 UI 가 열리는 부작용을 감춘다. 메뉴를 열고
   // 붙어있는 li 를 그냥 .click() 하면 무반응이다(실측) — 클론 교체가 핵심.
   // 성공(클릭 실행/이미 최고) 시 true.
-  function clickMaxQualityMenuItem() {
-    const list = document.querySelector(
-      ".pzp-setting-quality-pane__list-container",
-    );
-    if (!list) return false;
-    let bestLi = null;
-    let bestH = 0;
-    for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
-      const h = qualityItemHeight(li);
-      if (h > bestH) {
-        bestH = h;
-        bestLi = li;
-      }
-    }
-    if (!bestLi || bestH <= 0) return false;
+  function clickMaxQualityMenuItem(cap = 0) {
+    const target = findQualityMenuTarget(cap);
+    if (!target) return false;
+    const bestLi = target.li;
     // 이미 최고 항목이 체크돼 있으면 클릭하지 않는다(멱등).
     if (bestLi.classList.contains("pzp-ui-setting-pane-item--checked"))
       return true;
@@ -5027,14 +5040,17 @@
     }
   }
   function applyMaxQuality() {
-    if (!maxQualityAuto) return;
+    // 상한만 걸린 경우(멀티뷰)에도 동작해야 하므로 둘 중 하나라도 켜져 있으면 진행한다.
+    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
     // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
     // 경우, 모든 탭을 1080p60(≈8Mbps)으로 강제하면 대역폭·디코드·미디어 메모리가 탭 수만큼
     // 증폭돼 시스템 메모리 폭증 + 간헐적 수 초 버퍼링을 유발했다(실사용 계측: JS 힙/버퍼는
     // 정상인데 탭당 렌더러 1GB+ = 미디어 파이프라인 부하). 숨김 탭은 치지직 기본 ABR 에
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
-    if (document.hidden) return;
+    // (상한만 걸린 멀티뷰 프레임은 예외 — 상한은 화질을 낮추는 방향이라
+    //  숨김 상태에서도 부담을 늘리지 않는다.)
+    if (document.hidden && !(maxQualityCap > 0)) return;
     if (
       maxQualitySuspendedForAudioOnly &&
       Date.now() < maxQualityResumeAfterAudioOnlyAt
@@ -5106,21 +5122,39 @@
       (t) => !trackIsAbr(t) && !trackIsAudioOnly(t) && trackHeight(t) > 0,
     );
     if (!fixed.length) return;
-    let best = fixed[0];
-    for (const t of fixed) if (trackHeight(t) > trackHeight(best)) best = t;
+    // 상한이 있으면 그 이하 중 가장 높은 트랙. 상한 이하가 없으면 가장 낮은 트랙.
+    let best = null;
+    for (const t of fixed) {
+      const h = trackHeight(t);
+      if (maxQualityCap > 0 && h > maxQualityCap) continue;
+      if (!best || h > trackHeight(best)) best = t;
+    }
+    if (!best && maxQualityCap > 0) {
+      for (const t of fixed)
+        if (!best || trackHeight(t) < trackHeight(best)) best = t;
+    }
+    if (!best) return;
     const bestH = trackHeight(best);
     const selected = tracks.find((t) => trackSelected(t));
     const selH = selected && !trackIsAbr(selected) ? trackHeight(selected) : 0;
 
-    // '수동 변경 존중' 옵션: 우리가 최고로 올려둔 상태(maxQualitySetHeight)에서 선택이
-    // '더 낮은 고정 화질'로 바뀌었으면 = 사용자가 직접 낮춤 → 이 미디어 동안 존중.
+    // '수동 변경 존중' 옵션: 우리가 올려둔 상태(maxQualitySetHeight)에서 선택이 바뀌었으면
+    // 사용자가 직접 고른 것으로 보고 이 미디어 동안 존중한다.
+    //
+    // 상한이 없을 때는 '더 낮아진 경우'만 수동으로 친다(우리가 최고로 올리는 쪽이라
+    // 더 높아지는 변화는 우리 자신의 동작이다). 상한이 걸린 멀티뷰에서는 반대로
+    // 사용자가 상한 위로 올리는 것이 정상 동작이므로 '달라졌으면' 수동으로 본다.
+    const deviated =
+      maxQualityCap > 0
+        ? selH !== maxQualitySetHeight
+        : selH < maxQualitySetHeight;
     if (
       maxQualityRespectManual &&
       maxQualitySetHeight > 0 &&
       selected &&
       !trackIsAbr(selected) &&
       selH > 0 &&
-      selH < maxQualitySetHeight
+      deviated
     ) {
       maxQualityRespectedPage = currentPageKey;
     }
@@ -5130,7 +5164,10 @@
 
     // 이미 최고 고정 화질이면 손대지 않는다(멱등). 트랙 selected 반영이 늦어도, 화질
     // 메뉴상 최고 항목이 이미 체크돼 있으면 전환된 것이니 중복 클릭하지 않는다.
-    if (selH >= bestH || isMaxQualityMenuChecked()) {
+    if (
+      (maxQualityCap > 0 ? selH === bestH : selH >= bestH) ||
+      isMaxQualityMenuChecked(maxQualityCap)
+    ) {
       maxQualitySetHeight = bestH;
       return;
     }
@@ -5147,7 +5184,7 @@
     // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
     // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
     // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
-    if (!clickMaxQualityMenuItem()) {
+    if (!clickMaxQualityMenuItem(maxQualityCap)) {
       // 폴백: 메뉴를 못 찾는 등 클릭 실패 시 트랙 selected 직접 설정(그리드 미보장).
       try {
         best.selected = true;

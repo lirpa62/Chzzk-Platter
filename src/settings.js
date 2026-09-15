@@ -1023,6 +1023,18 @@
     window.open(settingsUrl.toString(), "_blank", "noopener");
   });
 
+  // 멀티뷰를 새 탭으로 연다.
+  document
+    .getElementById("openMultiviewButton")
+    ?.addEventListener("click", () => {
+      const url = chrome.runtime.getURL("multiview.html");
+      if (chrome.tabs?.create) {
+        chrome.tabs.create({ url });
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+    });
+
   // 채팅 리캡을 새 탭으로 연다.
   document.getElementById("openChatRecap")?.addEventListener("click", () => {
     const url = chrome.runtime.getURL("chatRecap.html");

@@ -237,14 +237,40 @@
       }
     });
   }
+  // 멀티뷰 프레임(확장 페이지가 ?cheeseMulti=1 로 띄운다). 사이드바·헤더 같은
+  // 최상위 UI 를 빼는 조건은 팝업 플레이어와 같으므로 아래에서 함께 묶는다.
+  // ⚠ 교차 출처라 부모가 프레임 내부를 만질 수 없다. 음소거·화질·채팅 접기는
+  //   모두 이 쿼리로 지시받아 프레임 쪽에서 수행한다.
+  const MULTIVIEW_PARAMS = new URLSearchParams(location.search);
+  const IS_MULTIVIEW_FRAME =
+    !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMulti") === "1";
+  // 채팅만 보여 주는 프레임(멀티뷰 채팅 칸). 이 칸도 /live/ 페이지를 통째로 띄우므로
+  // 영상·소리가 함께 산다 → 음소거·화질 상한은 영상 칸과 똑같이 적용해야 한다.
+  const IS_MULTIVIEW_CHAT_FRAME =
+    !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiChat") === "1";
+  // 음소거·화질 지시는 영상 칸과 채팅 칸 양쪽 모두에서 읽는다.
+  const IS_ANY_MULTIVIEW_FRAME = IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME;
+  const MULTIVIEW_START_MUTED =
+    IS_ANY_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
+  // 480 이면 그 높이 이하 트랙 중 가장 높은 것을 고른다(작은 칸에 1080p 는 낭비).
+  const MULTIVIEW_QUALITY = IS_ANY_MULTIVIEW_FRAME
+    ? Number(MULTIVIEW_PARAMS.get("cheeseMultiQuality")) || 0
+    : 0;
+
   // 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
   // 사이드바·헤더 등 최상위 전용 UI 를 주입하지 않고 플레이어 기능만 남긴다.
+  // ⚠ 멀티뷰 프레임도 같은 억제가 필요하므로 이 플래그에 함께 태운다. 멀티뷰
+  //   고유 동작만 IS_MULTIVIEW_FRAME 으로 따로 가른다.
   const IS_POPUP_PLAYER_FRAME =
     !IS_TOP_FRAME &&
-    new URLSearchParams(location.search).get("cheesePopup") === "1";
+    (MULTIVIEW_PARAMS.get("cheesePopup") === "1" ||
+      IS_MULTIVIEW_FRAME ||
+      IS_MULTIVIEW_CHAT_FRAME);
   const POPUP_PLAYER_START_WITHOUT_CHAT_FRAME =
-    IS_POPUP_PLAYER_FRAME &&
-    new URLSearchParams(location.search).get("cheesePopupChatFolded") === "1";
+    (IS_POPUP_PLAYER_FRAME &&
+      MULTIVIEW_PARAMS.get("cheesePopupChatFolded") === "1") ||
+    // 멀티뷰 영상 칸은 채팅을 항상 접는다(채팅은 전용 칸에서 따로 본다).
+    IS_MULTIVIEW_FRAME;
   const CLIP_PAGE_AUTOPLAY_PARAM = "cheesePlatterAutoplay";
   const clipPageAutoplayState = {
     pathname: "",
@@ -16776,6 +16802,7 @@
     ensureCustomFollowList();
     ensureCustomFollowCollapsedControls();
     ensureCustomFollowPageFavoriteButton();
+    ensureSidebarMultiview(); // 사이드바/서비스 섹션 숨김 변화 즉시 반영
     if (
       (previousGroupEnabled !== featureFlags.sbFollowGroupEnabled ||
         previousSubscribeGroups !== featureFlags.sbFollowGroupSubscribe ||
@@ -20227,6 +20254,64 @@
     schedulePopupPlayerInitialChatFold();
   }
 
+  // 멀티뷰 보조 칸 음소거. 메인만 소리가 나고 나머지는 음소거로 시작한다.
+  //
+  // ⚠ 한 번만 muted=true 로 두면 안 된다. 치지직 플레이어는 초기화 도중 video 를
+  //   교체하거나 저장된 볼륨을 다시 적용해 음소거가 풀린다. 그래서 재생이 안정될
+  //   때까지 반복해서 건다. 다만 사용자가 직접 음소거를 풀면 그 의사를 우선해야
+  //   하므로, 신뢰된 조작(isTrusted)이 오면 즉시 멈춘다.
+  if (MULTIVIEW_START_MUTED) {
+    let multiviewMuteDone = false;
+    const stopMultiviewMute = () => {
+      multiviewMuteDone = true;
+    };
+    // 사용자가 직접 소리를 켜면(클릭·키보드) 더는 강제하지 않는다.
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (!event.isTrusted) return;
+        // 음소거/볼륨 관련 조작만 해제 신호로 본다.
+        if (
+          event.target?.closest?.(
+            ".pzp-pc-volume-button, .pzp-volume-button, .pzp-pc-volume",
+          )
+        ) {
+          stopMultiviewMute();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (!event.isTrusted) return;
+        if (event.code === "KeyM" || event.code === "ArrowUp") {
+          stopMultiviewMute();
+        }
+      },
+      true,
+    );
+    const applyMultiviewMute = () => {
+      if (multiviewMuteDone) return;
+      for (const video of document.querySelectorAll("video")) {
+        if (!video.muted) video.muted = true;
+      }
+    };
+    applyMultiviewMute();
+    const muteTimer = setInterval(() => {
+      if (multiviewMuteDone) {
+        clearInterval(muteTimer);
+        return;
+      }
+      applyMultiviewMute();
+    }, 400);
+    // 재생이 충분히 안정된 뒤에는 강제를 멈춘다(그 뒤로는 사용자 조작 영역).
+    setTimeout(() => {
+      stopMultiviewMute();
+      clearInterval(muteTimer);
+    }, 20000);
+  }
+
   if (POPUP_PLAYER_START_WITHOUT_CHAT_FRAME) {
     // 초기 안정화 중이라도 사용자가 직접 토글하면 그 의사를 우선한다. programmatic
     // button.click()은 isTrusted=false라 이 경로에 들어오지 않는다.
@@ -21876,6 +21961,84 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       .map((el) => el.textContent || "")
       .join(" ");
     return (ariaLabel + " " + titleText + " " + blindText).replace(/\s+/g, "");
+  }
+
+  // ── 사이드바 멀티뷰 진입 버튼 ────────────────────────────────────────────
+  // '서비스 바로가기' nav 안에 우리 항목을 하나 얹는다. 치지직 원본 항목의 클래스를
+  // harvest 해 같은 모양을 쓰고, 사이드바가 재렌더되면 옵저버가 이 함수를 다시 불러
+  // 멱등하게 복구한다(요소가 살아 있으면 아무 것도 하지 않는다).
+  const SIDEBAR_MULTIVIEW_ID = "cheese-sidebar-multiview";
+  // lucide panels-top-left
+  const MULTIVIEW_ICON_SVG =
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
+    '<path d="M3 9h18"></path><path d="M9 21V9"></path></svg>';
+
+  function findSidebarServicesNav() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return null;
+    for (const nav of sidebar.querySelectorAll('nav[class*="_section_"]')) {
+      if (getSidebarNavLabel(nav).includes("서비스바로가기")) return nav;
+    }
+    return null;
+  }
+
+  function ensureSidebarMultiview() {
+    const existing = document.getElementById(SIDEBAR_MULTIVIEW_ID);
+    // 사이드바 전체 숨김이거나 서비스 섹션이 숨겨진 상태면 우리 항목도 뺀다.
+    if (featureFlags.sidebar || featureFlags.sbServices) {
+      existing?.remove();
+      return;
+    }
+    const nav = findSidebarServicesNav();
+    if (!nav) {
+      existing?.remove();
+      return;
+    }
+    if (existing && existing.parentElement?.closest("nav") === nav) return;
+    existing?.remove();
+
+    // 원본 항목(li > a)의 클래스를 harvest 해 같은 모양을 쓴다. 클래스 해시가 바뀌어도
+    // 부분 일치로 잡히므로 버전 변화에 견딘다.
+    const list = nav.querySelector('ul[class*="_list_"]');
+    if (!list) return;
+    const sampleLi = list.querySelector("li");
+    const sampleLink = sampleLi?.querySelector("a");
+    if (!sampleLi || !sampleLink) return;
+
+    const li = document.createElement("li");
+    li.id = SIDEBAR_MULTIVIEW_ID;
+    li.className = sampleLi.className;
+    const link = document.createElement("a");
+    link.className = sampleLink.className;
+    link.href = chrome.runtime.getURL("multiview.html");
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = "멀티뷰";
+
+    // 원본 아이콘 자리를 찾아 같은 래퍼에 우리 아이콘을 넣는다. 못 찾으면 svg 만 둔다.
+    const sampleIcon = sampleLink.querySelector('[class*="_icon_"]');
+    if (sampleIcon) {
+      const icon = document.createElement("span");
+      icon.className = sampleIcon.className;
+      icon.innerHTML = MULTIVIEW_ICON_SVG;
+      link.appendChild(icon);
+    } else {
+      const icon = document.createElement("span");
+      icon.innerHTML = MULTIVIEW_ICON_SVG;
+      link.appendChild(icon);
+    }
+    // 텍스트 자리도 원본 클래스를 따른다(접힌 사이드바에서는 CSS 가 알아서 숨긴다).
+    const sampleText = sampleLink.querySelector('[class*="_text_"]');
+    const text = document.createElement("span");
+    if (sampleText) text.className = sampleText.className;
+    text.textContent = "멀티뷰";
+    link.appendChild(text);
+
+    li.appendChild(link);
+    list.appendChild(li);
   }
 
   function findSidebarFollowNav() {
@@ -24055,6 +24218,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         ensureFollowCollapseHeaderButton(); // 헤더 '접기' 버튼 멱등 유지
         ensureCustomFollowList(); // 전용 팔로잉 목록 주입/유지(sbFollowCustom)
         ensureCustomFollowCollapsedControls(); // 접힘 상태 헤더 조작 버튼
+        ensureSidebarMultiview(); // 멀티뷰 진입 항목
       }, 30);
     });
     // childList/subtree + attributes(class): 사이드바 확장/축소는 #sidebar의 class만
@@ -24071,6 +24235,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ensureFollowCollapseHeaderButton();
     ensureCustomFollowList();
     ensureCustomFollowCollapsedControls();
+    ensureSidebarMultiview();
     // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
     // 있다 → 여기서 1회만 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
     applySidebarPush();
@@ -50823,16 +50988,26 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
         // 최대 화질 자동 고정. 팝업 프레임은 전역값과 무관하게 팝업 설정을 따른다
         // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
-        maxQualityAuto: IS_POPUP_PLAYER_FRAME
-          ? popupPlayerMaxQuality
-          : maxQualityAuto,
+        // 멀티뷰 프레임은 전역 최대화질 고정을 끈다(작은 칸 여러 개를 동시에 최고
+        // 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다). 대신 아래 상한을 쓴다.
+        maxQualityAuto: IS_ANY_MULTIVIEW_FRAME
+          ? false
+          : IS_POPUP_PLAYER_FRAME
+            ? popupPlayerMaxQuality
+            : maxQualityAuto,
+        // 화질 상한(px). 멀티뷰에서만 쓰며 0 이면 상한 없음. 메인을 고화질로 시작하는
+        // 경우엔 부모가 이 쿼리를 붙이지 않으므로 0 이 되어 상한이 걸리지 않는다.
+        maxQualityCap: MULTIVIEW_QUALITY,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
         videoFilterDefaultOn, // 비디오 필터 기본 켜짐(전역)
         // 넓은 화면 자동 적용(전역). 팝업 플레이어 프레임에서는 팝업 설정이 켜져 있으면
         // 전역값과 무관하게 켠다(작은 창에서 레터박스를 줄이는 게 기본 기대 동작).
+        // 멀티뷰 칸은 항상 넓은 화면(칸이 작아 레터박스를 최대한 줄인다).
         wideScreenAuto:
-          IS_POPUP_PLAYER_FRAME && popupPlayerWide ? true : wideScreenAuto,
+          IS_MULTIVIEW_FRAME || (IS_POPUP_PLAYER_FRAME && popupPlayerWide)
+            ? true
+            : wideScreenAuto,
         // 위 wideScreenAuto 가 '저장값을 읽은 결과'인지. 일반 페이지 값은
         // loadFeatureFlags, 팝업 전용 값은 loadFollowPreview가 각각 확정한다.
         settingsLoaded: IS_POPUP_PLAYER_FRAME
