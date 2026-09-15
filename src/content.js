@@ -20401,6 +20401,76 @@
     else window.addEventListener("load", () => notifyParent("FRAME_READY"));
   }
 
+  // ── 멀티뷰 채팅 칸 ───────────────────────────────────────────────────────
+  // 부모가 보내는 테마·너비 지시를 받는다. 교차 출처라 부모가 직접 만질 수 없다.
+  if (IS_MULTIVIEW_CHAT_FRAME) {
+    // 치지직 채팅 페이지의 테마는 html 의 class/data-theme/color-scheme 세 곳이
+    // 함께 정한다(실측: 셋을 light 로 바꾸면 배경 흰색·글자 검정으로 바뀐다).
+    // ⚠ theme_dark 클래스만 떼는 것으로는 바뀌지 않는다.
+    const applyChatTheme = (dark) => {
+      const de = document.documentElement;
+      if (!de) return;
+      de.style.colorScheme = dark ? "dark" : "light";
+      de.className = dark ? "dark theme_dark" : "light";
+      de.dataset.theme = dark ? "theme_dark" : "light";
+    };
+
+    // 채팅 컨테이너는 min-width:353px 이라 그보다 좁게 못 줄인다(실측).
+    // 우리 화면에서는 사용자가 정한 너비를 따르게 풀어 준다.
+    const CHAT_MIN_WIDTH_STYLE_ID = "cheese-multiview-chat-width";
+    const relaxChatMinWidth = () => {
+      if (document.getElementById(CHAT_MIN_WIDTH_STYLE_ID)) return;
+      const style = document.createElement("style");
+      style.id = CHAT_MIN_WIDTH_STYLE_ID;
+      // 해시가 바뀌어도 걸리도록 부분 일치로 잡는다.
+      style.textContent =
+        "[class*='_container_']{min-width:0 !important;}" +
+        "html,body{min-width:0 !important;}";
+      (document.head || document.documentElement).appendChild(style);
+    };
+
+    // 치지직이 초기화하면서 html 속성을 다시 쓰므로 그때마다 되돌린다.
+    let chatDarkWanted = null;
+    const themeObserver = new MutationObserver(() => {
+      if (chatDarkWanted === null) return;
+      const de = document.documentElement;
+      const isDark = de.dataset.theme === "theme_dark";
+      if (isDark !== chatDarkWanted) applyChatTheme(chatDarkWanted);
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event.source !== window.parent) return;
+      if (!String(event.origin || "").startsWith("chrome-extension://")) return;
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== MULTIVIEW_MESSAGE) return;
+      if (data.type !== "SET_MULTIVIEW_CHAT_VIEW") return;
+      if (typeof data.dark !== "boolean") return;
+
+      chatDarkWanted = data.dark;
+      applyChatTheme(data.dark);
+      relaxChatMinWidth();
+      try {
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ["class", "data-theme", "style"],
+        });
+      } catch {}
+    });
+
+    // 부모에 준비를 알린다(첫 지시를 받기 위해).
+    const notifyChatReady = () => {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage(
+          { source: MULTIVIEW_MESSAGE, type: "CHAT_FRAME_READY" },
+          "*",
+        );
+      } catch {}
+    };
+    if (document.readyState === "complete") notifyChatReady();
+    else window.addEventListener("load", notifyChatReady);
+  }
   if (POPUP_PLAYER_START_WITHOUT_CHAT_FRAME) {
     // 초기 안정화 중이라도 사용자가 직접 토글하면 그 의사를 우선한다. programmatic
     // button.click()은 isTrusted=false라 이 경로에 들어오지 않는다.

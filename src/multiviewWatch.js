@@ -87,6 +87,29 @@
     } catch {}
   }
 
+  // 채팅 칸에 지금 테마를 알린다. 프레임이 준비됐다고 알려 올 때와 테마를 바꿀 때
+  // 보낸다(교차 출처라 부모가 그 안의 html 을 직접 만질 수 없다).
+  function postChatView() {
+    const frame = $("mvChatFrame");
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          source: MULTIVIEW_MESSAGE,
+          type: "SET_MULTIVIEW_CHAT_VIEW",
+          dark: document.documentElement.dataset.theme === "dark",
+        },
+        CHZZK_ORIGIN,
+      );
+    } catch {}
+  }
+
+  // 테마 단추는 multiviewTheme.js 가 다룬다. 바뀌면 채팅 칸에도 알린다.
+  new MutationObserver(postChatView).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+
   function applyChat(channelId) {
     if (state.chatChannelId === channelId && $("mvChatFrame").src) return;
     state.chatChannelId = channelId;
@@ -193,7 +216,11 @@
       const box = document.createElement("div");
       box.className = "mv-cell-inner";
       const frame = document.createElement("iframe");
-      frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+      // 이 프레임에 허용할 기능. 대상 출처를 명시(*)해 치지직 안에서도 살아 있게 한다.
+      // ⚠ 채팅 접기·넓은 화면은 이것과 무관하다. 그 둘은 프레임 안에서 치지직의
+      //   버튼을 누르는 방식이라 DOM 준비 시점 문제이지 권한 문제가 아니다.
+      frame.allow =
+        "autoplay *; fullscreen *; encrypted-media *; picture-in-picture *";
       frame.title = `${channel.channelName} 방송`;
       frame.referrerPolicy = "origin";
       box.appendChild(frame);
@@ -548,7 +575,9 @@
 
   // ── 채팅 크기 조절 ───────────────────────────────────────────────────────
   // ⚠ 끄는 동안 프레임은 그대로다. 칸 크기만 다시 계산되고 16:9 는 CSS 가 지킨다.
-  const CHAT_MIN = 240;
+  // ⚠ 치지직 채팅 컨테이너는 min-width:353px 이다(실측). 프레임 쪽에서 그 제한을
+  //   풀어 주므로 여기서는 읽기 편한 최소치만 지킨다.
+  const CHAT_MIN = 260;
   const CHAT_MAX_RATIO = 0.6; // 화면의 60% 를 넘지 않게
   const CHAT_SIZE_KEY = "cheeseMultiviewChatSize";
 
@@ -917,6 +946,15 @@
     if (data.type === "AUDIO_INTERACTION_REQUIRED") {
       showAudioNotice(channelId);
     }
+  });
+
+  // 채팅 칸이 준비되면 테마를 보낸다(채널을 바꿔 새로 뜰 때마다 온다).
+  window.addEventListener("message", (event) => {
+    if (event.origin !== CHZZK_ORIGIN) return;
+    const data = event.data;
+    if (data?.source !== MULTIVIEW_MESSAGE) return;
+    if (data.type !== "CHAT_FRAME_READY") return;
+    postChatView();
   });
 
   (async () => {

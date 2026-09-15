@@ -820,6 +820,31 @@ const checks = [];
   );
 
   await test(
+    "채팅 칸에 테마를 알린다",
+    `// 채팅 프레임은 교차 출처라 부모가 직접 만질 수 없다. 지시를 보내야 한다.
+     window.sentMessages.length=0;
+     // 프레임이 준비됐다고 알려 오면 지금 테마를 보낸다.
+     window.dispatchEvent(new MessageEvent('message',{
+       origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}}));
+     await wait(100);
+     let msgs=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_CHAT_VIEW');
+     check(msgs.length>=1,'준비 신호를 받고도 테마를 안 보냈다');
+     check(msgs[0].origin==='https://chzzk.naver.com','대상 origin 이 치지직이 아니다');
+     check(typeof msgs[0].data.dark==='boolean','dark 가 boolean 이 아니다');
+     // 테마를 바꾸면 다시 보내야 한다.
+     window.sentMessages.length=0;
+     const was=document.documentElement.dataset.theme;
+     document.documentElement.dataset.theme = was==='dark' ? 'light' : 'dark';
+     await wait(100);
+     msgs=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_CHAT_VIEW');
+     check(msgs.length>=1,'테마를 바꿨는데 채팅 칸에 안 알렸다');
+     check(msgs[msgs.length-1].data.dark===(was!=='dark'),
+       '알린 테마가 화면과 다르다');
+     document.documentElement.dataset.theme=was;`,
+  );
+
+  await test(
     "채팅 크기를 바꿔도 영상이 다시 걸리지 않는다",
     `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const before=videoSrcs().length;
