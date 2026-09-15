@@ -98,9 +98,12 @@ const call = (method, params = {}, sessionId) =>
       const n=layout.aux+1;
       const {direction,side}=L.stageStyle(layout,'');
       stage.style.flexDirection=direction;stage.dataset.chatSide=side;
-      frames.style.gridTemplateColumns=layout.columns;
-      frames.style.gridTemplateRows=layout.rows;
+      const tk=L.solveTracks(layout);
+      frames.style.gridTemplateColumns=tk?tk.columns:layout.columns;
+      frames.style.gridTemplateRows=tk?tk.rows:layout.rows;
       frames.style.gridTemplateAreas=layout.areas.join(' ');
+      frames.style.setProperty('--mv-ratio',tk?String(tk.ratio):'');
+      frames.classList.toggle('is-exact',Boolean(tk));
       frames.innerHTML='';
       for(let i=0;i<n;i++){
         const cell=document.createElement('div');
@@ -117,27 +120,70 @@ const call = (method, params = {}, sessionId) =>
         return {w:Math.round(r.width),h:Math.round(r.height),
           ratio:r.height>0?+(r.width/r.height).toFixed(3):0};
       });
-      res.push({id:layout.id,n,ratios});
+      // 칸 대비 영상 상자가 덮지 못한 비율(=칸 안 레터박스).
+      const cells=[...frames.querySelectorAll('.mv-cell')].map(c=>{
+        const cr=c.getBoundingClientRect();
+        const ir=c.querySelector('.mv-cell-inner').getBoundingClientRect();
+        const area=cr.width*cr.height;
+        return area>0?(1-(ir.width*ir.height)/area)*100:0;
+      });
+      res.push({id:layout.id,n,ratios,cells});
     }
     return res;
   })()`);
 
-  const TARGET = +(16 / 9).toFixed(3);
+  const TARGET = 16 / 9;
+  // ⚠ 허용 오차는 칸 높이에 반비례한다. 렌더가 서브픽셀에서 반올림되므로 작은
+  //   칸일수록 같은 1px 이 더 큰 비율 오차로 보인다(118px 칸에서 1px ≈ 0.03).
+  const tol = (h) => Math.max(0.005, (1.5 / Math.max(h, 1)) * TARGET);
   let bad = 0;
   for (const r of out) {
-    const offenders = r.ratios.filter((x) => Math.abs(x.ratio - TARGET) > 0.02);
+    const offenders = r.ratios.filter(
+      (x) => Math.abs(x.ratio - TARGET) > tol(x.h),
+    );
     const mark = offenders.length ? "  ⚠" : "   ";
     console.log(
       `${mark} ${r.id.padEnd(14)} 칸${r.n}  ` +
-        r.ratios.map((x) => `${x.w}x${x.h}(${x.ratio})`).join(" "),
+        r.ratios
+          .map(
+            (x) =>
+              `${Math.round(x.w)}x${Math.round(x.h)}(${x.ratio.toFixed(3)})`,
+          )
+          .join(" "),
     );
     if (offenders.length) bad++;
   }
-  console.log(`\n목표 16:9 = ${TARGET}`);
+  console.log(`\n목표 16:9 = ${TARGET.toFixed(3)}`);
   console.log(
     bad ? `${bad}개 배치에서 비율이 어긋난다` : "모든 배치에서 16:9 유지",
   );
   if (bad) process.exitCode = 1;
+
+  // 레터박스(칸 안 검은 여백) 검사.
+  // ⚠ 오른쪽/왼쪽+아래·위 4개는 기하학적으로 해가 없다 — 전체 폭 띠와 16:9 메인을
+  //   동시에 만족시키는 열 너비가 존재하지 않는다. 이 4개만 여백을 허용한다.
+  const EXPECT_LETTERBOX = new Set([
+    "right-bottom",
+    "left-bottom",
+    "right-top",
+    "left-top",
+  ]);
+  let wasteBad = 0;
+  for (const r of out) {
+    const worst = Math.max(...r.cells);
+    if (worst > 1 && !EXPECT_LETTERBOX.has(r.id)) {
+      console.log(
+        `  ⚠ ${r.id}: 칸 안 여백 ${worst.toFixed(1)}% (0 이어야 한다)`,
+      );
+      wasteBad++;
+    }
+  }
+  console.log(
+    wasteBad
+      ? `${wasteBad}개 배치에 예상치 못한 레터박스`
+      : `레터박스 없음 ${out.length - EXPECT_LETTERBOX.size}개 / 불가피 ${EXPECT_LETTERBOX.size}개`,
+  );
+  if (wasteBad) process.exitCode = 1;
 })()
   .catch((e) => {
     console.error("FAIL", e.message);

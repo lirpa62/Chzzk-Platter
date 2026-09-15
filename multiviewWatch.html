@@ -9,11 +9,81 @@
     <link rel="stylesheet" href="src/multiview.css" />
   </head>
   <body class="mv-watch-body">
+    <!-- 최상단 조작 막대: 메인 채널·채팅 채널·채팅 위치·배치를 바꾼다. -->
+    <header class="mv-topbar" id="mvTopbar" hidden>
+      <div class="mv-pop" data-mv-pop="main">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="main"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">메인 채널</span>
+          <span class="mv-pop-value" id="mvMainValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvMainPanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="chat">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="chat"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">채팅</span>
+          <span class="mv-pop-value" id="mvChatValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvChatPanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="side">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="side"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">채팅 위치</span>
+          <span class="mv-pop-value" id="mvSideValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvSidePanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="layout">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="layout"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">배치</span>
+          <span class="mv-pop-value" id="mvLayoutValue">-</span>
+        </button>
+        <div
+          class="mv-pop-panel mv-pop-panel-grid"
+          role="listbox"
+          id="mvLayoutPanel"
+          hidden
+        ></div>
+      </div>
+
+      <button type="button" class="mv-topbar-back" id="mvBack">
+        채널 다시 고르기
+      </button>
+    </header>
+
     <main class="mv-stage" id="mvStage">
-      <div class="mv-frames" id="mvFrames"></div>
+      <div class="mv-frames-fit" id="mvFramesFit">
+        <div class="mv-frames" id="mvFrames"></div>
+      </div>
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
-          <select id="mvChatChannel" aria-label="채팅을 볼 채널"></select>
+          <span class="mv-chat-title" id="mvChatTitle"></span>
           <button type="button" id="mvChatToggle" aria-label="채팅 접기">
             접기
           </button>
@@ -25,9 +95,6 @@
           referrerpolicy="origin"
         ></iframe>
       </aside>
-      <div class="mv-toolbar" id="mvToolbar">
-        <button type="button" id="mvBack">채널 다시 고르기</button>
-      </div>
     </main>
 
     <p class="mv-empty mv-watch-empty" id="mvWatchEmpty" hidden>

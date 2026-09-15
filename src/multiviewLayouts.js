@@ -207,7 +207,70 @@
     return { direction, side: side || "right" };
   }
 
-  const api = { LAYOUTS, SLOTS, layoutsFor, layoutById, stageStyle };
+  // 배치의 areas 를 읽어 각 슬롯이 차지하는 행·열 범위를 구한다.
+  function slotSpans(layout) {
+    const grid = layout.areas.map((row) =>
+      row.replace(/"/g, "").trim().split(/\s+/),
+    );
+    const spans = {};
+    grid.forEach((row, ri) =>
+      row.forEach((slot, ci) => {
+        if (slot === ".") return;
+        const cur = spans[slot] || { r0: ri, r1: ri, c0: ci, c1: ci };
+        cur.r0 = Math.min(cur.r0, ri);
+        cur.r1 = Math.max(cur.r1, ri);
+        cur.c0 = Math.min(cur.c0, ci);
+        cur.c1 = Math.max(cur.c1, ci);
+        spans[slot] = cur;
+      }),
+    );
+    return { grid, spans, rows: grid.length, cols: grid[0].length };
+  }
+
+  // 모든 칸이 정확히 16:9 가 되는 열 너비 비율을 푼다.
+  //
+  // ⚠ 레터박스(검은 여백)를 없애려면 '칸 안에 16:9 를 끼워 넣는' 것으로는 안 된다.
+  //   칸 자체가 16:9 여야 영상이 칸을 꽉 채운다. 행 높이를 모두 1 로 두고 각 칸의
+  //   16:9 조건에서 열 너비를 역산한다. N 행을 병합한 칸은 너비가 (16/9)*N 이다.
+  //   해가 없으면 null 을 돌려주고, 부르는 쪽이 기존 fr 값으로 넘어간다.
+  function solveTracks(layout) {
+    const { spans, rows, cols } = slotSpans(layout);
+    const R = 16 / 9;
+    const widths = new Array(cols).fill(null);
+    // 한 열만 차지하는 칸이 그 열의 너비를 결정한다.
+    for (const span of Object.values(spans)) {
+      if (span.c0 !== span.c1) continue;
+      const need = R * (span.r1 - span.r0 + 1);
+      if (widths[span.c0] !== null && Math.abs(widths[span.c0] - need) > 1e-6) {
+        return null; // 같은 열에 서로 다른 너비를 요구하는 칸이 있다
+      }
+      widths[span.c0] = need;
+    }
+    if (widths.some((w) => w === null)) return null;
+    // 여러 열을 병합한 칸도 16:9 인지 확인한다.
+    for (const span of Object.values(spans)) {
+      if (span.c0 === span.c1) continue;
+      let sum = 0;
+      for (let c = span.c0; c <= span.c1; c += 1) sum += widths[c];
+      if (Math.abs(sum - R * (span.r1 - span.r0 + 1)) > 1e-6) return null;
+    }
+    return {
+      columns: widths.map((w) => `${w.toFixed(6)}fr`).join(" "),
+      rows: new Array(rows).fill("1fr").join(" "),
+      // 격자 전체가 지켜야 할 가로:세로. 스테이지는 이 비율로 잡아야 칸이 16:9 가 된다.
+      ratio: widths.reduce((a, b) => a + b, 0) / rows,
+    };
+  }
+
+  const api = {
+    LAYOUTS,
+    SLOTS,
+    layoutsFor,
+    layoutById,
+    stageStyle,
+    slotSpans,
+    solveTracks,
+  };
   if (typeof module === "object" && module.exports) module.exports = api;
   else globalThis.CheeseMultiviewLayouts = api;
 })();

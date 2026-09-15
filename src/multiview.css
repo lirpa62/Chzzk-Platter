@@ -276,7 +276,152 @@ body {
 
 /* ── 시청 화면(multiviewWatch.html) ────────────────────────────────── */
 .mv-watch-body {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+/* 최상단 조작 막대 */
+.mv-topbar {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  display: flex;
+  flex: none;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.mv-topbar-back {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  margin-left: auto;
+  padding: 6px 10px;
+}
+.mv-topbar-back:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+
+/* 커스텀 셀렉트 팝오버 */
+.mv-pop {
+  position: relative;
+}
+.mv-pop-button {
+  align-items: baseline;
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+}
+.mv-pop-button:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+.mv-pop-label {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+}
+.mv-pop-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-pop-button[aria-expanded="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-pop-panel {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  left: 0;
+  max-height: 320px;
+  min-width: 100%;
+  overflow-y: auto;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 10;
+}
+.mv-pop-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+}
+.mv-pop-option {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  overflow: hidden;
+  padding: 7px 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-pop-option:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+.mv-pop-option.is-on {
+  background: var(--popup-brand-soft, rgba(0, 255, 163, 0.14));
+  color: var(--popup-brand, #00ffa3);
+}
+
+/* 칸 안 '메인으로' 버튼: 평소엔 숨고 칸에 마우스를 올리면 나타난다. */
+.mv-cell-main {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  left: 8px;
+  opacity: 0;
+  padding: 5px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+.mv-cell:hover .mv-cell-main {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mv-cell-main:hover {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: var(--popup-brand, #00ffa3);
+}
+/* 이미 메인인 칸에는 올릴 필요가 없다. */
+.mv-cell.is-main .mv-cell-main {
+  display: none;
+}
+
+.mv-chat-title {
+  flex: 1 1 auto;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mv-watch-empty {
   padding: 40px 16px;
@@ -285,9 +430,13 @@ body {
 /* ── 실행 화면 ─────────────────────────────────────────────────────── */
 /* ⚠ 채팅을 격자 안에 넣지 않는다. 바깥 flex 로 감싸야 채팅을 접었다 펴도
    프레임 격자가 다시 계산되지 않는다(리플로우 중 재생이 끊길 수 있다). */
+/* ⚠ height:100% 로 두면 최상단 막대 높이만큼 화면 밖으로 넘친다.
+   막대와 형제로 flex 배치되므로 남은 높이를 받아야 한다. */
 .mv-stage {
   display: flex;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
   position: relative;
 }
 .mv-frames {
@@ -296,6 +445,40 @@ body {
   gap: 2px;
   min-height: 0;
   min-width: 0;
+}
+/* 칸이 정확히 16:9 로 떨어지는 배치: 격자 전체를 필요한 비율로 묶고 가운데 둔다.
+   이러면 칸 안에는 여백이 전혀 없고, 남는 자리는 격자 바깥에 한 번만 생긴다.
+   ⚠ flex 아이템에 aspect-ratio 를 주면 flex 가 이긴다(실측: 0.889 를 줘도
+   1.422 로 늘어남). 그래서 격자를 flex 로 늘리지 않는 래퍼 안에 넣는다. */
+.mv-frames-fit {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+}
+/* 래퍼 크기를 기준으로 '넘치지 않는 선에서 가장 큰' 격자를 만든다.
+   min() 으로 직접 계산해야 확실하다 — aspect-ratio 는 flex 나 grid 문맥에 따라
+   무시되거나(실측) 0 으로 접히는 경우가 있다. --mv-ratio 는 렌더가 채운다. */
+.mv-frames.is-exact {
+  flex: 0 0 auto;
+  height: min(100%, 100cqw / var(--mv-ratio));
+  width: min(100%, 100cqh * var(--mv-ratio));
+}
+.mv-frames-fit {
+  container-type: size;
+}
+/* 16:9 해가 없는 배치(오른쪽+아래 등)는 예전처럼 격자가 자리를 다 채우고,
+   칸 안쪽 상자가 16:9 를 지킨다(칸마다 약간의 여백이 남는다). */
+.mv-frames:not(.is-exact) {
+  flex: 1 1 auto;
+  height: 100%;
+  width: 100%;
+}
+.mv-frames.is-exact .mv-cell-inner {
+  height: 100%;
+  width: 100%;
 }
 /* 모든 화면은 16:9 를 지킨다. 칸의 모양이 어떻든(세로로 길든 가로로 넓든)
    안쪽 상자를 16:9 로 잡고 남는 자리는 검은 여백으로 둔다. 칸에 그냥 100% 로
@@ -336,7 +519,7 @@ body {
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 320px;
+  width: 370px;
 }
 .mv-stage[data-chat-side="bottom"] .mv-chat,
 .mv-stage[data-chat-side="top"] .mv-chat {

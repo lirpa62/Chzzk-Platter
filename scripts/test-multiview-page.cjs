@@ -296,6 +296,81 @@ const checks = [];
   );
 
   await test(
+    "최상단 막대가 현재 상태를 보여 준다",
+    `check(!document.getElementById('mvTopbar').hidden,'막대가 숨겨져 있다');
+     const main=document.getElementById('mvMainValue').textContent;
+     check(main && main!=='-','메인 채널 이름이 비어 있다: '+main);
+     check(document.getElementById('mvLayoutValue').textContent!=='-','배치 이름이 비어 있다');
+     check(document.getElementById('mvSideValue').textContent!=='-','채팅 위치가 비어 있다');`,
+  );
+
+  await test(
+    "팝오버를 열면 고른 채널이 모두 나오고 바깥을 누르면 닫힌다",
+    `document.querySelector('[data-mv-pop-toggle="main"]').click();
+     const panel=document.getElementById('mvMainPanel');
+     check(!panel.hidden,'팝오버가 열리지 않았다');
+     check(panel.querySelectorAll('[data-mv-set-main]').length===2,
+       '메인 후보가 2개가 아니다');
+     check(panel.querySelectorAll('.mv-pop-option.is-on').length===1,
+       '현재 선택 표시가 1개가 아니다');
+     document.body.click();
+     check(panel.hidden,'바깥 클릭으로 닫히지 않았다');`,
+  );
+
+  await test(
+    "메인을 바꾸면 해당 두 칸만 다시 걸리고 나머지는 그대로다",
+    `const before=window.frameSrcs.length;
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const sub=cells.find(c=>!c.classList.contains('is-main'));
+     const subId=sub.dataset.channelId;
+     sub.querySelector('[data-mv-promote]').click();
+     await wait(100);
+     // 메인 2개(이전·새) 프레임만 src 가 다시 걸려야 한다.
+     const added=window.frameSrcs.length-before;
+     check(added===2,'다시 걸린 프레임이 2개가 아니라 '+added+'개');
+     const nowMain=document.querySelector('.mv-cell.is-main');
+     check(nowMain.dataset.channelId===subId,'메인 표시가 옮겨가지 않았다');
+     const newSrcs=window.frameSrcs.slice(-2);
+     const promoted=newSrcs.find(s=>s.includes(subId));
+     check(promoted.includes('cheeseMultiMain=1'),'새 메인이 메인으로 안 걸렸다');
+     check(promoted.includes('cheeseMultiMuted=0'),'새 메인이 음소거로 걸렸다');
+     const demoted=newSrcs.find(s=>!s.includes(subId));
+     check(demoted.includes('cheeseMultiMuted=1'),'이전 메인이 음소거로 안 바뀌었다');`,
+  );
+
+  await test(
+    "배치를 바꿔도 프레임을 다시 걸지 않는다",
+    `const before=window.frameSrcs.length;
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     const opts=[...document.querySelectorAll('[data-mv-set-layout]')];
+     const other=opts.find(o=>!o.classList.contains('is-on'));
+     check(other,'고를 다른 배치가 없다');
+     const wanted=other.dataset.mvSetLayout;
+     other.click();
+     await wait(100);
+     check(window.frameSrcs.length===before,
+       '배치 변경으로 방송이 다시 로드됐다');
+     check(document.getElementById('mvLayoutValue').textContent!=='-','배치 이름이 갱신 안 됨');
+     // 새 배치에서도 칸이 모두 자리를 받았는지.
+     const placed=[...document.querySelectorAll('.mv-cell')]
+       .filter(c=>c.style.gridArea);
+     check(placed.length===2,'자리를 못 받은 칸이 있다');`,
+  );
+
+  await test(
+    "채팅 채널을 바꾸면 그 채널의 채팅 주소로 갈아탄다",
+    `document.querySelector('[data-mv-pop-toggle="chat"]').click();
+     const opts=[...document.querySelectorAll('[data-mv-set-chat]')];
+     const other=opts.find(o=>!o.classList.contains('is-on'));
+     const wanted=other.dataset.mvSetChat;
+     other.click();
+     await wait(100);
+     const chat=[...window.frameSrcs].reverse().find(s=>s.includes('cheeseMultiChat=1'));
+     check(chat.includes(wanted),'채팅이 고른 채널로 안 바뀌었다');
+     check(document.getElementById('mvChatValue').textContent!=='-','채팅 표시가 비었다');`,
+  );
+
+  await test(
     "모든 칸이 16:9 로 렌더된다",
     `const boxes=[...document.querySelectorAll('.mv-cell-inner')];
      check(boxes.length===2,'칸이 2개가 아니다');
