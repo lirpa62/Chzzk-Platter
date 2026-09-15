@@ -783,6 +783,64 @@ const checks = [];
   );
 
   await test(
+    "칸을 끌어 자리를 바꿔도 프레임을 다시 걸지 않는다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     check(cells.length>=2,'칸이 2개 미만이다');
+     const mainCell=document.querySelector('.mv-cell.is-main');
+     const other=cells.find(c=>c!==mainCell);
+     const mainId=mainCell.dataset.channelId, otherId=other.dataset.channelId;
+     // 손잡이가 있어야 드래그를 시작할 수 있다(iframe 위에서는 못 잡는다).
+     const grip=other.querySelector('.mv-cell-grip');
+     check(grip && grip.draggable,'자리 바꾸기 손잡이가 없다');
+     const dt={effectAllowed:'',setDragImage(){},};
+     const fire=(el,type,extra)=>{const e=new Event(type,{bubbles:true,cancelable:true});
+       e.dataTransfer=dt; Object.assign(e,extra||{}); el.dispatchEvent(e); return e;};
+     fire(grip,'dragstart');
+     check(document.getElementById('mvFrames').classList.contains('is-dragging'),
+       '드래그 중 표시가 안 붙었다');
+     fire(mainCell,'dragover');
+     fire(mainCell,'drop');
+     fire(grip,'dragend');
+     await wait(150);
+     // 메인 자리로 끌었으니 메인이 바뀌어야 한다.
+     check(document.querySelector('.mv-cell.is-main').dataset.channelId===otherId,
+       '메인 자리로 끌었는데 메인이 안 바뀌었다');
+     // 그래도 영상은 다시 걸리지 않는다.
+     check(videoSrcs().length===before,
+       '자리를 바꿨는데 영상이 다시 걸렸다('+(videoSrcs().length-before)+'개)');
+     check(!document.getElementById('mvFrames').classList.contains('is-dragging'),
+       'dragend 뒤에도 드래그 표시가 남았다');
+     check(!document.querySelector('.mv-cell.is-drop-target'),'드롭 표시가 남았다');
+     // 되돌린다(칸 안 '메인으로' 버튼을 쓴다).
+     document.querySelector('.mv-cell[data-channel-id="'+mainId+'"] [data-mv-promote]')
+       ?.click();
+     await wait(100);`,
+  );
+
+  await test(
+    "채팅 크기를 바꿔도 영상이 다시 걸리지 않는다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     const handle=document.getElementById('mvChatResize');
+     check(handle,'크기 조절 손잡이가 없다');
+     const stage=document.getElementById('mvStage');
+     // 오른쪽 채팅으로 두고 키보드로 넓혀 본다.
+     document.querySelector('[data-mv-pop-toggle="side"]').click();
+     document.querySelector('[data-mv-set-side="right"]').click();
+     await wait(100);
+     const w0=document.getElementById('mvChat').getBoundingClientRect().width;
+     for(let i=0;i<3;i++)
+       handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+     await wait(100);
+     const w1=document.getElementById('mvChat').getBoundingClientRect().width;
+     check(w1!==w0,'채팅 크기가 바뀌지 않았다('+w0+' → '+w1+')');
+     check(stage.style.getPropertyValue('--mv-chat-w'),'크기 변수가 설정되지 않았다');
+     check(videoSrcs().length===before,'채팅 크기를 바꿨는데 영상이 다시 걸렸다');`,
+  );
+
+  await test(
     "칸마다 16:9 상자가 만들어진다",
     `// 실제 비율·레터박스 측정은 test-multiview-aspect.cjs 가 18개 배치 전부를
      // 다룬다. 여기서는 구조만 확인한다.

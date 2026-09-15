@@ -168,6 +168,35 @@
       chat: ["left"],
     },
     {
+      // 6채널인데 왼쪽 대칭이 빠져 있었다(right-5 만 있었다).
+      id: "left-5",
+      label: "왼쪽 5",
+      aux: 5,
+      columns: "1fr 3fr",
+      rows: "repeat(5, 1fr)",
+      areas: ['"a m"', '"b m"', '"c m"', '"d m"', '"e m"'],
+      chat: ["right"],
+    },
+    {
+      // 메인을 크게 두고 보조를 오른쪽 2 + 아래 3 으로 두른다.
+      id: "right2-bottom3",
+      label: "오른쪽 2+아래 3",
+      aux: 5,
+      columns: "repeat(3, 1fr)",
+      rows: "1fr 1fr 1fr",
+      areas: ['"m m a"', '"m m b"', '"c d e"'],
+      chat: ["left", "bottom"],
+    },
+    {
+      id: "left2-bottom3",
+      label: "왼쪽 2+아래 3",
+      aux: 5,
+      columns: "repeat(3, 1fr)",
+      rows: "1fr 1fr 1fr",
+      areas: ['"a m m"', '"b m m"', '"c d e"'],
+      chat: ["right", "bottom"],
+    },
+    {
       id: "grid-3x2",
       label: "그리드 3×2",
       aux: 5,

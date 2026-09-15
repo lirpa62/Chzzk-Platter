@@ -186,6 +186,8 @@
       cell.className = "mv-cell";
       cell.dataset.channelId = channel.channelId;
       cell.dataset.status = "loading";
+      // 자리 바꾸기는 칸 머리의 손잡이로만 시작한다(영상 위 드래그와 겹치지 않게).
+      cell.draggable = false;
       // 칸이 이미 16:9 면(정확 배치) 상자는 칸을 그대로 꽉 채운다. 아닌 배치에서는
       // 상자가 16:9 를 지키고 남는 자리가 여백으로 남는다.
       const box = document.createElement("div");
@@ -198,6 +200,23 @@
 
       const overlay = document.createElement("div");
       overlay.className = "mv-cell-status";
+
+      // 자리 바꾸기 손잡이.
+      // ⚠ iframe 은 교차 출처라 그 위에서 시작한 드래그 이벤트가 부모로 오지 않는다.
+      //   그래서 칸 위에 얹은 이 손잡이에서만 드래그를 시작한다.
+      const grip = document.createElement("div");
+      grip.className = "mv-cell-grip";
+      grip.draggable = true;
+      grip.title = "끌어서 자리 바꾸기";
+      grip.setAttribute("aria-label", `${channel.channelName} 자리 바꾸기`);
+      grip.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" ' +
+        'aria-hidden="true"><circle cx="9" cy="6" r="1.6"></circle>' +
+        '<circle cx="15" cy="6" r="1.6"></circle>' +
+        '<circle cx="9" cy="12" r="1.6"></circle>' +
+        '<circle cx="15" cy="12" r="1.6"></circle>' +
+        '<circle cx="9" cy="18" r="1.6"></circle>' +
+        '<circle cx="15" cy="18" r="1.6"></circle></svg>';
 
       // 칸 안에서 바로 메인으로 올리는 버튼.
       const promote = document.createElement("button");
@@ -214,6 +233,7 @@
         "<span>메인으로</span>";
       cell.appendChild(box);
       cell.appendChild(overlay);
+      cell.appendChild(grip);
       cell.appendChild(promote);
       cells.set(channel.channelId, cell);
       frames.appendChild(cell);
@@ -266,6 +286,10 @@
   // 메인 변경: 소리·화질 지시만 바꾼다.
   // ⚠ iframe src 를 절대 다시 넣지 않는다. 넣으면 치지직 페이지가 통째로 다시 로드돼
   //   방송이 처음부터 시작된다. 상태만 postMessage 로 보내고 프레임은 그대로 둔다.
+  //
+  // ⚠ 그래도 '메인만 고화질' 을 켜 두면 전환이 느리게 느껴진다. 480p ↔ 고화질로
+  //   해상도가 바뀌면 치지직 플레이어가 스트림을 다시 잡기 때문이다(재로드가 아니라
+  //   화질 전환 자체의 비용). 화질을 그대로 두면 음소거만 바뀌어 즉시 전환된다.
   function setMain(channelId) {
     if (channelId === state.mainId || !cells.has(channelId)) return;
     const before = state.mainId;
@@ -415,6 +439,9 @@
     ensureCells();
     applyLayout();
     applyChat(state.chatChannelId);
+    restoreChatSize();
+    bindChatResize();
+    bindCellDrag();
     $("mvTopbar").hidden = false;
   }
 
@@ -452,6 +479,162 @@
       chatSide,
       mainHighQuality: raw.mainHighQuality !== false,
     };
+  }
+
+  // ── 칸 끌어서 자리 바꾸기 ─────────────────────────────────────────────────
+  // 두 칸의 순서를 맞바꾼다. applyLayout 이 gridArea 만 다시 매기므로 프레임은
+  // 그대로 살아 있다(다시 만들면 방송이 처음부터 로드된다).
+  //
+  // ⚠ 맨 앞이 메인이다. 메인 자리로 끌어다 놓으면 그 채널이 메인이 되며, 그때만
+  //   소리·화질 지시를 다시 보낸다.
+  function swapCells(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const order = orderedChannels();
+    const from = order.findIndex((c) => c.channelId === fromId);
+    const to = order.findIndex((c) => c.channelId === toId);
+    if (from < 0 || to < 0) return;
+    [order[from], order[to]] = [order[to], order[from]];
+    state.chosen = order;
+    const nextMain = order[0].channelId;
+    if (nextMain !== state.mainId) setMain(nextMain);
+    else applyLayout();
+  }
+
+  function bindCellDrag() {
+    const frames = $("mvFrames");
+    if (!frames || frames.dataset.dragBound === "1") return;
+    frames.dataset.dragBound = "1";
+    let dragId = "";
+
+    frames.addEventListener("dragstart", (event) => {
+      // 손잡이에서 시작한 것만 받는다.
+      if (!event.target.closest?.(".mv-cell-grip")) return;
+      const cell = event.target.closest?.(".mv-cell");
+      if (!cell) return;
+      dragId = cell.dataset.channelId || "";
+      event.dataTransfer.effectAllowed = "move";
+      // ⚠ iframe 위에서 시작한 드래그는 기본 이미지가 비어 보인다. 칸을 지정한다.
+      event.dataTransfer.setDragImage?.(cell, 20, 20);
+      cell.classList.add("is-dragging");
+      // 끄는 동안만 프레임이 포인터를 먹지 않게 한다(위 CSS 주석 참고).
+      frames.classList.add("is-dragging");
+    });
+    frames.addEventListener("dragover", (event) => {
+      if (!dragId) return;
+      const over = event.target.closest?.(".mv-cell");
+      if (!over || over.dataset.channelId === dragId) return;
+      event.preventDefault();
+      over.classList.add("is-drop-target");
+    });
+    frames.addEventListener("dragleave", (event) => {
+      event.target.closest?.(".mv-cell")?.classList.remove("is-drop-target");
+    });
+    frames.addEventListener("drop", (event) => {
+      const over = event.target.closest?.(".mv-cell");
+      if (!dragId || !over) return;
+      event.preventDefault();
+      swapCells(dragId, over.dataset.channelId);
+      dragId = "";
+    });
+    // ⚠ 엉뚱한 곳에 놓거나 취소해도 여기로는 반드시 온다. 표시를 확실히 지운다.
+    frames.addEventListener("dragend", () => {
+      dragId = "";
+      frames.classList.remove("is-dragging");
+      for (const cell of frames.querySelectorAll(".mv-cell")) {
+        cell.classList.remove("is-dragging", "is-drop-target");
+      }
+    });
+  }
+
+  // ── 채팅 크기 조절 ───────────────────────────────────────────────────────
+  // ⚠ 끄는 동안 프레임은 그대로다. 칸 크기만 다시 계산되고 16:9 는 CSS 가 지킨다.
+  const CHAT_MIN = 240;
+  const CHAT_MAX_RATIO = 0.6; // 화면의 60% 를 넘지 않게
+  const CHAT_SIZE_KEY = "cheeseMultiviewChatSize";
+
+  function applyChatSize(px) {
+    const stage = $("mvStage");
+    const vertical = state.chatSide === "bottom" || state.chatSide === "top";
+    const limit =
+      (vertical ? stage.clientHeight : stage.clientWidth) * CHAT_MAX_RATIO;
+    const size = Math.round(
+      Math.max(CHAT_MIN, Math.min(px, Math.max(CHAT_MIN, limit))),
+    );
+    stage.style.setProperty(
+      vertical ? "--mv-chat-h" : "--mv-chat-w",
+      `${size}px`,
+    );
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "{}");
+      saved[vertical ? "h" : "w"] = size;
+      localStorage.setItem(CHAT_SIZE_KEY, JSON.stringify(saved));
+    } catch {}
+  }
+
+  function restoreChatSize() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "{}");
+      const stage = $("mvStage");
+      if (Number(saved.w) > 0) {
+        stage.style.setProperty("--mv-chat-w", `${Number(saved.w)}px`);
+      }
+      if (Number(saved.h) > 0) {
+        stage.style.setProperty("--mv-chat-h", `${Number(saved.h)}px`);
+      }
+    } catch {}
+  }
+
+  function bindChatResize() {
+    const handle = $("mvChatResize");
+    if (!handle) return;
+    let dragging = false;
+
+    const sizeFromPointer = (event) => {
+      const rect = $("mvChat").getBoundingClientRect();
+      // 손잡이 반대쪽 모서리에서 포인터까지가 새 크기다. 채팅이 어느 쪽에 있든
+      // 이 계산이면 맞는다(오른쪽이면 오른 모서리 기준, 왼쪽이면 왼 모서리 기준).
+      switch (state.chatSide) {
+        case "left":
+          return event.clientX - rect.left;
+        case "bottom":
+          return rect.bottom - event.clientY;
+        case "top":
+          return event.clientY - rect.top;
+        default:
+          return rect.right - event.clientX;
+      }
+    };
+
+    handle.addEventListener("pointerdown", (event) => {
+      dragging = true;
+      handle.classList.add("is-dragging");
+      handle.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      applyChatSize(sizeFromPointer(event));
+    });
+    const stop = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("is-dragging");
+      handle.releasePointerCapture?.(event.pointerId);
+    };
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+
+    // 키보드로도 조절할 수 있게 한다(손잡이에 초점이 있을 때).
+    handle.addEventListener("keydown", (event) => {
+      const vertical = state.chatSide === "bottom" || state.chatSide === "top";
+      const dec = vertical ? "ArrowUp" : "ArrowLeft";
+      const inc = vertical ? "ArrowDown" : "ArrowRight";
+      if (event.key !== dec && event.key !== inc) return;
+      const rect = $("mvChat").getBoundingClientRect();
+      const now = vertical ? rect.height : rect.width;
+      applyChatSize(now + (event.key === inc ? 20 : -20));
+      event.preventDefault();
+    });
   }
 
   // ── 빠른 채널 바꾸기 ─────────────────────────────────────────────────────

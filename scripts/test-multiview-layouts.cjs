@@ -71,6 +71,18 @@ ok(
   "제공하지 않는 자리는 기본값으로 되돌린다",
 );
 
+console.log("\n[대칭] 오른쪽 배치에는 왼쪽 짝이 있어야 한다");
+// 6채널에 왼쪽 5 가 빠져 있었다(오른쪽 5 만 있었다).
+for (const layout of L.LAYOUTS) {
+  if (!layout.id.startsWith("right-")) continue;
+  const mirror = "left-" + layout.id.slice("right-".length);
+  ok(!!L.layoutById(mirror), `${layout.id} 의 짝 ${mirror} 이 있다`);
+}
+for (const n of [2, 3, 4, 5, 6]) {
+  const ids = L.layoutsFor(n).map((l) => l.id);
+  ok(ids.length >= 2, `${n}채널 배치 ${ids.length}개: ${ids.join(", ")}`);
+}
+
 console.log("\n[layoutById] 없는 id 는 null");
 ok(L.layoutById("없는배치") === null, "모르는 id 는 null 을 돌려준다");
 ok(L.layoutById(right.id) === right, "id 로 같은 배치를 찾는다");
