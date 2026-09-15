@@ -218,6 +218,41 @@ const checks = [];
   );
 
   await test(
+    "전용 팔로잉에서만 구역 폴더가 나오고 고르면 그 구역만 남는다",
+    `const folders=document.getElementById('mvFolders');
+     // 팔로잉 탭에서는 폴더가 없어야 한다.
+     check(folders.hidden,'팔로잉 탭인데 구역 폴더가 보인다');
+     document.querySelector('[data-mv-source="custom"]').click();
+     await wait(400);
+     check(!folders.hidden,'전용 팔로잉인데 구역 폴더가 없다');
+     const names=[...folders.querySelectorAll('.mv-folder-name')].map(e=>e.textContent);
+     check(names[0]==='전체','첫 폴더가 전체가 아니다: '+names.join(','));
+     check(names.includes('즐겨찾기')&&names.includes('게임')&&names.includes('팔로잉'),
+       '구역 폴더가 빠졌다: '+names.join(','));
+     // 구역을 고르면 그 구역만 남는다.
+     const 게임=[...folders.querySelectorAll('.mv-folder')]
+       .find(f=>f.querySelector('.mv-folder-name').textContent==='게임');
+     게임.click();
+     await wait(300);
+     const heads=[...document.querySelectorAll('#mvChannelList .mv-section-name')]
+       .map(e=>e.textContent);
+     check(heads.length===1&&heads[0]==='게임',
+       '고른 구역만 남지 않았다: '+heads.join(','));
+     // ⚠ 폴더를 고르면 목록을 다시 그리므로 버튼 노드가 새로 생긴다. 다시 찾는다.
+     const 게임2=[...folders.querySelectorAll('.mv-folder')]
+       .find(f=>f.querySelector('.mv-folder-name').textContent==='게임');
+     check(게임2.getAttribute('aria-pressed')==='true','고른 폴더 표시가 없다');
+     // 전체로 되돌린다.
+     folders.querySelector('[data-mv-folder=""]').click();
+     await wait(300);
+     check(document.querySelectorAll('#mvChannelList .mv-section-name').length>1,
+       '전체로 돌아오지 않았다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);
+     check(folders.hidden,'팔로잉으로 돌아왔는데 폴더가 남았다');`,
+  );
+
+  await test(
     "채널을 고르면 고른 목록과 개수가 갱신된다",
     // ⚠ 한 번 고를 때마다 목록을 다시 그리므로(선택 표시 갱신), 이전에 받아둔
     //   버튼 노드는 DOM 에서 떨어져 클릭이 먹지 않는다. 매번 다시 찾는다.
@@ -255,6 +290,20 @@ const checks = [];
      // 다시 팔로잉으로 돌려놓는다.
      document.querySelector('[data-mv-source="following"]').click();
      await wait(200);`,
+  );
+
+  await test(
+    "배치 미리보기가 버튼 밖으로 삐져나가지 않는다",
+    `// ⚠ 가로로 긴 배치(오른쪽 1 은 3.56:1)는 width:100% + aspect-ratio 로 두면
+     //   버튼 폭을 넘어 밖으로 나간다(실측: 87px 버튼 안에 149px).
+     for(const btn of document.querySelectorAll('#mvLayoutGrid .mv-layout')){
+       const br=btn.getBoundingClientRect();
+       const pv=btn.querySelector('.mv-layout-preview').getBoundingClientRect();
+       check(pv.right<=br.right+1 && pv.left>=br.left-1 && pv.bottom<=br.bottom+1,
+         btn.dataset.mvLayout+' 미리보기가 버튼 밖으로 나갔다: 버튼 '+
+         Math.round(br.width)+'x'+Math.round(br.height)+' / 미리보기 '+
+         Math.round(pv.width)+'x'+Math.round(pv.height));
+     }`,
   );
 
   await test(
@@ -385,6 +434,18 @@ const checks = [];
        '채팅 주소가 /live/<id>/chat 이 아니다: '+chat);
      check(!chat.includes('cheeseMultiQuality'),
        '채팅 전용 페이지에는 화질 지시가 필요 없다');`,
+  );
+
+  await test(
+    "닫아 둔 팝오버는 실제로 화면에서 사라진다",
+    `// ⚠ .mv-pop-panel 이 display:flex/grid 를 지정하므로 hidden 속성만으로는
+     //   숨겨지지 않았다(computed display 가 flex/grid 로 남아 전부 펼쳐져 보였다).
+     for(const id of ['mvMainPanel','mvChatPanel','mvSidePanel','mvLayoutPanel']){
+       const el=document.getElementById(id);
+       check(el.hidden,id+' 이 처음부터 열려 있다');
+       check(getComputedStyle(el).display==='none',
+         id+' 이 hidden 인데 화면에 보인다(display: '+getComputedStyle(el).display+')');
+     }`,
   );
 
   await test(

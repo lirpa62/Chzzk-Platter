@@ -19,8 +19,10 @@
   const HASH_RE = /^[0-9a-f]{32}$/i;
 
   const $ = (id) => document.getElementById(id);
+  // 전용 팔로잉에서 지금 보고 있는 구역(빈 문자열이면 전체).
   const state = {
     handoffId: "",
+    folder: "",
     source: "following",
     chosen: [], // [{channelId, channelName, channelImageUrl, liveTitle, viewers}]
     layoutId: "",
@@ -42,6 +44,47 @@
         })[c],
     );
   const fmt = (n) => Number(n || 0).toLocaleString("ko-KR");
+
+  // 구역 아이콘(lucide). 그룹은 사용자가 고른 아이콘이 따로 있지만 여기서는
+  // 폴더 하나로 통일한다(아이콘 집합을 통째로 들고 오지 않기 위해).
+  const FOLDER_ICONS = {
+    star: '<path d="M11.5 3.2a.6.6 0 0 1 1 0l2.2 4.5 5 .7a.6.6 0 0 1 .3 1l-3.6 3.5.9 4.9a.6.6 0 0 1-.9.6L12 16.1l-4.4 2.3a.6.6 0 0 1-.9-.6l.9-4.9L4 9.4a.6.6 0 0 1 .3-1l5-.7z"></path>',
+    folder:
+      '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>',
+    heart:
+      '<path d="M19 14c1.5-1.5 3-3.3 3-5.5A5.5 5.5 0 0 0 12 5.4 5.5 5.5 0 0 0 2 8.5c0 2.2 1.5 4 3 5.5l7 7Z"></path>',
+    users:
+      '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.9"></path><path d="M16 3.1a4 4 0 0 1 0 7.8"></path>',
+  };
+  const folderIcon = (name) =>
+    '<svg class="mv-folder-icon" width="18" height="18" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    (FOLDER_ICONS[name] || FOLDER_ICONS.folder) +
+    "</svg>";
+
+  // 구역 폴더(전용 팔로잉 전용). 통나무파워 탐색기 폴더 카드와 같은 모양.
+  function renderFolders(sections) {
+    const box = $("mvFolders");
+    if (state.source !== "custom" || !sections.length) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    const total = sections.reduce((n, sec) => n + sec.rows.length, 0);
+    const card = (id, label, icon, count) =>
+      `<button type="button" class="mv-folder${state.folder === id ? " is-on" : ""}" ` +
+      `data-mv-folder="${esc(id)}" aria-pressed="${state.folder === id}">` +
+      folderIcon(icon) +
+      `<span class="mv-folder-name">${esc(label)}</span>` +
+      `<span class="mv-folder-count">${fmt(count)}</span></button>`;
+    box.innerHTML =
+      card("", "전체", "users", total) +
+      sections
+        .map((sec) => card(sec.id, sec.label, sec.icon, sec.rows.length))
+        .join("");
+    box.hidden = false;
+  }
 
   function newHandoffId() {
     if (crypto?.randomUUID) return crypto.randomUUID();
@@ -65,11 +108,13 @@
   }
 
   // 프로필 원본은 수백 KB 다. 목록에 수십 개를 그리므로 리사이즈본을 쓴다.
-  const thumb = (url) => {
+  // ⚠ 프로필 리사이즈는 f120_120_na 와 f240_240_na 만 있다(실측: 360·480·600 은 404).
+  const thumb = (url, size = "120") => {
     const s = String(url || "");
     if (!s) return "";
     if (/[?&]type=/.test(s)) return s;
-    return `${s}${s.includes("?") ? "&" : "?"}type=f120_120_na`;
+    const kind = size === "240" ? "f240_240_na" : "f120_120_na";
+    return `${s}${s.includes("?") ? "&" : "?"}type=${kind}`;
   };
 
   // ⚠ 확장 페이지에서 치지직 API 를 직접 fetch 하면 Origin 이 chrome-extension://
@@ -94,7 +139,11 @@
     viewers: Number(live?.concurrentUserCount) || 0,
     adult: live?.adult === true,
     // 라이브 스냅샷. {type} 자리에 해상도를 넣어야 실제 이미지가 나온다.
-    liveImageUrl: String(live?.liveImageUrl || "").replace("{type}", "480"),
+    // ⚠ liveImageUrl 이 비어 있는 응답이 있다(팔로잉 목록의 liveInfo 등).
+    //   기존 통합검색 코드와 같은 순서로 defaultThumbnailImageUrl 을 대신 쓴다.
+    liveImageUrl: String(
+      live?.liveImageUrl || live?.defaultThumbnailImageUrl || "",
+    ).replace("{type}", "480"),
   });
 
   // ⚠ 팔로잉 응답은 `content.followingList` 다(`content.data` 가 아니다). 항목도
@@ -209,6 +258,21 @@
       });
     }
 
+    // 친밀도(내 활동순). 사이드바의 '내 활동순' 과 같은 점수 계산을 쓰되, 여기서는
+    // 저장소에 있는 지표(통나무파워·내 채팅)만 쓴다.
+    // ⚠ 구독 개월·후원 횟수는 치지직 API 를 직접 불러야 하는데 확장 페이지에서는
+    //   CORS 로 막힌다. 그래서 그 둘은 빼고 점수를 낸다 — 사이드바 순서와 완전히
+    //   같지는 않다.
+    const affinityRows = await loadAffinitySection(live, used);
+    if (affinityRows.length) {
+      sections.push({
+        id: "affinity",
+        label: "친밀도",
+        icon: "heart",
+        rows: affinityRows,
+      });
+    }
+
     // 어느 구역에도 안 들어간 나머지 팔로잉.
     const rest = live.filter((r) => !used.has(r.channelId));
     if (rest.length) {
@@ -227,6 +291,59 @@
   const LIST_TTL_MS = 20000;
 
   // 모든 목록을 '구역 배열' 로 통일한다. 전용 팔로잉만 여러 구역이고 나머지는 하나다.
+  // 친밀도 구역. 저장소 지표만으로 점수를 내 상위 채널을 고른다.
+  const AFFINITY_MAX = 12;
+  async function loadAffinitySection(live, used) {
+    const API_ = globalThis.CheeseChannelAffinity;
+    const DATA_ = globalThis.CheeseChannelAffinityData;
+    if (!API_ || !DATA_) return [];
+    try {
+      const d = await chrome.storage.local.get("cheeseFollowAffinityOn");
+      if (d?.cheeseFollowAffinityOn !== true) return []; // 기본 OFF
+    } catch {
+      return [];
+    }
+    try {
+      const accountId = await currentAccountId();
+      const metrics = await DATA_.collectMetrics(
+        chrome.storage.local,
+        accountId,
+        {
+          // 이 둘은 치지직 API 를 직접 불러야 해서 확장 페이지에서는 막힌다.
+          skip: ["subscribe", "donation"],
+          parseKey: globalThis.CheeseChatRecapStore?.parseKey,
+        },
+      );
+      const scored = API_.scoreChannels(metrics, {});
+      if (!Array.isArray(scored) || !scored.length) return [];
+      const rank = new Map(
+        scored.map((row, i) => [String(row.channelId).toLowerCase(), i]),
+      );
+      return live
+        .filter((r) => !used.has(r.channelId) && rank.has(r.channelId))
+        .sort((a, b) => rank.get(a.channelId) - rank.get(b.channelId))
+        .slice(0, AFFINITY_MAX)
+        .map((r) => {
+          used.add(r.channelId);
+          return r;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  // 채팅 기록 키에 쓰인 계정 id. 없으면 빈 문자열(그러면 '내 채팅' 지표만 빠진다).
+  async function currentAccountId() {
+    try {
+      const all = await chrome.storage.local.get(null);
+      for (const key of Object.keys(all || {})) {
+        const m = key.match(/^chatRecap:([0-9a-f]{32}):/i);
+        if (m) return m[1].toLowerCase();
+      }
+    } catch {}
+    return "";
+  }
+
   async function listFor(source, keyword = "") {
     const key = source === "search" ? `search:${keyword}` : source;
     const cached = state.listCache.get(key);
@@ -276,6 +393,12 @@
     }
     if (requestId !== listRequestId) return; // 더 최신 요청이 있다 → 버린다
     box.removeAttribute("aria-busy");
+    // 구역 폴더는 전체 구역을 기준으로 그린다(고른 구역과 무관하게 개수를 보여 준다).
+    renderFolders(source === "custom" ? sections : []);
+    // 구역을 골랐으면 그 구역만 남긴다.
+    if (source === "custom" && state.folder) {
+      sections = sections.filter((sec) => sec.id === state.folder);
+    }
     if (!sections.length) {
       box.innerHTML =
         source === "search"
@@ -306,13 +429,17 @@
   function card(r, picked) {
     const on = picked.has(r.channelId);
     const full = state.chosen.length >= MAX_CHANNELS && !on;
-    const thumbUrl = r.liveImageUrl || "";
+    // 방송 스냅샷이 없으면(응답에 따라 빈 경우가 있다) 채널 이미지로 대신 채운다.
+    // 빈 상자만 남으면 카드가 깨져 보인다.
+    const thumbUrl =
+      safeImageUrl(r.liveImageUrl) ||
+      safeImageUrl(thumb(r.channelImageUrl, "240"));
     return (
       `<button type="button" class="mv-card${on ? " is-on" : ""}" ` +
       `data-mv-pick="${esc(r.channelId)}"${full ? " disabled" : ""}>` +
-      `<span class="mv-card-thumb">` +
+      `<span class="mv-card-thumb${r.liveImageUrl ? "" : " is-fallback"}">` +
       (thumbUrl
-        ? `<img src="${esc(safeImageUrl(thumbUrl))}" alt="" loading="lazy">`
+        ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy">`
         : `<span class="mv-card-thumb-empty"></span>`) +
       `<span class="mv-card-viewers">${fmt(r.viewers)}명</span>` +
       // 성인 방송 표시. 치지직의 기존 인증 흐름을 그대로 쓰고 여기서는 알리기만 한다.
@@ -431,11 +558,19 @@
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
   document.addEventListener("click", (event) => {
+    const folder = event.target.closest?.("[data-mv-folder]");
+    if (folder) {
+      state.folder = folder.dataset.mvFolder;
+      void renderList();
+      return;
+    }
     const source = event.target.closest?.("[data-mv-source]");
     if (source) {
       state.source = source.dataset.mvSource;
+      state.folder = ""; // 탭을 바꾸면 구역 선택을 푼다
+      $("mvFolders").hidden = state.source !== "custom";
       for (const b of document.querySelectorAll("[data-mv-source]")) {
-        b.setAttribute("aria-selected", String(b === source));
+        b.setAttribute("aria-pressed", String(b === source));
       }
       $("mvSearch").hidden = state.source !== "search";
       void renderList();
@@ -531,7 +666,7 @@
     }
     document
       .querySelector('[data-mv-source="following"]')
-      ?.setAttribute("aria-selected", "true");
+      ?.setAttribute("aria-pressed", "true");
     renderChosen();
     await renderList();
   })();

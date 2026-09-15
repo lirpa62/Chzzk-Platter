@@ -43,10 +43,98 @@ body {
   gap: 10px;
   min-height: 0;
 }
+/* 치즈 플래터의 기존 탭 버튼 모양(.lps-view-switch)을 그대로 쓴다.
+   ⚠ 그 규칙은 logPowerStats.css 에 있고 이 페이지는 그 파일을 읽지 않으므로
+   여기에 같은 모양을 둔다(그 파일 전체를 끌어오면 관계없는 스타일까지 딸려온다). */
 .mv-source-tabs {
-  display: flex;
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: inline-grid;
   flex: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 2px;
 }
+.mv-source-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 5px;
+  height: 26px;
+  justify-content: center;
+  min-width: 72px;
+  padding: 0 9px;
+}
+.mv-source-tabs button[aria-pressed="true"] {
+  background: var(--popup-surface, #22252a);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  color: var(--popup-brand-strong, #00ffa3);
+  font-weight: 700;
+}
+.mv-source-tabs button:hover:not(:disabled) {
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-source-tabs button:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+/* 구역 폴더(전용 팔로잉). 통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. */
+.mv-folders {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+.mv-folder {
+  align-items: center;
+  background: var(--popup-surface, #22252a);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: var(--popup-text, #e9ecef);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  font-size: 12px;
+  gap: 7px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+.mv-folder:hover {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-folder:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 1px;
+}
+.mv-folder.is-on {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-folder-icon {
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-folder.is-on .mv-folder-icon {
+  color: var(--popup-brand, #00ffa3);
+}
+.mv-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-folder-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .mv-search {
   background: var(--popup-soft-bg, #1b1d20);
   border: 1px solid var(--popup-border, #34383d);
@@ -131,6 +219,20 @@ body {
   height: 100%;
   object-fit: cover;
   width: 100%;
+}
+/* 방송 스냅샷이 없어 채널 이미지로 대신 채운 경우: 꽉 채우면 확대돼 뭉개지므로
+   가운데에 작게 둔다. */
+.mv-card-thumb.is-fallback {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+.mv-card-thumb.is-fallback img {
+  border-radius: 50%;
+  height: 56%;
+  object-fit: cover;
+  width: auto;
+  aspect-ratio: 1 / 1;
 }
 .mv-card-thumb-empty {
   display: block;
@@ -319,19 +421,28 @@ body {
   font: inherit;
   gap: 4px;
   justify-items: center;
+  /* ⚠ 이게 없으면 그리드 열이 내용(max-content)만큼 넓어져, 미리보기의 width:100%
+     가 버튼보다 큰 값으로 풀린다 → 미리보기가 버튼 밖으로 나간다. */
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
   padding: 6px 4px;
 }
 .mv-layout.is-on {
   border-color: var(--popup-brand, #00ffa3);
 }
 /* 미리보기는 실제 적용될 트랙 계산 결과를 그대로 쓴다(인라인 style 로 들어온다).
-   ⚠ height 를 고정하면 인라인 aspect-ratio 가 무시돼 실제 모양과 달라진다. */
+   ⚠ width:100% + aspect-ratio 로 두면 가로로 긴 배치(오른쪽 1 은 3.56:1)가 버튼
+   폭을 넘어 밖으로 삐져나간다(실측: 87px 버튼 안에 135px). 높이를 기준으로 잡고
+   폭은 넘지 않게 묶어, 넓은 배치는 작아지고 좁은 배치는 높이를 채우게 한다. */
 .mv-layout-preview {
+  /* 버튼 폭을 기준으로 삼고 높이를 비율에서 끌어낸다. 이러면 넓은 배치도 버튼
+     안에 들어가고, 인라인 aspect-ratio 가 모양을 결정한다. */
+  container-type: inline-size;
   display: grid;
   gap: 2px;
-  max-height: 54px;
-  width: 100%;
   justify-self: center;
+  max-height: 48px;
+  width: 100%;
 }
 .mv-layout-preview i {
   background: var(--popup-border, #34383d);
@@ -471,6 +582,7 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(110px, 1fr));
 }
+
 .mv-pop-option {
   background: none;
   border: 0;
@@ -705,4 +817,12 @@ body {
   .mv-setup-body {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ⚠ display 를 지정한 요소는 hidden 속성(UA 의 display:none)을 덮어써 버린다.
+   그래서 hidden 을 걸어 둔 팝오버 패널·막대·빈 화면이 그대로 보였다(실측:
+   hidden=true 인데 computed display 가 flex/grid). 이 파일에서 display 를 주는
+   요소가 여럿이므로 맨 끝에서 한 번에 다시 막는다. */
+[hidden] {
+  display: none !important;
 }

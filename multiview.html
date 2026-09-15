@@ -22,21 +22,19 @@
 
       <div class="mv-setup-body">
         <section class="mv-pick" aria-label="채널 고르기">
-          <div class="lps-view-switch mv-source-tabs" role="tablist">
-            <button type="button" role="tab" data-mv-source="following">
-              팔로잉
-            </button>
-            <button type="button" role="tab" data-mv-source="custom">
-              전용 팔로잉
-            </button>
+          <div
+            class="lps-view-switch mv-source-tabs"
+            aria-label="채널 목록 종류"
+          >
+            <button type="button" data-mv-source="following">팔로잉</button>
+            <button type="button" data-mv-source="custom">전용 팔로잉</button>
             <!-- 실제로는 인기 상위 40개만 받아온다. '전체' 라고 하면 오해를 준다. -->
-            <button type="button" role="tab" data-mv-source="all">
-              라이브
-            </button>
-            <button type="button" role="tab" data-mv-source="search">
-              검색
-            </button>
+            <button type="button" data-mv-source="all">라이브</button>
+            <button type="button" data-mv-source="search">검색</button>
           </div>
+          <!-- 전용 팔로잉을 골랐을 때만 구역(즐겨찾기·그룹·친밀도·팔로잉)을 보여 준다.
+               통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. -->
+          <div class="mv-folders" id="mvFolders" hidden></div>
           <input
             type="search"
             class="mv-search"
@@ -78,6 +76,10 @@
       </div>
     </main>
 
+    <!-- 친밀도 구역 점수 계산에 쓴다(전용 팔로잉 탭에서만 동작). -->
+    <script src="src/chatRecapStore.js"></script>
+    <script src="src/channelAffinity.js"></script>
+    <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiview.js"></script>
   </body>
