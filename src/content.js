@@ -31904,14 +31904,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 네이티브 팔로우 목록에서 harvest 한 클래스(스타일 일치용). 없으면 폴백 클래스만.
   let customFollowHarvest = null;
 
-  // 헤더 주제 탭 영역의 font-family를 런타임에 읽어 라이브 툴팁에 적용한다.
-  // 폰트를 직접 선언하지 않고 치지직이 현재 사용 중인 computed 값만 재사용한다.
+  // 치지직이 지금 쓰는 font-family 를 런타임에 읽어 라이브 툴팁에 적용한다.
+  // 폰트를 직접 선언하지 않고 computed 값만 재사용한다.
+  // ⚠ 클래스 해시(_container_vgt54_2 등)는 배포마다 바뀌므로 역할 부분만 부분
+  //   일치로 찾는다. 헤더 주제 탭은 예전 출처 — 그 영역이 없는 화면(다시보기 등)
+  //   에서도 잡히도록 폴백으로 남긴다.
   let followTooltipFontHarvested = false;
   function harvestFollowTooltipFonts() {
     if (followTooltipFontHarvested) return;
-    const fontSource = document
-      .getElementById("header")
-      ?.querySelector('nav[aria-label="주제 탭"]')?.parentElement;
+    const fontSource =
+      document.querySelector("[class*='_container_'][class*='_font_bold_']") ||
+      document
+        .getElementById("header")
+        ?.querySelector('nav[aria-label="주제 탭"]')?.parentElement;
     if (!fontSource) return;
 
     const fontFamily = getComputedStyle(fontSource).fontFamily.trim();

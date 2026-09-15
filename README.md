@@ -655,6 +655,7 @@ node scripts/test-recap-channel-names.cjs
 node scripts/test-recap-profile-thumb.cjs
 node scripts/test-new-vod-detect.cjs
 node scripts/test-follow-tooltip-hitbox.cjs
+node scripts/test-follow-tooltip-font.cjs
 ```
 
 아래 두 가지는 헤드리스 Chrome 으로 실제 화면을 띄워 확인합니다. `CHROME_BIN`

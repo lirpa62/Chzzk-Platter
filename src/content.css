@@ -11385,7 +11385,6 @@ html.cheese-vod-chapter-hide
   font-size: 13px;
   letter-spacing: -0.3px;
   line-height: 16px;
-  text-overflow: ellipsis;
 }
 #cheese-follow-channel-tooltip .cheese-header-follow-tooltip-count {
   display: block;
@@ -11406,8 +11405,8 @@ html.cheese-vod-chapter-hide
   position: absolute;
   top: 50%;
   left: 0;
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background-color: currentColor;
   content: "";
