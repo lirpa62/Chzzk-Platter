@@ -142,11 +142,21 @@ const checks = [];
     // 전체는 data, 검색은 data[].{live,channel}.
     window.__apiContent=(url)=>{
       const p=new URL(url).pathname;
-      if(p.endsWith('/followings/live'))return {followingList:channels.map(c=>({
+      // 팔로잉은 following-lives 를 쓴다(liveInfo 에 방송 썸네일까지 들어 있다).
+      if(p.endsWith('/following-lives'))return {followingList:channels.map(c=>({
         channelId:c.channelId,channel:c,streamer:{openLive:true},
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           liveCategoryValue:'게임',
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
+      // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다.
+      const detail=p.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
+      if(detail){
+        const c=channels.find(x=>x.channelId===detail[1]);
+        if(!c)return {status:'CLOSE'};
+        return {status:'OPEN',channel:c,liveTitle:c.liveTitle,
+          concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임',
+          liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'};
+      }
       // 채널 검색은 search/channels 를 쓴다(방송 정보는 없고 openLive 만 있다).
       if(p.endsWith('/search/channels'))return {data:channels.map(c=>({
         channel:{...c,openLive:true}}))};
@@ -183,9 +193,58 @@ const checks = [];
   );
 
   await test(
+    "목록을 불러오는 동안 스켈레톤 카드를 보여 준다",
+    `const box=document.getElementById('mvChannelList');
+     // 느린 응답을 흉내 내 로딩 중 상태를 붙잡는다.
+     const realSend=chrome.runtime.sendMessage;
+     let release;
+     const gate=new Promise(r=>{release=r;});
+     chrome.runtime.sendMessage=async(msg)=>{await gate;return realSend(msg);};
+     document.querySelector('[data-mv-source="all"]').click();
+     await wait(50);
+     const skeletons=box.querySelectorAll('.mv-card.is-skeleton');
+     check(skeletons.length>0,'스켈레톤 카드가 없다');
+     check(box.getAttribute('aria-busy')==='true','aria-busy 가 아니다');
+     check(!box.textContent.includes('불러오는 중'),'아직 문구를 쓰고 있다');
+     // 스켈레톤도 실제 카드와 같은 골격이어야 자리가 안 밀린다.
+     check(skeletons[0].querySelector('.mv-card-thumb'),'스켈레톤에 썸네일 자리가 없다');
+     release();
+     chrome.runtime.sendMessage=realSend;
+     await wait(400);
+     check(box.querySelectorAll('.mv-card.is-skeleton').length===0,
+       '다 불러왔는데 스켈레톤이 남았다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);`,
+  );
+
+  await test(
     "팔로잉 채널 목록이 렌더된다",
     `const items=document.querySelectorAll('#mvChannelList .mv-card');
      check(items.length===4,'채널 4개가 아니라 '+items.length+'개');`,
+  );
+
+  await test(
+    "팔로잉·검색 카드에 방송 썸네일이 들어간다",
+    `// ⚠ 프로필 이미지로 대체된 카드(is-fallback)가 아니라 방송 스냅샷이어야 한다.
+     for(const src of ['following','search']){
+       document.querySelector('[data-mv-source="'+src+'"]').click();
+       if(src==='search'){
+         const box=document.getElementById('mvSearch');
+         box.value='테스트';
+         box.dispatchEvent(new Event('input',{bubbles:true}));
+       }
+       await wait(500);
+       const cards=[...document.querySelectorAll('#mvChannelList .mv-card')];
+       check(cards.length>0, src+' 목록이 비어 있다');
+       const fallback=cards.filter(c=>c.querySelector('.mv-card-thumb.is-fallback'));
+       check(fallback.length===0,
+         src+' 카드 '+fallback.length+'개가 프로필 이미지로 대체됐다(방송 썸네일 없음)');
+       const img=cards[0].querySelector('.mv-card-thumb img');
+       check(img && !img.getAttribute('src').includes('{type}'),
+         src+' 썸네일 {type} 이 치환되지 않았다');
+     }
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);`,
   );
 
   await test(

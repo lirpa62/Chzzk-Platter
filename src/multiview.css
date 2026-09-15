@@ -347,6 +347,57 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 불러오는 동안의 빈 카드. 실제 카드와 크기가 같아 다 불러와도 자리가 안 밀린다. */
+.mv-card.is-skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.mv-skeleton-box,
+.mv-skeleton-line,
+.mv-skeleton-avatar {
+  animation: mv-skeleton-pulse 1.2s ease-in-out infinite;
+  background: var(--popup-border, #34383d);
+  border-radius: 4px;
+  display: block;
+}
+.mv-skeleton-box {
+  border-radius: 8px;
+  height: 100%;
+  width: 100%;
+}
+.mv-skeleton-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 30px;
+  width: 30px;
+}
+.mv-skeleton-line {
+  height: 11px;
+  margin: 2px 0;
+  width: 84%;
+}
+.mv-skeleton-line.is-short {
+  height: 10px;
+  width: 54%;
+}
+@keyframes mv-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-skeleton-box,
+  .mv-skeleton-line,
+  .mv-skeleton-avatar {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
 .mv-empty {
   color: var(--popup-muted, #9aa1a9);
   font-size: 13px;
@@ -855,11 +906,24 @@ body {
   font-size: 12px;
   padding: 4px 8px;
 }
+/* ⚠ 채팅 프레임 안은 치지직 페이지라 우리 테마가 닿지 않는다. 치지직 채팅
+   페이지는 OS 설정과 무관하게 항상 어두운 색을 직접 칠하고(실측: body 배경이
+   늘 rgb(20,21,23)), 테마 클래스를 바꿔도 색이 바뀌지 않는다. 억지로 덮으려면
+   빌드마다 바뀌는 해시 클래스(_chatting_message_xxxxx_21)에 기대야 해서 두지
+   않는다. 대신 라이트 모드에서 프레임 경계만 정리해 덜 튀게 한다. */
 .mv-chat iframe {
   border: 0;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+}
+:root:not([data-theme="dark"]) .mv-chat {
+  border-left: 1px solid var(--popup-border, #34383d);
+}
+:root:not([data-theme="dark"]) .mv-stage[data-chat-side="bottom"] .mv-chat,
+:root:not([data-theme="dark"]) .mv-stage[data-chat-side="top"] .mv-chat {
+  border-left: 0;
+  border-top: 1px solid var(--popup-border, #34383d);
 }
 
 .mv-toolbar {

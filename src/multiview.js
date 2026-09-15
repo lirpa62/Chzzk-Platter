@@ -14,6 +14,8 @@
   // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
   // 검색은 입력마다 달라지므로 캐시하지 않는다.
   const LIST_TTL_MS = 20000;
+  // 검색 결과 중 방송 정보를 확인할 최대 채널 수(채널마다 요청이 한 번씩 생긴다).
+  const SEARCH_DETAIL_MAX = 12;
   const WATCH_PAGE = "multiviewWatch.html";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
@@ -163,23 +165,35 @@
   // ⚠ 팔로잉 응답은 `content.followingList` 다(`content.data` 가 아니다). 항목도
   //   모양이 달라 채널 정보는 최상위·`channel`, 방송 정보는 `liveInfo` 에 있다.
   //   오프라인 채널도 함께 내려오므로 `streamer.openLive` 로 걸러야 한다.
+  // ⚠ following-lives 를 쓴다. followings/live 의 liveInfo 에는 방송 썸네일이 없어
+  //   프로필 이미지만 보였다. 이쪽은 liveInfo.liveImageUrl 까지 함께 내려온다.
   async function loadFollowing() {
-    const c = await getJson(`${API}/service/v1/channels/followings/live`);
-    const rows = Array.isArray(c?.followingList) ? c.followingList : [];
-    const live = rows
-      .filter((r) => r?.streamer?.openLive === true)
+    const c = await getJson(
+      `${API}/service/v1/channels/following-lives?sortType=POPULAR`,
+    );
+    // 응답 모양이 버전마다 달라 둘 다 본다.
+    const rows = Array.isArray(c?.followingList)
+      ? c.followingList
+      : Array.isArray(c?.data)
+        ? c.data
+        : [];
+    return rows
+      .filter(
+        (r) =>
+          r?.streamer?.openLive === true ||
+          r?.liveInfo?.liveTitle ||
+          r?.openLive === true,
+      )
       .map((r) =>
         normalize(
           {
             ...(r?.channel || {}),
             channelId: r?.channelId || r?.channel?.channelId,
           },
-          r?.liveInfo,
+          r?.liveInfo || r?.live || r,
         ),
       )
       .filter((r) => r.channelId);
-    // 이 응답에는 방송 썸네일이 없어 라이브 목록에서 채운다.
-    return withLiveInfo(live);
   }
 
   async function loadAll() {
@@ -197,57 +211,28 @@
       `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
     );
     const rows = Array.isArray(c?.data) ? c.data : [];
-    const live = rows
+    const channels = rows
       .map((r) => r?.channel)
       .filter((ch) => ch?.channelId && ch.openLive === true)
-      .map((ch) => normalize(ch, null));
-    return withLiveInfo(live);
-  }
-
-  // 라이브 목록(썸네일·제목·시청자 수가 들어 있다)에서 부족한 정보를 채운다.
-  //
-  // ⚠ 팔로잉·전용 팔로잉 응답(liveInfo)과 채널 검색 응답에는 방송 썸네일이 없다.
-  //   그래서 프로필 이미지만 보였다. 라이브 목록 한 번으로 한꺼번에 메운다
-  //   (채널마다 live-detail 을 부르면 6개만 해도 요청이 6번 더 생긴다).
-  let liveIndexCache = { at: 0, map: null };
-  async function liveIndex() {
-    if (liveIndexCache.map && Date.now() - liveIndexCache.at < LIST_TTL_MS) {
-      return liveIndexCache.map;
-    }
-    const map = new Map();
-    try {
-      // 상위 목록이라 모든 채널을 덮지는 못한다. 없으면 프로필로 대체된다.
-      const c = await getJson(`${API}/service/v1/lives?size=50`);
-      for (const r of Array.isArray(c?.data) ? c.data : []) {
-        const id = String(r?.channel?.channelId || "").toLowerCase();
-        if (id) map.set(id, r);
-      }
-    } catch {}
-    liveIndexCache = { at: Date.now(), map };
-    return map;
-  }
-
-  async function withLiveInfo(rows) {
-    if (!rows.length) return rows;
-    const needs = rows.some((r) => !r.liveImageUrl);
-    if (!needs) return rows;
-    const index = await liveIndex();
-    if (!index.size) return rows;
-    return rows.map((r) => {
-      const hit = index.get(r.channelId);
-      if (!hit) return r;
-      const filled = normalize(hit.channel, hit);
-      return {
-        ...r,
-        // 원본에 값이 있으면 그대로 두고, 빈 것만 채운다.
-        liveImageUrl: r.liveImageUrl || filled.liveImageUrl,
-        liveTitle: r.liveTitle || filled.liveTitle,
-        category: r.category || filled.category,
-        viewers: r.viewers || filled.viewers,
-        adult: r.adult || filled.adult,
-        tags: r.tags?.length ? r.tags : filled.tags,
-      };
-    });
+      .slice(0, SEARCH_DETAIL_MAX);
+    if (!channels.length) return [];
+    // 검색 응답에는 방송 정보가 없다. 방송 중인 채널만 live-detail 로 확인한다
+    // (검색 결과는 적고 방송 중인 것만 대상이라 요청이 많이 늘지 않는다).
+    const detailed = await Promise.all(
+      channels.map(async (ch) => {
+        try {
+          const d = await getJson(
+            `${API}/service/v3/channels/${ch.channelId}/live-detail`,
+          );
+          // 방송이 실제로 열려 있을 때만 남긴다.
+          if (d?.status !== "OPEN") return null;
+          return normalize({ ...ch, ...(d.channel || {}) }, d);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return detailed.filter(Boolean);
   }
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
@@ -506,7 +491,7 @@
     const keyword = $("mvSearch").value;
     const box = $("mvChannelList");
     box.setAttribute("aria-busy", "true");
-    box.innerHTML = '<p class="mv-empty">불러오는 중…</p>';
+    box.innerHTML = skeletonCards();
     let sections = [];
     try {
       sections = await listFor(source, keyword);
@@ -548,6 +533,21 @@
       .join("");
     // 고르기 로직은 평평한 목록을 쓴다.
     box.__rows = sections.flatMap((s) => s.rows);
+  }
+
+  // 불러오는 동안 보여 줄 빈 카드. 실제 카드와 같은 모양이라 다 불러왔을 때
+  // 자리가 밀리지 않는다.
+  function skeletonCards(count = 8) {
+    const one =
+      '<div class="mv-card is-skeleton" aria-hidden="true">' +
+      '<span class="mv-card-thumb"><span class="mv-skeleton-box"></span></span>' +
+      '<span class="mv-card-body">' +
+      '<span class="mv-skeleton-avatar"></span>' +
+      '<span class="mv-card-text">' +
+      '<span class="mv-skeleton-line"></span>' +
+      '<span class="mv-skeleton-line is-short"></span>' +
+      "</span></span></div>";
+    return `<section class="mv-section"><div class="mv-cards">${one.repeat(count)}</div></section>`;
   }
 
   // 라이브 방송 카드(썸네일 + 프로필 + 제목 + 시청자 수).
