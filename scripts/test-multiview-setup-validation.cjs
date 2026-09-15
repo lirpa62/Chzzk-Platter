@@ -31,7 +31,7 @@ function validateSetup(raw) {
   const allowed = L.layoutsFor(chosen.length);
   if (!allowed.length) return null;
   const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
-  const chatSide = layout.chat?.includes(raw.chatSide)
+  const chatSide = L.CHAT_SIDES.includes(raw.chatSide)
     ? raw.chatSide
     : layout.chat?.[0] || "right";
   return {
@@ -98,12 +98,21 @@ ok(
 const wrongSide = validateSetup({
   chosen: [ch(A), ch(B)],
   layoutId: "right-1",
-  chatSide: "top", // right-1 은 left/bottom 만 허용
+  chatSide: "top", // 위쪽은 제공하지 않는다
 });
 ok(
-  wrongSide && L.layoutById("right-1").chat.includes(wrongSide.chatSide),
+  wrongSide && L.CHAT_SIDES.includes(wrongSide.chatSide),
   `허용 안 되는 채팅 자리는 기본값으로(${wrongSide?.chatSide})`,
 );
+// 배치와 무관하게 셋 다 받아야 한다.
+for (const side of L.CHAT_SIDES) {
+  const got = validateSetup({
+    chosen: [ch(A), ch(B)],
+    layoutId: "right-1",
+    chatSide: side,
+  });
+  ok(got?.chatSide === side, `right-1 에서도 채팅 ${side} 를 그대로 받는다`);
+}
 
 console.log("\n[정리] 중복·초과를 걸러낸다");
 const dup = validateSetup({ chosen: [ch(A), ch(A), ch(B), ch(C)] });

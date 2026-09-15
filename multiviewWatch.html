@@ -113,12 +113,35 @@
       </button>
 
       <button type="button" class="mv-topbar-back" id="mvBack">
-        채널 다시 고르기
+        채널 바꾸기
       </button>
     </header>
 
     <main class="mv-stage" id="mvStage">
       <div class="mv-frames-fit" id="mvFramesFit">
+        <!-- 격자 위아래 남는 자리에 뜬다. 여기서 바로 채널을 빼거나 바꿀 수 있어
+             고르기 화면까지 가지 않아도 된다. -->
+        <div class="mv-quick" id="mvQuick" hidden>
+          <div class="mv-quick-head">
+            <strong>채널 바꾸기</strong>
+            <span class="mv-quick-hint" id="mvQuickHint"></span>
+            <button type="button" class="mv-quick-all" id="mvQuickAll">
+              고르기 화면 열기
+            </button>
+            <button
+              type="button"
+              class="mv-quick-close"
+              id="mvQuickClose"
+              aria-label="닫기"
+            >
+              ×
+            </button>
+          </div>
+          <div class="mv-quick-body">
+            <ul class="mv-quick-current" id="mvQuickCurrent"></ul>
+            <div class="mv-quick-add" id="mvQuickAdd"></div>
+          </div>
+        </div>
         <div class="mv-frames" id="mvFrames"></div>
       </div>
       <aside class="mv-chat" id="mvChat">

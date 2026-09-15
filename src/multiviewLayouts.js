@@ -8,7 +8,9 @@
   "use strict";
 
   // areas: grid-template-areas 문자열. m=메인, a~e=보조.
-  // chat: 채팅을 놓을 수 있는 자리(앞에 오는 것이 기본값).
+  // chat: 채팅 기본 자리(앞에 오는 것이 기본값). 실제로 고를 수 있는 자리는
+  //   CHAT_SIDES 로 전부 열려 있다 — 채팅은 격자 밖 flex 라 어느 쪽이든 놓을 수
+  //   있고, 어디에 둘지는 취향이라 배치가 제한할 이유가 없다.
   const LAYOUTS = [
     {
       id: "right-1",
@@ -178,6 +180,9 @@
   ];
 
   const SLOTS = ["m", "a", "b", "c", "d", "e"];
+  // 채팅을 놓을 수 있는 자리. 배치와 무관하게 셋 다 고를 수 있다.
+  // ⚠ "top" 은 넣지 않는다. 위쪽 채팅은 영상보다 먼저 읽히는 자리라 시선이 튄다.
+  const CHAT_SIDES = ["right", "left", "bottom"];
 
   // 고른 채널 수(메인 포함)에 맞는 배치만 돌려준다.
   function layoutsFor(count) {
@@ -193,9 +198,10 @@
   // ⚠ 채팅을 grid 안에 넣지 않는다. 프레임 격자는 그대로 두고 바깥에서
   //   flex 로 감싸야 채팅을 접었다 폈을 때 격자가 다시 계산되지 않는다.
   function stageStyle(layout, chatSide) {
-    const side = layout?.chat?.includes(chatSide)
+    // 고른 자리가 유효하면 그대로 쓰고, 없으면 이 배치의 기본 자리로 되돌린다.
+    const side = CHAT_SIDES.includes(chatSide)
       ? chatSide
-      : layout?.chat?.[0];
+      : layout?.chat?.[0] || "right";
     const direction =
       side === "left"
         ? "row-reverse"
@@ -265,6 +271,7 @@
   const api = {
     LAYOUTS,
     SLOTS,
+    CHAT_SIDES,
     layoutsFor,
     layoutById,
     stageStyle,

@@ -50951,6 +50951,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 되감기/앞으로 버튼 중 하나라도 켜져 있으면 허용). 즉 '바가 보이면 방향키도 동작'이
   // 일관된 규칙이라, 버튼을 기능까지 껐더라도 바 설정은 건드리지 않는다.
   function getEffectiveLiveSeekBar() {
+    // 멀티뷰 칸은 팝업 전용 설정이 아니라 전역 설정을 따른다(위 주석 참고).
+    if (IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME) return liveSeekBar;
     return IS_POPUP_PLAYER_FRAME ? popupPlayerSeekBar : liveSeekBar;
   }
 
@@ -50960,6 +50962,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   //  - 팝업 프레임: 표시 설정이 별도라, '기능까지 끄기'가 켜졌을 때만 플래그를 세운다.
   function getEffectiveFeatureFlags() {
     const flags = { ...featureFlags };
+    // ⚠ 멀티뷰 칸은 팝업 플레이어와 최상위 UI 억제만 공유한다. 버튼 표시는 팝업
+    //   전용 설정(popupPlayerBtn*)을 따르면 안 된다 — 팝업에서 믹서 버튼을 꺼 둔
+    //   사용자는 멀티뷰에서도 오디오 믹서가 통째로 주입되지 않았다. 전역 설정을
+    //   그대로 쓴다.
+    if (IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME) return flags;
     if (IS_POPUP_PLAYER_FRAME) {
       if (!popupPlayerDisableHidden) return flags;
       if (!popupPlayerBtnMixer) flags.audioMixer = true;

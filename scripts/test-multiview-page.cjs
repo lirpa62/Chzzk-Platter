@@ -329,6 +329,37 @@ const checks = [];
   );
 
   await test(
+    "채널을 고르고 풀 때 목록을 다시 그리지 않는다",
+    `// ⚠ 예전에는 고를 때마다 renderList() 가 돌아 목록이 통째로 새로 그려졌다
+     //   (API 재호출 + 깜빡임). 카드 노드가 그대로 살아 있어야 한다.
+     // 앞선 검사에서 이미 고른 채널이 있을 수 있다. 안 고른 카드로 시작한다.
+     const first=[...document.querySelectorAll('#mvChannelList .mv-card')]
+       .find(c=>!c.classList.contains('is-on'))
+       || document.querySelector('#mvChannelList .mv-card');
+     const before=document.querySelectorAll('#mvChannelList .mv-card').length;
+     let apiCalls=0;
+     const realSend=chrome.runtime.sendMessage;
+     chrome.runtime.sendMessage=(msg)=>{apiCalls++;return realSend(msg);};
+     first.click();
+     await wait(150);
+     // 같은 노드가 문서에 그대로 남아 있어야 한다(다시 그리면 떨어져 나간다).
+     check(first.isConnected,'카드 노드가 교체됐다(목록을 다시 그렸다)');
+     check(document.querySelectorAll('#mvChannelList .mv-card').length===before,
+       '카드 개수가 달라졌다');
+     check(first.classList.contains('is-on'),'고른 표시가 안 붙었다');
+     check(first.querySelector('.mv-card-picked'),'선택됨 표시가 없다');
+     check(apiCalls===0,'고르는데 API 를 다시 불렀다('+apiCalls+'회)');
+     // 다시 눌러 해제해도 마찬가지.
+     first.click();
+     await wait(150);
+     check(first.isConnected,'해제 때 목록을 다시 그렸다');
+     check(!first.classList.contains('is-on'),'해제 표시가 안 됐다');
+     check(!first.querySelector('.mv-card-picked'),'선택됨 표시가 남았다');
+     check(apiCalls===0,'해제하는데 API 를 불렀다');
+     chrome.runtime.sendMessage=realSend;`,
+  );
+
+  await test(
     "2채널을 고르면 시작 버튼이 열리고 배치가 제시된다",
     `check(!document.getElementById('mvStart').disabled,'시작 버튼이 잠겨 있다');
      check(document.querySelectorAll('#mvLayoutGrid .mv-layout').length>0,'배치 없음');`,
@@ -442,7 +473,20 @@ const checks = [];
       }};},
     });
     window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
-    window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p},
+    // 빠른 바꾸기의 후보 목록도 중계로 받는다(고르기 화면과 같은 경로).
+    const quickChannels=[
+      {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나'},
+      {channelId:'aaaa0000000000000000000000000002',channelName:'채널둘'},
+      {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋'},
+      {channelId:'aaaa0000000000000000000000000004',channelName:'채널넷'},
+    ];
+    window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
+      sendMessage:async(msg)=>{
+        if(msg?.type!=='MULTIVIEW_API')return {ok:false};
+        return {ok:true,content:{followingList:quickChannels.map(c=>({
+          channelId:c.channelId,channel:c,streamer:{openLive:true},
+          liveInfo:{liveTitle:'방송',concurrentUserCount:1}}))}};
+      }},
       storage:{session:{
         get:async(k)=>({[k]:window.sessionStore[k]}),
         set:async(o)=>{Object.assign(window.sessionStore,o);},
@@ -680,6 +724,62 @@ const checks = [];
          o.dataset.mvSetLayout+' 미리보기가 항목 밖으로 나갔다');
      }
      document.body.click();`,
+  );
+
+  await test(
+    "빠른 채널 바꾸기로 빼도 남은 칸은 다시 걸리지 않는다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     // 2채널뿐이면 뺄 수 없으므로 먼저 하나 더한다.
+     document.getElementById('mvBack').click();
+     await wait(400);
+     const quick=document.getElementById('mvQuick');
+     check(!quick.hidden,'빠른 바꾸기가 열리지 않았다');
+     const addBtn=quick.querySelector('[data-mv-quick-add]:not([disabled])');
+     check(addBtn,'더할 후보가 없다');
+     const beforeAdd=videoSrcs().length;
+     const addId=addBtn.dataset.mvQuickAdd;
+     addBtn.click();
+     await wait(200);
+     check(videoSrcs().length===beforeAdd+1,
+       '더할 때 새 칸 하나만 생겨야 한다(생긴 수 '+(videoSrcs().length-beforeAdd)+')');
+     check(document.querySelectorAll('.mv-cell').length===3,'칸이 3개가 아니다');
+     // 이제 빼 본다. 남은 칸은 다시 걸리면 안 된다.
+     const beforeDrop=videoSrcs().length;
+     const dropBtn=quick.querySelector('[data-mv-quick-drop]:not([disabled])');
+     const dropId=dropBtn.dataset.mvQuickDrop;
+     dropBtn.click();
+     await wait(200);
+     check(!document.querySelector('.mv-cell[data-channel-id="'+dropId+'"]'),
+       '뺀 칸이 남아 있다');
+     check(document.querySelectorAll('.mv-cell').length===2,'칸이 2개로 줄지 않았다');
+     // about:blank 한 번만 늘고 멀티뷰 주소는 안 늘어야 한다.
+     check(videoSrcs().length===beforeDrop,
+       '뺄 때 남은 칸이 다시 걸렸다('+(videoSrcs().length-beforeDrop)+'개)');
+     // 배치도 새 채널 수에 맞게 바뀌어야 한다.
+     const L=window.CheeseMultiviewLayouts;
+     const nowLayout=document.getElementById('mvLayoutValue').textContent;
+     check(L.layoutsFor(2).some(l=>l.label===nowLayout),
+       '2채널용 배치로 바뀌지 않았다: '+nowLayout);
+     document.getElementById('mvQuickClose').click();
+     check(quick.hidden,'닫기가 동작하지 않았다');`,
+  );
+
+  await test(
+    "채팅 위치는 배치와 무관하게 셋 다 고를 수 있다",
+    `document.querySelector('[data-mv-pop-toggle="side"]').click();
+     const opts=[...document.querySelectorAll('[data-mv-set-side]')]
+       .map(o=>o.dataset.mvSetSide);
+     check(opts.length===3,'채팅 자리가 3개가 아니라 '+opts.length+'개: '+opts);
+     for(const want of ['right','left','bottom'])
+       check(opts.includes(want),want+' 가 없다');
+     // 실제로 바꿔 본다.
+     const videoBefore=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length;
+     document.querySelector('[data-mv-set-side="bottom"]').click();
+     await wait(100);
+     check(document.getElementById('mvStage').dataset.chatSide==='bottom',
+       '아래로 바뀌지 않았다');
+     check(window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length===videoBefore,
+       '채팅 위치를 바꿨는데 영상이 다시 걸렸다');`,
   );
 
   await test(

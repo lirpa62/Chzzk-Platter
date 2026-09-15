@@ -808,6 +808,151 @@ body {
 }
 .mv-frames-fit {
   container-type: size;
+  position: relative;
+}
+
+/* 빠른 채널 바꾸기. 격자 위 남는 자리에 겹쳐 띄운다.
+   ⚠ 격자를 밀어내지 않도록 absolute 로 띄운다(밀어내면 칸 크기가 다시 계산돼
+   16:9 가 흔들리고 재생도 끊길 수 있다). */
+.mv-quick {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  left: 50%;
+  max-height: min(60%, 360px);
+  max-width: min(760px, 94%);
+  padding: 10px 12px;
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  width: 100%;
+  z-index: 5;
+}
+.mv-quick-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.mv-quick-head strong {
+  font-size: 13px;
+}
+.mv-quick-hint {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.mv-quick-all {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  margin-left: auto;
+  padding: 4px 8px;
+}
+.mv-quick-all:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-close {
+  background: none;
+  border: 0;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.mv-quick-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.mv-quick-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mv-quick-item {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 6px 4px 10px;
+}
+.mv-quick-item.is-main {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-quick-tag {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #05170f;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+}
+.mv-quick-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-quick-drop {
+  background: none;
+  border: 0;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.mv-quick-drop:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.mv-quick-drop:hover:not(:disabled) {
+  color: #ff8a8a;
+}
+.mv-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mv-quick-pick {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.mv-quick-pick:hover:not(:disabled) {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-pick:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.mv-quick-empty {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 12px;
+  margin: 0;
 }
 /* 16:9 해가 없는 배치(오른쪽+아래 등)는 예전처럼 격자가 자리를 다 채우고,
    칸 안쪽 상자가 16:9 를 지킨다(칸마다 약간의 여백이 남는다). */

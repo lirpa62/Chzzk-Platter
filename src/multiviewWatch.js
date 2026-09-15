@@ -285,8 +285,7 @@
   }
 
   function setChatSide(side) {
-    const layout = LAYOUTS.layoutById(state.layoutId);
-    if (!layout?.chat?.includes(side)) return;
+    if (!LAYOUTS.CHAT_SIDES.includes(side)) return;
     state.chatSide = side;
     applyLayout();
   }
@@ -339,17 +338,15 @@
         ),
       )
       .join("");
-    // 채팅 위치는 배치가 허용하는 자리만 보여 준다.
-    $("mvSidePanel").innerHTML = (layout?.chat || [])
-      .map((side) =>
-        optionRow(
-          side,
-          SIDE_LABEL[side] || side,
-          side === state.chatSide,
-          "data-mv-set-side",
-        ),
-      )
-      .join("");
+    // 채팅 위치는 배치와 무관하게 셋 다 고를 수 있다.
+    $("mvSidePanel").innerHTML = LAYOUTS.CHAT_SIDES.map((side) =>
+      optionRow(
+        side,
+        SIDE_LABEL[side] || side,
+        side === state.chatSide,
+        "data-mv-set-side",
+      ),
+    ).join("");
     // 배치는 지금 채널 수에 맞는 것만. 이름만으로는 모양이 안 그려지므로 작은
     // 미리보기를 함께 둔다(고르기 화면과 같은 트랙 계산을 쓴다).
     $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length)
@@ -445,8 +442,8 @@
     const allowed = LAYOUTS.layoutsFor(chosen.length);
     if (!allowed.length) return null;
     const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
-    // 채팅 자리도 그 배치가 허용하는 값만.
-    const chatSide = layout.chat?.includes(raw.chatSide)
+    // 채팅 자리는 셋 중 하나면 된다(배치가 제한하지 않는다).
+    const chatSide = LAYOUTS.CHAT_SIDES.includes(raw.chatSide)
       ? raw.chatSide
       : layout.chat?.[0] || "right";
     return {
@@ -455,6 +452,140 @@
       chatSide,
       mainHighQuality: raw.mainHighQuality !== false,
     };
+  }
+
+  // ── 빠른 채널 바꾸기 ─────────────────────────────────────────────────────
+  // 격자 위아래 남는 자리에 띄운다. 고르기 화면까지 가지 않고 빼기·바꾸기를 한다.
+  //
+  // ⚠ 채널을 빼도 남은 칸은 다시 만들지 않는다(만들면 방송이 처음부터 로드된다).
+  //   빠진 칸만 지우고 배치를 새 채널 수에 맞는 것으로 바꾼다.
+  let quickCandidates = null;
+
+  function openQuick() {
+    $("mvQuick").hidden = false;
+    renderQuick();
+    void loadQuickCandidates();
+  }
+
+  function closeQuick() {
+    $("mvQuick").hidden = true;
+  }
+
+  function renderQuick() {
+    const min = 2;
+    $("mvQuickHint").textContent = `${state.chosen.length} / 6`;
+    $("mvQuickCurrent").innerHTML = state.chosen
+      .map((c) => {
+        const isMain = c.channelId === state.mainId;
+        return (
+          `<li class="mv-quick-item${isMain ? " is-main" : ""}">` +
+          `<span class="mv-quick-name">${esc(c.channelName)}</span>` +
+          (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
+          `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${esc(c.channelId)}"` +
+          `${state.chosen.length <= min ? " disabled" : ""}` +
+          ` aria-label="${esc(c.channelName)} 빼기">×</button></li>`
+        );
+      })
+      .join("");
+
+    const box = $("mvQuickAdd");
+    if (quickCandidates === null) {
+      box.innerHTML = '<p class="mv-quick-empty">불러오는 중…</p>';
+      return;
+    }
+    const have = new Set(state.chosen.map((c) => c.channelId));
+    const rest = quickCandidates.filter((r) => !have.has(r.channelId));
+    if (!rest.length) {
+      box.innerHTML = '<p class="mv-quick-empty">추가할 채널이 없습니다.</p>';
+      return;
+    }
+    const full = state.chosen.length >= 6;
+    box.innerHTML = rest
+      .slice(0, 24)
+      .map(
+        (r) =>
+          `<button type="button" class="mv-quick-pick" data-mv-quick-add="${esc(r.channelId)}"` +
+          `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
+          `<span class="mv-quick-name">${esc(r.channelName)}</span></button>`,
+      )
+      .join("");
+  }
+
+  // 후보는 팔로잉 목록에서 가져온다(고르기 화면과 같은 중계 경로).
+  async function loadQuickCandidates() {
+    if (quickCandidates !== null) return;
+    try {
+      const reply = await chrome.runtime.sendMessage({
+        type: "MULTIVIEW_API",
+        url: "https://api.chzzk.naver.com/service/v1/channels/following-lives?sortType=POPULAR",
+      });
+      const c = reply?.ok ? reply.content : null;
+      const rows = Array.isArray(c?.followingList)
+        ? c.followingList
+        : Array.isArray(c?.data)
+          ? c.data
+          : [];
+      quickCandidates = rows
+        .map((r) => ({
+          channelId: String(
+            r?.channelId || r?.channel?.channelId || "",
+          ).toLowerCase(),
+          channelName: String(r?.channel?.channelName || "").trim(),
+        }))
+        .filter((r) => HASH_RE.test(r.channelId) && r.channelName);
+    } catch {
+      quickCandidates = [];
+    }
+    renderQuick();
+  }
+
+  // 채널 빼기: 그 칸만 지우고 남은 칸은 그대로 둔다.
+  function dropChannel(channelId) {
+    if (state.chosen.length <= 2) return;
+    const cell = cells.get(channelId);
+    if (!cell) return;
+    // 이 칸의 프레임만 확실히 내린다.
+    const frame = cell.querySelector("iframe");
+    if (frame) frame.src = "about:blank";
+    cell.remove();
+    cells.delete(channelId);
+    clearTimeout(frameTimers.get(channelId));
+    frameTimers.delete(channelId);
+    state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
+
+    // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
+    if (state.mainId === channelId) {
+      state.mainId = state.chosen[0]?.channelId || "";
+      if (state.mainId) postState(state.mainId, true);
+      if (state.chatFollowsMain && state.mainId) applyChat(state.mainId);
+    }
+    if (state.chatChannelId === channelId && state.mainId) {
+      applyChat(state.mainId);
+    }
+    fitLayoutToCount();
+    renderQuick();
+  }
+
+  // 채널 더하기: 새 칸만 만든다(기존 칸은 건드리지 않는다).
+  function addChannel(channelId) {
+    if (state.chosen.length >= 6) return;
+    const found = quickCandidates?.find((r) => r.channelId === channelId);
+    if (!found || cells.has(channelId)) return;
+    state.chosen = [...state.chosen, { ...found, channelImageUrl: "" }];
+    fitLayoutToCount();
+    ensureCells(); // 새로 들어온 채널의 칸만 만든다
+    applyLayout();
+    renderQuick();
+  }
+
+  // 채널 수가 바뀌면 그 수에 맞는 배치로 갈아탄다(지금 배치를 쓸 수 없으면 첫 배치).
+  function fitLayoutToCount() {
+    const allowed = LAYOUTS.layoutsFor(state.chosen.length);
+    if (!allowed.length) return;
+    if (!allowed.some((l) => l.id === state.layoutId)) {
+      state.layoutId = allowed[0].id;
+    }
+    applyLayout();
   }
 
   async function backToSetup() {
@@ -483,7 +614,27 @@
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (target.closest?.("#mvBack")) {
+      // 먼저 빠른 바꾸기를 연다. 전체를 다시 고르려면 그 안의 단추로 간다.
+      if ($("mvQuick").hidden) openQuick();
+      else closeQuick();
+      return;
+    }
+    if (target.closest?.("#mvQuickClose")) {
+      closeQuick();
+      return;
+    }
+    if (target.closest?.("#mvQuickAll")) {
       void backToSetup();
+      return;
+    }
+    const drop = target.closest?.("[data-mv-quick-drop]");
+    if (drop) {
+      dropChannel(drop.dataset.mvQuickDrop);
+      return;
+    }
+    const add = target.closest?.("[data-mv-quick-add]");
+    if (add) {
+      addChannel(add.dataset.mvQuickAdd);
       return;
     }
     const retry = target.closest?.("[data-mv-retry]");
@@ -561,7 +712,9 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closePopovers(null);
+    if (event.key !== "Escape") return;
+    closePopovers(null);
+    closeQuick();
   });
 
   // 프레임이 보내는 상태 신호. 치지직 출처에서 온 것만 받는다.

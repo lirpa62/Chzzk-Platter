@@ -313,7 +313,10 @@
     }
 
     // 자동 '구독' 그룹. 사이드바의 sbFollowGroupSubscribe 와 같은 조건에서만 만든다.
-    if (flags.sbFollowGroupEnabled === true && flags.sbFollowGroupSubscribe === true) {
+    if (
+      flags.sbFollowGroupEnabled === true &&
+      flags.sbFollowGroupSubscribe === true
+    ) {
       const subscribed = await loadSubscribedIds();
       const rows = take([...subscribed]);
       if (rows.length) {
@@ -327,7 +330,10 @@
     }
 
     // 자동 태그 그룹. 같은 태그를 가진 채널을 묶는다(사이드바와 같은 규칙).
-    if (flags.sbFollowGroupEnabled === true && flags.sbFollowGroupTags === true) {
+    if (
+      flags.sbFollowGroupEnabled === true &&
+      flags.sbFollowGroupTags === true
+    ) {
       const byTag = new Map();
       for (const row of live) {
         if (used.has(row.channelId)) continue;
@@ -648,7 +654,33 @@
     if (at >= 0) state.chosen.splice(at, 1);
     else if (state.chosen.length < MAX_CHANNELS) state.chosen.push(row);
     renderChosen();
-    renderList();
+    syncPicked();
+  }
+
+  // 고른 표시만 제자리에서 갱신한다.
+  //
+  // ⚠ 예전에는 고를 때마다 renderList() 를 다시 불렀다. 그러면 목록을 통째로 다시
+  //   그리고 API 까지 다시 타서, 고르고 해제할 때마다 화면이 깜빡였다. 선택 여부는
+  //   카드의 표시 상태일 뿐이므로 클래스·속성만 바꾼다.
+  function syncPicked() {
+    const picked = new Set(state.chosen.map((c) => c.channelId));
+    const full = state.chosen.length >= MAX_CHANNELS;
+    for (const card of document.querySelectorAll("#mvChannelList .mv-card")) {
+      const id = card.dataset.mvPick;
+      if (!id) continue;
+      const on = picked.has(id);
+      card.classList.toggle("is-on", on);
+      card.disabled = full && !on;
+      const mark = card.querySelector(".mv-card-picked");
+      if (on && !mark) {
+        const span = document.createElement("span");
+        span.className = "mv-card-picked";
+        span.textContent = "선택됨";
+        card.querySelector(".mv-card-thumb")?.appendChild(span);
+      } else if (!on && mark) {
+        mark.remove();
+      }
+    }
   }
 
   // ── 실행 ───────────────────────────────────────────────────────────────
@@ -707,7 +739,7 @@
         (c) => c.channelId !== remove.dataset.mvRemove,
       );
       renderChosen();
-      void renderList();
+      syncPicked(); // 목록을 다시 그리지 않는다(깜빡임 방지)
       return;
     }
     const channel = event.target.closest?.("[data-mv-pick]");
@@ -758,8 +790,8 @@
     if (from < 0 || to < 0 || from === to) return;
     const [moved] = state.chosen.splice(from, 1);
     state.chosen.splice(to, 0, moved);
+    // 순서만 바뀐다. 목록은 그대로 두어 깜빡이지 않게 한다.
     renderChosen();
-    void renderList();
   });
   // ⚠ 엉뚱한 곳에 놓거나 취소해도 여기로는 반드시 온다. 여기서 비우지 않으면
   //   다음 클릭이 이전 드래그 상태로 처리될 수 있다.

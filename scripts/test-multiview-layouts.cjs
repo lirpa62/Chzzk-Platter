@@ -57,9 +57,18 @@ ok(
   "왼쪽 채팅 → row-reverse",
 );
 ok(L.stageStyle(right, "bottom").direction === "column", "아래 채팅 → column");
+// 채팅 자리는 배치와 무관하게 셋 다 고를 수 있다(어디에 둘지는 취향이다).
+for (const layout of L.LAYOUTS) {
+  for (const side of L.CHAT_SIDES) {
+    ok(
+      L.stageStyle(layout, side).side === side,
+      `${layout.id}: 채팅 ${side} 를 그대로 쓴다`,
+    );
+  }
+}
 ok(
-  L.stageStyle(right, "right").side === "left",
-  "허용하지 않는 자리를 주면 기본값으로 되돌린다",
+  L.CHAT_SIDES.includes(L.stageStyle(right, "top").side),
+  "제공하지 않는 자리는 기본값으로 되돌린다",
 );
 
 console.log("\n[layoutById] 없는 id 는 null");
