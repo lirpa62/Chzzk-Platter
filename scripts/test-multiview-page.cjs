@@ -1405,6 +1405,166 @@ const checks = [];
      await wait(100);`,
   );
 
+  await test(
+    "슬라이더를 끄는 동안 아이콘이 바로 따라오고 드래그가 끊기지 않는다",
+    `const pop=document.getElementById('mvVolumePop');
+     if(pop.hidden){document.getElementById('mvVolumeBtn').click();await wait(150);}
+     const p=document.getElementById('mvVolumePop');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const kindOf=(cid)=>{
+       const svg=p.querySelector('[data-mv-vol-mute="'+cid+'"] .mv-vol-icon');
+       if(!svg)return '?';
+       if(svg.querySelectorAll('line').length===2)return 'x';
+       return svg.querySelectorAll('path').length>=3?'high':'low';
+     };
+     // 메인만 듣기를 꺼서 채널 슬라이더를 쓸 수 있게 한다.
+     {const f=document.getElementById('mvVolFocus');
+      if(f.checked){f.checked=false;
+        f.dispatchEvent(new Event('change',{bubbles:true}));await wait(150);}}
+     const p2=document.getElementById('mvVolumePop');
+     const master=p2.querySelector('[data-mv-vol-master]');
+     master.value='100';master.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(80);
+     const range=p2.querySelector('[data-mv-vol-channel="'+mainId+'"]');
+     check(range,'메인 채널 슬라이더가 없다');
+     // 끄는 동안 같은 요소가 유지돼야 한다(교체되면 드래그가 끊긴다).
+     const before=range;
+     const steps=[['100','high'],['51','high'],['50','low'],['10','low'],
+                  ['1','low'],['0','x']];
+     for(const [v,want] of steps){
+       range.value=v;
+       range.dispatchEvent(new Event('input',{bubbles:true}));
+       await wait(60);
+       const got=kindOf(mainId);
+       check(got===want,v+'% 에서 '+want+' 여야 하는데 '+got);
+       // 퍼센트 글자도 즉시 따라와야 한다.
+       const pctText=range.parentElement.querySelector('.mv-vol-pct').textContent;
+       check(pctText===v+'%',v+'% 표시가 안 맞는다: '+pctText);
+     }
+     check(document.body.contains(before)&&before===
+       document.getElementById('mvVolumePop')
+         .querySelector('[data-mv-vol-channel="'+mainId+'"]'),
+       '끄는 동안 슬라이더 요소가 교체됐다(드래그가 끊긴다)');
+     range.value='100';range.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(80);`,
+  );
+
+  await test(
+    "전체 볼륨을 내리면 실제 출력 기준으로 아이콘이 바뀐다",
+    `const p=document.getElementById('mvVolumePop');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const kindOf=(cid)=>{
+       const svg=document.getElementById('mvVolumePop')
+         .querySelector('[data-mv-vol-mute="'+cid+'"] .mv-vol-icon');
+       if(!svg)return '?';
+       if(svg.querySelectorAll('line').length===2)return 'x';
+       return svg.querySelectorAll('path').length>=3?'high':'low';
+     };
+     const master=p.querySelector('[data-mv-vol-master]');
+     // 채널은 100% 인 상태에서 전체만 움직인다.
+     for(const [v,want] of [['100','high'],['50','low'],['1','low'],['0','x']]){
+       master.value=v;
+       master.dispatchEvent(new Event('input',{bubbles:true}));
+       await wait(60);
+       const got=kindOf(mainId);
+       check(got===want,'전체 '+v+'% 에서 '+want+' 여야 하는데 '+got);
+     }
+     master.value='100';master.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(80);
+     // 다시 메인만 듣기를 켜 둔다.
+     {const f=document.getElementById('mvVolFocus');
+      if(!f.checked){f.checked=true;
+        f.dispatchEvent(new Event('change',{bubbles:true}));await wait(150);}}`,
+  );
+
+  await test(
+    "화질 전환 중의 지연 0 은 '전환 중' 으로 보여 준다",
+    `// ⚠ 앞 테스트들을 거치며 칸이 종료·오류 상태가 됐을 수 있다. 그러면 통계
+     //   줄이 아예 안 그려져 검사가 헛돈다. 먼저 모두 준비 상태로 되돌린다.
+     for(const cell of document.querySelectorAll('.mv-cell')){
+       if(cell.dataset.status==='ready')continue;
+       // 종료 칸에는 '다시 불러오기' 가 없다(끝난 방송이라 뜻이 없다). 그때는
+       // 교체 대신 프레임 상태만 되돌려 통계 줄이 그려지게 한다.
+       cell.querySelector('[data-mv-retry]')?.click();
+       await wait(80);
+       if(cell.dataset.status==='ended'){
+         // 종료 → 로딩으로 되돌리는 공개 경로가 없으므로 교체로 새 칸을 만든다.
+         cell.querySelector('[data-mv-replace]')?.click();
+         await wait(400);
+         const card=document.querySelector(
+           '#mvQuickAdd [data-mv-quick-add]:not([disabled])');
+         if(card){card.click();await wait(300);}
+         document.getElementById('mvQuickClose')?.click();
+         await wait(100);
+         continue;
+       }
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'FRAME_READY',
+               channelId:cell.dataset.channelId}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+       await wait(80);
+     }
+     // 교체로 새로 생긴 칸에도 준비 신호를 보낸다.
+     for(const cell of document.querySelectorAll('.mv-cell')){
+       if(cell.dataset.status==='ready')continue;
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'FRAME_READY',
+               channelId:cell.dataset.channelId}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+       await wait(80);
+     }
+     const notReady=[...document.querySelectorAll('.mv-cell')]
+       .filter(c=>c.dataset.status!=='ready').length;
+     check(notReady===0,'준비 상태로 되돌리지 못한 칸이 '+notReady+'개');
+     // 통계 패널을 연다.
+     if(document.getElementById('mvStatsPop').hidden){
+       document.getElementById('mvStatsBtn').click();await wait(150);}
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const other=cells.find(c=>c.dataset.channelId!==mainId);
+     check(other,'보조 칸이 없다');
+     const otherId=other.dataset.channelId;
+     const send=(cid,lat)=>{
+       const cell=cells.find(c=>c.dataset.channelId===cid);
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:cid,
+               stats:{latencySec:lat,width:1920,height:1080,fps:60,bitrateKbps:8000}}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     // 화질이 바뀌지 않은 칸은 0 이 와도 그대로 보여 준다(전역 무효 처리 금지).
+     send(mainId,0);
+     await wait(1200);
+     let text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('0.0초'),
+       '전환 중이 아닌 칸의 0 을 숨겼다: '+text.slice(0,160));
+     // 이제 메인을 바꾼다 → 두 칸의 화질이 실제로 전환된다.
+     window.__setMainAt=Date.now();
+     other.querySelector('[data-mv-promote]')?.click();
+     await wait(200);
+     check(document.querySelector('.mv-cell.is-main').dataset.channelId===otherId,
+       '메인이 바뀌지 않았다');
+     // 전환 직후 플레이어가 잠깐 0 을 돌려주는 상황.
+     send(mainId,0);
+     send(otherId,0);
+     await wait(1200);
+     text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('전환 중'),'전환 중 표시가 없다: '+text.slice(0,200));
+     check(!text.includes('0.0초'),'전환 중인데 0.0초를 보여 줬다');
+     // 정상값이 오면 즉시 숫자로 돌아간다.
+     send(mainId,4.1);
+     send(otherId,2.3);
+     await wait(1200);
+     text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('4.1초')&&text.includes('2.3초'),
+       '정상값이 왔는데 숫자로 안 바뀐다: '+text.slice(0,200));
+     check(!text.includes('전환 중'),'정상값이 왔는데 전환 중이 남아 있다');
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);`,
+  );
+
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
   checks.push("시청 화면 조작 중 오류가 없다");
 

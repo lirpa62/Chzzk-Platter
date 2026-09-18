@@ -227,6 +227,94 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴
   );
 }
 
+console.log("\n[WebGL] 멀티뷰 통계 경로는 WebGL 컨텍스트를 만들지 않는다");
+{
+  // 6채널에서 "Too many active WebGL contexts" 경고가 보였다. 우리 코드가
+  // 칸마다 컨텍스트를 만드는지부터 확인해 둔다(만들지 않으면 외부 원인이다).
+  const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
+  const at = content.indexOf("if (IS_MULTIVIEW_FRAME) {");
+  const frameBlock = content.slice(at, at + 14000);
+  ok(
+    !/getContext\(|webgl|OffscreenCanvas/i.test(frameBlock),
+    "멀티뷰 프레임 코드가 컨텍스트를 만들지 않는다",
+  );
+  // 멀티뷰 통계 스냅샷은 collectStreamInfo 만 쓴다. 하드웨어 가속 표시
+  // (gpuAccelLabel → WebGL)는 개별 스트림 정보 패널을 열 때만 탄다.
+  const snap = mixer.slice(
+    mixer.indexOf("function getStreamStatsSnapshot"),
+    mixer.indexOf("function getStreamStatsSnapshot") + 2600,
+  );
+  ok(
+    !/gpuAccelLabel|getGpuAccelInfo/.test(snap),
+    "멀티뷰 스냅샷은 하드웨어 가속 조회를 하지 않는다",
+  );
+  // 그 조회 자체도 1회 캐시 + loseContext 로 정리한다.
+  const gpu = mixer.slice(
+    mixer.indexOf("function getGpuAccelInfo"),
+    mixer.indexOf("function getGpuAccelInfo") + 1400,
+  );
+  ok(/gpuAccelCache/.test(gpu), "하드웨어 가속 조회는 한 번만 한다");
+  ok(/WEBGL_lose_context/.test(gpu), "조회 뒤 컨텍스트를 바로 정리한다");
+}
+
+console.log("\n[지연 표시] 화질 전환 중의 0 만 과도 상태로 다룬다");
+{
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
+  ok(/qualityTransitions/.test(watch), "화질 전환 시각을 기록한다");
+  ok(
+    /QUALITY_TRANSITION_MAX_MS/.test(watch),
+    "전환 상태가 영구히 남지 않도록 시간 제한이 있다",
+  );
+  const fn = watch.slice(
+    watch.indexOf("function latencyText"),
+    watch.indexOf("function latencyText") + 1200,
+  );
+  // ⚠ 지연 0 을 전역으로 무효 처리하면 실제로 0 에 가까운 방송까지 가려진다.
+  //   전환 중인 칸에서만 과도 상태로 본다.
+  ok(
+    /qualityTransitions\.get\(channelId\)/.test(fn),
+    "전환 중인 칸에서만 과도 상태로 본다",
+  );
+  ok(
+    /qualityTransitions\.delete\(channelId\)/.test(fn),
+    "쓸 수 있는 값이 오면 바로 전환 상태를 푼다",
+  );
+  ok(/"전환 중"/.test(fn), "전환 중에는 숫자 대신 안내를 보여 준다");
+  // 통계 캐시를 통째로 지우면 해상도·비트레이트까지 '대기 중' 으로 깜빡인다.
+  ok(
+    !/statsByChannel\.delete|statsByChannel\.clear/.test(watch),
+    "메인을 바꿔도 통계 캐시를 지우지 않는다",
+  );
+}
+
+console.log("\n[볼륨 아이콘] 끄는 동안 패널을 다시 그리지 않는다");
+{
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
+  ok(/function syncVolumeButton/.test(watch), "버튼 하나만 맞추는 함수가 있다");
+  const handler = watch.slice(
+    watch.indexOf('document.addEventListener("input"'),
+    watch.indexOf('document.addEventListener("input"') + 1800,
+  );
+  ok(
+    /syncVolumeButton\(channelId\)/.test(handler),
+    "채널 슬라이더가 그 칸 아이콘을 바로 맞춘다",
+  );
+  ok(
+    /syncAllVolumeButtons\(\)/.test(handler),
+    "전체 볼륨은 모든 아이콘을 맞춘다",
+  );
+  // ⚠ 끄는 동안 renderVolume() 을 부르면 잡고 있는 range 가 교체돼 드래그가 끊긴다.
+  //   포커스 자동 해제 분기(한 번만 일어난다)를 빼면 호출이 없어야 한다.
+  const renders = handler.split("renderVolume()").length - 1;
+  ok(renders <= 1, `슬라이더 처리에서 전체 재렌더가 없다(${renders}회)`);
+}
+
 console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건다");
 {
   // 부모가 보내는 volume 은 0~1 의 실수여야 한다. 범위를 안 보면 1 보다 큰 값이

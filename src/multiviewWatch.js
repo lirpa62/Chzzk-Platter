@@ -82,9 +82,14 @@
 
   // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
   // 보낸다(주소를 다시 넣으면 방송이 처음부터 로드된다).
-  // 칸마다 마지막으로 지시한 화질. 통계 표의 '정책' 열과 진단 기록에 쓴다.
+  // 칸마다 마지막으로 지시한 화질. 진단 기록과 전환 판정에 쓴다.
   // ⚠ frameUrl 이 처음 만들 때부터 기록하므로 그보다 먼저 선언해 둔다.
   const lastQuality = new Map();
+  // 화질 전환이 시작된 시각(channelId → ms). 그동안의 지연 0 은 믿지 않는다.
+  const qualityTransitions = new Map();
+  // 전환 상태를 무한정 들고 있지 않는다. 이 시간이 지나면 값이 0 이어도 그대로
+  // 보여 준다(플레이어가 계속 0 을 주는 경우까지 '전환 중' 으로 덮지 않는다).
+  const QUALITY_TRANSITION_MAX_MS = 5000;
 
   function frameUrl(channel, isMain, mainHighQuality) {
     // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
@@ -126,6 +131,11 @@
       // 화질 전환은 트랙을 새로 받는 일이라 버퍼링의 첫 번째 의심 대상이다.
       // 이 기록과 프레임 쪽 waiting 기록의 시각을 맞춰 보면 알 수 있다.
       if (before !== undefined) {
+        // ⚠ 전환 직후에는 플레이어가 스트림을 다시 잡느라 _getLiveLatency() 가
+        //   잠깐 0 을 돌려준다(실측으로 확인된 과도 상태다). 그 0 을 '지연 0.0초'
+        //   로 보여 주면 실제로 라이브 엣지에 붙은 것처럼 읽힌다. 그래서 전환이
+        //   시작된 시각을 적어 두고, 그 사이의 0 만 '전환 중' 으로 다룬다.
+        qualityTransitions.set(channelId, Date.now());
         traceLog(
           "mv-quality",
           `${channelName(channelId)} ${before} → ${quality}`,
@@ -699,6 +709,29 @@
     (VOLUME_ICONS[kind] || VOLUME_ICONS.x) +
     "</svg>";
 
+  // 음소거 버튼 하나만 지금 상태에 맞춘다.
+  //
+  // ⚠ 슬라이더를 끄는 동안 renderVolume() 으로 패널을 통째로 다시 그리면, 지금
+  //   잡고 있는 <input type="range"> 가 새 요소로 교체돼 드래그가 끊긴다. 그래서
+  //   바뀐 버튼의 아이콘과 라벨만 갈아 끼운다.
+  function syncVolumeButton(channelId) {
+    const button = document.querySelector(
+      `[data-mv-vol-mute="${CSS.escape(channelId)}"]`,
+    );
+    if (!button) return;
+    const muted = effectiveMuted(channelId);
+    button.innerHTML = volumeIcon(volumeIconKind(channelId));
+    button.setAttribute("aria-pressed", String(muted));
+    const label = muted ? "음소거 해제" : "음소거";
+    button.setAttribute("aria-label", `${channelName(channelId)} ${label}`);
+    button.title = label;
+  }
+
+  // 전체 볼륨은 모든 칸의 실제 출력에 곱해지므로 버튼도 모두 다시 맞춘다.
+  function syncAllVolumeButtons() {
+    for (const c of state.chosen) syncVolumeButton(c.channelId);
+  }
+
   // 실제로 나오는 소리를 기준으로 아이콘을 고른다(전체 볼륨까지 곱해진 값).
   function volumeIconKind(channelId) {
     if (effectiveMuted(channelId)) return "x";
@@ -915,6 +948,26 @@
   }
 
   const fmtLatency = (v) => (Number.isFinite(v) ? `${v.toFixed(1)}초` : "-");
+
+  // 이 칸의 지연을 어떻게 보여 줄지 정한다.
+  //
+  // ⚠ 지연 0 을 전역으로 '이상한 값' 으로 치지 않는다. 화질을 막 바꾼 칸에서만
+  //   과도 상태로 본다. 화질이 바뀌지 않은 칸은 0 이 와도 그대로 보여 준다.
+  function latencyText(channelId, latencySec) {
+    const startedAt = qualityTransitions.get(channelId);
+    if (startedAt !== undefined) {
+      // 쓸 수 있는 값이 왔으면 전환이 끝난 것이다. 바로 숫자로 돌아간다.
+      if (Number.isFinite(latencySec) && latencySec > 0) {
+        qualityTransitions.delete(channelId);
+      } else if (Date.now() - startedAt > QUALITY_TRANSITION_MAX_MS) {
+        // 너무 오래 0 이면 더는 전환 탓으로 두지 않는다(그대로 보여 준다).
+        qualityTransitions.delete(channelId);
+      } else {
+        return "전환 중";
+      }
+    }
+    return fmtLatency(latencySec);
+  }
   const fmtRes = (w, h) => (w && h ? `${w}×${h}` : "-");
   const fmtFps = (v) =>
     Number.isFinite(v) && v > 0 ? String(Math.round(v)) : "-";
@@ -949,7 +1002,7 @@
         // 실제 화질은 해상도 열(width×height)로 충분히 보인다. 따로 열을 두지 않는다.
         return (
           `<tr>${name}` +
-          `<td>${fmtLatency(st.latencySec)}</td>` +
+          `<td>${latencyText(c.channelId, st.latencySec)}</td>` +
           `<td>${fmtRes(st.width, st.height)}</td>` +
           `<td>${fmtFps(st.fps)}</td>` +
           `<td>${fmtBitrate(st.bitrateKbps)}</td></tr>`
@@ -1284,6 +1337,8 @@
     // 칸이 사라지면 센 것도 버린다. 안 그러면 뺐다가 다시 넣은 채널이 #2 로 보여
     // '프레임이 다시 만들어졌다' 는 신호와 섞인다.
     frameReadyCounts.delete(oldChannelId);
+    lastQuality.delete(oldChannelId);
+    qualityTransitions.delete(oldChannelId);
 
     // 자리를 그대로 두고 갈아 끼운다(채널 수가 같아 배치도 그대로 쓸 수 있다).
     const next = {
@@ -1618,6 +1673,8 @@
     frameTimers.delete(channelId);
     frameStates.delete(channelId);
     frameReadyCounts.delete(channelId);
+    lastQuality.delete(channelId);
+    qualityTransitions.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
@@ -1902,6 +1959,8 @@
         ?.querySelector(".mv-vol-pct")
         ?.replaceChildren(pct(next));
       postAllAudio();
+      // 전체 볼륨은 모든 칸의 실제 출력을 바꾼다 → 아이콘도 전부 다시 맞춘다.
+      syncAllVolumeButtons();
       // 버튼의 숫자만 갱신한다(패널을 다시 그리지 않는다).
       const value = $("mvVolumeValue");
       if (value) {
@@ -1928,6 +1987,8 @@
     }
     if (next > 0 && audio.muted) audio.muted = false;
     postState(channelId, channelId === state.mainId);
+    // 끄는 동안에도 아이콘이 바로 따라오게 한다(50% 아래는 volume-1, 0 은 x).
+    syncVolumeButton(channelId);
   });
 
   document.addEventListener("change", (event) => {
