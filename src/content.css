@@ -11640,19 +11640,54 @@ html.cheese-popup-player-frame
    각 버튼을 옵션으로 켜고 끈다. 숨김은 '표시'만 막는 것이라 기능은 살아 있고
    단축키는 그대로 동작한다. 좁은 창을 고려해 자주 쓰는 셋(믹서·필터·따라잡기)만
    기본 ON, 나머지는 기본 OFF 로 둔다. */
-html.cheese-popup-player-frame:not(.cheese-popup-btn-mixer)
+/* ⚠ 멀티뷰 칸에도 cheese-popup-player-frame 이 붙는다(최상위 UI 억제를 공유한다).
+   그래서 :not(.cheese-multiview-frame) 으로 멀티뷰를 빼야 팝업 설정이 멀티뷰 버튼을
+   숨기지 않는다. 멀티뷰는 아래 전용 규칙을 따른다. */
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-mixer
+  )
   .cheese-audio-mixer-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-filter)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-filter
+  )
   .cheese-video-filter-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-sync)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-sync
+  )
   .cheese-live-sync-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-stats)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-stats
+  )
   .cheese-stream-stats-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-screenshot)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-screenshot
+  )
   .cheese-screenshot-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-rewind)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-rewind
+  )
   .cheese-live-rewind-button,
-html.cheese-popup-player-frame:not(.cheese-popup-btn-forward)
+html.cheese-popup-player-frame:not(.cheese-multiview-frame):not(
+    .cheese-popup-btn-forward
+  )
+  .cheese-live-forward-button {
+  display: none !important;
+}
+
+/* 멀티뷰 전용 버튼 표시. 팝업과 클래스를 따로 둬 서로 영향을 주지 않는다. */
+html.cheese-multiview-frame:not(.cheese-multiview-btn-mixer)
+  .cheese-audio-mixer-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-filter)
+  .cheese-video-filter-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-sync)
+  .cheese-live-sync-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-stats)
+  .cheese-stream-stats-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-screenshot)
+  .cheese-screenshot-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-rewind)
+  .cheese-live-rewind-button,
+html.cheese-multiview-frame:not(.cheese-multiview-btn-forward)
   .cheese-live-forward-button {
   display: none !important;
 }

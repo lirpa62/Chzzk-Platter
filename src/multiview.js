@@ -14,8 +14,6 @@
   // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
   // 검색은 입력마다 달라지므로 캐시하지 않는다.
   const LIST_TTL_MS = 20000;
-  // 검색 결과 중 방송 정보를 확인할 최대 채널 수(채널마다 요청이 한 번씩 생긴다).
-  const SEARCH_DETAIL_MAX = 12;
   const WATCH_PAGE = "multiviewWatch.html";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
@@ -125,115 +123,15 @@
   // ⚠ 확장 페이지에서 치지직 API 를 직접 fetch 하면 Origin 이 chrome-extension://
   //   으로 붙어 403 "Invalid CORS request" 가 돌아온다(팔로잉·전체·검색 모두).
   //   서비스 워커의 fetch 는 Origin 을 붙이지 않으므로 배경 스크립트에 중계시킨다.
-  async function getJson(url) {
-    const reply = await chrome.runtime.sendMessage({
-      type: "MULTIVIEW_API",
-      url,
-    });
-    if (!reply?.ok) throw new Error(reply?.reason || "요청 실패");
-    return reply.content ?? null;
-  }
 
   // ── 채널 목록 ──────────────────────────────────────────────────────────
-  const normalize = (channel, live) => ({
-    channelId: String(channel?.channelId || "").toLowerCase(),
-    channelName: String(channel?.channelName || "").trim(),
-    channelImageUrl: String(channel?.channelImageUrl || ""),
-    liveTitle: String(live?.liveTitle || "").trim(),
-    category: String(live?.liveCategoryValue || "").trim(),
-    viewers: Number(live?.concurrentUserCount) || 0,
-    adult: live?.adult === true,
-    // 라이브 스냅샷. {type} 자리에 해상도를 넣어야 실제 이미지가 나온다.
-    // ⚠ liveImageUrl 이 비어 있는 응답이 있다(팔로잉 목록의 liveInfo 등).
-    //   기존 통합검색 코드와 같은 순서로 defaultThumbnailImageUrl 을 대신 쓴다.
-    liveImageUrl: String(
-      live?.liveImageUrl || live?.defaultThumbnailImageUrl || "",
-    ).replace("{type}", "480"),
-    // 자동 태그 그룹에 쓴다. 응답마다 키 이름이 달라 사이드바와 같은 순서로 본다.
-    tags: (Array.isArray(live?.tags)
-      ? live.tags
-      : Array.isArray(live?.liveTagList)
-        ? live.liveTagList
-        : Array.isArray(live?.tagList)
-          ? live.tagList
-          : []
-    )
-      .map((t) => String(t || "").trim())
-      .filter(Boolean),
-  });
-
-  // ⚠ 팔로잉 응답은 `content.followingList` 다(`content.data` 가 아니다). 항목도
-  //   모양이 달라 채널 정보는 최상위·`channel`, 방송 정보는 `liveInfo` 에 있다.
-  //   오프라인 채널도 함께 내려오므로 `streamer.openLive` 로 걸러야 한다.
-  // ⚠ following-lives 를 쓴다. followings/live 의 liveInfo 에는 방송 썸네일이 없어
-  //   프로필 이미지만 보였다. 이쪽은 liveInfo.liveImageUrl 까지 함께 내려온다.
-  async function loadFollowing() {
-    const c = await getJson(
-      `${API}/service/v1/channels/following-lives?sortType=POPULAR`,
-    );
-    // 응답 모양이 버전마다 달라 둘 다 본다.
-    const rows = Array.isArray(c?.followingList)
-      ? c.followingList
-      : Array.isArray(c?.data)
-        ? c.data
-        : [];
-    return rows
-      .filter(
-        (r) =>
-          r?.streamer?.openLive === true ||
-          r?.liveInfo?.liveTitle ||
-          r?.openLive === true,
-      )
-      .map((r) =>
-        normalize(
-          {
-            ...(r?.channel || {}),
-            channelId: r?.channelId || r?.channel?.channelId,
-          },
-          r?.liveInfo || r?.live || r,
-        ),
-      )
-      .filter((r) => r.channelId);
-  }
-
-  async function loadAll() {
-    const c = await getJson(`${API}/service/v1/lives?size=40`);
-    const rows = Array.isArray(c?.data) ? c.data : [];
-    return rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId);
-  }
-
-  // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 지금 방송 중인 채널
-  //   이름을 정확히 넣어도 0건이 온다(실측) — 방송 제목만 훑는 것으로 보인다.
-  //   대신 이 응답에는 방송 정보가 없어 아래에서 라이브 목록으로 채운다.
-  async function search(keyword) {
-    if (!keyword.trim()) return [];
-    const c = await getJson(
-      `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
-    );
-    const rows = Array.isArray(c?.data) ? c.data : [];
-    const channels = rows
-      .map((r) => r?.channel)
-      .filter((ch) => ch?.channelId && ch.openLive === true)
-      .slice(0, SEARCH_DETAIL_MAX);
-    if (!channels.length) return [];
-    // 검색 응답에는 방송 정보가 없다. 방송 중인 채널만 live-detail 로 확인한다
-    // (검색 결과는 적고 방송 중인 것만 대상이라 요청이 많이 늘지 않는다).
-    const detailed = await Promise.all(
-      channels.map(async (ch) => {
-        try {
-          const d = await getJson(
-            `${API}/service/v3/channels/${ch.channelId}/live-detail`,
-          );
-          // 방송이 실제로 열려 있을 때만 남긴다.
-          if (d?.status !== "OPEN") return null;
-          return normalize({ ...ch, ...(d.channel || {}) }, d);
-        } catch {
-          return null;
-        }
-      }),
-    );
-    return detailed.filter(Boolean);
-  }
+  // 채널 목록은 공용 로더를 쓴다(주소·응답 해석을 고르기/시청 두 곳에 두지 않는다).
+  const SOURCES = globalThis.CheeseMultiviewSources;
+  const getJson = (url) => SOURCES.getJson(url);
+  const normalize = (channel, live) => SOURCES.normalize(channel, live);
+  const loadFollowing = () => SOURCES.loadFollowing();
+  const loadAll = () => SOURCES.loadLive();
+  const search = (keyword) => SOURCES.searchLive(keyword);
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
   // 나눠 돌려준다. 라이브 정보는 팔로잉 목록에서 가져오므로 방송 중인 채널만 남는다.

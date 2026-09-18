@@ -768,6 +768,7 @@ body {
 /* 자리 바꾸기 손잡이. 평소엔 숨고 칸에 마우스를 올리면 나타난다.
    ⚠ iframe 위에서는 드래그 이벤트가 부모로 오지 않아(교차 출처) 이 손잡이가
    필요하다. 영상 위에 얹어야 하므로 z-index 로 띄운다. */
+/* ⚠ 위치·표시는 .mv-cell-tools 가 맡는다(여기서 다시 absolute 로 띄우면 겹친다). */
 .mv-cell-grip {
   align-items: center;
   background: rgba(0, 0, 0, 0.66);
@@ -777,16 +778,7 @@ body {
   cursor: grab;
   display: flex;
   justify-content: center;
-  opacity: 0;
   padding: 4px 3px;
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  transition: opacity 0.12s ease;
-  z-index: 2;
-}
-.mv-cell:hover .mv-cell-grip {
-  opacity: 1;
 }
 .mv-cell-grip:active {
   cursor: grabbing;
@@ -802,6 +794,48 @@ body {
 .mv-cell.is-drop-target {
   outline: 3px dashed var(--popup-brand, #00ffa3);
   outline-offset: -3px;
+}
+
+/* 칸 도구 모음(손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다. */
+.mv-cell-tools {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  transition: opacity 0.12s ease;
+  z-index: 3;
+}
+.mv-cell:hover .mv-cell-tools,
+.mv-cell-tools:focus-within {
+  opacity: 1;
+}
+.mv-cell-close {
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+.mv-cell-close:hover:not(:disabled) {
+  border-color: #ff8a8a;
+  color: #ff8a8a;
+}
+.mv-cell-close:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+/* 상태 덮개의 단추 줄. */
+.mv-cell-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
 }
 
 /* 칸 안 '메인으로' 버튼: 평소엔 숨고 칸에 마우스를 올리면 나타난다. */
@@ -1073,6 +1107,154 @@ body {
   cursor: default;
   opacity: 0.35;
 }
+/* 후보 목록 종류 탭(고르기 화면과 같은 모양). */
+.mv-quick-tabs {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 2px;
+}
+.mv-quick-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 6px;
+}
+.mv-quick-tabs button[aria-pressed="true"] {
+  background: var(--popup-surface, #22252a);
+  color: var(--popup-brand-strong, #00ffa3);
+  font-weight: 700;
+}
+.mv-quick-search {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+/* 후보 카드 한 줄. 좌우 단추와 스크롤로 넘긴다(외부 라이브러리를 쓰지 않는다). */
+.mv-quick-rail {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.mv-quick-nav {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  padding: 10px 6px;
+}
+.mv-quick-nav:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-add {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+/* 데스크톱에서 네 개쯤 보이고, 좁아지면 자연히 두세 개가 된다. */
+.mv-quick-card {
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 calc(25% - 6px);
+  flex-direction: column;
+  font: inherit;
+  gap: 5px;
+  min-width: 132px;
+  padding: 0;
+  scroll-snap-align: start;
+  text-align: left;
+}
+.mv-quick-card:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.mv-quick-card-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 6px;
+  display: block;
+  overflow: hidden;
+  position: relative;
+}
+.mv-quick-card-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.mv-quick-card-empty {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-quick-card:hover:not(:disabled) .mv-quick-card-thumb {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+.mv-quick-card-adult {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 4px;
+  color: #ff8a8a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  position: absolute;
+  right: 4px;
+}
+.mv-quick-card-name {
+  font-size: 11.5px;
+  overflow: hidden;
+  padding: 0 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 현재 채널 줄의 상태 표시. 색만으로 알리지 않고 글자를 함께 둔다. */
+.mv-quick-state {
+  border-radius: 4px;
+  flex: none;
+  font-size: 10px;
+  padding: 1px 5px;
+}
+.mv-quick-state[data-state="ended"] {
+  background: rgba(154, 161, 169, 0.2);
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-quick-state[data-state="error"],
+.mv-quick-state[data-state="ui-error"] {
+  background: rgba(255, 138, 138, 0.18);
+  color: #ff8a8a;
+}
+.mv-quick-item.is-replacing {
+  outline: 1px dashed var(--popup-brand, #00ffa3);
+}
+
 .mv-quick-empty {
   color: var(--popup-muted, #9aa1a9);
   font-size: 12px;

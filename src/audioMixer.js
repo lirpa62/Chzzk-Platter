@@ -9916,6 +9916,28 @@
     } catch {}
   }
 
+  // 멀티뷰 전용: 넓은 화면을 다시 한 번 적용해 본다.
+  //
+  // ⚠ 6개 프레임은 플레이어 DOM 이 뜨는 시각이 제각각이라, 처음 시도 때 viewmode
+  //   버튼이 없어 놓치는 칸이 생긴다. 부모가 이 명령으로 다시 시키게 한다.
+  // ⚠ 이미 넓은 화면이면 아무것도 하지 않는다(다시 누르면 좁은 화면으로 돌아간다).
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-apply-multiview-wide") return;
+    if (isWideScreenOn(findViewModeButton())) {
+      // 이미 목표 상태 — 알리기만 한다.
+      wideScreenNotified = false;
+      notifyWideScreenSettled();
+      return;
+    }
+    // 적용 기록만 지워 다시 시도하게 한다(설정값·다른 상태는 건드리지 않는다).
+    wideScreenAppliedForPage = null;
+    wideScreenNotified = false;
+    resetWideScreenAttempt();
+    if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
+    else startWideScreenPolling();
+  });
+
   function settleWideScreenAttempt(waitForLayout = false) {
     const settledPageKey = currentPageKey;
     wideScreenAppliedForPage = settledPageKey;

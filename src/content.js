@@ -257,6 +257,8 @@
   // 화질 지시로 받을 수 있는 값만 허용한다. "high" 는 상한 없음(사용자 최대화질 설정을
   // 그대로 따른다), 숫자는 그 높이 이하 중 가장 높은 트랙을 고른다.
   const MULTIVIEW_QUALITY_VALUES = new Set(["high", "480"]);
+  // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
+  const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
   // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
   // 접두사 비교로는 부족하다.
   const MULTIVIEW_PARENT_ORIGIN = (() => {
@@ -285,11 +287,13 @@
     (MULTIVIEW_PARAMS.get("cheesePopup") === "1" ||
       IS_MULTIVIEW_FRAME ||
       IS_MULTIVIEW_CHAT_FRAME);
+  // ⚠ 멀티뷰는 여기 포함하지 않는다. 팝업의 일회성 접기는 정해진 횟수만 시도하고
+  //   끝나서 6칸 중 일부만 성공했다. 멀티뷰는 자체 재교정 경로(applyMultiviewUi)를
+  //   쓴다.
   const POPUP_PLAYER_START_WITHOUT_CHAT_FRAME =
-    (IS_POPUP_PLAYER_FRAME &&
-      MULTIVIEW_PARAMS.get("cheesePopupChatFolded") === "1") ||
-    // 멀티뷰 영상 칸은 채팅을 항상 접는다(채팅은 전용 칸에서 따로 본다).
-    IS_MULTIVIEW_FRAME;
+    IS_POPUP_PLAYER_FRAME &&
+    !IS_MULTIVIEW_FRAME &&
+    MULTIVIEW_PARAMS.get("cheesePopupChatFolded") === "1";
   const CLIP_PAGE_AUTOPLAY_PARAM = "cheesePlatterAutoplay";
   const clipPageAutoplayState = {
     pathname: "",
@@ -1135,6 +1139,93 @@
   // 팝업 관련 저장값(넓은 화면 등)을 실제로 읽어왔는지. 읽기 전 브로드캐스트는 기본값을
   // 담고 나가므로, MAIN world 가 그걸 '설정이 꺼짐'으로 오해하지 않게 함께 알린다.
   let popupPlayerSettingsLoaded = false;
+
+  // ── 멀티뷰 전용 설정 ────────────────────────────────────────────────────
+  // ⚠ 팝업 플레이어와 완전히 분리한다. 예전에는 멀티뷰가 팝업 버튼 설정을 그대로
+  //   따라가, 팝업에서 믹서를 꺼 둔 사용자는 멀티뷰에서도 믹서를 못 썼다.
+  const MULTIVIEW_BTN_MIXER_KEY = "cheeseMultiviewBtnMixer";
+  const MULTIVIEW_BTN_FILTER_KEY = "cheeseMultiviewBtnFilter";
+  const MULTIVIEW_BTN_SYNC_KEY = "cheeseMultiviewBtnSync";
+  const MULTIVIEW_SEEKBAR_KEY = "cheeseMultiviewSeekBar";
+  const MULTIVIEW_BTN_STATS_KEY = "cheeseMultiviewBtnStats";
+  const MULTIVIEW_BTN_SHOT_KEY = "cheeseMultiviewBtnScreenshot";
+  const MULTIVIEW_BTN_REWIND_KEY = "cheeseMultiviewBtnRewind";
+  const MULTIVIEW_BTN_FORWARD_KEY = "cheeseMultiviewBtnForward";
+  // 기본값: 오디오 믹서만 켜고 나머지는 끈다(작은 칸에 버튼이 많으면 영상을 가린다).
+  let multiviewBtnMixer = true;
+  let multiviewBtnFilter = false;
+  let multiviewBtnSync = false;
+  let multiviewSeekBar = false;
+  let multiviewBtnStats = false;
+  let multiviewBtnScreenshot = false;
+  let multiviewBtnRewind = false;
+  let multiviewBtnForward = false;
+  let multiviewSettingsLoaded = false;
+  const MULTIVIEW_SETTING_KEYS = [
+    MULTIVIEW_BTN_MIXER_KEY,
+    MULTIVIEW_BTN_FILTER_KEY,
+    MULTIVIEW_BTN_SYNC_KEY,
+    MULTIVIEW_SEEKBAR_KEY,
+    MULTIVIEW_BTN_STATS_KEY,
+    MULTIVIEW_BTN_SHOT_KEY,
+    MULTIVIEW_BTN_REWIND_KEY,
+    MULTIVIEW_BTN_FORWARD_KEY,
+  ];
+
+  function readMultiviewSettings(data) {
+    multiviewBtnMixer = data?.[MULTIVIEW_BTN_MIXER_KEY] !== false; // 기본 ON
+    multiviewBtnFilter = data?.[MULTIVIEW_BTN_FILTER_KEY] === true;
+    multiviewBtnSync = data?.[MULTIVIEW_BTN_SYNC_KEY] === true;
+    multiviewSeekBar = data?.[MULTIVIEW_SEEKBAR_KEY] === true;
+    multiviewBtnStats = data?.[MULTIVIEW_BTN_STATS_KEY] === true;
+    multiviewBtnScreenshot = data?.[MULTIVIEW_BTN_SHOT_KEY] === true;
+    multiviewBtnRewind = data?.[MULTIVIEW_BTN_REWIND_KEY] === true;
+    multiviewBtnForward = data?.[MULTIVIEW_BTN_FORWARD_KEY] === true;
+  }
+
+  // 지금 메모리에 있는 멀티뷰 설정값(바뀌지 않은 키를 되돌려 줄 때 쓴다).
+  function multiviewSettingValue(key) {
+    switch (key) {
+      case MULTIVIEW_BTN_MIXER_KEY:
+        return multiviewBtnMixer;
+      case MULTIVIEW_BTN_FILTER_KEY:
+        return multiviewBtnFilter;
+      case MULTIVIEW_BTN_SYNC_KEY:
+        return multiviewBtnSync;
+      case MULTIVIEW_SEEKBAR_KEY:
+        return multiviewSeekBar;
+      case MULTIVIEW_BTN_STATS_KEY:
+        return multiviewBtnStats;
+      case MULTIVIEW_BTN_SHOT_KEY:
+        return multiviewBtnScreenshot;
+      case MULTIVIEW_BTN_REWIND_KEY:
+        return multiviewBtnRewind;
+      case MULTIVIEW_BTN_FORWARD_KEY:
+        return multiviewBtnForward;
+      default:
+        return undefined;
+    }
+  }
+
+  // 멀티뷰 칸의 버튼 표시. 팝업과 클래스 이름을 따로 둬 서로 간섭하지 않는다.
+  function applyMultiviewPlayerButtonClasses() {
+    if (!IS_MULTIVIEW_FRAME) return;
+    const root = document.documentElement;
+    // 멀티뷰 칸임을 표시한다. 팝업 버튼 숨김 규칙이 이 칸에 걸리지 않게 하는 데 쓴다
+    // (멀티뷰도 IS_POPUP_PLAYER_FRAME 이라 팝업 루트 클래스가 함께 붙는다).
+    root.classList.add("cheese-multiview-frame");
+    root.classList.toggle("cheese-multiview-btn-mixer", multiviewBtnMixer);
+    root.classList.toggle("cheese-multiview-btn-filter", multiviewBtnFilter);
+    root.classList.toggle("cheese-multiview-btn-sync", multiviewBtnSync);
+    root.classList.toggle("cheese-multiview-seekbar", multiviewSeekBar);
+    root.classList.toggle("cheese-multiview-btn-stats", multiviewBtnStats);
+    root.classList.toggle(
+      "cheese-multiview-btn-screenshot",
+      multiviewBtnScreenshot,
+    );
+    root.classList.toggle("cheese-multiview-btn-rewind", multiviewBtnRewind);
+    root.classList.toggle("cheese-multiview-btn-forward", multiviewBtnForward);
+  }
   let popupPlayerOn = false;
   let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
   let popupPlayerSize = POPUP_PLAYER_SIZE_DEFAULT;
@@ -20174,7 +20265,8 @@
     } catch {}
   }
 
-  if (IS_POPUP_PLAYER_FRAME) {
+  // 멀티뷰는 자체 리스너로 받는다(위 applyMultiviewUi 참고).
+  if (IS_POPUP_PLAYER_FRAME && !IS_MULTIVIEW_FRAME) {
     window.addEventListener("message", (event) => {
       if (event.source !== window) return;
       if (event.data?.source !== "cheese-wide-screen-settled") return;
@@ -20446,9 +20538,81 @@
     // 종료 화면은 방송 중에도 나중에 뜰 수 있어 느슨하게 확인한다.
     setInterval(checkEnded, 5000);
 
-    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 현재 상태를 다시 준다.
-    // ⚠ 치지직 DOM 으로 재생 여부를 단정하지 않는다. 우리 스크립트가 붙어 지시를
-    //   받을 수 있게 된 시점만 알린다(그 이상은 추측이 된다).
+    // ── 초기 화면 정리(채팅 접기 + 넓은 화면) ────────────────────────────
+    // ⚠ 팝업 플레이어의 일회성 접기 로직을 쓰지 않는다. 그건 정해진 횟수만 시도하고
+    //   끝내서, 6칸의 렌더 속도가 제각각인 멀티뷰에서는 일부 칸만 성공했다.
+    //   대신 일반 채팅 복원에 쓰는 재교정 엔진(광고 대기·쿨다운·안정화 포함)을
+    //   그대로 쓴다.
+    // ⚠ 사용자의 저장된 채팅 접힘 설정(cheeseChatFoldState)은 건드리지 않는다.
+    //   멀티뷰에서만 잠깐 강제하고, 안정화가 끝나면 사용자가 직접 펼 수 있다.
+    let multiviewChatFoldReady = false;
+    let multiviewWideReady = false;
+    let multiviewUiReadyNotified = false;
+    // ⚠ 같은 칸에 재적용이 겹칠 수 있다. 오래된 시도의 늦은 결과가 최신 상태를 덮지
+    //   않도록 세대 번호로 가른다.
+    let multiviewUiGeneration = 0;
+
+    function maybeNotifyMultiviewUiReady() {
+      if (!multiviewChatFoldReady || !multiviewWideReady) return;
+      if (multiviewUiReadyNotified) return;
+      multiviewUiReadyNotified = true;
+      notifyParent("FRAME_UI_READY");
+    }
+
+    // 넓은 화면 완료 신호(MAIN world 가 보낸다).
+    window.addEventListener("message", (event) => {
+      if (event.source !== window) return;
+      if (event.data?.source !== "cheese-wide-screen-settled") return;
+      multiviewWideReady = true;
+      maybeNotifyMultiviewUiReady();
+    });
+
+    function applyMultiviewUi() {
+      const generation = ++multiviewUiGeneration;
+      multiviewChatFoldReady = false;
+      multiviewWideReady = false;
+      multiviewUiReadyNotified = false;
+
+      // 채팅 접기: 목표를 '접힘' 으로 두고 기존 재교정 엔진에 맡긴다.
+      chatFoldWant = true;
+      chatFoldRestoreUntil = Date.now() + MULTIVIEW_UI_FOLD_WINDOW_MS;
+      startChatFoldEnforce({
+        onSettle: (ok) => {
+          if (generation !== multiviewUiGeneration) return; // 지난 시도의 결과
+          multiviewChatFoldReady = ok;
+          if (ok) maybeNotifyMultiviewUiReady();
+        },
+      });
+
+      // 넓은 화면: MAIN world 에 다시 적용을 시킨다(이미 넓으면 아무것도 안 한다).
+      try {
+        window.postMessage(
+          { source: "cheese-apply-multiview-wide" },
+          location.origin,
+        );
+      } catch {}
+    }
+
+    // 부모의 화면 정리 지시.
+    window.addEventListener("message", (event) => {
+      if (event.source !== window.parent) return;
+      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
+      const data = event.data;
+      if (data?.source !== MULTIVIEW_MESSAGE) return;
+      if (data.type !== "APPLY_MULTIVIEW_UI") return;
+      if (
+        typeof data.channelId !== "string" ||
+        data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
+      ) {
+        return;
+      }
+      applyMultiviewUi();
+    });
+
+    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 현재 상태를 다시 주고
+    // 화면 정리를 시킨다.
+    // ⚠ 이건 '재생 성공' 이 아니라 '지시를 받을 수 있게 됨' 이다. 화면 정리까지
+    //   끝난 것은 FRAME_UI_READY 로 따로 알린다.
     if (document.readyState === "complete") notifyParent("FRAME_READY");
     else window.addEventListener("load", () => notifyParent("FRAME_READY"));
   }
@@ -20720,9 +20884,17 @@
   // 여러 번(재렌더) 채팅창을 되돌릴 수 있어, '목표 상태가 연속으로 안정될 때까지' 마스킹을
   // 유지한다. 목표와 다르면 토글로 재교정하고, 목표 달성이 연속 STABLE_TICKS 회 이어지면
   // 그때 마스킹을 제거한다(중간에 되돌려지면 카운터 리셋 → 마스킹 재적용).
-  function startChatFoldEnforce() {
+  // onSettle: 안정화가 끝났을 때 결과를 알려 준다(ok=목표 상태로 안정됨).
+  // ⚠ 기존 호출부는 인자 없이 부르므로 동작이 달라지지 않는다. 멀티뷰가 '접힘까지
+  //   확실히 끝났는지' 를 알아야 해서 결과만 받아 간다.
+  function startChatFoldEnforce({ onSettle } = {}) {
     if (chatFoldEnforceTimer) return;
     chatFoldStableCount = 0;
+    const settle = (ok) => {
+      try {
+        onSettle?.(ok);
+      } catch {}
+    };
     const STABLE_TICKS = 4; // 250ms × 4 = 1초 연속 안정 시 마스킹 해제
     let lastToggleAt = 0;
     let wasAd = false; // 직전 틱이 광고였는지(광고→비광고 전환 감지)
@@ -20737,6 +20909,7 @@
       if (chatFoldWant === null) {
         chatFoldEnforceTimer = 0;
         clearMask();
+        settle(false); // 목표가 사라짐(간섭 차단) — 달성으로 보지 않는다
         return;
       }
       // 광고(입장/중간) 재생 중엔 치지직이 채팅창을 강제로 펼쳐두고 우리 접기 클릭도
@@ -20789,6 +20962,7 @@
       if (Date.now() > chatFoldRestoreUntil) {
         chatFoldEnforceTimer = 0;
         clearMask();
+        settle(false); // 기간 안에 안정화하지 못함
         return;
       }
       const a = getLiveChatAside();
@@ -20803,6 +20977,7 @@
         if (chatFoldStableCount >= STABLE_TICKS) {
           clearMask();
           chatFoldEnforceTimer = 0;
+          settle(true); // 목표 상태로 연속 안정 — 성공
           return;
         }
       } else if (reachedGoalOnce) {
@@ -20813,6 +20988,8 @@
         chatFoldEnforceTimer = 0;
         chatFoldWant = null; // 이후 간섭 완전 차단
         chatFoldRestoreUntil = 0; // observer 저장 억제 해제 → 사용자 상태 저장
+        // 사용자가 직접 바꾼 것이다. 초기 정리는 '한 번 달성했다' 로 본다.
+        settle(true);
         return;
       } else if (a && btn) {
         // 아직 목표를 한 번도 달성 못 함 = 치지직 초기화가 되돌린 것 → 재교정(접기/펼치기).
@@ -40689,6 +40866,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         POPUP_PLAYER_START_WITHOUT_CHAT_KEY,
         POPUP_PLAYER_START_WITHOUT_CHAT_16X9_KEY,
         POPUP_PLAYER_SCROLL_KEY,
+        ...MULTIVIEW_SETTING_KEYS,
         POPUP_PLAYER_BTN_MIXER_KEY,
         POPUP_PLAYER_BTN_FILTER_KEY,
         POPUP_PLAYER_BTN_SYNC_KEY,
@@ -40733,6 +40911,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         data?.[POPUP_PLAYER_DISABLE_HIDDEN_KEY] === true;
       applyPopupPlayerButtonClasses();
       popupPlayerSettingsLoaded = true;
+      // 멀티뷰 전용 값도 같은 경로에서 읽는다(팝업 값과 섞지 않는다).
+      readMultiviewSettings(data);
+      applyMultiviewPlayerButtonClasses();
+      multiviewSettingsLoaded = true;
       // 팝업 프레임은 위 값들이 기능 플래그·최대 화질에 반영되므로, 로드 완료 후 한 번
       // 더 알린다(로드 전에 MAIN world 가 요청했다면 기본값을 받았을 수 있다).
       if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
@@ -40785,6 +40967,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 저장값 읽기가 실패(catch)했더라도 '더 기다려도 값이 안 온다'는 건 확정이므로
     // 로드 완료로 표시하고 한 번 더 알린다. 그래야 MAIN world 가 기본값 기준으로라도
     // 판단을 끝내고, 부모의 '준비 중' 오버레이가 타임아웃까지 매달리지 않는다.
+    if (!multiviewSettingsLoaded) {
+      // 읽기에 실패해도 기본값으로 판단을 끝낸다(오버레이가 매달리지 않게).
+      multiviewSettingsLoaded = true;
+      if (IS_MULTIVIEW_FRAME) broadcastFeatureFlags();
+    }
     if (!popupPlayerSettingsLoaded) {
       popupPlayerSettingsLoaded = true;
       if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
@@ -51074,8 +51261,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 되감기/앞으로 버튼 중 하나라도 켜져 있으면 허용). 즉 '바가 보이면 방향키도 동작'이
   // 일관된 규칙이라, 버튼을 기능까지 껐더라도 바 설정은 건드리지 않는다.
   function getEffectiveLiveSeekBar() {
-    // 멀티뷰 칸은 팝업 전용 설정이 아니라 전역 설정을 따른다(위 주석 참고).
-    if (IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME) return liveSeekBar;
+    // 멀티뷰는 멀티뷰 전용 설정을 따른다(팝업 값과 섞지 않는다).
+    if (IS_MULTIVIEW_FRAME) return multiviewSeekBar;
+    if (IS_MULTIVIEW_CHAT_FRAME) return liveSeekBar;
     return IS_POPUP_PLAYER_FRAME ? popupPlayerSeekBar : liveSeekBar;
   }
 
@@ -51086,10 +51274,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function getEffectiveFeatureFlags() {
     const flags = { ...featureFlags };
     // ⚠ 멀티뷰 칸은 팝업 플레이어와 최상위 UI 억제만 공유한다. 버튼 표시는 팝업
-    //   전용 설정(popupPlayerBtn*)을 따르면 안 된다 — 팝업에서 믹서 버튼을 꺼 둔
-    //   사용자는 멀티뷰에서도 오디오 믹서가 통째로 주입되지 않았다. 전역 설정을
-    //   그대로 쓴다.
-    if (IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME) return flags;
+    //   전용 설정(popupPlayerBtn*)이 아니라 멀티뷰 전용 설정을 따른다.
+    if (IS_MULTIVIEW_CHAT_FRAME) return flags;
+    if (IS_MULTIVIEW_FRAME) {
+      // 멀티뷰에서 끈 버튼은 기능까지 끈다(작은 칸에서 단축키만 남길 이유가 없다).
+      if (!multiviewBtnMixer) flags.audioMixer = true;
+      if (!multiviewBtnFilter) flags.videoFilter = true;
+      if (!multiviewBtnSync) flags.liveSync = true;
+      if (!multiviewBtnStats) flags.streamStats = true;
+      if (!multiviewBtnScreenshot) flags.screenshotButton = true;
+      // 되감기/앞으로는 치지직 컨트롤에서 한 쌍이라 둘 다 꺼야 기능을 끈다.
+      if (!multiviewBtnRewind && !multiviewBtnForward) flags.liveRewind = true;
+      return flags;
+    }
     if (IS_POPUP_PLAYER_FRAME) {
       if (!popupPlayerDisableHidden) return flags;
       if (!popupPlayerBtnMixer) flags.audioMixer = true;
@@ -51234,9 +51431,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             : wideScreenAuto,
         // 위 wideScreenAuto 가 '저장값을 읽은 결과'인지. 일반 페이지 값은
         // loadFeatureFlags, 팝업 전용 값은 loadFollowPreview가 각각 확정한다.
-        settingsLoaded: IS_POPUP_PLAYER_FRAME
-          ? popupPlayerSettingsLoaded
-          : featureFlagsLoaded,
+        // ⚠ 멀티뷰는 팝업 플레이어와 다른 기능이다. 팝업 설정 로딩을 기다리면
+        //   팝업을 한 번도 안 쓴 사용자의 멀티뷰가 준비 신호를 늦게 받는다.
+        //   멀티뷰는 자기 설정(전역 + 멀티뷰 전용)만 기다린다.
+        settingsLoaded: IS_MULTIVIEW_FRAME
+          ? featureFlagsLoaded && multiviewSettingsLoaded
+          : IS_POPUP_PLAYER_FRAME
+            ? popupPlayerSettingsLoaded
+            : featureFlagsLoaded,
         // 라이브 되감기 바 표시. 이 값은 표시뿐 아니라 '방향키 seek 허용' 판정에도 쓰인다
         // (seekHotkeyAllowed: 바 또는 되감기/앞으로 버튼 중 하나만 켜져 있어도 허용).
         // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
@@ -52508,6 +52710,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         applyPopupPlayerButtonClasses();
         // '기능까지 끄기'가 걸려 있으면 플래그가 바뀌므로 MAIN world 에 다시 알린다.
         if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
+      }
+      // 멀티뷰 전용 버튼 설정. 열려 있는 멀티뷰 칸에 바로 반영한다(다시 로드하지 않는다).
+      if (MULTIVIEW_SETTING_KEYS.some((key) => changes[key])) {
+        const next = {};
+        for (const key of MULTIVIEW_SETTING_KEYS) {
+          next[key] = changes[key]
+            ? changes[key].newValue
+            : // 바뀌지 않은 값은 지금 값을 유지한다.
+              multiviewSettingValue(key);
+        }
+        readMultiviewSettings(next);
+        applyMultiviewPlayerButtonClasses();
+        if (IS_MULTIVIEW_FRAME) broadcastFeatureFlags();
       }
       if (changes[POPUP_PLAYER_MAXQ_KEY]) {
         popupPlayerMaxQuality =

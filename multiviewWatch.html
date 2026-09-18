@@ -139,7 +139,46 @@
           </div>
           <div class="mv-quick-body">
             <ul class="mv-quick-current" id="mvQuickCurrent"></ul>
-            <div class="mv-quick-add" id="mvQuickAdd"></div>
+            <div
+              class="mv-quick-tabs"
+              id="mvQuickTabs"
+              aria-label="채널 목록 종류"
+            >
+              <button type="button" data-mv-quick-source="following">
+                팔로잉
+              </button>
+              <button type="button" data-mv-quick-source="custom">
+                전용 팔로잉
+              </button>
+              <button type="button" data-mv-quick-source="live">라이브</button>
+              <button type="button" data-mv-quick-source="search">검색</button>
+            </div>
+            <input
+              type="search"
+              class="mv-quick-search"
+              id="mvQuickSearch"
+              placeholder="채널 이름으로 찾기"
+              hidden
+            />
+            <div class="mv-quick-rail">
+              <button
+                type="button"
+                class="mv-quick-nav"
+                data-mv-quick-scroll="-1"
+                aria-label="이전"
+              >
+                ‹
+              </button>
+              <div class="mv-quick-add" id="mvQuickAdd"></div>
+              <button
+                type="button"
+                class="mv-quick-nav"
+                data-mv-quick-scroll="1"
+                aria-label="다음"
+              >
+                ›
+              </button>
+            </div>
           </div>
         </div>
         <div class="mv-frames" id="mvFrames"></div>
@@ -187,6 +226,7 @@
     </p>
 
     <script src="src/multiviewTheme.js"></script>
+    <script src="src/multiviewSources.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>

@@ -169,6 +169,7 @@ const checks = [];
   await evaluate(
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
+  await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiview.js", "utf8"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
@@ -516,6 +517,7 @@ const checks = [];
   await evaluate(
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
+  await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
@@ -704,14 +706,26 @@ const checks = [];
      // 제대로 된 신호.
      window.sentMessages.length=0;
      send('https://chzzk.naver.com',READY);
-     check(cell.dataset.status==='ready','준비 신호를 받고도 덮개가 남았다');
-     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');
-     // ⚠ 준비 신호를 받으면 현재 상태를 다시 내려 줘야 한다(그 전 지시는 유실 가능).
+     // ⚠ FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐이다. 채팅 접기·넓은 화면까지
+     //   끝난 게 아니므로 아직 덮개를 걷으면 안 된다.
+     check(cell.dataset.status==='initializing-ui',
+       'FRAME_READY 만으로 상태가 '+cell.dataset.status+' 가 됐다');
+     check(!cell.querySelector('.mv-cell-status').hidden,
+       '화면 정리 전인데 덮개가 걷혔다');
+     // 준비 신호를 받으면 현재 상태를 다시 내려 주고 화면 정리를 시켜야 한다.
      const resync=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE'
        && m.data.channelId===id);
      check(resync.length===1,'준비 후 상태 재전송이 없다('+resync.length+'회)');
      const isMain=cell.classList.contains('is-main');
-     check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');`,
+     check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');
+     const uiCmd=window.sentMessages.filter(m=>m.data?.type==='APPLY_MULTIVIEW_UI'
+       && m.data.channelId===id);
+     check(uiCmd.length===1,'화면 정리 지시가 없다('+uiCmd.length+'회)');
+     // 화면 정리까지 끝나야 덮개가 걷힌다.
+     send('https://chzzk.naver.com',
+       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',channelId:id});
+     check(cell.dataset.status==='ready','화면 정리 후에도 ready 가 아니다');
+     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
   );
 
   await test(
@@ -949,6 +963,71 @@ const checks = [];
      check(w1!==w0,'채팅 크기가 바뀌지 않았다('+w0+' → '+w1+')');
      check(stage.style.getPropertyValue('--mv-chat-w'),'크기 변수가 설정되지 않았다');
      check(videoSrcs().length===before,'채팅 크기를 바꿨는데 영상이 다시 걸렸다');`,
+  );
+
+  await test(
+    "종료된 칸을 다른 채널로 바꿔도 나머지는 그대로다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const target=cells.find(c=>!c.classList.contains('is-main'))||cells[0];
+     const oldId=target.dataset.channelId;
+     const others=cells.filter(c=>c!==target).map(c=>c.dataset.channelId);
+     const countBefore=cells.length;
+     const layoutBefore=document.getElementById('mvLayoutValue').textContent;
+     // 종료 → 다른 채널 선택
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'FRAME_ENDED',channelId:oldId}});
+      Object.defineProperty(e,'source',{value:target.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(50);
+     check(target.dataset.status==='ended','종료 상태가 아니다');
+     target.querySelector('[data-mv-replace]').click();
+     await wait(500);
+     const quick=document.getElementById('mvQuick');
+     check(!quick.hidden,'교체 모드로 Quick 이 열리지 않았다');
+     check(document.getElementById('mvQuickHint').textContent.includes('대신'),
+       '교체 안내 문구가 없다');
+     const card=quick.querySelector('[data-mv-quick-add]:not([disabled])');
+     check(card,'교체할 후보가 없다');
+     const newId=card.dataset.mvQuickAdd;
+     const before=videoSrcs().length;
+     card.click();
+     await wait(300);
+     // 새 칸 하나만 생기고 나머지는 건드리지 않는다.
+     check(videoSrcs().length===before+1,
+       '교체 때 새 칸 하나만 생겨야 한다(생긴 수 '+(videoSrcs().length-before)+')');
+     check(!document.querySelector('.mv-cell[data-channel-id="'+oldId+'"]'),
+       '옛 칸이 남아 있다');
+     check(document.querySelector('.mv-cell[data-channel-id="'+newId+'"]'),
+       '새 칸이 없다');
+     check(document.querySelectorAll('.mv-cell').length===countBefore,
+       '채널 수가 달라졌다');
+     for(const id of others)
+       check(document.querySelector('.mv-cell[data-channel-id="'+id+'"]'),
+         '다른 칸 '+id.slice(0,6)+' 이 사라졌다');
+     check(document.getElementById('mvLayoutValue').textContent===layoutBefore,
+       '배치가 바뀌었다');`,
+  );
+
+  await test(
+    "칸의 제거 버튼은 최소 2개일 때 잠긴다",
+    `const closes=[...document.querySelectorAll('.mv-cell-close')];
+     check(closes.length===document.querySelectorAll('.mv-cell').length,
+       '칸마다 제거 버튼이 있어야 한다');
+     const n=document.querySelectorAll('.mv-cell').length;
+     if(n>2){
+       check(!closes[0].disabled,'3개 이상인데 제거가 잠겨 있다');
+     }
+     // 2개가 될 때까지 뺀다.
+     let guard=0;
+     while(document.querySelectorAll('.mv-cell').length>2 && guard++<6){
+       document.querySelector('.mv-cell-close:not([disabled])')?.click();
+       await wait(150);
+     }
+     check(document.querySelectorAll('.mv-cell').length===2,'2개로 줄지 않았다');
+     const locked=[...document.querySelectorAll('.mv-cell-close')];
+     check(locked.every(b=>b.disabled),'2개인데 제거가 잠기지 않았다');
+     check(locked[0].title.includes('최소 2개'),'왜 잠겼는지 알려 주지 않는다');`,
   );
 
   await test(

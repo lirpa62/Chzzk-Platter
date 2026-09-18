@@ -156,6 +156,14 @@
     "cheesePopupPlayerStartWithoutChat",
     "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
+    "cheeseMultiviewBtnMixer",
+    "cheeseMultiviewBtnFilter",
+    "cheeseMultiviewBtnSync",
+    "cheeseMultiviewSeekBar",
+    "cheeseMultiviewBtnStats",
+    "cheeseMultiviewBtnScreenshot",
+    "cheeseMultiviewBtnRewind",
+    "cheeseMultiviewBtnForward",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -4976,6 +4984,16 @@
       "cheesePopupPlayerDisableHidden",
       false,
     ],
+    // 멀티뷰 버튼. 팝업 플레이어와 키를 따로 둬 서로 영향을 주지 않는다.
+    // 칸이 작아 기본은 오디오 믹서 하나만 켠다.
+    ["[data-multiview-btn-mixer]", "cheeseMultiviewBtnMixer", true],
+    ["[data-multiview-btn-filter]", "cheeseMultiviewBtnFilter", false],
+    ["[data-multiview-btn-sync]", "cheeseMultiviewBtnSync", false],
+    ["[data-multiview-seekbar]", "cheeseMultiviewSeekBar", false],
+    ["[data-multiview-btn-stats]", "cheeseMultiviewBtnStats", false],
+    ["[data-multiview-btn-screenshot]", "cheeseMultiviewBtnScreenshot", false],
+    ["[data-multiview-btn-rewind]", "cheeseMultiviewBtnRewind", false],
+    ["[data-multiview-btn-forward]", "cheeseMultiviewBtnForward", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;

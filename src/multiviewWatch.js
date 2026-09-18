@@ -177,35 +177,90 @@
 
   // 프레임 상태 관리. 준비 신호가 제때 안 오면 '다시 불러오기' 를 띄운다.
   const frameTimers = new Map(); // channelId -> timeout id
+  const uiTimers = new Map(); // 화면 정리 대기 타이머
+  // ⚠ 칸 상태의 정본. DOM 의 dataset 과 따로 놀지 않게 setCellStatus 에서만 바꾼다.
+  const frameStates = new Map(); // channelId -> "loading" | ... | "ended"
+  // 화면 정리(채팅 접기 + 넓은 화면)를 기다리는 시간. 광고가 끼면 프레임 쪽 엔진이
+  // 더 기다리므로 넉넉히 준다.
+  const UI_READY_TIMEOUT_MS = 30000;
 
+  const currentStatus = (channelId) => frameStates.get(channelId) || "";
+
+  // 해당 칸에만 화면 정리를 다시 시킨다(다른 칸에는 아무 영향이 없다).
+  function requestMultiviewUiApply(channelId) {
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          source: MULTIVIEW_MESSAGE,
+          type: "APPLY_MULTIVIEW_UI",
+          channelId,
+        },
+        CHZZK_ORIGIN,
+      );
+    } catch {}
+    clearTimeout(uiTimers.get(channelId));
+    uiTimers.set(
+      channelId,
+      setTimeout(() => {
+        // 아직 정리가 끝나지 않았으면 '화면 정리 실패' 로 둔다.
+        // ⚠ 프레임을 다시 로드하지 않는다. 영상은 살아 있고 정리만 못 끝낸 것이다.
+        if (currentStatus(channelId) === "initializing-ui") {
+          setCellStatus(channelId, "ui-error");
+        }
+      }, UI_READY_TIMEOUT_MS),
+    );
+  }
+
+  // 칸 상태를 바꾸는 유일한 통로. 여기서 타일 덮개와 Quick 목록을 함께 갱신해
+  // 두 곳이 다른 상태를 보여 주지 않게 한다.
   function setCellStatus(channelId, status, message) {
+    frameStates.set(channelId, status);
     const cell = cells.get(channelId);
-    if (!cell) return;
-    const overlay = cell.querySelector(".mv-cell-status");
-    if (!overlay) return;
-    cell.dataset.status = status;
+    if (cell) {
+      cell.dataset.status = status;
+      const overlay = cell.querySelector(".mv-cell-status");
+      if (overlay) renderCellOverlay(overlay, channelId, status, message);
+    }
+    // Quick 패널이 닫혀 있어도 상태는 위에서 이미 갱신됐다. 열려 있을 때만 다시 그린다.
+    if (!$("mvQuick")?.hidden) renderQuick();
+  }
+
+  function renderCellOverlay(overlay, channelId, status, message) {
     if (status === "ready") {
       overlay.hidden = true;
       overlay.innerHTML = "";
       return;
     }
     overlay.hidden = false;
-    if (status === "loading") {
-      overlay.innerHTML =
-        '<span class="mv-cell-status-text">불러오는 중…</span>';
+    // 기다리는 중인 두 단계는 안내만 보여 준다(누를 것이 없다).
+    if (status === "loading" || status === "initializing-ui") {
+      const text =
+        status === "loading" ? "플레이어 불러오는 중…" : "화면 준비 중…";
+      overlay.innerHTML = `<span class="mv-cell-status-text">${esc(text)}</span>`;
       return;
     }
-    // ⚠ '종료' 와 '실패' 는 다른 상태다. 종료는 방송이 끝난 것이고, 실패는 플레이어를
-    //   못 불러온 것이라 안내 문구가 달라야 한다. 둘 다 사용자가 직접 눌렀을 때만
-    //   다시 불러온다(자동 반복 금지).
+    // ⚠ 세 실패 상태는 뜻이 다르므로 문구도 할 수 있는 일도 다르다.
+    //   error     = 플레이어 자체를 못 불러옴 → 프레임을 다시 로드해야 한다
+    //   ui-error  = 영상은 살아 있고 화면 정리만 못 끝냄 → 정리만 다시 시킨다
+    //   ended     = 방송이 끝남 → 다시 불러오거나 다른 채널로 바꾼다
     const text =
       message ||
       (status === "ended"
         ? "방송이 종료되었습니다."
-        : "플레이어를 불러오지 못했습니다.");
+        : status === "ui-error"
+          ? "화면 정리를 완료하지 못했습니다."
+          : "플레이어를 불러오지 못했습니다.");
+    const primary =
+      status === "ui-error"
+        ? `<button type="button" class="mv-cell-retry" data-mv-reapply="${esc(channelId)}">화면 다시 적용</button>`
+        : `<button type="button" class="mv-cell-retry" data-mv-retry="${esc(channelId)}">다시 불러오기</button>`;
     overlay.innerHTML =
       `<span class="mv-cell-status-text">${esc(text)}</span>` +
-      `<button type="button" class="mv-cell-retry" data-mv-retry="${esc(channelId)}">다시 불러오기</button>`;
+      `<span class="mv-cell-status-actions">${primary}` +
+      `<button type="button" class="mv-cell-retry" data-mv-replace="${esc(channelId)}">다른 채널 선택</button>` +
+      `</span>`;
   }
 
   function armReadyTimeout(channelId) {
@@ -215,8 +270,10 @@
       setTimeout(() => {
         // 아직 준비 신호를 못 받았을 때만 실패로 본다.
         // ⚠ 이미 준비됐거나 방송이 끝난 칸은 건드리지 않는다(종료를 실패로 덮지 않는다).
-        const now = cells.get(channelId)?.dataset.status;
-        if (now !== "ready" && now !== "ended") {
+        // ⚠ 화면 정리 중인 칸도 건드리지 않는다. 프레임은 살아 있고 정리만 남은
+        //   것이라 '플레이어를 못 불러옴' 이 아니다(그쪽은 ui-error 가 맡는다).
+        const now = currentStatus(channelId);
+        if (now !== "ready" && now !== "ended" && now !== "initializing-ui") {
           setCellStatus(channelId, "error", "플레이어를 불러오지 못했습니다.");
         }
       }, FRAME_READY_TIMEOUT_MS),
@@ -287,6 +344,21 @@
       const overlay = document.createElement("div");
       overlay.className = "mv-cell-status";
 
+      // 칸 도구 모음(자리 바꾸기 손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다.
+      const tools = document.createElement("div");
+      tools.className = "mv-cell-tools";
+
+      // 이 채널만 멀티뷰에서 뺀다(멀티뷰 전체를 닫는 것이 아니다).
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "mv-cell-close";
+      close.dataset.mvClose = channel.channelId;
+      close.textContent = "×";
+      close.setAttribute(
+        "aria-label",
+        `${channel.channelName} 멀티뷰에서 제거`,
+      );
+
       // 자리 바꾸기 손잡이.
       // ⚠ iframe 은 교차 출처라 그 위에서 시작한 드래그 이벤트가 부모로 오지 않는다.
       //   그래서 칸 위에 얹은 이 손잡이에서만 드래그를 시작한다.
@@ -317,9 +389,12 @@
         '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
         '<path d="M3 9h18"></path><path d="M9 21V9"></path></svg>' +
         "<span>메인으로</span>";
+      // ⚠ 손잡이만 draggable 이다. 제거 단추가 드래그 시작점이 되면 안 된다.
+      tools.appendChild(grip);
+      tools.appendChild(close);
       cell.appendChild(box);
       cell.appendChild(overlay);
-      cell.appendChild(grip);
+      cell.appendChild(tools);
       cell.appendChild(promote);
       cells.set(channel.channelId, cell);
       frames.appendChild(cell);
@@ -359,6 +434,15 @@
       if (!cell) return;
       cell.style.gridArea = LAYOUTS.SLOTS[index];
       cell.classList.toggle("is-main", index === 0);
+      // 2개뿐이면 뺄 수 없다. 왜 안 되는지 알 수 있게 잠그고 이유를 적는다.
+      const close = cell.querySelector(".mv-cell-close");
+      if (close) {
+        const locked = state.chosen.length <= 2;
+        close.disabled = locked;
+        close.title = locked
+          ? "멀티뷰는 최소 2개 채널이 필요합니다."
+          : "멀티뷰에서 제거";
+      }
     });
 
     const { direction, side } = LAYOUTS.stageStyle(layout, state.chatSide);
@@ -743,82 +827,227 @@
   //   빠진 칸만 지우고 배치를 새 채널 수에 맞는 것으로 바꾼다.
   let quickCandidates = null;
 
-  function openQuick() {
+  // replaceChannelId 를 주면 '교체 모드' 로 연다(고른 채널이 그 자리를 대신한다).
+  let quickReplaceId = "";
+  function openQuick({ replaceChannelId = "" } = {}) {
+    quickReplaceId = cells.has(replaceChannelId) ? replaceChannelId : "";
     $("mvQuick").hidden = false;
     renderQuick();
     void loadQuickCandidates();
+  }
+
+  // 한 자리만 다른 채널로 바꾼다.
+  //
+  // ⚠ '빼고 다시 넣기' 로 하면 그 사이 메인·채팅·배치가 다시 계산돼 다른 칸까지
+  //   흔들린다. 그래서 자리를 지키며 그 칸만 갈아 끼운다.
+  function replaceChannel(oldChannelId, newChannel) {
+    const index = state.chosen.findIndex((c) => c.channelId === oldChannelId);
+    if (index < 0 || !newChannel) return;
+    const id = String(newChannel.channelId || "").toLowerCase();
+    if (!HASH_RE.test(id)) return;
+    // 이미 보고 있는 채널이면 넣지 않는다(같은 채널이 두 칸에 뜨지 않게).
+    if (state.chosen.some((c) => c.channelId === id)) return;
+
+    const wasMain = state.mainId === oldChannelId;
+    const wasChat = state.chatChannelId === oldChannelId;
+
+    // 옛 칸 정리: 그 프레임만 내린다.
+    const oldCell = cells.get(oldChannelId);
+    const oldFrame = oldCell?.querySelector("iframe");
+    if (oldFrame) oldFrame.src = "about:blank";
+    oldCell?.remove();
+    cells.delete(oldChannelId);
+    clearTimeout(frameTimers.get(oldChannelId));
+    frameTimers.delete(oldChannelId);
+    clearTimeout(uiTimers.get(oldChannelId));
+    uiTimers.delete(oldChannelId);
+    frameStates.delete(oldChannelId);
+
+    // 자리를 그대로 두고 갈아 끼운다(채널 수가 같아 배치도 그대로 쓸 수 있다).
+    const next = {
+      channelId: id,
+      channelName: String(newChannel.channelName || ""),
+      channelImageUrl: String(newChannel.channelImageUrl || ""),
+    };
+    state.chosen = state.chosen.map((c, i) => (i === index ? next : c));
+    if (wasMain) state.mainId = id;
+
+    ensureCells(); // 새 채널 칸만 만든다
+    applyLayout();
+    // 채팅이 그 채널을 보고 있었으면 새 채널로 넘긴다.
+    if (wasChat || (state.chatFollowsMain && wasMain)) applyChat(id);
+    renderQuick();
   }
 
   function closeQuick() {
     $("mvQuick").hidden = true;
   }
 
+  // 상태를 사람이 읽을 수 있는 짧은 말로. 색만으로 구분하지 않는다(글자를 함께 둔다).
+  const STATUS_BADGE = {
+    ended: "종료",
+    error: "오류",
+    "ui-error": "정리 실패",
+  };
+
   function renderQuick() {
     const min = 2;
-    $("mvQuickHint").textContent = `${state.chosen.length} / 6`;
+    const hint = $("mvQuickHint");
+    hint.textContent = quickReplaceId
+      ? `${channelName(quickReplaceId)} 대신 볼 채널을 고르세요.`
+      : `${state.chosen.length} / 6`;
+    // 교체 모드는 취소할 수 있어야 한다.
+    const cancel = $("mvQuickCancelReplace");
+    if (quickReplaceId && !cancel) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.id = "mvQuickCancelReplace";
+      button.className = "mv-quick-all";
+      button.textContent = "교체 취소";
+      hint.after(button);
+    } else if (!quickReplaceId && cancel) {
+      cancel.remove();
+    }
     $("mvQuickCurrent").innerHTML = state.chosen
       .map((c) => {
         const isMain = c.channelId === state.mainId;
+        const badge = STATUS_BADGE[currentStatus(c.channelId)] || "";
+        const locked = state.chosen.length <= min;
         return (
-          `<li class="mv-quick-item${isMain ? " is-main" : ""}">` +
+          `<li class="mv-quick-item${isMain ? " is-main" : ""}` +
+          `${quickReplaceId === c.channelId ? " is-replacing" : ""}">` +
           `<span class="mv-quick-name">${esc(c.channelName)}</span>` +
           (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
+          (badge
+            ? `<span class="mv-quick-state" data-state="${esc(
+                currentStatus(c.channelId),
+              )}">${esc(badge)}</span>`
+            : "") +
           `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${esc(c.channelId)}"` +
-          `${state.chosen.length <= min ? " disabled" : ""}` +
+          `${locked ? " disabled" : ""}` +
+          ` title="${locked ? "멀티뷰는 최소 2개 채널이 필요합니다." : "멀티뷰에서 제거"}"` +
           ` aria-label="${esc(c.channelName)} 빼기">×</button></li>`
         );
       })
       .join("");
 
+    renderQuickCandidates();
+  }
+
+  // ── 후보 목록 ───────────────────────────────────────────────────────────
+  // 고르기 화면과 같은 로더를 쓴다(주소·응답 해석을 두 곳에 두지 않는다).
+  const SOURCES = globalThis.CheeseMultiviewSources;
+  const QUICK_TTL_MS = 20000; // 제목·시청자 수가 바뀌므로 오래 들고 있지 않는다
+  const quickCache = new Map(); // key -> {value, expiresAt}
+  let quickSource = "following";
+  let quickKeyword = "";
+  // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
+  let quickRequestId = 0;
+
+  async function quickRows(source, keyword) {
+    const key = source === "search" ? `search:${keyword}` : source;
+    const cached = quickCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (!SOURCES) return [];
+    const rows =
+      source === "following"
+        ? await SOURCES.loadFollowing()
+        : source === "custom"
+          ? await SOURCES.loadCustomFollowing()
+          : source === "live"
+            ? await SOURCES.loadLive()
+            : await SOURCES.searchLive(keyword);
+    // 검색은 입력마다 달라 캐시하지 않는다.
+    if (source !== "search") {
+      quickCache.set(key, {
+        value: rows,
+        expiresAt: Date.now() + QUICK_TTL_MS,
+      });
+    }
+    return rows;
+  }
+
+  async function loadQuickCandidates() {
+    const requestId = ++quickRequestId;
+    const source = quickSource;
+    const keyword = quickKeyword;
+    quickCandidates = null; // 불러오는 중
+    renderQuickCandidates();
+    let rows = [];
+    try {
+      rows = await quickRows(source, keyword);
+    } catch {
+      rows = [];
+    }
+    if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
+    quickCandidates = rows;
+    renderQuickCandidates();
+  }
+
+  function renderQuickCandidates() {
+    const tabs = $("mvQuickTabs");
+    if (tabs) {
+      for (const button of tabs.querySelectorAll("[data-mv-quick-source]")) {
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.mvQuickSource === quickSource),
+        );
+      }
+    }
+    const searchBox = $("mvQuickSearch");
+    if (searchBox) searchBox.hidden = quickSource !== "search";
+
     const box = $("mvQuickAdd");
+    if (!box) return;
     if (quickCandidates === null) {
       box.innerHTML = '<p class="mv-quick-empty">불러오는 중…</p>';
       return;
     }
+    // 이미 보고 있는 채널은 후보에서 뺀다. 교체 모드에서는 바꿀 대상 자신도 뺀다.
     const have = new Set(state.chosen.map((c) => c.channelId));
     const rest = quickCandidates.filter((r) => !have.has(r.channelId));
     if (!rest.length) {
-      box.innerHTML = '<p class="mv-quick-empty">추가할 채널이 없습니다.</p>';
+      box.innerHTML =
+        quickSource === "search" && !quickKeyword.trim()
+          ? '<p class="mv-quick-empty">채널 이름으로 찾아보세요.</p>'
+          : '<p class="mv-quick-empty">추가할 채널이 없습니다.</p>';
       return;
     }
-    const full = state.chosen.length >= 6;
+    // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
+    const full = !quickReplaceId && state.chosen.length >= 6;
     box.innerHTML = rest
-      .slice(0, 24)
-      .map(
-        (r) =>
-          `<button type="button" class="mv-quick-pick" data-mv-quick-add="${esc(r.channelId)}"` +
+      .slice(0, 30)
+      .map((r) => {
+        const thumb =
+          safeImageUrl(r.liveImageUrl) || safeImageUrl(r.channelImageUrl);
+        return (
+          `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
           `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
-          `<span class="mv-quick-name">${esc(r.channelName)}</span></button>`,
-      )
+          `<span class="mv-quick-card-thumb">` +
+          (thumb
+            ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
+            : `<span class="mv-quick-card-empty"></span>`) +
+          (r.adult ? `<span class="mv-quick-card-adult">19+</span>` : "") +
+          `</span>` +
+          `<span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
+          `</button>`
+        );
+      })
       .join("");
   }
 
-  // 후보는 팔로잉 목록에서 가져온다(고르기 화면과 같은 중계 경로).
-  async function loadQuickCandidates() {
-    if (quickCandidates !== null) return;
+  // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.
+  function safeImageUrl(url) {
+    const raw = String(url || "").trim();
+    if (!raw) return "";
     try {
-      const reply = await chrome.runtime.sendMessage({
-        type: "MULTIVIEW_API",
-        url: "https://api.chzzk.naver.com/service/v1/channels/following-lives?sortType=POPULAR",
-      });
-      const c = reply?.ok ? reply.content : null;
-      const rows = Array.isArray(c?.followingList)
-        ? c.followingList
-        : Array.isArray(c?.data)
-          ? c.data
-          : [];
-      quickCandidates = rows
-        .map((r) => ({
-          channelId: String(
-            r?.channelId || r?.channel?.channelId || "",
-          ).toLowerCase(),
-          channelName: String(r?.channel?.channelName || "").trim(),
-        }))
-        .filter((r) => HASH_RE.test(r.channelId) && r.channelName);
+      const parsed = new URL(raw, location.href);
+      return parsed.protocol === "https:" || parsed.protocol === "http:"
+        ? parsed.toString()
+        : "";
     } catch {
-      quickCandidates = [];
+      return "";
     }
-    renderQuick();
   }
 
   // 채널 빼기: 그 칸만 지우고 남은 칸은 그대로 둔다.
@@ -920,15 +1149,61 @@
       dropChannel(drop.dataset.mvQuickDrop);
       return;
     }
+    const sourceTab = target.closest?.("[data-mv-quick-source]");
+    if (sourceTab) {
+      quickSource = sourceTab.dataset.mvQuickSource;
+      void loadQuickCandidates();
+      return;
+    }
+    const scroll = target.closest?.("[data-mv-quick-scroll]");
+    if (scroll) {
+      const box = $("mvQuickAdd");
+      const dir = Number(scroll.dataset.mvQuickScroll) || 1;
+      box?.scrollBy({ left: dir * box.clientWidth * 0.8, behavior: "smooth" });
+      return;
+    }
+    if (target.closest?.("#mvQuickCancelReplace")) {
+      quickReplaceId = "";
+      renderQuick();
+      return;
+    }
     const add = target.closest?.("[data-mv-quick-add]");
     if (add) {
-      addChannel(add.dataset.mvQuickAdd);
+      const id = add.dataset.mvQuickAdd;
+      const picked = quickCandidates?.find((r) => r.channelId === id);
+      if (quickReplaceId) {
+        // 교체 모드: 그 자리만 갈아 끼운다.
+        replaceChannel(quickReplaceId, picked || { channelId: id });
+        quickReplaceId = "";
+        renderQuick();
+        return;
+      }
+      addChannel(id);
       return;
     }
     const retry = target.closest?.("[data-mv-retry]");
     if (retry) {
       // 사용자가 직접 누른 경우에만 다시 불러온다(자동 반복 없음).
       reloadFrame(retry.dataset.mvRetry);
+      return;
+    }
+    const reapply = target.closest?.("[data-mv-reapply]");
+    if (reapply) {
+      // ⚠ 프레임을 다시 로드하지 않는다. 그 칸에만 화면 정리를 다시 시킨다.
+      const id = reapply.dataset.mvReapply;
+      setCellStatus(id, "initializing-ui");
+      requestMultiviewUiApply(id);
+      return;
+    }
+    const replace = target.closest?.("[data-mv-replace]");
+    if (replace) {
+      openQuick({ replaceChannelId: replace.dataset.mvReplace });
+      return;
+    }
+    const close = target.closest?.("[data-mv-close]");
+    if (close) {
+      // 기존 경로를 그대로 쓴다(삭제 로직을 새로 만들지 않는다).
+      dropChannel(close.dataset.mvClose);
       return;
     }
     const unmute = target.closest?.("[data-mv-unmute]");
@@ -999,6 +1274,13 @@
     if (!target.closest?.(".mv-pop-panel")) closePopovers(null);
   });
 
+  let quickSearchTimer = 0;
+  $("mvQuickSearch")?.addEventListener("input", (event) => {
+    quickKeyword = event.target.value;
+    clearTimeout(quickSearchTimer);
+    quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     closePopovers(null);
@@ -1009,6 +1291,7 @@
   // 검증 순서: 형태 → 출처 → 이름 → 타입 → 채널 → 그 채널의 프레임에서 왔는지.
   const FRAME_MESSAGE_TYPES = new Set([
     "FRAME_READY",
+    "FRAME_UI_READY",
     "FRAME_ENDED",
     "AUDIO_INTERACTION_REQUIRED",
   ]);
@@ -1028,15 +1311,30 @@
     if (data.type === "FRAME_READY") {
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
-      setCellStatus(channelId, "ready");
+      // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
+      //   화면 정리(채팅 접기·넓은 화면)는 아직 끝나지 않았다.
+      if (currentStatus(channelId) === "ended") return; // 종료된 칸은 그대로 둔다
+      setCellStatus(channelId, "initializing-ui");
       // ⚠ 프레임이 준비되기 전에 보낸 지시는 (리스너가 붙기 전이라) 유실됐을 수 있다.
       //   주소의 쿼리는 '처음 상태' 일 뿐이고 최종 기준은 지금 부모 상태다.
-      //   그래서 준비 신호를 받는 즉시 현재 상태를 다시 내려 준다.
       postState(channelId, channelId === state.mainId);
+      requestMultiviewUiApply(channelId);
+      return;
+    }
+    if (data.type === "FRAME_UI_READY") {
+      // ⚠ 늦게 온 신호가 종료 상태를 덮으면 안 된다.
+      if (currentStatus(channelId) === "ended") return;
+      clearTimeout(uiTimers.get(channelId));
+      uiTimers.delete(channelId);
+      setCellStatus(channelId, "ready");
       return;
     }
     if (data.type === "FRAME_ENDED") {
       // 방송 종료. 칸을 지우거나 다른 채널을 자동으로 메인으로 올리지 않는다.
+      clearTimeout(frameTimers.get(channelId));
+      frameTimers.delete(channelId);
+      clearTimeout(uiTimers.get(channelId));
+      uiTimers.delete(channelId);
       setCellStatus(channelId, "ended");
       return;
     }
