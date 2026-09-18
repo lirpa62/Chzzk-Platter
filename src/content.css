@@ -90,6 +90,20 @@ html.cheese-channel-profile-radius-enabled
   object-fit: cover;
 }
 
+/* ⚠ 위 규칙의 max-height:100% 는 래퍼에 '정해진 높이' 가 있을 때만 듣는다. 접힌
+   사이드바의 전용 팔로잉 아바타는 래퍼가 치지직에서 harvest 한 _profile_ 클래스를
+   쓰는데, 접힘 상태에서 그 클래스의 크기 규칙이 걸리지 않으면 높이가 정해지지
+   않는다. 그러면 원본 이미지 높이가 그대로 남아 30x453 처럼 세로로 늘어난다(실측).
+   이미지 쪽에서 height:auto 나 100% 로는 못 막는다 — height 속성이 계산 높이로
+   남고, 100% 는 기준 높이가 없어 auto 가 된다.
+   그래서 래퍼에 폭 기준 정사각을 준다. 네이티브가 크기를 제대로 정해 주는 경우에는
+   이미 정사각이라 모양이 달라지지 않는다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-channel-profile-radius-target:not(a) {
+  aspect-ratio: 1 / 1;
+}
+
 /* 사용자 지정 라이브 프로필 링. 옵션이 켜진 경우에만 네이티브/전용 팔로잉 목록의
    라이브 프로필 background-image를 같은 두 색 그라디언트로 교체한다. */
 html.cheese-channel-live-profile-custom
