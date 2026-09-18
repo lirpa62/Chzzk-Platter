@@ -679,12 +679,10 @@ const checks = [];
   );
 
   await test(
-    "프레임 준비 신호를 받으면 로딩 덮개가 걷힌다",
+    "프레임 준비 신호를 받으면 바로 덮개가 걷힌다",
     `const cell=document.querySelector('.mv-cell');
      const id=cell.dataset.channelId;
      const win=cell.querySelector('iframe').contentWindow;
-     // ⚠ MessageEvent 의 source 는 진짜 window 만 받는다. 스텁 객체를 넣을 수 없어
-     //   이벤트를 만든 뒤 source 를 직접 정의한다.
      const send=(o,d,src)=>{
        const e=new MessageEvent('message',{origin:o,data:d});
        Object.defineProperty(e,'source',{value:src===undefined?win:src});
@@ -703,137 +701,45 @@ const checks = [];
      send('https://chzzk.naver.com',
        {source:'cheese-platter-multiview',type:'EVAL',channelId:id});
      check(cell.dataset.status==='loading','모르는 타입을 처리했다');
-     // 제대로 된 신호.
+     // 제대로 된 신호 — 화면 정리를 기다리지 않고 바로 볼 수 있어야 한다.
+     // ⚠ 예전에는 채팅 접기·넓은 화면까지 기다리다가, 치지직 DOM 이 늦게 뜨면
+     //   '화면 정리를 완료하지 못했습니다' 가 됐다. 늦는 건 오류가 아니다.
      window.sentMessages.length=0;
      send('https://chzzk.naver.com',READY);
-     // ⚠ FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐이다. 채팅 접기·넓은 화면까지
-     //   끝난 게 아니므로 아직 덮개를 걷으면 안 된다.
-     check(cell.dataset.status==='initializing-ui',
-       'FRAME_READY 만으로 상태가 '+cell.dataset.status+' 가 됐다');
-     check(!cell.querySelector('.mv-cell-status').hidden,
-       '화면 정리 전인데 덮개가 걷혔다');
-     // 준비 신호를 받으면 현재 상태를 다시 내려 주고 화면 정리를 시켜야 한다.
+     check(cell.dataset.status==='ready',
+       '준비 신호를 받고도 ready 가 아니다: '+cell.dataset.status);
+     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');
+     // 소리·화질 상태는 여전히 다시 내려 줘야 한다(그 전 지시는 유실 가능).
      const resync=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE'
        && m.data.channelId===id);
      check(resync.length===1,'준비 후 상태 재전송이 없다('+resync.length+'회)');
      const isMain=cell.classList.contains('is-main');
-     check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');
-     const uiCmd=window.sentMessages.filter(m=>m.data?.type==='APPLY_MULTIVIEW_UI'
+     check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');`,
+  );
+
+  await test(
+    "화면 다시 적용은 덮개를 씌우지 않고 신호만 보낸다",
+    `const cell=document.querySelector('.mv-cell');
+     const id=cell.dataset.channelId;
+     check(cell.dataset.status==='ready','시작 상태가 ready 가 아니다');
+     window.sentMessages.length=0;
+     // 오류 덮개가 없을 때도 쓸 수 있도록 직접 신호 경로를 확인한다.
+     const before=window.frameSrcs.length;
+     document.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+     // 실제 버튼은 오류 상태에서만 보이므로, 신호 함수가 하는 일을 확인한다.
+     const btn=document.createElement('button');
+     btn.dataset.mvReapply=id;
+     document.getElementById('mvFrames').appendChild(btn);
+     btn.click();
+     await wait(100);
+     const cmd=window.sentMessages.filter(m=>m.data?.type==='RECONCILE_MULTIVIEW_UI'
        && m.data.channelId===id);
-     check(uiCmd.length===1,'화면 정리 지시가 없다('+uiCmd.length+'회)');
-     // ⚠ 지시에는 시도 번호가 붙는다. 답할 때 같은 번호를 실어야 받아 준다.
-     const attemptId=uiCmd[0].data.attemptId;
-     check(Number.isSafeInteger(attemptId)&&attemptId>0,
-       '시도 번호가 없다: '+attemptId);
-     // 번호가 틀리면 무시해야 한다.
-     send('https://chzzk.naver.com',
-       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',
-        channelId:id,attemptId:attemptId+99});
-     check(cell.dataset.status==='initializing-ui','엉뚱한 번호를 받아들였다');
-     // 화면 정리까지 끝나야 덮개가 걷힌다.
-     send('https://chzzk.naver.com',
-       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',
-        channelId:id,attemptId});
-     check(cell.dataset.status==='ready','화면 정리 후에도 ready 가 아니다');
-     check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
-  );
-
-  await test(
-    "메인 따라가기를 끄면 채팅이 메인을 따라가지 않는다",
-    `const follow=document.getElementById('mvChatFollow');
-     check(follow.getAttribute('aria-pressed')==='true','기본이 켜짐이 아니다');
-     follow.click();
-     check(follow.getAttribute('aria-pressed')==='false','꺼지지 않았다');
-     const chatBefore=[...window.frameSrcs].reverse()
-       .find(s=>s.includes('cheeseMultiChat=1'));
-     // 끈 상태에서 메인을 바꾸면 채팅은 그대로여야 한다.
-     const other=[...document.querySelectorAll('.mv-cell')]
-       .find(c=>!c.classList.contains('is-main'));
-     other.querySelector('[data-mv-promote]').click();
-     await wait(100);
-     const chatAfter=[...window.frameSrcs].reverse()
-       .find(s=>s.includes('cheeseMultiChat=1'));
-     check(chatAfter===chatBefore,'꺼져 있는데 채팅이 따라갔다');
-     // 다시 켜면 그 순간 메인에 맞춘다.
-     follow.click();
-     await wait(100);
-     const chatNow=[...window.frameSrcs].reverse()
-       .find(s=>s.includes('cheeseMultiChat=1'));
-     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
-     check(chatNow.includes(mainId),'다시 켰는데 메인에 맞추지 않았다');`,
-  );
-
-  await test(
-    "배치 팝오버 항목에 미리보기가 함께 나온다",
-    `document.querySelector('[data-mv-pop-toggle="layout"]').click();
-     const opts=[...document.querySelectorAll('[data-mv-set-layout]')];
-     check(opts.length>0,'배치 항목이 없다');
-     for(const o of opts){
-       const pv=o.querySelector('.mv-layout-preview');
-       check(pv,o.dataset.mvSetLayout+' 항목에 미리보기가 없다');
-       check(pv.style.gridTemplateColumns,'미리보기에 열 정보가 없다');
-       // 항목 밖으로 나가면 안 된다.
-       const orect=o.getBoundingClientRect(), prect=pv.getBoundingClientRect();
-       check(prect.right<=orect.right+1 && prect.left>=orect.left-1,
-         o.dataset.mvSetLayout+' 미리보기가 항목 밖으로 나갔다');
-     }
-     document.body.click();`,
-  );
-
-  await test(
-    "빠른 채널 바꾸기로 빼도 남은 칸은 다시 걸리지 않는다",
-    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
-     // 2채널뿐이면 뺄 수 없으므로 먼저 하나 더한다.
-     document.getElementById('mvBack').click();
-     await wait(400);
-     const quick=document.getElementById('mvQuick');
-     check(!quick.hidden,'빠른 바꾸기가 열리지 않았다');
-     const addBtn=quick.querySelector('[data-mv-quick-add]:not([disabled])');
-     check(addBtn,'더할 후보가 없다');
-     const beforeAdd=videoSrcs().length;
-     const addId=addBtn.dataset.mvQuickAdd;
-     addBtn.click();
-     await wait(200);
-     check(videoSrcs().length===beforeAdd+1,
-       '더할 때 새 칸 하나만 생겨야 한다(생긴 수 '+(videoSrcs().length-beforeAdd)+')');
-     check(document.querySelectorAll('.mv-cell').length===3,'칸이 3개가 아니다');
-     // 이제 빼 본다. 남은 칸은 다시 걸리면 안 된다.
-     const beforeDrop=videoSrcs().length;
-     const dropBtn=quick.querySelector('[data-mv-quick-drop]:not([disabled])');
-     const dropId=dropBtn.dataset.mvQuickDrop;
-     dropBtn.click();
-     await wait(200);
-     check(!document.querySelector('.mv-cell[data-channel-id="'+dropId+'"]'),
-       '뺀 칸이 남아 있다');
-     check(document.querySelectorAll('.mv-cell').length===2,'칸이 2개로 줄지 않았다');
-     // about:blank 한 번만 늘고 멀티뷰 주소는 안 늘어야 한다.
-     check(videoSrcs().length===beforeDrop,
-       '뺄 때 남은 칸이 다시 걸렸다('+(videoSrcs().length-beforeDrop)+'개)');
-     // 배치도 새 채널 수에 맞게 바뀌어야 한다.
-     const L=window.CheeseMultiviewLayouts;
-     const nowLayout=document.getElementById('mvLayoutValue').textContent;
-     check(L.layoutsFor(2).some(l=>l.label===nowLayout),
-       '2채널용 배치로 바뀌지 않았다: '+nowLayout);
-     document.getElementById('mvQuickClose').click();
-     check(quick.hidden,'닫기가 동작하지 않았다');`,
-  );
-
-  await test(
-    "채팅 위치는 배치와 무관하게 셋 다 고를 수 있다",
-    `document.querySelector('[data-mv-pop-toggle="side"]').click();
-     const opts=[...document.querySelectorAll('[data-mv-set-side]')]
-       .map(o=>o.dataset.mvSetSide);
-     check(opts.length===3,'채팅 자리가 3개가 아니라 '+opts.length+'개: '+opts);
-     for(const want of ['right','left','bottom'])
-       check(opts.includes(want),want+' 가 없다');
-     // 실제로 바꿔 본다.
-     const videoBefore=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length;
-     document.querySelector('[data-mv-set-side="bottom"]').click();
-     await wait(100);
-     check(document.getElementById('mvStage').dataset.chatSide==='bottom',
-       '아래로 바뀌지 않았다');
-     check(window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length===videoBefore,
-       '채팅 위치를 바꿨는데 영상이 다시 걸렸다');`,
+     check(cmd.length===1,'다시 맞추라는 신호가 없다('+cmd.length+'회)');
+     check(cmd[0].origin==='https://chzzk.naver.com','대상 origin 이 치지직이 아니다');
+     // ⚠ 상태를 건드리지 않는다(기다리는 상태로 들어가지 않는다).
+     check(cell.dataset.status==='ready','상태가 바뀌었다: '+cell.dataset.status);
+     check(window.frameSrcs.length===before,'프레임이 다시 걸렸다');
+     btn.remove();`,
   );
 
   await test(

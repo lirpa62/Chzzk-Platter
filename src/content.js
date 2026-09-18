@@ -20420,6 +20420,9 @@
       currentVideo = video;
       video.addEventListener("volumechange", onVolumeChange);
       applyAudioToVideo(video);
+      // 플레이어가 새로 만들어졌으면 넓은 화면·채팅 접힘도 풀렸을 수 있다.
+      // ⚠ 반드시 풀린다고 단정하지 않는다. 확인해서 필요할 때만 맞춘다.
+      scheduleMultiviewUiReconcile(300);
     };
 
     const syncMultiviewVideo = () => {
@@ -20550,110 +20553,141 @@
     //   그대로 쓴다.
     // ⚠ 사용자의 저장된 채팅 접힘 설정(cheeseChatFoldState)은 건드리지 않는다.
     //   멀티뷰에서만 잠깐 강제하고, 안정화가 끝나면 사용자가 직접 펼 수 있다.
-    // ⚠ 채팅 접기와 넓은 화면은 서로 다른 시점에 끝난다. 재적용할 때 둘 다 false 로
-    //   되돌리면, 이미 성공한 쪽까지 다시 기다리게 돼 사용자가 여러 번 눌러야 했다.
-    //   그래서 각자의 성공 상태를 남겨 두고, 재적용 때 '지금 실제로도 그런지' 만
-    //   다시 확인한다.
-    let multiviewChatFoldReady = false;
-    let multiviewWideReady = false;
-    // 시도 번호. 부모가 준 번호를 그대로 쓴다(부모·프레임·MAIN world 가 같은 번호).
-    let activeMultiviewUiAttemptId = 0;
-    let multiviewUiSettledAttemptId = 0; // 이미 결과를 알린 시도
+    // ── 화면 정리(채팅 접기 + 넓은 화면) ────────────────────────────────
+    // ⚠ '성공/실패로 끝나는 한 번의 절차' 가 아니라 '목표 상태로 계속 수렴시키는
+    //   일' 로 다룬다. 치지직 UI 는 비동기로 여러 번 다시 그려져서, 언제 끝났는지
+    //   판정하려 들면 DOM 이 늦게 뜬 것까지 실패로 잡힌다(그래서 재적용을 두세 번
+    //   눌러야 했다). DOM 이 늦는 건 오류가 아니라 정상이다.
+    const multiviewDesiredUi = { chatFolded: true, wide: true };
 
-    const isMultiviewAttemptId = (v) => Number.isSafeInteger(v) && v > 0;
+    // 접기 버튼을 연달아 누르면 펼침↔접힘을 왕복한다. 누른 뒤 잠시 쉬어 반영을 본다.
+    const FOLD_CLICK_COOLDOWN_MS = 700;
+    let lastMultiviewFoldClickAt = 0;
 
-    function maybeNotifyMultiviewUiReady(attemptId) {
-      if (attemptId !== activeMultiviewUiAttemptId) return; // 지난 시도
-      if (!multiviewChatFoldReady || !multiviewWideReady) return;
-      if (multiviewUiSettledAttemptId === attemptId) return;
-      multiviewUiSettledAttemptId = attemptId;
-      notifyParent("FRAME_UI_READY", { attemptId });
+    // 돌려주는 값은 '지금 목표 상태인가' 다. false 는 실패가 아니라 '아직' 이다.
+    function ensureMultiviewChatFold() {
+      if (!multiviewDesiredUi.chatFolded) return true;
+      const aside = getLiveChatAside();
+      if (!aside) return false; // 채팅 DOM 이 아직 없다
+      if (isChatFolded(aside)) return true;
+      // 광고 중에는 치지직이 채팅을 강제로 펼치고 우리 클릭도 무시한다. 기존 정책을
+      // 그대로 따라 억지로 누르지 않고 광고가 끝나기를 기다린다.
+      if (
+        typeof adRemainingSeconds === "function" &&
+        adRemainingSeconds() !== null
+      ) {
+        return false;
+      }
+      const button = getChatFoldToggleBtn();
+      if (!button) return false; // 버튼이 아직 없다
+      const now = Date.now();
+      if (now - lastMultiviewFoldClickAt < FOLD_CLICK_COOLDOWN_MS) return false;
+      button.click();
+      lastMultiviewFoldClickAt = now;
+      return false; // 눌렀다. 반영됐는지는 다음 확인에서 본다
     }
 
-    function notifyMultiviewUiFailed(attemptId, reason) {
-      if (attemptId !== activeMultiviewUiAttemptId) return;
-      if (multiviewUiSettledAttemptId === attemptId) return;
-      multiviewUiSettledAttemptId = attemptId;
-      notifyParent("FRAME_UI_FAILED", { attemptId, reason });
-    }
-
-    // 넓은 화면 완료 신호(MAIN world 가 보낸다). 어느 시도에 대한 답인지 함께 온다.
-    window.addEventListener("message", (event) => {
-      if (event.source !== window) return;
-      if (event.data?.source !== "cheese-wide-screen-settled") return;
-      const data = event.data;
-      // ⚠ 예전에는 번호가 없어 지난 시도의 늦은 완료를 최신 성공으로 오해했다.
-      if (!isMultiviewAttemptId(data.attemptId)) return;
-      if (data.attemptId !== activeMultiviewUiAttemptId) return;
-      if (data.ok === false) {
-        notifyMultiviewUiFailed(data.attemptId, "wide-screen");
-        return;
-      }
-      multiviewWideReady = true;
-      maybeNotifyMultiviewUiReady(data.attemptId);
-    });
-
-    function applyMultiviewUi(attemptId) {
-      activeMultiviewUiAttemptId = attemptId;
-
-      // ── 채팅 접기 ──────────────────────────────────────────────────────
-      // ⚠ 저장된 성공 상태를 믿지 않고 지금 DOM 을 확인한다(치지직이 다시 펼쳤을 수
-      //   있다). 이미 접혀 있으면 엔진을 돌리지 않고 즉시 완료로 본다.
-      if (isChatFolded(getLiveChatAside())) {
-        multiviewChatFoldReady = true;
-      } else {
-        multiviewChatFoldReady = false;
-        chatFoldWant = true;
-        chatFoldRestoreUntil = Date.now() + MULTIVIEW_UI_FOLD_WINDOW_MS;
-        startChatFoldEnforce({
-          onSettle: () => {
-            if (attemptId !== activeMultiviewUiAttemptId) return; // 지난 시도
-            // ⚠ 엔진의 결과 코드보다 실제 상태가 정확하다. 정말 접혔는지로 판정한다.
-            if (!isChatFolded(getLiveChatAside())) {
-              notifyMultiviewUiFailed(attemptId, "chat-fold");
-              return;
-            }
-            multiviewChatFoldReady = true;
-            maybeNotifyMultiviewUiReady(attemptId);
-          },
-        });
-      }
-
-      // ── 넓은 화면 ──────────────────────────────────────────────────────
-      // 항상 물어본다. 이미 넓으면 MAIN world 가 즉시 완료로 답한다(다시 누르지 않는다).
-      multiviewWideReady = false;
+    // 넓은 화면은 MAIN world 가 플레이어를 만진다. 여기서는 확인만 시킨다(답은
+    // 기다리지 않는다 — 다음 확인 때 또 시키면 된다).
+    function requestMultiviewWideEnsure() {
       try {
         window.postMessage(
-          { source: "cheese-apply-multiview-wide", attemptId },
+          { source: "cheese-reconcile-multiview-wide" },
           location.origin,
         );
       } catch {}
-
-      // 채팅이 이미 끝나 있으면 넓은 화면 답만 기다리면 된다.
-      maybeNotifyMultiviewUiReady(attemptId);
     }
 
-    // 부모의 화면 정리 지시.
+    let multiviewReconcileTimer = 0;
+    function scheduleMultiviewUiReconcile(delay = 0) {
+      clearTimeout(multiviewReconcileTimer);
+      multiviewReconcileTimer = window.setTimeout(() => {
+        multiviewReconcileTimer = 0;
+        ensureMultiviewChatFold();
+        requestMultiviewWideEnsure();
+      }, delay);
+    }
+
+    // 초기에는 치지직이 여러 번 다시 그리므로 잠깐 자주 확인한다.
+    // ⚠ 영구 폴링은 두지 않는다(6칸이면 비용이 6배다). 목표에 잠시 안정되면 멈추고,
+    //   그 뒤에는 DOM 이 바뀔 때만 다시 확인한다.
+    const MULTIVIEW_BOOT_INTERVAL_MS = 400;
+    const MULTIVIEW_BOOT_MAX_MS = 20000;
+    const MULTIVIEW_BOOT_STABLE_TICKS = 3; // 연속 이만큼 목표면 초기 확인 종료
+    let bootTimer = 0;
+    let bootStartedAt = 0;
+    let bootStableCount = 0;
+
+    function stopMultiviewBootReconcile() {
+      if (!bootTimer) return;
+      clearInterval(bootTimer);
+      bootTimer = 0;
+    }
+
+    function startMultiviewBootReconcile() {
+      if (bootTimer) return;
+      bootStartedAt = Date.now();
+      bootStableCount = 0;
+      bootTimer = window.setInterval(() => {
+        const chatOk = ensureMultiviewChatFold();
+        requestMultiviewWideEnsure();
+        // 넓은 화면은 MAIN world 가 맡으므로 여기서는 채팅만 안정 판정에 쓴다.
+        bootStableCount = chatOk ? bootStableCount + 1 : 0;
+        if (
+          bootStableCount >= MULTIVIEW_BOOT_STABLE_TICKS ||
+          Date.now() - bootStartedAt > MULTIVIEW_BOOT_MAX_MS
+        ) {
+          stopMultiviewBootReconcile();
+        }
+      }, MULTIVIEW_BOOT_INTERVAL_MS);
+    }
+
+    // 초기 확인이 끝난 뒤에도 치지직이 UI 를 다시 만들 수 있다. 플레이어·채팅 쪽만
+    // 좁게 지켜보다가 바뀌면 다시 맞춘다(문서 전체를 보지 않는다).
+    let uiObserver = null;
+    function observeMultiviewUiHost() {
+      const host =
+        document.getElementById("live_player_layout")?.parentElement ||
+        document.querySelector("#layout-body") ||
+        document.body;
+      if (!host || uiObserver) return;
+      uiObserver = new MutationObserver(() => scheduleMultiviewUiReconcile(200));
+      uiObserver.observe(host, { childList: true, subtree: true });
+    }
+
+    // 부모가 '지금 바로 다시 맞춰라' 고 시킬 때(수동 다시 적용). 답을 돌려주지
+    // 않는다 — 부모는 결과를 기다리지 않는다.
     window.addEventListener("message", (event) => {
       if (event.source !== window.parent) return;
       if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
       const data = event.data;
       if (data?.source !== MULTIVIEW_MESSAGE) return;
-      if (data.type !== "APPLY_MULTIVIEW_UI") return;
+      if (data.type !== "RECONCILE_MULTIVIEW_UI") return;
       if (
         typeof data.channelId !== "string" ||
         data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
       ) {
         return;
       }
-      if (!isMultiviewAttemptId(data.attemptId)) return;
-      applyMultiviewUi(data.attemptId);
+      startMultiviewBootReconcile(); // 다시 잠깐 적극적으로 맞춘다
+      scheduleMultiviewUiReconcile(0);
     });
 
-    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 현재 상태를 다시 주고
-    // 화면 정리를 시킨다.
-    // ⚠ 이건 '재생 성공' 이 아니라 '지시를 받을 수 있게 됨' 이다. 화면 정리까지
-    //   끝난 것은 FRAME_UI_READY 로 따로 알린다.
+    // 화면 정리 시작. 목표 상태로 계속 수렴시키기만 하면 되므로 부모의 지시를
+    // 기다리지 않는다.
+    startMultiviewBootReconcile();
+    observeMultiviewUiHost();
+    // 플레이어가 늦게 뜨면 감시 대상도 늦게 생긴다. 초기 몇 번만 다시 붙여 본다.
+    let hostTries = 0;
+    const hostTimer = setInterval(() => {
+      hostTries += 1;
+      observeMultiviewUiHost();
+      if (uiObserver || hostTries >= 20) clearInterval(hostTimer);
+    }, 500);
+
+    // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 소리·화질 상태를
+    // 다시 주고 곧바로 덮개를 걷는다.
+    // ⚠ 화면 정리가 끝났다는 뜻이 아니다. 정리는 이 프레임이 알아서 계속 맞춘다.
     if (document.readyState === "complete") notifyParent("FRAME_READY");
     else window.addEventListener("load", () => notifyParent("FRAME_READY"));
   }

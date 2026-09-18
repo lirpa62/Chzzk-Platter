@@ -9905,22 +9905,14 @@
   // 이미 켜짐) 더 시도하지 않기로 한 순간(마감·비대상 페이지) 한 번만 알린다.
   // content.js(격리 월드)가 받아 부모 창으로 중계한다.
   let wideScreenNotified = false;
-  // 멀티뷰가 기다리는 시도 번호. 0 이면 멀티뷰 요청이 아니다(팝업·일반 경로).
-  // ⚠ 팝업과 일반 동작은 예전 그대로다. 멀티뷰일 때만 번호·성공 여부를 얹는다.
-  let pendingMultiviewWideAttemptId = 0;
-  function notifyWideScreenSettled(result) {
+  // 팝업 플레이어의 '준비 중' 오버레이를 내리는 신호. 멀티뷰는 이 신호를 쓰지 않고
+  // 스스로 목표 상태로 수렴한다(ensureMultiviewWide 참고).
+  function notifyWideScreenSettled() {
     if (wideScreenNotified) return;
     wideScreenNotified = true;
-    const attemptId = result?.attemptId ?? pendingMultiviewWideAttemptId;
     try {
       window.postMessage(
-        {
-          source: "cheese-wide-screen-settled",
-          // 멀티뷰 요청이었을 때만 번호를 실어 보낸다.
-          ...(attemptId
-            ? { attemptId, ok: result?.ok !== false, reason: result?.reason }
-            : {}),
-        },
+        { source: "cheese-wide-screen-settled" },
         BRIDGE_ORIGIN,
       );
     } catch {}
@@ -9931,56 +9923,57 @@
   // ⚠ 6개 프레임은 플레이어 DOM 이 뜨는 시각이 제각각이라, 처음 시도 때 viewmode
   //   버튼이 없어 놓치는 칸이 생긴다. 부모가 이 명령으로 다시 시키게 한다.
   // ⚠ 이미 넓은 화면이면 아무것도 하지 않는다(다시 누르면 좁은 화면으로 돌아간다).
-  // ⚠ 설정 브리지가 아직 도착하지 않았을 수 있다. 그때 maybeAutoWideScreen 은
-  //   wideScreenSettingsLoaded 가 false 라 '아무 말 없이' 돌아가고, 우리는 완료
-  //   신호를 영영 못 받는다. 설정이 올 때까지 짧게 기다렸다가 다시 시도한다.
-  let multiviewWideWaitTimer = 0;
-  let multiviewWideWaitUntil = 0;
-  function runMultiviewWideApply() {
-    const attemptId = pendingMultiviewWideAttemptId;
-    if (!attemptId) return;
-    // ⚠ 이미 넓은 화면이면 다시 누르지 않는다(누르면 좁은 화면으로 돌아간다).
-    //   대신 '됐다' 고 바로 답해야 한다. 아무 말 없이 돌아가면 부모가 끝까지 기다린다.
-    if (isWideScreenOn(findViewModeButton())) {
-      wideScreenNotified = false;
-      notifyWideScreenSettled({ attemptId, ok: true });
-      return;
+  // ── 멀티뷰 넓은 화면 유지 ────────────────────────────────────────────────
+  // ⚠ '한 번 적용하고 끝' 이 아니라 '확인해서 아니면 맞춘다' 로 다룬다. 치지직은
+  //   플레이어를 여러 번 다시 만들고 viewmode 버튼도 늦게 붙는다. 언제 끝났는지
+  //   판정하려 들면 늦게 뜬 것까지 실패가 된다.
+  // ⚠ viewmode 는 토글이다. 이미 넓은 화면이면 절대 다시 누르지 않는다.
+  const MULTIVIEW_WIDE_CLICK_COOLDOWN_MS = 1200;
+  let lastMultiviewWideClickAt = 0;
+
+  // 돌려주는 값은 '지금 목표 상태인가'. false 는 실패가 아니라 '아직' 이다.
+  function ensureMultiviewWide() {
+    if (!wideScreenAuto) return true; // 넓은 화면을 원하지 않는다
+    const button = findViewModeButton();
+    if (!isViewModeButtonReady(button)) return false; // 버튼이 아직 없다
+    if (isWideScreenOn(button)) return true; // 이미 목표 상태 — 누르지 않는다
+    const now = Date.now();
+    if (now - lastMultiviewWideClickAt < MULTIVIEW_WIDE_CLICK_COOLDOWN_MS) {
+      return false;
     }
-    if (!wideScreenSettingsLoaded) {
-      // 설정이 아직이다. 기한 안에서 다시 확인한다(무한 대기는 하지 않는다).
-      if (Date.now() < multiviewWideWaitUntil) {
-        clearTimeout(multiviewWideWaitTimer);
-        multiviewWideWaitTimer = setTimeout(runMultiviewWideApply, 300);
-      } else {
-        wideScreenNotified = false;
-        notifyWideScreenSettled({
-          attemptId,
-          ok: false,
-          reason: "settings-not-ready",
-        });
-      }
-      return;
-    }
-    // ⚠ 이미 넓은 화면 적용을 기다리는 중이면 그대로 둔다. 매번 되돌리면(reset)
-    //   기다리던 시각이 초기화돼 성공이 오히려 늦어진다. 최신 시도 번호만 갱신하고
-    //   지금 돌고 있는 감시가 끝나면 그 번호로 답한다.
-    if (wideScreenPollTimer) return;
-    wideScreenAppliedForPage = null;
-    wideScreenNotified = false;
-    resetWideScreenAttempt();
-    if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
-    else startWideScreenPolling();
+    try {
+      button.click();
+    } catch {}
+    lastMultiviewWideClickAt = now;
+    return false; // 눌렀다. 반영됐는지는 다음 확인에서 본다
   }
 
+  // 초기에는 잠깐 자주 확인하고, 목표에 닿으면 멈춘다(영구 폴링을 두지 않는다).
+  const MULTIVIEW_WIDE_INTERVAL_MS = 400;
+  const MULTIVIEW_WIDE_MAX_MS = 20000;
+  let multiviewWideTimer = 0;
+  let multiviewWideStartedAt = 0;
+
+  function startMultiviewWideReconcile() {
+    if (multiviewWideTimer) return;
+    if (ensureMultiviewWide()) return; // 이미 됐으면 돌릴 필요가 없다
+    multiviewWideStartedAt = Date.now();
+    multiviewWideTimer = window.setInterval(() => {
+      if (
+        ensureMultiviewWide() ||
+        Date.now() - multiviewWideStartedAt > MULTIVIEW_WIDE_MAX_MS
+      ) {
+        clearInterval(multiviewWideTimer);
+        multiviewWideTimer = 0;
+      }
+    }, MULTIVIEW_WIDE_INTERVAL_MS);
+  }
+
+  // 격리 월드가 '확인해 봐라' 고 보낸다. 답은 돌려주지 않는다(기다리는 쪽이 없다).
   window.addEventListener("message", (e) => {
     if (e.source !== window) return;
-    if (e.data?.source !== "cheese-apply-multiview-wide") return;
-    const attemptId = e.data.attemptId;
-    if (!Number.isSafeInteger(attemptId) || attemptId <= 0) return;
-    pendingMultiviewWideAttemptId = attemptId;
-    multiviewWideWaitUntil = Date.now() + 15000;
-    clearTimeout(multiviewWideWaitTimer);
-    runMultiviewWideApply();
+    if (e.data?.source !== "cheese-reconcile-multiview-wide") return;
+    startMultiviewWideReconcile();
   });
 
   function settleWideScreenAttempt(waitForLayout = false) {
