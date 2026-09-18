@@ -1756,3 +1756,9 @@ body {
   line-height: 1.5;
   margin: 0;
 }
+
+/* 상한이 걸렸는데 그보다 높은 화질로 재생 중이면 정책이 깨진 것이다. 눈에 띄게 둔다. */
+.mv-stats-broken {
+  color: #ffb454;
+  font-weight: 600;
+}

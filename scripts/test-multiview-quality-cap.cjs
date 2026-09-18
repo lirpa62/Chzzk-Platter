@@ -76,6 +76,114 @@ for (const [label, sel, target, cap, expected] of idempotent) {
   }
 }
 
+// ── 부모가 내리는 화질 정책 ───────────────────────────────────────────────
+// "메인 채널만 높은 화질로 시작" 이 켜져도 모든 칸이 고화질로 시작하던 문제가
+// 있었다. 부모가 무엇을 보내는지부터 고정해 둔다.
+console.log("\n[정책] 메인만 고화질 설정에 따라 칸마다 다른 지시가 나간다");
+{
+  // multiviewWatch.js 의 frameUrl / postState 와 같은 규칙.
+  const urlQuality = (isMain, high) => (isMain && high ? null : "480");
+  const postQuality = (isMain, high) => (isMain && high ? "high" : "480");
+
+  const cases = [
+    ["켜짐 · 메인", true, true, null, "high"],
+    ["켜짐 · 보조", false, true, "480", "480"],
+    ["꺼짐 · 메인", true, false, "480", "480"],
+    ["꺼짐 · 보조", false, false, "480", "480"],
+  ];
+  for (const [label, isMain, high, wantUrl, wantPost] of cases) {
+    const u = urlQuality(isMain, high);
+    const q = postQuality(isMain, high);
+    try {
+      assert.strictEqual(u, wantUrl);
+      assert.strictEqual(q, wantPost);
+      console.log(`  PASS ${label}: 주소=${u ?? "상한없음"} 지시=${q}`);
+    } catch {
+      failed += 1;
+      console.log(`  FAIL ${label}: 주소=${u} 지시=${q}`);
+    }
+  }
+}
+
+// ── 수동 화질 존중의 오판 ─────────────────────────────────────────────────
+// 상한이 걸린 칸에서 '선택 트랙이 우리가 고정한 값과 다르다' 만으로 수동 변경으로
+// 보면, 치지직이 스스로 ABR·재연결로 되돌린 것까지 사용자 선택으로 오해한다.
+// 그러면 그 미디어 동안 상한 재적용이 영구히 멈춰 보조 칸이 1080p 로 남는다.
+console.log("\n[수동 존중] 신뢰된 조작이 있을 때만 사용자 선택으로 본다");
+{
+  // audioMixer.js 의 판정과 같은 규칙.
+  const isManual = (cap, selH, setH, userTouched) => {
+    const deviated = cap > 0 ? selH !== setH : selH < setH;
+    const userChose = cap > 0 ? userTouched : true;
+    return setH > 0 && selH > 0 && deviated && userChose;
+  };
+
+  const cases = [
+    // [설명, 상한, 선택높이, 우리가고정한높이, 신뢰된조작, 기대]
+    [
+      "상한 480 · 치지직이 1080 으로 되돌림(조작 없음)",
+      480,
+      1080,
+      480,
+      false,
+      false,
+    ],
+    ["상한 480 · 사용자가 메뉴에서 1080 선택", 480, 1080, 480, true, true],
+    ["상한 480 · 그대로 480", 480, 480, 480, false, false],
+    ["상한 없음 · 더 낮아짐(기존 규칙 유지)", 0, 480, 1080, false, true],
+    ["상한 없음 · 더 높아짐(우리 동작)", 0, 1080, 720, false, false],
+  ];
+  for (const [label, cap, selH, setH, touched, expected] of cases) {
+    const got = isManual(cap, selH, setH, touched);
+    try {
+      assert.strictEqual(got, expected);
+      console.log(`  PASS ${label}`);
+    } catch {
+      failed += 1;
+      console.log(`  FAIL ${label}: 기대 ${expected}, 실제 ${got}`);
+    }
+  }
+}
+
+// ── 비트레이트 단위 ───────────────────────────────────────────────────────
+// 치지직은 bps 로 줄 때도 kbps 로 줄 때도 있다. toKbps() 가 그 판정을 하므로
+// 반드시 거쳐야 한다. 직접 /1000 하면 이미 kbps 인 값이 1000배 작아진다.
+console.log("\n[비트레이트] toKbps 로 단위를 맞춘다");
+{
+  // audioMixer.js 의 toKbps 와 같다.
+  const toKbps = (n) => {
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n >= 100000 ? Math.round(n / 1000) : Math.round(n);
+  };
+  // multiviewWatch.js 의 표시 규칙과 같다.
+  const show = (v) => {
+    if (!Number.isFinite(v) || v <= 0) return "-";
+    return v >= 1000
+      ? `${(v / 1000).toFixed(1)} Mbps`
+      : `${Math.round(v)} kbps`;
+  };
+
+  const cases = [
+    ["bps 로 온 8Mbps", 8000000, 8000, "8.0 Mbps"],
+    ["bps 로 온 1.5Mbps", 1500000, 1500, "1.5 Mbps"],
+    ["이미 kbps 인 1500", 1500, 1500, "1.5 Mbps"],
+    ["이미 kbps 인 800", 800, 800, "800 kbps"],
+    ["값 없음", 0, null, "-"],
+  ];
+  for (const [label, raw, wantKbps, wantText] of cases) {
+    const kbps = toKbps(raw);
+    const text = show(kbps);
+    try {
+      assert.strictEqual(kbps, wantKbps);
+      assert.strictEqual(text, wantText);
+      console.log(`  PASS ${label} → ${text}`);
+    } catch {
+      failed += 1;
+      console.log(`  FAIL ${label}: kbps=${kbps} 표시=${text}`);
+    }
+  }
+}
+
 if (failed) {
   console.error(`\n${failed}개 실패`);
   process.exit(1);

@@ -82,7 +82,18 @@
 
   // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
   // 보낸다(주소를 다시 넣으면 방송이 처음부터 로드된다).
+  // 칸마다 마지막으로 지시한 화질. 통계 표의 '정책' 열과 진단 기록에 쓴다.
+  // ⚠ frameUrl 이 처음 만들 때부터 기록하므로 그보다 먼저 선언해 둔다.
+  const lastQuality = new Map();
+
   function frameUrl(channel, isMain, mainHighQuality) {
+    // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
+    // 통계 표의 정책 열이 첫 화면부터 맞는다(postState 는 프레임이 준비된 뒤에야
+    // 불린다).
+    lastQuality.set(
+      channel.channelId,
+      isMain && mainHighQuality ? "high" : "480",
+    );
     const url = new URL(`/live/${channel.channelId}`, CHZZK_ORIGIN);
     url.searchParams.set("cheeseMulti", "1");
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
@@ -104,9 +115,6 @@
   //
   // ⚠ isMain 은 '화질' 만 정한다. 음소거·크기는 소리 설정에서 계산한다 —
   //   focus mode 를 끄면 보조 채널도 소리를 낼 수 있어야 하기 때문이다.
-  // 칸마다 마지막으로 내려 준 화질. 진단에서 '언제 바뀌었나' 를 보기 위한 것이다.
-  const lastQuality = new Map();
-
   function postState(channelId, isMain) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
@@ -718,7 +726,11 @@
       .map((c) => c.channelName);
     const notice = blockedNames.length
       ? `<div class="mv-vol-notice">` +
-        `<p>브라우저가 ${esc(blockedNames.join(", "))} 의 소리 재생을 차단했습니다.</p>` +
+        `<p>${esc(
+          blockedNames.length > 1
+            ? `${blockedNames.join(", ")} 채널의 소리 재생이 차단되었습니다.`
+            : `브라우저가 ${blockedNames[0]}의 소리 재생을 차단했습니다.`,
+        )}</p>` +
         `<button type="button" class="mv-vol-enable" id="mvVolEnable">소리 활성화</button>` +
         `</div>`
       : "";
@@ -767,11 +779,33 @@
     );
   }
 
+  // 복귀 직후 지연이 어떻게 회복되는지 보려면 정해진 시점의 통계가 필요하다.
+  // ⚠ 통계 패널이 이미 1초마다 묻고 있으면 여기서 또 묻지 않는다. 두 곳이 같이
+  //   돌면 같은 시각의 통계가 두 번 들어와 로그가 겹쳐 보인다(중복의 진짜 원인).
+  const RETURN_PROBE_DELAYS = [200, 1000, 2000, 3000, 5000, 8000];
+  let returnProbeTimers = [];
+
+  function cancelReturnProbe() {
+    for (const id of returnProbeTimers) clearTimeout(id);
+    returnProbeTimers = [];
+  }
+
+  function scheduleReturnProbe() {
+    cancelReturnProbe();
+    if (statsTimer) return; // 이미 통계 폴링이 돌고 있다 → 따로 묻지 않는다
+    returnProbeTimers = RETURN_PROBE_DELAYS.map((delay) =>
+      window.setTimeout(() => {
+        requestStats();
+      }, delay),
+    );
+  }
+
   if (mvTrace) {
     // ⚠ 부모는 visibilitychange 에서 아무것도 '고치지' 않는다. 기록만 남긴다.
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         traceLog("mv-life", "부모 숨김");
+        cancelReturnProbe(); // 다음 복귀 주기와 겹치지 않게 예약을 비운다
         return;
       }
       lastVisibleAt = Date.now();
@@ -779,14 +813,7 @@
         "mv-life",
         `부모 복귀 (버려졌었나=${document.wasDiscarded === true})`,
       );
-      // 복귀 직후 지연이 어떻게 회복되는지 보려면 통계가 필요하다. 패널이 닫혀
-      // 있어도 진단 모드에서는 몇 번만 물어본다(계속 돌리지 않는다).
-      let ticks = 0;
-      const probe = setInterval(() => {
-        ticks += 1;
-        requestStats();
-        if (ticks >= 5) clearInterval(probe);
-      }, 1000);
+      scheduleReturnProbe();
     });
   }
 
@@ -800,6 +827,8 @@
   let statsTimer = 0;
 
   function startStatsPolling() {
+    // 폴링이 시작되면 복귀 진단 예약은 중복이 된다. 먼저 비운다.
+    cancelReturnProbe();
     renderStats();
     requestStats();
     if (statsTimer) return;
@@ -839,8 +868,20 @@
   const fmtRes = (w, h) => (w && h ? `${w}×${h}` : "-");
   const fmtFps = (v) =>
     Number.isFinite(v) && v > 0 ? String(Math.round(v)) : "-";
-  const fmtBitrate = (v) =>
-    Number.isFinite(v) && v > 0 ? `${(v / 1000).toFixed(1)} Mbps` : "-";
+  // 값은 kbps 로 온다(프레임에서 toKbps 를 거친다). 여기서 한 번만 Mbps 로 바꾼다.
+  const fmtBitrate = (v) => {
+    if (!Number.isFinite(v) || v <= 0) return "-";
+    return v >= 1000
+      ? `${(v / 1000).toFixed(1)} Mbps`
+      : `${Math.round(v)} kbps`;
+  };
+  // 정책(부모가 보낸 것) 과 실제(칸이 알려 준 것) 를 나눠 보여 준다.
+  const fmtPolicy = (q) =>
+    q === "high" ? "HIGH" : q === "480" ? "≤480p" : "-";
+  const fmtActual = (st) => {
+    if (st.selectedQuality) return st.selectedQuality;
+    return st.selectedHeight ? `${st.selectedHeight}p` : "-";
+  };
 
   function renderStats() {
     const panel = $("mvStatsPop");
@@ -852,18 +893,26 @@
         const name = `<td class="mv-stats-name">${esc(c.channelName)}</td>`;
         if (status === "ended" || status === "error") {
           const label = status === "ended" ? "방송 종료" : "오류";
-          return `<tr>${name}<td colspan="4" class="mv-stats-state">${label}</td></tr>`;
+          return `<tr>${name}<td colspan="6" class="mv-stats-state">${label}</td></tr>`;
         }
         const entry = statsByChannel.get(c.channelId);
         // 오래된 값은 최신인 척하지 않는다.
         const fresh =
           entry && now - entry.updatedAt < STATS_POLL_MS * STATS_STALE_TICKS;
         if (!fresh) {
-          return `<tr>${name}<td colspan="4" class="mv-stats-state">대기 중</td></tr>`;
+          return `<tr>${name}<td colspan="6" class="mv-stats-state">대기 중</td></tr>`;
         }
         const st = entry.stats;
+        // 정책은 부모가 보낸 값을 쓴다(우리가 아는 사실). 실제 화질은 칸이 알려 준
+        // 값만 쓴다 — 부모는 iframe 안을 볼 수 없으므로 추정하지 않는다.
+        const want = lastQuality.get(c.channelId) || "";
+        // 상한이 걸렸는데 그보다 높은 화질로 재생 중이면 정책이 깨진 것이다.
+        const broken =
+          want === "480" && st.selectedHeight && st.selectedHeight > 480;
         return (
           `<tr>${name}` +
+          `<td>${fmtPolicy(want)}</td>` +
+          `<td${broken ? ' class="mv-stats-broken"' : ""}>${esc(fmtActual(st))}</td>` +
           `<td>${fmtLatency(st.latencySec)}</td>` +
           `<td>${fmtRes(st.width, st.height)}</td>` +
           `<td>${fmtFps(st.fps)}</td>` +
@@ -873,7 +922,8 @@
       .join("");
     panel.innerHTML =
       `<table class="mv-stats-table">` +
-      `<thead><tr><th>채널</th><th>지연</th><th>해상도</th><th>FPS</th><th>비트레이트</th></tr></thead>` +
+      `<thead><tr><th>채널</th><th>정책</th><th>실제</th><th>지연</th>` +
+      `<th>해상도</th><th>FPS</th><th>비트레이트</th></tr></thead>` +
       `<tbody>${rows}</tbody></table>` +
       `<p class="mv-stats-note">지연은 플레이어가 알려 주는 값이다(스트림 정보 패널과 같은 기준).</p>`;
   }
@@ -1729,12 +1779,12 @@
     if (target.closest?.("#mvVolEnable")) {
       // ⚠ 이 클릭 자체가 사용자 조작이다. 같은 처리 안에서 바로 지시를 내려야
       //   브라우저가 자동재생 허용으로 쳐 준다(비동기로 미루면 놓친다).
+      // ⚠ 여기서 경고를 미리 지우지 않는다. 실제로 소리가 나기 시작하면 칸이
+      //   AUDIO_INTERACTION_RESOLVED 를 보내 주고, 그때 지운다. 성공을 확인하기
+      //   전에 UI 만 정상으로 바꾸면 안 들리는데 괜찮아 보이는 상태가 된다.
       for (const id of [...audioBlocked]) {
-        audioBlocked.delete(id);
-        clearAudioNotice(id);
         postState(id, id === state.mainId);
       }
-      renderVolume();
       return;
     }
     const setMainEl = target.closest?.("[data-mv-set-main]");
@@ -1861,6 +1911,7 @@
     "FRAME_READY",
     "FRAME_ENDED",
     "AUDIO_INTERACTION_REQUIRED",
+    "AUDIO_INTERACTION_RESOLVED",
     "MULTIVIEW_STATS",
   ]);
   window.addEventListener("message", (event) => {
@@ -1910,6 +1961,14 @@
           height: num(raw.height),
           fps: num(raw.fps),
           bitrateKbps: num(raw.bitrateKbps),
+          // 문자열·객체를 그대로 두지 않는다. 아는 값만 통과시킨다.
+          qualityCap: Number(raw.qualityCap) === 480 ? 480 : 0,
+          selectedHeight: num(raw.selectedHeight),
+          selectedQuality:
+            typeof raw.selectedQuality === "string" &&
+            raw.selectedQuality.length <= 20
+              ? raw.selectedQuality
+              : null,
           paused: raw.paused === true,
           readyState: num(raw.readyState),
           networkState: num(raw.networkState),
@@ -1919,6 +1978,11 @@
         updatedAt: Date.now(),
       });
       traceLatency(channelId);
+      return;
+    }
+    if (data.type === "AUDIO_INTERACTION_RESOLVED") {
+      // 칸이 '실제로 들리는 상태' 라고 알려 왔다. 그때만 경고를 거둔다.
+      clearAudioNotice(channelId);
       return;
     }
     if (data.type === "AUDIO_INTERACTION_REQUIRED") {

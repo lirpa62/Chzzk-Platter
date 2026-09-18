@@ -1080,10 +1080,21 @@ const checks = [];
      check(document.getElementById('mvVolEnable'),'소리 활성화 버튼이 없다');
      // 자동재생 해제는 사용자 조작 안에서 끝나야 확실하다. 칸 위 버튼도 남긴다.
      check(mainCell.querySelector('[data-mv-unmute]'),'칸 위 대비 버튼이 사라졌다');
+     // ⚠ 누른 것만으로 경고를 지우지 않는다. 실제로 소리가 나기 시작했다는
+     //    신호(AUDIO_INTERACTION_RESOLVED)를 받아야 지운다. 성공 전에 UI 만
+     //    정상으로 바꾸면 안 들리는데 괜찮아 보인다.
      document.getElementById('mvVolEnable').click();
      await wait(100);
+     check(document.getElementById('mvVolumeBtn').classList.contains('is-warn'),
+       '성공 확인 전에 경고를 지웠다');
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'AUDIO_INTERACTION_RESOLVED',channelId:id}});
+      Object.defineProperty(e,'source',{value:mainCell.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(100);
      check(!document.getElementById('mvVolumeBtn').classList.contains('is-warn'),
-       '소리 활성화 뒤에도 차단 표시가 남아 있다');`,
+       '해제 신호를 받고도 경고가 남아 있다');
+     check(!mainCell.querySelector('[data-mv-unmute]'),'칸 위 안내가 남아 있다');`,
   );
 
   await test(
@@ -1156,6 +1167,151 @@ const checks = [];
        await wait(200);
        check(videoSrcs().length===before,'보조끼리 바꿨는데 프레임이 다시 걸렸다');
      }`,
+  );
+
+  await test(
+    "비트레이트는 kbps 로 받아 한 번만 Mbps 로 바꾼다",
+    `document.getElementById('mvStatsBtn').click();
+     await wait(100);
+     const cell=document.querySelector('.mv-cell');
+     const id=cell.dataset.channelId;
+     const send=(stats)=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,stats}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     // 1500 kbps → 1.5 Mbps (두 번 나누면 0.0 Mbps 가 된다)
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:1500,
+           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     await wait(1200);
+     let text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('1.5 Mbps'),'1500kbps 가 1.5 Mbps 로 안 나온다: '+text);
+     check(!text.includes('0.0 Mbps'),'비트레이트를 두 번 나눴다: '+text);
+     // 1000 미만은 kbps 그대로 보여 준다.
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:800,
+           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     await wait(1200);
+     text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('800 kbps'),'800kbps 표시가 없다: '+text);
+     // 값이 없으면 추정하지 않고 '-' 로 둔다.
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:null,
+           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     await wait(1200);
+     text=document.getElementById('mvStatsPop').textContent;
+     check(!text.includes('Mbps')||text.includes('-'),'비트레이트가 없을 때 추정했다');`,
+  );
+
+  await test(
+    "정책과 실제가 어긋나면 표에서 드러난다",
+    `// 앞 테스트들이 종료·교체를 거쳐 왔다. 지금 살아 있는 메인 칸을 기준으로
+     // 정책 열을 확인한다(메인이면 HIGH 가 나와야 한다).
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const aux=document.querySelector('.mv-cell.is-main')||cells[0];
+     check(aux,'칸이 없다');
+     const id=aux.dataset.channelId;
+     // 상한 480 인데 실제 1080p 로 재생 중인 상태를 그대로 보여 준다.
+     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,
+             stats:{latencySec:4.3,width:1920,height:1080,fps:60,bitrateKbps:8000,
+                    selectedHeight:1080,selectedQuality:'1080p',qualityCap:480}}});
+     Object.defineProperty(e,'source',{value:aux.querySelector('iframe').contentWindow});
+     window.dispatchEvent(e);
+     await wait(1200);
+     const pop=document.getElementById('mvStatsPop');
+     check(/HIGH|≤480p/.test(pop.textContent),
+       '정책 열이 없다: '+pop.textContent.slice(0,200));
+     check(pop.textContent.includes('1080p'),'실제 화질이 없다');`,
+  );
+
+  await test(
+    "상한 칸이 상한보다 높은 화질이면 표에서 눈에 띈다",
+    `// ⚠ 앞 테스트들을 거치며 보조 칸이 종료 상태가 될 수 있다. 그러면 통계 줄이
+     //   아예 안 그려져 검사가 헛돈다. 그래서 칸 상태를 이 검사에 맞게 되돌린다.
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const cell=[...document.querySelectorAll('.mv-cell')]
+       .find(c=>c.dataset.channelId!==mainId);
+     check(cell,'보조 칸이 없다');
+     const id=cell.dataset.channelId;
+     // 종료된 칸은 FRAME_READY 로 덮이지 않는다(그게 올바른 동작이다). 다른 채널로
+     // 갈아 끼우면 새 칸이 생기고, 거기에 준비 신호를 보내면 통계 줄이 그려진다.
+     let target=cell,targetId=id;
+     if(cell.dataset.status!=='ready'){
+       cell.querySelector('[data-mv-replace]').click();
+       await wait(400);
+       const card=document.querySelector('#mvQuickAdd [data-mv-quick-add]:not([disabled])');
+       check(card,'교체할 후보가 없다');
+       targetId=card.dataset.mvQuickAdd;
+       card.click();
+       await wait(300);
+       document.getElementById('mvQuickClose')?.click();
+       target=[...document.querySelectorAll('.mv-cell')]
+         .find(c=>c.dataset.channelId===targetId);
+       check(target,'교체한 칸을 찾지 못했다');
+       const r=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:targetId}});
+       Object.defineProperty(r,'source',{value:target.querySelector('iframe').contentWindow});
+       window.dispatchEvent(r);
+       await wait(150);
+     }
+     check(target.dataset.status==='ready','보조 칸 상태='+target.dataset.status);
+     // 이 칸의 정책은 480(보조)인데 실제는 1080p 인 상황.
+     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:targetId,
+             stats:{latencySec:4.3,width:1920,height:1080,fps:60,bitrateKbps:8000,
+                    selectedHeight:1080,selectedQuality:'1080p',qualityCap:480}}});
+     Object.defineProperty(e,'source',{value:target.querySelector('iframe').contentWindow});
+     window.dispatchEvent(e);
+     await wait(1200);
+     const pop=document.getElementById('mvStatsPop');
+     check(pop.textContent.includes('≤480p'),
+       '보조 칸 정책이 ≤480p 로 안 나온다: '+pop.textContent.slice(0,200));
+     check(pop.querySelector('.mv-stats-broken'),
+       '상한 480 인데 1080p 인 것이 표시되지 않았다: '+pop.textContent.slice(0,200));`,
+  );
+
+  await test(
+    "이상한 통계 값은 걸러서 화면에 넣지 않는다",
+    `const cell=document.querySelector('.mv-cell');
+     const id=cell.dataset.channelId;
+     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+       data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,
+             stats:{latencySec:'<img src=x onerror=alert(1)>',width:{},height:[],
+                    fps:'abc',bitrateKbps:'1,500 kbps',
+                    selectedQuality:'<b>1080p</b>',qualityCap:'480'}}});
+     Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+     window.dispatchEvent(e);
+     await wait(1200);
+     const pop=document.getElementById('mvStatsPop');
+     check(!pop.querySelector('img'),'문자열이 태그로 들어갔다');
+     check(!pop.querySelector('b'),'selectedQuality 가 태그로 들어갔다');
+     // 숫자가 아닌 값은 '-' 로 떨어져야 한다.
+     check(!pop.textContent.includes('abc'),'숫자가 아닌 FPS 가 그대로 나왔다');
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);`,
+  );
+
+  await test(
+    "통계 폴링 중에 탭 복귀해도 요청이 겹치지 않는다",
+    `// 패널을 연 상태(1초 폴링)에서 복귀하면 진단 probe 를 따로 만들지 않아야 한다.
+     window.statsAsks=0;
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       f.contentWindow.postMessage=(m)=>{
+         if(m&&m.type==='REQUEST_MULTIVIEW_STATS')window.statsAsks++;
+       };
+     }
+     document.getElementById('mvStatsBtn').click();
+     await wait(2500);
+     const frames=document.querySelectorAll('.mv-cell iframe').length;
+     const base=window.statsAsks;
+     document.dispatchEvent(new Event('visibilitychange'));
+     await wait(2500);
+     const added=window.statsAsks-base;
+     // 2.5초 동안 폴링만 돌면 대략 2~3회다. probe 까지 겹치면 그보다 훨씬 많아진다.
+     check(added<=frames*4,
+       '복귀 때 요청이 겹쳤다(프레임당 '+(added/frames).toFixed(1)+'회)');
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");

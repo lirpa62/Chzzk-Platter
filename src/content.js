@@ -20455,6 +20455,10 @@
     //   지금은 video 를 붙들고 교체를 감지해 그때마다 현재 상태를 다시 건다.
     let currentVideo = null;
 
+    // 차단을 부모에게 알린 적이 있는지. 있을 때만 해제를 알린다(메시지를 줄인다).
+    // ⚠ applyAudioToVideo 가 이 값을 바로 읽으므로 그보다 먼저 선언해 둔다.
+    let audioBlockedReported = false;
+
     const applyAudioToVideo = (video) => {
       if (!(video instanceof HTMLMediaElement)) return;
       // ⚠ 음소거 여부와 상관없이 크기를 먼저 맞춘다. 음소거를 풀 때 이전 크기가
@@ -20471,15 +20475,34 @@
       if (video.muted) video.muted = false;
       if (video.paused) {
         const played = video.play();
-        played?.catch?.(() => {
-          // 자동재생 정책으로 소리 있는 재생이 막힌 경우만 알린다.
-          // ⚠ 플레이어 내부 상태를 추측하지 않는다.
-          if (video.muted || video.paused) {
-            notifyParent("AUDIO_INTERACTION_REQUIRED");
-          }
+        played?.catch?.((error) => {
+          // ⚠ play() 거부를 모두 자동재생 차단으로 보면 안 된다. 화질 전환·소스 교체·
+          //   플레이어 정리 중에도 거부가 나는데(AbortError 등), 그것까지 차단으로
+          //   알리면 소리가 멀쩡한데도 경고가 남는다.
+          if (error?.name !== "NotAllowedError") return;
+          // 그 사이 실제로 소리가 나기 시작했으면 차단이 아니다.
+          if (!video.paused && !video.muted && video.volume > 0) return;
+          notifyParent("AUDIO_INTERACTION_REQUIRED");
+          audioBlockedReported = true;
         });
       }
+      // 실제로 들리는 상태가 됐는데 차단으로 알려 둔 적이 있으면 거둬들인다.
+      reportAudioResolved(video);
     };
+
+    function reportAudioResolved(video) {
+      if (!audioBlockedReported) return;
+      if (!(video instanceof HTMLMediaElement)) return;
+      if (multiviewMuted) {
+        // 이 칸이 이제 음소거가 목표라면 차단 경고는 의미가 없다.
+        audioBlockedReported = false;
+        notifyParent("AUDIO_INTERACTION_RESOLVED");
+        return;
+      }
+      if (video.paused || video.muted || !(video.volume > 0)) return;
+      audioBlockedReported = false;
+      notifyParent("AUDIO_INTERACTION_RESOLVED");
+    }
 
     // 사용자가 직접 볼륨을 만졌는지 가린다. 우리가 바꾼 건 무시해야 하므로,
     // '지시한 상태와 어긋나게 바뀐 경우' 만 사용자 조작으로 본다.
@@ -20487,13 +20510,22 @@
       const video = event.currentTarget;
       if (!(video instanceof HTMLMediaElement)) return;
       if (multiviewMuted && !video.muted) muteOverriddenByUser = true;
+      reportAudioResolved(video);
+    };
+
+    // 실제로 재생이 시작되면 그때 상태를 다시 본다(차단이 풀렸을 수 있다).
+    const onPlaying = (event) => {
+      const video = event.currentTarget;
+      if (video instanceof HTMLMediaElement) reportAudioResolved(video);
     };
 
     const attachMultiviewVideo = (video) => {
       if (!(video instanceof HTMLMediaElement) || video === currentVideo) return;
       currentVideo?.removeEventListener("volumechange", onVolumeChange);
+      currentVideo?.removeEventListener("playing", onPlaying);
       currentVideo = video;
       video.addEventListener("volumechange", onVolumeChange);
+      video.addEventListener("playing", onPlaying);
       applyAudioToVideo(video);
       // 플레이어가 새로 만들어졌으면 넓은 화면·채팅 접힘도 풀렸을 수 있다.
       // ⚠ 반드시 풀린다고 단정하지 않는다. 확인해서 필요할 때만 맞춘다.

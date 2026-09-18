@@ -338,6 +338,8 @@
     if (maxQualityCap !== maxQualityCapPrev) {
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
+      // 역할이 바뀌었으니(메인↔보조) 이전 역할에서의 수동 기록도 끌고 가지 않는다.
+      maxQualityUserTouchedPage = null;
     }
     if (
       (maxQualityAuto || maxQualityCap > 0) &&
@@ -5032,6 +5034,43 @@
   // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
   let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
+  // 사용자가 '직접' 화질 메뉴를 만진 미디어 키.
+  //
+  // ⚠ selected 트랙이 우리가 고정한 값과 달라졌다는 것만으로 수동 변경으로 보면 안 된다.
+  //   치지직은 ABR·재연결·광고 복귀·SPA 재렌더로도 트랙을 바꾼다. 그걸 수동으로 오판하면
+  //   그 미디어 동안 상한 재적용이 영구히 멈춰, 멀티뷰 보조 칸이 1080p 로 남는다.
+  //   그래서 '실제 신뢰된 조작' 이 있었을 때만 기록한다.
+  let maxQualityUserTouchedPage = null;
+  // 우리가 메뉴를 클릭한 직후의 이벤트는 우리 것이다(클론 교체 클릭은 isTrusted=false 지만
+  // 그 여파로 뜨는 포인터 이벤트까지 섞이지 않게 짧은 창을 둔다).
+  let maxQualityOwnClickUntil = 0;
+
+  // 화질 메뉴 안에서 일어난 신뢰된 조작만 사용자 선택으로 친다.
+  function watchTrustedQualityChoice(event) {
+    if (!event?.isTrusted) return; // 스크립트가 만든 이벤트는 사용자 조작이 아니다
+    if (Date.now() < maxQualityOwnClickUntil) return; // 우리 클릭의 여파
+    const el = event.target instanceof Element ? event.target : null;
+    if (!el) return;
+    // 화질 메뉴(항목 또는 그 목록) 안에서 일어난 것만 본다.
+    if (
+      !el.closest?.(
+        "li.pzp-ui-setting-quality-item, .pzp-setting-quality-pane__list-container",
+      )
+    ) {
+      return;
+    }
+    maxQualityUserTouchedPage = currentPageKey;
+  }
+  document.addEventListener("pointerup", watchTrustedQualityChoice, true);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      // 키보드로 고르는 경우는 Enter/Space 로 확정된다.
+      if (event.key !== "Enter" && event.key !== " ") return;
+      watchTrustedQualityChoice(event);
+    },
+    true,
+  );
   let maxQualityCatchupTimer = 0;
   let maxQualitySuspendedForAudioOnly = false;
   let maxQualityResumeAfterAudioOnlyAt = 0;
@@ -5156,13 +5195,19 @@
       maxQualityCap > 0
         ? selH !== maxQualitySetHeight
         : selH < maxQualitySetHeight;
+    // ⚠ 상한이 걸린 칸(멀티뷰 보조)에서는 '달라졌다' 만으로 수동이라 볼 수 없다.
+    //   치지직이 스스로 되돌린 것과 사용자가 고른 것을 구분해야 한다. 그래서 상한이
+    //   있을 때는 신뢰된 메뉴 조작이 실제로 있었는지까지 확인한다.
+    const userChose =
+      maxQualityCap > 0 ? maxQualityUserTouchedPage === currentPageKey : true;
     if (
       maxQualityRespectManual &&
       maxQualitySetHeight > 0 &&
       selected &&
       !trackIsAbr(selected) &&
       selH > 0 &&
-      deviated
+      deviated &&
+      userChose
     ) {
       maxQualityRespectedPage = currentPageKey;
     }
@@ -5192,6 +5237,7 @@
     // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
     // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
     // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
+    maxQualityOwnClickUntil = Date.now() + 1500; // 이 사이의 이벤트는 우리 것이다
     if (!clickMaxQualityMenuItem(maxQualityCap)) {
       // 폴백: 메뉴를 못 찾는 등 클릭 실패 시 트랙 selected 직접 설정(그리드 미보장).
       try {
@@ -9747,6 +9793,7 @@
       // 끌고 가지 않는다).
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
+      maxQualityUserTouchedPage = null;
       maxQualityMenuClickAt = 0;
       maxQualitySuspendedForAudioOnly = false;
       maxQualityResumeAfterAudioOnlyAt = 0;
@@ -9980,6 +10027,44 @@
   // ⚠ 측정 방법을 새로 만들지 않는다. 스트림 정보 패널이 쓰는 collectStreamInfo()
   //   와 getLiveLatencySeconds() 를 그대로 재사용한다. 지연의 뜻도 그쪽과 같다
   //   (플레이어의 _getLiveLatency()). 못 구하는 값은 추정하지 않고 null 로 둔다.
+  // 라이브 selected 트랙에 비트레이트가 없을 때, 이미 다른 용도로 읽고 있는
+  // core.srcObject.data.media[].encodingTrack 에서 같은 트랙을 찾아 본다.
+  // ⚠ 없으면 null 로 둔다. 네트워크 다운로드 속도로 추정하지 않는다 —
+  //   그리드(P2P)·ABR 환경에서 전송량과 인코딩 비트레이트는 같은 값이 아니다.
+  function findEncodingTrackBitrate(core, selected, height) {
+    try {
+      const media = core?.srcObject?.data?.media;
+      if (!Array.isArray(media)) return null;
+      const wantId = String(
+        selected?.encodingTrackId ??
+          selected?._encodingTrackId ??
+          selected?.encodingOptionID ??
+          "",
+      ).toLowerCase();
+      for (const m of media) {
+        for (const t of m?.encodingTrack || []) {
+          const id = String(t?.encodingTrackId ?? "").toLowerCase();
+          const h = Number(t?.height ?? t?._height);
+          // 아이디가 맞거나, 아이디를 모를 때는 높이가 같은 트랙을 쓴다.
+          const match = wantId ? id === wantId : height && h === height;
+          if (!match) continue;
+          const bps = pickNum(
+            t,
+            "videoBitRate",
+            "videoBitrate",
+            "_videoBitrate",
+          );
+          if (bps) return bps;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  // ── 멀티뷰 통합 스트림 정보용 스냅샷 ────────────────────────────────────
+  // ⚠ 측정 방법을 새로 만들지 않는다. 스트림 정보 패널이 쓰는 collectStreamInfo()
+  //   와 getLiveLatencySeconds() 를 그대로 재사용한다. 지연의 뜻도 그쪽과 같다
+  //   (플레이어의 _getLiveLatency()). 못 구하는 값은 추정하지 않고 null 로 둔다.
   function getStreamStatsSnapshot() {
     const video = findVideo();
     let info = null;
@@ -9989,15 +10074,44 @@
       info = null;
     }
     const num = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+    const height = num(info?._h) || num(video?.videoHeight);
+
+    // ⚠ 비트레이트 단위. 치지직은 bps 로 줄 때도 kbps 로 줄 때도 있어서, 그 판정을
+    //   이미 하고 있는 toKbps() 를 반드시 거친다. 여기서 /1000 을 직접 하면 값이
+    //   이미 kbps 일 때 1000배 작아져 화면에 0.0 Mbps 로 보인다.
+    let bitrateKbps = toKbps(info?._bitrateNum);
+    let selectedQuality = null;
+    let selectedHeight = height;
+    try {
+      const core = findCorePlayer();
+      // ⚠ 트랙 목록은 core.videoTracks 다(이 파일의 다른 곳도 모두 이것을 쓴다).
+      const tracks = Array.from(core?.videoTracks || []);
+      const selected = tracks.find((t) => trackSelected(t));
+      if (selected) {
+        selectedQuality =
+          String(
+            selected._videoQuality || selected.encodingOptionID || "",
+          ).trim() || null;
+        const sh = trackHeight(selected);
+        if (sh) selectedHeight = sh;
+      }
+      if (!bitrateKbps) {
+        bitrateKbps = toKbps(
+          findEncodingTrackBitrate(core, selected, selectedHeight),
+        );
+      }
+    } catch {}
+
     return {
       latencySec: getLiveLatencySeconds(),
       width: num(info?._w) || num(video?.videoWidth),
-      height: num(info?._h) || num(video?.videoHeight),
+      height,
       fps: num(info?._fpsNum),
-      // collectStreamInfo 는 bps 로 들고 있다. 표시 단위(kbps)로만 바꾼다.
-      bitrateKbps: info?._bitrateNum
-        ? Math.round(info._bitrateNum / 1000)
-        : null,
+      bitrateKbps: bitrateKbps || null,
+      // 이 칸에 실제로 걸린 상한(0 이면 상한 없음). 부모가 추정하지 않게 알려 준다.
+      qualityCap: maxQualityCap,
+      selectedHeight: selectedHeight || null,
+      selectedQuality,
       // 아래는 백그라운드 복귀 진단용이다(UI 에 다 보여 주지 않아도 된다).
       paused: video ? video.paused : null,
       readyState: video ? video.readyState : null,
