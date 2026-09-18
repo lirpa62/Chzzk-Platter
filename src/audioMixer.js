@@ -8023,14 +8023,20 @@
   }
 
   // 표시값이 같으면 텍스트 노드를 교체하지 않아 전역 DOM 옵저버를 깨우지 않는다.
-  function setSyncTooltip(btn, lat, { catching = false } = {}) {
+  function setSyncTooltip(btn, lat, { catching = false, idle = false } = {}) {
     const tip = btn?.querySelector(".pzp-button__tooltip");
     if (!tip) return;
     let text;
     if (catching) {
+      // 자동으로 따라잡는 중이면 목표까지 함께 알린다.
       text = Number.isFinite(lat)
-        ? `따라잡는 중… (지연 ${lat.toFixed(1)}초)`
+        ? `지연 ${lat.toFixed(1)}초 · ${syncCfg.target}초까지 따라잡는 중`
         : "따라잡는 중…";
+    } else if (idle) {
+      // 지연이 목표 이하라 누를 수 없는 상태. 그래도 지금 지연은 알려 준다.
+      text = Number.isFinite(lat)
+        ? `지연 ${lat.toFixed(1)}초 · 따라잡기 불필요`
+        : "실시간 따라잡기";
     } else if (
       Number.isFinite(lat) &&
       (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S)
@@ -8130,7 +8136,9 @@
         tip.textContent = "자동 따라잡기 해제";
       }
     } else {
-      setSyncTooltip(btn, overThreshold ? lat : null);
+      // ⚠ 예전에는 임계 미만이면 null 을 넘겨 지연이 사라졌다. 버튼이 비활성일
+      //   때야말로 '지금 얼마나 밀렸는지' 가 궁금하므로 그대로 넘긴다.
+      setSyncTooltip(btn, lat, { idle: !overThreshold });
     }
   }
 
