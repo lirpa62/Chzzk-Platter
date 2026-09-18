@@ -54465,9 +54465,24 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     );
   }
 
+  // ⚠ MAIN world 가 postMessage 로 넘긴 Blob 은 이쪽(격리 월드)의 Blob 생성자와
+  //   다른 realm 에서 만들어졌을 수 있다. 그때 instanceof 는 false 가 되지만 값은
+  //   멀쩡하다. 그래서 '무엇으로 만들어졌나' 가 아니라 '무엇을 할 수 있나' 로 본다.
+  function isScreenshotBlobLike(value) {
+    return (
+      !!value &&
+      typeof value === "object" &&
+      typeof value.size === "number" &&
+      value.size > 0 &&
+      typeof value.type === "string" &&
+      typeof value.arrayBuffer === "function" &&
+      typeof value.slice === "function"
+    );
+  }
+
   function screenshotBlobToDataURL(blob) {
     return new Promise((resolve) => {
-      if (!(blob instanceof Blob)) {
+      if (!isScreenshotBlobLike(blob)) {
         resolve("");
         return;
       }
@@ -54509,22 +54524,47 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       const firefox = isFirefoxExtensionRuntime();
       // 파일명 오류로 재시도할 때는 저장 대화상자에서 직접 이름을 정하게 한다.
       const saveAs = data.forceSaveAs === true || !screenshotDirectSave;
-      const screenshotBlob =
-        data.blob instanceof Blob && data.blob.type === "image/png"
-          ? data.blob
-          : null;
-      const dataURL = firefox
+      // ⚠ instanceof 로 거르지 않는다. MAIN world 에서 온 Blob 은 realm 이 달라
+      //   instanceof 가 false 가 될 수 있는데, 예전에는 그때 보낼 주소가 아예
+      //   없어져 '이미지 형식 문제' 로 끝났다(바로 저장이 켜져 있으면 폴백조차
+      //   없었다). 형식만 확인하고 값은 그대로 쓴다.
+      const screenshotBlob = isScreenshotBlobLike(data.blob) ? data.blob : null;
+      // PNG 가 아니면 저장하지 않는다(확장자만 .png 로 붙이지 않는다).
+      if (screenshotBlob && screenshotBlob.type !== "image/png") {
+        window.postMessage(
+          {
+            source: "cheese-screenshot-save-result",
+            reqId,
+            ok: false,
+            saved: false,
+            reason: "invalid",
+            detail: `type=${screenshotBlob.type || "(없음)"}`,
+          },
+          BRIDGE_ORIGIN,
+        );
+        return;
+      }
+      let blobURL = null;
+      if (!firefox && screenshotBlob) {
+        // ⚠ 다른 realm 의 Blob 은 URL.createObjectURL 이 거부할 수 있다. 그때를
+        //   대비해 예외를 삼키고 아래 데이터 URL 로 넘어간다.
+        try {
+          blobURL = URL.createObjectURL(screenshotBlob);
+        } catch {
+          blobURL = null;
+        }
+      }
+      // 객체 URL 을 못 만들었으면 데이터 URL 로 만든다(보낼 주소가 없어 조용히
+      // 실패하는 일이 없게). 파이어폭스는 원래 데이터 URL 을 쓴다.
+      const needDataURL = firefox || !blobURL;
+      const dataURL = needDataURL
         ? screenshotBlob
           ? await screenshotBlobToDataURL(screenshotBlob)
           : String(data.dataURL || "")
-        : String(data.dataURL || "");
-      const blobURL = !firefox
-        ? screenshotBlob
-          ? URL.createObjectURL(data.blob)
-          : saveAs
-            ? dataURLToBlobURL(dataURL)
-            : null
-        : null;
+        : "";
+      if (!firefox && !blobURL && dataURL && saveAs) {
+        blobURL = dataURLToBlobURL(dataURL);
+      }
       const url = firefox ? dataURL : blobURL || dataURL;
       if (!url) {
         window.postMessage(
