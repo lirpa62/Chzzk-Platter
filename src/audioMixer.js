@@ -10125,15 +10125,6 @@
       height,
       fps: num(info?._fpsNum),
       bitrateKbps: bitrateKbps || null,
-      // 아래는 백그라운드 복귀 진단용이다(UI 에 다 보여 주지 않아도 된다).
-      paused: video ? video.paused : null,
-      readyState: video ? video.readyState : null,
-      networkState: video ? video.networkState : null,
-      currentTime: video ? video.currentTime : null,
-      seekableEnd:
-        video && video.seekable?.length
-          ? video.seekable.end(video.seekable.length - 1)
-          : null,
     };
   }
 

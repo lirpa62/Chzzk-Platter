@@ -1784,9 +1784,3 @@ body {
   color: var(--popup-muted, #9aa1a9);
   text-align: center !important;
 }
-.mv-stats-note {
-  color: var(--popup-muted, #9aa1a9);
-  font-size: 10.5px;
-  line-height: 1.5;
-  margin: 0;
-}

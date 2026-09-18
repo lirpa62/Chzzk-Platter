@@ -1205,6 +1205,13 @@ const checks = [];
      const heads=[...pop.querySelectorAll('thead th')].map(th=>th.textContent.trim());
      check(heads.join(',')==='채널,지연,해상도,FPS,비트레이트',
        '표 머리글이 다르다: '+heads.join(','));
+     // 표 아래 설명 문구는 없앴다(표만 보여 준다).
+     check(!pop.querySelector('.mv-stats-note'),'하단 안내 요소가 남아 있다');
+     check(!pop.textContent.includes('지연은 플레이어가'),'하단 안내 문구가 남아 있다');
+     // 표 말고 다른 자식이 남아 빈 여백을 만들지 않아야 한다.
+     check(pop.children.length===1&&pop.firstElementChild.tagName==='TABLE',
+       '패널에 표 말고 다른 요소가 있다: '+
+       [...pop.children].map(e=>e.tagName).join(','));
      // 화질 진단용으로 잠깐 뒀던 열은 남지 않아야 한다.
      check(!pop.textContent.includes('≤480p'),'정책 열이 남아 있다');
      check(!pop.querySelector('.mv-stats-broken'),'정책 깨짐 표시가 남아 있다');

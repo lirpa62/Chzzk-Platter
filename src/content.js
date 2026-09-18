@@ -20386,66 +20386,6 @@
   //   부모는 src 를 건드리지 않고 postMessage 로 상태만 바꾼다. 교차 출처라 부모가
   //   프레임 DOM 을 만질 수 없으므로 실제 적용은 여기(프레임 안)에서 한다.
   if (IS_MULTIVIEW_FRAME) {
-    // ── 탭 전환 진단 ──────────────────────────────────────────────────────
-    // Alt+Tab 이나 다른 탭으로 갔다 오면 영상이 다시 불러와진다는 증상을 가려내기
-    // 위한 기록이다. 어디서 끊기는지 눈으로 보려면 무엇이 언제 일어났는지가 있어야
-    // 한다.
-    //
-    // ⚠ 여기서는 '보기만' 한다. visibilitychange 에서 페이지를 다시 불러오거나
-    //   play() 를 억지로 부르지 않는다. 브라우저가 배경 탭에서 잠시 멈추는 것은
-    //   정상이고, 억지로 되살리면 오히려 프레임이 흔들린다.
-    //   켜는 법: 콘솔에서 localStorage.cheeseMultiviewTrace = "1" 후 새로고침.
-    let multiviewTrace = false;
-    try {
-      multiviewTrace = localStorage.getItem("cheeseMultiviewTrace") === "1";
-    } catch {}
-    const traceLife = (what, extra) => {
-      if (!multiviewTrace) return;
-      const video = document.querySelector("video");
-      console.log(
-        `[치즈 플래터] 멀티뷰 ${MULTIVIEW_CHANNEL_ID.slice(0, 6)} ${what}`,
-        {
-          t: Math.round(performance.now()),
-          숨김: document.hidden,
-          버려졌었나: document.wasDiscarded === true,
-          readyState: video?.readyState,
-          paused: video?.paused,
-          현재시각: video ? Number(video.currentTime.toFixed(1)) : null,
-          ...(extra || {}),
-        },
-      );
-    };
-    if (multiviewTrace) {
-      // 프레임이 통째로 다시 불러와졌다면 이 줄이 다시 찍힌다 — 탭 전환 뒤에 이
-      // 줄이 또 보이면 '다시 불러왔다' 는 뜻이고, 안 보이면 재생만 멈춘 것이다.
-      traceLife("문서 시작");
-      document.addEventListener("visibilitychange", () =>
-        traceLife(document.hidden ? "탭 숨김" : "탭 복귀"),
-      );
-      window.addEventListener("pagehide", (e) =>
-        traceLife("pagehide", { 캐시로: e.persisted }),
-      );
-      window.addEventListener("pageshow", (e) =>
-        traceLife("pageshow", { 캐시에서: e.persisted }),
-      );
-      for (const type of [
-        "pause",
-        "playing",
-        "waiting",
-        "stalled",
-        "emptied",
-      ]) {
-        document.addEventListener(
-          type,
-          (e) => {
-            if (e.target instanceof HTMLMediaElement)
-              traceLife(`video ${type}`);
-          },
-          true,
-        );
-      }
-    }
-
     // 사용자가 이 칸에서 직접 소리를 켰는지. 켰으면 잠시 존중하되, 부모가 메인/보조를
     // 다시 지정하면 그 지시를 우선한다(부모가 소리 주인을 정한다).
     let muteOverriddenByUser = false;

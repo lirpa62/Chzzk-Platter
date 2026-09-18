@@ -82,7 +82,7 @@
 
   // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
   // 보낸다(주소를 다시 넣으면 방송이 처음부터 로드된다).
-  // 칸마다 마지막으로 지시한 화질. 진단 기록과 전환 판정에 쓴다.
+  // 칸마다 마지막으로 지시한 화질. 화질이 실제로 바뀌었는지 판정하는 데 쓴다.
   // ⚠ frameUrl 이 처음 만들 때부터 기록하므로 그보다 먼저 선언해 둔다.
   const lastQuality = new Map();
   // 화질 전환이 시작된 시각(channelId → ms). 그동안의 지연 0 은 믿지 않는다.
@@ -128,18 +128,13 @@
     const before = lastQuality.get(channelId);
     if (before !== quality) {
       lastQuality.set(channelId, quality);
-      // 화질 전환은 트랙을 새로 받는 일이라 버퍼링의 첫 번째 의심 대상이다.
-      // 이 기록과 프레임 쪽 waiting 기록의 시각을 맞춰 보면 알 수 있다.
+      // ⚠ 전환 직후에는 플레이어가 스트림을 다시 잡느라 _getLiveLatency() 가
+      //   잠깐 0 을 돌려준다(실측으로 확인된 과도 상태다). 그 0 을 '지연 0.0초'
+      //   로 보여 주면 실제로 라이브 엣지에 붙은 것처럼 읽힌다. 그래서 전환이
+      //   시작된 시각을 적어 두고, 그 사이의 0 만 '전환 중' 으로 다룬다.
+      //   처음 지시(before 가 없을 때)는 전환이 아니라 시작이다.
       if (before !== undefined) {
-        // ⚠ 전환 직후에는 플레이어가 스트림을 다시 잡느라 _getLiveLatency() 가
-        //   잠깐 0 을 돌려준다(실측으로 확인된 과도 상태다). 그 0 을 '지연 0.0초'
-        //   로 보여 주면 실제로 라이브 엣지에 붙은 것처럼 읽힌다. 그래서 전환이
-        //   시작된 시각을 적어 두고, 그 사이의 0 만 '전환 중' 으로 다룬다.
         qualityTransitions.set(channelId, Date.now());
-        traceLog(
-          "mv-quality",
-          `${channelName(channelId)} ${before} → ${quality}`,
-        );
       }
     }
     try {
@@ -827,79 +822,6 @@
       `<div class="mv-vol-list">${rows}</div>`;
   }
 
-  // ── 진단 기록 ───────────────────────────────────────────────────────────
-  // ⚠ 기록만 한다. 여기서 다시 불러오거나 seek 하지 않는다.
-  //   켜는 법: 콘솔에서 localStorage.cheeseMultiviewTrace = "1" 후 새로고침.
-  let mvTrace = false;
-  try {
-    mvTrace = localStorage.getItem("cheeseMultiviewTrace") === "1";
-  } catch {}
-
-  const traceLog = (tag, text) => {
-    if (!mvTrace) return;
-    console.log(`[${tag}] ${text}`);
-  };
-
-  // 칸마다 FRAME_READY 를 몇 번 받았는지. Alt+Tab 으로 프레임이 다시 초기화되는지
-  // 가리는 데 쓴다 — 사용자가 다시 불러오기·교체를 하지 않았는데 #2 가 찍히면
-  // 그 프레임 document 가 다시 만들어졌다는 뜻이다.
-  // ⚠ 진단 기록에만 쓴다. 이 값으로 무엇을 자동으로 고치지 않는다.
-  const frameReadyCounts = new Map();
-
-  // 탭을 떠났다 돌아온 시각. 복귀 직후의 지연 변화를 보기 위한 것이다.
-  let lastVisibleAt = 0;
-  function traceLatency(channelId) {
-    if (!mvTrace || !lastVisibleAt) return;
-    const since = Date.now() - lastVisibleAt;
-    if (since > 10000) return; // 복귀 후 10초까지만 본다
-    const st = statsByChannel.get(channelId)?.stats;
-    if (!st) return;
-    traceLog(
-      "mv-life",
-      `복귀 +${(since / 1000).toFixed(1)}s ${channelName(channelId)} ` +
-        `지연=${st.latencySec == null ? "-" : st.latencySec.toFixed(1)}s ` +
-        `paused=${st.paused} readyState=${st.readyState}`,
-    );
-  }
-
-  // 복귀 직후 지연이 어떻게 회복되는지 보려면 정해진 시점의 통계가 필요하다.
-  // ⚠ 통계 패널이 이미 1초마다 묻고 있으면 여기서 또 묻지 않는다. 두 곳이 같이
-  //   돌면 같은 시각의 통계가 두 번 들어와 로그가 겹쳐 보인다(중복의 진짜 원인).
-  const RETURN_PROBE_DELAYS = [200, 1000, 2000, 3000, 5000, 8000];
-  let returnProbeTimers = [];
-
-  function cancelReturnProbe() {
-    for (const id of returnProbeTimers) clearTimeout(id);
-    returnProbeTimers = [];
-  }
-
-  function scheduleReturnProbe() {
-    cancelReturnProbe();
-    if (statsTimer) return; // 이미 통계 폴링이 돌고 있다 → 따로 묻지 않는다
-    returnProbeTimers = RETURN_PROBE_DELAYS.map((delay) =>
-      window.setTimeout(() => {
-        requestStats();
-      }, delay),
-    );
-  }
-
-  if (mvTrace) {
-    // ⚠ 부모는 visibilitychange 에서 아무것도 '고치지' 않는다. 기록만 남긴다.
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        traceLog("mv-life", "부모 숨김");
-        cancelReturnProbe(); // 다음 복귀 주기와 겹치지 않게 예약을 비운다
-        return;
-      }
-      lastVisibleAt = Date.now();
-      traceLog(
-        "mv-life",
-        `부모 복귀 (버려졌었나=${document.wasDiscarded === true})`,
-      );
-      scheduleReturnProbe();
-    });
-  }
-
   // ── 통합 스트림 정보 ────────────────────────────────────────────────────
   // ⚠ 부모는 통계를 계산하지 않는다. 교차 출처 iframe 안의 플레이어는 부모가
   //   들여다볼 수 없다. 각 칸에 물어보고 받은 값만 보여 준다.
@@ -910,8 +832,6 @@
   let statsTimer = 0;
 
   function startStatsPolling() {
-    // 폴링이 시작되면 복귀 진단 예약은 중복이 된다. 먼저 비운다.
-    cancelReturnProbe();
     renderStats();
     requestStats();
     if (statsTimer) return;
@@ -1013,8 +933,7 @@
       `<table class="mv-stats-table">` +
       `<thead><tr><th>채널</th><th>지연</th><th>해상도</th>` +
       `<th>FPS</th><th>비트레이트</th></tr></thead>` +
-      `<tbody>${rows}</tbody></table>` +
-      `<p class="mv-stats-note">지연은 플레이어가 알려 주는 값이다(스트림 정보 패널과 같은 기준).</p>`;
+      `<tbody>${rows}</tbody></table>`;
   }
 
   function closePopovers(except) {
@@ -1125,16 +1044,8 @@
     // ⚠ 자리 바꾸기 자체는 iframe 주소를 건드리지 않는다. 다만 첫 자리가 바뀌면
     //   메인이 함께 바뀌고, 그때 음소거·화질 지시가 나간다. 버퍼링이 보인다면
     //   자리 이동이 아니라 이 화질 전환을 먼저 의심해야 한다.
-    if (nextMain !== state.mainId) {
-      traceLog(
-        "mv-drag",
-        `자리 교체 + 메인 변경 ${channelName(state.mainId)} → ${channelName(nextMain)}`,
-      );
-      setMain(nextMain);
-    } else {
-      traceLog("mv-drag", "자리 교체만(메인 그대로, 지시 없음)");
-      applyLayout();
-    }
+    if (nextMain !== state.mainId) setMain(nextMain);
+    else applyLayout();
   }
 
   function bindCellDrag() {
@@ -1334,9 +1245,8 @@
     clearTimeout(frameTimers.get(oldChannelId));
     frameTimers.delete(oldChannelId);
     frameStates.delete(oldChannelId);
-    // 칸이 사라지면 센 것도 버린다. 안 그러면 뺐다가 다시 넣은 채널이 #2 로 보여
-    // '프레임이 다시 만들어졌다' 는 신호와 섞인다.
-    frameReadyCounts.delete(oldChannelId);
+    // 칸이 사라지면 그 칸의 화질 기록도 버린다. 남겨 두면 나중에 같은 채널을 다시
+    // 넣었을 때 옛 화질과 비교해 엉뚱하게 '전환 중' 이 뜬다.
     lastQuality.delete(oldChannelId);
     qualityTransitions.delete(oldChannelId);
 
@@ -1672,7 +1582,6 @@
     clearTimeout(frameTimers.get(channelId));
     frameTimers.delete(channelId);
     frameStates.delete(channelId);
-    frameReadyCounts.delete(channelId);
     lastQuality.delete(channelId);
     qualityTransitions.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
@@ -2029,9 +1938,6 @@
     if (!frame || event.source !== frame.contentWindow) return;
 
     if (data.type === "FRAME_READY") {
-      const count = (frameReadyCounts.get(channelId) || 0) + 1;
-      frameReadyCounts.set(channelId, count);
-      traceLog("mv-frame", `${channelName(channelId)} FRAME_READY #${count}`);
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
@@ -2069,15 +1975,9 @@
           height: num(raw.height),
           fps: num(raw.fps),
           bitrateKbps: num(raw.bitrateKbps),
-          paused: raw.paused === true,
-          readyState: num(raw.readyState),
-          networkState: num(raw.networkState),
-          currentTime: num(raw.currentTime),
-          seekableEnd: num(raw.seekableEnd),
         },
         updatedAt: Date.now(),
       });
-      traceLatency(channelId);
       return;
     }
     if (data.type === "AUDIO_INTERACTION_RESOLVED") {
