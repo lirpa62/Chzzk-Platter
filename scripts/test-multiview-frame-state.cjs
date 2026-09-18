@@ -290,5 +290,57 @@ console.log("\n[채팅 접기 콜백] 이미 감시 중이어도 결과를 받�
   ok(results.length === 2, "이미 끝난 콜백을 다시 부르지 않는다");
 }
 
+console.log("\n[넓은 화면] 설정이 늦게 와도 한 번에 끝난다");
+{
+  // ⚠ 실제로 났던 증상: '화면 다시 적용' 을 두 번 눌러야 됐다.
+  //   설정 브리지가 아직 안 온 상태에서 첫 지시가 오면 예전 코드는 아무 말 없이
+  //   돌아가(완료 신호 없음) 부모가 계속 기다렸다. 두 번째 누를 때쯤 설정이
+  //   도착해 그제서야 동작한 것이다.
+  function run(waitsForSettings, settingsAt) {
+    let now = 0;
+    let settingsLoaded = false;
+    let notified = 0;
+    let waitUntil = 0;
+    let pending = false;
+    const tick = (ms) => {
+      now += ms;
+      if (now >= settingsAt) settingsLoaded = true;
+    };
+    const apply = () => {
+      if (!settingsLoaded) {
+        // 기다리지 않는 예전 방식은 여기서 그냥 끝난다(신호 없음).
+        if (!waitsForSettings) return;
+        if (now < waitUntil) {
+          pending = true;
+          return;
+        }
+        notified += 1; // 기한 초과 — 붙잡지 않고 알린다
+        return;
+      }
+      notified += 1;
+    };
+    const press = () => {
+      waitUntil = now + 15000;
+      apply();
+    };
+    press();
+    // 기한(15초)을 넘길 만큼 충분히 돌린다.
+    for (let i = 0; i < 70; i += 1) {
+      tick(300);
+      if (pending) {
+        pending = false;
+        apply();
+      }
+    }
+    return notified;
+  }
+  ok(
+    run(false, 2000) === 0,
+    "기다리지 않으면 첫 지시에서 완료 신호가 없다(옛 증상)",
+  );
+  ok(run(true, 2000) === 1, "설정을 기다리면 첫 지시만으로 완료 신호가 온다");
+  ok(run(true, 999999) === 1, "설정이 끝내 안 와도 기한 뒤 한 번은 알린다");
+}
+
 console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");
 process.exit(fails ? 1 : 0);

@@ -9921,13 +9921,29 @@
   // ⚠ 6개 프레임은 플레이어 DOM 이 뜨는 시각이 제각각이라, 처음 시도 때 viewmode
   //   버튼이 없어 놓치는 칸이 생긴다. 부모가 이 명령으로 다시 시키게 한다.
   // ⚠ 이미 넓은 화면이면 아무것도 하지 않는다(다시 누르면 좁은 화면으로 돌아간다).
-  window.addEventListener("message", (e) => {
-    if (e.source !== window) return;
-    if (e.data?.source !== "cheese-apply-multiview-wide") return;
+  // ⚠ 설정 브리지가 아직 도착하지 않았을 수 있다. 그때 maybeAutoWideScreen 은
+  //   wideScreenSettingsLoaded 가 false 라 '아무 말 없이' 돌아가고, 우리는 완료
+  //   신호를 영영 못 받는다(그래서 '화면 다시 적용' 을 두 번 눌러야 됐다).
+  //   설정이 올 때까지 짧게 기다렸다가 다시 시도한다.
+  let multiviewWideWaitTimer = 0;
+  let multiviewWideWaitUntil = 0;
+  function runMultiviewWideApply() {
     if (isWideScreenOn(findViewModeButton())) {
       // 이미 목표 상태 — 알리기만 한다.
       wideScreenNotified = false;
       notifyWideScreenSettled();
+      return;
+    }
+    if (!wideScreenSettingsLoaded) {
+      // 설정이 아직이다. 기한 안에서 다시 확인한다(무한 대기는 하지 않는다).
+      if (Date.now() < multiviewWideWaitUntil) {
+        clearTimeout(multiviewWideWaitTimer);
+        multiviewWideWaitTimer = setTimeout(runMultiviewWideApply, 300);
+      } else {
+        // 끝내 안 오면 붙잡지 않는다(부모 오버레이가 매달리지 않게).
+        wideScreenNotified = false;
+        notifyWideScreenSettled();
+      }
       return;
     }
     // 적용 기록만 지워 다시 시도하게 한다(설정값·다른 상태는 건드리지 않는다).
@@ -9936,6 +9952,14 @@
     resetWideScreenAttempt();
     if (typeof maybeAutoWideScreen === "function") maybeAutoWideScreen();
     else startWideScreenPolling();
+  }
+
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-apply-multiview-wide") return;
+    multiviewWideWaitUntil = Date.now() + 15000;
+    clearTimeout(multiviewWideWaitTimer);
+    runMultiviewWideApply();
   });
 
   function settleWideScreenAttempt(waitForLayout = false) {
