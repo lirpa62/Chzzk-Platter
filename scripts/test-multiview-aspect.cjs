@@ -160,14 +160,9 @@ const call = (method, params = {}, sessionId) =>
   if (bad) process.exitCode = 1;
 
   // 레터박스(칸 안 검은 여백) 검사.
-  // ⚠ 오른쪽/왼쪽+아래·위 4개는 기하학적으로 해가 없다 — 전체 폭 띠와 16:9 메인을
-  //   동시에 만족시키는 열 너비가 존재하지 않는다. 이 4개만 여백을 허용한다.
-  const EXPECT_LETTERBOX = new Set([
-    "right-bottom",
-    "left-bottom",
-    "right-top",
-    "left-top",
-  ]);
+  // ⚠ 이제 모든 배치가 레터박스 없이 놓인다. 해가 없던 L자 배치는 없앴고,
+  //   전체 폭 띠를 쓰는 배치는 메인이 보조 열 수만큼 행을 차지한다.
+  const EXPECT_LETTERBOX = new Set();
   let wasteBad = 0;
   for (const r of out) {
     const worst = Math.max(...r.cells);

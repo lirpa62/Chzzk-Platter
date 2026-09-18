@@ -88,14 +88,10 @@ ok(L.layoutById("없는배치") === null, "모르는 id 는 null 을 돌려준�
 ok(L.layoutById(right.id) === right, "id 로 같은 배치를 찾는다");
 
 console.log("\n[solveTracks] 모든 칸이 16:9 가 되는 트랙을 푼다");
-// 레터박스를 없애려면 칸 자체가 16:9 여야 한다. 해가 있는 배치는 트랙을 돌려주고,
-// 해가 없는 배치(전체 폭 띠 + 16:9 메인)는 null 을 돌려줘야 한다.
-const NO_SOLUTION = new Set([
-  "right-bottom",
-  "left-bottom",
-  "right-top",
-  "left-top",
-]);
+// 레터박스를 없애려면 칸 자체가 16:9 여야 한다. 지금은 모든 배치에 해가 있다 —
+// 해가 없던 L자 배치(오른쪽/왼쪽+아래·위)는 빼고, 전체 폭 띠를 쓰는 배치는
+// 메인이 보조 열 수만큼 행을 차지하게 고쳤다.
+const NO_SOLUTION = new Set();
 for (const layout of L.LAYOUTS) {
   const tracks = L.solveTracks(layout);
   if (NO_SOLUTION.has(layout.id)) {
