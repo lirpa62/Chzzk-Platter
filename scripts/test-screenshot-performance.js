@@ -113,6 +113,11 @@ test("Chromium content bridge forwards only a Blob URL and revokes it on complet
   const marker = content.indexOf('if (!data || data.source !== "cheese-screenshot-save")');
   const from = content.lastIndexOf('  window.addEventListener("message", (event) => {', marker);
   const to = content.indexOf("\n  });", marker) + 6;
+  // ⚠ 다리는 Blob 을 instanceof 가 아니라 '모양' 으로 판별한다(MAIN world 에서 온
+  //   Blob 은 realm 이 달라 instanceof 가 false 가 될 수 있다). 그 헬퍼는 잘라 낸
+  //   범위 밖에 있으므로 원본에서 함께 가져와 sandbox 에 넣는다.
+  const helperFrom = content.indexOf("  function isScreenshotBlobLike(");
+  const helperTo = content.indexOf("\n  }", helperFrom) + 4;
   let listener, callback, request;
   const revoked = [], timers = new Map();
   let next = 0;
@@ -123,6 +128,7 @@ test("Chromium content bridge forwards only a Blob URL and revokes it on complet
     chrome: { runtime: { sendMessage: (payload, cb) => { request = payload; callback = cb; } } },
     setTimeout: (cb) => { timers.set(++next, cb); return next; }, clearTimeout: (id) => timers.delete(id),
   });
+  vm.runInContext(content.slice(helperFrom, helperTo), context);
   vm.runInContext(content.slice(from, to), context);
   listener({ source: window, data: { source: "cheese-screenshot-save", reqId: 1, filename: "test.png",
     blob: new Blob(["fixture"], { type: "image/png" }) } });
@@ -138,6 +144,11 @@ test("Firefox content bridge converts a Blob to a data URL", async () => {
   const marker = content.indexOf('if (!data || data.source !== "cheese-screenshot-save")');
   const from = content.lastIndexOf('  window.addEventListener("message", (event) => {', marker);
   const to = content.indexOf("\n  });", marker) + 6;
+  // ⚠ 다리는 Blob 을 instanceof 가 아니라 '모양' 으로 판별한다(MAIN world 에서 온
+  //   Blob 은 realm 이 달라 instanceof 가 false 가 될 수 있다). 그 헬퍼는 잘라 낸
+  //   범위 밖에 있으므로 원본에서 함께 가져와 sandbox 에 넣는다.
+  const helperFrom = content.indexOf("  function isScreenshotBlobLike(");
+  const helperTo = content.indexOf("\n  }", helperFrom) + 4;
   let listener, request;
   const window = { addEventListener: (event, cb) => { listener = cb; }, postMessage() {} };
   const context = vm.createContext({ window, Blob, screenshotDirectSave: true, BRIDGE_ORIGIN: "fixture",
@@ -147,6 +158,7 @@ test("Firefox content bridge converts a Blob to a data URL", async () => {
     chrome: { runtime: { sendMessage: (payload) => { request = payload; } } },
     setTimeout: () => 1, clearTimeout() {}, URL: { revokeObjectURL() {} },
   });
+  vm.runInContext(content.slice(helperFrom, helperTo), context);
   vm.runInContext(content.slice(from, to), context);
   listener({ source: window, data: { source: "cheese-screenshot-save", reqId: 1, filename: "test.png",
     blob: new Blob(["fixture"], { type: "image/png" }) } });
