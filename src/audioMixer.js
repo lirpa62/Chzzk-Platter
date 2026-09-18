@@ -7870,6 +7870,43 @@
     stallFixes = 0;
   }
 
+  // 방송이 끝났을 때 치지직이 플레이어 자리에 띄우는 안내.
+  // ⚠ content.js 의 RELIVE_END_TEXTS 와 같은 문구를 쓴다(그쪽은 격리 월드라
+  //   여기서 직접 부를 수 없다). 문구가 바뀌면 두 곳을 함께 고쳐야 한다.
+  const STALL_END_TEXTS = ["다음 라이브를 기대해주세요"];
+
+  // 지금 방송 종료 화면이 떠 있는가.
+  function liveEndScreenVisible() {
+    try {
+      const els = document.querySelectorAll(
+        'main [class*="_player_"] p, #layout-body [class*="_player_"] p,' +
+          ' main [class*="_player_"] [class*="_text_"],' +
+          ' #layout-body [class*="_player_"] [class*="_text_"]',
+      );
+      for (const el of els) {
+        if (!el.isConnected) continue;
+        // 화면에 실제로 보이는 것만 본다(숨은 템플릿을 종료로 오해하지 않게).
+        const rect = el.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+        const text = String(el.textContent || "");
+        if (STALL_END_TEXTS.some((m) => text.includes(m))) return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  // 방송이 끝난 것이 확실한가.
+  //
+  // ⚠ video.ended 하나만 보면 안 된다. 치지직 라이브는 방송이 끝나도 ended 가
+  //   서지 않고, readyState 가 낮은 채 currentTime 이 버퍼 끝을 넘어선 상태로
+  //   남는다 — 이것은 '멈춤' 과 신호가 똑같다. 그래서 종료 화면까지 함께 본다.
+  //   반대로 잠깐의 네트워크 정체를 종료로 오해하면 안 되므로, 종료 화면이
+  //   실제로 떠 있을 때만 종료로 본다.
+  function liveLooksEnded(video) {
+    if (video?.ended === true) return true;
+    return liveEndScreenVisible();
+  }
+
   // 지금 '멈춤'인가. 재생 위치가 버퍼 밖이거나(데이터 없음), seek 이 안 끝나는 상태.
   function looksStalled(video) {
     if (!video || video.paused || video.ended) return false;
@@ -7922,6 +7959,12 @@
     }
     const video = findVideo();
     if (!video) {
+      resetStallWatch();
+      return;
+    }
+    // ⚠ 방송이 끝났으면 되돌릴 곳이 없다. 예약해 둔 시도까지 비우고 손을 뗀다.
+    //   다음 방송이 시작되면(종료 화면이 사라지면) 새 상태로 다시 센다.
+    if (liveLooksEnded(video)) {
       resetStallWatch();
       return;
     }
