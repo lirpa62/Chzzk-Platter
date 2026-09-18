@@ -76,6 +76,41 @@ console.log("\n[탭 전환] visibilitychange 로 다시 불러오지 않는다")
   ok(!/\.play\(\)/.test(block), "진단 기록이 재생을 억지로 부르지 않는다");
 }
 
+console.log("\n[따라잡기] 멀티뷰 칸은 기본값에서 따라잡기가 돌지 않는다");
+{
+  // Alt+Tab 복귀 뒤 보조 화면이 라이브로 끌려가는 증상의 후보 중 하나가 우리
+  // '실시간 따라잡기' 다. 기본값에서 그것이 도는지 코드로 확정해 둔다.
+  //
+  // 흐름: multiviewBtnSync(기본 false) → flags.liveSync = true
+  //      → audioMixer 가 removeSyncButton() → stopSyncCheck()
+  // 즉 버튼만 숨기는 게 아니라 판정 루프 자체가 멈춘다.
+  ok(
+    /let multiviewBtnSync = false;/.test(content),
+    "멀티뷰 따라잡기 버튼은 기본으로 꺼져 있다",
+  );
+  ok(
+    /if \(!multiviewBtnSync\) flags\.liveSync = true;/.test(content),
+    "버튼을 끄면 기능 플래그까지 꺼진다(표시만 숨기지 않는다)",
+  );
+  const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
+  const gate = mixer.slice(
+    mixer.indexOf("if (featureFlags.liveSync) {"),
+    mixer.indexOf("if (featureFlags.liveSync) {") + 200,
+  );
+  ok(
+    /removeSyncButton\(\)/.test(gate),
+    "플래그가 켜지면 따라잡기 버튼을 없앤다",
+  );
+  const remove = mixer.slice(
+    mixer.indexOf("function removeSyncButton"),
+    mixer.indexOf("function removeSyncButton") + 300,
+  );
+  ok(
+    /stopSyncCheck\(\)/.test(remove),
+    "버튼을 없앨 때 판정 루프도 멈춘다(숨기기만 하는 게 아니다)",
+  );
+}
+
 console.log("\n[없어진 배치] 저장된 id 를 못 찾으면 첫 배치로 되돌린다");
 {
   // 3채널에서 뺀 L자 배치들이다. 예전 설정에 남아 있어도 화면이 깨지면 안 된다.
