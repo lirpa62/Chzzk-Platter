@@ -10080,21 +10080,14 @@
     //   이미 하고 있는 toKbps() 를 반드시 거친다. 여기서 /1000 을 직접 하면 값이
     //   이미 kbps 일 때 1000배 작아져 화면에 0.0 Mbps 로 보인다.
     let bitrateKbps = toKbps(info?._bitrateNum);
-    let selectedQuality = null;
-    let selectedHeight = height;
     try {
       const core = findCorePlayer();
       // ⚠ 트랙 목록은 core.videoTracks 다(이 파일의 다른 곳도 모두 이것을 쓴다).
       const tracks = Array.from(core?.videoTracks || []);
       const selected = tracks.find((t) => trackSelected(t));
-      if (selected) {
-        selectedQuality =
-          String(
-            selected._videoQuality || selected.encodingOptionID || "",
-          ).trim() || null;
-        const sh = trackHeight(selected);
-        if (sh) selectedHeight = sh;
-      }
+      // ⚠ 선택 트랙 높이는 밖으로 보내지 않는다. 비트레이트를 찾을 때 어느 트랙인지
+      //   맞추는 데만 쓴다(해상도는 width/height 로 이미 보인다).
+      const selectedHeight = (selected && trackHeight(selected)) || height;
       if (!bitrateKbps) {
         bitrateKbps = toKbps(
           findEncodingTrackBitrate(core, selected, selectedHeight),
@@ -10108,10 +10101,6 @@
       height,
       fps: num(info?._fpsNum),
       bitrateKbps: bitrateKbps || null,
-      // 이 칸에 실제로 걸린 상한(0 이면 상한 없음). 부모가 추정하지 않게 알려 준다.
-      qualityCap: maxQualityCap,
-      selectedHeight: selectedHeight || null,
-      selectedQuality,
       // 아래는 백그라운드 복귀 진단용이다(UI 에 다 보여 주지 않아도 된다).
       paused: video ? video.paused : null,
       readyState: video ? video.readyState : null,

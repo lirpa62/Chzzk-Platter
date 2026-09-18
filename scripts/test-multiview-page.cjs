@@ -1182,92 +1182,39 @@ const checks = [];
        window.dispatchEvent(e);
      };
      // 1500 kbps → 1.5 Mbps (두 번 나누면 0.0 Mbps 가 된다)
-     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:1500,
-           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:1500});
      await wait(1200);
      let text=document.getElementById('mvStatsPop').textContent;
      check(text.includes('1.5 Mbps'),'1500kbps 가 1.5 Mbps 로 안 나온다: '+text);
      check(!text.includes('0.0 Mbps'),'비트레이트를 두 번 나눴다: '+text);
      // 1000 미만은 kbps 그대로 보여 준다.
-     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:800,
-           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:800});
      await wait(1200);
      text=document.getElementById('mvStatsPop').textContent;
      check(text.includes('800 kbps'),'800kbps 표시가 없다: '+text);
      // 값이 없으면 추정하지 않고 '-' 로 둔다.
-     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:null,
-           selectedHeight:480,selectedQuality:'480p',qualityCap:480});
+     send({latencySec:3.2,width:854,height:480,fps:30,bitrateKbps:null});
      await wait(1200);
      text=document.getElementById('mvStatsPop').textContent;
      check(!text.includes('Mbps')||text.includes('-'),'비트레이트가 없을 때 추정했다');`,
   );
 
   await test(
-    "정책과 실제가 어긋나면 표에서 드러난다",
-    `// 앞 테스트들이 종료·교체를 거쳐 왔다. 지금 살아 있는 메인 칸을 기준으로
-     // 정책 열을 확인한다(메인이면 HIGH 가 나와야 한다).
-     const cells=[...document.querySelectorAll('.mv-cell')];
-     const aux=document.querySelector('.mv-cell.is-main')||cells[0];
-     check(aux,'칸이 없다');
-     const id=aux.dataset.channelId;
-     // 상한 480 인데 실제 1080p 로 재생 중인 상태를 그대로 보여 준다.
-     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-       data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,
-             stats:{latencySec:4.3,width:1920,height:1080,fps:60,bitrateKbps:8000,
-                    selectedHeight:1080,selectedQuality:'1080p',qualityCap:480}}});
-     Object.defineProperty(e,'source',{value:aux.querySelector('iframe').contentWindow});
-     window.dispatchEvent(e);
-     await wait(1200);
-     const pop=document.getElementById('mvStatsPop');
-     check(/HIGH|≤480p/.test(pop.textContent),
-       '정책 열이 없다: '+pop.textContent.slice(0,200));
-     check(pop.textContent.includes('1080p'),'실제 화질이 없다');`,
-  );
-
-  await test(
-    "상한 칸이 상한보다 높은 화질이면 표에서 눈에 띈다",
-    `// ⚠ 앞 테스트들을 거치며 보조 칸이 종료 상태가 될 수 있다. 그러면 통계 줄이
-     //   아예 안 그려져 검사가 헛돈다. 그래서 칸 상태를 이 검사에 맞게 되돌린다.
-     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
-     const cell=[...document.querySelectorAll('.mv-cell')]
-       .find(c=>c.dataset.channelId!==mainId);
-     check(cell,'보조 칸이 없다');
-     const id=cell.dataset.channelId;
-     // 종료된 칸은 FRAME_READY 로 덮이지 않는다(그게 올바른 동작이다). 다른 채널로
-     // 갈아 끼우면 새 칸이 생기고, 거기에 준비 신호를 보내면 통계 줄이 그려진다.
-     let target=cell,targetId=id;
-     if(cell.dataset.status!=='ready'){
-       cell.querySelector('[data-mv-replace]').click();
-       await wait(400);
-       const card=document.querySelector('#mvQuickAdd [data-mv-quick-add]:not([disabled])');
-       check(card,'교체할 후보가 없다');
-       targetId=card.dataset.mvQuickAdd;
-       card.click();
-       await wait(300);
-       document.getElementById('mvQuickClose')?.click();
-       target=[...document.querySelectorAll('.mv-cell')]
-         .find(c=>c.dataset.channelId===targetId);
-       check(target,'교체한 칸을 찾지 못했다');
-       const r=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-         data:{source:'cheese-platter-multiview',type:'FRAME_READY',channelId:targetId}});
-       Object.defineProperty(r,'source',{value:target.querySelector('iframe').contentWindow});
-       window.dispatchEvent(r);
-       await wait(150);
-     }
-     check(target.dataset.status==='ready','보조 칸 상태='+target.dataset.status);
-     // 이 칸의 정책은 480(보조)인데 실제는 1080p 인 상황.
-     const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-       data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:targetId,
-             stats:{latencySec:4.3,width:1920,height:1080,fps:60,bitrateKbps:8000,
-                    selectedHeight:1080,selectedQuality:'1080p',qualityCap:480}}});
-     Object.defineProperty(e,'source',{value:target.querySelector('iframe').contentWindow});
-     window.dispatchEvent(e);
-     await wait(1200);
-     const pop=document.getElementById('mvStatsPop');
-     check(pop.textContent.includes('≤480p'),
-       '보조 칸 정책이 ≤480p 로 안 나온다: '+pop.textContent.slice(0,200));
-     check(pop.querySelector('.mv-stats-broken'),
-       '상한 480 인데 1080p 인 것이 표시되지 않았다: '+pop.textContent.slice(0,200));`,
+    "통합 스트림 정보는 다섯 열만 보여 준다",
+    `const pop=document.getElementById('mvStatsPop');
+     const heads=[...pop.querySelectorAll('thead th')].map(th=>th.textContent.trim());
+     check(heads.join(',')==='채널,지연,해상도,FPS,비트레이트',
+       '표 머리글이 다르다: '+heads.join(','));
+     // 화질 진단용으로 잠깐 뒀던 열은 남지 않아야 한다.
+     check(!pop.textContent.includes('≤480p'),'정책 열이 남아 있다');
+     check(!pop.querySelector('.mv-stats-broken'),'정책 깨짐 표시가 남아 있다');
+     // 종료·오류 줄의 colspan 도 열 수에 맞아야 한다(채널 뒤 데이터 열 4개).
+     const state=pop.querySelector('.mv-stats-state');
+     if(state)check(state.getAttribute('colspan')==='4',
+       'colspan 이 열 수와 안 맞는다: '+state.getAttribute('colspan'));
+     // 실제 화질은 해상도 열로 확인할 수 있어야 한다.
+     check(pop.textContent.includes('1920×1080')||pop.textContent.includes('854×480'),
+       '해상도가 표에 없다');`,
   );
 
   await test(
@@ -1277,16 +1224,16 @@ const checks = [];
      const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
        data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,
              stats:{latencySec:'<img src=x onerror=alert(1)>',width:{},height:[],
-                    fps:'abc',bitrateKbps:'1,500 kbps',
-                    selectedQuality:'<b>1080p</b>',qualityCap:'480'}}});
+                    fps:'abc',bitrateKbps:'1,500 kbps'}}});
      Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
      window.dispatchEvent(e);
      await wait(1200);
      const pop=document.getElementById('mvStatsPop');
      check(!pop.querySelector('img'),'문자열이 태그로 들어갔다');
-     check(!pop.querySelector('b'),'selectedQuality 가 태그로 들어갔다');
-     // 숫자가 아닌 값은 '-' 로 떨어져야 한다.
+     check(!pop.textContent.includes('onerror'),'문자열이 그대로 새어 나왔다');
+     // 숫자가 아닌 값은 '-' 로 떨어져야 한다(추정하지 않는다).
      check(!pop.textContent.includes('abc'),'숫자가 아닌 FPS 가 그대로 나왔다');
+     check(!pop.textContent.includes('1,500'),'숫자가 아닌 비트레이트가 나왔다');
      document.getElementById('mvStatsBtn').click();
      await wait(100);`,
   );

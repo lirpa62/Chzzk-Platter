@@ -1716,7 +1716,8 @@ body {
 /* ── 통합 스트림 정보 팝오버 ───────────────────────────────────────────── */
 .mv-stats-pop {
   gap: 6px;
-  min-width: 420px;
+  /* 채널 + 지연·해상도·FPS·비트레이트 5열. 채널 이름이 잘리지 않을 만큼만 잡는다. */
+  min-width: 400px;
   padding: 10px;
 }
 .mv-stats-table {
@@ -1755,10 +1756,4 @@ body {
   font-size: 10.5px;
   line-height: 1.5;
   margin: 0;
-}
-
-/* 상한이 걸렸는데 그보다 높은 화질로 재생 중이면 정책이 깨진 것이다. 눈에 띄게 둔다. */
-.mv-stats-broken {
-  color: #ffb454;
-  font-weight: 600;
 }

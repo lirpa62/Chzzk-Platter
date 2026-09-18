@@ -99,8 +99,9 @@
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 메인만 소리, 나머지는 음소거로 시작한다.
     url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
-    // 화질: 보조는 480p 상한. 메인을 높은 화질로 고른 경우엔 상한을 걸지 않는다
-    // (프레임 쪽이 사용자의 최대 화질 설정을 따른다).
+    // 화질은 '지금 이 칸의 역할' 로 정한다(시작할 때만이 아니다). 메인이면 상한을
+    // 걸지 않고, 보조면 480p 상한을 건다. 메인이 바뀌면 두 칸 모두 다시 지시한다.
+    // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
     //
     // ⚠ 360p 는 넣지 않는다. 치지직 화질 목록에 실제로 있는지 이 코드만으로
     //   확인할 수 없어, 없는 값을 상한으로 주면 '이하 중 최고' 규칙이 가장 낮은
@@ -763,6 +764,12 @@
     console.log(`[${tag}] ${text}`);
   };
 
+  // 칸마다 FRAME_READY 를 몇 번 받았는지. Alt+Tab 으로 프레임이 다시 초기화되는지
+  // 가리는 데 쓴다 — 사용자가 다시 불러오기·교체를 하지 않았는데 #2 가 찍히면
+  // 그 프레임 document 가 다시 만들어졌다는 뜻이다.
+  // ⚠ 진단 기록에만 쓴다. 이 값으로 무엇을 자동으로 고치지 않는다.
+  const frameReadyCounts = new Map();
+
   // 탭을 떠났다 돌아온 시각. 복귀 직후의 지연 변화를 보기 위한 것이다.
   let lastVisibleAt = 0;
   function traceLatency(channelId) {
@@ -875,13 +882,6 @@
       ? `${(v / 1000).toFixed(1)} Mbps`
       : `${Math.round(v)} kbps`;
   };
-  // 정책(부모가 보낸 것) 과 실제(칸이 알려 준 것) 를 나눠 보여 준다.
-  const fmtPolicy = (q) =>
-    q === "high" ? "HIGH" : q === "480" ? "≤480p" : "-";
-  const fmtActual = (st) => {
-    if (st.selectedQuality) return st.selectedQuality;
-    return st.selectedHeight ? `${st.selectedHeight}p` : "-";
-  };
 
   function renderStats() {
     const panel = $("mvStatsPop");
@@ -893,26 +893,19 @@
         const name = `<td class="mv-stats-name">${esc(c.channelName)}</td>`;
         if (status === "ended" || status === "error") {
           const label = status === "ended" ? "방송 종료" : "오류";
-          return `<tr>${name}<td colspan="6" class="mv-stats-state">${label}</td></tr>`;
+          return `<tr>${name}<td colspan="4" class="mv-stats-state">${label}</td></tr>`;
         }
         const entry = statsByChannel.get(c.channelId);
         // 오래된 값은 최신인 척하지 않는다.
         const fresh =
           entry && now - entry.updatedAt < STATS_POLL_MS * STATS_STALE_TICKS;
         if (!fresh) {
-          return `<tr>${name}<td colspan="6" class="mv-stats-state">대기 중</td></tr>`;
+          return `<tr>${name}<td colspan="4" class="mv-stats-state">대기 중</td></tr>`;
         }
         const st = entry.stats;
-        // 정책은 부모가 보낸 값을 쓴다(우리가 아는 사실). 실제 화질은 칸이 알려 준
-        // 값만 쓴다 — 부모는 iframe 안을 볼 수 없으므로 추정하지 않는다.
-        const want = lastQuality.get(c.channelId) || "";
-        // 상한이 걸렸는데 그보다 높은 화질로 재생 중이면 정책이 깨진 것이다.
-        const broken =
-          want === "480" && st.selectedHeight && st.selectedHeight > 480;
+        // 실제 화질은 해상도 열(width×height)로 충분히 보인다. 따로 열을 두지 않는다.
         return (
           `<tr>${name}` +
-          `<td>${fmtPolicy(want)}</td>` +
-          `<td${broken ? ' class="mv-stats-broken"' : ""}>${esc(fmtActual(st))}</td>` +
           `<td>${fmtLatency(st.latencySec)}</td>` +
           `<td>${fmtRes(st.width, st.height)}</td>` +
           `<td>${fmtFps(st.fps)}</td>` +
@@ -922,8 +915,8 @@
       .join("");
     panel.innerHTML =
       `<table class="mv-stats-table">` +
-      `<thead><tr><th>채널</th><th>정책</th><th>실제</th><th>지연</th>` +
-      `<th>해상도</th><th>FPS</th><th>비트레이트</th></tr></thead>` +
+      `<thead><tr><th>채널</th><th>지연</th><th>해상도</th>` +
+      `<th>FPS</th><th>비트레이트</th></tr></thead>` +
       `<tbody>${rows}</tbody></table>` +
       `<p class="mv-stats-note">지연은 플레이어가 알려 주는 값이다(스트림 정보 패널과 같은 기준).</p>`;
   }
@@ -1245,6 +1238,9 @@
     clearTimeout(frameTimers.get(oldChannelId));
     frameTimers.delete(oldChannelId);
     frameStates.delete(oldChannelId);
+    // 칸이 사라지면 센 것도 버린다. 안 그러면 뺐다가 다시 넣은 채널이 #2 로 보여
+    // '프레임이 다시 만들어졌다' 는 신호와 섞인다.
+    frameReadyCounts.delete(oldChannelId);
 
     // 자리를 그대로 두고 갈아 끼운다(채널 수가 같아 배치도 그대로 쓸 수 있다).
     const next = {
@@ -1578,6 +1574,7 @@
     clearTimeout(frameTimers.get(channelId));
     frameTimers.delete(channelId);
     frameStates.delete(channelId);
+    frameReadyCounts.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
@@ -1928,6 +1925,9 @@
     if (!frame || event.source !== frame.contentWindow) return;
 
     if (data.type === "FRAME_READY") {
+      const count = (frameReadyCounts.get(channelId) || 0) + 1;
+      frameReadyCounts.set(channelId, count);
+      traceLog("mv-frame", `${channelName(channelId)} FRAME_READY #${count}`);
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
@@ -1961,14 +1961,6 @@
           height: num(raw.height),
           fps: num(raw.fps),
           bitrateKbps: num(raw.bitrateKbps),
-          // 문자열·객체를 그대로 두지 않는다. 아는 값만 통과시킨다.
-          qualityCap: Number(raw.qualityCap) === 480 ? 480 : 0,
-          selectedHeight: num(raw.selectedHeight),
-          selectedQuality:
-            typeof raw.selectedQuality === "string" &&
-            raw.selectedQuality.length <= 20
-              ? raw.selectedQuality
-              : null,
           paused: raw.paused === true,
           readyState: num(raw.readyState),
           networkState: num(raw.networkState),

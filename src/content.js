@@ -51648,8 +51648,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           : IS_POPUP_PLAYER_FRAME
             ? popupPlayerMaxQuality
             : maxQualityAuto,
-        // 화질 상한(px). 멀티뷰에서만 쓰며 0 이면 상한 없음. 메인을 고화질로 시작하는
-        // 경우엔 부모가 이 쿼리를 붙이지 않으므로 0 이 되어 상한이 걸리지 않는다.
+        // 화질 상한(px). 멀티뷰에서만 쓰며 0 이면 상한 없음. 지금 이 칸이 메인이면
+        // 부모가 상한을 지시하지 않으므로 0 이 되어 상한이 걸리지 않는다.
         maxQualityCap: multiviewQuality,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)

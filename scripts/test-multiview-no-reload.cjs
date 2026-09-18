@@ -128,6 +128,54 @@ console.log("\n[없어진 배치] 저장된 id 를 못 찾으면 첫 배치로 �
   }
 }
 
+console.log("\n[탭 전환] 부모도 프레임도 복귀 시 아무것도 고치지 않는다");
+{
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
+  // 부모: visibilitychange 에서 기록 말고는 아무것도 하지 않는다.
+  ok(
+    !/location\.reload|fastSeek/.test(watch),
+    "부모에 reload/seek 코드가 아예 없다",
+  );
+  ok(!/currentTime\s*=[^=]/.test(watch), "부모가 재생 위치를 대입하지 않는다");
+  // 프레임(멀티뷰 블록): 같은 확인.
+  const at = content.indexOf("if (IS_MULTIVIEW_FRAME) {");
+  ok(at > 0, "멀티뷰 프레임 블록을 찾았다");
+  const block = content.slice(at, at + 14000);
+  for (const [pat, label] of [
+    ["location.reload", "다시 불러오기"],
+    ["currentTime =", "재생 위치 대입"],
+    ["fastSeek", "seek"],
+    ["jumpToLiveEdge", "라이브 엣지 점프"],
+  ]) {
+    ok(!block.includes(pat), `멀티뷰 칸에 ${label} 가 없다`);
+  }
+}
+
+console.log("\n[진단] 평상시에는 아무 로그도 내지 않는다");
+{
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
+  // mvTrace 가 꺼져 있으면 traceLog 는 바로 돌아간다.
+  const fn = watch.slice(
+    watch.indexOf("const traceLog ="),
+    watch.indexOf("const traceLog =") + 160,
+  );
+  ok(/if \(!mvTrace\) return;/.test(fn), "traceLog 는 진단 모드에서만 찍는다");
+  ok(
+    /localStorage\.getItem\("cheeseMultiviewTrace"\)/.test(watch),
+    "진단 모드는 cheeseMultiviewTrace 로 켠다",
+  );
+  // FRAME_READY 카운터는 진단용이고, 이 값으로 무엇을 자동으로 고치지 않는다.
+  ok(/frameReadyCounts/.test(watch), "FRAME_READY 횟수를 센다");
+  const uses = watch.split("frameReadyCounts").length - 1;
+  ok(uses <= 5, `카운터 사용처가 진단 범위다(${uses}곳)`);
+}
+
 console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건다");
 {
   // 부모가 보내는 volume 은 0~1 의 실수여야 한다. 범위를 안 보면 1 보다 큰 값이
