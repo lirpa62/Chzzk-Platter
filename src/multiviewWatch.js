@@ -116,7 +116,7 @@
   //
   // ⚠ isMain 은 '화질' 만 정한다. 음소거·크기는 소리 설정에서 계산한다 —
   //   focus mode 를 끄면 보조 채널도 소리를 낼 수 있어야 하기 때문이다.
-  function postState(channelId, isMain) {
+  function postState(channelId, isMain, options = {}) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
     const quality = isMain && state.mainHighQuality ? "high" : "480";
@@ -141,6 +141,11 @@
           muted: effectiveMuted(channelId),
           volume: effectiveVolume(channelId),
           quality,
+          // ⚠ 화질이 '그대로' 여도 칸에게 다시 확인시켜야 하는 때가 있다.
+          //   프레임이 막 준비됐을 때가 그렇다 — 주소로 받은 상한과 지금 지시가
+          //   같아 '바뀐 것 없음' 으로 지나가면, 플레이어가 아직 로딩 국면이라
+          //   상한을 못 걸었던 칸이 그대로 고화질로 남는다.
+          reconcileQuality: options.reconcileQuality === true,
         },
         CHZZK_ORIGIN,
       );
@@ -672,6 +677,36 @@
 
   const pct = (v) => `${Math.round(v * 100)}%`;
 
+  // 볼륨 아이콘(lucide volume-x / volume-1 / volume-2). 폴더 아이콘과 같은 방식으로
+  // 필요한 path 만 인라인으로 둔다(외부 lucide 런타임을 들이지 않는다).
+  const VOLUME_ICONS = {
+    x:
+      '<path d="M11 4.7a.8.8 0 0 0-1.3-.6L6 7.3H3a1 1 0 0 0-1 1v7.4a1 1 0 0 0 1 1h3l3.7 3.2a.8.8 0 0 0 1.3-.6z"></path>' +
+      '<line x1="22" y1="9" x2="16" y2="15"></line>' +
+      '<line x1="16" y1="9" x2="22" y2="15"></line>',
+    low:
+      '<path d="M11 4.7a.8.8 0 0 0-1.3-.6L6 7.3H3a1 1 0 0 0-1 1v7.4a1 1 0 0 0 1 1h3l3.7 3.2a.8.8 0 0 0 1.3-.6z"></path>' +
+      '<path d="M16 9a5 5 0 0 1 0 6"></path>',
+    high:
+      '<path d="M11 4.7a.8.8 0 0 0-1.3-.6L6 7.3H3a1 1 0 0 0-1 1v7.4a1 1 0 0 0 1 1h3l3.7 3.2a.8.8 0 0 0 1.3-.6z"></path>' +
+      '<path d="M16 9a5 5 0 0 1 0 6"></path>' +
+      '<path d="M19.4 5.6a10 10 0 0 1 0 12.8"></path>',
+  };
+  const volumeIcon = (kind) =>
+    '<svg class="mv-vol-icon" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    (VOLUME_ICONS[kind] || VOLUME_ICONS.x) +
+    "</svg>";
+
+  // 실제로 나오는 소리를 기준으로 아이콘을 고른다(전체 볼륨까지 곱해진 값).
+  function volumeIconKind(channelId) {
+    if (effectiveMuted(channelId)) return "x";
+    const v = effectiveVolume(channelId);
+    if (!(v > 0)) return "x";
+    return v > 0.5 ? "high" : "low";
+  }
+
   function renderVolume() {
     const value = $("mvVolumeValue");
     const button = $("mvVolumeBtn");
@@ -702,13 +737,19 @@
         const muted = effectiveMuted(c.channelId);
         return (
           `<div class="mv-vol-row${forcedOff ? " is-off" : ""}">` +
-          `<span class="mv-vol-name">${esc(c.channelName)}` +
-          (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
+          // ⚠ 이름과 '메인' 배지를 나눈다. 한 덩어리에 overflow:hidden 을 두면
+          //   이름이 길 때 배지까지 함께 잘려 역할이 안 보인다.
+          `<span class="mv-vol-name">` +
+          `<span class="mv-vol-name-text" title="${esc(c.channelName)}">` +
+          `${esc(c.channelName)}</span>` +
+          (isMain ? `<span class="mv-main-badge">메인</span>` : "") +
           `</span>` +
           `<button type="button" class="mv-vol-mute" data-mv-vol-mute="${id}"` +
           ` aria-pressed="${muted}"` +
           ` aria-label="${esc(c.channelName)} ${muted ? "음소거 해제" : "음소거"}"` +
-          `${forcedOff ? " disabled" : ""}>${muted ? "🔇" : "🔊"}</button>` +
+          ` title="${muted ? "음소거 해제" : "음소거"}"` +
+          `${forcedOff ? " disabled" : ""}>` +
+          `${volumeIcon(volumeIconKind(c.channelId))}</button>` +
           `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
           ` value="${Math.round(audio.volume * 100)}"` +
           ` data-mv-vol-channel="${id}"` +
@@ -747,7 +788,9 @@
       `</div>` +
       `<label class="mv-vol-focus">` +
       `<input type="checkbox" id="mvVolFocus"${state.audioFocusMode ? " checked" : ""}>` +
-      `<span>메인 채널만 소리</span></label>` +
+      `<span>메인만 듣기</span></label>` +
+      `<p class="mv-vol-focus-note">` +
+      `끄면 채널별 음소거와 볼륨을 직접 조절할 수 있습니다.</p>` +
       `<div class="mv-vol-list">${rows}</div>`;
   }
 
@@ -1935,7 +1978,11 @@
       if (currentStatus(channelId) === "ended") return; // 종료된 칸은 그대로 둔다
       // ⚠ 프레임이 준비되기 전에 보낸 지시는 (리스너가 붙기 전이라) 유실됐을 수 있다.
       //   주소의 쿼리는 '처음 상태' 일 뿐이고 최종 기준은 지금 부모 상태다.
-      postState(channelId, channelId === state.mainId);
+      // ⚠ 이때만 화질 재확인을 함께 요청한다. 볼륨 조작 같은 평상시 지시에서는
+      //   요청하지 않는다(화질 재적용을 불필요하게 반복하지 않는다).
+      postState(channelId, channelId === state.mainId, {
+        reconcileQuality: true,
+      });
       // ⚠ 여기서 바로 덮개를 걷는다. 화면 정리(채팅 접기·넓은 화면)는 프레임이
       //   스스로 목표 상태로 맞춰 가는 일이라, 그걸 기다리면 DOM 이 늦게 뜬 것까지
       //   실패로 보인다(그래서 재적용을 두세 번 눌러야 했다).

@@ -176,6 +176,57 @@ console.log("\n[진단] 평상시에는 아무 로그도 내지 않는다");
   ok(uses <= 5, `카운터 사용처가 진단 범위다(${uses}곳)`);
 }
 
+console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴한다");
+{
+  const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
+  // 보조 칸은 maxQualityAuto 가 false 다(상한만 쓴다). 예전에는 이 때문에
+  // bindMaxQualityEvents 가 첫 줄에서 빠져나가 재시도 리스너가 아예 안 붙었다.
+  const bind = mixer.slice(
+    mixer.indexOf("function bindMaxQualityEvents"),
+    mixer.indexOf("function bindMaxQualityEvents") + 1400,
+  );
+  ok(
+    /if \(!maxQualityAuto && !\(maxQualityCap > 0\)\) return;/.test(bind),
+    "상한만 걸린 칸에도 재시도 이벤트를 건다",
+  );
+  ok(
+    /if \(maxQualityCap > 0\) \{/.test(bind),
+    "상한 모드는 맞을 때까지 재시도한다",
+  );
+  // 초당 여러 번 오는 timeupdate 에서 fiber 탐색을 반복하면 칸 수만큼 비싸진다.
+  ok(/lastCapProgressAt/.test(bind), "상한 재시도는 초당 한 번으로 제한한다");
+
+  // 프레임이 준비됐을 때는 값이 같아도 한 번 다시 확인시킨다.
+  ok(
+    /reconcileQuality: true/.test(watch),
+    "부모가 FRAME_READY 에서 화질 재확인을 요청한다",
+  );
+  ok(
+    /qualityChanged \|\| forceQualityReconcile/.test(content),
+    "칸이 값이 같아도 재확인 요청이면 다시 알린다",
+  );
+  // ⚠ 평상시 지시(볼륨 등)에서는 요청하지 않는다.
+  const posts = watch.split("postState(").length - 1;
+  const recon = watch.split("reconcileQuality: true").length - 1;
+  ok(
+    recon === 1,
+    `화질 재확인 요청은 FRAME_READY 한 곳뿐이다(${recon}곳 / postState ${posts}회)`,
+  );
+  // 안전 게이트는 그대로 둔다(로딩 국면에 화질을 바꾸면 플레이어가 죽는다).
+  const apply = mixer.slice(
+    mixer.indexOf("function applyMaxQuality"),
+    mixer.indexOf("function applyMaxQuality") + 2600,
+  );
+  ok(
+    /pzp-pc--beforeplay/.test(apply) && /readyState < 3/.test(apply),
+    "플레이어 안정 조건은 그대로 남아 있다",
+  );
+}
+
 console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건다");
 {
   // 부모가 보내는 volume 은 0~1 의 실수여야 한다. 범위를 안 보면 1 보다 큰 값이

@@ -1645,26 +1645,53 @@ body {
 .mv-vol-row.is-off {
   opacity: 0.55;
 }
+/* ⚠ 여기에는 overflow 를 두지 않는다. 두면 이름이 길 때 '메인' 배지까지 함께
+   잘려 역할이 안 보인다. 자르는 것은 이름 텍스트만이다. */
 .mv-vol-name {
   align-items: center;
   display: flex;
   font-size: 12px;
   gap: 5px;
   min-width: 0;
+}
+.mv-vol-name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 배지는 줄어들지 않는다(이름이 아무리 길어도 남는다). */
+.mv-main-badge {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #05170f;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+}
 .mv-vol-mute {
+  align-items: center;
   background: none;
   border: 0;
+  border-radius: 6px;
+  color: inherit;
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 2px;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.mv-vol-mute:hover:not(:disabled) {
+  color: var(--popup-brand-strong, #00ffa3);
 }
 .mv-vol-mute:disabled {
   cursor: default;
+}
+.mv-vol-icon {
+  height: 17px;
+  width: 17px;
 }
 .mv-vol-range {
   accent-color: var(--popup-brand, #00ffa3);
@@ -1682,6 +1709,12 @@ body {
   display: flex;
   font-size: 12px;
   gap: 6px;
+}
+.mv-vol-focus-note {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: -4px 0 0 20px;
 }
 .mv-vol-list {
   display: grid;

@@ -1261,6 +1261,150 @@ const checks = [];
      await wait(100);`,
   );
 
+  await test(
+    "볼륨 아이콘은 실제 출력 크기에 따라 세 가지로 바뀐다",
+    `document.getElementById('mvVolumeBtn').click();
+     await wait(150);
+     const pop=document.getElementById('mvVolumePop');
+     check(!pop.hidden,'볼륨 팝오버가 열리지 않았다');
+     // emoji 를 쓰지 않는다(SVG 로 통일).
+     check(!/🔇|🔊/.test(pop.textContent),'emoji 가 남아 있다');
+     check(pop.querySelector('.mv-vol-icon'),'볼륨 아이콘 SVG 가 없다');
+     const kindOf=(btn)=>{
+       const svg=btn.querySelector('.mv-vol-icon');
+       const lines=svg.querySelectorAll('line').length;
+       const paths=svg.querySelectorAll('path').length;
+       if(lines===2)return 'x';        // volume-x 는 X 표시가 선 2개
+       return paths>=3?'high':'low';   // volume-2 는 호가 2개
+     };
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     // 앞 테스트가 전체 볼륨을 바꿔 뒀을 수 있다. 기준을 100% 로 맞춘다.
+     {const m=pop.querySelector('[data-mv-vol-master]');
+      m.value='100';m.dispatchEvent(new Event('input',{bubbles:true}));
+      await wait(100);
+      document.getElementById('mvVolumeBtn').click();
+      document.getElementById('mvVolumeBtn').click();
+      await wait(150);}
+     const pop0=document.getElementById('mvVolumePop');
+     const mainBtn=pop0.querySelector('[data-mv-vol-mute="'+mainId+'"]');
+     check(mainBtn,'메인 음소거 버튼이 없다');
+     // 메인 100% → volume-2
+     check(kindOf(mainBtn)==='high','메인이 volume-2 가 아니다: '+kindOf(mainBtn));
+     // 음소거된 채널은 크기와 상관없이 volume-x 여야 한다. '메인만 듣기' 를 켜서
+     // 보조를 확실히 음소거 상태로 만든 뒤 확인한다.
+     {const f=document.getElementById('mvVolFocus');
+      if(!f.checked){f.checked=true;f.dispatchEvent(new Event('change',{bubbles:true}));
+        await wait(150);}}
+     const popA=document.getElementById('mvVolumePop');
+     const auxBtn=[...popA.querySelectorAll('[data-mv-vol-mute]')]
+       .find(b=>b.dataset.mvVolMute!==mainId);
+     if(auxBtn)check(kindOf(auxBtn)==='x',
+       '음소거된 보조가 volume-x 가 아니다: '+kindOf(auxBtn));
+     // 전체 볼륨을 30% 로 내리면 메인은 volume-1 이 된다(실제 출력 기준).
+     const master=document.getElementById('mvVolumePop')
+       .querySelector('[data-mv-vol-master]');
+     master.value='30';
+     master.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(100);
+     document.getElementById('mvVolumeBtn').click();
+     document.getElementById('mvVolumeBtn').click();
+     await wait(150);
+     const pop2=document.getElementById('mvVolumePop');
+     const mainBtn2=pop2.querySelector('[data-mv-vol-mute="'+mainId+'"]');
+     check(kindOf(mainBtn2)==='low',
+       '전체 30% 인데 volume-1 이 아니다: '+kindOf(mainBtn2));
+     // 0% 면 volume-x.
+     const master2=pop2.querySelector('[data-mv-vol-master]');
+     master2.value='0';
+     master2.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(100);
+     document.getElementById('mvVolumeBtn').click();
+     document.getElementById('mvVolumeBtn').click();
+     await wait(150);
+     const pop3=document.getElementById('mvVolumePop');
+     check(kindOf(pop3.querySelector('[data-mv-vol-mute="'+mainId+'"]'))==='x',
+       '전체 0% 인데 volume-x 가 아니다');
+     // 되돌려 둔다(뒤 테스트에 영향 없게).
+     const m3=pop3.querySelector('[data-mv-vol-master]');
+     m3.value='100';
+     m3.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(100);`,
+  );
+
+  await test(
+    "긴 닉네임이어도 메인 배지는 잘리지 않는다",
+    `const pop=document.getElementById('mvVolumePop');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     // 아주 긴 이름으로 바꿔 다시 그린다.
+     const long='A'.repeat(60);
+     const row=pop.querySelector('[data-mv-vol-mute="'+mainId+'"]')
+       .closest('.mv-vol-row');
+     const text=row.querySelector('.mv-vol-name-text');
+     check(text,'이름 텍스트 요소가 없다');
+     text.textContent=long;
+     await wait(50);
+     const badge=row.querySelector('.mv-main-badge');
+     check(badge,'메인 배지가 없다');
+     // 배지가 실제로 보이고 폭이 남아 있어야 한다.
+     const br=badge.getBoundingClientRect();
+     check(br.width>0&&br.height>0,'메인 배지가 보이지 않는다');
+     // 자르는 것은 이름 텍스트 쪽이어야 한다.
+     const style=getComputedStyle(text);
+     check(style.overflow==='hidden','이름 텍스트가 잘리도록 돼 있지 않다');
+     const nameStyle=getComputedStyle(row.querySelector('.mv-vol-name'));
+     check(nameStyle.overflow!=='hidden',
+       '이름 묶음에 overflow:hidden 이 있어 배지까지 잘린다');
+     // 배지가 행 밖으로 밀려나지 않아야 한다.
+     const rr=row.getBoundingClientRect();
+     check(br.right<=rr.right+1,
+       '메인 배지가 행 밖으로 밀렸다: '+br.right+' > '+rr.right);`,
+  );
+
+  await test(
+    "메인만 듣기를 꺼도 보조가 저절로 켜지지 않는다",
+    `const pop=document.getElementById('mvVolumePop');
+     check(pop.textContent.includes('메인만 듣기'),'문구가 바뀌지 않았다');
+     check(!pop.textContent.includes('메인 채널만 소리'),'옛 문구가 남아 있다');
+     check(pop.querySelector('.mv-vol-focus-note'),'설명 문구가 없다');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       f.contentWindow.postMessage=(m)=>window.sentMsgs.push(m);
+     }
+     // ⚠ '껐을 때 모두 켜지지 않는다' 를 제대로 보려면 보조가 저마다 음소거 상태
+     //    여야 한다. 앞 테스트가 만든 믹스를 지우고 다시 음소거로 맞춘다.
+     //    켜져 있는 동안에는 보조 버튼이 잠겨 있으므로 먼저 끄고 정리한다.
+     {const f=document.getElementById('mvVolFocus');
+      if(f.checked){f.checked=false;
+        f.dispatchEvent(new Event('change',{bubbles:true}));await wait(150);}}
+     const popF=document.getElementById('mvVolumePop');
+     for(const btn of popF.querySelectorAll('[data-mv-vol-mute]')){
+       if(btn.dataset.mvVolMute===mainId)continue;
+       if(btn.getAttribute('aria-pressed')==='false'&&!btn.disabled)btn.click();
+     }
+     await wait(150);
+     {const f=document.getElementById('mvVolFocus');
+      f.checked=true;f.dispatchEvent(new Event('change',{bubbles:true}));
+      await wait(150);}
+     window.sentMsgs=[];
+     const focus2=document.getElementById('mvVolFocus');
+     focus2.checked=false;
+     focus2.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(150);
+     // 끈 직후 보조가 전부 소리를 내면 6채널이 한꺼번에 울린다. 그러면 안 된다.
+     const aux=window.sentMsgs.filter(m=>m.type==='SET_MULTIVIEW_STATE'
+       &&m.channelId!==mainId);
+     check(aux.length>0,'보조에 지시가 나가지 않았다');
+     check(aux.every(m=>m.muted===true),
+       '메인만 듣기를 껐더니 보조가 저절로 켜졌다: '
+       +JSON.stringify(aux.map(m=>m.muted)));
+     // 다시 켜 둔다.
+     {const f=document.getElementById('mvVolFocus');
+      f.checked=true;f.dispatchEvent(new Event('change',{bubbles:true}));
+      await wait(100);}
+     document.getElementById('mvVolumeBtn').click();
+     await wait(100);`,
+  );
+
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
   checks.push("시청 화면 조작 중 오류가 없다");
 

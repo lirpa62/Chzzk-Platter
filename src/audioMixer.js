@@ -5319,8 +5319,17 @@
   // 바인딩된 경우를 위한 보조 트리거로 함께 둔다. applyMaxQuality 는 멱등이라 이미
   // 최고화질이면 no-op(timeupdate 가 자주 와도 비용 미미).
   const boundMaxQualityVideos = new WeakSet();
+  // 상한 모드에서 timeupdate 로 재시도한 마지막 시각(초당 한 번으로 제한).
+  let lastCapProgressAt = 0;
+
   function bindMaxQualityEvents() {
-    if (!maxQualityAuto) return;
+    // ⚠ 상한만 걸린 경우(멀티뷰 보조 칸)에도 이벤트를 걸어야 한다. 예전에는
+    //   maxQualityAuto 만 봤는데, 보조 칸은 그 값이 false 라(상한만 쓴다) 재시도
+    //   리스너가 아예 붙지 않았다. 그래서 입장 로딩 국면(beforeplay/loading)에
+    //   막힌 첫 시도가 실패하면 480p 를 다시 걸 기회가 없어 1080p 로 남았고,
+    //   탭을 전환해야(visibilitychange 경로) 뒤늦게 정리됐다.
+    //   applyMaxQuality 의 진입 조건과 같은 기준을 쓴다.
+    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
     const video = findVideo();
     if (!(video instanceof HTMLVideoElement)) return;
     if (!boundMaxQualityVideos.has(video)) {
@@ -5330,6 +5339,21 @@
       // (초당 여러 번)마다 applyMaxQuality 의 fiber 탐색(findCorePlayer)을 반복하지 않게
       // 조기 반환한다 — 여러 방송 탭을 켰을 때의 누적 CPU 부하를 줄인다.
       const onProgress = () => {
+        // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
+        // ⚠ 다만 상한이 걸린 칸은 tick 에 기대기 어렵다 — 멀티뷰는 채팅을 접어
+        //   두어 DOM 변이가 거의 없어 tick 이 잘 깨지 않는다. 상한 모드에서는
+        //   실제로 상한에 맞을 때까지 계속 재시도한다(맞으면 applyMaxQuality 가
+        //   멱등하게 즉시 빠져나온다).
+        if (maxQualityCap > 0) {
+          // ⚠ timeupdate 는 초당 여러 번 온다. applyMaxQuality 는 '이미 맞음' 을
+          //   판정하기까지 fiber 탐색(findCorePlayer)을 하므로 그대로 두면 칸 수
+          //   만큼 비용이 곱해진다. 초당 한 번으로 충분하다.
+          const now = Date.now();
+          if (now - lastCapProgressAt < 1000) return;
+          lastCapProgressAt = now;
+          applyMaxQuality();
+          return;
+        }
         if (maxQualitySetHeight > 0) return;
         applyMaxQuality();
       };

@@ -20667,6 +20667,8 @@
 
       const nextQuality = String(data.quality) === "high" ? 0 : 480;
       const qualityChanged = nextQuality !== multiviewQuality;
+      // 부모가 '지금 다시 확인해 달라' 고 한 경우(프레임이 막 준비된 때).
+      const forceQualityReconcile = data.reconcileQuality === true;
       multiviewQuality = nextQuality;
       // 부모 지시는 사용자의 이전 수동 조작보다 우선한다(메인이 바뀌었다는 뜻이다).
       multiviewMuted = data.muted;
@@ -20674,7 +20676,15 @@
       syncMultiviewVideo();
       if (currentVideo) applyAudioToVideo(currentVideo);
       // 화질 상한은 기능 플래그로 전달된다. 다시 알려 audioMixer 가 재적용하게 한다.
-      if (qualityChanged) broadcastFeatureFlags();
+      //
+      // ⚠ 값이 그대로여도(480 → 480) 프레임이 막 준비된 때는 다시 알린다. 칸이
+      //   처음 뜰 때 플레이어는 한동안 입장 로딩 국면(beforeplay/loading)이라
+      //   상한을 걸지 못하는데, 그 뒤 재시도를 깨워 줄 것이 마땅치 않다 —
+      //   멀티뷰는 채팅을 접어 두어 DOM 변이로 도는 tick 이 잘 깨지 않고,
+      //   timeupdate 경로는 한 번 걸린 뒤에는 빠져나간다. 그래서 일부 보조 칸이
+      //   1080p 로 남아 있다가 탭을 전환해야(visibilitychange) 480p 로 정리됐다.
+      //   실제 트랙 변경은 applyMaxQuality 의 안전 게이트가 그대로 판단한다.
+      if (qualityChanged || forceQualityReconcile) broadcastFeatureFlags();
     });
 
     // 초기 상태 적용 + 감시 시작.
