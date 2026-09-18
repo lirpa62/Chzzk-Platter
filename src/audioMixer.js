@@ -9905,12 +9905,22 @@
   // 이미 켜짐) 더 시도하지 않기로 한 순간(마감·비대상 페이지) 한 번만 알린다.
   // content.js(격리 월드)가 받아 부모 창으로 중계한다.
   let wideScreenNotified = false;
-  function notifyWideScreenSettled() {
+  // 멀티뷰가 기다리는 시도 번호. 0 이면 멀티뷰 요청이 아니다(팝업·일반 경로).
+  // ⚠ 팝업과 일반 동작은 예전 그대로다. 멀티뷰일 때만 번호·성공 여부를 얹는다.
+  let pendingMultiviewWideAttemptId = 0;
+  function notifyWideScreenSettled(result) {
     if (wideScreenNotified) return;
     wideScreenNotified = true;
+    const attemptId = result?.attemptId ?? pendingMultiviewWideAttemptId;
     try {
       window.postMessage(
-        { source: "cheese-wide-screen-settled" },
+        {
+          source: "cheese-wide-screen-settled",
+          // 멀티뷰 요청이었을 때만 번호를 실어 보낸다.
+          ...(attemptId
+            ? { attemptId, ok: result?.ok !== false, reason: result?.reason }
+            : {}),
+        },
         BRIDGE_ORIGIN,
       );
     } catch {}
@@ -9923,15 +9933,17 @@
   // ⚠ 이미 넓은 화면이면 아무것도 하지 않는다(다시 누르면 좁은 화면으로 돌아간다).
   // ⚠ 설정 브리지가 아직 도착하지 않았을 수 있다. 그때 maybeAutoWideScreen 은
   //   wideScreenSettingsLoaded 가 false 라 '아무 말 없이' 돌아가고, 우리는 완료
-  //   신호를 영영 못 받는다(그래서 '화면 다시 적용' 을 두 번 눌러야 됐다).
-  //   설정이 올 때까지 짧게 기다렸다가 다시 시도한다.
+  //   신호를 영영 못 받는다. 설정이 올 때까지 짧게 기다렸다가 다시 시도한다.
   let multiviewWideWaitTimer = 0;
   let multiviewWideWaitUntil = 0;
   function runMultiviewWideApply() {
+    const attemptId = pendingMultiviewWideAttemptId;
+    if (!attemptId) return;
+    // ⚠ 이미 넓은 화면이면 다시 누르지 않는다(누르면 좁은 화면으로 돌아간다).
+    //   대신 '됐다' 고 바로 답해야 한다. 아무 말 없이 돌아가면 부모가 끝까지 기다린다.
     if (isWideScreenOn(findViewModeButton())) {
-      // 이미 목표 상태 — 알리기만 한다.
       wideScreenNotified = false;
-      notifyWideScreenSettled();
+      notifyWideScreenSettled({ attemptId, ok: true });
       return;
     }
     if (!wideScreenSettingsLoaded) {
@@ -9940,13 +9952,19 @@
         clearTimeout(multiviewWideWaitTimer);
         multiviewWideWaitTimer = setTimeout(runMultiviewWideApply, 300);
       } else {
-        // 끝내 안 오면 붙잡지 않는다(부모 오버레이가 매달리지 않게).
         wideScreenNotified = false;
-        notifyWideScreenSettled();
+        notifyWideScreenSettled({
+          attemptId,
+          ok: false,
+          reason: "settings-not-ready",
+        });
       }
       return;
     }
-    // 적용 기록만 지워 다시 시도하게 한다(설정값·다른 상태는 건드리지 않는다).
+    // ⚠ 이미 넓은 화면 적용을 기다리는 중이면 그대로 둔다. 매번 되돌리면(reset)
+    //   기다리던 시각이 초기화돼 성공이 오히려 늦어진다. 최신 시도 번호만 갱신하고
+    //   지금 돌고 있는 감시가 끝나면 그 번호로 답한다.
+    if (wideScreenPollTimer) return;
     wideScreenAppliedForPage = null;
     wideScreenNotified = false;
     resetWideScreenAttempt();
@@ -9957,6 +9975,9 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window) return;
     if (e.data?.source !== "cheese-apply-multiview-wide") return;
+    const attemptId = e.data.attemptId;
+    if (!Number.isSafeInteger(attemptId) || attemptId <= 0) return;
+    pendingMultiviewWideAttemptId = attemptId;
     multiviewWideWaitUntil = Date.now() + 15000;
     clearTimeout(multiviewWideWaitTimer);
     runMultiviewWideApply();

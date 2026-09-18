@@ -721,9 +721,19 @@ const checks = [];
      const uiCmd=window.sentMessages.filter(m=>m.data?.type==='APPLY_MULTIVIEW_UI'
        && m.data.channelId===id);
      check(uiCmd.length===1,'화면 정리 지시가 없다('+uiCmd.length+'회)');
+     // ⚠ 지시에는 시도 번호가 붙는다. 답할 때 같은 번호를 실어야 받아 준다.
+     const attemptId=uiCmd[0].data.attemptId;
+     check(Number.isSafeInteger(attemptId)&&attemptId>0,
+       '시도 번호가 없다: '+attemptId);
+     // 번호가 틀리면 무시해야 한다.
+     send('https://chzzk.naver.com',
+       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',
+        channelId:id,attemptId:attemptId+99});
+     check(cell.dataset.status==='initializing-ui','엉뚱한 번호를 받아들였다');
      // 화면 정리까지 끝나야 덮개가 걷힌다.
      send('https://chzzk.naver.com',
-       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',channelId:id});
+       {source:'cheese-platter-multiview',type:'FRAME_UI_READY',
+        channelId:id,attemptId});
      check(cell.dataset.status==='ready','화면 정리 후에도 ready 가 아니다');
      check(cell.querySelector('.mv-cell-status').hidden,'덮개가 안 숨겨졌다');`,
   );

@@ -178,24 +178,47 @@
   // 프레임 상태 관리. 준비 신호가 제때 안 오면 '다시 불러오기' 를 띄운다.
   const frameTimers = new Map(); // channelId -> timeout id
   const uiTimers = new Map(); // 화면 정리 대기 타이머
+  // ⚠ 화면 정리 시도마다 번호를 매긴다. 늦게 온 결과가 최신 시도를 덮지 않게 하고,
+  //   종료·교체 때는 번호만 올려 이전 시도의 신호를 통째로 무효로 만든다.
+  const uiAttemptIds = new Map(); // channelId -> 지금 유효한 시도 번호
+
+  function nextUiAttemptId(channelId) {
+    const next = (uiAttemptIds.get(channelId) || 0) + 1;
+    uiAttemptIds.set(channelId, next);
+    return next;
+  }
+  // 종료·교체처럼 '이전 시도를 전부 버려야 하는' 경우에 쓴다.
+  function invalidateUiAttempts(channelId) {
+    nextUiAttemptId(channelId);
+    clearTimeout(uiTimers.get(channelId));
+    uiTimers.delete(channelId);
+  }
   // ⚠ 칸 상태의 정본. DOM 의 dataset 과 따로 놀지 않게 setCellStatus 에서만 바꾼다.
   const frameStates = new Map(); // channelId -> "loading" | ... | "ended"
-  // 화면 정리(채팅 접기 + 넓은 화면)를 기다리는 시간. 광고가 끼면 프레임 쪽 엔진이
-  // 더 기다리므로 넉넉히 준다.
-  const UI_READY_TIMEOUT_MS = 30000;
+  // 화면 정리(채팅 접기 + 넓은 화면)를 기다리는 시간.
+  // ⚠ 프레임 쪽 넓은 화면 대기 상한(60초)보다 넉넉해야 한다. 그보다 짧으면 프레임이
+  //   아직 정상적으로 기다리는 중인데 부모가 먼저 실패로 단정한다(그래서 두세 번
+  //   눌러야 됐다). 프레임이 실패를 직접 알려 주므로 이 타이머는 신호가 아예 오지
+  //   않을 때를 위한 최후 보루다.
+  const UI_READY_TIMEOUT_MS = 70000;
 
   const currentStatus = (channelId) => frameStates.get(channelId) || "";
 
   // 해당 칸에만 화면 정리를 다시 시킨다(다른 칸에는 아무 영향이 없다).
+  // 상태 바꾸기·시도 번호 발급·지시 전송·감시 타이머를 여기서 한꺼번에 맡는다.
+  // (부르는 쪽이 setCellStatus 를 따로 하지 않게 한 곳에 모은다.)
   function requestMultiviewUiApply(channelId) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
+    const attemptId = nextUiAttemptId(channelId);
+    setCellStatus(channelId, "initializing-ui");
     try {
       frame.contentWindow.postMessage(
         {
           source: MULTIVIEW_MESSAGE,
           type: "APPLY_MULTIVIEW_UI",
           channelId,
+          attemptId,
         },
         CHZZK_ORIGIN,
       );
@@ -204,6 +227,8 @@
     uiTimers.set(
       channelId,
       setTimeout(() => {
+        // ⚠ 오래된 타이머가 최신 시도를 실패로 덮으면 안 된다.
+        if (uiAttemptIds.get(channelId) !== attemptId) return;
         // 아직 정리가 끝나지 않았으면 '화면 정리 실패' 로 둔다.
         // ⚠ 프레임을 다시 로드하지 않는다. 영상은 살아 있고 정리만 못 끝낸 것이다.
         if (currentStatus(channelId) === "initializing-ui") {
@@ -302,6 +327,8 @@
     const channel = state.chosen.find((c) => c.channelId === channelId);
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!channel || !frame) return;
+    // 다시 로드하면 프레임이 처음부터 시작한다. 진행 중이던 화면 정리 시도는 버린다.
+    invalidateUiAttempts(channelId);
     setCellStatus(channelId, "loading");
     frame.src = frameUrl(
       channel,
@@ -859,8 +886,10 @@
     cells.delete(oldChannelId);
     clearTimeout(frameTimers.get(oldChannelId));
     frameTimers.delete(oldChannelId);
-    clearTimeout(uiTimers.get(oldChannelId));
-    uiTimers.delete(oldChannelId);
+    // ⚠ 진행 중이던 화면 정리 시도를 무효로 만든다(늦은 신호가 새 채널에 닿지
+    //   않게). 시도 번호 자체도 지워 새 채널이 1번부터 시작하게 한다.
+    invalidateUiAttempts(oldChannelId);
+    uiAttemptIds.delete(oldChannelId);
     frameStates.delete(oldChannelId);
 
     // 자리를 그대로 두고 갈아 끼운다(채널 수가 같아 배치도 그대로 쓸 수 있다).
@@ -1062,6 +1091,10 @@
     cells.delete(channelId);
     clearTimeout(frameTimers.get(channelId));
     frameTimers.delete(channelId);
+    // 진행 중이던 화면 정리 시도와 상태도 함께 정리한다.
+    invalidateUiAttempts(channelId);
+    uiAttemptIds.delete(channelId);
+    frameStates.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
@@ -1190,9 +1223,8 @@
     const reapply = target.closest?.("[data-mv-reapply]");
     if (reapply) {
       // ⚠ 프레임을 다시 로드하지 않는다. 그 칸에만 화면 정리를 다시 시킨다.
-      const id = reapply.dataset.mvReapply;
-      setCellStatus(id, "initializing-ui");
-      requestMultiviewUiApply(id);
+      //   상태 변경도 requestMultiviewUiApply 가 맡는다(한 곳에서 관리).
+      requestMultiviewUiApply(reapply.dataset.mvReapply);
       return;
     }
     const replace = target.closest?.("[data-mv-replace]");
@@ -1292,9 +1324,11 @@
   const FRAME_MESSAGE_TYPES = new Set([
     "FRAME_READY",
     "FRAME_UI_READY",
+    "FRAME_UI_FAILED",
     "FRAME_ENDED",
     "AUDIO_INTERACTION_REQUIRED",
   ]);
+  const isAttemptId = (v) => Number.isSafeInteger(v) && v > 0;
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
@@ -1314,27 +1348,35 @@
       // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
       //   화면 정리(채팅 접기·넓은 화면)는 아직 끝나지 않았다.
       if (currentStatus(channelId) === "ended") return; // 종료된 칸은 그대로 둔다
-      setCellStatus(channelId, "initializing-ui");
+      // ⚠ 프레임이 다시 초기화되면 이 신호가 또 온다. 그때는 이전 시도를 버리고
+      //   새로 시작해야 하므로 requestMultiviewUiApply 가 번호를 새로 발급한다.
       // ⚠ 프레임이 준비되기 전에 보낸 지시는 (리스너가 붙기 전이라) 유실됐을 수 있다.
       //   주소의 쿼리는 '처음 상태' 일 뿐이고 최종 기준은 지금 부모 상태다.
       postState(channelId, channelId === state.mainId);
       requestMultiviewUiApply(channelId);
       return;
     }
-    if (data.type === "FRAME_UI_READY") {
+    if (data.type === "FRAME_UI_READY" || data.type === "FRAME_UI_FAILED") {
       // ⚠ 늦게 온 신호가 종료 상태를 덮으면 안 된다.
       if (currentStatus(channelId) === "ended") return;
+      // ⚠ 지금 시도의 결과만 받는다(오래된 시도의 결과는 버린다).
+      if (!isAttemptId(data.attemptId)) return;
+      if (uiAttemptIds.get(channelId) !== data.attemptId) return;
       clearTimeout(uiTimers.get(channelId));
       uiTimers.delete(channelId);
-      setCellStatus(channelId, "ready");
+      setCellStatus(
+        channelId,
+        data.type === "FRAME_UI_READY" ? "ready" : "ui-error",
+      );
       return;
     }
     if (data.type === "FRAME_ENDED") {
       // 방송 종료. 칸을 지우거나 다른 채널을 자동으로 메인으로 올리지 않는다.
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
-      clearTimeout(uiTimers.get(channelId));
-      uiTimers.delete(channelId);
+      // ⚠ 종료는 어떤 화면 정리 결과보다 우선한다. 번호를 올려 진행 중인 시도의
+      //   늦은 신호를 통째로 무효로 만든다.
+      invalidateUiAttempts(channelId);
       setCellStatus(channelId, "ended");
       return;
     }

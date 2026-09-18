@@ -20469,11 +20469,16 @@
       true,
     );
 
-    function notifyParent(type) {
+    function notifyParent(type, extra) {
       if (window.parent === window) return;
       try {
         window.parent.postMessage(
-          { source: MULTIVIEW_MESSAGE, type, channelId: MULTIVIEW_CHANNEL_ID },
+          {
+            source: MULTIVIEW_MESSAGE,
+            type,
+            channelId: MULTIVIEW_CHANNEL_ID,
+            ...(extra || {}),
+          },
           // ⚠ "*" 로 보내지 않는다. 우리 확장 페이지에만 간다.
           MULTIVIEW_PARENT_ORIGIN,
         );
@@ -20545,55 +20550,87 @@
     //   그대로 쓴다.
     // ⚠ 사용자의 저장된 채팅 접힘 설정(cheeseChatFoldState)은 건드리지 않는다.
     //   멀티뷰에서만 잠깐 강제하고, 안정화가 끝나면 사용자가 직접 펼 수 있다.
+    // ⚠ 채팅 접기와 넓은 화면은 서로 다른 시점에 끝난다. 재적용할 때 둘 다 false 로
+    //   되돌리면, 이미 성공한 쪽까지 다시 기다리게 돼 사용자가 여러 번 눌러야 했다.
+    //   그래서 각자의 성공 상태를 남겨 두고, 재적용 때 '지금 실제로도 그런지' 만
+    //   다시 확인한다.
     let multiviewChatFoldReady = false;
     let multiviewWideReady = false;
-    let multiviewUiReadyNotified = false;
-    // ⚠ 같은 칸에 재적용이 겹칠 수 있다. 오래된 시도의 늦은 결과가 최신 상태를 덮지
-    //   않도록 세대 번호로 가른다.
-    let multiviewUiGeneration = 0;
+    // 시도 번호. 부모가 준 번호를 그대로 쓴다(부모·프레임·MAIN world 가 같은 번호).
+    let activeMultiviewUiAttemptId = 0;
+    let multiviewUiSettledAttemptId = 0; // 이미 결과를 알린 시도
 
-    function maybeNotifyMultiviewUiReady() {
+    const isMultiviewAttemptId = (v) => Number.isSafeInteger(v) && v > 0;
+
+    function maybeNotifyMultiviewUiReady(attemptId) {
+      if (attemptId !== activeMultiviewUiAttemptId) return; // 지난 시도
       if (!multiviewChatFoldReady || !multiviewWideReady) return;
-      if (multiviewUiReadyNotified) return;
-      multiviewUiReadyNotified = true;
-      notifyParent("FRAME_UI_READY");
+      if (multiviewUiSettledAttemptId === attemptId) return;
+      multiviewUiSettledAttemptId = attemptId;
+      notifyParent("FRAME_UI_READY", { attemptId });
     }
 
-    // 넓은 화면 완료 신호(MAIN world 가 보낸다).
+    function notifyMultiviewUiFailed(attemptId, reason) {
+      if (attemptId !== activeMultiviewUiAttemptId) return;
+      if (multiviewUiSettledAttemptId === attemptId) return;
+      multiviewUiSettledAttemptId = attemptId;
+      notifyParent("FRAME_UI_FAILED", { attemptId, reason });
+    }
+
+    // 넓은 화면 완료 신호(MAIN world 가 보낸다). 어느 시도에 대한 답인지 함께 온다.
     window.addEventListener("message", (event) => {
       if (event.source !== window) return;
       if (event.data?.source !== "cheese-wide-screen-settled") return;
+      const data = event.data;
+      // ⚠ 예전에는 번호가 없어 지난 시도의 늦은 완료를 최신 성공으로 오해했다.
+      if (!isMultiviewAttemptId(data.attemptId)) return;
+      if (data.attemptId !== activeMultiviewUiAttemptId) return;
+      if (data.ok === false) {
+        notifyMultiviewUiFailed(data.attemptId, "wide-screen");
+        return;
+      }
       multiviewWideReady = true;
-      maybeNotifyMultiviewUiReady();
+      maybeNotifyMultiviewUiReady(data.attemptId);
     });
 
-    function applyMultiviewUi() {
-      const generation = ++multiviewUiGeneration;
-      multiviewChatFoldReady = false;
+    function applyMultiviewUi(attemptId) {
+      activeMultiviewUiAttemptId = attemptId;
+
+      // ── 채팅 접기 ──────────────────────────────────────────────────────
+      // ⚠ 저장된 성공 상태를 믿지 않고 지금 DOM 을 확인한다(치지직이 다시 펼쳤을 수
+      //   있다). 이미 접혀 있으면 엔진을 돌리지 않고 즉시 완료로 본다.
+      if (isChatFolded(getLiveChatAside())) {
+        multiviewChatFoldReady = true;
+      } else {
+        multiviewChatFoldReady = false;
+        chatFoldWant = true;
+        chatFoldRestoreUntil = Date.now() + MULTIVIEW_UI_FOLD_WINDOW_MS;
+        startChatFoldEnforce({
+          onSettle: () => {
+            if (attemptId !== activeMultiviewUiAttemptId) return; // 지난 시도
+            // ⚠ 엔진의 결과 코드보다 실제 상태가 정확하다. 정말 접혔는지로 판정한다.
+            if (!isChatFolded(getLiveChatAside())) {
+              notifyMultiviewUiFailed(attemptId, "chat-fold");
+              return;
+            }
+            multiviewChatFoldReady = true;
+            maybeNotifyMultiviewUiReady(attemptId);
+          },
+        });
+      }
+
+      // ── 넓은 화면 ──────────────────────────────────────────────────────
+      // 항상 물어본다. 이미 넓으면 MAIN world 가 즉시 완료로 답한다(다시 누르지 않는다).
       multiviewWideReady = false;
-      multiviewUiReadyNotified = false;
-
-      // 채팅 접기: 목표를 '접힘' 으로 두고 기존 재교정 엔진에 맡긴다.
-      chatFoldWant = true;
-      chatFoldRestoreUntil = Date.now() + MULTIVIEW_UI_FOLD_WINDOW_MS;
-      startChatFoldEnforce({
-        onSettle: (ok) => {
-          if (generation !== multiviewUiGeneration) return; // 지난 시도의 결과
-          // ⚠ 엔진이 기간 만료로 끝나도(ok=false) 실제로 접혀 있으면 목표는 이룬
-          //   것이다. 상태를 직접 확인해 판정한다.
-          const folded = isChatFolded(getLiveChatAside());
-          multiviewChatFoldReady = ok || folded;
-          if (multiviewChatFoldReady) maybeNotifyMultiviewUiReady();
-        },
-      });
-
-      // 넓은 화면: MAIN world 에 다시 적용을 시킨다(이미 넓으면 아무것도 안 한다).
       try {
         window.postMessage(
-          { source: "cheese-apply-multiview-wide" },
+          { source: "cheese-apply-multiview-wide", attemptId },
           location.origin,
         );
       } catch {}
+
+      // 채팅이 이미 끝나 있으면 넓은 화면 답만 기다리면 된다.
+      maybeNotifyMultiviewUiReady(attemptId);
     }
 
     // 부모의 화면 정리 지시.
@@ -20609,7 +20646,8 @@
       ) {
         return;
       }
-      applyMultiviewUi();
+      if (!isMultiviewAttemptId(data.attemptId)) return;
+      applyMultiviewUi(data.attemptId);
     });
 
     // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 현재 상태를 다시 주고

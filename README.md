@@ -695,6 +695,7 @@ node scripts/test-multiview-layouts.cjs
 node scripts/test-multiview-quality-cap.cjs
 node scripts/test-multiview-setup-validation.cjs
 node scripts/test-multiview-frame-state.cjs
+node scripts/test-multiview-ui-attempt.cjs
 ```
 
 아래 두 가지는 헤드리스 Chrome 으로 실제 화면을 띄워 확인합니다. `CHROME_BIN`
