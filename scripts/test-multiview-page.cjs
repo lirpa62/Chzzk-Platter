@@ -501,7 +501,25 @@ const checks = [];
       storage:{session:{
         get:async(k)=>({[k]:window.sessionStore[k]}),
         set:async(o)=>{Object.assign(window.sessionStore,o);},
-      }}};
+      }},
+      // '고르기 화면 열기' 는 열린 탭을 찾아 그리로 보내거나 새 탭을 연다.
+      // 어떤 탭이 열려 있는지는 테스트가 window.fakeTabs 로 정한다.
+      tabs:{
+        create:async(o)=>{window.openedTabs.push(o.url);},
+        query:async(q)=>{
+          window.tabQueries.push(q.url);
+          let base=String(q.url||'');
+          if(base.endsWith('*'))base=base.slice(0,-1);
+          return (window.fakeTabs||[])
+            .filter((t)=>String(t.url||'').startsWith(base));
+        },
+        update:async(id,o)=>{window.tabUpdates.push(Object.assign({id},o));},
+      },
+      windows:{
+        update:async(id,o)=>{window.windowUpdates.push(Object.assign({id},o));},
+      }};
+    window.openedTabs=[];window.tabQueries=[];
+    window.tabUpdates=[];window.windowUpdates=[];window.fakeTabs=[];
     // 시청 화면은 location.search 의 setup id 를 읽는다. about:blank 문서는
     // search 를 가질 수 없고 location 도 재정의할 수 없어, 빈 search 로 만든
     // URLSearchParams 만 이 값으로 바꿔치기한다(테스트 전용 흉내).
@@ -1570,6 +1588,60 @@ const checks = [];
      check(!text.includes('전환 중'),'정상값이 왔는데 전환 중이 남아 있다');
      document.getElementById('mvStatsBtn').click();
      await wait(100);`,
+  );
+
+  await test(
+    "고르기 화면 열기는 보던 방송을 내리지 않는다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     const cellsBefore=document.querySelectorAll('.mv-cell').length;
+     if(document.getElementById('mvQuick').hidden){
+       document.getElementById('mvBack').click();await wait(200);}
+     // ① 열린 고르기 탭이 없으면 새 탭으로 연다.
+     window.fakeTabs=[];window.openedTabs=[];window.tabUpdates=[];
+     document.getElementById('mvQuickAll').click();
+     await wait(600);
+     check(window.openedTabs.length===1,
+       '새 탭을 열지 않았다(열린 수 '+window.openedTabs.length+')');
+     check(window.openedTabs[0].includes('multiview.html'),
+       '연 주소가 고르기 화면이 아니다: '+window.openedTabs[0]);
+     check(window.tabUpdates.length===0,'없는 탭을 갱신하려 했다');
+     // ⚠ 핵심: 이 탭은 그대로 있어야 한다(칸이 내려가면 다시 불러와야 한다).
+     // ⚠ 이 탭을 고르기 화면으로 바꿔 버리면 CDP 가 'target navigated' 로 끊겨
+     //   스위트 자체가 실패한다(실측). 그래서 이동 여부는 그쪽이 잡아 주고,
+     //   여기서는 프레임이 살아 있는지를 본다 — 채팅 칸까지 그대로여야 한다.
+     const blanked=[...document.querySelectorAll('iframe')]
+       .filter(f=>f.getAttribute('data-test-src')==='about:blank').length;
+     check(blanked===0,'이 탭을 떠나며 프레임을 내렸다(내린 수 '+blanked+')');
+     check(videoSrcs().length===before,'프레임이 다시 걸렸다');
+     check(document.querySelectorAll('.mv-cell').length===cellsBefore,
+       '칸 수가 바뀌었다');
+     check([...document.querySelectorAll('.mv-cell iframe')]
+       .every(f=>f.getAttribute('data-test-src')!=='about:blank'),
+       '칸의 프레임을 내려 버렸다');`,
+  );
+
+  await test(
+    "이미 열린 고르기 탭이 있으면 그 탭으로 보낸다",
+    `window.openedTabs=[];window.tabUpdates=[];window.windowUpdates=[];
+     // 이미 열려 있는 고르기 탭을 하나 둔다.
+     window.fakeTabs=[{id:77,windowId:5,
+       url:'chrome-extension://test/multiview.html?setup=old'}];
+     document.getElementById('mvQuickAll').click();
+     await wait(300);
+     check(window.openedTabs.length===0,
+       '이미 열려 있는데 새 탭을 또 열었다');
+     check(window.tabUpdates.length===1,'그 탭으로 보내지 않았다');
+     check(window.tabUpdates[0].id===77,'다른 탭을 건드렸다');
+     check(window.tabUpdates[0].active===true,'그 탭을 앞으로 가져오지 않았다');
+     check(window.tabUpdates[0].url.includes('multiview.html'),
+       '보낸 주소가 고르기 화면이 아니다');
+     // 그 탭이 다른 창에 있으면 창도 앞으로 가져온다.
+     check(window.windowUpdates.some(w=>w.id===5&&w.focused===true),
+       '그 탭이 있는 창을 앞으로 가져오지 않았다');
+     // 찾을 때 우리 확장의 고르기 화면만 본다.
+     check(window.tabQueries.some(u=>u.includes('multiview.html')),
+       '고르기 화면 주소로 찾지 않았다');`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");

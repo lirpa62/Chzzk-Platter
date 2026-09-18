@@ -1621,27 +1621,53 @@
     applyLayout();
   }
 
-  async function backToSetup() {
-    // 지금 구성을 그대로 되돌려 준다. 고르기 화면이 이 id 를 읽어 선택을 복원한다.
-    if (state.handoffId) {
-      try {
-        await chrome.storage.session.set({
-          [`${HANDOFF_PREFIX}:${state.handoffId}`]: {
-            chosen: state.chosen,
-            layoutId: state.layoutId,
-            chatSide: state.chatSide,
-            mainHighQuality: state.mainHighQuality,
-          },
-        });
-      } catch {}
-    }
-    // ⚠ src 를 비워 프레임을 확실히 내린다. 그냥 이동하면 재생·소켓이 잠깐 더 산다.
-    for (const frame of document.querySelectorAll("iframe")) {
-      frame.src = "about:blank";
-    }
+  // 지금 구성을 고르기 화면이 읽을 수 있게 넘겨 둔다(그 화면이 이 id 로 복원한다).
+  async function saveHandoff() {
+    if (!state.handoffId) return;
+    try {
+      await chrome.storage.session.set({
+        [`${HANDOFF_PREFIX}:${state.handoffId}`]: {
+          chosen: state.chosen,
+          layoutId: state.layoutId,
+          chatSide: state.chatSide,
+          mainHighQuality: state.mainHighQuality,
+        },
+      });
+    } catch {}
+  }
+
+  function setupUrl() {
     const url = new URL(chrome.runtime.getURL(SETUP_PAGE));
     if (state.handoffId) url.searchParams.set("setup", state.handoffId);
-    location.href = url.toString();
+    return url.toString();
+  }
+
+  // '고르기 화면 열기': 보던 방송은 그대로 두고 고르기 화면만 연다.
+  //
+  // ⚠ 이 탭을 고르기 화면으로 바꾸지 않는다. 그러면 칸이 전부 내려가 다시
+  //   불러와야 한다. 이미 열어 둔 고르기 탭이 있으면 그리로 보내고, 없으면 새 탭을
+  //   연다(같은 화면을 여러 개 띄우지 않는다).
+  async function openSetupTab() {
+    await saveHandoff();
+    const href = setupUrl();
+    try {
+      // 우리 확장의 고르기 화면만 찾는다(주소 앞부분이 확장 고유 출처다).
+      const base = chrome.runtime.getURL(SETUP_PAGE);
+      const tabs = await chrome.tabs.query({ url: `${base}*` });
+      const found = tabs.find((tab) => Number.isInteger(tab.id));
+      if (found) {
+        // 이미 열려 있던 탭은 지금 구성으로 맞춘 뒤 그 탭으로 옮겨 간다.
+        await chrome.tabs.update(found.id, { url: href, active: true });
+        if (Number.isInteger(found.windowId)) {
+          await chrome.windows?.update?.(found.windowId, { focused: true });
+        }
+        return;
+      }
+      await chrome.tabs.create({ url: href });
+    } catch {
+      // 탭 API 를 쓸 수 없으면 새 창으로라도 연다(이 탭은 그대로 둔다).
+      window.open(href, "_blank", "noopener");
+    }
   }
 
   document.addEventListener("click", (event) => {
@@ -1663,7 +1689,8 @@
       return;
     }
     if (target.closest?.("#mvQuickAll")) {
-      void backToSetup();
+      // 보던 방송은 그대로 두고 고르기 화면만 연다(이 탭을 떠나지 않는다).
+      void openSetupTab();
       return;
     }
     const drop = target.closest?.("[data-mv-quick-drop]");
