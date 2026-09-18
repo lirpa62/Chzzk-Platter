@@ -273,6 +273,9 @@
   //   쿼리는 '처음 상태' 일 뿐이고, 이후에는 부모 메시지로 갱신된다.
   let multiviewMuted =
     IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
+  // 부모가 지시한 출력 크기(0~1). 부모의 전체 볼륨 × 이 채널 볼륨이 이미 곱해져
+  // 온다. 여기서는 받은 값을 <video> 에 그대로 건다(새 AudioContext 를 만들지 않는다).
+  let multiviewVolume = 1;
   // 480 이면 그 높이 이하 트랙 중 가장 높은 것을 고른다(작은 칸에 1080p 는 낭비).
   let multiviewQuality = IS_MULTIVIEW_FRAME
     ? Number(MULTIVIEW_PARAMS.get("cheeseMultiQuality")) || 0
@@ -20454,6 +20457,13 @@
 
     const applyAudioToVideo = (video) => {
       if (!(video instanceof HTMLMediaElement)) return;
+      // ⚠ 음소거 여부와 상관없이 크기를 먼저 맞춘다. 음소거를 풀 때 이전 크기가
+      //   남아 있으면 갑자기 큰 소리가 나온다.
+      if (Math.abs(video.volume - multiviewVolume) > 0.001) {
+        try {
+          video.volume = multiviewVolume;
+        } catch {}
+      }
       if (multiviewMuted) {
         if (!muteOverriddenByUser && !video.muted) video.muted = true;
         return;
@@ -20537,6 +20547,29 @@
       true,
     );
 
+    // MAIN world 에 통계를 물어보고, 돌아온 답을 부모에게 넘긴다.
+    // ⚠ 답이 안 올 수도 있다(플레이어가 아직 없을 때). 그때는 아무것도 보내지
+    //   않는다 — 부모가 '대기 중' 으로 두게 한다. 가짜 값을 지어내지 않는다.
+    let multiviewStatsReplyBound = false;
+    function requestMultiviewStats() {
+      if (!multiviewStatsReplyBound) {
+        multiviewStatsReplyBound = true;
+        window.addEventListener("message", (e) => {
+          if (e.source !== window) return;
+          if (e.data?.source !== "cheese-multiview-stats-reply") return;
+          const stats = e.data.stats;
+          if (!stats || typeof stats !== "object") return;
+          notifyParent("MULTIVIEW_STATS", { stats });
+        });
+      }
+      try {
+        window.postMessage(
+          { source: "cheese-multiview-stats-request" },
+          location.origin,
+        );
+      } catch {}
+    }
+
     function notifyParent(type, extra) {
       if (window.parent === window) return;
       try {
@@ -20572,6 +20605,18 @@
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
+      // 통계 요청: MAIN world(오디오믹서)만 플레이어 내부를 볼 수 있다. 여기서는
+      // 물어보고 답만 넘긴다(격리 월드는 치지직 플레이어 객체에 닿지 못한다).
+      if (data.type === "REQUEST_MULTIVIEW_STATS") {
+        if (
+          typeof data.channelId !== "string" ||
+          data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
+        ) {
+          return;
+        }
+        requestMultiviewStats();
+        return;
+      }
       if (data.type !== "SET_MULTIVIEW_STATE") return;
       if (
         typeof data.channelId !== "string" ||
@@ -20581,6 +20626,12 @@
       }
       if (typeof data.muted !== "boolean") return;
       if (!MULTIVIEW_QUALITY_VALUES.has(String(data.quality))) return;
+      // volume 은 없어도 되지만(옛 형식) 오면 0~1 의 실수여야 한다.
+      if (data.volume !== undefined) {
+        const v = Number(data.volume);
+        if (!Number.isFinite(v) || v < 0 || v > 1) return;
+        multiviewVolume = v;
+      }
 
       const nextQuality = String(data.quality) === "high" ? 0 : 480;
       const qualityChanged = nextQuality !== multiviewQuality;

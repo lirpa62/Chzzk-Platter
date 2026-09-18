@@ -47,7 +47,38 @@
     mainHighQuality: true,
     // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
     chatFollowsMain: true,
+    // 전체 볼륨(0~1). 채널별 볼륨 위에 곱해지는 값이다.
+    masterVolume: 1,
+    // '메인 채널만 소리'(기본 켜짐). 기존 정책과 같다.
+    audioFocusMode: true,
   };
+
+  // 채널별 소리 설정. { volume: 0~1, muted: boolean }
+  // ⚠ focus mode 를 껐다 켜도 사용자가 맞춰 둔 volume 은 지우지 않는다. 껐을 때
+  //   이전 믹스를 그대로 되찾을 수 있어야 한다.
+  const channelAudio = new Map();
+
+  function audioOf(channelId) {
+    let entry = channelAudio.get(channelId);
+    if (!entry) {
+      entry = { volume: 1, muted: channelId !== state.mainId };
+      channelAudio.set(channelId, entry);
+    }
+    return entry;
+  }
+
+  // 이 채널이 지금 실제로 소리를 내야 하는가.
+  // focus mode 가 켜져 있으면 메인만 낸다(채널별 muted 는 건드리지 않고 덮어쓴다).
+  function effectiveMuted(channelId) {
+    if (state.audioFocusMode) return channelId !== state.mainId;
+    return audioOf(channelId).muted;
+  }
+
+  // 실제로 내보낼 크기 = 전체 볼륨 × 채널 볼륨.
+  function effectiveVolume(channelId) {
+    const v = state.masterVolume * audioOf(channelId).volume;
+    return Math.min(1, Math.max(0, v));
+  }
 
   // 프레임 '처음 주소'. 여기 담는 건 시작 상태일 뿐이고, 이후 변경은 postMessage 로
   // 보낸다(주소를 다시 넣으면 방송이 처음부터 로드된다).
@@ -70,21 +101,48 @@
   }
 
   // 프레임에 상태를 지시한다. src 를 건드리지 않으므로 방송이 다시 로드되지 않는다.
+  //
+  // ⚠ isMain 은 '화질' 만 정한다. 음소거·크기는 소리 설정에서 계산한다 —
+  //   focus mode 를 끄면 보조 채널도 소리를 낼 수 있어야 하기 때문이다.
+  // 칸마다 마지막으로 내려 준 화질. 진단에서 '언제 바뀌었나' 를 보기 위한 것이다.
+  const lastQuality = new Map();
+
   function postState(channelId, isMain) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
+    const quality = isMain && state.mainHighQuality ? "high" : "480";
+    const before = lastQuality.get(channelId);
+    if (before !== quality) {
+      lastQuality.set(channelId, quality);
+      // 화질 전환은 트랙을 새로 받는 일이라 버퍼링의 첫 번째 의심 대상이다.
+      // 이 기록과 프레임 쪽 waiting 기록의 시각을 맞춰 보면 알 수 있다.
+      if (before !== undefined) {
+        traceLog(
+          "mv-quality",
+          `${channelName(channelId)} ${before} → ${quality}`,
+        );
+      }
+    }
     try {
       frame.contentWindow.postMessage(
         {
           source: MULTIVIEW_MESSAGE,
           type: "SET_MULTIVIEW_STATE",
           channelId,
-          muted: !isMain,
-          quality: isMain && state.mainHighQuality ? "high" : "480",
+          muted: effectiveMuted(channelId),
+          volume: effectiveVolume(channelId),
+          quality,
         },
         CHZZK_ORIGIN,
       );
     } catch {}
+  }
+
+  // 모든 칸에 지금 소리 설정을 다시 내려 준다(화질은 건드리지 않는다).
+  function postAllAudio() {
+    for (const c of state.chosen) {
+      postState(c.channelId, c.channelId === state.mainId);
+    }
   }
 
   // 채팅 칸에 지금 테마를 알린다. 프레임이 준비됐다고 알려 올 때와 테마를 바꿀 때
@@ -313,6 +371,7 @@
 
   function clearAudioNotice(channelId) {
     cells.get(channelId)?.querySelector("[data-mv-unmute]")?.remove();
+    if (audioBlocked.delete(channelId)) renderVolume();
   }
 
   // 사용자가 명시적으로 눌렀을 때만 해당 프레임을 다시 불러온다.
@@ -598,10 +657,233 @@
       .join("");
   }
 
+  // ── 볼륨 팝오버 ─────────────────────────────────────────────────────────
+  // 자동재생이 막힌 채널. 여기 들어 있으면 볼륨 버튼에 표시를 띄운다.
+  const audioBlocked = new Set();
+
+  const pct = (v) => `${Math.round(v * 100)}%`;
+
+  function renderVolume() {
+    const value = $("mvVolumeValue");
+    const button = $("mvVolumeBtn");
+    if (value) {
+      value.textContent = state.audioFocusMode
+        ? `메인 ${pct(state.masterVolume)}`
+        : `전체 ${pct(state.masterVolume)}`;
+    }
+    // 자동재생이 막혔으면 버튼에 표시를 남긴다(색만이 아니라 글자로도 알린다).
+    const blocked = audioBlocked.size > 0;
+    button?.classList.toggle("is-warn", blocked);
+    if (button) {
+      button.setAttribute(
+        "aria-label",
+        blocked ? "볼륨 - 소리가 차단됨" : "볼륨",
+      );
+    }
+
+    const panel = $("mvVolumePop");
+    if (!panel || panel.hidden) return;
+    const rows = state.chosen
+      .map((c) => {
+        const id = esc(c.channelId);
+        const audio = audioOf(c.channelId);
+        const isMain = c.channelId === state.mainId;
+        // focus mode 에서는 메인만 소리가 난다. 보조 슬라이더는 잠근다.
+        const forcedOff = state.audioFocusMode && !isMain;
+        const muted = effectiveMuted(c.channelId);
+        return (
+          `<div class="mv-vol-row${forcedOff ? " is-off" : ""}">` +
+          `<span class="mv-vol-name">${esc(c.channelName)}` +
+          (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
+          `</span>` +
+          `<button type="button" class="mv-vol-mute" data-mv-vol-mute="${id}"` +
+          ` aria-pressed="${muted}"` +
+          ` aria-label="${esc(c.channelName)} ${muted ? "음소거 해제" : "음소거"}"` +
+          `${forcedOff ? " disabled" : ""}>${muted ? "🔇" : "🔊"}</button>` +
+          `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
+          ` value="${Math.round(audio.volume * 100)}"` +
+          ` data-mv-vol-channel="${id}"` +
+          ` aria-label="${esc(c.channelName)} 볼륨"` +
+          `${forcedOff ? " disabled" : ""}>` +
+          `<span class="mv-vol-pct">${pct(audio.volume)}</span>` +
+          `</div>`
+        );
+      })
+      .join("");
+
+    // 자동재생이 막혔을 때만 안내를 띄운다. 누르는 순간이 곧 사용자 조작이라
+    // 그 자리에서 소리 켜기를 다시 시도할 수 있다.
+    const blockedNames = state.chosen
+      .filter((c) => audioBlocked.has(c.channelId))
+      .map((c) => c.channelName);
+    const notice = blockedNames.length
+      ? `<div class="mv-vol-notice">` +
+        `<p>브라우저가 ${esc(blockedNames.join(", "))} 의 소리 재생을 차단했습니다.</p>` +
+        `<button type="button" class="mv-vol-enable" id="mvVolEnable">소리 활성화</button>` +
+        `</div>`
+      : "";
+
+    panel.innerHTML =
+      notice +
+      `<div class="mv-vol-row is-master">` +
+      `<span class="mv-vol-name">전체 볼륨</span>` +
+      `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
+      ` value="${Math.round(state.masterVolume * 100)}"` +
+      ` data-mv-vol-master="1" aria-label="멀티뷰 전체 볼륨">` +
+      `<span class="mv-vol-pct">${pct(state.masterVolume)}</span>` +
+      `</div>` +
+      `<label class="mv-vol-focus">` +
+      `<input type="checkbox" id="mvVolFocus"${state.audioFocusMode ? " checked" : ""}>` +
+      `<span>메인 채널만 소리</span></label>` +
+      `<div class="mv-vol-list">${rows}</div>`;
+  }
+
+  // ── 진단 기록 ───────────────────────────────────────────────────────────
+  // ⚠ 기록만 한다. 여기서 다시 불러오거나 seek 하지 않는다.
+  //   켜는 법: 콘솔에서 localStorage.cheeseMultiviewTrace = "1" 후 새로고침.
+  let mvTrace = false;
+  try {
+    mvTrace = localStorage.getItem("cheeseMultiviewTrace") === "1";
+  } catch {}
+
+  const traceLog = (tag, text) => {
+    if (!mvTrace) return;
+    console.log(`[${tag}] ${text}`);
+  };
+
+  // 탭을 떠났다 돌아온 시각. 복귀 직후의 지연 변화를 보기 위한 것이다.
+  let lastVisibleAt = 0;
+  function traceLatency(channelId) {
+    if (!mvTrace || !lastVisibleAt) return;
+    const since = Date.now() - lastVisibleAt;
+    if (since > 10000) return; // 복귀 후 10초까지만 본다
+    const st = statsByChannel.get(channelId)?.stats;
+    if (!st) return;
+    traceLog(
+      "mv-life",
+      `복귀 +${(since / 1000).toFixed(1)}s ${channelName(channelId)} ` +
+        `지연=${st.latencySec == null ? "-" : st.latencySec.toFixed(1)}s ` +
+        `paused=${st.paused} readyState=${st.readyState}`,
+    );
+  }
+
+  if (mvTrace) {
+    // ⚠ 부모는 visibilitychange 에서 아무것도 '고치지' 않는다. 기록만 남긴다.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        traceLog("mv-life", "부모 숨김");
+        return;
+      }
+      lastVisibleAt = Date.now();
+      traceLog(
+        "mv-life",
+        `부모 복귀 (버려졌었나=${document.wasDiscarded === true})`,
+      );
+      // 복귀 직후 지연이 어떻게 회복되는지 보려면 통계가 필요하다. 패널이 닫혀
+      // 있어도 진단 모드에서는 몇 번만 물어본다(계속 돌리지 않는다).
+      let ticks = 0;
+      const probe = setInterval(() => {
+        ticks += 1;
+        requestStats();
+        if (ticks >= 5) clearInterval(probe);
+      }, 1000);
+    });
+  }
+
+  // ── 통합 스트림 정보 ────────────────────────────────────────────────────
+  // ⚠ 부모는 통계를 계산하지 않는다. 교차 출처 iframe 안의 플레이어는 부모가
+  //   들여다볼 수 없다. 각 칸에 물어보고 받은 값만 보여 준다.
+  const STATS_POLL_MS = 1000;
+  // 이 횟수만큼 답이 없으면 '대기 중' 으로 바꾼다(옛 숫자를 계속 보여 주지 않는다).
+  const STATS_STALE_TICKS = 3;
+  const statsByChannel = new Map(); // channelId → { stats, updatedAt }
+  let statsTimer = 0;
+
+  function startStatsPolling() {
+    renderStats();
+    requestStats();
+    if (statsTimer) return;
+    statsTimer = window.setInterval(() => {
+      requestStats();
+      renderStats();
+    }, STATS_POLL_MS);
+  }
+
+  function stopStatsPolling() {
+    if (!statsTimer) return;
+    clearInterval(statsTimer);
+    statsTimer = 0;
+  }
+
+  function requestStats() {
+    for (const c of state.chosen) {
+      // 끝났거나 실패한 칸에는 물어볼 것이 없다.
+      const status = currentStatus(c.channelId);
+      if (status === "ended" || status === "error") continue;
+      const frame = cells.get(c.channelId)?.querySelector("iframe");
+      if (!frame?.contentWindow) continue;
+      try {
+        frame.contentWindow.postMessage(
+          {
+            source: MULTIVIEW_MESSAGE,
+            type: "REQUEST_MULTIVIEW_STATS",
+            channelId: c.channelId,
+          },
+          CHZZK_ORIGIN,
+        );
+      } catch {}
+    }
+  }
+
+  const fmtLatency = (v) => (Number.isFinite(v) ? `${v.toFixed(1)}초` : "-");
+  const fmtRes = (w, h) => (w && h ? `${w}×${h}` : "-");
+  const fmtFps = (v) =>
+    Number.isFinite(v) && v > 0 ? String(Math.round(v)) : "-";
+  const fmtBitrate = (v) =>
+    Number.isFinite(v) && v > 0 ? `${(v / 1000).toFixed(1)} Mbps` : "-";
+
+  function renderStats() {
+    const panel = $("mvStatsPop");
+    if (!panel || panel.hidden) return;
+    const now = Date.now();
+    const rows = state.chosen
+      .map((c) => {
+        const status = currentStatus(c.channelId);
+        const name = `<td class="mv-stats-name">${esc(c.channelName)}</td>`;
+        if (status === "ended" || status === "error") {
+          const label = status === "ended" ? "방송 종료" : "오류";
+          return `<tr>${name}<td colspan="4" class="mv-stats-state">${label}</td></tr>`;
+        }
+        const entry = statsByChannel.get(c.channelId);
+        // 오래된 값은 최신인 척하지 않는다.
+        const fresh =
+          entry && now - entry.updatedAt < STATS_POLL_MS * STATS_STALE_TICKS;
+        if (!fresh) {
+          return `<tr>${name}<td colspan="4" class="mv-stats-state">대기 중</td></tr>`;
+        }
+        const st = entry.stats;
+        return (
+          `<tr>${name}` +
+          `<td>${fmtLatency(st.latencySec)}</td>` +
+          `<td>${fmtRes(st.width, st.height)}</td>` +
+          `<td>${fmtFps(st.fps)}</td>` +
+          `<td>${fmtBitrate(st.bitrateKbps)}</td></tr>`
+        );
+      })
+      .join("");
+    panel.innerHTML =
+      `<table class="mv-stats-table">` +
+      `<thead><tr><th>채널</th><th>지연</th><th>해상도</th><th>FPS</th><th>비트레이트</th></tr></thead>` +
+      `<tbody>${rows}</tbody></table>` +
+      `<p class="mv-stats-note">지연은 플레이어가 알려 주는 값이다(스트림 정보 패널과 같은 기준).</p>`;
+  }
+
   function closePopovers(except) {
     for (const pop of document.querySelectorAll("[data-mv-pop]")) {
       const name = pop.dataset.mvPop;
       if (name === except) continue;
+      // 통계 패널이 닫히면 6칸에 계속 물어볼 이유가 없다.
+      if (name === "stats") stopStatsPolling();
       pop
         .querySelector("[data-mv-pop-toggle]")
         ?.setAttribute("aria-expanded", "false");
@@ -619,6 +901,12 @@
     closePopovers(open ? name : null);
     panel.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
+    // 볼륨·통계는 열려 있는 동안만 내용을 유지한다. 통계는 닫히면 폴링도 멈춘다.
+    if (name === "volume" && open) renderVolume();
+    if (name === "stats") {
+      if (open) startStatsPolling();
+      else stopStatsPolling();
+    }
   }
 
   function showEmpty() {
@@ -695,8 +983,19 @@
     [order[from], order[to]] = [order[to], order[from]];
     state.chosen = order;
     const nextMain = order[0].channelId;
-    if (nextMain !== state.mainId) setMain(nextMain);
-    else applyLayout();
+    // ⚠ 자리 바꾸기 자체는 iframe 주소를 건드리지 않는다. 다만 첫 자리가 바뀌면
+    //   메인이 함께 바뀌고, 그때 음소거·화질 지시가 나간다. 버퍼링이 보인다면
+    //   자리 이동이 아니라 이 화질 전환을 먼저 의심해야 한다.
+    if (nextMain !== state.mainId) {
+      traceLog(
+        "mv-drag",
+        `자리 교체 + 메인 변경 ${channelName(state.mainId)} → ${channelName(nextMain)}`,
+      );
+      setMain(nextMain);
+    } else {
+      traceLog("mv-drag", "자리 교체만(메인 그대로, 지시 없음)");
+      applyLayout();
+    }
   }
 
   function bindCellDrag() {
@@ -847,11 +1146,29 @@
 
   // replaceChannelId 를 주면 '교체 모드' 로 연다(고른 채널이 그 자리를 대신한다).
   let quickReplaceId = "";
-  function openQuick({ replaceChannelId = "" } = {}) {
+  // 교체 모드로 들어온 길. 취소했을 때 어디로 돌아갈지가 이것으로 갈린다.
+  //   "quick-chip"    = Quick 안에서 칩을 눌러 시작 → 취소하면 Quick 에 남는다
+  //   "ended-overlay" = 종료 덮개에서 시작 → 취소하면 Quick 까지 닫는다
+  let quickReplaceOrigin = "";
+  function openQuick({ replaceChannelId = "", origin = "" } = {}) {
     quickReplaceId = cells.has(replaceChannelId) ? replaceChannelId : "";
+    quickReplaceOrigin = quickReplaceId ? origin : "";
     $("mvQuick").hidden = false;
     renderQuick();
     void loadQuickCandidates();
+  }
+
+  // 교체 모드를 푼다. 들어온 길에 따라 Quick 을 닫을지가 달라진다.
+  function cancelReplace() {
+    const origin = quickReplaceOrigin;
+    quickReplaceId = "";
+    quickReplaceOrigin = "";
+    // 종료 덮개에서 왔다면 사용자는 원래 Quick 을 보고 있지 않았다. 되돌려 놓는다.
+    if (origin === "ended-overlay") {
+      closeQuick();
+      return;
+    }
+    renderQuick();
   }
 
   // 한 자리만 다른 채널로 바꾼다.
@@ -932,16 +1249,23 @@
         const status = currentStatus(c.channelId);
         const badge = STATUS_BADGE[status] || "";
         const locked = state.chosen.length <= min;
+        const id = esc(c.channelId);
+        // ⚠ 칩 본문과 × 를 각각 버튼으로 나눈다. 한 덩어리로 두고 클릭 위치로
+        //   갈라내면 × 를 눌렀을 때 교체 모드까지 함께 켜진다.
         return (
           `<li class="mv-quick-item${isMain ? " is-main" : ""}` +
           `${quickReplaceId === c.channelId ? " is-replacing" : ""}"` +
           `${badge ? ` data-state="${esc(status)}"` : ""}>` +
+          `<button type="button" class="mv-quick-select" data-mv-quick-replace="${id}"` +
+          ` aria-pressed="${quickReplaceId === c.channelId}"` +
+          ` title="${esc(c.channelName)} 를 다른 채널로 바꾸기">` +
           `<span class="mv-quick-name">${esc(c.channelName)}</span>` +
           (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
           (badge
             ? `<span class="mv-quick-state" data-state="${esc(status)}">${esc(badge)}</span>`
             : "") +
-          `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${esc(c.channelId)}"` +
+          `</button>` +
+          `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${id}"` +
           `${locked ? " disabled" : ""}` +
           ` title="${locked ? "멀티뷰는 최소 2개 채널이 필요합니다." : "멀티뷰에서 제거"}"` +
           ` aria-label="${esc(c.channelName)} 빼기">×</button></li>`
@@ -1069,6 +1393,14 @@
         )
         .join("");
     box.hidden = false;
+  }
+
+  // 탭을 바꾸면 세로·가로 스크롤을 모두 처음으로 돌린다.
+  function resetQuickScroll() {
+    const body = document.querySelector(".mv-quick-body");
+    if (body) body.scrollTop = 0;
+    const box = $("mvQuickAdd");
+    if (box) box.scrollLeft = 0;
   }
 
   // 지금 폴더에 해당하는 후보만 남긴다(전체면 그대로).
@@ -1283,10 +1615,24 @@
       dropChannel(drop.dataset.mvQuickDrop);
       return;
     }
+    const chip = target.closest?.("[data-mv-quick-replace]");
+    if (chip) {
+      const id = chip.dataset.mvQuickReplace;
+      // 같은 칩을 다시 누르면 교체 모드를 끈다(누른 것을 되돌릴 방법이 있어야 한다).
+      if (quickReplaceId === id) cancelReplace();
+      else {
+        quickReplaceId = cells.has(id) ? id : "";
+        quickReplaceOrigin = quickReplaceId ? "quick-chip" : "";
+        renderQuick();
+      }
+      return;
+    }
     const sourceTab = target.closest?.("[data-mv-quick-source]");
     if (sourceTab) {
       quickSource = sourceTab.dataset.mvQuickSource;
       quickFolder = ""; // 목록 종류를 바꾸면 구역 선택을 푼다
+      // 앞 탭에서 내려 둔 스크롤이 남으면 새 탭이 엉뚱한 위치에서 시작한다.
+      resetQuickScroll();
       void loadQuickCandidates();
       return;
     }
@@ -1305,8 +1651,7 @@
       return;
     }
     if (target.closest?.("#mvQuickCancelReplace")) {
-      quickReplaceId = "";
-      renderQuick();
+      cancelReplace();
       return;
     }
     const add = target.closest?.("[data-mv-quick-add]");
@@ -1317,6 +1662,7 @@
         // 교체 모드: 그 자리만 갈아 끼운다.
         replaceChannel(quickReplaceId, picked || { channelId: id });
         quickReplaceId = "";
+        quickReplaceOrigin = "";
         renderQuick();
         return;
       }
@@ -1343,7 +1689,10 @@
     }
     const replace = target.closest?.("[data-mv-replace]");
     if (replace) {
-      openQuick({ replaceChannelId: replace.dataset.mvReplace });
+      openQuick({
+        replaceChannelId: replace.dataset.mvReplace,
+        origin: "ended-overlay",
+      });
       return;
     }
     const close = target.closest?.("[data-mv-close]");
@@ -1364,6 +1713,28 @@
     const toggle = target.closest?.(".mv-pop-button[data-mv-pop-toggle]");
     if (toggle) {
       togglePopover(toggle.dataset.mvPopToggle);
+      return;
+    }
+    const volMute = target.closest?.("[data-mv-vol-mute]");
+    if (volMute) {
+      const id = volMute.dataset.mvVolMute;
+      const audio = audioOf(id);
+      audio.muted = !audio.muted;
+      // 음소거를 풀었는데 크기가 0 이면 아무 소리도 안 난다. 들리게 올려 준다.
+      if (!audio.muted && audio.volume === 0) audio.volume = 1;
+      postState(id, id === state.mainId);
+      renderVolume();
+      return;
+    }
+    if (target.closest?.("#mvVolEnable")) {
+      // ⚠ 이 클릭 자체가 사용자 조작이다. 같은 처리 안에서 바로 지시를 내려야
+      //   브라우저가 자동재생 허용으로 쳐 준다(비동기로 미루면 놓친다).
+      for (const id of [...audioBlocked]) {
+        audioBlocked.delete(id);
+        clearAudioNotice(id);
+        postState(id, id === state.mainId);
+      }
+      renderVolume();
       return;
     }
     const setMainEl = target.closest?.("[data-mv-set-main]");
@@ -1427,6 +1798,57 @@
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
   });
 
+  // 볼륨 슬라이더. input 마다 전체를 다시 그리면 끌 때 끊기므로, 끄는 동안에는
+  // 숫자만 바꾸고 프레임에 값을 내려 준다(전체 다시 그리기는 하지 않는다).
+  document.addEventListener("input", (event) => {
+    const el = event.target;
+    if (!(el instanceof HTMLInputElement) || el.type !== "range") return;
+    const next = Math.min(1, Math.max(0, Number(el.value) / 100));
+    if (!Number.isFinite(next)) return;
+
+    if (el.dataset.mvVolMaster) {
+      state.masterVolume = next;
+      el.parentElement
+        ?.querySelector(".mv-vol-pct")
+        ?.replaceChildren(pct(next));
+      postAllAudio();
+      // 버튼의 숫자만 갱신한다(패널을 다시 그리지 않는다).
+      const value = $("mvVolumeValue");
+      if (value) {
+        value.textContent = state.audioFocusMode
+          ? `메인 ${pct(next)}`
+          : `전체 ${pct(next)}`;
+      }
+      return;
+    }
+
+    const channelId = el.dataset.mvVolChannel;
+    if (!channelId || !cells.has(channelId)) return;
+    const audio = audioOf(channelId);
+    audio.volume = next;
+    el.parentElement?.querySelector(".mv-vol-pct")?.replaceChildren(pct(next));
+    // 보조 채널 소리를 올렸다는 건 여러 방송을 같이 듣고 싶다는 뜻이다.
+    // '메인 채널만 소리' 를 끄고 그 채널의 음소거도 함께 푼다.
+    if (state.audioFocusMode && channelId !== state.mainId && next > 0) {
+      state.audioFocusMode = false;
+      audio.muted = false;
+      postAllAudio();
+      renderVolume();
+      return;
+    }
+    if (next > 0 && audio.muted) audio.muted = false;
+    postState(channelId, channelId === state.mainId);
+  });
+
+  document.addEventListener("change", (event) => {
+    if (event.target?.id !== "mvVolFocus") return;
+    state.audioFocusMode = event.target.checked === true;
+    // ⚠ 채널별 volume 값은 그대로 둔다. focus mode 를 껐을 때 이전 믹스를
+    //   그대로 되찾을 수 있어야 한다. 바뀌는 것은 '지금 소리를 내는가' 뿐이다.
+    postAllAudio();
+    renderVolume();
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     closePopovers(null);
@@ -1439,6 +1861,7 @@
     "FRAME_READY",
     "FRAME_ENDED",
     "AUDIO_INTERACTION_REQUIRED",
+    "MULTIVIEW_STATS",
   ]);
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
@@ -1475,8 +1898,36 @@
       setCellStatus(channelId, "ended");
       return;
     }
+    if (data.type === "MULTIVIEW_STATS") {
+      const raw = data.stats;
+      if (!raw || typeof raw !== "object") return;
+      // 숫자로 쓸 수 있는 값만 받는다. 이상하면 null 로 둔다(추정하지 않는다).
+      const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+      statsByChannel.set(channelId, {
+        stats: {
+          latencySec: num(raw.latencySec),
+          width: num(raw.width),
+          height: num(raw.height),
+          fps: num(raw.fps),
+          bitrateKbps: num(raw.bitrateKbps),
+          paused: raw.paused === true,
+          readyState: num(raw.readyState),
+          networkState: num(raw.networkState),
+          currentTime: num(raw.currentTime),
+          seekableEnd: num(raw.seekableEnd),
+        },
+        updatedAt: Date.now(),
+      });
+      traceLatency(channelId);
+      return;
+    }
     if (data.type === "AUDIO_INTERACTION_REQUIRED") {
-      // 소리를 켜야 하는 건 메인뿐이다. 보조 칸에는 안내를 띄우지 않는다.
+      // 자동재생이 막혔다. 볼륨 버튼에 표시를 띄워 어디서든 풀 수 있게 한다.
+      audioBlocked.add(channelId);
+      renderVolume();
+      // 메인은 화면에서 바로 풀 수 있게 기존 안내도 함께 띄운다.
+      // ⚠ 볼륨 팝오버만 남기지 않는다. 자동재생 해제는 사용자 조작 안에서
+      //   이뤄져야 확실한데, 칸 위 버튼이 가장 짧은 경로다.
       if (channelId === state.mainId) showAudioNotice(channelId);
     }
   });

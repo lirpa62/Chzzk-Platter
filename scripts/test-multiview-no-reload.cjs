@@ -93,6 +93,59 @@ console.log("\n[없어진 배치] 저장된 id 를 못 찾으면 첫 배치로 �
   }
 }
 
+console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건다");
+{
+  // 부모가 보내는 volume 은 0~1 의 실수여야 한다. 범위를 안 보면 1 보다 큰 값이
+  // 그대로 video.volume 에 들어가 예외가 난다.
+  ok(
+    /data\.volume !== undefined/.test(content),
+    "volume 은 없어도 되는 필드로 받는다(옛 형식과 섞여도 깨지지 않는다)",
+  );
+  ok(
+    /!Number\.isFinite\(v\) \|\| v < 0 \|\| v > 1/.test(content),
+    "volume 범위를 검증한다",
+  );
+  ok(
+    /video\.volume = multiviewVolume/.test(content),
+    "video.volume 에 적용한다",
+  );
+  // 멀티뷰 칸마다 새 AudioContext 를 만들면 6칸에서 비용이 커진다.
+  const frameBlock = content.slice(
+    content.indexOf("if (IS_MULTIVIEW_FRAME) {"),
+    content.indexOf("if (IS_MULTIVIEW_FRAME) {") + 12000,
+  );
+  ok(
+    !/new AudioContext|new \(window\.AudioContext/.test(frameBlock),
+    "멀티뷰 칸에 새 AudioContext 를 만들지 않는다",
+  );
+}
+
+console.log("\n[통계 protocol] 부모가 계산하지 않고 물어본다");
+{
+  const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
+  ok(/REQUEST_MULTIVIEW_STATS/.test(content), "칸이 통계 요청을 받는다");
+  ok(/function getStreamStatsSnapshot/.test(mixer), "스냅샷 헬퍼가 있다");
+  const snap = mixer.slice(mixer.indexOf("function getStreamStatsSnapshot"));
+  // ⚠ 측정 방법을 새로 만들지 않는다. 기존 스트림 정보 패널과 같은 함수를 쓴다.
+  ok(
+    /collectStreamInfo\(\)/.test(snap),
+    "기존 collectStreamInfo 를 재사용한다",
+  );
+  ok(
+    /getLiveLatencySeconds\(\)/.test(snap),
+    "지연도 기존 정의(_getLiveLatency)를 그대로 쓴다",
+  );
+  // 부모로 나가는 메시지는 반드시 정확한 출처로 보낸다.
+  const relay = content.slice(
+    content.indexOf("function requestMultiviewStats"),
+    content.indexOf("function notifyParent"),
+  );
+  ok(
+    /location\.origin/.test(relay) && !/"\*"/.test(relay),
+    "같은 창 브리지도 * 를 쓰지 않는다",
+  );
+}
+
 console.log("\n[모든 배치] 레터박스 없는 해가 있다");
 {
   for (const layout of LAYOUTS.LAYOUTS) {

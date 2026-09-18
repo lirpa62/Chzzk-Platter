@@ -72,6 +72,40 @@
         ></div>
       </div>
 
+      <div class="mv-pop" data-mv-pop="volume">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="volume"
+          id="mvVolumeBtn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">볼륨</span>
+          <span class="mv-pop-value" id="mvVolumeValue">-</span>
+        </button>
+        <div class="mv-pop-panel mv-volume-pop" id="mvVolumePop" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="stats">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="stats"
+          id="mvStatsBtn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">스트림 정보</span>
+          <span class="mv-pop-value" id="mvStatsValue">-</span>
+        </button>
+        <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden></div>
+      </div>
+
+      <button type="button" class="mv-topbar-back" id="mvBack">
+        채널 바꾸기
+      </button>
+
       <button
         type="button"
         class="mv-theme-toggle"
@@ -110,10 +144,6 @@
         >
           <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
         </svg>
-      </button>
-
-      <button type="button" class="mv-topbar-back" id="mvBack">
-        채널 바꾸기
       </button>
     </header>
 

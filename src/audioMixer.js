@@ -9976,6 +9976,56 @@
     startMultiviewWideReconcile();
   });
 
+  // ── 멀티뷰 통합 스트림 정보용 스냅샷 ────────────────────────────────────
+  // ⚠ 측정 방법을 새로 만들지 않는다. 스트림 정보 패널이 쓰는 collectStreamInfo()
+  //   와 getLiveLatencySeconds() 를 그대로 재사용한다. 지연의 뜻도 그쪽과 같다
+  //   (플레이어의 _getLiveLatency()). 못 구하는 값은 추정하지 않고 null 로 둔다.
+  function getStreamStatsSnapshot() {
+    const video = findVideo();
+    let info = null;
+    try {
+      info = collectStreamInfo();
+    } catch {
+      info = null;
+    }
+    const num = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+    return {
+      latencySec: getLiveLatencySeconds(),
+      width: num(info?._w) || num(video?.videoWidth),
+      height: num(info?._h) || num(video?.videoHeight),
+      fps: num(info?._fpsNum),
+      // collectStreamInfo 는 bps 로 들고 있다. 표시 단위(kbps)로만 바꾼다.
+      bitrateKbps: info?._bitrateNum
+        ? Math.round(info._bitrateNum / 1000)
+        : null,
+      // 아래는 백그라운드 복귀 진단용이다(UI 에 다 보여 주지 않아도 된다).
+      paused: video ? video.paused : null,
+      readyState: video ? video.readyState : null,
+      networkState: video ? video.networkState : null,
+      currentTime: video ? video.currentTime : null,
+      seekableEnd:
+        video && video.seekable?.length
+          ? video.seekable.end(video.seekable.length - 1)
+          : null,
+    };
+  }
+
+  // 격리 월드가 통계를 물어 오면 같은 창으로 답한다(부모에게는 격리 월드가 넘긴다).
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-multiview-stats-request") return;
+    let stats = null;
+    try {
+      stats = getStreamStatsSnapshot();
+    } catch {
+      stats = null;
+    }
+    window.postMessage(
+      { source: "cheese-multiview-stats-reply", stats },
+      location.origin,
+    );
+  });
+
   function settleWideScreenAttempt(waitForLayout = false) {
     const settledPageKey = currentPageKey;
     wideScreenAppliedForPage = settledPageKey;

@@ -962,6 +962,202 @@ const checks = [];
      check(boxes.every(b=>b.querySelector('iframe')),'상자 안에 프레임이 없다');`,
   );
 
+  await test(
+    "Quick 칩 본문은 교체 모드, × 는 제거로 나뉜다",
+    `// 앞 테스트가 열어 뒀을 수 있다. 토글이 아니라 '열린 상태' 를 만든다.
+     if(document.getElementById('mvQuick').hidden)document.getElementById('mvBack').click();
+     await wait(300);
+     check(!document.getElementById('mvQuick').hidden,'Quick 이 열리지 않았다');
+     const chips=[...document.querySelectorAll('.mv-quick-item')];
+     check(chips.length>=2,'칩이 2개 미만이다');
+     // × 는 제거만 한다(교체 모드가 켜지면 안 된다).
+     const drop=chips[0].querySelector('[data-mv-quick-drop]');
+     check(drop,'× 버튼이 없다');
+     check(chips[0].querySelector('[data-mv-quick-replace]'),'칩 본문 버튼이 없다');
+     check(!drop.closest('[data-mv-quick-replace]'),'× 가 칩 본문 버튼 안에 있다');
+     // 칩 본문을 누르면 교체 모드로 들어간다.
+     chips[1].querySelector('[data-mv-quick-replace]').click();
+     await wait(100);
+     check(document.getElementById('mvQuickHint').textContent.includes('대신'),
+       '칩 클릭으로 교체 모드에 들어가지 않았다');
+     check(document.getElementById('mvQuickCancelReplace'),'교체 취소 버튼이 없다');
+     window.__hidBefore=document.getElementById('mvQuick').hidden;`,
+  );
+
+  await test(
+    "칩에서 시작한 교체를 취소하면 Quick 은 열린 채로 남는다",
+    `check(window.__hidBefore===false,'교체 모드 진입 시점에 이미 닫혀 있었다');
+     document.getElementById('mvQuickCancelReplace').click();
+     await wait(100);
+     check(!document.getElementById('mvQuick').hidden,'Quick 이 닫혔다');
+     check(!document.getElementById('mvQuickCancelReplace'),'취소 버튼이 남아 있다');
+     check(!document.getElementById('mvQuickHint').textContent.includes('대신'),
+       '교체 모드가 풀리지 않았다');`,
+  );
+
+  await test(
+    "종료 덮개에서 시작한 교체를 취소하면 Quick 까지 닫힌다",
+    `document.getElementById('mvQuickClose').click();
+     await wait(50);
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const target=cells.find(c=>!c.classList.contains('is-main'))||cells[0];
+     const id=target.dataset.channelId;
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'FRAME_ENDED',channelId:id}});
+      Object.defineProperty(e,'source',{value:target.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(100);
+     target.querySelector('[data-mv-replace]').click();
+     await wait(300);
+     check(!document.getElementById('mvQuick').hidden,'Quick 이 열리지 않았다');
+     document.getElementById('mvQuickCancelReplace').click();
+     await wait(100);
+     // 덮개에서 왔으니 원래 보고 있던 화면으로 돌려놓는다.
+     check(document.getElementById('mvQuick').hidden,'Quick 이 닫히지 않았다');`,
+  );
+
+  await test(
+    "볼륨 조작이 iframe 을 다시 걸지 않고 지시만 보낸다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     // 프레임으로 나가는 지시를 엿본다.
+     window.sentMsgs=[];
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       if(!f.contentWindow.__patched){
+         f.contentWindow.__patched=true;
+         f.contentWindow.postMessage=(m)=>window.sentMsgs.push(m);
+       }
+     }
+     document.getElementById('mvVolumeBtn').click();
+     await wait(100);
+     const pop=document.getElementById('mvVolumePop');
+     check(!pop.hidden,'볼륨 팝오버가 열리지 않았다');
+     const master=pop.querySelector('[data-mv-vol-master]');
+     check(master,'전체 볼륨 슬라이더가 없다');
+     master.value='50';
+     master.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(100);
+     check(videoSrcs().length===before,'볼륨 조작으로 프레임이 다시 걸렸다');
+     const vol=window.sentMsgs.filter(m=>m.type==='SET_MULTIVIEW_STATE');
+     check(vol.length>0,'볼륨 지시가 나가지 않았다');
+     check(vol.every(m=>typeof m.volume==='number'&&m.volume>=0&&m.volume<=1),
+       'volume 값이 0~1 범위가 아니다');
+     // 전체 50% 이므로 메인(채널볼륨 100%)은 0.5 여야 한다.
+     check(vol.some(m=>Math.abs(m.volume-0.5)<0.001),
+       '전체 볼륨이 곱해지지 않았다: '+JSON.stringify(vol.map(m=>m.volume)));`,
+  );
+
+  await test(
+    "보조 채널 볼륨을 올리면 '메인 채널만 소리' 가 풀린다",
+    `const pop=document.getElementById('mvVolumePop');
+     const focus=document.getElementById('mvVolFocus');
+     check(focus&&focus.checked,'처음에는 메인만 소리가 켜져 있어야 한다');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const auxRange=[...pop.querySelectorAll('[data-mv-vol-channel]')]
+       .find(r=>r.dataset.mvVolChannel!==mainId);
+     check(auxRange,'보조 채널 슬라이더가 없다');
+     window.sentMsgs=[];
+     auxRange.value='30';
+     auxRange.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(100);
+     check(!document.getElementById('mvVolFocus').checked,
+       '보조 소리를 올렸는데 메인만 소리가 유지된다');
+     const aux=window.sentMsgs.filter(m=>m.channelId!==mainId&&m.type==='SET_MULTIVIEW_STATE');
+     check(aux.some(m=>m.muted===false),'보조 채널 음소거가 풀리지 않았다');`,
+  );
+
+  await test(
+    "자동재생 차단을 볼륨 버튼이 알린다",
+    `const mainCell=document.querySelector('.mv-cell.is-main');
+     const id=mainCell.dataset.channelId;
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'AUDIO_INTERACTION_REQUIRED',channelId:id}});
+      Object.defineProperty(e,'source',{value:mainCell.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(100);
+     check(document.getElementById('mvVolumeBtn').classList.contains('is-warn'),
+       '볼륨 버튼에 차단 표시가 없다');
+     check(document.getElementById('mvVolEnable'),'소리 활성화 버튼이 없다');
+     // 자동재생 해제는 사용자 조작 안에서 끝나야 확실하다. 칸 위 버튼도 남긴다.
+     check(mainCell.querySelector('[data-mv-unmute]'),'칸 위 대비 버튼이 사라졌다');
+     document.getElementById('mvVolEnable').click();
+     await wait(100);
+     check(!document.getElementById('mvVolumeBtn').classList.contains('is-warn'),
+       '소리 활성화 뒤에도 차단 표시가 남아 있다');`,
+  );
+
+  await test(
+    "통계 패널은 열려 있을 때만 물어보고 닫으면 멈춘다",
+    `window.statsAsks=0;
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       f.contentWindow.postMessage=(m)=>{
+         if(m&&m.type==='REQUEST_MULTIVIEW_STATS')window.statsAsks++;
+       };
+     }
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);
+     check(!document.getElementById('mvStatsPop').hidden,'통계 팝오버가 안 열렸다');
+     check(window.statsAsks>0,'열었는데 통계를 묻지 않았다');
+     // 답이 오기 전에는 옛 숫자 대신 '대기 중' 이어야 한다.
+     check(document.getElementById('mvStatsPop').textContent.includes('대기 중'),
+       '응답 전에 대기 중 표시가 없다');
+     // 답을 하나 보내면 그 값이 표에 뜬다.
+     const cell=document.querySelector('.mv-cell');
+     const id=cell.dataset.channelId;
+     {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type:'MULTIVIEW_STATS',channelId:id,
+              stats:{latencySec:2.1,width:1920,height:1080,fps:60,bitrateKbps:7800}}});
+      Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);}
+     await wait(1200);
+     const text=document.getElementById('mvStatsPop').textContent;
+     check(text.includes('1920×1080'),'해상도가 표에 없다: '+text);
+     check(text.includes('7.8 Mbps'),'비트레이트가 표에 없다: '+text);
+     // 버튼으로 닫으면 더 묻지 않는다.
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);
+     const asked=window.statsAsks;
+     await wait(1500);
+     check(window.statsAsks===asked,
+       '닫았는데도 계속 물어본다('+asked+'→'+window.statsAsks+')');
+     // Esc 나 다른 팝오버로 닫았을 때도 멈춰야 한다(버튼 경로만 막으면 샌다).
+     document.getElementById('mvStatsBtn').click();
+     await wait(1200);
+     check(window.statsAsks>asked,'다시 열었는데 묻지 않는다');
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     await wait(100);
+     const afterEsc=window.statsAsks;
+     await wait(1500);
+     check(window.statsAsks===afterEsc,
+       'Esc 로 닫았는데 계속 물어본다('+afterEsc+'→'+window.statsAsks+')');`,
+  );
+
+  await test(
+    "보조끼리 자리를 바꾸면 아무 지시도 나가지 않는다",
+    `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     window.sentMsgs=[];
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       f.contentWindow.postMessage=(m)=>window.sentMsgs.push(m);
+     }
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     const aux=cells.filter(c=>!c.classList.contains('is-main'));
+     if(aux.length>=2){
+       const a=aux[0].dataset.channelId,b=aux[1].dataset.channelId;
+       const dt={effectAllowed:'',setDragImage(){},};
+       const grip=aux[0].querySelector('.mv-cell-grip');
+       grip.dispatchEvent(new MouseEvent('dragstart',{bubbles:true}));
+       // dragstart 는 dataTransfer 가 필요하다. 직접 이벤트를 만들어 준다.
+       const ds=new Event('dragstart',{bubbles:true});ds.dataTransfer=dt;
+       Object.defineProperty(ds,'target',{value:grip});
+       const drop=new Event('drop',{bubbles:true});drop.dataTransfer=dt;
+       aux[0].querySelector('.mv-cell-grip').dispatchEvent(ds);
+       aux[1].dispatchEvent(drop);
+       await wait(200);
+       check(videoSrcs().length===before,'보조끼리 바꿨는데 프레임이 다시 걸렸다');
+     }`,
+  );
+
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
   checks.push("시청 화면 조작 중 오류가 없다");
 

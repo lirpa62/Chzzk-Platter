@@ -737,8 +737,17 @@ body {
 .mv-cell[data-status="ended"] .mv-cell-status {
   background: rgba(0, 0, 0, 0.8);
 }
+/* ⚠ 덮개는 테마와 상관없이 늘 어두운 검정이다. 그래서 글자색에 테마 변수
+   (--popup-muted)를 쓰면 라이트 테마에서 밝은 회색이 되어 거의 안 보인다.
+   덮개 자체를 기준으로 한 고정 색을 쓴다. */
 .mv-cell[data-status="ended"] .mv-cell-status-text {
-  color: var(--popup-muted, #9aa1a9);
+  color: rgba(255, 255, 255, 0.92);
+}
+/* 덧붙이는 설명은 한 단계만 약하게 둔다(그래도 읽을 수 있어야 한다). */
+.mv-cell-status-note {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .mv-cell-retry,
 .mv-cell-unmute {
@@ -995,8 +1004,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* ⚠ 높이를 내용에 맡기면 탭마다 후보 수가 달라 팝오버가 늘었다 줄었다 하고,
+     그때마다 세로 스크롤바가 생겼다 사라지며 내용 너비까지 바뀌어 카드가 좌우로
+     흔들린다. 높이를 정해 두고 안쪽에서만 스크롤하게 한다. */
+  height: min(60%, 360px);
   left: 50%;
-  max-height: min(60%, 360px);
+  max-height: none;
   max-width: min(760px, 94%);
   padding: 10px 12px;
   position: absolute;
@@ -1067,6 +1080,11 @@ body {
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
+  /* 스크롤바가 생기든 말든 그 자리를 늘 비워 둔다. 없으면 스크롤바가 나타나는
+     순간 내용 너비가 줄어 카드가 한 번 튄다. */
+  scrollbar-gutter: stable;
+  /* 내용이 적은 탭에서도 격자가 위로 쏠려 붙지 않게 시작 정렬로 둔다. */
+  align-content: start;
 }
 .mv-quick-current {
   display: flex;
@@ -1074,7 +1092,7 @@ body {
   gap: 6px;
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 2px 0;
 }
 .mv-quick-item {
   align-items: center;
@@ -1108,6 +1126,28 @@ body {
   font-size: 10px;
   font-weight: 700;
   padding: 1px 4px;
+}
+/* 칩 본문 = '이 채널을 바꾸기' 버튼. × 와 겹치지 않게 따로 둔다. */
+.mv-quick-select {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 5px;
+  padding: 0;
+  text-align: left;
+}
+.mv-quick-select:hover .mv-quick-name {
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-select:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 2px;
 }
 .mv-quick-name {
   max-width: 160px;
@@ -1315,6 +1355,7 @@ body {
   display: flex;
   gap: 6px;
   min-width: 0;
+  min-height: 40px;
   overflow-x: auto;
   padding-bottom: 2px;
   scrollbar-width: thin;
@@ -1573,4 +1614,145 @@ body {
    요소가 여럿이므로 맨 끝에서 한 번에 다시 막는다. */
 [hidden] {
   display: none !important;
+}
+
+/* ── 볼륨 팝오버 ───────────────────────────────────────────────────────── */
+.mv-volume-pop {
+  gap: 8px;
+  min-width: 300px;
+  padding: 10px;
+}
+/* 자동재생이 막혔을 때 볼륨 버튼에 남기는 표시. 글자(aria-label)도 함께 바꾼다. */
+.mv-pop-button.is-warn {
+  border-color: #ffb454;
+}
+.mv-pop-button.is-warn .mv-pop-value::after {
+  content: " ●";
+  color: #ffb454;
+}
+.mv-vol-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto 120px 42px;
+}
+.mv-vol-row.is-master {
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  grid-template-columns: 1fr 120px 42px;
+  padding-bottom: 8px;
+}
+/* '메인 채널만 소리' 때문에 잠긴 줄은 흐리게 둔다. */
+.mv-vol-row.is-off {
+  opacity: 0.55;
+}
+.mv-vol-name {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-vol-mute {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+}
+.mv-vol-mute:disabled {
+  cursor: default;
+}
+.mv-vol-range {
+  accent-color: var(--popup-brand, #00ffa3);
+  width: 100%;
+}
+.mv-vol-pct {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.mv-vol-focus {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+.mv-vol-list {
+  display: grid;
+  gap: 6px;
+}
+.mv-vol-notice {
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.5);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 8px;
+}
+.mv-vol-notice p {
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+.mv-vol-enable {
+  background: var(--popup-brand, #00ffa3);
+  border: 0;
+  border-radius: 6px;
+  color: #05170f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+}
+
+/* ── 통합 스트림 정보 팝오버 ───────────────────────────────────────────── */
+.mv-stats-pop {
+  gap: 6px;
+  min-width: 420px;
+  padding: 10px;
+}
+.mv-stats-table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  width: 100%;
+}
+.mv-stats-table th {
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  color: var(--popup-muted, #9aa1a9);
+  font-weight: 500;
+  padding: 4px 6px;
+  text-align: right;
+}
+.mv-stats-table th:first-child {
+  text-align: left;
+}
+.mv-stats-table td {
+  font-variant-numeric: tabular-nums;
+  padding: 4px 6px;
+  text-align: right;
+}
+.mv-stats-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-align: left !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-stats-state {
+  color: var(--popup-muted, #9aa1a9);
+  text-align: center !important;
+}
+.mv-stats-note {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10.5px;
+  line-height: 1.5;
+  margin: 0;
 }
