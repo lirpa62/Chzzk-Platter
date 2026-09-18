@@ -249,5 +249,46 @@ console.log("\n[준비 실패] 프레임 자체가 안 오면 오류로 간다")
   ok(stage.reloads.length === 0, "자동으로 다시 로드하지 않는다");
 }
 
+console.log("\n[채팅 접기 콜백] 이미 감시 중이어도 결과를 받는다");
+{
+  // ⚠ 실제로 났던 버그: 일반 채팅 복원이 이미 돌고 있으면 멀티뷰가 건 콜백이
+  //   등록조차 되지 않아, 모든 칸이 '화면 정리를 완료하지 못했습니다' 로 끝났다.
+  //   content.js 의 startChatFoldEnforce 와 같은 규칙으로 검증한다.
+  function makeEngine() {
+    let timer = 0;
+    let callbacks = [];
+    return {
+      start({ onSettle } = {}) {
+        if (onSettle) callbacks.push(onSettle);
+        if (timer) return; // 이미 돌고 있다 — 위에서 콜백만 얹었다
+        timer = 1;
+      },
+      finish(ok) {
+        const cbs = callbacks;
+        callbacks = [];
+        timer = 0;
+        for (const cb of cbs) cb(ok);
+      },
+    };
+  }
+  const engine = makeEngine();
+  let got = null;
+  engine.start(); // 일반 채팅 복원이 먼저 돌고 있다
+  engine.start({ onSettle: (ok) => (got = ok) }); // 멀티뷰가 뒤늦게 붙는다
+  engine.finish(true);
+  ok(got === true, "이미 감시 중일 때 붙인 콜백도 불린다");
+
+  // 여러 번 붙어도 모두 받아야 한다.
+  const engine2 = makeEngine();
+  const results = [];
+  engine2.start({ onSettle: (v) => results.push(v) });
+  engine2.start({ onSettle: (v) => results.push(v) });
+  engine2.finish(false);
+  ok(results.length === 2, `콜백 여러 개가 모두 불린다(${results.length}개)`);
+  // 한 번 부른 콜백은 다시 부르지 않는다.
+  engine2.finish(true);
+  ok(results.length === 2, "이미 끝난 콜백을 다시 부르지 않는다");
+}
+
 console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");
 process.exit(fails ? 1 : 0);

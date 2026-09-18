@@ -20579,8 +20579,11 @@
       startChatFoldEnforce({
         onSettle: (ok) => {
           if (generation !== multiviewUiGeneration) return; // 지난 시도의 결과
-          multiviewChatFoldReady = ok;
-          if (ok) maybeNotifyMultiviewUiReady();
+          // ⚠ 엔진이 기간 만료로 끝나도(ok=false) 실제로 접혀 있으면 목표는 이룬
+          //   것이다. 상태를 직접 확인해 판정한다.
+          const folded = isChatFolded(getLiveChatAside());
+          multiviewChatFoldReady = ok || folded;
+          if (multiviewChatFoldReady) maybeNotifyMultiviewUiReady();
         },
       });
 
@@ -20887,13 +20890,22 @@
   // onSettle: 안정화가 끝났을 때 결과를 알려 준다(ok=목표 상태로 안정됨).
   // ⚠ 기존 호출부는 인자 없이 부르므로 동작이 달라지지 않는다. 멀티뷰가 '접힘까지
   //   확실히 끝났는지' 를 알아야 해서 결과만 받아 간다.
+  // ⚠ 결과 콜백은 '지금 돌고 있는' 감시에도 붙여야 한다. 예전에는 이미 감시 중이면
+  //   그냥 돌아가 버려서, 멀티뷰가 건 콜백이 영영 불리지 않았다(그 결과 모든 칸이
+  //   '화면 정리를 완료하지 못했습니다' 로 끝났다).
+  let chatFoldSettleCallbacks = [];
   function startChatFoldEnforce({ onSettle } = {}) {
-    if (chatFoldEnforceTimer) return;
+    if (onSettle) chatFoldSettleCallbacks.push(onSettle);
+    if (chatFoldEnforceTimer) return; // 이미 돌고 있다 — 위에서 콜백만 얹었다
     chatFoldStableCount = 0;
     const settle = (ok) => {
-      try {
-        onSettle?.(ok);
-      } catch {}
+      const callbacks = chatFoldSettleCallbacks;
+      chatFoldSettleCallbacks = [];
+      for (const callback of callbacks) {
+        try {
+          callback(ok);
+        } catch {}
+      }
     };
     const STABLE_TICKS = 4; // 250ms × 4 = 1초 연속 안정 시 마스킹 해제
     let lastToggleAt = 0;
