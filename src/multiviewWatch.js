@@ -236,13 +236,51 @@
       (status === "ended"
         ? "방송이 종료되었습니다."
         : "플레이어를 불러오지 못했습니다.");
+    const id = esc(channelId);
+    // ⚠ 상태마다 할 수 있는 일이 다르다. 할 수 없는 일은 버튼으로 두지 않는다.
+    //   ended = 방송이 끝났다 → 다시 불러와도 같은 종료 화면이고, 화면 정리는 뜻이
+    //           없다. 다른 채널로 바꾸거나, 다시 켜졌는지 확인하는 것만 남는다.
+    //   error = 플레이어를 못 불러왔다 → 다시 불러오기가 가장 먼저다.
+    const actions =
+      status === "ended"
+        ? `<button type="button" class="mv-cell-retry is-primary" data-mv-replace="${id}">다른 채널 선택</button>` +
+          `<button type="button" class="mv-cell-retry" data-mv-recheck="${id}">방송 다시 확인</button>`
+        : `<button type="button" class="mv-cell-retry is-primary" data-mv-retry="${id}">다시 불러오기</button>` +
+          `<button type="button" class="mv-cell-retry" data-mv-replace="${id}">다른 채널 선택</button>`;
     overlay.innerHTML =
       `<span class="mv-cell-status-text">${esc(text)}</span>` +
-      `<span class="mv-cell-status-actions">` +
-      `<button type="button" class="mv-cell-retry" data-mv-retry="${esc(channelId)}">다시 불러오기</button>` +
-      `<button type="button" class="mv-cell-retry" data-mv-reapply="${esc(channelId)}">화면 다시 적용</button>` +
-      `<button type="button" class="mv-cell-retry" data-mv-replace="${esc(channelId)}">다른 채널 선택</button>` +
-      `</span>`;
+      `<span class="mv-cell-status-actions">${actions}</span>`;
+  }
+
+  // '방송 다시 확인': 지금 다시 켜졌을 때만 프레임을 새로 불러온다.
+  // ⚠ 확인만으로 프레임을 건드리지 않는다. 아직 꺼져 있으면 안내만 바꾼다.
+  async function recheckLive(channelId) {
+    const cell = cells.get(channelId);
+    const overlay = cell?.querySelector(".mv-cell-status");
+    const button = overlay?.querySelector("[data-mv-recheck]");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "확인 중…";
+    }
+    let open = false;
+    try {
+      // ⚠ 확장 페이지에서 직접 부르면 Origin 때문에 막힌다. 공용 로더가 배경
+      //   중계를 거치게 해 둔다(getJson 은 content 를 이미 벗겨서 준다).
+      const detail = HASH_RE.test(channelId)
+        ? await SOURCES?.getJson(
+            `https://api.chzzk.naver.com/service/v3/channels/${channelId}/live-detail`,
+          )
+        : null;
+      open = detail?.status === "OPEN";
+    } catch {
+      open = false;
+    }
+    if (currentStatus(channelId) !== "ended") return; // 그 사이 상태가 바뀌었다
+    if (open) {
+      reloadFrame(channelId);
+      return;
+    }
+    setCellStatus(channelId, "ended", "아직 방송이 꺼져 있습니다.");
   }
 
   function armReadyTimeout(channelId) {
@@ -873,32 +911,35 @@
     hint.textContent = quickReplaceId
       ? `${channelName(quickReplaceId)} 대신 볼 채널을 고르세요.`
       : `${state.chosen.length} / 6`;
-    // 교체 모드는 취소할 수 있어야 한다.
+    // 교체 모드는 취소할 수 있어야 한다. 버튼은 머리말의 동작 묶음 안에 둔다
+    // (안내 문구 옆에 끼어들어 줄이 밀리지 않게).
     const cancel = $("mvQuickCancelReplace");
     if (quickReplaceId && !cancel) {
       const button = document.createElement("button");
       button.type = "button";
       button.id = "mvQuickCancelReplace";
-      button.className = "mv-quick-all";
+      button.className = "mv-quick-cancel";
       button.textContent = "교체 취소";
-      hint.after(button);
+      const actions = $("mvQuickHeadActions");
+      if (actions) actions.prepend(button);
+      else hint.after(button);
     } else if (!quickReplaceId && cancel) {
       cancel.remove();
     }
     $("mvQuickCurrent").innerHTML = state.chosen
       .map((c) => {
         const isMain = c.channelId === state.mainId;
-        const badge = STATUS_BADGE[currentStatus(c.channelId)] || "";
+        const status = currentStatus(c.channelId);
+        const badge = STATUS_BADGE[status] || "";
         const locked = state.chosen.length <= min;
         return (
           `<li class="mv-quick-item${isMain ? " is-main" : ""}` +
-          `${quickReplaceId === c.channelId ? " is-replacing" : ""}">` +
+          `${quickReplaceId === c.channelId ? " is-replacing" : ""}"` +
+          `${badge ? ` data-state="${esc(status)}"` : ""}>` +
           `<span class="mv-quick-name">${esc(c.channelName)}</span>` +
           (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
           (badge
-            ? `<span class="mv-quick-state" data-state="${esc(
-                currentStatus(c.channelId),
-              )}">${esc(badge)}</span>`
+            ? `<span class="mv-quick-state" data-state="${esc(status)}">${esc(badge)}</span>`
             : "") +
           `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${esc(c.channelId)}"` +
           `${locked ? " disabled" : ""}` +
@@ -918,30 +959,36 @@
   const quickCache = new Map(); // key -> {value, expiresAt}
   let quickSource = "following";
   let quickKeyword = "";
+  let quickSections = []; // 전용 팔로잉 구역(폴더)
+  let quickFolder = ""; // 고른 폴더(빈 문자열이면 전체)
   // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
   let quickRequestId = 0;
 
+  // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
+  // ⚠ 캐시 키를 구분한다. 같은 키에 평평한 목록과 구역 배열을 섞어 담으면 안 된다.
   async function quickRows(source, keyword) {
-    const key = source === "search" ? `search:${keyword}` : source;
+    const key =
+      source === "search"
+        ? `search:${keyword}`
+        : source === "custom"
+          ? "custom:sections"
+          : source;
     const cached = quickCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    if (!SOURCES) return [];
-    const rows =
+    if (!SOURCES) return source === "custom" ? [] : [];
+    const value =
       source === "following"
         ? await SOURCES.loadFollowing()
         : source === "custom"
-          ? await SOURCES.loadCustomFollowing()
+          ? await SOURCES.loadCustomSections()
           : source === "live"
             ? await SOURCES.loadLive()
             : await SOURCES.searchLive(keyword);
     // 검색은 입력마다 달라 캐시하지 않는다.
     if (source !== "search") {
-      quickCache.set(key, {
-        value: rows,
-        expiresAt: Date.now() + QUICK_TTL_MS,
-      });
+      quickCache.set(key, { value, expiresAt: Date.now() + QUICK_TTL_MS });
     }
-    return rows;
+    return value;
   }
 
   async function loadQuickCandidates() {
@@ -950,15 +997,115 @@
     const keyword = quickKeyword;
     quickCandidates = null; // 불러오는 중
     renderQuickCandidates();
-    let rows = [];
+    let result = [];
     try {
-      rows = await quickRows(source, keyword);
+      result = await quickRows(source, keyword);
     } catch {
-      rows = [];
+      result = [];
     }
     if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
-    quickCandidates = rows;
+    if (source === "custom") {
+      quickSections = Array.isArray(result) ? result : [];
+      quickCandidates = flattenQuickSections(quickSections);
+    } else {
+      quickSections = [];
+      quickCandidates = Array.isArray(result) ? result : [];
+    }
     renderQuickCandidates();
+  }
+
+  // 구역을 하나로 펼친다(같은 채널이 두 구역에 있으면 한 번만).
+  function flattenQuickSections(sections) {
+    const seen = new Set();
+    const rows = [];
+    for (const section of sections) {
+      for (const row of section.rows || []) {
+        if (seen.has(row.channelId)) continue;
+        seen.add(row.channelId);
+        rows.push(row);
+      }
+    }
+    return rows;
+  }
+
+  // 구역 아이콘(lucide). 고르기 화면과 같은 모양을 쓴다.
+  const QUICK_FOLDER_ICONS = {
+    star: '<path d="M11.5 3.2a.6.6 0 0 1 1 0l2.2 4.5 5 .7a.6.6 0 0 1 .3 1l-3.6 3.5.9 4.9a.6.6 0 0 1-.9.6L12 16.1l-4.4 2.3a.6.6 0 0 1-.9-.6l.9-4.9L4 9.4a.6.6 0 0 1 .3-1l5-.7z"></path>',
+    folder:
+      '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>',
+    heart:
+      '<path d="M19 14c1.5-1.5 3-3.3 3-5.5A5.5 5.5 0 0 0 12 5.4 5.5 5.5 0 0 0 2 8.5c0 2.2 1.5 4 3 5.5l7 7Z"></path>',
+    users:
+      '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.9"></path><path d="M16 3.1a4 4 0 0 1 0 7.8"></path>',
+  };
+  const quickFolderIcon = (name) =>
+    '<svg class="mv-quick-folder-icon" width="16" height="16" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    (QUICK_FOLDER_ICONS[name] || QUICK_FOLDER_ICONS.folder) +
+    "</svg>";
+
+  // 전용 팔로잉 구역 폴더. 다른 목록에서는 숨긴다.
+  function renderQuickFolders() {
+    const box = $("mvQuickFolders");
+    if (!box) return;
+    if (quickSource !== "custom" || !quickSections.length) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    const total = quickCandidates ? quickCandidates.length : 0;
+    const card = (id, label, icon, count) =>
+      `<button type="button" class="mv-quick-folder${quickFolder === id ? " is-on" : ""}" ` +
+      `data-mv-quick-folder="${esc(id)}" aria-pressed="${quickFolder === id}">` +
+      quickFolderIcon(icon) +
+      `<span class="mv-quick-folder-name">${esc(label)}</span>` +
+      `<span class="mv-quick-folder-count">${count}</span></button>`;
+    box.innerHTML =
+      card("", "전체", "users", total) +
+      quickSections
+        .map((sec) =>
+          card(sec.id, sec.label, sec.icon, (sec.rows || []).length),
+        )
+        .join("");
+    box.hidden = false;
+  }
+
+  // 지금 폴더에 해당하는 후보만 남긴다(전체면 그대로).
+  function quickVisibleRows() {
+    if (!quickCandidates) return [];
+    if (quickSource !== "custom" || !quickFolder) return quickCandidates;
+    const section = quickSections.find((sec) => sec.id === quickFolder);
+    return section ? section.rows || [] : [];
+  }
+
+  // 목록이 넘칠 때만 좌우 화살표를 보여준다.
+  function syncQuickRailNav() {
+    const box = $("mvQuickAdd");
+    const rail = box?.closest?.(".mv-quick-rail");
+    if (!box || !rail) return;
+    const overflow = box.scrollWidth > box.clientWidth + 1;
+    for (const nav of rail.querySelectorAll("[data-mv-quick-scroll]")) {
+      nav.hidden = !overflow;
+    }
+  }
+
+  // 후보가 없을 때의 안내는 목록 종류마다 다르다.
+  function quickEmptyMessage() {
+    if (quickSource === "search") {
+      return quickKeyword.trim()
+        ? "찾는 채널이 없습니다."
+        : "채널 이름으로 찾아보세요.";
+    }
+    if (quickSource === "custom") {
+      if (!quickSections.length) return "전용 팔로잉 구역이 아직 없습니다.";
+      if (quickFolder) return "이 구역에 지금 방송 중인 채널이 없습니다.";
+      return "지금 방송 중인 전용 팔로잉 채널이 없습니다.";
+    }
+    if (quickSource === "following") {
+      return "지금 방송 중인 팔로잉 채널이 없습니다.";
+    }
+    return "추가할 채널이 없습니다.";
   }
 
   function renderQuickCandidates() {
@@ -973,21 +1120,22 @@
     }
     const searchBox = $("mvQuickSearch");
     if (searchBox) searchBox.hidden = quickSource !== "search";
+    renderQuickFolders();
 
     const box = $("mvQuickAdd");
     if (!box) return;
     if (quickCandidates === null) {
       box.innerHTML = '<p class="mv-quick-empty">불러오는 중…</p>';
+      syncQuickRailNav();
       return;
     }
-    // 이미 보고 있는 채널은 후보에서 뺀다. 교체 모드에서는 바꿀 대상 자신도 뺀다.
+    // 이미 보고 있는 채널은 후보에서 뺀다. 교체 대상 자신도 뺀다 — 같은 채널로
+    // 갈아 끼우는 것은 replaceChannel 이 거르므로 눌러도 아무 일이 없다.
     const have = new Set(state.chosen.map((c) => c.channelId));
-    const rest = quickCandidates.filter((r) => !have.has(r.channelId));
+    const rest = quickVisibleRows().filter((r) => !have.has(r.channelId));
     if (!rest.length) {
-      box.innerHTML =
-        quickSource === "search" && !quickKeyword.trim()
-          ? '<p class="mv-quick-empty">채널 이름으로 찾아보세요.</p>'
-          : '<p class="mv-quick-empty">추가할 채널이 없습니다.</p>';
+      box.innerHTML = `<p class="mv-quick-empty">${esc(quickEmptyMessage())}</p>`;
+      syncQuickRailNav();
       return;
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
@@ -995,22 +1143,30 @@
     box.innerHTML = rest
       .slice(0, 30)
       .map((r) => {
-        const thumb =
-          safeImageUrl(r.liveImageUrl) || safeImageUrl(r.channelImageUrl);
+        const thumb = safeImageUrl(r.liveImageUrl);
+        const avatar = safeImageUrl(r.channelImageUrl);
         return (
           `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
           `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
-          `<span class="mv-quick-card-thumb">` +
+          `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}">` +
           (thumb
             ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
             : `<span class="mv-quick-card-empty"></span>`) +
           (r.adult ? `<span class="mv-quick-card-adult">19+</span>` : "") +
           `</span>` +
+          `<span class="mv-quick-card-body">` +
+          (avatar
+            ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy">`
+            : `<span class="mv-quick-card-avatar is-empty"></span>`) +
+          `<span class="mv-quick-card-text">` +
+          `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
           `<span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
+          `</span></span>` +
           `</button>`
         );
       })
       .join("");
+    syncQuickRailNav();
   }
 
   // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.
@@ -1130,7 +1286,15 @@
     const sourceTab = target.closest?.("[data-mv-quick-source]");
     if (sourceTab) {
       quickSource = sourceTab.dataset.mvQuickSource;
+      quickFolder = ""; // 목록 종류를 바꾸면 구역 선택을 푼다
       void loadQuickCandidates();
+      return;
+    }
+    const folder = target.closest?.("[data-mv-quick-folder]");
+    if (folder) {
+      // 구역 전환은 이미 받아 둔 목록을 거르기만 한다(다시 불러오지 않는다).
+      quickFolder = folder.dataset.mvQuickFolder;
+      renderQuickCandidates();
       return;
     }
     const scroll = target.closest?.("[data-mv-quick-scroll]");
@@ -1170,6 +1334,11 @@
       // ⚠ 프레임을 다시 로드하지 않고, 덮개로 덮지도 않는다. 그 칸에 '지금 다시
       //   맞춰라' 고만 알린다(결과를 기다리는 상태로 들어가지 않는다).
       requestMultiviewUiReconcile(reapply.dataset.mvReapply);
+      return;
+    }
+    const recheck = target.closest?.("[data-mv-recheck]");
+    if (recheck) {
+      void recheckLive(recheck.dataset.mvRecheck);
       return;
     }
     const replace = target.closest?.("[data-mv-replace]");

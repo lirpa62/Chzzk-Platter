@@ -760,7 +760,14 @@ const checks = [];
      check(target.dataset.status==='ended','상태가 ended 가 아니다');
      const text=target.querySelector('.mv-cell-status-text').textContent;
      check(text.includes('종료'),'종료 안내 문구가 아니다: '+text);
-     check(target.querySelector('[data-mv-retry]'),'다시 불러오기 버튼이 없다');
+     // 끝난 방송은 다시 불러와도 같은 종료 화면이다. 그래서 '다시 불러오기' 와
+     // '화면 다시 적용' 은 두지 않고, 할 수 있는 두 가지만 남긴다.
+     check(target.querySelector('[data-mv-replace]'),'다른 채널 선택 버튼이 없다');
+     check(target.querySelector('[data-mv-recheck]'),'방송 다시 확인 버튼이 없다');
+     check(!target.querySelector('[data-mv-retry]'),
+       '종료 칸에 다시 불러오기가 남아 있다');
+     check(!target.querySelector('[data-mv-reapply]'),
+       '종료 칸에 화면 다시 적용이 남아 있다');
      check(document.querySelector('.mv-cell.is-main').dataset.channelId===mainBefore,
        '메인이 자동으로 바뀌었다');
      check(videoSrcs().length===before,'종료 신호로 프레임이 다시 걸렸다');

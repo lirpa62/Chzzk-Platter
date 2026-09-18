@@ -121,29 +121,245 @@
     return detailed.filter(Boolean);
   }
 
-  // 전용 팔로잉에 넣어 둔 채널만 추린다(구역 나누기는 고르기 화면이 따로 한다).
-  async function loadCustomFollowing() {
-    let wanted = new Set();
+  // 전용 팔로잉을 사이드바와 같은 구분(즐겨찾기 → 그룹 → 구독 → 태그 → 친밀도 →
+  // 나머지 팔로잉)으로 나눠 돌려준다.
+  //
+  // ⚠ 고르기 화면과 시청 화면(Quick)이 반드시 같은 목록을 봐야 한다. 예전에는
+  //   Quick 만 '즐겨찾기 + 그룹 channelIds' 합집합을 따로 읽어, 구독·태그·친밀도·
+  //   나머지 팔로잉이 통째로 빠지고 두 키가 모두 없으면 아예 비어 보였다.
+  async function loadCustomSections() {
+    let favorites = [];
+    let groups = [];
+    let groupOrder = [];
+    let flags = {};
     try {
       const d = await chrome.storage.local.get([
         "cheeseFollowFavorites",
         "cheeseFollowCustomGroups",
+        "cheeseFollowGroupOrder",
+        "cheeseFeatureHidden",
       ]);
-      const favorites = Array.isArray(d?.cheeseFollowFavorites)
+      flags = d?.cheeseFeatureHidden || {};
+      favorites = Array.isArray(d?.cheeseFollowFavorites)
         ? d.cheeseFollowFavorites
         : [];
-      const groups = Array.isArray(d?.cheeseFollowCustomGroups)
+      groups = Array.isArray(d?.cheeseFollowCustomGroups)
         ? d.cheeseFollowCustomGroups
         : [];
-      wanted = new Set(
-        [...favorites, ...groups.flatMap((g) => g?.channelIds || [])]
-          .map((v) => String(v || "").toLowerCase())
-          .filter((v) => HASH_RE.test(v)),
-      );
+      groupOrder = Array.isArray(d?.cheeseFollowGroupOrder)
+        ? d.cheeseFollowGroupOrder
+        : [];
     } catch {}
-    if (!wanted.size) return [];
+
     const live = await loadFollowing();
-    return live.filter((r) => wanted.has(r.channelId));
+    const byId = new Map(live.map((r) => [r.channelId, r]));
+    const idsOf = (list) =>
+      (Array.isArray(list) ? list : [])
+        .map((v) => String(v || "").toLowerCase())
+        .filter((v) => HASH_RE.test(v));
+
+    const sections = [];
+    const used = new Set();
+    const take = (ids) => {
+      const rows = [];
+      for (const id of ids) {
+        const row = byId.get(id);
+        if (!row || used.has(id)) continue;
+        used.add(id);
+        rows.push(row);
+      }
+      return rows;
+    };
+
+    const favRows = take(idsOf(favorites));
+    if (favRows.length) {
+      sections.push({
+        id: "fav",
+        label: "즐겨찾기",
+        icon: "star",
+        rows: favRows,
+      });
+    }
+
+    // 사용자가 정한 그룹 순서를 따른다(없으면 저장된 차례대로).
+    const order = groupOrder.filter((id) => groups.some((g) => g?.id === id));
+    const ordered = [
+      ...order.map((id) => groups.find((g) => g?.id === id)),
+      ...groups.filter((g) => g?.id && !order.includes(g.id)),
+    ].filter(Boolean);
+    for (const group of ordered) {
+      const rows = take(idsOf(group.channelIds));
+      if (!rows.length) continue;
+      sections.push({
+        id: `group:${group.id}`,
+        label: String(group.name || "그룹"),
+        icon: group.icon || "folder",
+        color: group.color || "",
+        rows,
+      });
+    }
+
+    // 자동 '구독' 그룹. 사이드바의 sbFollowGroupSubscribe 와 같은 조건에서만 만든다.
+    if (
+      flags.sbFollowGroupEnabled === true &&
+      flags.sbFollowGroupSubscribe === true
+    ) {
+      const subscribed = await loadSubscribedIds();
+      const rows = take([...subscribed]);
+      if (rows.length) {
+        sections.push({
+          id: "auto:subscription",
+          label: "구독",
+          icon: "star",
+          rows,
+        });
+      }
+    }
+
+    // 자동 태그 그룹. 같은 태그를 가진 채널을 묶는다(사이드바와 같은 규칙).
+    if (
+      flags.sbFollowGroupEnabled === true &&
+      flags.sbFollowGroupTags === true
+    ) {
+      const byTag = new Map();
+      for (const row of live) {
+        if (used.has(row.channelId)) continue;
+        for (const tag of row.tags || []) {
+          const key = tag.toLowerCase();
+          if (!byTag.has(key)) byTag.set(key, { name: tag, rows: [] });
+          byTag.get(key).rows.push(row);
+        }
+      }
+      // 두 채널 이상 묶이는 태그만, 많이 묶인 순으로 최대 20개.
+      const tagGroups = [...byTag.entries()]
+        .filter(([, v]) => v.rows.length >= 2)
+        .sort((a, b) => b[1].rows.length - a[1].rows.length)
+        .slice(0, 20);
+      for (const [key, entry] of tagGroups) {
+        const rows = take(entry.rows.map((r) => r.channelId));
+        if (rows.length) {
+          sections.push({
+            id: `tag:${key}`,
+            label: `#${entry.name}`,
+            icon: "folder",
+            rows,
+          });
+        }
+      }
+    }
+
+    // 친밀도(내 활동순). 사이드바의 '내 활동순' 과 같은 점수 계산을 쓰되, 여기서는
+    // 저장소에 있는 지표(통나무파워·내 채팅)만 쓴다.
+    // ⚠ 구독 개월·후원 횟수는 치지직 API 를 직접 불러야 하는데 확장 페이지에서는
+    //   CORS 로 막힌다. 그래서 그 둘은 빼고 점수를 낸다 — 사이드바 순서와 완전히
+    //   같지는 않다.
+    const affinityRows = await loadAffinitySection(live, used);
+    if (affinityRows.length) {
+      sections.push({
+        id: "affinity",
+        label: "친밀도",
+        icon: "heart",
+        rows: affinityRows,
+      });
+    }
+
+    // 어느 구역에도 안 들어간 나머지 팔로잉.
+    const rest = live.filter((r) => !used.has(r.channelId));
+    if (rest.length) {
+      sections.push({
+        id: "rest",
+        label: "팔로잉",
+        icon: "users",
+        rows: rest,
+      });
+    }
+    return sections;
+  }
+
+  // 모든 목록을 '구역 배열' 로 통일한다. 전용 팔로잉만 여러 구역이고 나머지는 하나다.
+  // 구독 중인 채널 id. 자동 '구독' 그룹에 쓴다.
+  async function loadSubscribedIds() {
+    const out = new Set();
+    try {
+      const c = await getJson(
+        `${API}/commercial/v1/subscribe/channels?page=0&size=100`,
+      );
+      for (const row of Array.isArray(c?.data) ? c.data : []) {
+        const id = String(
+          row?.channel?.channelId || row?.channelId || "",
+        ).toLowerCase();
+        if (HASH_RE.test(id)) out.add(id);
+      }
+    } catch {}
+    return out;
+  }
+
+  // 친밀도 구역. 저장소 지표만으로 점수를 내 상위 채널을 고른다.
+  const AFFINITY_MAX = 12;
+  async function loadAffinitySection(live, used) {
+    const API_ = globalThis.CheeseChannelAffinity;
+    const DATA_ = globalThis.CheeseChannelAffinityData;
+    if (!API_ || !DATA_) return [];
+    try {
+      const d = await chrome.storage.local.get("cheeseFollowAffinityOn");
+      if (d?.cheeseFollowAffinityOn !== true) return []; // 기본 OFF
+    } catch {
+      return [];
+    }
+    try {
+      const accountId = await currentAccountId();
+      const metrics = await DATA_.collectMetrics(
+        chrome.storage.local,
+        accountId,
+        {
+          // 이 둘은 치지직 API 를 직접 불러야 해서 확장 페이지에서는 막힌다.
+          skip: ["subscribe", "donation"],
+          parseKey: globalThis.CheeseChatRecapStore?.parseKey,
+        },
+      );
+      const scored = API_.scoreChannels(metrics, {});
+      if (!Array.isArray(scored) || !scored.length) return [];
+      const rank = new Map(
+        scored.map((row, i) => [String(row.channelId).toLowerCase(), i]),
+      );
+      return live
+        .filter((r) => !used.has(r.channelId) && rank.has(r.channelId))
+        .sort((a, b) => rank.get(a.channelId) - rank.get(b.channelId))
+        .slice(0, AFFINITY_MAX)
+        .map((r) => {
+          used.add(r.channelId);
+          return r;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  // 채팅 기록 키에 쓰인 계정 id. 없으면 빈 문자열(그러면 '내 채팅' 지표만 빠진다).
+  async function currentAccountId() {
+    try {
+      const all = await chrome.storage.local.get(null);
+      for (const key of Object.keys(all || {})) {
+        const m = key.match(/^chatRecap:([0-9a-f]{32}):/i);
+        if (m) return m[1].toLowerCase();
+      }
+    } catch {}
+    return "";
+  }
+
+  // 구역을 하나로 펼친 목록(폴더가 필요 없는 곳에서 쓴다).
+  async function loadCustomFollowing() {
+    const sections = await loadCustomSections();
+    const seen = new Set();
+    const rows = [];
+    for (const section of sections) {
+      for (const row of section.rows || []) {
+        if (seen.has(row.channelId)) continue;
+        seen.add(row.channelId);
+        rows.push(row);
+      }
+    }
+    return rows;
   }
 
   const api = {
@@ -155,6 +371,7 @@
     loadLive,
     searchLive,
     loadCustomFollowing,
+    loadCustomSections,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else globalThis.CheeseMultiviewSources = api;

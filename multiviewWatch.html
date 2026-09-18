@@ -125,17 +125,19 @@
           <div class="mv-quick-head">
             <strong>채널 바꾸기</strong>
             <span class="mv-quick-hint" id="mvQuickHint"></span>
-            <button type="button" class="mv-quick-all" id="mvQuickAll">
-              고르기 화면 열기
-            </button>
-            <button
-              type="button"
-              class="mv-quick-close"
-              id="mvQuickClose"
-              aria-label="닫기"
-            >
-              ×
-            </button>
+            <div class="mv-quick-head-actions" id="mvQuickHeadActions">
+              <button type="button" class="mv-quick-all" id="mvQuickAll">
+                고르기 화면 열기
+              </button>
+              <button
+                type="button"
+                class="mv-quick-close"
+                id="mvQuickClose"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
           </div>
           <div class="mv-quick-body">
             <ul class="mv-quick-current" id="mvQuickCurrent"></ul>
@@ -153,6 +155,12 @@
               <button type="button" data-mv-quick-source="live">라이브</button>
               <button type="button" data-mv-quick-source="search">검색</button>
             </div>
+            <div
+              class="mv-quick-folders"
+              id="mvQuickFolders"
+              aria-label="전용 팔로잉 구역"
+              hidden
+            ></div>
             <input
               type="search"
               class="mv-quick-search"
@@ -226,6 +234,11 @@
     </p>
 
     <script src="src/multiviewTheme.js"></script>
+    <!-- 전용 팔로잉의 친밀도 구역 계산에 쓴다(고르기 화면과 같은 목록을 보여 주려면
+         여기에도 있어야 한다). -->
+    <script src="src/chatRecapStore.js"></script>
+    <script src="src/channelAffinity.js"></script>
+    <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewWatch.js"></script>
