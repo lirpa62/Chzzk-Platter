@@ -10261,6 +10261,93 @@
     shown: false,
     cancel: false, // 수집 중 버튼을 다시 누르면 중단한다(전수는 몇십 초 걸린다).
   };
+  // ── 다시보기 채팅 검색(현재 영상 한 편) ──────────────────────────────────
+  //
+  // ⚠ 저장하지 않는다. 이 탭이 살아 있는 동안 메모리에만 둔다. 활성도 캐시가
+  //   '원본 채팅은 버리고 집계만 남긴다' 는 정책을 지키기 위해서다. 남의 채팅
+  //   원문을 chrome.storage 에 넣지 않으며, 닉네임·UID 도 담지 않는다.
+  // ⚠ 검색을 한 번도 열지 않은 사용자는 아무 비용도 내지 않는다. 아래 collecting
+  //   이 켜져 있을 때만 순회 중에 원문을 모은다(opt-in).
+  //
+  // 담는 것: { t: 재생위치(ms), text: 본문 } 두 가지뿐.
+  // 실측(10만 건): 약 5.4MB, 검색 한 번 약 7ms.
+  const vodChatSearchState = {
+    videoNo: "",
+    messages: null, // 수집이 끝나면 배열. 없으면 null.
+    collecting: false, // 이번 순회에서 원문을 모을지(검색을 연 뒤에만 켠다)
+    loading: false,
+    progress: 0,
+    failed: false,
+  };
+  // 아주 긴 방송에서도 메모리가 무한히 늘지 않게 둔다. 실측 기준 10만 건이
+  // 약 5MB 라 넉넉하되, 폭주 방송에서 끝없이 쌓이지는 않는 값이다.
+  const VOD_CHAT_SEARCH_MAX_MESSAGES = 300000;
+
+  // 이 영상의 원문을 준비한다. 활성도 순회가 이미 돌고 있으면 그 순회를 함께 쓴다
+  // (같은 영상을 두 번 받지 않는다).
+  async function ensureVodChatSearchMessages(videoNo, duration, onProgress) {
+    if (!videoNo) return null;
+    if (vodChatSearchState.videoNo !== videoNo) {
+      // 다른 영상으로 옮겼으면 이전 원문은 버린다(메모리·사생활 양쪽 이유).
+      vodChatSearchState.videoNo = videoNo;
+      vodChatSearchState.messages = null;
+      vodChatSearchState.failed = false;
+      vodChatSearchState.progress = 0;
+    }
+    if (Array.isArray(vodChatSearchState.messages)) {
+      return vodChatSearchState.messages;
+    }
+    if (vodChatSearchState.loading) return null; // 이미 받는 중(중복 실행 금지)
+    vodChatSearchState.loading = true;
+    vodChatSearchState.collecting = true;
+    vodChatSearchState.failed = false;
+    vodChatSearchState.progress = 0;
+    try {
+      await collectVodChatDataShared(videoNo, duration, (progress) => {
+        vodChatSearchState.progress = progress;
+        onProgress?.(progress);
+      });
+    } catch {
+      vodChatSearchState.failed = true;
+    } finally {
+      // ⚠ 순회가 이미 돌고 있었다면 그 순회는 원문을 모으지 않는다(중간 합류는
+      //   앞부분이 빠진다). 그때는 messages 가 비어 실패로 남고, 사용자가 다시
+      //   누르면 새 순회에서 처음부터 모은다.
+      if (vodChatSearchState.videoNo === videoNo) {
+        vodChatSearchState.collecting = false;
+        vodChatSearchState.loading = false;
+        if (!Array.isArray(vodChatSearchState.messages)) {
+          vodChatSearchState.failed = true;
+        }
+      }
+    }
+    return vodChatSearchState.messages;
+  }
+
+  // 현재 영상의 채팅에서 검색어가 든 것을 찾는다.
+  //
+  // ⚠ 단순 부분 문자열 검색이다. 정규식·초성·유사어는 쓰지 않는다.
+  //   한글 조합 차이로 못 찾는 경우를 줄이려 양쪽 다 NFC 로 맞춘다.
+  function searchVodChatMessages(messages, query, limit = 200) {
+    const needle = String(query || "")
+      .trim()
+      .normalize("NFC")
+      .toLocaleLowerCase();
+    if (!needle || !Array.isArray(messages)) return { total: 0, rows: [] };
+    const rows = [];
+    let total = 0;
+    for (let i = 0; i < messages.length; i += 1) {
+      const message = messages[i];
+      const text = message?.text;
+      if (typeof text !== "string" || !text) continue;
+      if (!text.normalize("NFC").toLocaleLowerCase().includes(needle)) continue;
+      total += 1;
+      // ⚠ 수만 건을 한 번에 그리지 않는다. 앞쪽만 넘기고 개수는 따로 알린다.
+      if (rows.length < limit) rows.push(message);
+    }
+    return { total, rows };
+  }
+
   // 방송 제목 확인과 채팅 활성도가 같은 영상을 동시에 요청하면 하나의 순회를 공유한다.
   // 제목 확인이 먼저 실행된 경우에도 bins를 캐시하므로 나중에 활성도를 켤 때 재수집하지 않는다.
   const vodChatScanCoordinator = {
@@ -10420,6 +10507,11 @@
       CHAT_ACTIVITY_ANALYSIS_API?.createAccumulator(CHAT_GRAPH_BINS);
     const titleChangeTracker =
       CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
+    // 검색이 이 영상의 원문을 기다리고 있으면 같은 순회에서 함께 모은다.
+    const searchMessages =
+      vodChatSearchState.collecting && vodChatSearchState.videoNo === videoNo
+        ? []
+        : null;
     const totalMs = duration * 1000;
     let cursor = 0;
     let completed = false;
@@ -10466,6 +10558,15 @@
         const code = Number(m?.messageTypeCode ?? 1);
         if (code === CHAT_TYPE_DONATION) bin.donation += 1;
         else if (code === CHAT_TYPE_SUBSCRIPTION) bin.subscription += 1;
+        // 검색을 열어 둔 경우에만 원문을 모은다(같은 순회를 재사용한다).
+        // ⚠ 여기서도 닉네임·UID 는 담지 않는다. 시각과 본문뿐이다.
+        if (
+          searchMessages &&
+          searchMessages.length < VOD_CHAT_SEARCH_MAX_MESSAGES
+        ) {
+          const text = typeof m?.content === "string" ? m.content : "";
+          if (text) searchMessages.push({ t: Math.round(at), text });
+        }
         // UID·닉네임은 넘기지 않는다. 일반 사용자 메시지인지 여부만 확인해
         // 기존 활성도 수집의 같은 순회에서 통계에 더한다.
         CHAT_ACTIVITY_ANALYSIS_API?.addChatMessage(chatAnalysis, {
@@ -10487,6 +10588,19 @@
       completed &&
       !vodChatScanCoordinator.cancel &&
       getCurrentVideoNo() === videoNo;
+    // 검색용 원문은 끝까지 받았을 때만 넘긴다. 중간까지만 모은 것을 검색에 쓰면
+    // '찾는 채팅이 없다' 와 '아직 안 받았다' 를 구분할 수 없다.
+    if (searchMessages && vodChatSearchState.videoNo === videoNo) {
+      if (complete) {
+        vodChatSearchState.messages = searchMessages;
+        vodChatSearchState.failed = false;
+      } else {
+        vodChatSearchState.failed = true;
+      }
+      vodChatSearchState.collecting = false;
+      vodChatSearchState.loading = false;
+      vodChatSearchState.progress = complete ? 1 : vodChatSearchState.progress;
+    }
     if (complete) {
       try {
         await CHAT_RECAP_STORE_API.saveVodTitleChanges(
@@ -11382,6 +11496,22 @@
 
   function resetChatGraphIfVideoChanged() {
     const videoNo = getCurrentVideoNo();
+    // ⚠ 검색용 원문은 현재 영상 것만 들고 있는다. 영상이 바뀌면 바로 버린다
+    //   (메모리와 사생활 양쪽 이유다. 다시 들어오면 다시 모은다).
+    //   빈 값은 '다른 영상' 이 아니다 — SPA 가 주소를 잠깐 못 읽는 사이에 버리지
+    //   않는다.
+    if (
+      videoNo &&
+      vodChatSearchState.videoNo &&
+      vodChatSearchState.videoNo !== videoNo
+    ) {
+      vodChatSearchState.videoNo = "";
+      vodChatSearchState.messages = null;
+      vodChatSearchState.collecting = false;
+      vodChatSearchState.loading = false;
+      vodChatSearchState.progress = 0;
+      vodChatSearchState.failed = false;
+    }
     if (chatGraphState.videoNo && chatGraphState.videoNo !== videoNo) {
       chatGraphState.videoNo = "";
       chatGraphState.bins = null;
