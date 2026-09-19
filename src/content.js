@@ -10222,6 +10222,7 @@
     loading: false,
     progress: 0,
     cancel: false,
+    failed: false, // 재시도까지 했는데 못 끝낸 경우(사용자에게 알린다)
   };
   // 설정에서 편집한다. 비어 있으면 기본 목록을 쓴다.
   let vodRoleChatBots = [...CHAT_RECAP_STORE_API.DEFAULT_VOD_ROLE_CHAT_BOTS];
@@ -10954,33 +10955,84 @@
     const totalMs = Math.max(1, duration * 1000);
     let cursor = 0;
     let completed = false;
+    // 한 페이지가 잠깐 실패했다고 수집을 통째로 버리지 않는다. 긴 다시보기는
+    // 수백 페이지라 한 번의 네트워크 흔들림으로도 끝나 버렸다(사용자 제보의
+    // '진행이 멈추거나 초기화되거나' 가 이것이다).
+    const PAGE_RETRY_MAX = 3;
+    const PAGE_RETRY_BASE_MS = 500;
+    const PAGE_TIMEOUT_MS = 15000;
+    // 응답이 오지 않아도 영원히 기다리지 않는다.
+    const fetchPage = async (url) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PAGE_TIMEOUT_MS);
+      try {
+        return await fetch(url, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    let aborted = false; // 중단·영상 변경으로 끊겼는가(실패와 구분한다)
+    let failed = false; // 재시도까지 했는데 안 된 경우
     for (let page = 0; page < ROLE_CHAT_MAX_PAGES; page += 1) {
       const url =
         `https://api.chzzk.naver.com/service/v1/videos/${videoNo}/chats` +
         `?playerMessageTime=${cursor}&previousVideoChatSize=50`;
       let content = null;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) {
-          if (res.status === 400) completed = true;
+      let gotPage = false;
+      for (let attempt = 0; attempt < PAGE_RETRY_MAX; attempt += 1) {
+        // 기다리는 사이에 중단됐을 수 있다. 매 시도 전에 확인한다.
+        if (roleChatState.cancel || getCurrentVideoNo() !== videoNo) {
+          aborted = true;
           break;
         }
-        // eslint-disable-next-line no-await-in-loop
-        content = (await res.json())?.content;
-      } catch {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const res = await fetchPage(url);
+          if (res.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            content = (await res.json())?.content;
+            gotPage = true;
+            break;
+          }
+          // 400 은 '더 없음' 이라는 뜻으로 쓰여 왔다(재시도 대상이 아니다).
+          if (res.status === 400) {
+            completed = true;
+            gotPage = true;
+            content = null;
+            break;
+          }
+          // 4xx 는 다시 해도 같다. 5xx·429 만 다시 해 본다.
+          if (res.status !== 429 && res.status < 500) break;
+        } catch {
+          // 네트워크 오류·타임아웃 → 아래에서 잠깐 쉬고 다시 시도한다.
+        }
+        if (attempt < PAGE_RETRY_MAX - 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) =>
+            setTimeout(r, PAGE_RETRY_BASE_MS * 2 ** attempt),
+          );
+        }
+      }
+      if (aborted) break;
+      if (!gotPage) {
+        failed = true; // 여기까지 모은 것은 그대로 둔다
         break;
       }
+      if (completed) break; // 400 = 마지막
       // 영상을 옮기거나 중단을 누르면 즉시 멈춘다.
-      if (roleChatState.cancel || getCurrentVideoNo() !== videoNo) break;
+      if (roleChatState.cancel || getCurrentVideoNo() !== videoNo) {
+        aborted = true;
+        break;
+      }
       const list = Array.isArray(content?.videoChats)
         ? content.videoChats
         : content?.previousVideoChats;
-      if (!Array.isArray(list) || !list.length) {
-        completed = true;
-        break;
-      }
-      for (const m of list) tracker.add(m);
+      for (const m of Array.isArray(list) ? list : []) tracker.add(m);
+      // ⚠ 페이지가 비었다고 끝이 아니다. 다음 위치가 정상으로 오면 계속 간다.
+      //   예전에는 빈 페이지에서 '완료' 로 처리해 그 뒤 구간을 통째로 잃었다.
       const next = Number(content?.nextPlayerMessageTime);
       if (!Number.isFinite(next) || next <= cursor) {
         completed = true;
@@ -10990,9 +11042,12 @@
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
     }
     const complete =
-      completed && !roleChatState.cancel && getCurrentVideoNo() === videoNo;
+      completed &&
+      !failed &&
+      !roleChatState.cancel &&
+      getCurrentVideoNo() === videoNo;
     onProgress?.(complete ? 1 : Math.max(0, Math.min(1, cursor / totalMs)));
-    return { complete, items: tracker.finish() };
+    return { complete, failed, aborted, items: tracker.finish() };
   }
 
   // 저장된 게 있으면 그걸 쓰고, 없으면 모은다.
@@ -11017,6 +11072,7 @@
     roleChatState.loading = true;
     roleChatState.cancel = false;
     roleChatState.progress = 0;
+    roleChatState.failed = false;
     try {
       const result = await collectVodRoleChats(videoNo, (p) => {
         roleChatState.progress = p;
@@ -11042,7 +11098,14 @@
         }
       });
       if (getCurrentVideoNo() !== videoNo) return;
-      if (!result.complete) return; // 중단된 결과는 저장하지 않는다
+      // ⚠ 끝까지 못 갔어도 지금까지 모은 것은 화면에 남긴다. 예전에는 한 페이지가
+      //   흔들린 것만으로 전부 버려서, 사용자에게는 진행이 0 으로 '초기화' 된 것
+      //   처럼 보였다. 저장은 완주했을 때만 한다(불완전한 걸 캐시로 남기지 않는다).
+      if (Array.isArray(result.items) && result.items.length) {
+        roleChatState.items = result.items;
+      }
+      roleChatState.failed = result.failed === true;
+      if (!result.complete) return;
       roleChatState.items = result.items;
       try {
         await CHAT_RECAP_STORE_API.saveVodRoleChats(
@@ -11054,8 +11117,13 @@
         // 저장 실패해도 이번 화면에는 보여 준다.
       }
     } finally {
-      roleChatState.loading = false;
-      roleChatState.cancel = false;
+      // ⚠ 이 작업이 아직 '현재 작업' 일 때만 상태를 되돌린다. 늦게 끝난 예전
+      //   작업의 finally 가 새 작업의 중단 신호까지 지우면, 새 작업이 멈추지
+      //   못하고 계속 돈다(실측으로 확인한 경로다).
+      if (roleChatState.videoNo === videoNo) {
+        roleChatState.loading = false;
+        roleChatState.cancel = false;
+      }
     }
   }
 
@@ -11068,6 +11136,7 @@
       roleChatState.loading = false;
       roleChatState.cancel = true;
       roleChatState.progress = 0;
+      roleChatState.failed = false;
       roleChatPanelCurrentIndex = "";
     }
   }
@@ -12816,7 +12885,16 @@
       status(`모으는 중입니다… ${Math.round(roleChatState.progress * 100)}%`);
       return;
     }
-    if (!rows) {
+    // ⚠ 오류를 조용히 삼키면 '진행이 멈췄다' 로만 보인다. 끝까지 못 간 경우는
+    //   그렇다고 알린다(사용자가 취소한 경우는 오류가 아니므로 여기 오지 않는다).
+    if (roleChatState.failed) {
+      status(
+        rows && rows.length
+          ? "채팅을 모으는 중 오류가 났습니다. 지금까지 모은 것만 표시합니다. 다시 시도해 주세요."
+          : "채팅을 모으는 중 오류가 났습니다. 다시 시도해 주세요.",
+      );
+      if (!rows || !rows.length) return;
+    } else if (!rows) {
       status("아직 모으지 않았습니다. '모으기'를 눌러 주세요.");
       return;
     }
