@@ -90,8 +90,17 @@ const MIN = 15.5;
   const css = readFileSync("src/content.css", "utf8");
   const js = readFileSync("src/content.js", "utf8");
   // 실제 마크업을 content.js 에서 떼어 온다.
-  const from = js.indexOf('<div class="cheese-search-comment-panel-head">');
-  const to = js.indexOf("</div>", js.indexOf("data-role-chat-close"));
+  // ⚠ 첫 번째 panel-head 를 그냥 집으면 안 된다 — 같은 클래스를 여러 패널이
+  //   쓰고 있어서 10만 자가 넘는 엉뚱한 구간이 딸려 온다(실제로 그랬다).
+  //   방장·매니저 패널의 머리말만 정확히 집는다.
+  const anchorAt = js.indexOf("<strong>방장·매니저 채팅</strong>");
+  if (anchorAt < 0) throw Error("방장·매니저 패널 마크업을 찾지 못했다");
+  const from = js.lastIndexOf(
+    '<div class="cheese-search-comment-panel-head">',
+    anchorAt,
+  );
+  const to = js.indexOf("</div>", js.indexOf("data-role-chat-close", anchorAt));
+  if (from < 0 || to < 0) throw Error("방장·매니저 머리말 범위를 찾지 못했다");
   const markup = js.slice(from, to) + "</div></div>";
 
   await ev(`(()=>{

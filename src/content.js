@@ -10278,6 +10278,9 @@
     loading: false,
     progress: 0,
     failed: false,
+    // 상한에 걸려 일부만 모았는지. '전체 검색' 으로 오해하지 않게 화면에 알린다.
+    // "message" = 메시지 수 상한, "page" = 페이지 상한.
+    truncated: "",
   };
   // 아주 긴 방송에서도 메모리가 무한히 늘지 않게 둔다. 실측 기준 10만 건이
   // 약 5MB 라 넉넉하되, 폭주 방송에서 끝없이 쌓이지는 않는 값이다.
@@ -10293,15 +10296,40 @@
       vodChatSearchState.messages = null;
       vodChatSearchState.failed = false;
       vodChatSearchState.progress = 0;
+      vodChatSearchState.truncated = "";
     }
     if (Array.isArray(vodChatSearchState.messages)) {
       return vodChatSearchState.messages;
     }
     if (vodChatSearchState.loading) return null; // 이미 받는 중(중복 실행 금지)
+
+    // ⚠ 활성도·제목 순회가 이미 돌고 있으면 중간에 합류하지 않는다 — 앞부분
+    //   메시지가 통째로 빠지기 때문이다. 대신 그 순회가 끝나기를 기다렸다가
+    //   처음부터 모은다. 기다리는 동안 새 순회를 띄우면 같은 영상을 두 번 받게
+    //   되므로, 아래 collecting 을 켜는 것도 기다린 뒤에 한다.
+    const running =
+      vodChatScanCoordinator.videoNo === videoNo &&
+      vodChatScanCoordinator.promise;
+    if (running) {
+      try {
+        await running;
+      } catch {
+        // 앞선 순회가 어떻게 끝났든, 아래에서 검색용으로 다시 모은다.
+      }
+      // 기다리는 사이에 영상이 바뀌었거나 다른 호출이 먼저 시작했을 수 있다.
+      if (vodChatSearchState.videoNo !== videoNo) return null;
+      if (getCurrentVideoNo() !== videoNo) return null;
+      if (Array.isArray(vodChatSearchState.messages)) {
+        return vodChatSearchState.messages;
+      }
+      if (vodChatSearchState.loading) return null;
+    }
+
     vodChatSearchState.loading = true;
     vodChatSearchState.collecting = true;
     vodChatSearchState.failed = false;
     vodChatSearchState.progress = 0;
+    vodChatSearchState.truncated = "";
     try {
       await collectVodChatDataShared(videoNo, duration, (progress) => {
         vodChatSearchState.progress = progress;
@@ -10310,9 +10338,6 @@
     } catch {
       vodChatSearchState.failed = true;
     } finally {
-      // ⚠ 순회가 이미 돌고 있었다면 그 순회는 원문을 모으지 않는다(중간 합류는
-      //   앞부분이 빠진다). 그때는 messages 가 비어 실패로 남고, 사용자가 다시
-      //   누르면 새 순회에서 처음부터 모은다.
       if (vodChatSearchState.videoNo === videoNo) {
         vodChatSearchState.collecting = false;
         vodChatSearchState.loading = false;
@@ -10346,6 +10371,246 @@
       if (rows.length < limit) rows.push(message);
     }
     return { total, rows };
+  }
+
+  // ── 검색 화면(구간 요약 팝오버 안의 하위 화면) ───────────────────────────
+  //
+  // 새 플레이어 버튼을 만들지 않는다. 구간 요약 팝오버의 머리말 오른쪽에 돋보기를
+  // 하나 더 두고, 누르면 팝오버 안쪽만 검색 화면으로 바꾼다.
+  const VOD_CHAT_SEARCH_LIMIT = 200;
+  const VOD_CHAT_SEARCH_DEBOUNCE_MS = 200;
+  // 팝오버를 닫았다 열어도 검색어는 남긴다(같은 영상인 동안만). 영상이 바뀌면 버린다.
+  const vodChatSearchView = {
+    open: false,
+    query: "",
+    lastQuery: null, // 같은 검색어를 연달아 다시 계산하지 않는다.
+    result: null,
+    timer: 0,
+    token: 0, // 비동기 준비가 끝났을 때 아직 유효한 화면인지 확인한다.
+  };
+
+  function resetVodChatSearchView() {
+    vodChatSearchView.open = false;
+    vodChatSearchView.query = "";
+    vodChatSearchView.lastQuery = null;
+    vodChatSearchView.result = null;
+    vodChatSearchView.token += 1;
+    if (vodChatSearchView.timer) {
+      clearTimeout(vodChatSearchView.timer);
+      vodChatSearchView.timer = 0;
+    }
+  }
+
+  // 상한 때문에 일부만 모았을 때의 안내. 개발자 용어는 쓰지 않는다.
+  function vodChatSearchTruncatedNotice() {
+    if (vodChatSearchState.truncated === "message") {
+      return (
+        `채팅이 매우 많아 처음 ` +
+        `${VOD_CHAT_SEARCH_MAX_MESSAGES.toLocaleString()}개까지만 검색합니다.`
+      );
+    }
+    if (vodChatSearchState.truncated === "page") {
+      const count = Array.isArray(vodChatSearchState.messages)
+        ? vodChatSearchState.messages.length
+        : 0;
+      return `채팅이 매우 많아 처음 ${count.toLocaleString()}개까지만 검색합니다.`;
+    }
+    return "";
+  }
+
+  // 검색 화면 본문. 준비 상태에 따라 안내/입력칸/결과를 그린다.
+  function renderVodChatSearchBody(panel) {
+    const body = panel?.querySelector(".cheese-peak-body");
+    if (!body) return;
+    const ready = Array.isArray(vodChatSearchState.messages);
+    const busy = vodChatSearchState.loading;
+    const failed = vodChatSearchState.failed && !ready;
+
+    body.textContent = "";
+    const wrap = document.createElement("div");
+    wrap.className = "cheese-vod-search";
+
+    // 입력칸은 준비가 끝나야 쓸 수 있다.
+    const form = document.createElement("div");
+    form.className = "cheese-vod-search-bar";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.placeholder = "다시보기 채팅 검색";
+    input.autocomplete = "off";
+    input.className = "cheese-vod-search-input";
+    input.value = vodChatSearchView.query;
+    input.disabled = !ready;
+    form.appendChild(input);
+    wrap.appendChild(form);
+
+    const status = document.createElement("p");
+    status.className = "cheese-vod-search-status";
+
+    if (failed) {
+      status.textContent = "채팅을 불러오지 못했습니다. 다시 시도해 주세요.";
+      wrap.appendChild(status);
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "cheese-vod-search-retry";
+      retry.dataset.vodSearchRetry = "1";
+      retry.textContent = "다시 시도";
+      wrap.appendChild(retry);
+      body.appendChild(wrap);
+      return;
+    }
+
+    if (!ready) {
+      // 진행률은 공유 순회의 것을 그대로 쓴다(따로 재지 않는다).
+      const pct = Math.round((vodChatSearchState.progress || 0) * 100);
+      status.textContent = busy
+        ? `채팅을 준비하는 중입니다… ${pct}%`
+        : "채팅 데이터를 확인하는 중입니다…";
+      wrap.appendChild(status);
+      body.appendChild(wrap);
+      return;
+    }
+
+    const notice = vodChatSearchTruncatedNotice();
+    if (notice) {
+      const warn = document.createElement("p");
+      warn.className = "cheese-vod-search-notice";
+      warn.textContent = notice;
+      wrap.appendChild(warn);
+    }
+
+    const result = vodChatSearchView.result;
+    const query = vodChatSearchView.query.trim();
+    if (!query) {
+      status.textContent = "검색어를 입력해 주세요.";
+      wrap.appendChild(status);
+      body.appendChild(wrap);
+      input.focus();
+      return;
+    }
+    if (!result) {
+      body.appendChild(wrap);
+      return;
+    }
+    if (!result.total) {
+      // ⚠ 검색어를 HTML 로 합치지 않는다. 문자열로만 넣는다.
+      status.textContent = `'${query}'와 일치하는 채팅이 없습니다.`;
+      wrap.appendChild(status);
+      body.appendChild(wrap);
+      return;
+    }
+
+    status.textContent =
+      result.total > result.rows.length
+        ? `검색 결과 ${result.total.toLocaleString()}개 · 처음 ${result.rows.length.toLocaleString()}개 표시`
+        : `검색 결과 ${result.total.toLocaleString()}개`;
+    wrap.appendChild(status);
+
+    const list = document.createElement("ul");
+    list.className = "cheese-vod-search-list";
+    const needle = query.normalize("NFC").toLocaleLowerCase();
+    for (const row of result.rows) {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.vodSearchSeek = String(Math.floor((row.t || 0) / 1000));
+      const time = document.createElement("time");
+      time.textContent = formatSeconds((row.t || 0) / 1000);
+      button.appendChild(time);
+      const text = document.createElement("span");
+      text.className = "cheese-vod-search-text";
+      appendVodSearchHighlighted(text, String(row.text || ""), needle);
+      text.title = String(row.text || "");
+      button.appendChild(text);
+      li.appendChild(button);
+      list.appendChild(li);
+    }
+    wrap.appendChild(list);
+    body.appendChild(wrap);
+  }
+
+  // 검색어가 들어간 자리를 <mark> 로 감싼다.
+  // ⚠ 원문과 검색어를 innerHTML 로 합치지 않는다. 텍스트 노드와 mark 요소를
+  //   DOM 으로 만들어 붙인다(원문에 든 <script> 등이 절대 살아나지 않는다).
+  function appendVodSearchHighlighted(host, text, needle) {
+    if (!needle) {
+      host.appendChild(document.createTextNode(text));
+      return;
+    }
+    // 대소문자를 무시하고 찾되, 잘라 내는 위치는 원문 기준이어야 한다.
+    // ⚠ NFC 정규화는 길이를 바꿀 수 있어 위치 계산에 쓰지 않는다. 소문자 변환만
+    //   쓰고, 혹시 길이가 달라지면 강조를 포기하고 원문만 보여 준다.
+    const lower = text.toLocaleLowerCase();
+    if (lower.length !== text.length) {
+      host.appendChild(document.createTextNode(text));
+      return;
+    }
+    let from = 0;
+    let found = 0;
+    while (found < 50) {
+      const at = lower.indexOf(needle, from);
+      if (at < 0) break;
+      if (at > from) {
+        host.appendChild(document.createTextNode(text.slice(from, at)));
+      }
+      const mark = document.createElement("mark");
+      mark.textContent = text.slice(at, at + needle.length);
+      host.appendChild(mark);
+      from = at + needle.length;
+      found += 1;
+    }
+    if (from < text.length) {
+      host.appendChild(document.createTextNode(text.slice(from)));
+    }
+  }
+
+  // 검색을 실행하고 결과만 다시 그린다.
+  function runVodChatSearch(panel) {
+    const query = vodChatSearchView.query.trim().normalize("NFC");
+    if (!Array.isArray(vodChatSearchState.messages)) return;
+    // 같은 검색어면 다시 계산하지 않는다.
+    if (vodChatSearchView.lastQuery === query && vodChatSearchView.result) {
+      return;
+    }
+    vodChatSearchView.lastQuery = query;
+    vodChatSearchView.result = query
+      ? searchVodChatMessages(
+          vodChatSearchState.messages,
+          query,
+          VOD_CHAT_SEARCH_LIMIT,
+        )
+      : null;
+    renderVodChatSearchBody(panel);
+  }
+
+  // 검색 화면을 연다. 원문이 없으면 여기서 준비를 시작한다(사용자가 버튼을 다시
+  // 누를 필요가 없다).
+  async function openVodChatSearchView(panel) {
+    vodChatSearchView.open = true;
+    renderChatPeakPanelHead(panel);
+    renderVodChatSearchBody(panel);
+    if (Array.isArray(vodChatSearchState.messages)) {
+      runVodChatSearch(panel);
+      return;
+    }
+    const videoNo = getCurrentVideoNo();
+    if (!videoNo) return;
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    const token = (vodChatSearchView.token += 1);
+    const alive = () =>
+      vodChatSearchView.token === token &&
+      vodChatSearchView.open &&
+      getCurrentVideoNo() === videoNo &&
+      document.contains(panel);
+    await ensureVodChatSearchMessages(videoNo, duration, () => {
+      // 진행률은 공유 순회가 알려 준다. 따로 돌며 묻지 않는다.
+      if (alive()) renderVodChatSearchBody(panel);
+    });
+    if (!alive()) return;
+    renderVodChatSearchBody(panel);
+    runVodChatSearch(panel);
   }
 
   // 방송 제목 확인과 채팅 활성도가 같은 영상을 동시에 요청하면 하나의 순회를 공유한다.
@@ -10512,6 +10777,9 @@
       vodChatSearchState.collecting && vodChatSearchState.videoNo === videoNo
         ? []
         : null;
+    // 상한에 걸려 원문을 더 담지 못한 순간을 기록한다. 순회 자체는 활성도를 위해
+    // 끝까지 돌지만, 검색 index 는 그 지점까지만이라는 사실을 화면에 알려야 한다.
+    let searchTruncated = "";
     const totalMs = duration * 1000;
     let cursor = 0;
     let completed = false;
@@ -10560,12 +10828,14 @@
         else if (code === CHAT_TYPE_SUBSCRIPTION) bin.subscription += 1;
         // 검색을 열어 둔 경우에만 원문을 모은다(같은 순회를 재사용한다).
         // ⚠ 여기서도 닉네임·UID 는 담지 않는다. 시각과 본문뿐이다.
-        if (
-          searchMessages &&
-          searchMessages.length < VOD_CHAT_SEARCH_MAX_MESSAGES
-        ) {
-          const text = typeof m?.content === "string" ? m.content : "";
-          if (text) searchMessages.push({ t: Math.round(at), text });
+        if (searchMessages) {
+          if (searchMessages.length >= VOD_CHAT_SEARCH_MAX_MESSAGES) {
+            // ⚠ 조용히 끊고 '완료' 로 넘기면 사용자는 전체를 검색했다고 믿는다.
+            searchTruncated = "message";
+          } else {
+            const text = typeof m?.content === "string" ? m.content : "";
+            if (text) searchMessages.push({ t: Math.round(at), text });
+          }
         }
         // UID·닉네임은 넘기지 않는다. 일반 사용자 메시지인지 여부만 확인해
         // 기존 활성도 수집의 같은 순회에서 통계에 더한다.
@@ -10583,6 +10853,11 @@
       }
       cursor = next;
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
+      // 페이지 상한까지 돌았는데 아직 끝이 아니면, 받은 데까지가 전부다.
+      // ⚠ 메시지 수 상한과 원인이 다르므로 구분해 둔다(문구가 달라진다).
+      if (page === CHAT_GRAPH_MAX_PAGES - 1 && !searchTruncated) {
+        searchTruncated = "page";
+      }
     }
     const complete =
       completed &&
@@ -10591,15 +10866,20 @@
     // 검색용 원문은 끝까지 받았을 때만 넘긴다. 중간까지만 모은 것을 검색에 쓰면
     // '찾는 채팅이 없다' 와 '아직 안 받았다' 를 구분할 수 없다.
     if (searchMessages && vodChatSearchState.videoNo === videoNo) {
-      if (complete) {
+      // 페이지 상한에 걸린 경우는 '실패' 가 아니다. 받은 데까지는 정확하므로
+      // 검색을 허용하되, 어디까지 받았는지 화면에 밝힌다.
+      const usable = complete || searchTruncated === "page";
+      if (usable) {
         vodChatSearchState.messages = searchMessages;
         vodChatSearchState.failed = false;
+        vodChatSearchState.truncated = searchTruncated;
       } else {
         vodChatSearchState.failed = true;
+        vodChatSearchState.truncated = "";
       }
       vodChatSearchState.collecting = false;
       vodChatSearchState.loading = false;
-      vodChatSearchState.progress = complete ? 1 : vodChatSearchState.progress;
+      vodChatSearchState.progress = usable ? 1 : vodChatSearchState.progress;
     }
     if (complete) {
       try {
@@ -11400,20 +11680,55 @@
     await toggleChatGraph();
   }
 
-  function openChatPeakPopover(button) {
-    closeChatPeakPopover();
-    const host = button?.parentElement;
-    if (!host) return;
-    const duration =
-      Number(document.querySelector("video")?.duration) ||
-      getPlayerDuration(findPlayerSliderProgressWrap()) ||
-      0;
-    const el = document.createElement("div");
-    // 댓글 타임스탬프·내 채팅 기록과 같은 껍데기를 쓴다.
-    el.className = `${VIDEO_COMMENT_PANEL_CLASS} ${CHAT_PEAK_POPOVER_CLASS}`;
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-label", "채팅 활성도 구간 요약");
+  // 팝오버 머리말. 활성도 화면과 검색 화면이 같은 자리를 나눠 쓴다.
+  // ⚠ 아이콘은 제목에 밀려 줄어들면 안 된다. 폭이 좁을 때 SVG 부터 찌그러지는
+  //   문제가 방장·매니저 아이콘에서 있었다(content.css 의 flex:0 0 auto 참고).
+  function renderChatPeakPanelHead(panel) {
+    const head = panel?.querySelector(".cheese-search-comment-panel-head");
+    if (!head) return;
+    const searching = vodChatSearchView.open;
+    const back =
+      `<button type="button" data-peak-search-back aria-label="뒤로" title="뒤로">` +
+      `<svg class="lucide lucide-arrow-left" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>` +
+      `</svg></button>`;
+    const rescan =
+      `<button type="button" data-peak-rescan aria-label="다시 수집" title="다시 수집">` +
+      `<svg class="lucide lucide-rotate-cw" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<path d="M21 12a9 9 0 0 1-15.74 6"></path><path d="M3 12a9 9 0 0 1 15.74-6"></path>` +
+      `<path d="M18 2v4h-4"></path><path d="M6 22v-4h4"></path>` +
+      `</svg></button>`;
+    // lucide search.
+    const search =
+      `<button type="button" class="cheese-vod-search-open" data-peak-search ` +
+      `aria-label="다시보기 채팅 검색" title="다시보기 채팅 검색">` +
+      `<svg class="lucide lucide-search" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle>` +
+      `</svg></button>`;
+    const close =
+      `<button type="button" data-peak-close aria-label="닫기">` +
+      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
+      `<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>` +
+      `</svg></button>`;
+    head.innerHTML =
+      (searching ? back : "") +
+      `<strong>${searching ? "다시보기 채팅 검색" : "구간 요약"}</strong>` +
+      `<div class="cheese-recap-panel-head-actions">` +
+      (searching ? "" : rescan + search) +
+      close +
+      `</div>`;
+  }
 
+  // 활성도(구간 요약) 본문. 검색 화면에서 뒤로 돌아올 때도 이걸로 되돌린다.
+  function renderChatPeakBody(panel, duration) {
+    const host = panel?.querySelector(".cheese-peak-body");
+    if (!host) return;
+    const seconds =
+      Number.isFinite(duration) && duration > 0
+        ? duration
+        : Number(document.querySelector("video")?.duration) ||
+          getPlayerDuration(findPlayerSliderProgressWrap()) ||
+          0;
     const bins = chatGraphState.bins;
     let body;
     if (!Array.isArray(bins) || !bins.length) {
@@ -11439,23 +11754,33 @@
           bins,
           chatGraphState.peaks,
           chatGraphState.emojiUrls,
-          duration,
+          seconds,
         );
     }
+    host.innerHTML = body;
+  }
+
+  function openChatPeakPopover(button) {
+    closeChatPeakPopover();
+    const host = button?.parentElement;
+    if (!host) return;
+    const duration =
+      Number(document.querySelector("video")?.duration) ||
+      getPlayerDuration(findPlayerSliderProgressWrap()) ||
+      0;
+    const el = document.createElement("div");
+    // 댓글 타임스탬프·내 채팅 기록과 같은 껍데기를 쓴다.
+    el.className = `${VIDEO_COMMENT_PANEL_CLASS} ${CHAT_PEAK_POPOVER_CLASS}`;
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", "채팅 활성도 구간 요약");
+
     el.innerHTML =
-      `<div class="cheese-search-comment-panel-head">` +
-      `<strong>구간 요약</strong>` +
-      `<div class="cheese-recap-panel-head-actions">` +
-      `<button type="button" data-peak-rescan aria-label="다시 수집" title="다시 수집">` +
-      `<svg class="lucide lucide-rotate-cw" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-      `<path d="M21 12a9 9 0 0 1-15.74 6"></path><path d="M3 12a9 9 0 0 1 15.74-6"></path>` +
-      `<path d="M18 2v4h-4"></path><path d="M6 22v-4h4"></path>` +
-      `</svg></button>` +
-      `<button type="button" data-peak-close aria-label="닫기">` +
-      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
-      `<path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>` +
-      `</svg></button></div></div>` +
-      `<div class="cheese-peak-body">${body}</div>`;
+      `<div class="cheese-search-comment-panel-head"></div>` +
+      `<div class="cheese-peak-body"></div>`;
+    // 검색 화면은 팝오버를 새로 열 때마다 접어 둔다(활성도가 기본 화면이다).
+    vodChatSearchView.open = false;
+    renderChatPeakPanelHead(el);
+    renderChatPeakBody(el, duration);
     if (getComputedStyle(host).position === "static") {
       host.style.position = "relative";
     }
@@ -11473,10 +11798,64 @@
         rescanChatGraph();
         return;
       }
+      if (target.closest("[data-peak-search]")) {
+        openVodChatSearchView(el);
+        return;
+      }
+      if (target.closest("[data-peak-search-back]")) {
+        // 활성도 화면으로 돌아간다. 검색어와 결과는 남겨 둔다(다시 열면 그대로).
+        vodChatSearchView.open = false;
+        vodChatSearchView.token += 1;
+        renderChatPeakPanelHead(el);
+        renderChatPeakBody(el);
+        return;
+      }
+      if (target.closest("[data-vod-search-retry]")) {
+        // ⚠ 검색 index 만 다시 시도한다. 활성도·방장 채팅·제목 기록은 건드리지 않는다.
+        vodChatSearchState.failed = false;
+        vodChatSearchState.progress = 0;
+        openVodChatSearchView(el);
+        return;
+      }
+      const searchSeek = target.closest("[data-vod-search-seek]");
+      if (searchSeek) {
+        // 패널을 닫지 않는다 — 결과를 연달아 눌러 볼 수 있어야 한다.
+        seekVideoToCommentTimestamp(
+          Number(searchSeek.dataset.vodSearchSeek) || 0,
+        );
+        return;
+      }
       const seek = target.closest("[data-peak-seek]");
       if (seek) {
         seekVideoToCommentTimestamp(Number(seek.dataset.peakSeek) || 0);
       }
+    });
+
+    // 검색어 입력. 100k 에서도 10ms 안쪽이라 워커는 쓰지 않고 debounce 만 둔다.
+    el.addEventListener("input", (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!input.classList.contains("cheese-vod-search-input")) return;
+      vodChatSearchView.query = input.value;
+      if (vodChatSearchView.timer) clearTimeout(vodChatSearchView.timer);
+      vodChatSearchView.timer = setTimeout(() => {
+        vodChatSearchView.timer = 0;
+        runVodChatSearch(el);
+      }, VOD_CHAT_SEARCH_DEBOUNCE_MS);
+    });
+    el.addEventListener("keydown", (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!input.classList.contains("cheese-vod-search-input")) return;
+      if (event.key !== "Enter") return;
+      // 기다리지 않고 바로 찾는다.
+      event.preventDefault();
+      if (vodChatSearchView.timer) {
+        clearTimeout(vodChatSearchView.timer);
+        vodChatSearchView.timer = 0;
+      }
+      vodChatSearchView.query = input.value;
+      runVodChatSearch(el);
     });
   }
 
@@ -11511,6 +11890,8 @@
       vodChatSearchState.loading = false;
       vodChatSearchState.progress = 0;
       vodChatSearchState.failed = false;
+      vodChatSearchState.truncated = "";
+      resetVodChatSearchView();
     }
     if (chatGraphState.videoNo && chatGraphState.videoNo !== videoNo) {
       chatGraphState.videoNo = "";

@@ -15664,6 +15664,129 @@ html.theme_dark .cheese-memo-window {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
+.cheese-search-comment-panel-head [data-peak-search]:hover,
+.cheese-search-comment-panel-head [data-peak-search-back]:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+}
+/* ⚠ 머리말의 아이콘은 제목이 길어져도 줄어들면 안 된다. SVG 의 기본
+   flex-shrink 는 1 이라 폭이 모자라면 아이콘부터 찌그러진다(방장·매니저
+   아이콘에서 실제로 8x16 까지 줄어든 적이 있다). 전역 svg 규칙은 건드리지
+   않고 이 머리말 안에서만 고정한다. */
+.cheese-search-comment-panel-head button > svg {
+  flex: 0 0 auto;
+}
+/* 뒤로 버튼은 제목 왼쪽에 선다. */
+.cheese-search-comment-panel-head [data-peak-search-back] {
+  margin-right: 2px;
+}
+
+/* ── 다시보기 채팅 검색 ─────────────────────────────────────────────────── */
+.cheese-vod-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cheese-vod-search-bar {
+  display: flex;
+  position: relative;
+}
+.cheese-vod-search-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  box-sizing: border-box;
+  color: #fff;
+  font-size: 13px;
+  outline: 0;
+  padding: 7px 10px;
+  width: 100%;
+}
+.cheese-vod-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+.cheese-vod-search-input:focus {
+  border-color: rgba(0, 230, 147, 0.7);
+}
+.cheese-vod-search-input:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.cheese-vod-search-status {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 12px;
+  margin: 0;
+}
+.cheese-vod-search-notice {
+  color: #ffd479;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+}
+.cheese-vod-search-retry {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.12);
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+}
+.cheese-vod-search-retry:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.cheese-vod-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cheese-vod-search-list li button {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 6px 7px;
+  text-align: left;
+  width: 100%;
+}
+.cheese-vod-search-list li button:hover,
+.cheese-vod-search-list li button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  outline: 0;
+}
+.cheese-vod-search-list time {
+  color: #00e693;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+/* 본문은 두 줄까지만 보여 준다(전체는 title 로 뜬다). */
+.cheese-vod-search-text {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  word-break: break-word;
+}
+.cheese-vod-search-text mark {
+  background: rgba(0, 230, 147, 0.26);
+  border-radius: 3px;
+  color: #b9ffe4;
+  padding: 0 1px;
+}
 
 /* 스크롤 모양은 댓글 타임스탬프 패널(.cheese-search-comment-panel-list)과 맞춘다.
    헤더를 이미 같은 클래스로 쓰고 있는데 스크롤바만 브라우저 기본이라 겉돌았다. */
