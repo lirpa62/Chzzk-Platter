@@ -54503,10 +54503,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function downloadScreenshotWithAnchor(blob, dataURL, filename) {
-    const blobURL =
-      blob instanceof Blob
-        ? URL.createObjectURL(blob)
-        : dataURLToBlobURL(dataURL);
+    // ⚠ instanceof 로 보지 않는다(MAIN world 에서 온 Blob 은 realm 이 다르다).
+    let blobURL = null;
+    if (isScreenshotBlobLike(blob)) {
+      try {
+        blobURL = URL.createObjectURL(blob);
+      } catch {
+        blobURL = null;
+      }
+    }
+    if (!blobURL) blobURL = dataURLToBlobURL(dataURL);
     if (!blobURL) return false;
     try {
       const anchor = document.createElement("a");
@@ -54553,28 +54559,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         );
         return;
       }
-      let blobURL = null;
-      if (!firefox && screenshotBlob) {
-        // ⚠ 다른 realm 의 Blob 은 URL.createObjectURL 이 거부할 수 있다. 그때를
-        //   대비해 예외를 삼키고 아래 데이터 URL 로 넘어간다.
-        try {
-          blobURL = URL.createObjectURL(screenshotBlob);
-        } catch {
-          blobURL = null;
-        }
+      // ⚠ 콘텐츠 스크립트가 만든 blob: 주소를 확장 service worker 로 넘기지 않는다.
+      //   그 주소는 이 문서에 묶여 있어 service worker 의 chrome.downloads 가
+      //   내려받지 못한다(MV3 에서 알려진 제약이다. 그래서 주소 문자열은
+      //   만들어지는데 저장만 실패했고, 사용자에게는 '이미지 형식 문제' 로만
+      //   보였다).
+      //
+      //   대신 저장 방식을 둘로 나눈다.
+      //   · 바로 저장: 이 문서 안에서 <a download> 로 직접 내려받는다. 같은
+      //     컨텍스트의 blob: 주소라 확실히 동작하고, 큰 PNG 를 base64 로 부풀려
+      //     메시지로 실어 보내지 않아도 된다.
+      //   · 다른 이름으로 저장(대화상자)·파이어폭스: chrome.downloads 가 필요한
+      //     경로다. 이때만 Blob 을 데이터 URL 로 바꿔 보낸다(캔버스 인코딩은
+      //     그대로 두고, 전송 형식만 바꾼다).
+      const wantAnchorSave = !firefox && !saveAs && !!screenshotBlob;
+      if (wantAnchorSave) {
+        const saved = downloadScreenshotWithAnchor(
+          screenshotBlob,
+          "",
+          data.filename,
+        );
+        window.postMessage(
+          {
+            source: "cheese-screenshot-save-result",
+            reqId,
+            ok: saved,
+            saved,
+            reason: saved ? "" : "start-failed",
+            detail: saved ? "" : "anchor",
+          },
+          BRIDGE_ORIGIN,
+        );
+        return;
       }
-      // 객체 URL 을 못 만들었으면 데이터 URL 로 만든다(보낼 주소가 없어 조용히
-      // 실패하는 일이 없게). 파이어폭스는 원래 데이터 URL 을 쓴다.
-      const needDataURL = firefox || !blobURL;
-      const dataURL = needDataURL
-        ? screenshotBlob
-          ? await screenshotBlobToDataURL(screenshotBlob)
-          : String(data.dataURL || "")
-        : "";
-      if (!firefox && !blobURL && dataURL && saveAs) {
-        blobURL = dataURLToBlobURL(dataURL);
-      }
-      const url = firefox ? dataURL : blobURL || dataURL;
+      const dataURL = screenshotBlob
+        ? await screenshotBlobToDataURL(screenshotBlob)
+        : String(data.dataURL || "");
+      const blobURL = null; // 더 이상 blob: 주소를 background 로 넘기지 않는다
+      const url = dataURL;
       if (!url) {
         window.postMessage(
           {
@@ -54589,24 +54611,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         );
         return;
       }
-      const revoke = () => {
-        if (blobURL) URL.revokeObjectURL(blobURL);
-      };
-      let cleanupTimer = blobURL
-        ? setTimeout(revoke, saveAs ? 360000 : 80000)
-        : 0;
+      // 여기까지 온 경로는 데이터 URL 만 쓴다. 되돌릴 객체 URL 이 없다.
+      const revoke = () => {};
       const replyAndCleanup = (payload) => {
-        if (blobURL) {
-          clearTimeout(cleanupTimer);
-          if (
-            payload.reason === "timeout" ||
-            payload.reason === "disconnected"
-          ) {
-            cleanupTimer = setTimeout(revoke, 60000);
-          } else {
-            revoke();
-          }
-        }
         window.postMessage(payload, BRIDGE_ORIGIN);
       };
       try {
@@ -54620,8 +54627,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           (resp) => {
             const runtimeError = chrome.runtime.lastError;
             const ok = !runtimeError && resp?.ok === true;
-            if (!ok && firefox) {
-              revoke();
+            // ⚠ 예전에는 파이어폭스에서만 폴백했다. 다운로드 API 가 어떤 이유로든
+            //   실패하면(확장 연결 끊김 등) 조용히 실패하는 대신, 이 문서에서
+            //   직접 내려받아 본다. 대화상자 경로라도 저장이 되는 편이 낫다.
+            // ⚠ 대화상자에서 취소한 경우는 background 가 {ok:true, saved:false}
+            //   로 알려 주므로 여기(!ok)로 오지 않는다. 즉 전송 자체가 실패한
+            //   경우만 폴백한다 — 사용자가 거절한 파일을 몰래 저장하지 않는다.
+            if (!ok) {
               const fallbackSaved = downloadScreenshotWithAnchor(
                 screenshotBlob,
                 dataURL,

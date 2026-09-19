@@ -109,35 +109,36 @@ test("unanswered save releases callback at its deadline", () => {
   assert.equal(vm.runInContext("screenshotSaveCallbacks.size", context), 0);
 });
 
-test("Chromium content bridge forwards only a Blob URL and revokes it on completion", () => {
+test("Chromium direct save downloads in-page and never ships a blob URL to the worker", () => {
+  // ⚠ 콘텐츠 스크립트가 만든 blob: 주소는 이 문서에 묶여 있어 확장 service worker 의
+  //   chrome.downloads 가 내려받지 못한다(MV3 제약). 그래서 바로 저장은 이 문서에서
+  //   <a download> 로 직접 내려받고, background 로는 아무것도 보내지 않는다.
   const marker = content.indexOf('if (!data || data.source !== "cheese-screenshot-save")');
   const from = content.lastIndexOf('  window.addEventListener("message", (event) => {', marker);
   const to = content.indexOf("\n  });", marker) + 6;
-  // ⚠ 다리는 Blob 을 instanceof 가 아니라 '모양' 으로 판별한다(MAIN world 에서 온
-  //   Blob 은 realm 이 달라 instanceof 가 false 가 될 수 있다). 그 헬퍼는 잘라 낸
-  //   범위 밖에 있으므로 원본에서 함께 가져와 sandbox 에 넣는다.
   const helperFrom = content.indexOf("  function isScreenshotBlobLike(");
   const helperTo = content.indexOf("\n  }", helperFrom) + 4;
-  let listener, callback, request;
-  const revoked = [], timers = new Map();
-  let next = 0;
-  const window = { addEventListener: (event, cb) => { listener = cb; }, postMessage() {} };
+  let listener, sent = 0, anchored = null;
+  const posted = [];
+  const window = { addEventListener: (event, cb) => { listener = cb; },
+    postMessage: (payload) => posted.push(payload) };
   const context = vm.createContext({ window, Blob, screenshotDirectSave: true, BRIDGE_ORIGIN: "fixture",
-    isFirefoxExtensionRuntime: () => false, downloadScreenshotWithAnchor: () => false,
-    URL: { createObjectURL: (blob) => { assert.equal(blob.type, "image/png"); return "blob:fixture"; }, revokeObjectURL: (url) => revoked.push(url) },
-    chrome: { runtime: { sendMessage: (payload, cb) => { request = payload; callback = cb; } } },
-    setTimeout: (cb) => { timers.set(++next, cb); return next; }, clearTimeout: (id) => timers.delete(id),
+    isFirefoxExtensionRuntime: () => false,
+    downloadScreenshotWithAnchor: (blob, dataURL, filename) => { anchored = { blob, dataURL, filename }; return true; },
+    URL: { createObjectURL: () => { throw new Error("background 로 blob 주소를 만들면 안 된다"); },
+      revokeObjectURL() {} },
+    chrome: { runtime: { sendMessage: () => { sent += 1; } } },
+    setTimeout: () => 1, clearTimeout() {},
   });
   vm.runInContext(content.slice(helperFrom, helperTo), context);
   vm.runInContext(content.slice(from, to), context);
   listener({ source: window, data: { source: "cheese-screenshot-save", reqId: 1, filename: "test.png",
     blob: new Blob(["fixture"], { type: "image/png" }) } });
-  assert.equal(request.url, "blob:fixture");
-  assert.equal(request.saveAs, false);
-  assert.equal("blob" in request, false);
-  callback({ ok: true, saved: true });
-  assert.deepEqual(revoked, ["blob:fixture"]);
-  assert.equal(timers.size, 0);
+  assert.equal(sent, 0, "바로 저장에서는 background 로 보내지 않는다");
+  assert.ok(anchored, "이 문서에서 직접 내려받는다");
+  assert.equal(anchored.filename, "test.png");
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].saved, true);
 });
 
 test("Firefox content bridge converts a Blob to a data URL", async () => {

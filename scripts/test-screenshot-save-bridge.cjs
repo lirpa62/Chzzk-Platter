@@ -95,20 +95,31 @@ async function resolveSaveUrl({
 }
 
 (async () => {
-  console.log("\n[보낼 주소] 어떤 경로에서도 빈 주소로 끝나지 않는다");
-  const cases = [
-    ["바로 저장 · 객체 URL 정상", { saveAs: false, objectUrlWorks: true }],
-    ["바로 저장 · 객체 URL 실패", { saveAs: false, objectUrlWorks: false }],
-    ["대화상자 · 객체 URL 정상", { saveAs: true, objectUrlWorks: true }],
-    ["대화상자 · 객체 URL 실패", { saveAs: true, objectUrlWorks: false }],
-    ["파이어폭스", { saveAs: false, firefox: true }],
-  ];
-  for (const [label, opts] of cases) {
-    const r = await resolveSaveUrl({
-      blob: foreignBlob("image/png", 106),
-      ...opts,
-    });
-    ok(!!r.url, `${label} → 보낼 주소가 있다 (${r.url || r.reason})`);
+  console.log("\n[전송 방식] blob: 주소를 service worker 로 넘기지 않는다");
+  // ⚠ 콘텐츠 스크립트가 만든 blob: 주소는 그 문서에 묶여 있어 확장 service worker
+  //   의 chrome.downloads 가 내려받지 못한다(MV3 제약). 주소 문자열은 만들어지므로
+  //   예전에는 '주소가 있다' 로 통과한 뒤 저장만 조용히 실패했다.
+  const route = ({ saveAs, firefox = false, hasBlob = true }) => {
+    if (!firefox && !saveAs && hasBlob) return { how: "anchor", url: "" };
+    return { how: "downloads", url: "data:image/png;base64,AAAA" };
+  };
+  {
+    const cases = [
+      ["바로 저장(Chrome)", { saveAs: false }, "anchor", ""],
+      ["대화상자(Chrome)", { saveAs: true }, "downloads", "data:"],
+      ["파이어폭스", { saveAs: false, firefox: true }, "downloads", "data:"],
+    ];
+    for (const [label, opts, how, scheme] of cases) {
+      const r = route(opts);
+      ok(r.how === how, `${label} → ${how}`);
+      ok(
+        !String(r.url).startsWith("blob:"),
+        `${label} → blob: 주소를 보내지 않는다`,
+      );
+      if (scheme) {
+        ok(r.url.startsWith(scheme), `${label} → ${scheme} 로 보낸다`);
+      }
+    }
   }
 
   console.log("\n[background 검증] 그 주소를 background 가 받아 준다");
@@ -152,6 +163,22 @@ async function resolveSaveUrl({
     ok(
       !/data\.blob instanceof Blob/.test(content),
       "다리에서 instanceof 로 거르지 않는다",
+    );
+    const bridge = content.slice(
+      content.indexOf('if (!data || data.source !== "cheese-screenshot-save")'),
+      content.indexOf(
+        'if (!data || data.source !== "cheese-screenshot-save")',
+      ) + 4200,
+    );
+    ok(
+      /const wantAnchorSave = !firefox && !saveAs && !!screenshotBlob;/.test(
+        bridge,
+      ),
+      "바로 저장은 이 문서에서 직접 내려받는다",
+    );
+    ok(
+      !/blobURL = URL\.createObjectURL\(screenshotBlob\)/.test(bridge),
+      "background 로 넘길 blob: 주소를 만들지 않는다",
     );
   }
 
