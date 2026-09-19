@@ -2,24 +2,26 @@
 //
 // 증상: 머리말의 검색 아이콘을 누르면 검색 화면으로 바뀌지 않고 팝오버가 닫힌다.
 //
-// 원인(실측): 검색 버튼의 click 처리가 머리말을 innerHTML 로 통째로 갈아끼운다.
+// 공통 원인: 검색 버튼의 click 처리가 머리말을 innerHTML 로 통째로 갈아끼운다.
 // 그래서 이벤트가 document 까지 올라올 무렵 눌린 버튼은 이미 DOM 에서 떨어져
-// 나가 있다. 바깥 클릭 판정이 target.closest() 였기 때문에 null 이 나왔고,
-// '바깥을 눌렀다' 로 잘못 판정해 팝오버를 닫았다.
+// 나가 있고, target.closest() 는 null 이 된다.
 //
-//   search handler: head 교체 전 connected=true
-//   search handler: head 교체 후 connected=false
-//   document click: target.isConnected=false
-//     target.closest(.popover)=null      ← 여기서 바깥으로 오판
-//     panel.contains(target)=false
-//     composedPath.includes(panel)=true  ← 경로에는 남아 있다
+//   head 교체 전 connected=true → 교체 후 connected=false
+//   target.closest(.panel)=null      ← 여기서 '바깥' 으로 오판
+//   composedPath.includes(panel)=true ← 경로에는 남아 있다
 //
-// 고침: composedPath() 로 판정한다. 이벤트가 출발한 순간의 경로라 중간에 DOM 이
-// 바뀌어도 팝오버가 남아 있다.
+// 닫는 경로가 둘이었다. 처음에는 첫 번째만 고쳐서 실제 치지직에서는 그대로였다.
 //
-// ⚠ 이 파일의 fixture 는 반드시 '누른 버튼이 handler 안에서 DOM 에서 제거되는'
-//   상황을 만들어야 한다. 버튼을 그대로 둔 채 contains() 만 확인하면 실제 버그를
-//   못 잡는다.
+//  1) 구간 요약 자신의 바깥 클릭 판정 — composedPath 로 고침.
+//  2) 댓글 타임스탬프 패널의 document 리스너 — 이쪽이 실제 범인이었다.
+//     구간 요약 팝오버가 댓글 타임스탬프와 '같은 겉껍데기 클래스' 를 쓰는데
+//     그 패널의 삭제 선택자에서 빠져 있어, 검색을 누르면 함께 지워졌다.
+//     실제 trace: 팝오버만 떨어짐(조상·컨트롤은 그대로), 숨김이 아니라 detach.
+//
+// ⚠ fixture 가 지켜야 할 두 가지. 하나라도 빠지면 진짜 버그를 놓친다.
+//   - 누른 버튼이 handler 안에서 DOM 에서 제거될 것
+//   - 팝오버가 '실제 클래스 조합' 을 쓰고, 두 document 리스너가 모두 있을 것
+//   (예전 fixture 는 둘째를 빠뜨려서 통과해 버렸다.)
 const { spawn } = require("node:child_process");
 const { mkdtempSync, rmSync, readFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -35,6 +37,50 @@ function sliceFn(name) {
   const end = SRC.indexOf("\n  }\n", at);
   if (end < 0) throw Error(`함수 끝을 찾지 못했다: ${name}`);
   return SRC.slice(at, end + 4);
+}
+
+// content.js 의 COMMENT_TIMESTAMP_PANEL_SELECTOR 를 실제 값으로 만들어 온다.
+// ⚠ 여기 문자열을 손으로 베껴 두면 원본이 바뀌어도 테스트가 계속 통과한다.
+function commentSelector() {
+  const pick = (name) => {
+    const m = SRC.match(new RegExp(`const ${name} = "([^"]+)"`));
+    if (!m) throw Error(`상수를 찾지 못했다: ${name}`);
+    return m[1];
+  };
+  const body = SRC.match(
+    /const COMMENT_TIMESTAMP_PANEL_SELECTOR =\s*([\s\S]*?);\n/,
+  );
+  if (!body) throw Error("COMMENT_TIMESTAMP_PANEL_SELECTOR 를 찾지 못했다");
+  return body[1]
+    .replace(/`/g, "")
+    .replace(/\s*\+\s*/g, "")
+    .replace(/\$\{(\w+)\}/g, (_, n) => pick(n))
+    .trim();
+}
+
+// handleCommentTimestampDocumentClick 이 '패널 안인가' 를 어떻게 보는지 그대로
+// 가져온다. composedPath 든 target.closest 든 원본이 쓰는 방식이 그대로 실린다.
+function commentInsideCheckBody() {
+  const fn = SRC.slice(
+    SRC.indexOf("function handleCommentTimestampDocumentClick"),
+    SRC.indexOf("function handleCommentTimestampKeydown"),
+  );
+  if (!fn) throw Error("handleCommentTimestampDocumentClick 을 찾지 못했다");
+  // 새 방식: 경로로 본다.
+  const viaPath = fn.match(
+    /if \(eventPathContains\(event, `\.\$\{VIDEO_COMMENT_PANEL_CLASS\}`\)\) return;/,
+  );
+  if (viaPath) {
+    return `return eventPathContains(event, '.${"cheese-search-comment-timestamp-panel"}');`;
+  }
+  // 예전 방식: 떨어져 나간 target 에 기댄다.
+  const viaClosest = fn.match(
+    /const panel = event\.target\.closest\(`\.\$\{VIDEO_COMMENT_PANEL_CLASS\}`\);/,
+  );
+  if (viaClosest) {
+    return `return !!event.target.closest?.('.cheese-search-comment-timestamp-panel');`;
+  }
+  throw Error("패널 안/바깥 판정 방식을 알아내지 못했다");
 }
 
 const dir = mkdtempSync(join(tmpdir(), "cheese-peak-"));
@@ -104,6 +150,9 @@ const ok = (c, l) => {
     window.CHAT_PEAK_POPOVER_CLASS='cheese-chat-peak-popover';
     window.CHAT_GRAPH_BUTTON_CLASS='cheese-chat-graph-button';
     window.vodChatSearchView={open:false,query:'',lastQuery:null,result:null,timer:0,token:0};
+    // 댓글 타임스탬프가 '자기 것만' 지우는 선택자 — 실제 소스에서 그대로 가져온다.
+    window.COMMENT_SELECTOR=${JSON.stringify(commentSelector())};
+    window.commentInsideCheck=(event)=>{ ${commentInsideCheckBody()} };
     ${sliceFn("eventPathContains")}
     ${sliceFn("renderChatPeakPanelHead")}
     window.eventPathContains=eventPathContains;
@@ -111,10 +160,14 @@ const ok = (c, l) => {
 
     // 실제 구조와 같은 껍데기 + 실제 document 리스너와 같은 판정.
     window.setup=()=>{
+      // ⚠ 실제 팝오버가 쓰는 클래스를 그대로 써야 한다. 구간 요약 팝오버는
+      //   댓글 타임스탬프 패널과 '같은 겉껍데기 클래스'를 공유하는데, 예전
+      //   fixture 가 이걸 빼먹어서 남의 close 경로에 지워지는 진짜 버그를
+      //   구조적으로 재현하지 못했다.
       document.body.innerHTML=
         '<div id="host">'+
         '<button class="cheese-chat-graph-button">활성도</button>'+
-        '<div class="cheese-search-comment-panel cheese-chat-peak-popover" id="panel">'+
+        '<div class="cheese-search-comment-timestamp-panel cheese-chat-peak-popover" id="panel">'+
         '<div class="cheese-search-comment-panel-head"></div>'+
         '<div class="cheese-peak-body"></div></div></div>'+
         '<div id="outside">바깥</div>';
@@ -154,9 +207,23 @@ const ok = (c, l) => {
         if(eventPathContains(event,'.cheese-chat-graph-button'))return;
         closePeak('outside-click');
       };
+      // ⚠ 두 번째 close 경로. 댓글 타임스탬프 패널의 document 리스너는 같은
+      //   겉껍데기 클래스를 지우므로, 여기서 빠지면 구간 요약 팝오버가 함께
+      //   사라진다. 실제 코드의 판정·선택자를 그대로 쓴다.
+      window.commentHandler=(event)=>{
+        // ⚠ 안/바깥 판정은 실제 소스에서 떼어 온 것을 쓴다. 여기에 판정을 손으로
+        //   적어 두면, 원본이 예전 방식으로 되돌아가도 테스트가 통과해 버린다.
+        if(window.commentInsideCheck(event))return;
+        const removed=document.querySelector(window.COMMENT_SELECTOR);
+        if(removed){ window.closeReasons.push('comment-timestamp-close');
+          removed.remove(); }
+      };
       document.addEventListener('click',window.docHandler);
+      document.addEventListener('click',window.commentHandler);
       return true;};
-    window.teardown=()=>{document.removeEventListener('click',window.docHandler);};
+    window.teardown=()=>{
+      document.removeEventListener('click',window.docHandler);
+      document.removeEventListener('click',window.commentHandler);};
     window.alive=()=>!!document.getElementById('panel');
     return true;})()`);
 
@@ -180,6 +247,32 @@ const ok = (c, l) => {
       `팝오버가 살아 있다 (닫힌 이유: ${r.reasons.join(",") || "없음"})`,
     );
     ok(r.reasons.length === 0, "바깥 클릭으로 오판하지 않는다");
+  }
+
+  console.log(
+    "\n[2차 경로] 댓글 타임스탬프 close 가 구간 요약을 지우지 않는다",
+  );
+  {
+    // ⚠ 실제 치지직에서 팝오버를 지운 것은 바깥 클릭 판정이 아니라 이쪽이었다.
+    //   구간 요약 팝오버가 댓글 타임스탬프와 같은 겉껍데기 클래스를 쓰는데,
+    //   그 패널의 삭제 선택자에서 빠져 있어 함께 지워졌다.
+    const r = await ev(`(()=>{setup();
+      const sel=window.COMMENT_SELECTOR;
+      const matchesPeak=panel.matches(sel);
+      panel.querySelector('[data-peak-search]').click();
+      const out={matchesPeak, alive:alive(), reasons:window.closeReasons.slice(),
+        searchUi:!!panel.isConnected&&!!document.querySelector('.cheese-vod-search-input')};
+      teardown(); return out;})()`);
+    ok(
+      r.matchesPeak === false,
+      "구간 요약 팝오버가 댓글 타임스탬프 삭제 대상에서 빠져 있다",
+    );
+    ok(
+      !r.reasons.includes("comment-timestamp-close"),
+      `댓글 타임스탬프 close 가 돌지 않는다 (${r.reasons.join(",") || "없음"})`,
+    );
+    ok(r.alive, "두 리스너가 모두 있어도 팝오버가 살아 있다");
+    ok(r.searchUi, "검색 화면으로 전환된다");
   }
 
   console.log("\n[A] 검색 클릭 → 팝오버 유지 + 검색 화면 전환");

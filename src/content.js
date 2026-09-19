@@ -517,6 +517,16 @@
   // 별도 버튼으로 분리했다(패널 모양은 그대로 같은 클래스를 쓴다).
   const ROLE_CHAT_BUTTON_CLASS = "cheese-role-chat-button";
   const ROLE_CHAT_PANEL_CLASS = "cheese-role-chat-panel";
+  // 댓글 타임스탬프 패널 '자기 것만' 고르는 선택자.
+  //
+  // ⚠ 팝오버 모양을 쓰는 다른 화면들이 같은 겉껍데기 클래스를 공유한다. 그래서
+  //   여기서 빼 주지 않으면 댓글 타임스탬프를 닫을 때 남의 패널까지 지운다.
+  //   실제로 구간 요약 팝오버가 이 목록에서 빠져 있어, 검색 버튼을 누르면
+  //   방금 연 화면이 그 자리에서 사라졌다(실측).
+  const PEAK_POPOVER_CLASS_NAME = "cheese-chat-peak-popover";
+  const COMMENT_TIMESTAMP_PANEL_SELECTOR =
+    `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS})` +
+    `:not(.${ROLE_CHAT_PANEL_CLASS}):not(.${PEAK_POPOVER_CLASS_NAME})`;
   // ── seek preview 방송 당시 추정 시각 병기 ───────────────────────────────────
   // 다시보기 재생바 호버 시 뜨는 seek preview의 시간(.pzp-seeking-preview__time) 아래에
   // 시작 추정 시각(liveOpenDate) + preview 시간으로 계산한 당시 추정 시각을 병기.
@@ -9562,9 +9572,7 @@
       closeRoleChatPanel();
       return;
     }
-    const panel = document.querySelector(
-      `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`,
-    );
+    const panel = document.querySelector(COMMENT_TIMESTAMP_PANEL_SELECTOR);
     if (panel) {
       closeCommentTimestampPanel();
       return;
@@ -9669,11 +9677,7 @@
     clearCommentTsClickDelayTimer();
     stopCommentTimestampPanelTimeTracker();
     stopCommentTimestampPanelAnchorMonitor();
-    document
-      .querySelector(
-        `.${VIDEO_COMMENT_PANEL_CLASS}:not(.${RECAP_PANEL_CLASS}):not(.${ROLE_CHAT_PANEL_CLASS})`,
-      )
-      ?.remove();
+    document.querySelector(COMMENT_TIMESTAMP_PANEL_SELECTOR)?.remove();
     document
       .querySelector(`.${VIDEO_COMMENT_BUTTON_CLASS}`)
       ?.setAttribute("aria-expanded", "false");
@@ -10002,8 +10006,12 @@
     );
     if (!menu && !button) closeCommentFeatureMenu();
 
-    const panel = event.target.closest(`.${VIDEO_COMMENT_PANEL_CLASS}`);
-    if (panel || button) return;
+    // ⚠ closest() 만 보면 안 된다. 패널 안의 버튼이 자기 click 처리 중에 머리말을
+    //   다시 그리면, 이 핸들러가 도는 시점에는 눌린 노드가 이미 DOM 에서 떨어져
+    //   closest() 가 null 이 된다(실측: 구간 요약의 검색 버튼). 그러면 '안을
+    //   눌렀는데 바깥' 으로 판정해 방금 연 화면을 닫는다. 경로로 본다.
+    if (eventPathContains(event, `.${VIDEO_COMMENT_PANEL_CLASS}`)) return;
+    if (button) return;
     closeCommentTimestampPanel();
     closeChatRecapPanel();
   }
@@ -11200,7 +11208,9 @@
 
   // 영상이 바뀌면 모아 둔 집계와 표시를 버린다.
   // ── peak 구간 팝오버(활성도 버튼 우클릭) ────────────────────────────────
-  const CHAT_PEAK_POPOVER_CLASS = "cheese-chat-peak-popover";
+  // ⚠ 값은 위(COMMENT_TIMESTAMP_PANEL_SELECTOR 근처)에서 한 번만 정한다. 두 곳에
+  //   따로 적어 두면 한쪽만 고쳤을 때 팝오버가 다시 남의 손에 지워진다.
+  const CHAT_PEAK_POPOVER_CLASS = PEAK_POPOVER_CLASS_NAME;
 
   function closeChatPeakPopover() {
     document
