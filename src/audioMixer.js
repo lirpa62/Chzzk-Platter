@@ -7169,7 +7169,7 @@
     btn.setAttribute("aria-label", "실시간 따라잡기");
     btn.dataset.icon = "play";
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">실시간 따라잡기</span><span class="pzp-ui-icon">${syncIcon()}</span>`;
-    bindSyncTooltipHover(btn);
+    bindSyncTooltipHover();
     return btn;
   }
 
@@ -7181,17 +7181,70 @@
   //   뜨지 않았다.
   //   JS 이벤트는 정상으로 오므로, 그것으로 우리 클래스를 켜고 그 클래스에
   //   툴팁을 띄운다. disabled 는 그대로 둔다 — 접근성 의미와 클릭 차단을 유지한다.
-  function bindSyncTooltipHover(btn) {
-    if (!btn || btn.dataset.cheeseTipBound === "1") return;
-    btn.dataset.cheeseTipBound = "1";
-    const open = () => btn.classList.add("is-tip-open");
-    const close = () => btn.classList.remove("is-tip-open");
-    btn.addEventListener("pointerenter", open);
-    btn.addEventListener("pointerleave", close);
-    // 포인터가 사라지는 경우(창 밖으로 나감 등)도 닫는다.
-    btn.addEventListener("pointercancel", close);
-    btn.addEventListener("focus", open);
-    btn.addEventListener("blur", close);
+  //   ⚠ 버튼은 페이지 이동·컨트롤 재생성으로 없어졌다 다시 만들어진다. 그래서
+  //   버튼마다 리스너를 붙이지 않고 document 에서 한 번만 위임받는다(이 파일의
+  //   클릭 처리도 같은 방식이다). pointerenter 는 버블하지 않으므로
+  //   pointerover/pointerout 을 쓰고, 버튼 안 아이콘 사이를 오갈 때 깜빡이지
+  //   않도록 경계를 확인한다.
+  const SYNC_TIP_OPEN_CLASS = "is-tip-open";
+
+  function closeAllSyncTooltips() {
+    for (const el of document.querySelectorAll(
+      `.${SYNC_BUTTON_CLASS}.${SYNC_TIP_OPEN_CLASS}`,
+    )) {
+      el.classList.remove(SYNC_TIP_OPEN_CLASS);
+    }
+  }
+
+  let syncTooltipDelegated = false;
+  function bindSyncTooltipHover() {
+    if (syncTooltipDelegated) return;
+    syncTooltipDelegated = true;
+    document.addEventListener(
+      "pointerover",
+      (event) => {
+        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
+        if (!btn) return;
+        // 버튼 안에서 옮겨 다니는 것은 새로 들어온 것이 아니다.
+        if (btn.contains(event.relatedTarget)) return;
+        btn.classList.add(SYNC_TIP_OPEN_CLASS);
+      },
+      true,
+    );
+    document.addEventListener(
+      "pointerout",
+      (event) => {
+        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
+        if (!btn) return;
+        // 버튼 안쪽으로 옮겨 간 것이면 닫지 않는다.
+        if (btn.contains(event.relatedTarget)) return;
+        btn.classList.remove(SYNC_TIP_OPEN_CLASS);
+      },
+      true,
+    );
+    // 키보드로 옮겨 왔을 때도 보여 준다(버튼이 잠겨 있으면 포커스가 가지 않으므로
+    // 활성일 때만 해당된다).
+    document.addEventListener(
+      "focusin",
+      (event) => {
+        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
+        if (btn) btn.classList.add(SYNC_TIP_OPEN_CLASS);
+      },
+      true,
+    );
+    document.addEventListener(
+      "focusout",
+      (event) => {
+        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
+        if (btn) btn.classList.remove(SYNC_TIP_OPEN_CLASS);
+      },
+      true,
+    );
+    // 창 밖으로 나가거나 탭이 가려지면 떠 있던 말풍선을 정리한다(잔상 방지).
+    window.addEventListener("blur", closeAllSyncTooltips);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) closeAllSyncTooltips();
+    });
   }
 
   // ── 라이브·다시보기 되감기/앞으로 ─────────────────────────────────────────
@@ -7797,7 +7850,7 @@
     const existing = controls?.querySelector(`.${SYNC_BUTTON_CLASS}`);
     if (!controls || existing) {
       // 이미 있는 버튼에도 툴팁 처리를 붙인다(안에서 한 번만 걸린다).
-      if (existing) bindSyncTooltipHover(existing);
+      bindSyncTooltipHover();
       startSyncCheck();
       return;
     }
@@ -8048,11 +8101,22 @@
   }
 
   // 표시값이 같으면 텍스트 노드를 교체하지 않아 전역 DOM 옵저버를 깨우지 않는다.
-  function setSyncTooltip(btn, lat, { catching = false, idle = false } = {}) {
+  function setSyncTooltip(
+    btn,
+    lat,
+    { catching = false, idle = false, autoStop = false } = {},
+  ) {
     const tip = btn?.querySelector(".pzp-button__tooltip");
     if (!tip) return;
     let text;
-    if (catching) {
+    if (autoStop) {
+      // 자동 따라잡기가 켜져 있고 지금은 지연이 작아 개입하지 않는 상태.
+      // 버튼은 '해제' 로 동작하지만, 지금 지연도 함께 알려 준다.
+      // ⚠ 지연을 아직 못 쟀으면 '지연 - ' 같은 어색한 문구 대신 기존 문구만 쓴다.
+      text = Number.isFinite(lat)
+        ? `지연 ${lat.toFixed(1)}초 · 자동 따라잡기 해제`
+        : "자동 따라잡기 해제";
+    } else if (catching) {
       // 자동으로 따라잡는 중이면 목표까지 함께 알린다.
       text = Number.isFinite(lat)
         ? `지연 ${lat.toFixed(1)}초 · ${syncCfg.target}초까지 따라잡는 중`
@@ -8156,10 +8220,8 @@
     setSyncIcon(btn, showStop);
     if (showStop) {
       btn.disabled = false;
-      const tip = btn.querySelector(".pzp-button__tooltip");
-      if (tip && tip.textContent !== "자동 따라잡기 해제") {
-        tip.textContent = "자동 따라잡기 해제";
-      }
+      // 같은 헬퍼를 쓴다(지연 표기를 두 곳에 따로 만들지 않는다).
+      setSyncTooltip(btn, lat, { autoStop: true });
     } else {
       // ⚠ 예전에는 임계 미만이면 null 을 넘겨 지연이 사라졌다. 버튼이 비활성일
       //   때야말로 '지금 얼마나 밀렸는지' 가 궁금하므로 그대로 넘긴다.

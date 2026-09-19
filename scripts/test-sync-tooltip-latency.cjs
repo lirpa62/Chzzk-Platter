@@ -20,9 +20,14 @@ const SYNC_JUMP_LATENCY_S = 12;
 // audioMixer.js 와 같은 규칙.
 function tooltipText(
   lat,
-  { catching = false, idle = false, mode = "rate" } = {},
+  { catching = false, idle = false, autoStop = false, mode = "rate" } = {},
   target = 2,
 ) {
+  if (autoStop) {
+    return Number.isFinite(lat)
+      ? `지연 ${lat.toFixed(1)}초 · 자동 따라잡기 해제`
+      : "자동 따라잡기 해제";
+  }
   if (catching) {
     return Number.isFinite(lat)
       ? `지연 ${lat.toFixed(1)}초 · ${target}초까지 따라잡는 중`
@@ -60,6 +65,18 @@ console.log("\n[B] 자동으로 따라잡는 중에도 지연과 목표를 보�
   ok(text.includes("3초까지"), "목표 지연을 함께 알린다");
 }
 
+console.log("\n[G] 자동 따라잡기 해제 버튼에도 현재 지연을 보여 준다");
+{
+  const text = tooltipText(4.7, { autoStop: true });
+  ok(text.includes("4.7초"), `현재 지연이 들어 있다 (${text})`);
+  ok(text.includes("자동 따라잡기 해제"), "버튼이 하는 일을 그대로 알린다");
+  // ⚠ 지연을 아직 못 쟀으면 '지연 -' 같은 어색한 문구를 만들지 않는다.
+  ok(
+    tooltipText(null, { autoStop: true }) === "자동 따라잡기 해제",
+    "지연을 모르면 기존 문구로 돌아간다",
+  );
+}
+
 console.log("\n[기존 동작] 누를 수 있을 때의 문구는 그대로다");
 {
   const text = tooltipText(5.2, {});
@@ -94,6 +111,16 @@ console.log("\n[소스] 비활성일 때 지연을 버리지 않는다");
   ok(
     /\.cheese-live-sync-button\.is-tip-open \.pzp-button__tooltip/.test(css),
     "비활성일 때도 띄울 수 있는 규칙이 있다",
+  );
+  // ⚠ :hover 와 AND 로 묶이면 disabled 에서 다시 안 보인다.
+  ok(
+    !/is-tip-open[^{]*:hover/.test(css),
+    "표시 조건이 :hover 와 묶여 있지 않다",
+  );
+  // 지연 표기를 두 곳에 따로 만들지 않는다.
+  ok(
+    /setSyncTooltip\(btn, lat, \{ autoStop: true \}\)/.test(mixer),
+    "해제 버튼도 같은 헬퍼를 쓴다",
   );
 }
 

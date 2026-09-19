@@ -1982,10 +1982,16 @@
    ⚠ 치지직 툴팁은 CSS :hover 로 뜨는데, disabled 버튼에는 :hover 가 걸리지 않는다
    (실측: mouseenter·pointerover 는 오지만 matches(':hover') 는 false). 그래서
    따라잡기를 끝내 버튼이 잠기면 지금 지연을 보려 해도 툴팁이 뜨지 않았다.
-   JS 로 켜는 클래스에 맞춰 같은 모양으로 띄운다(disabled 는 그대로 둔다). */
+   JS 로 켜는 클래스에만 맞춰 띄운다(:hover 와 AND 로 묶지 않는다).
+
+   ⚠ !important 를 쓰는 이유: 치지직이 이 툴팁을 무엇으로 숨기는지는 페이지 CSS
+   에 달려 있고 버전마다 바뀔 수 있다. 실측으로 display:none·opacity/visibility·
+   hover 전용까지는 우리 규칙이 이겼지만, 치지직이 !important 로 숨기면 졌다.
+   표시 여부만 확실히 가져오고 위치·모양은 치지직 것을 그대로 쓴다.
+   disabled 는 건드리지 않는다. */
 .cheese-live-sync-button.is-tip-open .pzp-button__tooltip {
-  display: block;
-  opacity: 1;
-  visibility: visible;
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
   pointer-events: none;
 }
