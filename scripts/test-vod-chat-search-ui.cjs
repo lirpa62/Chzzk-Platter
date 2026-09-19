@@ -478,6 +478,62 @@ const ok = (c, l) => {
     ok(r.renderMs < 200, `렌더가 충분히 빠르다 (${r.renderMs}ms)`);
   }
 
+  console.log(
+    "\n[포커스] 플레이어가 mousedown 을 막아도 한 번 눌러 입력할 수 있다",
+  );
+  {
+    // ⚠ 증상: 한 번 클릭으로는 입력이 안 되고, 좌클릭을 꾹 누르고 있어야 글자가
+    //   들어갔다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
+    //   mousedown 에서 preventDefault 를 하면 '눌린 곳에 포커스' 기본 동작까지
+    //   취소된다(실측: 조상이 막으면 activeElement 가 빈다).
+    //   ⚠ 여기서는 진짜 마우스 이벤트를 보내야 한다. input.focus() 를 직접
+    //     부르는 방식으로는 이 버그가 재현되지 않는다.
+    const box = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:0,text:'둥그레'}];
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchView.query=''; vodChatSearchView.result=null;
+      vodChatSearchView.lastQuery=null;
+      panel.querySelector('.cheese-peak-body').textContent='';
+      renderVodChatSearchBody(panel);
+      // 플레이어가 하는 일을 그대로 흉내낸다.
+      if(!window.__pdBound){
+        document.body.addEventListener('mousedown',(e)=>{e.preventDefault();});
+        window.__pdBound=true;}
+      // 실제 코드와 같은 pointerdown 처리를 붙인다.
+      if(!window.__focusBound){
+        panel.addEventListener('pointerdown',(e)=>{
+          const i=e.target;
+          if(!(i instanceof HTMLInputElement))return;
+          if(!i.classList.contains('cheese-vod-search-input'))return;
+          if(i.disabled)return;
+          if(document.activeElement===i)return;
+          i.focus({preventScroll:true});});
+        window.__focusBound=true;}
+      document.activeElement?.blur?.();
+      const r=panel.querySelector('.cheese-vod-search-input').getBoundingClientRect();
+      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+    // 진짜 한 번 클릭(누르고 곧바로 뗀다).
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await call(
+        "Input.dispatchMouseEvent",
+        { type, x: box.x, y: box.y, button: "left", clickCount: 1 },
+        sessionId,
+      );
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const focused = await ev(
+      `document.activeElement===panel.querySelector('.cheese-vod-search-input')`,
+    );
+    ok(focused, "한 번 클릭으로 입력칸에 포커스가 잡힌다");
+    // 그 상태에서 실제로 글자가 들어가는지.
+    await call("Input.insertText", { text: "둥" }, sessionId);
+    await new Promise((r) => setTimeout(r, 20));
+    const typed = await ev(
+      `panel.querySelector('.cheese-vod-search-input').value`,
+    );
+    ok(typed === "둥", `클릭 직후 바로 입력된다 (${JSON.stringify(typed)})`);
+  }
+
   console.log("\n[한글 IME] 조합 중에 결과가 갱신돼도 자모가 합쳐진다");
   {
     // ⚠ 증상: 자음·모음이 합쳐지지 않고 낱자로만 들어갔다. 원인은 검색할 때마다
@@ -698,6 +754,16 @@ const ok = (c, l) => {
     ok(
       /if \(vodChatSearchView\.timer\) clearTimeout/.test(SRC),
       "입력에 debounce 를 건다",
+    );
+    // ⚠ 위 [포커스] 검사는 실제 코드와 '같은 모양' 의 처리를 붙여 재현한 것이다.
+    //   원본에 진짜로 들어가 있는지는 여기서 따로 확인한다.
+    ok(
+      /el\.addEventListener\("pointerdown", \(event\) => \{/.test(SRC),
+      "입력칸 포커스를 pointerdown 에서 직접 준다",
+    );
+    ok(
+      /input\.focus\(\{ preventScroll: true \}\)/.test(SRC),
+      "플레이어가 기본 동작을 막아도 포커스를 잡는다",
     );
     ok(
       /VOD_CHAT_SEARCH_DEBOUNCE_MS = 2\d\d/.test(SRC),

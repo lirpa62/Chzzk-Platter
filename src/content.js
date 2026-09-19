@@ -11891,6 +11891,22 @@
         runVodChatSearch(el);
       }, VOD_CHAT_SEARCH_DEBOUNCE_MS);
     });
+    // ⚠ 입력칸을 한 번 눌러서는 포커스가 잡히지 않고, 버튼을 누르고 있는 동안에만
+    //   글자가 들어갔다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
+    //   mousedown 에서 preventDefault 를 한다(영상 위 드래그 선택을 막는 흔한 처리).
+    //   그러면 '눌린 곳에 포커스를 준다' 는 기본 동작까지 함께 취소된다(실측:
+    //   조상이 preventDefault 하면 activeElement 가 비었다).
+    //   그래서 우리가 직접 포커스를 준다. 조합 중에는 건드리지 않는다.
+    el.addEventListener("pointerdown", (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!input.classList.contains("cheese-vod-search-input")) return;
+      if (input.disabled) return;
+      if (document.activeElement === input) return; // 이미 잡혀 있으면 그대로 둔다
+      // 기본 동작이 취소돼도 포커스는 잡히게 한다. 커서 위치는 브라우저가
+      // mouseup 에서 정하므로 여기서 건드리지 않는다.
+      input.focus({ preventScroll: true });
+    });
     el.addEventListener("keydown", (event) => {
       const input = event.target;
       if (!(input instanceof HTMLInputElement)) return;
