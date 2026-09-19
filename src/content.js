@@ -11859,14 +11859,38 @@
     });
   }
 
+  // 이 클릭이 팝오버 안에서 일어났는가.
+  //
+  // ⚠ target.closest() 만으로 보면 안 된다. 팝오버 안의 버튼(검색·뒤로)은 자기
+  //   click 처리 중에 머리말을 innerHTML 로 통째로 갈아끼운다. 그래서 이벤트가
+  //   document 까지 올라올 무렵이면 눌린 버튼은 이미 DOM 에서 떨어져 나가
+  //   closest() 도 contains() 도 전부 null/false 가 된다(실측: isConnected
+  //   false, composedPath 만 true). 그 결과 '안을 눌렀는데 바깥으로 판정' 되어
+  //   팝오버가 닫혔다.
+  //
+  //   composedPath() 는 이벤트가 출발한 순간의 경로를 그대로 들고 있으므로
+  //   중간에 DOM 이 바뀌어도 팝오버가 남아 있다. 이 방식은 이미 채팅창 너비
+  //   조절에서 쓰고 있다.
+  function eventPathContains(event, selector) {
+    if (typeof event.composedPath === "function") {
+      for (const node of event.composedPath()) {
+        if (node instanceof Element && node.matches?.(selector)) return true;
+      }
+      return false;
+    }
+    // composedPath 가 없는 환경에서만 쓰는 폴백.
+    const target = event.target;
+    return target instanceof Element && !!target.closest(selector);
+  }
+
   // 팝오버 바깥을 누르거나 Esc 면 닫는다. 합성 클릭은 무시한다(자동 갱신 등).
   document.addEventListener("click", (event) => {
     if (!event.isTrusted) return;
     if (!document.querySelector(`.${CHAT_PEAK_POPOVER_CLASS}`)) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest(`.${CHAT_PEAK_POPOVER_CLASS}`)) return;
-    if (target.closest(`.${CHAT_GRAPH_BUTTON_CLASS}`)) return;
+    if (eventPathContains(event, `.${CHAT_PEAK_POPOVER_CLASS}`)) return;
+    if (eventPathContains(event, `.${CHAT_GRAPH_BUTTON_CLASS}`)) return;
     closeChatPeakPopover();
   });
   document.addEventListener("keydown", (event) => {
