@@ -116,7 +116,7 @@ const ok = (c, l) => {
     ${sliceFn("appendVodSearchHighlighted")}
     ${sliceFn("vodChatSearchTruncatedNotice")}
     ${sliceFn("renderVodChatSearchBody")}
-    ${sliceFn("renderVodChatSearchBodyInner")}
+    ${sliceFn("renderVodChatSearchOutput")}
     ${sliceFn("renderChatPeakPanelHead")}
     window.formatSeconds = formatSeconds;
     window.searchVodChatMessages = searchVodChatMessages;
@@ -476,6 +476,52 @@ const ok = (c, l) => {
     ok(r.rows === 200, `200줄만 그린다 (${r.rows})`);
     ok(r.searchMs < 200, `검색이 충분히 빠르다 (${r.searchMs}ms)`);
     ok(r.renderMs < 200, `렌더가 충분히 빠르다 (${r.renderMs}ms)`);
+  }
+
+  console.log("\n[한글 IME] 조합 중에 결과가 갱신돼도 자모가 합쳐진다");
+  {
+    // ⚠ 증상: 자음·모음이 합쳐지지 않고 낱자로만 들어갔다. 원인은 검색할 때마다
+    //   입력칸이 든 껍데기를 통째로 다시 만들어, 조합 중인 입력칸이 DOM 에서
+    //   떨어졌다 붙은 것이다(IME 조합 버퍼가 끊긴다).
+    //   여기서는 CDP 로 '진짜 IME 조합' 을 넣는다. input.value 를 직접 넣는
+    //   방식으로는 이 버그를 절대 재현할 수 없다.
+    await ev(`(()=>{
+      vodChatSearchState.messages=[{t:0,text:'둥그레 왔다'}];
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchState.truncated='';
+      vodChatSearchView.query=''; vodChatSearchView.result=null;
+      vodChatSearchView.lastQuery=null;
+      panel.querySelector('.cheese-peak-body').textContent='';
+      renderVodChatSearchBody(panel);
+      const input=panel.querySelector('.cheese-vod-search-input');
+      // 실제 코드와 같은 자리에서 재렌더가 끼어들게 한다.
+      input.addEventListener('input',()=>{
+        vodChatSearchView.query=input.value;
+        vodChatSearchView.lastQuery=null;
+        vodChatSearchView.result=vodChatSearchView.query
+          ? searchVodChatMessages(vodChatSearchState.messages,vodChatSearchView.query,200)
+          : null;
+        renderVodChatSearchBody(panel);});
+      input.focus();
+      return true;})()`);
+    // ㄷ → 두 → 둥 → 확정
+    for (const step of ["ㄷ", "두", "둥"]) {
+      await call(
+        "Input.imeSetComposition",
+        { text: step, selectionStart: step.length, selectionEnd: step.length },
+        sessionId,
+      );
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    await call("Input.insertText", { text: "둥" }, sessionId);
+    await new Promise((r) => setTimeout(r, 30));
+    const r = await ev(`(()=>{
+      const i=panel.querySelector('.cheese-vod-search-input');
+      return {value:i.value, focused:document.activeElement===i,
+        rows:panel.querySelectorAll('.cheese-vod-search-list li').length};})()`);
+    ok(r.value === "둥", `자모가 합쳐진다 (${JSON.stringify(r.value)})`);
+    ok(r.focused, "조합 내내 포커스가 입력칸에 남는다");
+    ok(r.rows === 1, `조합된 글자로 검색된다 (${r.rows}건)`);
   }
 
   console.log("\n[연속 검색] 한 번 검색한 뒤에도 이어서 칠 수 있다");

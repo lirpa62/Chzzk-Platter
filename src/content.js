@@ -10430,74 +10430,77 @@
   //
   // ⚠ 본문을 다시 그려도 입력칸의 포커스·커서는 그대로 둔다. 그리는 경로가
   //   여러 갈래라 각 갈래에서 따로 되살리면 빠뜨리기 쉬워, 여기서 한 번에 한다.
+  // ⚠ 입력칸이 있는 껍데기는 '한 번만' 만든다. 예전에는 검색할 때마다 본문을
+  //   통째로 비우고 다시 그렸는데, 그러면 입력칸이 DOM 에서 떨어졌다 붙으면서
+  //   IME 조합이 깨진다. 한글 자모가 합쳐지지 않고 낱자로만 들어갔고, 포커스를
+  //   되살리려 setSelectionRange 를 부른 것이 조합 버퍼를 한 번 더 끊었다.
+  //   그래서 결과 영역만 따로 갈아 끼운다(입력칸은 건드리지 않는다).
   function renderVodChatSearchBody(panel) {
-    const before = panel?.querySelector(".cheese-vod-search-input");
-    const hadFocus = !!before && document.activeElement === before;
-    const start = hadFocus ? before.selectionStart : null;
-    const end = hadFocus ? before.selectionEnd : null;
-    renderVodChatSearchBodyInner(panel);
-    if (!hadFocus) return;
-    const after = panel?.querySelector(".cheese-vod-search-input");
-    if (!after || after.disabled) return;
-    if (document.activeElement !== after) after.focus();
-    // 커서를 원래 자리로. type=search 는 setSelectionRange 를 지원한다.
-    if (start !== null && end !== null) {
-      try {
-        after.setSelectionRange(start, end);
-      } catch {
-        // 일부 상태에서는 커서 지정이 막힌다. 포커스만 살려도 이어 칠 수 있다.
-      }
-    }
-  }
-
-  function renderVodChatSearchBodyInner(panel) {
     const body = panel?.querySelector(".cheese-peak-body");
     if (!body) return;
-    const ready = Array.isArray(vodChatSearchState.messages);
-    const busy = vodChatSearchState.loading;
-    const failed = vodChatSearchState.failed && !ready;
 
-    // ⚠ 입력칸은 다시 만들지 않고 그대로 옮겨 붙인다. 검색할 때마다 새로 만들면
-    //   포커스와 커서 위치가 사라져서, 한 번 검색한 뒤에는 이어서 칠 수 없었다
-    //   (한글 조합 중이면 조합까지 끊긴다).
-    let input = body.querySelector(".cheese-vod-search-input");
-    const hadFocus = !!input && document.activeElement === input;
+    let wrap = body.querySelector(".cheese-vod-search");
+    if (!wrap) {
+      body.textContent = "";
+      wrap = document.createElement("div");
+      wrap.className = "cheese-vod-search";
 
-    body.textContent = "";
-    const wrap = document.createElement("div");
-    wrap.className = "cheese-vod-search";
-
-    // 입력칸은 준비가 끝나야 쓸 수 있다.
-    const form = document.createElement("div");
-    form.className = "cheese-vod-search-bar";
-    if (!input) {
-      input = document.createElement("input");
+      const form = document.createElement("div");
+      form.className = "cheese-vod-search-bar";
+      const input = document.createElement("input");
       input.type = "search";
       input.placeholder = "다시보기 채팅 검색";
       input.autocomplete = "off";
       input.className = "cheese-vod-search-input";
       input.value = vodChatSearchView.query;
-    } else if (input.value !== vodChatSearchView.query && !hadFocus) {
-      // 치는 중에는 건드리지 않는다(조합 중인 글자가 되돌아간다).
-      input.value = vodChatSearchView.query;
+      form.appendChild(input);
+      wrap.appendChild(form);
+
+      // 결과·안내는 전부 이 안에서만 바뀐다.
+      const out = document.createElement("div");
+      out.className = "cheese-vod-search-output";
+      wrap.appendChild(out);
+      body.appendChild(wrap);
     }
-    input.disabled = !ready;
-    form.appendChild(input);
-    wrap.appendChild(form);
+
+    const input = wrap.querySelector(".cheese-vod-search-input");
+    const out = wrap.querySelector(".cheese-vod-search-output");
+    const ready = Array.isArray(vodChatSearchState.messages);
+    const busy = vodChatSearchState.loading;
+    const failed = vodChatSearchState.failed && !ready;
+
+    if (input) {
+      input.disabled = !ready;
+      // ⚠ 사용자가 치고 있는 값은 절대 덮어쓰지 않는다. 조합 중인 글자가
+      //   되돌아가거나 커서가 끝으로 튄다. 밖에서 검색어를 비운 경우에만 맞춘다.
+      if (
+        document.activeElement !== input &&
+        input.value !== vodChatSearchView.query
+      ) {
+        input.value = vodChatSearchView.query;
+      }
+    }
+
+    renderVodChatSearchOutput(out, { ready, busy, failed });
+  }
+
+  // 결과 영역만 그린다. 입력칸은 이 함수가 건드리지 않는다.
+  function renderVodChatSearchOutput(out, { ready, busy, failed }) {
+    if (!out) return;
+    out.textContent = "";
 
     const status = document.createElement("p");
     status.className = "cheese-vod-search-status";
 
     if (failed) {
       status.textContent = "채팅을 불러오지 못했습니다. 다시 시도해 주세요.";
-      wrap.appendChild(status);
+      out.appendChild(status);
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "cheese-vod-search-retry";
       retry.dataset.vodSearchRetry = "1";
       retry.textContent = "다시 시도";
-      wrap.appendChild(retry);
-      body.appendChild(wrap);
+      out.appendChild(retry);
       return;
     }
 
@@ -10507,7 +10510,7 @@
       status.textContent = busy
         ? `채팅을 준비하는 중입니다… ${pct}%`
         : "채팅 데이터를 확인하는 중입니다…";
-      wrap.appendChild(status);
+      out.appendChild(status);
       // ⚠ 활성도 그래프는 집계만 저장해 두므로 다시 열면 즉시 뜨지만, 검색은
       //   채팅 원문이 있어야 한다. 원문은 저장하지 않는 정책이라(닉네임·UID 를
       //   남기지 않기 위해서다) 탭을 새로 열 때마다 한 번은 받아야 한다.
@@ -10516,8 +10519,7 @@
       why.className = "cheese-vod-search-note";
       why.textContent =
         "채팅 내용은 저장하지 않아 검색할 때 한 번 불러옵니다. 이 탭에서는 다시 받지 않습니다.";
-      wrap.appendChild(why);
-      body.appendChild(wrap);
+      out.appendChild(why);
       return;
     }
 
@@ -10526,27 +10528,21 @@
       const warn = document.createElement("p");
       warn.className = "cheese-vod-search-notice";
       warn.textContent = notice;
-      wrap.appendChild(warn);
+      out.appendChild(warn);
     }
 
     const result = vodChatSearchView.result;
     const query = vodChatSearchView.query.trim();
     if (!query) {
       status.textContent = "검색어를 입력해 주세요.";
-      wrap.appendChild(status);
-      body.appendChild(wrap);
-      input.focus();
+      out.appendChild(status);
       return;
     }
-    if (!result) {
-      body.appendChild(wrap);
-      return;
-    }
+    if (!result) return;
     if (!result.total) {
       // ⚠ 검색어를 HTML 로 합치지 않는다. 문자열로만 넣는다.
       status.textContent = `'${query}'와 일치하는 채팅이 없습니다.`;
-      wrap.appendChild(status);
-      body.appendChild(wrap);
+      out.appendChild(status);
       return;
     }
 
@@ -10554,7 +10550,7 @@
       result.total > result.rows.length
         ? `검색 결과 ${result.total.toLocaleString()}개 · 처음 ${result.rows.length.toLocaleString()}개 표시`
         : `검색 결과 ${result.total.toLocaleString()}개`;
-    wrap.appendChild(status);
+    out.appendChild(status);
 
     const list = document.createElement("ul");
     list.className = "cheese-vod-search-list";
@@ -10575,8 +10571,7 @@
       li.appendChild(button);
       list.appendChild(li);
     }
-    wrap.appendChild(list);
-    body.appendChild(wrap);
+    out.appendChild(list);
   }
 
   // 검색어가 들어간 자리를 <mark> 로 감싼다.

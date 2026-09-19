@@ -15735,6 +15735,15 @@ html.theme_dark .cheese-memo-window {
   cursor: default;
   opacity: 0.5;
 }
+/* 결과 영역. 검색할 때 이 안만 갈아 끼운다(입력칸은 그대로 둔다). */
+.cheese-vod-search-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cheese-vod-search-output:empty {
+  display: none;
+}
 .cheese-vod-search-status {
   color: rgba(255, 255, 255, 0.66);
   font-size: 12px;
