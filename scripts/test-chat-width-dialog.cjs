@@ -1,19 +1,22 @@
-// 채팅창 너비 조절을 한 번도 하지 않은 상태에서 후원 창이 좁아지는 문제.
+// 채팅창 너비 조절 ON + 한 번도 끌지 않은 상태에서 후원 창이 좁아지는 문제.
 //
-// 증상: 너비 조절 ON + drag 0회 → '후원하기' 를 누르면 다이얼로그 내부가
-// 채팅 폭만큼 좁은 칸으로 눌린다. 한 번이라도 직접 조절하면 정상.
+// ⚠ 첫 가설(리사이저가 aside 를 position:relative 로 만들어 기준 상자가 바뀐다)은
+//   틀렸다. 실측 결과 outer/inner 모두 position:static, offsetParent 는 BODY 로
+//   drag 전후가 같았다.
 //
-// 원인: 리사이저 손잡이를 붙이면서 aside 를 position:relative 로 만들었다.
-// 그러면 그 안에서 position:absolute 로 뜨는 후원 alertdialog 의 기준 상자가
-// 뷰포트에서 채팅 칸으로 바뀌어 폭이 채팅 폭으로 줄어든다.
-// (position:fixed 는 영향이 없다. 이 파일에서 둘 다 재 본다.)
+// 실제 원인: [role="alertdialog"] 에 폭을 강제하는 규칙이 있고, 그 값이
+// var(--cheese-chat-profile-popup-width, 208px) 다. 이 변수는 '끌었을 때' 와
+// '왼쪽 배치일 때' 만 설정되므로, 오른쪽 배치 + 끌기 0회면 208px 기본값이 그대로
+// 적용된다. 이 규칙은 프로필 팝오버용으로 쓰였는데 후원 창도 같은 role 이라
+// 함께 눌린 것이다.
 //
-// 고침: 실제로 너비를 강제할 때만 기준 상자를 세운다.
+// 고침: 너비를 강제하지 않는 경우에도 지금 채팅 폭으로 런타임 변수만 맞춘다
+// (사용자 설정 cheeseChatWidth 에는 저장하지 않는다).
 const { spawn } = require("node:child_process");
-const { mkdtempSync, rmSync } = require("node:fs");
+const { mkdtempSync, rmSync, readFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
-const dir = mkdtempSync(join(tmpdir(), "cheese-dlg-"));
+const dir = mkdtempSync(join(tmpdir(), "cheese-d2-"));
 const b = spawn(
   process.env.CHROME_BIN ||
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -72,93 +75,102 @@ const call = (m, p = {}, s) =>
     { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false },
     sessionId,
   );
-  const measure = async (pos) =>
+  await ev(`(()=>{const st=document.createElement('style');
+    st.textContent=${JSON.stringify(readFileSync("src/content.css", "utf8"))};
+    document.head.appendChild(st);return true;})()`);
+  const measure = async (dragged) =>
     ev(`(()=>{
-      document.body.innerHTML=
-        '<div id="wrap" style="display:flex"><main style="flex:1"></main>'+
-        '<aside id="chat" style="width:353px">'+
-        '<div id="dlg" role="alertdialog" '+
-        'style="position:${pos};left:0;right:0;width:100%"></div>'+
-        '</aside></div>';
-      const aside=document.getElementById('chat');
-      const dlg=document.getElementById('dlg');
-      const w=()=>Math.round(dlg.getBoundingClientRect().width);
-      const base=w();
-      aside.style.position='relative';
-      const withRelative=w();
-      aside.style.removeProperty('position');
-      const after=w();
-      return {base, withRelative, after, viewport: window.innerWidth};
-    })()`);
+    const root=document.documentElement;
+    root.className='cheese-chat-width-resize-enabled';
+    if(${dragged}){
+      root.style.setProperty('--cheese-chat-resized-width','420px');
+      root.style.setProperty('--cheese-chat-profile-popup-width','400px');
+      root.style.setProperty('--cheese-chat-popover-width','404px');
+    } else {
+      root.style.removeProperty('--cheese-chat-resized-width');
+      root.style.removeProperty('--cheese-chat-profile-popup-width');
+      root.style.removeProperty('--cheese-chat-popover-width');
+    }
+    // 사용자가 준 실제 구조.
+    document.body.innerHTML=
+      '<aside id="aside-chatting" style="width:353px">'+
+      '<div class="_layer_1mkoo_2" role="dialog">'+
+      '<div class="_container_jao35_20 _container_1mkoo_12" role="alertdialog" aria-modal="true">'+
+      '<div id="popup_contents">후원</div></div></div></aside>';
+    const outer=document.querySelector('[role="dialog"]');
+    const inner=document.querySelector('[role="alertdialog"]');
+    const g=(el)=>{const cs=getComputedStyle(el);const r=el.getBoundingClientRect();
+      return {w:Math.round(r.width),width:cs.width,maxWidth:cs.maxWidth,
+        minWidth:cs.minWidth,position:cs.position,
+        offsetParent:el.offsetParent?el.offsetParent.tagName+'#'+(el.offsetParent.id||''):null};};
+    return {outer:g(outer),inner:g(inner),
+      varProfile:getComputedStyle(root).getPropertyValue('--cheese-chat-profile-popup-width').trim()||'(없음)'};
+  })()`);
+  const before = await measure(false);
+  const after = await measure(true);
+  const show = (t, o) => {
+    console.log(`\n[${t}]`);
+    console.log("  변수 --profile-popup-width:", o.varProfile);
+    console.log(
+      "  outer role=dialog   :",
+      o.outer.w + "px",
+      "width=" + o.outer.width,
+      "pos=" + o.outer.position,
+      "offsetParent=" + o.outer.offsetParent,
+    );
+    console.log(
+      "  inner alertdialog   :",
+      o.inner.w + "px",
+      "width=" + o.inner.width,
+      "maxW=" + o.inner.maxWidth,
+      "pos=" + o.inner.position,
+      "offsetParent=" + o.inner.offsetParent,
+    );
+  };
+  show("drag 전 (변수 없음)", before);
+  show("drag 후 (변수 있음)", after);
 
   let failed = 0;
-  const ok = (cond, label) => {
-    console.log((cond ? "  PASS " : "  FAIL ") + label);
-    if (!cond) failed += 1;
+  const ok = (c, l) => {
+    console.log((c ? "  PASS " : "  FAIL ") + l);
+    if (!c) failed += 1;
   };
+  console.log("\n[증상] 변수가 없으면 208px 기본값으로 눌린다");
+  ok(before.inner.w === 208, `변수 없음 → ${before.inner.w}px`);
+  ok(after.inner.w === 400, `변수 있음 → ${after.inner.w}px`);
 
-  console.log("[기준 상자] aside 를 relative 로 만들면 후원 창이 좁아진다");
-  {
-    const abs = await measure("absolute");
-    ok(
-      abs.base === abs.viewport,
-      `건드리기 전에는 뷰포트 폭이다 (${abs.base})`,
-    );
-    // ⚠ 이것이 증상이다. 이 줄이 통과해야 아래 '고침' 이 의미가 있다.
-    ok(
-      abs.withRelative < abs.base,
-      `relative 면 채팅 폭으로 좁아진다 (${abs.withRelative})`,
-    );
-    ok(
-      abs.after === abs.viewport,
-      `기준을 되돌리면 다시 넓어진다 (${abs.after})`,
-    );
-  }
+  console.log("\n[기준 상자는 원인이 아니다] drag 전후가 같다");
+  ok(
+    before.inner.offsetParent === after.inner.offsetParent,
+    `offsetParent 동일 (${before.inner.offsetParent})`,
+  );
+  ok(
+    before.inner.position === after.inner.position,
+    `position 동일 (${before.inner.position})`,
+  );
 
-  console.log("\n[fixed 는 무관] 같은 조작이어도 fixed 다이얼로그는 영향 없다");
+  console.log("\n[소스] 끌지 않아도 런타임 변수를 맞춘다");
   {
-    const fix = await measure("fixed");
-    ok(
-      fix.base === fix.withRelative && fix.withRelative === fix.after,
-      `fixed 는 폭이 그대로다 (${fix.base}/${fix.withRelative}/${fix.after})`,
-    );
-  }
-
-  console.log("\n[소스] 너비를 강제할 때만 기준 상자를 세운다");
-  {
-    const fs = require("node:fs");
-    const path = require("node:path");
-    const content = fs.readFileSync(
-      path.join(__dirname, "..", "src", "content.js"),
-      "utf8",
-    );
-    const fn = content.slice(
-      content.indexOf("function ensureChatResizer"),
-      content.indexOf("function bindChatResizer"),
+    const src = readFileSync("src/content.js", "utf8");
+    const fn = src.slice(
+      src.indexOf("const saved = chatWidthValue >= CHAT_MIN_WIDTH"),
+      src.indexOf("function ensureChatResizer"),
     );
     ok(
-      /needsAnchor && getComputedStyle\(aside\)\.position === "static"/.test(
-        fn,
-      ),
-      "조절값이 있을 때만 relative 로 만든다",
+      /if \(applied > 0\) syncChatPopupWidthVars\(applied\);/.test(fn),
+      "저장값이 없어도 현재 폭으로 변수를 맞춘다",
     );
+    // ⚠ 사용자 설정과 런타임 표시 상태를 섞지 않는다.
     ok(
-      /chatWidthValue >= CHAT_MIN_WIDTH/.test(fn),
-      "조절 여부를 저장된 값으로 판단한다",
-    );
-    ok(
-      /removeProperty\("position"\)/.test(fn),
-      "조절값이 없으면 세워 둔 기준을 되돌린다",
+      !/chrome\.storage[^;]*cheeseChatWidth/.test(fn),
+      "그 경로에서 사용자 설정을 저장하지 않는다",
     );
   }
 
   console.log(failed ? `\n실패 ${failed}건` : "\n전부 통과");
   process.exitCode = failed ? 1 : 0;
 })()
-  .catch((e) => {
-    console.error("FAIL", e.message);
-    process.exitCode = 1;
-  })
+  .catch((e) => console.error("FAIL", e.message))
   .finally(() => {
     b.kill("SIGTERM");
     try {

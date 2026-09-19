@@ -17491,6 +17491,13 @@
         "--cheese-chat-resized-width",
       );
       applied = Math.round(aside.getBoundingClientRect().width);
+      // ⚠ 너비를 강제하지 않더라도 팝오버 폭 변수는 지금 채팅 폭으로 맞춰 둔다.
+      //   이 변수가 없으면 [role="alertdialog"] 규칙이 기본값 208px 로 떨어져,
+      //   후원 창처럼 그 역할을 함께 쓰는 다이얼로그가 좁게 눌린다(실측: 변수가
+      //   없을 때 208px, 있을 때 400px). 한 번이라도 끌면 정상으로 보이던 이유다.
+      //   ⚠ 저장(cheeseChatWidth)은 하지 않는다. 사용자가 고른 값과 지금 화면
+      //     상태를 구분한다 — 여기서 맞추는 건 런타임 표시용 변수뿐이다.
+      if (applied > 0) syncChatPopupWidthVars(applied);
     }
     ensureChatResizer(aside, applied, maxWidth);
   }
@@ -17498,17 +17505,11 @@
   // 좌측(왼쪽배치 시 우측) 경계 리사이저. 배지 모아 챗과 동일한 드래그 방식.
   function ensureChatResizer(aside, appliedWidth, maxWidth) {
     const existing = aside.querySelector(`.${CHAT_RESIZER_CLASS}`);
-    // ⚠ aside 를 position:relative 로 만들면 그 안에서 뜨는 치지직 후원
-    //   alertdialog 의 기준 상자(containing block)가 뷰포트에서 채팅 칸으로
-    //   바뀐다. 그러면 후원 창이 채팅 폭만큼 좁아진다. 조절을 한 번도 하지 않아
-    //   너비를 강제하지 않는 동안에는 기준 상자를 건드릴 이유가 없으므로,
-    //   실제로 너비를 잡았을 때만 세운다(그때는 손잡이를 붙여야 한다).
-    const needsAnchor = chatWidthValue >= CHAT_MIN_WIDTH;
-    if (needsAnchor && getComputedStyle(aside).position === "static") {
+    // ⚠ 손잡이는 position:absolute 로 aside 안쪽 가장자리에 붙는다. 그래서 aside
+    //   가 기준 상자여야 한다. (후원 창이 좁아지던 원인은 이것이 아니라 팝오버 폭
+    //   변수가 비어 208px 기본값으로 떨어진 것이었다 — 실측으로 확인했다.)
+    if (getComputedStyle(aside).position === "static") {
       aside.style.position = "relative";
-    } else if (!needsAnchor && aside.style.position === "relative") {
-      // 조절값을 지웠으면 우리가 세운 기준도 되돌린다.
-      aside.style.removeProperty("position");
     }
     const handle = existing || document.createElement("div");
     if (!existing) {
