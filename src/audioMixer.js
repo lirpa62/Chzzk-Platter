@@ -7188,6 +7188,34 @@
   //   않도록 경계를 확인한다.
   const SYNC_TIP_OPEN_CLASS = "is-tip-open";
 
+  // 마지막으로 관측한 포인터 좌표. 툴팁을 열지 말지는 '버튼이 이벤트를 줬는가' 가
+  // 아니라 '지금 포인터가 버튼 위에 있는가' 로 정한다.
+  //
+  // ⚠ 왜 좌표로 보는가. 버튼이 disabled 로 바뀌는 순간 pointerout 은 오지 않는데
+  //   (실측) 치지직 툴팁은 :hover 로 뜨므로 그 순간 :hover 가 끊기며 사라진다.
+  //   버튼의 hover/pointer 이벤트를 아무리 보정해도 이 전환을 따라갈 수 없다.
+  //   좌표는 disabled 여부와 무관하므로 전환이 일어나도 판정이 흔들리지 않는다.
+  let syncPointerX = null;
+  let syncPointerY = null;
+
+  function isPointerInsideSyncButton(el) {
+    if (!el || syncPointerX === null || syncPointerY === null) return false;
+    const rect = el.getBoundingClientRect();
+    // 컨트롤이 자동으로 숨으면 크기가 0 이 된다. 그때는 툴팁도 닫는다.
+    if (!(rect.width > 0) || !(rect.height > 0)) return false;
+    return (
+      syncPointerX >= rect.left &&
+      syncPointerX <= rect.right &&
+      syncPointerY >= rect.top &&
+      syncPointerY <= rect.bottom
+    );
+  }
+
+  function setSyncTooltipOpen(btn, open) {
+    if (!btn) return;
+    btn.classList.toggle(SYNC_TIP_OPEN_CLASS, open === true);
+  }
+
   function closeAllSyncTooltips() {
     for (const el of document.querySelectorAll(
       `.${SYNC_BUTTON_CLASS}.${SYNC_TIP_OPEN_CLASS}`,
@@ -7196,54 +7224,53 @@
     }
   }
 
+  // 지금 포인터 위치로 툴팁 상태를 다시 판정한다.
+  // ⚠ 포인터가 멈춰 있어도 상태는 바뀐다(지연이 목표에 닿아 버튼이 잠기는 등).
+  //   그래서 포인터 이동뿐 아니라 상태 갱신 쪽에서도 이 함수를 부른다.
+  function updateSyncTooltipFromPointer() {
+    const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
+    if (!btn) {
+      // 버튼이 사라졌으면 남아 있을 표시를 정리한다.
+      closeAllSyncTooltips();
+      return;
+    }
+    setSyncTooltipOpen(btn, isPointerInsideSyncButton(btn));
+  }
+
   let syncTooltipDelegated = false;
+  let syncTooltipRaf = 0;
   function bindSyncTooltipHover() {
     if (syncTooltipDelegated) return;
     syncTooltipDelegated = true;
+    // ⚠ pointermove 는 아주 자주 온다. 좌표만 적어 두고 실제 판정은 한 프레임에
+    //   한 번만 한다(여기서 지연 계산·플레이어 조회 같은 무거운 일은 하지 않는다).
     document.addEventListener(
-      "pointerover",
+      "pointermove",
       (event) => {
-        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
-        if (!btn) return;
-        // 버튼 안에서 옮겨 다니는 것은 새로 들어온 것이 아니다.
-        if (btn.contains(event.relatedTarget)) return;
-        btn.classList.add(SYNC_TIP_OPEN_CLASS);
+        syncPointerX = event.clientX;
+        syncPointerY = event.clientY;
+        if (syncTooltipRaf) return;
+        syncTooltipRaf = requestAnimationFrame(() => {
+          syncTooltipRaf = 0;
+          updateSyncTooltipFromPointer();
+        });
       },
       true,
     );
-    document.addEventListener(
-      "pointerout",
-      (event) => {
-        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
-        if (!btn) return;
-        // 버튼 안쪽으로 옮겨 간 것이면 닫지 않는다.
-        if (btn.contains(event.relatedTarget)) return;
-        btn.classList.remove(SYNC_TIP_OPEN_CLASS);
-      },
-      true,
-    );
-    // 키보드로 옮겨 왔을 때도 보여 준다(버튼이 잠겨 있으면 포커스가 가지 않으므로
-    // 활성일 때만 해당된다).
-    document.addEventListener(
-      "focusin",
-      (event) => {
-        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
-        if (btn) btn.classList.add(SYNC_TIP_OPEN_CLASS);
-      },
-      true,
-    );
-    document.addEventListener(
-      "focusout",
-      (event) => {
-        const btn = event.target?.closest?.(`.${SYNC_BUTTON_CLASS}`);
-        if (btn) btn.classList.remove(SYNC_TIP_OPEN_CLASS);
-      },
-      true,
-    );
-    // 창 밖으로 나가거나 탭이 가려지면 떠 있던 말풍선을 정리한다(잔상 방지).
-    window.addEventListener("blur", closeAllSyncTooltips);
+    // 포인터가 창 밖으로 나가면 pointermove 가 더 오지 않는다. 좌표를 비워
+    // 남은 표시를 정리한다(잔상 방지).
+    const forget = () => {
+      syncPointerX = null;
+      syncPointerY = null;
+      closeAllSyncTooltips();
+    };
+    window.addEventListener("blur", forget);
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) closeAllSyncTooltips();
+      if (document.hidden) forget();
+    });
+    // 창 밖으로 빠져나간 경우(relatedTarget 이 없다).
+    document.addEventListener("pointerout", (event) => {
+      if (!event.relatedTarget) forget();
     });
   }
 
@@ -8227,6 +8254,10 @@
       //   때야말로 '지금 얼마나 밀렸는지' 가 궁금하므로 그대로 넘긴다.
       setSyncTooltip(btn, lat, { idle: !overThreshold });
     }
+    // ⚠ 여기서 disabled 가 바뀐다. 포인터가 버튼 위에 그대로 있어도 그 순간
+    //   :hover 가 끊겨 툴팁이 사라지므로, 좌표로 다시 판정해 열린 상태를
+    //   이어 준다(문구는 바로 위에서 이미 새 상태로 바뀌었다).
+    updateSyncTooltipFromPointer();
   }
 
   // 따라잡기 민감도 프리셋 적용(자동·수동 임계/목표 지연 모두). 알 수 없는 값이면 보통.
