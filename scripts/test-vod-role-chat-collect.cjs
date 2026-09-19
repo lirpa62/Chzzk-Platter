@@ -27,11 +27,40 @@ const PAGE_RETRY_MAX = 3;
 const PAGE_SIZE = 50;
 
 // content.js 의 collectVodRoleChats 와 같은 규칙.
-function makeCollector({ fetchImpl, cancelRef, videoNoRef, maxPages = 1500 }) {
+// content.js 의 체크포인트 규칙과 같다(영상별, 메모리 전용, '다음 요청 위치').
+const CHECKPOINT_MAX = 4;
+function makeCheckpoints() {
+  const map = new Map();
+  let seq = 0;
+  return {
+    map,
+    save(entry) {
+      if (!entry?.videoNo) return;
+      map.set(entry.videoNo, { ...entry, updatedAt: ++seq });
+      if (map.size > CHECKPOINT_MAX) {
+        const oldest = [...map.entries()].sort(
+          (a, b) => (a[1].updatedAt || 0) - (b[1].updatedAt || 0),
+        )[0];
+        if (oldest) map.delete(oldest[0]);
+      }
+    },
+  };
+}
+
+function makeCollector({
+  fetchImpl,
+  cancelRef,
+  videoNoRef,
+  maxPages = 1500,
+  checkpoints,
+}) {
   return async function collect(videoNo, onProgress) {
-    const items = [];
+    const resume = checkpoints?.map.get(videoNo);
+    const items = resume?.items || [];
     const totalMs = 3600 * 1000;
-    let cursor = 0;
+    let cursor = Number.isFinite(Number(resume?.cursor))
+      ? Number(resume.cursor)
+      : 0;
     let completed = false;
     let aborted = false;
     let failedRun = false;
@@ -83,6 +112,7 @@ function makeCollector({ fetchImpl, cancelRef, videoNoRef, maxPages = 1500 }) {
         break;
       }
       cursor = next;
+      checkpoints?.save({ videoNo, cursor, items, failed: false });
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
     }
     const complete =
@@ -90,6 +120,8 @@ function makeCollector({ fetchImpl, cancelRef, videoNoRef, maxPages = 1500 }) {
       !failedRun &&
       !cancelRef.value &&
       videoNoRef.value === videoNo;
+    if (complete) checkpoints?.map.delete(videoNo);
+    else checkpoints?.save({ videoNo, cursor, items, failed: failedRun });
     return { complete, failed: failedRun, aborted, items, requests, cursor };
   };
 }
@@ -275,6 +307,161 @@ const refs = () => ({
     ok(state.loading === true, "예전 작업이 새 작업의 진행 표시를 끄지 않는다");
   }
 
+  console.log("\n[B] 실패한 뒤 다시 모으면 그 자리에서 이어받는다");
+  {
+    const cp = makeCheckpoints();
+    let fail = true;
+    const r1 = await makeCollector({
+      ...refs(),
+      checkpoints: cp,
+      fetchImpl: async (c) =>
+        c >= 9 * 60000 && fail ? { ok: false, status: 500 } : okPage(c),
+    })("1");
+    ok(r1.failed, "처음에는 실패로 끝난다");
+    const saved = cp.map.get("1");
+    ok(!!saved, "체크포인트가 남는다");
+    ok(
+      saved.cursor === 9 * 60000,
+      `다음 요청 위치를 기억한다 (${saved.cursor})`,
+    );
+
+    fail = false;
+    const before = r1.items.length;
+    const seen = [];
+    const r2 = await makeCollector({
+      ...refs(),
+      checkpoints: cp,
+      fetchImpl: async (c) => {
+        seen.push(c);
+        return c >= 20 * 60000 ? endPage() : okPage(c);
+      },
+    })("1");
+    ok(r2.complete, "두 번째에는 완주한다");
+    ok(seen[0] === 9 * 60000, `처음부터 받지 않는다 (첫 요청 ${seen[0]})`);
+    ok(
+      r2.items.length > before,
+      `앞서 모은 것에 이어 붙는다 (${before} → ${r2.items.length})`,
+    );
+  }
+
+  console.log("\n[C2] 이어받아도 같은 페이지를 두 번 넣지 않는다");
+  {
+    const cp = makeCheckpoints();
+    let fail = true;
+    const r1 = await makeCollector({
+      ...refs(),
+      checkpoints: cp,
+      fetchImpl: async (c) =>
+        c >= 3 * 60000 && fail ? { ok: false, status: 500 } : okPage(c),
+    })("1");
+    const firstIds = r1.items.map((m) => m.id);
+    fail = false;
+    const r2 = await makeCollector({
+      ...refs(),
+      checkpoints: cp,
+      fetchImpl: async (c) => (c >= 6 * 60000 ? endPage() : okPage(c)),
+    })("1");
+    const ids = r2.items.map((m) => m.id);
+    ok(new Set(ids).size === ids.length, `중복이 없다 (${ids.length}개)`);
+    ok(
+      firstIds.every((id) => ids.includes(id)),
+      "먼저 모은 것이 그대로 남아 있다",
+    );
+  }
+
+  console.log("\n[D2] A → B → A — A 를 처음부터 다시 받지 않는다");
+  {
+    const cp = makeCheckpoints();
+    const ref = refs();
+    ref.videoNoRef.value = "A";
+    let n = 0;
+    await makeCollector({
+      ...ref,
+      checkpoints: cp,
+      fetchImpl: async (c) => {
+        n += 1;
+        if (n === 4) ref.videoNoRef.value = "B";
+        return okPage(c);
+      },
+    })("A");
+    const aSaved = cp.map.get("A");
+    ok(
+      !!aSaved && aSaved.cursor > 0,
+      `A 진행 지점이 남는다 (${aSaved?.cursor})`,
+    );
+
+    const refB = { cancelRef: { value: false }, videoNoRef: { value: "B" } };
+    let m = 0;
+    await makeCollector({
+      ...refB,
+      checkpoints: cp,
+      fetchImpl: async (c) => (++m > 2 ? endPage() : okPage(c)),
+    })("B");
+
+    const refA2 = { cancelRef: { value: false }, videoNoRef: { value: "A" } };
+    const seen = [];
+    const rA = await makeCollector({
+      ...refA2,
+      checkpoints: cp,
+      fetchImpl: async (c) => {
+        seen.push(c);
+        return c >= 10 * 60000 ? endPage() : okPage(c);
+      },
+    })("A");
+    ok(
+      seen[0] === aSaved.cursor,
+      `A 는 멈춘 자리에서 이어 받는다 (${seen[0]})`,
+    );
+    ok(rA.complete, "A 를 완주한다");
+  }
+
+  console.log("\n[E2] 영상마다 독립적으로 기억한다");
+  {
+    const cp = makeCheckpoints();
+    for (const v of ["A", "B", "C"]) {
+      const ref = { cancelRef: { value: false }, videoNoRef: { value: v } };
+      let n = 0;
+      await makeCollector({
+        ...ref,
+        checkpoints: cp,
+        fetchImpl: async (c) => {
+          n += 1;
+          if (n === 3) return { ok: false, status: 500 };
+          return okPage(c);
+        },
+      })(v);
+    }
+    ok(cp.map.size === 3, `세 영상이 따로 남는다 (${cp.map.size})`);
+    const cursors = ["A", "B", "C"].map((v) => cp.map.get(v).cursor);
+    ok(
+      cursors.every((c) => c > 0),
+      `서로 덮어쓰지 않는다 (${cursors})`,
+    );
+  }
+
+  console.log("\n[F2] 너무 많이 쌓이면 오래된 것부터 버린다");
+  {
+    const cp = makeCheckpoints();
+    for (let i = 1; i <= CHECKPOINT_MAX + 2; i += 1) {
+      cp.save({ videoNo: `V${i}`, cursor: i * 1000, items: [] });
+    }
+    ok(cp.map.size === CHECKPOINT_MAX, `개수가 제한된다 (${cp.map.size})`);
+    ok(!cp.map.has("V1"), "가장 오래된 것이 빠진다");
+    ok(cp.map.has(`V${CHECKPOINT_MAX + 2}`), "최근 것은 남는다");
+  }
+
+  console.log("\n[A2] 다 모으면 이어받을 것을 지운다");
+  {
+    const cp = makeCheckpoints();
+    let n = 0;
+    const r = await makeCollector({
+      ...refs(),
+      checkpoints: cp,
+      fetchImpl: async (c) => (++n > 3 ? endPage() : okPage(c)),
+    })("1");
+    ok(r.complete && !cp.map.has("1"), "완주하면 체크포인트가 사라진다");
+  }
+
   console.log("\n[소스] 원본이 실제로 그 규칙을 갖고 있다");
   {
     const src = fs.readFileSync(
@@ -309,6 +496,43 @@ const refs = () => ({
         ensure,
       ),
       "끝까지 못 가도 모은 것을 화면에 남긴다",
+    );
+    // ── 이어받기 ──
+    ok(/roleChatCheckpoints/.test(src), "영상별 이어받기 정보를 들고 있다");
+    ok(
+      /const resume = roleChatCheckpoints\.get\(videoNo\);/.test(fn),
+      "수집을 시작할 때 이어받을 것이 있는지 본다",
+    );
+    ok(
+      /saveRoleChatCheckpoint\(\{ videoNo, cursor, tracker, failed: false \}\)/.test(
+        fn,
+      ),
+      "페이지를 반영한 뒤에 다음 위치를 기록한다",
+    );
+    ok(
+      /roleChatCheckpoints\.delete\(videoNo\)/.test(fn),
+      "완주하면 이어받을 것을 지운다",
+    );
+    ok(
+      /ROLE_CHAT_CHECKPOINT_MAX/.test(src),
+      "이어받기 정보가 무한히 쌓이지 않는다",
+    );
+    // ⚠ 미완성을 완료 캐시에 넣으면 다음에 다 모은 것처럼 보인다.
+    const beforeComplete = ensure.slice(
+      0,
+      ensure.indexOf("if (!result.complete)"),
+    );
+    ok(
+      !/saveVodRoleChats/.test(beforeComplete),
+      "완주 전에는 저장소에 쓰지 않는다",
+    );
+    const reset = src.slice(
+      src.indexOf("function resetRoleChatIfVideoChanged"),
+      src.indexOf("function resetRoleChatIfVideoChanged") + 900,
+    );
+    ok(
+      /if \(!videoNo\) return;/.test(reset),
+      "주소를 잠깐 못 읽는 것을 영상 변경으로 보지 않는다",
     );
   }
 

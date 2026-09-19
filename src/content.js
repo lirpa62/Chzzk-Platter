@@ -10224,6 +10224,27 @@
     cancel: false,
     failed: false, // 재시도까지 했는데 못 끝낸 경우(사용자에게 알린다)
   };
+  // 끝내지 못한 수집을 영상별로 기억해 둔다(이 탭이 살아 있는 동안만).
+  //
+  // ⚠ 저장소(chrome.storage)에는 완주한 것만 넣는다. 미완성을 완료 캐시에 넣으면
+  //   다음에 들어왔을 때 다 모은 것처럼 보인다. 그래서 이어받기용 정보는 메모리에만
+  //   둔다 — 새로고침하면 사라지지만, 탭을 옮겨 다니는 동안에는 잃지 않는다.
+  //   value: { videoNo, cursor, tracker, pages, updatedAt, failed }
+  //   cursor 는 '다음에 요청할 위치' 다(이미 받은 페이지를 다시 받지 않는다).
+  const roleChatCheckpoints = new Map();
+  const ROLE_CHAT_CHECKPOINT_MAX = 4;
+
+  function saveRoleChatCheckpoint(entry) {
+    if (!entry?.videoNo) return;
+    roleChatCheckpoints.set(entry.videoNo, { ...entry, updatedAt: Date.now() });
+    // 오래된 것부터 버린다(여러 영상을 돌아다녀도 메모리가 늘지 않게).
+    if (roleChatCheckpoints.size > ROLE_CHAT_CHECKPOINT_MAX) {
+      const oldest = [...roleChatCheckpoints.entries()].sort(
+        (a, b) => (a[1].updatedAt || 0) - (b[1].updatedAt || 0),
+      )[0];
+      if (oldest) roleChatCheckpoints.delete(oldest[0]);
+    }
+  }
   // 설정에서 편집한다. 비어 있으면 기본 목록을 쓴다.
   let vodRoleChatBots = [...CHAT_RECAP_STORE_API.DEFAULT_VOD_ROLE_CHAT_BOTS];
   let chatGraphAutoTriedVideo = ""; // 이 영상에서 자동 표시를 이미 시도했는지
@@ -10945,15 +10966,24 @@
   //   건드리지 않는다 — 예전에는 둘이 한 캐시에 묶여 있어 타임라인만 갱신하려
   //   해도 구간 통계 전체를 다시 모아야 했다.
   async function collectVodRoleChats(videoNo, onProgress) {
-    const tracker = CHAT_RECAP_STORE_API.createVodRoleChatTracker({
-      bots: vodRoleChatBots,
-    });
+    // 끝내지 못하고 멈춘 적이 있으면 그 자리에서 이어받는다. 처음부터 다시 받지
+    // 않는다(네트워크가 잠깐 끊겼거나 다른 영상에 다녀온 경우).
+    // ⚠ tracker 는 모은 것을 들고 있는 그릇이라 그대로 넘겨받는다. finish() 는
+    //   비우지 않으므로 여러 번 불러도 괜찮다.
+    const resume = roleChatCheckpoints.get(videoNo);
+    const tracker =
+      resume?.tracker ||
+      CHAT_RECAP_STORE_API.createVodRoleChatTracker({
+        bots: vodRoleChatBots,
+      });
     const duration =
       Number(document.querySelector("video")?.duration) ||
       getPlayerDuration(findPlayerSliderProgressWrap()) ||
       0;
     const totalMs = Math.max(1, duration * 1000);
-    let cursor = 0;
+    let cursor = Number.isFinite(Number(resume?.cursor))
+      ? Number(resume.cursor)
+      : 0;
     let completed = false;
     // 한 페이지가 잠깐 실패했다고 수집을 통째로 버리지 않는다. 긴 다시보기는
     // 수백 페이지라 한 번의 네트워크 흔들림으로도 끝나 버렸다(사용자 제보의
@@ -11039,6 +11069,9 @@
         break;
       }
       cursor = next;
+      // ⚠ 여기까지 왔다는 것은 이 페이지를 tracker 에 넣었다는 뜻이다. 그 뒤에만
+      //   다음 위치를 기록한다(받자마자 적으면 반영 못 한 페이지를 건너뛴다).
+      saveRoleChatCheckpoint({ videoNo, cursor, tracker, failed: false });
       onProgress?.(Math.max(0, Math.min(1, cursor / totalMs)));
     }
     const complete =
@@ -11046,6 +11079,13 @@
       !failed &&
       !roleChatState.cancel &&
       getCurrentVideoNo() === videoNo;
+    if (complete) {
+      // 다 모았으면 이어받을 것이 없다.
+      roleChatCheckpoints.delete(videoNo);
+    } else {
+      // 실패·중단·영상 이동 — 어느 쪽이든 여기까지를 남겨 다음에 이어받는다.
+      saveRoleChatCheckpoint({ videoNo, cursor, tracker, failed });
+    }
     onProgress?.(complete ? 1 : Math.max(0, Math.min(1, cursor / totalMs)));
     return { complete, failed, aborted, items: tracker.finish() };
   }
@@ -11063,6 +11103,8 @@
         );
         if (saved.complete) {
           roleChatState.items = saved.items;
+          // 완주한 기록이 있으면 이어받을 것이 없다(있으면 오히려 헷갈린다).
+          roleChatCheckpoints.delete(videoNo);
           return;
         }
       } catch {
@@ -11130,10 +11172,16 @@
   // 영상이 바뀌면 비운다(다른 방송의 타임라인이 남아 있으면 안 된다).
   function resetRoleChatIfVideoChanged() {
     const videoNo = getCurrentVideoNo();
+    // ⚠ 빈 값은 '다른 영상' 이 아니다. SPA·플레이어가 다시 그려지는 사이 주소를
+    //   잠깐 못 읽을 수 있는데, 그것을 영상 변경으로 보면 수집이 끊긴다.
+    //   실제로 다른 영상 번호가 확인될 때만 정리한다.
+    if (!videoNo) return;
     if (roleChatState.videoNo && roleChatState.videoNo !== videoNo) {
       roleChatState.videoNo = "";
       roleChatState.items = null;
       roleChatState.loading = false;
+      // 돌던 수집을 멈춘다. 멈추는 쪽에서 여기까지를 체크포인트로 남기므로,
+      // 나중에 이 영상으로 돌아오면 그 자리에서 이어받는다.
       roleChatState.cancel = true;
       roleChatState.progress = 0;
       roleChatState.failed = false;
@@ -12890,8 +12938,8 @@
     if (roleChatState.failed) {
       status(
         rows && rows.length
-          ? "채팅을 모으는 중 오류가 났습니다. 지금까지 모은 것만 표시합니다. 다시 시도해 주세요."
-          : "채팅을 모으는 중 오류가 났습니다. 다시 시도해 주세요.",
+          ? "채팅을 모으는 중 끊겼습니다. 지금까지 모은 것만 보여 줍니다. 다시 모으면 이어서 계속합니다."
+          : "채팅을 모으는 중 끊겼습니다. 다시 모으면 이어서 계속합니다.",
       );
       if (!rows || !rows.length) return;
     } else if (!rows) {
