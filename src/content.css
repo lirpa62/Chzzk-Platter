@@ -15921,6 +15921,13 @@ img.cheese-peak-role-badge {
 .cheese-recap-role-collect.is-loading svg {
   animation: cheese-recap-role-spin 1.1s linear infinite;
 }
+/* ⚠ 아이콘은 진행률 글자에 밀려 줄어들면 안 된다. 버튼 안에서 SVG 와 글자가
+   나란히 놓이는데(inline-flex), SVG 의 기본 flex-shrink 는 1 이라 폭이 모자라면
+   아이콘부터 찌그러진다. 실측: 버튼 폭이 28px 로 고정된 순간 '43%' 면 8x16,
+   '100%' 면 2.4x16 까지 줄었다(제보한 '아이콘이 매우 작아짐'). */
+.cheese-recap-role-collect > svg {
+  flex: 0 0 auto;
+}
 .cheese-recap-role-collect-progress {
   font-size: 10px;
   font-variant-numeric: tabular-nums;

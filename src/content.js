@@ -11127,6 +11127,10 @@
           const text = `중단 (${Math.round(p * 100)}%)`;
           button.setAttribute("aria-label", text);
           button.title = text;
+          // ⚠ 진행률 글자와 is-loading 을 함께 건다. 글자만 들어가면 버튼이
+          //   좁은 상태(28px)로 남아 아이콘이 눌린다. 클래스는 패널을 다시
+          //   그릴 때만 붙었는데, 이어받기는 그리기 전에 진행률이 먼저 온다.
+          button.classList.add("is-loading");
           const slot = button.querySelector(
             ".cheese-recap-role-collect-progress",
           );
