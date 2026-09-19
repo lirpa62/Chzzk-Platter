@@ -116,6 +116,7 @@ const ok = (c, l) => {
     ${sliceFn("appendVodSearchHighlighted")}
     ${sliceFn("vodChatSearchTruncatedNotice")}
     ${sliceFn("renderVodChatSearchBody")}
+    ${sliceFn("renderVodChatSearchBodyInner")}
     ${sliceFn("renderChatPeakPanelHead")}
     window.formatSeconds = formatSeconds;
     window.searchVodChatMessages = searchVodChatMessages;
@@ -477,6 +478,86 @@ const ok = (c, l) => {
     ok(r.renderMs < 200, `렌더가 충분히 빠르다 (${r.renderMs}ms)`);
   }
 
+  console.log("\n[연속 검색] 한 번 검색한 뒤에도 이어서 칠 수 있다");
+  {
+    // ⚠ 증상: 검색할 때마다 본문을 다시 그리며 입력칸을 새로 만들어, 포커스와
+    //   커서가 사라져 두 번째 검색어를 칠 수 없었다.
+    const r = await ev(`(()=>{
+      vodChatSearchState.messages=[
+        {t:1000,text:'둥그레 왔다'},{t:2000,text:'안녕하세요'}];
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchView.query=''; vodChatSearchView.result=null;
+      vodChatSearchView.lastQuery=null;
+      renderVodChatSearchBody(panel);
+      const first=panel.querySelector('.cheese-vod-search-input');
+      first.focus();
+      // 1차 검색
+      vodChatSearchView.query='둥그레';
+      first.value='둥그레';
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'둥그레',200);
+      renderVodChatSearchBody(panel);
+      const afterFirst=panel.querySelector('.cheese-vod-search-input');
+      const keptNode = afterFirst===first;
+      const keptFocus = document.activeElement===afterFirst;
+      // 2차 검색어를 이어서 친다(사용자가 실제로 하는 동작).
+      afterFirst.value='안녕';
+      vodChatSearchView.query='안녕';
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'안녕',200);
+      renderVodChatSearchBody(panel);
+      const afterSecond=panel.querySelector('.cheese-vod-search-input');
+      return {keptNode, keptFocus,
+        focusAfterSecond: document.activeElement===afterSecond,
+        valueAfterSecond: afterSecond.value,
+        disabled: afterSecond.disabled,
+        rows: panel.querySelectorAll('.cheese-vod-search-list li').length,
+        status: panel.querySelector('.cheese-vod-search-status').textContent};})()`);
+    ok(r.keptNode, "검색해도 입력칸을 새로 만들지 않는다(같은 요소를 유지)");
+    ok(r.keptFocus, "1차 검색 뒤에도 포커스가 입력칸에 남는다");
+    ok(r.focusAfterSecond, "2차 검색 뒤에도 포커스가 남는다");
+    ok(
+      r.valueAfterSecond === "안녕",
+      `친 글자가 남는다 (${r.valueAfterSecond})`,
+    );
+    ok(!r.disabled, "입력칸이 잠기지 않는다");
+    ok(r.rows === 1 && r.status.includes("1개"), "2차 검색 결과가 나온다");
+  }
+
+  console.log("\n[커서] 가운데를 고쳐도 커서가 끝으로 튀지 않는다");
+  {
+    const r = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:0,text:'둥그레'}];
+      vodChatSearchView.query='둥그레'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=null;
+      renderVodChatSearchBody(panel);
+      const input=panel.querySelector('.cheese-vod-search-input');
+      input.focus(); input.value='둥그레'; input.setSelectionRange(1,1);
+      renderVodChatSearchBody(panel);
+      const after=panel.querySelector('.cheese-vod-search-input');
+      return {start:after.selectionStart,end:after.selectionEnd};})()`);
+    ok(r.start === 1 && r.end === 1, `커서 위치가 유지된다 (${r.start})`);
+  }
+
+  console.log("\n[준비 안내] 왜 다시 받는지 알려 준다");
+  {
+    const r = await ev(`(()=>{
+      vodChatSearchState.messages=null;
+      vodChatSearchState.loading=true;
+      vodChatSearchState.progress=0.2;
+      vodChatSearchState.failed=false;
+      renderVodChatSearchBody(panel);
+      const note=panel.querySelector('.cheese-vod-search-note');
+      const ready=(()=>{vodChatSearchState.messages=[{t:0,text:'x'}];
+        vodChatSearchState.loading=false;
+        renderVodChatSearchBody(panel);
+        return !!panel.querySelector('.cheese-vod-search-note');})();
+      return {text:note?.textContent||'', shownWhenReady:ready};})()`);
+    ok(r.text.includes("저장하지 않아"), `이유를 밝힌다 (${r.text})`);
+    ok(r.text.includes("다시 받지 않습니다"), "이 탭에서는 한 번뿐임을 알린다");
+    ok(!r.shownWhenReady, "준비가 끝나면 안내를 치운다");
+  }
+
   console.log("\n[E/S] 기존 순회가 돌고 있으면 기다렸다가 한 번만 모은다");
   {
     // ⚠ 문구 검사만으로는 부족하다(`if (false && running)` 같은 사보타주가
@@ -683,6 +764,19 @@ const ok = (c, l) => {
       ),
       "머리말 아이콘이 줄어들지 않게 고정한다",
     );
+    // 지우기(X) — 크롬 기본 아이콘은 어두운 패널에서 거의 안 보인다(실측:
+    // 흐린 남색). 기본 아이콘을 끄고 흰색으로 직접 그린다.
+    const clear = CSS.slice(
+      CSS.indexOf(".cheese-vod-search-input::-webkit-search-cancel-button"),
+      CSS.indexOf(".cheese-vod-search-note"),
+    );
+    ok(/appearance: none/.test(clear), "크롬 기본 지우기 아이콘을 끈다");
+    ok(
+      /background-color: rgba\(255, 255, 255/.test(clear),
+      "지우기 아이콘을 흰색 계열로 그린다",
+    );
+    ok(/mask:/.test(clear), "아이콘 모양을 직접 지정한다");
+    ok(/:hover/.test(clear), "가리키면 더 또렷해진다");
     // ⚠ 전역 svg 규칙을 바꾸지 않는다.
     ok(!/^svg \{/m.test(block), "전역 svg 규칙을 건드리지 않는다");
   }

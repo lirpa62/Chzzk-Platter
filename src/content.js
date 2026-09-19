@@ -10427,12 +10427,41 @@
   }
 
   // 검색 화면 본문. 준비 상태에 따라 안내/입력칸/결과를 그린다.
+  //
+  // ⚠ 본문을 다시 그려도 입력칸의 포커스·커서는 그대로 둔다. 그리는 경로가
+  //   여러 갈래라 각 갈래에서 따로 되살리면 빠뜨리기 쉬워, 여기서 한 번에 한다.
   function renderVodChatSearchBody(panel) {
+    const before = panel?.querySelector(".cheese-vod-search-input");
+    const hadFocus = !!before && document.activeElement === before;
+    const start = hadFocus ? before.selectionStart : null;
+    const end = hadFocus ? before.selectionEnd : null;
+    renderVodChatSearchBodyInner(panel);
+    if (!hadFocus) return;
+    const after = panel?.querySelector(".cheese-vod-search-input");
+    if (!after || after.disabled) return;
+    if (document.activeElement !== after) after.focus();
+    // 커서를 원래 자리로. type=search 는 setSelectionRange 를 지원한다.
+    if (start !== null && end !== null) {
+      try {
+        after.setSelectionRange(start, end);
+      } catch {
+        // 일부 상태에서는 커서 지정이 막힌다. 포커스만 살려도 이어 칠 수 있다.
+      }
+    }
+  }
+
+  function renderVodChatSearchBodyInner(panel) {
     const body = panel?.querySelector(".cheese-peak-body");
     if (!body) return;
     const ready = Array.isArray(vodChatSearchState.messages);
     const busy = vodChatSearchState.loading;
     const failed = vodChatSearchState.failed && !ready;
+
+    // ⚠ 입력칸은 다시 만들지 않고 그대로 옮겨 붙인다. 검색할 때마다 새로 만들면
+    //   포커스와 커서 위치가 사라져서, 한 번 검색한 뒤에는 이어서 칠 수 없었다
+    //   (한글 조합 중이면 조합까지 끊긴다).
+    let input = body.querySelector(".cheese-vod-search-input");
+    const hadFocus = !!input && document.activeElement === input;
 
     body.textContent = "";
     const wrap = document.createElement("div");
@@ -10441,12 +10470,17 @@
     // 입력칸은 준비가 끝나야 쓸 수 있다.
     const form = document.createElement("div");
     form.className = "cheese-vod-search-bar";
-    const input = document.createElement("input");
-    input.type = "search";
-    input.placeholder = "다시보기 채팅 검색";
-    input.autocomplete = "off";
-    input.className = "cheese-vod-search-input";
-    input.value = vodChatSearchView.query;
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "search";
+      input.placeholder = "다시보기 채팅 검색";
+      input.autocomplete = "off";
+      input.className = "cheese-vod-search-input";
+      input.value = vodChatSearchView.query;
+    } else if (input.value !== vodChatSearchView.query && !hadFocus) {
+      // 치는 중에는 건드리지 않는다(조합 중인 글자가 되돌아간다).
+      input.value = vodChatSearchView.query;
+    }
     input.disabled = !ready;
     form.appendChild(input);
     wrap.appendChild(form);
@@ -10474,6 +10508,15 @@
         ? `채팅을 준비하는 중입니다… ${pct}%`
         : "채팅 데이터를 확인하는 중입니다…";
       wrap.appendChild(status);
+      // ⚠ 활성도 그래프는 집계만 저장해 두므로 다시 열면 즉시 뜨지만, 검색은
+      //   채팅 원문이 있어야 한다. 원문은 저장하지 않는 정책이라(닉네임·UID 를
+      //   남기지 않기 위해서다) 탭을 새로 열 때마다 한 번은 받아야 한다.
+      //   '왜 또 받느냐' 로 보이지 않게 이유를 밝힌다.
+      const why = document.createElement("p");
+      why.className = "cheese-vod-search-note";
+      why.textContent =
+        "채팅 내용은 저장하지 않아 검색할 때 한 번 불러옵니다. 이 탭에서는 다시 받지 않습니다.";
+      wrap.appendChild(why);
       body.appendChild(wrap);
       return;
     }
