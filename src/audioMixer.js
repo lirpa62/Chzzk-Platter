@@ -7169,7 +7169,29 @@
     btn.setAttribute("aria-label", "실시간 따라잡기");
     btn.dataset.icon = "play";
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">실시간 따라잡기</span><span class="pzp-ui-icon">${syncIcon()}</span>`;
+    bindSyncTooltipHover(btn);
     return btn;
+  }
+
+  // 비활성 버튼 위의 툴팁.
+  //
+  // ⚠ 치지직 툴팁은 CSS :hover 로 뜬다. 그런데 disabled 버튼에는 :hover 가 아예
+  //   걸리지 않는다(실측: mouseenter·pointerover 는 오는데 matches(':hover') 는
+  //   false). 그래서 따라잡기를 끝내 버튼이 잠기면 지연을 보려고 올려도 툴팁이
+  //   뜨지 않았다.
+  //   JS 이벤트는 정상으로 오므로, 그것으로 우리 클래스를 켜고 그 클래스에
+  //   툴팁을 띄운다. disabled 는 그대로 둔다 — 접근성 의미와 클릭 차단을 유지한다.
+  function bindSyncTooltipHover(btn) {
+    if (!btn || btn.dataset.cheeseTipBound === "1") return;
+    btn.dataset.cheeseTipBound = "1";
+    const open = () => btn.classList.add("is-tip-open");
+    const close = () => btn.classList.remove("is-tip-open");
+    btn.addEventListener("pointerenter", open);
+    btn.addEventListener("pointerleave", close);
+    // 포인터가 사라지는 경우(창 밖으로 나감 등)도 닫는다.
+    btn.addEventListener("pointercancel", close);
+    btn.addEventListener("focus", open);
+    btn.addEventListener("blur", close);
   }
 
   // ── 라이브·다시보기 되감기/앞으로 ─────────────────────────────────────────
@@ -7772,7 +7794,10 @@
     const player = findPlayer();
     if (!player) return;
     const controls = sideControls(player, "sync");
-    if (!controls || controls.querySelector(`.${SYNC_BUTTON_CLASS}`)) {
+    const existing = controls?.querySelector(`.${SYNC_BUTTON_CLASS}`);
+    if (!controls || existing) {
+      // 이미 있는 버튼에도 툴팁 처리를 붙인다(안에서 한 번만 걸린다).
+      if (existing) bindSyncTooltipHover(existing);
       startSyncCheck();
       return;
     }

@@ -1977,3 +1977,15 @@
 .cheese-video-filter-button:has(.cheese-button-tip.is-on) .pzp-button__tooltip {
   display: none;
 }
+
+/* 따라잡기 버튼이 비활성일 때의 툴팁.
+   ⚠ 치지직 툴팁은 CSS :hover 로 뜨는데, disabled 버튼에는 :hover 가 걸리지 않는다
+   (실측: mouseenter·pointerover 는 오지만 matches(':hover') 는 false). 그래서
+   따라잡기를 끝내 버튼이 잠기면 지금 지연을 보려 해도 툴팁이 뜨지 않았다.
+   JS 로 켜는 클래스에 맞춰 같은 모양으로 띄운다(disabled 는 그대로 둔다). */
+.cheese-live-sync-button.is-tip-open .pzp-button__tooltip {
+  display: block;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+}

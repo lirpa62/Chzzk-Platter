@@ -83,19 +83,17 @@ console.log("\n[소스] 비활성일 때 지연을 버리지 않는다");
     /setSyncTooltip\(btn, lat, \{ idle: !overThreshold \}\)/.test(mixer),
     "지연을 그대로 넘기고 상태만 따로 알린다",
   );
-  // ⚠ 비활성 버튼도 hover 를 받아야 툴팁이 보인다. 이 프로젝트는 일부러
-  //   pointer-events 를 막지 않는다(우클릭 메뉴 때문). 그 전제를 고정해 둔다.
+  // ⚠ pointer-events 를 막지 않는 것만으로는 부족했다. disabled 버튼에는 CSS
+  //   :hover 자체가 걸리지 않아 치지직 툴팁이 뜨지 않는다(실측).
+  //   그래서 JS 로 켜는 클래스에 맞춘 규칙이 필요하다.
+  //   자세한 계측은 test-sync-tooltip-disabled.cjs 가 한다.
   const css = fs.readFileSync(
     path.join(__dirname, "..", "src", "audioMixer.css"),
     "utf8",
   );
-  const block = css.slice(
-    css.indexOf(".cheese-live-sync-button:disabled {"),
-    css.indexOf(".cheese-live-sync-button:disabled {") + 120,
-  );
   ok(
-    !/pointer-events:\s*none/.test(block),
-    "비활성이어도 포인터를 막지 않는다(툴팁이 보인다)",
+    /\.cheese-live-sync-button\.is-tip-open \.pzp-button__tooltip/.test(css),
+    "비활성일 때도 띄울 수 있는 규칙이 있다",
   );
 }
 
