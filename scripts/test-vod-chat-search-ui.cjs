@@ -27,6 +27,20 @@ function sliceFn(name) {
   return SRC.slice(at, end + 4);
 }
 
+// 검색 입력칸 포커스 리스너를 원본에서 통째로 떼어 온다.
+// ⚠ 등록 방식(어디에, 캡처인지 버블인지)까지 그대로 실려야 의미가 있다.
+function focusListenerSource() {
+  const at = SRC.indexOf('  document.addEventListener(\n    "pointerdown",');
+  if (at < 0) throw Error("입력칸 포커스 리스너를 찾지 못했다");
+  const end = SRC.indexOf("\n  );\n", at);
+  if (end < 0) throw Error("포커스 리스너 끝을 찾지 못했다");
+  const src = SRC.slice(at, end + 5);
+  if (!/cheese-vod-search-input/.test(src)) {
+    throw Error("찾은 리스너가 검색 입력칸용이 아니다");
+  }
+  return src;
+}
+
 const dir = mkdtempSync(join(tmpdir(), "cheese-vsui-"));
 const b = spawn(
   process.env.CHROME_BIN ||
@@ -123,6 +137,10 @@ const ok = (c, l) => {
     window.appendVodSearchHighlighted = appendVodSearchHighlighted;
     window.renderVodChatSearchBody = renderVodChatSearchBody;
     window.renderChatPeakPanelHead = renderChatPeakPanelHead;
+    // ⚠ 포커스 리스너는 손으로 흉내내지 않고 원본을 그대로 올린다. 예전 테스트가
+    //   손으로 옮겨 적는 바람에, 원본이 캡처 단계를 못 막는 자리에 붙어 있어도
+    //   통과해 버렸다.
+    ${focusListenerSource()}
     // 팝오버 껍데기(실제 클래스 그대로).
     document.body.innerHTML =
       '<div class="cheese-search-comment-panel cheese-chat-peak-popover" style="width:320px">'+
@@ -479,59 +497,75 @@ const ok = (c, l) => {
   }
 
   console.log(
-    "\n[포커스] 플레이어가 mousedown 을 막아도 한 번 눌러 입력할 수 있다",
+    "\n[포커스] 플레이어가 눌림을 가로채도 한 번 눌러 입력할 수 있다",
   );
   {
     // ⚠ 증상: 한 번 클릭으로는 입력이 안 되고, 좌클릭을 꾹 누르고 있어야 글자가
     //   들어갔다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
-    //   mousedown 에서 preventDefault 를 하면 '눌린 곳에 포커스' 기본 동작까지
-    //   취소된다(실측: 조상이 막으면 activeElement 가 빈다).
-    //   ⚠ 여기서는 진짜 마우스 이벤트를 보내야 한다. input.focus() 를 직접
-    //     부르는 방식으로는 이 버그가 재현되지 않는다.
-    const box = await ev(`(()=>{
-      vodChatSearchState.messages=[{t:0,text:'둥그레'}];
-      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
-      vodChatSearchView.query=''; vodChatSearchView.result=null;
-      vodChatSearchView.lastQuery=null;
-      panel.querySelector('.cheese-peak-body').textContent='';
-      renderVodChatSearchBody(panel);
-      // 플레이어가 하는 일을 그대로 흉내낸다.
-      if(!window.__pdBound){
-        document.body.addEventListener('mousedown',(e)=>{e.preventDefault();});
-        window.__pdBound=true;}
-      // 실제 코드와 같은 pointerdown 처리를 붙인다.
-      if(!window.__focusBound){
-        panel.addEventListener('pointerdown',(e)=>{
-          const i=e.target;
-          if(!(i instanceof HTMLInputElement))return;
-          if(!i.classList.contains('cheese-vod-search-input'))return;
-          if(i.disabled)return;
-          if(document.activeElement===i)return;
-          i.focus({preventScroll:true});});
-        window.__focusBound=true;}
-      document.activeElement?.blur?.();
-      const r=panel.querySelector('.cheese-vod-search-input').getBoundingClientRect();
-      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
-    // 진짜 한 번 클릭(누르고 곧바로 뗀다).
-    for (const type of ["mousePressed", "mouseReleased"]) {
-      await call(
-        "Input.dispatchMouseEvent",
-        { type, x: box.x, y: box.y, button: "left", clickCount: 1 },
-        sessionId,
+    //   눌림 이벤트를 두 가지 방식으로 가로챈다. 실측 결과:
+    //     preventDefault(mousedown)   → 포커스 기본 동작만 취소. 버블 리스너는 돈다
+    //     stopPropagation(캡처 단계)  → 우리 리스너가 아예 실행되지 않는다
+    //   앞선 수정은 팝오버에 리스너를 달아 둘째 경우를 못 막았다. 그래서 두 경우를
+    //   모두 검사한다.
+    //   ⚠ 진짜 마우스 이벤트를 보내야 한다. input.focus() 를 직접 부르거나
+    //     리스너를 손으로 흉내내면 이 버그가 재현되지 않는다.
+    const modes = [
+      ["preventDefault(mousedown)", "pd"],
+      ["stopPropagation(캡처)", "stop"],
+    ];
+    for (const [label, mode] of modes) {
+      const box = await ev(`(()=>{
+        // 방해 리스너를 매번 새로 건다.
+        // ⚠ 실제 팝오버는 position:absolute; bottom:calc(100%+10px) 이라 컨테이너
+        //   '위' 로 떠서 화면 밖(top 음수)에 놓인다. 그러면 좌표로 보낸 클릭이
+        //   입력칸에 닿지 않아 검사가 헛돈다(실측: top=-52). 여기서는 위치만
+        //   화면 안으로 돌려놓는다 — 포커스 동작과는 무관한 값이다.
+        document.body.innerHTML=
+          '<div id="cheese-player">'+
+          '<div class="cheese-search-comment-timestamp-panel cheese-chat-peak-popover" '+
+          'style="width:320px;position:static">'+
+          '<div class="cheese-search-comment-panel-head"></div>'+
+          '<div class="cheese-peak-body"></div></div></div>';
+        window.panel=document.querySelector('.cheese-chat-peak-popover');
+        vodChatSearchState.messages=[{t:0,text:'둥그레'}];
+        vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+        vodChatSearchState.truncated='';
+        vodChatSearchView.query=''; vodChatSearchView.result=null;
+        vodChatSearchView.lastQuery=null;
+        renderVodChatSearchBody(panel);
+        const player=document.getElementById('cheese-player');
+        if('${mode}'==='pd'){
+          player.addEventListener('mousedown',(e)=>{e.preventDefault();});
+        } else {
+          player.addEventListener('pointerdown',(e)=>{e.stopPropagation();},true);
+          player.addEventListener('mousedown',(e)=>{e.preventDefault();});
+        }
+        document.activeElement?.blur?.();
+        const r=panel.querySelector('.cheese-vod-search-input').getBoundingClientRect();
+        return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+      // 진짜 한 번 클릭(누르고 곧바로 뗀다).
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await call(
+          "Input.dispatchMouseEvent",
+          { type, x: box.x, y: box.y, button: "left", clickCount: 1 },
+          sessionId,
+        );
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const focused = await ev(
+        `document.activeElement===panel.querySelector('.cheese-vod-search-input')`,
       );
+      ok(focused, `${label} → 한 번 클릭으로 포커스가 잡힌다`);
+      await call("Input.insertText", { text: "둥" }, sessionId);
       await new Promise((r) => setTimeout(r, 20));
+      const typed = await ev(
+        `panel.querySelector('.cheese-vod-search-input').value`,
+      );
+      ok(
+        typed === "둥",
+        `${label} → 클릭 직후 바로 입력된다 (${JSON.stringify(typed)})`,
+      );
     }
-    const focused = await ev(
-      `document.activeElement===panel.querySelector('.cheese-vod-search-input')`,
-    );
-    ok(focused, "한 번 클릭으로 입력칸에 포커스가 잡힌다");
-    // 그 상태에서 실제로 글자가 들어가는지.
-    await call("Input.insertText", { text: "둥" }, sessionId);
-    await new Promise((r) => setTimeout(r, 20));
-    const typed = await ev(
-      `panel.querySelector('.cheese-vod-search-input').value`,
-    );
-    ok(typed === "둥", `클릭 직후 바로 입력된다 (${JSON.stringify(typed)})`);
   }
 
   console.log("\n[한글 IME] 조합 중에 결과가 갱신돼도 자모가 합쳐진다");
@@ -757,9 +791,13 @@ const ok = (c, l) => {
     );
     // ⚠ 위 [포커스] 검사는 실제 코드와 '같은 모양' 의 처리를 붙여 재현한 것이다.
     //   원본에 진짜로 들어가 있는지는 여기서 따로 확인한다.
+    // ⚠ 팝오버에 달면 안 된다. 플레이어가 캡처 단계에서 전파를 끊으면 아예 돌지
+    //   않는다(실측). document 의 캡처 단계여야 플레이어보다 먼저 잡는다.
     ok(
-      /el\.addEventListener\("pointerdown", \(event\) => \{/.test(SRC),
-      "입력칸 포커스를 pointerdown 에서 직접 준다",
+      /document\.addEventListener\(\s*"pointerdown",[\s\S]{0,600}?\n    true,\n  \);/.test(
+        SRC,
+      ),
+      "포커스 처리를 document 캡처 단계에서 잡는다",
     );
     ok(
       /input\.focus\(\{ preventScroll: true \}\)/.test(SRC),

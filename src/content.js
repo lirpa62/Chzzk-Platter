@@ -11891,22 +11891,6 @@
         runVodChatSearch(el);
       }, VOD_CHAT_SEARCH_DEBOUNCE_MS);
     });
-    // ⚠ 입력칸을 한 번 눌러서는 포커스가 잡히지 않고, 버튼을 누르고 있는 동안에만
-    //   글자가 들어갔다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
-    //   mousedown 에서 preventDefault 를 한다(영상 위 드래그 선택을 막는 흔한 처리).
-    //   그러면 '눌린 곳에 포커스를 준다' 는 기본 동작까지 함께 취소된다(실측:
-    //   조상이 preventDefault 하면 activeElement 가 비었다).
-    //   그래서 우리가 직접 포커스를 준다. 조합 중에는 건드리지 않는다.
-    el.addEventListener("pointerdown", (event) => {
-      const input = event.target;
-      if (!(input instanceof HTMLInputElement)) return;
-      if (!input.classList.contains("cheese-vod-search-input")) return;
-      if (input.disabled) return;
-      if (document.activeElement === input) return; // 이미 잡혀 있으면 그대로 둔다
-      // 기본 동작이 취소돼도 포커스는 잡히게 한다. 커서 위치는 브라우저가
-      // mouseup 에서 정하므로 여기서 건드리지 않는다.
-      input.focus({ preventScroll: true });
-    });
     el.addEventListener("keydown", (event) => {
       const input = event.target;
       if (!(input instanceof HTMLInputElement)) return;
@@ -11946,6 +11930,29 @@
     const target = event.target;
     return target instanceof Element && !!target.closest(selector);
   }
+
+  // 검색 입력칸에 포커스를 직접 준다.
+  //
+  // ⚠ 한 번 클릭으로는 글자가 들어가지 않고, 좌클릭을 누르고 있는 동안에만
+  //   입력됐다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
+  //   눌림 이벤트를 두 가지 방식으로 가로챈다.
+  //     - mousedown 에서 preventDefault → '눌린 곳에 포커스' 기본 동작이 취소된다
+  //     - pointerdown 을 캡처 단계에서 stopPropagation → 아래로 내려오지도 않는다
+  //   두 번째 때문에 팝오버에 붙인 리스너는 아예 실행되지 않았다(실측). 그래서
+  //   document 의 '캡처 단계' 에서 잡는다. 플레이어보다 위라 반드시 먼저 돈다.
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (!input.classList.contains("cheese-vod-search-input")) return;
+      if (input.disabled) return;
+      if (document.activeElement === input) return; // 이미 잡혀 있으면 그대로 둔다
+      // 커서 위치는 브라우저가 mouseup 에서 정하므로 여기서 건드리지 않는다.
+      input.focus({ preventScroll: true });
+    },
+    true,
+  );
 
   // 팝오버 바깥을 누르거나 Esc 면 닫는다. 합성 클릭은 무시한다(자동 갱신 등).
   document.addEventListener("click", (event) => {
