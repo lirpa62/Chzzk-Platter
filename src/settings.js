@@ -156,6 +156,14 @@
     "cheesePopupPlayerStartWithoutChat",
     "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
+    "cheeseMultiviewBtnMixer",
+    "cheeseMultiviewBtnFilter",
+    "cheeseMultiviewBtnSync",
+    "cheeseMultiviewSeekBar",
+    "cheeseMultiviewBtnStats",
+    "cheeseMultiviewBtnScreenshot",
+    "cheeseMultiviewBtnRewind",
+    "cheeseMultiviewBtnForward",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -1025,6 +1033,18 @@
     }
     window.open(settingsUrl.toString(), "_blank", "noopener");
   });
+
+  // 멀티뷰를 새 탭으로 연다.
+  document
+    .getElementById("openMultiviewButton")
+    ?.addEventListener("click", () => {
+      const url = chrome.runtime.getURL("multiview.html");
+      if (chrome.tabs?.create) {
+        chrome.tabs.create({ url });
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+    });
 
   // 채팅 리캡을 새 탭으로 연다.
   document.getElementById("openChatRecap")?.addEventListener("click", () => {
@@ -4986,6 +5006,16 @@
       "cheesePopupPlayerDisableHidden",
       false,
     ],
+    // 멀티뷰 버튼. 팝업 플레이어와 키를 따로 둬 서로 영향을 주지 않는다.
+    // 칸이 작아 기본은 오디오 믹서 하나만 켠다.
+    ["[data-multiview-btn-mixer]", "cheeseMultiviewBtnMixer", true],
+    ["[data-multiview-btn-filter]", "cheeseMultiviewBtnFilter", false],
+    ["[data-multiview-btn-sync]", "cheeseMultiviewBtnSync", false],
+    ["[data-multiview-seekbar]", "cheeseMultiviewSeekBar", false],
+    ["[data-multiview-btn-stats]", "cheeseMultiviewBtnStats", false],
+    ["[data-multiview-btn-screenshot]", "cheeseMultiviewBtnScreenshot", false],
+    ["[data-multiview-btn-rewind]", "cheeseMultiviewBtnRewind", false],
+    ["[data-multiview-btn-forward]", "cheeseMultiviewBtnForward", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;

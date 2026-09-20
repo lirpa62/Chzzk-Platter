@@ -1,0 +1,1801 @@
+/* 치즈 플래터 - 멀티뷰 */
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--popup-bg, #141517);
+  color: var(--popup-text, #e9ecef);
+  font-size: 14px;
+}
+
+/* ── 채널 고르기 ───────────────────────────────────────────────────── */
+.mv-setup {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 20px;
+}
+.mv-setup-head-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+/* 테마 전환 버튼(두 화면 공용). 지금 테마의 반대 아이콘만 보여 준다. */
+.mv-theme-toggle {
+  align-items: center;
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  padding: 6px;
+}
+.mv-theme-toggle:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-theme-toggle .mv-theme-moon {
+  display: none;
+}
+:root[data-theme="dark"] .mv-theme-toggle .mv-theme-sun {
+  display: none;
+}
+:root[data-theme="dark"] .mv-theme-toggle .mv-theme-moon {
+  display: inline;
+}
+
+.mv-setup-head h1 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+.mv-setup-desc {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+.mv-setup-body {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  min-height: 0;
+}
+.mv-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+/* 치즈 플래터의 기존 탭 버튼 모양(.lps-view-switch)을 그대로 쓴다.
+   ⚠ 그 규칙은 logPowerStats.css 에 있고 이 페이지는 그 파일을 읽지 않으므로
+   여기에 같은 모양을 둔다(그 파일 전체를 끌어오면 관계없는 스타일까지 딸려온다). */
+.mv-source-tabs {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: inline-grid;
+  flex: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 2px;
+}
+.mv-source-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 5px;
+  height: 26px;
+  justify-content: center;
+  min-width: 72px;
+  padding: 0 9px;
+}
+.mv-source-tabs button[aria-pressed="true"] {
+  background: var(--popup-surface, #22252a);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  color: var(--popup-brand-strong, #00ffa3);
+  font-weight: 700;
+}
+.mv-source-tabs button:hover:not(:disabled) {
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-source-tabs button:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+/* 구역 폴더(전용 팔로잉). 통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. */
+.mv-folders {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+.mv-folder {
+  align-items: center;
+  background: var(--popup-surface, #22252a);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: var(--popup-text, #e9ecef);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  font-size: 12px;
+  gap: 7px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+.mv-folder:hover {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-folder:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 1px;
+}
+.mv-folder.is-on {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-folder-icon {
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-folder.is-on .mv-folder-icon {
+  color: var(--popup-brand, #00ffa3);
+}
+.mv-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-folder-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mv-search {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.mv-channel-list {
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+/* 구역(즐겨찾기·그룹·팔로잉) */
+.mv-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 목록을 스크롤해도 구역 이름이 위에 붙어 있게 한다.
+   ⚠ 배경을 주지 않으면 아래 카드가 글자 뒤로 비쳐 보인다. */
+.mv-section-head {
+  align-items: baseline;
+  background: var(--popup-bg, #141517);
+  display: flex;
+  gap: 6px;
+  margin: -10px -10px 0;
+  padding: 10px 12px 6px;
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+}
+.mv-section-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+.mv-section-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
+
+/* 라이브 방송 카드 */
+.mv-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.mv-card {
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 7px;
+  padding: 0;
+  text-align: left;
+}
+.mv-card:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.mv-card-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 8px;
+  display: block;
+  overflow: hidden;
+  position: relative;
+}
+.mv-card-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+/* 방송 스냅샷이 없어 채널 이미지로 대신 채운 경우: 꽉 채우면 확대돼 뭉개지므로
+   가운데에 작게 둔다. */
+.mv-card-thumb.is-fallback {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+.mv-card-thumb.is-fallback img {
+  border-radius: 50%;
+  height: 56%;
+  object-fit: cover;
+  width: auto;
+  aspect-ratio: 1 / 1;
+}
+.mv-card-thumb-empty {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-card:hover:not(:disabled) .mv-card-thumb {
+  outline: 2px solid var(--popup-border, #34383d);
+  outline-offset: -2px;
+}
+.mv-card.is-on .mv-card-thumb {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+.mv-card-viewers {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 6px;
+  color: #fff;
+  font-size: 11px;
+  left: 6px;
+  padding: 2px 5px;
+  position: absolute;
+}
+.mv-card-adult {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 6px;
+  color: #ff8a8a;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  position: absolute;
+  right: 6px;
+}
+.mv-card-picked {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+.mv-card-body {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.mv-card-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 30px;
+  object-fit: cover;
+  width: 30px;
+}
+.mv-card-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.mv-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  /* 제목은 두 줄까지 보여 준다. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.mv-card-name,
+.mv-card-category {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 불러오는 동안의 빈 카드. 실제 카드와 크기가 같아 다 불러와도 자리가 안 밀린다. */
+.mv-card.is-skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.mv-skeleton-box,
+.mv-skeleton-line,
+.mv-skeleton-avatar {
+  animation: mv-skeleton-pulse 1.2s ease-in-out infinite;
+  background: var(--popup-border, #34383d);
+  border-radius: 4px;
+  display: block;
+}
+.mv-skeleton-box {
+  border-radius: 8px;
+  height: 100%;
+  width: 100%;
+}
+.mv-skeleton-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 30px;
+  width: 30px;
+}
+.mv-skeleton-line {
+  height: 11px;
+  margin: 2px 0;
+  width: 84%;
+}
+.mv-skeleton-line.is-short {
+  height: 10px;
+  width: 54%;
+}
+@keyframes mv-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-skeleton-box,
+  .mv-skeleton-line,
+  .mv-skeleton-avatar {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+.mv-empty {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 13px;
+  margin: 0;
+  padding: 14px 8px;
+  text-align: center;
+}
+
+/* ── 고른 채널 ─────────────────────────────────────────────────────── */
+.mv-chosen {
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+.mv-chosen-head {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.mv-hint {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+.mv-chosen-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mv-chosen-item {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 8px;
+  cursor: grab;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+}
+.mv-chosen-item:active {
+  cursor: grabbing;
+}
+.mv-chosen-item img {
+  border-radius: 50%;
+  flex: none;
+  height: 24px;
+  width: 24px;
+}
+.mv-chosen-rank {
+  background: var(--popup-border, #34383d);
+  border-radius: 4px;
+  flex: none;
+  font-size: 11px;
+  min-width: 30px;
+  padding: 2px 4px;
+  text-align: center;
+}
+.mv-chosen-item:first-child .mv-chosen-rank {
+  background: var(--popup-brand, #00ffa3);
+  color: #fff;
+  font-weight: 700;
+}
+.mv-chosen-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-chosen-remove {
+  background: none;
+  border: 0;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: auto;
+  padding: 2px 4px;
+}
+.mv-chosen-remove:hover {
+  color: var(--popup-text, #e9ecef);
+}
+
+/* ── 배치 고르기 ───────────────────────────────────────────────────── */
+.mv-layout-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  margin-top: 6px;
+}
+.mv-layout {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  justify-items: center;
+  /* ⚠ 이게 없으면 그리드 열이 내용(max-content)만큼 넓어져, 미리보기의 width:100%
+     가 버튼보다 큰 값으로 풀린다 → 미리보기가 버튼 밖으로 나간다. */
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  padding: 6px 4px;
+}
+.mv-layout.is-on {
+  border-color: var(--popup-brand, #00ffa3);
+}
+/* 미리보기는 실제 적용될 트랙 계산 결과를 그대로 쓴다(인라인 style 로 들어온다).
+   ⚠ width:100% + aspect-ratio 로 두면 가로로 긴 배치(오른쪽 1 은 3.56:1)가 버튼
+   폭을 넘어 밖으로 삐져나간다(실측: 87px 버튼 안에 135px). 높이를 기준으로 잡고
+   폭은 넘지 않게 묶어, 넓은 배치는 작아지고 좁은 배치는 높이를 채우게 한다. */
+.mv-layout-preview {
+  /* 버튼 폭을 기준으로 삼고 높이를 비율에서 끌어낸다. 이러면 넓은 배치도 버튼
+     안에 들어가고, 인라인 aspect-ratio 가 모양을 결정한다. */
+  container-type: inline-size;
+  display: grid;
+  gap: 2px;
+  justify-self: center;
+  max-height: 48px;
+  width: 100%;
+}
+.mv-layout-preview i {
+  background: var(--popup-border, #34383d);
+  border-radius: 2px;
+}
+.mv-layout-preview i.is-main {
+  background: var(--popup-brand, #00ffa3);
+}
+.mv-layout-label {
+  font-size: 11px;
+}
+
+.mv-main-quality {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+.mv-option-note {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: -4px 0 0;
+}
+.mv-start {
+  background: var(--popup-brand, #00ffa3);
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  margin-top: auto;
+  padding: 10px;
+}
+.mv-start:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* ── 시청 화면(multiviewWatch.html) ────────────────────────────────── */
+.mv-watch-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 최상단 조작 막대 */
+/* 좁은 창에서도 항목이 사라지지 않게 한다.
+   ⚠ 막대 자체에 overflow 를 걸면 안 된다. overflow-x:auto 를 주면 overflow-y 도
+   auto 로 계산돼(한 축만 visible 일 수 없다) 아래로 펼쳐지는 팝오버 패널이 잘린다
+   (실측: 패널이 막대 아래로 160px 넘어감). 대신 항목이 줄어들지 않게만 하고,
+   정말 좁으면 버튼 폭을 줄여 감당한다. */
+.mv-topbar {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  display: flex;
+  flex: none;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.mv-topbar > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* 좁아지면 라벨(메인 채널/채팅/…)을 감추고 값만 남겨 버튼 수를 유지한다. */
+@media (max-width: 720px) {
+  .mv-pop-label {
+    display: none;
+  }
+  .mv-pop-button {
+    max-width: 120px;
+  }
+}
+.mv-topbar-back {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  margin-left: auto;
+  padding: 6px 10px;
+}
+.mv-topbar-back:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+
+/* 커스텀 셀렉트 팝오버 */
+.mv-pop {
+  position: relative;
+}
+.mv-pop-button {
+  align-items: baseline;
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+}
+.mv-pop-button:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+.mv-pop-label {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+}
+.mv-pop-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-pop-button[aria-expanded="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-pop-panel {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  left: 0;
+  max-height: 320px;
+  min-width: 100%;
+  overflow-y: auto;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 10;
+}
+.mv-pop-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+}
+
+.mv-pop-option {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  overflow: hidden;
+  padding: 7px 10px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-pop-option:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+/* 배치 항목: 이름 위에 작은 미리보기를 얹는다. */
+.mv-pop-option-layout {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  overflow: hidden;
+  padding: 7px 8px;
+}
+.mv-pop-option-layout .mv-layout-preview {
+  max-height: 36px;
+}
+.mv-pop-option-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-pop-option.is-on {
+  background: var(--popup-brand-soft, rgba(0, 255, 163, 0.14));
+  color: var(--popup-brand, #00ffa3);
+}
+
+/* 칸 상태 덮개(불러오는 중 / 실패 / 방송 종료).
+   ⚠ flex 자식으로 끼면 영상 칸을 밀어내 16:9 가 흔들린다. 반드시 영상 위를 덮는
+   overlay 여야 한다. */
+.mv-cell-status {
+  align-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  display: grid;
+  gap: 8px;
+  inset: 0;
+  justify-items: center;
+  padding: 12px;
+  position: absolute;
+  text-align: center;
+  z-index: 3;
+}
+.mv-cell-status-text {
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+}
+/* 방송 종료는 실패와 구분되게 조금 다르게 보인다(덜 경고처럼). */
+.mv-cell[data-status="ended"] .mv-cell-status {
+  background: rgba(0, 0, 0, 0.8);
+}
+/* ⚠ 덮개는 테마와 상관없이 늘 어두운 검정이다. 그래서 글자색에 테마 변수
+   (--popup-muted)를 쓰면 라이트 테마에서 밝은 회색이 되어 거의 안 보인다.
+   덮개 자체를 기준으로 한 고정 색을 쓴다. */
+.mv-cell[data-status="ended"] .mv-cell-status-text {
+  color: rgba(255, 255, 255, 0.92);
+}
+/* 덧붙이는 설명은 한 단계만 약하게 둔다(그래도 읽을 수 있어야 한다). */
+.mv-cell-status-note {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.mv-cell-retry,
+.mv-cell-unmute {
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.mv-cell-retry:hover,
+.mv-cell-unmute:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+/* 덮개에는 버튼이 둘이다. 먼저 누르길 권하는 쪽을 앞세운다. */
+.mv-cell-retry.is-primary {
+  background: var(--popup-brand, #00ffa3);
+  border-color: var(--popup-brand, #00ffa3);
+  color: #fff;
+  font-weight: 600;
+}
+.mv-cell-retry.is-primary:hover {
+  color: #fff;
+  filter: brightness(1.08);
+}
+.mv-cell-retry:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* 소리 켜기 안내는 덮개가 아니라 영상 아래쪽에 띄운다(화면을 가리지 않는다). */
+.mv-cell-unmute {
+  bottom: 10px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 4;
+}
+
+/* 자리 바꾸기 손잡이. 평소엔 숨고 칸에 마우스를 올리면 나타난다.
+   ⚠ iframe 위에서는 드래그 이벤트가 부모로 오지 않아(교차 출처) 이 손잡이가
+   필요하다. 영상 위에 얹어야 하므로 z-index 로 띄운다. */
+/* ⚠ 위치·표시는 .mv-cell-tools 가 맡는다(여기서 다시 absolute 로 띄우면 겹친다). */
+.mv-cell-grip {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #fff;
+  cursor: grab;
+  display: flex;
+  justify-content: center;
+  padding: 4px 3px;
+}
+.mv-cell-grip:active {
+  cursor: grabbing;
+}
+.mv-cell.is-dragging {
+  opacity: 0.5;
+}
+/* ⚠ 드래그 중에는 iframe 이 포인터를 먹어 dragover/drop 이 칸까지 오지 않는다.
+   끄는 동안만 프레임을 통과시켜 칸이 드롭 대상이 되게 한다. */
+.mv-frames.is-dragging iframe {
+  pointer-events: none;
+}
+.mv-cell.is-drop-target {
+  outline: 3px dashed var(--popup-brand, #00ffa3);
+  outline-offset: -3px;
+}
+
+/* 칸 도구 모음(손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다. */
+.mv-cell-tools {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  transition: opacity 0.12s ease;
+  z-index: 3;
+}
+.mv-cell:hover .mv-cell-tools,
+.mv-cell-tools:focus-within {
+  opacity: 1;
+}
+.mv-cell-close {
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+.mv-cell-close:hover:not(:disabled) {
+  border-color: #ff8a8a;
+  color: #ff8a8a;
+}
+.mv-cell-close:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+/* 상태 덮개의 단추 줄. */
+.mv-cell-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* 칸 안 '메인으로' 버튼: 평소엔 숨고 칸에 마우스를 올리면 나타난다. */
+.mv-cell-main {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  left: 8px;
+  opacity: 0;
+  padding: 5px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+.mv-cell:hover .mv-cell-main {
+  opacity: 1;
+  pointer-events: auto;
+}
+.mv-cell-main:hover {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: var(--popup-brand, #00ffa3);
+}
+/* 이미 메인인 칸에는 올릴 필요가 없다. */
+.mv-cell.is-main .mv-cell-main {
+  display: none;
+}
+
+.mv-chat-follow {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 7px;
+}
+.mv-chat-follow[aria-pressed="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+/* 채팅 프레임과 덮개를 겹쳐 놓는다(덮개가 채팅을 밀어내지 않게). */
+.mv-chat-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.mv-chat-body iframe {
+  border: 0;
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-chat-status {
+  align-content: center;
+  background: var(--popup-bg, #141517);
+  display: grid;
+  gap: 8px;
+  inset: 0;
+  justify-items: center;
+  padding: 12px;
+  position: absolute;
+  text-align: center;
+  z-index: 2;
+}
+.mv-chat-status .mv-cell-status-text {
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-chat-title {
+  flex: 1 1 auto;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-watch-empty {
+  padding: 40px 16px;
+}
+
+/* ── 실행 화면 ─────────────────────────────────────────────────────── */
+/* ⚠ 채팅을 격자 안에 넣지 않는다. 바깥 flex 로 감싸야 채팅을 접었다 펴도
+   프레임 격자가 다시 계산되지 않는다(리플로우 중 재생이 끊길 수 있다). */
+/* ⚠ height:100% 로 두면 최상단 막대 높이만큼 화면 밖으로 넘친다.
+   막대와 형제로 flex 배치되므로 남은 높이를 받아야 한다. */
+.mv-stage {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+.mv-frames {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-height: 0;
+  min-width: 0;
+}
+/* 칸이 정확히 16:9 로 떨어지는 배치: 격자 전체를 필요한 비율로 묶고 가운데 둔다.
+   이러면 칸 안에는 여백이 전혀 없고, 남는 자리는 격자 바깥에 한 번만 생긴다.
+   ⚠ flex 아이템에 aspect-ratio 를 주면 flex 가 이긴다(실측: 0.889 를 줘도
+   1.422 로 늘어남). 그래서 격자를 flex 로 늘리지 않는 래퍼 안에 넣는다. */
+.mv-frames-fit {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+}
+/* 래퍼 크기를 기준으로 '넘치지 않는 선에서 가장 큰' 격자를 만든다.
+   min() 으로 직접 계산해야 확실하다 — aspect-ratio 는 flex 나 grid 문맥에 따라
+   무시되거나(실측) 0 으로 접히는 경우가 있다. --mv-ratio 는 렌더가 채운다. */
+.mv-frames.is-exact {
+  flex: 0 0 auto;
+  height: min(100%, 100cqw / var(--mv-ratio));
+  width: min(100%, 100cqh * var(--mv-ratio));
+}
+.mv-frames-fit {
+  container-type: size;
+  position: relative;
+}
+
+/* 빠른 채널 바꾸기. 격자 위 남는 자리에 겹쳐 띄운다.
+   ⚠ 격자를 밀어내지 않도록 absolute 로 띄운다(밀어내면 칸 크기가 다시 계산돼
+   16:9 가 흔들리고 재생도 끊길 수 있다). */
+.mv-quick {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* ⚠ 높이를 내용에 맡기면 탭마다 후보 수가 달라 팝오버가 늘었다 줄었다 하고,
+     그때마다 세로 스크롤바가 생겼다 사라지며 내용 너비까지 바뀌어 카드가 좌우로
+     흔들린다. 높이를 정해 두고 안쪽에서만 스크롤하게 한다. */
+  height: min(60%, 360px);
+  left: 50%;
+  max-height: none;
+  max-width: min(760px, 94%);
+  padding: 10px 12px;
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  width: 100%;
+  z-index: 5;
+}
+.mv-quick-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.mv-quick-head strong {
+  font-size: 13px;
+}
+.mv-quick-hint {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.mv-quick-head-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.mv-quick-all {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.mv-quick-all:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+/* 교체 취소는 되돌리는 동작이라 초록이 아니라 빨강으로 알린다. */
+.mv-quick-cancel {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+.mv-quick-cancel:hover {
+  border-color: #ff8a8a;
+  color: #ff8a8a;
+}
+.mv-quick-close {
+  background: none;
+  border: 0;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.mv-quick-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  /* 스크롤바가 생기든 말든 그 자리를 늘 비워 둔다. 없으면 스크롤바가 나타나는
+     순간 내용 너비가 줄어 카드가 한 번 튄다. */
+  scrollbar-gutter: stable;
+  /* 내용이 적은 탭에서도 격자가 위로 쏠려 붙지 않게 시작 정렬로 둔다. */
+  align-content: start;
+}
+.mv-quick-current {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+}
+.mv-quick-item {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  padding: 4px 6px 4px 10px;
+}
+/* 메인은 테두리만으로는 눈에 잘 안 띈다. 배경까지 옅게 칠한다. */
+.mv-quick-item.is-main {
+  background: rgba(0, 255, 163, 0.1);
+  border-color: var(--popup-brand, #00ffa3);
+}
+/* 종료·오류 칸은 흐리게 두되 글자 배지로도 함께 알린다. */
+.mv-quick-item[data-state="ended"] {
+  opacity: 0.65;
+}
+.mv-quick-item[data-state="error"] {
+  border-color: rgba(255, 138, 138, 0.6);
+}
+.mv-quick-item[data-state="error"] .mv-quick-name {
+  color: #ff8a8a;
+}
+.mv-quick-tag {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+}
+/* 칩 본문 = '이 채널을 바꾸기' 버튼. × 와 겹치지 않게 따로 둔다. */
+.mv-quick-select {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 5px;
+  padding: 0;
+  text-align: left;
+}
+.mv-quick-select:hover .mv-quick-name {
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-select:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 2px;
+}
+.mv-quick-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-quick-drop {
+  background: none;
+  border: 0;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.mv-quick-drop:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.mv-quick-drop:hover:not(:disabled) {
+  color: #ff8a8a;
+}
+.mv-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mv-quick-pick {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.mv-quick-pick:hover:not(:disabled) {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-pick:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+/* 후보 목록 종류 탭(고르기 화면과 같은 모양). */
+.mv-quick-tabs {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 2px;
+}
+.mv-quick-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 6px;
+}
+.mv-quick-tabs button[aria-pressed="true"] {
+  background: var(--popup-surface, #22252a);
+  color: var(--popup-brand-strong, #00ffa3);
+  font-weight: 700;
+}
+.mv-quick-search {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+/* 후보 카드 한 줄. 좌우 단추와 스크롤로 넘긴다(외부 라이브러리를 쓰지 않는다). */
+.mv-quick-rail {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.mv-quick-nav {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  padding: 10px 6px;
+}
+.mv-quick-nav:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-add {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+}
+/* 데스크톱에서 네 개쯤 보이고, 좁아지면 자연히 두세 개가 된다. */
+.mv-quick-card {
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 calc(25% - 6px);
+  flex-direction: column;
+  font: inherit;
+  gap: 5px;
+  min-width: 132px;
+  padding: 0;
+  scroll-snap-align: start;
+  text-align: left;
+}
+.mv-quick-card:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.mv-quick-card-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 6px;
+  display: block;
+  overflow: hidden;
+  position: relative;
+}
+.mv-quick-card-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.mv-quick-card-empty {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-quick-card:hover:not(:disabled) .mv-quick-card-thumb {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+.mv-quick-card-adult {
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 4px;
+  bottom: 4px;
+  color: #ff8a8a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  position: absolute;
+  right: 4px;
+}
+/* 카드 본문: 프로필 이미지 + 방송 제목 + 채널 이름(시청자수·카테고리는 안 쓴다). */
+.mv-quick-card-body {
+  align-items: flex-start;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.mv-quick-card-avatar {
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 50%;
+  flex: none;
+  height: 24px;
+  object-fit: cover;
+  width: 24px;
+}
+.mv-quick-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.mv-quick-card-title {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-quick-card-name {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 전용 팔로잉 구역 폴더. 가로로 넘치면 밀어서 본다. */
+.mv-quick-folders {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+.mv-quick-folder {
+  align-items: center;
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  font: inherit;
+  font-size: 11.5px;
+  gap: 5px;
+  padding: 4px 10px;
+}
+.mv-quick-folder:hover {
+  border-color: var(--popup-brand, #00ffa3);
+  color: inherit;
+}
+.mv-quick-folder:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 1px;
+}
+.mv-quick-folder.is-on {
+  background: rgba(0, 255, 163, 0.12);
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-quick-folder-icon {
+  flex: none;
+  opacity: 0.8;
+}
+.mv-quick-folder-name {
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-quick-folder-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10.5px;
+}
+.mv-quick-folder.is-on .mv-quick-folder-count {
+  color: inherit;
+}
+
+/* 현재 채널 줄의 상태 표시. 색만으로 알리지 않고 글자를 함께 둔다. */
+.mv-quick-state {
+  border-radius: 4px;
+  flex: none;
+  font-size: 10px;
+  padding: 1px 5px;
+}
+.mv-quick-state[data-state="ended"] {
+  background: rgba(154, 161, 169, 0.2);
+  color: var(--popup-muted, #9aa1a9);
+}
+.mv-quick-state[data-state="error"] {
+  background: rgba(255, 138, 138, 0.18);
+  color: #ff8a8a;
+}
+.mv-quick-item.is-replacing {
+  outline: 1px dashed var(--popup-brand, #00ffa3);
+}
+
+/* 후보가 없을 때는 레일 한가운데에 안내만 둔다. */
+.mv-quick-empty {
+  align-items: center;
+  color: var(--popup-muted, #9aa1a9);
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+  margin: 0;
+  min-height: 76px;
+  text-align: center;
+  width: 100%;
+}
+/* 16:9 해가 없는 배치(오른쪽+아래 등)는 예전처럼 격자가 자리를 다 채우고,
+   칸 안쪽 상자가 16:9 를 지킨다(칸마다 약간의 여백이 남는다). */
+.mv-frames:not(.is-exact) {
+  flex: 1 1 auto;
+  height: 100%;
+  width: 100%;
+}
+/* 모든 화면은 16:9 를 지킨다. 칸의 모양이 어떻든(세로로 길든 가로로 넓든)
+   안쪽 상자를 16:9 로 잡고 남는 자리는 검은 여백으로 둔다. 칸에 그냥 100% 로
+   채우면 배치에 따라 화면이 늘어나거나 눌린다. */
+.mv-cell {
+  align-items: center;
+  background: #000;
+  /* 안쪽 상자가 칸 크기를 기준으로 16:9 를 계산할 수 있게 컨테이너로 선언한다. */
+  container-type: size;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  border-radius: 8px;
+}
+.mv-cell-inner {
+  /* 칸보다 커지지 않는 선에서 가장 크게 16:9 를 잡는다.
+     ⚠ aspect-ratio + max-height/width 조합은 flex 자식에서 믿을 수 없다.
+     width:100% 를 주면 납작한 칸에서 옆으로 늘어나고(실측 5.70), height:100%
+     를 주면 좁은 칸에서 세로로 늘어난다(실측 0.36). 칸 크기를 직접 받아
+     min() 으로 계산하면 배치와 무관하게 정확히 16:9 가 된다. */
+  height: min(100%, (100cqw * 9 / 16));
+  width: min(100%, (100cqh * 16 / 9));
+}
+/* 칸 자체가 이미 정확히 16:9 인 배치(is-exact)에서는 상자가 칸을 그대로 채운다.
+   ⚠ 이 규칙은 위 min() 보다 뒤에 와야 이긴다(특이성이 같으면 순서가 결정한다).
+   앞에 두면 min() 이 이겨, 반올림으로 칸이 1px 납작해진 순간 상자가 그만큼
+   좁아지면서 좌우에 검은 여백이 생긴다. */
+.mv-frames.is-exact .mv-cell-inner {
+  height: 100%;
+  width: 100%;
+}
+.mv-cell iframe {
+  border: 0;
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+.mv-cell.is-main {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: -2px;
+}
+
+/* 채팅 크기는 --mv-chat-w/--mv-chat-h 로 정한다(끌어서 바꾼다). */
+.mv-chat {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--mv-chat-w, 370px);
+}
+.mv-stage[data-chat-side="bottom"] .mv-chat,
+.mv-stage[data-chat-side="top"] .mv-chat {
+  height: var(--mv-chat-h, 260px);
+  width: auto;
+}
+
+/* 손잡이. 채팅이 어느 쪽이든 '격자와 채팅 사이'에 오도록 stage 의 flex 흐름을
+   그대로 탄다(HTML 에서 채팅 바로 앞에 둔다). */
+.mv-chat-resize {
+  background: transparent;
+  flex: none;
+  position: relative;
+  z-index: 3;
+}
+.mv-stage[data-chat-side="right"] .mv-chat-resize,
+.mv-stage[data-chat-side="left"] .mv-chat-resize {
+  cursor: col-resize;
+  width: 6px;
+}
+.mv-stage[data-chat-side="bottom"] .mv-chat-resize,
+.mv-stage[data-chat-side="top"] .mv-chat-resize {
+  cursor: row-resize;
+  height: 6px;
+}
+.mv-chat-resize:hover,
+.mv-chat-resize:focus-visible,
+.mv-chat-resize.is-dragging {
+  background: var(--popup-brand, #00ffa3);
+  outline: none;
+}
+/* 채팅을 접으면 손잡이도 숨긴다. */
+.mv-stage.is-chat-folded .mv-chat-resize {
+  display: none;
+}
+/* 접으면 채팅 본문(프레임 + 덮개)을 통째로 숨긴다. 머리말만 남는다. */
+.mv-stage.is-chat-folded .mv-chat-body {
+  display: none;
+}
+.mv-stage.is-chat-folded .mv-chat {
+  height: auto;
+  width: auto;
+}
+.mv-chat-head {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+}
+.mv-chat-head select {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 4px 6px;
+}
+.mv-chat-head button {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+/* ⚠ 채팅 프레임 안은 치지직 페이지라 우리 테마가 닿지 않는다. 치지직 채팅
+   페이지는 OS 설정과 무관하게 항상 어두운 색을 직접 칠하고(실측: body 배경이
+   늘 rgb(20,21,23)), 테마 클래스를 바꿔도 색이 바뀌지 않는다. 억지로 덮으려면
+   빌드마다 바뀌는 해시 클래스(_chatting_message_xxxxx_21)에 기대야 해서 두지
+   않는다. 대신 라이트 모드에서 프레임 경계만 정리해 덜 튀게 한다. */
+.mv-chat iframe {
+  border: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+:root:not([data-theme="dark"]) .mv-chat {
+  border-left: 1px solid var(--popup-border, #34383d);
+}
+:root:not([data-theme="dark"]) .mv-stage[data-chat-side="bottom"] .mv-chat,
+:root:not([data-theme="dark"]) .mv-stage[data-chat-side="top"] .mv-chat {
+  border-left: 0;
+  border-top: 1px solid var(--popup-border, #34383d);
+}
+
+.mv-toolbar {
+  bottom: 8px;
+  left: 8px;
+  position: absolute;
+  z-index: 2;
+}
+.mv-toolbar button {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+@media (max-width: 900px) {
+  .mv-setup-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ⚠ display 를 지정한 요소는 hidden 속성(UA 의 display:none)을 덮어써 버린다.
+   그래서 hidden 을 걸어 둔 팝오버 패널·막대·빈 화면이 그대로 보였다(실측:
+   hidden=true 인데 computed display 가 flex/grid). 이 파일에서 display 를 주는
+   요소가 여럿이므로 맨 끝에서 한 번에 다시 막는다. */
+[hidden] {
+  display: none !important;
+}
+
+/* ── 볼륨 팝오버 ───────────────────────────────────────────────────────── */
+.mv-volume-pop {
+  gap: 8px;
+  min-width: 300px;
+  padding: 10px;
+}
+/* 자동재생이 막혔을 때 볼륨 버튼에 남기는 표시. 글자(aria-label)도 함께 바꾼다. */
+.mv-pop-button.is-warn {
+  border-color: #ffb454;
+}
+.mv-pop-button.is-warn .mv-pop-value::after {
+  content: " ●";
+  color: #ffb454;
+}
+.mv-vol-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto 120px 42px;
+}
+.mv-vol-row.is-master {
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  grid-template-columns: 1fr 120px 42px;
+  padding-bottom: 8px;
+}
+/* '메인 채널만 소리' 때문에 잠긴 줄은 흐리게 둔다. */
+.mv-vol-row.is-off {
+  opacity: 0.55;
+}
+/* ⚠ 여기에는 overflow 를 두지 않는다. 두면 이름이 길 때 '메인' 배지까지 함께
+   잘려 역할이 안 보인다. 자르는 것은 이름 텍스트만이다. */
+.mv-vol-name {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 5px;
+  min-width: 0;
+}
+.mv-vol-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 배지는 줄어들지 않는다(이름이 아무리 길어도 남는다). */
+.mv-main-badge {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 4px;
+  color: #fff;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+}
+.mv-vol-mute {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.mv-vol-mute:hover:not(:disabled) {
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-vol-mute:disabled {
+  cursor: default;
+}
+.mv-vol-icon {
+  height: 17px;
+  width: 17px;
+}
+.mv-vol-range {
+  accent-color: var(--popup-brand, #00ffa3);
+  width: 100%;
+}
+.mv-vol-pct {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.mv-vol-focus {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+.mv-vol-focus-note {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: -4px 0 0 20px;
+}
+.mv-vol-list {
+  display: grid;
+  gap: 6px;
+}
+.mv-vol-notice {
+  background: rgba(255, 180, 84, 0.12);
+  border: 1px solid rgba(255, 180, 84, 0.5);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 8px;
+}
+.mv-vol-notice p {
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+.mv-vol-enable {
+  background: var(--popup-brand, #00ffa3);
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+}
+
+/* ── 통합 스트림 정보 팝오버 ───────────────────────────────────────────── */
+.mv-stats-pop {
+  gap: 6px;
+  /* 채널 + 지연·해상도·FPS·비트레이트 5열. 채널 이름이 잘리지 않을 만큼만 잡는다. */
+  min-width: 400px;
+  padding: 10px;
+}
+.mv-stats-table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  width: 100%;
+}
+.mv-stats-table th {
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  color: var(--popup-muted, #9aa1a9);
+  font-weight: 500;
+  padding: 4px 6px;
+  text-align: right;
+}
+.mv-stats-table th:first-child {
+  text-align: left;
+}
+.mv-stats-table td {
+  font-variant-numeric: tabular-nums;
+  padding: 4px 6px;
+  text-align: right;
+}
+.mv-stats-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-align: left !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-stats-state {
+  color: var(--popup-muted, #9aa1a9);
+  text-align: center !important;
+}
+
+/* 브랜드색 배경 위의 글자색.
+   ⚠ --popup-brand 는 테마마다 다르다(라이트 #00c73c / 다크 #00d864). 라이트의
+   진한 초록 위에 거의 검은 글자를 올리면 대비가 모자라 읽기 어렵다. 그래서 기본은
+   흰 글자로 두고, 밝은 초록인 다크 모드에서만 어두운 글자로 되돌린다. */
+:root[data-theme="dark"] .mv-start,
+:root[data-theme="dark"] .mv-main-badge,
+:root[data-theme="dark"] .mv-quick-tag,
+:root[data-theme="dark"] .mv-card-picked,
+:root[data-theme="dark"] .mv-chosen-item:first-child .mv-chosen-rank,
+:root[data-theme="dark"] .mv-cell-retry.is-primary,
+:root[data-theme="dark"] .mv-cell-retry.is-primary:hover,
+:root[data-theme="dark"] .mv-vol-enable {
+  color: #05170f;
+}

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 멀티뷰 시청</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/multiview.css" />
+  </head>
+  <body class="mv-watch-body">
+    <!-- 최상단 조작 막대: 메인 채널·채팅 채널·채팅 위치·배치를 바꾼다. -->
+    <header class="mv-topbar" id="mvTopbar" hidden>
+      <div class="mv-pop" data-mv-pop="main">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="main"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">메인 채널</span>
+          <span class="mv-pop-value" id="mvMainValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvMainPanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="chat">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="chat"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">채팅</span>
+          <span class="mv-pop-value" id="mvChatValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvChatPanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="side">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="side"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">채팅 위치</span>
+          <span class="mv-pop-value" id="mvSideValue">-</span>
+        </button>
+        <div class="mv-pop-panel" role="listbox" id="mvSidePanel" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="layout">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="layout"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">배치</span>
+          <span class="mv-pop-value" id="mvLayoutValue">-</span>
+        </button>
+        <div
+          class="mv-pop-panel mv-pop-panel-grid"
+          role="listbox"
+          id="mvLayoutPanel"
+          hidden
+        ></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="volume">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="volume"
+          id="mvVolumeBtn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">볼륨</span>
+          <span class="mv-pop-value" id="mvVolumeValue">-</span>
+        </button>
+        <div class="mv-pop-panel mv-volume-pop" id="mvVolumePop" hidden></div>
+      </div>
+
+      <div class="mv-pop" data-mv-pop="stats">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="stats"
+          id="mvStatsBtn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+        >
+          <span class="mv-pop-label">스트림 정보</span>
+          <span class="mv-pop-value" id="mvStatsValue">-</span>
+        </button>
+        <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden></div>
+      </div>
+
+      <button type="button" class="mv-topbar-back" id="mvBack">
+        채널 바꾸기
+      </button>
+
+      <button
+        type="button"
+        class="mv-theme-toggle"
+        id="mvTheme"
+        aria-pressed="false"
+        aria-label="다크 모드로 전환"
+        title="테마 전환"
+      >
+        <svg
+          class="mv-theme-sun"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="4"></circle>
+          <path
+            d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+          ></path>
+        </svg>
+        <svg
+          class="mv-theme-moon"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <main class="mv-stage" id="mvStage">
+      <div class="mv-frames-fit" id="mvFramesFit">
+        <!-- 격자 위아래 남는 자리에 뜬다. 여기서 바로 채널을 빼거나 바꿀 수 있어
+             고르기 화면까지 가지 않아도 된다. -->
+        <div class="mv-quick" id="mvQuick" hidden>
+          <div class="mv-quick-head">
+            <strong>채널 바꾸기</strong>
+            <span class="mv-quick-hint" id="mvQuickHint"></span>
+            <div class="mv-quick-head-actions" id="mvQuickHeadActions">
+              <button type="button" class="mv-quick-all" id="mvQuickAll">
+                고르기 화면 열기
+              </button>
+              <button
+                type="button"
+                class="mv-quick-close"
+                id="mvQuickClose"
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div class="mv-quick-body">
+            <ul class="mv-quick-current" id="mvQuickCurrent"></ul>
+            <div
+              class="mv-quick-tabs"
+              id="mvQuickTabs"
+              aria-label="채널 목록 종류"
+            >
+              <button type="button" data-mv-quick-source="following">
+                팔로잉
+              </button>
+              <button type="button" data-mv-quick-source="custom">
+                전용 팔로잉
+              </button>
+              <button type="button" data-mv-quick-source="live">라이브</button>
+              <button type="button" data-mv-quick-source="search">검색</button>
+            </div>
+            <div
+              class="mv-quick-folders"
+              id="mvQuickFolders"
+              aria-label="전용 팔로잉 구역"
+              hidden
+            ></div>
+            <input
+              type="search"
+              class="mv-quick-search"
+              id="mvQuickSearch"
+              placeholder="채널 이름으로 찾기"
+              hidden
+            />
+            <div class="mv-quick-rail">
+              <button
+                type="button"
+                class="mv-quick-nav"
+                data-mv-quick-scroll="-1"
+                aria-label="이전"
+              >
+                ‹
+              </button>
+              <div class="mv-quick-add" id="mvQuickAdd"></div>
+              <button
+                type="button"
+                class="mv-quick-nav"
+                data-mv-quick-scroll="1"
+                aria-label="다음"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="mv-frames" id="mvFrames"></div>
+      </div>
+      <!-- 채팅 크기 조절 손잡이. 채팅과 격자 사이를 끈다. -->
+      <div
+        class="mv-chat-resize"
+        id="mvChatResize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="채팅 크기 조절"
+        tabindex="0"
+      ></div>
+      <aside class="mv-chat" id="mvChat">
+        <div class="mv-chat-head">
+          <span class="mv-chat-title" id="mvChatTitle"></span>
+          <button
+            type="button"
+            class="mv-chat-follow"
+            id="mvChatFollow"
+            aria-pressed="true"
+            title="메인 채널을 바꾸면 채팅도 같이 바꾼다"
+          >
+            메인 따라가기
+          </button>
+          <button type="button" id="mvChatToggle" aria-label="채팅 접기">
+            접기
+          </button>
+        </div>
+        <div class="mv-chat-body">
+          <iframe
+            id="mvChatFrame"
+            title="채팅"
+            allow="autoplay"
+            referrerpolicy="origin"
+          ></iframe>
+          <!-- 채팅 준비 상태 덮개(연결 중 / 실패). 영상 칸과 같은 방식이다. -->
+          <div class="mv-chat-status" id="mvChatStatus" hidden></div>
+        </div>
+      </aside>
+    </main>
+
+    <p class="mv-empty mv-watch-empty" id="mvWatchEmpty" hidden>
+      볼 채널 정보를 찾지 못했습니다. 채널 고르기 화면에서 다시 시작하세요.
+    </p>
+
+    <script src="src/multiviewTheme.js"></script>
+    <!-- 전용 팔로잉의 친밀도 구역 계산에 쓴다(고르기 화면과 같은 목록을 보여 주려면
+         여기에도 있어야 한다). -->
+    <script src="src/chatRecapStore.js"></script>
+    <script src="src/channelAffinity.js"></script>
+    <script src="src/channelAffinityData.js"></script>
+    <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewLayouts.js"></script>
+    <script src="src/multiviewWatch.js"></script>
+  </body>
+</html>

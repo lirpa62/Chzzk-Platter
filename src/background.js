@@ -6134,9 +6134,65 @@ function mutateChatRecapCatalog(accountId, apply) {
   return task;
 }
 
+// 멀티뷰(확장 페이지)에서 쓰는 치지직 목록 API 중계.
+//
+// ⚠ 확장 페이지에서 직접 fetch 하면 Origin 이 chrome-extension:// 으로 붙어
+//   치지직이 403 "Invalid CORS request" 로 막는다(실측: 팔로잉·전체·검색 모두).
+//   서비스 워커의 fetch 는 Origin 을 붙이지 않아 정상 응답을 받는다.
+//   credentials:"include" 로 로그인 쿠키를 함께 보내야 팔로잉 목록이 내려온다.
+//
+// 임의 주소를 대신 받아 주는 통로가 되지 않도록 허용 경로를 고정한다.
+const MULTIVIEW_API_ORIGIN = "https://api.chzzk.naver.com";
+const MULTIVIEW_API_PATHS = new Set([
+  // 팔로잉 목록. liveInfo 에 방송 썸네일까지 들어 있어 이걸 정본으로 쓴다.
+  "/service/v1/channels/following-lives",
+  "/service/v1/lives",
+  // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 방송 제목만 훑는지
+  //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
+  "/service/v1/search/channels",
+  // 전용 팔로잉의 '구독' 자동 그룹을 멀티뷰에서도 보여 주려면 구독 목록이 필요하다.
+  "/commercial/v1/subscribe/channels",
+]);
+
+// 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다. 채널 id 가 경로에
+// 들어가므로 고정 목록으로는 못 막고, 모양을 확인해 허용한다.
+const MULTIVIEW_LIVE_DETAIL_RE =
+  /^\/service\/v3\/channels\/[0-9a-f]{32}\/live-detail$/i;
+
+async function fetchMultiviewApi(rawUrl) {
+  let url;
+  try {
+    url = new URL(String(rawUrl || ""));
+  } catch {
+    throw new Error("invalid-url");
+  }
+  if (
+    url.origin !== MULTIVIEW_API_ORIGIN ||
+    (!MULTIVIEW_API_PATHS.has(url.pathname) &&
+      !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname))
+  ) {
+    throw new Error("not-allowed");
+  }
+  const response = await fetch(url.toString(), {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json())?.content ?? null;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (message.type === "MULTIVIEW_API") {
+    fetchMultiviewApi(message.url)
+      .then((content) => sendResponse?.({ ok: true, content }))
+      .catch((error) =>
+        sendResponse?.({ ok: false, reason: String(error?.message || error) }),
+      );
+    return true;
   }
 
   if (message.type === "CHAT_HISTORY_BUFFER") {

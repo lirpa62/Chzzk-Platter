@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 멀티뷰</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/multiview.css" />
+  </head>
+  <body>
+    <!-- 채널 고르기: 멀티뷰를 시작하기 전 화면 -->
+    <main class="mv-setup" id="mvSetup">
+      <header class="mv-setup-head">
+        <div class="mv-setup-head-row">
+          <h1>멀티뷰</h1>
+          <button
+            type="button"
+            class="mv-theme-toggle"
+            id="mvTheme"
+            aria-pressed="false"
+            aria-label="다크 모드로 전환"
+            title="테마 전환"
+          >
+            <svg
+              class="mv-theme-sun"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4"></circle>
+              <path
+                d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+              ></path>
+            </svg>
+            <svg
+              class="mv-theme-moon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+            </svg>
+          </button>
+        </div>
+        <p class="mv-setup-desc">
+          여러 방송을 한 화면에서 봅니다. 메인 채널은 소리가 켜진 채로 시작하고
+          나머지는 음소거됩니다. 화질은 480p로 시작해 화면마다 따로 올릴 수
+          있습니다.
+        </p>
+      </header>
+
+      <div class="mv-setup-body">
+        <section class="mv-pick" aria-label="채널 고르기">
+          <div
+            class="lps-view-switch mv-source-tabs"
+            aria-label="채널 목록 종류"
+          >
+            <button type="button" data-mv-source="following">팔로잉</button>
+            <button type="button" data-mv-source="custom">전용 팔로잉</button>
+            <!-- 실제로는 인기 상위 40개만 받아온다. '전체' 라고 하면 오해를 준다. -->
+            <button type="button" data-mv-source="all">라이브</button>
+            <button type="button" data-mv-source="search">검색</button>
+          </div>
+          <!-- 전용 팔로잉을 골랐을 때만 구역(즐겨찾기·그룹·친밀도·팔로잉)을 보여 준다.
+               통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. -->
+          <div class="mv-folders" id="mvFolders" hidden></div>
+          <input
+            type="search"
+            class="mv-search"
+            id="mvSearch"
+            placeholder="채널 이름으로 찾기"
+            hidden
+          />
+          <div class="mv-channel-list" id="mvChannelList" aria-busy="true">
+            <p class="mv-empty">불러오는 중…</p>
+          </div>
+        </section>
+
+        <aside class="mv-chosen" aria-label="고른 채널">
+          <div class="mv-chosen-head">
+            <strong>고른 채널</strong>
+            <span id="mvChosenCount">0 / 6</span>
+          </div>
+          <p class="mv-hint">
+            맨 위가 메인 채널입니다. 끌어서 순서를 바꿀 수 있습니다.
+          </p>
+          <ol class="mv-chosen-list" id="mvChosenList"></ol>
+
+          <div class="mv-layout-pick">
+            <strong>배치</strong>
+            <div class="mv-layout-grid" id="mvLayoutGrid" role="radiogroup">
+              <!-- 고른 채널 수에 맞는 배치만 렌더한다 -->
+            </div>
+          </div>
+
+          <label class="mv-main-quality">
+            <input type="checkbox" id="mvMainHighQuality" checked />
+            <span>메인 고화질 · 보조 480p</span>
+          </label>
+          <p class="mv-option-note">
+            메인 채널은 높은 화질을 사용하고, 나머지 채널은 480p로 재생합니다.
+            메인 채널을 바꾸면 화질도 함께 전환되며, 그때 잠깐 로딩이 생깁니다.
+            끄면 모두 480p라 전환이 바로 됩니다.
+          </p>
+
+          <button type="button" class="mv-start" id="mvStart" disabled>
+            멀티뷰 시작
+          </button>
+        </aside>
+      </div>
+    </main>
+
+    <!-- 친밀도 구역 점수 계산에 쓴다(전용 팔로잉 탭에서만 동작). -->
+    <script src="src/multiviewTheme.js"></script>
+    <script src="src/chatRecapStore.js"></script>
+    <script src="src/channelAffinity.js"></script>
+    <script src="src/channelAffinityData.js"></script>
+    <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewLayouts.js"></script>
+    <script src="src/multiview.js"></script>
+  </body>
+</html>

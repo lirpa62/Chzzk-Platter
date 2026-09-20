@@ -130,6 +130,9 @@
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
+  // 화질 상한(px height). 멀티뷰 프레임처럼 작은 칸에서 고화질이 낭비일 때 쓴다.
+  // 0 이면 상한 없음. 상한이 있으면 '이하 중 가장 높은' 트랙을 고른다.
+  let maxQualityCap = 0;
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
   // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
@@ -327,7 +330,21 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
-    if (maxQualityAuto && typeof applyMaxQuality === "function") {
+    const maxQualityCapPrev = maxQualityCap;
+    maxQualityCap = Number(e.data.maxQualityCap) || 0;
+    // 상한이 바뀌면(멀티뷰 메인 전환) 이전 상한으로 고정해 둔 기록을 지운다.
+    // ⚠ 안 지우면 '수동 변경 존중' 이 우리가 건 480p 를 사용자 선택으로 오해해
+    //   이후 화질 조정을 막는다.
+    if (maxQualityCap !== maxQualityCapPrev) {
+      maxQualitySetHeight = 0;
+      maxQualityRespectedPage = null;
+      // 역할이 바뀌었으니(메인↔보조) 이전 역할에서의 수동 기록도 끌고 가지 않는다.
+      maxQualityUserTouchedPage = null;
+    }
+    if (
+      (maxQualityAuto || maxQualityCap > 0) &&
+      typeof applyMaxQuality === "function"
+    ) {
       // 옵션을 방금 켠 경우 현재 video 에 이벤트를 바인딩해 두면, 다음 재생/전환에서
       // 곧바로 최고화질이 걸린다. 이미 재생 중이면 applyMaxQuality 가 즉시 처리.
       if (typeof bindMaxQualityEvents === "function") bindMaxQualityEvents();
@@ -5149,23 +5166,40 @@
     const m = txt.match(/(\d{3,4})\s*p/i);
     return m ? Number(m[1]) : 0;
   }
-  // 화질 메뉴에서 '최고 화질 항목이 이미 선택(--checked)돼 있는지'.
-  function isMaxQualityMenuChecked() {
+  // 화질 메뉴에서 목표 화질 항목(li)과 그 height 를 찾는다.
+  // cap>0 이면 'cap 이하 중 가장 높은' 항목을 고른다(멀티뷰처럼 화질 상한이 있는 경우).
+  // cap 이하가 하나도 없으면 가장 낮은 항목으로 내린다. cap=0 이면 최고 화질.
+  function findQualityMenuTarget(cap = 0) {
     const list = document.querySelector(
       ".pzp-setting-quality-pane__list-container",
     );
-    if (!list) return false;
+    if (!list) return null;
     let bestLi = null;
     let bestH = 0;
+    let lowLi = null;
+    let lowH = 0;
     for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
       const h = qualityItemHeight(li);
+      if (h <= 0) continue;
+      if (!lowLi || h < lowH) {
+        lowH = h;
+        lowLi = li;
+      }
+      if (cap > 0 && h > cap) continue;
       if (h > bestH) {
         bestH = h;
         bestLi = li;
       }
     }
+    if (!bestLi && cap > 0 && lowLi) return { li: lowLi, height: lowH };
+    return bestLi ? { li: bestLi, height: bestH } : null;
+  }
+  // 화질 메뉴에서 '목표 화질 항목이 이미 선택(--checked)돼 있는지'.
+  function isMaxQualityMenuChecked(cap = 0) {
+    const target = findQualityMenuTarget(cap);
     return (
-      !!bestLi && bestLi.classList.contains("pzp-ui-setting-pane-item--checked")
+      !!target &&
+      target.li.classList.contains("pzp-ui-setting-pane-item--checked")
     );
   }
   let maxQualityMenuClickAt = 0; // 마지막 메뉴 클릭 시각(중복 클릭 억제)
@@ -5178,21 +5212,10 @@
   // 으로 처리하고(그리드 포함), (b) 화질 메뉴 UI 가 열리는 부작용을 감춘다. 메뉴를 열고
   // 붙어있는 li 를 그냥 .click() 하면 무반응이다(실측) — 클론 교체가 핵심.
   // 성공(클릭 실행/이미 최고) 시 true.
-  function clickMaxQualityMenuItem() {
-    const list = document.querySelector(
-      ".pzp-setting-quality-pane__list-container",
-    );
-    if (!list) return false;
-    let bestLi = null;
-    let bestH = 0;
-    for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
-      const h = qualityItemHeight(li);
-      if (h > bestH) {
-        bestH = h;
-        bestLi = li;
-      }
-    }
-    if (!bestLi || bestH <= 0) return false;
+  function clickMaxQualityMenuItem(cap = 0) {
+    const target = findQualityMenuTarget(cap);
+    if (!target) return false;
+    const bestLi = target.li;
     // 이미 최고 항목이 체크돼 있으면 클릭하지 않는다(멱등).
     if (bestLi.classList.contains("pzp-ui-setting-pane-item--checked"))
       return true;
@@ -5224,6 +5247,43 @@
   // 최고로 올리지 않는다. 미디어(currentPageKey)가 바뀌면 리셋된다.
   let maxQualitySetHeight = 0; // 우리가 마지막으로 고정한 height
   let maxQualityRespectedPage = null; // 사용자 수동 선택을 존중하기로 한 미디어 키
+  // 사용자가 '직접' 화질 메뉴를 만진 미디어 키.
+  //
+  // ⚠ selected 트랙이 우리가 고정한 값과 달라졌다는 것만으로 수동 변경으로 보면 안 된다.
+  //   치지직은 ABR·재연결·광고 복귀·SPA 재렌더로도 트랙을 바꾼다. 그걸 수동으로 오판하면
+  //   그 미디어 동안 상한 재적용이 영구히 멈춰, 멀티뷰 보조 칸이 1080p 로 남는다.
+  //   그래서 '실제 신뢰된 조작' 이 있었을 때만 기록한다.
+  let maxQualityUserTouchedPage = null;
+  // 우리가 메뉴를 클릭한 직후의 이벤트는 우리 것이다(클론 교체 클릭은 isTrusted=false 지만
+  // 그 여파로 뜨는 포인터 이벤트까지 섞이지 않게 짧은 창을 둔다).
+  let maxQualityOwnClickUntil = 0;
+
+  // 화질 메뉴 안에서 일어난 신뢰된 조작만 사용자 선택으로 친다.
+  function watchTrustedQualityChoice(event) {
+    if (!event?.isTrusted) return; // 스크립트가 만든 이벤트는 사용자 조작이 아니다
+    if (Date.now() < maxQualityOwnClickUntil) return; // 우리 클릭의 여파
+    const el = event.target instanceof Element ? event.target : null;
+    if (!el) return;
+    // 화질 메뉴(항목 또는 그 목록) 안에서 일어난 것만 본다.
+    if (
+      !el.closest?.(
+        "li.pzp-ui-setting-quality-item, .pzp-setting-quality-pane__list-container",
+      )
+    ) {
+      return;
+    }
+    maxQualityUserTouchedPage = currentPageKey;
+  }
+  document.addEventListener("pointerup", watchTrustedQualityChoice, true);
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      // 키보드로 고르는 경우는 Enter/Space 로 확정된다.
+      if (event.key !== "Enter" && event.key !== " ") return;
+      watchTrustedQualityChoice(event);
+    },
+    true,
+  );
   let maxQualityCatchupTimer = 0;
   let maxQualitySuspendedForAudioOnly = false;
   let maxQualityResumeAfterAudioOnlyAt = 0;
@@ -5240,14 +5300,17 @@
     }
   }
   function applyMaxQuality() {
-    if (!maxQualityAuto) return;
+    // 상한만 걸린 경우(멀티뷰)에도 동작해야 하므로 둘 중 하나라도 켜져 있으면 진행한다.
+    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
     // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
     // 경우, 모든 탭을 1080p60(≈8Mbps)으로 강제하면 대역폭·디코드·미디어 메모리가 탭 수만큼
     // 증폭돼 시스템 메모리 폭증 + 간헐적 수 초 버퍼링을 유발했다(실사용 계측: JS 힙/버퍼는
     // 정상인데 탭당 렌더러 1GB+ = 미디어 파이프라인 부하). 숨김 탭은 치지직 기본 ABR 에
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
-    if (document.hidden) return;
+    // (상한만 걸린 멀티뷰 프레임은 예외 — 상한은 화질을 낮추는 방향이라
+    //  숨김 상태에서도 부담을 늘리지 않는다.)
+    if (document.hidden && !(maxQualityCap > 0)) return;
     if (
       maxQualitySuspendedForAudioOnly &&
       Date.now() < maxQualityResumeAfterAudioOnlyAt
@@ -5319,21 +5382,45 @@
       (t) => !trackIsAbr(t) && !trackIsAudioOnly(t) && trackHeight(t) > 0,
     );
     if (!fixed.length) return;
-    let best = fixed[0];
-    for (const t of fixed) if (trackHeight(t) > trackHeight(best)) best = t;
+    // 상한이 있으면 그 이하 중 가장 높은 트랙. 상한 이하가 없으면 가장 낮은 트랙.
+    let best = null;
+    for (const t of fixed) {
+      const h = trackHeight(t);
+      if (maxQualityCap > 0 && h > maxQualityCap) continue;
+      if (!best || h > trackHeight(best)) best = t;
+    }
+    if (!best && maxQualityCap > 0) {
+      for (const t of fixed)
+        if (!best || trackHeight(t) < trackHeight(best)) best = t;
+    }
+    if (!best) return;
     const bestH = trackHeight(best);
     const selected = tracks.find((t) => trackSelected(t));
     const selH = selected && !trackIsAbr(selected) ? trackHeight(selected) : 0;
 
-    // '수동 변경 존중' 옵션: 우리가 최고로 올려둔 상태(maxQualitySetHeight)에서 선택이
-    // '더 낮은 고정 화질'로 바뀌었으면 = 사용자가 직접 낮춤 → 이 미디어 동안 존중.
+    // '수동 변경 존중' 옵션: 우리가 올려둔 상태(maxQualitySetHeight)에서 선택이 바뀌었으면
+    // 사용자가 직접 고른 것으로 보고 이 미디어 동안 존중한다.
+    //
+    // 상한이 없을 때는 '더 낮아진 경우'만 수동으로 친다(우리가 최고로 올리는 쪽이라
+    // 더 높아지는 변화는 우리 자신의 동작이다). 상한이 걸린 멀티뷰에서는 반대로
+    // 사용자가 상한 위로 올리는 것이 정상 동작이므로 '달라졌으면' 수동으로 본다.
+    const deviated =
+      maxQualityCap > 0
+        ? selH !== maxQualitySetHeight
+        : selH < maxQualitySetHeight;
+    // ⚠ 상한이 걸린 칸(멀티뷰 보조)에서는 '달라졌다' 만으로 수동이라 볼 수 없다.
+    //   치지직이 스스로 되돌린 것과 사용자가 고른 것을 구분해야 한다. 그래서 상한이
+    //   있을 때는 신뢰된 메뉴 조작이 실제로 있었는지까지 확인한다.
+    const userChose =
+      maxQualityCap > 0 ? maxQualityUserTouchedPage === currentPageKey : true;
     if (
       maxQualityRespectManual &&
       maxQualitySetHeight > 0 &&
       selected &&
       !trackIsAbr(selected) &&
       selH > 0 &&
-      selH < maxQualitySetHeight
+      deviated &&
+      userChose
     ) {
       maxQualityRespectedPage = currentPageKey;
     }
@@ -5343,7 +5430,10 @@
 
     // 이미 최고 고정 화질이면 손대지 않는다(멱등). 트랙 selected 반영이 늦어도, 화질
     // 메뉴상 최고 항목이 이미 체크돼 있으면 전환된 것이니 중복 클릭하지 않는다.
-    if (selH >= bestH || isMaxQualityMenuChecked()) {
+    if (
+      (maxQualityCap > 0 ? selH === bestH : selH >= bestH) ||
+      isMaxQualityMenuChecked(maxQualityCap)
+    ) {
       maxQualitySetHeight = bestH;
       return;
     }
@@ -5360,7 +5450,8 @@
     // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
     // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
     // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
-    if (!clickMaxQualityMenuItem()) {
+    maxQualityOwnClickUntil = Date.now() + 1500; // 이 사이의 이벤트는 우리 것이다
+    if (!clickMaxQualityMenuItem(maxQualityCap)) {
       // 폴백: 메뉴를 못 찾는 등 클릭 실패 시 트랙 selected 직접 설정(그리드 미보장).
       try {
         best.selected = true;
@@ -5441,8 +5532,17 @@
   // 바인딩된 경우를 위한 보조 트리거로 함께 둔다. applyMaxQuality 는 멱등이라 이미
   // 최고화질이면 no-op(timeupdate 가 자주 와도 비용 미미).
   const boundMaxQualityVideos = new WeakSet();
+  // 상한 모드에서 timeupdate 로 재시도한 마지막 시각(초당 한 번으로 제한).
+  let lastCapProgressAt = 0;
+
   function bindMaxQualityEvents() {
-    if (!maxQualityAuto) return;
+    // ⚠ 상한만 걸린 경우(멀티뷰 보조 칸)에도 이벤트를 걸어야 한다. 예전에는
+    //   maxQualityAuto 만 봤는데, 보조 칸은 그 값이 false 라(상한만 쓴다) 재시도
+    //   리스너가 아예 붙지 않았다. 그래서 입장 로딩 국면(beforeplay/loading)에
+    //   막힌 첫 시도가 실패하면 480p 를 다시 걸 기회가 없어 1080p 로 남았고,
+    //   탭을 전환해야(visibilitychange 경로) 뒤늦게 정리됐다.
+    //   applyMaxQuality 의 진입 조건과 같은 기준을 쓴다.
+    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
     const video = findVideo();
     if (!(video instanceof HTMLVideoElement)) return;
     if (!boundMaxQualityVideos.has(video)) {
@@ -5452,6 +5552,21 @@
       // (초당 여러 번)마다 applyMaxQuality 의 fiber 탐색(findCorePlayer)을 반복하지 않게
       // 조기 반환한다 — 여러 방송 탭을 켰을 때의 누적 CPU 부하를 줄인다.
       const onProgress = () => {
+        // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
+        // ⚠ 다만 상한이 걸린 칸은 tick 에 기대기 어렵다 — 멀티뷰는 채팅을 접어
+        //   두어 DOM 변이가 거의 없어 tick 이 잘 깨지 않는다. 상한 모드에서는
+        //   실제로 상한에 맞을 때까지 계속 재시도한다(맞으면 applyMaxQuality 가
+        //   멱등하게 즉시 빠져나온다).
+        if (maxQualityCap > 0) {
+          // ⚠ timeupdate 는 초당 여러 번 온다. applyMaxQuality 는 '이미 맞음' 을
+          //   판정하기까지 fiber 탐색(findCorePlayer)을 하므로 그대로 두면 칸 수
+          //   만큼 비용이 곱해진다. 초당 한 번으로 충분하다.
+          const now = Date.now();
+          if (now - lastCapProgressAt < 1000) return;
+          lastCapProgressAt = now;
+          applyMaxQuality();
+          return;
+        }
         if (maxQualitySetHeight > 0) return;
         applyMaxQuality();
       };
@@ -10097,6 +10212,7 @@
       // 끌고 가지 않는다).
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
+      maxQualityUserTouchedPage = null;
       maxQualityMenuClickAt = 0;
       maxQualitySuspendedForAudioOnly = false;
       maxQualityResumeAfterAudioOnlyAt = 0;
@@ -10255,6 +10371,8 @@
   // 이미 켜짐) 더 시도하지 않기로 한 순간(마감·비대상 페이지) 한 번만 알린다.
   // content.js(격리 월드)가 받아 부모 창으로 중계한다.
   let wideScreenNotified = false;
+  // 팝업 플레이어의 '준비 중' 오버레이를 내리는 신호. 멀티뷰는 이 신호를 쓰지 않고
+  // 스스로 목표 상태로 수렴한다(ensureMultiviewWide 참고).
   function notifyWideScreenSettled() {
     if (wideScreenNotified) return;
     wideScreenNotified = true;
@@ -10265,6 +10383,161 @@
       );
     } catch {}
   }
+
+  // 멀티뷰 전용: 넓은 화면을 다시 한 번 적용해 본다.
+  //
+  // ⚠ 6개 프레임은 플레이어 DOM 이 뜨는 시각이 제각각이라, 처음 시도 때 viewmode
+  //   버튼이 없어 놓치는 칸이 생긴다. 부모가 이 명령으로 다시 시키게 한다.
+  // ⚠ 이미 넓은 화면이면 아무것도 하지 않는다(다시 누르면 좁은 화면으로 돌아간다).
+  // ── 멀티뷰 넓은 화면 유지 ────────────────────────────────────────────────
+  // ⚠ '한 번 적용하고 끝' 이 아니라 '확인해서 아니면 맞춘다' 로 다룬다. 치지직은
+  //   플레이어를 여러 번 다시 만들고 viewmode 버튼도 늦게 붙는다. 언제 끝났는지
+  //   판정하려 들면 늦게 뜬 것까지 실패가 된다.
+  // ⚠ viewmode 는 토글이다. 이미 넓은 화면이면 절대 다시 누르지 않는다.
+  const MULTIVIEW_WIDE_CLICK_COOLDOWN_MS = 1200;
+  let lastMultiviewWideClickAt = 0;
+
+  // 돌려주는 값은 '지금 목표 상태인가'. false 는 실패가 아니라 '아직' 이다.
+  function ensureMultiviewWide() {
+    if (!wideScreenAuto) return true; // 넓은 화면을 원하지 않는다
+    const button = findViewModeButton();
+    if (!isViewModeButtonReady(button)) return false; // 버튼이 아직 없다
+    if (isWideScreenOn(button)) return true; // 이미 목표 상태 — 누르지 않는다
+    const now = Date.now();
+    if (now - lastMultiviewWideClickAt < MULTIVIEW_WIDE_CLICK_COOLDOWN_MS) {
+      return false;
+    }
+    try {
+      button.click();
+    } catch {}
+    lastMultiviewWideClickAt = now;
+    return false; // 눌렀다. 반영됐는지는 다음 확인에서 본다
+  }
+
+  // 초기에는 잠깐 자주 확인하고, 목표에 닿으면 멈춘다(영구 폴링을 두지 않는다).
+  const MULTIVIEW_WIDE_INTERVAL_MS = 400;
+  const MULTIVIEW_WIDE_MAX_MS = 20000;
+  let multiviewWideTimer = 0;
+  let multiviewWideStartedAt = 0;
+
+  function startMultiviewWideReconcile() {
+    if (multiviewWideTimer) return;
+    if (ensureMultiviewWide()) return; // 이미 됐으면 돌릴 필요가 없다
+    multiviewWideStartedAt = Date.now();
+    multiviewWideTimer = window.setInterval(() => {
+      if (
+        ensureMultiviewWide() ||
+        Date.now() - multiviewWideStartedAt > MULTIVIEW_WIDE_MAX_MS
+      ) {
+        clearInterval(multiviewWideTimer);
+        multiviewWideTimer = 0;
+      }
+    }, MULTIVIEW_WIDE_INTERVAL_MS);
+  }
+
+  // 격리 월드가 '확인해 봐라' 고 보낸다. 답은 돌려주지 않는다(기다리는 쪽이 없다).
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-reconcile-multiview-wide") return;
+    startMultiviewWideReconcile();
+  });
+
+  // ── 멀티뷰 통합 스트림 정보용 스냅샷 ────────────────────────────────────
+  // ⚠ 측정 방법을 새로 만들지 않는다. 스트림 정보 패널이 쓰는 collectStreamInfo()
+  //   와 getLiveLatencySeconds() 를 그대로 재사용한다. 지연의 뜻도 그쪽과 같다
+  //   (플레이어의 _getLiveLatency()). 못 구하는 값은 추정하지 않고 null 로 둔다.
+  // 라이브 selected 트랙에 비트레이트가 없을 때, 이미 다른 용도로 읽고 있는
+  // core.srcObject.data.media[].encodingTrack 에서 같은 트랙을 찾아 본다.
+  // ⚠ 없으면 null 로 둔다. 네트워크 다운로드 속도로 추정하지 않는다 —
+  //   그리드(P2P)·ABR 환경에서 전송량과 인코딩 비트레이트는 같은 값이 아니다.
+  function findEncodingTrackBitrate(core, selected, height) {
+    try {
+      const media = core?.srcObject?.data?.media;
+      if (!Array.isArray(media)) return null;
+      const wantId = String(
+        selected?.encodingTrackId ??
+          selected?._encodingTrackId ??
+          selected?.encodingOptionID ??
+          "",
+      ).toLowerCase();
+      for (const m of media) {
+        for (const t of m?.encodingTrack || []) {
+          const id = String(t?.encodingTrackId ?? "").toLowerCase();
+          const h = Number(t?.height ?? t?._height);
+          // 아이디가 맞거나, 아이디를 모를 때는 높이가 같은 트랙을 쓴다.
+          const match = wantId ? id === wantId : height && h === height;
+          if (!match) continue;
+          const bps = pickNum(
+            t,
+            "videoBitRate",
+            "videoBitrate",
+            "_videoBitrate",
+          );
+          if (bps) return bps;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  // ── 멀티뷰 통합 스트림 정보용 스냅샷 ────────────────────────────────────
+  // ⚠ 측정 방법을 새로 만들지 않는다. 스트림 정보 패널이 쓰는 collectStreamInfo()
+  //   와 getLiveLatencySeconds() 를 그대로 재사용한다. 지연의 뜻도 그쪽과 같다
+  //   (플레이어의 _getLiveLatency()). 못 구하는 값은 추정하지 않고 null 로 둔다.
+  function getStreamStatsSnapshot() {
+    const video = findVideo();
+    let info = null;
+    try {
+      info = collectStreamInfo();
+    } catch {
+      info = null;
+    }
+    const num = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+    const height = num(info?._h) || num(video?.videoHeight);
+
+    // ⚠ 비트레이트 단위. 치지직은 bps 로 줄 때도 kbps 로 줄 때도 있어서, 그 판정을
+    //   이미 하고 있는 toKbps() 를 반드시 거친다. 여기서 /1000 을 직접 하면 값이
+    //   이미 kbps 일 때 1000배 작아져 화면에 0.0 Mbps 로 보인다.
+    let bitrateKbps = toKbps(info?._bitrateNum);
+    try {
+      const core = findCorePlayer();
+      // ⚠ 트랙 목록은 core.videoTracks 다(이 파일의 다른 곳도 모두 이것을 쓴다).
+      const tracks = Array.from(core?.videoTracks || []);
+      const selected = tracks.find((t) => trackSelected(t));
+      // ⚠ 선택 트랙 높이는 밖으로 보내지 않는다. 비트레이트를 찾을 때 어느 트랙인지
+      //   맞추는 데만 쓴다(해상도는 width/height 로 이미 보인다).
+      const selectedHeight = (selected && trackHeight(selected)) || height;
+      if (!bitrateKbps) {
+        bitrateKbps = toKbps(
+          findEncodingTrackBitrate(core, selected, selectedHeight),
+        );
+      }
+    } catch {}
+
+    return {
+      latencySec: getLiveLatencySeconds(),
+      width: num(info?._w) || num(video?.videoWidth),
+      height,
+      fps: num(info?._fpsNum),
+      bitrateKbps: bitrateKbps || null,
+    };
+  }
+
+  // 격리 월드가 통계를 물어 오면 같은 창으로 답한다(부모에게는 격리 월드가 넘긴다).
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-multiview-stats-request") return;
+    let stats = null;
+    try {
+      stats = getStreamStatsSnapshot();
+    } catch {
+      stats = null;
+    }
+    window.postMessage(
+      { source: "cheese-multiview-stats-reply", stats },
+      location.origin,
+    );
+  });
 
   function settleWideScreenAttempt(waitForLayout = false) {
     const settledPageKey = currentPageKey;

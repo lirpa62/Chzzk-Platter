@@ -237,7 +237,15 @@
         "src/html-to-image.min.js",
         "src/chart.min.js",
         "src/coloris.min.js",
-        "src/coloris.min.css"
+        "src/coloris.min.css",
+        "multiview.html",
+        "multiviewWatch.html",
+        "src/multiview.css",
+        "src/multiview.js",
+        "src/multiviewWatch.js",
+        "src/multiviewTheme.js",
+        "src/multiviewSources.js",
+        "src/multiviewLayouts.js"
       ],
       "matches": [
         "https://chzzk.naver.com/*",
