@@ -8203,6 +8203,15 @@
   //   실제로 떠 있을 때만 종료로 본다.
   function liveLooksEnded(video) {
     if (video?.ended === true) return true;
+    // ⚠ 소스가 통째로 사라진 상태(NETWORK_EMPTY). 실측한 종료 순서는 이렇다.
+    //     waiting → pause → ended → abort/emptied → networkState=EMPTY
+    //     종료 화면은 그보다 31초나 뒤에 떴다(끊김 기준 43초).
+    //   ended 와 종료 화면 사이에는 8초(STALL_MIN_MS) 를 넘는 구간이 있어,
+    //   그 사이에 멈춤으로 보이면 되돌리기가 나갈 수 있다. 소스가 없으면 애초에
+    //   되돌릴 곳도 없으므로 종료로 본다.
+    //   ⚠ 갓 만든 video 도 EMPTY 지만 그때는 buffered 가 비어 있어 '멈춤' 판정
+    //     자체가 서지 않는다(looksStalled 는 buffered 가 있어야 참이 된다).
+    if (video && video.networkState === 0) return true;
     return liveEndScreenVisible();
   }
 

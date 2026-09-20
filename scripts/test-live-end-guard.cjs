@@ -163,6 +163,58 @@ const cleanup = () => {
     ok(r.target === 97.5, `버퍼 안쪽으로 옮긴다 (${r.target})`);
   }
 
+  console.log("\n[실측] 소스가 사라지면 종료 화면을 기다리지 않는다");
+  {
+    // ⚠ 실제 방송 종료를 재어 보니 종료 화면이 아주 늦게 떴다.
+    //     끊김(waiting)        398637ms
+    //     ended               410704ms  (+12.1초)
+    //     networkState=EMPTY  411001ms  (+12.4초)
+    //     종료 화면            442001ms  (+43.4초, ended 보다 31초 뒤)
+    //   ended 와 종료 화면 사이가 8초(STALL_MIN_MS)보다 훨씬 길다. 그 사이에
+    //   멈춤으로 보이면 되돌리기가 나갈 수 있어 EMPTY 를 함께 본다.
+    const r = await ev(`(()=>{
+      document.body.innerHTML=${JSON.stringify(PLAYER("<video></video>"))};
+      const v=makeStalledVideo(); v.networkState=0;  // 소스 없음
+      return {ended:liveLooksEnded(v), recovered:recoverFromStall(v),
+        moved:v.currentTime!==100};})()`);
+    ok(r.ended === true, "소스가 사라졌으면 종료로 본다(종료 화면 전이라도)");
+    ok(r.recovered === false && r.moved === false, "되돌리지 않는다");
+  }
+
+  console.log("\n[실측] 정상 재생 중에는 소스 신호로 오판하지 않는다");
+  {
+    // NETWORK_IDLE(1)·LOADING(2) 은 정상이다. 여기서 종료로 보면 기능이 죽는다.
+    const r = await ev(`(()=>{
+      document.body.innerHTML=${JSON.stringify(PLAYER("<video></video>"))};
+      const out={};
+      for(const n of [1,2,3]){
+        const v=makeStalledVideo(); v.networkState=n;
+        out[n]={ended:liveLooksEnded(v), recovered:recoverFromStall(v)};
+      }
+      return out;})()`);
+    ok(r["1"].ended === false && r["1"].recovered === true, "IDLE(1) 은 정상");
+    ok(
+      r["2"].ended === false && r["2"].recovered === true,
+      "LOADING(2) 도 정상",
+    );
+    ok(
+      r["3"].ended === false && r["3"].recovered === true,
+      "NO_SOURCE(3) 만으로는 종료로 보지 않는다(로드 실패와 구분 못 함)",
+    );
+  }
+
+  console.log("\n[실측] 갓 만든 video 와 겹치지 않는다");
+  {
+    // 새 video 도 networkState=0 이지만 buffered 가 비어 '멈춤' 자체가 아니다.
+    const r = await ev(`(()=>{
+      document.body.innerHTML=${JSON.stringify(PLAYER("<video></video>"))};
+      const fresh={paused:false, ended:false, readyState:0, currentTime:0,
+        seeking:false, networkState:0, buffered:{length:0}};
+      return {stalled:looksStalled(fresh), recovered:recoverFromStall(fresh)};})()`);
+    ok(r.stalled === false, "버퍼가 없으면 애초에 멈춤이 아니다");
+    ok(r.recovered === false, "되돌릴 것도 없다");
+  }
+
   console.log("\n[9] '종료' 가 든 다른 문구를 종료로 보지 않는다");
   {
     const r = await ev(`(()=>{
