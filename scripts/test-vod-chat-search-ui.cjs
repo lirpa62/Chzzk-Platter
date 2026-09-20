@@ -166,6 +166,8 @@ const ok = (c, l) => {
     // 이모티콘을 그림으로 그리는 경로. 활성도 사전(chatGraphState.emojiUrls)을 쓴다.
     // ⚠ 허용 호스트 규칙도 원본에서 떼어 온다(여기 적어 두면 원본과 어긋난다).
     window.chatGraphState = { emojiUrls: {} };
+    // 활성도 사전이 비었을 때 쓰는 폴백(내 구독 이모티콘).
+    window.dlgEmojiMap = Object.create(null);
     ${emojiHostSource()}
     ${sliceFn("appendVodSearchText")}
     ${sliceFn("vodChatSearchTruncatedNotice")}
@@ -263,7 +265,7 @@ const ok = (c, l) => {
         back:!!panel.querySelector('[data-peak-search-back]'),
         rescan:!!panel.querySelector('[data-peak-rescan]')};
       return {searching,backHome};})()`);
-    ok(r.searching.heading === "다시보기 채팅 검색", "검색 화면 제목");
+    ok(r.searching.heading === "채팅 키워드 검색", "검색 화면 제목");
     ok(r.searching.back, "뒤로 버튼이 생긴다");
     ok(!r.searching.rescan, "검색 화면에서는 '다시 수집' 을 감춘다");
     ok(r.searching.close, "닫기는 계속 있다");
@@ -315,9 +317,9 @@ const ok = (c, l) => {
         status:panel.querySelector('.cheese-vod-search-status').textContent};})()`);
     ok(!r.disabled, "준비가 끝나면 입력할 수 있다");
     ok(r.type === "search", `type=search (${r.type})`);
-    ok(r.ph === "다시보기 채팅 검색", `placeholder (${r.ph})`);
+    ok(r.ph === "채팅에서 키워드 검색", `placeholder (${r.ph})`);
     ok(r.auto === "off", "자동완성을 끈다");
-    ok(r.status.includes("검색어를 입력"), "빈 검색어 안내");
+    ok(r.status.includes("키워드를 찾습니다"), `빈 검색어 안내 (${r.status})`);
   }
 
   console.log("\n[L] 결과가 없으면 검색어와 함께 알린다");
@@ -994,6 +996,53 @@ const ok = (c, l) => {
         scan,
       ),
       "검색을 열어 두지 않았어도 결과를 넘겨 둔다",
+    );
+  }
+
+  console.log("\n[순회 결과] 그래프를 켜지 않아도 사전·집계를 챙겨 둔다");
+  {
+    // ⚠ 예전에는 그래프를 '켤 때' 만 chatGraphState 를 채웠다. 그래서 검색으로만
+    //   수집하면 두 가지가 어긋났다.
+    //     - 이모티콘 사전이 비어 {:d_42:} 가 이름으로만 보였다
+    //     - 구간 요약으로 뒤로 가면 "먼저 수집해 주세요" 가 떴다
+    const scan = SRC.slice(
+      SRC.indexOf("function collectVodChatDataShared"),
+      SRC.indexOf("async function collectChatGraph"),
+    );
+    ok(
+      /chatGraphState\.emojiUrls = result\.emojiUrls;/.test(scan),
+      "순회가 끝나면 이모티콘 사전을 챙긴다",
+    );
+    ok(
+      /chatGraphState\.bins = result\.bins;/.test(scan),
+      "순회가 끝나면 구간 집계도 챙긴다(뒤로 가면 바로 보인다)",
+    );
+    ok(
+      /getCurrentVideoNo\(\) === videoNo/.test(scan),
+      "그 사이 영상이 바뀌었으면 넣지 않는다",
+    );
+  }
+
+  console.log("\n[진행률] 닫았다 다시 열어도 퍼센트가 멈추지 않는다");
+  {
+    // ⚠ 증상: 수집 중에 패널을 닫거나 뒤로 갔다가 다시 검색으로 오면 퍼센트가
+    //   그대로 멈춰 있었다. 다시 열 때 ensureVodChatSearchMessages 가 '이미
+    //   받는 중' 이라 곧바로 null 을 돌려주어, 진행률을 받을 곳이 없었다.
+    const open = SRC.slice(
+      SRC.indexOf("async function openVodChatSearchView"),
+      SRC.indexOf("\n  // 방송 제목 확인과"),
+    );
+    ok(
+      /if \(vodChatSearchState\.loading\) \{/.test(open),
+      "이미 받는 중인 경우를 따로 다룬다",
+    );
+    ok(
+      /vodChatScanCoordinator\.listeners\.add\(onProgress\)/.test(open),
+      "돌고 있는 순회에 직접 붙어 진행률을 받는다",
+    );
+    ok(
+      /vodChatScanCoordinator\.listeners\.delete\(onProgress\)/.test(open),
+      "끝나면 떼어낸다(리스너가 쌓이지 않는다)",
     );
   }
 

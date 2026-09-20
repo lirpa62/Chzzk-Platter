@@ -10449,7 +10449,7 @@
       form.className = "cheese-vod-search-bar";
       const input = document.createElement("input");
       input.type = "search";
-      input.placeholder = "다시보기 채팅 검색";
+      input.placeholder = "채팅에서 키워드 검색";
       input.autocomplete = "off";
       input.className = "cheese-vod-search-input";
       input.value = vodChatSearchView.query;
@@ -10534,7 +10534,7 @@
     const result = vodChatSearchView.result;
     const query = vodChatSearchView.query.trim();
     if (!query) {
-      status.textContent = "검색어를 입력해 주세요.";
+      status.textContent = "현재 다시보기의 채팅 내용에서 키워드를 찾습니다.";
       out.appendChild(status);
       return;
     }
@@ -10585,7 +10585,12 @@
   //   쓴다. 검색용으로 따로 저장하지 않는다 — 원문에 닉네임·UID 를 담지 않는
   //   정책과 같은 이유다. 사전이 없으면 이름만 글자로 보여 준다(기존과 같다).
   function appendVodSearchText(host, text, needle) {
-    const map = chatGraphState.emojiUrls;
+    // 활성도 사전이 먼저다. 비어 있으면 내 구독 이모티콘 사전이라도 쓴다
+    // (라이브 대화상자와 같은 저장소 — 최소한 내가 쓴 것은 그림으로 보인다).
+    const map =
+      chatGraphState.emojiUrls && Object.keys(chatGraphState.emojiUrls).length
+        ? chatGraphState.emojiUrls
+        : dlgEmojiMap;
     const pattern = /\{:([^:}]+):\}/g;
     let last = 0;
     let match = null;
@@ -10690,10 +10695,36 @@
       vodChatSearchView.open &&
       getCurrentVideoNo() === videoNo &&
       document.contains(panel);
-    await ensureVodChatSearchMessages(videoNo, duration, () => {
+    const onProgress = () => {
       // 진행률은 공유 순회가 알려 준다. 따로 돌며 묻지 않는다.
       if (alive()) renderVodChatSearchBody(panel);
-    });
+    };
+
+    // ⚠ 이미 받는 중이면 ensureVodChatSearchMessages 는 곧바로 null 을 준다.
+    //   그러면 진행률을 알려 줄 곳이 없어 화면의 퍼센트가 그대로 멈춘다(패널을
+    //   닫았다 다시 열거나, 뒤로 갔다 온 경우가 그랬다).
+    //   그럴 때는 돌고 있는 순회에 직접 붙어 끝까지 따라간다.
+    if (vodChatSearchState.loading) {
+      const running =
+        vodChatScanCoordinator.videoNo === videoNo &&
+        vodChatScanCoordinator.promise;
+      if (running) {
+        vodChatScanCoordinator.listeners.add(onProgress);
+        onProgress();
+        try {
+          await running;
+        } catch {
+          // 아래에서 상태를 보고 다시 판단한다.
+        }
+        vodChatScanCoordinator.listeners.delete(onProgress);
+        if (!alive()) return;
+        renderVodChatSearchBody(panel);
+        runVodChatSearch(panel);
+        return;
+      }
+    }
+
+    await ensureVodChatSearchMessages(videoNo, duration, onProgress);
     if (!alive()) return;
     renderVodChatSearchBody(panel);
     runVodChatSearch(panel);
@@ -10737,6 +10768,22 @@
           } catch {}
         });
       });
+      // ⚠ 순회 결과는 누가 시작했든 여기서 한 번에 챙긴다. 예전에는 그래프를
+      //   켤 때만 담아서, 검색으로 수집한 경우 두 가지가 어긋났다.
+      //     - 이모티콘 사전이 비어 {:d_42:} 가 이름으로만 보였다
+      //     - 구간 요약으로 '뒤로' 가면 "먼저 수집해 주세요" 가 떴다
+      //       (패널을 닫았다 열면 그제야 캐시에서 읽어 정상이었다)
+      if (result?.complete && getCurrentVideoNo() === videoNo) {
+        if (result.emojiUrls && typeof result.emojiUrls === "object") {
+          chatGraphState.emojiUrls = result.emojiUrls;
+        }
+        if (Array.isArray(result.bins) && result.bins.length) {
+          chatGraphState.videoNo = videoNo;
+          chatGraphState.bins = result.bins;
+          chatGraphState.peaks = result.peaks || null;
+          chatGraphState.overall = result.overall || null;
+        }
+      }
       if (result.complete) await saveChatGraphCache(videoNo, result);
       return result;
     });
@@ -11807,7 +11854,7 @@
       `</svg></button>`;
     head.innerHTML =
       (searching ? back : "") +
-      `<strong>${searching ? "다시보기 채팅 검색" : "구간 요약"}</strong>` +
+      `<strong>${searching ? "채팅 키워드 검색" : "구간 요약"}</strong>` +
       `<div class="cheese-recap-panel-head-actions">` +
       (searching ? "" : rescan + search) +
       close +

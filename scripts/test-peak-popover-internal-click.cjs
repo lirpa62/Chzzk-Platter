@@ -287,7 +287,7 @@ const ok = (c, l) => {
         close:!!panel.querySelector('[data-peak-close]')};
       teardown(); return out;})()`);
     ok(r.alive, "팝오버가 닫히지 않는다");
-    ok(r.title === "다시보기 채팅 검색", `제목 전환 (${r.title})`);
+    ok(r.title === "채팅 키워드 검색", `제목 전환 (${r.title})`);
     ok(r.back, "뒤로 버튼이 보인다");
     ok(r.input, "검색 입력칸이 보인다");
     ok(!r.rescan, "'다시 수집' 은 감춘다");
