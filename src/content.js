@@ -10601,7 +10601,13 @@
       const url = map && typeof map === "object" ? map[key] : "";
       if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
         const img = document.createElement("img");
-        img.className = "cheese-vod-search-emoji";
+        // 줄 맨 앞뒤면 바깥쪽 여백을 뺀다(들여쓰기처럼 보이지 않게).
+        // ⚠ CSS :first-child 로는 못 가른다 — 앞의 글자는 텍스트 노드라서
+        //   요소 기준으로는 이모티콘이 첫 자식으로 잡힌다.
+        let cls = "cheese-vod-search-emoji";
+        if (match.index === 0) cls += " is-edge-start";
+        if (pattern.lastIndex === text.length) cls += " is-edge-end";
+        img.className = cls;
         img.src = url;
         img.alt = key;
         img.title = key;

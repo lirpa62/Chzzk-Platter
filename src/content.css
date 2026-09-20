@@ -15817,9 +15817,22 @@ html.theme_dark .cheese-memo-window {
 .cheese-vod-search-emoji {
   display: inline-block;
   height: 20px;
+  /* 이모티콘끼리도, 글자와도 다닥다닥 붙지 않게 양옆을 조금 띄운다.
+     ⚠ 줄 맨 앞뒤에서는 들여쓰기처럼 보이지 않도록 아래에서 뺀다. */
+  margin: 0 2px;
   object-fit: contain;
   vertical-align: middle;
   width: 20px;
+}
+/* ⚠ :first-child / :last-child 로는 안 된다. 앞뒤의 글자는 '요소' 가 아니라
+   텍스트 노드라, 글자가 앞에 있어도 이모티콘이 첫 자식으로 잡힌다(실측:
+   '앞{:a:}' 에서 왼쪽 여백이 0 이 됐다).
+   줄 맨 앞뒤 여백은 렌더할 때 클래스로 표시한다. */
+.cheese-vod-search-emoji.is-edge-start {
+  margin-left: 0;
+}
+.cheese-vod-search-emoji.is-edge-end {
+  margin-right: 0;
 }
 .cheese-vod-search-text mark {
   background: rgba(0, 230, 147, 0.26);

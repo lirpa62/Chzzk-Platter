@@ -665,9 +665,53 @@ const ok = (c, l) => {
     ok(r.title.includes("{:d_42:}"), "전체 원문은 title 에 그대로 둔다");
   }
 
-  console.log("\n[이모티콘] 사전에 없으면 이름만 글자로 보여 준다");
+  console.log("\n[이모티콘] 글자·이모티콘 사이가 다닥다닥 붙지 않는다");
+  {
+    // ⚠ 실제로 떨어져 보이는지 rect 로 잰다. CSS 문자열만 확인하면 규칙이
+    //   덮여도 통과한다.
+    const r = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:0,text:'앞{:d_42:}{:hi:}뒤 폼'}];
+      vodChatSearchView.query='폼'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'폼',200);
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      const imgs=[...t.querySelectorAll('img')];
+      const cs=imgs.map(i=>getComputedStyle(i));
+      const r0=imgs[0].getBoundingClientRect();
+      const r1=imgs[1].getBoundingClientRect();
+      return {count:imgs.length,
+        betweenGap:Math.round((r1.left-r0.right)*10)/10,
+        left0:cs[0].marginLeft, right0:cs[0].marginRight,
+        left1:cs[1].marginLeft, right1:cs[1].marginRight};})()`);
+    ok(r.count === 2, `이모티콘 두 개 (${r.count})`);
+    // 둘 사이: 각자 2px 씩 → 4px
+    ok(r.betweenGap >= 3, `이모티콘끼리 떨어져 있다 (${r.betweenGap}px)`);
+    ok(r.left0 === "2px", `앞 글자와도 띄운다 (${r.left0})`);
+    ok(r.right1 === "2px", `뒤 글자와도 띄운다 (${r.right1})`);
+  }
+
+  console.log("\n[이모티콘] 줄 맨 앞뒤에서는 들여쓰기처럼 보이지 않는다");
   {
     const r = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:0,text:'{:d_42:} 폼 {:hi:}'}];
+      vodChatSearchView.query='폼'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'폼',200);
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      const imgs=[...t.querySelectorAll('img')];
+      return {first:getComputedStyle(imgs[0]).marginLeft,
+        last:getComputedStyle(imgs[imgs.length-1]).marginRight};})()`);
+    ok(r.first === "0px", `맨 앞은 왼쪽 여백이 없다 (${r.first})`);
+    ok(r.last === "0px", `맨 뒤는 오른쪽 여백이 없다 (${r.last})`);
+  }
+
+  console.log("\n[이모티콘] 사전에 없으면 이름만 글자로 보여 준다");
+  {
+    // ⚠ 앞 검사들이 messages 를 갈아 끼우므로 여기서 다시 세운다.
+    const r = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:2000,text:'{:모르는키:} 어떡하지'}];
       vodChatSearchView.query='어떡하지'; vodChatSearchView.lastQuery=null;
       vodChatSearchView.result=searchVodChatMessages(
         vodChatSearchState.messages,'어떡하지',200);
@@ -682,6 +726,7 @@ const ok = (c, l) => {
   console.log("\n[이모티콘] 이어 붙은 것도 각각 그림이 된다");
   {
     const r = await ev(`(()=>{
+      vodChatSearchState.messages=[{t:3000,text:'{:d_42:}{:hi:} 둘 다'}];
       vodChatSearchView.query='둘 다'; vodChatSearchView.lastQuery=null;
       vodChatSearchView.result=searchVodChatMessages(
         vodChatSearchState.messages,'둘 다',200);
