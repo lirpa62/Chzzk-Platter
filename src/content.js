@@ -25122,8 +25122,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ensureCustomFollowList();
     ensureCustomFollowCollapsedControls();
     // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
-    // 있다 → 여기서 1회만 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
+    // 있다 → 여기서 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
     applySidebarPush();
+    // ⚠ 처음부터 펼쳐진 채로 들어오면 한 번의 측정으로는 부족하다. 그 시점엔 폭이
+    //   아직 아이콘 폭(80px 이하)이거나 0 이라 applySidebarPush 가 스타일을 비우고
+    //   끝내는데, 접힘↔펼침 전환이 아니라서 handleSidebarExpandTransition 의
+    //   재측정(scheduleSidebarPushSettle)이 걸리지 않는다. 그래서 본문 패딩이 영영
+    //   안 붙고, 접었다 펴야 그제야 정상으로 보였다(제보 내용과 일치).
+    //   이미 펼쳐진 경우에만 전환과 같은 재측정을 한 번 예약한다.
+    if (isSidebarExpanded(sidebar)) scheduleSidebarPushSettle();
   }
 
   // ── 헤더 미니 네비 주입/유지 ──────────────────────────────────────────────

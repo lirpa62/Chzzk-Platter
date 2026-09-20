@@ -34,6 +34,20 @@
     "뷰포트",
     `${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio}`,
   );
+  // ⚠ 물리 해상도가 넓어도 배율·확대·세로 회전 때문에 CSS 폭은 1199 이하일 수
+  //   있다. 좁은 폭에서만 켜지는 규칙이 있어 이 값이 중요하다.
+  log(
+    "visualViewport",
+    window.visualViewport
+      ? `${Math.round(window.visualViewport.width)}x${Math.round(
+          window.visualViewport.height,
+        )} scale=${window.visualViewport.scale}`
+      : "(없음)",
+  );
+  log(
+    "1199px 이하 규칙 적용",
+    String(window.matchMedia("(width <= 1199px)").matches),
+  );
   log(
     "화면",
     `${screen.width}x${screen.height} avail=${screen.availWidth}x${screen.availHeight}`,
@@ -121,6 +135,32 @@
     if (inline) log(`${name} inline`, inline.slice(0, 160));
   }
 
+  // ── 좁은 폭에서 사이드바가 만드는 덮개(Issue B 후보) ────────────────────
+  // 펼친 사이드바 앞에 화면 전체를 덮는 ::before 가 생기는 규칙이 있다(오른쪽
+  // 배치 + 1199px 이하). 그것이 휠을 가로채는지 값으로 확인한다.
+  if (sidebar) {
+    const before = getComputedStyle(sidebar, "::before");
+    log(
+      "사이드바 ::before",
+      `content=${before.content} size=${before.width}x${before.height} ` +
+        `position=${before.position} pointer-events=${before.pointerEvents} z=${before.zIndex}`,
+    );
+  }
+  // 화면 한가운데에서 실제로 무엇이 집히는지(덮개가 있으면 사이드바가 나온다).
+  const midX = Math.round(window.innerWidth / 2);
+  const midY = Math.round(window.innerHeight / 2);
+  log(
+    "화면 중앙에서 집히는 요소",
+    show(rect(document.elementFromPoint(midX, midY))),
+  );
+  log("  그 요소", idOfElement(document.elementFromPoint(midX, midY)));
+
+  function idOfElement(el) {
+    if (!el) return "(없음)";
+    const cls = (el.className || "").toString().trim().split(/\s+/)[0] || "";
+    return `${el.tagName}${el.id ? "#" + el.id : ""}${cls ? "." + cls : ""}`;
+  }
+
   console.log(
     "%c[치즈 플래터] 사이드바 진단",
     "font-weight:bold;color:#00c07f",
@@ -132,8 +172,11 @@
   let wheelSeen = 0;
   let defaultPrevented = 0;
   let topBefore = se ? se.scrollTop : 0;
+  // ⚠ 휠이 '어디로' 가는지도 남긴다. 덮개가 가로채면 target 이 사이드바가 된다.
+  const wheelTargets = new Set();
   const onWheel = (e) => {
     wheelSeen += 1;
+    wheelTargets.add(idOfElement(e.target));
     // 다른 리스너가 막았는지는 다음 프레임에 확인한다.
     requestAnimationFrame(() => {
       if (e.defaultPrevented) defaultPrevented += 1;
@@ -147,6 +190,7 @@
       [
         `휠 이벤트 ${wheelSeen}건`,
         `그중 누군가 막은 것 ${defaultPrevented}건`,
+        `휠이 닿은 요소: ${[...wheelTargets].join(", ") || "(없음)"}`,
         `scrollTop ${num(topBefore)} → ${num(topAfter)}`,
         wheelSeen === 0
           ? "→ 휠 이벤트 자체가 안 왔습니다(입력이 다른 곳으로 갔을 수 있음)"
