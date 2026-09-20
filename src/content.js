@@ -55275,6 +55275,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 프리셋과 독립적으로 적용할 전역 마스터 게인 설정.
   const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY = "audioMixer:globalGainDefault";
   const AUDIO_MIXER_AUTO_SYNC_KEY = "cheeseAudioMixer.autoSync";
+  // 채널 간 믹서 설정 공유(opt-in, 기본 꺼짐)와 마지막으로 사용자가 조절한 값.
+  // ⚠ 스냅샷은 '한 개만' 둔다. 채널별 복제본을 늘리지 않는다.
+  const AUDIO_MIXER_SHARE_KEY = "audioMixer:shareAcrossChannels";
+  const AUDIO_MIXER_SHARED_STATE_KEY = "audioMixer:lastSharedState";
   // Firefox에서 연속 slider input의 storage.set 완료 순서가 뒤섞이지 않게 직렬화한다.
   // load는 앞서 받은 save가 모두 끝난 뒤 실행돼 채널 전환 직전 마지막 값이 보장된다.
   let audioMixerStorageQueue = Promise.resolve();
@@ -55335,9 +55339,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           defaultCustomId,
           globalDefault,
           globalGainDefault,
+          // ⚠ 채널 간 공유용 스냅샷. per-media 저장에 섞이면 안 된다.
+          sharedSnapshot,
           ...perMedia
         } = incoming;
         const toSet = { [key]: perMedia };
+        // 사용자가 실제로 조절했을 때만 실려 온다(자동 적용은 싣지 않는다).
+        if (sharedSnapshot && typeof sharedSnapshot === "object") {
+          toSet[AUDIO_MIXER_SHARED_STATE_KEY] = sharedSnapshot;
+        }
         if (Array.isArray(customPresets)) {
           toSet[AUDIO_MIXER_PRESETS_KEY] = customPresets;
         }
@@ -55366,6 +55376,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             AUDIO_MIXER_DEFAULT_CUSTOM_KEY,
             AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
             AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY,
+            AUDIO_MIXER_SHARE_KEY,
+            AUDIO_MIXER_SHARED_STATE_KEY,
           ]),
         )
         .then((result) => {
@@ -55399,6 +55411,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
               type: "loaded",
               channelId,
               requestId,
+              // ⚠ 이 채널에 '실제로 저장된 값이 있었는지'. merged 는 전역값을 늘
+              //   싣고 오므로 state 만 보고는 구분할 수 없다. 채널 간 공유는
+              //   저장값이 없는 채널에만 적용해야 해서 이 값이 필요하다.
+              found: !!saved,
+              // 채널 간 공유 설정과 마지막 조절값(켜져 있을 때만 의미가 있다).
+              shareAcrossChannels: result?.[AUDIO_MIXER_SHARE_KEY] === true,
+              sharedState: result?.[AUDIO_MIXER_SHARED_STATE_KEY] || null,
               state: merged,
             },
             BRIDGE_ORIGIN,
@@ -55455,6 +55474,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       changes[AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY]
     ) {
       void broadcastAudioMixerGlobals();
+    }
+    // 설정 화면에서 공유를 켜고 끄면 열려 있는 플레이어도 바로 따라간다.
+    // ⚠ 이미 적용된 화면을 되돌리지는 않는다. '다음 새 채널부터' 가 이 기능의 약속이다.
+    if (changes[AUDIO_MIXER_SHARE_KEY]) {
+      window.postMessage(
+        {
+          source: "cheese-audio-mixer-content",
+          type: "share-across-channels-changed",
+          enabled: changes[AUDIO_MIXER_SHARE_KEY].newValue === true,
+        },
+        BRIDGE_ORIGIN,
+      );
     }
   });
 

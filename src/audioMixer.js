@@ -1013,6 +1013,21 @@
   // 채널의 '원래 선택'(전역 기본값 적용 전) 스냅샷. 전역 기본값이 켜진 동안엔 이 값을
   // 채널 저장에 쓴다(전역값이 채널 저장을 덮어쓰지 않게). 전역 해제 시 이 값으로 복원.
   let channelBaseState = null;
+  // ── 채널 간 믹서 설정 공유(opt-in, 기본 꺼짐) ────────────────────────────
+  //
+  // "저장된 설정이 없는 새 채널에만, 마지막으로 사용자가 조절한 값을 이어받는다."
+  // ⚠ 이미 저장된 채널 설정은 절대 덮지 않는다. 적용 우선순위는
+  //     채널 저장값 > 공유 스냅샷 > 전역 기본값 > DEFAULT_STATE
+  //   공유를 켠 것은 '최근에 내가 맞춘 값을 쓰겠다'는 더 구체적인 의사라
+  //   전역 기본값보다 앞에 둔다.
+  let shareAcrossChannels = false;
+  let lastSharedSnapshot = null;
+  // 이 채널의 값이 '물려받은 것'인지. 물려받기만 한 상태는 사용자가 이 채널에서
+  // 직접 고른 것으로 취급하지 않는다(전역 기본값 정책과 엉키지 않게).
+  // ⚠ 런타임 전용 — 저장하지 않는다.
+  let inheritedSharedState = false;
+  // 다음 saveState 가 '사용자 DSP 조절' 인지. commitUserEditToChannelBase 가 세운다.
+  let nextSaveIsUserEdit = false;
   // 프리셋(내장/커스텀) 적용 후 값을 수정해 벗어난 상태인지. true면 head에
   // "프리셋 추가" 빠른 저장 버튼이 나타난다.
   let presetDirty = false;
@@ -1685,6 +1700,7 @@
         channelBaseState = snapshotChannelPreset(); // 사용자 선택 → 채널 원본 갱신
         applyGlobalGainDefault(channelBaseState.gain);
         applyState();
+        nextSaveIsUserEdit = true; // 커스텀 프리셋을 직접 고름
         saveState();
         syncUI();
         return;
@@ -1708,6 +1724,8 @@
     channelBaseState = snapshotChannelPreset();
     applyGlobalGainDefault(channelBaseState.gain);
     applyState();
+    // 프리셋을 직접 고른 것도 '사용자 조절' 이다(기본 프리셋으로 되돌린 것 포함).
+    nextSaveIsUserEdit = true;
     saveState();
     syncUI();
   }
@@ -2294,7 +2312,10 @@
       applyGlobalGainDefault(channelBaseState.gain);
     }
     applyState();
-    if (!options.keepDraft) saveState();
+    if (!options.keepDraft) {
+      nextSaveIsUserEdit = true; // 저장해 둔 커스텀을 직접 적용함
+      saveState();
+    }
     syncUI();
   }
 
@@ -2577,12 +2598,24 @@
       return;
     }
     if (!stateLoaded) userEditedDuringLoad = true;
-    pendingStateSave = {
+    const packet = {
       source: "cheese-audio-mixer",
       type: "save",
       channelId: currentMediaId,
       state: serializeState(opts),
     };
+    // ⚠ 채널 간 공유 스냅샷은 '사용자가 DSP 값을 실제로 조절했을 때' 만 갱신한다.
+    //   저장 복원·전역 기본값 적용·EQ 모드 이행·켜기/끄기 같은 저장은 제외한다.
+    //   자동 적용이 다시 스냅샷을 갱신하면 값이 순환하며 떠돈다.
+    const userEdit = nextSaveIsUserEdit || opts?.userEdit === true;
+    nextSaveIsUserEdit = false;
+    if (shareAcrossChannels && userEdit) {
+      packet.state.sharedSnapshot = buildSharedSnapshot();
+      lastSharedSnapshot = packet.state.sharedSnapshot;
+      // 이 채널에서 직접 만졌으니 더는 '물려받기만 한 상태'가 아니다.
+      inheritedSharedState = false;
+    }
+    pendingStateSave = packet;
     // 슬라이더 input마다 storage.set을 호출하면 Firefox에서 저장 알림과 IPC가 폭주한다.
     // 짧게 합쳐 마지막 값만 저장하되, 커스텀 프리셋 편집은 즉시 확정한다.
     if (opts?.forcePresets) {
@@ -2611,6 +2644,61 @@
       limiter: { ...state.limiter },
       normalizer: { ...state.normalizer },
     };
+  }
+
+  // 채널 간 공유용 스냅샷. 채널 저장 스냅샷에 '재현에 필요한 최소 metadata' 만 더한다.
+  // ⚠ 켜짐 여부(enabled)·userDisabled·네이티브 볼륨은 담지 않는다. DSP 값만 옮긴다.
+  function buildSharedSnapshot() {
+    const base = snapshotChannelPreset();
+    return {
+      v: 1,
+      preset: base.preset,
+      dirtyFrom: String(base.dirtyFrom || ""),
+      gain: base.gain,
+      eq: [...base.eq],
+      comp: { ...base.comp },
+      limiter: { ...base.limiter },
+      normalizer: { ...base.normalizer },
+      // 저장 당시 대역 모드. 지금 모드가 다르면 주파수 기준으로 변환해 적용한다.
+      eqBandMode,
+    };
+  }
+
+  // 공유 스냅샷을 현재 state 에 적용한다. 적용했으면 true.
+  function applySharedSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return false;
+    const eqSource = Array.isArray(snapshot.eq) ? snapshot.eq : null;
+    if (!eqSource) return false;
+    // ⚠ 대역 모드가 다르면 인덱스를 그대로 쓰면 안 된다(같은 칸이라도 주파수가 다르다).
+    //   커스텀 프리셋과 같은 변환 규칙을 쓴다.
+    const eq = convertEqBetweenModes(
+      eqSource,
+      normalizeEqBandMode(snapshot.eqBandMode),
+      eqBandMode,
+    );
+    const preset = String(snapshot.preset || "default");
+    // ⚠ 커스텀 프리셋이 지워진 뒤라면 그 id 를 칩으로 세우지 않는다. 값은 그대로
+    //   살리되 이름만 '사용자 설정' 으로 떨어뜨린다.
+    const presetExists =
+      preset === "default" ||
+      preset === "custom" ||
+      Object.prototype.hasOwnProperty.call(PRESETS, preset) ||
+      normalizeCustomPresets(state.customPresets).some((p) => p.id === preset);
+    state.preset = presetExists ? preset : "custom";
+    state.gain = Number(snapshot.gain);
+    state.eq = [...eq];
+    state.comp = { ...DEFAULT_STATE().comp, ...(snapshot.comp || {}) };
+    state.limiter = { ...DEFAULT_STATE().limiter, ...(snapshot.limiter || {}) };
+    state.normalizer = {
+      ...DEFAULT_STATE().normalizer,
+      ...(snapshot.normalizer || {}),
+    };
+    state.eqByMode = { ...state.eqByMode, [eqBandMode]: [...eq] };
+    // '수정된 OOO' 표시도 그대로 잇는다. 판정은 저장값 복원과 같은 규칙을 쓴다
+    // (원본 프리셋이 사라졌으면 알아서 '사용자 설정'으로 떨어진다).
+    state.dirtyFrom = presetExists ? String(snapshot.dirtyFrom || "") : "";
+    restoreDirtyFromSaved();
+    return true;
   }
 
   function serializeState(opts) {
@@ -2711,6 +2799,12 @@
       setAutoSync(e.data.enabled === true, { syncStorage: false });
       return;
     }
+    // 설정에서 채널 간 공유를 켜고 끈 경우. 지금 화면은 그대로 두고 '다음 새 채널'
+    // 부터 달라진다(이미 적용된 값을 되돌리면 오히려 놀란다).
+    if (e.data.type === "share-across-channels-changed") {
+      shareAcrossChannels = e.data.enabled === true;
+      return;
+    }
     if (
       e.data.type === "loaded" &&
       e.data.channelId === currentMediaId &&
@@ -2718,6 +2812,17 @@
       !stateLoaded
     ) {
       resetStateLoadRetry();
+      // 채널 간 공유 설정은 채널마다 함께 실려 온다.
+      shareAcrossChannels = e.data.shareAcrossChannels === true;
+      lastSharedSnapshot =
+        e.data.sharedState && typeof e.data.sharedState === "object"
+          ? e.data.sharedState
+          : null;
+      // ⚠ '이 채널에 실제로 저장된 값이 있었는가'. state 만 보면 전역값 때문에 늘
+      //   객체라 구분할 수 없어 브리지가 따로 알려 준다. 예전 브리지(플래그 없음)
+      //   에서는 undefined 가 오는데, 그때는 공유를 적용하지 않는다(안전한 쪽).
+      const hasChannelSaved = e.data.found === true;
+      inheritedSharedState = false;
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
         const locallyEditedState = userEditedDuringLoad
@@ -2794,12 +2899,34 @@
         if (locallyEditedState) {
           state = { ...state, ...locallyEditedState };
         }
+        // ── 채널 간 공유 ──────────────────────────────────────────────────
+        // 저장된 설정이 없는 채널에만, 마지막으로 조절한 값을 물려준다.
+        // ⚠ 아래 세 가지 중 하나라도 걸리면 적용하지 않는다.
+        //    - 이 채널에 저장값이 있다(사용자가 맞춰 둔 것을 덮으면 안 된다)
+        //    - 로드를 기다리는 사이 사용자가 이미 만졌다(그 조작이 우선)
+        //    - 공유가 꺼져 있거나 물려줄 값이 없다
+        const inherit =
+          shareAcrossChannels &&
+          !hasChannelSaved &&
+          !locallyEditedState &&
+          !!lastSharedSnapshot;
+        if (inherit && applySharedSnapshot(lastSharedSnapshot)) {
+          // 물려받기만 한 상태다. 이 채널에서 '직접 골랐다'로 세우지 않는다
+          // (전역 기본값의 '채널 우선' 정책과 엉키지 않게).
+          state.userPickedPreset = false;
+          state.userPickedGain = false;
+          inheritedSharedState = true;
+        }
         // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 기본값이 켜진 동안 채널
         // 저장이 전역값으로 덮어써지지 않게 하고, 전역 해제 시 이 값으로 복원한다.
         channelBaseState = snapshotChannelPreset();
         // 프리셋과 게인의 전역 정책을 각각 적용한다. 로드 응답을 기다리는 동안 사용자가
         // 값을 바꿨다면 그 조작이 우선이며, 저장 응답으로 다시 덮어쓰지 않는다.
-        if (!locallyEditedState) applyConfiguredGlobalDefaults();
+        // ⚠ 공유값을 물려받았으면 전역 기본값으로 다시 덮지 않는다. 공유를 켠 것은
+        //   '최근에 내가 맞춘 값을 쓰겠다'는 더 구체적인 의사이기 때문이다.
+        if (!locallyEditedState && !inheritedSharedState) {
+          applyConfiguredGlobalDefaults();
+        }
         // userDisabled 채널인데 로드 전 자동 활성화가 먼저 켰을 수 있다(레이스).
         // 저장된 의사를 존중해 확실히 끈다.
         if (state.userDisabled && audio.connected) {
@@ -4254,6 +4381,10 @@
   function commitUserEditToChannelBase() {
     channelBaseState = snapshotChannelPreset();
     state.userPickedPreset = true; // 이 채널은 사용자가 직접 정함(전역값에 안 덮이게)
+    // ⚠ 여기가 'DSP 값을 사용자가 직접 만졌다'는 유일한 표시다. 바로 뒤따르는
+    //   saveState() 가 이 표시를 보고 채널 간 공유 스냅샷을 갱신한다. 저장 복원·
+    //   전역 기본값 적용·켜기/끄기 저장에는 이 함수가 끼지 않으므로 섞이지 않는다.
+    nextSaveIsUserEdit = true;
   }
 
   function handleEqBand(index, value) {

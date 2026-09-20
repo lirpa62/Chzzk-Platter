@@ -311,6 +311,9 @@
     "audioMixer:globalDefault",
     "audioMixer:globalGainDefault",
     "audioMixer:defaultCustomId",
+    // ⚠ 프리페치 목록에 없으면 cachedStorageGet 이 빈 값을 돌려줘, 켜 둔 토글이
+    //   설정 화면에서 늘 꺼진 것으로 보인다.
+    "audioMixer:shareAcrossChannels",
     "videoFilter:presets",
     "videoFilter:globalDefault",
     "hiddenChannels",
@@ -2820,6 +2823,8 @@
   // ── 오디오 믹서 전역 기본값(채널 무관) ────────────────────────────────────
   const AUDIO_MIXER_PRESETS_KEY = "audioMixer:presets";
   const AUDIO_MIXER_GLOBAL_DEFAULT_KEY = "audioMixer:globalDefault";
+  // 채널 간 믹서 설정 공유(opt-in, 기본 꺼짐).
+  const AUDIO_MIXER_SHARE_KEY = "audioMixer:shareAcrossChannels";
   const AUDIO_MIXER_GLOBAL_GAIN_DEFAULT_KEY =
     "audioMixer:globalGainDefault";
   const MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY =
@@ -2878,6 +2883,9 @@
   ];
   const mixerGlobalDefaultEnabledInput = document.querySelector(
     "[data-mixer-global-default-enabled]",
+  );
+  const mixerShareAcrossChannelsInput = document.querySelector(
+    "[data-mixer-share-across-channels]",
   );
   const videoFilterGlobalDefaultEnabledInput = document.querySelector(
     "[data-video-filter-global-default-enabled]",
@@ -3203,6 +3211,14 @@
     );
   });
 
+  mixerShareAcrossChannelsInput?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({
+        [AUDIO_MIXER_SHARE_KEY]: mixerShareAcrossChannelsInput.checked === true,
+      });
+    } catch {}
+  });
+
   clipAudioMixerAlwaysOnInput?.addEventListener("change", () => {
     try {
       cachedStorageSet({
@@ -3279,6 +3295,7 @@
       const data = await cachedStorageGet([
         AUDIO_MIXER_PRESETS_KEY,
         AUDIO_MIXER_GLOBAL_DEFAULT_KEY,
+        AUDIO_MIXER_SHARE_KEY,
         CLIP_AUDIO_MIXER_ENABLED_KEY,
         CLIP_AUDIO_MIXER_ALWAYS_ON_KEY,
         CLIP_AUDIO_MIXER_PRESET_KEY,
@@ -3319,6 +3336,11 @@
       if (clipAudioMixerAlwaysOnInput) {
         clipAudioMixerAlwaysOnInput.checked =
           data?.[CLIP_AUDIO_MIXER_ALWAYS_ON_KEY] === true;
+      }
+      if (mixerShareAcrossChannelsInput) {
+        // 기본 꺼짐. 명시적으로 켠 경우에만 true.
+        mixerShareAcrossChannelsInput.checked =
+          data?.[AUDIO_MIXER_SHARE_KEY] === true;
       }
       if (clipVideoFilterEnabledInput) {
         clipVideoFilterEnabledInput.checked =
