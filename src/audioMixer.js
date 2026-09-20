@@ -8225,6 +8225,10 @@
 
   // 버퍼 안쪽으로 되돌려 seek 을 끊어낸다. 성공하면 true.
   function recoverFromStall(video) {
+    // ⚠ stallTick 에서 종료를 확인한 뒤에도 여기까지 오는 사이에 종료 화면이 뜰 수
+    //   있다(판정과 실행 사이에 최대 한 틱이 있다). 되돌리기 직전에 한 번 더 본다.
+    //   DOM 만 보는 값싼 판정이라 네트워크 요청이 늘지 않는다.
+    if (liveLooksEnded(video)) return false;
     let end = null;
     let start = null;
     try {
