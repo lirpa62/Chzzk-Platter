@@ -3,7 +3,7 @@
 // 검색 엔진은 test-vod-chat-search.cjs 가 맡는다. 여기서는 화면과 수명주기만 본다.
 //  - 머리말의 돋보기 → 검색 화면, 뒤로 → 활성도 화면
 //  - 준비 전에는 입력칸을 잠그고 진행률을 보여 준다
-//  - 결과 200건 제한과 '처음 200개 표시' 문구
+//  - 한 번에 200건씩 그리고, 바닥에 닿으면 이어 붙인다(무한 스크롤)
 //  - 강조는 mark 요소로 만들고 원문을 HTML 로 합치지 않는다
 //  - 머리말 아이콘이 찌그러지지 않는다(방장·매니저 아이콘 회귀 재발 방지)
 //
@@ -171,6 +171,10 @@ const ok = (c, l) => {
     ${emojiHostSource()}
     ${sliceFn("appendVodSearchText")}
     ${sliceFn("vodChatSearchTruncatedNotice")}
+    ${sliceFn("vodChatSearchResultLabel")}
+    ${sliceFn("buildVodSearchRow")}
+    ${sliceFn("appendMoreVodSearchRows")}
+    window.appendMoreVodSearchRows = appendMoreVodSearchRows;
     ${sliceFn("renderVodChatSearchBody")}
     ${sliceFn("renderVodChatSearchOutput")}
     ${sliceFn("renderChatPeakPanelHead")}
@@ -417,6 +421,74 @@ const ok = (c, l) => {
     ok(r.text.includes("<img"), "검색어를 글자로 되돌려 준다");
   }
 
+  console.log("\n[무한 스크롤] 바닥에 닿으면 다음 묶음을 이어 붙인다");
+  {
+    // ⚠ 예전에는 앞 200건만 그리고 끝이라, 더 보려 해도 방법이 없었다.
+    const r = await ev(`(()=>{
+      const list=[];
+      for(let i=0;i<520;i+=1) list.push({t:i*1000,text:'둥그레 '+i});
+      vodChatSearchState.messages=list;
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchState.truncated='';
+      vodChatSearchView.query='둥그레'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=null;
+      panel.querySelector('.cheese-peak-body').textContent='';
+      renderVodChatSearchBody(panel);
+      // runVodChatSearch 와 같은 초기 상태를 만든다.
+      vodChatSearchView.lastQuery='둥그레';
+      vodChatSearchView.shown=200;
+      vodChatSearchView.result=searchVodChatMessages(list,'둥그레',200);
+      renderVodChatSearchBody(panel);
+      const first={rows:panel.querySelectorAll('.cheese-vod-search-list li').length,
+        status:panel.querySelector('.cheese-vod-search-status').textContent};
+      // 바닥에 닿았다고 보고 한 묶음 더
+      const grew1=appendMoreVodSearchRows(panel);
+      const second={rows:panel.querySelectorAll('.cheese-vod-search-list li').length,
+        status:panel.querySelector('.cheese-vod-search-status').textContent};
+      const grew2=appendMoreVodSearchRows(panel);
+      const third={rows:panel.querySelectorAll('.cheese-vod-search-list li').length,
+        status:panel.querySelector('.cheese-vod-search-status').textContent};
+      // 다 붙였으면 더 안 붙는다
+      const grew3=appendMoreVodSearchRows(panel);
+      const fourth=panel.querySelectorAll('.cheese-vod-search-list li').length;
+      // 첫 줄이 그대로인지(맨 위로 튀지 않았는지)
+      const firstRowText=panel.querySelector('.cheese-vod-search-list li .cheese-vod-search-text').textContent;
+      return {first,second,third,fourth,grew1,grew2,grew3,firstRowText};})()`);
+    ok(r.first.rows === 200, `처음에는 200줄 (${r.first.rows})`);
+    ok(r.grew1 && r.second.rows === 400, `한 번 더 → 400줄 (${r.second.rows})`);
+    ok(
+      r.grew2 && r.third.rows === 520,
+      `또 한 번 → 520줄 전부 (${r.third.rows})`,
+    );
+    ok(!r.grew3 && r.fourth === 520, "다 붙이면 더 늘지 않는다");
+    ok(
+      r.third.status === "검색 결과 520개",
+      `다 보여 주면 제한 문구가 사라진다 (${r.third.status})`,
+    );
+    ok(
+      r.firstRowText.includes("둥그레 0"),
+      `첫 줄이 그대로다(맨 위로 튀지 않는다) (${r.firstRowText})`,
+    );
+    // ⚠ 위 검사는 이어 붙이는 함수만 본다. 실제로 '스크롤이' 그것을 부르는지도
+    //   확인한다(리스너가 빠지면 사용자는 영영 더 볼 수 없다).
+    const scroll = SRC.slice(
+      SRC.indexOf('    el.addEventListener(\n      "scroll",'),
+      SRC.indexOf('    el.addEventListener("input"'),
+    );
+    ok(
+      /cheese-peak-body/.test(scroll),
+      "스크롤 컨테이너(.cheese-peak-body)를 본다",
+    );
+    ok(
+      /appendMoreVodSearchRows\(el\)/.test(scroll),
+      "바닥에 닿으면 이어 붙이기를 부른다",
+    );
+    ok(
+      /scrollHeight - box\.scrollTop - box\.clientHeight/.test(scroll),
+      "바닥까지 남은 거리로 판단한다",
+    );
+  }
+
   console.log("\n[M] 200건 초과");
   {
     const r = await ev(`(()=>{
@@ -432,7 +504,11 @@ const ok = (c, l) => {
     ok(r.total === 201, `전체 개수는 201 (${r.total})`);
     ok(r.rows === 200, `화면에는 200줄만 (${r.rows})`);
     ok(r.status.includes("201"), "전체 개수를 알린다");
-    ok(r.status.includes("처음 200개 표시"), `제한을 알린다 (${r.status})`);
+    ok(
+      r.status.includes("200개 표시"),
+      `한 번에 200개까지만 그린다 (${r.status})`,
+    );
+    ok(r.status.includes("스크롤하면 더"), "더 볼 수 있다는 것을 알린다");
   }
 
   console.log("\n[결과 개수] 200건 이하면 제한 문구를 붙이지 않는다");

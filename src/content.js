@@ -10393,6 +10393,7 @@
     query: "",
     lastQuery: null, // 같은 검색어를 연달아 다시 계산하지 않는다.
     result: null,
+    shown: 0, // 지금까지 화면에 붙인 개수(바닥에 닿으면 한 묶음씩 늘린다)
     timer: 0,
     token: 0, // 비동기 준비가 끝났을 때 아직 유효한 화면인지 확인한다.
   };
@@ -10402,6 +10403,7 @@
     vodChatSearchView.query = "";
     vodChatSearchView.lastQuery = null;
     vodChatSearchView.result = null;
+    vodChatSearchView.shown = 0;
     vodChatSearchView.token += 1;
     if (vodChatSearchView.timer) {
       clearTimeout(vodChatSearchView.timer);
@@ -10484,6 +10486,33 @@
     renderVodChatSearchOutput(out, { ready, busy, failed });
   }
 
+  // 결과 개수 문구. 아직 다 못 보여 준 경우에는 몇 개까지 보고 있는지 알린다.
+  function vodChatSearchResultLabel(result) {
+    const total = Number(result?.total) || 0;
+    const shown = result?.rows?.length || 0;
+    return total > shown
+      ? `검색 결과 ${total.toLocaleString()}개 · ${shown.toLocaleString()}개 표시 (스크롤하면 더 봅니다)`
+      : `검색 결과 ${total.toLocaleString()}개`;
+  }
+
+  // 결과 한 줄. 처음 그릴 때와 이어 붙일 때가 같은 모양이어야 한다.
+  function buildVodSearchRow(row, needle) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.vodSearchSeek = String(Math.floor((row.t || 0) / 1000));
+    const time = document.createElement("time");
+    time.textContent = formatSeconds((row.t || 0) / 1000);
+    button.appendChild(time);
+    const text = document.createElement("span");
+    text.className = "cheese-vod-search-text";
+    appendVodSearchText(text, String(row.text || ""), needle);
+    text.title = String(row.text || "");
+    button.appendChild(text);
+    li.appendChild(button);
+    return li;
+  }
+
   // 결과 영역만 그린다. 입력칸은 이 함수가 건드리지 않는다.
   function renderVodChatSearchOutput(out, { ready, busy, failed }) {
     if (!out) return;
@@ -10546,30 +10575,14 @@
       return;
     }
 
-    status.textContent =
-      result.total > result.rows.length
-        ? `검색 결과 ${result.total.toLocaleString()}개 · 처음 ${result.rows.length.toLocaleString()}개 표시`
-        : `검색 결과 ${result.total.toLocaleString()}개`;
+    status.textContent = vodChatSearchResultLabel(result);
     out.appendChild(status);
 
     const list = document.createElement("ul");
     list.className = "cheese-vod-search-list";
     const needle = query.normalize("NFC").toLocaleLowerCase();
     for (const row of result.rows) {
-      const li = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.dataset.vodSearchSeek = String(Math.floor((row.t || 0) / 1000));
-      const time = document.createElement("time");
-      time.textContent = formatSeconds((row.t || 0) / 1000);
-      button.appendChild(time);
-      const text = document.createElement("span");
-      text.className = "cheese-vod-search-text";
-      appendVodSearchText(text, String(row.text || ""), needle);
-      text.title = String(row.text || "");
-      button.appendChild(text);
-      li.appendChild(button);
-      list.appendChild(li);
+      list.appendChild(buildVodSearchRow(row, needle));
     }
     out.appendChild(list);
   }
@@ -10669,14 +10682,48 @@
       return;
     }
     vodChatSearchView.lastQuery = query;
+    // 새 검색어면 다시 처음 한 묶음부터 본다.
+    vodChatSearchView.shown = VOD_CHAT_SEARCH_LIMIT;
     vodChatSearchView.result = query
       ? searchVodChatMessages(
           vodChatSearchState.messages,
           query,
-          VOD_CHAT_SEARCH_LIMIT,
+          vodChatSearchView.shown,
         )
       : null;
     renderVodChatSearchBody(panel);
+  }
+
+  // 결과를 한 묶음 더 붙인다(바닥까지 내렸을 때).
+  // ⚠ 화면을 통째로 다시 그리지 않는다. 그러면 보고 있던 자리가 맨 위로 튄다.
+  //   줄만 이어 붙이고 개수 문구를 고친다.
+  function appendMoreVodSearchRows(panel) {
+    const view = vodChatSearchView;
+    const result = view.result;
+    if (!result || !Array.isArray(vodChatSearchState.messages)) return false;
+    if (result.rows.length >= result.total) return false; // 더 없다
+    const next = view.shown + VOD_CHAT_SEARCH_LIMIT;
+    const grown = searchVodChatMessages(
+      vodChatSearchState.messages,
+      view.lastQuery || "",
+      next,
+    );
+    const added = grown.rows.slice(result.rows.length);
+    if (!added.length) return false;
+    view.shown = next;
+    view.result = grown;
+    const list = panel?.querySelector(".cheese-vod-search-list");
+    const status = panel?.querySelector(".cheese-vod-search-status");
+    if (!list) {
+      renderVodChatSearchBody(panel);
+      return true;
+    }
+    const needle = String(view.lastQuery || "")
+      .normalize("NFC")
+      .toLocaleLowerCase();
+    for (const row of added) list.appendChild(buildVodSearchRow(row, needle));
+    if (status) status.textContent = vodChatSearchResultLabel(grown);
+    return true;
   }
 
   // 검색 화면을 연다. 원문이 없으면 여기서 준비를 시작한다(사용자가 버튼을 다시
@@ -11980,6 +12027,23 @@
     });
 
     // 검색어 입력. 100k 에서도 10ms 안쪽이라 워커는 쓰지 않고 debounce 만 둔다.
+    // 바닥 가까이 내리면 다음 묶음을 이어 붙인다(무한 스크롤).
+    // ⚠ scroll 은 아주 자주 오므로 계산을 최소로 한다. 더 붙일 것이 없으면
+    //   곧바로 빠져나간다.
+    el.addEventListener(
+      "scroll",
+      (event) => {
+        if (!vodChatSearchView.open) return;
+        const box = event.target;
+        if (!(box instanceof Element)) return;
+        if (!box.classList.contains("cheese-peak-body")) return;
+        const rest = box.scrollHeight - box.scrollTop - box.clientHeight;
+        if (rest > 120) return; // 아직 바닥이 멀다
+        appendMoreVodSearchRows(el);
+      },
+      true,
+    );
+
     el.addEventListener("input", (event) => {
       const input = event.target;
       if (!(input instanceof HTMLInputElement)) return;
