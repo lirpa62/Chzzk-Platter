@@ -2611,18 +2611,35 @@
   // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 전역
   // customPresets/defaultCustomId를 함께 저장). 일반 채널 설정 저장에는 전역값을 싣지 않는다.
   function saveState(opts) {
+    // ⚠ 판정을 '가장 먼저' 한다. 예전에는 함수 첫 줄에서 무조건
+    //   pendingUserEdit / userEditedDuringLoad 를 세웠는데, 저장은 사용자 조작이
+    //   아닌 경로에서도 불린다(EQ 대역 동기화·자동 켜기·그래프 실패 등).
+    //   그 바람에 손댄 적 없는데도 '로드 중 사용자가 고쳤다' 로 잡혀, 늦게 도착한
+    //   load 에서 전역 기본 프리셋이 통째로 건너뛰어졌다(실측으로 재현).
+    //
+    //   세 가지를 구분한다.
+    //     userEdit   DSP 값을 직접 만졌다(프리셋 선택 포함)
+    //     userIntent 값은 아니지만 남겨야 할 사용자 의사(opt-out·커스텀 편집)
+    //     그 밖       시스템 동기화 — 어느 표시도 세우지 않는다
+    //
+    //   ⚠ 표시는 어느 경로로 빠져나가든 여기서 내린다(다음 저장에 샌다).
+    const userEdit = nextSaveIsUserEdit || opts?.userEdit === true;
+    nextSaveIsUserEdit = false;
+    const userIntent =
+      userEdit || opts?.userIntent === true || opts?.forcePresets === true;
+
     if (!currentMediaId) {
       // 채널id 확보 전 변경 — 확보되면 그때 저장한다.
-      pendingUserEdit = true;
+      // ⚠ 시스템 동기화는 남기지 않는다. 남기면 채널이 잡힌 뒤 강제 저장이 돌아
+      //   userEditedDuringLoad 까지 오염된다.
+      if (userIntent) pendingUserEdit = true;
       return;
     }
-    if (!stateLoaded) userEditedDuringLoad = true;
+    // 로드가 늦는 동안 '사용자가' 바꾼 것만 늦은 응답보다 우선한다.
+    if (!stateLoaded && userIntent) userEditedDuringLoad = true;
     // ⚠ 채널 간 공유 스냅샷은 '사용자가 DSP 값을 실제로 조절했을 때' 만 갱신한다.
     //   저장 복원·전역 기본값 적용·EQ 모드 이행·켜기/끄기 같은 저장은 제외한다.
     //   자동 적용이 다시 스냅샷을 갱신하면 값이 순환하며 떠돈다.
-    //   ⚠ 표시는 어느 경로로 빠져나가든 반드시 여기서 내린다(다음 저장에 샌다).
-    const userEdit = nextSaveIsUserEdit || opts?.userEdit === true;
-    nextSaveIsUserEdit = false;
     // ⚠ 물려받기만 한 채널에는 채널 저장값을 만들지 않는다. 켜기/끄기 같은 저장이
     //   audioMixer:<채널> 을 만들어 버리면, 다음 방문에 '저장값 있음' 으로 잡혀
     //   공유값 대신 전역 기본값이 적용된다(실제로 그래서 재방문이 깨졌다).
@@ -4053,7 +4070,8 @@
         if (action === "eq-band-mode") {
           const next = eqBandMode === "iso" ? "chzzk" : "iso";
           if (applyEqBandMode(next)) {
-            saveState();
+            // 패널에서 직접 바꾼 것이다(설정에서 내려온 동기화와 다르다).
+            saveState({ userIntent: true });
             refreshPanelContent();
           }
           // 전역 설정이라 설정 화면과 다른 탭에도 반영되도록 저장을 맡긴다.
@@ -4084,7 +4102,8 @@
           alwaysOnOffAsk = false;
           state.userDisabled = true;
           setEnabled(false);
-          saveState(); // opt-out 은 켜짐 여부와 무관하게 확실히 남긴다
+          // 사용자 의사다(값 편집은 아니다). 늦은 로드가 되돌리면 안 된다.
+          saveState({ userIntent: true }); // opt-out 은 켜짐 여부와 무관하게 남긴다
           refreshPanelContent();
           return;
         }
@@ -4171,7 +4190,7 @@
         if (mixerDefaultOn && !mixerAlwaysOn) {
           mixerDefaultOffThisPage = !t.checked;
           setEnabled(t.checked);
-          saveState();
+          saveState({ userIntent: true });
           return;
         }
         // 사용자가 직접 끄면 이 채널은 '항상 켜기' 자동 활성화에서 제외(opt-out).
@@ -4182,7 +4201,7 @@
         //   빠져나간다. 그러면 방금 바꾼 userDisabled 가 저장되지 않아, 새로고침
         //   후에도 예전 opt-out 이 되살아났다. 켜짐 여부와 무관하게 이
         //   '의사'는 반드시 남긴다.
-        saveState();
+        saveState({ userIntent: true });
       } else if (t.dataset.action === "comp-toggle") {
         state.comp.enabled = t.checked;
         enterCustomFromEdit();
