@@ -28,32 +28,36 @@ const ok = (cond, label) => {
   if (!cond) failed += 1;
 };
 
-// audioMixer.js 의 '물려받을지' 판정을 원본에서 떼어 온다.
-function inheritRule() {
-  const at = SRC.indexOf("        const inherit =");
-  if (at < 0) throw Error("공유 적용 판정을 찾지 못했다");
-  const end = SRC.indexOf(";", at);
-  const expr = SRC.slice(at + "        const inherit =".length, end).trim();
-  if (!/shareAcrossChannels/.test(expr)) {
-    throw Error("찾은 식이 공유 판정이 아니다");
-  }
-  // eslint-disable-next-line no-new-func
-  return new Function(
-    "shareAcrossChannels",
-    "hasChannelSaved",
-    "locallyEditedState",
-    "lastSharedSnapshot",
-    `return !!(${expr});`,
-  );
+// audioMixer.js 의 판정 규칙을 원본에서 그대로 떼어 온다.
+// ⚠ 손으로 베껴 두면 원본이 바뀌어도 통과해 버린다.
+function sliceFn(name) {
+  const at = SRC.indexOf(`  function ${name}(`);
+  if (at < 0) throw Error(`함수를 찾지 못했다: ${name}`);
+  const end = SRC.indexOf("\n  }\n", at);
+  if (end < at) throw Error(`함수 끝을 찾지 못했다: ${name}`);
+  return SRC.slice(at, end + 4);
 }
 
-// ⚠ 끝 지점을 SRC.indexOf 로 그냥 찾으면 안 된다. 같은 문자열이 파일 앞쪽에도
-//   있어 시작보다 앞을 가리키면 빈 문자열이 나오고, 검사가 조용히 헛돈다.
-function sliceInheritBlock(endMark) {
-  const at = SRC.indexOf("        const inherit =");
+// 무엇을 기준으로 삼을지 정하는 함수.
+const resolveSource = new Function(
+  `${sliceFn("resolveMixerBaseSource")}; return resolveMixerBaseSource;`,
+)();
+// 그 기준일 때 전역 기본값을 덮어도 되는지.
+function applyGlobals(source) {
+  return new Function(
+    "mixerBaseSource",
+    `${sliceFn("shouldApplyConfiguredGlobals")}; return shouldApplyConfiguredGlobals();`,
+  )(source);
+}
+// 편의: 물려받는 상황인가.
+// load 응답에서 공유를 적용하는 블록만 잘라 온다.
+// ⚠ 끝 표시를 SRC.indexOf 로 그냥 찾으면 파일 앞쪽의 같은 문자열을 집어 빈 범위가
+//   나온다(실제로 그렇게 헛돌았다). 시작 위치부터 찾는다.
+function sliceLoadBlock() {
+  const at = SRC.indexOf("        const nextSource = resolveMixerBaseSource({");
   if (at < 0) throw Error("공유 적용 블록을 찾지 못했다");
-  const end = SRC.indexOf(endMark, at);
-  if (end < at) throw Error("블록 끝을 찾지 못했다: " + endMark);
+  const end = SRC.indexOf("        channelBaseState =", at);
+  if (end < at) throw Error("블록 끝을 찾지 못했다");
   const out = SRC.slice(at, end);
   if (!out.includes("applySharedSnapshot")) {
     throw Error("잘라 낸 범위가 공유 적용 블록이 아니다");
@@ -61,7 +65,13 @@ function sliceInheritBlock(endMark) {
   return out;
 }
 
-const shouldInherit = inheritRule();
+const shouldInherit = (share, found, locallyEdited, snapshot) =>
+  !locallyEdited &&
+  resolveSource({
+    foundSaved: found,
+    shareEnabled: share,
+    snapshot,
+  }) === "shared";
 
 console.log("[A] 공유 OFF — 아무것도 물려받지 않는다");
 {
@@ -173,25 +183,14 @@ console.log("\n[I] 지워진 커스텀 프리셋 id 는 칩으로 세우지 않�
 
 console.log("\n[F] 공유값을 적용한 것 자체는 다시 스냅샷을 갱신하지 않는다");
 {
-  const save = SRC.slice(
-    SRC.indexOf("  function saveState(opts) {"),
-    SRC.indexOf("  // 현재 state에서 '채널이 저장할 프리셋/값' 부분만 스냅샷."),
-  );
-  ok(
-    /if \(shareAcrossChannels && userEdit\)/.test(save),
-    "사용자 조절일 때만 스냅샷을 갱신한다",
-  );
-  // ⚠ 자동 적용이 스냅샷을 갱신하면 값이 순환하며 떠돈다.
-  const commit = SRC.slice(
-    SRC.indexOf("  function commitUserEditToChannelBase() {"),
-    SRC.indexOf("  function commitUserEditToChannelBase() {") + 700,
-  );
+  const save = sliceFn("saveState");
+  ok(/if \(userEdit\) \{/.test(save), "사용자 조절일 때만 스냅샷을 갱신한다");
+  const commit = sliceFn("commitUserEditToChannelBase");
   ok(
     /nextSaveIsUserEdit = true;/.test(commit),
     "DSP 를 직접 만진 경로에서만 표시를 세운다",
   );
-  // 물려받기만 한 상태에서는 표시가 서지 않아야 한다.
-  const loaded = sliceInheritBlock("        channelBaseState =");
+  const loaded = sliceLoadBlock();
   ok(
     !/nextSaveIsUserEdit = true/.test(loaded),
     "공유값을 물려받는 자리에서는 표시를 세우지 않는다",
@@ -200,7 +199,7 @@ console.log("\n[F] 공유값을 적용한 것 자체는 다시 스냅샷을 갱�
 
 console.log("\n[13] 물려받은 상태는 '이 채널에서 직접 고름' 이 아니다");
 {
-  const loaded = sliceInheritBlock("        channelBaseState =");
+  const loaded = sliceLoadBlock();
   ok(
     /state\.userPickedPreset = false;/.test(loaded),
     "userPickedPreset 을 세우지 않는다",
@@ -210,35 +209,163 @@ console.log("\n[13] 물려받은 상태는 '이 채널에서 직접 고름' 이 
     "userPickedGain 도 세우지 않는다",
   );
   ok(
-    /inheritedSharedState = true;/.test(loaded),
-    "'물려받음' 은 런타임 표시로만 둔다",
+    /setMixerBaseSource\("shared"\);/.test(loaded),
+    "'물려받음' 을 런타임 표시로 남긴다",
   );
   ok(
-    !/inheritedSharedState/.test(
-      SRC.slice(
-        SRC.indexOf("  function serializeState(opts) {"),
-        SRC.indexOf("  function requestState("),
-      ),
-    ),
+    !/mixerBaseSource/.test(sliceFn("serializeState")),
     "그 표시를 저장하지 않는다",
   );
 }
 
-console.log("\n[10] 물려받기만 했다고 그 채널에 바로 저장하지 않는다");
+console.log("\n[Q/17] 물려받기만 한 채널에는 채널 저장값을 만들지 않는다");
 {
-  // ⚠ 공유를 한 번 켰다고 수백 채널의 저장소가 자동으로 생기면 안 된다.
-  const loaded = sliceInheritBlock("        if (state.userDisabled");
-  ok(!/saveState\(/.test(loaded), "적용 직후 저장을 부르지 않는다");
+  // ⚠ 실제 브라우저에서 깨졌던 지점이다. 믹서를 켜기만 해도 saveState 가 돌아
+  //   audioMixer:<채널> 이 생겼고, 다음 방문에 found=true 가 되어 공유값 대신
+  //   전역 기본값이 적용됐다.
+  const save = sliceFn("saveState");
+  ok(
+    /if \(mixerBaseSource === "shared" && !userEdit && !mustSaveAnyway\) \{\s*\n\s*return;/.test(
+      save,
+    ),
+    "직접 만지지 않았으면 저장을 건너뛴다",
+  );
+  ok(
+    /opts\?\.forcePresets === true \|\| state\.userDisabled === true/.test(
+      save,
+    ),
+    "커스텀 프리셋 편집과 opt-out 은 그래도 저장한다",
+  );
+  // 표시를 내리는 자리가 return 보다 앞에 있어야 다음 저장으로 새지 않는다.
+  // ⚠ 첫 return 은 채널id 확보 전 가드다. '건너뛰기' return 과 비교해야 한다.
+  ok(
+    save.indexOf("nextSaveIsUserEdit = false;") <
+      save.indexOf('if (mixerBaseSource === "shared"'),
+    "건너뛰어도 '사용자 조절' 표시를 확실히 내린다(다음 저장에 새지 않게)",
+  );
 }
 
-console.log("\n[12] 전역 기본값과의 우선순위");
+console.log("\n[B/19] 재방문에도 다시 물려받는다");
 {
-  const loaded = sliceInheritBlock("        if (state.userDisabled");
+  // 저장값이 없는 한 첫 진입이든 재방문이든 결과가 같아야 한다.
+  const first = resolveSource({
+    foundSaved: false,
+    shareEnabled: true,
+    snapshot: { gain: 1.5 },
+  });
+  const revisit = resolveSource({
+    foundSaved: false,
+    shareEnabled: true,
+    snapshot: { gain: 1.5 },
+  });
+  ok(first === "shared", `첫 진입 → shared (${first})`);
+  ok(revisit === "shared", `재방문 → shared (${revisit})`);
+  ok(!applyGlobals(revisit), "재방문에도 전역 기본값이 덮지 않는다");
+}
+
+console.log("\n[C~F/14] 공유 상태에서 전역값을 바꿔도 지금 소리는 그대로");
+{
+  const handler = SRC.slice(
+    SRC.indexOf('} else if (e.data.type === "globals-changed") {'),
+    SRC.indexOf("  // ── UI ─"),
+  );
   ok(
-    /if \(!locallyEditedState && !inheritedSharedState\) \{\s*\n\s*applyConfiguredGlobalDefaults\(\);/.test(
-      loaded,
+    /if \(!shouldApplyConfiguredGlobals\(\)\) return;/.test(handler),
+    "물려받은 채널에서는 전역 변경이 지금 값을 덮지 않는다",
+  );
+  // ⚠ 그 판정이 beginStateLoad 재로드보다 앞에 있어야 한다. 뒤에 있으면
+  //   전역을 끌 때 reload 가 먼저 돌아 shared→global→shared 로 튄다.
+  ok(
+    handler.indexOf("shouldApplyConfiguredGlobals") <
+      handler.indexOf("beginStateLoad"),
+    "전역 OFF 로 인한 재로드보다 먼저 막는다",
+  );
+  // 전역 프리셋과 전역 게인을 함께 막는다(반쪽 수정 금지).
+  ok(
+    !/globalDefaultPreset\.enabled\s*&&\s*applyGlobalDefaultPreset/.test(
+      handler,
     ),
-    "물려받았으면 전역 기본값으로 다시 덮지 않는다",
+    "프리셋만 막고 게인은 놔두는 반쪽 처리가 아니다",
+  );
+}
+
+console.log("\n[G/H/12] 공유를 끄면 전역·기본 정책으로 돌아간다");
+{
+  const handler = SRC.slice(
+    SRC.indexOf('if (e.data.type === "share-across-channels-changed") {'),
+    SRC.indexOf('if (e.data.type === "share-across-channels-changed") {') + 900,
+  );
+  ok(
+    /wasEnabled && !shareAcrossChannels && mixerBaseSource === "shared"/.test(
+      handler,
+    ),
+    "공유를 끈 순간 물려받은 채널만 다시 판단한다",
+  );
+  ok(/beginStateLoad\(currentMediaId\)/.test(handler), "다시 불러와 적용한다");
+  // 켜는 쪽은 지금 화면을 건드리지 않는다(§13 — 새 UX 를 만들지 않는다).
+  ok(
+    !/!wasEnabled && shareAcrossChannels/.test(handler),
+    "켜는 쪽은 보고 있는 채널을 바꾸지 않는다",
+  );
+  // 공유가 꺼지면 판정은 default 로 떨어져 전역 정책이 살아난다.
+  const off = resolveSource({
+    foundSaved: false,
+    shareEnabled: false,
+    snapshot: { gain: 1.5 },
+  });
+  ok(off === "default", `공유 OFF → default (${off})`);
+  ok(applyGlobals(off), "그때는 전역 기본값을 적용한다");
+}
+
+console.log("\n[I/15/16] 직접 수정하면 더는 물려받은 채널이 아니다");
+{
+  const save = sliceFn("saveState");
+  ok(
+    /setMixerBaseSource\("saved"\);/.test(save),
+    "직접 만지면 저장 채널로 전환한다",
+  );
+  // 전환 뒤에는 전역 정책이 기존 저장 채널과 똑같이 동작해야 한다.
+  ok(applyGlobals("saved"), "전환 뒤에는 전역 기본값 정책이 되살아난다");
+  // 공유가 꺼져 있어도 전환은 해야 한다.
+  const idx = save.indexOf('setMixerBaseSource("saved");');
+  const shareIdx = save.indexOf("if (shareAcrossChannels) {");
+  ok(
+    idx >= 0 && (shareIdx < 0 || idx < shareIdx),
+    "공유가 꺼져 있어도 전환한다",
+  );
+}
+
+console.log("\n[K/L/M/22/23] 기존 저장 채널의 전역 정책은 그대로");
+{
+  ok(applyGlobals("saved"), "저장된 채널에는 전역 기본값을 적용한다");
+  ok(
+    applyGlobals("default"),
+    "저장값도 공유값도 없으면 전역 기본값을 적용한다",
+  );
+  ok(!applyGlobals("shared"), "물려받은 채널에만 적용을 막는다");
+  // applyConfiguredGlobalDefaults 자체는 건드리지 않았는지(다른 수명주기에서도 쓴다).
+  const fn = sliceFn("applyConfiguredGlobalDefaults");
+  ok(
+    !/mixerBaseSource/.test(fn),
+    "전역 적용 함수 자체에는 공유 특례를 넣지 않았다(caller 에서 판단)",
+  );
+  ok(
+    /globalDefaultMode === "channel" && state\.userPickedPreset === true/.test(
+      fn,
+    ),
+    "기존 global/channel 정책이 그대로 남아 있다",
+  );
+}
+
+console.log("\n[26] 채널이 바뀌면 판정을 초기화한다");
+{
+  const loaded = SRC.slice(
+    SRC.indexOf("      const hasChannelSaved = e.data.found === true;"),
+    SRC.indexOf("      const saved = e.data.state;"),
+  );
+  ok(
+    /setMixerBaseSource\("default"\);/.test(loaded),
+    "매 로드마다 초기화해 이전 채널 판정이 새지 않는다",
   );
 }
 

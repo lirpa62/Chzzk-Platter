@@ -1022,10 +1022,29 @@
   //   전역 기본값보다 앞에 둔다.
   let shareAcrossChannels = false;
   let lastSharedSnapshot = null;
-  // 이 채널의 값이 '물려받은 것'인지. 물려받기만 한 상태는 사용자가 이 채널에서
-  // 직접 고른 것으로 취급하지 않는다(전역 기본값 정책과 엉키지 않게).
-  // ⚠ 런타임 전용 — 저장하지 않는다.
-  let inheritedSharedState = false;
+  // 지금 화면의 DSP 값이 '어디서 온 것'인지. 전역 기본값을 덮어써도 되는지 판단한다.
+  //   "saved"  이 채널에 저장된 값 → 기존 전역 global/channel 정책 그대로
+  //   "shared" 다른 채널에서 물려받음 → 전역 기본값이 덮지 않는다
+  //   "default" 저장값도 공유값도 없음 → 기존 전역 정책 그대로
+  // ⚠ 런타임 전용이다. chrome.storage 에 저장하지 않는다.
+  let mixerBaseSource = "default";
+
+  // 무엇을 기준으로 삼을지 한 곳에서만 정한다(여러 곳에 흩어지면 어긋난다).
+  function resolveMixerBaseSource({ foundSaved, shareEnabled, snapshot }) {
+    if (foundSaved) return "saved";
+    if (shareEnabled && snapshot) return "shared";
+    return "default";
+  }
+
+  // 전역 기본값(프리셋·게인)을 지금 값 위에 덮어도 되는가.
+  // ⚠ 물려받은 값일 때만 막는다. 저장된 채널의 기존 의미는 그대로 둔다.
+  function shouldApplyConfiguredGlobals() {
+    return mixerBaseSource !== "shared";
+  }
+
+  function setMixerBaseSource(next) {
+    mixerBaseSource = next;
+  }
   // 다음 saveState 가 '사용자 DSP 조절' 인지. commitUserEditToChannelBase 가 세운다.
   let nextSaveIsUserEdit = false;
   // 프리셋(내장/커스텀) 적용 후 값을 수정해 벗어난 상태인지. true면 head에
@@ -2598,22 +2617,40 @@
       return;
     }
     if (!stateLoaded) userEditedDuringLoad = true;
+    // ⚠ 채널 간 공유 스냅샷은 '사용자가 DSP 값을 실제로 조절했을 때' 만 갱신한다.
+    //   저장 복원·전역 기본값 적용·EQ 모드 이행·켜기/끄기 같은 저장은 제외한다.
+    //   자동 적용이 다시 스냅샷을 갱신하면 값이 순환하며 떠돈다.
+    //   ⚠ 표시는 어느 경로로 빠져나가든 반드시 여기서 내린다(다음 저장에 샌다).
+    const userEdit = nextSaveIsUserEdit || opts?.userEdit === true;
+    nextSaveIsUserEdit = false;
+    // ⚠ 물려받기만 한 채널에는 채널 저장값을 만들지 않는다. 켜기/끄기 같은 저장이
+    //   audioMixer:<채널> 을 만들어 버리면, 다음 방문에 '저장값 있음' 으로 잡혀
+    //   공유값 대신 전역 기본값이 적용된다(실제로 그래서 재방문이 깨졌다).
+    //   DSP 를 직접 만진 경우에만 이 채널의 값으로 확정한다.
+    // ⚠ 단 두 가지는 통과시킨다. 켜짐 여부와 무관하게 남겨야 하는 '의사'다.
+    //    - userDisabled: 이 채널에서 믹서를 쓰지 않겠다는 opt-out
+    //    - forcePresets: 커스텀 프리셋 추가/수정/삭제(전역 목록을 함께 저장)
+    const mustSaveAnyway =
+      opts?.forcePresets === true || state.userDisabled === true;
+    if (mixerBaseSource === "shared" && !userEdit && !mustSaveAnyway) {
+      return;
+    }
     const packet = {
       source: "cheese-audio-mixer",
       type: "save",
       channelId: currentMediaId,
       state: serializeState(opts),
     };
-    // ⚠ 채널 간 공유 스냅샷은 '사용자가 DSP 값을 실제로 조절했을 때' 만 갱신한다.
-    //   저장 복원·전역 기본값 적용·EQ 모드 이행·켜기/끄기 같은 저장은 제외한다.
-    //   자동 적용이 다시 스냅샷을 갱신하면 값이 순환하며 떠돈다.
-    const userEdit = nextSaveIsUserEdit || opts?.userEdit === true;
-    nextSaveIsUserEdit = false;
-    if (shareAcrossChannels && userEdit) {
-      packet.state.sharedSnapshot = buildSharedSnapshot();
-      lastSharedSnapshot = packet.state.sharedSnapshot;
-      // 이 채널에서 직접 만졌으니 더는 '물려받기만 한 상태'가 아니다.
-      inheritedSharedState = false;
+    if (userEdit) {
+      // ⚠ 직접 만진 순간부터 이 채널은 더 이상 '물려받은 채널' 이 아니다. 이 저장이
+      //   곧 채널 저장값이 되므로, 이후 전역 기본값 정책도 기존 저장 채널과 똑같이
+      //   동작해야 한다(공유 특례가 계속 붙어 있으면 안 된다).
+      //   공유가 꺼져 있어도 이 전환은 해야 한다.
+      setMixerBaseSource("saved");
+      if (shareAcrossChannels) {
+        packet.state.sharedSnapshot = buildSharedSnapshot();
+        lastSharedSnapshot = packet.state.sharedSnapshot;
+      }
     }
     pendingStateSave = packet;
     // 슬라이더 input마다 storage.set을 호출하면 Firefox에서 저장 알림과 IPC가 폭주한다.
@@ -2802,7 +2839,16 @@
     // 설정에서 채널 간 공유를 켜고 끈 경우. 지금 화면은 그대로 두고 '다음 새 채널'
     // 부터 달라진다(이미 적용된 값을 되돌리면 오히려 놀란다).
     if (e.data.type === "share-across-channels-changed") {
+      const wasEnabled = shareAcrossChannels;
       shareAcrossChannels = e.data.enabled === true;
+      // ⚠ 공유를 끄면 '물려받은 값' 은 더 이상 근거가 없다. 저장값이 없는 채널이니
+      //   전역 기본값(또는 기본 상태)으로 돌려놓는다. 이건 전역값을 바꾸는 것과
+      //   의미가 다르다 — 기준 자체가 사라진 경우다.
+      //   반대로 켜는 쪽은 지금 화면을 건드리지 않는다. 다음 채널부터 적용된다
+      //   (보고 있는 채널의 소리가 갑자기 바뀌면 놀란다).
+      if (wasEnabled && !shareAcrossChannels && mixerBaseSource === "shared") {
+        if (currentMediaId) beginStateLoad(currentMediaId);
+      }
       return;
     }
     if (
@@ -2822,7 +2868,8 @@
       //   객체라 구분할 수 없어 브리지가 따로 알려 준다. 예전 브리지(플래그 없음)
       //   에서는 undefined 가 오는데, 그때는 공유를 적용하지 않는다(안전한 쪽).
       const hasChannelSaved = e.data.found === true;
-      inheritedSharedState = false;
+      // 이전 채널의 판정이 다음 채널로 새지 않게 매 로드마다 초기화한다.
+      setMixerBaseSource("default");
       const saved = e.data.state;
       if (saved && typeof saved === "object") {
         const locallyEditedState = userEditedDuringLoad
@@ -2905,26 +2952,37 @@
         //    - 이 채널에 저장값이 있다(사용자가 맞춰 둔 것을 덮으면 안 된다)
         //    - 로드를 기다리는 사이 사용자가 이미 만졌다(그 조작이 우선)
         //    - 공유가 꺼져 있거나 물려줄 값이 없다
-        const inherit =
-          shareAcrossChannels &&
-          !hasChannelSaved &&
+        // 무엇을 기준으로 삼을지 여기서 한 번만 정한다.
+        //   저장값 > 공유 스냅샷 > 전역 기본값 > 기본 상태
+        // ⚠ '첫 진입에만' 물려받는 것이 아니다. 저장값이 없는 한 재방문에도 다시
+        //   물려받는다(그 사이 공유값이 바뀌었으면 최신 값을 받는다). 예전에는
+        //   재방문 때 전역 기본값이 공유값을 덮었다.
+        const nextSource = resolveMixerBaseSource({
+          foundSaved: hasChannelSaved,
+          shareEnabled: shareAcrossChannels,
+          snapshot: lastSharedSnapshot,
+        });
+        // 로드를 기다리는 사이 사용자가 이미 만졌으면 그 조작이 최우선이다.
+        if (
           !locallyEditedState &&
-          !!lastSharedSnapshot;
-        if (inherit && applySharedSnapshot(lastSharedSnapshot)) {
+          nextSource === "shared" &&
+          applySharedSnapshot(lastSharedSnapshot)
+        ) {
           // 물려받기만 한 상태다. 이 채널에서 '직접 골랐다'로 세우지 않는다
           // (전역 기본값의 '채널 우선' 정책과 엉키지 않게).
           state.userPickedPreset = false;
           state.userPickedGain = false;
-          inheritedSharedState = true;
+          setMixerBaseSource("shared");
+        } else {
+          setMixerBaseSource(hasChannelSaved ? "saved" : "default");
         }
         // 채널의 '원래 선택'(전역 적용 전)을 보관 — 전역 기본값이 켜진 동안 채널
         // 저장이 전역값으로 덮어써지지 않게 하고, 전역 해제 시 이 값으로 복원한다.
         channelBaseState = snapshotChannelPreset();
         // 프리셋과 게인의 전역 정책을 각각 적용한다. 로드 응답을 기다리는 동안 사용자가
         // 값을 바꿨다면 그 조작이 우선이며, 저장 응답으로 다시 덮어쓰지 않는다.
-        // ⚠ 공유값을 물려받았으면 전역 기본값으로 다시 덮지 않는다. 공유를 켠 것은
-        //   '최근에 내가 맞춘 값을 쓰겠다'는 더 구체적인 의사이기 때문이다.
-        if (!locallyEditedState && !inheritedSharedState) {
+        // ⚠ 공유값을 물려받았으면 전역 기본값으로 덮지 않는다(프리셋·게인 모두).
+        if (!locallyEditedState && shouldApplyConfiguredGlobals()) {
           applyConfiguredGlobalDefaults();
         }
         // userDisabled 채널인데 로드 전 자동 활성화가 먼저 켰을 수 있다(레이스).
@@ -2958,6 +3016,11 @@
       }
       globalDefaultPreset = normalizeGlobalDefaultPreset(next.globalDefault);
       globalGainDefault = normalizeGlobalGainDefault(next.globalGainDefault);
+      // ⚠ 공유값을 물려받은 채널이면 전역값을 바꿔도 지금 소리를 건드리지 않는다.
+      //   예전에는 전역 프리셋을 만질 때마다 공유값이 전역값으로 바뀌었다가, 전역을
+      //   끄면 다시 공유값으로 돌아왔다(shared → global → shared 로 튐).
+      //   설정값 자체는 위에서 이미 갱신했으니, 다음 채널부터 제대로 반영된다.
+      if (!shouldApplyConfiguredGlobals()) return;
       // 전역값을 끄면 전역 적용 전 채널 저장값부터 다시 불러온 뒤, 아직 켜진 다른
       // 전역 설정만 재적용한다. 현재 화면의 전역값을 채널값으로 오인하는 것을 막는다.
       if (
