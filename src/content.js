@@ -11966,6 +11966,32 @@
     );
   }
 
+  // 검색어를 칠 때 플레이어 단축키가 가로채지 않게 한다.
+  //
+  // ⚠ 치지직은 f(전체화면)·스페이스(재생/정지) 같은 키를 문서 단위로 처리하면서
+  //   '지금 글을 쓰는 중인지' 를 보지 않는다. 그래서 검색창에 'f' 나 띄어쓰기를
+  //   치면 글자는 안 들어가고 전체화면이 켜졌다.
+  //   입력칸에서 난 키 이벤트는 위로 올리지 않는다. 오디오 믹서 패널이 같은
+  //   이유로 이미 쓰고 있는 방식이다(audioMixer.js 의 stopMixerEditableShortcutLeak).
+  //   ⚠ 막는 것은 전파뿐이다. preventDefault 는 하지 않는다 — 그러면 글자가
+  //     입력되지 않는다.
+  //   ⚠ Enter(바로 검색)·Escape(팝오버 닫기)는 우리 처리가 문서 쪽에 걸려 있다.
+  //     여기서 끊으면 그 둘이 죽으므로 통과시킨다. 플레이어 단축키에는 없는
+  //     키라 내보내도 문제가 없다.
+  const VOD_SEARCH_PASS_KEYS = new Set(["Enter", "Escape", "Tab"]);
+  function stopVodSearchShortcutLeak(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (!target.closest(".cheese-vod-search-input")) return;
+    if (VOD_SEARCH_PASS_KEYS.has(event.key)) return;
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  }
+  for (const type of ["keydown", "keyup", "keypress"]) {
+    // 캡처 단계에서 잡아야 문서에 걸린 단축키 처리보다 먼저 끊을 수 있다.
+    document.addEventListener(type, stopVodSearchShortcutLeak, true);
+  }
+
   // 클릭 직후 짧은 동안 입력칸의 포커스를 지킨다.
   //
   // 치지직 플레이어는 자기 영역이 클릭되면 단축키를 받으려고 플레이어 루트로

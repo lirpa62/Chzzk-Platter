@@ -35,8 +35,18 @@ function focusListenerSource() {
   //   통과한다. 실제 증상은 click 에서 포커스를 빼앗기는 것이었다.
   // ⚠ 헬퍼를 빠뜨리면 리스너 안에서 ReferenceError 가 나고, 복구가 조용히
   //   동작하지 않은 채 '실패' 로만 보인다(실제로 그렇게 헤맸다).
+  // 단축키 가로채기 방지도 같은 덩어리에 들어가야 한다.
+  // ⚠ 선언 순서대로 잘라야 한다. 가장 앞선 것에서 시작하지 않으면 뒤의 것만
+  //   실리고 앞의 것이 빠져, 실행 중 ReferenceError 로 조용히 죽는다.
   const at = SRC.indexOf("  // 사용자가 스스로 옮겨 간 '글을 쓰는 곳' 인지.");
   if (at < 0) throw Error("isTextEntryElement 를 찾지 못했다");
+  for (const name of [
+    "  function isTextEntryElement(el) {",
+    "  const VOD_SEARCH_PASS_KEYS = new Set(",
+    "  function stopVodSearchShortcutLeak(event) {",
+  ]) {
+    if (SRC.indexOf(name, at) < 0) throw Error(`${name.trim()} 을 찾지 못했다`);
+  }
   if (SRC.indexOf("  function watchVodSearchFocus(input) {", at) < 0) {
     throw Error("watchVodSearchFocus 를 찾지 못했다");
   }
@@ -601,6 +611,99 @@ const ok = (c, l) => {
         `${label} → 클릭 직후 바로 입력된다 (${JSON.stringify(typed)})`,
       );
     }
+  }
+
+  console.log("\n[단축키] 검색창에서는 플레이어 단축키가 가로채지 않는다");
+  {
+    // ⚠ 증상: 검색창에 'f' 나 띄어쓰기를 치면 글자는 안 들어가고 전체화면이
+    //   켜졌다. 치지직이 단축키를 문서 단위로 처리하면서 '지금 글을 쓰는 중인지'
+    //   를 보지 않기 때문이다.
+    //   ⚠ 진짜 키 이벤트를 보내야 한다. value 에 글자를 넣는 방식으로는 재현되지
+    //     않는다(단축키 처리는 키 이벤트에만 반응한다).
+    const box = await ev(`(()=>{
+      document.body.innerHTML=
+        '<div id="cheese-player">'+
+        '<div class="cheese-search-comment-timestamp-panel cheese-chat-peak-popover" '+
+        'style="width:320px;position:static">'+
+        '<div class="cheese-search-comment-panel-head"></div>'+
+        '<div class="cheese-peak-body"></div></div></div>';
+      window.panel=document.querySelector('.cheese-chat-peak-popover');
+      vodChatSearchState.messages=[{t:0,text:'f 띄어쓰기'}];
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchState.truncated='';
+      vodChatSearchView.query=''; vodChatSearchView.result=null;
+      vodChatSearchView.lastQuery=null;
+      renderVodChatSearchBody(panel);
+      // 치지직처럼: 문서에서 단축키를 처리하고 기본 동작을 막는다.
+      window.shortcutSaw=[];
+      window.__sc=(e)=>{
+        window.shortcutSaw.push(e.key);
+        if(e.key==='f'||e.key===' ') e.preventDefault();};
+      document.addEventListener('keydown',window.__sc);
+      const i=panel.querySelector('.cheese-vod-search-input');
+      i.focus();
+      const r=i.getBoundingClientRect();
+      return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()`);
+    void box;
+    for (const k of [
+      { key: "f", code: "KeyF", vk: 70, text: "f" },
+      { key: " ", code: "Space", vk: 32, text: " " },
+    ]) {
+      await call(
+        "Input.dispatchKeyEvent",
+        {
+          type: "keyDown",
+          key: k.key,
+          code: k.code,
+          windowsVirtualKeyCode: k.vk,
+          text: k.text,
+        },
+        sessionId,
+      );
+      await call(
+        "Input.dispatchKeyEvent",
+        {
+          type: "keyUp",
+          key: k.key,
+          code: k.code,
+          windowsVirtualKeyCode: k.vk,
+        },
+        sessionId,
+      );
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const r = await ev(`(()=>{
+      document.removeEventListener('keydown',window.__sc);
+      return {value:panel.querySelector('.cheese-vod-search-input').value,
+        saw:window.shortcutSaw.slice()};})()`);
+    ok(
+      r.value === "f ",
+      `단축키 글자가 그대로 입력된다 (${JSON.stringify(r.value)})`,
+    );
+    ok(
+      r.saw.length === 0,
+      `플레이어 단축키 처리까지 올라가지 않는다 (${r.saw.join(",") || "없음"})`,
+    );
+  }
+
+  console.log("\n[단축키] Enter·Escape 는 막지 않는다");
+  {
+    // ⚠ Enter(바로 검색)·Escape(팝오버 닫기)는 우리 처리가 문서 쪽에 있다.
+    //   단축키를 끊느라 이 둘까지 막으면 검색·닫기가 죽는다.
+    const r = await ev(`(()=>{
+      const i=panel.querySelector('.cheese-vod-search-input');
+      i.focus();
+      const seen=[];
+      const on=(e)=>seen.push(e.key);
+      document.addEventListener('keydown',on);
+      for(const key of ['Enter','Escape','f']){
+        i.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+      }
+      document.removeEventListener('keydown',on);
+      return seen;})()`);
+    ok(r.includes("Enter"), "Enter 는 문서까지 전달된다(바로 검색)");
+    ok(r.includes("Escape"), "Escape 는 문서까지 전달된다(팝오버 닫기)");
+    ok(!r.includes("f"), "그 밖의 키는 막는다");
   }
 
   console.log("\n[한글 IME] 조합 중에 결과가 갱신돼도 자모가 합쳐진다");
