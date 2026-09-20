@@ -489,6 +489,71 @@ const ok = (c, l) => {
     );
   }
 
+  console.log("\n[고정] 입력칸·개수 문구는 스크롤해도 붙어 있다");
+  {
+    const r = await ev(`(()=>{
+      const head=panel.querySelector('.cheese-vod-search-head');
+      const cs=head?getComputedStyle(head):null;
+      const input=panel.querySelector('.cheese-vod-search-input');
+      const status=panel.querySelector('.cheese-vod-search-status');
+      return {has:!!head, position:cs?cs.position:'', top:cs?cs.top:'',
+        gap:cs?cs.gap:'',
+        // ⚠ 둘 다 머리말 '안' 에 있어야 같이 붙어 있는다.
+        inputInHead:!!head&&head.contains(input),
+        statusInHead:!!head&&head.contains(status),
+        // 결과 목록은 머리말 바깥(다시 그려지는 쪽)이어야 한다.
+        listOutside:!panel.querySelector('.cheese-vod-search-head .cheese-vod-search-list')};})()`);
+    ok(r.has, "머리말 덩어리가 있다");
+    ok(r.position === "sticky", `sticky 로 붙어 있다 (${r.position})`);
+    // ⚠ 0 이 아니라 음수다. 스크롤 상자의 위쪽 padding 만큼 끌어올려 덮지 않으면
+    //   줄이 머리말 위로 비어져 나온다(실측으로 확인했다).
+    ok(r.top === "-6px", `위 padding 까지 덮으며 붙는다 (${r.top})`);
+    ok(r.inputInHead, "입력칸이 머리말 안에 있다");
+    ok(r.statusInHead, "개수 문구도 머리말 안에 있다");
+    ok(r.listOutside, "결과 목록은 머리말 바깥이다");
+    ok(
+      r.gap && r.gap !== "normal",
+      `입력칸과 문구 사이가 떨어져 있다 (${r.gap})`,
+    );
+  }
+
+  console.log("\n[맨 위로] 한참 내려가야 보이고, 누르면 올라간다");
+  {
+    const r = await ev(`(()=>{
+      const list=[];
+      for(let i=0;i<600;i+=1) list.push({t:i*1000,text:'둥그레 '+i});
+      vodChatSearchState.messages=list;
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchView.query='둥그레'; vodChatSearchView.lastQuery='둥그레';
+      vodChatSearchView.shown=200;
+      vodChatSearchView.result=searchVodChatMessages(list,'둥그레',200);
+      renderVodChatSearchBody(panel);
+      const fab=panel.querySelector('[data-vod-search-top]');
+      return {has:!!fab, hiddenAtFirst:fab?.hidden,
+        label:fab?.getAttribute('aria-label'),
+        icon:!!fab?.querySelector('svg.lucide-arrow-up'),
+        type:fab?.type};})()`);
+    ok(r.has, "맨 위로 버튼이 있다");
+    ok(r.hiddenAtFirst === true, "처음에는 감춰 둔다");
+    ok(r.label === "맨 위로", `aria-label (${r.label})`);
+    ok(r.icon, "lucide arrow-up 아이콘을 쓴다");
+    ok(r.type === "button", "실제 button 이다");
+    // 스크롤 리스너가 실제로 켜고 끄는지는 소스로 확인한다.
+    const scroll = SRC.slice(
+      SRC.indexOf('    el.addEventListener(\n      "scroll",'),
+      SRC.indexOf('    el.addEventListener("input"'),
+    );
+    ok(
+      /top\.hidden = box\.scrollTop < \d+/.test(scroll),
+      "한참 내려가야 보인다",
+    );
+    const click = SRC.slice(
+      SRC.indexOf('if (target.closest("[data-vod-search-top]"))'),
+      SRC.indexOf('if (target.closest("[data-vod-search-top]")') + 300,
+    );
+    ok(/scrollTo\(\{ top: 0/.test(click), "누르면 맨 위로 올린다");
+  }
+
   console.log("\n[M] 200건 초과");
   {
     const r = await ev(`(()=>{
@@ -508,7 +573,6 @@ const ok = (c, l) => {
       r.status.includes("200개 표시"),
       `한 번에 200개까지만 그린다 (${r.status})`,
     );
-    ok(r.status.includes("스크롤하면 더"), "더 볼 수 있다는 것을 알린다");
   }
 
   console.log("\n[결과 개수] 200건 이하면 제한 문구를 붙이지 않는다");

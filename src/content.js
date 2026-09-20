@@ -10447,6 +10447,10 @@
       wrap = document.createElement("div");
       wrap.className = "cheese-vod-search";
 
+      // 입력칸과 개수 문구는 스크롤해도 따라오게 한 덩어리로 묶는다.
+      const head = document.createElement("div");
+      head.className = "cheese-vod-search-head";
+
       const form = document.createElement("div");
       form.className = "cheese-vod-search-bar";
       const input = document.createElement("input");
@@ -10456,12 +10460,35 @@
       input.className = "cheese-vod-search-input";
       input.value = vodChatSearchView.query;
       form.appendChild(input);
-      wrap.appendChild(form);
+      head.appendChild(form);
 
-      // 결과·안내는 전부 이 안에서만 바뀐다.
+      // 개수·안내 문구. ⚠ 결과 목록과 달리 여기는 지우고 다시 만들지 않는다
+      //   (sticky 로 붙어 있어야 해서 자리를 옮기면 안 된다).
+      const status = document.createElement("p");
+      status.className = "cheese-vod-search-status";
+      head.appendChild(status);
+      wrap.appendChild(head);
+
+      // 결과 목록은 전부 이 안에서만 바뀐다.
       const out = document.createElement("div");
       out.className = "cheese-vod-search-output";
       wrap.appendChild(out);
+
+      // 맨 위로. 한참 내려간 뒤에만 보인다(아래 scroll 에서 켠다).
+      const top = document.createElement("button");
+      top.type = "button";
+      top.className = "cheese-vod-search-top";
+      top.dataset.vodSearchTop = "1";
+      top.setAttribute("aria-label", "맨 위로");
+      top.title = "맨 위로";
+      top.hidden = true;
+      // lucide arrow-up.
+      top.innerHTML =
+        `<svg class="lucide lucide-arrow-up" width="18" height="18" viewBox="0 0 24 24" ` +
+        `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+        `stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>`;
+      wrap.appendChild(top);
       body.appendChild(wrap);
     }
 
@@ -10491,7 +10518,7 @@
     const total = Number(result?.total) || 0;
     const shown = result?.rows?.length || 0;
     return total > shown
-      ? `검색 결과 ${total.toLocaleString()}개 · ${shown.toLocaleString()}개 표시 (스크롤하면 더 봅니다)`
+      ? `검색 결과 ${total.toLocaleString()}개 · ${shown.toLocaleString()}개 표시`
       : `검색 결과 ${total.toLocaleString()}개`;
   }
 
@@ -10518,12 +10545,16 @@
     if (!out) return;
     out.textContent = "";
 
-    const status = document.createElement("p");
+    // ⚠ 개수 문구는 머리말(sticky)에 붙어 있다. 여기서 새로 만들지 않고 글자만
+    //   갈아 끼운다 — 새로 만들면 스크롤을 따라오지 않는다.
+    const status =
+      out.parentElement?.querySelector(".cheese-vod-search-status") ||
+      document.createElement("p");
     status.className = "cheese-vod-search-status";
+    status.textContent = "";
 
     if (failed) {
       status.textContent = "채팅을 불러오지 못했습니다. 다시 시도해 주세요.";
-      out.appendChild(status);
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "cheese-vod-search-retry";
@@ -10539,7 +10570,6 @@
       status.textContent = busy
         ? `채팅을 준비하는 중입니다… ${pct}%`
         : "채팅 데이터를 확인하는 중입니다…";
-      out.appendChild(status);
       // ⚠ 활성도 그래프는 집계만 저장해 두므로 다시 열면 즉시 뜨지만, 검색은
       //   채팅 원문이 있어야 한다. 원문은 저장하지 않는 정책이라(닉네임·UID 를
       //   남기지 않기 위해서다) 탭을 새로 열 때마다 한 번은 받아야 한다.
@@ -10564,19 +10594,16 @@
     const query = vodChatSearchView.query.trim();
     if (!query) {
       status.textContent = "현재 다시보기의 채팅 내용에서 키워드를 찾습니다.";
-      out.appendChild(status);
       return;
     }
     if (!result) return;
     if (!result.total) {
       // ⚠ 검색어를 HTML 로 합치지 않는다. 문자열로만 넣는다.
       status.textContent = `'${query}'와 일치하는 채팅이 없습니다.`;
-      out.appendChild(status);
       return;
     }
 
     status.textContent = vodChatSearchResultLabel(result);
-    out.appendChild(status);
 
     const list = document.createElement("ul");
     list.className = "cheese-vod-search-list";
@@ -12005,6 +12032,11 @@
         renderChatPeakBody(el);
         return;
       }
+      if (target.closest("[data-vod-search-top]")) {
+        const box = el.querySelector(".cheese-peak-body");
+        box?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
       if (target.closest("[data-vod-search-retry]")) {
         // ⚠ 검색 index 만 다시 시도한다. 활성도·방장 채팅·제목 기록은 건드리지 않는다.
         vodChatSearchState.failed = false;
@@ -12026,7 +12058,6 @@
       }
     });
 
-    // 검색어 입력. 100k 에서도 10ms 안쪽이라 워커는 쓰지 않고 debounce 만 둔다.
     // 바닥 가까이 내리면 다음 묶음을 이어 붙인다(무한 스크롤).
     // ⚠ scroll 은 아주 자주 오므로 계산을 최소로 한다. 더 붙일 것이 없으면
     //   곧바로 빠져나간다.
@@ -12037,12 +12068,17 @@
         const box = event.target;
         if (!(box instanceof Element)) return;
         if (!box.classList.contains("cheese-peak-body")) return;
+        // 한참 내려왔으면 '맨 위로' 를 보여 준다.
+        const top = el.querySelector("[data-vod-search-top]");
+        if (top) top.hidden = box.scrollTop < 400;
         const rest = box.scrollHeight - box.scrollTop - box.clientHeight;
         if (rest > 120) return; // 아직 바닥이 멀다
         appendMoreVodSearchRows(el);
       },
       true,
     );
+
+    // 검색어 입력. 100k 에서도 10ms 안쪽이라 워커는 쓰지 않고 debounce 만 둔다.
 
     el.addEventListener("input", (event) => {
       const input = event.target;

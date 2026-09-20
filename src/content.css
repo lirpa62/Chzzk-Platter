@@ -15687,6 +15687,24 @@ html.theme_dark .cheese-memo-window {
   flex-direction: column;
   gap: 8px;
 }
+/* 입력칸과 개수 문구는 스크롤해도 위에 붙어 있는다.
+   ⚠ 스크롤 상자는 .cheese-peak-body 다. 그 padding 안쪽에 붙이므로 top 은 0,
+   대신 좌우로 넓혀 뒤 내용이 비쳐 보이지 않게 배경을 깐다. */
+.cheese-vod-search-head {
+  /* ⚠ 반투명이면 뒤로 지나가는 줄이 비쳐 보인다. 불투명하게 덮는다. */
+  background: rgb(31, 39, 56);
+  display: flex;
+  flex-direction: column;
+  /* 입력칸과 개수 문구 사이 간격 */
+  gap: 7px;
+  /* 스크롤 상자의 padding(6px 8px) 바깥까지 덮어 좌우로 새지 않게 한다.
+     위쪽도 같이 덮어야 줄이 머리말 '위' 로 비어져 나오지 않는다. */
+  margin: -6px -8px 0;
+  padding: 6px 8px 8px;
+  position: sticky;
+  top: -6px;
+  z-index: 3;
+}
 .cheese-vod-search-bar {
   display: flex;
   position: relative;
@@ -15735,6 +15753,38 @@ html.theme_dark .cheese-memo-window {
   cursor: default;
   opacity: 0.5;
 }
+/* 맨 위로. 결과를 한참 내렸을 때만 보인다.
+   ⚠ 스크롤 상자(.cheese-peak-body) 안에서 같이 밀리면 안 되므로 sticky 로
+   바닥에 붙여 두고, 오른쪽으로 밀어 목록을 가리지 않게 한다. */
+.cheese-vod-search-top {
+  align-items: center;
+  align-self: flex-end;
+  background: rgb(39 48 66 / 96%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  bottom: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  margin-top: -34px;
+  position: sticky;
+  width: 34px;
+  z-index: 4;
+}
+.cheese-vod-search-top:hover {
+  background: rgb(52 63 86 / 98%);
+  color: #fff;
+}
+.cheese-vod-search-top[hidden] {
+  display: none;
+}
+.cheese-vod-search-top > svg {
+  flex: 0 0 auto;
+}
+
 /* 결과 영역. 검색할 때 이 안만 갈아 끼운다(입력칸은 그대로 둔다). */
 .cheese-vod-search-output {
   display: flex;
@@ -15748,6 +15798,10 @@ html.theme_dark .cheese-memo-window {
   color: rgba(255, 255, 255, 0.66);
   font-size: 12px;
   margin: 0;
+}
+/* 문구가 비어 있으면(준비 전 등) 자리를 차지하지 않는다. */
+.cheese-vod-search-status:empty {
+  display: none;
 }
 .cheese-vod-search-notice {
   color: #ffd479;
