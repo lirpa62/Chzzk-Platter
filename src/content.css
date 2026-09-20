@@ -15813,6 +15813,14 @@ html.theme_dark .cheese-memo-window {
   overflow: hidden;
   word-break: break-word;
 }
+/* 채팅 이모티콘. 글자 사이에 자연스럽게 앉도록 줄 높이에 맞춘다. */
+.cheese-vod-search-emoji {
+  display: inline-block;
+  height: 20px;
+  object-fit: contain;
+  vertical-align: middle;
+  width: 20px;
+}
 .cheese-vod-search-text mark {
   background: rgba(0, 230, 147, 0.26);
   border-radius: 3px;

@@ -10565,7 +10565,7 @@
       button.appendChild(time);
       const text = document.createElement("span");
       text.className = "cheese-vod-search-text";
-      appendVodSearchHighlighted(text, String(row.text || ""), needle);
+      appendVodSearchText(text, String(row.text || ""), needle);
       text.title = String(row.text || "");
       button.appendChild(text);
       li.appendChild(button);
@@ -10577,6 +10577,46 @@
   // 검색어가 들어간 자리를 <mark> 로 감싼다.
   // ⚠ 원문과 검색어를 innerHTML 로 합치지 않는다. 텍스트 노드와 mark 요소를
   //   DOM 으로 만들어 붙인다(원문에 든 <script> 등이 절대 살아나지 않는다).
+  // 본문을 {:키:} 조각과 글자 조각으로 나눠 붙인다.
+  //
+  // ⚠ 이모티콘은 글자가 아니라 그림으로 보여 준다. 치지직 채팅과 같은 인상이고,
+  //   {:d_42:} 같은 날것이 그대로 보이면 읽을 수 없다.
+  //   그림 주소는 활성도 수집이 이미 만들어 둔 사전(chatGraphState.emojiUrls)을
+  //   쓴다. 검색용으로 따로 저장하지 않는다 — 원문에 닉네임·UID 를 담지 않는
+  //   정책과 같은 이유다. 사전이 없으면 이름만 글자로 보여 준다(기존과 같다).
+  function appendVodSearchText(host, text, needle) {
+    const map = chatGraphState.emojiUrls;
+    const pattern = /\{:([^:}]+):\}/g;
+    let last = 0;
+    let match = null;
+    while ((match = pattern.exec(text)) !== null) {
+      const before = text.slice(last, match.index);
+      if (before) appendVodSearchHighlighted(host, before, needle);
+      const key = String(match[1] || "").trim();
+      const url = map && typeof map === "object" ? map[key] : "";
+      if (typeof url === "string" && RECAP_EMOJI_HOST.test(url)) {
+        const img = document.createElement("img");
+        img.className = "cheese-vod-search-emoji";
+        img.src = url;
+        img.alt = key;
+        img.title = key;
+        img.width = 20;
+        img.height = 20;
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.draggable = false;
+        host.appendChild(img);
+      } else {
+        // 주소를 모르면 이름만. ⚠ {:키:} 껍데기는 벗긴다.
+        appendVodSearchHighlighted(host, key, needle);
+      }
+      last = pattern.lastIndex;
+    }
+    if (last < text.length) {
+      appendVodSearchHighlighted(host, text.slice(last), needle);
+    }
+  }
+
   function appendVodSearchHighlighted(host, text, needle) {
     if (!needle) {
       host.appendChild(document.createTextNode(text));
@@ -10819,10 +10859,13 @@
     const titleChangeTracker =
       CHAT_RECAP_STORE_API.createVodTitleChangeTracker();
     // 검색이 이 영상의 원문을 기다리고 있으면 같은 순회에서 함께 모은다.
-    const searchMessages =
-      vodChatSearchState.collecting && vodChatSearchState.videoNo === videoNo
-        ? []
-        : null;
+    // 원문은 순회 도중에는 늘 모아 둔다. 어차피 한 번 훑는 김에 담는 것이라
+    // 추가 요청이 없고, 활성도를 먼저 수집한 사람이 검색을 열 때 같은 영상을 두 번
+    // 받지 않아도 된다.
+    // ⚠ 대신 순회가 끝나는 시점에 검색이 원하지 않으면 그 자리에서 버린다.
+    //   계속 들고 있으면 검색을 쓰지 않는 사람도 10만 건당 약 10MB 를 떠안는다
+    //   (실측). 아래 hand-off 를 참고.
+    const searchMessages = [];
     // 상한에 걸려 원문을 더 담지 못한 순간을 기록한다. 순회 자체는 활성도를 위해
     // 끝까지 돌지만, 검색 index 는 그 지점까지만이라는 사실을 화면에 알려야 한다.
     let searchTruncated = "";
@@ -10874,14 +10917,12 @@
         else if (code === CHAT_TYPE_SUBSCRIPTION) bin.subscription += 1;
         // 검색을 열어 둔 경우에만 원문을 모은다(같은 순회를 재사용한다).
         // ⚠ 여기서도 닉네임·UID 는 담지 않는다. 시각과 본문뿐이다.
-        if (searchMessages) {
-          if (searchMessages.length >= VOD_CHAT_SEARCH_MAX_MESSAGES) {
-            // ⚠ 조용히 끊고 '완료' 로 넘기면 사용자는 전체를 검색했다고 믿는다.
-            searchTruncated = "message";
-          } else {
-            const text = typeof m?.content === "string" ? m.content : "";
-            if (text) searchMessages.push({ t: Math.round(at), text });
-          }
+        if (searchMessages.length >= VOD_CHAT_SEARCH_MAX_MESSAGES) {
+          // ⚠ 조용히 끊고 '완료' 로 넘기면 사용자는 전체를 검색했다고 믿는다.
+          searchTruncated = "message";
+        } else {
+          const text = typeof m?.content === "string" ? m.content : "";
+          if (text) searchMessages.push({ t: Math.round(at), text });
         }
         // UID·닉네임은 넘기지 않는다. 일반 사용자 메시지인지 여부만 확인해
         // 기존 활성도 수집의 같은 순회에서 통계에 더한다.
@@ -10911,21 +10952,27 @@
       getCurrentVideoNo() === videoNo;
     // 검색용 원문은 끝까지 받았을 때만 넘긴다. 중간까지만 모은 것을 검색에 쓰면
     // '찾는 채팅이 없다' 와 '아직 안 받았다' 를 구분할 수 없다.
-    if (searchMessages && vodChatSearchState.videoNo === videoNo) {
-      // 페이지 상한에 걸린 경우는 '실패' 가 아니다. 받은 데까지는 정확하므로
-      // 검색을 허용하되, 어디까지 받았는지 화면에 밝힌다.
-      const usable = complete || searchTruncated === "page";
+    // 페이지 상한에 걸린 경우는 '실패' 가 아니다. 받은 데까지는 정확하므로
+    // 검색을 허용하되, 어디까지 받았는지 화면에 밝힌다.
+    const usable = complete || searchTruncated === "page";
+    // 이 영상 것이면 넘긴다. 검색을 열어 두지 않았어도 넘겨 둔다 — 나중에 검색을
+    // 열 때 다시 받지 않기 위해서다(활성도 먼저 → 검색이 그 결과를 쓴다).
+    if (vodChatSearchState.videoNo === videoNo || !vodChatSearchState.videoNo) {
       if (usable) {
+        vodChatSearchState.videoNo = videoNo;
         vodChatSearchState.messages = searchMessages;
         vodChatSearchState.failed = false;
         vodChatSearchState.truncated = searchTruncated;
-      } else {
+      } else if (vodChatSearchState.collecting) {
+        // 검색이 기다리고 있을 때만 실패로 알린다.
         vodChatSearchState.failed = true;
         vodChatSearchState.truncated = "";
       }
-      vodChatSearchState.collecting = false;
-      vodChatSearchState.loading = false;
-      vodChatSearchState.progress = usable ? 1 : vodChatSearchState.progress;
+      if (vodChatSearchState.collecting) {
+        vodChatSearchState.collecting = false;
+        vodChatSearchState.loading = false;
+        vodChatSearchState.progress = usable ? 1 : vodChatSearchState.progress;
+      }
     }
     if (complete) {
       try {

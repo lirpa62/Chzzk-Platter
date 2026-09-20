@@ -67,6 +67,15 @@ function focusListenerSource() {
   return src;
 }
 
+// 이모티콘 이미지로 인정하는 호스트 규칙을 원본에서 떼어 온다.
+function emojiHostSource() {
+  const at = SRC.indexOf("  const RECAP_EMOJI_HOST =");
+  if (at < 0) throw Error("RECAP_EMOJI_HOST 를 찾지 못했다");
+  const end = SRC.indexOf(";\n", at);
+  if (end < 0) throw Error("RECAP_EMOJI_HOST 끝을 찾지 못했다");
+  return SRC.slice(at, end + 1);
+}
+
 const dir = mkdtempSync(join(tmpdir(), "cheese-vsui-"));
 const b = spawn(
   process.env.CHROME_BIN ||
@@ -154,6 +163,11 @@ const ok = (c, l) => {
     ${sliceFn("formatSeconds")}
     ${sliceFn("searchVodChatMessages")}
     ${sliceFn("appendVodSearchHighlighted")}
+    // 이모티콘을 그림으로 그리는 경로. 활성도 사전(chatGraphState.emojiUrls)을 쓴다.
+    // ⚠ 허용 호스트 규칙도 원본에서 떼어 온다(여기 적어 두면 원본과 어긋난다).
+    window.chatGraphState = { emojiUrls: {} };
+    ${emojiHostSource()}
+    ${sliceFn("appendVodSearchText")}
     ${sliceFn("vodChatSearchTruncatedNotice")}
     ${sliceFn("renderVodChatSearchBody")}
     ${sliceFn("renderVodChatSearchOutput")}
@@ -613,6 +627,88 @@ const ok = (c, l) => {
     }
   }
 
+  console.log("\n[이모티콘] {:키:} 를 그림으로 보여 준다");
+  {
+    // ⚠ 예전에는 {:d_42:} 가 날것 그대로 보였다. 활성도 수집이 만들어 둔 사전을
+    //   써서 그림으로 바꾼다(검색용으로 따로 저장하지 않는다).
+    const r = await ev(`(()=>{
+      chatGraphState.emojiUrls = {
+        d_42:'https://ssl.pstatic.net/static/nng/emoji/d_42.png',
+        hi:'https://nid.naver.net/emoji/hi.png',
+      };
+      vodChatSearchState.messages=[
+        {t:1000,text:'오늘 {:d_42:} 폼 미쳤다'},
+        {t:2000,text:'{:모르는키:} 어떡하지'},
+        {t:3000,text:'{:d_42:}{:hi:} 둘 다'},
+      ];
+      vodChatSearchState.loading=false; vodChatSearchState.failed=false;
+      vodChatSearchState.truncated='';
+      vodChatSearchView.query='폼'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'폼',200);
+      panel.querySelector('.cheese-peak-body').textContent='';
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      const img=t.querySelector('img');
+      return {imgs:t.querySelectorAll('img').length,
+        src:img?.getAttribute('src')||'', alt:img?.alt||'',
+        cls:img?.className||'',
+        text:t.textContent, title:t.title,
+        marks:[...t.querySelectorAll('mark')].map(m=>m.textContent)};})()`);
+    ok(r.imgs === 1, `그림으로 바뀐다 (${r.imgs}개)`);
+    ok(r.src.includes("d_42.png"), `사전의 주소를 쓴다 (${r.src})`);
+    ok(r.alt === "d_42", `키를 대체 텍스트로 남긴다 (${r.alt})`);
+    ok(!r.text.includes("{:"), `날것 {:키:} 가 남지 않는다 (${r.text})`);
+    ok(r.marks.includes("폼"), "글자 부분의 강조는 그대로 된다");
+    ok(r.title.includes("{:d_42:}"), "전체 원문은 title 에 그대로 둔다");
+  }
+
+  console.log("\n[이모티콘] 사전에 없으면 이름만 글자로 보여 준다");
+  {
+    const r = await ev(`(()=>{
+      vodChatSearchView.query='어떡하지'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'어떡하지',200);
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      return {imgs:t.querySelectorAll('img').length, text:t.textContent};})()`);
+    ok(r.imgs === 0, "모르는 키는 그림을 만들지 않는다");
+    ok(r.text.includes("모르는키"), `이름만 보여 준다 (${r.text})`);
+    ok(!r.text.includes("{:"), "껍데기 {: :} 는 벗긴다");
+  }
+
+  console.log("\n[이모티콘] 이어 붙은 것도 각각 그림이 된다");
+  {
+    const r = await ev(`(()=>{
+      vodChatSearchView.query='둘 다'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'둘 다',200);
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      return {imgs:t.querySelectorAll('img').length};})()`);
+    ok(r.imgs === 2, `연달아 붙어도 둘 다 그림 (${r.imgs}개)`);
+  }
+
+  console.log("\n[이모티콘] 아무 주소나 그림으로 만들지 않는다");
+  {
+    // ⚠ 사전 값이 오염돼도 치지직 계열 호스트가 아니면 그림으로 만들지 않는다.
+    const r = await ev(`(()=>{
+      window.__xss3=0;
+      chatGraphState.emojiUrls={evil:'javascript:window.__xss3=1',
+        other:'https://example.com/x.png'};
+      vodChatSearchState.messages=[{t:0,text:'{:evil:}{:other:} 검사'}];
+      vodChatSearchView.query='검사'; vodChatSearchView.lastQuery=null;
+      vodChatSearchView.result=searchVodChatMessages(
+        vodChatSearchState.messages,'검사',200);
+      renderVodChatSearchBody(panel);
+      const t=panel.querySelector('.cheese-vod-search-text');
+      return {xss:window.__xss3, imgs:t.querySelectorAll('img').length,
+        text:t.textContent};})()`);
+    ok(r.xss === 0, "스크립트가 실행되지 않았다");
+    ok(r.imgs === 0, `허용 호스트가 아니면 그림을 만들지 않는다 (${r.imgs}개)`);
+    ok(r.text.includes("evil"), "대신 이름만 글자로 보여 준다");
+  }
+
   console.log("\n[단축키] 검색창에서는 플레이어 단축키가 가로채지 않는다");
   {
     // ⚠ 증상: 검색창에 'f' 나 띄어쓰기를 치면 글자는 안 들어가고 전체화면이
@@ -830,6 +926,75 @@ const ok = (c, l) => {
     ok(r.text.includes("저장하지 않아"), `이유를 밝힌다 (${r.text})`);
     ok(r.text.includes("다시 받지 않습니다"), "이 탭에서는 한 번뿐임을 알린다");
     ok(!r.shownWhenReady, "준비가 끝나면 안내를 치운다");
+  }
+
+  console.log("\n[공유] 활성도를 먼저 모으면 검색이 다시 받지 않는다");
+  {
+    // ⚠ 예전에는 검색을 열어 둔 경우에만 원문을 모아, 활성도를 먼저 수집한
+    //   사람이 검색을 열면 같은 영상을 처음부터 다시 받았다.
+    //   이제는 순회 중에 늘 모아 두고, 끝날 때 넘긴다.
+    const r = await ev(`(async()=>{
+      let scans=0;
+      window.getCurrentVideoNo=()=>'77';
+      window.vodChatScanCoordinator={videoNo:'',promise:null};
+      vodChatSearchState={videoNo:"",messages:null,collecting:false,
+        loading:false,progress:0,failed:false,truncated:""};
+      // 활성도 수집이 끝났을 때 실제 코드가 하는 hand-off 를 그대로 흉내낸다.
+      window.collectVodChatDataShared=async(videoNo)=>{
+        scans+=1;
+        const searchMessages=[{t:0,text:'둥그레'}];
+        if(vodChatSearchState.videoNo===videoNo || !vodChatSearchState.videoNo){
+          vodChatSearchState.videoNo=videoNo;
+          vodChatSearchState.messages=searchMessages;
+          vodChatSearchState.failed=false;
+          if(vodChatSearchState.collecting){
+            vodChatSearchState.collecting=false;
+            vodChatSearchState.loading=false;}
+        }
+        return {complete:true};};
+      ${sliceFn("ensureVodChatSearchMessages")}
+      // 1) 활성도만 수집(검색은 아직 안 열었다)
+      await collectVodChatDataShared('77');
+      const afterGraph={scans, has:Array.isArray(vodChatSearchState.messages)};
+      // 2) 이제 검색을 연다 → 다시 받지 않아야 한다
+      const got=await ensureVodChatSearchMessages('77',100,()=>{});
+      return {afterGraph, scansAfterSearch:scans,
+        got:Array.isArray(got)?got.length:null};})()`);
+    ok(r.afterGraph.scans === 1, "활성도 수집은 한 번 돈다");
+    ok(r.afterGraph.has, "그 순회에서 검색용 원문까지 함께 챙긴다");
+    ok(
+      r.scansAfterSearch === 1,
+      `검색을 열어도 다시 받지 않는다 (순회 ${r.scansAfterSearch}회)`,
+    );
+    ok(r.got === 1, "모아 둔 원문을 그대로 쓴다");
+    // ⚠ 위 검사는 hand-off 규칙만 흉내낸다. '순회 중에 늘 모으는지' 는 실제
+    //   수집 함수를 봐야 한다(검색을 열었을 때만 모으면 이 기능이 죽는다).
+    // ⚠ 잘라 낼 끝은 '시작보다 뒤' 여야 한다. saveChatGraphCache 는 이 함수보다
+    //   앞에 선언돼 있어 그대로 쓰면 빈 문자열이 나온다(실제로 그래서 헛돌았다).
+    const scanAt = SRC.indexOf("async function collectChatGraph");
+    if (scanAt < 0) throw Error("collectChatGraph 를 찾지 못했다");
+    const scanEnd = SRC.indexOf("\n  async function ", scanAt + 10);
+    const scan = SRC.slice(scanAt, scanEnd > scanAt ? scanEnd : SRC.length);
+    if (!/searchMessages/.test(scan)) {
+      throw Error("collectChatGraph 범위를 잘못 잘랐다");
+    }
+    ok(
+      /const searchMessages = \[\];/.test(scan),
+      "순회 중에는 검색을 열지 않았어도 원문을 모은다",
+    );
+    ok(
+      !/vodChatSearchState\.collecting && vodChatSearchState\.videoNo === videoNo\s*\n?\s*\? \[\]/.test(
+        scan,
+      ),
+      "'검색을 열었을 때만 모으기' 로 돌아가지 않았다",
+    );
+    // 넘겨 줄 때 검색이 열려 있는지를 조건으로 걸지 않는다.
+    ok(
+      /vodChatSearchState\.videoNo === videoNo \|\| !vodChatSearchState\.videoNo/.test(
+        scan,
+      ),
+      "검색을 열어 두지 않았어도 결과를 넘겨 둔다",
+    );
   }
 
   console.log("\n[E/S] 기존 순회가 돌고 있으면 기다렸다가 한 번만 모은다");
