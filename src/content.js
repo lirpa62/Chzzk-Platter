@@ -11931,25 +11931,103 @@
     return target instanceof Element && !!target.closest(selector);
   }
 
-  // 검색 입력칸에 포커스를 직접 준다.
+  // 검색 입력칸의 포커스를 지켜 준다.
   //
   // ⚠ 한 번 클릭으로는 글자가 들어가지 않고, 좌클릭을 누르고 있는 동안에만
-  //   입력됐다. 이 팝오버는 치지직 플레이어 컨트롤 안에 붙는데, 플레이어가
-  //   눌림 이벤트를 두 가지 방식으로 가로챈다.
-  //     - mousedown 에서 preventDefault → '눌린 곳에 포커스' 기본 동작이 취소된다
-  //     - pointerdown 을 캡처 단계에서 stopPropagation → 아래로 내려오지도 않는다
-  //   두 번째 때문에 팝오버에 붙인 리스너는 아예 실행되지 않았다(실측). 그래서
-  //   document 의 '캡처 단계' 에서 잡는다. 플레이어보다 위라 반드시 먼저 돈다.
+  //   입력됐다. 실측으로 확인한 순서는 이렇다.
+  //
+  //     mousedown  포커스: INPUT.cheese-vod-search-input
+  //     mouseup    포커스: INPUT.cheese-vod-search-input   ← 여기까지는 멀쩡하다
+  //     click      포커스: DIV.pzp                          ← 여기서 빼앗긴다
+  //
+  //   치지직 플레이어는 자기 영역이 클릭되면 단축키를 받으려고 플레이어 루트로
+  //   포커스를 가져간다. 이 팝오버가 플레이어 컨트롤 안에 붙어 있어 우리 입력칸을
+  //   눌러도 그 처리가 함께 돈다. 누르고 있는 동안 입력이 됐던 것은 click 이 아직
+  //   나지 않아서였다(떼는 순간 click 이 나고 포커스를 잃는다).
+  //
+  //   입력칸이 교체되는 것도, 키가 막히는 것도 아니었다(각각 교체 0회,
+  //   defaultPrevented 전부 false 로 확인).
+  //
+  //   그래서 두 단계로 지킨다.
+  //     1) pointerdown 에서 포커스를 준다(플레이어가 기본 동작을 막는 경우 대비)
+  //     2) click 뒤에 빼앗겼으면 되돌린다
+  //   플레이어의 click 처리를 막지는 않는다. stopPropagation 으로 끊으면 재생·
+  //   컨트롤 동작까지 함께 막힐 수 있어서다.
+
+  // 사용자가 스스로 옮겨 간 '글을 쓰는 곳' 인지. 그렇다면 포커스를 되돌리지 않는다.
+  function isTextEntryElement(el) {
+    if (!(el instanceof Element)) return false;
+    const tag = el.tagName;
+    return (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      el.isContentEditable === true
+    );
+  }
+
+  // 클릭 직후 짧은 동안 입력칸의 포커스를 지킨다.
+  //
+  // 치지직 플레이어는 자기 영역이 클릭되면 단축키를 받으려고 플레이어 루트로
+  // 포커스를 가져간다. 이 팝오버가 컨트롤 안에 있어 우리 입력칸을 눌러도 함께
+  // 돈다. 언제 가져갈지는 알 수 없으므로 '잃는 순간' 을 듣고 되돌린다.
+  let vodSearchFocusGuard = null;
+  function watchVodSearchFocus(input) {
+    if (vodSearchFocusGuard) vodSearchFocusGuard();
+    const onFocusOut = (event) => {
+      if (event.target !== input) return;
+      // 사용자가 스스로 다른 '글 쓰는 곳' 으로 옮겼으면 존중한다.
+      const next = event.relatedTarget;
+      if (next && isTextEntryElement(next)) return stop();
+      // 이 차례가 끝난 뒤 되돌린다(지금 부르면 진행 중인 포커스 이동에 묻힌다).
+      queueMicrotask(() => {
+        if (!input.isConnected || input.disabled) return stop();
+        if (document.activeElement === input) return;
+        input.focus({ preventScroll: true });
+      });
+    };
+    const stop = () => {
+      document.removeEventListener("focusout", onFocusOut, true);
+      clearTimeout(timer);
+      if (vodSearchFocusGuard === stop) vodSearchFocusGuard = null;
+    };
+    // ⚠ 계속 지키면 사용자가 다른 곳을 눌러 빠져나갈 수 없다. 클릭 직후
+    //   잠깐만 본다(플레이어가 가져가는 것은 이 안에서 끝난다).
+    const timer = setTimeout(stop, 400);
+    document.addEventListener("focusout", onFocusOut, true);
+    vodSearchFocusGuard = stop;
+  }
+
+  function focusVodSearchInput(event) {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return null;
+    if (!input.classList.contains("cheese-vod-search-input")) return null;
+    if (input.disabled) return null;
+    if (document.activeElement !== input) {
+      input.focus({ preventScroll: true });
+    }
+    return input;
+  }
+
   document.addEventListener(
     "pointerdown",
     (event) => {
-      const input = event.target;
-      if (!(input instanceof HTMLInputElement)) return;
-      if (!input.classList.contains("cheese-vod-search-input")) return;
-      if (input.disabled) return;
-      if (document.activeElement === input) return; // 이미 잡혀 있으면 그대로 둔다
       // 커서 위치는 브라우저가 mouseup 에서 정하므로 여기서 건드리지 않는다.
-      input.focus({ preventScroll: true });
+      focusVodSearchInput(event);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      const input = focusVodSearchInput(event);
+      if (!input) return;
+      // ⚠ 플레이어가 '언제' 가져가는지 맞히려 하지 않는다. 같은 차례일 수도,
+      //   다음 tick 일 수도 있어 타이머로 쫓으면 구현에 따라 놓친다.
+      //   대신 '빼앗기는 순간' 을 직접 듣는다. 이 클릭 직후 잠깐 동안만
+      //   지켜보다가, 입력칸이 포커스를 잃으면 곧바로 되돌린다.
+      watchVodSearchFocus(input);
     },
     true,
   );

@@ -30,13 +30,29 @@ function sliceFn(name) {
 // 검색 입력칸 포커스 리스너를 원본에서 통째로 떼어 온다.
 // ⚠ 등록 방식(어디에, 캡처인지 버블인지)까지 그대로 실려야 의미가 있다.
 function focusListenerSource() {
-  const at = SRC.indexOf('  document.addEventListener(\n    "pointerdown",');
-  if (at < 0) throw Error("입력칸 포커스 리스너를 찾지 못했다");
-  const end = SRC.indexOf("\n  );\n", at);
-  if (end < 0) throw Error("포커스 리스너 끝을 찾지 못했다");
+  // 헬퍼부터 click 리스너 끝까지 한 덩어리로 가져온다.
+  // ⚠ pointerdown 하나만 가져오면, click 에서 포커스를 되돌리는 처리가 빠진 채
+  //   통과한다. 실제 증상은 click 에서 포커스를 빼앗기는 것이었다.
+  // ⚠ 헬퍼를 빠뜨리면 리스너 안에서 ReferenceError 가 나고, 복구가 조용히
+  //   동작하지 않은 채 '실패' 로만 보인다(실제로 그렇게 헤맸다).
+  const at = SRC.indexOf("  // 사용자가 스스로 옮겨 간 '글을 쓰는 곳' 인지.");
+  if (at < 0) throw Error("isTextEntryElement 를 찾지 못했다");
+  if (SRC.indexOf("  function watchVodSearchFocus(input) {", at) < 0) {
+    throw Error("watchVodSearchFocus 를 찾지 못했다");
+  }
+  if (SRC.indexOf("  function focusVodSearchInput(event) {", at) < 0) {
+    throw Error("focusVodSearchInput 을 찾지 못했다");
+  }
+  const clickAt = SRC.indexOf('  document.addEventListener(\n    "click",', at);
+  if (clickAt < 0) throw Error("입력칸 click 리스너를 찾지 못했다");
+  const end = SRC.indexOf("\n  );\n", clickAt);
+  if (end < 0) throw Error("click 리스너 끝을 찾지 못했다");
   const src = SRC.slice(at, end + 5);
   if (!/cheese-vod-search-input/.test(src)) {
     throw Error("찾은 리스너가 검색 입력칸용이 아니다");
+  }
+  if (!/"pointerdown"/.test(src) || !/"click"/.test(src)) {
+    throw Error("pointerdown·click 리스너가 모두 있어야 한다");
   }
   return src;
 }
@@ -505,13 +521,16 @@ const ok = (c, l) => {
     //   눌림 이벤트를 두 가지 방식으로 가로챈다. 실측 결과:
     //     preventDefault(mousedown)   → 포커스 기본 동작만 취소. 버블 리스너는 돈다
     //     stopPropagation(캡처 단계)  → 우리 리스너가 아예 실행되지 않는다
-    //   앞선 수정은 팝오버에 리스너를 달아 둘째 경우를 못 막았다. 그래서 두 경우를
-    //   모두 검사한다.
+    //     click 에서 포커스 가져가기   → 실제 원인. 아래 trace 그대로다.
+    //         mouseup  포커스: INPUT
+    //         click    포커스: DIV.pzp   ← 여기서 빼앗긴다
+    //   앞선 수정들은 앞의 둘만 막았다. 셋을 모두 검사한다.
     //   ⚠ 진짜 마우스 이벤트를 보내야 한다. input.focus() 를 직접 부르거나
     //     리스너를 손으로 흉내내면 이 버그가 재현되지 않는다.
     const modes = [
       ["preventDefault(mousedown)", "pd"],
       ["stopPropagation(캡처)", "stop"],
+      ["click 에서 포커스 뺏김", "steal"],
     ];
     for (const [label, mode] of modes) {
       const box = await ev(`(()=>{
@@ -536,9 +555,21 @@ const ok = (c, l) => {
         const player=document.getElementById('cheese-player');
         if('${mode}'==='pd'){
           player.addEventListener('mousedown',(e)=>{e.preventDefault();});
-        } else {
+        } else if('${mode}'==='stop'){
           player.addEventListener('pointerdown',(e)=>{e.stopPropagation();},true);
           player.addEventListener('mousedown',(e)=>{e.preventDefault();});
+        } else {
+          // 실제 치지직: mousedown 기본 동작을 막고, click 버블 끝에서 플레이어
+          // 루트로 포커스를 가져간다(단축키를 받기 위해서다).
+          // ⚠ document 에 남겨 두면 다음 검사까지 따라다닌다. 한 번만 돌고
+          //   스스로 떨어지게 한다.
+          player.setAttribute('tabindex','-1');
+          player.addEventListener('mousedown',(e)=>{e.preventDefault();});
+          const steal=()=>{
+            document.querySelector('.cheese-vod-search-input')?.blur();
+            player.focus();
+            document.removeEventListener('click',steal);};
+          document.addEventListener('click',steal);
         }
         document.activeElement?.blur?.();
         const r=panel.querySelector('.cheese-vod-search-input').getBoundingClientRect();
@@ -552,6 +583,10 @@ const ok = (c, l) => {
         );
         await new Promise((r) => setTimeout(r, 20));
       }
+      // ⚠ click 에서 빼앗긴 포커스는 그 차례가 끝난 뒤에 되돌린다. 바로 재면
+      //   되돌리기 전을 재게 되므로 한 번 쉬었다 확인한다(사용자가 글자를 치는
+      //   시점은 어차피 그 뒤다).
+      await new Promise((r) => setTimeout(r, 20));
       const focused = await ev(
         `document.activeElement===panel.querySelector('.cheese-vod-search-input')`,
       );
