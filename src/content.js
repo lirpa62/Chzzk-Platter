@@ -21238,6 +21238,11 @@
   let popupPlayerChatFoldWaitStartedAt = 0;
   let popupPlayerChatFoldEnforceStartedAt = 0;
   let popupPlayerChatFoldTimer = 0;
+  // 사용자가 안정화 구간 중에 채팅을 직접 펼쳤는지. 그 뒤로는 다시 접지 않는다.
+  // ⚠ 기존 사용자 조작 감지(ensureChatFoldUserClickListener)는 '채팅 접힘 유지'
+  //   기능이 켜졌을 때만 붙는다. 팝업의 '채팅 없이 시작' 은 그 기능과 무관하게
+  //   동작하므로, 그때는 사용자가 펼쳐도 최대 16번까지 다시 접어 버렸다.
+  let popupPlayerChatFoldUserOverride = false;
   const POPUP_PLAYER_CHAT_FOLD_READY_TIMEOUT_MS = 30000;
   const POPUP_PLAYER_CHAT_FOLD_ENFORCE_MS = 8000;
   const POPUP_PLAYER_CHAT_FOLD_MAX_ENFORCE_MS = 15000;
@@ -21332,6 +21337,46 @@
     });
   }
 
+  // 팝업의 '채팅 없이 시작' 안정화 구간에만 쓰는 사용자 조작 감지. 클릭은
+  // isTrusted 로, 단축키는 물리 키(KeyJ)로 구분한다(한글 입력 상태에선 e.key 가
+  // 'ㅓ' 로 온다). 한 번 잡히면 남은 안정화를 끝내고 다시 접지 않는다.
+  let popupPlayerChatFoldUserWatchBound = false;
+  function ensurePopupPlayerChatFoldUserWatch() {
+    if (popupPlayerChatFoldUserWatchBound) return;
+    popupPlayerChatFoldUserWatchBound = true;
+    const onUser = () => {
+      if (popupPlayerChatFoldUserOverride) return;
+      popupPlayerChatFoldUserOverride = true;
+      finishPopupPlayerInitialChatFold();
+    };
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (!e.isTrusted) return; // 우리 접기 click 은 무시
+        const el = e.target?.closest?.("button");
+        if (el && isChatFoldToggleButton(el)) onUser();
+      },
+      true,
+    );
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (!e.isTrusted || e.code !== "KeyJ") return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const t = e.target;
+        if (
+          t &&
+          (t.isContentEditable ||
+            /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""))
+        ) {
+          return;
+        }
+        onUser();
+      },
+      true,
+    );
+  }
+
   function finishPopupPlayerInitialChatFold() {
     if (popupPlayerChatFoldDone) return;
     popupPlayerChatFoldDone = true;
@@ -21372,6 +21417,12 @@
     ) {
       return;
     }
+    // 사용자가 직접 펼쳤으면 그 의사가 우선이다(다시 접지 않는다).
+    if (popupPlayerChatFoldUserOverride) {
+      finishPopupPlayerInitialChatFold();
+      return;
+    }
+    ensurePopupPlayerChatFoldUserWatch();
 
     const now = Date.now();
     if (!popupPlayerChatFoldWaitStartedAt) {
