@@ -3341,6 +3341,12 @@
   // 있으면 유지하고, 모두 비워지면 해제한다(서로의 유지를 끊지 않도록).
   const controlsHolders = new Set();
 
+  // 치지직이 컨트롤을 숨기려 했는데 우리가 되살린 적이 있는지(플레이어별).
+  // ⚠ 이 표시가 있어야 '우리가 억지로 남긴 클래스' 와 '원래 켜져 있던 클래스' 를
+  //   구분해 안전하게 정리할 수 있다. 전역 boolean 하나면 플레이어가 바뀔 때
+  //   상태가 섞인다.
+  const controlsRestoredByUs = new WeakMap(); // player -> true
+
   function keepControlsVisible(root, reason = "panel") {
     controlsHolders.add(reason);
     // 루트가 바뀌었거나 observer가 없으면 (재)설정.
@@ -3349,6 +3355,8 @@
       controlsRoot = root;
       controlsObserver = new MutationObserver(() => {
         if (controlsRoot && !controlsRoot.classList.contains(CONTROLS_CLASS)) {
+          // 치지직이 지운 것을 되돌린다 — 나중에 정리할 수 있게 표시해 둔다.
+          controlsRestoredByUs.set(controlsRoot, true);
           controlsRoot.classList.add(CONTROLS_CLASS);
         }
       });
@@ -3358,6 +3366,7 @@
       });
     }
     if (!root.classList.contains(CONTROLS_CLASS)) {
+      controlsRestoredByUs.set(root, true);
       root.classList.add(CONTROLS_CLASS);
     }
   }
@@ -9522,6 +9531,8 @@
   let nativeVolumeOsdUntil = 0;
   const NATIVE_WHEEL_CONTROLS_HOLDER = "native-wheel-volume";
   let nativeWheelControlsReleaseTimer = 0;
+  // 휠 볼륨으로 컨트롤을 잡아 둔 플레이어(이탈 감시 대상). 하나만 추적한다.
+  let nativeWheelControlsPlayer = null;
 
   function eventTargetElement(target) {
     return target instanceof Element
@@ -9797,6 +9808,41 @@
     if (overVideo) return true;
     return wheelVolumeScope !== "video" && !!isOverVolumeControl(target);
   }
+  // 휠 볼륨으로 잡아 둔 컨트롤을 놓는다. 포인터가 플레이어를 완전히 벗어났고
+  // 다른 유지 사유가 없다면, 우리가 되살려 둔 컨트롤 클래스까지 정리한다.
+  //
+  // ⚠ 이게 없으면: 휠 직후 빠르게 플레이어 밖으로 나가면 치지직이 컨트롤을
+  //   지우려 한 것을 우리 observer 가 되살리고, 850ms 뒤 holder 만 풀려
+  //   클래스는 그대로 남는다. 그때는 포인터가 이미 밖이라 새 leave 가 오지
+  //   않아 하단 컨트롤과 되감기 바가 계속 떠 있게 된다(실측으로 재현).
+  // ⚠ 다른 holder(믹서·스트림 정보·따라잡기·바 호버)가 남아 있으면 클래스를
+  //   건드리지 않는다. 그쪽이 계속 컨트롤을 원하고 있다.
+  function releaseNativeWheelControls(player) {
+    if (nativeWheelControlsReleaseTimer) {
+      clearTimeout(nativeWheelControlsReleaseTimer);
+      nativeWheelControlsReleaseTimer = 0;
+    }
+    if (!controlsHolders.has(NATIVE_WHEEL_CONTROLS_HOLDER)) return;
+    releaseControlsVisible(NATIVE_WHEEL_CONTROLS_HOLDER);
+    if (controlsHolders.size > 0) return; // 다른 사유가 컨트롤을 잡고 있다
+    if (!player || !controlsRestoredByUs.get(player)) return;
+    controlsRestoredByUs.delete(player);
+    // 되감기 바 호버 중이면 그쪽 로직이 컨트롤을 유지해야 한다.
+    if (seekBarHovered || seekBarDragging) return;
+    player.classList.remove(CONTROLS_CLASS);
+  }
+
+  // 포인터가 플레이어 밖으로 실제로 나갔을 때만 정리한다(자식 간 이동 제외).
+  function onNativeWheelPointerOut(e) {
+    const player = nativeWheelControlsPlayer;
+    if (!player) return;
+    const to = e.relatedTarget;
+    if (to && player.contains(to)) return; // 플레이어 내부 이동
+    nativeWheelControlsPlayer = null;
+    player.removeEventListener("pointerout", onNativeWheelPointerOut);
+    releaseNativeWheelControls(player);
+  }
+
   function keepNativeWheelControlsVisible(target) {
     if (nativeWheelControlsReleaseTimer) {
       clearTimeout(nativeWheelControlsReleaseTimer);
@@ -9804,11 +9850,29 @@
     }
     const player = playerOfEventTarget(target);
     if (!player) return;
+    // 이 플레이어의 이탈만 짧게 감시한다(document 전역 감시를 만들지 않는다).
+    if (nativeWheelControlsPlayer !== player) {
+      nativeWheelControlsPlayer?.removeEventListener(
+        "pointerout",
+        onNativeWheelPointerOut,
+      );
+      nativeWheelControlsPlayer = player;
+      player.addEventListener("pointerout", onNativeWheelPointerOut);
+    }
     keepControlsVisible(player, NATIVE_WHEEL_CONTROLS_HOLDER);
     // 연속 휠 입력마다 갱신한다. 마지막 입력의 툴팁이 사라진 뒤 native 자동 숨김으로
     // 돌아가게 해, 조절 중에는 볼륨 아이콘과 하단 컨트롤이 사라지지 않게 한다.
     nativeWheelControlsReleaseTimer = window.setTimeout(() => {
       nativeWheelControlsReleaseTimer = 0;
+      // 포인터가 아직 플레이어 안이면 클래스는 건드리지 않는다. 치지직의
+      // 자동 숨김이 정상적으로 이어받는다(기존 동작 그대로).
+      if (nativeWheelControlsPlayer) {
+        nativeWheelControlsPlayer.removeEventListener(
+          "pointerout",
+          onNativeWheelPointerOut,
+        );
+        nativeWheelControlsPlayer = null;
+      }
       releaseControlsVisible(NATIVE_WHEEL_CONTROLS_HOLDER);
     }, VOLUME_TOOLTIP_HIDE_MS + 150);
   }
