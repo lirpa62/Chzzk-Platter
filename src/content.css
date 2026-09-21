@@ -5700,6 +5700,52 @@ body > .clr-picker {
   img {
   padding: 2px;
 }
+/* 전용 팔로잉 아바타 크기는 우리가 소유한다.
+   네이티브 프로필 클래스를 harvest 해 쓰지만, 그 클래스의 크기 규칙은 펼침
+   상태에서만 걸리는 경우가 있다. 접히면 래퍼가 크기를 잃고 블록으로 늘어나
+   접힘 레일 폭(실측 126px)까지 커진다. 모서리 옵션이 켜져 있으면 이미지도
+   max-height:100% 를 따라 같이 커진다.
+   ⚠ 크기만 고정한다. border-radius·overflow·display 는 건드리지 않아야
+     사각 프로필·모서리 옵션·라이브 링이 그대로 동작한다.
+   ⚠ !important 는 네이티브 해시 규칙이 나중에 주입돼 우리 규칙을 덮기 때문에
+     필요하다. 원인이 되는 크기 속성에만 붙인다. */
+#cheese-custom-follow .cheese-cf-avatar {
+  box-sizing: border-box;
+  flex: none !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+}
+#cheese-custom-follow .cheese-cf-avatar > img {
+  box-sizing: border-box;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  object-fit: cover;
+}
+/* 폴백은 자체 링 크기(30px)를 쓰므로 위 소유 규칙 대신 폴백 값을 유지한다. */
+#cheese-custom-follow .cheese-cf-avatar.cheese-cf-profile {
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  max-width: 30px !important;
+  max-height: 30px !important;
+}
+#cheese-custom-follow .cheese-cf-avatar.cheese-cf-profile > img {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
 /* 프로필 폴백(harvest 실패 시). 네이티브 _profile_ 와 동일하게: 라이브면 청록 그라디언트
    링, 오프라인이면 회색 링. background-clip 로 안쪽은 배경색, 테두리 링만 그라디언트. */
 .cheese-cf-profile {

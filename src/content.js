@@ -36209,10 +36209,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const squareCls = customFollowSquares.get(item.channelId)?.has(section)
       ? " cheese-cf-square"
       : "";
+    // ⚠ cheese-cf-avatar 는 harvest 성공 여부와 무관하게 항상 붙는다. 네이티브
+    //   프로필 클래스를 harvest 하지만, 접힘 순간 네이티브의 크기 규칙이 우리
+    //   커스텀 DOM 에서는 걸리지 않아 래퍼가 레일 폭까지 늘어난다(실측 32→126).
+    //   그래서 아바타 크기만큼은 이 클래스로 우리가 고정한다. 링·모양은 그대로
+    //   네이티브(또는 폴백 cheese-cf-profile)에 맡긴다.
     const profileCls =
+      "cheese-cf-avatar " +
       (live
         ? c(h?.profileLive, "cheese-cf-profile is-live")
-        : c(h?.profile, "cheese-cf-profile")) + squareCls;
+        : c(h?.profile, "cheese-cf-profile")) +
+      squareCls;
     // 인증마크 + 업적 배지: 네이티브는 모두 _icon_ 에 background-image(인라인). harvest 한
     // _icon_ 클래스를 쓰고, 인증마크는 클래스 기본 배경, 배지는 인라인 background-image.
     const iconCls = c(h?.icon, "cheese-cf-official");
