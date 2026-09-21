@@ -20426,6 +20426,102 @@
     return m ? m[1] : "";
   }
 
+  // ── 라이브 되감기 제한 정책 ────────────────────────────────────────────────
+  // 일부 특수/캠페인 LIVE 에서 관측되는 제한 신호 조합.
+  // adParameter.tag 는 공식적인 '같이보기+' 식별자로 보장된 필드가 아니므로
+  // 단독 판정에 사용하지 않는다. timeMachineActive=false + TV 시청 DENIED +
+  // "none" 이 아닌 캠페인 태그가 모두 명확할 때만 우리 되감기 UI 를 제한한다.
+  //
+  // ⚠ 값이 없거나 불명확하면(fetch 실패/필드 누락/undefined) 제한하지 않는다.
+  //   일반 방송의 되감기까지 막는 오탐이 훨씬 나쁘다.
+  // ⚠ 치지직 네이티브 플레이어는 건드리지 않는다. 우리가 얹은 기능만 접는다.
+  const LIVE_CAMPAIGN_TAG_NONE = "none";
+
+  function hasSpecialLiveCampaignTag(value) {
+    if (typeof value !== "string") return false;
+    const tag = value.trim();
+    if (!tag) return false;
+    return tag.toLowerCase() !== LIVE_CAMPAIGN_TAG_NONE;
+  }
+
+  // policy: { timeMachineActive, tvAppViewingPolicyType, adTag } 로 정규화된 값.
+  // ⚠ !timeMachineActive 같은 truthy 판정을 쓰지 않는다. 필드가 없을 때
+  //   false 로 오판해 일반 방송을 막게 된다.
+  function isLiveRewindRestrictedByPolicy(policy) {
+    if (!policy || typeof policy !== "object") return false;
+    return (
+      policy.timeMachineActive === false &&
+      policy.tvAppViewingPolicyType === "DENIED" &&
+      hasSpecialLiveCampaignTag(policy.adTag)
+    );
+  }
+
+  // 라이브 단위 정책 캐시. 채널이 아니라 '이번 방송'(live:<id>) 기준이다 —
+  // 같은 채널이라도 다음 방송은 정책이 다를 수 있다. storage 에 저장하지 않는다.
+  const liveRewindPolicyCache = new Map(); // pageKey -> { restricted, at }
+  const LIVE_REWIND_POLICY_TTL_MS = 5 * 60 * 1000;
+  let liveRewindPolicyFetching = "";
+
+  function liveRewindPolicyPageKey() {
+    const id = currentLiveChannelId();
+    return id ? `live:${id}` : "";
+  }
+
+  // 현재 방송이 제한 대상인지(모르면 false). MAIN world 로 내보내는 값.
+  function currentLiveRewindRestricted() {
+    const key = liveRewindPolicyPageKey();
+    if (!key) return false;
+    const hit = liveRewindPolicyCache.get(key);
+    return hit ? hit.restricted === true : false;
+  }
+
+  // live-status(정책) + live-detail(캠페인 태그)을 이 방송에 대해 한 번만 읽는다.
+  // ⚠ 폴링하지 않는다. 페이지/방송이 바뀔 때만 다시 읽는다.
+  async function ensureLiveRewindPolicy() {
+    const key = liveRewindPolicyPageKey();
+    if (!key) return;
+    const cached = liveRewindPolicyCache.get(key);
+    if (cached && Date.now() - cached.at < LIVE_REWIND_POLICY_TTL_MS) return;
+    if (liveRewindPolicyFetching === key) return;
+    liveRewindPolicyFetching = key;
+    const channelId = currentLiveChannelId();
+    const getJson = (url) =>
+      fetch(url, {
+        credentials: "include",
+        headers: { accept: "application/json" },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+    try {
+      const [status, detail] = await Promise.all([
+        getJson(
+          `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+        ),
+        getJson(
+          `https://api.chzzk.naver.com/service/v3/channels/${encodeURIComponent(channelId)}/live-detail`,
+        ),
+      ]);
+      // ⚠ 응답이 늦게 와도 그 사이 다른 방송으로 옮겼으면 적용하지 않는다.
+      if (liveRewindPolicyPageKey() !== key) return;
+      if (!status && !detail) return; // 둘 다 실패 — 기존 동작 유지
+      const sc = status?.content;
+      const dc = detail?.content;
+      // 필요한 필드만 남긴다(응답 전체를 들고 있지 않는다).
+      const policy = {
+        timeMachineActive: sc?.timeMachineActive,
+        tvAppViewingPolicyType: sc?.tvAppViewingPolicyType,
+        adTag: dc?.adParameter?.tag,
+      };
+      liveRewindPolicyCache.set(key, {
+        restricted: isLiveRewindRestrictedByPolicy(policy),
+        at: Date.now(),
+      });
+      broadcastFeatureFlags();
+    } finally {
+      if (liveRewindPolicyFetching === key) liveRewindPolicyFetching = "";
+    }
+  }
+
   // 방종 종료 화면이 실제로 '보이는지'. 클래스 해시는 바뀔 수 있어 텍스트로 감지한다.
   // 플레이어 영역(_player_) 안의 문구가 종료 안내 문구면 참.
   function isReliveEndScreenVisible() {
@@ -52745,6 +52841,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         // 되감기·앞으로를 '기능까지' 끈 경우엔 바도 함께 끄면 그 OR 조건이 자연히 false 가
         // 되어 방향키까지 막힌다. 반대로 바가 표시되는 동안에는 방향키가 그대로 동작한다.
         liveSeekBar: getEffectiveLiveSeekBar(),
+        // 이번 방송이 치지직 재생 정책상 되감기 제한 대상인지(모르면 false).
+        // ⚠ 사용자 설정이 아니라 방송별 런타임 값이다. 저장하지 않는다.
+        //   앞으로 이동·따라잡기는 이 값과 무관하게 그대로 둔다.
+        liveRewindRestricted: currentLiveRewindRestricted(),
         liveStallRecovery, // 라이브 멈춤 자동 복구(전역)
         liveSeekBarBottom, // 되감기 바 하단 여백(px)
         volumePct, // 볼륨 조절 % 표시(전역)
@@ -54938,6 +55038,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     initSeekPreviewRealtime();
     syncVodTitleChangesProgress();
     initLiveDetailStartTooltip();
+    // 이번 방송의 되감기 제한 정책(방송당 1회, 캐시로 자체 가드).
+    void ensureLiveRewindPolicy();
     ensureFollowerCountHover(); // "팔로워 8.9만명" 호버 시 정확한 수 표시
     ensureProfileStudioLink(); // 헤더 '삭제된 클립 보기' 옆 스튜디오 링크
     fixPartyIconMasks(); // 파티 아이콘 mask id 충돌 보정(사이드바 숨김 시 흰색으로 깨지던 문제)

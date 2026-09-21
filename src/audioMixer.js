@@ -107,6 +107,10 @@
   // 위 값이 content.js 의 저장값 로드를 거친 것인지(로드 전 false = '아직 모름').
   let wideScreenSettingsLoaded = popupWideParamKnown;
   let liveSeekBarOn = false; // 라이브 되감기 바(seekable 표시+드래그 seek) 표시(전역, 기본 OFF)
+  // 이번 방송이 치지직 재생 정책상 되감기 제한 대상인지(방송별, 기본 false=제한 없음).
+  // ⚠ 설정이 아니라 런타임 값이다. 저장하지 않고, 방송이 바뀌면 다시 내려온다.
+  //   과거로 가는 우리 기능만 접는다 — 따라잡기·앞으로 이동은 그대로 둔다.
+  let liveRewindRestricted = false;
   // 라이브 멈춤 자동 복구(전역, 기본 OFF). 원인이 확정되지 않아 켠 사용자에게만 동작한다.
   let liveStallRecoveryOn = false;
   let volumePctOn = true; // 볼륨 조절 시 % 표시(전역, 기본 ON)
@@ -247,6 +251,9 @@
     featureFlags.streamStats = f.streamStats === true;
     featureFlags.liveSync = f.liveSync === true;
     featureFlags.liveRewind = f.liveRewind === true;
+    // 이번 방송이 치지직 재생 정책상 되감기 제한 대상인지. 사용자 설정이 아니라
+    // 방송별 값이라 featureFlags 와 따로 둔다(설정값을 덮어쓰지 않는다).
+    liveRewindRestricted = f.liveRewindRestricted === true;
     featureFlags.vodSeekButtons = f.vodSeekButtons === true;
     featureFlags.vodGlobalArrowSeek = f.vodGlobalArrowSeek === true;
     featureFlags.tabMute = f.tabMute === true;
@@ -7723,6 +7730,11 @@
   function seekBy(forward) {
     const w = getSeekWindow();
     if (!w) return;
+    // 되감기 제한 방송에서는 우리 기능으로 과거로 가지 않는다(UI 를 숨겨도 단축키·
+    // 꾹 누르기 같은 다른 진입점이 남아 있어 실행 지점에서도 막는다).
+    // ⚠ 앞으로 이동은 막지 않는다. 이미 과거에 서 있는 사용자가 현재로 돌아올 수
+    //   있어야 한다(강제로 엣지로 점프시키지도 않는다).
+    if (!forward && w.mode === "live" && liveRewindRestricted) return;
     const amount = w.mode === "vod" ? VOD_SEEK_STEP_S : seekStepS;
     const step = forward ? amount : -amount;
     // 라이브는 엣지 직전까지만, 다시보기는 영상 끝까지 이동한다.
@@ -7832,7 +7844,14 @@
           button.remove();
         }
       });
-    if (!player.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
+    // 되감기 제한 방송에서는 되감기 버튼만 뺀다. 앞으로/따라잡기는 현재 시점으로
+    // 돌아오는 기능이라 그대로 둔다.
+    const hideRewind = live && liveRewindRestricted;
+    if (hideRewind) {
+      player
+        .querySelectorAll(`.${REWIND_BUTTON_CLASS}`)
+        .forEach((button) => button.remove());
+    } else if (!player.querySelector(`.${REWIND_BUTTON_CLASS}`)) {
       controls.insertBefore(createSeekButton(false), baseAnchor);
     }
     if (!player.querySelector(`.${FORWARD_BUTTON_CLASS}`)) {
@@ -7962,6 +7981,9 @@
     if (!w || !w.video) return;
     if (Math.abs(target - w.video.currentTime) < 0.05) return;
     const back = target < w.video.currentTime;
+    // 제한 방송에서는 바를 통한 과거 이동도 막는다(바 자체는 이미 숨기지만,
+    // 숨기기 전에 잡고 있던 드래그가 남아 있을 수 있다).
+    if (back && w.mode === "live" && liveRewindRestricted) return;
     if (back && w.video.currentTime - target <= SYNC_SHORT_REWIND_MAX_S + 0.5) {
       rewindButtonSeekUntil = Date.now() + 3000; // 짧은 되감기 → 짧은 pause
     }
@@ -7977,6 +7999,11 @@
     // (featureFlags.liveRewind)은 플레이어의 되감기/앞으로 '버튼'만 숨기는 것이고, 바는
     // 별개다. 버튼을 숨겨도 탐색할 수 있도록 바는 유지한다.
     if (!liveSeekBarOn) {
+      removeSeekBar();
+      return;
+    }
+    // 치지직이 이 방송에 되감기 제한 신호를 내려주면 우리 바는 접는다(설정은 그대로).
+    if (liveRewindRestricted && isLiveSeekPage()) {
       removeSeekBar();
       return;
     }
