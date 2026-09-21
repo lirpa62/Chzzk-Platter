@@ -52534,17 +52534,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       return flags;
     }
     if (IS_POPUP_PLAYER_FRAME) {
-      if (!popupPlayerDisableHidden) return flags;
-      if (!popupPlayerBtnMixer) flags.audioMixer = true;
-      if (!popupPlayerBtnFilter) flags.videoFilter = true;
-      if (!popupPlayerBtnSync) flags.liveSync = true;
-      if (!popupPlayerBtnStats) flags.streamStats = true;
-      if (!popupPlayerBtnScreenshot) flags.screenshotButton = true;
+      // 팝업 버튼 설정은 일반 플레이어의 숨김 설정과 독립이다. 예전에는 여기서
+      // 전역 플래그를 그대로 두고 '끄기'만 더했다. 그래서 일반 플레이어에서
+      // 믹서를 숨겨 두면, 팝업에서 믹서를 켜도 전역 숨김이 그대로 남아
+      // MAIN world 가 버튼을 만들지 않았다. 표시로 둔 기능은 반드시 되살린다.
+      //   기능도 끄기 OFF → 숨긴 버튼도 기능·단축키는 살아 있다(표시는 CSS 담당)
+      //   기능도 끄기 ON  → 숨긴 버튼은 기능까지 끈다
+      const hidden = (visible) => (popupPlayerDisableHidden ? !visible : false);
+      flags.audioMixer = hidden(popupPlayerBtnMixer);
+      flags.videoFilter = hidden(popupPlayerBtnFilter);
+      flags.liveSync = hidden(popupPlayerBtnSync);
+      flags.streamStats = hidden(popupPlayerBtnStats);
+      flags.screenshotButton = hidden(popupPlayerBtnScreenshot);
       // 되감기/앞으로는 치지직 컨트롤에서 한 쌍으로 묶여 있어(liveRewind 하나로 제어)
       // 둘 다 꺼져 있을 때만 기능을 끈다.
-      if (!popupPlayerBtnRewind && !popupPlayerBtnForward) {
-        flags.liveRewind = true;
-      }
+      flags.liveRewind = hidden(popupPlayerBtnRewind || popupPlayerBtnForward);
       return flags;
     }
     // 기본 플레이어에서 '기능도 끄기'를 끄면 숨김 플래그가 기능까지 끄지 않게 한다.
