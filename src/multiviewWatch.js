@@ -1916,6 +1916,26 @@
   // ⚠ 채널을 빼도 남은 칸은 다시 만들지 않는다(만들면 방송이 처음부터 로드된다).
   //   빠진 칸만 지우고 배치를 새 채널 수에 맞는 것으로 바꾼다.
   let quickCandidates = null;
+  const quickSize = { width: null, height: null };
+  const quickResizeMinWidth = 420;
+  const quickResizeMinHeight = 260;
+
+  function clampQuickSize() {
+    const panel = $("mvQuick");
+    const stage = $("mvFramesFit");
+    if (!panel || !stage || panel.hidden) return;
+    const bounds = stage.getBoundingClientRect();
+    const maxWidth = Math.max(1, bounds.width - 16);
+    const maxHeight = Math.max(1, bounds.height - 16);
+    if (quickSize.width !== null) {
+      quickSize.width = Math.min(maxWidth, Math.max(Math.min(quickResizeMinWidth, maxWidth), quickSize.width));
+      panel.style.width = `${quickSize.width}px`;
+    }
+    if (quickSize.height !== null) {
+      quickSize.height = Math.min(maxHeight, Math.max(Math.min(quickResizeMinHeight, maxHeight), quickSize.height));
+      panel.style.height = `${quickSize.height}px`;
+    }
+  }
 
   // replaceChannelId 를 주면 '교체 모드' 로 연다(고른 채널이 그 자리를 대신한다).
   let quickReplaceId = "";
@@ -1927,6 +1947,7 @@
     quickReplaceId = cells.has(replaceChannelId) ? replaceChannelId : "";
     quickReplaceOrigin = quickReplaceId ? origin : "";
     $("mvQuick").hidden = false;
+    clampQuickSize();
     renderQuick();
     void loadQuickCandidates();
   }
@@ -2300,8 +2321,8 @@
   function quickEmptyMessage() {
     if (quickSource === "search") {
       return quickKeyword.trim()
-        ? "찾는 채널이 없습니다."
-        : "채널 이름으로 찾아보세요.";
+        ? "찾는 채널이나 태그의 방송이 없습니다."
+        : "채널 이름 또는 태그로 찾아보세요.";
     }
     if (quickSource === "custom") {
       if (!quickSections.length) return "전용 팔로잉 구역이 아직 없습니다.";
@@ -2332,10 +2353,12 @@
     if (!box) return;
     const previousScrollLeft = box.scrollLeft;
     if (quickCandidates === null) {
-      box.innerHTML = '<p class="mv-quick-empty">불러오는 중…</p>';
+      box.setAttribute("aria-busy", "true");
+      box.innerHTML = quickSkeletonCards();
       syncQuickRailNav();
       return;
     }
+    box.removeAttribute("aria-busy");
     // 이미 보고 있는 채널은 후보에서 뺀다. 교체 대상 자신도 뺀다 — 같은 채널로
     // 갈아 끼우는 것은 replaceChannel 이 거르므로 눌러도 아무 일이 없다.
     const have = new Set(state.chosen.map((c) => c.channelId));
@@ -2685,9 +2708,23 @@
       const id = volMute.dataset.mvVolMute;
       const audio = audioOf(id);
       audio.muted = !audio.muted;
+      audio.muteTouched = true;
       // 음소거를 풀었는데 크기가 0 이면 아무 소리도 안 난다. 들리게 올려 준다.
       if (!audio.muted && audio.volume === 0) audio.volume = 1;
       postState(id, id === state.mainId);
+      if (effectiveMuted(id)) clearAudioNotice(id);
+      renderVolume();
+      return;
+    }
+    const mixerConfirmButton = target.closest?.("[data-mv-mixer-confirm]");
+    if (mixerConfirmButton) {
+      const id = mixerConfirmButton.dataset.mvMixerConfirm;
+      sendMixerCommand(id, "MIXER_SET_ENABLED", { enabled: false, confirmed: true });
+      return;
+    }
+    const mixerCancelButton = target.closest?.("[data-mv-mixer-cancel]");
+    if (mixerCancelButton) {
+      mixerConfirm.delete(mixerCancelButton.dataset.mvMixerCancel);
       renderVolume();
       return;
     }
@@ -2761,6 +2798,69 @@
     quickKeyword = event.target.value;
     clearTimeout(quickSearchTimer);
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
+  });
+
+  $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickLive, { passive: true });
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(() => {
+      clampQuickSize();
+      maybeLoadMoreQuickLive();
+    });
+    observer.observe($("mvQuickAdd"));
+    observer.observe($("mvFramesFit"));
+  } else {
+    window.addEventListener("resize", () => {
+      clampQuickSize();
+      maybeLoadMoreQuickLive();
+    }, { passive: true });
+  }
+
+  const quickResize = $("mvQuickResize");
+  let quickDrag = null;
+  quickResize?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const bounds = $("mvQuick").getBoundingClientRect();
+    quickDrag = { x: event.clientX, y: event.clientY, width: bounds.width, height: bounds.height };
+    quickResize.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  quickResize?.addEventListener("pointermove", (event) => {
+    if (!quickDrag || !quickResize.hasPointerCapture(event.pointerId)) return;
+    quickSize.width = quickDrag.width + (event.clientX - quickDrag.x) * 2;
+    quickSize.height = quickDrag.height + event.clientY - quickDrag.y;
+    clampQuickSize();
+  });
+  const finishQuickResize = () => { quickDrag = null; };
+  quickResize?.addEventListener("pointerup", finishQuickResize);
+  quickResize?.addEventListener("pointercancel", finishQuickResize);
+  quickResize?.addEventListener("lostpointercapture", finishQuickResize);
+  quickResize?.addEventListener("keydown", (event) => {
+    const step = event.shiftKey ? 50 : 20;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    const bounds = $("mvQuick").getBoundingClientRect();
+    quickSize.width = (quickSize.width ?? bounds.width) +
+      (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0);
+    quickSize.height = (quickSize.height ?? bounds.height) +
+      (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0);
+    clampQuickSize();
+    event.preventDefault();
+  });
+
+  function queueMixerGain(channelId, gain) {
+    mixerGainDrafts.set(channelId, gain);
+    if (mixerGainTimers.has(channelId)) return;
+    mixerGainTimers.set(channelId, window.setTimeout(() => {
+      mixerGainTimers.delete(channelId);
+      sendMixerCommand(channelId, "MIXER_SET_GAIN", { gain: mixerGainDrafts.get(channelId) });
+    }, 80));
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    const gain = event.target.closest?.("[data-mv-mixer-gain]");
+    if (gain) mixerDragId = gain.dataset.mvMixerGain;
+  });
+  document.addEventListener("pointercancel", (event) => {
+    if (event.target.closest?.("[data-mv-mixer-gain]")) mixerDragId = "";
   });
 
   // 볼륨 슬라이더. input 마다 전체를 다시 그리면 끌 때 끊기므로, 끄는 동안에는
@@ -2855,6 +2955,9 @@
     // ⚠ 채널별 volume 값은 그대로 둔다. focus mode 를 껐을 때 이전 믹스를
     //   그대로 되찾을 수 있어야 한다. 바뀌는 것은 '지금 소리를 내는가' 뿐이다.
     postAllAudio();
+    for (const channel of state.chosen) {
+      if (effectiveMuted(channel.channelId)) clearAudioNotice(channel.channelId);
+    }
     renderVolume();
   });
 
