@@ -939,6 +939,607 @@
       `<div class="mv-vol-list">${rows}</div>`;
   }
 
+  // ── 멀티뷰 라이브 싱크 ──────────────────────────────────────────────────
+  const syncStats = new Map();
+  const syncReadyAt = new Map();
+  const syncGeneration = new Map();
+  const syncSeekAt = new Map();
+  const syncRates = new Map();
+  const pendingSyncCommands = new Map();
+  const syncRetryAt = new Map();
+  const syncDiagnostics = DIAGNOSTICS.createRecorder();
+  let syncCommandSeq = 0;
+  let syncCongestion = { active: false, since: 0 };
+  let syncTimer = 0;
+  let syncNotice = "";
+  let syncDiagnosticsStartedAt = 0;
+  let syncDiagnosticsNotice = "";
+
+  function syncChannelName(channelId) {
+    return state.chosen.find((channel) => channel.channelId === channelId)?.channelName || "";
+  }
+
+  function recordSyncDiagnostic(type, fields = {}, timestamp) {
+    if (!state.sync.diagnosticsEnabled) return false;
+    const at = Number.isFinite(timestamp) ? timestamp : Date.now();
+    if (!syncDiagnosticsStartedAt) syncDiagnosticsStartedAt = at;
+    return syncDiagnostics.add({
+      type,
+      timestamp: at,
+      elapsedMs: Math.max(0, at - syncDiagnosticsStartedAt),
+      ...fields,
+    });
+  }
+
+  function diagnosticDesiredValue(value) {
+    if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+    if (!value || typeof value !== "object") return null;
+    const safe = {};
+    for (const key of ["currentTime", "manual", "offset", "commitOffset"]) {
+      if (typeof value[key] === "boolean" || Number.isFinite(value[key])) safe[key] = value[key];
+    }
+    return safe;
+  }
+
+  function recordSyncSample(channelId, stats, timestamp) {
+    if (!state.sync.diagnosticsEnabled) return;
+    const referenceChannelId = state.sync.referenceChannelId;
+    const referenceStats = referenceChannelId === channelId
+      ? stats : syncStats.get(referenceChannelId);
+    const manualOffset = state.sync.manualOffsets[channelId] || 0;
+    const targetDelaySec = SYNC.targetDelay(referenceStats, manualOffset);
+    const syncErrorSec = targetDelaySec !== null && stats.nativeDelaySec !== null
+      ? targetDelaySec - stats.nativeDelaySec : null;
+    const readyAt = syncReadyAt.get(channelId);
+    recordSyncDiagnostic("sample", {
+      channelId,
+      channelName: syncChannelName(channelId),
+      generation: stats.generation,
+      frameStatus: currentStatus(channelId),
+      syncMode: state.sync.mode,
+      referenceChannelId,
+      nativeDelaySec: stats.nativeDelaySec,
+      bufferAheadSec: stats.bufferAheadSec,
+      edgeLagSec: stats.edgeLagSec,
+      playbackRate: stats.playbackRate,
+      syncRateOwned: stats.syncRateOwned,
+      userRateOverride: stats.userRateOverride,
+      audioProtected: isSyncAudioProtected(channelId),
+      manualOffset,
+      targetDelaySec,
+      syncErrorSec,
+      settling: Number.isFinite(readyAt) && timestamp - readyAt < SYNC.LIMITS.settlingMs,
+      congested: state.sync.congested,
+    }, timestamp);
+  }
+
+  function recordReferenceChange(fromChannelId, toChannelId, cause, timestamp = Date.now()) {
+    if (!state.sync.diagnosticsEnabled || fromChannelId === toChannelId) return;
+    recordSyncDiagnostic("reference-change", {
+      fromChannelId: fromChannelId || null,
+      toChannelId: toChannelId || null,
+      cause,
+      fromDelaySec: syncStats.get(fromChannelId)?.nativeDelaySec ?? null,
+      toDelaySec: syncStats.get(toChannelId)?.nativeDelaySec ?? null,
+    }, timestamp);
+  }
+
+  function recordCongestionChange(active, ids, timestamp) {
+    if (!state.sync.diagnosticsEnabled) return;
+    const edgeLagByChannel = {};
+    const affectedChannels = [];
+    for (const id of ids) {
+      const edgeLag = syncStats.get(id)?.edgeLagSec;
+      edgeLagByChannel[id] = Number.isFinite(edgeLag) ? edgeLag : null;
+      if (Number.isFinite(edgeLag) && edgeLag >= SYNC.LIMITS.congestionEdgeSec) {
+        affectedChannels.push(id);
+      }
+    }
+    recordSyncDiagnostic("congestion-change", {
+      active,
+      affectedChannels,
+      edgeLagByChannel,
+    }, timestamp);
+  }
+
+  function diagnosticsPayload(exportedAt = Date.now()) {
+    const startedAt = syncDiagnosticsStartedAt || exportedAt;
+    return DIAGNOSTICS.createExport({
+      records: syncDiagnostics.toArray(),
+      startedAt,
+      exportedAt,
+      channelCount: state.chosen.length,
+      limits: SYNC.LIMITS,
+    });
+  }
+
+  async function copySyncDiagnosticsSummary() {
+    if (!syncDiagnostics.size) return;
+    const text = DIAGNOSTICS.formatSummary(diagnosticsPayload().summary);
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        if (!document.execCommand?.("copy")) throw new Error("copy failed");
+        textarea.remove();
+      }
+      syncDiagnosticsNotice = "진단 요약을 복사했습니다.";
+    } catch {
+      syncDiagnosticsNotice = "진단 요약을 복사하지 못했습니다.";
+    }
+    renderSync(true);
+  }
+
+  function diagnosticsFilename(timestamp) {
+    const date = new Date(timestamp);
+    const part = (value) => String(value).padStart(2, "0");
+    return `chzzk-multiview-sync-diagnostics-${date.getFullYear()}` +
+      `${part(date.getMonth() + 1)}${part(date.getDate())}-` +
+      `${part(date.getHours())}${part(date.getMinutes())}${part(date.getSeconds())}.json`;
+  }
+
+  function exportSyncDiagnostics() {
+    if (!syncDiagnostics.size) return;
+    const exportedAt = Date.now();
+    const blob = new Blob([JSON.stringify(diagnosticsPayload(exportedAt), null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = diagnosticsFilename(exportedAt);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    syncDiagnosticsNotice = "진단 JSON을 저장했습니다.";
+    renderSync(true);
+  }
+
+  function clearSyncDiagnostics() {
+    syncDiagnostics.clear();
+    syncDiagnosticsStartedAt = Date.now();
+    syncDiagnosticsNotice = "진단 기록을 초기화했습니다.";
+    renderSync(true);
+  }
+
+  function setSyncDiagnosticsEnabled(enabled) {
+    state.sync.diagnosticsEnabled = enabled === true;
+    if (state.sync.diagnosticsEnabled && !syncDiagnosticsStartedAt) {
+      syncDiagnosticsStartedAt = Date.now();
+    }
+    syncDiagnosticsNotice = "";
+    updateSyncPolling();
+    renderSync(true);
+  }
+
+  document.addEventListener("click", (event) => {
+    const path = event.composedPath?.() || [];
+    if (!path.some((node) => node?.id === "mvSyncPop")) return;
+    const control = path.find((node) => typeof node?.id === "string" &&
+      node.id.startsWith("mvSyncDiagnostics"));
+    if (!control) return;
+    if (control.id === "mvSyncDiagnostics") {
+      queueMicrotask(() => setSyncDiagnosticsEnabled(control.checked));
+      return;
+    }
+    if (control.id === "mvSyncDiagnosticsCopy") {
+      document.activeElement?.blur?.();
+      void copySyncDiagnosticsSummary();
+      return;
+    }
+    if (control.id === "mvSyncDiagnosticsExport") {
+      document.activeElement?.blur?.();
+      exportSyncDiagnostics();
+      return;
+    }
+    if (control.id === "mvSyncDiagnosticsClear") {
+      document.activeElement?.blur?.();
+      clearSyncDiagnostics();
+    }
+  }, true);
+
+  function sendSync(channelId, type, extra = {}) {
+    if (currentStatus(channelId) !== "ready") return false;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return false;
+    try {
+      frame.contentWindow.postMessage({ source: MULTIVIEW_MESSAGE, type, channelId, ...extra }, CHZZK_ORIGIN);
+      return true;
+    } catch { return false; }
+  }
+
+  function pendingSync(channelId, command) {
+    return [...pendingSyncCommands.values()].find((entry) =>
+      entry.channelId === channelId && entry.command === command);
+  }
+
+  function cancelPendingSync(channelId) {
+    for (const [id, entry] of pendingSyncCommands) {
+      if (entry.channelId !== channelId) continue;
+      clearTimeout(entry.timeout);
+      pendingSyncCommands.delete(id);
+    }
+  }
+
+  function sendSyncCommand(channelId, command, type, extra = {}, desiredValue = null) {
+    if (pendingSync(channelId, command) || Date.now() < (syncRetryAt.get(`${channelId}:${command}`) || 0)) return false;
+    const commandId = ++syncCommandSeq;
+    const entry = { commandId, channelId, command, sentAt: Date.now(), desiredValue,
+      generation: syncGeneration.get(channelId) ?? null, timeout: 0 };
+    if (!sendSync(channelId, type, { ...extra, commandId })) return false;
+    recordSyncDiagnostic("command", {
+      channelId,
+      channelName: syncChannelName(channelId),
+      commandId,
+      command,
+      desiredValue: diagnosticDesiredValue(desiredValue),
+      generation: entry.generation,
+      referenceChannelId: state.sync.referenceChannelId,
+      manualOffset: state.sync.manualOffsets[channelId] || 0,
+    }, entry.sentAt);
+    entry.timeout = window.setTimeout(() => {
+      if (pendingSyncCommands.get(commandId) !== entry) return;
+      pendingSyncCommands.delete(commandId);
+      const timedOutAt = Date.now();
+      syncRetryAt.set(`${channelId}:${command}`, timedOutAt + SYNC.LIMITS.commandRetryMs);
+      recordSyncDiagnostic("command-timeout", {
+        channelId,
+        channelName: syncChannelName(channelId),
+        commandId,
+        command,
+        generation: entry.generation,
+        waitedMs: Math.max(0, timedOutAt - entry.sentAt),
+      }, timedOutAt);
+      if (command === "nudge" || (command === "seek" && extra.manual)) {
+        syncNotice = "보정 응답이 없어 적용하지 못했습니다.";
+        renderSync();
+      }
+    }, SYNC.LIMITS.commandTimeoutMs);
+    pendingSyncCommands.set(commandId, entry);
+    return true;
+  }
+
+  function finishSyncCommand(channelId, data) {
+    if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
+        !["seek", "nudge", "rate", "reset-rate"].includes(data.command) ||
+        typeof data.applied !== "boolean" ||
+        !(data.reason === null || (typeof data.reason === "string" &&
+          ["no-video", "paused", "not-ready", "seeking", "ad", "range", "cooldown",
+            "user-rate", "too-far", "invalid-state", "exception"].includes(data.reason))) ||
+        !Number.isInteger(data.generation) || data.generation < 0 || data.generation > 1000000 ||
+        (data.actualCurrentTime !== null &&
+          (!Number.isFinite(data.actualCurrentTime) || data.actualCurrentTime < 0)) ||
+        (data.actualPlaybackRate !== null &&
+          (!Number.isFinite(data.actualPlaybackRate) || data.actualPlaybackRate < 0.5 ||
+            data.actualPlaybackRate > 2))) return;
+    const entry = pendingSyncCommands.get(data.commandId);
+    if (!entry || entry.channelId !== channelId || entry.command !== data.command ||
+        entry.generation !== data.generation) return;
+    if (data.applied && entry.command === "rate" &&
+        (!Number.isFinite(data.actualPlaybackRate) ||
+          Math.abs(data.actualPlaybackRate - entry.desiredValue) > SYNC.LIMITS.userRateEpsilon)) return;
+    const receivedAt = Date.now();
+    recordSyncDiagnostic("command-result", {
+      channelId,
+      channelName: syncChannelName(channelId),
+      commandId: data.commandId,
+      command: data.command,
+      applied: data.applied,
+      reason: data.reason,
+      actualCurrentTime: data.actualCurrentTime,
+      actualPlaybackRate: data.actualPlaybackRate,
+      generation: data.generation,
+      roundTripMs: Math.max(0, receivedAt - entry.sentAt),
+    }, receivedAt);
+    clearTimeout(entry.timeout);
+    pendingSyncCommands.delete(data.commandId);
+    const retryKey = `${channelId}:${entry.command}`;
+    if (!data.applied) {
+      syncRetryAt.set(retryKey, Date.now() + SYNC.LIMITS.commandRetryMs);
+      if (entry.command === "nudge" || (entry.command === "seek" && entry.desiredValue?.manual)) {
+        syncNotice = `보정을 적용하지 못했습니다 (${data.reason || "상태 확인 필요"}).`;
+      }
+    } else {
+      syncRetryAt.delete(retryKey);
+      if (entry.command === "seek" || entry.command === "nudge") syncSeekAt.set(channelId, Date.now());
+      if (entry.command === "nudge") {
+        state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        syncNotice = "수동 보정을 적용했습니다.";
+      }
+      if (entry.command === "seek" && entry.desiredValue?.commitOffset) {
+        state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        syncNotice = "보정값을 초기화했습니다.";
+      }
+      if (entry.command === "rate") {
+        syncRates.set(channelId, data.actualPlaybackRate);
+        if (state.sync.mode !== "auto") resetSyncRate(channelId);
+      }
+      if (entry.command === "reset-rate") {
+        syncRates.delete(channelId);
+        const stats = syncStats.get(channelId);
+        if (stats) syncStats.set(channelId, {
+          ...stats,
+          playbackRate: data.actualPlaybackRate,
+          syncRateOwned: false,
+          userRateOverride: false,
+        });
+      }
+    }
+    updateSyncPolling();
+    renderSync();
+  }
+
+  function resetSyncRate(channelId) {
+    const pendingRate = pendingSync(channelId, "rate");
+    const frameOwnsRate = syncStats.get(channelId)?.syncRateOwned === true;
+    if (!syncRates.has(channelId) && !pendingRate && !frameOwnsRate) return;
+    if (pendingRate) {
+      clearTimeout(pendingRate.timeout);
+      pendingSyncCommands.delete(pendingRate.commandId);
+    }
+    sendSyncCommand(channelId, "reset-rate", "RESET_SYNC_RATE");
+  }
+
+  function resetAllSyncRates() {
+    for (const id of state.chosen.map((c) => c.channelId)) resetSyncRate(id);
+  }
+
+  function clearChannelSync(channelId, removeOffset = false) {
+    resetSyncRate(channelId);
+    cancelPendingSync(channelId);
+    syncStats.delete(channelId);
+    syncReadyAt.delete(channelId);
+    syncGeneration.delete(channelId);
+    syncSeekAt.delete(channelId);
+    for (const command of ["seek", "nudge", "rate", "reset-rate"]) syncRetryAt.delete(`${channelId}:${command}`);
+    syncRates.delete(channelId);
+    if (removeOffset) delete state.sync.manualOffsets[channelId];
+    if (state.sync.referenceChannelId === channelId) {
+      state.sync.referenceChannelId = null;
+    }
+  }
+
+  function syncEligibleIds(now = Date.now(), settled = false) {
+    return state.chosen.map((c) => c.channelId).filter((id) =>
+      currentStatus(id) === "ready" &&
+      SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled));
+  }
+
+  function selectSyncReference(now = Date.now()) {
+    const ids = syncEligibleIds(now);
+    const current = state.sync.referenceChannelId;
+    if (state.sync.mode !== "auto" && current && ids.includes(current)) return current;
+    const next = SYNC.reference(ids, syncStats, syncReadyAt, current, now);
+    if (next && next !== current) {
+      recordReferenceChange(current, next, state.sync.mode === "auto" ? "auto" : "manual", now);
+      state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, next,
+        state.chosen.map((c) => c.channelId));
+      state.sync.referenceChannelId = next;
+      for (const c of state.chosen) cancelPendingSync(c.channelId);
+      resetAllSyncRates();
+    }
+    return next;
+  }
+
+  function requestSyncStats() {
+    for (const id of state.chosen.map((c) => c.channelId)) {
+      if (currentStatus(id) === "ready") sendSync(id, "REQUEST_FRAME_SYNC_STATS");
+    }
+  }
+
+  function syncPanelOpen() {
+    return $("mvSyncPop")?.hidden === false;
+  }
+
+  function updateSyncPolling() {
+    const frameOwnsRate = state.chosen.some((c) =>
+      syncStats.get(c.channelId)?.syncRateOwned === true);
+    const needed = !document.hidden && (syncPanelOpen() || state.sync.mode === "auto" ||
+      pendingSyncCommands.size > 0 || syncRates.size > 0 || frameOwnsRate ||
+      state.sync.diagnosticsEnabled);
+    if (!needed && syncTimer) {
+      clearInterval(syncTimer);
+      syncTimer = 0;
+    }
+    if (needed && !syncTimer) {
+      requestSyncStats();
+      syncTimer = window.setInterval(syncTick, SYNC.LIMITS.sampleMs);
+    }
+  }
+
+  function setSyncRate(id, rate) {
+    if (rate === 1) {
+      resetSyncRate(id);
+      return;
+    }
+    if (pendingSync(id, "reset-rate")) return;
+    if (syncRates.get(id) === rate) return;
+    sendSyncCommand(id, "rate", "APPLY_SYNC_RATE", { rate }, rate);
+  }
+
+  function alignSync(ids = null, manual = false, offsetOverrides = null,
+    allowAudioProtectedSeek = false) {
+    const now = Date.now();
+    const ref = selectSyncReference(now);
+    if (!ref || now - (syncReadyAt.get(ref) || now) < SYNC.LIMITS.settlingMs) {
+      syncNotice = "기준 채널의 재생 정보가 준비되지 않았습니다.";
+      renderSync();
+      return;
+    }
+    const refStats = syncStats.get(ref);
+    let changed = 0;
+    let partial = 0;
+    let protectedCount = 0;
+    for (const id of ids || syncEligibleIds(now)) {
+      if (id === ref || !SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now)) continue;
+      if (isSyncAudioProtected(id) && !allowAudioProtectedSeek) {
+        protectedCount += 1;
+        continue;
+      }
+      if (now - (syncSeekAt.get(id) || 0) < (manual ? 250 : SYNC.LIMITS.seekCooldownMs)) continue;
+      const requestedOffset = offsetOverrides && Object.hasOwn(offsetOverrides, id)
+        ? offsetOverrides[id] : state.sync.manualOffsets[id] || 0;
+      const delay = SYNC.targetDelay(refStats, requestedOffset);
+      const target = SYNC.seekTarget(syncStats.get(id), delay, manual ? 0.05 : SYNC.LIMITS.seekThresholdSec);
+      if (target === null) {
+        if (offsetOverrides && Math.abs(syncStats.get(id).nativeDelaySec - delay) < 0.05) {
+          state.sync.manualOffsets[id] = requestedOffset;
+        }
+        continue;
+      }
+      const withinOneSeek = Math.abs(syncStats.get(id).nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec;
+      if (sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
+        { currentTime: target, deltaSec: target - syncStats.get(id).currentTime, manual },
+        { currentTime: target, manual, offset: requestedOffset,
+          commitOffset: !!offsetOverrides && withinOneSeek })) {
+        changed += 1;
+        if (offsetOverrides && !withinOneSeek) partial += 1;
+      }
+    }
+    syncNotice = partial ? "한 번에 최대 4초만 이동합니다. 남은 차이는 다시 보정해 주세요." :
+      changed ? `${changed}개 채널에 보정을 요청했습니다.` :
+        protectedCount ? "소리가 켜진 채널은 자동 이동하지 않았습니다." :
+        "보정 가능한 차이가 없거나 잠시 기다려야 합니다.";
+    renderSync();
+  }
+
+  function syncTick() {
+    if (document.hidden) {
+      resetAllSyncRates();
+      return;
+    }
+    const now = Date.now();
+    requestSyncStats();
+    if (state.sync.mode !== "auto") resetAllSyncRates();
+    const ids = syncEligibleIds(now);
+    if (!state.sync.referenceChannelId) selectSyncReference(now);
+    const settledIds = syncEligibleIds(now, true);
+    const fresh = new Map(settledIds.map((id) => [id, syncStats.get(id)]));
+    const previousCongestion = syncCongestion.active;
+    syncCongestion = SYNC.congestion(syncCongestion, fresh, settledIds, now);
+    if (syncCongestion.active !== previousCongestion) {
+      recordCongestionChange(syncCongestion.active, settledIds, now);
+    }
+    state.sync.congested = syncCongestion.active;
+    if (state.sync.mode === "auto") {
+      const ref = selectSyncReference(now);
+      const refStats = ref && syncStats.get(ref);
+      for (const c of state.chosen) {
+        const id = c.channelId;
+        if (!refStats || !settledIds.includes(ref) || id === ref || !ids.includes(id) ||
+            now - (syncReadyAt.get(id) || now) < SYNC.LIMITS.settlingMs ||
+            state.sync.congested ||
+            syncStats.get(id).userRateOverride ||
+            (syncStats.get(id).playbackRate !== null &&
+              Math.abs(syncStats.get(id).playbackRate - 1) > SYNC.LIMITS.userRateEpsilon &&
+              !syncStats.get(id).syncRateOwned)) {
+          resetSyncRate(id);
+          continue;
+        }
+        const delay = SYNC.targetDelay(refStats, state.sync.manualOffsets[id] || 0);
+        const error = delay - syncStats.get(id).nativeDelaySec;
+        if (Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
+            now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs) {
+          const target = SYNC.seekTarget(syncStats.get(id), delay);
+          // 자동 모드에서 기준보다 뒤처진 채널은 seek로 앞당기지 않는다.
+          if (!isSyncAudioProtected(id) && target !== null &&
+              target < syncStats.get(id).currentTime) {
+            sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
+              { currentTime: target, deltaSec: target - syncStats.get(id).currentTime },
+              { currentTime: target, manual: false });
+          }
+        }
+        setSyncRate(id, SYNC.rateFor(error, syncStats.get(id).syncRateOwned));
+      }
+    }
+    renderSync();
+    updateSyncPolling();
+  }
+
+  function fmtSyncSeconds(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)}초` : "-";
+  }
+
+  function renderSync(force = false) {
+    const value = $("mvSyncValue");
+    if (value) value.textContent = state.sync.mode === "auto" ? "자동" :
+      state.sync.mode === "manual" ? "수동" : "꺼짐";
+    const panel = $("mvSyncPop");
+    if (!panel || (panel.hidden && !force)) return;
+    if (!force && panel.contains(document.activeElement) && document.activeElement !== panel) return;
+    const now = Date.now();
+    const ref = state.sync.referenceChannelId;
+    const diagnosticsElapsed = syncDiagnosticsStartedAt
+      ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
+    const diagnosticsStatus = state.sync.diagnosticsEnabled
+      ? `기록 중 · ${DIAGNOSTICS.formatDuration(diagnosticsElapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
+      : syncDiagnostics.size
+        ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
+        : "기록 안 함";
+    const rows = state.chosen.map((c) => {
+      const id = c.channelId;
+      const status = currentStatus(id);
+      const st = syncStats.get(id);
+      const fresh = status === "ready" && st && now - st.receivedAt <= SYNC.LIMITS.staleMs;
+      const ready = fresh && SYNC.eligible(st, syncReadyAt.get(id), now);
+      const settling = ready && now - syncReadyAt.get(id) < SYNC.LIMITS.settlingMs;
+      const label = status === "ended" ? "종료" : status === "error" || status === "ui-error" ? "오류" :
+        !fresh ? "측정 대기" : st.paused ? "일시정지" : st.readyState < 2 ? "재생 준비 중" :
+        !ready ? "측정 불가" : settling ? "안정화 중" :
+        state.sync.congested ? "연결 지연" : id === ref ? "기준" :
+        st.userRateOverride ||
+        (Math.abs((st.playbackRate || 1) - 1) > SYNC.LIMITS.userRateEpsilon && !st.syncRateOwned)
+          ? "수동 속도" : st.syncRateOwned ? "자동 보정 중" : "준비됨";
+      const offset = state.sync.manualOffsets[id] || 0;
+      const nudgePending = !!pendingSync(id, "nudge") ||
+        !!pendingSync(id, "seek")?.desiredValue?.commitOffset;
+      return `<div class="mv-sync-row">` +
+        `<div class="mv-sync-row-head"><strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong>` +
+        `<span>${esc(label)}</span></div>` +
+        `<div class="mv-sync-metrics"><span>지연 ${fmtSyncSeconds(st?.nativeDelaySec)}</span>` +
+        `<span>버퍼 ${fmtSyncSeconds(st?.bufferAheadSec)}</span>` +
+        `<span>엣지 ${fmtSyncSeconds(st?.edgeLagSec)}</span>` +
+        `<span>속도 ${Number.isFinite(st?.playbackRate) ? st.playbackRate.toFixed(2) + "×" : "-"}</span></div>` +
+        `<div class="mv-sync-controls">` +
+        `<button type="button" data-mv-sync-ref="${id}" ${!ready || id === ref ? "disabled" : ""}>기준</button>` +
+        `<button type="button" data-mv-sync-offset="${id}" data-step="-0.5" ${!ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.5</button>` +
+        `<button type="button" data-mv-sync-offset="${id}" data-step="-0.1" ${!ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.1</button>` +
+        `<output>${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초${nudgePending ? " · 적용 중" : ""}</output>` +
+        `<button type="button" data-mv-sync-offset="${id}" data-step="0.1" ${!ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.1</button>` +
+        `<button type="button" data-mv-sync-offset="${id}" data-step="0.5" ${!ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.5</button>` +
+        `<button type="button" data-mv-sync-clear="${id}" ${!offset || nudgePending ? "disabled" : ""} aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
+        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` +
+        `</div></div>`;
+    }).join("");
+    panel.innerHTML = `<div class="mv-sync-actions">` +
+      `<label><input type="checkbox" id="mvSyncAuto" ${state.sync.mode === "auto" ? "checked" : ""}> 자동 싱크</label>` +
+      `<button type="button" id="mvSyncAlign">느린 채널에 맞추기</button>` +
+      `<button type="button" id="mvSyncClear">보정 초기화</button></div>` +
+      (state.sync.congested ? `<p class="mv-sync-warning">여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` : "") +
+      (syncNotice ? `<p class="mv-sync-notice" role="status">${esc(syncNotice)}</p>` : "") +
+      `<div class="mv-sync-list">${rows}</div>` +
+      `<section class="mv-sync-diagnostics" aria-label="싱크 진단">` +
+      `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
+      `<label><input type="checkbox" id="mvSyncDiagnostics"` +
+      `${state.sync.diagnosticsEnabled ? " checked" : ""}> 싱크 진단 기록</label></div>` +
+      `<p class="mv-sync-diagnostics-status">${esc(diagnosticsStatus)}</p>` +
+      `<div class="mv-sync-diagnostics-actions">` +
+      `<button type="button" id="mvSyncDiagnosticsCopy"${syncDiagnostics.size ? "" : " disabled"}>요약 복사</button>` +
+      `<button type="button" id="mvSyncDiagnosticsExport"${syncDiagnostics.size ? "" : " disabled"}>JSON 내보내기</button>` +
+      `<button type="button" id="mvSyncDiagnosticsClear"${syncDiagnostics.size ? "" : " disabled"}>초기화</button>` +
+      `</div>` +
+      (syncDiagnosticsNotice
+        ? `<p class="mv-sync-diagnostics-notice" role="status">${esc(syncDiagnosticsNotice)}</p>` : "") +
+      `</section>`;
+  }
+
   // ── 통합 스트림 정보 ────────────────────────────────────────────────────
   // ⚠ 부모는 통계를 계산하지 않는다. 교차 출처 iframe 안의 플레이어는 부모가
   //   들여다볼 수 없다. 각 칸에 물어보고 받은 값만 보여 준다.
