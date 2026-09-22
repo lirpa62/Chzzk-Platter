@@ -838,6 +838,70 @@ const ALL = ["a", "b", "c", "d"];
   );
 }
 
+// 12) 싱크 패널 버튼을 눌러도 포커스가 유지돼 깜빡이지 않는다.
+{
+  // ⚠ 예전에는 blur() 로 포커스를 없앴다. 그러면 renderSync 의 '패널에 포커스가
+  //   있으면 건너뛴다' 가드가 풀려 목록 전체가 커서 아래에서 교체된다.
+  const handlers = SRC.slice(
+    SRC.indexOf('const syncRef = target.closest?.("[data-mv-sync-ref]")'),
+    SRC.indexOf(
+      'const syncScopeBtn = target.closest?.("[data-mv-sync-scope]")',
+    ),
+  );
+  assert.doesNotMatch(
+    handlers,
+    /document\.activeElement\?\.blur\?\.\(\)/,
+    "기준·보정 버튼이 아직 포커스를 없앤다(깜빡임 원인)",
+  );
+  for (const want of [
+    /renderSyncKeepingFocus\(`\[data-mv-sync-ref=/,
+    /renderSyncKeepingFocus\(\s*`\[data-mv-sync-offset=/,
+    /renderSyncKeepingFocus\(`\[data-mv-sync-clear=/,
+  ]) {
+    assert.match(
+      handlers,
+      want,
+      `버튼이 포커스를 지키며 다시 그리지 않는다: ${want}`,
+    );
+  }
+  // helper 가 실제로 포커스를 되돌려 준다.
+  const keep = sliceFn("renderSyncKeepingFocus");
+  assert.match(keep, /renderSync\(true\)/, "강제로 다시 그리지 않는다");
+  assert.match(
+    keep,
+    /focus\(\{ preventScroll: true \}\)/,
+    "포커스를 되돌리지 않는다",
+  );
+  assert.match(
+    keep,
+    /panel\.contains\(active\)/,
+    "패널 밖에서 눌렀을 때까지 포커스를 옮긴다",
+  );
+
+  // +/- 가 어느 방향인지 글자로 드러난다.
+  const render = SRC.slice(SRC.indexOf("function renderSync"));
+  assert.match(render, /0\.1초 앞으로/, "− 버튼의 의미가 없다");
+  assert.match(render, /0\.1초 뒤로/, "+ 버튼의 의미가 없다");
+  assert.match(render, /−는 기준보다 앞으로/, "안내에 방향 설명이 없다");
+  // 방향이 뒤바뀌지 않았는지(보정값이 커지면 더 늦게 재생된다).
+  // ⚠ data-step="0.5" 는 "-0.5" 안에도 들어 있다. 따옴표 앞을 함께 잡아
+  //   양수/음수 버튼을 정확히 구분한다(처음엔 이걸 놓쳐 뒤집어도 통과했다).
+  for (const [step, want, bad] of [
+    ['="0.5"', "뒤로", "앞으로"],
+    ['="0.1"', "뒤로", "앞으로"],
+    ['="-0.5"', "앞으로", "뒤로"],
+    ['="-0.1"', "앞으로", "뒤로"],
+  ]) {
+    const at = render.indexOf(`data-step${step} `);
+    assert.ok(at > 0, `data-step${step} 버튼을 찾지 못했다`);
+    const markup = render.slice(at, render.indexOf("</button>", at));
+    assert.ok(
+      markup.includes(want) && !markup.includes(bad),
+      `data-step${step} 의 방향 설명이 '${want}' 가 아니다: ${markup.slice(0, 90)}`,
+    );
+  }
+}
+
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");
 console.log("  PASS 재생 속도 표시(느리게/기본/빠르게)와 시간 보정 구분");
 console.log("  PASS 같은 자리 교체의 선택 계승과 보정값 초기화");
