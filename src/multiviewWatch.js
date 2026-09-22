@@ -1797,6 +1797,9 @@
     const panel = pop.querySelector(".mv-pop-panel");
     const open = panel.hidden;
     closePopovers(open ? name : null);
+    // 새로 여는 팝오버는 채널 관리와 겹치지 않게 한다(숨기기만 하므로 교체
+    // 작업·검색어·크기 같은 Quick 상태는 그대로 남는다).
+    if (open) closeQuick();
     panel.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
     // 볼륨·통계는 열려 있는 동안만 내용을 유지한다. 통계는 닫히면 폴링도 멈춘다.
@@ -2070,6 +2073,9 @@
   function openQuick({ replaceChannelId = "", origin = "" } = {}) {
     quickReplaceId = cells.has(replaceChannelId) ? replaceChannelId : "";
     quickReplaceOrigin = quickReplaceId ? origin : "";
+    // 헤더 팝오버와 채널 관리는 동시에 떠 있지 않는다(둘 다 화면 위를 덮는다).
+    // ⚠ closeQuick 은 숨기기만 하므로 여기서 불러도 되돌아오지 않는다(재귀 없음).
+    closePopovers(null);
     $("mvQuick").hidden = false;
     clampQuickSize();
     renderQuick();

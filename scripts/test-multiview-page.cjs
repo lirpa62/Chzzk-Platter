@@ -877,6 +877,89 @@ const checks = [];
   );
 
   await test(
+    "헤더 팝오버와 채널 관리는 동시에 열리지 않는다",
+    `const quick=document.getElementById('mvQuick');
+     const popOf=(n)=>document.querySelector('[data-mv-pop="'+n+'"] .mv-pop-panel');
+     const toggleOf=(n)=>document.querySelector('[data-mv-pop-toggle="'+n+'"]');
+     const beforeSrcs=window.frameSrcs.length;
+     const beforeFrames=[...document.querySelectorAll('iframe')];
+     const beforeChosen=document.querySelectorAll('.mv-cell').length;
+
+     // 1) mv-pop 열림 → 채널 관리 열기 → mv-pop 닫힘
+     toggleOf('main').click();
+     check(!popOf('main').hidden,'메인 팝오버가 열리지 않았다');
+     document.getElementById('mvBack').click();
+     await wait(60);
+     check(!quick.hidden,'채널 관리가 열리지 않았다');
+     check(popOf('main').hidden,'채널 관리를 열었는데 메인 팝오버가 남아 있다');
+     check(toggleOf('main').getAttribute('aria-expanded')==='false',
+       'aria-expanded 가 정리되지 않았다');
+
+     // 2) 채널 관리 열림 → 볼륨 팝오버 → 채널 관리 닫힘
+     toggleOf('volume').click();
+     await wait(60);
+     check(!popOf('volume').hidden,'볼륨 팝오버가 열리지 않았다');
+     check(quick.hidden,'볼륨 팝오버를 열었는데 채널 관리가 남아 있다');
+
+     // 3) 채널 관리 → 싱크 팝오버
+     document.getElementById('mvBack').click();
+     await wait(60);
+     check(!quick.hidden && popOf('volume').hidden,'채널 관리 재진입이 안 됐다');
+     document.getElementById('mvSyncBtn').click();
+     await wait(60);
+     check(!popOf('sync').hidden,'싱크 팝오버가 열리지 않았다');
+     check(quick.hidden,'싱크 팝오버를 열었는데 채널 관리가 남아 있다');
+
+     // 4) 통계 팝오버 → 채널 관리: stats 폴링이 멈춰야 한다
+     document.getElementById('mvStatsBtn').click();
+     await wait(60);
+     check(!popOf('stats').hidden,'통계 팝오버가 열리지 않았다');
+     window.__statsPollingStopped=false;
+     document.getElementById('mvBack').click();
+     await wait(60);
+     check(popOf('stats').hidden,'채널 관리를 열었는데 통계 패널이 남아 있다');
+
+     // 5) Escape 는 둘 다 닫는다
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     await wait(60);
+     check(quick.hidden,'Escape 로 채널 관리가 닫히지 않았다');
+     check(popOf('sync').hidden && popOf('stats').hidden,'Escape 로 팝오버가 닫히지 않았다');
+
+     // Quick 상태(교체 대상·탭)는 패널 전환만으로 초기화되지 않는다
+     check(window.frameSrcs.length===beforeSrcs,
+       '패널 전환으로 iframe src 가 바뀌었다: '+(window.frameSrcs.length-beforeSrcs));
+     const afterFrames=[...document.querySelectorAll('iframe')];
+     check(afterFrames.length===beforeFrames.length &&
+       afterFrames.every((f,i)=>f===beforeFrames[i]),'iframe 노드가 교체됐다');
+     check(document.querySelectorAll('.mv-cell').length===beforeChosen,'칸 수가 바뀌었다');`,
+  );
+
+  await test(
+    "패널을 20회 번갈아 열어도 프레임을 다시 걸지 않는다",
+    `const beforeSrcs=window.frameSrcs.length;
+     const beforeFrames=[...document.querySelectorAll('iframe')];
+     const beforeMain=document.getElementById('mvMainValue').textContent;
+     const beforeLayout=document.getElementById('mvLayoutValue').textContent;
+     const beforeSide=document.getElementById('mvSideValue').textContent;
+     for(let i=0;i<20;i++){
+       document.getElementById('mvBack').click();
+       await wait(10);
+       document.querySelector('[data-mv-pop-toggle="'+(i%2?'volume':'layout')+'"]').click();
+       await wait(10);
+     }
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     await wait(40);
+     check(window.frameSrcs.length===beforeSrcs,
+       '반복 전환으로 iframe src 가 바뀌었다: '+(window.frameSrcs.length-beforeSrcs));
+     const afterFrames=[...document.querySelectorAll('iframe')];
+     check(afterFrames.length===beforeFrames.length &&
+       afterFrames.every((f,i)=>f===beforeFrames[i]),'반복 전환으로 iframe 노드가 교체됐다');
+     check(document.getElementById('mvMainValue').textContent===beforeMain,'메인 채널이 바뀌었다');
+     check(document.getElementById('mvLayoutValue').textContent===beforeLayout,'배치가 바뀌었다');
+     check(document.getElementById('mvSideValue').textContent===beforeSide,'채팅 위치가 바뀌었다');`,
+  );
+
+  await test(
     "싱크 패널은 세션 안에서만 켜지고 프레임을 다시 걸지 않는다",
     `const before=window.frameSrcs.length;
      document.getElementById('mvSyncBtn').click();
