@@ -10,6 +10,8 @@
 //  - 상한 N 인데 N 이하가 없으면 → 가장 낮은 트랙(상한을 넘겨 트는 것보다 낫다)
 
 const assert = require("assert");
+const fs = require("node:fs");
+const path = require("node:path");
 
 // applyMaxQuality 의 선택부와 같은 규칙.
 function pickTrack(heights, cap) {
@@ -84,13 +86,13 @@ console.log("\n[정책] 메인만 고화질 설정에 따라 칸마다 다른 �
 {
   // multiviewWatch.js 의 frameUrl / postState 와 같은 규칙.
   const urlQuality = (isMain, high) => (isMain && high ? null : "480");
-  const postQuality = (isMain, high) => (isMain && high ? "high" : "480");
+  const postQuality = (isMain, high) => (isMain && high ? "highest" : "cap-480");
 
   const cases = [
-    ["켜짐 · 메인", true, true, null, "high"],
-    ["켜짐 · 보조", false, true, "480", "480"],
-    ["꺼짐 · 메인", true, false, "480", "480"],
-    ["꺼짐 · 보조", false, false, "480", "480"],
+    ["켜짐 · 메인", true, true, null, "highest"],
+    ["켜짐 · 보조", false, true, "480", "cap-480"],
+    ["꺼짐 · 메인", true, false, "480", "cap-480"],
+    ["꺼짐 · 보조", false, false, "480", "cap-480"],
   ];
   for (const [label, isMain, high, wantUrl, wantPost] of cases) {
     const u = urlQuality(isMain, high);
@@ -113,9 +115,9 @@ console.log("\n[정책] 메인만 고화질 설정에 따라 칸마다 다른 �
 console.log("\n[수동 존중] 신뢰된 조작이 있을 때만 사용자 선택으로 본다");
 {
   // audioMixer.js 의 판정과 같은 규칙.
-  const isManual = (cap, selH, setH, userTouched) => {
+  const isManual = (policy, cap, selH, setH, userTouched) => {
     const deviated = cap > 0 ? selH !== setH : selH < setH;
-    const userChose = cap > 0 ? userTouched : true;
+    const userChose = policy !== "none" || cap > 0 ? userTouched : true;
     return setH > 0 && selH > 0 && deviated && userChose;
   };
 
@@ -123,25 +125,54 @@ console.log("\n[수동 존중] 신뢰된 조작이 있을 때만 사용자 선�
     // [설명, 상한, 선택높이, 우리가고정한높이, 신뢰된조작, 기대]
     [
       "상한 480 · 치지직이 1080 으로 되돌림(조작 없음)",
-      480,
+      "cap-480", 480,
       1080,
       480,
       false,
       false,
     ],
-    ["상한 480 · 사용자가 메뉴에서 1080 선택", 480, 1080, 480, true, true],
-    ["상한 480 · 그대로 480", 480, 480, 480, false, false],
-    ["상한 없음 · 더 낮아짐(기존 규칙 유지)", 0, 480, 1080, false, true],
-    ["상한 없음 · 더 높아짐(우리 동작)", 0, 1080, 720, false, false],
+    ["상한 480 · 사용자가 메뉴에서 1080 선택", "cap-480", 480, 1080, 480, true, true],
+    ["상한 480 · 그대로 480", "cap-480", 480, 480, 480, false, false],
+    ["멀티뷰 최고 · 플레이어가 480으로 복귀(조작 없음)", "highest", 0, 480, 1080, false, false],
+    ["멀티뷰 최고 · 사용자가 720 선택", "highest", 0, 720, 1080, true, true],
+    ["일반 상한 없음 · 더 낮아짐(기존 규칙 유지)", "none", 0, 480, 1080, false, true],
+    ["일반 상한 없음 · 더 높아짐(우리 동작)", "none", 0, 1080, 720, false, false],
   ];
-  for (const [label, cap, selH, setH, touched, expected] of cases) {
-    const got = isManual(cap, selH, setH, touched);
+  for (const [label, policy, cap, selH, setH, touched, expected] of cases) {
+    const got = isManual(policy, cap, selH, setH, touched);
     try {
       assert.strictEqual(got, expected);
       console.log(`  PASS ${label}`);
     } catch {
       failed += 1;
       console.log(`  FAIL ${label}: 기대 ${expected}, 실제 ${got}`);
+    }
+  }
+}
+
+console.log("\n[수명주기] 역할·video/source·광고 종료에서만 정책을 다시 확인한다");
+{
+  const root = path.join(__dirname, "..");
+  const content = fs.readFileSync(path.join(root, "src/content.js"), "utf8");
+  const watch = fs.readFileSync(path.join(root, "src/multiviewWatch.js"), "utf8");
+  const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
+  const checks = [
+    [content.includes('"highest", "cap-480"'), "명시적 정책 값"],
+    [/attachMultiviewVideo[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "새 video attach 재확인"],
+    [/onMultiviewSourceReady[\s\S]*?syncVideoGeneration \+= 1[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "같은 video source 변경 재확인"],
+    [/multiviewAdPlaying && !next\) reconcileMultiviewQuality\(\)/.test(content), "광고 종료 재확인"],
+    [/qualityChanged \|\| forceQualityReconcile\) reconcileMultiviewQuality\(\)/.test(content), "역할/부모 요청 재확인"],
+    [/qualityPolicy,/.test(watch), "부모가 명시적 정책 전달"],
+    [/multiviewLifecycleChanged[\s\S]*?maxQualitySetHeight = 0/.test(mixer), "lifecycle에서 수동 존중 상태 초기화"],
+    [!/setInterval\([^)]*reconcileMultiviewQuality/.test(content), "화질 전용 반복 polling 없음"],
+  ];
+  for (const [passed, label] of checks) {
+    try {
+      assert.ok(passed, label);
+      console.log(`  PASS ${label}`);
+    } catch {
+      failed += 1;
+      console.log(`  FAIL ${label}`);
     }
   }
 }

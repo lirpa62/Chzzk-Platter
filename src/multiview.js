@@ -14,6 +14,7 @@
   // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
   // 검색은 입력마다 달라지므로 캐시하지 않는다.
   const LIST_TTL_MS = 20000;
+  const LIVE_LOAD_THRESHOLD_PX = 400;
   const WATCH_PAGE = "multiviewWatch.html";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
@@ -32,6 +33,7 @@
     chatSide: "",
     mainHighQuality: true,
     listCache: new Map(),
+    livePager: null,
   };
 
   const esc = (s) =>
@@ -130,7 +132,6 @@
   const getJson = (url) => SOURCES.getJson(url);
   const normalize = (channel, live) => SOURCES.normalize(channel, live);
   const loadFollowing = () => SOURCES.loadFollowing();
-  const loadAll = () => SOURCES.loadLive();
   const search = (keyword) => SOURCES.searchLive(keyword);
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
@@ -141,8 +142,24 @@
   // 전용 팔로잉 구역은 공용 로더가 맡는다(Quick 패널과 같은 목록을 보게 한다).
   const loadCustomSections = () => SOURCES.loadCustomSections();
 
+  function setupLivePager() {
+    if (!state.livePager) {
+      state.livePager = SOURCES.createLivePager({ ttlMs: LIST_TTL_MS });
+    }
+    return state.livePager;
+  }
+
   async function listFor(source, keyword = "") {
     const key = source === "search" ? `search:${keyword}` : source;
+    // 전체 라이브는 pager 자체가 rows/cursor/done/TTL을 함께 보관한다. 첫 페이지
+    // 배열만 listCache에 따로 넣으면 탭을 다시 열 때 이미 붙인 다음 페이지가
+    // 사라지므로 이 source는 pager를 유일한 캐시로 사용한다.
+    if (source === "all") {
+      const pager = setupLivePager();
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+    }
     const cached = state.listCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     let sections;
@@ -152,9 +169,7 @@
       const rows =
         source === "following"
           ? await loadFollowing()
-          : source === "all"
-            ? await loadAll()
-            : await search(keyword);
+          : await search(keyword);
       sections = rows.length ? [{ id: source, label: "", rows }] : [];
     }
     if (source !== "search") {
@@ -199,7 +214,7 @@
     if (!sections.length) {
       box.innerHTML =
         source === "search"
-          ? '<p class="mv-empty">검색어를 입력하세요.</p>'
+          ? `<p class="mv-empty">${keyword.trim() ? "찾는 채널이나 태그의 방송이 없습니다." : "채널 이름 또는 태그로 찾아보세요."}</p>`
           : '<p class="mv-empty">지금 방송 중인 채널이 없습니다.</p>';
       box.__rows = [];
       return;
@@ -220,6 +235,10 @@
       .join("");
     // 고르기 로직은 평평한 목록을 쓴다.
     box.__rows = sections.flatMap((s) => s.rows);
+    if (source === "all") {
+      if (state.livePager?.error) setLiveLoading(false, true);
+      else requestAnimationFrame(maybeLoadMoreLive);
+    }
   }
 
   // 불러오는 동안 보여 줄 빈 카드. 실제 카드와 같은 모양이라 다 불러왔을 때
@@ -241,33 +260,81 @@
   function card(r, picked) {
     const on = picked.has(r.channelId);
     const full = state.chosen.length >= MAX_CHANNELS && !on;
+    const tags = Array.isArray(r.tags) ? r.tags : [];
     // 방송 스냅샷이 없으면(응답에 따라 빈 경우가 있다) 채널 이미지로 대신 채운다.
     // 빈 상자만 남으면 카드가 깨져 보인다.
     const thumbUrl =
       safeImageUrl(r.liveImageUrl) ||
       safeImageUrl(thumb(r.channelImageUrl, "240"));
     return (
-      `<button type="button" class="mv-card${on ? " is-on" : ""}" ` +
+      `<button type="button" class="mv-card${on ? " is-on" : ""}${full ? " is-limit" : ""}" ` +
       `data-mv-pick="${esc(r.channelId)}"${full ? " disabled" : ""}>` +
       `<span class="mv-card-thumb${r.liveImageUrl ? "" : " is-fallback"}">` +
       (thumbUrl
         ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy">`
         : `<span class="mv-card-thumb-empty"></span>`) +
+      `<span class="mv-card-live">LIVE</span>` +
       `<span class="mv-card-viewers">${fmt(r.viewers)}명</span>` +
       // 성인 방송 표시. 치지직의 기존 인증 흐름을 그대로 쓰고 여기서는 알리기만 한다.
       (r.adult ? `<span class="mv-card-adult">19+</span>` : "") +
-      (on ? `<span class="mv-card-picked">선택됨</span>` : "") +
+      (on ? `<span class="mv-card-picked"><svg width="22" height="22" viewBox="0 0 24 24" ` +
+        `fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" ` +
+        `stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>` +
+        `<span>선택됨</span></span>` : "") +
       `</span>` +
       `<span class="mv-card-body">` +
       `<img class="mv-card-avatar" src="${esc(safeImageUrl(thumb(r.channelImageUrl)))}" alt="" loading="lazy">` +
       `<span class="mv-card-text">` +
       `<span class="mv-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-card-name">${esc(r.channelName)}</span>` +
-      (r.category
-        ? `<span class="mv-card-category">${esc(r.category)}</span>`
+      ((r.category || tags.length)
+        ? `<span class="mv-card-meta">` +
+          (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +
+          tags.map((tag) => `<span class="mv-card-tag-chip">${esc(tag)}</span>`).join("") +
+          `</span>`
         : "") +
       `</span></span></button>`
     );
+  }
+
+  function setLiveLoading(loading, failed = false) {
+    const section = $("mvChannelList")?.querySelector(".mv-section");
+    if (!section) return;
+    section.querySelector(".mv-live-more")?.remove();
+    if (!loading && !failed) return;
+    const status = document.createElement(failed ? "button" : "div");
+    if (failed) status.type = "button";
+    status.className = "mv-live-more";
+    status.textContent = failed ? "다음 목록 다시 불러오기" : "다음 방송을 불러오는 중...";
+    if (failed) status.dataset.mvLiveRetry = "1";
+    section.appendChild(status);
+  }
+
+  async function loadMoreLive() {
+    if (state.source !== "all") return;
+    const pager = setupLivePager();
+    if (pager.loading || pager.done) return;
+    const before = pager.rows.length;
+    setLiveLoading(true);
+    await pager.loadNext();
+    if (state.source !== "all" || pager !== state.livePager) return;
+    setLiveLoading(false, Boolean(pager.error));
+    if (pager.error) return;
+    const rows = pager.rows;
+    const added = rows.slice(before);
+    if (!added.length) return;
+    const box = $("mvChannelList");
+    const cards = box.querySelector(".mv-section .mv-cards");
+    const picked = new Set(state.chosen.map((c) => c.channelId));
+    cards?.insertAdjacentHTML("beforeend", added.map((row) => card(row, picked)).join(""));
+    box.__rows = rows;
+  }
+
+  function maybeLoadMoreLive() {
+    const box = $("mvChannelList");
+    if (!box || state.source !== "all") return;
+    const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (remaining <= LIVE_LOAD_THRESHOLD_PX) void loadMoreLive();
   }
 
   // ── 고른 채널 ──────────────────────────────────────────────────────────
@@ -352,11 +419,15 @@
       const on = picked.has(id);
       card.classList.toggle("is-on", on);
       card.disabled = full && !on;
+      card.classList.toggle("is-limit", full && !on);
       const mark = card.querySelector(".mv-card-picked");
       if (on && !mark) {
         const span = document.createElement("span");
         span.className = "mv-card-picked";
-        span.textContent = "선택됨";
+        span.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" ' +
+          'stroke="currentColor" stroke-width="3" stroke-linecap="round" ' +
+          'stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>' +
+          '<span>선택됨</span>';
         card.querySelector(".mv-card-thumb")?.appendChild(span);
       } else if (!on && mark) {
         mark.remove();
@@ -435,7 +506,10 @@
       return;
     }
     if (event.target.closest?.("#mvStart")) void start();
+    if (event.target.closest?.("[data-mv-live-retry]")) void loadMoreLive();
   });
+
+  $("mvChannelList")?.addEventListener("scroll", maybeLoadMoreLive, { passive: true });
 
   let searchTimer = 0;
   $("mvSearch")?.addEventListener("input", () => {

@@ -80,6 +80,7 @@
         "src/chatActivityAnalysis.js",
         "src/channelAffinity.js",
         "src/channelAffinityData.js",
+        "src/multiviewSync.js",
         "src/content.js",
         "src/subscribeBadge.js"
       ],
@@ -243,6 +244,8 @@
         "src/multiview.css",
         "src/multiview.js",
         "src/multiviewWatch.js",
+        "src/multiviewSync.js",
+        "src/multiviewDiagnostics.js",
         "src/multiviewTheme.js",
         "src/multiviewSources.js",
         "src/multiviewLayouts.js"

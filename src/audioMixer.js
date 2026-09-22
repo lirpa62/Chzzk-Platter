@@ -137,6 +137,8 @@
   // 화질 상한(px height). 멀티뷰 프레임처럼 작은 칸에서 고화질이 낭비일 때 쓴다.
   // 0 이면 상한 없음. 상한이 있으면 '이하 중 가장 높은' 트랙을 고른다.
   let maxQualityCap = 0;
+  let multiviewQualityPolicy = "none";
+  let multiviewQualityReconcileToken = -1;
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
   // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
@@ -344,16 +346,27 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
+    const nextMultiviewQualityPolicy = ["highest", "cap-480"].includes(
+      e.data.multiviewQualityPolicy,
+    ) ? e.data.multiviewQualityPolicy : "none";
+    const nextReconcileToken = Number.isSafeInteger(e.data.multiviewQualityReconcileToken) &&
+        e.data.multiviewQualityReconcileToken >= 0
+      ? e.data.multiviewQualityReconcileToken : 0;
+    const multiviewPolicyChanged = nextMultiviewQualityPolicy !== multiviewQualityPolicy;
+    const multiviewLifecycleChanged = nextMultiviewQualityPolicy !== "none" &&
+      nextReconcileToken !== multiviewQualityReconcileToken;
+    multiviewQualityPolicy = nextMultiviewQualityPolicy;
+    multiviewQualityReconcileToken = nextReconcileToken;
     const maxQualityCapPrev = maxQualityCap;
     maxQualityCap = Number(e.data.maxQualityCap) || 0;
     // 상한이 바뀌면(멀티뷰 메인 전환) 이전 상한으로 고정해 둔 기록을 지운다.
     // ⚠ 안 지우면 '수동 변경 존중' 이 우리가 건 480p 를 사용자 선택으로 오해해
     //   이후 화질 조정을 막는다.
-    if (maxQualityCap !== maxQualityCapPrev) {
+    if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged || multiviewLifecycleChanged) {
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
-      // 역할이 바뀌었으니(메인↔보조) 이전 역할에서의 수동 기록도 끌고 가지 않는다.
       maxQualityUserTouchedPage = null;
+      maxQualityMenuClickAt = 0;
     }
     if (
       (maxQualityAuto || maxQualityCap > 0) &&
@@ -5434,10 +5447,12 @@
     // ⚠ 상한이 걸린 칸(멀티뷰 보조)에서는 '달라졌다' 만으로 수동이라 볼 수 없다.
     //   치지직이 스스로 되돌린 것과 사용자가 고른 것을 구분해야 한다. 그래서 상한이
     //   있을 때는 신뢰된 메뉴 조작이 실제로 있었는지까지 확인한다.
-    const userChose =
-      maxQualityCap > 0 ? maxQualityUserTouchedPage === currentPageKey : true;
+    const multiviewPolicyActive = multiviewQualityPolicy !== "none";
+    const userChose = multiviewPolicyActive || maxQualityCap > 0
+      ? maxQualityUserTouchedPage === currentPageKey : true;
+    const respectManual = multiviewPolicyActive || maxQualityRespectManual;
     if (
-      maxQualityRespectManual &&
+      respectManual &&
       maxQualitySetHeight > 0 &&
       selected &&
       !trackIsAbr(selected) &&
@@ -5447,7 +5462,7 @@
     ) {
       maxQualityRespectedPage = currentPageKey;
     }
-    if (maxQualityRespectManual && maxQualityRespectedPage === currentPageKey) {
+    if (respectManual && maxQualityRespectedPage === currentPageKey) {
       return; // 이 미디어는 사용자가 고른 화질을 존중
     }
 
@@ -5575,6 +5590,7 @@
       // (초당 여러 번)마다 applyMaxQuality 의 fiber 탐색(findCorePlayer)을 반복하지 않게
       // 조기 반환한다 — 여러 방송 탭을 켰을 때의 누적 CPU 부하를 줄인다.
       const onProgress = () => {
+        if (maxQualityRespectedPage === currentPageKey) return;
         // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
         // ⚠ 다만 상한이 걸린 칸은 tick 에 기대기 어렵다 — 멀티뷰는 채팅을 접어
         //   두어 DOM 변이가 거의 없어 tick 이 잘 깨지 않는다. 상한 모드에서는

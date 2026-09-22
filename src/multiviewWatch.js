@@ -9,6 +9,8 @@
   "use strict";
 
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
+  const SYNC = globalThis.CheeseMultiviewSync;
+  const DIAGNOSTICS = globalThis.CheeseMultiviewDiagnostics;
   const SETUP_PAGE = "multiview.html";
   // 고른 구성을 주소에 담기엔 길다. 세션 저장소로 넘기고 이 id 로 읽는다.
   // ⚠ 고정 키를 쓰면 멀티뷰 탭을 두 개 열었을 때 서로 구성을 덮어쓴다. 탭마다
@@ -51,9 +53,16 @@
     masterVolume: 1,
     // '메인 채널만 소리'(기본 켜짐). 기존 정책과 같다.
     audioFocusMode: true,
+    sync: {
+      mode: "off",
+      referenceChannelId: null,
+      manualOffsets: {},
+      congested: false,
+      diagnosticsEnabled: false,
+    },
   };
 
-  // 채널별 소리 설정. { volume: 0~1, muted: boolean }
+  // 채널별 소리 설정. muteTouched는 보조 채널의 초기 음소거와 직접 조작을 구분한다.
   // ⚠ focus mode 를 껐다 켜도 사용자가 맞춰 둔 volume 은 지우지 않는다. 껐을 때
   //   이전 믹스를 그대로 되찾을 수 있어야 한다.
   const channelAudio = new Map();
@@ -61,17 +70,20 @@
   function audioOf(channelId) {
     let entry = channelAudio.get(channelId);
     if (!entry) {
-      entry = { volume: 1, muted: channelId !== state.mainId };
+      entry = { volume: 1, muted: channelId !== state.mainId, muteTouched: false };
       channelAudio.set(channelId, entry);
     }
     return entry;
   }
 
-  // 이 채널이 지금 실제로 소리를 내야 하는가.
-  // focus mode 가 켜져 있으면 메인만 낸다(채널별 muted 는 건드리지 않고 덮어쓴다).
+  // focus mode는 보조 채널만 강제로 끈다. 메인의 직접 음소거는 유지한다.
   function effectiveMuted(channelId) {
-    if (state.audioFocusMode) return channelId !== state.mainId;
+    if (state.audioFocusMode && channelId !== state.mainId) return true;
     return audioOf(channelId).muted;
+  }
+
+  function isSyncAudioProtected(channelId) {
+    return effectiveMuted(channelId) === false;
   }
 
   // 실제로 내보낼 크기 = 전체 볼륨 × 채널 볼륨.
@@ -92,6 +104,7 @@
   const QUALITY_TRANSITION_MAX_MS = 5000;
 
   function frameUrl(channel, isMain, mainHighQuality) {
+    const qualityPolicy = isMain && mainHighQuality ? "highest" : "cap-480";
     // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
     // 통계 표의 정책 열이 첫 화면부터 맞는다(postState 는 프레임이 준비된 뒤에야
     // 불린다).
@@ -104,6 +117,7 @@
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 메인만 소리, 나머지는 음소거로 시작한다.
     url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
+    url.searchParams.set("cheeseMultiQualityPolicy", qualityPolicy);
     // 화질은 '지금 이 칸의 역할' 로 정한다(시작할 때만이 아니다). 메인이면 상한을
     // 걸지 않고, 보조면 480p 상한을 건다. 메인이 바뀌면 두 칸 모두 다시 지시한다.
     // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
@@ -125,6 +139,7 @@
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
     const quality = isMain && state.mainHighQuality ? "high" : "480";
+    const qualityPolicy = quality === "high" ? "highest" : "cap-480";
     const before = lastQuality.get(channelId);
     if (before !== quality) {
       lastQuality.set(channelId, quality);
@@ -146,6 +161,7 @@
           muted: effectiveMuted(channelId),
           volume: effectiveVolume(channelId),
           quality,
+          qualityPolicy,
           // ⚠ 화질이 '그대로' 여도 칸에게 다시 확인시켜야 하는 때가 있다.
           //   프레임이 막 준비됐을 때가 그렇다 — 주소로 받은 상한과 지금 지시가
           //   같아 '바뀐 것 없음' 으로 지나가면, 플레이어가 아직 로딩 국면이라
@@ -280,7 +296,15 @@
   // 칸 상태를 바꾸는 유일한 통로. 여기서 타일 덮개와 Quick 목록을 함께 갱신해
   // 두 곳이 다른 상태를 보여 주지 않게 한다.
   function setCellStatus(channelId, status, message) {
+    if (status === "loading" || status === "error" || status === "ended" || status === "ui-error") {
+      clearChannelSync(channelId);
+      if (status !== "loading") clearChannelMixer(channelId);
+    }
+    if (status === "ready" && frameStates.get(channelId) !== "ready") {
+      syncReadyAt.set(channelId, Date.now());
+    }
     frameStates.set(channelId, status);
+    renderSync();
     const cell = cells.get(channelId);
     if (cell) {
       cell.dataset.status = status;
@@ -560,6 +584,7 @@
     if (channelId === state.mainId || !cells.has(channelId)) return;
     const before = state.mainId;
     state.mainId = channelId;
+    promoteMainAudio(channelId);
     // ⚠ chosen[0] 이 곧 메인이라는 약속을 지킨다. 안 맞추면 '채널 다시 고르기' 로
     //   돌아갔을 때 예전 메인이 다시 첫 번째로 보인다.
     const main = state.chosen.find((c) => c.channelId === channelId);
@@ -577,6 +602,11 @@
     // 메인을 따라가도록 해 뒀으면 채팅도 같이 옮긴다.
     if (state.chatFollowsMain) applyChat(channelId);
     applyLayout();
+  }
+
+  function promoteMainAudio(channelId) {
+    const audio = audioOf(channelId);
+    if (audio.muted && !audio.muteTouched) audio.muted = false;
   }
 
   function setLayout(layoutId) {
@@ -679,6 +709,93 @@
   // ── 볼륨 팝오버 ─────────────────────────────────────────────────────────
   // 자동재생이 막힌 채널. 여기 들어 있으면 볼륨 버튼에 표시를 띄운다.
   const audioBlocked = new Set();
+  const mixerStates = new Map();
+  const mixerPending = new Map();
+  const mixerErrors = new Map();
+  const mixerConfirm = new Set();
+  const mixerGainDrafts = new Map();
+  const mixerGainTimers = new Map();
+  let mixerCommandSeq = 0;
+  let mixerDragId = "";
+
+  function requestMixerState(channelId) {
+    if (currentStatus(channelId) !== "ready") return;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    frame?.contentWindow?.postMessage({ source: MULTIVIEW_MESSAGE,
+      type: "MIXER_GET_STATE", channelId }, CHZZK_ORIGIN);
+  }
+
+  function sendMixerCommand(channelId, type, values = {}) {
+    if (currentStatus(channelId) !== "ready") return false;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return false;
+    const key = `${channelId}:${type}`;
+    const previous = mixerPending.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const commandId = ++mixerCommandSeq;
+    const timer = window.setTimeout(() => {
+      if (mixerPending.get(key)?.commandId !== commandId) return;
+      mixerPending.delete(key);
+      mixerErrors.set(channelId, "응답이 없습니다. 다시 시도해 주세요.");
+      if (type === "MIXER_FLUSH_GAIN") {
+        mixerDragId = "";
+        mixerGainDrafts.delete(channelId);
+      }
+      if (mixerDragId !== channelId) renderVolume();
+    }, 4000);
+    mixerPending.set(key, { commandId, timer });
+    frame.contentWindow.postMessage({ source: MULTIVIEW_MESSAGE,
+      type, channelId, commandId, ...values }, CHZZK_ORIGIN);
+    return true;
+  }
+
+  function clearChannelMixer(channelId) {
+    mixerStates.delete(channelId);
+    mixerErrors.delete(channelId);
+    mixerConfirm.delete(channelId);
+    mixerGainDrafts.delete(channelId);
+    clearTimeout(mixerGainTimers.get(channelId));
+    mixerGainTimers.delete(channelId);
+    for (const [key, pending] of mixerPending) {
+      if (!key.startsWith(`${channelId}:`)) continue;
+      clearTimeout(pending.timer);
+      mixerPending.delete(key);
+    }
+    if (mixerDragId === channelId) mixerDragId = "";
+  }
+
+  function normalizeMixerSnapshot(raw) {
+    if (!raw || typeof raw !== "object" || !Number.isSafeInteger(raw.revision) ||
+        raw.revision < 0 || typeof raw.ready !== "boolean" ||
+        typeof raw.enabled !== "boolean" || typeof raw.graphConflict !== "boolean" ||
+        typeof raw.preset !== "string" || raw.preset.length > 128 ||
+        typeof raw.presetDirty !== "boolean" ||
+        !Number.isFinite(raw.gain) || !Number.isFinite(raw.gainMin) ||
+        !Number.isFinite(raw.gainMax) || !Number.isFinite(raw.gainStep) ||
+        raw.gainMin < 0 || raw.gainMax > 4 || raw.gainMin >= raw.gainMax ||
+        raw.gainStep <= 0 || raw.gainStep > 1 || !Array.isArray(raw.presets) ||
+        raw.presets.length > 100) return null;
+    const presets = [];
+    for (const item of raw.presets) {
+      if (!item || typeof item.id !== "string" || !item.id || item.id.length > 128 ||
+          typeof item.label !== "string" || item.label.length > 80 ||
+          !["builtin", "custom"].includes(item.kind)) return null;
+      presets.push({ id: item.id, label: item.label, kind: item.kind });
+    }
+    return { ready: raw.ready, enabled: raw.enabled,
+      graphConflict: raw.graphConflict, preset: raw.preset,
+      presetDirty: raw.presetDirty, gain: raw.gain,
+      gainMin: raw.gainMin, gainMax: raw.gainMax, gainStep: raw.gainStep,
+      presets, revision: raw.revision };
+  }
+
+  function acceptMixerSnapshot(channelId, raw) {
+    const next = normalizeMixerSnapshot(raw);
+    if (!next || next.revision < (mixerStates.get(channelId)?.revision ?? -1)) return false;
+    mixerStates.set(channelId, next);
+    if (mixerDragId !== channelId) renderVolume();
+    return true;
+  }
 
   const pct = (v) => `${Math.round(v * 100)}%`;
 
@@ -818,7 +935,7 @@
       `<input type="checkbox" id="mvVolFocus"${state.audioFocusMode ? " checked" : ""}>` +
       `<span>메인만 듣기</span></label>` +
       `<p class="mv-vol-focus-note">` +
-      `끄면 채널별 음소거와 볼륨을 직접 조절할 수 있습니다.</p>` +
+      `켜면 보조 채널만 음소거합니다. 메인 채널의 음소거와 볼륨은 계속 조절할 수 있습니다.</p>` +
       `<div class="mv-vol-list">${rows}</div>`;
   }
 
@@ -948,6 +1065,7 @@
       const panel = pop.querySelector(".mv-pop-panel");
       if (panel) panel.hidden = true;
     }
+    updateSyncPolling();
   }
 
   function togglePopover(name) {
@@ -964,6 +1082,10 @@
     if (name === "stats") {
       if (open) startStatsPolling();
       else stopStatsPolling();
+    }
+    if (name === "sync") {
+      if (open) renderSync();
+      updateSyncPolling();
     }
   }
 
@@ -1187,7 +1309,7 @@
     });
   }
 
-  // ── 빠른 채널 바꾸기 ─────────────────────────────────────────────────────
+  // ── 빠른 채널 관리 ───────────────────────────────────────────────────────
   // 격자 위아래 남는 자리에 띄운다. 고르기 화면까지 가지 않고 빼기·바꾸기를 한다.
   //
   // ⚠ 채널을 빼도 남은 칸은 다시 만들지 않는다(만들면 방송이 처음부터 로드된다).
@@ -1239,6 +1361,8 @@
     // 옛 칸 정리: 그 프레임만 내린다.
     const oldCell = cells.get(oldChannelId);
     const oldFrame = oldCell?.querySelector("iframe");
+    clearChannelSync(oldChannelId, true);
+    clearChannelMixer(oldChannelId);
     if (oldFrame) oldFrame.src = "about:blank";
     oldCell?.remove();
     cells.delete(oldChannelId);
@@ -1257,6 +1381,7 @@
       channelImageUrl: String(newChannel.channelImageUrl || ""),
     };
     state.chosen = state.chosen.map((c, i) => (i === index ? next : c));
+    renderSync();
     if (wasMain) state.mainId = id;
 
     ensureCells(); // 새 채널 칸만 만든다
@@ -1335,12 +1460,20 @@
   const SOURCES = globalThis.CheeseMultiviewSources;
   const QUICK_TTL_MS = 20000; // 제목·시청자 수가 바뀌므로 오래 들고 있지 않는다
   const quickCache = new Map(); // key -> {value, expiresAt}
+  let quickLivePager = null;
   let quickSource = "following";
   let quickKeyword = "";
   let quickSections = []; // 전용 팔로잉 구역(폴더)
   let quickFolder = ""; // 고른 폴더(빈 문자열이면 전체)
   // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
   let quickRequestId = 0;
+
+  function getQuickLivePager() {
+    if (!quickLivePager) {
+      quickLivePager = SOURCES.createLivePager({ ttlMs: QUICK_TTL_MS });
+    }
+    return quickLivePager;
+  }
 
   // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
   // ⚠ 캐시 키를 구분한다. 같은 키에 평평한 목록과 구역 배열을 섞어 담으면 안 된다.
@@ -1351,6 +1484,12 @@
         : source === "custom"
           ? "custom:sections"
           : source;
+    if (source === "live") {
+      const pager = getQuickLivePager();
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows;
+    }
     const cached = quickCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     if (!SOURCES) return source === "custom" ? [] : [];
@@ -1359,9 +1498,7 @@
         ? await SOURCES.loadFollowing()
         : source === "custom"
           ? await SOURCES.loadCustomSections()
-          : source === "live"
-            ? await SOURCES.loadLive()
-            : await SOURCES.searchLive(keyword);
+          : await SOURCES.searchLive(keyword);
     // 검색은 입력마다 달라 캐시하지 않는다.
     if (source !== "search") {
       quickCache.set(key, { value, expiresAt: Date.now() + QUICK_TTL_MS });
@@ -1476,6 +1613,88 @@
     }
   }
 
+  function quickCard(r, full) {
+    const thumb = safeImageUrl(r.liveImageUrl);
+    const avatar = safeImageUrl(r.channelImageUrl);
+    const tags = Array.isArray(r.tags) ? r.tags : [];
+    return (
+      `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
+      `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
+      `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}">` +
+      (thumb
+        ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
+        : `<span class="mv-quick-card-empty"></span>`) +
+      (r.adult ? `<span class="mv-quick-card-adult">19+</span>` : "") +
+      `</span>` +
+      `<span class="mv-quick-card-body">` +
+      (avatar
+        ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy">`
+        : `<span class="mv-quick-card-avatar is-empty"></span>`) +
+      `<span class="mv-quick-card-text">` +
+      `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
+      `<span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
+      `</span></span>` +
+      ((r.category || tags.length) ? `<span class="mv-card-meta mv-quick-card-meta">` +
+        (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +
+        tags.map((tag) => `<span class="mv-card-tag-chip">${esc(tag)}</span>`).join("") +
+        `</span>` : "") +
+      `</button>`
+    );
+  }
+
+  function quickSkeletonCards(count = 4) {
+    return (`<div class="mv-quick-card is-skeleton" aria-hidden="true">` +
+      `<span class="mv-quick-card-thumb"></span>` +
+      `<span class="mv-quick-card-body"><span class="mv-quick-card-avatar"></span>` +
+      `<span class="mv-quick-card-text"><span class="mv-skeleton-line"></span>` +
+      `<span class="mv-skeleton-line is-short"></span></span></span></div>`).repeat(count);
+  }
+
+  function syncQuickLiveRetry() {
+    const box = $("mvQuickAdd");
+    if (!box) return;
+    box.querySelector(".mv-quick-retry")?.remove();
+    if (quickSource === "live" && quickLivePager?.error && quickCandidates?.length) {
+      box.insertAdjacentHTML("beforeend",
+        '<button type="button" class="mv-quick-retry" data-mv-quick-retry="1">다음 목록 다시 불러오기</button>');
+    }
+  }
+
+  async function loadMoreQuickLive() {
+    if (quickSource !== "live" || $("mvQuick")?.hidden) return;
+    const pager = getQuickLivePager();
+    if (pager.loading || pager.done) return;
+    const box = $("mvQuickAdd");
+    box?.querySelector(".mv-quick-retry")?.remove();
+    const beforeIds = new Set(
+      [...(box?.querySelectorAll?.("[data-mv-quick-add]") || [])]
+        .map((node) => node.dataset.mvQuickAdd),
+    );
+    box?.classList.add("is-loading-more");
+    await pager.loadNext();
+    box?.classList.remove("is-loading-more");
+    if (quickSource !== "live" || pager !== quickLivePager) return;
+    if (pager.error) {
+      syncQuickLiveRetry();
+      return;
+    }
+    quickCandidates = pager.rows;
+    const have = new Set(state.chosen.map((c) => c.channelId));
+    const full = !quickReplaceId && state.chosen.length >= 6;
+    const added = quickCandidates.filter((row) =>
+      !have.has(row.channelId) && !beforeIds.has(row.channelId));
+    if (added.length) box?.insertAdjacentHTML("beforeend", added.map((row) => quickCard(row, full)).join(""));
+    syncQuickRailNav();
+  }
+
+  function maybeLoadMoreQuickLive() {
+    const box = $("mvQuickAdd");
+    if (!box || $("mvQuick")?.hidden || quickSource !== "live" ||
+        !quickLivePager || quickLivePager.error) return;
+    const remaining = box.scrollWidth - box.scrollLeft - box.clientWidth;
+    if (remaining <= Math.max(220, box.clientWidth * 0.75)) void loadMoreQuickLive();
+  }
+
   // 후보가 없을 때의 안내는 목록 종류마다 다르다.
   function quickEmptyMessage() {
     if (quickSource === "search") {
@@ -1510,6 +1729,7 @@
 
     const box = $("mvQuickAdd");
     if (!box) return;
+    const previousScrollLeft = box.scrollLeft;
     if (quickCandidates === null) {
       box.innerHTML = '<p class="mv-quick-empty">불러오는 중…</p>';
       syncQuickRailNav();
@@ -1526,33 +1746,11 @@
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
     const full = !quickReplaceId && state.chosen.length >= 6;
-    box.innerHTML = rest
-      .slice(0, 30)
-      .map((r) => {
-        const thumb = safeImageUrl(r.liveImageUrl);
-        const avatar = safeImageUrl(r.channelImageUrl);
-        return (
-          `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
-          `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
-          `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}">` +
-          (thumb
-            ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
-            : `<span class="mv-quick-card-empty"></span>`) +
-          (r.adult ? `<span class="mv-quick-card-adult">19+</span>` : "") +
-          `</span>` +
-          `<span class="mv-quick-card-body">` +
-          (avatar
-            ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy">`
-            : `<span class="mv-quick-card-avatar is-empty"></span>`) +
-          `<span class="mv-quick-card-text">` +
-          `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
-          `<span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
-          `</span></span>` +
-          `</button>`
-        );
-      })
-      .join("");
+    box.innerHTML = rest.map((r) => quickCard(r, full)).join("");
+    syncQuickLiveRetry();
+    box.scrollLeft = Math.min(previousScrollLeft, Math.max(0, box.scrollWidth - box.clientWidth));
     syncQuickRailNav();
+    requestAnimationFrame(maybeLoadMoreQuickLive);
   }
 
   // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.
@@ -1576,6 +1774,8 @@
     if (!cell) return;
     // 이 칸의 프레임만 확실히 내린다.
     const frame = cell.querySelector("iframe");
+    clearChannelSync(channelId, true);
+    clearChannelMixer(channelId);
     if (frame) frame.src = "about:blank";
     cell.remove();
     cells.delete(channelId);
@@ -1585,11 +1785,15 @@
     lastQuality.delete(channelId);
     qualityTransitions.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
+    renderSync();
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
     if (state.mainId === channelId) {
       state.mainId = state.chosen[0]?.channelId || "";
-      if (state.mainId) postState(state.mainId, true);
+      if (state.mainId) {
+        promoteMainAudio(state.mainId);
+        postState(state.mainId, true);
+      }
       if (state.chatFollowsMain && state.mainId) applyChat(state.mainId);
     }
     if (state.chatChannelId === channelId && state.mainId) {
@@ -1672,6 +1876,78 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target;
+    const syncRef = target.closest?.("[data-mv-sync-ref]");
+    if (syncRef) {
+      const id = syncRef.dataset.mvSyncRef;
+      if (!syncEligibleIds().includes(id)) return;
+      recordReferenceChange(state.sync.referenceChannelId, id, "manual");
+      state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, id,
+        state.chosen.map((c) => c.channelId));
+      state.sync.referenceChannelId = id;
+      state.sync.mode = "manual";
+      for (const c of state.chosen) cancelPendingSync(c.channelId);
+      resetAllSyncRates();
+      updateSyncPolling();
+      document.activeElement?.blur?.();
+      alignSync(null, true);
+      return;
+    }
+    const syncOffset = target.closest?.("[data-mv-sync-offset]");
+    if (syncOffset) {
+      const id = syncOffset.dataset.mvSyncOffset;
+      const step = Number(syncOffset.dataset.step);
+      if (!syncEligibleIds().includes(id) || id === state.sync.referenceChannelId ||
+          ![-0.5, -0.1, 0.1, 0.5].includes(step)) return;
+      const before = state.sync.manualOffsets[id] || 0;
+      const next = Math.round((before + step) * 10) / 10;
+      if (Math.abs(next) > 10 && Math.abs(next) > Math.abs(before)) return;
+      if (next === before) return;
+      const st = syncStats.get(id);
+      const target = st.currentTime + before - next;
+      if (target < st.seekableStart + 0.05 || target > st.seekableEnd - 0.05) {
+        syncNotice = "현재 재생 가능한 구간 밖입니다.";
+      } else if (Date.now() - (syncSeekAt.get(id) || 0) < 250 || pendingSync(id, "nudge")) {
+        syncNotice = "잠시 후 다시 조절해 주세요.";
+      } else {
+        syncNotice = sendSyncCommand(id, "nudge", "APPLY_SYNC_NUDGE",
+          { deltaSec: before - next }, { offset: next })
+          ? "수동 보정을 적용 중입니다." : "잠시 후 다시 조절해 주세요.";
+      }
+      document.activeElement?.blur?.();
+      renderSync();
+      return;
+    }
+    const syncClear = target.closest?.("[data-mv-sync-clear]");
+    if (syncClear) {
+      const id = syncClear.dataset.mvSyncClear;
+      if (!cells.has(id) || pendingSync(id, "nudge")) return;
+      document.activeElement?.blur?.();
+      alignSync([id], true, { [id]: 0 }, true);
+      return;
+    }
+    if (target.closest?.("#mvSyncAlign")) {
+      document.activeElement?.blur?.();
+      requestSyncStats();
+      window.setTimeout(() => {
+        const next = SYNC.reference(syncEligibleIds(), syncStats, syncReadyAt,
+          state.sync.referenceChannelId);
+        if (next && next !== state.sync.referenceChannelId) {
+          recordReferenceChange(state.sync.referenceChannelId, next, "manual");
+          state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, next,
+            state.chosen.map((c) => c.channelId));
+          state.sync.referenceChannelId = next;
+          for (const c of state.chosen) cancelPendingSync(c.channelId);
+          resetAllSyncRates();
+        }
+        alignSync();
+      }, 400);
+      return;
+    }
+    if (target.closest?.("#mvSyncClear")) {
+      document.activeElement?.blur?.();
+      alignSync(null, true, Object.fromEntries(state.chosen.map((c) => [c.channelId, 0])));
+      return;
+    }
     if (target.closest?.("#mvBack")) {
       // 먼저 빠른 바꾸기를 연다. 전체를 다시 고르려면 그 안의 단추로 간다.
       if ($("mvQuick").hidden) openQuick();
@@ -1730,7 +2006,12 @@
     if (scroll) {
       const box = $("mvQuickAdd");
       const dir = Number(scroll.dataset.mvQuickScroll) || 1;
+      if (dir > 0) maybeLoadMoreQuickLive();
       box?.scrollBy({ left: dir * box.clientWidth * 0.8, behavior: "smooth" });
+      return;
+    }
+    if (target.closest?.("[data-mv-quick-retry]")) {
+      void loadMoreQuickLive();
       return;
     }
     if (target.closest?.("#mvQuickCancelReplace")) {
@@ -1917,17 +2198,57 @@
     if (state.audioFocusMode && channelId !== state.mainId && next > 0) {
       state.audioFocusMode = false;
       audio.muted = false;
+      audio.muteTouched = true;
       postAllAudio();
       renderVolume();
       return;
     }
-    if (next > 0 && audio.muted) audio.muted = false;
+    if (next > 0 && audio.muted) {
+      audio.muted = false;
+      audio.muteTouched = true;
+    }
     postState(channelId, channelId === state.mainId);
     // 끄는 동안에도 아이콘이 바로 따라오게 한다(50% 아래는 volume-1, 0 은 x).
     syncVolumeButton(channelId);
   });
 
   document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target?.dataset?.mvMixerEnabled) {
+      sendMixerCommand(target.dataset.mvMixerEnabled, "MIXER_SET_ENABLED", {
+        enabled: target.checked === true,
+      });
+      target.checked = !target.checked;
+      return;
+    }
+    if (target?.dataset?.mvMixerPreset) {
+      const id = target.dataset.mvMixerPreset;
+      if (target.value) sendMixerCommand(id, "MIXER_SET_PRESET", { presetId: target.value });
+      const mixer = mixerStates.get(id);
+      target.value = mixer?.presetDirty ? "" : mixer?.preset || "";
+      return;
+    }
+    if (target?.dataset?.mvMixerGain) {
+      const id = target.dataset.mvMixerGain;
+      clearTimeout(mixerGainTimers.get(id));
+      mixerGainTimers.delete(id);
+      const gain = Number(target.value);
+      if (Number.isFinite(gain)) {
+        mixerGainDrafts.set(id, gain);
+        sendMixerCommand(id, "MIXER_SET_GAIN", { gain });
+        sendMixerCommand(id, "MIXER_FLUSH_GAIN");
+      }
+      return;
+    }
+    if (event.target?.id === "mvSyncAuto") {
+      state.sync.mode = event.target.checked ? "auto" : "manual";
+      if (state.sync.mode !== "auto") resetAllSyncRates();
+      syncNotice = "";
+      updateSyncPolling();
+      event.target.blur();
+      renderSync();
+      return;
+    }
     if (event.target?.id !== "mvVolFocus") return;
     state.audioFocusMode = event.target.checked === true;
     // ⚠ 채널별 volume 값은 그대로 둔다. focus mode 를 껐을 때 이전 믹스를
@@ -1950,6 +2271,10 @@
     "AUDIO_INTERACTION_REQUIRED",
     "AUDIO_INTERACTION_RESOLVED",
     "MULTIVIEW_STATS",
+    "FRAME_SYNC_STATS",
+    "FRAME_SYNC_COMMAND_RESULT",
+    "FRAME_MIXER_STATE",
+    "FRAME_MIXER_COMMAND_RESULT",
   ]);
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
@@ -1965,6 +2290,10 @@
     if (!frame || event.source !== frame.contentWindow) return;
 
     if (data.type === "FRAME_READY") {
+      if (currentStatus(channelId) === "ready") {
+        clearChannelSync(channelId);
+        syncReadyAt.set(channelId, Date.now());
+      }
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
@@ -1988,6 +2317,115 @@
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       setCellStatus(channelId, "ended");
+      return;
+    }
+    if (data.type === "FRAME_MIXER_STATE") {
+      if (currentStatus(channelId) === "ready") acceptMixerSnapshot(channelId, data.state);
+      return;
+    }
+    if (data.type === "FRAME_MIXER_COMMAND_RESULT") {
+      if (currentStatus(channelId) !== "ready" || typeof data.command !== "string" ||
+          !Number.isSafeInteger(data.commandId)) return;
+      const key = `${channelId}:${data.command}`;
+      const pending = mixerPending.get(key);
+      if (!pending || pending.commandId !== data.commandId) return;
+      clearTimeout(pending.timer);
+      mixerPending.delete(key);
+      if (data.command === "MIXER_FLUSH_GAIN") {
+        mixerDragId = "";
+        mixerGainDrafts.delete(channelId);
+      }
+      if (data.applied === true) {
+        if (data.command !== "MIXER_FLUSH_GAIN") {
+          mixerErrors.delete(channelId);
+          mixerConfirm.delete(channelId);
+        }
+      } else if (data.reason === "confirmation-required") {
+        mixerConfirm.add(channelId);
+      } else {
+        const messages = {
+          "not-ready": "오디오 믹서가 아직 준비되지 않았습니다.",
+          "no-video": "재생 영상을 찾지 못했습니다.",
+          "graph-conflict": "오디오 그래프 충돌로 믹서를 켤 수 없습니다.",
+          "interaction-required": "플레이어에서 한 번 상호작용한 뒤 다시 시도해 주세요.",
+          "invalid-preset": "프리셋을 적용하지 못했습니다.",
+          "invalid-gain": "게인 값을 적용하지 못했습니다.",
+        };
+        mixerErrors.set(channelId, messages[data.reason] || "오디오 믹서 명령을 적용하지 못했습니다.");
+      }
+      if (!acceptMixerSnapshot(channelId, data.state) && mixerDragId !== channelId) renderVolume();
+      return;
+    }
+    if (data.type === "FRAME_SYNC_COMMAND_RESULT") {
+      if (currentStatus(channelId) === "ready") finishSyncCommand(channelId, data);
+      return;
+    }
+    if (data.type === "FRAME_SYNC_STATS") {
+      if (currentStatus(channelId) !== "ready") return;
+      const stats = SYNC.normalize(data.stats);
+      if (!stats) return;
+      const previousGeneration = syncGeneration.get(channelId);
+      if (stats.generation !== null && previousGeneration !== undefined &&
+          stats.generation < previousGeneration) return;
+      if (stats.generation !== null && previousGeneration !== stats.generation) {
+        requestMixerState(channelId);
+        const generationAt = stats.receivedAt;
+        recordSyncDiagnostic("generation-change", {
+          channelId,
+          channelName: syncChannelName(channelId),
+          from: previousGeneration ?? null,
+          to: stats.generation,
+        }, generationAt);
+        recordSyncDiagnostic("settling-start", {
+          channelId,
+          channelName: syncChannelName(channelId),
+          generation: stats.generation,
+          cause: previousGeneration === undefined ? "first-video" : "video-replaced",
+        }, generationAt);
+        cancelPendingSync(channelId);
+        for (const command of ["seek", "nudge", "rate", "reset-rate"]) {
+          syncRetryAt.delete(`${channelId}:${command}`);
+        }
+        syncRates.delete(channelId);
+        syncReadyAt.set(channelId, Date.now());
+        syncSeekAt.delete(channelId);
+        if (syncCongestion.active) {
+          recordCongestionChange(false, syncEligibleIds(), generationAt);
+        }
+        syncCongestion = { active: false, since: 0 };
+        state.sync.congested = false;
+      }
+      if (stats.generation !== null) syncGeneration.set(channelId, stats.generation);
+      const pendingRate = pendingSync(channelId, "rate");
+      const pendingReset = pendingSync(channelId, "reset-rate");
+      if (!pendingRate && !pendingReset) {
+        const parentOwnedRate = syncRates.has(channelId);
+        if (stats.syncRateOwned && Number.isFinite(stats.playbackRate)) {
+          syncRates.set(channelId, stats.playbackRate);
+          if (!parentOwnedRate) {
+            recordSyncDiagnostic("rate-reconciled", {
+              channelId,
+              channelName: syncChannelName(channelId),
+              playbackRate: stats.playbackRate,
+              direction: "frame-to-parent",
+            }, stats.receivedAt);
+          }
+        } else if (!stats.syncRateOwned) {
+          syncRates.delete(channelId);
+          if (parentOwnedRate) {
+            recordSyncDiagnostic("rate-reconciled", {
+              channelId,
+              channelName: syncChannelName(channelId),
+              playbackRate: stats.playbackRate,
+              direction: "frame-cleared-parent",
+            }, stats.receivedAt);
+          }
+        }
+      }
+      syncStats.set(channelId, stats);
+      recordSyncSample(channelId, stats, stats.receivedAt);
+      if (state.sync.mode !== "auto" && stats.syncRateOwned) resetSyncRate(channelId);
+      updateSyncPolling();
       return;
     }
     if (data.type === "MULTIVIEW_STATS") {
@@ -2021,6 +2459,47 @@
       //   이뤄져야 확실한데, 칸 위 버튼이 가장 짧은 경로다.
       if (channelId === state.mainId) showAudioNotice(channelId);
     }
+  });
+
+  window.addEventListener("pagehide", () => {
+    resetAllSyncRates();
+    for (const c of state.chosen) cancelPendingSync(c.channelId);
+    syncStats.clear();
+    syncRates.clear();
+    syncSeekAt.clear();
+    syncGeneration.clear();
+    syncReadyAt.clear();
+    syncRetryAt.clear();
+    syncCongestion = { active: false, since: 0 };
+    state.sync.congested = false;
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = 0;
+  });
+  window.addEventListener("pageshow", updateSyncPolling);
+  document.addEventListener("visibilitychange", () => {
+    const changedAt = Date.now();
+    recordSyncDiagnostic("visibility", { hidden: document.hidden }, changedAt);
+    if (document.hidden) {
+      syncStats.clear();
+      resetAllSyncRates();
+      for (const c of state.chosen) cancelPendingSync(c.channelId);
+    } else {
+      const now = Date.now();
+      for (const c of state.chosen) {
+        if (currentStatus(c.channelId) !== "ready") continue;
+        syncReadyAt.set(c.channelId, now);
+        recordSyncDiagnostic("settling-start", {
+          channelId: c.channelId,
+          channelName: c.channelName || "",
+          generation: syncGeneration.get(c.channelId) ?? null,
+          cause: "tab-visible",
+        }, changedAt);
+      }
+      if (syncCongestion.active) recordCongestionChange(false, syncEligibleIds(), changedAt);
+      syncCongestion = { active: false, since: 0 };
+      state.sync.congested = false;
+    }
+    updateSyncPolling();
   });
 
   // 채팅 칸이 준비되면 덮개를 걷고 테마를 보낸다(채널을 바꿔 새로 뜰 때마다 온다).

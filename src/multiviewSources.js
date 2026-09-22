@@ -12,6 +12,9 @@
 
   const API = "https://api.chzzk.naver.com";
   const HASH_RE = /^[0-9a-f]{32}$/i;
+  const LIVE_PAGE_SIZE = 40;
+  const LIVE_CURSOR_KEYS = Object.freeze(["concurrentUserCount", "liveId"]);
+  const LIVE_CACHE_TTL_MS = 20000;
   // 검색 결과 중 방송 정보를 확인할 최대 채널 수(채널마다 요청이 하나씩 생긴다).
   const SEARCH_DETAIL_MAX = 12;
 
@@ -84,11 +87,143 @@
       .filter((r) => r.channelId);
   }
 
-  // 인기 상위 목록('전체' 가 아니다 — 탭 이름도 '라이브' 로 둔다).
-  async function loadLive() {
-    const c = await getJson(`${API}/service/v1/lives?size=40`);
+  function normalizeLiveCursor(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const cursor = {};
+    for (const key of LIVE_CURSOR_KEYS) {
+      const raw = value[key];
+      if (raw === undefined || raw === null || raw === "") return null;
+      if (typeof raw !== "string" && typeof raw !== "number") return null;
+      cursor[key] = String(raw);
+    }
+    return cursor;
+  }
+
+  function livePageUrl(cursor = null) {
+    const url = new URL(`${API}/service/v1/lives`);
+    url.searchParams.set("size", String(LIVE_PAGE_SIZE));
+    const safeCursor = normalizeLiveCursor(cursor);
+    if (safeCursor) {
+      for (const key of LIVE_CURSOR_KEYS) url.searchParams.set(key, safeCursor[key]);
+    }
+    return url.toString();
+  }
+
+  async function loadLivePage(cursor = null, fetchJson = getJson) {
+    const c = await fetchJson(livePageUrl(cursor));
     const rows = Array.isArray(c?.data) ? c.data : [];
-    return rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId);
+    return {
+      rows: rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId),
+      next: normalizeLiveCursor(c?.page?.next),
+    };
+  }
+
+  function createLivePager(options = {}) {
+    const fetchPage = typeof options.fetchPage === "function"
+      ? options.fetchPage : (cursor) => loadLivePage(cursor);
+    const now = typeof options.now === "function" ? options.now : Date.now;
+    const ttlMs = Number.isFinite(options.ttlMs) && options.ttlMs > 0
+      ? options.ttlMs : LIVE_CACHE_TTL_MS;
+    let rows = [];
+    let next = null;
+    let loading = false;
+    let done = false;
+    let error = null;
+    let expiresAt = 0;
+    let generation = 0;
+    let pending = null;
+
+    const snapshot = () => ({
+      rows: [...rows],
+      next: next ? { ...next } : null,
+      loading,
+      done,
+      error,
+      expiresAt,
+      generation,
+    });
+
+    const mergeRows = (base, incoming) => {
+      const seen = new Set();
+      const merged = [];
+      for (const row of [...base, ...(Array.isArray(incoming) ? incoming : [])]) {
+        const id = String(row?.channelId || "").toLowerCase();
+        if (!HASH_RE.test(id) || seen.has(id)) continue;
+        seen.add(id);
+        merged.push({ ...row, channelId: id });
+      }
+      return merged;
+    };
+
+    const request = (cursor, replace) => {
+      const requestGeneration = ++generation;
+      loading = true;
+      error = null;
+      let response;
+      try {
+        response = fetchPage(cursor ? { ...cursor } : null);
+      } catch (reason) {
+        response = Promise.reject(reason);
+      }
+      const task = Promise.resolve(response)
+        .then((page) => {
+          if (requestGeneration !== generation) return;
+          rows = mergeRows(replace ? [] : rows, page?.rows);
+          next = normalizeLiveCursor(page?.next);
+          if (cursor && next && LIVE_CURSOR_KEYS.every((key) => next[key] === cursor[key])) {
+            next = null;
+          }
+          done = next === null;
+          expiresAt = now() + ttlMs;
+        })
+        .catch((reason) => {
+          if (requestGeneration === generation) error = reason;
+        })
+        .finally(() => {
+          if (requestGeneration === generation) {
+            loading = false;
+            pending = null;
+          }
+        })
+        .then(snapshot);
+      pending = task;
+      return task;
+    };
+
+    return {
+      get rows() { return [...rows]; },
+      get next() { return next ? { ...next } : null; },
+      get loading() { return loading; },
+      get done() { return done; },
+      get error() { return error; },
+      get expiresAt() { return expiresAt; },
+      get generation() { return generation; },
+      snapshot,
+      isExpired() { return expiresAt > 0 && expiresAt <= now(); },
+      loadFirst(force = false) {
+        if (!force && loading && pending) return pending;
+        if (!force && expiresAt > now()) return Promise.resolve(snapshot());
+        return request(null, true);
+      },
+      loadNext() {
+        if (loading && pending) return pending;
+        if (done) return Promise.resolve(snapshot());
+        if (!next) return request(null, true);
+        return request(next, false);
+      },
+      invalidate() {
+        generation += 1;
+        loading = false;
+        pending = null;
+        expiresAt = 0;
+      },
+    };
+  }
+
+  // 첫 페이지만 필요로 하던 기존 호출부를 위한 호환 함수.
+  async function loadLive() {
+    const page = await loadLivePage();
+    return page.rows;
   }
 
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 지금 방송 중인 채널
@@ -367,6 +502,10 @@
     HASH_RE,
     getJson,
     normalize,
+    normalizeLiveCursor,
+    livePageUrl,
+    loadLivePage,
+    createLivePager,
     loadFollowing,
     loadLive,
     searchLive,

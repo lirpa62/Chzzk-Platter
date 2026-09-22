@@ -102,8 +102,18 @@
         <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden></div>
       </div>
 
+      <div class="mv-pop" data-mv-pop="sync">
+        <button type="button" class="mv-pop-button" data-mv-pop-toggle="sync"
+          id="mvSyncBtn" aria-haspopup="dialog" aria-expanded="false">
+          <span class="mv-pop-label">싱크</span>
+          <span class="mv-pop-value" id="mvSyncValue">꺼짐</span>
+        </button>
+        <div class="mv-pop-panel mv-sync-pop" id="mvSyncPop" role="dialog"
+          aria-label="라이브 싱크" hidden></div>
+      </div>
+
       <button type="button" class="mv-topbar-back" id="mvBack">
-        채널 바꾸기
+        채널 관리
       </button>
 
       <button
@@ -153,7 +163,7 @@
              고르기 화면까지 가지 않아도 된다. -->
         <div class="mv-quick" id="mvQuick" hidden>
           <div class="mv-quick-head">
-            <strong>채널 바꾸기</strong>
+            <strong>채널 관리</strong>
             <span class="mv-quick-hint" id="mvQuickHint"></span>
             <div class="mv-quick-head-actions" id="mvQuickHeadActions">
               <button type="button" class="mv-quick-all" id="mvQuickAll">
@@ -195,7 +205,7 @@
               type="search"
               class="mv-quick-search"
               id="mvQuickSearch"
-              placeholder="채널 이름으로 찾기"
+              placeholder="채널 이름 또는 태그로 찾기"
               hidden
             />
             <div class="mv-quick-rail">
@@ -218,6 +228,8 @@
               </button>
             </div>
           </div>
+          <button type="button" class="mv-quick-resize" id="mvQuickResize"
+            aria-label="채널 관리 패널 크기 조절" title="채널 관리 패널 크기 조절"></button>
         </div>
         <div class="mv-frames" id="mvFrames"></div>
       </div>
@@ -271,6 +283,8 @@
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
     <script src="src/multiviewLayouts.js"></script>
+    <script src="src/multiviewSync.js"></script>
+    <script src="src/multiviewDiagnostics.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>
 </html>

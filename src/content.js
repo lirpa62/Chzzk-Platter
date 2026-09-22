@@ -254,9 +254,7 @@
   ).toLowerCase();
   // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
-  // 화질 지시로 받을 수 있는 값만 허용한다. "high" 는 상한 없음(사용자 최대화질 설정을
-  // 그대로 따른다), 숫자는 그 높이 이하 중 가장 높은 트랙을 고른다.
-  const MULTIVIEW_QUALITY_VALUES = new Set(["high", "480"]);
+  const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480"]);
   // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
   const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
   // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
@@ -276,10 +274,15 @@
   // 부모가 지시한 출력 크기(0~1). 부모의 전체 볼륨 × 이 채널 볼륨이 이미 곱해져
   // 온다. 여기서는 받은 값을 <video> 에 그대로 건다(새 AudioContext 를 만들지 않는다).
   let multiviewVolume = 1;
-  // 480 이면 그 높이 이하 트랙 중 가장 높은 것을 고른다(작은 칸에 1080p 는 낭비).
-  let multiviewQuality = IS_MULTIVIEW_FRAME
-    ? Number(MULTIVIEW_PARAMS.get("cheeseMultiQuality")) || 0
-    : 0;
+  // 역할 정책은 숫자 상한과 분리한다. highest는 상한이 없는 상태가 아니라 생명주기
+  // 경계에서 사용 가능한 최고 화질을 적극적으로 다시 선택한다는 뜻이다.
+  const multiviewInitialQualityPolicy = MULTIVIEW_PARAMS.get("cheeseMultiQualityPolicy");
+  let multiviewQualityPolicy = IS_MULTIVIEW_FRAME &&
+      MULTIVIEW_QUALITY_POLICIES.has(multiviewInitialQualityPolicy)
+    ? multiviewInitialQualityPolicy
+    : IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiQuality") === "480"
+      ? "cap-480" : "highest";
+  let multiviewQualityReconcileToken = 0;
 
   // 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
   // 사이드바·헤더 등 최상위 전용 UI 를 주입하지 않고 플레이어 기능만 남긴다.
@@ -21633,6 +21636,7 @@
   //   부모는 src 를 건드리지 않고 postMessage 로 상태만 바꾼다. 교차 출처라 부모가
   //   프레임 DOM 을 만질 수 없으므로 실제 적용은 여기(프레임 안)에서 한다.
   if (IS_MULTIVIEW_FRAME) {
+    const MULTIVIEW_SYNC = globalThis.CheeseMultiviewSync;
     // 사용자가 이 칸에서 직접 소리를 켰는지. 켰으면 잠시 존중하되, 부모가 메인/보조를
     // 다시 지정하면 그 지시를 우선한다(부모가 소리 주인을 정한다).
     let muteOverriddenByUser = false;
@@ -21641,6 +21645,116 @@
     //   400ms 폴링으로 20초만 버텼는데, 오래 보면 그 뒤 교체분에는 적용되지 않았다.
     //   지금은 video 를 붙들고 교체를 감지해 그때마다 현재 상태를 다시 건다.
     let currentVideo = null;
+    let syncVideoGeneration = 0;
+    let syncRateOwned = false;
+    let syncRateTarget = 1;
+    let syncRateUserOverride = false;
+    let syncSeekAt = 0;
+    let currentVideoSource = "";
+    let multiviewAdPlaying = false;
+    let multiviewAdCheckTimer = 0;
+    const MULTIVIEW_MIXER_COMMANDS = new Set([
+      "MIXER_GET_STATE", "MIXER_SET_ENABLED", "MIXER_SET_GAIN",
+      "MIXER_SET_PRESET", "MIXER_FLUSH_GAIN",
+    ]);
+
+    const forwardMultiviewMixerCommand = (data) => {
+      const packet = { source: "cheese-multiview-mixer-content", type: data.type,
+        channelId: MULTIVIEW_CHANNEL_ID };
+      if (data.type !== "MIXER_GET_STATE") {
+        if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
+        packet.commandId = data.commandId;
+      }
+      if (data.type === "MIXER_SET_ENABLED") {
+        if (typeof data.enabled !== "boolean" ||
+            (data.confirmed !== undefined && typeof data.confirmed !== "boolean")) return;
+        packet.enabled = data.enabled;
+        packet.confirmed = data.confirmed === true;
+      } else if (data.type === "MIXER_SET_GAIN") {
+        if (typeof data.gain !== "number" || !Number.isFinite(data.gain) ||
+            data.gain < 0 || data.gain > 4) return;
+        packet.gain = data.gain;
+      } else if (data.type === "MIXER_SET_PRESET") {
+        if (typeof data.presetId !== "string" || !data.presetId || data.presetId.length > 128) return;
+        packet.presetId = data.presetId;
+      }
+      window.postMessage(packet, location.origin);
+    };
+
+    window.addEventListener("message", (event) => {
+      if (event.source !== window || event.origin !== location.origin) return;
+      const data = event.data;
+      if (data?.source !== "cheese-multiview-mixer-main" ||
+          data.channelId !== MULTIVIEW_CHANNEL_ID) return;
+      if (data.type === "state" && data.state && typeof data.state === "object") {
+        notifyParent("FRAME_MIXER_STATE", { state: data.state });
+      } else if (data.type === "result" && Number.isSafeInteger(data.commandId) &&
+          data.commandId > 0 && typeof data.command === "string" &&
+          typeof data.applied === "boolean") {
+        notifyParent("FRAME_MIXER_COMMAND_RESULT", {
+          commandId: data.commandId, command: data.command, applied: data.applied,
+          reason: typeof data.reason === "string" ? data.reason : null,
+          state: data.state,
+        });
+      }
+    });
+
+    const reconcileMultiviewQuality = () => {
+      multiviewQualityReconcileToken += 1;
+      broadcastFeatureFlags();
+    };
+
+    const resetFrameSyncRate = () => {
+      const restore = syncRateOwned && currentVideo &&
+        Math.abs(currentVideo.playbackRate - syncRateTarget) <= MULTIVIEW_SYNC.LIMITS.userRateEpsilon;
+      syncRateOwned = false;
+      syncRateTarget = 1;
+      if (restore) {
+        try { currentVideo.playbackRate = 1; } catch {}
+      }
+    };
+
+    const onSyncRateChange = (event) => {
+      if (event.currentTarget !== currentVideo) return;
+      const state = MULTIVIEW_SYNC.rateOwnership(syncRateOwned, syncRateTarget,
+        currentVideo.playbackRate);
+      syncRateOwned = state.owned;
+      syncRateUserOverride = state.userOverride;
+    };
+
+    const syncRange = (ranges, edge) => {
+      try {
+        const value = ranges?.length ? ranges[edge](edge === "end" ? ranges.length - 1 : 0) : null;
+        return Number.isFinite(value) && value >= 0 && value <= 1000000000 ? value : null;
+      } catch { return null; }
+    };
+
+    const reportFrameSyncStats = () => {
+      syncMultiviewVideo();
+      const video = currentVideo;
+      const adPlaying = typeof isAdPlaying === "function" && isAdPlaying();
+      const currentTime = Number.isFinite(video?.currentTime) ? video.currentTime : null;
+      const seekableStart = syncRange(video?.seekable, "start");
+      const seekableEnd = syncRange(video?.seekable, "end");
+      const bufferedEnd = syncRange(video?.buffered, "end");
+      const gap = (end) => end === null || currentTime === null ? null : Math.max(0, end - currentTime);
+      notifyParent("FRAME_SYNC_STATS", { stats: {
+        currentTime,
+        playbackRate: video && Number.isFinite(video.playbackRate) ? video.playbackRate : null,
+        syncRateOwned,
+        userRateOverride: syncRateUserOverride,
+        paused: video?.paused !== false || adPlaying,
+        readyState: video?.readyState ?? 0,
+        nativeDelaySec: gap(seekableEnd),
+        bufferAheadSec: gap(bufferedEnd),
+        edgeLagSec: seekableEnd === null || bufferedEnd === null
+          ? null : Math.max(0, seekableEnd - bufferedEnd),
+        seekableStart,
+        seekableEnd,
+        generation: syncVideoGeneration,
+        sampledAt: Date.now(),
+      } });
+    };
 
     // 차단을 부모에게 알린 적이 있는지. 있을 때만 해제를 알린다(메시지를 줄인다).
     // ⚠ applyAudioToVideo 가 이 값을 바로 읽으므로 그보다 먼저 선언해 둔다.
@@ -21703,28 +21817,77 @@
     // 실제로 재생이 시작되면 그때 상태를 다시 본다(차단이 풀렸을 수 있다).
     const onPlaying = (event) => {
       const video = event.currentTarget;
-      if (video instanceof HTMLMediaElement) reportAudioResolved(video);
+      if (video instanceof HTMLMediaElement) {
+        reportAudioResolved(video);
+        scheduleMultiviewAdCheck();
+      }
     };
+
+    const onMultiviewSourceReady = (event) => {
+      const video = event.currentTarget;
+      if (video !== currentVideo) return;
+      const source = String(video.currentSrc || video.src || "");
+      if (!source || source === currentVideoSource) return;
+      const hadSource = Boolean(currentVideoSource);
+      currentVideoSource = source;
+      if (!hadSource) return;
+      resetFrameSyncRate();
+      syncVideoGeneration += 1;
+      syncSeekAt = 0;
+      syncRateUserOverride = false;
+      reconcileMultiviewQuality();
+      forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
+    };
+
+    function checkMultiviewAdTransition() {
+      multiviewAdCheckTimer = 0;
+      const next = typeof isAdPlaying === "function" && isAdPlaying();
+      if (multiviewAdPlaying && !next) reconcileMultiviewQuality();
+      multiviewAdPlaying = next;
+    }
+
+    function scheduleMultiviewAdCheck() {
+      if (multiviewAdCheckTimer) return;
+      multiviewAdCheckTimer = window.setTimeout(checkMultiviewAdTransition, 100);
+    }
 
     const attachMultiviewVideo = (video) => {
       if (!(video instanceof HTMLMediaElement) || video === currentVideo) return;
+      resetFrameSyncRate();
       currentVideo?.removeEventListener("volumechange", onVolumeChange);
       currentVideo?.removeEventListener("playing", onPlaying);
+      currentVideo?.removeEventListener("ratechange", onSyncRateChange);
+      currentVideo?.removeEventListener("loadedmetadata", onMultiviewSourceReady);
       currentVideo = video;
+      currentVideoSource = String(video.currentSrc || video.src || "");
+      multiviewAdPlaying = typeof isAdPlaying === "function" && isAdPlaying();
+      syncVideoGeneration += 1;
+      syncSeekAt = 0;
+      syncRateUserOverride = false;
       video.addEventListener("volumechange", onVolumeChange);
       video.addEventListener("playing", onPlaying);
+      video.addEventListener("ratechange", onSyncRateChange);
+      video.addEventListener("loadedmetadata", onMultiviewSourceReady);
       applyAudioToVideo(video);
+      reconcileMultiviewQuality();
+      forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
       // 플레이어가 새로 만들어졌으면 넓은 화면·채팅 접힘도 풀렸을 수 있다.
       // ⚠ 반드시 풀린다고 단정하지 않는다. 확인해서 필요할 때만 맞춘다.
       scheduleMultiviewUiReconcile(300);
     };
 
     const syncMultiviewVideo = () => {
-      // 붙들고 있던 video 가 문서에서 떨어졌으면 교체된 것이다.
-      if (currentVideo && !currentVideo.isConnected) currentVideo = null;
       const video = document.querySelector("video");
       if (video) attachMultiviewVideo(video);
-      else if (currentVideo) applyAudioToVideo(currentVideo);
+      else if (currentVideo && !currentVideo.isConnected) {
+        resetFrameSyncRate();
+        currentVideo.removeEventListener("volumechange", onVolumeChange);
+        currentVideo.removeEventListener("playing", onPlaying);
+        currentVideo.removeEventListener("ratechange", onSyncRateChange);
+        currentVideo.removeEventListener("loadedmetadata", onMultiviewSourceReady);
+        currentVideo = null;
+        currentVideoSource = "";
+      } else if (currentVideo) applyAudioToVideo(currentVideo);
     };
 
     // 플레이어 영역만 감시한다(문서 전체를 고빈도로 보지 않는다).
@@ -21736,7 +21899,10 @@
         document.body;
       if (!host) return;
       videoObserver?.disconnect();
-      videoObserver = new MutationObserver(syncMultiviewVideo);
+      videoObserver = new MutationObserver(() => {
+        syncMultiviewVideo();
+        scheduleMultiviewAdCheck();
+      });
       videoObserver.observe(host, { childList: true, subtree: true });
     };
 
@@ -21824,6 +21990,93 @@
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
+      if (typeof data.channelId !== "string" ||
+          data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID) return;
+      if (MULTIVIEW_MIXER_COMMANDS.has(data.type)) {
+        forwardMultiviewMixerCommand(data);
+        return;
+      }
+      if (data.type === "REQUEST_FRAME_SYNC_STATS") {
+        reportFrameSyncStats();
+        return;
+      }
+      const syncCommand = {
+        RESET_SYNC_RATE: "reset-rate", APPLY_SYNC_RATE: "rate",
+        APPLY_SYNC_NUDGE: "nudge", APPLY_SYNC_SEEK: "seek",
+      }[data.type];
+      if (typeof syncCommand === "string") {
+        if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
+        if (syncCommand === "rate" &&
+            (typeof data.rate !== "number" || !Number.isFinite(data.rate) ||
+              data.rate < 0.95 || data.rate > 1.05)) return;
+        if (syncCommand === "nudge" &&
+            (typeof data.deltaSec !== "number" || !Number.isFinite(data.deltaSec) ||
+              Math.abs(data.deltaSec) < 0.05 || Math.abs(data.deltaSec) > 0.5)) return;
+        if (syncCommand === "seek" &&
+            (typeof data.currentTime !== "number" || !Number.isFinite(data.currentTime) ||
+              data.currentTime < 0 || data.currentTime > 1000000000 ||
+              typeof data.deltaSec !== "number" || !Number.isFinite(data.deltaSec) ||
+              Math.abs(data.deltaSec) > MULTIVIEW_SYNC.LIMITS.maxSeekSec + 0.001 ||
+              (data.manual !== undefined && typeof data.manual !== "boolean"))) return;
+        syncMultiviewVideo();
+        const video = currentVideo;
+        let reason = null;
+        try {
+          if (!video) reason = "no-video";
+          else if (syncCommand === "reset-rate") resetFrameSyncRate();
+          else if (video.paused) reason = "paused";
+          else if (video.readyState < 2) reason = "not-ready";
+          else if (typeof isAdPlaying === "function" && isAdPlaying()) reason = "ad";
+          else if (syncCommand === "rate") {
+            if (syncRateUserOverride ||
+                (!syncRateOwned &&
+                  Math.abs(video.playbackRate - 1) > MULTIVIEW_SYNC.LIMITS.userRateEpsilon)) {
+              reason = "user-rate";
+            } else {
+              const previousOwned = syncRateOwned;
+              const previousTarget = syncRateTarget;
+              syncRateTarget = data.rate;
+              syncRateOwned = data.rate !== 1;
+              try {
+                video.playbackRate = data.rate;
+                if (Math.abs(video.playbackRate - data.rate) > MULTIVIEW_SYNC.LIMITS.userRateEpsilon) {
+                  reason = "invalid-state";
+                  syncRateOwned = previousOwned;
+                  syncRateTarget = previousTarget;
+                }
+              } catch (error) {
+                syncRateOwned = previousOwned;
+                syncRateTarget = previousTarget;
+                throw error;
+              }
+            }
+          } else if (video.seeking) reason = "seeking";
+          else if (Date.now() - syncSeekAt <
+              (syncCommand === "nudge" || data.manual === true ? 250 : 30000)) reason = "cooldown";
+          else {
+            const start = syncRange(video.seekable, "start");
+            const end = syncRange(video.seekable, "end");
+            const target = video.currentTime + data.deltaSec;
+            if (start === null || end === null || !Number.isFinite(target) ||
+                target < start + 0.05 || target > end - 0.05) reason = "range";
+            else {
+              video.currentTime = target;
+              if (Math.abs(video.currentTime - target) > 0.2) reason = "invalid-state";
+              else syncSeekAt = Date.now();
+            }
+          }
+        } catch { reason = "exception"; }
+        notifyParent("FRAME_SYNC_COMMAND_RESULT", {
+          commandId: data.commandId,
+          command: syncCommand,
+          applied: reason === null,
+          reason,
+          actualCurrentTime: video && Number.isFinite(video.currentTime) ? video.currentTime : null,
+          actualPlaybackRate: video && Number.isFinite(video.playbackRate) ? video.playbackRate : null,
+          generation: syncVideoGeneration,
+        });
+        return;
+      }
       // 통계 요청: MAIN world(오디오믹서)만 플레이어 내부를 볼 수 있다. 여기서는
       // 물어보고 답만 넘긴다(격리 월드는 치지직 플레이어 객체에 닿지 못한다).
       if (data.type === "REQUEST_MULTIVIEW_STATS") {
@@ -21844,7 +22097,14 @@
         return;
       }
       if (typeof data.muted !== "boolean") return;
-      if (!MULTIVIEW_QUALITY_VALUES.has(String(data.quality))) return;
+      const incomingQualityPolicy = MULTIVIEW_QUALITY_POLICIES.has(String(data.qualityPolicy))
+        ? String(data.qualityPolicy)
+        : String(data.quality) === "high"
+          ? "highest"
+          : String(data.quality) === "480"
+            ? "cap-480"
+            : "";
+      if (!incomingQualityPolicy) return;
       // volume 은 없어도 되지만(옛 형식) 오면 0~1 의 실수여야 한다.
       if (data.volume !== undefined) {
         const v = Number(data.volume);
@@ -21852,26 +22112,18 @@
         multiviewVolume = v;
       }
 
-      const nextQuality = String(data.quality) === "high" ? 0 : 480;
-      const qualityChanged = nextQuality !== multiviewQuality;
+      const qualityChanged = incomingQualityPolicy !== multiviewQualityPolicy;
       // 부모가 '지금 다시 확인해 달라' 고 한 경우(프레임이 막 준비된 때).
       const forceQualityReconcile = data.reconcileQuality === true;
-      multiviewQuality = nextQuality;
+      multiviewQualityPolicy = incomingQualityPolicy;
       // 부모 지시는 사용자의 이전 수동 조작보다 우선한다(메인이 바뀌었다는 뜻이다).
       multiviewMuted = data.muted;
       muteOverriddenByUser = false;
       syncMultiviewVideo();
       if (currentVideo) applyAudioToVideo(currentVideo);
-      // 화질 상한은 기능 플래그로 전달된다. 다시 알려 audioMixer 가 재적용하게 한다.
-      //
-      // ⚠ 값이 그대로여도(480 → 480) 프레임이 막 준비된 때는 다시 알린다. 칸이
-      //   처음 뜰 때 플레이어는 한동안 입장 로딩 국면(beforeplay/loading)이라
-      //   상한을 걸지 못하는데, 그 뒤 재시도를 깨워 줄 것이 마땅치 않다 —
-      //   멀티뷰는 채팅을 접어 두어 DOM 변이로 도는 tick 이 잘 깨지 않고,
-      //   timeupdate 경로는 한 번 걸린 뒤에는 빠져나간다. 그래서 일부 보조 칸이
-      //   1080p 로 남아 있다가 탭을 전환해야(visibilitychange) 480p 로 정리됐다.
-      //   실제 트랙 변경은 applyMaxQuality 의 안전 게이트가 그대로 판단한다.
-      if (qualityChanged || forceQualityReconcile) broadcastFeatureFlags();
+      // 역할이 같아도 FRAME_READY 직후에는 로딩 중 놓친 화질 적용을 다시 시도한다.
+      // 실제 트랙 변경 시점은 applyMaxQuality의 재생 안정성 검사에 맡긴다.
+      if (qualityChanged || forceQualityReconcile) reconcileMultiviewQuality();
     });
 
     // 초기 상태 적용 + 감시 시작.
@@ -52849,23 +53101,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         syncCooldownCustom, // {base,max}(초) 또는 null
         mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
         mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
-        // 최대 화질 자동 고정. 팝업 프레임은 전역값과 무관하게 팝업 설정을 따른다
-        // (작은 창에 최고 화질을 고정하면 대역폭·디코딩 부담만 커진다).
-        // 멀티뷰 프레임은 전역 최대화질 고정을 끈다(작은 칸 여러 개를 동시에 최고
-        // 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다). 대신 아래 상한을 쓴다.
-        // 멀티뷰: 상한이 걸린 칸(보조)은 전역 최대화질 고정을 끈다. 작은 칸 여러 개를
-        // 동시에 최고 화질로 올리면 대역폭·디코딩이 화면 수만큼 곱해진다.
-        // ⚠ 상한이 풀린 칸(메인)은 전역 설정을 그대로 따라야 한다. 여기서 false 로
-        //   묶어 두면 보조→메인으로 올린 칸이 480p 에 머문다(상한만 풀려서는 화질을
-        //   다시 올릴 트리거가 없다).
+        // 멀티뷰는 전역 설정과 분리된 역할 정책을 쓴다. 메인은 최고 고정 동작을
+        // 적극적으로 실행하고, 보조 칸은 아래의 480p 상한만 적용한다.
         maxQualityAuto: IS_MULTIVIEW_FRAME
-          ? multiviewQuality === 0 && maxQualityAuto
+          ? multiviewQualityPolicy === "highest"
           : IS_POPUP_PLAYER_FRAME
             ? popupPlayerMaxQuality
             : maxQualityAuto,
-        // 화질 상한(px). 멀티뷰에서만 쓰며 0 이면 상한 없음. 지금 이 칸이 메인이면
-        // 부모가 상한을 지시하지 않으므로 0 이 되어 상한이 걸리지 않는다.
-        maxQualityCap: multiviewQuality,
+        // 화질 상한(px). cap-480 정책에서만 쓰며 highest는 별도 자동 선택으로 처리한다.
+        maxQualityCap: IS_MULTIVIEW_FRAME && multiviewQualityPolicy === "cap-480"
+          ? 480 : 0,
+        multiviewQualityPolicy: IS_MULTIVIEW_FRAME ? multiviewQualityPolicy : "none",
+        multiviewQualityReconcileToken: IS_MULTIVIEW_FRAME
+          ? multiviewQualityReconcileToken : 0,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)
         videoFilterAlwaysOn, // 비디오 필터 항상 켜기(전역)
         videoFilterDefaultOn, // 비디오 필터 기본 켜짐(전역)

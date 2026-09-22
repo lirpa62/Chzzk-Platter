@@ -6147,6 +6147,7 @@ const MULTIVIEW_API_PATHS = new Set([
   // 팔로잉 목록. liveInfo 에 방송 썸네일까지 들어 있어 이걸 정본으로 쓴다.
   "/service/v1/channels/following-lives",
   "/service/v1/lives",
+  "/service/v1/tag/lives",
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 방송 제목만 훑는지
   //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
   "/service/v1/search/channels",
@@ -6159,6 +6160,46 @@ const MULTIVIEW_API_PATHS = new Set([
 const MULTIVIEW_LIVE_DETAIL_RE =
   /^\/service\/v3\/channels\/[0-9a-f]{32}\/live-detail$/i;
 
+function validMultiviewApiQuery(url) {
+  const keys = [...url.searchParams.keys()];
+  const only = (allowed) => keys.every((key) => allowed.has(key)) &&
+    keys.every((key) => url.searchParams.getAll(key).length === 1);
+  const uint = (key, min = 0, max = Number.MAX_SAFE_INTEGER) => {
+    const raw = url.searchParams.get(key);
+    if (raw === null) return true;
+    if (!/^\d+$/.test(raw)) return false;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value >= min && value <= max;
+  };
+  if (url.pathname === "/service/v1/lives") {
+    if (!only(new Set(["size", "concurrentUserCount", "liveId"]))) return false;
+    const hasCount = url.searchParams.has("concurrentUserCount");
+    const hasLiveId = url.searchParams.has("liveId");
+    return hasCount === hasLiveId && uint("size", 1, 100) &&
+      uint("concurrentUserCount") && uint("liveId", 1);
+  }
+  if (url.pathname === "/service/v1/tag/lives") {
+    if (!only(new Set(["size", "sortType", "tags"]))) return false;
+    const tag = url.searchParams.get("tags");
+    return url.searchParams.has("size") && uint("size", 1, 100) &&
+      url.searchParams.get("sortType") === "POPULAR" &&
+      typeof tag === "string" && tag.trim().length > 0 && tag.length <= 80;
+  }
+  if (url.pathname === "/service/v1/channels/following-lives") {
+    return only(new Set(["sortType"])) &&
+      (!url.searchParams.has("sortType") || url.searchParams.get("sortType") === "POPULAR");
+  }
+  if (url.pathname === "/service/v1/search/channels") {
+    return only(new Set(["keyword", "offset", "size"])) &&
+      url.searchParams.has("keyword") && uint("offset", 0, 10000) && uint("size", 1, 100);
+  }
+  if (url.pathname === "/commercial/v1/subscribe/channels") {
+    return only(new Set(["page", "size"])) && uint("page", 0, 10000) && uint("size", 1, 100);
+  }
+  if (MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) return keys.length === 0;
+  return false;
+}
+
 async function fetchMultiviewApi(rawUrl) {
   let url;
   try {
@@ -6169,7 +6210,8 @@ async function fetchMultiviewApi(rawUrl) {
   if (
     url.origin !== MULTIVIEW_API_ORIGIN ||
     (!MULTIVIEW_API_PATHS.has(url.pathname) &&
-      !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname))
+      !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) ||
+    !validMultiviewApiQuery(url)
   ) {
     throw new Error("not-allowed");
   }
