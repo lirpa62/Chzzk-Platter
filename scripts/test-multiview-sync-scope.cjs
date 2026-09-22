@@ -296,14 +296,92 @@ const ALL = ["a", "b", "c", "d"];
   assert.equal(at(null).text, "재생 속도 -", "값이 없을 때 표시가 다르다");
   assert.equal(at(undefined).text, "재생 속도 -");
 
-  // ⚠ 부동소수점 오차로 방향이 뒤집히면 안 된다.
-  for (const near of [0.999999, 1.000001, 1 - LIMITS.userRateEpsilon / 2]) {
+  // ⚠ 부동소수점 오차로 방향이 뒤집히면 안 된다. 다만 '표시값이 1.00× 인 경우'
+  //   에만 기본이다 — 0.99 처럼 화면에 다르게 보이는 값은 방향이 있어야 한다.
+  for (const near of [0.999999, 1.000001, 1, 0.9999, 1.0001]) {
+    const out = at(near);
     assert.match(
-      at(near).text,
+      out.text,
+      /재생 속도 1\.00×/,
+      `${near} 의 표시가 1.00× 가 아니다`,
+    );
+    assert.match(
+      out.text,
       /기본/,
-      `1× 근처(${near})가 느리게/빠르게로 표시된다`,
+      `표시가 1.00× 인데(${near}) 방향이 기본이 아니다`,
     );
   }
+
+  // 엔진이 실제로 만드는 배속(±0.01/0.03/0.05)이 모두 방향을 갖는다.
+  // ⚠ 예전에는 userRateEpsilon(0.02) 으로 판정해 0.99/1.01 이 '기본' 으로 떴다.
+  //   같은 줄의 '자동 보정 중' 과 모순이었다.
+  for (const [rate, want] of [
+    [0.95, "느리게"],
+    [0.97, "느리게"],
+    [0.99, "느리게"],
+    [1.01, "빠르게"],
+    [1.03, "빠르게"],
+    [1.05, "빠르게"],
+  ]) {
+    const out = at(rate, { syncRateOwned: true });
+    assert.match(
+      out.text,
+      new RegExp(`재생 속도 ${rate.toFixed(2)}×`),
+      `${rate} 의 표시 숫자가 다르다`,
+    );
+    assert.match(
+      out.text,
+      new RegExp(want),
+      `${rate} 가 ${want} 로 표시되지 않는다`,
+    );
+    assert.doesNotMatch(out.text, /기본/, `${rate} 가 기본으로 표시된다`);
+  }
+
+  // 표시 숫자와 방향이 어긋나지 않는다(1.00× 인데 느리게 같은 모순 금지).
+  for (const rate of [0.95, 0.99, 0.999999, 1, 1.000001, 1.01, 1.05]) {
+    const out = at(rate);
+    const shown = Number(out.text.match(/재생 속도 ([0-9.]+)×/)[1]);
+    const dir = /느리게/.test(out.text)
+      ? "느리게"
+      : /빠르게/.test(out.text)
+        ? "빠르게"
+        : "기본";
+    const expected = shown < 1 ? "느리게" : shown > 1 ? "빠르게" : "기본";
+    assert.equal(
+      dir,
+      expected,
+      `표시 ${shown}× 와 방향 '${dir}' 이 어긋난다(기대 '${expected}')`,
+    );
+  }
+
+  // 엔진 출력과 UI 의미가 맞물리는지(정책을 복제하지 않고 실제 rateFor 를 쓴다).
+  const SYNC_MOD = require("../src/multiviewSync.js");
+  for (const [error, want] of [
+    [3, "느리게"],
+    [-3, "빠르게"],
+  ]) {
+    const engineRate = SYNC_MOD.rateFor(error, true);
+    assert.notEqual(engineRate, 1, `rateFor(${error}) 가 배속을 만들지 않았다`);
+    assert.match(
+      at(engineRate, { syncRateOwned: true }).text,
+      new RegExp(want),
+      `rateFor(${error})=${engineRate} 가 ${want} 로 표시되지 않는다`,
+    );
+  }
+
+  // userRateEpsilon 은 소유권 판정용으로 남아 있어야 한다(값 변경 금지).
+  assert.equal(LIMITS.userRateEpsilon, 0.02, "userRateEpsilon 값이 바뀌었다");
+  // ⚠ 주석에는 왜 안 쓰는지 적혀 있을 수 있다. 실제 코드 줄만 본다.
+  const rateCode = sliceFn("syncRateText")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  assert.doesNotMatch(
+    rateCode,
+    /userRateEpsilon/,
+    "방향 판정에 다시 userRateEpsilon 을 쓴다",
+  );
+  assert.match(rateCode, /toFixed\(2\)/, "표시 숫자를 만들지 않는다");
 
   // 색·화살표만으로 방향을 표현하지 않는다(글자가 반드시 있다).
   for (const r of [0.95, 1.05]) {
@@ -454,6 +532,109 @@ const ALL = ["a", "b", "c", "d"];
     /manualOffsets\[id\] =/,
     "교체가 새 채널에 보정값을 물려준다",
   );
+}
+
+// 9) 그룹 부족으로 자동 싱크를 끝낼 때 혼잡 상태를 즉시 비운다.
+{
+  const SYNC_MOD = require("../src/multiviewSync.js");
+  const calls = { reset: 0, cancel: [], polling: 0, diag: [] };
+  const state = {
+    chosen: [{ channelId: "a" }, { channelId: "b" }],
+    sync: {
+      mode: "auto",
+      scope: "selected",
+      selectedChannelIds: ["a"], // 이미 1개로 줄어든 상태
+      congested: true,
+    },
+  };
+  // ⚠ 혼잡에 막 들어간 직후(since=0)가 문제다. 이때 빈 그룹으로 한 번 부르면
+  //   SYNC.congestion 은 since 만 잡고 active 를 유지한다(5초 hysteresis).
+  const box = { syncCongestion: { active: true, since: 0 }, syncNotice: "" };
+
+  // 원본 함수를 그대로 쓰되, 모듈 스코프 변수만 box 로 바꿔 관찰한다.
+  const src =
+    sliceFn("syncScopeIds") +
+    sliceFn("syncGroupTooSmall") +
+    sliceFn("stopAutoSyncIfGroupTooSmall");
+  const wired = src
+    .replace(/\bsyncCongestion\b/g, "box.syncCongestion")
+    .replace(/\bsyncNotice\b/g, "box.syncNotice");
+  // eslint-disable-next-line no-new-func
+  const stop = new Function(
+    "state",
+    "SYNC",
+    "box",
+    "resetAllSyncRates",
+    "cancelPendingSync",
+    "recordCongestionChange",
+    "updateSyncPolling",
+    wired + "\nreturn stopAutoSyncIfGroupTooSmall;",
+  )(
+    state,
+    SYNC_MOD,
+    box,
+    () => {
+      calls.reset += 1;
+    },
+    (id) => calls.cancel.push(id),
+    (active) => calls.diag.push(active),
+    () => {
+      calls.polling += 1;
+    },
+  );
+
+  const stopped = stop();
+  assert.equal(stopped, true, "그룹이 1개인데 자동 싱크를 끝내지 않았다");
+  assert.equal(state.sync.mode, "off", "자동 싱크가 꺼지지 않았다");
+  assert.equal(state.sync.congested, false, "표시용 혼잡 상태가 남았다");
+  assert.equal(box.syncCongestion.active, false, "내부 혼잡 상태가 남았다");
+  assert.equal(
+    box.syncCongestion.since,
+    0,
+    "혼잡 since 가 남았다(다음 세션에 샌다)",
+  );
+  assert.equal(calls.reset, 1, "속도를 되돌리지 않았다");
+  assert.deepEqual(calls.cancel, ["a", "b"], "보류 명령을 버리지 않았다");
+  assert.deepEqual(
+    calls.diag,
+    [false],
+    "혼잡 해제를 진단에 한 번만 기록해야 한다",
+  );
+  assert.match(box.syncNotice, /2개 이상/, "안내 문구가 없다");
+
+  // 재진입: 이전 세션의 혼잡이 새 세션을 막지 않는다.
+  const fresh = SYNC_MOD.congestion(
+    box.syncCongestion,
+    new Map(),
+    ["a", "b"],
+    50000,
+  );
+  assert.equal(fresh.active, false, "이전 혼잡이 새 세션으로 이어졌다");
+}
+
+// 10) 일반 혼잡 해제의 hysteresis 는 그대로다(직접 초기화가 정책을 바꾸지 않는다).
+{
+  const SYNC_MOD = require("../src/multiviewSync.js");
+  assert.equal(
+    SYNC_MOD.LIMITS.congestionExitMs,
+    5000,
+    "혼잡 해제 기준이 바뀌었다",
+  );
+  // 혼잡 직후에는 한 번 불러도 풀리지 않는다.
+  const step1 = SYNC_MOD.congestion(
+    { active: true, since: 0 },
+    new Map(),
+    [],
+    10000,
+  );
+  assert.equal(
+    step1.active,
+    true,
+    "일반 경로에서 혼잡이 즉시 풀렸다(정책 변경)",
+  );
+  // 5초가 지나야 풀린다.
+  const step2 = SYNC_MOD.congestion(step1, new Map(), [], 15000);
+  assert.equal(step2.active, false, "5초 뒤에도 혼잡이 안 풀린다");
 }
 
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");

@@ -1449,9 +1449,14 @@
   function syncRateText(stats) {
     const rate = stats?.playbackRate;
     if (!Number.isFinite(rate)) return { text: "재생 속도 -", hint: "" };
-    const eps = SYNC.LIMITS.userRateEpsilon;
-    const dir = rate < 1 - eps ? "느리게" : rate > 1 + eps ? "빠르게" : "기본";
-    const text = `재생 속도 ${rate.toFixed(2)}× · ${dir}`;
+    // ⚠ 방향은 '화면에 보이는 숫자' 로 정한다. userRateEpsilon(0.02)으로 판정하면
+    //   자동 보정이 만드는 0.99×/1.01× 가 '기본' 으로 표시돼, 같은 줄의 '자동 보정
+    //   중' 과 모순된다. 표시값과 판정값이 어긋나지 않게 같은 수에서 계산한다.
+    //   (userRateEpsilon 은 rate 소유권 판정용으로 그대로 둔다.)
+    const formatted = rate.toFixed(2);
+    const shown = Number(formatted);
+    const dir = shown < 1 ? "느리게" : shown > 1 ? "빠르게" : "기본";
+    const text = `재생 속도 ${formatted}× · ${dir}`;
     // 자동 보정인지 사용자가 직접 바꾼 배속인지 구분해 설명한다.
     const owned =
       stats?.syncRateOwned === true && stats?.userRateOverride !== true;
@@ -1504,8 +1509,16 @@
     state.sync.mode = "off";
     resetAllSyncRates();
     for (const c of state.chosen) cancelPendingSync(c.channelId);
+    // ⚠ 혼잡 상태를 직접 비운다. SYNC.congestion 은 해제에도 5초 hysteresis 가
+    //   있어, 빈 그룹으로 한 번 불러도 active 가 남을 수 있다(since=0 이면 이번
+    //   호출에서 since 만 잡히고 active 는 유지된다 — 실측). 이건 혼잡이 풀린 게
+    //   아니라 싱크 세션 자체가 끝난 경우라 이전 상태를 물려줄 이유가 없다.
+    //   일반 혼잡 진입/해제의 hysteresis 정책은 그대로 둔다.
+    if (syncCongestion.active) {
+      recordCongestionChange(false, syncScopeIds(), Date.now());
+    }
     state.sync.congested = false;
-    syncCongestion = SYNC.congestion(syncCongestion, new Map(), [], Date.now());
+    syncCongestion = { active: false, since: 0 };
     syncNotice = "싱크할 채널을 2개 이상 선택해 주세요.";
     updateSyncPolling();
     return true;
