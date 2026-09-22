@@ -141,7 +141,7 @@ const checks = [];
     ];
     // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
     // 전체는 data, 검색은 data[].{live,channel}.
-    window.__livePageCalls=0;
+    window.__livePageCalls=0;window.__searchPageOffsets=[];
     window.__apiContent=(url)=>{
       const parsed=new URL(url),p=parsed.pathname;
       // 팔로잉은 following-lives 를 쓴다(liveInfo 에 방송 썸네일까지 들어 있다).
@@ -155,7 +155,11 @@ const checks = [];
       // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다.
       const detail=p.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
       if(detail){
-        const c=channels.find(x=>x.channelId===detail[1]);
+        let c=channels.find(x=>x.channelId===detail[1]);
+        const searchNumber=parseInt(detail[1],16);
+        if(!c&&searchNumber>=500&&searchNumber<532)c={
+          channelId:detail[1],channelName:'검색 '+searchNumber,
+          liveTitle:'검색 방송 '+searchNumber,concurrentUserCount:searchNumber};
         if(!c)return {status:'CLOSE'};
         return {status:'OPEN',channel:c,liveTitle:c.liveTitle,
           adult:c.channelId.endsWith('1')?'true':false,
@@ -163,8 +167,21 @@ const checks = [];
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'};
       }
       // 채널 검색은 search/channels 를 쓴다(방송 정보는 없고 openLive 만 있다).
-      if(p.endsWith('/search/channels'))return {data:channels.map(c=>({
-        channel:{...c,openLive:true}}))};
+      if(p.endsWith('/search/channels')){
+        const keyword=parsed.searchParams.get('keyword');
+        if(keyword==='페이지'){
+          const offset=Number(parsed.searchParams.get('offset')||0);
+          window.__searchPageOffsets.push(offset);
+          const count=offset===0?30:offset===30?2:0;
+          return {data:Array.from({length:count},(_,i)=>{
+            const n=500+offset+i;
+            return {channel:{channelId:n.toString(16).padStart(32,'0'),
+              channelName:'검색 '+n,openLive:true}};
+          })};
+        }
+        return {data:channels.map(c=>({channel:{...c,openLive:true}}))};
+      }
+      if(p.endsWith('/service/v1/tag/lives')&&parsed.searchParams.get('tags')==='페이지')return {data:[]};
       if(p.endsWith('/subscribe/channels'))return {data:[]};
       if(p.endsWith('/service/v1/lives')){
         window.__livePageCalls++;
@@ -507,6 +524,28 @@ const checks = [];
   );
 
   await test(
+    "선택 화면 검색은 스크롤로 다음 채널 페이지를 이어 붙인다",
+    `document.querySelector('[data-mv-source="search"]').click();
+     const input=document.getElementById('mvSearch');
+     input.value='페이지';
+     input.dispatchEvent(new Event('input',{bubbles:true}));
+     const list=document.getElementById('mvChannelList');
+     await wait(340);
+     for(let i=0;i<6&&!window.__searchPageOffsets.includes(30);i++){
+       list.scrollTop=list.scrollHeight;
+       list.dispatchEvent(new Event('scroll'));
+       await wait(100);
+     }
+     await wait(100);
+     check(window.__searchPageOffsets.includes(30),
+       '검색 다음 페이지(offset=30)를 요청하지 않았다: '+window.__searchPageOffsets);
+     check(list.querySelectorAll('[data-mv-pick]').length===32,
+       '검색 다음 페이지 카드가 이어지지 않았다: '+list.querySelectorAll('[data-mv-pick]').length);
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(200);`,
+  );
+
+  await test(
     "배치 미리보기가 버튼 밖으로 삐져나가지 않는다",
     `// ⚠ 가로로 긴 배치(오른쪽 1 은 3.56:1)는 width:100% + aspect-ratio 로 두면
      //   버튼 폭을 넘어 밖으로 나간다(실측: 87px 버튼 안에 149px).
@@ -613,11 +652,35 @@ const checks = [];
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋'},
       {channelId:'aaaa0000000000000000000000000004',channelName:'채널넷'},
     ];
-    window.__quickLiveCalls=0;
+    window.__quickLiveCalls=0;window.__quickSearchOffsets=[];
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       sendMessage:async(msg)=>{
         if(msg?.type!=='MULTIVIEW_API')return {ok:false};
         const parsed=new URL(msg.url);
+        const detail=parsed.pathname.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
+        if(detail){
+          const n=parseInt(detail[1],16);
+          if(n>=700&&n<732)return {ok:true,content:{status:'OPEN',
+            channel:{channelId:detail[1],channelName:'Quick 검색 '+n},
+            liveTitle:'Quick 검색 방송 '+n,concurrentUserCount:n,
+            liveCategoryValue:'게임',tags:['검색']}};
+          return {ok:true,content:{status:'CLOSE'}};
+        }
+        if(parsed.pathname.endsWith('/service/v1/search/channels')){
+          const keyword=parsed.searchParams.get('keyword');
+          if(keyword==='페이지'){
+            const offset=Number(parsed.searchParams.get('offset')||0);
+            window.__quickSearchOffsets.push(offset);
+            const count=offset===0?30:offset===30?2:0;
+            return {ok:true,content:{data:Array.from({length:count},(_,i)=>{
+              const n=700+offset+i;
+              return {channel:{channelId:n.toString(16).padStart(32,'0'),
+                channelName:'Quick 검색 '+n,openLive:true}};
+            })}};
+          }
+          return {ok:true,content:{data:[]}};
+        }
+        if(parsed.pathname.endsWith('/service/v1/tag/lives'))return {ok:true,content:{data:[]}};
         if(parsed.pathname.endsWith('/service/v1/lives')){
           window.__quickLiveCalls++;
           const second=parsed.searchParams.has('liveId');
@@ -781,6 +844,36 @@ const checks = [];
      await wait(250);
      document.getElementById('mvQuickClose').click();
      check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "Quick 검색은 빈 상태에서도 손잡이를 유지하고 다음 채널 페이지를 읽는다",
+    `document.getElementById('mvBack').click();
+     const quick=document.getElementById('mvQuick');
+     const search=quick.querySelector('[data-mv-quick-source="search"]');
+     const input=document.getElementById('mvQuickSearch');
+     const rail=document.getElementById('mvQuickAdd');
+     search.click();
+     input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(80);
+     const panelRect=quick.getBoundingClientRect();
+     const handleRect=document.getElementById('mvQuickResize').getBoundingClientRect();
+     check(Math.abs(handleRect.right-panelRect.right)<=12&&Math.abs(handleRect.bottom-panelRect.bottom)<=12,
+       '빈 검색에서 크기 조절 손잡이가 오른쪽 아래에 없다: '+
+       [handleRect.right-panelRect.right,handleRect.bottom-panelRect.bottom]);
+     input.value='페이지';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(340);
+     for(let i=0;i<7&&!window.__quickSearchOffsets.includes(30);i++){
+       rail.scrollTop=rail.scrollHeight;
+       rail.dispatchEvent(new Event('scroll'));
+       await wait(100);
+     }
+     await wait(100);
+     check(window.__quickSearchOffsets.includes(30),
+       'Quick 검색 다음 페이지(offset=30)를 요청하지 않았다: '+window.__quickSearchOffsets);
+     check(rail.querySelectorAll('[data-mv-quick-add]').length===32,
+       'Quick 검색 다음 페이지 카드가 이어지지 않았다: '+rail.querySelectorAll('[data-mv-quick-add]').length);
+     document.getElementById('mvQuickClose').click();`,
   );
 
   await test(

@@ -1775,6 +1775,7 @@
   }
 
   function closePopovers(except) {
+    closeMixerPresetPicker();
     for (const pop of document.querySelectorAll("[data-mv-pop]")) {
       const name = pop.dataset.mvPop;
       if (name === except) continue;
@@ -2206,6 +2207,8 @@
   const QUICK_TTL_MS = 20000; // 제목·시청자 수가 바뀌므로 오래 들고 있지 않는다
   const quickCache = new Map(); // key -> {value, expiresAt}
   let quickLivePager = null;
+  let quickSearchPager = null;
+  let quickSearchKeyword = "";
   let quickSource = "following";
   let quickKeyword = "";
   let quickSections = []; // 전용 팔로잉 구역(폴더)
@@ -2218,6 +2221,15 @@
       quickLivePager = SOURCES.createLivePager({ ttlMs: QUICK_TTL_MS });
     }
     return quickLivePager;
+  }
+
+  function getQuickSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!quickSearchPager || quickSearchKeyword !== query) {
+      quickSearchKeyword = query;
+      quickSearchPager = SOURCES.createSearchPager(query);
+    }
+    return quickSearchPager;
   }
 
   // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
@@ -2235,6 +2247,12 @@
       if (pager.error && !pager.rows.length) throw pager.error;
       return pager.rows;
     }
+    if (source === "search") {
+      const pager = getQuickSearchPager(keyword);
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows;
+    }
     const cached = quickCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     if (!SOURCES) return source === "custom" ? [] : [];
@@ -2243,7 +2261,7 @@
         ? await SOURCES.loadFollowing()
         : source === "custom"
           ? await SOURCES.loadCustomSections()
-          : await SOURCES.searchLive(keyword);
+          : [];
     // 검색은 입력마다 달라 캐시하지 않는다.
     if (source !== "search") {
       quickCache.set(key, { value, expiresAt: Date.now() + QUICK_TTL_MS });
@@ -2384,20 +2402,28 @@
       `<span class="mv-skeleton-line is-short"></span></span></span></div>`).repeat(count);
   }
 
-  function syncQuickLiveRetry() {
+  function quickPagerForSource(source = quickSource) {
+    if (source === "live") return quickLivePager;
+    if (source === "search") return quickSearchPager;
+    return null;
+  }
+
+  function syncQuickPagedRetry() {
     const box = $("mvQuickAdd");
     if (!box) return;
     box.querySelector(".mv-quick-retry")?.remove();
-    if (quickSource === "live" && quickLivePager?.error && quickCandidates?.length) {
+    const pager = quickPagerForSource();
+    if (pager?.error && quickCandidates?.length) {
       box.insertAdjacentHTML("beforeend",
         '<button type="button" class="mv-quick-retry" data-mv-quick-retry="1">다음 목록 다시 불러오기</button>');
     }
   }
 
-  async function loadMoreQuickLive() {
-    if (quickSource !== "live" || $("mvQuick")?.hidden) return;
-    const pager = getQuickLivePager();
-    if (pager.loading || pager.done) return;
+  async function loadMoreQuickCandidates() {
+    if ((quickSource !== "live" && quickSource !== "search") || $("mvQuick")?.hidden) return;
+    const source = quickSource;
+    const pager = quickPagerForSource(source);
+    if (!pager || pager.loading || pager.done) return;
     const box = $("mvQuickAdd");
     box?.querySelector(".mv-quick-retry")?.remove();
     const beforeIds = new Set(
@@ -2407,9 +2433,9 @@
     box?.classList.add("is-loading-more");
     await pager.loadNext();
     box?.classList.remove("is-loading-more");
-    if (quickSource !== "live" || pager !== quickLivePager) return;
+    if (quickSource !== source || pager !== quickPagerForSource(source)) return;
     if (pager.error) {
-      syncQuickLiveRetry();
+      syncQuickPagedRetry();
       return;
     }
     quickCandidates = pager.rows;
@@ -2420,14 +2446,14 @@
     if (added.length) box?.insertAdjacentHTML("beforeend", added.map((row) => quickCard(row, full)).join(""));
   }
 
-  function maybeLoadMoreQuickLive() {
+  function maybeLoadMoreQuickCandidates() {
     const box = $("mvQuickAdd");
-    if (!box || $("mvQuick")?.hidden || quickSource !== "live" ||
-        !quickLivePager || quickLivePager.error) return;
+    const pager = quickPagerForSource();
+    if (!box || $("mvQuick")?.hidden || !pager || pager.error) return;
     // 격자는 위아래로 스크롤한다(예전 가로 캐러셀 기준을 세로로 바꿨다).
     const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
     if (remaining <= Math.max(220, box.clientHeight * 0.75))
-      void loadMoreQuickLive();
+      void loadMoreQuickCandidates();
   }
 
   // 후보가 없을 때의 안내는 목록 종류마다 다르다.
@@ -2482,12 +2508,12 @@
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
     const full = !quickReplaceId && state.chosen.length >= 6;
     box.innerHTML = rest.map((r) => quickCard(r, full)).join("");
-    syncQuickLiveRetry();
+    syncQuickPagedRetry();
     box.scrollTop = Math.min(
       previousScrollTop,
       Math.max(0, box.scrollHeight - box.clientHeight),
     );
-    requestAnimationFrame(maybeLoadMoreQuickLive);
+    requestAnimationFrame(maybeLoadMoreQuickCandidates);
   }
 
   // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.
@@ -2740,7 +2766,7 @@
       return;
     }
     if (target.closest?.("[data-mv-quick-retry]")) {
-      void loadMoreQuickLive();
+      void loadMoreQuickCandidates();
       return;
     }
     if (target.closest?.("#mvQuickCancelReplace")) {
@@ -2928,18 +2954,20 @@
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
   });
 
-  $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickLive, { passive: true });
+  $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, { passive: true });
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(() => {
       clampQuickSize();
-      maybeLoadMoreQuickLive();
+      maybeLoadMoreQuickCandidates();
+      positionMixerPresetPicker();
     });
     observer.observe($("mvQuickAdd"));
     observer.observe($("mvFramesFit"));
   } else {
     window.addEventListener("resize", () => {
       clampQuickSize();
-      maybeLoadMoreQuickLive();
+      maybeLoadMoreQuickCandidates();
+      positionMixerPresetPicker();
     }, { passive: true });
   }
 

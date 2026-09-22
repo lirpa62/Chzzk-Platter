@@ -1188,14 +1188,11 @@ button.mv-live-more {
 }
 .mv-quick-body {
   display: grid;
+  flex: 1;
   gap: 8px;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-height: 0;
-  overflow-y: auto;
-  /* 스크롤바가 생기든 말든 그 자리를 늘 비워 둔다. 없으면 스크롤바가 나타나는
-     순간 내용 너비가 줄어 카드가 한 번 튄다. */
-  scrollbar-gutter: stable;
-  /* 내용이 적은 탭에서도 격자가 위로 쏠려 붙지 않게 시작 정렬로 둔다. */
-  align-content: start;
+  overflow: hidden;
 }
 .mv-quick-current {
   display: flex;
@@ -1368,6 +1365,7 @@ button.mv-live-more {
 .mv-quick-add {
   align-content: start;
   display: grid;
+  flex: 1;
   gap: 8px;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   min-height: 0;
