@@ -326,21 +326,30 @@ body {
   position: absolute;
   z-index: 2;
 }
+/* 선택됨 표시. 썸네일 전체를 덮으면 19세 연령 제한 오버레이(z-index:3)에 가려
+   보이지 않는다. 오른쪽 위 배지로 두고 그 위에 그린다. */
 .mv-card-picked {
   align-items: center;
-  background: rgba(0, 210, 135, 0.42);
+  background: var(--popup-brand, #00c73c);
+  border-radius: 999px;
   display: flex;
-  flex-direction: column;
   color: #fff;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
   gap: 3px;
-  inset: 0;
   justify-content: center;
+  padding: 3px 8px 3px 5px;
   pointer-events: none;
   position: absolute;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
-  z-index: 1;
+  right: 6px;
+  top: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+.mv-card-picked svg {
+  flex: none;
+  height: 14px;
+  width: 14px;
 }
 .mv-card-body {
   display: flex;
