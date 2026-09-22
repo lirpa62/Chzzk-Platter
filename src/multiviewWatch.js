@@ -2250,7 +2250,7 @@
     const body = document.querySelector(".mv-quick-body");
     if (body) body.scrollTop = 0;
     const box = $("mvQuickAdd");
-    if (box) box.scrollLeft = 0;
+    if (box) box.scrollTop = 0;
   }
 
   // 지금 폴더에 해당하는 후보만 남긴다(전체면 그대로).
@@ -2259,17 +2259,6 @@
     if (quickSource !== "custom" || !quickFolder) return quickCandidates;
     const section = quickSections.find((sec) => sec.id === quickFolder);
     return section ? section.rows || [] : [];
-  }
-
-  // 목록이 넘칠 때만 좌우 화살표를 보여준다.
-  function syncQuickRailNav() {
-    const box = $("mvQuickAdd");
-    const rail = box?.closest?.(".mv-quick-rail");
-    if (!box || !rail) return;
-    const overflow = box.scrollWidth > box.clientWidth + 1;
-    for (const nav of rail.querySelectorAll("[data-mv-quick-scroll]")) {
-      nav.hidden = !overflow;
-    }
   }
 
   function quickCard(r, full) {
@@ -2343,15 +2332,16 @@
     const added = quickCandidates.filter((row) =>
       !have.has(row.channelId) && !beforeIds.has(row.channelId));
     if (added.length) box?.insertAdjacentHTML("beforeend", added.map((row) => quickCard(row, full)).join(""));
-    syncQuickRailNav();
   }
 
   function maybeLoadMoreQuickLive() {
     const box = $("mvQuickAdd");
     if (!box || $("mvQuick")?.hidden || quickSource !== "live" ||
         !quickLivePager || quickLivePager.error) return;
-    const remaining = box.scrollWidth - box.scrollLeft - box.clientWidth;
-    if (remaining <= Math.max(220, box.clientWidth * 0.75)) void loadMoreQuickLive();
+    // 격자는 위아래로 스크롤한다(예전 가로 캐러셀 기준을 세로로 바꿨다).
+    const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (remaining <= Math.max(220, box.clientHeight * 0.75))
+      void loadMoreQuickLive();
   }
 
   // 후보가 없을 때의 안내는 목록 종류마다 다르다.
@@ -2388,11 +2378,10 @@
 
     const box = $("mvQuickAdd");
     if (!box) return;
-    const previousScrollLeft = box.scrollLeft;
+    const previousScrollTop = box.scrollTop;
     if (quickCandidates === null) {
       box.setAttribute("aria-busy", "true");
       box.innerHTML = quickSkeletonCards();
-      syncQuickRailNav();
       return;
     }
     box.removeAttribute("aria-busy");
@@ -2402,15 +2391,16 @@
     const rest = quickVisibleRows().filter((r) => !have.has(r.channelId));
     if (!rest.length) {
       box.innerHTML = `<p class="mv-quick-empty">${esc(quickEmptyMessage())}</p>`;
-      syncQuickRailNav();
       return;
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
     const full = !quickReplaceId && state.chosen.length >= 6;
     box.innerHTML = rest.map((r) => quickCard(r, full)).join("");
     syncQuickLiveRetry();
-    box.scrollLeft = Math.min(previousScrollLeft, Math.max(0, box.scrollWidth - box.clientWidth));
-    syncQuickRailNav();
+    box.scrollTop = Math.min(
+      previousScrollTop,
+      Math.max(0, box.scrollHeight - box.clientHeight),
+    );
     requestAnimationFrame(maybeLoadMoreQuickLive);
   }
 
@@ -2661,14 +2651,6 @@
       // 구역 전환은 이미 받아 둔 목록을 거르기만 한다(다시 불러오지 않는다).
       quickFolder = folder.dataset.mvQuickFolder;
       renderQuickCandidates();
-      return;
-    }
-    const scroll = target.closest?.("[data-mv-quick-scroll]");
-    if (scroll) {
-      const box = $("mvQuickAdd");
-      const dir = Number(scroll.dataset.mvQuickScroll) || 1;
-      if (dir > 0) maybeLoadMoreQuickLive();
-      box?.scrollBy({ left: dir * box.clientWidth * 0.8, behavior: "smooth" });
       return;
     }
     if (target.closest?.("[data-mv-quick-retry]")) {

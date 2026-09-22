@@ -1339,10 +1339,13 @@ button.mv-live-more {
 }
 
 /* 후보 카드 한 줄. 좌우 단추와 스크롤로 넘긴다(외부 라이브러리를 쓰지 않는다). */
+/* 격자가 남는 높이를 모두 쓰도록 세로로 편다(예전 가로 캐러셀 잔재 제거). */
 .mv-quick-rail {
-  align-items: center;
   display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 4px;
+  min-height: 0;
   min-width: 0;
 }
 .mv-quick-nav {
@@ -1360,15 +1363,18 @@ button.mv-live-more {
   border-color: var(--popup-brand, #00ffa3);
   color: var(--popup-brand-strong, #00ffa3);
 }
+/* 채널이 많으면 좌우 캐러셀은 찾기 불편하고, 높이가 한 줄로 고정돼 패널을
+   아래로 늘려도 이 아래가 빈 공간으로 남았다. 위아래로 스크롤하는 격자로 둔다. */
 .mv-quick-add {
-  display: flex;
-  flex-wrap: nowrap;
+  align-content: start;
+  display: grid;
   gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  min-height: 0;
   min-width: 0;
-  overflow-x: auto;
+  overflow-y: auto;
   padding-bottom: 4px;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 .mv-quick-add.is-loading-more::after {
   align-items: center;
@@ -1391,7 +1397,7 @@ button.mv-live-more {
   font-size: 11px;
   padding: 12px 8px;
 }
-/* 데스크톱에서 네 개쯤 보이고, 좁아지면 자연히 두세 개가 된다. */
+/* 격자 칸을 채운다(칸 너비는 .mv-quick-add 의 auto-fill 이 정한다). */
 .mv-quick-card {
   background: none;
   border: 0;
@@ -1399,13 +1405,11 @@ button.mv-live-more {
   color: inherit;
   cursor: pointer;
   display: flex;
-  flex: 0 0 clamp(150px, calc(22% - 4px), 205px);
   flex-direction: column;
   font: inherit;
   gap: 5px;
   min-width: 0;
   padding: 0;
-  scroll-snap-align: start;
   text-align: left;
 }
 .mv-quick-card:disabled {

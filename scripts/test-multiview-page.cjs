@@ -760,10 +760,10 @@ const checks = [];
      const firstCount=rail.querySelectorAll('[data-mv-quick-add]').length;
      check(firstCount===40,
        'Quick 첫 페이지가 40개가 아니다: '+firstCount+' / 호출 '+window.__quickLiveCalls+
-       ' / 폭 '+rail.clientWidth+':'+rail.scrollWidth);
+       ' / 높이 '+rail.clientHeight+':'+rail.scrollHeight);
      const first=rail.querySelector('[data-mv-quick-add]');
      window.__failQuickNext=true;
-     rail.scrollLeft=rail.scrollWidth;
+     rail.scrollTop=rail.scrollHeight;
      rail.dispatchEvent(new Event('scroll'));
      await wait(400);
      check(rail.querySelectorAll('[data-mv-quick-add]').length===40,
