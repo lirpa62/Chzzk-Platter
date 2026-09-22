@@ -1112,18 +1112,16 @@ button.mv-live-more {
   color: var(--popup-muted, #9aa1a9);
   cursor: nwse-resize;
   flex: none;
-  height: 16px;
+  height: 18px;
   margin: -8px -10px -8px 0;
-  padding: 2px;
-  width: 16px;
+  padding: 0;
+  width: 18px;
 }
-.mv-quick-resize::before {
-  border-bottom: 2px solid currentColor;
-  border-right: 2px solid currentColor;
-  content: "";
+/* 팔로잉 미리보기 창의 손잡이와 같은 아이콘을 쓴다. */
+.mv-quick-resize svg {
   display: block;
-  height: 9px;
-  width: 9px;
+  height: 100%;
+  width: 100%;
 }
 .mv-quick-resize:hover,
 .mv-quick-resize:focus-visible {
@@ -1562,8 +1560,11 @@ button.mv-live-more {
   outline: 1px dashed var(--popup-brand, #00ffa3);
 }
 
-/* 후보가 없을 때는 레일 한가운데에 안내만 둔다. */
+/* 후보가 없을 때는 레일 한가운데에 안내만 둔다.
+   ⚠ 부모가 auto-fill 격자라 그냥 두면 한 칸(150px)만 차지해 좁게 보인다.
+      모든 열을 가로질러 놓는다. */
 .mv-quick-empty {
+  grid-column: 1 / -1;
   align-items: center;
   color: var(--popup-muted, #9aa1a9);
   display: flex;
@@ -2287,7 +2288,8 @@ button.mv-live-more {
 .mv-chosen,
 .mv-pop-panel,
 .mv-quick-body,
-.mv-quick-add {
+.mv-quick-add,
+.mv-mixer-preset-list {
   scrollbar-color: rgba(37, 223, 151, 0.88) rgba(255, 255, 255, 0.08);
   scrollbar-width: thin;
 }
@@ -2295,14 +2297,16 @@ button.mv-live-more {
 .mv-chosen::-webkit-scrollbar,
 .mv-pop-panel::-webkit-scrollbar,
 .mv-quick-body::-webkit-scrollbar,
-.mv-quick-add::-webkit-scrollbar {
+.mv-quick-add::-webkit-scrollbar,
+.mv-mixer-preset-list::-webkit-scrollbar {
   width: 8px;
 }
 .mv-channel-list::-webkit-scrollbar-track,
 .mv-chosen::-webkit-scrollbar-track,
 .mv-pop-panel::-webkit-scrollbar-track,
 .mv-quick-body::-webkit-scrollbar-track,
-.mv-quick-add::-webkit-scrollbar-track {
+.mv-quick-add::-webkit-scrollbar-track,
+.mv-mixer-preset-list::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   margin: 8px 0;
@@ -2311,7 +2315,8 @@ button.mv-live-more {
 .mv-chosen::-webkit-scrollbar-thumb,
 .mv-pop-panel::-webkit-scrollbar-thumb,
 .mv-quick-body::-webkit-scrollbar-thumb,
-.mv-quick-add::-webkit-scrollbar-thumb {
+.mv-quick-add::-webkit-scrollbar-thumb,
+.mv-mixer-preset-list::-webkit-scrollbar-thumb {
   background: linear-gradient(
     180deg,
     rgba(37, 223, 151, 0.88),
@@ -2324,7 +2329,8 @@ button.mv-live-more {
 .mv-chosen::-webkit-scrollbar-thumb:hover,
 .mv-pop-panel::-webkit-scrollbar-thumb:hover,
 .mv-quick-body::-webkit-scrollbar-thumb:hover,
-.mv-quick-add::-webkit-scrollbar-thumb:hover {
+.mv-quick-add::-webkit-scrollbar-thumb:hover,
+.mv-mixer-preset-list::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(
     180deg,
     rgba(37, 223, 151, 1),
@@ -2332,7 +2338,46 @@ button.mv-live-more {
   );
 }
 
-/* 체크박스 체크 표시. 브라우저 기본 파랑 대신 브랜드 초록으로. */
+/* 체크박스. accent-color 만 주면 체크 표시 색을 브라우저가 정해 두 테마 모두
+   어둡게 그린다. 다른 요소처럼 라이트=흰색, 다크=검은색으로 맞추려면 직접
+   그려야 한다.
+   ⚠ appearance:none 이므로 배경·테두리·체크 표시를 모두 우리가 책임진다. */
 input[type="checkbox"] {
   accent-color: var(--popup-brand, #00c73c);
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1.5px solid var(--popup-border, #34383d);
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-grid;
+  flex: none;
+  height: 15px;
+  margin: 0;
+  place-content: center;
+  width: 15px;
+}
+input[type="checkbox"]:checked {
+  background: var(--popup-brand, #00c73c);
+  border-color: var(--popup-brand, #00c73c);
+}
+/* 체크 표시. 기본(라이트)은 흰색. */
+input[type="checkbox"]:checked::before {
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 60%, 39% 100%, 100% 18%, 83% 0, 39% 64%);
+  content: "";
+  height: 9px;
+  width: 9px;
+}
+/* 다크 모드는 밝은 초록 위라 어두운 체크가 읽힌다(다른 요소와 같은 규칙). */
+:root[data-theme="dark"] input[type="checkbox"]:checked::before {
+  background: #05170f;
+}
+input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 2px;
 }
