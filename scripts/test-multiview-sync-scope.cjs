@@ -179,8 +179,38 @@ const ALL = ["a", "b", "c", "d"];
     "혼잡 판정이 전체 eligible 기준으로 남아 있다",
   );
   // 최소 2채널이면 자동 싱크를 실제로 끈다(UI 만 막지 않는다).
-  assert.match(tick, /syncGroupTooSmall\(\)/, "최소 채널 처리가 없다");
-  assert.match(tick, /state\.sync\.mode = "off";/, "자동 싱크를 끄지 않는다");
+  // ⚠ 종료 로직은 공용 helper 로 모았다. tick 은 그 helper 를 부른다.
+  assert.match(
+    tick,
+    /stopAutoSyncIfGroupTooSmall\(\)/,
+    "tick 이 최소 채널 종료를 호출하지 않는다",
+  );
+  const stopFn = sliceFn("stopAutoSyncIfGroupTooSmall");
+  assert.match(stopFn, /syncGroupTooSmall\(\)/, "최소 채널 판정이 없다");
+  assert.match(stopFn, /state\.sync\.mode = "off";/, "자동 싱크를 끄지 않는다");
+  assert.match(stopFn, /resetAllSyncRates\(\)/, "속도를 되돌리지 않는다");
+  assert.match(stopFn, /cancelPendingSync/, "보류 명령을 버리지 않는다");
+  // ⚠ 판정 기준이 '고른 수' 여야 한다. activeIds(=eligible 교집합) 로 바꾸면
+  //   한 채널이 잠시 stale 인 것만으로 자동 싱크가 꺼진다.
+  const tooSmall = sliceFn("syncGroupTooSmall");
+  assert.match(
+    tooSmall,
+    /syncScopeIds\(\)\.length < 2/,
+    "판정이 선택 수 기준이 아니다",
+  );
+  assert.doesNotMatch(
+    tooSmall,
+    /syncActiveIds/,
+    "판정이 eligible 기준으로 바뀌었다(일시적 stale 로 자동이 꺼진다)",
+  );
+  // 선택/범위 변경 직후에도 즉시 끝낸다(다음 tick 을 기다리지 않는다).
+  for (const name of ["setSyncSelected", "setSyncScope"]) {
+    assert.match(
+      sliceFn(name),
+      /stopAutoSyncIfGroupTooSmall\(\)/,
+      `${name} 이 즉시 종료를 부르지 않는다`,
+    );
+  }
 
   // 기준은 범위 안에서 고른다.
   const ref = sliceFn("selectSyncReference");
@@ -218,4 +248,81 @@ const ALL = ["a", "b", "c", "d"];
   );
 }
 
+// 7) 재생 속도 표시: 0.97× 는 '느리게 재생 중' 이라는 뜻이다.
+{
+  const LIMITS = require("../src/multiviewSync.js").LIMITS;
+  // eslint-disable-next-line no-new-func
+  const rateText = new Function(
+    "SYNC",
+    sliceFn("syncRateText") + "\nreturn syncRateText;",
+  )({ LIMITS });
+
+  const at = (playbackRate, extra = {}) =>
+    rateText({
+      playbackRate,
+      syncRateOwned: false,
+      userRateOverride: false,
+      ...extra,
+    });
+
+  // 자동 보정으로 느리게
+  const slow = at(0.97, { syncRateOwned: true });
+  assert.match(slow.text, /재생 속도 0\.97×/, "배속 값이 없다");
+  assert.match(slow.text, /느리게/, "0.97× 를 느리게로 표시하지 않는다");
+  assert.doesNotMatch(slow.text, /빠르게/, "0.97× 를 빠르게로 표시한다");
+  assert.match(slow.hint, /자동 싱크/, "자동 보정임을 설명하지 않는다");
+
+  // 기본 속도
+  const base = at(1);
+  assert.match(base.text, /재생 속도 1\.00×/);
+  assert.match(base.text, /기본/, "1.00× 를 기본으로 표시하지 않는다");
+
+  // 자동 보정으로 빠르게
+  const fast = at(1.03, { syncRateOwned: true });
+  assert.match(fast.text, /재생 속도 1\.03×/);
+  assert.match(fast.text, /빠르게/, "1.03× 를 빠르게로 표시하지 않는다");
+  assert.doesNotMatch(fast.text, /느리게/, "1.03× 를 느리게로 표시한다");
+
+  // 사용자가 직접 바꾼 배속은 '자동 보정' 으로 설명하지 않는다.
+  const manual = at(1.25, { userRateOverride: true });
+  assert.match(manual.text, /빠르게/, "수동 배속도 방향은 보여 줘야 한다");
+  assert.doesNotMatch(
+    manual.hint,
+    /자동 싱크/,
+    "수동 배속을 자동 보정으로 설명한다",
+  );
+
+  // 값이 없을 때
+  assert.equal(at(null).text, "재생 속도 -", "값이 없을 때 표시가 다르다");
+  assert.equal(at(undefined).text, "재생 속도 -");
+
+  // ⚠ 부동소수점 오차로 방향이 뒤집히면 안 된다.
+  for (const near of [0.999999, 1.000001, 1 - LIMITS.userRateEpsilon / 2]) {
+    assert.match(
+      at(near).text,
+      /기본/,
+      `1× 근처(${near})가 느리게/빠르게로 표시된다`,
+    );
+  }
+
+  // 색·화살표만으로 방향을 표현하지 않는다(글자가 반드시 있다).
+  for (const r of [0.95, 1.05]) {
+    assert.match(at(r).text, /(느리게|빠르게)/, "방향 글자가 없다");
+  }
+
+  // 소스: 시간 보정 output 과 재생 속도를 구분해 설명한다.
+  const render = SRC.slice(SRC.indexOf("function renderSync"));
+  assert.match(
+    render,
+    /시간 위치 보정/,
+    "시간 보정 값에 의미 설명이 없다(재생 속도와 혼동된다)",
+  );
+  assert.match(
+    render,
+    /재생 속도는 현재 영상의 배속입니다/,
+    "안내 문구가 없다",
+  );
+}
+
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");
+console.log("  PASS 재생 속도 표시(느리게/기본/빠르게)와 시간 보정 구분");

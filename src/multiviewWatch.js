@@ -1443,6 +1443,27 @@
   // scope 분기를 두면 '측정은 되는데 보정만 빠지는' 경로가 생기기 쉽다.
   // ⚠ 측정(stats 수집)은 범위와 무관하게 모든 ready 채널에서 계속한다.
   //   제외 채널도 패널에서 지연을 볼 수 있어야 한다.
+  // 재생 속도 표시. 0.97× 는 '3% 느리게 재생 중' 이라는 뜻이지 위치를 옮긴
+  // 양이 아니다. 배속이라는 것과 방향(느리게/빠르게)을 글자로 함께 보여 준다.
+  // ⚠ 부동소수점 오차로 방향이 뒤집히지 않게 기존 userRateEpsilon 을 그대로 쓴다.
+  function syncRateText(stats) {
+    const rate = stats?.playbackRate;
+    if (!Number.isFinite(rate)) return { text: "재생 속도 -", hint: "" };
+    const eps = SYNC.LIMITS.userRateEpsilon;
+    const dir = rate < 1 - eps ? "느리게" : rate > 1 + eps ? "빠르게" : "기본";
+    const text = `재생 속도 ${rate.toFixed(2)}× · ${dir}`;
+    // 자동 보정인지 사용자가 직접 바꾼 배속인지 구분해 설명한다.
+    const owned =
+      stats?.syncRateOwned === true && stats?.userRateOverride !== true;
+    const hint =
+      dir === "기본"
+        ? "현재 영상을 기본 속도로 재생 중입니다."
+        : owned
+          ? `자동 싱크가 재생 속도를 ${dir} 조절하고 있습니다.`
+          : `현재 영상을 ${dir} 재생 중입니다.`;
+    return { text, hint };
+  }
+
   function syncScopeIds() {
     const chosen = state.chosen.map((c) => c.channelId);
     if (state.sync.scope !== "selected") return chosen;
@@ -1475,6 +1496,21 @@
     }
   }
 
+  // 선택 그룹이 2채널 미만이면 자동 싱크를 실제로 끝낸다(UI 만 막지 않는다).
+  // ⚠ 판정은 syncGroupTooSmall 이 한다 — '사용자가 고른 수' 기준이라
+  //   한 채널이 잠시 stale/loading 인 것만으로는 꺼지지 않는다.
+  function stopAutoSyncIfGroupTooSmall() {
+    if (state.sync.mode !== "auto" || !syncGroupTooSmall()) return false;
+    state.sync.mode = "off";
+    resetAllSyncRates();
+    for (const c of state.chosen) cancelPendingSync(c.channelId);
+    state.sync.congested = false;
+    syncCongestion = SYNC.congestion(syncCongestion, new Map(), [], Date.now());
+    syncNotice = "싱크할 채널을 2개 이상 선택해 주세요.";
+    updateSyncPolling();
+    return true;
+  }
+
   function setSyncScope(next) {
     const before = new Set(syncScopeIds());
     state.sync.scope = next === "selected" ? "selected" : "all";
@@ -1491,7 +1527,7 @@
       state.sync.referenceChannelId = null;
     }
     syncNotice = "";
-    updateSyncPolling();
+    if (!stopAutoSyncIfGroupTooSmall()) updateSyncPolling();
     renderSync(true);
   }
 
@@ -1509,7 +1545,8 @@
       }
     }
     syncNotice = "";
-    updateSyncPolling();
+    // 그룹이 1개로 줄었으면 다음 tick 을 기다리지 않고 지금 끝낸다.
+    if (!stopAutoSyncIfGroupTooSmall()) updateSyncPolling();
     // 기준이 바뀌면 행 상태(기준/제외됨)가 달라지므로 다시 그려야 한다.
     // ⚠ 다시 그리면 방금 누른 체크박스가 사라진다. 같은 채널의 체크박스로
     //   포커스를 돌려줘 연속 조작이 끊기지 않게 한다.
@@ -1641,16 +1678,7 @@
     }
     const now = Date.now();
     requestSyncStats();
-    // 선택 그룹이 2채널 미만이면 자동 싱크는 의미가 없다. UI 만 막지 않고
-    // 루프 자체를 끈 뒤 우리가 잡고 있던 속도를 모두 되돌린다.
-    if (state.sync.mode === "auto" && syncGroupTooSmall()) {
-      state.sync.mode = "off";
-      resetAllSyncRates();
-      for (const c of state.chosen) cancelPendingSync(c.channelId);
-      state.sync.congested = false;
-      syncCongestion = SYNC.congestion(syncCongestion, new Map(), [], now);
-      syncNotice = "싱크할 채널을 2개 이상 선택해 주세요.";
-      updateSyncPolling();
+    if (stopAutoSyncIfGroupTooSmall()) {
       renderSync();
       return;
     }
@@ -1744,6 +1772,7 @@
       const offset = state.sync.manualOffsets[id] || 0;
       const nudgePending = !!pendingSync(id, "nudge") ||
         !!pendingSync(id, "seek")?.desiredValue?.commitOffset;
+      const rateInfo = syncRateText(st);
       const picking = state.sync.scope === "selected";
       const picked = inSyncScope(id);
       // 범위 밖 채널은 보정 대상이 아니다. 지연·버퍼 같은 측정값은 그대로 둔다.
@@ -1762,12 +1791,14 @@
         `<div class="mv-sync-metrics"><span>지연 ${fmtSyncSeconds(st?.nativeDelaySec)}</span>` +
         `<span>버퍼 ${fmtSyncSeconds(st?.bufferAheadSec)}</span>` +
         `<span>엣지 ${fmtSyncSeconds(st?.edgeLagSec)}</span>` +
-        `<span>속도 ${Number.isFinite(st?.playbackRate) ? st.playbackRate.toFixed(2) + "×" : "-"}</span></div>` +
+        `<span title="${esc(rateInfo.hint)}">${esc(rateInfo.text)}</span></div>` +
         `<div class="mv-sync-controls">` +
         `<button type="button" data-mv-sync-ref="${id}" ${locked || !ready || id === ref ? "disabled" : ""}>기준</button>` +
         `<button type="button" data-mv-sync-offset="${id}" data-step="-0.5" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.5</button>` +
         `<button type="button" data-mv-sync-offset="${id}" data-step="-0.1" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.1</button>` +
-        `<output>${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초${nudgePending ? " · 적용 중" : ""}</output>` +
+        `<output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
+        `${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초" title="시간 위치 보정(재생 속도와 별개)">` +
+        `${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초${nudgePending ? " · 적용 중" : ""}</output>` +
         `<button type="button" data-mv-sync-offset="${id}" data-step="0.1" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.1</button>` +
         `<button type="button" data-mv-sync-offset="${id}" data-step="0.5" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.5</button>` +
         `<button type="button" data-mv-sync-clear="${id}" ${locked || !offset || nudgePending ? "disabled" : ""} aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
@@ -1795,6 +1826,7 @@
       (state.sync.congested ? `<p class="mv-sync-warning">여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` : "") +
       (syncNotice ? `<p class="mv-sync-notice" role="status">${esc(syncNotice)}</p>` : "") +
       `<div class="mv-sync-list">${rows}</div>` +
+      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다. 초 단위 위치 보정과는 별개입니다.</p>` +
       `<section class="mv-sync-diagnostics" aria-label="싱크 진단">` +
       `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
       `<label><input type="checkbox" id="mvSyncDiagnostics"` +
@@ -2711,6 +2743,8 @@
     lastQuality.delete(channelId);
     qualityTransitions.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
+    // 채널을 빼서 선택 그룹이 1개가 됐을 수도 있다.
+    stopAutoSyncIfGroupTooSmall();
     renderSync();
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
