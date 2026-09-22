@@ -910,14 +910,25 @@ const checks = [];
      check(!popOf('sync').hidden,'싱크 팝오버가 열리지 않았다');
      check(quick.hidden,'싱크 팝오버를 열었는데 채널 관리가 남아 있다');
 
-     // 4) 통계 팝오버 → 채널 관리: stats 폴링이 멈춰야 한다
+     // 4) 통계 팝오버 → 채널 관리: stats 폴링이 '실제로' 멈춰야 한다.
+     //    ⚠ 패널이 hidden 인지만 보면 폴링이 계속 돌아도 통과한다.
+     const statsReqs=()=>window.sentMessages
+       .filter(m=>m.data?.type==='REQUEST_MULTIVIEW_STATS').length;
      document.getElementById('mvStatsBtn').click();
      await wait(60);
      check(!popOf('stats').hidden,'통계 팝오버가 열리지 않았다');
-     window.__statsPollingStopped=false;
+     const openedAt=statsReqs();
+     await wait(1400);
+     const whileOpen=statsReqs();
+     check(whileOpen>openedAt,'통계 패널을 열었는데 폴링 요청이 없다: '+openedAt+' → '+whileOpen);
+     // 채널 관리를 열면 통계 패널이 닫히고 폴링도 멈춘다.
      document.getElementById('mvBack').click();
      await wait(60);
      check(popOf('stats').hidden,'채널 관리를 열었는데 통계 패널이 남아 있다');
+     const stoppedAt=statsReqs();
+     await wait(1500);
+     check(statsReqs()===stoppedAt,
+       '통계 패널이 닫혔는데 폴링이 계속된다: '+stoppedAt+' → '+statsReqs());
 
      // 5) Escape 는 둘 다 닫는다
      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
@@ -3135,17 +3146,22 @@ const checks = [];
      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
      document.getElementById('mvBack').click();
      await wait(200);
+     const beforeCount=document.querySelectorAll('.mv-cell').length;
      const add=[...document.querySelectorAll('[data-mv-quick-add]')].find(b=>!b.disabled);
-     if(add){
-       add.click(); await wait(120);
-       document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-       document.getElementById('mvSyncBtn').click();
-       await wait(60);
-       const picks=[...panel.querySelectorAll('[data-mv-sync-pick]')];
-       const fresh=picks.filter(p=>!beforeIds.includes(p.dataset.mvSyncPick));
-       check(fresh.length>=1,'추가한 채널이 싱크 목록에 없다');
-       check(fresh.every(p=>!p.checked),'추가한 채널이 자동으로 선택됐다');
-     }
+     // ⚠ 후보가 없으면 건너뛰지 않고 실패한다(공허한 PASS 방지).
+     check(add,'추가 가능한 채널 fixture 가 없다: 후보 '+
+       document.querySelectorAll('[data-mv-quick-add]').length+
+       ' / 칸 '+beforeCount);
+     add.click(); await wait(150);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     check(document.querySelectorAll('.mv-cell').length===beforeCount+1,
+       '채널이 실제로 늘지 않았다: '+document.querySelectorAll('.mv-cell').length);
+     document.getElementById('mvSyncBtn').click();
+     await wait(60);
+     const picks=[...panel.querySelectorAll('[data-mv-sync-pick]')];
+     const fresh=picks.filter(p=>!beforeIds.includes(p.dataset.mvSyncPick));
+     check(fresh.length>=1,'추가한 채널이 싱크 목록에 없다');
+     check(fresh.every(p=>!p.checked),'추가한 채널이 자동으로 선택됐다');
      // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
      document.getElementById('mvSyncBtn').click();
      await wait(40);

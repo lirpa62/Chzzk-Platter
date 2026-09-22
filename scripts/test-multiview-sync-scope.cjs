@@ -324,5 +324,138 @@ const ALL = ["a", "b", "c", "d"];
   );
 }
 
+// 8) 같은 자리 교체: 선택 여부만 물려받고 보정값·보류 명령은 남기지 않는다.
+{
+  // clearChannelSync 를 원본 그대로 돌린다(교체·제거가 모두 이 경로를 쓴다).
+  const calls = { resetRate: [], cancel: [] };
+  const state = {
+    chosen: [{ channelId: "a" }, { channelId: "b" }, { channelId: "c" }],
+    sync: {
+      scope: "selected",
+      selectedChannelIds: ["a", "b"],
+      manualOffsets: { a: 0, b: 1.2 },
+      referenceChannelId: "b",
+    },
+  };
+  const maps = {
+    syncStats: new Map([["b", {}]]),
+    syncReadyAt: new Map([["b", 1]]),
+    syncGeneration: new Map([["b", 1]]),
+    syncSeekAt: new Map([["b", 1]]),
+    syncRetryAt: new Map([["b:seek", 1]]),
+    syncRates: new Map([["b", 0.97]]),
+  };
+  const body = sliceFn("clearChannelSync") + "\nreturn clearChannelSync;";
+  // eslint-disable-next-line no-new-func
+  const clearChannelSync = new Function(
+    "state",
+    "resetSyncRate",
+    "cancelPendingSync",
+    "syncStats",
+    "syncReadyAt",
+    "syncGeneration",
+    "syncSeekAt",
+    "syncRetryAt",
+    "syncRates",
+    body,
+  )(
+    state,
+    (id) => calls.resetRate.push(id),
+    (id) => calls.cancel.push(id),
+    maps.syncStats,
+    maps.syncReadyAt,
+    maps.syncGeneration,
+    maps.syncSeekAt,
+    maps.syncRetryAt,
+    maps.syncRates,
+  );
+
+  // replaceChannel 이 교체 직전에 하는 판정(원본과 같은 식).
+  const inheritSelected =
+    state.sync.selectedChannelIds.includes("b") &&
+    state.sync.scope === "selected";
+  assert.equal(
+    inheritSelected,
+    true,
+    "선택된 채널의 교체를 계승 대상으로 보지 않는다",
+  );
+
+  clearChannelSync("b", true);
+
+  // 옛 채널의 흔적이 남지 않는다.
+  assert.deepEqual(calls.resetRate, ["b"], "옛 채널의 속도를 되돌리지 않았다");
+  assert.deepEqual(calls.cancel, ["b"], "옛 채널의 보류 명령을 버리지 않았다");
+  assert.equal(maps.syncRates.has("b"), false, "syncRates 에 옛 채널이 남았다");
+  assert.equal(maps.syncStats.has("b"), false, "syncStats 에 옛 채널이 남았다");
+  assert.equal(
+    state.sync.selectedChannelIds.includes("b"),
+    false,
+    "선택 목록에 옛 채널이 남았다",
+  );
+  assert.equal(
+    "b" in state.sync.manualOffsets,
+    false,
+    "옛 채널의 보정값이 남았다(새 방송에 물려주면 안 된다)",
+  );
+  assert.equal(
+    state.sync.referenceChannelId,
+    null,
+    "옛 채널이 기준으로 남았다",
+  );
+
+  // 새 채널이 같은 자리에 들어오고 선택 상태만 계승한다.
+  state.chosen = state.chosen.map((c) =>
+    c.channelId === "b" ? { channelId: "d" } : c,
+  );
+  if (inheritSelected && !state.sync.selectedChannelIds.includes("d")) {
+    state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, "d"];
+  }
+  assert.deepEqual(
+    state.chosen.map((c) => c.channelId),
+    ["a", "d", "c"],
+    "새 채널이 같은 자리에 들어오지 않았다",
+  );
+  assert.equal(
+    state.sync.selectedChannelIds.includes("d"),
+    true,
+    "새 채널이 선택 상태를 물려받지 못했다",
+  );
+  assert.equal(
+    state.sync.manualOffsets.d ?? 0,
+    0,
+    "새 채널의 보정값이 0 이 아니다",
+  );
+  assert.equal(
+    state.sync.referenceChannelId,
+    null,
+    "stats 준비 전에 새 채널을 기준으로 지정했다",
+  );
+
+  // 미선택 채널을 교체하면 새 채널도 미선택이다.
+  const inheritOff =
+    state.sync.selectedChannelIds.includes("c") &&
+    state.sync.scope === "selected";
+  assert.equal(inheritOff, false, "미선택 채널이 계승 대상으로 잡혔다");
+
+  // 소스: 교체가 실제로 이 판정과 정리를 쓴다.
+  const replaceFn = sliceFn("replaceChannel");
+  assert.match(
+    replaceFn,
+    /clearChannelSync\(oldChannelId, true\)/,
+    "교체가 옛 채널의 보정값을 지우지 않는다",
+  );
+  assert.match(
+    replaceFn,
+    /inSyncScope\(oldChannelId\)/,
+    "교체가 선택 여부를 보지 않는다",
+  );
+  assert.doesNotMatch(
+    replaceFn,
+    /manualOffsets\[id\] =/,
+    "교체가 새 채널에 보정값을 물려준다",
+  );
+}
+
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");
 console.log("  PASS 재생 속도 표시(느리게/기본/빠르게)와 시간 보정 구분");
+console.log("  PASS 같은 자리 교체의 선택 계승과 보정값 초기화");
