@@ -20456,23 +20456,65 @@
     );
   }
 
-  // 라이브 단위 정책 캐시. 채널이 아니라 '이번 방송'(live:<id>) 기준이다 —
+  // live-status 응답 하나로 정책을 판정한다. 세 필드가 모두 '값으로' 있어야
+  // 판정한 것(known)으로 본다.
+  // ⚠ 필드가 빠졌는데 restricted=false 로 확정해 버리면, 응답이 불완전한
+  //   제한 방송을 '정상 방송' 으로 굳혀 버린다(그래서 known 을 따로 둔다).
+  //   tag 가 "none" 인 것은 값이 있는 것이므로 known 이다(제한 없음으로 확정).
+  function resolveLiveRewindPolicy(content) {
+    if (!content || typeof content !== "object") {
+      return { known: false, restricted: false };
+    }
+    const timeMachineActive = content.timeMachineActive;
+    const tvAppViewingPolicyType = content.tvAppViewingPolicyType;
+    const adTag = content.adParameter?.tag;
+    const known =
+      typeof timeMachineActive === "boolean" &&
+      typeof tvAppViewingPolicyType === "string" &&
+      typeof adTag === "string";
+    if (!known) return { known: false, restricted: false };
+    return {
+      known: true,
+      restricted: isLiveRewindRestrictedByPolicy({
+        timeMachineActive,
+        tvAppViewingPolicyType,
+        adTag,
+      }),
+    };
+  }
+
+  // 방송 단위 정책 캐시. 키는 채널이 아니라 이번 방송(channelId + openDate)이다 —
   // 같은 채널이라도 다음 방송은 정책이 다를 수 있다. storage 에 저장하지 않는다.
-  const liveRewindPolicyCache = new Map(); // pageKey -> { restricted, at }
+  const liveRewindPolicyCache = new Map(); // sessionKey -> { restricted, at }
   const LIVE_REWIND_POLICY_TTL_MS = 5 * 60 * 1000;
+  // 판정하지 못한 경우(응답 실패·필드 누락)의 재시도 간격. 이건 '정상 방송으로
+  // 확정한 캐시' 가 아니라 요청 폭주만 막는 쿨다운이다.
+  const LIVE_REWIND_POLICY_RETRY_MS = 20 * 1000;
+  const liveRewindPolicyRetryAt = new Map(); // channelId -> 다음 시도 가능 시각
+  // 현재 채널에서 확정된 결과(채널이 바뀌면 버린다).
+  let liveRewindPolicyChannel = "";
+  let liveRewindPolicyResolved = null; // { sessionKey, restricted }
   let liveRewindPolicyFetching = "";
 
+  // 요청 식별자: 아직 방송 정보를 모르는 시점에는 채널까지만 알 수 있다.
   function liveRewindPolicyPageKey() {
     const id = currentLiveChannelId();
     return id ? `live:${id}` : "";
   }
 
+  // 방송 식별자: 응답을 받은 뒤에야 만들 수 있다(openDate 가 방송을 가른다).
+  function liveRewindPolicySessionKey(content) {
+    const id = content?.channelId || currentLiveChannelId();
+    const open = content?.openDate;
+    return id && open ? `live:${id}:${open}` : "";
+  }
+
   // 현재 방송이 제한 대상인지(모르면 false). MAIN world 로 내보내는 값.
   function currentLiveRewindRestricted() {
-    const key = liveRewindPolicyPageKey();
-    if (!key) return false;
-    const hit = liveRewindPolicyCache.get(key);
-    return hit ? hit.restricted === true : false;
+    if (!currentLiveChannelId()) return false;
+    // 채널이 바뀌면 이전 방송의 판정을 쓰지 않는다.
+    if (liveRewindPolicyChannel !== currentLiveChannelId()) return false;
+    return liveRewindPolicyResolved?.restricted === true;
   }
 
   // live-status(정책) + live-detail(캠페인 태그)을 이 방송에 대해 한 번만 읽는다.
@@ -20480,42 +20522,50 @@
   async function ensureLiveRewindPolicy() {
     const key = liveRewindPolicyPageKey();
     if (!key) return;
-    const cached = liveRewindPolicyCache.get(key);
-    if (cached && Date.now() - cached.at < LIVE_REWIND_POLICY_TTL_MS) return;
+    const channelId = currentLiveChannelId();
+    // 채널이 바뀌었으면 이전 방송의 판정을 버린다.
+    if (liveRewindPolicyChannel !== channelId) {
+      liveRewindPolicyChannel = channelId;
+      liveRewindPolicyResolved = null;
+    }
+    // 이번 방송을 이미 판정했고 아직 유효하면 다시 읽지 않는다.
+    const resolved = liveRewindPolicyResolved;
+    if (resolved) {
+      const hit = liveRewindPolicyCache.get(resolved.sessionKey);
+      if (hit && Date.now() - hit.at < LIVE_REWIND_POLICY_TTL_MS) return;
+    }
+    // 판정하지 못했던 경우는 쿨다운 동안만 쉬었다가 다시 시도한다.
+    const retryAt = liveRewindPolicyRetryAt.get(channelId) || 0;
+    if (!resolved && retryAt && Date.now() < retryAt) return;
     if (liveRewindPolicyFetching === key) return;
     liveRewindPolicyFetching = key;
-    const channelId = currentLiveChannelId();
-    const getJson = (url) =>
-      fetch(url, {
-        credentials: "include",
-        headers: { accept: "application/json" },
-      })
+    // ⚠ 정책 판정은 live-status 하나로 끝난다. adParameter 도 여기에 들어 있어
+    //   live-detail 을 따로 부를 이유가 없다(예전엔 태그만 detail 에서 읽어,
+    //   detail 이 실패하면 제한 방송을 놓쳤다).
+    try {
+      const status = await fetch(
+        `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      )
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
-    try {
-      const [status, detail] = await Promise.all([
-        getJson(
-          `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
-        ),
-        getJson(
-          `https://api.chzzk.naver.com/service/v3/channels/${encodeURIComponent(channelId)}/live-detail`,
-        ),
-      ]);
-      // ⚠ 응답이 늦게 와도 그 사이 다른 방송으로 옮겼으면 적용하지 않는다.
+      // ⚠ 응답이 늦게 와도 그 사이 다른 채널로 옮겼으면 적용하지 않는다.
       if (liveRewindPolicyPageKey() !== key) return;
-      if (!status && !detail) return; // 둘 다 실패 — 기존 동작 유지
-      const sc = status?.content;
-      const dc = detail?.content;
-      // 필요한 필드만 남긴다(응답 전체를 들고 있지 않는다).
-      const policy = {
-        timeMachineActive: sc?.timeMachineActive,
-        tvAppViewingPolicyType: sc?.tvAppViewingPolicyType,
-        adTag: dc?.adParameter?.tag,
-      };
-      liveRewindPolicyCache.set(key, {
-        restricted: isLiveRewindRestrictedByPolicy(policy),
-        at: Date.now(),
-      });
+      const { known, restricted } = resolveLiveRewindPolicy(status?.content);
+      if (!known) {
+        // 확정하지 못했다. '정상 방송' 으로 굳히지 않고 잠시 뒤 다시 시도한다.
+        // 이미 확정해 둔 결과가 있으면 그 값을 그대로 유지한다.
+        liveRewindPolicyRetryAt.set(
+          channelId,
+          Date.now() + LIVE_REWIND_POLICY_RETRY_MS,
+        );
+        return;
+      }
+      liveRewindPolicyRetryAt.delete(channelId);
+      const sessionKey = liveRewindPolicySessionKey(status?.content) || key;
+      liveRewindPolicyCache.set(sessionKey, { restricted, at: Date.now() });
+      liveRewindPolicyChannel = channelId;
+      liveRewindPolicyResolved = { sessionKey, restricted };
       broadcastFeatureFlags();
     } finally {
       if (liveRewindPolicyFetching === key) liveRewindPolicyFetching = "";
