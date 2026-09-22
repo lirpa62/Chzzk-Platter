@@ -431,10 +431,17 @@ console.log("\n[MAIN world] 되감기만 막고 앞으로·따라잡기는 두�
     "바 드래그의 과거 이동도 막는다",
   );
 
+  // ⚠ 조건은 shouldShowLiveSeekBar() 로 모았다(표시 판정과 안정 판정이 서로
+  //   다른 조건을 쓰다가 tick 이 영원히 불안정해진 적이 있다).
   const ensureBar = sliceFn(MIXER, "ensureSeekBar");
+  const shouldBar = sliceFn(MIXER, "shouldShowLiveSeekBar");
   ok(
-    /liveRewindRestricted/.test(ensureBar),
+    /liveRewindRestricted/.test(shouldBar),
     "제한 방송에서는 되감기 바를 접는다",
+  );
+  ok(
+    /if \(!shouldShowLiveSeekBar\(\)\)/.test(ensureBar),
+    "ensureSeekBar 가 그 판정을 쓴다",
   );
   ok(/removeSeekBar\(\)/.test(ensureBar), "기존 제거 경로를 재사용한다");
 
@@ -653,11 +660,8 @@ console.log("\n[설정 회귀] 사용자 설정 의미를 뒤집지 않는다");
     /!featureFlags\.liveRewind/.test(ensureButtons),
     "기존 버튼 숨김 설정이 그대로 먼저 적용된다",
   );
-  const ensureBar = sliceFn(MIXER, "ensureSeekBar");
-  ok(
-    /if \(!liveSeekBarOn\)/.test(ensureBar),
-    "바 표시 설정이 그대로 먼저 적용된다",
-  );
+  const shouldBar2 = sliceFn(MIXER, "shouldShowLiveSeekBar");
+  ok(/liveSeekBarOn/.test(shouldBar2), "바 표시 설정이 그대로 먼저 적용된다");
   // 정책은 설정값을 덮어쓰지 않는다(별도 변수).
   ok(
     /let liveRewindRestricted = false;/.test(MIXER),

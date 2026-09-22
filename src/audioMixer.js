@@ -253,7 +253,14 @@
     featureFlags.liveRewind = f.liveRewind === true;
     // 이번 방송이 치지직 재생 정책상 되감기 제한 대상인지. 사용자 설정이 아니라
     // 방송별 값이라 featureFlags 와 따로 둔다(설정값을 덮어쓰지 않는다).
-    liveRewindRestricted = f.liveRewindRestricted === true;
+    // ⚠ 이 값은 flags 안이 아니라 메시지 최상위로 온다. f(=e.data.flags)에서
+    //   읽으면 항상 undefined 라 제한이 걸리지 않는다.
+    const previousLiveRewindRestricted = liveRewindRestricted;
+    liveRewindRestricted = e.data.liveRewindRestricted === true;
+    // 제한이 켜지거나 풀리면 이미 만들어 둔 버튼·바를 즉시 다시 맞춘다.
+    if (previousLiveRewindRestricted !== liveRewindRestricted) {
+      forceFullTick = true;
+    }
     featureFlags.vodSeekButtons = f.vodSeekButtons === true;
     featureFlags.vodGlobalArrowSeek = f.vodGlobalArrowSeek === true;
     featureFlags.tabMute = f.tabMute === true;
@@ -8003,22 +8010,35 @@
     updateHlsRewindLock(target, w.end);
   }
 
+  // 되감기 바를 지금 띄워야 하는가. 표시 판정과 안정 판정이 갈라지지 않도록
+  // 한 곳에서만 정한다.
+  //   - liveSeekBarOn: 사용자 설정(정책이 이 값을 덮어쓰지 않는다)
+  //   - liveRewindRestricted: 이번 방송의 재생 정책(과거 이동 제한)
+  //   - hasChzzkTimemachine: 치지직 재생바가 이미 있으면 우리 바는 접는다
+  function shouldShowLiveSeekBar() {
+    return (
+      liveSeekBarOn &&
+      isLiveSeekPage() &&
+      !liveRewindRestricted &&
+      !hasChzzkTimemachine()
+    );
+  }
+
+  // 되감기 '버튼' 을 지금 띄워야 하는가. 앞으로 버튼은 이 판정을 쓰지 않는다
+  // (정책은 과거 이동만 막는다).
+  function shouldShowLiveRewindButton() {
+    return !featureFlags.liveRewind && !liveRewindRestricted;
+  }
+
   function ensureSeekBar() {
     // 되감기 바는 '되감기 바 표시' 토글(liveSeekBarOn)만 따른다. '라이브 되감기 숨김'
     // (featureFlags.liveRewind)은 플레이어의 되감기/앞으로 '버튼'만 숨기는 것이고, 바는
     // 별개다. 버튼을 숨겨도 탐색할 수 있도록 바는 유지한다.
-    if (!liveSeekBarOn) {
-      removeSeekBar();
-      return;
-    }
-    // 치지직이 이 방송에 되감기 제한 신호를 내려주면 우리 바는 접는다(설정은 그대로).
-    if (liveRewindRestricted && isLiveSeekPage()) {
-      removeSeekBar();
-      return;
-    }
-    // 타임머신을 쓸 수 있는 방송이면 치지직 재생바가 이미 있으므로 우리 바는 뺀다
-    // (설정은 그대로 두고 이 방송에서만 접는다).
-    if (hasChzzkTimemachine()) {
+    // ⚠ '바가 있어야 하는가' 를 한 곳에서만 판단한다. 예전에는 여기와
+    //   isTickStable 이 서로 다른 조건을 썼다. 제한 방송에서 ensureSeekBar 는
+    //   바를 지우는데 stable 판정은 '있어야 한다' 고 봐서, tick 이 영원히
+    //   불안정으로 남았다.
+    if (!shouldShowLiveSeekBar()) {
       removeSeekBar();
       return;
     }
@@ -8222,11 +8242,8 @@
 
   // 토글 변경 시 즉시 반영: 켜졌고 라이브면 바 보장, 꺼졌으면 제거.
   function applyLiveSeekBar() {
-    if (liveSeekBarOn && location.pathname.startsWith("/live/")) {
-      ensureSeekBar();
-    } else {
-      removeSeekBar();
-    }
+    if (shouldShowLiveSeekBar()) ensureSeekBar();
+    else removeSeekBar();
   }
 
   function ensureSyncButton() {
@@ -10181,12 +10198,13 @@
         featureFlags.liveSync ? has(SYNC_BUTTON_CLASS) : !has(SYNC_BUTTON_CLASS)
       )
         return false;
-      if (
-        featureFlags.liveRewind
-          ? has(REWIND_BUTTON_CLASS)
-          : !has(REWIND_BUTTON_CLASS)
-      )
+      // ⚠ 되감기 버튼은 사용자 설정뿐 아니라 이번 방송의 정책도 본다. 정책으로
+      //   버튼을 뺐는데 여기서 '있어야 한다' 고 보면 tick 이 영원히 불안정해진다.
+      if (shouldShowLiveRewindButton() !== has(REWIND_BUTTON_CLASS)) {
         return false;
+      }
+      // 앞으로 버튼은 정책과 무관하다(현재로 돌아오는 기능).
+      if (!featureFlags.liveRewind !== has(FORWARD_BUTTON_CLASS)) return false;
     }
     if (isVod) {
       const shouldHaveVodSeek = featureFlags.vodSeekButtons;
@@ -10224,8 +10242,7 @@
     // ⚠ 타임머신 여부(pzp-pc--seekable)는 재생 중에 붙거나 떨어질 수 있다. 여기서
     //   보지 않으면 이미 안정된 tick 이 early return 해서 바가 그대로 남는다.
     if (isLive) {
-      const wantSeekBar = liveSeekBarOn && !hasChzzkTimemachine();
-      if (wantSeekBar !== has(SEEK_BAR_CLASS)) return false;
+      if (shouldShowLiveSeekBar() !== has(SEEK_BAR_CLASS)) return false;
     }
     return true;
   }
