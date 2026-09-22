@@ -714,6 +714,8 @@
   const mixerErrors = new Map();
   const mixerConfirm = new Set();
   const mixerGainDrafts = new Map();
+  // 믹서 설정을 펼쳐 둔 채널(기본은 접힘 — 채널이 많을 때 목록이 길어진다).
+  const mixerOpen = new Set();
   const mixerGainTimers = new Map();
   let mixerCommandSeq = 0;
   let mixerDragId = "";
@@ -852,6 +854,15 @@
     return v > 0.5 ? "high" : "low";
   }
 
+  // 접기/펼치기 버튼은 '실제 조작 UI 가 있을 때' 만 둔다. 상태 안내 문구
+  // (사용 불가·확인 중·충돌)는 접을 것이 없으므로 그대로 보여 준다.
+  function hasMixerControls(channelId) {
+    const status = currentStatus(channelId);
+    if (status === "ended" || status === "error") return false;
+    const mixer = mixerStates.get(channelId);
+    return !!mixer?.ready && !mixer.graphConflict;
+  }
+
   function mixerControlsMarkup(channelId) {
     const id = esc(channelId);
     const mixer = mixerStates.get(channelId);
@@ -871,7 +882,8 @@
     const draft = mixerGainDrafts.get(channelId);
     const gain = Number.isFinite(draft) ? draft : mixer.gain;
     const error = mixerErrors.get(channelId);
-    return `<div class="mv-mixer-controls">` +
+    const open = mixerOpen.has(channelId);
+    return `<div class="mv-mixer-controls"${open ? "" : " hidden"}>` +
       `<label class="mv-mixer-power">오디오 믹서 <input type="checkbox" data-mv-mixer-enabled="${id}"${mixer.enabled ? " checked" : ""}></label>` +
       `<label class="mv-mixer-preset">프리셋 <select data-mv-mixer-preset="${id}" aria-label="${esc(channelName(channelId))} 오디오 믹서 프리셋">` +
       ((mixer.presetDirty || !selected) ? '<option value="" selected disabled>사용자 조정</option>' : "") +
@@ -935,6 +947,17 @@
           ` aria-label="${esc(c.channelName)} 볼륨"` +
           `${forcedOff ? " disabled" : ""}>` +
           `<span class="mv-vol-pct">${pct(audio.volume)}</span>` +
+          (hasMixerControls(c.channelId)
+            ? `<button type="button" class="mv-vol-mixer-toggle"` +
+              ` data-mv-mixer-toggle="${id}"` +
+              ` aria-expanded="${mixerOpen.has(c.channelId)}"` +
+              ` aria-label="${esc(c.channelName)} 오디오 믹서 설정"` +
+              ` title="오디오 믹서 설정">` +
+              `<svg viewBox="0 0 24 24" width="14" height="14" fill="none"` +
+              ` stroke="currentColor" stroke-width="2.4" stroke-linecap="round"` +
+              ` stroke-linejoin="round" aria-hidden="true">` +
+              `<path d="m6 9 6 6 6-6"></path></svg></button>`
+            : "") +
           `</div>` + mixerControlsMarkup(c.channelId) + `</div>`
         );
       })
@@ -2732,6 +2755,14 @@
       if (!audio.muted && audio.volume === 0) audio.volume = 1;
       postState(id, id === state.mainId);
       if (effectiveMuted(id)) clearAudioNotice(id);
+      renderVolume();
+      return;
+    }
+    const mixerToggle = target.closest?.("[data-mv-mixer-toggle]");
+    if (mixerToggle) {
+      const id = mixerToggle.dataset.mvMixerToggle;
+      if (mixerOpen.has(id)) mixerOpen.delete(id);
+      else mixerOpen.add(id);
       renderVolume();
       return;
     }
