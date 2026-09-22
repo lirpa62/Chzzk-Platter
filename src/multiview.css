@@ -255,6 +255,26 @@ body {
   object-fit: cover;
   width: 100%;
 }
+.mv-card-thumb.is-adult::before,
+.mv-quick-card-thumb.is-adult::before {
+  background: url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png)
+    50% / contain no-repeat;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
+}
+.mv-card-sr-only {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+  clip: rect(0, 0, 0, 0);
+}
 /* 방송 스냅샷이 없어 채널 이미지로 대신 채운 경우: 꽉 채우면 확대돼 뭉개지므로
    가운데에 작게 둔다. */
 .mv-card-thumb.is-fallback {
@@ -304,18 +324,6 @@ body {
   left: 6px;
   padding: 2px 5px;
   position: absolute;
-  z-index: 2;
-}
-.mv-card-adult {
-  background: rgba(0, 0, 0, 0.72);
-  border-radius: 4px;
-  bottom: 6px;
-  color: #ff8a8a;
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 2px 5px;
-  position: absolute;
-  right: 6px;
   z-index: 2;
 }
 .mv-card-picked {
@@ -1417,17 +1425,6 @@ button.mv-live-more {
 .mv-quick-card:hover:not(:disabled) .mv-quick-card-thumb {
   outline: 2px solid var(--popup-brand, #00ffa3);
   outline-offset: -2px;
-}
-.mv-quick-card-adult {
-  background: rgba(0, 0, 0, 0.72);
-  border-radius: 4px;
-  bottom: 4px;
-  color: #ff8a8a;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 4px;
-  position: absolute;
-  right: 4px;
 }
 /* 카드 본문: 프로필 이미지 + 방송 제목 + 채널 이름(시청자수·카테고리는 안 쓴다). */
 .mv-quick-card-body {

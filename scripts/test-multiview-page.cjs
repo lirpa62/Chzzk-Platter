@@ -147,6 +147,7 @@ const checks = [];
       // 팔로잉은 following-lives 를 쓴다(liveInfo 에 방송 썸네일까지 들어 있다).
       if(p.endsWith('/following-lives'))return {followingList:channels.map(c=>({
         channelId:c.channelId,channel:c,streamer:{openLive:true},
+        adult:c.channelId.endsWith('1'),
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           liveCategoryValue:'게임',
           tags:c.tags||[],
@@ -157,6 +158,7 @@ const checks = [];
         const c=channels.find(x=>x.channelId===detail[1]);
         if(!c)return {status:'CLOSE'};
         return {status:'OPEN',channel:c,liveTitle:c.liveTitle,
+          adult:c.channelId.endsWith('1')?'true':false,
           concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임',
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'};
       }
@@ -174,6 +176,7 @@ const checks = [];
           : Array.from({length:40},(_,i)=>{const c=channels[i]||{
               channelId:(10+i).toString(16).padStart(32,'0'),channelName:'라이브'+i};
               return {channel:c,liveTitle:c.liveTitle||'방송'+i,
+                adult:i===0,
                 concurrentUserCount:c.concurrentUserCount||100-i,
                 liveCategoryValue:'게임',tags:c.tags||['태그']};});
         return {data,page:{next:second?null:{concurrentUserCount:61,liveId:9001}}};
@@ -267,6 +270,8 @@ const checks = [];
        const img=cards[0].querySelector('.mv-card-thumb img');
        check(img && !img.getAttribute('src').includes('{type}'),
          src+' 썸네일 {type} 이 치환되지 않았다');
+       check(cards[0].querySelector('.mv-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
+         src+' 첫 카드에 연령 제한 오버레이가 없다');
      }
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);`,
@@ -280,6 +285,8 @@ const checks = [];
      check(!src.includes('{type}'),'썸네일 {type} 이 치환되지 않았다: '+src);
      check(card.querySelector('.mv-card-viewers'),'시청자 수가 없다');
      check(card.querySelector('.mv-card-live')?.textContent==='LIVE','LIVE 배지가 없다');
+     check(card.querySelector('.mv-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
+       '연령 제한 오버레이가 없다');
      check(card.querySelector('.mv-card-title').textContent.trim(),'제목이 비었다');
      check(card.querySelector('.mv-card-name').textContent.trim(),'채널명이 비었다');
      check(card.querySelector('.mv-card-category-chip'),'카테고리가 없다');
@@ -623,6 +630,7 @@ const checks = [];
             channel:{channelId:(start+i).toString(16).padStart(32,'0'),
               channelName:'퀵'+(start+i)},liveTitle:'퀵 방송 '+(start+i),
             concurrentUserCount:1000-i,liveCategoryValue:'게임',
+            adult:i===0,
             tags:i===0?['하나','둘','셋','넷']:['테스트']})),
             page:{next:second?null:{concurrentUserCount:961,liveId:7777}}}};
         }
@@ -987,6 +995,8 @@ const checks = [];
      const quick=document.getElementById('mvQuick');
      const card=quick.querySelector('[data-mv-quick-add]');
      check(card?.querySelectorAll('.mv-card-tag-chip').length===4,'Quick 태그 4개가 보이지 않는다');
+     check(card.querySelector('.mv-quick-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
+       'Quick 카드에 연령 제한 오버레이가 없다');
      check(card.querySelector('.mv-card-category-chip')?.textContent==='게임','Quick 카테고리가 없다');
      for(const width of [450,650,900]){
        quick.style.width=width+'px';

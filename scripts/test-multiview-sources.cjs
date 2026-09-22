@@ -157,6 +157,23 @@ async function test(name, run) {
     assert.equal(url.searchParams.has("ignored"), false);
   });
 
+  await test("연령 제한 값은 방송 정보와 팔로잉 행 어디에 있어도 보존한다", async () => {
+    assert.equal(SOURCES.normalize(row(1), { adult: true }).adult, true);
+    assert.equal(SOURCES.normalize(row(1), { adult: "TRUE" }).adult, true);
+    assert.equal(SOURCES.normalize(row(1), { adult: false }, { adult: true }).adult, true);
+    assert.equal(SOURCES.normalize({ ...row(1), adult: true }, {}).adult, true);
+    assert.equal(SOURCES.normalize(row(1), { adult: "false" }).adult, false);
+    const following = await withApi(() => ({ followingList: [{
+      channelId: id(1), channel: row(1), streamer: { openLive: true },
+      adult: true, liveInfo: { liveTitle: "연령 제한 방송", adult: false },
+    }] }), () => SOURCES.loadFollowing());
+    assert.equal(following[0].adult, true);
+    const live = await SOURCES.loadLivePage(null, async () => ({ data: [{
+      channel: row(2), liveTitle: "연령 제한 방송", adult: "true",
+    }] }));
+    assert.equal(live.rows[0].adult, true);
+  });
+
   await test("태그 검색은 # 한 개를 벗기고 첫 20개를 조회한다", async () => {
     const urls = [];
     await withApi((url) => { urls.push(url); return { data: [] }; }, async () => {

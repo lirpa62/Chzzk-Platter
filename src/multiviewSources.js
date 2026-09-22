@@ -27,15 +27,17 @@
     return reply.content ?? null;
   }
 
+  const isAdult = (value) => value === true || String(value).toLowerCase() === "true";
+
   // 응답 모양이 제각각이라 한 곳에서 같은 형태로 맞춘다.
-  const normalize = (channel, live) => ({
+  const normalize = (channel, live, entry = null) => ({
     channelId: String(channel?.channelId || "").toLowerCase(),
     channelName: String(channel?.channelName || "").trim(),
     channelImageUrl: String(channel?.channelImageUrl || ""),
     liveTitle: String(live?.liveTitle || "").trim(),
     category: String(live?.liveCategoryValue || "").trim(),
     viewers: Number(live?.concurrentUserCount) || 0,
-    adult: live?.adult === true,
+    adult: isAdult(live?.adult) || isAdult(entry?.adult) || isAdult(channel?.adult),
     // 라이브 스냅샷. {type} 자리에 해상도를 넣어야 실제 이미지가 나온다.
     // ⚠ liveImageUrl 이 비어 있는 응답이 있다(팔로잉 목록의 liveInfo 등).
     //   기존 통합검색 코드와 같은 순서로 defaultThumbnailImageUrl 을 대신 쓴다.
@@ -82,6 +84,7 @@
             channelId: r?.channelId || r?.channel?.channelId,
           },
           r?.liveInfo || r?.live || r,
+          r,
         ),
       )
       .filter((r) => r.channelId);

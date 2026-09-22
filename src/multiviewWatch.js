@@ -2279,11 +2279,11 @@
     return (
       `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
       `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
-      `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}">` +
+      `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}${r.adult ? " is-adult" : ""}">` +
       (thumb
         ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
         : `<span class="mv-quick-card-empty"></span>`) +
-      (r.adult ? `<span class="mv-quick-card-adult">19+</span>` : "") +
+      (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       `</span>` +
       `<span class="mv-quick-card-body">` +
       (avatar

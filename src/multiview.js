@@ -269,14 +269,13 @@
     return (
       `<button type="button" class="mv-card${on ? " is-on" : ""}${full ? " is-limit" : ""}" ` +
       `data-mv-pick="${esc(r.channelId)}"${full ? " disabled" : ""}>` +
-      `<span class="mv-card-thumb${r.liveImageUrl ? "" : " is-fallback"}">` +
+      `<span class="mv-card-thumb${r.liveImageUrl ? "" : " is-fallback"}${r.adult ? " is-adult" : ""}">` +
       (thumbUrl
         ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy">`
         : `<span class="mv-card-thumb-empty"></span>`) +
       `<span class="mv-card-live">LIVE</span>` +
       `<span class="mv-card-viewers">${fmt(r.viewers)}명</span>` +
-      // 성인 방송 표시. 치지직의 기존 인증 흐름을 그대로 쓰고 여기서는 알리기만 한다.
-      (r.adult ? `<span class="mv-card-adult">19+</span>` : "") +
+      (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       (on ? `<span class="mv-card-picked"><svg width="22" height="22" viewBox="0 0 24 24" ` +
         `fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" ` +
         `stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>` +
