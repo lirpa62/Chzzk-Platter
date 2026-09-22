@@ -1787,14 +1787,83 @@ button.mv-live-more {
 .mv-mixer-power input {
   justify-self: start;
 }
-.mv-mixer-preset select {
+.mv-mixer-preset-picker {
+  min-width: 0;
+}
+.mv-mixer-preset-trigger {
+  align-items: center;
   background: var(--popup-soft-bg, #1b1d20);
   border: 1px solid var(--popup-border, #34383d);
   border-radius: 5px;
   color: var(--popup-text, #e9ecef);
+  cursor: pointer;
+  display: flex;
   font: inherit;
+  gap: 6px;
+  justify-content: space-between;
   min-width: 0;
   padding: 4px;
+  width: 100%;
+}
+.mv-mixer-preset-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-mixer-preset-trigger:hover,
+.mv-mixer-preset-trigger[aria-expanded="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+}
+.mv-mixer-preset-trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.mv-mixer-preset-trigger svg {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.mv-mixer-preset-list {
+  background: var(--popup-surface, #22252a);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 4px;
+  position: fixed;
+  z-index: 1000;
+}
+.mv-mixer-preset-list [role="option"] {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--popup-text, #e9ecef);
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 8px;
+  text-align: left;
+  width: 100%;
+}
+.mv-mixer-preset-list [role="option"]:hover:not(:disabled) {
+  background: var(--popup-soft-bg, #1b1d20);
+}
+.mv-mixer-preset-list [role="option"][aria-selected="true"] {
+  background: var(--popup-help-bg, rgba(0, 255, 163, 0.12));
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-mixer-preset-list [role="option"]:disabled {
+  cursor: default;
+}
+.mv-mixer-preset-group {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10px;
+  font-weight: 800;
+  margin: 5px 8px 3px;
 }
 .mv-mixer-gain {
   grid-template-columns: 78px minmax(0, 1fr) 42px;

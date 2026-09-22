@@ -1065,8 +1065,12 @@ const checks = [];
      const gain=document.querySelector('[data-mv-mixer-gain="'+id+'"]');
      check(gain && gain.min==='0.25' && gain.max==='3' && gain.dataset.gainStep==='0.1',
        '믹서 게인 범위가 MAIN snapshot과 다르다');
-     const select=document.querySelector('[data-mv-mixer-preset="'+id+'"]');
-     check(select.querySelector('option[value="custom-a"]'),'커스텀 프리셋이 없다');
+     const presetTrigger=document.querySelector('[data-mv-mixer-preset-toggle="'+id+'"]');
+     check(presetTrigger?.textContent.includes('기본'),'커스텀 프리셋 트리거가 없다');
+     presetTrigger.click();
+     const presetList=document.getElementById('mvMixerPresetList');
+     check(presetList?.querySelector('[data-preset-id="custom-a"]'),
+       '커스텀 프리셋이 팝오버에 없다');
      const before=window.frameSrcs.length;
      document.querySelector('[data-mv-mixer-enabled="'+id+'"]').click();
      const cmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_ENABLED' && m.data.channelId===id);
@@ -1078,14 +1082,13 @@ const checks = [];
        state:{...state,enabled:true,revision:2}});
      check(document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
        'MAIN 응답의 ON 상태가 반영되지 않았다');
-     const preset=document.querySelector('[data-mv-mixer-preset="'+id+'"]');
-     preset.value='custom-a';preset.dispatchEvent(new Event('change',{bubbles:true}));
+     presetList.querySelector('[data-preset-id="custom-a"]').click();
      const presetCmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_PRESET' && m.data.channelId===id);
      check(presetCmd?.data.presetId==='custom-a','커스텀 프리셋 명령이 없다');
      send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
        command:'MIXER_SET_PRESET',commandId:presetCmd.data.commandId,applied:true,
        state:{...state,enabled:true,preset:'custom-a',revision:3}});
-     check(document.querySelector('[data-mv-mixer-preset="'+id+'"]').value==='custom-a',
+     check(document.querySelector('[data-mv-mixer-preset-toggle="'+id+'"]').textContent.includes('내 프리셋'),
        '커스텀 프리셋 응답이 반영되지 않았다');
      const slider=document.querySelector('[data-mv-mixer-gain="'+id+'"]');
      slider.value='1.25';slider.dispatchEvent(new Event('input',{bubbles:true}));

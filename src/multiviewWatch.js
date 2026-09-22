@@ -717,6 +717,7 @@
   // 믹서 설정을 펼쳐 둔 채널(기본은 접힘 — 채널이 많을 때 목록이 길어진다).
   const mixerOpen = new Set();
   const mixerGainTimers = new Map();
+  let mixerPresetPickerId = "";
   let mixerCommandSeq = 0;
   let mixerDragId = "";
 
@@ -752,6 +753,7 @@
   }
 
   function clearChannelMixer(channelId) {
+    if (mixerPresetPickerId === channelId) closeMixerPresetPicker();
     mixerStates.delete(channelId);
     mixerErrors.delete(channelId);
     mixerConfirm.delete(channelId);
@@ -876,25 +878,86 @@
     if (mixer.graphConflict) {
       return '<p class="mv-mixer-status">다른 확장 프로그램과 오디오 그래프가 충돌해 사용할 수 없습니다.</p>';
     }
-    const options = (kind) => mixer.presets.filter((item) => item.kind === kind)
-      .map((item) => `<option value="${esc(item.id)}"${!mixer.presetDirty && item.id === mixer.preset ? " selected" : ""}>${esc(item.label)}</option>`).join("");
-    const selected = mixer.presets.some((item) => item.id === mixer.preset);
+    const selectedPreset = mixer.presets.find((item) => item.id === mixer.preset);
+    const presetLabel = !mixer.presetDirty && selectedPreset
+      ? selectedPreset.label
+      : "사용자 조정";
     const draft = mixerGainDrafts.get(channelId);
     const gain = Number.isFinite(draft) ? draft : mixer.gain;
     const error = mixerErrors.get(channelId);
     const open = mixerOpen.has(channelId);
     return `<div class="mv-mixer-controls"${open ? "" : " hidden"}>` +
       `<label class="mv-mixer-power">오디오 믹서 <input type="checkbox" data-mv-mixer-enabled="${id}"${mixer.enabled ? " checked" : ""}></label>` +
-      `<label class="mv-mixer-preset">프리셋 <select data-mv-mixer-preset="${id}" aria-label="${esc(channelName(channelId))} 오디오 믹서 프리셋">` +
-      ((mixer.presetDirty || !selected) ? '<option value="" selected disabled>사용자 조정</option>' : "") +
-      `<optgroup label="기본 프리셋">${options("builtin")}</optgroup>` +
-      (mixer.presets.some((item) => item.kind === "custom")
-        ? `<optgroup label="커스텀">${options("custom")}</optgroup>` : "") +
-      `</select></label>` +
+      `<span class="mv-mixer-preset">프리셋 <span class="mv-mixer-preset-picker">` +
+      `<button type="button" class="mv-mixer-preset-trigger" data-mv-mixer-preset-toggle="${id}" ` +
+      `aria-haspopup="listbox" aria-expanded="${mixerPresetPickerId === channelId}" ` +
+      `aria-label="${esc(channelName(channelId))} 오디오 믹서 프리셋">` +
+      `<span>${esc(presetLabel)}</span>` +
+      `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>` +
+      `</button></span></span>` +
       `<label class="mv-mixer-gain">게인 <input type="range" data-mv-mixer-gain="${id}" data-gain-step="${mixer.gainStep}" min="${mixer.gainMin}" max="${mixer.gainMax}" step="any" value="${gain}" aria-label="${esc(channelName(channelId))} 오디오 믹서 게인"><output>${Math.round(gain * 100)}%</output></label>` +
       (mixerConfirm.has(channelId) ? `<div class="mv-mixer-confirm">이 채널은 '항상 켜기' 상태입니다. 끄면 이 채널을 항상 켜기 대상에서 제외합니다. <button type="button" data-mv-mixer-confirm="${id}">끄기</button><button type="button" data-mv-mixer-cancel="${id}">취소</button></div>` : "") +
       (error ? `<p class="mv-mixer-error">${esc(error)}</p>` : "") +
       `</div>`;
+  }
+
+  function closeMixerPresetPicker() {
+    mixerPresetPickerId = "";
+    document.getElementById("mvMixerPresetList")?.remove();
+    document.querySelectorAll("[data-mv-mixer-preset-toggle]").forEach((trigger) => {
+      trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function positionMixerPresetPicker() {
+    const id = mixerPresetPickerId;
+    const list = document.getElementById("mvMixerPresetList");
+    const trigger = document.querySelector(`[data-mv-mixer-preset-toggle="${CSS.escape(id)}"]`);
+    if (!id || !list || !trigger) return closeMixerPresetPicker();
+    const rect = trigger.getBoundingClientRect();
+    const padding = 12;
+    const maxHeight = Math.min(280, Math.max(120, window.innerHeight - padding * 2));
+    list.style.minWidth = `${Math.round(rect.width)}px`;
+    list.style.maxHeight = `${maxHeight}px`;
+    const listHeight = Math.min(list.scrollHeight, maxHeight);
+    const below = window.innerHeight - rect.bottom - padding;
+    const above = rect.top - padding;
+    const top = below >= Math.min(140, listHeight) || below >= above
+      ? rect.bottom + 4
+      : Math.max(padding, rect.top - listHeight - 4);
+    list.style.left = `${Math.round(Math.min(rect.left, window.innerWidth - rect.width - padding))}px`;
+    list.style.top = `${Math.round(top)}px`;
+  }
+
+  function openMixerPresetPicker(channelId) {
+    const mixer = mixerStates.get(channelId);
+    if (!mixer?.ready || mixer.graphConflict) return;
+    if (mixerPresetPickerId === channelId) {
+      closeMixerPresetPicker();
+      return;
+    }
+    closeMixerPresetPicker();
+    mixerPresetPickerId = channelId;
+    const selected = !mixer.presetDirty ? mixer.preset : "";
+    const options = (kind) => mixer.presets
+      .filter((item) => item.kind === kind)
+      .map((item) => `<button type="button" role="option" data-mv-mixer-preset-option="${esc(channelId)}" ` +
+        `data-preset-id="${esc(item.id)}" aria-selected="${item.id === selected}">${esc(item.label)}</button>`)
+      .join("");
+    const custom = options("custom");
+    const list = document.createElement("div");
+    list.id = "mvMixerPresetList";
+    list.className = "mv-mixer-preset-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", `${channelName(channelId)} 오디오 믹서 프리셋`);
+    list.innerHTML =
+      (mixer.presetDirty ? '<p class="mv-mixer-preset-group">현재 선택</p><button type="button" role="option" aria-selected="true" disabled>사용자 조정</button>' : "") +
+      `<p class="mv-mixer-preset-group">기본 프리셋</p>${options("builtin")}` +
+      (custom ? `<p class="mv-mixer-preset-group">커스텀 프리셋</p>${custom}` : "");
+    document.body.appendChild(list);
+    document.querySelector(`[data-mv-mixer-preset-toggle="${CSS.escape(channelId)}"]`)
+      ?.setAttribute("aria-expanded", "true");
+    positionMixerPresetPicker();
   }
 
   function renderVolume() {
@@ -2766,6 +2829,21 @@
       renderVolume();
       return;
     }
+    const mixerPresetToggle = target.closest?.("[data-mv-mixer-preset-toggle]");
+    if (mixerPresetToggle) {
+      openMixerPresetPicker(mixerPresetToggle.dataset.mvMixerPresetToggle);
+      return;
+    }
+    const mixerPresetOption = target.closest?.("[data-mv-mixer-preset-option]");
+    if (mixerPresetOption && !mixerPresetOption.disabled) {
+      const channelId = mixerPresetOption.dataset.mvMixerPresetOption;
+      const presetId = mixerPresetOption.dataset.presetId;
+      closeMixerPresetPicker();
+      if (channelId && presetId) {
+        sendMixerCommand(channelId, "MIXER_SET_PRESET", { presetId });
+      }
+      return;
+    }
     const mixerConfirmButton = target.closest?.("[data-mv-mixer-confirm]");
     if (mixerConfirmButton) {
       const id = mixerConfirmButton.dataset.mvMixerConfirm;
@@ -2980,13 +3058,6 @@
         enabled: target.checked === true,
       });
       target.checked = !target.checked;
-      return;
-    }
-    if (target?.dataset?.mvMixerPreset) {
-      const id = target.dataset.mvMixerPreset;
-      if (target.value) sendMixerCommand(id, "MIXER_SET_PRESET", { presetId: target.value });
-      const mixer = mixerStates.get(id);
-      target.value = mixer?.presetDirty ? "" : mixer?.preset || "";
       return;
     }
     if (target?.dataset?.mvMixerGain) {
