@@ -1535,8 +1535,11 @@
     }
     const after = new Set(syncScopeIds());
     releaseSyncOwnership([...before].filter((id) => !after.has(id)));
-    if (state.sync.referenceChannelId &&
-        !after.has(state.sync.referenceChannelId)) {
+    // 기준은 '그룹 안에 있고 그룹이 성립할 때' 만 유지한다.
+    if (
+      state.sync.referenceChannelId &&
+      (!after.has(state.sync.referenceChannelId) || syncGroupTooSmall())
+    ) {
       state.sync.referenceChannelId = null;
     }
     syncNotice = "";
@@ -1552,14 +1555,20 @@
     if (!selected) {
       // 빠진 채널이 자동 보정 중이었다면 그 소유권을 즉시 놓는다.
       releaseSyncOwnership([channelId]);
-      if (state.sync.referenceChannelId === channelId) {
+      if (state.sync.referenceChannelId === channelId)
         state.sync.referenceChannelId = null;
-        selectSyncReference();
-      }
     }
     syncNotice = "";
     // 그룹이 1개로 줄었으면 다음 tick 을 기다리지 않고 지금 끝낸다.
-    if (!stopAutoSyncIfGroupTooSmall()) updateSyncPolling();
+    const ended = stopAutoSyncIfGroupTooSmall();
+    if (!ended) updateSyncPolling();
+    // ⚠ 기준 재선택은 그룹이 성립할 때만 한다. 2→1 로 줄어 세션이 끝나는
+    //   순간에 남은 한 채널을 기준으로 잡으면, 그 채널 기준으로 보정값
+    //   전체가 rebase 돼 사용자가 맞춰 둔 값이 바뀐다(실측: reference 가
+    //   단일 채널도 고르고, rebaseOffsets 는 chosen 전체를 다시 계산한다).
+    if (!selected && !state.sync.referenceChannelId && !syncGroupTooSmall()) {
+      selectSyncReference();
+    }
     // 기준이 바뀌면 행 상태(기준/제외됨)가 달라지므로 다시 그려야 한다.
     // ⚠ 다시 그리면 방금 누른 체크박스가 사라진다. 같은 채널의 체크박스로
     //   포커스를 돌려줘 연속 조작이 끊기지 않게 한다.

@@ -355,17 +355,39 @@ const ALL = ["a", "b", "c", "d"];
   }
 
   // 엔진 출력과 UI 의미가 맞물리는지(정책을 복제하지 않고 실제 rateFor 를 쓴다).
+  // ⚠ 이번 버그의 핵심인 ±0.01(0.99/1.01)까지 실제 엔진 출력으로 확인한다.
+  //   rateStartSec=0.7 이라 오차 0.8 이 가장 작은 보정 구간이다.
   const SYNC_MOD = require("../src/multiviewSync.js");
-  for (const [error, want] of [
-    [3, "느리게"],
-    [-3, "빠르게"],
+  for (const [error, wantRate, want] of [
+    [0.8, 0.99, "느리게"],
+    [-0.8, 1.01, "빠르게"],
+    [1.2, 0.97, "느리게"],
+    [-1.2, 1.03, "빠르게"],
+    [3, 0.95, "느리게"],
+    [-3, 1.05, "빠르게"],
   ]) {
     const engineRate = SYNC_MOD.rateFor(error, true);
-    assert.notEqual(engineRate, 1, `rateFor(${error}) 가 배속을 만들지 않았다`);
+    // 하드코딩한 기대 배속과 실제 엔진 출력이 어긋나면 잡는다.
+    assert.equal(
+      engineRate,
+      wantRate,
+      `rateFor(${error}) 가 ${wantRate} 가 아니다: ${engineRate}`,
+    );
+    const out = at(engineRate, { syncRateOwned: true });
     assert.match(
-      at(engineRate, { syncRateOwned: true }).text,
+      out.text,
+      new RegExp(`재생 속도 ${wantRate.toFixed(2)}×`),
+      `${engineRate} 의 표시 숫자가 다르다: ${out.text}`,
+    );
+    assert.match(
+      out.text,
       new RegExp(want),
       `rateFor(${error})=${engineRate} 가 ${want} 로 표시되지 않는다`,
+    );
+    assert.doesNotMatch(
+      out.text,
+      /기본/,
+      `엔진이 만든 ${engineRate} 가 기본으로 표시된다`,
     );
   }
 
@@ -635,6 +657,185 @@ const ALL = ["a", "b", "c", "d"];
   // 5초가 지나야 풀린다.
   const step2 = SYNC_MOD.congestion(step1, new Map(), [], 15000);
   assert.equal(step2.active, false, "5초 뒤에도 혼잡이 안 풀린다");
+}
+
+// 11) 2→1 로 줄어 세션이 끝날 때는 남은 한 채널을 기준으로 잡지 않는다.
+//     ⚠ 기준이 바뀌면 rebaseOffsets 가 chosen 전체의 보정값을 다시 계산한다.
+//        세션이 끝나는 순간에 사용자가 맞춰 둔 값을 건드릴 이유가 없다.
+{
+  const SYNC_MOD = require("../src/multiviewSync.js");
+
+  // setSyncSelected 를 원본 그대로 돌린다. 모듈 스코프 변수만 box 로 바꾼다.
+  const wire = (src) =>
+    src
+      .replace(/\bsyncCongestion\b/g, "box.syncCongestion")
+      .replace(/\bsyncNotice\b/g, "box.syncNotice");
+
+  const run = ({ selected, reference, mode, chosen }) => {
+    const calls = { rebase: 0, refPicked: [], reset: 0, cancel: [], render: 0 };
+    const state = {
+      chosen: chosen.map((id) => ({ channelId: id })),
+      sync: {
+        mode,
+        scope: "selected",
+        selectedChannelIds: [...selected],
+        selectionInitialized: true,
+        referenceChannelId: reference,
+        manualOffsets: { a: 0, b: 1.2, c: -0.5 },
+        congested: false,
+      },
+    };
+    const box = { syncCongestion: { active: false, since: 0 }, syncNotice: "" };
+    const src =
+      sliceFn("syncScopeIds") +
+      sliceFn("syncGroupTooSmall") +
+      sliceFn("stopAutoSyncIfGroupTooSmall") +
+      sliceFn("setSyncSelected");
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(
+      "state",
+      "SYNC",
+      "box",
+      "resetAllSyncRates",
+      "cancelPendingSync",
+      "recordCongestionChange",
+      "updateSyncPolling",
+      "releaseSyncOwnership",
+      "selectSyncReference",
+      "renderSync",
+      "$",
+      "CSS",
+      wire(src) + "\nreturn setSyncSelected;",
+    )(
+      state,
+      SYNC_MOD,
+      box,
+      () => {
+        calls.reset += 1;
+      },
+      (id) => calls.cancel.push(id),
+      () => {},
+      () => {},
+      () => {},
+      // 실제 selectSyncReference 대신, '불렸는지' 와 '무엇을 골랐는지' 만 본다.
+      () => {
+        calls.refPicked.push(state.sync.selectedChannelIds.slice());
+        // 원본은 여기서 reference 를 정하고 rebaseOffsets 를 부른다.
+        const ids = state.sync.selectedChannelIds;
+        if (!ids.length) return null;
+        calls.rebase += 1;
+        state.sync.manualOffsets = SYNC_MOD.rebaseOffsets(
+          state.sync.manualOffsets,
+          ids[0],
+          state.chosen.map((c) => c.channelId),
+        );
+        state.sync.referenceChannelId = ids[0];
+        return ids[0];
+      },
+      () => {
+        calls.render += 1;
+      },
+      () => null,
+      { escape: (v) => v },
+    );
+    return { fn, state, calls, box };
+  };
+
+  // 2→1: 기준 재선택도 rebase 도 없어야 한다.
+  {
+    const { fn, state, calls, box } = run({
+      selected: ["a", "b"],
+      reference: "a",
+      mode: "auto",
+      chosen: ["a", "b", "c"],
+    });
+    const before = { ...state.sync.manualOffsets };
+    fn("a", false);
+    assert.deepEqual(
+      state.sync.selectedChannelIds,
+      ["b"],
+      "선택이 하나로 줄지 않았다",
+    );
+    assert.equal(state.sync.mode, "off", "자동 싱크가 즉시 꺼지지 않았다");
+    assert.equal(
+      state.sync.referenceChannelId,
+      null,
+      "남은 한 채널이 기준으로 잡혔다",
+    );
+    assert.equal(calls.rebase, 0, "세션이 끝나는데 보정값을 rebase 했다");
+    assert.deepEqual(
+      state.sync.manualOffsets,
+      before,
+      "보정값이 바뀌었다(사용자가 맞춰 둔 값이다)",
+    );
+    assert.equal(calls.reset, 1, "속도를 되돌리지 않았다");
+    assert.deepEqual(
+      calls.cancel,
+      ["a", "b", "c"],
+      "보류 명령을 버리지 않았다",
+    );
+    assert.match(box.syncNotice, /2개 이상/, "안내 문구가 없다");
+  }
+
+  // 3→2: 그룹이 남으므로 기준은 정상적으로 다시 고른다.
+  {
+    const { fn, state, calls } = run({
+      selected: ["a", "b", "c"],
+      reference: "a",
+      mode: "auto",
+      chosen: ["a", "b", "c"],
+    });
+    fn("a", false);
+    assert.deepEqual(
+      state.sync.selectedChannelIds,
+      ["b", "c"],
+      "선택이 둘로 줄지 않았다",
+    );
+    assert.equal(state.sync.mode, "auto", "그룹이 남았는데 자동 싱크가 꺼졌다");
+    assert.equal(calls.refPicked.length, 1, "기준을 다시 고르지 않았다");
+    assert.ok(
+      ["b", "c"].includes(state.sync.referenceChannelId),
+      `새 기준이 그룹 안이 아니다: ${state.sync.referenceChannelId}`,
+    );
+    assert.equal(calls.rebase, 1, "기준 변경인데 rebase 가 없다(기존 정책)");
+  }
+
+  // manual 모드에서도 싱글턴을 기준으로 승격하지 않는다.
+  for (const mode of ["manual", "off"]) {
+    const { fn, state, calls } = run({
+      selected: ["a", "b"],
+      reference: "a",
+      mode,
+      chosen: ["a", "b", "c"],
+    });
+    const before = { ...state.sync.manualOffsets };
+    fn("a", false);
+    assert.equal(
+      state.sync.referenceChannelId,
+      null,
+      `${mode}: 남은 한 채널이 기준으로 잡혔다`,
+    );
+    assert.equal(calls.rebase, 0, `${mode}: 보정값을 rebase 했다`);
+    assert.deepEqual(
+      state.sync.manualOffsets,
+      before,
+      `${mode}: 보정값이 바뀌었다`,
+    );
+  }
+
+  // 소스: 기준 재선택이 그룹 성립 여부를 본다.
+  const setSel = sliceFn("setSyncSelected");
+  assert.match(
+    setSel,
+    /!syncGroupTooSmall\(\)[\s\S]{0,40}selectSyncReference\(\)/,
+    "기준 재선택이 그룹 크기를 보지 않는다",
+  );
+  const scopeFn = sliceFn("setSyncScope");
+  assert.match(
+    scopeFn,
+    /syncGroupTooSmall\(\)/,
+    "범위 전환에서 기준 불변식을 지키지 않는다",
+  );
 }
 
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");
