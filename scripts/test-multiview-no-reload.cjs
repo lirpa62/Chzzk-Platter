@@ -156,18 +156,27 @@ console.log("\n[탭 전환] 부모도 프레임도 복귀 시 아무것도 고�
     "부모에 reload/seek 코드가 아예 없다",
   );
   ok(!/currentTime\s*=[^=]/.test(watch), "부모가 재생 위치를 대입하지 않는다");
-  // 프레임(멀티뷰 블록): 같은 확인.
+  // 프레임: seek 는 명시적으로 검증된 싱크 명령에서만 허용한다.
   const at = content.indexOf("if (IS_MULTIVIEW_FRAME) {");
   ok(at > 0, "멀티뷰 프레임 블록을 찾았다");
-  const block = content.slice(at, at + 14000);
+  const block = content.slice(at, content.indexOf("// 통계 요청:", at));
   for (const [pat, label] of [
     ["location.reload", "다시 불러오기"],
-    ["currentTime =", "재생 위치 대입"],
     ["fastSeek", "seek"],
     ["jumpToLiveEdge", "라이브 엣지 점프"],
   ]) {
     ok(!block.includes(pat), `멀티뷰 칸에 ${label} 가 없다`);
   }
+  const syncCommands = block.slice(block.indexOf("const syncCommand = {") + 1);
+  ok(
+    syncCommands.includes('APPLY_SYNC_SEEK: "seek"') &&
+      syncCommands.includes('APPLY_SYNC_NUDGE: "nudge"') &&
+      syncCommands.includes("video.currentTime = target") &&
+      syncCommands.includes("target < start + 0.05") &&
+      syncCommands.includes("target > end - 0.05") &&
+      (block.match(/video\.currentTime\s*=[^=]/g) || []).length === 1,
+    "재생 위치 변경은 범위를 검증한 싱크 명령에서만 수행한다",
+  );
 }
 
 console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴한다");
@@ -181,7 +190,7 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴
   // bindMaxQualityEvents 가 첫 줄에서 빠져나가 재시도 리스너가 아예 안 붙었다.
   const bind = mixer.slice(
     mixer.indexOf("function bindMaxQualityEvents"),
-    mixer.indexOf("function bindMaxQualityEvents") + 1400,
+    mixer.indexOf("function getLiveLatencySeconds"),
   );
   ok(
     /if \(!maxQualityAuto && !\(maxQualityCap > 0\)\) return;/.test(bind),
@@ -210,6 +219,11 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴
     recon === 1,
     `화질 재확인 요청은 FRAME_READY 한 곳뿐이다(${recon}곳 / postState ${posts}회)`,
   );
+  const postState = watch.slice(watch.indexOf("function postState("),
+    watch.indexOf("function postAllAudio("));
+  ok(/frame\.contentWindow\.postMessage/.test(postState) &&
+    !/frame\.src\s*=/.test(postState),
+    "역할·화질 재확인은 프레임 주소를 바꾸지 않는다");
   // 안전 게이트는 그대로 둔다(로딩 국면에 화질을 바꾸면 플레이어가 죽는다).
   const apply = mixer.slice(
     mixer.indexOf("function applyMaxQuality"),
@@ -293,7 +307,7 @@ console.log("\n[볼륨 아이콘] 끄는 동안 패널을 다시 그리지 않�
   ok(/function syncVolumeButton/.test(watch), "버튼 하나만 맞추는 함수가 있다");
   const handler = watch.slice(
     watch.indexOf('document.addEventListener("input"'),
-    watch.indexOf('document.addEventListener("input"') + 1800,
+    watch.indexOf('document.addEventListener("change"'),
   );
   ok(
     /syncVolumeButton\(channelId\)/.test(handler),

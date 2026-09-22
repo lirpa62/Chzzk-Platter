@@ -60,7 +60,7 @@ function call(method, params = {}, sessionId) {
   });
 }
 
-const deadline = setTimeout(() => browser.kill("SIGTERM"), 45000);
+const deadline = setTimeout(() => browser.kill("SIGTERM"), 90000);
 const checks = [];
 (async () => {
   const { targetId } = await call("Target.createTarget", {
@@ -130,7 +130,8 @@ const checks = [];
     // 치지직 API 스텁: 팔로잉 3채널.
     const channels=[
       {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나',
-        channelImageUrl:'',liveTitle:'방송1',concurrentUserCount:100},
+        channelImageUrl:'',liveTitle:'방송1',concurrentUserCount:100,
+        tags:['태그1','태그2','태그3','태그4']},
       {channelId:'aaaa0000000000000000000000000002',channelName:'채널둘',
         channelImageUrl:'',liveTitle:'방송2',concurrentUserCount:200},
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋',
@@ -140,13 +141,15 @@ const checks = [];
     ];
     // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
     // 전체는 data, 검색은 data[].{live,channel}.
+    window.__livePageCalls=0;
     window.__apiContent=(url)=>{
-      const p=new URL(url).pathname;
+      const parsed=new URL(url),p=parsed.pathname;
       // 팔로잉은 following-lives 를 쓴다(liveInfo 에 방송 썸네일까지 들어 있다).
       if(p.endsWith('/following-lives'))return {followingList:channels.map(c=>({
         channelId:c.channelId,channel:c,streamer:{openLive:true},
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           liveCategoryValue:'게임',
+          tags:c.tags||[],
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
       // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다.
       const detail=p.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
@@ -161,8 +164,22 @@ const checks = [];
       if(p.endsWith('/search/channels'))return {data:channels.map(c=>({
         channel:{...c,openLive:true}}))};
       if(p.endsWith('/subscribe/channels'))return {data:[]};
+      if(p.endsWith('/service/v1/lives')){
+        window.__livePageCalls++;
+        const second=parsed.searchParams.has('liveId');
+        const data=second
+          ? Array.from({length:3},(_,i)=>({channel:{channelId:(100+i).toString(16).padStart(32,'0'),
+              channelName:'추가'+i},liveTitle:'추가 방송'+i,concurrentUserCount:10-i,
+              liveCategoryValue:'추가',tags:['둘째']}))
+          : Array.from({length:40},(_,i)=>{const c=channels[i]||{
+              channelId:(10+i).toString(16).padStart(32,'0'),channelName:'라이브'+i};
+              return {channel:c,liveTitle:c.liveTitle||'방송'+i,
+                concurrentUserCount:c.concurrentUserCount||100-i,
+                liveCategoryValue:'게임',tags:c.tags||['태그']};});
+        return {data,page:{next:second?null:{concurrentUserCount:61,liveId:9001}}};
+      }
       return {data:channels.map(c=>({channel:c,liveTitle:c.liveTitle,
-        concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임'}))};
+        concurrentUserCount:c.concurrentUserCount,liveCategoryValue:'게임',tags:c.tags||[]}))};
     };
   `);
   const style = readFileSync("src/multiview.css", "utf8");
@@ -191,6 +208,13 @@ const checks = [];
     "배치 정의가 전역으로 노출된다",
     `check(window.CheeseMultiviewLayouts,'CheeseMultiviewLayouts 없음');
      check(CheeseMultiviewLayouts.layoutsFor(2).length>0,'2채널 배치 없음');`,
+  );
+
+  await test(
+    "채널이 없을 때 배치 안내가 grid 전체 너비를 쓴다",
+    `const hint=document.querySelector('#mvLayoutGrid > .mv-hint');
+     check(hint,'빈 배치 안내가 없다');
+     check(getComputedStyle(hint).gridColumnEnd==='-1','빈 안내가 마지막 열까지 차지하지 않는다');`,
   );
 
   await test(
@@ -249,14 +273,75 @@ const checks = [];
   );
 
   await test(
-    "카드에 썸네일·시청자 수·제목이 함께 나온다",
+    "카드에 LIVE·시청자·제목·카테고리·태그가 함께 나온다",
     `const card=document.querySelector('#mvChannelList .mv-card');
      check(card.querySelector('.mv-card-thumb img'),'썸네일이 없다');
      const src=card.querySelector('.mv-card-thumb img').getAttribute('src');
      check(!src.includes('{type}'),'썸네일 {type} 이 치환되지 않았다: '+src);
      check(card.querySelector('.mv-card-viewers'),'시청자 수가 없다');
+     check(card.querySelector('.mv-card-live')?.textContent==='LIVE','LIVE 배지가 없다');
      check(card.querySelector('.mv-card-title').textContent.trim(),'제목이 비었다');
-     check(card.querySelector('.mv-card-name').textContent.trim(),'채널명이 비었다');`,
+     check(card.querySelector('.mv-card-name').textContent.trim(),'채널명이 비었다');
+     check(card.querySelector('.mv-card-category-chip'),'카테고리가 없다');
+     check(card.querySelectorAll('.mv-card-tag-chip').length===4,'태그 4개가 모두 보이지 않는다');
+     check(!card.querySelector('.mv-card-tag-more'),'+N 표시가 남았다');`,
+  );
+
+  await test(
+    "고르기 화면은 고정 최대 폭 없이 뷰포트를 활용한다",
+    `const setup=document.querySelector('.mv-setup');
+     const style=getComputedStyle(setup);
+     check(style.maxWidth==='none','고르기 화면에 최대 폭이 남아 있다');
+     check(Math.abs(setup.getBoundingClientRect().width-innerWidth)<1,
+       '고르기 화면이 뷰포트 폭을 채우지 않는다');`,
+  );
+
+  for (const width of [1280, 1440, 1920]) {
+    await command("Emulation.setDeviceMetricsOverride", {
+      width,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await evaluate("new Promise(r=>requestAnimationFrame(()=>r()))");
+    await test(
+      `${width}px에서 방송 카드 폭이 220~280px 범위를 유지한다`,
+      `const widths=[...document.querySelectorAll('#mvChannelList .mv-card')]
+         .map(card=>card.getBoundingClientRect().width);
+       check(widths.length>0,'측정할 카드가 없다');
+       check(widths.every(width=>width>=218&&width<=282),
+         '카드 폭 범위 이상: '+widths.map(Math.round).join(','));`,
+    );
+  }
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280,
+    height: 800,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+
+  await test(
+    "라이브 탭은 아래쪽에서 다음 페이지를 기존 카드 뒤에 붙인다",
+    `document.querySelector('[data-mv-source="all"]').click();
+     await wait(400);
+     const box=document.getElementById('mvChannelList');
+     check(box.querySelectorAll('.mv-card').length===40,'첫 페이지가 40개가 아니다');
+     const first=box.querySelector('.mv-card');
+     box.scrollTop=box.scrollHeight;
+     box.dispatchEvent(new Event('scroll'));
+     await wait(400);
+     check(box.querySelectorAll('.mv-card').length===43,'둘째 페이지가 append되지 않았다');
+     check(first.isConnected,'다음 페이지 로드 중 기존 카드를 다시 그렸다');
+     check(window.__livePageCalls===2,'라이브 API 호출 수 이상: '+window.__livePageCalls);
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);
+     document.querySelector('[data-mv-source="all"]').click();
+     await wait(300);
+     check(box.querySelectorAll('.mv-card').length===43,
+       '탭을 다시 열자 불러온 페이지가 사라졌다');
+     check(window.__livePageCalls===2,'유효한 pager를 두고 다시 요청했다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(300);`,
   );
 
   await test(
@@ -320,6 +405,9 @@ const checks = [];
     `const at=i=>document.querySelectorAll('#mvChannelList .mv-card')[i];
      at(0).click();
      await wait(50);
+     const oneHint=document.querySelector('#mvLayoutGrid > .mv-hint');
+     check(oneHint&&getComputedStyle(oneHint).gridColumnEnd==='-1',
+       '1개 선택 상태의 배치 안내가 전체 너비가 아니다');
      at(1).click();
      await wait(50);
      check(document.querySelectorAll('#mvChosenList .mv-chosen-item').length===2,
@@ -348,7 +436,7 @@ const checks = [];
      check(document.querySelectorAll('#mvChannelList .mv-card').length===before,
        '카드 개수가 달라졌다');
      check(first.classList.contains('is-on'),'고른 표시가 안 붙었다');
-     check(first.querySelector('.mv-card-picked'),'선택됨 표시가 없다');
+     check(first.querySelector('.mv-card-picked svg'),'선택 overlay의 check가 없다');
      check(apiCalls===0,'고르는데 API 를 다시 불렀다('+apiCalls+'회)');
      // 다시 눌러 해제해도 마찬가지.
      first.click();
@@ -364,6 +452,33 @@ const checks = [];
     "2채널을 고르면 시작 버튼이 열리고 배치가 제시된다",
     `check(!document.getElementById('mvStart').disabled,'시작 버튼이 잠겨 있다');
      check(document.querySelectorAll('#mvLayoutGrid .mv-layout').length>0,'배치 없음');`,
+  );
+
+  await test(
+    "6개를 채워도 선택한 카드는 유지되고 미선택 카드만 잠긴다",
+    `document.querySelector('[data-mv-source="all"]').click();
+     await wait(300);
+     const box=document.getElementById('mvChannelList');
+     const extras=[...box.querySelectorAll('.mv-card:not(.is-on)')].slice(0,4)
+       .map(card=>card.dataset.mvPick);
+     check(extras.length===4,'추가할 카드가 부족하다');
+     for(const id of extras)box.querySelector('[data-mv-pick="'+id+'"]').click();
+     check(document.getElementById('mvChosenCount').textContent.includes('6 / 6'),
+       '6개 선택 상태가 아니다');
+     for(const id of extras){
+       const card=box.querySelector('[data-mv-pick="'+id+'"]');
+       check(card.classList.contains('is-on')&&!card.disabled&&
+         card.querySelector('.mv-card-picked'),'선택된 카드가 잠겼거나 overlay가 없다');
+     }
+     const unpicked=box.querySelector('.mv-card:not(.is-on)');
+     check(unpicked?.disabled&&unpicked.classList.contains('is-limit')&&
+       !unpicked.querySelector('.mv-card-picked'),
+       '미선택 카드의 6/6 제한 표시가 올바르지 않다');
+     for(const id of extras)box.querySelector('[data-mv-pick="'+id+'"]').click();
+     check(document.getElementById('mvChosenCount').textContent.includes('2 / 6'),
+       '추가한 카드 해제 후 2개로 돌아오지 않았다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(250);`,
   );
 
   await test(
@@ -486,17 +601,35 @@ const checks = [];
     window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
     // 빠른 바꾸기의 후보 목록도 중계로 받는다(고르기 화면과 같은 경로).
     const quickChannels=[
-      {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나'},
+      {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나',tags:['하나','둘','셋','넷']},
       {channelId:'aaaa0000000000000000000000000002',channelName:'채널둘'},
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋'},
       {channelId:'aaaa0000000000000000000000000004',channelName:'채널넷'},
     ];
+    window.__quickLiveCalls=0;
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       sendMessage:async(msg)=>{
         if(msg?.type!=='MULTIVIEW_API')return {ok:false};
+        const parsed=new URL(msg.url);
+        if(parsed.pathname.endsWith('/service/v1/lives')){
+          window.__quickLiveCalls++;
+          const second=parsed.searchParams.has('liveId');
+          if(second&&window.__failQuickNext){
+            window.__failQuickNext=false;
+            return {ok:false,reason:'temporary'};
+          }
+          const start=second?300:200,count=second?5:40;
+          return {ok:true,content:{data:Array.from({length:count},(_,i)=>({
+            channel:{channelId:(start+i).toString(16).padStart(32,'0'),
+              channelName:'퀵'+(start+i)},liveTitle:'퀵 방송 '+(start+i),
+            concurrentUserCount:1000-i,liveCategoryValue:'게임',
+            tags:i===0?['하나','둘','셋','넷']:['테스트']})),
+            page:{next:second?null:{concurrentUserCount:961,liveId:7777}}}};
+        }
         return {ok:true,content:{followingList:quickChannels.map(c=>({
           channelId:c.channelId,channel:c,streamer:{openLive:true},
-          liveInfo:{liveTitle:'방송',concurrentUserCount:1}}))}};
+          liveInfo:{liveTitle:'방송',concurrentUserCount:1,
+            liveCategoryValue:'게임',tags:c.tags||[]}}))}};
       }},
       storage:{session:{
         get:async(k)=>({[k]:window.sessionStore[k]}),
@@ -537,6 +670,8 @@ const checks = [];
   );
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
@@ -556,8 +691,13 @@ const checks = [];
     `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const main=srcs.find(s=>s.includes('cheeseMultiMain=1'));
      const sub=srcs.find(s=>s.includes('cheeseMultiMain=0'));
-     check(!main.includes('cheeseMultiQuality'),'메인에 화질 상한이 붙었다');
-     check(sub.includes('cheeseMultiQuality=480'),'보조에 480 상한이 없다');`,
+     const mainUrl=new URL(main),subUrl=new URL(sub);
+     check(mainUrl.searchParams.get('cheeseMultiQualityPolicy')==='highest',
+       '메인의 명시적 최고 화질 정책이 없다');
+     check(!mainUrl.searchParams.has('cheeseMultiQuality'),'메인에 화질 상한이 붙었다');
+     check(subUrl.searchParams.get('cheeseMultiQualityPolicy')==='cap-480',
+       '보조의 명시적 480 상한 정책이 없다');
+     check(subUrl.searchParams.get('cheeseMultiQuality')==='480','보조에 480 상한이 없다');`,
   );
 
   await test(
@@ -589,6 +729,66 @@ const checks = [];
      check(main && main!=='-','메인 채널 이름이 비어 있다: '+main);
      check(document.getElementById('mvLayoutValue').textContent!=='-','배치 이름이 비어 있다');
      check(document.getElementById('mvSideValue').textContent!=='-','채팅 위치가 비어 있다');`,
+  );
+
+  await test(
+    "채널 관리 Quick 라이브 목록은 가로 끝에서 다음 페이지를 붙인다",
+    `check(document.getElementById('mvBack').textContent.includes('채널 관리'),
+       '상단 진입 문구가 채널 관리가 아니다');
+     document.getElementById('mvBack').click();
+     await wait(300);
+     const quick=document.getElementById('mvQuick');
+     const rail=document.getElementById('mvQuickAdd');
+     check(!quick.hidden,'채널 관리 패널이 열리지 않았다');
+     check(quick.querySelector('.mv-quick-head strong')?.textContent.includes('채널 관리'),
+       'Quick 제목이 채널 관리가 아니다');
+     quick.querySelector('[data-mv-quick-source="live"]').click();
+     check(rail.querySelector('.mv-quick-card.is-skeleton'),
+       'Quick 탭 전환 직후 카드 스켈레톤이 없다');
+     check(rail.getAttribute('aria-busy')==='true','Quick 로딩 상태가 전달되지 않는다');
+     await wait(400);
+     check(!rail.querySelector('.mv-quick-card.is-skeleton'),
+       'Quick 목록 로드 후 스켈레톤이 남았다');
+     const firstCount=rail.querySelectorAll('[data-mv-quick-add]').length;
+     check(firstCount===40,
+       'Quick 첫 페이지가 40개가 아니다: '+firstCount+' / 호출 '+window.__quickLiveCalls+
+       ' / 폭 '+rail.clientWidth+':'+rail.scrollWidth);
+     const first=rail.querySelector('[data-mv-quick-add]');
+     window.__failQuickNext=true;
+     rail.scrollLeft=rail.scrollWidth;
+     rail.dispatchEvent(new Event('scroll'));
+     await wait(400);
+     check(rail.querySelectorAll('[data-mv-quick-add]').length===40,
+       '실패한 다음 페이지 때문에 기존 Quick 카드가 사라졌다');
+     const retry=rail.querySelector('[data-mv-quick-retry]');
+     check(retry,'Quick 다음 페이지 재시도 버튼이 없다');
+     retry.click();
+     await wait(400);
+     check(rail.querySelectorAll('[data-mv-quick-add]').length===45,
+       'Quick 둘째 페이지가 append되지 않았다');
+     check(first.isConnected,'Quick 다음 페이지 로드 중 기존 카드를 다시 그렸다');
+     check(window.__quickLiveCalls===3,
+       'Quick 라이브 API 호출 수 이상: '+window.__quickLiveCalls);
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(250);
+     document.getElementById('mvQuickClose').click();
+     check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "싱크 패널은 세션 안에서만 켜지고 프레임을 다시 걸지 않는다",
+    `const before=window.frameSrcs.length;
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     check(!panel.hidden,'싱크 패널이 열리지 않았다');
+     check(panel.querySelectorAll('.mv-sync-row').length===2,'채널별 상태가 없다');
+     const auto=panel.querySelector('#mvSyncAuto');
+     auto.click();
+     check(document.getElementById('mvSyncValue').textContent==='자동','자동 모드가 표시되지 않는다');
+     panel.querySelector('#mvSyncAuto').click();
+     document.body.click();
+     check(panel.hidden,'싱크 패널이 닫히지 않았다');
+     check(window.frameSrcs.length===before,'싱크 조작으로 프레임을 다시 걸었다');`,
   );
 
   await test(
@@ -665,6 +865,26 @@ const checks = [];
   );
 
   await test(
+    "직접 음소거한 채널은 메인을 바꿨다가 돌아와도 음소거를 유지한다",
+    `const initial=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const other=document.querySelector('.mv-cell:not(.is-main)').dataset.channelId;
+     const before=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length;
+     document.getElementById('mvVolumeBtn').click();
+     document.querySelector('[data-mv-vol-mute="'+initial+'"]').click();
+     document.body.click();
+     document.querySelector('.mv-cell[data-channel-id="'+other+'"] [data-mv-promote]').click();
+     document.querySelector('.mv-cell[data-channel-id="'+initial+'"] [data-mv-promote]').click();
+     const latest=[...window.sentMessages].reverse().find(m=>m.data.type==='SET_MULTIVIEW_STATE' &&
+       m.data.channelId===initial);
+     check(latest?.data.muted===true,'사용자 음소거가 메인 승격 중 풀렸다');
+     document.getElementById('mvVolumeBtn').click();
+     document.querySelector('[data-mv-vol-mute="'+initial+'"]').click();
+     document.body.click();
+     check(window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length===before,
+       '메인 왕복 변경으로 영상 프레임을 다시 걸었다');`,
+  );
+
+  await test(
     "배치를 바꿔도 프레임을 다시 걸지 않는다",
     `const before=window.frameSrcs.length;
      document.querySelector('[data-mv-pop-toggle="layout"]').click();
@@ -736,6 +956,168 @@ const checks = [];
   );
 
   await test(
+    "메인만 듣기에서도 메인 음소거를 전환하고 보조 오디오는 잠근다",
+    `const before=window.frameSrcs.length;
+     const panel=document.getElementById('mvVolumePop');
+     document.getElementById('mvVolumeBtn').click();
+     check(!panel.hidden,'볼륨 패널이 열리지 않았다');
+     const main=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const aux=document.querySelector('.mv-cell:not(.is-main)').dataset.channelId;
+     check(!panel.querySelector('[data-mv-vol-mute="'+main+'"]').disabled,'메인 음소거가 잠겼다');
+     check(panel.querySelector('[data-mv-vol-mute="'+aux+'"]').disabled,'보조 음소거가 열려 있다');
+     window.sentMessages.length=0;
+     panel.querySelector('[data-mv-vol-mute="'+main+'"]').click();
+     check(window.sentMessages.some(m=>m.data.type==='SET_MULTIVIEW_STATE' &&
+       m.data.channelId===main && m.data.muted===true),'메인 mute 지시가 없다');
+     check(document.querySelector('[data-mv-vol-mute="'+main+'"]').getAttribute('aria-pressed')==='true',
+       '메인 음소거 표시가 없다');
+     panel.querySelector('[data-mv-vol-mute="'+main+'"]').click();
+     check(window.sentMessages.some(m=>m.data.type==='SET_MULTIVIEW_STATE' &&
+       m.data.channelId===main && m.data.muted===false),'메인 unmute 지시가 없다');
+     check(window.frameSrcs.length===before,'음소거가 프레임을 다시 걸었다');
+     document.body.click();`,
+  );
+
+  await test(
+    "Quick 카드에는 모든 태그가 보이고 크기 조절값은 닫았다 열어도 유지된다",
+    `const before=window.frameSrcs.length;
+     document.getElementById('mvBack').click();
+     document.querySelector('[data-mv-quick-source="live"]').click();
+     await wait(350);
+     const quick=document.getElementById('mvQuick');
+     const card=quick.querySelector('[data-mv-quick-add]');
+     check(card?.querySelectorAll('.mv-card-tag-chip').length===4,'Quick 태그 4개가 보이지 않는다');
+     check(card.querySelector('.mv-card-category-chip')?.textContent==='게임','Quick 카테고리가 없다');
+     for(const width of [450,650,900]){
+       quick.style.width=width+'px';
+       const cardWidth=card.getBoundingClientRect().width;
+       const thumb=card.querySelector('.mv-quick-card-thumb').getBoundingClientRect();
+       check(cardWidth>=149 && cardWidth<=206,'Quick 카드 폭이 비정상이다: '+width+' / '+cardWidth);
+       check(Math.abs(thumb.width/thumb.height-16/9)<.05,'Quick 썸네일 비율이 깨졌다');
+     }
+     quick.style.width='';
+     const handle=document.getElementById('mvQuickResize');
+     check(handle && handle.tabIndex===0,'크기 조절 핸들이 없다');
+     const old=quick.getBoundingClientRect();
+     handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+     const resized=quick.getBoundingClientRect();
+     check(resized.height>old.height,'세로 크기가 늘지 않았다');
+     document.getElementById('mvQuickClose').click();
+     document.getElementById('mvBack').click();
+     check(Math.abs(quick.getBoundingClientRect().height-resized.height)<2,
+       'Quick 크기가 다시 열 때 초기화됐다');
+     check(window.frameSrcs.length===before,'Quick 크기 조절로 프레임을 다시 걸었다');
+     document.getElementById('mvQuickClose').click();`,
+  );
+
+  await test(
+    "Quick 포인터 드래그는 패널만 조절하고 영상을 유지한다",
+    `document.getElementById('mvBack').click();
+     const panel=document.getElementById('mvQuick');
+     const handle=document.getElementById('mvQuickResize');
+     const before=panel.getBoundingClientRect(),srcs=window.frameSrcs.length;
+     let captured=-1;
+     handle.setPointerCapture=id=>{captured=id};
+     handle.hasPointerCapture=id=>captured===id;
+     handle.dispatchEvent(new PointerEvent('pointerdown',{
+       bubbles:true,button:0,pointerId:7,clientX:100,clientY:100}));
+     handle.dispatchEvent(new PointerEvent('pointermove',{
+       bubbles:true,pointerId:7,clientX:155,clientY:145}));
+     handle.dispatchEvent(new PointerEvent('pointerup',{
+       bubbles:true,pointerId:7,clientX:155,clientY:145}));
+     const after=panel.getBoundingClientRect();
+     check(after.width>before.width+20,'가로 드래그가 적용되지 않았다');
+     check(after.height>before.height+20,'세로 드래그가 적용되지 않았다');
+     check(window.frameSrcs.length===srcs,'크기 조절로 프레임을 다시 걸었다');
+     document.getElementById('mvQuickClose').click();`,
+  );
+
+  await test(
+    "믹서 상태는 해당 프레임에서만 받고 명령 후 응답값으로 확정한다",
+    `const cell=document.querySelector('.mv-cell[data-status="ready"]');
+     check(cell,'ready 프레임이 없다');
+     const id=cell.dataset.channelId,win=cell.querySelector('iframe').contentWindow;
+     const send=(data,origin='https://chzzk.naver.com',source=win)=>{
+       const e=new MessageEvent('message',{origin,data});
+       Object.defineProperty(e,'source',{value:source});window.dispatchEvent(e);
+     };
+     const state={ready:true,enabled:false,graphConflict:false,preset:'default',
+       presetDirty:false,gain:1,gainMin:.25,gainMax:3,gainStep:.1,revision:1,
+       presets:[{id:'default',label:'기본',kind:'builtin'},
+         {id:'custom-a',label:'내 프리셋',kind:'custom'}]};
+     const msg={source:'cheese-platter-multiview',type:'FRAME_MIXER_STATE',channelId:id,state};
+     document.getElementById('mvVolumeBtn').click();
+     check(window.sentMessages.some(m=>m.data.type==='MIXER_GET_STATE' && m.data.channelId===id),
+       '패널을 열 때 믹서 상태를 요청하지 않았다');
+     send(msg,'https://evil.invalid');send(msg,'https://chzzk.naver.com',window);
+     check(!document.querySelector('[data-mv-mixer-gain="'+id+'"]'),'잘못된 출처를 수용했다');
+     send(msg);
+     const gain=document.querySelector('[data-mv-mixer-gain="'+id+'"]');
+     check(gain && gain.min==='0.25' && gain.max==='3' && gain.dataset.gainStep==='0.1',
+       '믹서 게인 범위가 MAIN snapshot과 다르다');
+     const select=document.querySelector('[data-mv-mixer-preset="'+id+'"]');
+     check(select.querySelector('option[value="custom-a"]'),'커스텀 프리셋이 없다');
+     const before=window.frameSrcs.length;
+     document.querySelector('[data-mv-mixer-enabled="'+id+'"]').click();
+     const cmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_ENABLED' && m.data.channelId===id);
+     check(cmd?.data.enabled===true,'믹서 ON 명령이 없다');
+     check(!document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
+       'MAIN 응답 전에 ON으로 확정했다');
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_SET_ENABLED',commandId:cmd.data.commandId,applied:true,
+       state:{...state,enabled:true,revision:2}});
+     check(document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
+       'MAIN 응답의 ON 상태가 반영되지 않았다');
+     const preset=document.querySelector('[data-mv-mixer-preset="'+id+'"]');
+     preset.value='custom-a';preset.dispatchEvent(new Event('change',{bubbles:true}));
+     const presetCmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_PRESET' && m.data.channelId===id);
+     check(presetCmd?.data.presetId==='custom-a','커스텀 프리셋 명령이 없다');
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_SET_PRESET',commandId:presetCmd.data.commandId,applied:true,
+       state:{...state,enabled:true,preset:'custom-a',revision:3}});
+     check(document.querySelector('[data-mv-mixer-preset="'+id+'"]').value==='custom-a',
+       '커스텀 프리셋 응답이 반영되지 않았다');
+     const slider=document.querySelector('[data-mv-mixer-gain="'+id+'"]');
+     slider.value='1.25';slider.dispatchEvent(new Event('input',{bubbles:true}));
+     check(slider.isConnected,'게인 입력 중 패널을 다시 그렸다');
+     slider.dispatchEvent(new Event('change',{bubbles:true}));
+     const gainCmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_GAIN' && m.data.channelId===id);
+     check(gainCmd?.data.gain===1.25,'최종 게인 명령이 없다');
+     const flushCmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_FLUSH_GAIN' && m.data.channelId===id);
+     check(flushCmd,
+       '게인 저장 확정 명령이 없다');
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_SET_GAIN',commandId:gainCmd.data.commandId,applied:true,
+       state:{...state,enabled:true,preset:'custom-a',gain:1.3,revision:4}});
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_FLUSH_GAIN',commandId:flushCmd.data.commandId,applied:true,
+       state:{...state,enabled:true,preset:'custom-a',gain:1.3,revision:4}});
+     check(document.querySelector('[data-mv-mixer-gain="'+id+'"]').closest('label').querySelector('output').textContent==='130%',
+       'MAIN이 보정한 게인값으로 갱신되지 않았다');
+     document.querySelector('[data-mv-mixer-enabled="'+id+'"]').click();
+     const offCmd=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_ENABLED' &&
+       m.data.channelId===id && m.data.enabled===false);
+     check(offCmd && offCmd.data.confirmed!==true,'첫 OFF 명령이 이미 확인 처리됐다');
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_SET_ENABLED',commandId:offCmd.data.commandId,applied:false,
+       reason:'confirmation-required',state:{...state,enabled:true,preset:'custom-a',gain:1.3,revision:4}});
+     check(document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
+       '확인 전에 믹서가 꺼진 것처럼 표시됐다');
+     const confirm=document.querySelector('[data-mv-mixer-confirm="'+id+'"]');
+     check(confirm,'항상 켜기 해제 확인 UI가 없다');confirm.click();
+     const confirmed=[...window.sentMessages].reverse().find(m=>m.data.type==='MIXER_SET_ENABLED' &&
+       m.data.channelId===id && m.data.confirmed===true);
+     check(confirmed?.data.enabled===false,'명시적인 확인 OFF 명령이 없다');
+     send({source:msg.source,type:'FRAME_MIXER_COMMAND_RESULT',channelId:id,
+       command:'MIXER_SET_ENABLED',commandId:confirmed.data.commandId,applied:true,
+       state:{...state,enabled:false,preset:'custom-a',gain:1.3,revision:5}});
+     check(!document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
+       '확인 후 OFF 상태가 반영되지 않았다');
+     check(window.frameSrcs.length===before,'믹서 명령이 프레임을 다시 걸었다');
+     document.body.click();`,
+  );
+
+  await test(
     "화면 다시 적용은 덮개를 씌우지 않고 신호만 보낸다",
     `const cell=document.querySelector('.mv-cell');
      const id=cell.dataset.channelId;
@@ -761,6 +1143,360 @@ const checks = [];
   );
 
   await test(
+    "소리가 나는 빠른 메인은 자동 seek 없이 rate만 보정한다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const [slow,fast]=cells;
+     if(!fast.classList.contains('is-main')){
+       fast.querySelector('[data-mv-promote]').click();
+       await wait(100);
+     }
+     const realNow=Date.now;
+     let clock=realNow()+10000;
+     Date.now=()=>clock;
+     const post=(cell,type,stats)=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...(stats?{stats}:{})}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     post(slow,'FRAME_READY');post(fast,'FRAME_READY');
+     const raw=(delay)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:delay-2,seekableStart:80,
+       seekableEnd:100+delay,generation:1});
+     post(slow,'FRAME_SYNC_STATS',raw(5));
+     post(fast,'FRAME_SYNC_STATS',raw(3));
+     clock+=4100;
+     post(slow,'FRAME_SYNC_STATS',raw(5));
+     post(fast,'FRAME_SYNC_STATS',raw(3));
+     window.sentMessages.length=0;
+     document.getElementById('mvSyncBtn').click();
+     document.getElementById('mvSyncPop').querySelector('#mvSyncAuto').click();
+     await wait(1200);
+     const fastId=fast.dataset.channelId;
+     check(!window.sentMessages.some(m=>m.data?.type==='APPLY_SYNC_SEEK'&&
+       m.data.channelId===fastId),'소리가 나는 메인에 자동 seek가 나갔다');
+     check(window.sentMessages.some(m=>m.data?.type==='APPLY_SYNC_RATE'&&
+       m.data.channelId===fastId),'메인에 rate 보정이 나가지 않았다');
+     document.getElementById('mvSyncPop').querySelector('#mvSyncAuto').click();
+     document.body.click();
+     Date.now=realNow;`,
+  );
+
+  await test(
+    "싱크 통계는 해당 프레임에서만 받고 수동 기준·보정을 적용한다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const [a,b]=cells;
+     const aId=a.dataset.channelId,bId=b.dataset.channelId;
+     const realNow=Date.now;
+     let clock=realNow();
+     Date.now=()=>clock;
+     const send=(cell,type,stats,origin='https://chzzk.naver.com',src)=>{
+       const e=new MessageEvent('message',{origin,data:{source:'cheese-platter-multiview',
+         type,channelId:cell.dataset.channelId,stats}});
+       Object.defineProperty(e,'source',{value:src||cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const ack=(cell,cmd,applied=true,origin='https://chzzk.naver.com',src,
+       channelId=cell.dataset.channelId)=>{
+       const e=new MessageEvent('message',{origin,data:{source:'cheese-platter-multiview',
+         type:'FRAME_SYNC_COMMAND_RESULT',channelId,commandId:cmd.data.commandId,
+         command:cmd.data.type==='APPLY_SYNC_NUDGE'?'nudge':
+           cmd.data.type==='APPLY_SYNC_SEEK'?'seek':
+           cmd.data.type==='APPLY_SYNC_RATE'?'rate':'reset-rate',
+         applied,reason:applied?null:'ad',generation:1,
+         actualCurrentTime:100,actualPlaybackRate:cmd.data.rate||1}});
+       Object.defineProperty(e,'source',{value:src||cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const last=(type,id)=>[...window.sentMessages].reverse()
+       .find(m=>m.data?.type===type&&m.data.channelId===id);
+     send(a,'FRAME_READY');
+     send(b,'FRAME_READY');
+     clock+=5000;
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     const raw=(delay)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,
+       nativeDelaySec:delay,bufferAheadSec:2,edgeLagSec:delay-2,
+       seekableStart:80,seekableEnd:100+delay,generation:1});
+     send(a,'FRAME_SYNC_STATS',raw(5),'https://evil.invalid');
+     send(b,'FRAME_SYNC_STATS',raw(3),'https://chzzk.naver.com',window);
+     check(!panel.textContent.includes('5.0초')&&!panel.textContent.includes('3.0초'),
+       '다른 출처/창의 통계를 받아들였다');
+     send(a,'FRAME_SYNC_STATS',raw(5));
+     send(b,'FRAME_SYNC_STATS',raw(3));
+     clock+=4100;
+     send(a,'FRAME_SYNC_STATS',raw(5));
+     send(b,'FRAME_SYNC_STATS',raw(3));
+     await wait(1100);
+     check(panel.textContent.includes('5.0초')&&panel.textContent.includes('3.0초'),
+       '정상 프레임 통계가 표시되지 않는다');
+     const before=window.frameSrcs.length;
+     window.sentMessages.length=0;
+     const ref=[...panel.querySelectorAll('[data-mv-sync-ref]')]
+       .find(el=>el.dataset.mvSyncRef===bId);
+     ref.click();
+     check(document.getElementById('mvSyncValue').textContent==='수동',
+       '기준 지정 후 수동 모드가 아니다');
+     check(window.sentMessages.some(m=>m.data?.type==='APPLY_SYNC_SEEK'&&
+       m.data.channelId===aId&&m.data.currentTime>100),
+       '수동 기준으로 맞추는 seek가 없다');
+     ack(a,last('APPLY_SYNC_SEEK',aId));
+     clock+=300;
+     const offset=[...panel.querySelectorAll('[data-mv-sync-offset]')]
+       .find(el=>el.dataset.mvSyncOffset===aId&&el.dataset.step==='0.5');
+     offset.click();
+     check(!panel.textContent.includes('+0.5초'),'ACK 전에 수동 오프셋이 확정됐다');
+     check(window.sentMessages.some(m=>m.data?.type==='APPLY_SYNC_NUDGE'&&
+       m.data.channelId===aId&&m.data.deltaSec===-0.5),
+       '프레임 현재 위치 기준 수동 보정 명령이 없다');
+     const nudge=last('APPLY_SYNC_NUDGE',aId);
+     ack(a,nudge,true,'https://evil.invalid');
+     ack(a,nudge,true,'https://chzzk.naver.com',window);
+     ack(a,nudge,true,'https://chzzk.naver.com',undefined,bId);
+     ack(a,{data:{...nudge.data,commandId:nudge.data.commandId+999}},true);
+     check(!panel.textContent.includes('+0.5초'),'잘못된 ACK를 받아들였다');
+     ack(a,nudge);
+     check(panel.textContent.includes('+0.5초'),'성공 ACK 뒤 오프셋이 바뀌지 않았다');
+     ack(a,nudge,false);
+     check(panel.textContent.includes('+0.5초'),'오래된 ACK가 상태를 바꿨다');
+     clock+=300;
+     const rejected=[...panel.querySelectorAll('[data-mv-sync-offset]')]
+       .find(el=>el.dataset.mvSyncOffset===aId&&el.dataset.step==='0.5');
+     rejected.click();
+     const rejectedCommand=last('APPLY_SYNC_NUDGE',aId);
+     check(rejectedCommand.data.commandId!==nudge.data.commandId,'새 명령 ID가 없다');
+     ack(a,rejectedCommand,false);
+     check(panel.textContent.includes('+0.5초')&&!panel.textContent.includes('+1.0초'),
+       '실패한 수동 보정이 확정됐다');
+     clock+=1600;
+     panel.querySelector('#mvSyncAlign').click();
+     await wait(500);
+     check([...panel.querySelectorAll('.mv-sync-row')].some(row=>
+       row.querySelector('[data-mv-sync-ref]')?.dataset.mvSyncRef===aId&&
+       row.querySelector('.mv-sync-row-head')?.textContent.includes('기준')),
+       '느린 채널이 정렬 기준으로 선택되지 않았다');
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1200);
+     check(window.sentMessages.some(m=>m.data?.type==='APPLY_SYNC_RATE'),
+       '자동 모드의 재생속도 보정 명령이 없다');
+     const rate=window.sentMessages.find(m=>m.data?.type==='APPLY_SYNC_RATE');
+     ack(cells.find(c=>c.dataset.channelId===rate.data.channelId),rate);
+     panel.querySelector('#mvSyncAuto').click();
+     check(window.sentMessages.some(m=>m.data?.type==='RESET_SYNC_RATE'),
+       '자동 모드를 끈 뒤 재생속도 원복 명령이 없다');
+     check(window.frameSrcs.length===before,'싱크 명령이 프레임을 다시 불러왔다');
+     document.body.click();
+     Date.now=realNow;`,
+  );
+
+  await test(
+    "실패 ACK·세대 교체·탭 복귀는 자동 보정 상태를 잘못 확정하지 않는다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const [a,b]=cells;
+     const aId=a.dataset.channelId,bId=b.dataset.channelId;
+     if(!a.classList.contains('is-main')){
+       a.querySelector('[data-mv-promote]').click();
+       await wait(100);
+     }
+     const realNow=Date.now;
+     let clock=realNow()+40000;
+     Date.now=()=>clock;
+     const post=(cell,type,extra={},origin='https://chzzk.naver.com',source)=>{
+       const e=new MessageEvent('message',{origin,data:{source:'cheese-platter-multiview',
+         type,channelId:cell.dataset.channelId,...extra}});
+       Object.defineProperty(e,'source',{value:source||cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay,generation)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:delay,bufferAheadSec:2,
+       edgeLagSec:delay-2,seekableStart:80,seekableEnd:100+delay,generation});
+     const sample=(generation)=>{post(a,'FRAME_SYNC_STATS',{stats:raw(5,generation)});
+       post(b,'FRAME_SYNC_STATS',{stats:raw(3,generation)});};
+     const commands=(type)=>window.sentMessages.filter(m=>m.data?.type===type&&
+       m.data.channelId===bId);
+     const reply=(command,applied)=>post(b,'FRAME_SYNC_COMMAND_RESULT',{
+       commandId:command.data.commandId,
+       command:command.data.type==='APPLY_SYNC_SEEK'?'seek':
+         command.data.type==='APPLY_SYNC_RATE'?'rate':'reset-rate',
+       applied,reason:applied?null:'ad',generation:2,
+       actualCurrentTime:100,actualPlaybackRate:command.data.rate||1});
+     const panel=document.getElementById('mvSyncPop');
+     document.getElementById('mvSyncBtn').click();
+     sample(2);
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1100);
+     check(commands('APPLY_SYNC_SEEK').length===0&&commands('APPLY_SYNC_RATE').length===0,
+       '첫 generation 직후 자동 보정이 실행됐다');
+     clock+=4100;sample(2);
+     await wait(1100);
+     const failedSeek=commands('APPLY_SYNC_SEEK').at(-1);
+     const failedRate=commands('APPLY_SYNC_RATE').at(-1);
+     check(failedSeek&&failedRate,'안정화 뒤 자동 명령이 없다');
+     reply(failedSeek,false);
+     reply(failedRate,false);
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     check(commands('RESET_SYNC_RATE').length===0,
+       '실패한 rate를 extension 소유로 취급했다');
+     clock+=1600;sample(2);
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1100);
+     const retrySeek=commands('APPLY_SYNC_SEEK').at(-1);
+     const retryRate=commands('APPLY_SYNC_RATE').at(-1);
+     check(retrySeek&&retryRate,'실패 후 30초 이내 재시도하지 않았다');
+     reply(retrySeek,true);
+     reply(retryRate,true);
+     window.sentMessages.length=0;
+     clock+=1600;sample(2);
+     await wait(1100);
+     check(commands('APPLY_SYNC_SEEK').length===0,
+       '성공한 seek의 30초 쿨다운이 적용되지 않았다');
+     panel.querySelector('#mvSyncAuto').click();
+     check(commands('RESET_SYNC_RATE').length===1,
+       '성공한 rate ownership이 기록되지 않았다');
+     const hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');
+     let hidden=true;
+     Object.defineProperty(document,'hidden',{configurable:true,get:()=>hidden});
+     document.dispatchEvent(new Event('visibilitychange'));
+     hidden=false;
+     clock+=40000;
+     document.dispatchEvent(new Event('visibilitychange'));
+     sample(2);
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1100);
+     check(commands('APPLY_SYNC_RATE').length===0,
+       '탭 복귀 직후 자동 속도 보정이 실행됐다');
+     clock+=4100;sample(2);
+     await wait(1100);
+     const oldSeek=commands('APPLY_SYNC_SEEK').at(-1);
+     check(oldSeek,'탭 복귀 안정화 이후 seek가 없다');
+     sample(3);
+     reply(oldSeek,true);
+     clock+=4100;sample(3);
+     window.sentMessages.length=0;
+     await wait(1100);
+     check(commands('APPLY_SYNC_SEEK').length>0,
+       '세대 교체 뒤 오래된 ACK가 쿨다운을 시작했다');
+     panel.querySelector('#mvSyncAuto').click();
+     document.body.click();
+     if(hiddenDescriptor)Object.defineProperty(document,'hidden',hiddenDescriptor);
+     else delete document.hidden;
+     Date.now=realNow;`,
+  );
+
+  await test(
+    "rate ACK 유실은 stats로 복구하고 사용자 배속과 구분한다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const [a,b]=cells;
+     const aId=a.dataset.channelId,bId=b.dataset.channelId;
+     const realNow=Date.now;
+     let clock=realNow()+90000;
+     Date.now=()=>clock;
+     const post=(cell,type,extra={})=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...extra}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay,generation,rate=1,owned=false,user=false)=>({
+       currentTime:100,playbackRate:rate,paused:false,readyState:4,
+       syncRateOwned:owned,userRateOverride:user,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:0,seekableStart:80,seekableEnd:100+delay,
+       generation});
+     const sample=(rate=1,owned=false,user=false,generation=20)=>{
+       post(a,'FRAME_SYNC_STATS',{stats:raw(5,generation)});
+       post(b,'FRAME_SYNC_STATS',{stats:raw(3,generation,rate,owned,user)});
+     };
+     const commands=(type)=>window.sentMessages.filter(m=>
+       m.data?.type===type&&m.data.channelId===bId);
+     const ack=(command,applied=true,generation=20,rate=1)=>post(b,
+       'FRAME_SYNC_COMMAND_RESULT',{commandId:command.data.commandId,
+         command:command.data.type==='APPLY_SYNC_RATE'?'rate':'reset-rate',
+         applied,reason:applied?null:'ad',generation,actualCurrentTime:100,
+         actualPlaybackRate:rate});
+     post(a,'FRAME_READY');post(b,'FRAME_READY');
+     sample();clock+=4100;sample();
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+
+     // APPLY_SYNC_RATE는 적용됐지만 ACK가 유실된 상황이다.
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1100);
+     const lostRate=commands('APPLY_SYNC_RATE').at(-1);
+     check(lostRate,'ACK 유실 대상으로 쓸 rate 명령이 없다');
+     // pending 중간 stats는 ACK/timeout보다 먼저 ownership을 확정하지 않는다.
+     sample(1,false,false);
+     await wait(2200);
+     sample(lostRate.data.rate,true,false);
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     const recoveredReset=commands('RESET_SYNC_RATE').at(-1);
+     check(recoveredReset,'stats로 ownership을 복구한 뒤 reset을 보내지 않았다');
+     // reset pending 중 owned stats가 와도 reset을 중복 발행하지 않는다.
+     sample(lostRate.data.rate,true,false);
+     await wait(1100);
+     check(commands('RESET_SYNC_RATE').length===1,
+       'reset pending 중 stats가 중복 reset을 만들었다');
+     // frame에서는 reset됐지만 ACK만 유실된 경우 timeout 뒤 stats로 정리한다.
+     sample(1,false,false);
+     await wait(1200);
+     sample(1,false,false);
+     clock+=1600;
+     await wait(1100);
+     check(commands('RESET_SYNC_RATE').length===1,
+       'reset 성공 stats 뒤 불필요한 reset을 재시도했다');
+
+     // ACK도 없고 실제 적용도 안 된 경우 ownership을 만들지 않는다.
+     clock+=5000;sample();
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     await wait(1100);
+     check(commands('APPLY_SYNC_RATE').length===1,'두 번째 rate 명령이 없다');
+     await wait(2200);
+     sample(1,false,false);
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAuto').click();
+     check(commands('RESET_SYNC_RATE').length===0,
+       '적용되지 않은 rate를 ownership으로 복구했다');
+
+     // 사용자 1.5x와 낮은 generation의 늦은 stats도 ownership이 아니다.
+     sample(1.5,false,true,21);
+     post(b,'FRAME_SYNC_STATS',{stats:raw(3,20,0.95,true,false)});
+     window.sentMessages.length=0;
+     await wait(1100);
+     check(commands('RESET_SYNC_RATE').length===0,
+       '사용자 배속 또는 이전 generation을 sync ownership으로 오인했다');
+
+     // reset도 실제로 실패했다면 timeout/backoff 뒤 stats를 근거로 재시도한다.
+     window.sentMessages.length=0;
+     sample(0.95,true,false,22);
+     const failedReset=commands('RESET_SYNC_RATE').at(-1);
+     check(failedReset,'frame ownership을 원복하는 reset이 없다');
+     sample(0.95,true,false,22);
+     check(commands('RESET_SYNC_RATE').length===1,
+       'reset pending 중 명령을 중복 전송했다');
+     await wait(2200);
+     sample(0.95,true,false,22);
+     check(commands('RESET_SYNC_RATE').length===1,
+       'reset timeout 직후 backoff 없이 재시도했다');
+     clock+=1600;
+     sample(0.95,true,false,22);
+     check(commands('RESET_SYNC_RATE').length===2,
+       'reset 실패 상태를 backoff 뒤 재시도하지 않았다');
+     ack(commands('RESET_SYNC_RATE').at(-1),true,22,1);
+     document.body.click();
+     Date.now=realNow;`,
+  );
+
+  await test(
     "방송 종료 신호를 받으면 칸을 지우지 않고 안내만 띄운다",
     `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const before=videoSrcs().length;
@@ -768,11 +1504,44 @@ const checks = [];
      const target=cells.find(c=>!c.classList.contains('is-main')) || cells[0];
      const id=target.dataset.channelId;
      const mainBefore=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const main=cells.find(c=>c!==target);
+     const post=(cell,type,extra={})=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...extra}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     post(main,'FRAME_READY');post(target,'FRAME_READY');
+     const raw=(delay)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:0,seekableStart:80,seekableEnd:100+delay,
+       generation:4});
+     post(main,'FRAME_SYNC_STATS',{stats:raw(5)});
+     post(target,'FRAME_SYNC_STATS',{stats:raw(3)});
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     panel.querySelector('[data-mv-sync-ref="'+main.dataset.channelId+'"]').click();
+     const row=()=>[...panel.querySelectorAll('.mv-sync-row')].find(r=>
+       r.querySelector('[data-mv-sync-ref]')?.dataset.mvSyncRef===id);
+     const beforeOffset=row().querySelector('output').textContent;
+     const nudge=[...row().querySelectorAll('[data-mv-sync-offset]')]
+       .find(el=>el.dataset.step==='0.5');
+     nudge.click();
+     const pending=[...window.sentMessages].reverse().find(m=>
+       m.data?.type==='APPLY_SYNC_NUDGE'&&m.data.channelId===id);
+     check(pending,'종료 전 보류 중인 보정 명령이 없다');
      {const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
         data:{source:'cheese-platter-multiview',type:'FRAME_ENDED',channelId:id}});
       Object.defineProperty(e,'source',
         {value:target.querySelector('iframe').contentWindow});
       window.dispatchEvent(e);}
+     post(target,'FRAME_SYNC_COMMAND_RESULT',{
+       commandId:pending.data.commandId,command:'nudge',applied:true,reason:null,
+       actualCurrentTime:99.5,actualPlaybackRate:1,generation:4});
+     check(row().querySelector('output').textContent===beforeOffset,
+       '종료된 프레임의 늦은 ACK가 오프셋을 바꿨다');
+     document.body.click();
      await wait(100);
      check(target.isConnected,'종료됐다고 칸을 지웠다');
      check(target.dataset.status==='ended','상태가 ended 가 아니다');
@@ -1303,7 +2072,10 @@ const checks = [];
        return paths>=3?'high':'low';   // volume-2 는 호가 2개
      };
      const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
-     // 앞 테스트가 전체 볼륨을 바꿔 뒀을 수 있다. 기준을 100% 로 맞춘다.
+     // 앞 테스트가 메인과 소리 포커스를 바꿔 뒀을 수 있다. 현재 메인을 기준으로 맞춘다.
+     {const focus=pop.querySelector('#mvVolFocus');
+      if(!focus.checked){focus.checked=true;
+        focus.dispatchEvent(new Event('change',{bubbles:true}));await wait(100);}}
      {const m=pop.querySelector('[data-mv-vol-master]');
       m.value='100';m.dispatchEvent(new Event('input',{bubbles:true}));
       await wait(100);
@@ -1642,6 +2414,291 @@ const checks = [];
      // 찾을 때 우리 확장의 고르기 화면만 본다.
      check(window.tabQueries.some(u=>u.includes('multiview.html')),
        '고르기 화면 주소로 찾지 않았다');`,
+  );
+
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 720,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await test(
+    "좁은 화면에서도 싱크 패널이 화면 안에 들어온다",
+    `document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     const rect=panel.getBoundingClientRect();
+     check(!panel.hidden,'싱크 패널이 열리지 않았다');
+     check(rect.left>=0&&rect.right<=innerWidth+1,
+       '싱크 패널이 좌우로 벗어났다: '+JSON.stringify(rect.toJSON()));
+     check(rect.top>=0&&rect.bottom<=innerHeight+1,
+       '싱크 패널이 위아래로 벗어났다: '+JSON.stringify(rect.toJSON()));
+     document.body.click();`,
+  );
+
+  await test(
+    "채널 교체와 제거는 보류 중인 싱크 명령을 버린다",
+    `const post=(cell,type,extra={})=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...extra}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay,generation)=>({currentTime:100,playbackRate:1,paused:false,
+       readyState:4,syncRateOwned:false,userRateOverride:false,
+       nativeDelaySec:delay,bufferAheadSec:2,edgeLagSec:0,
+       seekableStart:80,seekableEnd:100+delay,generation});
+     const [other,target]=[...document.querySelectorAll('.mv-cell')];
+     post(other,'FRAME_READY');post(target,'FRAME_READY');
+     post(other,'FRAME_SYNC_STATS',{stats:raw(5,10)});
+     post(target,'FRAME_SYNC_STATS',{stats:raw(3,10)});
+     document.getElementById('mvSyncBtn').click();
+     let panel=document.getElementById('mvSyncPop');
+     panel.querySelector('[data-mv-sync-ref="'+other.dataset.channelId+'"]').click();
+     panel.querySelector('[data-mv-sync-offset="'+target.dataset.channelId+'"][data-step="0.5"]').click();
+     const pending=[...window.sentMessages].reverse().find(m=>
+       m.data?.type==='APPLY_SYNC_NUDGE'&&m.data.channelId===target.dataset.channelId);
+     check(pending,'교체 전 보류 명령이 없다');
+     document.getElementById('mvBack').click();
+     await wait(500);
+     const quick=document.getElementById('mvQuick');
+     quick.querySelector('[data-mv-quick-replace="'+target.dataset.channelId+'"]').click();
+     const replacement=quick.querySelector('[data-mv-quick-add]:not([disabled])');
+     check(replacement,'교체 후보가 없다');
+     replacement.click();
+     post(target,'FRAME_SYNC_COMMAND_RESULT',{commandId:pending.data.commandId,
+       command:'nudge',applied:true,reason:null,actualCurrentTime:99.5,
+       actualPlaybackRate:1,generation:10});
+     check(!document.querySelector('.mv-cell[data-channel-id="'+target.dataset.channelId+'"]'),
+       '교체 전 채널이 남았다');
+     const extra=quick.querySelector('[data-mv-quick-add]:not([disabled])');
+     check(extra,'추가 후보가 없다');
+     extra.click();
+     await wait(100);
+     const third=document.querySelector('.mv-cell[data-channel-id="'+extra.dataset.mvQuickAdd+'"]');
+     check(third&&document.querySelectorAll('.mv-cell').length===3,'세 번째 채널이 추가되지 않았다');
+     post(third,'FRAME_READY');
+     post(other,'FRAME_SYNC_STATS',{stats:raw(5,10)});
+     post(third,'FRAME_SYNC_STATS',{stats:raw(3,1)});
+     if(!quick.hidden)document.body.click();
+     document.getElementById('mvSyncBtn').click();
+     panel=document.getElementById('mvSyncPop');
+     panel.querySelector('[data-mv-sync-offset="'+third.dataset.channelId+'"][data-step="0.5"]').click();
+     const dropPending=[...window.sentMessages].reverse().find(m=>
+       m.data?.type==='APPLY_SYNC_NUDGE'&&m.data.channelId===third.dataset.channelId);
+     check(dropPending,'제거 전 보류 명령이 없다');
+     document.getElementById('mvBack').click();
+     quick.querySelector('[data-mv-quick-drop="'+third.dataset.channelId+'"]').click();
+     post(third,'FRAME_SYNC_COMMAND_RESULT',{commandId:dropPending.data.commandId,
+       command:'nudge',applied:true,reason:null,actualCurrentTime:99.5,
+       actualPlaybackRate:1,generation:1});
+     check(!document.querySelector('.mv-cell[data-channel-id="'+third.dataset.channelId+'"]')&&
+       document.querySelectorAll('.mv-cell').length===2,
+       '제거된 채널의 보류 명령이 정리되지 않았다');
+     document.body.click();`,
+  );
+
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280,
+    height: 800,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await test(
+    "싱크 진단은 세션 메모리에서 기록·요약·내보내기·초기화된다",
+    `const realNow=Date.now;
+     let clock=realNow()+180000;
+     Date.now=()=>clock;
+     const post=(cell,type,extra={})=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...extra}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay,generation,edge=0,rate=1,owned=false,user=false)=>({
+       currentTime:100,playbackRate:rate,paused:false,readyState:4,
+       syncRateOwned:owned,userRateOverride:user,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:edge,seekableStart:80,
+       seekableEnd:100+delay,generation});
+     const samples=(cells,generation,edge=0)=>cells.forEach((cell,index)=>
+       post(cell,'FRAME_SYNC_STATS',{stats:raw(5-index,generation,edge)}));
+     let cells=[...document.querySelectorAll('.mv-cell')];
+     cells.forEach(cell=>post(cell,'FRAME_READY'));
+     document.getElementById('mvSyncBtn').click();
+     let panel=document.getElementById('mvSyncPop');
+     check(!panel.querySelector('#mvSyncDiagnostics').checked,
+       '진단이 기본으로 켜져 있다');
+     samples(cells,50);
+     check(panel.querySelector('#mvSyncDiagnosticsCopy').disabled,
+       '진단 OFF인데 stats가 기록됐다');
+
+     panel.querySelector('#mvSyncDiagnostics').click();
+     window.sentMessages.length=0;
+     document.getElementById('mvSyncBtn').click();
+     await wait(1100);
+     check(window.sentMessages.some(message=>message.data?.type==='REQUEST_FRAME_SYNC_STATS'),
+       '진단 중 패널을 닫으면 통계 폴링이 멈춘다');
+     document.getElementById('mvSyncBtn').click();
+     panel=document.getElementById('mvSyncPop');
+
+     // congestion 검증을 위해 세 번째 채널을 추가한다.
+     document.getElementById('mvBack').click();
+     await wait(400);
+     const quick=document.getElementById('mvQuick');
+     const add=quick.querySelector('[data-mv-quick-add]:not([disabled])');
+     check(add,'진단용 세 번째 채널 후보가 없다');
+     const addedId=add.dataset.mvQuickAdd;
+     add.click();
+     await wait(100);
+     const added=document.querySelector('.mv-cell[data-channel-id="'+addedId+'"]');
+     check(added,'진단용 세 번째 채널이 추가되지 않았다');
+     post(added,'FRAME_READY');
+     if(!quick.hidden)document.body.click();
+     document.getElementById('mvSyncBtn').click();
+     cells=[...document.querySelectorAll('.mv-cell')];
+     samples(cells,51);
+     clock+=4100;
+     samples(cells,51);
+     await wait(1100);
+     panel=document.getElementById('mvSyncPop');
+     check(panel.querySelector('.mv-sync-diagnostics-status').textContent.includes('기록 중'),
+       '진단 기록 상태가 표시되지 않는다');
+     check(!panel.querySelector('#mvSyncDiagnosticsCopy').disabled,
+       '기록이 있는데 진단 동작이 비활성화됐다');
+
+     // 수동 기준 변경으로 command/result를 만들고 다음 명령은 timeout시킨다.
+     window.sentMessages.length=0;
+     const reference=panel.querySelector('[data-mv-sync-ref]:not([disabled])');
+     check(reference,'바꿀 수 있는 싱크 기준이 없다');
+     reference.click();
+     let commands=window.sentMessages.filter(message=>
+       message.data?.type==='APPLY_SYNC_SEEK');
+     check(commands.length>0,'ACK할 seek 명령이 없다');
+     for(const command of commands){
+       const cell=cells.find(item=>item.dataset.channelId===command.data.channelId);
+       post(cell,'FRAME_SYNC_COMMAND_RESULT',{commandId:command.data.commandId,
+         command:'seek',applied:true,reason:null,generation:51,
+         actualCurrentTime:100,actualPlaybackRate:1});
+     }
+     clock+=300;
+     window.sentMessages.length=0;
+     panel=document.getElementById('mvSyncPop');
+     const timeoutReference=panel.querySelector('[data-mv-sync-ref]:not([disabled])');
+     check(timeoutReference,'timeout 명령을 만들 다음 기준이 없다');
+     timeoutReference.click();
+     check(window.sentMessages.some(message=>message.data?.type==='APPLY_SYNC_SEEK'),
+       'timeout시킬 seek 명령이 없다');
+     await wait(2200);
+
+     // 세 채널의 edge lag가 임계값을 넘는 상태를 유지했다가 해제한다.
+     clock+=1000;samples(cells,51,3);await wait(1100);
+     clock+=4100;samples(cells,51,3);await wait(1100);
+     clock+=1000;samples(cells,51,3);await wait(1100);
+     samples(cells,51,0);await wait(1100);
+     clock+=5100;samples(cells,51,0);await wait(1100);
+
+     // 탭 복귀와 새 generation의 settling 기록을 만든다.
+     const hiddenDescriptor=Object.getOwnPropertyDescriptor(document,'hidden');
+     let hidden=true;
+     Object.defineProperty(document,'hidden',{configurable:true,get:()=>hidden});
+     document.dispatchEvent(new Event('visibilitychange'));
+     hidden=false;clock+=100;
+     document.dispatchEvent(new Event('visibilitychange'));
+     samples(cells,52);
+     if(hiddenDescriptor)Object.defineProperty(document,'hidden',hiddenDescriptor);
+     else delete document.hidden;
+     await wait(100);
+
+     // 저장된 Blob을 읽어 schema와 이벤트를 확인한다.
+     const realCreate=URL.createObjectURL;
+     const realRevoke=URL.revokeObjectURL;
+     const realAnchorClick=HTMLAnchorElement.prototype.click;
+     window.__diagBlobs=[];window.__diagDownload='';
+     URL.createObjectURL=(blob)=>{window.__diagBlobs.push(blob);return 'blob:diagnostics';};
+     URL.revokeObjectURL=()=>{};
+     HTMLAnchorElement.prototype.click=function(){window.__diagDownload=this.download;};
+     panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncDiagnosticsExport').click();
+     await wait(50);
+     const payload=JSON.parse(await window.__diagBlobs.at(-1).text());
+     const types=payload.records.map(record=>record.type);
+     for(const type of ['sample','command','command-result','command-timeout',
+       'reference-change','congestion-change','generation-change','settling-start','visibility']){
+       check(types.includes(type),'진단 이벤트가 없다: '+type);
+     }
+     check(payload.schemaVersion===1,'진단 schemaVersion이 없다');
+     check(payload.config.sampleMs===1000&&payload.config.settlingMs===4000&&
+       payload.config.seekCooldownMs===30000,'현재 싱크 임계값이 export되지 않았다');
+     check(payload.records.every(record=>!('cookie' in record)&&!('chat' in record)&&
+       !('url' in record)),'민감하거나 불필요한 필드가 기록됐다');
+     check(payload.records.some(record=>record.type==='command-result'&&
+       Number.isFinite(record.roundTripMs)),'ACK RTT가 기록되지 않았다');
+     check(payload.records.filter(record=>record.type==='congestion-change'&&record.active).length===1,
+       'congestion 진입 이벤트가 중복됐다');
+     check(payload.records.filter(record=>record.type==='congestion-change'&&!record.active).length===1,
+       'congestion 해제 이벤트가 중복되거나 없다');
+     check(payload.summary.channels.some(channel=>
+       Number.isFinite(channel.absoluteSyncErrorSec?.p90)),
+       '싱크 오차 p90 요약이 없다');
+     check(/^chzzk-multiview-sync-diagnostics-[0-9]{8}-[0-9]{6}[.]json$/.test(window.__diagDownload),
+       '진단 파일명이 올바르지 않다: '+window.__diagDownload);
+
+     const clipboardDescriptor=Object.getOwnPropertyDescriptor(navigator,'clipboard');
+     window.__diagCopied='';
+     Object.defineProperty(navigator,'clipboard',{configurable:true,
+       value:{writeText:async text=>{window.__diagCopied=text;}}});
+     panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncDiagnosticsCopy').click();
+     await wait(50);
+     check(window.__diagCopied.includes('멀티뷰 싱크 진단')&&
+       window.__diagCopied.includes('|오차| 중앙/p90/p95/최대'),
+       '진단 요약을 복사하지 못했다');
+
+     // OFF 뒤에는 샘플을 보내도 기록 수가 늘지 않는다.
+     panel=document.getElementById('mvSyncPop');
+     const diagnosticsToggle=panel.querySelector('#mvSyncDiagnostics');
+     diagnosticsToggle.click();
+     await wait(20);
+     panel=document.getElementById('mvSyncPop');
+     const offChecked=panel.querySelector('#mvSyncDiagnostics').checked;
+     const offStatus=panel.querySelector('.mv-sync-diagnostics-status').textContent;
+     check(!offChecked&&offStatus.includes('기록 안 함'),
+       '진단 OFF 전환이 반영되지 않았다 (checked: '+offChecked+
+       ', 상태: '+offStatus+')');
+     const beforeOff=payload.records.length;
+     samples(cells,52);
+     window.__diagBlobs=[];
+     panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncDiagnosticsExport').click();
+     await wait(50);
+     const afterOff=JSON.parse(await window.__diagBlobs.at(-1).text());
+     check(afterOff.records.length===beforeOff,
+       '진단 OFF 뒤에도 record가 추가됐다');
+
+     const syncModeBefore=document.getElementById('mvSyncValue').textContent;
+     const offsetsBefore=[...panel.querySelectorAll('.mv-sync-controls output')]
+       .map(output=>output.textContent).join('|');
+     const clearButton=panel.querySelector('#mvSyncDiagnosticsClear');
+     check(clearButton&&!clearButton.disabled,'초기화 버튼을 누를 수 없다');
+     clearButton.click();
+     await wait(50);
+     panel=document.getElementById('mvSyncPop');
+     const copyDisabled=panel.querySelector('#mvSyncDiagnosticsCopy').disabled;
+     const clearedStatus=panel.querySelector('.mv-sync-diagnostics-status').textContent;
+     check(copyDisabled&&clearedStatus.includes('기록 안 함'),
+       '진단 초기화가 records를 비우지 않았다 (복사 비활성화: '+copyDisabled+
+       ', 상태: '+clearedStatus+')');
+     check(document.getElementById('mvSyncValue').textContent===syncModeBefore&&
+       [...panel.querySelectorAll('.mv-sync-controls output')]
+         .map(output=>output.textContent).join('|')===offsetsBefore,
+       '진단 초기화가 실제 싱크 상태를 바꿨다');
+
+     URL.createObjectURL=realCreate;URL.revokeObjectURL=realRevoke;
+     HTMLAnchorElement.prototype.click=realAnchorClick;
+     if(clipboardDescriptor)Object.defineProperty(navigator,'clipboard',clipboardDescriptor);
+     else delete navigator.clipboard;
+     document.body.click();Date.now=realNow;`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
