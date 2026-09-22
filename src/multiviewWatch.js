@@ -852,6 +852,39 @@
     return v > 0.5 ? "high" : "low";
   }
 
+  function mixerControlsMarkup(channelId) {
+    const id = esc(channelId);
+    const mixer = mixerStates.get(channelId);
+    const status = currentStatus(channelId);
+    if (status === "ended" || status === "error") {
+      return '<p class="mv-mixer-status">오디오 믹서 사용 불가</p>';
+    }
+    if (!mixer?.ready) {
+      return '<p class="mv-mixer-status">오디오 믹서 상태 확인 중…</p>';
+    }
+    if (mixer.graphConflict) {
+      return '<p class="mv-mixer-status">다른 확장 프로그램과 오디오 그래프가 충돌해 사용할 수 없습니다.</p>';
+    }
+    const options = (kind) => mixer.presets.filter((item) => item.kind === kind)
+      .map((item) => `<option value="${esc(item.id)}"${!mixer.presetDirty && item.id === mixer.preset ? " selected" : ""}>${esc(item.label)}</option>`).join("");
+    const selected = mixer.presets.some((item) => item.id === mixer.preset);
+    const draft = mixerGainDrafts.get(channelId);
+    const gain = Number.isFinite(draft) ? draft : mixer.gain;
+    const error = mixerErrors.get(channelId);
+    return `<div class="mv-mixer-controls">` +
+      `<label class="mv-mixer-power">오디오 믹서 <input type="checkbox" data-mv-mixer-enabled="${id}"${mixer.enabled ? " checked" : ""}></label>` +
+      `<label class="mv-mixer-preset">프리셋 <select data-mv-mixer-preset="${id}" aria-label="${esc(channelName(channelId))} 오디오 믹서 프리셋">` +
+      ((mixer.presetDirty || !selected) ? '<option value="" selected disabled>사용자 조정</option>' : "") +
+      `<optgroup label="기본 프리셋">${options("builtin")}</optgroup>` +
+      (mixer.presets.some((item) => item.kind === "custom")
+        ? `<optgroup label="커스텀">${options("custom")}</optgroup>` : "") +
+      `</select></label>` +
+      `<label class="mv-mixer-gain">게인 <input type="range" data-mv-mixer-gain="${id}" data-gain-step="${mixer.gainStep}" min="${mixer.gainMin}" max="${mixer.gainMax}" step="any" value="${gain}" aria-label="${esc(channelName(channelId))} 오디오 믹서 게인"><output>${Math.round(gain * 100)}%</output></label>` +
+      (mixerConfirm.has(channelId) ? `<div class="mv-mixer-confirm">이 채널은 '항상 켜기' 상태입니다. 끄면 이 채널을 항상 켜기 대상에서 제외합니다. <button type="button" data-mv-mixer-confirm="${id}">끄기</button><button type="button" data-mv-mixer-cancel="${id}">취소</button></div>` : "") +
+      (error ? `<p class="mv-mixer-error">${esc(error)}</p>` : "") +
+      `</div>`;
+  }
+
   function renderVolume() {
     const value = $("mvVolumeValue");
     const button = $("mvVolumeBtn");
@@ -881,6 +914,7 @@
         const forcedOff = state.audioFocusMode && !isMain;
         const muted = effectiveMuted(c.channelId);
         return (
+          `<div class="mv-vol-channel" data-mv-vol-row="${id}">` +
           `<div class="mv-vol-row${forcedOff ? " is-off" : ""}">` +
           // ⚠ 이름과 '메인' 배지를 나눈다. 한 덩어리에 overflow:hidden 을 두면
           //   이름이 길 때 배지까지 함께 잘려 역할이 안 보인다.
@@ -901,7 +935,7 @@
           ` aria-label="${esc(c.channelName)} 볼륨"` +
           `${forcedOff ? " disabled" : ""}>` +
           `<span class="mv-vol-pct">${pct(audio.volume)}</span>` +
-          `</div>`
+          `</div>` + mixerControlsMarkup(c.channelId) + `</div>`
         );
       })
       .join("");
@@ -1679,7 +1713,10 @@
     panel.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
     // 볼륨·통계는 열려 있는 동안만 내용을 유지한다. 통계는 닫히면 폴링도 멈춘다.
-    if (name === "volume" && open) renderVolume();
+    if (name === "volume" && open) {
+      renderVolume();
+      for (const channel of state.chosen) requestMixerState(channel.channelId);
+    }
     if (name === "stats") {
       if (open) startStatsPolling();
       else stopStatsPolling();
@@ -2868,6 +2905,16 @@
   document.addEventListener("input", (event) => {
     const el = event.target;
     if (!(el instanceof HTMLInputElement) || el.type !== "range") return;
+    const mixerId = el.dataset.mvMixerGain;
+    if (mixerId) {
+      const gain = Number(el.value);
+      const mixer = mixerStates.get(mixerId);
+      if (!mixer || !Number.isFinite(gain) || gain < mixer.gainMin || gain > mixer.gainMax) return;
+      mixerDragId = mixerId;
+      el.closest(".mv-mixer-gain")?.querySelector("output")?.replaceChildren(`${Math.round(gain * 100)}%`);
+      queueMixerGain(mixerId, gain);
+      return;
+    }
     const next = Math.min(1, Math.max(0, Number(el.value) / 100));
     if (!Number.isFinite(next)) return;
 
@@ -3014,6 +3061,7 @@
       //   스스로 목표 상태로 맞춰 가는 일이라, 그걸 기다리면 DOM 이 늦게 뜬 것까지
       //   실패로 보인다(그래서 재적용을 두세 번 눌러야 했다).
       setCellStatus(channelId, "ready");
+      requestMixerState(channelId);
       return;
     }
     if (data.type === "FRAME_ENDED") {
@@ -3155,6 +3203,7 @@
       return;
     }
     if (data.type === "AUDIO_INTERACTION_REQUIRED") {
+      if (effectiveMuted(channelId)) return;
       // 자동재생이 막혔다. 볼륨 버튼에 표시를 띄워 어디서든 풀 수 있게 한다.
       audioBlocked.add(channelId);
       renderVolume();

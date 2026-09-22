@@ -1685,6 +1685,24 @@
     syncUI();
   }
 
+  function applyMixerPowerUserIntent(enabled, confirmed = false) {
+    if (!stateLoaded) return "not-ready";
+    if (!enabled && mixerAlwaysOn && !confirmed) return "confirmation-required";
+    if (enabled && graphConflict) return "graph-conflict";
+    if (enabled && !findVideo()) return "no-video";
+    if (mixerDefaultOn && !mixerAlwaysOn) {
+      mixerDefaultOffThisPage = !enabled;
+    } else {
+      state.userDisabled = !enabled;
+    }
+    setEnabled(enabled);
+    saveState({ userIntent: true });
+    if (enabled && (!state.enabled || !audio.connected || audio.ctx?.state === "suspended")) {
+      return graphConflict ? "graph-conflict" : "interaction-required";
+    }
+    return null;
+  }
+
   function ensureEnabledGraph() {
     if (!state.enabled) return;
     const video = findVideo();
@@ -2655,6 +2673,7 @@
   // forcePresets: 사용자가 커스텀 프리셋을 직접 추가/수정/삭제한 저장(반드시 전역
   // customPresets/defaultCustomId를 함께 저장). 일반 채널 설정 저장에는 전역값을 싣지 않는다.
   function saveState(opts) {
+    queueMultiviewMixerState();
     // ⚠ 판정을 '가장 먼저' 한다. 예전에는 함수 첫 줄에서 무조건
     //   pendingUserEdit / userEditedDuringLoad 를 세웠는데, 저장은 사용자 조작이
     //   아닌 경로에서도 불린다(EQ 대역 동기화·자동 켜기·그래프 실패 등).
@@ -3061,6 +3080,7 @@
       stateLoaded = true;
       userEditedDuringLoad = false;
       maybeAutoEnableMixer();
+      queueMultiviewMixerState();
       // 같은 탭에서 복원된 enabled 상태도 클릭 없이 이어지도록 재생 기반 resume을 시도한다.
       bindVideoAutoEnable();
     } else if (e.data.type === "globals-changed") {
@@ -3068,6 +3088,7 @@
       const prevGainEnabled = globalGainDefault.enabled;
       const next = e.data.state || {};
       state.customPresets = normalizeCustomPresets(next.customPresets);
+      queueMultiviewMixerState();
       state.defaultCustomId = String(next.defaultCustomId || "");
       if (
         state.defaultCustomId &&
@@ -3154,6 +3175,107 @@
     const quantized = 1 + Math.round((g - 1) / GAIN_STEP) * GAIN_STEP;
     return Math.round(clampGain(quantized) * 100) / 100;
   }
+
+  const multiviewMixerChannelId = new URLSearchParams(location.search).get("cheeseMulti") === "1"
+    ? (location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || "").toLowerCase()
+    : "";
+  let multiviewMixerRevision = 0;
+  let multiviewMixerSignature = "";
+  let multiviewMixerNotifyTimer = 0;
+
+  function multiviewMixerSnapshot() {
+    const custom = normalizeCustomPresets(state.customPresets);
+    const presets = Object.entries(PRESETS).map(([id, preset]) => ({
+      id, label: id === "default" ? defaultPresetLabel() : preset.label, kind: "builtin",
+    }));
+    for (const preset of custom) {
+      presets.push({ id: preset.id, label: preset.name, kind: "custom" });
+    }
+    const selected = presets.find((preset) => preset.id === state.preset);
+    return {
+      ready: stateLoaded && currentMediaId === multiviewMixerChannelId,
+      enabled: state.enabled === true,
+      graphConflict: graphConflict === true,
+      preset: state.preset,
+      presetLabel: selected?.label || "사용자 조정",
+      presetDirty: presetDirty === true || state.preset === "custom",
+      gain: state.gain,
+      gainMin: GAIN_MIN,
+      gainMax: GAIN_MAX,
+      gainStep: GAIN_STEP,
+      presets,
+    };
+  }
+
+  function publishMultiviewMixerState(force = false) {
+    if (!multiviewMixerChannelId) return null;
+    const snapshot = multiviewMixerSnapshot();
+    const signature = JSON.stringify(snapshot);
+    if (signature !== multiviewMixerSignature) {
+      multiviewMixerSignature = signature;
+      multiviewMixerRevision += 1;
+      force = true;
+    }
+    const stateForParent = { ...snapshot, revision: multiviewMixerRevision };
+    if (force) {
+      window.postMessage({ source: "cheese-multiview-mixer-main", type: "state",
+        channelId: multiviewMixerChannelId, state: stateForParent }, location.origin);
+    }
+    return stateForParent;
+  }
+
+  function queueMultiviewMixerState() {
+    if (!multiviewMixerChannelId || multiviewMixerNotifyTimer) return;
+    multiviewMixerNotifyTimer = window.setTimeout(() => {
+      multiviewMixerNotifyTimer = 0;
+      publishMultiviewMixerState();
+    }, 80);
+  }
+
+  window.addEventListener("message", (event) => {
+    if (!multiviewMixerChannelId || event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (data?.source !== "cheese-multiview-mixer-content" ||
+        data.channelId !== multiviewMixerChannelId) return;
+    const commands = new Set(["MIXER_GET_STATE", "MIXER_SET_ENABLED", "MIXER_SET_GAIN",
+      "MIXER_SET_PRESET", "MIXER_FLUSH_GAIN"]);
+    if (!commands.has(data.type)) return;
+    if (data.type === "MIXER_GET_STATE") {
+      publishMultiviewMixerState(true);
+      return;
+    }
+    if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
+    let reason = null;
+    try {
+      if (!stateLoaded || currentMediaId !== multiviewMixerChannelId) reason = "not-ready";
+      else if (graphConflict && data.type !== "MIXER_SET_ENABLED" &&
+          data.type !== "MIXER_FLUSH_GAIN") reason = "graph-conflict";
+      else if (data.type === "MIXER_SET_ENABLED") {
+        reason = typeof data.enabled === "boolean"
+          ? applyMixerPowerUserIntent(data.enabled, data.confirmed === true) : "invalid-command";
+      } else if (data.type === "MIXER_SET_GAIN") {
+        if (typeof data.gain !== "number" || !Number.isFinite(data.gain) ||
+            data.gain < GAIN_MIN || data.gain > GAIN_MAX) reason = "invalid-gain";
+        else handleSlider("gain", data.gain);
+      } else if (data.type === "MIXER_SET_PRESET") {
+        const id = String(data.presetId || "");
+        if (!findVideo()) reason = "no-video";
+        else if (Object.hasOwn(PRESETS, id)) applyPreset(id);
+        else if (normalizeCustomPresets(state.customPresets).some((preset) => preset.id === id)) {
+          applyCustomPreset(id);
+        } else reason = "invalid-preset";
+        if (!reason && !state.enabled) reason = graphConflict ? "graph-conflict" : "interaction-required";
+      } else if (data.type === "MIXER_FLUSH_GAIN") {
+        flushPendingStateSave();
+      }
+    } catch {
+      reason = "exception";
+    }
+    const stateForParent = publishMultiviewMixerState();
+    window.postMessage({ source: "cheese-multiview-mixer-main", type: "result",
+      channelId: multiviewMixerChannelId, commandId: data.commandId, command: data.type,
+      applied: reason === null, reason, state: stateForParent }, location.origin);
+  });
   // 키보드 한 단계 이동. 현재값이 새 간격 격자에 없으면 이동 방향에서 가장 가까운
   // 다음 격자로 붙이고, 이미 격자에 있으면 정확히 한 단계 이동한다.
   function gainByStep(g, direction) {
@@ -4151,12 +4273,8 @@
           return;
         }
         if (action === "alwayson-confirm") {
-          // 확인을 받았으니 실제로 끄고, 이 채널을 '항상 켜기'에서 제외한다.
           alwaysOnOffAsk = false;
-          state.userDisabled = true;
-          setEnabled(false);
-          // 사용자 의사다(값 편집은 아니다). 늦은 로드가 되돌리면 안 된다.
-          saveState({ userIntent: true }); // opt-out 은 켜짐 여부와 무관하게 남긴다
+          applyMixerPowerUserIntent(false, true);
           refreshPanelContent();
           return;
         }
@@ -4229,32 +4347,15 @@
         return;
       }
       if (t.dataset.action === "power") {
-        // '항상 켜기' 중 끄려 하면 무슨 일이 벌어지는지 먼저 확인받는다.
-        // (체크박스는 되돌려 두고, 확인을 누르면 그때 실제로 끈다.)
-        if (!t.checked && mixerAlwaysOn) {
+        const reason = applyMixerPowerUserIntent(t.checked);
+        if (reason === "confirmation-required") {
           t.checked = true;
           alwaysOnOffAsk = true;
           refreshPanelContent();
-          return;
+        } else if (reason) {
+          t.checked = state.enabled;
+          syncUI();
         }
-        // '기본 켜짐'(항상 켜기 아님)에서는 이번 페이지 동안만 기억하고, 저장되는
-        // 채널 제외(userDisabled)는 건드리지 않는다 — 설정의 '항상 켜기 제외 채널'
-        // 목록에 엉뚱하게 쌓이면 나중에 '항상 켜기'로 바꿨을 때 그 채널만 안 켜진다.
-        if (mixerDefaultOn && !mixerAlwaysOn) {
-          mixerDefaultOffThisPage = !t.checked;
-          setEnabled(t.checked);
-          saveState({ userIntent: true });
-          return;
-        }
-        // 사용자가 직접 끄면 이 채널은 '항상 켜기' 자동 활성화에서 제외(opt-out).
-        // 다시 켜면 해제. per-channel로 저장돼 새로고침 후에도 의사 유지.
-        state.userDisabled = !t.checked;
-        setEnabled(t.checked);
-        // ⚠ setEnabled 는 video 가 없거나 그래프 생성이 실패하면 saveState 전에
-        //   빠져나간다. 그러면 방금 바꾼 userDisabled 가 저장되지 않아, 새로고침
-        //   후에도 예전 opt-out 이 되살아났다. 켜짐 여부와 무관하게 이
-        //   '의사'는 반드시 남긴다.
-        saveState({ userIntent: true });
       } else if (t.dataset.action === "comp-toggle") {
         state.comp.enabled = t.checked;
         enterCustomFromEdit();
@@ -4649,6 +4750,7 @@
   }
 
   function syncUI() {
+    queueMultiviewMixerState();
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     button?.classList.toggle("is-active", state.enabled);
     button?.setAttribute("aria-pressed", String(state.enabled));
