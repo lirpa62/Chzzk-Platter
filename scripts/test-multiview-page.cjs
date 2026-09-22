@@ -2890,6 +2890,271 @@ const checks = [];
      document.body.click();Date.now=realNow;`,
   );
 
+  await test(
+    "싱크 범위를 선택으로 바꾸면 고른 채널만 보정한다",
+    `// 4채널로 늘린다(빠른 바꾸기 후보에서 추가).
+     document.getElementById('mvBack').click();
+     await wait(200);
+     // 최소 3채널이면 '선택/제외' 를 나눌 수 있다. 앞선 테스트가 이미 채널을
+     // 늘려 뒀을 수 있으므로 모자랄 때만 더한다.
+     for(let i=0;i<3&&document.querySelectorAll('.mv-cell').length<4;i++){
+       const add=[...document.querySelectorAll('[data-mv-quick-add]')].find(b=>!b.disabled);
+       if(!add) break;
+       add.click(); await wait(100);
+       document.getElementById('mvBack').click(); await wait(150);
+     }
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     await wait(80);
+     const cells=[...document.querySelectorAll('.mv-cell')];
+     check(cells.length>=3,'채널이 3개 미만이다: '+cells.length);
+
+     const realNow=Date.now;
+     let clock=realNow()+10000;
+     Date.now=()=>clock;
+     const post=(cell,type,stats)=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...(stats?{stats}:{})}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:delay-2,seekableStart:80,
+       seekableEnd:100+delay,generation:1});
+     const ids=cells.map(c=>c.dataset.channelId);
+     const feed=()=>{cells.forEach((c,i)=>post(c,'FRAME_SYNC_STATS',raw(5-i*0.7)));};
+     cells.forEach(c=>post(c,'FRAME_READY'));
+     feed(); clock+=4100; feed();
+
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     check(panel.querySelector('[data-mv-sync-scope="all"]').getAttribute('aria-pressed')==='true',
+       '기본 범위가 전체가 아니다');
+     check(!panel.querySelector('[data-mv-sync-pick]'),'전체 범위인데 체크박스가 보인다');
+
+     // 선택 모드로 전환하면 전부 선택된 상태로 시작한다.
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(60);
+     const picks=[...panel.querySelectorAll('[data-mv-sync-pick]')];
+     check(picks.length===cells.length,
+       '체크박스 수가 채널 수와 다르다: '+picks.length+'/'+cells.length);
+     check(picks.every(p=>p.checked),'선택 모드 최초 전환에서 전부 선택이 아니다');
+     check(panel.querySelector('.mv-sync-scope-count').textContent
+       .includes(cells.length+'/'+cells.length),'범위 표시가 전부 선택이 아니다');
+
+     // C/D 를 뺀다 → A/B 만 그룹
+     const pickOf=(id)=>panel.querySelector('[data-mv-sync-pick="'+id+'"]');
+     // 앞의 둘만 남기고 나머지를 뺀다.
+     for(const id of ids.slice(2)){ pickOf(id)?.click(); await wait(40); }
+     const cnt2=panel.querySelector('.mv-sync-scope-count').textContent;
+     check(cnt2.indexOf('선택 2/')===0,'범위 표시가 선택 2/N 이 아니다: '+cnt2);
+     const rows=[...panel.querySelectorAll('.mv-sync-row')];
+     check(rows.slice(2).every(r=>r.classList.contains('is-excluded')),
+       '제외 행 표시가 없다');
+     check(rows[2].textContent.includes('제외됨'),'제외됨 문구가 없다');
+     // 제외 행의 조작은 실제로 비활성이어야 한다(보이기만 흐린 게 아니라).
+     check([...rows[2].querySelectorAll('.mv-sync-controls button')].every(b=>b.disabled),
+       '제외 행의 조작 버튼이 살아 있다');
+     // 측정값은 계속 읽을 수 있어야 한다.
+     check(rows[2].textContent.includes('지연'),'제외 행에서 측정값이 사라졌다');
+
+     // 수동 맞추기: 제외 채널에는 어떤 명령도 나가지 않는다.
+     feed();
+     window.sentMessages.length=0;
+     panel.querySelector('#mvSyncAlign').click();
+     await wait(600);
+     const cmdTo=(id)=>window.sentMessages.filter(m=>
+       ['APPLY_SYNC_SEEK','APPLY_SYNC_NUDGE','APPLY_SYNC_RATE'].includes(m.data?.type)&&
+       m.data.channelId===id).length;
+     for(const id of ids.slice(2)){
+       check(cmdTo(id)===0,'제외 채널에 보정 명령이 나갔다: '+id+' → '+cmdTo(id));
+     }
+     Date.now=realNow;
+     // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
+     document.getElementById('mvSyncBtn').click();
+     await wait(40);
+     document.getElementById('mvSyncPop')
+       .querySelector('[data-mv-sync-scope="all"]')?.click();
+     await wait(40);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
+  await test(
+    "기준 채널을 빼면 그룹 안에서 새 기준을 고른다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const realNow=Date.now;
+     let clock=realNow()+30000;
+     Date.now=()=>clock;
+     const post=(cell,type,stats)=>{
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,
+           channelId:cell.dataset.channelId,...(stats?{stats}:{})}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     const raw=(delay)=>({currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:delay,
+       bufferAheadSec:2,edgeLagSec:delay-2,seekableStart:80,
+       seekableEnd:100+delay,generation:1});
+     cells.forEach(c=>post(c,'FRAME_READY'));
+     const feed=()=>cells.forEach((c,i)=>post(c,'FRAME_SYNC_STATS',raw(5-i*0.7)));
+     feed(); clock+=4100; feed();
+
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     await wait(60);
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(80);
+     // 앞 테스트가 선택을 비워 뒀을 수 있다. 전부 선택 상태로 맞춘 뒤 시작한다.
+     for(const c of cells){
+       const box=panel.querySelector('[data-mv-sync-pick="'+c.dataset.channelId+'"]');
+       if(box&&!box.checked){ box.click(); await wait(30); }
+     }
+     feed();
+     await wait(80);
+     const labelsOf=()=>[...panel.querySelectorAll('.mv-sync-row')]
+       .map(r=>r.querySelector('.mv-sync-row-head span')?.textContent);
+     const idOfRow=(i)=>[...panel.querySelectorAll('.mv-sync-row')][i]
+       ?.querySelector('[data-mv-sync-pick]')?.dataset.mvSyncPick;
+     // 기준을 명시적으로 지정한다(자동 모드가 아니면 저절로 정해지지 않는다).
+     const refBtn=[...panel.querySelectorAll('[data-mv-sync-ref]')].find(b=>!b.disabled);
+     check(refBtn,'기준 지정 버튼이 모두 비활성이다: '+JSON.stringify(labelsOf()));
+     refBtn.click();
+     await wait(100);
+     feed();
+     await wait(60);
+     // 기준이 반드시 하나 잡혀 있어야 한다(가드로 넘어가지 않는다).
+     const refRow0=[...panel.querySelectorAll('.mv-sync-row')]
+       .find(r=>r.classList.contains('is-reference'));
+     check(refRow0,'기준 채널이 정해지지 않았다: '+JSON.stringify(labelsOf()));
+     const oldRefId=refRow0.querySelector('[data-mv-sync-pick]').dataset.mvSyncPick;
+
+     // 기준 채널을 선택에서 뺀다.
+     panel.querySelector('[data-mv-sync-pick="'+oldRefId+'"]').click();
+     await wait(120);
+     feed();
+     await wait(80);
+
+     const rows=[...panel.querySelectorAll('.mv-sync-row')];
+     const refRow=rows.find(r=>r.classList.contains('is-reference'));
+     const refNowId=refRow?.querySelector('[data-mv-sync-pick]')?.dataset.mvSyncPick;
+     const dump=rows.map(r=>[r.classList.contains('is-reference'),
+       r.querySelector('[data-mv-sync-pick]')?.checked]);
+     // 1) 뺀 채널은 더 이상 기준이 아니다.
+     check(refNowId!==oldRefId,'뺀 채널이 그대로 기준으로 남아 있다: '+JSON.stringify(dump));
+     // 2) 기준이 있다면 반드시 선택된 행이어야 한다.
+     if(refRow){
+       check(refRow.querySelector('[data-mv-sync-pick]')?.checked===true,
+         '범위 밖 채널이 기준으로 남아 있다: '+JSON.stringify(dump));
+     }
+     Date.now=realNow;
+     // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
+     panel.querySelector('[data-mv-sync-scope="all"]')?.click();
+     await wait(40);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
+  await test(
+    "선택이 2개 미만이면 자동 싱크를 멈추고 안내한다",
+    `document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     await wait(60);
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(60);
+     // 지금 체크된 것 중 하나만 남기고 모두 해제한다(패널이 매번 다시 그려지므로
+     // 매 회 새로 찾는다).
+     const keep=panel.querySelector('[data-mv-sync-pick]')?.dataset.mvSyncPick;
+     check(keep,'체크박스가 없다(선택 모드가 아니다)');
+     for(let i=0;i<8;i++){
+       const next=[...panel.querySelectorAll('[data-mv-sync-pick]')]
+         .find(p=>p.checked&&p.dataset.mvSyncPick!==keep);
+       if(!next) break;
+       next.click();
+       await wait(40);
+     }
+     // 남긴 채널이 해제됐으면 다시 켠다.
+     const keepBox=panel.querySelector('[data-mv-sync-pick="'+keep+'"]');
+     if(keepBox&&!keepBox.checked){ keepBox.click(); await wait(40); }
+     const cnt1=panel.querySelector('.mv-sync-scope-count').textContent;
+     check(cnt1.indexOf('선택 1/')===0,'범위 표시가 선택 1/N 이 아니다: '+cnt1);
+     check(panel.querySelector('#mvSyncAlign').disabled,'맞추기 버튼이 살아 있다');
+     check(panel.querySelector('#mvSyncAuto').disabled,'자동 싱크 체크박스가 살아 있다');
+     check(panel.textContent.includes('2개 이상'),'최소 채널 안내가 없다');
+     // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
+     document.getElementById('mvSyncBtn').click();
+     await wait(40);
+     document.getElementById('mvSyncPop')
+       .querySelector('[data-mv-sync-scope="all"]')?.click();
+     await wait(40);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
+  await test(
+    "범위를 전체로 되돌렸다가 선택으로 오면 이전 선택이 남는다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const ids=cells.map(c=>c.dataset.channelId);
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     await wait(60);
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(60);
+     // 하나를 빼 '전부 선택이 아닌' 상태를 만든다.
+     const someBox=[...panel.querySelectorAll('[data-mv-sync-pick]')].find(p=>p.checked);
+     if(someBox){ someBox.click(); await wait(60); }
+     const before=[...panel.querySelectorAll('[data-mv-sync-pick]')]
+       .filter(p=>p.checked).map(p=>p.dataset.mvSyncPick).sort().join(',');
+     panel.querySelector('[data-mv-sync-scope="all"]').click();
+     await wait(60);
+     check(!panel.querySelector('[data-mv-sync-pick]'),'전체 범위인데 체크박스가 남아 있다');
+     check(panel.querySelector('.mv-sync-scope-count').textContent.includes('전체'),
+       '전체 표시가 아니다');
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(60);
+     const after=[...panel.querySelectorAll('[data-mv-sync-pick]')]
+       .filter(p=>p.checked).map(p=>p.dataset.mvSyncPick).sort().join(',');
+     check(after===before,'재진입에서 이전 선택이 복원되지 않았다: '+before+' → '+after);
+     // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
+     document.getElementById('mvSyncBtn').click();
+     await wait(40);
+     document.getElementById('mvSyncPop')
+       .querySelector('[data-mv-sync-scope="all"]')?.click();
+     await wait(40);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
+  await test(
+    "선택 범위에서 채널을 추가하면 기본은 미선택이다",
+    `document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     await wait(60);
+     panel.querySelector('[data-mv-sync-scope="selected"]').click();
+     await wait(60);
+     const beforeIds=[...panel.querySelectorAll('[data-mv-sync-pick]')]
+       .map(p=>p.dataset.mvSyncPick);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+     document.getElementById('mvBack').click();
+     await wait(200);
+     const add=[...document.querySelectorAll('[data-mv-quick-add]')].find(b=>!b.disabled);
+     if(add){
+       add.click(); await wait(120);
+       document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+       document.getElementById('mvSyncBtn').click();
+       await wait(60);
+       const picks=[...panel.querySelectorAll('[data-mv-sync-pick]')];
+       const fresh=picks.filter(p=>!beforeIds.includes(p.dataset.mvSyncPick));
+       check(fresh.length>=1,'추가한 채널이 싱크 목록에 없다');
+       check(fresh.every(p=>!p.checked),'추가한 채널이 자동으로 선택됐다');
+     }
+     // ⚠ 뒤 테스트가 기존(전체) 동작을 전제하므로 범위를 되돌려 둔다.
+     document.getElementById('mvSyncBtn').click();
+     await wait(40);
+     document.getElementById('mvSyncPop')
+       .querySelector('[data-mv-sync-scope="all"]')?.click();
+     await wait(40);
+     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
   checks.push("시청 화면 조작 중 오류가 없다");
 

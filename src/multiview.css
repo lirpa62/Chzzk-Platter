@@ -2094,6 +2094,46 @@ button.mv-live-more {
   right: 0;
   width: min(520px, calc(100vw - 16px));
 }
+/* 싱크 범위 전환(전체/선택). 현재 범위는 글자로도 함께 보여 준다. */
+.mv-sync-scope {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.mv-sync-scope button {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 12px;
+}
+.mv-sync-scope button[aria-pressed="true"] {
+  background: var(--popup-brand, #00c73c);
+  border-color: var(--popup-brand, #00c73c);
+  color: #fff;
+}
+.mv-sync-scope-count {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  margin-left: auto;
+}
+/* 채널명 옆 체크박스. 색만으로 구분하지 않게 글자와 함께 둔다. */
+.mv-sync-pick {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+/* 범위 밖 채널. 측정값은 계속 읽을 수 있어야 하므로 살짝만 흐리게 둔다. */
+.mv-sync-row.is-excluded .mv-sync-metrics,
+.mv-sync-row.is-excluded .mv-sync-controls {
+  opacity: 0.55;
+}
 .mv-sync-actions,
 .mv-sync-controls,
 .mv-sync-diagnostics-actions,
