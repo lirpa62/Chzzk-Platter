@@ -45647,6 +45647,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return out.trim();
   }
 
+  // 현재 페이지에서 가능하면 loungeId 로 쓸 채널 ID 를 찾는다.
+  // ⚠ 이 값은 '있으면 함께 보내는 페이지 맥락' 이지 요청 실행의 필수 조건이 아니다.
+  //   빈 loungeId 로도 사용자 차단·해제가 동일하게 동작하는 것을 실측으로 확인했다
+  //   (POST/DELETE 모두 실제 차단·해제까지 적용됨). 그래서 이 함수가 빈 문자열을
+  //   돌려줘도 네이티브 요청을 건너뛰지 않는다.
   function getCommentBlockChannelId() {
     const seg = location.pathname.split("/").filter(Boolean);
     for (const s of seg) {
@@ -45661,6 +45666,15 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (m) return m[1];
     }
     return "";
+  }
+
+  // 네이티브 사용자 차단/해제 요청 URL. channelId 는 선택 값이라 없으면 비워 보낸다.
+  function buildNativeUserBlockUrl(userHash, channelId = "") {
+    return (
+      "https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/" +
+      `${encodeURIComponent(userHash)}` +
+      `?loungeId=${encodeURIComponent(channelId || "")}`
+    );
   }
 
   // MAIN world 로부터 commentId→user 맵/ready 수신.
@@ -46028,41 +46042,31 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     saveCommentBlocks();
     // 치지직 실제 차단 옵션.
     if (native) {
+      // ⚠ 채널 ID 는 '있으면 보내는 맥락' 이다. 예전에는 못 찾으면 요청 자체를
+      //   건너뛰어, URL 에 채널이 없는 다시보기·클립에서 치지직 차단이 조용히
+      //   빠졌다. 빈 loungeId 로도 차단이 적용되는 것을 실측으로 확인했다.
       const channelId = getCommentBlockChannelId();
-      if (!channelId) {
-        showCommentBlockToast(
-          "치지직 차단은 채널 정보를 못 찾아 건너뛰었습니다(로컬 차단만 적용).",
-        );
-      } else {
-        // ⚠ background fetch 는 페이지 컨텍스트(Origin/Referer/세션)가 달라 403 이 났다.
-        // content.js(ISOLATED world)에서 직접 호출하면 페이지와 동일한 자격으로 요청돼
-        // 통과한다(comm-api.game.naver.com 은 host_permissions 에 있어 CORS 무관).
-        try {
-          const res = await fetch(
-            `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
-              userHash,
-            )}?loungeId=${encodeURIComponent(channelId)}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-            },
-          );
-          const entry = commentBlocks.find((b) => b.userIdHash === userHash);
-          if (res.ok) {
-            if (entry) entry.nativeBlocked = true;
-            saveCommentBlocks();
-            showCommentBlockToast("차단했습니다(치지직 차단 포함)");
-          } else {
-            showCommentBlockToast(
-              `로컬 차단됨. 치지직 차단 실패(status ${res.status})`,
-            );
-          }
-        } catch {
+      // ⚠ background fetch 는 페이지 컨텍스트(Origin/Referer/세션)가 달라 403 이 났다.
+      // content.js(ISOLATED world)에서 직접 호출하면 페이지와 동일한 자격으로 요청돼
+      // 통과한다(comm-api.game.naver.com 은 host_permissions 에 있어 CORS 무관).
+      try {
+        const res = await fetch(buildNativeUserBlockUrl(userHash, channelId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        });
+        const entry = commentBlocks.find((b) => b.userIdHash === userHash);
+        if (res.ok) {
+          if (entry) entry.nativeBlocked = true;
+          saveCommentBlocks();
+          showCommentBlockToast("차단했습니다(치지직 차단 포함)");
+        } else {
           showCommentBlockToast(
-            "로컬 차단됨. 치지직 차단 요청에 실패했습니다.",
+            `로컬 차단됨. 치지직 차단 실패(status ${res.status})`,
           );
         }
+      } catch {
+        showCommentBlockToast("로컬 차단됨. 치지직 차단 요청에 실패했습니다.");
       }
     } else {
       showCommentBlockToast("차단했습니다.");
@@ -56257,45 +56261,38 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "CHEESE_NATIVE_UNBLOCK_USER") {
       const userHash = String(message.userHash || "");
-      const channelId = getCommentBlockChannelId();
-      if (!userHash || !channelId) {
-        sendResponse({ ok: false, reason: "no-channel" });
+      if (!userHash) {
+        sendResponse({ ok: false, reason: "no-hash" });
         return true;
       }
-      fetch(
-        `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
-          userHash,
-        )}?loungeId=${encodeURIComponent(channelId)}`,
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        },
-      )
+      // ⚠ 채널 ID 는 선택 값이다. 못 찾아도 해제 요청은 보낸다(빈 loungeId 로도
+      //   실제 해제가 되는 것을 실측으로 확인했다).
+      const channelId = getCommentBlockChannelId();
+      fetch(buildNativeUserBlockUrl(userHash, channelId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      })
         .then((res) => sendResponse({ ok: res.ok, status: res.status }))
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true; // 비동기 응답
     }
-    // 설정 페이지에서 UID 직접 입력으로 치지직 차단 요청(맥락 없는 전역 차단).
+    // 설정 페이지에서 UID 직접 입력으로 치지직 차단 요청(페이지 맥락 없음).
     // ⚠ 치지직 차단은 content(ISOLATED)에서 페이지와 동일 자격으로 호출해야 통과한다
-    // (background 는 Origin/Referer 불일치로 403). loungeId 는 비워도 200(전역 차단).
+    // (background 는 Origin/Referer 불일치로 403). loungeId 를 비워도 실제 차단이
+    // 적용되는 것을 실측으로 확인했다.
     if (message?.type === "CHEESE_NATIVE_BLOCK_USER") {
       const userHash = String(message.userHash || "");
       if (!userHash) {
         sendResponse({ ok: false, reason: "no-hash" });
         return true;
       }
-      const channelId = getCommentBlockChannelId(); // 있으면 그 맥락, 없으면 빈 값(전역)
-      fetch(
-        `https://comm-api.game.naver.com/nng_main/v1/privateUserBlocks/${encodeURIComponent(
-          userHash,
-        )}?loungeId=${encodeURIComponent(channelId || "")}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-        },
-      )
+      const channelId = getCommentBlockChannelId(); // 있으면 그 맥락, 없으면 빈 값
+      fetch(buildNativeUserBlockUrl(userHash, channelId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      })
         .then((res) => sendResponse({ ok: res.ok, status: res.status }))
         .catch((err) => sendResponse({ ok: false, error: String(err) }));
       return true; // 비동기 응답
