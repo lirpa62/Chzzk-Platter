@@ -229,6 +229,63 @@ async function test(name, run) {
       () => SOURCES.searchLive("봉누도")), /검색 요청 실패/);
   });
 
+  await test("검색 pager는 상세 조회 묶음과 다음 검색 페이지를 이어 읽는다", async () => {
+    const requests = [];
+    const liveChannel = (n) => ({
+      channelId: id(n),
+      channelName: `검색 채널 ${n}`,
+      openLive: true,
+    });
+    await withApi((url) => {
+      requests.push(url);
+      if (url.pathname === "/service/v1/search/channels") {
+        const offset = Number(url.searchParams.get("offset"));
+        const count = offset === 0 ? 30 : offset === 30 ? 2 : 0;
+        return {
+          data: Array.from({ length: count }, (_, index) => ({
+            channel: liveChannel(100 + offset + index),
+          })),
+        };
+      }
+      if (url.pathname === "/service/v1/tag/lives") return { data: [] };
+      const match = url.pathname.match(/\/channels\/([0-9a-f]{32})\/live-detail$/i);
+      assert.ok(match, `예상하지 못한 API: ${url}`);
+      const channelId = match[1];
+      return {
+        status: "OPEN",
+        channel: { channelId, channelName: `상세 ${channelId.slice(-2)}` },
+        liveTitle: "방송",
+      };
+    }, async () => {
+      const pager = SOURCES.createSearchPager("페이지");
+      await pager.loadFirst();
+      assert.equal(pager.rows.length, 12);
+      assert.deepEqual(pager.next, { offset: 0, detailOffset: 12 });
+
+      await pager.loadNext();
+      assert.equal(pager.rows.length, 24);
+      assert.deepEqual(pager.next, { offset: 0, detailOffset: 24 });
+
+      await pager.loadNext();
+      assert.equal(pager.rows.length, 30);
+      assert.deepEqual(pager.next, { offset: 30, detailOffset: 0 });
+
+      await pager.loadNext();
+      assert.equal(pager.rows.length, 32);
+      assert.equal(pager.done, true);
+      assert.equal(new Set(pager.rows.map((item) => item.channelId)).size, 32);
+    });
+    const searchOffsets = requests
+      .filter((url) => url.pathname === "/service/v1/search/channels")
+      .map((url) => Number(url.searchParams.get("offset")));
+    assert.deepEqual(searchOffsets, [0, 0, 0, 30]);
+    assert.equal(
+      requests.filter((url) => url.pathname === "/service/v1/tag/lives").length,
+      1,
+      "태그 검색은 첫 검색 페이지에만 요청해야 한다",
+    );
+  });
+
   await test("배경 중계는 확인된 라이브 커서 키만 허용한다", async () => {
     const background = fs.readFileSync(path.join(__dirname, "../src/background.js"), "utf8");
     const start = background.indexOf("function validMultiviewApiQuery(url) {");

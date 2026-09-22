@@ -34,6 +34,8 @@
     mainHighQuality: true,
     listCache: new Map(),
     livePager: null,
+    searchPager: null,
+    searchKeyword: "",
   };
 
   const esc = (s) =>
@@ -132,7 +134,6 @@
   const getJson = (url) => SOURCES.getJson(url);
   const normalize = (channel, live) => SOURCES.normalize(channel, live);
   const loadFollowing = () => SOURCES.loadFollowing();
-  const search = (keyword) => SOURCES.searchLive(keyword);
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
   // 나눠 돌려준다. 라이브 정보는 팔로잉 목록에서 가져오므로 방송 중인 채널만 남는다.
@@ -149,6 +150,15 @@
     return state.livePager;
   }
 
+  function setupSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!state.searchPager || state.searchKeyword !== query) {
+      state.searchKeyword = query;
+      state.searchPager = SOURCES.createSearchPager(query);
+    }
+    return state.searchPager;
+  }
+
   async function listFor(source, keyword = "") {
     const key = source === "search" ? `search:${keyword}` : source;
     // 전체 라이브는 pager 자체가 rows/cursor/done/TTL을 함께 보관한다. 첫 페이지
@@ -156,6 +166,12 @@
     // 사라지므로 이 source는 pager를 유일한 캐시로 사용한다.
     if (source === "all") {
       const pager = setupLivePager();
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+    }
+    if (source === "search") {
+      const pager = setupSearchPager(keyword);
       await pager.loadFirst();
       if (pager.error && !pager.rows.length) throw pager.error;
       return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
@@ -169,7 +185,7 @@
       const rows =
         source === "following"
           ? await loadFollowing()
-          : await search(keyword);
+          : [];
       sections = rows.length ? [{ id: source, label: "", rows }] : [];
     }
     if (source !== "search") {
@@ -235,9 +251,10 @@
       .join("");
     // 고르기 로직은 평평한 목록을 쓴다.
     box.__rows = sections.flatMap((s) => s.rows);
-    if (source === "all") {
-      if (state.livePager?.error) setLiveLoading(false, true);
-      else requestAnimationFrame(maybeLoadMoreLive);
+    if (source === "all" || source === "search") {
+      const pager = source === "all" ? state.livePager : state.searchPager;
+      if (pager?.error) setPagedLoading(source, false, true);
+      else requestAnimationFrame(maybeLoadMorePaged);
     }
   }
 
@@ -296,7 +313,7 @@
     );
   }
 
-  function setLiveLoading(loading, failed = false) {
+  function setPagedLoading(source, loading, failed = false) {
     const section = $("mvChannelList")?.querySelector(".mv-section");
     if (!section) return;
     section.querySelector(".mv-live-more")?.remove();
@@ -305,7 +322,7 @@
     if (failed) status.type = "button";
     status.className = "mv-live-more";
     status.textContent = failed ? "다음 목록 다시 불러오기" : "다음 방송을 불러오는 중...";
-    if (failed) status.dataset.mvLiveRetry = "1";
+    if (failed) status.dataset.mvPagedRetry = source;
     section.appendChild(status);
   }
 
@@ -314,10 +331,10 @@
     const pager = setupLivePager();
     if (pager.loading || pager.done) return;
     const before = pager.rows.length;
-    setLiveLoading(true);
+    setPagedLoading("all", true);
     await pager.loadNext();
     if (state.source !== "all" || pager !== state.livePager) return;
-    setLiveLoading(false, Boolean(pager.error));
+    setPagedLoading("all", false, Boolean(pager.error));
     if (pager.error) return;
     const rows = pager.rows;
     const added = rows.slice(before);
@@ -334,6 +351,37 @@
     if (!box || state.source !== "all") return;
     const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
     if (remaining <= LIVE_LOAD_THRESHOLD_PX) void loadMoreLive();
+  }
+
+  async function loadMoreSearch() {
+    if (state.source !== "search") return;
+    const pager = state.searchPager;
+    if (!pager || pager.loading || pager.done) return;
+    const before = pager.rows.length;
+    setPagedLoading("search", true);
+    await pager.loadNext();
+    if (state.source !== "search" || pager !== state.searchPager) return;
+    setPagedLoading("search", false, Boolean(pager.error));
+    if (pager.error) return;
+    const added = pager.rows.slice(before);
+    if (!added.length) return;
+    const box = $("mvChannelList");
+    const cards = box.querySelector(".mv-section .mv-cards");
+    const picked = new Set(state.chosen.map((c) => c.channelId));
+    cards?.insertAdjacentHTML("beforeend", added.map((row) => card(row, picked)).join(""));
+    box.__rows = pager.rows;
+  }
+
+  function maybeLoadMorePaged() {
+    if (state.source === "all") {
+      maybeLoadMoreLive();
+      return;
+    }
+    if (state.source !== "search") return;
+    const box = $("mvChannelList");
+    if (!box) return;
+    const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (remaining <= LIVE_LOAD_THRESHOLD_PX) void loadMoreSearch();
   }
 
   // ── 고른 채널 ──────────────────────────────────────────────────────────
@@ -505,10 +553,14 @@
       return;
     }
     if (event.target.closest?.("#mvStart")) void start();
-    if (event.target.closest?.("[data-mv-live-retry]")) void loadMoreLive();
+    const retry = event.target.closest?.("[data-mv-paged-retry]");
+    if (retry) {
+      if (retry.dataset.mvPagedRetry === "search") void loadMoreSearch();
+      else void loadMoreLive();
+    }
   });
 
-  $("mvChannelList")?.addEventListener("scroll", maybeLoadMoreLive, { passive: true });
+  $("mvChannelList")?.addEventListener("scroll", maybeLoadMorePaged, { passive: true });
 
   let searchTimer = 0;
   $("mvSearch")?.addEventListener("input", () => {

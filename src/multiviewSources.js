@@ -17,6 +17,7 @@
   const LIVE_CACHE_TTL_MS = 20000;
   // 검색 결과 중 방송 정보를 확인할 최대 채널 수(채널마다 요청이 하나씩 생긴다).
   const SEARCH_DETAIL_MAX = 12;
+  const SEARCH_PAGE_SIZE = 30;
 
   async function getJson(url) {
     const reply = await chrome.runtime.sendMessage({
@@ -232,16 +233,30 @@
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 지금 방송 중인 채널
   //   이름을 정확히 넣어도 0건이 온다(실측) — 방송 제목만 훑는 것으로 보인다.
   //   대신 이 응답에는 방송 정보가 없어 live-detail 로 채운다.
-  async function searchLiveChannels(keyword) {
+  function normalizeSearchCursor(value) {
+    const offset = Number(value?.offset);
+    const detailOffset = Number(value?.detailOffset);
+    return {
+      offset: Number.isSafeInteger(offset) && offset >= 0 ? offset : 0,
+      detailOffset: Number.isSafeInteger(detailOffset) && detailOffset >= 0
+        ? detailOffset
+        : 0,
+    };
+  }
+
+  async function searchLiveChannelsPage(keyword, cursor = null) {
+    const { offset, detailOffset } = normalizeSearchCursor(cursor);
     const c = await getJson(
-      `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
+      `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=${offset}&size=${SEARCH_PAGE_SIZE}`,
     );
     const rows = Array.isArray(c?.data) ? c.data : [];
-    const channels = rows
+    const liveChannels = rows
       .map((r) => r?.channel)
-      .filter((ch) => ch?.channelId && ch.openLive === true)
-      .slice(0, SEARCH_DETAIL_MAX);
-    if (!channels.length) return [];
+      .filter((ch) => ch?.channelId && ch.openLive === true);
+    const channels = liveChannels.slice(
+      detailOffset,
+      detailOffset + SEARCH_DETAIL_MAX,
+    );
     const detailed = await Promise.all(
       channels.map(async (ch) => {
         try {
@@ -255,7 +270,17 @@
         }
       }),
     );
-    return detailed.filter(Boolean);
+    const nextDetailOffset = detailOffset + SEARCH_DETAIL_MAX;
+    const next = nextDetailOffset < liveChannels.length
+      ? { offset, detailOffset: nextDetailOffset }
+      : rows.length === SEARCH_PAGE_SIZE
+        ? { offset: offset + SEARCH_PAGE_SIZE, detailOffset: 0 }
+        : null;
+    return { rows: detailed.filter(Boolean), next };
+  }
+
+  async function searchLiveChannels(keyword) {
+    return (await searchLiveChannelsPage(keyword)).rows;
   }
 
   async function searchLiveTags(keyword) {
@@ -298,20 +323,112 @@
     return merged;
   }
 
-  async function searchLive(keyword) {
+  async function searchLivePage(keyword, cursor = null) {
     const query = String(keyword || "").trim();
-    if (!query) return [];
+    if (!query) return { rows: [], next: null };
+    const normalizedCursor = normalizeSearchCursor(cursor);
+    const includeTags = normalizedCursor.offset === 0 && normalizedCursor.detailOffset === 0;
     const results = await Promise.allSettled([
-      searchLiveChannels(query),
-      searchLiveTags(query),
+      searchLiveChannelsPage(query, normalizedCursor),
+      includeTags ? searchLiveTags(query) : Promise.resolve([]),
     ]);
     if (results.every((result) => result.status === "rejected")) {
       throw new Error("검색 요청 실패");
     }
-    return mergeSearchRows(
-      results[0].status === "fulfilled" ? results[0].value : [],
-      results[1].status === "fulfilled" ? results[1].value : [],
-    );
+    const channelPage = results[0].status === "fulfilled"
+      ? results[0].value
+      : { rows: [], next: null };
+    return {
+      rows: mergeSearchRows(
+        Array.isArray(channelPage?.rows) ? channelPage.rows : [],
+        results[1].status === "fulfilled" ? results[1].value : [],
+      ),
+      next: channelPage?.next || null,
+    };
+  }
+
+  function createSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    let rows = [];
+    let next = query ? { offset: 0, detailOffset: 0 } : null;
+    let loading = false;
+    let done = !query;
+    let error = null;
+    let generation = 0;
+    let pending = null;
+
+    const snapshot = () => ({
+      rows: [...rows],
+      next: next ? { ...next } : null,
+      loading,
+      done,
+      error,
+      generation,
+    });
+
+    const request = async (cursor, replace) => {
+      const requestGeneration = ++generation;
+      loading = true;
+      error = null;
+      const before = replace ? [] : rows;
+      try {
+        let current = cursor;
+        let merged = before;
+        do {
+          const page = await searchLivePage(query, current);
+          if (requestGeneration !== generation) return snapshot();
+          const previousLength = merged.length;
+          merged = mergeSearchRows(merged, page.rows);
+          current = page.next;
+          // 빈 검색 페이지나 앞선 결과와만 겹친 페이지는 사용자가 빈 목록을 보지
+          // 않도록, 새 결과가 나올 때까지 다음 검증된 offset을 이어서 읽는다.
+          if (merged.length > previousLength || !current) break;
+        } while (current);
+        rows = merged;
+        next = current;
+        done = next === null;
+      } catch (reason) {
+        if (requestGeneration === generation) error = reason;
+      } finally {
+        if (requestGeneration === generation) {
+          loading = false;
+          pending = null;
+        }
+      }
+      return snapshot();
+    };
+
+    return {
+      get rows() { return [...rows]; },
+      get next() { return next ? { ...next } : null; },
+      get loading() { return loading; },
+      get done() { return done; },
+      get error() { return error; },
+      get generation() { return generation; },
+      snapshot,
+      loadFirst(force = false) {
+        if (loading && pending) return pending;
+        if (!force && rows.length) return Promise.resolve(snapshot());
+        if (!query) return Promise.resolve(snapshot());
+        pending = request({ offset: 0, detailOffset: 0 }, true);
+        return pending;
+      },
+      loadNext() {
+        if (loading && pending) return pending;
+        if (done || !next) return Promise.resolve(snapshot());
+        pending = request(next, false);
+        return pending;
+      },
+      invalidate() {
+        generation += 1;
+        loading = false;
+        pending = null;
+      },
+    };
+  }
+
+  async function searchLive(keyword) {
+    return (await searchLivePage(keyword)).rows;
   }
 
   // 전용 팔로잉을 사이드바와 같은 구분(즐겨찾기 → 그룹 → 구독 → 태그 → 친밀도 →
@@ -567,8 +684,11 @@
     loadFollowing,
     loadLive,
     searchLiveChannels,
+    searchLiveChannelsPage,
     searchLiveTags,
     mergeSearchRows,
+    searchLivePage,
+    createSearchPager,
     searchLive,
     loadCustomFollowing,
     loadCustomSections,
