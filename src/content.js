@@ -52970,20 +52970,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   //  - 기본 플레이어: playerDisableHidden 이 꺼져 있으면, 숨김으로 표시된 버튼의 플래그를
   //    false 로 되돌려 기능·단축키를 살린다(숨김은 CSS 가 담당).
   //  - 팝업 프레임: 표시 설정이 별도라, '기능까지 끄기'가 켜졌을 때만 플래그를 세운다.
+  //  - 멀티뷰 영상 프레임: 지원 버튼의 기능은 유지하고 표시만 멀티뷰 클래스로 정한다.
   function getEffectiveFeatureFlags() {
     const flags = { ...featureFlags };
     // ⚠ 멀티뷰 칸은 팝업 플레이어와 최상위 UI 억제만 공유한다. 버튼 표시는 팝업
     //   전용 설정(popupPlayerBtn*)이 아니라 멀티뷰 전용 설정을 따른다.
     if (IS_MULTIVIEW_CHAT_FRAME) return flags;
     if (IS_MULTIVIEW_FRAME) {
-      // 멀티뷰에서 끈 버튼은 기능까지 끈다(작은 칸에서 단축키만 남길 이유가 없다).
-      if (!multiviewBtnMixer) flags.audioMixer = true;
-      if (!multiviewBtnFilter) flags.videoFilter = true;
-      if (!multiviewBtnSync) flags.liveSync = true;
-      if (!multiviewBtnStats) flags.streamStats = true;
-      if (!multiviewBtnScreenshot) flags.screenshotButton = true;
-      // 되감기/앞으로는 치지직 컨트롤에서 한 쌍이라 둘 다 꺼야 기능을 끈다.
-      if (!multiviewBtnRewind && !multiviewBtnForward) flags.liveRewind = true;
+      // 멀티뷰 설정은 버튼 표시 설정이다. 일반 플레이어의 숨김값을 상속하면
+      // MAIN world가 버튼을 만들지 못하므로 지원 기능만 명시적으로 되살린다.
+      flags.audioMixer = false;
+      flags.videoFilter = false;
+      flags.liveSync = false;
+      flags.streamStats = false;
+      flags.screenshotButton = false;
+      // 되감기/앞으로는 한 기능을 공유하고 각각의 표시는 멀티뷰 CSS가 정한다.
+      flags.liveRewind = false;
       return flags;
     }
     if (IS_POPUP_PLAYER_FRAME) {

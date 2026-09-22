@@ -246,10 +246,8 @@ console.log("\n[멀티뷰] 팝업 설정이 멀티뷰 칸에 새지 않는다");
       popupPlayerDisableHidden: true,
     }),
   );
-  ok(f.audioMixer === true, "멀티뷰는 멀티뷰 설정대로 믹서 OFF");
-  ok(f.videoFilter === true, "멀티뷰는 멀티뷰 설정대로 필터 OFF");
-  // ⚠ 멀티뷰는 전역 숨김을 그대로 상속한다(현재 동작). 이번 수정 대상이 아니라
-  //   현 상태를 고정만 해 둔다. 팝업 수정이 멀티뷰로 새면 이 값이 바뀐다.
+  ok(f.audioMixer === false, "멀티뷰는 믹서 버튼 숨김과 기능을 분리한다");
+  ok(f.videoFilter === false, "멀티뷰는 필터 버튼 숨김과 기능을 분리한다");
   const on = evaluate(
     base({
       IS_MULTIVIEW_FRAME: true,
@@ -257,7 +255,7 @@ console.log("\n[멀티뷰] 팝업 설정이 멀티뷰 칸에 새지 않는다");
       multiviewBtnMixer: true,
     }),
   );
-  ok(on.audioMixer === true, "멀티뷰는 전역 숨김을 그대로 따른다(기존 동작)");
+  ok(on.audioMixer === false, "멀티뷰 믹서는 일반 플레이어 숨김을 상속하지 않는다");
   // 멀티뷰 채팅 칸은 전역 그대로.
   const chat = evaluate(
     base({
