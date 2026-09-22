@@ -229,8 +229,7 @@
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 지금 방송 중인 채널
   //   이름을 정확히 넣어도 0건이 온다(실측) — 방송 제목만 훑는 것으로 보인다.
   //   대신 이 응답에는 방송 정보가 없어 live-detail 로 채운다.
-  async function searchLive(keyword) {
-    if (!String(keyword || "").trim()) return [];
+  async function searchLiveChannels(keyword) {
     const c = await getJson(
       `${API}/service/v1/search/channels?keyword=${encodeURIComponent(keyword)}&offset=0&size=30`,
     );
@@ -254,6 +253,62 @@
       }),
     );
     return detailed.filter(Boolean);
+  }
+
+  async function searchLiveTags(keyword) {
+    const tag = String(keyword || "").trim().replace(/^#/, "").trim();
+    if (!tag) return [];
+    const url = new URL(`${API}/service/v1/tag/lives`);
+    url.searchParams.set("size", "20");
+    url.searchParams.set("sortType", "POPULAR");
+    url.searchParams.set("tags", tag);
+    const c = await getJson(url.toString());
+    const rows = Array.isArray(c?.data) ? c.data : [];
+    return rows
+      .filter((row) => HASH_RE.test(String(row?.channel?.channelId || "")) &&
+        typeof row?.liveTitle === "string")
+      .map((row) => normalize(row.channel, row));
+  }
+
+  function mergeSearchRows(channels, tags) {
+    const merged = [];
+    const index = new Map();
+    for (const row of [...channels, ...tags]) {
+      const id = String(row?.channelId || "").toLowerCase();
+      if (!HASH_RE.test(id)) continue;
+      const previous = index.get(id);
+      if (!previous) {
+        const entry = { ...row, channelId: id };
+        index.set(id, entry);
+        merged.push(entry);
+        continue;
+      }
+      for (const field of ["channelName", "channelImageUrl", "liveTitle", "category", "liveImageUrl"]) {
+        if (!previous[field] && row[field]) previous[field] = row[field];
+      }
+      if (!previous.viewers && row.viewers) previous.viewers = row.viewers;
+      if (!previous.adult && row.adult) previous.adult = true;
+      if ((!Array.isArray(previous.tags) || !previous.tags.length) && row.tags?.length) {
+        previous.tags = [...row.tags];
+      }
+    }
+    return merged;
+  }
+
+  async function searchLive(keyword) {
+    const query = String(keyword || "").trim();
+    if (!query) return [];
+    const results = await Promise.allSettled([
+      searchLiveChannels(query),
+      searchLiveTags(query),
+    ]);
+    if (results.every((result) => result.status === "rejected")) {
+      throw new Error("검색 요청 실패");
+    }
+    return mergeSearchRows(
+      results[0].status === "fulfilled" ? results[0].value : [],
+      results[1].status === "fulfilled" ? results[1].value : [],
+    );
   }
 
   // 전용 팔로잉을 사이드바와 같은 구분(즐겨찾기 → 그룹 → 구독 → 태그 → 친밀도 →
@@ -508,6 +563,9 @@
     createLivePager,
     loadFollowing,
     loadLive,
+    searchLiveChannels,
+    searchLiveTags,
+    mergeSearchRows,
     searchLive,
     loadCustomFollowing,
     loadCustomSections,
