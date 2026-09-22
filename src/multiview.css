@@ -1799,7 +1799,9 @@ button.mv-live-more {
 .mv-mixer-gain {
   grid-template-columns: 78px minmax(0, 1fr) 42px;
 }
+/* 게인은 볼륨(초록)과 구분되게 보라로 둔다 — 서로 다른 값이라 색으로 가른다. */
 .mv-mixer-gain input {
+  accent-color: #a97bff;
   min-width: 0;
   width: 100%;
 }
@@ -2137,4 +2139,61 @@ button.mv-live-more {
 :root[data-theme="dark"] .mv-cell-retry.is-primary:hover,
 :root[data-theme="dark"] .mv-vol-enable {
   color: #05170f;
+}
+
+/* ── 패널 스크롤바 ─────────────────────────────────────────────────────────
+   다시보기 패널(.cheese-peak-body 등)과 같은 모양으로 맞춘다. Firefox 는
+   ::-webkit-* 를 모르므로 scrollbar-color 로 같은 색을 준다. */
+.mv-channel-list,
+.mv-chosen,
+.mv-pop-panel,
+.mv-quick-body,
+.mv-quick-add {
+  scrollbar-color: rgba(37, 223, 151, 0.88) rgba(255, 255, 255, 0.08);
+  scrollbar-width: thin;
+}
+.mv-channel-list::-webkit-scrollbar,
+.mv-chosen::-webkit-scrollbar,
+.mv-pop-panel::-webkit-scrollbar,
+.mv-quick-body::-webkit-scrollbar,
+.mv-quick-add::-webkit-scrollbar {
+  width: 8px;
+}
+.mv-channel-list::-webkit-scrollbar-track,
+.mv-chosen::-webkit-scrollbar-track,
+.mv-pop-panel::-webkit-scrollbar-track,
+.mv-quick-body::-webkit-scrollbar-track,
+.mv-quick-add::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 8px 0;
+}
+.mv-channel-list::-webkit-scrollbar-thumb,
+.mv-chosen::-webkit-scrollbar-thumb,
+.mv-pop-panel::-webkit-scrollbar-thumb,
+.mv-quick-body::-webkit-scrollbar-thumb,
+.mv-quick-add::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 0.88),
+    rgba(22, 143, 92, 0.86)
+  );
+  border: 2px solid rgba(18, 20, 24, 0.96);
+  border-radius: 999px;
+}
+.mv-channel-list::-webkit-scrollbar-thumb:hover,
+.mv-chosen::-webkit-scrollbar-thumb:hover,
+.mv-pop-panel::-webkit-scrollbar-thumb:hover,
+.mv-quick-body::-webkit-scrollbar-thumb:hover,
+.mv-quick-add::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(37, 223, 151, 1),
+    rgba(22, 143, 92, 1)
+  );
+}
+
+/* 체크박스 체크 표시. 브라우저 기본 파랑 대신 브랜드 초록으로. */
+input[type="checkbox"] {
+  accent-color: var(--popup-brand, #00c73c);
 }
