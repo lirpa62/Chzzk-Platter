@@ -99,8 +99,8 @@ console.log("\n[따라잡기] 멀티뷰 버튼 숨김과 기능 플래그를 분
     "멀티뷰 따라잡기 버튼은 기본으로 꺼져 있다",
   );
   ok(
-    /flags\.liveSync = false;/.test(content),
-    "멀티뷰에서는 일반 숨김과 관계없이 기능 플래그를 유지한다",
+    /flags\.liveSync = hidden\(multiviewBtnSync\);/.test(content),
+    "멀티뷰 따라잡기 플래그가 전용 버튼 설정을 따른다",
   );
   const css = fs.readFileSync(path.join(root, "src/content.css"), "utf8");
   ok(
@@ -292,7 +292,9 @@ console.log("\n[지연 표시] 화질 전환 중의 0 만 과도 상태로 다�
   ok(/"전환 중"/.test(fn), "전환 중에는 숫자 대신 안내를 보여 준다");
   // 통계 캐시를 통째로 지우면 해상도·비트레이트까지 '대기 중' 으로 깜빡인다.
   ok(
-    !/statsByChannel\.delete|statsByChannel\.clear/.test(watch),
+    !/statsByChannel\.delete|statsByChannel\.clear/.test(
+      watch.slice(watch.indexOf("function setMain("), watch.indexOf("function promoteMainAudio(")),
+    ),
     "메인을 바꿔도 통계 캐시를 지우지 않는다",
   );
 }

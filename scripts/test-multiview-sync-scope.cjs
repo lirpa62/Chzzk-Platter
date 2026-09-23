@@ -222,8 +222,13 @@ const ALL = ["a", "b", "c", "d"];
   // 보정값 rebase 는 전체 채널을 대상으로 한다(상대 기준 보존).
   assert.match(
     ref,
-    /SYNC\.rebaseOffsets\([\s\S]{0,120}state\.chosen\.map/,
-    "rebase 대상이 전체 채널이 아니다",
+    /rebaseSyncOffsets\(next\)/,
+    "기준 변경에서 보정값을 재계산하지 않는다",
+  );
+  assert.match(
+    sliceFn("rebaseSyncOffsets"),
+    /ids = state\.chosen\.map\([\s\S]{0,120}SYNC\.rebaseOffsets\(/,
+    "rebase 기본 대상이 전체 채널이 아니다",
   );
 
   // 선택 해제 시 기준을 놓는다.
@@ -457,6 +462,8 @@ const ALL = ["a", "b", "c", "d"];
     "syncSeekAt",
     "syncRetryAt",
     "syncRates",
+    "freshSyncChannels",
+    "syncGroupForChannel",
     body,
   )(
     state,
@@ -468,6 +475,8 @@ const ALL = ["a", "b", "c", "d"];
     maps.syncSeekAt,
     maps.syncRetryAt,
     maps.syncRates,
+    new Set(["b"]),
+    () => null,
   );
 
   // replaceChannel 이 교체 직전에 하는 판정(원본과 같은 식).
@@ -541,7 +550,7 @@ const ALL = ["a", "b", "c", "d"];
   const replaceFn = sliceFn("replaceChannel");
   assert.match(
     replaceFn,
-    /clearChannelSync\(oldChannelId, true\)/,
+    /clearRemovedChannel\(oldChannelId\)/,
     "교체가 옛 채널의 보정값을 지우지 않는다",
   );
   assert.match(
@@ -549,10 +558,10 @@ const ALL = ["a", "b", "c", "d"];
     /inSyncScope\(oldChannelId\)/,
     "교체가 선택 여부를 보지 않는다",
   );
-  assert.doesNotMatch(
+  assert.match(
     replaceFn,
-    /manualOffsets\[id\] =/,
-    "교체가 새 채널에 보정값을 물려준다",
+    /manualOffsets\[id\] = 0/,
+    "교체한 채널의 보정값을 0으로 시작하지 않는다",
   );
 }
 
@@ -703,6 +712,7 @@ const ALL = ["a", "b", "c", "d"];
       "releaseSyncOwnership",
       "selectSyncReference",
       "renderSync",
+      "refreshSyncPanel",
       "$",
       "CSS",
       wire(src) + "\nreturn setSyncSelected;",
@@ -735,6 +745,7 @@ const ALL = ["a", "b", "c", "d"];
       () => {
         calls.render += 1;
       },
+      () => {},
       () => null,
       { escape: (v) => v },
     );
