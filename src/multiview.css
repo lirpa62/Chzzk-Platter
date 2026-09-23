@@ -1024,13 +1024,40 @@ button.mv-live-more {
 .mv-chat-status .mv-cell-status-text {
   color: var(--popup-muted, #9aa1a9);
 }
-.mv-chat-title {
+.mv-chat-title-wrap {
   flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+}
+.mv-chat-title {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
   font-size: 12px;
+  max-width: 100%;
   overflow: hidden;
+  padding: 3px 14px 3px 0;
+  position: relative;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mv-chat-title::after { content: "⌄"; margin-left: 6px; }
+.mv-chat-title-list {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
+  left: 0;
+  max-height: 240px;
+  min-width: 170px;
+  overflow-y: auto;
+  position: absolute;
+  top: 100%;
+  z-index: 10;
+}
+.mv-chat-title-list .mv-pop-option { width: 100%; }
 .mv-watch-empty {
   padding: 40px 16px;
 }
@@ -1129,9 +1156,13 @@ button.mv-live-more {
 }
 .mv-quick-head {
   align-items: center;
+  cursor: grab;
   display: flex;
   gap: 8px;
+  touch-action: none;
 }
+.mv-quick-head:active { cursor: grabbing; }
+.mv-quick-head button { cursor: pointer; }
 .mv-quick-head strong {
   font-size: 13px;
 }
@@ -1760,6 +1791,7 @@ button.mv-live-more {
   gap: 8px;
   min-width: min(380px, calc(100vw - 24px));
   padding: 10px;
+  scrollbar-gutter: stable;
 }
 .mv-vol-channel {
   border: 1px solid var(--popup-border, #34383d);

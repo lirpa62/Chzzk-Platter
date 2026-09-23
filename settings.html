@@ -7516,6 +7516,16 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
+                  <span class="settings-item-name">끈 버튼은 단축키도 끄기</span>
+                  <span class="settings-item-desc">멀티뷰에서 표시하지 않는 버튼의 기능과 단축키도 끕니다. 되감기 바가 켜져 있으면 방향키 탐색은 유지됩니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-disable-hidden />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
                   <span class="settings-item-name"
                     >오디오 믹서 버튼 (Shift + A)</span
                   >
@@ -7544,7 +7554,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">실시간 따라잡기 버튼</span>
+                  <span class="settings-item-name">실시간 따라잡기 버튼 (Shift + F)</span>
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 실시간 따라잡기 버튼을 표시합니다</span
                   >
@@ -7568,7 +7578,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">스트림 정보 버튼</span>
+                  <span class="settings-item-name">스트림 정보 버튼 (Shift + I)</span>
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 스트림 정보 버튼을 표시합니다</span
                   >
@@ -7580,7 +7590,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">스크린샷 버튼</span>
+                  <span class="settings-item-name">스크린샷 버튼 (Shift + S)</span>
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 스크린샷 버튼을 표시합니다</span
                   >
@@ -7611,6 +7621,31 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-btn-forward />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 패널">
+            <h2 class="settings-group-title">멀티뷰 패널</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채널 관리 상태 기억</span>
+                  <span class="settings-item-desc">패널을 다시 열 때 마지막 탭과 검색어를 복원합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-remember-quick-state />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">싱크 진단 도구 표시</span>
+                  <span class="settings-item-desc">싱크 문제 분석을 위한 기록과 내보내기 도구를 표시합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-sync-diagnostics-ui />
                   <i aria-hidden="true"></i>
                 </label>
               </li>

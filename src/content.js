@@ -1167,6 +1167,7 @@
   const MULTIVIEW_BTN_SHOT_KEY = "cheeseMultiviewBtnScreenshot";
   const MULTIVIEW_BTN_REWIND_KEY = "cheeseMultiviewBtnRewind";
   const MULTIVIEW_BTN_FORWARD_KEY = "cheeseMultiviewBtnForward";
+  const MULTIVIEW_DISABLE_HIDDEN_KEY = "cheeseMultiviewDisableHidden";
   // 기본값: 오디오 믹서만 켜고 나머지는 끈다(작은 칸에 버튼이 많으면 영상을 가린다).
   let multiviewBtnMixer = true;
   let multiviewBtnFilter = false;
@@ -1176,6 +1177,7 @@
   let multiviewBtnScreenshot = false;
   let multiviewBtnRewind = false;
   let multiviewBtnForward = false;
+  let multiviewDisableHidden = false;
   let multiviewSettingsLoaded = false;
   const MULTIVIEW_SETTING_KEYS = [
     MULTIVIEW_BTN_MIXER_KEY,
@@ -1186,6 +1188,7 @@
     MULTIVIEW_BTN_SHOT_KEY,
     MULTIVIEW_BTN_REWIND_KEY,
     MULTIVIEW_BTN_FORWARD_KEY,
+    MULTIVIEW_DISABLE_HIDDEN_KEY,
   ];
 
   function readMultiviewSettings(data) {
@@ -1197,6 +1200,7 @@
     multiviewBtnScreenshot = data?.[MULTIVIEW_BTN_SHOT_KEY] === true;
     multiviewBtnRewind = data?.[MULTIVIEW_BTN_REWIND_KEY] === true;
     multiviewBtnForward = data?.[MULTIVIEW_BTN_FORWARD_KEY] === true;
+    multiviewDisableHidden = data?.[MULTIVIEW_DISABLE_HIDDEN_KEY] === true;
   }
 
   // 지금 메모리에 있는 멀티뷰 설정값(바뀌지 않은 키를 되돌려 줄 때 쓴다).
@@ -1218,6 +1222,8 @@
         return multiviewBtnRewind;
       case MULTIVIEW_BTN_FORWARD_KEY:
         return multiviewBtnForward;
+      case MULTIVIEW_DISABLE_HIDDEN_KEY:
+        return multiviewDisableHidden;
       default:
         return undefined;
     }
@@ -52994,13 +53000,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (IS_MULTIVIEW_FRAME) {
       // 멀티뷰 설정은 버튼 표시 설정이다. 일반 플레이어의 숨김값을 상속하면
       // MAIN world가 버튼을 만들지 못하므로 지원 기능만 명시적으로 되살린다.
-      flags.audioMixer = false;
-      flags.videoFilter = false;
-      flags.liveSync = false;
-      flags.streamStats = false;
-      flags.screenshotButton = false;
+      const hidden = (visible) => multiviewDisableHidden && !visible;
+      flags.audioMixer = hidden(multiviewBtnMixer);
+      flags.videoFilter = hidden(multiviewBtnFilter);
+      flags.liveSync = hidden(multiviewBtnSync);
+      flags.streamStats = hidden(multiviewBtnStats);
+      flags.screenshotButton = hidden(multiviewBtnScreenshot);
       // 되감기/앞으로는 한 기능을 공유하고 각각의 표시는 멀티뷰 CSS가 정한다.
-      flags.liveRewind = false;
+      flags.liveRewind = hidden(multiviewBtnRewind || multiviewBtnForward);
       return flags;
     }
     if (IS_POPUP_PLAYER_FRAME) {

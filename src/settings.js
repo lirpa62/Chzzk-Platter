@@ -164,6 +164,11 @@
     "cheeseMultiviewBtnScreenshot",
     "cheeseMultiviewBtnRewind",
     "cheeseMultiviewBtnForward",
+    "cheeseMultiviewDisableHidden",
+    "cheeseMultiviewRememberQuickState",
+    "cheeseMultiviewSyncDiagnosticsUi",
+    "cheeseMultiviewQuickState",
+    "cheeseMultiviewQuickPosition",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -5016,6 +5021,9 @@
     ["[data-multiview-btn-screenshot]", "cheeseMultiviewBtnScreenshot", false],
     ["[data-multiview-btn-rewind]", "cheeseMultiviewBtnRewind", false],
     ["[data-multiview-btn-forward]", "cheeseMultiviewBtnForward", false],
+    ["[data-multiview-disable-hidden]", "cheeseMultiviewDisableHidden", false],
+    ["[data-multiview-remember-quick-state]", "cheeseMultiviewRememberQuickState", false],
+    ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;

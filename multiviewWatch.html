@@ -253,7 +253,12 @@
       ></div>
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
-          <span class="mv-chat-title" id="mvChatTitle"></span>
+          <div class="mv-chat-title-wrap" id="mvChatTitleWrap">
+            <button type="button" class="mv-chat-title" id="mvChatTitle"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList"></button>
+            <div class="mv-chat-title-list" id="mvChatTitleList" role="listbox"
+              aria-label="채팅 채널" hidden></div>
+          </div>
           <button
             type="button"
             class="mv-chat-follow"

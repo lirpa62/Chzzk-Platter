@@ -660,6 +660,24 @@
     );
   }
 
+  function closeChatSelector() {
+    $("mvChatTitleList").hidden = true;
+    $("mvChatTitle").setAttribute("aria-expanded", "false");
+  }
+
+  function toggleChatSelector() {
+    const list = $("mvChatTitleList");
+    if (!list.hidden) return closeChatSelector();
+    closePopovers(null);
+    closeQuick();
+    list.innerHTML = state.chosen.map((channel) => optionRow(
+      channel.channelId, channel.channelName,
+      channel.channelId === state.chatChannelId, "data-mv-set-chat",
+    )).join("");
+    list.hidden = false;
+    $("mvChatTitle").setAttribute("aria-expanded", "true");
+  }
+
   function renderTopbar() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     $("mvMainValue").textContent = channelName(state.mainId);
@@ -667,6 +685,12 @@
     $("mvSideValue").textContent = SIDE_LABEL[state.chatSide] || "-";
     $("mvLayoutValue").textContent = layout?.label || "-";
     $("mvChatTitle").textContent = channelName(state.chatChannelId) + " 채팅";
+    if (!$("mvChatTitleList").hidden) {
+      $("mvChatTitleList").innerHTML = state.chosen.map((channel) => optionRow(
+        channel.channelId, channel.channelName,
+        channel.channelId === state.chatChannelId, "data-mv-set-chat",
+      )).join("");
+    }
 
     $("mvMainPanel").innerHTML = state.chosen
       .map((c) =>
@@ -1104,6 +1128,17 @@
   let syncNotice = "";
   let syncDiagnosticsStartedAt = 0;
   let syncDiagnosticsNotice = "";
+  let syncDiagnosticsUi = false;
+  void chrome.storage?.local?.get("cheeseMultiviewSyncDiagnosticsUi")?.then((data) => {
+    syncDiagnosticsUi = data.cheeseMultiviewSyncDiagnosticsUi === true;
+    refreshSyncPanel();
+  }).catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local" || !changes.cheeseMultiviewSyncDiagnosticsUi) return;
+    syncDiagnosticsUi = changes.cheeseMultiviewSyncDiagnosticsUi.newValue === true;
+    if (!syncDiagnosticsUi) setSyncDiagnosticsEnabled(false);
+    refreshSyncPanel();
+  });
 
   function syncChannelName(channelId) {
     return state.chosen.find((channel) => channel.channelId === channelId)?.channelName || "";
@@ -1734,6 +1769,7 @@
     notice.hidden = !syncNotice;
     const diagnostics = panel.querySelector(".mv-sync-diagnostics");
     if (!diagnostics) return false;
+    diagnostics.hidden = !syncDiagnosticsUi;
     const elapsed = syncDiagnosticsStartedAt
       ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
     const status = state.sync.diagnosticsEnabled
@@ -2089,7 +2125,7 @@
       `${esc(syncNotice)}</p>` +
       `<div class="mv-sync-list">${rows}</div>` +
       `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다. 채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
-      `<section class="mv-sync-diagnostics" aria-label="싱크 진단">` +
+      `<section class="mv-sync-diagnostics" aria-label="싱크 진단"${syncDiagnosticsUi ? "" : " hidden"}>` +
       `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
       `<label><input type="checkbox" id="mvSyncDiagnostics"` +
       `${state.sync.diagnosticsEnabled ? " checked" : ""}> 싱크 진단 기록</label></div>` +
@@ -2219,11 +2255,17 @@
 
   function closePopovers(except) {
     closeMixerPresetPicker();
+    closeChatSelector();
     for (const pop of document.querySelectorAll("[data-mv-pop]")) {
       const name = pop.dataset.mvPop;
       if (name === except) continue;
       // 통계 패널이 닫히면 6칸에 계속 물어볼 이유가 없다.
       if (name === "stats") stopStatsPolling();
+      if (name === "volume" && !pop.querySelector(".mv-pop-panel")?.hidden) {
+        mixerOpen.clear();
+        mixerConfirm.clear();
+        closeMixerPresetPicker();
+      }
       pop
         .querySelector("[data-mv-pop-toggle]")
         ?.setAttribute("aria-expanded", "false");
@@ -2487,6 +2529,7 @@
   //   빠진 칸만 지우고 배치를 새 채널 수에 맞는 것으로 바꾼다.
   let quickCandidates = null;
   const quickSize = { width: null, height: null };
+  const quickPosition = { left: null, top: null };
   const quickResizeMinWidth = 420;
   const quickResizeMinHeight = 260;
 
@@ -2505,6 +2548,15 @@
       quickSize.height = Math.min(maxHeight, Math.max(Math.min(quickResizeMinHeight, maxHeight), quickSize.height));
       panel.style.height = `${quickSize.height}px`;
     }
+    if (quickPosition.left !== null) {
+      const width = panel.getBoundingClientRect().width;
+      const height = panel.getBoundingClientRect().height;
+      quickPosition.left = Math.max(0, Math.min(bounds.width - width, quickPosition.left));
+      quickPosition.top = Math.max(0, Math.min(bounds.height - height, quickPosition.top));
+      panel.style.left = `${quickPosition.left}px`;
+      panel.style.top = `${quickPosition.top}px`;
+      panel.style.transform = "none";
+    }
   }
 
   // replaceChannelId 를 주면 '교체 모드' 로 연다(고른 채널이 그 자리를 대신한다).
@@ -2519,6 +2571,15 @@
     // 헤더 팝오버와 채널 관리는 동시에 떠 있지 않는다(둘 다 화면 위를 덮는다).
     // ⚠ closeQuick 은 숨기기만 하므로 여기서 불러도 되돌아오지 않는다(재귀 없음).
     closePopovers(null);
+    if (!replaceChannelId && !quickRememberState) {
+      quickSource = "following";
+      quickKeyword = "";
+      quickFolder = "";
+      quickSearchPager = null;
+      quickSearchKeyword = "";
+      $("mvQuickSearch").value = "";
+      resetQuickScroll();
+    }
     $("mvQuick").hidden = false;
     clampQuickSize();
     renderQuick();
@@ -2593,6 +2654,7 @@
   }
 
   function closeQuick() {
+    if (quickRememberState) saveQuickState();
     $("mvQuick").hidden = true;
   }
 
@@ -2668,6 +2730,40 @@
   let quickKeyword = "";
   let quickSections = []; // 전용 팔로잉 구역(폴더)
   let quickFolder = ""; // 고른 폴더(빈 문자열이면 전체)
+  let quickRememberState = false;
+
+  function saveQuickState() {
+    if (!quickRememberState || !chrome.storage?.local) return;
+    void chrome.storage.local.set({ cheeseMultiviewQuickState: {
+      source: quickSource, keyword: quickKeyword, folder: quickFolder,
+    } }).catch(() => {});
+  }
+
+  void chrome.storage?.local?.get([
+    "cheeseMultiviewRememberQuickState", "cheeseMultiviewQuickState",
+    "cheeseMultiviewQuickPosition",
+  ])?.then((data) => {
+    quickRememberState = data.cheeseMultiviewRememberQuickState === true;
+    if (quickRememberState) {
+      const saved = data.cheeseMultiviewQuickState;
+      if (saved && ["following", "custom", "live", "search"].includes(saved.source)) {
+        quickSource = saved.source;
+        quickKeyword = typeof saved.keyword === "string" ? saved.keyword.slice(0, 100) : "";
+        quickFolder = typeof saved.folder === "string" ? saved.folder.slice(0, 128) : "";
+        $("mvQuickSearch").value = quickKeyword;
+      }
+    }
+    const savedPosition = data.cheeseMultiviewQuickPosition;
+    if (Number.isFinite(savedPosition?.left) && Number.isFinite(savedPosition?.top)) {
+      quickPosition.left = savedPosition.left;
+      quickPosition.top = savedPosition.top;
+    }
+  }).catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === "local" && changes.cheeseMultiviewRememberQuickState) {
+      quickRememberState = changes.cheeseMultiviewRememberQuickState.newValue === true;
+    }
+  });
   // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
   let quickRequestId = 0;
 
@@ -2739,6 +2835,10 @@
     if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
     if (source === "custom") {
       quickSections = Array.isArray(result) ? result : [];
+      if (quickFolder && !quickSections.some((section) => section.id === quickFolder)) {
+        quickFolder = "";
+        saveQuickState();
+      }
       quickCandidates = flattenQuickSections(quickSections);
     } else {
       quickSections = [];
@@ -3235,6 +3335,7 @@
       quickFolder = ""; // 목록 종류를 바꾸면 구역 선택을 푼다
       // 앞 탭에서 내려 둔 스크롤이 남으면 새 탭이 엉뚱한 위치에서 시작한다.
       resetQuickScroll();
+      saveQuickState();
       void loadQuickCandidates();
       return;
     }
@@ -3242,6 +3343,7 @@
     if (folder) {
       // 구역 전환은 이미 받아 둔 목록을 거르기만 한다(다시 불러오지 않는다).
       quickFolder = folder.dataset.mvQuickFolder;
+      saveQuickState();
       renderQuickCandidates();
       return;
     }
@@ -3312,6 +3414,10 @@
     const toggle = target.closest?.(".mv-pop-button[data-mv-pop-toggle]");
     if (toggle) {
       togglePopover(toggle.dataset.mvPopToggle);
+      return;
+    }
+    if (target.closest?.("#mvChatTitle")) {
+      toggleChatSelector();
       return;
     }
     const volMute = target.closest?.("[data-mv-vol-mute]");
@@ -3427,6 +3533,23 @@
     if (!target.closest?.(".mv-pop-panel")) closePopovers(null);
   });
 
+  $("mvChatTitleWrap")?.addEventListener("keydown", (event) => {
+    const list = $("mvChatTitleList");
+    if (event.key === "Escape" && !list.hidden) {
+      closeChatSelector();
+      $("mvChatTitle").focus();
+      event.preventDefault();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    if (list.hidden) toggleChatSelector();
+    const options = [...list.querySelectorAll("[role='option']")];
+    const index = options.indexOf(document.activeElement);
+    const next = event.key === "ArrowDown" ? index + 1 : index - 1;
+    options[(next + options.length) % options.length]?.focus();
+    event.preventDefault();
+  });
+
   let quickSearchTimer = 0;
   $("mvQuickSearch")?.addEventListener("input", (event) => {
     quickKeyword = event.target.value;
@@ -3452,6 +3575,35 @@
   }
 
   const quickResize = $("mvQuickResize");
+  const quickHead = $("mvQuick")?.querySelector(".mv-quick-head");
+  let quickMove = null;
+  quickHead?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button, input, a, [role='tab']")) return;
+    const stage = $("mvFramesFit").getBoundingClientRect();
+    const panel = $("mvQuick").getBoundingClientRect();
+    quickPosition.left = panel.left - stage.left;
+    quickPosition.top = panel.top - stage.top;
+    quickMove = { x: event.clientX, y: event.clientY,
+      left: quickPosition.left, top: quickPosition.top };
+    quickHead.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  quickHead?.addEventListener("pointermove", (event) => {
+    if (!quickMove || !quickHead.hasPointerCapture(event.pointerId)) return;
+    quickPosition.left = quickMove.left + event.clientX - quickMove.x;
+    quickPosition.top = quickMove.top + event.clientY - quickMove.y;
+    clampQuickSize();
+  });
+  const finishQuickMove = () => {
+    if (!quickMove) return;
+    quickMove = null;
+    void chrome.storage?.local?.set({ cheeseMultiviewQuickPosition: {
+      left: quickPosition.left, top: quickPosition.top,
+    } }).catch(() => {});
+  };
+  quickHead?.addEventListener("pointerup", finishQuickMove);
+  quickHead?.addEventListener("pointercancel", finishQuickMove);
+  quickHead?.addEventListener("lostpointercapture", finishQuickMove);
   let quickDrag = null;
   quickResize?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -3462,7 +3614,8 @@
   });
   quickResize?.addEventListener("pointermove", (event) => {
     if (!quickDrag || !quickResize.hasPointerCapture(event.pointerId)) return;
-    quickSize.width = quickDrag.width + (event.clientX - quickDrag.x) * 2;
+    quickSize.width = quickDrag.width + (event.clientX - quickDrag.x) *
+      (quickPosition.left === null ? 2 : 1);
     quickSize.height = quickDrag.height + event.clientY - quickDrag.y;
     clampQuickSize();
   });

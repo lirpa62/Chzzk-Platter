@@ -90,6 +90,22 @@ function frame(options = {}) {
   }
   console.log("PASS mixer/filter/sync/stats/screenshot independence and visibility matrix");
 
+  for (const [flag, setting] of buttons) {
+    const cell = frame({ multiview: true, flags: allHidden, popupDisableHidden: true });
+    cell.read({ cheeseMultiviewDisableHidden: true, [setting]: false });
+    assert.equal(cell.flags()[flag], true, `${flag}: hidden multiview shortcut remained enabled`);
+    cell.read({ cheeseMultiviewDisableHidden: true, [setting]: true });
+    assert.equal(cell.flags()[flag], false, `${flag}: visible multiview control was disabled`);
+  }
+  const independent = frame({ multiview: true, flags: allHidden, popupDisableHidden: true });
+  independent.read({ cheeseMultiviewBtnMixer: false });
+  assert.equal(independent.flags().audioMixer, false);
+  const rewindHidden = frame({ multiview: true, flags: allHidden });
+  rewindHidden.read({ cheeseMultiviewDisableHidden: true, cheeseMultiviewSeekBar: true });
+  assert.equal(rewindHidden.flags().liveRewind, true);
+  assert.equal(rewindHidden.seek(), true);
+  console.log("PASS multiview hidden-shortcut policy and seekbar independence");
+
   const pair = frame({ multiview: true, flags: allHidden });
   pair.read({ cheeseMultiviewBtnRewind: true, cheeseMultiviewBtnForward: false });
   pair.apply();
@@ -190,8 +206,8 @@ function frame(options = {}) {
 
   const sabotages = [
     ["early multiview return", effectiveSource.replace("if (IS_MULTIVIEW_FRAME) {", "if (IS_MULTIVIEW_FRAME) return flags;\n    if (false) {")],
-    ["mixer override removed", effectiveSource.replace("flags.audioMixer = false;", "")],
-    ["filter override removed", effectiveSource.replace("flags.videoFilter = false;", "")],
+    ["mixer override removed", effectiveSource.replace("flags.audioMixer = hidden(multiviewBtnMixer);", "")],
+    ["filter override removed", effectiveSource.replace("flags.videoFilter = hidden(multiviewBtnFilter);", "")],
     ["chat branch removed", effectiveSource.replace("if (IS_MULTIVIEW_CHAT_FRAME) return flags;", "")],
     ["popup branch used", effectiveSource.replace("if (IS_MULTIVIEW_FRAME) {", "if (false) {")],
   ];

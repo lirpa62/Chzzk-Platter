@@ -645,6 +645,8 @@ const checks = [];
       },
     });
     window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
+    window.localStore={};
+    window.storageListeners=[];
     // 빠른 바꾸기의 후보 목록도 중계로 받는다(고르기 화면과 같은 경로).
     const quickChannels=[
       {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나',tags:['하나','둘','셋','넷']},
@@ -705,7 +707,16 @@ const checks = [];
       storage:{session:{
         get:async(k)=>({[k]:window.sessionStore[k]}),
         set:async(o)=>{Object.assign(window.sessionStore,o);},
-      }},
+      },local:{
+        get:async(keys)=>Object.fromEntries((Array.isArray(keys)?keys:[keys])
+          .map(key=>[key,window.localStore[key]])),
+        set:async(values)=>{
+          const changes=Object.fromEntries(Object.entries(values).map(([key,value])=>
+            [key,{oldValue:window.localStore[key],newValue:value}]));
+          Object.assign(window.localStore,values);
+          window.storageListeners.forEach(listener=>listener(changes,'local'));
+        },
+      },onChanged:{addListener:listener=>window.storageListeners.push(listener)}},
       // '고르기 화면 열기' 는 열린 탭을 찾아 그리로 보내거나 새 탭을 연다.
       // 어떤 탭이 열려 있는지는 테스트가 window.fakeTabs 로 정한다.
       tabs:{
@@ -990,6 +1001,89 @@ const checks = [];
      document.body.click();
      check(panel.hidden,'싱크 패널이 닫히지 않았다');
      check(window.frameSrcs.length===before,'싱크 조작으로 프레임을 다시 걸었다');`,
+  );
+
+  await test(
+    "Quick 상태 기억 OFF는 새로 열 때 기본 탭과 빈 검색으로 돌아간다",
+    `document.getElementById('mvBack').click();
+     document.querySelector('[data-mv-quick-source="search"]').click();
+     const search=document.getElementById('mvQuickSearch');
+     search.value='테스트';
+     search.dispatchEvent(new Event('input',{bubbles:true}));
+     document.getElementById('mvQuickClose').click();
+     document.getElementById('mvBack').click();
+     check(document.querySelector('[data-mv-quick-source="following"]').getAttribute('aria-pressed')==='true',
+       'Quick이 기본 탭으로 돌아가지 않았다');
+     check(search.value==='','검색어가 남았다');
+     document.getElementById('mvQuickClose').click();`,
+  );
+
+  await test(
+    "Quick 상태 기억 ON은 탭과 검색어를 복원한다",
+    `await chrome.storage.local.set({cheeseMultiviewRememberQuickState:true});
+     document.getElementById('mvBack').click();
+     document.querySelector('[data-mv-quick-source="search"]').click();
+     const search=document.getElementById('mvQuickSearch');
+     search.value='봉누도';
+     search.dispatchEvent(new Event('input',{bubbles:true}));
+     document.getElementById('mvQuickClose').click();
+     await wait(20);
+     check(window.localStore.cheeseMultiviewQuickState?.keyword==='봉누도',
+       '검색어가 저장되지 않았다');
+     document.getElementById('mvBack').click();
+     check(document.querySelector('[data-mv-quick-source="search"]').getAttribute('aria-pressed')==='true',
+       '검색 탭을 복원하지 않았다');
+     check(search.value==='봉누도','검색어를 복원하지 않았다');
+     document.getElementById('mvQuickClose').click();
+     await chrome.storage.local.set({cheeseMultiviewRememberQuickState:false});`,
+  );
+
+  await test(
+    "Quick 머리말 드래그 위치는 닫았다 다시 열어도 유지된다",
+    `document.getElementById('mvBack').click();
+     const quick=document.getElementById('mvQuick');
+     const head=quick.querySelector('.mv-quick-head');
+     const before=quick.getBoundingClientRect();
+     const target=head.querySelector('strong');
+     let captured=-1;
+     head.setPointerCapture=id=>{captured=id};
+     head.hasPointerCapture=id=>captured===id;
+     target.dispatchEvent(new PointerEvent('pointerdown',{
+       bubbles:true,pointerId:81,button:0,clientX:before.left+30,clientY:before.top+12}));
+     head.dispatchEvent(new PointerEvent('pointermove',{
+       bubbles:true,pointerId:81,button:0,clientX:before.left+130,clientY:before.top+62}));
+     head.dispatchEvent(new PointerEvent('pointerup',{
+       bubbles:true,pointerId:81,button:0,clientX:before.left+130,clientY:before.top+62}));
+     const moved=quick.getBoundingClientRect();
+     check(moved.left>before.left+20,'Quick 위치가 이동하지 않았다');
+     document.getElementById('mvQuickClose').click();
+     document.getElementById('mvBack').click();
+     check(Math.abs(quick.getBoundingClientRect().left-moved.left)<2,
+       '다시 열 때 Quick 위치가 사라졌다');
+     document.getElementById('mvQuickClose').click();`,
+  );
+
+  await test(
+    "채팅 제목 선택기는 영상 프레임을 유지하고 채팅 채널만 바꾼다",
+    `const videos=[...document.querySelectorAll('.mv-cell iframe')];
+     const before=window.frameSrcs.length;
+     document.getElementById('mvChatTitle').click();
+     const list=document.getElementById('mvChatTitleList');
+     check(!list.hidden && list.getAttribute('role')==='listbox','채팅 선택기가 열리지 않았다');
+     const current=document.getElementById('mvChatValue').textContent;
+     const choice=[...list.querySelectorAll('[data-mv-set-chat]')]
+       .find(button=>button.textContent!==current);
+     check(choice,'다른 채팅 채널이 없다');
+     choice.click();
+     check(list.hidden,'채팅 선택기가 닫히지 않았다');
+     check(videos.every((frame,i)=>document.querySelectorAll('.mv-cell iframe')[i]===frame),
+       '영상 프레임이 교체됐다');
+     check(!window.frameSrcs.slice(before).some(src=>src.includes('cheeseMulti=1')),
+       '영상 주소가 다시 설정됐다');
+     document.getElementById('mvChatTitle').click();
+     document.getElementById('mvChatTitle').dispatchEvent(new KeyboardEvent('keydown',{
+       key:'Escape',bubbles:true}));
+     check(list.hidden,'Escape로 선택기가 닫히지 않았다');`,
   );
 
   await test(
@@ -1359,6 +1453,26 @@ const checks = [];
      check(!document.querySelector('[data-mv-mixer-enabled="'+id+'"]').checked,
        '확인 후 OFF 상태가 반영되지 않았다');
      check(window.frameSrcs.length===before,'믹서 명령이 프레임을 다시 걸었다');
+     document.body.click();`,
+  );
+
+  await test(
+    "볼륨 세부 옵션은 닫으면 접히고 스크롤바로 가로 위치가 흔들리지 않는다",
+    `document.getElementById('mvVolumeBtn').click();
+     const panel=document.getElementById('mvVolumePop');
+     const toggle=panel.querySelector('[data-mv-mixer-toggle]');
+     check(toggle,'믹서 세부 옵션 버튼이 없다');
+     const x=panel.querySelector('.mv-vol-row.is-master').getBoundingClientRect().left;
+     toggle.click();
+     check(panel.querySelector('.mv-mixer-controls:not([hidden])'),'세부 옵션이 열리지 않았다');
+     const nextX=panel.querySelector('.mv-vol-row.is-master').getBoundingClientRect().left;
+     check(Math.abs(nextX-x)<=1,'스크롤바로 볼륨 행이 이동했다');
+     document.body.click();
+     document.getElementById('mvVolumeBtn').click();
+     check(!panel.querySelector('.mv-mixer-controls:not([hidden])'),
+       '다시 열었을 때 세부 옵션이 펼쳐져 있다');
+     check(!document.getElementById('mvMixerPresetList'),
+       '프리셋 팝오버가 남아 있다');
      document.body.click();`,
   );
 
@@ -2751,7 +2865,12 @@ const checks = [];
   });
   await test(
     "싱크 진단은 세션 메모리에서 기록·요약·내보내기·초기화된다",
-    `const realNow=Date.now;
+    `document.getElementById('mvSyncBtn').click();
+     check(document.querySelector('.mv-sync-diagnostics').hidden,
+       '진단 UI가 기본으로 표시된다');
+     document.body.click();
+     await chrome.storage.local.set({cheeseMultiviewSyncDiagnosticsUi:true});
+     const realNow=Date.now;
      let clock=realNow()+180000;
      Date.now=()=>clock;
      const post=(cell,type,extra={})=>{
@@ -3190,6 +3309,7 @@ const checks = [];
        .map(p=>p.dataset.mvSyncPick);
      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
      document.getElementById('mvBack').click();
+     document.querySelector('[data-mv-quick-source="live"]').click();
      await wait(200);
      const beforeCount=document.querySelectorAll('.mv-cell').length;
      const add=[...document.querySelectorAll('[data-mv-quick-add]')].find(b=>!b.disabled);
