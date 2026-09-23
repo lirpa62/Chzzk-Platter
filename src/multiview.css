@@ -2162,6 +2162,57 @@ button.mv-live-more {
   font-size: 11px;
   margin-left: auto;
 }
+.mv-group-assignments {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.mv-group-assignment {
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  min-width: 0;
+}
+.mv-group-assignment span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-group-assignment select {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  max-width: 92px;
+  padding: 3px;
+}
+.mv-sync-group {
+  border-top: 1px solid var(--popup-border, #34383d);
+  padding-top: 9px;
+}
+.mv-sync-group-head {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.mv-group-reference { color: var(--popup-muted, #9aa1a9); font-size: 11px; }
+.mv-group-add {
+  align-self: start;
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 8px;
+}
 /* 채널명 옆 체크박스. 색만으로 구분하지 않게 글자와 함께 둔다. */
 .mv-sync-pick {
   align-items: center;

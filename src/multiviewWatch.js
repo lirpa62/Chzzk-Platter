@@ -62,6 +62,7 @@
       // 싱크 그룹 범위. "all" 은 지금까지와 같은 의미(모든 채널이 한 그룹),
       // "selected" 는 사용자가 고른 채널만 한 그룹이다. 그룹은 언제나 하나다.
       scope: "all",
+      groups: [],
       // scope="selected" 에서 고른 채널. 처음 전환할 때 현재 채널로 채운다.
       selectedChannelIds: [],
       // 선택을 한 번이라도 만들었는지(재진입 때 이전 선택을 되살리려고 둔다).
@@ -1122,6 +1123,55 @@
   const pendingSyncCommands = new Map();
   const syncRetryAt = new Map();
   const freshSyncChannels = new Set();
+
+  function syncGroupForChannel(channelId) {
+    return state.sync.groups.find((group) => group.channelIds.includes(channelId)) || null;
+  }
+
+  function ensureSyncGroups() {
+    if (state.sync.groups.length) return;
+    state.sync.groups = ["a", "b"].map((id) => ({
+      id, channelIds: id === "a" && state.sync.selectionInitialized
+        ? state.sync.selectedChannelIds.filter((channelId) => cells.has(channelId)) : [],
+      mode: "off", referenceChannelId: null, manualOffsets: {}, congested: false,
+      congestionState: { active: false, since: 0 },
+    }));
+  }
+
+  function releaseGroupChannel(group, channelId) {
+    group.channelIds = group.channelIds.filter((id) => id !== channelId);
+    delete group.manualOffsets[channelId];
+    if (group.referenceChannelId === channelId) group.referenceChannelId = null;
+    if (group.channelIds.length < 2) {
+      group.mode = "off";
+      group.channelIds.forEach(resetSyncRate);
+    }
+    resetSyncRate(channelId);
+    cancelPendingSync(channelId);
+  }
+
+  function assignSyncGroup(channelId, groupId) {
+    if (!cells.has(channelId)) return;
+    const next = state.sync.groups.find((group) => group.id === groupId);
+    const current = syncGroupForChannel(channelId);
+    if (current === next) return;
+    if (current) releaseGroupChannel(current, channelId);
+    if (next) {
+      next.channelIds.push(channelId);
+      next.manualOffsets[channelId] = 0;
+    }
+    renderSync(true);
+    updateSyncPolling();
+  }
+
+  function rebaseGroupOffsets(group, nextReference) {
+    const next = SYNC.rebaseOffsets(group.manualOffsets, nextReference, group.channelIds);
+    for (const id of group.channelIds) {
+      if (freshSyncChannels.has(id)) next[id] = 0;
+    }
+    group.manualOffsets = next;
+    group.referenceChannelId = nextReference;
+  }
   const syncDiagnostics = DIAGNOSTICS.createRecorder();
   let syncCommandSeq = 0;
   let syncCongestion = { active: false, since: 0 };
@@ -1169,10 +1219,12 @@
 
   function recordSyncSample(channelId, stats, timestamp) {
     if (!state.sync.diagnosticsEnabled) return;
-    const referenceChannelId = state.sync.referenceChannelId;
+    const group = state.sync.scope === "groups" ? syncGroupForChannel(channelId) : null;
+    const context = state.sync.scope === "groups" ? group : state.sync;
+    const referenceChannelId = context?.referenceChannelId || null;
     const referenceStats = referenceChannelId === channelId
       ? stats : syncStats.get(referenceChannelId);
-    const manualOffset = state.sync.manualOffsets[channelId] || 0;
+    const manualOffset = context?.manualOffsets[channelId] || 0;
     const targetDelaySec = SYNC.targetDelay(referenceStats, manualOffset);
     const syncErrorSec = targetDelaySec !== null && stats.nativeDelaySec !== null
       ? targetDelaySec - stats.nativeDelaySec : null;
@@ -1182,10 +1234,11 @@
       channelName: syncChannelName(channelId),
       generation: stats.generation,
       frameStatus: currentStatus(channelId),
-      syncMode: state.sync.mode,
+      syncMode: context?.mode || "off",
       // 범위 정보는 추가 필드로만 남긴다(기존 소비자 형식은 그대로).
       syncScope: state.sync.scope,
-      inSyncScope: inSyncScope(channelId),
+      groupId: group?.id || null,
+      inSyncScope: group ? true : inSyncScope(channelId),
       referenceChannelId,
       nativeDelaySec: stats.nativeDelaySec,
       bufferAheadSec: stats.bufferAheadSec,
@@ -1198,22 +1251,23 @@
       targetDelaySec,
       syncErrorSec,
       settling: Number.isFinite(readyAt) && timestamp - readyAt < SYNC.LIMITS.settlingMs,
-      congested: state.sync.congested,
+      congested: context?.congested || false,
     }, timestamp);
   }
 
-  function recordReferenceChange(fromChannelId, toChannelId, cause, timestamp = Date.now()) {
+  function recordReferenceChange(fromChannelId, toChannelId, cause, timestamp = Date.now(), groupId = null) {
     if (!state.sync.diagnosticsEnabled || fromChannelId === toChannelId) return;
     recordSyncDiagnostic("reference-change", {
       fromChannelId: fromChannelId || null,
       toChannelId: toChannelId || null,
+      groupId,
       cause,
       fromDelaySec: syncStats.get(fromChannelId)?.nativeDelaySec ?? null,
       toDelaySec: syncStats.get(toChannelId)?.nativeDelaySec ?? null,
     }, timestamp);
   }
 
-  function recordCongestionChange(active, ids, timestamp) {
+  function recordCongestionChange(active, ids, timestamp, groupId = null) {
     if (!state.sync.diagnosticsEnabled) return;
     const edgeLagByChannel = {};
     const affectedChannels = [];
@@ -1226,6 +1280,7 @@
     }
     recordSyncDiagnostic("congestion-change", {
       active,
+      groupId,
       affectedChannels,
       edgeLagByChannel,
     }, timestamp);
@@ -1360,8 +1415,11 @@
     if (pendingSync(channelId, command) || Date.now() < (syncRetryAt.get(`${channelId}:${command}`) || 0)) return false;
     const commandId = ++syncCommandSeq;
     const entry = { commandId, channelId, command, sentAt: Date.now(), desiredValue,
-      generation: syncGeneration.get(channelId) ?? null, timeout: 0 };
+      generation: syncGeneration.get(channelId) ?? null, timeout: 0,
+      groupId: state.sync.scope === "groups" ? syncGroupForChannel(channelId)?.id || null : null };
     if (!sendSync(channelId, type, { ...extra, commandId })) return false;
+    const context = entry.groupId
+      ? state.sync.groups.find((group) => group.id === entry.groupId) : state.sync;
     recordSyncDiagnostic("command", {
       channelId,
       channelName: syncChannelName(channelId),
@@ -1369,8 +1427,9 @@
       command,
       desiredValue: diagnosticDesiredValue(desiredValue),
       generation: entry.generation,
-      referenceChannelId: state.sync.referenceChannelId,
-      manualOffset: state.sync.manualOffsets[channelId] || 0,
+      groupId: entry.groupId,
+      referenceChannelId: context?.referenceChannelId || null,
+      manualOffset: context?.manualOffsets[channelId] || 0,
     }, entry.sentAt);
     entry.timeout = window.setTimeout(() => {
       if (pendingSyncCommands.get(commandId) !== entry) return;
@@ -1412,6 +1471,9 @@
     const entry = pendingSyncCommands.get(data.commandId);
     if (!entry || entry.channelId !== channelId || entry.command !== data.command ||
         entry.generation !== data.generation) return;
+    const group = entry.groupId && state.sync.groups.find((item) => item.id === entry.groupId);
+    if (entry.groupId && (!group || !group.channelIds.includes(channelId))) return;
+    const context = group || state.sync;
     if (data.applied && entry.command === "rate" &&
         (!Number.isFinite(data.actualPlaybackRate) ||
           Math.abs(data.actualPlaybackRate - entry.desiredValue) > SYNC.LIMITS.userRateEpsilon)) return;
@@ -1440,18 +1502,18 @@
       syncRetryAt.delete(retryKey);
       if (entry.command === "seek" || entry.command === "nudge") syncSeekAt.set(channelId, Date.now());
       if (entry.command === "nudge") {
-        state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        context.manualOffsets[channelId] = entry.desiredValue.offset;
         freshSyncChannels.delete(channelId);
         syncNotice = "수동 보정을 적용했습니다.";
       }
       if (entry.command === "seek" && entry.desiredValue?.commitOffset) {
-        state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        context.manualOffsets[channelId] = entry.desiredValue.offset;
         freshSyncChannels.delete(channelId);
         syncNotice = "보정값을 초기화했습니다.";
       }
       if (entry.command === "rate") {
         syncRates.set(channelId, data.actualPlaybackRate);
-        if (state.sync.mode !== "auto") resetSyncRate(channelId);
+        if (context.mode !== "auto") resetSyncRate(channelId);
       }
       if (entry.command === "reset-rate") {
         syncRates.delete(channelId);
@@ -1491,6 +1553,8 @@
       state.sync.selectedChannelIds =
         state.sync.selectedChannelIds.filter((id) => id !== channelId);
       freshSyncChannels.delete(channelId);
+      const group = syncGroupForChannel(channelId);
+      if (group) releaseGroupChannel(group, channelId);
     }
     resetSyncRate(channelId);
     cancelPendingSync(channelId);
@@ -1605,6 +1669,157 @@
     };
   }
 
+  function getGroupRowViewState(group, channelId, now = Date.now()) {
+    const st = syncStats.get(channelId);
+    const fresh = currentStatus(channelId) === "ready" && st &&
+      now - st.receivedAt <= SYNC.LIMITS.staleMs;
+    const ready = fresh && SYNC.eligible(st, syncReadyAt.get(channelId), now);
+    const offset = group.manualOffsets[channelId] || 0;
+    const pending = syncNudgePending(channelId);
+    return {
+      st, offset, pending, ready,
+      reference: group.referenceChannelId === channelId,
+      status: currentStatus(channelId) === "ended" ? "종료" :
+        currentStatus(channelId) === "error" ? "오류" : !fresh ? "측정 대기" :
+        st.paused ? "일시정지" : !ready ? "측정 불가" : group.congested ? "연결 지연" :
+        group.referenceChannelId === channelId ? "기준" :
+        st.syncRateOwned ? "자동 보정 중" : "준비됨",
+      rate: syncRateText(st),
+    };
+  }
+
+  function patchGroupPanel(now = Date.now()) {
+    const panel = $("mvSyncPop");
+    if (!panel || panel.hidden) return false;
+    const rows = [...panel.querySelectorAll("[data-mv-group-row]")];
+    const expected = state.sync.groups.flatMap((group) => group.channelIds);
+    if (rows.length !== expected.length ||
+        rows.some((row, index) => row.dataset.mvGroupRow !== expected[index])) return false;
+    $("mvSyncValue").textContent = "그룹";
+    for (const group of state.sync.groups) {
+      const section = panel.querySelector(`[data-mv-group="${group.id}"]`);
+      if (!section) return false;
+      const auto = section.querySelector("[data-mv-group-auto]");
+      auto.checked = group.mode === "auto";
+      auto.disabled = group.channelIds.length < 2;
+      section.querySelector("[data-mv-group-align]").disabled = group.channelIds.length < 2;
+      const warning = section.querySelector(".mv-sync-warning");
+      warning.hidden = !group.congested && group.channelIds.length >= 2;
+      warning.textContent = group.channelIds.length < 2
+        ? "싱크할 채널을 2개 이상 배정해 주세요."
+        : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.";
+      section.querySelector(".mv-group-reference").textContent = group.referenceChannelId
+        ? `기준: ${channelName(group.referenceChannelId)}` : "기준 대기";
+      for (const id of group.channelIds) {
+        const row = section.querySelector(`[data-mv-group-row="${CSS.escape(id)}"]`);
+        const view = getGroupRowViewState(group, id, now);
+        row.classList.toggle("is-reference", view.reference);
+        row.querySelector("[data-mv-sync-status]").textContent = view.status;
+        for (const [kind, value] of [
+          ["delay", `지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}`],
+          ["buffer", `버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}`],
+          ["edge", `엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}`],
+          ["rate", view.rate.text],
+        ]) row.querySelector(`[data-mv-sync-metric="${kind}"]`).textContent = value;
+        const rate = row.querySelector('[data-mv-sync-metric="rate"]');
+        rate.title = view.rate.hint;
+        const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
+        const output = row.querySelector("[data-mv-sync-output]");
+        output.textContent = `${off}${view.pending ? " · 적용 중" : ""}`;
+        output.setAttribute("aria-label", `${channelName(id)} 시간 위치 보정 ${off}`);
+        setSyncButtonState(row.querySelector("[data-mv-sync-ref]"), !view.ready,
+          view.reference);
+        for (const button of row.querySelectorAll("[data-mv-sync-offset]")) {
+          setSyncButtonState(button, !view.ready || !group.referenceChannelId ||
+            view.reference, view.pending);
+        }
+        setSyncButtonState(row.querySelector("[data-mv-sync-clear]"), false,
+          view.pending || !view.offset);
+      }
+    }
+    const notice = panel.querySelector(".mv-sync-notice");
+    if (!notice) return false;
+    notice.textContent = syncNotice;
+    notice.hidden = !syncNotice;
+    const diagnostics = panel.querySelector(".mv-sync-diagnostics");
+    if (diagnostics) {
+      diagnostics.hidden = !syncDiagnosticsUi;
+      diagnostics.querySelector("#mvSyncDiagnostics").checked = state.sync.diagnosticsEnabled;
+      const elapsed = syncDiagnosticsStartedAt
+        ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
+      diagnostics.querySelector(".mv-sync-diagnostics-status").textContent =
+        state.sync.diagnosticsEnabled
+          ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
+          : syncDiagnostics.size
+            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관` : "기록 안 함";
+      for (const action of ["Copy", "Export", "Clear"]) {
+        diagnostics.querySelector(`#mvSyncDiagnostics${action}`).disabled = !syncDiagnostics.size;
+      }
+      const diagnosticNotice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
+      diagnosticNotice.textContent = syncDiagnosticsNotice;
+      diagnosticNotice.hidden = !syncDiagnosticsNotice;
+    }
+    return true;
+  }
+
+  function renderGroupSync() {
+    const panel = $("mvSyncPop");
+    const assignments = state.chosen.map((channel) => {
+      const current = syncGroupForChannel(channel.channelId)?.id || "";
+      return `<label class="mv-group-assignment"><span>${esc(channel.channelName)}</span>` +
+        `<select data-mv-group-assign="${esc(channel.channelId)}" aria-label="${esc(channel.channelName)} 싱크 그룹">` +
+        `<option value=""${current ? "" : " selected"}>그룹 없음</option>` +
+        state.sync.groups.map((group) => `<option value="${group.id}"${current === group.id ? " selected" : ""}>` +
+          `그룹 ${group.id.toUpperCase()}</option>`).join("") + `</select></label>`;
+    }).join("");
+    const sections = state.sync.groups.map((group) => {
+      const rows = group.channelIds.map((id) => {
+        const view = getGroupRowViewState(group, id);
+        const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
+        const step = (value) => `<button type="button" data-mv-sync-offset="${esc(id)}" data-step="${value}"` +
+          `${!view.ready || !group.referenceChannelId || view.reference ? " disabled" : ""}>${value > 0 ? "+" : ""}${value}</button>`;
+        return `<div class="mv-sync-row${view.reference ? " is-reference" : ""}" data-mv-group-row="${esc(id)}">` +
+          `<div class="mv-sync-row-head"><strong>${esc(channelName(id))}</strong>` +
+          `<span data-mv-sync-status>${view.status}</span></div>` +
+          `<div class="mv-sync-metrics">` +
+          `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
+          `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
+          `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}</span>` +
+          `<span data-mv-sync-metric="rate" title="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
+          `<div class="mv-sync-controls"><button type="button" data-mv-sync-ref="${esc(id)}"` +
+          `${view.ready ? "" : " disabled"}>기준</button>` +
+          step(-0.5) + step(-0.1) +
+          `<output data-mv-sync-output aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
+          step(0.1) + step(0.5) +
+          `<button type="button" data-mv-sync-clear="${esc(id)}" title="보정 초기화">↺</button></div></div>`;
+      }).join("");
+      return `<section class="mv-sync-group" data-mv-group="${group.id}">` +
+        `<div class="mv-sync-group-head"><strong>그룹 ${group.id.toUpperCase()}</strong>` +
+        `<span class="mv-group-reference"></span></div>` +
+        `<div class="mv-sync-actions"><label><input type="checkbox" data-mv-group-auto="${group.id}"> 자동 싱크</label>` +
+        `<button type="button" data-mv-group-align="${group.id}">느린 채널에 맞추기</button>` +
+        `<button type="button" data-mv-group-clear="${group.id}">보정 초기화</button></div>` +
+        `<p class="mv-sync-warning" hidden></p><div class="mv-sync-list">${rows}</div></section>`;
+    }).join("");
+    panel.innerHTML = `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
+      `<button type="button" data-mv-sync-scope="all" aria-pressed="false">전체</button>` +
+      `<button type="button" data-mv-sync-scope="selected" aria-pressed="false">선택</button>` +
+      `<button type="button" data-mv-sync-scope="groups" aria-pressed="true">그룹</button></div>` +
+      `<div class="mv-group-assignments">${assignments}</div>${sections}` +
+      (state.sync.groups.length < 3 ? `<button type="button" class="mv-group-add" data-mv-group-add>그룹 추가</button>` : "") +
+      `<p class="mv-sync-notice" role="status" hidden></p>` +
+      `<section class="mv-sync-diagnostics" aria-label="싱크 진단" hidden>` +
+      `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
+      `<label><input type="checkbox" id="mvSyncDiagnostics"${state.sync.diagnosticsEnabled ? " checked" : ""}> 싱크 진단 기록</label></div>` +
+      `<p class="mv-sync-diagnostics-status">기록 안 함</p>` +
+      `<div class="mv-sync-diagnostics-actions">` +
+      `<button type="button" id="mvSyncDiagnosticsCopy" disabled>요약 복사</button>` +
+      `<button type="button" id="mvSyncDiagnosticsExport" disabled>JSON 내보내기</button>` +
+      `<button type="button" id="mvSyncDiagnosticsClear" disabled>초기화</button></div>` +
+      `<p class="mv-sync-diagnostics-notice" role="status" hidden></p></section>`;
+    patchGroupPanel();
+  }
+
   // 위치 보정(±·개별 초기화)이 아직 응답을 기다리는 중인지.
   function syncNudgePending(channelId) {
     return (
@@ -1626,12 +1841,14 @@
 
   function syncScopeIds() {
     const chosen = state.chosen.map((c) => c.channelId);
+    if (state.sync.scope === "groups") return [];
     if (state.sync.scope !== "selected") return chosen;
     const selected = new Set(state.sync.selectedChannelIds);
     return chosen.filter((id) => selected.has(id));
   }
 
   function inSyncScope(channelId) {
+    if (state.sync.scope === "groups") return false;
     if (state.sync.scope !== "selected") return true;
     return state.sync.selectedChannelIds.includes(channelId);
   }
@@ -1688,6 +1905,7 @@
   function patchSyncPanel(now = Date.now()) {
     const panel = $("mvSyncPop");
     if (!panel || panel.hidden) return false;
+    if (state.sync.scope === "groups") return patchGroupPanel(now);
     const rows = [...panel.querySelectorAll("[data-mv-sync-row]")];
     // 행 수나 채널이 달라졌으면 구조가 바뀐 것이다 — 전체 렌더에 맡긴다.
     const ids = state.chosen.map((c) => c.channelId);
@@ -1812,7 +2030,8 @@
     const panel = $("mvSyncPop");
     if (!panel || panel.hidden) {
       const value = $("mvSyncValue");
-      if (value) value.textContent = state.sync.mode === "auto" ? "자동" :
+      if (value) value.textContent = state.sync.scope === "groups" ? "그룹" :
+        state.sync.mode === "auto" ? "자동" :
         state.sync.mode === "manual" ? "수동" : "꺼짐";
       return;
     }
@@ -1826,7 +2045,9 @@
 
   function setSyncScope(next) {
     const before = new Set(syncScopeIds());
-    state.sync.scope = next === "selected" ? "selected" : "all";
+    const leavingGroups = state.sync.scope === "groups";
+    state.sync.scope = ["all", "selected", "groups"].includes(next) ? next : "all";
+    if (state.sync.scope === "groups") ensureSyncGroups();
     if (state.sync.scope === "selected" && !state.sync.selectionInitialized) {
       // 최초 전환: 지금 보고 있는 채널을 모두 선택해 둔다. 이후 재진입에서는
       // 사용자가 만들어 둔 선택을 그대로 되살린다.
@@ -1835,6 +2056,9 @@
     }
     const after = new Set(syncScopeIds());
     releaseSyncOwnership([...before].filter((id) => !after.has(id)));
+    if (leavingGroups && state.sync.scope !== "groups") {
+      releaseSyncOwnership(state.chosen.map((c) => c.channelId));
+    }
     // 기준은 '그룹 안에 있고 그룹이 성립할 때' 만 유지한다.
     if (
       state.sync.referenceChannelId &&
@@ -1914,7 +2138,10 @@
   function updateSyncPolling() {
     const frameOwnsRate = state.chosen.some((c) =>
       syncStats.get(c.channelId)?.syncRateOwned === true);
-    const needed = !document.hidden && (syncPanelOpen() || state.sync.mode === "auto" ||
+    const auto = state.sync.scope === "groups"
+      ? state.sync.groups.some((group) => group.mode === "auto")
+      : state.sync.mode === "auto";
+    const needed = !document.hidden && (syncPanelOpen() || auto ||
       pendingSyncCommands.size > 0 || syncRates.size > 0 || frameOwnsRate ||
       state.sync.diagnosticsEnabled);
     if (!needed && syncTimer) {
@@ -1983,6 +2210,183 @@
     refreshSyncPanel();
   }
 
+  function groupEligibleIds(group, now, settled = false) {
+    return group.channelIds.filter((id) => currentStatus(id) === "ready" &&
+      SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled));
+  }
+
+  function selectGroupReference(group, now = Date.now()) {
+    const ids = groupEligibleIds(group, now);
+    const current = group.referenceChannelId;
+    if (group.mode !== "auto" && current && ids.includes(current)) return current;
+    const next = SYNC.reference(ids, syncStats, syncReadyAt, current, now);
+    if (next && next !== current) {
+      rebaseGroupOffsets(group, next);
+      recordReferenceChange(current, next, group.mode === "auto" ? "auto" : "manual", now, group.id);
+      for (const id of group.channelIds) cancelPendingSync(id);
+    } else if (!next && current && !group.channelIds.includes(current)) {
+      group.referenceChannelId = null;
+    }
+    return next;
+  }
+
+  function tickSyncGroups(now) {
+    for (const group of state.sync.groups) {
+      if (group.channelIds.length < 2) group.mode = "off";
+      const ids = groupEligibleIds(group, now, true);
+      const fresh = new Map(ids.map((id) => [id, syncStats.get(id)]));
+      const wasCongested = group.congested;
+      group.congestionState = SYNC.congestion(group.congestionState, fresh, ids, now);
+      group.congested = group.congestionState.active;
+      if (wasCongested !== group.congested) {
+        recordCongestionChange(group.congested, ids, now, group.id);
+      }
+      const ref = selectGroupReference(group, now);
+      const refStats = ref && syncStats.get(ref);
+      for (const id of group.channelIds) {
+        const st = syncStats.get(id);
+        if (group.mode !== "auto" || group.congested || !refStats || !ids.includes(ref) ||
+            id === ref || !ids.includes(id) || st.userRateOverride ||
+            (st.playbackRate !== null && Math.abs(st.playbackRate - 1) >
+              SYNC.LIMITS.userRateEpsilon && !st.syncRateOwned)) {
+          resetSyncRate(id);
+          continue;
+        }
+        const delay = SYNC.targetDelay(refStats, group.manualOffsets[id] || 0);
+        const error = delay - st.nativeDelaySec;
+        if (Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
+            now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs) {
+          const target = SYNC.seekTarget(st, delay);
+          if (!isSyncAudioProtected(id) && target !== null && target < st.currentTime) {
+            sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
+              { currentTime: target, deltaSec: target - st.currentTime },
+              { currentTime: target, manual: false });
+          }
+        }
+        setSyncRate(id, SYNC.rateFor(error, st.syncRateOwned));
+      }
+    }
+  }
+
+  function alignSyncGroup(group, ids = group.channelIds, offsets = null,
+    allowAudioProtectedSeek = false) {
+    const now = Date.now();
+    const ref = selectGroupReference(group, now);
+    if (!ref || now - (syncReadyAt.get(ref) || now) < SYNC.LIMITS.settlingMs) {
+      syncNotice = `그룹 ${group.id.toUpperCase()}의 기준 채널이 준비되지 않았습니다.`;
+      refreshSyncPanel();
+      return;
+    }
+    const refStats = syncStats.get(ref);
+    for (const id of ids) {
+      const st = syncStats.get(id);
+      if (id === ref || !SYNC.eligible(st, syncReadyAt.get(id), now) ||
+          (isSyncAudioProtected(id) && !allowAudioProtectedSeek) ||
+          now - (syncSeekAt.get(id) || 0) < 250) continue;
+      const offset = offsets && Object.hasOwn(offsets, id)
+        ? offsets[id] : group.manualOffsets[id] || 0;
+      const delay = SYNC.targetDelay(refStats, offset);
+      const target = SYNC.seekTarget(st, delay, 0.05);
+      if (target === null) {
+        if (offsets && Math.abs(st.nativeDelaySec - delay) < 0.05) {
+          group.manualOffsets[id] = offset;
+        }
+        continue;
+      }
+      sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
+        { currentTime: target, deltaSec: target - st.currentTime, manual: true },
+        { currentTime: target, manual: true, offset,
+          commitOffset: !!offsets && Math.abs(st.nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec });
+    }
+    syncNotice = `그룹 ${group.id.toUpperCase()}에 보정을 요청했습니다.`;
+    refreshSyncPanel();
+  }
+
+  function handleGroupSyncClick(target) {
+    if (state.sync.scope !== "groups") return false;
+    if (target.closest?.("[data-mv-group-add]")) {
+      if (state.sync.groups.length < 3) {
+        const id = "abc"[state.sync.groups.length];
+        state.sync.groups.push({ id, channelIds: [], mode: "off",
+          referenceChannelId: null, manualOffsets: {}, congested: false,
+          congestionState: { active: false, since: 0 } });
+        renderSync(true);
+      }
+      return true;
+    }
+    const auto = target.closest?.("[data-mv-group-auto]");
+    if (auto) {
+      const group = state.sync.groups.find((item) => item.id === auto.dataset.mvGroupAuto);
+      if (group) {
+        group.mode = auto.checked && group.channelIds.length >= 2 ? "auto" : "off";
+        if (group.mode !== "auto") group.channelIds.forEach(resetSyncRate);
+        updateSyncPolling();
+        refreshSyncPanel();
+      }
+      return true;
+    }
+    const align = target.closest?.("[data-mv-group-align]");
+    if (align) {
+      const group = state.sync.groups.find((item) => item.id === align.dataset.mvGroupAlign);
+      if (group) alignSyncGroup(group);
+      return true;
+    }
+    const clear = target.closest?.("[data-mv-group-clear]");
+    if (clear) {
+      const group = state.sync.groups.find((item) => item.id === clear.dataset.mvGroupClear);
+      if (group) alignSyncGroup(group, group.channelIds,
+        Object.fromEntries(group.channelIds.map((id) => [id, 0])), true);
+      return true;
+    }
+    const ref = target.closest?.("[data-mv-sync-ref]");
+    if (ref) {
+      const id = ref.dataset.mvSyncRef;
+      const group = syncGroupForChannel(id);
+      if (group && group.referenceChannelId !== id && groupEligibleIds(group, Date.now()).includes(id)) {
+        recordReferenceChange(group.referenceChannelId, id, "manual", Date.now(), group.id);
+        rebaseGroupOffsets(group, id);
+        group.mode = "manual";
+        group.channelIds.forEach((channelId) => {
+          cancelPendingSync(channelId);
+          resetSyncRate(channelId);
+        });
+        alignSyncGroup(group);
+      }
+      refreshSyncPanel();
+      return true;
+    }
+    const offset = target.closest?.("[data-mv-sync-offset]");
+    if (offset) {
+      const id = offset.dataset.mvSyncOffset;
+      const group = syncGroupForChannel(id);
+      const step = Number(offset.dataset.step);
+      if (!group || syncNudgePending(id) || ![-0.5, -0.1, 0.1, 0.5].includes(step) ||
+          !groupEligibleIds(group, Date.now()).includes(id) || group.referenceChannelId === id) return true;
+      const before = group.manualOffsets[id] || 0;
+      const next = Math.round((before + step) * 10) / 10;
+      const st = syncStats.get(id);
+      const targetTime = st.currentTime + before - next;
+      if (Math.abs(next) <= 10 && targetTime >= st.seekableStart + 0.05 &&
+          targetTime <= st.seekableEnd - 0.05 &&
+          Date.now() - (syncSeekAt.get(id) || 0) >= 250) {
+        sendSyncCommand(id, "nudge", "APPLY_SYNC_NUDGE",
+          { deltaSec: before - next }, { offset: next });
+      }
+      refreshSyncPanel();
+      return true;
+    }
+    const reset = target.closest?.("[data-mv-sync-clear]");
+    if (reset) {
+      const id = reset.dataset.mvSyncClear;
+      const group = syncGroupForChannel(id);
+      if (group && !syncNudgePending(id) && group.manualOffsets[id]) {
+        alignSyncGroup(group, [id], { [id]: 0 }, true);
+      }
+      return true;
+    }
+    return false;
+  }
+
   function syncTick() {
     if (document.hidden) {
       resetAllSyncRates();
@@ -1990,6 +2394,12 @@
     }
     const now = Date.now();
     requestSyncStats();
+    if (state.sync.scope === "groups") {
+      tickSyncGroups(now);
+      refreshSyncPanel();
+      updateSyncPolling();
+      return;
+    }
     if (stopAutoSyncIfGroupTooSmall()) {
       refreshSyncPanel();
       return;
@@ -2053,11 +2463,13 @@
 
   function renderSync(force = false) {
     const value = $("mvSyncValue");
-    if (value) value.textContent = state.sync.mode === "auto" ? "자동" :
+    if (value) value.textContent = state.sync.scope === "groups" ? "그룹" :
+      state.sync.mode === "auto" ? "자동" :
       state.sync.mode === "manual" ? "수동" : "꺼짐";
     const panel = $("mvSyncPop");
     if (!panel || (panel.hidden && !force)) return;
     if (!force && panel.contains(document.activeElement) && document.activeElement !== panel) return;
+    if (state.sync.scope === "groups") return renderGroupSync();
     const now = Date.now();
     const ref = state.sync.referenceChannelId;
     const diagnosticsElapsed = syncDiagnosticsStartedAt
@@ -2121,6 +2533,7 @@
       ` aria-pressed="${!picking}">전체</button>` +
       `<button type="button" data-mv-sync-scope="selected"` +
       ` aria-pressed="${picking}">선택</button>` +
+      `<button type="button" data-mv-sync-scope="groups" aria-pressed="false">그룹</button>` +
       `<span class="mv-sync-scope-count">${picking
         ? `선택 ${scopeIds.length}/${state.chosen.length}`
         : "전체"}</span></div>` +
@@ -2633,6 +3046,8 @@
     // ⚠ 보정값(offset)은 물려주지 않는다 — 다른 방송이라 기준이 다르다.
     const inheritSelected = inSyncScope(oldChannelId) &&
       state.sync.scope === "selected";
+    const inheritGroup = syncGroupForChannel(oldChannelId);
+    const inheritGroupMode = inheritGroup?.mode;
     clearRemovedChannel(oldChannelId);
     if (oldFrame) oldFrame.src = "about:blank";
     oldCell?.remove();
@@ -2654,6 +3069,11 @@
     state.chosen = state.chosen.map((c, i) => (i === index ? next : c));
     freshSyncChannels.add(id);
     state.sync.manualOffsets[id] = 0;
+    if (inheritGroup) {
+      inheritGroup.channelIds.push(id);
+      inheritGroup.manualOffsets[id] = 0;
+      if (inheritGroup.channelIds.length >= 2) inheritGroup.mode = inheritGroupMode;
+    }
     if (inheritSelected && !state.sync.selectedChannelIds.includes(id)) {
       state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, id];
     }
@@ -2662,6 +3082,7 @@
 
     ensureCells(); // 새 채널 칸만 만든다
     applyLayout();
+    renderVolume();
     // 채팅이 그 채널을 보고 있었으면 새 채널로 넘긴다.
     if (wasChat || (state.chatFollowsMain && wasMain)) applyChat(id);
     renderQuick();
@@ -3116,6 +3537,7 @@
     lastQuality.delete(channelId);
     qualityTransitions.delete(channelId);
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
+    renderVolume();
     // 채널을 빼서 선택 그룹이 1개가 됐을 수도 있다.
     stopAutoSyncIfGroupTooSmall();
     renderSync(true);
@@ -3211,6 +3633,7 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target;
+    if (handleGroupSyncClick(target)) return;
     const syncRef = target.closest?.("[data-mv-sync-ref]");
     if (syncRef) {
       const id = syncRef.dataset.mvSyncRef;
@@ -3276,7 +3699,7 @@
     }
     const syncScopeBtn = target.closest?.("[data-mv-sync-scope]");
     if (syncScopeBtn) {
-      const next = syncScopeBtn.dataset.mvSyncScope === "selected" ? "selected" : "all";
+      const next = syncScopeBtn.dataset.mvSyncScope;
       if (next !== state.sync.scope) setSyncScope(next);
       return;
     }
@@ -3545,6 +3968,13 @@
     }
     // 패널 안의 빈 곳을 누른 게 아니면(=바깥) 열린 팝오버를 닫는다.
     if (!target.closest?.(".mv-pop-panel")) closePopovers(null);
+  });
+
+  $("mvSyncPop")?.addEventListener("change", (event) => {
+    const assignment = event.target.closest?.("[data-mv-group-assign]");
+    if (assignment && state.sync.scope === "groups") {
+      assignSyncGroup(assignment.dataset.mvGroupAssign, assignment.value);
+    }
   });
 
   $("mvChatTitleWrap")?.addEventListener("keydown", (event) => {
@@ -3940,7 +4370,9 @@
       }
       syncStats.set(channelId, stats);
       recordSyncSample(channelId, stats, stats.receivedAt);
-      if (state.sync.mode !== "auto" && stats.syncRateOwned) resetSyncRate(channelId);
+      const activeSyncMode = state.sync.scope === "groups"
+        ? syncGroupForChannel(channelId)?.mode : state.sync.mode;
+      if (activeSyncMode !== "auto" && stats.syncRateOwned) resetSyncRate(channelId);
       updateSyncPolling();
       return;
     }

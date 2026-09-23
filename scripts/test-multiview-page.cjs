@@ -60,7 +60,7 @@ function call(method, params = {}, sessionId) {
   });
 }
 
-const deadline = setTimeout(() => browser.kill("SIGTERM"), 90000);
+const deadline = setTimeout(() => browser.kill("SIGTERM"), 150000);
 const checks = [];
 (async () => {
   const { targetId } = await call("Target.createTarget", {
@@ -763,7 +763,15 @@ const checks = [];
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8")
     .replace("const state = {", "const state = window.__mvState = {")
     .replace("  function rebaseSyncOffsets(",
-      "  window.__testRebase = rebaseSyncOffsets;\n  function rebaseSyncOffsets("));
+      "  window.__testRebase = rebaseSyncOffsets;\n  function rebaseSyncOffsets(")
+    .replace("  function rebaseGroupOffsets(",
+      "  window.__testGroupRebase = rebaseGroupOffsets;\n  function rebaseGroupOffsets(")
+    .replace("  function tickSyncGroups(",
+      "  window.__testGroupTick = tickSyncGroups;\n  function tickSyncGroups(")
+    .replace("  function replaceChannel(",
+      "  window.__testReplaceChannel = replaceChannel;\n  function replaceChannel(")
+    .replace("  (async () => {\n    // 주소로 받은 id",
+      "  window.__testResources = {channelAudio,audioBlocked,mixerOpen,statsByChannel,frameLoadTimers,frameTimers,frameStates,syncStats,syncReadyAt,syncGeneration,syncSeekAt,syncRates,syncRetryAt,syncDiagnostics,mixerStates,mixerErrors,mixerConfirm,mixerGainDrafts,mixerGainTimers,mixerPending,pendingSyncCommands,lastQuality,qualityTransitions,cells};\n  (async () => {\n    // 주소로 받은 id"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
   await test(
@@ -1086,7 +1094,10 @@ const checks = [];
      document.getElementById('mvChatTitle').click();
      document.getElementById('mvChatTitle').dispatchEvent(new KeyboardEvent('keydown',{
        key:'Escape',bubbles:true}));
-     check(list.hidden,'Escape로 선택기가 닫히지 않았다');`,
+     check(list.hidden,'Escape로 선택기가 닫히지 않았다');
+     document.getElementById('mvChatTitle').click();
+     document.body.click();
+     check(list.hidden,'바깥을 눌러도 채팅 선택기가 닫히지 않았다');`,
   );
 
   await test(
@@ -1370,6 +1381,24 @@ const checks = [];
      check(window.frameSrcs.length===srcs,'크기 조절로 프레임을 다시 걸었다');
      document.getElementById('mvQuickClose').click();`,
   );
+
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 640, height: 480, deviceScaleFactor: 1, mobile: false,
+  });
+  await test(
+    "좁은 뷰포트에서도 Quick 위치와 크기를 화면 안으로 제한한다",
+    `document.getElementById('mvBack').click();
+     await wait(80);
+     const panel=document.getElementById('mvQuick').getBoundingClientRect();
+     const stage=document.getElementById('mvStage').getBoundingClientRect();
+     check(panel.left>=stage.left-2 && panel.top>=stage.top-2 &&
+       panel.right<=stage.right+2 && panel.bottom<=stage.bottom+2,
+       'Quick이 좁은 화면 밖으로 나갔다: '+JSON.stringify({panel:panel.toJSON(),stage:stage.toJSON()}));
+     document.getElementById('mvQuickClose').click();`,
+  );
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280, height: 800, deviceScaleFactor: 1, mobile: false,
+  });
 
   await test(
     "믹서 상태는 해당 프레임에서만 받고 명령 후 응답값으로 확정한다",
@@ -3349,6 +3378,198 @@ const checks = [];
        .querySelector('[data-mv-sync-scope="all"]')?.click();
      await wait(40);
      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));`,
+  );
+
+  await test(
+    "독립 싱크 그룹은 멤버십·기준·혼잡을 서로 섞지 않는다",
+    `const realNow=Date.now;
+     let clock=realNow()+100000;
+     Date.now=()=>clock;
+     document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     panel.querySelector('[data-mv-sync-scope="groups"]').click();
+     const ids=[...document.querySelectorAll('.mv-cell')].map(cell=>cell.dataset.channelId);
+     check(ids.length>=5,'그룹 테스트에는 채널 5개가 필요하다');
+     const assign=(id,groupId)=>{
+       const select=panel.querySelector('[data-mv-group-assign="'+id+'"]');
+       select.value=groupId;
+       select.dispatchEvent(new Event('change',{bubbles:true}));
+     };
+     ids.forEach(id=>assign(id,''));
+     ids.slice(0,3).forEach(id=>assign(id,'a'));
+     ids.slice(3,5).forEach(id=>assign(id,'b'));
+     const [a,b]=window.__mvState.sync.groups;
+     check(a.channelIds.length===3&&b.channelIds.length===2,'그룹 배정이 틀렸다');
+     a.manualOffsets[ids[0]]=0.5;a.manualOffsets[ids[1]]=1.2;
+     b.manualOffsets[ids[3]]=0.7;b.manualOffsets[ids[4]]=-0.2;
+     const beforeB=JSON.stringify(b.manualOffsets);
+     window.__testGroupRebase(a,ids[1]);
+     check(JSON.stringify(b.manualOffsets)===beforeB,'A 기준 변경이 B offset을 바꿨다');
+     assign(ids[2],'b');
+     check(!a.channelIds.includes(ids[2])&&b.channelIds.includes(ids[2]),
+       '한 채널이 두 그룹에 속했다');
+     assign(ids[2],'a');
+     const post=(id,type,stats)=>{
+       const cell=document.querySelector('.mv-cell[data-channel-id="'+id+'"]');
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type,channelId:id,...(stats?{stats}:{})}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     ids.slice(0,5).forEach(id=>post(id,'FRAME_READY'));
+     clock+=4100;
+     const samples=()=>ids.slice(0,5).forEach((id,index)=>post(id,'FRAME_SYNC_STATS',{
+       currentTime:100,playbackRate:1,paused:false,readyState:4,
+       syncRateOwned:false,userRateOverride:false,nativeDelaySec:index===4?3:5,
+       bufferAheadSec:2,edgeLagSec:index<3?3:0,
+       seekableStart:80,seekableEnd:index===4?103:105,generation:91,
+     }));
+     samples();
+     a.mode='auto';b.mode='auto';
+     window.__testGroupTick(clock);
+     clock+=4100;samples();
+     window.sentMessages.length=0;
+     window.__testGroupTick(clock);
+     clock+=4100;samples();
+     window.__testGroupTick(clock);
+     check(a.congested===true,'A 혼잡 상태를 잡지 못했다');
+     check(b.congested===false && b.mode==='auto','A 혼잡이 B를 멈췄다');
+     check(window.sentMessages.some(message=>message.data?.type==='APPLY_SYNC_RATE'
+       && b.channelIds.includes(message.data.channelId)),
+       'B 자동 보정이 멈췄다');
+     window.sentMessages.length=0;
+     post(ids[4],'FRAME_SYNC_STATS',{
+       currentTime:100,playbackRate:1.01,paused:false,readyState:4,
+       syncRateOwned:true,userRateOverride:false,nativeDelaySec:3,
+       bufferAheadSec:2,edgeLagSec:0,seekableStart:80,seekableEnd:103,generation:91,
+     });
+     check(!window.sentMessages.some(message=>message.data?.type==='RESET_SYNC_RATE'
+       && message.data.channelId===ids[4]),
+       '그룹 자동 보정 속도를 통계 수신 시 해제했다');
+     window.__mvState.sync.diagnosticsEnabled=true;
+     post(ids[4],'FRAME_SYNC_STATS',{
+       currentTime:100,playbackRate:1.01,paused:false,readyState:4,
+       syncRateOwned:true,userRateOverride:false,nativeDelaySec:3,
+       bufferAheadSec:2,edgeLagSec:0,seekableStart:80,seekableEnd:103,generation:91,
+     });
+     const sample=window.__testResources.syncDiagnostics.toArray()
+       .filter(record=>record.type==='sample' && record.channelId===ids[4]).at(-1);
+     check(sample?.groupId==='b' && sample.referenceChannelId===b.referenceChannelId &&
+       sample.manualOffset===b.manualOffsets[ids[4]] && sample.syncMode==='auto',
+       '그룹 진단이 해당 그룹의 기준과 보정값을 기록하지 않았다');
+     window.__mvState.sync.diagnosticsEnabled=false;
+     const control=panel.querySelector('[data-mv-group="a"] [data-mv-sync-offset]');
+     const assignment=panel.querySelector('[data-mv-group-assign="'+ids[0]+'"]');
+     for(let i=0;i<20;i++){
+       clock+=1000;samples();window.syncTickCallbacks.at(-1)();
+     }
+     check(panel.querySelector('[data-mv-group="a"] [data-mv-sync-offset]')===control &&
+       panel.querySelector('[data-mv-group-assign="'+ids[0]+'"]')===assignment,
+       '그룹 싱크 주기 갱신에서 조작 요소를 다시 만들었다');
+     Date.now=realNow;
+     panel.querySelector('[data-mv-sync-scope="all"]').click();
+     document.body.click();`,
+  );
+
+  await command("HeapProfiler.collectGarbage");
+  const domBeforeReplace = await command("Memory.getDOMCounters");
+  await test(
+    "그룹 채널 100회 교체 후 오래된 상태와 지연 iframe 로드가 남지 않는다",
+    `const groups=window.__mvState.sync.groups;
+     const group=groups[0];
+     const resources=window.__testResources;
+     const picked=group.channelIds.find(id=>id!==window.__mvState.mainId &&
+       id!==window.__mvState.chatChannelId) || group.channelIds.at(-1);
+     check(picked,'교체할 그룹 채널이 없다');
+     group.mode='auto';
+     let oldId=picked;
+     const historical=[];
+     const count=window.__mvState.chosen.length;
+     for(let i=0;i<100;i++){
+       resources.channelAudio.set(oldId,{volume:1,muted:true,muteTouched:false});
+       resources.audioBlocked.add(oldId);
+       resources.mixerOpen.add(oldId);
+       resources.statsByChannel.set(oldId,{stats:{},updatedAt:Date.now()});
+       resources.syncStats.set(oldId,{nativeDelaySec:1});
+       resources.syncReadyAt.set(oldId,Date.now());
+       resources.syncGeneration.set(oldId,91);
+       resources.syncSeekAt.set(oldId,Date.now());
+       resources.syncRetryAt.set(oldId+':seek',Date.now()+1000);
+       resources.mixerStates.set(oldId,{revision:0});
+       resources.mixerErrors.set(oldId,'test');
+       resources.mixerConfirm.add(oldId);
+       resources.mixerGainDrafts.set(oldId,1.1);
+       resources.mixerGainTimers.set(oldId,setTimeout(()=>{},10000));
+       resources.mixerPending.set(oldId+':TEST_STRESS',{
+         commandId:100000+i,timer:setTimeout(()=>{},10000)});
+       resources.pendingSyncCommands.set(100000+i,{
+         commandId:100000+i,channelId:oldId,timeout:setTimeout(()=>{},10000)});
+       resources.frameTimers.set(oldId,setTimeout(()=>{},10000));
+       resources.frameStates.set(oldId,'ready');
+       resources.lastQuality.set(oldId,'480');
+       resources.qualityTransitions.set(oldId,Date.now());
+       const nextId=(10000+i).toString(16).padStart(32,'0');
+       historical.push(oldId);
+       window.__testReplaceChannel(oldId,{channelId:nextId,channelName:'교체 '+i});
+       oldId=nextId;
+     }
+     check(group.channelIds.includes(oldId),'교체 채널이 그룹 멤버십을 잃었다');
+     check(group.mode==='auto','교체가 그룹 자동 모드를 해제했다');
+     check(group.manualOffsets[oldId]===0,'새 채널에 예전 보정값이 남았다');
+     check(resources.cells.size===count && document.querySelectorAll('.mv-cell').length===count,
+       '교체마다 칸이 누적됐다');
+     check(document.querySelectorAll('.mv-cell iframe').length===count,
+       '영상 iframe이 누적됐다');
+     for(const id of historical){
+       check(!groups.some(item=>item.channelIds.includes(id)),'옛 그룹 멤버십이 남았다');
+       for(const name of ['channelAudio','audioBlocked','mixerOpen','statsByChannel',
+         'frameLoadTimers','frameTimers','frameStates','syncStats','syncReadyAt',
+         'syncGeneration','syncSeekAt','syncRates','mixerStates','mixerErrors',
+         'mixerConfirm','mixerGainDrafts','mixerGainTimers','lastQuality',
+         'qualityTransitions']){
+         check(!resources[name].has(id),name+'에 옛 채널 ID가 남았다');
+       }
+       check(!resources.syncRetryAt.has(id+':seek') &&
+         ![...resources.mixerPending.keys()].some(key=>key.startsWith(id+':')) &&
+         ![...resources.pendingSyncCommands.values()].some(entry=>entry.channelId===id),
+         '옛 채널의 재시도 또는 보류 명령이 남았다');
+     }
+     const before=window.frameSrcs.length;
+     await wait(500);
+     const removedIds=new Set(historical);
+     const late=window.frameSrcs.slice(before).filter(src=>src.includes('cheeseMulti=1') &&
+       removedIds.has(new URL(src).pathname.split('/').at(-1)));
+     check(late.length===0,'분리된 옛 iframe의 지연 로드가 실행됐다: '+late.join(', '));`,
+  );
+  await command("HeapProfiler.collectGarbage");
+  const domAfterReplace = await command("Memory.getDOMCounters");
+  const domGrowth = domAfterReplace.nodes - domBeforeReplace.nodes;
+  assert.ok(domGrowth < 500, `100회 교체 후 DOM 노드가 과도하게 증가했다: ${domGrowth}`);
+  checks.push(`100회 채널 교체 후 CDP DOM 노드 증가 ${domGrowth}개`);
+
+  await test(
+    "그룹 채널 제거 시 다른 iframe을 유지하고 단일 멤버 자동 싱크를 끈다",
+    `const group=window.__mvState.sync.groups[0];
+     check(group.channelIds.length>=3,'제거할 그룹 채널이 부족하다');
+     const removed=group.channelIds.slice(-2);
+     const kept=[...document.querySelectorAll('.mv-cell iframe')].filter(frame=>
+       !removed.includes(frame.closest('.mv-cell').dataset.channelId));
+     const before=window.frameSrcs.length;
+     document.querySelector('[data-mv-close="'+removed[0]+'"]').click();
+     check(!group.channelIds.includes(removed[0]),'제거한 채널이 그룹에 남았다');
+     const remaining=group.channelIds.find(id=>id!==removed[1]);
+     window.__testResources.syncStats.set(remaining,{syncRateOwned:true});
+     window.__testResources.syncRates.set(remaining,1.01);
+     window.sentMessages.length=0;
+     document.querySelector('[data-mv-close="'+removed[1]+'"]').click();
+     check(!group.channelIds.includes(removed[1]),'제거한 채널이 그룹에 남았다');
+     check(group.channelIds.length===1 && group.mode==='off',
+       '멤버가 하나 남은 그룹의 자동 싱크가 계속 켜져 있다');
+     check(window.sentMessages.some(message=>message.data?.type==='RESET_SYNC_RATE' &&
+       message.data.channelId===remaining),'남은 채널의 자동 재생속도를 해제하지 않았다');
+     check(kept.every(frame=>frame.isConnected),'남은 채널 iframe이 교체됐다');
+     check(!window.frameSrcs.slice(before).some(src=>src.includes('cheeseMulti=1')),
+       '그룹 채널 제거로 남은 영상을 다시 로드했다');`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");
