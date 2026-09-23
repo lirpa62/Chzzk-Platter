@@ -21892,16 +21892,20 @@
 
     // 플레이어 영역만 감시한다(문서 전체를 고빈도로 보지 않는다).
     let videoObserver = null;
+    let videoObserverHost = null;
     const observeVideoHost = () => {
       const host =
         document.getElementById("live_player_layout") ||
         document.querySelector('[class*="_player_"]') ||
         document.body;
-      if (!host) return;
+      if (!host || (host === videoObserverHost && videoObserver)) return;
       videoObserver?.disconnect();
+      videoObserverHost = host;
       videoObserver = new MutationObserver(() => {
         syncMultiviewVideo();
         scheduleMultiviewAdCheck();
+        if (videoObserverHost !== document.getElementById("live_player_layout"))
+          observeVideoHost();
       });
       videoObserver.observe(host, { childList: true, subtree: true });
     };
@@ -21974,12 +21978,15 @@
     // 방송 종료 감지. 이미 검증된 종료 화면 판정을 그대로 쓴다(구조 + 문구 이중 확인).
     // 한 번만 알린다.
     let endedNotified = false;
+    let endedTimer = 0;
     const checkEnded = () => {
       if (endedNotified) return;
       if (typeof isReliveEndScreenVisible !== "function") return;
       if (!isReliveEndScreenVisible()) return;
       endedNotified = true;
       notifyParent("FRAME_ENDED");
+      if (endedTimer) clearInterval(endedTimer);
+      endedTimer = 0;
     };
 
     // 부모 지시 수신. 아무 페이지나 보낸 메시지를 실행하지 않도록 형태를 모두 확인한다.
@@ -22141,7 +22148,7 @@
       if (currentVideo || bootstrapTries >= 20) clearInterval(bootstrapTimer);
     }, 500);
     // 종료 화면은 방송 중에도 나중에 뜰 수 있어 느슨하게 확인한다.
-    setInterval(checkEnded, 5000);
+    if (!endedNotified) endedTimer = setInterval(checkEnded, 5000);
 
     // ── 초기 화면 정리(채팅 접기 + 넓은 화면) ────────────────────────────
     // ⚠ 팝업 플레이어의 일회성 접기 로직을 쓰지 않는다. 그건 정해진 횟수만 시도하고
@@ -22242,13 +22249,20 @@
     // 초기 확인이 끝난 뒤에도 치지직이 UI 를 다시 만들 수 있다. 플레이어·채팅 쪽만
     // 좁게 지켜보다가 바뀌면 다시 맞춘다(문서 전체를 보지 않는다).
     let uiObserver = null;
+    let uiObserverHost = null;
     function observeMultiviewUiHost() {
       const host =
         document.getElementById("live_player_layout")?.parentElement ||
         document.querySelector("#layout-body") ||
         document.body;
-      if (!host || uiObserver) return;
-      uiObserver = new MutationObserver(() => scheduleMultiviewUiReconcile(200));
+      if (!host || (host === uiObserverHost && uiObserver)) return;
+      uiObserver?.disconnect();
+      uiObserverHost = host;
+      uiObserver = new MutationObserver(() => {
+        scheduleMultiviewUiReconcile(200);
+        if (uiObserverHost !== document.getElementById("live_player_layout")?.parentElement)
+          observeMultiviewUiHost();
+      });
       uiObserver.observe(host, { childList: true, subtree: true });
     }
 
@@ -22279,7 +22293,8 @@
     const hostTimer = setInterval(() => {
       hostTries += 1;
       observeMultiviewUiHost();
-      if (uiObserver || hostTries >= 20) clearInterval(hostTimer);
+      if (uiObserverHost === document.getElementById("live_player_layout")?.parentElement ||
+          hostTries >= 20) clearInterval(hostTimer);
     }, 500);
 
     // 부모에 '이 프레임이 준비됐다'고 알린다. 부모는 이걸 받아 소리·화질 상태를

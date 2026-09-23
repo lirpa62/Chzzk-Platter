@@ -743,6 +743,12 @@ const checks = [];
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
+  await evaluate(`window.syncTickCallbacks=[];
+    const nativeSetInterval=window.setInterval;
+    window.setInterval=function(callback,delay,...args){
+      if(callback?.name==='syncTick')window.syncTickCallbacks.push(callback);
+      return nativeSetInterval.call(this,callback,delay,...args);
+    };`);
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
@@ -984,6 +990,45 @@ const checks = [];
      document.body.click();
      check(panel.hidden,'싱크 패널이 닫히지 않았다');
      check(window.frameSrcs.length===before,'싱크 조작으로 프레임을 다시 걸었다');`,
+  );
+
+  await test(
+    "싱크 통계 100회 갱신에도 패널 컨트롤의 DOM identity를 유지한다",
+    `document.getElementById('mvSyncBtn').click();
+     const panel=document.getElementById('mvSyncPop');
+     const tick=window.syncTickCallbacks.at(-1);
+     check(typeof tick==='function','싱크 타이머를 찾지 못했다');
+     const row=panel.querySelector('.mv-sync-row');
+     const list=panel.querySelector('.mv-sync-list');
+     const controls=row.querySelector('.mv-sync-controls');
+     const ref=row.querySelector('[data-mv-sync-ref]');
+     const offset=row.querySelector('[data-mv-sync-offset]');
+     const output=row.querySelector('[data-mv-sync-output]');
+     const counts=['.mv-sync-row','.mv-sync-controls','button','output']
+       .map(selector=>panel.querySelectorAll(selector).length);
+     document.getElementById('mvBack').focus();
+     for(let i=0;i<100;i++){
+       const id=row.dataset.mvSyncRow;
+       const frame=document.querySelector('.mv-cell[data-channel-id="'+id+'"] iframe');
+       const message=new MessageEvent('message',{
+         origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'FRAME_SYNC_STATS',channelId:id,
+           stats:{nativeDelaySec:2+i/100,bufferAheadSec:1,edgeLagSec:1,
+             currentTime:10,playbackRate:1,readyState:4,generation:1}}
+       });
+       Object.defineProperty(message,'source',{value:frame.contentWindow});
+       window.dispatchEvent(message);
+       tick();
+     }
+     check(panel.querySelector('.mv-sync-list')===list,'목록이 교체됐다');
+     check(panel.querySelector('.mv-sync-row')===row,'행이 교체됐다');
+     check(row.querySelector('.mv-sync-controls')===controls,'컨트롤이 교체됐다');
+     check(row.querySelector('[data-mv-sync-ref]')===ref,'기준 버튼이 교체됐다');
+     check(row.querySelector('[data-mv-sync-offset]')===offset,'offset 버튼이 교체됐다');
+     check(row.querySelector('[data-mv-sync-output]')===output,'출력이 교체됐다');
+     check(['.mv-sync-row','.mv-sync-controls','button','output'].every((selector,i)=>
+       panel.querySelectorAll(selector).length===counts[i]),'요소 수가 늘었다');
+     document.body.click();`,
   );
 
   await test(

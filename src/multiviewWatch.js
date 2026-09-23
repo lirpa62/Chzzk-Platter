@@ -277,6 +277,7 @@
 
   // 프레임 상태 관리. 준비 신호가 제때 안 오면 '다시 불러오기' 를 띄운다.
   const frameTimers = new Map(); // channelId -> timeout id
+  const frameLoadTimers = new Map(); // channelId -> staggered load timeout
   // ⚠ 칸 상태의 정본. DOM 의 dataset 과 따로 놀지 않게 setCellStatus 에서만 바꾼다.
   const frameStates = new Map(); // channelId -> "loading" | "ready" | "error" | "ended"
 
@@ -311,7 +312,7 @@
       syncReadyAt.set(channelId, Date.now());
     }
     frameStates.set(channelId, status);
-    renderSync();
+    refreshSyncPanel();
     const cell = cells.get(channelId);
     if (cell) {
       cell.dataset.status = status;
@@ -429,6 +430,8 @@
     const channel = state.chosen.find((c) => c.channelId === channelId);
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!channel || !frame) return;
+    clearTimeout(frameLoadTimers.get(channelId));
+    frameLoadTimers.delete(channelId);
     setCellStatus(channelId, "loading");
     frame.src = frameUrl(
       channel,
@@ -529,9 +532,18 @@
 
       const src = frameUrl(channel, isMain, state.mainHighQuality);
       const delay = stagger * index;
-      if (delay) setTimeout(() => (frame.src = src), delay);
+      if (delay) {
+        const timer = setTimeout(() => {
+          frameLoadTimers.delete(channel.channelId);
+          if (cells.get(channel.channelId) !== cell || !frame.isConnected ||
+              !state.chosen.some((item) => item.channelId === channel.channelId)) return;
+          frame.src = src;
+          armReadyTimeout(channel.channelId);
+        }, delay);
+        frameLoadTimers.set(channel.channelId, timer);
+      }
       else frame.src = src;
-      armReadyTimeout(channel.channelId);
+      if (!delay) armReadyTimeout(channel.channelId);
     });
   }
 
@@ -773,6 +785,17 @@
       mixerPending.delete(key);
     }
     if (mixerDragId === channelId) mixerDragId = "";
+    mixerOpen.delete(channelId);
+  }
+
+  function clearRemovedChannel(channelId) {
+    clearTimeout(frameLoadTimers.get(channelId));
+    frameLoadTimers.delete(channelId);
+    channelAudio.delete(channelId);
+    audioBlocked.delete(channelId);
+    statsByChannel.delete(channelId);
+    clearChannelMixer(channelId);
+    clearChannelSync(channelId, true);
   }
 
   function normalizeMixerSnapshot(raw) {
@@ -1202,7 +1225,7 @@
     } catch {
       syncDiagnosticsNotice = "진단 요약을 복사하지 못했습니다.";
     }
-    renderSync(true);
+    refreshSyncPanel();
   }
 
   function diagnosticsFilename(timestamp) {
@@ -1228,14 +1251,14 @@
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
     syncDiagnosticsNotice = "진단 JSON을 저장했습니다.";
-    renderSync(true);
+    refreshSyncPanel();
   }
 
   function clearSyncDiagnostics() {
     syncDiagnostics.clear();
     syncDiagnosticsStartedAt = Date.now();
     syncDiagnosticsNotice = "진단 기록을 초기화했습니다.";
-    renderSync(true);
+    refreshSyncPanel();
   }
 
   function setSyncDiagnosticsEnabled(enabled) {
@@ -1245,7 +1268,7 @@
     }
     syncDiagnosticsNotice = "";
     updateSyncPolling();
-    renderSync(true);
+    refreshSyncPanel();
   }
 
   document.addEventListener("click", (event) => {
@@ -1622,15 +1645,42 @@
     const ids = state.chosen.map((c) => c.channelId);
     if (rows.length !== ids.length) return false;
     if (rows.some((row, i) => row.dataset.mvSyncRow !== ids[i])) return false;
+    const picking = state.sync.scope === "selected";
+    if (rows.some((row) => !!row.querySelector("[data-mv-sync-pick]") !== picking)) return false;
+    const setText = (el, value) => {
+      if (el && el.textContent !== value) el.textContent = value;
+    };
+    const mode = state.sync.mode;
+    setText($("mvSyncValue"), mode === "auto" ? "자동" : mode === "manual" ? "수동" : "꺼짐");
+    const scopeIds = syncScopeIds();
+    setText(panel.querySelector(".mv-sync-scope-count"),
+      picking ? `선택 ${scopeIds.length}/${ids.length}` : "전체");
+    const tooSmall = syncGroupTooSmall();
+    const auto = panel.querySelector("#mvSyncAuto");
+    const align = panel.querySelector("#mvSyncAlign");
+    if (auto) {
+      auto.checked = mode === "auto";
+      auto.disabled = tooSmall;
+    }
+    if (align) align.disabled = tooSmall;
+    for (const [kind, visible, value] of [
+      ["group", tooSmall, "싱크할 채널을 2개 이상 선택해 주세요."],
+      ["congestion", state.sync.congested,
+        "여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다."],
+    ]) {
+      const warning = panel.querySelector(`[data-mv-sync-warning="${kind}"]`);
+      if (!warning) return false;
+      setText(warning, value);
+      warning.hidden = !visible;
+    }
 
     for (const row of rows) {
       const id = row.dataset.mvSyncRow;
       const v = getSyncRowViewState(id, now);
       row.classList.toggle("is-excluded", v.locked);
       row.classList.toggle("is-reference", v.isReference);
-      const setText = (el, text) => {
-        if (el && el.textContent !== text) el.textContent = text;
-      };
+      const selected = row.querySelector("[data-mv-sync-pick]");
+      if (selected) selected.checked = v.picked;
       setText(
         row.querySelector("[data-mv-sync-status]"),
         v.locked ? "제외됨" : v.label,
@@ -1682,6 +1732,26 @@
     if (!notice) return false; // 예전 구조로 그려진 패널이면 전체 렌더에 맡긴다
     if (notice.textContent !== syncNotice) notice.textContent = syncNotice;
     notice.hidden = !syncNotice;
+    const diagnostics = panel.querySelector(".mv-sync-diagnostics");
+    if (!diagnostics) return false;
+    const elapsed = syncDiagnosticsStartedAt
+      ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
+    const status = state.sync.diagnosticsEnabled
+      ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
+      : syncDiagnostics.size
+        ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
+        : "기록 안 함";
+    const checkbox = diagnostics.querySelector("#mvSyncDiagnostics");
+    if (checkbox) checkbox.checked = state.sync.diagnosticsEnabled;
+    setText(diagnostics.querySelector(".mv-sync-diagnostics-status"), status);
+    for (const action of ["Copy", "Export", "Clear"]) {
+      const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
+      if (button) button.disabled = syncDiagnostics.size === 0;
+    }
+    const diagnosticsNotice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
+    if (!diagnosticsNotice) return false;
+    setText(diagnosticsNotice, syncDiagnosticsNotice);
+    diagnosticsNotice.hidden = !syncDiagnosticsNotice;
     return true;
   }
 
@@ -1690,8 +1760,14 @@
   // ⚠ 전체 렌더는 누른 버튼까지 새 Element 로 바꾼다. 그 경우에만 포커스를
   //   되돌려 준다(제자리 갱신에서는 포커스가 애초에 움직이지 않는다).
   function refreshSyncPanel(focusSelector) {
-    if (patchSyncPanel()) return;
     const panel = $("mvSyncPop");
+    if (!panel || panel.hidden) {
+      const value = $("mvSyncValue");
+      if (value) value.textContent = state.sync.mode === "auto" ? "자동" :
+        state.sync.mode === "manual" ? "수동" : "꺼짐";
+      return;
+    }
+    if (patchSyncPanel()) return;
     const wasInside =
       !!panel && !panel.hidden && panel.contains(document.activeElement);
     renderSync(true);
@@ -1744,16 +1820,7 @@
     if (!selected && !state.sync.referenceChannelId && !syncGroupTooSmall()) {
       selectSyncReference();
     }
-    // 기준이 바뀌면 행 상태(기준/제외됨)가 달라지므로 다시 그려야 한다.
-    // ⚠ 다시 그리면 방금 누른 체크박스가 사라진다. 같은 채널의 체크박스로
-    //   포커스를 돌려줘 연속 조작이 끊기지 않게 한다.
-    renderSync(true);
-    const panel = $("mvSyncPop");
-    if (panel && !panel.hidden) {
-      panel
-        .querySelector(`[data-mv-sync-pick="${CSS.escape(channelId)}"]`)
-        ?.focus({ preventScroll: true });
-    }
+    refreshSyncPanel(`[data-mv-sync-pick="${CSS.escape(channelId)}"]`);
   }
 
   function syncEligibleIds(now = Date.now(), settled = false) {
@@ -1828,7 +1895,7 @@
     const ref = selectSyncReference(now);
     if (!ref || now - (syncReadyAt.get(ref) || now) < SYNC.LIMITS.settlingMs) {
       syncNotice = "기준 채널의 재생 정보가 준비되지 않았습니다.";
-      renderSync();
+      refreshSyncPanel();
       return;
     }
     const refStats = syncStats.get(ref);
@@ -1865,7 +1932,7 @@
       changed ? `${changed}개 채널에 보정을 요청했습니다.` :
         protectedCount ? "소리가 켜진 채널은 자동 이동하지 않았습니다." :
         "보정 가능한 차이가 없거나 잠시 기다려야 합니다.";
-    renderSync();
+    refreshSyncPanel();
   }
 
   function syncTick() {
@@ -1876,7 +1943,7 @@
     const now = Date.now();
     requestSyncStats();
     if (stopAutoSyncIfGroupTooSmall()) {
-      renderSync();
+      refreshSyncPanel();
       return;
     }
     if (state.sync.mode !== "auto") resetAllSyncRates();
@@ -1928,7 +1995,7 @@
         setSyncRate(id, SYNC.rateFor(error, syncStats.get(id).syncRateOwned));
       }
     }
-    renderSync();
+    refreshSyncPanel();
     updateSyncPolling();
   }
 
@@ -2014,8 +2081,8 @@
       `${tooSmall ? " disabled" : ""}> 자동 싱크</label>` +
       `<button type="button" id="mvSyncAlign"${tooSmall ? " disabled" : ""}>느린 채널에 맞추기</button>` +
       `<button type="button" id="mvSyncClear">보정 초기화</button></div>` +
-      (tooSmall ? `<p class="mv-sync-warning">싱크할 채널을 2개 이상 선택해 주세요.</p>` : "") +
-      (state.sync.congested ? `<p class="mv-sync-warning">여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` : "") +
+      `<p class="mv-sync-warning" data-mv-sync-warning="group"${tooSmall ? "" : " hidden"}>싱크할 채널을 2개 이상 선택해 주세요.</p>` +
+      `<p class="mv-sync-warning" data-mv-sync-warning="congestion"${state.sync.congested ? "" : " hidden"}>여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` +
       // 안내 자리는 늘 만들어 두고 비었을 때만 숨긴다. 없던 자리에 새로 끼워
       // 넣으면 그건 구조 변화라 제자리 갱신이 불가능해진다(첫 클릭이 그 경우다).
       `<p class="mv-sync-notice" role="status"${syncNotice ? "" : " hidden"}>` +
@@ -2032,8 +2099,7 @@
       `<button type="button" id="mvSyncDiagnosticsExport"${syncDiagnostics.size ? "" : " disabled"}>JSON 내보내기</button>` +
       `<button type="button" id="mvSyncDiagnosticsClear"${syncDiagnostics.size ? "" : " disabled"}>초기화</button>` +
       `</div>` +
-      (syncDiagnosticsNotice
-        ? `<p class="mv-sync-diagnostics-notice" role="status">${esc(syncDiagnosticsNotice)}</p>` : "") +
+      `<p class="mv-sync-diagnostics-notice" role="status"${syncDiagnosticsNotice ? "" : " hidden"}>${esc(syncDiagnosticsNotice)}</p>` +
       `</section>`;
   }
 
@@ -2494,8 +2560,7 @@
     // ⚠ 보정값(offset)은 물려주지 않는다 — 다른 방송이라 기준이 다르다.
     const inheritSelected = inSyncScope(oldChannelId) &&
       state.sync.scope === "selected";
-    clearChannelSync(oldChannelId, true);
-    clearChannelMixer(oldChannelId);
+    clearRemovedChannel(oldChannelId);
     if (oldFrame) oldFrame.src = "about:blank";
     oldCell?.remove();
     cells.delete(oldChannelId);
@@ -2517,7 +2582,7 @@
     if (inheritSelected && !state.sync.selectedChannelIds.includes(id)) {
       state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, id];
     }
-    renderSync();
+    renderSync(true);
     if (wasMain) state.mainId = id;
 
     ensureCells(); // 새 채널 칸만 만든다
@@ -2927,8 +2992,7 @@
     if (!cell) return;
     // 이 칸의 프레임만 확실히 내린다.
     const frame = cell.querySelector("iframe");
-    clearChannelSync(channelId, true);
-    clearChannelMixer(channelId);
+    clearRemovedChannel(channelId);
     if (frame) frame.src = "about:blank";
     cell.remove();
     cells.delete(channelId);
@@ -2940,7 +3004,7 @@
     state.chosen = state.chosen.filter((c) => c.channelId !== channelId);
     // 채널을 빼서 선택 그룹이 1개가 됐을 수도 있다.
     stopAutoSyncIfGroupTooSmall();
-    renderSync();
+    renderSync(true);
 
     // 메인이 빠졌으면 남은 첫 채널을 메인으로 올린다.
     if (state.mainId === channelId) {
@@ -3527,7 +3591,7 @@
       syncNotice = "";
       updateSyncPolling();
       event.target.blur();
-      renderSync();
+      refreshSyncPanel();
       return;
     }
     if (event.target?.id !== "mvVolFocus") return;
