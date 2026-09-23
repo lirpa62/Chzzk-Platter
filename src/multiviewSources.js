@@ -51,6 +51,8 @@
     return reply.content ?? null;
   }
 
+  const isLoginRequiredError = (error) => error?.message === "HTTP 401";
+
   const isAdult = (value) =>
     value === true || String(value).toLowerCase() === "true";
 
@@ -903,6 +905,7 @@
     API,
     HASH_RE,
     getJson,
+    isLoginRequiredError,
     profileThumb,
     SORT_OPTIONS,
     serverSortType,

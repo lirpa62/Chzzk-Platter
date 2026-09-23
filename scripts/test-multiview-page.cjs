@@ -112,6 +112,8 @@ const checks = [];
       // 목록 API 는 배경 스크립트가 중계한다(확장 페이지 직접 fetch 는 CORS 로 막힘).
       sendMessage:async(msg)=>{
         if(msg?.type!=='MULTIVIEW_API')return {ok:false,reason:'unknown'};
+        if(window.__followingAuthFailure&&new URL(msg.url).pathname.endsWith('/following-lives'))
+          return {ok:false,reason:'HTTP 401'};
         return {ok:true,content:window.__apiContent(msg.url)};
       }},
       storage:{local:{get:async()=>({
@@ -281,6 +283,26 @@ const checks = [];
     "팔로잉 채널 목록이 렌더된다",
     `const items=document.querySelectorAll('#mvChannelList .mv-card');
      check(items.length===4,'채널 4개가 아니라 '+items.length+'개');`,
+  );
+
+  await test(
+    "비로그인 팔로잉·전용 팔로잉에는 로그인 안내를 표시한다",
+    `window.__followingAuthFailure=true;
+     const box=document.getElementById('mvChannelList');
+     const sort=document.getElementById('mvSort');
+     sort.value='viewers-asc';sort.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(200);
+     check(box.textContent.includes('치지직에 로그인해 주세요'),
+       '팔로잉 401에 로그인 안내가 없다: '+box.textContent);
+     document.querySelector('[data-mv-source="custom"]').click();
+     await wait(200);
+     check(box.textContent.includes('치지직에 로그인해 주세요'),
+       '전용 팔로잉 401에 로그인 안내가 없다: '+box.textContent);
+     window.__followingAuthFailure=false;
+     document.querySelector('[data-mv-source="following"]').click();
+     sort.value='viewers';sort.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(200);
+     check(box.querySelector('.mv-card'),'로그인 상태의 목록이 복구되지 않았다');`,
   );
 
   await test(
@@ -772,6 +794,8 @@ const checks = [];
       sendMessage:async(msg)=>{
         if(msg?.type!=='MULTIVIEW_API')return {ok:false};
         const parsed=new URL(msg.url);
+        if(window.__followingAuthFailure&&parsed.pathname.endsWith('/following-lives'))
+          return {ok:false,reason:'HTTP 401'};
         const detail=parsed.pathname.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
         if(detail){
           const n=parseInt(detail[1],16);
@@ -989,6 +1013,29 @@ const checks = [];
      await wait(250);
      document.getElementById('mvQuickClose').click();
      check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "Quick 비로그인 팔로잉·전용 팔로잉에도 로그인 안내를 표시한다",
+    `document.getElementById('mvBack').click();
+     window.__followingAuthFailure=true;
+     const box=document.getElementById('mvQuickAdd');
+     const sort=document.getElementById('mvQuickSort');
+     sort.value='viewers-asc';sort.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(200);
+     check(box.textContent.includes('치지직에 로그인해 주세요'),
+       'Quick 팔로잉 401에 로그인 안내가 없다: '+box.textContent);
+     document.querySelector('[data-mv-quick-source="custom"]').click();
+     await wait(200);
+     check(box.textContent.includes('치지직에 로그인해 주세요'),
+       'Quick 전용 팔로잉 401에 로그인 안내가 없다: '+box.textContent);
+     window.__followingAuthFailure=false;
+     document.querySelector('[data-mv-quick-source="following"]').click();
+     sort.value='viewers';sort.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(200);
+     check(box.querySelector('.mv-quick-card:not(.is-skeleton)'),
+       'Quick 로그인 상태의 목록이 복구되지 않았다');
+     document.getElementById('mvQuickClose').click();`,
   );
 
   await test(

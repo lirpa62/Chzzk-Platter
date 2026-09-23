@@ -22,6 +22,12 @@ async function test(name, run) {
 }
 
 (async () => {
+  await test("401 응답만 로그인 필요로 구분한다", async () => {
+    assert.equal(SOURCES.isLoginRequiredError(new Error("HTTP 401")), true);
+    assert.equal(SOURCES.isLoginRequiredError(new Error("HTTP 403")), false);
+    assert.equal(SOURCES.isLoginRequiredError(new Error("HTTP 500")), false);
+  });
+
   await test("프로필 이미지는 작은 리사이즈본을 요청한다", async () => {
     const original = "https://nng-phinf.pstatic.net/profile.png?type=f120_120_na&v=1";
     const avatar = new URL(SOURCES.profileThumb(original));

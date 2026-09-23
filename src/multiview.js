@@ -264,7 +264,11 @@
     } catch (error) {
       if (requestId !== listRequestId) return;
       box.removeAttribute("aria-busy");
-      box.innerHTML = `<p class="mv-empty">목록을 불러오지 못했습니다. (${esc(error.message)})</p>`;
+      const loginRequired = (source === "following" || source === "custom") &&
+        SOURCES.isLoginRequiredError(error);
+      box.innerHTML = loginRequired
+        ? '<p class="mv-empty">팔로잉 목록을 보려면 치지직에 로그인해 주세요.</p>'
+        : `<p class="mv-empty">목록을 불러오지 못했습니다. (${esc(error.message)})</p>`;
       $("mvSort").disabled = false;
       sortPicker.sync();
       return;

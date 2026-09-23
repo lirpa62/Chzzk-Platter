@@ -3716,6 +3716,7 @@
   // ⚠ 채널을 빼도 남은 칸은 다시 만들지 않는다(만들면 방송이 처음부터 로드된다).
   //   빠진 칸만 지우고 배치를 새 채널 수에 맞는 것으로 바꾼다.
   let quickCandidates = null;
+  let quickLoadError = null;
   const quickSize = { width: null, height: null };
   const quickPosition = { left: null, top: null };
   const quickResizeMinWidth = 420;
@@ -4079,14 +4080,17 @@
     const source = quickSource;
     const keyword = quickKeyword;
     quickCandidates = null; // 불러오는 중
+    quickLoadError = null;
     renderQuickCandidates();
     let result = [];
+    let error = null;
     try {
       result = await quickRows(source, keyword);
-    } catch {
-      result = [];
+    } catch (caught) {
+      error = caught;
     }
     if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
+    quickLoadError = error;
     if (source === "custom") {
       quickSections = Array.isArray(result) ? result : [];
       if (
@@ -4386,7 +4390,14 @@
         (quickSource === "custom" && (mode === "recent" || mode === "oldest")),
     ).filter((r) => !have.has(r.channelId));
     if (!rest.length) {
-      box.innerHTML = `<p class="mv-quick-empty">${esc(quickEmptyMessage())}</p>`;
+      const loginRequired = (quickSource === "following" || quickSource === "custom") &&
+        SOURCES.isLoginRequiredError(quickLoadError);
+      const message = loginRequired
+        ? "팔로잉 목록을 보려면 치지직에 로그인해 주세요."
+        : quickLoadError
+          ? `목록을 불러오지 못했습니다. (${quickLoadError.message || "요청 실패"})`
+          : quickEmptyMessage();
+      box.innerHTML = `<p class="mv-quick-empty">${esc(message)}</p>`;
       return;
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
