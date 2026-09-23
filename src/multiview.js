@@ -319,7 +319,9 @@
       `<img class="mv-card-avatar" src="${esc(safeImageUrl(SOURCES.profileThumb(r.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
       `<span class="mv-card-text">` +
       `<span class="mv-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
-      `<span class="mv-card-name">${esc(r.channelName)}</span>` +
+      `<span class="mv-card-name-row"><span class="mv-card-name">${esc(r.channelName)}</span>` +
+      (r.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>` : "") +
+      `</span>` +
       ((r.category || tags.length)
         ? `<span class="mv-card-meta">` +
           (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +

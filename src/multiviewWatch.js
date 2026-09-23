@@ -38,6 +38,7 @@
           "'": "&#39;",
         })[c],
     );
+  const fmtCount = (value) => Number(value || 0).toLocaleString("ko-KR");
 
   const state = {
     handoffId: "",
@@ -3573,6 +3574,8 @@
       (thumb
         ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
         : `<span class="mv-quick-card-empty"></span>`) +
+      `<span class="mv-card-live">LIVE</span>` +
+      `<span class="mv-card-viewers">${fmtCount(r.viewers)}명</span>` +
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       `</span>` +
       `<span class="mv-quick-card-body">` +
@@ -3581,7 +3584,11 @@
         : `<span class="mv-quick-card-avatar is-empty"></span>`) +
       `<span class="mv-quick-card-text">` +
       `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
-      `<span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
+      `<span class="mv-quick-card-name-row"><span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
+      (r.verifiedMark
+        ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>`
+        : "") +
+      `</span>` +
       `</span></span>` +
       ((r.category || tags.length) ? `<span class="mv-card-meta mv-quick-card-meta">` +
         (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +

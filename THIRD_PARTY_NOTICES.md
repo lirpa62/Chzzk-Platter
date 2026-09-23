@@ -2,6 +2,16 @@
 
 This project includes third-party open source software.
 
+## Pretendard
+
+This extension includes the Pretendard variable font.
+
+- Project: https://github.com/orioncactus/pretendard
+- License: SIL Open Font License 1.1
+- Bundled file: `fonts/PretendardVariable.woff2`
+- Full license text: `LICENSES/Pretendard-OFL-1.1.txt`
+- Copyright: Copyright (c) 2021, Kil Hyung-jin; includes portions attributed to Adobe, The Inter Project Authors, and The M+ FONTS Project Authors. See the full license text for details.
+
 ## D3
 
 This extension includes `D3` v7.9.0.

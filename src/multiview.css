@@ -1,4 +1,12 @@
 /* 치즈 플래터 - 멀티뷰 */
+@font-face {
+  font-family: Pretendard;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/PretendardVariable.woff2") format("woff2");
+}
+
 html,
 body {
   height: 100%;
@@ -7,7 +15,14 @@ body {
   margin: 0;
   background: var(--popup-bg, #141517);
   color: var(--popup-text, #e9ecef);
+  font-family: Pretendard, "Apple SD Gothic Neo", sans-serif;
   font-size: 14px;
+}
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* ── 채널 고르기 ───────────────────────────────────────────────────── */
@@ -426,9 +441,30 @@ body {
 .mv-card-name {
   color: var(--popup-muted, #9aa1a9);
   font-size: 11.5px;
+  font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.mv-card-name-row,
+.mv-quick-card-name-row {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.mv-card-name-row .mv-card-name,
+.mv-quick-card-name-row .mv-quick-card-name {
+  flex: 0 1 auto;
+}
+.mv-card-verified {
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+    50% / cover no-repeat;
+  display: inline-block;
+  flex: none;
+  height: 14px;
+  width: 14px;
 }
 .mv-card-meta {
   display: flex;
@@ -444,6 +480,7 @@ body {
   border-radius: 5px;
   color: var(--popup-muted, #9aa1a9);
   font-size: 10.5px;
+  font-weight: 500;
   line-height: 17px;
   max-width: 100%;
   overflow: hidden;
@@ -455,8 +492,15 @@ body {
   background: var(--popup-surface, #22252a);
   color: var(--popup-text, #e9ecef);
 }
-.mv-card-tag-chip::before {
-  content: "#";
+.mv-card-tag-chip {
+  background: #eee8ff;
+  border-color: #d9caff;
+  color: #593c91;
+}
+:root[data-theme="dark"] .mv-card-tag-chip {
+  background: rgba(164, 126, 255, 0.18);
+  border-color: rgba(184, 153, 255, 0.32);
+  color: #d2c0ff;
 }
 .mv-live-more {
   align-self: center;
@@ -891,15 +935,24 @@ button.mv-live-more {
   font-size: 12px;
   padding: 6px 12px;
 }
-.mv-cell-retry:hover,
 .mv-cell-unmute:hover {
   border-color: var(--popup-brand, #00ffa3);
   color: var(--popup-brand-strong, #00ffa3);
 }
+.mv-cell-retry {
+  background: #eee8ff;
+  border-color: #d9caff;
+  color: #593c91;
+}
+.mv-cell-retry:hover {
+  background: #e3d6ff;
+  border-color: #c5aaff;
+  color: #482c80;
+}
 /* 덮개에는 버튼이 둘이다. 먼저 누르길 권하는 쪽을 앞세운다. */
 .mv-cell-retry.is-primary {
-  background: var(--popup-brand, #00ffa3);
-  border-color: var(--popup-brand, #00ffa3);
+  background: #6f42c1;
+  border-color: #6f42c1;
   color: #fff;
   font-weight: 600;
 }
@@ -1502,6 +1555,10 @@ button.mv-live-more {
   object-fit: cover;
   width: 100%;
 }
+.mv-quick-card-thumb .mv-card-live,
+.mv-quick-card-thumb .mv-card-viewers {
+  z-index: 4;
+}
 .mv-quick-card-empty {
   display: block;
   height: 100%;
@@ -1543,6 +1600,8 @@ button.mv-live-more {
 .mv-quick-card-name {
   color: var(--popup-muted, #9aa1a9);
   font-size: 10.5px;
+  font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2508,10 +2567,24 @@ button.mv-live-more {
 :root[data-theme="dark"] .mv-quick-tag,
 :root[data-theme="dark"] .mv-card-picked,
 :root[data-theme="dark"] .mv-chosen-item:first-child .mv-chosen-rank,
-:root[data-theme="dark"] .mv-cell-retry.is-primary,
-:root[data-theme="dark"] .mv-cell-retry.is-primary:hover,
 :root[data-theme="dark"] .mv-vol-enable {
   color: #05170f;
+}
+:root[data-theme="dark"] .mv-cell-retry {
+  background: rgba(164, 126, 255, 0.18);
+  border-color: rgba(184, 153, 255, 0.32);
+  color: #d2c0ff;
+}
+:root[data-theme="dark"] .mv-cell-retry:hover {
+  background: rgba(164, 126, 255, 0.28);
+  border-color: #b899ff;
+  color: #eee7ff;
+}
+:root[data-theme="dark"] .mv-cell-retry.is-primary,
+:root[data-theme="dark"] .mv-cell-retry.is-primary:hover {
+  background: #8b63d2;
+  border-color: #8b63d2;
+  color: #fff;
 }
 
 /* ── 패널 스크롤바 ─────────────────────────────────────────────────────────

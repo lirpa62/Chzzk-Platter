@@ -129,6 +129,8 @@
     channelId: String(channel?.channelId || "").toLowerCase(),
     channelName: String(channel?.channelName || "").trim(),
     channelImageUrl: String(channel?.channelImageUrl || ""),
+    verifiedMark:
+      channel?.verifiedMark === true || entry?.verifiedMark === true,
     liveTitle: String(live?.liveTitle || "").trim(),
     category: String(live?.liveCategoryValue || "").trim(),
     viewers: Number(live?.concurrentUserCount) || 0,
