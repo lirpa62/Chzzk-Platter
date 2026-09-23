@@ -256,6 +256,7 @@
     "cheeseMixerDefaultOn",
     "cheeseAudioMixer.autoSync",
     "cheeseMaxQuality",
+    "cheeseMaxQualityTarget",
     "cheeseMaxQualityRespectManual",
     "cheeseMixerGainMin",
     "cheeseMixerGainMax",
@@ -3750,7 +3751,49 @@
 
   // ── 최대 화질 자동 고정(전역, 기본 OFF) ──────────────────────────────────
   const MAX_QUALITY_KEY = "cheeseMaxQuality";
+  const MAX_QUALITY_TARGET_KEY = "cheeseMaxQualityTarget";
   const maxQualityInput = document.querySelector("[data-max-quality]");
+  const maxQualityTargetPicker = document.querySelector(
+    "[data-max-quality-target-picker]",
+  );
+  const maxQualityTargetTrigger = maxQualityTargetPicker?.querySelector(
+    "[data-max-quality-target]",
+  );
+  const maxQualityTargetList = maxQualityTargetPicker?.querySelector(
+    "[data-max-quality-target-list]",
+  );
+  const normalizeMaxQualityTarget = (value) =>
+    value === "720" ? "720" : "highest";
+  function reflectMaxQualityTarget(value) {
+    const target = normalizeMaxQualityTarget(value);
+    const label = maxQualityTargetPicker?.querySelector(
+      "[data-max-quality-target-label]",
+    );
+    if (label) label.textContent = target === "720" ? "720p" : "최고 화질";
+    maxQualityTargetList?.querySelectorAll("[role='option']").forEach((option) => {
+      option.setAttribute(
+        "aria-selected",
+        String(option.dataset.value === target),
+      );
+    });
+  }
+  function closeMaxQualityTarget() {
+    maxQualityTargetPicker?.classList.remove("is-open");
+    maxQualityTargetTrigger?.setAttribute("aria-expanded", "false");
+    if (maxQualityTargetList) maxQualityTargetList.hidden = true;
+  }
+  function reflectMaxQualityChildrenEnabled() {
+    const enabled = !!maxQualityInput?.checked;
+    if (maxQualityTargetTrigger) maxQualityTargetTrigger.disabled = !enabled;
+    maxQualityTargetPicker
+      ?.closest(".settings-item")
+      ?.classList.toggle("is-locked", !enabled);
+    if (!enabled) closeMaxQualityTarget();
+    if (maxQualityRespectInput) maxQualityRespectInput.disabled = !enabled;
+    maxQualityRespectInput
+      ?.closest(".settings-item")
+      ?.classList.toggle("is-locked", !enabled);
+  }
   async function loadMaxQuality() {
     let on = false;
     try {
@@ -3758,20 +3801,61 @@
       on = data?.[MAX_QUALITY_KEY] === true;
     } catch {}
     if (maxQualityInput) maxQualityInput.checked = on;
+    reflectMaxQualityChildrenEnabled();
   }
+  async function loadMaxQualityTarget() {
+    try {
+      const data = await cachedStorageGet(MAX_QUALITY_TARGET_KEY);
+      reflectMaxQualityTarget(data?.[MAX_QUALITY_TARGET_KEY]);
+    } catch {
+      reflectMaxQualityTarget("highest");
+    }
+  }
+  maxQualityTargetTrigger?.addEventListener("click", () => {
+    if (maxQualityTargetTrigger.disabled) return;
+    if (!maxQualityTargetList?.hidden) {
+      closeMaxQualityTarget();
+      return;
+    }
+    const rect = maxQualityTargetTrigger.getBoundingClientRect();
+    maxQualityTargetList.style.left = `${Math.round(rect.left)}px`;
+    maxQualityTargetList.style.minWidth = `${Math.round(rect.width)}px`;
+    maxQualityTargetList.hidden = false;
+    const listHeight = maxQualityTargetList.getBoundingClientRect().height;
+    const top = rect.bottom + listHeight + 4 <= window.innerHeight
+      ? rect.bottom + 4
+      : Math.max(4, rect.top - listHeight - 4);
+    maxQualityTargetList.style.top = `${Math.round(top)}px`;
+    maxQualityTargetPicker.classList.add("is-open");
+    maxQualityTargetTrigger.setAttribute("aria-expanded", "true");
+  });
+  maxQualityTargetList?.addEventListener("click", (event) => {
+    const option = event.target.closest("[role='option'][data-value]");
+    if (!option) return;
+    const value = normalizeMaxQualityTarget(option.dataset.value);
+    reflectMaxQualityTarget(value);
+    cachedStorageSet({ [MAX_QUALITY_TARGET_KEY]: value });
+    closeMaxQualityTarget();
+    maxQualityTargetTrigger?.focus();
+  });
+  maxQualityTargetPicker?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closeMaxQualityTarget();
+    maxQualityTargetTrigger?.focus();
+  });
+  document.addEventListener("click", (event) => {
+    if (maxQualityTargetPicker && !maxQualityTargetPicker.contains(event.target)) {
+      closeMaxQualityTarget();
+    }
+  });
+  document.addEventListener("scroll", () => closeMaxQualityTarget(), true);
+  window.addEventListener("resize", closeMaxQualityTarget);
   // 수동 화질 변경 존중(하위, 기본 ON). 위 최대 화질 고정이 꺼져 있으면 비활성화(흐림).
   const MAX_QUALITY_RESPECT_KEY = "cheeseMaxQualityRespectManual";
   const maxQualityRespectInput = document.querySelector(
     "[data-max-quality-respect]",
   );
-  function reflectMaxQualityRespectEnabled() {
-    const parentOn = !!maxQualityInput?.checked;
-    if (!maxQualityRespectInput) return;
-    maxQualityRespectInput.disabled = !parentOn;
-    maxQualityRespectInput
-      .closest(".settings-item")
-      ?.classList.toggle("is-locked", !parentOn);
-  }
   async function loadMaxQualityRespect() {
     let on = true;
     try {
@@ -3779,7 +3863,7 @@
       on = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 미설정=기본 ON
     } catch {}
     if (maxQualityRespectInput) maxQualityRespectInput.checked = on;
-    reflectMaxQualityRespectEnabled();
+    reflectMaxQualityChildrenEnabled();
   }
   maxQualityRespectInput?.addEventListener("change", () => {
     try {
@@ -3792,9 +3876,10 @@
     try {
       cachedStorageSet({ [MAX_QUALITY_KEY]: maxQualityInput.checked });
     } catch {}
-    reflectMaxQualityRespectEnabled(); // 부모 변화 시 하위 활성/비활성 갱신
+    reflectMaxQualityChildrenEnabled();
   });
   loadMaxQuality();
+  loadMaxQualityTarget();
   loadMaxQualityRespect();
 
   // ── 라이브 되감기 바 표시(전역, 기본 OFF) ─────────────────────────────────

@@ -21,6 +21,7 @@ for (const key of [
   // 멀티뷰 전용 버튼 설정(팝업과 별개 키). 내보내기에서 빠지면 안 된다.
   'cheeseMultiviewBtnMixer',
   'cheeseMultiviewSeekBar',
+  'cheeseMaxQualityTarget',
 ]) {
   assert.match(settingsSource, new RegExp(`SETTINGS_STORAGE_KEYS[\\s\\S]*?"${key}"`));
 }
@@ -268,6 +269,29 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseEmbedClipMixerDefaultGainEnabled===false&&embedGainRow.classList.contains('is-locked'),'embed gain disable did not lock its value');
       search('비디오 필터 기본 켜짐');
       check(shown(row('[data-video-filter-auto-enable]')),'legacy auto-enable name not searchable');
+      search('');
+    `);
+    await test('maximum quality target defaults, persists, and follows parent availability',`
+      search('');document.querySelector('[data-tab="player"]').click();
+      const parent=document.querySelector('[data-max-quality]');
+      const trigger=document.querySelector('[data-max-quality-target]');
+      const label=document.querySelector('[data-max-quality-target-label]');
+      const respect=document.querySelector('[data-max-quality-respect]');
+      check(label.textContent==='최고 화질','missing target did not default to highest');
+      check(trigger.disabled&&respect.disabled,'children enabled while parent off');
+      parent.checked=true;parent.dispatchEvent(new Event('change',{bubbles:true}));
+      check(!trigger.disabled&&!respect.disabled,'children stayed locked');
+      row('[data-max-quality-target]').scrollIntoView({block:'center'});
+      trigger.click();
+      check(trigger.getAttribute('aria-expanded')==='true','target popover did not open');
+      const listRect=document.querySelector('[data-max-quality-target-list]').getBoundingClientRect();
+      check(listRect.top>=0&&listRect.bottom<=innerHeight,'target popover clipped by viewport');
+      document.querySelector('[data-max-quality-target-list] [data-value="720"]').click();
+      check(saved.cheeseMaxQualityTarget==='720'&&label.textContent==='720p','target was not saved');
+      parent.checked=false;parent.dispatchEvent(new Event('change',{bubbles:true}));
+      check(trigger.disabled&&respect.disabled&&saved.cheeseMaxQualityTarget==='720','parent off erased target or left child enabled');
+      search('최대 화질');
+      check(row('[data-max-quality-target]').querySelector('.settings-search-path').dataset.settingsParent.includes('최대 화질 자동 고정'),'target search path missing parent');
       search('');
     `);
     await test('preset popover still opens after repeated searches',`

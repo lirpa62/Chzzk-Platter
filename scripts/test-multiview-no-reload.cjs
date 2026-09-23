@@ -196,8 +196,8 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 스스로 480p 로 수렴
     "상한만 걸린 칸에도 재시도 이벤트를 건다",
   );
   ok(
-    /if \(maxQualityCap > 0\) \{/.test(bind),
-    "상한 모드는 맞을 때까지 재시도한다",
+    /if \(multiviewQualityPolicy === "cap-480" && maxQualityCap > 0\) \{/.test(bind),
+    "멀티뷰 480p 상한만 맞을 때까지 재시도한다",
   );
   // 초당 여러 번 오는 timeupdate 에서 fiber 탐색을 반복하면 칸 수만큼 비싸진다.
   ok(/lastCapProgressAt/.test(bind), "상한 재시도는 초당 한 번으로 제한한다");

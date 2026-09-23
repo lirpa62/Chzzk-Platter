@@ -673,6 +673,10 @@
   // 시청 시 최대 화질 자동 고정(전역, 기본 OFF). MAIN world(audioMixer.js)가 corePlayer로 적용.
   const MAX_QUALITY_KEY = "cheeseMaxQuality";
   let maxQualityAuto = false;
+  const MAX_QUALITY_TARGET_KEY = "cheeseMaxQualityTarget";
+  let maxQualityTarget = "highest";
+  const normalizeMaxQualityTarget = (value) =>
+    value === "720" ? "720" : "highest";
   // 최대 화질 고정 중 사용자가 수동으로 화질을 바꾸면 존중(그 영상 동안 안 되돌림, 기본 ON).
   const MAX_QUALITY_RESPECT_KEY = "cheeseMaxQualityRespectManual";
   let maxQualityRespectManual = true;
@@ -53112,6 +53116,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     broadcastFeatureFlags();
   });
 
+  function resolveMaxQualityCap() {
+    if (IS_MULTIVIEW_FRAME) {
+      return multiviewQualityPolicy === "cap-480" ? 480 : 0;
+    }
+    if (IS_POPUP_PLAYER_FRAME || !maxQualityAuto) return 0;
+    return maxQualityTarget === "720" ? 720 : 0;
+  }
+
   function broadcastFeatureFlags() {
     window.postMessage(
       {
@@ -53138,9 +53150,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           : IS_POPUP_PLAYER_FRAME
             ? popupPlayerMaxQuality
             : maxQualityAuto,
-        // 화질 상한(px). cap-480 정책에서만 쓰며 highest는 별도 자동 선택으로 처리한다.
-        maxQualityCap: IS_MULTIVIEW_FRAME && multiviewQualityPolicy === "cap-480"
-          ? 480 : 0,
+        // 멀티뷰와 팝업은 일반 플레이어의 최대 화질 선택과 독립적으로 동작한다.
+        maxQualityCap: resolveMaxQualityCap(),
         multiviewQualityPolicy: IS_MULTIVIEW_FRAME ? multiviewQualityPolicy : "none",
         multiviewQualityReconcileToken: IS_MULTIVIEW_FRAME
           ? multiviewQualityReconcileToken : 0,
@@ -53237,6 +53248,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     MIXER_ALWAYS_ON_KEY,
     MIXER_DEFAULT_ON_KEY,
     MAX_QUALITY_KEY,
+    MAX_QUALITY_TARGET_KEY,
     MAX_QUALITY_RESPECT_KEY,
     VIDEO_FILTER_ALWAYS_ON_KEY,
     VIDEO_FILTER_DEFAULT_ON_KEY,
@@ -53624,6 +53636,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       mixerAlwaysOn = data?.[MIXER_ALWAYS_ON_KEY] === true;
       mixerDefaultOn = data?.[MIXER_DEFAULT_ON_KEY] === true;
       maxQualityAuto = data?.[MAX_QUALITY_KEY] === true;
+      maxQualityTarget = normalizeMaxQualityTarget(
+        data?.[MAX_QUALITY_TARGET_KEY],
+      );
       maxQualityRespectManual = data?.[MAX_QUALITY_RESPECT_KEY] !== false; // 기본 ON
       videoFilterAlwaysOn = data?.[VIDEO_FILTER_ALWAYS_ON_KEY] === true;
       videoFilterDefaultOn = data?.[VIDEO_FILTER_DEFAULT_ON_KEY] === true;
@@ -53719,6 +53734,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
       if (changes[MAX_QUALITY_KEY]) {
         maxQualityAuto = changes[MAX_QUALITY_KEY].newValue === true;
+      }
+      if (changes[MAX_QUALITY_TARGET_KEY]) {
+        maxQualityTarget = normalizeMaxQualityTarget(
+          changes[MAX_QUALITY_TARGET_KEY].newValue,
+        );
       }
       if (changes[MAX_QUALITY_RESPECT_KEY]) {
         maxQualityRespectManual =
@@ -54827,6 +54847,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[MIXER_ALWAYS_ON_KEY] ||
         changes[MIXER_DEFAULT_ON_KEY] ||
         changes[MAX_QUALITY_KEY] ||
+        changes[MAX_QUALITY_TARGET_KEY] ||
         changes[MAX_QUALITY_RESPECT_KEY] ||
         changes[VIDEO_FILTER_ALWAYS_ON_KEY] ||
         changes[VIDEO_FILTER_DEFAULT_ON_KEY] ||

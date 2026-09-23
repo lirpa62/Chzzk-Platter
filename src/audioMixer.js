@@ -5305,7 +5305,7 @@
     return m ? Number(m[1]) : 0;
   }
   // 화질 메뉴에서 목표 화질 항목(li)과 그 height 를 찾는다.
-  // cap>0 이면 'cap 이하 중 가장 높은' 항목을 고른다(멀티뷰처럼 화질 상한이 있는 경우).
+  // cap>0 이면 'cap 이하 중 가장 높은' 항목을 고른다.
   // cap 이하가 하나도 없으면 가장 낮은 항목으로 내린다. cap=0 이면 최고 화질.
   function findQualityMenuTarget(cap = 0) {
     const list = document.querySelector(
@@ -5438,7 +5438,7 @@
     }
   }
   function applyMaxQuality() {
-    // 상한만 걸린 경우(멀티뷰)에도 동작해야 하므로 둘 중 하나라도 켜져 있으면 진행한다.
+    // 멀티뷰 보조 칸은 자동 최고 화질 없이 480p 상한만 적용한다.
     if (!maxQualityAuto && !(maxQualityCap > 0)) return;
     // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
     // 경우, 모든 탭을 1080p60(≈8Mbps)으로 강제하면 대역폭·디코드·미디어 메모리가 탭 수만큼
@@ -5446,9 +5446,8 @@
     // 정상인데 탭당 렌더러 1GB+ = 미디어 파이프라인 부하). 숨김 탭은 치지직 기본 ABR 에
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
-    // (상한만 걸린 멀티뷰 프레임은 예외 — 상한은 화질을 낮추는 방향이라
-    //  숨김 상태에서도 부담을 늘리지 않는다.)
-    if (document.hidden && !(maxQualityCap > 0)) return;
+    // 멀티뷰 보조 칸의 480p 상한만 숨김 상태에서도 적용한다.
+    if (document.hidden && multiviewQualityPolicy !== "cap-480") return;
     if (
       maxQualitySuspendedForAudioOnly &&
       Date.now() < maxQualityResumeAfterAudioOnlyAt
@@ -5539,16 +5538,13 @@
     // '수동 변경 존중' 옵션: 우리가 올려둔 상태(maxQualitySetHeight)에서 선택이 바뀌었으면
     // 사용자가 직접 고른 것으로 보고 이 미디어 동안 존중한다.
     //
-    // 상한이 없을 때는 '더 낮아진 경우'만 수동으로 친다(우리가 최고로 올리는 쪽이라
-    // 더 높아지는 변화는 우리 자신의 동작이다). 상한이 걸린 멀티뷰에서는 반대로
-    // 사용자가 상한 위로 올리는 것이 정상 동작이므로 '달라졌으면' 수동으로 본다.
+    // 상한이 없을 때는 더 낮아진 경우만, 상한이 있으면 목표와 달라진 경우를 본다.
     const deviated =
       maxQualityCap > 0
         ? selH !== maxQualitySetHeight
         : selH < maxQualitySetHeight;
-    // ⚠ 상한이 걸린 칸(멀티뷰 보조)에서는 '달라졌다' 만으로 수동이라 볼 수 없다.
-    //   치지직이 스스로 되돌린 것과 사용자가 고른 것을 구분해야 한다. 그래서 상한이
-    //   있을 때는 신뢰된 메뉴 조작이 실제로 있었는지까지 확인한다.
+    // 상한이 있으면 플레이어가 자체적으로 화질을 바꿀 수도 있으므로
+    // 신뢰된 메뉴 조작이 있었는지 확인한다.
     const multiviewPolicyActive = multiviewQualityPolicy !== "none";
     const userChose = multiviewPolicyActive || maxQualityCap > 0
       ? maxQualityUserTouchedPage === currentPageKey : true;
@@ -5694,11 +5690,9 @@
       const onProgress = () => {
         if (maxQualityRespectedPage === currentPageKey) return;
         // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
-        // ⚠ 다만 상한이 걸린 칸은 tick 에 기대기 어렵다 — 멀티뷰는 채팅을 접어
-        //   두어 DOM 변이가 거의 없어 tick 이 잘 깨지 않는다. 상한 모드에서는
-        //   실제로 상한에 맞을 때까지 계속 재시도한다(맞으면 applyMaxQuality 가
-        //   멱등하게 즉시 빠져나온다).
-        if (maxQualityCap > 0) {
+        // 멀티뷰 보조 칸은 tick 이 드물 수 있어 실제 480p가 적용될 때까지
+        // timeupdate에서도 재시도한다.
+        if (multiviewQualityPolicy === "cap-480" && maxQualityCap > 0) {
           // ⚠ timeupdate 는 초당 여러 번 온다. applyMaxQuality 는 '이미 맞음' 을
           //   판정하기까지 fiber 탐색(findCorePlayer)을 하므로 그대로 두면 칸 수
           //   만큼 비용이 곱해진다. 초당 한 번으로 충분하다.
