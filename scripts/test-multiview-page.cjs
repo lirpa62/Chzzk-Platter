@@ -760,7 +760,10 @@ const checks = [];
       if(callback?.name==='syncTick')window.syncTickCallbacks.push(callback);
       return nativeSetInterval.call(this,callback,delay,...args);
     };`);
-  await evaluate(readFileSync("src/multiviewWatch.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewWatch.js", "utf8")
+    .replace("const state = {", "const state = window.__mvState = {")
+    .replace("  function rebaseSyncOffsets(",
+      "  window.__testRebase = rebaseSyncOffsets;\n  function rebaseSyncOffsets("));
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
   await test(
@@ -2041,6 +2044,9 @@ const checks = [];
      const target=cells.find(c=>!c.classList.contains('is-main'))||cells[0];
      const oldId=target.dataset.channelId;
      const others=cells.filter(c=>c!==target).map(c=>c.dataset.channelId);
+     window.__mvState.sync.manualOffsets[oldId]=1.2;
+     window.__mvState.sync.manualOffsets[others[0]]=0.5;
+     window.__mvState.sync.referenceChannelId=oldId;
      const countBefore=cells.length;
      const layoutBefore=document.getElementById('mvLayoutValue').textContent;
      // 종료 → 다른 채널 선택
@@ -2069,13 +2075,22 @@ const checks = [];
        '옛 칸이 남아 있다');
      check(document.querySelector('.mv-cell[data-channel-id="'+newId+'"]'),
        '새 칸이 없다');
+     check(window.__mvState.sync.manualOffsets[oldId]===undefined,
+       '교체된 채널 보정값이 남았다');
+     check(window.__mvState.sync.manualOffsets[newId]===0,
+       '새 채널이 이전 보정값을 물려받았다');
+     window.__testRebase(others[0]);
+     check(window.__mvState.sync.manualOffsets[newId]===0,
+       '기준 재선택으로 새 채널에 보정값이 생겼다');
      check(document.querySelectorAll('.mv-cell').length===countBefore,
        '채널 수가 달라졌다');
      for(const id of others)
        check(document.querySelector('.mv-cell[data-channel-id="'+id+'"]'),
          '다른 칸 '+id.slice(0,6)+' 이 사라졌다');
      check(document.getElementById('mvLayoutValue').textContent===layoutBefore,
-       '배치가 바뀌었다');`,
+       '배치가 바뀌었다');
+     window.__mvState.sync.manualOffsets[others[0]]=0;
+     window.__mvState.sync.referenceChannelId=null;`,
   );
 
   await test(

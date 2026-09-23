@@ -1121,6 +1121,7 @@
   const syncRates = new Map();
   const pendingSyncCommands = new Map();
   const syncRetryAt = new Map();
+  const freshSyncChannels = new Set();
   const syncDiagnostics = DIAGNOSTICS.createRecorder();
   let syncCommandSeq = 0;
   let syncCongestion = { active: false, since: 0 };
@@ -1440,10 +1441,12 @@
       if (entry.command === "seek" || entry.command === "nudge") syncSeekAt.set(channelId, Date.now());
       if (entry.command === "nudge") {
         state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        freshSyncChannels.delete(channelId);
         syncNotice = "수동 보정을 적용했습니다.";
       }
       if (entry.command === "seek" && entry.desiredValue?.commitOffset) {
         state.sync.manualOffsets[channelId] = entry.desiredValue.offset;
+        freshSyncChannels.delete(channelId);
         syncNotice = "보정값을 초기화했습니다.";
       }
       if (entry.command === "rate") {
@@ -1484,9 +1487,11 @@
   }
 
   function clearChannelSync(channelId, removeOffset = false) {
-    // 빠지는 채널은 선택 목록에도 남기지 않는다(stale ID 방지).
-    state.sync.selectedChannelIds =
-      state.sync.selectedChannelIds.filter((id) => id !== channelId);
+    if (removeOffset) {
+      state.sync.selectedChannelIds =
+        state.sync.selectedChannelIds.filter((id) => id !== channelId);
+      freshSyncChannels.delete(channelId);
+    }
     resetSyncRate(channelId);
     cancelPendingSync(channelId);
     syncStats.delete(channelId);
@@ -1499,6 +1504,14 @@
     if (state.sync.referenceChannelId === channelId) {
       state.sync.referenceChannelId = null;
     }
+  }
+
+  function rebaseSyncOffsets(nextReference, ids = state.chosen.map((c) => c.channelId)) {
+    const next = SYNC.rebaseOffsets(state.sync.manualOffsets, nextReference, ids);
+    for (const id of ids) {
+      if (freshSyncChannels.has(id)) next[id] = 0;
+    }
+    state.sync.manualOffsets = next;
   }
 
   // ── 싱크 범위 ────────────────────────────────────────────────────────────
@@ -1875,8 +1888,7 @@
     const next = SYNC.reference(ids, syncStats, syncReadyAt, current, now);
     if (next && next !== current) {
       recordReferenceChange(current, next, state.sync.mode === "auto" ? "auto" : "manual", now);
-      state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, next,
-        state.chosen.map((c) => c.channelId));
+      rebaseSyncOffsets(next);
       state.sync.referenceChannelId = next;
       for (const c of state.chosen) cancelPendingSync(c.channelId);
       resetAllSyncRates();
@@ -2640,6 +2652,8 @@
       channelImageUrl: String(newChannel.channelImageUrl || ""),
     };
     state.chosen = state.chosen.map((c, i) => (i === index ? next : c));
+    freshSyncChannels.add(id);
+    state.sync.manualOffsets[id] = 0;
     if (inheritSelected && !state.sync.selectedChannelIds.includes(id)) {
       state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, id];
     }
@@ -3128,6 +3142,8 @@
     const found = quickCandidates?.find((r) => r.channelId === channelId);
     if (!found || cells.has(channelId)) return;
     state.chosen = [...state.chosen, { ...found, channelImageUrl: "" }];
+    freshSyncChannels.add(channelId);
+    state.sync.manualOffsets[channelId] = 0;
     fitLayoutToCount();
     ensureCells(); // 새로 들어온 채널의 칸만 만든다
     applyLayout();
@@ -3206,8 +3222,7 @@
       )
         return;
       recordReferenceChange(state.sync.referenceChannelId, id, "manual");
-      state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, id,
-        state.chosen.map((c) => c.channelId));
+      rebaseSyncOffsets(id);
       state.sync.referenceChannelId = id;
       state.sync.mode = "manual";
       for (const c of state.chosen) cancelPendingSync(c.channelId);
@@ -3273,8 +3288,7 @@
           state.sync.referenceChannelId);
         if (next && next !== state.sync.referenceChannelId) {
           recordReferenceChange(state.sync.referenceChannelId, next, "manual");
-          state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, next,
-            state.chosen.map((c) => c.channelId));
+          rebaseSyncOffsets(next);
           state.sync.referenceChannelId = next;
           for (const c of state.chosen) cancelPendingSync(c.channelId);
           resetAllSyncRates();
