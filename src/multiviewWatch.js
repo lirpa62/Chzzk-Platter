@@ -79,7 +79,11 @@
   function audioOf(channelId) {
     let entry = channelAudio.get(channelId);
     if (!entry) {
-      entry = { volume: 1, muted: channelId !== state.mainId, muteTouched: false };
+      entry = {
+        volume: 1,
+        muted: channelId !== state.mainId,
+        muteTouched: false,
+      };
       channelAudio.set(channelId, entry);
     }
     return entry;
@@ -306,7 +310,12 @@
   // 칸 상태를 바꾸는 유일한 통로. 여기서 타일 덮개와 Quick 목록을 함께 갱신해
   // 두 곳이 다른 상태를 보여 주지 않게 한다.
   function setCellStatus(channelId, status, message) {
-    if (status === "loading" || status === "error" || status === "ended" || status === "ui-error") {
+    if (
+      status === "loading" ||
+      status === "error" ||
+      status === "ended" ||
+      status === "ui-error"
+    ) {
       clearChannelSync(channelId);
       if (status !== "loading") clearChannelMixer(channelId);
     }
@@ -537,14 +546,17 @@
       if (delay) {
         const timer = setTimeout(() => {
           frameLoadTimers.delete(channel.channelId);
-          if (cells.get(channel.channelId) !== cell || !frame.isConnected ||
-              !state.chosen.some((item) => item.channelId === channel.channelId)) return;
+          if (
+            cells.get(channel.channelId) !== cell ||
+            !frame.isConnected ||
+            !state.chosen.some((item) => item.channelId === channel.channelId)
+          )
+            return;
           frame.src = src;
           armReadyTimeout(channel.channelId);
         }, delay);
         frameLoadTimers.set(channel.channelId, timer);
-      }
-      else frame.src = src;
+      } else frame.src = src;
       if (!delay) armReadyTimeout(channel.channelId);
     });
   }
@@ -677,10 +689,16 @@
     if (!list.hidden) return closeChatSelector();
     closePopovers(null);
     closeQuick();
-    list.innerHTML = state.chosen.map((channel) => optionRow(
-      channel.channelId, channel.channelName,
-      channel.channelId === state.chatChannelId, "data-mv-set-chat",
-    )).join("");
+    list.innerHTML = state.chosen
+      .map((channel) =>
+        optionRow(
+          channel.channelId,
+          channel.channelName,
+          channel.channelId === state.chatChannelId,
+          "data-mv-set-chat",
+        ),
+      )
+      .join("");
     list.hidden = false;
     $("mvChatTitle").setAttribute("aria-expanded", "true");
   }
@@ -693,10 +711,16 @@
     $("mvLayoutValue").textContent = layout?.label || "-";
     renderChatTitle();
     if (!$("mvChatTitleList").hidden) {
-      $("mvChatTitleList").innerHTML = state.chosen.map((channel) => optionRow(
-        channel.channelId, channel.channelName,
-        channel.channelId === state.chatChannelId, "data-mv-set-chat",
-      )).join("");
+      $("mvChatTitleList").innerHTML = state.chosen
+        .map((channel) =>
+          optionRow(
+            channel.channelId,
+            channel.channelName,
+            channel.channelId === state.chatChannelId,
+            "data-mv-set-chat",
+          ),
+        )
+        .join("");
     }
 
     $("mvMainPanel").innerHTML = state.chosen
@@ -775,8 +799,10 @@
   function requestMixerState(channelId) {
     if (currentStatus(channelId) !== "ready") return;
     const frame = cells.get(channelId)?.querySelector("iframe");
-    frame?.contentWindow?.postMessage({ source: MULTIVIEW_MESSAGE,
-      type: "MIXER_GET_STATE", channelId }, CHZZK_ORIGIN);
+    frame?.contentWindow?.postMessage(
+      { source: MULTIVIEW_MESSAGE, type: "MIXER_GET_STATE", channelId },
+      CHZZK_ORIGIN,
+    );
   }
 
   function sendMixerCommand(channelId, type, values = {}) {
@@ -798,8 +824,10 @@
       if (mixerDragId !== channelId) renderVolume();
     }, 4000);
     mixerPending.set(key, { commandId, timer });
-    frame.contentWindow.postMessage({ source: MULTIVIEW_MESSAGE,
-      type, channelId, commandId, ...values }, CHZZK_ORIGIN);
+    frame.contentWindow.postMessage(
+      { source: MULTIVIEW_MESSAGE, type, channelId, commandId, ...values },
+      CHZZK_ORIGIN,
+    );
     return true;
   }
 
@@ -831,33 +859,63 @@
   }
 
   function normalizeMixerSnapshot(raw) {
-    if (!raw || typeof raw !== "object" || !Number.isSafeInteger(raw.revision) ||
-        raw.revision < 0 || typeof raw.ready !== "boolean" ||
-        typeof raw.enabled !== "boolean" || typeof raw.graphConflict !== "boolean" ||
-        typeof raw.preset !== "string" || raw.preset.length > 128 ||
-        typeof raw.presetDirty !== "boolean" ||
-        !Number.isFinite(raw.gain) || !Number.isFinite(raw.gainMin) ||
-        !Number.isFinite(raw.gainMax) || !Number.isFinite(raw.gainStep) ||
-        raw.gainMin < 0 || raw.gainMax > 4 || raw.gainMin >= raw.gainMax ||
-        raw.gainStep <= 0 || raw.gainStep > 1 || !Array.isArray(raw.presets) ||
-        raw.presets.length > 100) return null;
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      !Number.isSafeInteger(raw.revision) ||
+      raw.revision < 0 ||
+      typeof raw.ready !== "boolean" ||
+      typeof raw.enabled !== "boolean" ||
+      typeof raw.graphConflict !== "boolean" ||
+      typeof raw.preset !== "string" ||
+      raw.preset.length > 128 ||
+      typeof raw.presetDirty !== "boolean" ||
+      !Number.isFinite(raw.gain) ||
+      !Number.isFinite(raw.gainMin) ||
+      !Number.isFinite(raw.gainMax) ||
+      !Number.isFinite(raw.gainStep) ||
+      raw.gainMin < 0 ||
+      raw.gainMax > 4 ||
+      raw.gainMin >= raw.gainMax ||
+      raw.gainStep <= 0 ||
+      raw.gainStep > 1 ||
+      !Array.isArray(raw.presets) ||
+      raw.presets.length > 100
+    )
+      return null;
     const presets = [];
     for (const item of raw.presets) {
-      if (!item || typeof item.id !== "string" || !item.id || item.id.length > 128 ||
-          typeof item.label !== "string" || item.label.length > 80 ||
-          !["builtin", "custom"].includes(item.kind)) return null;
+      if (
+        !item ||
+        typeof item.id !== "string" ||
+        !item.id ||
+        item.id.length > 128 ||
+        typeof item.label !== "string" ||
+        item.label.length > 80 ||
+        !["builtin", "custom"].includes(item.kind)
+      )
+        return null;
       presets.push({ id: item.id, label: item.label, kind: item.kind });
     }
-    return { ready: raw.ready, enabled: raw.enabled,
-      graphConflict: raw.graphConflict, preset: raw.preset,
-      presetDirty: raw.presetDirty, gain: raw.gain,
-      gainMin: raw.gainMin, gainMax: raw.gainMax, gainStep: raw.gainStep,
-      presets, revision: raw.revision };
+    return {
+      ready: raw.ready,
+      enabled: raw.enabled,
+      graphConflict: raw.graphConflict,
+      preset: raw.preset,
+      presetDirty: raw.presetDirty,
+      gain: raw.gain,
+      gainMin: raw.gainMin,
+      gainMax: raw.gainMax,
+      gainStep: raw.gainStep,
+      presets,
+      revision: raw.revision,
+    };
   }
 
   function acceptMixerSnapshot(channelId, raw) {
     const next = normalizeMixerSnapshot(raw);
-    if (!next || next.revision < (mixerStates.get(channelId)?.revision ?? -1)) return false;
+    if (!next || next.revision < (mixerStates.get(channelId)?.revision ?? -1))
+      return false;
     mixerStates.set(channelId, next);
     if (mixerDragId !== channelId) renderVolume();
     return true;
@@ -940,15 +998,19 @@
     if (mixer.graphConflict) {
       return '<p class="mv-mixer-status">다른 확장 프로그램과 오디오 그래프가 충돌해 사용할 수 없습니다.</p>';
     }
-    const selectedPreset = mixer.presets.find((item) => item.id === mixer.preset);
-    const presetLabel = !mixer.presetDirty && selectedPreset
-      ? selectedPreset.label
-      : "사용자 조정";
+    const selectedPreset = mixer.presets.find(
+      (item) => item.id === mixer.preset,
+    );
+    const presetLabel =
+      !mixer.presetDirty && selectedPreset
+        ? selectedPreset.label
+        : "사용자 조정";
     const draft = mixerGainDrafts.get(channelId);
     const gain = Number.isFinite(draft) ? draft : mixer.gain;
     const error = mixerErrors.get(channelId);
     const open = mixerOpen.has(channelId);
-    return `<div class="mv-mixer-controls"${open ? "" : " hidden"}>` +
+    return (
+      `<div class="mv-mixer-controls"${open ? "" : " hidden"}>` +
       `<label class="mv-mixer-power">오디오 믹서 <input type="checkbox" data-mv-mixer-enabled="${id}"${mixer.enabled ? " checked" : ""}></label>` +
       `<span class="mv-mixer-preset">프리셋 <span class="mv-mixer-preset-picker">` +
       `<button type="button" class="mv-mixer-preset-trigger" data-mv-mixer-preset-toggle="${id}" ` +
@@ -958,35 +1020,46 @@
       `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>` +
       `</button></span></span>` +
       `<label class="mv-mixer-gain">게인 <input type="range" data-mv-mixer-gain="${id}" data-gain-step="${mixer.gainStep}" min="${mixer.gainMin}" max="${mixer.gainMax}" step="any" value="${gain}" aria-label="${esc(channelName(channelId))} 오디오 믹서 게인"><output>${Math.round(gain * 100)}%</output></label>` +
-      (mixerConfirm.has(channelId) ? `<div class="mv-mixer-confirm">이 채널은 '항상 켜기' 상태입니다. 끄면 이 채널을 항상 켜기 대상에서 제외합니다. <button type="button" data-mv-mixer-confirm="${id}">끄기</button><button type="button" data-mv-mixer-cancel="${id}">취소</button></div>` : "") +
+      (mixerConfirm.has(channelId)
+        ? `<div class="mv-mixer-confirm">이 채널은 '항상 켜기' 상태입니다. 끄면 이 채널을 항상 켜기 대상에서 제외합니다. <button type="button" data-mv-mixer-confirm="${id}">끄기</button><button type="button" data-mv-mixer-cancel="${id}">취소</button></div>`
+        : "") +
       (error ? `<p class="mv-mixer-error">${esc(error)}</p>` : "") +
-      `</div>`;
+      `</div>`
+    );
   }
 
   function closeMixerPresetPicker() {
     mixerPresetPickerId = "";
     document.getElementById("mvMixerPresetList")?.remove();
-    document.querySelectorAll("[data-mv-mixer-preset-toggle]").forEach((trigger) => {
-      trigger.setAttribute("aria-expanded", "false");
-    });
+    document
+      .querySelectorAll("[data-mv-mixer-preset-toggle]")
+      .forEach((trigger) => {
+        trigger.setAttribute("aria-expanded", "false");
+      });
   }
 
   function positionMixerPresetPicker() {
     const id = mixerPresetPickerId;
     const list = document.getElementById("mvMixerPresetList");
-    const trigger = document.querySelector(`[data-mv-mixer-preset-toggle="${CSS.escape(id)}"]`);
+    const trigger = document.querySelector(
+      `[data-mv-mixer-preset-toggle="${CSS.escape(id)}"]`,
+    );
     if (!id || !list || !trigger) return closeMixerPresetPicker();
     const rect = trigger.getBoundingClientRect();
     const padding = 12;
-    const maxHeight = Math.min(280, Math.max(120, window.innerHeight - padding * 2));
+    const maxHeight = Math.min(
+      280,
+      Math.max(120, window.innerHeight - padding * 2),
+    );
     list.style.minWidth = `${Math.round(rect.width)}px`;
     list.style.maxHeight = `${maxHeight}px`;
     const listHeight = Math.min(list.scrollHeight, maxHeight);
     const below = window.innerHeight - rect.bottom - padding;
     const above = rect.top - padding;
-    const top = below >= Math.min(140, listHeight) || below >= above
-      ? rect.bottom + 4
-      : Math.max(padding, rect.top - listHeight - 4);
+    const top =
+      below >= Math.min(140, listHeight) || below >= above
+        ? rect.bottom + 4
+        : Math.max(padding, rect.top - listHeight - 4);
     list.style.left = `${Math.round(Math.min(rect.left, window.innerWidth - rect.width - padding))}px`;
     list.style.top = `${Math.round(top)}px`;
   }
@@ -1001,23 +1074,35 @@
     closeMixerPresetPicker();
     mixerPresetPickerId = channelId;
     const selected = !mixer.presetDirty ? mixer.preset : "";
-    const options = (kind) => mixer.presets
-      .filter((item) => item.kind === kind)
-      .map((item) => `<button type="button" role="option" data-mv-mixer-preset-option="${esc(channelId)}" ` +
-        `data-preset-id="${esc(item.id)}" aria-selected="${item.id === selected}">${esc(item.label)}</button>`)
-      .join("");
+    const options = (kind) =>
+      mixer.presets
+        .filter((item) => item.kind === kind)
+        .map(
+          (item) =>
+            `<button type="button" role="option" data-mv-mixer-preset-option="${esc(channelId)}" ` +
+            `data-preset-id="${esc(item.id)}" aria-selected="${item.id === selected}">${esc(item.label)}</button>`,
+        )
+        .join("");
     const custom = options("custom");
     const list = document.createElement("div");
     list.id = "mvMixerPresetList";
     list.className = "mv-mixer-preset-list";
     list.setAttribute("role", "listbox");
-    list.setAttribute("aria-label", `${channelName(channelId)} 오디오 믹서 프리셋`);
+    list.setAttribute(
+      "aria-label",
+      `${channelName(channelId)} 오디오 믹서 프리셋`,
+    );
     list.innerHTML =
-      (mixer.presetDirty ? '<p class="mv-mixer-preset-group">현재 선택</p><button type="button" role="option" aria-selected="true" disabled>사용자 조정</button>' : "") +
+      (mixer.presetDirty
+        ? '<p class="mv-mixer-preset-group">현재 선택</p><button type="button" role="option" aria-selected="true" disabled>사용자 조정</button>'
+        : "") +
       `<p class="mv-mixer-preset-group">기본 프리셋</p>${options("builtin")}` +
-      (custom ? `<p class="mv-mixer-preset-group">커스텀 프리셋</p>${custom}` : "");
+      (custom
+        ? `<p class="mv-mixer-preset-group">커스텀 프리셋</p>${custom}`
+        : "");
     document.body.appendChild(list);
-    document.querySelector(`[data-mv-mixer-preset-toggle="${CSS.escape(channelId)}"]`)
+    document
+      .querySelector(`[data-mv-mixer-preset-toggle="${CSS.escape(channelId)}"]`)
       ?.setAttribute("aria-expanded", "true");
     positionMixerPresetPicker();
   }
@@ -1083,7 +1168,9 @@
               ` stroke-linejoin="round" aria-hidden="true">` +
               `<path d="m6 9 6 6 6-6"></path></svg></button>`
             : "") +
-          `</div>` + mixerControlsMarkup(c.channelId) + `</div>`
+          `</div>` +
+          mixerControlsMarkup(c.channelId) +
+          `</div>`
         );
       })
       .join("");
@@ -1132,15 +1219,26 @@
   const freshSyncChannels = new Set();
 
   function syncGroupForChannel(channelId) {
-    return state.sync.groups.find((group) => group.channelIds.includes(channelId)) || null;
+    return (
+      state.sync.groups.find((group) => group.channelIds.includes(channelId)) ||
+      null
+    );
   }
 
   function ensureSyncGroups() {
     if (state.sync.groups.length) return;
     state.sync.groups = ["a", "b"].map((id) => ({
-      id, channelIds: id === "a" && state.sync.selectionInitialized
-        ? state.sync.selectedChannelIds.filter((channelId) => cells.has(channelId)) : [],
-      mode: "off", referenceChannelId: null, manualOffsets: {}, congested: false,
+      id,
+      channelIds:
+        id === "a" && state.sync.selectionInitialized
+          ? state.sync.selectedChannelIds.filter((channelId) =>
+              cells.has(channelId),
+            )
+          : [],
+      mode: "off",
+      referenceChannelId: null,
+      manualOffsets: {},
+      congested: false,
       congestionState: { active: false, since: 0 },
     }));
   }
@@ -1186,7 +1284,11 @@
   }
 
   function rebaseGroupOffsets(group, nextReference) {
-    const next = SYNC.rebaseOffsets(group.manualOffsets, nextReference, group.channelIds);
+    const next = SYNC.rebaseOffsets(
+      group.manualOffsets,
+      nextReference,
+      group.channelIds,
+    );
     for (const id of group.channelIds) {
       if (freshSyncChannels.has(id)) next[id] = 0;
     }
@@ -1201,19 +1303,26 @@
   let syncDiagnosticsStartedAt = 0;
   let syncDiagnosticsNotice = "";
   let syncDiagnosticsUi = false;
-  void chrome.storage?.local?.get("cheeseMultiviewSyncDiagnosticsUi")?.then((data) => {
-    syncDiagnosticsUi = data.cheeseMultiviewSyncDiagnosticsUi === true;
-    refreshSyncPanel();
-  }).catch(() => {});
+  void chrome.storage?.local
+    ?.get("cheeseMultiviewSyncDiagnosticsUi")
+    ?.then((data) => {
+      syncDiagnosticsUi = data.cheeseMultiviewSyncDiagnosticsUi === true;
+      refreshSyncPanel();
+    })
+    .catch(() => {});
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local" || !changes.cheeseMultiviewSyncDiagnosticsUi) return;
-    syncDiagnosticsUi = changes.cheeseMultiviewSyncDiagnosticsUi.newValue === true;
+    syncDiagnosticsUi =
+      changes.cheeseMultiviewSyncDiagnosticsUi.newValue === true;
     if (!syncDiagnosticsUi) setSyncDiagnosticsEnabled(false);
     refreshSyncPanel();
   });
 
   function syncChannelName(channelId) {
-    return state.chosen.find((channel) => channel.channelId === channelId)?.channelName || "";
+    return (
+      state.chosen.find((channel) => channel.channelId === channelId)
+        ?.channelName || ""
+    );
   }
 
   function recordSyncDiagnostic(type, fields = {}, timestamp) {
@@ -1229,63 +1338,90 @@
   }
 
   function diagnosticDesiredValue(value) {
-    if (value === null || typeof value === "number" || typeof value === "boolean") return value;
+    if (
+      value === null ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+      return value;
     if (!value || typeof value !== "object") return null;
     const safe = {};
     for (const key of ["currentTime", "manual", "offset", "commitOffset"]) {
-      if (typeof value[key] === "boolean" || Number.isFinite(value[key])) safe[key] = value[key];
+      if (typeof value[key] === "boolean" || Number.isFinite(value[key]))
+        safe[key] = value[key];
     }
     return safe;
   }
 
   function recordSyncSample(channelId, stats, timestamp) {
     if (!state.sync.diagnosticsEnabled) return;
-    const group = state.sync.scope === "groups" ? syncGroupForChannel(channelId) : null;
+    const group =
+      state.sync.scope === "groups" ? syncGroupForChannel(channelId) : null;
     const context = state.sync.scope === "groups" ? group : state.sync;
     const referenceChannelId = context?.referenceChannelId || null;
-    const referenceStats = referenceChannelId === channelId
-      ? stats : syncStats.get(referenceChannelId);
+    const referenceStats =
+      referenceChannelId === channelId
+        ? stats
+        : syncStats.get(referenceChannelId);
     const manualOffset = context?.manualOffsets[channelId] || 0;
     const targetDelaySec = SYNC.targetDelay(referenceStats, manualOffset);
-    const syncErrorSec = targetDelaySec !== null && stats.nativeDelaySec !== null
-      ? targetDelaySec - stats.nativeDelaySec : null;
+    const syncErrorSec =
+      targetDelaySec !== null && stats.nativeDelaySec !== null
+        ? targetDelaySec - stats.nativeDelaySec
+        : null;
     const readyAt = syncReadyAt.get(channelId);
-    recordSyncDiagnostic("sample", {
-      channelId,
-      channelName: syncChannelName(channelId),
-      generation: stats.generation,
-      frameStatus: currentStatus(channelId),
-      syncMode: context?.mode || "off",
-      // 범위 정보는 추가 필드로만 남긴다(기존 소비자 형식은 그대로).
-      syncScope: state.sync.scope,
-      groupId: group?.id || null,
-      inSyncScope: group ? true : inSyncScope(channelId),
-      referenceChannelId,
-      nativeDelaySec: stats.nativeDelaySec,
-      bufferAheadSec: stats.bufferAheadSec,
-      edgeLagSec: stats.edgeLagSec,
-      playbackRate: stats.playbackRate,
-      syncRateOwned: stats.syncRateOwned,
-      userRateOverride: stats.userRateOverride,
-      audioProtected: isSyncAudioProtected(channelId),
-      manualOffset,
-      targetDelaySec,
-      syncErrorSec,
-      settling: Number.isFinite(readyAt) && timestamp - readyAt < SYNC.LIMITS.settlingMs,
-      congested: context?.congested || false,
-    }, timestamp);
+    recordSyncDiagnostic(
+      "sample",
+      {
+        channelId,
+        channelName: syncChannelName(channelId),
+        generation: stats.generation,
+        frameStatus: currentStatus(channelId),
+        syncMode: context?.mode || "off",
+        // 범위 정보는 추가 필드로만 남긴다(기존 소비자 형식은 그대로).
+        syncScope: state.sync.scope,
+        groupId: group?.id || null,
+        inSyncScope: group ? true : inSyncScope(channelId),
+        referenceChannelId,
+        nativeDelaySec: stats.nativeDelaySec,
+        bufferAheadSec: stats.bufferAheadSec,
+        edgeLagSec: stats.edgeLagSec,
+        playbackRate: stats.playbackRate,
+        syncRateOwned: stats.syncRateOwned,
+        userRateOverride: stats.userRateOverride,
+        audioProtected: isSyncAudioProtected(channelId),
+        manualOffset,
+        targetDelaySec,
+        syncErrorSec,
+        settling:
+          Number.isFinite(readyAt) &&
+          timestamp - readyAt < SYNC.LIMITS.settlingMs,
+        congested: context?.congested || false,
+      },
+      timestamp,
+    );
   }
 
-  function recordReferenceChange(fromChannelId, toChannelId, cause, timestamp = Date.now(), groupId = null) {
+  function recordReferenceChange(
+    fromChannelId,
+    toChannelId,
+    cause,
+    timestamp = Date.now(),
+    groupId = null,
+  ) {
     if (!state.sync.diagnosticsEnabled || fromChannelId === toChannelId) return;
-    recordSyncDiagnostic("reference-change", {
-      fromChannelId: fromChannelId || null,
-      toChannelId: toChannelId || null,
-      groupId,
-      cause,
-      fromDelaySec: syncStats.get(fromChannelId)?.nativeDelaySec ?? null,
-      toDelaySec: syncStats.get(toChannelId)?.nativeDelaySec ?? null,
-    }, timestamp);
+    recordSyncDiagnostic(
+      "reference-change",
+      {
+        fromChannelId: fromChannelId || null,
+        toChannelId: toChannelId || null,
+        groupId,
+        cause,
+        fromDelaySec: syncStats.get(fromChannelId)?.nativeDelaySec ?? null,
+        toDelaySec: syncStats.get(toChannelId)?.nativeDelaySec ?? null,
+      },
+      timestamp,
+    );
   }
 
   function recordCongestionChange(active, ids, timestamp, groupId = null) {
@@ -1295,16 +1431,23 @@
     for (const id of ids) {
       const edgeLag = syncStats.get(id)?.edgeLagSec;
       edgeLagByChannel[id] = Number.isFinite(edgeLag) ? edgeLag : null;
-      if (Number.isFinite(edgeLag) && edgeLag >= SYNC.LIMITS.congestionEdgeSec) {
+      if (
+        Number.isFinite(edgeLag) &&
+        edgeLag >= SYNC.LIMITS.congestionEdgeSec
+      ) {
         affectedChannels.push(id);
       }
     }
-    recordSyncDiagnostic("congestion-change", {
-      active,
-      groupId,
-      affectedChannels,
-      edgeLagByChannel,
-    }, timestamp);
+    recordSyncDiagnostic(
+      "congestion-change",
+      {
+        active,
+        groupId,
+        affectedChannels,
+        edgeLagByChannel,
+      },
+      timestamp,
+    );
   }
 
   function diagnosticsPayload(exportedAt = Date.now()) {
@@ -1322,7 +1465,8 @@
     if (!syncDiagnostics.size) return;
     const text = DIAGNOSTICS.formatSummary(diagnosticsPayload().summary);
     try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+      if (navigator.clipboard?.writeText)
+        await navigator.clipboard.writeText(text);
       else {
         const textarea = document.createElement("textarea");
         textarea.value = text;
@@ -1343,17 +1487,22 @@
   function diagnosticsFilename(timestamp) {
     const date = new Date(timestamp);
     const part = (value) => String(value).padStart(2, "0");
-    return `chzzk-multiview-sync-diagnostics-${date.getFullYear()}` +
+    return (
+      `chzzk-multiview-sync-diagnostics-${date.getFullYear()}` +
       `${part(date.getMonth() + 1)}${part(date.getDate())}-` +
-      `${part(date.getHours())}${part(date.getMinutes())}${part(date.getSeconds())}.json`;
+      `${part(date.getHours())}${part(date.getMinutes())}${part(date.getSeconds())}.json`
+    );
   }
 
   function exportSyncDiagnostics() {
     if (!syncDiagnostics.size) return;
     const exportedAt = Date.now();
-    const blob = new Blob([JSON.stringify(diagnosticsPayload(exportedAt), null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob(
+      [JSON.stringify(diagnosticsPayload(exportedAt), null, 2)],
+      {
+        type: "application/json",
+      },
+    );
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -1383,62 +1532,84 @@
     refreshSyncPanel();
   }
 
-  document.addEventListener("click", (event) => {
-    if (event.button != null && event.button !== 0) return;
-    const target = event.target;
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (event.button != null && event.button !== 0) return;
+      const target = event.target;
+      const quickPanel = $("mvQuick");
+      if (
+        quickPanel &&
+        !quickPanel.hidden &&
+        !target.closest?.("#mvQuick, #mvBack, .mv-sort-options")
+      )
+        closeQuick();
+    },
+    true,
+  );
+  window.addEventListener("blur", () => {
     const quickPanel = $("mvQuick");
     if (
       quickPanel &&
       !quickPanel.hidden &&
-      !target.closest?.("#mvQuick, #mvBack, .mv-sort-options")
-    ) closeQuick();
-  }, true);
-  window.addEventListener("blur", () => {
-    const quickPanel = $("mvQuick");
-    if (quickPanel && !quickPanel.hidden && document.activeElement?.tagName === "IFRAME") {
+      document.activeElement?.tagName === "IFRAME"
+    ) {
       closeQuick();
     }
   });
 
-  document.addEventListener("click", (event) => {
-    const path = event.composedPath?.() || [];
-    if (!path.some((node) => node?.id === "mvSyncPop")) return;
-    const control = path.find((node) => typeof node?.id === "string" &&
-      node.id.startsWith("mvSyncDiagnostics"));
-    if (!control) return;
-    if (control.id === "mvSyncDiagnostics") {
-      queueMicrotask(() => setSyncDiagnosticsEnabled(control.checked));
-      return;
-    }
-    if (control.id === "mvSyncDiagnosticsCopy") {
-      document.activeElement?.blur?.();
-      void copySyncDiagnosticsSummary();
-      return;
-    }
-    if (control.id === "mvSyncDiagnosticsExport") {
-      document.activeElement?.blur?.();
-      exportSyncDiagnostics();
-      return;
-    }
-    if (control.id === "mvSyncDiagnosticsClear") {
-      document.activeElement?.blur?.();
-      clearSyncDiagnostics();
-    }
-  }, true);
+  document.addEventListener(
+    "click",
+    (event) => {
+      const path = event.composedPath?.() || [];
+      if (!path.some((node) => node?.id === "mvSyncPop")) return;
+      const control = path.find(
+        (node) =>
+          typeof node?.id === "string" &&
+          node.id.startsWith("mvSyncDiagnostics"),
+      );
+      if (!control) return;
+      if (control.id === "mvSyncDiagnostics") {
+        queueMicrotask(() => setSyncDiagnosticsEnabled(control.checked));
+        return;
+      }
+      if (control.id === "mvSyncDiagnosticsCopy") {
+        document.activeElement?.blur?.();
+        void copySyncDiagnosticsSummary();
+        return;
+      }
+      if (control.id === "mvSyncDiagnosticsExport") {
+        document.activeElement?.blur?.();
+        exportSyncDiagnostics();
+        return;
+      }
+      if (control.id === "mvSyncDiagnosticsClear") {
+        document.activeElement?.blur?.();
+        clearSyncDiagnostics();
+      }
+    },
+    true,
+  );
 
   function sendSync(channelId, type, extra = {}) {
     if (currentStatus(channelId) !== "ready") return false;
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return false;
     try {
-      frame.contentWindow.postMessage({ source: MULTIVIEW_MESSAGE, type, channelId, ...extra }, CHZZK_ORIGIN);
+      frame.contentWindow.postMessage(
+        { source: MULTIVIEW_MESSAGE, type, channelId, ...extra },
+        CHZZK_ORIGIN,
+      );
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   function pendingSync(channelId, command) {
-    return [...pendingSyncCommands.values()].find((entry) =>
-      entry.channelId === channelId && entry.command === command);
+    return [...pendingSyncCommands.values()].find(
+      (entry) => entry.channelId === channelId && entry.command === command,
+    );
   }
 
   function cancelPendingSync(channelId) {
@@ -1449,39 +1620,71 @@
     }
   }
 
-  function sendSyncCommand(channelId, command, type, extra = {}, desiredValue = null) {
-    if (pendingSync(channelId, command) || Date.now() < (syncRetryAt.get(`${channelId}:${command}`) || 0)) return false;
+  function sendSyncCommand(
+    channelId,
+    command,
+    type,
+    extra = {},
+    desiredValue = null,
+  ) {
+    if (
+      pendingSync(channelId, command) ||
+      Date.now() < (syncRetryAt.get(`${channelId}:${command}`) || 0)
+    )
+      return false;
     const commandId = ++syncCommandSeq;
-    const entry = { commandId, channelId, command, sentAt: Date.now(), desiredValue,
-      generation: syncGeneration.get(channelId) ?? null, timeout: 0,
-      groupId: state.sync.scope === "groups" ? syncGroupForChannel(channelId)?.id || null : null };
+    const entry = {
+      commandId,
+      channelId,
+      command,
+      sentAt: Date.now(),
+      desiredValue,
+      generation: syncGeneration.get(channelId) ?? null,
+      timeout: 0,
+      groupId:
+        state.sync.scope === "groups"
+          ? syncGroupForChannel(channelId)?.id || null
+          : null,
+    };
     if (!sendSync(channelId, type, { ...extra, commandId })) return false;
     const context = entry.groupId
-      ? state.sync.groups.find((group) => group.id === entry.groupId) : state.sync;
-    recordSyncDiagnostic("command", {
-      channelId,
-      channelName: syncChannelName(channelId),
-      commandId,
-      command,
-      desiredValue: diagnosticDesiredValue(desiredValue),
-      generation: entry.generation,
-      groupId: entry.groupId,
-      referenceChannelId: context?.referenceChannelId || null,
-      manualOffset: context?.manualOffsets[channelId] || 0,
-    }, entry.sentAt);
-    entry.timeout = window.setTimeout(() => {
-      if (pendingSyncCommands.get(commandId) !== entry) return;
-      pendingSyncCommands.delete(commandId);
-      const timedOutAt = Date.now();
-      syncRetryAt.set(`${channelId}:${command}`, timedOutAt + SYNC.LIMITS.commandRetryMs);
-      recordSyncDiagnostic("command-timeout", {
+      ? state.sync.groups.find((group) => group.id === entry.groupId)
+      : state.sync;
+    recordSyncDiagnostic(
+      "command",
+      {
         channelId,
         channelName: syncChannelName(channelId),
         commandId,
         command,
+        desiredValue: diagnosticDesiredValue(desiredValue),
         generation: entry.generation,
-        waitedMs: Math.max(0, timedOutAt - entry.sentAt),
-      }, timedOutAt);
+        groupId: entry.groupId,
+        referenceChannelId: context?.referenceChannelId || null,
+        manualOffset: context?.manualOffsets[channelId] || 0,
+      },
+      entry.sentAt,
+    );
+    entry.timeout = window.setTimeout(() => {
+      if (pendingSyncCommands.get(commandId) !== entry) return;
+      pendingSyncCommands.delete(commandId);
+      const timedOutAt = Date.now();
+      syncRetryAt.set(
+        `${channelId}:${command}`,
+        timedOutAt + SYNC.LIMITS.commandRetryMs,
+      );
+      recordSyncDiagnostic(
+        "command-timeout",
+        {
+          channelId,
+          channelName: syncChannelName(channelId),
+          commandId,
+          command,
+          generation: entry.generation,
+          waitedMs: Math.max(0, timedOutAt - entry.sentAt),
+        },
+        timedOutAt,
+      );
       if (command === "nudge" || (command === "seek" && extra.manual)) {
         syncNotice = "보정 응답이 없어 적용하지 못했습니다.";
         // ⚠ 방금 누른 버튼에 포커스가 남아 있으면 renderSync 는 건너뛴다.
@@ -1494,51 +1697,94 @@
   }
 
   function finishSyncCommand(channelId, data) {
-    if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
-        !["seek", "nudge", "rate", "reset-rate"].includes(data.command) ||
-        typeof data.applied !== "boolean" ||
-        !(data.reason === null || (typeof data.reason === "string" &&
-          ["no-video", "paused", "not-ready", "seeking", "ad", "range", "cooldown",
-            "user-rate", "too-far", "invalid-state", "exception"].includes(data.reason))) ||
-        !Number.isInteger(data.generation) || data.generation < 0 || data.generation > 1000000 ||
-        (data.actualCurrentTime !== null &&
-          (!Number.isFinite(data.actualCurrentTime) || data.actualCurrentTime < 0)) ||
-        (data.actualPlaybackRate !== null &&
-          (!Number.isFinite(data.actualPlaybackRate) || data.actualPlaybackRate < 0.5 ||
-            data.actualPlaybackRate > 2))) return;
-    const entry = pendingSyncCommands.get(data.commandId);
-    if (!entry || entry.channelId !== channelId || entry.command !== data.command ||
-        entry.generation !== data.generation) return;
-    const group = entry.groupId && state.sync.groups.find((item) => item.id === entry.groupId);
-    if (entry.groupId && (!group || !group.channelIds.includes(channelId))) return;
-    const context = group || state.sync;
-    if (data.applied && entry.command === "rate" &&
+    if (
+      !Number.isSafeInteger(data.commandId) ||
+      data.commandId <= 0 ||
+      !["seek", "nudge", "rate", "reset-rate"].includes(data.command) ||
+      typeof data.applied !== "boolean" ||
+      !(
+        data.reason === null ||
+        (typeof data.reason === "string" &&
+          [
+            "no-video",
+            "paused",
+            "not-ready",
+            "seeking",
+            "ad",
+            "range",
+            "cooldown",
+            "user-rate",
+            "too-far",
+            "invalid-state",
+            "exception",
+          ].includes(data.reason))
+      ) ||
+      !Number.isInteger(data.generation) ||
+      data.generation < 0 ||
+      data.generation > 1000000 ||
+      (data.actualCurrentTime !== null &&
+        (!Number.isFinite(data.actualCurrentTime) ||
+          data.actualCurrentTime < 0)) ||
+      (data.actualPlaybackRate !== null &&
         (!Number.isFinite(data.actualPlaybackRate) ||
-          Math.abs(data.actualPlaybackRate - entry.desiredValue) > SYNC.LIMITS.userRateEpsilon)) return;
+          data.actualPlaybackRate < 0.5 ||
+          data.actualPlaybackRate > 2))
+    )
+      return;
+    const entry = pendingSyncCommands.get(data.commandId);
+    if (
+      !entry ||
+      entry.channelId !== channelId ||
+      entry.command !== data.command ||
+      entry.generation !== data.generation
+    )
+      return;
+    const group =
+      entry.groupId &&
+      state.sync.groups.find((item) => item.id === entry.groupId);
+    if (entry.groupId && (!group || !group.channelIds.includes(channelId)))
+      return;
+    const context = group || state.sync;
+    if (
+      data.applied &&
+      entry.command === "rate" &&
+      (!Number.isFinite(data.actualPlaybackRate) ||
+        Math.abs(data.actualPlaybackRate - entry.desiredValue) >
+          SYNC.LIMITS.userRateEpsilon)
+    )
+      return;
     const receivedAt = Date.now();
-    recordSyncDiagnostic("command-result", {
-      channelId,
-      channelName: syncChannelName(channelId),
-      commandId: data.commandId,
-      command: data.command,
-      applied: data.applied,
-      reason: data.reason,
-      actualCurrentTime: data.actualCurrentTime,
-      actualPlaybackRate: data.actualPlaybackRate,
-      generation: data.generation,
-      roundTripMs: Math.max(0, receivedAt - entry.sentAt),
-    }, receivedAt);
+    recordSyncDiagnostic(
+      "command-result",
+      {
+        channelId,
+        channelName: syncChannelName(channelId),
+        commandId: data.commandId,
+        command: data.command,
+        applied: data.applied,
+        reason: data.reason,
+        actualCurrentTime: data.actualCurrentTime,
+        actualPlaybackRate: data.actualPlaybackRate,
+        generation: data.generation,
+        roundTripMs: Math.max(0, receivedAt - entry.sentAt),
+      },
+      receivedAt,
+    );
     clearTimeout(entry.timeout);
     pendingSyncCommands.delete(data.commandId);
     const retryKey = `${channelId}:${entry.command}`;
     if (!data.applied) {
       syncRetryAt.set(retryKey, Date.now() + SYNC.LIMITS.commandRetryMs);
-      if (entry.command === "nudge" || (entry.command === "seek" && entry.desiredValue?.manual)) {
+      if (
+        entry.command === "nudge" ||
+        (entry.command === "seek" && entry.desiredValue?.manual)
+      ) {
         syncNotice = `보정을 적용하지 못했습니다 (${data.reason || "상태 확인 필요"}).`;
       }
     } else {
       syncRetryAt.delete(retryKey);
-      if (entry.command === "seek" || entry.command === "nudge") syncSeekAt.set(channelId, Date.now());
+      if (entry.command === "seek" || entry.command === "nudge")
+        syncSeekAt.set(channelId, Date.now());
       if (entry.command === "nudge") {
         context.manualOffsets[channelId] = entry.desiredValue.offset;
         freshSyncChannels.delete(channelId);
@@ -1556,12 +1802,13 @@
       if (entry.command === "reset-rate") {
         syncRates.delete(channelId);
         const stats = syncStats.get(channelId);
-        if (stats) syncStats.set(channelId, {
-          ...stats,
-          playbackRate: data.actualPlaybackRate,
-          syncRateOwned: false,
-          userRateOverride: false,
-        });
+        if (stats)
+          syncStats.set(channelId, {
+            ...stats,
+            playbackRate: data.actualPlaybackRate,
+            syncRateOwned: false,
+            userRateOverride: false,
+          });
       }
     }
     updateSyncPolling();
@@ -1588,8 +1835,9 @@
 
   function clearChannelSync(channelId, removeOffset = false) {
     if (removeOffset) {
-      state.sync.selectedChannelIds =
-        state.sync.selectedChannelIds.filter((id) => id !== channelId);
+      state.sync.selectedChannelIds = state.sync.selectedChannelIds.filter(
+        (id) => id !== channelId,
+      );
       freshSyncChannels.delete(channelId);
       const group = syncGroupForChannel(channelId);
       if (group) releaseGroupChannel(group, channelId);
@@ -1600,7 +1848,8 @@
     syncReadyAt.delete(channelId);
     syncGeneration.delete(channelId);
     syncSeekAt.delete(channelId);
-    for (const command of ["seek", "nudge", "rate", "reset-rate"]) syncRetryAt.delete(`${channelId}:${command}`);
+    for (const command of ["seek", "nudge", "rate", "reset-rate"])
+      syncRetryAt.delete(`${channelId}:${command}`);
     syncRates.delete(channelId);
     if (removeOffset) delete state.sync.manualOffsets[channelId];
     if (state.sync.referenceChannelId === channelId) {
@@ -1608,8 +1857,15 @@
     }
   }
 
-  function rebaseSyncOffsets(nextReference, ids = state.chosen.map((c) => c.channelId)) {
-    const next = SYNC.rebaseOffsets(state.sync.manualOffsets, nextReference, ids);
+  function rebaseSyncOffsets(
+    nextReference,
+    ids = state.chosen.map((c) => c.channelId),
+  ) {
+    const next = SYNC.rebaseOffsets(
+      state.sync.manualOffsets,
+      nextReference,
+      ids,
+    );
     for (const id of ids) {
       if (freshSyncChannels.has(id)) next[id] = 0;
     }
@@ -1659,21 +1915,32 @@
     const settling =
       ready && now - syncReadyAt.get(channelId) < SYNC.LIMITS.settlingMs;
     const label =
-      status === "ended" ? "종료"
-      : status === "error" || status === "ui-error" ? "오류"
-      : !fresh ? "측정 대기"
-      : st.paused ? "일시정지"
-      : st.readyState < 2 ? "재생 준비 중"
-      : !ready ? "측정 불가"
-      : settling ? "안정화 중"
-      : state.sync.congested ? "연결 지연"
-      : channelId === ref ? "기준"
-      : st.userRateOverride ||
-        (Math.abs((st.playbackRate || 1) - 1) > SYNC.LIMITS.userRateEpsilon &&
-          !st.syncRateOwned)
-        ? "수동 속도"
-      : st.syncRateOwned ? "자동 보정 중"
-      : "준비됨";
+      status === "ended"
+        ? "종료"
+        : status === "error" || status === "ui-error"
+          ? "오류"
+          : !fresh
+            ? "측정 대기"
+            : st.paused
+              ? "일시정지"
+              : st.readyState < 2
+                ? "재생 준비 중"
+                : !ready
+                  ? "측정 불가"
+                  : settling
+                    ? "안정화 중"
+                    : state.sync.congested
+                      ? "연결 지연"
+                      : channelId === ref
+                        ? "기준"
+                        : st.userRateOverride ||
+                            (Math.abs((st.playbackRate || 1) - 1) >
+                              SYNC.LIMITS.userRateEpsilon &&
+                              !st.syncRateOwned)
+                          ? "수동 속도"
+                          : st.syncRateOwned
+                            ? "자동 보정 중"
+                            : "준비됨";
     const picking = state.sync.scope === "selected";
     const picked = inSyncScope(channelId);
     const nudgePending = syncNudgePending(channelId);
@@ -1709,19 +1976,37 @@
 
   function getGroupRowViewState(group, channelId, now = Date.now()) {
     const st = syncStats.get(channelId);
-    const fresh = currentStatus(channelId) === "ready" && st &&
+    const fresh =
+      currentStatus(channelId) === "ready" &&
+      st &&
       now - st.receivedAt <= SYNC.LIMITS.staleMs;
     const ready = fresh && SYNC.eligible(st, syncReadyAt.get(channelId), now);
     const offset = group.manualOffsets[channelId] || 0;
     const pending = syncNudgePending(channelId);
     return {
-      st, offset, pending, ready,
+      st,
+      offset,
+      pending,
+      ready,
       reference: group.referenceChannelId === channelId,
-      status: currentStatus(channelId) === "ended" ? "종료" :
-        currentStatus(channelId) === "error" ? "오류" : !fresh ? "측정 대기" :
-        st.paused ? "일시정지" : !ready ? "측정 불가" : group.congested ? "연결 지연" :
-        group.referenceChannelId === channelId ? "기준" :
-        st.syncRateOwned ? "자동 보정 중" : "준비됨",
+      status:
+        currentStatus(channelId) === "ended"
+          ? "종료"
+          : currentStatus(channelId) === "error"
+            ? "오류"
+            : !fresh
+              ? "측정 대기"
+              : st.paused
+                ? "일시정지"
+                : !ready
+                  ? "측정 불가"
+                  : group.congested
+                    ? "연결 지연"
+                    : group.referenceChannelId === channelId
+                      ? "기준"
+                      : st.syncRateOwned
+                        ? "자동 보정 중"
+                        : "준비됨",
       rate: syncRateText(st),
     };
   }
@@ -1729,9 +2014,11 @@
   function closeGroupAssignmentPicker() {
     const picker = $("mvGroupAssignmentList");
     picker?.remove();
-    document.querySelectorAll("[data-mv-group-assignment-toggle]").forEach((trigger) => {
-      trigger.setAttribute("aria-expanded", "false");
-    });
+    document
+      .querySelectorAll("[data-mv-group-assignment-toggle]")
+      .forEach((trigger) => {
+        trigger.setAttribute("aria-expanded", "false");
+      });
     groupAssignmentPickerId = "";
   }
 
@@ -1746,14 +2033,18 @@
     }
     const rect = trigger.getBoundingClientRect();
     const padding = 8;
-    const maxHeight = Math.min(240, Math.max(100, window.innerHeight - padding * 2));
+    const maxHeight = Math.min(
+      240,
+      Math.max(100, window.innerHeight - padding * 2),
+    );
     picker.style.maxHeight = `${maxHeight}px`;
     picker.style.minWidth = `${Math.max(110, Math.round(rect.width))}px`;
     const height = Math.min(picker.scrollHeight, maxHeight);
     const below = window.innerHeight - rect.bottom - padding;
-    const top = below >= height || below >= rect.top - padding
-      ? rect.bottom + 4
-      : Math.max(padding, rect.top - height - 4);
+    const top =
+      below >= height || below >= rect.top - padding
+        ? rect.bottom + 4
+        : Math.max(padding, rect.top - height - 4);
     const left = Math.max(
       padding,
       Math.min(rect.left, window.innerWidth - rect.width - padding),
@@ -1785,20 +2076,28 @@
     picker.className = "mv-pop-panel mv-group-assignment-list";
     picker.setAttribute("role", "listbox");
     picker.setAttribute("aria-label", `${channelName(channelId)} 싱크 그룹`);
-    picker.innerHTML = options.map((option) =>
-      `<button type="button" role="option" class="mv-pop-option${option.id === current ? " is-on" : ""}" ` +
-      `data-mv-group-assign-option="${esc(channelId)}" data-group-id="${esc(option.id)}" ` +
-      `aria-selected="${option.id === current}">${esc(option.label)}</button>`,
-    ).join("");
+    picker.innerHTML = options
+      .map(
+        (option) =>
+          `<button type="button" role="option" class="mv-pop-option${option.id === current ? " is-on" : ""}" ` +
+          `data-mv-group-assign-option="${esc(channelId)}" data-group-id="${esc(option.id)}" ` +
+          `aria-selected="${option.id === current}">${esc(option.label)}</button>`,
+      )
+      .join("");
     picker.addEventListener("keydown", (event) => {
       const options = [...picker.querySelectorAll('[role="option"]')];
       if (event.key === "Escape") {
         closeGroupAssignmentPicker();
-        document.querySelector(`[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`)?.focus();
+        document
+          .querySelector(
+            `[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`,
+          )
+          ?.focus();
         event.preventDefault();
         return;
       }
-      if (!options.length || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      if (!options.length || !["ArrowDown", "ArrowUp"].includes(event.key))
+        return;
       const index = options.indexOf(document.activeElement);
       const direction = event.key === "ArrowDown" ? 1 : -1;
       options[(index + direction + options.length) % options.length]?.focus();
@@ -1806,10 +2105,15 @@
     });
     picker.hidden = false;
     document.body.appendChild(picker);
-    document.querySelector(`[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`)
+    document
+      .querySelector(
+        `[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`,
+      )
       ?.setAttribute("aria-expanded", "true");
     positionGroupAssignmentPicker();
-    picker.querySelector(`[aria-selected="true"]`)?.focus({ preventScroll: true });
+    picker
+      .querySelector(`[aria-selected="true"]`)
+      ?.focus({ preventScroll: true });
   }
 
   function patchGroupPanel(now = Date.now()) {
@@ -1820,8 +2124,11 @@
     };
     const rows = [...panel.querySelectorAll("[data-mv-group-row]")];
     const expected = state.sync.groups.flatMap((group) => group.channelIds);
-    if (rows.length !== expected.length ||
-        rows.some((row, index) => row.dataset.mvGroupRow !== expected[index])) return false;
+    if (
+      rows.length !== expected.length ||
+      rows.some((row, index) => row.dataset.mvGroupRow !== expected[index])
+    )
+      return false;
     setText($("mvSyncValue"), "그룹");
     for (const group of state.sync.groups) {
       const section = panel.querySelector(`[data-mv-group="${group.id}"]`);
@@ -1837,13 +2144,22 @@
       const warningVisible = group.congested || group.channelIds.length < 2;
       const warningHidden = !warningVisible;
       if (warning.hidden !== warningHidden) warning.hidden = warningHidden;
-      setText(warning, group.channelIds.length < 2
-        ? "싱크할 채널을 2개 이상 배정해 주세요."
-        : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.");
-      setText(section.querySelector(".mv-group-reference"), group.referenceChannelId
-        ? `기준: ${channelName(group.referenceChannelId)}` : "기준 대기");
+      setText(
+        warning,
+        group.channelIds.length < 2
+          ? "싱크할 채널을 2개 이상 배정해 주세요."
+          : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.",
+      );
+      setText(
+        section.querySelector(".mv-group-reference"),
+        group.referenceChannelId
+          ? `기준: ${channelName(group.referenceChannelId)}`
+          : "기준 대기",
+      );
       for (const id of group.channelIds) {
-        const row = section.querySelector(`[data-mv-group-row="${CSS.escape(id)}"]`);
+        const row = section.querySelector(
+          `[data-mv-group-row="${CSS.escape(id)}"]`,
+        );
         const view = getGroupRowViewState(group, id, now);
         row.classList.toggle("is-reference", view.reference);
         setText(row.querySelector("[data-mv-sync-status]"), view.status);
@@ -1852,7 +2168,8 @@
           ["buffer", `버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}`],
           ["edge", `엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}`],
           ["rate", view.rate.text],
-        ]) setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), value);
+        ])
+          setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), value);
         const rate = row.querySelector('[data-mv-sync-metric="rate"]');
         if (rate.title !== view.rate.hint) rate.title = view.rate.hint;
         const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
@@ -1862,14 +2179,23 @@
         if (output.getAttribute("aria-label") !== outputLabel) {
           output.setAttribute("aria-label", outputLabel);
         }
-        setSyncButtonState(row.querySelector("[data-mv-sync-ref]"), !view.ready,
-          view.reference);
+        setSyncButtonState(
+          row.querySelector("[data-mv-sync-ref]"),
+          !view.ready,
+          view.reference,
+        );
         for (const button of row.querySelectorAll("[data-mv-sync-offset]")) {
-          setSyncButtonState(button, !view.ready || !group.referenceChannelId ||
-            view.reference, view.pending);
+          setSyncButtonState(
+            button,
+            !view.ready || !group.referenceChannelId || view.reference,
+            view.pending,
+          );
         }
-        setSyncButtonState(row.querySelector("[data-mv-sync-clear]"), false,
-          view.pending || !view.offset);
+        setSyncButtonState(
+          row.querySelector("[data-mv-sync-clear]"),
+          false,
+          view.pending || !view.offset,
+        );
       }
     }
     const notice = panel.querySelector(".mv-sync-notice");
@@ -1885,18 +2211,24 @@
         checkbox.checked = state.sync.diagnosticsEnabled;
       }
       const elapsed = syncDiagnosticsStartedAt
-        ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
-      setText(diagnostics.querySelector(".mv-sync-diagnostics-status"),
+        ? Math.max(0, now - syncDiagnosticsStartedAt)
+        : 0;
+      setText(
+        diagnostics.querySelector(".mv-sync-diagnostics-status"),
         state.sync.diagnosticsEnabled
           ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
           : syncDiagnostics.size
-            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관` : "기록 안 함");
+            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
+            : "기록 안 함",
+      );
       for (const action of ["Copy", "Export", "Clear"]) {
         const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
         const disabled = syncDiagnostics.size === 0;
         if (button.disabled !== disabled) button.disabled = disabled;
       }
-      const diagnosticNotice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
+      const diagnosticNotice = diagnostics.querySelector(
+        ".mv-sync-diagnostics-notice",
+      );
       setText(diagnosticNotice, syncDiagnosticsNotice);
       const hidden = !syncDiagnosticsNotice;
       if (diagnosticNotice.hidden !== hidden) diagnosticNotice.hidden = hidden;
@@ -1907,69 +2239,87 @@
   function renderGroupSync() {
     closeGroupAssignmentPicker();
     const panel = $("mvSyncPop");
-    const assignments = state.chosen.map((channel) => {
-      const current = syncGroupForChannel(channel.channelId)?.id || "";
-      const label = current ? `그룹 ${current.toUpperCase()}` : "그룹 없음";
-      return `<div class="mv-group-assignment"><span>${esc(channel.channelName)}</span>` +
-        `<div class="mv-group-assignment-picker"><button type="button" ` +
-        `class="mv-pop-button mv-group-assignment-trigger" ` +
-        `data-mv-group-assignment-toggle="${esc(channel.channelId)}" ` +
-        `aria-haspopup="listbox" aria-expanded="false" aria-controls="mvGroupAssignmentList" ` +
-        `aria-label="${esc(channel.channelName)} 싱크 그룹">` +
-        `<span class="mv-pop-value">${esc(label)}</span>` +
-        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
-        `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-        `<path d="m6 9 6 6 6-6"></path></svg></button></div></div>`;
-    }).join("");
-    const sections = state.sync.groups.map((group) => {
-      const rows = group.channelIds.map((id) => {
-        const view = getGroupRowViewState(group, id);
-        const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
-        const step = (value) => `<button type="button" data-mv-sync-offset="${esc(id)}" data-step="${value}"` +
-          `${!view.ready || !group.referenceChannelId || view.reference ? " disabled" : ""}>${value > 0 ? "+" : ""}${value}</button>`;
-        return `<div class="mv-sync-row${view.reference ? " is-reference" : ""}" data-mv-group-row="${esc(id)}">` +
-          `<div class="mv-sync-row-head"><strong>${esc(channelName(id))}</strong>` +
-          `<span data-mv-sync-status>${view.status}</span>` +
-          `<button type="button" class="mv-sync-remove-reference" data-mv-group-remove="${esc(id)}" ` +
-            `aria-label="${esc(channelName(id))} 그룹에서 제거" ` +
-            `title="이 채널을 그룹에서 제거"><svg viewBox="0 0 24 24" width="16" height="16" ` +
-            `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
-            `stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path>` +
-            `</svg></button></div>` +
-          `<div class="mv-sync-metrics">` +
-          `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
-          `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
-          `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}</span>` +
-          `<span data-mv-sync-metric="rate" title="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
-          `<div class="mv-sync-controls"><button type="button" data-mv-sync-ref="${esc(id)}"` +
-          `${view.ready ? "" : " disabled"}>기준</button>` +
-          step(-0.5) + step(-0.1) +
-          `<output data-mv-sync-output aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
-          step(0.1) + step(0.5) +
-          `<button type="button" data-mv-sync-clear="${esc(id)}" title="보정 초기화">↺</button></div></div>`;
-      }).join("");
-      return `<section class="mv-sync-group" data-mv-group="${group.id}">` +
-        `<div class="mv-sync-group-head"><strong>그룹 ${group.id.toUpperCase()}</strong>` +
-        `<span class="mv-group-reference"></span>` +
-        `<button type="button" class="mv-sync-group-reset" data-mv-group-reset="${group.id}" ` +
-        `aria-label="그룹 ${group.id.toUpperCase()} 비우기" title="그룹 비우기">` +
-        `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ` +
-        `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-        `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>` +
-        `</svg><span>비우기</span></button></div>` +
-        `<div class="mv-sync-actions"><label><input type="checkbox" data-mv-group-auto="${group.id}"> 자동 싱크</label>` +
-        `<button type="button" data-mv-group-align="${group.id}">느린 채널에 맞추기</button>` +
-        `<button type="button" data-mv-group-clear="${group.id}">보정 초기화</button></div>` +
-        `<p class="mv-sync-warning" hidden></p><div class="mv-sync-list">${rows}</div></section>`;
-    }).join("");
-    panel.innerHTML = `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
+    const assignments = state.chosen
+      .map((channel) => {
+        const current = syncGroupForChannel(channel.channelId)?.id || "";
+        const label = current ? `그룹 ${current.toUpperCase()}` : "그룹 없음";
+        return (
+          `<div class="mv-group-assignment"><span>${esc(channel.channelName)}</span>` +
+          `<div class="mv-group-assignment-picker"><button type="button" ` +
+          `class="mv-pop-button mv-group-assignment-trigger" ` +
+          `data-mv-group-assignment-toggle="${esc(channel.channelId)}" ` +
+          `aria-haspopup="listbox" aria-expanded="false" aria-controls="mvGroupAssignmentList" ` +
+          `aria-label="${esc(channel.channelName)} 싱크 그룹">` +
+          `<span class="mv-pop-value">${esc(label)}</span>` +
+          `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
+          `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+          `<path d="m6 9 6 6 6-6"></path></svg></button></div></div>`
+        );
+      })
+      .join("");
+    const sections = state.sync.groups
+      .map((group) => {
+        const rows = group.channelIds
+          .map((id) => {
+            const view = getGroupRowViewState(group, id);
+            const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
+            const step = (value) =>
+              `<button type="button" data-mv-sync-offset="${esc(id)}" data-step="${value}"` +
+              `${!view.ready || !group.referenceChannelId || view.reference ? " disabled" : ""}>${value > 0 ? "+" : ""}${value}</button>`;
+            return (
+              `<div class="mv-sync-row${view.reference ? " is-reference" : ""}" data-mv-group-row="${esc(id)}">` +
+              `<div class="mv-sync-row-head"><strong>${esc(channelName(id))}</strong>` +
+              `<span data-mv-sync-status>${view.status}</span>` +
+              `<button type="button" class="mv-sync-remove-reference" data-mv-group-remove="${esc(id)}" ` +
+              `aria-label="${esc(channelName(id))} 그룹에서 제거" ` +
+              `title="이 채널을 그룹에서 제거"><svg viewBox="0 0 24 24" width="16" height="16" ` +
+              `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+              `stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path>` +
+              `</svg></button></div>` +
+              `<div class="mv-sync-metrics">` +
+              `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
+              `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
+              `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}</span>` +
+              `<span data-mv-sync-metric="rate" title="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
+              `<div class="mv-sync-controls"><button type="button" data-mv-sync-ref="${esc(id)}"` +
+              `${view.ready ? "" : " disabled"}>기준</button>` +
+              step(-0.5) +
+              step(-0.1) +
+              `<output data-mv-sync-output aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
+              step(0.1) +
+              step(0.5) +
+              `<button type="button" data-mv-sync-clear="${esc(id)}" title="보정 초기화">↺</button></div></div>`
+            );
+          })
+          .join("");
+        return (
+          `<section class="mv-sync-group" data-mv-group="${group.id}">` +
+          `<div class="mv-sync-group-head"><strong>그룹 ${group.id.toUpperCase()}</strong>` +
+          `<span class="mv-group-reference"></span>` +
+          `<button type="button" class="mv-sync-group-reset" data-mv-group-reset="${group.id}" ` +
+          `aria-label="그룹 ${group.id.toUpperCase()} 비우기" title="그룹 비우기">` +
+          `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ` +
+          `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+          `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>` +
+          `</svg><span>비우기</span></button></div>` +
+          `<div class="mv-sync-actions"><label><input type="checkbox" data-mv-group-auto="${group.id}"> 자동 싱크</label>` +
+          `<button type="button" data-mv-group-align="${group.id}">느린 채널에 맞추기</button>` +
+          `<button type="button" data-mv-group-clear="${group.id}">보정 초기화</button></div>` +
+          `<p class="mv-sync-warning" hidden></p><div class="mv-sync-list">${rows}</div></section>`
+        );
+      })
+      .join("");
+    panel.innerHTML =
+      `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
       `<button type="button" data-mv-sync-scope="all" aria-pressed="false">전체</button>` +
       `<button type="button" data-mv-sync-scope="selected" aria-pressed="false">선택</button>` +
       `<button type="button" data-mv-sync-scope="groups" aria-pressed="true">그룹</button>` +
       `<button type="button" class="mv-group-reset-all" data-mv-group-reset-all>` +
       `그룹 전체 비우기</button></div>` +
       `<div class="mv-group-assignments">${assignments}</div>${sections}` +
-      (state.sync.groups.length < 3 ? `<button type="button" class="mv-group-add" data-mv-group-add>그룹 추가</button>` : "") +
+      (state.sync.groups.length < 3
+        ? `<button type="button" class="mv-group-add" data-mv-group-add>그룹 추가</button>`
+        : "") +
       `<p class="mv-sync-notice" role="status" hidden></p>` +
       `<section class="mv-sync-diagnostics" aria-label="싱크 진단" hidden>` +
       `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
@@ -2075,15 +2425,23 @@
     if (rows.length !== ids.length) return false;
     if (rows.some((row, i) => row.dataset.mvSyncRow !== ids[i])) return false;
     const picking = state.sync.scope === "selected";
-    if (rows.some((row) => !!row.querySelector("[data-mv-sync-pick]") !== picking)) return false;
+    if (
+      rows.some((row) => !!row.querySelector("[data-mv-sync-pick]") !== picking)
+    )
+      return false;
     const setText = (el, value) => {
       if (el && el.textContent !== value) el.textContent = value;
     };
     const mode = state.sync.mode;
-    setText($("mvSyncValue"), mode === "auto" ? "자동" : mode === "manual" ? "수동" : "꺼짐");
+    setText(
+      $("mvSyncValue"),
+      mode === "auto" ? "자동" : mode === "manual" ? "수동" : "꺼짐",
+    );
     const scopeIds = syncScopeIds();
-    setText(panel.querySelector(".mv-sync-scope-count"),
-      picking ? `선택 ${scopeIds.length}/${ids.length}` : "전체");
+    setText(
+      panel.querySelector(".mv-sync-scope-count"),
+      picking ? `선택 ${scopeIds.length}/${ids.length}` : "전체",
+    );
     const tooSmall = syncGroupTooSmall();
     const auto = panel.querySelector("#mvSyncAuto");
     const align = panel.querySelector("#mvSyncAlign");
@@ -2094,8 +2452,11 @@
     if (align) align.disabled = tooSmall;
     for (const [kind, visible, value] of [
       ["group", tooSmall, "싱크할 채널을 2개 이상 선택해 주세요."],
-      ["congestion", state.sync.congested,
-        "여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다."],
+      [
+        "congestion",
+        state.sync.congested,
+        "여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.",
+      ],
     ]) {
       const warning = panel.querySelector(`[data-mv-sync-warning="${kind}"]`);
       if (!warning) return false;
@@ -2165,7 +2526,8 @@
     if (!diagnostics) return false;
     diagnostics.hidden = !syncDiagnosticsUi;
     const elapsed = syncDiagnosticsStartedAt
-      ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
+      ? Math.max(0, now - syncDiagnosticsStartedAt)
+      : 0;
     const status = state.sync.diagnosticsEnabled
       ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
       : syncDiagnostics.size
@@ -2178,7 +2540,9 @@
       const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
       if (button) button.disabled = syncDiagnostics.size === 0;
     }
-    const diagnosticsNotice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
+    const diagnosticsNotice = diagnostics.querySelector(
+      ".mv-sync-diagnostics-notice",
+    );
     if (!diagnosticsNotice) return false;
     setText(diagnosticsNotice, syncDiagnosticsNotice);
     diagnosticsNotice.hidden = !syncDiagnosticsNotice;
@@ -2193,9 +2557,15 @@
     const panel = $("mvSyncPop");
     if (!panel || panel.hidden) {
       const value = $("mvSyncValue");
-      if (value) value.textContent = state.sync.scope === "groups" ? "그룹" :
-        state.sync.mode === "auto" ? "자동" :
-        state.sync.mode === "manual" ? "수동" : "꺼짐";
+      if (value)
+        value.textContent =
+          state.sync.scope === "groups"
+            ? "그룹"
+            : state.sync.mode === "auto"
+              ? "자동"
+              : state.sync.mode === "manual"
+                ? "수동"
+                : "꺼짐";
       return;
     }
     if (patchSyncPanel()) return;
@@ -2209,7 +2579,9 @@
   function setSyncScope(next) {
     const before = new Set(syncScopeIds());
     const leavingGroups = state.sync.scope === "groups";
-    state.sync.scope = ["all", "selected", "groups"].includes(next) ? next : "all";
+    state.sync.scope = ["all", "selected", "groups"].includes(next)
+      ? next
+      : "all";
     if (state.sync.scope === "groups") ensureSyncGroups();
     if (state.sync.scope === "selected" && !state.sync.selectionInitialized) {
       // 최초 전환: 지금 보고 있는 채널을 모두 선택해 둔다. 이후 재진입에서는
@@ -2260,9 +2632,13 @@
   }
 
   function syncEligibleIds(now = Date.now(), settled = false) {
-    return state.chosen.map((c) => c.channelId).filter((id) =>
-      currentStatus(id) === "ready" &&
-      SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled));
+    return state.chosen
+      .map((c) => c.channelId)
+      .filter(
+        (id) =>
+          currentStatus(id) === "ready" &&
+          SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled),
+      );
   }
 
   function selectSyncReference(now = Date.now()) {
@@ -2271,10 +2647,16 @@
     // 잃지 않기 위해서다.
     const ids = syncActiveIds(now);
     const current = state.sync.referenceChannelId;
-    if (state.sync.mode !== "auto" && current && ids.includes(current)) return current;
+    if (state.sync.mode !== "auto" && current && ids.includes(current))
+      return current;
     const next = SYNC.reference(ids, syncStats, syncReadyAt, current, now);
     if (next && next !== current) {
-      recordReferenceChange(current, next, state.sync.mode === "auto" ? "auto" : "manual", now);
+      recordReferenceChange(
+        current,
+        next,
+        state.sync.mode === "auto" ? "auto" : "manual",
+        now,
+      );
       rebaseSyncOffsets(next);
       state.sync.referenceChannelId = next;
       for (const c of state.chosen) cancelPendingSync(c.channelId);
@@ -2290,7 +2672,8 @@
 
   function requestSyncStats() {
     for (const id of state.chosen.map((c) => c.channelId)) {
-      if (currentStatus(id) === "ready") sendSync(id, "REQUEST_FRAME_SYNC_STATS");
+      if (currentStatus(id) === "ready")
+        sendSync(id, "REQUEST_FRAME_SYNC_STATS");
     }
   }
 
@@ -2299,14 +2682,21 @@
   }
 
   function updateSyncPolling() {
-    const frameOwnsRate = state.chosen.some((c) =>
-      syncStats.get(c.channelId)?.syncRateOwned === true);
-    const auto = state.sync.scope === "groups"
-      ? state.sync.groups.some((group) => group.mode === "auto")
-      : state.sync.mode === "auto";
-    const needed = !document.hidden && (syncPanelOpen() || auto ||
-      pendingSyncCommands.size > 0 || syncRates.size > 0 || frameOwnsRate ||
-      state.sync.diagnosticsEnabled);
+    const frameOwnsRate = state.chosen.some(
+      (c) => syncStats.get(c.channelId)?.syncRateOwned === true,
+    );
+    const auto =
+      state.sync.scope === "groups"
+        ? state.sync.groups.some((group) => group.mode === "auto")
+        : state.sync.mode === "auto";
+    const needed =
+      !document.hidden &&
+      (syncPanelOpen() ||
+        auto ||
+        pendingSyncCommands.size > 0 ||
+        syncRates.size > 0 ||
+        frameOwnsRate ||
+        state.sync.diagnosticsEnabled);
     if (!needed && syncTimer) {
       clearInterval(syncTimer);
       syncTimer = 0;
@@ -2327,8 +2717,12 @@
     sendSyncCommand(id, "rate", "APPLY_SYNC_RATE", { rate }, rate);
   }
 
-  function alignSync(ids = null, manual = false, offsetOverrides = null,
-    allowAudioProtectedSeek = false) {
+  function alignSync(
+    ids = null,
+    manual = false,
+    offsetOverrides = null,
+    allowAudioProtectedSeek = false,
+  ) {
     const now = Date.now();
     const ref = selectSyncReference(now);
     if (!ref || now - (syncReadyAt.get(ref) || now) < SYNC.LIMITS.settlingMs) {
@@ -2341,51 +2735,97 @@
     let partial = 0;
     let protectedCount = 0;
     for (const id of ids || syncActiveIds(now)) {
-      if (id === ref || !SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now)) continue;
+      if (
+        id === ref ||
+        !SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now)
+      )
+        continue;
       if (isSyncAudioProtected(id) && !allowAudioProtectedSeek) {
         protectedCount += 1;
         continue;
       }
-      if (now - (syncSeekAt.get(id) || 0) < (manual ? 250 : SYNC.LIMITS.seekCooldownMs)) continue;
-      const requestedOffset = offsetOverrides && Object.hasOwn(offsetOverrides, id)
-        ? offsetOverrides[id] : state.sync.manualOffsets[id] || 0;
+      if (
+        now - (syncSeekAt.get(id) || 0) <
+        (manual ? 250 : SYNC.LIMITS.seekCooldownMs)
+      )
+        continue;
+      const requestedOffset =
+        offsetOverrides && Object.hasOwn(offsetOverrides, id)
+          ? offsetOverrides[id]
+          : state.sync.manualOffsets[id] || 0;
       const delay = SYNC.targetDelay(refStats, requestedOffset);
-      const target = SYNC.seekTarget(syncStats.get(id), delay, manual ? 0.05 : SYNC.LIMITS.seekThresholdSec);
+      const target = SYNC.seekTarget(
+        syncStats.get(id),
+        delay,
+        manual ? 0.05 : SYNC.LIMITS.seekThresholdSec,
+      );
       if (target === null) {
-        if (offsetOverrides && Math.abs(syncStats.get(id).nativeDelaySec - delay) < 0.05) {
+        if (
+          offsetOverrides &&
+          Math.abs(syncStats.get(id).nativeDelaySec - delay) < 0.05
+        ) {
           state.sync.manualOffsets[id] = requestedOffset;
         }
         continue;
       }
-      const withinOneSeek = Math.abs(syncStats.get(id).nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec;
-      if (sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
-        { currentTime: target, deltaSec: target - syncStats.get(id).currentTime, manual },
-        { currentTime: target, manual, offset: requestedOffset,
-          commitOffset: !!offsetOverrides && withinOneSeek })) {
+      const withinOneSeek =
+        Math.abs(syncStats.get(id).nativeDelaySec - delay) <=
+        SYNC.LIMITS.maxSeekSec;
+      if (
+        sendSyncCommand(
+          id,
+          "seek",
+          "APPLY_SYNC_SEEK",
+          {
+            currentTime: target,
+            deltaSec: target - syncStats.get(id).currentTime,
+            manual,
+          },
+          {
+            currentTime: target,
+            manual,
+            offset: requestedOffset,
+            commitOffset: !!offsetOverrides && withinOneSeek,
+          },
+        )
+      ) {
         changed += 1;
         if (offsetOverrides && !withinOneSeek) partial += 1;
       }
     }
-    syncNotice = partial ? "한 번에 최대 4초만 이동합니다. 남은 차이는 다시 보정해 주세요." :
-      changed ? `${changed}개 채널에 보정을 요청했습니다.` :
-        protectedCount ? "소리가 켜진 채널은 자동 이동하지 않았습니다." :
-        "보정 가능한 차이가 없거나 잠시 기다려야 합니다.";
+    syncNotice = partial
+      ? "한 번에 최대 4초만 이동합니다. 남은 차이는 다시 보정해 주세요."
+      : changed
+        ? `${changed}개 채널에 보정을 요청했습니다.`
+        : protectedCount
+          ? "소리가 켜진 채널은 자동 이동하지 않았습니다."
+          : "보정 가능한 차이가 없거나 잠시 기다려야 합니다.";
     refreshSyncPanel();
   }
 
   function groupEligibleIds(group, now, settled = false) {
-    return group.channelIds.filter((id) => currentStatus(id) === "ready" &&
-      SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled));
+    return group.channelIds.filter(
+      (id) =>
+        currentStatus(id) === "ready" &&
+        SYNC.eligible(syncStats.get(id), syncReadyAt.get(id), now, settled),
+    );
   }
 
   function selectGroupReference(group, now = Date.now()) {
     const ids = groupEligibleIds(group, now);
     const current = group.referenceChannelId;
-    if (group.mode !== "auto" && current && ids.includes(current)) return current;
+    if (group.mode !== "auto" && current && ids.includes(current))
+      return current;
     const next = SYNC.reference(ids, syncStats, syncReadyAt, current, now);
     if (next && next !== current) {
       rebaseGroupOffsets(group, next);
-      recordReferenceChange(current, next, group.mode === "auto" ? "auto" : "manual", now, group.id);
+      recordReferenceChange(
+        current,
+        next,
+        group.mode === "auto" ? "auto" : "manual",
+        now,
+        group.id,
+      );
       for (const id of group.channelIds) cancelPendingSync(id);
     } else if (!next && current && !group.channelIds.includes(current)) {
       group.referenceChannelId = null;
@@ -2399,7 +2839,12 @@
       const ids = groupEligibleIds(group, now, true);
       const fresh = new Map(ids.map((id) => [id, syncStats.get(id)]));
       const wasCongested = group.congested;
-      group.congestionState = SYNC.congestion(group.congestionState, fresh, ids, now);
+      group.congestionState = SYNC.congestion(
+        group.congestionState,
+        fresh,
+        ids,
+        now,
+      );
       group.congested = group.congestionState.active;
       if (wasCongested !== group.congested) {
         recordCongestionChange(group.congested, ids, now, group.id);
@@ -2408,22 +2853,40 @@
       const refStats = ref && syncStats.get(ref);
       for (const id of group.channelIds) {
         const st = syncStats.get(id);
-        if (group.mode !== "auto" || group.congested || !refStats || !ids.includes(ref) ||
-            id === ref || !ids.includes(id) || st.userRateOverride ||
-            (st.playbackRate !== null && Math.abs(st.playbackRate - 1) >
-              SYNC.LIMITS.userRateEpsilon && !st.syncRateOwned)) {
+        if (
+          group.mode !== "auto" ||
+          group.congested ||
+          !refStats ||
+          !ids.includes(ref) ||
+          id === ref ||
+          !ids.includes(id) ||
+          st.userRateOverride ||
+          (st.playbackRate !== null &&
+            Math.abs(st.playbackRate - 1) > SYNC.LIMITS.userRateEpsilon &&
+            !st.syncRateOwned)
+        ) {
           resetSyncRate(id);
           continue;
         }
         const delay = SYNC.targetDelay(refStats, group.manualOffsets[id] || 0);
         const error = delay - st.nativeDelaySec;
-        if (Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
-            now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs) {
+        if (
+          Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
+          now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs
+        ) {
           const target = SYNC.seekTarget(st, delay);
-          if (!isSyncAudioProtected(id) && target !== null && target < st.currentTime) {
-            sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
+          if (
+            !isSyncAudioProtected(id) &&
+            target !== null &&
+            target < st.currentTime
+          ) {
+            sendSyncCommand(
+              id,
+              "seek",
+              "APPLY_SYNC_SEEK",
               { currentTime: target, deltaSec: target - st.currentTime },
-              { currentTime: target, manual: false });
+              { currentTime: target, manual: false },
+            );
           }
         }
         setSyncRate(id, SYNC.rateFor(error, st.syncRateOwned));
@@ -2431,8 +2894,12 @@
     }
   }
 
-  function alignSyncGroup(group, ids = group.channelIds, offsets = null,
-    allowAudioProtectedSeek = false) {
+  function alignSyncGroup(
+    group,
+    ids = group.channelIds,
+    offsets = null,
+    allowAudioProtectedSeek = false,
+  ) {
     const now = Date.now();
     const ref = selectGroupReference(group, now);
     if (!ref || now - (syncReadyAt.get(ref) || now) < SYNC.LIMITS.settlingMs) {
@@ -2443,11 +2910,17 @@
     const refStats = syncStats.get(ref);
     for (const id of ids) {
       const st = syncStats.get(id);
-      if (id === ref || !SYNC.eligible(st, syncReadyAt.get(id), now) ||
-          (isSyncAudioProtected(id) && !allowAudioProtectedSeek) ||
-          now - (syncSeekAt.get(id) || 0) < 250) continue;
-      const offset = offsets && Object.hasOwn(offsets, id)
-        ? offsets[id] : group.manualOffsets[id] || 0;
+      if (
+        id === ref ||
+        !SYNC.eligible(st, syncReadyAt.get(id), now) ||
+        (isSyncAudioProtected(id) && !allowAudioProtectedSeek) ||
+        now - (syncSeekAt.get(id) || 0) < 250
+      )
+        continue;
+      const offset =
+        offsets && Object.hasOwn(offsets, id)
+          ? offsets[id]
+          : group.manualOffsets[id] || 0;
       const delay = SYNC.targetDelay(refStats, offset);
       const target = SYNC.seekTarget(st, delay, 0.05);
       if (target === null) {
@@ -2456,10 +2929,24 @@
         }
         continue;
       }
-      sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
-        { currentTime: target, deltaSec: target - st.currentTime, manual: true },
-        { currentTime: target, manual: true, offset,
-          commitOffset: !!offsets && Math.abs(st.nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec });
+      sendSyncCommand(
+        id,
+        "seek",
+        "APPLY_SYNC_SEEK",
+        {
+          currentTime: target,
+          deltaSec: target - st.currentTime,
+          manual: true,
+        },
+        {
+          currentTime: target,
+          manual: true,
+          offset,
+          commitOffset:
+            !!offsets &&
+            Math.abs(st.nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec,
+        },
+      );
     }
     syncNotice = `그룹 ${group.id.toUpperCase()}에 보정을 요청했습니다.`;
     refreshSyncPanel();
@@ -2476,7 +2963,9 @@
     }
     const groupReset = target.closest?.("[data-mv-group-reset]");
     if (groupReset) {
-      const group = state.sync.groups.find((item) => item.id === groupReset.dataset.mvGroupReset);
+      const group = state.sync.groups.find(
+        (item) => item.id === groupReset.dataset.mvGroupReset,
+      );
       if (group) {
         clearSyncGroup(group);
         syncNotice = `그룹 ${group.id.toUpperCase()}의 채널 배정을 비웠습니다.`;
@@ -2500,18 +2989,27 @@
     if (target.closest?.("[data-mv-group-add]")) {
       if (state.sync.groups.length < 3) {
         const id = "abc"[state.sync.groups.length];
-        state.sync.groups.push({ id, channelIds: [], mode: "off",
-          referenceChannelId: null, manualOffsets: {}, congested: false,
-          congestionState: { active: false, since: 0 } });
+        state.sync.groups.push({
+          id,
+          channelIds: [],
+          mode: "off",
+          referenceChannelId: null,
+          manualOffsets: {},
+          congested: false,
+          congestionState: { active: false, since: 0 },
+        });
         renderSync(true);
       }
       return true;
     }
     const auto = target.closest?.("[data-mv-group-auto]");
     if (auto) {
-      const group = state.sync.groups.find((item) => item.id === auto.dataset.mvGroupAuto);
+      const group = state.sync.groups.find(
+        (item) => item.id === auto.dataset.mvGroupAuto,
+      );
       if (group) {
-        group.mode = auto.checked && group.channelIds.length >= 2 ? "auto" : "off";
+        group.mode =
+          auto.checked && group.channelIds.length >= 2 ? "auto" : "off";
         if (group.mode !== "auto") group.channelIds.forEach(resetSyncRate);
         updateSyncPolling();
         refreshSyncPanel();
@@ -2520,23 +3018,42 @@
     }
     const align = target.closest?.("[data-mv-group-align]");
     if (align) {
-      const group = state.sync.groups.find((item) => item.id === align.dataset.mvGroupAlign);
+      const group = state.sync.groups.find(
+        (item) => item.id === align.dataset.mvGroupAlign,
+      );
       if (group) alignSyncGroup(group);
       return true;
     }
     const clear = target.closest?.("[data-mv-group-clear]");
     if (clear) {
-      const group = state.sync.groups.find((item) => item.id === clear.dataset.mvGroupClear);
-      if (group) alignSyncGroup(group, group.channelIds,
-        Object.fromEntries(group.channelIds.map((id) => [id, 0])), true);
+      const group = state.sync.groups.find(
+        (item) => item.id === clear.dataset.mvGroupClear,
+      );
+      if (group)
+        alignSyncGroup(
+          group,
+          group.channelIds,
+          Object.fromEntries(group.channelIds.map((id) => [id, 0])),
+          true,
+        );
       return true;
     }
     const ref = target.closest?.("[data-mv-sync-ref]");
     if (ref) {
       const id = ref.dataset.mvSyncRef;
       const group = syncGroupForChannel(id);
-      if (group && group.referenceChannelId !== id && groupEligibleIds(group, Date.now()).includes(id)) {
-        recordReferenceChange(group.referenceChannelId, id, "manual", Date.now(), group.id);
+      if (
+        group &&
+        group.referenceChannelId !== id &&
+        groupEligibleIds(group, Date.now()).includes(id)
+      ) {
+        recordReferenceChange(
+          group.referenceChannelId,
+          id,
+          "manual",
+          Date.now(),
+          group.id,
+        );
         rebaseGroupOffsets(group, id);
         group.mode = "manual";
         group.channelIds.forEach((channelId) => {
@@ -2553,17 +3070,31 @@
       const id = offset.dataset.mvSyncOffset;
       const group = syncGroupForChannel(id);
       const step = Number(offset.dataset.step);
-      if (!group || syncNudgePending(id) || ![-0.5, -0.1, 0.1, 0.5].includes(step) ||
-          !groupEligibleIds(group, Date.now()).includes(id) || group.referenceChannelId === id) return true;
+      if (
+        !group ||
+        syncNudgePending(id) ||
+        ![-0.5, -0.1, 0.1, 0.5].includes(step) ||
+        !groupEligibleIds(group, Date.now()).includes(id) ||
+        group.referenceChannelId === id
+      )
+        return true;
       const before = group.manualOffsets[id] || 0;
       const next = Math.round((before + step) * 10) / 10;
       const st = syncStats.get(id);
       const targetTime = st.currentTime + before - next;
-      if (Math.abs(next) <= 10 && targetTime >= st.seekableStart + 0.05 &&
-          targetTime <= st.seekableEnd - 0.05 &&
-          Date.now() - (syncSeekAt.get(id) || 0) >= 250) {
-        sendSyncCommand(id, "nudge", "APPLY_SYNC_NUDGE",
-          { deltaSec: before - next }, { offset: next });
+      if (
+        Math.abs(next) <= 10 &&
+        targetTime >= st.seekableStart + 0.05 &&
+        targetTime <= st.seekableEnd - 0.05 &&
+        Date.now() - (syncSeekAt.get(id) || 0) >= 250
+      ) {
+        sendSyncCommand(
+          id,
+          "nudge",
+          "APPLY_SYNC_NUDGE",
+          { deltaSec: before - next },
+          { offset: next },
+        );
       }
       refreshSyncPanel();
       return true;
@@ -2620,27 +3151,48 @@
           resetSyncRate(id);
           continue;
         }
-        if (!refStats || !settledIds.includes(ref) || id === ref || !ids.includes(id) ||
-            now - (syncReadyAt.get(id) || now) < SYNC.LIMITS.settlingMs ||
-            state.sync.congested ||
-            syncStats.get(id).userRateOverride ||
-            (syncStats.get(id).playbackRate !== null &&
-              Math.abs(syncStats.get(id).playbackRate - 1) > SYNC.LIMITS.userRateEpsilon &&
-              !syncStats.get(id).syncRateOwned)) {
+        if (
+          !refStats ||
+          !settledIds.includes(ref) ||
+          id === ref ||
+          !ids.includes(id) ||
+          now - (syncReadyAt.get(id) || now) < SYNC.LIMITS.settlingMs ||
+          state.sync.congested ||
+          syncStats.get(id).userRateOverride ||
+          (syncStats.get(id).playbackRate !== null &&
+            Math.abs(syncStats.get(id).playbackRate - 1) >
+              SYNC.LIMITS.userRateEpsilon &&
+            !syncStats.get(id).syncRateOwned)
+        ) {
           resetSyncRate(id);
           continue;
         }
-        const delay = SYNC.targetDelay(refStats, state.sync.manualOffsets[id] || 0);
+        const delay = SYNC.targetDelay(
+          refStats,
+          state.sync.manualOffsets[id] || 0,
+        );
         const error = delay - syncStats.get(id).nativeDelaySec;
-        if (Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
-            now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs) {
+        if (
+          Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
+          now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs
+        ) {
           const target = SYNC.seekTarget(syncStats.get(id), delay);
           // 자동 모드에서 기준보다 뒤처진 채널은 seek로 앞당기지 않는다.
-          if (!isSyncAudioProtected(id) && target !== null &&
-              target < syncStats.get(id).currentTime) {
-            sendSyncCommand(id, "seek", "APPLY_SYNC_SEEK",
-              { currentTime: target, deltaSec: target - syncStats.get(id).currentTime },
-              { currentTime: target, manual: false });
+          if (
+            !isSyncAudioProtected(id) &&
+            target !== null &&
+            target < syncStats.get(id).currentTime
+          ) {
+            sendSyncCommand(
+              id,
+              "seek",
+              "APPLY_SYNC_SEEK",
+              {
+                currentTime: target,
+                deltaSec: target - syncStats.get(id).currentTime,
+              },
+              { currentTime: target, manual: false },
+            );
           }
         }
         setSyncRate(id, SYNC.rateFor(error, syncStats.get(id).syncRateOwned));
@@ -2656,80 +3208,97 @@
 
   function renderSync(force = false) {
     const value = $("mvSyncValue");
-    if (value) value.textContent = state.sync.scope === "groups" ? "그룹" :
-      state.sync.mode === "auto" ? "자동" :
-      state.sync.mode === "manual" ? "수동" : "꺼짐";
+    if (value)
+      value.textContent =
+        state.sync.scope === "groups"
+          ? "그룹"
+          : state.sync.mode === "auto"
+            ? "자동"
+            : state.sync.mode === "manual"
+              ? "수동"
+              : "꺼짐";
     const panel = $("mvSyncPop");
     if (!panel || (panel.hidden && !force)) return;
-    if (!force && panel.contains(document.activeElement) && document.activeElement !== panel) return;
+    if (
+      !force &&
+      panel.contains(document.activeElement) &&
+      document.activeElement !== panel
+    )
+      return;
     if (state.sync.scope === "groups") return renderGroupSync();
     const now = Date.now();
     const ref = state.sync.referenceChannelId;
     const diagnosticsElapsed = syncDiagnosticsStartedAt
-      ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
+      ? Math.max(0, now - syncDiagnosticsStartedAt)
+      : 0;
     const diagnosticsStatus = state.sync.diagnosticsEnabled
       ? `기록 중 · ${DIAGNOSTICS.formatDuration(diagnosticsElapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
       : syncDiagnostics.size
         ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
         : "기록 안 함";
-    const rows = state.chosen.map((c) => {
-      const id = c.channelId;
-      const v = getSyncRowViewState(id, now);
-      const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
-      const btnAttrs = (disabled, busy) =>
-        disabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
-      // 방향 설명은 '재생 위치' 이동이다. 배속(재생 속도)과 섞이면 안 된다.
-      const stepBtn = (step, text, dir, side) =>
-        `<button type="button" data-mv-sync-offset="${id}" data-step="${step}" ` +
-        `title="재생 위치를 ${dir} 이동(${side})" ` +
-        `aria-label="${esc(c.channelName)} 재생 위치를 ${dir} 이동" ` +
-        `${btnAttrs(v.offDisabled, v.offBusy)}>${text}</button>`;
-      return `<div class="mv-sync-row${v.locked ? " is-excluded" : ""}` +
-        `${v.isReference ? " is-reference" : ""}" data-mv-sync-row="${id}">` +
-        `<div class="mv-sync-row-head">` +
-        (v.picking
-          ? `<label class="mv-sync-pick"><input type="checkbox" data-mv-sync-pick="${id}"` +
-            `${v.picked ? " checked" : ""} aria-label="${esc(c.channelName)} 싱크 대상">` +
-            `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong></label>`
-          : `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong>`) +
-        `<span data-mv-sync-status>${esc(v.locked ? "제외됨" : v.label)}</span></div>` +
-        `<div class="mv-sync-metrics">` +
-        `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}</span>` +
-        `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}</span>` +
-        `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}</span>` +
-        `<span data-mv-sync-metric="rate" title="${esc(v.rateInfo.hint)}">` +
-        `${esc(v.rateInfo.text)}</span></div>` +
-        `<div class="mv-sync-controls">` +
-        `<button type="button" data-mv-sync-ref="${id}" ` +
-        `title="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
-        `aria-label="${esc(c.channelName)}을 기준 채널로" ` +
-        `${btnAttrs(v.refDisabled, v.refBusy)}>기준</button>` +
-        stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
-        stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
-        `<output data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
-        `${offText}" title="시간 위치 보정(재생 속도와 별개)">` +
-        `${offText}${v.nudgePending ? " · 적용 중" : ""}</output>` +
-        stepBtn("0.1", "+0.1", "0.1초 뒤로", "과거 쪽") +
-        stepBtn("0.5", "+0.5", "0.5초 뒤로", "과거 쪽") +
-        `<button type="button" data-mv-sync-clear="${id}" ` +
-        `${btnAttrs(v.clearDisabled, v.clearBusy)} ` +
-        `aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
-        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-        `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` +
-        `</div></div>`;
-    }).join("");
+    const rows = state.chosen
+      .map((c) => {
+        const id = c.channelId;
+        const v = getSyncRowViewState(id, now);
+        const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
+        const btnAttrs = (disabled, busy) =>
+          disabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
+        // 방향 설명은 '재생 위치' 이동이다. 배속(재생 속도)과 섞이면 안 된다.
+        const stepBtn = (step, text, dir, side) =>
+          `<button type="button" data-mv-sync-offset="${id}" data-step="${step}" ` +
+          `title="재생 위치를 ${dir} 이동(${side})" ` +
+          `aria-label="${esc(c.channelName)} 재생 위치를 ${dir} 이동" ` +
+          `${btnAttrs(v.offDisabled, v.offBusy)}>${text}</button>`;
+        return (
+          `<div class="mv-sync-row${v.locked ? " is-excluded" : ""}` +
+          `${v.isReference ? " is-reference" : ""}" data-mv-sync-row="${id}">` +
+          `<div class="mv-sync-row-head">` +
+          (v.picking
+            ? `<label class="mv-sync-pick"><input type="checkbox" data-mv-sync-pick="${id}"` +
+              `${v.picked ? " checked" : ""} aria-label="${esc(c.channelName)} 싱크 대상">` +
+              `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong></label>`
+            : `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong>`) +
+          `<span data-mv-sync-status>${esc(v.locked ? "제외됨" : v.label)}</span></div>` +
+          `<div class="mv-sync-metrics">` +
+          `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}</span>` +
+          `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}</span>` +
+          `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}</span>` +
+          `<span data-mv-sync-metric="rate" title="${esc(v.rateInfo.hint)}">` +
+          `${esc(v.rateInfo.text)}</span></div>` +
+          `<div class="mv-sync-controls">` +
+          `<button type="button" data-mv-sync-ref="${id}" ` +
+          `title="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
+          `aria-label="${esc(c.channelName)}을 기준 채널로" ` +
+          `${btnAttrs(v.refDisabled, v.refBusy)}>기준</button>` +
+          stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
+          stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
+          `<output data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
+          `${offText}" title="시간 위치 보정(재생 속도와 별개)">` +
+          `${offText}${v.nudgePending ? " · 적용 중" : ""}</output>` +
+          stepBtn("0.1", "+0.1", "0.1초 뒤로", "과거 쪽") +
+          stepBtn("0.5", "+0.5", "0.5초 뒤로", "과거 쪽") +
+          `<button type="button" data-mv-sync-clear="${id}" ` +
+          `${btnAttrs(v.clearDisabled, v.clearBusy)} ` +
+          `aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
+          `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+          `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` +
+          `</div></div>`
+        );
+      })
+      .join("");
     const picking = state.sync.scope === "selected";
     const scopeIds = syncScopeIds();
     const tooSmall = syncGroupTooSmall();
-    panel.innerHTML = `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
+    panel.innerHTML =
+      `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
       `<button type="button" data-mv-sync-scope="all"` +
       ` aria-pressed="${!picking}">전체</button>` +
       `<button type="button" data-mv-sync-scope="selected"` +
       ` aria-pressed="${picking}">선택</button>` +
       `<button type="button" data-mv-sync-scope="groups" aria-pressed="false">그룹</button>` +
-      `<span class="mv-sync-scope-count">${picking
-        ? `선택 ${scopeIds.length}/${state.chosen.length}`
-        : "전체"}</span></div>` +
+      `<span class="mv-sync-scope-count">${
+        picking ? `선택 ${scopeIds.length}/${state.chosen.length}` : "전체"
+      }</span></div>` +
       `<div class="mv-sync-actions">` +
       `<label><input type="checkbox" id="mvSyncAuto" ${state.sync.mode === "auto" ? "checked" : ""}` +
       `${tooSmall ? " disabled" : ""}> 자동 싱크</label>` +
@@ -2742,7 +3311,7 @@
       `<p class="mv-sync-notice" role="status"${syncNotice ? "" : " hidden"}>` +
       `${esc(syncNotice)}</p>` +
       `<div class="mv-sync-list">${rows}</div>` +
-      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다. 채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
+      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다.<br />채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
       `<section class="mv-sync-diagnostics" aria-label="싱크 진단"${syncDiagnosticsUi ? "" : " hidden"}>` +
       `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
       `<label><input type="checkbox" id="mvSyncDiagnostics"` +
@@ -3160,18 +3729,30 @@
     const maxWidth = Math.max(1, bounds.width - 16);
     const maxHeight = Math.max(1, bounds.height - 16);
     if (quickSize.width !== null) {
-      quickSize.width = Math.min(maxWidth, Math.max(Math.min(quickResizeMinWidth, maxWidth), quickSize.width));
+      quickSize.width = Math.min(
+        maxWidth,
+        Math.max(Math.min(quickResizeMinWidth, maxWidth), quickSize.width),
+      );
       panel.style.width = `${quickSize.width}px`;
     }
     if (quickSize.height !== null) {
-      quickSize.height = Math.min(maxHeight, Math.max(Math.min(quickResizeMinHeight, maxHeight), quickSize.height));
+      quickSize.height = Math.min(
+        maxHeight,
+        Math.max(Math.min(quickResizeMinHeight, maxHeight), quickSize.height),
+      );
       panel.style.height = `${quickSize.height}px`;
     }
     if (quickPosition.left !== null) {
       const width = panel.getBoundingClientRect().width;
       const height = panel.getBoundingClientRect().height;
-      quickPosition.left = Math.max(0, Math.min(bounds.width - width, quickPosition.left));
-      quickPosition.top = Math.max(0, Math.min(bounds.height - height, quickPosition.top));
+      quickPosition.left = Math.max(
+        0,
+        Math.min(bounds.width - width, quickPosition.left),
+      );
+      quickPosition.top = Math.max(
+        0,
+        Math.min(bounds.height - height, quickPosition.top),
+      );
       panel.style.left = `${quickPosition.left}px`;
       panel.style.top = `${quickPosition.top}px`;
       panel.style.transform = "none";
@@ -3238,8 +3819,8 @@
     const oldFrame = oldCell?.querySelector("iframe");
     // 같은 자리 교체다. 싱크 대상이었으면 새 채널이 그 자리를 이어받는다.
     // ⚠ 보정값(offset)은 물려주지 않는다 — 다른 방송이라 기준이 다르다.
-    const inheritSelected = inSyncScope(oldChannelId) &&
-      state.sync.scope === "selected";
+    const inheritSelected =
+      inSyncScope(oldChannelId) && state.sync.scope === "selected";
     const inheritGroup = syncGroupForChannel(oldChannelId);
     const inheritGroupMode = inheritGroup?.mode;
     clearRemovedChannel(oldChannelId);
@@ -3266,7 +3847,8 @@
     if (inheritGroup) {
       inheritGroup.channelIds.push(id);
       inheritGroup.manualOffsets[id] = 0;
-      if (inheritGroup.channelIds.length >= 2) inheritGroup.mode = inheritGroupMode;
+      if (inheritGroup.channelIds.length >= 2)
+        inheritGroup.mode = inheritGroupMode;
     }
     if (inheritSelected && !state.sync.selectedChannelIds.includes(id)) {
       state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, id];
@@ -3363,46 +3945,70 @@
   let quickFolder = ""; // 고른 폴더(빈 문자열이면 전체)
   let quickRememberState = false;
   const quickSortBySource = {
-    following: "viewers", custom: "custom", live: "viewers", search: "viewers",
+    following: "viewers",
+    custom: "custom",
+    live: "viewers",
+    search: "viewers",
   };
 
   function saveQuickState() {
     if (!quickRememberState || !chrome.storage?.local) return;
-    void chrome.storage.local.set({ cheeseMultiviewQuickState: {
-      source: quickSource, keyword: quickKeyword, folder: quickFolder,
-      sortBySource: quickSortBySource,
-    } }).catch(() => {});
+    void chrome.storage.local
+      .set({
+        cheeseMultiviewQuickState: {
+          source: quickSource,
+          keyword: quickKeyword,
+          folder: quickFolder,
+          sortBySource: quickSortBySource,
+        },
+      })
+      .catch(() => {});
   }
 
-  void chrome.storage?.local?.get([
-    "cheeseMultiviewRememberQuickState", "cheeseMultiviewQuickState",
-    "cheeseMultiviewQuickPosition",
-  ])?.then((data) => {
-    quickRememberState = data.cheeseMultiviewRememberQuickState === true;
-    if (quickRememberState) {
-      const saved = data.cheeseMultiviewQuickState;
-      if (saved && ["following", "custom", "live", "search"].includes(saved.source)) {
-        quickSource = saved.source;
-        quickKeyword = typeof saved.keyword === "string" ? saved.keyword.slice(0, 100) : "";
-        quickFolder = typeof saved.folder === "string" ? saved.folder.slice(0, 128) : "";
-        for (const source of Object.keys(quickSortBySource)) {
-          const mode = saved.sortBySource?.[source];
-          if (SOURCES.SORT_OPTIONS.some((option) => option.id === mode)) {
-            quickSortBySource[source] = mode;
+  void chrome.storage?.local
+    ?.get([
+      "cheeseMultiviewRememberQuickState",
+      "cheeseMultiviewQuickState",
+      "cheeseMultiviewQuickPosition",
+    ])
+    ?.then((data) => {
+      quickRememberState = data.cheeseMultiviewRememberQuickState === true;
+      if (quickRememberState) {
+        const saved = data.cheeseMultiviewQuickState;
+        if (
+          saved &&
+          ["following", "custom", "live", "search"].includes(saved.source)
+        ) {
+          quickSource = saved.source;
+          quickKeyword =
+            typeof saved.keyword === "string"
+              ? saved.keyword.slice(0, 100)
+              : "";
+          quickFolder =
+            typeof saved.folder === "string" ? saved.folder.slice(0, 128) : "";
+          for (const source of Object.keys(quickSortBySource)) {
+            const mode = saved.sortBySource?.[source];
+            if (SOURCES.SORT_OPTIONS.some((option) => option.id === mode)) {
+              quickSortBySource[source] = mode;
+            }
           }
+          $("mvQuickSearch").value = quickKeyword;
         }
-        $("mvQuickSearch").value = quickKeyword;
       }
-    }
-    const savedPosition = data.cheeseMultiviewQuickPosition;
-    if (Number.isFinite(savedPosition?.left) && Number.isFinite(savedPosition?.top)) {
-      quickPosition.left = savedPosition.left;
-      quickPosition.top = savedPosition.top;
-    }
-  }).catch(() => {});
+      const savedPosition = data.cheeseMultiviewQuickPosition;
+      if (
+        Number.isFinite(savedPosition?.left) &&
+        Number.isFinite(savedPosition?.top)
+      ) {
+        quickPosition.left = savedPosition.left;
+        quickPosition.top = savedPosition.top;
+      }
+    })
+    .catch(() => {});
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === "local" && changes.cheeseMultiviewRememberQuickState) {
-      quickRememberState = changes.cheeseMultiviewRememberQuickState.newValue === true;
+      quickRememberState =
+        changes.cheeseMultiviewRememberQuickState.newValue === true;
     }
   });
   // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
@@ -3411,7 +4017,10 @@
   function getQuickLivePager() {
     const sortType = SOURCES.serverSortType("live", quickSortBySource.live);
     if (!quickLivePager || quickLivePager.sortType !== sortType) {
-      quickLivePager = SOURCES.createLivePager({ ttlMs: QUICK_TTL_MS, sortType });
+      quickLivePager = SOURCES.createLivePager({
+        ttlMs: QUICK_TTL_MS,
+        sortType,
+      });
     }
     return quickLivePager;
   }
@@ -3434,7 +4043,9 @@
         ? `search:${keyword}`
         : source === "custom"
           ? `custom:sections:${sortType}`
-          : source === "following" ? `following:${sortType}` : source;
+          : source === "following"
+            ? `following:${sortType}`
+            : source;
     if (source === "live") {
       const pager = getQuickLivePager();
       await pager.loadFirst();
@@ -3478,7 +4089,10 @@
     if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
     if (source === "custom") {
       quickSections = Array.isArray(result) ? result : [];
-      if (quickFolder && !quickSections.some((section) => section.id === quickFolder)) {
+      if (
+        quickFolder &&
+        !quickSections.some((section) => section.id === quickFolder)
+      ) {
         quickFolder = "";
         saveQuickState();
       }
@@ -3590,20 +4204,28 @@
         : "") +
       `</span>` +
       `</span></span>` +
-      ((r.category || tags.length) ? `<span class="mv-card-meta mv-quick-card-meta">` +
-        (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +
-        tags.map((tag) => `<span class="mv-card-tag-chip">${esc(tag)}</span>`).join("") +
-        `</span>` : "") +
+      (r.category || tags.length
+        ? `<span class="mv-card-meta mv-quick-card-meta">` +
+          (r.category
+            ? `<span class="mv-card-category-chip">${esc(r.category)}</span>`
+            : "") +
+          tags
+            .map((tag) => `<span class="mv-card-tag-chip">${esc(tag)}</span>`)
+            .join("") +
+          `</span>`
+        : "") +
       `</button>`
     );
   }
 
   function quickSkeletonCards(count = 4) {
-    return (`<div class="mv-quick-card is-skeleton" aria-hidden="true">` +
+    return (
+      `<div class="mv-quick-card is-skeleton" aria-hidden="true">` +
       `<span class="mv-quick-card-thumb"></span>` +
       `<span class="mv-quick-card-body"><span class="mv-quick-card-avatar"></span>` +
       `<span class="mv-quick-card-text"><span class="mv-skeleton-line"></span>` +
-      `<span class="mv-skeleton-line is-short"></span></span></span></div>`).repeat(count);
+      `<span class="mv-skeleton-line is-short"></span></span></span></div>`
+    ).repeat(count);
   }
 
   function quickPagerForSource(source = quickSource) {
@@ -3618,13 +4240,19 @@
     box.querySelector(".mv-quick-retry")?.remove();
     const pager = quickPagerForSource();
     if (pager?.error && quickCandidates?.length) {
-      box.insertAdjacentHTML("beforeend",
-        '<button type="button" class="mv-quick-retry" data-mv-quick-retry="1">다음 목록 다시 불러오기</button>');
+      box.insertAdjacentHTML(
+        "beforeend",
+        '<button type="button" class="mv-quick-retry" data-mv-quick-retry="1">다음 목록 다시 불러오기</button>',
+      );
     }
   }
 
   async function loadMoreQuickCandidates() {
-    if ((quickSource !== "live" && quickSource !== "search") || $("mvQuick")?.hidden) return;
+    if (
+      (quickSource !== "live" && quickSource !== "search") ||
+      $("mvQuick")?.hidden
+    )
+      return;
     const source = quickSource;
     const pager = quickPagerForSource(source);
     if (!pager || pager.loading || pager.done) return;
@@ -3639,18 +4267,25 @@
       return;
     }
     quickCandidates = pager.rows;
-    const existing = new Map([...box.querySelectorAll("[data-mv-quick-add]")]
-      .map((node) => [node.dataset.mvQuickAdd, node]));
+    const existing = new Map(
+      [...box.querySelectorAll("[data-mv-quick-add]")].map((node) => [
+        node.dataset.mvQuickAdd,
+        node,
+      ]),
+    );
     if (!existing.size) {
       renderQuickCandidates();
       return;
     }
     const have = new Set(state.chosen.map((channel) => channel.channelId));
     const mode = $("mvQuickSort").value;
-    const rows = SOURCES.sortRows(quickVisibleRows(), mode,
-      source === "live" || source === "following" ||
-      (source === "custom" && (mode === "recent" || mode === "oldest")))
-      .filter((row) => !have.has(row.channelId));
+    const rows = SOURCES.sortRows(
+      quickVisibleRows(),
+      mode,
+      source === "live" ||
+        source === "following" ||
+        (source === "custom" && (mode === "recent" || mode === "oldest")),
+    ).filter((row) => !have.has(row.channelId));
     const full = !quickReplaceId && state.chosen.length >= 6;
     let next = null;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -3709,19 +4344,24 @@
     if (searchBox) searchBox.hidden = quickSource !== "search";
     renderQuickFolders();
     const sort = $("mvQuickSort");
-    const hasCustom = quickSource === "custom" &&
+    const hasCustom =
+      quickSource === "custom" &&
       SOURCES.hasCustomOrder(quickSections, quickFolder);
     if (!sort.options.length) {
-      sort.innerHTML = SOURCES.SORT_OPTIONS.map((option) =>
-        `<option value="${option.id}">${option.label}</option>`).join("");
+      sort.innerHTML = SOURCES.SORT_OPTIONS.map(
+        (option) => `<option value="${option.id}">${option.label}</option>`,
+      ).join("");
     }
     const custom = sort.querySelector('[value="custom"]');
     custom.hidden = !hasCustom;
     custom.disabled = !hasCustom;
     const oldest = sort.querySelector('[value="oldest"]');
-    oldest.textContent = quickSource === "live" ? "오래된순 (불러온 방송)" : "오래된순";
-    const mode = quickSortBySource[quickSource] === "custom" && !hasCustom
-      ? "viewers" : quickSortBySource[quickSource];
+    oldest.textContent =
+      quickSource === "live" ? "오래된순 (불러온 방송)" : "오래된순";
+    const mode =
+      quickSortBySource[quickSource] === "custom" && !hasCustom
+        ? "viewers"
+        : quickSortBySource[quickSource];
     sort.value = mode;
     sort.disabled = quickCandidates === null;
     quickSortPicker.sync();
@@ -3738,10 +4378,13 @@
     // 이미 보고 있는 채널은 후보에서 뺀다. 교체 대상 자신도 뺀다 — 같은 채널로
     // 갈아 끼우는 것은 replaceChannel 이 거르므로 눌러도 아무 일이 없다.
     const have = new Set(state.chosen.map((c) => c.channelId));
-    const rest = SOURCES.sortRows(quickVisibleRows(), mode,
-      quickSource === "live" || quickSource === "following" ||
-      (quickSource === "custom" && (mode === "recent" || mode === "oldest")))
-      .filter((r) => !have.has(r.channelId));
+    const rest = SOURCES.sortRows(
+      quickVisibleRows(),
+      mode,
+      quickSource === "live" ||
+        quickSource === "following" ||
+        (quickSource === "custom" && (mode === "recent" || mode === "oldest")),
+    ).filter((r) => !have.has(r.channelId));
     if (!rest.length) {
       box.innerHTML = `<p class="mv-quick-empty">${esc(quickEmptyMessage())}</p>`;
       return;
@@ -3884,7 +4527,9 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target;
-    const groupAssignmentOption = target.closest?.("[data-mv-group-assign-option]");
+    const groupAssignmentOption = target.closest?.(
+      "[data-mv-group-assign-option]",
+    );
     if (groupAssignmentOption) {
       const channelId = groupAssignmentOption.dataset.mvGroupAssignOption;
       const groupId = groupAssignmentOption.dataset.groupId || "";
@@ -3892,15 +4537,17 @@
       assignSyncGroup(channelId, groupId);
       return;
     }
-    const groupAssignmentToggle = target.closest?.("[data-mv-group-assignment-toggle]");
+    const groupAssignmentToggle = target.closest?.(
+      "[data-mv-group-assignment-toggle]",
+    );
     if (groupAssignmentToggle) {
-      toggleGroupAssignmentPicker(groupAssignmentToggle.dataset.mvGroupAssignmentToggle);
+      toggleGroupAssignmentPicker(
+        groupAssignmentToggle.dataset.mvGroupAssignmentToggle,
+      );
       return;
     }
-    if (
-      groupAssignmentPickerId &&
-      !target.closest?.("#mvGroupAssignmentList")
-    ) closeGroupAssignmentPicker();
+    if (groupAssignmentPickerId && !target.closest?.("#mvGroupAssignmentList"))
+      closeGroupAssignmentPicker();
     if (handleGroupSyncClick(target)) return;
     const syncRef = target.closest?.("[data-mv-sync-ref]");
     if (syncRef) {
@@ -3929,8 +4576,12 @@
       // 보류 중에는 새 보정을 받지 않는다(버튼은 aria-disabled 로 잠겨 있다).
       if (syncNudgePending(id)) return;
       const step = Number(syncOffset.dataset.step);
-      if (!syncEligibleIds().includes(id) || id === state.sync.referenceChannelId ||
-          ![-0.5, -0.1, 0.1, 0.5].includes(step)) return;
+      if (
+        !syncEligibleIds().includes(id) ||
+        id === state.sync.referenceChannelId ||
+        ![-0.5, -0.1, 0.1, 0.5].includes(step)
+      )
+        return;
       const before = state.sync.manualOffsets[id] || 0;
       const next = Math.round((before + step) * 10) / 10;
       if (Math.abs(next) > 10 && Math.abs(next) > Math.abs(before)) return;
@@ -3939,12 +4590,21 @@
       const target = st.currentTime + before - next;
       if (target < st.seekableStart + 0.05 || target > st.seekableEnd - 0.05) {
         syncNotice = "현재 재생 가능한 구간 밖입니다.";
-      } else if (Date.now() - (syncSeekAt.get(id) || 0) < 250 || pendingSync(id, "nudge")) {
+      } else if (
+        Date.now() - (syncSeekAt.get(id) || 0) < 250 ||
+        pendingSync(id, "nudge")
+      ) {
         syncNotice = "잠시 후 다시 조절해 주세요.";
       } else {
-        syncNotice = sendSyncCommand(id, "nudge", "APPLY_SYNC_NUDGE",
-          { deltaSec: before - next }, { offset: next })
-          ? "수동 보정을 적용 중입니다." : "잠시 후 다시 조절해 주세요.";
+        syncNotice = sendSyncCommand(
+          id,
+          "nudge",
+          "APPLY_SYNC_NUDGE",
+          { deltaSec: before - next },
+          { offset: next },
+        )
+          ? "수동 보정을 적용 중입니다."
+          : "잠시 후 다시 조절해 주세요.";
       }
       refreshSyncPanel(
         `[data-mv-sync-offset="${CSS.escape(id)}"][data-step="${syncOffset.dataset.step}"]`,
@@ -3975,8 +4635,12 @@
       document.activeElement?.blur?.();
       requestSyncStats();
       window.setTimeout(() => {
-        const next = SYNC.reference(syncActiveIds(), syncStats, syncReadyAt,
-          state.sync.referenceChannelId);
+        const next = SYNC.reference(
+          syncActiveIds(),
+          syncStats,
+          syncReadyAt,
+          state.sync.referenceChannelId,
+        );
         if (next && next !== state.sync.referenceChannelId) {
           recordReferenceChange(state.sync.referenceChannelId, next, "manual");
           rebaseSyncOffsets(next);
@@ -3992,8 +4656,11 @@
       document.activeElement?.blur?.();
       // 현재 범위의 채널만 0 으로 맞춘다. 범위 밖 채널의 보정값은 건드리지 않는다.
       const scopeIds = syncScopeIds();
-      alignSync(syncActiveIds(), true,
-        Object.fromEntries(scopeIds.map((id) => [id, 0])));
+      alignSync(
+        syncActiveIds(),
+        true,
+        Object.fromEntries(scopeIds.map((id) => [id, 0])),
+      );
       return;
     }
     if (target.closest?.("#mvBack")) {
@@ -4164,7 +4831,10 @@
     const mixerConfirmButton = target.closest?.("[data-mv-mixer-confirm]");
     if (mixerConfirmButton) {
       const id = mixerConfirmButton.dataset.mvMixerConfirm;
-      sendMixerCommand(id, "MIXER_SET_ENABLED", { enabled: false, confirmed: true });
+      sendMixerCommand(id, "MIXER_SET_ENABLED", {
+        enabled: false,
+        confirmed: true,
+      });
       return;
     }
     const mixerCancelButton = target.closest?.("[data-mv-mixer-cancel]");
@@ -4239,7 +4909,9 @@
   });
 
   window.addEventListener("resize", closeGroupAssignmentPicker);
-  $("mvSyncPop")?.addEventListener("scroll", closeGroupAssignmentPicker, { passive: true });
+  $("mvSyncPop")?.addEventListener("scroll", closeGroupAssignmentPicker, {
+    passive: true,
+  });
 
   $("mvChatTitleWrap")?.addEventListener("keydown", (event) => {
     const list = $("mvChatTitleList");
@@ -4265,18 +4937,25 @@
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
   });
   $("mvQuickSort")?.addEventListener("change", (event) => {
-    const previousType = SOURCES.serverSortType(quickSource, quickSortBySource[quickSource]);
+    const previousType = SOURCES.serverSortType(
+      quickSource,
+      quickSortBySource[quickSource],
+    );
     quickSortBySource[quickSource] = event.target.value;
     $("mvQuickAdd").scrollTop = 0;
     saveQuickState();
-    if (previousType !== SOURCES.serverSortType(quickSource, event.target.value)) {
+    if (
+      previousType !== SOURCES.serverSortType(quickSource, event.target.value)
+    ) {
       void loadQuickCandidates();
     } else {
       renderQuickCandidates();
     }
   });
 
-  $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, { passive: true });
+  $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, {
+    passive: true,
+  });
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(() => {
       clampQuickSize();
@@ -4286,24 +4965,36 @@
     observer.observe($("mvQuickAdd"));
     observer.observe($("mvFramesFit"));
   } else {
-    window.addEventListener("resize", () => {
-      clampQuickSize();
-      maybeLoadMoreQuickCandidates();
-      positionMixerPresetPicker();
-    }, { passive: true });
+    window.addEventListener(
+      "resize",
+      () => {
+        clampQuickSize();
+        maybeLoadMoreQuickCandidates();
+        positionMixerPresetPicker();
+      },
+      { passive: true },
+    );
   }
 
   const quickResize = $("mvQuickResize");
   const quickHead = $("mvQuick")?.querySelector(".mv-quick-head");
   let quickMove = null;
   quickHead?.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.target.closest("button, input, a, [role='tab']")) return;
+    if (
+      event.button !== 0 ||
+      event.target.closest("button, input, a, [role='tab']")
+    )
+      return;
     const stage = $("mvFramesFit").getBoundingClientRect();
     const panel = $("mvQuick").getBoundingClientRect();
     quickPosition.left = panel.left - stage.left;
     quickPosition.top = panel.top - stage.top;
-    quickMove = { x: event.clientX, y: event.clientY,
-      left: quickPosition.left, top: quickPosition.top };
+    quickMove = {
+      x: event.clientX,
+      y: event.clientY,
+      left: quickPosition.left,
+      top: quickPosition.top,
+    };
     quickHead.setPointerCapture(event.pointerId);
     event.preventDefault();
   });
@@ -4316,9 +5007,14 @@
   const finishQuickMove = () => {
     if (!quickMove) return;
     quickMove = null;
-    void chrome.storage?.local?.set({ cheeseMultiviewQuickPosition: {
-      left: quickPosition.left, top: quickPosition.top,
-    } }).catch(() => {});
+    void chrome.storage?.local
+      ?.set({
+        cheeseMultiviewQuickPosition: {
+          left: quickPosition.left,
+          top: quickPosition.top,
+        },
+      })
+      .catch(() => {});
   };
   quickHead?.addEventListener("pointerup", finishQuickMove);
   quickHead?.addEventListener("pointercancel", finishQuickMove);
@@ -4327,28 +5023,45 @@
   quickResize?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     const bounds = $("mvQuick").getBoundingClientRect();
-    quickDrag = { x: event.clientX, y: event.clientY, width: bounds.width, height: bounds.height };
+    quickDrag = {
+      x: event.clientX,
+      y: event.clientY,
+      width: bounds.width,
+      height: bounds.height,
+    };
     quickResize.setPointerCapture(event.pointerId);
     event.preventDefault();
   });
   quickResize?.addEventListener("pointermove", (event) => {
     if (!quickDrag || !quickResize.hasPointerCapture(event.pointerId)) return;
-    quickSize.width = quickDrag.width + (event.clientX - quickDrag.x) *
-      (quickPosition.left === null ? 2 : 1);
+    quickSize.width =
+      quickDrag.width +
+      (event.clientX - quickDrag.x) * (quickPosition.left === null ? 2 : 1);
     quickSize.height = quickDrag.height + event.clientY - quickDrag.y;
     clampQuickSize();
   });
-  const finishQuickResize = () => { quickDrag = null; };
+  const finishQuickResize = () => {
+    quickDrag = null;
+  };
   quickResize?.addEventListener("pointerup", finishQuickResize);
   quickResize?.addEventListener("pointercancel", finishQuickResize);
   quickResize?.addEventListener("lostpointercapture", finishQuickResize);
   quickResize?.addEventListener("keydown", (event) => {
     const step = event.shiftKey ? 50 : 20;
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    if (
+      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+    )
+      return;
     const bounds = $("mvQuick").getBoundingClientRect();
-    quickSize.width = (quickSize.width ?? bounds.width) +
-      (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0);
-    quickSize.height = (quickSize.height ?? bounds.height) +
+    quickSize.width =
+      (quickSize.width ?? bounds.width) +
+      (event.key === "ArrowRight"
+        ? step
+        : event.key === "ArrowLeft"
+          ? -step
+          : 0);
+    quickSize.height =
+      (quickSize.height ?? bounds.height) +
       (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0);
     clampQuickSize();
     event.preventDefault();
@@ -4357,10 +5070,15 @@
   function queueMixerGain(channelId, gain) {
     mixerGainDrafts.set(channelId, gain);
     if (mixerGainTimers.has(channelId)) return;
-    mixerGainTimers.set(channelId, window.setTimeout(() => {
-      mixerGainTimers.delete(channelId);
-      sendMixerCommand(channelId, "MIXER_SET_GAIN", { gain: mixerGainDrafts.get(channelId) });
-    }, 80));
+    mixerGainTimers.set(
+      channelId,
+      window.setTimeout(() => {
+        mixerGainTimers.delete(channelId);
+        sendMixerCommand(channelId, "MIXER_SET_GAIN", {
+          gain: mixerGainDrafts.get(channelId),
+        });
+      }, 80),
+    );
   }
 
   document.addEventListener("pointerdown", (event) => {
@@ -4380,9 +5098,17 @@
     if (mixerId) {
       const gain = Number(el.value);
       const mixer = mixerStates.get(mixerId);
-      if (!mixer || !Number.isFinite(gain) || gain < mixer.gainMin || gain > mixer.gainMax) return;
+      if (
+        !mixer ||
+        !Number.isFinite(gain) ||
+        gain < mixer.gainMin ||
+        gain > mixer.gainMax
+      )
+        return;
       mixerDragId = mixerId;
-      el.closest(".mv-mixer-gain")?.querySelector("output")?.replaceChildren(`${Math.round(gain * 100)}%`);
+      el.closest(".mv-mixer-gain")
+        ?.querySelector("output")
+        ?.replaceChildren(`${Math.round(gain * 100)}%`);
       queueMixerGain(mixerId, gain);
       return;
     }
@@ -4472,7 +5198,8 @@
     //   그대로 되찾을 수 있어야 한다. 바뀌는 것은 '지금 소리를 내는가' 뿐이다.
     postAllAudio();
     for (const channel of state.chosen) {
-      if (effectiveMuted(channel.channelId)) clearAudioNotice(channel.channelId);
+      if (effectiveMuted(channel.channelId))
+        clearAudioNotice(channel.channelId);
     }
     renderVolume();
   });
@@ -4541,12 +5268,17 @@
       return;
     }
     if (data.type === "FRAME_MIXER_STATE") {
-      if (currentStatus(channelId) === "ready") acceptMixerSnapshot(channelId, data.state);
+      if (currentStatus(channelId) === "ready")
+        acceptMixerSnapshot(channelId, data.state);
       return;
     }
     if (data.type === "FRAME_MIXER_COMMAND_RESULT") {
-      if (currentStatus(channelId) !== "ready" || typeof data.command !== "string" ||
-          !Number.isSafeInteger(data.commandId)) return;
+      if (
+        currentStatus(channelId) !== "ready" ||
+        typeof data.command !== "string" ||
+        !Number.isSafeInteger(data.commandId)
+      )
+        return;
       const key = `${channelId}:${data.command}`;
       const pending = mixerPending.get(key);
       if (!pending || pending.commandId !== data.commandId) return;
@@ -4568,17 +5300,26 @@
           "not-ready": "오디오 믹서가 아직 준비되지 않았습니다.",
           "no-video": "재생 영상을 찾지 못했습니다.",
           "graph-conflict": "오디오 그래프 충돌로 믹서를 켤 수 없습니다.",
-          "interaction-required": "플레이어에서 한 번 상호작용한 뒤 다시 시도해 주세요.",
+          "interaction-required":
+            "플레이어에서 한 번 상호작용한 뒤 다시 시도해 주세요.",
           "invalid-preset": "프리셋을 적용하지 못했습니다.",
           "invalid-gain": "게인 값을 적용하지 못했습니다.",
         };
-        mixerErrors.set(channelId, messages[data.reason] || "오디오 믹서 명령을 적용하지 못했습니다.");
+        mixerErrors.set(
+          channelId,
+          messages[data.reason] || "오디오 믹서 명령을 적용하지 못했습니다.",
+        );
       }
-      if (!acceptMixerSnapshot(channelId, data.state) && mixerDragId !== channelId) renderVolume();
+      if (
+        !acceptMixerSnapshot(channelId, data.state) &&
+        mixerDragId !== channelId
+      )
+        renderVolume();
       return;
     }
     if (data.type === "FRAME_SYNC_COMMAND_RESULT") {
-      if (currentStatus(channelId) === "ready") finishSyncCommand(channelId, data);
+      if (currentStatus(channelId) === "ready")
+        finishSyncCommand(channelId, data);
       return;
     }
     if (data.type === "FRAME_SYNC_STATS") {
@@ -4586,23 +5327,41 @@
       const stats = SYNC.normalize(data.stats);
       if (!stats) return;
       const previousGeneration = syncGeneration.get(channelId);
-      if (stats.generation !== null && previousGeneration !== undefined &&
-          stats.generation < previousGeneration) return;
-      if (stats.generation !== null && previousGeneration !== stats.generation) {
+      if (
+        stats.generation !== null &&
+        previousGeneration !== undefined &&
+        stats.generation < previousGeneration
+      )
+        return;
+      if (
+        stats.generation !== null &&
+        previousGeneration !== stats.generation
+      ) {
         requestMixerState(channelId);
         const generationAt = stats.receivedAt;
-        recordSyncDiagnostic("generation-change", {
-          channelId,
-          channelName: syncChannelName(channelId),
-          from: previousGeneration ?? null,
-          to: stats.generation,
-        }, generationAt);
-        recordSyncDiagnostic("settling-start", {
-          channelId,
-          channelName: syncChannelName(channelId),
-          generation: stats.generation,
-          cause: previousGeneration === undefined ? "first-video" : "video-replaced",
-        }, generationAt);
+        recordSyncDiagnostic(
+          "generation-change",
+          {
+            channelId,
+            channelName: syncChannelName(channelId),
+            from: previousGeneration ?? null,
+            to: stats.generation,
+          },
+          generationAt,
+        );
+        recordSyncDiagnostic(
+          "settling-start",
+          {
+            channelId,
+            channelName: syncChannelName(channelId),
+            generation: stats.generation,
+            cause:
+              previousGeneration === undefined
+                ? "first-video"
+                : "video-replaced",
+          },
+          generationAt,
+        );
         cancelPendingSync(channelId);
         for (const command of ["seek", "nudge", "rate", "reset-rate"]) {
           syncRetryAt.delete(`${channelId}:${command}`);
@@ -4616,7 +5375,8 @@
         syncCongestion = { active: false, since: 0 };
         state.sync.congested = false;
       }
-      if (stats.generation !== null) syncGeneration.set(channelId, stats.generation);
+      if (stats.generation !== null)
+        syncGeneration.set(channelId, stats.generation);
       const pendingRate = pendingSync(channelId, "rate");
       const pendingReset = pendingSync(channelId, "reset-rate");
       if (!pendingRate && !pendingReset) {
@@ -4624,30 +5384,41 @@
         if (stats.syncRateOwned && Number.isFinite(stats.playbackRate)) {
           syncRates.set(channelId, stats.playbackRate);
           if (!parentOwnedRate) {
-            recordSyncDiagnostic("rate-reconciled", {
-              channelId,
-              channelName: syncChannelName(channelId),
-              playbackRate: stats.playbackRate,
-              direction: "frame-to-parent",
-            }, stats.receivedAt);
+            recordSyncDiagnostic(
+              "rate-reconciled",
+              {
+                channelId,
+                channelName: syncChannelName(channelId),
+                playbackRate: stats.playbackRate,
+                direction: "frame-to-parent",
+              },
+              stats.receivedAt,
+            );
           }
         } else if (!stats.syncRateOwned) {
           syncRates.delete(channelId);
           if (parentOwnedRate) {
-            recordSyncDiagnostic("rate-reconciled", {
-              channelId,
-              channelName: syncChannelName(channelId),
-              playbackRate: stats.playbackRate,
-              direction: "frame-cleared-parent",
-            }, stats.receivedAt);
+            recordSyncDiagnostic(
+              "rate-reconciled",
+              {
+                channelId,
+                channelName: syncChannelName(channelId),
+                playbackRate: stats.playbackRate,
+                direction: "frame-cleared-parent",
+              },
+              stats.receivedAt,
+            );
           }
         }
       }
       syncStats.set(channelId, stats);
       recordSyncSample(channelId, stats, stats.receivedAt);
-      const activeSyncMode = state.sync.scope === "groups"
-        ? syncGroupForChannel(channelId)?.mode : state.sync.mode;
-      if (activeSyncMode !== "auto" && stats.syncRateOwned) resetSyncRate(channelId);
+      const activeSyncMode =
+        state.sync.scope === "groups"
+          ? syncGroupForChannel(channelId)?.mode
+          : state.sync.mode;
+      if (activeSyncMode !== "auto" && stats.syncRateOwned)
+        resetSyncRate(channelId);
       updateSyncPolling();
       return;
     }
@@ -4712,14 +5483,19 @@
       for (const c of state.chosen) {
         if (currentStatus(c.channelId) !== "ready") continue;
         syncReadyAt.set(c.channelId, now);
-        recordSyncDiagnostic("settling-start", {
-          channelId: c.channelId,
-          channelName: c.channelName || "",
-          generation: syncGeneration.get(c.channelId) ?? null,
-          cause: "tab-visible",
-        }, changedAt);
+        recordSyncDiagnostic(
+          "settling-start",
+          {
+            channelId: c.channelId,
+            channelName: c.channelName || "",
+            generation: syncGeneration.get(c.channelId) ?? null,
+            cause: "tab-visible",
+          },
+          changedAt,
+        );
       }
-      if (syncCongestion.active) recordCongestionChange(false, syncEligibleIds(), changedAt);
+      if (syncCongestion.active)
+        recordCongestionChange(false, syncEligibleIds(), changedAt);
       syncCongestion = { active: false, since: 0 };
       state.sync.congested = false;
     }

@@ -19,11 +19,16 @@
   const SEARCH_DETAIL_MAX = 12;
   const SEARCH_PAGE_SIZE = 30;
   const FOLLOWING_SORT_TYPES = Object.freeze({
-    viewers: "POPULAR", "viewers-asc": "UNPOPULAR", recent: "LATEST",
-    oldest: "OLDEST", recommended: "RECOMMEND",
+    viewers: "POPULAR",
+    "viewers-asc": "UNPOPULAR",
+    recent: "LATEST",
+    oldest: "OLDEST",
+    recommended: "RECOMMEND",
   });
   const LIVE_SORT_TYPES = Object.freeze({
-    viewers: "POPULAR", "viewers-asc": "UNPOPULAR", recent: "LATEST",
+    viewers: "POPULAR",
+    "viewers-asc": "UNPOPULAR",
+    recent: "LATEST",
     recommended: "RECOMMEND",
   });
   const SORT_OPTIONS = Object.freeze([
@@ -46,14 +51,21 @@
     return reply.content ?? null;
   }
 
-  const isAdult = (value) => value === true || String(value).toLowerCase() === "true";
+  const isAdult = (value) =>
+    value === true || String(value).toLowerCase() === "true";
 
   function serverSortType(source, mode) {
     if (source === "custom") {
-      return mode === "recent" || mode === "oldest" ? FOLLOWING_SORT_TYPES[mode] : "POPULAR";
+      return mode === "recent" || mode === "oldest"
+        ? FOLLOWING_SORT_TYPES[mode]
+        : "POPULAR";
     }
-    const types = source === "following" ? FOLLOWING_SORT_TYPES
-      : source === "all" || source === "live" ? LIVE_SORT_TYPES : null;
+    const types =
+      source === "following"
+        ? FOLLOWING_SORT_TYPES
+        : source === "all" || source === "live"
+          ? LIVE_SORT_TYPES
+          : null;
     return types?.[mode] || (types ? "POPULAR" : null);
   }
 
@@ -66,19 +78,29 @@
   function sortRows(rows, mode = "viewers", preserveServerOrder = false) {
     if (!Array.isArray(rows)) return [];
     if (mode === "custom") return [...rows];
-    const matchingServerSort = preserveServerOrder && rows.length > 0 && rows.every((row) => {
-      const types = row.serverSource === "following" ? FOLLOWING_SORT_TYPES
-        : row.serverSource === "all" ? LIVE_SORT_TYPES : null;
-      return types?.[mode] && row.serverSortType === types[mode];
-    });
+    const matchingServerSort =
+      preserveServerOrder &&
+      rows.length > 0 &&
+      rows.every((row) => {
+        const types =
+          row.serverSource === "following"
+            ? FOLLOWING_SORT_TYPES
+            : row.serverSource === "all"
+              ? LIVE_SORT_TYPES
+              : null;
+        return types?.[mode] && row.serverSortType === types[mode];
+      });
     if (matchingServerSort) {
       return rows[0].serverSource === "following"
         ? [...rows].sort((a, b) => a.recommendationRank - b.recommendationRank)
         : [...rows];
     }
-    const byName = (a, b) => String(a.channelName || "").localeCompare(
-      String(b.channelName || ""), "ko", { numeric: true },
-    );
+    const byName = (a, b) =>
+      String(a.channelName || "").localeCompare(
+        String(b.channelName || ""),
+        "ko",
+        { numeric: true },
+      );
     return [...rows].sort((a, b) => {
       if (mode === "name-asc") return byName(a, b);
       if (mode === "name-desc") return byName(b, a);
@@ -86,17 +108,27 @@
         const left = Number(a.openedAt) || 0;
         const right = Number(b.openedAt) || 0;
         if (!left || !right) return (right > 0) - (left > 0);
-        return (mode === "recent" ? right - left : left - right) || byName(a, b);
+        return (
+          (mode === "recent" ? right - left : left - right) || byName(a, b)
+        );
       }
       if (mode === "recommended") {
-        const left = Number.isFinite(a.recommendationRank) ? a.recommendationRank : Infinity;
-        const right = Number.isFinite(b.recommendationRank) ? b.recommendationRank : Infinity;
+        const left = Number.isFinite(a.recommendationRank)
+          ? a.recommendationRank
+          : Infinity;
+        const right = Number.isFinite(b.recommendationRank)
+          ? b.recommendationRank
+          : Infinity;
         return left - right;
       }
       if (mode === "viewers-asc") {
-        return (Number(a.viewers) || 0) - (Number(b.viewers) || 0) || byName(a, b);
+        return (
+          (Number(a.viewers) || 0) - (Number(b.viewers) || 0) || byName(a, b)
+        );
       }
-      return (Number(b.viewers) || 0) - (Number(a.viewers) || 0) || byName(a, b);
+      return (
+        (Number(b.viewers) || 0) - (Number(a.viewers) || 0) || byName(a, b)
+      );
     });
   }
 
@@ -108,7 +140,9 @@
   }
 
   function hasCustomOrder(sections, folder = "") {
-    return sections.some((section) => (!folder || section.id === folder) && section.customOrder);
+    return sections.some(
+      (section) => (!folder || section.id === folder) && section.customOrder,
+    );
   }
 
   function profileThumb(imageUrl, size = 60) {
@@ -135,7 +169,8 @@
     category: String(live?.liveCategoryValue || "").trim(),
     viewers: Number(live?.concurrentUserCount) || 0,
     openedAt: liveOpenedAt(live?.openDate),
-    adult: isAdult(live?.adult) || isAdult(entry?.adult) || isAdult(channel?.adult),
+    adult:
+      isAdult(live?.adult) || isAdult(entry?.adult) || isAdult(channel?.adult),
     // 라이브 스냅샷. {type} 자리에 해상도를 넣어야 실제 이미지가 나온다.
     // ⚠ liveImageUrl 이 비어 있는 응답이 있다(팔로잉 목록의 liveInfo 등).
     //   기존 통합검색 코드와 같은 순서로 defaultThumbnailImageUrl 을 대신 쓴다.
@@ -159,7 +194,8 @@
   //   프로필 이미지만 보였다. 이쪽은 liveInfo.liveImageUrl 까지 함께 내려온다.
   //   오프라인 채널도 함께 오므로 방송 중인 것만 남긴다.
   async function loadFollowing(sortType = "POPULAR") {
-    if (!Object.values(FOLLOWING_SORT_TYPES).includes(sortType)) throw new Error("invalid-sort");
+    if (!Object.values(FOLLOWING_SORT_TYPES).includes(sortType))
+      throw new Error("invalid-sort");
     const c = await getJson(
       `${API}/service/v1/channels/following-lives?sortType=${sortType}`,
     );
@@ -193,7 +229,8 @@
   }
 
   function normalizeLiveCursor(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return null;
     const cursor = {};
     for (const key of LIVE_CURSOR_KEYS) {
       const raw = value[key];
@@ -205,35 +242,49 @@
   }
 
   function livePageUrl(cursor = null, sortType = "POPULAR") {
-    if (!Object.values(LIVE_SORT_TYPES).includes(sortType)) throw new Error("invalid-sort");
+    if (!Object.values(LIVE_SORT_TYPES).includes(sortType))
+      throw new Error("invalid-sort");
     const url = new URL(`${API}/service/v1/lives`);
     url.searchParams.set("size", String(LIVE_PAGE_SIZE));
     url.searchParams.set("sortType", sortType);
     const safeCursor = normalizeLiveCursor(cursor);
     if (safeCursor) {
-      for (const key of LIVE_CURSOR_KEYS) url.searchParams.set(key, safeCursor[key]);
+      for (const key of LIVE_CURSOR_KEYS)
+        url.searchParams.set(key, safeCursor[key]);
     }
     return url.toString();
   }
 
-  async function loadLivePage(cursor = null, fetchJson = getJson, sortType = "POPULAR") {
+  async function loadLivePage(
+    cursor = null,
+    fetchJson = getJson,
+    sortType = "POPULAR",
+  ) {
     const c = await fetchJson(livePageUrl(cursor, sortType));
     const rows = Array.isArray(c?.data) ? c.data : [];
     return {
-      rows: rows.map((r) => ({ ...normalize(r?.channel, r),
-        serverSortType: sortType, serverSource: "all",
-      })).filter((r) => r.channelId),
+      rows: rows
+        .map((r) => ({
+          ...normalize(r?.channel, r),
+          serverSortType: sortType,
+          serverSource: "all",
+        }))
+        .filter((r) => r.channelId),
       next: normalizeLiveCursor(c?.page?.next),
     };
   }
 
   function createLivePager(options = {}) {
     const sortType = options.sortType || "POPULAR";
-    const fetchPage = typeof options.fetchPage === "function"
-      ? options.fetchPage : (cursor) => loadLivePage(cursor, getJson, sortType);
+    const fetchPage =
+      typeof options.fetchPage === "function"
+        ? options.fetchPage
+        : (cursor) => loadLivePage(cursor, getJson, sortType);
     const now = typeof options.now === "function" ? options.now : Date.now;
-    const ttlMs = Number.isFinite(options.ttlMs) && options.ttlMs > 0
-      ? options.ttlMs : LIVE_CACHE_TTL_MS;
+    const ttlMs =
+      Number.isFinite(options.ttlMs) && options.ttlMs > 0
+        ? options.ttlMs
+        : LIVE_CACHE_TTL_MS;
     let rows = [];
     let next = null;
     let loading = false;
@@ -256,7 +307,10 @@
     const mergeRows = (base, incoming) => {
       const seen = new Set();
       const merged = [];
-      for (const row of [...base, ...(Array.isArray(incoming) ? incoming : [])]) {
+      for (const row of [
+        ...base,
+        ...(Array.isArray(incoming) ? incoming : []),
+      ]) {
         const id = String(row?.channelId || "").toLowerCase();
         if (!HASH_RE.test(id) || seen.has(id)) continue;
         seen.add(id);
@@ -280,7 +334,11 @@
           if (requestGeneration !== generation) return;
           rows = mergeRows(replace ? [] : rows, page?.rows);
           next = normalizeLiveCursor(page?.next);
-          if (cursor && next && LIVE_CURSOR_KEYS.every((key) => next[key] === cursor[key])) {
+          if (
+            cursor &&
+            next &&
+            LIVE_CURSOR_KEYS.every((key) => next[key] === cursor[key])
+          ) {
             next = null;
           }
           done = next === null;
@@ -301,16 +359,34 @@
     };
 
     return {
-      get rows() { return [...rows]; },
-      get next() { return next ? { ...next } : null; },
-      get loading() { return loading; },
-      get done() { return done; },
-      get error() { return error; },
-      get expiresAt() { return expiresAt; },
-      get generation() { return generation; },
-      get sortType() { return sortType; },
+      get rows() {
+        return [...rows];
+      },
+      get next() {
+        return next ? { ...next } : null;
+      },
+      get loading() {
+        return loading;
+      },
+      get done() {
+        return done;
+      },
+      get error() {
+        return error;
+      },
+      get expiresAt() {
+        return expiresAt;
+      },
+      get generation() {
+        return generation;
+      },
+      get sortType() {
+        return sortType;
+      },
       snapshot,
-      isExpired() { return expiresAt > 0 && expiresAt <= now(); },
+      isExpired() {
+        return expiresAt > 0 && expiresAt <= now();
+      },
       loadFirst(force = false) {
         if (!force && loading && pending) return pending;
         if (!force && expiresAt > now()) return Promise.resolve(snapshot());
@@ -345,9 +421,10 @@
     const detailOffset = Number(value?.detailOffset);
     return {
       offset: Number.isSafeInteger(offset) && offset >= 0 ? offset : 0,
-      detailOffset: Number.isSafeInteger(detailOffset) && detailOffset >= 0
-        ? detailOffset
-        : 0,
+      detailOffset:
+        Number.isSafeInteger(detailOffset) && detailOffset >= 0
+          ? detailOffset
+          : 0,
     };
   }
 
@@ -378,11 +455,12 @@
       }),
     );
     const nextDetailOffset = detailOffset + SEARCH_DETAIL_MAX;
-    const next = nextDetailOffset < liveChannels.length
-      ? { offset, detailOffset: nextDetailOffset }
-      : rows.length === SEARCH_PAGE_SIZE
-        ? { offset: offset + SEARCH_PAGE_SIZE, detailOffset: 0 }
-        : null;
+    const next =
+      nextDetailOffset < liveChannels.length
+        ? { offset, detailOffset: nextDetailOffset }
+        : rows.length === SEARCH_PAGE_SIZE
+          ? { offset: offset + SEARCH_PAGE_SIZE, detailOffset: 0 }
+          : null;
     return { rows: detailed.filter(Boolean), next };
   }
 
@@ -391,7 +469,10 @@
   }
 
   async function searchLiveTags(keyword) {
-    const tag = String(keyword || "").trim().replace(/^#/, "").trim();
+    const tag = String(keyword || "")
+      .trim()
+      .replace(/^#/, "")
+      .trim();
     if (!tag) return [];
     const url = new URL(`${API}/service/v1/tag/lives`);
     url.searchParams.set("size", "20");
@@ -400,8 +481,11 @@
     const c = await getJson(url.toString());
     const rows = Array.isArray(c?.data) ? c.data : [];
     return rows
-      .filter((row) => HASH_RE.test(String(row?.channel?.channelId || "")) &&
-        typeof row?.liveTitle === "string")
+      .filter(
+        (row) =>
+          HASH_RE.test(String(row?.channel?.channelId || "")) &&
+          typeof row?.liveTitle === "string",
+      )
       .map((row) => normalize(row.channel, row));
   }
 
@@ -418,13 +502,22 @@
         merged.push(entry);
         continue;
       }
-      for (const field of ["channelName", "channelImageUrl", "liveTitle", "category", "liveImageUrl"]) {
+      for (const field of [
+        "channelName",
+        "channelImageUrl",
+        "liveTitle",
+        "category",
+        "liveImageUrl",
+      ]) {
         if (!previous[field] && row[field]) previous[field] = row[field];
       }
       if (!previous.viewers && row.viewers) previous.viewers = row.viewers;
       if (!previous.openedAt && row.openedAt) previous.openedAt = row.openedAt;
       if (!previous.adult && row.adult) previous.adult = true;
-      if ((!Array.isArray(previous.tags) || !previous.tags.length) && row.tags?.length) {
+      if (
+        (!Array.isArray(previous.tags) || !previous.tags.length) &&
+        row.tags?.length
+      ) {
         previous.tags = [...row.tags];
       }
     }
@@ -435,7 +528,8 @@
     const query = String(keyword || "").trim();
     if (!query) return { rows: [], next: null };
     const normalizedCursor = normalizeSearchCursor(cursor);
-    const includeTags = normalizedCursor.offset === 0 && normalizedCursor.detailOffset === 0;
+    const includeTags =
+      normalizedCursor.offset === 0 && normalizedCursor.detailOffset === 0;
     const results = await Promise.allSettled([
       searchLiveChannelsPage(query, normalizedCursor),
       includeTags ? searchLiveTags(query) : Promise.resolve([]),
@@ -443,9 +537,10 @@
     if (results.every((result) => result.status === "rejected")) {
       throw new Error("검색 요청 실패");
     }
-    const channelPage = results[0].status === "fulfilled"
-      ? results[0].value
-      : { rows: [], next: null };
+    const channelPage =
+      results[0].status === "fulfilled"
+        ? results[0].value
+        : { rows: [], next: null };
     return {
       rows: mergeSearchRows(
         Array.isArray(channelPage?.rows) ? channelPage.rows : [],
@@ -507,12 +602,24 @@
     };
 
     return {
-      get rows() { return [...rows]; },
-      get next() { return next ? { ...next } : null; },
-      get loading() { return loading; },
-      get done() { return done; },
-      get error() { return error; },
-      get generation() { return generation; },
+      get rows() {
+        return [...rows];
+      },
+      get next() {
+        return next ? { ...next } : null;
+      },
+      get loading() {
+        return loading;
+      },
+      get done() {
+        return done;
+      },
+      get error() {
+        return error;
+      },
+      get generation() {
+        return generation;
+      },
       snapshot,
       loadFirst(force = false) {
         if (loading && pending) return pending;
@@ -595,7 +702,9 @@
     };
 
     const favoriteIds = idsOf(favorites);
-    const orderedFavorites = idsOf(favoriteOrder).filter((id) => favoriteIds.includes(id));
+    const orderedFavorites = idsOf(favoriteOrder).filter((id) =>
+      favoriteIds.includes(id),
+    );
     const favRows = take([...orderedFavorites, ...favoriteIds]);
     if (favRows.length) {
       sections.push({

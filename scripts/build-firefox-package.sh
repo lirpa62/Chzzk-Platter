@@ -32,6 +32,7 @@ mkdir -p "$FIREFOX_DIR"
 
 copy_path "src"
 copy_path "icons"
+copy_path "fonts"
 copy_path "popup.html"
 copy_path "settings.html"
 copy_path "logPowerStats.html"
