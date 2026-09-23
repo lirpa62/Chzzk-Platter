@@ -21,7 +21,10 @@ for (const key of [
   // 멀티뷰 전용 버튼 설정(팝업과 별개 키). 내보내기에서 빠지면 안 된다.
   'cheeseMultiviewBtnMixer',
   'cheeseMultiviewSeekBar',
+  'cheeseMultiviewRememberQuickState',
+  'cheeseMultiviewSyncDiagnosticsUi',
   'cheeseMaxQualityTarget',
+  'audioMixer:shareAcrossChannels',
 ]) {
   assert.match(settingsSource, new RegExp(`SETTINGS_STORAGE_KEYS[\\s\\S]*?"${key}"`));
 }
@@ -79,7 +82,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
       const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1']]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
-      window.saved={cheeseSettingsKnownFeatures:[],cheeseSettingsNewFeatureUpdatePending:true,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false,
+      const previousTabOrder=[...document.querySelectorAll('.settings-tab')].map(el=>el.dataset.tab).filter(tab=>tab!=='all'&&tab!=='multiview');
+      previousTabOrder.splice(previousTabOrder.indexOf('customfollow'),1);
+      previousTabOrder.splice(2,0,'customfollow');
+      window.saved={cheeseSettingsKnownFeatures:['audio-mixer-share-across-channels'],cheeseSettingsTabOrder:previousTabOrder,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false,
         cheeseMixerAlwaysOn:true,cheeseMixerDefaultOn:true,cheeseVideoFilterAlwaysOn:false,cheeseVideoFilterDefaultOn:true,
         cheeseEmbedClipMixerAlwaysOn:true,cheeseEmbedClipMixerDefaultOn:true,
         cheeseEmbedClipMixerDefaultPresetEnabled:false,cheeseEmbedClipMixerDefaultGainEnabled:true,
@@ -105,6 +111,28 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     `);
     const checks=[];
     async function test(name, expression){await evaluate(`{${expression}}`);checks.push(name);}
+    await test('new tab follows custom following without changing saved order',`
+      const tabs=[...document.querySelectorAll('.settings-tabs .settings-tab')].map(el=>el.dataset.tab);
+      check(tabs[tabs.indexOf('customfollow')+1]==='multiview','new tab was appended instead of placed after custom following');
+      check(JSON.stringify(tabs.filter(tab=>tab!=='all'&&tab!=='multiview'))===JSON.stringify(saved.cheeseSettingsTabOrder),'existing custom tab order changed');
+      const editor=[...document.querySelectorAll('#settingsTabOrderList [data-id]')].map(el=>el.dataset.id);
+      check(JSON.stringify(editor)===JSON.stringify(tabs.filter(tab=>tab!=='all')),'tab order editor disagrees with navigation');
+      document.querySelector('[data-settings-tab-order-reset]').click();
+      const reset=[...document.querySelectorAll('.settings-tabs .settings-tab')].map(el=>el.dataset.tab);
+      check(reset[reset.indexOf('customfollow')+1]==='multiview','reset did not restore default multiview position');
+    `);
+    await test('new badges survive a previously consumed update flag',`
+      const tab=document.querySelector('[data-tab="multiview"]');
+      const title=document.querySelector('[data-new-feature="multiview-player-controls"]');
+      const quality=document.querySelector('[data-new-feature="max-quality-target"]');
+      check(tab.classList.contains('has-new-feature')&&tab.querySelector('.settings-tab-new-badge'),'multiview tab NEW badge missing');
+      check(title.classList.contains('is-new-feature'),'multiview group NEW badge missing');
+      check(quality.classList.contains('is-new-feature'),'new quality target badge missing');
+      tab.click();
+      check(tab.classList.contains('has-new-feature'),'NEW badge cleared before settings were viewed');
+      document.querySelector('[data-tab="player"]').click();
+      check(!tab.classList.contains('has-new-feature'),'multiview NEW badge remained after viewing tab');
+    `);
     await test('disclosures preserve feature state, support multiple open groups, and persist',`
       const wheel=document.querySelector('[data-settings-disclosure="wheel-volume"]');
       const overlay=document.querySelector('[data-settings-disclosure="action-overlay"]');

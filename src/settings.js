@@ -916,7 +916,10 @@
       return;
     }
 
-    if (data?.[SETTINGS_NEW_FEATURE_UPDATE_KEY] === true) {
+    if (
+      data?.[SETTINGS_NEW_FEATURE_UPDATE_KEY] === true ||
+      Array.isArray(data?.[SETTINGS_KNOWN_FEATURES_KEY])
+    ) {
       allIds.forEach((id) => {
         if (!newFeatureState.known.has(id)) newFeatureState.pending.add(id);
       });
@@ -3945,7 +3948,7 @@
   };
   let settingsTabOrder = orderableTabs();
 
-  // 저장값 + 현재 탭 목록을 합친다(없어진 탭은 빼고, 새 탭은 뒤에 붙인다).
+  // 저장된 순서는 유지하고, 새 탭은 마크업에서 가장 가까운 기존 탭 옆에 넣는다.
   function normalizeTabOrder(saved) {
     const valid = orderableTabs();
     const seen = new Set();
@@ -3956,7 +3959,15 @@
         seen.add(tab);
       }
     }
-    for (const tab of valid) if (!seen.has(tab)) out.push(tab);
+    for (const [index, tab] of valid.entries()) {
+      if (seen.has(tab)) continue;
+      const previous = valid.slice(0, index).reverse().find((id) => seen.has(id));
+      const next = valid.slice(index + 1).find((id) => seen.has(id));
+      if (previous) out.splice(out.indexOf(previous) + 1, 0, tab);
+      else if (next) out.splice(out.indexOf(next), 0, tab);
+      else out.push(tab);
+      seen.add(tab);
+    }
     return out;
   }
 

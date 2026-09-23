@@ -75,6 +75,7 @@ const base = (over = {}) => ({
   multiviewBtnScreenshot: false,
   multiviewBtnRewind: false,
   multiviewBtnForward: false,
+  multiviewDisableHidden: false,
   popupPlayerBtnMixer: false,
   popupPlayerBtnFilter: false,
   popupPlayerBtnSync: false,

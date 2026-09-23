@@ -265,6 +265,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="multiview"
+            role="tab"
+            aria-selected="false"
+          >
+            멀티뷰
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="preview"
             role="tab"
             aria-selected="false"
@@ -279,15 +288,6 @@
             aria-selected="false"
           >
             팝업 플레이어
-          </button>
-          <button
-            type="button"
-            class="settings-tab"
-            data-tab="multiview"
-            role="tab"
-            aria-selected="false"
-          >
-            멀티뷰
           </button>
           <button
             type="button"
@@ -866,7 +866,7 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-max-quality-target-row>
+              <li class="settings-item" data-max-quality-target-row data-new-feature="max-quality-target">
                 <div>
                   <span class="settings-item-name">└ 최대 화질</span>
                   <span class="settings-item-desc"
@@ -7545,7 +7545,7 @@
             data-panel="multiview"
             aria-label="멀티뷰 버튼"
           >
-            <h2 class="settings-group-title">멀티뷰 버튼</h2>
+            <h2 class="settings-group-title" data-new-feature="multiview-player-controls">멀티뷰 버튼</h2>
             <p class="settings-group-desc">
               멀티뷰 화면의 버튼 표시입니다. 팝업 플레이어 설정과 따로 관리되며,
               화면이 작아 기본값은 오디오 믹서만 켜져 있습니다.
@@ -7666,7 +7666,7 @@
           <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 패널">
             <h2 class="settings-group-title">멀티뷰 패널</h2>
             <ul class="settings-list">
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="multiview-quick-state">
                 <label>
                   <span class="settings-item-name">채널 관리 상태 기억</span>
                   <span class="settings-item-desc">패널을 다시 열 때 마지막 탭과 검색어를 복원합니다.</span>
@@ -7676,7 +7676,7 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item">
+              <li class="settings-item" data-new-feature="multiview-sync-diagnostics">
                 <label>
                   <span class="settings-item-name">싱크 진단 도구 표시</span>
                   <span class="settings-item-desc">싱크 문제 분석을 위한 기록과 내보내기 도구를 표시합니다.</span>
