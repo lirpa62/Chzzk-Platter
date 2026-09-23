@@ -22151,7 +22151,9 @@
     const bootstrapTimer = setInterval(() => {
       bootstrapTries += 1;
       bootstrapMultiviewFrame();
-      if (currentVideo || bootstrapTries >= 20) clearInterval(bootstrapTimer);
+      const preferredHost = document.getElementById("live_player_layout");
+      if ((preferredHost && videoObserverHost === preferredHost) ||
+          bootstrapTries >= 20) clearInterval(bootstrapTimer);
     }, 500);
     // 종료 화면은 방송 중에도 나중에 뜰 수 있어 느슨하게 확인한다.
     if (!endedNotified) endedTimer = setInterval(checkEnded, 5000);
