@@ -18,6 +18,24 @@
   // 검색 결과 중 방송 정보를 확인할 최대 채널 수(채널마다 요청이 하나씩 생긴다).
   const SEARCH_DETAIL_MAX = 12;
   const SEARCH_PAGE_SIZE = 30;
+  const FOLLOWING_SORT_TYPES = Object.freeze({
+    viewers: "POPULAR", "viewers-asc": "UNPOPULAR", recent: "LATEST",
+    oldest: "OLDEST", recommended: "RECOMMEND",
+  });
+  const LIVE_SORT_TYPES = Object.freeze({
+    viewers: "POPULAR", "viewers-asc": "UNPOPULAR", recent: "LATEST",
+    recommended: "RECOMMEND",
+  });
+  const SORT_OPTIONS = Object.freeze([
+    { id: "viewers", label: "시청자순" },
+    { id: "viewers-asc", label: "시청자역순" },
+    { id: "name-asc", label: "채널명 오름차순" },
+    { id: "name-desc", label: "채널명 내림차순" },
+    { id: "recent", label: "최신순" },
+    { id: "oldest", label: "오래된순" },
+    { id: "recommended", label: "추천순" },
+    { id: "custom", label: "커스텀 순서" },
+  ]);
 
   async function getJson(url) {
     const reply = await chrome.runtime.sendMessage({
@@ -30,6 +48,82 @@
 
   const isAdult = (value) => value === true || String(value).toLowerCase() === "true";
 
+  function serverSortType(source, mode) {
+    if (source === "custom") {
+      return mode === "recent" || mode === "oldest" ? FOLLOWING_SORT_TYPES[mode] : "POPULAR";
+    }
+    const types = source === "following" ? FOLLOWING_SORT_TYPES
+      : source === "all" || source === "live" ? LIVE_SORT_TYPES : null;
+    return types?.[mode] || (types ? "POPULAR" : null);
+  }
+
+  function liveOpenedAt(value) {
+    if (typeof value !== "string" || !value.trim()) return 0;
+    const parsed = Date.parse(value.trim().replace(" ", "T"));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function sortRows(rows, mode = "viewers", preserveServerOrder = false) {
+    if (!Array.isArray(rows)) return [];
+    if (mode === "custom") return [...rows];
+    const matchingServerSort = preserveServerOrder && rows.length > 0 && rows.every((row) => {
+      const types = row.serverSource === "following" ? FOLLOWING_SORT_TYPES
+        : row.serverSource === "all" ? LIVE_SORT_TYPES : null;
+      return types?.[mode] && row.serverSortType === types[mode];
+    });
+    if (matchingServerSort) {
+      return rows[0].serverSource === "following"
+        ? [...rows].sort((a, b) => a.recommendationRank - b.recommendationRank)
+        : [...rows];
+    }
+    const byName = (a, b) => String(a.channelName || "").localeCompare(
+      String(b.channelName || ""), "ko", { numeric: true },
+    );
+    return [...rows].sort((a, b) => {
+      if (mode === "name-asc") return byName(a, b);
+      if (mode === "name-desc") return byName(b, a);
+      if (mode === "recent" || mode === "oldest") {
+        const left = Number(a.openedAt) || 0;
+        const right = Number(b.openedAt) || 0;
+        if (!left || !right) return (right > 0) - (left > 0);
+        return (mode === "recent" ? right - left : left - right) || byName(a, b);
+      }
+      if (mode === "recommended") {
+        const left = Number.isFinite(a.recommendationRank) ? a.recommendationRank : Infinity;
+        const right = Number.isFinite(b.recommendationRank) ? b.recommendationRank : Infinity;
+        return left - right;
+      }
+      if (mode === "viewers-asc") {
+        return (Number(a.viewers) || 0) - (Number(b.viewers) || 0) || byName(a, b);
+      }
+      return (Number(b.viewers) || 0) - (Number(a.viewers) || 0) || byName(a, b);
+    });
+  }
+
+  function sortSections(sections, mode, preserveServerOrder = false) {
+    return sections.map((section) => ({
+      ...section,
+      rows: sortRows(section.rows, mode, preserveServerOrder),
+    }));
+  }
+
+  function hasCustomOrder(sections, folder = "") {
+    return sections.some((section) => (!folder || section.id === folder) && section.customOrder);
+  }
+
+  function profileThumb(imageUrl, size = 60) {
+    const raw = String(imageUrl || "").trim();
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+      url.searchParams.set("type", size === 240 ? "f240_240_na" : "f60_60_na");
+      return url.toString();
+    } catch {
+      return "";
+    }
+  }
+
   // 응답 모양이 제각각이라 한 곳에서 같은 형태로 맞춘다.
   const normalize = (channel, live, entry = null) => ({
     channelId: String(channel?.channelId || "").toLowerCase(),
@@ -38,6 +132,7 @@
     liveTitle: String(live?.liveTitle || "").trim(),
     category: String(live?.liveCategoryValue || "").trim(),
     viewers: Number(live?.concurrentUserCount) || 0,
+    openedAt: liveOpenedAt(live?.openDate),
     adult: isAdult(live?.adult) || isAdult(entry?.adult) || isAdult(channel?.adult),
     // 라이브 스냅샷. {type} 자리에 해상도를 넣어야 실제 이미지가 나온다.
     // ⚠ liveImageUrl 이 비어 있는 응답이 있다(팔로잉 목록의 liveInfo 등).
@@ -61,9 +156,10 @@
   // ⚠ following-lives 를 쓴다. followings/live 의 liveInfo 에는 방송 썸네일이 없어
   //   프로필 이미지만 보였다. 이쪽은 liveInfo.liveImageUrl 까지 함께 내려온다.
   //   오프라인 채널도 함께 오므로 방송 중인 것만 남긴다.
-  async function loadFollowing() {
+  async function loadFollowing(sortType = "POPULAR") {
+    if (!Object.values(FOLLOWING_SORT_TYPES).includes(sortType)) throw new Error("invalid-sort");
     const c = await getJson(
-      `${API}/service/v1/channels/following-lives?sortType=POPULAR`,
+      `${API}/service/v1/channels/following-lives?sortType=${sortType}`,
     );
     // 응답 모양이 버전마다 달라 둘 다 본다.
     const rows = Array.isArray(c?.followingList)
@@ -78,8 +174,8 @@
           r?.liveInfo?.liveTitle ||
           r?.openLive === true,
       )
-      .map((r) =>
-        normalize(
+      .map((r, index) => ({
+        ...normalize(
           {
             ...(r?.channel || {}),
             channelId: r?.channelId || r?.channel?.channelId,
@@ -87,7 +183,10 @@
           r?.liveInfo || r?.live || r,
           r,
         ),
-      )
+        recommendationRank: index,
+        serverSortType: sortType,
+        serverSource: "following",
+      }))
       .filter((r) => r.channelId);
   }
 
@@ -103,9 +202,11 @@
     return cursor;
   }
 
-  function livePageUrl(cursor = null) {
+  function livePageUrl(cursor = null, sortType = "POPULAR") {
+    if (!Object.values(LIVE_SORT_TYPES).includes(sortType)) throw new Error("invalid-sort");
     const url = new URL(`${API}/service/v1/lives`);
     url.searchParams.set("size", String(LIVE_PAGE_SIZE));
+    url.searchParams.set("sortType", sortType);
     const safeCursor = normalizeLiveCursor(cursor);
     if (safeCursor) {
       for (const key of LIVE_CURSOR_KEYS) url.searchParams.set(key, safeCursor[key]);
@@ -113,18 +214,21 @@
     return url.toString();
   }
 
-  async function loadLivePage(cursor = null, fetchJson = getJson) {
-    const c = await fetchJson(livePageUrl(cursor));
+  async function loadLivePage(cursor = null, fetchJson = getJson, sortType = "POPULAR") {
+    const c = await fetchJson(livePageUrl(cursor, sortType));
     const rows = Array.isArray(c?.data) ? c.data : [];
     return {
-      rows: rows.map((r) => normalize(r?.channel, r)).filter((r) => r.channelId),
+      rows: rows.map((r) => ({ ...normalize(r?.channel, r),
+        serverSortType: sortType, serverSource: "all",
+      })).filter((r) => r.channelId),
       next: normalizeLiveCursor(c?.page?.next),
     };
   }
 
   function createLivePager(options = {}) {
+    const sortType = options.sortType || "POPULAR";
     const fetchPage = typeof options.fetchPage === "function"
-      ? options.fetchPage : (cursor) => loadLivePage(cursor);
+      ? options.fetchPage : (cursor) => loadLivePage(cursor, getJson, sortType);
     const now = typeof options.now === "function" ? options.now : Date.now;
     const ttlMs = Number.isFinite(options.ttlMs) && options.ttlMs > 0
       ? options.ttlMs : LIVE_CACHE_TTL_MS;
@@ -202,6 +306,7 @@
       get error() { return error; },
       get expiresAt() { return expiresAt; },
       get generation() { return generation; },
+      get sortType() { return sortType; },
       snapshot,
       isExpired() { return expiresAt > 0 && expiresAt <= now(); },
       loadFirst(force = false) {
@@ -315,6 +420,7 @@
         if (!previous[field] && row[field]) previous[field] = row[field];
       }
       if (!previous.viewers && row.viewers) previous.viewers = row.viewers;
+      if (!previous.openedAt && row.openedAt) previous.openedAt = row.openedAt;
       if (!previous.adult && row.adult) previous.adult = true;
       if ((!Array.isArray(previous.tags) || !previous.tags.length) && row.tags?.length) {
         previous.tags = [...row.tags];
@@ -437,14 +543,16 @@
   // ⚠ 고르기 화면과 시청 화면(Quick)이 반드시 같은 목록을 봐야 한다. 예전에는
   //   Quick 만 '즐겨찾기 + 그룹 channelIds' 합집합을 따로 읽어, 구독·태그·친밀도·
   //   나머지 팔로잉이 통째로 빠지고 두 키가 모두 없으면 아예 비어 보였다.
-  async function loadCustomSections() {
+  async function loadCustomSections(sortType = "POPULAR") {
     let favorites = [];
+    let favoriteOrder = [];
     let groups = [];
     let groupOrder = [];
     let flags = {};
     try {
       const d = await chrome.storage.local.get([
         "cheeseFollowFavorites",
+        "cheeseFollowFavOrder",
         "cheeseFollowCustomGroups",
         "cheeseFollowGroupOrder",
         "cheeseFeatureHidden",
@@ -452,6 +560,9 @@
       flags = d?.cheeseFeatureHidden || {};
       favorites = Array.isArray(d?.cheeseFollowFavorites)
         ? d.cheeseFollowFavorites
+        : [];
+      favoriteOrder = Array.isArray(d?.cheeseFollowFavOrder)
+        ? d.cheeseFollowFavOrder
         : [];
       groups = Array.isArray(d?.cheeseFollowCustomGroups)
         ? d.cheeseFollowCustomGroups
@@ -461,7 +572,7 @@
         : [];
     } catch {}
 
-    const live = await loadFollowing();
+    const live = await loadFollowing(sortType);
     const byId = new Map(live.map((r) => [r.channelId, r]));
     const idsOf = (list) =>
       (Array.isArray(list) ? list : [])
@@ -481,12 +592,15 @@
       return rows;
     };
 
-    const favRows = take(idsOf(favorites));
+    const favoriteIds = idsOf(favorites);
+    const orderedFavorites = idsOf(favoriteOrder).filter((id) => favoriteIds.includes(id));
+    const favRows = take([...orderedFavorites, ...favoriteIds]);
     if (favRows.length) {
       sections.push({
         id: "fav",
         label: "즐겨찾기",
         icon: "star",
+        customOrder: orderedFavorites.length > 0,
         rows: favRows,
       });
     }
@@ -505,6 +619,7 @@
         label: String(group.name || "그룹"),
         icon: group.icon || "folder",
         color: group.color || "",
+        customOrder: group.manualOrder === true,
         rows,
       });
     }
@@ -569,6 +684,7 @@
         id: "affinity",
         label: "친밀도",
         icon: "heart",
+        customOrder: true,
         rows: affinityRows,
       });
     }
@@ -676,6 +792,12 @@
     API,
     HASH_RE,
     getJson,
+    profileThumb,
+    SORT_OPTIONS,
+    serverSortType,
+    sortRows,
+    sortSections,
+    hasCustomOrder,
     normalize,
     normalizeLiveCursor,
     livePageUrl,

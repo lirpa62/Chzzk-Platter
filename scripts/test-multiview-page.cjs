@@ -117,8 +117,9 @@ const checks = [];
       storage:{local:{get:async()=>({
           // 전용 팔로잉은 즐겨찾기·그룹에 든 채널만 추린다.
           cheeseFollowFavorites:['aaaa0000000000000000000000000001'],
+          cheeseFollowFavOrder:['aaaa0000000000000000000000000001'],
           cheeseFollowCustomGroups:[
-            {id:'g1',name:'친구',channelIds:['aaaa0000000000000000000000000002']},
+            {id:'g1',name:'친구',manualOrder:true,channelIds:['aaaa0000000000000000000000000002']},
             {id:'g2',name:'게임',channelIds:['aaaa0000000000000000000000000003']},
           ],
           cheeseFollowGroupOrder:['g2','g1'],
@@ -130,7 +131,8 @@ const checks = [];
     // 치지직 API 스텁: 팔로잉 3채널.
     const channels=[
       {channelId:'aaaa0000000000000000000000000001',channelName:'채널하나',
-        channelImageUrl:'',liveTitle:'방송1',concurrentUserCount:100,
+        channelImageUrl:'https://nng-phinf.pstatic.net/profile.png?type=f120_120_na',
+        liveTitle:'방송1',concurrentUserCount:100,
         tags:['태그1','태그2','태그3','태그4']},
       {channelId:'aaaa0000000000000000000000000002',channelName:'채널둘',
         channelImageUrl:'',liveTitle:'방송2',concurrentUserCount:200},
@@ -141,17 +143,27 @@ const checks = [];
     ];
     // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
     // 전체는 data, 검색은 data[].{live,channel}.
-    window.__livePageCalls=0;window.__searchPageOffsets=[];
+    window.__livePageCalls=0;window.__liveSortRequests=[];
+    window.__followingSortRequests=[];window.__searchPageOffsets=[];
     window.__apiContent=(url)=>{
       const parsed=new URL(url),p=parsed.pathname;
       // 팔로잉은 following-lives 를 쓴다(liveInfo 에 방송 썸네일까지 들어 있다).
-      if(p.endsWith('/following-lives'))return {followingList:channels.map(c=>({
+      if(p.endsWith('/following-lives')){
+        const sortType=parsed.searchParams.get('sortType');
+        const sorted=[...channels];
+        if(sortType==='POPULAR')sorted.sort((a,b)=>b.concurrentUserCount-a.concurrentUserCount);
+        if(sortType==='UNPOPULAR')sorted.sort((a,b)=>a.concurrentUserCount-b.concurrentUserCount);
+        if(sortType==='LATEST')sorted.reverse();
+        window.__followingSortRequests.push(sortType);
+        return {followingList:sorted.map(c=>({
         channelId:c.channelId,channel:c,streamer:{openLive:true},
         adult:c.channelId.endsWith('1'),
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
+          openDate:'2026-09-24 10:0'+c.channelId.at(-1)+':00',
           liveCategoryValue:'게임',
           tags:c.tags||[],
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
+      }
       // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다.
       const detail=p.match(/\\/channels\\/([0-9a-f]{32})\\/live-detail$/);
       if(detail){
@@ -185,6 +197,8 @@ const checks = [];
       if(p.endsWith('/subscribe/channels'))return {data:[]};
       if(p.endsWith('/service/v1/lives')){
         window.__livePageCalls++;
+        window.__liveSortRequests.push({sortType:parsed.searchParams.get('sortType'),
+          liveId:parsed.searchParams.get('liveId')});
         const second=parsed.searchParams.has('liveId');
         const data=second
           ? Array.from({length:3},(_,i)=>({channel:{channelId:(100+i).toString(16).padStart(32,'0'),
@@ -207,6 +221,7 @@ const checks = [];
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewSort.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiview.js", "utf8"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
@@ -287,8 +302,9 @@ const checks = [];
        const img=cards[0].querySelector('.mv-card-thumb img');
        check(img && !img.getAttribute('src').includes('{type}'),
          src+' 썸네일 {type} 이 치환되지 않았다');
-       check(cards[0].querySelector('.mv-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
-         src+' 첫 카드에 연령 제한 오버레이가 없다');
+       const adult=cards.find(c=>c.dataset.mvPick.endsWith('1'));
+       check(adult?.querySelector('.mv-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
+         src+' 연령 제한 카드에 오버레이가 없다');
      }
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);`,
@@ -296,11 +312,18 @@ const checks = [];
 
   await test(
     "카드에 LIVE·시청자·제목·카테고리·태그가 함께 나온다",
-    `const card=document.querySelector('#mvChannelList .mv-card');
+    `const card=[...document.querySelectorAll('#mvChannelList .mv-card')]
+       .find(c=>c.dataset.mvPick.endsWith('1'));
+     check(card,'검증할 연령 제한 카드가 없다');
      check(card.querySelector('.mv-card-thumb img'),'썸네일이 없다');
      const src=card.querySelector('.mv-card-thumb img').getAttribute('src');
      check(!src.includes('{type}'),'썸네일 {type} 이 치환되지 않았다: '+src);
      check(card.querySelector('.mv-card-viewers'),'시청자 수가 없다');
+     check(Number(getComputedStyle(card.querySelector('.mv-card-viewers')).zIndex)>
+       Number(getComputedStyle(card.querySelector('.mv-card-thumb'),'::before').zIndex),
+       '시청자 배지가 연령 제한 표시 뒤에 가려진다');
+     check(new URL(card.querySelector('.mv-card-avatar').src).searchParams.get('type')==='f60_60_na',
+       '선택 카드 프로필이 작은 리사이즈본을 쓰지 않는다');
      check(card.querySelector('.mv-card-live')?.textContent==='LIVE','LIVE 배지가 없다');
      check(card.querySelector('.mv-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
        '연령 제한 오버레이가 없다');
@@ -312,6 +335,61 @@ const checks = [];
   );
 
   await test(
+    "선택 화면은 정렬을 즉시 바꾸고 전용 팔로잉에만 커스텀 순서를 제공한다",
+    `const select=document.getElementById('mvSort');
+     const cards=()=>[...document.querySelectorAll('#mvChannelList .mv-card')];
+     const names=()=>cards().map(card=>card.querySelector('.mv-card-name').textContent);
+     const setMode=async(mode)=>{select.value=mode;
+       select.dispatchEvent(new Event('change',{bubbles:true}));await wait(220);};
+     check(select.value==='viewers','기본 시청자순이 아니다');
+     check(cards()[0].dataset.mvPick.endsWith('4'),'시청자순 첫 카드가 다르다');
+     check(select.querySelector('[value="custom"]').disabled,'팔로잉에 커스텀 순서가 보인다');
+     await setMode('recommended');
+     check(cards()[0].dataset.mvPick.endsWith('1'),'추천순이 API 순서를 보존하지 않았다');
+     await setMode('name-asc');
+     check(names().join('|')===names().slice().sort((a,b)=>a.localeCompare(b,'ko',{numeric:true})).join('|'),
+       '채널명 오름차순이 아니다');
+     await setMode('name-desc');
+     check(names().join('|')===names().slice().sort((a,b)=>b.localeCompare(a,'ko',{numeric:true})).join('|'),
+       '채널명 내림차순이 아니다');
+     await setMode('oldest');
+     check(cards()[0].dataset.mvPick.endsWith('1'),'오래된순이 방송 시작 시각을 쓰지 않았다');
+     await setMode('recent');
+     check(cards()[0].dataset.mvPick.endsWith('4'),'최신순이 방송 시작 시각을 쓰지 않았다');
+     document.querySelector('[data-mv-source="custom"]').click();await wait(250);
+     check(select.value==='custom'&&!select.querySelector('[value="custom"]').disabled,
+       '저장된 즐겨찾기 순서가 커스텀 정렬로 제공되지 않았다');
+     document.querySelector('[data-mv-folder="rest"]').click();
+     check(select.value==='viewers'&&select.querySelector('[value="custom"]').disabled,
+       '수동 순서가 없는 구역에도 커스텀 정렬이 나온다');
+     document.querySelector('[data-mv-source="following"]').click();await wait(250);`,
+  );
+
+  await test(
+    "선택 화면 정렬은 커스텀 옵션 패널에서 선택하고 바깥 클릭으로 닫힌다",
+    `const trigger=document.getElementById('mvSortTrigger');
+     const select=document.getElementById('mvSort');
+     trigger.click();
+     const panel=document.querySelector('.mv-sort-options');
+     check(!panel.hidden&&trigger.getAttribute('aria-expanded')==='true',
+       '커스텀 정렬 옵션이 열리지 않았다');
+     check(panel.querySelector('[role="option"][aria-selected="true"]'),
+       '현재 정렬 선택 상태가 표시되지 않는다');
+     panel.querySelector('[data-value="name-asc"]').click();
+     check(select.value==='name-asc'&&panel.hidden,
+       '커스텀 정렬 항목 선택이 반영되지 않았다');
+     await wait(250);
+     trigger.focus();trigger.dispatchEvent(new KeyboardEvent('keydown',{
+       key:'ArrowDown',bubbles:true}));
+     check(!panel.hidden&&panel.contains(document.activeElement),
+       '키보드로 옵션을 열거나 이동할 수 없다: '+
+       [panel.hidden,document.activeElement?.outerHTML?.slice(0,100),trigger.disabled,
+         trigger.getAttribute('aria-expanded')].join(' / '));
+     document.body.click();
+     check(panel.hidden,'바깥을 눌러도 옵션이 닫히지 않는다');`,
+  );
+
+  await test(
     "고르기 화면은 고정 최대 폭 없이 뷰포트를 활용한다",
     `const setup=document.querySelector('.mv-setup');
      const style=getComputedStyle(setup);
@@ -320,6 +398,7 @@ const checks = [];
        '고르기 화면이 뷰포트 폭을 채우지 않는다');`,
   );
 
+  await evaluate(`document.querySelector('[data-mv-source="all"]').click();new Promise(r=>setTimeout(r,200))`);
   for (const width of [1280, 1440, 1920]) {
     await command("Emulation.setDeviceMetricsOverride", {
       width,
@@ -329,12 +408,17 @@ const checks = [];
     });
     await evaluate("new Promise(r=>requestAnimationFrame(()=>r()))");
     await test(
-      `${width}px에서 방송 카드 폭이 220~280px 범위를 유지한다`,
-      `const widths=[...document.querySelectorAll('#mvChannelList .mv-card')]
-         .map(card=>card.getBoundingClientRect().width);
+      `${width}px에서 방송 카드가 오른쪽 끝까지 채운다`,
+      `const cards=[...document.querySelectorAll('#mvChannelList .mv-card')];
+       const widths=cards.map(card=>card.getBoundingClientRect().width);
        check(widths.length>0,'측정할 카드가 없다');
-       check(widths.every(width=>width>=218&&width<=282),
-         '카드 폭 범위 이상: '+widths.map(Math.round).join(','));`,
+       check(widths.every(width=>width>=218&&width<=320),
+         '카드 폭 범위 이상: '+widths.map(Math.round).join(','));
+       const first=cards[0].getBoundingClientRect();
+       const last=[...cards].filter(card=>Math.abs(card.getBoundingClientRect().top-first.top)<2).at(-1);
+       const grid=cards[0].closest('.mv-cards').getBoundingClientRect();
+       check(Math.abs(last.getBoundingClientRect().right-grid.right)<2,
+         '카드 그리드 오른쪽에 빈 폭이 남았다');`,
     );
   }
   await command("Emulation.setDeviceMetricsOverride", {
@@ -343,6 +427,7 @@ const checks = [];
     deviceScaleFactor: 1,
     mobile: false,
   });
+  await evaluate(`document.querySelector('[data-mv-source="following"]').click();new Promise(r=>setTimeout(r,200))`);
 
   await test(
     "라이브 탭은 아래쪽에서 다음 페이지를 기존 카드 뒤에 붙인다",
@@ -366,6 +451,34 @@ const checks = [];
      check(window.__livePageCalls===2,'유효한 pager를 두고 다시 요청했다');
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);`,
+  );
+
+  await test(
+    "선택 화면은 서버 정렬로 첫 페이지를 다시 읽고 같은 정렬로 다음 페이지를 받는다",
+    `document.querySelector('[data-mv-source="all"]').click();await wait(250);
+     const select=document.getElementById('mvSort');
+     select.value='recent';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(250);
+     check(window.__liveSortRequests.at(-1)?.sortType==='LATEST',
+       '최신순이 API 정렬로 요청되지 않았다');
+     const box=document.getElementById('mvChannelList');
+     box.scrollTop=box.scrollHeight;box.dispatchEvent(new Event('scroll'));
+     await wait(250);
+     check(window.__liveSortRequests.some((request)=>request.sortType==='LATEST'&&request.liveId==='9001'),
+       '다음 페이지가 최신순 정렬을 유지하지 않았다');
+     select.value='viewers-asc';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(250);
+     check(window.__liveSortRequests.at(-1)?.sortType==='UNPOPULAR',
+       '시청자역순이 API 정렬로 요청되지 않았다');
+     document.querySelector('[data-mv-source="following"]').click();await wait(250);
+     select.value='recommended';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(250);
+     check(window.__followingSortRequests.includes('RECOMMEND'),
+       '팔로잉 추천순이 API 정렬로 요청되지 않았다: '+window.__followingSortRequests);
+     select.value='oldest';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(250);
+     check(window.__followingSortRequests.includes('OLDEST'),
+       '팔로잉 오래된순이 API 정렬로 요청되지 않았다');`,
   );
 
   await test(
@@ -654,7 +767,7 @@ const checks = [];
       {channelId:'aaaa0000000000000000000000000003',channelName:'채널셋'},
       {channelId:'aaaa0000000000000000000000000004',channelName:'채널넷'},
     ];
-    window.__quickLiveCalls=0;window.__quickSearchOffsets=[];
+    window.__quickLiveCalls=0;window.__quickLiveSortRequests=[];window.__quickSearchOffsets=[];
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       sendMessage:async(msg)=>{
         if(msg?.type!=='MULTIVIEW_API')return {ok:false};
@@ -685,6 +798,7 @@ const checks = [];
         if(parsed.pathname.endsWith('/service/v1/tag/lives'))return {ok:true,content:{data:[]}};
         if(parsed.pathname.endsWith('/service/v1/lives')){
           window.__quickLiveCalls++;
+          window.__quickLiveSortRequests.push(parsed.searchParams.get('sortType'));
           const second=parsed.searchParams.has('liveId');
           if(second&&window.__failQuickNext){
             window.__failQuickNext=false;
@@ -693,7 +807,9 @@ const checks = [];
           const start=second?300:200,count=second?5:40;
           return {ok:true,content:{data:Array.from({length:count},(_,i)=>({
             channel:{channelId:(start+i).toString(16).padStart(32,'0'),
-              channelName:'퀵'+(start+i)},liveTitle:'퀵 방송 '+(start+i),
+              channelName:'퀵'+(start+i),
+              channelImageUrl:i===0?'https://nng-phinf.pstatic.net/quick.png?type=f120_120_na':''},
+            liveTitle:'퀵 방송 '+(start+i),
             concurrentUserCount:1000-i,liveCategoryValue:'게임',
             adult:i===0,
             tags:i===0?['하나','둘','셋','넷']:['테스트']})),
@@ -751,6 +867,7 @@ const checks = [];
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewSort.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
@@ -872,6 +989,38 @@ const checks = [];
      await wait(250);
      document.getElementById('mvQuickClose').click();
      check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "Quick 정렬은 카드와 프레임을 유지하며 불러온 목록에 적용된다",
+    `const before=window.frameSrcs.length;
+     document.getElementById('mvBack').click();
+     document.querySelector('[data-mv-quick-source="live"]').click();
+     await wait(250);
+     const select=document.getElementById('mvQuickSort');
+     const rail=document.getElementById('mvQuickAdd');
+     const names=()=>[...rail.querySelectorAll('.mv-quick-card-name')]
+       .map(node=>node.textContent.trim());
+     check(select.value==='viewers','Quick 기본 정렬이 시청자순이 아니다');
+     check(select.querySelector('[value="custom"]').disabled,
+       '라이브 탭에서 커스텀 순서를 선택할 수 있다');
+     select.value='name-asc';select.dispatchEvent(new Event('change',{bubbles:true}));
+     check(names().join('|')===names().slice().sort((a,b)=>a.localeCompare(b,'ko',{numeric:true})).join('|'),
+       'Quick 채널명 오름차순이 아니다');
+     select.value='recommended';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(250);
+     check(window.__quickLiveSortRequests.at(-1)==='RECOMMEND',
+       'Quick 추천순이 API 정렬로 요청되지 않았다');
+     const trigger=document.getElementById('mvQuickSortTrigger');
+     trigger.click();
+     const panel=document.querySelector('.mv-sort-options');
+     check(!panel.hidden,'Quick 커스텀 정렬 옵션이 열리지 않았다');
+     panel.querySelector('[data-value="viewers-asc"]').click();
+     await wait(250);
+     check(select.value==='viewers-asc'&&!document.getElementById('mvQuick').hidden,
+       'Quick 정렬 항목을 누르자 채널 관리가 닫혔다');
+     check(window.frameSrcs.length===before,'Quick 정렬이 재생 프레임을 다시 걸었다');
+     document.getElementById('mvQuickClose').click();`,
   );
 
   await test(
@@ -1078,9 +1227,14 @@ const checks = [];
     "채팅 제목 선택기는 영상 프레임을 유지하고 채팅 채널만 바꾼다",
     `const videos=[...document.querySelectorAll('.mv-cell iframe')];
      const before=window.frameSrcs.length;
-     document.getElementById('mvChatTitle').click();
+     const title=document.getElementById('mvChatTitle');
+     check(title.classList.contains('mv-pop-button')&&title.querySelector('svg.mv-chat-title-chevron'),
+       '채팅 제목이 팝오버 버튼 스타일 또는 SVG chevron을 사용하지 않는다');
+     title.click();
      const list=document.getElementById('mvChatTitleList');
      check(!list.hidden && list.getAttribute('role')==='listbox','채팅 선택기가 열리지 않았다');
+     check(list.classList.contains('mv-pop-panel')&&list.querySelector('.mv-pop-option'),
+       '채팅 선택 항목이 공용 팝오버 목록 스타일을 사용하지 않는다');
      const current=document.getElementById('mvChatValue').textContent;
      const choice=[...list.querySelectorAll('[data-mv-set-chat]')]
        .find(button=>button.textContent!==current);
@@ -1335,6 +1489,8 @@ const checks = [];
      const quick=document.getElementById('mvQuick');
      const card=quick.querySelector('[data-mv-quick-add]');
      check(card?.querySelectorAll('.mv-card-tag-chip').length===4,'Quick 태그 4개가 보이지 않는다');
+     check(new URL(card.querySelector('.mv-quick-card-avatar').src).searchParams.get('type')==='f60_60_na',
+       '시청 화면 Quick 프로필이 작은 리사이즈본을 쓰지 않는다');
      check(card.querySelector('.mv-quick-card-thumb.is-adult .mv-card-sr-only')?.textContent==='19 연령 제한',
        'Quick 카드에 연령 제한 오버레이가 없다');
      check(card.querySelector('.mv-card-category-chip')?.textContent==='게임','Quick 카테고리가 없다');
@@ -3391,9 +3547,16 @@ const checks = [];
      const ids=[...document.querySelectorAll('.mv-cell')].map(cell=>cell.dataset.channelId);
      check(ids.length>=5,'그룹 테스트에는 채널 5개가 필요하다');
      const assign=(id,groupId)=>{
-       const select=panel.querySelector('[data-mv-group-assign="'+id+'"]');
-       select.value=groupId;
-       select.dispatchEvent(new Event('change',{bubbles:true}));
+       const trigger=panel.querySelector('[data-mv-group-assignment-toggle="'+id+'"]');
+       check(trigger.classList.contains('mv-pop-button'),'그룹 지정이 커스텀 버튼이 아니다');
+       check(!panel.querySelector('.mv-group-assignment select'),'기본 select가 남아 있다');
+       trigger.click();
+       check(document.getElementById('mvGroupAssignmentList')?.classList.contains('mv-pop-panel'),
+         '그룹 지정 팝오버가 공용 패널 스타일을 사용하지 않는다');
+       const option=[...document.querySelectorAll('#mvGroupAssignmentList [data-mv-group-assign-option="'+id+'"]')]
+         .find(item=>item.dataset.groupId===groupId);
+       check(option,'group assignment option missing');
+       option.click();
      };
      ids.forEach(id=>assign(id,''));
      ids.slice(0,3).forEach(id=>assign(id,'a'));
@@ -3459,15 +3622,64 @@ const checks = [];
        '그룹 진단이 해당 그룹의 기준과 보정값을 기록하지 않았다');
      window.__mvState.sync.diagnosticsEnabled=false;
      const control=panel.querySelector('[data-mv-group="a"] [data-mv-sync-offset]');
-     const assignment=panel.querySelector('[data-mv-group-assign="'+ids[0]+'"]');
+     const assignment=panel.querySelector('[data-mv-group-assignment-toggle="'+ids[0]+'"]');
      for(let i=0;i<20;i++){
        clock+=1000;samples();window.syncTickCallbacks.at(-1)();
      }
      check(panel.querySelector('[data-mv-group="a"] [data-mv-sync-offset]')===control &&
-       panel.querySelector('[data-mv-group-assign="'+ids[0]+'"]')===assignment,
+       panel.querySelector('[data-mv-group-assignment-toggle="'+ids[0]+'"]')===assignment,
        '그룹 싱크 주기 갱신에서 조작 요소를 다시 만들었다');
+     check(getComputedStyle(panel).scrollbarGutter==='stable',
+       '싱크 패널이 스크롤바 공간을 고정 예약하지 않는다');
+     check(getComputedStyle(panel.querySelector('.mv-group-assignments')).columnGap==='18px',
+       '그룹 배정 2열 사이 간격이 적용되지 않았다');
+     check(panel.querySelector('[data-mv-group-reset-all]').closest('.mv-sync-scope'),
+       '그룹 전체 초기화가 범위 선택 줄에 없다');
+     check(panel.querySelector('[data-mv-group-reset="a"]').textContent.includes('비우기'),
+       '그룹 머리말에 비우기 버튼이 없다');
+     const nonRef=panel.querySelector('.mv-sync-group[data-mv-group="a"] .mv-sync-row:not(.is-reference)');
+     const nonRefRemove=nonRef?.querySelector('[data-mv-group-remove]');
+     check(nonRefRemove&&nonRefRemove.querySelector('svg'),'기준 외 채널의 제거 SVG가 없다');
+     const nonRefId=nonRefRemove.dataset.mvGroupRemove;
+     const formerRef=a.referenceChannelId;
+     nonRefRemove.click();
+     check(!a.channelIds.includes(nonRefId)&&a.referenceChannelId===formerRef,
+       '기준 외 채널 제거가 기준을 바꿨거나 채널을 남겼다');
+     assign(nonRefId,'a');
+     const refRow=panel.querySelector('.mv-sync-group[data-mv-group="a"] .mv-sync-row.is-reference');
+     check(refRow,'A 그룹의 기준 행이 없다');
+     const remove=refRow.querySelector('[data-mv-group-remove]');
+     check(remove&&remove.querySelector('svg'),'기준 채널 제거 SVG가 표시되지 않는다');
+     const removeId=remove.dataset.mvGroupRemove;
+     const removeFrame=document.querySelector('.mv-cell[data-channel-id="'+removeId+'"] iframe');
+     remove.click();
+     check(!a.channelIds.includes(removeId)&&a.channelIds.length===2,
+       '기준 채널이 그룹에서 개별 제거되지 않았다');
+     check(document.querySelector('.mv-cell[data-channel-id="'+removeId+'"] iframe')===removeFrame,
+       '그룹에서 채널을 제거하면서 iframe이 교체됐다');
+     assign(removeId,'a');
+     a.referenceChannelId=a.channelIds[0];
+     a.mode='auto';
+     a.manualOffsets[a.channelIds[1]]=1.2;
+     const previousMembers=[...a.channelIds];
+     panel.querySelector('[data-mv-group-reset="a"]').click();
+     check(a.mode==='off'&&a.referenceChannelId===null&&a.channelIds.length===0&&
+       Object.keys(a.manualOffsets).length===0,
+       '그룹 비우기가 채널 배정을 해제하지 않았다');
+     for(const id of previousMembers.slice(0,2))assign(id,'a');
+     const previousBMembers=[...b.channelIds];
+     a.mode='auto';b.mode='auto';
+     a.manualOffsets[a.channelIds[0]]=0.8;b.manualOffsets[b.channelIds[0]]=0.6;
+     panel.querySelector('[data-mv-group-reset-all]').click();
+     check([a,b].every(group=>group.mode==='off'&&group.referenceChannelId===null&&
+       group.channelIds.length===0&&Object.keys(group.manualOffsets).length===0),
+       '그룹 전체 비우기가 모든 채널 배정을 해제하지 않았다');
+     for(const id of previousMembers)assign(id,'a');
+     for(const id of previousBMembers)assign(id,'b');
      Date.now=realNow;
      panel.querySelector('[data-mv-sync-scope="all"]').click();
+     check(!panel.querySelector('[data-mv-group-reset-all]'),
+       '그룹 외 범위에도 그룹 전체 초기화가 표시된다');
      document.body.click();`,
   );
 
@@ -3565,8 +3777,11 @@ const checks = [];
      check(!group.channelIds.includes(removed[1]),'제거한 채널이 그룹에 남았다');
      check(group.channelIds.length===1 && group.mode==='off',
        '멤버가 하나 남은 그룹의 자동 싱크가 계속 켜져 있다');
-     check(window.sentMessages.some(message=>message.data?.type==='RESET_SYNC_RATE' &&
-       message.data.channelId===remaining),'남은 채널의 자동 재생속도를 해제하지 않았다');
+     const resetSent=window.sentMessages.some(message=>message.data?.type==='RESET_SYNC_RATE' &&
+       message.data.channelId===remaining);
+     const resetPending=[...window.__testResources.pendingSyncCommands.values()].some(entry=>
+       entry.channelId===remaining&&entry.command==='reset-rate');
+     check(resetSent||resetPending,'남은 채널의 자동 재생속도를 해제하지 않았다');
      check(kept.every(frame=>frame.isConnected),'남은 채널 iframe이 교체됐다');
      check(!window.frameSrcs.slice(before).some(src=>src.includes('cheeseMulti=1')),
        '그룹 채널 제거로 남은 영상을 다시 로드했다');`,

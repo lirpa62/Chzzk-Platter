@@ -22,6 +22,91 @@ async function test(name, run) {
 }
 
 (async () => {
+  await test("프로필 이미지는 작은 리사이즈본을 요청한다", async () => {
+    const original = "https://nng-phinf.pstatic.net/profile.png?type=f120_120_na&v=1";
+    const avatar = new URL(SOURCES.profileThumb(original));
+    assert.equal(avatar.searchParams.get("type"), "f60_60_na");
+    assert.equal(avatar.searchParams.get("v"), "1");
+    assert.equal(new URL(SOURCES.profileThumb(original, 240)).searchParams.get("type"), "f240_240_na");
+    assert.equal(SOURCES.profileThumb("javascript:alert(1)"), "");
+  });
+
+  await test("공용 정렬은 시청자·이름·시작 시각·원본 순서를 구분한다", async () => {
+    const rows = [
+      { ...row(1), channelName: "가", viewers: 10, openedAt: 200, recommendationRank: 2 },
+      { ...row(2), channelName: "다", viewers: 30, openedAt: 100, recommendationRank: 0 },
+      { ...row(3), channelName: "나", viewers: 20, openedAt: 0, recommendationRank: 1 },
+    ];
+    const ids = (mode) => SOURCES.sortRows(rows, mode).map((item) => item.channelId);
+    assert.deepEqual(ids("viewers"), [id(2), id(3), id(1)]);
+    assert.deepEqual(ids("viewers-asc"), [id(1), id(3), id(2)]);
+    assert.deepEqual(ids("name-asc"), [id(1), id(3), id(2)]);
+    assert.deepEqual(ids("name-desc"), [id(2), id(3), id(1)]);
+    assert.deepEqual(ids("recent"), [id(1), id(2), id(3)]);
+    assert.deepEqual(ids("oldest"), [id(2), id(1), id(3)]);
+    assert.deepEqual(ids("recommended"), [id(2), id(3), id(1)]);
+    assert.deepEqual(ids("custom"), [id(1), id(2), id(3)]);
+    assert.deepEqual(rows.map((item) => item.channelId), [id(1), id(2), id(3)]);
+    assert.equal(SOURCES.normalize(row(1), { openDate: "2026-09-24 10:30:00" }).openedAt,
+      new Date("2026-09-24T10:30:00").getTime());
+    assert.equal(SOURCES.normalize(row(1), { openDate: "invalid" }).openedAt, 0);
+  });
+
+  await test("저장된 즐겨찾기·그룹 순서가 커스텀 정렬로 제공된다", async () => {
+    await withApi((url) => ({ followingList: (url.searchParams.get("sortType") === "OLDEST"
+      ? [2, 1, 3] : [1, 2, 3]).map((n) => ({
+      channelId: id(n), channel: row(n), streamer: { openLive: true },
+      liveInfo: { liveTitle: `방송${n}`, concurrentUserCount: n * 10 },
+    })) }), async () => {
+      global.chrome.storage = { local: { get: async () => ({
+        cheeseFollowFavorites: [id(1), id(2)],
+        cheeseFollowFavOrder: [id(2), id(1)],
+        cheeseFollowCustomGroups: [{ id: "g1", name: "친구", manualOrder: true,
+          channelIds: [id(3)] }],
+      }) } };
+      const sections = await SOURCES.loadCustomSections();
+      assert.deepEqual(sections[0].rows.map((item) => item.channelId), [id(2), id(1)]);
+      assert.equal(SOURCES.hasCustomOrder(sections, "fav"), true);
+      assert.equal(SOURCES.hasCustomOrder(sections, "group:g1"), true);
+      assert.equal(SOURCES.hasCustomOrder(sections, "rest"), false);
+      assert.deepEqual(SOURCES.sortSections(sections, "custom")[0].rows,
+        sections[0].rows);
+      const latest = await SOURCES.loadCustomSections("LATEST");
+      assert.deepEqual(SOURCES.sortSections(latest, "recent", true)[0].rows
+        .map((item) => item.channelId), [id(1), id(2)],
+      "시작 시각이 없어도 API 최신순이 수동 즐겨찾기 순서를 대체해야 한다");
+      const oldest = await SOURCES.loadCustomSections("OLDEST");
+      assert.deepEqual(SOURCES.sortSections(oldest, "oldest", true)[0].rows
+        .map((item) => item.channelId), [id(2), id(1)]);
+    });
+  });
+
+  await test("친밀도 구역의 점수 순서는 커스텀 정렬로 취급한다", async () => {
+    const previousAffinity = global.CheeseChannelAffinity;
+    const previousData = global.CheeseChannelAffinityData;
+    try {
+      global.CheeseChannelAffinity = { scoreChannels: () => [
+        { channelId: id(2) }, { channelId: id(1) },
+      ] };
+      global.CheeseChannelAffinityData = { collectMetrics: async () => ({}) };
+      await withApi(() => ({ followingList: [1, 2].map((n) => ({
+        channelId: id(n), channel: row(n), streamer: { openLive: true },
+        liveInfo: { liveTitle: `방송${n}` },
+      })) }), async () => {
+        global.chrome.storage = { local: { get: async (keys) =>
+          keys === "cheeseFollowAffinityOn" ? { cheeseFollowAffinityOn: true } : {} } };
+        const sections = await SOURCES.loadCustomSections();
+        const affinity = sections.find((section) => section.id === "affinity");
+        assert.ok(affinity);
+        assert.equal(SOURCES.hasCustomOrder(sections, "affinity"), true);
+        assert.deepEqual(affinity.rows.map((item) => item.channelId), [id(2), id(1)]);
+      });
+    } finally {
+      global.CheeseChannelAffinity = previousAffinity;
+      global.CheeseChannelAffinityData = previousData;
+    }
+  });
+
   await test("첫 페이지와 다음 커서를 저장한다", async () => {
     const pager = SOURCES.createLivePager({
       fetchPage: async () => ({ rows: [row(1), row(2)], next: {
@@ -32,6 +117,68 @@ async function test(name, run) {
     assert.deepEqual(state.rows.map((item) => item.channelId), [id(1), id(2)]);
     assert.deepEqual(pager.next, { concurrentUserCount: "20", liveId: "200" });
     assert.equal(pager.done, false);
+  });
+
+  await test("정렬별 라이브 요청은 동일한 커서 필드와 정렬값을 유지한다", async () => {
+    for (const [mode, sortType] of Object.entries({
+      viewers: "POPULAR", "viewers-asc": "UNPOPULAR",
+      recent: "LATEST", recommended: "RECOMMEND",
+    })) {
+      assert.equal(SOURCES.serverSortType("all", mode), sortType);
+      assert.equal(SOURCES.serverSortType("live", mode), sortType);
+      const url = new URL(SOURCES.livePageUrl({ concurrentUserCount: 787,
+        liveId: 21261965 }, sortType));
+      assert.equal(url.searchParams.get("sortType"), sortType);
+      assert.equal(url.searchParams.get("concurrentUserCount"), "787");
+      assert.equal(url.searchParams.get("liveId"), "21261965");
+      assert.equal(url.searchParams.get("size"), "40");
+      const calls = [];
+      await withApi((request) => { calls.push(request); return {
+        data: [{ channel: row(1), concurrentUserCount: 10 }],
+        page: { next: calls.length === 1
+          ? { concurrentUserCount: 787, liveId: 21261965 } : null },
+      }; }, async () => {
+        const pager = SOURCES.createLivePager({ sortType });
+        await pager.loadFirst();
+        await pager.loadNext();
+        assert.equal(pager.done, true);
+      });
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].searchParams.get("sortType"), sortType);
+      assert.equal(calls[1].searchParams.get("sortType"), sortType);
+      assert.equal(calls[1].searchParams.get("liveId"), "21261965");
+    }
+    assert.equal(SOURCES.serverSortType("all", "oldest"), "POPULAR");
+    assert.equal(SOURCES.serverSortType("search", "recent"), null);
+    assert.throws(() => SOURCES.livePageUrl(null, "OLDEST"), /invalid-sort/);
+  });
+
+  await test("팔로잉 정렬은 API 순서를 그대로 쓰고 허용된 값만 요청한다", async () => {
+    for (const [mode, sortType] of Object.entries({
+      viewers: "POPULAR", "viewers-asc": "UNPOPULAR", recent: "LATEST",
+      oldest: "OLDEST", recommended: "RECOMMEND",
+    })) {
+      assert.equal(SOURCES.serverSortType("following", mode), sortType);
+      await withApi((url) => {
+        assert.equal(url.searchParams.get("sortType"), sortType);
+        return { followingList: [2, 1].map((n) => ({
+          channelId: id(n), channel: row(n), streamer: { openLive: true },
+          liveInfo: { liveTitle: `방송${n}`, concurrentUserCount: n * 10 },
+        })) };
+      }, async () => {
+        const rows = await SOURCES.loadFollowing(sortType);
+        assert.deepEqual(SOURCES.sortRows(rows, mode, true).map((item) => item.channelId),
+          [id(2), id(1)]);
+        if (sortType === "POPULAR") {
+          assert.deepEqual(SOURCES.sortRows(rows, "viewers").map((item) => item.channelId),
+            [id(2), id(1)]);
+          assert.deepEqual(SOURCES.sortRows(rows.slice().reverse(), "viewers")
+            .map((item) => item.channelId), [id(2), id(1)],
+          "전용 팔로잉의 로컬 정렬은 API 행의 원래 순서와 독립적이어야 한다");
+        }
+      });
+    }
+    await assert.rejects(SOURCES.loadFollowing("INVALID"), /invalid-sort/);
   });
 
   await test("다음 페이지는 순서를 유지하며 channelId 중복을 제거한다", async () => {
@@ -294,11 +441,25 @@ async function test(name, run) {
     const valid = vm.runInNewContext(`${background.slice(start, end)}\nvalidMultiviewApiQuery`);
     const base = "https://api.chzzk.naver.com/service/v1/lives?size=40";
     assert.equal(valid(new URL(base)), true);
+    for (const sortType of ["POPULAR", "UNPOPULAR", "LATEST", "RECOMMEND"]) {
+      assert.equal(valid(new URL(`${base}&sortType=${sortType}`)), true);
+      assert.equal(valid(new URL(`${base}&sortType=${sortType}&concurrentUserCount=20&liveId=123`)), true);
+    }
+    for (const sortType of ["OLDEST", "RANDOM", ""]) {
+      assert.equal(valid(new URL(`${base}&sortType=${sortType}`)), false);
+    }
+    assert.equal(valid(new URL(`${base}&sortType=POPULAR&sortType=LATEST`)), false);
     assert.equal(valid(new URL(`${base}&concurrentUserCount=20&liveId=123`)), true);
     assert.equal(valid(new URL(`${base}&unexpected=1`)), false);
     assert.equal(valid(new URL(`${base}&liveId=123`)), false);
     assert.equal(valid(new URL(`${base}&concurrentUserCount=20&liveId=123&liveId=124`)), false);
     assert.equal(valid(new URL(`${base}&concurrentUserCount=20%26x%3D1&liveId=123`)), false);
+    const following = "https://api.chzzk.naver.com/service/v1/channels/following-lives";
+    for (const sortType of ["POPULAR", "UNPOPULAR", "LATEST", "OLDEST", "RECOMMEND"]) {
+      assert.equal(valid(new URL(`${following}?sortType=${sortType}`)), true);
+    }
+    assert.equal(valid(new URL(`${following}?sortType=RANDOM`)), false);
+    assert.equal(valid(new URL(`${following}?sortType=POPULAR&sortType=LATEST`)), false);
     const tag = "https://api.chzzk.naver.com/service/v1/tag/lives?size=20&sortType=POPULAR&tags=%EB%B4%89%EB%88%84%EB%8F%84";
     assert.equal(valid(new URL(tag)), true);
     assert.equal(valid(new URL(tag.replace("&tags=", "&unexpected=1&tags="))), false);

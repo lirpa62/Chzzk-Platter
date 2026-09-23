@@ -219,6 +219,23 @@
               placeholder="채널 이름 또는 태그로 찾기"
               hidden
             />
+            <div class="mv-sort-row">
+              <span id="mvQuickSortLabel">정렬</span>
+              <div class="mv-pop mv-sort-picker">
+                <button type="button" class="mv-pop-button mv-sort-trigger" id="mvQuickSortTrigger"
+                  aria-haspopup="listbox" aria-expanded="false"
+                  aria-labelledby="mvQuickSortLabel mvQuickSortValue">
+                  <span class="mv-pop-value" id="mvQuickSortValue">시청자순</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+                <div class="mv-pop-panel mv-sort-options" role="listbox"
+                  aria-labelledby="mvQuickSortLabel" hidden></div>
+                <select id="mvQuickSort" class="mv-sort-native" aria-hidden="true" tabindex="-1"></select>
+              </div>
+            </div>
             <div class="mv-quick-rail">
               <div class="mv-quick-add" id="mvQuickAdd"></div>
             </div>
@@ -254,9 +271,12 @@
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
           <div class="mv-chat-title-wrap" id="mvChatTitleWrap">
-            <button type="button" class="mv-chat-title" id="mvChatTitle"
-              aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList"></button>
-            <div class="mv-chat-title-list" id="mvChatTitleList" role="listbox"
+            <button type="button" class="mv-pop-button mv-chat-title" id="mvChatTitle"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList">
+              <span class="mv-chat-title-label"></span>
+              <svg class="mv-chat-title-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </button>
+            <div class="mv-pop-panel mv-chat-title-list" id="mvChatTitleList" role="listbox"
               aria-label="채팅 채널" hidden></div>
           </div>
           <button
@@ -296,6 +316,7 @@
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewSort.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewSync.js"></script>
     <script src="src/multiviewDiagnostics.js"></script>

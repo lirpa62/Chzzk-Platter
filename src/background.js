@@ -6172,10 +6172,12 @@ function validMultiviewApiQuery(url) {
     return Number.isSafeInteger(value) && value >= min && value <= max;
   };
   if (url.pathname === "/service/v1/lives") {
-    if (!only(new Set(["size", "concurrentUserCount", "liveId"]))) return false;
+    if (!only(new Set(["size", "sortType", "concurrentUserCount", "liveId"]))) return false;
     const hasCount = url.searchParams.has("concurrentUserCount");
     const hasLiveId = url.searchParams.has("liveId");
     return hasCount === hasLiveId && uint("size", 1, 100) &&
+      (!url.searchParams.has("sortType") ||
+        ["POPULAR", "UNPOPULAR", "LATEST", "RECOMMEND"].includes(url.searchParams.get("sortType"))) &&
       uint("concurrentUserCount") && uint("liveId", 1);
   }
   if (url.pathname === "/service/v1/tag/lives") {
@@ -6187,7 +6189,8 @@ function validMultiviewApiQuery(url) {
   }
   if (url.pathname === "/service/v1/channels/following-lives") {
     return only(new Set(["sortType"])) &&
-      (!url.searchParams.has("sortType") || url.searchParams.get("sortType") === "POPULAR");
+      (!url.searchParams.has("sortType") ||
+        ["POPULAR", "UNPOPULAR", "LATEST", "OLDEST", "RECOMMEND"].includes(url.searchParams.get("sortType")));
   }
   if (url.pathname === "/service/v1/search/channels") {
     return only(new Set(["keyword", "offset", "size"])) &&

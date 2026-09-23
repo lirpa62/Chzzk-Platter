@@ -666,6 +666,11 @@
     $("mvChatTitle").setAttribute("aria-expanded", "false");
   }
 
+  function renderChatTitle() {
+    const label = $("mvChatTitle")?.querySelector(".mv-chat-title-label");
+    if (label) label.textContent = channelName(state.chatChannelId) + " 채팅";
+  }
+
   function toggleChatSelector() {
     const list = $("mvChatTitleList");
     if (!list.hidden) return closeChatSelector();
@@ -685,7 +690,7 @@
     $("mvChatValue").textContent = channelName(state.chatChannelId);
     $("mvSideValue").textContent = SIDE_LABEL[state.chatSide] || "-";
     $("mvLayoutValue").textContent = layout?.label || "-";
-    $("mvChatTitle").textContent = channelName(state.chatChannelId) + " 채팅";
+    renderChatTitle();
     if (!$("mvChatTitleList").hidden) {
       $("mvChatTitleList").innerHTML = state.chosen.map((channel) => optionRow(
         channel.channelId, channel.channelName,
@@ -762,6 +767,7 @@
   const mixerOpen = new Set();
   const mixerGainTimers = new Map();
   let mixerPresetPickerId = "";
+  let groupAssignmentPickerId = "";
   let mixerCommandSeq = 0;
   let mixerDragId = "";
 
@@ -1150,6 +1156,20 @@
     cancelPendingSync(channelId);
   }
 
+  function clearSyncGroup(group) {
+    const channelIds = [...group.channelIds];
+    group.channelIds = [];
+    group.mode = "off";
+    group.referenceChannelId = null;
+    group.manualOffsets = {};
+    group.congested = false;
+    group.congestionState = { active: false, since: 0 };
+    for (const id of channelIds) {
+      cancelPendingSync(id);
+      resetSyncRate(id);
+    }
+  }
+
   function assignSyncGroup(channelId, groupId) {
     if (!cells.has(channelId)) return;
     const next = state.sync.groups.find((group) => group.id === groupId);
@@ -1361,6 +1381,23 @@
     updateSyncPolling();
     refreshSyncPanel();
   }
+
+  document.addEventListener("click", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const target = event.target;
+    const quickPanel = $("mvQuick");
+    if (
+      quickPanel &&
+      !quickPanel.hidden &&
+      !target.closest?.("#mvQuick, #mvBack, .mv-sort-options")
+    ) closeQuick();
+  }, true);
+  window.addEventListener("blur", () => {
+    const quickPanel = $("mvQuick");
+    if (quickPanel && !quickPanel.hidden && document.activeElement?.tagName === "IFRAME") {
+      closeQuick();
+    }
+  });
 
   document.addEventListener("click", (event) => {
     const path = event.composedPath?.() || [];
@@ -1688,45 +1725,142 @@
     };
   }
 
+  function closeGroupAssignmentPicker() {
+    const picker = $("mvGroupAssignmentList");
+    picker?.remove();
+    document.querySelectorAll("[data-mv-group-assignment-toggle]").forEach((trigger) => {
+      trigger.setAttribute("aria-expanded", "false");
+    });
+    groupAssignmentPickerId = "";
+  }
+
+  function positionGroupAssignmentPicker() {
+    const picker = $("mvGroupAssignmentList");
+    const trigger = document.querySelector(
+      `[data-mv-group-assignment-toggle="${CSS.escape(groupAssignmentPickerId)}"]`,
+    );
+    if (!picker || !trigger || !groupAssignmentPickerId) {
+      closeGroupAssignmentPicker();
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const padding = 8;
+    const maxHeight = Math.min(240, Math.max(100, window.innerHeight - padding * 2));
+    picker.style.maxHeight = `${maxHeight}px`;
+    picker.style.minWidth = `${Math.max(110, Math.round(rect.width))}px`;
+    const height = Math.min(picker.scrollHeight, maxHeight);
+    const below = window.innerHeight - rect.bottom - padding;
+    const top = below >= height || below >= rect.top - padding
+      ? rect.bottom + 4
+      : Math.max(padding, rect.top - height - 4);
+    const left = Math.max(
+      padding,
+      Math.min(rect.left, window.innerWidth - rect.width - padding),
+    );
+    picker.style.left = `${Math.round(left)}px`;
+    picker.style.top = `${Math.round(top)}px`;
+  }
+
+  function toggleGroupAssignmentPicker(channelId) {
+    if (groupAssignmentPickerId === channelId) {
+      closeGroupAssignmentPicker();
+      return;
+    }
+    closeGroupAssignmentPicker();
+    closeMixerPresetPicker();
+    closeChatSelector();
+    closeQuick();
+    groupAssignmentPickerId = channelId;
+    const current = syncGroupForChannel(channelId)?.id || "";
+    const options = [
+      { id: "", label: "그룹 없음" },
+      ...state.sync.groups.map((group) => ({
+        id: group.id,
+        label: `그룹 ${group.id.toUpperCase()}`,
+      })),
+    ];
+    const picker = document.createElement("div");
+    picker.id = "mvGroupAssignmentList";
+    picker.className = "mv-pop-panel mv-group-assignment-list";
+    picker.setAttribute("role", "listbox");
+    picker.setAttribute("aria-label", `${channelName(channelId)} 싱크 그룹`);
+    picker.innerHTML = options.map((option) =>
+      `<button type="button" role="option" class="mv-pop-option${option.id === current ? " is-on" : ""}" ` +
+      `data-mv-group-assign-option="${esc(channelId)}" data-group-id="${esc(option.id)}" ` +
+      `aria-selected="${option.id === current}">${esc(option.label)}</button>`,
+    ).join("");
+    picker.addEventListener("keydown", (event) => {
+      const options = [...picker.querySelectorAll('[role="option"]')];
+      if (event.key === "Escape") {
+        closeGroupAssignmentPicker();
+        document.querySelector(`[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`)?.focus();
+        event.preventDefault();
+        return;
+      }
+      if (!options.length || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      const index = options.indexOf(document.activeElement);
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      options[(index + direction + options.length) % options.length]?.focus();
+      event.preventDefault();
+    });
+    picker.hidden = false;
+    document.body.appendChild(picker);
+    document.querySelector(`[data-mv-group-assignment-toggle="${CSS.escape(channelId)}"]`)
+      ?.setAttribute("aria-expanded", "true");
+    positionGroupAssignmentPicker();
+    picker.querySelector(`[aria-selected="true"]`)?.focus({ preventScroll: true });
+  }
+
   function patchGroupPanel(now = Date.now()) {
     const panel = $("mvSyncPop");
     if (!panel || panel.hidden) return false;
+    const setText = (element, value) => {
+      if (element && element.textContent !== value) element.textContent = value;
+    };
     const rows = [...panel.querySelectorAll("[data-mv-group-row]")];
     const expected = state.sync.groups.flatMap((group) => group.channelIds);
     if (rows.length !== expected.length ||
         rows.some((row, index) => row.dataset.mvGroupRow !== expected[index])) return false;
-    $("mvSyncValue").textContent = "그룹";
+    setText($("mvSyncValue"), "그룹");
     for (const group of state.sync.groups) {
       const section = panel.querySelector(`[data-mv-group="${group.id}"]`);
       if (!section) return false;
       const auto = section.querySelector("[data-mv-group-auto]");
-      auto.checked = group.mode === "auto";
-      auto.disabled = group.channelIds.length < 2;
-      section.querySelector("[data-mv-group-align]").disabled = group.channelIds.length < 2;
+      const checked = group.mode === "auto";
+      const disabled = group.channelIds.length < 2;
+      if (auto.checked !== checked) auto.checked = checked;
+      if (auto.disabled !== disabled) auto.disabled = disabled;
+      const align = section.querySelector("[data-mv-group-align]");
+      if (align.disabled !== disabled) align.disabled = disabled;
       const warning = section.querySelector(".mv-sync-warning");
-      warning.hidden = !group.congested && group.channelIds.length >= 2;
-      warning.textContent = group.channelIds.length < 2
+      const warningVisible = group.congested || group.channelIds.length < 2;
+      const warningHidden = !warningVisible;
+      if (warning.hidden !== warningHidden) warning.hidden = warningHidden;
+      setText(warning, group.channelIds.length < 2
         ? "싱크할 채널을 2개 이상 배정해 주세요."
-        : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.";
-      section.querySelector(".mv-group-reference").textContent = group.referenceChannelId
-        ? `기준: ${channelName(group.referenceChannelId)}` : "기준 대기";
+        : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.");
+      setText(section.querySelector(".mv-group-reference"), group.referenceChannelId
+        ? `기준: ${channelName(group.referenceChannelId)}` : "기준 대기");
       for (const id of group.channelIds) {
         const row = section.querySelector(`[data-mv-group-row="${CSS.escape(id)}"]`);
         const view = getGroupRowViewState(group, id, now);
         row.classList.toggle("is-reference", view.reference);
-        row.querySelector("[data-mv-sync-status]").textContent = view.status;
+        setText(row.querySelector("[data-mv-sync-status]"), view.status);
         for (const [kind, value] of [
           ["delay", `지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}`],
           ["buffer", `버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}`],
           ["edge", `엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}`],
           ["rate", view.rate.text],
-        ]) row.querySelector(`[data-mv-sync-metric="${kind}"]`).textContent = value;
+        ]) setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), value);
         const rate = row.querySelector('[data-mv-sync-metric="rate"]');
-        rate.title = view.rate.hint;
+        if (rate.title !== view.rate.hint) rate.title = view.rate.hint;
         const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
         const output = row.querySelector("[data-mv-sync-output]");
-        output.textContent = `${off}${view.pending ? " · 적용 중" : ""}`;
-        output.setAttribute("aria-label", `${channelName(id)} 시간 위치 보정 ${off}`);
+        setText(output, `${off}${view.pending ? " · 적용 중" : ""}`);
+        const outputLabel = `${channelName(id)} 시간 위치 보정 ${off}`;
+        if (output.getAttribute("aria-label") !== outputLabel) {
+          output.setAttribute("aria-label", outputLabel);
+        }
         setSyncButtonState(row.querySelector("[data-mv-sync-ref]"), !view.ready,
           view.reference);
         for (const button of row.querySelectorAll("[data-mv-sync-offset]")) {
@@ -1739,38 +1873,52 @@
     }
     const notice = panel.querySelector(".mv-sync-notice");
     if (!notice) return false;
-    notice.textContent = syncNotice;
-    notice.hidden = !syncNotice;
+    setText(notice, syncNotice);
+    const noticeHidden = !syncNotice;
+    if (notice.hidden !== noticeHidden) notice.hidden = noticeHidden;
     const diagnostics = panel.querySelector(".mv-sync-diagnostics");
     if (diagnostics) {
       diagnostics.hidden = !syncDiagnosticsUi;
-      diagnostics.querySelector("#mvSyncDiagnostics").checked = state.sync.diagnosticsEnabled;
+      const checkbox = diagnostics.querySelector("#mvSyncDiagnostics");
+      if (checkbox.checked !== state.sync.diagnosticsEnabled) {
+        checkbox.checked = state.sync.diagnosticsEnabled;
+      }
       const elapsed = syncDiagnosticsStartedAt
         ? Math.max(0, now - syncDiagnosticsStartedAt) : 0;
-      diagnostics.querySelector(".mv-sync-diagnostics-status").textContent =
+      setText(diagnostics.querySelector(".mv-sync-diagnostics-status"),
         state.sync.diagnosticsEnabled
           ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
           : syncDiagnostics.size
-            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관` : "기록 안 함";
+            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관` : "기록 안 함");
       for (const action of ["Copy", "Export", "Clear"]) {
-        diagnostics.querySelector(`#mvSyncDiagnostics${action}`).disabled = !syncDiagnostics.size;
+        const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
+        const disabled = syncDiagnostics.size === 0;
+        if (button.disabled !== disabled) button.disabled = disabled;
       }
       const diagnosticNotice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
-      diagnosticNotice.textContent = syncDiagnosticsNotice;
-      diagnosticNotice.hidden = !syncDiagnosticsNotice;
+      setText(diagnosticNotice, syncDiagnosticsNotice);
+      const hidden = !syncDiagnosticsNotice;
+      if (diagnosticNotice.hidden !== hidden) diagnosticNotice.hidden = hidden;
     }
     return true;
   }
 
   function renderGroupSync() {
+    closeGroupAssignmentPicker();
     const panel = $("mvSyncPop");
     const assignments = state.chosen.map((channel) => {
       const current = syncGroupForChannel(channel.channelId)?.id || "";
-      return `<label class="mv-group-assignment"><span>${esc(channel.channelName)}</span>` +
-        `<select data-mv-group-assign="${esc(channel.channelId)}" aria-label="${esc(channel.channelName)} 싱크 그룹">` +
-        `<option value=""${current ? "" : " selected"}>그룹 없음</option>` +
-        state.sync.groups.map((group) => `<option value="${group.id}"${current === group.id ? " selected" : ""}>` +
-          `그룹 ${group.id.toUpperCase()}</option>`).join("") + `</select></label>`;
+      const label = current ? `그룹 ${current.toUpperCase()}` : "그룹 없음";
+      return `<div class="mv-group-assignment"><span>${esc(channel.channelName)}</span>` +
+        `<div class="mv-group-assignment-picker"><button type="button" ` +
+        `class="mv-pop-button mv-group-assignment-trigger" ` +
+        `data-mv-group-assignment-toggle="${esc(channel.channelId)}" ` +
+        `aria-haspopup="listbox" aria-expanded="false" aria-controls="mvGroupAssignmentList" ` +
+        `aria-label="${esc(channel.channelName)} 싱크 그룹">` +
+        `<span class="mv-pop-value">${esc(label)}</span>` +
+        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
+        `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="m6 9 6 6 6-6"></path></svg></button></div></div>`;
     }).join("");
     const sections = state.sync.groups.map((group) => {
       const rows = group.channelIds.map((id) => {
@@ -1780,7 +1928,13 @@
           `${!view.ready || !group.referenceChannelId || view.reference ? " disabled" : ""}>${value > 0 ? "+" : ""}${value}</button>`;
         return `<div class="mv-sync-row${view.reference ? " is-reference" : ""}" data-mv-group-row="${esc(id)}">` +
           `<div class="mv-sync-row-head"><strong>${esc(channelName(id))}</strong>` +
-          `<span data-mv-sync-status>${view.status}</span></div>` +
+          `<span data-mv-sync-status>${view.status}</span>` +
+          `<button type="button" class="mv-sync-remove-reference" data-mv-group-remove="${esc(id)}" ` +
+            `aria-label="${esc(channelName(id))} 그룹에서 제거" ` +
+            `title="이 채널을 그룹에서 제거"><svg viewBox="0 0 24 24" width="16" height="16" ` +
+            `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+            `stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path>` +
+            `</svg></button></div>` +
           `<div class="mv-sync-metrics">` +
           `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
           `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
@@ -1795,7 +1949,13 @@
       }).join("");
       return `<section class="mv-sync-group" data-mv-group="${group.id}">` +
         `<div class="mv-sync-group-head"><strong>그룹 ${group.id.toUpperCase()}</strong>` +
-        `<span class="mv-group-reference"></span></div>` +
+        `<span class="mv-group-reference"></span>` +
+        `<button type="button" class="mv-sync-group-reset" data-mv-group-reset="${group.id}" ` +
+        `aria-label="그룹 ${group.id.toUpperCase()} 비우기" title="그룹 비우기">` +
+        `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ` +
+        `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>` +
+        `</svg><span>비우기</span></button></div>` +
         `<div class="mv-sync-actions"><label><input type="checkbox" data-mv-group-auto="${group.id}"> 자동 싱크</label>` +
         `<button type="button" data-mv-group-align="${group.id}">느린 채널에 맞추기</button>` +
         `<button type="button" data-mv-group-clear="${group.id}">보정 초기화</button></div>` +
@@ -1804,7 +1964,9 @@
     panel.innerHTML = `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
       `<button type="button" data-mv-sync-scope="all" aria-pressed="false">전체</button>` +
       `<button type="button" data-mv-sync-scope="selected" aria-pressed="false">선택</button>` +
-      `<button type="button" data-mv-sync-scope="groups" aria-pressed="true">그룹</button></div>` +
+      `<button type="button" data-mv-sync-scope="groups" aria-pressed="true">그룹</button>` +
+      `<button type="button" class="mv-group-reset-all" data-mv-group-reset-all>` +
+      `그룹 전체 비우기</button></div>` +
       `<div class="mv-group-assignments">${assignments}</div>${sections}` +
       (state.sync.groups.length < 3 ? `<button type="button" class="mv-group-add" data-mv-group-add>그룹 추가</button>` : "") +
       `<p class="mv-sync-notice" role="status" hidden></p>` +
@@ -2304,6 +2466,36 @@
 
   function handleGroupSyncClick(target) {
     if (state.sync.scope !== "groups") return false;
+    if (target.closest?.("[data-mv-group-reset-all]")) {
+      state.sync.groups.forEach(clearSyncGroup);
+      syncNotice = "모든 그룹의 채널 배정을 비웠습니다.";
+      updateSyncPolling();
+      renderSync(true);
+      return true;
+    }
+    const groupReset = target.closest?.("[data-mv-group-reset]");
+    if (groupReset) {
+      const group = state.sync.groups.find((item) => item.id === groupReset.dataset.mvGroupReset);
+      if (group) {
+        clearSyncGroup(group);
+        syncNotice = `그룹 ${group.id.toUpperCase()}의 채널 배정을 비웠습니다.`;
+        updateSyncPolling();
+        refreshSyncPanel(`[data-mv-group-reset="${CSS.escape(group.id)}"]`);
+      }
+      return true;
+    }
+    const remove = target.closest?.("[data-mv-group-remove]");
+    if (remove) {
+      const id = remove.dataset.mvGroupRemove;
+      const group = syncGroupForChannel(id);
+      if (group) {
+        releaseGroupChannel(group, id);
+        syncNotice = `${channelName(id)} 채널을 그룹 ${group.id.toUpperCase()}에서 제거했습니다.`;
+        updateSyncPolling();
+        renderSync(true);
+      }
+      return true;
+    }
     if (target.closest?.("[data-mv-group-add]")) {
       if (state.sync.groups.length < 3) {
         const id = "abc"[state.sync.groups.length];
@@ -2680,6 +2872,7 @@
 
   function closePopovers(except) {
     closeMixerPresetPicker();
+    closeGroupAssignmentPicker();
     closeChatSelector();
     for (const pop of document.querySelectorAll("[data-mv-pop]")) {
       const name = pop.dataset.mvPop;
@@ -3090,6 +3283,7 @@
 
   function closeQuick() {
     if (quickRememberState) saveQuickState();
+    quickSortPicker.close();
     $("mvQuick").hidden = true;
   }
 
@@ -3156,6 +3350,7 @@
   // ── 후보 목록 ───────────────────────────────────────────────────────────
   // 고르기 화면과 같은 로더를 쓴다(주소·응답 해석을 두 곳에 두지 않는다).
   const SOURCES = globalThis.CheeseMultiviewSources;
+  const quickSortPicker = globalThis.CheeseMultiviewSort.attach("mvQuickSort");
   const QUICK_TTL_MS = 20000; // 제목·시청자 수가 바뀌므로 오래 들고 있지 않는다
   const quickCache = new Map(); // key -> {value, expiresAt}
   let quickLivePager = null;
@@ -3166,11 +3361,15 @@
   let quickSections = []; // 전용 팔로잉 구역(폴더)
   let quickFolder = ""; // 고른 폴더(빈 문자열이면 전체)
   let quickRememberState = false;
+  const quickSortBySource = {
+    following: "viewers", custom: "custom", live: "viewers", search: "viewers",
+  };
 
   function saveQuickState() {
     if (!quickRememberState || !chrome.storage?.local) return;
     void chrome.storage.local.set({ cheeseMultiviewQuickState: {
       source: quickSource, keyword: quickKeyword, folder: quickFolder,
+      sortBySource: quickSortBySource,
     } }).catch(() => {});
   }
 
@@ -3185,6 +3384,12 @@
         quickSource = saved.source;
         quickKeyword = typeof saved.keyword === "string" ? saved.keyword.slice(0, 100) : "";
         quickFolder = typeof saved.folder === "string" ? saved.folder.slice(0, 128) : "";
+        for (const source of Object.keys(quickSortBySource)) {
+          const mode = saved.sortBySource?.[source];
+          if (SOURCES.SORT_OPTIONS.some((option) => option.id === mode)) {
+            quickSortBySource[source] = mode;
+          }
+        }
         $("mvQuickSearch").value = quickKeyword;
       }
     }
@@ -3203,8 +3408,9 @@
   let quickRequestId = 0;
 
   function getQuickLivePager() {
-    if (!quickLivePager) {
-      quickLivePager = SOURCES.createLivePager({ ttlMs: QUICK_TTL_MS });
+    const sortType = SOURCES.serverSortType("live", quickSortBySource.live);
+    if (!quickLivePager || quickLivePager.sortType !== sortType) {
+      quickLivePager = SOURCES.createLivePager({ ttlMs: QUICK_TTL_MS, sortType });
     }
     return quickLivePager;
   }
@@ -3221,12 +3427,13 @@
   // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
   // ⚠ 캐시 키를 구분한다. 같은 키에 평평한 목록과 구역 배열을 섞어 담으면 안 된다.
   async function quickRows(source, keyword) {
+    const sortType = SOURCES.serverSortType(source, quickSortBySource[source]);
     const key =
       source === "search"
         ? `search:${keyword}`
         : source === "custom"
-          ? "custom:sections"
-          : source;
+          ? `custom:sections:${sortType}`
+          : source === "following" ? `following:${sortType}` : source;
     if (source === "live") {
       const pager = getQuickLivePager();
       await pager.loadFirst();
@@ -3244,9 +3451,9 @@
     if (!SOURCES) return source === "custom" ? [] : [];
     const value =
       source === "following"
-        ? await SOURCES.loadFollowing()
+        ? await SOURCES.loadFollowing(sortType)
         : source === "custom"
-          ? await SOURCES.loadCustomSections()
+          ? await SOURCES.loadCustomSections(sortType)
           : [];
     // 검색은 입력마다 달라 캐시하지 않는다.
     if (source !== "search") {
@@ -3357,7 +3564,7 @@
 
   function quickCard(r, full) {
     const thumb = safeImageUrl(r.liveImageUrl);
-    const avatar = safeImageUrl(r.channelImageUrl);
+    const avatar = safeImageUrl(SOURCES.profileThumb(r.channelImageUrl));
     const tags = Array.isArray(r.tags) ? r.tags : [];
     return (
       `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
@@ -3370,7 +3577,7 @@
       `</span>` +
       `<span class="mv-quick-card-body">` +
       (avatar
-        ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy">`
+        ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy" decoding="async">`
         : `<span class="mv-quick-card-avatar is-empty"></span>`) +
       `<span class="mv-quick-card-text">` +
       `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
@@ -3416,10 +3623,6 @@
     if (!pager || pager.loading || pager.done) return;
     const box = $("mvQuickAdd");
     box?.querySelector(".mv-quick-retry")?.remove();
-    const beforeIds = new Set(
-      [...(box?.querySelectorAll?.("[data-mv-quick-add]") || [])]
-        .map((node) => node.dataset.mvQuickAdd),
-    );
     box?.classList.add("is-loading-more");
     await pager.loadNext();
     box?.classList.remove("is-loading-more");
@@ -3429,11 +3632,32 @@
       return;
     }
     quickCandidates = pager.rows;
-    const have = new Set(state.chosen.map((c) => c.channelId));
+    const existing = new Map([...box.querySelectorAll("[data-mv-quick-add]")]
+      .map((node) => [node.dataset.mvQuickAdd, node]));
+    if (!existing.size) {
+      renderQuickCandidates();
+      return;
+    }
+    const have = new Set(state.chosen.map((channel) => channel.channelId));
+    const mode = $("mvQuickSort").value;
+    const rows = SOURCES.sortRows(quickVisibleRows(), mode,
+      source === "live" || source === "following" ||
+      (source === "custom" && (mode === "recent" || mode === "oldest")))
+      .filter((row) => !have.has(row.channelId));
     const full = !quickReplaceId && state.chosen.length >= 6;
-    const added = quickCandidates.filter((row) =>
-      !have.has(row.channelId) && !beforeIds.has(row.channelId));
-    if (added.length) box?.insertAdjacentHTML("beforeend", added.map((row) => quickCard(row, full)).join(""));
+    let next = null;
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index];
+      let node = existing.get(row.channelId);
+      if (!node) {
+        const template = document.createElement("template");
+        template.innerHTML = quickCard(row, full);
+        node = template.content.firstElementChild;
+        box.insertBefore(node, next);
+      }
+      next = node;
+    }
+    requestAnimationFrame(maybeLoadMoreQuickCandidates);
   }
 
   function maybeLoadMoreQuickCandidates() {
@@ -3477,6 +3701,23 @@
     const searchBox = $("mvQuickSearch");
     if (searchBox) searchBox.hidden = quickSource !== "search";
     renderQuickFolders();
+    const sort = $("mvQuickSort");
+    const hasCustom = quickSource === "custom" &&
+      SOURCES.hasCustomOrder(quickSections, quickFolder);
+    if (!sort.options.length) {
+      sort.innerHTML = SOURCES.SORT_OPTIONS.map((option) =>
+        `<option value="${option.id}">${option.label}</option>`).join("");
+    }
+    const custom = sort.querySelector('[value="custom"]');
+    custom.hidden = !hasCustom;
+    custom.disabled = !hasCustom;
+    const oldest = sort.querySelector('[value="oldest"]');
+    oldest.textContent = quickSource === "live" ? "오래된순 (불러온 방송)" : "오래된순";
+    const mode = quickSortBySource[quickSource] === "custom" && !hasCustom
+      ? "viewers" : quickSortBySource[quickSource];
+    sort.value = mode;
+    sort.disabled = quickCandidates === null;
+    quickSortPicker.sync();
 
     const box = $("mvQuickAdd");
     if (!box) return;
@@ -3490,7 +3731,10 @@
     // 이미 보고 있는 채널은 후보에서 뺀다. 교체 대상 자신도 뺀다 — 같은 채널로
     // 갈아 끼우는 것은 replaceChannel 이 거르므로 눌러도 아무 일이 없다.
     const have = new Set(state.chosen.map((c) => c.channelId));
-    const rest = quickVisibleRows().filter((r) => !have.has(r.channelId));
+    const rest = SOURCES.sortRows(quickVisibleRows(), mode,
+      quickSource === "live" || quickSource === "following" ||
+      (quickSource === "custom" && (mode === "recent" || mode === "oldest")))
+      .filter((r) => !have.has(r.channelId));
     if (!rest.length) {
       box.innerHTML = `<p class="mv-quick-empty">${esc(quickEmptyMessage())}</p>`;
       return;
@@ -3633,6 +3877,23 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target;
+    const groupAssignmentOption = target.closest?.("[data-mv-group-assign-option]");
+    if (groupAssignmentOption) {
+      const channelId = groupAssignmentOption.dataset.mvGroupAssignOption;
+      const groupId = groupAssignmentOption.dataset.groupId || "";
+      closeGroupAssignmentPicker();
+      assignSyncGroup(channelId, groupId);
+      return;
+    }
+    const groupAssignmentToggle = target.closest?.("[data-mv-group-assignment-toggle]");
+    if (groupAssignmentToggle) {
+      toggleGroupAssignmentPicker(groupAssignmentToggle.dataset.mvGroupAssignmentToggle);
+      return;
+    }
+    if (
+      groupAssignmentPickerId &&
+      !target.closest?.("#mvGroupAssignmentList")
+    ) closeGroupAssignmentPicker();
     if (handleGroupSyncClick(target)) return;
     const syncRef = target.closest?.("[data-mv-sync-ref]");
     if (syncRef) {
@@ -3970,12 +4231,8 @@
     if (!target.closest?.(".mv-pop-panel")) closePopovers(null);
   });
 
-  $("mvSyncPop")?.addEventListener("change", (event) => {
-    const assignment = event.target.closest?.("[data-mv-group-assign]");
-    if (assignment && state.sync.scope === "groups") {
-      assignSyncGroup(assignment.dataset.mvGroupAssign, assignment.value);
-    }
-  });
+  window.addEventListener("resize", closeGroupAssignmentPicker);
+  $("mvSyncPop")?.addEventListener("scroll", closeGroupAssignmentPicker, { passive: true });
 
   $("mvChatTitleWrap")?.addEventListener("keydown", (event) => {
     const list = $("mvChatTitleList");
@@ -3999,6 +4256,17 @@
     quickKeyword = event.target.value;
     clearTimeout(quickSearchTimer);
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
+  });
+  $("mvQuickSort")?.addEventListener("change", (event) => {
+    const previousType = SOURCES.serverSortType(quickSource, quickSortBySource[quickSource]);
+    quickSortBySource[quickSource] = event.target.value;
+    $("mvQuickAdd").scrollTop = 0;
+    saveQuickState();
+    if (previousType !== SOURCES.serverSortType(quickSource, event.target.value)) {
+      void loadQuickCandidates();
+    } else {
+      renderQuickCandidates();
+    }
   });
 
   $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, { passive: true });

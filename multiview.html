@@ -83,6 +83,22 @@
             placeholder="채널 이름 또는 태그로 찾기"
             hidden
           />
+          <div class="mv-sort-row">
+            <span id="mvSortLabel">정렬</span>
+            <div class="mv-pop mv-sort-picker">
+              <button type="button" class="mv-pop-button mv-sort-trigger" id="mvSortTrigger"
+                aria-haspopup="listbox" aria-expanded="false" aria-labelledby="mvSortLabel mvSortValue">
+                <span class="mv-pop-value" id="mvSortValue">시청자순</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6"></path>
+                </svg>
+              </button>
+              <div class="mv-pop-panel mv-sort-options" role="listbox"
+                aria-labelledby="mvSortLabel" hidden></div>
+              <select id="mvSort" class="mv-sort-native" aria-hidden="true" tabindex="-1"></select>
+            </div>
+          </div>
           <div class="mv-channel-list" id="mvChannelList" aria-busy="true">
             <p class="mv-empty">불러오는 중…</p>
           </div>
@@ -128,6 +144,7 @@
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewSort.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiview.js"></script>
   </body>

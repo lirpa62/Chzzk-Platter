@@ -36,6 +36,8 @@
     livePager: null,
     searchPager: null,
     searchKeyword: "",
+    currentSections: [],
+    sortBySource: { following: "viewers", custom: "custom", all: "viewers", search: "viewers" },
   };
 
   const esc = (s) =>
@@ -114,16 +116,6 @@
     }
   }
 
-  // 프로필 원본은 수백 KB 다. 목록에 수십 개를 그리므로 리사이즈본을 쓴다.
-  // ⚠ 프로필 리사이즈는 f120_120_na 와 f240_240_na 만 있다(실측: 360·480·600 은 404).
-  const thumb = (url, size = "120") => {
-    const s = String(url || "");
-    if (!s) return "";
-    if (/[?&]type=/.test(s)) return s;
-    const kind = size === "240" ? "f240_240_na" : "f120_120_na";
-    return `${s}${s.includes("?") ? "&" : "?"}type=${kind}`;
-  };
-
   // ⚠ 확장 페이지에서 치지직 API 를 직접 fetch 하면 Origin 이 chrome-extension://
   //   으로 붙어 403 "Invalid CORS request" 가 돌아온다(팔로잉·전체·검색 모두).
   //   서비스 워커의 fetch 는 Origin 을 붙이지 않으므로 배경 스크립트에 중계시킨다.
@@ -131,9 +123,10 @@
   // ── 채널 목록 ──────────────────────────────────────────────────────────
   // 채널 목록은 공용 로더를 쓴다(주소·응답 해석을 고르기/시청 두 곳에 두지 않는다).
   const SOURCES = globalThis.CheeseMultiviewSources;
+  const sortPicker = globalThis.CheeseMultiviewSort.attach("mvSort");
   const getJson = (url) => SOURCES.getJson(url);
   const normalize = (channel, live) => SOURCES.normalize(channel, live);
-  const loadFollowing = () => SOURCES.loadFollowing();
+  const loadFollowing = (sortType) => SOURCES.loadFollowing(sortType);
 
   // 전용 팔로잉: 사이드바와 같은 구분(즐겨찾기 → 각 그룹 → 나머지 팔로잉)으로
   // 나눠 돌려준다. 라이브 정보는 팔로잉 목록에서 가져오므로 방송 중인 채널만 남는다.
@@ -141,11 +134,12 @@
   // ⚠ 선호도(affinity) 구역은 넣지 않는다. 시청 이력 지표를 따로 모아 점수를
   //   매기는 별도 계산이라 이 화면에서 재현할 수 없다.
   // 전용 팔로잉 구역은 공용 로더가 맡는다(Quick 패널과 같은 목록을 보게 한다).
-  const loadCustomSections = () => SOURCES.loadCustomSections();
+  const loadCustomSections = (sortType) => SOURCES.loadCustomSections(sortType);
 
   function setupLivePager() {
-    if (!state.livePager) {
-      state.livePager = SOURCES.createLivePager({ ttlMs: LIST_TTL_MS });
+    const sortType = SOURCES.serverSortType("all", state.sortBySource.all);
+    if (!state.livePager || state.livePager.sortType !== sortType) {
+      state.livePager = SOURCES.createLivePager({ ttlMs: LIST_TTL_MS, sortType });
     }
     return state.livePager;
   }
@@ -160,7 +154,9 @@
   }
 
   async function listFor(source, keyword = "") {
-    const key = source === "search" ? `search:${keyword}` : source;
+    const sortType = SOURCES.serverSortType(source, state.sortBySource[source]);
+    const key = source === "search" ? `search:${keyword}`
+      : source === "following" || source === "custom" ? `${source}:${sortType}` : source;
     // 전체 라이브는 pager 자체가 rows/cursor/done/TTL을 함께 보관한다. 첫 페이지
     // 배열만 listCache에 따로 넣으면 탭을 다시 열 때 이미 붙인 다음 페이지가
     // 사라지므로 이 source는 pager를 유일한 캐시로 사용한다.
@@ -180,11 +176,11 @@
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     let sections;
     if (source === "custom") {
-      sections = await loadCustomSections();
+      sections = await loadCustomSections(sortType);
     } else {
       const rows =
         source === "following"
-          ? await loadFollowing()
+          ? await loadFollowing(sortType)
           : [];
       sections = rows.length ? [{ id: source, label: "", rows }] : [];
     }
@@ -202,6 +198,56 @@
   //   요청마다 번호를 매겨 마지막 요청의 응답만 그린다.
   let listRequestId = 0;
 
+  function paintList(source = state.source, keyword = $("mvSearch").value) {
+    const box = $("mvChannelList");
+    let sections = state.currentSections;
+    renderFolders(source === "custom" ? sections : []);
+    const sort = $("mvSort");
+    const hasCustom = source === "custom" && SOURCES.hasCustomOrder(sections, state.folder);
+    if (!sort.options.length) {
+      sort.innerHTML = SOURCES.SORT_OPTIONS.map((option) =>
+        `<option value="${option.id}">${option.label}</option>`).join("");
+    }
+    const custom = sort.querySelector('[value="custom"]');
+    custom.hidden = !hasCustom;
+    custom.disabled = !hasCustom;
+    const oldest = sort.querySelector('[value="oldest"]');
+    oldest.textContent = source === "all" ? "오래된순 (불러온 방송)" : "오래된순";
+    const mode = state.sortBySource[source] === "custom" && !hasCustom
+      ? "viewers" : state.sortBySource[source] || "viewers";
+    sort.value = mode;
+    sort.disabled = false;
+    sortPicker.sync();
+    if (source === "custom" && state.folder) {
+      sections = sections.filter((section) => section.id === state.folder);
+    }
+    sections = SOURCES.sortSections(sections, mode,
+      source === "all" || source === "following" ||
+      (source === "custom" && (mode === "recent" || mode === "oldest")));
+    if (!sections.length) {
+      box.innerHTML = source === "search"
+        ? `<p class="mv-empty">${keyword.trim() ? "찾는 채널이나 태그의 방송이 없습니다." : "채널 이름 또는 태그로 찾아보세요."}</p>`
+        : '<p class="mv-empty">지금 방송 중인 채널이 없습니다.</p>';
+      box.__rows = [];
+      return;
+    }
+    const picked = new Set(state.chosen.map((c) => c.channelId));
+    box.innerHTML = sections.map((section) => {
+      const cards = section.rows.map((row) => card(row, picked)).join("");
+      const head = section.label
+        ? `<div class="mv-section-head"><span class="mv-section-name">${esc(section.label)}</span>` +
+          `<span class="mv-section-count">${fmt(section.rows.length)}</span></div>`
+        : "";
+      return `<section class="mv-section">${head}<div class="mv-cards">${cards}</div></section>`;
+    }).join("");
+    box.__rows = sections.flatMap((section) => section.rows);
+    if (source === "all" || source === "search") {
+      const pager = source === "all" ? state.livePager : state.searchPager;
+      if (pager?.error) setPagedLoading(source, false, true);
+      else requestAnimationFrame(maybeLoadMorePaged);
+    }
+  }
+
   async function renderList() {
     const requestId = ++listRequestId;
     // 요청 시점의 값을 붙잡는다(기다리는 동안 사용자가 탭·검색어를 바꿀 수 있다).
@@ -210,6 +256,8 @@
     const box = $("mvChannelList");
     box.setAttribute("aria-busy", "true");
     box.innerHTML = skeletonCards();
+    $("mvSort").disabled = true;
+    sortPicker.sync();
     let sections = [];
     try {
       sections = await listFor(source, keyword);
@@ -217,45 +265,14 @@
       if (requestId !== listRequestId) return;
       box.removeAttribute("aria-busy");
       box.innerHTML = `<p class="mv-empty">목록을 불러오지 못했습니다. (${esc(error.message)})</p>`;
+      $("mvSort").disabled = false;
+      sortPicker.sync();
       return;
     }
     if (requestId !== listRequestId) return; // 더 최신 요청이 있다 → 버린다
     box.removeAttribute("aria-busy");
-    // 구역 폴더는 전체 구역을 기준으로 그린다(고른 구역과 무관하게 개수를 보여 준다).
-    renderFolders(source === "custom" ? sections : []);
-    // 구역을 골랐으면 그 구역만 남긴다.
-    if (source === "custom" && state.folder) {
-      sections = sections.filter((sec) => sec.id === state.folder);
-    }
-    if (!sections.length) {
-      box.innerHTML =
-        source === "search"
-          ? `<p class="mv-empty">${keyword.trim() ? "찾는 채널이나 태그의 방송이 없습니다." : "채널 이름 또는 태그로 찾아보세요."}</p>`
-          : '<p class="mv-empty">지금 방송 중인 채널이 없습니다.</p>';
-      box.__rows = [];
-      return;
-    }
-    const picked = new Set(state.chosen.map((c) => c.channelId));
-    box.innerHTML = sections
-      .map((section) => {
-        const cards = section.rows.map((r) => card(r, picked)).join("");
-        // 구역이 하나뿐이고 이름이 없으면(팔로잉·전체·검색) 머리말을 빼고 카드만 둔다.
-        const head = section.label
-          ? `<div class="mv-section-head">` +
-            `<span class="mv-section-name">${esc(section.label)}</span>` +
-            `<span class="mv-section-count">${fmt(section.rows.length)}</span>` +
-            `</div>`
-          : "";
-        return `<section class="mv-section">${head}<div class="mv-cards">${cards}</div></section>`;
-      })
-      .join("");
-    // 고르기 로직은 평평한 목록을 쓴다.
-    box.__rows = sections.flatMap((s) => s.rows);
-    if (source === "all" || source === "search") {
-      const pager = source === "all" ? state.livePager : state.searchPager;
-      if (pager?.error) setPagedLoading(source, false, true);
-      else requestAnimationFrame(maybeLoadMorePaged);
-    }
+    state.currentSections = sections;
+    paintList(source, keyword);
   }
 
   // 불러오는 동안 보여 줄 빈 카드. 실제 카드와 같은 모양이라 다 불러왔을 때
@@ -282,7 +299,7 @@
     // 빈 상자만 남으면 카드가 깨져 보인다.
     const thumbUrl =
       safeImageUrl(r.liveImageUrl) ||
-      safeImageUrl(thumb(r.channelImageUrl, "240"));
+      safeImageUrl(SOURCES.profileThumb(r.channelImageUrl, 240));
     return (
       `<button type="button" class="mv-card${on ? " is-on" : ""}${full ? " is-limit" : ""}" ` +
       `data-mv-pick="${esc(r.channelId)}"${full ? " disabled" : ""}>` +
@@ -299,7 +316,7 @@
         `<span>선택됨</span></span>` : "") +
       `</span>` +
       `<span class="mv-card-body">` +
-      `<img class="mv-card-avatar" src="${esc(safeImageUrl(thumb(r.channelImageUrl)))}" alt="" loading="lazy">` +
+      `<img class="mv-card-avatar" src="${esc(safeImageUrl(SOURCES.profileThumb(r.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
       `<span class="mv-card-text">` +
       `<span class="mv-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-card-name">${esc(r.channelName)}</span>` +
@@ -326,24 +343,44 @@
     section.appendChild(status);
   }
 
+  function insertSortedPageRows(source, rows) {
+    state.currentSections = [{ id: source, label: "", rows }];
+    const box = $("mvChannelList");
+    const cards = box.querySelector(".mv-section .mv-cards");
+    if (!cards) {
+      paintList();
+      return;
+    }
+    const sorted = SOURCES.sortRows(rows, state.sortBySource[source], source === "all");
+    const existing = new Map([...cards.querySelectorAll("[data-mv-pick]")]
+      .map((node) => [node.dataset.mvPick, node]));
+    const picked = new Set(state.chosen.map((channel) => channel.channelId));
+    let next = null;
+    for (let index = sorted.length - 1; index >= 0; index -= 1) {
+      const row = sorted[index];
+      let node = existing.get(row.channelId);
+      if (!node) {
+        const template = document.createElement("template");
+        template.innerHTML = card(row, picked);
+        node = template.content.firstElementChild;
+        cards.insertBefore(node, next);
+      }
+      next = node;
+    }
+    box.__rows = sorted;
+    requestAnimationFrame(maybeLoadMorePaged);
+  }
+
   async function loadMoreLive() {
     if (state.source !== "all") return;
     const pager = setupLivePager();
     if (pager.loading || pager.done) return;
-    const before = pager.rows.length;
     setPagedLoading("all", true);
     await pager.loadNext();
     if (state.source !== "all" || pager !== state.livePager) return;
     setPagedLoading("all", false, Boolean(pager.error));
     if (pager.error) return;
-    const rows = pager.rows;
-    const added = rows.slice(before);
-    if (!added.length) return;
-    const box = $("mvChannelList");
-    const cards = box.querySelector(".mv-section .mv-cards");
-    const picked = new Set(state.chosen.map((c) => c.channelId));
-    cards?.insertAdjacentHTML("beforeend", added.map((row) => card(row, picked)).join(""));
-    box.__rows = rows;
+    insertSortedPageRows("all", pager.rows);
   }
 
   function maybeLoadMoreLive() {
@@ -357,19 +394,12 @@
     if (state.source !== "search") return;
     const pager = state.searchPager;
     if (!pager || pager.loading || pager.done) return;
-    const before = pager.rows.length;
     setPagedLoading("search", true);
     await pager.loadNext();
     if (state.source !== "search" || pager !== state.searchPager) return;
     setPagedLoading("search", false, Boolean(pager.error));
     if (pager.error) return;
-    const added = pager.rows.slice(before);
-    if (!added.length) return;
-    const box = $("mvChannelList");
-    const cards = box.querySelector(".mv-section .mv-cards");
-    const picked = new Set(state.chosen.map((c) => c.channelId));
-    cards?.insertAdjacentHTML("beforeend", added.map((row) => card(row, picked)).join(""));
-    box.__rows = pager.rows;
+    insertSortedPageRows("search", pager.rows);
   }
 
   function maybeLoadMorePaged() {
@@ -393,7 +423,7 @@
         (c, i) =>
           `<li class="mv-chosen-item" draggable="true" data-mv-chosen="${esc(c.channelId)}">` +
           `<span class="mv-chosen-rank">${i === 0 ? "메인" : i}</span>` +
-          `<img src="${esc(safeImageUrl(thumb(c.channelImageUrl)))}" alt="" loading="lazy">` +
+          `<img src="${esc(safeImageUrl(SOURCES.profileThumb(c.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
           `<span class="mv-chosen-name">${esc(c.channelName)}</span>` +
           `<button type="button" class="mv-chosen-remove" data-mv-remove="${esc(c.channelId)}" ` +
           `aria-label="${esc(c.channelName)} 빼기">×</button></li>`,
@@ -517,7 +547,7 @@
     const folder = event.target.closest?.("[data-mv-folder]");
     if (folder) {
       state.folder = folder.dataset.mvFolder;
-      void renderList();
+      paintList();
       return;
     }
     const source = event.target.closest?.("[data-mv-source]");
@@ -561,6 +591,18 @@
   });
 
   $("mvChannelList")?.addEventListener("scroll", maybeLoadMorePaged, { passive: true });
+
+  $("mvSort")?.addEventListener("change", (event) => {
+    const source = state.source;
+    const previousType = SOURCES.serverSortType(source, state.sortBySource[source]);
+    state.sortBySource[state.source] = event.target.value;
+    $("mvChannelList").scrollTop = 0;
+    if (previousType !== SOURCES.serverSortType(source, event.target.value)) {
+      void renderList();
+    } else {
+      paintList();
+    }
+  });
 
   let searchTimer = 0;
   $("mvSearch")?.addEventListener("input", () => {

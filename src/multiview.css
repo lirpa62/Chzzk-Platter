@@ -176,6 +176,52 @@ body {
   font-size: 13px;
   padding: 8px 10px;
 }
+.mv-sort-row {
+  align-items: center;
+  color: var(--popup-muted, #9aa1a9);
+  display: flex;
+  flex: none;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.mv-sort-native {
+  display: none;
+}
+.mv-pop-button.mv-sort-trigger {
+  align-items: center;
+  justify-content: space-between;
+  max-width: min(220px, 55vw);
+  min-width: 158px;
+  width: 100%;
+}
+.mv-sort-trigger .mv-pop-value {
+  flex: 1;
+  text-align: left;
+}
+.mv-sort-trigger svg {
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.mv-sort-trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.mv-sort-trigger:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 1px;
+}
+.mv-pop-panel.mv-sort-options {
+  box-sizing: border-box;
+  max-height: min(320px, calc(100vh - 16px));
+  min-width: 158px;
+  position: fixed;
+  z-index: 1200;
+}
+.mv-sort-options .mv-pop-option {
+  flex: none;
+  width: 100%;
+}
 
 .mv-channel-list {
   border: 1px solid var(--popup-border, #34383d);
@@ -220,8 +266,7 @@ body {
 .mv-cards {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 280px));
-  justify-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr));
 }
 .mv-card {
   background: none;
@@ -324,7 +369,7 @@ body {
   left: 6px;
   padding: 2px 5px;
   position: absolute;
-  z-index: 2;
+  z-index: 4;
 }
 /* 선택됨 표시. 썸네일 전체를 덮으면 19세 연령 제한 오버레이(z-index:3)에 가려
    보이지 않는다. 오른쪽 위 배지로 두고 그 위에 그린다. */
@@ -1025,39 +1070,39 @@ button.mv-live-more {
   color: var(--popup-muted, #9aa1a9);
 }
 .mv-chat-title-wrap {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   position: relative;
 }
+.mv-chat-title-list .mv-pop-option {
+  width: 100%;
+}
+.mv-chat-title-list {
+  min-width: 170px;
+}
 .mv-chat-title {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  display: block;
-  font-size: 12px;
-  max-width: 100%;
+  align-items: center;
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+  padding: 6px 10px;
+  width: 100%;
+}
+.mv-chat-title-label {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
-  padding: 3px 14px 3px 0;
-  position: relative;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mv-chat-title::after { content: "⌄"; margin-left: 6px; }
-.mv-chat-title-list {
-  background: var(--popup-bg, #141517);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 6px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
-  left: 0;
-  max-height: 240px;
-  min-width: 170px;
-  overflow-y: auto;
-  position: absolute;
-  top: 100%;
-  z-index: 10;
+.mv-chat-title-chevron {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+  transition: transform 0.12s ease;
 }
-.mv-chat-title-list .mv-pop-option { width: 100%; }
+.mv-chat-title[aria-expanded="true"] .mv-chat-title-chevron {
+  transform: rotate(180deg);
+}
 .mv-watch-empty {
   padding: 40px 16px;
 }
@@ -1216,10 +1261,10 @@ button.mv-live-more {
   padding: 0 4px;
 }
 .mv-quick-body {
-  display: grid;
+  display: flex;
   flex: 1;
+  flex-direction: column;
   gap: 8px;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -1396,7 +1441,7 @@ button.mv-live-more {
   display: grid;
   flex: 1;
   gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
@@ -1711,20 +1756,10 @@ button.mv-live-more {
   background: var(--popup-soft-bg, #1b1d20);
   display: flex;
   gap: 6px;
+  min-width: 0;
   padding: 6px;
 }
-.mv-chat-head select {
-  background: var(--popup-bg, #141517);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 6px;
-  color: inherit;
-  flex: 1 1 auto;
-  font: inherit;
-  font-size: 12px;
-  min-width: 0;
-  padding: 4px 6px;
-}
-.mv-chat-head button {
+.mv-chat-head > button {
   background: none;
   border: 1px solid var(--popup-border, #34383d);
   border-radius: 6px;
@@ -2125,6 +2160,7 @@ button.mv-live-more {
   min-width: 0;
   padding: 12px;
   right: 0;
+  scrollbar-gutter: stable;
   width: min(520px, calc(100vw - 16px));
 }
 /* 재생 속도가 '배속' 이라는 것을 한 번에 알 수 있게 두는 짧은 안내.
@@ -2139,6 +2175,7 @@ button.mv-live-more {
 .mv-sync-scope {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -2164,8 +2201,10 @@ button.mv-live-more {
 }
 .mv-group-assignments {
   display: grid;
-  gap: 5px;
+  column-gap: 18px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 8px;
+  padding: 2px 0 4px;
 }
 .mv-group-assignment {
   align-items: center;
@@ -2181,14 +2220,35 @@ button.mv-live-more {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mv-group-assignment select {
-  background: var(--popup-soft-bg, #1b1d20);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 4px;
-  color: inherit;
-  font: inherit;
-  max-width: 92px;
-  padding: 3px;
+.mv-group-assignment-picker {
+  flex: none;
+  min-width: 0;
+  position: relative;
+}
+.mv-group-assignment-trigger {
+  align-items: center;
+  max-width: 106px;
+  min-width: 88px;
+  padding: 4px 6px;
+  width: 100%;
+}
+.mv-group-assignment-trigger .mv-pop-value {
+  min-width: 0;
+}
+.mv-group-assignment-trigger svg {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+  transition: transform 0.12s ease;
+}
+.mv-group-assignment-trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.mv-group-assignment-list {
+  box-sizing: border-box;
+  max-height: min(240px, 60vh);
+  min-width: 110px;
+  position: fixed;
+  z-index: 1000;
 }
 .mv-sync-group {
   border-top: 1px solid var(--popup-border, #34383d);
@@ -2198,8 +2258,68 @@ button.mv-live-more {
   align-items: center;
   display: flex;
   font-size: 12px;
+  gap: 8px;
   justify-content: space-between;
   margin-bottom: 6px;
+}
+.mv-sync-group-head strong {
+  flex: none;
+}
+.mv-sync-group-reset,
+.mv-sync-remove-reference {
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  padding: 3px;
+}
+.mv-sync-group-reset {
+  background: var(--popup-soft-bg, #1b1d20);
+  border-color: var(--popup-border, #34383d);
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 7px;
+}
+.mv-sync-group-reset:hover,
+.mv-sync-remove-reference:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+  border-color: var(--popup-border, #34383d);
+  color: inherit;
+}
+.mv-sync-group-reset:focus-visible,
+.mv-sync-remove-reference:focus-visible {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 1px;
+}
+.mv-sync-row-head {
+  gap: 6px;
+}
+.mv-sync-row-head strong {
+  flex: 1 1 auto;
+}
+.mv-sync-row-head > span {
+  flex: none;
+}
+.mv-sync-scope .mv-group-reset-all {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  margin-left: auto;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+.mv-sync-scope .mv-group-reset-all:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+  color: inherit;
 }
 .mv-group-reference { color: var(--popup-muted, #9aa1a9); font-size: 11px; }
 .mv-group-add {
@@ -2258,10 +2378,37 @@ button.mv-live-more {
   font: inherit;
   padding: 4px 7px;
 }
+.mv-sync-actions button,
+.mv-sync-controls button {
+  background: rgba(124, 58, 237, 0.13);
+  border-color: rgba(109, 40, 217, 0.36);
+  color: #5b21b6;
+}
 .mv-sync-actions button:hover:not(:disabled),
 .mv-sync-controls button:hover:not(:disabled):not([aria-disabled="true"]),
 .mv-sync-diagnostics-actions button:hover:not(:disabled) {
   background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+.mv-sync-actions button:hover:not(:disabled),
+.mv-sync-controls button:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: rgba(124, 58, 237, 0.22);
+  border-color: rgba(109, 40, 217, 0.6);
+}
+.mv-sync-actions button:focus-visible,
+.mv-sync-controls button:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+:root[data-theme="dark"] .mv-sync-actions button,
+:root[data-theme="dark"] .mv-sync-controls button {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(196, 181, 253, 0.38);
+  color: #ddd6fe;
+}
+:root[data-theme="dark"] .mv-sync-actions button:hover:not(:disabled),
+:root[data-theme="dark"] .mv-sync-controls button:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: rgba(139, 92, 246, 0.34);
+  border-color: rgba(196, 181, 253, 0.62);
 }
 /* aria-disabled: 누른 결과로 막힌 버튼(보류 중·이미 기준·초기화 뒤 0).
    포커스를 잃지 않게 disabled 대신 쓰고, 보기에는 같게 둔다. */
