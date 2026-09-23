@@ -838,10 +838,12 @@ const ALL = ["a", "b", "c", "d"];
   );
 }
 
-// 12) 싱크 패널 버튼을 눌러도 포커스가 유지돼 깜빡이지 않는다.
+// 12) 싱크 패널 버튼을 눌러도 DOM 을 통째로 다시 만들지 않는다.
 {
-  // ⚠ 예전에는 blur() 로 포커스를 없앴다. 그러면 renderSync 의 '패널에 포커스가
-  //   있으면 건너뛴다' 가드가 풀려 목록 전체가 커서 아래에서 교체된다.
+  // ⚠ 예전에는 blur() 를 없애고 포커스를 되돌려 주는 것으로 끝냈다. 하지만
+  //   renderSync 는 panel.innerHTML 을 새로 쓰므로 누른 버튼과 행이 전부 새
+  //   Element 로 바뀐다. 실제 DOM identity 는 test-multiview-sync-dom.cjs 가 본다.
+  //   여기서는 '제자리 갱신을 먼저 시도한다' 는 구조만 고정한다.
   const handlers = SRC.slice(
     SRC.indexOf('const syncRef = target.closest?.("[data-mv-sync-ref]")'),
     SRC.indexOf(
@@ -851,55 +853,203 @@ const ALL = ["a", "b", "c", "d"];
   assert.doesNotMatch(
     handlers,
     /document\.activeElement\?\.blur\?\.\(\)/,
-    "기준·보정 버튼이 아직 포커스를 없앤다(깜빡임 원인)",
+    "기준·보정 버튼이 아직 포커스를 없앤다",
+  );
+  assert.doesNotMatch(
+    handlers,
+    /renderSync\(true\)/,
+    "버튼 처리에서 전체 렌더를 직접 부른다(DOM 이 교체된다)",
   );
   for (const want of [
-    /renderSyncKeepingFocus\(`\[data-mv-sync-ref=/,
-    /renderSyncKeepingFocus\(\s*`\[data-mv-sync-offset=/,
-    /renderSyncKeepingFocus\(`\[data-mv-sync-clear=/,
+    /refreshSyncPanel\(`\[data-mv-sync-ref=/,
+    /refreshSyncPanel\(\s*`\[data-mv-sync-offset=/,
+    /refreshSyncPanel\(`\[data-mv-sync-clear=/,
   ]) {
     assert.match(
       handlers,
       want,
-      `버튼이 포커스를 지키며 다시 그리지 않는다: ${want}`,
+      `버튼이 제자리 갱신 경로를 쓰지 않는다: ${want}`,
     );
   }
-  // helper 가 실제로 포커스를 되돌려 준다.
-  const keep = sliceFn("renderSyncKeepingFocus");
-  assert.match(keep, /renderSync\(true\)/, "강제로 다시 그리지 않는다");
+  // 제자리 갱신을 먼저 시도하고, 안 될 때만 전체 렌더로 내려간다.
+  const refresh = sliceFn("refreshSyncPanel");
   assert.match(
-    keep,
-    /focus\(\{ preventScroll: true \}\)/,
-    "포커스를 되돌리지 않는다",
+    refresh,
+    /if \(patchSyncPanel\(\)\) return;/,
+    "제자리 갱신을 먼저 시도하지 않는다",
+  );
+  // 제자리 갱신은 innerHTML 을 쓰지 않는다(그러면 의미가 없다).
+  const patch = sliceFn("patchSyncPanel");
+  assert.doesNotMatch(
+    patch,
+    /innerHTML/,
+    "제자리 갱신이 innerHTML 을 쓴다(Element 가 교체된다)",
   );
   assert.match(
-    keep,
-    /panel\.contains\(active\)/,
-    "패널 밖에서 눌렀을 때까지 포커스를 옮긴다",
+    patch,
+    /classList\.toggle\("is-reference"/,
+    "기준 표시를 제자리에서 옮기지 않는다",
+  );
+  assert.match(
+    patch,
+    /setSyncButtonState\(/,
+    "버튼 활성 상태를 제자리에서 고치지 않는다",
+  );
+  // 누른 결과로 잠시 막히는 상태(보류 중·이미 기준)는 aria-disabled 로 둔다.
+  // 진짜 disabled 면 포커스된 버튼에서 포커스가 body 로 빠진다.
+  const setBtn = sliceFn("setSyncButtonState");
+  assert.match(
+    setBtn,
+    /!disabled && busy \? "true" : null/,
+    "잠시 막힘을 aria-disabled 로 나누지 않는다",
+  );
+  const rowState = sliceFn("getSyncRowViewState");
+  assert.match(
+    rowState,
+    /refBusy: isReference,/,
+    "기준 채널을 aria-disabled 로 두지 않는다",
+  );
+  assert.match(
+    rowState,
+    /offBusy: nudgePending,/,
+    "보류 중 ±를 aria-disabled 로 두지 않는다",
+  );
+  const field = (name) =>
+    (rowState.match(new RegExp(`${name}: ([^\\n]*),\\n`)) || [])[1];
+  assert.ok(
+    field("refDisabled") && !/isReference/.test(field("refDisabled")),
+    "기준 채널의 기준 버튼이 진짜 disabled 다(누른 버튼에서 포커스가 빠진다)",
+  );
+  for (const name of ["offDisabled", "clearDisabled"]) {
+    assert.ok(
+      field(name) && !/nudgePending/.test(field(name)),
+      `${name} 이 보류 중에 진짜 disabled 가 된다(누른 버튼에서 포커스가 빠진다)`,
+    );
+  }
+  // 초기화가 끝나 0 이 된 것도 누른 결과다.
+  assert.ok(
+    field("clearDisabled") && !/offset/.test(field("clearDisabled")),
+    "보정값 0 인 초기화 버튼이 진짜 disabled 다(누른 버튼에서 포커스가 빠진다)",
+  );
+  // aria-disabled 는 클릭을 막지 않으므로 핸들러가 같은 상태를 보고 막아야 한다.
+  assert.match(
+    handlers,
+    /id === state\.sync\.referenceChannelId\s*\)\s*return;/,
+    "이미 기준인 채널의 기준 클릭을 핸들러가 막지 않는다",
+  );
+  assert.match(
+    handlers,
+    /if \(syncNudgePending\(id\)\) return;/,
+    "보류 중 ± 클릭을 핸들러가 막지 않는다",
+  );
+  assert.match(
+    handlers,
+    /!cells\.has\(id\) \|\|\s*syncNudgePending\(id\) \|\|\s*!\(state\.sync\.manualOffsets\[id\] \|\| 0\)\s*\)\s*return;/,
+    "보류 중이거나 0 인 개별 초기화를 핸들러가 막지 않는다",
+  );
+  // 타임아웃도 포커스 가드에 막히지 않는 경로로 갱신한다.
+  // ⚠ sendSyncCommand 는 안쪽 콜백 때문에 sliceFn 으로 끝까지 잘리지 않는다.
+  const timeoutAt = SRC.indexOf(
+    'syncNotice = "보정 응답이 없어 적용하지 못했습니다.";',
+  );
+  assert.ok(
+    timeoutAt > SRC.indexOf("  function sendSyncCommand("),
+    "타임아웃 안내 자리를 찾지 못했다",
+  );
+  const timeoutTail = SRC.slice(
+    timeoutAt,
+    SRC.indexOf("\n      }\n", timeoutAt),
+  );
+  assert.match(
+    timeoutTail,
+    /refreshSyncPanel\(\);/,
+    "타임아웃이 포커스 가드에 막히는 renderSync() 를 쓴다(적용 중이 남는다)",
+  );
+  // 응답/타임아웃에서도 값이 stale 해지지 않는다.
+  const finish = sliceFn("finishSyncCommand");
+  assert.match(
+    finish,
+    /refreshSyncPanel\(\)/,
+    "응답 처리에서 패널 값을 갱신하지 않는다(적용 중이 남는다)",
   );
 
-  // +/- 가 어느 방향인지 글자로 드러난다.
+  // 전체 렌더와 제자리 갱신이 같은 계산을 쓰는지(따로 계산하면 어긋난다).
   const render = SRC.slice(SRC.indexOf("function renderSync"));
-  assert.match(render, /0\.1초 앞으로/, "− 버튼의 의미가 없다");
-  assert.match(render, /0\.1초 뒤로/, "+ 버튼의 의미가 없다");
-  assert.match(render, /−는 기준보다 앞으로/, "안내에 방향 설명이 없다");
-  // 방향이 뒤바뀌지 않았는지(보정값이 커지면 더 늦게 재생된다).
-  // ⚠ data-step="0.5" 는 "-0.5" 안에도 들어 있다. 따옴표 앞을 함께 잡아
-  //   양수/음수 버튼을 정확히 구분한다(처음엔 이걸 놓쳐 뒤집어도 통과했다).
-  for (const [step, want, bad] of [
-    ['="0.5"', "뒤로", "앞으로"],
-    ['="0.1"', "뒤로", "앞으로"],
-    ['="-0.5"', "앞으로", "뒤로"],
-    ['="-0.1"', "앞으로", "뒤로"],
+  assert.match(
+    render,
+    /getSyncRowViewState\(id, now\)/,
+    "전체 렌더가 공용 행 상태를 쓰지 않는다",
+  );
+  assert.match(
+    patch,
+    /getSyncRowViewState\(id, now\)/,
+    "제자리 갱신이 공용 행 상태를 쓰지 않는다",
+  );
+}
+
+// 13) ± 버튼은 '재생 위치' 이동이다. 배속(재생 속도)과 섞어 쓰지 않는다.
+{
+  const render = SRC.slice(SRC.indexOf("function renderSync"));
+  // 버튼은 공용 템플릿(stepBtn)으로 만든다. 템플릿과 호출 인자를 함께 본다.
+  const tpl = render.slice(
+    render.indexOf("const stepBtn = "),
+    render.indexOf("</button>`;", render.indexOf("const stepBtn = ")) + 11,
+  );
+  assert.ok(
+    tpl.includes("재생 위치를 ${dir} 이동"),
+    "버튼 설명에 '재생 위치' 가 없다",
+  );
+  assert.ok(
+    tpl.includes('aria-label="${esc(c.channelName)} 재생 위치를 ${dir} 이동'),
+    "aria-label 이 동작 의미를 먼저 말하지 않는다",
+  );
+  // ⚠ 이 버튼은 배속을 바꾸지 않는다. 그렇게 읽히면 안 된다.
+  for (const bad of ["빠르게 재생", "느리게 재생", "재생 속도"]) {
+    assert.ok(!tpl.includes(bad), `버튼 설명에 배속 표현('${bad}')이 있다`);
+  }
+
+  // 실제 계산: target = currentTime + before - next, next = before + step.
+  // step 이 음수면 target 이 앞(라이브 쪽), 양수면 뒤(과거 쪽)로 간다.
+  const handler = SRC.slice(
+    SRC.indexOf('const syncOffset = target.closest?.("[data-mv-sync-offset]")'),
+    SRC.indexOf('const syncClear = target.closest?.("[data-mv-sync-clear]")'),
+  );
+  assert.match(
+    handler,
+    /const target = st\.currentTime \+ before - next;/,
+    "재생 위치 계산이 바뀌었다(설명과 어긋날 수 있다)",
+  );
+
+  for (const [s2, dir, side] of [
+    ["-0.5", "0.5초 앞으로", "라이브 쪽"],
+    ["-0.1", "0.1초 앞으로", "라이브 쪽"],
+    ["0.1", "0.1초 뒤로", "과거 쪽"],
+    ["0.5", "0.5초 뒤로", "과거 쪽"],
   ]) {
-    const at = render.indexOf(`data-step${step} `);
-    assert.ok(at > 0, `data-step${step} 버튼을 찾지 못했다`);
-    const markup = render.slice(at, render.indexOf("</button>", at));
+    const call = `stepBtn("${s2}",`;
+    const at = render.indexOf(call);
+    assert.ok(at > 0, `${call} 호출을 찾지 못했다`);
+    const args = render.slice(at, render.indexOf(")", at) + 1);
     assert.ok(
-      markup.includes(want) && !markup.includes(bad),
-      `data-step${step} 의 방향 설명이 '${want}' 가 아니다: ${markup.slice(0, 90)}`,
+      args.includes(`"${dir}"`),
+      `step ${s2} 의 방향이 '${dir}' 가 아니다: ${args}`,
+    );
+    assert.ok(
+      args.includes(`"${side}"`),
+      `step ${s2} 에 '${side}' 가 없다: ${args}`,
     );
   }
+  // 안내 문구도 두 개념을 나눈다.
+  assert.match(
+    render,
+    /배속이 아니라 재생 위치를 옮깁니다/,
+    "안내가 배속과 위치를 구분하지 않는다",
+  );
+  assert.match(
+    render,
+    /−는 라이브 쪽\(앞으로\), \+는 과거 쪽\(뒤로\)/,
+    "안내의 방향 설명이 없다",
+  );
 }
 
 console.log("  PASS 멀티뷰 싱크 범위(전체/선택) 계산과 정리");

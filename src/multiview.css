@@ -2176,11 +2176,14 @@ button.mv-live-more {
   padding: 4px 7px;
 }
 .mv-sync-actions button:hover:not(:disabled),
-.mv-sync-controls button:hover:not(:disabled),
+.mv-sync-controls button:hover:not(:disabled):not([aria-disabled="true"]),
 .mv-sync-diagnostics-actions button:hover:not(:disabled) {
   background: var(--popup-hover, rgba(127, 127, 127, 0.14));
 }
+/* aria-disabled: 누른 결과로 막힌 버튼(보류 중·이미 기준·초기화 뒤 0).
+   포커스를 잃지 않게 disabled 대신 쓰고, 보기에는 같게 둔다. */
 .mv-sync-controls button:disabled,
+.mv-sync-controls button[aria-disabled="true"],
 .mv-sync-diagnostics-actions button:disabled {
   cursor: default;
   opacity: 0.45;

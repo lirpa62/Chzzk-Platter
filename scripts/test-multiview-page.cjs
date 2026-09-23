@@ -2769,7 +2769,7 @@ const checks = [];
 
      // 수동 기준 변경으로 command/result를 만들고 다음 명령은 timeout시킨다.
      window.sentMessages.length=0;
-     const reference=panel.querySelector('[data-mv-sync-ref]:not([disabled])');
+     const reference=panel.querySelector('[data-mv-sync-ref]:not([disabled]):not([aria-disabled="true"])');
      check(reference,'바꿀 수 있는 싱크 기준이 없다');
      reference.click();
      let commands=window.sentMessages.filter(message=>
@@ -2784,7 +2784,7 @@ const checks = [];
      clock+=300;
      window.sentMessages.length=0;
      panel=document.getElementById('mvSyncPop');
-     const timeoutReference=panel.querySelector('[data-mv-sync-ref]:not([disabled])');
+     const timeoutReference=panel.querySelector('[data-mv-sync-ref]:not([disabled]):not([aria-disabled="true"])');
      check(timeoutReference,'timeout 명령을 만들 다음 기준이 없다');
      timeoutReference.click();
      check(window.sentMessages.some(message=>message.data?.type==='APPLY_SYNC_SEEK'),

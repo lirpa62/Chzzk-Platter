@@ -1328,7 +1328,9 @@
       }, timedOutAt);
       if (command === "nudge" || (command === "seek" && extra.manual)) {
         syncNotice = "보정 응답이 없어 적용하지 못했습니다.";
-        renderSync();
+        // ⚠ 방금 누른 버튼에 포커스가 남아 있으면 renderSync 는 건너뛴다.
+        //   그러면 '적용 중' 이 풀리지 않는다. 응답 경로와 같이 제자리 갱신한다.
+        refreshSyncPanel();
       }
     }, SYNC.LIMITS.commandTimeoutMs);
     pendingSyncCommands.set(commandId, entry);
@@ -1402,7 +1404,10 @@
       }
     }
     updateSyncPolling();
-    renderSync();
+    // ⚠ 응답/타임아웃으로 값이 바뀌었는데, 사용자가 패널 버튼에 포커스를 두고
+    //   있으면 renderSync 의 가드가 전체 렌더를 건너뛴다. 그러면 '적용 중' 이
+    //   그대로 남는다. 제자리 갱신은 그 가드를 타지 않으므로 먼저 시도한다.
+    refreshSyncPanel();
   }
 
   function resetSyncRate(channelId) {
@@ -1469,6 +1474,85 @@
     return { text, hint };
   }
 
+  // 한 행의 표시 상태. 전체 렌더와 부분 갱신이 같은 계산을 쓰게 한 곳에 둔다.
+  // ⚠ 두 곳에서 따로 계산하면 부분 갱신만 stale 해지는 경로가 생긴다.
+  function getSyncRowViewState(channelId, now = Date.now()) {
+    const ref = state.sync.referenceChannelId;
+    const status = currentStatus(channelId);
+    const st = syncStats.get(channelId);
+    const fresh =
+      status === "ready" && st && now - st.receivedAt <= SYNC.LIMITS.staleMs;
+    const ready = fresh && SYNC.eligible(st, syncReadyAt.get(channelId), now);
+    const settling =
+      ready && now - syncReadyAt.get(channelId) < SYNC.LIMITS.settlingMs;
+    const label =
+      status === "ended" ? "종료"
+      : status === "error" || status === "ui-error" ? "오류"
+      : !fresh ? "측정 대기"
+      : st.paused ? "일시정지"
+      : st.readyState < 2 ? "재생 준비 중"
+      : !ready ? "측정 불가"
+      : settling ? "안정화 중"
+      : state.sync.congested ? "연결 지연"
+      : channelId === ref ? "기준"
+      : st.userRateOverride ||
+        (Math.abs((st.playbackRate || 1) - 1) > SYNC.LIMITS.userRateEpsilon &&
+          !st.syncRateOwned)
+        ? "수동 속도"
+      : st.syncRateOwned ? "자동 보정 중"
+      : "준비됨";
+    const picking = state.sync.scope === "selected";
+    const picked = inSyncScope(channelId);
+    const nudgePending = syncNudgePending(channelId);
+    // 범위 밖 채널은 보정 대상이 아니다. 측정값은 그대로 보여 준다.
+    const locked = picking && !picked;
+    const isReference = channelId === ref;
+    const offset = state.sync.manualOffsets[channelId] || 0;
+    return {
+      st,
+      ref,
+      ready,
+      label,
+      picking,
+      picked,
+      nudgePending,
+      locked,
+      isReference,
+      offset,
+      rateInfo: syncRateText(st),
+      // 버튼 상태. 누른 결과로 막히는 경우(보류 중, 이미 기준, 초기화 뒤 0)는 disabled 대신
+      // aria-disabled 로 둔다. 포커스된 버튼이 disabled 가 되면 브라우저가 다음
+      // 프레임에 포커스를 body 로 옮긴다(실측). 그러면 키보드 위치가 사라지고,
+      // renderSync 의 포커스 가드도 풀려 다음 tick 에 패널이 통째로 다시 그려진다.
+      // 실제 동작은 핸들러가 같은 상태를 보고 막는다.
+      refDisabled: locked || !ready,
+      refBusy: isReference,
+      offDisabled: locked || !ready || !ref || isReference,
+      offBusy: nudgePending,
+      clearDisabled: locked,
+      clearBusy: nudgePending || !offset,
+    };
+  }
+
+  // 위치 보정(±·개별 초기화)이 아직 응답을 기다리는 중인지.
+  function syncNudgePending(channelId) {
+    return (
+      !!pendingSync(channelId, "nudge") ||
+      !!pendingSync(channelId, "seek")?.desiredValue?.commitOffset
+    );
+  }
+
+  // disabled(진짜 막힘)와 aria-disabled(잠시 막힘)를 한 번에 맞춘다.
+  function setSyncButtonState(btn, disabled, busy) {
+    if (!btn) return;
+    if (btn.disabled !== disabled) btn.disabled = disabled;
+    const aria = !disabled && busy ? "true" : null;
+    if (btn.getAttribute("aria-disabled") !== aria) {
+      if (aria) btn.setAttribute("aria-disabled", aria);
+      else btn.removeAttribute("aria-disabled");
+    }
+  }
+
   function syncScopeIds() {
     const chosen = state.chosen.map((c) => c.channelId);
     if (state.sync.scope !== "selected") return chosen;
@@ -1524,18 +1608,95 @@
     return true;
   }
 
-  // 싱크 패널의 버튼을 누른 뒤 다시 그릴 때 쓴다.
-  // ⚠ 예전에는 blur() 로 포커스를 없앴다. 그러면 renderSync 의 '패널에 포커스가
-  //   있으면 건너뛴다' 가드가 풀려 목록 전체가 커서 아래에서 교체되고, 연타할 때
-  //   깜빡임으로 보인다. 포커스를 유지한 채 강제로 그린 뒤 같은 버튼으로
-  //   되돌려 주면 화면이 튀지 않고 연속 조작도 끊기지 않는다.
-  function renderSyncKeepingFocus(selector) {
+  // 이미 떠 있는 싱크 패널의 값만 제자리에서 고친다.
+  // ⚠ panel.innerHTML 로 다시 그리면 누른 버튼과 행이 통째로 새 Element 로
+  //   바뀐다. 포커스를 되돌려 줘도 커서 아래에서 DOM 이 교체되므로 연타할 때
+  //   깜빡임으로 보인다. 여기서는 기존 Element 를 그대로 두고 글자·상태만 고친다.
+  // 구조가 바뀌는 경우(패널 열기, 범위 전환, 채널 추가/제거/교체)는 기존
+  //   renderSync 의 전체 렌더를 그대로 쓴다.
+  function patchSyncPanel(now = Date.now()) {
     const panel = $("mvSyncPop");
-    const active = document.activeElement;
-    const wasInside = !!panel && !panel.hidden && panel.contains(active);
+    if (!panel || panel.hidden) return false;
+    const rows = [...panel.querySelectorAll("[data-mv-sync-row]")];
+    // 행 수나 채널이 달라졌으면 구조가 바뀐 것이다 — 전체 렌더에 맡긴다.
+    const ids = state.chosen.map((c) => c.channelId);
+    if (rows.length !== ids.length) return false;
+    if (rows.some((row, i) => row.dataset.mvSyncRow !== ids[i])) return false;
+
+    for (const row of rows) {
+      const id = row.dataset.mvSyncRow;
+      const v = getSyncRowViewState(id, now);
+      row.classList.toggle("is-excluded", v.locked);
+      row.classList.toggle("is-reference", v.isReference);
+      const setText = (el, text) => {
+        if (el && el.textContent !== text) el.textContent = text;
+      };
+      setText(
+        row.querySelector("[data-mv-sync-status]"),
+        v.locked ? "제외됨" : v.label,
+      );
+      setText(
+        row.querySelector('[data-mv-sync-metric="delay"]'),
+        `지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}`,
+      );
+      setText(
+        row.querySelector('[data-mv-sync-metric="buffer"]'),
+        `버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}`,
+      );
+      setText(
+        row.querySelector('[data-mv-sync-metric="edge"]'),
+        `엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}`,
+      );
+      const rateEl = row.querySelector('[data-mv-sync-metric="rate"]');
+      setText(rateEl, v.rateInfo.text);
+      if (rateEl && rateEl.title !== v.rateInfo.hint)
+        rateEl.title = v.rateInfo.hint;
+
+      const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
+      const output = row.querySelector("[data-mv-sync-output]");
+      setText(output, `${offText}${v.nudgePending ? " · 적용 중" : ""}`);
+      if (output) {
+        const label = `${channelName(id)} 시간 위치 보정 ${offText}`;
+        if (output.getAttribute("aria-label") !== label) {
+          output.setAttribute("aria-label", label);
+        }
+      }
+
+      setSyncButtonState(
+        row.querySelector("[data-mv-sync-ref]"),
+        v.refDisabled,
+        v.refBusy,
+      );
+      for (const btn of row.querySelectorAll("[data-mv-sync-offset]")) {
+        setSyncButtonState(btn, v.offDisabled, v.offBusy);
+      }
+      setSyncButtonState(
+        row.querySelector("[data-mv-sync-clear]"),
+        v.clearDisabled,
+        v.clearBusy,
+      );
+    }
+
+    // 안내 자리는 전체 렌더가 늘 만들어 둔다. 여기서는 글자와 숨김만 바꾼다.
+    const notice = panel.querySelector(".mv-sync-notice");
+    if (!notice) return false; // 예전 구조로 그려진 패널이면 전체 렌더에 맡긴다
+    if (notice.textContent !== syncNotice) notice.textContent = syncNotice;
+    notice.hidden = !syncNotice;
+    return true;
+  }
+
+  // 싱크 패널의 값만 바뀌었을 때 쓴다. 제자리 갱신이 되면 그걸로 끝내고,
+  // 구조가 달라져 제자리 갱신이 불가능할 때만 전체 렌더로 내려간다.
+  // ⚠ 전체 렌더는 누른 버튼까지 새 Element 로 바꾼다. 그 경우에만 포커스를
+  //   되돌려 준다(제자리 갱신에서는 포커스가 애초에 움직이지 않는다).
+  function refreshSyncPanel(focusSelector) {
+    if (patchSyncPanel()) return;
+    const panel = $("mvSyncPop");
+    const wasInside =
+      !!panel && !panel.hidden && panel.contains(document.activeElement);
     renderSync(true);
-    if (!wasInside || !panel || panel.hidden) return;
-    panel.querySelector(selector)?.focus({ preventScroll: true });
+    if (!wasInside || !focusSelector || !panel || panel.hidden) return;
+    panel.querySelector(focusSelector)?.focus({ preventScroll: true });
   }
 
   function setSyncScope(next) {
@@ -1793,51 +1954,46 @@
         : "기록 안 함";
     const rows = state.chosen.map((c) => {
       const id = c.channelId;
-      const status = currentStatus(id);
-      const st = syncStats.get(id);
-      const fresh = status === "ready" && st && now - st.receivedAt <= SYNC.LIMITS.staleMs;
-      const ready = fresh && SYNC.eligible(st, syncReadyAt.get(id), now);
-      const settling = ready && now - syncReadyAt.get(id) < SYNC.LIMITS.settlingMs;
-      const label = status === "ended" ? "종료" : status === "error" || status === "ui-error" ? "오류" :
-        !fresh ? "측정 대기" : st.paused ? "일시정지" : st.readyState < 2 ? "재생 준비 중" :
-        !ready ? "측정 불가" : settling ? "안정화 중" :
-        state.sync.congested ? "연결 지연" : id === ref ? "기준" :
-        st.userRateOverride ||
-        (Math.abs((st.playbackRate || 1) - 1) > SYNC.LIMITS.userRateEpsilon && !st.syncRateOwned)
-          ? "수동 속도" : st.syncRateOwned ? "자동 보정 중" : "준비됨";
-      const offset = state.sync.manualOffsets[id] || 0;
-      const nudgePending = !!pendingSync(id, "nudge") ||
-        !!pendingSync(id, "seek")?.desiredValue?.commitOffset;
-      const rateInfo = syncRateText(st);
-      const picking = state.sync.scope === "selected";
-      const picked = inSyncScope(id);
-      // 범위 밖 채널은 보정 대상이 아니다. 지연·버퍼 같은 측정값은 그대로 둔다.
-      const locked = picking && !picked;
-      // 기준 채널은 클래스로도 표시한다(제외 행은 라벨이 '제외됨' 으로 덮여
-      // 기준 여부가 글자로 드러나지 않는다).
-      return `<div class="mv-sync-row${locked ? " is-excluded" : ""}` +
-        `${id === ref ? " is-reference" : ""}">` +
+      const v = getSyncRowViewState(id, now);
+      const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
+      const btnAttrs = (disabled, busy) =>
+        disabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
+      // 방향 설명은 '재생 위치' 이동이다. 배속(재생 속도)과 섞이면 안 된다.
+      const stepBtn = (step, text, dir, side) =>
+        `<button type="button" data-mv-sync-offset="${id}" data-step="${step}" ` +
+        `title="재생 위치를 ${dir} 이동(${side})" ` +
+        `aria-label="${esc(c.channelName)} 재생 위치를 ${dir} 이동" ` +
+        `${btnAttrs(v.offDisabled, v.offBusy)}>${text}</button>`;
+      return `<div class="mv-sync-row${v.locked ? " is-excluded" : ""}` +
+        `${v.isReference ? " is-reference" : ""}" data-mv-sync-row="${id}">` +
         `<div class="mv-sync-row-head">` +
-        (picking
+        (v.picking
           ? `<label class="mv-sync-pick"><input type="checkbox" data-mv-sync-pick="${id}"` +
-            `${picked ? " checked" : ""} aria-label="${esc(c.channelName)} 싱크 대상">` +
+            `${v.picked ? " checked" : ""} aria-label="${esc(c.channelName)} 싱크 대상">` +
             `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong></label>`
           : `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong>`) +
-        `<span>${esc(locked ? "제외됨" : label)}</span></div>` +
-        `<div class="mv-sync-metrics"><span>지연 ${fmtSyncSeconds(st?.nativeDelaySec)}</span>` +
-        `<span>버퍼 ${fmtSyncSeconds(st?.bufferAheadSec)}</span>` +
-        `<span>엣지 ${fmtSyncSeconds(st?.edgeLagSec)}</span>` +
-        `<span title="${esc(rateInfo.hint)}">${esc(rateInfo.text)}</span></div>` +
+        `<span data-mv-sync-status>${esc(v.locked ? "제외됨" : v.label)}</span></div>` +
+        `<div class="mv-sync-metrics">` +
+        `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}</span>` +
+        `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}</span>` +
+        `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}</span>` +
+        `<span data-mv-sync-metric="rate" title="${esc(v.rateInfo.hint)}">` +
+        `${esc(v.rateInfo.text)}</span></div>` +
         `<div class="mv-sync-controls">` +
-        `<button type="button" data-mv-sync-ref="${id}" title="이 채널을 기준으로 삼아 나머지를 맞춘다" aria-label="${esc(c.channelName)}을 기준 채널로" ${locked || !ready || id === ref ? "disabled" : ""}>기준</button>` +
-        `<button type="button" data-mv-sync-offset="${id}" data-step="-0.5" title="0.5초 앞으로(기준보다 빠르게 재생)" aria-label="${esc(c.channelName)} 0.5초 앞으로" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.5</button>` +
-        `<button type="button" data-mv-sync-offset="${id}" data-step="-0.1" title="0.1초 앞으로(기준보다 빠르게 재생)" aria-label="${esc(c.channelName)} 0.1초 앞으로" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>-0.1</button>` +
-        `<output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
-        `${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초" title="시간 위치 보정(재생 속도와 별개)">` +
-        `${offset >= 0 ? "+" : ""}${offset.toFixed(1)}초${nudgePending ? " · 적용 중" : ""}</output>` +
-        `<button type="button" data-mv-sync-offset="${id}" data-step="0.1" title="0.1초 뒤로(기준보다 늦게 재생)" aria-label="${esc(c.channelName)} 0.1초 뒤로" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.1</button>` +
-        `<button type="button" data-mv-sync-offset="${id}" data-step="0.5" title="0.5초 뒤로(기준보다 늦게 재생)" aria-label="${esc(c.channelName)} 0.5초 뒤로" ${locked || !ready || !ref || id === ref || nudgePending ? "disabled" : ""}>+0.5</button>` +
-        `<button type="button" data-mv-sync-clear="${id}" ${locked || !offset || nudgePending ? "disabled" : ""} aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
+        `<button type="button" data-mv-sync-ref="${id}" ` +
+        `title="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
+        `aria-label="${esc(c.channelName)}을 기준 채널로" ` +
+        `${btnAttrs(v.refDisabled, v.refBusy)}>기준</button>` +
+        stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
+        stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
+        `<output data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
+        `${offText}" title="시간 위치 보정(재생 속도와 별개)">` +
+        `${offText}${v.nudgePending ? " · 적용 중" : ""}</output>` +
+        stepBtn("0.1", "+0.1", "0.1초 뒤로", "과거 쪽") +
+        stepBtn("0.5", "+0.5", "0.5초 뒤로", "과거 쪽") +
+        `<button type="button" data-mv-sync-clear="${id}" ` +
+        `${btnAttrs(v.clearDisabled, v.clearBusy)} ` +
+        `aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
         `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
         `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` +
         `</div></div>`;
@@ -1860,9 +2016,12 @@
       `<button type="button" id="mvSyncClear">보정 초기화</button></div>` +
       (tooSmall ? `<p class="mv-sync-warning">싱크할 채널을 2개 이상 선택해 주세요.</p>` : "") +
       (state.sync.congested ? `<p class="mv-sync-warning">여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` : "") +
-      (syncNotice ? `<p class="mv-sync-notice" role="status">${esc(syncNotice)}</p>` : "") +
+      // 안내 자리는 늘 만들어 두고 비었을 때만 숨긴다. 없던 자리에 새로 끼워
+      // 넣으면 그건 구조 변화라 제자리 갱신이 불가능해진다(첫 클릭이 그 경우다).
+      `<p class="mv-sync-notice" role="status"${syncNotice ? "" : " hidden"}>` +
+      `${esc(syncNotice)}</p>` +
       `<div class="mv-sync-list">${rows}</div>` +
-      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다. 초 단위 위치 보정과는 별개입니다. 채널별 −는 기준보다 앞으로(빠르게), +는 뒤로(늦게) 재생 위치를 옮깁니다.</p>` +
+      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다. 채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
       `<section class="mv-sync-diagnostics" aria-label="싱크 진단">` +
       `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
       `<label><input type="checkbox" id="mvSyncDiagnostics"` +
@@ -2875,7 +3034,13 @@
     const syncRef = target.closest?.("[data-mv-sync-ref]");
     if (syncRef) {
       const id = syncRef.dataset.mvSyncRef;
-      if (!syncEligibleIds().includes(id)) return;
+      // 이미 기준인 채널은 다시 처리하지 않는다(버튼은 포커스 유지를 위해
+      // disabled 대신 aria-disabled 로 둔다).
+      if (
+        !syncEligibleIds().includes(id) ||
+        id === state.sync.referenceChannelId
+      )
+        return;
       recordReferenceChange(state.sync.referenceChannelId, id, "manual");
       state.sync.manualOffsets = SYNC.rebaseOffsets(state.sync.manualOffsets, id,
         state.chosen.map((c) => c.channelId));
@@ -2885,12 +3050,14 @@
       resetAllSyncRates();
       updateSyncPolling();
       alignSync(null, true);
-      renderSyncKeepingFocus(`[data-mv-sync-ref="${CSS.escape(id)}"]`);
+      refreshSyncPanel(`[data-mv-sync-ref="${CSS.escape(id)}"]`);
       return;
     }
     const syncOffset = target.closest?.("[data-mv-sync-offset]");
     if (syncOffset) {
       const id = syncOffset.dataset.mvSyncOffset;
+      // 보류 중에는 새 보정을 받지 않는다(버튼은 aria-disabled 로 잠겨 있다).
+      if (syncNudgePending(id)) return;
       const step = Number(syncOffset.dataset.step);
       if (!syncEligibleIds().includes(id) || id === state.sync.referenceChannelId ||
           ![-0.5, -0.1, 0.1, 0.5].includes(step)) return;
@@ -2909,7 +3076,7 @@
           { deltaSec: before - next }, { offset: next })
           ? "수동 보정을 적용 중입니다." : "잠시 후 다시 조절해 주세요.";
       }
-      renderSyncKeepingFocus(
+      refreshSyncPanel(
         `[data-mv-sync-offset="${CSS.escape(id)}"][data-step="${syncOffset.dataset.step}"]`,
       );
       return;
@@ -2917,9 +3084,15 @@
     const syncClear = target.closest?.("[data-mv-sync-clear]");
     if (syncClear) {
       const id = syncClear.dataset.mvSyncClear;
-      if (!cells.has(id) || pendingSync(id, "nudge")) return;
+      // 되돌릴 보정이 없거나 보류 중이면 막는다(버튼은 aria-disabled 로 잠겨 있다).
+      if (
+        !cells.has(id) ||
+        syncNudgePending(id) ||
+        !(state.sync.manualOffsets[id] || 0)
+      )
+        return;
       alignSync([id], true, { [id]: 0 }, true);
-      renderSyncKeepingFocus(`[data-mv-sync-clear="${CSS.escape(id)}"]`);
+      refreshSyncPanel(`[data-mv-sync-clear="${CSS.escape(id)}"]`);
       return;
     }
     const syncScopeBtn = target.closest?.("[data-mv-sync-scope]");
