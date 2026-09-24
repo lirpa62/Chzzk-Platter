@@ -19,6 +19,7 @@
   const HANDOFF_PREFIX = "cheeseMultiviewSetup";
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
   const CHAT_POPUP_MESSAGE = "cheese-platter-multiview-chat-popup";
+  const CHAT_POPOUT_MODE_KEY = "cheeseMultiviewChatPopoutMode";
   const CHZZK_ORIGIN = "https://chzzk.naver.com";
   const HASH_RE = /^[0-9a-f]{32}$/i;
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
@@ -201,9 +202,11 @@
   // 보낸다(교차 출처라 부모가 그 안의 html 을 직접 만질 수 없다).
   function postChatView() {
     if (detachedChat) {
-      chatPopupPost("SET_THEME", {
-        dark: document.documentElement.dataset.theme === "dark",
-      });
+      if (detachedChat.mode === "platter") {
+        chatPopupPost("SET_THEME", {
+          dark: document.documentElement.dataset.theme === "dark",
+        });
+      }
       return;
     }
     const frame = $("mvChatFrame");
@@ -238,10 +241,44 @@
   let chatReadyTimer = 0;
   let chatFrameReady = false;
   let detachedChat = null;
+  let nativeChatOpening = false;
+  let chatPopoutMode = "platter";
+  let chatPopoutModeRevision = 0;
   let chatPopoutFeedbackTimer = 0;
 
+  function reflectChatPopoutMode(mode) {
+    chatPopoutMode = mode === "native" ? "native" : "platter";
+    const button = $("mvChatPopout");
+    if (!button) return;
+    button.dataset.mode = chatPopoutMode;
+    button.dataset.tooltip = chatPopoutMode === "native"
+      ? "치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다."
+      : "새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.";
+    button.setAttribute("aria-label", chatPopoutMode === "native"
+      ? "치지직 채팅창으로 분리"
+      : "치즈 플래터 팝업으로 분리");
+  }
+
+  const chatPopoutButton = $("mvChatPopout");
+  if (chatPopoutButton) chatPopoutButton.disabled = true;
+  const initialChatPopoutModeRevision = chatPopoutModeRevision;
+  chrome.storage.local.get(CHAT_POPOUT_MODE_KEY).then((stored) => {
+    if (chatPopoutModeRevision === initialChatPopoutModeRevision) {
+      reflectChatPopoutMode(stored?.[CHAT_POPOUT_MODE_KEY]);
+    }
+  }).catch(() => {
+    reflectChatPopoutMode("platter");
+  }).finally(() => {
+    if (chatPopoutButton) chatPopoutButton.disabled = false;
+  });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[CHAT_POPOUT_MODE_KEY]) return;
+    chatPopoutModeRevision += 1;
+    reflectChatPopoutMode(changes[CHAT_POPOUT_MODE_KEY].newValue);
+  });
+
   function chatPopupPost(type, detail = {}) {
-    if (!detachedChat) return false;
+    if (detachedChat?.mode !== "platter") return false;
     try {
       detachedChat.channel.postMessage({
         source: CHAT_POPUP_MESSAGE,
@@ -259,7 +296,9 @@
     const box = $("mvChatPopupStatus");
     if (!box) return;
     const text = status === "ready"
-      ? "채팅 팝업에서 표시 중"
+      ? detachedChat?.mode === "native"
+        ? "치지직 채팅창에서 표시 중"
+        : "채팅 팝업에서 표시 중"
       : status === "error"
         ? message || "채팅 연결 실패"
         : "채팅 팝업 연결 중…";
@@ -343,6 +382,24 @@
     if (!retry) chatAutoRetried = false;
     state.chatChannelId = channelId;
     chatFrameReady = false;
+    if (detachedChat?.mode === "native") {
+      clearTimeout(chatReadyTimer);
+      if (retry || detachedChat.channelId !== channelId) {
+        const popup = detachedChat;
+        popup.channelId = channelId;
+        const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN).toString();
+        popup.navigation = (popup.navigation || Promise.resolve()).then(() => {
+          if (detachedChat !== popup) return;
+          return chrome.tabs.update(popup.tabId, { url });
+        }).catch(() => {
+          if (detachedChat !== popup) return;
+          showChatPopoutFeedback("치지직 채팅창을 전환하지 못해 이 화면으로 돌아왔습니다.");
+          restoreInlineChat();
+        });
+      }
+      setChatStatus("ready");
+      return generation;
+    }
     setChatStatus("loading");
     if (detachedChat) {
       clearTimeout(chatReadyTimer);
@@ -380,12 +437,14 @@
     clearTimeout(popup.hostReadyTimer);
     clearInterval(popup.closePoll);
     try {
-      popup.channel.close();
+      popup.channel?.close();
     } catch {}
     $("mvStage").classList.remove("is-chat-popped-out");
     $("mvChatPopupControl").hidden = true;
     $("mvChatPopout").hidden = false;
-    if (closePopup && !popup.window.closed) {
+    if (closePopup && popup.mode === "native") {
+      chrome.windows.remove(popup.windowId).catch(() => {});
+    } else if (closePopup && !popup.window.closed) {
       try {
         popup.window.close();
       } catch {}
@@ -397,7 +456,7 @@
     const popup = detachedChat;
     const data = event?.data;
     if (
-      !popup ||
+      popup?.mode !== "platter" ||
       data?.source !== CHAT_POPUP_MESSAGE ||
       data.sessionId !== popup.sessionId
     ) return;
@@ -433,11 +492,19 @@
     if (data.type === "POPUP_CLOSED") restoreInlineChat(false);
   }
 
+  function focusDetachedChat() {
+    if (detachedChat?.mode === "native") {
+      chrome.windows.update(detachedChat.windowId, { focused: true }).catch(() => {});
+      return;
+    }
+    try {
+      detachedChat?.window.focus();
+    } catch {}
+  }
+
   function openChatPopup() {
     if (detachedChat) {
-      try {
-        detachedChat.window.focus();
-      } catch {}
+      focusDetachedChat();
       return;
     }
     if (typeof BroadcastChannel !== "function") {
@@ -467,6 +534,7 @@
       return;
     }
     detachedChat = {
+      mode: "platter",
       sessionId,
       channel,
       window: popupWindow,
@@ -492,6 +560,63 @@
     detachedChat.closePoll = setInterval(() => {
       if (detachedChat?.window.closed) restoreInlineChat(false);
     }, 1000);
+  }
+
+  async function openNativeChatPopup() {
+    if (detachedChat) {
+      focusDetachedChat();
+      return;
+    }
+    if (nativeChatOpening) return;
+    const channelId = state.chatChannelId;
+    if (!HASH_RE.test(channelId || "")) return;
+    const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN);
+    nativeChatOpening = true;
+    let popupWindow;
+    try {
+      popupWindow = await chrome.windows.create({
+        url: url.toString(),
+        type: "popup",
+        width: 420,
+        height: 760,
+      });
+    } catch {
+      showChatPopoutFeedback("치지직 채팅창을 열지 못했습니다.");
+    } finally {
+      nativeChatOpening = false;
+    }
+    const tabId = popupWindow?.tabs?.[0]?.id;
+    if (!Number.isInteger(popupWindow?.id) || !Number.isInteger(tabId)) {
+      if (Number.isInteger(popupWindow?.id)) chrome.windows.remove(popupWindow.id).catch(() => {});
+      if (popupWindow) showChatPopoutFeedback("치지직 채팅창을 연결하지 못했습니다.");
+      return;
+    }
+    detachedChat = {
+      mode: "native",
+      windowId: popupWindow.id,
+      tabId,
+      channelId,
+    };
+    closeChatSelector();
+    $("mvStage").classList.add("is-chat-popped-out");
+    $("mvChatPopupControl").hidden = false;
+    $("mvChatPopout").hidden = true;
+    $("mvChatFrame").src = "about:blank";
+    loadChat(state.chatChannelId);
+  }
+
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (detachedChat?.mode === "native" && detachedChat.windowId === windowId) {
+      restoreInlineChat(false);
+    }
+  });
+
+  function openChatPopout() {
+    if (chatPopoutMode === "native") {
+      openNativeChatPopup();
+      return;
+    }
+    openChatPopup();
   }
 
   // 칸(iframe)은 채널마다 하나씩 만들어 두고 배치가 바뀌어도 '자리'만 옮긴다.
@@ -4953,7 +5078,7 @@
       return;
     }
     if (target.closest?.("#mvChatPopout")) {
-      openChatPopup();
+      openChatPopout();
       return;
     }
     if (target.closest?.("#mvChatPopupReturn")) {
@@ -5518,7 +5643,6 @@
     "FRAME_MIXER_COMMAND_RESULT",
   ]);
   window.addEventListener("message", (event) => {
-    if (detachedChat) return;
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
     if (!data || typeof data !== "object") return;

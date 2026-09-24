@@ -22329,7 +22329,9 @@
       const de = document.documentElement;
       if (!de) return;
       de.style.colorScheme = dark ? "dark" : "light";
-      de.className = dark ? "dark theme_dark" : "light";
+      de.classList.toggle("dark", dark);
+      de.classList.toggle("theme_dark", dark);
+      de.classList.toggle("light", !dark);
       de.dataset.theme = dark ? "theme_dark" : "light";
     };
 

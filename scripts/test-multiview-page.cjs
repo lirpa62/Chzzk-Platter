@@ -932,10 +932,28 @@ const checks = [];
           return (window.fakeTabs||[])
             .filter((t)=>String(t.url||'').startsWith(base));
         },
-        update:async(id,o)=>{window.tabUpdates.push(Object.assign({id},o));},
+        update:async(id,o)=>{
+          window.tabUpdates.push(Object.assign({id},o));
+          const popup=window.__nativeChatPopups?.find(item=>item.tabId===id);
+          if(popup&&o.url)popup.url=o.url;
+        },
       },
       windows:{
         update:async(id,o)=>{window.windowUpdates.push(Object.assign({id},o));},
+        create:async(o)=>{
+          const id=100+(window.__nativeChatPopups?.length||0);
+          const popup={id,tabId:id+1000,url:o.url,closed:false};
+          window.__nativeChatPopups.push(popup);
+          return {id,tabs:[{id:popup.tabId}]};
+        },
+        remove:async(id)=>{
+          const popup=window.__nativeChatPopups?.find(item=>item.id===id);
+          if(popup)popup.closed=true;
+          window.__nativeChatRemoved?.forEach(listener=>listener(id));
+        },
+        onRemoved:{addListener:listener=>{
+          (window.__nativeChatRemoved??=[]).push(listener);
+        }},
       }};
     window.openedTabs=[];window.tabQueries=[];
     window.tabUpdates=[];window.windowUpdates=[];window.fakeTabs=[];
@@ -2463,6 +2481,51 @@ const checks = [];
        '팝업 닫힘 뒤 본창 채팅을 복원하지 않았다');
      signalInlineReady();
      check(videoSrcs().length===before,'팝업 닫힘 복귀가 영상 프레임을 다시 걸었다');`,
+  );
+
+  await test(
+    "치지직 채팅창으로 열어 외부 확장 주입과 채널 전환·복귀를 지원한다",
+    `window.__nativeChatPopups=[];
+     window.localStore.cheeseMultiviewChatPopoutMode='native';
+     window.storageListeners.forEach(listener=>listener({
+       cheeseMultiviewChatPopoutMode:{newValue:'native'}},'local'));
+     const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     document.getElementById('mvChatPopout').click();
+     await wait(30);
+     const opened=window.__nativeChatPopups.at(-1);
+     const first=new URL(opened.url);
+     check(first.origin==='https://chzzk.naver.com'&&
+       first.pathname==='/live/'+window.__mvState.chatChannelId+'/chat',
+       '치지직 채팅 페이지를 최상위 창으로 열지 않았다');
+     check(!first.searchParams.has('cheeseMultiChat'),
+       '외부 채팅창에 멀티뷰 iframe 파라미터가 붙었다');
+     check(document.getElementById('mvChatFrame').src==='about:blank',
+       '외부 채팅 중 내장 iframe을 내리지 않았다');
+     check(document.getElementById('mvChatPopupStatus').textContent==='치지직 채팅창에서 표시 중',
+       '외부 채팅 상태가 표시되지 않았다');
+     document.querySelector('[data-mv-pop-toggle="chat"]').click();
+     const other=[...document.querySelectorAll('[data-mv-set-chat]')]
+       .find(o=>o.dataset.mvSetChat!==window.__mvState.chatChannelId);
+     other.click();
+     await wait(30);
+     check(new URL(opened.url).pathname===
+       '/live/'+window.__mvState.chatChannelId+'/chat',
+       '채널 변경이 외부 채팅창에 반영되지 않았다');
+     check(videoSrcs().length===before,'외부 채팅 전환이 영상 iframe을 다시 걸었다');
+     document.getElementById('mvChatPopupReturn').click();
+     await wait(30);
+     check(opened.closed,'복귀 시 외부 채팅창을 닫지 않았다');
+     check(new URL(document.getElementById('mvChatFrame').src).pathname===
+       '/live/'+window.__mvState.chatChannelId+'/chat',
+       '복귀 시 내장 채팅을 복원하지 않았다');
+     check(videoSrcs().length===before,'복귀가 영상 iframe을 다시 걸었다');
+     document.getElementById('mvChatPopout').click();
+     await wait(30);
+     window.__nativeChatRemoved.forEach(listener=>listener(window.__nativeChatPopups.at(-1).id));
+     await wait(30);
+     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
+       '외부 채팅창 닫힘 뒤 내장 채팅을 복원하지 않았다');`,
   );
 
   await test(

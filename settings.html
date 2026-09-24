@@ -7666,9 +7666,45 @@
           <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
             <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
             <p class="settings-group-desc">
-              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·싱크 진단 도구를 설정합니다.
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·싱크 진단·채팅 분리 방식을 설정합니다.
             </p>
             <ul class="settings-list">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="multiview-chat-popout-mode"
+              >
+                <div>
+                  <span class="settings-item-name">분리 채팅 방식</span>
+                  <span class="settings-item-desc">
+                    치즈 플래터 팝업은 채팅 상태와 재연결을 제공하고, 치지직 채팅창은 배지 모아 챗 등 다른 채팅 확장 프로그램을 사용할 수 있습니다.
+                  </span>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-multiview-chat-popout-mode
+                  role="radiogroup"
+                  aria-label="분리 채팅 방식"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-mv-chat-popout-mode-value="platter"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    치즈 플래터 팝업
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mv-chat-popout-mode-value="native"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    치지직 채팅창
+                  </button>
+                </div>
+              </li>
               <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
                 <label>
                   <span class="settings-item-name">선택 화면 정렬 기억</span>

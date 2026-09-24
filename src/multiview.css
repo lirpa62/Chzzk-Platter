@@ -1256,7 +1256,9 @@ button.mv-live-more {
 }
 .mv-chat-title {
   align-items: center;
+  box-sizing: border-box;
   flex: 1 1 0;
+  height: 28px;
   max-width: none;
   min-width: 0;
   padding: 6px 10px;
@@ -1984,11 +1986,13 @@ button.mv-live-more {
   background: none;
   border: 1px solid var(--popup-border, #34383d);
   border-radius: 6px;
+  box-sizing: border-box;
   color: inherit;
   cursor: pointer;
   flex: none;
   font: inherit;
   font-size: 12px;
+  height: 28px;
   padding: 4px 8px;
 }
 .mv-stage[data-chat-side="bottom"] #mvChatPopoutFeedback {

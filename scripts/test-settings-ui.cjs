@@ -27,6 +27,7 @@ for (const key of [
   'cheeseMultiviewQuickPosition',
   'cheeseMultiviewSetupSortBySource',
   'cheeseMultiviewRememberSetupSort',
+  'cheeseMultiviewChatPopoutMode',
   'cheeseMaxQualityTarget',
   'audioMixer:shareAcrossChannels',
 ]) {
@@ -107,6 +108,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewQuickPosition:{left:24,top:18,width:640,height:400},
         cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
         cheeseMultiviewRememberSetupSort:true,
+        cheeseMultiviewChatPopoutMode:'native',
         'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
@@ -128,7 +130,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       window.featureWrites = writes.filter(obj=>'cheeseFeatureHidden' in obj).length;
     `);
     const checks=[];
-    async function test(name, expression){await evaluate(`{${expression}}`);checks.push(name);}
+    async function test(name, expression){await evaluate(`(async()=>{${expression}})()`);checks.push(name);}
     await test('new tab follows custom following without changing saved order',`
       const tabs=[...document.querySelectorAll('.settings-tabs .settings-tab')].map(el=>el.dataset.tab);
       check(tabs[tabs.indexOf('customfollow')+1]==='multiview','new tab was appended instead of placed after custom following');
@@ -401,10 +403,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
         check(exported.settings.cheeseMultiviewSetupSortBySource?.following==='name-desc','setup source sort missing from export');
         check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
+        check(exported.settings.cheeseMultiviewChatPopoutMode==='native','chat popout mode missing from export');
       }
       const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true,
         cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false},appearance:{multiviewChatSize:{w:720,h:180}}};
+      payload.settings.cheeseMultiviewChatPopoutMode='platter';
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));
@@ -414,6 +418,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
       check(saved.cheeseMultiviewSetupSortBySource?.following==='name-asc','setup source sort was not imported');
       check(saved.cheeseMultiviewRememberSetupSort===false,'setup sort preference was not imported');
+      check(saved.cheeseMultiviewChatPopoutMode==='platter','chat popout mode was not imported');
+      const invalidMode={...payload,settings:{...payload.settings,cheeseMultiviewChatPopoutMode:'unsupported'}};
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(invalidMode)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      check(saved.cheeseMultiviewChatPopoutMode==='platter','unsupported chat popout mode overwrote the saved value');
       const bounded={...payload,appearance:{multiviewChatSize:{w:9000,h:300}}};
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(bounded)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));

@@ -24,6 +24,7 @@ const watchHtml = fs.readFileSync(
   path.join(root, "multiviewWatch.html"),
   "utf8",
 );
+const settingsHtml = fs.readFileSync(path.join(root, "settings.html"), "utf8");
 const setupHtml = fs.readFileSync(path.join(root, "multiview.html"), "utf8");
 const popupHtml = fs.readFileSync(
   path.join(root, "multiviewChatPopup.html"),
@@ -242,6 +243,10 @@ assert.equal(bus.sent.at(-1).type, "POPUP_CLOSED");
 assert.equal(bus.closed, true);
 
 assert.match(watchHtml, /id="mvChatPopout"/);
+assert.match(watchHtml, /id="mvChatPopout"[^>]*aria-label="채팅 분리"/);
+assert.doesNotMatch(watchHtml, /mvChatNativePopout/);
+assert.match(settingsHtml, /data-mv-chat-popout-mode-value="platter"/);
+assert.match(settingsHtml, /data-mv-chat-popout-mode-value="native"/);
 assert.match(watchHtml, /id="mvChatPopupReturn"/);
 assert.ok(
   watchHtml.indexOf('id="mvChatPanel"') <
@@ -277,6 +282,12 @@ assert.match(parentScript, /\.src = "about:blank"/);
 assert.match(parentScript, /data\.channelId !== state\.chatChannelId/);
 assert.match(parentScript, /data\.generation !== chatGeneration/);
 assert.match(parentScript, /function restoreInlineChat/);
+assert.match(parentScript, /function openNativeChatPopup/);
+assert.match(parentScript, /new URL\(`\/live\/\$\{channelId\}\/chat`, CHZZK_ORIGIN\)/);
+assert.match(parentScript, /chrome\.windows\.create\(/);
+assert.match(parentScript, /chrome\.tabs\.update\(popup\.tabId, \{ url \}\)/);
+assert.match(parentScript, /chrome\.windows\.onRemoved\.addListener/);
+assert.doesNotMatch(parentScript.match(/const FRAME_MESSAGE_TYPES[\s\S]*?if \(event\.origin !== CHZZK_ORIGIN\)/)?.[0] || "", /if \(detachedChat\) return/);
 assert.match(parentScript, /loadChat\(state\.chatChannelId\)/);
 assert.match(contentScript, /cheeseMultiChatGeneration/);
 assert.match(styles, /\.mv-stage\.is-chat-popped-out \.mv-chat-body/);
@@ -285,6 +296,11 @@ assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] \.mv-chat-title-wrap
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatPopoutFeedback\s*\{\s*order: 1/s);
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatPopout\s*\{\s*margin-left: auto;\s*order: 2/s);
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatToggle\s*\{\s*order: 3/s);
+assert.match(parentScript, /function openChatPopout\(\)/);
+assert.match(parentScript, /chrome\.storage\.local\.get\(CHAT_POPOUT_MODE_KEY\)/);
+assert.match(parentScript, /chrome\.storage\.onChanged\.addListener/);
+assert.match(parentScript, /button\.dataset\.tooltip = chatPopoutMode === "native"/);
+assert.match(parentScript, /const CHAT_POPOUT_MODE_KEY = "cheeseMultiviewChatPopoutMode"/);
 assert.match(popupStyles, /#mvChatPopupStatus\[data-state="ready"\]::before/);
 assert.match(popupStyles, /#mvChatPopupStatus\[data-state="loading"\]/);
 assert.match(popupStyles, /#mvChatPopupStatus\[data-state="error"\]::before/);

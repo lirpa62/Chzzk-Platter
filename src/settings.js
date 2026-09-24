@@ -156,6 +156,7 @@
     "cheesePopupPlayerStartWithoutChat",
     "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
+    "cheeseMultiviewChatPopoutMode",
     "cheeseMultiviewBtnMixer",
     "cheeseMultiviewBtnFilter",
     "cheeseMultiviewBtnSync",
@@ -5146,6 +5147,43 @@
       } catch {}
     });
   });
+
+  const multiviewChatPopoutModeGroup = document.querySelector(
+    "[data-multiview-chat-popout-mode]",
+  );
+  if (multiviewChatPopoutModeGroup) {
+    const modeKey = "cheeseMultiviewChatPopoutMode";
+    const modeButtons = Array.from(
+      multiviewChatPopoutModeGroup.querySelectorAll(
+        "[data-mv-chat-popout-mode-value]",
+      ),
+    );
+    function reflectMultiviewChatPopoutMode(mode) {
+      const value = mode === "native" ? "native" : "platter";
+      modeButtons.forEach((button) => {
+        const active = button.dataset.mvChatPopoutModeValue === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    }
+    (async () => {
+      let mode = "platter";
+      try {
+        const stored = await cachedStorageGet(modeKey);
+        if (stored?.[modeKey] === "native") mode = "native";
+      } catch {}
+      reflectMultiviewChatPopoutMode(mode);
+    })();
+    modeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.mvChatPopoutModeValue === "native"
+          ? "native"
+          : "platter";
+        reflectMultiviewChatPopoutMode(mode);
+        cachedStorageSet({ [modeKey]: mode });
+      });
+    });
+  }
 
   // ── 비디오 필터 전역 기본값 재방문 동작(오디오 믹서와 동일, 별도 키) ──────────
   const vfGlobalDefaultModeGroup = document.querySelector(
@@ -11028,6 +11066,9 @@
   }
 
   function normalizeImportedSettingValue(key, value) {
+    if (key === "cheeseMultiviewChatPopoutMode") {
+      return value === "native" || value === "platter" ? value : undefined;
+    }
     if (key === POPUP_WIDTH_KEY) {
       return Number.isFinite(Number(value))
         ? clampPopupWidth(value)
