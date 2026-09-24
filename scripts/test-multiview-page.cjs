@@ -2537,6 +2537,35 @@ const checks = [];
   );
 
   await test(
+    "전체 음소거가 채널별 음소거 설정을 보존한다",
+    `const pop=document.getElementById('mvVolumePop');
+     const mainId=document.querySelector('.mv-cell.is-main').dataset.channelId;
+     const before=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length;
+     let mute=pop.querySelector('[data-mv-vol-master-mute]');
+     check(mute&&!mute.disabled,'전체 음소거 버튼이 없다');
+     window.sentMsgs=[];
+     mute.click();
+     await wait(100);
+     mute=document.querySelector('[data-mv-vol-master-mute]');
+     check(mute.getAttribute('aria-pressed')==='true','전체 음소거 상태가 표시되지 않았다');
+     check(window.sentMsgs.length>0&&window.sentMsgs.every(m=>m.muted===true),
+       '전체 음소거 지시가 모든 채널에 전달되지 않았다');
+     window.sentMsgs=[];
+     mute.click();
+     await wait(100);
+     mute=document.querySelector('[data-mv-vol-master-mute]');
+     check(mute.getAttribute('aria-pressed')==='false','전체 음소거가 해제되지 않았다');
+     const latest=new Map(window.sentMsgs.map(m=>[m.channelId,m]));
+     check(latest.get(mainId)?.muted===false,'메인의 개별 음소거 상태가 보존되지 않았다');
+     check([...latest].some(([id,m])=>id!==mainId&&m.muted===true),
+       '메인만 듣기 상태가 유지되지 않았다');
+     check(Number(pop.querySelector('[data-mv-vol-master]').value)===50,
+       '전체 음소거가 전체 볼륨 슬라이더 값을 변경했다');
+     check(window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length===before,
+       '전체 음소거로 iframe 이 다시 로드됐다');`,
+  );
+
+  await test(
     "보조 채널 볼륨을 올리면 '메인 채널만 소리' 가 풀린다",
     `const pop=document.getElementById('mvVolumePop');
      const focus=document.getElementById('mvVolFocus');

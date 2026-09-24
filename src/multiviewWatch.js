@@ -52,6 +52,7 @@
     chatFollowsMain: true,
     // 전체 볼륨(0~1). 채널별 볼륨 위에 곱해지는 값이다.
     masterVolume: 1,
+    masterMuted: false,
     // '메인 채널만 소리'(기본 켜짐). 기존 정책과 같다.
     audioFocusMode: true,
     sync: {
@@ -89,8 +90,9 @@
     return entry;
   }
 
-  // focus mode는 보조 채널만 강제로 끈다. 메인의 직접 음소거는 유지한다.
+  // 전체 음소거와 focus mode를 적용한 뒤 채널별 음소거를 반영한다.
   function effectiveMuted(channelId) {
+    if (state.masterMuted) return true;
     if (state.audioFocusMode && channelId !== state.mainId) return true;
     return audioOf(channelId).muted;
   }
@@ -1204,6 +1206,11 @@
       notice +
       `<div class="mv-vol-row is-master">` +
       `<span class="mv-vol-name">전체 볼륨</span>` +
+      `<button type="button" class="mv-vol-mute" data-mv-vol-master-mute` +
+      ` aria-pressed="${state.masterMuted}"` +
+      ` aria-label="전체 볼륨 ${state.masterMuted ? "음소거 해제" : "음소거"}"` +
+      ` title="${state.masterMuted ? "전체 음소거 해제" : "전체 음소거"}">` +
+      `${volumeIcon(state.masterMuted ? "x" : "high")}</button>` +
       `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
       ` value="${Math.round(state.masterVolume * 100)}"` +
       ` data-mv-vol-master="1" aria-label="멀티뷰 전체 볼륨">` +
@@ -4810,6 +4817,16 @@
     }
     if (target.closest?.("#mvChatTitle")) {
       toggleChatSelector();
+      return;
+    }
+    const masterMute = target.closest?.("[data-mv-vol-master-mute]");
+    if (masterMute) {
+      state.masterMuted = !state.masterMuted;
+      postAllAudio();
+      if (state.masterMuted) {
+        for (const channel of state.chosen) clearAudioNotice(channel.channelId);
+      }
+      renderVolume();
       return;
     }
     const volMute = target.closest?.("[data-mv-vol-mute]");

@@ -2117,7 +2117,7 @@ button.mv-live-more {
 }
 .mv-vol-row.is-master {
   border-bottom: 1px solid var(--popup-border, #34383d);
-  grid-template-columns: 1fr 120px 42px;
+  grid-template-columns: minmax(0, 1fr) 26px minmax(70px, 120px) 42px;
   padding-bottom: 8px;
 }
 /* '메인 채널만 소리' 때문에 잠긴 줄은 흐리게 둔다. */
