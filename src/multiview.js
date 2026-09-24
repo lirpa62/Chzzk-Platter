@@ -16,6 +16,8 @@
   const LIST_TTL_MS = 20000;
   const LIVE_LOAD_THRESHOLD_PX = 400;
   const WATCH_PAGE = "multiviewWatch.html";
+  const SETUP_SORT_STORAGE_KEY = "cheeseMultiviewSetupSortBySource";
+  const REMEMBER_SETUP_SORT_KEY = "cheeseMultiviewRememberSetupSort";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
   //   서로 구성을 덮어쓴다.
@@ -39,6 +41,7 @@
     currentSections: [],
     sortBySource: { following: "viewers", custom: "custom", all: "viewers", search: "viewers" },
   };
+  let rememberSetupSort = true;
 
   const esc = (s) =>
     String(s ?? "").replace(
@@ -135,6 +138,33 @@
   //   매기는 별도 계산이라 이 화면에서 재현할 수 없다.
   // 전용 팔로잉 구역은 공용 로더가 맡는다(Quick 패널과 같은 목록을 보게 한다).
   const loadCustomSections = (sortType) => SOURCES.loadCustomSections(sortType);
+
+  function restoreSortBySource(saved) {
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+    for (const source of Object.keys(state.sortBySource)) {
+      const mode = saved[source];
+      if (SOURCES.SORT_OPTIONS.some((option) => option.id === mode)) {
+        state.sortBySource[source] = mode;
+      }
+    }
+  }
+
+  function saveSortBySource() {
+    if (!rememberSetupSort || !chrome.storage?.local) return;
+    void chrome.storage.local
+      .set({ [SETUP_SORT_STORAGE_KEY]: { ...state.sortBySource } })
+      .catch(() => {});
+  }
+
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local" || !changes[REMEMBER_SETUP_SORT_KEY]) return;
+    rememberSetupSort = changes[REMEMBER_SETUP_SORT_KEY].newValue !== false;
+    if (!rememberSetupSort) {
+      void chrome.storage.local
+        .remove?.(SETUP_SORT_STORAGE_KEY)
+        .catch(() => {});
+    }
+  });
 
   function setupLivePager() {
     const sortType = SOURCES.serverSortType("all", state.sortBySource.all);
@@ -255,7 +285,7 @@
     const keyword = $("mvSearch").value;
     const box = $("mvChannelList");
     box.setAttribute("aria-busy", "true");
-    box.innerHTML = skeletonCards();
+    box.innerHTML = skeletonCards(8, source);
     $("mvSort").disabled = true;
     sortPicker.sync();
     let sections = [];
@@ -281,16 +311,25 @@
 
   // 불러오는 동안 보여 줄 빈 카드. 실제 카드와 같은 모양이라 다 불러왔을 때
   // 자리가 밀리지 않는다.
-  function skeletonCards(count = 8) {
-    const one =
-      '<div class="mv-card is-skeleton" aria-hidden="true">' +
-      '<span class="mv-card-thumb"><span class="mv-skeleton-box"></span></span>' +
-      '<span class="mv-card-body">' +
-      '<span class="mv-skeleton-avatar"></span>' +
-      '<span class="mv-card-text">' +
-      '<span class="mv-skeleton-line"></span>' +
-      '<span class="mv-skeleton-line is-short"></span>' +
-      "</span></span></div>";
+  function skeletonCards(count = 8, source = "") {
+    const customFollowing = source === "custom";
+    const one = customFollowing
+      ? '<div class="mv-card is-skeleton is-custom-following-skeleton" aria-hidden="true">' +
+        '<span class="mv-card-thumb"></span>' +
+        '<span class="mv-card-body">' +
+        '<span class="mv-card-avatar"></span>' +
+        '<span class="mv-card-text">' +
+        '<span class="mv-skeleton-line"></span>' +
+        '<span class="mv-skeleton-line is-short"></span>' +
+        "</span></span></div>"
+      : '<div class="mv-card is-skeleton" aria-hidden="true">' +
+        '<span class="mv-card-thumb"><span class="mv-skeleton-box"></span></span>' +
+        '<span class="mv-card-body">' +
+        '<span class="mv-skeleton-avatar"></span>' +
+        '<span class="mv-card-text">' +
+        '<span class="mv-skeleton-line"></span>' +
+        '<span class="mv-skeleton-line is-short"></span>' +
+        "</span></span></div>";
     return `<section class="mv-section"><div class="mv-cards">${one.repeat(count)}</div></section>`;
   }
 
@@ -602,6 +641,7 @@
     const source = state.source;
     const previousType = SOURCES.serverSortType(source, state.sortBySource[source]);
     state.sortBySource[state.source] = event.target.value;
+    saveSortBySource();
     $("mvChannelList").scrollTop = 0;
     if (previousType !== SOURCES.serverSortType(source, event.target.value)) {
       void renderList();
@@ -655,6 +695,18 @@
 
   // 시작
   (async () => {
+    try {
+      const saved = await chrome.storage?.local?.get([
+        SETUP_SORT_STORAGE_KEY,
+        REMEMBER_SETUP_SORT_KEY,
+      ]);
+      rememberSetupSort = saved?.[REMEMBER_SETUP_SORT_KEY] !== false;
+      if (rememberSetupSort) {
+        restoreSortBySource(saved?.[SETUP_SORT_STORAGE_KEY]);
+      } else {
+        await chrome.storage?.local?.remove?.(SETUP_SORT_STORAGE_KEY);
+      }
+    } catch {}
     // '채널 다시 고르기' 로 돌아온 경우: 주소의 setup id 로 이전 구성을 복원한다.
     const handoffId = new URLSearchParams(location.search).get("setup") || "";
     if (/^[A-Za-z0-9-]{1,64}$/.test(handoffId)) {

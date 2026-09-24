@@ -78,6 +78,9 @@
   let chatOsCustomIconSignature = "";
   let chatOsIconPosition = "after";
   let chatOsIconVersion = 0;
+  let chatOsScaleObserver = null;
+  let chatOsScaleObserverTargets = new Set();
+  let chatOsScaleObserverTargetCount = 0;
   // 채팅 닉네임 숨김. 방장(스트리머)·매니저·파트너 채팅은 예외로 남긴다 —
   // 누가 말했는지가 중요한 역할들이라 숨기면 대화 맥락이 깨진다.
   let hideChatNickname = false;
@@ -1108,6 +1111,78 @@
     return true;
   }
 
+  function readChatOsNativeScale(element) {
+    for (const className of element?.classList || []) {
+      const match = className.match(/(?:^|_)scale_(\d+)(?:_|$)/);
+      if (!match) continue;
+      const percent = Number(match[1]);
+      if (Number.isFinite(percent) && percent >= 50 && percent <= 300) {
+        return percent / 100;
+      }
+    }
+    return 1;
+  }
+
+  function updateChatOsNativeScale(container) {
+    const scale = String(readChatOsNativeScale(container));
+    container.querySelectorAll(".cheese-chat-os").forEach((icon) => {
+      if (icon.style.getPropertyValue("--cheese-chat-os-native-scale") !== scale) {
+        icon.style.setProperty("--cheese-chat-os-native-scale", scale);
+      }
+    });
+  }
+
+  function observeChatOsNativeScale(container) {
+    if (!container || chatOsScaleObserverTargets.has(container)) return;
+    if (!chatOsScaleObserver) {
+      chatOsScaleObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) =>
+          updateChatOsNativeScale(mutation.target),
+        );
+      });
+    }
+    chatOsScaleObserver.observe(container, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    chatOsScaleObserverTargets.add(container);
+    chatOsScaleObserverTargetCount += 1;
+
+    if (chatOsScaleObserverTargetCount % 32 === 0) {
+      const connected = [...chatOsScaleObserverTargets].filter(
+        (target) => target.isConnected,
+      );
+      if (connected.length !== chatOsScaleObserverTargets.size) {
+        chatOsScaleObserver.disconnect();
+        chatOsScaleObserverTargets = new Set(connected);
+        chatOsScaleObserverTargets.forEach((target) =>
+          chatOsScaleObserver.observe(target, {
+            attributes: true,
+            attributeFilter: ["class"],
+          }),
+        );
+      }
+    }
+  }
+
+  function clearChatOsNativeScaleObserver() {
+    chatOsScaleObserver?.disconnect();
+    chatOsScaleObserver = null;
+    chatOsScaleObserverTargets.clear();
+    chatOsScaleObserverTargetCount = 0;
+  }
+
+  function syncChatOsNativeScale(row, icon) {
+    const message = row.querySelector(CHAT_MESSAGE_SELECTOR);
+    const container = message?.parentElement;
+    if (!container) return;
+    const scale = String(readChatOsNativeScale(container));
+    if (icon.style.getPropertyValue("--cheese-chat-os-native-scale") !== scale) {
+      icon.style.setProperty("--cheese-chat-os-native-scale", scale);
+    }
+    observeChatOsNativeScale(container);
+  }
+
   function applyOsIcon(row, osType) {
     if (OS_ICON_SVG[osType]) {
       row.setAttribute(CHAT_HISTORY_OS_ATTR, osType);
@@ -1123,6 +1198,7 @@
         const nicknameBtn =
           row.querySelector("button[class*='_nickname_']") ||
           row.querySelector("[class*='_nickname_']");
+        syncChatOsNativeScale(row, existing);
         return placeChatOsIcon(row, existing, nicknameBtn);
       }
       existing.remove(); // 행 재사용 또는 사용자 아이콘 변경
@@ -1144,11 +1220,13 @@
         ? customTemplate.cloneNode(true)
         : createDefaultChatOsSvg(osType),
     );
+    syncChatOsNativeScale(row, span);
     return placeChatOsIcon(row, span, nicknameBtn);
   }
 
   function removeAllOsIcons() {
     document.querySelectorAll(".cheese-chat-os").forEach((el) => el.remove());
+    clearChatOsNativeScaleObserver();
   }
 
   // ── 닉네임 숨김 ───────────────────────────────────────────────────────────

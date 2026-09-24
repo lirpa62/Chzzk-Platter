@@ -415,9 +415,9 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 
-/* 5-2. 확장프로그램이 주입한 작성 기기 아이콘(.cheese-chat-os) — 시간 표시와 같은
-   이유로 안 커진다. 아이콘 크기는 span 의 em 기준이므로 여기서 font-size 만 배율에
-   맞춰 주면 내부 SVG/이미지가 함께 커진다. 기준은 메시지 텍스트 14px. */
+/* 5-2. 확장프로그램이 주입한 작성 기기 아이콘(.cheese-chat-os).
+   자체 글꼴 크기는 지정하지 않는다. 네이티브 배율은 chatTimestamp.js 가 행의
+   _scale_ 클래스에서 읽고, 아이콘 박스 크기는 content.css 에서 두 배율을 반영한다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
@@ -430,7 +430,6 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   )
   [class*="_chatting_message_"]
   .cheese-chat-os {
-  font-size: calc(14px * var(--cheese-chat-font-scale)) !important;
   line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 

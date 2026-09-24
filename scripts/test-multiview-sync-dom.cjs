@@ -274,10 +274,14 @@ const cleanup = () => {
     const s = await snap();
     ok(s.rows === 3, `행 3개 (${s.rows})`);
     ok(s.btns > 0, `컨트롤이 있다 (${s.btns})`);
+    const headerTooltips = await ev(`document.querySelectorAll(
+      '.mv-sync-row-head.mv-custom-tooltip, .mv-sync-row-head[data-tooltip], .mv-sync-row-head[title], .mv-sync-row-head .mv-custom-tooltip, .mv-sync-row-head [data-tooltip], .mv-sync-row-head [title]'
+    ).length`);
+    ok(headerTooltips === 0, "싱크 행 헤더에 커스텀·네이티브 툴팁이 없다");
     // 그려진 버튼의 실제 문구: ± 는 재생 위치 이동이고, 배속 표현이 없다.
     const labels =
       await ev(`[...document.querySelectorAll('[data-mv-sync-row="a"] [data-mv-sync-offset]')]
-      .map(b=>({step:b.dataset.step, title:b.title, aria:b.getAttribute('aria-label')}))`);
+      .map(b=>({step:b.dataset.step, tooltip:b.dataset.tooltip, aria:b.getAttribute('aria-label')}))`);
     const want = {
       "-0.5": "재생 위치를 0.5초 앞으로 이동(라이브 쪽)",
       "-0.1": "재생 위치를 0.1초 앞으로 이동(라이브 쪽)",
@@ -285,8 +289,8 @@ const cleanup = () => {
       0.5: "재생 위치를 0.5초 뒤로 이동(과거 쪽)",
     };
     ok(
-      labels.length === 4 && labels.every((l) => l.title === want[l.step]),
-      `± title 이 재생 위치 방향과 맞다 (${JSON.stringify(labels.map((l) => l.title))})`,
+      labels.length === 4 && labels.every((l) => l.tooltip === want[l.step]),
+      `± 툴팁이 재생 위치 방향과 맞다 (${JSON.stringify(labels.map((l) => l.tooltip))})`,
     );
     ok(
       labels.every(
@@ -296,7 +300,7 @@ const cleanup = () => {
     );
     ok(
       labels.every(
-        (l) => !/빠르게 재생|느리게 재생|재생 속도/.test(l.title + l.aria),
+        (l) => !/빠르게 재생|느리게 재생|재생 속도/.test(l.tooltip + l.aria),
       ),
       "± 버튼에 배속 표현이 없다",
     );

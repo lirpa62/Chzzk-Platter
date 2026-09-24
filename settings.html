@@ -7663,13 +7663,26 @@
               </li>
             </ul>
           </section>
-          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 패널">
-            <h2 class="settings-group-title">멀티뷰 패널</h2>
+          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
+            <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
+            <p class="settings-group-desc">
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·싱크 진단 도구를 설정합니다.
+            </p>
             <ul class="settings-list">
+              <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
+                <label>
+                  <span class="settings-item-name">선택 화면 정렬 기억</span>
+                  <span class="settings-item-desc">팔로잉·전용 팔로잉·라이브·검색 탭의 마지막 정렬을 복원합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-remember-setup-sort />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item" data-new-feature="multiview-quick-state">
                 <label>
-                  <span class="settings-item-name">채널 관리 상태 기억</span>
-                  <span class="settings-item-desc">패널을 다시 열 때 마지막 탭과 검색어를 복원합니다.</span>
+                  <span class="settings-item-name">시청 화면 채널 관리 상태 기억</span>
+                  <span class="settings-item-desc">멀티뷰 시청 중 ‘채널 관리’ 버튼으로 여는 패널의 탭·검색어·정렬을 복원합니다. 크기와 위치는 항상 저장합니다.</span>
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-remember-quick-state />

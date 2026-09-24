@@ -520,6 +520,24 @@ button.mv-live-more {
   cursor: default;
   pointer-events: none;
 }
+.mv-card.is-custom-following-skeleton .mv-card-thumb,
+.mv-card.is-custom-following-skeleton .mv-card-avatar {
+  animation: mv-skeleton-pulse 1.2s ease-in-out infinite;
+  background: var(--popup-border, #34383d);
+}
+.mv-card.is-custom-following-skeleton .mv-card-thumb {
+  border-radius: 6px;
+}
+.mv-card.is-custom-following-skeleton .mv-card-body {
+  gap: 6px;
+}
+.mv-card.is-custom-following-skeleton .mv-card-text {
+  flex: 1;
+}
+.mv-card.is-custom-following-skeleton .mv-card-avatar {
+  height: 24px;
+  width: 24px;
+}
 .mv-skeleton-box,
 .mv-skeleton-line,
 .mv-skeleton-avatar {
@@ -767,7 +785,7 @@ button.mv-live-more {
   min-width: 0;
 }
 /* 좁아지면 라벨(메인 채널/채팅/…)을 감추고 값만 남겨 버튼 수를 유지한다. */
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .mv-topbar {
     flex-wrap: wrap;
   }
@@ -924,6 +942,14 @@ button.mv-live-more {
   color: #fff;
   font-size: 12px;
   line-height: 1.5;
+}
+.mv-cell-status-channel {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 /* 방송 종료는 실패와 구분되게 조금 다르게 보인다(덜 경고처럼). */
 .mv-cell[data-status="ended"] .mv-cell-status {
@@ -1123,6 +1149,7 @@ button.mv-live-more {
 }
 
 .mv-chat-follow {
+  align-items: center;
   background: none;
   border: 1px solid var(--popup-border, #34383d);
   border-radius: 6px;
@@ -1130,12 +1157,59 @@ button.mv-live-more {
   cursor: pointer;
   flex: none;
   font: inherit;
-  font-size: 11px;
-  padding: 3px 7px;
+  font-size: 12px;
+  padding: 6px 10px;
 }
 .mv-chat-follow[aria-pressed="true"] {
   border-color: var(--popup-brand, #00ffa3);
   color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-tooltip {
+  background: rgba(20, 24, 34, 0.96);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 5px 8px;
+  pointer-events: none;
+  position: fixed;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  z-index: 2147483647;
+}
+.mv-tooltip[hidden] {
+  display: none;
+}
+.mv-chat-popup-control {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 7px;
+  min-width: 0;
+}
+.mv-chat-popup-control > span {
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+.mv-chat-popup-control .mv-pop-button {
+  flex: none;
+}
+.mv-chat-popup-return {
+  position: relative;
+  z-index: 20;
+}
+.mv-chat-popout-feedback {
+  color: var(--popup-alert, #ff5454);
+  flex: 1 1 auto;
+  font-size: 10px;
+  min-width: 0;
 }
 /* 채팅 프레임과 덮개를 겹쳐 놓는다(덮개가 채팅을 밀어내지 않게). */
 .mv-chat-body {
@@ -1168,6 +1242,11 @@ button.mv-live-more {
   flex: 1 1 0;
   min-width: 0;
   position: relative;
+}
+.mv-stage[data-chat-side="bottom"] .mv-chat-title-wrap,
+.mv-stage[data-chat-side="top"] .mv-chat-title-wrap {
+  flex: 0 1 360px;
+  max-width: min(360px, 45%);
 }
 .mv-chat-title-list .mv-pop-option {
   width: 100%;
@@ -1299,23 +1378,38 @@ button.mv-live-more {
   cursor: grab;
   display: flex;
   gap: 8px;
+  min-width: 0;
   touch-action: none;
 }
-.mv-quick-head:active { cursor: grabbing; }
-.mv-quick-head button { cursor: pointer; }
+.mv-quick-head:active {
+  cursor: grabbing;
+}
+.mv-quick-head button {
+  cursor: pointer;
+  white-space: nowrap;
+}
 .mv-quick-head strong {
+  flex: 0 0 auto;
   font-size: 13px;
+  white-space: nowrap;
 }
 .mv-quick-hint {
   color: var(--popup-muted, #9aa1a9);
+  flex: 1 1 auto;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mv-quick-head-actions {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
   gap: 6px;
   margin-left: auto;
+  white-space: nowrap;
 }
 .mv-quick-all {
   background: none;
@@ -1844,8 +1938,14 @@ button.mv-live-more {
 .mv-stage.is-chat-folded .mv-chat-resize {
   display: none;
 }
+.mv-stage.is-chat-popped-out .mv-chat-resize {
+  display: none;
+}
 /* 접혀도 iframe은 유지하되 시청 영역 위에 클릭 가능한 부분을 남기지 않는다. */
 .mv-stage.is-chat-folded .mv-chat-body {
+  display: none;
+}
+.mv-stage.is-chat-popped-out .mv-chat-body {
   display: none;
 }
 .mv-stage.is-chat-folded .mv-chat {
@@ -1857,7 +1957,19 @@ button.mv-live-more {
   top: 0;
   width: 0;
 }
+.mv-stage.is-chat-popped-out .mv-chat {
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
 .mv-stage.is-chat-folded .mv-chat-head {
+  display: none;
+}
+.mv-stage.is-chat-popped-out .mv-chat-head {
   display: none;
 }
 .mv-chat-head {
@@ -1879,6 +1991,16 @@ button.mv-live-more {
   font-size: 12px;
   padding: 4px 8px;
 }
+.mv-stage[data-chat-side="bottom"] #mvChatPopoutFeedback {
+  order: 1;
+}
+.mv-stage[data-chat-side="bottom"] #mvChatPopout {
+  margin-left: auto;
+  order: 2;
+}
+.mv-stage[data-chat-side="bottom"] #mvChatToggle {
+  order: 3;
+}
 /* ⚠ 채팅 프레임 안은 치지직 페이지라 우리 테마가 닿지 않는다. 치지직 채팅
    페이지는 OS 설정과 무관하게 항상 어두운 색을 직접 칠하고(실측: body 배경이
    늘 rgb(20,21,23)), 테마 클래스를 바꿔도 색이 바뀌지 않는다. 억지로 덮으려면
@@ -1899,6 +2021,9 @@ button.mv-live-more {
   border-top: 1px solid var(--popup-border, #34383d);
 }
 :root:not([data-theme="dark"]) .mv-stage.is-chat-folded .mv-chat {
+  border: 0;
+}
+:root:not([data-theme="dark"]) .mv-stage.is-chat-popped-out .mv-chat {
   border: 0;
 }
 
@@ -2433,7 +2558,10 @@ button.mv-live-more {
   background: var(--popup-hover, rgba(127, 127, 127, 0.14));
   color: inherit;
 }
-.mv-group-reference { color: var(--popup-muted, #9aa1a9); font-size: 11px; }
+.mv-group-reference {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
 .mv-group-add {
   align-self: start;
   background: none;
@@ -2518,7 +2646,9 @@ button.mv-live-more {
   color: #ddd6fe;
 }
 :root[data-theme="dark"] .mv-sync-actions button:hover:not(:disabled),
-:root[data-theme="dark"] .mv-sync-controls button:hover:not(:disabled):not([aria-disabled="true"]) {
+:root[data-theme="dark"]
+  .mv-sync-controls
+  button:hover:not(:disabled):not([aria-disabled="true"]) {
   background: rgba(139, 92, 246, 0.34);
   border-color: rgba(196, 181, 253, 0.62);
 }

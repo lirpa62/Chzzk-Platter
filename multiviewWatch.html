@@ -39,8 +39,19 @@
         <div class="mv-pop-panel" role="listbox" id="mvChatPanel" hidden></div>
       </div>
 
+      <button type="button" class="mv-chat-follow mv-custom-tooltip" id="mvChatFollow"
+        aria-pressed="true" data-tooltip="메인 채널을 바꾸면 채팅도 같이 바꾼다">
+        메인 따라가기
+      </button>
+
       <button type="button" class="mv-pop-button mv-topbar-chat-expand" id="mvChatExpand"
         aria-controls="mvChatBody" aria-expanded="false" hidden>채팅 펴기</button>
+
+      <div class="mv-chat-popup-control" id="mvChatPopupControl" hidden>
+        <span class="mv-chat-popup-status-live" id="mvChatPopupStatus" role="status" aria-live="polite">채팅 팝업에서 표시 중</span>
+        <button type="button" class="mv-pop-button mv-topbar-chat-expand mv-chat-popup-return" id="mvChatPopupReturn"
+          data-tooltip="채팅 팝업에서 표시 중">이 창에서 보기</button>
+      </div>
 
       <div class="mv-pop" data-mv-pop="side">
         <button
@@ -132,11 +143,11 @@
 
       <button
         type="button"
-        class="mv-theme-toggle"
+        class="mv-theme-toggle mv-custom-tooltip"
         id="mvTheme"
         aria-pressed="false"
         aria-label="다크 모드로 전환"
-        title="테마 전환"
+        data-tooltip="테마 전환"
       >
         <svg
           class="mv-theme-sun"
@@ -178,7 +189,7 @@
         <div class="mv-quick" id="mvQuick" hidden>
           <div class="mv-quick-head">
             <strong>채널 관리</strong>
-            <span class="mv-quick-hint" id="mvQuickHint"></span>
+            <span class="mv-quick-hint mv-custom-tooltip" id="mvQuickHint"></span>
             <div class="mv-quick-head-actions" id="mvQuickHeadActions">
               <button type="button" class="mv-quick-all" id="mvQuickAll">
                 고르기 화면 열기
@@ -245,10 +256,10 @@
           </div>
           <button
             type="button"
-            class="mv-quick-resize"
+            class="mv-quick-resize mv-custom-tooltip"
             id="mvQuickResize"
             aria-label="채널 관리 패널 크기 조절"
-            title="채널 관리 패널 크기 조절"
+            data-tooltip="채널 관리 패널 크기 조절"
           >
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path
@@ -274,23 +285,19 @@
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
           <div class="mv-chat-title-wrap" id="mvChatTitleWrap">
-            <button type="button" class="mv-pop-button mv-chat-title" id="mvChatTitle"
-              aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList">
+          <button type="button" class="mv-pop-button mv-chat-title" id="mvChatTitle"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList">
               <span class="mv-chat-title-label"></span>
               <svg class="mv-chat-title-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
             </button>
             <div class="mv-pop-panel mv-chat-title-list" id="mvChatTitleList" role="listbox"
               aria-label="채팅 채널" hidden></div>
           </div>
-          <button
-            type="button"
-            class="mv-chat-follow"
-            id="mvChatFollow"
-            aria-pressed="true"
-            title="메인 채널을 바꾸면 채팅도 같이 바꾼다"
-          >
-            메인 따라가기
+          <button type="button" class="mv-custom-tooltip" id="mvChatPopout"
+            data-tooltip="새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.">
+            채팅 분리
           </button>
+          <span class="mv-chat-popout-feedback" id="mvChatPopoutFeedback" role="status" hidden></span>
           <button type="button" id="mvChatToggle" aria-label="채팅 접기"
             aria-controls="mvChatBody" aria-expanded="true">
             접기
@@ -324,6 +331,7 @@
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewSync.js"></script>
     <script src="src/multiviewDiagnostics.js"></script>
+    <script src="src/multiviewTooltip.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>
 </html>

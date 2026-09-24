@@ -4,6 +4,7 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const assert = require('node:assert/strict');
 const settingsSource = readFileSync('src/settings.js', 'utf8');
+const settingsHtml = readFileSync('settings.html', 'utf8');
 for (const key of [
   'cheeseEmbedClipMixerAlwaysOn',
   'cheeseEmbedClipMixerDefaultOn',
@@ -23,6 +24,9 @@ for (const key of [
   'cheeseMultiviewSeekBar',
   'cheeseMultiviewRememberQuickState',
   'cheeseMultiviewSyncDiagnosticsUi',
+  'cheeseMultiviewQuickPosition',
+  'cheeseMultiviewSetupSortBySource',
+  'cheeseMultiviewRememberSetupSort',
   'cheeseMaxQualityTarget',
   'audioMixer:shareAcrossChannels',
 ]) {
@@ -32,6 +36,13 @@ assert.match(
   settingsSource,
   /SETTINGS_TRANSFER_KEYS\s*=\s*new Set\(SETTINGS_STORAGE_KEYS\)/,
 );
+assert.match(
+  settingsSource,
+  /\["\[data-multiview-remember-setup-sort\]", "cheeseMultiviewRememberSetupSort", true\]/,
+);
+assert.ok(settingsHtml.includes('멀티뷰 화면별 설정'));
+assert.ok(settingsHtml.includes('선택 화면 정렬 기억'));
+assert.ok(settingsHtml.includes('시청 화면 채널 관리 상태 기억'));
 const dir = mkdtempSync(join(tmpdir(), 'cheese-settings-ui-'));
 const browser = spawn(process.env.CHROME_BIN || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', '--disable-gpu', '--disable-background-networking', '--no-first-run',
@@ -93,6 +104,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMixerAlwaysOn:true,cheeseMixerDefaultOn:true,cheeseVideoFilterAlwaysOn:false,cheeseVideoFilterDefaultOn:true,
         cheeseEmbedClipMixerAlwaysOn:true,cheeseEmbedClipMixerDefaultOn:true,
         cheeseEmbedClipMixerDefaultPresetEnabled:false,cheeseEmbedClipMixerDefaultGainEnabled:true,
+        cheeseMultiviewQuickPosition:{left:24,top:18,width:640,height:400},
+        cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
+        cheeseMultiviewRememberSetupSort:true,
         'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
@@ -383,13 +397,23 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const full=await exportPayload('[data-settings-export-full]');
       check(JSON.stringify(regular.appearance.multiviewChatSize)==='{"w":430,"h":320}','settings export omitted multiview chat size');
       check(JSON.stringify(full.appearance.multiviewChatSize)==='{"w":430,"h":320}','full backup omitted multiview chat size');
-      const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true},appearance:{multiviewChatSize:{w:720,h:180}}};
+      for(const exported of [regular,full]){
+        check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
+        check(exported.settings.cheeseMultiviewSetupSortBySource?.following==='name-desc','setup source sort missing from export');
+        check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
+      }
+      const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true,
+        cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
+        cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false},appearance:{multiviewChatSize:{w:720,h:180}}};
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,50));
       const imported=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
       check(imported.w===720&&imported.h===320,'invalid dimension was not ignored while retaining existing size');
+      check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
+      check(saved.cheeseMultiviewSetupSortBySource?.following==='name-asc','setup source sort was not imported');
+      check(saved.cheeseMultiviewRememberSetupSort===false,'setup sort preference was not imported');
       const bounded={...payload,appearance:{multiviewChatSize:{w:9000,h:300}}};
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(bounded)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));

@@ -8563,18 +8563,24 @@ html.cheese-chat-nickname-message-split
   margin-top: 2px;
 }
 
-/* 채팅 작성 기기(PC/AOS/IOS) 아이콘. 시간 표시와 같은 톤의 회색으로 두어 눈에
-   띄지 않게 한다(강조하면 조롱 소재가 되기 쉬움). 삽입 위치의 글꼴을 상속하면 일부
-   채팅 DOM에서 커스텀 이미지가 크게 튈 수 있어, 13px 기준 박스에 채팅 배율만 적용한다. */
+/* 채팅 작성 기기(PC/AOS/IOS) 아이콘. 14px 기준 크기에 네이티브 배율과 확장 배율을
+   각각 곱해 채팅창 자체의 폰트 크기 변경도 반영한다. */
 .cheese-chat-os {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: calc(12.88px * var(--cheese-chat-font-scale, 1));
-  height: calc(12.88px * var(--cheese-chat-font-scale, 1));
-  margin-right: 4px;
-  flex: 0 0 calc(12.88px * var(--cheese-chat-font-scale, 1));
+  width: calc(
+    12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+  );
+  height: calc(
+    12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+  );
+  margin-right: calc(
+    4px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+  );
+  flex: 0 0
+    calc(12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1));
   vertical-align: -0.12em;
   overflow: hidden;
   color: var(

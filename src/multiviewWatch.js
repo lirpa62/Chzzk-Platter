@@ -12,11 +12,13 @@
   const SYNC = globalThis.CheeseMultiviewSync;
   const DIAGNOSTICS = globalThis.CheeseMultiviewDiagnostics;
   const SETUP_PAGE = "multiview.html";
+  const CHAT_POPUP_PAGE = "multiviewChatPopup.html";
   // 고른 구성을 주소에 담기엔 길다. 세션 저장소로 넘기고 이 id 로 읽는다.
   // ⚠ 고정 키를 쓰면 멀티뷰 탭을 두 개 열었을 때 서로 구성을 덮어쓴다. 탭마다
   //   다른 id 를 주소로 받아 그 키만 읽는다.
   const HANDOFF_PREFIX = "cheeseMultiviewSetup";
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
+  const CHAT_POPUP_MESSAGE = "cheese-platter-multiview-chat-popup";
   const CHZZK_ORIGIN = "https://chzzk.naver.com";
   const HASH_RE = /^[0-9a-f]{32}$/i;
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
@@ -198,8 +200,14 @@
   // 채팅 칸에 지금 테마를 알린다. 프레임이 준비됐다고 알려 올 때와 테마를 바꿀 때
   // 보낸다(교차 출처라 부모가 그 안의 html 을 직접 만질 수 없다).
   function postChatView() {
+    if (detachedChat) {
+      chatPopupPost("SET_THEME", {
+        dark: document.documentElement.dataset.theme === "dark",
+      });
+      return;
+    }
     const frame = $("mvChatFrame");
-    if (!frame?.contentWindow) return;
+    if (!chatFrameReady || !frame?.contentWindow) return;
     try {
       frame.contentWindow.postMessage(
         {
@@ -224,12 +232,96 @@
   // ⚠ 채널을 빠르게 바꾸면 이전 프레임의 늦은 신호·시간 초과가 지금 상태를 덮을 수
   //   있다. 세대 번호로 그때 것만 받는다.
   const CHAT_READY_TIMEOUT_MS = 12000;
+  const CHAT_POPUP_READY_TIMEOUT_MS = 10000;
   let chatGeneration = 0;
   let chatAutoRetried = false;
   let chatReadyTimer = 0;
+  let chatFrameReady = false;
+  let detachedChat = null;
+  let chatPopoutFeedbackTimer = 0;
+
+  function chatPopupPost(type, detail = {}) {
+    if (!detachedChat) return false;
+    try {
+      detachedChat.channel.postMessage({
+        source: CHAT_POPUP_MESSAGE,
+        sessionId: detachedChat.sessionId,
+        type,
+        ...detail,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function updateChatPopupStatus(status, message = "") {
+    const box = $("mvChatPopupStatus");
+    if (!box) return;
+    const text = status === "ready"
+      ? "채팅 팝업에서 표시 중"
+      : status === "error"
+        ? message || "채팅 연결 실패"
+        : "채팅 팝업 연결 중…";
+    box.textContent = text;
+    const returnButton = $("mvChatPopupReturn");
+    if (returnButton) returnButton.dataset.tooltip = text;
+  }
+
+  function showChatPopoutFeedback(message) {
+    const box = $("mvChatPopoutFeedback");
+    if (!box) return;
+    clearTimeout(chatPopoutFeedbackTimer);
+    box.textContent = message;
+    box.hidden = false;
+    chatPopoutFeedbackTimer = setTimeout(() => {
+      box.hidden = true;
+      box.textContent = "";
+    }, 5000);
+  }
+
+  function startChatReadyTimer(generation) {
+    clearTimeout(chatReadyTimer);
+    chatReadyTimer = setTimeout(() => {
+      if (generation !== chatGeneration) return;
+      if (!chatAutoRetried) {
+        chatAutoRetried = true;
+        loadChat(state.chatChannelId, { retry: true });
+        return;
+      }
+      setChatStatus("error");
+    }, CHAT_READY_TIMEOUT_MS);
+  }
+
+  function dispatchChatLoadToPopup() {
+    const pending = detachedChat?.pendingLoad;
+    if (!detachedChat?.ready || !pending) return;
+    detachedChat.pendingLoad = null;
+    chatPopupPost("LOAD_CHAT", {
+      channelId: pending.channelId,
+      channelName: channelName(pending.channelId),
+      generation: pending.generation,
+      retry: pending.retry,
+    });
+    chatPopupPost("CHAT_STATUS", {
+      status: "loading",
+      channelId: pending.channelId,
+      generation: pending.generation,
+    });
+    startChatReadyTimer(pending.generation);
+  }
 
   function setChatStatus(status, message) {
     const box = $("mvChatStatus");
+    if (detachedChat) {
+      updateChatPopupStatus(status, message);
+      chatPopupPost("CHAT_STATUS", {
+        status,
+        message: String(message || ""),
+        channelId: state.chatChannelId,
+        generation: chatGeneration,
+      });
+    }
     if (!box) return;
     if (status === "ready") {
       box.hidden = true;
@@ -250,32 +342,156 @@
     const generation = ++chatGeneration;
     if (!retry) chatAutoRetried = false;
     state.chatChannelId = channelId;
+    chatFrameReady = false;
     setChatStatus("loading");
+    if (detachedChat) {
+      clearTimeout(chatReadyTimer);
+      detachedChat.pendingLoad = { channelId, generation, retry };
+      dispatchChatLoadToPopup();
+      return generation;
+    }
     // 채팅 전용 페이지를 쓴다(/live/<id>/chat). 영상이 없는 화면이라 소리·화질을
     // 따로 억제할 필요가 없고, 라이브 페이지를 통째로 띄우는 것보다 훨씬 가볍다.
     const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN);
     url.searchParams.set("cheeseMultiChat", "1");
+    url.searchParams.set("cheeseMultiChatGeneration", String(generation));
     // 다시 연결할 때 같은 주소면 브라우저가 무시할 수 있어 값을 하나 바꾼다.
     if (retry) url.searchParams.set("cheeseRetry", String(generation));
     $("mvChatFrame").src = url.toString();
 
-    clearTimeout(chatReadyTimer);
-    chatReadyTimer = setTimeout(() => {
-      if (generation !== chatGeneration) return; // 이미 다른 채널로 넘어갔다
-      if (!chatAutoRetried) {
-        // 자동 재연결은 딱 한 번만 한다(무한 재시도 금지).
-        chatAutoRetried = true;
-        loadChat(channelId, { retry: true });
-        return;
-      }
-      setChatStatus("error");
-    }, CHAT_READY_TIMEOUT_MS);
+    startChatReadyTimer(generation);
     return generation;
   }
 
   function applyChat(channelId) {
-    if (state.chatChannelId === channelId && $("mvChatFrame").src) return;
+    const inlineFrame = $("mvChatFrame");
+    if (
+      state.chatChannelId === channelId &&
+      (detachedChat || (inlineFrame?.src && !inlineFrame.src.endsWith("about:blank")))
+    ) return;
     loadChat(channelId);
+  }
+
+  function restoreInlineChat(closePopup = true) {
+    const popup = detachedChat;
+    if (!popup) return;
+    detachedChat = null;
+    clearTimeout(chatReadyTimer);
+    clearTimeout(popup.hostReadyTimer);
+    clearInterval(popup.closePoll);
+    try {
+      popup.channel.close();
+    } catch {}
+    $("mvStage").classList.remove("is-chat-popped-out");
+    $("mvChatPopupControl").hidden = true;
+    $("mvChatPopout").hidden = false;
+    if (closePopup && !popup.window.closed) {
+      try {
+        popup.window.close();
+      } catch {}
+    }
+    loadChat(state.chatChannelId);
+  }
+
+  function handleChatPopupMessage(event) {
+    const popup = detachedChat;
+    const data = event?.data;
+    if (
+      !popup ||
+      data?.source !== CHAT_POPUP_MESSAGE ||
+      data.sessionId !== popup.sessionId
+    ) return;
+    if (data.type === "POPUP_READY") {
+      if (popup.ready) return;
+      popup.ready = true;
+      clearTimeout(popup.hostReadyTimer);
+      chatPopupPost("SET_THEME", {
+        dark: document.documentElement.dataset.theme === "dark",
+      });
+      dispatchChatLoadToPopup();
+      return;
+    }
+    if (data.type === "CHAT_FRAME_READY") {
+      if (
+        data.channelId !== state.chatChannelId ||
+        data.generation !== chatGeneration
+      ) return;
+      clearTimeout(chatReadyTimer);
+      setChatStatus("ready");
+      postChatView();
+      return;
+    }
+    if (data.type === "RETRY_CHAT") {
+      chatAutoRetried = false;
+      loadChat(state.chatChannelId, { retry: true });
+      return;
+    }
+    if (data.type === "RETURN_TO_PAGE") {
+      restoreInlineChat();
+      return;
+    }
+    if (data.type === "POPUP_CLOSED") restoreInlineChat(false);
+  }
+
+  function openChatPopup() {
+    if (detachedChat) {
+      try {
+        detachedChat.window.focus();
+      } catch {}
+      return;
+    }
+    if (typeof BroadcastChannel !== "function") {
+      showChatPopoutFeedback("이 브라우저에서는 채팅 분리를 지원하지 않습니다.");
+      return;
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const sessionId = [...bytes]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+    const channel = new BroadcastChannel(`cheese-multiview-chat-${sessionId}`);
+    channel.onmessage = handleChatPopupMessage;
+    const url = new URL(chrome.runtime.getURL(CHAT_POPUP_PAGE));
+    url.searchParams.set("session", sessionId);
+    let popupWindow = null;
+    try {
+      popupWindow = window.open(
+        url.toString(),
+        `cheese-multiview-chat-${sessionId}`,
+        "popup=yes,width=420,height=760,resizable=yes",
+      );
+    } catch {}
+    if (!popupWindow) {
+      channel.close();
+      showChatPopoutFeedback("팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.");
+      return;
+    }
+    detachedChat = {
+      sessionId,
+      channel,
+      window: popupWindow,
+      ready: false,
+      pendingLoad: null,
+      hostReadyTimer: 0,
+      closePoll: 0,
+    };
+    const openedPopup = detachedChat;
+    closeChatSelector();
+    $("mvStage").classList.add("is-chat-popped-out");
+    $("mvChatPopupControl").hidden = false;
+    $("mvChatPopout").hidden = true;
+    updateChatPopupStatus("loading");
+    // 팝업에 실제 채팅을 옮긴 뒤 원본 프레임은 내려 중복 연결과 리소스 사용을 막는다.
+    $("mvChatFrame").src = "about:blank";
+    loadChat(state.chatChannelId);
+    openedPopup.hostReadyTimer = setTimeout(() => {
+      if (detachedChat !== openedPopup || openedPopup.ready) return;
+      showChatPopoutFeedback("채팅 팝업을 준비하지 못해 이 화면으로 돌아왔습니다.");
+      restoreInlineChat();
+    }, CHAT_POPUP_READY_TIMEOUT_MS);
+    detachedChat.closePoll = setInterval(() => {
+      if (detachedChat?.window.closed) restoreInlineChat(false);
+    }, 1000);
   }
 
   // 칸(iframe)은 채널마다 하나씩 만들어 두고 배치가 바뀌어도 '자리'만 옮긴다.
@@ -370,6 +586,9 @@
         : `<button type="button" class="mv-cell-retry is-primary" data-mv-retry="${id}">다시 불러오기</button>` +
           `<button type="button" class="mv-cell-retry" data-mv-replace="${id}">다른 채널 선택</button>`;
     overlay.innerHTML =
+      (status === "ended"
+        ? `<strong class="mv-cell-status-channel">${esc(channelName(channelId))}</strong>`
+        : "") +
       `<span class="mv-cell-status-text">${esc(text)}</span>` +
       `<span class="mv-cell-status-actions">${actions}</span>`;
   }
@@ -494,7 +713,7 @@
       // 이 채널만 멀티뷰에서 뺀다(멀티뷰 전체를 닫는 것이 아니다).
       const close = document.createElement("button");
       close.type = "button";
-      close.className = "mv-cell-close";
+      close.className = "mv-cell-close mv-custom-tooltip";
       close.dataset.mvClose = channel.channelId;
       close.textContent = "×";
       close.setAttribute(
@@ -504,19 +723,19 @@
 
       const change = document.createElement("button");
       change.type = "button";
-      change.className = "mv-cell-change";
+      change.className = "mv-cell-change mv-custom-tooltip";
       change.dataset.mvReplace = channel.channelId;
       change.textContent = "변경";
-      change.title = `${channel.channelName} 채널 변경`;
+      change.dataset.tooltip = `${channel.channelName} 채널 변경`;
       change.setAttribute("aria-label", `${channel.channelName} 채널 변경`);
 
       // 자리 바꾸기 손잡이.
       // ⚠ iframe 은 교차 출처라 그 위에서 시작한 드래그 이벤트가 부모로 오지 않는다.
       //   그래서 칸 위에 얹은 이 손잡이에서만 드래그를 시작한다.
       const grip = document.createElement("div");
-      grip.className = "mv-cell-grip";
+      grip.className = "mv-cell-grip mv-custom-tooltip";
       grip.draggable = true;
-      grip.title = "끌어서 자리 바꾸기";
+      grip.dataset.tooltip = "끌어서 자리 바꾸기";
       grip.setAttribute("aria-label", `${channel.channelName} 자리 바꾸기`);
       grip.innerHTML =
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" ' +
@@ -530,9 +749,9 @@
       // 칸 안에서 바로 메인으로 올리는 버튼.
       const promote = document.createElement("button");
       promote.type = "button";
-      promote.className = "mv-cell-main";
+      promote.className = "mv-cell-main mv-custom-tooltip";
       promote.dataset.mvPromote = channel.channelId;
-      promote.title = "이 채널을 메인으로";
+      promote.dataset.tooltip = "이 채널을 메인으로";
       promote.innerHTML =
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
         'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
@@ -603,7 +822,7 @@
       if (close) {
         const locked = state.chosen.length <= 2;
         close.disabled = locked;
-        close.title = locked
+        close.dataset.tooltip = locked
           ? "멀티뷰는 최소 2개 채널이 필요합니다."
           : "멀티뷰에서 제거";
       }
@@ -971,7 +1190,7 @@
     button.setAttribute("aria-pressed", String(muted));
     const label = muted ? "음소거 해제" : "음소거";
     button.setAttribute("aria-label", `${channelName(channelId)} ${label}`);
-    button.title = label;
+    button.dataset.tooltip = label;
   }
 
   // 전체 볼륨은 모든 칸의 실제 출력에 곱해지므로 버튼도 모두 다시 맞춘다.
@@ -1152,14 +1371,14 @@
           // ⚠ 이름과 '메인' 배지를 나눈다. 한 덩어리에 overflow:hidden 을 두면
           //   이름이 길 때 배지까지 함께 잘려 역할이 안 보인다.
           `<span class="mv-vol-name">` +
-          `<span class="mv-vol-name-text" title="${esc(c.channelName)}">` +
+          `<span class="mv-vol-name-text mv-custom-tooltip" data-tooltip="${esc(c.channelName)}">` +
           `${esc(c.channelName)}</span>` +
           (isMain ? `<span class="mv-main-badge">메인</span>` : "") +
           `</span>` +
-          `<button type="button" class="mv-vol-mute" data-mv-vol-mute="${id}"` +
+          `<button type="button" class="mv-vol-mute mv-custom-tooltip" data-mv-vol-mute="${id}"` +
           ` aria-pressed="${muted}"` +
           ` aria-label="${esc(c.channelName)} ${muted ? "음소거 해제" : "음소거"}"` +
-          ` title="${muted ? "음소거 해제" : "음소거"}"` +
+          ` data-tooltip="${muted ? "음소거 해제" : "음소거"}"` +
           `${forcedOff ? " disabled" : ""}>` +
           `${volumeIcon(volumeIconKind(c.channelId))}</button>` +
           `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
@@ -1169,11 +1388,11 @@
           `${forcedOff ? " disabled" : ""}>` +
           `<span class="mv-vol-pct">${pct(audio.volume)}</span>` +
           (hasMixerControls(c.channelId)
-            ? `<button type="button" class="mv-vol-mixer-toggle"` +
+            ? `<button type="button" class="mv-vol-mixer-toggle mv-custom-tooltip"` +
               ` data-mv-mixer-toggle="${id}"` +
               ` aria-expanded="${mixerOpen.has(c.channelId)}"` +
               ` aria-label="${esc(c.channelName)} 오디오 믹서 설정"` +
-              ` title="오디오 믹서 설정">` +
+              ` data-tooltip="오디오 믹서 설정">` +
               `<svg viewBox="0 0 24 24" width="14" height="14" fill="none"` +
               ` stroke="currentColor" stroke-width="2.4" stroke-linecap="round"` +
               ` stroke-linejoin="round" aria-hidden="true">` +
@@ -1206,10 +1425,10 @@
       notice +
       `<div class="mv-vol-row is-master">` +
       `<span class="mv-vol-name">전체 볼륨</span>` +
-      `<button type="button" class="mv-vol-mute" data-mv-vol-master-mute` +
+      `<button type="button" class="mv-vol-mute mv-custom-tooltip" data-mv-vol-master-mute` +
       ` aria-pressed="${state.masterMuted}"` +
       ` aria-label="전체 볼륨 ${state.masterMuted ? "음소거 해제" : "음소거"}"` +
-      ` title="${state.masterMuted ? "전체 음소거 해제" : "전체 음소거"}">` +
+      ` data-tooltip="${state.masterMuted ? "전체 음소거 해제" : "전체 음소거"}">` +
       `${volumeIcon(state.masterMuted ? "x" : "high")}</button>` +
       `<input type="range" class="mv-vol-range" min="0" max="100" step="1"` +
       ` value="${Math.round(state.masterVolume * 100)}"` +
@@ -2187,7 +2406,8 @@
         ])
           setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), value);
         const rate = row.querySelector('[data-mv-sync-metric="rate"]');
-        if (rate.title !== view.rate.hint) rate.title = view.rate.hint;
+        if (rate.dataset.tooltip !== view.rate.hint)
+          rate.dataset.tooltip = view.rate.hint;
         const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
         const output = row.querySelector("[data-mv-sync-output]");
         setText(output, `${off}${view.pending ? " · 적용 중" : ""}`);
@@ -2287,8 +2507,7 @@
               `<div class="mv-sync-row-head"><strong>${esc(channelName(id))}</strong>` +
               `<span data-mv-sync-status>${view.status}</span>` +
               `<button type="button" class="mv-sync-remove-reference" data-mv-group-remove="${esc(id)}" ` +
-              `aria-label="${esc(channelName(id))} 그룹에서 제거" ` +
-              `title="이 채널을 그룹에서 제거"><svg viewBox="0 0 24 24" width="16" height="16" ` +
+              `aria-label="${esc(channelName(id))} 그룹에서 제거"><svg viewBox="0 0 24 24" width="16" height="16" ` +
               `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
               `stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path>` +
               `</svg></button></div>` +
@@ -2296,7 +2515,7 @@
               `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
               `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
               `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}</span>` +
-              `<span data-mv-sync-metric="rate" title="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
+              `<span class="mv-custom-tooltip" data-mv-sync-metric="rate" data-tooltip="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
               `<div class="mv-sync-controls"><button type="button" data-mv-sync-ref="${esc(id)}"` +
               `${view.ready ? "" : " disabled"}>기준</button>` +
               step(-0.5) +
@@ -2304,7 +2523,7 @@
               `<output data-mv-sync-output aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
               step(0.1) +
               step(0.5) +
-              `<button type="button" data-mv-sync-clear="${esc(id)}" title="보정 초기화">↺</button></div></div>`
+              `<button type="button" class="mv-custom-tooltip" data-mv-sync-clear="${esc(id)}" data-tooltip="보정 초기화">↺</button></div></div>`
             );
           })
           .join("");
@@ -2312,8 +2531,8 @@
           `<section class="mv-sync-group" data-mv-group="${group.id}">` +
           `<div class="mv-sync-group-head"><strong>그룹 ${group.id.toUpperCase()}</strong>` +
           `<span class="mv-group-reference"></span>` +
-          `<button type="button" class="mv-sync-group-reset" data-mv-group-reset="${group.id}" ` +
-          `aria-label="그룹 ${group.id.toUpperCase()} 비우기" title="그룹 비우기">` +
+          `<button type="button" class="mv-sync-group-reset mv-custom-tooltip" data-mv-group-reset="${group.id}" ` +
+          `aria-label="그룹 ${group.id.toUpperCase()} 비우기" data-tooltip="그룹 비우기">` +
           `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ` +
           `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
           `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>` +
@@ -2505,8 +2724,8 @@
       );
       const rateEl = row.querySelector('[data-mv-sync-metric="rate"]');
       setText(rateEl, v.rateInfo.text);
-      if (rateEl && rateEl.title !== v.rateInfo.hint)
-        rateEl.title = v.rateInfo.hint;
+      if (rateEl && rateEl.dataset.tooltip !== v.rateInfo.hint)
+        rateEl.dataset.tooltip = v.rateInfo.hint;
 
       const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
       const output = row.querySelector("[data-mv-sync-output]");
@@ -3261,8 +3480,8 @@
           disabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
         // 방향 설명은 '재생 위치' 이동이다. 배속(재생 속도)과 섞이면 안 된다.
         const stepBtn = (step, text, dir, side) =>
-          `<button type="button" data-mv-sync-offset="${id}" data-step="${step}" ` +
-          `title="재생 위치를 ${dir} 이동(${side})" ` +
+          `<button type="button" class="mv-custom-tooltip" data-mv-sync-offset="${id}" data-step="${step}" ` +
+          `data-tooltip="재생 위치를 ${dir} 이동(${side})" ` +
           `aria-label="${esc(c.channelName)} 재생 위치를 ${dir} 이동" ` +
           `${btnAttrs(v.offDisabled, v.offBusy)}>${text}</button>`;
         return (
@@ -3272,30 +3491,30 @@
           (v.picking
             ? `<label class="mv-sync-pick"><input type="checkbox" data-mv-sync-pick="${id}"` +
               `${v.picked ? " checked" : ""} aria-label="${esc(c.channelName)} 싱크 대상">` +
-              `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong></label>`
-            : `<strong title="${esc(c.channelName)}">${esc(c.channelName)}</strong>`) +
+              `<strong>${esc(c.channelName)}</strong></label>`
+            : `<strong>${esc(c.channelName)}</strong>`) +
           `<span data-mv-sync-status>${esc(v.locked ? "제외됨" : v.label)}</span></div>` +
           `<div class="mv-sync-metrics">` +
           `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}</span>` +
           `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}</span>` +
           `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}</span>` +
-          `<span data-mv-sync-metric="rate" title="${esc(v.rateInfo.hint)}">` +
+          `<span class="mv-custom-tooltip" data-mv-sync-metric="rate" data-tooltip="${esc(v.rateInfo.hint)}">` +
           `${esc(v.rateInfo.text)}</span></div>` +
           `<div class="mv-sync-controls">` +
-          `<button type="button" data-mv-sync-ref="${id}" ` +
-          `title="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
+          `<button type="button" class="mv-custom-tooltip" data-mv-sync-ref="${id}" ` +
+          `data-tooltip="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
           `aria-label="${esc(c.channelName)}을 기준 채널로" ` +
           `${btnAttrs(v.refDisabled, v.refBusy)}>기준</button>` +
           stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
           stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
-          `<output data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
-          `${offText}" title="시간 위치 보정(재생 속도와 별개)">` +
+          `<output class="mv-custom-tooltip" data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
+          `${offText}" data-tooltip="시간 위치 보정(재생 속도와 별개)">` +
           `${offText}${v.nudgePending ? " · 적용 중" : ""}</output>` +
           stepBtn("0.1", "+0.1", "0.1초 뒤로", "과거 쪽") +
           stepBtn("0.5", "+0.5", "0.5초 뒤로", "과거 쪽") +
-          `<button type="button" data-mv-sync-clear="${id}" ` +
+          `<button type="button" class="mv-custom-tooltip" data-mv-sync-clear="${id}" ` +
           `${btnAttrs(v.clearDisabled, v.clearBusy)} ` +
-          `aria-label="${esc(c.channelName)} 보정 초기화" title="보정 초기화">` +
+          `aria-label="${esc(c.channelName)} 보정 초기화" data-tooltip="보정 초기화">` +
           `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
           `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` +
           `</div></div>`
@@ -3776,6 +3995,22 @@
     }
   }
 
+  function saveQuickGeometry() {
+    const panel = $("mvQuick");
+    if (!panel || !chrome.storage?.local) return;
+    const bounds = panel.getBoundingClientRect();
+    void chrome.storage.local
+      .set({
+        cheeseMultiviewQuickPosition: {
+          left: quickPosition.left,
+          top: quickPosition.top,
+          width: Math.round(bounds.width),
+          height: Math.round(bounds.height),
+        },
+      })
+      .catch(() => {});
+  }
+
   // replaceChannelId 를 주면 '교체 모드' 로 연다(고른 채널이 그 자리를 대신한다).
   let quickReplaceId = "";
   // 교체 모드로 들어온 길. 취소했을 때 어디로 돌아갈지가 이것으로 갈린다.
@@ -3899,6 +4134,8 @@
     hint.textContent = quickReplaceId
       ? `${channelName(quickReplaceId)} 대신 볼 채널을 고르세요.`
       : `${state.chosen.length} / 6`;
+    if (quickReplaceId) hint.dataset.tooltip = hint.textContent;
+    else delete hint.dataset.tooltip;
     // 교체 모드는 취소할 수 있어야 한다. 버튼은 머리말의 동작 묶음 안에 둔다
     // (안내 문구 옆에 끼어들어 줄이 밀리지 않게).
     const cancel = $("mvQuickCancelReplace");
@@ -3927,18 +4164,18 @@
           `<li class="mv-quick-item${isMain ? " is-main" : ""}` +
           `${quickReplaceId === c.channelId ? " is-replacing" : ""}"` +
           `${badge ? ` data-state="${esc(status)}"` : ""}>` +
-          `<button type="button" class="mv-quick-select" data-mv-quick-replace="${id}"` +
+          `<button type="button" class="mv-quick-select mv-custom-tooltip" data-mv-quick-replace="${id}"` +
           ` aria-pressed="${quickReplaceId === c.channelId}"` +
-          ` title="${esc(c.channelName)} 를 다른 채널로 바꾸기">` +
+          ` data-tooltip="${esc(c.channelName)} 를 다른 채널로 바꾸기">` +
           `<span class="mv-quick-name">${esc(c.channelName)}</span>` +
           (isMain ? `<span class="mv-quick-tag">메인</span>` : "") +
           (badge
             ? `<span class="mv-quick-state" data-state="${esc(status)}">${esc(badge)}</span>`
             : "") +
           `</button>` +
-          `<button type="button" class="mv-quick-drop" data-mv-quick-drop="${id}"` +
+          `<button type="button" class="mv-quick-drop mv-custom-tooltip" data-mv-quick-drop="${id}"` +
           `${locked ? " disabled" : ""}` +
-          ` title="${locked ? "멀티뷰는 최소 2개 채널이 필요합니다." : "멀티뷰에서 제거"}"` +
+          ` data-tooltip="${locked ? "멀티뷰는 최소 2개 채널이 필요합니다." : "멀티뷰에서 제거"}"` +
           ` aria-label="${esc(c.channelName)} 빼기">×</button></li>`
         );
       })
@@ -4020,12 +4257,25 @@
         quickPosition.left = savedPosition.left;
         quickPosition.top = savedPosition.top;
       }
+      if (Number.isFinite(savedPosition?.width)) {
+        quickSize.width = Math.max(
+          1,
+          Math.min(4000, Math.round(savedPosition.width)),
+        );
+      }
+      if (Number.isFinite(savedPosition?.height)) {
+        quickSize.height = Math.max(
+          1,
+          Math.min(4000, Math.round(savedPosition.height)),
+        );
+      }
     })
     .catch(() => {});
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area === "local" && changes.cheeseMultiviewRememberQuickState) {
       quickRememberState =
         changes.cheeseMultiviewRememberQuickState.newValue === true;
+      if (quickRememberState) saveQuickState();
     }
   });
   // ⚠ 요청은 순서대로 보내도 응답은 뒤섞여 온다. 마지막 요청의 응답만 그린다.
@@ -4202,8 +4452,8 @@
     const avatar = safeImageUrl(SOURCES.profileThumb(r.channelImageUrl));
     const tags = Array.isArray(r.tags) ? r.tags : [];
     return (
-      `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
-      `${full ? " disabled" : ""} title="${esc(r.channelName)}">` +
+      `<button type="button" class="mv-quick-card mv-custom-tooltip" data-mv-quick-add="${esc(r.channelId)}"` +
+      `${full ? " disabled" : ""} data-tooltip="${esc(r.channelName)}">` +
       `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}${r.adult ? " is-adult" : ""}">` +
       (thumb
         ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
@@ -4702,6 +4952,14 @@
       loadChat(state.chatChannelId, { retry: true });
       return;
     }
+    if (target.closest?.("#mvChatPopout")) {
+      openChatPopup();
+      return;
+    }
+    if (target.closest?.("#mvChatPopupReturn")) {
+      restoreInlineChat();
+      return;
+    }
     if (target.closest?.("#mvQuickClose")) {
       closeQuick();
       return;
@@ -5047,14 +5305,7 @@
   const finishQuickMove = () => {
     if (!quickMove) return;
     quickMove = null;
-    void chrome.storage?.local
-      ?.set({
-        cheeseMultiviewQuickPosition: {
-          left: quickPosition.left,
-          top: quickPosition.top,
-        },
-      })
-      .catch(() => {});
+    saveQuickGeometry();
   };
   quickHead?.addEventListener("pointerup", finishQuickMove);
   quickHead?.addEventListener("pointercancel", finishQuickMove);
@@ -5081,7 +5332,9 @@
     clampQuickSize();
   });
   const finishQuickResize = () => {
+    if (!quickDrag) return;
     quickDrag = null;
+    saveQuickGeometry();
   };
   quickResize?.addEventListener("pointerup", finishQuickResize);
   quickResize?.addEventListener("pointercancel", finishQuickResize);
@@ -5104,6 +5357,7 @@
       (quickSize.height ?? bounds.height) +
       (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0);
     clampQuickSize();
+    saveQuickGeometry();
     event.preventDefault();
   });
 
@@ -5264,6 +5518,7 @@
     "FRAME_MIXER_COMMAND_RESULT",
   ]);
   window.addEventListener("message", (event) => {
+    if (detachedChat) return;
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
     if (!data || typeof data !== "object") return;
@@ -5550,7 +5805,13 @@
     if (data.type !== "CHAT_FRAME_READY") return;
     // ⚠ 정말 채팅 프레임이 보낸 것인지 확인한다.
     const frame = $("mvChatFrame");
-    if (!frame || event.source !== frame.contentWindow) return;
+    if (
+      !frame ||
+      event.source !== frame.contentWindow ||
+      data.channelId !== state.chatChannelId ||
+      data.generation !== chatGeneration
+    ) return;
+    chatFrameReady = true;
     clearTimeout(chatReadyTimer);
     setChatStatus("ready");
     postChatView();

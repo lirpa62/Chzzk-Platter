@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 멀티뷰 채팅</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/multiviewChatPopup.css" />
+  </head>
+  <body class="mv-chat-popup-body">
+    <header class="mv-chat-popup-head">
+      <div class="mv-chat-popup-heading">
+        <strong id="mvChatPopupTitle">멀티뷰 채팅</strong>
+        <span id="mvChatPopupStatus" data-state="loading" role="status" aria-live="polite">채팅 연결 중…</span>
+      </div>
+      <button type="button" class="mv-chat-popup-return" id="mvChatPopupReturn" data-tooltip="멀티뷰 시청 화면에서 채팅 보기">
+        이 창에서 보기
+      </button>
+    </header>
+    <main class="mv-chat-popup-view">
+      <iframe id="mvChatPopupFrame" title="채팅" allow="autoplay" referrerpolicy="origin"></iframe>
+      <div class="mv-chat-popup-overlay" id="mvChatPopupOverlay" role="status" aria-live="polite">
+        <span id="mvChatPopupMessage">연결 준비 중…</span>
+        <button type="button" id="mvChatPopupRetry" hidden>다시 연결</button>
+      </div>
+    </main>
+    <script src="src/multiviewChatPopup.js"></script>
+  </body>
+</html>

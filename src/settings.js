@@ -169,6 +169,8 @@
     "cheeseMultiviewSyncDiagnosticsUi",
     "cheeseMultiviewQuickState",
     "cheeseMultiviewQuickPosition",
+    "cheeseMultiviewSetupSortBySource",
+    "cheeseMultiviewRememberSetupSort",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -5119,6 +5121,7 @@
     ["[data-multiview-btn-forward]", "cheeseMultiviewBtnForward", false],
     ["[data-multiview-disable-hidden]", "cheeseMultiviewDisableHidden", false],
     ["[data-multiview-remember-quick-state]", "cheeseMultiviewRememberQuickState", false],
+    ["[data-multiview-remember-setup-sort]", "cheeseMultiviewRememberSetupSort", true],
     ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);

@@ -252,6 +252,9 @@
   const MULTIVIEW_CHANNEL_ID = (
     location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || ""
   ).toLowerCase();
+  const MULTIVIEW_CHAT_GENERATION = Number(
+    MULTIVIEW_PARAMS.get("cheeseMultiChatGeneration"),
+  );
   // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
   const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480"]);
@@ -22379,7 +22382,12 @@
       if (window.parent === window) return;
       try {
         window.parent.postMessage(
-          { source: MULTIVIEW_MESSAGE, type: "CHAT_FRAME_READY" },
+          {
+            source: MULTIVIEW_MESSAGE,
+            type: "CHAT_FRAME_READY",
+            channelId: MULTIVIEW_CHANNEL_ID,
+            generation: MULTIVIEW_CHAT_GENERATION,
+          },
           MULTIVIEW_PARENT_ORIGIN,
         );
       } catch {}

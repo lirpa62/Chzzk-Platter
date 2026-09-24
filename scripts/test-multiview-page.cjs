@@ -107,7 +107,7 @@ const checks = [];
       set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
       get(){return this.getAttribute('data-test-src')||'';},
     });
-    window.sessionStore={};window.openedTabs=[];
+    window.sessionStore={};window.openedTabs=[];window.localStore={};window.storageListeners=[];
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       // 목록 API 는 배경 스크립트가 중계한다(확장 페이지 직접 fetch 는 CORS 로 막힘).
       sendMessage:async(msg)=>{
@@ -125,10 +125,24 @@ const checks = [];
             {id:'g2',name:'게임',channelIds:['aaaa0000000000000000000000000003']},
           ],
           cheeseFollowGroupOrder:['g2','g1'],
-        }),set:async()=>{},remove:async()=>{}},
+          ...window.localStore,
+        }),set:async(values)=>{
+          const changes=Object.fromEntries(Object.entries(values).map(([key,value])=>
+            [key,{oldValue:window.localStore[key],newValue:value}]));
+          Object.assign(window.localStore,values);
+          window.storageListeners.forEach(listener=>listener(changes,'local'));
+        },remove:async(keys)=>{
+          const list=Array.isArray(keys)?keys:[keys];
+          const changes={};
+          for(const key of list){
+            changes[key]={oldValue:window.localStore[key],newValue:undefined};
+            delete window.localStore[key];
+          }
+          window.storageListeners.forEach(listener=>listener(changes,'local'));
+        }},
         session:{get:async(k)=>({[k]:window.sessionStore[k]}),
           set:async(o)=>{Object.assign(window.sessionStore,o);}},
-        onChanged:{addListener:()=>{}}},
+        onChanged:{addListener:listener=>window.storageListeners.push(listener)}},
       tabs:{create:(o)=>{window.openedTabs.push(o.url);}}};
     // 치지직 API 스텁: 팔로잉 3채널.
     const channels=[
@@ -388,6 +402,38 @@ const checks = [];
   );
 
   await test(
+    "선택 페이지는 탭별 마지막 정렬을 저장하고 탭 전환 시 복원한다",
+    `const select=document.getElementById('mvSort');
+     const setMode=async(mode)=>{select.value=mode;
+       select.dispatchEvent(new Event('change',{bubbles:true}));await wait(220);};
+     await setMode('name-desc');
+     check(window.localStore.cheeseMultiviewSetupSortBySource?.following==='name-desc',
+       '팔로잉 정렬이 저장되지 않았다');
+     document.querySelector('[data-mv-source="all"]').click();await wait(250);
+     await setMode('recommended');
+     check(window.localStore.cheeseMultiviewSetupSortBySource?.all==='recommended',
+       '라이브 정렬이 저장되지 않았다');
+     document.querySelector('[data-mv-source="following"]').click();await wait(250);
+     check(select.value==='name-desc','팔로잉으로 돌아왔을 때 마지막 정렬이 복원되지 않았다');
+     document.querySelector('[data-mv-source="all"]').click();await wait(250);
+     check(select.value==='recommended','라이브로 돌아왔을 때 마지막 정렬이 복원되지 않았다');`,
+  );
+
+  await test(
+    "선택 화면 정렬 기억을 끄면 저장값을 지우고 이후 변경을 저장하지 않는다",
+    `await chrome.storage.local.set({cheeseMultiviewRememberSetupSort:false});
+     await wait(20);
+     check(!window.localStore.cheeseMultiviewSetupSortBySource,
+       '기억을 끈 뒤 저장된 정렬값을 지우지 않았다');
+     const select=document.getElementById('mvSort');
+     select.value='name-asc';select.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(20);
+     check(!window.localStore.cheeseMultiviewSetupSortBySource,
+       '기억을 끈 뒤 정렬값을 다시 저장했다');
+     await chrome.storage.local.set({cheeseMultiviewRememberSetupSort:true});`,
+  );
+
+  await test(
     "선택 화면 정렬은 커스텀 옵션 패널에서 선택하고 바깥 클릭으로 닫힌다",
     `const trigger=document.getElementById('mvSortTrigger');
      const select=document.getElementById('mvSort');
@@ -520,6 +566,24 @@ const checks = [];
      check(new Set(ids).size===ids.length,'같은 채널이 여러 구역에 중복됐다');
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);`,
+  );
+
+  await test(
+    "선택 화면 전용 팔로잉 로딩은 채널관리 패널과 같은 스켈레톤을 쓴다",
+    `const box=document.getElementById('mvChannelList');
+     document.querySelector('[data-mv-source="custom"]').click();
+     const cards=box.querySelectorAll('.mv-card.is-custom-following-skeleton');
+     check(cards.length>0,'전용 팔로잉 전용 스켈레톤이 없다');
+     check(cards[0].querySelector('.mv-card-thumb')&&cards[0].querySelector('.mv-card-avatar'),
+       '전용 팔로잉 스켈레톤의 썸네일/프로필 자리가 없다');
+     const text=cards[0].querySelector('.mv-card-text');
+     const lines=[...text.querySelectorAll('.mv-skeleton-line')];
+     check(lines.length===2,'제목/채널명 스켈레톤 줄이 없다');
+     check(text.getBoundingClientRect().width>0&&lines.every(line=>line.getBoundingClientRect().width>0),
+       '제목/채널명 스켈레톤이 실제 너비로 렌더되지 않는다');
+     check(!cards[0].querySelector('.mv-skeleton-box'),
+       '썸네일 자체가 pulse되는 채널관리 패널 형태가 아니다');
+     await wait(350);`,
   );
 
   await test(
@@ -780,7 +844,7 @@ const checks = [];
       },
     });
     window.sessionStore={'cheeseMultiviewSetup:${handoffId}':${JSON.stringify(setup)}};
-    window.localStore={};
+    window.localStore={cheeseMultiviewQuickPosition:{left:24,top:20,width:640,height:400}};
     window.storageListeners=[];
     // 빠른 바꾸기의 후보 목록도 중계로 받는다(고르기 화면과 같은 경로).
     const quickChannels=[
@@ -980,6 +1044,9 @@ const checks = [];
      const quick=document.getElementById('mvQuick');
      const rail=document.getElementById('mvQuickAdd');
      check(!quick.hidden,'채널 관리 패널이 열리지 않았다');
+     const restored=quick.getBoundingClientRect();
+     check(Math.abs(restored.width-640)<2&&Math.abs(restored.height-400)<2,
+       '저장된 채널 관리 크기를 복원하지 않았다: '+restored.width+'x'+restored.height);
      check(quick.querySelector('.mv-quick-head strong')?.textContent.includes('채널 관리'),
        'Quick 제목이 채널 관리가 아니다');
      quick.querySelector('[data-mv-quick-source="live"]').click();
@@ -1013,6 +1080,26 @@ const checks = [];
      await wait(250);
      document.getElementById('mvQuickClose').click();
      check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "Quick 교체 안내가 긴 채널명에서도 한 줄로 유지된다",
+    `document.getElementById('mvBack').click();
+     const quick=document.getElementById('mvQuick');
+     quick.style.width='420px';
+     const channel=window.__mvState.chosen[0];
+     const originalName=channel.channelName;
+     channel.channelName='아주긴채널이름'.repeat(12);
+     quick.querySelector('[data-mv-quick-replace="'+channel.channelId+'"]').click();
+     const head=quick.querySelector('.mv-quick-head');
+     const hint=document.getElementById('mvQuickHint');
+     check(getComputedStyle(hint).whiteSpace==='nowrap','교체 안내가 줄바꿈을 허용한다');
+     check(hint.scrollWidth>hint.clientWidth,'긴 안내가 말줄임되지 않았다');
+     check(hint.dataset.tooltip===hint.textContent,'잘린 안내의 전체 문구 툴팁이 없다');
+     check(head.getBoundingClientRect().height<34,'헤더가 두 줄 이상으로 늘어났다');
+     quick.querySelector('[data-mv-quick-replace="'+channel.channelId+'"]').click();
+     channel.channelName=originalName;
+     document.getElementById('mvQuickClose').click();`,
   );
 
   await test(
@@ -1233,14 +1320,31 @@ const checks = [];
      const search=document.getElementById('mvQuickSearch');
      search.value='봉누도';
      search.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(350);
+     const quickSort=document.getElementById('mvQuickSort');
+     quickSort.value='name-desc';
+     quickSort.dispatchEvent(new Event('change',{bubbles:true}));
      document.getElementById('mvQuickClose').click();
      await wait(20);
      check(window.localStore.cheeseMultiviewQuickState?.keyword==='봉누도',
        '검색어가 저장되지 않았다');
+     check(window.localStore.cheeseMultiviewQuickState?.sortBySource?.search==='name-desc',
+       '검색 탭 정렬이 저장되지 않았다');
      document.getElementById('mvBack').click();
      check(document.querySelector('[data-mv-quick-source="search"]').getAttribute('aria-pressed')==='true',
        '검색 탭을 복원하지 않았다');
      check(search.value==='봉누도','검색어를 복원하지 않았다');
+     check(quickSort.value==='name-desc','검색 탭 정렬을 복원하지 않았다');
+     document.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(250);
+     quickSort.value='viewers-asc';
+     quickSort.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(20);
+     check(window.localStore.cheeseMultiviewQuickState?.sortBySource?.following==='viewers-asc',
+       '팔로잉 탭 정렬이 검색 탭 정렬과 별도로 저장되지 않았다');
+     document.querySelector('[data-mv-quick-source="search"]').click();
+     await wait(250);
+     check(quickSort.value==='name-desc','다른 탭 정렬을 바꾼 뒤 검색 정렬이 유지되지 않았다');
      document.getElementById('mvQuickClose').click();
      await chrome.storage.local.set({cheeseMultiviewRememberQuickState:false});`,
   );
@@ -1555,6 +1659,10 @@ const checks = [];
      handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
      const resized=quick.getBoundingClientRect();
      check(resized.height>old.height,'세로 크기가 늘지 않았다');
+     await wait(20);
+     const saved=window.localStore.cheeseMultiviewQuickPosition;
+     check(saved?.width===Math.round(resized.width)&&saved?.height===Math.round(resized.height),
+       '조절한 크기가 저장값에 반영되지 않았다: '+JSON.stringify(saved));
      document.getElementById('mvQuickClose').click();
      document.getElementById('mvBack').click();
      check(Math.abs(quick.getBoundingClientRect().height-resized.height)<2,
@@ -2139,6 +2247,9 @@ const checks = [];
      await wait(100);
      check(target.isConnected,'종료됐다고 칸을 지웠다');
      check(target.dataset.status==='ended','상태가 ended 가 아니다');
+     const channelLabel=target.querySelector('.mv-cell-status-channel');
+     check(channelLabel?.textContent===window.__mvState.chosen.find(c=>c.channelId===id)?.channelName,
+       '종료 안내 위에 해당 채널명이 없다');
      const text=target.querySelector('.mv-cell-status-text').textContent;
      check(text.includes('종료'),'종료 안내 문구가 아니다: '+text);
      // 끝난 방송은 다시 불러와도 같은 종료 화면이다. 그래서 '다시 불러오기' 와
@@ -2199,10 +2310,14 @@ const checks = [];
      window.sentMessages.length=0;
      // 프레임이 준비됐다고 알려 오면 지금 테마를 보낸다.
      const chatReady=()=>{
+       const frame=document.getElementById('mvChatFrame');
+       const chatUrl=new URL(frame.src);
        const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-         data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}});
+         data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
+           channelId:chatUrl.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+           generation:Number(chatUrl.searchParams.get('cheeseMultiChatGeneration'))}});
        Object.defineProperty(e,'source',
-         {value:document.getElementById('mvChatFrame').contentWindow});
+         {value:frame.contentWindow});
        window.dispatchEvent(e);
      };
      chatReady();
@@ -2236,16 +2351,118 @@ const checks = [];
      await wait(100);
      check(!box.hidden,'채팅 연결 중 덮개가 없다');
      check(box.textContent.includes('연결'),'연결 중 문구가 아니다');
+     // 채팅 iframe 준비 전에 테마가 바뀌어도 잘못된 origin으로 메시지를 보내지 않는다.
+     window.sentMessages.length=0;
+     const priorTheme=document.documentElement.dataset.theme;
+     document.documentElement.dataset.theme=priorTheme==='dark'?'light':'dark';
+     await wait(50);
+     check(!window.sentMessages.some(message=>
+       message.data?.type==='SET_MULTIVIEW_CHAT_VIEW'),
+       '채팅 iframe 준비 전에 테마 메시지를 보냈다');
+     document.documentElement.dataset.theme=priorTheme;
      // 준비 신호가 오면 걷힌다.
+     const chatFrame=document.getElementById('mvChatFrame');
+     const chatUrl=new URL(chatFrame.src);
      const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-       data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY'}});
+       data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
+         channelId:chatUrl.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+         generation:Number(chatUrl.searchParams.get('cheeseMultiChatGeneration'))}});
      Object.defineProperty(e,'source',
-       {value:document.getElementById('mvChatFrame').contentWindow});
+       {value:chatFrame.contentWindow});
      window.dispatchEvent(e);
      await wait(50);
      check(box.hidden,'준비됐는데 덮개가 남았다');
+     check(window.sentMessages.some(message=>
+       message.data?.type==='SET_MULTIVIEW_CHAT_VIEW'),
+       '채팅 iframe 준비 후 테마 메시지를 보내지 않았다');
      // 채팅을 다시 걸어도 영상은 그대로다.
      check(videoSrcs().length===before,'채팅 때문에 영상이 다시 걸렸다');`,
+  );
+
+  await test(
+    "채팅을 팝업으로 분리하고 채널 전환·복귀를 처리한다",
+    `window.__chatPopupBuses=[];window.__chatPopupWindows=[];
+     window.BroadcastChannel=class{
+       constructor(name){this.name=name;this.sent=[];window.__chatPopupBuses.push(this);}
+       postMessage(data){this.sent.push(data);}
+       close(){this.closed=true;}
+     };
+     window.open=(url,name,features)=>{
+       const popup={closed:false,focus(){},close(){this.closed=true;}};
+       window.__chatPopupWindows.push({url,name,features,popup});
+       return popup;
+     };
+     const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
+     const before=videoSrcs().length;
+     const signalInlineReady=()=>{
+       const frame=document.getElementById('mvChatFrame'),url=new URL(frame.src);
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
+           channelId:url.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+           generation:Number(url.searchParams.get('cheeseMultiChatGeneration'))}});
+       Object.defineProperty(e,'source',{value:frame.contentWindow});
+       window.dispatchEvent(e);
+     };
+     document.getElementById('mvChatPopout').click();
+     await wait(50);
+     const opened=window.__chatPopupWindows.at(-1);
+     const bus=window.__chatPopupBuses.at(-1);
+     const popupUrl=new URL(opened.url);
+     check(popupUrl.pathname.endsWith('/multiviewChatPopup.html'),'채팅 팝업 페이지가 아니다');
+     check(popupUrl.searchParams.get('session')===bus.name.split('cheese-multiview-chat-')[1],
+       '세션 id가 채널 이름과 일치하지 않는다');
+     check(document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
+       '분리 상태가 화면에 반영되지 않았다');
+     check(document.getElementById('mvChatFrame').src==='about:blank',
+       '분리 후 본창의 채팅 iframe을 내리지 않았다');
+     check(!document.getElementById('mvChatPopupControl').hidden,
+       '본창에 팝업 복귀 UI가 없다');
+     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
+       sessionId:'wrong-session',type:'POPUP_READY'}});
+     check(!bus.sent.some(m=>m.type==='LOAD_CHAT'),'다른 세션 응답을 받아들였다');
+     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
+       sessionId:popupUrl.searchParams.get('session'),type:'POPUP_READY'}});
+     await wait(30);
+     let load=bus.sent.filter(m=>m.type==='LOAD_CHAT').at(-1);
+     check(load&&load.channelId===window.__mvState.chatChannelId,'현재 채널을 팝업에 보내지 않았다');
+     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
+       sessionId:popupUrl.searchParams.get('session'),type:'CHAT_FRAME_READY',
+       channelId:load.channelId,generation:load.generation}});
+     check(document.getElementById('mvChatPopupStatus').textContent==='채팅 팝업에서 표시 중',
+       '팝업 연결 상태를 표시하지 않았다');
+     document.querySelector('[data-mv-pop-toggle="chat"]').click();
+     const other=[...document.querySelectorAll('[data-mv-set-chat]')]
+       .find(o=>o.dataset.mvSetChat!==window.__mvState.chatChannelId);
+     other.click();
+     await wait(30);
+     load=bus.sent.filter(m=>m.type==='LOAD_CHAT').at(-1);
+     check(load.channelId===window.__mvState.chatChannelId,'채팅 채널 변경을 팝업에 반영하지 않았다');
+     check(document.getElementById('mvChatFrame').src==='about:blank',
+       '분리 중 본창에 채팅 iframe이 다시 생겼다');
+     document.getElementById('mvChatPopupReturn').click();
+     await wait(30);
+     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
+       '복귀 뒤 분리 상태가 남았다');
+     check(opened.popup.closed,'본창 복귀 시 팝업을 닫지 않았다');
+     check(new URL(document.getElementById('mvChatFrame').src).pathname===
+       '/live/'+window.__mvState.chatChannelId+'/chat','현재 채팅을 본창에 되돌리지 않았다');
+     signalInlineReady();
+     check(videoSrcs().length===before,'채팅 분리/복귀가 영상 프레임을 다시 걸었다');
+     // 팝업의 닫기 신호가 들어오면 자동으로 본창에 복귀한다.
+     document.getElementById('mvChatPopout').click();
+     await wait(30);
+     const secondBus=window.__chatPopupBuses.at(-1);
+     const secondUrl=new URL(window.__chatPopupWindows.at(-1).url);
+     secondBus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
+       sessionId:secondUrl.searchParams.get('session'),type:'POPUP_READY'}});
+     await wait(20);
+     secondBus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
+       sessionId:secondUrl.searchParams.get('session'),type:'POPUP_CLOSED'}});
+     await wait(30);
+     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
+       '팝업 닫힘 뒤 본창 채팅을 복원하지 않았다');
+     signalInlineReady();
+     check(videoSrcs().length===before,'팝업 닫힘 복귀가 영상 프레임을 다시 걸었다');`,
   );
 
   await test(
@@ -2439,7 +2656,7 @@ const checks = [];
      check(document.querySelectorAll('.mv-cell').length===2,'2개로 줄지 않았다');
      const locked=[...document.querySelectorAll('.mv-cell-close')];
      check(locked.every(b=>b.disabled),'2개인데 제거가 잠기지 않았다');
-     check(locked[0].title.includes('최소 2개'),'왜 잠겼는지 알려 주지 않는다');`,
+     check(locked[0].dataset.tooltip.includes('최소 2개'),'왜 잠겼는지 알려 주지 않는다');`,
   );
 
   await test(
@@ -3735,6 +3952,9 @@ const checks = [];
      ids.slice(3,5).forEach(id=>assign(id,'b'));
      const [a,b]=window.__mvState.sync.groups;
      check(a.channelIds.length===3&&b.channelIds.length===2,'그룹 배정이 틀렸다');
+     check(panel.querySelectorAll(
+       '.mv-sync-row-head.mv-custom-tooltip, .mv-sync-row-head[data-tooltip], .mv-sync-row-head[title], .mv-sync-row-head .mv-custom-tooltip, .mv-sync-row-head [data-tooltip], .mv-sync-row-head [title]'
+     ).length===0,'그룹 싱크 행 헤더에 툴팁이 남아 있다');
      a.manualOffsets[ids[0]]=0.5;a.manualOffsets[ids[1]]=1.2;
      b.manualOffsets[ids[3]]=0.7;b.manualOffsets[ids[4]]=-0.2;
      const beforeB=JSON.stringify(b.manualOffsets);
