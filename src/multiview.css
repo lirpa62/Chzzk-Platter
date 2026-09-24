@@ -826,6 +826,23 @@ button.mv-live-more {
 .mv-pop-button[aria-expanded="true"] {
   border-color: var(--popup-brand, #00ffa3);
 }
+.mv-pop-button.mv-topbar-chat-expand {
+  background: #6f42c1;
+  border-color: #6f42c1;
+  color: #fff;
+  flex: none;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mv-pop-button.mv-topbar-chat-expand:hover {
+  background: #8055d1;
+  border-color: #8055d1;
+  color: #fff;
+}
+.mv-pop-button.mv-topbar-chat-expand:focus-visible {
+  outline: 2px solid #bda2ff;
+  outline-offset: 2px;
+}
 .mv-pop-panel {
   background: var(--popup-bg, #141517);
   border: 1px solid var(--popup-border, #34383d);
@@ -1037,6 +1054,31 @@ button.mv-live-more {
 .mv-cell-close:disabled {
   cursor: default;
   opacity: 0.35;
+}
+.mv-cell-change {
+  background: #6f42c1;
+  border: 1px solid #6f42c1;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+.mv-cell-change:hover {
+  background: #8055d1;
+  border-color: #8055d1;
+}
+.mv-cell-change:focus-visible {
+  outline: 2px solid #bda2ff;
+  outline-offset: 2px;
+}
+@media (hover: none), (pointer: coarse) {
+  .mv-cell-tools {
+    opacity: 1;
+  }
 }
 /* 상태 덮개의 단추 줄. */
 .mv-cell-status-actions {
@@ -1802,13 +1844,21 @@ button.mv-live-more {
 .mv-stage.is-chat-folded .mv-chat-resize {
   display: none;
 }
-/* 접으면 채팅 본문(프레임 + 덮개)을 통째로 숨긴다. 머리말만 남는다. */
+/* 접혀도 iframe은 유지하되 시청 영역 위에 클릭 가능한 부분을 남기지 않는다. */
 .mv-stage.is-chat-folded .mv-chat-body {
   display: none;
 }
 .mv-stage.is-chat-folded .mv-chat {
-  height: auto;
-  width: auto;
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+.mv-stage.is-chat-folded .mv-chat-head {
+  display: none;
 }
 .mv-chat-head {
   align-items: center;
@@ -1847,6 +1897,9 @@ button.mv-live-more {
 :root:not([data-theme="dark"]) .mv-stage[data-chat-side="top"] .mv-chat {
   border-left: 0;
   border-top: 1px solid var(--popup-border, #34383d);
+}
+:root:not([data-theme="dark"]) .mv-stage.is-chat-folded .mv-chat {
+  border: 0;
 }
 
 .mv-toolbar {

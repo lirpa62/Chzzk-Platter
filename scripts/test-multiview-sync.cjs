@@ -137,7 +137,7 @@ assert.equal(autoCorrection(true, stats(4), 3).seek, false,
 assert.equal(autoCorrection(false, stats(2), 3).seek, true,
   "muting a channel makes it seek-eligible again");
 assert.match(watch, /function isSyncAudioProtected\(channelId\)[\s\S]*?effectiveMuted\(channelId\) === false/);
-assert.match(watch, /!isSyncAudioProtected\(id\) && target !== null/);
+assert.match(watch, /!isSyncAudioProtected\(id\)\s*&&\s*target !== null/);
 assert.match(watch, /setSyncRate\(id, SYNC\.rateFor/);
 assert.match(watch, /alignSync\(\[id\], true, \{ \[id\]: 0 \}, true\)/,
   "per-channel manual reset remains allowed");

@@ -500,6 +500,14 @@
         `${channel.channelName} 멀티뷰에서 제거`,
       );
 
+      const change = document.createElement("button");
+      change.type = "button";
+      change.className = "mv-cell-change";
+      change.dataset.mvReplace = channel.channelId;
+      change.textContent = "변경";
+      change.title = `${channel.channelName} 채널 변경`;
+      change.setAttribute("aria-label", `${channel.channelName} 채널 변경`);
+
       // 자리 바꾸기 손잡이.
       // ⚠ iframe 은 교차 출처라 그 위에서 시작한 드래그 이벤트가 부모로 오지 않는다.
       //   그래서 칸 위에 얹은 이 손잡이에서만 드래그를 시작한다.
@@ -532,6 +540,7 @@
         "<span>메인으로</span>";
       // ⚠ 손잡이만 draggable 이다. 제거 단추가 드래그 시작점이 되면 안 된다.
       tools.appendChild(grip);
+      tools.appendChild(change);
       tools.appendChild(close);
       cell.appendChild(box);
       cell.appendChild(overlay);
@@ -4904,15 +4913,18 @@
       renderTopbar();
       return;
     }
-    if (target.closest?.("#mvChatToggle")) {
+    if (target.closest?.("#mvChatToggle, #mvChatExpand")) {
       // ⚠ 채팅 접기 = UI 만 숨김. iframe 은 그대로 살아 있어 채팅 연결도 유지된다.
       //   src 를 비우면 다시 펼 때 채팅이 재연결돼 그동안의 대화를 놓친다.
       //   연결까지 끊는 '채팅 끄기' 가 필요하면 별도 동작으로 나눈다.
       const stage = $("mvStage");
       const folded = stage.classList.toggle("is-chat-folded");
       const button = $("mvChatToggle");
-      button.textContent = folded ? "펴기" : "접기";
-      button.setAttribute("aria-label", folded ? "채팅 펴기" : "채팅 접기");
+      if (folded) closeChatSelector();
+      button.setAttribute("aria-expanded", String(!folded));
+      const expand = $("mvChatExpand");
+      expand.hidden = !folded;
+      (folded ? expand : button).focus();
       return;
     }
     // 패널 안의 빈 곳을 누른 게 아니면(=바깥) 열린 팝오버를 닫는다.

@@ -10886,6 +10886,7 @@
   // ── 설정 JSON 내보내기·불러오기 ──────────────────────────────────────────
   const SETTINGS_TRANSFER_FORMAT = "chzzk-platter-settings";
   const SETTINGS_TRANSFER_SCHEMA_VERSION = 1;
+  const MULTIVIEW_CHAT_SIZE_KEY = "cheeseMultiviewChatSize";
   // 계정별 클립 보관함을 최대치로 사용하면 백업이 수십 MB가 될 수 있다. 직접 만든
   // 전체 백업도 다시 읽을 수 있게 하되, 손상되거나 지나치게 큰 파일로 설정창이
   // 멈추는 것은 막기 위해 넉넉한 상한만 둔다.
@@ -10914,6 +10915,30 @@
     CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
   const SETTINGS_MEDIA_KEY_PATTERN =
     /^(?:audioMixer|videoFilter):[0-9a-f]{32}$/i;
+
+  function normalizeTransferMultiviewChatSize(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const size = {};
+    for (const key of ["w", "h"]) {
+      const number = Number(value[key]);
+      if (Number.isFinite(number) && number >= 260) {
+        size[key] = Math.min(4000, Math.round(number));
+      }
+    }
+    return Object.keys(size).length ? size : null;
+  }
+
+  function readTransferMultiviewChatSize() {
+    try {
+      return normalizeTransferMultiviewChatSize(
+        JSON.parse(localStorage.getItem(MULTIVIEW_CHAT_SIZE_KEY) || "null"),
+      );
+    } catch {
+      return null;
+    }
+  }
   // NEW 읽음 상태는 설치별 UI 메타데이터이므로 설정 JSON으로 다른 브라우저에 옮기지 않는다.
   [
     "cheeseSettingsKnownFeatures",
@@ -11429,6 +11454,7 @@
             localStorage.getItem(THEME_STORAGE_KEY) === "dark"
               ? "dark"
               : "light",
+          multiviewChatSize: readTransferMultiviewChatSize(),
         },
       };
       if (includeUserData) {
@@ -11646,6 +11672,16 @@
       if (theme === "dark" || theme === "light") {
         localStorage.setItem(THEME_STORAGE_KEY, theme);
         applyTheme(theme);
+      }
+      const multiviewChatSize = normalizeTransferMultiviewChatSize(
+        payload?.appearance?.multiviewChatSize,
+      );
+      if (multiviewChatSize) {
+        const currentChatSize = readTransferMultiviewChatSize() || {};
+        localStorage.setItem(
+          MULTIVIEW_CHAT_SIZE_KEY,
+          JSON.stringify({ ...currentChatSize, ...multiviewChatSize }),
+        );
       }
 
       if (

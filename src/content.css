@@ -4348,6 +4348,14 @@ html.cheese-cf-on
   padding-left: 3px;
   padding-right: 3px;
 }
+/* 접힌 그룹은 왼쪽 색 바가 2px을 차지한다. 세로형 프로필이 있는 그룹만
+   목록 안쪽 여백을 줄여 36px 사진이 레일 밖으로 잘리지 않게 한다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group-list:has(.cheese-cf-square) {
+  padding-left: 3px;
+  padding-right: 1px;
+}
 /* 링이 잘리지 않도록 항목 자신은 자르지 않는다(실측에서 .cheese-cf-item 이
    clip 조상으로 잡혔다). nav 의 clip 은 플레이어 침범 방지용이라 유지한다. */
 #sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-item {
@@ -5848,26 +5856,25 @@ html.cheese-channel-profile-radius-enabled
   ) !important;
 }
 
-/* 접힌 전용 목록은 프로필 링의 안쪽 폭이 작다. 모서리 옵션이 이미지에 적용될 때
-   이미지 패딩이 content-box 바깥으로 더해지면 오른쪽/아래쪽 간격이 먼저 사라지므로,
-   링 안쪽 크기에 패딩까지 포함하고 사방 여백을 동일하게 유지한다. */
-html.cheese-channel-profile-radius-enabled
-  #sidebar:not([class*="_is_expanded_"])
+/* 접힌 목록은 네이티브 프로필의 패딩/호버 규칙과 무관하게 사진을 링 중앙에 둔다.
+   모서리 옵션의 100% 이미지 크기 규칙도 여기서는 덮어써야 사방 간격이 같다. */
+#sidebar:not([class*="_is_expanded_"])
   #cheese-custom-follow
-  .cheese-channel-profile-radius-target {
-  box-sizing: border-box !important;
+  .cheese-cf-avatar {
+  position: relative;
 }
-
-html.cheese-channel-profile-radius-enabled
-  #sidebar:not([class*="_is_expanded_"])
+#sidebar:not([class*="_is_expanded_"])
   #cheese-custom-follow
-  .cheese-channel-profile-radius-target
+  .cheese-cf-avatar
   > img {
   box-sizing: border-box !important;
-  width: 100% !important;
-  height: 100% !important;
+  position: absolute !important;
+  top: 3px !important;
+  left: 3px !important;
+  width: calc(100% - 6px) !important;
+  height: calc(100% - 6px) !important;
   margin: 0 !important;
-  padding: 2px !important;
+  padding: 0 !important;
 }
 
 .cheese-cf-profile::after {
@@ -16360,6 +16367,68 @@ img.cheese-peak-role-badge {
 }
 #sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-square {
   flex: none;
+}
+/* 고른 채널만 접힌 목록에서 세로형 초상화로 표시한다. 일반 아바타의
+   32px 정사각 제한과 네이티브 행 높이에 다시 눌리지 않게 크기를 함께 고정한다. */
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-avatar.cheese-cf-square {
+  aspect-ratio: 3 / 10;
+  width: 36px !important;
+  height: 120px !important;
+  min-width: 36px !important;
+  min-height: 120px !important;
+  max-width: 36px !important;
+  max-height: 120px !important;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-item:has(.cheese-cf-square),
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-inner:has(> .cheese-cf-square) {
+  height: auto !important;
+  min-height: 126px;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-inner:has(> .cheese-cf-square) {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding-block: 3px;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-avatar.cheese-cf-square
+  > img {
+  top: 3px !important;
+  left: 3px !important;
+  width: calc(100% - 6px) !important;
+  height: calc(100% - 6px) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-avatar.cheese-cf-square::after {
+  display: none;
+}
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-item:hover
+  .cheese-cf-avatar.cheese-cf-square
+  > img,
+#sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-item:focus-within
+  .cheese-cf-avatar.cheese-cf-square
+  > img {
+  outline: 2px solid
+    var(--sem-color-border-brand-base, var(--cheese-platter-border-brand-base));
+  outline-offset: -2px;
 }
 
 /* 모달 목록의 미리보기: 고른 채널은 실제 적용될 사각 모양으로 보여 준다. */

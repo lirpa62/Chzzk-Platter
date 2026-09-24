@@ -80,8 +80,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1']]);
+      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320})]]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
+      window.downloadedBlobs=[];
+      URL.createObjectURL=blob=>{downloadedBlobs.push(blob);return 'blob:fixture'};
+      URL.revokeObjectURL=()=>{};
+      HTMLAnchorElement.prototype.click=function(){};
       const previousTabOrder=[...document.querySelectorAll('.settings-tab')].map(el=>el.dataset.tab).filter(tab=>tab!=='all'&&tab!=='multiview');
       previousTabOrder.splice(previousTabOrder.indexOf('customfollow'),1);
       previousTabOrder.splice(2,0,'customfollow');
@@ -367,6 +371,32 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const shot=await command('Page.captureScreenshot',{format:'png'});
       writeFileSync(join(tmpdir(),`cheese-settings-disclosure-${open?'open':'closed'}.png`),Buffer.from(shot.data,'base64'));
     }
+    await test('multiview chat size is included in settings and full backup and imports safely',`
+      const exportPayload=async selector=>{
+        const before=downloadedBlobs.length;
+        document.querySelector(selector).click();
+        for(let i=0;i<30&&downloadedBlobs.length===before;i++)await new Promise(resolve=>setTimeout(resolve,10));
+        check(downloadedBlobs.length===before+1,'export did not produce a file: '+selector);
+        return JSON.parse(await downloadedBlobs[before].text());
+      };
+      const regular=await exportPayload('[data-settings-export]');
+      const full=await exportPayload('[data-settings-export-full]');
+      check(JSON.stringify(regular.appearance.multiviewChatSize)==='{"w":430,"h":320}','settings export omitted multiview chat size');
+      check(JSON.stringify(full.appearance.multiviewChatSize)==='{"w":430,"h":320}','full backup omitted multiview chat size');
+      const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true},appearance:{multiviewChatSize:{w:720,h:180}}};
+      const input=document.querySelector('[data-settings-import-file]');
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      const imported=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
+      check(imported.w===720&&imported.h===320,'invalid dimension was not ignored while retaining existing size');
+      const bounded={...payload,appearance:{multiviewChatSize:{w:9000,h:300}}};
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(bounded)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      const capped=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
+      check(capped.w===4000&&capped.h===300,'imported dimensions were not capped');
+    `);
     assert.deepEqual(await evaluate('errors'),[]);
     console.log(JSON.stringify({passed:checks.length,checks,screenshots:'temporary directory: cheese-settings-ui-{420,788,1280,390}.png'},null,2));
   } finally {

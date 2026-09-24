@@ -39,6 +39,9 @@
         <div class="mv-pop-panel" role="listbox" id="mvChatPanel" hidden></div>
       </div>
 
+      <button type="button" class="mv-pop-button mv-topbar-chat-expand" id="mvChatExpand"
+        aria-controls="mvChatBody" aria-expanded="false" hidden>채팅 펴기</button>
+
       <div class="mv-pop" data-mv-pop="side">
         <button
           type="button"
@@ -288,11 +291,12 @@
           >
             메인 따라가기
           </button>
-          <button type="button" id="mvChatToggle" aria-label="채팅 접기">
+          <button type="button" id="mvChatToggle" aria-label="채팅 접기"
+            aria-controls="mvChatBody" aria-expanded="true">
             접기
           </button>
         </div>
-        <div class="mv-chat-body">
+        <div class="mv-chat-body" id="mvChatBody">
           <iframe
             id="mvChatFrame"
             title="채팅"

@@ -2270,6 +2270,102 @@ const checks = [];
   );
 
   await test(
+    "채팅을 접으면 세 방향 모두 영상 영역이 넓어지고 펼치기 버튼은 상단에 나타난다",
+    `const stage=document.getElementById('mvStage');
+     const fit=document.getElementById('mvFramesFit');
+     const chat=document.getElementById('mvChat');
+     const toggle=document.getElementById('mvChatToggle');
+     const expand=document.getElementById('mvChatExpand');
+     const topbar=document.getElementById('mvTopbar');
+     const frame=document.getElementById('mvChatFrame');
+     const videoFrames=[...document.querySelectorAll('.mv-cell iframe')];
+     const before=window.frameSrcs.length;
+     check(expand.parentElement===topbar && expand.hidden,'상단 펼치기 버튼의 초기 상태가 잘못됐다');
+     for(const side of ['right','left','bottom']){
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       document.querySelector('[data-mv-set-side="'+side+'"]').click();
+       const expanded=fit.getBoundingClientRect();
+       toggle.click();
+       const folded=fit.getBoundingClientRect();
+       const buttonRect=expand.getBoundingClientRect();
+       const topbarRect=topbar.getBoundingClientRect();
+       check(stage.classList.contains('is-chat-folded'),side+' 채팅이 접히지 않았다');
+       check(getComputedStyle(chat).position==='absolute' &&
+         chat.getBoundingClientRect().width===0 && chat.getBoundingClientRect().height===0,
+         side+' aside가 공간을 차지한다');
+       check(side==='bottom' ? folded.height>expanded.height+100 :
+         folded.width>expanded.width+100,side+' 영상 영역이 확장되지 않았다');
+       const stageRect=stage.getBoundingClientRect();
+       check(Math.abs(folded.width-stageRect.width)<2 &&
+         Math.abs(folded.height-stageRect.height)<2,
+         side+' 영상 영역이 전체 공간을 쓰지 않는다');
+       check(!expand.hidden && buttonRect.width>0 &&
+         buttonRect.left>=topbarRect.left && buttonRect.right<=topbarRect.right &&
+         buttonRect.top>=topbarRect.top && buttonRect.bottom<=topbarRect.bottom,
+         side+' 펼치기 버튼이 상단 바 밖으로 나갔다');
+       const expandStyle=getComputedStyle(expand);
+       check(expandStyle.backgroundColor==='rgb(111, 66, 193)' &&
+         expandStyle.color==='rgb(255, 255, 255)',
+         side+' 채팅 펼치기 버튼이 주변 버튼과 구분되지 않는다');
+       check(getComputedStyle(chat.querySelector('.mv-chat-head')).display==='none',
+         side+' 접힌 채팅의 머리말이 남았다');
+       check(expand.textContent==='채팅 펴기',side+' 펼치기 버튼 문구가 없다');
+       check(toggle.getAttribute('aria-expanded')==='false',
+         side+' 접힘 상태가 접근성 속성에 반영되지 않았다');
+       check(document.activeElement===expand,side+' 포커스가 펼치기 버튼으로 이동하지 않았다');
+       expand.click();
+       check(!stage.classList.contains('is-chat-folded'),side+' 채팅이 다시 열리지 않았다');
+       check(expand.hidden && document.activeElement===toggle,
+         side+' 펼친 뒤 버튼·포커스가 돌아오지 않았다');
+       check(toggle.getAttribute('aria-expanded')==='true',
+         side+' 펼침 상태가 접근성 속성에 반영되지 않았다');
+       check(Math.abs(fit.getBoundingClientRect().width-expanded.width)<2 &&
+         Math.abs(fit.getBoundingClientRect().height-expanded.height)<2,
+         side+' 펼친 뒤 기존 크기로 돌아오지 않았다');
+     }
+     check(document.getElementById('mvChatFrame')===frame,'채팅 iframe이 교체됐다');
+     check(videoFrames.every((item)=>item.isConnected),'영상 iframe이 교체됐다');
+     check(window.frameSrcs.length===before,'채팅 접기로 영상이 다시 로드됐다');
+     document.querySelector('[data-mv-pop-toggle="side"]').click();
+     document.querySelector('[data-mv-set-side="right"]').click();`,
+  );
+
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 720, deviceScaleFactor: 1, mobile: true,
+  });
+  await test(
+    "좁은 화면에서도 채팅 펼치기 버튼은 상단 바 안에 남는다",
+    `document.getElementById('mvChatToggle').click();
+     const button=document.getElementById('mvChatExpand');
+     const rect=button.getBoundingClientRect();
+     const bar=document.getElementById('mvTopbar').getBoundingClientRect();
+     check(!button.hidden && rect.width>0,'좁은 화면에서 펼치기 버튼이 보이지 않는다');
+     check(rect.left>=bar.left && rect.right<=bar.right &&
+       rect.top>=bar.top && rect.bottom<=bar.bottom,
+       '펼치기 버튼이 상단 바를 벗어났다');
+     button.click();
+     check(button.hidden,'좁은 화면에서 채팅을 다시 펼치지 못했다');`,
+  );
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280, height: 800, deviceScaleFactor: 1, mobile: false,
+  });
+
+  await test(
+    "각 영상 칸의 채널 변경 버튼이 해당 칸의 교체 패널을 연다",
+    `const target=[...document.querySelectorAll('.mv-cell')].find(cell=>!cell.classList.contains('is-main'));
+     const id=target.dataset.channelId;
+     const button=target.querySelector('.mv-cell-change');
+     check(button&&button.dataset.mvReplace===id,'칸별 교체 버튼에 채널 ID가 없다');
+     button.click();
+     check(!document.getElementById('mvQuick').hidden,'채널 관리 패널이 열리지 않았다');
+     check(document.getElementById('mvQuickHint').textContent.includes('대신 볼 채널을 고르세요'),
+       '해당 칸 교체 모드가 시작되지 않았다');
+     check(document.getElementById('mvQuickCancelReplace'),'교체 취소 버튼이 없다');
+     document.getElementById('mvQuickClose').click();
+     check(document.getElementById('mvQuick').hidden,'채널 관리 패널을 닫지 못했다');`,
+  );
+
+  await test(
     "종료된 칸을 다른 채널로 바꿔도 나머지는 그대로다",
     `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const cells=[...document.querySelectorAll('.mv-cell')];

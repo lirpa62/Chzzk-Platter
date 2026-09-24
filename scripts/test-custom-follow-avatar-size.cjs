@@ -115,6 +115,7 @@ const NATIVE_CSS = `
   ._profile_x1{position:relative;padding:1px;box-sizing:border-box;border-radius:50%}
   ._profile_x1 img{display:block}
   ._profile_x1._is_live_x1{background:linear-gradient(#0ff,#027f80)}
+  .cheese-cf-item:hover ._profile_x1{padding:4px}
 `;
 
 // harvest 성공(네이티브 해시 클래스) / 실패(폴백) 두 경우.
@@ -123,7 +124,7 @@ const HARVEST = {
   inner: "_item_x1",
   profile: "_profile_x1",
   profileLive: "_profile_x1 _is_live_x1",
-  information: "_info_x1",
+  information: "_information_x1",
   name: "_name_x1",
   ellipsis: "_ellipsis_x1",
   text: "_text_x1",
@@ -136,7 +137,7 @@ const HARVEST = {
 
 (async () => {
   const { targetId } = await call("Target.createTarget", {
-    url: "data:text/html,<body></body>",
+    url: "about:blank",
   });
   const { sessionId } = await call("Target.attachToTarget", {
     targetId,
@@ -209,6 +210,11 @@ const HARVEST = {
       const cs=getComputedStyle(w);
       return {wrap:[Math.round(wr.width),Math.round(wr.height)],
               img: ir?[Math.round(ir.width),Math.round(ir.height)]:null,
+              itemHeight:Math.round(w.closest('.cheese-cf-item').getBoundingClientRect().height),
+              gap:ir?[ir.left-wr.left,ir.top-wr.top,wr.right-ir.right,wr.bottom-ir.bottom].map(v=>Math.round(v*10)/10):null,
+              imageRadius:i?getComputedStyle(i).borderRadius:null,
+              imageOutline:i?getComputedStyle(i).outlineWidth:null,
+              imageOutlineStyle:i?getComputedStyle(i).outlineStyle:null,
               radius: cs.borderRadius, overflow: cs.overflow,
               hasStable: w.classList.contains('cheese-cf-avatar'),
               visibleImgs: imgs.length,
@@ -305,6 +311,13 @@ const HARVEST = {
       `이미지가 래퍼를 넘지 않는다 (${col && col.img[0]})`,
     );
     ok(col && col.wrap[0] < 40, "126px 로 커지지 않는다");
+    ok(col && col.gap.every((v) => inRange(v, 3, 0.2)),
+      `사진의 사방 간격이 같다 (${JSON.stringify(col && col.gap)})`);
+    const pos = await ev(`(()=>{const r=document.querySelector('.cheese-cf-avatar').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    await call("Input.dispatchMouseEvent", {type:"mouseMoved",x:pos.x,y:pos.y}, sessionId);
+    const hovered = await measure();
+    ok(hovered && hovered.gap.every((v) => inRange(v, 3, 0.2)),
+      `호버해도 사진 간격이 변하지 않는다 (${JSON.stringify(hovered && hovered.gap)})`);
   }
 
   console.log("\n[모서리 ON] 펼침도 정상");
@@ -417,6 +430,59 @@ const HARVEST = {
       sizeOk(m, 32, 26),
       `square 여도 크기 32/26 (${JSON.stringify(m && [m.wrap, m.img])})`,
     );
+    await ev(`document.documentElement.classList.add('cheese-channel-profile-radius-enabled')`);
+    await collapse();
+    const square = await measure();
+    ok(square && square.wrap[0]===36 && square.wrap[1]===120 &&
+      square.img[0]===30 && square.img[1]===114,
+      `접힌 선택 프로필은 세로형 36/120이다 (${JSON.stringify(square && [square.wrap,square.img])})`);
+    ok(square && square.itemHeight>=126,
+      `세로형 프로필의 행도 높이를 확보한다 (${square && square.itemHeight})`);
+    ok(square && square.gap.every((v) => inRange(v, 3, 0.2)),
+      `접힌 사각 프로필 사진은 바깥 링에서 3px 떨어진다 (${JSON.stringify(square && square.gap)})`);
+    ok(square && square.radius === "0px" && square.imageRadius === "0px",
+      `사각 프로필의 링과 사진이 모두 각지다 (${square && square.radius}/${square && square.imageRadius})`);
+    await call("Input.dispatchMouseEvent", {type:"mouseMoved",x:500,y:500}, sessionId);
+    const idle = await measure();
+    ok(idle && idle.imageOutlineStyle === "none", "호버 전에는 강조 테두리가 없다");
+    const center = await ev(`(()=>{const r=document.querySelector('.cheese-cf-avatar').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    await call("Input.dispatchMouseEvent", {type:"mouseMoved",x:center.x,y:center.y}, sessionId);
+    const hoveredSquare = await measure();
+    ok(hoveredSquare && hoveredSquare.imageOutlineStyle === "solid" &&
+      hoveredSquare.imageOutline === "2px" &&
+      hoveredSquare.wrap[0]===36 && hoveredSquare.wrap[1]===120,
+      `호버 테두리만 선명해지고 크기는 유지된다 (${hoveredSquare && hoveredSquare.imageOutline})`);
+    await call("Input.dispatchMouseEvent", {type:"mouseMoved",x:500,y:500}, sessionId);
+    await ev(`document.querySelector('.cheese-cf-link').focus()`);
+    const focusedSquare = await measure();
+    ok(focusedSquare && focusedSquare.imageOutline === "2px",
+      "키보드 포커스에서도 강조 테두리가 나타난다");
+    await ev(`document.activeElement.blur()`);
+    await ev(`document.getElementById('sidebar').className='_is_expanded_';`);
+    const expanded = await measure();
+    ok(expanded && expanded.radius !== "0px" && expanded.imageRadius !== "0px",
+      `펼치면 원래 모서리로 돌아온다 (${expanded && expanded.radius}/${expanded && expanded.imageRadius})`);
+    await build(true, OFFLINE, false);
+    const groupFit = await ev(`(()=>{
+      const sidebar=document.getElementById('sidebar');
+      sidebar.style.width='42px';
+      const old=document.getElementById('cheese-custom-follow');
+      const nav=document.createElement('nav');
+      nav.id=old.id;
+      const group=document.createElement('div');
+      group.className='cheese-cf-group';
+      const list=document.createElement('ul');
+      list.className='cheese-cf-list cheese-cf-group-list';
+      list.appendChild(old.firstElementChild);
+      group.appendChild(list);
+      nav.appendChild(group);
+      old.replaceWith(nav);
+      const rail=sidebar.getBoundingClientRect();
+      const photo=nav.querySelector('.cheese-cf-avatar').getBoundingClientRect();
+      return {left:photo.left-rail.left,right:rail.right-photo.right};
+    })()`);
+    ok(groupFit && groupFit.left>=0 && groupFit.right>=0,
+      `42px 그룹 레일 안에서 잘리지 않는다 (${JSON.stringify(groupFit)})`);
     await ev(`customFollowSquares = new Map()`);
   }
 
