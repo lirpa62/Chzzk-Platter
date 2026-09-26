@@ -37,6 +37,22 @@ async function test(name, run) {
     assert.equal(SOURCES.profileThumb("javascript:alert(1)"), "");
   });
 
+  await test("다시보기 지표 포맷은 조회수·재생 시간·상대 시각을 처리한다", async () => {
+    assert.equal(SOURCES.formatCompactCount(12345), "1.2만");
+    assert.equal(SOURCES.formatVideoDuration(28020), "7:47:00");
+    assert.equal(SOURCES.formatVideoDuration(466), "7:46");
+    assert.equal(SOURCES.formatRelativeTime(1_000_000_000_000, 1_000_000_120_000), "2분 전");
+  });
+
+  await test("재정렬 컨트롤은 기존 검색 클래스와 설정 항목을 제공한다", async () => {
+    const markup = SOURCES.videoSearchControlsMarkup("setup");
+    assert.match(markup, /cheese-search-control cheese-search-sort-trigger/);
+    assert.match(markup, /class="cheese-search-options"/);
+    assert.match(markup, /data-video-rerank-pool/);
+    assert.match(markup, /data-video-rerank-default-sort="score"/);
+    assert.match(markup, /라이브 시청자/);
+  });
+
   await test("공용 정렬은 시청자·이름·시작 시각·원본 순서를 구분한다", async () => {
     const rows = [
       { ...row(1), channelName: "가", viewers: 10, openedAt: 200, recommendationRank: 2 },
@@ -284,6 +300,228 @@ async function test(name, run) {
     assert.deepEqual(pager.rows.map((item) => item.channelId), [id(1), id(2)]);
   });
 
+  await test("팔로잉 다시보기는 nextNo 페이지와 영상 단위 중복 제거를 지원한다", async () => {
+    const calls = [];
+    await withApi((url) => {
+      calls.push(url);
+      assert.equal(url.pathname, "/service/v2/home/following/videos");
+      assert.equal(url.searchParams.get("size"), "50");
+      const page = calls.length;
+      return {
+        data: [1, page === 1 ? 2 : 1].map((n) => ({
+          video: { videoNo: String(n), videoTitle: `다시보기${n}`, thumbnailImageUrl: "https://img.test/{type}.jpg" },
+          channel: { channelId: id(n), channelName: `채널${n}`, channelImageUrl: `https://img.test/${n}.png` },
+        })),
+        page: { next: page === 1 ? { nextNo: "2103509840029549570" } : null, prev: null },
+      };
+    }, async () => {
+      const pager = SOURCES.createFollowingVideoPager();
+      await pager.loadFirst();
+      assert.equal(pager.next, "2103509840029549570");
+      await pager.loadNext();
+      assert.equal(calls[1].searchParams.get("nextNo"), "2103509840029549570");
+      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["1", "2"]);
+      assert.equal(pager.rows[0].channelId, "video:1");
+      assert.equal(pager.rows[0].ownerChannelId, id(1));
+      assert.equal(pager.rows[0].liveImageUrl, "https://img.test/480.jpg");
+      assert.equal(pager.done, true);
+    });
+  });
+
+  await test("전체 다시보기는 인기·최신 정렬과 채널 다시보기 PAGE API를 사용한다", async () => {
+    const calls = [];
+    await withApi((url) => {
+      calls.push(url);
+      if (url.pathname === "/service/v1/home/videos") {
+        return { data: [{ video: { videoNo: "123", videoTitle: "전체 영상" }, channel: row(1) }] };
+      }
+      return { data: [{ videoNo: "456", videoTitle: "채널 영상" }] };
+    }, async () => {
+      for (const sortType of ["POPULAR", "LATEST"]) {
+        const pager = SOURCES.createAllVideoPager(sortType);
+        await pager.loadFirst();
+        assert.equal(calls.at(-1).pathname, "/service/v1/home/videos");
+        assert.equal(calls.at(-1).searchParams.get("sortType"), sortType);
+        assert.equal(calls.at(-1).searchParams.get("size"), "50");
+      }
+      const channel = { channelId: id(8), channelName: "채널8", channelImageUrl: "https://img.test/p.png" };
+      const pager = SOURCES.createChannelVideoPager(channel);
+      await pager.loadFirst();
+      const url = calls.at(-1);
+      assert.equal(url.pathname, `/service/v1/channels/${id(8)}/videos`);
+      assert.equal(url.searchParams.get("sortType"), "LATEST");
+      assert.equal(url.searchParams.get("pagingType"), "PAGE");
+      assert.equal(url.searchParams.get("size"), "50");
+      assert.equal(url.searchParams.get("page"), "0");
+      assert.equal(pager.rows[0].ownerChannelId, id(8));
+      assert.equal(pager.rows[0].channelName, "채널8");
+    });
+  });
+
+  await test("인기·최신 다시보기는 복합 커서를 이어 읽고 업로드도 포함한다", async () => {
+    const calls = [];
+    await withApi((url) => {
+      calls.push(url);
+      const first = !url.searchParams.has("videoNo") && !url.searchParams.has("nextNo");
+      const latest = url.searchParams.get("sortType") === "LATEST";
+      if (first) return {
+        data: [
+          { video: { videoNo: latest ? "11" : "1", videoTitle: "업로드 영상", videoType: "UPLOAD" }, channel: row(1) },
+          { video: { videoNo: latest ? "12" : "2", videoTitle: "다시보기", videoType: "REPLAY" }, channel: row(2) },
+        ],
+        page: { next: latest ? { publishDateAt: "20260925120000", videoNo: "12" } : { readCount: "9000", videoNo: "2" } },
+      };
+      return { data: [{ video: { videoNo: latest ? "13" : "3", videoTitle: "다음 영상", videoType: "UPLOAD" }, channel: row(3) }], page: { next: null } };
+    }, async () => {
+      for (const sortType of ["POPULAR", "LATEST"]) {
+        const pager = SOURCES.createAllVideoPager(sortType);
+        await pager.loadFirst();
+        assert.equal(pager.rows.length, 2);
+        assert.equal(pager.rows[0].videoType, "UPLOAD");
+        await pager.loadNext();
+        const second = calls.at(-1);
+        assert.equal(second.searchParams.get("sortType"), sortType);
+        assert.equal(second.searchParams.get("size"), "50");
+        if (sortType === "POPULAR") {
+          assert.equal(second.searchParams.get("readCount"), "9000");
+          assert.equal(second.searchParams.get("videoNo"), "2");
+        } else {
+          assert.equal(second.searchParams.get("publishDateAt"), "20260925120000");
+          assert.equal(second.searchParams.get("videoNo"), "12");
+        }
+        assert.equal(pager.rows.length, 3);
+        assert.equal(pager.rows.at(-1).videoType, "UPLOAD");
+        assert.equal(pager.done, true);
+      }
+    });
+  });
+
+  await test("채널 다시보기 페이지는 업로드 포함 후에도 원본 페이지 기준으로 이어진다", async () => {
+    const calls = [];
+    await withApi((url) => {
+      calls.push(url);
+      const page = Number(url.searchParams.get("page"));
+      const data = page === 0
+        ? Array.from({ length: 50 }, (_, index) => ({
+          videoNo: String(index + 1),
+          videoTitle: `영상${index + 1}`,
+          videoType: index === 0 ? "UPLOAD" : "REPLAY",
+        }))
+        : [{ videoNo: "51", videoTitle: "마지막 다시보기", videoType: "REPLAY" }];
+      return { data, totalPages: 2 };
+    }, async () => {
+      const channel = { channelId: id(8), channelName: "채널8" };
+      const pager = SOURCES.createChannelVideoPager(channel);
+      await pager.loadFirst();
+      assert.equal(pager.rows.length, 50);
+      assert.equal(pager.rows[0].videoType, "UPLOAD");
+      assert.equal(pager.next, "1");
+      await pager.loadNext();
+      assert.equal(calls[1].searchParams.get("page"), "1");
+      assert.equal(pager.rows.length, 51);
+      assert.equal(pager.rows.at(-1).videoNo, "51");
+      assert.equal(pager.done, true);
+    });
+  });
+
+  await test("채널 검색 및 현재 계정의 다시보기 즐겨찾기를 정규화한다", async () => {
+    const previous = global.chrome;
+    global.chrome = {
+      runtime: { sendMessage: async ({ url }) => ({ ok: true, content: {
+        data: [{ channel: { ...row(9), channelImageUrl: "https://img.test/a.png", verifiedMark: true } }],
+      } }) },
+      storage: { local: { get: async () => ({
+        cheeseVideoVaultActiveAccount: id(99),
+        [`cheeseVideoVault:${id(99)}`]: [{ videoNo: "789", title: "보관한 다시보기", thumb: "https://img.test/v.jpg", channelId: id(9), channelName: "채널9", channelImageUrl: "https://img.test/p.png", adult: true }],
+      }) } },
+    };
+    try {
+      const search = await SOURCES.searchChannelsPage("채널", 0);
+      assert.equal(search.rows[0].channelId, id(9));
+      assert.equal(search.rows[0].verifiedMark, true);
+      const favorites = await SOURCES.loadVideoVaultFavorites();
+      assert.equal(favorites[0].channelId, "video:789");
+      assert.equal(favorites[0].ownerChannelId, id(9));
+      assert.equal(favorites[0].liveTitle, "보관한 다시보기");
+      assert.equal(favorites[0].adult, true);
+    } finally {
+      global.chrome = previous;
+    }
+  });
+
+  await test("치즈 플래터 재정렬은 기존 가중치 설정과 검색 페이지 API를 사용한다", async () => {
+    const previous = global.chrome;
+    const requests = [];
+    const stored = {};
+    global.chrome = {
+      runtime: { sendMessage: async ({ url }) => {
+        const parsed = new URL(url);
+        requests.push(parsed);
+        return { ok: true, content: { data: [
+          { video: { videoNo: "801", videoTitle: "다른 게임", videoType: "UPLOAD", readCount: 900000 }, channel: row(8) },
+          { video: { videoNo: "802", videoTitle: "고양이 모험", videoType: "REPLAY", readCount: 1 }, channel: row(2) },
+        ] } };
+      } },
+      storage: { local: {
+        get: async () => ({
+          cheeseSearchRerankPoolMax: stored.cheeseSearchRerankPoolMax ?? 50,
+          cheeseSearchRerankWeights: stored.cheeseSearchRerankWeights ??
+            { rel: 100, channel: 0, read: 0, pv: 0, verified: 0, recent: 0 },
+          cheeseSearchRerankDefaultSort: stored.cheeseSearchRerankDefaultSort ?? "score",
+        }),
+        set: async (values) => Object.assign(stored, values),
+      } },
+    };
+    try {
+      const pager = SOURCES.createVideoSearchPager("고양이");
+      await pager.loadFirst();
+      assert.equal(requests[0].pathname, "/service/v1/search/videos");
+      assert.equal(requests[0].searchParams.get("keyword"), "고양이");
+      assert.equal(requests[0].searchParams.get("offset"), "0");
+      assert.equal(requests[0].searchParams.get("size"), "50");
+      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["802", "801"]);
+      assert.equal(pager.rows[1].videoType, "UPLOAD");
+      assert.equal(pager.done, true);
+      await pager.setSort("read");
+      assert.equal(pager.sort, "read");
+      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["801", "802"]);
+      await pager.updateSettings({ weights: { rel: 0, channel: 100 } });
+      assert.equal(pager.settings.weights.channel, 100);
+      assert.equal(pager.sort, "read");
+      const saved = await SOURCES.saveVideoSearchSettings({ poolMax: 225, sort: "pv" });
+      assert.equal(saved.poolMax, 225);
+      assert.equal(stored.cheeseSearchRerankDefaultSort, "pv");
+    } finally {
+      global.chrome = previous;
+    }
+  });
+
+  await test("다시보기 즐겨찾기는 50개씩 페이지네이션한다", async () => {
+    const previous = global.chrome;
+    const favorites = Array.from({ length: 51 }, (_, index) => ({
+      videoNo: String(index + 1),
+      title: `보관 다시보기${index + 1}`,
+      channelId: id(9),
+      channelName: "채널9",
+    }));
+    global.chrome = {
+      storage: { local: { get: async (key) => key === "cheeseVideoVaultActiveAccount"
+        ? { cheeseVideoVaultActiveAccount: id(99) }
+        : { [`cheeseVideoVault:${id(99)}`]: favorites } } },
+    };
+    try {
+      const pager = SOURCES.createVideoVaultFavoritesPager();
+      await pager.loadFirst();
+      assert.equal(pager.rows.length, 50);
+      assert.equal(pager.next, "50");
+      await pager.loadNext();
+      assert.equal(pager.rows.length, 51);
+      assert.equal(pager.done, true);
+    } finally {
+      global.chrome = previous;
+    }
+  });
+
   await test("TTL 만료 뒤 첫 페이지를 새로 고친다", async () => {
     let now = 100;
     let calls = 0;
@@ -444,7 +682,9 @@ async function test(name, run) {
     const start = background.indexOf("function validMultiviewApiQuery(url) {");
     const end = background.indexOf("\nasync function fetchMultiviewApi", start);
     assert.ok(start >= 0 && end > start, "멀티뷰 URL 검증 함수를 찾지 못했다");
-    const valid = vm.runInNewContext(`${background.slice(start, end)}\nvalidMultiviewApiQuery`);
+    const channelVideosDeclaration = background.match(/const MULTIVIEW_CHANNEL_VIDEOS_RE =\s*[^;]+;/)?.[0] || "";
+    const helpers = vm.runInNewContext(`${channelVideosDeclaration}\n${background.slice(start, end)}\n({ validMultiviewApiQuery, preserveFollowingVideoNextNoPrecision })`);
+    const { validMultiviewApiQuery: valid, preserveFollowingVideoNextNoPrecision: preserveNextNo } = helpers;
     const base = "https://api.chzzk.naver.com/service/v1/lives?size=40";
     assert.equal(valid(new URL(base)), true);
     for (const sortType of ["POPULAR", "UNPOPULAR", "LATEST", "RECOMMEND"]) {
@@ -466,12 +706,47 @@ async function test(name, run) {
     }
     assert.equal(valid(new URL(`${following}?sortType=RANDOM`)), false);
     assert.equal(valid(new URL(`${following}?sortType=POPULAR&sortType=LATEST`)), false);
+    const followingVideos = "https://api.chzzk.naver.com/service/v2/home/following/videos?size=50&nextNo=2103509840029549570";
+    assert.equal(valid(new URL(followingVideos)), true);
+    assert.equal(valid(new URL(followingVideos.replace("size=50", "size=51"))), false);
+    assert.equal(valid(new URL(`${followingVideos}&unexpected=1`)), false);
+    assert.equal(valid(new URL(`${followingVideos}&nextNo=123`)), false);
+    const cursor = "2103509840029549570";
+    const rawFollowingResponse = `{"content":{"data":[{"videoTitle":${JSON.stringify(`literal "nextNo":${cursor}`)}}],"page":{"next":{"nextNo":${cursor}},"prev":null}}}`;
+    assert.notEqual(String(JSON.parse(rawFollowingResponse).content.page.next.nextNo), cursor,
+      "일반 JSON 숫자 파싱은 커서 정밀도를 잃는 fixture여야 한다");
+    const preciseFollowingResponse = JSON.parse(preserveNextNo(rawFollowingResponse));
+    assert.equal(preciseFollowingResponse.content.page.next.nextNo, cursor);
+    assert.equal(preciseFollowingResponse.content.data[0].videoTitle, `literal "nextNo":${cursor}`,
+      "채팅/제목 등 JSON 문자열 안에 있는 nextNo 텍스트는 변형하면 안 된다");
+    for (const sortType of ["POPULAR", "LATEST"]) {
+      assert.equal(valid(new URL(`https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=${sortType}`)), true);
+      assert.equal(valid(new URL(`https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=${sortType}&nextNo=123456`)), true);
+    }
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=POPULAR&readCount=9000&videoNo=123")), true);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=LATEST&publishDateAt=20260925120000&videoNo=123")), true);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=LATEST&unexpected=1")), false);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=LATEST&videoNo=123&videoNo=124")), false);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=RECOMMEND")), false);
+    const videoSearch = "https://api.chzzk.naver.com/service/v1/search/videos?keyword=%EA%B3%A0%EC%96%91%EC%9D%B4&offset=0&size=50";
+    assert.equal(valid(new URL(videoSearch)), true);
+    assert.equal(valid(new URL(videoSearch.replace("size=50", "size=100"))), false);
+    assert.equal(valid(new URL(videoSearch.replace("&offset=0", ""))), false);
+    assert.equal(valid(new URL(`${videoSearch}&unexpected=1`)), false);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/search/videos?keyword=&offset=0&size=50")), false);
+    const channelVideos = `https://api.chzzk.naver.com/service/v1/channels/${id(1)}/videos?sortType=LATEST&pagingType=PAGE&page=0&size=50&publishDateAt=&videoType=`;
+    assert.equal(valid(new URL(channelVideos)), true);
+    assert.equal(valid(new URL(`${channelVideos}&unexpected=1`)), false);
+    assert.equal(valid(new URL(channelVideos.replace("page=0", "page=-1"))), false);
     const tag = "https://api.chzzk.naver.com/service/v1/tag/lives?size=20&sortType=POPULAR&tags=%EB%B4%89%EB%88%84%EB%8F%84";
     assert.equal(valid(new URL(tag)), true);
     assert.equal(valid(new URL(tag.replace("&tags=", "&unexpected=1&tags="))), false);
     assert.equal(valid(new URL(tag.replace("POPULAR", "LATEST"))), false);
     assert.equal(valid(new URL(tag.replace(/&tags=.*/, ""))), false);
     assert.equal(valid(new URL(`${tag}&tags=duplicate`)), false);
+    const nicknameColors = "https://api.chzzk.naver.com/service/v2/nickname/color/codes";
+    assert.equal(valid(new URL(nicknameColors)), true);
+    assert.equal(valid(new URL(`${nicknameColors}?unexpected=1`)), false);
     assert.match(background, /url\.origin !== MULTIVIEW_API_ORIGIN/);
     assert.match(background, /!MULTIVIEW_API_PATHS\.has\(url\.pathname\)/);
   });

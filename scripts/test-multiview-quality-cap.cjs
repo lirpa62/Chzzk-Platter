@@ -85,18 +85,24 @@ for (const [label, sel, target, cap, expected] of idempotent) {
 console.log("\n[정책] 메인만 고화질 설정에 따라 칸마다 다른 지시가 나간다");
 {
   // multiviewWatch.js 의 frameUrl / postState 와 같은 규칙.
-  const urlQuality = (isMain, high) => (isMain && high ? null : "480");
-  const postQuality = (isMain, high) => (isMain && high ? "highest" : "cap-480");
+  const urlQuality = (isMain, high, isVideo) =>
+    isMain && high ? null : isVideo ? "720" : "480";
+  const postQuality = (isMain, high, isVideo) =>
+    isMain && high ? "highest" : isVideo ? "cap-720" : "cap-480";
 
   const cases = [
-    ["켜짐 · 메인", true, true, null, "highest"],
-    ["켜짐 · 보조", false, true, "480", "cap-480"],
-    ["꺼짐 · 메인", true, false, "480", "cap-480"],
-    ["꺼짐 · 보조", false, false, "480", "cap-480"],
+    ["라이브 · 켜짐 · 메인", true, true, false, null, "highest"],
+    ["라이브 · 켜짐 · 보조", false, true, false, "480", "cap-480"],
+    ["라이브 · 꺼짐 · 메인", true, false, false, "480", "cap-480"],
+    ["라이브 · 꺼짐 · 보조", false, false, false, "480", "cap-480"],
+    ["다시보기 · 켜짐 · 메인", true, true, true, null, "highest"],
+    ["다시보기 · 켜짐 · 보조", false, true, true, "720", "cap-720"],
+    ["다시보기 · 꺼짐 · 메인", true, false, true, "720", "cap-720"],
+    ["다시보기 · 꺼짐 · 보조", false, false, true, "720", "cap-720"],
   ];
-  for (const [label, isMain, high, wantUrl, wantPost] of cases) {
-    const u = urlQuality(isMain, high);
-    const q = postQuality(isMain, high);
+  for (const [label, isMain, high, isVideo, wantUrl, wantPost] of cases) {
+    const u = urlQuality(isMain, high, isVideo);
+    const q = postQuality(isMain, high, isVideo);
     try {
       assert.strictEqual(u, wantUrl);
       assert.strictEqual(q, wantPost);
@@ -157,7 +163,8 @@ console.log("\n[수명주기] 역할·video/source·광고 종료에서만 정�
   const watch = fs.readFileSync(path.join(root, "src/multiviewWatch.js"), "utf8");
   const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
   const checks = [
-    [content.includes('"highest", "cap-480"'), "명시적 정책 값"],
+    [content.includes('"highest", "cap-480", "cap-720"'), "라이브/다시보기 정책 값"],
+    [mixer.includes('"highest", "cap-480", "cap-720"'), "MAIN 플레이어가 720p 상한 정책을 수용"],
     [/attachMultiviewVideo[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "새 video attach 재확인"],
     [/onMultiviewSourceReady[\s\S]*?syncVideoGeneration \+= 1[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "같은 video source 변경 재확인"],
     [/multiviewAdPlaying && !next\) reconcileMultiviewQuality\(\)/.test(content), "광고 종료 재확인"],

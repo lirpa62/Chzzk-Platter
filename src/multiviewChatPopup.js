@@ -48,6 +48,8 @@
     const statusLabel = $("mvChatPopupStatus");
     const text = status === "ready"
       ? "연결됨"
+      : status === "unavailable"
+        ? message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."
       : status === "error"
         ? message || "채팅을 불러오지 못했습니다."
         : "채팅 연결 중…";
@@ -83,11 +85,29 @@
     frame.src = url.toString();
   }
 
+  function showUnavailable(data) {
+    if (!Number.isSafeInteger(data.generation) || data.generation < currentGeneration) return;
+    currentChannelId = "";
+    currentGeneration = data.generation;
+    chatFrameReady = false;
+    frame.src = "about:blank";
+    const message = typeof data.message === "string"
+      ? data.message.slice(0, 180)
+      : "다시보기 채팅은 멀티뷰에서 지원하지 않습니다.";
+    $("mvChatPopupTitle").textContent = "다시보기 채팅 미지원";
+    document.title = "다시보기 채팅 미지원 - 치즈 플래터";
+    setStatus("unavailable", message);
+  }
+
   channel.onmessage = (event) => {
     const data = event.data;
     if (data?.source !== SOURCE || data.sessionId !== sessionId) return;
     if (data.type === "LOAD_CHAT") {
       loadChat(data);
+      return;
+    }
+    if (data.type === "CHAT_UNAVAILABLE") {
+      showUnavailable(data);
       return;
     }
     if (data.type === "SET_THEME" && typeof data.dark === "boolean") {
@@ -98,7 +118,7 @@
       data.type === "CHAT_STATUS" &&
       data.channelId === currentChannelId &&
       data.generation === currentGeneration &&
-      ["loading", "ready", "error"].includes(data.status)
+      ["loading", "ready", "error", "unavailable"].includes(data.status)
     ) {
       setStatus(data.status, typeof data.message === "string" ? data.message.slice(0, 180) : "");
     }

@@ -219,6 +219,21 @@
               </button>
               <button type="button" data-mv-quick-source="live">라이브</button>
               <button type="button" data-mv-quick-source="search">검색</button>
+              <button type="button" data-mv-quick-source="videos">다시보기</button>
+            </div>
+            <div class="mv-video-sources mv-quick-video-sources" id="mvQuickVideoSources" aria-label="다시보기 목록" hidden>
+              <button type="button" data-mv-quick-video-source="following">팔로잉</button>
+              <button type="button" class="mv-custom-tooltip" data-mv-quick-video-source="popular" data-tooltip="모든 방송에서 인기 정렬">인기</button>
+              <button type="button" class="mv-custom-tooltip" data-mv-quick-video-source="latest" data-tooltip="모든 방송에서 최신 정렬">최신</button>
+              <button type="button" data-mv-quick-video-source="favorites">즐겨찾기</button>
+              <div class="mv-video-channel-source-cell">
+                <button type="button" data-mv-quick-video-source="channel-search">채널 검색</button>
+                <button type="button" class="mv-video-channel-selected mv-custom-tooltip" data-mv-quick-video-channel-back data-tooltip="선택한 채널 목록" data-tooltip-icon-only aria-label="선택한 채널 목록" hidden>
+                  <svg class="lucide lucide-list-video" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12H3"></path><path d="M16 6H3"></path><path d="M12 18H3"></path><path d="m16 12 5-3v6z"></path></svg>
+                  <span class="mv-video-channel-selected-label" data-tooltip-label>선택한 채널 목록</span>
+                </button>
+              </div>
+              <button type="button" data-mv-quick-video-source="platter-search">치즈 플래터 재정렬</button>
             </div>
             <div
               class="mv-quick-folders"
@@ -233,6 +248,14 @@
               placeholder="채널 이름 또는 태그로 찾기"
               hidden
             />
+            <div class="mv-video-search-wrap mv-quick-video-search-wrap" id="mvQuickVideoChannelSearch" hidden>
+              <input type="search" class="mv-quick-search" id="mvQuickVideoChannelSearchInput" placeholder="채널명을 입력하세요" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="mvQuickVideoChannelPopover" aria-expanded="false" />
+              <div class="mv-video-channel-popover mv-quick-video-channel-popover" id="mvQuickVideoChannelPopover" role="listbox" aria-label="채널 검색 결과" hidden></div>
+            </div>
+            <div class="mv-video-search-wrap mv-quick-video-search-wrap" id="mvQuickVideoRerankSearch" hidden>
+              <input type="search" class="mv-quick-search" id="mvQuickVideoRerankSearchInput" placeholder="다시보기 검색어" autocomplete="off" />
+              <div id="mvQuickVideoRerankControls"></div>
+            </div>
             <div class="mv-sort-row">
               <span id="mvQuickSortLabel">정렬</span>
               <div class="mv-pop mv-sort-picker">
@@ -311,6 +334,23 @@
             allow="autoplay"
             referrerpolicy="origin"
           ></iframe>
+          <div class="mv-vod-chat-feed" id="mvVodChatFeed" hidden>
+            <div class="mv-vod-chat-scale" role="group" aria-label="채팅 크기 조절">
+              <button type="button" id="mvVodChatScaleDown" aria-label="채팅 크기 마이너스" disabled>
+                <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.196 7c0-.419.34-.758.758-.758h10.092a.758.758 0 0 1 0 1.516H1.954A.758.758 0 0 1 1.196 7Z" clip-rule="evenodd"></path></svg>
+              </button>
+              <span id="mvVodChatScaleValue" aria-live="off">100%</span>
+              <button type="button" id="mvVodChatScaleUp" aria-label="채팅 크기 플러스">
+                <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" d="M7.759 1.954a.758.758 0 1 0-1.517 0v4.288H1.954a.758.758 0 0 0 0 1.516h4.288v4.288a.758.758 0 0 0 1.517 0V7.758h4.287a.758.758 0 1 0 0-1.516H7.759V1.954Z"></path></svg>
+              </button>
+            </div>
+            <div class="mv-vod-chat-meta" id="mvVodChatMeta">
+              <span id="mvVodChatClock" aria-live="off"></span>
+              <button type="button" class="mv-custom-tooltip" id="mvVodChatTimeMode" aria-pressed="false"
+                aria-label="실제 방송 시각으로 전환" data-tooltip="재생 시간과 실제 방송 시각 전환">재생 시간</button>
+            </div>
+            <div class="mv-vod-chat-list" id="mvVodChatList" role="log" aria-live="off"></div>
+          </div>
           <!-- 채팅 준비 상태 덮개(연결 중 / 실패). 영상 칸과 같은 방식이다. -->
           <div class="mv-chat-status" id="mvChatStatus" hidden></div>
         </div>
@@ -328,11 +368,14 @@
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewVideoSearchControls.js"></script>
     <script src="src/multiviewSort.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewSync.js"></script>
     <script src="src/multiviewDiagnostics.js"></script>
     <script src="src/multiviewTooltip.js"></script>
+    <script src="src/achievementBadgeMap.js"></script>
+    <script src="src/multiviewVodChat.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>
 </html>

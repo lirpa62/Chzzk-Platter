@@ -249,15 +249,21 @@
   const IS_MULTIVIEW_CHAT_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiChat") === "1";
   // 이 프레임이 맡은 채널. 부모가 보내는 지시가 이 프레임 것인지 확인하는 데 쓴다.
-  const MULTIVIEW_CHANNEL_ID = (
+  const multiviewLiveChannelId = (
     location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || ""
   ).toLowerCase();
+  const multiviewVideoNo = location.pathname.match(/^\/video\/(\d+)/i)?.[1] || "";
+  const multiviewVideoSlot = MULTIVIEW_PARAMS.get("cheeseMultiChannelId") || "";
+  const MULTIVIEW_CHANNEL_ID = multiviewLiveChannelId ||
+    (/^video:\d+$/.test(multiviewVideoSlot) && multiviewVideoNo === multiviewVideoSlot.slice(6)
+      ? multiviewVideoSlot
+      : "");
   const MULTIVIEW_CHAT_GENERATION = Number(
     MULTIVIEW_PARAMS.get("cheeseMultiChatGeneration"),
   );
   // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
-  const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480"]);
+  const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480", "cap-720"]);
   // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
   const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
   // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
@@ -284,7 +290,9 @@
       MULTIVIEW_QUALITY_POLICIES.has(multiviewInitialQualityPolicy)
     ? multiviewInitialQualityPolicy
     : IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiQuality") === "480"
-      ? "cap-480" : "highest";
+      ? "cap-480"
+      : IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiQuality") === "720"
+        ? "cap-720" : "highest";
   let multiviewQualityReconcileToken = 0;
 
   // 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
@@ -1175,6 +1183,11 @@
   const MULTIVIEW_BTN_REWIND_KEY = "cheeseMultiviewBtnRewind";
   const MULTIVIEW_BTN_FORWARD_KEY = "cheeseMultiviewBtnForward";
   const MULTIVIEW_DISABLE_HIDDEN_KEY = "cheeseMultiviewDisableHidden";
+  const MULTIVIEW_VOD_SPEED_KEY = "cheeseMultiviewVodSpeedButton";
+  const MULTIVIEW_VOD_TIMESTAMPS_KEY = "cheeseMultiviewVodTimestamps";
+  const MULTIVIEW_VOD_MY_CHAT_KEY = "cheeseMultiviewVodMyChat";
+  const MULTIVIEW_VOD_CHAT_GRAPH_KEY = "cheeseMultiviewVodChatGraph";
+  const MULTIVIEW_VOD_ROLE_CHAT_KEY = "cheeseMultiviewVodRoleChat";
   // 기본값: 오디오 믹서만 켜고 나머지는 끈다(작은 칸에 버튼이 많으면 영상을 가린다).
   let multiviewBtnMixer = true;
   let multiviewBtnFilter = false;
@@ -1185,6 +1198,11 @@
   let multiviewBtnRewind = false;
   let multiviewBtnForward = false;
   let multiviewDisableHidden = false;
+  let multiviewVodSpeedButton = true;
+  let multiviewVodTimestamps = true;
+  let multiviewVodMyChat = true;
+  let multiviewVodChatGraph = true;
+  let multiviewVodRoleChat = true;
   let multiviewSettingsLoaded = false;
   const MULTIVIEW_SETTING_KEYS = [
     MULTIVIEW_BTN_MIXER_KEY,
@@ -1196,6 +1214,11 @@
     MULTIVIEW_BTN_REWIND_KEY,
     MULTIVIEW_BTN_FORWARD_KEY,
     MULTIVIEW_DISABLE_HIDDEN_KEY,
+    MULTIVIEW_VOD_SPEED_KEY,
+    MULTIVIEW_VOD_TIMESTAMPS_KEY,
+    MULTIVIEW_VOD_MY_CHAT_KEY,
+    MULTIVIEW_VOD_CHAT_GRAPH_KEY,
+    MULTIVIEW_VOD_ROLE_CHAT_KEY,
   ];
 
   function readMultiviewSettings(data) {
@@ -1208,6 +1231,11 @@
     multiviewBtnRewind = data?.[MULTIVIEW_BTN_REWIND_KEY] === true;
     multiviewBtnForward = data?.[MULTIVIEW_BTN_FORWARD_KEY] === true;
     multiviewDisableHidden = data?.[MULTIVIEW_DISABLE_HIDDEN_KEY] === true;
+    multiviewVodSpeedButton = data?.[MULTIVIEW_VOD_SPEED_KEY] !== false;
+    multiviewVodTimestamps = data?.[MULTIVIEW_VOD_TIMESTAMPS_KEY] !== false;
+    multiviewVodMyChat = data?.[MULTIVIEW_VOD_MY_CHAT_KEY] !== false;
+    multiviewVodChatGraph = data?.[MULTIVIEW_VOD_CHAT_GRAPH_KEY] !== false;
+    multiviewVodRoleChat = data?.[MULTIVIEW_VOD_ROLE_CHAT_KEY] !== false;
   }
 
   // 지금 메모리에 있는 멀티뷰 설정값(바뀌지 않은 키를 되돌려 줄 때 쓴다).
@@ -1231,6 +1259,16 @@
         return multiviewBtnForward;
       case MULTIVIEW_DISABLE_HIDDEN_KEY:
         return multiviewDisableHidden;
+      case MULTIVIEW_VOD_SPEED_KEY:
+        return multiviewVodSpeedButton;
+      case MULTIVIEW_VOD_TIMESTAMPS_KEY:
+        return multiviewVodTimestamps;
+      case MULTIVIEW_VOD_MY_CHAT_KEY:
+        return multiviewVodMyChat;
+      case MULTIVIEW_VOD_CHAT_GRAPH_KEY:
+        return multiviewVodChatGraph;
+      case MULTIVIEW_VOD_ROLE_CHAT_KEY:
+        return multiviewVodRoleChat;
       default:
         return undefined;
     }
@@ -1254,6 +1292,27 @@
     );
     root.classList.toggle("cheese-multiview-btn-rewind", multiviewBtnRewind);
     root.classList.toggle("cheese-multiview-btn-forward", multiviewBtnForward);
+  }
+
+  function isMultiviewReplay() {
+    return IS_MULTIVIEW_FRAME && Boolean(multiviewVideoNo);
+  }
+
+  function isVodChatGraphEnabled() {
+    return isMultiviewReplay()
+      ? multiviewVodChatGraph && chatGraphOn
+      : chatGraphOn;
+  }
+
+  function isVodRoleChatEnabled() {
+    return isMultiviewReplay()
+      ? multiviewVodRoleChat && vodRoleChatOn
+      : vodRoleChatOn;
+  }
+
+  function isVodChatRecapButtonEnabled() {
+    return chatRecapOn && !chatRecapPlayerButtonHidden &&
+      (!isMultiviewReplay() || multiviewVodMyChat);
   }
   let popupPlayerOn = false;
   let popupPlayerAudioMode = POPUP_PLAYER_AUDIO_DEFAULT;
@@ -11321,7 +11380,7 @@
   }
 
   function renderChatGraph() {
-    if (!chatGraphOn || !chatGraphState.shown) {
+    if (!isVodChatGraphEnabled() || !chatGraphState.shown) {
       removeChatGraphLayer();
       return;
     }
@@ -11508,7 +11567,7 @@
       chatGraphState.emojiUrls = cached.emojiUrls || {};
       chatGraphState.bins = cached.bins;
       // 수집 도중 설정이 꺼졌다면 결과만 캐시하고 UI는 다시 열지 않는다.
-      chatGraphState.shown = chatGraphOn;
+      chatGraphState.shown = isVodChatGraphEnabled();
       renderChatGraph();
     } finally {
       chatGraphState.loading = false;
@@ -11521,7 +11580,7 @@
 
   // 컨트롤바 버튼. 댓글 타임스탬프 버튼과 같은 자리·같은 클래스 체계를 쓴다.
   function ensureChatGraphButton() {
-    if (!chatGraphOn || !getCurrentVideoNo()) {
+    if (!isVodChatGraphEnabled() || !getCurrentVideoNo()) {
       document
         .querySelectorAll(`.${CHAT_GRAPH_BUTTON_CLASS}`)
         .forEach((el) => el.remove());
@@ -12472,7 +12531,7 @@
   // ⚠ 영상당 1회만 시도한다. tick 은 DOM 변이마다 도는데 매번 재시도하면 수집이
   //   중복으로 돌거나, 사용자가 버튼으로 닫아 둔 그래프를 계속 되살린다.
   async function maybeAutoShowChatGraph() {
-    if (!chatGraphOn || !chatGraphAuto) return;
+    if (!isVodChatGraphEnabled() || !chatGraphAuto) return;
     const videoNo = getCurrentVideoNo();
     if (
       !videoNo ||
@@ -12498,7 +12557,7 @@
       }
       if (
         checkVersion !== chatGraphAutoCheckVersion ||
-        !chatGraphOn ||
+        !isVodChatGraphEnabled() ||
         !chatGraphAuto ||
         getCurrentVideoNo() !== videoNo
       ) {
@@ -13427,7 +13486,7 @@
   }
 
   function ensureChatRecapButton() {
-    if (!chatRecapOn || chatRecapPlayerButtonHidden || !getCurrentVideoNo()) {
+    if (!isVodChatRecapButtonEnabled() || !getCurrentVideoNo()) {
       return;
     }
     const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
@@ -13502,7 +13561,7 @@
   }
 
   function applyChatRecapPlayerButtonVisibility() {
-    if (!chatRecapOn || chatRecapPlayerButtonHidden || !getCurrentVideoNo()) {
+    if (!isVodChatRecapButtonEnabled() || !getCurrentVideoNo()) {
       closeChatRecapPanel();
       document
         .querySelectorAll(`.${RECAP_BUTTON_CLASS}`)
@@ -13521,13 +13580,13 @@
   async function prefetchVodChatCompanions(origin) {
     if (!getCurrentVideoNo()) return;
     const jobs = [];
-    if (origin !== "role" && vodRoleChatOn && !roleChatState.loading) {
+    if (origin !== "role" && isVodRoleChatEnabled() && !roleChatState.loading) {
       jobs.push(ensureVodRoleChats(false));
     }
-    if (origin !== "mine" && chatRecapOn && !chatRecapPlayerButtonHidden) {
+    if (origin !== "mine" && isVodChatRecapButtonEnabled()) {
       jobs.push(loadRecapForCurrentVideo());
     }
-    if (origin !== "graph" && chatGraphOn && !chatGraphState.loading) {
+    if (origin !== "graph" && isVodChatGraphEnabled() && !chatGraphState.loading) {
       jobs.push(prefetchChatGraphData());
     }
     // 각각 실패해도 나머지는 계속한다(부가 작업이라 조용히 넘어간다).
@@ -13554,7 +13613,7 @@
   // 내 채팅 기록과 같은 팝오버를 쓰되 버튼과 상태만 따로 둔다. 예전에는 내 채팅
   // 기록 패널의 탭이었는데, 보려는 대상이 달라 진입로를 나눴다.
   function ensureRoleChatButton() {
-    if (!vodRoleChatOn || !getCurrentVideoNo()) return;
+    if (!isVodRoleChatEnabled() || !getCurrentVideoNo()) return;
     const controls = document.querySelector(".pzp-pc__bottom-buttons-right");
     if (!controls) return;
     if (controls.querySelector(`.${ROLE_CHAT_BUTTON_CLASS}`)) return;
@@ -13587,7 +13646,7 @@
   }
 
   function applyRoleChatButtonVisibility() {
-    if (!vodRoleChatOn || !getCurrentVideoNo()) {
+    if (!isVodRoleChatEnabled() || !getCurrentVideoNo()) {
       closeRoleChatPanel();
       document
         .querySelectorAll(`.${ROLE_CHAT_BUTTON_CLASS}`)
@@ -21286,19 +21345,25 @@
   //  - 펼친 상태의 '접기' 버튼: aria-label="채팅 접기" (클래스 _button_mb8xy_)
   //  - 접힌 상태의 '펼치기' 버튼: aria-label 없음, 클래스 _folded_button_, 텍스트 '채팅 (J)'
   // 접기/펼치기 어느 쪽이든 현재 화면에 있는 토글 버튼을 반환한다.
-  function getChatFoldToggleBtn() {
+  function getChatFoldToggleBtn(aside = null) {
+    const root = aside || document;
     // 펼친 상태 → 접기 버튼(aria-label).
-    let b = document.querySelector('button[aria-label="채팅 접기"]');
+    let b = root.querySelector('button[aria-label="채팅 접기"]');
     if (b) return b;
     // 접힌 상태 → 펼치기 버튼(_folded_button_ 클래스).
-    b = document.querySelector('button[class*="_folded_button_"]');
+    b = root.querySelector('button[class*="_folded_button_"]');
     if (b) return b;
     // 폴백: 텍스트가 '채팅 (J)' 인 버튼(접힌 상태 펼치기 토글).
-    for (const btn of document.querySelectorAll("button")) {
+    for (const btn of root.querySelectorAll("button")) {
       const t = (btn.textContent || "").trim();
       if (t === "채팅 (J)") return btn;
     }
     return null;
+  }
+  function getVodChatCloseButton(aside = null) {
+    const root = aside || document.querySelector("aside#vod-aside");
+    if (!(root instanceof HTMLElement) || root.id !== "vod-aside") return null;
+    return root.querySelector('button[class*="_close_button_"]');
   }
   let chatFoldObserver = null;
   let chatFoldRestoredForKey = ""; // 이 페이지(채널)에서 복원을 1회 했는지
@@ -21658,6 +21723,10 @@
     //   400ms 폴링으로 20초만 버텼는데, 오래 보면 그 뒤 교체분에는 적용되지 않았다.
     //   지금은 video 를 붙들고 교체를 감지해 그때마다 현재 상태를 다시 건다.
     let currentVideo = null;
+    let multiviewVodChatEnabled = false;
+    let multiviewVodChatGeneration = 0;
+    let lastMultiviewVodChatReportAt = 0;
+    let multiviewVodChatVideo = null;
     let syncVideoGeneration = 0;
     let syncRateOwned = false;
     let syncRateTarget = 1;
@@ -21666,6 +21735,7 @@
     let currentVideoSource = "";
     let multiviewAdPlaying = false;
     let multiviewAdCheckTimer = 0;
+    let endedNotified = false;
     const MULTIVIEW_MIXER_COMMANDS = new Set([
       "MIXER_GET_STATE", "MIXER_SET_ENABLED", "MIXER_SET_GAIN",
       "MIXER_SET_PRESET", "MIXER_FLUSH_GAIN",
@@ -21769,6 +21839,38 @@
       } });
     };
 
+    function reportMultiviewVodChat(event) {
+      if (!multiviewVodChatEnabled || !/^\/video\/\d+/i.test(location.pathname)) return;
+      const now = Date.now();
+      if (event?.type === "timeupdate" && now - lastMultiviewVodChatReportAt < 400) return;
+      const video = currentVideo;
+      if (!video || !Number.isFinite(video.currentTime) || video.currentTime < 0) return;
+      lastMultiviewVodChatReportAt = now;
+      notifyParent("FRAME_VOD_CHAT_PLAYBACK", {
+        chatGeneration: multiviewVodChatGeneration,
+        currentTime: video.currentTime,
+        duration: Number.isFinite(video.duration) ? video.duration : null,
+        paused: video.paused,
+        seeking: video.seeking,
+        playbackRate: Number.isFinite(video.playbackRate) ? video.playbackRate : 1,
+      });
+    }
+
+    const onVodChatPlaybackEvent = (event) => reportMultiviewVodChat(event);
+
+    function bindMultiviewVodChatVideo(video) {
+      if (multiviewVodChatVideo === video) return;
+      if (multiviewVodChatVideo) {
+        for (const type of ["timeupdate", "seeking", "seeked", "pause", "play"])
+          multiviewVodChatVideo.removeEventListener(type, onVodChatPlaybackEvent);
+      }
+      multiviewVodChatVideo = null;
+      if (!multiviewVodChatEnabled || !(video instanceof HTMLMediaElement)) return;
+      for (const type of ["timeupdate", "seeking", "seeked", "pause", "play"])
+        video.addEventListener(type, onVodChatPlaybackEvent);
+      multiviewVodChatVideo = video;
+    }
+
     // 차단을 부모에게 알린 적이 있는지. 있을 때만 해제를 알린다(메시지를 줄인다).
     // ⚠ applyAudioToVideo 가 이 값을 바로 읽으므로 그보다 먼저 선언해 둔다.
     let audioBlockedReported = false;
@@ -21852,6 +21954,14 @@
       forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
     };
 
+    const onMultiviewVideoEnded = () => {
+      if (!/^\/video\/\d+/i.test(location.pathname) || endedNotified) return;
+      endedNotified = true;
+      notifyParent("FRAME_ENDED");
+      if (endedTimer) clearInterval(endedTimer);
+      endedTimer = 0;
+    };
+
     function checkMultiviewAdTransition() {
       multiviewAdCheckTimer = 0;
       const next = typeof isAdPlaying === "function" && isAdPlaying();
@@ -21871,6 +21981,8 @@
       currentVideo?.removeEventListener("playing", onPlaying);
       currentVideo?.removeEventListener("ratechange", onSyncRateChange);
       currentVideo?.removeEventListener("loadedmetadata", onMultiviewSourceReady);
+      currentVideo?.removeEventListener("ended", onMultiviewVideoEnded);
+      bindMultiviewVodChatVideo(null);
       currentVideo = video;
       currentVideoSource = String(video.currentSrc || video.src || "");
       multiviewAdPlaying = typeof isAdPlaying === "function" && isAdPlaying();
@@ -21881,9 +21993,12 @@
       video.addEventListener("playing", onPlaying);
       video.addEventListener("ratechange", onSyncRateChange);
       video.addEventListener("loadedmetadata", onMultiviewSourceReady);
+      video.addEventListener("ended", onMultiviewVideoEnded);
+      bindMultiviewVodChatVideo(video);
       applyAudioToVideo(video);
       reconcileMultiviewQuality();
       forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
+      reportMultiviewVodChat();
       // 플레이어가 새로 만들어졌으면 넓은 화면·채팅 접힘도 풀렸을 수 있다.
       // ⚠ 반드시 풀린다고 단정하지 않는다. 확인해서 필요할 때만 맞춘다.
       scheduleMultiviewUiReconcile(300);
@@ -21898,6 +22013,8 @@
         currentVideo.removeEventListener("playing", onPlaying);
         currentVideo.removeEventListener("ratechange", onSyncRateChange);
         currentVideo.removeEventListener("loadedmetadata", onMultiviewSourceReady);
+        currentVideo.removeEventListener("ended", onMultiviewVideoEnded);
+        bindMultiviewVodChatVideo(null);
         currentVideo = null;
         currentVideoSource = "";
       } else if (currentVideo) applyAudioToVideo(currentVideo);
@@ -21990,7 +22107,6 @@
 
     // 방송 종료 감지. 이미 검증된 종료 화면 판정을 그대로 쓴다(구조 + 문구 이중 확인).
     // 한 번만 알린다.
-    let endedNotified = false;
     let endedTimer = 0;
     const checkEnded = () => {
       if (endedNotified) return;
@@ -22018,6 +22134,20 @@
       }
       if (data.type === "REQUEST_FRAME_SYNC_STATS") {
         reportFrameSyncStats();
+        return;
+      }
+      if (data.type === "SET_MULTIVIEW_VOD_CHAT") {
+        if (!/^\/video\/\d+/i.test(location.pathname) ||
+            typeof data.enabled !== "boolean" ||
+            !Number.isSafeInteger(data.chatGeneration) || data.chatGeneration <= 0 ||
+            data.chatGeneration < multiviewVodChatGeneration) return;
+        multiviewVodChatGeneration = data.chatGeneration;
+        multiviewVodChatEnabled = data.enabled;
+        bindMultiviewVodChatVideo(multiviewVodChatEnabled ? currentVideo : null);
+        if (multiviewVodChatEnabled) {
+          syncMultiviewVideo();
+          reportMultiviewVodChat();
+        }
         return;
       }
       const syncCommand = {
@@ -22123,7 +22253,8 @@
           ? "highest"
           : String(data.quality) === "480"
             ? "cap-480"
-            : "";
+            : String(data.quality) === "720"
+              ? "cap-720" : "";
       if (!incomingQualityPolicy) return;
       // volume 은 없어도 되지만(옛 형식) 오면 0~1 의 실수여야 한다.
       if (data.volume !== undefined) {
@@ -22186,9 +22317,15 @@
     // 돌려주는 값은 '지금 목표 상태인가' 다. false 는 실패가 아니라 '아직' 이다.
     function ensureMultiviewChatFold() {
       if (!multiviewDesiredUi.chatFolded) return true;
-      const aside = getLiveChatAside();
+      const isVod = isMultiviewReplay();
+      const aside = isVod
+        ? document.querySelector("aside#vod-aside")
+        : getLiveChatAside();
+      // 다시보기 채팅은 라이브의 접기 토글 대신 닫기 버튼으로 aside를 제거하고
+      // 네이티브 펼치기 버튼을 남긴다.
+      if (isVod && isVodChatFoldedAway()) return true;
       if (!aside) return false; // 채팅 DOM 이 아직 없다
-      if (isChatFolded(aside)) return true;
+      if (!isVod && isChatFolded(aside)) return true;
       // 광고 중에는 치지직이 채팅을 강제로 펼치고 우리 클릭도 무시한다. 기존 정책을
       // 그대로 따라 억지로 누르지 않고 광고가 끝나기를 기다린다.
       if (
@@ -22197,7 +22334,9 @@
       ) {
         return false;
       }
-      const button = getChatFoldToggleBtn();
+      const button = isVod
+        ? getVodChatCloseButton(aside)
+        : getChatFoldToggleBtn(aside);
       if (!button) return false; // 버튼이 아직 없다
       const now = Date.now();
       if (now - lastMultiviewFoldClickAt < FOLD_CLICK_COOLDOWN_MS) return false;
@@ -42647,6 +42786,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       readMultiviewSettings(data);
       applyMultiviewPlayerButtonClasses();
       multiviewSettingsLoaded = true;
+      if (IS_MULTIVIEW_FRAME) {
+        broadcastFeatureFlags();
+        if (isMultiviewReplay()) {
+          ensureChatGraphButton();
+          applyRoleChatButtonVisibility();
+          applyChatRecapPlayerButtonVisibility();
+        }
+      }
       // 팝업 프레임은 위 값들이 기능 플래그·최대 화질에 반영되므로, 로드 완료 후 한 번
       // 더 알린다(로드 전에 MAIN world 가 요청했다면 기본값을 받았을 수 있다).
       if (IS_POPUP_PLAYER_FRAME) broadcastFeatureFlags();
@@ -53022,6 +53169,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       flags.liveSync = hidden(multiviewBtnSync);
       flags.streamStats = hidden(multiviewBtnStats);
       flags.screenshotButton = hidden(multiviewBtnScreenshot);
+      if (isMultiviewReplay()) {
+        flags.speedButton = !multiviewVodSpeedButton;
+        flags.commentTimestamp = !multiviewVodTimestamps;
+      }
       // 되감기/앞으로는 한 기능을 공유하고 각각의 표시는 멀티뷰 CSS가 정한다.
       flags.liveRewind = hidden(multiviewBtnRewind || multiviewBtnForward);
       return flags;
@@ -53128,7 +53279,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function resolveMaxQualityCap() {
     if (IS_MULTIVIEW_FRAME) {
-      return multiviewQualityPolicy === "cap-480" ? 480 : 0;
+      if (multiviewQualityPolicy === "cap-480") return 480;
+      if (multiviewQualityPolicy === "cap-720") return 720;
+      return 0;
     }
     if (IS_POPUP_PLAYER_FRAME || !maxQualityAuto) return 0;
     return maxQualityTarget === "720" ? 720 : 0;
@@ -53208,6 +53361,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
         mixerGlobalGainDefaultMode, // 전역 게인 재방문 동작(global | channel)
         videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
+        // settingsLoaded는 팝업별 준비 상태일 수 있어 게인 범위 로드 여부를 따로 전달한다.
+        mixerGainRangeLoaded: featureFlagsLoaded,
         mixerGainMin, // 게인 슬라이더 최소(배율, 0.5=50%)
         mixerGainMax, // 게인 슬라이더 최대(배율, 2=200%)
         mixerGainStep, // 게인 슬라이더 조절 간격(%, 1~10)
@@ -54481,7 +54636,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         }
         readMultiviewSettings(next);
         applyMultiviewPlayerButtonClasses();
-        if (IS_MULTIVIEW_FRAME) broadcastFeatureFlags();
+        if (IS_MULTIVIEW_FRAME) {
+          broadcastFeatureFlags();
+          if (isMultiviewReplay()) {
+            ensureChatGraphButton();
+            if (!isVodChatGraphEnabled()) {
+              chatGraphState.shown = false;
+              renderChatGraph();
+              closeChatPeakPopover();
+            }
+            applyRoleChatButtonVisibility();
+            applyChatRecapPlayerButtonVisibility();
+          }
+        }
       }
       if (changes[POPUP_PLAYER_MAXQ_KEY]) {
         popupPlayerMaxQuality =

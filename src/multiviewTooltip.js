@@ -14,9 +14,17 @@
   let active = null;
   let addedDescription = false;
 
+  function tooltipAllowed(target) {
+    if (!target?.hasAttribute("data-tooltip-icon-only")) return true;
+    const label = target.querySelector("[data-tooltip-label]");
+    return !label || getComputedStyle(label).display === "none";
+  }
+
   function tooltipTarget(node) {
-    if (node instanceof Element) return node.closest("[data-tooltip]");
-    return node?.parentElement?.closest("[data-tooltip]") || null;
+    const target = node instanceof Element
+      ? node.closest("[data-tooltip]")
+      : node?.parentElement?.closest("[data-tooltip]") || null;
+    return tooltipAllowed(target) ? target : null;
   }
 
   function removeDescription() {
@@ -63,7 +71,7 @@
 
   function show(target) {
     const text = target?.getAttribute("data-tooltip")?.trim();
-    if (!text) return hide();
+    if (!text || !tooltipAllowed(target)) return hide();
     if (active !== target) {
       removeDescription();
       active = target;
@@ -109,7 +117,7 @@
     }
   });
   document.addEventListener("scroll", () => active && position(active), true);
-  window.addEventListener("resize", () => active && position(active));
+  window.addEventListener("resize", refresh);
 
   new MutationObserver((records) => {
     if (records.some((record) => record.target === active)) refresh();

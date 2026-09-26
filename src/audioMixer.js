@@ -346,7 +346,7 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
-    const nextMultiviewQualityPolicy = ["highest", "cap-480"].includes(
+    const nextMultiviewQualityPolicy = ["highest", "cap-480", "cap-720"].includes(
       e.data.multiviewQualityPolicy,
     ) ? e.data.multiviewQualityPolicy : "none";
     const nextReconcileToken = Number.isSafeInteger(e.data.multiviewQualityReconcileToken) &&
@@ -384,11 +384,7 @@
       e.data.mixerGlobalGainDefaultMode === "channel" ? "channel" : "global";
     // 게인 슬라이더 범위와 조절 간격(전역). 값이 바뀌면 현재 게인을 새 범위로
     // 클램프하고 플레이어/패널 슬라이더를 다시 그려 즉시 반영한다.
-    updateGainRange(
-      e.data.mixerGainMin,
-      e.data.mixerGainMax,
-      e.data.mixerGainStep,
-    );
+    applyLoadedGainRange(e.data);
     // 라이브 되감기 바 표시(전역, 미설정=기본 ON). 끄면 바 제거.
     liveSeekBarOn = e.data.liveSeekBar === true;
     const stallPrev = liveStallRecoveryOn;
@@ -3153,7 +3149,7 @@
   // ⚠ 레이스 방어: 사용자가 설정한 게인 범위(예: 최소 10%)를 아직 브리지로 못 받았는데
   // 그 전에 채널 상태가 로드되면, 로드된 저장 게인(예: 30%)이 '기본 하한 50%' 기준으로
   // 클램프돼 새로고침이나 방송 전환 시 50%로 바뀔 수 있다.
-  // 실제 범위를 받기 전엔 클램프하지 않고, 받은 뒤 clampLoadedGain 으로 한 번 정리한다.
+  // 실제 설정 범위를 받을 때까지 클램프를 보류하고, 범위 수신 뒤 한 번 정리한다.
   let gainRangeReceived = false;
   function clampGain(g) {
     // 범위 미수신 상태에선 저장값을 보존한다(기본 하한으로 성급히 깎지 않음).
@@ -3326,6 +3322,15 @@
     if (typeof refreshPanelContent === "function" && ui?.panel) {
       refreshPanelContent();
     }
+  }
+  function applyLoadedGainRange(message) {
+    if (message?.mixerGainRangeLoaded !== true) return false;
+    updateGainRange(
+      message.mixerGainMin,
+      message.mixerGainMax,
+      message.mixerGainStep,
+    );
+    return true;
   }
   // 게인 슬라이더 마크업(치지직 native 볼륨 슬라이더 클래스 그대로 → native CSS
   // 적용). 게인 0.5~2를 0~1 정규화해 progress/handler에 반영.
@@ -5447,7 +5452,7 @@
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
     // 멀티뷰 보조 칸의 480p 상한만 숨김 상태에서도 적용한다.
-    if (document.hidden && multiviewQualityPolicy !== "cap-480") return;
+    if (document.hidden && !["cap-480", "cap-720"].includes(multiviewQualityPolicy)) return;
     if (
       maxQualitySuspendedForAudioOnly &&
       Date.now() < maxQualityResumeAfterAudioOnlyAt
@@ -5692,7 +5697,7 @@
         // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
         // 멀티뷰 보조 칸은 tick 이 드물 수 있어 실제 480p가 적용될 때까지
         // timeupdate에서도 재시도한다.
-        if (multiviewQualityPolicy === "cap-480" && maxQualityCap > 0) {
+        if (["cap-480", "cap-720"].includes(multiviewQualityPolicy) && maxQualityCap > 0) {
           // ⚠ timeupdate 는 초당 여러 번 온다. applyMaxQuality 는 '이미 맞음' 을
           //   판정하기까지 fiber 탐색(findCorePlayer)을 하므로 그대로 두면 칸 수
           //   만큼 비용이 곱해진다. 초당 한 번으로 충분하다.

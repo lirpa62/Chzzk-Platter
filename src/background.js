@@ -6146,11 +6146,15 @@ const MULTIVIEW_API_ORIGIN = "https://api.chzzk.naver.com";
 const MULTIVIEW_API_PATHS = new Set([
   // 팔로잉 목록. liveInfo 에 방송 썸네일까지 들어 있어 이걸 정본으로 쓴다.
   "/service/v1/channels/following-lives",
+  "/service/v2/home/following/videos",
+  "/service/v1/home/videos",
   "/service/v1/lives",
   "/service/v1/tag/lives",
+  "/service/v2/nickname/color/codes",
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 방송 제목만 훑는지
   //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
   "/service/v1/search/channels",
+  "/service/v1/search/videos",
   // 전용 팔로잉의 '구독' 자동 그룹을 멀티뷰에서도 보여 주려면 구독 목록이 필요하다.
   "/commercial/v1/subscribe/channels",
 ]);
@@ -6159,6 +6163,8 @@ const MULTIVIEW_API_PATHS = new Set([
 // 들어가므로 고정 목록으로는 못 막고, 모양을 확인해 허용한다.
 const MULTIVIEW_LIVE_DETAIL_RE =
   /^\/service\/v3\/channels\/[0-9a-f]{32}\/live-detail$/i;
+const MULTIVIEW_CHANNEL_VIDEOS_RE =
+  /^\/service\/v1\/channels\/[0-9a-f]{32}\/videos$/i;
 
 function validMultiviewApiQuery(url) {
   const keys = [...url.searchParams.keys()];
@@ -6187,20 +6193,112 @@ function validMultiviewApiQuery(url) {
       url.searchParams.get("sortType") === "POPULAR" &&
       typeof tag === "string" && tag.trim().length > 0 && tag.length <= 80;
   }
+  if (url.pathname === "/service/v2/nickname/color/codes") {
+    return keys.length === 0;
+  }
   if (url.pathname === "/service/v1/channels/following-lives") {
     return only(new Set(["sortType"])) &&
       (!url.searchParams.has("sortType") ||
         ["POPULAR", "UNPOPULAR", "LATEST", "OLDEST", "RECOMMEND"].includes(url.searchParams.get("sortType")));
   }
+  if (url.pathname === "/service/v2/home/following/videos") {
+    if (!only(new Set(["size", "nextNo"]))) return false;
+    const nextNo = url.searchParams.get("nextNo");
+    return url.searchParams.has("size") && uint("size", 1, 50) &&
+      (nextNo === null || nextNo === "" || /^\d{1,20}$/.test(nextNo));
+  }
+  if (url.pathname === "/service/v1/home/videos") {
+    const cursorKeys = new Set(["nextNo", "videoNo", "readCount", "livePv", "publishDateAt", "offset"]);
+    if (!only(new Set(["size", "sortType", ...cursorKeys]))) return false;
+    return url.searchParams.has("size") && uint("size", 1, 50) &&
+      ["POPULAR", "LATEST"].includes(url.searchParams.get("sortType")) &&
+      [...cursorKeys].every((key) => {
+        const value = url.searchParams.get(key);
+        if (value === null) return true;
+        if (!/^\d{1,20}$/.test(value)) return false;
+        if (key === "offset") return Number.isSafeInteger(Number(value)) && Number(value) <= 10000;
+        try { return BigInt(value) <= 10000000000000000000n; } catch { return false; }
+      });
+  }
+  if (MULTIVIEW_CHANNEL_VIDEOS_RE.test(url.pathname)) {
+    return only(new Set(["sortType", "pagingType", "page", "size", "publishDateAt", "videoType"])) &&
+      url.searchParams.get("sortType") === "LATEST" &&
+      url.searchParams.get("pagingType") === "PAGE" &&
+      url.searchParams.has("page") && uint("page", 0, 10000) &&
+      url.searchParams.has("size") && uint("size", 1, 50) &&
+      url.searchParams.get("publishDateAt") === "" &&
+      url.searchParams.get("videoType") === "";
+  }
   if (url.pathname === "/service/v1/search/channels") {
     return only(new Set(["keyword", "offset", "size"])) &&
       url.searchParams.has("keyword") && uint("offset", 0, 10000) && uint("size", 1, 100);
+  }
+  if (url.pathname === "/service/v1/search/videos") {
+    const keyword = url.searchParams.get("keyword");
+    return only(new Set(["keyword", "offset", "size"])) &&
+      typeof keyword === "string" && keyword.trim().length > 0 && keyword.length <= 100 &&
+      url.searchParams.has("offset") && uint("offset", 0, 10000) &&
+      url.searchParams.has("size") && uint("size", 1, 50);
   }
   if (url.pathname === "/commercial/v1/subscribe/channels") {
     return only(new Set(["page", "size"])) && uint("page", 0, 10000) && uint("size", 1, 100);
   }
   if (MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) return keys.length === 0;
   return false;
+}
+
+// Following-video nextNo can exceed Number's exact integer range, so preserve its raw digits.
+function preserveFollowingVideoNextNoPrecision(jsonText) {
+  const source = String(jsonText);
+  let result = "";
+  let index = 0;
+  while (index < source.length) {
+    if (source[index] !== '"') {
+      result += source[index];
+      index += 1;
+      continue;
+    }
+
+    const tokenStart = index;
+    index += 1;
+    let escaped = false;
+    while (index < source.length) {
+      const character = source[index];
+      index += 1;
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        break;
+      }
+    }
+
+    const tokenEnd = index;
+    let valueStart = tokenEnd;
+    while (/\s/.test(source[valueStart] || "")) valueStart += 1;
+    if (source[valueStart] !== ":") {
+      result += source.slice(tokenStart, tokenEnd);
+      continue;
+    }
+
+    let numberStart = valueStart + 1;
+    while (/\s/.test(source[numberStart] || "")) numberStart += 1;
+    if (source.slice(tokenStart, tokenEnd) !== '"nextNo"' || !/\d/.test(source[numberStart] || "")) {
+      result += source.slice(tokenStart, tokenEnd);
+      continue;
+    }
+
+    let numberEnd = numberStart;
+    while (/\d/.test(source[numberEnd] || "")) numberEnd += 1;
+    if (!/[\s,}]/.test(source[numberEnd] || "")) {
+      result += source.slice(tokenStart, tokenEnd);
+      continue;
+    }
+    result += source.slice(tokenStart, numberStart) + `"${source.slice(numberStart, numberEnd)}"`;
+    index = numberEnd;
+  }
+  return result;
 }
 
 async function fetchMultiviewApi(rawUrl) {
@@ -6213,7 +6311,8 @@ async function fetchMultiviewApi(rawUrl) {
   if (
     url.origin !== MULTIVIEW_API_ORIGIN ||
     (!MULTIVIEW_API_PATHS.has(url.pathname) &&
-      !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) ||
+      !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname) &&
+      !MULTIVIEW_CHANNEL_VIDEOS_RE.test(url.pathname)) ||
     !validMultiviewApiQuery(url)
   ) {
     throw new Error("not-allowed");
@@ -6223,6 +6322,10 @@ async function fetchMultiviewApi(rawUrl) {
     headers: { accept: "application/json" },
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (url.pathname === "/service/v2/home/following/videos") {
+    const body = JSON.parse(preserveFollowingVideoNextNoPrecision(await response.text()));
+    return body?.content ?? null;
+  }
   return (await response.json())?.content ?? null;
 }
 

@@ -10,19 +10,29 @@ const assert = require("node:assert/strict");
 const L = require("../src/multiviewLayouts.js");
 
 const HASH_RE = /^[0-9a-f]{32}$/i;
+const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
 
 function validateSetup(raw) {
   if (!raw || typeof raw !== "object") return null;
   const seen = new Set();
   const chosen = (Array.isArray(raw.chosen) ? raw.chosen : [])
     .filter((c) => c && typeof c === "object")
-    .map((c) => ({
-      channelId: String(c.channelId || "").toLowerCase(),
-      channelName: String(c.channelName ?? ""),
-      channelImageUrl: String(c.channelImageUrl ?? ""),
-    }))
+    .map((c) => {
+      const mediaType = c.mediaType === "video" ? "video" : "live";
+      const videoNo = String(c.videoNo || "");
+      const ownerId = String(c.ownerChannelId || (mediaType === "live" ? c.channelId : "")).toLowerCase();
+      return {
+        ...c,
+        mediaType,
+        channelId: mediaType === "video" ? `video:${videoNo}` : String(c.channelId || "").toLowerCase(),
+        ownerChannelId: HASH_RE.test(ownerId) ? ownerId : "",
+        videoNo: mediaType === "video" && /^\d+$/.test(videoNo) ? videoNo : "",
+        channelName: String(c.channelName ?? ""),
+        channelImageUrl: String(c.channelImageUrl ?? ""),
+      };
+    })
     .filter((c) => {
-      if (!HASH_RE.test(c.channelId) || seen.has(c.channelId)) return false;
+      if (!SLOT_RE.test(c.channelId) || (c.mediaType === "video" && !c.videoNo) || seen.has(c.channelId)) return false;
       seen.add(c.channelId);
       return true;
     })
@@ -81,6 +91,14 @@ ok(two?.chosen.length === 2, "2채널을 그대로 받는다");
 ok(two?.layoutId === "right-1", "허용되는 배치는 유지한다");
 ok(two?.chatSide === "left", "허용되는 채팅 자리는 유지한다");
 ok(two?.mainHighQuality === false, "mainHighQuality false 를 지킨다");
+const replay = validateSetup({
+  chosen: [ch(A), { channelId: "video:902", mediaType: "video", videoNo: "902", ownerChannelId: B, adult: true }],
+});
+ok(replay?.chosen[1].channelId === "video:902", "다시보기 슬롯 ID를 보존한다");
+ok(replay?.chosen[1].ownerChannelId === B && replay.chosen[1].adult === true,
+  "다시보기 채널 연결과 연령 제한 정보를 보존한다");
+ok(validateSetup({ chosen: [ch(A), { channelId: "video:bad", mediaType: "video", videoNo: "bad" }] }) === null,
+  "잘못된 다시보기 번호는 거부한다");
 ok(
   validateSetup({ chosen: [ch(A), ch(B)] })?.mainHighQuality === true,
   "값이 없으면 고화질 시작이 기본",

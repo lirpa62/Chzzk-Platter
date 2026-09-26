@@ -66,16 +66,21 @@ function createRuntime() {
     .replace(/mixerBaseSource/g, "ctx.mixerBaseSource")
     .replace(/state\.userDisabled/g, "ctx.userDisabled");
   // eslint-disable-next-line no-new-func
-  const fn = new Function("ctx", "opts", body + "\n return true;");
+  const fn = new Function(
+    "ctx",
+    "opts",
+    "queueMultiviewMixerState",
+    body + "\n return true;",
+  );
   return {
     ctx,
-    save: (opts) => fn(ctx, opts),
+    save: (opts) => fn(ctx, opts, () => {}),
     // 채널 id 가 잡히는 순간의 실제 처리(resolveAndLoadChannel 와 같은 규칙).
     resolveChannel(id) {
       ctx.currentMediaId = id;
       if (ctx.pendingUserEdit) {
         ctx.pendingUserEdit = false;
-        fn(ctx, { forcePresets: true });
+        fn(ctx, { forcePresets: true }, () => {});
       }
     },
     // load 응답에서 전역 기본값을 적용하는지.

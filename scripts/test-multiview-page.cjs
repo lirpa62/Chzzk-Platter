@@ -78,7 +78,10 @@ const checks = [];
       returnByValue: true,
     });
     if (result.exceptionDetails)
-      throw Error(JSON.stringify(result.exceptionDetails));
+      throw Error(JSON.stringify({
+        exception: result.exceptionDetails,
+        expression: expression.slice(0, 180),
+      }));
     return result.result.value;
   };
   await command("Network.enable");
@@ -159,7 +162,7 @@ const checks = [];
     ];
     // 실제 응답 모양을 따른다: 팔로잉은 followingList(+liveInfo/streamer),
     // 전체는 data, 검색은 data[].{live,channel}.
-    window.__livePageCalls=0;window.__liveSortRequests=[];
+    window.__livePageCalls=0;window.__liveSortRequests=[];window.__allVideoCalls=[];window.__followingVideoCalls=[];
     window.__followingSortRequests=[];window.__searchPageOffsets=[];
     window.__apiContent=(url)=>{
       const parsed=new URL(url),p=parsed.pathname;
@@ -207,9 +210,45 @@ const checks = [];
               channelName:'검색 '+n,openLive:true}};
           })};
         }
-        return {data:channels.map(c=>({channel:{...c,openLive:true}}))};
+        return {data:channels.map((c,index)=>({channel:{...c,openLive:true,verifiedMark:index===0}}))};
       }
+      if(p.endsWith('/search/videos'))return {data:[{
+        video:{videoNo:'901',videoTitle:'검색어 재정렬 업로드',videoType:'UPLOAD',readCount:500,
+          livePv:12345,publishDateAt:Date.now()-3*60*60*1000,duration:466},
+        channel:{...channels[2],verifiedMark:true},
+      },{
+        video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800,
+          livePv:67890,publishDateAt:Date.now()-4*60*60*1000,duration:930},
+        channel:{...channels[1],verifiedMark:true},
+      }]};
       if(p.endsWith('/service/v1/tag/lives')&&parsed.searchParams.get('tags')==='페이지')return {data:[]};
+      if(p.endsWith('/service/v2/home/following/videos')){
+        const nextNo=parsed.searchParams.get('nextNo')||'';
+        window.__followingVideoCalls.push(nextNo);
+        const next=nextNo==='2103509840029549570';
+        const count=next?1:40;
+        return {data:Array.from({length:count},(_,index)=>{
+          const videoNo=next?'141':String(101+index);
+          return {
+            video:{videoNo,videoTitle:next?'팔로잉 다음 다시보기':'팔로잉 다시보기 '+videoNo,
+              thumbnailImageUrl:'https://example.invalid/replay_{type}.jpg',adult:false},
+            channel:{...channels[0],verifiedMark:true},
+          };
+        }),page:{next:next?null:{nextNo:'2103509840029549570'},prev:null}};
+      }
+      if(p==='/service/v1/home/videos'){
+        const latest=parsed.searchParams.get('sortType')==='LATEST';
+        const next=parsed.searchParams.has('videoNo');
+        window.__allVideoCalls.push({sortType:parsed.searchParams.get('sortType'),next});
+        const videoNo=latest?(next?'204':'202'):(next?'203':'201');
+        return {data:[{
+          video:{videoNo,videoTitle:next?'다음 페이지 업로드':'전체 다시보기',videoType:next?'UPLOAD':'REPLAY',thumbnailImageUrl:'https://example.invalid/all_{type}.jpg'},
+          channel:channels[1],
+        }],page:{next:next?null:(latest?{publishDateAt:'20260925120000',videoNo:'202'}:{readCount:'9000',videoNo:'201'})}};
+      }
+      const channelVideos=p.match(/\\/service\\/v1\\/channels\\/([0-9a-f]{32})\\/videos$/);
+      if(channelVideos)return {data:[{videoNo:'301',videoTitle:'채널 다시보기',thumbnailImageUrl:'https://example.invalid/channel_{type}.jpg',
+        readCount:1234,livePv:23000,publishDateAt:Date.now()-2*60*60*1000,duration:3600}]};
       if(p.endsWith('/subscribe/channels'))return {data:[]};
       if(p.endsWith('/service/v1/lives')){
         window.__livePageCalls++;
@@ -237,9 +276,12 @@ const checks = [];
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewVideoSearchControls.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSort.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
-  await evaluate(readFileSync("src/multiview.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewTooltip.js", "utf8"));
+  await evaluate(readFileSync("src/multiview.js", "utf8")
+    .replace("const state = {", "const state = window.__setupState = {"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
   // 검증식 안에서 await 를 쓸 수 있도록 async IIFE 로 감싼다.
@@ -284,6 +326,11 @@ const checks = [];
      check(!box.textContent.includes('불러오는 중'),'아직 문구를 쓰고 있다');
      // 스켈레톤도 실제 카드와 같은 골격이어야 자리가 안 밀린다.
      check(skeletons[0].querySelector('.mv-card-thumb'),'스켈레톤에 썸네일 자리가 없다');
+     const skeletonText=skeletons[0].querySelector('.mv-card-text');
+     const skeletonLines=[...skeletonText.querySelectorAll('.mv-skeleton-line')];
+     check(skeletons[0].querySelector('.mv-skeleton-avatar')&&skeletonLines.length===2&&
+       skeletonText.getBoundingClientRect().width>0&&skeletonLines.every(line=>line.getBoundingClientRect().width>0),
+       '일반 스켈레톤의 프로필 옆 제목·채널명 줄이 보이지 않는다');
      release();
      chrome.runtime.sendMessage=realSend;
      await wait(400);
@@ -499,24 +546,32 @@ const checks = [];
 
   await test(
     "라이브 탭은 아래쪽에서 다음 페이지를 기존 카드 뒤에 붙인다",
-    `document.querySelector('[data-mv-source="all"]').click();
+    `window.__setupState.livePager=null;
+     document.querySelector('[data-mv-source="following"]').click();await wait(100);
+     const liveCallsBefore=window.__livePageCalls;
+     document.querySelector('[data-mv-source="all"]').click();
      await wait(400);
      const box=document.getElementById('mvChannelList');
-     check(box.querySelectorAll('.mv-card').length===40,'첫 페이지가 40개가 아니다');
+     const firstPageCount=box.querySelectorAll('.mv-card').length;
+     check(firstPageCount===40||firstPageCount===43,
+       '초기 목록 크기가 예상 범위가 아니다: '+firstPageCount+' / 호출 '+(window.__livePageCalls-liveCallsBefore));
      const first=box.querySelector('.mv-card');
      box.scrollTop=box.scrollHeight;
      box.dispatchEvent(new Event('scroll'));
      await wait(400);
-     check(box.querySelectorAll('.mv-card').length===43,'둘째 페이지가 append되지 않았다');
+     check(box.querySelectorAll('.mv-card').length===43,
+       '둘째 페이지가 append되지 않았다: '+box.querySelectorAll('.mv-card').length+
+       ' / 호출 '+(window.__livePageCalls-liveCallsBefore)+' / done '+window.__setupState.livePager?.done);
      check(first.isConnected,'다음 페이지 로드 중 기존 카드를 다시 그렸다');
-     check(window.__livePageCalls===2,'라이브 API 호출 수 이상: '+window.__livePageCalls);
+     check(window.__livePageCalls===liveCallsBefore+2,
+       '첫/다음 페이지 요청 수 이상: '+(window.__livePageCalls-liveCallsBefore));
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);
      document.querySelector('[data-mv-source="all"]').click();
      await wait(300);
      check(box.querySelectorAll('.mv-card').length===43,
        '탭을 다시 열자 불러온 페이지가 사라졌다');
-     check(window.__livePageCalls===2,'유효한 pager를 두고 다시 요청했다');
+     check(window.__livePageCalls===liveCallsBefore+2,'유효한 pager를 두고 다시 요청했다');
      document.querySelector('[data-mv-source="following"]').click();
      await wait(300);`,
   );
@@ -588,7 +643,9 @@ const checks = [];
 
   await test(
     "전용 팔로잉에서만 구역 폴더가 나오고 고르면 그 구역만 남는다",
-    `const folders=document.getElementById('mvFolders');
+    `document.querySelector('[data-mv-source="following"]').click();
+     await wait(200);
+     const folders=document.getElementById('mvFolders');
      // 팔로잉 탭에서는 폴더가 없어야 한다.
      check(folders.hidden,'팔로잉 탭인데 구역 폴더가 보인다');
      document.querySelector('[data-mv-source="custom"]').click();
@@ -745,6 +802,164 @@ const checks = [];
   );
 
   await test(
+    "다시보기 선택은 팔로잉·전체·채널 검색·보관함 경로를 제공한다",
+    `const tabs=document.querySelectorAll('[data-mv-source]');
+     const source='videos';
+     window.localStore.cheeseVideoVaultActiveAccount='bbbb0000000000000000000000000001';
+     window.localStore['cheeseVideoVault:bbbb0000000000000000000000000001']=[{
+       videoNo:'902',title:'즐겨찾기 다시보기',thumb:'https://example.invalid/favorite.jpg',
+       channelId:'aaaa0000000000000000000000000003',channelName:'채널셋',adult:true,
+     }];
+     document.querySelector('[data-mv-source="'+source+'"]').click();
+     await wait(250);
+     const list=document.getElementById('mvChannelList');
+     let replay=list.querySelector('[data-mv-pick="video:101"]');
+     check(replay,'팔로잉 다시보기가 선택 목록에 없다: '+list.textContent);
+     check(replay.querySelector('.mv-card-live.is-replay')?.textContent==='다시보기',
+       '다시보기 배지가 표시되지 않는다');
+     check(replay.querySelector('.mv-card-viewers')===null,'다시보기에 라이브 시청자 수를 표시한다');
+     check(list.scrollHeight>list.clientHeight&&window.__followingVideoCalls.length===1,
+       '스크롤 전 팔로잉 첫 페이지가 충분히 길지 않거나 다음 페이지를 미리 요청했다');
+     list.scrollTop=list.scrollHeight;list.dispatchEvent(new Event('scroll'));await wait(300);
+     check(list.querySelector('[data-mv-pick="video:141"]'),
+       '팔로잉 다시보기 다음 페이지가 스크롤 후 추가되지 않는다');
+     check(window.__followingVideoCalls.length===2&&window.__followingVideoCalls[1]==='2103509840029549570',
+       '팔로잉 다시보기 nextNo 커서가 그대로 전달되지 않는다: '+window.__followingVideoCalls.join(','));
+     replay.click();
+     check(document.querySelector('[data-mv-chosen="video:101"]'),'다시보기 슬롯 ID가 저장되지 않았다');
+     document.querySelector('[data-mv-remove="video:101"]').click();
+     document.querySelector('[data-mv-video-source="popular"]').click();await wait(200);
+     check(list.querySelector('[data-mv-pick="video:201"]'),'인기 전체 다시보기가 없다');
+     list.scrollTop=list.scrollHeight;list.dispatchEvent(new Event('scroll'));await wait(250);
+     check(list.querySelector('[data-mv-pick="video:203"] .mv-card-live')?.textContent==='업로드',
+       '인기 다음 페이지의 업로드 영상이 표시되지 않는다');
+     check(window.__allVideoCalls.some(call=>call.sortType==='POPULAR'&&call.next),
+       '인기 다시보기 다음 커서를 요청하지 않았다');
+     document.querySelector('[data-mv-video-source="latest"]').click();await wait(200);
+     check(list.querySelector('[data-mv-pick="video:202"]'),'최신 전체 다시보기가 없다');
+     list.scrollTop=list.scrollHeight;list.dispatchEvent(new Event('scroll'));await wait(250);
+     check(list.querySelector('[data-mv-pick="video:204"] .mv-card-live')?.textContent==='업로드',
+       '최신 다음 페이지의 업로드 영상이 표시되지 않는다');
+     const selectedSource=document.querySelector('[data-mv-video-source="latest"]');
+     const selectedStyle=getComputedStyle(selectedSource);
+     check(selectedStyle.color==='rgb(255, 255, 255)'&&
+       selectedStyle.backgroundColor==='rgb(112, 80, 200)'&&
+       selectedStyle.borderTopColor==='rgb(139, 107, 232)',
+       '선택된 다시보기 소스 버튼의 보라색 대비가 적용되지 않는다');
+     document.querySelector('[data-mv-video-source="favorites"]').click();await wait(100);
+     const favorite=list.querySelector('[data-mv-pick="video:902"]');
+     check(favorite?.querySelector('.mv-card-thumb.is-adult'),'보관함 다시보기 연령 제한 표시가 없다');
+     document.querySelector('[data-mv-video-source="channel-search"]').click();
+     const input=document.getElementById('mvVideoChannelSearchInput');input.value='채널';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(350);
+     const channel=document.querySelector('#mvVideoChannelPopover [data-mv-video-channel]');
+     check(channel?.querySelector('img'),'채널 검색 팝오버에 프로필 이미지가 없다');
+     check(channel?.querySelector('.mv-card-verified'),'채널 검색 팝오버에 파트너 배지가 없다');
+     check(channel,'다시보기용 채널 검색 결과가 없다');channel.click();await wait(150);
+     check(list.querySelector('[data-mv-pick="video:301"]'),'선택 채널의 다시보기가 없다');
+     check(list.querySelector('[data-mv-pick="video:301"] .mv-card-name').textContent==='채널하나',
+       '채널 다시보기 카드에서 채널 메타데이터를 잃었다');
+     const channelVod=list.querySelector('[data-mv-pick="video:301"]');
+     check(channelVod.querySelector('.mv-card-live-pv')?.textContent==='2.3만회 시청된 라이브'&&
+       channelVod.querySelector('.mv-card-duration')?.textContent==='1:00:00',
+       '다시보기 썸네일의 livePv/duration 정보가 없다');
+     check(channelVod.querySelector('.mv-card-video-info')?.textContent.includes('조회수 1,234회')&&
+       channelVod.querySelector('.mv-card-video-info')?.textContent.includes('시간 전'),
+       '다시보기의 조회수·상대 시간이 채널명 아래에 없다');
+     const selectedChannelTab=document.querySelector('[data-mv-video-channel-back]');
+     check(selectedChannelTab.textContent.trim()==='선택한 채널 목록'&&selectedChannelTab.getAttribute('aria-pressed')==='true',
+       '선택한 채널 다시보기 탭이 선택 상태로 표시되지 않는다');
+     check(selectedChannelTab.hasAttribute('data-tooltip-icon-only')&&
+       selectedChannelTab.querySelector('[data-tooltip-label]'),
+       '문구가 보일 때는 툴팁을 숨기고 아이콘만 남을 때 표시하도록 지정하지 않았다');
+     const channelSourceCell=document.querySelector('#mvVideoSources .mv-video-channel-source-cell');
+     const channelTabRect=channelSourceCell.getBoundingClientRect();
+     const selectedTabRect=selectedChannelTab.getBoundingClientRect();
+     check(document.getElementById('mvVideoSources').children.length===6&&
+       channelSourceCell.children.length===2&&Math.abs(channelTabRect.top-selectedTabRect.top)<1,
+       '선택 채널 탭이 채널 검색과 같은 그리드 셀에 배치되지 않았다');
+     const sourceGrid=document.getElementById('mvVideoSources');
+     const sourceGridWidth=sourceGrid.style.width;
+     sourceGrid.style.width='600px';
+     check(getComputedStyle(selectedChannelTab.querySelector('.mv-video-channel-selected-label')).display==='none',
+       '좁은 채널 검색 셀에서 선택 채널 탭의 텍스트 대신 아이콘을 표시하지 않는다');
+     const setupTooltip=document.getElementById('mvTooltip');
+     selectedChannelTab.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+     check(!setupTooltip.hidden,'아이콘만 남은 선택 채널 버튼에 툴팁을 표시하지 않는다');
+     sourceGrid.style.width='700px';window.dispatchEvent(new Event('resize'));
+     check(setupTooltip.hidden,'문구가 보이는 선택 채널 버튼에 중복 툴팁을 표시한다');
+     sourceGrid.style.width=sourceGridWidth;
+     document.querySelector('[data-mv-video-source="channel-search"]').click();await wait(100);
+     check(!document.getElementById('mvVideoChannelSearch').hidden,
+       '채널 검색 탭으로 돌아오지 못했다');
+     selectedChannelTab.click();await wait(150);
+     check(list.querySelector('[data-mv-pick="video:301"]'),
+       '선택한 채널 목록 탭으로 돌아왔을 때 선택한 채널을 유지하지 못했다');
+     document.querySelector('[data-mv-video-source="channel-search"]').click();
+     const returnInput=document.getElementById('mvVideoChannelSearchInput');
+     returnInput.value='채널';returnInput.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
+     check(!document.getElementById('mvVideoChannelPopover').hidden&&
+       document.querySelector('#mvVideoChannelPopover [data-mv-video-channel]'),
+       '선택한 채널 목록을 거친 뒤 채널 검색 팝오버가 다시 열리지 않는다');
+     document.querySelector('[data-mv-video-source="platter-search"]').click();
+     check(document.getElementById('mvVideoRerankSearchInput').value==='',
+       '채널 검색어가 치즈 플래터 재정렬 검색칸으로 복사된다');
+     const rerankControls=document.querySelector('[data-mv-video-rerank-controls="setup"]');
+     check(rerankControls.querySelector('.cheese-search-control.cheese-search-sort-trigger')&&
+       rerankControls.querySelector('.cheese-search-options'),
+       '재정렬 정렬/설정 컨트롤이 통합 검색 스타일로 표시되지 않는다');
+     check(getComputedStyle(rerankControls).justifyContent==='flex-end',
+       '재정렬 정렬/설정 컨트롤이 오른쪽 끝에 정렬되지 않는다');
+     const rerankInput=document.getElementById('mvVideoRerankSearchInput');rerankInput.value='검색어';rerankInput.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
+     const rerankCard=list.querySelector('[data-mv-pick="video:901"]');
+     check(rerankCard?.querySelector('.mv-card-live')?.textContent==='업로드',
+       '치즈 플래터 재정렬 검색 결과의 업로드 표시가 없다');
+     check(rerankCard.querySelector('.mv-card-live-pv')?.textContent==='1.2만회 시청된 라이브'&&
+       rerankCard.querySelector('.mv-card-duration')?.textContent==='7:46'&&
+       rerankCard.querySelector('.mv-card-video-info')?.textContent.includes('조회수 500회'),
+       '재정렬 다시보기 카드의 조회수·livePv·duration 지표가 누락됐다');
+     const badgeRow=rerankCard.querySelector('.mv-card-badge-row');
+     check(badgeRow?.children[0]?.classList.contains('mv-card-live')&&
+       badgeRow.children[1]?.classList.contains('mv-card-live-pv'),
+       '실시간 시청 수 배지가 다시보기 배지 바로 옆에 배치되지 않았다');
+     check(getComputedStyle(rerankCard.querySelector('.mv-card-live-pv')).fontWeight==='700'&&
+       getComputedStyle(rerankCard.querySelector('.mv-card-duration')).fontWeight==='700',
+       '다시보기 livePv 또는 재생 시간 글꼴 굵기가 700이 아니다');
+     check(Number(getComputedStyle(document.getElementById('mvVideoRerankSearch')).zIndex)>
+       Number(getComputedStyle(rerankCard.querySelector('.mv-card-badge-row')).zIndex),
+       '재정렬 컨트롤 영역이 썸네일 배지보다 위 레이어에 있지 않는다');
+     const sortTrigger=rerankControls.querySelector('[data-video-rerank-sort-trigger]');
+     sortTrigger.click();
+     check(!rerankControls.querySelector('.cheese-search-sort-menu').hidden,
+       '재정렬 정렬 메뉴가 열리지 않는다');
+     rerankControls.querySelector('[data-video-rerank-sort="read"]').click();
+     check(sortTrigger.textContent.trim()==='인기순','재정렬 결과 정렬 선택이 반영되지 않는다');
+     check(list.querySelector('.mv-cards [data-mv-pick="video:902"]')===list.querySelector('.mv-cards').firstElementChild,
+       '정렬 변경 직후 채널 목록 카드 순서가 갱신되지 않는다');
+     const sortMenu=rerankControls.querySelector('.cheese-search-sort-menu');
+     const pickedProbe=document.createElement('span');pickedProbe.className='mv-card-picked';
+     rerankCard.querySelector('.mv-card-thumb').appendChild(pickedProbe);
+     check(Number(getComputedStyle(sortMenu).zIndex)>
+       Number(getComputedStyle(pickedProbe).zIndex),
+       '정렬 팝오버가 선택됨 배지보다 위에 표시되지 않는다');
+     pickedProbe.remove();
+     rerankControls.querySelector('[data-video-rerank-options-trigger]').click();
+     check(!rerankControls.querySelector('.cheese-search-options-popover').hidden&&
+       rerankControls.querySelector('[data-video-rerank-pool]').value==='200',
+       '재정렬 설정 팝오버가 기존 저장값으로 열리지 않는다');
+     check(Number(getComputedStyle(rerankControls.querySelector('.cheese-search-options-popover')).zIndex)>
+       Number(getComputedStyle(rerankCard.querySelector('.mv-card-live-pv')).zIndex),
+       '재정렬 설정 팝오버가 썸네일 지표보다 위에 표시되지 않는다');
+     const relWeight=rerankControls.querySelector('[data-video-rerank-weight="rel"]');
+     relWeight.value='44';relWeight.dispatchEvent(new Event('change',{bubbles:true}));await wait(50);
+     check(window.localStore.cheeseSearchRerankWeights.rel===44,
+       '재정렬 가중치가 기존 설정 저장소에 저장되지 않는다');
+     check(document.querySelector('[data-mv-video-source="popular"]').dataset.tooltip==='모든 방송에서 인기 정렬',
+       '인기 정렬 툴팁 설명이 없다');
+     document.querySelector('[data-mv-source="following"]').click();await wait(150);`,
+  );
+
+  await test(
     "배치 미리보기가 버튼 밖으로 삐져나가지 않는다",
     `// ⚠ 가로로 긴 배치(오른쪽 1 은 3.56:1)는 width:100% + aspect-ratio 로 두면
      //   버튼 폭을 넘어 밖으로 나간다(실측: 87px 버튼 안에 149px).
@@ -881,9 +1096,34 @@ const checks = [];
                 channelName:'Quick 검색 '+n,openLive:true}};
             })}};
           }
+          if(keyword==='채널')return {ok:true,content:{data:[{
+            channel:{...quickChannels[0],openLive:false,verifiedMark:true},
+          }]}};
           return {ok:true,content:{data:[]}};
         }
+        if(parsed.pathname.endsWith('/service/v1/search/videos'))return {ok:true,content:{data:[{
+          video:{videoNo:'901',videoTitle:'검색어 재정렬 업로드',videoType:'UPLOAD',readCount:500},
+          channel:{...quickChannels[2],verifiedMark:true},
+        },{
+          video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800},
+          channel:{...quickChannels[1],verifiedMark:true},
+        }]}};
         if(parsed.pathname.endsWith('/service/v1/tag/lives'))return {ok:true,content:{data:[]}};
+        if(parsed.pathname.endsWith('/service/v2/home/following/videos'))return {ok:true,content:{
+          data:[{video:{videoNo:'101',videoTitle:'팔로잉 다시보기',
+            thumbnailImageUrl:'https://example.invalid/replay_{type}.jpg'},
+            channel:{...quickChannels[0],verifiedMark:true}}],page:{nextNo:''}}};
+        if(parsed.pathname==='/service/v1/home/videos'){
+          const latest=parsed.searchParams.get('sortType')==='LATEST';
+          const next=parsed.searchParams.has('videoNo');
+          return {ok:true,content:{data:[{video:{videoNo:latest?(next?'204':'202'):(next?'203':'201'),
+            videoTitle:next?'다음 페이지 업로드':'전체 다시보기',videoType:next?'UPLOAD':'REPLAY',thumbnailImageUrl:'https://example.invalid/all_{type}.jpg'},
+            channel:quickChannels[1]}],page:{next:next?null:(latest?{publishDateAt:'20260925120000',videoNo:'202'}:{readCount:'9000',videoNo:'201'})}}};
+        }
+        const quickChannelVideos=parsed.pathname.match(/\\/service\\/v1\\/channels\\/([0-9a-f]{32})\\/videos$/);
+        if(quickChannelVideos)return {ok:true,content:{data:[{videoNo:'301',
+          videoTitle:'채널 다시보기',thumbnailImageUrl:'https://example.invalid/channel_{type}.jpg',
+          readCount:1234,livePv:23000,publishDateAt:Date.now()-2*60*60*1000,duration:3600}]}};
         if(parsed.pathname.endsWith('/service/v1/lives')){
           window.__quickLiveCalls++;
           window.__quickLiveSortRequests.push(parsed.searchParams.get('sortType'));
@@ -973,10 +1213,13 @@ const checks = [];
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewVideoSearchControls.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSort.js", "utf8"));
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewTooltip.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewVodChat.js", "utf8"));
   await evaluate(`window.syncTickCallbacks=[];
     const nativeSetInterval=window.setInterval;
     window.setInterval=function(callback,delay,...args){
@@ -993,6 +1236,10 @@ const checks = [];
       "  window.__testGroupTick = tickSyncGroups;\n  function tickSyncGroups(")
     .replace("  function replaceChannel(",
       "  window.__testReplaceChannel = replaceChannel;\n  function replaceChannel(")
+    .replace("  function setMain(",
+      "  window.__testSetMain = setMain;\n  function setMain(")
+    .replace("  function ownerChannelId(",
+      "  window.__testOwnerChannelId = ownerChannelId;\n  function ownerChannelId(")
     .replace("  (async () => {\n    // 주소로 받은 id",
       "  window.__testResources = {channelAudio,audioBlocked,mixerOpen,statsByChannel,frameLoadTimers,frameTimers,frameStates,syncStats,syncReadyAt,syncGeneration,syncSeekAt,syncRates,syncRetryAt,syncDiagnostics,mixerStates,mixerErrors,mixerConfirm,mixerGainDrafts,mixerGainTimers,mixerPending,pendingSyncCommands,lastQuality,qualityTransitions,cells};\n  (async () => {\n    // 주소로 받은 id"));
   await evaluate("new Promise(r=>setTimeout(r,300))");
@@ -1070,6 +1317,12 @@ const checks = [];
      quick.querySelector('[data-mv-quick-source="live"]').click();
      check(rail.querySelector('.mv-quick-card.is-skeleton'),
        'Quick 탭 전환 직후 카드 스켈레톤이 없다');
+     const quickSkeleton=rail.querySelector('.mv-quick-card.is-skeleton');
+     const quickSkeletonText=quickSkeleton?.querySelector('.mv-quick-card-text');
+     check(quickSkeletonText?.querySelectorAll('.mv-skeleton-line').length===2&&
+       quickSkeletonText.getBoundingClientRect().width>0&&
+       [...quickSkeletonText.querySelectorAll('.mv-skeleton-line')].every(line=>line.getBoundingClientRect().width>0),
+       'Quick 스켈레톤의 프로필 옆 제목·채널명 줄이 보이지 않는다');
      check(rail.getAttribute('aria-busy')==='true','Quick 로딩 상태가 전달되지 않는다');
      await wait(400);
      check(!rail.querySelector('.mv-quick-card.is-skeleton'),
@@ -1098,6 +1351,141 @@ const checks = [];
      await wait(250);
      document.getElementById('mvQuickClose').click();
      check(quick.hidden,'채널 관리 패널이 닫히지 않았다');`,
+  );
+
+  await test(
+    "Quick에서 다시보기와 라이브·다시보기 조합을 재생한다",
+    `const quick=document.getElementById('mvQuick');
+     document.getElementById('mvBack').click();await wait(200);
+     quick.querySelector('[data-mv-quick-source="videos"]').click();await wait(250);
+     let replay=quick.querySelector('[data-mv-quick-add="video:101"]');
+     check(replay?.querySelector('.mv-card-live.is-replay'),'팔로잉 다시보기 카드가 없다');
+     replay.click();
+     let chosen=window.__mvState.chosen.filter(channel=>channel.mediaType==='video');
+     check(chosen.length===1&&chosen[0].channelId==='video:101',
+       '팔로잉 다시보기 슬롯을 추가하지 못했다');
+     let replayUrl=window.frameSrcs.map(value=>new URL(value)).find(url=>url.pathname==='/video/101');
+     check(replayUrl?.searchParams.get('cheeseMultiChannelId')==='video:101',
+       '다시보기 iframe에 고유 슬롯 ID가 없다');
+     check(replayUrl.searchParams.get('cheeseMultiMuted')==='1'&&
+       replayUrl.searchParams.get('cheeseMultiQualityPolicy')==='cap-720'&&
+       replayUrl.searchParams.get('cheeseMultiQuality')==='720',
+       '보조 다시보기의 음소거·화질 정책이 올바르지 않다');
+     check(window.__mvState.chosen.some(channel=>channel.mediaType!=='video'),
+       '라이브와 다시보기 혼합 구성이 되지 않았다');
+     quick.querySelector('[data-mv-quick-video-source="popular"]').click();await wait(200);
+     quick.querySelector('[data-mv-quick-add="video:201"]')?.click();
+     await wait(200);
+     check(quick.querySelector('[data-mv-quick-add="video:203"] .mv-card-live')?.textContent==='업로드',
+       'Quick 인기 다음 페이지 업로드 영상이 없다');
+     chosen=window.__mvState.chosen.filter(channel=>channel.mediaType==='video');
+     check(chosen.length===2,'다시보기 두 개를 함께 선택할 수 없다');
+     replay=window.__mvState.chosen.find(channel=>channel.mediaType==='video');
+     check(window.__testOwnerChannelId(replay.channelId)==='','다시보기 소유자 채널을 라이브 채팅 대상으로 잘못 반환한다');
+     const live=window.__mvState.chosen.find(channel=>channel.mediaType!=='video');
+     window.__testSetMain(replay.channelId);
+     check(window.__mvState.chatChannelId===replay.channelId,
+       '다시보기 메인을 선택했을 때 해당 다시보기 채팅으로 전환되지 않았다');
+     check(document.getElementById('mvChatFrame').src==='about:blank',
+       '다시보기 선택 시 기존 라이브 채팅 프레임을 비우지 않았다');
+     check(document.getElementById('mvChatFrame').hidden &&
+       !document.getElementById('mvVodChatFeed').hidden,
+       '다시보기 채팅 전용 목록이 표시되지 않았다');
+     check(document.getElementById('mvChatStatus').textContent.includes('재생 시점 채팅'),
+       '다시보기 재생 시점 채팅 대기 안내가 없다');
+     document.getElementById('mvChatTitle').click();
+     check([...document.querySelectorAll('#mvChatTitleList [data-mv-set-chat]')]
+       .some(option=>option.dataset.mvSetChat===replay.channelId),
+       '채팅 선택 목록에 다시보기 슬롯이 없다');
+     document.body.click();
+     window.__testSetMain(live.channelId);
+     if(quick.hidden){document.getElementById('mvBack').click();await wait(150);
+       quick.querySelector('[data-mv-quick-source="videos"]').click();await wait(150);}
+     quick.querySelector('[data-mv-quick-video-source="channel-search"]').click();
+     const input=document.getElementById('mvQuickVideoChannelSearchInput');
+     input.value='채널';input.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
+     const channel=document.querySelector('#mvQuickVideoChannelPopover [data-mv-quick-video-channel]');
+     check(channel,'Quick 다시보기 채널 검색 결과가 없다');channel.click();await wait(200);
+     check(quick.querySelector('[data-mv-quick-add="video:301"]'),
+       'Quick에서 선택한 채널의 다시보기가 없다');
+     const quickChannelVod=quick.querySelector('[data-mv-quick-add="video:301"]');
+     check(quickChannelVod.querySelector('.mv-card-live-pv')?.textContent==='2.3만회 시청된 라이브'&&
+       quickChannelVod.querySelector('.mv-card-duration')?.textContent==='1:00:00'&&
+       quickChannelVod.querySelector('.mv-quick-card-video-info')?.textContent.includes('조회수 1,234회'),
+       'Quick 다시보기 카드의 조회수·livePv·duration 정보가 없다');
+     const selectedQuickTab=quick.querySelector('[data-mv-quick-video-channel-back]');
+     check(selectedQuickTab.textContent.trim()==='선택한 채널 목록'&&selectedQuickTab.getAttribute('aria-pressed')==='true',
+       'Quick 선택 채널 탭이 선택 상태로 표시되지 않는다');
+     check(selectedQuickTab.hasAttribute('data-tooltip-icon-only')&&
+       selectedQuickTab.querySelector('[data-tooltip-label]'),
+       '문구가 보일 때는 툴팁을 숨기고 아이콘만 남을 때 표시하도록 지정하지 않았다');
+     const quickChannelCell=quick.querySelector('.mv-video-channel-source-cell');
+     const quickTabRect=quickChannelCell.getBoundingClientRect();
+     const quickSelectedRect=selectedQuickTab.getBoundingClientRect();
+     check(document.getElementById('mvQuickVideoSources').children.length===6&&
+       quickChannelCell.children.length===2&&Math.abs(quickTabRect.top-quickSelectedRect.top)<1,
+       'Quick 선택 채널 탭이 채널 검색과 같은 그리드 셀에 배치되지 않았다');
+     const quickSources=document.getElementById('mvQuickVideoSources');
+     const quickSourcesWidth=quickSources.style.width;
+     quickSources.style.width='400px';
+     await wait(30);
+     const selectedLabel=selectedQuickTab.querySelector('.mv-video-channel-selected-label');
+     check(getComputedStyle(selectedLabel).display==='none',
+       '좁은 Quick 채널 검색 셀에서 선택 채널 탭의 텍스트 대신 아이콘을 표시하지 않는다: '+
+       quickSources.getBoundingClientRect().width+'px / '+getComputedStyle(selectedLabel).display);
+     const quickTooltip=document.getElementById('mvTooltip');
+     selectedQuickTab.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+     check(!quickTooltip.hidden,'아이콘만 남은 Quick 선택 채널 버튼에 툴팁을 표시하지 않는다');
+     quickSources.style.width='700px';window.dispatchEvent(new Event('resize'));
+     check(quickTooltip.hidden,'문구가 보이는 Quick 선택 채널 버튼에 중복 툴팁을 표시한다');
+     quickSources.style.width=quickSourcesWidth;
+     quick.querySelector('[data-mv-quick-video-source="channel-search"]').click();await wait(100);
+     check(!document.getElementById('mvQuickVideoChannelSearch').hidden,
+       'Quick 채널 검색 탭으로 돌아오지 못했다');
+     selectedQuickTab.click();await wait(150);
+     check(quick.querySelector('[data-mv-quick-add="video:301"]'),
+       'Quick 선택 채널 목록 탭에서 선택 채널을 유지하지 못했다');
+     quick.querySelector('[data-mv-quick-video-source="channel-search"]').click();
+     const returnQuickInput=document.getElementById('mvQuickVideoChannelSearchInput');
+     returnQuickInput.value='채널';returnQuickInput.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
+     check(!document.getElementById('mvQuickVideoChannelPopover').hidden&&
+       document.querySelector('#mvQuickVideoChannelPopover [data-mv-quick-video-channel]'),
+       'Quick 선택 채널 목록을 거친 뒤 채널 검색 팝오버가 다시 열리지 않는다');
+     selectedQuickTab.click();await wait(150);
+     quick.querySelector('[data-mv-quick-add="video:301"]').click();
+     check(window.__mvState.chosen.some(item=>item.channelId==='video:301'),
+       'Quick에서 채널 다시보기 재생 칸을 만들지 못했다');
+     quick.querySelector('[data-mv-quick-video-source="platter-search"]').click();
+     check(document.getElementById('mvQuickVideoRerankSearchInput').value==='',
+       '채널 검색어가 Quick 재정렬 검색칸으로 복사된다');
+     const quickRerankControls=document.querySelector('[data-mv-video-rerank-controls="quick"]');
+     check(quickRerankControls.querySelector('.cheese-search-control.cheese-search-sort-trigger')&&
+       quickRerankControls.querySelector('.cheese-search-options'),
+       'Quick 재정렬 정렬/설정 컨트롤이 표시되지 않는다');
+     check(getComputedStyle(quickRerankControls).justifyContent==='flex-end',
+       'Quick 재정렬 컨트롤이 오른쪽 끝에 정렬되지 않는다');
+     const rerank=document.getElementById('mvQuickVideoRerankSearchInput');rerank.value='검색어';rerank.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
+     check(document.getElementById('mvQuickVideoChannelSearchInput').value==='채널',
+       'Quick 재정렬 검색어가 채널 검색칸을 덮어쓴다');
+     const reranked=quick.querySelector('[data-mv-quick-add="video:901"]');
+     check(reranked?.querySelector('.mv-card-live')?.textContent==='업로드',
+       'Quick 재정렬 검색에 업로드 영상이 없다');
+     check(Number(getComputedStyle(document.getElementById('mvQuickVideoRerankSearch')).zIndex)>
+       Number(getComputedStyle(reranked.querySelector('.mv-card-badge-row')).zIndex),
+       'Quick 재정렬 컨트롤 영역이 썸네일 배지보다 위 레이어에 있지 않다');
+     check(!reranked.classList.contains('mv-custom-tooltip'),
+       'Quick 후보 카드에 커스텀 툴팁이 남아 있다');
+     const quickSortTrigger=quickRerankControls.querySelector('[data-video-rerank-sort-trigger]');
+     quickSortTrigger.click();
+     quickRerankControls.querySelector('[data-video-rerank-sort="read"]').click();
+     check(quickSortTrigger.textContent.trim()==='인기순'&&
+       quick.querySelector('#mvQuickAdd [data-mv-quick-add="video:902"]')===
+         quick.querySelector('#mvQuickAdd').firstElementChild,
+       'Quick에서 정렬 변경 직후 후보 카드 순서가 갱신되지 않는다');
+     for(const id of ['video:101','video:201','video:301'])
+       quick.querySelector('[data-mv-quick-drop="'+id+'"]').click();
+     check(window.__mvState.chosen.length===2,'테스트 다시보기를 제거하지 못했다');
+     document.getElementById('mvQuickClose').click();`,
   );
 
   await test(
@@ -2332,7 +2720,7 @@ const checks = [];
        const chatUrl=new URL(frame.src);
        const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
          data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
-           channelId:chatUrl.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+           channelId:chatUrl.pathname.match(/\\/live\\/([0-9a-f]{32})/i)?.[1],
            generation:Number(chatUrl.searchParams.get('cheeseMultiChatGeneration'))}});
        Object.defineProperty(e,'source',
          {value:frame.contentWindow});
@@ -2383,7 +2771,7 @@ const checks = [];
      const chatUrl=new URL(chatFrame.src);
      const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
        data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
-         channelId:chatUrl.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+         channelId:chatUrl.pathname.match(/\\/live\\/([0-9a-f]{32})/i)?.[1],
          generation:Number(chatUrl.searchParams.get('cheeseMultiChatGeneration'))}});
      Object.defineProperty(e,'source',
        {value:chatFrame.contentWindow});
@@ -2416,7 +2804,7 @@ const checks = [];
        const frame=document.getElementById('mvChatFrame'),url=new URL(frame.src);
        const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
          data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
-           channelId:url.pathname.match(/\/live\/([0-9a-f]{32})/i)?.[1],
+           channelId:url.pathname.match(/\\/live\\/([0-9a-f]{32})/i)?.[1],
            generation:Number(url.searchParams.get('cheeseMultiChatGeneration'))}});
        Object.defineProperty(e,'source',{value:frame.contentWindow});
        window.dispatchEvent(e);

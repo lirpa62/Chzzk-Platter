@@ -72,6 +72,21 @@
             <!-- 실제로는 인기 상위 40개만 받아온다. '전체' 라고 하면 오해를 준다. -->
             <button type="button" data-mv-source="all">라이브</button>
             <button type="button" data-mv-source="search">검색</button>
+            <button type="button" data-mv-source="videos">다시보기</button>
+          </div>
+          <div class="mv-video-sources" id="mvVideoSources" aria-label="다시보기 목록" hidden>
+            <button type="button" data-mv-video-source="following">팔로잉</button>
+            <button type="button" class="mv-custom-tooltip" data-mv-video-source="popular" data-tooltip="모든 방송에서 인기 정렬">인기</button>
+            <button type="button" class="mv-custom-tooltip" data-mv-video-source="latest" data-tooltip="모든 방송에서 최신 정렬">최신</button>
+            <button type="button" data-mv-video-source="favorites">즐겨찾기</button>
+            <div class="mv-video-channel-source-cell">
+              <button type="button" data-mv-video-source="channel-search">채널 검색</button>
+              <button type="button" class="mv-video-channel-selected mv-custom-tooltip" data-mv-video-channel-back data-tooltip="선택한 채널 목록" data-tooltip-icon-only aria-label="선택한 채널 목록" hidden>
+                <svg class="lucide lucide-list-video" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12H3"></path><path d="M16 6H3"></path><path d="M12 18H3"></path><path d="m16 12 5-3v6z"></path></svg>
+                <span class="mv-video-channel-selected-label" data-tooltip-label>선택한 채널 목록</span>
+              </button>
+            </div>
+            <button type="button" data-mv-video-source="platter-search">치즈 플래터 재정렬</button>
           </div>
           <!-- 전용 팔로잉을 골랐을 때만 구역(즐겨찾기·그룹·친밀도·팔로잉)을 보여 준다.
                통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. -->
@@ -83,6 +98,14 @@
             placeholder="채널 이름 또는 태그로 찾기"
             hidden
           />
+          <div class="mv-video-search-wrap" id="mvVideoChannelSearch" hidden>
+            <input type="search" class="mv-search" id="mvVideoChannelSearchInput" placeholder="채널명을 입력하세요" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="mvVideoChannelPopover" aria-expanded="false" />
+            <div class="mv-video-channel-popover" id="mvVideoChannelPopover" role="listbox" aria-label="채널 검색 결과" hidden></div>
+          </div>
+          <div class="mv-video-search-wrap" id="mvVideoRerankSearch" hidden>
+            <input type="search" class="mv-search" id="mvVideoRerankSearchInput" placeholder="다시보기 검색어" autocomplete="off" />
+            <div id="mvVideoRerankControls"></div>
+          </div>
           <div class="mv-sort-row">
             <span id="mvSortLabel">정렬</span>
             <div class="mv-pop mv-sort-picker">
@@ -168,6 +191,7 @@
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewVideoSearchControls.js"></script>
     <script src="src/multiviewSort.js"></script>
     <script src="src/multiviewLayouts.js"></script>
     <script src="src/multiviewTooltip.js"></script>

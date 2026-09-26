@@ -40,10 +40,11 @@ assert.match(
 function build({ scope = "all", selected = [], chosen, eligible }) {
   const calls = { resetRate: [], cancel: [] };
   const state = {
-    chosen: chosen.map((id) => ({ channelId: id })),
+    chosen: chosen.map((item) => typeof item === "string" ? { channelId: item } : item),
     sync: { scope, selectedChannelIds: [...selected] },
   };
   const body =
+    "function isVideoSlot(id){return state.chosen.some(c=>c.channelId===id&&c.mediaType==='video');}\n" +
     PIECES +
     "\nreturn { syncScopeIds, inSyncScope, syncActiveIds, syncGroupTooSmall," +
     " releaseSyncOwnership };";
@@ -76,6 +77,15 @@ const ALL = ["a", "b", "c", "d"];
     false,
     "전체 범위는 최소 채널 제한이 없다",
   );
+}
+
+// 다시보기 슬롯은 싱크 범위와 명령 대상에서 빠진다.
+{
+  const video = { channelId: "video:123", mediaType: "video" };
+  const { api } = build({ chosen: ["a", video, "b"], eligible: ["a", video.channelId, "b"] });
+  assert.deepEqual(api.syncScopeIds(), ["a", "b"]);
+  assert.equal(api.inSyncScope(video.channelId), false);
+  assert.deepEqual(api.syncActiveIds(), ["a", "b"]);
 }
 
 // 2) 선택 범위는 고른 채널만 남긴다.

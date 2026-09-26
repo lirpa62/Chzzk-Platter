@@ -23,6 +23,7 @@
   //   서로 구성을 덮어쓴다.
   const HANDOFF_PREFIX = "cheeseMultiviewSetup";
   const HASH_RE = /^[0-9a-f]{32}$/i;
+  const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
 
   const $ = (id) => document.getElementById(id);
   // 전용 팔로잉에서 지금 보고 있는 구역(빈 문자열이면 전체).
@@ -38,8 +39,16 @@
     livePager: null,
     searchPager: null,
     searchKeyword: "",
+    videoSource: "following",
+    videoChannel: null,
+    videoPagers: new Map(),
+    videoSearchPager: null,
+    videoSearchKeyword: "",
+    videoRerankPager: null,
+    videoRerankKeyword: "",
     currentSections: [],
     sortBySource: { following: "viewers", custom: "custom", all: "viewers", search: "viewers" },
+    videoChannelView: "search",
   };
   let rememberSetupSort = true;
 
@@ -126,6 +135,11 @@
   // ── 채널 목록 ──────────────────────────────────────────────────────────
   // 채널 목록은 공용 로더를 쓴다(주소·응답 해석을 고르기/시청 두 곳에 두지 않는다).
   const SOURCES = globalThis.CheeseMultiviewSources;
+  const videoRerankControls = globalThis.CheeseMultiviewVideoSearchControls.attach(
+    $("mvVideoRerankControls"),
+    "setup",
+    onSetupVideoRerankChange,
+  );
   const sortPicker = globalThis.CheeseMultiviewSort.attach("mvSort");
   const getJson = (url) => SOURCES.getJson(url);
   const normalize = (channel, live) => SOURCES.normalize(channel, live);
@@ -183,7 +197,83 @@
     return state.searchPager;
   }
 
+  function setupVideoPager() {
+    if (state.videoChannel) {
+      const key = `channel:${state.videoChannel.channelId}`;
+      if (!state.videoPagers.has(key)) {
+        state.videoPagers.set(key, SOURCES.createChannelVideoPager(state.videoChannel));
+      }
+      return state.videoPagers.get(key);
+    }
+    const key = state.videoSource;
+    if (!state.videoPagers.has(key)) {
+      const pager = key === "following"
+        ? SOURCES.createFollowingVideoPager()
+        : key === "favorites"
+          ? SOURCES.createVideoVaultFavoritesPager()
+          : SOURCES.createAllVideoPager(key === "latest" ? "LATEST" : "POPULAR");
+      state.videoPagers.set(key, pager);
+    }
+    return state.videoPagers.get(key);
+  }
+
+  function setupVideoSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!state.videoSearchPager || state.videoSearchKeyword !== query) {
+      state.videoSearchKeyword = query;
+      state.videoSearchPager = SOURCES.createChannelSearchPager(query);
+    }
+    return state.videoSearchPager;
+  }
+
+  function setupVideoRerankPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!state.videoRerankPager || state.videoRerankKeyword !== query) {
+      state.videoRerankKeyword = query;
+      state.videoRerankPager = SOURCES.createVideoSearchPager(query);
+      videoRerankControls.setPager(state.videoRerankPager);
+    }
+    return state.videoRerankPager;
+  }
+
+  function videoSearchKeyword() {
+    return state.videoSource === "channel-search"
+      ? $("mvVideoChannelSearchInput").value
+      : state.videoSource === "platter-search"
+        ? $("mvVideoRerankSearchInput").value
+        : $("mvSearch").value;
+  }
+
+  function isVideoChannelSearchView() {
+    return state.videoSource === "channel-search" &&
+      (!state.videoChannel || state.videoChannelView === "search");
+  }
+
   async function listFor(source, keyword = "") {
+    if (source === "videos") {
+      if (isVideoChannelSearchView()) {
+        const pager = setupVideoSearchPager(keyword);
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+      }
+      if (state.videoChannel) {
+        const pager = setupVideoPager();
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+      }
+      if (state.videoSource === "platter-search") {
+        const pager = setupVideoRerankPager(keyword);
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+      }
+      const pager = setupVideoPager();
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows.length ? [{ id: source, label: "", rows: pager.rows }] : [];
+    }
     const sortType = SOURCES.serverSortType(source, state.sortBySource[source]);
     const key = source === "search" ? `search:${keyword}`
       : source === "following" || source === "custom" ? `${source}:${sortType}` : source;
@@ -228,11 +318,33 @@
   //   요청마다 번호를 매겨 마지막 요청의 응답만 그린다.
   let listRequestId = 0;
 
-  function paintList(source = state.source, keyword = $("mvSearch").value) {
+  function paintList(source = state.source, keyword = source === "videos" ? videoSearchKeyword() : $("mvSearch").value) {
     const box = $("mvChannelList");
     let sections = state.currentSections;
+    const isVideoList = source === "videos";
+    const isChannelSearch = isVideoList && isVideoChannelSearchView();
+    const isRerankSearch = isVideoList && !state.videoChannel && state.videoSource === "platter-search";
     renderFolders(source === "custom" ? sections : []);
+    $("mvVideoSources").hidden = !isVideoList;
+    for (const button of document.querySelectorAll("[data-mv-video-source]")) {
+      const selected = button.dataset.mvVideoSource === state.videoSource &&
+        (button.dataset.mvVideoSource !== "channel-search" || state.videoChannelView === "search");
+      button.setAttribute("aria-pressed", String(selected));
+    }
+    const backToChannels = document.querySelector("[data-mv-video-channel-back]");
+    if (backToChannels) {
+      backToChannels.hidden = state.videoSource !== "channel-search" || !state.videoChannel;
+      backToChannels.setAttribute("aria-pressed", String(
+        state.videoSource === "channel-search" && Boolean(state.videoChannel) && state.videoChannelView === "selected",
+      ));
+    }
+    $("mvSearch").hidden = source !== "search";
+    $("mvVideoChannelSearch").hidden = !isChannelSearch;
+    $("mvVideoRerankSearch").hidden = !isRerankSearch;
+    videoRerankControls.setPager(isRerankSearch ? state.videoRerankPager : null);
+    box.hidden = isChannelSearch;
     const sort = $("mvSort");
+    $("mvSort").closest(".mv-sort-row").hidden = isVideoList;
     const hasCustom = source === "custom" && SOURCES.hasCustomOrder(sections, state.folder);
     if (!sort.options.length) {
       sort.innerHTML = SOURCES.SORT_OPTIONS.map((option) =>
@@ -243,27 +355,41 @@
     custom.disabled = !hasCustom;
     const oldest = sort.querySelector('[value="oldest"]');
     oldest.textContent = source === "all" ? "오래된순 (불러온 방송)" : "오래된순";
-    const mode = state.sortBySource[source] === "custom" && !hasCustom
+    const mode = isVideoList
+      ? "custom"
+      : state.sortBySource[source] === "custom" && !hasCustom
       ? "viewers" : state.sortBySource[source] || "viewers";
     sort.value = mode;
     sort.disabled = false;
     sortPicker.sync();
+    if (isChannelSearch) {
+      renderVideoChannelSuggestions(setupVideoSearchPager(keyword), keyword);
+      box.innerHTML = "";
+      box.__rows = [];
+      return;
+    }
     if (source === "custom" && state.folder) {
       sections = sections.filter((section) => section.id === state.folder);
     }
     sections = SOURCES.sortSections(sections, mode,
+      isVideoList ||
       source === "all" || source === "following" ||
       (source === "custom" && (mode === "recent" || mode === "oldest")));
     if (!sections.length) {
-      box.innerHTML = source === "search"
+      box.innerHTML = isVideoList
+        ? `<p class="mv-empty">${esc(videoEmptyMessage(isChannelSearch, keyword))}</p>`
+        : source === "search"
         ? `<p class="mv-empty">${keyword.trim() ? "찾는 채널이나 태그의 방송이 없습니다." : "채널 이름 또는 태그로 찾아보세요."}</p>`
         : '<p class="mv-empty">지금 방송 중인 채널이 없습니다.</p>';
       box.__rows = [];
+      if (isVideoList) requestAnimationFrame(maybeLoadMorePaged);
       return;
     }
     const picked = new Set(state.chosen.map((c) => c.channelId));
     box.innerHTML = sections.map((section) => {
-      const cards = section.rows.map((row) => card(row, picked)).join("");
+      const cards = section.rows.map((row) => row.mediaType === "channel"
+        ? videoChannelCard(row)
+        : card(row, picked)).join("");
       const head = section.label
         ? `<div class="mv-section-head"><span class="mv-section-name">${esc(section.label)}</span>` +
           `<span class="mv-section-count">${fmt(section.rows.length)}</span></div>`
@@ -271,21 +397,79 @@
       return `<section class="mv-section">${head}<div class="mv-cards">${cards}</div></section>`;
     }).join("");
     box.__rows = sections.flatMap((section) => section.rows);
-    if (source === "all" || source === "search") {
-      const pager = source === "all" ? state.livePager : state.searchPager;
+    if (source === "all" || source === "search" || isVideoList) {
+      const pager = source === "all" ? state.livePager
+        : source === "search" ? state.searchPager
+        : isRerankSearch ? setupVideoRerankPager(keyword)
+          : setupVideoPager();
       if (pager?.error) setPagedLoading(source, false, true);
       else requestAnimationFrame(maybeLoadMorePaged);
     }
+  }
+
+  function videoEmptyMessage(channelSearch, keyword) {
+    if (channelSearch) return keyword.trim() ? "다시보기를 찾을 채널이 없습니다." : "채널명을 검색해 다시보기를 찾아보세요.";
+    if (state.videoSource === "platter-search") return keyword.trim() ? "다시보기 검색 결과가 없습니다." : "검색어를 입력해 다시보기를 찾아보세요.";
+    if (state.videoChannel) return "채널에 공개된 다시보기가 없습니다.";
+    if (state.videoSource === "favorites") return "보관함에 즐겨찾기한 다시보기가 없습니다.";
+    if (state.videoSource === "following") return "팔로잉 채널의 다시보기가 없습니다.";
+    return "다시보기를 불러오지 못했습니다.";
+  }
+
+  function videoChannelCard(channel) {
+    const avatar = safeImageUrl(SOURCES.profileThumb(channel.channelImageUrl));
+    return `<button type="button" class="mv-video-channel-option" role="option" data-mv-video-channel="${esc(channel.channelId)}">` +
+      (avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy" decoding="async">` : `<span class="mv-video-channel-option-avatar"></span>`) +
+      `<span class="mv-video-channel-option-name">${esc(channel.channelName || "채널")}</span>` +
+      (channel.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
+      `</button>`;
+  }
+
+  function renderVideoChannelSuggestions(pager, keyword) {
+    const input = $("mvVideoChannelSearchInput");
+    const popover = $("mvVideoChannelPopover");
+    const query = String(keyword || "").trim();
+    const visible = Boolean(query) && isVideoChannelSearchView();
+    input.setAttribute("aria-expanded", String(visible));
+    popover.hidden = !visible;
+    if (!visible) {
+      popover.innerHTML = "";
+      return;
+    }
+    if (pager?.loading && !pager.rows.length) {
+      popover.innerHTML = '<div class="mv-video-channel-empty" aria-busy="true">채널을 찾는 중…</div>';
+      return;
+    }
+    if (pager?.error && !pager.rows.length) {
+      popover.innerHTML = `<div class="mv-video-channel-empty">채널을 불러오지 못했습니다. (${esc(pager.error.message || "요청 실패")})</div>`;
+      return;
+    }
+    if (!pager?.rows.length) {
+      popover.innerHTML = '<div class="mv-video-channel-empty">검색된 채널이 없습니다.</div>';
+      return;
+    }
+    popover.innerHTML = pager.rows.map(videoChannelCard).join("") +
+      (pager.error ? '<button type="button" class="mv-video-channel-more" data-mv-paged-retry="videos">다음 채널 다시 불러오기</button>' :
+        pager.loading ? '<div class="mv-video-channel-empty">더 불러오는 중…</div>' : "");
   }
 
   async function renderList() {
     const requestId = ++listRequestId;
     // 요청 시점의 값을 붙잡는다(기다리는 동안 사용자가 탭·검색어를 바꿀 수 있다).
     const source = state.source;
-    const keyword = $("mvSearch").value;
+    const keyword = source === "videos" ? videoSearchKeyword() : $("mvSearch").value;
     const box = $("mvChannelList");
+    const channelSearch = source === "videos" && isVideoChannelSearchView();
+    box.hidden = channelSearch;
     box.setAttribute("aria-busy", "true");
     box.innerHTML = skeletonCards(8, source);
+    if (channelSearch) {
+      const query = keyword.trim();
+      const popover = $("mvVideoChannelPopover");
+      popover.hidden = !query;
+      popover.innerHTML = query ? '<div class="mv-video-channel-empty" aria-busy="true">채널을 찾는 중…</div>' : "";
+      $("mvVideoChannelSearchInput").setAttribute("aria-expanded", String(Boolean(query)));
+    }
     $("mvSort").disabled = true;
     sortPicker.sync();
     let sections = [];
@@ -294,11 +478,13 @@
     } catch (error) {
       if (requestId !== listRequestId) return;
       box.removeAttribute("aria-busy");
-      const loginRequired = (source === "following" || source === "custom") &&
+      const loginRequired = (source === "following" || source === "custom" ||
+        (source === "videos" && state.videoSource === "following")) &&
         SOURCES.isLoginRequiredError(error);
       box.innerHTML = loginRequired
         ? '<p class="mv-empty">팔로잉 목록을 보려면 치지직에 로그인해 주세요.</p>'
         : `<p class="mv-empty">목록을 불러오지 못했습니다. (${esc(error.message)})</p>`;
+      if (channelSearch) renderVideoChannelSuggestions(setupVideoSearchPager(keyword), keyword);
       $("mvSort").disabled = false;
       sortPicker.sync();
       return;
@@ -338,6 +524,7 @@
     const on = picked.has(r.channelId);
     const full = state.chosen.length >= MAX_CHANNELS && !on;
     const tags = Array.isArray(r.tags) ? r.tags : [];
+    const isVideo = r.mediaType === "video";
     // 방송 스냅샷이 없으면(응답에 따라 빈 경우가 있다) 채널 이미지로 대신 채운다.
     // 빈 상자만 남으면 카드가 깨져 보인다.
     const thumbUrl =
@@ -350,8 +537,17 @@
       (thumbUrl
         ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy">`
         : `<span class="mv-card-thumb-empty"></span>`) +
-      `<span class="mv-card-live">LIVE</span>` +
-      `<span class="mv-card-viewers">${fmt(r.viewers)}명</span>` +
+      (isVideo
+        ? `<span class="mv-card-badge-row${on ? " has-picked" : ""}">` +
+          `<span class="mv-card-live is-replay">${r.videoType === "UPLOAD" ? "업로드" : "다시보기"}</span>` +
+          (r.livePv > 0
+            ? `<span class="mv-card-live-pv">${SOURCES.formatCompactCount(r.livePv)}회 시청된 라이브</span>`
+            : "") +
+          `</span>`
+        : `<span class="mv-card-live">LIVE</span><span class="mv-card-viewers">${fmt(r.viewers)}명</span>`) +
+      (isVideo && r.duration > 0
+        ? `<span class="mv-card-duration">${SOURCES.formatVideoDuration(r.duration)}</span>`
+        : "") +
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       (on ? `<span class="mv-card-picked"><svg width="22" height="22" viewBox="0 0 24 24" ` +
         `fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" ` +
@@ -365,6 +561,9 @@
       `<span class="mv-card-name-row"><span class="mv-card-name">${esc(r.channelName)}</span>` +
       (r.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>` : "") +
       `</span>` +
+      (isVideo
+        ? `<span class="mv-card-video-info">조회수 ${fmt(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatRelativeTime(r.openedAt))}` : ""}</span>`
+        : "") +
       ((r.category || tags.length)
         ? `<span class="mv-card-meta">` +
           (r.category ? `<span class="mv-card-category-chip">${esc(r.category)}</span>` : "") +
@@ -383,7 +582,7 @@
     const status = document.createElement(failed ? "button" : "div");
     if (failed) status.type = "button";
     status.className = "mv-live-more";
-    status.textContent = failed ? "다음 목록 다시 불러오기" : "다음 방송을 불러오는 중...";
+    status.textContent = failed ? "다음 목록 다시 불러오기" : source === "videos" ? "다시보기를 불러오는 중..." : "다음 방송을 불러오는 중...";
     if (failed) status.dataset.mvPagedRetry = source;
     section.appendChild(status);
   }
@@ -396,24 +595,45 @@
       paintList();
       return;
     }
-    const sorted = SOURCES.sortRows(rows, state.sortBySource[source], source === "all");
+    const sorted = source === "videos"
+      ? rows
+      : SOURCES.sortRows(rows, state.sortBySource[source], source === "all");
     const existing = new Map([...cards.querySelectorAll("[data-mv-pick]")]
       .map((node) => [node.dataset.mvPick, node]));
     const picked = new Set(state.chosen.map((channel) => channel.channelId));
+    const visibleIds = new Set(sorted.map((row) => row.channelId));
+    existing.forEach((node, id) => {
+      if (!visibleIds.has(id)) node.remove();
+    });
     let next = null;
     for (let index = sorted.length - 1; index >= 0; index -= 1) {
       const row = sorted[index];
       let node = existing.get(row.channelId);
       if (!node) {
         const template = document.createElement("template");
-        template.innerHTML = card(row, picked);
+        template.innerHTML = row.mediaType === "channel" ? videoChannelCard(row) : card(row, picked);
         node = template.content.firstElementChild;
-        cards.insertBefore(node, next);
       }
+      if (node.parentElement !== cards || node.nextElementSibling !== next)
+        cards.insertBefore(node, next);
       next = node;
     }
     box.__rows = sorted;
     requestAnimationFrame(maybeLoadMorePaged);
+  }
+
+  function onSetupVideoRerankChange({ pager, poolChanged, updatePager }) {
+    if (poolChanged) {
+      state.videoRerankPager = null;
+      state.videoRerankKeyword = "";
+      if (state.source === "videos" && state.videoSource === "platter-search") void renderList();
+      return;
+    }
+    if (updatePager === false) return;
+    if (state.source === "videos" && state.videoSource === "platter-search" &&
+      pager && pager === state.videoRerankPager) {
+      insertSortedPageRows("videos", pager.rows);
+    }
   }
 
   async function loadMoreLive() {
@@ -448,6 +668,14 @@
   }
 
   function maybeLoadMorePaged() {
+    if (state.source === "videos") {
+      if (isVideoChannelSearchView()) return;
+      const box = $("mvChannelList");
+      if (!box) return;
+      const remaining = box.scrollHeight - box.scrollTop - box.clientHeight;
+      if (remaining <= LIVE_LOAD_THRESHOLD_PX) void loadMoreVideos();
+      return;
+    }
     if (state.source === "all") {
       maybeLoadMoreLive();
       return;
@@ -599,12 +827,53 @@
     if (source) {
       state.source = source.dataset.mvSource;
       state.folder = ""; // 탭을 바꾸면 구역 선택을 푼다
+      if (state.source === "videos") {
+        state.videoChannel = null;
+        state.videoChannelView = "search";
+      }
       $("mvFolders").hidden = state.source !== "custom";
       for (const b of document.querySelectorAll("[data-mv-source]")) {
         b.setAttribute("aria-pressed", String(b === source));
       }
       $("mvSearch").hidden = state.source !== "search";
       void renderList();
+      return;
+    }
+    const videoSource = event.target.closest?.("[data-mv-video-source]");
+    if (videoSource) {
+      const nextVideoSource = videoSource.dataset.mvVideoSource;
+      if (nextVideoSource !== "channel-search" || state.videoSource !== "channel-search") {
+        state.videoChannel = null;
+      }
+      state.videoSource = nextVideoSource;
+      if (nextVideoSource === "channel-search") state.videoChannelView = "search";
+      $("mvChannelList").scrollTop = 0;
+      if (state.videoSource === "channel-search") {
+        $("mvVideoChannelSearch").hidden = false;
+        $("mvVideoChannelSearchInput").focus();
+      } else if (state.videoSource === "platter-search") {
+        $("mvVideoRerankSearch").hidden = false;
+        $("mvVideoRerankSearchInput").focus();
+      }
+      void renderList();
+      return;
+    }
+    if (event.target.closest?.("[data-mv-video-channel-back]")) {
+      state.videoChannelView = "selected";
+      $("mvChannelList").scrollTop = 0;
+      void renderList();
+      return;
+    }
+    const videoChannel = event.target.closest?.("[data-mv-video-channel]");
+    if (videoChannel) {
+      const row = state.videoSearchPager?.rows.find((item) => item.channelId === videoChannel.dataset.mvVideoChannel);
+      if (row) {
+        state.videoChannel = row;
+        state.videoChannelView = "selected";
+        state.videoPagers.delete(`channel:${row.channelId}`);
+        $("mvChannelList").scrollTop = 0;
+        void renderList();
+      }
       return;
     }
     const remove = event.target.closest?.("[data-mv-remove]");
@@ -630,7 +899,8 @@
     if (event.target.closest?.("#mvStart")) void start();
     const retry = event.target.closest?.("[data-mv-paged-retry]");
     if (retry) {
-      if (retry.dataset.mvPagedRetry === "search") void loadMoreSearch();
+      if (retry.dataset.mvPagedRetry === "videos") void loadMoreVideos();
+      else if (retry.dataset.mvPagedRetry === "search") void loadMoreSearch();
       else void loadMoreLive();
     }
   });
@@ -655,6 +925,46 @@
     clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => void renderList(), 300);
   });
+
+  let videoChannelSearchTimer = 0;
+  $("mvVideoChannelSearchInput")?.addEventListener("input", () => {
+    $("mvVideoChannelPopover").scrollTop = 0;
+    clearTimeout(videoChannelSearchTimer);
+    videoChannelSearchTimer = window.setTimeout(() => void renderList(), 300);
+  });
+  let videoRerankSearchTimer = 0;
+  $("mvVideoRerankSearchInput")?.addEventListener("input", () => {
+    clearTimeout(videoRerankSearchTimer);
+    videoRerankSearchTimer = window.setTimeout(() => void renderList(), 300);
+  });
+
+  async function loadMoreVideos() {
+    if (state.source !== "videos") return;
+    const isChannelSearch = isVideoChannelSearchView();
+    const isRerankSearch = !state.videoChannel && state.videoSource === "platter-search";
+    const keyword = videoSearchKeyword();
+    const pager = isChannelSearch ? setupVideoSearchPager(keyword)
+      : isRerankSearch ? setupVideoRerankPager(keyword) : setupVideoPager();
+    if (!pager || pager.loading || pager.done) return;
+    if (isChannelSearch) {
+      await pager.loadNext();
+      if (state.source !== "videos" || pager !== setupVideoSearchPager(keyword)) return;
+      renderVideoChannelSuggestions(pager, keyword);
+      return;
+    }
+    setPagedLoading("videos", true);
+    await pager.loadNext();
+    if (state.source !== "videos" || pager !== (isRerankSearch ? setupVideoRerankPager(keyword) : setupVideoPager())) return;
+    setPagedLoading("videos", false, Boolean(pager.error));
+    if (pager.error) return;
+    insertSortedPageRows("videos", pager.rows);
+  }
+
+  $("mvVideoChannelPopover")?.addEventListener("scroll", () => {
+    const popover = $("mvVideoChannelPopover");
+    if (popover.scrollHeight - popover.scrollTop - popover.clientHeight < 80)
+      void loadMoreVideos();
+  }, { passive: true });
 
   $("mvMainHighQuality")?.addEventListener("change", (event) => {
     state.mainHighQuality = event.target.checked;
@@ -715,7 +1025,9 @@
         const key = `${HANDOFF_PREFIX}:${handoffId}`;
         const stored = (await chrome.storage.session.get(key))?.[key];
         const chosen = (Array.isArray(stored?.chosen) ? stored.chosen : [])
-          .filter((c) => c && HASH_RE.test(String(c.channelId || "")))
+          .filter((c) => c && (HASH_RE.test(String(c.channelId || "")) ||
+            (c.mediaType === "video" && SLOT_RE.test(String(c.channelId || "")) &&
+              String(c.channelId) === `video:${c.videoNo}`)))
           .slice(0, MAX_CHANNELS);
         if (chosen.length) {
           state.chosen = chosen;

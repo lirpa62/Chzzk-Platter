@@ -22,6 +22,7 @@
   const CHAT_POPOUT_MODE_KEY = "cheeseMultiviewChatPopoutMode";
   const CHZZK_ORIGIN = "https://chzzk.naver.com";
   const HASH_RE = /^[0-9a-f]{32}$/i;
+  const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
   const FRAME_READY_TIMEOUT_MS = 20000;
   // 4개 이상일 때만 아주 짧게 시차를 준다. 동시에 6개를 붙이면 초기 요청이 몰린다.
@@ -122,29 +123,37 @@
   const QUALITY_TRANSITION_MAX_MS = 5000;
 
   function frameUrl(channel, isMain, mainHighQuality) {
-    const qualityPolicy = isMain && mainHighQuality ? "highest" : "cap-480";
+    const isVideo = channel.mediaType === "video";
+    const quality = isMain && mainHighQuality
+      ? "high"
+      : isVideo ? "720" : "480";
+    const qualityPolicy = quality === "high"
+      ? "highest"
+      : quality === "720" ? "cap-720" : "cap-480";
     // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
     // 통계 표의 정책 열이 첫 화면부터 맞는다(postState 는 프레임이 준비된 뒤에야
     // 불린다).
     lastQuality.set(
       channel.channelId,
-      isMain && mainHighQuality ? "high" : "480",
+      quality,
     );
-    const url = new URL(`/live/${channel.channelId}`, CHZZK_ORIGIN);
+    const url = new URL(
+      isVideo ? `/video/${channel.videoNo}` : `/live/${channel.ownerChannelId || channel.channelId}`,
+      CHZZK_ORIGIN,
+    );
     url.searchParams.set("cheeseMulti", "1");
+    if (isVideo) url.searchParams.set("cheeseMultiChannelId", channel.channelId);
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 메인만 소리, 나머지는 음소거로 시작한다.
     url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
     url.searchParams.set("cheeseMultiQualityPolicy", qualityPolicy);
     // 화질은 '지금 이 칸의 역할' 로 정한다(시작할 때만이 아니다). 메인이면 상한을
-    // 걸지 않고, 보조면 480p 상한을 건다. 메인이 바뀌면 두 칸 모두 다시 지시한다.
+    // 걸지 않고, 보조 라이브는 480p, 다시보기는 720p 상한을 건다. 메인이 바뀌면
+    // 두 칸 모두 다시 지시한다.
     // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
     //
-    // ⚠ 360p 는 넣지 않는다. 치지직 화질 목록에 실제로 있는지 이 코드만으로
-    //   확인할 수 없어, 없는 값을 상한으로 주면 '이하 중 최고' 규칙이 가장 낮은
-    //   트랙으로 떨어뜨린다. 480p 가 확인된 값이라 채널 수와 무관하게 이것만 쓴다.
-    if (!(isMain && mainHighQuality)) {
-      url.searchParams.set("cheeseMultiQuality", "480");
+    if (quality !== "high") {
+      url.searchParams.set("cheeseMultiQuality", quality);
     }
     return url.toString();
   }
@@ -156,8 +165,13 @@
   function postState(channelId, isMain, options = {}) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
-    const quality = isMain && state.mainHighQuality ? "high" : "480";
-    const qualityPolicy = quality === "high" ? "highest" : "cap-480";
+    const channel = state.chosen.find((item) => item.channelId === channelId);
+    const quality = isMain && state.mainHighQuality
+      ? "high"
+      : channel?.mediaType === "video" ? "720" : "480";
+    const qualityPolicy = quality === "high"
+      ? "highest"
+      : quality === "720" ? "cap-720" : "cap-480";
     const before = lastQuality.get(channelId);
     if (before !== quality) {
       lastQuality.set(channelId, quality);
@@ -224,7 +238,10 @@
   }
 
   // 테마 단추는 multiviewTheme.js 가 다룬다. 바뀌면 채팅 칸에도 알린다.
-  new MutationObserver(postChatView).observe(document.documentElement, {
+  new MutationObserver(() => {
+    postChatView();
+    renderVodChat();
+  }).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ["data-theme"],
   });
@@ -245,6 +262,66 @@
   let chatPopoutMode = "platter";
   let chatPopoutModeRevision = 0;
   let chatPopoutFeedbackTimer = 0;
+  let vodChatSourceId = "";
+  let vodChatRenderSignature = "";
+  let vodChatTimeMode = "playback";
+  let vodChatShowTime = false;
+  let vodChatTimeFormat = "24h";
+  let vodChatScalePercent = 100;
+  let vodChatEmojiMap = Object.create(null);
+  let vodChatEmojiMapPromise = null;
+  let vodChatEmojiRevision = 0;
+  let vodNicknameColorsPromise = null;
+  const vodChatSession = globalThis.CheeseMultiviewVodChat.createSession({
+    onChange: renderVodChat,
+  });
+  const vodChatTimeModeButton = $("mvVodChatTimeMode");
+  vodChatTimeModeButton?.addEventListener("click", () => {
+    vodChatTimeMode = vodChatTimeMode === "playback" ? "broadcast" : "playback";
+    renderVodChat();
+  });
+  const vodChatScaleDownButton = $("mvVodChatScaleDown");
+  const vodChatScaleUpButton = $("mvVodChatScaleUp");
+  const vodChatScaleValue = $("mvVodChatScaleValue");
+  function reflectVodChatScale() {
+    const feed = $("mvVodChatFeed");
+    feed?.style.setProperty("--mv-vod-chat-scale", String(vodChatScalePercent / 100));
+    if (vodChatScaleValue) vodChatScaleValue.textContent = `${vodChatScalePercent}%`;
+    if (vodChatScaleDownButton) vodChatScaleDownButton.disabled = vodChatScalePercent <= 100;
+    if (vodChatScaleUpButton) vodChatScaleUpButton.disabled = vodChatScalePercent >= 200;
+  }
+  vodChatScaleDownButton?.addEventListener("click", () => {
+    vodChatScalePercent = Math.max(100, vodChatScalePercent - 10);
+    reflectVodChatScale();
+  });
+  vodChatScaleUpButton?.addEventListener("click", () => {
+    vodChatScalePercent = Math.min(200, vodChatScalePercent + 10);
+    reflectVodChatScale();
+  });
+  reflectVodChatScale();
+
+  const VOD_CHAT_DISPLAY_SETTINGS = ["cheeseFeatureHidden", "cheeseChatTimeFormat"];
+  function applyVodChatDisplaySettings(values = {}) {
+    if (Object.hasOwn(values, "cheeseFeatureHidden")) {
+      vodChatShowTime = values.cheeseFeatureHidden?.chatShowTime === true;
+    }
+    if (Object.hasOwn(values, "cheeseChatTimeFormat")) {
+      vodChatTimeFormat = values.cheeseChatTimeFormat === "12h-en" ||
+        values.cheeseChatTimeFormat === "12h-ko" ? values.cheeseChatTimeFormat : "24h";
+    }
+    renderVodChat();
+  }
+  chrome.storage.local.get(VOD_CHAT_DISPLAY_SETTINGS)
+    .then(applyVodChatDisplaySettings)
+    .catch(() => {});
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    const values = {};
+    for (const key of VOD_CHAT_DISPLAY_SETTINGS) {
+      if (changes[key]) values[key] = changes[key].newValue;
+    }
+    if (Object.keys(values).length) applyVodChatDisplaySettings(values);
+  });
 
   function reflectChatPopoutMode(mode) {
     chatPopoutMode = mode === "native" ? "native" : "platter";
@@ -299,6 +376,8 @@
       ? detachedChat?.mode === "native"
         ? "치지직 채팅창에서 표시 중"
         : "채팅 팝업에서 표시 중"
+      : status === "unavailable"
+        ? message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."
       : status === "error"
         ? message || "채팅 연결 실패"
         : "채팅 팝업 연결 중…";
@@ -334,7 +413,7 @@
 
   function dispatchChatLoadToPopup() {
     const pending = detachedChat?.pendingLoad;
-    if (!detachedChat?.ready || !pending) return;
+    if (!detachedChat?.ready || !pending || !HASH_RE.test(pending.channelId || "")) return;
     detachedChat.pendingLoad = null;
     chatPopupPost("LOAD_CHAT", {
       channelId: pending.channelId,
@@ -354,12 +433,19 @@
     const box = $("mvChatStatus");
     if (detachedChat) {
       updateChatPopupStatus(status, message);
-      chatPopupPost("CHAT_STATUS", {
-        status,
-        message: String(message || ""),
-        channelId: state.chatChannelId,
-        generation: chatGeneration,
-      });
+      if (status === "unavailable") {
+        chatPopupPost("CHAT_UNAVAILABLE", {
+          message: String(message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."),
+          generation: chatGeneration,
+        });
+      } else {
+        chatPopupPost("CHAT_STATUS", {
+          status,
+          message: String(message || ""),
+          channelId: state.chatChannelId,
+          generation: chatGeneration,
+        });
+      }
     }
     if (!box) return;
     if (status === "ready") {
@@ -372,22 +458,346 @@
       box.innerHTML = '<span class="mv-cell-status-text">채팅 연결 중…</span>';
       return;
     }
+    if (status === "unavailable") {
+      box.innerHTML = `<span class="mv-cell-status-text">${esc(message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다.")}</span>`;
+      return;
+    }
     box.innerHTML =
       `<span class="mv-cell-status-text">${esc(message || "채팅을 불러오지 못했습니다.")}</span>` +
       '<button type="button" class="mv-cell-retry" id="mvChatRetry">다시 연결</button>';
   }
 
+  function postVodChatControl(channelId, enabled, generation = chatGeneration) {
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow || !isVideoChatSource(channelId)) return false;
+    try {
+      frame.contentWindow.postMessage({
+        source: MULTIVIEW_MESSAGE,
+        type: "SET_MULTIVIEW_VOD_CHAT",
+        channelId,
+        enabled,
+        chatGeneration: generation,
+      }, CHZZK_ORIGIN);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function stopVodChat() {
+    if (vodChatSourceId) {
+      postVodChatControl(vodChatSourceId, false);
+    }
+    vodChatSourceId = "";
+    vodChatRenderSignature = "";
+    vodChatSession.stop();
+    $("mvVodChatFeed").hidden = true;
+    $("mvChatFrame").hidden = false;
+  }
+
+  function loadVodNicknameColorCodes() {
+    if (vodNicknameColorsPromise) return vodNicknameColorsPromise;
+    const url = `${globalThis.CheeseMultiviewSources.API}/service/v2/nickname/color/codes`;
+    vodNicknameColorsPromise = globalThis.CheeseMultiviewSources.getJson(url)
+      .then((content) => {
+        if (globalThis.CheeseMultiviewVodChat.setNicknameColorCodes(content)) {
+          vodChatRenderSignature = "";
+          renderVodChat();
+        }
+      })
+      .catch(() => {
+        vodNicknameColorsPromise = null;
+      });
+    return vodNicknameColorsPromise;
+  }
+
+  function formatVodChatTime(seconds) {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    const remainder = value % 60;
+    return hours
+      ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+      : `${minutes}:${String(remainder).padStart(2, "0")}`;
+  }
+
+  function formatVodBroadcastTime(timestamp, includeDate = false) {
+    return globalThis.CheeseMultiviewVodChat.formatBroadcastTime(
+      timestamp, vodChatTimeFormat, includeDate,
+    );
+  }
+
+  function loadVodChatEmojiMap() {
+    if (vodChatEmojiMapPromise) return vodChatEmojiMapPromise;
+    vodChatEmojiMapPromise = (async () => {
+      const key = "chatRecapEmojis";
+      const [accountResponse, stored] = await Promise.all([
+        fetch("https://comm-api.game.naver.com/nng_main/v1/user/getUserStatus", {
+          credentials: "include",
+          headers: { accept: "application/json" },
+        }).catch(() => null),
+        chrome.storage.local.get(key).catch(() => ({})),
+      ]);
+      if (!accountResponse?.ok) return;
+      const accountId = String((await accountResponse.json())?.content?.userIdHash || "")
+        .trim().toLowerCase();
+      if (!/^[0-9a-f]{32}$/.test(accountId)) return;
+      const root = stored?.[key];
+      const source = root && typeof root === "object" ? root[accountId] : null;
+      if (!source || typeof source !== "object") return;
+      const next = Object.create(null);
+      for (const [emojiId, rawUrl] of Object.entries(source)) {
+        const url = String(rawUrl || "").trim();
+        if (/^https:\/\/(?:[a-z0-9-]+\.)*(?:pstatic\.net|naver\.com|navercdn\.com)\//i.test(url)) {
+          next[emojiId] = url;
+        }
+      }
+      vodChatEmojiMap = next;
+      vodChatEmojiRevision += 1;
+    })().catch(() => {
+      vodChatEmojiMapPromise = null;
+    });
+    return vodChatEmojiMapPromise;
+  }
+
+  function renderVodChatText(message) {
+    const raw = String(message.text || "");
+    const supplied = message.emojis && typeof message.emojis === "object"
+      ? message.emojis
+      : {};
+    const pattern = /\{:([^:}]+):\}/g;
+    let output = "";
+    let last = 0;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      output += esc(raw.slice(last, match.index));
+      const emojiId = String(match[1] || "").trim();
+      const rawUrl = supplied[emojiId] || supplied[`:${emojiId}:`] || vodChatEmojiMap[emojiId];
+      const url = String(rawUrl || "");
+      if (/^https:\/\/(?:[a-z0-9-]+\.)*(?:pstatic\.net|naver\.com|navercdn\.com)\//i.test(url)) {
+        output += `<img class="mv-vod-chat-emoji" src="${esc(url)}" alt="${esc(emojiId)}" width="22" height="22" loading="lazy" decoding="async" draggable="false">`;
+      } else {
+        output += esc(emojiId);
+      }
+      last = pattern.lastIndex;
+    }
+    return output + esc(raw.slice(last));
+  }
+
+  function renderVodChatSpecialCard(message, identity) {
+    const info = message.donation;
+    if (!info) return "";
+    const header = (suffix = "") =>
+      `<div class="mv-vod-chat-special-head">${identity}${suffix ? `<strong>${esc(suffix)}</strong>` : ""}</div>`;
+    if (info.kind === "subscription") {
+      const period = info.month ? `<strong>${fmtCount(info.month)}개월</strong> 동안` : "";
+      const tierClass = info.tier === 1 || info.tier === 2 ? ` is-tier-${info.tier}` : "";
+      return `<div class="mv-vod-chat-card is-subscription${tierClass}">${header("님이")}` +
+        `<div class="mv-vod-chat-special-copy">${period} 구독 중이에요 🎉</div>` +
+        (message.text ? `<div class="mv-vod-chat-special-detail">${renderVodChatText(message)}</div>` : "") +
+        `</div>`;
+    }
+    if (info.kind === "gift") {
+      const recipient = info.receiverNickname
+        ? `<strong>${esc(info.receiverNickname)}</strong>님에게 `
+        : "";
+      const tierName = esc(info.tierName || "구독권");
+      const quantity = info.quantity > 1 ? ` ${fmtCount(info.quantity)}장` : "";
+      return `<div class="mv-vod-chat-card is-gift">${header("님이")}` +
+        `<div class="mv-vod-chat-special-copy">${recipient}<strong>${tierName} 구독권</strong>을${quantity} 선물했습니다.</div>` +
+        `</div>`;
+    }
+    if (info.kind === "mission") {
+      const label = info.missionDonationType.toUpperCase() === "PARTICIPATION" ||
+        info.donationType === "MISSION_PARTICIPATION" ? "미션 상금" : "미션";
+      const title = info.missionTitle || message.text;
+      const amount = info.amount > 0
+        ? `<div class="mv-vod-chat-special-amount">🧀 ${fmtCount(info.amount)}</div>`
+        : "";
+      return `<div class="mv-vod-chat-card is-mission">` +
+        `<div class="mv-vod-chat-special-head"><span class="mv-vod-chat-mission-label">${label}</span>${identity}</div>` +
+        (title ? `<div class="mv-vod-chat-special-copy">${info.missionTitle ? esc(title) : renderVodChatText(message)}</div>` : "") + amount +
+        `</div>`;
+    }
+    const title = info.kind === "video" ? "영상 후원" : info.kind === "party" ? "파티 후원" : "후원";
+    const tone = info.tone || "neutral";
+    const amount = info.amount > 0
+      ? `<div class="mv-vod-chat-special-amount">🧀 ${fmtCount(info.amount)}</div>`
+      : "";
+    const party = info.partyName ? ` · ${esc(info.partyName)}` : "";
+    return `<div class="mv-vod-chat-card is-${info.kind} is-tone-${tone}">${header()}` +
+      `<div class="mv-vod-chat-special-copy">${renderVodChatText(message) || title}${party}</div>${amount}</div>`;
+  }
+
+  function renderVodChatRow(message, timeMode) {
+    const rowTime = vodChatShowTime
+      ? timeMode === "broadcast" && message.broadcastAt
+        ? formatVodBroadcastTime(message.broadcastAt)
+        : formatVodChatTime(message.at)
+      : "";
+    const badges = Array.isArray(message.badges) ? message.badges : [];
+    const renderBadges = (position) => {
+      const images = badges
+        .filter((badge) => badge.position === position)
+        .map((badge) => `<img class="mv-vod-chat-profile-badge" src="${esc(badge.url)}" alt="${esc(badge.label)}" width="16" height="16" loading="lazy" decoding="async">`)
+        .join("");
+      return images ? `<span class="mv-vod-chat-profile-badge-group">${images}</span>` : "";
+    };
+    const time = rowTime ? `<time>${rowTime}</time>` : "";
+    const nicknameTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const nicknameStyleValue = message.donation
+      ? ""
+      : message.nicknameTitleColor
+        ? `color:${message.nicknameTitleColor};`
+        : globalThis.CheeseMultiviewVodChat.resolveNicknameStyle(
+          message.nicknameFallbackColor || message.nicknameColorCode || message.nicknameColor,
+          nicknameTheme,
+        );
+    const nicknameStyle = nicknameStyleValue
+      ? ` style="${esc(nicknameStyleValue)}"`
+      : "";
+    const roleMessageColor = !message.donation &&
+      (message.roles?.includes("streamer") || message.roles?.includes("manager"))
+      ? message.nicknameMessageColor || globalThis.CheeseMultiviewVodChat.resolveNicknameColor(
+        message.nicknameFallbackColor || message.nicknameColorCode || message.nicknameColor,
+        nicknameTheme,
+      )
+      : "";
+    const badgeMarkup = { before: renderBadges("before"), after: renderBadges("after") };
+    const identity = `<span class="mv-vod-chat-identity">${badgeMarkup.before}` +
+      `<strong${nicknameStyle}>${esc(message.nickname)}</strong>${badgeMarkup.after}</span>`;
+    if (message.donation) {
+      const tone = message.donation.tone ? ` is-tone-${message.donation.tone}` : "";
+      return `<article class="mv-vod-chat-row is-special${tone}" data-chat-time="${message.at}">` +
+        renderVodChatSpecialCard(message, identity) + `</article>`;
+    }
+    return `<article class="mv-vod-chat-row" data-chat-time="${message.at}">` +
+      `<div class="mv-vod-chat-inline">${time}${identity}` +
+      (message.text ? `<span class="mv-vod-chat-message"${roleMessageColor
+        ? ` style="color:${esc(roleMessageColor)}"` : ""}>${renderVodChatText(message)}</span>` : "") +
+      `</div></article>`;
+  }
+
+  function renderVodChat() {
+    if (!isVideoChatSource(state.chatChannelId) ||
+        state.chatChannelId !== vodChatSourceId) return;
+    const snapshot = vodChatSession.snapshot();
+    const list = $("mvVodChatList");
+    const statusBox = $("mvChatStatus");
+    const meta = $("mvVodChatMeta");
+    if (!list || !statusBox || !meta) return;
+    const broadcastAt = vodChatSession.broadcastTimeAt(snapshot.currentTime);
+    const clock = $("mvVodChatClock");
+    if (clock) {
+      clock.textContent = vodChatTimeMode === "broadcast" && broadcastAt
+        ? `${formatVodBroadcastTime(broadcastAt, true)} · 실제 방송 시각`
+        : `${formatVodChatTime(snapshot.currentTime)} · 재생 시간`;
+    }
+    if (vodChatTimeModeButton) {
+      const canShowBroadcastTime = vodChatSession.hasBroadcastTimes();
+      if (!canShowBroadcastTime) vodChatTimeMode = "playback";
+      vodChatTimeModeButton.disabled = !canShowBroadcastTime;
+      vodChatTimeModeButton.textContent = vodChatTimeMode === "broadcast" ? "방송 시각" : "재생 시간";
+      vodChatTimeModeButton.setAttribute("aria-pressed", String(vodChatTimeMode === "broadcast"));
+      vodChatTimeModeButton.setAttribute("aria-label", vodChatTimeMode === "broadcast"
+        ? "재생 시간으로 전환"
+        : "실제 방송 시각으로 전환");
+    }
+    const visible = vodChatSession.visible(snapshot.currentTime, 120);
+    const nicknameColorTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const signature = `${snapshot.status}:${snapshot.error}:` +
+      `${vodChatTimeMode}:${vodChatShowTime}:${vodChatTimeFormat}:${vodChatEmojiRevision}:${nicknameColorTheme}:` +
+      `${globalThis.CheeseMultiviewVodChat.nicknameColorCodeRevision}:` +
+      `${visible.map((message) => message.id).join("\u001f")}`;
+    if (signature !== vodChatRenderSignature) {
+      const nearBottom = Math.abs(list.scrollTop) < 32;
+      const previousScrollTop = list.scrollTop;
+      list.innerHTML = visible.slice().reverse()
+        .map((message) => renderVodChatRow(message, vodChatTimeMode))
+        .join("");
+      list.scrollTop = nearBottom ? 0 : previousScrollTop;
+      vodChatRenderSignature = signature;
+    }
+
+    if (snapshot.status === "error") {
+      statusBox.hidden = false;
+      statusBox.innerHTML = `<span class="mv-cell-status-text">${esc(snapshot.error || "채팅을 불러오지 못했습니다.")}</span>` +
+        '<button type="button" class="mv-cell-retry" id="mvChatRetry">다시 시도</button>';
+    } else if (snapshot.status === "empty") {
+      statusBox.hidden = false;
+      statusBox.innerHTML = '<span class="mv-cell-status-text">이 구간에 표시할 채팅이 없습니다.</span>';
+    } else if (!visible.length && snapshot.status !== "empty" &&
+        snapshot.loadedThrough <= snapshot.currentTime) {
+      statusBox.hidden = false;
+      statusBox.innerHTML = '<span class="mv-cell-status-text">재생 시점 채팅을 불러오는 중…</span>';
+    } else if (!visible.length && snapshot.status === "ready") {
+      statusBox.hidden = false;
+      statusBox.innerHTML = '<span class="mv-cell-status-text">현재 재생 구간에 채팅이 없습니다.</span>';
+    } else {
+      statusBox.hidden = true;
+      statusBox.innerHTML = "";
+    }
+  }
+
+  function updateVodChatPlayback(data) {
+    if (data.channelId !== state.chatChannelId ||
+        data.channelId !== vodChatSourceId ||
+        data.chatGeneration !== chatGeneration) return;
+    const channel = state.chosen.find((item) => item.channelId === data.channelId);
+    if (!channel?.videoNo) return;
+    const current = vodChatSession.snapshot();
+    if (current.videoNo !== channel.videoNo) {
+      vodChatSession.start(channel.videoNo, data.currentTime);
+    } else {
+      vodChatSession.updatePlayback(data.currentTime, {
+        seeking: data.seeking === true,
+        paused: data.paused === true,
+      });
+    }
+  }
+
   function loadChat(channelId, { retry = false } = {}) {
     const generation = ++chatGeneration;
     if (!retry) chatAutoRetried = false;
-    state.chatChannelId = channelId;
+    const source = resolveChatSource(channelId);
+    const selectedId = source?.id || "";
+    state.chatChannelId = selectedId;
     chatFrameReady = false;
+    if (source?.type === "video") {
+      clearTimeout(chatReadyTimer);
+      if (detachedChat) restoreInlineChat(true, false);
+      stopVodChat();
+      $("mvChatFrame").src = "about:blank";
+      $("mvChatFrame").hidden = true;
+      $("mvVodChatFeed").hidden = false;
+      vodChatSourceId = selectedId;
+      vodChatRenderSignature = "";
+      void loadVodChatEmojiMap().then(renderVodChat);
+      void loadVodNicknameColorCodes();
+      renderVodChat();
+      if (currentStatus(selectedId) === "ready")
+        postVodChatControl(selectedId, true, generation);
+      renderTopbar();
+      return generation;
+    }
+    stopVodChat();
+    $("mvChatFrame").hidden = false;
+    const liveChannelId = source?.id || "";
+    if (!liveChannelId) {
+      clearTimeout(chatReadyTimer);
+      if (detachedChat?.mode === "native") restoreInlineChat(true, false);
+      if (detachedChat?.mode === "platter") detachedChat.pendingLoad = null;
+      $("mvChatFrame").src = "about:blank";
+      setChatStatus("error", "채팅을 표시할 채널을 선택해 주세요.");
+      renderTopbar();
+      return generation;
+    }
     if (detachedChat?.mode === "native") {
       clearTimeout(chatReadyTimer);
       if (retry || detachedChat.channelId !== channelId) {
         const popup = detachedChat;
         popup.channelId = channelId;
-        const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN).toString();
+        const url = new URL(`/live/${liveChannelId}/chat`, CHZZK_ORIGIN).toString();
         popup.navigation = (popup.navigation || Promise.resolve()).then(() => {
           if (detachedChat !== popup) return;
           return chrome.tabs.update(popup.tabId, { url });
@@ -403,13 +813,13 @@
     setChatStatus("loading");
     if (detachedChat) {
       clearTimeout(chatReadyTimer);
-      detachedChat.pendingLoad = { channelId, generation, retry };
+      detachedChat.pendingLoad = { channelId: liveChannelId, generation, retry };
       dispatchChatLoadToPopup();
       return generation;
     }
     // 채팅 전용 페이지를 쓴다(/live/<id>/chat). 영상이 없는 화면이라 소리·화질을
     // 따로 억제할 필요가 없고, 라이브 페이지를 통째로 띄우는 것보다 훨씬 가볍다.
-    const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN);
+    const url = new URL(`/live/${liveChannelId}/chat`, CHZZK_ORIGIN);
     url.searchParams.set("cheeseMultiChat", "1");
     url.searchParams.set("cheeseMultiChatGeneration", String(generation));
     // 다시 연결할 때 같은 주소면 브라우저가 무시할 수 있어 값을 하나 바꾼다.
@@ -422,14 +832,21 @@
 
   function applyChat(channelId) {
     const inlineFrame = $("mvChatFrame");
-    if (
-      state.chatChannelId === channelId &&
-      (detachedChat || (inlineFrame?.src && !inlineFrame.src.endsWith("about:blank")))
-    ) return;
-    loadChat(channelId);
+    const source = resolveChatSource(channelId);
+    if (!source) {
+      loadChat("");
+      return;
+    }
+    if (state.chatChannelId === source.id) {
+      if (source.type === "video" && !$("mvVodChatFeed").hidden) return;
+      if (source.type === "live" &&
+          (detachedChat || (inlineFrame?.src && !inlineFrame.src.endsWith("about:blank"))))
+        return;
+    }
+    loadChat(source.id);
   }
 
-  function restoreInlineChat(closePopup = true) {
+  function restoreInlineChat(closePopup = true, reloadChat = true) {
     const popup = detachedChat;
     if (!popup) return;
     detachedChat = null;
@@ -449,7 +866,7 @@
         popup.window.close();
       } catch {}
     }
-    loadChat(state.chatChannelId);
+    if (reloadChat) loadChat(state.chatChannelId);
   }
 
   function handleChatPopupMessage(event) {
@@ -503,6 +920,7 @@
   }
 
   function openChatPopup() {
+    if (!HASH_RE.test(state.chatChannelId || "")) return;
     if (detachedChat) {
       focusDetachedChat();
       return;
@@ -694,10 +1112,11 @@
     //   error = 플레이어 자체를 못 불러옴 / ended = 방송이 끝남
     //   화면 정리(채팅 접기·넓은 화면)는 실패 상태로 두지 않는다. 늦게 되는 것일 뿐
     //   이라 프레임이 계속 맞춰 간다.
+    const video = isVideoSlot(channelId);
     const text =
       message ||
       (status === "ended"
-        ? "방송이 종료되었습니다."
+        ? video ? "다시보기 재생이 끝났습니다." : "방송이 종료되었습니다."
         : "플레이어를 불러오지 못했습니다.");
     const id = esc(channelId);
     // ⚠ 상태마다 할 수 있는 일이 다르다. 할 수 없는 일은 버튼으로 두지 않는다.
@@ -706,8 +1125,8 @@
     //   error = 플레이어를 못 불러왔다 → 다시 불러오기가 가장 먼저다.
     const actions =
       status === "ended"
-        ? `<button type="button" class="mv-cell-retry is-primary" data-mv-replace="${id}">다른 채널 선택</button>` +
-          `<button type="button" class="mv-cell-retry" data-mv-recheck="${id}">방송 다시 확인</button>`
+        ? `<button type="button" class="mv-cell-retry is-primary" data-mv-replace="${id}">${video ? "다른 영상 선택" : "다른 채널 선택"}</button>` +
+          (video ? "" : `<button type="button" class="mv-cell-retry" data-mv-recheck="${id}">방송 다시 확인</button>`)
         : `<button type="button" class="mv-cell-retry is-primary" data-mv-retry="${id}">다시 불러오기</button>` +
           `<button type="button" class="mv-cell-retry" data-mv-replace="${id}">다른 채널 선택</button>`;
     overlay.innerHTML =
@@ -988,7 +1407,8 @@
     if (before) clearAudioNotice(before);
     clearAudioNotice(channelId);
     // 메인을 따라가도록 해 뒀으면 채팅도 같이 옮긴다.
-    if (state.chatFollowsMain) applyChat(channelId);
+    const chatId = chatSourceId(channelId);
+    if (state.chatFollowsMain) applyChat(chatId);
     applyLayout();
   }
 
@@ -1018,7 +1438,61 @@
   };
 
   function channelName(id) {
-    return state.chosen.find((c) => c.channelId === id)?.channelName || "-";
+    return state.chosen.find((c) => c.channelId === id || c.ownerChannelId === id)?.channelName || "-";
+  }
+
+  function ownerChannelId(slotId) {
+    const channel = state.chosen.find((item) => item.channelId === slotId);
+    if (channel?.mediaType === "video") return "";
+    return channel?.ownerChannelId || channel?.channelId || "";
+  }
+
+  function chatSourceId(slotId) {
+    const channel = state.chosen.find((item) => item.channelId === slotId);
+    if (channel?.mediaType === "video") return channel.channelId;
+    return channel?.ownerChannelId || channel?.channelId || "";
+  }
+
+  function isVideoChatSource(sourceId) {
+    return /^video:\d+$/.test(String(sourceId || "")) &&
+      state.chosen.some((item) => item.channelId === sourceId && item.mediaType === "video");
+  }
+
+  function resolveChatSource(sourceId) {
+    const id = String(sourceId || "").toLowerCase();
+    if (isVideoChatSource(id)) return { id, type: "video" };
+    if (!HASH_RE.test(id)) return null;
+    const channel = state.chosen.find((item) =>
+      item.mediaType !== "video" && ownerChannelId(item.channelId) === id,
+    );
+    return channel ? { id, type: "live", channel } : null;
+  }
+
+  function chatSourceLabel(sourceId) {
+    const channel = state.chosen.find((item) =>
+      item.channelId === sourceId || ownerChannelId(item.channelId) === sourceId,
+    );
+    if (!channel) return "채팅";
+    return channel.mediaType === "video"
+      ? `${channel.channelName} 다시보기 채팅`
+      : `${channel.channelName} 채팅`;
+  }
+
+  function availableChatChannels() {
+    const channels = new Map();
+    for (const channel of state.chosen) {
+      const id = chatSourceId(channel.channelId);
+      if (id && !channels.has(id)) {
+        channels.set(id, channel.mediaType === "video"
+          ? `${channel.channelName} · 다시보기`
+          : channel.channelName);
+      }
+    }
+    return [...channels];
+  }
+
+  function isVideoSlot(slotId) {
+    return state.chosen.some((item) => item.channelId === slotId && item.mediaType === "video");
   }
 
   function optionRow(value, label, on, attr) {
@@ -1036,7 +1510,9 @@
 
   function renderChatTitle() {
     const label = $("mvChatTitle")?.querySelector(".mv-chat-title-label");
-    if (label) label.textContent = channelName(state.chatChannelId) + " 채팅";
+    if (label) label.textContent = state.chatChannelId
+      ? chatSourceLabel(state.chatChannelId)
+      : "채팅 없음";
   }
 
   function toggleChatSelector() {
@@ -1044,14 +1520,11 @@
     if (!list.hidden) return closeChatSelector();
     closePopovers(null);
     closeQuick();
-    list.innerHTML = state.chosen
-      .map((channel) =>
-        optionRow(
-          channel.channelId,
-          channel.channelName,
-          channel.channelId === state.chatChannelId,
-          "data-mv-set-chat",
-        ),
+    const chatChannels = availableChatChannels();
+    if (!chatChannels.length) return;
+    list.innerHTML = chatChannels
+      .map(([id, name]) =>
+        optionRow(id, name, id === state.chatChannelId, "data-mv-set-chat"),
       )
       .join("");
     list.hidden = false;
@@ -1061,17 +1534,21 @@
   function renderTopbar() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     $("mvMainValue").textContent = channelName(state.mainId);
-    $("mvChatValue").textContent = channelName(state.chatChannelId);
+    $("mvChatValue").textContent = state.chatChannelId
+      ? channelName(state.chatChannelId)
+      : "미지원";
     $("mvSideValue").textContent = SIDE_LABEL[state.chatSide] || "-";
     $("mvLayoutValue").textContent = layout?.label || "-";
     renderChatTitle();
+    $("mvChatTitle").disabled = availableChatChannels().length === 0;
+    if (!detachedChat) $("mvChatPopout").hidden = !HASH_RE.test(state.chatChannelId);
     if (!$("mvChatTitleList").hidden) {
-      $("mvChatTitleList").innerHTML = state.chosen
-        .map((channel) =>
+      $("mvChatTitleList").innerHTML = availableChatChannels()
+        .map(([channelId, name]) =>
           optionRow(
-            channel.channelId,
-            channel.channelName,
-            channel.channelId === state.chatChannelId,
+            channelId,
+            name,
+            channelId === state.chatChannelId,
             "data-mv-set-chat",
           ),
         )
@@ -1091,9 +1568,9 @@
     $("mvChatPanel").innerHTML = state.chosen
       .map((c) =>
         optionRow(
-          c.channelId,
-          c.channelName,
-          c.channelId === state.chatChannelId,
+          chatSourceId(c.channelId),
+          c.mediaType === "video" ? `${c.channelName} · 다시보기` : c.channelName,
+          chatSourceId(c.channelId) === state.chatChannelId,
           "data-mv-set-chat",
         ),
       )
@@ -1952,6 +2429,7 @@
   );
 
   function sendSync(channelId, type, extra = {}) {
+    if (isVideoSlot(channelId)) return false;
     if (currentStatus(channelId) !== "ready") return false;
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return false;
@@ -2713,7 +3191,7 @@
   }
 
   function syncScopeIds() {
-    const chosen = state.chosen.map((c) => c.channelId);
+    const chosen = state.chosen.filter((c) => c.mediaType !== "video").map((c) => c.channelId);
     if (state.sync.scope === "groups") return [];
     if (state.sync.scope !== "selected") return chosen;
     const selected = new Set(state.sync.selectedChannelIds);
@@ -2721,6 +3199,7 @@
   }
 
   function inSyncScope(channelId) {
+    if (isVideoSlot(channelId)) return false;
     if (state.sync.scope === "groups") return false;
     if (state.sync.scope !== "selected") return true;
     return state.sync.selectedChannelIds.includes(channelId);
@@ -2993,6 +3472,7 @@
 
   function syncEligibleIds(now = Date.now(), settled = false) {
     return state.chosen
+      .filter((c) => c.mediaType !== "video")
       .map((c) => c.channelId)
       .filter(
         (id) =>
@@ -3031,7 +3511,7 @@
   }
 
   function requestSyncStats() {
-    for (const id of state.chosen.map((c) => c.channelId)) {
+    for (const id of state.chosen.filter((c) => c.mediaType !== "video").map((c) => c.channelId)) {
       if (currentStatus(id) === "ready")
         sendSync(id, "REQUEST_FRAME_SYNC_STATS");
     }
@@ -3860,7 +4340,7 @@
     state.chosen = setup.chosen;
     state.layoutId = setup.layoutId;
     state.mainId = setup.chosen[0].channelId;
-    state.chatChannelId = setup.chosen[0].channelId;
+    state.chatChannelId = chatSourceId(setup.chosen[0].channelId);
     state.chatSide = setup.chatSide;
     state.mainHighQuality = setup.mainHighQuality;
 
@@ -3880,13 +4360,22 @@
     const seen = new Set();
     const chosen = (Array.isArray(raw.chosen) ? raw.chosen : [])
       .filter((c) => c && typeof c === "object")
-      .map((c) => ({
-        channelId: String(c.channelId || "").toLowerCase(),
-        channelName: String(c.channelName ?? ""),
-        channelImageUrl: String(c.channelImageUrl ?? ""),
-      }))
+      .map((c) => {
+        const mediaType = c.mediaType === "video" ? "video" : "live";
+        const videoNo = String(c.videoNo || "");
+        const ownerId = String(c.ownerChannelId || (mediaType === "live" ? c.channelId : "")).toLowerCase();
+        return {
+          ...c,
+          mediaType,
+          channelId: mediaType === "video" ? `video:${videoNo}` : String(c.channelId || "").toLowerCase(),
+          ownerChannelId: HASH_RE.test(ownerId) ? ownerId : "",
+          videoNo: mediaType === "video" && /^\d+$/.test(videoNo) ? videoNo : "",
+          channelName: String(c.channelName ?? ""),
+          channelImageUrl: String(c.channelImageUrl ?? ""),
+        };
+      })
       .filter((c) => {
-        if (!HASH_RE.test(c.channelId) || seen.has(c.channelId)) return false;
+        if (!SLOT_RE.test(c.channelId) || (c.mediaType === "video" && !c.videoNo) || seen.has(c.channelId)) return false;
         seen.add(c.channelId);
         return true;
       })
@@ -4151,10 +4640,14 @@
     if (!replaceChannelId && !quickRememberState) {
       quickSource = "following";
       quickKeyword = "";
+      quickVideoChannelKeyword = "";
+      quickVideoRerankSearchKeyword = "";
       quickFolder = "";
       quickSearchPager = null;
       quickSearchKeyword = "";
       $("mvQuickSearch").value = "";
+      $("mvQuickVideoChannelSearchInput").value = "";
+      $("mvQuickVideoRerankSearchInput").value = "";
       resetQuickScroll();
     }
     $("mvQuick").hidden = false;
@@ -4184,12 +4677,13 @@
     const index = state.chosen.findIndex((c) => c.channelId === oldChannelId);
     if (index < 0 || !newChannel) return;
     const id = String(newChannel.channelId || "").toLowerCase();
-    if (!HASH_RE.test(id)) return;
+    if (!SLOT_RE.test(id) || (newChannel.mediaType === "video" && !/^video:\d+$/.test(id))) return;
     // 이미 보고 있는 채널이면 넣지 않는다(같은 채널이 두 칸에 뜨지 않게).
     if (state.chosen.some((c) => c.channelId === id)) return;
 
     const wasMain = state.mainId === oldChannelId;
-    const wasChat = state.chatChannelId === oldChannelId;
+    const oldChatId = chatSourceId(oldChannelId);
+    const wasChat = Boolean(oldChatId) && state.chatChannelId === oldChatId;
 
     // 옛 칸 정리: 그 프레임만 내린다.
     const oldCell = cells.get(oldChannelId);
@@ -4214,7 +4708,11 @@
 
     // 자리를 그대로 두고 갈아 끼운다(채널 수가 같아 배치도 그대로 쓸 수 있다).
     const next = {
+      ...newChannel,
       channelId: id,
+      mediaType: newChannel.mediaType === "video" ? "video" : "live",
+      ownerChannelId: String(newChannel.ownerChannelId || (newChannel.mediaType === "video" ? "" : id)).toLowerCase(),
+      videoNo: String(newChannel.videoNo || ""),
       channelName: String(newChannel.channelName || ""),
       channelImageUrl: String(newChannel.channelImageUrl || ""),
     };
@@ -4237,7 +4735,10 @@
     applyLayout();
     renderVolume();
     // 채팅이 그 채널을 보고 있었으면 새 채널로 넘긴다.
-    if (wasChat || (state.chatFollowsMain && wasMain)) applyChat(id);
+    if (wasChat || (state.chatFollowsMain && wasMain)) {
+      const chatId = chatSourceId(id);
+      applyChat(chatId);
+    }
     renderQuick();
   }
 
@@ -4312,12 +4813,27 @@
   // ── 후보 목록 ───────────────────────────────────────────────────────────
   // 고르기 화면과 같은 로더를 쓴다(주소·응답 해석을 두 곳에 두지 않는다).
   const SOURCES = globalThis.CheeseMultiviewSources;
+  const quickVideoRerankControls = globalThis.CheeseMultiviewVideoSearchControls.attach(
+    $("mvQuickVideoRerankControls"),
+    "quick",
+    onQuickVideoRerankChange,
+  );
   const quickSortPicker = globalThis.CheeseMultiviewSort.attach("mvQuickSort");
   const QUICK_TTL_MS = 20000; // 제목·시청자 수가 바뀌므로 오래 들고 있지 않는다
   const quickCache = new Map(); // key -> {value, expiresAt}
   let quickLivePager = null;
   let quickSearchPager = null;
   let quickSearchKeyword = "";
+  let quickVideoSource = "following";
+  let quickVideoChannel = null;
+  let quickVideoChannelView = "search";
+  const quickVideoPagers = new Map();
+  let quickVideoSearchPager = null;
+  let quickVideoSearchKeyword = "";
+  let quickVideoRerankPager = null;
+  let quickVideoRerankPagerKeyword = "";
+  let quickVideoChannelKeyword = "";
+  let quickVideoRerankSearchKeyword = "";
   let quickSource = "following";
   let quickKeyword = "";
   let quickSections = []; // 전용 팔로잉 구역(폴더)
@@ -4336,7 +4852,22 @@
       .set({
         cheeseMultiviewQuickState: {
           source: quickSource,
+          videoSource: quickVideoSource,
+          videoChannel: quickVideoChannel ? {
+            channelId: quickVideoChannel.channelId,
+            channelName: quickVideoChannel.channelName,
+            channelImageUrl: quickVideoChannel.channelImageUrl,
+            verifiedMark: quickVideoChannel.verifiedMark === true,
+          } : null,
+          videoChannelView: quickVideoChannelView,
           keyword: quickKeyword,
+          videoKeyword: quickVideoSource === "channel-search"
+            ? quickVideoChannelKeyword
+            : quickVideoSource === "platter-search"
+              ? quickVideoRerankSearchKeyword
+              : "",
+          videoChannelSearchKeyword: quickVideoChannelKeyword,
+          videoRerankSearchKeyword: quickVideoRerankSearchKeyword,
           folder: quickFolder,
           sortBySource: quickSortBySource,
         },
@@ -4356,13 +4887,29 @@
         const saved = data.cheeseMultiviewQuickState;
         if (
           saved &&
-          ["following", "custom", "live", "search"].includes(saved.source)
+          ["following", "custom", "live", "search", "videos"].includes(saved.source)
         ) {
           quickSource = saved.source;
+          if (["following", "popular", "latest", "favorites", "channel-search", "platter-search"].includes(saved.videoSource))
+            quickVideoSource = saved.videoSource;
+          const savedVideoChannel = saved.videoChannel;
+          if (savedVideoChannel && /^[0-9a-f]{32}$/i.test(String(savedVideoChannel.channelId || "")))
+            quickVideoChannel = savedVideoChannel;
+          quickVideoChannelView = quickVideoChannel && saved.videoChannelView === "selected"
+            ? "selected" : "search";
           quickKeyword =
             typeof saved.keyword === "string"
               ? saved.keyword.slice(0, 100)
               : "";
+          const legacyVideoKeyword = typeof saved.videoKeyword === "string"
+            ? saved.videoKeyword.slice(0, 100)
+            : "";
+          quickVideoChannelKeyword = typeof saved.videoChannelSearchKeyword === "string"
+            ? saved.videoChannelSearchKeyword.slice(0, 100)
+            : saved.videoSource === "channel-search" ? legacyVideoKeyword : "";
+          quickVideoRerankSearchKeyword = typeof saved.videoRerankSearchKeyword === "string"
+            ? saved.videoRerankSearchKeyword.slice(0, 100)
+            : saved.videoSource === "platter-search" ? legacyVideoKeyword : "";
           quickFolder =
             typeof saved.folder === "string" ? saved.folder.slice(0, 128) : "";
           for (const source of Object.keys(quickSortBySource)) {
@@ -4372,6 +4919,8 @@
             }
           }
           $("mvQuickSearch").value = quickKeyword;
+          $("mvQuickVideoChannelSearchInput").value = quickVideoChannelKeyword;
+          $("mvQuickVideoRerankSearchInput").value = quickVideoRerankSearchKeyword;
         }
       }
       const savedPosition = data.cheeseMultiviewQuickPosition;
@@ -4426,9 +4975,75 @@
     return quickSearchPager;
   }
 
+  function getQuickVideoPager() {
+    if (quickVideoChannel) {
+      const key = `channel:${quickVideoChannel.channelId}`;
+      if (!quickVideoPagers.has(key))
+        quickVideoPagers.set(key, SOURCES.createChannelVideoPager(quickVideoChannel));
+      return quickVideoPagers.get(key);
+    }
+      const key = quickVideoSource;
+      if (!quickVideoPagers.has(key)) {
+        if (key === "following") quickVideoPagers.set(key, SOURCES.createFollowingVideoPager());
+        else if (key === "favorites") quickVideoPagers.set(key, SOURCES.createVideoVaultFavoritesPager());
+        else if (key === "popular" || key === "latest")
+        quickVideoPagers.set(key, SOURCES.createAllVideoPager(key === "latest" ? "LATEST" : "POPULAR"));
+    }
+    return quickVideoPagers.get(key) || null;
+  }
+
+  function isQuickVideoChannelSearchView() {
+    return quickVideoSource === "channel-search" &&
+      (!quickVideoChannel || quickVideoChannelView === "search");
+  }
+
+  function getQuickVideoSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!quickVideoSearchPager || quickVideoSearchKeyword !== query) {
+      quickVideoSearchKeyword = query;
+      quickVideoSearchPager = SOURCES.createChannelSearchPager(query);
+    }
+    return quickVideoSearchPager;
+  }
+
+  function getQuickVideoRerankPager(keyword) {
+    const query = String(keyword || "").trim();
+    if (!quickVideoRerankPager || quickVideoRerankPagerKeyword !== query) {
+      quickVideoRerankPagerKeyword = query;
+      quickVideoRerankPager = SOURCES.createVideoSearchPager(query);
+      quickVideoRerankControls.setPager(quickVideoRerankPager);
+    }
+    return quickVideoRerankPager;
+  }
+
   // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
   // ⚠ 캐시 키를 구분한다. 같은 키에 평평한 목록과 구역 배열을 섞어 담으면 안 된다.
   async function quickRows(source, keyword) {
+    if (source === "videos") {
+      if (isQuickVideoChannelSearchView()) {
+        const pager = getQuickVideoSearchPager(keyword);
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows;
+      }
+      if (quickVideoChannel) {
+        const pager = getQuickVideoPager();
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows;
+      }
+      if (quickVideoSource === "platter-search") {
+        const pager = getQuickVideoRerankPager(keyword);
+        await pager.loadFirst();
+        if (pager.error && !pager.rows.length) throw pager.error;
+        return pager.rows;
+      }
+      const pager = getQuickVideoPager();
+      if (!pager) return [];
+      await pager.loadFirst();
+      if (pager.error && !pager.rows.length) throw pager.error;
+      return pager.rows;
+    }
     const sortType = SOURCES.serverSortType(source, quickSortBySource[source]);
     const key =
       source === "search"
@@ -4469,7 +5084,13 @@
   async function loadQuickCandidates() {
     const requestId = ++quickRequestId;
     const source = quickSource;
-    const keyword = quickKeyword;
+    const keyword = source === "videos"
+      ? isQuickVideoChannelSearchView()
+        ? quickVideoChannelKeyword
+        : quickVideoSource === "platter-search"
+          ? quickVideoRerankSearchKeyword
+          : ""
+      : quickKeyword;
     quickCandidates = null; // 불러오는 중
     quickLoadError = null;
     renderQuickCandidates();
@@ -4576,15 +5197,25 @@
     const thumb = safeImageUrl(r.liveImageUrl);
     const avatar = safeImageUrl(SOURCES.profileThumb(r.channelImageUrl));
     const tags = Array.isArray(r.tags) ? r.tags : [];
+    const isVideo = r.mediaType === "video";
     return (
-      `<button type="button" class="mv-quick-card mv-custom-tooltip" data-mv-quick-add="${esc(r.channelId)}"` +
-      `${full ? " disabled" : ""} data-tooltip="${esc(r.channelName)}">` +
+      `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
+      `${full ? " disabled" : ""}>` +
       `<span class="mv-quick-card-thumb${thumb ? "" : " is-fallback"}${r.adult ? " is-adult" : ""}">` +
       (thumb
         ? `<img src="${esc(thumb)}" alt="" loading="lazy">`
         : `<span class="mv-quick-card-empty"></span>`) +
-      `<span class="mv-card-live">LIVE</span>` +
-      `<span class="mv-card-viewers">${fmtCount(r.viewers)}명</span>` +
+      (isVideo
+        ? `<span class="mv-card-badge-row${state.chosen.some((c) => c.channelId === r.channelId) ? " has-picked" : ""}">` +
+          `<span class="mv-card-live is-replay">${r.videoType === "UPLOAD" ? "업로드" : "다시보기"}</span>` +
+          (r.livePv > 0
+            ? `<span class="mv-card-live-pv">${SOURCES.formatCompactCount(r.livePv)}회 시청된 라이브</span>`
+            : "") +
+          `</span>`
+        : `<span class="mv-card-live">LIVE</span><span class="mv-card-viewers">${fmtCount(r.viewers)}명</span>`) +
+      (isVideo && r.duration > 0
+        ? `<span class="mv-card-duration">${SOURCES.formatVideoDuration(r.duration)}</span>`
+        : "") +
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       `</span>` +
       `<span class="mv-quick-card-body">` +
@@ -4598,6 +5229,9 @@
         ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>`
         : "") +
       `</span>` +
+      (isVideo
+        ? `<span class="mv-quick-card-video-info">조회수 ${fmtCount(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatRelativeTime(r.openedAt))}` : ""}</span>`
+        : "") +
       `</span></span>` +
       (r.category || tags.length
         ? `<span class="mv-card-meta mv-quick-card-meta">` +
@@ -4613,6 +5247,15 @@
     );
   }
 
+  function quickVideoChannelCard(channel) {
+    const avatar = safeImageUrl(SOURCES.profileThumb(channel.channelImageUrl));
+    return `<button type="button" class="mv-video-channel-option" role="option" data-mv-quick-video-channel="${esc(channel.channelId)}">` +
+      (avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy" decoding="async">` : `<span class="mv-video-channel-option-avatar"></span>`) +
+      `<span class="mv-video-channel-option-name">${esc(channel.channelName || "채널")}</span>` +
+      (channel.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
+      `</button>`;
+  }
+
   function quickSkeletonCards(count = 4) {
     return (
       `<div class="mv-quick-card is-skeleton" aria-hidden="true">` +
@@ -4626,7 +5269,42 @@
   function quickPagerForSource(source = quickSource) {
     if (source === "live") return quickLivePager;
     if (source === "search") return quickSearchPager;
+    if (source === "videos") {
+      if (isQuickVideoChannelSearchView()) return quickVideoSearchPager;
+      if (!quickVideoChannel && quickVideoSource === "platter-search") return quickVideoRerankPager;
+      return getQuickVideoPager();
+    }
     return null;
+  }
+
+  function renderQuickVideoChannelSuggestions(pager, keyword) {
+    const input = $("mvQuickVideoChannelSearchInput");
+    const popover = $("mvQuickVideoChannelPopover");
+    const query = String(keyword || "").trim();
+    const visible = Boolean(query) && quickSource === "videos" && isQuickVideoChannelSearchView();
+    input.setAttribute("aria-expanded", String(visible));
+    popover.hidden = !visible;
+    if (!visible) {
+      popover.innerHTML = "";
+      return;
+    }
+    if (quickCandidates === null) {
+      popover.setAttribute("aria-busy", "true");
+      popover.innerHTML = '<div class="mv-video-channel-empty">채널을 찾는 중…</div>'.repeat(3);
+      return;
+    }
+    popover.removeAttribute("aria-busy");
+    if ((pager?.error || quickLoadError) && !quickCandidates.length) {
+      popover.innerHTML = `<div class="mv-video-channel-empty">채널을 불러오지 못했습니다. (${esc((pager?.error || quickLoadError).message || "요청 실패")})</div>`;
+      return;
+    }
+    if (!quickCandidates.length) {
+      popover.innerHTML = '<div class="mv-video-channel-empty">검색된 채널이 없습니다.</div>';
+      return;
+    }
+    popover.innerHTML = quickCandidates.map(quickVideoChannelCard).join("") +
+      (pager?.error ? '<button type="button" class="mv-video-channel-more" data-mv-quick-retry="1">다음 채널 다시 불러오기</button>' :
+        pager?.loading ? '<div class="mv-video-channel-empty">더 불러오는 중…</div>' : "");
   }
 
   function syncQuickPagedRetry() {
@@ -4644,7 +5322,7 @@
 
   async function loadMoreQuickCandidates() {
     if (
-      (quickSource !== "live" && quickSource !== "search") ||
+      (quickSource !== "live" && quickSource !== "search" && quickSource !== "videos") ||
       $("mvQuick")?.hidden
     )
       return;
@@ -4659,9 +5337,15 @@
     if (quickSource !== source || pager !== quickPagerForSource(source)) return;
     if (pager.error) {
       syncQuickPagedRetry();
+      if (source === "videos" && isQuickVideoChannelSearchView())
+        renderQuickCandidates();
       return;
     }
     quickCandidates = pager.rows;
+    if (source === "videos" && isQuickVideoChannelSearchView()) {
+      renderQuickCandidates();
+      return;
+    }
     const existing = new Map(
       [...box.querySelectorAll("[data-mv-quick-add]")].map((node) => [
         node.dataset.mvQuickAdd,
@@ -4674,13 +5358,13 @@
     }
     const have = new Set(state.chosen.map((channel) => channel.channelId));
     const mode = $("mvQuickSort").value;
-    const rows = SOURCES.sortRows(
+    const rows = (source === "videos" ? quickVisibleRows() : SOURCES.sortRows(
       quickVisibleRows(),
       mode,
       source === "live" ||
         source === "following" ||
         (source === "custom" && (mode === "recent" || mode === "oldest")),
-    ).filter((row) => !have.has(row.channelId));
+    )).filter((row) => row.mediaType === "channel" || !have.has(row.channelId));
     const full = !quickReplaceId && state.chosen.length >= 6;
     let next = null;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -4688,7 +5372,9 @@
       let node = existing.get(row.channelId);
       if (!node) {
         const template = document.createElement("template");
-        template.innerHTML = quickCard(row, full);
+        template.innerHTML = row.mediaType === "channel"
+          ? quickVideoChannelCard(row)
+          : quickCard(row, full);
         node = template.content.firstElementChild;
         box.insertBefore(node, next);
       }
@@ -4698,6 +5384,14 @@
   }
 
   function maybeLoadMoreQuickCandidates() {
+    if (quickSource === "videos" && isQuickVideoChannelSearchView()) {
+      const popover = $("mvQuickVideoChannelPopover");
+      const pager = quickPagerForSource();
+      if (!popover || popover.hidden || $("mvQuick")?.hidden || !pager || pager.error) return;
+      if (popover.scrollHeight - popover.scrollTop - popover.clientHeight < 80)
+        void loadMoreQuickCandidates();
+      return;
+    }
     const box = $("mvQuickAdd");
     const pager = quickPagerForSource();
     if (!box || $("mvQuick")?.hidden || !pager || pager.error) return;
@@ -4709,6 +5403,16 @@
 
   // 후보가 없을 때의 안내는 목록 종류마다 다르다.
   function quickEmptyMessage() {
+    if (quickSource === "videos") {
+      if (isQuickVideoChannelSearchView())
+        return quickVideoChannelKeyword.trim() ? "다시보기를 찾을 채널이 없습니다." : "채널명을 검색해 다시보기를 찾아보세요.";
+      if (!quickVideoChannel && quickVideoSource === "platter-search")
+        return quickVideoRerankSearchKeyword.trim() ? "다시보기 검색 결과가 없습니다." : "검색어를 입력해 다시보기를 찾아보세요.";
+      if (quickVideoChannel) return "채널에 공개된 다시보기가 없습니다.";
+      if (quickVideoSource === "favorites") return "보관함에 즐겨찾기한 다시보기가 없습니다.";
+      if (quickVideoSource === "following") return "팔로잉 채널의 다시보기가 없습니다.";
+      return "다시보기가 없습니다.";
+    }
     if (quickSource === "search") {
       return quickKeyword.trim()
         ? "찾는 채널이나 태그의 방송이 없습니다."
@@ -4736,9 +5440,29 @@
       }
     }
     const searchBox = $("mvQuickSearch");
+    const videoChannelSearch = quickSource === "videos" && isQuickVideoChannelSearchView();
+    const videoRerankSearch = quickSource === "videos" && !quickVideoChannel && quickVideoSource === "platter-search";
     if (searchBox) searchBox.hidden = quickSource !== "search";
+    $("mvQuickVideoChannelSearch").hidden = !videoChannelSearch;
+    $("mvQuickVideoRerankSearch").hidden = !videoRerankSearch;
+    quickVideoRerankControls.setPager(videoRerankSearch ? quickVideoRerankPager : null);
+    const videoSources = $("mvQuickVideoSources");
+    if (videoSources) {
+      videoSources.hidden = quickSource !== "videos";
+      for (const button of videoSources.querySelectorAll("[data-mv-quick-video-source]"))
+        button.setAttribute("aria-pressed", String(button.dataset.mvQuickVideoSource === quickVideoSource &&
+          (button.dataset.mvQuickVideoSource !== "channel-search" || quickVideoChannelView === "search")));
+      const back = videoSources.querySelector("[data-mv-quick-video-channel-back]");
+      if (back) {
+        back.hidden = quickVideoSource !== "channel-search" || !quickVideoChannel;
+        back.setAttribute("aria-pressed", String(
+          quickVideoSource === "channel-search" && Boolean(quickVideoChannel) && quickVideoChannelView === "selected",
+        ));
+      }
+    }
     renderQuickFolders();
     const sort = $("mvQuickSort");
+    sort.closest(".mv-sort-row").hidden = quickSource === "videos";
     const hasCustom =
       quickSource === "custom" &&
       SOURCES.hasCustomOrder(quickSections, quickFolder);
@@ -4754,34 +5478,45 @@
     oldest.textContent =
       quickSource === "live" ? "오래된순 (불러온 방송)" : "오래된순";
     const mode =
-      quickSortBySource[quickSource] === "custom" && !hasCustom
+      quickSource === "videos"
+        ? "custom"
+        : quickSortBySource[quickSource] === "custom" && !hasCustom
         ? "viewers"
         : quickSortBySource[quickSource];
     sort.value = mode;
-    sort.disabled = quickCandidates === null;
+    sort.disabled = quickCandidates === null || quickSource === "videos";
     quickSortPicker.sync();
 
     const box = $("mvQuickAdd");
     if (!box) return;
+    const rail = box.closest(".mv-quick-rail");
+    if (rail) rail.hidden = videoChannelSearch;
     const previousScrollTop = box.scrollTop;
     if (quickCandidates === null) {
       box.setAttribute("aria-busy", "true");
       box.innerHTML = quickSkeletonCards();
+      if (videoChannelSearch) renderQuickVideoChannelSuggestions(quickVideoSearchPager, quickVideoChannelKeyword);
       return;
     }
     box.removeAttribute("aria-busy");
+    if (videoChannelSearch) {
+      box.innerHTML = "";
+      renderQuickVideoChannelSuggestions(getQuickVideoSearchPager(quickVideoChannelKeyword), quickVideoChannelKeyword);
+      return;
+    }
     // 이미 보고 있는 채널은 후보에서 뺀다. 교체 대상 자신도 뺀다 — 같은 채널로
     // 갈아 끼우는 것은 replaceChannel 이 거르므로 눌러도 아무 일이 없다.
     const have = new Set(state.chosen.map((c) => c.channelId));
-    const rest = SOURCES.sortRows(
+    const rest = (quickSource === "videos" ? quickVisibleRows() : SOURCES.sortRows(
       quickVisibleRows(),
       mode,
       quickSource === "live" ||
         quickSource === "following" ||
         (quickSource === "custom" && (mode === "recent" || mode === "oldest")),
-    ).filter((r) => !have.has(r.channelId));
+    )).filter((r) => r.mediaType === "channel" || !have.has(r.channelId));
     if (!rest.length) {
-      const loginRequired = (quickSource === "following" || quickSource === "custom") &&
+      const loginRequired = (quickSource === "following" || quickSource === "custom" ||
+        (quickSource === "videos" && quickVideoSource === "following")) &&
         SOURCES.isLoginRequiredError(quickLoadError);
       const message = loginRequired
         ? "팔로잉 목록을 보려면 치지직에 로그인해 주세요."
@@ -4793,13 +5528,30 @@
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
     const full = !quickReplaceId && state.chosen.length >= 6;
-    box.innerHTML = rest.map((r) => quickCard(r, full)).join("");
+    box.innerHTML = rest.map((r) => r.mediaType === "channel"
+      ? quickVideoChannelCard(r)
+      : quickCard(r, full)).join("");
     syncQuickPagedRetry();
     box.scrollTop = Math.min(
       previousScrollTop,
       Math.max(0, box.scrollHeight - box.clientHeight),
     );
     requestAnimationFrame(maybeLoadMoreQuickCandidates);
+  }
+
+  function onQuickVideoRerankChange({ pager, poolChanged, updatePager }) {
+    if (poolChanged) {
+      quickVideoRerankPager = null;
+      quickVideoRerankPagerKeyword = "";
+      if (quickSource === "videos" && quickVideoSource === "platter-search") void loadQuickCandidates();
+      return;
+    }
+    if (updatePager === false) return;
+    if (quickSource === "videos" && quickVideoSource === "platter-search" &&
+      pager && pager === quickVideoRerankPager) {
+      quickCandidates = pager.rows;
+      renderQuickCandidates();
+    }
   }
 
   // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.
@@ -4821,6 +5573,7 @@
     if (state.chosen.length <= 2) return;
     const cell = cells.get(channelId);
     if (!cell) return;
+    const removedChatId = chatSourceId(channelId);
     // 이 칸의 프레임만 확실히 내린다.
     const frame = cell.querySelector("iframe");
     clearRemovedChannel(channelId);
@@ -4845,10 +5598,14 @@
         promoteMainAudio(state.mainId);
         postState(state.mainId, true);
       }
-      if (state.chatFollowsMain && state.mainId) applyChat(state.mainId);
+      if (state.chatFollowsMain) {
+        const chatId = chatSourceId(state.mainId);
+        applyChat(chatId);
+      }
     }
-    if (state.chatChannelId === channelId && state.mainId) {
-      applyChat(state.mainId);
+    if (removedChatId && state.chatChannelId === removedChatId && state.mainId) {
+      const chatId = chatSourceId(state.mainId);
+      applyChat(chatId);
     }
     fitLayoutToCount();
     renderQuick();
@@ -4859,7 +5616,7 @@
     if (state.chosen.length >= 6) return;
     const found = quickCandidates?.find((r) => r.channelId === channelId);
     if (!found || cells.has(channelId)) return;
-    state.chosen = [...state.chosen, { ...found, channelImageUrl: "" }];
+    state.chosen = [...state.chosen, { ...found }];
     freshSyncChannels.add(channelId);
     state.sync.manualOffsets[channelId] = 0;
     fitLayoutToCount();
@@ -5074,7 +5831,13 @@
     if (target.closest?.("#mvChatRetry")) {
       // 사용자가 직접 누른 경우에만 다시 연결한다(영상 프레임은 건드리지 않는다).
       chatAutoRetried = false;
-      loadChat(state.chatChannelId, { retry: true });
+      if (isVideoChatSource(state.chatChannelId)) {
+        if (!vodChatSession.retry())
+          postVodChatControl(state.chatChannelId, true, chatGeneration);
+        renderVodChat();
+      } else {
+        loadChat(state.chatChannelId, { retry: true });
+      }
       return;
     }
     if (target.closest?.("#mvChatPopout")) {
@@ -5113,12 +5876,58 @@
     }
     const sourceTab = target.closest?.("[data-mv-quick-source]");
     if (sourceTab) {
+      const wasVideos = quickSource === "videos";
       quickSource = sourceTab.dataset.mvQuickSource;
+      if (quickSource === "videos" && !wasVideos) {
+        quickVideoChannel = null;
+        quickVideoChannelView = "search";
+      }
       quickFolder = ""; // 목록 종류를 바꾸면 구역 선택을 푼다
       // 앞 탭에서 내려 둔 스크롤이 남으면 새 탭이 엉뚱한 위치에서 시작한다.
       resetQuickScroll();
       saveQuickState();
       void loadQuickCandidates();
+      return;
+    }
+    const videoSourceTab = target.closest?.("[data-mv-quick-video-source]");
+    if (videoSourceTab) {
+      const nextVideoSource = videoSourceTab.dataset.mvQuickVideoSource;
+      if (nextVideoSource !== "channel-search" || quickVideoSource !== "channel-search") {
+        quickVideoChannel = null;
+        quickVideoChannelView = "search";
+      }
+      quickVideoSource = nextVideoSource;
+      if (nextVideoSource === "channel-search") quickVideoChannelView = "search";
+      resetQuickScroll();
+      saveQuickState();
+      if (quickVideoSource === "channel-search") {
+        $("mvQuickVideoChannelSearch").hidden = false;
+        $("mvQuickVideoChannelSearchInput").focus();
+      } else if (quickVideoSource === "platter-search") {
+        $("mvQuickVideoRerankSearch").hidden = false;
+        $("mvQuickVideoRerankSearchInput").focus();
+      }
+      void loadQuickCandidates();
+      return;
+    }
+    if (target.closest?.("[data-mv-quick-video-channel-back]")) {
+      quickVideoChannelView = "selected";
+      resetQuickScroll();
+      saveQuickState();
+      void loadQuickCandidates();
+      return;
+    }
+    const videoChannelCard = target.closest?.("[data-mv-quick-video-channel]");
+    if (videoChannelCard) {
+      const channel = quickCandidates?.find((row) => row.channelId === videoChannelCard.dataset.mvQuickVideoChannel);
+      if (channel) {
+        quickVideoChannel = channel;
+        quickVideoChannelView = "selected";
+        quickVideoPagers.delete(`channel:${channel.channelId}`);
+        resetQuickScroll();
+        saveQuickState();
+        void loadQuickCandidates();
+      }
       return;
     }
     const folder = target.closest?.("[data-mv-quick-folder]");
@@ -5309,7 +6118,10 @@
       const button = $("mvChatFollow");
       button.setAttribute("aria-pressed", String(state.chatFollowsMain));
       // 켠 순간 이미 어긋나 있으면 바로 맞춰 준다.
-      if (state.chatFollowsMain) applyChat(state.mainId);
+      if (state.chatFollowsMain) {
+        const chatId = chatSourceId(state.mainId);
+        applyChat(chatId);
+      }
       renderTopbar();
       return;
     }
@@ -5359,6 +6171,20 @@
     clearTimeout(quickSearchTimer);
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
   });
+  let quickVideoSearchTimer = 0;
+  const onQuickVideoChannelSearchInput = (event) => {
+    quickVideoChannelKeyword = event.target.value;
+    $("mvQuickVideoChannelPopover").scrollTop = 0;
+    clearTimeout(quickVideoSearchTimer);
+    quickVideoSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
+  };
+  const onQuickVideoRerankSearchInput = (event) => {
+    quickVideoRerankSearchKeyword = event.target.value;
+    clearTimeout(quickVideoSearchTimer);
+    quickVideoSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
+  };
+  $("mvQuickVideoChannelSearchInput")?.addEventListener("input", onQuickVideoChannelSearchInput);
+  $("mvQuickVideoRerankSearchInput")?.addEventListener("input", onQuickVideoRerankSearchInput);
   $("mvQuickSort")?.addEventListener("change", (event) => {
     const previousType = SOURCES.serverSortType(
       quickSource,
@@ -5377,6 +6203,9 @@
   });
 
   $("mvQuickAdd")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, {
+    passive: true,
+  });
+  $("mvQuickVideoChannelPopover")?.addEventListener("scroll", maybeLoadMoreQuickCandidates, {
     passive: true,
   });
   if (typeof ResizeObserver === "function") {
@@ -5641,6 +6470,7 @@
     "FRAME_SYNC_COMMAND_RESULT",
     "FRAME_MIXER_STATE",
     "FRAME_MIXER_COMMAND_RESULT",
+    "FRAME_VOD_CHAT_PLAYBACK",
   ]);
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
@@ -5649,14 +6479,14 @@
     if (data.source !== MULTIVIEW_MESSAGE) return;
     if (!FRAME_MESSAGE_TYPES.has(data.type)) return;
     const channelId = String(data.channelId || "").toLowerCase();
-    if (!HASH_RE.test(channelId) || !cells.has(channelId)) return;
+    if (!SLOT_RE.test(channelId) || !cells.has(channelId)) return;
     // ⚠ 정말 그 칸의 프레임이 보낸 것인지 확인한다. 다른 프레임이 남의 channelId 로
     //   보내는 것을 막는다.
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame || event.source !== frame.contentWindow) return;
 
     if (data.type === "FRAME_READY") {
-      if (currentStatus(channelId) === "ready") {
+      if (currentStatus(channelId) === "ready" && !isVideoSlot(channelId)) {
         clearChannelSync(channelId);
         syncReadyAt.set(channelId, Date.now());
       }
@@ -5677,6 +6507,17 @@
       //   실패로 보인다(그래서 재적용을 두세 번 눌러야 했다).
       setCellStatus(channelId, "ready");
       requestMixerState(channelId);
+      if (channelId === state.chatChannelId && isVideoChatSource(channelId))
+        postVodChatControl(channelId, true, chatGeneration);
+      return;
+    }
+    if (data.type === "FRAME_VOD_CHAT_PLAYBACK") {
+      if (currentStatus(channelId) === "ready" &&
+          typeof data.currentTime === "number" && Number.isFinite(data.currentTime) &&
+          data.currentTime >= 0 && data.currentTime <= 1000000000 &&
+          Number.isSafeInteger(data.chatGeneration)) {
+        updateVodChatPlayback(data);
+      }
       return;
     }
     if (data.type === "FRAME_ENDED") {
@@ -5742,6 +6583,7 @@
       return;
     }
     if (data.type === "FRAME_SYNC_STATS") {
+      if (isVideoSlot(channelId)) return;
       if (currentStatus(channelId) !== "ready") return;
       const stats = SYNC.normalize(data.stats);
       if (!stats) return;
