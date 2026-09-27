@@ -34,13 +34,13 @@ async function main() {
         nextPlayerMessageTime: 12000,
       });
     }
-    if (cursor === 15000) {
+    if (cursor === 90000) {
       return response({
         videoChats: [
-          { messageId: "seek-a", playerMessageTime: 59000, content: "이동한 곳" },
-          { messageId: "seek-b", playerMessageTime: 60000, content: "현재" },
+          { messageId: "seek-a", playerMessageTime: 179000, content: "이동한 곳" },
+          { messageId: "seek-b", playerMessageTime: 180000, content: "현재" },
         ],
-        nextPlayerMessageTime: 62000,
+        nextPlayerMessageTime: 182000,
       });
     }
     return response({ videoChats: [], nextPlayerMessageTime: cursor });
@@ -48,6 +48,7 @@ async function main() {
 
   const session = context.CheeseMultiviewVodChat.createSession({ fetchImpl });
   assert.equal(session.start("12345", 10), true);
+  assert.equal(session.snapshot().complete, false, "방송 시각 수집 중에는 완료되지 않은 상태를 노출");
   await wait(240);
 
   assert.equal(calls[0].parsed.pathname, "/service/v1/videos/12345/chats");
@@ -74,6 +75,7 @@ async function main() {
   assert.equal(manager.emojis.d_42, "https://nng-phinf.pstatic.net/emoji.png");
   assert.equal(session.broadcastTimeAt(9), 1790279187543);
   assert.equal(session.hasBroadcastTimes(), true);
+  assert.equal(session.snapshot().complete, true, "마지막 페이지까지 확인하면 수집 완료 상태가 됨");
   assert.equal(session.visible(11).some((item) => item.text === "조금 뒤"), true);
   const formatTime = context.CheeseMultiviewVodChat.formatBroadcastTime;
   const localTime = new Date(2024, 0, 1, 13, 5).getTime();
@@ -84,7 +86,7 @@ async function main() {
   const quietSession = context.CheeseMultiviewVodChat.createSession({
     fetchImpl: async (url) => {
       const cursor = Number(new URL(url).searchParams.get("playerMessageTime"));
-      if (cursor === 11000) {
+      if (cursor === 0) {
         return response({
           videoChats: [
             { messageId: "quiet-old", playerMessageTime: 1000, content: "오래된 채팅" },
@@ -254,22 +256,22 @@ async function main() {
     fetchImpl: async (url) => {
       const cursor = Number(new URL(url).searchParams.get("playerMessageTime"));
       if (cursor === 0) return response({ videoChats: paletteRows, nextPlayerMessageTime: 2000 });
-      if (cursor === 15000) return response({
+      if (cursor === 90000) return response({
         videoChats: [
           {
             messageId: "palette-seek-existing",
-            playerMessageTime: 60000,
+            playerMessageTime: 180000,
             profile: JSON.stringify({ nickname: "기본색0", streamingProperty: { nicknameColor: { colorCode: "CC000" } } }),
             content: "시킹 후 기존 닉네임",
           },
           {
             messageId: "palette-seek-new",
-            playerMessageTime: 60000,
+            playerMessageTime: 180000,
             profile: JSON.stringify({ nickname: "시킹 후 신규", streamingProperty: { nicknameColor: { colorCode: "CC000" } } }),
             content: "시킹 후 새 닉네임",
           },
         ],
-        nextPlayerMessageTime: 62000,
+        nextPlayerMessageTime: 182000,
       });
       return response({ videoChats: [], nextPlayerMessageTime: cursor });
     },
@@ -286,24 +288,24 @@ async function main() {
     "같은 다시보기의 같은 닉네임은 재등장해도 배정 색을 유지");
   assert.equal(paletteVisible.find((item) => item.id === "special-cc000").nicknameFallbackColor, "",
     "특수 채팅은 기본 색상 팔레트 인덱스를 소비하지 않음");
-  paletteSession.updatePlayback(60, { seeking: true });
-  paletteSession.updatePlayback(60);
+  paletteSession.updatePlayback(180, { seeking: true });
+  paletteSession.updatePlayback(180);
   await wait(260);
-  paletteVisible = paletteSession.visible(60);
+  paletteVisible = paletteSession.visible(180);
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-existing").nicknameFallbackColor, defaultPalette[0],
     "시킹 후에도 기존 닉네임 색을 유지");
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-new").nicknameFallbackColor, defaultPalette[2],
     "시킹 후 새 닉네임에는 다음 순번 색을 배정");
   paletteSession.stop();
-  paletteSession.start("88888", 60);
+  paletteSession.start("88888", 180);
   await wait(260);
-  paletteVisible = paletteSession.visible(60);
+  paletteVisible = paletteSession.visible(180);
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-existing").nicknameFallbackColor, defaultPalette[0],
     "같은 다시보기의 채팅을 다시 선택해도 기존 닉네임 색을 유지");
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-new").nicknameFallbackColor, defaultPalette[2]);
-  paletteSession.start("99999", 60);
+  paletteSession.start("99999", 180);
   await wait(260);
-  paletteVisible = paletteSession.visible(60);
+  paletteVisible = paletteSession.visible(180);
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-existing").nicknameFallbackColor, defaultPalette[0],
     "다른 다시보기는 별도의 색상 배정 순서로 시작");
   assert.equal(paletteVisible.find((item) => item.id === "palette-seek-new").nicknameFallbackColor, defaultPalette[1]);
@@ -338,13 +340,38 @@ async function main() {
   }).nickname, "익명의 후원자");
   const mission = normalize({
     playerMessageTime: 1000,
+    messageTime: 1790279186543,
     messageTypeCode: 10,
     profile: JSON.stringify({ nickname: "후원자" }),
-    extras: JSON.stringify({ donationType: "MISSION_PARTICIPATION", payAmount: 5000 }),
+    extras: JSON.stringify({ donationType: "MISSION", missionDonationType: "PARTICIPATION", payAmount: 5000, missionText: "눈치보고 한번더", durationTime: 5400 }),
   });
   assert.equal(mission.donation.kind, "mission");
   assert.equal(mission.donation.amount, 5000);
   assert.equal(mission.donation.tone, "violet");
+  assert.equal(mission.donation.donationType, "MISSION");
+  assert.equal(mission.donation.missionDonationType, "PARTICIPATION");
+  assert.equal(mission.donation.missionTitle, "눈치보고 한번더");
+  assert.equal(mission.donation.missionTimeSeconds, 5400);
+  const regularMission = normalize({
+    playerMessageTime: 1000,
+    messageTime: 1790279186543,
+    messageTypeCode: 10,
+    extras: JSON.stringify({
+      donation_type: "MISSION",
+      mission_donation_type: "MISSION_ALONE",
+      pay_amount: 1000,
+      mission_created_time: "2026-09-27T00:00:00Z",
+      mission_end_time: "2026-09-27T02:00:00Z",
+      duration_time: 5400,
+      mission_text: "눈치보고 한번더",
+    }),
+    content: "눈치보고 한번더",
+  });
+  assert.equal(regularMission.donation.donationType, "MISSION");
+  assert.equal(regularMission.donation.missionDonationType, "MISSION_ALONE");
+  assert.equal(regularMission.donation.missionTitle, "눈치보고 한번더");
+  assert.equal(regularMission.donation.missionTimeSeconds, 5400,
+    "타이머는 생성·종료 시각 차이가 아니라 extras.durationTime을 사용");
   assert.equal(normalize({
     playerMessageTime: 1000,
     messageTypeCode: 10,
@@ -366,12 +393,12 @@ async function main() {
     extras: JSON.stringify({ donationType: "CHAT", payAmount: 1000 }),
   }).text, "", "본문이 없어도 후원 이벤트는 표시한다");
 
-  session.updatePlayback(60, { seeking: true });
-  session.updatePlayback(60);
+  session.updatePlayback(180, { seeking: true });
+  session.updatePlayback(180);
   await wait(240);
-  assert.ok(calls.some((call) => call.cursor === 15000), "seek 이후 새 재생 위치의 커서를 요청");
-  assert.equal(session.visible(60).some((item) => item.text === "현재"), true);
-  assert.equal(session.visible(60).some((item) => item.text === "재생 중"), false);
+  assert.ok(calls.some((call) => call.cursor === 90000), "seek 이후 90초 전 커서에서 채팅을 이어서 요청");
+  assert.equal(session.visible(180).some((item) => item.text === "현재"), true);
+  assert.equal(session.visible(180).some((item) => item.text === "재생 중"), false);
 
   session.stop();
   assert.equal(session.snapshot().status, "idle");

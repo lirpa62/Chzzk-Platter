@@ -48,6 +48,7 @@ function validateSetup(raw) {
     chosen,
     layoutId: layout.id,
     chatSide,
+    chatEnabled: raw.chatEnabled !== false,
     mainHighQuality: raw.mainHighQuality !== false,
   };
 }
@@ -85,11 +86,13 @@ const two = validateSetup({
   chosen: [ch(A, "가"), ch(B, "나")],
   layoutId: "right-1",
   chatSide: "left",
+  chatEnabled: false,
   mainHighQuality: false,
 });
 ok(two?.chosen.length === 2, "2채널을 그대로 받는다");
 ok(two?.layoutId === "right-1", "허용되는 배치는 유지한다");
 ok(two?.chatSide === "left", "허용되는 채팅 자리는 유지한다");
+ok(two?.chatEnabled === false, "채팅 없이 시작 선택을 보존한다");
 ok(two?.mainHighQuality === false, "mainHighQuality false 를 지킨다");
 const replay = validateSetup({
   chosen: [ch(A), { channelId: "video:902", mediaType: "video", videoNo: "902", ownerChannelId: B, adult: true }],
@@ -102,6 +105,10 @@ ok(validateSetup({ chosen: [ch(A), { channelId: "video:bad", mediaType: "video",
 ok(
   validateSetup({ chosen: [ch(A), ch(B)] })?.mainHighQuality === true,
   "값이 없으면 고화질 시작이 기본",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)] })?.chatEnabled === true,
+  "이전 handoff 값은 채팅 사용으로 기본 처리",
 );
 
 console.log("\n[어긋난 값] 안전한 기본값으로 고친다");

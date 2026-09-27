@@ -171,6 +171,18 @@
     "cheeseMultiviewVodMyChat",
     "cheeseMultiviewVodChatGraph",
     "cheeseMultiviewVodRoleChat",
+    "cheeseMultiviewBadgeChatButton",
+    "cheeseMultiviewBadgeChatHideEmptyButton",
+    "cheeseMultiviewBadgeChatHideChatBackground",
+    "cheeseMultiviewBadgeChatHideChatBorder",
+    "cheeseMultiviewBadgeChatHidePopupBackground",
+    "cheeseMultiviewBadgeChatHidePopupBorder",
+    "cheeseMultiviewBadgeChatHidePopupTime",
+    "cheeseMultiviewBadgeChatRoleBadgesOnly",
+    "cheeseMultiviewBadgeChatKeepPopupOpen",
+    "cheeseMultiviewBadgeChatPillGlowEnabled",
+    "cheeseMultiviewBadgeChatCompactPill",
+    "cheeseMultiviewBadgeChatHidePillButton",
     "cheeseMultiviewRememberQuickState",
     "cheeseMultiviewSyncDiagnosticsUi",
     "cheeseMultiviewQuickState",
@@ -5131,6 +5143,17 @@
     ["[data-multiview-vod-my-chat]", "cheeseMultiviewVodMyChat", true],
     ["[data-multiview-vod-chat-graph]", "cheeseMultiviewVodChatGraph", true],
     ["[data-multiview-vod-role-chat]", "cheeseMultiviewVodRoleChat", true],
+    ["[data-multiview-badge-chat-hide-empty-button]", "cheeseMultiviewBadgeChatHideEmptyButton", false],
+    ["[data-multiview-badge-chat-hide-chat-background]", "cheeseMultiviewBadgeChatHideChatBackground", false],
+    ["[data-multiview-badge-chat-hide-chat-border]", "cheeseMultiviewBadgeChatHideChatBorder", false],
+    ["[data-multiview-badge-chat-hide-popup-background]", "cheeseMultiviewBadgeChatHidePopupBackground", false],
+    ["[data-multiview-badge-chat-hide-popup-border]", "cheeseMultiviewBadgeChatHidePopupBorder", false],
+    ["[data-multiview-badge-chat-hide-popup-time]", "cheeseMultiviewBadgeChatHidePopupTime", false],
+    ["[data-multiview-badge-chat-role-badges-only]", "cheeseMultiviewBadgeChatRoleBadgesOnly", false],
+    ["[data-multiview-badge-chat-keep-popup-open]", "cheeseMultiviewBadgeChatKeepPopupOpen", false],
+    ["[data-multiview-badge-chat-pill-glow]", "cheeseMultiviewBadgeChatPillGlowEnabled", true],
+    ["[data-multiview-badge-chat-compact-pill]", "cheeseMultiviewBadgeChatCompactPill", false],
+    ["[data-multiview-badge-chat-hide-pill-button]", "cheeseMultiviewBadgeChatHidePillButton", false],
     ["[data-multiview-remember-quick-state]", "cheeseMultiviewRememberQuickState", false],
     ["[data-multiview-remember-setup-sort]", "cheeseMultiviewRememberSetupSort", true],
     ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
@@ -5140,8 +5163,14 @@
     (async () => {
       let on = defaultOn;
       try {
-        const d = await cachedStorageGet(key);
+        const d = await cachedStorageGet(
+          key === "cheeseMultiviewBadgeChatHidePillButton"
+            ? [key, "cheeseMultiviewBadgeChatButton"]
+            : key,
+        );
         on = defaultOn ? d?.[key] !== false : d?.[key] === true;
+        if (key === "cheeseMultiviewBadgeChatHidePillButton" && d?.[key] === undefined)
+          on = d?.cheeseMultiviewBadgeChatButton === false;
       } catch {}
       input.checked = on;
       if (input === popupPlayerStartWithoutChatInput) {
@@ -5157,6 +5186,37 @@
       } catch {}
     });
   });
+
+  const badgeChatKeepOpenInput = document.querySelector(
+    "[data-multiview-badge-chat-keep-popup-open]",
+  );
+  const badgeChatHideButtonInput = document.querySelector(
+    "[data-multiview-badge-chat-hide-pill-button]",
+  );
+  if (badgeChatKeepOpenInput && badgeChatHideButtonInput) {
+    (async () => {
+      const values = await cachedStorageGet([
+        "cheeseMultiviewBadgeChatKeepPopupOpen",
+        "cheeseMultiviewBadgeChatHidePillButton",
+      ]);
+      if (values.cheeseMultiviewBadgeChatHidePillButton === true) {
+        badgeChatKeepOpenInput.checked = false;
+        cachedStorageSet({ cheeseMultiviewBadgeChatKeepPopupOpen: false });
+      } else if (values.cheeseMultiviewBadgeChatKeepPopupOpen === true) {
+        badgeChatHideButtonInput.checked = false;
+      }
+    })();
+    badgeChatKeepOpenInput.addEventListener("change", () => {
+      if (!badgeChatKeepOpenInput.checked) return;
+      badgeChatHideButtonInput.checked = false;
+      cachedStorageSet({ cheeseMultiviewBadgeChatHidePillButton: false });
+    });
+    badgeChatHideButtonInput.addEventListener("change", () => {
+      if (!badgeChatHideButtonInput.checked) return;
+      badgeChatKeepOpenInput.checked = false;
+      cachedStorageSet({ cheeseMultiviewBadgeChatKeepPopupOpen: false });
+    });
+  }
 
   const multiviewChatPopoutModeGroup = document.querySelector(
     "[data-multiview-chat-popout-mode]",
@@ -11126,7 +11186,8 @@
       key === "cheeseLogPowerLineCumulative" ||
       key === "cheeseChatRecapChannelTrendCumulative" ||
       key === "cheeseChatRecapColorsCollapsed" ||
-      key === "chatRecapNewVodBadge"
+      key === "chatRecapNewVodBadge" ||
+      key.startsWith("cheeseMultiviewBadgeChat")
     ) {
       return typeof value === "boolean" ? value : undefined;
     }
@@ -11601,6 +11662,18 @@
           const normalized = normalizeImportedSettingValue(key, value);
           if (normalized !== undefined) imported[key] = normalized;
         }
+      }
+      if (
+        imported.cheeseMultiviewBadgeChatHidePillButton === undefined &&
+        imported.cheeseMultiviewBadgeChatButton !== undefined
+      ) {
+        imported.cheeseMultiviewBadgeChatHidePillButton =
+          imported.cheeseMultiviewBadgeChatButton === false;
+      }
+      if (imported.cheeseMultiviewBadgeChatHidePillButton === true) {
+        imported.cheeseMultiviewBadgeChatKeepPopupOpen = false;
+      } else if (imported.cheeseMultiviewBadgeChatKeepPopupOpen === true) {
+        imported.cheeseMultiviewBadgeChatHidePillButton = false;
       }
       if (
         imported[LIVE_VIEWER_COUNT_POSITION_KEY] === undefined &&

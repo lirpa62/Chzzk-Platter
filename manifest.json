@@ -81,6 +81,7 @@
         "src/channelAffinity.js",
         "src/channelAffinityData.js",
         "src/multiviewSync.js",
+        "src/multiviewBadgeChat.js",
         "src/content.js",
         "src/subscribeBadge.js"
       ],

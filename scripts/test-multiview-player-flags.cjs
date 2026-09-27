@@ -51,6 +51,7 @@ function frame(options = {}) {
     featureFlags: { ...options.flags },
     IS_MULTIVIEW_CHAT_FRAME: options.chat === true,
     IS_MULTIVIEW_FRAME: options.multiview === true,
+    multiviewVideoNo: options.videoNo || "",
     IS_POPUP_PLAYER_FRAME: options.popup === true || options.multiview === true || options.chat === true,
     popupPlayerDisableHidden: options.popupDisableHidden === true,
     popupPlayerBtnMixer: options.popupMixer === true,
@@ -187,7 +188,7 @@ function frame(options = {}) {
   assert.equal(hot.flags().audioMixer, false);
   assert(hot.classes.has("cheese-multiview-btn-mixer"));
   assert(/MULTIVIEW_SETTING_KEYS\.some\(\(key\) => changes\[key\]\)/.test(source));
-  assert(/applyMultiviewPlayerButtonClasses\(\);\s*if \(IS_MULTIVIEW_FRAME\) broadcastFeatureFlags\(\);/.test(source));
+  assert(/readMultiviewSettings\(next\);\s*applyMultiviewPlayerButtonClasses\(\);\s*if \(IS_MULTIVIEW_FRAME\) \{\s*broadcastFeatureFlags\(\);/.test(source));
   assert(css.includes('html.cheese-popup-player-frame:not(.cheese-multiview-frame)'));
   console.log("PASS hot multiview/global changes and popup CSS isolation");
 

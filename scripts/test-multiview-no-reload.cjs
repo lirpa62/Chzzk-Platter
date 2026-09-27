@@ -306,6 +306,9 @@ console.log("\n[볼륨 아이콘] 끄는 동안 패널을 다시 그리지 않�
     "utf8",
   );
   ok(/function syncVolumeButton/.test(watch), "버튼 하나만 맞추는 함수가 있다");
+  ok(/function syncVolumePanelButton/.test(watch), "상단 볼륨 버튼 상태 동기화 함수가 있다");
+  ok(/value: "전체 음소거"/.test(watch) && /value: "일부 음소거"/.test(watch),
+    "전체·개별 채널 음소거 상태를 상단 버튼 문구로 구분한다");
   const handler = watch.slice(
     watch.indexOf('document.addEventListener("input"'),
     watch.indexOf('document.addEventListener("change"'),

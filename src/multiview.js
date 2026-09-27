@@ -35,6 +35,7 @@
     layoutId: "",
     chatSide: "",
     mainHighQuality: true,
+    startWithoutChat: false,
     listCache: new Map(),
     livePager: null,
     searchPager: null,
@@ -525,6 +526,7 @@
     const full = state.chosen.length >= MAX_CHANNELS && !on;
     const tags = Array.isArray(r.tags) ? r.tags : [];
     const isVideo = r.mediaType === "video";
+    const watchTimelinePercent = isVideo ? SOURCES.getWatchTimelinePercent(r) : null;
     // 방송 스냅샷이 없으면(응답에 따라 빈 경우가 있다) 채널 이미지로 대신 채운다.
     // 빈 상자만 남으면 카드가 깨져 보인다.
     const thumbUrl =
@@ -548,6 +550,9 @@
       (isVideo && r.duration > 0
         ? `<span class="mv-card-duration">${SOURCES.formatVideoDuration(r.duration)}</span>`
         : "") +
+      (watchTimelinePercent !== null
+        ? `<span class="mv-card-watch-timeline" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, watchTimelinePercent)).toFixed(2)}%"></span></span>`
+        : "") +
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       (on ? `<span class="mv-card-picked"><svg width="22" height="22" viewBox="0 0 24 24" ` +
         `fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" ` +
@@ -562,7 +567,7 @@
       (r.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>` : "") +
       `</span>` +
       (isVideo
-        ? `<span class="mv-card-video-info">조회수 ${fmt(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatRelativeTime(r.openedAt))}` : ""}</span>`
+        ? `<span class="mv-card-video-info">조회수 ${fmt(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatVideoDate(r.openedAt))}` : ""}</span>`
         : "") +
       ((r.category || tags.length)
         ? `<span class="mv-card-meta">` +
@@ -797,6 +802,7 @@
       layoutId: state.layoutId,
       chatSide: side,
       mainHighQuality: state.mainHighQuality,
+      chatEnabled: !state.startWithoutChat,
     };
     // 기존 멀티뷰를 고치는 중이면 그 id 를 이어 쓰고, 새로 시작하면 새 id 를 만든다.
     const handoffId = state.handoffId || newHandoffId();
@@ -969,6 +975,9 @@
   $("mvMainHighQuality")?.addEventListener("change", (event) => {
     state.mainHighQuality = event.target.checked;
   });
+  $("mvStartWithoutChat")?.addEventListener("change", (event) => {
+    state.startWithoutChat = event.target.checked;
+  });
 
   // 고른 채널 순서 바꾸기(맨 위가 메인).
   let dragId = "";
@@ -1036,6 +1045,9 @@
           state.mainHighQuality = stored.mainHighQuality !== false;
           const box = $("mvMainHighQuality");
           if (box) box.checked = state.mainHighQuality;
+          state.startWithoutChat = stored.chatEnabled === false;
+          const chatBox = $("mvStartWithoutChat");
+          if (chatBox) chatBox.checked = state.startWithoutChat;
         }
       } catch {}
     }

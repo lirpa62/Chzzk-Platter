@@ -258,6 +258,13 @@
     (/^video:\d+$/.test(multiviewVideoSlot) && multiviewVideoNo === multiviewVideoSlot.slice(6)
       ? multiviewVideoSlot
       : "");
+  const multiviewRoot = document.documentElement;
+  if (IS_MULTIVIEW_FRAME || IS_MULTIVIEW_CHAT_FRAME)
+    multiviewRoot.classList.add("cheese-multiview-no-root-scroll");
+  if (IS_MULTIVIEW_FRAME) multiviewRoot.classList.add("cheese-multiview-frame");
+  if (IS_MULTIVIEW_CHAT_FRAME) multiviewRoot.classList.add("cheese-multiview-chat-frame");
+  if (IS_MULTIVIEW_FRAME && multiviewVideoNo)
+    multiviewRoot.classList.add("cheese-multiview-vod-frame");
   const MULTIVIEW_CHAT_GENERATION = Number(
     MULTIVIEW_PARAMS.get("cheeseMultiChatGeneration"),
   );
@@ -22484,7 +22491,8 @@
       // 해시가 바뀌어도 걸리도록 부분 일치로 잡는다.
       style.textContent =
         "[class*='_container_']{min-width:0 !important;}" +
-        "html,body{min-width:0 !important;}";
+        "html,body{box-sizing:border-box !important;height:100% !important;" +
+        "max-width:100% !important;min-width:0 !important;width:100% !important;}";
       (document.head || document.documentElement).appendChild(style);
     };
 

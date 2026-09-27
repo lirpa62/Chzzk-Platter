@@ -96,6 +96,7 @@
           aria-expanded="false"
         >
           <span class="mv-pop-label">볼륨</span>
+          <span class="mv-volume-state-icon" id="mvVolumeStatusIcon" aria-hidden="true"></span>
           <span class="mv-pop-value" id="mvVolumeValue">-</span>
         </button>
         <div class="mv-pop-panel mv-volume-pop" id="mvVolumePop" hidden></div>
@@ -336,6 +337,30 @@
           ></iframe>
           <div class="mv-vod-chat-feed" id="mvVodChatFeed" hidden>
             <div class="mv-vod-chat-scale" role="group" aria-label="채팅 크기 조절">
+              <div class="mv-vod-badge-chat-anchor" id="mvVodBadgeChatAnchor">
+                <button type="button" class="mv-badge-chat-trigger is-empty" id="mvVodBadgeChatTrigger"
+                  aria-expanded="false" aria-haspopup="dialog" aria-controls="mvVodBadgeChatPopover">
+                  <span class="mv-badge-chat-badges" id="mvVodBadgeChatBadges" aria-hidden="true"></span>
+                  <svg class="mv-badge-chat-compact-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v7.5a2.25 2.25 0 0 1-2.25 2.25H10l-4.4 3.3a.75.75 0 0 1-1.2-.6v-2.83a2.25 2.25 0 0 1-1.4-2.12v-7.5A2.25 2.25 0 0 1 5.25 4.5Z"></path></svg>
+                  <span class="mv-badge-chat-label" id="mvVodBadgeChatLabel">새 채팅 없음</span>
+                  <span class="mv-badge-chat-count" id="mvVodBadgeChatCount" hidden></span>
+                </button>
+                <section class="mv-badge-chat-popover" id="mvVodBadgeChatPopover"
+                  role="dialog" aria-label="배지 채팅 모아보기" hidden>
+                  <header class="mv-badge-chat-popover-head">
+                    <strong>배지 채팅 모아보기</strong>
+                    <button type="button" class="mv-badge-chat-popover-close" id="mvVodBadgeChatClose"
+                      aria-label="배지 채팅 팝오버 닫기">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>
+                    </button>
+                  </header>
+                  <div class="mv-badge-chat-empty" id="mvVodBadgeChatEmpty">배지 채팅 없음</div>
+                  <div class="mv-badge-chat-list" id="mvVodBadgeChatList" role="log" aria-live="off"></div>
+                  <div class="mv-badge-chat-resize" id="mvVodBadgeChatResize" role="separator"
+                    aria-orientation="horizontal" aria-label="배지 채팅 팝오버 높이 조절"
+                    aria-valuemin="120" aria-valuemax="720" aria-valuenow="320" tabindex="0"></div>
+                </section>
+              </div>
               <button type="button" id="mvVodChatScaleDown" aria-label="채팅 크기 마이너스" disabled>
                 <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.196 7c0-.419.34-.758.758-.758h10.092a.758.758 0 0 1 0 1.516H1.954A.758.758 0 0 1 1.196 7Z" clip-rule="evenodd"></path></svg>
               </button>
@@ -346,8 +371,8 @@
             </div>
             <div class="mv-vod-chat-meta" id="mvVodChatMeta">
               <span id="mvVodChatClock" aria-live="off"></span>
-              <button type="button" class="mv-custom-tooltip" id="mvVodChatTimeMode" aria-pressed="false"
-                aria-label="실제 방송 시각으로 전환" data-tooltip="재생 시간과 실제 방송 시각 전환">재생 시간</button>
+              <button type="button" class="mv-custom-tooltip" id="mvVodChatTimeMode" aria-pressed="true"
+                aria-label="재생 시간으로 전환" data-tooltip="재생 시간과 실제 방송 시각 전환">방송 시각</button>
             </div>
             <div class="mv-vod-chat-list" id="mvVodChatList" role="log" aria-live="off"></div>
           </div>
@@ -376,6 +401,7 @@
     <script src="src/multiviewTooltip.js"></script>
     <script src="src/achievementBadgeMap.js"></script>
     <script src="src/multiviewVodChat.js"></script>
+    <script src="src/multiviewBadgeChat.js"></script>
     <script src="src/multiviewWatch.js"></script>
   </body>
 </html>

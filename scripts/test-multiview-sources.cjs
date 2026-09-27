@@ -44,6 +44,24 @@ async function test(name, run) {
     assert.equal(SOURCES.formatRelativeTime(1_000_000_000_000, 1_000_000_120_000), "2분 전");
   });
 
+  await test("다시보기 날짜는 24시간까지 상대 시각, 이후 MM.DD로 표시한다", async () => {
+    const now = new Date(2026, 8, 27, 12).getTime();
+    assert.equal(SOURCES.formatVideoDate(now - 23 * 60 * 60 * 1000, now), "23시간 전");
+    const yesterday = new Date(now - 24 * 60 * 60 * 1000);
+    assert.equal(SOURCES.formatVideoDate(yesterday.getTime(), now),
+      `${String(yesterday.getMonth() + 1).padStart(2, "0")}.${String(yesterday.getDate()).padStart(2, "0")}`);
+  });
+
+  await test("다시보기 시청 위치를 보존하고 진행률을 계산한다", async () => {
+    const video = SOURCES.normalizeVideo({
+      video: { videoNo: "123", duration: 3600, watchTimeline: { currentTime: 1200 } },
+    });
+    assert.equal(video.watchTimeline.currentTime, 1200);
+    assert.ok(Math.abs(SOURCES.getWatchTimelinePercent(video) - 100 / 3) < 1e-9);
+    assert.equal(SOURCES.getWatchTimelinePercent({ watchTimeline: "00:15", duration: 60 }), 25);
+    assert.equal(SOURCES.getWatchTimelinePercent({ watchTimeline: 0, duration: 0 }), null);
+  });
+
   await test("재정렬 컨트롤은 기존 검색 클래스와 설정 항목을 제공한다", async () => {
     const markup = SOURCES.videoSearchControlsMarkup("setup");
     assert.match(markup, /cheese-search-control cheese-search-sort-trigger/);

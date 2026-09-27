@@ -4,7 +4,7 @@
 
   const PAGE_SIZE = 50;
   const LOOKAHEAD_MS = 12000;
-  const SEEK_HISTORY_MS = 45000;
+  const SEEK_HISTORY_MS = 90000;
   const MAX_BUFFER_MESSAGES = 2000;
   const MAX_PAGES_PER_PUMP = 2;
   const MAX_MESSAGE_TEXT_LENGTH = 2000;
@@ -332,9 +332,11 @@
       };
     }
     if (type !== 10) return null;
-    const donationType = String(extras.donationType || "CHAT").toUpperCase();
+    const donationType = String(extras.donationType || extras.donation_type || "CHAT").toUpperCase();
     const mission = donationType.startsWith("MISSION");
-    const amount = Math.max(0, Number(extras.payAmount) || 0);
+    const amount = Math.max(0, Number(extras.payAmount ?? extras.pay_amount) || 0);
+    const durationTime = Math.max(0, Number(extras.durationTime ?? extras.duration_time) || 0);
+    const missionTimeSeconds = mission ? durationTime : 0;
     return {
       kind: mission ? "mission" : donationType === "VIDEO" ? "video" :
         donationType === "PARTY" ? "party" : "donation",
@@ -342,8 +344,14 @@
       amount,
       tone: donationTone(amount),
       partyName: String(extras.partyName || "").slice(0, 80),
-      missionTitle: String(extras.missionTitle || extras.missionName || extras.title || "").slice(0, 160),
-      missionDonationType: String(extras.missionDonationType || "").slice(0, 40),
+      missionTitle: String(
+        extras.missionTitle || extras.mission_text || extras.missionText ||
+        extras.missionName || extras.title || "",
+      ).slice(0, 160),
+      missionDonationType: String(
+        extras.missionDonationType || extras.mission_donation_type || "",
+      ).slice(0, 40),
+      missionTimeSeconds,
     };
   }
 
@@ -495,6 +503,7 @@
         generation,
         status,
         error,
+        complete: noMore,
         currentTime,
         loadedThrough: loadedThrough / 1000,
         fetching,

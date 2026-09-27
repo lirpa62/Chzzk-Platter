@@ -171,6 +171,63 @@
     return `${Math.floor(seconds / (365 * 86400))}년 전`;
   }
 
+  function formatVideoDate(value, now = Date.now()) {
+    let timestamp = Number(value) || 0;
+    if (timestamp > 0 && timestamp < 1000000000000) timestamp *= 1000;
+    if (!timestamp) return "";
+    if (Math.max(0, now - timestamp) < 86400000) {
+      return formatRelativeTime(timestamp, now);
+    }
+    const date = new Date(timestamp);
+    return `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function getWatchTimelinePercent(video) {
+    if (video?.watchTimeline == null) return null;
+    const durationSeconds = Number(video?.duration || 0);
+    if (!durationSeconds) return null;
+    const watchedSeconds = normalizeWatchTimelineSeconds(
+      video.watchTimeline,
+      durationSeconds,
+    );
+    return watchedSeconds === null ? null : (watchedSeconds / durationSeconds) * 100;
+  }
+
+  function normalizeWatchTimelineSeconds(value, durationSeconds) {
+    if (typeof value === "number") return normalizeWatchTimelineNumber(value, durationSeconds);
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (/^\d+(?::\d+){1,2}$/.test(trimmed)) {
+        return trimmed.split(":").map(Number).reduce((total, part) => total * 60 + part, 0);
+      }
+      const numeric = Number(trimmed);
+      return Number.isFinite(numeric)
+        ? normalizeWatchTimelineNumber(numeric, durationSeconds)
+        : null;
+    }
+    if (value && typeof value === "object") {
+      for (const key of [
+        "watchTime", "watchTimeSec", "watchTimeline", "lastWatchTime",
+        "currentTime", "currentTimestamp", "playTime", "position", "seconds", "time",
+      ]) {
+        if (value[key] == null) continue;
+        const normalized = normalizeWatchTimelineSeconds(value[key], durationSeconds);
+        if (normalized !== null) return normalized;
+      }
+    }
+    return null;
+  }
+
+  function normalizeWatchTimelineNumber(value, durationSeconds) {
+    if (!Number.isFinite(value) || value < 0) return null;
+    if (value <= 1) return value * durationSeconds;
+    if (value > durationSeconds && value / 1000 <= durationSeconds * 1.1) {
+      return value / 1000;
+    }
+    return value;
+  }
+
   function sortRows(rows, mode = "viewers", preserveServerOrder = false) {
     if (!Array.isArray(rows)) return [];
     if (mode === "custom") return [...rows];
@@ -342,6 +399,7 @@
         liveOpenedAt(video?.publishDateAt || video?.createdDate || entry?.publishDateAt),
       adult: isAdult(video?.adult) || isAdult(video?.adultFlag) || isAdult(entry?.adult),
       duration: Number(video?.duration) || 0,
+      watchTimeline: video?.watchTimeline ?? entry?.watchTimeline ?? null,
       videoType: String(video?.videoType || entry?.videoType || "REPLAY").toUpperCase(),
     };
   }
@@ -1507,6 +1565,8 @@
     formatCompactCount,
     formatVideoDuration,
     formatRelativeTime,
+    formatVideoDate,
+    getWatchTimelinePercent,
     loadVideoSearchSettings,
     saveVideoSearchSettings,
     API,

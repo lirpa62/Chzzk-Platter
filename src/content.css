@@ -11709,6 +11709,21 @@ html.cheese-popup-player-frame
   height: 100vh !important;
 }
 
+/* 멀티뷰 iframe 루트는 스크롤하지 않는다. 콘텐츠 목록은 각 패널 내부에서 스크롤한다. */
+html.cheese-popup-player-frame.cheese-multiview-frame.cheese-multiview-no-root-scroll,
+html.cheese-popup-player-frame.cheese-multiview-frame.cheese-multiview-no-root-scroll body,
+html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-root-scroll,
+html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-root-scroll body {
+  overflow: hidden !important;
+}
+
+/* 다시보기 iframe은 플레이어 section이 자체 스크롤 컨테이너가 되지 않게 한다. */
+html.cheese-popup-player-frame.cheese-multiview-vod-frame
+  #layout-body
+  > section[class*="_container_"] {
+  overflow: hidden !important;
+}
+
 /* ── 팝업 안 우리 버튼 표시 정책 ──
    각 버튼을 옵션으로 켜고 끈다. 숨김은 '표시'만 막는 것이라 기능은 살아 있고
    단축키는 그대로 동작한다. 좁은 창을 고려해 자주 쓰는 셋(믹서·필터·따라잡기)만

@@ -248,7 +248,7 @@ const checks = [];
       }
       const channelVideos=p.match(/\\/service\\/v1\\/channels\\/([0-9a-f]{32})\\/videos$/);
       if(channelVideos)return {data:[{videoNo:'301',videoTitle:'채널 다시보기',thumbnailImageUrl:'https://example.invalid/channel_{type}.jpg',
-        readCount:1234,livePv:23000,publishDateAt:Date.now()-2*60*60*1000,duration:3600}]};
+        readCount:1234,livePv:23000,publishDateAt:Date.now()-48*60*60*1000,duration:3600,watchTimeline:1200}]};
       if(p.endsWith('/subscribe/channels'))return {data:[]};
       if(p.endsWith('/service/v1/lives')){
         window.__livePageCalls++;
@@ -863,9 +863,11 @@ const checks = [];
      check(channelVod.querySelector('.mv-card-live-pv')?.textContent==='2.3만회 시청된 라이브'&&
        channelVod.querySelector('.mv-card-duration')?.textContent==='1:00:00',
        '다시보기 썸네일의 livePv/duration 정보가 없다');
+     check(channelVod.querySelector('.mv-card-watch-timeline > span')?.style.width==='33.33%',
+       '선택 페이지 다시보기 썸네일의 시청 위치 막대가 없다');
      check(channelVod.querySelector('.mv-card-video-info')?.textContent.includes('조회수 1,234회')&&
-       channelVod.querySelector('.mv-card-video-info')?.textContent.includes('시간 전'),
-       '다시보기의 조회수·상대 시간이 채널명 아래에 없다');
+       /\\d{2}\\.\\d{2}/.test(channelVod.querySelector('.mv-card-video-info')?.textContent||''),
+       '다시보기의 조회수·MM.DD 날짜가 채널명 아래에 없다');
      const selectedChannelTab=document.querySelector('[data-mv-video-channel-back]');
      check(selectedChannelTab.textContent.trim()==='선택한 채널 목록'&&selectedChannelTab.getAttribute('aria-pressed')==='true',
        '선택한 채널 다시보기 탭이 선택 상태로 표시되지 않는다');
@@ -1123,7 +1125,7 @@ const checks = [];
         const quickChannelVideos=parsed.pathname.match(/\\/service\\/v1\\/channels\\/([0-9a-f]{32})\\/videos$/);
         if(quickChannelVideos)return {ok:true,content:{data:[{videoNo:'301',
           videoTitle:'채널 다시보기',thumbnailImageUrl:'https://example.invalid/channel_{type}.jpg',
-          readCount:1234,livePv:23000,publishDateAt:Date.now()-2*60*60*1000,duration:3600}]}};
+          readCount:1234,livePv:23000,publishDateAt:Date.now()-48*60*60*1000,duration:3600,watchTimeline:1200}]}};
         if(parsed.pathname.endsWith('/service/v1/lives')){
           window.__quickLiveCalls++;
           window.__quickLiveSortRequests.push(parsed.searchParams.get('sortType'));
@@ -1373,7 +1375,16 @@ const checks = [];
        '보조 다시보기의 음소거·화질 정책이 올바르지 않다');
      check(window.__mvState.chosen.some(channel=>channel.mediaType!=='video'),
        '라이브와 다시보기 혼합 구성이 되지 않았다');
-     quick.querySelector('[data-mv-quick-video-source="popular"]').click();await wait(200);
+     const quickPopular=quick.querySelector('[data-mv-quick-video-source="popular"]');
+     const quickTooltip=document.getElementById('mvTooltip');
+     quickPopular.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+     check(!quickTooltip.hidden,'Quick 인기 정렬 버튼에 커스텀 툴팁이 표시되지 않는다');
+     quickPopular.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
+     check(quickTooltip.hidden,'Quick 인기 정렬 버튼에서 포인터를 놓아도 툴팁이 남아 있다');
+     quickPopular.click();
+     check(quickTooltip.hidden,'Quick 인기 정렬 버튼을 클릭해도 커스텀 툴팁이 남아 있다');
+     await wait(200);
+     check(quickTooltip.hidden,'Quick 다시보기 목록 갱신 뒤에도 커스텀 툴팁이 남아 있다');
      quick.querySelector('[data-mv-quick-add="video:201"]')?.click();
      await wait(200);
      check(quick.querySelector('[data-mv-quick-add="video:203"] .mv-card-live')?.textContent==='업로드',
@@ -1411,8 +1422,11 @@ const checks = [];
      const quickChannelVod=quick.querySelector('[data-mv-quick-add="video:301"]');
      check(quickChannelVod.querySelector('.mv-card-live-pv')?.textContent==='2.3만회 시청된 라이브'&&
        quickChannelVod.querySelector('.mv-card-duration')?.textContent==='1:00:00'&&
-       quickChannelVod.querySelector('.mv-quick-card-video-info')?.textContent.includes('조회수 1,234회'),
+       quickChannelVod.querySelector('.mv-quick-card-video-info')?.textContent.includes('조회수 1,234회')&&
+       /\\d{2}\\.\\d{2}/.test(quickChannelVod.querySelector('.mv-quick-card-video-info')?.textContent||''),
        'Quick 다시보기 카드의 조회수·livePv·duration 정보가 없다');
+     check(quickChannelVod.querySelector('.mv-quick-card-watch-timeline > span')?.style.width==='33.33%',
+       '시청 페이지 다시보기 썸네일의 시청 위치 막대가 없다');
      const selectedQuickTab=quick.querySelector('[data-mv-quick-video-channel-back]');
      check(selectedQuickTab.textContent.trim()==='선택한 채널 목록'&&selectedQuickTab.getAttribute('aria-pressed')==='true',
        'Quick 선택 채널 탭이 선택 상태로 표시되지 않는다');
@@ -3216,6 +3230,11 @@ const checks = [];
      await wait(100);
      mute=document.querySelector('[data-mv-vol-master-mute]');
      check(mute.getAttribute('aria-pressed')==='true','전체 음소거 상태가 표시되지 않았다');
+     check(document.getElementById('mvVolumeValue').textContent==='전체 음소거',
+       '상단 볼륨 버튼에 전체 음소거 상태가 표시되지 않았다');
+     check(document.getElementById('mvVolumeBtn').classList.contains('is-muted')&&
+       document.getElementById('mvVolumeStatusIcon').classList.contains('is-muted'),
+       '상단 볼륨 버튼의 음소거 아이콘 표시가 없다');
      check(window.sentMsgs.length>0&&window.sentMsgs.every(m=>m.muted===true),
        '전체 음소거 지시가 모든 채널에 전달되지 않았다');
      window.sentMsgs=[];
@@ -3229,6 +3248,23 @@ const checks = [];
        '메인만 듣기 상태가 유지되지 않았다');
      check(Number(pop.querySelector('[data-mv-vol-master]').value)===50,
        '전체 음소거가 전체 볼륨 슬라이더 값을 변경했다');
+     document.getElementById('mvVolFocus').click();
+     await wait(100);
+     let auxMute=[...pop.querySelectorAll('[data-mv-vol-mute]')]
+       .find(button=>button.dataset.mvVolMute!==mainId);
+     check(auxMute,'보조 채널 음소거 버튼이 없다');
+     if(auxMute){
+       auxMute.click();
+       await wait(100);
+       auxMute=[...pop.querySelectorAll('[data-mv-vol-mute]')]
+         .find(button=>button.dataset.mvVolMute!==mainId);
+       auxMute.click();
+       await wait(100);
+       check(document.getElementById('mvVolumeValue').textContent==='일부 음소거',
+         '개별 채널 음소거가 상단 볼륨 버튼에 표시되지 않았다');
+     }
+     document.getElementById('mvVolFocus').click();
+     await wait(100);
      check(window.frameSrcs.filter(s=>s.includes('cheeseMulti=1')).length===before,
        '전체 음소거로 iframe 이 다시 로드됐다');`,
   );

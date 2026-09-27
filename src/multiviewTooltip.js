@@ -12,6 +12,7 @@
   let hovered = null;
   let focused = null;
   let active = null;
+  let dismissed = null;
   let addedDescription = false;
 
   function tooltipAllowed(target) {
@@ -90,7 +91,7 @@
 
   function refresh() {
     const target = focused || hovered;
-    if (!target?.isConnected) return hide();
+    if (!target?.isConnected || target === dismissed) return hide();
     show(target);
   }
 
@@ -102,20 +103,33 @@
     const leaving = tooltipTarget(event.target);
     if (leaving && leaving === hovered && !leaving.contains(event.relatedTarget)) {
       hovered = null;
+      if (dismissed === leaving) dismissed = null;
       refresh();
     }
   });
   document.addEventListener("focusin", (event) => {
-    focused = tooltipTarget(event.target);
+    const target = tooltipTarget(event.target);
+    if (target && target !== focused && target === dismissed) dismissed = null;
+    focused = target;
     refresh();
   });
   document.addEventListener("focusout", (event) => {
     const leaving = tooltipTarget(event.target);
     if (leaving && leaving === focused && !leaving.contains(event.relatedTarget)) {
       focused = null;
+      if (dismissed === leaving && hovered !== leaving) dismissed = null;
       refresh();
     }
   });
+  function dismissFromInteraction(event) {
+    const target = tooltipTarget(event.target);
+    if (!target || !target.matches("button, a, input, select, [role='button']")) return;
+    dismissed = target;
+    if (focused === target) focused = null;
+    hide();
+  }
+  document.addEventListener("pointerup", dismissFromInteraction, true);
+  document.addEventListener("click", dismissFromInteraction, true);
   document.addEventListener("scroll", () => active && position(active), true);
   window.addEventListener("resize", refresh);
 

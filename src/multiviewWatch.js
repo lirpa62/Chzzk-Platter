@@ -51,6 +51,7 @@
     mainId: "",
     chatChannelId: "",
     chatSide: "",
+    chatEnabled: true,
     mainHighQuality: true,
     // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
     chatFollowsMain: true,
@@ -264,7 +265,7 @@
   let chatPopoutFeedbackTimer = 0;
   let vodChatSourceId = "";
   let vodChatRenderSignature = "";
-  let vodChatTimeMode = "playback";
+  let vodChatTimeMode = "broadcast";
   let vodChatShowTime = false;
   let vodChatTimeFormat = "24h";
   let vodChatScalePercent = 100;
@@ -272,8 +273,334 @@
   let vodChatEmojiMapPromise = null;
   let vodChatEmojiRevision = 0;
   let vodNicknameColorsPromise = null;
+  const BADGE_CHAT_ROLES = new Set(["streamer", "manager", "operator", "partner"]);
+  const BADGE_CHAT_ROLE_BADGES = Object.freeze({
+    streamer: ["방장", "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"],
+    manager: ["매니저", "https://ssl.pstatic.net/static/nng/glive/icon/manager.png"],
+    operator: ["치지직 운영자", "https://ssl.pstatic.net/static/nng/glive/icon/owner.png"],
+    partner: ["파트너", "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png"],
+  });
+  const BADGE_CHAT_ROLE_BADGE_URLS = new Set(
+    Object.values(BADGE_CHAT_ROLE_BADGES).map(([, url]) => url),
+  );
+  const BADGE_CHAT_ROLE_BADGE_LABELS = new Set([
+    "방장", "매니저", "치지직 운영자", "파트너", "역할 배지",
+  ]);
+  const BADGE_CHAT_LIMIT = 150;
+  let vodBadgeChatOpen = false;
+  let vodBadgeChatResizeObserver = null;
+  let vodBadgeChatSignature = "reset";
+  let vodBadgeChatHeight = 320;
+  let vodBadgeChatResizeStart = null;
+  let vodBadgeChatLatestId = "";
+  let vodBadgeChatLastPlaybackTime = null;
+  let vodBadgeChatHasBaseline = false;
+  let vodBadgeChatPopupItems = [];
+  let vodBadgeChatPopupHasNewMessage = false;
+  const vodBadgeChatSeenIds = new Set();
+  let vodBadgeChatSettingsRevision = 0;
+  const MULTIVIEW_BADGE_CHAT_SETTINGS = [
+    "cheeseMultiviewBadgeChatButton",
+    "cheeseMultiviewBadgeChatHideEmptyButton",
+    "cheeseMultiviewBadgeChatHideChatBackground",
+    "cheeseMultiviewBadgeChatHideChatBorder",
+    "cheeseMultiviewBadgeChatHidePopupBackground",
+    "cheeseMultiviewBadgeChatHidePopupBorder",
+    "cheeseMultiviewBadgeChatHidePopupTime",
+    "cheeseMultiviewBadgeChatRoleBadgesOnly",
+    "cheeseMultiviewBadgeChatKeepPopupOpen",
+    "cheeseMultiviewBadgeChatPillGlowEnabled",
+    "cheeseMultiviewBadgeChatCompactPill",
+    "cheeseMultiviewBadgeChatHidePillButton",
+  ];
+  const vodBadgeChatSettings = {
+    hidePillButton: false,
+    hideEmptyButton: false,
+    hideChatBackground: false,
+    hideChatBorder: false,
+    hidePopupBackground: false,
+    hidePopupBorder: false,
+    hidePopupTime: false,
+    roleBadgesOnly: false,
+    keepPopupOpen: false,
+    pillGlowEnabled: true,
+    compactPill: false,
+  };
   const vodChatSession = globalThis.CheeseMultiviewVodChat.createSession({
     onChange: renderVodChat,
+  });
+  const vodBadgeChatAnchor = $("mvVodBadgeChatAnchor");
+  const vodBadgeChatTrigger = $("mvVodBadgeChatTrigger");
+  const vodBadgeChatPopover = $("mvVodBadgeChatPopover");
+  const vodBadgeChatList = $("mvVodBadgeChatList");
+  const vodBadgeChatLabel = $("mvVodBadgeChatLabel");
+  const vodBadgeChatBadges = $("mvVodBadgeChatBadges");
+  const vodBadgeChatCount = $("mvVodBadgeChatCount");
+  // 알림 버튼 순환·강조와 팝업 펼침 애니메이션은 라이브 채팅 프레임과 같은 코드를 쓴다.
+  const vodBadgeChatPill = vodBadgeChatTrigger && globalThis.CheeseMultiviewBadgeChat
+    ? globalThis.CheeseMultiviewBadgeChat.createBadgePill({
+      trigger: vodBadgeChatTrigger,
+      badges: vodBadgeChatBadges,
+      label: vodBadgeChatLabel,
+      count: vodBadgeChatCount,
+      classPrefix: "mv-badge-chat",
+    })
+    : null;
+  const vodBadgeChatMotion = vodBadgeChatPopover && globalThis.CheeseMultiviewBadgeChat
+    ? globalThis.CheeseMultiviewBadgeChat.createPopoverMotion(vodBadgeChatPopover)
+    : null;
+  const vodBadgeChatFontScaleControls = globalThis.CheeseMultiviewBadgeChat?.createFontScaleControls({
+    doc: document,
+    classPrefix: "mv-badge-chat",
+    onChange: (percent) => {
+      const scale = String(percent / 100);
+      vodBadgeChatPopover?.style.setProperty("--mv-badge-chat-font-scale", scale);
+      vodBadgeChatPopover?.style.setProperty("--mv-vod-chat-scale", scale);
+    },
+  });
+  const vodBadgeChatHeader = vodBadgeChatPopover?.querySelector(".mv-badge-chat-popover-head");
+  const vodBadgeChatCloseButton = $("mvVodBadgeChatClose");
+  if (vodBadgeChatHeader && vodBadgeChatFontScaleControls)
+    vodBadgeChatHeader.insertBefore(vodBadgeChatFontScaleControls.element, vodBadgeChatCloseButton);
+
+  function closeVodBadgeChatPopover(force = false) {
+    if (!force && vodBadgeChatSettings.keepPopupOpen && !vodBadgeChatSettings.hidePillButton) return;
+    const wasOpen = vodBadgeChatOpen;
+    vodBadgeChatOpen = false;
+    vodBadgeChatMotion?.close(force || !wasOpen);
+    vodBadgeChatTrigger?.setAttribute("aria-expanded", "false");
+    vodBadgeChatResizeObserver?.disconnect();
+    vodBadgeChatResizeObserver = null;
+    document.removeEventListener("scroll", positionVodBadgeChatPopover, true);
+    window.removeEventListener("resize", positionVodBadgeChatPopover);
+  }
+
+  function positionVodBadgeChatPopover() {
+    if (!vodBadgeChatOpen || !vodBadgeChatTrigger || !vodBadgeChatPopover) return;
+    const anchor = vodBadgeChatTrigger.getBoundingClientRect();
+    const margin = 8;
+    const chatPanel = vodBadgeChatAnchor?.closest(".mv-chat");
+    const chatBounds = chatPanel?.getBoundingClientRect();
+    const width = Math.max(0, Math.min(
+      chatBounds?.width || 370,
+      window.innerWidth - margin * 2,
+    ));
+    vodBadgeChatPopover.style.width = `${width}px`;
+    const maxHeight = Math.max(120, Math.min(720, window.innerHeight - margin * 2));
+    vodBadgeChatHeight = Math.min(vodBadgeChatHeight, maxHeight);
+    vodBadgeChatPopover.style.height = `${vodBadgeChatHeight}px`;
+    // ⚠ 펼침 애니메이션(scaleY) 중에도 맞는 높이를 쓰도록 변형 없는 레이아웃 크기를 읽는다.
+    const panel = { height: vodBadgeChatPopover.offsetHeight };
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const left = Math.min(maxLeft, Math.max(margin, chatBounds?.left ?? anchor.left));
+    let top = anchor.bottom + 6;
+    const above = top + panel.height > window.innerHeight - margin;
+    if (above) top = anchor.top - panel.height - 6;
+    top = Math.min(
+      Math.max(margin, window.innerHeight - panel.height - margin),
+      Math.max(margin, top),
+    );
+    vodBadgeChatPopover.classList.toggle("is-above", above);
+    vodBadgeChatPopover.style.left = `${left}px`;
+    vodBadgeChatPopover.style.top = `${top}px`;
+    const resize = $("mvVodBadgeChatResize");
+    if (resize) resize.setAttribute("aria-valuenow", String(Math.round(vodBadgeChatHeight)));
+  }
+
+  function renderVodBadgeChat(visible) {
+    const entries = visible.filter((message) =>
+      Array.isArray(message.roles) && message.roles.some((role) => BADGE_CHAT_ROLES.has(role)),
+    ).slice(-BADGE_CHAT_LIMIT);
+    if (vodBadgeChatOpen) {
+      entries.forEach((message) => vodBadgeChatSeenIds.add(message.id));
+      while (vodBadgeChatSeenIds.size > 2000)
+        vodBadgeChatSeenIds.delete(vodBadgeChatSeenIds.values().next().value);
+    }
+    const unreadEntries = entries.filter((message) => !vodBadgeChatSeenIds.has(message.id));
+    const actors = globalThis.CheeseMultiviewBadgeChat?.collectPillActors(unreadEntries) || [];
+    vodBadgeChatPill?.render({
+      actors,
+      compact: vodBadgeChatSettings.compactPill,
+      glow: vodBadgeChatSettings.pillGlowEnabled,
+    });
+    if (vodBadgeChatTrigger) {
+      vodBadgeChatTrigger.hidden = vodBadgeChatSettings.hidePillButton ||
+        (vodBadgeChatSettings.hideEmptyButton && !actors.length);
+    }
+    const playbackTime = vodChatSession.snapshot().currentTime;
+    const latestId = entries.at(-1)?.id || "";
+    const movedForward = vodBadgeChatLastPlaybackTime === null || playbackTime >= vodBadgeChatLastPlaybackTime;
+    const hasNewVisibleChat = vodBadgeChatHasBaseline && movedForward && latestId && latestId !== vodBadgeChatLatestId;
+    vodBadgeChatPopupHasNewMessage = Boolean(hasNewVisibleChat);
+    vodBadgeChatLatestId = latestId;
+    vodBadgeChatLastPlaybackTime = playbackTime;
+    vodBadgeChatHasBaseline = true;
+    const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const signature = `${vodChatTimeMode}:${vodChatShowTime}:${vodChatTimeFormat}:` +
+      `${vodBadgeChatSettings.hidePopupBackground}:${vodBadgeChatSettings.hidePopupBorder}:` +
+      `${vodBadgeChatSettings.hidePopupTime}:${vodBadgeChatSettings.roleBadgesOnly}:` +
+      `${vodChatEmojiRevision}:${theme}:` +
+      entries.map((message) => message.id).join("\u001f");
+    if (hasNewVisibleChat && !vodBadgeChatOpen && !vodBadgeChatSettings.keepPopupOpen)
+      vodBadgeChatPill?.attention();
+    if (vodBadgeChatSettings.keepPopupOpen && !vodBadgeChatSettings.hidePillButton && entries.length && !vodBadgeChatOpen) {
+      openVodBadgeChatPopover(true);
+      return;
+    }
+    if (signature === vodBadgeChatSignature) return;
+    vodBadgeChatSignature = signature;
+    const empty = $("mvVodBadgeChatEmpty");
+    if (empty) empty.hidden = entries.length > 0;
+    if (!vodBadgeChatList) return;
+    const nearBottom = Math.abs(vodBadgeChatList.scrollTop) < 32;
+    vodBadgeChatPopupItems = entries.map((message) => ({
+      id: String(message.id),
+      nickname: String(message.nickname || "알 수 없음"),
+      roles: message.roles.filter((role) => BADGE_CHAT_ROLES.has(role)),
+      html: renderVodChatRow(message, vodChatTimeMode, !vodBadgeChatSettings.hidePopupTime, {
+        hideBackground: vodBadgeChatSettings.hidePopupBackground,
+        hideBorder: vodBadgeChatSettings.hidePopupBorder,
+        roleBadgesOnly: vodBadgeChatSettings.roleBadgesOnly,
+      }),
+    }));
+    vodBadgeChatList.innerHTML = vodBadgeChatPopupItems.slice().reverse()
+      .map((item) => item.html)
+      .join("");
+    if (nearBottom) vodBadgeChatList.scrollTop = 0;
+  }
+
+  function openVodBadgeChatPopover(open) {
+    if (!open) {
+      closeVodBadgeChatPopover();
+      return;
+    }
+    if (vodBadgeChatSettings.hidePillButton) return;
+    vodBadgeChatPill?.clearAttention();
+    vodBadgeChatOpen = open;
+    vodBadgeChatMotion?.open();
+    vodBadgeChatTrigger?.setAttribute("aria-expanded", String(open));
+    if (open) {
+      const snapshot = vodChatSession.snapshot();
+      vodChatSession.visible(snapshot.currentTime, 120)
+        .filter((message) => Array.isArray(message.roles) && message.roles.some((role) => BADGE_CHAT_ROLES.has(role)))
+        .forEach((message) => vodBadgeChatSeenIds.add(message.id));
+      vodBadgeChatSignature = "reset";
+      positionVodBadgeChatPopover();
+      renderVodBadgeChat(vodChatSession.visible(snapshot.currentTime, 120));
+      // 새로 열 때는 가장 최근 채팅(아래, column-reverse 라 scrollTop 0)에서 시작한다.
+      if (vodBadgeChatList) vodBadgeChatList.scrollTop = 0;
+      const chatPanel = vodBadgeChatAnchor?.closest(".mv-chat");
+      if (chatPanel && window.ResizeObserver) {
+        vodBadgeChatResizeObserver = new window.ResizeObserver(positionVodBadgeChatPopover);
+        vodBadgeChatResizeObserver.observe(chatPanel);
+      }
+      document.addEventListener("scroll", positionVodBadgeChatPopover, true);
+      window.addEventListener("resize", positionVodBadgeChatPopover);
+    }
+  }
+
+  function applyMultiviewBadgeChatSettings(values = {}) {
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePillButton"))
+      vodBadgeChatSettings.hidePillButton = values.cheeseMultiviewBadgeChatHidePillButton === true;
+    else if (Object.hasOwn(values, "cheeseMultiviewBadgeChatButton"))
+      vodBadgeChatSettings.hidePillButton = values.cheeseMultiviewBadgeChatButton === false;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideEmptyButton"))
+      vodBadgeChatSettings.hideEmptyButton = values.cheeseMultiviewBadgeChatHideEmptyButton === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideChatBackground"))
+      vodBadgeChatSettings.hideChatBackground = values.cheeseMultiviewBadgeChatHideChatBackground === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideChatBorder"))
+      vodBadgeChatSettings.hideChatBorder = values.cheeseMultiviewBadgeChatHideChatBorder === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupBackground"))
+      vodBadgeChatSettings.hidePopupBackground = values.cheeseMultiviewBadgeChatHidePopupBackground === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupBorder"))
+      vodBadgeChatSettings.hidePopupBorder = values.cheeseMultiviewBadgeChatHidePopupBorder === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupTime"))
+      vodBadgeChatSettings.hidePopupTime = values.cheeseMultiviewBadgeChatHidePopupTime === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatRoleBadgesOnly"))
+      vodBadgeChatSettings.roleBadgesOnly = values.cheeseMultiviewBadgeChatRoleBadgesOnly === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatKeepPopupOpen"))
+      vodBadgeChatSettings.keepPopupOpen = values.cheeseMultiviewBadgeChatKeepPopupOpen === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatPillGlowEnabled"))
+      vodBadgeChatSettings.pillGlowEnabled = values.cheeseMultiviewBadgeChatPillGlowEnabled !== false;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatCompactPill"))
+      vodBadgeChatSettings.compactPill = values.cheeseMultiviewBadgeChatCompactPill === true;
+    if (vodBadgeChatSettings.hidePillButton) vodBadgeChatSettings.keepPopupOpen = false;
+    const closeButton = $("mvVodBadgeChatClose");
+    if (closeButton) closeButton.disabled = vodBadgeChatSettings.keepPopupOpen;
+    vodBadgeChatPopover?.classList.toggle("is-locked-open", vodBadgeChatSettings.keepPopupOpen);
+    document.documentElement.classList.toggle("cheese-mv-badge-no-chat-bg", vodBadgeChatSettings.hideChatBackground);
+    document.documentElement.classList.toggle("cheese-mv-badge-no-chat-border", vodBadgeChatSettings.hideChatBorder);
+    if (vodBadgeChatSettings.hidePillButton) closeVodBadgeChatPopover(true);
+    vodBadgeChatSignature = "reset";
+    renderVodChat();
+  }
+
+  const initialVodBadgeChatSettingsRevision = vodBadgeChatSettingsRevision;
+  chrome.storage.local.get(MULTIVIEW_BADGE_CHAT_SETTINGS)
+    .then((values) => {
+      if (initialVodBadgeChatSettingsRevision === vodBadgeChatSettingsRevision)
+        applyMultiviewBadgeChatSettings(values);
+    })
+    .catch(() => {});
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    const values = {};
+    MULTIVIEW_BADGE_CHAT_SETTINGS.forEach((key) => {
+      if (changes[key]) values[key] = changes[key].newValue;
+    });
+    if (Object.keys(values).length) {
+      vodBadgeChatSettingsRevision += 1;
+      applyMultiviewBadgeChatSettings(values);
+    }
+  });
+
+  const vodBadgeChatResize = $("mvVodBadgeChatResize");
+  vodBadgeChatResize?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    vodBadgeChatResizeStart = {
+      y: event.clientY,
+      height: vodBadgeChatHeight,
+      top: Number.parseFloat(vodBadgeChatPopover.style.top) || 8,
+      pointerId: event.pointerId,
+    };
+    vodBadgeChatResize.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  vodBadgeChatResize?.addEventListener("pointermove", (event) => {
+    if (!vodBadgeChatResizeStart || vodBadgeChatResizeStart.pointerId !== event.pointerId) return;
+    const maxHeight = Math.max(120, Math.min(720, window.innerHeight - vodBadgeChatResizeStart.top - 8));
+    vodBadgeChatHeight = Math.max(120, Math.min(maxHeight,
+      vodBadgeChatResizeStart.height + event.clientY - vodBadgeChatResizeStart.y));
+    vodBadgeChatPopover.style.height = `${vodBadgeChatHeight}px`;
+    vodBadgeChatResize.setAttribute("aria-valuenow", String(Math.round(vodBadgeChatHeight)));
+  });
+  const stopVodBadgeChatResize = (event) => {
+    if (vodBadgeChatResizeStart?.pointerId === event.pointerId) vodBadgeChatResizeStart = null;
+  };
+  vodBadgeChatResize?.addEventListener("pointerup", stopVodBadgeChatResize);
+  vodBadgeChatResize?.addEventListener("pointercancel", stopVodBadgeChatResize);
+  vodBadgeChatResize?.addEventListener("lostpointercapture", stopVodBadgeChatResize);
+  vodBadgeChatResize?.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const maxHeight = Math.max(120, Math.min(720, window.innerHeight - 16));
+    vodBadgeChatHeight = Math.max(120, Math.min(maxHeight,
+      vodBadgeChatHeight + (event.key === "ArrowUp" ? 24 : -24)));
+    positionVodBadgeChatPopover();
+  });
+
+  vodBadgeChatTrigger?.addEventListener("click", () => {
+    if (vodBadgeChatSettings.keepPopupOpen && vodBadgeChatOpen) return;
+    openVodBadgeChatPopover(!vodBadgeChatOpen);
+  });
+  $("mvVodBadgeChatClose")?.addEventListener("click", () => closeVodBadgeChatPopover());
+  document.addEventListener("pointerdown", (event) => {
+    if (vodBadgeChatOpen && !vodBadgeChatSettings.keepPopupOpen && !vodBadgeChatAnchor?.contains(event.target))
+      closeVodBadgeChatPopover();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && vodBadgeChatOpen && !vodBadgeChatSettings.keepPopupOpen)
+      closeVodBadgeChatPopover();
   });
   const vodChatTimeModeButton = $("mvVodChatTimeMode");
   vodChatTimeModeButton?.addEventListener("click", () => {
@@ -283,20 +610,25 @@
   const vodChatScaleDownButton = $("mvVodChatScaleDown");
   const vodChatScaleUpButton = $("mvVodChatScaleUp");
   const vodChatScaleValue = $("mvVodChatScaleValue");
+  const VOD_CHAT_SCALE_STEPS = Object.freeze([100, 125, 150, 175]);
   function reflectVodChatScale() {
     const feed = $("mvVodChatFeed");
     feed?.style.setProperty("--mv-vod-chat-scale", String(vodChatScalePercent / 100));
     if (vodChatScaleValue) vodChatScaleValue.textContent = `${vodChatScalePercent}%`;
     if (vodChatScaleDownButton) vodChatScaleDownButton.disabled = vodChatScalePercent <= 100;
-    if (vodChatScaleUpButton) vodChatScaleUpButton.disabled = vodChatScalePercent >= 200;
+    if (vodChatScaleUpButton) vodChatScaleUpButton.disabled = vodChatScalePercent >= 175;
+  }
+  function stepVodChatScale(direction) {
+    const currentIndex = VOD_CHAT_SCALE_STEPS.indexOf(vodChatScalePercent);
+    const nextIndex = Math.max(0, Math.min(VOD_CHAT_SCALE_STEPS.length - 1, currentIndex + direction));
+    vodChatScalePercent = VOD_CHAT_SCALE_STEPS[nextIndex];
+    reflectVodChatScale();
   }
   vodChatScaleDownButton?.addEventListener("click", () => {
-    vodChatScalePercent = Math.max(100, vodChatScalePercent - 10);
-    reflectVodChatScale();
+    stepVodChatScale(-1);
   });
   vodChatScaleUpButton?.addEventListener("click", () => {
-    vodChatScalePercent = Math.min(200, vodChatScalePercent + 10);
-    reflectVodChatScale();
+    stepVodChatScale(1);
   });
   reflectVodChatScale();
 
@@ -328,12 +660,17 @@
     const button = $("mvChatPopout");
     if (!button) return;
     button.dataset.mode = chatPopoutMode;
-    button.dataset.tooltip = chatPopoutMode === "native"
-      ? "치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다."
-      : "새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.";
-    button.setAttribute("aria-label", chatPopoutMode === "native"
-      ? "치지직 채팅창으로 분리"
-      : "치즈 플래터 팝업으로 분리");
+    const isVideo = isVideoChatSource(state.chatChannelId);
+    button.dataset.tooltip = isVideo
+      ? "다시보기 채팅을 치즈 플래터 팝업으로 분리합니다."
+      : chatPopoutMode === "native"
+        ? "치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다."
+        : "새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.";
+    button.setAttribute("aria-label", isVideo
+      ? "다시보기 채팅 분리"
+      : chatPopoutMode === "native"
+        ? "치지직 채팅창으로 분리"
+        : "치즈 플래터 팝업으로 분리");
   }
 
   const chatPopoutButton = $("mvChatPopout");
@@ -380,6 +717,10 @@
         ? message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."
       : status === "error"
         ? message || "채팅 연결 실패"
+      : status === "empty"
+        ? message || "현재 재생 구간에 채팅이 없습니다."
+      : status === "loading" && detachedChat?.mediaType === "video"
+        ? message || "다시보기 채팅 불러오는 중…"
         : "채팅 팝업 연결 중…";
     box.textContent = text;
     const returnButton = $("mvChatPopupReturn");
@@ -587,6 +928,7 @@
   function renderVodChatSpecialCard(message, identity) {
     const info = message.donation;
     if (!info) return "";
+    const cheeseIcon = '<span class="mv-vod-chat-cheese-icon" aria-hidden="true"></span>';
     const header = (suffix = "") =>
       `<div class="mv-vod-chat-special-head">${identity}${suffix ? `<strong>${esc(suffix)}</strong>` : ""}</div>`;
     if (info.kind === "subscription") {
@@ -598,47 +940,79 @@
         `</div>`;
     }
     if (info.kind === "gift") {
-      const recipient = info.receiverNickname
-        ? `<strong>${esc(info.receiverNickname)}</strong>님에게 `
-        : "";
       const tierName = esc(info.tierName || "구독권");
-      const quantity = info.quantity > 1 ? ` ${fmtCount(info.quantity)}장` : "";
-      return `<div class="mv-vod-chat-card is-gift">${header("님이")}` +
-        `<div class="mv-vod-chat-special-copy">${recipient}<strong>${tierName} 구독권</strong>을${quantity} 선물했습니다.</div>` +
+      const tierClass = info.tier === 1 || info.tier === 2 ? ` is-tier-${info.tier}` : "";
+      if (info.receiverNickname) {
+        return `<div class="mv-vod-chat-card is-gift is-personal-gift${tierClass}">${header("님이")}` +
+          `<div class="mv-vod-chat-special-copy"><strong>${esc(info.receiverNickname)}</strong>님에게 ` +
+          `<strong>${tierName} 구독권</strong>을 선물했습니다.</div>` +
+          `</div>`;
+      }
+      const quantity = Math.max(1, Number(info.quantity) || 1);
+      return `<div class="mv-vod-chat-card is-gift is-channel-gift${tierClass}">${header("님이")}` +
+        `<div class="mv-vod-chat-special-copy"><strong>${tierName} 구독권 ${fmtCount(quantity)}개</strong>를 채널에 선물하였습니다.</div>` +
         `</div>`;
     }
     if (info.kind === "mission") {
-      const label = info.missionDonationType.toUpperCase() === "PARTICIPATION" ||
-        info.donationType === "MISSION_PARTICIPATION" ? "미션 상금" : "미션";
+      const isParticipation = [info.missionDonationType, info.donationType]
+        .some((type) => /(?:^|_)PARTICIPATION$/i.test(type));
       const title = info.missionTitle || message.text;
+      const renderedTitle = info.missionTitle ? esc(title) : renderVodChatText(message);
       const amount = info.amount > 0
-        ? `<div class="mv-vod-chat-special-amount">🧀 ${fmtCount(info.amount)}</div>`
+        ? `<span class="mv-vod-chat-mission-amount">${cheeseIcon}<strong>${fmtCount(info.amount)}</strong></span>`
+        : "";
+      if (isParticipation) {
+        return `<div class="mv-vod-chat-card is-mission is-participation">` +
+          `${header("님이")}` +
+          (title ? `<div class="mv-vod-chat-mission-prize-title"><strong>${renderedTitle}</strong> 미션에</div>` : "") +
+          (amount ? `<div class="mv-vod-chat-mission-prize-amount">${amount}<span>추가했습니다.</span></div>` : "") +
+          `</div>`;
+      }
+      const targetIcon = '<svg class="mv-vod-chat-mission-target" width="12" height="13" viewBox="0 0 12 13" fill="none" aria-hidden="true"><path d="M10.5492 6.72944C10.5492 9.24234 8.51211 11.2794 5.99922 11.2794C3.48632 11.2794 1.44922 9.24234 1.44922 6.72944C1.44922 4.21655 3.48632 2.17944 5.99922 2.17944" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.59941 6.72939C8.59941 8.16534 7.43535 9.32939 5.99941 9.32939C4.56347 9.32939 3.39941 8.16534 3.39941 6.72939C3.39941 5.29345 4.56347 4.12939 5.99941 4.12939" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path fill-rule="evenodd" clip-rule="evenodd" d="M8.13992 3.61327L7.82386 2.66515C7.8005 2.59507 7.81874 2.51782 7.87097 2.46559L9.18141 1.15523C9.29503 1.04161 9.48961 1.10647 9.51233 1.26554L9.71507 2.68476C9.72732 2.77056 9.79474 2.83797 9.88054 2.85022L11.2996 3.05285C11.4587 3.07556 11.5236 3.27014 11.41 3.38377L10.0995 4.69426C10.0473 4.74648 9.97006 4.76472 9.9 4.74138L8.77057 4.36504L6.51403 6.74034C6.3286 6.93554 6.02003 6.94345 5.82483 6.75801C5.62963 6.57257 5.62172 6.264 5.80716 6.06881L8.13992 3.61327Z" fill="currentColor"/></svg>';
+      const timer = info.missionTimeSeconds > 0
+        ? `<span class="mv-vod-chat-mission-timer"><svg width="16" height="16" viewBox="0 0 13 14" fill="none" aria-hidden="true"><path fill="currentColor" d="M10.479 10.338a5.174 5.174 0 1 0-7.899 0l-1.096 1.096a.438.438 0 0 0 .618.619L3.2 10.956a5.14 5.14 0 0 0 6.661 0l1.097 1.097a.415.415 0 0 0 .31.128.43.43 0 0 0 .308-.128.437.437 0 0 0 0-.619l-1.096-1.096ZM8.29 8.774a.583.583 0 0 1-.822 0L5.946 7.252V4.3a.583.583 0 1 1 1.167 0v2.468L8.28 7.934a.583.583 0 0 1 .011.84ZM11.6 3.058a.46.46 0 0 1-.31-.129L9.943 1.576a.432.432 0 0 1 0-.618.437.437 0 0 1 .618 0l1.377 1.33a.438.438 0 0 1 0 .618.461.461 0 0 1-.338.152Zm-10.162 0a.437.437 0 0 1-.31-.747L2.482.958a.437.437 0 1 1 .619.618L1.746 2.929a.438.438 0 0 1-.309.129Z"/></svg><span>${String(Math.floor(info.missionTimeSeconds / 3600)).padStart(2, "0")}:${String(Math.floor(info.missionTimeSeconds / 60) % 60).padStart(2, "0")}:${String(info.missionTimeSeconds % 60).padStart(2, "0")}</span></span>`
         : "";
       return `<div class="mv-vod-chat-card is-mission">` +
-        `<div class="mv-vod-chat-special-head"><span class="mv-vod-chat-mission-label">${label}</span>${identity}</div>` +
-        (title ? `<div class="mv-vod-chat-special-copy">${info.missionTitle ? esc(title) : renderVodChatText(message)}</div>` : "") + amount +
-        `</div>`;
+        `<div class="mv-vod-chat-special-head"><span class="mv-vod-chat-mission-label">${targetIcon}미션</span>${identity}</div>` +
+        (title ? `<div class="mv-vod-chat-mission-title">${renderedTitle}</div>` : "") +
+        `<div class="mv-vod-chat-mission-footer">${amount}` +
+        timer +
+        `</div></div>`;
     }
-    const title = info.kind === "video" ? "영상 후원" : info.kind === "party" ? "파티 후원" : "후원";
     const tone = info.tone || "neutral";
     const amount = info.amount > 0
-      ? `<div class="mv-vod-chat-special-amount">🧀 ${fmtCount(info.amount)}</div>`
+      ? `<div class="mv-vod-chat-special-amount">${cheeseIcon} ${fmtCount(info.amount)}</div>`
       : "";
-    const party = info.partyName ? ` · ${esc(info.partyName)}` : "";
-    return `<div class="mv-vod-chat-card is-${info.kind} is-tone-${tone}">${header()}` +
-      `<div class="mv-vod-chat-special-copy">${renderVodChatText(message) || title}${party}</div>${amount}</div>`;
+    const content = renderVodChatText(message);
+    const videoLabel = info.kind === "video" && content
+      ? '<strong class="mv-vod-chat-video-label">[영상 후원]</strong>'
+      : "";
+    const specialHeader = info.kind === "video"
+      ? `<div class="mv-vod-chat-special-head">${identity}${videoLabel}</div>`
+      : header();
+    const party = info.kind === "party" && content && info.partyName
+      ? ` · ${esc(info.partyName)}`
+      : "";
+    return `<div class="mv-vod-chat-card is-${info.kind} is-tone-${tone}">${specialHeader}` +
+      `<div class="mv-vod-chat-special-copy">${content}${party}</div>${amount}</div>`;
   }
 
-  function renderVodChatRow(message, timeMode) {
-    const rowTime = vodChatShowTime
+  function renderVodChatRow(message, timeMode, showTime = vodChatShowTime, options = {}) {
+    const rowTime = showTime
       ? timeMode === "broadcast" && message.broadcastAt
         ? formatVodBroadcastTime(message.broadcastAt)
         : formatVodChatTime(message.at)
       : "";
     const badges = Array.isArray(message.badges) ? message.badges : [];
+    const role = ["streamer", "manager", "operator", "partner"]
+      .find((candidate) => message.roles?.includes(candidate));
+    const roleClass = role ? ` is-badge-${role}` : "";
+    const popupClasses = `${options.hideBackground ? " is-message-bg-hidden" : ""}` +
+      `${options.hideBorder ? " is-message-border-hidden" : ""}`;
     const renderBadges = (position) => {
       const images = badges
-        .filter((badge) => badge.position === position)
+        .filter((badge) => badge.position === position && (!options.roleBadgesOnly ||
+          BADGE_CHAT_ROLE_BADGE_URLS.has(badge.url) || BADGE_CHAT_ROLE_BADGE_LABELS.has(badge.label)))
         .map((badge) => `<img class="mv-vod-chat-profile-badge" src="${esc(badge.url)}" alt="${esc(badge.label)}" width="16" height="16" loading="lazy" decoding="async">`)
         .join("");
       return images ? `<span class="mv-vod-chat-profile-badge-group">${images}</span>` : "";
@@ -668,10 +1042,10 @@
       `<strong${nicknameStyle}>${esc(message.nickname)}</strong>${badgeMarkup.after}</span>`;
     if (message.donation) {
       const tone = message.donation.tone ? ` is-tone-${message.donation.tone}` : "";
-      return `<article class="mv-vod-chat-row is-special${tone}" data-chat-time="${message.at}">` +
+      return `<article class="mv-vod-chat-row is-special${tone}${roleClass}${popupClasses}" data-chat-time="${message.at}">` +
         renderVodChatSpecialCard(message, identity) + `</article>`;
     }
-    return `<article class="mv-vod-chat-row" data-chat-time="${message.at}">` +
+    return `<article class="mv-vod-chat-row${roleClass}${popupClasses}" data-chat-time="${message.at}">` +
       `<div class="mv-vod-chat-inline">${time}${identity}` +
       (message.text ? `<span class="mv-vod-chat-message"${roleMessageColor
         ? ` style="color:${esc(roleMessageColor)}"` : ""}>${renderVodChatText(message)}</span>` : "") +
@@ -695,7 +1069,7 @@
     }
     if (vodChatTimeModeButton) {
       const canShowBroadcastTime = vodChatSession.hasBroadcastTimes();
-      if (!canShowBroadcastTime) vodChatTimeMode = "playback";
+      if (!canShowBroadcastTime && snapshot.complete) vodChatTimeMode = "playback";
       vodChatTimeModeButton.disabled = !canShowBroadcastTime;
       vodChatTimeModeButton.textContent = vodChatTimeMode === "broadcast" ? "방송 시각" : "재생 시간";
       vodChatTimeModeButton.setAttribute("aria-pressed", String(vodChatTimeMode === "broadcast"));
@@ -710,14 +1084,15 @@
       `${globalThis.CheeseMultiviewVodChat.nicknameColorCodeRevision}:` +
       `${visible.map((message) => message.id).join("\u001f")}`;
     if (signature !== vodChatRenderSignature) {
-      const nearBottom = Math.abs(list.scrollTop) < 32;
+      const nearBottom = list.scrollHeight - list.clientHeight - list.scrollTop < 32;
       const previousScrollTop = list.scrollTop;
-      list.innerHTML = visible.slice().reverse()
+      list.innerHTML = visible
         .map((message) => renderVodChatRow(message, vodChatTimeMode))
         .join("");
-      list.scrollTop = nearBottom ? 0 : previousScrollTop;
+      list.scrollTop = nearBottom ? list.scrollHeight : previousScrollTop;
       vodChatRenderSignature = signature;
     }
+    renderVodBadgeChat(visible);
 
     if (snapshot.status === "error") {
       statusBox.hidden = false;
@@ -726,6 +1101,9 @@
     } else if (snapshot.status === "empty") {
       statusBox.hidden = false;
       statusBox.innerHTML = '<span class="mv-cell-status-text">이 구간에 표시할 채팅이 없습니다.</span>';
+    } else if (snapshot.status === "idle") {
+      statusBox.hidden = false;
+      statusBox.innerHTML = '<span class="mv-cell-status-text">다시보기 채팅을 준비하는 중…</span>';
     } else if (!visible.length && snapshot.status !== "empty" &&
         snapshot.loadedThrough <= snapshot.currentTime) {
       statusBox.hidden = false;
@@ -736,6 +1114,57 @@
     } else {
       statusBox.hidden = true;
       statusBox.innerHTML = "";
+    }
+    syncVodChatPopup(snapshot, visible, signature);
+  }
+
+  function syncVodChatPopup(snapshot, visible, signature) {
+    const popup = detachedChat;
+    if (popup?.mode !== "platter" || !isVideoChatSource(state.chatChannelId)) return;
+    const video = state.chosen.find((item) => item.channelId === state.chatChannelId);
+    if (!video?.videoNo) return;
+    const popupSignature = `${signature}:${vodBadgeChatSignature}:${vodBadgeChatSettingsRevision}`;
+    if (popup.lastVodSignature === popupSignature && popup.latestVodSnapshot) {
+      if (popup.ready) updateChatPopupStatus(popup.latestVodSnapshot.status, popup.latestVodSnapshot.message);
+      if (popup.ready && popup.sentVodSignature !== popupSignature) {
+        chatPopupPost("VOD_CHAT_UPDATE", popup.latestVodSnapshot);
+        popup.sentVodSignature = popupSignature;
+      }
+      return;
+    }
+    const hasRows = visible.length > 0;
+    const status = snapshot.status === "error" ? "error"
+      : snapshot.status === "loading" || snapshot.status === "idle" ? "loading"
+        : hasRows ? "ready" : "empty";
+    const message = status === "error" ? snapshot.error || "다시보기 채팅을 불러오지 못했습니다."
+      : status === "empty" ? "현재 재생 구간에 채팅이 없습니다."
+        : status === "loading" ? "재생 시점 채팅을 불러오는 중…" : "";
+    popup.latestVodSnapshot = {
+      channelId: video.channelId,
+      videoNo: video.videoNo,
+      channelName: video.channelName,
+      generation: chatGeneration,
+      status,
+      message,
+      dark: document.documentElement.dataset.theme === "dark",
+      html: visible.map((message) => renderVodChatRow(message, vodChatTimeMode)).join(""),
+      badgeChat: {
+        items: vodBadgeChatPopupItems,
+        hasNew: vodBadgeChatPopupHasNewMessage,
+        settings: {
+          hidePillButton: vodBadgeChatSettings.hidePillButton,
+          hideEmptyButton: vodBadgeChatSettings.hideEmptyButton,
+          keepPopupOpen: vodBadgeChatSettings.keepPopupOpen,
+          compactPill: vodBadgeChatSettings.compactPill,
+          pillGlowEnabled: vodBadgeChatSettings.pillGlowEnabled,
+        },
+      },
+    };
+    popup.lastVodSignature = popupSignature;
+    if (popup.ready) {
+      updateChatPopupStatus(status, message);
+      chatPopupPost("VOD_CHAT_UPDATE", popup.latestVodSnapshot);
+      popup.sentVodSignature = popupSignature;
     }
   }
 
@@ -758,6 +1187,18 @@
 
   function loadChat(channelId, { retry = false } = {}) {
     const generation = ++chatGeneration;
+    closeVodBadgeChatPopover(true);
+    vodBadgeChatSignature = "reset";
+    vodBadgeChatSeenIds.clear();
+    // 채널을 바꾸면 이전 채널 닉네임 순환·강조를 멈춘다(라이브로 바뀌면 피드가 숨겨진다).
+    vodBadgeChatPill?.render({
+      actors: [],
+      compact: vodBadgeChatSettings.compactPill,
+      glow: vodBadgeChatSettings.pillGlowEnabled,
+    });
+    vodBadgeChatLatestId = "";
+    vodBadgeChatLastPlaybackTime = null;
+    vodBadgeChatHasBaseline = false;
     if (!retry) chatAutoRetried = false;
     const source = resolveChatSource(channelId);
     const selectedId = source?.id || "";
@@ -765,13 +1206,22 @@
     chatFrameReady = false;
     if (source?.type === "video") {
       clearTimeout(chatReadyTimer);
-      if (detachedChat) restoreInlineChat(true, false);
+      if (detachedChat?.mode === "native") restoreInlineChat(true, false);
       stopVodChat();
       $("mvChatFrame").src = "about:blank";
       $("mvChatFrame").hidden = true;
       $("mvVodChatFeed").hidden = false;
       vodChatSourceId = selectedId;
       vodChatRenderSignature = "";
+      const videoChannel = state.chosen.find((item) => item.channelId === selectedId);
+      if (detachedChat?.mode === "platter") {
+        detachedChat.mediaType = "video";
+        detachedChat.videoNo = videoChannel?.videoNo || "";
+        detachedChat.channelId = selectedId;
+        detachedChat.lastVodSignature = "";
+        detachedChat.sentVodSignature = "";
+      }
+      if (videoChannel?.videoNo) vodChatSession.start(videoChannel.videoNo, 0);
       void loadVodChatEmojiMap().then(renderVodChat);
       void loadVodNicknameColorCodes();
       renderVodChat();
@@ -812,6 +1262,11 @@
     }
     setChatStatus("loading");
     if (detachedChat) {
+      detachedChat.mediaType = "live";
+      detachedChat.videoNo = "";
+      detachedChat.latestVodSnapshot = null;
+      detachedChat.lastVodSignature = "";
+      detachedChat.sentVodSignature = "";
       clearTimeout(chatReadyTimer);
       detachedChat.pendingLoad = { channelId: liveChannelId, generation, retry };
       dispatchChatLoadToPopup();
@@ -838,7 +1293,12 @@
       return;
     }
     if (state.chatChannelId === source.id) {
-      if (source.type === "video" && !$("mvVodChatFeed").hidden) return;
+      if (source.type === "video") {
+        const video = state.chosen.find((item) => item.channelId === source.id);
+        const vodSnapshot = vodChatSession.snapshot();
+        if (vodChatSourceId === source.id && video?.videoNo &&
+            vodSnapshot.videoNo === video.videoNo && !$("mvVodChatFeed").hidden) return;
+      }
       if (source.type === "live" &&
           (detachedChat || (inlineFrame?.src && !inlineFrame.src.endsWith("about:blank"))))
         return;
@@ -846,7 +1306,7 @@
     loadChat(source.id);
   }
 
-  function restoreInlineChat(closePopup = true, reloadChat = true) {
+  function restoreInlineChat(closePopup = true, reloadChat = !isVideoChatSource(state.chatChannelId)) {
     const popup = detachedChat;
     if (!popup) return;
     detachedChat = null;
@@ -867,6 +1327,7 @@
       } catch {}
     }
     if (reloadChat) loadChat(state.chatChannelId);
+    else if (isVideoChatSource(state.chatChannelId)) renderVodChat();
   }
 
   function handleChatPopupMessage(event) {
@@ -884,7 +1345,13 @@
       chatPopupPost("SET_THEME", {
         dark: document.documentElement.dataset.theme === "dark",
       });
-      dispatchChatLoadToPopup();
+      if (detachedChat.mediaType === "video") {
+        updateChatPopupStatus("ready");
+        detachedChat.sentVodSignature = "";
+        renderVodChat();
+      } else {
+        dispatchChatLoadToPopup();
+      }
       return;
     }
     if (data.type === "CHAT_FRAME_READY") {
@@ -899,7 +1366,12 @@
     }
     if (data.type === "RETRY_CHAT") {
       chatAutoRetried = false;
-      loadChat(state.chatChannelId, { retry: true });
+      if (isVideoChatSource(state.chatChannelId)) {
+        if (!vodChatSession.retry()) postVodChatControl(state.chatChannelId, true, chatGeneration);
+        renderVodChat();
+      } else {
+        loadChat(state.chatChannelId, { retry: true });
+      }
       return;
     }
     if (data.type === "RETURN_TO_PAGE") {
@@ -920,7 +1392,8 @@
   }
 
   function openChatPopup() {
-    if (!HASH_RE.test(state.chatChannelId || "")) return;
+    const source = resolveChatSource(state.chatChannelId);
+    if (!source) return;
     if (detachedChat) {
       focusDetachedChat();
       return;
@@ -953,6 +1426,7 @@
     }
     detachedChat = {
       mode: "platter",
+      mediaType: source.type,
       sessionId,
       channel,
       window: popupWindow,
@@ -961,15 +1435,27 @@
       hostReadyTimer: 0,
       closePoll: 0,
     };
+    if (source.type === "video") {
+      const video = state.chosen.find((item) => item.channelId === source.id);
+      detachedChat.videoNo = video?.videoNo || "";
+      detachedChat.channelId = source.id;
+      detachedChat.lastVodSignature = "";
+      detachedChat.sentVodSignature = "";
+    }
     const openedPopup = detachedChat;
     closeChatSelector();
     $("mvStage").classList.add("is-chat-popped-out");
     $("mvChatPopupControl").hidden = false;
     $("mvChatPopout").hidden = true;
     updateChatPopupStatus("loading");
-    // 팝업에 실제 채팅을 옮긴 뒤 원본 프레임은 내려 중복 연결과 리소스 사용을 막는다.
-    $("mvChatFrame").src = "about:blank";
-    loadChat(state.chatChannelId);
+    if (source.type === "live") {
+      // 팝업에 실제 채팅을 옮긴 뒤 원본 프레임은 내려 중복 연결과 리소스 사용을 막는다.
+      $("mvChatFrame").src = "about:blank";
+      loadChat(state.chatChannelId);
+    } else {
+      // 다시보기는 부모의 재생 동기화 세션을 유지하고 현재 렌더링만 팝업으로 보낸다.
+      renderVodChat();
+    }
     openedPopup.hostReadyTimer = setTimeout(() => {
       if (detachedChat !== openedPopup || openedPopup.ready) return;
       showChatPopoutFeedback("채팅 팝업을 준비하지 못해 이 화면으로 돌아왔습니다.");
@@ -1030,6 +1516,10 @@
   });
 
   function openChatPopout() {
+    if (isVideoChatSource(state.chatChannelId)) {
+      openChatPopup();
+      return;
+    }
     if (chatPopoutMode === "native") {
       openNativeChatPopup();
       return;
@@ -1408,7 +1898,13 @@
     clearAudioNotice(channelId);
     // 메인을 따라가도록 해 뒀으면 채팅도 같이 옮긴다.
     const chatId = chatSourceId(channelId);
-    if (state.chatFollowsMain) applyChat(chatId);
+    if (state.chatFollowsMain) {
+      if (state.chatEnabled) applyChat(chatId);
+      else {
+        state.chatChannelId = chatId;
+        renderTopbar();
+      }
+    }
     applyLayout();
   }
 
@@ -1510,7 +2006,7 @@
 
   function renderChatTitle() {
     const label = $("mvChatTitle")?.querySelector(".mv-chat-title-label");
-    if (label) label.textContent = state.chatChannelId
+    if (label) label.textContent = state.chatEnabled && state.chatChannelId
       ? chatSourceLabel(state.chatChannelId)
       : "채팅 없음";
   }
@@ -1534,14 +2030,17 @@
   function renderTopbar() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     $("mvMainValue").textContent = channelName(state.mainId);
-    $("mvChatValue").textContent = state.chatChannelId
+    $("mvChatValue").textContent = !state.chatEnabled
+      ? "사용 안 함"
+      : state.chatChannelId
       ? channelName(state.chatChannelId)
       : "미지원";
     $("mvSideValue").textContent = SIDE_LABEL[state.chatSide] || "-";
     $("mvLayoutValue").textContent = layout?.label || "-";
     renderChatTitle();
     $("mvChatTitle").disabled = availableChatChannels().length === 0;
-    if (!detachedChat) $("mvChatPopout").hidden = !HASH_RE.test(state.chatChannelId);
+    reflectChatPopoutMode(chatPopoutMode);
+    if (!detachedChat) $("mvChatPopout").hidden = !resolveChatSource(state.chatChannelId);
     if (!$("mvChatTitleList").hidden) {
       $("mvChatTitleList").innerHTML = availableChatChannels()
         .map(([channelId, name]) =>
@@ -1795,9 +2294,47 @@
     button.dataset.tooltip = label;
   }
 
-  // 전체 볼륨은 모든 칸의 실제 출력에 곱해지므로 버튼도 모두 다시 맞춘다.
+  function volumeButtonState() {
+    if (state.masterMuted) return { value: "전체 음소거", muted: true };
+    if (state.audioFocusMode) {
+      if (!state.mainId || effectiveMuted(state.mainId))
+        return { value: "메인 음소거", muted: true };
+      return { value: `메인 ${pct(state.masterVolume)}`, muted: false };
+    }
+    const mutedCount = state.chosen.filter((channel) => audioOf(channel.channelId).muted).length;
+    if (mutedCount === state.chosen.length && mutedCount > 0)
+      return { value: "모두 음소거", muted: true };
+    if (mutedCount > 0) return { value: "일부 음소거", muted: true };
+    return { value: `전체 ${pct(state.masterVolume)}`, muted: false };
+  }
+
+  function syncVolumePanelButton() {
+    const button = $("mvVolumeBtn");
+    const value = $("mvVolumeValue");
+    const icon = $("mvVolumeStatusIcon");
+    if (!button) return;
+    const status = volumeButtonState();
+    if (value) value.textContent = status.value;
+    button.classList.toggle("is-muted", status.muted);
+    const blocked = audioBlocked.size > 0;
+    button.setAttribute("aria-label", blocked
+      ? `볼륨 조절, 소리가 차단됨, ${status.value}`
+      : `볼륨 조절, ${status.value}`);
+    button.dataset.tooltip = blocked
+      ? `소리가 차단됨 · ${status.value}`
+      : `볼륨 · ${status.value}`;
+    if (icon) {
+      const quiet = status.muted || state.masterVolume <= 0;
+      const kind = quiet ? "x" : state.masterVolume > 0.5 ? "high" : "low";
+      icon.innerHTML = volumeIcon(kind);
+      icon.classList.toggle("is-muted", quiet);
+    }
+  }
+
+  // 전체 볼륨은 모든 칸의 실제 출력에 곱해지므로 아이콘과 상단 상태를 맞춘다.
   function syncAllVolumeButtons() {
     for (const c of state.chosen) syncVolumeButton(c.channelId);
+    syncVolumePanelButton();
   }
 
   // 실제로 나오는 소리를 기준으로 아이콘을 고른다(전체 볼륨까지 곱해진 값).
@@ -1940,22 +2477,11 @@
   }
 
   function renderVolume() {
-    const value = $("mvVolumeValue");
     const button = $("mvVolumeBtn");
-    if (value) {
-      value.textContent = state.audioFocusMode
-        ? `메인 ${pct(state.masterVolume)}`
-        : `전체 ${pct(state.masterVolume)}`;
-    }
+    syncVolumePanelButton();
     // 자동재생이 막혔으면 버튼에 표시를 남긴다(색만이 아니라 글자로도 알린다).
     const blocked = audioBlocked.size > 0;
     button?.classList.toggle("is-warn", blocked);
-    if (button) {
-      button.setAttribute(
-        "aria-label",
-        blocked ? "볼륨 - 소리가 차단됨" : "볼륨",
-      );
-    }
 
     const panel = $("mvVolumePop");
     if (!panel || panel.hidden) return;
@@ -4342,11 +4868,15 @@
     state.mainId = setup.chosen[0].channelId;
     state.chatChannelId = chatSourceId(setup.chosen[0].channelId);
     state.chatSide = setup.chatSide;
+    state.chatEnabled = setup.chatEnabled;
     state.mainHighQuality = setup.mainHighQuality;
+    $("mvStage").classList.toggle("is-chat-folded", !state.chatEnabled);
+    $("mvChatToggle").setAttribute("aria-expanded", String(state.chatEnabled));
+    $("mvChatExpand").hidden = state.chatEnabled;
 
     ensureCells();
     applyLayout();
-    applyChat(state.chatChannelId);
+    if (state.chatEnabled) applyChat(state.chatChannelId);
     restoreChatSize();
     bindChatResize();
     bindCellDrag();
@@ -4394,6 +4924,7 @@
       chosen,
       layoutId: layout.id,
       chatSide,
+      chatEnabled: raw.chatEnabled !== false,
       mainHighQuality: raw.mainHighQuality !== false,
     };
   }
@@ -5198,6 +5729,7 @@
     const avatar = safeImageUrl(SOURCES.profileThumb(r.channelImageUrl));
     const tags = Array.isArray(r.tags) ? r.tags : [];
     const isVideo = r.mediaType === "video";
+    const watchTimelinePercent = isVideo ? SOURCES.getWatchTimelinePercent(r) : null;
     return (
       `<button type="button" class="mv-quick-card" data-mv-quick-add="${esc(r.channelId)}"` +
       `${full ? " disabled" : ""}>` +
@@ -5216,6 +5748,9 @@
       (isVideo && r.duration > 0
         ? `<span class="mv-card-duration">${SOURCES.formatVideoDuration(r.duration)}</span>`
         : "") +
+      (watchTimelinePercent !== null
+        ? `<span class="mv-quick-card-watch-timeline" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, watchTimelinePercent)).toFixed(2)}%"></span></span>`
+        : "") +
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       `</span>` +
       `<span class="mv-quick-card-body">` +
@@ -5230,7 +5765,7 @@
         : "") +
       `</span>` +
       (isVideo
-        ? `<span class="mv-quick-card-video-info">조회수 ${fmtCount(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatRelativeTime(r.openedAt))}` : ""}</span>`
+        ? `<span class="mv-quick-card-video-info">조회수 ${fmtCount(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatVideoDate(r.openedAt))}` : ""}</span>`
         : "") +
       `</span></span>` +
       (r.category || tags.length
@@ -5644,6 +6179,7 @@
           chosen: state.chosen,
           layoutId: state.layoutId,
           chatSide: state.chatSide,
+          chatEnabled: state.chatEnabled,
           mainHighQuality: state.mainHighQuality,
         },
       });
@@ -6096,6 +6632,12 @@
     }
     const setChatEl = target.closest?.("[data-mv-set-chat]");
     if (setChatEl) {
+      if (!state.chatEnabled) {
+        state.chatEnabled = true;
+        $("mvStage").classList.remove("is-chat-folded");
+        $("mvChatToggle").setAttribute("aria-expanded", "true");
+        $("mvChatExpand").hidden = true;
+      }
       applyChat(setChatEl.dataset.mvSetChat);
       renderTopbar();
       closePopovers(null);
@@ -6120,7 +6662,11 @@
       // 켠 순간 이미 어긋나 있으면 바로 맞춰 준다.
       if (state.chatFollowsMain) {
         const chatId = chatSourceId(state.mainId);
-        applyChat(chatId);
+        if (state.chatEnabled) applyChat(chatId);
+        else {
+          state.chatChannelId = chatId;
+          renderTopbar();
+        }
       }
       renderTopbar();
       return;
@@ -6131,6 +6677,11 @@
       //   연결까지 끊는 '채팅 끄기' 가 필요하면 별도 동작으로 나눈다.
       const stage = $("mvStage");
       const folded = stage.classList.toggle("is-chat-folded");
+      if (!folded && !state.chatEnabled) {
+        state.chatEnabled = true;
+        applyChat(state.chatChannelId);
+        renderTopbar();
+      }
       const button = $("mvChatToggle");
       if (folded) closeChatSelector();
       button.setAttribute("aria-expanded", String(!folded));
@@ -6369,15 +6920,8 @@
         ?.querySelector(".mv-vol-pct")
         ?.replaceChildren(pct(next));
       postAllAudio();
-      // 전체 볼륨은 모든 칸의 실제 출력을 바꾼다 → 아이콘도 전부 다시 맞춘다.
+      // 전체 볼륨은 모든 칸의 실제 출력을 바꾼다 → 채널과 상단 아이콘을 맞춘다.
       syncAllVolumeButtons();
-      // 버튼의 숫자만 갱신한다(패널을 다시 그리지 않는다).
-      const value = $("mvVolumeValue");
-      if (value) {
-        value.textContent = state.audioFocusMode
-          ? `메인 ${pct(next)}`
-          : `전체 ${pct(next)}`;
-      }
       return;
     }
 
@@ -6403,6 +6947,7 @@
     postState(channelId, channelId === state.mainId);
     // 끄는 동안에도 아이콘이 바로 따라오게 한다(50% 아래는 volume-1, 0 은 x).
     syncVolumeButton(channelId);
+    syncVolumePanelButton();
   });
 
   document.addEventListener("change", (event) => {
@@ -6768,7 +7313,6 @@
     if (event.origin !== CHZZK_ORIGIN) return;
     const data = event.data;
     if (data?.source !== MULTIVIEW_MESSAGE) return;
-    if (data.type !== "CHAT_FRAME_READY") return;
     // ⚠ 정말 채팅 프레임이 보낸 것인지 확인한다.
     const frame = $("mvChatFrame");
     if (
@@ -6777,6 +7321,7 @@
       data.channelId !== state.chatChannelId ||
       data.generation !== chatGeneration
     ) return;
+    if (data.type !== "CHAT_FRAME_READY") return;
     chatFrameReady = true;
     clearTimeout(chatReadyTimer);
     setChatStatus("ready");

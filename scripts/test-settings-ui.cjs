@@ -28,6 +28,18 @@ for (const key of [
   'cheeseMultiviewSetupSortBySource',
   'cheeseMultiviewRememberSetupSort',
   'cheeseMultiviewChatPopoutMode',
+  'cheeseMultiviewBadgeChatButton',
+  'cheeseMultiviewBadgeChatHideEmptyButton',
+  'cheeseMultiviewBadgeChatHideChatBackground',
+  'cheeseMultiviewBadgeChatHideChatBorder',
+  'cheeseMultiviewBadgeChatHidePopupBackground',
+  'cheeseMultiviewBadgeChatHidePopupBorder',
+  'cheeseMultiviewBadgeChatHidePopupTime',
+  'cheeseMultiviewBadgeChatRoleBadgesOnly',
+  'cheeseMultiviewBadgeChatKeepPopupOpen',
+  'cheeseMultiviewBadgeChatPillGlowEnabled',
+  'cheeseMultiviewBadgeChatCompactPill',
+  'cheeseMultiviewBadgeChatHidePillButton',
   'cheeseMaxQualityTarget',
   'audioMixer:shareAcrossChannels',
 ]) {
@@ -109,6 +121,18 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
         cheeseMultiviewRememberSetupSort:true,
         cheeseMultiviewChatPopoutMode:'native',
+        cheeseMultiviewBadgeChatButton:true,
+        cheeseMultiviewBadgeChatHideEmptyButton:true,
+        cheeseMultiviewBadgeChatHideChatBackground:true,
+        cheeseMultiviewBadgeChatHideChatBorder:false,
+        cheeseMultiviewBadgeChatHidePopupBackground:true,
+        cheeseMultiviewBadgeChatHidePopupBorder:false,
+        cheeseMultiviewBadgeChatHidePopupTime:true,
+        cheeseMultiviewBadgeChatRoleBadgesOnly:true,
+        cheeseMultiviewBadgeChatKeepPopupOpen:false,
+        cheeseMultiviewBadgeChatPillGlowEnabled:false,
+        cheeseMultiviewBadgeChatCompactPill:true,
+        cheeseMultiviewBadgeChatHidePillButton:false,
         'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
@@ -404,6 +428,13 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(exported.settings.cheeseMultiviewSetupSortBySource?.following==='name-desc','setup source sort missing from export');
         check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
         check(exported.settings.cheeseMultiviewChatPopoutMode==='native','chat popout mode missing from export');
+        for(const key of ['cheeseMultiviewBadgeChatButton','cheeseMultiviewBadgeChatHideEmptyButton',
+          'cheeseMultiviewBadgeChatHideChatBackground','cheeseMultiviewBadgeChatHideChatBorder',
+          'cheeseMultiviewBadgeChatHidePopupBackground','cheeseMultiviewBadgeChatHidePopupBorder',
+          'cheeseMultiviewBadgeChatHidePopupTime','cheeseMultiviewBadgeChatRoleBadgesOnly',
+          'cheeseMultiviewBadgeChatKeepPopupOpen','cheeseMultiviewBadgeChatPillGlowEnabled',
+          'cheeseMultiviewBadgeChatCompactPill','cheeseMultiviewBadgeChatHidePillButton'])
+          check(Object.hasOwn(exported.settings,key),key+' missing from settings/full backup export');
       }
       const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true,
         cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
@@ -419,6 +450,23 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseMultiviewSetupSortBySource?.following==='name-asc','setup source sort was not imported');
       check(saved.cheeseMultiviewRememberSetupSort===false,'setup sort preference was not imported');
       check(saved.cheeseMultiviewChatPopoutMode==='platter','chat popout mode was not imported');
+      payload.settings.cheeseMultiviewBadgeChatHidePillButton=true;
+      payload.settings.cheeseMultiviewBadgeChatKeepPopupOpen=true;
+      payload.settings.cheeseMultiviewBadgeChatHidePopupTime=false;
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      check(saved.cheeseMultiviewBadgeChatHidePillButton===true&&
+        saved.cheeseMultiviewBadgeChatKeepPopupOpen===false&&
+        saved.cheeseMultiviewBadgeChatHidePopupTime===false,
+        'badge chat settings were not imported or mutually exclusive values were not normalized');
+      delete saved.cheeseMultiviewBadgeChatCompactPill;
+      payload.settings.cheeseMultiviewBadgeChatCompactPill='invalid';
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      check(!Object.hasOwn(saved,'cheeseMultiviewBadgeChatCompactPill'),
+        'invalid badge chat setting type was imported');
       const invalidMode={...payload,settings:{...payload.settings,cheeseMultiviewChatPopoutMode:'unsupported'}};
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(invalidMode)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));

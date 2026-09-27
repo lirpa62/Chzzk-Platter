@@ -53,10 +53,35 @@ const element = (id) => {
       id,
       hidden: false,
       textContent: "",
+      innerHTML: "",
+      scrollHeight: 0,
+      clientHeight: 300,
+      scrollTop: 0,
       dataset: {},
+      style: { values: {}, setProperty(name, value) { this.values[name] = value; } },
+      classList: {
+        values: new Set(),
+        add(value) { this.values.add(value); },
+        remove(value) { this.values.delete(value); },
+        toggle(value, force) {
+          if (force === undefined ? !this.values.has(value) : force) this.values.add(value);
+          else this.values.delete(value);
+        },
+      },
+      disabled: false,
+      offsetHeight: 320,
       src: "",
       contentWindow: { sent: [], postMessage(data, origin) { this.sent.push({ data, origin }); } },
       listeners: {},
+      setAttribute(name, value) { this[name] = value; },
+      getAttribute(name) { return this[name] ?? null; },
+      querySelector() { return null; },
+      contains(target) { return target === this; },
+      replaceChildren() {},
+      append() {},
+      getBoundingClientRect() {
+        return { left: 20, right: 220, top: 20, bottom: 54, width: 200, height: 34 };
+      },
       addEventListener(type, callback) {
         this.listeners[type] = callback;
       },
@@ -85,15 +110,53 @@ const document = {
   title: "",
   documentElement: { dataset: {} },
   getElementById: element,
+  addEventListener() {},
+  removeEventListener() {},
 };
 const window = {
+  innerWidth: 900,
+  innerHeight: 700,
   addEventListener(type, callback) {
     windowListeners[type] = callback;
   },
+  removeEventListener() {},
 };
 vm.runInNewContext(popupScript, {
   document,
   window,
+  CheeseMultiviewBadgeChat: {
+    createFontScaleControls() { return null; },
+    createBadgePill({ trigger, count }) {
+      return {
+        render({ actors }) {
+          const total = actors.reduce((sum, actor) => sum + actor.count, 0);
+          count.hidden = total === 0;
+          count.textContent = total ? String(total) : "";
+          trigger.classList.toggle("is-empty", total === 0);
+        },
+        clearAttention() {},
+        attention() {},
+        dispose() {},
+      };
+    },
+    createPopoverMotion(popover) {
+      return {
+        open() { popover.hidden = false; },
+        close() { popover.hidden = true; },
+        dispose() {},
+      };
+    },
+    collectPillActors(messages) {
+      const actors = new Map();
+      messages.forEach(({ nickname, roles }) => {
+        const actor = actors.get(nickname) || { nickname, count: 0, roles: new Set() };
+        actor.count += 1;
+        roles.forEach((role) => actor.roles.add(role));
+        actors.set(nickname, actor);
+      });
+      return [...actors.values()];
+    },
+  },
   location: { search: `?session=${SESSION_ID}` },
   URL,
   URLSearchParams,
@@ -234,6 +297,83 @@ assert.equal(document.documentElement.dataset.theme, "dark");
 assert.equal(frame.contentWindow.sent.at(-1).origin, "https://chzzk.naver.com");
 assert.equal(frame.contentWindow.sent.at(-1).data.type, "SET_MULTIVIEW_CHAT_VIEW");
 
+bus.onmessage({
+  data: {
+    source: "cheese-platter-multiview-chat-popup",
+    sessionId: SESSION_ID,
+    type: "VOD_CHAT_UPDATE",
+    channelId: "video:987654",
+    videoNo: "987654",
+    channelName: "다시보기 채널",
+    generation: 8,
+    status: "ready",
+    dark: true,
+    html: '<article class="mv-vod-chat-row">현재 재생 채팅</article>',
+    badgeChat: {
+      items: [{
+        id: "badge-1",
+        nickname: "테스트 방장",
+        roles: ["streamer"],
+        html: '<article class="mv-vod-chat-row">방장 채팅</article>',
+      }],
+      hasNew: true,
+      settings: { compactPill: true },
+    },
+  },
+});
+assert.equal(frame.hidden, true, "다시보기 팝업은 라이브 iframe 대신 자체 채팅 목록을 표시");
+assert.equal(element("mvChatPopupVod").hidden, false);
+assert.equal(element("mvChatPopupVodList").innerHTML, '<article class="mv-vod-chat-row">현재 재생 채팅</article>');
+assert.equal(element("mvChatPopupBadgeList").innerHTML, '<article class="mv-vod-chat-row">방장 채팅</article>');
+assert.equal(element("mvChatPopupBadgeEmpty").hidden, true);
+assert.equal(element("mvChatPopupBadgeTrigger").hidden, false);
+assert.equal(element("mvChatPopupTitle").textContent, "다시보기 채널 다시보기 채팅");
+assert.equal(element("mvChatPopupStatus").dataset.state, "ready");
+element("mvChatPopupVodScaleUp").listeners.click();
+assert.equal(element("mvChatPopupVodScaleValue").textContent, "125%");
+assert.equal(element("mvChatPopupVodList").style.values["--mv-vod-chat-scale"], "1.25");
+element("mvChatPopupVodScaleUp").listeners.click();
+element("mvChatPopupVodScaleUp").listeners.click();
+assert.equal(element("mvChatPopupVodScaleValue").textContent, "175%");
+assert.equal(element("mvChatPopupVodScaleUp").disabled, true);
+element("mvChatPopupVodScaleDown").listeners.click();
+assert.equal(element("mvChatPopupVodScaleValue").textContent, "150%");
+element("mvChatPopupBadgeTrigger").listeners.click();
+assert.equal(element("mvChatPopupBadgeTrigger")["aria-expanded"], "true");
+assert.equal(element("mvChatPopupBadgeCount").hidden, true, "모아보기를 열면 현재 배지 채팅을 읽음 처리한다");
+assert.equal(element("mvChatPopupBadgePopover").hidden, false);
+element("mvChatPopupBadgeClose").listeners.click();
+assert.equal(element("mvChatPopupBadgePopover").hidden, true);
+bus.onmessage({
+  data: {
+    source: "cheese-platter-multiview-chat-popup",
+    sessionId: SESSION_ID,
+    type: "VOD_CHAT_UPDATE",
+    channelId: "video:987654",
+    videoNo: "987654",
+    channelName: "오래된 응답",
+    generation: 7,
+    status: "ready",
+    dark: true,
+    html: "stale",
+  },
+});
+assert.notEqual(element("mvChatPopupVodList").innerHTML, "stale", "이전 다시보기 세대의 팝업 갱신은 무시");
+bus.onmessage({
+  data: {
+    source: "cheese-platter-multiview-chat-popup",
+    sessionId: SESSION_ID,
+    type: "LOAD_CHAT",
+    channelId: CHANNEL_ID,
+    channelName: "테스트 채널",
+    generation: 9,
+    retry: false,
+  },
+});
+assert.equal(frame.hidden, false, "라이브 채팅 로드 시 iframe 표시로 돌아감");
+assert.equal(element("mvChatPopupVod").hidden, true);
+assert.equal(element("mvChatPopupBadgePopover").hidden, true);
+
 element("mvChatPopupRetry").listeners.click();
 element("mvChatPopupReturn").listeners.click();
 assert.equal(bus.sent.at(-2).type, "RETRY_CHAT");
@@ -243,6 +383,11 @@ assert.equal(bus.sent.at(-1).type, "POPUP_CLOSED");
 assert.equal(bus.closed, true);
 
 assert.match(watchHtml, /id="mvChatPopout"/);
+assert.match(setupHtml, /id="mvStartWithoutChat"/);
+assert.match(setupHtml, /채팅 없이 시작/);
+assert.match(parentScript, /chatEnabled: raw\.chatEnabled !== false/);
+assert.match(parentScript, /if \(state\.chatEnabled\) applyChat\(state\.chatChannelId\)/);
+assert.match(parentScript, /if \(!folded && !state\.chatEnabled\)/);
 assert.match(watchHtml, /id="mvChatPopout"[^>]*aria-label="채팅 분리"/);
 assert.doesNotMatch(watchHtml, /mvChatNativePopout/);
 assert.match(settingsHtml, /data-mv-chat-popout-mode-value="platter"/);
@@ -274,6 +419,13 @@ assert.match(tooltipScript, /pointerover/);
 assert.match(tooltipScript, /focusin/);
 assert.match(tooltipScript, /getBoundingClientRect/);
 assert.match(popupHtml, /id="mvChatPopupFrame"/);
+assert.match(popupHtml, /class="mv-chat-popup-view" id="mvChatPopupView"/);
+assert.match(popupHtml, /id="mvChatPopupVodList"/);
+assert.match(popupHtml, /id="mvChatPopupVodScaleUp"/);
+assert.match(popupHtml, /id="mvChatPopupBadgeTrigger"/);
+assert.match(popupHtml, /id="mvChatPopupBadgePopover"/);
+assert.match(popupHtml, /src="src\/multiviewBadgeChat\.js"/);
+assert.match(popupHtml, /href="src\/multiview\.css"/);
 assert.doesNotMatch(popupHtml, /id="mvChatPopupReturn"[^>]*\stitle=/);
 assert.match(popupHtml, /id="mvChatPopupReturn"[^>]*data-tooltip=/);
 assert.match(parentScript, /CHAT_POPUP_PAGE/);
@@ -297,9 +449,14 @@ assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatPopoutFeedbac
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatPopout\s*\{\s*margin-left: auto;\s*order: 2/s);
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatToggle\s*\{\s*order: 3/s);
 assert.match(parentScript, /function openChatPopout\(\)/);
+assert.match(parentScript, /function syncVodChatPopup\(/);
+assert.match(parentScript, /badgeChat: \{/);
+assert.match(parentScript, /vodBadgeChatPopupItems/);
+assert.match(parentScript, /chatPopupPost\("VOD_CHAT_UPDATE"/);
+assert.match(parentScript, /if \(isVideoChatSource\(state\.chatChannelId\)\) \{\s*openChatPopup\(\)/);
 assert.match(parentScript, /chrome\.storage\.local\.get\(CHAT_POPOUT_MODE_KEY\)/);
 assert.match(parentScript, /chrome\.storage\.onChanged\.addListener/);
-assert.match(parentScript, /button\.dataset\.tooltip = chatPopoutMode === "native"/);
+assert.match(parentScript, /button\.dataset\.tooltip = isVideo\s*\?/);
 assert.match(parentScript, /const CHAT_POPOUT_MODE_KEY = "cheeseMultiviewChatPopoutMode"/);
 assert.match(popupStyles, /#mvChatPopupStatus\[data-state="ready"\]::before/);
 assert.match(popupStyles, /#mvChatPopupStatus\[data-state="loading"\]/);
