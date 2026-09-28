@@ -67,6 +67,7 @@ const base = (over = {}) => ({
   featureFlags: {},
   IS_MULTIVIEW_CHAT_FRAME: false,
   IS_MULTIVIEW_FRAME: false,
+  isMultiviewReplay: () => false,
   IS_POPUP_PLAYER_FRAME: false,
   multiviewBtnMixer: false,
   multiviewBtnFilter: false,

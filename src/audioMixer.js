@@ -346,14 +346,14 @@
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
-    const nextMultiviewQualityPolicy = ["highest", "cap-480", "cap-720"].includes(
+    const nextMultiviewQualityPolicy = ["highest", "cap-480", "cap-720", "native"].includes(
       e.data.multiviewQualityPolicy,
     ) ? e.data.multiviewQualityPolicy : "none";
     const nextReconcileToken = Number.isSafeInteger(e.data.multiviewQualityReconcileToken) &&
         e.data.multiviewQualityReconcileToken >= 0
       ? e.data.multiviewQualityReconcileToken : 0;
     const multiviewPolicyChanged = nextMultiviewQualityPolicy !== multiviewQualityPolicy;
-    const multiviewLifecycleChanged = nextMultiviewQualityPolicy !== "none" &&
+    const multiviewLifecycleChanged = ["highest", "cap-480", "cap-720"].includes(nextMultiviewQualityPolicy) &&
       nextReconcileToken !== multiviewQualityReconcileToken;
     multiviewQualityPolicy = nextMultiviewQualityPolicy;
     multiviewQualityReconcileToken = nextReconcileToken;
@@ -5550,7 +5550,7 @@
         : selH < maxQualitySetHeight;
     // 상한이 있으면 플레이어가 자체적으로 화질을 바꿀 수도 있으므로
     // 신뢰된 메뉴 조작이 있었는지 확인한다.
-    const multiviewPolicyActive = multiviewQualityPolicy !== "none";
+    const multiviewPolicyActive = ["highest", "cap-480", "cap-720"].includes(multiviewQualityPolicy);
     const userChose = multiviewPolicyActive || maxQualityCap > 0
       ? maxQualityUserTouchedPage === currentPageKey : true;
     const respectManual = multiviewPolicyActive || maxQualityRespectManual;
@@ -5591,12 +5591,15 @@
     // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
     // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
     // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
+    if (multiviewPolicyActive && Date.now() - maxQualityMenuClickAt < 1500) return;
     maxQualityOwnClickUntil = Date.now() + 1500; // 이 사이의 이벤트는 우리 것이다
     if (!clickMaxQualityMenuItem(maxQualityCap)) {
-      // 폴백: 메뉴를 못 찾는 등 클릭 실패 시 트랙 selected 직접 설정(그리드 미보장).
-      try {
-        best.selected = true;
-      } catch {}
+      if (multiviewPolicyActive) {
+        // 멀티뷰에서는 치지직 메뉴 경로가 없을 때 내부 트랙을 직접 선택하지 않는다.
+        maxQualityMenuClickAt = Date.now();
+        return;
+      }
+      try { best.selected = true; } catch {}
     }
     maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
     // 화질 전환은 스트림을 재초기화한다. 입장 후 480p 로 재생되던 중 전환하면 재초기화가
@@ -10563,11 +10566,21 @@
   // 쓸 수 없다. 켜지면 checked 속성이 붙고 aria-label이 '좁은 화면'(누르면 좁아짐)
   // 으로 바뀐다. 최근 UI는 이 둘보다 레이아웃의 _is_large_ 클래스가 먼저 바뀌므로
   // 함께 판정해야 상태 반영 중 버튼을 다시 눌러 좁은 화면으로 돌아가는 일을 막을 수 있다.
-  function isWideScreenOn(btn) {
-    const playerBox = document.querySelector(
-      "div#layout-body #live_player_layout, div#layout-body #player_layout",
+  // 넓은 화면은 플레이어가 아니라 치지직 '페이지' 상태라, 플레이어 영역 조상에 _is_large_
+  // 가 붙는다. 광고 중에는 #live_player_layout 이 아직 없고 광고 플레이어만 있으므로
+  // 광고 래퍼도 기준으로 삼는다(실측: T 적용 후 광고 래퍼를 감싼 main._container_ 에
+  // _is_large_ 가 붙고, 적용 전에는 어디에도 없다).
+  const WIDE_LAYOUT_ANCHOR_SELECTOR =
+    "div#layout-body #live_player_layout, div#layout-body #player_layout, " +
+    "div#layout-body .vod_player_wrap, div#layout-body [data-role='adVideoContainerEl']";
+  function isWideLayoutOn() {
+    return Array.from(document.querySelectorAll(WIDE_LAYOUT_ANCHOR_SELECTOR)).some(
+      (el) => !!el.closest('[class*="_is_large_"]'),
     );
-    if (playerBox?.closest?.('[class*="_is_large_"]')) return true;
+  }
+
+  function isWideScreenOn(btn) {
+    if (isWideLayoutOn()) return true;
     if (!btn) return false;
     return (
       btn.hasAttribute("checked") ||
@@ -10621,15 +10634,48 @@
   // ⚠ viewmode 는 토글이다. 이미 넓은 화면이면 절대 다시 누르지 않는다.
   const MULTIVIEW_WIDE_CLICK_COOLDOWN_MS = 1200;
   let lastMultiviewWideClickAt = 0;
+  let lastMultiviewWideShortcutAt = 0;
+
+  // 광고 중 수동 '다시 적용' 전용: 치지직 단축키 T 로 페이지 넓은 화면을 켠다.
+  //
+  // 광고 중에는 치지직 플레이어(.pzp-pc)와 viewmode 버튼이 아직 없어 누를 것이 없다.
+  // 치지직의 T 처리기(window keydown)는 플레이어 UI 와 무관하게 페이지 상태를 토글하고
+  // isTrusted 를 보지 않는다(실측: 광고 중 합성 keydown 으로 넓은 화면 적용 확인).
+  // ⚠ 처리기가 document.hasFocus() 를 요구한다. 부모가 버튼 클릭 직후 이 프레임에
+  //   포커스를 넘기므로 수동 요청일 때만 성립한다 → 자동 경로에서는 쓰지 않는다.
+  // ⚠ 토글이다. 판정 기준(광고 래퍼)이 없으면 켜졌는지 알 수 없으므로 보내지 않고,
+  //   상태 반영(~0.6초) 전 중복 입력으로 되돌아가지 않게 강제 요청에도 쿨다운을 건다.
+  function applyWideByShortcut() {
+    if (isWideLayoutOn()) return true;
+    if (!document.querySelector(WIDE_LAYOUT_ANCHOR_SELECTOR)) return false;
+    if (!document.hasFocus()) return false;
+    const now = Date.now();
+    if (now - lastMultiviewWideShortcutAt < MULTIVIEW_WIDE_CLICK_COOLDOWN_MS) return false;
+    lastMultiviewWideShortcutAt = now;
+    try {
+      (document.body || document.documentElement).dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "t",
+          code: "KeyT",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    } catch {}
+    return false; // 보냈다. 반영됐는지는 다음 확인에서 본다
+  }
 
   // 돌려주는 값은 '지금 목표 상태인가'. false 는 실패가 아니라 '아직' 이다.
-  function ensureMultiviewWide() {
-    if (!wideScreenAuto) return true; // 넓은 화면을 원하지 않는다
+  function ensureMultiviewWide(force = false) {
+    if (!wideScreenAuto && !force) return true; // 자동 적용이 꺼져 있고 수동 요청도 없다
     const button = findViewModeButton();
-    if (!isViewModeButtonReady(button)) return false; // 버튼이 아직 없다
+    if (!isViewModeButtonReady(button)) {
+      // 버튼이 아직 없다(대개 광고 중). 수동 요청이면 단축키 경로로 켠다.
+      return force ? applyWideByShortcut() : false;
+    }
     if (isWideScreenOn(button)) return true; // 이미 목표 상태 — 누르지 않는다
     const now = Date.now();
-    if (now - lastMultiviewWideClickAt < MULTIVIEW_WIDE_CLICK_COOLDOWN_MS) {
+    if (!force && now - lastMultiviewWideClickAt < MULTIVIEW_WIDE_CLICK_COOLDOWN_MS) {
       return false;
     }
     try {
@@ -10645,9 +10691,10 @@
   let multiviewWideTimer = 0;
   let multiviewWideStartedAt = 0;
 
-  function startMultiviewWideReconcile() {
+  function startMultiviewWideReconcile(force = false) {
+    if (force && ensureMultiviewWide(true)) return;
     if (multiviewWideTimer) return;
-    if (ensureMultiviewWide()) return; // 이미 됐으면 돌릴 필요가 없다
+    if (!force && ensureMultiviewWide()) return; // 이미 됐으면 돌릴 필요가 없다
     multiviewWideStartedAt = Date.now();
     multiviewWideTimer = window.setInterval(() => {
       if (
@@ -10665,6 +10712,11 @@
     if (e.source !== window) return;
     if (e.data?.source !== "cheese-reconcile-multiview-wide") return;
     startMultiviewWideReconcile();
+  });
+  window.addEventListener("message", (e) => {
+    if (e.source !== window) return;
+    if (e.data?.source !== "cheese-apply-multiview-wide") return;
+    startMultiviewWideReconcile(true);
   });
 
   // ── 멀티뷰 통합 스트림 정보용 스냅샷 ────────────────────────────────────

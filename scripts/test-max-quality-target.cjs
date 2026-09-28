@@ -13,8 +13,8 @@ const sabotages = {
   S1: ["content", 'let maxQualityTarget = "highest"', 'let maxQualityTarget = "720"'],
   S2: ["content", 'maxQualityTarget === "720" ? 720 : 0', 'maxQualityTarget === "720" ? 0 : 0'],
   S3: ["content", 'maxQualityTarget === "720" ? 720 : 0', 'maxQualityTarget === "highest" ? 720 : 0'],
-  S4: ["mixer", 'document.hidden && multiviewQualityPolicy !== "cap-480"', 'document.hidden && false'],
-  S5: ["mixer", 'document.hidden && multiviewQualityPolicy !== "cap-480"', 'document.hidden'],
+  S4: ["mixer", 'document.hidden && !["cap-480", "cap-720"].includes(multiviewQualityPolicy)', 'document.hidden && false'],
+  S5: ["mixer", 'document.hidden && !["cap-480", "cap-720"].includes(multiviewQualityPolicy)', 'document.hidden'],
   S6: ["content", 'if (IS_POPUP_PLAYER_FRAME || !maxQualityAuto) return 0;', 'if (!maxQualityAuto) return 0;'],
   S7: ["content", 'function resolveMaxQualityCap() {\n    if (IS_MULTIVIEW_FRAME) {', 'function resolveMaxQualityCap() {\n    if (false) {'],
   S8: ["mixer", '? maxQualityUserTouchedPage === currentPageKey : true', '? false : true'],
@@ -81,7 +81,7 @@ const menuSource = mixer.slice(menuStart, menuEnd);
 
 function runQuality({ heights, selected, cap, policy = "none", hidden = false,
   respect = true, setHeight = 0, touched = false, audioOnly = false,
-  pageKey = "live:fixture" }) {
+  menuClick = false, pageKey = "live:fixture" }) {
   const tracks = heights.map((height) => ({ height, selected: height === selected }));
   const video = { paused: false, readyState: 4, currentTime: 30,
     videoWidth: 1920, videoHeight: 1080 };
@@ -105,7 +105,7 @@ function runQuality({ heights, selected, cap, policy = "none", hidden = false,
     trackHeight: (track) => track.height,
     trackSelected: (track) => track.selected,
     isMaxQualityMenuChecked: () => false,
-    clickMaxQualityMenuItem: () => false,
+    clickMaxQualityMenuItem: () => menuClick,
     scheduleMaxQualityLiveEdgeCatchup: () => { catchups += 1; },
   };
   vm.runInNewContext(`${applySource}\napplyMaxQuality();`, context);
@@ -135,12 +135,20 @@ assert.equal(runQuality({ heights: [1080, 720], selected: 720, cap: 0 })
   .context.maxQualitySetHeight, 1080);
 
 for (const [policy, cap, expected] of [
-  ["none", 720, 0], ["none", 0, 0], ["cap-480", 480, 480],
+  ["none", 720, 0], ["none", 0, 0], ["cap-480", 480, 0],
 ]) {
   const result = runQuality({ heights: [1080, 720, 480], selected: 1080,
     cap, policy, hidden: true });
   assert.equal(result.context.maxQualitySetHeight, expected);
+  if (policy === "cap-480") {
+    assert.equal(result.tracks.find((track) => track.height === 480).selected, false,
+      "멀티뷰 메뉴 조작이 불가능할 때 내부 트랙을 직접 선택하지 않는다");
+  }
 }
+const menuApplied = runQuality({ heights: [1080, 720, 480], selected: 1080,
+  cap: 480, policy: "cap-480", hidden: true, menuClick: true });
+assert.equal(menuApplied.context.maxQualitySetHeight, 480,
+  "멀티뷰 화질 메뉴 경로가 성공하면 목표 화질을 기록한다");
 
 const manual = runQuality({ heights: [1080, 720, 480], selected: 1080,
   cap: 720, setHeight: 720, touched: true });
@@ -167,7 +175,7 @@ assert.equal(vod.context.maxQualitySetHeight, 720);
 assert.equal(vod.catchups, 0);
 
 assert.match(mixer, /if \(maxQualityCap !== maxQualityCapPrev \|\| multiviewPolicyChanged \|\| multiviewLifecycleChanged\) \{\s*maxQualitySetHeight = 0;/);
-assert.match(mixer, /multiviewQualityPolicy === "cap-480" && maxQualityCap > 0/);
+assert.match(mixer, /const multiviewPolicyActive = \["highest", "cap-480", "cap-720"\]\.includes\(multiviewQualityPolicy\)/);
 if (!sabotage) {
   for (const id of Object.keys(sabotages)) {
     const result = spawnSync(process.execPath, [__filename], {

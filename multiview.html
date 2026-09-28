@@ -155,6 +155,10 @@
           <div class="mv-chosen-head">
             <strong>고른 채널</strong>
             <span id="mvChosenCount">0 / 6</span>
+            <button type="button" class="mv-chosen-clear" id="mvChosenClear" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg>
+              <span>모두 비우기</span>
+            </button>
           </div>
           <p class="mv-hint">
             맨 위가 메인 채널입니다. 끌어서 순서를 바꿀 수 있습니다.
@@ -169,18 +173,24 @@
           </div>
 
           <label class="mv-main-quality">
-            <input type="checkbox" id="mvMainHighQuality" checked />
+            <input type="checkbox" id="mvMainHighQuality" />
             <span>메인 고화질 · 보조 480p</span>
           </label>
           <p class="mv-option-note">
-            메인 채널은 높은 화질을 사용하고 나머지 채널은 480p로 재생합니다.
-            메인 채널을 바꾸면 화질도 함께 전환되며 그때 잠깐 로딩이 생깁니다.
-            끄면 모두 480p라 전환이 바로 됩니다.
+            켜면 메인 채널은 최고 화질을 사용하고 보조 라이브는 480p로 제한합니다.
+            끄면 메인 라이브는 치지직의 기본 화질 선택을 따릅니다. 다시보기는 720p 상한을 유지합니다.
           </p>
           <label class="mv-main-quality mv-start-without-chat">
             <input type="checkbox" id="mvStartWithoutChat" />
             <span>채팅 없이 시작</span>
           </label>
+          <label class="mv-main-quality">
+            <input type="checkbox" id="mvStartMainMuted" />
+            <span>메인 채널 음소거로 시작</span>
+          </label>
+          <p class="mv-option-note">
+            최초 메인에만 적용되며, 이후 메인 변경은 채널별 음소거 설정을 따릅니다.
+          </p>
 
           <button type="button" class="mv-start" id="mvStart" disabled>
             멀티뷰 시작

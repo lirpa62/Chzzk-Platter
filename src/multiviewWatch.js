@@ -52,7 +52,8 @@
     chatChannelId: "",
     chatSide: "",
     chatEnabled: true,
-    mainHighQuality: true,
+    mainHighQuality: false,
+    startMainMuted: false,
     // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
     chatFollowsMain: true,
     // 전체 볼륨(0~1). 채널별 볼륨 위에 곱해지는 값이다.
@@ -123,14 +124,17 @@
   // 보여 준다(플레이어가 계속 0 을 주는 경우까지 '전환 중' 으로 덮지 않는다).
   const QUALITY_TRANSITION_MAX_MS = 5000;
 
+  function qualityForChannel(channel, isMain, mainHighQuality) {
+    const isVideo = channel.mediaType === "video";
+    if (isMain && mainHighQuality) return { quality: "high", qualityPolicy: "highest" };
+    if (isVideo) return { quality: "720", qualityPolicy: "cap-720" };
+    if (isMain) return { quality: "native", qualityPolicy: "native" };
+    return { quality: "480", qualityPolicy: "cap-480" };
+  }
+
   function frameUrl(channel, isMain, mainHighQuality) {
     const isVideo = channel.mediaType === "video";
-    const quality = isMain && mainHighQuality
-      ? "high"
-      : isVideo ? "720" : "480";
-    const qualityPolicy = quality === "high"
-      ? "highest"
-      : quality === "720" ? "cap-720" : "cap-480";
+    const { quality, qualityPolicy } = qualityForChannel(channel, isMain, mainHighQuality);
     // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
     // 통계 표의 정책 열이 첫 화면부터 맞는다(postState 는 프레임이 준비된 뒤에야
     // 불린다).
@@ -145,15 +149,14 @@
     url.searchParams.set("cheeseMulti", "1");
     if (isVideo) url.searchParams.set("cheeseMultiChannelId", channel.channelId);
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
-    // 메인만 소리, 나머지는 음소거로 시작한다.
-    url.searchParams.set("cheeseMultiMuted", isMain ? "0" : "1");
+    // 첫 프레임의 음소거 상태도 현재 채널별 오디오 상태와 일치시킨다.
+    url.searchParams.set("cheeseMultiMuted", effectiveMuted(channel.channelId) ? "1" : "0");
     url.searchParams.set("cheeseMultiQualityPolicy", qualityPolicy);
-    // 화질은 '지금 이 칸의 역할' 로 정한다(시작할 때만이 아니다). 메인이면 상한을
-    // 걸지 않고, 보조 라이브는 480p, 다시보기는 720p 상한을 건다. 메인이 바뀌면
-    // 두 칸 모두 다시 지시한다.
+    // 화질은 현재 역할에 맞춘다. 기본 설정에서는 메인 라이브가 치지직 기본 선택을
+    // 따르고, 보조 라이브는 480p, 다시보기는 720p 상한을 사용한다.
     // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
     //
-    if (quality !== "high") {
+    if (quality !== "high" && quality !== "native") {
       url.searchParams.set("cheeseMultiQuality", quality);
     }
     return url.toString();
@@ -167,12 +170,11 @@
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
     const channel = state.chosen.find((item) => item.channelId === channelId);
-    const quality = isMain && state.mainHighQuality
-      ? "high"
-      : channel?.mediaType === "video" ? "720" : "480";
-    const qualityPolicy = quality === "high"
-      ? "highest"
-      : quality === "720" ? "cap-720" : "cap-480";
+    const { quality, qualityPolicy } = qualityForChannel(
+      channel || { mediaType: "live" },
+      isMain,
+      state.mainHighQuality,
+    );
     const before = lastQuality.get(channelId);
     if (before !== quality) {
       lastQuality.set(channelId, quality);
@@ -1013,7 +1015,7 @@
       const images = badges
         .filter((badge) => badge.position === position && (!options.roleBadgesOnly ||
           BADGE_CHAT_ROLE_BADGE_URLS.has(badge.url) || BADGE_CHAT_ROLE_BADGE_LABELS.has(badge.label)))
-        .map((badge) => `<img class="mv-vod-chat-profile-badge" src="${esc(badge.url)}" alt="${esc(badge.label)}" width="16" height="16" loading="lazy" decoding="async">`)
+        .map((badge) => `<img class="mv-vod-chat-profile-badge" src="${esc(badge.url)}" alt="${esc(position === "after" ? "" : badge.label)}" width="16" height="16" loading="lazy" decoding="async">`)
         .join("");
       return images ? `<span class="mv-vod-chat-profile-badge-group">${images}</span>` : "";
     };
@@ -1558,6 +1560,21 @@
     } catch {}
   }
 
+  function requestMultiviewWideApply(channelId) {
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          source: MULTIVIEW_MESSAGE,
+          type: "APPLY_MULTIVIEW_WIDE",
+          channelId,
+        },
+        CHZZK_ORIGIN,
+      );
+    } catch {}
+  }
+
   // 칸 상태를 바꾸는 유일한 통로. 여기서 타일 덮개와 Quick 목록을 함께 갱신해
   // 두 곳이 다른 상태를 보여 주지 않게 한다.
   function setCellStatus(channelId, status, message) {
@@ -1580,6 +1597,7 @@
       cell.dataset.status = status;
       const overlay = cell.querySelector(".mv-cell-status");
       if (overlay) renderCellOverlay(overlay, channelId, status, message);
+      renderCellWidePrompt(channelId);
     }
     // Quick 패널이 닫혀 있어도 상태는 위에서 이미 갱신됐다. 열려 있을 때만 다시 그린다.
     if (!$("mvQuick")?.hidden) renderQuick();
@@ -1625,6 +1643,14 @@
         : "") +
       `<span class="mv-cell-status-text">${esc(text)}</span>` +
       `<span class="mv-cell-status-actions">${actions}</span>`;
+  }
+
+  function renderCellWidePrompt(channelId) {
+    const cell = cells.get(channelId);
+    const prompt = cell?.querySelector(".mv-cell-wide-prompt");
+    if (!prompt) return;
+    prompt.hidden = currentStatus(channelId) !== "ready" ||
+      cell.dataset.widePromptPending !== "true" || cell.dataset.wideScreenOn === "true";
   }
 
   // '방송 다시 확인': 지금 다시 켜졌을 때만 프레임을 새로 불러온다.
@@ -1740,6 +1766,16 @@
       const overlay = document.createElement("div");
       overlay.className = "mv-cell-status";
 
+      const widePrompt = document.createElement("div");
+      widePrompt.className = "mv-cell-wide-prompt";
+      widePrompt.hidden = true;
+      widePrompt.innerHTML =
+        '<span aria-live="polite">화면 맞춤 지연</span>' +
+        `<button type="button" data-mv-wide-apply="${esc(channel.channelId)}" ` +
+        `aria-label="${esc(channel.channelName)} 넓은 화면 다시 적용" ` +
+        'class="mv-custom-tooltip" data-tooltip="자동 적용이 늦으면 다시 누르거나 플레이어에서 T를 누르세요">' +
+        '다시 적용 <kbd>T</kbd></button>';
+
       // 칸 도구 모음(자리 바꾸기 손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다.
       const tools = document.createElement("div");
       tools.className = "mv-cell-tools";
@@ -1799,6 +1835,7 @@
       tools.appendChild(close);
       cell.appendChild(box);
       cell.appendChild(overlay);
+      cell.appendChild(widePrompt);
       cell.appendChild(tools);
       cell.appendChild(promote);
       cells.set(channel.channelId, cell);
@@ -4870,6 +4907,14 @@
     state.chatSide = setup.chatSide;
     state.chatEnabled = setup.chatEnabled;
     state.mainHighQuality = setup.mainHighQuality;
+    state.startMainMuted = setup.startMainMuted;
+    if (state.startMainMuted && !channelAudio.has(state.mainId)) {
+      channelAudio.set(state.mainId, {
+        volume: 1,
+        muted: true,
+        muteTouched: false,
+      });
+    }
     $("mvStage").classList.toggle("is-chat-folded", !state.chatEnabled);
     $("mvChatToggle").setAttribute("aria-expanded", String(state.chatEnabled));
     $("mvChatExpand").hidden = state.chatEnabled;
@@ -4925,7 +4970,8 @@
       layoutId: layout.id,
       chatSide,
       chatEnabled: raw.chatEnabled !== false,
-      mainHighQuality: raw.mainHighQuality !== false,
+      mainHighQuality: raw.mainHighQuality === true,
+      startMainMuted: raw.startMainMuted === true,
     };
   }
 
@@ -5333,7 +5379,10 @@
           `<button type="button" class="mv-quick-drop mv-custom-tooltip" data-mv-quick-drop="${id}"` +
           `${locked ? " disabled" : ""}` +
           ` data-tooltip="${locked ? "멀티뷰는 최소 2개 채널이 필요합니다." : "멀티뷰에서 제거"}"` +
-          ` aria-label="${esc(c.channelName)} 빼기">×</button></li>`
+          ` aria-label="${esc(c.channelName)} 빼기">` +
+          `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+          `stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>` +
+          `</button></li>`
         );
       })
       .join("");
@@ -6181,6 +6230,7 @@
           chatSide: state.chatSide,
           chatEnabled: state.chatEnabled,
           mainHighQuality: state.mainHighQuality,
+          startMainMuted: state.startMainMuted,
         },
       });
     } catch {}
@@ -6508,6 +6558,15 @@
       // ⚠ 프레임을 다시 로드하지 않고, 덮개로 덮지도 않는다. 그 칸에 '지금 다시
       //   맞춰라' 고만 알린다(결과를 기다리는 상태로 들어가지 않는다).
       requestMultiviewUiReconcile(reapply.dataset.mvReapply);
+      return;
+    }
+    const wideApply = target.closest?.("[data-mv-wide-apply]");
+    if (wideApply) {
+      const channelId = wideApply.dataset.mvWideApply;
+      requestMultiviewWideApply(channelId);
+      try {
+        cells.get(channelId)?.querySelector("iframe")?.contentWindow?.focus();
+      } catch {}
       return;
     }
     const recheck = target.closest?.("[data-mv-recheck]");
@@ -7016,6 +7075,7 @@
     "FRAME_MIXER_STATE",
     "FRAME_MIXER_COMMAND_RESULT",
     "FRAME_VOD_CHAT_PLAYBACK",
+    "FRAME_AD_STATUS",
   ]);
   window.addEventListener("message", (event) => {
     if (event.origin !== CHZZK_ORIGIN) return;
@@ -7029,6 +7089,24 @@
     //   보내는 것을 막는다.
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame || event.source !== frame.contentWindow) return;
+
+    if (data.type === "FRAME_AD_STATUS") {
+      if (
+        typeof data.adPlaying !== "boolean" ||
+        typeof data.wideScreenOn !== "boolean"
+      ) return;
+      const cell = cells.get(channelId);
+      if (!cell) return;
+      cell.dataset.adPlaying = String(data.adPlaying);
+      cell.dataset.wideScreenOn = String(data.wideScreenOn);
+      if (data.wideScreenOn) {
+        cell.dataset.widePromptPending = "false";
+      } else if (data.adPlaying) {
+        cell.dataset.widePromptPending = "true";
+      }
+      renderCellWidePrompt(channelId);
+      return;
+    }
 
     if (data.type === "FRAME_READY") {
       if (currentStatus(channelId) === "ready" && !isVideoSlot(channelId)) {

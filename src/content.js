@@ -270,7 +270,7 @@
   );
   // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
-  const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480", "cap-720"]);
+  const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480", "cap-720", "native"]);
   // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
   const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
   // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
@@ -299,7 +299,7 @@
     : IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiQuality") === "480"
       ? "cap-480"
       : IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiQuality") === "720"
-        ? "cap-720" : "highest";
+        ? "cap-720" : IS_MULTIVIEW_FRAME ? "native" : "highest";
   let multiviewQualityReconcileToken = 0;
 
   // 우리 팝업 플레이어 iframe 안인지(부모가 ?cheesePopup=1 을 붙여 띄운다). 여기서는
@@ -20256,10 +20256,17 @@
   function isWideScreenModeOn() {
     // 최근 치지직 UI는 버튼 클래스/aria-label 갱신보다 레이아웃의 _is_large_ 클래스가
     // 먼저 붙는 경우가 있다. 플레이어 조상으로 범위를 한정해 해시가 바뀌어도 감지한다.
-    const playerBox = document.querySelector(
-      "div#layout-body #live_player_layout, div#layout-body #player_layout",
+    // 광고 중에는 #live_player_layout 이 없고 광고 플레이어만 있다. 넓은 화면은 페이지
+    // 상태라 광고 래퍼의 조상(main._container_)에도 _is_large_ 가 붙는다(실측).
+    const layoutAnchors = document.querySelectorAll(
+      "div#layout-body #live_player_layout, div#layout-body #player_layout, " +
+        "div#layout-body .vod_player_wrap, div#layout-body [data-role='adVideoContainerEl']",
     );
-    if (playerBox?.closest?.('[class*="_is_large_"]')) return true;
+    if (
+      Array.from(layoutAnchors).some((el) => el.closest('[class*="_is_large_"]'))
+    ) {
+      return true;
+    }
 
     const btn =
       document.querySelector(".pzp-pc__viewmode-button") ||
@@ -21742,6 +21749,7 @@
     let currentVideoSource = "";
     let multiviewAdPlaying = false;
     let multiviewAdCheckTimer = 0;
+    let lastReportedMultiviewAdState = "";
     let endedNotified = false;
     const MULTIVIEW_MIXER_COMMANDS = new Set([
       "MIXER_GET_STATE", "MIXER_SET_ENABLED", "MIXER_SET_GAIN",
@@ -21971,9 +21979,25 @@
 
     function checkMultiviewAdTransition() {
       multiviewAdCheckTimer = 0;
+      const previous = multiviewAdPlaying;
       const next = typeof isAdPlaying === "function" && isAdPlaying();
-      if (multiviewAdPlaying && !next) reconcileMultiviewQuality();
       multiviewAdPlaying = next;
+      reportMultiviewAdState();
+      if (previous && !next) {
+        reconcileMultiviewQuality();
+        scheduleMultiviewUiReconcile(250);
+      }
+    }
+
+    function reportMultiviewAdState() {
+      const wideScreenOn = isWideScreenModeOn();
+      const key = `${multiviewAdPlaying}:${wideScreenOn}`;
+      if (key === lastReportedMultiviewAdState) return;
+      lastReportedMultiviewAdState = key;
+      notifyParent("FRAME_AD_STATUS", {
+        adPlaying: multiviewAdPlaying,
+        wideScreenOn,
+      });
     }
 
     function scheduleMultiviewAdCheck() {
@@ -21993,6 +22017,7 @@
       currentVideo = video;
       currentVideoSource = String(video.currentSrc || video.src || "");
       multiviewAdPlaying = typeof isAdPlaying === "function" && isAdPlaying();
+      reportMultiviewAdState();
       syncVideoGeneration += 1;
       syncSeekAt = 0;
       syncRateUserOverride = false;
@@ -22370,6 +22395,7 @@
         multiviewReconcileTimer = 0;
         ensureMultiviewChatFold();
         requestMultiviewWideEnsure();
+        window.setTimeout(reportMultiviewAdState, 150);
       }, delay);
     }
 
@@ -22434,11 +22460,23 @@
       if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
       const data = event.data;
       if (data?.source !== MULTIVIEW_MESSAGE) return;
-      if (data.type !== "RECONCILE_MULTIVIEW_UI") return;
+      if (
+        data.type !== "RECONCILE_MULTIVIEW_UI" &&
+        data.type !== "APPLY_MULTIVIEW_WIDE"
+      ) return;
       if (
         typeof data.channelId !== "string" ||
         data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID
       ) {
+        return;
+      }
+      if (data.type === "APPLY_MULTIVIEW_WIDE") {
+        window.postMessage(
+          { source: "cheese-apply-multiview-wide" },
+          location.origin,
+        );
+        window.setTimeout(reportMultiviewAdState, 500);
+        window.setTimeout(reportMultiviewAdState, 1300);
         return;
       }
       startMultiviewBootReconcile(); // 다시 잠깐 적극적으로 맞춘다

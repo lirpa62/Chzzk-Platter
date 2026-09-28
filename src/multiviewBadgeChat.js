@@ -763,7 +763,8 @@
           badges.forEach((badge) => {
             const image = document.createElement("img");
             image.src = badge.src;
-            image.alt = badge.alt;
+            // 배지 모아 챗처럼 닉네임 뒤쪽 마크는 장식 이미지로만 표시한다.
+            image.alt = position === "after" ? "" : badge.alt;
             image.width = 18;
             image.height = 18;
             image.decoding = "async";

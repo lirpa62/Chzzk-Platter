@@ -97,6 +97,7 @@ assert.match(source, /aside#aside-chatting/);
 assert.match(source, /\[class\*="manager"\]/);
 assert.match(source, /getAttribute\("data-role"\)/);
 assert.match(source, /new win\.MutationObserver/);
+assert.match(source, /image\.alt = position === "after" \? "" : badge\.alt/);
 assert.match(source, /cheese-mv-badge-chat-trigger/);
 assert.match(source, /cheese-mv-badge-chat-popover/);
 assert.match(source, /CHAT_FONT_SCALE_STEPS = Object\.freeze\(\[100, 125, 150, 175\]\)/);

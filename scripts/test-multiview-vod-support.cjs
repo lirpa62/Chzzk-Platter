@@ -40,11 +40,11 @@ check([...multiviewAchievementMap].every(([id, url]) => canonicalAchievementMap.
   "멀티뷰 업적 이미지 URL이 기존 검색 배지 표와 일치");
 
 console.log("[다시보기 화질] 라이브 정책은 유지하고 VOD 상한은 720p");
-check(/isVideo \? "720" : "480"/.test(watch), "VOD 칸은 720p, 라이브 칸은 480p를 사용");
-check(/quality === "720" \? "cap-720" : "cap-480"/.test(watch), "프레임 상태에 매체별 상한 전달");
-check(/"highest", "cap-480", "cap-720"/.test(content), "격리 월드가 720p 정책을 허용");
+check(/if \(isVideo\) return \{ quality: "720", qualityPolicy: "cap-720" \}/.test(watch), "다시보기는 메인 고화질 미선택 시 720p 상한");
+check(/if \(isMain\) return \{ quality: "native", qualityPolicy: "native" \}/.test(watch), "메인 라이브는 기본 화질 선택을 따름");
+check(/"highest", "cap-480", "cap-720", "native"/.test(content), "격리 월드가 기본 화질 정책을 허용");
 check(/multiviewQualityPolicy === "cap-720"\) return 720/.test(content), "VOD 정책에서 720 상한 계산");
-check(/"highest", "cap-480", "cap-720"/.test(mixer), "MAIN 플레이어가 VOD 정책을 허용");
+check(/"highest", "cap-480", "cap-720", "native"/.test(mixer), "MAIN 플레이어가 기본 화질 정책을 허용");
 check(/\["cap-480", "cap-720"\]\.includes\(multiviewQualityPolicy\)/.test(mixer), "두 상한 모두 트랙 재시도와 숨김 탭 정책에 반영");
 
 console.log("\n[다시보기 설정] 토글·저장·기존 기능 게이트");
@@ -116,7 +116,7 @@ check(specialCardRenderer.includes("const content = renderVodChatText(message);"
   /\.mv-vod-chat-special-head \.mv-vod-chat-video-label\s*\{[^}]*color:\s*#00ffa3/s.test(css),
   "영상 후원 라벨을 닉네임 옆에 강조하고 빈 후원 본문은 비워 둠");
 const badgeRenderer = watch.slice(watch.indexOf("const renderBadges ="), watch.indexOf("const time = rowTime"));
-check(/mv-vod-chat-profile-badge/.test(badgeRenderer) && /alt="\$\{esc\(badge\.label\)\}"/.test(badgeRenderer) && !/title=/.test(badgeRenderer), "닉네임 배지의 기본 title 툴팁을 제거하고 alt는 유지");
+check(/mv-vod-chat-profile-badge/.test(badgeRenderer) && /alt="\$\{esc\(position === "after" \? "" : badge\.label\)\}"/.test(badgeRenderer) && !/title=/.test(badgeRenderer), "닉네임 앞 배지는 대체 텍스트를 유지하고 뒤쪽 장식 배지는 빈 alt로 표시");
 check(!/\.mv-vod-chat-row\.is-current/.test(css) && !/is-current/.test(watch.slice(watch.indexOf("function renderVodChatRow"), watch.indexOf("function renderVodChat()"))), "현재 재생 채팅 강조 배경·테두리·그림자를 사용하지 않음");
 check(/broadcastTimeAt/.test(read("src/multiviewVodChat.js")) && /mvVodChatTimeMode/.test(watchHtml), "재생 시간과 실제 방송 시각을 전환");
 check(/let vodChatTimeMode = "broadcast"/.test(watch) &&

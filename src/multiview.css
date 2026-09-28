@@ -1121,10 +1121,48 @@ button.mv-live-more {
   padding: 12px;
 }
 .mv-chosen-head {
-  align-items: baseline;
+  align-items: center;
   display: flex;
   gap: 8px;
-  justify-content: space-between;
+  min-width: 0;
+}
+.mv-chosen-clear {
+  align-items: center;
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 7px;
+}
+.mv-chosen-clear:hover:not(:disabled) {
+  border-color: #ff8a8a;
+  color: #ff8a8a;
+}
+.mv-chosen-clear:focus-visible,
+.mv-chosen-remove:focus-visible,
+.mv-quick-close:focus-visible,
+.mv-quick-drop:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 2px;
+}
+.mv-chosen-clear:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.mv-chosen-clear svg,
+.mv-chosen-remove svg,
+.mv-quick-close svg,
+.mv-quick-drop svg {
+  display: block;
+  flex: none;
+  pointer-events: none;
 }
 .mv-hint {
   color: var(--popup-muted, #9aa1a9);
@@ -1182,17 +1220,23 @@ button.mv-live-more {
   white-space: nowrap;
 }
 .mv-chosen-remove {
+  align-items: center;
   background: none;
   border: 0;
+  border-radius: 5px;
   color: var(--popup-muted, #9aa1a9);
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  display: inline-flex;
+  flex: none;
+  height: 26px;
   margin-left: auto;
-  padding: 2px 4px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
 }
 .mv-chosen-remove:hover {
-  color: var(--popup-text, #e9ecef);
+  background: rgba(255, 138, 138, 0.12);
+  color: #ff8a8a;
 }
 
 /* ── 배치 고르기 ───────────────────────────────────────────────────── */
@@ -1488,6 +1532,51 @@ button.mv-live-more {
   line-height: 1.35;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+.mv-cell-wide-prompt {
+  align-items: center;
+  background: rgba(20, 20, 24, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 6px;
+  color: #fff;
+  display: flex;
+  font-size: 10px;
+  gap: 7px;
+  left: 50%;
+  max-width: calc(100% - 16px);
+  padding: 4px 6px;
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 4;
+}
+.mv-cell-wide-prompt[hidden] {
+  display: none;
+}
+.mv-cell-wide-prompt button {
+  align-items: center;
+  background: #6f42c1;
+  border: 1px solid #8e6bd0;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 600;
+  gap: 4px;
+  padding: 3px 5px;
+}
+.mv-cell-wide-prompt button:hover {
+  background: #8055d1;
+}
+.mv-cell-wide-prompt kbd {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 3px;
+  font: inherit;
+  line-height: 1;
+  padding: 2px 3px;
 }
 /* 방송 종료는 실패와 구분되게 조금 다르게 보인다(덜 경고처럼). */
 .mv-cell[data-status="ended"] .mv-cell-status {
@@ -3119,13 +3208,22 @@ html[data-theme="dark"]
   color: #ff8a8a;
 }
 .mv-quick-close {
+  align-items: center;
   background: none;
   border: 0;
+  border-radius: 6px;
   color: var(--popup-muted, #9aa1a9);
   cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 0 4px;
+  display: inline-flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+.mv-quick-close:hover {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+  color: var(--popup-text, #e9ecef);
 }
 .mv-quick-body {
   display: flex;
@@ -3176,7 +3274,7 @@ html[data-theme="dark"]
   font-weight: 700;
   padding: 1px 4px;
 }
-/* 칩 본문 = '이 채널을 바꾸기' 버튼. × 와 겹치지 않게 따로 둔다. */
+/* 채널 교체와 제거 동작은 서로 다른 버튼으로 둔다. */
 .mv-quick-select {
   align-items: center;
   background: none;
@@ -3205,19 +3303,25 @@ html[data-theme="dark"]
   white-space: nowrap;
 }
 .mv-quick-drop {
+  align-items: center;
   background: none;
   border: 0;
+  border-radius: 50%;
   color: var(--popup-muted, #9aa1a9);
   cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  padding: 0 2px;
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
 }
 .mv-quick-drop:disabled {
   cursor: default;
   opacity: 0.35;
 }
 .mv-quick-drop:hover:not(:disabled) {
+  background: rgba(255, 138, 138, 0.12);
   color: #ff8a8a;
 }
 .mv-quick-add {

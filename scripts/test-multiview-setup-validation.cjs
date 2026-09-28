@@ -49,7 +49,8 @@ function validateSetup(raw) {
     layoutId: layout.id,
     chatSide,
     chatEnabled: raw.chatEnabled !== false,
-    mainHighQuality: raw.mainHighQuality !== false,
+    mainHighQuality: raw.mainHighQuality === true,
+    startMainMuted: raw.startMainMuted === true,
   };
 }
 
@@ -88,12 +89,14 @@ const two = validateSetup({
   chatSide: "left",
   chatEnabled: false,
   mainHighQuality: false,
+  startMainMuted: true,
 });
 ok(two?.chosen.length === 2, "2채널을 그대로 받는다");
 ok(two?.layoutId === "right-1", "허용되는 배치는 유지한다");
 ok(two?.chatSide === "left", "허용되는 채팅 자리는 유지한다");
 ok(two?.chatEnabled === false, "채팅 없이 시작 선택을 보존한다");
 ok(two?.mainHighQuality === false, "mainHighQuality false 를 지킨다");
+ok(two?.startMainMuted === true, "메인 음소거로 시작 선택을 보존한다");
 const replay = validateSetup({
   chosen: [ch(A), { channelId: "video:902", mediaType: "video", videoNo: "902", ownerChannelId: B, adult: true }],
 });
@@ -103,12 +106,20 @@ ok(replay?.chosen[1].ownerChannelId === B && replay.chosen[1].adult === true,
 ok(validateSetup({ chosen: [ch(A), { channelId: "video:bad", mediaType: "video", videoNo: "bad" }] }) === null,
   "잘못된 다시보기 번호는 거부한다");
 ok(
-  validateSetup({ chosen: [ch(A), ch(B)] })?.mainHighQuality === true,
-  "값이 없으면 고화질 시작이 기본",
+  validateSetup({ chosen: [ch(A), ch(B)] })?.mainHighQuality === false,
+  "값이 없으면 메인 고화질을 선택하지 않는 것이 기본",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)], mainHighQuality: true })?.mainHighQuality === true,
+  "명시적으로 선택한 메인 고화질을 보존",
 );
 ok(
   validateSetup({ chosen: [ch(A), ch(B)] })?.chatEnabled === true,
   "이전 handoff 값은 채팅 사용으로 기본 처리",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)] })?.startMainMuted === false,
+  "이전 handoff 값은 메인 음소거 없이 시작하는 것으로 처리",
 );
 
 console.log("\n[어긋난 값] 안전한 기본값으로 고친다");

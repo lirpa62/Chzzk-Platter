@@ -304,6 +304,12 @@ const checks = [];
   );
 
   await test(
+    "메인 고화질은 기본 해제 상태다",
+    `check(document.getElementById('mvMainHighQuality').checked===false,
+       '메인 고화질이 기본 선택되어 있다');`,
+  );
+
+  await test(
     "채널이 없을 때 배치 안내가 grid 전체 너비를 쓴다",
     `const hint=document.querySelector('#mvLayoutGrid > .mv-hint');
      check(hint,'빈 배치 안내가 없다');
@@ -998,8 +1004,32 @@ const checks = [];
   );
 
   await test(
+    "고른 채널을 모두 비우면 선택 표시와 시작 상태가 초기화된다",
+    `const clear=document.getElementById('mvChosenClear');
+     check(clear&&!clear.disabled,'선택 중인데 모두 비우기 버튼이 비활성화됐다');
+     clear.click();
+     check(document.querySelectorAll('#mvChosenList .mv-chosen-item').length===0,
+       '고른 채널 목록이 비워지지 않았다');
+     check(document.getElementById('mvChosenCount').textContent.includes('0 / 6'),
+       '개수 표시가 0으로 갱신되지 않았다');
+     check(document.getElementById('mvStart').disabled,'채널이 없는데 시작 버튼이 활성화됐다');
+     check(clear.disabled,'비운 뒤 모두 비우기 버튼이 비활성화되지 않았다');
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(250);
+     const cards=[...document.querySelectorAll('#mvChannelList .mv-card')].slice(0,2);
+     check(cards.length===2,'선택 복구용 채널 카드가 부족하다');
+     cards.forEach(card=>card.click());
+     check(document.querySelectorAll('#mvChosenList .mv-chosen-item').length===2,
+       '모두 비운 뒤 채널을 다시 선택할 수 없다');`,
+  );
+
+  await test(
     "시작하면 구성을 넘기고 시청 화면을 새 탭으로 연다",
-    `document.getElementById('mvStart').click();
+    `const startMuted=document.getElementById('mvStartMainMuted');
+     check(startMuted&&!startMuted.checked,'메인 음소거 시작 기본값이 켜져 있다');
+     startMuted.checked=true;
+     startMuted.dispatchEvent(new Event('change',{bubbles:true}));
+     document.getElementById('mvStart').click();
      await wait(200);
      // 고정 키가 아니라 탭마다 다른 id 로 저장돼야 한다.
      const keys=Object.keys(window.sessionStore)
@@ -1009,6 +1039,7 @@ const checks = [];
        '고정 키에 저장됐다(탭끼리 덮어쓴다)');
      const setup=window.sessionStore[keys[0]];
      check(setup.chosen.length===2,'넘긴 채널이 2개가 아니다');
+     check(setup.startMainMuted===true,'메인 음소거 시작을 handoff에 담지 않았다');
      check(setup.layoutId,'배치가 비어 있다');
      check(window.openedTabs.length===1,'새 탭이 열리지 않았다');
      const opened=window.openedTabs[0];
@@ -1230,6 +1261,7 @@ const checks = [];
     };`);
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8")
     .replace("const state = {", "const state = window.__mvState = {")
+    .replace("  function frameUrl(", "  window.__testQualityForChannel=qualityForChannel;\n  window.__testFrameUrl=frameUrl;\n  function frameUrl(")
     .replace("  function rebaseSyncOffsets(",
       "  window.__testRebase = rebaseSyncOffsets;\n  function rebaseSyncOffsets(")
     .replace("  function rebaseGroupOffsets(",
@@ -1247,28 +1279,71 @@ const checks = [];
   await evaluate("new Promise(r=>setTimeout(r,300))");
 
   await test(
-    "시청 화면이 프레임을 만들고 메인만 소리가 켜진다",
+    "시청 화면이 프레임을 만들고 메인 음소거 시작을 적용한다",
     `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      check(srcs.length===2,'멀티뷰 프레임이 2개가 아니라 '+srcs.length+'개');
      const mains=srcs.filter(s=>s.includes('cheeseMultiMain=1'));
      check(mains.length===1,'메인 프레임이 1개가 아니라 '+mains.length+'개');
-     check(mains[0].includes('cheeseMultiMuted=0'),'메인이 음소거로 시작한다');
+     check(new URL(mains[0]).searchParams.get('cheeseMultiMuted')==='1',
+       '선택한 메인 음소거 시작이 프레임에 적용되지 않았다');
      const subs=srcs.filter(s=>s.includes('cheeseMultiMain=0'));
      check(subs.every(s=>s.includes('cheeseMultiMuted=1')),'보조가 음소거가 아니다');`,
   );
 
   await test(
-    "메인 고화질 선택 시 메인에는 화질 상한이 붙지 않는다",
+    "시작 음소거는 최초 메인에만 적용되고 메인을 바꾸면 기본 상태로 복귀한다",
+    `const initial=window.__mvState.mainId;
+     const aux=window.__mvState.chosen.find(c=>c.channelId!==initial).channelId;
+     const audio=window.__testResources.channelAudio.get(initial);
+     check(audio?.muted===true&&audio.muteTouched===false,
+       '최초 메인이 사용자 조작 없이 음소거 상태가 아니다');
+     window.__testSetMain(aux);
+     check(window.__testResources.channelAudio.get(aux).muted===false,
+       '새 메인이 기본 소리 켜짐 상태가 아니다');
+     window.__testSetMain(initial);
+     check(window.__testResources.channelAudio.get(initial).muted===false,
+       '초기 음소거가 메인 변경 뒤에도 계속 강제된다');
+     check(window.__testResources.channelAudio.get(initial).muteTouched===false,
+       '초기 음소거가 사용자 조작으로 잘못 기록됐다');`,
+  );
+
+  await test(
+    "기본 설정은 메인 라이브 화질을 치지직에 맡기고 보조만 제한한다",
     `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const main=srcs.find(s=>s.includes('cheeseMultiMain=1'));
      const sub=srcs.find(s=>s.includes('cheeseMultiMain=0'));
      const mainUrl=new URL(main),subUrl=new URL(sub);
-     check(mainUrl.searchParams.get('cheeseMultiQualityPolicy')==='highest',
-       '메인의 명시적 최고 화질 정책이 없다');
+     check(mainUrl.searchParams.get('cheeseMultiQualityPolicy')==='native',
+       '메인 라이브가 기본 화질 정책을 따르지 않는다');
      check(!mainUrl.searchParams.has('cheeseMultiQuality'),'메인에 화질 상한이 붙었다');
      check(subUrl.searchParams.get('cheeseMultiQualityPolicy')==='cap-480',
        '보조의 명시적 480 상한 정책이 없다');
      check(subUrl.searchParams.get('cheeseMultiQuality')==='480','보조에 480 상한이 없다');`,
+  );
+
+  await test(
+    "메인 고화질을 명시적으로 켜면 최고화질 정책을 유지한다",
+    `const live=window.__testQualityForChannel({mediaType:'live'},true,true);
+     const vod=window.__testQualityForChannel({mediaType:'video'},true,true);
+     check(live.qualityPolicy==='highest'&&live.quality==='high',
+       '메인 라이브의 명시적 고화질 정책이 없다');
+     check(vod.qualityPolicy==='highest'&&vod.quality==='high',
+       '메인 다시보기의 명시적 고화질 정책이 없다');`,
+  );
+
+  await test(
+    "라이브와 다시보기의 프레임 URL을 각각 생성한다",
+    `const vodUrl=new URL(window.__testFrameUrl({
+       channelId:'video:123',mediaType:'video',videoNo:'123'
+     },true,false));
+     check(vodUrl.pathname==='/video/123','다시보기 경로가 잘못됐다: '+vodUrl.pathname);
+     check(vodUrl.searchParams.get('cheeseMultiChannelId')==='video:123',
+       '다시보기 채널 id가 전달되지 않는다');
+     const liveUrl=new URL(window.__testFrameUrl({
+       channelId:'a'.repeat(32),mediaType:'live'
+     },true,false));
+     check(liveUrl.pathname==='/live/'+'a'.repeat(32),
+       '라이브 경로가 잘못됐다: '+liveUrl.pathname);`,
   );
 
   await test(

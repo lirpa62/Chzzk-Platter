@@ -34,8 +34,9 @@
     chosen: [], // [{channelId, channelName, channelImageUrl, liveTitle, viewers}]
     layoutId: "",
     chatSide: "",
-    mainHighQuality: true,
+    mainHighQuality: false,
     startWithoutChat: false,
+    startMainMuted: false,
     listCache: new Map(),
     livePager: null,
     searchPager: null,
@@ -696,6 +697,8 @@
   function renderChosen() {
     const list = $("mvChosenList");
     $("mvChosenCount").textContent = `${state.chosen.length} / ${MAX_CHANNELS}`;
+    const clearButton = $("mvChosenClear");
+    if (clearButton) clearButton.disabled = state.chosen.length === 0;
     list.innerHTML = state.chosen
       .map(
         (c, i) =>
@@ -704,7 +707,10 @@
           `<img src="${esc(safeImageUrl(SOURCES.profileThumb(c.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
           `<span class="mv-chosen-name">${esc(c.channelName)}</span>` +
           `<button type="button" class="mv-chosen-remove" data-mv-remove="${esc(c.channelId)}" ` +
-          `aria-label="${esc(c.channelName)} 빼기">×</button></li>`,
+          `aria-label="${esc(c.channelName)} 빼기">` +
+          `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+          `stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"></path></svg>` +
+          `</button></li>`,
       )
       .join("");
     renderLayouts();
@@ -803,6 +809,7 @@
       chatSide: side,
       mainHighQuality: state.mainHighQuality,
       chatEnabled: !state.startWithoutChat,
+      startMainMuted: state.startMainMuted,
     };
     // 기존 멀티뷰를 고치는 중이면 그 id 를 이어 쓰고, 새로 시작하면 새 id 를 만든다.
     const handoffId = state.handoffId || newHandoffId();
@@ -889,6 +896,12 @@
       );
       renderChosen();
       syncPicked(); // 목록을 다시 그리지 않는다(깜빡임 방지)
+      return;
+    }
+    if (event.target.closest?.("#mvChosenClear")) {
+      state.chosen = [];
+      renderChosen();
+      syncPicked();
       return;
     }
     const channel = event.target.closest?.("[data-mv-pick]");
@@ -978,6 +991,9 @@
   $("mvStartWithoutChat")?.addEventListener("change", (event) => {
     state.startWithoutChat = event.target.checked;
   });
+  $("mvStartMainMuted")?.addEventListener("change", (event) => {
+    state.startMainMuted = event.target.checked;
+  });
 
   // 고른 채널 순서 바꾸기(맨 위가 메인).
   let dragId = "";
@@ -1042,12 +1058,15 @@
           state.chosen = chosen;
           if (stored.layoutId) state.layoutId = String(stored.layoutId);
           if (stored.chatSide) state.chatSide = String(stored.chatSide);
-          state.mainHighQuality = stored.mainHighQuality !== false;
+          state.mainHighQuality = stored.mainHighQuality === true;
           const box = $("mvMainHighQuality");
           if (box) box.checked = state.mainHighQuality;
           state.startWithoutChat = stored.chatEnabled === false;
           const chatBox = $("mvStartWithoutChat");
           if (chatBox) chatBox.checked = state.startWithoutChat;
+          state.startMainMuted = stored.startMainMuted === true;
+          const mutedBox = $("mvStartMainMuted");
+          if (mutedBox) mutedBox.checked = state.startMainMuted;
         }
       } catch {}
     }
