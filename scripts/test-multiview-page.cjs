@@ -1522,11 +1522,11 @@ const checks = [];
      check(getComputedStyle(selectedLabel).display==='none',
        '좁은 Quick 채널 검색 셀에서 선택 채널 탭의 텍스트 대신 아이콘을 표시하지 않는다: '+
        quickSources.getBoundingClientRect().width+'px / '+getComputedStyle(selectedLabel).display);
-     const quickTooltip=document.getElementById('mvTooltip');
+     const selectedChannelTooltip=document.getElementById('mvTooltip');
      selectedQuickTab.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
-     check(!quickTooltip.hidden,'아이콘만 남은 Quick 선택 채널 버튼에 툴팁을 표시하지 않는다');
+     check(!selectedChannelTooltip.hidden,'아이콘만 남은 Quick 선택 채널 버튼에 툴팁을 표시하지 않는다');
      quickSources.style.width='700px';window.dispatchEvent(new Event('resize'));
-     check(quickTooltip.hidden,'문구가 보이는 Quick 선택 채널 버튼에 중복 툴팁을 표시한다');
+     check(selectedChannelTooltip.hidden,'문구가 보이는 Quick 선택 채널 버튼에 중복 툴팁을 표시한다');
      quickSources.style.width=quickSourcesWidth;
      quick.querySelector('[data-mv-quick-video-source="channel-search"]').click();await wait(100);
      check(!document.getElementById('mvQuickVideoChannelSearch').hidden,
@@ -2002,7 +2002,8 @@ const checks = [];
      const toNew=msgs.find(m=>m.data.channelId===subId);
      const toOld=msgs.find(m=>m.data.channelId===prevMain);
      check(toNew && toNew.data.muted===false,'새 메인에 소리 켜기 지시가 없다');
-     check(toNew.data.quality==='high','새 메인 화질 지시가 high 가 아니다');
+     check(toNew.data.quality==='native' && toNew.data.qualityPolicy==='native',
+       '새 메인 화질 지시가 기본 native 정책이 아니다');
      check(toOld && toOld.data.muted===true,'이전 메인에 음소거 지시가 없다');
      check(toOld.data.quality==='480','이전 메인 화질 지시가 480 이 아니다');
      // 보내는 대상 origin 을 치지직으로 한정해야 한다.
