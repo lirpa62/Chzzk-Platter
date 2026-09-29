@@ -192,12 +192,12 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 지정한 화질로 수�
     mixer.indexOf("function getLiveLatencySeconds"),
   );
   ok(
-    /if \(!maxQualityAuto && !\(maxQualityCap > 0\)\) return;/.test(bind),
-    "상한만 걸린 칸에도 재시도 이벤트를 건다",
+    /if \(!maxQualityAuto && !\(maxQualityCap > 0\) &&[\s\S]*?multiviewInitialQualityApplied\)\s*&&\s*!multiviewInitialGlobalPending\) return;/.test(bind),
+    "전역 고정이 꺼져도 초기 1회 화질 목표에 재시도 이벤트를 건다",
   );
   ok(
-    /\["cap-480", "cap-720"\]\.includes\(multiviewQualityPolicy\) && maxQualityCap > 0/.test(bind),
-    "멀티뷰 480p·720p 상한을 지정 화질까지 재시도한다",
+    /multiviewInitialQuality !== "none" && !multiviewInitialQualityApplied/.test(bind),
+    "초기 목표가 적용될 때까지만 화질 재시도한다",
   );
   // 초당 여러 번 오는 timeupdate 에서 fiber 탐색을 반복하면 칸 수만큼 비싸진다.
   ok(/lastCapProgressAt/.test(bind), "상한 재시도는 초당 한 번으로 제한한다");
@@ -226,7 +226,7 @@ console.log("\n[최초 화질] 상한만 걸린 칸도 지정한 화질로 수�
   // 안전 게이트는 그대로 둔다(로딩 국면에 화질을 바꾸면 플레이어가 죽는다).
   const apply = mixer.slice(
     mixer.indexOf("function applyMaxQuality"),
-    mixer.indexOf("function applyMaxQuality") + 2600,
+    mixer.indexOf("function applyMaxQuality") + 4200,
   );
   ok(
     /pzp-pc--beforeplay/.test(apply) && /readyState < 3/.test(apply),
@@ -329,6 +329,10 @@ console.log("\n[볼륨 아이콘] 끄는 동안 패널을 다시 그리지 않�
 
 console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건다");
 {
+  const watch = fs.readFileSync(
+    path.join(root, "src/multiviewWatch.js"),
+    "utf8",
+  );
   // 부모가 보내는 volume 은 0~1 의 실수여야 한다. 범위를 안 보면 1 보다 큰 값이
   // 그대로 video.volume 에 들어가 예외가 난다.
   ok(
@@ -342,6 +346,21 @@ console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건�
   ok(
     /video\.volume = multiviewVolume/.test(content),
     "video.volume 에 적용한다",
+  );
+  ok(
+    /Number\.isFinite\(video\.volume\) && video\.volume >= 0 && video\.volume <= 1\)\s*notifyParent\("FRAME_AUDIO_STATE",\s*\{\s*volume:\s*video\.volume\s*\}\)/.test(content),
+    "플레이어의 실제 볼륨을 부모에 보고한다",
+  );
+  ok(
+    /"FRAME_AUDIO_STATE"/.test(watch) &&
+      /data\.volume < 0/.test(watch) &&
+      /data\.volume > 1/.test(watch),
+    "부모는 허용된 볼륨 메시지만 0~1 범위로 처리한다",
+  );
+  ok(
+    /MULTIVIEW_PARAMS\.get\("cheeseMultiVolume"\)/.test(content) &&
+      /parsedInitialMultiviewVolume >= 0 && parsedInitialMultiviewVolume <= 1/.test(content),
+    "첫 프레임 시작 볼륨 쿼리를 0~1로 검증한다",
   );
   // 멀티뷰 칸마다 새 AudioContext 를 만들면 6칸에서 비용이 커진다.
   const frameBlock = content.slice(

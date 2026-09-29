@@ -443,6 +443,12 @@ assert.doesNotMatch(parentScript.match(/const FRAME_MESSAGE_TYPES[\s\S]*?if \(ev
 assert.match(parentScript, /loadChat\(state\.chatChannelId\)/);
 assert.match(contentScript, /cheeseMultiChatGeneration/);
 assert.match(styles, /\.mv-stage\.is-chat-popped-out \.mv-chat-body/);
+assert.match(styles, /--mv-vod-local-chat-surface-neutral-base: #e1e1e5/);
+assert.match(styles, /--mv-vod-local-chat-surface-neutral-base: #2e3033/);
+assert.match(styles, /--mv-vod-local-chat-surface-brand-strongest: #1bb373/);
+assert.match(styles, /--mv-vod-local-chat-surface-brand-strongest: #00ffa3/);
+assert.match(styles, /\.mv-vod-chat-row\.is-local/);
+assert.match(styles, /\.mv-vod-chat-message \{\s*color: var\(--mv-vod-local-chat-content-neutral-cool-strong\)/);
 assert.match(styles, /\.mv-tooltip\s*\{/);
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] \.mv-chat-title-wrap/);
 assert.match(styles, /\.mv-stage\[data-chat-side="bottom"\] #mvChatPopoutFeedback\s*\{\s*order: 1/s);

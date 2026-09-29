@@ -79,39 +79,35 @@ for (const [label, sel, target, cap, expected] of idempotent) {
 }
 
 // ── 부모가 내리는 화질 정책 ───────────────────────────────────────────────
-// "메인 고화질 · 보조 480p" 가 켜져도 모든 칸이 고화질로 나오던 문제가 있었다.
-// 이 정책은 시작할 때만이 아니라 '지금 이 칸의 역할' 에 따라 계속 적용된다.
-// 부모가 무엇을 보내는지부터 고정해 둔다.
-console.log("\n[정책] 메인만 고화질 설정에 따라 칸마다 다른 지시가 나간다");
+// 옵션이 켜져도 부모는 이후 역할 변경 때 고정 정책을 반복하지 않는다.
+console.log("\n[정책] 메인 고화질 옵션은 iframe 시작 목표로만 전달한다");
 {
-  // multiviewWatch.js 의 frameUrl / postState 와 같은 규칙.
-  const urlQuality = (isMain, high, isVideo) => {
-    if (isMain && high || isMain && !isVideo) return null;
-    return isVideo ? "720" : "480";
-  };
+  // multiviewWatch.js 의 initialQualityForChannel / qualityForChannel 과 같은 규칙.
+  const initialQuality = (isMain, high, isVideo) =>
+    !high ? "" : isMain ? "highest" : isVideo ? "cap-720" : "cap-480";
   const postQuality = (isMain, high, isVideo) =>
-    isMain && high ? "highest" : isVideo ? "cap-720" : isMain ? "native" : "cap-480";
+    high ? "native" : isVideo ? "cap-720" : isMain ? "native" : "cap-480";
 
   const cases = [
-    ["라이브 · 켜짐 · 메인", true, true, false, null, "highest"],
-    ["라이브 · 켜짐 · 보조", false, true, false, "480", "cap-480"],
-    ["라이브 · 꺼짐 · 메인", true, false, false, null, "native"],
-    ["라이브 · 꺼짐 · 보조", false, false, false, "480", "cap-480"],
-    ["다시보기 · 켜짐 · 메인", true, true, true, null, "highest"],
-    ["다시보기 · 켜짐 · 보조", false, true, true, "720", "cap-720"],
-    ["다시보기 · 꺼짐 · 메인", true, false, true, "720", "cap-720"],
-    ["다시보기 · 꺼짐 · 보조", false, false, true, "720", "cap-720"],
+    ["라이브 · 켜짐 · 메인", true, true, false, "highest", "native"],
+    ["라이브 · 켜짐 · 보조", false, true, false, "cap-480", "native"],
+    ["라이브 · 꺼짐 · 메인", true, false, false, "", "native"],
+    ["라이브 · 꺼짐 · 보조", false, false, false, "", "cap-480"],
+    ["다시보기 · 켜짐 · 메인", true, true, true, "highest", "native"],
+    ["다시보기 · 켜짐 · 보조", false, true, true, "cap-720", "native"],
+    ["다시보기 · 꺼짐 · 메인", true, false, true, "", "cap-720"],
+    ["다시보기 · 꺼짐 · 보조", false, false, true, "", "cap-720"],
   ];
-  for (const [label, isMain, high, isVideo, wantUrl, wantPost] of cases) {
-    const u = urlQuality(isMain, high, isVideo);
+  for (const [label, isMain, high, isVideo, wantInitial, wantPost] of cases) {
+    const initial = initialQuality(isMain, high, isVideo);
     const q = postQuality(isMain, high, isVideo);
     try {
-      assert.strictEqual(u, wantUrl);
+      assert.strictEqual(initial, wantInitial);
       assert.strictEqual(q, wantPost);
-      console.log(`  PASS ${label}: 주소=${u ?? "상한없음"} 지시=${q}`);
+      console.log(`  PASS ${label}: 초기=${initial || "없음"} 이후=${q}`);
     } catch {
       failed += 1;
-      console.log(`  FAIL ${label}: 주소=${u} 지시=${q}`);
+      console.log(`  FAIL ${label}: 초기=${initial} 이후=${q}`);
     }
   }
 }
@@ -166,18 +162,22 @@ console.log("\n[수명주기] 역할·video/source·광고 종료에서만 정�
   const mixer = fs.readFileSync(path.join(root, "src/audioMixer.js"), "utf8");
   const checks = [
     [content.includes('"highest", "cap-480", "cap-720", "native"'), "라이브/다시보기 기본 화질 정책 값"],
-    [/maxQualityAuto: IS_MULTIVIEW_FRAME\s*\?\s*multiviewQualityPolicy === "highest"/.test(content), "native 정책에서는 자동 최고화질을 실행하지 않음"],
+    [/function resolveMaxQualityAuto\(\)[\s\S]*?multiviewInitialQuality !== "none"\s*\?\s*maxQualityAuto/.test(content), "초기 1회 모드 뒤에는 전역 자동 고정 설정을 따른다"],
     [mixer.includes('"highest", "cap-480", "cap-720", "native"'), "MAIN 플레이어가 기본 화질 정책을 수용"],
     [/multiviewPolicyActive = \["highest", "cap-480", "cap-720"\]\.includes/.test(mixer), "기본 화질은 강제 정책으로 취급하지 않음"],
-    [/multiviewPolicyActive && Date\.now\(\) - maxQualityMenuClickAt < 1500/.test(mixer), "멀티뷰 최고화질 메뉴 재시도 간격을 제한"],
-    [/if \(multiviewPolicyActive\) \{\s*\/\/ 멀티뷰에서는[\s\S]*?return;\s*\}/.test(mixer), "멀티뷰 화질은 내부 트랙 직접 선택으로 우회하지 않음"],
+    [/\(multiviewPolicyActive \|\| oneShotQualityActive\) &&\s*Date\.now\(\) - maxQualityMenuClickAt < 1500/.test(mixer), "고정·초기 화질 적용의 메뉴 재시도 간격을 제한"],
+    [/if \(multiviewPolicyActive \|\| oneShotQualityActive\) \{[\s\S]*?return;\s*\}/.test(mixer), "멀티뷰 화질은 내부 트랙 직접 선택으로 우회하지 않음"],
     [/attachMultiviewVideo[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "새 video attach 재확인"],
     [/onMultiviewSourceReady[\s\S]*?syncVideoGeneration \+= 1[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "같은 video source 변경 재확인"],
     [/function frameUrl\(channel,[\s\S]*?const isVideo = channel\.mediaType === "video";[\s\S]*?const url = new URL\(\s*isVideo \?/.test(watch), "frameUrl 에서 라이브/다시보기 유형을 자체 판별"],
     [/previous && !next\) \{[\s\S]*?reconcileMultiviewQuality\(\)/.test(content), "광고 종료 재확인"],
     [/qualityChanged \|\| forceQualityReconcile\) reconcileMultiviewQuality\(\)/.test(content), "역할/부모 요청 재확인"],
     [/qualityPolicy,/.test(watch), "부모가 명시적 정책 전달"],
-    [/multiviewLifecycleChanged[\s\S]*?maxQualitySetHeight = 0/.test(mixer), "lifecycle에서 수동 존중 상태 초기화"],
+    [/multiviewLifecycleChanged[\s\S]*?maxQualitySetHeight = 0/.test(mixer), "기존 역할 고정 정책의 lifecycle 초기화 유지"],
+    [/multiviewInitialQualityApplied = true/.test(mixer), "초기 목표 적용 후 재적용을 막는 상태를 기록"],
+    [/multiviewInitialQualityApplied &&\s*multiviewInitialGlobalPending &&\s*maxQualityAuto &&\s*maxQualityRespectManual &&\s*maxQualityUserTouchedPage === currentPageKey/.test(mixer), "전역 자동 고정의 수동 화질 존중 설정을 적용"],
+    [/multiviewInitialGlobalPending/.test(mixer), "전역 고정 후속 목표가 안정화 전까지 재시도 상태를 유지"],
+    [/multiviewInitialQuality !== "none" && maxQualityAuto && maxQualityTarget === "720"/.test(content), "전역 720p 상한이 초기 목표 후 적용될 수 있음"],
     [!/setInterval\([^)]*reconcileMultiviewQuality/.test(content), "화질 전용 반복 polling 없음"],
   ];
   for (const [passed, label] of checks) {

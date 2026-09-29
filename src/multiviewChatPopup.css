@@ -135,6 +135,11 @@ body.mv-chat-popup-body {
   min-height: 0;
   --mv-vod-chat-scale: 1;
 }
+.mv-chat-popup-vod .mv-vod-chat-compose {
+  flex: none;
+  position: relative;
+  z-index: 1;
+}
 
 .mv-chat-popup-view iframe {
   background: #141517;

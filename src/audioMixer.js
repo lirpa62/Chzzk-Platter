@@ -139,6 +139,10 @@
   let maxQualityCap = 0;
   let multiviewQualityPolicy = "none";
   let multiviewQualityReconcileToken = -1;
+  let multiviewInitialQuality = "none";
+  let multiviewInitialQualityApplied = false;
+  let multiviewInitialGlobalPending = false;
+  let multiviewQualityManualOverride = false;
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
   // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
@@ -344,32 +348,61 @@
     // 스크린샷 저장 전 미리보기(전역, 기본 OFF). 켜면 모달로 저장/취소 확인.
     screenshotPreviewOn = e.data.screenshotPreview === true;
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
+    const maxQualityAutoPrev = maxQualityAuto;
     maxQualityAuto = e.data.maxQualityAuto === true;
     maxQualityRespectManual = e.data.maxQualityRespectManual !== false;
     const nextMultiviewQualityPolicy = ["highest", "cap-480", "cap-720", "native"].includes(
       e.data.multiviewQualityPolicy,
     ) ? e.data.multiviewQualityPolicy : "none";
+    const nextMultiviewInitialQuality = ["highest", "cap-480", "cap-720"].includes(
+      e.data.multiviewInitialQuality,
+    ) ? e.data.multiviewInitialQuality : "none";
     const nextReconcileToken = Number.isSafeInteger(e.data.multiviewQualityReconcileToken) &&
         e.data.multiviewQualityReconcileToken >= 0
       ? e.data.multiviewQualityReconcileToken : 0;
     const multiviewPolicyChanged = nextMultiviewQualityPolicy !== multiviewQualityPolicy;
+    const multiviewInitialQualityChanged = nextMultiviewInitialQuality !== multiviewInitialQuality;
+    const preserveInitialQualityUserChoice = multiviewInitialQuality !== "none" &&
+      multiviewInitialQualityApplied && maxQualityUserTouchedPage === currentPageKey;
+    const nextMaxQualityCap = Number(e.data.maxQualityCap) || 0;
+    const preserveMultiviewQualityChoice = multiviewQualityManualOverride &&
+      (["highest", "cap-480", "cap-720"].includes(nextMultiviewQualityPolicy) ||
+        nextMaxQualityCap > 0 ||
+        (maxQualityAuto && maxQualityRespectManual));
     const multiviewLifecycleChanged = ["highest", "cap-480", "cap-720"].includes(nextMultiviewQualityPolicy) &&
       nextReconcileToken !== multiviewQualityReconcileToken;
     multiviewQualityPolicy = nextMultiviewQualityPolicy;
+    multiviewInitialQuality = nextMultiviewInitialQuality;
+    if (multiviewInitialQualityChanged) {
+      multiviewInitialQualityApplied = multiviewInitialQuality === "none";
+      multiviewInitialGlobalPending = false;
+    }
     multiviewQualityReconcileToken = nextReconcileToken;
     const maxQualityCapPrev = maxQualityCap;
-    maxQualityCap = Number(e.data.maxQualityCap) || 0;
+    maxQualityCap = nextMaxQualityCap;
+    const globalQualityPolicyChanged = maxQualityAuto !== maxQualityAutoPrev ||
+      maxQualityCap !== maxQualityCapPrev;
+    if (multiviewInitialQuality !== "none" && multiviewInitialQualityApplied &&
+        globalQualityPolicyChanged) {
+      multiviewInitialGlobalPending = maxQualityAuto || maxQualityCap > 0;
+    }
+    if (!maxQualityAuto && !(maxQualityCap > 0))
+      multiviewInitialGlobalPending = false;
     // 상한이 바뀌면(멀티뷰 메인 전환) 이전 상한으로 고정해 둔 기록을 지운다.
     // ⚠ 안 지우면 '수동 변경 존중' 이 우리가 건 480p 를 사용자 선택으로 오해해
     //   이후 화질 조정을 막는다.
-    if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged || multiviewLifecycleChanged) {
+    if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||
+        multiviewInitialQualityChanged || multiviewLifecycleChanged) {
       maxQualitySetHeight = 0;
-      maxQualityRespectedPage = null;
-      maxQualityUserTouchedPage = null;
+      maxQualityRespectedPage = preserveMultiviewQualityChoice ? currentPageKey : null;
+      maxQualityUserTouchedPage = preserveInitialQualityUserChoice ||
+        preserveMultiviewQualityChoice ? currentPageKey : null;
       maxQualityMenuClickAt = 0;
     }
     if (
-      (maxQualityAuto || maxQualityCap > 0) &&
+      (maxQualityAuto || maxQualityCap > 0 ||
+        (multiviewInitialQuality !== "none" && !multiviewInitialQualityApplied) ||
+        multiviewInitialGlobalPending) &&
       typeof applyMaxQuality === "function"
     ) {
       // 옵션을 방금 켠 경우 현재 video 에 이벤트를 바인딩해 두면, 다음 재생/전환에서
@@ -3175,6 +3208,15 @@
   const multiviewMixerChannelId = new URLSearchParams(location.search).get("cheeseMulti") === "1"
     ? (location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || "").toLowerCase()
     : "";
+  const multiviewQualityChannelId = (() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("cheeseMulti") !== "1") return "";
+    const liveId = location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1]?.toLowerCase();
+    if (liveId) return liveId;
+    const videoNo = location.pathname.match(/^\/video\/(\d+)/i)?.[1] || "";
+    const slotId = params.get("cheeseMultiChannelId") || "";
+    return /^video:\d+$/.test(slotId) && videoNo === slotId.slice(6) ? slotId : "";
+  })();
   let multiviewMixerRevision = 0;
   let multiviewMixerSignature = "";
   let multiviewMixerNotifyTimer = 0;
@@ -3201,6 +3243,67 @@
       gainStep: GAIN_STEP,
       presets,
     };
+  }
+
+  function multiviewQualitySnapshot() {
+    if (!multiviewQualityChannelId) return null;
+    const core = findCorePlayer();
+    const tracks = Array.from(core?.videoTracks || []);
+    const choicesByValue = new Map();
+    for (const track of tracks) {
+      if (trackIsAudioOnly(track)) continue;
+      const automatic = trackIsAbr(track);
+      const height = trackHeight(track);
+      if (!automatic && (!Number.isInteger(height) || height < 1 || height > 4320))
+        continue;
+      const value = automatic ? "auto" : String(height);
+      const choice = choicesByValue.get(value) || {
+        value,
+        label: automatic ? "자동" : `${height}p`,
+        selected: false,
+      };
+      choice.selected ||= trackSelected(track);
+      choicesByValue.set(value, choice);
+    }
+    const choices = [...choicesByValue.values()].sort((a, b) => {
+      if (a.value === "auto") return -1;
+      if (b.value === "auto") return 1;
+      return Number(b.value) - Number(a.value);
+    });
+    const fixedChoices = choices.filter((choice) => choice.value !== "auto");
+    let lockedQuality = "";
+    if (maxQualityAuto && !maxQualityRespectManual && fixedChoices.length) {
+      const allowed = maxQualityCap > 0
+        ? fixedChoices.filter((choice) => Number(choice.value) <= maxQualityCap)
+        : fixedChoices;
+      const target = allowed[0] || fixedChoices.at(-1);
+      lockedQuality = target?.value || "";
+    }
+    const selected = choices.find((choice) => choice.selected)?.value || "";
+    const video = findVideo();
+    const width = Number(video?.videoWidth) || 0;
+    const height = Number(video?.videoHeight) || 0;
+    return {
+      ready: tracks.length > 0 && choices.length > 0,
+      selected,
+      output: width > 0 && height > 0 ? `${width}×${height}` : "",
+      locked: Boolean(lockedQuality),
+      lockedQuality,
+      choices,
+    };
+  }
+
+  function publishMultiviewQualityState(requestId) {
+    if (!multiviewQualityChannelId) return;
+    const state = multiviewQualitySnapshot();
+    if (!state) return;
+    window.postMessage({
+      source: "cheese-multiview-quality-main",
+      type: "state",
+      channelId: multiviewQualityChannelId,
+      requestId,
+      state,
+    }, location.origin);
   }
 
   function publishMultiviewMixerState(force = false) {
@@ -3271,6 +3374,56 @@
     window.postMessage({ source: "cheese-multiview-mixer-main", type: "result",
       channelId: multiviewMixerChannelId, commandId: data.commandId, command: data.type,
       applied: reason === null, reason, state: stateForParent }, location.origin);
+  });
+
+  window.addEventListener("message", (event) => {
+    if (!multiviewQualityChannelId || event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (data?.source !== "cheese-multiview-quality-content" ||
+        data.channelId !== multiviewQualityChannelId) return;
+    if (data.type === "QUALITY_GET_STATE") {
+      if (!Number.isSafeInteger(data.requestId) || data.requestId <= 0) return;
+      publishMultiviewQualityState(data.requestId);
+      return;
+    }
+    if (data.type !== "QUALITY_SET" ||
+        !Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
+        typeof data.quality !== "string") return;
+
+    let reason = null;
+    const snapshot = multiviewQualitySnapshot();
+    if (!snapshot?.ready || !findVideo()) reason = "not-ready";
+    else if (!snapshot.choices.some((choice) => choice.value === data.quality))
+      reason = "unavailable";
+    else if (snapshot.locked && data.quality !== snapshot.lockedQuality)
+      reason = "quality-locked";
+    else {
+      const clicked = clickMultiviewQualityMenuItem(data.quality);
+      if (!clicked) reason = "menu-unavailable";
+      else {
+        const selectedHeight = data.quality === "auto" ? 0 : Number(data.quality);
+        maxQualityOwnClickUntil = Date.now() + 1500;
+        maxQualityUserTouchedPage = currentPageKey;
+        maxQualitySetHeight = selectedHeight;
+        maxQualityMenuClickAt = Date.now();
+        multiviewQualityManualOverride = true;
+        multiviewInitialQualityApplied = true;
+        multiviewInitialGlobalPending = false;
+        if (["highest", "cap-480", "cap-720"].includes(multiviewQualityPolicy) ||
+            maxQualityCap > 0 || (maxQualityAuto && maxQualityRespectManual)) {
+          maxQualityRespectedPage = currentPageKey;
+        }
+      }
+    }
+    window.postMessage({
+      source: "cheese-multiview-quality-main",
+      type: "result",
+      channelId: multiviewQualityChannelId,
+      commandId: data.commandId,
+      quality: data.quality,
+      applied: reason === null,
+      reason,
+    }, location.origin);
   });
   // 키보드 한 단계 이동. 현재값이 새 간격 격자에 없으면 이동 방향에서 가장 가까운
   // 다음 격자로 붙이고, 이미 격자에 있으면 정확히 한 단계 이동한다.
@@ -5309,6 +5462,27 @@
     const m = txt.match(/(\d{3,4})\s*p/i);
     return m ? Number(m[1]) : 0;
   }
+  function qualityItemIsAuto(li) {
+    const txt = String(
+      li?.querySelector?.(".pzp-ui-setting-quality-item__prefix")
+        ?.textContent || li?.textContent || "",
+    ).trim();
+    return /^(auto|자동|abr)(?:\b|\s|$)/i.test(txt);
+  }
+  function findMultiviewQualityMenuItem(value) {
+    const list = document.querySelector(
+      ".pzp-setting-quality-pane__list-container",
+    );
+    if (!list) return null;
+    if (value !== "auto" &&
+        (!/^\d{3,4}$/.test(value) || Number(value) < 144 || Number(value) > 4320))
+      return null;
+    for (const li of list.querySelectorAll("li.pzp-ui-setting-quality-item")) {
+      if (value === "auto" ? qualityItemIsAuto(li) : qualityItemHeight(li) === Number(value))
+        return li;
+    }
+    return null;
+  }
   // 화질 메뉴에서 목표 화질 항목(li)과 그 height 를 찾는다.
   // cap>0 이면 'cap 이하 중 가장 높은' 항목을 고른다.
   // cap 이하가 하나도 없으면 가장 낮은 항목으로 내린다. cap=0 이면 최고 화질.
@@ -5400,6 +5574,27 @@
   // 우리가 메뉴를 클릭한 직후의 이벤트는 우리 것이다(클론 교체 클릭은 isTrusted=false 지만
   // 그 여파로 뜨는 포인터 이벤트까지 섞이지 않게 짧은 창을 둔다).
   let maxQualityOwnClickUntil = 0;
+  function clickMultiviewQualityMenuItem(value) {
+    const item = findMultiviewQualityMenuItem(value);
+    if (!item) return false;
+    if (item.classList.contains("pzp-ui-setting-pane-item--checked")) return true;
+    const parent = item.parentElement;
+    if (!parent) return false;
+    try {
+      const clone = item.cloneNode(true);
+      parent.replaceChild(clone, item);
+      maxQualityOwnClickUntil = Date.now() + 1500;
+      item.click();
+      requestAnimationFrame(() => {
+        try {
+          if (clone.parentElement === parent) parent.replaceChild(item, clone);
+        } catch {}
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // 화질 메뉴 안에서 일어난 신뢰된 조작만 사용자 선택으로 친다.
   function watchTrustedQualityChoice(event) {
@@ -5443,16 +5638,38 @@
     }
   }
   function applyMaxQuality() {
+    let initialQualityPending = multiviewInitialQuality !== "none" &&
+      !multiviewInitialQualityApplied;
+    let initialGlobalPending = multiviewInitialGlobalPending;
     // 멀티뷰 보조 칸은 자동 최고 화질 없이 480p 상한만 적용한다.
-    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
+    if (!maxQualityAuto && !(maxQualityCap > 0) && !initialQualityPending &&
+        !initialGlobalPending) return;
+    // 시작 목표보다 먼저 사용자가 화질 메뉴를 골랐다면 그 선택을 우선한다.
+    if (initialQualityPending && maxQualityUserTouchedPage === currentPageKey) {
+      multiviewInitialQualityApplied = true;
+      initialQualityPending = false;
+      multiviewInitialGlobalPending = maxQualityAuto || maxQualityCap > 0;
+      initialGlobalPending = multiviewInitialGlobalPending;
+      if (multiviewInitialGlobalPending && maxQualityRespectManual) {
+        multiviewInitialGlobalPending = false;
+        maxQualityRespectedPage = currentPageKey;
+        return;
+      }
+      if (!multiviewInitialGlobalPending) return;
+    }
+    const initialQualityCap = multiviewInitialQuality === "cap-480" ? 480
+      : multiviewInitialQuality === "cap-720" ? 720 : 0;
+    const qualityTargetCap = initialQualityPending ? initialQualityCap : maxQualityCap;
     // 백그라운드(숨김) 탭에는 최대화질을 강제하지 않는다. 여러 방송 탭을 켜두는 사용자의
     // 경우, 모든 탭을 1080p60(≈8Mbps)으로 강제하면 대역폭·디코드·미디어 메모리가 탭 수만큼
     // 증폭돼 시스템 메모리 폭증 + 간헐적 수 초 버퍼링을 유발했다(실사용 계측: JS 힙/버퍼는
     // 정상인데 탭당 렌더러 1GB+ = 미디어 파이프라인 부하). 숨김 탭은 치지직 기본 ABR 에
     // 맡기고, 탭이 다시 보이면 timeupdate/tick 경로가 이 함수를 다시 불러 그때 최대화질을
     // 건다(가시 탭만 최대화질).
-    // 멀티뷰 보조 칸의 480p 상한만 숨김 상태에서도 적용한다.
-    if (document.hidden && !["cap-480", "cap-720"].includes(multiviewQualityPolicy)) return;
+    // 멀티뷰의 역할 상한과 초기 480/720p 목표는 숨김 상태에서도 적용한다.
+    if (document.hidden &&
+        !["cap-480", "cap-720"].includes(multiviewQualityPolicy) &&
+        !(initialQualityPending && initialQualityCap > 0)) return;
     if (
       maxQualitySuspendedForAudioOnly &&
       Date.now() < maxQualityResumeAfterAudioOnlyAt
@@ -5528,10 +5745,10 @@
     let best = null;
     for (const t of fixed) {
       const h = trackHeight(t);
-      if (maxQualityCap > 0 && h > maxQualityCap) continue;
+      if (qualityTargetCap > 0 && h > qualityTargetCap) continue;
       if (!best || h > trackHeight(best)) best = t;
     }
-    if (!best && maxQualityCap > 0) {
+    if (!best && qualityTargetCap > 0) {
       for (const t of fixed)
         if (!best || trackHeight(t) < trackHeight(best)) best = t;
     }
@@ -5540,20 +5757,39 @@
     const selected = tracks.find((t) => trackSelected(t));
     const selH = selected && !trackIsAbr(selected) ? trackHeight(selected) : 0;
 
+    // 시작 목표가 끝난 뒤에는 전역 고정이 켜져 있어도 사용자가 직접 고른
+    // 화질을 기본 설정(maxQualityRespectManual)에 맞춰 존중한다.
+    if (
+      multiviewInitialQuality !== "none" &&
+      multiviewInitialQualityApplied &&
+      multiviewInitialGlobalPending &&
+      maxQualityAuto &&
+      maxQualityRespectManual &&
+      maxQualityUserTouchedPage === currentPageKey &&
+      selected &&
+      !trackIsAbr(selected) &&
+      selH > 0
+    ) {
+      multiviewInitialGlobalPending = false;
+      maxQualityRespectedPage = currentPageKey;
+      return;
+    }
+
     // '수동 변경 존중' 옵션: 우리가 올려둔 상태(maxQualitySetHeight)에서 선택이 바뀌었으면
     // 사용자가 직접 고른 것으로 보고 이 미디어 동안 존중한다.
     //
     // 상한이 없을 때는 더 낮아진 경우만, 상한이 있으면 목표와 달라진 경우를 본다.
     const deviated =
-      maxQualityCap > 0
+      qualityTargetCap > 0
         ? selH !== maxQualitySetHeight
         : selH < maxQualitySetHeight;
     // 상한이 있으면 플레이어가 자체적으로 화질을 바꿀 수도 있으므로
     // 신뢰된 메뉴 조작이 있었는지 확인한다.
     const multiviewPolicyActive = ["highest", "cap-480", "cap-720"].includes(multiviewQualityPolicy);
-    const userChose = multiviewPolicyActive || maxQualityCap > 0
+    const oneShotQualityActive = initialQualityPending;
+    const userChose = multiviewPolicyActive || oneShotQualityActive || qualityTargetCap > 0
       ? maxQualityUserTouchedPage === currentPageKey : true;
-    const respectManual = multiviewPolicyActive || maxQualityRespectManual;
+    const respectManual = multiviewPolicyActive || oneShotQualityActive || maxQualityRespectManual;
     if (
       respectManual &&
       maxQualitySetHeight > 0 &&
@@ -5572,10 +5808,18 @@
     // 이미 최고 고정 화질이면 손대지 않는다(멱등). 트랙 selected 반영이 늦어도, 화질
     // 메뉴상 최고 항목이 이미 체크돼 있으면 전환된 것이니 중복 클릭하지 않는다.
     if (
-      (maxQualityCap > 0 ? selH === bestH : selH >= bestH) ||
-      isMaxQualityMenuChecked(maxQualityCap)
+      (qualityTargetCap > 0 ? selH === bestH : selH >= bestH) ||
+      isMaxQualityMenuChecked(qualityTargetCap)
     ) {
       maxQualitySetHeight = bestH;
+      if (initialQualityPending) {
+        multiviewInitialQualityApplied = true;
+        multiviewInitialGlobalPending = maxQualityAuto || maxQualityCap > 0;
+        if (multiviewInitialGlobalPending)
+          window.setTimeout(() => applyMaxQuality(), 1600);
+      } else if (initialGlobalPending) {
+        multiviewInitialGlobalPending = false;
+      }
       return;
     }
     // 화질 전환: 화질 메뉴 최고 항목을 '클론 교체 트릭'으로 클릭한다.
@@ -5591,10 +5835,11 @@
     // 과거 이 방식이 컨트롤바를 깼던 건 클론 교체 자체가 아니라, 재초기화 과도 상태
     // (beforeplay/loading)에서 클릭이 걸렸기 때문이다. 위 안전 게이트(beforeplay/loading
     // 없음 + currentTime>=1.5)가 그 타이밍을 막으므로 이제 안전하다.
-    if (multiviewPolicyActive && Date.now() - maxQualityMenuClickAt < 1500) return;
+    if ((multiviewPolicyActive || oneShotQualityActive) &&
+        Date.now() - maxQualityMenuClickAt < 1500) return;
     maxQualityOwnClickUntil = Date.now() + 1500; // 이 사이의 이벤트는 우리 것이다
-    if (!clickMaxQualityMenuItem(maxQualityCap)) {
-      if (multiviewPolicyActive) {
+    if (!clickMaxQualityMenuItem(qualityTargetCap)) {
+      if (multiviewPolicyActive || oneShotQualityActive) {
         // 멀티뷰에서는 치지직 메뉴 경로가 없을 때 내부 트랙을 직접 선택하지 않는다.
         maxQualityMenuClickAt = Date.now();
         return;
@@ -5602,6 +5847,14 @@
       try { best.selected = true; } catch {}
     }
     maxQualitySetHeight = bestH; // 우리가 올린 기준값 기록
+    if (initialQualityPending) {
+      multiviewInitialQualityApplied = true;
+      multiviewInitialGlobalPending = maxQualityAuto || maxQualityCap > 0;
+      if (multiviewInitialGlobalPending)
+        window.setTimeout(() => applyMaxQuality(), 1600);
+    } else if (initialGlobalPending) {
+      multiviewInitialGlobalPending = false;
+    }
     // 화질 전환은 스트림을 재초기화한다. 입장 후 480p 로 재생되던 중 전환하면 재초기화가
     // 라이브 엣지가 아니라 과거 지점에서 재개돼 지연이 남을 수 있다(실측). 라이브 페이지에
     // 한해 전환 뒤 따라잡기로 엣지에 복귀시킨다.
@@ -5686,7 +5939,9 @@
     //   막힌 첫 시도가 실패하면 480p 를 다시 걸 기회가 없어 1080p 로 남았고,
     //   탭을 전환해야(visibilitychange 경로) 뒤늦게 정리됐다.
     //   applyMaxQuality 의 진입 조건과 같은 기준을 쓴다.
-    if (!maxQualityAuto && !(maxQualityCap > 0)) return;
+    if (!maxQualityAuto && !(maxQualityCap > 0) &&
+        !(multiviewInitialQuality !== "none" && !multiviewInitialQualityApplied) &&
+        !multiviewInitialGlobalPending) return;
     const video = findVideo();
     if (!(video instanceof HTMLVideoElement)) return;
     if (!boundMaxQualityVideos.has(video)) {
@@ -5700,7 +5955,9 @@
         // 한 번 걸고 나면 드리프트 보정은 tick 폴링이 맡으므로 여기서 빠진다.
         // 멀티뷰 보조 칸은 tick 이 드물 수 있어 실제 480p가 적용될 때까지
         // timeupdate에서도 재시도한다.
-        if (["cap-480", "cap-720"].includes(multiviewQualityPolicy) && maxQualityCap > 0) {
+        if ((["cap-480", "cap-720"].includes(multiviewQualityPolicy) && maxQualityCap > 0) ||
+            (multiviewInitialQuality !== "none" && !multiviewInitialQualityApplied) ||
+            multiviewInitialGlobalPending) {
           // ⚠ timeupdate 는 초당 여러 번 온다. applyMaxQuality 는 '이미 맞음' 을
           //   판정하기까지 fiber 탐색(findCorePlayer)을 하므로 그대로 두면 칸 수
           //   만큼 비용이 곱해진다. 초당 한 번으로 충분하다.
@@ -10433,6 +10690,11 @@
       flushPendingStateSave();
       currentPageKey = pageKey;
       currentMediaId = null; // 채널id는 아래에서 비동기로 해석
+      // 플레이어가 다른 방송/다시보기로 이동한 경우에만 시작 목표를 새 미디어에 적용한다.
+      if (multiviewInitialQuality !== "none") {
+        multiviewInitialQualityApplied = false;
+        multiviewInitialGlobalPending = false;
+      }
       // 새 미디어 → 넓은 화면 자동 적용을 다시 1회 허용(버튼이 늦게 떠도 잠깐 재시도).
       resetWideScreenAttempt();
 
@@ -10441,6 +10703,7 @@
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = null;
       maxQualityUserTouchedPage = null;
+      multiviewQualityManualOverride = false;
       maxQualityMenuClickAt = 0;
       maxQualitySuspendedForAudioOnly = false;
       maxQualityResumeAfterAudioOnlyAt = 0;

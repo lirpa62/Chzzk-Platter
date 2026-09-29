@@ -85,11 +85,63 @@ assert.deepEqual(
   badgeChat.normalizeCapturedMessage({ role: "manager", nickname: "매니저", text: "안내", special: true }),
   { role: "manager", nickname: "매니저", text: "안내", special: true },
 );
+const initiallyCaptured = badgeChat.normalizeCapturedMessage({
+  role: "manager",
+  nickname: "매니저",
+  text: "안내",
+  badges: [
+    { src: "https://example.com/manager.png", alt: "매니저", position: "before" },
+  ],
+});
+const enrichedCapture = badgeChat.mergeCapturedMessage(initiallyCaptured, {
+  role: "manager",
+  nickname: "매니저",
+  text: "안내",
+  badges: [
+    { src: "https://example.com/manager.png", alt: "매니저", position: "before" },
+    { src: "https://example.com/fan.png", alt: "팬", position: "after" },
+  ],
+  timeText: "12:34",
+});
+assert.equal(enrichedCapture.badges.length, 2, "후속 DOM 변경으로 도착한 배지를 같은 메시지에 보강");
+assert.equal(enrichedCapture.timeText, "12:34", "늦게 도착한 채팅 시간을 같은 메시지에 보강");
+assert.equal(
+  badgeChat.mergeCapturedMessage(enrichedCapture, { text: "", timeText: "" }).timeText,
+  "12:34",
+  "빈 후속 캡처가 먼저 확보한 시간 정보를 지우지 않음",
+);
+const achievementUrl = "https://nng-phinf.pstatic.net/badge.png";
+const mappedAchievementBadges = badgeChat.collectMappedAchievementBadges(
+  {
+    querySelectorAll: () => [
+      {
+        currentSrc: `${achievementUrl}?type=f120_120_na`,
+        getAttribute: () => achievementUrl,
+      },
+      {
+        currentSrc: achievementUrl,
+        getAttribute: () => achievementUrl,
+      },
+      {
+        currentSrc: "https://nng-phinf.pstatic.net/other.png",
+        getAttribute: () => "https://nng-phinf.pstatic.net/other.png",
+      },
+    ],
+  },
+  { example_badge: achievementUrl },
+);
+assert.deepEqual(
+  mappedAchievementBadges,
+  [{ src: `${achievementUrl}?type=f120_120_na`, alt: "", position: "after" }],
+  "매핑된 업적 이미지를 닉네임 뒤 배지로 한 번만 수집하고 URL query 차이는 무시",
+);
 
 const entries = manifest.content_scripts.flatMap((entry) => entry.js || []);
 assert.ok(entries.includes("src/multiviewBadgeChat.js"));
 const contentEntry = manifest.content_scripts.find((entry) => entry.js?.includes("src/content.js"));
 assert.ok(contentEntry.js.includes("src/multiviewBadgeChat.js"));
+assert.ok(contentEntry.js.includes("src/achievementBadgeMap.js"));
+assert.ok(contentEntry.js.indexOf("src/achievementBadgeMap.js") < contentEntry.js.indexOf("src/multiviewBadgeChat.js"));
 assert.equal(contentEntry.all_frames, true);
 assert.equal(manifest.content_scripts.filter((entry) => entry.js?.includes("src/multiviewBadgeChat.js")).length, 1);
 assert.match(source, /params\.get\("cheeseMultiChat"\) !== "1"/);
@@ -127,17 +179,29 @@ assert.match(source, /새 채팅 없음/);
 assert.match(source, /\.cheese-mv-badge-chat-label \{ max-width:min\(180px,30vw\)/);
 assert.match(source, /actor\.roles\.add\(role\)/);
 assert.match(source, /pill\.render\(\{\s*actors: collectPillActors\(/);
-assert.match(source, /message\.badges \|\| \[\]/);
+// 모아보기 줄 배지는 splitDisplayBadges 로 앞/뒤를 나눈다(파트너 마크는 닉네임 뒤 맨 앞).
+assert.match(source, /Array\.isArray\(message\?\.badges\) \? message\.badges : \[\]/);
 assert.match(source, /message\.nicknameColor/);
 assert.match(source, /message\.messageColor/);
 assert.match(source, /cheese-mv-badge-chat-identity/);
 assert.match(source, /cheese-mv-badge-chat-time/);
-assert.match(source, /appendRoleMessage\(role, captured, row, roles\.length \? roles : \[role\]\)/);
+assert.match(source, /appendRoleMessage\(\s*role,\s*captured,\s*row,\s*roles\.length\s*\?\s*roles\s*:\s*\[role\],?\s*\)/);
 assert.match(source, /handleOutsidePointer/);
 assert.match(source, /function watchForAside\(\)[\s\S]*new win\.MutationObserver\(attachAside\)/);
 assert.match(source, /if \(next === aside\)[\s\S]*if \(!next\) watchForAside\(\)/);
 assert.doesNotMatch(source, /postMessage\(|FRAME_BADGE_CHAT_MESSAGE|parentOrigin|messageSequence/);
-assert.match(source, /Array\.from\(messageContainer\?\.children \|\| \[\]\)/);
+assert.match(source, /messageContainer\?\.querySelectorAll\('\[class\*="_text_"\]'\)/);
+assert.match(source, /const cleanIdentityText = \(source\) =>/);
+assert.match(source, /identity\?\.querySelector\('\[class\*="_nickname_"\]'\)[\s\S]*identity\?\.querySelector\('\[class\*="_text_"\]'\)/);
+assert.match(source, /clone\.querySelectorAll\('\[class\*="_wrapper_"\]'\)/);
+assert.match(source, /cleanIdentityText\(nicknameNode\) \|\| cleanIdentityText\(identity\)/);
+assert.doesNotMatch(source, /nicknameNode\?\.textContent \|\| identity\?\.textContent/);
+assert.match(source, /\.cheese-chat-time, \.cheese-chat-os, time, \[data-chat-epoch-ms\]/);
+assert.match(source, /aside\.addEventListener\("load", handleImageLoad, true\)/);
+assert.match(source, /aside\?\.removeEventListener\("load", handleImageLoad, true\)/);
+assert.match(source, /mergeCapturedMessage\(target, message\)/);
+assert.match(source, /"srcset"/);
+assert.doesNotMatch(source, /sentRows\.get\(row\) === signature/);
 assert.match(source, /rgba\(94,157,255,\.18\)/);
 assert.match(source, /rgba\(34,197,94,\.2\)/);
 assert.match(source, /rgba\(0,199,155,\.2\)/);
@@ -200,14 +264,15 @@ assert.match(html, /id="mvVodBadgeChatList"/);
 assert.match(html, /id="mvVodBadgeChatResize"/);
 assert.match(html, /mvVodBadgeChatAnchor[\s\S]*mvVodChatScaleDown/);
 assert.doesNotMatch(html, /mvChatBadgeToggle|mvBadgeChatList/);
-assert.match(css, /\.mv-vod-chat-scale > button/);
+// 글자 크기 조절은 원본(chzzk-badge-moa-popup-font-scale)과 같은 묶음 스타일을 쓴다.
+assert.match(css, /:is\(\.mv-vod-chat-font-scale, \.mv-badge-chat-font-scale\) button \{/);
 assert.match(css, /\.mv-badge-chat-trigger\.is-compact/);
 assert.match(css, /\.mv-badge-chat-trigger\.is-attention \{[^}]*mv-badge-chat-glow-pulse 1\.45s/);
 assert.match(css, /\.mv-badge-chat-trigger\.is-attention::before \{[^}]*mv-badge-chat-glow-aura/);
 assert.match(css, /\.mv-badge-chat-popover\.is-locked-open/);
 assert.match(css, /--mv-vod-chat-scale:\s*var\(--mv-badge-chat-font-scale, 1\)/);
-assert.match(css, /\.mv-badge-chat-font-scale-value/);
-assert.match(css, /\.mv-vod-chat-scale > span/);
+assert.match(css, /:is\(\.mv-vod-chat-font-scale, \.mv-badge-chat-font-scale\) > span \{/);
+assert.match(html, /<div class="mv-vod-chat-font-scale"[^>]*>\s*<button type="button" id="mvVodChatScaleDown"/);
 assert.match(css, /\.mv-badge-chat-trigger \{[\s\S]*height: 32px/);
 assert.match(css, /\.mv-badge-chat-badges img \{[\s\S]*height: 16px/);
 assert.match(css, /\.mv-badge-chat-count\[hidden\] \{\s*display: none/);

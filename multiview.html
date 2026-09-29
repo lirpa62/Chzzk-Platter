@@ -172,25 +172,64 @@
             </div>
           </div>
 
-          <label class="mv-main-quality">
-            <input type="checkbox" id="mvMainHighQuality" />
-            <span>메인 고화질 · 보조 480p</span>
-          </label>
-          <p class="mv-option-note">
-            켜면 메인 채널은 최고 화질을 사용하고 보조 라이브는 480p로 제한합니다.
-            끄면 메인 라이브는 치지직의 기본 화질 선택을 따릅니다. 다시보기는 720p 상한을 유지합니다.
-          </p>
-          <label class="mv-main-quality mv-start-without-chat">
-            <input type="checkbox" id="mvStartWithoutChat" />
-            <span>채팅 없이 시작</span>
-          </label>
-          <label class="mv-main-quality">
-            <input type="checkbox" id="mvStartMainMuted" />
-            <span>메인 채널 음소거로 시작</span>
-          </label>
-          <p class="mv-option-note">
-            최초 메인에만 적용되며, 이후 메인 변경은 채널별 음소거 설정을 따릅니다.
-          </p>
+          <section class="mv-setup-option">
+            <div class="mv-setup-option-head">
+              <label class="mv-main-quality mv-option-toggle">
+                <input type="checkbox" id="mvMainHighQuality" role="switch" />
+                <span class="mv-option-switch" aria-hidden="true"></span>
+                <span>메인 고화질 · 보조 480p로 시작</span>
+              </label>
+              <button type="button" class="mv-option-info" data-mv-option-note="mvMainQualityNote"
+                aria-label="메인 고화질 옵션 설명" aria-controls="mvMainQualityNote" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+              </button>
+            </div>
+            <p class="mv-option-note" id="mvMainQualityNote" hidden>
+              켜면 각 채널을 처음 열 때 메인은 제공되는 최고 화질, 보조 라이브는 480p로 시작합니다. 이후에는 직접 선택한 화질을 유지합니다. 다시보기는 메인은 최고 화질, 보조는 720p로 시작합니다.
+              <strong>주의: 설정의 ‘최대 화질 자동 고정’이 켜져 있으면 전역 고정이 시작 화질을 덮어쓸 수 있습니다. 특히 ‘수동으로 화질을 바꾸면 존중’이 꺼져 있으면 이후 수동 변경도 다시 고정될 수 있습니다.</strong>
+              끄면 메인 라이브는 치지직의 기본 화질을 따르고 보조 라이브는 480p, 다시보기는 720p 상한을 유지합니다.
+            </p>
+          </section>
+          <section class="mv-setup-option">
+            <div class="mv-setup-option-head">
+              <label class="mv-main-quality mv-option-toggle mv-start-without-chat">
+                <input type="checkbox" id="mvStartWithoutChat" role="switch" />
+                <span class="mv-option-switch" aria-hidden="true"></span>
+                <span>채팅 없이 시작</span>
+              </label>
+              <button type="button" class="mv-option-info" data-mv-option-note="mvStartWithoutChatNote"
+                aria-label="채팅 없이 시작 옵션 설명" aria-controls="mvStartWithoutChatNote" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+              </button>
+            </div>
+            <p class="mv-option-note" id="mvStartWithoutChatNote" hidden>
+              시청 화면에서는 채팅 영역을 접은 상태로 시작합니다. 상단 채팅 버튼으로 다시 열 수 있습니다.
+            </p>
+          </section>
+          <section class="mv-setup-option">
+            <div class="mv-setup-option-head">
+              <label class="mv-main-quality mv-option-toggle">
+                <input type="checkbox" id="mvStartMainMuted" role="switch" />
+                <span class="mv-option-switch" aria-hidden="true"></span>
+                <span>메인 채널 음소거로 시작</span>
+              </label>
+              <button type="button" class="mv-option-info" data-mv-option-note="mvStartMainMutedNote"
+                aria-label="메인 오디오 시작 옵션 설명" aria-controls="mvStartMainMutedNote" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+              </button>
+            </div>
+            <p class="mv-option-note" id="mvStartMainMutedNote" hidden>
+              음소거는 최초 메인에만 적용됩니다. 시작 음량은 처음 불러오는 모든 채널에 적용되며, 시청 중 채널별로 조절한 값은 그대로 유지됩니다.
+            </p>
+            <div class="mv-start-main-volume" id="mvStartMainVolumeControl">
+              <label for="mvStartMainVolumeRange">모든 채널 시작 음량</label>
+              <div class="mv-start-main-volume-controls">
+                <input type="range" id="mvStartMainVolumeRange" min="0" max="100" step="1" value="100" />
+                <input type="number" id="mvStartMainVolumeNumber" min="0" max="100" step="1" value="100" inputmode="numeric" aria-label="모든 채널 시작 음량(퍼센트)" />
+                <span aria-hidden="true">%</span>
+              </div>
+            </div>
+          </section>
 
           <button type="button" class="mv-start" id="mvStart" disabled>
             멀티뷰 시작

@@ -1297,11 +1297,147 @@ button.mv-live-more {
   font-size: 12px;
   gap: 6px;
 }
+.mv-setup-option {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.mv-setup-option-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.mv-option-toggle {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.mv-option-toggle input[type="checkbox"] {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+.mv-option-switch {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 999px;
+  box-sizing: border-box;
+  flex: none;
+  height: 20px;
+  padding: 2px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+  width: 36px;
+}
+.mv-option-switch::after {
+  background: var(--popup-muted, #9aa1a9);
+  border-radius: 50%;
+  content: "";
+  display: block;
+  height: 14px;
+  transform: translateX(0);
+  transition:
+    background-color 120ms ease,
+    transform 120ms ease;
+  width: 14px;
+}
+.mv-option-toggle input:checked + .mv-option-switch {
+  background: var(--popup-brand, #00c73c);
+  border-color: var(--popup-brand, #00c73c);
+}
+.mv-option-toggle input:checked + .mv-option-switch::after {
+  background: #fff;
+  transform: translateX(16px);
+}
+.mv-option-toggle input:focus-visible + .mv-option-switch {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 2px;
+}
+.mv-option-info {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 50%;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+.mv-option-info:hover,
+.mv-option-info[aria-expanded="true"] {
+  border-color: var(--popup-brand, #00c73c);
+  color: var(--popup-brand-strong, #00ffa3);
+}
+.mv-option-info:focus-visible {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 2px;
+}
+.mv-option-info svg {
+  height: 14px;
+  width: 14px;
+}
 .mv-option-note {
   color: var(--popup-muted, #9aa1a9);
   font-size: 11px;
   line-height: 1.45;
-  margin: -4px 0 0;
+  margin: 0;
+}
+.mv-option-note strong {
+  color: inherit;
+  display: block;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.mv-option-note[hidden],
+.mv-start-main-volume[hidden] {
+  display: none;
+}
+.mv-start-main-volume {
+  display: grid;
+  gap: 4px;
+  padding-left: 44px;
+}
+.mv-start-main-volume > label {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
+.mv-start-main-volume-controls {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.mv-start-main-volume-controls input[type="range"] {
+  accent-color: var(--popup-brand, #00c73c);
+  flex: 1;
+  min-width: 0;
+}
+.mv-start-main-volume-controls input[type="number"] {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 5px;
+  box-sizing: border-box;
+  color: var(--popup-text, #e9ecef);
+  font-size: 12px;
+  padding: 4px;
+  text-align: right;
+  width: 54px;
+}
+.mv-start-main-volume-controls input[type="number"]:focus-visible {
+  border-color: var(--popup-brand, #00c73c);
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 1px;
+}
+.mv-start-main-volume-controls > span {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
 }
 .mv-start {
   background: var(--popup-brand, #00ffa3);
@@ -1868,6 +2004,28 @@ button.mv-live-more {
   position: absolute;
   --mv-vod-chat-emoji-gap: 4px;
 }
+/* 치지직 색 토큰(라이트/다크). 다시보기 채팅뿐 아니라 화질 패널 등 멀티뷰 어디서든 쓴다.
+   ⚠ 예전에는 다시보기 채팅 영역 안에서만 정의해, 다른 패널에서 쓰면 값이 비었다. */
+:root {
+  --mv-vod-local-chat-surface-neutral-base: #e1e1e5;
+  --mv-vod-local-chat-surface-neutral-weak: #f0f1f2;
+  --mv-vod-local-chat-border-neutral-weaker: #e1e1e5;
+  --mv-vod-local-chat-content-neutral-cool-strong: #2e3033;
+  --mv-vod-local-chat-content-warm-base: #6d6e70;
+  --mv-vod-local-chat-surface-brand-strongest: #1bb373;
+  --mv-vod-local-chat-content-neutral-inverse: #fff;
+  --mv-vod-local-chat-focus-border: #707174;
+}
+html[data-theme="dark"] {
+  --mv-vod-local-chat-surface-neutral-base: #2e3033;
+  --mv-vod-local-chat-surface-neutral-weak: #202224;
+  --mv-vod-local-chat-border-neutral-weaker: #202224;
+  --mv-vod-local-chat-content-neutral-cool-strong: #dfe2ea;
+  --mv-vod-local-chat-content-warm-base: #6d6e70;
+  --mv-vod-local-chat-surface-brand-strongest: #00ffa3;
+  --mv-vod-local-chat-content-neutral-inverse: #0e0f10;
+  --mv-vod-local-chat-focus-border: #c9cedc;
+}
 .mv-vod-chat-feed[hidden] {
   display: none;
 }
@@ -2360,44 +2518,7 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
   font-weight: 700;
   margin-right: auto;
 }
-.mv-badge-chat-font-scale {
-  align-items: center;
-  display: flex;
-  flex: none;
-  gap: 3px;
-}
-.mv-badge-chat-font-scale button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: 13px;
-  height: 24px;
-  justify-content: center;
-  padding: 0;
-  width: 24px;
-}
-.mv-badge-chat-font-scale button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--popup-brand, #8b6ce8) 18%, transparent);
-}
-.mv-badge-chat-font-scale button:focus-visible {
-  outline: 2px solid var(--popup-brand, #8b6ce8);
-  outline-offset: 1px;
-}
-.mv-badge-chat-font-scale button:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-.mv-badge-chat-font-scale-value {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  min-width: 34px;
-  text-align: center;
-}
+/* 배지 모아보기 팝오버의 글자 크기 조절은 아래 .mv-vod-chat-font-scale 과 같은 규칙을 쓴다. */
 .mv-badge-chat-popover-close {
   align-items: center;
   background: transparent;
@@ -2473,29 +2594,101 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
 .mv-badge-chat-list .mv-vod-chat-row.is-message-border-hidden {
   border-color: transparent !important;
 }
-.mv-vod-chat-scale > button {
+/* 블록보기(배지 모아 챗 기본): 첫 줄 닉네임(왼쪽)·시간(오른쪽), 둘째 줄 채팅. 카드 여백 8px.
+   한줄보기는 기존 줄 구성(시간·닉네임·채팅 한 줄)을 그대로 쓴다. */
+.mv-badge-chat-list.is-block .mv-vod-chat-row:not(.is-special) {
+  padding: 8px;
+}
+.mv-badge-chat-list.is-block
+  .mv-vod-chat-row:not(.is-special)
+  .mv-vod-chat-inline {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.mv-badge-chat-list.is-block
+  .mv-vod-chat-row:not(.is-special)
+  .mv-vod-chat-identity {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  padding: 0;
+}
+.mv-badge-chat-list.is-block
+  .mv-vod-chat-row:not(.is-special)
+  .mv-vod-chat-inline
+  > time {
+  grid-column: 2;
+  grid-row: 1;
+  margin-right: 0;
+}
+.mv-badge-chat-list.is-block
+  .mv-vod-chat-row:not(.is-special)
+  .mv-vod-chat-message {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 글자 크기 조절 묶음. 원본(배지 모아 챗 chzzk-badge-moa-popup-font-scale)과 같은 모양·수치:
+   높이 28px, 1px 테두리, 7px 둥근 모서리, 28px 정사각 버튼, 가운데 12px 굵은 숫자.
+   다시보기 채팅 크기(mvVodChatScale*)와 배지 모아보기 팝오버가 같은 규칙을 쓴다. */
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) {
+  --mv-font-scale-border: rgba(0, 0, 0, 0.08);
+  --mv-font-scale-bg: #fff;
+  --mv-font-scale-hover: #d4d7dc;
+  --mv-font-scale-color: #2e3033;
+  align-items: center;
+  background: var(--mv-font-scale-bg);
+  border: 1px solid var(--mv-font-scale-border);
+  border-radius: 7px;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  gap: 0;
+  height: 28px;
+  overflow: hidden;
+}
+html[data-theme="dark"]
+  :is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) {
+  --mv-font-scale-border: rgba(255, 255, 255, 0.12);
+  --mv-font-scale-bg: #1c1d1f;
+  --mv-font-scale-hover: #4a5161;
+  --mv-font-scale-color: #dfe2ea;
+}
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
-  color: var(--popup-text, #e8eaed);
+  border-radius: 0;
+  color: var(--mv-font-scale-color);
   cursor: pointer;
   display: inline-flex;
-  height: 26px;
+  flex: 0 0 28px;
+  height: 28px;
   justify-content: center;
   padding: 0;
-  width: 26px;
+  width: 28px;
 }
-.mv-vod-chat-scale > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--popup-brand, #8b6ce8) 18%, transparent);
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale)
+  button:hover:not(:disabled) {
+  background: var(--mv-font-scale-hover);
 }
-.mv-vod-chat-scale > button:disabled {
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) button:focus-visible {
+  outline: 2px solid var(--popup-brand, #8b6ce8);
+  outline-offset: -2px;
+}
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) button:disabled {
   cursor: default;
-  opacity: 0.42;
+  opacity: 0.35;
 }
-.mv-vod-chat-scale > span {
-  font-size: 11px;
+:is(.mv-vod-chat-font-scale, .mv-badge-chat-font-scale) > span {
+  color: var(--mv-font-scale-color);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
   min-width: 38px;
   text-align: center;
 }
@@ -2550,6 +2743,269 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
   height: 0;
   width: 0;
 }
+/* 목록과 '최신 채팅으로' 버튼의 기준 상자. 목록이 차지하던 자리를 그대로 이어받는다. */
+.mv-vod-chat-list-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+/* 지난 채팅을 보고 있을 때만 오른쪽 아래에 뜨는 FAB. */
+.mv-vod-chat-latest {
+  align-items: center;
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, rgba(255, 255, 255, 0.16));
+  border-radius: 50%;
+  bottom: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+  box-sizing: border-box;
+  color: var(--popup-text, #e8eaed);
+  cursor: pointer;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 12px;
+  width: 34px;
+  z-index: 4;
+}
+.mv-vod-chat-latest[hidden] {
+  display: none;
+}
+.mv-vod-chat-latest:hover {
+  background: color-mix(
+    in srgb,
+    var(--popup-brand, #8b6ce8) 22%,
+    var(--popup-bg, #141517)
+  );
+}
+.mv-vod-chat-latest:focus-visible {
+  outline: 2px solid var(--popup-brand, #8b6ce8);
+  outline-offset: 2px;
+}
+.mv-vod-chat-compose {
+  background: var(--popup-bg, #141517);
+  border-top: 1px solid var(--popup-border, rgba(255, 255, 255, 0.12));
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 12px 10px;
+  position: relative;
+  z-index: 3;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose {
+  border-top-color: var(--mv-vod-local-chat-border-neutral-weaker);
+}
+/* 설정의 '다시보기 채팅 입력'이 꺼지면 숨긴다(위 display:flex 가 [hidden] 을 덮는다). */
+.mv-vod-chat-compose[hidden] {
+  display: none;
+}
+/* 설정 - 채팅 '채팅 전송 버튼 숨김'이 켜지면 로컬 채팅 입력의 도구 줄(안내·전송 버튼)도
+   숨긴다. 입력은 Enter 로 계속 된다. */
+html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
+  display: none;
+}
+.mv-vod-chat-compose-input-container {
+  align-items: center;
+  background: var(--popup-surface, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--popup-border, rgba(255, 255, 255, 0.16));
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  min-height: 42px;
+  min-width: 0;
+  padding: 6px;
+  position: relative;
+  transition: border-color 0.16s ease;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-compose-input-container {
+  background: var(--mv-vod-local-chat-surface-neutral-base);
+  border-color: var(--mv-vod-local-chat-border-neutral-weaker);
+}
+.mv-vod-chat-compose-input-container:focus-within {
+  background: transparent;
+  border-color: transparent;
+}
+.mv-vod-chat-compose-input-container.is-active::before {
+  border: 2px solid var(--popup-muted, #707174);
+  border-radius: inherit;
+  content: "";
+  inset: -2px;
+  pointer-events: none;
+  position: absolute;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-compose-input-container.is-active::before {
+  border-color: var(--mv-vod-local-chat-focus-border);
+}
+.mv-vod-chat-compose-avatar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  color: var(--popup-muted, #9aa1a9);
+  display: inline-flex;
+  flex: none;
+  font-size: calc(11px * var(--mv-vod-chat-scale, 1));
+  font-weight: 600;
+  height: 28px;
+  justify-content: center;
+  overflow: hidden;
+  width: 28px;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-avatar {
+  background: var(--mv-vod-local-chat-surface-neutral-weak);
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
+.mv-vod-chat-compose-avatar img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.mv-vod-chat-compose-tools {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 32px;
+  min-width: 0;
+}
+.mv-vod-chat-compose-indicator {
+  align-items: center;
+  color: var(--popup-muted, #9aa1a9);
+  display: inline-flex;
+  flex: 1 1 auto;
+  font-size: calc(11px * var(--mv-vod-chat-scale, 1));
+  gap: 6px;
+  line-height: 1.35;
+  min-width: 0;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-indicator {
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
+.mv-vod-chat-compose-indicator svg {
+  fill: currentColor;
+  flex: none;
+  height: 18px;
+  width: 18px;
+}
+.mv-vod-chat-compose-input-container .mv-vod-chat-compose-input {
+  background: transparent;
+  border: 0;
+  color: var(--popup-text, #e8eaed);
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: calc(13px * var(--mv-vod-chat-scale, 1));
+  line-height: 20px;
+  display: block;
+  margin: 0 0 0 7px;
+  max-height: 60px;
+  min-height: 20px;
+  min-width: 0;
+  outline: none;
+  overflow-y: hidden;
+  padding: 0;
+  resize: none;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-compose-input-container
+  .mv-vod-chat-compose-input {
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
+.mv-vod-chat-compose-input-container .mv-vod-chat-compose-input::placeholder {
+  color: var(--popup-muted, #9aa1a9);
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-compose-input-container
+  .mv-vod-chat-compose-input::placeholder {
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
+.mv-vod-chat-compose-input-container
+  .mv-vod-chat-compose-input:focus::placeholder {
+  color: transparent;
+}
+.mv-vod-chat-compose-tools button {
+  background: var(--popup-brand, #8b6ce8);
+  border: 1px solid var(--popup-brand, #8b6ce8);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #fff;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  height: 32px;
+  min-width: 52px;
+  padding: 0 11px;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-tools button {
+  background: var(--mv-vod-local-chat-surface-brand-strongest);
+  border-color: var(--mv-vod-local-chat-surface-brand-strongest);
+  color: var(--mv-vod-local-chat-content-neutral-inverse);
+}
+.mv-vod-chat-compose-tools button:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: default;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-compose-tools
+  button:disabled {
+  background: var(--mv-vod-local-chat-surface-neutral-weak);
+  border-color: transparent;
+  color: var(--mv-vod-local-chat-content-warm-base);
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-row.is-local {
+  /* 나의 로컬 채팅 강조(보라 계열). 줄에 이미 있는 투명 1px 테두리의 색만 바꾼다. */
+  --mv-vod-local-chat-highlight-border: rgba(124, 58, 237, 0.45);
+  /* 배경은 치지직 응원 채팅과 같은 그라데이션(바탕 + 45deg 보라→하늘). */
+  --mv-vod-local-chat-highlight-base: #fff;
+  --mv-vod-local-chat-gradient-start-rgb: 87, 65, 255;
+  --mv-vod-local-chat-gradient-end-rgb: 26, 175, 255;
+  background: var(--mv-vod-local-chat-highlight-base)
+    linear-gradient(
+      45deg,
+      rgba(var(--mv-vod-local-chat-gradient-start-rgb), 0.2),
+      rgba(var(--mv-vod-local-chat-gradient-end-rgb), 0.14902)
+    );
+  border-color: var(--mv-vod-local-chat-highlight-border);
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
+html[data-theme="dark"]
+  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-row.is-local {
+  --mv-vod-local-chat-highlight-border: rgba(167, 139, 250, 0.55);
+  --mv-vod-local-chat-highlight-base: #141517;
+}
+/* 설정 - 다시보기 '다시보기 채팅 입력'의 하위 옵션. */
+html.cheese-vod-local-chat-hide-border
+  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-row.is-local {
+  border-color: transparent;
+}
+html.cheese-vod-local-chat-hide-bg
+  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-row.is-local {
+  background: transparent;
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-row.is-local
+  .mv-vod-chat-identity
+  strong {
+  color: var(--mv-vod-local-chat-surface-brand-strongest);
+}
+:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-row.is-local
+  .mv-vod-chat-message {
+  color: var(--mv-vod-local-chat-content-neutral-cool-strong);
+}
 .mv-vod-chat-row {
   border: 1px solid transparent;
   border-radius: 8px;
@@ -2563,6 +3019,12 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
 }
 .mv-vod-chat-row:first-child {
   margin-top: auto;
+}
+/* 배지 모아보기는 위(가장 오래된 채팅)에서부터 채운다. 위 규칙은 다시보기 채팅창에서
+   채팅이 적을 때 아래에 붙이려는 것이라, 모아보기에 따라 들어오면 높이를 늘릴수록
+   위쪽이 빈다. */
+.mv-badge-chat-list .mv-vod-chat-row:first-child {
+  margin-top: 0;
 }
 .mv-vod-chat-row.is-badge-streamer:not(.is-special) {
   background: linear-gradient(
@@ -2662,6 +3124,13 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
   gap: 4px;
   vertical-align: middle;
 }
+/* 배지 모아보기의 닉네임 뒤 마크(파트너·업적 등)는 원본처럼 14px × 글자 배율. */
+.mv-badge-chat-list
+  .mv-vod-chat-profile-badge-group.is-after
+  .mv-vod-chat-profile-badge {
+  height: calc(14px * var(--mv-vod-chat-scale, 1));
+  width: calc(14px * var(--mv-vod-chat-scale, 1));
+}
 .mv-vod-chat-identity {
   align-items: center;
   display: inline-flex;
@@ -2759,7 +3228,8 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
   width: 18px;
 }
 .mv-vod-chat-cheese-icon::before {
-  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_cheese.png") 50% / cover no-repeat;
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_cheese.png")
+    50% / cover no-repeat;
   content: "";
   flex: none;
   height: 18px;
@@ -2795,6 +3265,25 @@ html.theme_dark .mv-badge-chat-trigger.is-empty {
   background: #ddf4ea;
   color: #141517;
 }
+/* 구독 카드 오른쪽 위 메달(치지직과 같다): 1티어 은메달, 2티어 금메달.
+   구독권 선물 카드의 티켓 장식과 같은 크기·위치(96×64, 위로 12px). */
+.mv-vod-chat-card.is-subscription {
+  position: relative;
+}
+.mv-vod-chat-card.is-subscription::before {
+  background: url("https://ssl.pstatic.net/static/nng/glive/chatting/silver_medal_image.png")
+    50% / cover no-repeat;
+  content: "";
+  height: 64px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: -12px;
+  width: 96px;
+}
+.mv-vod-chat-card.is-subscription.is-tier-2::before {
+  background-image: url("https://ssl.pstatic.net/static/nng/glive/chatting/gold_medal_image.png");
+}
 .mv-vod-chat-card.is-subscription .mv-vod-chat-special-copy strong {
   color: #23815a;
 }
@@ -2817,7 +3306,8 @@ html[data-theme="dark"]
   position: relative;
 }
 .mv-vod-chat-card.is-gift.is-channel-gift::before {
-  background: url("https://ssl.pstatic.net/static/nng/glive/chatting/gift_ticket_01.png") 50% / contain no-repeat;
+  background: url("https://ssl.pstatic.net/static/nng/glive/chatting/gift_ticket_01.png")
+    50% / contain no-repeat;
   content: "";
   height: 64px;
   position: absolute;
@@ -2941,7 +3431,9 @@ html[data-theme="dark"]
   gap: 3px;
 }
 html[data-theme="dark"] .mv-vod-chat-mission-prize-title strong,
-html[data-theme="dark"] .mv-vod-chat-mission-prize-amount .mv-vod-chat-mission-amount {
+html[data-theme="dark"]
+  .mv-vod-chat-mission-prize-amount
+  .mv-vod-chat-mission-amount {
   color: #00ffa3;
 }
 html[data-theme="dark"] .mv-vod-chat-card.is-tone-neutral,
@@ -2966,10 +3458,14 @@ html[data-theme="dark"] .mv-vod-chat-card.is-gift.is-channel-gift.is-tier-2 {
 html[data-theme="dark"] .mv-vod-chat-card.is-mission.is-participation {
   color: #dfe2ea;
 }
-html[data-theme="dark"] .mv-vod-chat-card.is-mission.is-participation .mv-vod-chat-special-head {
+html[data-theme="dark"]
+  .mv-vod-chat-card.is-mission.is-participation
+  .mv-vod-chat-special-head {
   color: #fff;
 }
-html[data-theme="dark"] .mv-vod-chat-card.is-mission .mv-vod-chat-mission-label {
+html[data-theme="dark"]
+  .mv-vod-chat-card.is-mission
+  .mv-vod-chat-mission-label {
   color: #0e0f10;
 }
 html[data-theme="dark"] .mv-vod-chat-card.is-subscription.is-tier-1 {
@@ -3678,6 +4174,9 @@ html[data-theme="dark"]
   outline: 2px solid var(--popup-brand, #00ffa3);
   outline-offset: -2px;
 }
+.mv-watch-body.mv-main-border-hidden .mv-cell.is-main {
+  outline: none;
+}
 
 /* 채팅 크기는 --mv-chat-w/--mv-chat-h 로 정한다(끌어서 바꾼다). */
 .mv-chat {
@@ -4171,6 +4670,92 @@ html[data-theme="dark"]
 .mv-stats-state {
   color: var(--popup-muted, #9aa1a9);
   text-align: center !important;
+}
+.mv-quality-pop {
+  box-sizing: border-box;
+  gap: 0;
+  left: auto;
+  max-height: min(65vh, 520px);
+  min-width: min(390px, calc(100vw - 16px));
+  padding: 6px 10px;
+  right: 0;
+  scrollbar-gutter: stable;
+  width: min(460px, calc(100vw - 16px));
+}
+.mv-quality-channel {
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  display: grid;
+  gap: 7px;
+  padding: 9px 2px;
+}
+.mv-quality-channel:last-child {
+  border-bottom: 0;
+}
+.mv-quality-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+.mv-quality-name {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-quality-current {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.mv-quality-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mv-quality-option {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  min-width: 48px;
+  padding: 5px 8px;
+}
+.mv-quality-option:hover:not(:disabled),
+.mv-quality-option:focus-visible {
+  border-color: var(--popup-brand, #00ffa3);
+  outline: none;
+}
+.mv-quality-option[aria-pressed="true"] {
+  background: var(--mv-vod-local-chat-surface-brand-strongest);
+  border-color: var(--mv-vod-local-chat-surface-brand-strongest);
+  color: var(--mv-vod-local-chat-content-neutral-inverse);
+  font-weight: 600;
+}
+.mv-quality-option:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+.mv-quality-feedback {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10.5px;
+  min-height: 1em;
+}
+.mv-quality-feedback.is-error {
+  color: #e56b79;
+}
+.mv-quality-empty {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 12px;
+  padding: 12px 6px;
+  text-align: center;
 }
 
 /* 라이브 싱크 패널 */

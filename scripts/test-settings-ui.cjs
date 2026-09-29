@@ -5,6 +5,11 @@ const { join } = require('node:path');
 const assert = require('node:assert/strict');
 const settingsSource = readFileSync('src/settings.js', 'utf8');
 const settingsHtml = readFileSync('settings.html', 'utf8');
+const contentSource = readFileSync('src/content.js', 'utf8');
+assert.match(settingsHtml, /data-feature="chatHideSendButton"/);
+assert.match(contentSource, /chatHideSendButton: false/);
+assert.match(contentSource, /cheese-chat-hide-send-button[^\n]*aside#aside-chatting button#send_chat_or_donate/);
+assert.match(settingsSource, /"cheeseMultiviewSetupOptions"/);
 for (const key of [
   'cheeseEmbedClipMixerAlwaysOn',
   'cheeseEmbedClipMixerDefaultOn',
@@ -24,7 +29,9 @@ for (const key of [
   'cheeseMultiviewSeekBar',
   'cheeseMultiviewRememberQuickState',
   'cheeseMultiviewSyncDiagnosticsUi',
+  'cheeseMultiviewLiveCatchUp',
   'cheeseMultiviewQuickPosition',
+  'cheeseMultiviewMainBorder',
   'cheeseMultiviewSetupSortBySource',
   'cheeseMultiviewRememberSetupSort',
   'cheeseMultiviewChatPopoutMode',
@@ -53,7 +60,13 @@ assert.match(
   settingsSource,
   /\["\[data-multiview-remember-setup-sort\]", "cheeseMultiviewRememberSetupSort", true\]/,
 );
+assert.match(
+  settingsSource,
+  /\["\[data-multiview-main-border\]", "cheeseMultiviewMainBorder", true\]/,
+);
 assert.ok(settingsHtml.includes('멀티뷰 화면별 설정'));
+assert.ok(settingsHtml.includes('data-multiview-main-border'));
+assert.ok(settingsHtml.includes('메인 채널 테두리 강조'));
 assert.ok(settingsHtml.includes('선택 화면 정렬 기억'));
 assert.ok(settingsHtml.includes('시청 화면 채널 관리 상태 기억'));
 const dir = mkdtempSync(join(tmpdir(), 'cheese-settings-ui-'));
@@ -113,13 +126,15 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const previousTabOrder=[...document.querySelectorAll('.settings-tab')].map(el=>el.dataset.tab).filter(tab=>tab!=='all'&&tab!=='multiview');
       previousTabOrder.splice(previousTabOrder.indexOf('customfollow'),1);
       previousTabOrder.splice(2,0,'customfollow');
-      window.saved={cheeseSettingsKnownFeatures:['audio-mixer-share-across-channels'],cheeseSettingsTabOrder:previousTabOrder,cheeseFeatureHidden:{audioMixer:true},cheeseWheelVolume:false,
+      window.saved={cheeseSettingsKnownFeatures:['audio-mixer-share-across-channels'],cheeseSettingsTabOrder:previousTabOrder,cheeseFeatureHidden:{audioMixer:true,vodLocalChat:true},cheeseWheelVolume:false,
         cheeseMixerAlwaysOn:true,cheeseMixerDefaultOn:true,cheeseVideoFilterAlwaysOn:false,cheeseVideoFilterDefaultOn:true,
         cheeseEmbedClipMixerAlwaysOn:true,cheeseEmbedClipMixerDefaultOn:true,
         cheeseEmbedClipMixerDefaultPresetEnabled:false,cheeseEmbedClipMixerDefaultGainEnabled:true,
         cheeseMultiviewQuickPosition:{left:24,top:18,width:640,height:400},
+        cheeseMultiviewMainBorder:false,
         cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
         cheeseMultiviewRememberSetupSort:true,
+        cheeseMultiviewSetupOptions:{mainHighQuality:true,startWithoutChat:false,startMainMuted:true,startMainVolume:0.37},
         cheeseMultiviewChatPopoutMode:'native',
         cheeseMultiviewBadgeChatButton:true,
         cheeseMultiviewBadgeChatHideEmptyButton:true,
@@ -299,6 +314,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       input.checked=false;input.dispatchEvent(new Event('change',{bubbles:true}));
       check(saved.cheeseFeatureHidden.audioMixer===true,'display off must save hidden true');
       for(const key of Object.keys(afterOn))if(key!=='audioMixer')check(saved.cheeseFeatureHidden[key]===afterOn[key],'unrelated flag changed: '+key);
+      const sendButton=document.querySelector('[data-feature="chatHideSendButton"]');
+      check(sendButton&&!sendButton.checked,'send-button hiding must default off');
+      sendButton.checked=true;sendButton.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseFeatureHidden.chatHideSendButton===true,'send-button option did not save');
+      sendButton.checked=false;sendButton.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseFeatureHidden.chatHideSendButton===false,'send-button option did not turn off');
       for(const el of document.querySelectorAll('[data-feature-inverted]'))for(const value of [true,false]){
         const old=el.checked;el.checked=CheeseSettingsUi.checkedFromStored(el,value);
         check(CheeseSettingsUi.storedFromChecked(el)===value,'roundtrip failed: '+el.dataset.feature);el.checked=old;
@@ -424,9 +445,17 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(JSON.stringify(regular.appearance.multiviewChatSize)==='{"w":430,"h":320}','settings export omitted multiview chat size');
       check(JSON.stringify(full.appearance.multiviewChatSize)==='{"w":430,"h":320}','full backup omitted multiview chat size');
       for(const exported of [regular,full]){
+        check(exported.settings.cheeseFeatureHidden?.chatHideSendButton===false,'send-button option missing from backup');
+        check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
+        check(exported.settings.cheeseMultiviewMainBorder===false,'main border setting missing from export');
         check(exported.settings.cheeseMultiviewSetupSortBySource?.following==='name-desc','setup source sort missing from export');
         check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
+        check(exported.settings.cheeseMultiviewSetupOptions?.mainHighQuality===true&&
+          exported.settings.cheeseMultiviewSetupOptions?.startWithoutChat===false&&
+          exported.settings.cheeseMultiviewSetupOptions?.startMainMuted===true&&
+          exported.settings.cheeseMultiviewSetupOptions?.startMainVolume===0.37,
+          'multiview setup options missing from export');
         check(exported.settings.cheeseMultiviewChatPopoutMode==='native','chat popout mode missing from export');
         for(const key of ['cheeseMultiviewBadgeChatButton','cheeseMultiviewBadgeChatHideEmptyButton',
           'cheeseMultiviewBadgeChatHideChatBackground','cheeseMultiviewBadgeChatHideChatBorder',
@@ -438,7 +467,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       }
       const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true,
         cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
-        cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false},appearance:{multiviewChatSize:{w:720,h:180}}};
+        cheeseFeatureHidden:{...saved.cheeseFeatureHidden,chatHideSendButton:true,vodLocalChat:false},
+        cheeseMultiviewMainBorder:true,
+        cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
+        cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62}},appearance:{multiviewChatSize:{w:720,h:180}}};
       payload.settings.cheeseMultiviewChatPopoutMode='platter';
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
@@ -447,8 +479,16 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const imported=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
       check(imported.w===720&&imported.h===320,'invalid dimension was not ignored while retaining existing size');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
+      check(saved.cheeseFeatureHidden?.chatHideSendButton===true,'send-button setting was not imported');
+      check(saved.cheeseFeatureHidden?.vodLocalChat===false,'local replay chat setting was not imported');
+      check(saved.cheeseMultiviewMainBorder===true,'main border setting was not imported');
       check(saved.cheeseMultiviewSetupSortBySource?.following==='name-asc','setup source sort was not imported');
       check(saved.cheeseMultiviewRememberSetupSort===false,'setup sort preference was not imported');
+      check(saved.cheeseMultiviewSetupOptions?.mainHighQuality===false&&
+        saved.cheeseMultiviewSetupOptions?.startWithoutChat===true&&
+        saved.cheeseMultiviewSetupOptions?.startMainMuted===false&&
+        saved.cheeseMultiviewSetupOptions?.startMainVolume===0.62,
+        'multiview setup options were not imported');
       check(saved.cheeseMultiviewChatPopoutMode==='platter','chat popout mode was not imported');
       payload.settings.cheeseMultiviewBadgeChatHidePillButton=true;
       payload.settings.cheeseMultiviewBadgeChatKeepPopupOpen=true;

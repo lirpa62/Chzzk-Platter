@@ -81,6 +81,7 @@
         "src/channelAffinity.js",
         "src/channelAffinityData.js",
         "src/multiviewSync.js",
+        "src/achievementBadgeMap.js",
         "src/multiviewBadgeChat.js",
         "src/content.js",
         "src/subscribeBadge.js"
@@ -93,6 +94,21 @@
       "matches": ["https://chzzk.naver.com/*"],
       "js": ["src/logPowerPrediction.js"],
       "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://chzzk.naver.com/live/*"],
+      "js": ["src/multiviewAchievementBridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://chzzk.naver.com/video/*"],
+      "js": ["src/replayLocalChat.js"],
+      "css": ["src/replayLocalChat.css"],
+      "run_at": "document_idle",
+      "world": "MAIN",
       "all_frames": false
     },
     {

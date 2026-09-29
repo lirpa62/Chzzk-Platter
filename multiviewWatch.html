@@ -117,6 +117,29 @@
         <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden></div>
       </div>
 
+      <div class="mv-pop" data-mv-pop="quality">
+        <button
+          type="button"
+          class="mv-pop-button"
+          data-mv-pop-toggle="quality"
+          id="mvQualityBtn"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          aria-label="채널별 화질 설정"
+        >
+          <span class="mv-pop-label">채널별 화질</span>
+          <span class="mv-pop-value" id="mvQualityValue">-</span>
+        </button>
+        <div
+          class="mv-pop-panel mv-quality-pop"
+          id="mvQualityPop"
+          role="dialog"
+          aria-label="채널별 화질 설정"
+          aria-busy="false"
+          hidden
+        ></div>
+      </div>
+
       <div class="mv-pop" data-mv-pop="sync">
         <button
           type="button"
@@ -361,20 +384,42 @@
                     aria-valuemin="120" aria-valuemax="720" aria-valuenow="320" tabindex="0"></div>
                 </section>
               </div>
-              <button type="button" id="mvVodChatScaleDown" aria-label="채팅 크기 마이너스" disabled>
-                <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.196 7c0-.419.34-.758.758-.758h10.092a.758.758 0 0 1 0 1.516H1.954A.758.758 0 0 1 1.196 7Z" clip-rule="evenodd"></path></svg>
-              </button>
-              <span id="mvVodChatScaleValue" aria-live="off">100%</span>
-              <button type="button" id="mvVodChatScaleUp" aria-label="채팅 크기 플러스">
-                <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" d="M7.759 1.954a.758.758 0 1 0-1.517 0v4.288H1.954a.758.758 0 0 0 0 1.516h4.288v4.288a.758.758 0 0 0 1.517 0V7.758h4.287a.758.758 0 1 0 0-1.516H7.759V1.954Z"></path></svg>
-              </button>
+              <div class="mv-vod-chat-font-scale" role="group" aria-label="채팅 글자 크기">
+                <button type="button" id="mvVodChatScaleDown" aria-label="채팅 크기 마이너스" disabled>
+                  <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.196 7c0-.419.34-.758.758-.758h10.092a.758.758 0 0 1 0 1.516H1.954A.758.758 0 0 1 1.196 7Z" clip-rule="evenodd"></path></svg>
+                </button>
+                <span id="mvVodChatScaleValue" aria-live="off">100%</span>
+                <button type="button" id="mvVodChatScaleUp" aria-label="채팅 크기 플러스">
+                  <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" aria-hidden="true"><path fill="currentColor" d="M7.759 1.954a.758.758 0 1 0-1.517 0v4.288H1.954a.758.758 0 0 0 0 1.516h4.288v4.288a.758.758 0 0 0 1.517 0V7.758h4.287a.758.758 0 1 0 0-1.516H7.759V1.954Z"></path></svg>
+                </button>
+              </div>
             </div>
             <div class="mv-vod-chat-meta" id="mvVodChatMeta">
               <span id="mvVodChatClock" aria-live="off"></span>
               <button type="button" class="mv-custom-tooltip" id="mvVodChatTimeMode" aria-pressed="true"
                 aria-label="재생 시간으로 전환" data-tooltip="재생 시간과 실제 방송 시각 전환">방송 시각</button>
             </div>
-            <div class="mv-vod-chat-list" id="mvVodChatList" role="log" aria-live="off"></div>
+            <div class="mv-vod-chat-list-wrap">
+              <div class="mv-vod-chat-list" id="mvVodChatList" role="log" aria-live="off"></div>
+              <button type="button" class="mv-vod-chat-latest mv-custom-tooltip" id="mvVodChatLatest"
+                aria-label="최신 채팅으로 이동" data-tooltip="최신 채팅으로 이동" hidden>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+              </button>
+            </div>
+            <form class="mv-vod-chat-compose" id="mvVodChatCompose" aria-label="다시보기 로컬 채팅 입력">
+              <div class="mv-vod-chat-compose-input-container">
+                <span class="mv-vod-chat-compose-avatar" id="mvVodChatComposeAvatar" aria-hidden="true">나</span>
+                <textarea class="mv-vod-chat-compose-input" id="mvVodChatComposeInput" maxlength="300" rows="1"
+                  placeholder="다시보기 채팅 입력" aria-label="다시보기 로컬 채팅 입력"></textarea>
+              </div>
+              <div class="mv-vod-chat-compose-tools">
+                <span class="mv-vod-chat-compose-indicator" aria-label="이 기기에만 표시되며 실제 채팅으로 전송되지 않습니다">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v7.5a2.25 2.25 0 0 1-2.25 2.25H10l-4.4 3.3a.75.75 0 0 1-1.2-.6v-2.83a2.25 2.25 0 0 1-1.4-2.12v-7.5A2.25 2.25 0 0 1 5.25 4.5Z"></path></svg>
+                  <span>이 기기에만 표시</span>
+                </span>
+                <button type="submit" id="mvVodChatComposeSend" disabled>채팅</button>
+              </div>
+            </form>
           </div>
           <!-- 채팅 준비 상태 덮개(연결 중 / 실패). 영상 칸과 같은 방식이다. -->
           <div class="mv-chat-status" id="mvChatStatus" hidden></div>
@@ -400,6 +445,7 @@
     <script src="src/multiviewDiagnostics.js"></script>
     <script src="src/multiviewTooltip.js"></script>
     <script src="src/achievementBadgeMap.js"></script>
+    <script src="src/replayLocalChat.js"></script>
     <script src="src/multiviewVodChat.js"></script>
     <script src="src/multiviewBadgeChat.js"></script>
     <script src="src/multiviewWatch.js"></script>

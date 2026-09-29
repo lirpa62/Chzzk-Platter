@@ -25,7 +25,7 @@ async function main() {
     if (cursor === 0) {
       return response({
         videoChats: [
-          { messageId: "a", playerMessageTime: 8000, messageTime: 1790279186543, profile: JSON.stringify({ nickname: "가", userRoleCode: "streamer", verifiedMark: true, badge: { imageUrl: "https://nng-phinf.pstatic.net/badge.png", name: "방송 배지" }, activityBadges: [{ badge: { imageUrl: "https://nng-phinf.pstatic.net/activity.png", badgeId: "활동" } }], viewerBadges: [{ badge: { imageUrl: "https://nng-phinf.pstatic.net/viewer.png", badgeId: "시청자" } }], streamingProperty: { nicknameColor: { colorCode: "4659CF" }, subscription: { badge: { imageUrl: "https://nng-phinf.pstatic.net/subscription.png" } }, activatedAchievementBadgeIds: ["2026chzzkopencup_1"] } }), content: "먼저" },
+          { messageId: "a", playerMessageTime: 8000, messageTime: 1790279186543, profile: JSON.stringify({ nickname: "가", userRoleCode: "streamer", verifiedMark: true, badge: { imageUrl: "https://nng-phinf.pstatic.net/badge.png", name: "방송 배지" }, activityBadges: [{ badge: { imageUrl: "https://nng-phinf.pstatic.net/activity.png", badgeId: "활동" } }], viewerBadges: [{ badge: { imageUrl: "https://nng-phinf.pstatic.net/viewer.png", badgeId: "시청자" } }], streamingProperty: { nicknameColor: { colorCode: "4659CF" }, subscription: { badge: { imageUrl: "https://nng-phinf.pstatic.net/subscription.png" } }, activatedAchievementBadgeIds: ["2026chzzkopencup_1", "chraksil_pacman_4_128"] } }), content: "먼저" },
           { messageId: "b", playerMessageTime: 9000, messageTime: 1790279187543, profile: JSON.stringify({ nickname: "나", userRoleCode: "manager" }), extras: JSON.stringify({ emojis: { d_42: "https://nng-phinf.pstatic.net/emoji.png" } }), content: "재생 중 {:d_42:}" },
           { messageId: "b", playerMessageTime: 9000, messageTime: 1790279187543, profile: JSON.stringify({ nickname: "나", userRoleCode: "manager" }), content: "재생 중 {:d_42:}" },
           { messageId: "private", playerMessageTime: 9500, content: "숨김", privateUserBlock: true },
@@ -64,9 +64,12 @@ async function main() {
   assert.equal(streamer.badges[0].url, "https://nng-phinf.pstatic.net/badge.png");
   assert.equal(streamer.nicknameColor, "#4659CF");
   assert.deepEqual(Array.from(streamer.badges, (badge) => badge.label), [
-    "방장", "활동", "구독 배지", "시청자", "파트너", "업적 배지",
+    "방장", "구독 배지", "시청자", "파트너", "업적 배지",
   ]);
+  // 활동 배지(activityBadges)는 닉네임 앞 배지에 넣지 않는다.
+  assert.equal(streamer.badges.some((badge) => /activity\.png/.test(badge.url)), false);
   assert.equal(streamer.badges.at(-2).position, "after");
+  // 업적 배지는 활성화된 것 중 첫 번째 하나만(치지직·배지 모아 챗과 같다).
   assert.equal(streamer.badges.at(-1).url, context.CheeseAchievementBadgeMap["2026chzzkopencup_1"]);
   assert.equal("titleName" in streamer, false, "닉네임 옆 제목 칩에 쓰던 데이터는 제거");
   const manager = session.visible(10).find((item) => item.id === "b");

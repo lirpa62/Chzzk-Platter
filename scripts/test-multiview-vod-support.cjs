@@ -82,7 +82,7 @@ check(/nicknameMessageColor/.test(read("src/multiviewVodChat.js")) && /message\.
 check(/DEFAULT_NICKNAME_COLORS/.test(read("src/multiviewVodChat.js")) && /getFallbackNicknameColor/.test(read("src/multiviewVodChat.js")) && /fallbackNicknameColorStates/.test(read("src/multiviewVodChat.js")) && /MAX_FALLBACK_COLOR_VIDEOS = 6/.test(read("src/multiviewVodChat.js")), "CC000 닉네임에 제한된 다시보기별 고정 순환 색상을 배정");
 check(/message\.donation\s*\?\s*""/.test(watch.slice(watch.indexOf("function renderVodChatRow"), watch.indexOf("function renderVodChat()"))), "후원·구독·미션 특수 채팅에는 닉네임 색상 코드 스타일을 적용하지 않음");
 check(/new MutationObserver\(\(\) => \{\s*postChatView\(\);\s*renderVodChat\(\);/.test(watch), "테마 변경 시 다시보기 채팅 닉네임 색상을 즉시 갱신");
-check(/activityBadges/.test(read("src/multiviewVodChat.js")) && /streamingProperty\.subscription/.test(read("src/multiviewVodChat.js")) && /activatedAchievementBadgeIds/.test(read("src/multiviewVodChat.js")) && /viewerBadges/.test(read("src/multiviewVodChat.js")) && /mv-vod-chat-profile-badge/.test(watch), "활동·구독·업적·시청자 배지를 닉네임 앞뒤에 표시");
+check(!/(?:profile|userProfile|user|streamingProperty)\.activityBadges?\b/.test(read("src/multiviewVodChat.js")) && /streamingProperty\.subscription/.test(read("src/multiviewVodChat.js")) && /activatedAchievementBadgeIds/.test(read("src/multiviewVodChat.js")) && /viewerBadges/.test(read("src/multiviewVodChat.js")) && /mv-vod-chat-profile-badge/.test(watch), "구독·업적·시청자 배지를 닉네임 앞뒤에 표시하고 활동 배지는 넣지 않음");
 check(/src\/achievementBadgeMap\.js/.test(watchHtml) && /2026chzzkopencup_4/.test(read("src/achievementBadgeMap.js")), "멀티뷰에서 지원하는 업적 배지 URL 표를 로드");
 check(/cheeseFeatureHidden/.test(watch) && /chatShowTime === true/.test(watch) && /cheeseChatTimeFormat/.test(watch), "채팅 시간 표시 여부와 12/24시간 형식을 기존 설정에 맞춤");
 check(/mvVodChatScaleDown/.test(watchHtml) && /mvVodChatScaleUp/.test(watchHtml) && /VOD_CHAT_SCALE_STEPS = Object\.freeze\(\[100, 125, 150, 175\]\)/.test(watch) && /vodChatScalePercent >= 175/.test(watch), "다시보기 채팅 크기를 100·125·150·175% 단계로 조절");
@@ -95,7 +95,7 @@ check(/const cheeseIcon = '<span class="mv-vod-chat-cheese-icon"/.test(watch) &&
 check(/is-channel-gift/.test(watch) && /is-personal-gift/.test(watch) && /gift_ticket_01\.png/.test(css) && (css.match(/background:\s*#3e34af/g) || []).length >= 2 && (css.match(/background:\s*#6f23cb/g) || []).length >= 2 && /rgba\(255, 255, 255, 0\.8\)/.test(css), "채널·개인 구독권 선물을 분리하고 티어별 색상과 장식을 적용");
 check(/is-participation/.test(watch) && /mv-vod-chat-mission-prize-title/.test(watch) && /추가했습니다\./.test(watch) && /mv-vod-chat-mission-target/.test(watch), "미션 후원과 미션 상금 카드 레이아웃을 분리하고 과녁 아이콘을 표시");
 check(/const missionTimeSeconds = mission \? durationTime : 0/.test(read("src/multiviewVodChat.js")) && /mv-vod-chat-mission-timer/.test(watch) && /viewBox="0 0 13 14"/.test(watch) && /missionTimeSeconds \/ 3600/.test(watch), "미션 타이머는 extras.durationTime을 사용");
-check(/html\[data-theme="dark"\] \.mv-vod-chat-card\.is-mission\s*\{[^}]*background:\s*#2a2c2f;[^}]*color:\s*#fff/s.test(css) && /html\[data-theme="dark"\] \.mv-vod-chat-card\.is-mission\.is-participation\s*\{[^}]*color:\s*#dfe2ea/s.test(css) && /html\[data-theme="dark"\] \.mv-vod-chat-card\.is-mission\.is-participation \.mv-vod-chat-special-head\s*\{[^}]*color:\s*#fff/s.test(css) && /html\[data-theme="dark"\] \.mv-vod-chat-card\.is-mission \.mv-vod-chat-mission-label\s*\{[^}]*color:\s*#0e0f10/s.test(css), "다크 모드 미션·상금 카드 전용 배경과 글자색 적용");
+check(/html\[data-theme="dark"\]\s+\.mv-vod-chat-card\.is-mission\s*\{[^}]*background:\s*#2a2c2f;[^}]*color:\s*#fff/s.test(css) && /html\[data-theme="dark"\]\s+\.mv-vod-chat-card\.is-mission\.is-participation\s*\{[^}]*color:\s*#dfe2ea/s.test(css) && /html\[data-theme="dark"\]\s+\.mv-vod-chat-card\.is-mission\.is-participation\s+\.mv-vod-chat-special-head\s*\{[^}]*color:\s*#fff/s.test(css) && /html\[data-theme="dark"\]\s+\.mv-vod-chat-card\.is-mission\s+\.mv-vod-chat-mission-label\s*\{[^}]*color:\s*#0e0f10/s.test(css), "다크 모드 미션·상금 카드 전용 배경과 글자색 적용");
 check(/mv-vod-chat-inline/.test(watch) && /\.mv-vod-chat-message\s*\{[\s\S]*?display:\s*inline/.test(css), "일반 채팅의 닉네임과 메시지를 한 흐름으로 표시");
 check(/\.mv-vod-chat-inline\s*\{[^}]*line-height:\s*calc\(20px \* var\(--mv-vod-chat-scale, 1\)\)/s.test(css) && /\.mv-vod-chat-inline \.mv-vod-chat-identity\s*\{[^}]*vertical-align:\s*top/s.test(css) && /\.mv-vod-chat-identity\s*\{[^}]*line-height:\s*inherit/s.test(css) && !/\.mv-vod-chat-message\s*\{[^}]*vertical-align:/s.test(css), "닉네임과 메시지가 네이티브의 상단 정렬·상속 line-height를 사용");
 check(!/\.mv-vod-chat-inline strong\s*,[\s\S]*?color:\s*#b7c5ff/.test(css), "일반 다시보기 닉네임에 고정 파란색 대신 채팅 기본색을 사용");
@@ -157,7 +157,8 @@ check(/data\.type === "CHAT_UNAVAILABLE"/.test(popup), "기존 라이브 채팅 
 check(/document\.querySelector\("aside#vod-aside"\)/.test(content), "멀티뷰 초기 접기 대상에 다시보기 채팅 aside 포함");
 check(/function getChatFoldToggleBtn\(aside = null\)/.test(content), "네이티브 접기 버튼을 해당 채팅 aside 안에서 찾음");
 check(/function getVodChatCloseButton\(aside = null\)[\s\S]*?button\[class\*="_close_button_"\]/.test(content), "다시보기 채팅의 전용 닫기 버튼을 찾음");
-const foldReconcileStart = content.indexOf("function ensureMultiviewChatFold()");
+// 수동 '다시 적용'용 force 인자가 붙어도 같은 함수를 찾는다.
+const foldReconcileStart = content.indexOf("function ensureMultiviewChatFold(");
 const foldReconcileEnd = content.indexOf("// 넓은 화면은 MAIN world", foldReconcileStart);
 const foldReconcile = content.slice(foldReconcileStart, foldReconcileEnd);
 check(/if \(isVod && isVodChatFoldedAway\(\)\) return true/.test(foldReconcile), "네이티브 펼치기 버튼이 나타나면 다시보기 채팅을 닫힌 상태로 판정");

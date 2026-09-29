@@ -18,6 +18,7 @@
   const WATCH_PAGE = "multiviewWatch.html";
   const SETUP_SORT_STORAGE_KEY = "cheeseMultiviewSetupSortBySource";
   const REMEMBER_SETUP_SORT_KEY = "cheeseMultiviewRememberSetupSort";
+  const SETUP_OPTIONS_STORAGE_KEY = "cheeseMultiviewSetupOptions";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
   //   서로 구성을 덮어쓴다.
@@ -37,6 +38,7 @@
     mainHighQuality: false,
     startWithoutChat: false,
     startMainMuted: false,
+    startMainVolume: 1,
     listCache: new Map(),
     livePager: null,
     searchPager: null,
@@ -67,6 +69,33 @@
         })[c],
     );
   const fmt = (n) => Number(n || 0).toLocaleString("ko-KR");
+
+  function normalizeStartMainVolume(value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+    return Math.round(Math.min(1, Math.max(0, value)) * 100) / 100;
+  }
+
+  function paintStartMainVolume() {
+    const percent = Math.round(state.startMainVolume * 100);
+    const range = $("mvStartMainVolumeRange");
+    const number = $("mvStartMainVolumeNumber");
+    if (range) range.value = String(percent);
+    if (number) number.value = String(percent);
+  }
+
+  function setStartMainVolumePercent(value) {
+    if (typeof value === "string" && value.trim() === "") return false;
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return false;
+    state.startMainVolume = Math.round(Math.min(100, Math.max(0, percent))) / 100;
+    paintStartMainVolume();
+    return true;
+  }
+
+  function syncStartMainVolumeVisibility() {
+    const control = $("mvStartMainVolumeControl");
+    if (control) control.hidden = state.startMainMuted;
+  }
 
   // 구역 아이콘(lucide). 그룹은 사용자가 고른 아이콘이 따로 있지만 여기서는
   // 폴더 하나로 통일한다(아이콘 집합을 통째로 들고 오지 않기 위해).
@@ -170,6 +199,30 @@
     void chrome.storage.local
       .set({ [SETUP_SORT_STORAGE_KEY]: { ...state.sortBySource } })
       .catch(() => {});
+  }
+
+  let setupOptionsSaveTimer = 0;
+  function saveSetupOptions() {
+    clearTimeout(setupOptionsSaveTimer);
+    setupOptionsSaveTimer = 0;
+    if (!chrome.storage?.local) return;
+    void chrome.storage.local
+      .set({
+        [SETUP_OPTIONS_STORAGE_KEY]: {
+          mainHighQuality: state.mainHighQuality,
+          startWithoutChat: state.startWithoutChat,
+          startMainMuted: state.startMainMuted,
+          // ⚠ 예전에는 시작 음량을 빼고 저장해, 다음에 열면 늘 100% 로 돌아왔다.
+          startMainVolume: state.startMainVolume,
+        },
+      })
+      .catch(() => {});
+  }
+
+  // 슬라이더를 끄는 동안 input 이 연달아 온다. 저장은 묶어서 한 번 한다.
+  function scheduleSetupOptionsSave() {
+    clearTimeout(setupOptionsSaveTimer);
+    setupOptionsSaveTimer = window.setTimeout(saveSetupOptions, 300);
   }
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -810,6 +863,7 @@
       mainHighQuality: state.mainHighQuality,
       chatEnabled: !state.startWithoutChat,
       startMainMuted: state.startMainMuted,
+      startMainVolume: state.startMainVolume,
     };
     // 기존 멀티뷰를 고치는 중이면 그 id 를 이어 쓰고, 새로 시작하면 새 id 를 만든다.
     const handoffId = state.handoffId || newHandoffId();
@@ -830,6 +884,15 @@
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
   document.addEventListener("click", (event) => {
+    const noteButton = event.target.closest?.("[data-mv-option-note]");
+    if (noteButton) {
+      const note = $(noteButton.dataset.mvOptionNote);
+      if (note) {
+        note.hidden = !note.hidden;
+        noteButton.setAttribute("aria-expanded", String(!note.hidden));
+      }
+      return;
+    }
     const folder = event.target.closest?.("[data-mv-folder]");
     if (folder) {
       state.folder = folder.dataset.mvFolder;
@@ -987,12 +1050,34 @@
 
   $("mvMainHighQuality")?.addEventListener("change", (event) => {
     state.mainHighQuality = event.target.checked;
+    saveSetupOptions();
   });
   $("mvStartWithoutChat")?.addEventListener("change", (event) => {
     state.startWithoutChat = event.target.checked;
+    saveSetupOptions();
   });
   $("mvStartMainMuted")?.addEventListener("change", (event) => {
     state.startMainMuted = event.target.checked;
+    saveSetupOptions();
+    syncStartMainVolumeVisibility();
+  });
+  $("mvStartMainVolumeRange")?.addEventListener("input", (event) => {
+    if (setStartMainVolumePercent(event.target.value)) scheduleSetupOptionsSave();
+  });
+  $("mvStartMainVolumeRange")?.addEventListener("change", (event) => {
+    if (setStartMainVolumePercent(event.target.value)) saveSetupOptions();
+  });
+  $("mvStartMainVolumeNumber")?.addEventListener("input", (event) => {
+    if (event.target.value !== "" && setStartMainVolumePercent(event.target.value))
+      scheduleSetupOptionsSave();
+  });
+  $("mvStartMainVolumeNumber")?.addEventListener("change", (event) => {
+    if (setStartMainVolumePercent(event.target.value)) saveSetupOptions();
+    else paintStartMainVolume();
+  });
+  // 저장을 묶어 둔 사이에 탭을 닫아도 마지막 값을 남긴다.
+  window.addEventListener("pagehide", () => {
+    if (setupOptionsSaveTimer) saveSetupOptions();
   });
 
   // 고른 채널 순서 바꾸기(맨 위가 메인).
@@ -1034,6 +1119,7 @@
       const saved = await chrome.storage?.local?.get([
         SETUP_SORT_STORAGE_KEY,
         REMEMBER_SETUP_SORT_KEY,
+        SETUP_OPTIONS_STORAGE_KEY,
       ]);
       rememberSetupSort = saved?.[REMEMBER_SETUP_SORT_KEY] !== false;
       if (rememberSetupSort) {
@@ -1041,6 +1127,20 @@
       } else {
         await chrome.storage?.local?.remove?.(SETUP_SORT_STORAGE_KEY);
       }
+      const setupOptions = saved?.[SETUP_OPTIONS_STORAGE_KEY];
+      state.mainHighQuality = setupOptions?.mainHighQuality === true;
+      state.startWithoutChat = setupOptions?.startWithoutChat === true;
+      state.startMainMuted = setupOptions?.startMainMuted === true;
+      // 저장값이 없으면(예전 버전에서 저장한 경우 포함) 100%.
+      state.startMainVolume = normalizeStartMainVolume(setupOptions?.startMainVolume);
+      paintStartMainVolume();
+      const qualityBox = $("mvMainHighQuality");
+      const chatBox = $("mvStartWithoutChat");
+      const mutedBox = $("mvStartMainMuted");
+      if (qualityBox) qualityBox.checked = state.mainHighQuality;
+      if (chatBox) chatBox.checked = state.startWithoutChat;
+      if (mutedBox) mutedBox.checked = state.startMainMuted;
+      syncStartMainVolumeVisibility();
     } catch {}
     // '채널 다시 고르기' 로 돌아온 경우: 주소의 setup id 로 이전 구성을 복원한다.
     const handoffId = new URLSearchParams(location.search).get("setup") || "";
@@ -1067,6 +1167,9 @@
           state.startMainMuted = stored.startMainMuted === true;
           const mutedBox = $("mvStartMainMuted");
           if (mutedBox) mutedBox.checked = state.startMainMuted;
+          state.startMainVolume = normalizeStartMainVolume(stored.startMainVolume);
+          paintStartMainVolume();
+          syncStartMainVolumeVisibility();
         }
       } catch {}
     }

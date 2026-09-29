@@ -248,6 +248,10 @@
   // 화질 지시는 필요 없고, 최상위 UI 억제만 영상 칸과 똑같이 적용한다.
   const IS_MULTIVIEW_CHAT_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiChat") === "1";
+  // 멀티뷰 영상 칸은 채팅을 접어 둔다. 접힌 채팅창에는 채팅 줄이 그려지지 않지만
+  // 랭킹 닉네임 순환 같은 작은 갱신은 계속 일어나, 채팅 감시가 칸마다 헛돈다
+  // (실측: 채팅 정리 패스가 초당 약 3회, 너비 측정 포함). 채팅은 채팅 칸에서만 감시한다.
+  const CHAT_DOM_WATCH_OFF = IS_MULTIVIEW_FRAME;
   // 이 프레임이 맡은 채널. 부모가 보내는 지시가 이 프레임 것인지 확인하는 데 쓴다.
   const multiviewLiveChannelId = (
     location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || ""
@@ -271,6 +275,7 @@
   // 부모(확장 페이지)가 쓰는 메시지 이름. 양쪽이 같은 문자열을 쓴다.
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
   const MULTIVIEW_QUALITY_POLICIES = new Set(["highest", "cap-480", "cap-720", "native"]);
+  const MULTIVIEW_INITIAL_QUALITIES = new Set(["highest", "cap-480", "cap-720"]);
   // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
   const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
   // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
@@ -289,10 +294,21 @@
     IS_MULTIVIEW_FRAME && MULTIVIEW_PARAMS.get("cheeseMultiMuted") === "1";
   // 부모가 지시한 출력 크기(0~1). 부모의 전체 볼륨 × 이 채널 볼륨이 이미 곱해져
   // 온다. 여기서는 받은 값을 <video> 에 그대로 건다(새 AudioContext 를 만들지 않는다).
-  let multiviewVolume = 1;
+  const initialMultiviewVolume = MULTIVIEW_PARAMS.get("cheeseMultiVolume");
+  const parsedInitialMultiviewVolume = initialMultiviewVolume === null
+    ? NaN
+    : Number(initialMultiviewVolume);
+  let multiviewVolume = IS_MULTIVIEW_FRAME && Number.isFinite(parsedInitialMultiviewVolume) &&
+    parsedInitialMultiviewVolume >= 0 && parsedInitialMultiviewVolume <= 1
+    ? parsedInitialMultiviewVolume
+    : 1;
   // 역할 정책은 숫자 상한과 분리한다. highest는 상한이 없는 상태가 아니라 생명주기
   // 경계에서 사용 가능한 최고 화질을 적극적으로 다시 선택한다는 뜻이다.
   const multiviewInitialQualityPolicy = MULTIVIEW_PARAMS.get("cheeseMultiQualityPolicy");
+  const multiviewInitialQuality = IS_MULTIVIEW_FRAME &&
+      MULTIVIEW_INITIAL_QUALITIES.has(MULTIVIEW_PARAMS.get("cheeseMultiInitialQuality"))
+    ? MULTIVIEW_PARAMS.get("cheeseMultiInitialQuality")
+    : "none";
   let multiviewQualityPolicy = IS_MULTIVIEW_FRAME &&
       MULTIVIEW_QUALITY_POLICIES.has(multiviewInitialQualityPolicy)
     ? multiviewInitialQualityPolicy
@@ -2319,6 +2335,7 @@
     chatHideMission: false,
     chatHidePrediction: false,
     chatHideParty: false, // 채팅 상단 고정 '파티 후원' 진행 패널 숨김
+    chatHideSendButton: false, // 일반·멀티뷰 라이브 채팅 입력창의 전송 버튼 숨김
     chatHideDonation: false, // 채팅 스트림의 후원(치즈) 메시지 숨김
     chatHideSubscription: false, // 채팅 스트림의 구독 메시지 숨김
     chatHideMissionMsg: false, // 채팅 스트림의 미션 메시지 숨김
@@ -2343,6 +2360,12 @@
     pipChat: false, // PIP(다른 페이지 이동) 중 치지직 PIP 옆에 채팅 iframe 을 붙여 고정
     clipVault: false, // /clips 헤더의 클립 보관함(즐겨찾기·좋아요) 버튼
     videoVault: false, // /videos·팔로잉 동영상의 다시보기 보관함
+    // 다시보기 로컬 채팅 입력(체크=켬, 기본 끔). 일반 다시보기와 멀티뷰 다시보기 채팅
+    // 모두 이 값을 따른다(replayLocalChat.js · multiviewWatch.js · multiviewChatPopup.js).
+    vodLocalChat: false,
+    // 위 입력으로 추가된 나의 채팅 줄의 보라 테두리선·배경색 숨김(하위 옵션, 기본 끔).
+    vodLocalChatHideBorder: false,
+    vodLocalChatHideBackground: false,
     chatLogPower: false, // 현재 채널 보유 통나무파워를 채팅 영역에 표시
     chatLogPowerAuto: false, // 통나무파워 자동 획득(적격 claim PUT)
     chatLogPowerToast: false, // 1시간 시청 보상 획득 시 토스트 알림
@@ -18022,6 +18045,15 @@
       "cheese-chat-nickname-message-split",
       featureFlags.chatSplitNickname === true,
     );
+    // 다시보기 로컬 채팅 줄 강조의 테두리선·배경색 숨김(replayLocalChat.css 가 본다).
+    document.documentElement.classList.toggle(
+      "cheese-vod-local-chat-hide-border",
+      featureFlags.vodLocalChatHideBorder === true,
+    );
+    document.documentElement.classList.toggle(
+      "cheese-vod-local-chat-hide-bg",
+      featureFlags.vodLocalChatHideBackground === true,
+    );
     applyChatTweaks(); // 채팅창 정리(랭킹/미션/승부예측 숨김·너비·왼쪽배치)
     // seek preview 병기 토글 즉시 반영(이미 떠 있는 preview에 추가/제거).
     updateSeekPreviewRealtime();
@@ -18294,6 +18326,7 @@
 
   // 채팅 정리 기능 중 하나라도 켜져 있나(옵저버 가동 여부 판단).
   function anyChatTweakOn() {
+    if (CHAT_DOM_WATCH_OFF) return false;
     return (
       featureFlags.chatHideRanking ||
       featureFlags.chatHideLogPowerRanking ||
@@ -20664,13 +20697,18 @@
   // 방종 종료 화면이 실제로 '보이는지'. 클래스 해시는 바뀔 수 있어 텍스트로 감지한다.
   // 플레이어 영역(_player_) 안의 문구가 종료 안내 문구면 참.
   function isReliveEndScreenVisible() {
-    const els = document.querySelectorAll(
-      'main [class*="_player_"] p, #layout-body [class*="_player_"] p, main [class*="_player_"] [class*="_text_"], #layout-body [class*="_player_"] [class*="_text_"]',
+    const players = document.querySelectorAll(
+      '#live_player_layout, main [class*="_player_"], #layout-body [class*="_player_"]',
     );
-    for (const el of els) {
-      if (!isElementActuallyVisible(el)) continue;
-      const t = String(el.textContent || "");
-      if (RELIVE_END_TEXTS.some((m) => t.includes(m))) return true;
+    for (const player of players) {
+      const els = player.querySelectorAll(
+        'p, span, div, [role="status"], [class*="_text_"]',
+      );
+      for (const el of els) {
+        if (!isElementActuallyVisible(el)) continue;
+        const t = String(el.textContent || "");
+        if (RELIVE_END_TEXTS.some((m) => t.includes(m))) return true;
+      }
     }
     return false;
   }
@@ -21732,6 +21770,11 @@
     // 사용자가 이 칸에서 직접 소리를 켰는지. 켰으면 잠시 존중하되, 부모가 메인/보조를
     // 다시 지정하면 그 지시를 우선한다(부모가 소리 주인을 정한다).
     let muteOverriddenByUser = false;
+    // 마지막으로 사용자가 이 칸의 소리를 직접 조작한 시각(신뢰된 클릭·키 입력).
+    // 이 직후에 지시와 다르게 바뀐 음소거만 사용자 조작으로 부모에게 알린다.
+    // ⚠ 치지직은 초기화·video 교체 중에 스스로 음소거를 풀기도 한다. 그건 알리지 않는다.
+    let lastTrustedAudioInputAt = 0;
+    const TRUSTED_AUDIO_INPUT_WINDOW_MS = 2000;
 
     // ⚠ 치지직은 SPA·재연결·화질 전환·광고로 <video> 를 통째로 교체한다. 예전에는
     //   400ms 폴링으로 20초만 버텼는데, 오래 보면 그 뒤 교체분에는 적용되지 않았다.
@@ -21755,6 +21798,28 @@
       "MIXER_GET_STATE", "MIXER_SET_ENABLED", "MIXER_SET_GAIN",
       "MIXER_SET_PRESET", "MIXER_FLUSH_GAIN",
     ]);
+    const isMultiviewQualityValue = (value) => value === "auto" ||
+      (typeof value === "string" && /^\d{3,4}$/.test(value) &&
+        Number(value) >= 144 && Number(value) <= 4320);
+
+    const forwardMultiviewQualityCommand = (data) => {
+      const packet = {
+        source: "cheese-multiview-quality-content",
+        type: data.type === "REQUEST_MULTIVIEW_QUALITY"
+          ? "QUALITY_GET_STATE" : "QUALITY_SET",
+        channelId: MULTIVIEW_CHANNEL_ID,
+      };
+      if (data.type === "REQUEST_MULTIVIEW_QUALITY") {
+        if (!Number.isSafeInteger(data.requestId) || data.requestId <= 0) return;
+        packet.requestId = data.requestId;
+      } else {
+        if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
+            !isMultiviewQualityValue(data.quality)) return;
+        packet.commandId = data.commandId;
+        packet.quality = data.quality;
+      }
+      window.postMessage(packet, location.origin);
+    };
 
     const forwardMultiviewMixerCommand = (data) => {
       const packet = { source: "cheese-multiview-mixer-content", type: data.type,
@@ -21782,6 +21847,26 @@
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== location.origin) return;
       const data = event.data;
+      if (data?.source === "cheese-multiview-quality-main" &&
+          data.channelId === MULTIVIEW_CHANNEL_ID) {
+        if (data.type === "state" && Number.isSafeInteger(data.requestId) &&
+            data.requestId > 0 && data.state && typeof data.state === "object") {
+          notifyParent("FRAME_QUALITY_STATE", {
+            requestId: data.requestId,
+            state: data.state,
+          });
+        } else if (data.type === "result" && Number.isSafeInteger(data.commandId) &&
+            data.commandId > 0 && typeof data.quality === "string" &&
+            typeof data.applied === "boolean") {
+          notifyParent("FRAME_QUALITY_COMMAND_RESULT", {
+            commandId: data.commandId,
+            quality: data.quality,
+            applied: data.applied,
+            reason: typeof data.reason === "string" ? data.reason : null,
+          });
+        }
+        return;
+      }
       if (data?.source !== "cheese-multiview-mixer-main" ||
           data.channelId !== MULTIVIEW_CHANNEL_ID) return;
       if (data.type === "state" && data.state && typeof data.state === "object") {
@@ -21941,6 +22026,15 @@
       const video = event.currentTarget;
       if (!(video instanceof HTMLMediaElement)) return;
       if (multiviewMuted && !video.muted) muteOverriddenByUser = true;
+      if (Number.isFinite(video.volume) && video.volume >= 0 && video.volume <= 1)
+        notifyParent("FRAME_AUDIO_STATE", { volume: video.volume });
+      // 플레이어에서 직접 음소거를 켜거나 끈 경우. 부모의 볼륨 패널이 따라가도록 알린다.
+      if (
+        video.muted !== multiviewMuted &&
+        Date.now() - lastTrustedAudioInputAt < TRUSTED_AUDIO_INPUT_WINDOW_MS
+      ) {
+        notifyParent("FRAME_USER_MUTE", { muted: video.muted });
+      }
       reportAudioResolved(video);
     };
 
@@ -21969,12 +22063,22 @@
       forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
     };
 
-    const onMultiviewVideoEnded = () => {
-      if (!/^\/video\/\d+/i.test(location.pathname) || endedNotified) return;
+    const onMultiviewVideoEnded = (event) => {
+      const video = event.currentTarget;
+      const isVod = /^\/video\/\d+/i.test(location.pathname);
+      if (
+        endedNotified ||
+        !(video instanceof HTMLMediaElement) ||
+        !video.ended ||
+        (!isVod && typeof isAdPlaying === "function" && isAdPlaying())
+      )
+        return;
       endedNotified = true;
       notifyParent("FRAME_ENDED");
       if (endedTimer) clearInterval(endedTimer);
       endedTimer = 0;
+      if (endedMutationCheckTimer) clearTimeout(endedMutationCheckTimer);
+      endedMutationCheckTimer = 0;
     };
 
     function checkMultiviewAdTransition() {
@@ -22066,10 +22170,15 @@
       videoObserver = new MutationObserver(() => {
         syncMultiviewVideo();
         scheduleMultiviewAdCheck();
+        scheduleEndedMutationCheck();
         if (videoObserverHost !== document.getElementById("live_player_layout"))
           observeVideoHost();
       });
-      videoObserver.observe(host, { childList: true, subtree: true });
+      videoObserver.observe(host, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
     };
 
     // 사용자가 소리 관련 조작을 하면 그 의사를 기록한다.
@@ -22083,6 +22192,7 @@
           )
         ) {
           muteOverriddenByUser = true;
+          lastTrustedAudioInputAt = Date.now();
         }
       },
       true,
@@ -22093,6 +22203,9 @@
         if (!event.isTrusted) return;
         if (event.code === "KeyM" || event.code === "ArrowUp") {
           muteOverriddenByUser = true;
+        }
+        if (event.code === "KeyM" || event.code === "ArrowUp" || event.code === "ArrowDown") {
+          lastTrustedAudioInputAt = Date.now();
         }
       },
       true,
@@ -22140,6 +22253,7 @@
     // 방송 종료 감지. 이미 검증된 종료 화면 판정을 그대로 쓴다(구조 + 문구 이중 확인).
     // 한 번만 알린다.
     let endedTimer = 0;
+    let endedMutationCheckTimer = 0;
     const checkEnded = () => {
       if (endedNotified) return;
       if (typeof isReliveEndScreenVisible !== "function") return;
@@ -22148,6 +22262,15 @@
       notifyParent("FRAME_ENDED");
       if (endedTimer) clearInterval(endedTimer);
       endedTimer = 0;
+      if (endedMutationCheckTimer) clearTimeout(endedMutationCheckTimer);
+      endedMutationCheckTimer = 0;
+    };
+    const scheduleEndedMutationCheck = () => {
+      if (endedNotified || endedMutationCheckTimer) return;
+      endedMutationCheckTimer = setTimeout(() => {
+        endedMutationCheckTimer = 0;
+        checkEnded();
+      }, 150);
     };
 
     // 부모 지시 수신. 아무 페이지나 보낸 메시지를 실행하지 않도록 형태를 모두 확인한다.
@@ -22160,6 +22283,11 @@
       if (data.source !== MULTIVIEW_MESSAGE) return;
       if (typeof data.channelId !== "string" ||
           data.channelId.toLowerCase() !== MULTIVIEW_CHANNEL_ID) return;
+      if (data.type === "REQUEST_MULTIVIEW_QUALITY" ||
+          data.type === "SET_MULTIVIEW_QUALITY") {
+        forwardMultiviewQualityCommand(data);
+        return;
+      }
       if (MULTIVIEW_MIXER_COMMANDS.has(data.type)) {
         forwardMultiviewMixerCommand(data);
         return;
@@ -22185,9 +22313,14 @@
       const syncCommand = {
         RESET_SYNC_RATE: "reset-rate", APPLY_SYNC_RATE: "rate",
         APPLY_SYNC_NUDGE: "nudge", APPLY_SYNC_SEEK: "seek",
+        APPLY_LIVE_CATCH_UP: "catch-up",
       }[data.type];
       if (typeof syncCommand === "string") {
         if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
+        if (syncCommand === "catch-up" &&
+            (typeof data.targetDelaySec !== "number" || !Number.isFinite(data.targetDelaySec) ||
+              data.targetDelaySec < MULTIVIEW_SYNC.CATCH_UP.targetSec ||
+              data.targetDelaySec > MULTIVIEW_SYNC.CATCH_UP.limitSec)) return;
         if (syncCommand === "rate" &&
             (typeof data.rate !== "number" || !Number.isFinite(data.rate) ||
               data.rate < 0.95 || data.rate > 1.05)) return;
@@ -22233,14 +22366,20 @@
               }
             }
           } else if (video.seeking) reason = "seeking";
-          else if (Date.now() - syncSeekAt <
+          // 따라잡기는 싱크 seek 쿨다운과 무관하다(부모가 자체 쿨다운을 둔다).
+          else if (syncCommand !== "catch-up" && Date.now() - syncSeekAt <
               (syncCommand === "nudge" || data.manual === true ? 250 : 30000)) reason = "cooldown";
           else {
             const start = syncRange(video.seekable, "start");
             const end = syncRange(video.seekable, "end");
-            const target = video.currentTime + data.deltaSec;
+            // 따라잡기는 부모가 본 지연이 아니라 지금의 라이브 끝에서 목표 지연을 뺀다.
+            const target = syncCommand === "catch-up"
+              ? (end === null ? NaN : end - data.targetDelaySec)
+              : video.currentTime + data.deltaSec;
             if (start === null || end === null || !Number.isFinite(target) ||
                 target < start + 0.05 || target > end - 0.05) reason = "range";
+            // 라이브 쪽(앞)으로만 옮긴다. 이미 목표 근처면 할 일이 없다.
+            else if (syncCommand === "catch-up" && target < video.currentTime + 0.5) reason = "range";
             else {
               video.currentTime = target;
               if (Math.abs(video.currentTime - target) > 0.2) reason = "invalid-state";
@@ -22347,7 +22486,8 @@
     let lastMultiviewFoldClickAt = 0;
 
     // 돌려주는 값은 '지금 목표 상태인가' 다. false 는 실패가 아니라 '아직' 이다.
-    function ensureMultiviewChatFold() {
+    // force: 칸의 '다시 적용'(사용자 조작)일 때만 true. 광고 중 대기 정책을 건너뛴다.
+    function ensureMultiviewChatFold(force = false) {
       if (!multiviewDesiredUi.chatFolded) return true;
       const isVod = isMultiviewReplay();
       const aside = isVod
@@ -22358,9 +22498,13 @@
       if (isVod && isVodChatFoldedAway()) return true;
       if (!aside) return false; // 채팅 DOM 이 아직 없다
       if (!isVod && isChatFolded(aside)) return true;
-      // 광고 중에는 치지직이 채팅을 강제로 펼치고 우리 클릭도 무시한다. 기존 정책을
-      // 그대로 따라 억지로 누르지 않고 광고가 끝나기를 기다린다.
+      // 자동 맞춤은 광고 중에 누르지 않고 광고가 끝나기를 기다린다(광고가 채팅을 다시
+      // 펼칠 수 있어 반복 클릭이 되기 쉽다).
+      // ⚠ 수동 '다시 적용'은 예외다. 광고 중에도 '채팅 접기' 버튼 클릭이 반영되고
+      //   5초 뒤까지 유지됐다(2026-09-30 실측). 접혀 있으면 위에서 이미 끝났으므로
+      //   토글이 펼침으로 뒤집힐 일은 없다.
       if (
+        !force &&
         typeof adRemainingSeconds === "function" &&
         adRemainingSeconds() !== null
       ) {
@@ -22475,6 +22619,8 @@
           { source: "cheese-apply-multiview-wide" },
           location.origin,
         );
+        // '화면 맞춤 지연'의 다시 적용은 채팅 접기도 함께 맞춘다(처음 불러올 때처럼).
+        ensureMultiviewChatFold(true);
         window.setTimeout(reportMultiviewAdState, 500);
         window.setTimeout(reportMultiviewAdState, 1300);
         return;
@@ -23028,6 +23174,10 @@
   // 채팅 정리 전체 적용(양보 판단 포함). settings/onChanged/옵저버에서 호출.
   function applyChatTweaks() {
     reportChatMoaState(); // moa 제어 상태를 settings에 알림(토글 비활성화용)
+    document.documentElement.classList.toggle(
+      "cheese-chat-hide-send-button",
+      featureFlags.chatHideSendButton === true,
+    );
     // 아무 토글도 안 켜졌으면 전부 정리한다. 단 moa 감시는 라이브에서 유지해야
     // settings 토글 비활성화가 실시간 반영되므로, 라이브/다시보기면 옵저버를 둔다.
     if (!anyChatTweakOn()) {
@@ -23172,6 +23322,7 @@
       (document.head || document.documentElement).appendChild(style);
     }
     style.textContent = `
+    html.cheese-chat-hide-send-button:not(.cheese-multiview-frame) aside#aside-chatting button#send_chat_or_donate { display: none !important; }
     .${CHAT_HIDE_CLASSES.chatHideRanking},
     .${CHAT_HIDE_CLASSES.chatHideLogPowerRanking},
     .${CHAT_HIDE_CLASSES.chatHideMission},
@@ -52449,7 +52600,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function ensureChatMsgObserver() {
-    if (!commentBlockNicknameSet.size && !chatWordFilterRegexes.length) {
+    if (
+      CHAT_DOM_WATCH_OFF ||
+      (!commentBlockNicknameSet.size && !chatWordFilterRegexes.length)
+    ) {
       if (chatMsgObserver) {
         chatMsgObserver.disconnect();
         chatMsgObserver = null;
@@ -52700,7 +52854,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   }
 
   function ensureChatBlockObserver() {
-    if (!chatProfileBlockButtonOn) {
+    if (!chatProfileBlockButtonOn || CHAT_DOM_WATCH_OFF) {
       disableChatBlockObserver();
       return;
     }
@@ -53323,10 +53477,21 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     broadcastFeatureFlags();
   });
 
+  function resolveMaxQualityAuto() {
+    if (IS_MULTIVIEW_FRAME) {
+      return multiviewInitialQuality !== "none"
+        ? maxQualityAuto
+        : multiviewQualityPolicy === "highest";
+    }
+    return IS_POPUP_PLAYER_FRAME ? popupPlayerMaxQuality : maxQualityAuto;
+  }
+
   function resolveMaxQualityCap() {
     if (IS_MULTIVIEW_FRAME) {
       if (multiviewQualityPolicy === "cap-480") return 480;
       if (multiviewQualityPolicy === "cap-720") return 720;
+      if (multiviewInitialQuality !== "none" && maxQualityAuto && maxQualityTarget === "720")
+        return 720;
       return 0;
     }
     if (IS_POPUP_PLAYER_FRAME || !maxQualityAuto) return 0;
@@ -53339,6 +53504,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         source: FEATURE_FLAGS_MESSAGE,
         flags: getEffectiveFeatureFlags(),
         chatHistoryEnabled: chatHistoryOn,
+        // 다시보기 로컬 채팅 입력. 저장값을 읽기 전에는 null 로 보내 MAIN world 가
+        // 기본값으로 입력창을 먼저 붙였다가 떼는 깜빡임을 막는다.
+        vodLocalChatEnabled: featureFlagsLoaded ? featureFlags.vodLocalChat === true : null,
         // 채팅 리캡: 본인 판정에 쓸 계정과, 다시보기용 채널 힌트를 함께 준다.
         chatRecapEnabled: chatRecapOn,
         chatRecapAccountId: chatRecapOn ? currentClipVaultAccountId() : "",
@@ -53352,16 +53520,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         syncCooldownCustom, // {base,max}(초) 또는 null
         mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
         mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
-        // 멀티뷰는 전역 설정과 분리된 역할 정책을 쓴다. 메인은 최고 고정 동작을
-        // 적극적으로 실행하고, 보조 칸은 아래의 480p 상한만 적용한다.
-        maxQualityAuto: IS_MULTIVIEW_FRAME
-          ? multiviewQualityPolicy === "highest"
-          : IS_POPUP_PLAYER_FRAME
-            ? popupPlayerMaxQuality
-            : maxQualityAuto,
-        // 멀티뷰와 팝업은 일반 플레이어의 최대 화질 선택과 독립적으로 동작한다.
+        // 체크된 시작 옵션은 첫 목표만 적용한다. 그 뒤부터 전역 자동 고정 설정을
+        // 독립적으로 따르며, 체크 해제 시에는 기존 역할별 정책을 유지한다.
+        maxQualityAuto: resolveMaxQualityAuto(),
+        // 시작 옵션에서는 전역 720p 상한도 초기 목표 적용 이후에 반영한다.
         maxQualityCap: resolveMaxQualityCap(),
         multiviewQualityPolicy: IS_MULTIVIEW_FRAME ? multiviewQualityPolicy : "none",
+        multiviewInitialQuality: IS_MULTIVIEW_FRAME ? multiviewInitialQuality : "none",
         multiviewQualityReconcileToken: IS_MULTIVIEW_FRAME
           ? multiviewQualityReconcileToken : 0,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)

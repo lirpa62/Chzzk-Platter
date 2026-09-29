@@ -442,7 +442,7 @@ const ALL = ["a", "b", "c", "d"];
 // 8) 같은 자리 교체: 선택 여부만 물려받고 보정값·보류 명령은 남기지 않는다.
 {
   // clearChannelSync 를 원본 그대로 돌린다(교체·제거가 모두 이 경로를 쓴다).
-  const calls = { resetRate: [], cancel: [] };
+  const calls = { resetRate: [], cancel: [], catchUp: [] };
   const state = {
     chosen: [{ channelId: "a" }, { channelId: "b" }, { channelId: "c" }],
     sync: {
@@ -474,6 +474,7 @@ const ALL = ["a", "b", "c", "d"];
     "syncRates",
     "freshSyncChannels",
     "syncGroupForChannel",
+    "resetLiveCatchUp",
     body,
   )(
     state,
@@ -487,6 +488,7 @@ const ALL = ["a", "b", "c", "d"];
     maps.syncRates,
     new Set(["b"]),
     () => null,
+    (id) => calls.catchUp.push(id),
   );
 
   // replaceChannel 이 교체 직전에 하는 판정(원본과 같은 식).
@@ -504,6 +506,7 @@ const ALL = ["a", "b", "c", "d"];
   // 옛 채널의 흔적이 남지 않는다.
   assert.deepEqual(calls.resetRate, ["b"], "옛 채널의 속도를 되돌리지 않았다");
   assert.deepEqual(calls.cancel, ["b"], "옛 채널의 보류 명령을 버리지 않았다");
+  assert.deepEqual(calls.catchUp, ["b"], "옛 채널의 따라잡기 상태를 비우지 않았다");
   assert.equal(maps.syncRates.has("b"), false, "syncRates 에 옛 채널이 남았다");
   assert.equal(maps.syncStats.has("b"), false, "syncStats 에 옛 채널이 남았다");
   assert.equal(

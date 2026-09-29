@@ -2700,6 +2700,53 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item" data-new-feature="vod-local-chat">
+                <label>
+                  <span class="settings-item-name">다시보기 채팅 입력</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기 채팅창에 이 기기에만 보이는 채팅을 입력합니다."
+                    >다시보기 채팅창 아래에 입력창을 추가합니다. 입력한 채팅은
+                    재생 시간에 맞춰 채팅 사이에 표시되며, 실제 채팅으로 전송되지
+                    않고 이 기기에만 보입니다. 일반 다시보기와 멀티뷰 다시보기
+                    채팅창에 함께 적용됩니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="vodLocalChat" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="vod-local-chat-style">
+                <label>
+                  <span class="settings-item-name">└ 테두리선 숨김</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="나의 다시보기 채팅의 보라색 테두리선을 숨깁니다."
+                    >채팅창에 표시되는 나의 다시보기 채팅의 보라색 테두리선을
+                    숨깁니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="vodLocalChatHideBorder" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="vod-local-chat-style">
+                <label>
+                  <span class="settings-item-name">└ 배경색 숨김</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="나의 다시보기 채팅의 보라색 배경을 숨깁니다."
+                    >채팅창에 표시되는 나의 다시보기 채팅의 보라색 배경을
+                    숨깁니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="vodLocalChatHideBackground" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
             </ul>
           </section>
 
@@ -7729,6 +7776,42 @@
             <h2 class="settings-group-title" data-new-feature="multiview-badge-chat">모아보기 팝업</h2>
             <p class="settings-group-desc">멀티뷰 라이브·다시보기 배지 채팅 팝업의 표시 방식을 설정합니다.</p>
             <ul class="settings-list">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="multiview-badge-chat-display-style"
+              >
+                <div>
+                  <span class="settings-item-name">보기 방식</span>
+                  <span class="settings-item-desc">
+                    한줄보기는 시간·닉네임·채팅을 한 줄로 이어 보여 주고, 블록보기는 닉네임과 시간 아래에 채팅을 보여 줍니다.
+                  </span>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-multiview-badge-chat-display-style
+                  role="radiogroup"
+                  aria-label="모아보기 보기 방식"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-mv-badge-chat-display-value="inline"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    한줄보기
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-mv-badge-chat-display-value="block"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    블록보기
+                  </button>
+                </div>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">역할 배지만 표시</span>
@@ -7850,7 +7933,7 @@
           <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
             <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
             <p class="settings-group-desc">
-              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·싱크 진단·채팅 분리 방식을 설정합니다.
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단·채팅 분리 방식을 설정합니다.
             </p>
             <ul class="settings-list">
               <li
@@ -7899,6 +7982,16 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">메인 채널 테두리 강조</span>
+                  <span class="settings-item-desc">멀티뷰 시청 화면에서 메인 채널 칸의 초록색 테두리를 표시합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-main-border />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item" data-new-feature="multiview-quick-state">
                 <label>
                   <span class="settings-item-name">시청 화면 채널 관리 상태 기억</span>
@@ -7906,6 +7999,16 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-remember-quick-state />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="multiview-live-catch-up">
+                <label>
+                  <span class="settings-item-name">라이브 지연 자동 따라잡기</span>
+                  <span class="settings-item-desc">라이브 지연이 8초를 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-live-catch-up />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -8560,6 +8663,19 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="chatHideParty" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">채팅 전송 버튼 숨김</span>
+                  <span class="settings-item-desc"
+                    >일반 및 멀티뷰 라이브 채팅 입력창의 '채팅' 버튼과 다시보기
+                    채팅 입력의 안내·'채팅' 버튼 줄</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatHideSendButton" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
