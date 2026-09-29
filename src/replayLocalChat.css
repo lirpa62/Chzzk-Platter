@@ -1,0 +1,283 @@
+aside#vod-aside {
+  --cheese-replay-local-chat-surface-neutral-base: #e1e1e5;
+  --cheese-replay-local-chat-surface-neutral-weak: #f0f1f2;
+  --cheese-replay-local-chat-border-neutral-strong: #6d6e70;
+  --cheese-replay-local-chat-content-neutral-cool-strong: #2e3033;
+  --cheese-replay-local-chat-content-warm-base: #6d6e70;
+  --cheese-replay-local-chat-surface-brand-strongest: #1bb373;
+  --cheese-replay-local-chat-content-neutral-inverse: #fff;
+  --cheese-replay-local-chat-focus-border: #707174;
+  /* 나의 로컬 채팅 강조(보라 계열). */
+  --cheese-replay-local-chat-highlight-border: rgba(124, 58, 237, 0.45);
+  /* 배경은 치지직 응원 채팅과 같은 그라데이션(바탕 + 45deg 보라→하늘). */
+  --cheese-replay-local-chat-highlight-base: #fff;
+  --cheese-replay-local-chat-gradient-start-rgb: 87, 65, 255;
+  --cheese-replay-local-chat-gradient-end-rgb: 26, 175, 255;
+}
+
+html[data-theme="dark"] aside#vod-aside,
+html.theme_dark aside#vod-aside {
+  --cheese-replay-local-chat-surface-neutral-base: #2e3033;
+  --cheese-replay-local-chat-surface-neutral-weak: #202224;
+  --cheese-replay-local-chat-border-neutral-strong: #697183;
+  --cheese-replay-local-chat-content-neutral-cool-strong: #dfe2ea;
+  --cheese-replay-local-chat-content-warm-base: #6d6e70;
+  --cheese-replay-local-chat-surface-brand-strongest: #00ffa3;
+  --cheese-replay-local-chat-content-neutral-inverse: #0e0f10;
+  --cheese-replay-local-chat-focus-border: #c9cedc;
+  --cheese-replay-local-chat-highlight-border: rgba(167, 139, 250, 0.55);
+  --cheese-replay-local-chat-highlight-base: #141517;
+}
+
+aside#vod-aside .cheese-replay-local-chat-composer {
+  border-top: 1px solid var(--cheese-replay-local-chat-border-neutral-weaker);
+  box-sizing: border-box;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 20px;
+}
+
+.cheese-replay-local-chat-input-container {
+  align-items: center;
+  background: var(--cheese-replay-local-chat-surface-neutral-base);
+  border: 1px solid var(--cheese-replay-local-chat-border-neutral-weaker);
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  min-height: 42px;
+  padding: 6px;
+  position: relative;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.cheese-replay-local-chat-input-container:focus-within {
+  background: transparent;
+  border-color: transparent;
+}
+
+.cheese-replay-local-chat-input-container.is-active::before {
+  border: 2px solid var(--cheese-replay-local-chat-focus-border);
+  border-radius: inherit;
+  content: "";
+  inset: -2px;
+  pointer-events: none;
+  position: absolute;
+}
+
+.cheese-replay-local-chat-avatar {
+  align-items: center;
+  background: var(--cheese-replay-local-chat-surface-neutral-weak);
+  border-radius: 50%;
+  color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+  display: inline-flex;
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  height: 28px;
+  justify-content: center;
+  overflow: hidden;
+  width: 28px;
+}
+
+.cheese-replay-local-chat-avatar img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.cheese-replay-local-chat-tools {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 32px;
+  min-width: 0;
+}
+
+/* 설정 - 채팅 '채팅 전송 버튼 숨김'(content.js 가 <html> 에 붙이는 클래스)을 따른다.
+   도구 줄(안내·전송 버튼)을 숨기고, 입력은 Enter 로 계속 된다. */
+html.cheese-chat-hide-send-button
+  aside#vod-aside
+  .cheese-replay-local-chat-tools {
+  display: none;
+}
+
+.cheese-replay-local-chat-indicator {
+  align-items: center;
+  color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+  display: inline-flex;
+  flex: 1 1 auto;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.cheese-replay-local-chat-indicator svg {
+  fill: currentColor;
+  flex: none;
+  height: 18px;
+  width: 18px;
+}
+
+.cheese-replay-local-chat-input {
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+  color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+  flex: 1 1 auto;
+  font: inherit;
+  display: block;
+  height: 20px;
+  line-height: 20px;
+  margin: 0 0 0 7px;
+  max-height: 60px;
+  min-height: 20px;
+  min-width: 0;
+  outline: none;
+  overflow-y: hidden;
+  padding: 0;
+  resize: none;
+}
+
+.cheese-replay-local-chat-input::placeholder {
+  color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+}
+
+.cheese-replay-local-chat-input:focus::placeholder {
+  color: transparent;
+}
+
+/* 광고 중(채팅 불러오는 중)에는 입력을 잠근다(replayLocalChat.js 의 is-blocked). */
+.cheese-replay-local-chat-input-container.is-blocked {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cheese-replay-local-chat-input:disabled {
+  cursor: not-allowed;
+}
+
+.cheese-replay-local-chat-send {
+  background: var(--cheese-replay-local-chat-surface-brand-strongest);
+  border: 0;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--cheese-replay-local-chat-content-neutral-inverse);
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  height: 32px;
+  min-width: 52px;
+  padding: 0 11px;
+}
+
+.cheese-replay-local-chat-send:disabled {
+  background: var(--cheese-replay-local-chat-surface-neutral-weak);
+  color: var(--cheese-replay-local-chat-content-warm-base);
+  cursor: default;
+}
+
+@media (max-width: 480px) {
+  aside#vod-aside .cheese-replay-local-chat-composer {
+    padding: 8px 10px;
+  }
+}
+
+/* 나의 로컬 채팅 줄. 치지직 다시보기 채팅 줄의 구성과 수치를 따른다(실측):
+   _item_ margin-bottom 3px
+   _chatting_message_ padding 4px 6px, line-height 20px, word-break: break-all
+   _nickname_ 묶음 margin -2px 0, padding 2px 4px 2px 2px, 오른쪽 4px
+   배지 묶음 gap 4px, margin-right 4px, 배지 18px / 닉네임 굵기 500, 한 줄 말줄임 */
+aside#vod-aside .cheese-replay-local-chat-message {
+  box-sizing: border-box;
+  color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+  margin-bottom: 3px;
+}
+
+aside#vod-aside .cheese-replay-local-chat-content {
+  /* 강조 테두리는 box-shadow 로 그려, 숨겨도 줄 높이·위치가 바뀌지 않는다. */
+  background: var(--cheese-replay-local-chat-highlight-base)
+    linear-gradient(
+      45deg,
+      rgba(var(--cheese-replay-local-chat-gradient-start-rgb), 0.2),
+      rgba(var(--cheese-replay-local-chat-gradient-end-rgb), 0.14902)
+    );
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--cheese-replay-local-chat-highlight-border);
+  contain: layout;
+  line-height: 20px;
+  overflow: hidden;
+  padding: 4px 6px;
+  text-align: left;
+  word-break: break-all;
+  word-wrap: break-word;
+}
+
+/* 설정 - 다시보기 '다시보기 채팅 입력'의 하위 옵션(content.js 가 <html> 에 붙인다). */
+html.cheese-vod-local-chat-hide-border aside#vod-aside .cheese-replay-local-chat-content {
+  box-shadow: none;
+}
+
+html.cheese-vod-local-chat-hide-bg aside#vod-aside .cheese-replay-local-chat-content {
+  background: transparent;
+}
+
+aside#vod-aside .cheese-replay-local-chat-identity {
+  align-items: center;
+  display: inline-flex;
+  line-height: 20px;
+  margin: -2px 4px -2px 0;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 4px 2px 2px;
+  vertical-align: top;
+}
+
+aside#vod-aside .cheese-replay-local-chat-badges {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-right: 4px;
+  vertical-align: top;
+}
+
+aside#vod-aside .cheese-replay-local-chat-badge {
+  border-radius: 0;
+  display: block;
+  flex: none;
+  height: 18px;
+  object-fit: cover;
+  width: 18px;
+}
+
+aside#vod-aside .cheese-replay-local-chat-nickname {
+  color: var(--cheese-replay-local-chat-surface-brand-strongest);
+  display: inline-flex;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+aside#vod-aside .cheese-replay-local-chat-badges + .cheese-replay-local-chat-nickname {
+  margin-left: 1px;
+}
+
+aside#vod-aside .cheese-replay-local-chat-nickname-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+aside#vod-aside .cheese-replay-local-chat-text {
+  /* Shift+Enter 줄바꿈을 살린다. */
+  white-space: pre-wrap;
+}

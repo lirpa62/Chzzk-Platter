@@ -35,9 +35,10 @@ function checkObserver(code, kind) {
   const hostName = kind === "video" ? "videoObserverHost" : "uiObserverHost";
   const observe = new Function(
     "document", "MutationObserver", "syncMultiviewVideo",
-    "scheduleMultiviewAdCheck", "scheduleMultiviewUiReconcile",
+    "scheduleMultiviewAdCheck", "scheduleEndedMutationCheck",
+    "scheduleMultiviewUiReconcile",
     `${code}\nreturn { run: ${observeName}, host: () => ${hostName} };`,
-  )(document, MockObserver, () => {}, () => {}, () => {});
+  )(document, MockObserver, () => {}, () => {}, () => {}, () => {});
   observe.run();
   assert.equal(observers.length, 1);
   assert.equal(observers[0].host, fallback);

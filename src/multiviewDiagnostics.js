@@ -104,6 +104,8 @@
         ? rounded(entry.nonDefaultRateSamples / rateSamples) : null,
       seekCommandCount: entry.seekCommands,
       rateCommandCount: entry.rateCommands,
+      catchUpCommandCount: entry.catchUpCommands,
+      catchUpHoldCount: entry.catchUpHolds,
       failureReasons: { ...entry.failureReasons },
       absoluteSyncErrorSec: distribution(entry.absoluteErrors, true),
     };
@@ -128,6 +130,8 @@
           absoluteErrors: [],
           seekCommands: 0,
           rateCommands: 0,
+          catchUpCommands: 0,
+          catchUpHolds: 0,
           failureReasons: {},
         });
       }
@@ -166,6 +170,7 @@
         if (!entry) continue;
         if (record.command === "seek") entry.seekCommands += 1;
         if (record.command === "rate") entry.rateCommands += 1;
+        if (record.command === "catch-up") entry.catchUpCommands += 1;
       } else if (record.type === "command-result") {
         if (record.applied) commandSuccessCount += 1;
         else {
@@ -183,6 +188,8 @@
         congestionEntryCount += 1;
       } else if (record.type === "reference-change") {
         referenceChangeCount += 1;
+      } else if (record.type === "catch-up-hold" && entry) {
+        entry.catchUpHolds += 1;
       }
     }
 
@@ -257,6 +264,7 @@
         `엣지 평균/최대: ${metricText(channel.edgeLagSec?.avg)} / ${metricText(channel.edgeLagSec?.max)}초`,
         `1.0x 외 배속 비율: ${Number.isFinite(channel.nonDefaultPlaybackRateRatio) ? (channel.nonDefaultPlaybackRateRatio * 100).toFixed(1) : "-"}%`,
         `seek/rate 명령: ${channel.seekCommandCount} / ${channel.rateCommandCount}`,
+        `라이브 따라잡기: ${channel.catchUpCommandCount || 0}회 (되감기로 보류 ${channel.catchUpHoldCount || 0}회)`,
         `|오차| 중앙/p90/p95/최대: ${metricText(error?.median)} / ${metricText(error?.p90)} / ${metricText(error?.p95)} / ${metricText(error?.max)}초`,
       );
     }

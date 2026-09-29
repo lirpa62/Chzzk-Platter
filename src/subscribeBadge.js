@@ -27,6 +27,12 @@
     return window.top !== window && isEditorUrl(document.referrer);
   }
   if (isClipEditorContext()) return;
+  // 멀티뷰 영상 칸에는 구독권 관리 팝업이 뜨지 않는다. body 전체 감시만 헛돈다.
+  if (
+    window.top !== window &&
+    new URLSearchParams(location.search).get("cheeseMulti") === "1"
+  )
+    return;
 
   try {
     const data = await chrome.storage.local.get("cheeseMasterEnabled");

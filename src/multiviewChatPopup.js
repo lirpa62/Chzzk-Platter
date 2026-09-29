@@ -19,13 +19,49 @@
   const channel = new BroadcastChannel(`cheese-multiview-chat-${sessionId}`);
   const frame = $("mvChatPopupFrame");
   let currentChannelId = "";
+  let currentVodVideoNo = "";
+  let vodChatScrollInitialized = false;
   let currentMediaType = "live";
   let currentGeneration = -1;
   let chatFrameReady = false;
   let currentThemeDark = document.documentElement.dataset.theme === "dark";
   const vodList = $("mvChatPopupVodList");
+  // 지난 채팅을 보고 있을 때 오른쪽 아래에 뜨는 '최신 채팅으로' 버튼(시청 페이지와 같다).
+  const vodChatLatest = globalThis.CheeseReplayLocalChat?.bindLatestButton({
+    list: vodList,
+    button: $("mvChatPopupVodLatest"),
+  });
   const vodScaleSteps = [100, 125, 150, 175];
   let vodScalePercent = 100;
+  // 설정의 '다시보기 채팅 입력'. 읽기 전에는 숨긴다. 로컬 채팅 줄은 시청 페이지가
+  // 설정을 보고 빼서 보내므로 여기서는 입력창만 맞춘다.
+  const vodComposeForm = $("mvChatPopupVodCompose");
+  let vodLocalChatEnabled = false;
+  if (vodComposeForm) vodComposeForm.hidden = true;
+  globalThis.CheeseReplayLocalChat?.watchEnabledSetting((enabled) => {
+    vodLocalChatEnabled = enabled;
+    if (vodComposeForm) vodComposeForm.hidden = !enabled;
+  });
+  // 설정 - 채팅 '채팅 전송 버튼 숨김'을 로컬 채팅 입력 도구 줄에도 적용한다.
+  globalThis.CheeseReplayLocalChat?.watchHideToolsSetting((hide) => {
+    document.documentElement.classList.toggle("mv-hide-chat-send-button", hide);
+  });
+  // 나의 로컬 채팅 줄 강조의 테두리선·배경색 숨김(시청 페이지와 같은 설정).
+  globalThis.CheeseReplayLocalChat?.watchStyleClasses();
+  globalThis.CheeseReplayLocalChat?.bindComposer({
+    form: vodComposeForm,
+    input: $("mvChatPopupVodComposeInput"),
+    button: $("mvChatPopupVodComposeSend"),
+    onSend: (text) => {
+      if (!vodLocalChatEnabled || currentMediaType !== "video" || !currentVodVideoNo) return;
+      send("VOD_LOCAL_CHAT_SEND", {
+        channelId: currentChannelId,
+        videoNo: currentVodVideoNo,
+        generation: currentGeneration,
+        text,
+      });
+    },
+  });
   const badgeAnchor = $("mvChatPopupBadgeAnchor");
   const badgeTrigger = $("mvChatPopupBadgeTrigger");
   const badgePopover = $("mvChatPopupBadgePopover");
@@ -34,6 +70,7 @@
   const badgeResize = $("mvChatPopupBadgeResize");
   const badgeClose = $("mvChatPopupBadgeClose");
   const badgeSeenIds = new Set();
+  let vodLocalChatIds = new Set();
   let badgeItems = [];
   let badgeSettings = {
     hidePillButton: false,
@@ -41,6 +78,7 @@
     keepPopupOpen: false,
     compactPill: false,
     pillGlowEnabled: true,
+    displayStyle: "inline",
   };
   let badgePopoverOpen = false;
   let badgePopoverHeight = 320;
@@ -72,7 +110,9 @@
   }
 
   function reflectVodScale() {
-    vodList?.style.setProperty("--mv-vod-chat-scale", String(vodScalePercent / 100));
+    const scale = String(vodScalePercent / 100);
+    $("mvChatPopupVod")?.style.setProperty("--mv-vod-chat-scale", scale);
+    vodList?.style.setProperty("--mv-vod-chat-scale", scale);
     $("mvChatPopupVodScaleValue").textContent = `${vodScalePercent}%`;
     $("mvChatPopupVodScaleDown").disabled = vodScalePercent <= 100;
     $("mvChatPopupVodScaleUp").disabled = vodScalePercent >= 175;
@@ -132,7 +172,8 @@
     badgeMotion?.open();
     badgeTrigger?.setAttribute("aria-expanded", "true");
     renderPopupBadgeChat(null);
-    badgeList.scrollTop = 0;
+    // 새로 열 때는 가장 최근 채팅(맨 아래)에서 시작한다.
+    badgeList.scrollTop = badgeList.scrollHeight;
     positionBadgePopover();
     if (window.ResizeObserver) {
       badgeResizeObserver = new window.ResizeObserver(positionBadgePopover);
@@ -164,7 +205,9 @@
         keepPopupOpen: settings.keepPopupOpen === true,
         compactPill: settings.compactPill === true,
         pillGlowEnabled: settings.pillGlowEnabled !== false,
+        displayStyle: settings.displayStyle === "block" ? "block" : "inline",
       };
+      badgeList.classList.toggle("is-block", badgeSettings.displayStyle === "block");
       if (badgeSettings.hidePillButton) badgeSettings.keepPopupOpen = false;
     }
     if (badgePopoverOpen) badgeItems.forEach((item) => badgeSeenIds.add(item.id));
@@ -190,8 +233,10 @@
     if (signature !== badgeRenderSignature) {
       badgeRenderSignature = signature;
       badgeEmpty.hidden = badgeItems.length > 0;
+      // 과거 → 최신(위 → 아래). 맨 아래 근처를 보던 중이면 새 채팅을 따라간다.
+      const nearBottom = badgeList.scrollHeight - badgeList.scrollTop - badgeList.clientHeight < 32;
       badgeList.innerHTML = badgeItems.slice().reverse().map((item) => item.html).join("");
-      badgeList.scrollTop = 0;
+      if (nearBottom) badgeList.scrollTop = badgeList.scrollHeight;
     }
   }
 
@@ -293,18 +338,40 @@
     if (changedSource) {
       badgeSeenIds.clear();
       badgeRenderSignature = "";
+      vodChatScrollInitialized = false;
+      vodLocalChatIds.clear();
     }
     currentMediaType = "video";
     currentChannelId = data.channelId;
+    currentVodVideoNo = data.videoNo;
     currentGeneration = data.generation;
+    globalThis.CheeseReplayLocalChat?.applyAvatar(
+      $("mvChatPopupVodComposeAvatar"), data.identity,
+    );
     chatFrameReady = false;
     if (changedSource) frame.src = "about:blank";
     frame.hidden = true;
     $("mvChatPopupVod").hidden = false;
     const list = $("mvChatPopupVodList");
+    // 맨 아래 근처를 보던 중이면 재생에 따라 붙는 새 채팅을 따라간다(시청 페이지와 같다).
     const nearBottom = list.scrollHeight - list.clientHeight - list.scrollTop < 32;
+    const previousScrollTop = list.scrollTop;
     list.innerHTML = data.html;
-    if (nearBottom) list.scrollTop = list.scrollHeight;
+    const localRows = [...(list.querySelectorAll?.(".mv-vod-chat-row.is-local") || [])];
+    const nextLocalIds = new Set(localRows.map((row) => row.dataset.chatId).filter(Boolean));
+    const newLocalRow = localRows.find((row) =>
+      row.dataset.chatId && !vodLocalChatIds.has(row.dataset.chatId));
+    if (newLocalRow) {
+      globalThis.CheeseReplayLocalChat?.revealRowAtPosition(list, newLocalRow);
+      vodChatScrollInitialized = true;
+    } else if (!vodChatScrollInitialized && data.html) {
+      list.scrollTop = list.scrollHeight;
+      vodChatScrollInitialized = true;
+    } else {
+      list.scrollTop = nearBottom ? list.scrollHeight : previousScrollTop;
+    }
+    vodChatLatest?.update();
+    vodLocalChatIds = nextLocalIds;
     renderPopupBadgeChat(data.badgeChat, data.badgeChat?.hasNew === true);
     reflectVodScale();
     if (badgePopoverOpen) positionBadgePopover();
@@ -333,6 +400,7 @@
 
     currentMediaType = "live";
     currentChannelId = data.channelId.toLowerCase();
+    currentVodVideoNo = "";
     currentGeneration = data.generation;
     chatFrameReady = false;
     $("mvChatPopupVod").hidden = true;
@@ -357,6 +425,7 @@
   function showUnavailable(data) {
     if (!Number.isSafeInteger(data.generation) || data.generation < currentGeneration) return;
     currentChannelId = "";
+    currentVodVideoNo = "";
     currentMediaType = "unavailable";
     currentGeneration = data.generation;
     chatFrameReady = false;

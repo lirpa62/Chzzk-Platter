@@ -51,6 +51,9 @@ function validateSetup(raw) {
     chatEnabled: raw.chatEnabled !== false,
     mainHighQuality: raw.mainHighQuality === true,
     startMainMuted: raw.startMainMuted === true,
+    startMainVolume: typeof raw.startMainVolume === "number" && Number.isFinite(raw.startMainVolume)
+      ? Math.round(Math.min(1, Math.max(0, raw.startMainVolume)) * 100) / 100
+      : 1,
   };
 }
 
@@ -90,6 +93,7 @@ const two = validateSetup({
   chatEnabled: false,
   mainHighQuality: false,
   startMainMuted: true,
+  startMainVolume: 0.42,
 });
 ok(two?.chosen.length === 2, "2채널을 그대로 받는다");
 ok(two?.layoutId === "right-1", "허용되는 배치는 유지한다");
@@ -97,6 +101,7 @@ ok(two?.chatSide === "left", "허용되는 채팅 자리는 유지한다");
 ok(two?.chatEnabled === false, "채팅 없이 시작 선택을 보존한다");
 ok(two?.mainHighQuality === false, "mainHighQuality false 를 지킨다");
 ok(two?.startMainMuted === true, "메인 음소거로 시작 선택을 보존한다");
+ok(two?.startMainVolume === 0.42, "메인 채널 시작 음량을 보존한다");
 const replay = validateSetup({
   chosen: [ch(A), { channelId: "video:902", mediaType: "video", videoNo: "902", ownerChannelId: B, adult: true }],
 });
@@ -120,6 +125,18 @@ ok(
 ok(
   validateSetup({ chosen: [ch(A), ch(B)] })?.startMainMuted === false,
   "이전 handoff 값은 메인 음소거 없이 시작하는 것으로 처리",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)] })?.startMainVolume === 1,
+  "이전 handoff 값은 메인 채널 음량 100%로 시작",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)], startMainVolume: 0.376 })?.startMainVolume === 0.38,
+  "메인 시작 음량은 1% 단위로 정규화",
+);
+ok(
+  validateSetup({ chosen: [ch(A), ch(B)], startMainVolume: 5 })?.startMainVolume === 1,
+  "메인 시작 음량은 최대 100%로 제한",
 );
 
 console.log("\n[어긋난 값] 안전한 기본값으로 고친다");

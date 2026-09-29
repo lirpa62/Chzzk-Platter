@@ -59,7 +59,7 @@
         nested.imageUrl || nested.badgeImageUrl || nested.iconUrl || nested.url || nested.image,
       );
       const positionCount = position === "after" ? afterCount : beforeCount;
-      const positionLimit = position === "after" ? 2 : MAX_BADGES - 2;
+      const positionLimit = position === "after" ? MAX_BADGES : MAX_BADGES - 2;
       if (!url || seen.has(url) || badges.length >= MAX_BADGES || positionCount >= positionLimit) return;
       seen.add(url);
       if (position === "after") afterCount += 1;
@@ -76,14 +76,7 @@
       add(roleBadge || ROLE_BADGE_URLS[role], role === "streamer" ? "방장" :
         role === "manager" ? "매니저" : role === "operator" ? "치지직 운영자" : "역할 배지");
     } else add(roleBadge, "역할 배지");
-    const activityBadges = [
-      ...(Array.isArray(profile.activityBadges) ? profile.activityBadges : []),
-      ...(Array.isArray(userProfile.activityBadges) ? userProfile.activityBadges : []),
-      ...(Array.isArray(user.activityBadges) ? user.activityBadges : []),
-      ...(Array.isArray(streamingProperty.activityBadges) ? streamingProperty.activityBadges : []),
-    ];
-    for (const badge of activityBadges) add(badge, badge?.badge?.badgeId || badge?.badgeId || "활동 배지");
-    add(profile.activityBadge || userProfile.activityBadge || user.activityBadge, "활동 배지");
+    // 활동 배지(activityBadges·activityBadge)는 닉네임 앞 배지에 넣지 않는다.
     add(streamingProperty.subscription?.badge || profile.subscription?.badge || profile.subscriptionBadge,
       "구독 배지");
     for (const badge of [
@@ -102,13 +95,22 @@
     const verified = profile.verifiedMark === true || userProfile.verifiedMark === true ||
       user.verifiedMark === true || message.verifiedMark === true;
     if (verified) add(ROLE_BADGE_URLS.partner, "파트너", "after");
-    const activatedIds = Array.isArray(streamingProperty.activatedAchievementBadgeIds)
-      ? streamingProperty.activatedAchievementBadgeIds
-      : [];
-    const achievementId = String(activatedIds[0] || "").trim();
-    const achievementUrl = ACHIEVEMENT_BADGE_URLS[achievementId] ||
-      ACHIEVEMENT_BADGE_URLS[achievementId.toLowerCase()];
-    if (achievementUrl) add(achievementUrl, "업적 배지", "after");
+    // 업적 배지는 활성화된 것 중 첫 번째 하나만 보여 준다(치지직·배지 모아 챗과 같다:
+    // streamingProperty.activatedAchievementBadgeIds[0]). 첫 번째가 매핑 표에 없으면
+    // 다음 것으로 넘어가지 않는다.
+    // ⚠ 예전에는 활성화된 배지를 전부 붙여 닉네임 뒤에 여러 개가 보였다.
+    const achievementId = String([
+      streamingProperty.activatedAchievementBadgeIds,
+      profile.activatedAchievementBadgeIds,
+      userProfile.activatedAchievementBadgeIds,
+      user.activatedAchievementBadgeIds,
+      message.activatedAchievementBadgeIds,
+    ].find((ids) => Array.isArray(ids) && ids.length)?.[0] || "").trim();
+    if (achievementId) {
+      const achievementUrl = ACHIEVEMENT_BADGE_URLS[achievementId] ||
+        ACHIEVEMENT_BADGE_URLS[achievementId.toLowerCase()];
+      if (achievementUrl) add(achievementUrl, "업적 배지", "after");
+    }
     return badges;
   }
 

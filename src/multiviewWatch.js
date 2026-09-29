@@ -54,6 +54,7 @@
     chatEnabled: true,
     mainHighQuality: false,
     startMainMuted: false,
+    startMainVolume: 1,
     // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
     chatFollowsMain: true,
     // 전체 볼륨(0~1). 채널별 볼륨 위에 곱해지는 값이다.
@@ -87,7 +88,7 @@
     let entry = channelAudio.get(channelId);
     if (!entry) {
       entry = {
-        volume: 1,
+        volume: state.startMainVolume,
         muted: channelId !== state.mainId,
         muteTouched: false,
       };
@@ -126,15 +127,24 @@
 
   function qualityForChannel(channel, isMain, mainHighQuality) {
     const isVideo = channel.mediaType === "video";
-    if (isMain && mainHighQuality) return { quality: "high", qualityPolicy: "highest" };
+    // 이 옵션은 iframe을 처음 만들 때만 화질 목표로 전달한다. 이후 메인 역할 변경
+    // 메시지는 화질을 다시 고정하지 않아 사용자의 선택을 유지한다.
+    if (mainHighQuality) return { quality: "native", qualityPolicy: "native" };
     if (isVideo) return { quality: "720", qualityPolicy: "cap-720" };
     if (isMain) return { quality: "native", qualityPolicy: "native" };
     return { quality: "480", qualityPolicy: "cap-480" };
   }
 
+  function initialQualityForChannel(channel, isMain, mainHighQuality) {
+    if (!mainHighQuality) return "";
+    if (isMain) return "highest";
+    return channel.mediaType === "video" ? "cap-720" : "cap-480";
+  }
+
   function frameUrl(channel, isMain, mainHighQuality) {
     const isVideo = channel.mediaType === "video";
     const { quality, qualityPolicy } = qualityForChannel(channel, isMain, mainHighQuality);
+    const initialQuality = initialQualityForChannel(channel, isMain, mainHighQuality);
     // 처음 주소에 담는 화질도 '우리가 지시한 정책' 이다. 여기서 기록해 두어야
     // 통계 표의 정책 열이 첫 화면부터 맞는다(postState 는 프레임이 준비된 뒤에야
     // 불린다).
@@ -151,9 +161,12 @@
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 첫 프레임의 음소거 상태도 현재 채널별 오디오 상태와 일치시킨다.
     url.searchParams.set("cheeseMultiMuted", effectiveMuted(channel.channelId) ? "1" : "0");
+    // 첫 영상이 붙는 순간부터 시작 음량을 적용한다. FRAME_READY 메시지만 기다리면
+    // 부모 상태가 도착하기 전까지 플레이어 기본 음량으로 잠깐 재생될 수 있다.
+    url.searchParams.set("cheeseMultiVolume", String(effectiveVolume(channel.channelId)));
     url.searchParams.set("cheeseMultiQualityPolicy", qualityPolicy);
-    // 화질은 현재 역할에 맞춘다. 기본 설정에서는 메인 라이브가 치지직 기본 선택을
-    // 따르고, 보조 라이브는 480p, 다시보기는 720p 상한을 사용한다.
+    if (initialQuality) url.searchParams.set("cheeseMultiInitialQuality", initialQuality);
+    // 옵션을 끄면 기존 역할별 정책을 유지하고, 켜면 초기 목표만 한 번 적용한다.
     // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
     //
     if (quality !== "high" && quality !== "native") {
@@ -215,6 +228,38 @@
     }
   }
 
+  // 칸 안의 치지직 플레이어에서 사용자가 직접 음소거를 켜거나 끈 경우(FRAME_USER_MUTE).
+  // ⚠ 예전에는 프레임이 볼륨 값만 알려, 플레이어에서 음소거를 풀어도 볼륨 패널은 계속
+  //   음소거로 보였다. 부모 상태를 실제 소리에 맞춘다.
+  function adoptFrameUserMute(channelId, muted) {
+    if (effectiveMuted(channelId) === muted) return;
+    const audio = audioOf(channelId);
+    audio.muteTouched = true;
+    if (muted) {
+      audio.muted = true;
+      postState(channelId, channelId === state.mainId);
+      clearAudioNotice(channelId);
+      renderVolume();
+      syncAllVolumeButtons();
+      return;
+    }
+    if (state.masterMuted) {
+      // 전체 음소거를 풀되 다른 칸은 지금처럼 조용히 둔다(갑자기 소리가 나지 않게).
+      for (const c of state.chosen) {
+        if (c.channelId !== channelId) audioOf(c.channelId).muted = true;
+      }
+      state.masterMuted = false;
+    }
+    // 보조 칸을 켰다는 건 여러 방송을 같이 듣겠다는 뜻이다. 볼륨 슬라이더를 올릴 때와
+    // 같이 '메인만 듣기' 를 끈다.
+    if (state.audioFocusMode && channelId !== state.mainId) state.audioFocusMode = false;
+    audio.muted = false;
+    if (audio.volume === 0) audio.volume = 1;
+    postAllAudio();
+    renderVolume();
+    syncAllVolumeButtons();
+  }
+
   // 채팅 칸에 지금 테마를 알린다. 프레임이 준비됐다고 알려 올 때와 테마를 바꿀 때
   // 보낸다(교차 출처라 부모가 그 안의 html 을 직접 만질 수 없다).
   function postChatView() {
@@ -267,6 +312,8 @@
   let chatPopoutFeedbackTimer = 0;
   let vodChatSourceId = "";
   let vodChatRenderSignature = "";
+  let vodChatScrollInitialized = false;
+  let pendingVodLocalRevealId = "";
   let vodChatTimeMode = "broadcast";
   let vodChatShowTime = false;
   let vodChatTimeFormat = "24h";
@@ -275,6 +322,7 @@
   let vodChatEmojiMapPromise = null;
   let vodChatEmojiRevision = 0;
   let vodNicknameColorsPromise = null;
+  let vodLocalIdentityRequestId = 0;
   const BADGE_CHAT_ROLES = new Set(["streamer", "manager", "operator", "partner"]);
   const BADGE_CHAT_ROLE_BADGES = Object.freeze({
     streamer: ["방장", "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"],
@@ -314,6 +362,7 @@
     "cheeseMultiviewBadgeChatPillGlowEnabled",
     "cheeseMultiviewBadgeChatCompactPill",
     "cheeseMultiviewBadgeChatHidePillButton",
+    "cheeseMultiviewBadgeChatDisplayStyle",
   ];
   const vodBadgeChatSettings = {
     hidePillButton: false,
@@ -327,9 +376,50 @@
     keepPopupOpen: false,
     pillGlowEnabled: true,
     compactPill: false,
+    // 한줄보기(inline) | 블록보기(block). 배지 모아 챗의 보기 방식과 같다.
+    displayStyle: "inline",
   };
   const vodChatSession = globalThis.CheeseMultiviewVodChat.createSession({
     onChange: renderVodChat,
+  });
+  const vodLocalChatSession = globalThis.CheeseReplayLocalChat.createSession();
+  const vodLocalChatAvatar = $("mvVodChatComposeAvatar");
+  const vodLocalChatForm = $("mvVodChatCompose");
+  // 지난 채팅을 보고 있을 때 오른쪽 아래에 뜨는 '최신 채팅으로' 버튼.
+  const vodChatLatest = globalThis.CheeseReplayLocalChat.bindLatestButton({
+    list: $("mvVodChatList"),
+    button: $("mvVodChatLatest"),
+  });
+  // 설정의 '다시보기 채팅 입력'. 저장값을 읽기 전에는 숨겨 둔다(끈 사용자에게 깜빡임 방지).
+  // 끄면 입력창과 이미 입력한 로컬 채팅을 모두 감춘다(입력 내용은 남겨 다시 켜면 보인다).
+  let vodLocalChatEnabled = false;
+  if (vodLocalChatForm) vodLocalChatForm.hidden = true;
+  globalThis.CheeseReplayLocalChat.watchEnabledSetting((enabled) => {
+    vodLocalChatEnabled = enabled;
+    if (vodLocalChatForm) vodLocalChatForm.hidden = !enabled;
+    if (!enabled) pendingVodLocalRevealId = "";
+    renderVodChat();
+  });
+  // 설정 - 채팅 '채팅 전송 버튼 숨김'을 로컬 채팅 입력 도구 줄에도 적용한다.
+  globalThis.CheeseReplayLocalChat.watchHideToolsSetting((hide) => {
+    document.documentElement.classList.toggle("mv-hide-chat-send-button", hide);
+  });
+  // 나의 로컬 채팅 줄 강조의 테두리선·배경색 숨김.
+  globalThis.CheeseReplayLocalChat.watchStyleClasses();
+  globalThis.CheeseReplayLocalChat.bindComposer({
+    form: vodLocalChatForm,
+    input: $("mvVodChatComposeInput"),
+    button: $("mvVodChatComposeSend"),
+    onSend: (text) => {
+      if (!vodLocalChatEnabled) return;
+      const playback = vodChatSession.snapshot();
+      if (!playback.videoNo || playback.videoNo !== vodLocalChatSession.snapshot().videoNo) return;
+      const message = vodLocalChatSession.add(text, playback.currentTime);
+      if (message) {
+        pendingVodLocalRevealId = message.id;
+        renderVodChat();
+      }
+    },
   });
   const vodBadgeChatAnchor = $("mvVodBadgeChatAnchor");
   const vodBadgeChatTrigger = $("mvVodBadgeChatTrigger");
@@ -454,7 +544,9 @@
     const empty = $("mvVodBadgeChatEmpty");
     if (empty) empty.hidden = entries.length > 0;
     if (!vodBadgeChatList) return;
-    const nearBottom = Math.abs(vodBadgeChatList.scrollTop) < 32;
+    // 과거 → 최신(위 → 아래). 맨 아래 근처를 보던 중이면 새 채팅을 따라간다.
+    const nearBottom = vodBadgeChatList.scrollHeight - vodBadgeChatList.scrollTop -
+      vodBadgeChatList.clientHeight < 32;
     vodBadgeChatPopupItems = entries.map((message) => ({
       id: String(message.id),
       nickname: String(message.nickname || "알 수 없음"),
@@ -465,10 +557,10 @@
         roleBadgesOnly: vodBadgeChatSettings.roleBadgesOnly,
       }),
     }));
-    vodBadgeChatList.innerHTML = vodBadgeChatPopupItems.slice().reverse()
+    vodBadgeChatList.innerHTML = vodBadgeChatPopupItems
       .map((item) => item.html)
       .join("");
-    if (nearBottom) vodBadgeChatList.scrollTop = 0;
+    if (nearBottom) vodBadgeChatList.scrollTop = vodBadgeChatList.scrollHeight;
   }
 
   function openVodBadgeChatPopover(open) {
@@ -489,8 +581,8 @@
       vodBadgeChatSignature = "reset";
       positionVodBadgeChatPopover();
       renderVodBadgeChat(vodChatSession.visible(snapshot.currentTime, 120));
-      // 새로 열 때는 가장 최근 채팅(아래, column-reverse 라 scrollTop 0)에서 시작한다.
-      if (vodBadgeChatList) vodBadgeChatList.scrollTop = 0;
+      // 새로 열 때는 가장 최근 채팅(맨 아래)에서 시작한다.
+      if (vodBadgeChatList) vodBadgeChatList.scrollTop = vodBadgeChatList.scrollHeight;
       const chatPanel = vodBadgeChatAnchor?.closest(".mv-chat");
       if (chatPanel && window.ResizeObserver) {
         vodBadgeChatResizeObserver = new window.ResizeObserver(positionVodBadgeChatPopover);
@@ -526,6 +618,10 @@
       vodBadgeChatSettings.pillGlowEnabled = values.cheeseMultiviewBadgeChatPillGlowEnabled !== false;
     if (Object.hasOwn(values, "cheeseMultiviewBadgeChatCompactPill"))
       vodBadgeChatSettings.compactPill = values.cheeseMultiviewBadgeChatCompactPill === true;
+    if (Object.hasOwn(values, "cheeseMultiviewBadgeChatDisplayStyle"))
+      vodBadgeChatSettings.displayStyle =
+        values.cheeseMultiviewBadgeChatDisplayStyle === "block" ? "block" : "inline";
+    vodBadgeChatList?.classList.toggle("is-block", vodBadgeChatSettings.displayStyle === "block");
     if (vodBadgeChatSettings.hidePillButton) vodBadgeChatSettings.keepPopupOpen = false;
     const closeButton = $("mvVodBadgeChatClose");
     if (closeButton) closeButton.disabled = vodBadgeChatSettings.keepPopupOpen;
@@ -828,12 +924,19 @@
   }
 
   function stopVodChat() {
+    vodLocalIdentityRequestId += 1;
     if (vodChatSourceId) {
       postVodChatControl(vodChatSourceId, false);
     }
     vodChatSourceId = "";
     vodChatRenderSignature = "";
+    vodChatScrollInitialized = false;
+    pendingVodLocalRevealId = "";
     vodChatSession.stop();
+    vodLocalChatSession.setVideo("");
+    globalThis.CheeseReplayLocalChat.applyAvatar(
+      vodLocalChatAvatar, vodLocalChatSession.getIdentity(),
+    );
     $("mvVodChatFeed").hidden = true;
     $("mvChatFrame").hidden = false;
   }
@@ -1000,9 +1103,12 @@
   }
 
   function renderVodChatRow(message, timeMode, showTime = vodChatShowTime, options = {}) {
+    const broadcastAt = message.broadcastAt || (message.local
+      ? vodChatSession.broadcastTimeAt(message.at)
+      : 0);
     const rowTime = showTime
-      ? timeMode === "broadcast" && message.broadcastAt
-        ? formatVodBroadcastTime(message.broadcastAt)
+      ? timeMode === "broadcast" && broadcastAt
+        ? formatVodBroadcastTime(broadcastAt)
         : formatVodChatTime(message.at)
       : "";
     const badges = Array.isArray(message.badges) ? message.badges : [];
@@ -1017,7 +1123,7 @@
           BADGE_CHAT_ROLE_BADGE_URLS.has(badge.url) || BADGE_CHAT_ROLE_BADGE_LABELS.has(badge.label)))
         .map((badge) => `<img class="mv-vod-chat-profile-badge" src="${esc(badge.url)}" alt="${esc(position === "after" ? "" : badge.label)}" width="16" height="16" loading="lazy" decoding="async">`)
         .join("");
-      return images ? `<span class="mv-vod-chat-profile-badge-group">${images}</span>` : "";
+      return images ? `<span class="mv-vod-chat-profile-badge-group is-${position}">${images}</span>` : "";
     };
     const time = rowTime ? `<time>${rowTime}</time>` : "";
     const nicknameTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
@@ -1047,7 +1153,8 @@
       return `<article class="mv-vod-chat-row is-special${tone}${roleClass}${popupClasses}" data-chat-time="${message.at}">` +
         renderVodChatSpecialCard(message, identity) + `</article>`;
     }
-    return `<article class="mv-vod-chat-row${roleClass}${popupClasses}" data-chat-time="${message.at}">` +
+    const localClass = message.local ? " is-local" : "";
+    return `<article class="mv-vod-chat-row${roleClass}${localClass}${popupClasses}" data-chat-id="${esc(message.id)}" data-chat-time="${message.at}">` +
       `<div class="mv-vod-chat-inline">${time}${identity}` +
       (message.text ? `<span class="mv-vod-chat-message"${roleMessageColor
         ? ` style="color:${esc(roleMessageColor)}"` : ""}>${renderVodChatText(message)}</span>` : "") +
@@ -1079,31 +1186,58 @@
         ? "재생 시간으로 전환"
         : "실제 방송 시각으로 전환");
     }
-    const visible = vodChatSession.visible(snapshot.currentTime, 120);
+    const archived = vodChatSession.visible(snapshot.currentTime, 120);
+    const local = vodLocalChatEnabled
+      ? vodLocalChatSession.visible(snapshot.currentTime, 120)
+      : [];
+    const visible = [...archived, ...local]
+      .sort((a, b) => a.at - b.at || Number(a.local) - Number(b.local))
+      .slice(-120);
     const nicknameColorTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const localIdentityRevision = vodLocalChatSession.snapshot().identityRevision;
     const signature = `${snapshot.status}:${snapshot.error}:` +
       `${vodChatTimeMode}:${vodChatShowTime}:${vodChatTimeFormat}:${vodChatEmojiRevision}:${nicknameColorTheme}:` +
+      `${localIdentityRevision}:` +
       `${globalThis.CheeseMultiviewVodChat.nicknameColorCodeRevision}:` +
       `${visible.map((message) => message.id).join("\u001f")}`;
     if (signature !== vodChatRenderSignature) {
+      // 맨 아래 근처를 보던 중이면 재생에 따라 붙는 새 채팅을 따라간다. 위로 올려 과거를
+      // 보는 중이면 위치를 둔다.
+      // ⚠ 로컬 채팅 입력 보여 주기를 넣으면서 이 따라가기가 빠져, 채팅은 붙는데 창이
+      //   스크롤되지 않았다.
       const nearBottom = list.scrollHeight - list.clientHeight - list.scrollTop < 32;
       const previousScrollTop = list.scrollTop;
       list.innerHTML = visible
         .map((message) => renderVodChatRow(message, vodChatTimeMode))
         .join("");
-      list.scrollTop = nearBottom ? list.scrollHeight : previousScrollTop;
+      const pendingLocalRow = pendingVodLocalRevealId
+        ? [...list.querySelectorAll(".mv-vod-chat-row.is-local")]
+          .find((row) => row.dataset.chatId === pendingVodLocalRevealId)
+        : null;
+      if (pendingLocalRow) {
+        globalThis.CheeseReplayLocalChat.revealRowAtPosition(list, pendingLocalRow);
+        pendingVodLocalRevealId = "";
+        vodChatScrollInitialized = true;
+      } else if (!vodChatScrollInitialized && visible.length) {
+        list.scrollTop = list.scrollHeight;
+        vodChatScrollInitialized = true;
+      } else {
+        list.scrollTop = nearBottom ? list.scrollHeight : previousScrollTop;
+      }
+      // 새 채팅이 붙어도 스크롤 이벤트가 나지 않을 수 있어 여기서 다시 맞춘다.
+      vodChatLatest.update();
       vodChatRenderSignature = signature;
     }
     renderVodBadgeChat(visible);
 
-    if (snapshot.status === "error") {
+    if (snapshot.status === "error" && !local.length) {
       statusBox.hidden = false;
       statusBox.innerHTML = `<span class="mv-cell-status-text">${esc(snapshot.error || "채팅을 불러오지 못했습니다.")}</span>` +
         '<button type="button" class="mv-cell-retry" id="mvChatRetry">다시 시도</button>';
-    } else if (snapshot.status === "empty") {
+    } else if (snapshot.status === "empty" && !visible.length) {
       statusBox.hidden = false;
       statusBox.innerHTML = '<span class="mv-cell-status-text">이 구간에 표시할 채팅이 없습니다.</span>';
-    } else if (snapshot.status === "idle") {
+    } else if (snapshot.status === "idle" && !visible.length) {
       statusBox.hidden = false;
       statusBox.innerHTML = '<span class="mv-cell-status-text">다시보기 채팅을 준비하는 중…</span>';
     } else if (!visible.length && snapshot.status !== "empty" &&
@@ -1135,9 +1269,9 @@
       return;
     }
     const hasRows = visible.length > 0;
-    const status = snapshot.status === "error" ? "error"
-      : snapshot.status === "loading" || snapshot.status === "idle" ? "loading"
-        : hasRows ? "ready" : "empty";
+    const status = hasRows ? "ready"
+      : snapshot.status === "error" ? "error"
+        : snapshot.status === "loading" || snapshot.status === "idle" ? "loading" : "empty";
     const message = status === "error" ? snapshot.error || "다시보기 채팅을 불러오지 못했습니다."
       : status === "empty" ? "현재 재생 구간에 채팅이 없습니다."
         : status === "loading" ? "재생 시점 채팅을 불러오는 중…" : "";
@@ -1145,6 +1279,7 @@
       channelId: video.channelId,
       videoNo: video.videoNo,
       channelName: video.channelName,
+      identity: vodLocalChatSession.getIdentity(),
       generation: chatGeneration,
       status,
       message,
@@ -1159,6 +1294,7 @@
           keepPopupOpen: vodBadgeChatSettings.keepPopupOpen,
           compactPill: vodBadgeChatSettings.compactPill,
           pillGlowEnabled: vodBadgeChatSettings.pillGlowEnabled,
+          displayStyle: vodBadgeChatSettings.displayStyle,
         },
       },
     };
@@ -1223,7 +1359,26 @@
         detachedChat.lastVodSignature = "";
         detachedChat.sentVodSignature = "";
       }
-      if (videoChannel?.videoNo) vodChatSession.start(videoChannel.videoNo, 0);
+      vodLocalChatSession.setVideo(videoChannel?.videoNo || "");
+      globalThis.CheeseReplayLocalChat.applyAvatar(
+        vodLocalChatAvatar, vodLocalChatSession.getIdentity(),
+      );
+      if (videoChannel?.videoNo) {
+        vodChatSession.start(videoChannel.videoNo, 0);
+        const identityRequestId = ++vodLocalIdentityRequestId;
+        void globalThis.CheeseReplayLocalChat.loadIdentity(
+          videoChannel.videoNo, videoChannel.ownerChannelId,
+        ).then((identity) => {
+          if (identityRequestId !== vodLocalIdentityRequestId ||
+              vodChatSourceId !== selectedId ||
+              vodChatSession.snapshot().videoNo !== videoChannel.videoNo) return;
+          if (vodLocalChatSession.setIdentity(identity)) {
+            globalThis.CheeseReplayLocalChat.applyAvatar(vodLocalChatAvatar, identity);
+            vodChatRenderSignature = "";
+            renderVodChat();
+          }
+        });
+      }
       void loadVodChatEmojiMap().then(renderVodChat);
       void loadVodNicknameColorCodes();
       renderVodChat();
@@ -1364,6 +1519,30 @@
       clearTimeout(chatReadyTimer);
       setChatStatus("ready");
       postChatView();
+      return;
+    }
+    if (data.type === "VOD_LOCAL_CHAT_SEND") {
+      if (!vodLocalChatEnabled) return;
+      const selected = state.chosen.find((item) => item.channelId === state.chatChannelId);
+      const playback = vodChatSession.snapshot();
+      if (
+        !isVideoChatSource(state.chatChannelId) ||
+        popup.mediaType !== "video" ||
+        data.channelId !== state.chatChannelId ||
+        data.videoNo !== selected?.videoNo ||
+        data.videoNo !== popup.videoNo ||
+        data.generation !== chatGeneration ||
+        !Number.isSafeInteger(data.generation) ||
+        typeof data.text !== "string" ||
+        !data.text.trim() ||
+        data.text.trim().length > globalThis.CheeseReplayLocalChat.MAX_MESSAGE_LENGTH ||
+        playback.videoNo !== data.videoNo
+      ) return;
+      const message = vodLocalChatSession.add(data.text, playback.currentTime);
+      if (message) {
+        pendingVodLocalRevealId = message.id;
+        renderVodChat();
+      }
       return;
     }
     if (data.type === "RETRY_CHAT") {
@@ -1586,12 +1765,16 @@
     ) {
       clearChannelSync(channelId);
       if (status !== "loading") clearChannelMixer(channelId);
+      if (status === "ended" || status === "error")
+        clearQualityChannelActivity(channelId);
     }
     if (status === "ready" && frameStates.get(channelId) !== "ready") {
       syncReadyAt.set(channelId, Date.now());
     }
     frameStates.set(channelId, status);
     refreshSyncPanel();
+    // 라이브 따라잡기는 싱크 패널이 닫혀 있어도 측정이 필요하다.
+    updateSyncPolling();
     const cell = cells.get(channelId);
     if (cell) {
       cell.dataset.status = status;
@@ -1601,6 +1784,7 @@
     }
     // Quick 패널이 닫혀 있어도 상태는 위에서 이미 갱신됐다. 열려 있을 때만 다시 그린다.
     if (!$("mvQuick")?.hidden) renderQuick();
+    updateQualityPolling();
   }
 
   function renderCellOverlay(overlay, channelId, status, message) {
@@ -1772,8 +1956,8 @@
       widePrompt.innerHTML =
         '<span aria-live="polite">화면 맞춤 지연</span>' +
         `<button type="button" data-mv-wide-apply="${esc(channel.channelId)}" ` +
-        `aria-label="${esc(channel.channelName)} 넓은 화면 다시 적용" ` +
-        'class="mv-custom-tooltip" data-tooltip="자동 적용이 늦으면 다시 누르거나 플레이어에서 T를 누르세요">' +
+        `aria-label="${esc(channel.channelName)} 넓은 화면·채팅 접기 다시 적용" ` +
+        'class="mv-custom-tooltip" data-tooltip="넓은 화면과 채팅 접기를 다시 맞춥니다.&#10;넓은 화면이 늦으면 플레이어에서 T를 누르세요">' +
         '다시 적용 <kbd>T</kbd></button>';
 
       // 칸 도구 모음(자리 바꾸기 손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다.
@@ -2222,6 +2406,14 @@
     channelAudio.delete(channelId);
     audioBlocked.delete(channelId);
     statsByChannel.delete(channelId);
+    qualityByChannel.delete(channelId);
+    const qualityRequest = qualityRequestByChannel.get(channelId);
+    if (qualityRequest?.timer) clearTimeout(qualityRequest.timer);
+    qualityRequestByChannel.delete(channelId);
+    const qualityCommand = qualityPending.get(channelId);
+    if (qualityCommand?.timer) clearTimeout(qualityCommand.timer);
+    qualityPending.delete(channelId);
+    qualityFeedback.delete(channelId);
     clearChannelMixer(channelId);
     clearChannelSync(channelId, true);
   }
@@ -2618,6 +2810,200 @@
   const syncRetryAt = new Map();
   const freshSyncChannels = new Set();
 
+  // ── 칸별 라이브 따라잡기 ─────────────────────────────────────────────────
+  // 지연이 상한(CATCH_UP.limitSec)을 넘은 라이브 칸을 라이브 쪽으로 옮긴다.
+  // ⚠ 여러 칸을 소프트웨어로 디코딩하면 버퍼는 쌓이는데 재생 위치가 초당
+  //   0.06~0.09초씩 밀린다(엣지 지연 ≈ 0). 배속은 디코딩 부하를 더 키워 쓰지 않는다.
+  // ⚠ 자동 싱크로 묶인 칸은 함께 옮긴다. 한 칸만 옮기면 싱크가 가장 느린 칸에
+  //   맞추려고 그 칸을 다시 과거로 되돌린다.
+  const LIVE_CATCH_UP_KEY = "cheeseMultiviewLiveCatchUp";
+  const MAIN_BORDER_KEY = "cheeseMultiviewMainBorder";
+  let liveCatchUpEnabled = true;
+  const catchUpOverSince = new Map(); // channelId → 상한을 처음 넘은 시각
+  const catchUpLastAt = new Map(); // channelId → 마지막 따라잡기 명령 시각
+  // 사용자가 되감은 칸. 지연이 상한 아래로 돌아오거나 영상이 바뀔 때까지 두고 본다.
+  const catchUpHeld = new Set();
+  // 탭 복귀 뒤 첫 판단. 가려진 동안 밀린 지연은 확인 시간·쿨다운 없이 바로 옮긴다.
+  const catchUpUrgent = new Set();
+  const catchUpQuietUntil = new Map(); // 우리가 옮긴 직후라 되감기 판정에서 뺄 시각
+
+  void chrome.storage?.local
+    ?.get(LIVE_CATCH_UP_KEY)
+    ?.then((data) => {
+      liveCatchUpEnabled = data[LIVE_CATCH_UP_KEY] !== false;
+      updateSyncPolling();
+    })
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local" || !changes[LIVE_CATCH_UP_KEY]) return;
+    liveCatchUpEnabled = changes[LIVE_CATCH_UP_KEY].newValue !== false;
+    if (!liveCatchUpEnabled) resetLiveCatchUp();
+    updateSyncPolling();
+  });
+
+  function applyMainBorderSetting(enabled) {
+    document.body.classList.toggle("mv-main-border-hidden", !enabled);
+  }
+
+  void chrome.storage?.local
+    ?.get(MAIN_BORDER_KEY)
+    ?.then((data) => applyMainBorderSetting(data[MAIN_BORDER_KEY] !== false))
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local" || !changes[MAIN_BORDER_KEY]) return;
+    applyMainBorderSetting(changes[MAIN_BORDER_KEY].newValue !== false);
+  });
+
+  function resetLiveCatchUp(channelId = null) {
+    if (channelId === null) {
+      catchUpOverSince.clear();
+      catchUpLastAt.clear();
+      catchUpHeld.clear();
+      catchUpUrgent.clear();
+      catchUpQuietUntil.clear();
+      return;
+    }
+    catchUpOverSince.delete(channelId);
+    catchUpLastAt.delete(channelId);
+    catchUpHeld.delete(channelId);
+    catchUpUrgent.delete(channelId);
+    catchUpQuietUntil.delete(channelId);
+  }
+
+  function liveCatchUpWanted() {
+    return (
+      liveCatchUpEnabled &&
+      state.chosen.some(
+        (c) => c.mediaType !== "video" && currentStatus(c.channelId) === "ready",
+      )
+    );
+  }
+
+  // 새 샘플마다 되감기를 살핀다. 사용자가 타임머신으로 과거를 보는 칸은 끌어오지 않는다.
+  function observeCatchUpSample(channelId, previous, stats) {
+    if (!liveCatchUpEnabled) return;
+    if (previous && previous.generation !== stats.generation) {
+      catchUpHeld.delete(channelId);
+      catchUpOverSince.delete(channelId);
+    }
+    const quietUntil = catchUpQuietUntil.get(channelId) || 0;
+    if (SYNC.isRewind(previous, stats, quietUntil)) {
+      if (catchUpHeld.has(channelId)) return;
+      catchUpHeld.add(channelId);
+      catchUpOverSince.delete(channelId);
+      recordSyncDiagnostic(
+        "catch-up-hold",
+        {
+          channelId,
+          channelName: syncChannelName(channelId),
+          fromDelaySec: previous.nativeDelaySec,
+          toDelaySec: stats.nativeDelaySec,
+        },
+        stats.receivedAt,
+      );
+      return;
+    }
+    if (
+      catchUpHeld.has(channelId) &&
+      stats.nativeDelaySec !== null &&
+      stats.nativeDelaySec < SYNC.CATCH_UP.limitSec
+    ) {
+      catchUpHeld.delete(channelId);
+      recordSyncDiagnostic(
+        "catch-up-release",
+        {
+          channelId,
+          channelName: syncChannelName(channelId),
+          delaySec: stats.nativeDelaySec,
+        },
+        stats.receivedAt,
+      );
+    }
+  }
+
+  // 함께 옮길 칸 묶음. 자동 싱크 중인 범위(또는 그룹)는 한 묶음, 나머지는 한 칸씩.
+  function catchUpClusters() {
+    const live = state.chosen
+      .filter((c) => c.mediaType !== "video")
+      .map((c) => c.channelId);
+    const synced =
+      state.sync.scope === "groups"
+        ? state.sync.groups
+            .filter((group) => group.mode === "auto")
+            .map((group) => group.channelIds)
+        : state.sync.mode === "auto"
+          ? [syncScopeIds()]
+          : [];
+    const clusters = [];
+    const taken = new Set();
+    for (const ids of synced) {
+      const members = ids.filter((id) => live.includes(id) && !taken.has(id));
+      members.forEach((id) => taken.add(id));
+      if (members.length) clusters.push(members);
+    }
+    for (const id of live) if (!taken.has(id)) clusters.push([id]);
+    return clusters;
+  }
+
+  function catchUpCandidate(id, now) {
+    const st = syncStats.get(id);
+    return (
+      currentStatus(id) === "ready" &&
+      !catchUpHeld.has(id) &&
+      SYNC.eligible(st, syncReadyAt.get(id), now, true) &&
+      // 플레이어 재초기화 중에는 버퍼 없이 지연만 크게 나온다(실측 31초). 옮기지 않는다.
+      st.bufferAheadSec !== null &&
+      !st.userRateOverride &&
+      !pendingSync(id, "catch-up")
+    );
+  }
+
+  function tickLiveCatchUp(now) {
+    if (!liveCatchUpEnabled) return;
+    const { limitSec, confirmMs, cooldownMs, ownSeekQuietMs } = SYNC.CATCH_UP;
+    for (const cluster of catchUpClusters()) {
+      const members = cluster.filter((id) => catchUpCandidate(id, now));
+      let due = false;
+      for (const id of cluster) {
+        const delay = members.includes(id)
+          ? syncStats.get(id).nativeDelaySec
+          : null;
+        if (delay === null || delay < limitSec) {
+          catchUpOverSince.delete(id);
+          continue;
+        }
+        if (!catchUpOverSince.has(id)) catchUpOverSince.set(id, now);
+        const urgent = catchUpUrgent.has(id);
+        const confirmed = now - catchUpOverSince.get(id) >= confirmMs;
+        const cooled =
+          !catchUpLastAt.has(id) || now - catchUpLastAt.get(id) >= cooldownMs;
+        if (urgent || (confirmed && cooled)) due = true;
+      }
+      // 탭 복귀 특례는 측정이 된 첫 판단에서 한 번만 쓴다.
+      for (const id of members) catchUpUrgent.delete(id);
+      if (!due) continue;
+      const targets = SYNC.catchUpTargets(
+        members.map((id) => ({ id, delaySec: syncStats.get(id).nativeDelaySec })),
+      );
+      for (const { id, targetDelaySec } of targets) {
+        const delaySec = syncStats.get(id).nativeDelaySec;
+        if (
+          sendSyncCommand(
+            id,
+            "catch-up",
+            "APPLY_LIVE_CATCH_UP",
+            { targetDelaySec },
+            { targetDelaySec, delaySec },
+          )
+        ) {
+          catchUpLastAt.set(id, now);
+          catchUpOverSince.delete(id);
+          catchUpQuietUntil.set(id, now + ownSeekQuietMs);
+        }
+      }
+    }
+  }
+
   function syncGroupForChannel(channelId) {
     return (
       state.sync.groups.find((group) => group.channelIds.includes(channelId)) ||
@@ -2746,7 +3132,14 @@
       return value;
     if (!value || typeof value !== "object") return null;
     const safe = {};
-    for (const key of ["currentTime", "manual", "offset", "commitOffset"]) {
+    for (const key of [
+      "currentTime",
+      "manual",
+      "offset",
+      "commitOffset",
+      "targetDelaySec",
+      "delaySec",
+    ]) {
       if (typeof value[key] === "boolean" || Number.isFinite(value[key]))
         safe[key] = value[key];
     }
@@ -3101,7 +3494,9 @@
     if (
       !Number.isSafeInteger(data.commandId) ||
       data.commandId <= 0 ||
-      !["seek", "nudge", "rate", "reset-rate"].includes(data.command) ||
+      !["seek", "nudge", "rate", "reset-rate", "catch-up"].includes(
+        data.command,
+      ) ||
       typeof data.applied !== "boolean" ||
       !(
         data.reason === null ||
@@ -3184,7 +3579,12 @@
       }
     } else {
       syncRetryAt.delete(retryKey);
-      if (entry.command === "seek" || entry.command === "nudge")
+      // 따라잡기도 seek 이다. 자동 싱크가 곧바로 과거로 되돌리지 않게 같은 쿨다운을 건다.
+      if (
+        entry.command === "seek" ||
+        entry.command === "nudge" ||
+        entry.command === "catch-up"
+      )
         syncSeekAt.set(channelId, Date.now());
       if (entry.command === "nudge") {
         context.manualOffsets[channelId] = entry.desiredValue.offset;
@@ -3249,9 +3649,10 @@
     syncReadyAt.delete(channelId);
     syncGeneration.delete(channelId);
     syncSeekAt.delete(channelId);
-    for (const command of ["seek", "nudge", "rate", "reset-rate"])
+    for (const command of ["seek", "nudge", "rate", "reset-rate", "catch-up"])
       syncRetryAt.delete(`${channelId}:${command}`);
     syncRates.delete(channelId);
+    resetLiveCatchUp(channelId);
     if (removeOffset) delete state.sync.manualOffsets[channelId];
     if (state.sync.referenceChannelId === channelId) {
       state.sync.referenceChannelId = null;
@@ -4099,7 +4500,8 @@
         pendingSyncCommands.size > 0 ||
         syncRates.size > 0 ||
         frameOwnsRate ||
-        state.sync.diagnosticsEnabled);
+        state.sync.diagnosticsEnabled ||
+        liveCatchUpWanted());
     if (!needed && syncTimer) {
       clearInterval(syncTimer);
       syncTimer = 0;
@@ -4521,6 +4923,8 @@
     }
     const now = Date.now();
     requestSyncStats();
+    // 직전 틱까지 받은 측정값으로 판단한다(싱크 보정과 같은 기준).
+    tickLiveCatchUp(now);
     if (state.sync.scope === "groups") {
       tickSyncGroups(now);
       refreshSyncPanel();
@@ -4738,6 +5142,183 @@
   const statsByChannel = new Map(); // channelId → { stats, updatedAt }
   let statsTimer = 0;
 
+  // 화질 목록은 각 iframe의 MAIN world가 치지직 플레이어에서 직접 수집한다.
+  // 부모는 검증된 응답을 잠시 보관하고, 패널이 열려 있는 동안만 갱신을 요청한다.
+  const qualityByChannel = new Map();
+  const qualityRequestByChannel = new Map();
+  const qualityPending = new Map();
+  const qualityFeedback = new Map();
+  let qualityRequestSeq = 0;
+  let qualityCommandSeq = 0;
+  let qualityTimer = 0;
+  // 마지막으로 그린 화질 패널. 폴링(1.6초)과 칸별 응답마다 불리므로, 내용이 같으면
+  // DOM 을 건드리지 않는다.
+  // ⚠ 예전에는 매번 innerHTML 을 통째로 바꿔, 버튼을 누르는 사이 요소가 교체되면 클릭이
+  //   무시될 수 있었고 포커스·호버도 계속 풀렸다.
+  let qualityPanelHtml = "";
+
+  function clearQualityChannelActivity(channelId) {
+    const request = qualityRequestByChannel.get(channelId);
+    if (request?.timer) clearTimeout(request.timer);
+    qualityRequestByChannel.delete(channelId);
+    const pending = qualityPending.get(channelId);
+    if (pending?.timer) clearTimeout(pending.timer);
+    qualityPending.delete(channelId);
+    qualityByChannel.delete(channelId);
+    qualityFeedback.delete(channelId);
+  }
+
+  function hasQualityPollingChannel() {
+    return state.chosen.some(
+      (channel) => !["ended", "error"].includes(currentStatus(channel.channelId)),
+    );
+  }
+
+  function requestChannelQuality(channelId) {
+    if (["ended", "error"].includes(currentStatus(channelId))) return;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return;
+    const previous = qualityRequestByChannel.get(channelId);
+    if (previous) return;
+    qualityRequestSeq = qualityRequestSeq >= Number.MAX_SAFE_INTEGER ? 1 : qualityRequestSeq + 1;
+    const requestId = qualityRequestSeq;
+    const timer = window.setTimeout(() => {
+      if (qualityRequestByChannel.get(channelId)?.requestId !== requestId) return;
+      qualityRequestByChannel.delete(channelId);
+      if (!qualityByChannel.has(channelId)) {
+        qualityFeedback.set(channelId, { text: "화질 정보를 불러오지 못했습니다.", error: true });
+      }
+      renderQuality();
+    }, 4500);
+    qualityRequestByChannel.set(channelId, { requestId, timer });
+    try {
+      frame.contentWindow.postMessage({
+        source: MULTIVIEW_MESSAGE,
+        type: "REQUEST_MULTIVIEW_QUALITY",
+        channelId,
+        requestId,
+      }, CHZZK_ORIGIN);
+    } catch {
+      clearTimeout(timer);
+      qualityRequestByChannel.delete(channelId);
+    }
+  }
+
+  function requestAllChannelQualities() {
+    for (const channel of state.chosen) requestChannelQuality(channel.channelId);
+    renderQuality();
+  }
+
+  function startQualityPolling() {
+    renderQuality();
+    requestAllChannelQualities();
+    if (qualityTimer || !hasQualityPollingChannel()) return;
+    qualityTimer = window.setInterval(() => {
+      if (!hasQualityPollingChannel()) {
+        stopQualityPolling();
+        renderQuality();
+        return;
+      }
+      requestAllChannelQualities();
+      renderQuality();
+    }, 1600);
+  }
+
+  function stopQualityPolling() {
+    if (qualityTimer) clearInterval(qualityTimer);
+    qualityTimer = 0;
+  }
+
+  function updateQualityPolling() {
+    const panel = $("mvQualityPop");
+    if (!panel || panel.hidden || !hasQualityPollingChannel()) {
+      stopQualityPolling();
+      renderQuality();
+      return;
+    }
+    startQualityPolling();
+  }
+
+  function renderQuality() {
+    const panel = $("mvQualityPop");
+    if (!panel || panel.hidden) return;
+    const busy = state.chosen.some((channel) => qualityRequestByChannel.has(channel.channelId) ||
+      qualityPending.has(channel.channelId));
+    if (panel.getAttribute("aria-busy") !== String(busy))
+      panel.setAttribute("aria-busy", String(busy));
+    const valueText = `${state.chosen.length}채널`;
+    const valueElement = $("mvQualityValue");
+    if (valueElement && valueElement.textContent !== valueText) valueElement.textContent = valueText;
+    const html = !state.chosen.length
+      ? '<div class="mv-quality-empty">선택된 채널이 없습니다.</div>'
+      : state.chosen.map((channel) => {
+      const id = channel.channelId;
+      const status = currentStatus(id);
+      const entry = qualityByChannel.get(id);
+      const pending = qualityPending.has(id);
+      const feedback = qualityFeedback.get(id);
+      const selected = entry?.choices.find((choice) => choice.value === entry.selected);
+      const current = status === "ended" ? "방송 종료"
+        : status === "error" ? "플레이어 오류"
+          : entry?.ready
+            ? `${selected?.label || "확인 중"}${entry.output ? ` · ${entry.output}` : ""}`
+            : qualityRequestByChannel.has(id) ? "화질 정보 확인 중" : "준비 중";
+      const choices = entry?.ready && status === "ready" ? entry.choices.map((choice) =>
+        `<button type="button" class="mv-quality-option" data-mv-quality-channel="${esc(id)}"` +
+        ` data-mv-quality-value="${esc(choice.value)}" aria-pressed="${String(choice.value === entry.selected)}"` +
+        `${pending || status !== "ready" || (entry.locked && choice.value !== entry.lockedQuality) ? " disabled" : ""}>${esc(choice.label)}</button>`
+      ).join("") : "";
+      const message = feedback?.text || (pending ? "화질 변경 중…" :
+        status === "ended" ? "방송이 종료되었습니다." :
+          status === "error" ? "플레이어를 사용할 수 없습니다." :
+            entry?.locked ? "최대 화질 자동 고정이 적용 중입니다." :
+          status === "ready" && entry?.ready ? "" : "화질 목록을 준비하고 있습니다.");
+      return `<section class="mv-quality-channel" data-channel-id="${esc(id)}">` +
+        `<div class="mv-quality-head"><strong class="mv-quality-name" title="${esc(channel.channelName)}">${esc(channel.channelName)}</strong>` +
+        `<span class="mv-quality-current">${esc(current)}</span></div>` +
+        (choices ? `<div class="mv-quality-options" role="group" aria-label="${esc(channel.channelName)} 화질">${choices}</div>` : "") +
+        `<div class="mv-quality-feedback${feedback?.error ? " is-error" : ""}" role="status">${esc(message)}</div>` +
+        `</section>`;
+    }).join("");
+    // 다른 곳에서 패널을 비웠을 수 있으니 실제로 비어 있으면 다시 그린다.
+    if (html === qualityPanelHtml && panel.childElementCount) return;
+    qualityPanelHtml = html;
+    panel.innerHTML = html;
+  }
+
+  function setChannelQuality(channelId, quality) {
+    const entry = qualityByChannel.get(channelId);
+    if (!entry?.ready || !entry.choices.some((choice) => choice.value === quality) ||
+        qualityPending.has(channelId)) return;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow || currentStatus(channelId) !== "ready") return;
+    qualityCommandSeq = qualityCommandSeq >= Number.MAX_SAFE_INTEGER ? 1 : qualityCommandSeq + 1;
+    const commandId = qualityCommandSeq;
+    const timer = window.setTimeout(() => {
+      if (qualityPending.get(channelId)?.commandId !== commandId) return;
+      qualityPending.delete(channelId);
+      qualityFeedback.set(channelId, { text: "화질 변경 응답이 없습니다. 다시 시도해 주세요.", error: true });
+      renderQuality();
+    }, 6000);
+    qualityPending.set(channelId, { commandId, quality, timer });
+    qualityFeedback.delete(channelId);
+    renderQuality();
+    try {
+      frame.contentWindow.postMessage({
+        source: MULTIVIEW_MESSAGE,
+        type: "SET_MULTIVIEW_QUALITY",
+        channelId,
+        commandId,
+        quality,
+      }, CHZZK_ORIGIN);
+    } catch {
+      clearTimeout(timer);
+      qualityPending.delete(channelId);
+      qualityFeedback.set(channelId, { text: "화질 변경 명령을 보내지 못했습니다.", error: true });
+      renderQuality();
+    }
+  }
+
   function startStatsPolling() {
     renderStats();
     requestStats();
@@ -4852,6 +5433,7 @@
       if (name === except) continue;
       // 통계 패널이 닫히면 6칸에 계속 물어볼 이유가 없다.
       if (name === "stats") stopStatsPolling();
+      if (name === "quality") stopQualityPolling();
       if (name === "volume" && !pop.querySelector(".mv-pop-panel")?.hidden) {
         mixerOpen.clear();
         mixerConfirm.clear();
@@ -4887,6 +5469,10 @@
       if (open) startStatsPolling();
       else stopStatsPolling();
     }
+    if (name === "quality") {
+      if (open) startQualityPolling();
+      else stopQualityPolling();
+    }
     if (name === "sync") {
       if (open) renderSync();
       updateSyncPolling();
@@ -4908,10 +5494,11 @@
     state.chatEnabled = setup.chatEnabled;
     state.mainHighQuality = setup.mainHighQuality;
     state.startMainMuted = setup.startMainMuted;
-    if (state.startMainMuted && !channelAudio.has(state.mainId)) {
+    state.startMainVolume = setup.startMainVolume;
+    if (!channelAudio.has(state.mainId)) {
       channelAudio.set(state.mainId, {
-        volume: 1,
-        muted: true,
+        volume: state.startMainVolume,
+        muted: state.startMainMuted,
         muteTouched: false,
       });
     }
@@ -4972,6 +5559,9 @@
       chatEnabled: raw.chatEnabled !== false,
       mainHighQuality: raw.mainHighQuality === true,
       startMainMuted: raw.startMainMuted === true,
+      startMainVolume: typeof raw.startMainVolume === "number" && Number.isFinite(raw.startMainVolume)
+        ? Math.round(Math.min(1, Math.max(0, raw.startMainVolume)) * 100) / 100
+        : 1,
     };
   }
 
@@ -6231,6 +6821,7 @@
           chatEnabled: state.chatEnabled,
           mainHighQuality: state.mainHighQuality,
           startMainMuted: state.startMainMuted,
+          startMainVolume: state.startMainVolume,
         },
       });
     } catch {}
@@ -6600,6 +7191,14 @@
     const toggle = target.closest?.(".mv-pop-button[data-mv-pop-toggle]");
     if (toggle) {
       togglePopover(toggle.dataset.mvPopToggle);
+      return;
+    }
+    const qualityOption = target.closest?.("[data-mv-quality-channel][data-mv-quality-value]");
+    if (qualityOption) {
+      setChannelQuality(
+        qualityOption.dataset.mvQualityChannel,
+        qualityOption.dataset.mvQualityValue,
+      );
       return;
     }
     if (target.closest?.("#mvChatTitle")) {
@@ -7074,6 +7673,10 @@
     "FRAME_SYNC_COMMAND_RESULT",
     "FRAME_MIXER_STATE",
     "FRAME_MIXER_COMMAND_RESULT",
+    "FRAME_AUDIO_STATE",
+    "FRAME_USER_MUTE",
+    "FRAME_QUALITY_STATE",
+    "FRAME_QUALITY_COMMAND_RESULT",
     "FRAME_VOD_CHAT_PLAYBACK",
     "FRAME_AD_STATUS",
   ]);
@@ -7105,6 +7708,78 @@
         cell.dataset.widePromptPending = "true";
       }
       renderCellWidePrompt(channelId);
+      return;
+    }
+
+    if (data.type === "FRAME_QUALITY_STATE") {
+      if (!Number.isSafeInteger(data.requestId) || data.requestId <= 0 ||
+          qualityRequestByChannel.get(channelId)?.requestId !== data.requestId) return;
+      const pendingRequest = qualityRequestByChannel.get(channelId);
+      if (pendingRequest?.timer) clearTimeout(pendingRequest.timer);
+      qualityRequestByChannel.delete(channelId);
+      const raw = data.state;
+      if (!raw || typeof raw !== "object" || typeof raw.ready !== "boolean" ||
+          !Array.isArray(raw.choices) || raw.choices.length > 24) return;
+      const choices = [];
+      const seen = new Set();
+      for (const item of raw.choices) {
+        if (!item || typeof item !== "object" || typeof item.value !== "string" ||
+            typeof item.label !== "string" || item.label.length > 20) continue;
+        const validValue = item.value === "auto" ||
+          (/^\d{3,4}$/.test(item.value) && Number(item.value) >= 144 && Number(item.value) <= 4320);
+        if (!validValue || seen.has(item.value)) continue;
+        seen.add(item.value);
+        choices.push({
+          value: item.value,
+          label: item.value === "auto" ? "자동" : `${Number(item.value)}p`,
+          selected: item.selected === true,
+        });
+      }
+      const selected = typeof raw.selected === "string" && seen.has(raw.selected)
+        ? raw.selected : "";
+      const lockedQuality = typeof raw.lockedQuality === "string" && seen.has(raw.lockedQuality)
+        ? raw.lockedQuality : "";
+      const output = typeof raw.output === "string" &&
+        /^\d{1,4}×\d{1,4}$/.test(raw.output) ? raw.output : "";
+      qualityByChannel.set(channelId, {
+        ready: raw.ready && choices.length > 0,
+        selected,
+        output,
+        locked: raw.locked === true && Boolean(lockedQuality),
+        lockedQuality,
+        choices,
+      });
+      if (raw.ready && !qualityPending.has(channelId)) qualityFeedback.delete(channelId);
+      renderQuality();
+      return;
+    }
+
+    if (data.type === "FRAME_QUALITY_COMMAND_RESULT") {
+      if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
+          typeof data.quality !== "string" || typeof data.applied !== "boolean") return;
+      const pending = qualityPending.get(channelId);
+      if (!pending || pending.commandId !== data.commandId || pending.quality !== data.quality) return;
+      clearTimeout(pending.timer);
+      qualityPending.delete(channelId);
+      if (data.applied) {
+        qualityTransitions.set(channelId, Date.now());
+        qualityFeedback.set(channelId, { text: "화질 변경을 요청했습니다.", error: false });
+      } else {
+        const messages = {
+          "not-ready": "플레이어 화질 정보가 아직 준비되지 않았습니다.",
+          unavailable: "현재 방송에서 사용할 수 없는 화질입니다.",
+          "menu-unavailable": "화질 메뉴가 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+          "quality-locked": "최대 화질 자동 고정 설정으로 변경할 수 없는 화질입니다.",
+          "invalid-quality": "화질을 적용할 수 없습니다.",
+          "no-video": "재생 영상을 찾지 못했습니다.",
+        };
+        qualityFeedback.set(channelId, {
+          text: messages[data.reason] || "화질을 적용하지 못했습니다.",
+          error: true,
+        });
+      }
+      renderQuality();
+      if (data.applied && !$("mvQualityPop").hidden) requestChannelQuality(channelId);
       return;
     }
 
@@ -7148,6 +7823,44 @@
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       setCellStatus(channelId, "ended");
+      return;
+    }
+    if (data.type === "FRAME_USER_MUTE") {
+      if (currentStatus(channelId) !== "ready" || typeof data.muted !== "boolean") return;
+      adoptFrameUserMute(channelId, data.muted);
+      return;
+    }
+    if (data.type === "FRAME_AUDIO_STATE") {
+      if (
+        currentStatus(channelId) !== "ready" ||
+        typeof data.volume !== "number" ||
+        !Number.isFinite(data.volume) ||
+        data.volume < 0 ||
+        data.volume > 1
+      ) return;
+      const audio = audioOf(channelId);
+      const expectedVolume = effectiveVolume(channelId);
+      // 부모의 지시가 iframe에 반영되며 발생한 volumechange는 되돌려 받지 않는다.
+      if (Math.abs(data.volume - expectedVolume) <= 0.005) return;
+      // 전체 볼륨이 0이면 iframe의 출력값만으로 채널별 값을 역산할 수 없다.
+      if (state.masterVolume <= 0) {
+        postState(channelId, channelId === state.mainId);
+        return;
+      }
+      audio.volume = Math.min(1, Math.max(0, data.volume / state.masterVolume));
+      const slider = [...document.querySelectorAll("[data-mv-vol-channel]")].find(
+        (element) => element.dataset.mvVolChannel === channelId,
+      );
+      if (slider) {
+        slider.value = String(Math.round(audio.volume * 100));
+        slider.parentElement?.querySelector(".mv-vol-pct")?.replaceChildren(pct(audio.volume));
+      }
+      syncVolumeButton(channelId);
+      syncVolumePanelButton();
+      // 채널값이 100%를 넘어 역산된 경우에는 기존 전체×채널 상한을 다시 적용한다.
+      if (data.volume / state.masterVolume > 1) {
+        postState(channelId, channelId === state.mainId);
+      }
       return;
     }
     if (data.type === "FRAME_MIXER_STATE") {
@@ -7247,7 +7960,13 @@
           generationAt,
         );
         cancelPendingSync(channelId);
-        for (const command of ["seek", "nudge", "rate", "reset-rate"]) {
+        for (const command of [
+          "seek",
+          "nudge",
+          "rate",
+          "reset-rate",
+          "catch-up",
+        ]) {
           syncRetryAt.delete(`${channelId}:${command}`);
         }
         syncRates.delete(channelId);
@@ -7295,7 +8014,9 @@
           }
         }
       }
+      const previousStats = syncStats.get(channelId);
       syncStats.set(channelId, stats);
+      observeCatchUpSample(channelId, previousStats, stats);
       recordSyncSample(channelId, stats, stats.receivedAt);
       const activeSyncMode =
         state.sync.scope === "groups"
@@ -7349,6 +8070,7 @@
     syncGeneration.clear();
     syncReadyAt.clear();
     syncRetryAt.clear();
+    resetLiveCatchUp();
     syncCongestion = { active: false, since: 0 };
     state.sync.congested = false;
     if (syncTimer) clearInterval(syncTimer);
@@ -7362,11 +8084,15 @@
       syncStats.clear();
       resetAllSyncRates();
       for (const c of state.chosen) cancelPendingSync(c.channelId);
+      catchUpOverSince.clear();
     } else {
       const now = Date.now();
       for (const c of state.chosen) {
         if (currentStatus(c.channelId) !== "ready") continue;
         syncReadyAt.set(c.channelId, now);
+        // 가려진 동안 Chrome 이 음소거 칸의 재생을 늦춰 지연이 30초대로 튄다(실측).
+        // 치지직이 스스로 복귀하는 경우가 많아 안정화(settlingMs) 뒤 남은 지연만 옮긴다.
+        if (c.mediaType !== "video") catchUpUrgent.add(c.channelId);
         recordSyncDiagnostic(
           "settling-start",
           {

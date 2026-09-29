@@ -1435,6 +1435,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-item:has(.settings-volume-row),
 .settings-item:has([data-multiview-chat-popout-mode]),
+.settings-item:has([data-multiview-badge-chat-display-style]),
 .settings-item:has(.settings-segmented-5),
 .settings-item:has(.settings-segmented-6),
 .settings-item:has(#commentTsClickAction),
@@ -1470,6 +1471,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-segmented[data-live-viewer-count-position],
 .settings-segmented[data-multiview-chat-popout-mode],
+.settings-segmented[data-multiview-badge-chat-display-style],
 .settings-segmented[data-mixer-gain-min],
 .settings-segmented[data-mixer-gain-max],
 .settings-segmented[data-video-filter-global-default-mode],

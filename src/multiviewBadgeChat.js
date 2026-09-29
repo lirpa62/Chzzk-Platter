@@ -6,13 +6,29 @@
     const text = (Array.isArray(signals) ? signals : [signals])
       .map((value) => String(value || "").toLowerCase())
       .join(" ");
-    if (/\/icon\/streamer(?:\.png)?|스트리머|방장|채널 주인|(?:^|[^a-z])broadcaster(?:$|[^a-z])/.test(text))
+    if (
+      /\/icon\/streamer(?:\.png)?|스트리머|방장|채널 주인|(?:^|[^a-z])broadcaster(?:$|[^a-z])/.test(
+        text,
+      )
+    )
       return "streamer";
-    if (/\/icon\/manager\.png|채널 관리자|채팅 운영자|(?:^|[^a-z])manager(?:$|[^a-z])/.test(text))
+    if (
+      /\/icon\/manager\.png|채널 관리자|채팅 운영자|(?:^|[^a-z])manager(?:$|[^a-z])/.test(
+        text,
+      )
+    )
       return "manager";
-    if (/\/icon\/owner\.png|네이버 게임 운영자|치지직 운영자|(?:^|[^a-z])operator(?:$|[^a-z])/.test(text))
+    if (
+      /\/icon\/owner\.png|네이버 게임 운영자|치지직 운영자|(?:^|[^a-z])operator(?:$|[^a-z])/.test(
+        text,
+      )
+    )
       return "operator";
-    if (/파트너|인증 마크|icon_official_mark|verified_mark|(?:^|[^a-z])partner(?:$|[^a-z])/.test(text))
+    if (
+      /파트너|인증 마크|icon_official_mark|verified_mark|(?:^|[^a-z])partner(?:$|[^a-z])/.test(
+        text,
+      )
+    )
       return "partner";
     return "";
   }
@@ -26,51 +42,81 @@
     // 빌드에 따라 역할 배지가 닉네임 버튼 밖에 붙는다(원본도 항목 전체의 img 를 본다).
     // 메시지 본문의 이모티콘은 역할 판정에 섞이지 않게 뺀다.
     row.querySelectorAll("img").forEach((image) => {
-      if (identity.contains(image) ||
-          image.closest('[class*="_chatting_message_"] > [class*="_text_"]')) return;
-      signals.push(image.getAttribute("src"), image.getAttribute("alt"), image.getAttribute("title"));
-    });
-    identity.querySelectorAll(
-      'img, [aria-label], [title], [class*="verified"], [class*="partner"], ' +
-      '[class*="streamer"], [class*="manager"], [class*="operator"], ' +
-      '[class*="owner"], [class*="official"], [data-role], [data-badge-type]',
-    ).forEach((node) => {
+      if (
+        identity.contains(image) ||
+        image.closest('[class*="_chatting_message_"] > [class*="_text_"]')
+      )
+        return;
       signals.push(
-        node.getAttribute("src"),
-        node.getAttribute("alt"),
-        node.getAttribute("title"),
-        node.getAttribute("aria-label"),
-        node.getAttribute("class"),
-        node.getAttribute("data-role"),
-        node.getAttribute("data-badge-type"),
+        image.currentSrc,
+        image.src,
+        image.getAttribute("src"),
+        image.getAttribute("srcset"),
+        image.getAttribute("alt"),
+        image.getAttribute("title"),
       );
     });
-    row.querySelectorAll(".blind").forEach((node) => signals.push(node.textContent));
+    identity
+      .querySelectorAll(
+        'img, [aria-label], [title], [class*="verified"], [class*="partner"], ' +
+          '[class*="streamer"], [class*="manager"], [class*="operator"], ' +
+          '[class*="owner"], [class*="official"], [data-role], [data-badge-type]',
+      )
+      .forEach((node) => {
+        signals.push(
+          node.currentSrc,
+          node.src,
+          node.getAttribute("src"),
+          node.getAttribute("srcset"),
+          node.getAttribute("alt"),
+          node.getAttribute("title"),
+          node.getAttribute("aria-label"),
+          node.getAttribute("class"),
+          node.getAttribute("data-role"),
+          node.getAttribute("data-badge-type"),
+        );
+      });
+    row
+      .querySelectorAll(".blind")
+      .forEach((node) => signals.push(node.textContent));
     return signals;
   }
 
   function isSpecialMessageRow(row) {
-    return Boolean(row.querySelector(
-      '[class*="_is_donation_"], [class*="_is_subscription_"], [class*="_is_mission_"]',
-    ));
+    return Boolean(
+      row.querySelector(
+        '[class*="_is_donation_"], [class*="_is_subscription_"], [class*="_is_mission_"]',
+      ),
+    );
   }
 
   function normalizeCapturedMessage(message) {
     if (!message || typeof message !== "object" || !ROLE_SET.has(message.role))
       return null;
-    const nickname = String(message.nickname || "").replace(/\s+/g, " ").trim().slice(0, 80);
-    const text = String(message.text || "").replace(/\s+/g, " ").trim().slice(0, 700);
+    const nickname = String(message.nickname || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+    const text = String(message.text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 700);
     if (!nickname && !text) return null;
     const normalized = { role: message.role, nickname, text };
     if (Array.isArray(message.badges)) {
-      normalized.badges = message.badges.filter((badge) =>
-        badge && /^https:\/\//i.test(badge.src || "") &&
-        (badge.position === "before" || badge.position === "after"),
-      ).slice(0, 12).map((badge) => ({
-        src: String(badge.src).slice(0, 2048),
-        alt: String(badge.alt || "").slice(0, 80),
-        position: badge.position,
-      }));
+      normalized.badges = message.badges
+        .filter(
+          (badge) =>
+            badge &&
+            /^https:\/\//i.test(badge.src || "") &&
+            (badge.position === "before" || badge.position === "after"),
+        )
+        .slice(0, 12)
+        .map((badge) => ({
+          src: String(badge.src).slice(0, 2048),
+          alt: String(badge.alt || "").slice(0, 80),
+          position: badge.position,
+        }));
     }
     if (typeof message.timeText === "string")
       normalized.timeText = message.timeText.trim().slice(0, 24);
@@ -82,6 +128,173 @@
     return normalized;
   }
 
+  function canonicalBadgeUrl(value) {
+    try {
+      const url = new URL(String(value || ""));
+      return url.protocol === "https:" ? `${url.origin}${url.pathname}` : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function collectMappedAchievementBadges(
+    row,
+    badgeMap = globalThis.CheeseAchievementBadgeMap,
+  ) {
+    if (!row?.querySelectorAll || !badgeMap || typeof badgeMap !== "object")
+      return [];
+    const mappedUrls = new Set(
+      Object.values(badgeMap).map(canonicalBadgeUrl).filter(Boolean),
+    );
+    if (!mappedUrls.size) return [];
+
+    const seen = new Set();
+    const badges = [];
+    row.querySelectorAll("img").forEach((image) => {
+      const src = image.currentSrc || image.src || image.getAttribute("src") || "";
+      const canonical = canonicalBadgeUrl(src);
+      if (!canonical || !mappedUrls.has(canonical) || seen.has(canonical)) return;
+      seen.add(canonical);
+      badges.push({ src, alt: "", position: "after" });
+    });
+    return badges;
+  }
+
+  // 치지직 채팅창은 업적 배지를 이미지로 그리지 않는다. multiviewAchievementBridge.js
+  // (MAIN world)가 메시지 데이터의 배지 ID 를 줄에 남기면 여기서 매핑 표로 이미지를 찾는다.
+  const ACHIEVEMENT_ID_ATTR = "data-cheese-achievement-badge-id";
+
+  function achievementBadgeFromId(
+    id,
+    badgeMap = globalThis.CheeseAchievementBadgeMap,
+  ) {
+    const key = String(id || "").trim();
+    if (!key || !badgeMap || typeof badgeMap !== "object") return null;
+    const src = String(badgeMap[key] || badgeMap[key.toLowerCase()] || "").trim();
+    return /^https:\/\//i.test(src) ? { src, alt: "", position: "after" } : null;
+  }
+
+  // 모아보기 줄에 그릴 배지(원본 배지 모아 챗과 같은 배치).
+  // - 닉네임 뒤: 파트너 마크가 맨 앞, 그다음 업적 등 나머지 마크.
+  // - 파트너는 채팅창에 마크 이미지가 없어도(치지직이 그리지 않을 때가 있다) 역할로 판정되면
+  //   붙인다(원본: roleInfo.isPartner → icon_official_mark). 앞쪽에 잡힌 마크는 뒤로 옮긴다.
+  function splitDisplayBadges(message) {
+    const partnerUrl = ROLE_BADGES.partner[1];
+    const partnerCanonical = canonicalBadgeUrl(partnerUrl);
+    const all = Array.isArray(message?.badges) ? message.badges : [];
+    const isPartnerMark = (badge) =>
+      canonicalBadgeUrl(badge?.src) === partnerCanonical ||
+      classifyBadgeRole([badge?.src, badge?.alt]) === "partner";
+    const partnerBadge = all.find(isPartnerMark);
+    const isPartner =
+      !!partnerBadge ||
+      (Array.isArray(message?.roles) && message.roles.includes("partner")) ||
+      message?.role === "partner";
+    // 같은 줄을 다시 읽으며 배지가 합쳐져도 업적 배지는 첫 번째 하나만 그린다.
+    const achievementUrls = new Set(
+      Object.values(globalThis.CheeseAchievementBadgeMap || {})
+        .map(canonicalBadgeUrl)
+        .filter(Boolean),
+    );
+    let achievementShown = false;
+    const rest = all.filter((badge) => {
+      if (isPartnerMark(badge)) return false;
+      if (!achievementUrls.has(canonicalBadgeUrl(badge?.src))) return true;
+      if (achievementShown) return false;
+      achievementShown = true;
+      return true;
+    });
+    return {
+      before: rest.filter((badge) => badge.position === "before"),
+      after: [
+        ...(isPartner
+          ? [{ src: partnerBadge?.src || partnerUrl, alt: "파트너", position: "after" }]
+          : []),
+        ...rest.filter((badge) => badge.position === "after"),
+      ],
+    };
+  }
+
+  // 한 번에 읽은 채팅 줄을 오래된 순(화면 위 → 아래)으로 정렬한다.
+  // ⚠ 치지직 채팅 목록은 DOM 이 최신 → 과거 순이고 화면에서만 뒤집어 보여 준다(실측,
+  //   다시보기 목록). 채팅 칸이 처음 뜰 때 이미 있는 줄을 DOM 순서대로 넣으면 모아보기
+  //   맨 위가 가장 최신이 됐다. 화면 위치로 정렬하고, 위치를 잴 수 없으면 DOM 순서와
+  //   목록 방향(column-reverse)으로 판단한다.
+  function orderRowsOldestFirst(rows, view = globalThis) {
+    const list = Array.from(rows || []);
+    if (list.length < 2) return list;
+    const tops = list.map((row) => {
+      try {
+        const rect = row.getBoundingClientRect?.();
+        return rect && (rect.width || rect.height) ? rect.top : null;
+      } catch {
+        return null;
+      }
+    });
+    if (tops.every((top) => typeof top === "number") && new Set(tops).size > 1) {
+      return list
+        .map((row, index) => ({ row, top: tops[index], index }))
+        .sort((a, b) => a.top - b.top || a.index - b.index)
+        .map((entry) => entry.row);
+    }
+    const following = view.Node?.DOCUMENT_POSITION_FOLLOWING ?? 4;
+    const sorted = list.slice().sort((a, b) => {
+      if (a === b) return 0;
+      const position = a.compareDocumentPosition?.(b) ?? 0;
+      return position & following ? -1 : 1;
+    });
+    let reversed = false;
+    try {
+      const parent = sorted[0]?.parentElement;
+      reversed = !!parent &&
+        view.getComputedStyle?.(parent)?.flexDirection === "column-reverse";
+    } catch {}
+    return reversed ? sorted.reverse() : sorted;
+  }
+
+  function mergeCapturedMessage(existing, incoming) {
+    const previous = existing && typeof existing === "object" ? existing : {};
+    const next = incoming && typeof incoming === "object" ? incoming : {};
+    const badges = [];
+    const seenBadges = new Set();
+    [...(previous.badges || []), ...(next.badges || [])].forEach((badge) => {
+      if (
+        badges.length >= 12 ||
+        !badge ||
+        !/^https:\/\//i.test(badge.src || "")
+      )
+        return;
+      const key = `${badge.position}\u001f${badge.src}`;
+      if (seenBadges.has(key)) return;
+      seenBadges.add(key);
+      badges.push(badge);
+    });
+    const merged = { ...previous, ...next, badges };
+    for (const key of [
+      "nickname",
+      "text",
+      "timeText",
+      "nicknameColor",
+      "messageColor",
+    ]) {
+      if (!merged[key] && previous[key]) merged[key] = previous[key];
+    }
+    if (previous.special === true) merged.special = true;
+    return merged;
+  }
+
+  function capturedMessageMetadataKey(message) {
+    return JSON.stringify({
+      role: message.role,
+      roles: message.roles,
+      badges: message.badges,
+      timeText: message.timeText,
+      nicknameColor: message.nicknameColor,
+      messageColor: message.messageColor,
+      special: message.special,
+    });
+  }
+
   // 원본(배지 모아보기)과 같은 박자: 닉네임 순환 2.4초, 새 채팅 강조 1.4초,
   // 팝업 펼침 0.32초·접힘 0.28초.
   const PILL_CYCLE_INTERVAL_MS = 2400;
@@ -89,10 +302,22 @@
   const POPOVER_OPEN_MS = 320;
   const POPOVER_CLOSE_MS = 280;
   const ROLE_BADGES = Object.freeze({
-    streamer: ["방장", "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"],
-    manager: ["매니저", "https://ssl.pstatic.net/static/nng/glive/icon/manager.png"],
-    operator: ["치지직 운영자", "https://ssl.pstatic.net/static/nng/glive/icon/owner.png"],
-    partner: ["파트너", "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png"],
+    streamer: [
+      "방장",
+      "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png",
+    ],
+    manager: [
+      "매니저",
+      "https://ssl.pstatic.net/static/nng/glive/icon/manager.png",
+    ],
+    operator: [
+      "치지직 운영자",
+      "https://ssl.pstatic.net/static/nng/glive/icon/owner.png",
+    ],
+    partner: [
+      "파트너",
+      "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png",
+    ],
   });
   // 알림 버튼 강조색 우선순위(원본과 같다): 방장 > 운영자 > 매니저 > 파트너.
   const PILL_ROLE_PRIORITY = ["streamer", "operator", "manager", "partner"];
@@ -109,21 +334,48 @@
     const root = doc.createElement("div");
     root.className = `${classPrefix}-font-scale`;
     root.setAttribute("role", "group");
-    root.setAttribute("aria-label", "배지 채팅 글자 크기 조절");
+    root.setAttribute("aria-label", "모아보기 글자 크기");
 
-    const createButton = (direction, label, symbol) => {
+    // 원본(배지 모아 챗 chzzk-badge-moa-popup-font-scale)과 같은 14px 아이콘.
+    const ICON_PATHS = {
+      down: "M1.196 7c0-.419.34-.758.758-.758h10.092a.758.758 0 0 1 0 1.516H1.954A.758.758 0 0 1 1.196 7Z",
+      up: "M7.759 1.954a.758.758 0 1 0-1.517 0v4.288H1.954a.758.758 0 0 0 0 1.516h4.288v4.288a.758.758 0 0 0 1.517 0V7.758h4.287a.758.758 0 1 0 0-1.516H7.759V1.954Z",
+    };
+    const createButton = (direction, label, title) => {
       const button = doc.createElement("button");
       button.type = "button";
-      button.className = `${classPrefix}-font-scale-${direction}`;
+      button.className =
+        `${classPrefix}-font-scale-button ${classPrefix}-font-scale-${direction}`;
       button.setAttribute("aria-label", label);
-      button.textContent = symbol;
+      button.title = title;
+      const svgNs = "http://www.w3.org/2000/svg";
+      const svg = doc.createElementNS?.(svgNs, "svg");
+      if (svg) {
+        svg.setAttribute("viewBox", "0 0 14 14");
+        svg.setAttribute("width", "14");
+        svg.setAttribute("height", "14");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+        const path = doc.createElementNS(svgNs, "path");
+        path.setAttribute("fill", "currentColor");
+        if (direction === "down") {
+          path.setAttribute("fill-rule", "evenodd");
+          path.setAttribute("clip-rule", "evenodd");
+        }
+        path.setAttribute("d", ICON_PATHS[direction]);
+        svg.append(path);
+        button.append(svg);
+      } else {
+        button.textContent = direction === "down" ? "−" : "+";
+      }
       return button;
     };
-    const down = createButton("down", "글자 크기 줄이기", "−");
+    const down = createButton("down", "모아보기 글자 크기 줄이기", "글자 크기 줄이기");
     const value = doc.createElement("span");
     value.className = `${classPrefix}-font-scale-value`;
-    value.setAttribute("aria-live", "off");
-    const up = createButton("up", "글자 크기 키우기", "+");
+    value.setAttribute("aria-live", "polite");
+    const up = createButton("up", "모아보기 글자 크기 늘리기", "글자 크기 늘리기");
     root.append(down, value, up);
 
     const update = () => {
@@ -205,18 +457,29 @@
 
     function paint() {
       const locked = Date.now() < lockUntil;
-      const actor = actors.length ? actors[locked ? 0 : index % actors.length] : null;
+      const actor = actors.length
+        ? actors[locked ? 0 : index % actors.length]
+        : null;
       const unseen = actors.reduce((sum, item) => sum + item.count, 0);
-      const role = actor ? PILL_ROLE_PRIORITY.find((item) => actor.roles.has(item)) || "" : "";
+      const role = actor
+        ? PILL_ROLE_PRIORITY.find((item) => actor.roles.has(item)) || ""
+        : "";
       trigger.classList.toggle("is-compact", compact);
       trigger.classList.toggle("is-empty", !actor);
       trigger.classList.toggle("has-unseen", unseen > 0);
-      trigger.classList.toggle("is-rotating", !compact && actors.length > 1 && !locked);
-      ROLE_ORDER.forEach((item) => trigger.classList.toggle(`is-role-${item}`, item === role));
+      trigger.classList.toggle(
+        "is-rotating",
+        !compact && actors.length > 1 && !locked,
+      );
+      ROLE_ORDER.forEach((item) =>
+        trigger.classList.toggle(`is-role-${item}`, item === role),
+      );
       // 다시보기는 재생 틱마다 부른다. 보이는 내용이 같으면 배지 img 를 다시 만들지 않는다.
       const key = compact
         ? `c:${unseen}`
-        : actor ? `a:${actor.nickname}:${actor.count}:${[...actor.roles].join(",")}` : "e";
+        : actor
+          ? `a:${actor.nickname}:${actor.count}:${[...actor.roles].join(",")}`
+          : "e";
       if (key === paintedKey) return;
       paintedKey = key;
       badges.replaceChildren();
@@ -228,8 +491,9 @@
         if (unseen) text = `읽지 않은 배지 채팅 ${unseen}개, 모아보기 열기`;
       } else if (actor) {
         shown = actor.count;
-        ROLE_ORDER.filter((item) => item !== "partner" && actor.roles.has(item))
-          .forEach((item) => badges.append(roleImage(item)));
+        ROLE_ORDER.filter(
+          (item) => item !== "partner" && actor.roles.has(item),
+        ).forEach((item) => badges.append(roleImage(item)));
         const name = doc.createElement("span");
         name.className = `${classPrefix}-name`;
         name.textContent = actor.nickname;
@@ -310,7 +574,10 @@
       if (reducedMotion()) return;
       void popover.offsetWidth;
       popover.classList.add("is-opening");
-      timer = view.setTimeout(() => popover.classList.remove("is-opening"), POPOVER_OPEN_MS);
+      timer = view.setTimeout(
+        () => popover.classList.remove("is-opening"),
+        POPOVER_OPEN_MS,
+      );
     }
 
     function close(immediate = false) {
@@ -338,39 +605,105 @@
     const identity = row.querySelector(
       'button[class*="_nickname_"], button[class*="_profile_button_"], button[class*="_name_"]',
     );
-    const nicknameNode = identity?.querySelector('[class*="_nickname_"]');
-    const nickname = nicknameNode?.textContent ||
-      identity?.textContent || "";
+    const nicknameNode = identity?.querySelector('[class*="_nickname_"]') ||
+      identity?.querySelector('[class*="_user_name_"]') ||
+      identity?.querySelector('[class*="_name_"]') ||
+      identity?.querySelector('[class*="_text_"]');
+    const cleanIdentityText = (source) => {
+      if (!source) return "";
+      const clone = source.cloneNode(true);
+      clone.querySelectorAll('[class*="_wrapper_"]').forEach((node) => {
+        if (node.querySelector("img, svg")) node.remove();
+      });
+      clone.querySelectorAll(
+        'img, svg, .blind, [aria-hidden="true"], [aria-label], [title], ' +
+          '[class*="badge"], [class*="icon"], [class*="mark"], [class*="achievement"]',
+      ).forEach((node) => node.remove());
+      return String(clone.innerText || clone.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    };
+    const nickname = cleanIdentityText(nicknameNode) || cleanIdentityText(identity);
     const messageContainer = row.querySelector('[class*="_chatting_message_"]');
-    const content = Array.from(messageContainer?.children || [])
-      .find((child) => child.matches('[class*="_text_"]'));
-    let text = content?.textContent || "";
-    if (!text && messageContainer) {
-      text = messageContainer.innerText || messageContainer.textContent || "";
-      if (nickname) text = text.replace(nickname, "");
-    }
-    if (!text && !messageContainer) {
-      text = row.innerText || row.textContent || "";
-      if (nickname) text = text.replace(nickname, "");
-    }
+    const excludedTextSelector =
+      ".cheese-chat-time, .cheese-chat-os, time, [data-chat-epoch-ms]";
+    const textWithoutDecorations = (source) => {
+      if (!source) return "";
+      const clone = source.cloneNode(true);
+      if (clone.matches?.(excludedTextSelector)) return "";
+      clone
+        .querySelectorAll?.(excludedTextSelector)
+        .forEach((element) => element.remove());
+      clone
+        .querySelectorAll?.(
+          'button[class*="_nickname_"], button[class*="_profile_button_"], button[class*="_name_"]',
+        )
+        .forEach((element) => element.remove());
+      return clone.innerText || clone.textContent || "";
+    };
+    const content = Array.from(
+      messageContainer?.querySelectorAll('[class*="_text_"]') || [],
+    ).find(
+      (element) =>
+        !identity?.contains(element) &&
+        !element.matches(excludedTextSelector),
+    );
+    let text = textWithoutDecorations(content);
+    if (!text && messageContainer)
+      text = textWithoutDecorations(messageContainer);
+    if (!text && !messageContainer)
+      text = textWithoutDecorations(row);
     const badges = [];
     identity?.querySelectorAll("img").forEach((image) => {
       const src = image.currentSrc || image.src || "";
       if (!/^https:\/\//i.test(src)) return;
-      const beforeNickname = nicknameNode &&
-        (image.compareDocumentPosition(nicknameNode) & win.Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      const beforeNickname =
+        nicknameNode &&
+        (image.compareDocumentPosition(nicknameNode) &
+          win.Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0;
       badges.push({
         src,
         alt: image.alt || image.title || "",
         position: beforeNickname ? "before" : "after",
       });
     });
+    const achievementBadges = collectMappedAchievementBadges(row);
+    const achievementId =
+      row.getAttribute?.(ACHIEVEMENT_ID_ATTR) ||
+      row.querySelector?.(`[${ACHIEVEMENT_ID_ATTR}]`)?.getAttribute(ACHIEVEMENT_ID_ATTR) ||
+      "";
+    // 업적 배지는 하나만(치지직·배지 모아 챗: 활성화된 것 중 첫 번째). 메시지 데이터의
+    // 배지 ID(첫 번째)를 우선하고, 없을 때만 채팅창 이미지에서 찾은 첫 번째를 쓴다.
+    const achievement = achievementBadgeFromId(achievementId) || achievementBadges[0] || null;
+    const achievementCanonical = achievement ? canonicalBadgeUrl(achievement.src) : "";
+    const mappedUrls = new Set(
+      achievementBadges.map((badge) => canonicalBadgeUrl(badge.src)),
+    );
+    for (let index = badges.length - 1; index >= 0; index -= 1) {
+      const canonical = canonicalBadgeUrl(badges[index].src);
+      if (canonical === achievementCanonical) {
+        badges[index].position = "after";
+        badges[index].alt = "";
+      } else if (mappedUrls.has(canonical)) {
+        badges.splice(index, 1); // 두 번째 이후 업적 배지는 뺀다
+      }
+    }
+    if (
+      achievement &&
+      !badges.some((badge) => canonicalBadgeUrl(badge.src) === achievementCanonical)
+    ) {
+      badges.push(achievement);
+    }
     const getColor = (element) => {
       if (!element) return "";
       const color = win.getComputedStyle(element).color;
       return color && color !== "canvastext" ? color : "";
     };
-    const timeNode = row.querySelector("[data-chat-epoch-ms], .cheese-chat-time, time");
+    const timeNode =
+      row.querySelector(".cheese-chat-time") ||
+      row.querySelector("time") ||
+      row.querySelector("[data-chat-epoch-ms]");
     const special = isSpecialMessageRow(row);
     return normalizeCapturedMessage({
       role: "partner",
@@ -438,6 +771,8 @@
       keepPopupOpen: false,
       pillGlowEnabled: true,
       compactPill: false,
+      // 한줄보기(inline) | 블록보기(block). 배지 모아 챗의 보기 방식과 같다.
+      displayStyle: "inline",
     };
     const BADGE_SETTING_KEYS = [
       "cheeseMultiviewBadgeChatButton",
@@ -452,57 +787,91 @@
       "cheeseMultiviewBadgeChatPillGlowEnabled",
       "cheeseMultiviewBadgeChatCompactPill",
       "cheeseMultiviewBadgeChatHidePillButton",
+      "cheeseMultiviewBadgeChatDisplayStyle",
     ];
 
     function applyBadgeSettings(values = {}) {
+      if (Object.hasOwn(values, "cheeseMultiviewBadgeChatDisplayStyle"))
+        badgeSettings.displayStyle =
+          values.cheeseMultiviewBadgeChatDisplayStyle === "block" ? "block" : "inline";
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePillButton"))
-        badgeSettings.hidePillButton = values.cheeseMultiviewBadgeChatHidePillButton === true;
+        badgeSettings.hidePillButton =
+          values.cheeseMultiviewBadgeChatHidePillButton === true;
       else if (Object.hasOwn(values, "cheeseMultiviewBadgeChatButton"))
-        badgeSettings.hidePillButton = values.cheeseMultiviewBadgeChatButton === false;
+        badgeSettings.hidePillButton =
+          values.cheeseMultiviewBadgeChatButton === false;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideEmptyButton"))
-        badgeSettings.hideEmptyButton = values.cheeseMultiviewBadgeChatHideEmptyButton === true;
+        badgeSettings.hideEmptyButton =
+          values.cheeseMultiviewBadgeChatHideEmptyButton === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideChatBackground"))
-        badgeSettings.hideChatBackground = values.cheeseMultiviewBadgeChatHideChatBackground === true;
+        badgeSettings.hideChatBackground =
+          values.cheeseMultiviewBadgeChatHideChatBackground === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHideChatBorder"))
-        badgeSettings.hideChatBorder = values.cheeseMultiviewBadgeChatHideChatBorder === true;
+        badgeSettings.hideChatBorder =
+          values.cheeseMultiviewBadgeChatHideChatBorder === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupBackground"))
-        badgeSettings.hidePopupBackground = values.cheeseMultiviewBadgeChatHidePopupBackground === true;
+        badgeSettings.hidePopupBackground =
+          values.cheeseMultiviewBadgeChatHidePopupBackground === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupBorder"))
-        badgeSettings.hidePopupBorder = values.cheeseMultiviewBadgeChatHidePopupBorder === true;
+        badgeSettings.hidePopupBorder =
+          values.cheeseMultiviewBadgeChatHidePopupBorder === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatHidePopupTime"))
-        badgeSettings.hidePopupTime = values.cheeseMultiviewBadgeChatHidePopupTime === true;
+        badgeSettings.hidePopupTime =
+          values.cheeseMultiviewBadgeChatHidePopupTime === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatRoleBadgesOnly"))
-        badgeSettings.roleBadgesOnly = values.cheeseMultiviewBadgeChatRoleBadgesOnly === true;
+        badgeSettings.roleBadgesOnly =
+          values.cheeseMultiviewBadgeChatRoleBadgesOnly === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatKeepPopupOpen"))
-        badgeSettings.keepPopupOpen = values.cheeseMultiviewBadgeChatKeepPopupOpen === true;
+        badgeSettings.keepPopupOpen =
+          values.cheeseMultiviewBadgeChatKeepPopupOpen === true;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatPillGlowEnabled"))
-        badgeSettings.pillGlowEnabled = values.cheeseMultiviewBadgeChatPillGlowEnabled !== false;
+        badgeSettings.pillGlowEnabled =
+          values.cheeseMultiviewBadgeChatPillGlowEnabled !== false;
       if (Object.hasOwn(values, "cheeseMultiviewBadgeChatCompactPill"))
-        badgeSettings.compactPill = values.cheeseMultiviewBadgeChatCompactPill === true;
+        badgeSettings.compactPill =
+          values.cheeseMultiviewBadgeChatCompactPill === true;
       if (badgeSettings.hidePillButton) badgeSettings.keepPopupOpen = false;
-      document.documentElement.classList.toggle("cheese-mv-badge-no-chat-bg", badgeSettings.hideChatBackground);
-      document.documentElement.classList.toggle("cheese-mv-badge-no-chat-border", badgeSettings.hideChatBorder);
+      document.documentElement.classList.toggle(
+        "cheese-mv-badge-no-chat-bg",
+        badgeSettings.hideChatBackground,
+      );
+      document.documentElement.classList.toggle(
+        "cheese-mv-badge-no-chat-border",
+        badgeSettings.hideChatBorder,
+      );
       updatePopoverCount();
       updatePopoverSettings();
       if (popoverOpen) renderPopoverMessages();
-      else if (badgeSettings.keepPopupOpen && roleMessages.length) openPopover();
+      else if (badgeSettings.keepPopupOpen && roleMessages.length)
+        openPopover();
     }
 
     function updatePopoverSettings() {
-      if (popoverTrigger) popoverTrigger.hidden = badgeSettings.hidePillButton ||
-        (badgeSettings.hideEmptyButton && !hasUnreadMessages());
+      if (popoverTrigger)
+        popoverTrigger.hidden =
+          badgeSettings.hidePillButton ||
+          (badgeSettings.hideEmptyButton && !hasUnreadMessages());
       if (popoverClose) popoverClose.disabled = badgeSettings.keepPopupOpen;
-      if (popover) popover.classList.toggle("is-locked-open", badgeSettings.keepPopupOpen);
+      if (popover)
+        popover.classList.toggle("is-locked-open", badgeSettings.keepPopupOpen);
+      popoverList?.classList.toggle("is-block", badgeSettings.displayStyle === "block");
       if (badgeSettings.hidePillButton && popoverOpen) closePopover(true);
     }
 
     function triggerAttention() {
-      if (!badgeSettings.pillGlowEnabled || badgeSettings.keepPopupOpen || popoverOpen) return;
+      if (
+        !badgeSettings.pillGlowEnabled ||
+        badgeSettings.keepPopupOpen ||
+        popoverOpen
+      )
+        return;
       pill?.attention();
     }
 
     function hasUnreadMessages() {
-      return roleMessages.some((message) => message.sequence > lastSeenSequence);
+      return roleMessages.some(
+        (message) => message.sequence > lastSeenSequence,
+      );
     }
 
     const style = document.createElement("style");
@@ -537,7 +906,7 @@
       `border-color: rgba(255,166,84,.44) !important;}` +
       `.cheese-mv-badge-chat-heading { position:relative !important; }` +
       `.cheese-mv-badge-chat-anchor { align-items:center; display:inline-flex; position:absolute;` +
-      `left:10px; top:50%; transform:translateY(-50%); z-index:2; }` +
+      `left:10px; top:50%; transform:translateY(-50%); z-index:1100; }` +
       `.cheese-mv-badge-chat-trigger { --pill-bg:rgba(255,148,183,.24);` +
       `--pill-text-color:inherit; --pill-border-color:rgba(255,255,255,.32);` +
       `--pill-hover-bg:rgba(255,170,198,.3); --pill-shadow:0 4px 14px rgba(31,38,135,.25),` +
@@ -676,15 +1045,25 @@
       `flex:none; gap:4px; justify-content:space-between; min-height:36px; padding:4px 8px 4px 12px;}` +
       `.cheese-mv-badge-chat-popover-head strong { color:inherit; font-size:12px; font-weight:700;` +
       `margin-right:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}` +
-      `.cheese-mv-badge-chat-font-scale { align-items:center; display:flex; flex:none; gap:3px;}` +
-      `.cheese-mv-badge-chat-font-scale button { align-items:center; background:transparent; border:0;` +
-      `border-radius:4px; color:inherit; cursor:pointer; display:inline-flex; font:inherit; font-size:13px;` +
-      `height:24px; justify-content:center; padding:0; width:24px;}` +
-      `.cheese-mv-badge-chat-font-scale button:hover:not(:disabled) { background:rgba(139,108,232,.2);}` +
-      `.cheese-mv-badge-chat-font-scale button:focus-visible { outline:2px solid #8b6ce8; outline-offset:1px;}` +
-      `.cheese-mv-badge-chat-font-scale button:disabled { cursor:default; opacity:.4;}` +
-      `.cheese-mv-badge-chat-font-scale-value { font-size:10px; font-variant-numeric:tabular-nums;` +
-      `min-width:34px; text-align:center;}` +
+      // 글자 크기 조절: 원본(chzzk-badge-moa-popup-font-scale)과 같은 모양·수치.
+      // 색은 치지직 토큰을 먼저 쓰고, 없으면 원본의 기본값(라이트/다크)을 쓴다.
+      `.cheese-mv-badge-chat-font-scale { --cmv-fs-border:rgba(0,0,0,.08); --cmv-fs-bg:#fff;` +
+      `--cmv-fs-hover:#d4d7dc; --cmv-fs-color:#2e3033; align-items:center; display:inline-flex; flex:none;` +
+      `height:28px; box-sizing:border-box; overflow:hidden; border-radius:7px;` +
+      `border:1px solid var(--sem-color-border-neutral-weaker, var(--cmv-fs-border));` +
+      `background:var(--sem-color-surface-neutral-weaker, var(--cmv-fs-bg));}` +
+      `:is(html.theme_dark, html[data-theme="theme_dark"], html[data-theme="dark"]) .cheese-mv-badge-chat-font-scale {` +
+      `--cmv-fs-border:rgba(255,255,255,.12); --cmv-fs-bg:#1c1d1f; --cmv-fs-hover:#4a5161; --cmv-fs-color:#dfe2ea;}` +
+      `.cheese-mv-badge-chat-font-scale-button { align-items:center; background:transparent; border:0;` +
+      `color:var(--color-content-02, var(--cmv-fs-color)); cursor:pointer; display:inline-flex; flex:0 0 28px;` +
+      `height:28px; justify-content:center; padding:0; width:28px;}` +
+      `.cheese-mv-badge-chat-font-scale-button:hover:not(:disabled) {` +
+      `background:var(--sem-color-surface-neutral-strong, var(--cmv-fs-hover));}` +
+      `.cheese-mv-badge-chat-font-scale-button:focus-visible { outline:2px solid #8b6ce8; outline-offset:-2px;}` +
+      `.cheese-mv-badge-chat-font-scale-button:disabled { cursor:default; opacity:.35;}` +
+      `.cheese-mv-badge-chat-font-scale-value { color:var(--color-content-02, var(--cmv-fs-color));` +
+      `font-size:12px; font-variant-numeric:tabular-nums; font-weight:600; line-height:1; min-width:38px;` +
+      `text-align:center;}` +
       `.cheese-mv-badge-chat-close { align-items:center; background:transparent; border:0; border-radius:5px;` +
       `color:#9aa1a9; cursor:pointer; display:inline-flex; height:26px; justify-content:center; padding:0; width:26px;}` +
       `.cheese-mv-badge-chat-close:hover { background:rgba(139,108,232,.2); color:#e8eaed;}` +
@@ -699,6 +1078,9 @@
       `.cheese-mv-badge-chat-badge-group { align-items:center; align-self:center; display:inline-flex; gap:4px;}` +
       `.cheese-mv-badge-chat-badge-group img { display:block; height:calc(18px * var(--mv-badge-chat-font-scale, 1));` +
       `object-fit:contain; width:calc(18px * var(--mv-badge-chat-font-scale, 1));}` +
+      // 닉네임 뒤 마크(파트너·업적 등)는 원본처럼 14px × 글자 배율.
+      `.cheese-mv-badge-chat-badge-group.is-after img { height:calc(14px * var(--mv-badge-chat-font-scale, 1));` +
+      `width:calc(14px * var(--mv-badge-chat-font-scale, 1));}` +
       `.cheese-mv-badge-chat-time { color:#9aa1a9; font-size:.84em; white-space:nowrap;}` +
       `.cheese-mv-badge-chat-empty { color:#9aa1a9; display:grid; flex:1 1 auto; min-height:60px;` +
       `place-content:center; text-align:center;}` +
@@ -709,6 +1091,16 @@
       `.cheese-mv-badge-chat-row { border:1px solid transparent; border-radius:8px; flex:none; line-height:1.45;` +
       `overflow-wrap:anywhere; padding:4px 7px;}` +
       `.cheese-mv-badge-chat-row.is-message-bg-hidden:not(.is-special) { background:transparent !important;}` +
+      // 블록보기(배지 모아 챗 기본): 첫 줄 닉네임(왼쪽)·시간(오른쪽), 둘째 줄 채팅. 카드 여백 8px.
+      `.cheese-mv-badge-chat-list.is-block .cheese-mv-badge-chat-row:not(.is-special) { padding:8px;}` +
+      `.cheese-mv-badge-chat-list.is-block .cheese-mv-badge-chat-row:not(.is-special) .cheese-mv-badge-chat-inline {` +
+      `align-items:center; display:grid; gap:6px; grid-template-columns:minmax(0,1fr) auto;}` +
+      `.cheese-mv-badge-chat-list.is-block .cheese-mv-badge-chat-row:not(.is-special) .cheese-mv-badge-chat-identity {` +
+      `grid-column:1; grid-row:1; min-width:0;}` +
+      `.cheese-mv-badge-chat-list.is-block .cheese-mv-badge-chat-row:not(.is-special) .cheese-mv-badge-chat-time {` +
+      `grid-column:2; grid-row:1;}` +
+      `.cheese-mv-badge-chat-list.is-block .cheese-mv-badge-chat-row:not(.is-special) .cheese-mv-badge-chat-message {` +
+      `grid-column:1 / -1; grid-row:2; white-space:pre-wrap; word-break:break-word;}` +
       `.cheese-mv-badge-chat-row.is-message-border-hidden { border-color:transparent !important;}` +
       `.cheese-mv-badge-chat-row.is-badge-streamer:not(.is-special) { background:linear-gradient(90deg,rgba(255,105,125,.2),rgba(255,105,125,.06));` +
       `border-color:rgba(255,105,125,.58);}` +
@@ -731,8 +1123,11 @@
     // 새 채팅이 와도 위치를 빼앗지 않는다(원본의 scrollListToBottom 과 같은 기준).
     function renderPopoverMessages(pinToBottom = false) {
       if (!popoverList) return;
-      const nearBottom = popoverList.scrollHeight - popoverList.scrollTop -
-        popoverList.clientHeight < 24;
+      const nearBottom =
+        popoverList.scrollHeight -
+          popoverList.scrollTop -
+          popoverList.clientHeight <
+        24;
       const previousScrollTop = popoverList.scrollTop;
       const fragment = document.createDocumentFragment();
       roleMessages.forEach((message) => {
@@ -741,7 +1136,8 @@
         if (message.special) row.classList.add("is-special");
         if (badgeSettings.hidePopupBackground && !message.special)
           row.classList.add("is-message-bg-hidden");
-        if (badgeSettings.hidePopupBorder) row.classList.add("is-message-border-hidden");
+        if (badgeSettings.hidePopupBorder)
+          row.classList.add("is-message-border-hidden");
         const inline = document.createElement("span");
         inline.className = "cheese-mv-badge-chat-inline";
         if (!badgeSettings.hidePopupTime && message.timeText) {
@@ -752,21 +1148,23 @@
         }
         const identity = document.createElement("span");
         identity.className = "cheese-mv-badge-chat-identity";
+        const displayBadges = splitDisplayBadges(message);
         const appendBadges = (position) => {
-          const badges = (message.badges || []).filter((badge) =>
-            badge.position === position && (!badgeSettings.roleBadgesOnly ||
-              ROLE_ORDER.includes(classifyBadgeRole([badge.src, badge.alt]))),
+          const badges = displayBadges[position].filter(
+            (badge) =>
+              !badgeSettings.roleBadgesOnly ||
+              ROLE_ORDER.includes(classifyBadgeRole([badge.src, badge.alt])),
           );
           if (!badges.length) return;
           const group = document.createElement("span");
-          group.className = "cheese-mv-badge-chat-badge-group";
+          group.className = `cheese-mv-badge-chat-badge-group is-${position}`;
           badges.forEach((badge) => {
             const image = document.createElement("img");
             image.src = badge.src;
             // 배지 모아 챗처럼 닉네임 뒤쪽 마크는 장식 이미지로만 표시한다.
             image.alt = position === "after" ? "" : badge.alt;
-            image.width = 18;
-            image.height = 18;
+            image.width = position === "after" ? 14 : 18;
+            image.height = position === "after" ? 14 : 18;
             image.decoding = "async";
             group.append(image);
           });
@@ -819,20 +1217,39 @@
       const anchorRect = popoverTrigger.getBoundingClientRect();
       const asideRect = aside?.getBoundingClientRect();
       const margin = 8;
-      const width = Math.max(0, Math.min(
-        asideRect?.width || win.innerWidth - margin * 2,
-        win.innerWidth - margin * 2,
-      ));
+      const width = Math.max(
+        0,
+        Math.min(
+          asideRect?.width || win.innerWidth - margin * 2,
+          win.innerWidth - margin * 2,
+        ),
+      );
       popover.style.width = `${width}px`;
-      const maxHeight = Math.max(120, Math.min(720, win.innerHeight - margin * 2));
+      const maxHeight = Math.max(
+        120,
+        Math.min(720, win.innerHeight - margin * 2),
+      );
       popoverHeight = Math.min(popoverHeight, maxHeight);
       popover.style.height = `${popoverHeight}px`;
-      if (popoverResize) popoverResize.setAttribute("aria-valuenow", String(Math.round(popoverHeight)));
+      if (popoverResize)
+        popoverResize.setAttribute(
+          "aria-valuenow",
+          String(Math.round(popoverHeight)),
+        );
       // ⚠ 펼침 애니메이션 중에는 scaleY 가 걸려 getBoundingClientRect 높이가 줄어든다.
       //   변형이 없는 레이아웃 크기로 자리를 잡는다.
-      const panelRect = { width: popover.offsetWidth, height: popover.offsetHeight };
-      const maxLeft = Math.max(margin, win.innerWidth - panelRect.width - margin);
-      const left = Math.min(maxLeft, Math.max(margin, asideRect?.left ?? anchorRect.left));
+      const panelRect = {
+        width: popover.offsetWidth,
+        height: popover.offsetHeight,
+      };
+      const maxLeft = Math.max(
+        margin,
+        win.innerWidth - panelRect.width - margin,
+      );
+      const left = Math.min(
+        maxLeft,
+        Math.max(margin, asideRect?.left ?? anchorRect.left),
+      );
       let top = anchorRect.bottom + 6;
       const above = top + panelRect.height > win.innerHeight - margin;
       if (above) top = anchorRect.top - panelRect.height - 6;
@@ -846,7 +1263,12 @@
     }
 
     function closePopover(force = false) {
-      if (!force && badgeSettings.keepPopupOpen && !badgeSettings.hidePillButton) return;
+      if (
+        !force &&
+        badgeSettings.keepPopupOpen &&
+        !badgeSettings.hidePillButton
+      )
+        return;
       const wasOpen = popoverOpen;
       popoverOpen = false;
       if (popover) popoverMotion?.close(force || !wasOpen);
@@ -860,7 +1282,10 @@
 
     function handleOutsidePointer(event) {
       if (badgeSettings.keepPopupOpen) return;
-      if (!popoverAnchor?.contains(event.target) && !popover?.contains(event.target))
+      if (
+        !popoverAnchor?.contains(event.target) &&
+        !popover?.contains(event.target)
+      )
         closePopover();
     }
 
@@ -919,8 +1344,9 @@
       if (!aside) return;
       if (popoverAnchor?.isConnected && popoverHeading?.isConnected) return;
       if (popoverAnchor || popover) removePopover();
-      const heading = Array.from(aside.querySelectorAll("h2"))
-        .find((node) => node.textContent.trim() === "채팅");
+      const heading = Array.from(aside.querySelectorAll("h2")).find(
+        (node) => node.textContent.trim() === "채팅",
+      );
       if (!heading?.parentElement || !document.body) return;
 
       popoverAnchor = document.createElement("span");
@@ -938,18 +1364,32 @@
       triggerText.className = "cheese-mv-badge-chat-label";
       triggerText.textContent = "배지 채팅";
       popoverLabel = triggerText;
-      popoverCompactIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      popoverCompactIcon = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
       popoverCompactIcon.classList.add("cheese-mv-badge-chat-compact-icon");
       popoverCompactIcon.setAttribute("viewBox", "0 0 24 24");
       popoverCompactIcon.setAttribute("fill", "currentColor");
       popoverCompactIcon.setAttribute("aria-hidden", "true");
-      const iconPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      iconPath.setAttribute("d", "M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v7.5a2.25 2.25 0 0 1-2.25 2.25H10l-4.4 3.3a.75.75 0 0 1-1.2-.6v-2.83a2.25 2.25 0 0 1-1.4-2.12v-7.5A2.25 2.25 0 0 1 5.25 4.5Z");
+      const iconPath = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path",
+      );
+      iconPath.setAttribute(
+        "d",
+        "M5.25 4.5h13.5A2.25 2.25 0 0 1 21 6.75v7.5a2.25 2.25 0 0 1-2.25 2.25H10l-4.4 3.3a.75.75 0 0 1-1.2-.6v-2.83a2.25 2.25 0 0 1-1.4-2.12v-7.5A2.25 2.25 0 0 1 5.25 4.5Z",
+      );
       popoverCompactIcon.append(iconPath);
       popoverCount = document.createElement("span");
       popoverCount.className = "cheese-mv-badge-chat-count";
       popoverCount.hidden = true;
-      popoverTrigger.append(popoverBadges, popoverCompactIcon, triggerText, popoverCount);
+      popoverTrigger.append(
+        popoverBadges,
+        popoverCompactIcon,
+        triggerText,
+        popoverCount,
+      );
       popoverAnchor.append(popoverTrigger);
       popoverHeading = heading;
       popoverHeadingParent = heading.parentElement;
@@ -961,7 +1401,10 @@
       popover.setAttribute("role", "dialog");
       popover.setAttribute("aria-label", "배지 채팅 모아보기");
       popover.hidden = true;
-      popover.style.setProperty("--mv-badge-chat-font-scale", String(popoverFontScalePercent / 100));
+      popover.style.setProperty(
+        "--mv-badge-chat-font-scale",
+        String(popoverFontScalePercent / 100),
+      );
       const header = document.createElement("header");
       header.className = "cheese-mv-badge-chat-popover-head";
       const title = document.createElement("strong");
@@ -972,7 +1415,10 @@
         initial: popoverFontScalePercent,
         onChange: (percent) => {
           popoverFontScalePercent = percent;
-          popover?.style.setProperty("--mv-badge-chat-font-scale", String(percent / 100));
+          popover?.style.setProperty(
+            "--mv-badge-chat-font-scale",
+            String(percent / 100),
+          );
         },
       });
       const closeButton = document.createElement("button");
@@ -989,7 +1435,10 @@
       svg.setAttribute("stroke-width", "2");
       svg.setAttribute("stroke-linecap", "round");
       svg.setAttribute("aria-hidden", "true");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const path = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "path",
+      );
       path.setAttribute("d", "m18 6-12 12M6 6l12 12");
       svg.append(path);
       closeButton.append(svg);
@@ -1042,10 +1491,22 @@
       });
       popoverResize.addEventListener("pointermove", (event) => {
         if (!resizeStart || resizeStart.pointerId !== event.pointerId) return;
-        const maxHeight = Math.max(120, Math.min(720, win.innerHeight - resizeStart.top - 8));
-        popoverHeight = Math.max(120, Math.min(maxHeight, resizeStart.height + event.clientY - resizeStart.y));
+        const maxHeight = Math.max(
+          120,
+          Math.min(720, win.innerHeight - resizeStart.top - 8),
+        );
+        popoverHeight = Math.max(
+          120,
+          Math.min(
+            maxHeight,
+            resizeStart.height + event.clientY - resizeStart.y,
+          ),
+        );
         popover.style.height = `${popoverHeight}px`;
-        popoverResize.setAttribute("aria-valuenow", String(Math.round(popoverHeight)));
+        popoverResize.setAttribute(
+          "aria-valuenow",
+          String(Math.round(popoverHeight)),
+        );
       });
       const stopResize = (event) => {
         if (resizeStart?.pointerId === event.pointerId) resizeStart = null;
@@ -1058,27 +1519,87 @@
         event.preventDefault();
         const maxHeight = Math.max(120, Math.min(720, win.innerHeight - 16));
         const delta = event.key === "ArrowUp" ? 24 : -24;
-        popoverHeight = Math.max(120, Math.min(maxHeight, popoverHeight + delta));
+        popoverHeight = Math.max(
+          120,
+          Math.min(maxHeight, popoverHeight + delta),
+        );
         positionPopover();
       });
       updatePopoverCount();
       updatePopoverSettings();
       renderPopoverMessages();
-      if (badgeSettings.keepPopupOpen && !badgeSettings.hidePillButton && roleMessages.length)
+      if (
+        badgeSettings.keepPopupOpen &&
+        !badgeSettings.hidePillButton &&
+        roleMessages.length
+      )
         openPopover();
     }
 
     function appendRoleMessage(role, message, row, roles) {
-      const normalizedRoles = [...new Set(roles)].filter((item) => ROLE_SET.has(item));
-      const signature = `${role}\u001f${normalizedRoles.join(",")}\u001f${message.nickname}\u001f${message.text}`;
-      if (!signature || sentRows.get(row) === signature) return;
-      sentRows.set(row, signature);
-      roleMessages.push({ ...message, role, roles: normalizedRoles, sequence: ++nextMessageSequence });
-      if (roleMessages.length > 150) roleMessages.splice(0, roleMessages.length - 150);
+      const normalizedRoles = [...new Set(roles)].filter((item) =>
+        ROLE_SET.has(item),
+      );
+      // 배지 이미지와 시간 표시는 원본 행 뒤에 비동기로 붙을 수 있어 같은 행을 보강한다.
+      const signature = `${message.nickname}\u001f${message.text}`;
+      const rowMessageKey = {
+        historyId:
+          row.getAttribute("data-cheese-history-id") ||
+          row
+            .querySelector("[data-cheese-history-id]")
+            ?.getAttribute("data-cheese-history-id") ||
+          "",
+        epochMs:
+          row.getAttribute("data-chat-epoch-ms") ||
+          row
+            .querySelector("[data-chat-epoch-ms]")
+            ?.getAttribute("data-chat-epoch-ms") ||
+          "",
+      };
+      const previous = sentRows.get(row);
+      const sameMessage =
+        previous &&
+        previous.signature === signature &&
+        (!previous.rowMessageKey.historyId ||
+          !rowMessageKey.historyId ||
+          previous.rowMessageKey.historyId === rowMessageKey.historyId) &&
+        (!previous.rowMessageKey.epochMs ||
+          !rowMessageKey.epochMs ||
+          previous.rowMessageKey.epochMs === rowMessageKey.epochMs);
+      if (!signature) return;
+      if (sameMessage) {
+        const target = previous.message;
+        const before = capturedMessageMetadataKey(target);
+        Object.assign(target, mergeCapturedMessage(target, message), {
+          role,
+          roles: normalizedRoles,
+        });
+        previous.rowMessageKey = {
+          historyId:
+            rowMessageKey.historyId || previous.rowMessageKey.historyId,
+          epochMs: rowMessageKey.epochMs || previous.rowMessageKey.epochMs,
+        };
+        if (before !== capturedMessageMetadataKey(target)) {
+          updatePopoverCount();
+          if (popoverOpen) renderPopoverMessages();
+        }
+        return;
+      }
+      const captured = {
+        ...message,
+        role,
+        roles: normalizedRoles,
+        sequence: ++nextMessageSequence,
+      };
+      sentRows.set(row, { signature, rowMessageKey, message: captured });
+      roleMessages.push(captured);
+      if (roleMessages.length > 150)
+        roleMessages.splice(0, roleMessages.length - 150);
       if (popoverOpen) lastSeenSequence = nextMessageSequence;
       updatePopoverCount();
       if (popoverOpen) renderPopoverMessages();
-      else if (badgeSettings.keepPopupOpen && !badgeSettings.hidePillButton) openPopover();
+      else if (badgeSettings.keepPopupOpen && !badgeSettings.hidePillButton)
+        openPopover();
       else triggerAttention();
     }
 
@@ -1095,27 +1616,43 @@
         const inner = element.querySelector(messageSelector);
         if (inner) queue(inner);
       }
-      if (includeDescendants) element.querySelectorAll?.(messageSelector).forEach(queue);
-      if (pendingRows.size && !renderFrame) renderFrame = win.requestAnimationFrame(flushRows);
+      if (includeDescendants)
+        element.querySelectorAll?.(messageSelector).forEach(queue);
+      if (pendingRows.size && !renderFrame)
+        renderFrame = win.requestAnimationFrame(flushRows);
+    }
+
+    function handleImageLoad(event) {
+      if (event.target?.tagName === "IMG") addRow(event.target);
     }
 
     function flushRows() {
       renderFrame = 0;
-      const rows = pendingRows;
+      // 오래된 줄부터 넣어야 모아보기 목록이 과거 → 최신(위 → 아래)이 된다.
+      const rows = orderRowsOldestFirst(pendingRows, win);
       pendingRows = new Set();
       rows.forEach((row) => {
         if (!row.isConnected) return;
         const special = isSpecialMessageRow(row);
         row.toggleAttribute("data-cheese-mv-badge-special", special);
         const signals = roleSignals(row);
-        const roles = [...new Set(signals.map(classifyBadgeRole).filter(Boolean))];
-        const role = ROLE_ORDER.find((candidate) => roles.includes(candidate)) ||
+        const roles = [
+          ...new Set(signals.map(classifyBadgeRole).filter(Boolean)),
+        ];
+        const role =
+          ROLE_ORDER.find((candidate) => roles.includes(candidate)) ||
           classifyBadgeRole(signals);
         if (role) {
           if (row.getAttribute("data-cheese-mv-badge-role") !== role)
             row.setAttribute("data-cheese-mv-badge-role", role);
           const captured = rowMessage(row);
-          if (captured) appendRoleMessage(role, captured, row, roles.length ? roles : [role]);
+          if (captured)
+            appendRoleMessage(
+              role,
+              captured,
+              row,
+              roles.length ? roles : [role],
+            );
         } else {
           row.removeAttribute("data-cheese-mv-badge-role");
         }
@@ -1141,6 +1678,7 @@
       }
       listObserver?.disconnect();
       parentObserver?.disconnect();
+      aside?.removeEventListener("load", handleImageLoad, true);
       removePopover();
       roleMessages = [];
       lastSeenSequence = 0;
@@ -1151,6 +1689,7 @@
         watchForAside();
         return;
       }
+      aside.addEventListener("load", handleImageLoad, true);
       discoveryObserver?.disconnect();
       discoveryObserver = null;
       listObserver = new win.MutationObserver((mutations) => {
@@ -1162,7 +1701,18 @@
       });
       listObserver.observe(aside, {
         attributes: true,
-        attributeFilter: ["src", "alt", "title", "aria-label", "class"],
+        attributeFilter: [
+          "src",
+          "srcset",
+          "alt",
+          "title",
+          "aria-label",
+          "class",
+          "data-chat-epoch-ms",
+          "data-cheese-history-id",
+          // 업적 배지 ID 가 줄 캡처 뒤에 붙어도 다시 읽는다.
+          ACHIEVEMENT_ID_ATTR,
+        ],
         characterData: true,
         childList: true,
         subtree: true,
@@ -1182,19 +1732,25 @@
       listObserver?.disconnect();
       parentObserver?.disconnect();
       discoveryObserver?.disconnect();
+      aside?.removeEventListener("load", handleImageLoad, true);
       if (renderFrame) win.cancelAnimationFrame(renderFrame);
       pendingRows.clear();
       removePopover();
-      if (storageChangeListener) storage?.onChanged?.removeListener(storageChangeListener);
+      if (storageChangeListener)
+        storage?.onChanged?.removeListener(storageChangeListener);
       style.remove();
       win.removeEventListener("pagehide", dispose);
     }
 
     attachAside();
     const settingsRevision = badgeSettingsRevision;
-    storage?.local?.get(BADGE_SETTING_KEYS).then((values) => {
-      if (settingsRevision === badgeSettingsRevision) applyBadgeSettings(values);
-    }).catch(() => {});
+    storage?.local
+      ?.get(BADGE_SETTING_KEYS)
+      .then((values) => {
+        if (settingsRevision === badgeSettingsRevision)
+          applyBadgeSettings(values);
+      })
+      .catch(() => {});
     if (storage?.onChanged) {
       storageChangeListener = (changes, areaName) => {
         if (areaName !== "local") return;
@@ -1214,6 +1770,11 @@
   const api = Object.freeze({
     classifyBadgeRole,
     normalizeCapturedMessage,
+    collectMappedAchievementBadges,
+    achievementBadgeFromId,
+    splitDisplayBadges,
+    orderRowsOldestFirst,
+    mergeCapturedMessage,
     collectPillActors,
     createBadgePill,
     createFontScaleControls,
@@ -1224,9 +1785,17 @@
   if (typeof module === "object" && module.exports) module.exports = api;
 
   const win = globalThis.window;
-  if (!win || win === win.top || win.location.origin !== "https://chzzk.naver.com") return;
+  if (
+    !win ||
+    win === win.top ||
+    win.location.origin !== "https://chzzk.naver.com"
+  )
+    return;
   const params = new URLSearchParams(win.location.search);
-  if (params.get("cheeseMultiChat") !== "1" ||
-      !/^\/live\/[0-9a-f]{32}\/chat\/?$/i.test(win.location.pathname)) return;
+  if (
+    params.get("cheeseMultiChat") !== "1" ||
+    !/^\/live\/[0-9a-f]{32}\/chat\/?$/i.test(win.location.pathname)
+  )
+    return;
   createRoleHighlighter(win);
 })();

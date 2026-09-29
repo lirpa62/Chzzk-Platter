@@ -9898,11 +9898,97 @@
     );
   }
 
+  function crossSourceHistoryMatchScore(stored, incoming) {
+    const previous = stored?.d;
+    const history = incoming?.d;
+    if (
+      !previous ||
+      history?.src !== "history" ||
+      previous.src === "history"
+    ) {
+      return null;
+    }
+    const delta = Math.abs(
+      (Number(stored?.t) || 0) - (Number(incoming?.t) || 0),
+    );
+    if (!Number(incoming?.t) || delta > 5000) return null;
+
+    const previousType = String(previous.type || "").toUpperCase();
+    const historyType = String(history.type || "").toUpperCase();
+    if (
+      previousType.startsWith("MISSION") ||
+      historyType.startsWith("MISSION")
+    ) {
+      return null;
+    }
+
+    if (previous.kind === "DONATION" && history.kind === "DONATION") {
+      if (
+        !(Number(previous.amount) > 0) ||
+        Number(previous.amount) !== Number(history.amount) ||
+        (previousType && historyType && previousType !== historyType)
+      ) {
+        return null;
+      }
+      const previousText = normalizeDonationMatchText(stored.m);
+      const historyText = normalizeDonationMatchText(incoming.m);
+      if (previousText && historyText && previousText !== historyText) {
+        return null;
+      }
+      return { delta };
+    }
+
+    const giftKinds = new Set(["GIFT_SENT", "GIFT_RECEIVED"]);
+    const subscriptionPair =
+      (previous.kind === "SUBSCRIPTION" &&
+        (history.kind === "SUBSCRIPTION" || giftKinds.has(history.kind))) ||
+      (history.kind === "SUBSCRIPTION" && giftKinds.has(previous.kind));
+    if (!subscriptionPair) return null;
+
+    const previousTier = Number(previous.tier) || 0;
+    const historyTier = Number(history.tier) || 0;
+    const previousMonth = Number(previous.month) || 0;
+    const historyMonth = Number(history.month) || 0;
+    if (
+      (previousTier && historyTier && previousTier !== historyTier) ||
+      (previousMonth && historyMonth && previousMonth !== historyMonth)
+    ) {
+      return null;
+    }
+    if (
+      !(previousTier && previousTier === historyTier) &&
+      !(previousMonth && previousMonth === historyMonth)
+    ) {
+      return null;
+    }
+    return { delta };
+  }
+
+  function findCrossSourceHistoryMatch(items, incoming) {
+    const matches = [];
+    for (let index = 0; index < (items || []).length; index += 1) {
+      const score = crossSourceHistoryMatchScore(items[index], incoming);
+      if (score) matches.push({ index, ...score });
+    }
+    matches.sort((a, b) => a.delta - b.delta);
+    const best = matches[0];
+    if (!best) return -1;
+    if (matches[1] && matches[1].delta - best.delta < 1000) return -1;
+    return best.index;
+  }
+
   function mergeDonationHistoryRow(current, incoming) {
     if (incoming?.d?.src !== "history" || current?.d?.src === "history") {
       return { ...current, ...incoming };
     }
-    if (current?.d?.src !== "mission") return { ...current, ...incoming };
+    if (current?.d?.src !== "mission") {
+      return {
+        ...current,
+        ...incoming,
+        m: incoming.m || current.m,
+        d: { ...current.d, ...incoming.d, src: "history" },
+      };
+    }
     return {
       ...current,
       ...incoming,
@@ -10186,6 +10272,16 @@
           const next = mergeDonationHistoryRow(items[missionAt], r);
           if (!sameRecapStoredRow(items[missionAt], next)) {
             items[missionAt] = next;
+            changed = true;
+          }
+          continue;
+        }
+        const crossSourceAt = findCrossSourceHistoryMatch(items, r);
+        if (crossSourceAt >= 0) {
+          const current = items[crossSourceAt];
+          const next = mergeDonationHistoryRow(current, r);
+          if (!sameRecapStoredRow(current, next)) {
+            items[crossSourceAt] = next;
             changed = true;
           }
           continue;

@@ -27,6 +27,13 @@
   }
 
   if (isClipEditorContext()) return;
+  // 멀티뷰 영상 칸은 채팅을 접어 둔다. 접힌 채팅창에는 채팅 줄이 없어 목록을 찾는
+  // 재시도(0.5초)가 끝없이 돈다. 채팅은 채팅 칸(cheeseMultiChat)에서 처리한다.
+  if (
+    window.top !== window &&
+    new URLSearchParams(location.search).get("cheeseMulti") === "1"
+  )
+    return;
 
   // masterGate.js(ISOLATED, document_start)가 루트에 준비 표시를 세울 때까지 기다린다.
   // 예전의 10ms x 100회(=1초) 고정 폴링은 서비스워커 콜드 스타트가 느리거나 팝업
@@ -1520,6 +1527,7 @@
           ? node.parentElement
           : null;
     if (!element) return null;
+    if (element.closest("[data-cheese-replay-local-chat]")) return null;
 
     if (
       element.matches(CHAT_ROW_SELECTOR) &&
@@ -1537,6 +1545,7 @@
   function collectChatRows(root) {
     const rows = new Set();
     if (!(root instanceof Element)) return rows;
+    if (root.closest("[data-cheese-replay-local-chat]")) return rows;
     const direct = findChatRowForNode(root);
     if (direct) rows.add(direct);
     root.querySelectorAll(CHAT_MESSAGE_SELECTOR).forEach((message) => {

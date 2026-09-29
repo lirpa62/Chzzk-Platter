@@ -110,7 +110,9 @@ const checks = [];
       set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
       get(){return this.getAttribute('data-test-src')||'';},
     });
-    window.sessionStore={};window.openedTabs=[];window.localStore={};window.storageListeners=[];
+    window.sessionStore={};window.openedTabs=[];window.localStore={
+      cheeseMultiviewSetupOptions:{mainHighQuality:true,startWithoutChat:true},
+    };window.storageListeners=[];
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       // 목록 API 는 배경 스크립트가 중계한다(확장 페이지 직접 fetch 는 CORS 로 막힘).
       sendMessage:async(msg)=>{
@@ -304,9 +306,34 @@ const checks = [];
   );
 
   await test(
-    "메인 고화질은 기본 해제 상태다",
-    `check(document.getElementById('mvMainHighQuality').checked===false,
-       '메인 고화질이 기본 선택되어 있다');`,
+    "저장된 선택 옵션을 복원하고 누락된 값은 해제한다",
+    `check(document.getElementById('mvMainHighQuality').checked===true,
+       '저장된 메인 고화질 시작값을 복원하지 않았다');
+     check(document.getElementById('mvStartWithoutChat').checked===true,
+       '저장된 채팅 없이 시작값을 복원하지 않았다');
+     check(document.getElementById('mvStartMainMuted').checked===false,
+       '저장되지 않은 메인 음소거 옵션이 켜져 있다');`,
+  );
+
+  await test(
+    "선택 옵션 변경을 다음 페이지 진입을 위해 저장한다",
+    `const quality=document.getElementById('mvMainHighQuality');
+     const chat=document.getElementById('mvStartWithoutChat');
+     const mute=document.getElementById('mvStartMainMuted');
+     quality.checked=false;quality.dispatchEvent(new Event('change',{bubbles:true}));
+     chat.checked=false;chat.dispatchEvent(new Event('change',{bubbles:true}));
+     mute.checked=true;mute.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(20);
+     check(window.localStore.cheeseMultiviewSetupOptions?.mainHighQuality===false,
+       '메인 화질 옵션 해제를 저장하지 않았다');
+     check(window.localStore.cheeseMultiviewSetupOptions?.startWithoutChat===false,
+       '채팅 옵션 해제를 저장하지 않았다');
+     check(window.localStore.cheeseMultiviewSetupOptions?.startMainMuted===true,
+       '메인 음소거 옵션을 저장하지 않았다');
+     mute.checked=false;mute.dispatchEvent(new Event('change',{bubbles:true}));
+     await wait(20);
+     check(window.localStore.cheeseMultiviewSetupOptions?.startMainMuted===false,
+       '메인 음소거 옵션 해제를 저장하지 않았다');`,
   );
 
   await test(
@@ -1024,11 +1051,46 @@ const checks = [];
   );
 
   await test(
+    "선택 화면 옵션은 토글·접이식 설명을 쓰고 시작 음량 입력을 동기화한다",
+    `const quality=document.getElementById('mvMainHighQuality');
+     const chat=document.getElementById('mvStartWithoutChat');
+     const mute=document.getElementById('mvStartMainMuted');
+     check([quality,chat,mute].every(input=>input?.getAttribute('role')==='switch'),
+       '화질·채팅·메인 오디오 옵션이 토글로 표시되지 않는다');
+     for(const id of ['mvMainQualityNote','mvStartWithoutChatNote','mvStartMainMutedNote'])
+       check(document.getElementById(id).hidden,'옵션 설명이 처음부터 펼쳐져 있다: '+id);
+     const info=document.querySelector('[data-mv-option-note="mvMainQualityNote"]');
+     info.click();
+     check(!document.getElementById('mvMainQualityNote').hidden&&info.getAttribute('aria-expanded')==='true',
+       '정보 버튼으로 설명을 펼치지 못했다');
+     info.click();
+     check(document.getElementById('mvMainQualityNote').hidden,'정보 버튼으로 설명을 접지 못했다');
+     const range=document.getElementById('mvStartMainVolumeRange');
+     const number=document.getElementById('mvStartMainVolumeNumber');
+     const control=document.getElementById('mvStartMainVolumeControl');
+     check(range&&number&&!control.hidden,'메인 음량 설정이 기본 표시되지 않는다');
+     check(document.querySelector('label[for="mvStartMainVolumeRange"]').textContent.includes('모든 채널'),
+       '시작 음량 설정이 모든 채널에 적용됨을 표시하지 않는다');
+     number.value='37';number.dispatchEvent(new Event('input',{bubbles:true}));
+     check(range.value==='37','숫자 입력이 슬라이더에 반영되지 않았다');
+     range.value='42';range.dispatchEvent(new Event('input',{bubbles:true}));
+     check(number.value==='42','슬라이더가 숫자 입력에 반영되지 않았다');
+     mute.checked=true;mute.dispatchEvent(new Event('change',{bubbles:true}));
+     check(control.hidden,'메인 음소거가 켜졌는데 시작 음량 옵션이 보인다');
+     mute.checked=false;mute.dispatchEvent(new Event('change',{bubbles:true}));
+     check(!control.hidden,'메인 음소거를 끈 뒤 시작 음량 옵션이 나타나지 않는다');`,
+  );
+
+  await test(
     "시작하면 구성을 넘기고 시청 화면을 새 탭으로 연다",
     `const startMuted=document.getElementById('mvStartMainMuted');
      check(startMuted&&!startMuted.checked,'메인 음소거 시작 기본값이 켜져 있다');
+     const startVolume=document.getElementById('mvStartMainVolumeNumber');
+     startVolume.value='37';startVolume.dispatchEvent(new Event('input',{bubbles:true}));
      startMuted.checked=true;
      startMuted.dispatchEvent(new Event('change',{bubbles:true}));
+     check(document.getElementById('mvStartMainVolumeControl').hidden,
+       '음소거 시작일 때 시작 음량 옵션이 숨겨지지 않았다');
      document.getElementById('mvStart').click();
      await wait(200);
      // 고정 키가 아니라 탭마다 다른 id 로 저장돼야 한다.
@@ -1039,7 +1101,10 @@ const checks = [];
        '고정 키에 저장됐다(탭끼리 덮어쓴다)');
      const setup=window.sessionStore[keys[0]];
      check(setup.chosen.length===2,'넘긴 채널이 2개가 아니다');
+     check(setup.mainHighQuality===false&&setup.chatEnabled===true,
+       '저장된 기본 선택 옵션이 handoff에 정확히 반영되지 않았다');
      check(setup.startMainMuted===true,'메인 음소거 시작을 handoff에 담지 않았다');
+     check(setup.startMainVolume===0.37,'메인 채널 시작 음량을 handoff에 담지 않았다');
      check(setup.layoutId,'배치가 비어 있다');
      check(window.openedTabs.length===1,'새 탭이 열리지 않았다');
      const opened=window.openedTabs[0];
@@ -1261,7 +1326,7 @@ const checks = [];
     };`);
   await evaluate(readFileSync("src/multiviewWatch.js", "utf8")
     .replace("const state = {", "const state = window.__mvState = {")
-    .replace("  function frameUrl(", "  window.__testQualityForChannel=qualityForChannel;\n  window.__testFrameUrl=frameUrl;\n  function frameUrl(")
+    .replace("  function frameUrl(", "  window.__testQualityForChannel=qualityForChannel;\n  window.__testInitialQualityForChannel=initialQualityForChannel;\n  window.__testFrameUrl=frameUrl;\n  function frameUrl(")
     .replace("  function rebaseSyncOffsets(",
       "  window.__testRebase = rebaseSyncOffsets;\n  function rebaseSyncOffsets(")
     .replace("  function rebaseGroupOffsets(",
@@ -1286,8 +1351,37 @@ const checks = [];
      check(mains.length===1,'메인 프레임이 1개가 아니라 '+mains.length+'개');
      check(new URL(mains[0]).searchParams.get('cheeseMultiMuted')==='1',
        '선택한 메인 음소거 시작이 프레임에 적용되지 않았다');
+     check(new URL(mains[0]).searchParams.get('cheeseMultiVolume')==='0.37',
+       '메인 시작 음량이 첫 프레임 URL에 적용되지 않았다');
+     const mainAudio=window.__testResources.channelAudio.get(window.__mvState.mainId);
+     check(mainAudio?.muted===true&&Math.abs(mainAudio.volume-0.37)<0.001,
+       '초기 메인 오디오 상태에 음소거와 시작 음량이 함께 적용되지 않았다');
+     const auxId=window.__mvState.chosen.find(c=>c.channelId!==window.__mvState.mainId).channelId;
+     const auxAudio=window.__testResources.channelAudio.get(auxId);
+     check(auxAudio?.muted===true&&Math.abs(auxAudio.volume-0.37)<0.001,
+       '보조 채널의 초기 볼륨이 설정한 시작 음량과 다르다');
+     check(srcs.every(src=>new URL(src).searchParams.get('cheeseMultiVolume')==='0.37'),
+       '모든 최초 프레임에 동일한 시작 음량이 전달되지 않았다');
      const subs=srcs.filter(s=>s.includes('cheeseMultiMain=0'));
      check(subs.every(s=>s.includes('cheeseMultiMuted=1')),'보조가 음소거가 아니다');`,
+  );
+
+  await test(
+    "메인 채널 테두리 설정은 즉시 반영되고 iframe을 다시 불러오지 않는다",
+    `const main=document.querySelector('.mv-cell.is-main');
+     check(main&&!document.body.classList.contains('mv-main-border-hidden'),
+       '기본 메인 테두리가 표시되지 않는다');
+     const before=window.frameSrcs.length;
+     await chrome.storage.local.set({cheeseMultiviewMainBorder:false});
+     check(document.body.classList.contains('mv-main-border-hidden'),
+       '테두리 끄기 설정이 화면에 반영되지 않았다');
+     check(getComputedStyle(main).outlineStyle==='none',
+       '테두리를 껐는데 메인 칸 outline이 남아 있다');
+     await chrome.storage.local.set({cheeseMultiviewMainBorder:true});
+     check(!document.body.classList.contains('mv-main-border-hidden')&&
+       getComputedStyle(main).outlineStyle==='solid',
+       '테두리 켜기 설정이 화면에 반영되지 않았다');
+     check(window.frameSrcs.length===before,'테두리 설정 변경이 iframe을 다시 불러왔다');`,
   );
 
   await test(
@@ -1322,13 +1416,26 @@ const checks = [];
   );
 
   await test(
-    "메인 고화질을 명시적으로 켜면 최고화질 정책을 유지한다",
+    "메인 고화질 옵션은 초기 목표만 전달하고 이후 역할 정책은 기본으로 둔다",
     `const live=window.__testQualityForChannel({mediaType:'live'},true,true);
      const vod=window.__testQualityForChannel({mediaType:'video'},true,true);
-     check(live.qualityPolicy==='highest'&&live.quality==='high',
-       '메인 라이브의 명시적 고화질 정책이 없다');
-     check(vod.qualityPolicy==='highest'&&vod.quality==='high',
-       '메인 다시보기의 명시적 고화질 정책이 없다');`,
+     check(live.qualityPolicy==='native'&&live.quality==='native',
+       '메인 역할 변경 후에도 최고 화질 정책이 계속 적용된다');
+     check(vod.qualityPolicy==='native'&&vod.quality==='native',
+       '다시보기 역할 변경 후에도 초기 목표 정책이 계속 적용된다');
+     check(window.__testInitialQualityForChannel({mediaType:'live'},true,true)==='highest',
+       '메인 라이브의 초기 최고 화질 목표가 없다');
+     check(window.__testInitialQualityForChannel({mediaType:'live'},false,true)==='cap-480',
+       '보조 라이브의 초기 480p 목표가 없다');
+     check(window.__testInitialQualityForChannel({mediaType:'video'},false,true)==='cap-720',
+       '보조 다시보기의 초기 720p 목표가 없다');
+     const mainUrl=new URL(window.__testFrameUrl({
+       channelId:'a'.repeat(32),mediaType:'live'
+     },true,true));
+     check(mainUrl.searchParams.get('cheeseMultiQualityPolicy')==='native',
+       '초기 화질 옵션이 지속 정책으로 전달된다');
+     check(mainUrl.searchParams.get('cheeseMultiInitialQuality')==='highest',
+       '최초 프레임 URL에 초기 목표가 전달되지 않는다');`,
   );
 
   await test(
@@ -3292,6 +3399,36 @@ const checks = [];
      // 전체 50% 이므로 메인(채널볼륨 100%)은 0.5 여야 한다.
      check(vol.some(m=>Math.abs(m.volume-0.5)<0.001),
        '전체 볼륨이 곱해지지 않았다: '+JSON.stringify(vol.map(m=>m.volume)));`,
+  );
+
+  await test(
+    "플레이어 볼륨 변경이 채널 슬라이더에 반영되고 잘못된 프레임 메시지는 무시한다",
+    `const cells=[...document.querySelectorAll('.mv-cell')];
+     const main=cells.find(cell=>cell.classList.contains('is-main'));
+     const id=main.dataset.channelId;
+     const frame=main.querySelector('iframe');
+     const send=(volume,origin='https://chzzk.naver.com',source=frame.contentWindow,
+       channelId=id)=>{
+       const event=new MessageEvent('message',{origin,data:{
+         source:'cheese-platter-multiview',type:'FRAME_AUDIO_STATE',channelId,volume}});
+       Object.defineProperty(event,'source',{value:source});
+       window.dispatchEvent(event);
+     };
+     const slider=document.querySelector('[data-mv-vol-channel="'+id+'"]');
+     check(slider,'메인 채널 볼륨 슬라이더가 없다');
+     const sourceCount=window.frameSrcs.length;
+     // 이전 테스트에서 전체 볼륨은 50%다. 플레이어 출력 25%는 채널 50%에 해당한다.
+     send(0.25);
+     check(slider.value==='50','전체 볼륨을 제외해 채널 값으로 환산하지 못했다: '+slider.value);
+     check(slider.parentElement.querySelector('.mv-vol-pct').textContent==='50%',
+       '채널 볼륨 텍스트가 플레이어 변경을 반영하지 않았다');
+     send(0.8,'https://evil.invalid');
+     send(0.8,'https://chzzk.naver.com',window);
+     send(0.8,'https://chzzk.naver.com',frame.contentWindow,cells.find(c=>c!==main).dataset.channelId);
+     check(slider.value==='50','잘못된 출처·창·채널 메시지를 받아들였다');
+     send(0.5);
+     check(slider.value==='100','fixture의 채널 볼륨을 원래 상태로 복원하지 못했다');
+     check(window.frameSrcs.length===sourceCount,'볼륨 동기화가 iframe src를 변경했다');`,
   );
 
   await test(

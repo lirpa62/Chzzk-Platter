@@ -157,6 +157,7 @@
     "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
     "cheeseMultiviewChatPopoutMode",
+    "cheeseMultiviewBadgeChatDisplayStyle",
     "cheeseMultiviewBtnMixer",
     "cheeseMultiviewBtnFilter",
     "cheeseMultiviewBtnSync",
@@ -185,10 +186,13 @@
     "cheeseMultiviewBadgeChatHidePillButton",
     "cheeseMultiviewRememberQuickState",
     "cheeseMultiviewSyncDiagnosticsUi",
+    "cheeseMultiviewLiveCatchUp",
     "cheeseMultiviewQuickState",
     "cheeseMultiviewQuickPosition",
+    "cheeseMultiviewMainBorder",
     "cheeseMultiviewSetupSortBySource",
     "cheeseMultiviewRememberSetupSort",
+    "cheeseMultiviewSetupOptions",
     "cheesePopupPlayerBtnMixer",
     "cheesePopupPlayerBtnFilter",
     "cheesePopupPlayerBtnSync",
@@ -5155,8 +5159,10 @@
     ["[data-multiview-badge-chat-compact-pill]", "cheeseMultiviewBadgeChatCompactPill", false],
     ["[data-multiview-badge-chat-hide-pill-button]", "cheeseMultiviewBadgeChatHidePillButton", false],
     ["[data-multiview-remember-quick-state]", "cheeseMultiviewRememberQuickState", false],
+    ["[data-multiview-main-border]", "cheeseMultiviewMainBorder", true],
     ["[data-multiview-remember-setup-sort]", "cheeseMultiviewRememberSetupSort", true],
     ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
+    ["[data-multiview-live-catch-up]", "cheeseMultiviewLiveCatchUp", true],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;
@@ -5215,6 +5221,43 @@
       if (!badgeChatHideButtonInput.checked) return;
       badgeChatKeepOpenInput.checked = false;
       cachedStorageSet({ cheeseMultiviewBadgeChatKeepPopupOpen: false });
+    });
+  }
+
+  // 모아보기 팝업 보기 방식(한줄보기 inline | 블록보기 block). 배지 모아 챗과 같은 두 가지.
+  const multiviewBadgeChatDisplayGroup = document.querySelector(
+    "[data-multiview-badge-chat-display-style]",
+  );
+  if (multiviewBadgeChatDisplayGroup) {
+    const displayKey = "cheeseMultiviewBadgeChatDisplayStyle";
+    const displayButtons = Array.from(
+      multiviewBadgeChatDisplayGroup.querySelectorAll(
+        "[data-mv-badge-chat-display-value]",
+      ),
+    );
+    const reflectBadgeChatDisplayStyle = (style) => {
+      const value = style === "block" ? "block" : "inline";
+      displayButtons.forEach((button) => {
+        const active = button.dataset.mvBadgeChatDisplayValue === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-checked", String(active));
+      });
+    };
+    (async () => {
+      let style = "inline";
+      try {
+        const stored = await cachedStorageGet(displayKey);
+        if (stored?.[displayKey] === "block") style = "block";
+      } catch {}
+      reflectBadgeChatDisplayStyle(style);
+    })();
+    displayButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const style =
+          button.dataset.mvBadgeChatDisplayValue === "block" ? "block" : "inline";
+        reflectBadgeChatDisplayStyle(style);
+        cachedStorageSet({ [displayKey]: style });
+      });
     });
   }
 
@@ -11136,8 +11179,26 @@
   }
 
   function normalizeImportedSettingValue(key, value) {
+    if (key === "cheeseMultiviewSetupOptions") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      return {
+        mainHighQuality: value.mainHighQuality === true,
+        startWithoutChat: value.startWithoutChat === true,
+        startMainMuted: value.startMainMuted === true,
+        // ⚠ 빠뜨리면 설정 백업·복원 때 시작 음량이 사라진다.
+        startMainVolume:
+          typeof value.startMainVolume === "number" && Number.isFinite(value.startMainVolume)
+            ? Math.round(Math.min(1, Math.max(0, value.startMainVolume)) * 100) / 100
+            : 1,
+      };
+    }
     if (key === "cheeseMultiviewChatPopoutMode") {
       return value === "native" || value === "platter" ? value : undefined;
+    }
+    if (key === "cheeseMultiviewBadgeChatDisplayStyle") {
+      return value === "block" || value === "inline" ? value : undefined;
     }
     if (key === POPUP_WIDTH_KEY) {
       return Number.isFinite(Number(value))

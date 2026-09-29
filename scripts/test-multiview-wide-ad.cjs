@@ -67,6 +67,23 @@ check(/div#layout-body \.vod_player_wrap, div#layout-body \[data-role='adVideoCo
   /Array\.from\(layoutAnchors\)\.some\(\(el\) => el\.closest\('\[class\*="_is_large_"\]'\)\)/.test(content),
   "부모에 보고하는 넓은 화면 상태도 광고 중 판정을 포함한다");
 check(/다시 적용 <kbd>T<\/kbd>/.test(watch), "오버레이에 적용 버튼과 T 안내가 있다");
+
+// '다시 적용'은 채팅 접기도 함께 맞춘다(광고 중에도 버튼 클릭이 반영됨, 실측).
+const foldFn = content.slice(
+  content.indexOf("function ensureMultiviewChatFold(force = false)"),
+  content.indexOf("function requestMultiviewWideEnsure()"),
+);
+check(foldFn.length > 0 &&
+  /if \(!isVod && isChatFolded\(aside\)\) return true;[\s\S]*?!force &&\s*typeof adRemainingSeconds === "function"/.test(foldFn),
+  "수동 적용만 광고 중 대기를 건너뛰고, 이미 접혀 있으면 누르지 않는다(토글 뒤집힘 방지)");
+check(/FOLD_CLICK_COOLDOWN_MS\) return false;/.test(foldFn),
+  "수동 적용도 연타 쿨다운을 지킨다");
+check(/data\.type === "APPLY_MULTIVIEW_WIDE"\) \{[\s\S]*?cheese-apply-multiview-wide[\s\S]*?ensureMultiviewChatFold\(true\);/.test(content),
+  "'다시 적용'이 넓은 화면과 함께 채팅 접기를 맞춘다");
+check(!/ensureMultiviewChatFold\(true\)/.test(content.replace(
+  /data\.type === "APPLY_MULTIVIEW_WIDE"\) \{[\s\S]*?ensureMultiviewChatFold\(true\);/, "")),
+  "자동 맞춤 경로는 광고 중 대기 정책을 그대로 따른다");
+check(/넓은 화면·채팅 접기 다시 적용/.test(watch), "버튼 설명에 채팅 접기를 함께 적는다");
 check(/\.mv-cell-wide-prompt\[hidden\][\s\S]*?display: none/.test(css),
   "숨긴 fallback 오버레이가 레이아웃을 가리지 않는다");
 
