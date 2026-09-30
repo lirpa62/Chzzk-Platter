@@ -1213,6 +1213,17 @@
     if (pageKey.startsWith("video:")) {
       const videoNo = pageKey.slice(6);
       if (videoChannelCache.has(videoNo)) return videoChannelCache.get(videoNo);
+      // 멀티뷰 다시보기 칸은 부모가 채널 id 를 주소로 넘긴다(이 영상의 칸일 때만).
+      // 영상 API 를 기다리지 않고 바로 스트리머별 믹서 설정을 불러온다.
+      if (multiviewSlotId === pageKey) {
+        const owner = String(
+          new URLSearchParams(location.search).get("cheeseMultiOwnerChannelId") || "",
+        ).toLowerCase();
+        if (/^[0-9a-f]{32}$/.test(owner)) {
+          videoChannelCache.set(videoNo, owner);
+          return owner;
+        }
+      }
       const fromApi = await fetchChannelIdFromApi(videoNo);
       if (fromApi) {
         videoChannelCache.set(videoNo, fromApi);
@@ -3205,10 +3216,9 @@
     return Math.round(clampGain(quantized) * 100) / 100;
   }
 
-  const multiviewMixerChannelId = new URLSearchParams(location.search).get("cheeseMulti") === "1"
-    ? (location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1] || "").toLowerCase()
-    : "";
-  const multiviewQualityChannelId = (() => {
+  // 멀티뷰 칸 id. 라이브는 채널 id, 다시보기는 부모가 붙인 'video:<번호>'(주소와 맞을 때만).
+  // 부모·content.js 가 쓰는 칸 id(MULTIVIEW_CHANNEL_ID)와 같은 규칙이다.
+  const multiviewSlotId = (() => {
     const params = new URLSearchParams(location.search);
     if (params.get("cheeseMulti") !== "1") return "";
     const liveId = location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1]?.toLowerCase();
@@ -3217,6 +3227,19 @@
     const slotId = params.get("cheeseMultiChannelId") || "";
     return /^video:\d+$/.test(slotId) && videoNo === slotId.slice(6) ? slotId : "";
   })();
+  // ⚠ 예전에는 믹서 칸 id 만 라이브 주소에서 따로 구해, 다시보기 칸에서는 빈 값이 됐다.
+  //   그러면 믹서가 상태를 보내지 않고 명령도 무시해 볼륨 패널이 '상태 확인 중' 에 머물렀다.
+  const multiviewMixerChannelId = multiviewSlotId;
+  const multiviewQualityChannelId = multiviewSlotId;
+  // 이 칸의 믹서 상태가 준비됐는지. 라이브 칸은 칸 id 가 곧 설정 키(채널 id)다.
+  // ⚠ 다시보기 칸은 칸 id 가 'video:<번호>' 인데 설정 키는 그 다시보기의 채널 id 라
+  //   둘이 같아질 수 없다. 예전에는 둘을 비교해 볼륨 패널이 늘 '상태 확인 중' 이었다.
+  //   다시보기 칸은 이 프레임이 그 영상만 띄우므로 상태 로드만 끝나면 준비된 것이다.
+  const multiviewMixerIsVideo = multiviewMixerChannelId.startsWith("video:");
+  function multiviewMixerReady() {
+    return stateLoaded &&
+      (multiviewMixerIsVideo || currentMediaId === multiviewMixerChannelId);
+  }
   let multiviewMixerRevision = 0;
   let multiviewMixerSignature = "";
   let multiviewMixerNotifyTimer = 0;
@@ -3231,7 +3254,7 @@
     }
     const selected = presets.find((preset) => preset.id === state.preset);
     return {
-      ready: stateLoaded && currentMediaId === multiviewMixerChannelId,
+      ready: multiviewMixerReady(),
       enabled: state.enabled === true,
       graphConflict: graphConflict === true,
       preset: state.preset,
@@ -3346,7 +3369,7 @@
     if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
     let reason = null;
     try {
-      if (!stateLoaded || currentMediaId !== multiviewMixerChannelId) reason = "not-ready";
+      if (!multiviewMixerReady()) reason = "not-ready";
       else if (graphConflict && data.type !== "MIXER_SET_ENABLED" &&
           data.type !== "MIXER_FLUSH_GAIN") reason = "graph-conflict";
       else if (data.type === "MIXER_SET_ENABLED") {
@@ -3424,6 +3447,109 @@
       applied: reason === null,
       reason,
     }, location.origin);
+  });
+
+  // 멀티뷰 싱크 기준점: 지금 재생 중인 조각의 송출 시각(PROGRAM-DATE-TIME)과 미디어 시작 시각.
+  // ⚠ 채널마다 seekable 끝(라이브 가장자리)이 송출 시각과 떨어진 정도가 달라, 가장자리 기준
+  //   지연을 맞추면 지연이 짧게 나온 채널이 실제 장면은 더 뒤처질 수 있다. 두 값을 알면
+  //   화면 장면의 송출 시각을 구할 수 있어 채널끼리 같은 시계로 비교된다.
+  // 값만 읽는다(플레이어 내부 함수는 부르지 않는다). 라이브 칸만 해당한다.
+  let multiviewSyncCore = null;
+  const isMultiviewLiveSlot = () => !!multiviewSlotId && !multiviewSlotId.startsWith("video:");
+  // 플레이어의 hls 매체 제어 객체(_lastFrag·_hls·_catchUpController 를 가진다).
+  // 매 요청마다 fiber 를 훑지 않도록 코어를 붙들고, 값이 안 나올 때만 다시 찾는다.
+  function multiviewMediaController(accept = (mc) => !!mc) {
+    const read = (core) => {
+      const mc = core?.srcObject?._player?.player?._mediaController;
+      return mc && typeof mc === "object" && accept(mc) ? mc : null;
+    };
+    let mc = multiviewSyncCore ? read(multiviewSyncCore) : null;
+    if (!mc) {
+      multiviewSyncCore = findCorePlayer();
+      mc = read(multiviewSyncCore);
+    }
+    return mc;
+  }
+
+  function multiviewSyncAnchor() {
+    if (!isMultiviewLiveSlot()) return null;
+    const readAnchor = (mc) => {
+      const frag = mc?._lastFrag;
+      const pdt = frag?._programDateTime;
+      const start = frag?.start;
+      if (typeof pdt !== "number" || !Number.isFinite(pdt) || pdt < 1e12 ||
+          typeof start !== "number" || !Number.isFinite(start) || start < 0) return null;
+      return { pdt, start, cc: Number.isFinite(frag.cc) ? frag.cc : null };
+    };
+    return readAnchor(multiviewMediaController((mc) => !!readAnchor(mc)));
+  }
+
+  // 자동 싱크 중인 칸은 치지직 플레이어의 자체 따라잡기(버퍼 4초 초과 → 1.03×, 2초 이하 →
+  // 1×)를 멈춘다. ⚠ 싱크가 칸을 느린 채널에 맞추려고 뒤로 옮기면 버퍼가 늘어 플레이어가
+  //   1.03× 로 다시 당겼고, 30초 뒤 싱크가 또 뒤로 옮기는 일이 반복됐다.
+  // 플레이어가 매 틱 읽는 hls 설정 maxLiveSyncPlaybackRate 를 1 로 두면 따라잡기(와 hls.js
+  // 자체 지연 보정)가 배속을 올리지 않는다. 자동 싱크가 풀리면 원래 값으로 돌린다.
+  const PLAYER_CATCH_UP_RATE = 1.03;
+  let multiviewCatchUpHold = false;
+  let multiviewCatchUpTimer = 0;
+  let multiviewCatchUpConfig = null;
+  let multiviewCatchUpOriginal = null;
+  function applyMultiviewCatchUpHold() {
+    if (!isMultiviewLiveSlot()) return;
+    const mc = multiviewMediaController((item) => !!item._hls?.config);
+    const config = mc?._hls?.config;
+    if (!multiviewCatchUpHold) {
+      if (multiviewCatchUpConfig && multiviewCatchUpOriginal !== null)
+        multiviewCatchUpConfig.maxLiveSyncPlaybackRate = multiviewCatchUpOriginal;
+      multiviewCatchUpConfig = null;
+      multiviewCatchUpOriginal = null;
+      return;
+    }
+    if (!config || typeof config !== "object") return;
+    // 재연결로 hls 가 새로 만들어지면 새 설정의 원래 값을 다시 잡는다.
+    if (config !== multiviewCatchUpConfig) {
+      multiviewCatchUpConfig = config;
+      multiviewCatchUpOriginal = typeof config.maxLiveSyncPlaybackRate === "number"
+        ? config.maxLiveSyncPlaybackRate : null;
+    }
+    if (config.maxLiveSyncPlaybackRate !== 1) config.maxLiveSyncPlaybackRate = 1;
+    // 이미 플레이어가 따라잡기 중이면 그 배속만 1× 로 되돌린다(싱크 배속은 1.03 을 쓰지 않는다).
+    const video = mc._video instanceof HTMLMediaElement ? mc._video : findVideo();
+    if (video && mc._catchUpController?._isCatchUpMode === true &&
+        Math.abs(video.playbackRate - PLAYER_CATCH_UP_RATE) < 0.001) {
+      video.playbackRate = 1;
+    }
+  }
+
+  function setMultiviewCatchUpHold(hold) {
+    multiviewCatchUpHold = hold === true;
+    if (multiviewCatchUpTimer) clearInterval(multiviewCatchUpTimer);
+    multiviewCatchUpTimer = 0;
+    try { applyMultiviewCatchUpHold(); } catch {}
+    if (multiviewCatchUpHold) {
+      multiviewCatchUpTimer = setInterval(() => {
+        try { applyMultiviewCatchUpHold(); } catch {}
+      }, 2000);
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    if (!isMultiviewLiveSlot() || event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (data?.source !== "cheese-multiview-catchup-hold" || data.channelId !== multiviewSlotId ||
+        typeof data.hold !== "boolean") return;
+    setMultiviewCatchUpHold(data.hold);
+  });
+
+  window.addEventListener("message", (event) => {
+    if (!multiviewSlotId || event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (data?.source !== "cheese-multiview-sync-anchor-request" ||
+        data.channelId !== multiviewSlotId) return;
+    let anchor = null;
+    try { anchor = multiviewSyncAnchor(); } catch {}
+    window.postMessage({ source: "cheese-multiview-sync-anchor", channelId: multiviewSlotId,
+      anchor }, location.origin);
   });
   // 키보드 한 단계 이동. 현재값이 새 간격 격자에 없으면 이동 방향에서 가장 가까운
   // 다음 격자로 붙이고, 이미 격자에 있으면 정확히 한 단계 이동한다.

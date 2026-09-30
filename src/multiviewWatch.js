@@ -125,20 +125,21 @@
   // 보여 준다(플레이어가 계속 0 을 주는 경우까지 '전환 중' 으로 덮지 않는다).
   const QUALITY_TRANSITION_MAX_MS = 5000;
 
+  // 계속 적용되는 화질 정책. 어느 칸도 상한을 두지 않고 각 화면의 치지직 화질 선택을
+  // 따른다(README: '메인 고화질 · 보조 480p로 시작'은 최초 재생 화질만 정한다).
+  // ⚠ 예전에는 옵션을 끄면 오히려 보조 라이브에 480p, 다시보기에 720p 상한이 계속
+  //   걸렸다. 시작 목표는 아래 initialQualityForChannel 이 따로 정한다.
   function qualityForChannel(channel, isMain, mainHighQuality) {
-    const isVideo = channel.mediaType === "video";
-    // 이 옵션은 iframe을 처음 만들 때만 화질 목표로 전달한다. 이후 메인 역할 변경
-    // 메시지는 화질을 다시 고정하지 않아 사용자의 선택을 유지한다.
-    if (mainHighQuality) return { quality: "native", qualityPolicy: "native" };
-    if (isVideo) return { quality: "720", qualityPolicy: "cap-720" };
-    if (isMain) return { quality: "native", qualityPolicy: "native" };
-    return { quality: "480", qualityPolicy: "cap-480" };
+    return { quality: "native", qualityPolicy: "native" };
   }
 
+  // iframe 을 처음 만들 때만 쓰는 시작 화질 목표.
+  // - 라이브: 옵션을 켰을 때만 메인 최고화질, 보조 480p 이하.
+  // - 다시보기: 옵션과 무관하게 메인 최대 화질, 보조 720p 이하(README).
   function initialQualityForChannel(channel, isMain, mainHighQuality) {
+    if (channel.mediaType === "video") return isMain ? "highest" : "cap-720";
     if (!mainHighQuality) return "";
-    if (isMain) return "highest";
-    return channel.mediaType === "video" ? "cap-720" : "cap-480";
+    return isMain ? "highest" : "cap-480";
   }
 
   function frameUrl(channel, isMain, mainHighQuality) {
@@ -157,7 +158,13 @@
       CHZZK_ORIGIN,
     );
     url.searchParams.set("cheeseMulti", "1");
-    if (isVideo) url.searchParams.set("cheeseMultiChannelId", channel.channelId);
+    if (isVideo) {
+      url.searchParams.set("cheeseMultiChannelId", channel.channelId);
+      // 다시보기 칸의 채널 id. 칸 안 믹서가 스트리머별 설정을 불러오는 키다. 넘기지 않으면
+      // 믹서가 영상 API 로 따로 알아내야 해 설정 로드가 늦거나, 실패하면 기본값으로 동작한다.
+      if (HASH_RE.test(String(channel.ownerChannelId || "")))
+        url.searchParams.set("cheeseMultiOwnerChannelId", channel.ownerChannelId);
+    }
     url.searchParams.set("cheeseMultiMain", isMain ? "1" : "0");
     // 첫 프레임의 음소거 상태도 현재 채널별 오디오 상태와 일치시킨다.
     url.searchParams.set("cheeseMultiMuted", effectiveMuted(channel.channelId) ? "1" : "0");
@@ -166,9 +173,8 @@
     url.searchParams.set("cheeseMultiVolume", String(effectiveVolume(channel.channelId)));
     url.searchParams.set("cheeseMultiQualityPolicy", qualityPolicy);
     if (initialQuality) url.searchParams.set("cheeseMultiInitialQuality", initialQuality);
-    // 옵션을 끄면 기존 역할별 정책을 유지하고, 켜면 초기 목표만 한 번 적용한다.
-    // 채널별로 화질을 기억해 두지 않는다 — 역할이 기준이다.
-    //
+    // 시작 목표(cheeseMultiInitialQuality)만 한 번 적용하고, 이후에는 치지직 화질 선택을
+    // 따른다. 채널별로 화질을 기억해 두지 않는다.
     if (quality !== "high" && quality !== "native") {
       url.searchParams.set("cheeseMultiQuality", quality);
     }
@@ -2962,6 +2968,12 @@
     if (!liveCatchUpEnabled) return;
     const { limitSec, confirmMs, cooldownMs, ownSeekQuietMs } = SYNC.CATCH_UP;
     for (const cluster of catchUpClusters()) {
+      // 자동 싱크는 되감은 칸도 기준으로 삼는다. 나머지만 앞으로 보내면
+      // 싱크가 다시 그 칸에 맞춰 뒤로 당기므로 묶음 전체를 보류한다.
+      if (cluster.length > 1 && cluster.some((id) => catchUpHeld.has(id))) {
+        for (const id of cluster) catchUpOverSince.delete(id);
+        continue;
+      }
       const members = cluster.filter((id) => catchUpCandidate(id, now));
       let due = false;
       for (const id of cluster) {
@@ -3002,6 +3014,14 @@
         }
       }
     }
+  }
+
+  // 싱크가 맞출 기준 지연을 채널 전체에 한 번에 정한다(모두 실제 지연이 있을 때만 그것).
+  // ⚠ 싱크 계산(자동·수동·그룹) 직전마다 부른다. 측정값은 매초 새 객체로 바뀐다.
+  function applySyncAlignDelays(now = Date.now()) {
+    return SYNC.alignDelays(
+      syncEligibleIds(now).map((id) => syncStats.get(id)),
+    );
   }
 
   function syncGroupForChannel(channelId) {
@@ -3082,11 +3102,18 @@
     group.referenceChannelId = nextReference;
   }
   const syncDiagnostics = DIAGNOSTICS.createRecorder();
+  const playerCatchUpHold = new Map(); // channelId -> 마지막으로 보낸 자체 따라잡기 멈춤
   let syncCommandSeq = 0;
   let syncCongestion = { active: false, since: 0 };
   let syncTimer = 0;
   let syncNotice = "";
   let syncDiagnosticsStartedAt = 0;
+  // 기록 상태: idle(시작 전) · recording · paused · stopped.
+  // ⚠ 예전에는 체크박스로 끄고 켜기만 해, 다시 켜도 처음 시작 시각부터 시간이
+  //   이어서 흘렀다. 멈춘 동안(일시정지·정지)은 측정 시간에 넣지 않는다.
+  let syncDiagnosticsPhase = "idle";
+  let syncDiagnosticsHaltedAt = 0;
+  let syncDiagnosticsPausedMs = 0;
   let syncDiagnosticsNotice = "";
   let syncDiagnosticsUi = false;
   void chrome.storage?.local
@@ -3100,7 +3127,7 @@
     if (area !== "local" || !changes.cheeseMultiviewSyncDiagnosticsUi) return;
     syncDiagnosticsUi =
       changes.cheeseMultiviewSyncDiagnosticsUi.newValue === true;
-    if (!syncDiagnosticsUi) setSyncDiagnosticsEnabled(false);
+    if (!syncDiagnosticsUi) stopSyncDiagnostics();
     refreshSyncPanel();
   });
 
@@ -3118,7 +3145,7 @@
     return syncDiagnostics.add({
       type,
       timestamp: at,
-      elapsedMs: Math.max(0, at - syncDiagnosticsStartedAt),
+      elapsedMs: Math.max(0, at - syncDiagnosticsStartedAt - syncDiagnosticsPausedMs),
       ...fields,
     });
   }
@@ -3159,8 +3186,8 @@
     const manualOffset = context?.manualOffsets[channelId] || 0;
     const targetDelaySec = SYNC.targetDelay(referenceStats, manualOffset);
     const syncErrorSec =
-      targetDelaySec !== null && stats.nativeDelaySec !== null
-        ? targetDelaySec - stats.nativeDelaySec
+      targetDelaySec !== null && SYNC.alignDelay(stats) !== null
+        ? targetDelaySec - SYNC.alignDelay(stats)
         : null;
     const readyAt = syncReadyAt.get(channelId);
     recordSyncDiagnostic(
@@ -3177,6 +3204,9 @@
         inSyncScope: group ? true : inSyncScope(channelId),
         referenceChannelId,
         nativeDelaySec: stats.nativeDelaySec,
+        // 실제 송출 시각 기준 지연과, 싱크가 맞출 때 쓴 지연(둘 중 하나).
+        absoluteDelaySec: stats.absoluteDelaySec ?? null,
+        alignDelaySec: SYNC.alignDelay(stats),
         bufferAheadSec: stats.bufferAheadSec,
         edgeLagSec: stats.edgeLagSec,
         playbackRate: stats.playbackRate,
@@ -3243,12 +3273,29 @@
     );
   }
 
+  // 실제로 기록한 시간(멈춘 동안은 빼고, 멈춘 뒤로는 흐르지 않는다).
+  function syncDiagnosticsElapsed(now = Date.now()) {
+    if (!syncDiagnosticsStartedAt) return 0;
+    const end = syncDiagnosticsHaltedAt || now;
+    return Math.max(0, end - syncDiagnosticsStartedAt - syncDiagnosticsPausedMs);
+  }
+
+  function syncDiagnosticsStatusText(now = Date.now()) {
+    const count = syncDiagnostics.size.toLocaleString();
+    const elapsed = DIAGNOSTICS.formatDuration(syncDiagnosticsElapsed(now));
+    if (syncDiagnosticsPhase === "recording") return `기록 중 · ${elapsed} · ${count}개 기록`;
+    if (syncDiagnosticsPhase === "paused") return `일시정지 · ${elapsed} · ${count}개 기록`;
+    if (syncDiagnosticsPhase === "stopped") return `정지됨 · ${elapsed} · ${count}개 보관`;
+    return syncDiagnostics.size ? `기록 안 함 · ${count}개 보관` : "기록 안 함";
+  }
+
   function diagnosticsPayload(exportedAt = Date.now()) {
     const startedAt = syncDiagnosticsStartedAt || exportedAt;
     return DIAGNOSTICS.createExport({
       records: syncDiagnostics.toArray(),
       startedAt,
       exportedAt,
+      durationMs: syncDiagnosticsElapsed(exportedAt),
       channelCount: state.chosen.length,
       limits: SYNC.LIMITS,
     });
@@ -3308,21 +3355,131 @@
     refreshSyncPanel();
   }
 
+  function resetSyncDiagnosticsClock(now = 0) {
+    syncDiagnosticsStartedAt = now;
+    syncDiagnosticsHaltedAt = 0;
+    syncDiagnosticsPausedMs = 0;
+  }
+
+  function setSyncDiagnosticsPhase(phase) {
+    syncDiagnosticsPhase = phase;
+    state.sync.diagnosticsEnabled = phase === "recording";
+    updateSyncPolling();
+    refreshSyncPanel();
+  }
+
   function clearSyncDiagnostics() {
     syncDiagnostics.clear();
-    syncDiagnosticsStartedAt = Date.now();
+    // 기록 중이면 새로 잰다. 멈춰 있으면 시작 전 상태로 돌린다.
+    if (syncDiagnosticsPhase === "recording") resetSyncDiagnosticsClock(Date.now());
+    else {
+      resetSyncDiagnosticsClock();
+      syncDiagnosticsPhase = "idle";
+    }
     syncDiagnosticsNotice = "진단 기록을 초기화했습니다.";
     refreshSyncPanel();
   }
 
-  function setSyncDiagnosticsEnabled(enabled) {
-    state.sync.diagnosticsEnabled = enabled === true;
-    if (state.sync.diagnosticsEnabled && !syncDiagnosticsStartedAt) {
-      syncDiagnosticsStartedAt = Date.now();
+  // 시작: 일시정지였으면 이어서, 정지·시작 전이면 새 기록으로 시작한다.
+  function startSyncDiagnostics() {
+    const now = Date.now();
+    if (syncDiagnosticsPhase === "recording") return;
+    if (syncDiagnosticsPhase === "paused") {
+      syncDiagnosticsPausedMs += Math.max(0, now - syncDiagnosticsHaltedAt);
+      syncDiagnosticsHaltedAt = 0;
+    } else {
+      syncDiagnostics.clear();
+      resetSyncDiagnosticsClock(now);
     }
     syncDiagnosticsNotice = "";
-    updateSyncPolling();
-    refreshSyncPanel();
+    setSyncDiagnosticsPhase("recording");
+  }
+
+  function pauseSyncDiagnostics() {
+    if (syncDiagnosticsPhase !== "recording") return;
+    syncDiagnosticsHaltedAt = Date.now();
+    syncDiagnosticsNotice = "";
+    setSyncDiagnosticsPhase("paused");
+  }
+
+  // 정지: 기록은 남겨 두고(복사·내보내기용) 시간은 멈춘다.
+  function stopSyncDiagnostics() {
+    if (syncDiagnosticsPhase !== "recording" && syncDiagnosticsPhase !== "paused") return;
+    if (syncDiagnosticsPhase === "recording") syncDiagnosticsHaltedAt = Date.now();
+    syncDiagnosticsNotice = "";
+    setSyncDiagnosticsPhase("stopped");
+  }
+
+  // 진단 기록 조작 버튼(lucide play / pause / square).
+  const SYNC_DIAGNOSTICS_ICONS = {
+    Start: '<polygon points="6 3 20 12 6 21 6 3"/>',
+    Pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+    Stop: '<rect width="18" height="18" x="3" y="3" rx="2"/>',
+  };
+
+  function syncDiagnosticsControlState(action) {
+    const phase = syncDiagnosticsPhase;
+    if (action === "Start") {
+      return {
+        disabled: phase === "recording",
+        label: phase === "paused"
+          ? "기록 이어서 하기"
+          : phase === "stopped" && syncDiagnostics.size
+            ? "새로 기록 시작(이전 기록은 지워집니다)"
+            : "기록 시작",
+      };
+    }
+    if (action === "Pause") return { disabled: phase !== "recording", label: "기록 일시정지" };
+    return { disabled: phase !== "recording" && phase !== "paused", label: "기록 정지" };
+  }
+
+  function syncDiagnosticsControlsHtml() {
+    return (
+      `<div class="mv-sync-diagnostics-controls" role="group" aria-label="진단 기록">` +
+      ["Start", "Pause", "Stop"].map((action) => {
+        const view = syncDiagnosticsControlState(action);
+        return (
+          `<button type="button" id="mvSyncDiagnostics${action}" class="mv-custom-tooltip" ` +
+          `data-tooltip="${esc(view.label)}" aria-label="${esc(view.label)}"` +
+          `${view.disabled ? " disabled" : ""}>` +
+          `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
+          `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+          `${SYNC_DIAGNOSTICS_ICONS[action]}</svg></button>`
+        );
+      }).join("") +
+      `</div>`
+    );
+  }
+
+  // 전체 렌더 없이 진단 영역의 글자·버튼 상태만 맞춘다.
+  function patchSyncDiagnostics(diagnostics, now = Date.now()) {
+    const setText = (el, value) => {
+      if (el && el.textContent !== value) el.textContent = value;
+    };
+    diagnostics.hidden = !syncDiagnosticsUi;
+    setText(diagnostics.querySelector(".mv-sync-diagnostics-status"), syncDiagnosticsStatusText(now));
+    diagnostics.dataset.phase = syncDiagnosticsPhase;
+    for (const action of ["Start", "Pause", "Stop"]) {
+      const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
+      if (!button) continue;
+      const view = syncDiagnosticsControlState(action);
+      if (button.disabled !== view.disabled) button.disabled = view.disabled;
+      if (button.dataset.tooltip !== view.label) {
+        button.dataset.tooltip = view.label;
+        button.setAttribute("aria-label", view.label);
+      }
+    }
+    for (const action of ["Copy", "Export", "Clear"]) {
+      const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
+      const disabled = syncDiagnostics.size === 0;
+      if (button && button.disabled !== disabled) button.disabled = disabled;
+    }
+    const notice = diagnostics.querySelector(".mv-sync-diagnostics-notice");
+    if (!notice) return false;
+    setText(notice, syncDiagnosticsNotice);
+    const hidden = !syncDiagnosticsNotice;
+    if (notice.hidden !== hidden) notice.hidden = hidden;
+    return true;
   }
 
   document.addEventListener(
@@ -3362,8 +3519,14 @@
           node.id.startsWith("mvSyncDiagnostics"),
       );
       if (!control) return;
-      if (control.id === "mvSyncDiagnostics") {
-        queueMicrotask(() => setSyncDiagnosticsEnabled(control.checked));
+      if (control.disabled) return;
+      const phaseAction = {
+        mvSyncDiagnosticsStart: startSyncDiagnostics,
+        mvSyncDiagnosticsPause: pauseSyncDiagnostics,
+        mvSyncDiagnosticsStop: stopSyncDiagnostics,
+      }[control.id];
+      if (phaseAction) {
+        queueMicrotask(phaseAction);
         return;
       }
       if (control.id === "mvSyncDiagnosticsCopy") {
@@ -4007,35 +4170,7 @@
     const noticeHidden = !syncNotice;
     if (notice.hidden !== noticeHidden) notice.hidden = noticeHidden;
     const diagnostics = panel.querySelector(".mv-sync-diagnostics");
-    if (diagnostics) {
-      diagnostics.hidden = !syncDiagnosticsUi;
-      const checkbox = diagnostics.querySelector("#mvSyncDiagnostics");
-      if (checkbox.checked !== state.sync.diagnosticsEnabled) {
-        checkbox.checked = state.sync.diagnosticsEnabled;
-      }
-      const elapsed = syncDiagnosticsStartedAt
-        ? Math.max(0, now - syncDiagnosticsStartedAt)
-        : 0;
-      setText(
-        diagnostics.querySelector(".mv-sync-diagnostics-status"),
-        state.sync.diagnosticsEnabled
-          ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
-          : syncDiagnostics.size
-            ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
-            : "기록 안 함",
-      );
-      for (const action of ["Copy", "Export", "Clear"]) {
-        const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
-        const disabled = syncDiagnostics.size === 0;
-        if (button.disabled !== disabled) button.disabled = disabled;
-      }
-      const diagnosticNotice = diagnostics.querySelector(
-        ".mv-sync-diagnostics-notice",
-      );
-      setText(diagnosticNotice, syncDiagnosticsNotice);
-      const hidden = !syncDiagnosticsNotice;
-      if (diagnosticNotice.hidden !== hidden) diagnosticNotice.hidden = hidden;
-    }
+    if (diagnostics) patchSyncDiagnostics(diagnostics, now);
     return true;
   }
 
@@ -4123,10 +4258,10 @@
         ? `<button type="button" class="mv-group-add" data-mv-group-add>그룹 추가</button>`
         : "") +
       `<p class="mv-sync-notice" role="status" hidden></p>` +
-      `<section class="mv-sync-diagnostics" aria-label="싱크 진단" hidden>` +
-      `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
-      `<label><input type="checkbox" id="mvSyncDiagnostics"${state.sync.diagnosticsEnabled ? " checked" : ""}> 싱크 진단 기록</label></div>` +
-      `<p class="mv-sync-diagnostics-status">기록 안 함</p>` +
+      `<section class="mv-sync-diagnostics" aria-label="싱크 진단" data-phase="${syncDiagnosticsPhase}" hidden>` +
+      `<div class="mv-sync-diagnostics-head"><strong>싱크 진단 기록</strong>` +
+      `${syncDiagnosticsControlsHtml()}</div>` +
+      `<p class="mv-sync-diagnostics-status">${esc(syncDiagnosticsStatusText())}</p>` +
       `<div class="mv-sync-diagnostics-actions">` +
       `<button type="button" id="mvSyncDiagnosticsCopy" disabled>요약 복사</button>` +
       `<button type="button" id="mvSyncDiagnosticsExport" disabled>JSON 내보내기</button>` +
@@ -4327,29 +4462,7 @@
     notice.hidden = !syncNotice;
     const diagnostics = panel.querySelector(".mv-sync-diagnostics");
     if (!diagnostics) return false;
-    diagnostics.hidden = !syncDiagnosticsUi;
-    const elapsed = syncDiagnosticsStartedAt
-      ? Math.max(0, now - syncDiagnosticsStartedAt)
-      : 0;
-    const status = state.sync.diagnosticsEnabled
-      ? `기록 중 · ${DIAGNOSTICS.formatDuration(elapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
-      : syncDiagnostics.size
-        ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
-        : "기록 안 함";
-    const checkbox = diagnostics.querySelector("#mvSyncDiagnostics");
-    if (checkbox) checkbox.checked = state.sync.diagnosticsEnabled;
-    setText(diagnostics.querySelector(".mv-sync-diagnostics-status"), status);
-    for (const action of ["Copy", "Export", "Clear"]) {
-      const button = diagnostics.querySelector(`#mvSyncDiagnostics${action}`);
-      if (button) button.disabled = syncDiagnostics.size === 0;
-    }
-    const diagnosticsNotice = diagnostics.querySelector(
-      ".mv-sync-diagnostics-notice",
-    );
-    if (!diagnosticsNotice) return false;
-    setText(diagnosticsNotice, syncDiagnosticsNotice);
-    diagnosticsNotice.hidden = !syncDiagnosticsNotice;
-    return true;
+    return patchSyncDiagnostics(diagnostics, now);
   }
 
   // 싱크 패널의 값만 바뀌었을 때 쓴다. 제자리 갱신이 되면 그걸로 끝내고,
@@ -4446,6 +4559,7 @@
   }
 
   function selectSyncReference(now = Date.now()) {
+    applySyncAlignDelays(now);
     // 기준 채널은 반드시 현재 싱크 그룹 안에서 고른다. 다만 offset rebase 는
     // 아래에서 chosen 전체를 대상으로 한다 — 제외 채널의 상대 보정값을
     // 잃지 않기 위해서다.
@@ -4486,6 +4600,7 @@
   }
 
   function updateSyncPolling() {
+    updatePlayerCatchUpHold();
     const frameOwnsRate = state.chosen.some(
       (c) => syncStats.get(c.channelId)?.syncRateOwned === true,
     );
@@ -4509,6 +4624,36 @@
     if (needed && !syncTimer) {
       requestSyncStats();
       syncTimer = window.setInterval(syncTick, SYNC.LIMITS.sampleMs);
+    }
+  }
+
+  // 자동 싱크가 맞추는 라이브 칸. 이 칸들은 치지직 플레이어의 자체 따라잡기(1.03×)를
+  // 멈춘다. 그렇지 않으면 싱크가 뒤로 맞춘 칸을 플레이어가 다시 앞으로 당긴다.
+  function autoSyncedChannelIds() {
+    const lists =
+      state.sync.scope === "groups"
+        ? state.sync.groups
+            .filter((group) => group.mode === "auto")
+            .map((group) => group.channelIds)
+        : state.sync.mode === "auto"
+          ? [syncScopeIds()]
+          : [];
+    const ids = new Set();
+    for (const list of lists) {
+      const live = list.filter((id) => !isVideoSlot(id));
+      if (live.length >= 2) live.forEach((id) => ids.add(id));
+    }
+    return ids;
+  }
+
+  function updatePlayerCatchUpHold() {
+    const held = autoSyncedChannelIds();
+    for (const c of state.chosen) {
+      const id = c.channelId;
+      if (isVideoSlot(id) || currentStatus(id) !== "ready") continue;
+      const hold = held.has(id);
+      if ((playerCatchUpHold.get(id) ?? false) === hold) continue;
+      if (sendSync(id, "SET_PLAYER_CATCH_UP_HOLD", { hold })) playerCatchUpHold.set(id, hold);
     }
   }
 
@@ -4567,14 +4712,14 @@
       if (target === null) {
         if (
           offsetOverrides &&
-          Math.abs(syncStats.get(id).nativeDelaySec - delay) < 0.05
+          Math.abs(SYNC.alignDelay(syncStats.get(id)) - delay) < 0.05
         ) {
           state.sync.manualOffsets[id] = requestedOffset;
         }
         continue;
       }
       const withinOneSeek =
-        Math.abs(syncStats.get(id).nativeDelaySec - delay) <=
+        Math.abs(SYNC.alignDelay(syncStats.get(id)) - delay) <=
         SYNC.LIMITS.maxSeekSec;
       if (
         sendSyncCommand(
@@ -4617,6 +4762,7 @@
   }
 
   function selectGroupReference(group, now = Date.now()) {
+    applySyncAlignDelays(now);
     const ids = groupEligibleIds(group, now);
     const current = group.referenceChannelId;
     if (group.mode !== "auto" && current && ids.includes(current))
@@ -4674,7 +4820,7 @@
           continue;
         }
         const delay = SYNC.targetDelay(refStats, group.manualOffsets[id] || 0);
-        const error = delay - st.nativeDelaySec;
+        const error = delay - SYNC.alignDelay(st);
         if (
           Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
           now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs
@@ -4729,7 +4875,7 @@
       const delay = SYNC.targetDelay(refStats, offset);
       const target = SYNC.seekTarget(st, delay, 0.05);
       if (target === null) {
-        if (offsets && Math.abs(st.nativeDelaySec - delay) < 0.05) {
+        if (offsets && Math.abs(SYNC.alignDelay(st) - delay) < 0.05) {
           group.manualOffsets[id] = offset;
         }
         continue;
@@ -4749,7 +4895,7 @@
           offset,
           commitOffset:
             !!offsets &&
-            Math.abs(st.nativeDelaySec - delay) <= SYNC.LIMITS.maxSeekSec,
+            Math.abs(SYNC.alignDelay(st) - delay) <= SYNC.LIMITS.maxSeekSec,
         },
       );
     }
@@ -4923,6 +5069,8 @@
     }
     const now = Date.now();
     requestSyncStats();
+    updatePlayerCatchUpHold();
+    applySyncAlignDelays(now);
     // 직전 틱까지 받은 측정값으로 판단한다(싱크 보정과 같은 기준).
     tickLiveCatchUp(now);
     if (state.sync.scope === "groups") {
@@ -4978,7 +5126,7 @@
           refStats,
           state.sync.manualOffsets[id] || 0,
         );
-        const error = delay - syncStats.get(id).nativeDelaySec;
+        const error = delay - SYNC.alignDelay(syncStats.get(id));
         if (
           Math.abs(error) >= SYNC.LIMITS.seekThresholdSec &&
           now - (syncSeekAt.get(id) || 0) >= SYNC.LIMITS.seekCooldownMs
@@ -5035,14 +5183,7 @@
     if (state.sync.scope === "groups") return renderGroupSync();
     const now = Date.now();
     const ref = state.sync.referenceChannelId;
-    const diagnosticsElapsed = syncDiagnosticsStartedAt
-      ? Math.max(0, now - syncDiagnosticsStartedAt)
-      : 0;
-    const diagnosticsStatus = state.sync.diagnosticsEnabled
-      ? `기록 중 · ${DIAGNOSTICS.formatDuration(diagnosticsElapsed)} · ${syncDiagnostics.size.toLocaleString()}개 기록`
-      : syncDiagnostics.size
-        ? `기록 안 함 · ${syncDiagnostics.size.toLocaleString()}개 보관`
-        : "기록 안 함";
+    const diagnosticsStatus = syncDiagnosticsStatusText(now);
     const rows = state.chosen
       .map((c) => {
         const id = c.channelId;
@@ -5119,10 +5260,9 @@
       `${esc(syncNotice)}</p>` +
       `<div class="mv-sync-list">${rows}</div>` +
       `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다.<br />채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
-      `<section class="mv-sync-diagnostics" aria-label="싱크 진단"${syncDiagnosticsUi ? "" : " hidden"}>` +
-      `<div class="mv-sync-diagnostics-head"><strong>진단</strong>` +
-      `<label><input type="checkbox" id="mvSyncDiagnostics"` +
-      `${state.sync.diagnosticsEnabled ? " checked" : ""}> 싱크 진단 기록</label></div>` +
+      `<section class="mv-sync-diagnostics" aria-label="싱크 진단" data-phase="${syncDiagnosticsPhase}"${syncDiagnosticsUi ? "" : " hidden"}>` +
+      `<div class="mv-sync-diagnostics-head"><strong>싱크 진단 기록</strong>` +
+      `${syncDiagnosticsControlsHtml()}</div>` +
       `<p class="mv-sync-diagnostics-status">${esc(diagnosticsStatus)}</p>` +
       `<div class="mv-sync-diagnostics-actions">` +
       `<button type="button" id="mvSyncDiagnosticsCopy"${syncDiagnostics.size ? "" : " disabled"}>요약 복사</button>` +
@@ -7666,6 +7806,7 @@
   const FRAME_MESSAGE_TYPES = new Set([
     "FRAME_READY",
     "FRAME_ENDED",
+    "FRAME_ENDED_CANCEL",
     "AUDIO_INTERACTION_REQUIRED",
     "AUDIO_INTERACTION_RESOLVED",
     "MULTIVIEW_STATS",
@@ -7784,6 +7925,8 @@
     }
 
     if (data.type === "FRAME_READY") {
+      // 프레임이 새로 떴으면 따라잡기 멈춤 지시를 다시 보낸다.
+      playerCatchUpHold.delete(channelId);
       if (currentStatus(channelId) === "ready" && !isVideoSlot(channelId)) {
         clearChannelSync(channelId);
         syncReadyAt.set(channelId, Date.now());
@@ -7823,6 +7966,13 @@
       clearTimeout(frameTimers.get(channelId));
       frameTimers.delete(channelId);
       setCellStatus(channelId, "ended");
+      return;
+    }
+    if (data.type === "FRAME_ENDED_CANCEL") {
+      // 장비 재정비 안내였다(방송은 이어진다). 라이브 칸만 되돌린다.
+      if (isVideoSlot(channelId) || currentStatus(channelId) !== "ended") return;
+      setCellStatus(channelId, "ready");
+      requestMixerState(channelId);
       return;
     }
     if (data.type === "FRAME_USER_MUTE") {
@@ -8016,6 +8166,8 @@
       }
       const previousStats = syncStats.get(channelId);
       syncStats.set(channelId, stats);
+      // 새 측정값도 곧바로 같은 정렬 기준(송출 시각/가장자리)을 갖게 한다.
+      applySyncAlignDelays(stats.receivedAt);
       observeCatchUpSample(channelId, previousStats, stats);
       recordSyncSample(channelId, stats, stats.receivedAt);
       const activeSyncMode =

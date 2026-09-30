@@ -73,6 +73,11 @@
     const nativeDelaySec = finite(raw.nativeDelaySec, 0, 86400);
     const bufferAheadSec = finite(raw.bufferAheadSec, 0, 86400);
     const edgeLagSec = finite(raw.edgeLagSec, 0, 86400);
+    // 지금 화면 장면의 실제 송출 시각 기준 지연(PROGRAM-DATE-TIME). 내 PC 시계와 치지직
+    // 시계의 차이만큼 음수일 수도 있지만 채널끼리는 같은 차이라 비교에 쓸 수 있다.
+    const absoluteDelaySec = typeof raw.absoluteDelaySec === "number" &&
+      Number.isFinite(raw.absoluteDelaySec) && raw.absoluteDelaySec >= -60 &&
+      raw.absoluteDelaySec <= 86400 ? raw.absoluteDelaySec : null;
     if (seekableStart !== null && seekableEnd !== null && seekableStart > seekableEnd) return null;
     if (currentTime !== null && seekableEnd !== null && currentTime > seekableEnd + 1) return null;
     if (currentTime !== null && seekableEnd !== null && nativeDelaySec !== null &&
@@ -86,6 +91,7 @@
       readyState: Number.isInteger(raw.readyState) && raw.readyState >= 0 && raw.readyState <= 4
         ? raw.readyState : 0,
       nativeDelaySec,
+      absoluteDelaySec,
       bufferAheadSec,
       edgeLagSec,
       seekableStart,
@@ -104,6 +110,26 @@
       stats.seekableStart !== null && stats.seekableEnd !== null;
   }
 
+  // 채널끼리 맞출 때 쓰는 지연. 각 방송의 라이브 끝까지 거리(nativeDelaySec)는 방송마다
+  // 라이브 끝 자체가 실제 시각보다 늦는 정도가 달라, 그 값을 같게 맞추면 지연이 짧게 잰
+  // 채널이 오히려 뒤처졌다(실측 0.2초). 모든 채널에 실제 송출 시각 기준 지연이 있으면
+  // 그것으로 맞추고(alignDelays 가 정한다), 없으면 예전 값으로 맞춘다.
+  function alignDelay(stats) {
+    if (!stats) return null;
+    return typeof stats.alignDelaySec === "number" ? stats.alignDelaySec : stats.nativeDelaySec;
+  }
+
+  // 맞출 기준을 채널 묶음 전체에 한 번에 정한다. 섞어 쓰면 두 기준의 차이만큼 어긋난다.
+  function alignDelays(statsList) {
+    const list = (statsList || []).filter(Boolean);
+    const absolute = list.length > 0 && list.every((stats) => stats.absoluteDelaySec !== null &&
+      stats.absoluteDelaySec !== undefined);
+    for (const stats of list) {
+      stats.alignDelaySec = absolute ? stats.absoluteDelaySec : stats.nativeDelaySec;
+    }
+    return absolute ? "absolute" : "native";
+  }
+
   function reference(ids, stats, readyAt, current, now = Date.now()) {
     let candidates = ids.filter((id) => eligible(stats.get(id), readyAt.get(id), now, true));
     if (!candidates.length) {
@@ -111,9 +137,9 @@
     }
     if (!candidates.length) return null;
     const slowest = candidates.reduce((a, b) =>
-      stats.get(a).nativeDelaySec >= stats.get(b).nativeDelaySec ? a : b);
+      alignDelay(stats.get(a)) >= alignDelay(stats.get(b)) ? a : b);
     if (candidates.includes(current) &&
-      stats.get(slowest).nativeDelaySec - stats.get(current).nativeDelaySec <= LIMITS.stickySec
+      alignDelay(stats.get(slowest)) - alignDelay(stats.get(current)) <= LIMITS.stickySec
     ) return current;
     return slowest;
   }
@@ -130,13 +156,19 @@
   }
 
   function targetDelay(referenceStats, offset = 0) {
-    if (!referenceStats || referenceStats.nativeDelaySec === null) return null;
-    return Math.max(0, referenceStats.nativeDelaySec + (finite(offset, -600, 600) || 0));
+    const base = alignDelay(referenceStats);
+    if (base === null || base === undefined) return null;
+    const delay = base + (finite(offset, -600, 600) || 0);
+    // 실제 지연 기준이면 시계 차이로 음수일 수 있어 0 으로 자르지 않는다.
+    const absoluteMode = typeof referenceStats.absoluteDelaySec === "number" &&
+      referenceStats.alignDelaySec === referenceStats.absoluteDelaySec;
+    return absoluteMode ? delay : Math.max(0, delay);
   }
 
   function seekTarget(stats, delay, threshold = LIMITS.seekThresholdSec) {
     if (!stats || delay === null || !eligible(stats, stats.receivedAt, stats.receivedAt)) return null;
-    const delta = stats.nativeDelaySec - delay;
+    // 두 지연 모두 재생 위치와 1:1 로 움직이므로, 차이만큼 옮기면 목표에 닿는다.
+    const delta = alignDelay(stats) - delay;
     if (Math.abs(delta) < threshold) return null;
     const next = stats.currentTime + Math.max(-LIMITS.maxSeekSec, Math.min(LIMITS.maxSeekSec, delta));
     return next >= stats.seekableStart + 0.05 && next <= stats.seekableEnd - 0.05
@@ -147,7 +179,9 @@
     const magnitude = Math.abs(error);
     if (magnitude <= LIMITS.rateStopSec || (!active && magnitude < LIMITS.rateStartSec)) return 1;
     const amount = magnitude >= 2 ? 0.05 : magnitude >= 1 ? 0.03 : 0.01;
-    return error > 0 ? 1 - amount : 1 + amount;
+    // ⚠ 빠르게는 1.03 을 쓰지 않는다. 치지직 플레이어의 자체 따라잡기 배속이 정확히
+    //   1.03 이라, 그 값이면 플레이어가 자기 따라잡기로 알고 버퍼가 줄면 1× 로 되돌린다.
+    return error > 0 ? 1 - amount : 1 + (amount === 0.03 ? 0.04 : amount);
   }
 
   function rateOwnership(owned, target, actual) {
@@ -220,7 +254,8 @@
       .map(({ id, targetDelaySec }) => ({ id, targetDelaySec }));
   }
 
-  const api = { LIMITS, CATCH_UP, sample, normalize, eligible, reference, rebaseOffsets,
+  const api = { LIMITS, CATCH_UP, sample, normalize, eligible, alignDelay, alignDelays,
+    reference, rebaseOffsets,
     targetDelay, seekTarget, rateFor, rateOwnership, congestion, isRewind, catchUpTargets };
   root.CheeseMultiviewSync = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

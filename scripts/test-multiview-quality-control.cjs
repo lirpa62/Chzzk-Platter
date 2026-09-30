@@ -48,8 +48,17 @@ const endedSource = content.slice(endedStart, endedEnd);
 assert.match(endedSource, /video\.ended/);
 assert.match(endedSource, /!isVod && typeof isAdPlaying === "function" && isAdPlaying\(\)/,
   "라이브 입장 광고의 ended 이벤트는 방송 종료로 오인하지 않는다");
-assert.match(endedSource, /notifyParent\("FRAME_ENDED"\)/,
+assert.match(endedSource, /notifyMultiviewEnded\(true\)/,
   "실제 종료된 라이브와 다시보기는 부모에 종료 상태를 알린다");
+assert.match(content, /const notifyMultiviewEnded = \(byVideo\) => \{[\s\S]*?notifyParent\("FRAME_ENDED"\)/);
+assert.match(endedSource, /isLiveRestartGuideVisible\(\)\) return;/,
+  "장비 재정비 안내가 떠 있으면 라이브 ended 를 방송 종료로 알리지 않는다");
+assert.match(endedSource, /LIVE_ENDED_CONFIRM_MS\)/,
+  "라이브 ended 는 잠시 기다렸다가 확정한다");
+assert.match(content, /'\.restart_guide, \[class\*="restart_guide"\]'/);
+assert.match(content, /isLiveRestartGuideVisible\(\)\) \{[\s\S]*?notifyParent\("FRAME_ENDED_CANCEL"\)/,
+  "종료를 알린 뒤 재정비 안내가 뜨면 되돌린다");
+assert.match(watch, /data\.type === "FRAME_ENDED_CANCEL"[\s\S]*?setCellStatus\(channelId, "ready"\)/);
 assert.ok(content.includes("#live_player_layout, main [class*=\"_player_\"], #layout-body [class*=\"_player_\"]"),
   "종료 문구를 live player 영역에서 확인한다");
 assert.ok(content.includes("characterData: true") && content.includes("scheduleEndedMutationCheck();"),

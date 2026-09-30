@@ -274,6 +274,29 @@ check(/resetLiveCatchUp\(channelId\);/.test(watch) && /resetLiveCatchUp\(\);/.te
     check(env.sent.map((s) => `${s.id}:${s.targetDelaySec}`).sort().join() === "a:3.5,b:3.2,c:3",
       "자동 싱크 묶음은 상한 아래 칸까지 간격을 유지해 함께 옮긴다");
   }
+
+  // 되감은 칸이 싱크 기준으로 남아 있으면 나머지만 따라잡아서는 안 된다.
+  {
+    const { env, tickLiveCatchUp } = make([live("a"), live("b")],
+      { scope: "all", mode: "auto", groups: [] });
+    env.catchUpHeld.add("b");
+    env.syncStats.set("a", st(9, 10000));
+    env.syncStats.set("b", st(15, 10000));
+    tickLiveCatchUp(10000);
+    tickLiveCatchUp(12000);
+    check(env.sent.length === 0,
+      "되감은 칸이 있는 자동 싱크 묶음은 다른 칸만 앞으로 보내지 않는다");
+    env.catchUpHeld.delete("b");
+    env.syncStats.set("a", st(9, 13000));
+    env.syncStats.set("b", st(15, 13000));
+    tickLiveCatchUp(13000);
+    env.syncStats.set("a", st(9, 15000));
+    env.syncStats.set("b", st(15, 15000));
+    tickLiveCatchUp(15000);
+    check(env.sent.some((command) => command.id === "a") &&
+      env.sent.some((command) => command.id === "b"),
+      "되감기 보류가 풀리면 묶음 전체가 다시 따라잡는다");
+  }
 }
 
 // ── 진단 요약 ───────────────────────────────────────────────────────────

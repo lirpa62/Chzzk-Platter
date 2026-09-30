@@ -143,4 +143,54 @@ assert.match(watch, /alignSync\(\[id\], true, \{ \[id\]: 0 \}, true\)/,
   "per-channel manual reset remains allowed");
 assert.match(watch, /audioProtected: isSyncAudioProtected\(channelId\)/,
   "diagnostic samples include audio protection context");
+
+// 송출 시각(PROGRAM-DATE-TIME) 기준 정렬. 실측: ch1 가장자리 2.68s/송출 2.54s,
+// ch2 가장자리 2.99s/송출 2.64s. 가장자리로 맞추면 ch1 을 2.99s 로 늦춰 장면이 0.2s 뒤처진다.
+const abs = (native, absolute) => ({ ...stats(native), absoluteDelaySec: absolute });
+assert.equal(S.normalize({ ...stats(2.68), seekableEnd: 102.68, absoluteDelaySec: 2.54 })
+  .absoluteDelaySec, 2.54);
+assert.equal(S.normalize({ ...stats(2.68), seekableEnd: 102.68, absoluteDelaySec: -1.2 })
+  .absoluteDelaySec, -1.2, "clock skew may make the absolute delay negative");
+assert.equal(S.normalize({ ...stats(2.68), seekableEnd: 102.68, absoluteDelaySec: -120 })
+  .absoluteDelaySec, null);
+assert.equal(S.normalize({ ...stats(2.68), seekableEnd: 102.68 }).absoluteDelaySec, null);
+{
+  const ch1 = abs(2.68, 2.54);
+  const ch2 = abs(2.99, 2.64);
+  assert.equal(S.alignDelays([ch1, ch2]), "absolute");
+  assert.equal(S.alignDelay(ch1), 2.54);
+  const values = new Map([["ch1", ch1], ["ch2", ch2]]);
+  const ready = new Map([["ch1", now - 5000], ["ch2", now - 5000]]);
+  assert.equal(S.reference(["ch1", "ch2"], values, ready, null, now), "ch2",
+    "slowest by broadcast time");
+  const delay = S.targetDelay(ch2, 0);
+  assert.equal(delay, 2.64);
+  const target = S.seekTarget(ch1, delay, 0.05);
+  assert.ok(Math.abs(target - (100 - 0.1)) < 1e-9,
+    "ch1 moves back only by the broadcast-time gap (0.1s), not the edge gap (0.31s)");
+
+  // 한 칸이라도 송출 시각이 없으면 모두 가장자리 기준으로 맞춘다(섞으면 비교가 안 된다).
+  const bare = stats(2.99);
+  assert.equal(S.alignDelays([abs(2.68, 2.54), bare]), "native");
+  const mixed = abs(2.68, 2.54);
+  S.alignDelays([mixed, bare]);
+  assert.equal(S.alignDelay(mixed), 2.68);
+  assert.equal(S.targetDelay(bare, -5), 0, "native mode keeps the zero floor");
+  const skewed = abs(1, -2);
+  S.alignDelays([skewed]);
+  assert.equal(S.targetDelay(skewed, 0), -2, "absolute mode allows negative delays");
+}
+assert.match(watch, /function applySyncAlignDelays\(now = Date\.now\(\)\)[\s\S]*?SYNC\.alignDelays\(/);
+assert.match(watch, /function selectSyncReference\(now = Date\.now\(\)\) \{\s*applySyncAlignDelays\(now\);/);
+assert.match(watch, /function selectGroupReference\(group, now = Date\.now\(\)\) \{\s*applySyncAlignDelays\(now\);/);
+assert.match(watch, /absoluteDelaySec: stats\.absoluteDelaySec \?\? null/);
+assert.match(content, /absoluteDelaySec: absoluteSyncDelay\(currentTime, nativeDelaySec, adPlaying, now\)/);
+assert.match(content, /anchor\.generation !== syncVideoGeneration \|\| now - anchor\.at > 10000/);
+assert.match(content, /source: "cheese-multiview-sync-anchor-request"/);
+const mixer = fs.readFileSync(path.join(__dirname, "../src/audioMixer.js"), "utf8");
+assert.match(mixer, /srcObject\?\._player\?\.player\?\._mediaController/);
+assert.match(mixer, /const frag = mc\?\._lastFrag;/);
+assert.match(mixer, /function multiviewSyncAnchor\(\) \{\s*if \(!isMultiviewLiveSlot\(\)\) return null;/,
+  "replay cells never report a broadcast-time anchor");
+assert.match(mixer, /source: "cheese-multiview-sync-anchor", channelId: multiviewSlotId/);
 console.log("멀티뷰 싱크 계산·수명주기·메시지 검증 통과");

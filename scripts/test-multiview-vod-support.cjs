@@ -39,9 +39,12 @@ const multiviewAchievementMap = mapEntries(achievementMap);
 check([...multiviewAchievementMap].every(([id, url]) => canonicalAchievementMap.get(id) === url),
   "멀티뷰 업적 이미지 URL이 기존 검색 배지 표와 일치");
 
-console.log("[다시보기 화질] 라이브 정책은 유지하고 VOD 상한은 720p");
-check(/if \(isVideo\) return \{ quality: "720", qualityPolicy: "cap-720" \}/.test(watch), "다시보기는 메인 고화질 미선택 시 720p 상한");
-check(/if \(isMain\) return \{ quality: "native", qualityPolicy: "native" \}/.test(watch), "메인 라이브는 기본 화질 선택을 따름");
+console.log("[다시보기 화질] 시작만 메인 최대·보조 720p, 이후에는 치지직 화질 선택");
+// README: 옵션과 무관하게 다시보기는 시작 시 메인 최대 화질, 보조 720p. 이후 상한은 없다.
+check(/if \(channel\.mediaType === "video"\) return isMain \? "highest" : "cap-720";/.test(watch),
+  "다시보기는 옵션과 무관하게 메인 최대·보조 720p 로 시작");
+check(/function qualityForChannel\(channel, isMain, mainHighQuality\) \{\s*return \{ quality: "native", qualityPolicy: "native" \};/.test(watch),
+  "시작 뒤에는 라이브·다시보기 모두 치지직 화질 선택을 따름(상한 없음)");
 check(/"highest", "cap-480", "cap-720", "native"/.test(content), "격리 월드가 기본 화질 정책을 허용");
 check(/multiviewQualityPolicy === "cap-720"\) return 720/.test(content), "VOD 정책에서 720 상한 계산");
 check(/"highest", "cap-480", "cap-720", "native"/.test(mixer), "MAIN 플레이어가 기본 화질 정책을 허용");
@@ -61,7 +64,27 @@ for (const [key, selector] of vodSettings) {
   check(content.includes(`"${key}"`), `${key} 런타임 저장 변경을 감지`);
 }
 check(/flags\.speedButton = !multiviewVodSpeedButton/.test(content), "멀티뷰 다시보기 재생 속도 설정 적용");
-check(/flags\.commentTimestamp = !multiviewVodTimestamps/.test(content), "멀티뷰 다시보기 댓글 타임스탬프 설정 적용");
+check(/flags\.commentTimestamp = isCommentTimestampHidden\(\);/.test(content) &&
+  /function isCommentTimestampHidden\(\) \{\s*return featureFlags\.commentTimestamp === true \|\|\s*\(isMultiviewReplay\(\) && !multiviewVodTimestamps\);/.test(content),
+  "멀티뷰 다시보기 댓글 타임스탬프 설정 적용(전역 설정과 함께 본다)");
+// ⚠ 버튼을 만드는 쪽(격리 월드)도 같은 판정을 써야 옵션을 끄면 버튼이 사라진다.
+check(/function initCommentTimestampMarkers\(\) \{[\s\S]{0,300}if \(isCommentTimestampHidden\(\)\) \{/.test(content),
+  "댓글 타임스탬프 버튼을 만들 때도 멀티뷰 옵션을 본다");
+check(/if \(changes\[MULTIVIEW_VOD_TIMESTAMPS_KEY\]\) initCommentTimestampMarkers\(\);/.test(content),
+  "옵션을 바꾸면 열려 있는 다시보기 칸에 바로 반영");
+// 멀티뷰 다시보기 플레이어 옵션은 모두 기본 끔.
+for (const [key, selector, variable, constant] of [
+  ["cheeseMultiviewVodSpeedButton", "data-multiview-vod-speed", "multiviewVodSpeedButton", "MULTIVIEW_VOD_SPEED_KEY"],
+  ["cheeseMultiviewVodTimestamps", "data-multiview-vod-timestamps", "multiviewVodTimestamps", "MULTIVIEW_VOD_TIMESTAMPS_KEY"],
+  ["cheeseMultiviewVodMyChat", "data-multiview-vod-my-chat", "multiviewVodMyChat", "MULTIVIEW_VOD_MY_CHAT_KEY"],
+  ["cheeseMultiviewVodChatGraph", "data-multiview-vod-chat-graph", "multiviewVodChatGraph", "MULTIVIEW_VOD_CHAT_GRAPH_KEY"],
+  ["cheeseMultiviewVodRoleChat", "data-multiview-vod-role-chat", "multiviewVodRoleChat", "MULTIVIEW_VOD_ROLE_CHAT_KEY"],
+]) {
+  check(settings.includes(`["[${selector}]", "${key}", false]`) &&
+    new RegExp(`let ${variable} = false;`).test(content) &&
+    new RegExp(`${variable} = data\\?\\.\\[${constant}\\] === true;`).test(content),
+    `${key} 기본 끔(설정 화면·런타임 모두)`);
+}
 check(/return chatRecapOn && !chatRecapPlayerButtonHidden/.test(content), "내 채팅 기록은 기존 채팅 리캡 동의가 필요");
 check(/multiviewVodChatGraph && chatGraphOn/.test(content), "채팅 활성도는 멀티뷰·기존 기능 설정을 함께 따름");
 check(/multiviewVodRoleChat && vodRoleChatOn/.test(content), "역할 채팅은 멀티뷰·기존 기능 설정을 함께 따름");

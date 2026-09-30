@@ -194,7 +194,10 @@
     }
 
     return {
-      durationMs: Math.max(0, endedAt - startedAt),
+      // 일시정지한 동안은 측정 시간에서 뺀다(넘겨받은 값이 있으면 그 값을 쓴다).
+      durationMs: Number.isFinite(options.durationMs)
+        ? Math.max(0, options.durationMs)
+        : Math.max(0, endedAt - startedAt),
       channelCount: Number.isSafeInteger(options.channelCount)
         ? options.channelCount : channels.size,
       sampleCount,
@@ -216,7 +219,7 @@
     return config;
   }
 
-  function createExport({ records, startedAt, exportedAt, channelCount, limits }) {
+  function createExport({ records, startedAt, exportedAt, channelCount, limits, durationMs }) {
     const list = Array.isArray(records) ? records : [];
     const end = Number.isFinite(exportedAt) ? exportedAt : Date.now();
     const start = Number.isFinite(startedAt) ? startedAt : end;
@@ -226,7 +229,7 @@
       exportedAt: end,
       channelCount: Number.isSafeInteger(channelCount) ? channelCount : 0,
       config: configFromLimits(limits),
-      summary: summarize(list, { startedAt: start, endedAt: end, channelCount }),
+      summary: summarize(list, { startedAt: start, endedAt: end, channelCount, durationMs }),
       records: list,
     };
   }

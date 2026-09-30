@@ -1317,7 +1317,12 @@ const checks = [];
   await evaluate(readFileSync("src/multiviewTooltip.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
+  // multiviewWatch.html 과 같은 순서로 싣는다. 빠지면 시청 페이지가 시작하자마자 멈춰
+  // 뒤의 검사가 모두 실행되지 않는다(다시보기 로컬 채팅·배지 모아보기·업적 배지 표).
+  await evaluate(readFileSync("src/achievementBadgeMap.js", "utf8"));
+  await evaluate(readFileSync("src/replayLocalChat.js", "utf8"));
   await evaluate(readFileSync("src/multiviewVodChat.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewBadgeChat.js", "utf8"));
   await evaluate(`window.syncTickCallbacks=[];
     const nativeSetInterval=window.setInterval;
     window.setInterval=function(callback,delay,...args){
@@ -1402,7 +1407,7 @@ const checks = [];
   );
 
   await test(
-    "기본 설정은 메인 라이브 화질을 치지직에 맡기고 보조만 제한한다",
+    "기본 설정(옵션 끔)은 메인·보조 라이브 화질을 모두 치지직에 맡긴다",
     `const srcs=window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const main=srcs.find(s=>s.includes('cheeseMultiMain=1'));
      const sub=srcs.find(s=>s.includes('cheeseMultiMain=0'));
@@ -1410,9 +1415,12 @@ const checks = [];
      check(mainUrl.searchParams.get('cheeseMultiQualityPolicy')==='native',
        '메인 라이브가 기본 화질 정책을 따르지 않는다');
      check(!mainUrl.searchParams.has('cheeseMultiQuality'),'메인에 화질 상한이 붙었다');
-     check(subUrl.searchParams.get('cheeseMultiQualityPolicy')==='cap-480',
-       '보조의 명시적 480 상한 정책이 없다');
-     check(subUrl.searchParams.get('cheeseMultiQuality')==='480','보조에 480 상한이 없다');`,
+     // README: 옵션을 끄면 각 라이브 화면의 치지직 화질 선택을 따른다(보조도 상한 없음).
+     check(subUrl.searchParams.get('cheeseMultiQualityPolicy')==='native',
+       '옵션을 껐는데 보조 라이브에 상한 정책이 걸렸다');
+     check(!subUrl.searchParams.has('cheeseMultiQuality'),'옵션을 껐는데 보조에 480 상한이 붙었다');
+     check(!subUrl.searchParams.has('cheeseMultiInitialQuality')&&!mainUrl.searchParams.has('cheeseMultiInitialQuality'),
+       '옵션을 껐는데 라이브에 시작 화질 목표가 붙었다');`,
   );
 
   await test(
@@ -1551,10 +1559,12 @@ const checks = [];
      let replayUrl=window.frameSrcs.map(value=>new URL(value)).find(url=>url.pathname==='/video/101');
      check(replayUrl?.searchParams.get('cheeseMultiChannelId')==='video:101',
        '다시보기 iframe에 고유 슬롯 ID가 없다');
+     // README: 다시보기 보조는 720p 로 시작만 하고 이후에는 치지직 화질 선택을 따른다.
      check(replayUrl.searchParams.get('cheeseMultiMuted')==='1'&&
-       replayUrl.searchParams.get('cheeseMultiQualityPolicy')==='cap-720'&&
-       replayUrl.searchParams.get('cheeseMultiQuality')==='720',
-       '보조 다시보기의 음소거·화질 정책이 올바르지 않다');
+       replayUrl.searchParams.get('cheeseMultiQualityPolicy')==='native'&&
+       !replayUrl.searchParams.has('cheeseMultiQuality')&&
+       replayUrl.searchParams.get('cheeseMultiInitialQuality')==='cap-720',
+       '보조 다시보기의 음소거·화질 시작 목표가 올바르지 않다');
      check(window.__mvState.chosen.some(channel=>channel.mediaType!=='video'),
        '라이브와 다시보기 혼합 구성이 되지 않았다');
      const quickPopular=quick.querySelector('[data-mv-quick-video-source="popular"]');
@@ -2112,7 +2122,9 @@ const checks = [];
      check(toNew.data.quality==='native' && toNew.data.qualityPolicy==='native',
        '새 메인 화질 지시가 기본 native 정책이 아니다');
      check(toOld && toOld.data.muted===true,'이전 메인에 음소거 지시가 없다');
-     check(toOld.data.quality==='480','이전 메인 화질 지시가 480 이 아니다');
+     // 역할이 바뀌어도 화질 상한을 새로 걸지 않는다(치지직 화질 선택·사용자 선택 유지).
+     check(toOld.data.quality==='native' && toOld.data.qualityPolicy==='native',
+       '이전 메인에 화질 상한이 새로 걸렸다');
      // 보내는 대상 origin 을 치지직으로 한정해야 한다.
      check(msgs.every(m=>m.origin==='https://chzzk.naver.com'),
        '메시지 대상 origin 이 치지직이 아니다');
@@ -2867,7 +2879,21 @@ const checks = [];
        '메인이 자동으로 바뀌었다');
      check(videoSrcs().length===before,'종료 신호로 프레임이 다시 걸렸다');
      check(document.querySelectorAll('.mv-cell').length===cells.length,
-       '다른 칸이 영향을 받았다');`,
+       '다른 칸이 영향을 받았다');
+     // 장비 재정비 안내로 판명되면(FRAME_ENDED_CANCEL) 종료 표시를 거둔다.
+     const endedSignal=(type)=>{const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+        data:{source:'cheese-platter-multiview',type,channelId:id}});
+      Object.defineProperty(e,'source',{value:target.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);};
+     endedSignal('FRAME_ENDED_CANCEL');
+     await wait(50);
+     check(target.dataset.status==='ready','재정비 안내인데 방송 종료 표시가 남았다: '+target.dataset.status);
+     check(!target.querySelector('.mv-cell-status-text')?.textContent?.includes('종료'),
+       '재정비 안내인데 종료 문구가 남았다');
+     check(videoSrcs().length===before,'종료 취소로 프레임이 다시 걸렸다');
+     endedSignal('FRAME_ENDED');
+     await wait(50);
+     check(target.dataset.status==='ended','종료 신호가 다시 반영되지 않았다');`,
   );
 
   await test(
@@ -3396,8 +3422,11 @@ const checks = [];
      check(vol.length>0,'볼륨 지시가 나가지 않았다');
      check(vol.every(m=>typeof m.volume==='number'&&m.volume>=0&&m.volume<=1),
        'volume 값이 0~1 범위가 아니다');
-     // 전체 50% 이므로 메인(채널볼륨 100%)은 0.5 여야 한다.
-     check(vol.some(m=>Math.abs(m.volume-0.5)<0.001),
+     // 전체 50% × 메인 채널 음량이어야 한다. 앞의 검사에서 '모든 채널 시작 음량'을
+     // 37% 로 넣고 시작하므로 채널 음량은 100% 가 아니다(패널 슬라이더 값을 읽는다).
+     const mainSlider=pop.querySelector('[data-mv-vol-channel="'+window.__mvState.mainId+'"]');
+     const expected=0.5*Number(mainSlider?.value??100)/100;
+     check(vol.some(m=>Math.abs(m.volume-expected)<0.001),
        '전체 볼륨이 곱해지지 않았다: '+JSON.stringify(vol.map(m=>m.volume)));`,
   );
 
@@ -3985,19 +4014,52 @@ const checks = [];
      let text=document.getElementById('mvStatsPop').textContent;
      check(text.includes('0.0초'),
        '전환 중이 아닌 칸의 0 을 숨겼다: '+text.slice(0,160));
-     // 이제 메인을 바꾼다 → 두 칸의 화질이 실제로 전환된다.
-     window.__setMainAt=Date.now();
+     // 메인을 바꿔도 화질은 바꾸지 않는다(치지직 화질 선택 유지) → 전환으로 보지 않는다.
      other.querySelector('[data-mv-promote]')?.click();
      await wait(200);
      check(document.querySelector('.mv-cell.is-main').dataset.channelId===otherId,
        '메인이 바뀌지 않았다');
-     // 전환 직후 플레이어가 잠깐 0 을 돌려주는 상황.
      send(mainId,0);
+     await wait(1200);
+     text=document.getElementById('mvStatsPop').textContent;
+     check(!text.includes('전환 중'),'화질을 바꾸지 않았는데 전환 중으로 표시했다: '+text.slice(0,200));
+     // 화질 패널에서 직접 화질을 바꾸면 그 칸은 전환 중이다.
+     const frameMessage=(cid,data)=>{
+       const cell=cells.find(c=>c.dataset.channelId===cid);
+       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
+         data:{source:'cheese-platter-multiview',channelId:cid,...data}});
+       Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(e);
+     };
+     window.sentMessages.length=0;
+     document.getElementById('mvQualityBtn').click();
+     await wait(150);
+     const request=window.sentMessages.find(m=>m.channelId===otherId&&
+       m.data?.type==='REQUEST_MULTIVIEW_QUALITY');
+     check(request,'화질 패널이 칸에 화질 목록을 묻지 않았다');
+     frameMessage(otherId,{type:'FRAME_QUALITY_STATE',requestId:request.data.requestId,
+       state:{ready:true,selected:'1080',output:'1920×1080',choices:[
+         {value:'1080',label:'1080p',selected:true},{value:'480',label:'480p',selected:false}]}});
+     await wait(100);
+     document.querySelector('[data-mv-quality-channel="'+otherId+'"][data-mv-quality-value="480"]')?.click();
+     await wait(100);
+     const command=window.sentMessages.find(m=>m.channelId===otherId&&
+       m.data?.type==='SET_MULTIVIEW_QUALITY');
+     check(command&&command.data.quality==='480','화질 변경 지시가 나가지 않았다');
+     frameMessage(otherId,{type:'FRAME_QUALITY_COMMAND_RESULT',commandId:command.data.commandId,
+       quality:'480',applied:true});
+     document.getElementById('mvQualityBtn').click();
+     await wait(100);
+     // 화질 패널을 열면 통계 패널이 닫힌다. 다시 연다.
+     if(document.getElementById('mvStatsPop').hidden){
+       document.getElementById('mvStatsBtn').click();
+       await wait(100);
+     }
+     // 전환 직후 플레이어가 잠깐 0 을 돌려주는 상황.
      send(otherId,0);
      await wait(1200);
      text=document.getElementById('mvStatsPop').textContent;
      check(text.includes('전환 중'),'전환 중 표시가 없다: '+text.slice(0,200));
-     check(!text.includes('0.0초'),'전환 중인데 0.0초를 보여 줬다');
      // 정상값이 오면 즉시 숫자로 돌아간다.
      send(mainId,4.1);
      send(otherId,2.3);
@@ -4180,13 +4242,16 @@ const checks = [];
      cells.forEach(cell=>post(cell,'FRAME_READY'));
      document.getElementById('mvSyncBtn').click();
      let panel=document.getElementById('mvSyncPop');
-     check(!panel.querySelector('#mvSyncDiagnostics').checked,
-       '진단이 기본으로 켜져 있다');
+     check(!panel.querySelector('#mvSyncDiagnosticsStart').disabled&&
+       panel.querySelector('#mvSyncDiagnosticsPause').disabled&&
+       panel.querySelector('#mvSyncDiagnosticsStop').disabled,
+       '진단이 기본으로 켜져 있거나 시작 버튼을 누를 수 없다');
      samples(cells,50);
      check(panel.querySelector('#mvSyncDiagnosticsCopy').disabled,
        '진단 OFF인데 stats가 기록됐다');
 
-     panel.querySelector('#mvSyncDiagnostics').click();
+     panel.querySelector('#mvSyncDiagnosticsStart').click();
+     await wait(20);
      window.sentMessages.length=0;
      document.getElementById('mvSyncBtn').click();
      await wait(1100);
@@ -4308,18 +4373,56 @@ const checks = [];
        window.__diagCopied.includes('|오차| 중앙/p90/p95/최대'),
        '진단 요약을 복사하지 못했다');
 
-     // OFF 뒤에는 샘플을 보내도 기록 수가 늘지 않는다.
+     // 일시정지한 동안은 기록도 측정 시간도 늘지 않고, 이어서 하면 그 뒤부터 잰다.
+     const seconds=text=>{const m=/([0-9]+):([0-9]{2})(?::([0-9]{2}))?/.exec(text||'');
+       if(!m)return NaN;return m[3]?(+m[1])*3600+(+m[2])*60+(+m[3]):(+m[1])*60+(+m[2]);};
+     const diagStatus=()=>document.getElementById('mvSyncPop')
+       .querySelector('.mv-sync-diagnostics-status').textContent;
      panel=document.getElementById('mvSyncPop');
-     const diagnosticsToggle=panel.querySelector('#mvSyncDiagnostics');
-     diagnosticsToggle.click();
+     panel.querySelector('#mvSyncDiagnosticsPause').click();
+     await wait(20);
+     const pausedStatus=diagStatus();
+     check(pausedStatus.includes('일시정지'),'일시정지가 반영되지 않았다: '+pausedStatus);
+     panel=document.getElementById('mvSyncPop');
+     check(!panel.querySelector('#mvSyncDiagnosticsStart').disabled&&
+       panel.querySelector('#mvSyncDiagnosticsPause').disabled&&
+       !panel.querySelector('#mvSyncDiagnosticsStop').disabled,
+       '일시정지 중 버튼 상태가 맞지 않다');
+     window.__diagBlobs=[];
+     panel.querySelector('#mvSyncDiagnosticsExport').click();
+     await wait(50);
+     const beforePause=JSON.parse(await window.__diagBlobs.at(-1).text()).records.length;
+     const pausedAt=seconds(pausedStatus);
+     clock+=60000;
+     samples(cells,52);
+     await wait(1100);
+     window.__diagBlobs=[];
+     document.getElementById('mvSyncPop').querySelector('#mvSyncDiagnosticsExport').click();
+     await wait(50);
+     check(JSON.parse(await window.__diagBlobs.at(-1).text()).records.length===beforePause,
+       '일시정지 중에 record가 추가됐다');
+     check(seconds(diagStatus())===pausedAt,'일시정지 중에도 측정 시간이 흘렀다: '+diagStatus());
+     document.getElementById('mvSyncPop').querySelector('#mvSyncDiagnosticsStart').click();
+     await wait(20);
+     const resumedStatus=diagStatus();
+     check(resumedStatus.includes('기록 중')&&seconds(resumedStatus)<pausedAt+5,
+       '이어서 기록할 때 멈춘 시간이 측정 시간에 들어갔다: '+resumedStatus);
+
+     // 정지 뒤에는 샘플을 보내도 기록 수가 늘지 않고 시간도 멈춘다.
+     panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncDiagnosticsStop').click();
      await wait(20);
      panel=document.getElementById('mvSyncPop');
-     const offChecked=panel.querySelector('#mvSyncDiagnostics').checked;
      const offStatus=panel.querySelector('.mv-sync-diagnostics-status').textContent;
-     check(!offChecked&&offStatus.includes('기록 안 함'),
-       '진단 OFF 전환이 반영되지 않았다 (checked: '+offChecked+
-       ', 상태: '+offStatus+')');
-     const beforeOff=payload.records.length;
+     check(offStatus.includes('정지됨')&&panel.querySelector('#mvSyncDiagnosticsStop').disabled&&
+       !panel.querySelector('#mvSyncDiagnosticsStart').disabled,
+       '진단 정지가 반영되지 않았다 (상태: '+offStatus+')');
+     window.__diagBlobs=[];
+     panel.querySelector('#mvSyncDiagnosticsExport').click();
+     await wait(50);
+     const beforeOff=JSON.parse(await window.__diagBlobs.at(-1).text()).records.length;
+     clock+=30000;
+     check(seconds(diagStatus())===seconds(offStatus),'정지 뒤에도 측정 시간이 흘렀다');
      samples(cells,52);
      window.__diagBlobs=[];
      panel=document.getElementById('mvSyncPop');
@@ -4346,6 +4449,14 @@ const checks = [];
        [...panel.querySelectorAll('.mv-sync-controls output')]
          .map(output=>output.textContent).join('|')===offsetsBefore,
        '진단 초기화가 실제 싱크 상태를 바꿨다');
+
+     // 정지 뒤 시작은 새 기록이다.
+     panel.querySelector('#mvSyncDiagnosticsStart').click();
+     await wait(20);
+     check(diagStatus().includes('기록 중')&&seconds(diagStatus())===0,
+       '정지 뒤 시작이 새 기록으로 시작하지 않았다: '+diagStatus());
+     document.getElementById('mvSyncPop').querySelector('#mvSyncDiagnosticsStop').click();
+     await wait(20);
 
      URL.createObjectURL=realCreate;URL.revokeObjectURL=realRevoke;
      HTMLAnchorElement.prototype.click=realAnchorClick;

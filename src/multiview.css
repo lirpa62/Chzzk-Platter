@@ -5081,11 +5081,64 @@ html[data-theme="dark"]
 .mv-sync-diagnostics-head {
   justify-content: space-between;
 }
-.mv-sync-diagnostics-head label {
-  align-items: center;
-  display: inline-flex;
+.mv-sync-diagnostics-head strong {
   font-size: 11.5px;
+}
+/* 진단 기록 시작·일시정지·정지 */
+.mv-sync-diagnostics-controls {
+  display: inline-flex;
   gap: 4px;
+}
+.mv-sync-diagnostics-controls button {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.mv-sync-diagnostics-controls button:hover:not(:disabled) {
+  background: var(--popup-hover, rgba(127, 127, 127, 0.14));
+}
+.mv-sync-diagnostics-controls button:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+.mv-sync-diagnostics-controls button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+/* 기록 중에는 정지 버튼을, 일시정지 중에는 시작(이어서) 버튼을 눈에 띄게 둔다. */
+.mv-sync-diagnostics[data-phase="recording"] #mvSyncDiagnosticsStop,
+.mv-sync-diagnostics[data-phase="paused"] #mvSyncDiagnosticsStart {
+  border-color: rgba(139, 92, 246, 0.6);
+  color: #8b5cf6;
+}
+.mv-sync-diagnostics[data-phase="recording"] .mv-sync-diagnostics-status::before {
+  animation: mv-sync-diag-blink 1.2s ease-in-out infinite;
+  background: #ef4444;
+  border-radius: 50%;
+  content: "";
+  display: inline-block;
+  height: 6px;
+  margin-right: 5px;
+  vertical-align: 1px;
+  width: 6px;
+}
+@keyframes mv-sync-diag-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-sync-diagnostics[data-phase="recording"] .mv-sync-diagnostics-status::before {
+    animation: none;
+  }
 }
 .mv-sync-diagnostics-status,
 .mv-sync-diagnostics-notice {
