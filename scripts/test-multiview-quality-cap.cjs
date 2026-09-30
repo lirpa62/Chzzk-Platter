@@ -79,35 +79,47 @@ for (const [label, sel, target, cap, expected] of idempotent) {
 }
 
 // ── 부모가 내리는 화질 정책 ───────────────────────────────────────────────
-// 옵션이 켜져도 부모는 이후 역할 변경 때 고정 정책을 반복하지 않는다.
-console.log("\n[정책] 메인 고화질 옵션은 iframe 시작 목표로만 전달한다");
+// README: '메인 고화질 · 보조 480p로 시작'은 최초 재생 화질만 정한다. 켜면 메인은
+// 최고화질, 라이브 보조는 480p 이하로 시작하고, 끄면 각 라이브 화면의 치지직 화질
+// 선택을 따른다. 다시보기는 시작 시 메인 최대 화질, 보조 720p. 이후에는 상한이 없다.
+console.log("\n[정책] 시작 목표만 정하고 이후에는 치지직 화질 선택을 따른다");
 {
-  // multiviewWatch.js 의 initialQualityForChannel / qualityForChannel 과 같은 규칙.
-  const initialQuality = (isMain, high, isVideo) =>
-    !high ? "" : isMain ? "highest" : isVideo ? "cap-720" : "cap-480";
-  const postQuality = (isMain, high, isVideo) =>
-    high ? "native" : isVideo ? "cap-720" : isMain ? "native" : "cap-480";
+  // ⚠ 규칙을 손으로 베끼면 원본이 바뀌어도 통과한다. 원본 함수를 그대로 돌린다.
+  const watchSource = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "..", "src/multiviewWatch.js"), "utf8");
+  const slice = (name) => {
+    const start = watchSource.indexOf(`  function ${name}(`);
+    const end = watchSource.indexOf("\n  }\n", start);
+    return watchSource.slice(start, end + 4);
+  };
+  const ctx = {};
+  require("node:vm").runInNewContext(
+    `${slice("qualityForChannel")}\n${slice("initialQualityForChannel")}\n` +
+    "globalThis.q = qualityForChannel; globalThis.i = initialQualityForChannel;",
+    Object.assign(ctx, { globalThis: ctx }));
 
   const cases = [
+    // [설명, 메인, 옵션, 다시보기, 시작 목표, 이후 정책]
     ["라이브 · 켜짐 · 메인", true, true, false, "highest", "native"],
     ["라이브 · 켜짐 · 보조", false, true, false, "cap-480", "native"],
     ["라이브 · 꺼짐 · 메인", true, false, false, "", "native"],
-    ["라이브 · 꺼짐 · 보조", false, false, false, "", "cap-480"],
+    ["라이브 · 꺼짐 · 보조", false, false, false, "", "native"],
     ["다시보기 · 켜짐 · 메인", true, true, true, "highest", "native"],
     ["다시보기 · 켜짐 · 보조", false, true, true, "cap-720", "native"],
-    ["다시보기 · 꺼짐 · 메인", true, false, true, "", "cap-720"],
-    ["다시보기 · 꺼짐 · 보조", false, false, true, "", "cap-720"],
+    ["다시보기 · 꺼짐 · 메인", true, false, true, "highest", "native"],
+    ["다시보기 · 꺼짐 · 보조", false, false, true, "cap-720", "native"],
   ];
   for (const [label, isMain, high, isVideo, wantInitial, wantPost] of cases) {
-    const initial = initialQuality(isMain, high, isVideo);
-    const q = postQuality(isMain, high, isVideo);
+    const channel = { mediaType: isVideo ? "video" : "live" };
+    const initial = ctx.i(channel, isMain, high);
+    const q = ctx.q(channel, isMain, high).qualityPolicy;
     try {
       assert.strictEqual(initial, wantInitial);
       assert.strictEqual(q, wantPost);
       console.log(`  PASS ${label}: 초기=${initial || "없음"} 이후=${q}`);
     } catch {
       failed += 1;
-      console.log(`  FAIL ${label}: 초기=${initial} 이후=${q}`);
+      console.log(`  FAIL ${label}: 초기=${initial || "없음"} 이후=${q}`);
     }
   }
 }

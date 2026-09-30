@@ -1221,11 +1221,12 @@
   let multiviewBtnRewind = false;
   let multiviewBtnForward = false;
   let multiviewDisableHidden = false;
-  let multiviewVodSpeedButton = true;
-  let multiviewVodTimestamps = true;
-  let multiviewVodMyChat = true;
-  let multiviewVodChatGraph = true;
-  let multiviewVodRoleChat = true;
+  // 멀티뷰 다시보기 플레이어 옵션은 모두 기본 끔(작은 칸에 버튼이 늘지 않게, 켠 것만 표시).
+  let multiviewVodSpeedButton = false;
+  let multiviewVodTimestamps = false;
+  let multiviewVodMyChat = false;
+  let multiviewVodChatGraph = false;
+  let multiviewVodRoleChat = false;
   let multiviewSettingsLoaded = false;
   const MULTIVIEW_SETTING_KEYS = [
     MULTIVIEW_BTN_MIXER_KEY,
@@ -1254,11 +1255,11 @@
     multiviewBtnRewind = data?.[MULTIVIEW_BTN_REWIND_KEY] === true;
     multiviewBtnForward = data?.[MULTIVIEW_BTN_FORWARD_KEY] === true;
     multiviewDisableHidden = data?.[MULTIVIEW_DISABLE_HIDDEN_KEY] === true;
-    multiviewVodSpeedButton = data?.[MULTIVIEW_VOD_SPEED_KEY] !== false;
-    multiviewVodTimestamps = data?.[MULTIVIEW_VOD_TIMESTAMPS_KEY] !== false;
-    multiviewVodMyChat = data?.[MULTIVIEW_VOD_MY_CHAT_KEY] !== false;
-    multiviewVodChatGraph = data?.[MULTIVIEW_VOD_CHAT_GRAPH_KEY] !== false;
-    multiviewVodRoleChat = data?.[MULTIVIEW_VOD_ROLE_CHAT_KEY] !== false;
+    multiviewVodSpeedButton = data?.[MULTIVIEW_VOD_SPEED_KEY] === true; // 기본 끔
+    multiviewVodTimestamps = data?.[MULTIVIEW_VOD_TIMESTAMPS_KEY] === true; // 기본 끔
+    multiviewVodMyChat = data?.[MULTIVIEW_VOD_MY_CHAT_KEY] === true; // 기본 끔
+    multiviewVodChatGraph = data?.[MULTIVIEW_VOD_CHAT_GRAPH_KEY] === true; // 기본 끔
+    multiviewVodRoleChat = data?.[MULTIVIEW_VOD_ROLE_CHAT_KEY] === true; // 기본 끔
   }
 
   // 지금 메모리에 있는 멀티뷰 설정값(바뀌지 않은 키를 되돌려 줄 때 쓴다).
@@ -1331,6 +1332,15 @@
     return isMultiviewReplay()
       ? multiviewVodRoleChat && vodRoleChatOn
       : vodRoleChatOn;
+  }
+
+  // 댓글 타임스탬프(버튼·재생바 마커)를 숨길지. 멀티뷰 다시보기 칸은 멀티뷰 옵션도
+  // 켜져 있어야 보인다(다른 다시보기 옵션과 같이 전역 설정과 함께 본다).
+  // ⚠ 예전에는 멀티뷰 옵션을 MAIN world 로 보내는 플래그에만 반영해, 버튼을 만드는
+  //   이쪽(격리 월드)은 전역 설정만 보고 옵션을 꺼도 버튼을 계속 붙였다.
+  function isCommentTimestampHidden() {
+    return featureFlags.commentTimestamp === true ||
+      (isMultiviewReplay() && !multiviewVodTimestamps);
   }
 
   function isVodChatRecapButtonEnabled() {
@@ -7090,8 +7100,9 @@
 
   function initCommentTimestampMarkers() {
     void loadChatRecapClickAction();
-    // 팝업에서 댓글 타임스탬프를 숨김 처리하면 버튼/마커/패널을 모두 제거하고 끝낸다.
-    if (featureFlags.commentTimestamp) {
+    // 댓글 타임스탬프를 숨김 처리하면(팝업·멀티뷰 다시보기 옵션 포함) 버튼/마커/패널을
+    // 모두 제거하고 끝낸다.
+    if (isCommentTimestampHidden()) {
       closeCommentTimestampPanel();
       resetCommentTimestampMarkers();
       document
@@ -21789,6 +21800,8 @@
     let syncRateTarget = 1;
     let syncRateUserOverride = false;
     let syncSeekAt = 0;
+    // MAIN 이 알려 준 재생 조각의 송출 시각 기준점({ pdt, start, generation, at }).
+    let syncAnchor = null;
     let currentVideoSource = "";
     let multiviewAdPlaying = false;
     let multiviewAdCheckTimer = 0;
@@ -21867,6 +21880,18 @@
         }
         return;
       }
+      if (data?.source === "cheese-multiview-sync-anchor" &&
+          data.channelId === MULTIVIEW_CHANNEL_ID) {
+        const anchor = data.anchor;
+        // 한 번 못 읽었다고 바로 버리지 않는다(기준이 절대↔가장자리로 번갈아 튀지 않게).
+        // 오래된 값은 reportFrameSyncStats 에서 나이로 거른다.
+        if (anchor && Number.isFinite(anchor.pdt) && anchor.pdt > 1e12 &&
+            Number.isFinite(anchor.start) && anchor.start >= 0) {
+          syncAnchor = { pdt: anchor.pdt, start: anchor.start,
+            generation: syncVideoGeneration, at: Date.now() };
+        }
+        return;
+      }
       if (data?.source !== "cheese-multiview-mixer-main" ||
           data.channelId !== MULTIVIEW_CHANNEL_ID) return;
       if (data.type === "state" && data.state && typeof data.state === "object") {
@@ -21912,6 +21937,19 @@
       } catch { return null; }
     };
 
+    // 화면 장면의 송출 시각 기준 지연(초). 채널끼리 같은 시계로 비교되는 값이다.
+    // 기준점이 없거나 오래됐거나 영상이 바뀐 뒤면 null(가장자리 기준 지연으로 맞춘다).
+    const absoluteSyncDelay = (currentTime, nativeDelaySec, adPlaying, now) => {
+      const anchor = syncAnchor;
+      if (!anchor || adPlaying || currentTime === null || nativeDelaySec === null ||
+          anchor.generation !== syncVideoGeneration || now - anchor.at > 10000) return null;
+      const delay = (now - (anchor.pdt + (currentTime - anchor.start) * 1000)) / 1000;
+      // 기기 시계가 크게 어긋났거나 조각 정보가 엉뚱하면 쓰지 않는다.
+      if (!Number.isFinite(delay) || delay < -60 || delay > 600 ||
+          Math.abs(delay - nativeDelaySec) > 15) return null;
+      return delay;
+    };
+
     const reportFrameSyncStats = () => {
       syncMultiviewVideo();
       const video = currentVideo;
@@ -21921,6 +21959,13 @@
       const seekableEnd = syncRange(video?.seekable, "end");
       const bufferedEnd = syncRange(video?.buffered, "end");
       const gap = (end) => end === null || currentTime === null ? null : Math.max(0, end - currentTime);
+      const now = Date.now();
+      const nativeDelaySec = gap(seekableEnd);
+      // 다음 측정에 쓸 기준점을 MAIN 에 묻는다(답은 비동기로 syncAnchor 에 쌓인다).
+      if (multiviewLiveChannelId) {
+        window.postMessage({ source: "cheese-multiview-sync-anchor-request",
+          channelId: MULTIVIEW_CHANNEL_ID }, location.origin);
+      }
       notifyParent("FRAME_SYNC_STATS", { stats: {
         currentTime,
         playbackRate: video && Number.isFinite(video.playbackRate) ? video.playbackRate : null,
@@ -21928,14 +21973,15 @@
         userRateOverride: syncRateUserOverride,
         paused: video?.paused !== false || adPlaying,
         readyState: video?.readyState ?? 0,
-        nativeDelaySec: gap(seekableEnd),
+        nativeDelaySec,
+        absoluteDelaySec: absoluteSyncDelay(currentTime, nativeDelaySec, adPlaying, now),
         bufferAheadSec: gap(bufferedEnd),
         edgeLagSec: seekableEnd === null || bufferedEnd === null
           ? null : Math.max(0, seekableEnd - bufferedEnd),
         seekableStart,
         seekableEnd,
         generation: syncVideoGeneration,
-        sampledAt: Date.now(),
+        sampledAt: now,
       } });
     };
 
@@ -22063,6 +22109,31 @@
       forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
     };
 
+    // 스트리머 장비 재정비(일시 중단) 안내. 방송이 끝난 게 아니라 곧 이어진다.
+    const isLiveRestartGuideVisible = () => {
+      for (const el of document.querySelectorAll('.restart_guide, [class*="restart_guide"]')) {
+        if (typeof isElementActuallyVisible !== "function" || isElementActuallyVisible(el))
+          return true;
+      }
+      return false;
+    };
+
+    const notifyMultiviewEnded = (byVideo) => {
+      endedNotified = true;
+      endedByVideo = byVideo;
+      notifyParent("FRAME_ENDED");
+      if (endedTimer) clearInterval(endedTimer);
+      endedTimer = 0;
+      if (endedMutationCheckTimer) clearTimeout(endedMutationCheckTimer);
+      endedMutationCheckTimer = 0;
+    };
+
+    // ⚠ 라이브는 장비 재정비로 송출이 잠깐 끊겨도 video 가 ended 된다. 바로 알리면
+    //   칸이 '방송 종료' 로 굳어 방송이 이어져도 풀리지 않았다. 잠시 기다렸다가
+    //   재정비 안내가 떠 있거나 재생이 다시 이어졌으면 알리지 않는다.
+    const LIVE_ENDED_CONFIRM_MS = 3000;
+    let endedConfirmTimer = 0;
+    let endedByVideo = false;
     const onMultiviewVideoEnded = (event) => {
       const video = event.currentTarget;
       const isVod = /^\/video\/\d+/i.test(location.pathname);
@@ -22073,12 +22144,17 @@
         (!isVod && typeof isAdPlaying === "function" && isAdPlaying())
       )
         return;
-      endedNotified = true;
-      notifyParent("FRAME_ENDED");
-      if (endedTimer) clearInterval(endedTimer);
-      endedTimer = 0;
-      if (endedMutationCheckTimer) clearTimeout(endedMutationCheckTimer);
-      endedMutationCheckTimer = 0;
+      if (isVod) {
+        notifyMultiviewEnded(true);
+        return;
+      }
+      if (endedConfirmTimer) return;
+      endedConfirmTimer = setTimeout(() => {
+        endedConfirmTimer = 0;
+        if (endedNotified || isLiveRestartGuideVisible()) return;
+        if (currentVideo && !currentVideo.ended) return; // 재생이 다시 이어졌다
+        notifyMultiviewEnded(true);
+      }, LIVE_ENDED_CONFIRM_MS);
     };
 
     function checkMultiviewAdTransition() {
@@ -22258,14 +22334,17 @@
       if (endedNotified) return;
       if (typeof isReliveEndScreenVisible !== "function") return;
       if (!isReliveEndScreenVisible()) return;
-      endedNotified = true;
-      notifyParent("FRAME_ENDED");
-      if (endedTimer) clearInterval(endedTimer);
-      endedTimer = 0;
-      if (endedMutationCheckTimer) clearTimeout(endedMutationCheckTimer);
-      endedMutationCheckTimer = 0;
+      notifyMultiviewEnded(false);
     };
     const scheduleEndedMutationCheck = () => {
+      // video 종료로 알린 뒤에 재정비 안내가 뜨면 되돌린다(안내가 늦게 그려진 경우).
+      if (endedNotified && endedByVideo && !/^\/video\/\d+/i.test(location.pathname) &&
+          isLiveRestartGuideVisible()) {
+        endedNotified = false;
+        endedByVideo = false;
+        notifyParent("FRAME_ENDED_CANCEL");
+        if (!endedTimer) endedTimer = setInterval(checkEnded, 5000);
+      }
       if (endedNotified || endedMutationCheckTimer) return;
       endedMutationCheckTimer = setTimeout(() => {
         endedMutationCheckTimer = 0;
@@ -22294,6 +22373,13 @@
       }
       if (data.type === "REQUEST_FRAME_SYNC_STATS") {
         reportFrameSyncStats();
+        return;
+      }
+      // 자동 싱크 대상이면 플레이어 자체 따라잡기(1.03×)를 멈추게 MAIN 에 전한다.
+      if (data.type === "SET_PLAYER_CATCH_UP_HOLD") {
+        if (!multiviewLiveChannelId || typeof data.hold !== "boolean") return;
+        window.postMessage({ source: "cheese-multiview-catchup-hold",
+          channelId: MULTIVIEW_CHANNEL_ID, hold: data.hold }, location.origin);
         return;
       }
       if (data.type === "SET_MULTIVIEW_VOD_CHAT") {
@@ -53371,7 +53457,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       flags.screenshotButton = hidden(multiviewBtnScreenshot);
       if (isMultiviewReplay()) {
         flags.speedButton = !multiviewVodSpeedButton;
-        flags.commentTimestamp = !multiviewVodTimestamps;
+        flags.commentTimestamp = isCommentTimestampHidden();
       }
       // 되감기/앞으로는 한 기능을 공유하고 각각의 표시는 멀티뷰 CSS가 정한다.
       flags.liveRewind = hidden(multiviewBtnRewind || multiviewBtnForward);
@@ -54858,6 +54944,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
             }
             applyRoleChatButtonVisibility();
             applyChatRecapPlayerButtonVisibility();
+            // 댓글 타임스탬프 버튼·마커도 다시 불러오지 않고 바로 붙이거나 뗀다.
+            if (changes[MULTIVIEW_VOD_TIMESTAMPS_KEY]) initCommentTimestampMarkers();
           }
         }
       }

@@ -37,6 +37,10 @@ function sliceFn(name) {
 }
 
 const PIECES = [
+  // 다시보기 칸을 싱크 대상에서 빼는 판정(inSyncScope 가 쓴다).
+  "isVideoSlot",
+  // 기준 채널을 바꿀 때 보정값을 새 기준으로 다시 계산한다(클릭 처리가 부른다).
+  "rebaseSyncOffsets",
   "getSyncRowViewState",
   "syncNudgePending",
   "setSyncButtonState",
@@ -46,6 +50,12 @@ const PIECES = [
   "syncGroupTooSmall",
   "syncEligibleIds",
   "syncActiveIds",
+  // 진단 기록 영역(시작·일시정지·정지 버튼과 상태 글자).
+  "syncDiagnosticsElapsed",
+  "syncDiagnosticsStatusText",
+  "syncDiagnosticsControlState",
+  "syncDiagnosticsControlsHtml",
+  "patchSyncDiagnostics",
   "patchSyncPanel",
   "refreshSyncPanel",
   "renderSync",
@@ -208,7 +218,15 @@ const cleanup = () => {
     window.syncNotice='';
     window.syncDiagnostics=new Map();
     window.syncDiagnosticsStartedAt=0;
+    window.syncDiagnosticsPhase='idle';
+    window.syncDiagnosticsHaltedAt=0;
+    window.syncDiagnosticsPausedMs=0;
+    window.SYNC_DIAGNOSTICS_ICONS={Start:'',Pause:'',Stop:''};
     window.syncDiagnosticsNotice='';
+    // 설정의 '싱크 진단 도구 표시'. 꺼져 있으면 진단 영역을 숨긴다.
+    window.syncDiagnosticsUi=false;
+    // 막 들어와 보정값을 아직 확정하지 않은 칸(수동 보정이 끝나면 빠진다).
+    window.freshSyncChannels=new Set();
     window.DIAGNOSTICS={formatDuration:()=>'0초'};
     window.$=(id)=>document.getElementById(id);
     // 클릭 구간이 부르는 바깥 함수. 기록만 하거나 명령 경로로 넘긴다.

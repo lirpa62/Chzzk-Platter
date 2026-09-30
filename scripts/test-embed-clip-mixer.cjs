@@ -363,8 +363,18 @@ const deadline = setTimeout(() => browser.kill("SIGTERM"), 30000);
     console.log("embed clip mixer UI test passed");
   } finally {
     clearTimeout(deadline);
-    browser.kill("SIGTERM");
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome 이 실제로 끝난 뒤 프로필을 지운다. 종료 신호 직후에도 몇 초간 프로필에
+    // 써서, 바로 지우면 ENOTEMPTY 로 테스트가 실패했다(검사는 모두 통과한 뒤).
+    await new Promise((resolve) => {
+      if (browser.exitCode !== null || browser.signalCode !== null) return resolve();
+      const timer = setTimeout(resolve, 5000);
+      browser.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      browser.kill("SIGTERM");
+    });
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 })().catch((error) => {
   console.error(error);

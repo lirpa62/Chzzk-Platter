@@ -94,8 +94,9 @@ function call(method, params = {}, sessionId) {
         : `document.documentElement.removeAttribute('data-theme')`,
     );
     return evaluate(`(()=>{
+      // ⚠ '.mv-cell-retry.is-primary' 는 브랜드색이 아니라 보라 버튼이라 아래에서 따로 잰다.
       const sels=['.mv-start','.mv-main-badge','.mv-quick-tag','.mv-card-picked',
-        '.mv-chosen-rank','.mv-cell-retry.is-primary','.mv-vol-enable'];
+        '.mv-chosen-rank','.mv-vol-enable','.mv-cell-retry.is-primary'];
       const out={};
       for(const s of sels){const el=document.querySelector(s);
         const cs=getComputedStyle(el);out[s]={color:cs.color,bg:cs.backgroundColor};}
@@ -103,8 +104,12 @@ function call(method, params = {}, sessionId) {
     })()`);
   };
 
+  // '다시 시도' 강조 버튼은 브랜드색(초록)이 아니라 보라 배경에 흰 글자다(두 테마 모두).
+  const RETRY = ".mv-cell-retry.is-primary";
   console.log("[라이트 모드] 브랜드색 배경 위 글자는 흰색이어야 한다");
   const light = await read("light");
+  const lightRetry = light[RETRY];
+  delete light[RETRY];
   for (const [sel, v] of Object.entries(light)) {
     ok(
       v.color === "rgb(255, 255, 255)",
@@ -114,6 +119,8 @@ function call(method, params = {}, sessionId) {
 
   console.log("\n[다크 모드] 지금까지의 어두운 글자를 그대로 쓴다");
   const dark = await read("dark");
+  const darkRetry = dark[RETRY];
+  delete dark[RETRY];
   for (const [sel, v] of Object.entries(dark)) {
     ok(
       v.color === "rgb(5, 23, 15)",
@@ -123,6 +130,16 @@ function call(method, params = {}, sessionId) {
   ok(
     dark[".mv-start"].bg !== light[".mv-start"].bg,
     "배경색은 테마마다 다르다",
+  );
+
+  console.log("\n['다시 시도' 강조 버튼] 보라 배경 위 흰 글자(두 테마 모두)");
+  ok(
+    lightRetry.color === "rgb(255, 255, 255)" && lightRetry.bg === "rgb(111, 66, 193)",
+    `라이트: 흰 글자 on #6f42c1 (${lightRetry.color} on ${lightRetry.bg})`,
+  );
+  ok(
+    darkRetry.color === "rgb(255, 255, 255)" && darkRetry.bg === "rgb(139, 99, 210)",
+    `다크: 흰 글자 on #8b63d2 (${darkRetry.color} on ${darkRetry.bg})`,
   );
 
   console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");
