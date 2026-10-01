@@ -62,23 +62,29 @@ for (const members of [
 }
 
 // 되감기 판정.
-const sample = (delay, receivedAt, generation = 1) =>
-  ({ nativeDelaySec: delay, receivedAt, generation });
-check(S.isRewind(sample(4, 1000), sample(15, 2000)), "한 샘플 사이 크게 늘면 되감기");
+const sample = (delay, receivedAt, generation = 1, currentTime = 100) =>
+  ({ nativeDelaySec: delay, currentTime, seekableEnd: currentTime + delay,
+    receivedAt, generation });
+check(S.isRewind(sample(4, 1000), sample(15, 2000, 1, 90)),
+  "재생 위치가 뒤로 이동하며 지연이 크게 늘면 되감기");
+check(!S.isRewind(sample(4, 1000), sample(15, 2000)),
+  "재생이 멈추고 라이브 끝만 멀어지면 되감기가 아니다");
+check(!S.isRewind(sample(4, 1000), sample(15, 2000, 1, 80)),
+  "재생 시간축이 뒤로 재설정되면 되감기로 보류하지 않는다");
 check(!S.isRewind(sample(4, 1000), sample(4.07, 2000)), "재생 밀림(초당 0.07초)은 되감기가 아니다");
-check(!S.isRewind(sample(4, 1000), sample(8, 2000)),
+check(!S.isRewind(sample(4, 1000), sample(8, 2000, 1, 96)),
   "자동 싱크 seek(최대 4초)는 되감기가 아니다");
-check(!S.isRewind(sample(4, 1000, 1), sample(31, 2000, 2)),
+check(!S.isRewind(sample(4, 1000, 1), sample(31, 2000, 2, 73)),
   "플레이어 재초기화(generation 변경)는 되감기가 아니다");
-check(!S.isRewind(sample(4, 1000), sample(34, 31000)),
+check(!S.isRewind(sample(4, 1000), sample(34, 31000, 1, 70)),
   "탭이 가려져 샘플이 끊긴 사이의 증가는 되감기가 아니다");
-check(!S.isRewind(sample(4, 1000), sample(15, 2000), 2500),
+check(!S.isRewind(sample(4, 1000), sample(15, 2000, 1, 90), 2500),
   "우리가 옮긴 직후의 변화는 판정하지 않는다");
 check(!S.isRewind(null, sample(15, 2000)), "이전 샘플이 없으면 판정하지 않는다");
 
 // ── 프레임 명령 ─────────────────────────────────────────────────────────
 check(/APPLY_LIVE_CATCH_UP: "catch-up"/.test(content), "프레임이 따라잡기 명령을 받는다");
-check(/syncCommand === "catch-up" &&[\s\S]*?data\.targetDelaySec < MULTIVIEW_SYNC\.CATCH_UP\.targetSec[\s\S]*?data\.targetDelaySec > MULTIVIEW_SYNC\.CATCH_UP\.limitSec\)\) return;/.test(content),
+check(/syncCommand === "catch-up" &&[\s\S]*?data\.targetDelaySec < MULTIVIEW_SYNC\.CATCH_UP\.minTargetSec[\s\S]*?data\.targetDelaySec > MULTIVIEW_SYNC\.CATCH_UP\.limitSec\)\) return;/.test(content),
   "프레임은 목표 지연 범위를 검증한다");
 check(/syncCommand !== "catch-up" && Date\.now\(\) - syncSeekAt/.test(content),
   "따라잡기는 싱크 seek 쿨다운에 막히지 않는다");
@@ -97,8 +103,8 @@ check(/video\.paused\) reason = "paused"/.test(frameCommand) &&
 
 // ── 부모 판단 루프 ──────────────────────────────────────────────────────
 check(/const LIVE_CATCH_UP_KEY = "cheeseMultiviewLiveCatchUp";/.test(watch) &&
-  /liveCatchUpEnabled = data\[LIVE_CATCH_UP_KEY\] !== false;/.test(watch) &&
-  /liveCatchUpEnabled = changes\[LIVE_CATCH_UP_KEY\]\.newValue !== false;/.test(watch),
+  /applyLiveCatchUpSetting\(data\[LIVE_CATCH_UP_KEY\] !== false\)/.test(watch) &&
+  /applyLiveCatchUpSetting\(changes\[LIVE_CATCH_UP_KEY\]\.newValue !== false\)/.test(watch),
   "설정은 기본 켜짐이고 바뀌면 바로 반영한다");
 check(/state\.sync\.diagnosticsEnabled \|\|\s*liveCatchUpWanted\(\)\);/.test(watch),
   "싱크 패널이 닫혀 있어도 측정을 계속한다");
@@ -150,11 +156,12 @@ check(/resetLiveCatchUp\(channelId\);/.test(watch) && /resetLiveCatchUp\(\);/.te
   const body = ["catchUpClusters", "catchUpCandidate", "tickLiveCatchUp", "observeCatchUpSample"]
     .map(sliceFn).join("\n") +
     "\nreturn { tickLiveCatchUp, observeCatchUpSample };";
-  const make = (chosen, sync = { scope: "all", mode: "off", groups: [] }) => {
+  const make = (chosen, sync = { scope: "all", mode: "off", groups: [] }, limitSec = 8) => {
     const env = {
       state: { chosen, sync },
       syncStats: new Map(),
       syncReadyAt: new Map(chosen.map((c) => [c.channelId, 0])),
+      syncSeekAt: new Map(),
       sent: [],
       pending: new Set(),
       catchUpOverSince: new Map(),
@@ -166,19 +173,19 @@ check(/resetLiveCatchUp\(channelId\);/.test(watch) && /resetLiveCatchUp\(\);/.te
     };
     // eslint-disable-next-line no-new-func
     const api = new Function(
-      "state", "SYNC", "syncStats", "syncReadyAt", "currentStatus", "pendingSync",
-      "sendSyncCommand", "syncScopeIds", "liveCatchUpEnabled", "catchUpOverSince",
+      "state", "SYNC", "syncStats", "syncReadyAt", "syncSeekAt", "currentStatus", "pendingSync",
+      "sendSyncCommand", "syncScopeIds", "liveCatchUpEnabled", "liveCatchUpLimitSec", "catchUpOverSince",
       "catchUpLastAt", "catchUpHeld", "catchUpUrgent", "catchUpQuietUntil",
       "recordSyncDiagnostic", "syncChannelName", body,
     )(
-      env.state, S, env.syncStats, env.syncReadyAt, () => "ready",
+      env.state, S, env.syncStats, env.syncReadyAt, env.syncSeekAt, () => "ready",
       (id, command) => env.pending.has(`${id}:${command}`),
       (id, command, type, extra) => {
         env.sent.push({ id, command, type, ...extra });
         return true;
       },
       () => chosen.filter((c) => c.mediaType !== "video").map((c) => c.channelId),
-      true, env.catchUpOverSince, env.catchUpLastAt, env.catchUpHeld,
+      true, limitSec, env.catchUpOverSince, env.catchUpLastAt, env.catchUpHeld,
       env.catchUpUrgent, env.catchUpQuietUntil,
       (type, fields) => env.diagnostics.push({ type, ...fields }), () => "",
     );
@@ -234,7 +241,7 @@ check(/resetLiveCatchUp\(channelId\);/.test(watch) && /resetLiveCatchUp\(\);/.te
   {
     const { env, tickLiveCatchUp, observeCatchUpSample } = make([live("a")]);
     const before = st(4, 1000);
-    const after = st(40, 2000);
+    const after = st(40, 2000, { currentTime: 65, seekableEnd: 105 });
     env.syncStats.set("a", after);
     observeCatchUpSample("a", before, after);
     check(env.catchUpHeld.has("a"), "되감기를 감지하면 붙잡아 둔다");
@@ -245,6 +252,38 @@ check(/resetLiveCatchUp\(channelId\);/.test(watch) && /resetLiveCatchUp\(\);/.te
     check(!env.catchUpHeld.has("a"), "사용자가 라이브로 돌아오면 다시 대상이 된다");
     check(env.diagnostics.map((d) => d.type).join() === "catch-up-hold,catch-up-release",
       "진단 기록에 보류·해제를 남긴다");
+  }
+
+  // 모든 칸의 라이브 끝만 함께 멀어졌다면 사용자 되감기로 묶음을 보류하지 않는다.
+  {
+    const { env, tickLiveCatchUp, observeCatchUpSample } = make(
+      [live("a"), live("b")], { scope: "all", mode: "auto", groups: [] });
+    for (const id of ["a", "b"]) {
+      const before = st(4, 11000);
+      const after = st(15, 12000, { currentTime: 100, seekableEnd: 115 });
+      env.syncStats.set(id, after);
+      observeCatchUpSample(id, before, after);
+    }
+    check(env.catchUpHeld.size === 0, "전체 지연 급증은 되감기 보류를 만들지 않는다");
+    tickLiveCatchUp(12000);
+    tickLiveCatchUp(14000);
+    check(env.sent.length === 2 && env.sent.every((command) =>
+      command.type === "APPLY_LIVE_CATCH_UP" && command.targetDelaySec === 3),
+    "전체 채널이 밀리면 확인 시간 뒤 묶음 전체를 따라잡는다");
+  }
+
+  // 확장이 보낸 seek 의 ACK 전후 통계는 사용자 되감기로 오인하지 않는다.
+  {
+    const { env, observeCatchUpSample } = make([live("a")]);
+    const before = st(4, 1000);
+    const after = st(15, 2000, { currentTime: 90, seekableEnd: 105 });
+    env.pending.add("a:seek");
+    observeCatchUpSample("a", before, after);
+    check(!env.catchUpHeld.has("a"), "확장의 seek 응답 대기 중에는 되감기로 보류하지 않는다");
+    env.pending.delete("a:seek");
+    env.syncSeekAt.set("a", 1900);
+    observeCatchUpSample("a", before, after);
+    check(!env.catchUpHeld.has("a"), "확장의 seek 완료 직후에도 보류하지 않는다");
   }
 
   // 안정화 중·광고(일시정지)·버퍼 없는 재초기화·다시보기 칸은 건드리지 않는다.

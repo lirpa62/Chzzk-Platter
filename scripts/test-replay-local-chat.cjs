@@ -99,8 +99,7 @@ assert.match(source, /revealRowAtPosition\(replayScrollElement \|\| activeList, 
 assert.match(source, /USER_STATUS_URL = "https:\/\/comm-api\.game\.naver\.com\/nng_main\/v1\/user\/getUserStatus"/);
 assert.match(source, /commercial\/v1\/subscribe\/channels\//);
 const watchHtml = fs.readFileSync("multiviewWatch.html", "utf8");
-const popupHtml = fs.readFileSync("multiviewChatPopup.html", "utf8");
-for (const html of [watchHtml, popupHtml]) {
+for (const html of [watchHtml]) {
   assert.match(html, /mv-vod-chat-compose-input-container/);
   assert.match(html, /mv-vod-chat-compose-tools/);
   assert.match(html, /이 기기에만 표시/);
@@ -124,7 +123,6 @@ assert.doesNotMatch(source, /chrome\.storage|localStorage|sessionStorage/,
   "로컬 채팅은 저장소에 기록하지 않는다");
 
 const watch = fs.readFileSync("src/multiviewWatch.js", "utf8");
-const popup = fs.readFileSync("src/multiviewChatPopup.js", "utf8");
 assert.match(watch, /vodLocalChatSession\.visible\(snapshot\.currentTime, 120\)/);
 assert.match(watch, /vodChatScrollInitialized/);
 assert.match(watch, /pendingVodLocalRevealId/);
@@ -133,12 +131,6 @@ assert.match(watch, /message\.local[\s\S]{0,60}vodChatSession\.broadcastTimeAt\(
 // 재생에 따라 붙는 채팅은 맨 아래를 보던 중일 때만 따라간다(지난 채팅을 보는 중이면 위치 유지).
 // 입력한 로컬 채팅 보여 주기(pendingVodLocalRevealId·newLocalRow)는 그대로다.
 assert.match(watch, /list\.scrollTop = nearBottom \? list\.scrollHeight : previousScrollTop;/);
-assert.match(popup, /vodChatScrollInitialized/);
-assert.match(popup, /newLocalRow/);
-assert.match(popup, /list\.scrollTop = nearBottom \? list\.scrollHeight : previousScrollTop;/);
-assert.match(watch, /data\.type === "VOD_LOCAL_CHAT_SEND"/);
-assert.match(watch, /playback\.videoNo !== data\.videoNo/);
-assert.match(popup, /send\("VOD_LOCAL_CHAT_SEND"/);
 
 console.log("Replay local chat session, bounds, video isolation and local-only transport checks passed.");
 

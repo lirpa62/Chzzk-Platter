@@ -18,7 +18,7 @@ function check(condition, label) {
 check(/new URL\(`\/live\/\$\{liveChannelId\}\/chat`, CHZZK_ORIGIN\);\s*url\.searchParams\.set\("cheeseMultiChat", "1"\);/.test(watch),
   "채팅 칸은 cheeseMultiChat=1 만 받는다");
 const chatFrameUrl = watch.slice(watch.indexOf("new URL(`/live/${liveChannelId}/chat`"),
-  watch.indexOf('$("mvChatFrame").src = url.toString();'));
+  watch.indexOf('loadFrame($("mvChatFrame"), url.toString());'));
 check(!/"cheeseMulti"/.test(chatFrameUrl), "채팅 칸 주소에 영상 칸 표시(cheeseMulti)를 붙이지 않는다");
 
 // content.js: 기준은 한 곳.
@@ -35,7 +35,8 @@ check(/function ensureMultiviewChatFold\((?:force = false)?\) \{[\s\S]*?getLiveC
   "채팅 접기 유지는 영상 칸에서 계속 동작한다");
 
 // 별도 스크립트: 영상 칸이면 시작하지 않는다.
-const guard = /if \(\s*window\.top !== window &&\s*new URLSearchParams\(location\.search\)\.get\("cheeseMulti"\) === "1"\s*\)\s*return;/;
+// 칸 설정은 iframe 이름(예전 방식은 주소 쿼리)에서 읽는다.
+const guard = /if \(\s*window\.top !== window &&\s*multiviewFrameParams\(\)\.get\("cheeseMulti"\) === "1"\s*\)\s*return;/;
 check(guard.test(chat), "chatTimestamp.js 는 영상 칸에서 시작하지 않는다");
 check(guard.test(badge), "subscribeBadge.js 는 영상 칸에서 시작하지 않는다");
 check(chat.search(guard) < chat.indexOf("new MutationObserver") &&

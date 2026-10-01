@@ -7,7 +7,6 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const watch = read("src/multiviewWatch.js");
 const content = read("src/content.js");
 const mixer = read("src/audioMixer.js");
-const popup = read("src/multiviewChatPopup.js");
 const html = read("settings.html");
 const watchHtml = read("multiviewWatch.html");
 const settings = read("src/settings.js");
@@ -176,7 +175,6 @@ check(/vodChatSourceId === source\.id && video\?\.videoNo &&\s*vodSnapshot\.vide
 check(/event\.source !== window\.parent/.test(content) && /event\.origin !== MULTIVIEW_PARENT_ORIGIN/.test(content), "다시보기 재생 명령에 기존 출처 검증 유지");
 check(/event\.source !== frame\.contentWindow/.test(watch) && /data\.chatGeneration !== chatGeneration/.test(watch), "부모가 해당 프레임과 최신 채팅 세대만 수용");
 check(!/chrome\.storage|background\.sendMessage/.test(read("src/multiviewVodChat.js")), "다시보기 원문을 영구 저장하거나 백그라운드로 중계하지 않음");
-check(/data\.type === "CHAT_UNAVAILABLE"/.test(popup), "기존 라이브 채팅 팝업의 미지원 메시지 처리 유지");
 check(/document\.querySelector\("aside#vod-aside"\)/.test(content), "멀티뷰 초기 접기 대상에 다시보기 채팅 aside 포함");
 check(/function getChatFoldToggleBtn\(aside = null\)/.test(content), "네이티브 접기 버튼을 해당 채팅 aside 안에서 찾음");
 check(/function getVodChatCloseButton\(aside = null\)[\s\S]*?button\[class\*="_close_button_"\]/.test(content), "다시보기 채팅의 전용 닫기 버튼을 찾음");

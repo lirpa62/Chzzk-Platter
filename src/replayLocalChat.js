@@ -641,6 +641,8 @@
 
   function startRegularVod() {
     if (location.origin !== "https://chzzk.naver.com") return;
+    // 멀티뷰를 띄운 치지직 페이지(/lives)에서는 라이브러리로만 쓴다.
+    if (document.documentElement?.hasAttribute?.("data-cheese-multiview-host")) return;
     const session = createSession();
     let activeVideoNo = "";
     let activeAside = null;

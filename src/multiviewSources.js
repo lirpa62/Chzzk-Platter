@@ -298,6 +298,27 @@
     );
   }
 
+  // 채널 이미지가 없을 때 치지직이 쓰는 기본 프로필(다시보기 검색 팝업과 같은 주소).
+  const DEFAULT_PROFILE_URLS = Object.freeze({
+    light: "https://ssl.pstatic.net/static/nng/glive/image/default_profile_light.png",
+    dark: "https://ssl.pstatic.net/static/nng/glive/image/default_profile_dark.png",
+  });
+
+  function defaultProfileUrl(theme) {
+    return theme === "dark" ? DEFAULT_PROFILE_URLS.dark : DEFAULT_PROFILE_URLS.light;
+  }
+
+  // 채널 프로필 <img>. 이미지가 없으면 지금 테마의 기본 프로필을 넣고 표시해 둔다
+  // (테마를 바꾸면 multiviewTheme 이 표시된 것만 바꿔 끼운다. 목록을 다시 그리지 않는다).
+  function profileImg(imageUrl, attrs = "", size = 60) {
+    const thumb = profileThumb(imageUrl, size);
+    const theme = globalThis.document?.documentElement?.dataset?.theme;
+    const src = thumb || defaultProfileUrl(theme);
+    const safe = src.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    return `<img${attrs ? ` ${attrs}` : ""} src="${safe}"` +
+      `${thumb ? "" : " data-mv-default-profile"} alt="" loading="lazy" decoding="async">`;
+  }
+
   function profileThumb(imageUrl, size = 60) {
     const raw = String(imageUrl || "").trim();
     if (!raw) return "";
@@ -1574,6 +1595,8 @@
     getJson,
     isLoginRequiredError,
     profileThumb,
+    defaultProfileUrl,
+    profileImg,
     SORT_OPTIONS,
     serverSortType,
     sortRows,

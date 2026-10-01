@@ -28,9 +28,31 @@
   }
   if (isClipEditorContext()) return;
   // 멀티뷰 영상 칸에는 구독권 관리 팝업이 뜨지 않는다. body 전체 감시만 헛돈다.
+  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는 같은 탭·같은 출처의 sessionStorage 에 칸 주소
+  // 키로 넘긴다(⚠ window.name 은 치지직 스크립트가 비운다). 예전 방식(iframe 이름·주소 쿼리)도 읽는다.
+  function multiviewFrameParams() {
+    const params = new URLSearchParams(window.location.search);
+    if (window.top === window) return params;
+    const apply = (raw) => {
+      if (typeof raw !== "string" || !raw) return;
+      const data = JSON.parse(raw);
+      for (const [key, value] of Object.entries(data || {})) {
+        if (key.startsWith("cheeseMulti") && typeof value === "string") params.set(key, value);
+      }
+    };
+    try {
+      const name = String(window.name || "");
+      if (name.startsWith("cheese-multiview:")) apply(name.slice("cheese-multiview:".length));
+    } catch {}
+    try {
+      apply(window.sessionStorage.getItem(
+        "cheese-multiview-frame:" + window.location.pathname.replace(/\/+$/, "")));
+    } catch {}
+    return params;
+  }
   if (
     window.top !== window &&
-    new URLSearchParams(location.search).get("cheeseMulti") === "1"
+    multiviewFrameParams().get("cheeseMulti") === "1"
   )
     return;
 

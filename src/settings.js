@@ -156,7 +156,6 @@
     "cheesePopupPlayerStartWithoutChat",
     "cheesePopupPlayerStartWithoutChat16x9",
     "cheesePopupPlayerScroll",
-    "cheeseMultiviewChatPopoutMode",
     "cheeseMultiviewBadgeChatDisplayStyle",
     "cheeseMultiviewBtnMixer",
     "cheeseMultiviewBtnFilter",
@@ -187,6 +186,8 @@
     "cheeseMultiviewRememberQuickState",
     "cheeseMultiviewSyncDiagnosticsUi",
     "cheeseMultiviewLiveCatchUp",
+    "cheeseMultiviewLiveCatchUpLimit",
+    "cheeseMultiviewChatSize",
     "cheeseMultiviewQuickState",
     "cheeseMultiviewQuickPosition",
     "cheeseMultiviewMainBorder",
@@ -1178,7 +1179,7 @@
     "sbFollowPageFavVideo",
     "sbFollowPageFavChannel",
     "sbFollowPageFavSearch",
-    // 라운지 소식은 기본 숨김(체크=숨김). content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다.
+    // 저장값은 기존 숨김 플래그 그대로 둔다. 화면의 표시 토글만 반대로 보여 준다.
     "loungeNews",
     // 수신함 커뮤니티 소식도 채널별 요청이 필요하므로 opt-in 으로 둔다.
     "inboxCommunityNews",
@@ -1360,6 +1361,7 @@
         input, typeof v === "boolean" ? v : DEFAULT_CHECKED.has(key),
       );
     });
+    settingsDisclosures?.refresh?.();
     reflectClipEditorStepAvailability();
     reflectChatTimeFormatAvailability();
     reflectLoungeRefreshAvailability();
@@ -4654,6 +4656,80 @@
     reflectLsbAvailability();
   })();
 
+  // ── 멀티뷰 라이브 따라잡기 기준 시간(초, 2~8, 기본 8) ────────────────────
+  // 시청 화면이 같은 범위로 다시 자른다(multiviewSync catchUpLimit). 따라잡기가 꺼져 있으면 잠근다.
+  const MULTIVIEW_CATCH_UP_LIMIT_KEY = "cheeseMultiviewLiveCatchUpLimit";
+  const CATCH_UP_LIMIT_DEFAULT = 8;
+  const CATCH_UP_LIMIT_MIN = 2;
+  const CATCH_UP_LIMIT_MAX = 8;
+  const catchUpLimitRange = document.querySelector("[data-multiview-live-catch-up-limit]");
+  const catchUpLimitNum = document.querySelector("[data-multiview-live-catch-up-limit-num]");
+  const catchUpLimitReset = document.querySelector(
+    "[data-multiview-live-catch-up-limit-reset]",
+  );
+
+  function normalizeCatchUpLimit(value) {
+    if (value == null || value === "") return CATCH_UP_LIMIT_DEFAULT;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return CATCH_UP_LIMIT_DEFAULT;
+    return Math.min(CATCH_UP_LIMIT_MAX, Math.max(CATCH_UP_LIMIT_MIN, n));
+  }
+
+  function reflectCatchUpLimit(value) {
+    const v = normalizeCatchUpLimit(value);
+    if (catchUpLimitRange) catchUpLimitRange.value = String(v);
+    if (catchUpLimitNum) catchUpLimitNum.value = String(v);
+  }
+
+  function reflectCatchUpLimitAvailability() {
+    const off =
+      document.querySelector("[data-multiview-live-catch-up]")?.checked !== true;
+    [catchUpLimitRange, catchUpLimitNum, catchUpLimitReset].forEach((el) => {
+      if (el) el.disabled = off;
+    });
+    document
+      .querySelector("[data-multiview-live-catch-up-limit-item]")
+      ?.classList.toggle("is-locked", off);
+  }
+
+  function saveCatchUpLimit(value) {
+    const v = normalizeCatchUpLimit(value);
+    reflectCatchUpLimit(v);
+    try {
+      cachedStorageSet({ [MULTIVIEW_CATCH_UP_LIMIT_KEY]: v });
+    } catch {}
+  }
+
+  catchUpLimitRange?.addEventListener("input", () =>
+    saveCatchUpLimit(catchUpLimitRange.value));
+  catchUpLimitNum?.addEventListener("change", () =>
+    saveCatchUpLimit(catchUpLimitNum.value));
+  catchUpLimitReset?.addEventListener("click", () =>
+    saveCatchUpLimit(CATCH_UP_LIMIT_DEFAULT));
+  document
+    .querySelector("[data-multiview-live-catch-up]")
+    ?.addEventListener("change", reflectCatchUpLimitAvailability);
+  (async () => {
+    let v = CATCH_UP_LIMIT_DEFAULT;
+    let on = true;
+    try {
+      const data = await cachedStorageGet([
+        MULTIVIEW_CATCH_UP_LIMIT_KEY,
+        "cheeseMultiviewLiveCatchUp",
+      ]);
+      if (data?.[MULTIVIEW_CATCH_UP_LIMIT_KEY] != null) v = data[MULTIVIEW_CATCH_UP_LIMIT_KEY];
+      on = data?.cheeseMultiviewLiveCatchUp !== false;
+    } catch {}
+    reflectCatchUpLimit(v);
+    // 스위치 값은 아래 공용 바인딩이 비동기로 채운다. 그보다 먼저 끝나도 잠금이 맞게 저장값을 쓴다.
+    [catchUpLimitRange, catchUpLimitNum, catchUpLimitReset].forEach((el) => {
+      if (el) el.disabled = !on;
+    });
+    document
+      .querySelector("[data-multiview-live-catch-up-limit-item]")
+      ?.classList.toggle("is-locked", !on);
+  })();
+
   // ── 볼륨/게인 % 표시(전역, 기본 ON) ───────────────────────────────────────
   // 체크=표시. 미설정 시 ON. 각각 독립.
   function bindPctToggle(selector, key) {
@@ -5257,43 +5333,6 @@
           button.dataset.mvBadgeChatDisplayValue === "block" ? "block" : "inline";
         reflectBadgeChatDisplayStyle(style);
         cachedStorageSet({ [displayKey]: style });
-      });
-    });
-  }
-
-  const multiviewChatPopoutModeGroup = document.querySelector(
-    "[data-multiview-chat-popout-mode]",
-  );
-  if (multiviewChatPopoutModeGroup) {
-    const modeKey = "cheeseMultiviewChatPopoutMode";
-    const modeButtons = Array.from(
-      multiviewChatPopoutModeGroup.querySelectorAll(
-        "[data-mv-chat-popout-mode-value]",
-      ),
-    );
-    function reflectMultiviewChatPopoutMode(mode) {
-      const value = mode === "native" ? "native" : "platter";
-      modeButtons.forEach((button) => {
-        const active = button.dataset.mvChatPopoutModeValue === value;
-        button.classList.toggle("is-active", active);
-        button.setAttribute("aria-checked", String(active));
-      });
-    }
-    (async () => {
-      let mode = "platter";
-      try {
-        const stored = await cachedStorageGet(modeKey);
-        if (stored?.[modeKey] === "native") mode = "native";
-      } catch {}
-      reflectMultiviewChatPopoutMode(mode);
-    })();
-    modeButtons.forEach((button) => {
-      button.addEventListener("click", () => {
-        const mode = button.dataset.mvChatPopoutModeValue === "native"
-          ? "native"
-          : "platter";
-        reflectMultiviewChatPopoutMode(mode);
-        cachedStorageSet({ [modeKey]: mode });
       });
     });
   }
@@ -11075,9 +11114,9 @@
       return null;
     }
     const size = {};
-    for (const key of ["w", "h"]) {
+    for (const key of ["w", "h", "topH"]) {
       const number = Number(value[key]);
-      if (Number.isFinite(number) && number >= 260) {
+      if (Number.isFinite(number) && number >= (key === "topH" ? 100 : 260)) {
         size[key] = Math.min(4000, Math.round(number));
       }
     }
@@ -11179,6 +11218,9 @@
   }
 
   function normalizeImportedSettingValue(key, value) {
+    if (key === MULTIVIEW_CHAT_SIZE_KEY) {
+      return normalizeTransferMultiviewChatSize(value) || undefined;
+    }
     if (key === "cheeseMultiviewSetupOptions") {
       if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
@@ -11194,11 +11236,13 @@
             : 1,
       };
     }
-    if (key === "cheeseMultiviewChatPopoutMode") {
-      return value === "native" || value === "platter" ? value : undefined;
-    }
     if (key === "cheeseMultiviewBadgeChatDisplayStyle") {
       return value === "block" || value === "inline" ? value : undefined;
+    }
+    if (key === MULTIVIEW_CATCH_UP_LIMIT_KEY) {
+      return Number.isFinite(Number(value)) && value !== null && value !== ""
+        ? normalizeCatchUpLimit(value)
+        : undefined;
     }
     if (key === POPUP_WIDTH_KEY) {
       return Number.isFinite(Number(value))
@@ -11618,6 +11662,11 @@
       const settings = await chrome.storage.local.get(
         Array.from(SETTINGS_TRANSFER_KEYS),
       );
+      const chatSize = normalizeTransferMultiviewChatSize(
+        settings[MULTIVIEW_CHAT_SIZE_KEY],
+      ) || readTransferMultiviewChatSize();
+      if (chatSize) settings[MULTIVIEW_CHAT_SIZE_KEY] = chatSize;
+      else delete settings[MULTIVIEW_CHAT_SIZE_KEY];
       const payload = {
         format: SETTINGS_TRANSFER_FORMAT,
         schemaVersion: SETTINGS_TRANSFER_SCHEMA_VERSION,
@@ -11630,7 +11679,7 @@
             localStorage.getItem(THEME_STORAGE_KEY) === "dark"
               ? "dark"
               : "light",
-          multiviewChatSize: readTransferMultiviewChatSize(),
+          multiviewChatSize: chatSize,
         },
       };
       if (includeUserData) {
@@ -11848,6 +11897,18 @@
         //   캐시에도 넣지 않는다 — 저장 안 된 내역이 화면에 보이면 안 된다.
         if (!logOk) delete imported.cheeseLogPowerLog;
       }
+      const appearanceChatSize = normalizeTransferMultiviewChatSize(
+        payload?.appearance?.multiviewChatSize,
+      );
+      if (imported[MULTIVIEW_CHAT_SIZE_KEY] || appearanceChatSize) {
+        const currentChatSize = normalizeTransferMultiviewChatSize(
+          (await chrome.storage.local.get(MULTIVIEW_CHAT_SIZE_KEY))?.[MULTIVIEW_CHAT_SIZE_KEY],
+        ) || readTransferMultiviewChatSize() || {};
+        imported[MULTIVIEW_CHAT_SIZE_KEY] = {
+          ...currentChatSize,
+          ...(imported[MULTIVIEW_CHAT_SIZE_KEY] || appearanceChatSize),
+        };
+      }
       await chrome.storage.local.set(imported);
       if (storageCacheData) {
         Object.assign(storageCacheData, imported);
@@ -11861,14 +11922,11 @@
         localStorage.setItem(THEME_STORAGE_KEY, theme);
         applyTheme(theme);
       }
-      const multiviewChatSize = normalizeTransferMultiviewChatSize(
-        payload?.appearance?.multiviewChatSize,
-      );
+      const multiviewChatSize = imported[MULTIVIEW_CHAT_SIZE_KEY];
       if (multiviewChatSize) {
-        const currentChatSize = readTransferMultiviewChatSize() || {};
         localStorage.setItem(
           MULTIVIEW_CHAT_SIZE_KEY,
-          JSON.stringify({ ...currentChatSize, ...multiviewChatSize }),
+          JSON.stringify(multiviewChatSize),
         );
       }
 
@@ -13849,8 +13907,8 @@
   const inboxCommunityNewTabInput = document.querySelector(
     "[data-inbox-community-new-tab]",
   );
-  // 두 값 모두 '숨김' 플래그다(체크=숨김). 주기 타이머가 각각 따로 돌므로,
-  // 각 주기 선택은 '자기 기능'이 숨겨졌을 때만 잠근다.
+  // 저장값은 숨김 플래그지만, 이 세 체크박스는 체크=표시다.
+  // 각 하위 옵션은 자기 기능의 표시를 껐을 때만 잠근다.
   function reflectLoungeRefreshAvailability() {
     // ⚠ 기능 플래그 로더(load())도 이 함수를 부른다. 그 시점에 아래쪽 const 들이 아직
     // 초기화 전일 수 있으므로(TDZ) 캡처된 변수를 쓰지 않고 DOM 에서 직접 찾는다.
@@ -13858,7 +13916,7 @@
     const communityInput = document.querySelector(
       '[data-feature="inboxCommunityNews"]',
     );
-    const disabled = loungeInput?.checked === true;
+    const disabled = loungeInput?.checked !== true;
     document.querySelectorAll("[data-lounge-refresh]").forEach((btn) => {
       btn.disabled = disabled;
     });
@@ -13875,7 +13933,7 @@
         .closest(".settings-item")
         ?.classList.toggle("is-locked", disabled);
     }
-    const communityDisabled = communityInput?.checked === true;
+    const communityDisabled = communityInput?.checked !== true;
     const communityDotInput = document.querySelector(
       '[data-feature="inboxCommunityNewsDot"]',
     );
@@ -13904,7 +13962,7 @@
         ?.classList.toggle("is-locked", communityDisabled);
     }
     const logPowerDisabled =
-      document.querySelector('[data-feature="inboxLogPower"]')?.checked ===
+      document.querySelector('[data-feature="inboxLogPower"]')?.checked !==
       true;
     const logPowerDotInput = document.querySelector(
       '[data-feature="inboxLogPowerDot"]',

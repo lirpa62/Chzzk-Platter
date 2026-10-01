@@ -81,7 +81,29 @@
 
   const win = root.window;
   if (!win || win === win.top || win.location?.origin !== "https://chzzk.naver.com") return;
-  const params = new URLSearchParams(win.location.search);
+  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는 같은 탭·같은 출처의 sessionStorage 에 칸 주소
+  // 키로 넘긴다(⚠ window.name 은 치지직 스크립트가 비운다). 예전 방식(iframe 이름·주소 쿼리)도 읽는다.
+  function multiviewFrameParams() {
+    const params = new URLSearchParams(win.location.search);
+    if (win.top === win) return params;
+    const apply = (raw) => {
+      if (typeof raw !== "string" || !raw) return;
+      const data = JSON.parse(raw);
+      for (const [key, value] of Object.entries(data || {})) {
+        if (key.startsWith("cheeseMulti") && typeof value === "string") params.set(key, value);
+      }
+    };
+    try {
+      const name = String(win.name || "");
+      if (name.startsWith("cheese-multiview:")) apply(name.slice("cheese-multiview:".length));
+    } catch {}
+    try {
+      apply(win.sessionStorage.getItem(
+        "cheese-multiview-frame:" + win.location.pathname.replace(/\/+$/, "")));
+    } catch {}
+    return params;
+  }
+  const params = multiviewFrameParams();
   if (
     params.get("cheeseMultiChat") !== "1" ||
     !/^\/live\/[0-9a-f]{32}\/chat\/?$/i.test(win.location.pathname)

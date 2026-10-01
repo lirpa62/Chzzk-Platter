@@ -525,8 +525,7 @@ textarea {
   background: var(--popup-soft-bg, #1b1d20);
   outline: none;
 }
-.mv-video-channel-option img,
-.mv-video-channel-option-avatar {
+.mv-video-channel-option img {
   background: var(--popup-soft-bg, #1b1d20);
   border-radius: 50%;
   flex: none;
@@ -1285,6 +1284,10 @@ button.mv-live-more {
 }
 .mv-layout-preview i.is-main {
   background: var(--popup-brand, #00ffa3);
+}
+.mv-layout-preview i.is-chat {
+  background: color-mix(in srgb, var(--popup-border, #34383d) 45%, transparent);
+  border: 1px solid var(--popup-border, #34383d);
 }
 .mv-layout-label {
   font-size: 11px;
@@ -2797,7 +2800,7 @@ html[data-theme="dark"]
   position: relative;
   z-index: 3;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose {
+.mv-vod-chat-feed .mv-vod-chat-compose {
   border-top-color: var(--mv-vod-local-chat-border-neutral-weaker);
 }
 /* 설정의 '다시보기 채팅 입력'이 꺼지면 숨긴다(위 display:flex 가 [hidden] 을 덮는다). */
@@ -2822,7 +2825,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   position: relative;
   transition: border-color 0.16s ease;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-compose-input-container {
   background: var(--mv-vod-local-chat-surface-neutral-base);
   border-color: var(--mv-vod-local-chat-border-neutral-weaker);
@@ -2839,7 +2842,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   pointer-events: none;
   position: absolute;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-compose-input-container.is-active::before {
   border-color: var(--mv-vod-local-chat-focus-border);
 }
@@ -2857,7 +2860,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   overflow: hidden;
   width: 28px;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-avatar {
+.mv-vod-chat-feed .mv-vod-chat-compose-avatar {
   background: var(--mv-vod-local-chat-surface-neutral-weak);
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
 }
@@ -2884,7 +2887,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   line-height: 1.35;
   min-width: 0;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-indicator {
+.mv-vod-chat-feed .mv-vod-chat-compose-indicator {
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
 }
 .mv-vod-chat-compose-indicator svg {
@@ -2912,7 +2915,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   padding: 0;
   resize: none;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-compose-input-container
   .mv-vod-chat-compose-input {
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
@@ -2920,7 +2923,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
 .mv-vod-chat-compose-input-container .mv-vod-chat-compose-input::placeholder {
   color: var(--popup-muted, #9aa1a9);
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-compose-input-container
   .mv-vod-chat-compose-input::placeholder {
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
@@ -2944,7 +2947,7 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   min-width: 52px;
   padding: 0 11px;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-compose-tools button {
+.mv-vod-chat-feed .mv-vod-chat-compose-tools button {
   background: var(--mv-vod-local-chat-surface-brand-strongest);
   border-color: var(--mv-vod-local-chat-surface-brand-strongest);
   color: var(--mv-vod-local-chat-content-neutral-inverse);
@@ -2955,14 +2958,14 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   color: var(--popup-muted, #9aa1a9);
   cursor: default;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-compose-tools
   button:disabled {
   background: var(--mv-vod-local-chat-surface-neutral-weak);
   border-color: transparent;
   color: var(--mv-vod-local-chat-content-warm-base);
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod) .mv-vod-chat-row.is-local {
+.mv-vod-chat-feed .mv-vod-chat-row.is-local {
   /* 나의 로컬 채팅 강조(보라 계열). 줄에 이미 있는 투명 1px 테두리의 색만 바꾼다. */
   --mv-vod-local-chat-highlight-border: rgba(124, 58, 237, 0.45);
   /* 배경은 치지직 응원 채팅과 같은 그라데이션(바탕 + 45deg 보라→하늘). */
@@ -2979,29 +2982,29 @@ html.mv-hide-chat-send-button .mv-vod-chat-compose-tools {
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
 }
 html[data-theme="dark"]
-  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-feed
   .mv-vod-chat-row.is-local {
   --mv-vod-local-chat-highlight-border: rgba(167, 139, 250, 0.55);
   --mv-vod-local-chat-highlight-base: #141517;
 }
 /* 설정 - 다시보기 '다시보기 채팅 입력'의 하위 옵션. */
 html.cheese-vod-local-chat-hide-border
-  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-feed
   .mv-vod-chat-row.is-local {
   border-color: transparent;
 }
 html.cheese-vod-local-chat-hide-bg
-  :is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+  .mv-vod-chat-feed
   .mv-vod-chat-row.is-local {
   background: transparent;
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-row.is-local
   .mv-vod-chat-identity
   strong {
   color: var(--mv-vod-local-chat-surface-brand-strongest);
 }
-:is(.mv-vod-chat-feed, .mv-chat-popup-vod)
+.mv-vod-chat-feed
   .mv-vod-chat-row.is-local
   .mv-vod-chat-message {
   color: var(--mv-vod-local-chat-content-neutral-cool-strong);
@@ -3545,8 +3548,8 @@ html[data-theme="dark"]
 }
 
 /* ── 실행 화면 ─────────────────────────────────────────────────────── */
-/* ⚠ 채팅을 격자 안에 넣지 않는다. 바깥 flex 로 감싸야 채팅을 접었다 펴도
-   프레임 격자가 다시 계산되지 않는다(리플로우 중 재생이 끊길 수 있다). */
+/* 기본은 채팅을 프레임 격자 밖에 둔다. 채팅 위 영상 배치만 아래에서 스테이지를
+   Grid로 바꾸며, 어느 경우에도 iframe 노드를 다른 부모로 옮기지 않는다. */
 /* ⚠ height:100% 로 두면 최상단 막대 높이만큼 화면 밖으로 넘친다.
    막대와 형제로 flex 배치되므로 남은 높이를 받아야 한다. */
 .mv-stage {
@@ -4185,6 +4188,49 @@ html[data-theme="dark"]
   flex-direction: column;
   width: var(--mv-chat-w, 370px);
 }
+/* 채팅 위에 영상이 있는 배치에서는 기존 프레임 DOM을 그대로 두고 두 래퍼만
+   Grid에서 투명하게 만든다. iframe을 다른 부모로 옮기면 재생이 다시 시작된다. */
+.mv-stage:is(.is-chat-top-layout, .is-chat-inset-layout) {
+  display: grid;
+  gap: 2px;
+}
+.mv-stage:is(.is-chat-top-layout, .is-chat-inset-layout) .mv-frames-fit,
+.mv-stage:is(.is-chat-top-layout, .is-chat-inset-layout) .mv-frames {
+  display: contents;
+}
+.mv-stage:is(.is-chat-top-layout, .is-chat-inset-layout) .mv-chat {
+  grid-area: x;
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  width: auto;
+}
+.mv-stage.is-chat-top-layout .mv-chat-resize {
+  grid-area: z;
+  height: auto;
+  width: 6px;
+}
+.mv-stage.is-chat-inset-layout .mv-chat-resize {
+  display: none;
+}
+.mv-chat-top-resize {
+  display: none;
+}
+.mv-stage.is-chat-top-layout:not(.is-chat-folded):not(.is-chat-popped-out) .mv-chat-top-resize {
+  cursor: row-resize;
+  display: block;
+  grid-area: y;
+  min-height: 6px;
+  position: relative;
+  z-index: 3;
+}
+.mv-stage.is-chat-top-layout .mv-chat-top-resize:hover,
+.mv-stage.is-chat-top-layout .mv-chat-top-resize:focus-visible,
+.mv-stage.is-chat-top-layout .mv-chat-top-resize.is-dragging {
+  background: var(--popup-brand, #00ffa3);
+  outline: none;
+}
 .mv-stage[data-chat-side="bottom"] .mv-chat,
 .mv-stage[data-chat-side="top"] .mv-chat {
   height: var(--mv-chat-h, 260px);
@@ -4635,14 +4681,28 @@ html[data-theme="dark"]
 
 /* ── 통합 스트림 정보 팝오버 ───────────────────────────────────────────── */
 .mv-stats-pop {
+  box-sizing: border-box;
   gap: 6px;
-  /* 채널 + 지연·해상도·FPS·비트레이트 5열. 채널 이름이 잘리지 않을 만큼만 잡는다. */
-  min-width: 400px;
+  max-width: calc(100vw - 16px);
+  min-width: min(520px, calc(100vw - 16px));
+  overflow-x: auto;
   padding: 10px;
+}
+.mv-stats-catch-up {
+  align-items: center;
+  border-bottom: 1px solid var(--popup-border, #34383d);
+  color: var(--popup-text, #e9ecef);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  justify-content: space-between;
+  padding: 1px 6px 9px;
 }
 .mv-stats-table {
   border-collapse: collapse;
   font-size: 11.5px;
+  min-width: 470px;
   width: 100%;
 }
 .mv-stats-table th {
@@ -4670,6 +4730,10 @@ html[data-theme="dark"]
 .mv-stats-state {
   color: var(--popup-muted, #9aa1a9);
   text-align: center !important;
+}
+.mv-stats-catch-up-state {
+  color: var(--popup-muted, #9aa1a9);
+  white-space: nowrap;
 }
 .mv-quality-pop {
   box-sizing: border-box;
@@ -4976,6 +5040,27 @@ html[data-theme="dark"]
   gap: 4px;
   margin-right: auto;
 }
+.mv-sync-mode {
+  display: inline-flex;
+  flex: none;
+  margin-right: auto;
+}
+.mv-sync-actions .mv-sync-mode button {
+  border-radius: 0;
+  min-width: 48px;
+}
+.mv-sync-actions .mv-sync-mode button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.mv-sync-actions .mv-sync-mode button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+.mv-sync-actions .mv-sync-mode button + button {
+  border-left: 0;
+}
+.mv-sync-actions .mv-sync-mode button[aria-pressed="true"] + button {
+  border-left: 1px solid var(--popup-brand, #00c73c);
+}
 .mv-sync-actions button,
 .mv-sync-controls button,
 .mv-sync-diagnostics-actions button {
@@ -5021,13 +5106,26 @@ html[data-theme="dark"]
   background: rgba(139, 92, 246, 0.34);
   border-color: rgba(196, 181, 253, 0.62);
 }
-/* aria-disabled: 누른 결과로 막힌 버튼(보류 중·이미 기준·초기화 뒤 0).
-   포커스를 잃지 않게 disabled 대신 쓰고, 보기에는 같게 둔다. */
+.mv-sync-actions .mv-sync-mode button[aria-pressed="true"],
+.mv-sync-actions .mv-sync-mode button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--popup-brand, #00c73c);
+  border-color: var(--popup-brand, #00c73c);
+  color: #fff;
+}
+:root[data-theme="dark"] .mv-sync-actions .mv-sync-mode button[aria-pressed="true"],
+:root[data-theme="dark"] .mv-sync-actions .mv-sync-mode button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--popup-brand, #00d864);
+  border-color: var(--popup-brand, #00d864);
+  color: #05170f;
+}
+/* aria-disabled: 누른 버튼의 포커스를 지키고 보류 중의 시각적 깜빡임을 피한다. */
 .mv-sync-controls button:disabled,
-.mv-sync-controls button[aria-disabled="true"],
 .mv-sync-diagnostics-actions button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+.mv-sync-controls button[aria-disabled="true"] {
+  cursor: default;
 }
 .mv-sync-list {
   display: grid;
@@ -5060,8 +5158,10 @@ html[data-theme="dark"]
   margin: 5px 0;
 }
 .mv-sync-controls output {
+  flex: none;
   font-variant-numeric: tabular-nums;
-  min-width: 4.5em;
+  width: 6em;
+  white-space: nowrap;
   text-align: center;
 }
 .mv-sync-warning,

@@ -9,7 +9,6 @@ const source = read("src/multiviewBadgeChat.js");
 const css = read("src/multiview.css");
 const watch = read("src/multiviewWatch.js");
 const watchHtml = read("multiviewWatch.html");
-const popupHtml = read("multiviewChatPopup.html");
 const checks = [];
 function check(condition, label) {
   assert.ok(condition, label);
@@ -91,7 +90,6 @@ check(!/\.mv-vod-chat-scale > button/.test(css) && !/\n\.mv-badge-chat-font-scal
   "예전 흩어진 버튼 규칙이 남지 않는다");
 for (const [html, prefix, label] of [
   [watchHtml, "mvVodChatScale", "시청 페이지"],
-  [popupHtml, "mvChatPopupVodScale", "분리 채팅 팝업"],
 ]) {
   check(new RegExp(`<div class="mv-vod-chat-font-scale" role="group" aria-label="채팅 글자 크기">\\s*` +
     `<button type="button" id="${prefix}Down"[\\s\\S]*?id="${prefix}Value"[\\s\\S]*?id="${prefix}Up"[\\s\\S]*?</button>\\s*</div>`).test(html),

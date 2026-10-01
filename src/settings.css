@@ -1400,6 +1400,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-update-notice-duration]),
 .settings-item:has([data-fp-color-reset]),
 .settings-item:has([data-live-seek-bar-bottom]),
+.settings-item:has([data-multiview-live-catch-up-limit]),
 .settings-item:has([data-chat-word-filter]),
 .settings-item:has([data-chat-recap-retention]),
 .settings-item:has([data-search-live-rerank-w-rel]),
@@ -1434,7 +1435,6 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-item:has(.settings-volume-row),
-.settings-item:has([data-multiview-chat-popout-mode]),
 .settings-item:has([data-multiview-badge-chat-display-style]),
 .settings-item:has(.settings-segmented-5),
 .settings-item:has(.settings-segmented-6),
@@ -1470,7 +1470,6 @@ html.settings-tab-view .settings-item-desc {
 }
 
 .settings-segmented[data-live-viewer-count-position],
-.settings-segmented[data-multiview-chat-popout-mode],
 .settings-segmented[data-multiview-badge-chat-display-style],
 .settings-segmented[data-mixer-gain-min],
 .settings-segmented[data-mixer-gain-max],
@@ -2218,6 +2217,14 @@ body > .clr-picker .clr-preview {
 }
 
 .settings-osd-row:has([data-live-seek-bar-bottom]) {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.settings-osd-row:has([data-multiview-live-catch-up-limit]) {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
   gap: 8px;

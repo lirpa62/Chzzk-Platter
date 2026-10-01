@@ -6,7 +6,6 @@ const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const live = read("src/multiviewBadgeChat.js");
 const watch = read("src/multiviewWatch.js");
-const popup = read("src/multiviewChatPopup.js");
 const css = read("src/multiview.css");
 const settingsHtml = read("settings.html");
 const settingsJs = read("src/settings.js");
@@ -31,12 +30,6 @@ check(/const nearBottom = vodBadgeChatList\.scrollHeight - vodBadgeChatList\.scr
   "다시보기: 맨 아래를 보던 중에만 새 채팅을 따라가고, 과거를 보는 중이면 위치를 둔다");
 check(/if \(vodBadgeChatList\) vodBadgeChatList\.scrollTop = vodBadgeChatList\.scrollHeight;/.test(watch),
   "다시보기: 새로 열면 최신(맨 아래)에서 시작한다");
-check(/\.filter\(\(item\) => \{[\s\S]*?\}\)\.reverse\(\);/.test(popup) &&
-  /badgeList\.innerHTML = badgeItems\.slice\(\)\.reverse\(\)/.test(popup) &&
-  /if \(nearBottom\) badgeList\.scrollTop = badgeList\.scrollHeight;/.test(popup) &&
-  /badgeList\.scrollTop = badgeList\.scrollHeight;/.test(popup) &&
-  !/badgeList\.scrollTop = 0;/.test(popup),
-  "분리 채팅 팝업: 과거→최신으로 그리고 맨 위가 아니라 최신(맨 아래)으로 스크롤한다");
 check(/\.mv-badge-chat-list \{[^}]*flex-direction: column;/.test(css) && !/column-reverse/.test(css),
   "목록은 위→아래 방향이다");
 
@@ -78,12 +71,12 @@ check(/\.mv-badge-chat-list \.mv-vod-chat-row:first-child \{\s*margin-top: 0;\s*
     css.indexOf(".mv-vod-chat-row:first-child {"),
   "다시보기: 채팅창의 아래 붙이기(margin-top:auto)가 모아보기에 따라 들어오지 않는다");
 
-// ── 설정 화면: 분리 채팅 방식과 같은 배치 ───────────────────────────────
+// ── 설정 화면: 다른 세그먼트 선택과 같은 배치 ─────────────────────────────
 {
   const settingsCss = read("src/settings.css");
-  check(/\.settings-item:has\(\[data-multiview-chat-popout-mode\]\),\s*\.settings-item:has\(\[data-multiview-badge-chat-display-style\]\),/.test(settingsCss) &&
-    /\.settings-segmented\[data-multiview-chat-popout-mode\],\s*\.settings-segmented\[data-multiview-badge-chat-display-style\],/.test(settingsCss),
-    "보기 방식 선택이 분리 채팅 방식과 같은 배치(세로 배치·전체 폭)를 쓴다");
+  check(/\.settings-item:has\(\[data-multiview-badge-chat-display-style\]\),/.test(settingsCss) &&
+    /\.settings-segmented\[data-multiview-badge-chat-display-style\],/.test(settingsCss),
+    "보기 방식 선택이 세로 배치·전체 폭 세그먼트를 쓴다");
 }
 
 // ── 한줄보기 / 블록보기 설정 ───────────────────────────────────────────
@@ -106,10 +99,8 @@ for (const [source, label] of [[live, "라이브"], [watch, "다시보기 시청
     `${label}: 설정을 읽고 바뀌면 반영한다`);
 }
 check(/popoverList\?\.classList\.toggle\("is-block", badgeSettings\.displayStyle === "block"\);/.test(live) &&
-  /vodBadgeChatList\?\.classList\.toggle\("is-block", vodBadgeChatSettings\.displayStyle === "block"\);/.test(watch) &&
-  /displayStyle: vodBadgeChatSettings\.displayStyle,/.test(watch) &&
-  /badgeList\.classList\.toggle\("is-block", badgeSettings\.displayStyle === "block"\);/.test(popup),
-  "라이브·시청 페이지·분리 채팅 팝업 모두 목록에 is-block 을 건다");
+  /vodBadgeChatList\?\.classList\.toggle\("is-block", vodBadgeChatSettings\.displayStyle === "block"\);/.test(watch),
+  "라이브·시청 페이지 모두 목록에 is-block 을 건다");
 check(/\.cheese-mv-badge-chat-list\.is-block \.cheese-mv-badge-chat-row:not\(\.is-special\) \.cheese-mv-badge-chat-inline \{`\s*\+\s*`align-items:center; display:grid; gap:6px; grid-template-columns:minmax\(0,1fr\) auto;\}/.test(live) &&
   /\.cheese-mv-badge-chat-message \{`\s*\+\s*`grid-column:1 \/ -1; grid-row:2;/.test(live),
   "라이브 블록보기: 첫 줄 닉네임·시간, 둘째 줄 채팅(원본과 같다)");

@@ -35,12 +35,15 @@ check(ready({ slot: "video:123", mediaId: OWNER, loaded: false }) === false,
 
 // 칸 id: 믹서도 다시보기 칸을 'video:<번호>' 로 알아야 상태를 보내고 명령을 받는다.
 {
-  const slotStart = source.indexOf("  const multiviewSlotId = (() => {");
+  // 칸 설정 읽기(iframe 이름 → 예전 방식 주소 쿼리) 함수부터 함께 떼어 온다.
+  const slotStart = source.indexOf("  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는");
   const slotEnd = source.indexOf("  const multiviewQualityChannelId = multiviewSlotId;");
   assert.ok(slotStart > 0 && slotEnd > slotStart, "칸 id 계산 구간을 찾지 못했다");
   const slotSource = source.slice(slotStart, slotEnd);
-  const slotFor = (pathname, search) => {
-    const ctx = { location: { pathname, search }, URLSearchParams };
+  const slotFor = (pathname, search, name = "") => {
+    const location = { pathname, search };
+    const ctx = { location, URLSearchParams, window: { location, name, top: {},
+      sessionStorage: { getItem: () => null } } };
     vm.runInNewContext(`${slotSource}\nglobalThis.result = multiviewMixerChannelId;`,
       Object.assign(ctx, { globalThis: ctx }));
     return ctx.result;
@@ -51,6 +54,9 @@ check(ready({ slot: "video:123", mediaId: OWNER, loaded: false }) === false,
   check(slotFor("/video/123", "?cheeseMulti=1&cheeseMultiChannelId=video:999") === "",
     "다시보기 칸: 주소와 다른 칸 id 는 받지 않는다");
   check(slotFor(`/live/${LIVE}`, "") === "", "멀티뷰 칸이 아니면 비운다");
+  check(slotFor("/video/123", "", "cheese-multiview:" + JSON.stringify({
+    cheeseMulti: "1", cheeseMultiChannelId: "video:123",
+  })) === "video:123", "칸 설정을 iframe 이름으로 받아도 같은 칸 id 를 쓴다");
   check(/const multiviewMixerChannelId = multiviewSlotId;/.test(source) &&
     /const multiviewQualityChannelId = multiviewSlotId;/.test(source),
     "믹서와 화질이 같은 칸 id 를 쓴다");
@@ -68,6 +74,7 @@ check(ready({ slot: "video:123", mediaId: OWNER, loaded: false }) === false,
     const calls = [];
     const ctx = {
       location: { search }, URLSearchParams, multiviewSlotId: slot,
+      multiviewFrameParams: () => new URLSearchParams(search),
       videoChannelCache: new Map(),
       fetchChannelIdFromApi: async (no) => { calls.push(no); return "c".repeat(32); },
     };

@@ -94,14 +94,34 @@ const call = (method, params = {}, sessionId) =>
     const stage=document.getElementById('mvStage');
     const chat=document.getElementById('mvChat');
     const res=[];
-    for(const layout of L.LAYOUTS){
+    // '빈 칸' 채팅을 고를 수 있는 배치는 바깥·빈 칸 두 모드를 모두 잰다(applyLayout 과 같은 분기).
+    const variants=L.LAYOUTS.flatMap(layout=>layout.chatInsetOption
+      ?[[layout,L.chatSidesFor(layout).find(side=>side!==L.CHAT_INSET_SIDE)],[layout,L.CHAT_INSET_SIDE]]
+      :[[layout,'']]);
+    for(const [layout,wanted] of variants){
       const n=layout.aux+1;
-      const {direction,side}=L.stageStyle(layout,'');
+      const {direction,side}=L.stageStyle(layout,wanted);
       stage.style.flexDirection=direction;stage.dataset.chatSide=side;
-      const tk=L.solveTracks(layout);
-      frames.style.gridTemplateColumns=tk?tk.columns:layout.columns;
-      frames.style.gridTemplateRows=tk?tk.rows:layout.rows;
-      frames.style.gridTemplateAreas=layout.areas.join(' ');
+      const inset=L.usesChatInset(layout,side);
+      const tk=inset?null:L.solveTracks(layout);
+      stage.classList.toggle('is-chat-top-layout',Boolean(layout.chatTop));
+      stage.classList.toggle('is-chat-inset-layout',inset);
+      if(layout.chatTop||inset){
+        const grid=layout.chatTop?L.chatTopStageGrid(layout,side):L.chatInsetStageGrid(layout);
+        stage.style.gridTemplateColumns=grid.columns;
+        stage.style.gridTemplateRows=grid.rows;
+        stage.style.gridTemplateAreas=grid.areas;
+        frames.style.gridTemplateColumns='';
+        frames.style.gridTemplateRows='';
+        frames.style.gridTemplateAreas='';
+      }else{
+        stage.style.gridTemplateColumns='';
+        stage.style.gridTemplateRows='';
+        stage.style.gridTemplateAreas='';
+        frames.style.gridTemplateColumns=tk?tk.columns:layout.columns;
+        frames.style.gridTemplateRows=tk?tk.rows:layout.rows;
+        frames.style.gridTemplateAreas=layout.areas.join(' ');
+      }
       frames.style.setProperty('--mv-ratio',tk?String(tk.ratio):'');
       frames.classList.toggle('is-exact',Boolean(tk));
       frames.innerHTML='';
@@ -127,7 +147,21 @@ const call = (method, params = {}, sessionId) =>
         const area=cr.width*cr.height;
         return area>0?(1-(ir.width*ir.height)/area)*100:0;
       });
-      res.push({id:layout.id,n,ratios,cells});
+      const chatRect=chat.getBoundingClientRect();
+      const stageRect=stage.getBoundingClientRect();
+      const videoRects=[...frames.querySelectorAll('.mv-cell')].map(c=>c.getBoundingClientRect());
+      const chatInStage=chatRect.width>0&&chatRect.height>0&&
+        chatRect.left>=stageRect.left-2&&chatRect.right<=stageRect.right+2&&
+        chatRect.top>=stageRect.top-2&&chatRect.bottom<=stageRect.bottom+2;
+      const overlapsVideo=videoRects.some(r=>Math.min(r.right,chatRect.right)-Math.max(r.left,chatRect.left)>2&&
+        Math.min(r.bottom,chatRect.bottom)-Math.max(r.top,chatRect.top)>2);
+      const last=videoRects[videoRects.length-1];
+      const chatPlacement=layout.chatTop
+        ? chatInStage&&!overlapsVideo&&last.bottom<=chatRect.top+2
+        : inset ? chatInStage&&!overlapsVideo : true;
+      // 빈 칸 채팅은 칸이 스테이지를 채워 16:9 가 아니다(칸 안 여백은 예상된 것).
+      res.push({id:layout.id+(wanted?':'+wanted:''),n,ratios,cells,
+        flexible:layout.flexible===true||inset,chatPlacement});
     }
     return res;
   })()`);
@@ -159,10 +193,16 @@ const call = (method, params = {}, sessionId) =>
   );
   if (bad) process.exitCode = 1;
 
+  const misplaced = out.filter((layout) => !layout.chatPlacement);
+  if (misplaced.length) {
+    console.log("채팅 배치 오류: " + misplaced.map((layout) => layout.id).join(", "));
+    process.exitCode = 1;
+  }
+
   // 레터박스(칸 안 검은 여백) 검사.
-  // ⚠ 이제 모든 배치가 레터박스 없이 놓인다. 해가 없던 L자 배치는 없앴고,
-  //   전체 폭 띠를 쓰는 배치는 메인이 보조 열 수만큼 행을 차지한다.
-  const EXPECT_LETTERBOX = new Set();
+  // 위치 선택형/채팅 위 배치는 Grid 칸 안에서 영상을 16:9로 맞춘다.
+  // 칸 자체가 16:9인 정확 배치에서만 레터박스가 없어야 한다.
+  const EXPECT_LETTERBOX = new Set(out.filter((layout) => layout.flexible).map((layout) => layout.id));
   let wasteBad = 0;
   for (const r of out) {
     const worst = Math.max(...r.cells);

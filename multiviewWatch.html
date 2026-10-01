@@ -48,7 +48,7 @@
         aria-controls="mvChatBody" aria-expanded="false" hidden>채팅 펴기</button>
 
       <div class="mv-chat-popup-control" id="mvChatPopupControl" hidden>
-        <span class="mv-chat-popup-status-live" id="mvChatPopupStatus" role="status" aria-live="polite">채팅 팝업에서 표시 중</span>
+        <span class="mv-chat-popup-status-live" id="mvChatPopupStatus" role="status" aria-live="polite">치지직 채팅창에서 표시 중</span>
         <button type="button" class="mv-pop-button mv-topbar-chat-expand mv-chat-popup-return" id="mvChatPopupReturn"
           data-tooltip="채팅 팝업에서 표시 중">이 창에서 보기</button>
       </div>
@@ -114,7 +114,17 @@
           <span class="mv-pop-label">스트림 정보</span>
           <span class="mv-pop-value" id="mvStatsValue">-</span>
         </button>
-        <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden></div>
+        <div class="mv-pop-panel mv-stats-pop" id="mvStatsPop" hidden>
+          <label class="mv-stats-catch-up mv-option-toggle">
+            <span id="mvStatsCatchUpLabel">자동 따라잡기 · 8초 이상</span>
+            <input type="checkbox" id="mvStatsCatchUp" checked />
+            <span class="mv-option-switch" aria-hidden="true"></span>
+          </label>
+          <table class="mv-stats-table">
+            <thead><tr><th>채널</th><th>지연</th><th>따라잡기</th><th>해상도</th><th>FPS</th><th>비트레이트</th></tr></thead>
+            <tbody id="mvStatsRows"></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="mv-pop" data-mv-pop="quality">
@@ -329,6 +339,10 @@
         aria-label="채팅 크기 조절"
         tabindex="0"
       ></div>
+      <div class="mv-chat-top-resize" id="mvChatTopResize" role="separator"
+        aria-orientation="horizontal"
+        aria-label="채팅 위 영상 높이 조절 (더블클릭하면 자동 높이)"
+        aria-valuemin="100" tabindex="0"></div>
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
           <div class="mv-chat-title-wrap" id="mvChatTitleWrap">
@@ -342,7 +356,7 @@
           </div>
           <button type="button" class="mv-custom-tooltip" id="mvChatPopout"
             aria-label="채팅 분리"
-            data-tooltip="새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.">
+            data-tooltip="치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다.">
             채팅 분리
           </button>
           <span class="mv-chat-popout-feedback" id="mvChatPopoutFeedback" role="status" hidden></span>

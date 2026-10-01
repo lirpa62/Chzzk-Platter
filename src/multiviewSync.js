@@ -184,11 +184,22 @@
     return error > 0 ? 1 - amount : 1 + (amount === 0.03 ? 0.04 : amount);
   }
 
+  // 치지직 플레이어 자체 따라잡기 배속(버퍼 4초 초과 → 1.03×, 2초 이하 → 1×).
+  // ⚠ 사용자 배속으로 치면 지연 6~7초(버퍼 4초 안팎) 칸이 '배속 사용 중' 과 아님을
+  //   오가고, 그동안 따라잡기·자동 싱크에서도 빠진다. 치지직 배속 메뉴에는 없는 값이다.
+  const PLAYER_CATCH_UP_RATE = 1.03;
+
+  function isUserRate(rate) {
+    if (typeof rate !== "number" || !Number.isFinite(rate)) return false;
+    return Math.abs(rate - 1) > LIMITS.userRateEpsilon &&
+      Math.abs(rate - PLAYER_CATCH_UP_RATE) > 0.005;
+  }
+
   function rateOwnership(owned, target, actual) {
     if (owned && Math.abs(actual - target) <= LIMITS.userRateEpsilon) {
       return { owned: true, userOverride: false };
     }
-    return { owned: false, userOverride: Math.abs(actual - 1) > LIMITS.userRateEpsilon };
+    return { owned: false, userOverride: isUserRate(actual) };
   }
 
   function congestion(previous, stats, ids, now = Date.now()) {
@@ -206,13 +217,17 @@
   // 버퍼는 쌓이는데 재생 위치가 밀려 지연이 계속 늘어난다. 배속은 CPU 를 더 쓰므로
   // 상한을 넘은 칸만 라이브 쪽으로 한 번에 옮긴다.
   const CATCH_UP = Object.freeze({
+    // 기본 상한. 설정(cheeseMultiviewLiveCatchUpLimit)으로 minLimitSec~limitSec 사이를 고른다.
     limitSec: 8,
+    minLimitSec: 2,
     targetSec: 3,
+    // 상한이 낮을 때의 목표 하한. 라이브 끝에 너무 붙이면 버퍼가 없어 멈칫한다.
+    minTargetSec: 1.5,
     // 한 번 튄 값으로는 움직이지 않는다(탭 복귀 직후는 예외).
     confirmMs: 2000,
     // 옮긴 뒤에도 안 줄면(명령 실패, 플레이어 재초기화) 연달아 보내지 않는다.
     cooldownMs: 15000,
-    // 한 샘플 사이에 이만큼 늘면 사용자가 되감은 것으로 본다. 자동 싱크 seek(최대
+    // 지연 증가와 재생 위치의 역행이 함께 있어야 되감기로 본다. 자동 싱크 seek(최대
     // maxSeekSec)와 재생 밀림(초당 1초 미만)으로는 나오지 않는 크기다.
     rewindJumpSec: LIMITS.maxSeekSec + 0.5,
     // 되감기 판정에 쓰는 이전 샘플의 최대 간격.
@@ -221,13 +236,18 @@
     ownSeekQuietMs: 3000,
   });
 
-  // 되감기로 지연이 한 번에 늘었는지. 같은 영상(generation)의 연속 샘플만 비교한다.
+  // 지연 증가만으로는 되감기를 알 수 없다. 재생이 멈춘 사이 라이브 끝만
+  // 앞으로 가도 같은 증가가 생기므로, 실제 재생 위치가 뒤로 이동했는지도 본다.
   function isRewind(previous, stats, quietUntil = 0) {
     if (!previous || !stats) return false;
     if (previous.generation !== stats.generation) return false;
     if (stats.receivedAt < quietUntil) return false;
     if (stats.receivedAt - previous.receivedAt > CATCH_UP.rewindSampleGapMs) return false;
     if (previous.nativeDelaySec === null || stats.nativeDelaySec === null) return false;
+    if (!Number.isFinite(previous.currentTime) || !Number.isFinite(stats.currentTime) ||
+        previous.currentTime - stats.currentTime < 0.5) return false;
+    if (Number.isFinite(previous.seekableEnd) && Number.isFinite(stats.seekableEnd) &&
+        stats.seekableEnd < previous.seekableEnd - 1) return false;
     return stats.nativeDelaySec - previous.nativeDelaySec >= CATCH_UP.rewindJumpSec;
   }
 
@@ -235,8 +255,23 @@
   // 가장 느린 칸이 상한을 넘으면 모두 같은 양만큼 앞당겨 서로의 간격을 유지한다.
   // 가장 빠른 칸이 목표에 오도록 옮긴다(어느 칸도 목표보다 앞으로 보내지 않는다).
   // ⚠ 간격이 큰 묶음은 느린 칸이 다시 상한 근처에 남는다. 상한 - 2초에서 자른다.
+  // 설정값 → 상한(초). 정수 minLimitSec~limitSec, 알 수 없는 값은 기본 상한.
+  function catchUpLimit(value) {
+    if (value == null || value === "") return CATCH_UP.limitSec;
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return CATCH_UP.limitSec;
+    return Math.min(CATCH_UP.limitSec, Math.max(CATCH_UP.minLimitSec, n));
+  }
+
+  // 상한에 맞는 목표 지연. 상한 4초 이상은 기본 목표(3초), 그 아래는 상한보다 1초 앞
+  // (하한 minTargetSec). 옮긴 직후 다시 상한을 넘지 않을 여유를 둔다.
+  function catchUpTarget(limit) {
+    const cap = catchUpLimit(limit);
+    return Math.max(CATCH_UP.minTargetSec, Math.min(CATCH_UP.targetSec, cap - 1));
+  }
+
   // members: [{ id, delaySec }] → [{ id, targetDelaySec }]
-  function catchUpTargets(members, limit = CATCH_UP.limitSec, target = CATCH_UP.targetSec) {
+  function catchUpTargets(members, limit = CATCH_UP.limitSec, target = catchUpTarget(limit)) {
     const valid = (members || []).filter((m) => finite(m?.delaySec, 0, 86400) !== null);
     if (!valid.length) return [];
     const delays = valid.map((m) => m.delaySec);
@@ -256,7 +291,8 @@
 
   const api = { LIMITS, CATCH_UP, sample, normalize, eligible, alignDelay, alignDelays,
     reference, rebaseOffsets,
-    targetDelay, seekTarget, rateFor, rateOwnership, congestion, isRewind, catchUpTargets };
+    targetDelay, seekTarget, rateFor, isUserRate, rateOwnership, congestion, isRewind,
+    catchUpLimit, catchUpTarget, catchUpTargets };
   root.CheeseMultiviewSync = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

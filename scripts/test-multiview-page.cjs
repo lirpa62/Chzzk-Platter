@@ -116,6 +116,10 @@ const checks = [];
     window.chrome={runtime:{getURL:p=>'chrome-extension://test/'+p,
       // 목록 API 는 배경 스크립트가 중계한다(확장 페이지 직접 fetch 는 CORS 로 막힘).
       sendMessage:async(msg)=>{
+        if(msg?.type==='MULTIVIEW_OPEN_HOST'){
+          (window.hostOpens=window.hostOpens||[]).push(msg);
+          return {ok:true,tabId:1,windowId:1};
+        }
         if(msg?.type!=='MULTIVIEW_API')return {ok:false,reason:'unknown'};
         if(window.__followingAuthFailure&&new URL(msg.url).pathname.endsWith('/following-lives'))
           return {ok:false,reason:'HTTP 401'};
@@ -1022,8 +1026,10 @@ const checks = [];
        // 브라우저가 fr 값을 반올림해 다시 쓰므로(1.777778fr → 1.77778fr) 숫자로 비교한다.
        const nums=(v)=>String(v).trim().split(/\\s+/).map(x=>parseFloat(x));
        const got=nums(box.style.gridTemplateColumns), exp=nums(want);
-       check(got.length===exp.length &&
-         got.every((n,i)=>Math.abs(n-exp[i])<0.001),
+       const same=got.every(Number.isFinite)&&exp.every(Number.isFinite)
+         ? got.length===exp.length&&got.every((n,i)=>Math.abs(n-exp[i])<0.001)
+         : box.style.gridTemplateColumns.replace(/\\s+/g,'')===want.replace(/\\s+/g,'');
+       check(same,
          id+' 미리보기 열이 실제와 다르다: '+box.style.gridTemplateColumns+' vs '+want);
        // 행도 반영돼야 한다(예전에는 열만 썼다).
        check(box.style.gridTemplateRows,id+' 미리보기에 행이 없다');
@@ -1106,13 +1112,14 @@ const checks = [];
      check(setup.startMainMuted===true,'메인 음소거 시작을 handoff에 담지 않았다');
      check(setup.startMainVolume===0.37,'메인 채널 시작 음량을 handoff에 담지 않았다');
      check(setup.layoutId,'배치가 비어 있다');
-     check(window.openedTabs.length===1,'새 탭이 열리지 않았다');
-     const opened=window.openedTabs[0];
-     check(opened.includes('multiviewWatch.html'),'연 주소가 시청 화면이 아니다: '+opened);
-     // 주소의 setup id 와 저장 키가 맞아야 시청 화면이 그 구성을 찾는다.
-     const id=new URL(opened).searchParams.get('setup');
+     // 치지직이 확장 페이지 안 iframe 을 막아, 시청 화면은 배경 스크립트가 치지직 페이지
+     // 위 팝업 창으로 연다. 확장 시청 탭은 열지 않는다.
+     check(window.openedTabs.length===0,'확장 시청 탭을 열었다');
+     check((window.hostOpens||[]).length===1,'멀티뷰 창을 열지 않았다');
+     const id=window.hostOpens[0].setupId;
+     check(['light','dark'].includes(window.hostOpens[0].theme),'테마를 넘기지 않았다');
      check(id && keys[0]==='cheeseMultiviewSetup:'+id,
-       '주소의 setup id 와 저장 키가 다르다: '+opened+' / '+keys[0]);
+       'setup id 와 저장 키가 다르다: '+id+' / '+keys[0]);
      window.__handoffId=id;`,
   );
 
@@ -1134,9 +1141,22 @@ const checks = [];
     window.errors=[];
     addEventListener('error',e=>errors.push(e.message));
     addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-    window.frameSrcs=[];
+    window.frameSrcs=[];window.rawFrameSrcs=[];
+    // 칸 설정은 iframe 이름으로 간다. 검증 편의를 위해 주소+이름을 예전 쿼리 모양으로 합쳐
+    // 기록하고, 실제로 건 주소는 rawFrameSrcs 에 따로 남긴다.
     Object.defineProperty(HTMLIFrameElement.prototype,'src',{
-      set(v){window.frameSrcs.push(v);this.setAttribute('data-test-src',v);},
+      set(v){
+        window.rawFrameSrcs.push(v);
+        let full=v;
+        const name=this.name||'';
+        if(String(v).startsWith('https://chzzk.naver.com/')&&name.startsWith('cheese-multiview:')){
+          const url=new URL(v);
+          for(const [key,value] of Object.entries(JSON.parse(name.slice('cheese-multiview:'.length))))
+            url.searchParams.set(key,value);
+          full=url.toString();
+        }
+        window.frameSrcs.push(full);this.setAttribute('data-test-src',full);
+      },
       get(){return this.getAttribute('data-test-src')||'';},
     });
     // 프레임으로 나가는 지시를 기록한다(교차 출처라 실제로는 못 가므로 흉내).
@@ -1340,6 +1360,8 @@ const checks = [];
       "  window.__testGroupTick = tickSyncGroups;\n  function tickSyncGroups(")
     .replace("  function replaceChannel(",
       "  window.__testReplaceChannel = replaceChannel;\n  function replaceChannel(")
+    .replace("  function assignSyncGroup(",
+      "  window.__testAssignSyncGroup = assignSyncGroup;\n  function assignSyncGroup(")
     .replace("  function setMain(",
       "  window.__testSetMain = setMain;\n  function setMain(")
     .replace("  function ownerChannelId(",
@@ -1901,9 +1923,16 @@ const checks = [];
      check(!panel.hidden,'싱크 패널이 열리지 않았다');
      check(panel.querySelectorAll('.mv-sync-row').length===2,'채널별 상태가 없다');
      const auto=panel.querySelector('#mvSyncAuto');
+     check(panel.querySelector('#mvSyncOff').getAttribute('aria-pressed')==='true',
+       '초기 꺼짐 모드가 선택되지 않았다');
      auto.click();
      check(document.getElementById('mvSyncValue').textContent==='자동','자동 모드가 표시되지 않는다');
      panel.querySelector('#mvSyncAuto').click();
+     check(window.__mvState.sync.mode==='off','자동을 다시 누르면 싱크가 꺼져야 한다');
+     panel.querySelector('#mvSyncManual').click();
+     check(window.__mvState.sync.mode==='manual','수동 모드로 바뀌지 않는다');
+     panel.querySelector('#mvSyncOff').click();
+     check(window.__mvState.sync.mode==='off','수동에서 싱크를 끌 수 없다');
      document.body.click();
      check(panel.hidden,'싱크 패널이 닫히지 않았다');
      check(window.frameSrcs.length===before,'싱크 조작으로 프레임을 다시 걸었다');`,
@@ -2129,7 +2158,29 @@ const checks = [];
      check(msgs.every(m=>m.origin==='https://chzzk.naver.com'),
        '메시지 대상 origin 이 치지직이 아니다');
      const nowMain=document.querySelector('.mv-cell.is-main');
-     check(nowMain.dataset.channelId===subId,'메인 표시가 옮겨가지 않았다');`,
+     check(nowMain.dataset.channelId===subId,'메인 표시가 옮겨가지 않았다');
+     // 메인 변경은 역할 표시를 함께 보낸다. '메인 고화질 · 보조 480p로 시작' 이 꺼져 있으면
+     // 시작 화질 목표는 없다(각 칸의 선택을 그대로 둔다).
+     check(Number.isSafeInteger(toNew.data.qualityRoleToken)&&toNew.data.qualityRoleToken>0&&
+       toNew.data.qualityRoleToken===toOld.data.qualityRoleToken,'두 칸에 같은 역할 표시를 보내지 않았다');
+     check(toNew.data.initialQuality==='none'&&toOld.data.initialQuality==='none',
+       '옵션이 꺼져 있는데 시작 화질 목표를 보냈다');
+     // 옵션이 켜져 있으면 새 메인은 최고 화질, 이전 메인은 480p 이하로 한 번 다시 건다.
+     window.__mvState.mainHighQuality=true;
+     window.sentMessages.length=0;
+     document.querySelector('.mv-cell[data-channel-id="'+prevMain+'"] [data-mv-promote]').click();
+     await wait(50);
+     const again=window.sentMessages.filter(m=>m.data?.type==='SET_MULTIVIEW_STATE');
+     const promoted=again.find(m=>m.data.channelId===prevMain);
+     const demoted=again.find(m=>m.data.channelId===subId);
+     check(promoted?.data.initialQuality==='highest','새 메인에 최고 화질 시작 목표가 없다: '+promoted?.data.initialQuality);
+     check(demoted?.data.initialQuality==='cap-480','이전 메인에 480p 시작 목표가 없다: '+demoted?.data.initialQuality);
+     check(promoted.data.qualityRoleToken>toNew.data.qualityRoleToken,'역할 표시가 늘지 않았다');
+     check(promoted.data.qualityPolicy==='native'&&demoted.data.qualityPolicy==='native',
+       '역할 시작 목표를 계속 걸리는 상한으로 바꿨다');
+     window.__mvState.mainHighQuality=false;
+     document.querySelector('.mv-cell[data-channel-id="'+subId+'"] [data-mv-promote]').click();
+     await wait(50);`,
   );
 
   await test(
@@ -2169,6 +2220,137 @@ const checks = [];
      const placed=[...document.querySelectorAll('.mv-cell')]
        .filter(c=>c.style.gridArea);
      check(placed.length===2,'자리를 못 받은 칸이 있다');`,
+  );
+
+  await test(
+    "채팅 위 영상 배치는 채팅 헤더 위에 놓이고 좌우·접기를 따라간다",
+    `const stage=document.getElementById('mvStage');
+     const originalId=window.__mvState.layoutId;
+     const originalSide=stage.dataset.chatSide;
+     const before=window.frameSrcs.length;
+     const aux=document.querySelector('.mv-cell:not(.is-main)');
+     const frame=aux.querySelector('iframe');
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-set-layout="main-chat-top"]').click();
+     await wait(50);
+     const head=document.querySelector('.mv-chat-head').getBoundingClientRect();
+     const video=aux.getBoundingClientRect();
+     const chat=document.getElementById('mvChat').getBoundingClientRect();
+     check(getComputedStyle(stage).display==='grid','채팅 위 영상의 스테이지가 Grid가 아니다');
+     check(getComputedStyle(document.getElementById('mvFrames')).display==='contents',
+       '프레임 래퍼가 Grid 자식을 막고 있다');
+     check(video.bottom<=head.top+3&&Math.abs(video.left-chat.left)<3,
+       '보조 영상이 채팅 헤더 위에 놓이지 않았다');
+     check(frame.parentElement.parentElement===aux,'배치 전환 중 iframe을 옮겼다');
+     const topResize=document.getElementById('mvChatTopResize');
+     check(getComputedStyle(topResize).display!=='none','채팅 위 영상 높이 조절 손잡이가 없다');
+     topResize.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+     await wait(20);
+     const taller=aux.getBoundingClientRect().height;
+     check(taller>video.height+15,'채팅 위 영상 높이 조절이 적용되지 않았다');
+     const innerBefore=aux.querySelector('.mv-cell-inner').getBoundingClientRect().height;
+     const widthResize=document.getElementById('mvChatResize');
+     widthResize.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+     await wait(20);
+     check(Math.abs(aux.getBoundingClientRect().height-taller)<3,
+       '채팅 너비를 줄일 때 위 영상의 칸 높이가 달라졌다');
+     check(aux.querySelector('.mv-cell-inner').getBoundingClientRect().height<=innerBefore+2,
+       '채팅 너비를 줄일 때 위 영상 자체가 세로로 커졌다');
+     widthResize.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+     const topH=parseFloat(stage.style.getPropertyValue('--mv-chat-top-h'));
+     check(topH>0&&String(Math.round(topH))===topResize.getAttribute('aria-valuenow'),
+       '채팅 위 영상 높이가 스테이지에 적용되지 않았다');
+     await wait(200);
+     check(Math.abs(window.localStore.cheeseMultiviewChatSize?.topH-topH)<1,
+       '채팅 위 영상 높이가 확장 저장소에 기록되지 않았다');
+     topResize.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+     await wait(20);
+     check(!stage.style.getPropertyValue('--mv-chat-top-h'),'더블클릭해도 자동 높이로 돌아가지 않았다');
+     check(!Object.hasOwn(window.localStore.cheeseMultiviewChatSize||{},'topH'),
+       '기본 높이 복귀가 확장 저장소에 반영되지 않았다');
+     check(Math.abs(aux.getBoundingClientRect().height-video.height)<3,
+       '자동 높이로 돌아가도 처음 높이와 다르다');
+     document.getElementById('mvBack').click();
+     await wait(40);
+     const quick=document.getElementById('mvQuick').getBoundingClientRect();
+     const bounds=stage.getBoundingClientRect();
+     check(quick.width>100&&quick.height>100&&quick.left>=bounds.left-2&&quick.right<=bounds.right+2,
+       '채팅 위 영상 배치에서 채널 관리 패널이 화면 밖으로 벗어났다');
+     document.getElementById('mvQuickClose').click();
+     document.querySelector('[data-mv-pop-toggle="side"]').click();
+     document.querySelector('[data-mv-set-side="left"]').click();
+     await wait(30);
+     const leftVideo=aux.getBoundingClientRect();
+     const main=document.querySelector('.mv-cell.is-main').getBoundingClientRect();
+     check(leftVideo.right<=main.left+3,'채팅을 왼쪽으로 옮겨도 보조 영상이 오른쪽에 남았다');
+     document.getElementById('mvChatToggle').click();
+     await wait(30);
+     check(aux.getBoundingClientRect().height>video.height*1.5,
+       '채팅을 접었는데 위 영상 아래에 빈 채팅 칸이 남았다');
+     document.getElementById('mvChatExpand').click();
+     await wait(30);
+     check(aux.getBoundingClientRect().height<video.height*1.5,
+       '채팅을 펼친 뒤 위 영상 높이가 돌아오지 않았다');
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-set-layout="'+originalId+'"]').click();
+     if(stage.dataset.chatSide!==originalSide){
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       document.querySelector('[data-mv-set-side="'+originalSide+'"]').click();
+     }
+     check(window.frameSrcs.length===before,'채팅 위 영상 배치 전환으로 프레임을 다시 걸었다');`,
+  );
+
+  await test(
+    "빈 칸 채팅 배치는 기본으로 빈 칸에 두고 바깥 자리도 고를 수 있다",
+    `const stage=document.getElementById('mvStage');
+     const originalId=window.__mvState.layoutId;
+     const originalSide=stage.dataset.chatSide;
+     const before=window.frameSrcs.length;
+     const main=document.querySelector('.mv-cell.is-main');
+     const aux=document.querySelector('.mv-cell:not(.is-main)');
+     const setSide=(side)=>{
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       document.querySelector('[data-mv-set-side="'+side+'"]').click();
+     };
+     for(const [id,edge] of [['bottom-1-0','right'],['bottom-1-2','left']]){
+       // 바깥 자리를 쓰던 중에 바꿔 와도 빈 칸에 들어간다.
+       document.querySelector('[data-mv-pop-toggle="layout"]').click();
+       document.querySelector('[data-mv-set-layout="'+id+'"]').click();
+       await wait(25);
+       let chat=document.getElementById('mvChat').getBoundingClientRect();
+       const smaller=aux.getBoundingClientRect();
+       const larger=main.getBoundingClientRect();
+       check(stage.classList.contains('is-chat-inset-layout'),id+' 에 빈 칸 채팅 Grid가 없다');
+       check(stage.dataset.chatSide==='inset',id+' 의 기본 채팅 자리가 빈 칸이 아니다');
+       check(getComputedStyle(document.getElementById('mvChatResize')).display==='none',
+         id+' 에 바깥쪽 채팅 너비 손잡이가 남았다');
+       check(chat.top>=larger.bottom-3&&
+         (edge==='right'?chat.left>=smaller.right-3:chat.right<=smaller.left+3),
+         id+' 의 채팅이 남는 아래쪽 칸에 놓이지 않았다');
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       const options=[...document.querySelectorAll('[data-mv-set-side]')].map(el=>el.dataset.mvSetSide);
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       check(['right','left','bottom','inset'].every(side=>options.includes(side)),
+         id+' 의 채팅 위치 목록: '+options.join(','));
+       for(const side of ['right','left','bottom']){
+         setSide(side);
+         await wait(25);
+         chat=document.getElementById('mvChat').getBoundingClientRect();
+         const frames=[...document.querySelectorAll('.mv-cell')].map(el=>el.getBoundingClientRect());
+         check(!stage.classList.contains('is-chat-inset-layout')&&stage.dataset.chatSide===side,
+           id+' 에서 '+side+' 채팅을 고르지 못했다');
+         check(frames.every(r=>Math.min(r.right,chat.right)-Math.max(r.left,chat.left)<=2||
+           Math.min(r.bottom,chat.bottom)-Math.max(r.top,chat.top)<=2),
+           id+' 의 '+side+' 채팅이 영상과 겹친다');
+       }
+       setSide('inset');
+       await wait(25);
+       check(stage.classList.contains('is-chat-inset-layout'),id+' 에서 빈 칸으로 돌아가지 못했다');
+     }
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-set-layout="'+originalId+'"]').click();
+     if(stage.dataset.chatSide!==originalSide) setSide(originalSide);
+     check(window.frameSrcs.length===before,'빈 칸 채팅 배치 전환으로 프레임을 다시 걸었다');`,
   );
 
   await test(
@@ -2554,6 +2736,7 @@ const checks = [];
      window.sentMessages.length=0;
      const ref=[...panel.querySelectorAll('[data-mv-sync-ref]')]
        .find(el=>el.dataset.mvSyncRef===bId);
+     panel.querySelector('#mvSyncManual').click();
      ref.click();
      check(document.getElementById('mvSyncValue').textContent==='수동',
        '기준 지정 후 수동 모드가 아니다');
@@ -2838,6 +3021,7 @@ const checks = [];
      post(target,'FRAME_SYNC_STATS',{stats:raw(3)});
      document.getElementById('mvSyncBtn').click();
      const panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncManual').click();
      panel.querySelector('[data-mv-sync-ref="'+main.dataset.channelId+'"]').click();
      const row=()=>[...panel.querySelectorAll('.mv-sync-row')].find(r=>
        r.querySelector('[data-mv-sync-ref]')?.dataset.mvSyncRef===id);
@@ -3009,97 +3193,9 @@ const checks = [];
   );
 
   await test(
-    "채팅을 팝업으로 분리하고 채널 전환·복귀를 처리한다",
-    `window.__chatPopupBuses=[];window.__chatPopupWindows=[];
-     window.BroadcastChannel=class{
-       constructor(name){this.name=name;this.sent=[];window.__chatPopupBuses.push(this);}
-       postMessage(data){this.sent.push(data);}
-       close(){this.closed=true;}
-     };
-     window.open=(url,name,features)=>{
-       const popup={closed:false,focus(){},close(){this.closed=true;}};
-       window.__chatPopupWindows.push({url,name,features,popup});
-       return popup;
-     };
-     const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
-     const before=videoSrcs().length;
-     const signalInlineReady=()=>{
-       const frame=document.getElementById('mvChatFrame'),url=new URL(frame.src);
-       const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',
-         data:{source:'cheese-platter-multiview',type:'CHAT_FRAME_READY',
-           channelId:url.pathname.match(/\\/live\\/([0-9a-f]{32})/i)?.[1],
-           generation:Number(url.searchParams.get('cheeseMultiChatGeneration'))}});
-       Object.defineProperty(e,'source',{value:frame.contentWindow});
-       window.dispatchEvent(e);
-     };
-     document.getElementById('mvChatPopout').click();
-     await wait(50);
-     const opened=window.__chatPopupWindows.at(-1);
-     const bus=window.__chatPopupBuses.at(-1);
-     const popupUrl=new URL(opened.url);
-     check(popupUrl.pathname.endsWith('/multiviewChatPopup.html'),'채팅 팝업 페이지가 아니다');
-     check(popupUrl.searchParams.get('session')===bus.name.split('cheese-multiview-chat-')[1],
-       '세션 id가 채널 이름과 일치하지 않는다');
-     check(document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
-       '분리 상태가 화면에 반영되지 않았다');
-     check(document.getElementById('mvChatFrame').src==='about:blank',
-       '분리 후 본창의 채팅 iframe을 내리지 않았다');
-     check(!document.getElementById('mvChatPopupControl').hidden,
-       '본창에 팝업 복귀 UI가 없다');
-     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
-       sessionId:'wrong-session',type:'POPUP_READY'}});
-     check(!bus.sent.some(m=>m.type==='LOAD_CHAT'),'다른 세션 응답을 받아들였다');
-     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
-       sessionId:popupUrl.searchParams.get('session'),type:'POPUP_READY'}});
-     await wait(30);
-     let load=bus.sent.filter(m=>m.type==='LOAD_CHAT').at(-1);
-     check(load&&load.channelId===window.__mvState.chatChannelId,'현재 채널을 팝업에 보내지 않았다');
-     bus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
-       sessionId:popupUrl.searchParams.get('session'),type:'CHAT_FRAME_READY',
-       channelId:load.channelId,generation:load.generation}});
-     check(document.getElementById('mvChatPopupStatus').textContent==='채팅 팝업에서 표시 중',
-       '팝업 연결 상태를 표시하지 않았다');
-     document.querySelector('[data-mv-pop-toggle="chat"]').click();
-     const other=[...document.querySelectorAll('[data-mv-set-chat]')]
-       .find(o=>o.dataset.mvSetChat!==window.__mvState.chatChannelId);
-     other.click();
-     await wait(30);
-     load=bus.sent.filter(m=>m.type==='LOAD_CHAT').at(-1);
-     check(load.channelId===window.__mvState.chatChannelId,'채팅 채널 변경을 팝업에 반영하지 않았다');
-     check(document.getElementById('mvChatFrame').src==='about:blank',
-       '분리 중 본창에 채팅 iframe이 다시 생겼다');
-     document.getElementById('mvChatPopupReturn').click();
-     await wait(30);
-     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
-       '복귀 뒤 분리 상태가 남았다');
-     check(opened.popup.closed,'본창 복귀 시 팝업을 닫지 않았다');
-     check(new URL(document.getElementById('mvChatFrame').src).pathname===
-       '/live/'+window.__mvState.chatChannelId+'/chat','현재 채팅을 본창에 되돌리지 않았다');
-     signalInlineReady();
-     check(videoSrcs().length===before,'채팅 분리/복귀가 영상 프레임을 다시 걸었다');
-     // 팝업의 닫기 신호가 들어오면 자동으로 본창에 복귀한다.
-     document.getElementById('mvChatPopout').click();
-     await wait(30);
-     const secondBus=window.__chatPopupBuses.at(-1);
-     const secondUrl=new URL(window.__chatPopupWindows.at(-1).url);
-     secondBus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
-       sessionId:secondUrl.searchParams.get('session'),type:'POPUP_READY'}});
-     await wait(20);
-     secondBus.onmessage({data:{source:'cheese-platter-multiview-chat-popup',
-       sessionId:secondUrl.searchParams.get('session'),type:'POPUP_CLOSED'}});
-     await wait(30);
-     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),
-       '팝업 닫힘 뒤 본창 채팅을 복원하지 않았다');
-     signalInlineReady();
-     check(videoSrcs().length===before,'팝업 닫힘 복귀가 영상 프레임을 다시 걸었다');`,
-  );
-
-  await test(
     "치지직 채팅창으로 열어 외부 확장 주입과 채널 전환·복귀를 지원한다",
     `window.__nativeChatPopups=[];
-     window.localStore.cheeseMultiviewChatPopoutMode='native';
-     window.storageListeners.forEach(listener=>listener({
-       cheeseMultiviewChatPopoutMode:{newValue:'native'}},'local'));
+     // 채팅 분리는 설정 없이 늘 치지직 채팅창으로 연다(치즈 플래터 팝업은 없앴다).
      const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));
      const before=videoSrcs().length;
      document.getElementById('mvChatPopout').click();
@@ -3562,6 +3658,52 @@ const checks = [];
   );
 
   await test(
+    "스트림 패널 자동 따라잡기 토글은 설정과 양방향 연동되고 폴링에도 유지된다",
+    `await chrome.storage.local.set({cheeseMultiviewLiveCatchUp:false});
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);
+     const toggle=document.getElementById('mvStatsCatchUp');
+     const panel=document.getElementById('mvStatsPop');
+     check(!toggle.checked,'저장된 꺼짐 설정이 반영되지 않았다');
+     check(panel.textContent.includes('꺼짐'),'채널별 꺼짐 상태가 없다');
+     toggle.click();
+     await wait(100);
+     check(window.localStore.cheeseMultiviewLiveCatchUp===true,
+       '패널에서 켠 값이 저장되지 않았다');
+     await wait(1200);
+     check(document.getElementById('mvStatsCatchUp')===toggle,
+       '통계 폴링 중 토글 DOM 이 교체됐다');
+     await chrome.storage.local.set({cheeseMultiviewLiveCatchUp:false});
+     await wait(100);
+     check(!toggle.checked,'외부 설정 변경이 패널에 반영되지 않았다');
+     await chrome.storage.local.set({cheeseMultiviewLiveCatchUp:true});
+     document.getElementById('mvStatsBtn').click();
+     await wait(100);`,
+  );
+
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 390, height: 720, deviceScaleFactor: 1, mobile: true,
+  });
+  await test(
+    "좁은 화면에서도 스트림 패널과 따라잡기 토글이 화면 안에 있다",
+    `document.getElementById('mvStatsBtn').click();
+     const panel=document.getElementById('mvStatsPop');
+     const toggle=document.getElementById('mvStatsCatchUp');
+     const rect=panel.getBoundingClientRect();
+     const switchRect=toggle.parentElement.getBoundingClientRect();
+     check(rect.left>=7&&rect.right<=innerWidth-7,
+       '스트림 패널이 뷰포트를 벗어났다: '+JSON.stringify({
+         rect:rect.toJSON(),left:panel.style.left,innerWidth,
+         visualWidth:visualViewport?.width,visualOffset:visualViewport?.offsetLeft}));
+     check(switchRect.left>=rect.left&&switchRect.right<=rect.right,
+       '따라잡기 토글이 패널 밖으로 나갔다');
+     document.getElementById('mvStatsBtn').click();`,
+  );
+  await command("Emulation.setDeviceMetricsOverride", {
+    width: 1280, height: 800, deviceScaleFactor: 1, mobile: false,
+  });
+
+  await test(
     "통계 패널은 열려 있을 때만 물어보고 닫으면 멈춘다",
     `window.statsAsks=0;
      for(const f of document.querySelectorAll('.mv-cell iframe')){
@@ -3664,24 +3806,25 @@ const checks = [];
   );
 
   await test(
-    "통합 스트림 정보는 다섯 열만 보여 준다",
+    "통합 스트림 정보는 따라잡기 상태를 포함한 여섯 열을 보여 준다",
     `const pop=document.getElementById('mvStatsPop');
      const heads=[...pop.querySelectorAll('thead th')].map(th=>th.textContent.trim());
-     check(heads.join(',')==='채널,지연,해상도,FPS,비트레이트',
+     check(heads.join(',')==='채널,지연,따라잡기,해상도,FPS,비트레이트',
        '표 머리글이 다르다: '+heads.join(','));
      // 표 아래 설명 문구는 없앴다(표만 보여 준다).
      check(!pop.querySelector('.mv-stats-note'),'하단 안내 요소가 남아 있다');
      check(!pop.textContent.includes('지연은 플레이어가'),'하단 안내 문구가 남아 있다');
-     // 표 말고 다른 자식이 남아 빈 여백을 만들지 않아야 한다.
-     check(pop.children.length===1&&pop.firstElementChild.tagName==='TABLE',
-       '패널에 표 말고 다른 요소가 있다: '+
+     // 고정된 토글과 표만 두고, 폴링으로 조작 요소를 갈아 끼우지 않는다.
+     check(pop.children.length===2&&pop.firstElementChild.tagName==='LABEL'&&
+       pop.lastElementChild.tagName==='TABLE',
+       '패널 구조가 다르다: '+
        [...pop.children].map(e=>e.tagName).join(','));
      // 화질 진단용으로 잠깐 뒀던 열은 남지 않아야 한다.
      check(!pop.textContent.includes('≤480p'),'정책 열이 남아 있다');
      check(!pop.querySelector('.mv-stats-broken'),'정책 깨짐 표시가 남아 있다');
-     // 종료·오류 줄의 colspan 도 열 수에 맞아야 한다(채널 뒤 데이터 열 4개).
+     // 종료·오류 줄의 colspan 도 열 수에 맞아야 한다(채널 뒤 데이터 열 5개).
      const state=pop.querySelector('.mv-stats-state');
-     if(state)check(state.getAttribute('colspan')==='4',
+     if(state&&state.hasAttribute('colspan'))check(state.getAttribute('colspan')==='5',
        'colspan 이 열 수와 안 맞는다: '+state.getAttribute('colspan'));
      // 실제 화질은 해상도 열로 확인할 수 있어야 한다.
      check(pop.textContent.includes('1920×1080')||pop.textContent.includes('854×480'),
@@ -4164,6 +4307,7 @@ const checks = [];
      post(target,'FRAME_SYNC_STATS',{stats:raw(3,10)});
      document.getElementById('mvSyncBtn').click();
      let panel=document.getElementById('mvSyncPop');
+     panel.querySelector('#mvSyncManual').click();
      panel.querySelector('[data-mv-sync-ref="'+other.dataset.channelId+'"]').click();
      panel.querySelector('[data-mv-sync-offset="'+target.dataset.channelId+'"][data-step="0.5"]').click();
      const pending=[...window.sentMessages].reverse().find(m=>
@@ -4287,6 +4431,7 @@ const checks = [];
 
      // 수동 기준 변경으로 command/result를 만들고 다음 명령은 timeout시킨다.
      window.sentMessages.length=0;
+     panel.querySelector('#mvSyncManual').click();
      const reference=panel.querySelector('[data-mv-sync-ref]:not([disabled]):not([aria-disabled="true"])');
      check(reference,'바꿀 수 있는 싱크 기준이 없다');
      reference.click();
@@ -4537,6 +4682,7 @@ const checks = [];
      // 수동 맞추기: 제외 채널에는 어떤 명령도 나가지 않는다.
      feed();
      window.sentMessages.length=0;
+     panel.querySelector('#mvSyncManual').click();
      panel.querySelector('#mvSyncAlign').click();
      await wait(600);
      const cmdTo=(id)=>window.sentMessages.filter(m=>
@@ -4588,6 +4734,7 @@ const checks = [];
      }
      feed();
      await wait(80);
+     panel.querySelector('#mvSyncManual').click();
      const labelsOf=()=>[...panel.querySelectorAll('.mv-sync-row')]
        .map(r=>r.querySelector('.mv-sync-row-head span')?.textContent);
      const idOfRow=(i)=>[...panel.querySelectorAll('.mv-sync-row')][i]
@@ -4897,6 +5044,7 @@ const checks = [];
        id!==window.__mvState.chatChannelId) || group.channelIds.at(-1);
      check(picked,'교체할 그룹 채널이 없다');
      group.mode='auto';
+     const expectedMembers=group.channelIds.filter(id=>id!==picked);
      let oldId=picked;
      const historical=[];
      const count=window.__mvState.chosen.length;
@@ -4928,9 +5076,12 @@ const checks = [];
        window.__testReplaceChannel(oldId,{channelId:nextId,channelName:'교체 '+i});
        oldId=nextId;
      }
-     check(group.channelIds.includes(oldId),'교체 채널이 그룹 멤버십을 잃었다');
-     check(group.mode==='auto','교체가 그룹 자동 모드를 해제했다');
-     check(group.manualOffsets[oldId]===0,'새 채널에 예전 보정값이 남았다');
+     check(!group.channelIds.includes(oldId),'새 채널에 옛 그룹 멤버십이 승계됐다');
+     check(JSON.stringify(group.channelIds)===JSON.stringify(expectedMembers),
+       '교체 후 기존 그룹의 다른 채널이 달라졌다');
+     check(group.mode===(expectedMembers.length<2?'off':'auto'),
+       '남은 그룹 채널 수에 맞는 싱크 모드가 아니다');
+     check(group.manualOffsets[oldId]===undefined,'새 채널에 예전 보정값이 남았다');
      check(resources.cells.size===count && document.querySelectorAll('.mv-cell').length===count,
        '교체마다 칸이 누적됐다');
      check(document.querySelectorAll('.mv-cell iframe').length===count,
@@ -4954,7 +5105,8 @@ const checks = [];
      const removedIds=new Set(historical);
      const late=window.frameSrcs.slice(before).filter(src=>src.includes('cheeseMulti=1') &&
        removedIds.has(new URL(src).pathname.split('/').at(-1)));
-     check(late.length===0,'분리된 옛 iframe의 지연 로드가 실행됐다: '+late.join(', '));`,
+     check(late.length===0,'분리된 옛 iframe의 지연 로드가 실행됐다: '+late.join(', '));
+     window.__testAssignSyncGroup(oldId,group.id);`,
   );
   await command("HeapProfiler.collectGarbage");
   const domAfterReplace = await command("Memory.getDOMCounters");
@@ -4988,6 +5140,42 @@ const checks = [];
      check(kept.every(frame=>frame.isConnected),'남은 채널 iframe이 교체됐다');
      check(!window.frameSrcs.slice(before).some(src=>src.includes('cheeseMulti=1')),
        '그룹 채널 제거로 남은 영상을 다시 로드했다');`,
+  );
+
+  await test(
+    "그룹의 두 채널을 교체하면 새 채널은 빠지고 남은 한 채널의 싱크가 꺼진다",
+    `const group=window.__mvState.sync.groups[0];
+     const other=window.__mvState.sync.groups[1];
+     check(group.channelIds.length===1 && other.channelIds.length>=2,
+       '교체 시나리오의 그룹 준비가 실패했다');
+     other.channelIds.slice(0,2).forEach(id=>window.__testAssignSyncGroup(id,group.id));
+     const [kept,first,second]=[...group.channelIds];
+     group.mode='auto';
+     const replacements=['00000000000000000000000000004e20','00000000000000000000000000004e21'];
+     window.__testReplaceChannel(first,{channelId:replacements[0],channelName:'새 채널 A'});
+     check(group.channelIds.length===2 && !group.channelIds.includes(replacements[0]),
+       '첫 채널 교체 후 새 채널이 그룹에 들어갔다');
+     window.__testReplaceChannel(second,{channelId:replacements[1],channelName:'새 채널 B'});
+     check(group.channelIds.length===1 && group.channelIds[0]===kept,
+       '두 채널 교체 후 원래 채널 C만 남지 않았다');
+     check(group.mode==='off','단일 채널 그룹의 자동 싱크가 꺼지지 않았다');
+     check(replacements.every(id=>!group.channelIds.includes(id)),
+       '무관한 새 채널이 싱크 그룹에 남았다');`,
+  );
+
+  await test(
+    "칸 설정은 주소가 아니라 iframe 이름으로 넘긴다",
+    `const raw=window.rawFrameSrcs.filter(s=>String(s).startsWith('https://chzzk.naver.com/'));
+     check(raw.length>0,'칸 주소 기록이 없다');
+     const leaked=raw.find(s=>/cheeseMulti|cheeseRetry/.test(s));
+     check(!leaked,'칸 주소에 설정 쿼리가 남았다(치지직 서버에 전송된다): '+leaked);
+     const frame=document.querySelector('.mv-cell iframe');
+     check(frame.name.startsWith('cheese-multiview:'),'iframe 이름에 칸 설정이 없다: '+frame.name);
+     const config=JSON.parse(frame.name.slice('cheese-multiview:'.length));
+     check(config.cheeseMulti==='1'&&typeof config.cheeseMultiMain==='string',
+       '칸 설정이 이름에 다 담기지 않았다');
+     check(!('cheeseMultiToken' in config)&&!('cheeseMultiHost' in config),
+       '확장 페이지에서 띄운 칸에 치지직 페이지용 토큰을 넘겼다');`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "시청 화면 조작 중 오류");

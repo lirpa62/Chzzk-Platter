@@ -5,7 +5,6 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const watch = read("src/multiviewWatch.js");
-const popup = read("src/multiviewChatPopup.js");
 const checks = [];
 function check(condition, label) {
   assert.ok(condition, label);
@@ -34,13 +33,12 @@ function render(list, { html, initialized, localRow = null }) {
   check(list.scrollTop === 200, "위로 올려 과거를 보는 중이면 위치를 둔다");
 }
 
-for (const [source, label] of [[watch, "시청 페이지"], [popup, "분리 채팅 팝업"]]) {
+for (const [source, label] of [[watch, "시청 페이지"]]) {
   check(/const nearBottom = list\.scrollHeight - list\.clientHeight - list\.scrollTop < 32;\s*const previousScrollTop = list\.scrollTop;/.test(source) &&
     /list\.scrollTop = nearBottom \? list\.scrollHeight : previousScrollTop;/.test(source),
     `${label}: 새 채팅을 그리기 전 맨 아래 여부를 재고, 맨 아래였으면 따라간다`);
 }
-check(/revealRowAtPosition\(list, pendingLocalRow\)/.test(watch) &&
-  /revealRowAtPosition\(list, newLocalRow\)/.test(popup),
+check(/revealRowAtPosition\(list, pendingLocalRow\)/.test(watch),
   "입력한 로컬 채팅 보여 주기는 그대로 둔다");
 
 console.log(checks.map((label) => `  PASS ${label}`).join("\n"));

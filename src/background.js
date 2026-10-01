@@ -6329,9 +6329,230 @@ async function fetchMultiviewApi(rawUrl) {
   return (await response.json())?.content ?? null;
 }
 
+// ── 멀티뷰(치지직 페이지 위) ────────────────────────────────────────────────
+// 치지직이 응답 헤더 frame-ancestors 로 다른 출처(확장 페이지 포함)의 iframe 표시를 막았다.
+// 같은 출처는 허용하므로 멀티뷰 전용 팝업 창에 치지직 라이브 탐색 페이지를 열고, 그 위에
+// 시청 화면을 그린다(칸은 같은 출처 iframe). 헤더를 지우는 우회는 하지 않는다.
+const MULTIVIEW_HOST_URL = "https://chzzk.naver.com/lives";
+const MULTIVIEW_HOST_STORE = "cheeseMultiviewHostTabs";
+const MULTIVIEW_SETUP_PAGE = "multiview.html";
+// 시청 화면 스크립트. chatRecapStore·channelAffinity(Data)·multiviewSync·achievementBadgeMap·
+// multiviewBadgeChat 은 치지직 페이지 content script 로 이미 들어 있어 넣지 않는다.
+const MULTIVIEW_HOST_SCRIPTS = [
+  "src/multiviewTheme.js",
+  "src/multiviewSources.js",
+  "src/multiviewVideoSearchControls.js",
+  "src/multiviewSort.js",
+  "src/multiviewLayouts.js",
+  "src/multiviewDiagnostics.js",
+  "src/multiviewTooltip.js",
+  "src/replayLocalChat.js",
+  "src/multiviewVodChat.js",
+  "src/multiviewWatch.js",
+];
+const MULTIVIEW_SETUP_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+
+// 시청 화면(content script)이 고르기 화면과 주고받는 구성(세션 저장소)을 읽게 한다.
+try {
+  chrome.storage.session.setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
+} catch {}
+
+async function readMultiviewHosts() {
+  try {
+    const data = await chrome.storage.session.get(MULTIVIEW_HOST_STORE);
+    const hosts = data?.[MULTIVIEW_HOST_STORE];
+    return hosts && typeof hosts === "object" ? hosts : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeMultiviewHosts(hosts) {
+  try {
+    await chrome.storage.session.set({ [MULTIVIEW_HOST_STORE]: hosts });
+  } catch {}
+}
+
+let multiviewWatchMarkupCache = "";
+async function multiviewWatchMarkup() {
+  if (!multiviewWatchMarkupCache) {
+    const response = await fetch(chrome.runtime.getURL("multiviewWatch.html"));
+    multiviewWatchMarkupCache = await response.text();
+  }
+  return multiviewWatchMarkupCache;
+}
+
+// 멀티뷰 탭이 받침 페이지(/lives)에 있는지. 일반 탭이라 사용자가 주소창으로 다른 곳에
+// 갈 수 있다. 그때는 멀티뷰를 그 페이지 위에 세우지 않고 멀티뷰 탭 기록을 지운다.
+function isMultiviewHostUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return parsed.origin === "https://chzzk.naver.com" && parsed.pathname.replace(/\/+$/, "") === "/lives";
+  } catch {
+    return false;
+  }
+}
+
+async function injectMultiviewHost(tabId, info) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!isMultiviewHostUrl(tab?.url)) {
+    const hosts = await readMultiviewHosts();
+    if (hosts[tabId]) {
+      delete hosts[tabId];
+      await writeMultiviewHosts(hosts);
+    }
+    return false;
+  }
+  const markup = await multiviewWatchMarkup();
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["src/multiviewHostBoot.js"] });
+  const [mounted] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (html, hostInfo) => globalThis.CheeseMultiviewHostBoot?.mount(html, hostInfo) === true,
+    args: [markup, { setupId: info.setupId, theme: info.theme }],
+  });
+  // 이미 세운 문서면(같은 문서에 두 번 불림) 스크립트를 다시 넣지 않는다.
+  if (mounted?.result !== true) return false;
+  await chrome.scripting.executeScript({ target: { tabId }, files: MULTIVIEW_HOST_SCRIPTS });
+  return true;
+}
+
+// ⚠ 팝업 창(type: popup)은 macOS 에서 화면 밖·뒤에 떠 보이지 않는 일이 있었다(소리만 났다).
+//   고르기 화면 옆에 일반 새 탭으로 연다.
+async function openMultiviewHost(setupId, theme, openerTab) {
+  const tab = await chrome.tabs.create({
+    url: MULTIVIEW_HOST_URL,
+    active: true,
+    ...(Number.isInteger(openerTab?.windowId) ? { windowId: openerTab.windowId } : {}),
+    ...(Number.isInteger(openerTab?.index) ? { index: openerTab.index + 1 } : {}),
+  });
+  const tabId = tab?.id;
+  if (!Number.isInteger(tabId)) throw new Error("no-tab");
+  const hosts = await readMultiviewHosts();
+  hosts[tabId] = { setupId, theme: theme === "dark" ? "dark" : "light", windowId: tab.windowId, children: [] };
+  await writeMultiviewHosts(hosts);
+  // 저장 전에 로드가 끝났을 수 있다(그 경우 onUpdated 를 놓친다).
+  const loaded = await chrome.tabs.get(tabId).catch(() => null);
+  if (loaded?.status === "complete") injectMultiviewHost(tabId, hosts[tabId]).catch(() => {});
+  return { windowId: tab.windowId, tabId };
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== "complete") return;
+  readMultiviewHosts().then((hosts) => {
+    const info = hosts[tabId];
+    if (info) injectMultiviewHost(tabId, info).catch(() => {});
+  });
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  readMultiviewHosts().then((hosts) => {
+    if (!hosts[tabId]) return;
+    delete hosts[tabId];
+    return writeMultiviewHosts(hosts);
+  });
+});
+
+// 멀티뷰가 열어 둔 창(치지직 채팅 독립 창)이 닫히면 그 멀티뷰 탭에 알린다.
+chrome.windows.onRemoved.addListener((windowId) => {
+  readMultiviewHosts().then((hosts) => {
+    let changed = false;
+    for (const [tabId, info] of Object.entries(hosts)) {
+      if (!info?.children?.includes(windowId)) continue;
+      info.children = info.children.filter((id) => id !== windowId);
+      changed = true;
+      chrome.tabs.sendMessage(Number(tabId), { type: "MULTIVIEW_HOST_WINDOW_REMOVED", windowId })
+        .catch(() => {});
+    }
+    if (changed) return writeMultiviewHosts(hosts);
+  });
+});
+
+const clampWindowSize = (value, fallback) =>
+  Number.isInteger(value) && value >= 200 && value <= 4000 ? value : fallback;
+
+// 시청 화면(치지직 페이지의 content script)이 부탁하는 탭·창 조작. 그 멀티뷰 탭이 연 창과
+// 치지직·고르기 화면 주소만 다룬다.
+async function handleMultiviewHostApi(message, sender) {
+  const hostTabId = sender?.tab?.id;
+  const hosts = await readMultiviewHosts();
+  const host = Number.isInteger(hostTabId) ? hosts[hostTabId] : null;
+  if (!host) throw new Error("not-multiview-host");
+  const args = message.args && typeof message.args === "object" ? message.args : {};
+  const children = Array.isArray(host.children) ? host.children : [];
+  const ownWindow = (windowId) => Number.isInteger(windowId) && children.includes(windowId);
+  switch (message.op) {
+    case "windows.create": {
+      const url = String(args.url || "");
+      if (!url.startsWith("https://chzzk.naver.com/")) throw new Error("invalid-url");
+      const win = await chrome.windows.create({
+        url,
+        type: "popup",
+        width: clampWindowSize(args.width, 420),
+        height: clampWindowSize(args.height, 760),
+      });
+      host.children = [...children, win.id];
+      await writeMultiviewHosts(hosts);
+      return { id: win.id, tabs: (win.tabs || []).map((tab) => ({ id: tab.id })) };
+    }
+    case "windows.remove":
+      if (!ownWindow(args.windowId)) throw new Error("not-owned");
+      await chrome.windows.remove(args.windowId);
+      return true;
+    case "windows.focus":
+      if (!ownWindow(args.windowId)) throw new Error("not-owned");
+      await chrome.windows.update(args.windowId, { focused: true });
+      return true;
+    case "tabs.update": {
+      const url = String(args.url || "");
+      if (!url.startsWith("https://chzzk.naver.com/")) throw new Error("invalid-url");
+      const tab = await chrome.tabs.get(args.tabId);
+      if (!ownWindow(tab?.windowId)) throw new Error("not-owned");
+      await chrome.tabs.update(args.tabId, { url });
+      return true;
+    }
+    case "setup.open": {
+      const base = chrome.runtime.getURL(MULTIVIEW_SETUP_PAGE);
+      const href = String(args.href || "");
+      if (!href.startsWith(base)) throw new Error("invalid-url");
+      const tabs = await chrome.tabs.query({ url: `${base}*` });
+      const found = tabs.find((tab) => Number.isInteger(tab.id));
+      if (found) {
+        await chrome.tabs.update(found.id, { url: href, active: true });
+        if (Number.isInteger(found.windowId)) await chrome.windows.update(found.windowId, { focused: true });
+        return true;
+      }
+      await chrome.tabs.create({ url: href });
+      return true;
+    }
+    default:
+      throw new Error("unknown-op");
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (message.type === "MULTIVIEW_OPEN_HOST") {
+    // 우리 확장 페이지(고르기 화면)만 연다.
+    if (!String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
+    const setupId = String(message.setupId || "");
+    if (!MULTIVIEW_SETUP_ID_RE.test(setupId)) {
+      sendResponse?.({ ok: false, reason: "invalid-setup" });
+      return false;
+    }
+    openMultiviewHost(setupId, message.theme, sender?.tab)
+      .then((result) => sendResponse?.({ ok: true, ...result }))
+      .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message.type === "MULTIVIEW_HOST_API") {
+    handleMultiviewHostApi(message, sender)
+      .then((value) => sendResponse?.({ ok: true, value }))
+      .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
+    return true;
   }
 
   if (message.type === "MULTIVIEW_API") {

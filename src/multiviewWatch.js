@@ -12,15 +12,85 @@
   const SYNC = globalThis.CheeseMultiviewSync;
   const DIAGNOSTICS = globalThis.CheeseMultiviewDiagnostics;
   const SETUP_PAGE = "multiview.html";
-  const CHAT_POPUP_PAGE = "multiviewChatPopup.html";
   // 고른 구성을 주소에 담기엔 길다. 세션 저장소로 넘기고 이 id 로 읽는다.
   // ⚠ 고정 키를 쓰면 멀티뷰 탭을 두 개 열었을 때 서로 구성을 덮어쓴다. 탭마다
   //   다른 id 를 주소로 받아 그 키만 읽는다.
   const HANDOFF_PREFIX = "cheeseMultiviewSetup";
   const MULTIVIEW_MESSAGE = "cheese-platter-multiview";
-  const CHAT_POPUP_MESSAGE = "cheese-platter-multiview-chat-popup";
-  const CHAT_POPOUT_MODE_KEY = "cheeseMultiviewChatPopoutMode";
   const CHZZK_ORIGIN = "https://chzzk.naver.com";
+  // 치지직 페이지(/lives) 위에서 도는지. 치지직이 다른 출처(확장 페이지)의 iframe 표시를
+  // 막아서, 멀티뷰 화면을 치지직 페이지 위에 그리고 칸을 같은 출처 iframe 으로 띄운다.
+  const HOSTED_ON_CHZZK = location.origin === CHZZK_ORIGIN;
+  // ⚠ 같은 출처에서는 치지직 스크립트도 칸과 메시지를 주고받을 수 있다. 이 화면이 칸마다
+  //   넘긴 세션 토큰이 맞는 메시지만 서로 믿는다.
+  const FRAME_TOKEN = (() => {
+    if (!HOSTED_ON_CHZZK) return "";
+    const bytes = new Uint8Array(18);
+    crypto.getRandomValues(bytes);
+    return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  })();
+  const FRAME_TOKEN_FIELD = FRAME_TOKEN ? { token: FRAME_TOKEN } : {};
+  const FRAME_NAME_PREFIX = "cheese-multiview:";
+  const FRAME_STORE_PREFIX = "cheese-multiview-frame:";
+  // 탭·창 API. 확장 페이지에서는 바로 부르고, 치지직 페이지 위에서는 배경 스크립트에
+  // 맡긴다(content script 에는 chrome.tabs·chrome.windows 가 없다).
+  function hostApi(op, args) {
+    return chrome.runtime.sendMessage({ type: "MULTIVIEW_HOST_API", op, args }).then((res) => {
+      if (!res?.ok) throw new Error(res?.reason || "host-api-failed");
+      return res.value;
+    });
+  }
+  const EXT = HOSTED_ON_CHZZK
+    ? {
+        createWindow: (options) => hostApi("windows.create", options),
+        removeWindow: (windowId) => hostApi("windows.remove", { windowId }),
+        focusWindow: (windowId) => hostApi("windows.focus", { windowId }),
+        updateTabUrl: (tabId, url) => hostApi("tabs.update", { tabId, url }),
+        onWindowRemoved: (listener) => chrome.runtime.onMessage.addListener((message) => {
+          if (message?.type === "MULTIVIEW_HOST_WINDOW_REMOVED" &&
+              Number.isInteger(message.windowId)) listener(message.windowId);
+        }),
+      }
+    : {
+        createWindow: (options) => chrome.windows.create(options),
+        removeWindow: (windowId) => chrome.windows.remove(windowId),
+        focusWindow: (windowId) => chrome.windows.update(windowId, { focused: true }),
+        updateTabUrl: (tabId, url) => chrome.tabs.update(tabId, { url }),
+        onWindowRemoved: (listener) => chrome.windows.onRemoved.addListener(listener),
+      };
+
+  function isTrustedFrameMessage(event) {
+    if (event.origin !== CHZZK_ORIGIN) return false;
+    return !FRAME_TOKEN || event.data?.token === FRAME_TOKEN;
+  }
+
+  // 칸 설정(cheeseMulti*)은 주소 쿼리가 아니라 iframe 이름으로 넘긴다. 쿼리는 칸을 열 때마다
+  // 치지직 서버 접속 기록에 남는다. 칸 안 스크립트는 window.name 에서 읽는다.
+  function loadFrame(frame, src) {
+    const url = new URL(src, CHZZK_ORIGIN);
+    const config = {};
+    for (const [key, value] of [...url.searchParams]) {
+      if (!key.startsWith("cheeseMulti") && key !== "cheeseRetry") continue;
+      config[key] = value;
+      url.searchParams.delete(key);
+    }
+    if (FRAME_TOKEN) {
+      config.cheeseMultiHost = "chzzk";
+      config.cheeseMultiToken = FRAME_TOKEN;
+      // ⚠ 치지직 스크립트가 칸의 window.name 을 비워(실측) 이름으로는 전달되지 않는다.
+      //   이 화면과 칸은 같은 탭·같은 출처라 sessionStorage 를 함께 쓴다. 칸 주소를 키로
+      //   써 두면 칸이 자기 주소로 읽는다. 서버로는 가지 않는다.
+      try {
+        sessionStorage.setItem(
+          FRAME_STORE_PREFIX + url.pathname.replace(/\/+$/, ""),
+          JSON.stringify(config),
+        );
+      } catch {}
+    }
+    // 확장 페이지(예전 방식)에서는 iframe 이름으로 넘긴다. 주소를 걸기 전에 바꾼다.
+    frame.name = FRAME_NAME_PREFIX + JSON.stringify(config);
+    frame.src = url.toString();
+  }
   const HASH_RE = /^[0-9a-f]{32}$/i;
   const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
@@ -185,6 +255,9 @@
   //
   // ⚠ isMain 은 '화질' 만 정한다. 음소거·크기는 소리 설정에서 계산한다 —
   //   focus mode 를 끄면 보조 채널도 소리를 낼 수 있어야 하기 때문이다.
+  // 메인이 바뀔 때마다 늘리는 역할 표시. 칸은 이 값이 바뀌면 새 역할의 시작 화질을 다시 건다.
+  let qualityRoleToken = 0;
+
   function postState(channelId, isMain, options = {}) {
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame?.contentWindow) return;
@@ -209,7 +282,7 @@
     try {
       frame.contentWindow.postMessage(
         {
-          source: MULTIVIEW_MESSAGE,
+          source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
           type: "SET_MULTIVIEW_STATE",
           channelId,
           muted: effectiveMuted(channelId),
@@ -221,6 +294,18 @@
           //   같아 '바뀐 것 없음' 으로 지나가면, 플레이어가 아직 로딩 국면이라
           //   상한을 못 걸었던 칸이 그대로 고화질로 남는다.
           reconcileQuality: options.reconcileQuality === true,
+          // 메인 변경: '메인 고화질 · 보조 480p로 시작' 이 켜져 있으면 바뀐 두 칸에 새 역할의
+          // 시작 화질을 한 번 다시 건다(이후에는 사용자 선택을 따른다).
+          ...(options.roleToken
+            ? {
+                qualityRoleToken: options.roleToken,
+                initialQuality: initialQualityForChannel(
+                  channel || { mediaType: "live" },
+                  isMain,
+                  state.mainHighQuality,
+                ) || "none",
+              }
+            : {}),
         },
         CHZZK_ORIGIN,
       );
@@ -269,20 +354,13 @@
   // 채팅 칸에 지금 테마를 알린다. 프레임이 준비됐다고 알려 올 때와 테마를 바꿀 때
   // 보낸다(교차 출처라 부모가 그 안의 html 을 직접 만질 수 없다).
   function postChatView() {
-    if (detachedChat) {
-      if (detachedChat.mode === "platter") {
-        chatPopupPost("SET_THEME", {
-          dark: document.documentElement.dataset.theme === "dark",
-        });
-      }
-      return;
-    }
+    if (detachedChat) return;
     const frame = $("mvChatFrame");
     if (!chatFrameReady || !frame?.contentWindow) return;
     try {
       frame.contentWindow.postMessage(
         {
-          source: MULTIVIEW_MESSAGE,
+          source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
           type: "SET_MULTIVIEW_CHAT_VIEW",
           dark: document.documentElement.dataset.theme === "dark",
         },
@@ -306,15 +384,12 @@
   // ⚠ 채널을 빠르게 바꾸면 이전 프레임의 늦은 신호·시간 초과가 지금 상태를 덮을 수
   //   있다. 세대 번호로 그때 것만 받는다.
   const CHAT_READY_TIMEOUT_MS = 12000;
-  const CHAT_POPUP_READY_TIMEOUT_MS = 10000;
   let chatGeneration = 0;
   let chatAutoRetried = false;
   let chatReadyTimer = 0;
   let chatFrameReady = false;
   let detachedChat = null;
   let nativeChatOpening = false;
-  let chatPopoutMode = "platter";
-  let chatPopoutModeRevision = 0;
   let chatPopoutFeedbackTimer = 0;
   let vodChatSourceId = "";
   let vodChatRenderSignature = "";
@@ -352,7 +427,6 @@
   let vodBadgeChatLastPlaybackTime = null;
   let vodBadgeChatHasBaseline = false;
   let vodBadgeChatPopupItems = [];
-  let vodBadgeChatPopupHasNewMessage = false;
   const vodBadgeChatSeenIds = new Set();
   let vodBadgeChatSettingsRevision = 0;
   const MULTIVIEW_BADGE_CHAT_SETTINGS = [
@@ -529,7 +603,6 @@
     const latestId = entries.at(-1)?.id || "";
     const movedForward = vodBadgeChatLastPlaybackTime === null || playbackTime >= vodBadgeChatLastPlaybackTime;
     const hasNewVisibleChat = vodBadgeChatHasBaseline && movedForward && latestId && latestId !== vodBadgeChatLatestId;
-    vodBadgeChatPopupHasNewMessage = Boolean(hasNewVisibleChat);
     vodBadgeChatLatestId = latestId;
     vodBadgeChatLastPlaybackTime = playbackTime;
     vodBadgeChatHasBaseline = true;
@@ -759,73 +832,27 @@
     if (Object.keys(values).length) applyVodChatDisplaySettings(values);
   });
 
-  function reflectChatPopoutMode(mode) {
-    chatPopoutMode = mode === "native" ? "native" : "platter";
+  // 채팅 분리는 치지직 채팅창(독립 창)으로만 연다. ⚠ 예전의 '치즈 플래터 팝업'(확장 페이지)은
+  //   치지직이 다른 출처의 iframe 표시를 막아 치지직 채팅을 띄울 수 없게 되어 없앴다.
+  //   다시보기 채팅은 이 화면이 그리는 것이라 분리하지 않는다.
+  function reflectChatPopoutButton() {
     const button = $("mvChatPopout");
     if (!button) return;
-    button.dataset.mode = chatPopoutMode;
     const isVideo = isVideoChatSource(state.chatChannelId);
     button.dataset.tooltip = isVideo
-      ? "다시보기 채팅을 치즈 플래터 팝업으로 분리합니다."
-      : chatPopoutMode === "native"
-        ? "치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다."
-        : "새 창에서 채팅을 다시 연결합니다. 기존 채팅 화면은 이동되지 않습니다.";
-    button.setAttribute("aria-label", isVideo
-      ? "다시보기 채팅 분리"
-      : chatPopoutMode === "native"
-        ? "치지직 채팅창으로 분리"
-        : "치즈 플래터 팝업으로 분리");
-  }
-
-  const chatPopoutButton = $("mvChatPopout");
-  if (chatPopoutButton) chatPopoutButton.disabled = true;
-  const initialChatPopoutModeRevision = chatPopoutModeRevision;
-  chrome.storage.local.get(CHAT_POPOUT_MODE_KEY).then((stored) => {
-    if (chatPopoutModeRevision === initialChatPopoutModeRevision) {
-      reflectChatPopoutMode(stored?.[CHAT_POPOUT_MODE_KEY]);
-    }
-  }).catch(() => {
-    reflectChatPopoutMode("platter");
-  }).finally(() => {
-    if (chatPopoutButton) chatPopoutButton.disabled = false;
-  });
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes[CHAT_POPOUT_MODE_KEY]) return;
-    chatPopoutModeRevision += 1;
-    reflectChatPopoutMode(changes[CHAT_POPOUT_MODE_KEY].newValue);
-  });
-
-  function chatPopupPost(type, detail = {}) {
-    if (detachedChat?.mode !== "platter") return false;
-    try {
-      detachedChat.channel.postMessage({
-        source: CHAT_POPUP_MESSAGE,
-        sessionId: detachedChat.sessionId,
-        type,
-        ...detail,
-      });
-      return true;
-    } catch {
-      return false;
-    }
+      ? "다시보기 채팅은 분리할 수 없습니다."
+      : "치지직 채팅창을 엽니다. 다른 채팅 확장 프로그램을 사용할 수 있습니다.";
+    button.setAttribute("aria-label", isVideo ? "다시보기 채팅 분리(지원하지 않음)" : "치지직 채팅창으로 분리");
   }
 
   function updateChatPopupStatus(status, message = "") {
     const box = $("mvChatPopupStatus");
     if (!box) return;
     const text = status === "ready"
-      ? detachedChat?.mode === "native"
-        ? "치지직 채팅창에서 표시 중"
-        : "채팅 팝업에서 표시 중"
-      : status === "unavailable"
-        ? message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."
+      ? "치지직 채팅창에서 표시 중"
       : status === "error"
         ? message || "채팅 연결 실패"
-      : status === "empty"
-        ? message || "현재 재생 구간에 채팅이 없습니다."
-      : status === "loading" && detachedChat?.mediaType === "video"
-        ? message || "다시보기 채팅 불러오는 중…"
-        : "채팅 팝업 연결 중…";
+        : "치지직 채팅창 연결 중…";
     box.textContent = text;
     const returnButton = $("mvChatPopupReturn");
     if (returnButton) returnButton.dataset.tooltip = text;
@@ -856,42 +883,9 @@
     }, CHAT_READY_TIMEOUT_MS);
   }
 
-  function dispatchChatLoadToPopup() {
-    const pending = detachedChat?.pendingLoad;
-    if (!detachedChat?.ready || !pending || !HASH_RE.test(pending.channelId || "")) return;
-    detachedChat.pendingLoad = null;
-    chatPopupPost("LOAD_CHAT", {
-      channelId: pending.channelId,
-      channelName: channelName(pending.channelId),
-      generation: pending.generation,
-      retry: pending.retry,
-    });
-    chatPopupPost("CHAT_STATUS", {
-      status: "loading",
-      channelId: pending.channelId,
-      generation: pending.generation,
-    });
-    startChatReadyTimer(pending.generation);
-  }
-
   function setChatStatus(status, message) {
     const box = $("mvChatStatus");
-    if (detachedChat) {
-      updateChatPopupStatus(status, message);
-      if (status === "unavailable") {
-        chatPopupPost("CHAT_UNAVAILABLE", {
-          message: String(message || "다시보기 채팅은 멀티뷰에서 지원하지 않습니다."),
-          generation: chatGeneration,
-        });
-      } else {
-        chatPopupPost("CHAT_STATUS", {
-          status,
-          message: String(message || ""),
-          channelId: state.chatChannelId,
-          generation: chatGeneration,
-        });
-      }
-    }
+    if (detachedChat) updateChatPopupStatus(status, message);
     if (!box) return;
     if (status === "ready") {
       box.hidden = true;
@@ -917,7 +911,7 @@
     if (!frame?.contentWindow || !isVideoChatSource(channelId)) return false;
     try {
       frame.contentWindow.postMessage({
-        source: MULTIVIEW_MESSAGE,
+        source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
         type: "SET_MULTIVIEW_VOD_CHAT",
         channelId,
         enabled,
@@ -1257,59 +1251,6 @@
       statusBox.hidden = true;
       statusBox.innerHTML = "";
     }
-    syncVodChatPopup(snapshot, visible, signature);
-  }
-
-  function syncVodChatPopup(snapshot, visible, signature) {
-    const popup = detachedChat;
-    if (popup?.mode !== "platter" || !isVideoChatSource(state.chatChannelId)) return;
-    const video = state.chosen.find((item) => item.channelId === state.chatChannelId);
-    if (!video?.videoNo) return;
-    const popupSignature = `${signature}:${vodBadgeChatSignature}:${vodBadgeChatSettingsRevision}`;
-    if (popup.lastVodSignature === popupSignature && popup.latestVodSnapshot) {
-      if (popup.ready) updateChatPopupStatus(popup.latestVodSnapshot.status, popup.latestVodSnapshot.message);
-      if (popup.ready && popup.sentVodSignature !== popupSignature) {
-        chatPopupPost("VOD_CHAT_UPDATE", popup.latestVodSnapshot);
-        popup.sentVodSignature = popupSignature;
-      }
-      return;
-    }
-    const hasRows = visible.length > 0;
-    const status = hasRows ? "ready"
-      : snapshot.status === "error" ? "error"
-        : snapshot.status === "loading" || snapshot.status === "idle" ? "loading" : "empty";
-    const message = status === "error" ? snapshot.error || "다시보기 채팅을 불러오지 못했습니다."
-      : status === "empty" ? "현재 재생 구간에 채팅이 없습니다."
-        : status === "loading" ? "재생 시점 채팅을 불러오는 중…" : "";
-    popup.latestVodSnapshot = {
-      channelId: video.channelId,
-      videoNo: video.videoNo,
-      channelName: video.channelName,
-      identity: vodLocalChatSession.getIdentity(),
-      generation: chatGeneration,
-      status,
-      message,
-      dark: document.documentElement.dataset.theme === "dark",
-      html: visible.map((message) => renderVodChatRow(message, vodChatTimeMode)).join(""),
-      badgeChat: {
-        items: vodBadgeChatPopupItems,
-        hasNew: vodBadgeChatPopupHasNewMessage,
-        settings: {
-          hidePillButton: vodBadgeChatSettings.hidePillButton,
-          hideEmptyButton: vodBadgeChatSettings.hideEmptyButton,
-          keepPopupOpen: vodBadgeChatSettings.keepPopupOpen,
-          compactPill: vodBadgeChatSettings.compactPill,
-          pillGlowEnabled: vodBadgeChatSettings.pillGlowEnabled,
-          displayStyle: vodBadgeChatSettings.displayStyle,
-        },
-      },
-    };
-    popup.lastVodSignature = popupSignature;
-    if (popup.ready) {
-      updateChatPopupStatus(status, message);
-      chatPopupPost("VOD_CHAT_UPDATE", popup.latestVodSnapshot);
-      popup.sentVodSignature = popupSignature;
-    }
   }
 
   function updateVodChatPlayback(data) {
@@ -1350,7 +1291,7 @@
     chatFrameReady = false;
     if (source?.type === "video") {
       clearTimeout(chatReadyTimer);
-      if (detachedChat?.mode === "native") restoreInlineChat(true, false);
+      if (detachedChat) restoreInlineChat(true, false);
       stopVodChat();
       $("mvChatFrame").src = "about:blank";
       $("mvChatFrame").hidden = true;
@@ -1358,13 +1299,6 @@
       vodChatSourceId = selectedId;
       vodChatRenderSignature = "";
       const videoChannel = state.chosen.find((item) => item.channelId === selectedId);
-      if (detachedChat?.mode === "platter") {
-        detachedChat.mediaType = "video";
-        detachedChat.videoNo = videoChannel?.videoNo || "";
-        detachedChat.channelId = selectedId;
-        detachedChat.lastVodSignature = "";
-        detachedChat.sentVodSignature = "";
-      }
       vodLocalChatSession.setVideo(videoChannel?.videoNo || "");
       globalThis.CheeseReplayLocalChat.applyAvatar(
         vodLocalChatAvatar, vodLocalChatSession.getIdentity(),
@@ -1398,14 +1332,13 @@
     const liveChannelId = source?.id || "";
     if (!liveChannelId) {
       clearTimeout(chatReadyTimer);
-      if (detachedChat?.mode === "native") restoreInlineChat(true, false);
-      if (detachedChat?.mode === "platter") detachedChat.pendingLoad = null;
+      if (detachedChat) restoreInlineChat(true, false);
       $("mvChatFrame").src = "about:blank";
       setChatStatus("error", "채팅을 표시할 채널을 선택해 주세요.");
       renderTopbar();
       return generation;
     }
-    if (detachedChat?.mode === "native") {
+    if (detachedChat) {
       clearTimeout(chatReadyTimer);
       if (retry || detachedChat.channelId !== channelId) {
         const popup = detachedChat;
@@ -1413,7 +1346,7 @@
         const url = new URL(`/live/${liveChannelId}/chat`, CHZZK_ORIGIN).toString();
         popup.navigation = (popup.navigation || Promise.resolve()).then(() => {
           if (detachedChat !== popup) return;
-          return chrome.tabs.update(popup.tabId, { url });
+          return EXT.updateTabUrl(popup.tabId, url);
         }).catch(() => {
           if (detachedChat !== popup) return;
           showChatPopoutFeedback("치지직 채팅창을 전환하지 못해 이 화면으로 돌아왔습니다.");
@@ -1424,17 +1357,6 @@
       return generation;
     }
     setChatStatus("loading");
-    if (detachedChat) {
-      detachedChat.mediaType = "live";
-      detachedChat.videoNo = "";
-      detachedChat.latestVodSnapshot = null;
-      detachedChat.lastVodSignature = "";
-      detachedChat.sentVodSignature = "";
-      clearTimeout(chatReadyTimer);
-      detachedChat.pendingLoad = { channelId: liveChannelId, generation, retry };
-      dispatchChatLoadToPopup();
-      return generation;
-    }
     // 채팅 전용 페이지를 쓴다(/live/<id>/chat). 영상이 없는 화면이라 소리·화질을
     // 따로 억제할 필요가 없고, 라이브 페이지를 통째로 띄우는 것보다 훨씬 가볍다.
     const url = new URL(`/live/${liveChannelId}/chat`, CHZZK_ORIGIN);
@@ -1442,7 +1364,7 @@
     url.searchParams.set("cheeseMultiChatGeneration", String(generation));
     // 다시 연결할 때 같은 주소면 브라우저가 무시할 수 있어 값을 하나 바꾼다.
     if (retry) url.searchParams.set("cheeseRetry", String(generation));
-    $("mvChatFrame").src = url.toString();
+    loadFrame($("mvChatFrame"), url.toString());
 
     startChatReadyTimer(generation);
     return generation;
@@ -1474,183 +1396,17 @@
     if (!popup) return;
     detachedChat = null;
     clearTimeout(chatReadyTimer);
-    clearTimeout(popup.hostReadyTimer);
-    clearInterval(popup.closePoll);
-    try {
-      popup.channel?.close();
-    } catch {}
     $("mvStage").classList.remove("is-chat-popped-out");
+    applyLayout();
     $("mvChatPopupControl").hidden = true;
     $("mvChatPopout").hidden = false;
-    if (closePopup && popup.mode === "native") {
-      chrome.windows.remove(popup.windowId).catch(() => {});
-    } else if (closePopup && !popup.window.closed) {
-      try {
-        popup.window.close();
-      } catch {}
-    }
+    if (closePopup) EXT.removeWindow(popup.windowId).catch(() => {});
     if (reloadChat) loadChat(state.chatChannelId);
     else if (isVideoChatSource(state.chatChannelId)) renderVodChat();
   }
 
-  function handleChatPopupMessage(event) {
-    const popup = detachedChat;
-    const data = event?.data;
-    if (
-      popup?.mode !== "platter" ||
-      data?.source !== CHAT_POPUP_MESSAGE ||
-      data.sessionId !== popup.sessionId
-    ) return;
-    if (data.type === "POPUP_READY") {
-      if (popup.ready) return;
-      popup.ready = true;
-      clearTimeout(popup.hostReadyTimer);
-      chatPopupPost("SET_THEME", {
-        dark: document.documentElement.dataset.theme === "dark",
-      });
-      if (detachedChat.mediaType === "video") {
-        updateChatPopupStatus("ready");
-        detachedChat.sentVodSignature = "";
-        renderVodChat();
-      } else {
-        dispatchChatLoadToPopup();
-      }
-      return;
-    }
-    if (data.type === "CHAT_FRAME_READY") {
-      if (
-        data.channelId !== state.chatChannelId ||
-        data.generation !== chatGeneration
-      ) return;
-      clearTimeout(chatReadyTimer);
-      setChatStatus("ready");
-      postChatView();
-      return;
-    }
-    if (data.type === "VOD_LOCAL_CHAT_SEND") {
-      if (!vodLocalChatEnabled) return;
-      const selected = state.chosen.find((item) => item.channelId === state.chatChannelId);
-      const playback = vodChatSession.snapshot();
-      if (
-        !isVideoChatSource(state.chatChannelId) ||
-        popup.mediaType !== "video" ||
-        data.channelId !== state.chatChannelId ||
-        data.videoNo !== selected?.videoNo ||
-        data.videoNo !== popup.videoNo ||
-        data.generation !== chatGeneration ||
-        !Number.isSafeInteger(data.generation) ||
-        typeof data.text !== "string" ||
-        !data.text.trim() ||
-        data.text.trim().length > globalThis.CheeseReplayLocalChat.MAX_MESSAGE_LENGTH ||
-        playback.videoNo !== data.videoNo
-      ) return;
-      const message = vodLocalChatSession.add(data.text, playback.currentTime);
-      if (message) {
-        pendingVodLocalRevealId = message.id;
-        renderVodChat();
-      }
-      return;
-    }
-    if (data.type === "RETRY_CHAT") {
-      chatAutoRetried = false;
-      if (isVideoChatSource(state.chatChannelId)) {
-        if (!vodChatSession.retry()) postVodChatControl(state.chatChannelId, true, chatGeneration);
-        renderVodChat();
-      } else {
-        loadChat(state.chatChannelId, { retry: true });
-      }
-      return;
-    }
-    if (data.type === "RETURN_TO_PAGE") {
-      restoreInlineChat();
-      return;
-    }
-    if (data.type === "POPUP_CLOSED") restoreInlineChat(false);
-  }
-
   function focusDetachedChat() {
-    if (detachedChat?.mode === "native") {
-      chrome.windows.update(detachedChat.windowId, { focused: true }).catch(() => {});
-      return;
-    }
-    try {
-      detachedChat?.window.focus();
-    } catch {}
-  }
-
-  function openChatPopup() {
-    const source = resolveChatSource(state.chatChannelId);
-    if (!source) return;
-    if (detachedChat) {
-      focusDetachedChat();
-      return;
-    }
-    if (typeof BroadcastChannel !== "function") {
-      showChatPopoutFeedback("이 브라우저에서는 채팅 분리를 지원하지 않습니다.");
-      return;
-    }
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    const sessionId = [...bytes]
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join("");
-    const channel = new BroadcastChannel(`cheese-multiview-chat-${sessionId}`);
-    channel.onmessage = handleChatPopupMessage;
-    const url = new URL(chrome.runtime.getURL(CHAT_POPUP_PAGE));
-    url.searchParams.set("session", sessionId);
-    let popupWindow = null;
-    try {
-      popupWindow = window.open(
-        url.toString(),
-        `cheese-multiview-chat-${sessionId}`,
-        "popup=yes,width=420,height=760,resizable=yes",
-      );
-    } catch {}
-    if (!popupWindow) {
-      channel.close();
-      showChatPopoutFeedback("팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.");
-      return;
-    }
-    detachedChat = {
-      mode: "platter",
-      mediaType: source.type,
-      sessionId,
-      channel,
-      window: popupWindow,
-      ready: false,
-      pendingLoad: null,
-      hostReadyTimer: 0,
-      closePoll: 0,
-    };
-    if (source.type === "video") {
-      const video = state.chosen.find((item) => item.channelId === source.id);
-      detachedChat.videoNo = video?.videoNo || "";
-      detachedChat.channelId = source.id;
-      detachedChat.lastVodSignature = "";
-      detachedChat.sentVodSignature = "";
-    }
-    const openedPopup = detachedChat;
-    closeChatSelector();
-    $("mvStage").classList.add("is-chat-popped-out");
-    $("mvChatPopupControl").hidden = false;
-    $("mvChatPopout").hidden = true;
-    updateChatPopupStatus("loading");
-    if (source.type === "live") {
-      // 팝업에 실제 채팅을 옮긴 뒤 원본 프레임은 내려 중복 연결과 리소스 사용을 막는다.
-      $("mvChatFrame").src = "about:blank";
-      loadChat(state.chatChannelId);
-    } else {
-      // 다시보기는 부모의 재생 동기화 세션을 유지하고 현재 렌더링만 팝업으로 보낸다.
-      renderVodChat();
-    }
-    openedPopup.hostReadyTimer = setTimeout(() => {
-      if (detachedChat !== openedPopup || openedPopup.ready) return;
-      showChatPopoutFeedback("채팅 팝업을 준비하지 못해 이 화면으로 돌아왔습니다.");
-      restoreInlineChat();
-    }, CHAT_POPUP_READY_TIMEOUT_MS);
-    detachedChat.closePoll = setInterval(() => {
-      if (detachedChat?.window.closed) restoreInlineChat(false);
-    }, 1000);
+    if (detachedChat) EXT.focusWindow(detachedChat.windowId).catch(() => {});
   }
 
   async function openNativeChatPopup() {
@@ -1665,7 +1421,7 @@
     nativeChatOpening = true;
     let popupWindow;
     try {
-      popupWindow = await chrome.windows.create({
+      popupWindow = await EXT.createWindow({
         url: url.toString(),
         type: "popup",
         width: 420,
@@ -1678,40 +1434,36 @@
     }
     const tabId = popupWindow?.tabs?.[0]?.id;
     if (!Number.isInteger(popupWindow?.id) || !Number.isInteger(tabId)) {
-      if (Number.isInteger(popupWindow?.id)) chrome.windows.remove(popupWindow.id).catch(() => {});
+      if (Number.isInteger(popupWindow?.id)) EXT.removeWindow(popupWindow.id).catch(() => {});
       if (popupWindow) showChatPopoutFeedback("치지직 채팅창을 연결하지 못했습니다.");
       return;
     }
     detachedChat = {
-      mode: "native",
       windowId: popupWindow.id,
       tabId,
       channelId,
     };
     closeChatSelector();
     $("mvStage").classList.add("is-chat-popped-out");
+    applyLayout();
     $("mvChatPopupControl").hidden = false;
     $("mvChatPopout").hidden = true;
     $("mvChatFrame").src = "about:blank";
     loadChat(state.chatChannelId);
   }
 
-  chrome.windows.onRemoved.addListener((windowId) => {
-    if (detachedChat?.mode === "native" && detachedChat.windowId === windowId) {
+  EXT.onWindowRemoved((windowId) => {
+    if (detachedChat && detachedChat.windowId === windowId) {
       restoreInlineChat(false);
     }
   });
 
   function openChatPopout() {
     if (isVideoChatSource(state.chatChannelId)) {
-      openChatPopup();
+      showChatPopoutFeedback("다시보기 채팅은 분리할 수 없습니다.");
       return;
     }
-    if (chatPopoutMode === "native") {
-      openNativeChatPopup();
-      return;
-    }
-    openChatPopup();
+    openNativeChatPopup();
   }
 
   // 칸(iframe)은 채널마다 하나씩 만들어 두고 배치가 바뀌어도 '자리'만 옮긴다.
@@ -1736,7 +1488,7 @@
     try {
       frame.contentWindow.postMessage(
         {
-          source: MULTIVIEW_MESSAGE,
+          source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
           type: "RECONCILE_MULTIVIEW_UI",
           channelId,
         },
@@ -1751,7 +1503,7 @@
     try {
       frame.contentWindow.postMessage(
         {
-          source: MULTIVIEW_MESSAGE,
+          source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
           type: "APPLY_MULTIVIEW_WIDE",
           channelId,
         },
@@ -1915,11 +1667,11 @@
     clearTimeout(frameLoadTimers.get(channelId));
     frameLoadTimers.delete(channelId);
     setCellStatus(channelId, "loading");
-    frame.src = frameUrl(
+    loadFrame(frame, frameUrl(
       channel,
       channelId === state.mainId,
       state.mainHighQuality,
-    );
+    ));
     armReadyTimeout(channelId);
   }
 
@@ -2043,11 +1795,11 @@
             !state.chosen.some((item) => item.channelId === channel.channelId)
           )
             return;
-          frame.src = src;
+          loadFrame(frame, src);
           armReadyTimeout(channel.channelId);
         }, delay);
         frameLoadTimers.set(channel.channelId, timer);
-      } else frame.src = src;
+      } else loadFrame(frame, src);
       if (!delay) armReadyTimeout(channel.channelId);
     });
   }
@@ -2063,13 +1815,37 @@
     const layout = LAYOUTS.layoutById(state.layoutId);
     if (!layout) return;
     const frames = $("mvFrames");
+    const stage = $("mvStage");
+    const { direction, side } = LAYOUTS.stageStyle(layout, state.chatSide);
+    state.chatSide = side;
     // 레터박스를 없애려면 칸 자체가 16:9 여야 한다. 그렇게 되는 트랙 크기를 풀어
     // 쓰고, 격자 전체도 그때 필요한 가로:세로로 묶는다(남는 자리는 격자 바깥에서
     // 한 번만 생긴다). 해가 없는 배치(오른쪽+아래 등)는 기존 fr 값으로 돌아간다.
-    const tracks = LAYOUTS.solveTracks(layout);
-    frames.style.gridTemplateColumns = tracks ? tracks.columns : layout.columns;
-    frames.style.gridTemplateRows = tracks ? tracks.rows : layout.rows;
-    frames.style.gridTemplateAreas = layout.areas.join(" ");
+    // 빈 칸 채팅은 칸이 스테이지를 채우므로 16:9 트랙을 쓰지 않는다.
+    const inset = LAYOUTS.usesChatInset(layout, side);
+    const tracks = inset ? null : LAYOUTS.solveTracks(layout);
+    stage.classList.toggle("is-chat-top-layout", layout.chatTop === true);
+    stage.classList.toggle("is-chat-inset-layout", inset);
+    if (layout.chatTop || inset) {
+      const hideChat = stage.classList.contains("is-chat-folded") ||
+        stage.classList.contains("is-chat-popped-out");
+      const grid = layout.chatTop
+        ? LAYOUTS.chatTopStageGrid(layout, side, hideChat)
+        : LAYOUTS.chatInsetStageGrid(layout, hideChat);
+      stage.style.gridTemplateColumns = grid.columns;
+      stage.style.gridTemplateRows = grid.rows;
+      stage.style.gridTemplateAreas = grid.areas;
+      frames.style.gridTemplateColumns = "";
+      frames.style.gridTemplateRows = "";
+      frames.style.gridTemplateAreas = "";
+    } else {
+      stage.style.gridTemplateColumns = "";
+      stage.style.gridTemplateRows = "";
+      stage.style.gridTemplateAreas = "";
+      frames.style.gridTemplateColumns = tracks ? tracks.columns : layout.columns;
+      frames.style.gridTemplateRows = tracks ? tracks.rows : layout.rows;
+      frames.style.gridTemplateAreas = layout.areas.join(" ");
+    }
     frames.style.setProperty("--mv-ratio", tracks ? String(tracks.ratio) : "");
     frames.classList.toggle("is-exact", Boolean(tracks));
 
@@ -2089,9 +1865,6 @@
       }
     });
 
-    const { direction, side } = LAYOUTS.stageStyle(layout, state.chatSide);
-    state.chatSide = side;
-    const stage = $("mvStage");
     stage.style.flexDirection = direction;
     stage.dataset.chatSide = side;
     renderTopbar();
@@ -2118,8 +1891,11 @@
         ...state.chosen.filter((c) => c.channelId !== channelId),
       ];
     }
-    if (before) postState(before, false);
-    postState(channelId, true);
+    // ⚠ 예전에는 시작 화질을 칸을 처음 띄울 때만 정해, 메인을 바꿔도 새 메인이 고화질로,
+    //   이전 메인이 480p 로 바뀌지 않았다.
+    const roleToken = ++qualityRoleToken;
+    if (before) postState(before, false, { roleToken });
+    postState(channelId, true, { roleToken });
     // 이전 메인에 남아 있던 '소리를 켜려면 클릭' 도 함께 지운다.
     if (before) clearAudioNotice(before);
     clearAudioNotice(channelId);
@@ -2141,13 +1917,16 @@
   }
 
   function setLayout(layoutId) {
-    if (!LAYOUTS.layoutById(layoutId) || layoutId === state.layoutId) return;
+    const layout = LAYOUTS.layoutById(layoutId);
+    if (!layout || layoutId === state.layoutId) return;
     state.layoutId = layoutId;
+    state.chatSide = LAYOUTS.chatSideForSwitch(layout, state.chatSide);
     applyLayout();
   }
 
   function setChatSide(side) {
-    if (!LAYOUTS.CHAT_SIDES.includes(side)) return;
+    const layout = LAYOUTS.layoutById(state.layoutId);
+    if (!LAYOUTS.chatSidesFor(layout).includes(side)) return;
     state.chatSide = side;
     applyLayout();
   }
@@ -2158,6 +1937,7 @@
     left: "왼쪽",
     bottom: "아래",
     top: "위",
+    [LAYOUTS.CHAT_INSET_SIDE]: "빈 칸",
   };
 
   function channelName(id) {
@@ -2266,7 +2046,7 @@
     $("mvLayoutValue").textContent = layout?.label || "-";
     renderChatTitle();
     $("mvChatTitle").disabled = availableChatChannels().length === 0;
-    reflectChatPopoutMode(chatPopoutMode);
+    reflectChatPopoutButton();
     if (!detachedChat) $("mvChatPopout").hidden = !resolveChatSource(state.chatChannelId);
     if (!$("mvChatTitleList").hidden) {
       $("mvChatTitleList").innerHTML = availableChatChannels()
@@ -2301,37 +2081,39 @@
         ),
       )
       .join("");
-    // 채팅 위치는 배치와 무관하게 셋 다 고를 수 있다.
-    $("mvSidePanel").innerHTML = LAYOUTS.CHAT_SIDES.map((side) =>
+    // 배치마다 고를 수 있는 자리가 다르다(chatSidesFor). 순서는 늘 같게 둔다.
+    const sides = LAYOUTS.chatSidesFor(layout);
+    $("mvSidePanel").innerHTML = [...LAYOUTS.CHAT_SIDES, LAYOUTS.CHAT_INSET_SIDE]
+      .filter((side) => sides.includes(side))
+      .map((side) =>
       optionRow(
         side,
         SIDE_LABEL[side] || side,
         side === state.chatSide,
         "data-mv-set-side",
       ),
-    ).join("");
+      ).join("");
     // 배치는 지금 채널 수에 맞는 것만. 이름만으로는 모양이 안 그려지므로 작은
     // 미리보기를 함께 둔다(고르기 화면과 같은 트랙 계산을 쓴다).
     $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length)
       .map((l) => {
         const on = l.id === state.layoutId;
-        const tracks = LAYOUTS.solveTracks(l);
-        const columns = tracks ? tracks.columns : l.columns;
-        const rows = tracks ? tracks.rows : l.rows;
+        const preview = LAYOUTS.previewGrid(l);
         return (
           `<button type="button" role="option" aria-selected="${on}"` +
           ` class="mv-pop-option mv-pop-option-layout${on ? " is-on" : ""}"` +
           ` data-mv-set-layout="${esc(l.id)}">` +
-          `<span class="mv-layout-preview" style="grid-template-columns:${esc(columns)};` +
-          `grid-template-rows:${esc(rows)};` +
-          `aspect-ratio:${tracks ? esc(String(tracks.ratio)) : "16/9"};` +
-          `grid-template-areas:${esc(l.areas.join(" "))}">` +
+          `<span class="mv-layout-preview" style="grid-template-columns:${esc(preview.columns)};` +
+          `grid-template-rows:${esc(preview.rows)};` +
+          `aspect-ratio:${esc(preview.ratio)};` +
+          `grid-template-areas:${esc(preview.areas)}">` +
           LAYOUTS.SLOTS.slice(0, l.aux + 1)
             .map(
               (slot) =>
                 `<i style="grid-area:${slot}"${slot === "m" ? ' class="is-main"' : ""}></i>`,
             )
             .join("") +
+          (preview.chat ? '<i class="is-chat" style="grid-area:x" aria-hidden="true"></i>' : "") +
           `</span><span class="mv-pop-option-label">${esc(l.label)}</span></button>`
         );
       })
@@ -2358,7 +2140,7 @@
     if (currentStatus(channelId) !== "ready") return;
     const frame = cells.get(channelId)?.querySelector("iframe");
     frame?.contentWindow?.postMessage(
-      { source: MULTIVIEW_MESSAGE, type: "MIXER_GET_STATE", channelId },
+      { source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD, type: "MIXER_GET_STATE", channelId },
       CHZZK_ORIGIN,
     );
   }
@@ -2383,7 +2165,7 @@
     }, 4000);
     mixerPending.set(key, { commandId, timer });
     frame.contentWindow.postMessage(
-      { source: MULTIVIEW_MESSAGE, type, channelId, commandId, ...values },
+      { source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD, type, channelId, commandId, ...values },
       CHZZK_ORIGIN,
     );
     return true;
@@ -2817,14 +2599,16 @@
   const freshSyncChannels = new Set();
 
   // ── 칸별 라이브 따라잡기 ─────────────────────────────────────────────────
-  // 지연이 상한(CATCH_UP.limitSec)을 넘은 라이브 칸을 라이브 쪽으로 옮긴다.
+  // 지연이 상한(설정 2~8초, 기본 CATCH_UP.limitSec)을 넘은 라이브 칸을 라이브 쪽으로 옮긴다.
   // ⚠ 여러 칸을 소프트웨어로 디코딩하면 버퍼는 쌓이는데 재생 위치가 초당
   //   0.06~0.09초씩 밀린다(엣지 지연 ≈ 0). 배속은 디코딩 부하를 더 키워 쓰지 않는다.
   // ⚠ 자동 싱크로 묶인 칸은 함께 옮긴다. 한 칸만 옮기면 싱크가 가장 느린 칸에
   //   맞추려고 그 칸을 다시 과거로 되돌린다.
   const LIVE_CATCH_UP_KEY = "cheeseMultiviewLiveCatchUp";
+  const LIVE_CATCH_UP_LIMIT_KEY = "cheeseMultiviewLiveCatchUpLimit";
   const MAIN_BORDER_KEY = "cheeseMultiviewMainBorder";
   let liveCatchUpEnabled = true;
+  let liveCatchUpLimitSec = SYNC.CATCH_UP.limitSec;
   const catchUpOverSince = new Map(); // channelId → 상한을 처음 넘은 시각
   const catchUpLastAt = new Map(); // channelId → 마지막 따라잡기 명령 시각
   // 사용자가 되감은 칸. 지연이 상한 아래로 돌아오거나 영상이 바뀔 때까지 두고 본다.
@@ -2833,18 +2617,35 @@
   const catchUpUrgent = new Set();
   const catchUpQuietUntil = new Map(); // 우리가 옮긴 직후라 되감기 판정에서 뺄 시각
 
+  function applyLiveCatchUpSetting(enabled) {
+    liveCatchUpEnabled = enabled;
+    if (!enabled) resetLiveCatchUp();
+    updateSyncPolling();
+    renderStats();
+  }
+
+  // 상한이 바뀌면 이전 상한으로 센 확인 시간은 버린다(되감기 보류·쿨다운은 그대로).
+  function applyLiveCatchUpLimit(value) {
+    const next = SYNC.catchUpLimit(value);
+    if (next === liveCatchUpLimitSec) return;
+    liveCatchUpLimitSec = next;
+    catchUpOverSince.clear();
+    renderStats();
+  }
+
   void chrome.storage?.local
-    ?.get(LIVE_CATCH_UP_KEY)
+    ?.get([LIVE_CATCH_UP_KEY, LIVE_CATCH_UP_LIMIT_KEY])
     ?.then((data) => {
-      liveCatchUpEnabled = data[LIVE_CATCH_UP_KEY] !== false;
-      updateSyncPolling();
+      applyLiveCatchUpLimit(data[LIVE_CATCH_UP_LIMIT_KEY]);
+      applyLiveCatchUpSetting(data[LIVE_CATCH_UP_KEY] !== false);
     })
     .catch(() => {});
   chrome.storage?.onChanged?.addListener((changes, area) => {
-    if (area !== "local" || !changes[LIVE_CATCH_UP_KEY]) return;
-    liveCatchUpEnabled = changes[LIVE_CATCH_UP_KEY].newValue !== false;
-    if (!liveCatchUpEnabled) resetLiveCatchUp();
-    updateSyncPolling();
+    if (area !== "local") return;
+    if (changes[LIVE_CATCH_UP_LIMIT_KEY])
+      applyLiveCatchUpLimit(changes[LIVE_CATCH_UP_LIMIT_KEY].newValue);
+    if (changes[LIVE_CATCH_UP_KEY])
+      applyLiveCatchUpSetting(changes[LIVE_CATCH_UP_KEY].newValue !== false);
   });
 
   function applyMainBorderSetting(enabled) {
@@ -2892,8 +2693,16 @@
       catchUpHeld.delete(channelId);
       catchUpOverSince.delete(channelId);
     }
-    const quietUntil = catchUpQuietUntil.get(channelId) || 0;
-    if (SYNC.isRewind(previous, stats, quietUntil)) {
+    const quietUntil = Math.max(
+      catchUpQuietUntil.get(channelId) || 0,
+      syncSeekAt.has(channelId)
+        ? syncSeekAt.get(channelId) + SYNC.CATCH_UP.ownSeekQuietMs
+        : 0,
+    );
+    // 우리가 보낸 싱크 seek/nudge 는 사용자의 되감기가 아니다. ACK 전후
+    // 어느 시점에 측정값이 와도 보류하지 않는다.
+    if (!pendingSync(channelId, "seek") && !pendingSync(channelId, "nudge") &&
+        SYNC.isRewind(previous, stats, quietUntil)) {
       if (catchUpHeld.has(channelId)) return;
       catchUpHeld.add(channelId);
       catchUpOverSince.delete(channelId);
@@ -2912,7 +2721,7 @@
     if (
       catchUpHeld.has(channelId) &&
       stats.nativeDelaySec !== null &&
-      stats.nativeDelaySec < SYNC.CATCH_UP.limitSec
+      stats.nativeDelaySec < liveCatchUpLimitSec
     ) {
       catchUpHeld.delete(channelId);
       recordSyncDiagnostic(
@@ -2966,7 +2775,8 @@
 
   function tickLiveCatchUp(now) {
     if (!liveCatchUpEnabled) return;
-    const { limitSec, confirmMs, cooldownMs, ownSeekQuietMs } = SYNC.CATCH_UP;
+    const { confirmMs, cooldownMs, ownSeekQuietMs } = SYNC.CATCH_UP;
+    const limitSec = liveCatchUpLimitSec;
     for (const cluster of catchUpClusters()) {
       // 자동 싱크는 되감은 칸도 기준으로 삼는다. 나머지만 앞으로 보내면
       // 싱크가 다시 그 칸에 맞춰 뒤로 당기므로 묶음 전체를 보류한다.
@@ -2996,6 +2806,7 @@
       if (!due) continue;
       const targets = SYNC.catchUpTargets(
         members.map((id) => ({ id, delaySec: syncStats.get(id).nativeDelaySec })),
+        limitSec,
       );
       for (const { id, targetDelaySec } of targets) {
         const delaySec = syncStats.get(id).nativeDelaySec;
@@ -3554,7 +3365,7 @@
     if (!frame?.contentWindow) return false;
     try {
       frame.contentWindow.postMessage(
-        { source: MULTIVIEW_MESSAGE, type, channelId, ...extra },
+        { source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD, type, channelId, ...extra },
         CHZZK_ORIGIN,
       );
       return true;
@@ -3868,6 +3679,17 @@
     return { text, hint };
   }
 
+  function syncReadyLabel(mode, stats) {
+    if (mode === "off") return "싱크 꺼짐";
+    const userRate = stats.userRateOverride ||
+      (SYNC.isUserRate(stats.playbackRate) && !stats.syncRateOwned);
+    if (userRate)
+      return mode === "auto" ? "사용자 배속 · 자동 제외" : "사용자 배속";
+    if (mode === "auto")
+      return stats.syncRateOwned ? "자동 보정 중" : "자동 감시 중";
+    return "수동 조절 가능";
+  }
+
   // 한 행의 표시 상태. 전체 렌더와 부분 갱신이 같은 계산을 쓰게 한 곳에 둔다.
   // ⚠ 두 곳에서 따로 계산하면 부분 갱신만 stale 해지는 경로가 생긴다.
   function getSyncRowViewState(channelId, now = Date.now()) {
@@ -3894,23 +3716,19 @@
                   ? "측정 불가"
                   : settling
                     ? "안정화 중"
+                    : state.sync.mode === "off"
+                      ? "싱크 꺼짐"
                     : state.sync.congested
                       ? "연결 지연"
                       : channelId === ref
                         ? "기준"
-                        : st.userRateOverride ||
-                            (Math.abs((st.playbackRate || 1) - 1) >
-                              SYNC.LIMITS.userRateEpsilon &&
-                              !st.syncRateOwned)
-                          ? "수동 속도"
-                          : st.syncRateOwned
-                            ? "자동 보정 중"
-                            : "준비됨";
+                        : syncReadyLabel(state.sync.mode, st);
     const picking = state.sync.scope === "selected";
     const picked = inSyncScope(channelId);
     const nudgePending = syncNudgePending(channelId);
     // 범위 밖 채널은 보정 대상이 아니다. 측정값은 그대로 보여 준다.
     const locked = picking && !picked;
+    const controlsOff = state.sync.mode === "off";
     const isReference = channelId === ref;
     const offset = state.sync.manualOffsets[channelId] || 0;
     return {
@@ -3930,11 +3748,11 @@
       // 프레임에 포커스를 body 로 옮긴다(실측). 그러면 키보드 위치가 사라지고,
       // renderSync 의 포커스 가드도 풀려 다음 tick 에 패널이 통째로 다시 그려진다.
       // 실제 동작은 핸들러가 같은 상태를 보고 막는다.
-      refDisabled: locked || !ready,
+      refDisabled: locked || controlsOff || !ready,
       refBusy: isReference,
-      offDisabled: locked || !ready || !ref || isReference,
+      offDisabled: locked || controlsOff || !ready || !ref || isReference,
       offBusy: nudgePending,
-      clearDisabled: locked,
+      clearDisabled: locked || controlsOff,
       clearBusy: nudgePending || !offset,
     };
   }
@@ -3965,13 +3783,13 @@
                 ? "일시정지"
                 : !ready
                   ? "측정 불가"
+                  : group.mode === "off"
+                    ? "싱크 꺼짐"
                   : group.congested
                     ? "연결 지연"
                     : group.referenceChannelId === channelId
                       ? "기준"
-                      : st.syncRateOwned
-                        ? "자동 보정 중"
-                        : "준비됨",
+                      : syncReadyLabel(group.mode, st),
       rate: syncRateText(st),
     };
   }
@@ -4140,7 +3958,9 @@
           rate.dataset.tooltip = view.rate.hint;
         const off = `${view.offset >= 0 ? "+" : ""}${view.offset.toFixed(1)}초`;
         const output = row.querySelector("[data-mv-sync-output]");
-        setText(output, `${off}${view.pending ? " · 적용 중" : ""}`);
+        setText(output, off);
+        if (output.getAttribute("aria-busy") !== String(view.pending))
+          output.setAttribute("aria-busy", String(view.pending));
         const outputLabel = `${channelName(id)} 시간 위치 보정 ${off}`;
         if (output.getAttribute("aria-label") !== outputLabel) {
           output.setAttribute("aria-label", outputLabel);
@@ -4222,7 +4042,7 @@
               `${view.ready ? "" : " disabled"}>기준</button>` +
               step(-0.5) +
               step(-0.1) +
-              `<output data-mv-sync-output aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
+              `<output data-mv-sync-output aria-busy="${view.pending}" aria-label="${esc(channelName(id))} 시간 위치 보정 ${off}">${off}</output>` +
               step(0.1) +
               step(0.5) +
               `<button type="button" class="mv-custom-tooltip" data-mv-sync-clear="${esc(id)}" data-tooltip="보정 초기화">↺</button></div></div>`
@@ -4381,13 +4201,19 @@
       picking ? `선택 ${scopeIds.length}/${ids.length}` : "전체",
     );
     const tooSmall = syncGroupTooSmall();
-    const auto = panel.querySelector("#mvSyncAuto");
+    const modes = panel.querySelectorAll("[data-mv-sync-mode]");
     const align = panel.querySelector("#mvSyncAlign");
-    if (auto) {
-      auto.checked = mode === "auto";
-      auto.disabled = tooSmall;
+    const clear = panel.querySelector("#mvSyncClear");
+    if (modes.length !== 3) return false;
+    for (const button of modes) {
+      const pressed = String(button.dataset.mvSyncMode === mode);
+      if (button.getAttribute("aria-pressed") !== pressed)
+        button.setAttribute("aria-pressed", pressed);
+      const disabled = tooSmall && button.dataset.mvSyncMode !== "off";
+      if (button.disabled !== disabled) button.disabled = disabled;
     }
-    if (align) align.disabled = tooSmall;
+    if (align) align.disabled = tooSmall || mode === "off";
+    if (clear) clear.disabled = tooSmall || mode === "off";
     for (const [kind, visible, value] of [
       ["group", tooSmall, "싱크할 채널을 2개 이상 선택해 주세요."],
       [
@@ -4432,8 +4258,10 @@
 
       const offText = `${v.offset >= 0 ? "+" : ""}${v.offset.toFixed(1)}초`;
       const output = row.querySelector("[data-mv-sync-output]");
-      setText(output, `${offText}${v.nudgePending ? " · 적용 중" : ""}`);
+      setText(output, offText);
       if (output) {
+        if (output.getAttribute("aria-busy") !== String(v.nudgePending))
+          output.setAttribute("aria-busy", String(v.nudgePending));
         const label = `${channelName(id)} 시간 위치 보정 ${offText}`;
         if (output.getAttribute("aria-label") !== label) {
           output.setAttribute("aria-label", label);
@@ -4490,6 +4318,18 @@
     renderSync(true);
     if (!wasInside || !focusSelector || !panel || panel.hidden) return;
     panel.querySelector(focusSelector)?.focus({ preventScroll: true });
+  }
+
+  function setSyncMode(next) {
+    if (!["off", "auto", "manual"].includes(next) ||
+        (next !== "off" && syncGroupTooSmall())) return;
+    const mode = next === "auto" && state.sync.mode === "auto" ? "off" : next;
+    if (mode === state.sync.mode) return;
+    state.sync.mode = mode;
+    if (mode !== "auto") resetAllSyncRates();
+    syncNotice = "";
+    updateSyncPolling();
+    refreshSyncPanel();
   }
 
   function setSyncScope(next) {
@@ -4812,9 +4652,7 @@
           id === ref ||
           !ids.includes(id) ||
           st.userRateOverride ||
-          (st.playbackRate !== null &&
-            Math.abs(st.playbackRate - 1) > SYNC.LIMITS.userRateEpsilon &&
-            !st.syncRateOwned)
+          (SYNC.isUserRate(st.playbackRate) && !st.syncRateOwned)
         ) {
           resetSyncRate(id);
           continue;
@@ -5114,9 +4952,7 @@
           now - (syncReadyAt.get(id) || now) < SYNC.LIMITS.settlingMs ||
           state.sync.congested ||
           syncStats.get(id).userRateOverride ||
-          (syncStats.get(id).playbackRate !== null &&
-            Math.abs(syncStats.get(id).playbackRate - 1) >
-              SYNC.LIMITS.userRateEpsilon &&
+          (SYNC.isUserRate(syncStats.get(id).playbackRate) &&
             !syncStats.get(id).syncRateOwned)
         ) {
           resetSyncRate(id);
@@ -5221,8 +5057,8 @@
           stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
           stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
           `<output class="mv-custom-tooltip" data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
-          `${offText}" data-tooltip="시간 위치 보정(재생 속도와 별개)">` +
-          `${offText}${v.nudgePending ? " · 적용 중" : ""}</output>` +
+          `${offText}" aria-busy="${v.nudgePending}" data-tooltip="시간 위치 보정(재생 속도와 별개)">` +
+          `${offText}</output>` +
           stepBtn("0.1", "+0.1", "0.1초 뒤로", "과거 쪽") +
           stepBtn("0.5", "+0.5", "0.5초 뒤로", "과거 쪽") +
           `<button type="button" class="mv-custom-tooltip" data-mv-sync-clear="${id}" ` +
@@ -5248,10 +5084,18 @@
         picking ? `선택 ${scopeIds.length}/${state.chosen.length}` : "전체"
       }</span></div>` +
       `<div class="mv-sync-actions">` +
-      `<label><input type="checkbox" id="mvSyncAuto" ${state.sync.mode === "auto" ? "checked" : ""}` +
-      `${tooSmall ? " disabled" : ""}> 자동 싱크</label>` +
-      `<button type="button" id="mvSyncAlign"${tooSmall ? " disabled" : ""}>느린 채널에 맞추기</button>` +
-      `<button type="button" id="mvSyncClear">보정 초기화</button></div>` +
+      `<div class="mv-sync-mode" role="group" aria-label="싱크 모드">` +
+      [["off", "꺼짐", "mvSyncOff", "싱크 조작을 중지합니다"],
+        ["auto", "자동", "mvSyncAuto", "재생 위치와 속도를 계속 자동 보정합니다"],
+        ["manual", "수동", "mvSyncManual", "기준 채널과 위치를 직접 조절합니다"]]
+        .map(([mode, label, id, hint]) =>
+          `<button type="button" id="${id}" data-mv-sync-mode="${mode}" ` +
+          `class="mv-custom-tooltip" data-tooltip="${hint}" ` +
+          `aria-pressed="${state.sync.mode === mode}"` +
+          `${tooSmall && mode !== "off" ? " disabled" : ""}>${label}</button>`
+        ).join("") + `</div>` +
+      `<button type="button" id="mvSyncAlign"${tooSmall || state.sync.mode === "off" ? " disabled" : ""}>느린 채널에 맞추기</button>` +
+      `<button type="button" id="mvSyncClear"${tooSmall || state.sync.mode === "off" ? " disabled" : ""}>보정 초기화</button></div>` +
       `<p class="mv-sync-warning" data-mv-sync-warning="group"${tooSmall ? "" : " hidden"}>싱크할 채널을 2개 이상 선택해 주세요.</p>` +
       `<p class="mv-sync-warning" data-mv-sync-warning="congestion"${state.sync.congested ? "" : " hidden"}>여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` +
       // 안내 자리는 늘 만들어 두고 비었을 때만 숨긴다. 없던 자리에 새로 끼워
@@ -5333,7 +5177,7 @@
     qualityRequestByChannel.set(channelId, { requestId, timer });
     try {
       frame.contentWindow.postMessage({
-        source: MULTIVIEW_MESSAGE,
+        source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
         type: "REQUEST_MULTIVIEW_QUALITY",
         channelId,
         requestId,
@@ -5445,7 +5289,7 @@
     renderQuality();
     try {
       frame.contentWindow.postMessage({
-        source: MULTIVIEW_MESSAGE,
+        source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
         type: "SET_MULTIVIEW_QUALITY",
         channelId,
         commandId,
@@ -5485,7 +5329,7 @@
       try {
         frame.contentWindow.postMessage(
           {
-            source: MULTIVIEW_MESSAGE,
+            source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
             type: "REQUEST_MULTIVIEW_STATS",
             channelId: c.channelId,
           },
@@ -5527,9 +5371,39 @@
       : `${Math.round(v)} kbps`;
   };
 
+  function catchUpStatus(channel, now) {
+    if (channel.mediaType === "video") return "해당 없음";
+    if (!liveCatchUpEnabled) return "꺼짐";
+    const id = channel.channelId;
+    if (currentStatus(id) !== "ready") return "재생 대기";
+    const cluster = catchUpClusters().find((ids) => ids.includes(id)) || [id];
+    if (catchUpHeld.has(id)) return "되감기 보류";
+    if (cluster.some((member) => catchUpHeld.has(member))) return "그룹 보류";
+    if (pendingSync(id, "catch-up")) return "따라잡는 중";
+    const stats = syncStats.get(id);
+    if (!stats || now - stats.receivedAt > SYNC.LIMITS.staleMs) return "측정 대기";
+    if (stats.paused) return "일시정지";
+    if (stats.userRateOverride) return "배속 사용 중";
+    if (!SYNC.eligible(stats, syncReadyAt.get(id), now, true)) return "재생 대기";
+    if (stats.bufferAheadSec === null) return "버퍼 확인 중";
+    if (stats.nativeDelaySec < liveCatchUpLimitSec) return "보정 불필요";
+    const since = catchUpOverSince.get(id);
+    if (since === undefined || now - since < SYNC.CATCH_UP.confirmMs) return "지연 확인 중";
+    const last = catchUpLastAt.get(id);
+    if (last !== undefined && now - last < SYNC.CATCH_UP.cooldownMs) return "재시도 대기";
+    return "보정 대기";
+  }
+
   function renderStats() {
     const panel = $("mvStatsPop");
     if (!panel || panel.hidden) return;
+    const toggle = $("mvStatsCatchUp");
+    if (toggle) toggle.checked = liveCatchUpEnabled;
+    const toggleLabel = $("mvStatsCatchUpLabel");
+    if (toggleLabel)
+      toggleLabel.textContent = `자동 따라잡기 · ${liveCatchUpLimitSec}초 이상`;
+    const body = $("mvStatsRows");
+    if (!body) return;
     const now = Date.now();
     const rows = state.chosen
       .map((c) => {
@@ -5537,31 +5411,41 @@
         const name = `<td class="mv-stats-name">${esc(c.channelName)}</td>`;
         if (status === "ended" || status === "error") {
           const label = status === "ended" ? "방송 종료" : "오류";
-          return `<tr>${name}<td colspan="4" class="mv-stats-state">${label}</td></tr>`;
+          return `<tr>${name}<td colspan="5" class="mv-stats-state">${label}</td></tr>`;
         }
+        const catchUp = `<td class="mv-stats-catch-up-state">${catchUpStatus(c, now)}</td>`;
         const entry = statsByChannel.get(c.channelId);
         // 오래된 값은 최신인 척하지 않는다.
         const fresh =
           entry && now - entry.updatedAt < STATS_POLL_MS * STATS_STALE_TICKS;
         if (!fresh) {
-          return `<tr>${name}<td colspan="4" class="mv-stats-state">대기 중</td></tr>`;
+          return `<tr>${name}<td class="mv-stats-state">대기 중</td>${catchUp}` +
+            `<td colspan="3" class="mv-stats-state">대기 중</td></tr>`;
         }
         const st = entry.stats;
         // 실제 화질은 해상도 열(width×height)로 충분히 보인다. 따로 열을 두지 않는다.
         return (
           `<tr>${name}` +
           `<td>${latencyText(c.channelId, st.latencySec)}</td>` +
+          catchUp +
           `<td>${fmtRes(st.width, st.height)}</td>` +
           `<td>${fmtFps(st.fps)}</td>` +
           `<td>${fmtBitrate(st.bitrateKbps)}</td></tr>`
         );
       })
       .join("");
-    panel.innerHTML =
-      `<table class="mv-stats-table">` +
-      `<thead><tr><th>채널</th><th>지연</th><th>해상도</th>` +
-      `<th>FPS</th><th>비트레이트</th></tr></thead>` +
-      `<tbody>${rows}</tbody></table>`;
+    if (body.innerHTML !== rows) body.innerHTML = rows;
+  }
+
+  function positionStatsPanel() {
+    const panel = $("mvStatsPop");
+    if (!panel || panel.hidden) return;
+    panel.style.left = "0px";
+    const viewportRight = window.visualViewport
+      ? window.visualViewport.offsetLeft + window.visualViewport.width
+      : window.innerWidth;
+    const overflow = panel.getBoundingClientRect().right - viewportRight + 8;
+    if (overflow > 0) panel.style.left = `${-overflow}px`;
   }
 
   function closePopovers(except) {
@@ -5606,7 +5490,10 @@
       for (const channel of state.chosen) requestMixerState(channel.channelId);
     }
     if (name === "stats") {
-      if (open) startStatsPolling();
+      if (open) {
+        startStatsPolling();
+        positionStatsPanel();
+      }
       else stopStatsPolling();
     }
     if (name === "quality") {
@@ -5651,6 +5538,7 @@
     if (state.chatEnabled) applyChat(state.chatChannelId);
     restoreChatSize();
     bindChatResize();
+    bindChatTopResize();
     bindCellDrag();
     $("mvTopbar").hidden = false;
   }
@@ -5688,10 +5576,8 @@
     const allowed = LAYOUTS.layoutsFor(chosen.length);
     if (!allowed.length) return null;
     const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
-    // 채팅 자리는 셋 중 하나면 된다(배치가 제한하지 않는다).
-    const chatSide = LAYOUTS.CHAT_SIDES.includes(raw.chatSide)
-      ? raw.chatSide
-      : layout.chat?.[0] || "right";
+    // 채팅 위 영상 배치는 좌/우만 가능하므로 저장된 아래쪽 위치도 정규화한다.
+    const chatSide = LAYOUTS.stageStyle(layout, raw.chatSide).side;
     return {
       chosen,
       layoutId: layout.id,
@@ -5780,6 +5666,50 @@
   const CHAT_MIN = 260;
   const CHAT_MAX_RATIO = 0.6; // 화면의 60% 를 넘지 않게
   const CHAT_SIZE_KEY = "cheeseMultiviewChatSize";
+  let chatSizeState = {};
+  let chatSizeEdited = false;
+  let chatSizeSaveTimer = 0;
+  let chatSizeWrite = Promise.resolve();
+
+  function validChatSize(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const size = {};
+    for (const key of ["w", "h", "topH"]) {
+      const n = Number(value[key]);
+      if (Number.isFinite(n) && n >= (key === "topH" ? 100 : 260)) {
+        size[key] = Math.min(4000, Math.round(n));
+      }
+    }
+    return size;
+  }
+
+  function persistChatSize(immediate = false) {
+    chatSizeEdited = true;
+    try { localStorage.setItem(CHAT_SIZE_KEY, JSON.stringify(chatSizeState)); } catch {}
+    clearTimeout(chatSizeSaveTimer);
+    const write = () => {
+      chatSizeSaveTimer = 0;
+      const snapshot = { ...chatSizeState };
+      chatSizeWrite = chatSizeWrite.catch(() => {}).then(() =>
+        chrome.storage.local.set({ [CHAT_SIZE_KEY]: snapshot }),
+      );
+    };
+    if (immediate) write();
+    else chatSizeSaveTimer = setTimeout(write, 150);
+  }
+
+  function applyRestoredChatSize(size) {
+    const stage = $("mvStage");
+    if (size.w) stage.style.setProperty("--mv-chat-w", `${size.w}px`);
+    else stage.style.removeProperty("--mv-chat-w");
+    if (size.h) stage.style.setProperty("--mv-chat-h", `${size.h}px`);
+    else stage.style.removeProperty("--mv-chat-h");
+    if (size.topH) setChatTopSize(size.topH);
+    else {
+      stage.style.removeProperty("--mv-chat-top-h");
+      $("mvChatTopResize")?.removeAttribute("aria-valuenow");
+    }
+  }
 
   function applyChatSize(px) {
     const stage = $("mvStage");
@@ -5793,24 +5723,45 @@
       vertical ? "--mv-chat-h" : "--mv-chat-w",
       `${size}px`,
     );
-    try {
-      const saved = JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "{}");
-      saved[vertical ? "h" : "w"] = size;
-      localStorage.setItem(CHAT_SIZE_KEY, JSON.stringify(saved));
-    } catch {}
+    chatSizeState[vertical ? "h" : "w"] = size;
+    persistChatSize();
+  }
+
+  // 채팅 위 영상 높이. 손으로 정하기 전에는 채팅 폭의 16:9 높이를 쓴다(multiviewLayouts).
+  // ⚠ 화면 높이에 맞춘 상한은 CSS(calc(100% - 160px))가 지킨다. 복원할 때 지금 높이로
+  //   잘라 저장하면 작은 창에서 한 번 연 뒤로 사용자가 정한 높이가 줄어든 채 남는다.
+  function setChatTopSize(size) {
+    const stage = $("mvStage");
+    stage.style.setProperty("--mv-chat-top-h", `${size}px`);
+    const handle = $("mvChatTopResize");
+    handle?.setAttribute("aria-valuemax", String(Math.max(100, stage.clientHeight - 160)));
+    handle?.setAttribute("aria-valuenow", String(size));
+  }
+
+  function applyChatTopSize(px) {
+    const stage = $("mvStage");
+    const max = Math.max(100, stage.clientHeight - 160);
+    const size = Math.round(Math.max(100, Math.min(px, max)));
+    setChatTopSize(size);
+    chatSizeState.topH = size;
+    persistChatSize();
   }
 
   function restoreChatSize() {
+    let legacy = {};
     try {
-      const saved = JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "{}");
-      const stage = $("mvStage");
-      if (Number(saved.w) > 0) {
-        stage.style.setProperty("--mv-chat-w", `${Number(saved.w)}px`);
-      }
-      if (Number(saved.h) > 0) {
-        stage.style.setProperty("--mv-chat-h", `${Number(saved.h)}px`);
-      }
+      legacy = validChatSize(JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "{}"));
     } catch {}
+    chatSizeState = legacy;
+    applyRestoredChatSize(legacy);
+    void chrome.storage?.local?.get(CHAT_SIZE_KEY).then((data) => {
+      if (chatSizeEdited) return;
+      const stored = validChatSize(data?.[CHAT_SIZE_KEY]);
+      chatSizeState = Object.keys(stored).length ? stored : legacy;
+      applyRestoredChatSize(chatSizeState);
+      try { localStorage.setItem(CHAT_SIZE_KEY, JSON.stringify(chatSizeState)); } catch {}
+      if (!Object.keys(stored).length && Object.keys(legacy).length) persistChatSize(true);
+    }).catch(() => {});
   }
 
   function bindChatResize() {
@@ -5849,6 +5800,7 @@
       dragging = false;
       handle.classList.remove("is-dragging");
       handle.releasePointerCapture?.(event.pointerId);
+      persistChatSize(true);
     };
     handle.addEventListener("pointerup", stop);
     handle.addEventListener("pointercancel", stop);
@@ -5866,6 +5818,48 @@
     });
   }
 
+  function bindChatTopResize() {
+    const handle = $("mvChatTopResize");
+    if (!handle) return;
+    let dragging = false;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      dragging = true;
+      handle.classList.add("is-dragging");
+      handle.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      applyChatTopSize(event.clientY - $("mvStage").getBoundingClientRect().top);
+    });
+    const stop = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("is-dragging");
+      handle.releasePointerCapture?.(event.pointerId);
+      persistChatSize(true);
+    };
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      // 손잡이 위치에는 행 간격이 섞여 있다. 빼지 않으면 누를 때마다 그만큼 밀린다.
+      const stage = $("mvStage");
+      const gap = parseFloat(getComputedStyle(stage).rowGap) || 0;
+      const top = handle.getBoundingClientRect().top - stage.getBoundingClientRect().top - gap;
+      applyChatTopSize(top + (event.key === "ArrowDown" ? 20 : -20));
+      event.preventDefault();
+    });
+    // 더블클릭: 손으로 정한 높이를 지우고 채팅 폭의 16:9 높이로 돌아간다.
+    handle.addEventListener("dblclick", () => {
+      $("mvStage").style.removeProperty("--mv-chat-top-h");
+      handle.removeAttribute("aria-valuenow");
+      delete chatSizeState.topH;
+      persistChatSize(true);
+    });
+  }
+
   // ── 빠른 채널 관리 ───────────────────────────────────────────────────────
   // 격자 위아래 남는 자리에 띄운다. 고르기 화면까지 가지 않고 빼기·바꾸기를 한다.
   //
@@ -5878,9 +5872,15 @@
   const quickResizeMinWidth = 420;
   const quickResizeMinHeight = 260;
 
+  function quickStage() {
+    return $("mvStage").matches(".is-chat-top-layout, .is-chat-inset-layout")
+      ? $("mvStage")
+      : $("mvFramesFit");
+  }
+
   function clampQuickSize() {
     const panel = $("mvQuick");
-    const stage = $("mvFramesFit");
+    const stage = quickStage();
     if (!panel || !stage || panel.hidden) return;
     const bounds = stage.getBoundingClientRect();
     const maxWidth = Math.max(1, bounds.width - 16);
@@ -5995,12 +5995,10 @@
     // 옛 칸 정리: 그 프레임만 내린다.
     const oldCell = cells.get(oldChannelId);
     const oldFrame = oldCell?.querySelector("iframe");
-    // 같은 자리 교체다. 싱크 대상이었으면 새 채널이 그 자리를 이어받는다.
-    // ⚠ 보정값(offset)은 물려주지 않는다 — 다른 방송이라 기준이 다르다.
+    // 선택 범위의 체크 상태만 자리를 따라간다. 그룹 소속은 방송 채널에 속하므로
+    // 새 채널에는 넘기지 않는다.
     const inheritSelected =
       inSyncScope(oldChannelId) && state.sync.scope === "selected";
-    const inheritGroup = syncGroupForChannel(oldChannelId);
-    const inheritGroupMode = inheritGroup?.mode;
     clearRemovedChannel(oldChannelId);
     if (oldFrame) oldFrame.src = "about:blank";
     oldCell?.remove();
@@ -6026,12 +6024,6 @@
     state.chosen = state.chosen.map((c, i) => (i === index ? next : c));
     freshSyncChannels.add(id);
     state.sync.manualOffsets[id] = 0;
-    if (inheritGroup) {
-      inheritGroup.channelIds.push(id);
-      inheritGroup.manualOffsets[id] = 0;
-      if (inheritGroup.channelIds.length >= 2)
-        inheritGroup.mode = inheritGroupMode;
-    }
     if (inheritSelected && !state.sync.selectedChannelIds.includes(id)) {
       state.sync.selectedChannelIds = [...state.sync.selectedChannelIds, id];
     }
@@ -6505,7 +6497,6 @@
 
   function quickCard(r, full) {
     const thumb = safeImageUrl(r.liveImageUrl);
-    const avatar = safeImageUrl(SOURCES.profileThumb(r.channelImageUrl));
     const tags = Array.isArray(r.tags) ? r.tags : [];
     const isVideo = r.mediaType === "video";
     const watchTimelinePercent = isVideo ? SOURCES.getWatchTimelinePercent(r) : null;
@@ -6533,9 +6524,7 @@
       (r.adult ? `<span class="mv-card-sr-only">19 연령 제한</span>` : "") +
       `</span>` +
       `<span class="mv-quick-card-body">` +
-      (avatar
-        ? `<img class="mv-quick-card-avatar" src="${esc(avatar)}" alt="" loading="lazy" decoding="async">`
-        : `<span class="mv-quick-card-avatar is-empty"></span>`) +
+      SOURCES.profileImg(r.channelImageUrl, 'class="mv-quick-card-avatar"') +
       `<span class="mv-quick-card-text">` +
       `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-quick-card-name-row"><span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
@@ -6562,9 +6551,8 @@
   }
 
   function quickVideoChannelCard(channel) {
-    const avatar = safeImageUrl(SOURCES.profileThumb(channel.channelImageUrl));
     return `<button type="button" class="mv-video-channel-option" role="option" data-mv-quick-video-channel="${esc(channel.channelId)}">` +
-      (avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy" decoding="async">` : `<span class="mv-video-channel-option-avatar"></span>`) +
+      SOURCES.profileImg(channel.channelImageUrl) +
       `<span class="mv-video-channel-option-name">${esc(channel.channelName || "채널")}</span>` +
       (channel.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
       `</button>`;
@@ -6945,6 +6933,7 @@
     if (!allowed.length) return;
     if (!allowed.some((l) => l.id === state.layoutId)) {
       state.layoutId = allowed[0].id;
+      state.chatSide = LAYOUTS.chatSideForSwitch(allowed[0], state.chatSide);
     }
     applyLayout();
   }
@@ -6981,6 +6970,14 @@
   async function openSetupTab() {
     await saveHandoff();
     const href = setupUrl();
+    if (HOSTED_ON_CHZZK) {
+      try {
+        await hostApi("setup.open", { href });
+      } catch {
+        window.open(href, "_blank", "noopener");
+      }
+      return;
+    }
     try {
       // 우리 확장의 고르기 화면만 찾는다(주소 앞부분이 확장 고유 출처다).
       const base = chrome.runtime.getURL(SETUP_PAGE);
@@ -7025,8 +7022,14 @@
     if (groupAssignmentPickerId && !target.closest?.("#mvGroupAssignmentList"))
       closeGroupAssignmentPicker();
     if (handleGroupSyncClick(target)) return;
+    const syncMode = target.closest?.("[data-mv-sync-mode]");
+    if (syncMode && state.sync.scope !== "groups") {
+      setSyncMode(syncMode.dataset.mvSyncMode);
+      return;
+    }
     const syncRef = target.closest?.("[data-mv-sync-ref]");
     if (syncRef) {
+      if (state.sync.mode === "off") return;
       const id = syncRef.dataset.mvSyncRef;
       // 이미 기준인 채널은 다시 처리하지 않는다(버튼은 포커스 유지를 위해
       // disabled 대신 aria-disabled 로 둔다).
@@ -7048,6 +7051,7 @@
     }
     const syncOffset = target.closest?.("[data-mv-sync-offset]");
     if (syncOffset) {
+      if (state.sync.mode === "off") return;
       const id = syncOffset.dataset.mvSyncOffset;
       // 보류 중에는 새 보정을 받지 않는다(버튼은 aria-disabled 로 잠겨 있다).
       if (syncNudgePending(id)) return;
@@ -7089,6 +7093,7 @@
     }
     const syncClear = target.closest?.("[data-mv-sync-clear]");
     if (syncClear) {
+      if (state.sync.mode === "off") return;
       const id = syncClear.dataset.mvSyncClear;
       // 되돌릴 보정이 없거나 보류 중이면 막는다(버튼은 aria-disabled 로 잠겨 있다).
       if (
@@ -7108,6 +7113,7 @@
       return;
     }
     if (target.closest?.("#mvSyncAlign")) {
+      if (state.sync.mode === "off") return;
       document.activeElement?.blur?.();
       requestSyncStats();
       window.setTimeout(() => {
@@ -7129,6 +7135,7 @@
       return;
     }
     if (target.closest?.("#mvSyncClear")) {
+      if (state.sync.mode === "off") return;
       document.activeElement?.blur?.();
       // 현재 범위의 채널만 0 으로 맞춘다. 범위 밖 채널의 보정값은 건드리지 않는다.
       const scopeIds = syncScopeIds();
@@ -7433,6 +7440,7 @@
       if (!state.chatEnabled) {
         state.chatEnabled = true;
         $("mvStage").classList.remove("is-chat-folded");
+        applyLayout();
         $("mvChatToggle").setAttribute("aria-expanded", "true");
         $("mvChatExpand").hidden = true;
       }
@@ -7475,6 +7483,7 @@
       //   연결까지 끊는 '채팅 끄기' 가 필요하면 별도 동작으로 나눈다.
       const stage = $("mvStage");
       const folded = stage.classList.toggle("is-chat-folded");
+      applyLayout();
       if (!folded && !state.chatEnabled) {
         state.chatEnabled = true;
         applyChat(state.chatChannelId);
@@ -7493,6 +7502,7 @@
   });
 
   window.addEventListener("resize", closeGroupAssignmentPicker);
+  window.addEventListener("resize", positionStatsPanel);
   $("mvSyncPop")?.addEventListener("scroll", closeGroupAssignmentPicker, {
     passive: true,
   });
@@ -7565,6 +7575,7 @@
     });
     observer.observe($("mvQuickAdd"));
     observer.observe($("mvFramesFit"));
+    observer.observe($("mvStage"));
   } else {
     window.addEventListener(
       "resize",
@@ -7586,7 +7597,7 @@
       event.target.closest("button, input, a, [role='tab']")
     )
       return;
-    const stage = $("mvFramesFit").getBoundingClientRect();
+    const stage = quickStage().getBoundingClientRect();
     const panel = $("mvQuick").getBoundingClientRect();
     quickPosition.left = panel.left - stage.left;
     quickPosition.top = panel.top - stage.top;
@@ -7750,6 +7761,13 @@
 
   document.addEventListener("change", (event) => {
     const target = event.target;
+    if (target?.id === "mvStatsCatchUp") {
+      const previous = liveCatchUpEnabled;
+      applyLiveCatchUpSetting(target.checked === true);
+      void chrome.storage.local.set({ [LIVE_CATCH_UP_KEY]: liveCatchUpEnabled })
+        .catch(() => applyLiveCatchUpSetting(previous));
+      return;
+    }
     if (target?.dataset?.mvMixerEnabled) {
       sendMixerCommand(target.dataset.mvMixerEnabled, "MIXER_SET_ENABLED", {
         enabled: target.checked === true,
@@ -7772,15 +7790,6 @@
     const syncPick = event.target?.closest?.("[data-mv-sync-pick]");
     if (syncPick) {
       setSyncSelected(syncPick.dataset.mvSyncPick, syncPick.checked === true);
-      return;
-    }
-    if (event.target?.id === "mvSyncAuto") {
-      state.sync.mode = event.target.checked ? "auto" : "manual";
-      if (state.sync.mode !== "auto") resetAllSyncRates();
-      syncNotice = "";
-      updateSyncPolling();
-      event.target.blur();
-      refreshSyncPanel();
       return;
     }
     if (event.target?.id !== "mvVolFocus") return;
@@ -7822,7 +7831,7 @@
     "FRAME_AD_STATUS",
   ]);
   window.addEventListener("message", (event) => {
-    if (event.origin !== CHZZK_ORIGIN) return;
+    if (!isTrustedFrameMessage(event)) return;
     const data = event.data;
     if (!data || typeof data !== "object") return;
     if (data.source !== MULTIVIEW_MESSAGE) return;
@@ -8266,7 +8275,7 @@
 
   // 채팅 칸이 준비되면 덮개를 걷고 테마를 보낸다(채널을 바꿔 새로 뜰 때마다 온다).
   window.addEventListener("message", (event) => {
-    if (event.origin !== CHZZK_ORIGIN) return;
+    if (!isTrustedFrameMessage(event)) return;
     const data = event.data;
     if (data?.source !== MULTIVIEW_MESSAGE) return;
     // ⚠ 정말 채팅 프레임이 보낸 것인지 확인한다.
@@ -8286,7 +8295,9 @@
 
   (async () => {
     // 주소로 받은 id 에 해당하는 구성만 읽는다(탭마다 다르다).
-    const handoffId = new URLSearchParams(location.search).get("setup") || "";
+    const handoffId = HOSTED_ON_CHZZK
+      ? String(globalThis.__cheeseMultiviewHost?.setupId || "")
+      : new URLSearchParams(location.search).get("setup") || "";
     if (!/^[A-Za-z0-9-]{1,64}$/.test(handoffId)) {
       showEmpty();
       return;
