@@ -42,6 +42,27 @@ assert.match(watch, /qualityTimer = window\.setInterval\(\(\) => \{\s*if \(!hasQ
 assert.match(watch, /function updateQualityPolling\(\)\s*\{[\s\S]*?panel\.hidden \|\| !hasQualityPollingChannel\(\)[\s\S]*?stopQualityPolling\(\);\s*renderQuality\(\)/);
 assert.match(watch, /status === "ended" \? "방송 종료"/);
 
+// 메인 변경: 바뀐 두 칸에 새 역할의 시작 화질을 한 번 다시 건다. 단 그 칸에서 사용자가
+// 직접 고른 화질(화질 패널·치지직 화질 메뉴)이 있으면 그 선택을 지킨다.
+assert.match(watch, /const roleToken = \+\+qualityRoleToken;\s*if \(before\) postState\(before, false, \{ roleToken \}\);\s*postState\(channelId, true, \{ roleToken \}\);/);
+assert.match(content, /data\.qualityRoleToken > multiviewQualityRoleToken[\s\S]{0,200}multiviewInitialQuality = data\.initialQuality;/,
+  "칸은 더 새로운 역할 표시가 오면 시작 화질 목표를 바꾼다");
+assert.match(content, /const qualityChanged = incomingQualityPolicy !== multiviewQualityPolicy \|\| roleChanged;/);
+assert.match(content, /multiviewQualityRoleToken: IS_MULTIVIEW_FRAME \? multiviewQualityRoleToken : 0,/);
+assert.match(mixer, /const multiviewRoleChanged = nextRoleToken > multiviewQualityRoleToken &&\s*nextMultiviewInitialQuality !== "none";/);
+assert.match(mixer, /const preserveInitialQualityUserChoice = multiviewInitialQuality !== "none" &&\s*multiviewInitialQualityApplied && maxQualityUserTouchedPage === currentPageKey;/,
+  "역할이 바뀌어도 사용자가 직접 고른 화질은 지킨다");
+assert.doesNotMatch(mixer, /!multiviewRoleChanged/, "역할 변경이 사용자 선택 보존을 끄지 않는다");
+assert.doesNotMatch(mixer, /if \(multiviewRoleChanged\) multiviewQualityManualOverride = false;/,
+  "역할 변경으로 화질 패널 선택 기록을 지우지 않는다");
+// 사용자 선택은 화질 패널과 치지직 화질 메뉴 양쪽에서 기록된다.
+assert.match(mixer, /multiviewQualityManualOverride = true;/);
+assert.match(mixer, /function watchTrustedQualityChoice\(event\) \{[\s\S]*?maxQualityUserTouchedPage = currentPageKey;/);
+// 시작 목표 적용은 사용자가 직접 고른 칸이면 건너뛴다.
+assert.match(mixer, /if \(initialQualityPending && maxQualityUserTouchedPage === currentPageKey\) \{/);
+assert.match(mixer, /if \(multiviewInitialQualityChanged \|\| multiviewRoleChanged\) \{\s*multiviewInitialQualityApplied = multiviewInitialQuality === "none";/,
+  "같은 목표라도 역할이 바뀌면 다시 적용 대기로 돌린다");
+
 const endedStart = content.indexOf("    const onMultiviewVideoEnded = (");
 const endedEnd = content.indexOf("    function checkMultiviewAdTransition", endedStart);
 const endedSource = content.slice(endedStart, endedEnd);

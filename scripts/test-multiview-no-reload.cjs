@@ -399,10 +399,11 @@ console.log("\n[통계 protocol] 부모가 계산하지 않고 물어본다");
   );
 }
 
-console.log("\n[모든 배치] 레터박스 없는 해가 있다");
+console.log("\n[배치 비율] 정확 배치는 해가 있고 자유 배치는 칸 안에서 비율을 지킨다");
 {
   for (const layout of LAYOUTS.LAYOUTS) {
-    ok(LAYOUTS.solveTracks(layout) !== null, `${layout.id}: 16:9 해가 있다`);
+    ok(layout.flexible === true || LAYOUTS.solveTracks(layout) !== null,
+      `${layout.id}: 16:9 해 또는 자유 배치`);
   }
 }
 

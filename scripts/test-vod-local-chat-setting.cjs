@@ -9,7 +9,6 @@ const content = read("src/content.js");
 const settingsHtml = read("settings.html");
 const settingsJs = read("src/settings.js");
 const watch = read("src/multiviewWatch.js");
-const popup = read("src/multiviewChatPopup.js");
 const css = read("src/multiview.css");
 const checks = [];
 function check(condition, label) {
@@ -112,13 +111,8 @@ async function runWatch(stored, change, api = "watchEnabledSetting") {
     "멀티뷰 시청: 설정을 읽기 전엔 숨기고, 바뀌면 입력창과 채팅을 다시 그린다");
   check(/const local = vodLocalChatEnabled\s*\?\s*vodLocalChatSession\.visible/.test(watch),
     "멀티뷰 시청: 꺼지면 입력한 로컬 채팅도 감춘다(분리 채팅에도 같은 목록이 간다)");
-  check(/onSend: \(text\) => \{\s*if \(!vodLocalChatEnabled\) return;/.test(watch) &&
-    /data\.type === "VOD_LOCAL_CHAT_SEND"\) \{\s*if \(!vodLocalChatEnabled\) return;/.test(watch),
-    "멀티뷰 시청: 꺼져 있으면 입력·분리 채팅 전송을 받지 않는다");
-  check(/if \(vodComposeForm\) vodComposeForm\.hidden = true;/.test(popup) &&
-    /watchEnabledSetting\(\(enabled\) => \{[\s\S]*?vodComposeForm\.hidden = !enabled;/.test(popup) &&
-    /if \(!vodLocalChatEnabled \|\| currentMediaType !== "video"/.test(popup),
-    "분리 채팅 팝업도 같은 설정으로 입력창을 숨긴다");
+  check(/onSend: \(text\) => \{\s*if \(!vodLocalChatEnabled\) return;/.test(watch),
+    "멀티뷰 시청: 꺼져 있으면 입력을 받지 않는다");
   check(/\.mv-vod-chat-compose\[hidden\] \{\s*display: none;/.test(css),
     "display:flex 가 hidden 을 덮지 않는다");
 
@@ -131,8 +125,8 @@ async function runWatch(stored, change, api = "watchEnabledSetting") {
   check(/html\.mv-hide-chat-send-button \.mv-vod-chat-compose-tools \{\s*display: none;/.test(css),
     "멀티뷰: 전송 버튼 숨김이 켜지면 도구 줄을 숨긴다");
   const toggle = /watchHideToolsSetting\(\(hide\) => \{\s*document\.documentElement\.classList\.toggle\("mv-hide-chat-send-button", hide\);/;
-  check(toggle.test(watch) && toggle.test(popup),
-    "멀티뷰 시청 페이지와 분리 채팅 팝업 모두 같은 설정을 따른다");
+  check(toggle.test(watch),
+    "멀티뷰 시청 페이지가 같은 설정을 따른다");
 
   console.log(checks.map((label) => `  PASS ${label}`).join("\n"));
   console.log("전부 통과");

@@ -15,10 +15,10 @@
   // 검색은 입력마다 달라지므로 캐시하지 않는다.
   const LIST_TTL_MS = 20000;
   const LIVE_LOAD_THRESHOLD_PX = 400;
-  const WATCH_PAGE = "multiviewWatch.html";
   const SETUP_SORT_STORAGE_KEY = "cheeseMultiviewSetupSortBySource";
   const REMEMBER_SETUP_SORT_KEY = "cheeseMultiviewRememberSetupSort";
   const SETUP_OPTIONS_STORAGE_KEY = "cheeseMultiviewSetupOptions";
+  const CHAT_SIZE_STORAGE_KEY = "cheeseMultiviewChatSize";
   // 고른 구성을 시청 화면으로 넘길 때 쓰는 세션 저장소 키의 앞부분.
   // ⚠ 탭마다 다른 id 를 붙인다. 고정 키를 쓰면 멀티뷰를 두 탭에서 열었을 때
   //   서로 구성을 덮어쓴다.
@@ -472,9 +472,8 @@
   }
 
   function videoChannelCard(channel) {
-    const avatar = safeImageUrl(SOURCES.profileThumb(channel.channelImageUrl));
     return `<button type="button" class="mv-video-channel-option" role="option" data-mv-video-channel="${esc(channel.channelId)}">` +
-      (avatar ? `<img src="${esc(avatar)}" alt="" loading="lazy" decoding="async">` : `<span class="mv-video-channel-option-avatar"></span>`) +
+      SOURCES.profileImg(channel.channelImageUrl) +
       `<span class="mv-video-channel-option-name">${esc(channel.channelName || "채널")}</span>` +
       (channel.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
       `</button>`;
@@ -614,7 +613,7 @@
         `<span>선택됨</span></span>` : "") +
       `</span>` +
       `<span class="mv-card-body">` +
-      `<img class="mv-card-avatar" src="${esc(safeImageUrl(SOURCES.profileThumb(r.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
+      SOURCES.profileImg(r.channelImageUrl, 'class="mv-card-avatar"') +
       `<span class="mv-card-text">` +
       `<span class="mv-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-card-name-row"><span class="mv-card-name">${esc(r.channelName)}</span>` +
@@ -757,7 +756,7 @@
         (c, i) =>
           `<li class="mv-chosen-item" draggable="true" data-mv-chosen="${esc(c.channelId)}">` +
           `<span class="mv-chosen-rank">${i === 0 ? "메인" : i}</span>` +
-          `<img src="${esc(safeImageUrl(SOURCES.profileThumb(c.channelImageUrl)))}" alt="" loading="lazy" decoding="async">` +
+          SOURCES.profileImg(c.channelImageUrl) +
           `<span class="mv-chosen-name">${esc(c.channelName)}</span>` +
           `<button type="button" class="mv-chosen-remove" data-mv-remove="${esc(c.channelId)}" ` +
           `aria-label="${esc(c.channelName)} 빼기">` +
@@ -779,29 +778,31 @@
       state.layoutId = "";
       return;
     }
-    if (!list.some((l) => l.id === state.layoutId)) state.layoutId = list[0].id;
+    if (!list.some((l) => l.id === state.layoutId)) {
+      state.layoutId = list[0].id;
+      state.chatSide = LAYOUTS.chatSideForSwitch(list[0], state.chatSide);
+    }
     box.innerHTML = list
       .map((l) => {
         // ⚠ 미리보기도 시청 화면과 같은 트랙 계산을 써야 한다. l.columns 를 그대로
         //   쓰면 '오른쪽 1' 이 3:1 로 보이지만 실제로는 모든 칸을 16:9 로 맞추느라
         //   1:1 이 되어, 고르기 전후의 모양이 달라진다.
-        const tracks = LAYOUTS.solveTracks(l);
-        const columns = tracks ? tracks.columns : l.columns;
-        const rows = tracks ? tracks.rows : l.rows;
+        const preview = LAYOUTS.previewGrid(l);
         return (
           `<button type="button" class="mv-layout${l.id === state.layoutId ? " is-on" : ""}" ` +
           `data-mv-layout="${esc(l.id)}" role="radio" ` +
           `aria-checked="${l.id === state.layoutId}">` +
-          `<span class="mv-layout-preview" style="grid-template-columns:${esc(columns)};` +
-          `grid-template-rows:${esc(rows)};` +
-          `aspect-ratio:${tracks ? esc(String(tracks.ratio)) : "16/9"};` +
-          `grid-template-areas:${esc(l.areas.join(" "))}">` +
+          `<span class="mv-layout-preview" style="grid-template-columns:${esc(preview.columns)};` +
+          `grid-template-rows:${esc(preview.rows)};` +
+          `aspect-ratio:${esc(preview.ratio)};` +
+          `grid-template-areas:${esc(preview.areas)}">` +
           LAYOUTS.SLOTS.slice(0, l.aux + 1)
             .map(
               (s) =>
                 `<i style="grid-area:${s}"${s === "m" ? ' class="is-main"' : ""}></i>`,
             )
             .join("") +
+          (preview.chat ? '<i class="is-chat" style="grid-area:x" aria-hidden="true"></i>' : "") +
           `</span><span class="mv-layout-label">${esc(l.label)}</span></button>`
         );
       })
@@ -875,11 +876,23 @@
       alert("시청 화면으로 넘기지 못했습니다: " + (error?.message || error));
       return;
     }
-    const url = new URL(chrome.runtime.getURL(WATCH_PAGE));
-    url.searchParams.set("setup", handoffId);
-    const href = url.toString();
-    if (chrome.tabs?.create) chrome.tabs.create({ url: href });
-    else window.open(href, "_blank", "noopener");
+    // ⚠ 치지직이 다른 출처(확장 페이지)의 iframe 표시를 막아, 시청 화면은 치지직 페이지
+    //   위 전용 팝업 창에 띄운다(배경 스크립트가 열고 화면을 넣는다).
+    let theme = "light";
+    try {
+      theme = localStorage.getItem("cheeseSearchTheme") === "dark" ? "dark" : "light";
+    } catch {}
+    let opened = null;
+    try {
+      opened = await chrome.runtime.sendMessage({
+        type: "MULTIVIEW_OPEN_HOST",
+        setupId: handoffId,
+        theme,
+      });
+    } catch {}
+    if (!opened?.ok) {
+      alert("멀티뷰 창을 열지 못했습니다." + (opened?.reason ? ` (${opened.reason})` : ""));
+    }
   }
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
@@ -975,6 +988,8 @@
     const layout = event.target.closest?.("[data-mv-layout]");
     if (layout) {
       state.layoutId = layout.dataset.mvLayout;
+      const picked = LAYOUTS.layoutById(state.layoutId);
+      if (picked) state.chatSide = LAYOUTS.chatSideForSwitch(picked, state.chatSide);
       renderLayouts();
       return;
     }
@@ -1120,7 +1135,25 @@
         SETUP_SORT_STORAGE_KEY,
         REMEMBER_SETUP_SORT_KEY,
         SETUP_OPTIONS_STORAGE_KEY,
+        CHAT_SIZE_STORAGE_KEY,
       ]);
+      if (!saved?.[CHAT_SIZE_STORAGE_KEY]) {
+        try {
+          const legacy = JSON.parse(localStorage.getItem(CHAT_SIZE_STORAGE_KEY) || "null");
+          if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+            const size = {};
+            for (const key of ["w", "h", "topH"]) {
+              const n = Number(legacy[key]);
+              if (Number.isFinite(n) && n >= (key === "topH" ? 100 : 260)) {
+                size[key] = Math.min(4000, Math.round(n));
+              }
+            }
+            if (Object.keys(size).length) {
+              await chrome.storage.local.set({ [CHAT_SIZE_STORAGE_KEY]: size });
+            }
+          }
+        } catch {}
+      }
       rememberSetupSort = saved?.[REMEMBER_SETUP_SORT_KEY] !== false;
       if (rememberSetupSort) {
         restoreSortBySource(saved?.[SETUP_SORT_STORAGE_KEY]);

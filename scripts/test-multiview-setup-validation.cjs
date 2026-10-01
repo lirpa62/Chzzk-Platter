@@ -41,9 +41,7 @@ function validateSetup(raw) {
   const allowed = L.layoutsFor(chosen.length);
   if (!allowed.length) return null;
   const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
-  const chatSide = L.CHAT_SIDES.includes(raw.chatSide)
-    ? raw.chatSide
-    : layout.chat?.[0] || "right";
+  const chatSide = L.stageStyle(layout, raw.chatSide).side;
   return {
     chosen,
     layoutId: layout.id,
@@ -157,7 +155,7 @@ ok(
   wrongSide && L.CHAT_SIDES.includes(wrongSide.chatSide),
   `허용 안 되는 채팅 자리는 기본값으로(${wrongSide?.chatSide})`,
 );
-// 배치와 무관하게 셋 다 받아야 한다.
+// 일반 배치는 셋 다 받고, 채팅 위 영상 배치는 좌/우만 받는다.
 for (const side of L.CHAT_SIDES) {
   const got = validateSetup({
     chosen: [ch(A), ch(B)],
@@ -165,6 +163,24 @@ for (const side of L.CHAT_SIDES) {
     chatSide: side,
   });
   ok(got?.chatSide === side, `right-1 에서도 채팅 ${side} 를 그대로 받는다`);
+}
+const chatTopBottom = validateSetup({
+  chosen: [ch(A), ch(B)],
+  layoutId: "main-chat-top",
+  chatSide: "bottom",
+});
+ok(chatTopBottom?.chatSide === "right", "채팅 위 영상 배치는 아래쪽 채팅을 오른쪽으로 고친다");
+for (const [layoutId, requested, expected] of [
+  ["bottom-1-0", undefined, "inset"],
+  ["bottom-1-2", "", "inset"],
+  ["bottom-1-0", "left", "left"],
+  ["bottom-1-2", "bottom", "bottom"],
+  ["right-2-bottom-1-0", "inset", "inset"],
+  ["bottom-1-0", "top", "inset"],
+]) {
+  const chosen = layoutId.startsWith("right-2") ? [ch(A), ch(B), ch(C), ch(id(4))] : [ch(A), ch(B)];
+  const inset = validateSetup({ chosen, layoutId, chatSide: requested });
+  ok(inset?.chatSide === expected, `${layoutId}: 채팅 ${requested || "(없음)"} → ${expected}`);
 }
 
 console.log("\n[정리] 중복·초과를 걸러낸다");

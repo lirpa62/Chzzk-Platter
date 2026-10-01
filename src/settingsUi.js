@@ -55,6 +55,7 @@
     ["[data-update-notice-enabled]", "[data-update-notice-mode], [data-update-notice-duration], [data-update-notice-toast-position]"],
     ["[data-max-quality]", "[data-max-quality-target], [data-max-quality-respect]"],
     ["[data-live-seek-bar]", "[data-live-seek-bar-bottom]"],
+    ["[data-multiview-live-catch-up]", "[data-multiview-live-catch-up-limit]"],
     ["[data-wheel-volume]", "[data-wheel-volume-scope], [data-wheel-volume-rightclick], [data-wheel-volume-step]"],
     ["[data-action-overlay]", "[data-osd-group]"],
     ["[data-ad-mini-unmute]", "[data-ad-mini-keep-muted]"],

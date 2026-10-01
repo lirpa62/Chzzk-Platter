@@ -20,7 +20,7 @@ const sabotages = {
   S8: ["mixer", '? maxQualityUserTouchedPage === currentPageKey : true', '? false : true'],
   S9: ["mixer", 'multiviewPolicyActive || oneShotQualityActive || maxQualityRespectManual', 'multiviewPolicyActive || oneShotQualityActive || true'],
   S10: ["mixer", 'if (qualityTargetCap > 0 && h > qualityTargetCap) continue;', 'if (qualityTargetCap > 0 && h !== qualityTargetCap) continue;'],
-  S11: ["mixer", 'if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||\n        multiviewInitialQualityChanged || multiviewLifecycleChanged) {\n      maxQualitySetHeight = 0;', 'if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||\n        multiviewInitialQualityChanged || multiviewLifecycleChanged) {\n      maxQualitySetHeight = 1080;'],
+  S11: ["mixer", 'if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||\n        multiviewInitialQualityChanged || multiviewLifecycleChanged || multiviewRoleChanged) {\n      maxQualitySetHeight = 0;', 'if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||\n        multiviewInitialQualityChanged || multiviewLifecycleChanged || multiviewRoleChanged) {\n      maxQualitySetHeight = 1080;'],
   S12: ["settings", 'maxQualityTargetTrigger.disabled = !enabled', 'maxQualityTargetTrigger.disabled = false'],
 };
 const sabotage = process.env.QUALITY_TARGET_TEST_MUTATION;
@@ -225,7 +225,7 @@ const vod = runQuality({ heights: [1080, 720], selected: 1080,
 assert.equal(vod.context.maxQualitySetHeight, 720);
 assert.equal(vod.catchups, 0);
 
-assert.match(mixer, /if \(maxQualityCap !== maxQualityCapPrev \|\| multiviewPolicyChanged \|\|\s*multiviewInitialQualityChanged \|\| multiviewLifecycleChanged\) \{\s*maxQualitySetHeight = 0;/);
+assert.match(mixer, /if \(maxQualityCap !== maxQualityCapPrev \|\| multiviewPolicyChanged \|\|\s*multiviewInitialQualityChanged \|\| multiviewLifecycleChanged \|\| multiviewRoleChanged\) \{\s*maxQualitySetHeight = 0;/);
 assert.match(mixer, /const multiviewPolicyActive = \["highest", "cap-480", "cap-720"\]\.includes\(multiviewQualityPolicy\)/);
 if (!sabotage) {
   for (const id of Object.keys(sabotages)) {

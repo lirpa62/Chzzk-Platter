@@ -10,6 +10,10 @@ assert.match(settingsHtml, /data-feature="chatHideSendButton"/);
 assert.match(contentSource, /chatHideSendButton: false/);
 assert.match(contentSource, /cheese-chat-hide-send-button[^\n]*aside#aside-chatting button#send_chat_or_donate/);
 assert.match(settingsSource, /"cheeseMultiviewSetupOptions"/);
+// 분리 채팅 방식은 없앤 설정이다(치지직 페이지 위 멀티뷰는 치지직 채팅창만 쓸 수 있다).
+// 화면·내보내기·불러오기 어디에도 남지 않는다.
+assert.doesNotMatch(settingsSource, /cheeseMultiviewChatPopoutMode|data-multiview-chat-popout-mode/);
+assert.doesNotMatch(settingsHtml, /data-multiview-chat-popout-mode|분리 채팅 방식/);
 for (const key of [
   'cheeseEmbedClipMixerAlwaysOn',
   'cheeseEmbedClipMixerDefaultOn',
@@ -34,7 +38,6 @@ for (const key of [
   'cheeseMultiviewMainBorder',
   'cheeseMultiviewSetupSortBySource',
   'cheeseMultiviewRememberSetupSort',
-  'cheeseMultiviewChatPopoutMode',
   'cheeseMultiviewBadgeChatButton',
   'cheeseMultiviewBadgeChatHideEmptyButton',
   'cheeseMultiviewBadgeChatHideChatBackground',
@@ -117,7 +120,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320})]]);
+      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320,topH:240})]]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
       window.downloadedBlobs=[];
       URL.createObjectURL=blob=>{downloadedBlobs.push(blob);return 'blob:fixture'};
@@ -134,6 +137,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewMainBorder:false,
         cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
         cheeseMultiviewRememberSetupSort:true,
+        cheeseMultiviewLiveCatchUpLimit:6,
+        cheeseMultiviewChatSize:{w:430,h:320,topH:240},
         cheeseMultiviewSetupOptions:{mainHighQuality:true,startWithoutChat:false,startMainMuted:true,startMainVolume:0.37},
         cheeseMultiviewChatPopoutMode:'native',
         cheeseMultiviewBadgeChatButton:true,
@@ -326,6 +331,34 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       }
       search('오디오 믹서 숨김');check(shown(row('[data-feature="audioMixer"]')),'old toggle label not searchable');search('');
     `);
+    await test('news display toggles unlock their own options without changing stored polarity',`
+      const lounge=document.querySelector('[data-feature="loungeNews"]');
+      const community=document.querySelector('[data-feature="inboxCommunityNews"]');
+      const logPower=document.querySelector('[data-feature="inboxLogPower"]');
+      const loungeChildren=[...document.querySelectorAll('[data-feature="loungeNewsDot"], [data-lounge-refresh]')];
+      const communityChildren=[...document.querySelectorAll('[data-feature="inboxCommunityNewsDot"], [data-inbox-community-new-tab], [data-inbox-community-refresh]')];
+      const logPowerChildren=[document.querySelector('[data-feature="inboxLogPowerDot"]')];
+      check(!lounge.checked&&!community.checked&&logPower.checked,'default display states are wrong');
+      check(loungeChildren.every(el=>el.disabled)&&communityChildren.every(el=>el.disabled),
+        'hidden news options must start locked');
+      check(logPowerChildren.every(el=>!el.disabled),'visible log power options must start unlocked');
+      const set=(input,checked)=>{input.checked=checked;input.dispatchEvent(new Event('change',{bubbles:true}));};
+      set(lounge,true);set(community,true);
+      check(saved.cheeseFeatureHidden.loungeNews===false&&saved.cheeseFeatureHidden.inboxCommunityNews===false,
+        'display on did not preserve hidden=false');
+      check(loungeChildren.every(el=>!el.disabled)&&communityChildren.every(el=>!el.disabled),
+        'display on did not unlock refresh and notification options');
+      set(logPower,false);
+      check(saved.cheeseFeatureHidden.inboxLogPower===true&&logPowerChildren.every(el=>el.disabled),
+        'log power display off did not lock its options');
+      set(lounge,false);set(community,false);set(logPower,true);
+      check(saved.cheeseFeatureHidden.loungeNews===true&&saved.cheeseFeatureHidden.inboxCommunityNews===true&&
+        saved.cheeseFeatureHidden.inboxLogPower===false,'display off/on did not preserve legacy flags');
+      check(loungeChildren.every(el=>el.disabled)&&communityChildren.every(el=>el.disabled)&&
+        logPowerChildren.every(el=>!el.disabled),'child locks did not follow parent display states');
+      search('라운지 소식 숨김');check(shown(row('[data-feature="loungeNews"]')),
+        'old lounge setting name is no longer searchable');search('');
+    `);
     await test('auto-enable modes preserve legacy keys and embed defaults stay independent',`
       const mixer=document.querySelector('[data-mixer-auto-enable]');
       const filter=document.querySelector('[data-video-filter-auto-enable]');
@@ -442,8 +475,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       };
       const regular=await exportPayload('[data-settings-export]');
       const full=await exportPayload('[data-settings-export-full]');
-      check(JSON.stringify(regular.appearance.multiviewChatSize)==='{"w":430,"h":320}','settings export omitted multiview chat size');
-      check(JSON.stringify(full.appearance.multiviewChatSize)==='{"w":430,"h":320}','full backup omitted multiview chat size');
+      check(JSON.stringify(regular.appearance.multiviewChatSize)==='{"w":430,"h":320,"topH":240}','settings export omitted multiview chat size');
+      check(JSON.stringify(full.appearance.multiviewChatSize)==='{"w":430,"h":320,"topH":240}','full backup omitted multiview chat size');
+      check(JSON.stringify(regular.settings.cheeseMultiviewChatSize)==='{"w":430,"h":320,"topH":240}',
+        'settings export omitted cross-origin multiview chat size');
+      check(JSON.stringify(full.settings.cheeseMultiviewChatSize)==='{"w":430,"h":320,"topH":240}',
+        'full backup omitted cross-origin multiview chat size');
       for(const exported of [regular,full]){
         check(exported.settings.cheeseFeatureHidden?.chatHideSendButton===false,'send-button option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
@@ -451,12 +488,13 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(exported.settings.cheeseMultiviewMainBorder===false,'main border setting missing from export');
         check(exported.settings.cheeseMultiviewSetupSortBySource?.following==='name-desc','setup source sort missing from export');
         check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
+        check(exported.settings.cheeseMultiviewLiveCatchUpLimit===6,
+          'catch-up limit missing from export');
         check(exported.settings.cheeseMultiviewSetupOptions?.mainHighQuality===true&&
           exported.settings.cheeseMultiviewSetupOptions?.startWithoutChat===false&&
           exported.settings.cheeseMultiviewSetupOptions?.startMainMuted===true&&
           exported.settings.cheeseMultiviewSetupOptions?.startMainVolume===0.37,
           'multiview setup options missing from export');
-        check(exported.settings.cheeseMultiviewChatPopoutMode==='native','chat popout mode missing from export');
         for(const key of ['cheeseMultiviewBadgeChatButton','cheeseMultiviewBadgeChatHideEmptyButton',
           'cheeseMultiviewBadgeChatHideChatBackground','cheeseMultiviewBadgeChatHideChatBorder',
           'cheeseMultiviewBadgeChatHidePopupBackground','cheeseMultiviewBadgeChatHidePopupBorder',
@@ -470,14 +508,19 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseFeatureHidden:{...saved.cheeseFeatureHidden,chatHideSendButton:true,vodLocalChat:false},
         cheeseMultiviewMainBorder:true,
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
-        cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62}},appearance:{multiviewChatSize:{w:720,h:180}}};
+        cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
+        cheeseMultiviewLiveCatchUpLimit:4},appearance:{multiviewChatSize:{w:720,h:180,topH:210}}};
       payload.settings.cheeseMultiviewChatPopoutMode='platter';
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,50));
       const imported=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
-      check(imported.w===720&&imported.h===320,'invalid dimension was not ignored while retaining existing size');
+      check(imported.w===720&&imported.h===320&&imported.topH===210,
+        'chat size and top-video height were not imported safely');
+      check(saved.cheeseMultiviewChatSize?.w===720&&saved.cheeseMultiviewChatSize?.topH===210,
+        'imported chat size did not reach extension storage');
+      check(saved.cheeseMultiviewLiveCatchUpLimit===4,'catch-up limit was not imported');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
       check(saved.cheeseFeatureHidden?.chatHideSendButton===true,'send-button setting was not imported');
       check(saved.cheeseFeatureHidden?.vodLocalChat===false,'local replay chat setting was not imported');
@@ -489,7 +532,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         saved.cheeseMultiviewSetupOptions?.startMainMuted===false&&
         saved.cheeseMultiviewSetupOptions?.startMainVolume===0.62,
         'multiview setup options were not imported');
-      check(saved.cheeseMultiviewChatPopoutMode==='platter','chat popout mode was not imported');
+      check(saved.cheeseMultiviewChatPopoutMode==='native','removed chat popout mode was imported from an old backup');
+      check(!document.querySelector('[data-multiview-chat-popout-mode]'),'removed chat popout mode control is still shown');
       payload.settings.cheeseMultiviewBadgeChatHidePillButton=true;
       payload.settings.cheeseMultiviewBadgeChatKeepPopupOpen=true;
       payload.settings.cheeseMultiviewBadgeChatHidePopupTime=false;
@@ -511,13 +555,25 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(invalidMode)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,50));
-      check(saved.cheeseMultiviewChatPopoutMode==='platter','unsupported chat popout mode overwrote the saved value');
-      const bounded={...payload,appearance:{multiviewChatSize:{w:9000,h:300}}};
+      check(saved.cheeseMultiviewChatPopoutMode==='native','removed chat popout mode was imported from an old backup');
+      const bounded={...payload,appearance:{multiviewChatSize:{w:9000,h:300,topH:9000}}};
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(bounded)],'settings.json',{type:'application/json'})]});
       input.dispatchEvent(new Event('change',{bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,50));
       const capped=JSON.parse(localStorage.getItem('cheeseMultiviewChatSize'));
-      check(capped.w===4000&&capped.h===300,'imported dimensions were not capped');
+      check(capped.w===4000&&capped.h===300&&capped.topH===4000,'imported dimensions were not capped');
+      const invalidTop={...payload,appearance:{multiviewChatSize:{topH:50}}};
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(invalidTop)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      check(JSON.parse(localStorage.getItem('cheeseMultiviewChatSize')).topH===4000,
+        'invalid top-video height overwrote the saved value');
+      const storageOnly={...payload,settings:{cheeseMultiviewChatSize:{w:610,topH:180}},appearance:{}};
+      Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(storageOnly)],'settings.json',{type:'application/json'})]});
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,50));
+      check(saved.cheeseMultiviewChatSize?.w===610&&saved.cheeseMultiviewChatSize?.topH===180,
+        'cross-origin chat size was not restored from settings storage');
     `);
     assert.deepEqual(await evaluate('errors'),[]);
     console.log(JSON.stringify({passed:checks.length,checks,screenshots:'temporary directory: cheese-settings-ui-{420,788,1280,390}.png'},null,2));

@@ -8,9 +8,7 @@ const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const source = read("src/replayLocalChat.js");
 const watch = read("src/multiviewWatch.js");
-const popup = read("src/multiviewChatPopup.js");
 const watchHtml = read("multiviewWatch.html");
-const popupHtml = read("multiviewChatPopup.html");
 const css = read("src/multiview.css");
 const checks = [];
 function check(condition, label) {
@@ -60,8 +58,6 @@ check(context.CheeseReplayLocalChat.bindLatestButton({}).update() === undefined,
 // 마크업·스타일·연결.
 check(/<div class="mv-vod-chat-list-wrap">\s*<div class="mv-vod-chat-list" id="mvVodChatList"[^>]*><\/div>\s*<button type="button" class="mv-vod-chat-latest[^"]*" id="mvVodChatLatest"[\s\S]*?aria-label="최신 채팅으로 이동"[\s\S]*?hidden>/.test(watchHtml),
   "시청 페이지: 목록 옆에 '최신 채팅으로' 버튼(처음엔 숨김)");
-check(/<div class="mv-vod-chat-list-wrap">\s*<div class="mv-vod-chat-list" id="mvChatPopupVodList"[^>]*><\/div>\s*<button type="button" class="mv-vod-chat-latest" id="mvChatPopupVodLatest"[\s\S]*?hidden>/.test(popupHtml),
-  "분리 채팅 팝업: 같은 버튼");
 check(/\.mv-vod-chat-list-wrap \{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*position: relative;/s.test(css) &&
   /\.mv-vod-chat-latest \{[^}]*border-radius: 50%;[^}]*bottom: 12px;[^}]*position: absolute;[^}]*right: 12px;/s.test(css) &&
   /\.mv-vod-chat-latest\[hidden\] \{\s*display: none;/.test(css),
@@ -69,9 +65,6 @@ check(/\.mv-vod-chat-list-wrap \{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*pos
 check(/bindLatestButton\(\{\s*list: \$\("mvVodChatList"\),\s*button: \$\("mvVodChatLatest"\),/.test(watch) &&
   /vodChatLatest\.update\(\);\s*vodChatRenderSignature = signature;/.test(watch),
   "시청 페이지: 채팅을 새로 그릴 때마다 버튼 표시를 맞춘다");
-check(/bindLatestButton\(\{\s*list: vodList,\s*button: \$\("mvChatPopupVodLatest"\),/.test(popup) &&
-  /vodChatLatest\?\.update\(\);\s*vodLocalChatIds = nextLocalIds;/.test(popup),
-  "분리 채팅 팝업: 채팅을 새로 그릴 때마다 버튼 표시를 맞춘다");
 
 console.log(checks.map((label) => `  PASS ${label}`).join("\n"));
 console.log("전부 통과");

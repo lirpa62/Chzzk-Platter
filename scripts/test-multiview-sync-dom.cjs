@@ -41,6 +41,7 @@ const PIECES = [
   "isVideoSlot",
   // 기준 채널을 바꿀 때 보정값을 새 기준으로 다시 계산한다(클릭 처리가 부른다).
   "rebaseSyncOffsets",
+  "syncReadyLabel",
   "getSyncRowViewState",
   "syncNudgePending",
   "setSyncButtonState",
@@ -324,6 +325,35 @@ const cleanup = () => {
     );
   }
 
+  console.log("\n[모드] 꺼짐은 조작을 막고 수동·자동은 상태를 구분한다");
+  {
+    const states = await ev(`(()=>{
+      const row=document.querySelector('[data-mv-sync-row="a"]');
+      const ref=row.querySelector('[data-mv-sync-ref]');
+      state.sync.mode='off'; refreshSyncPanel();
+      const off={label:row.querySelector('[data-mv-sync-status]').textContent,
+        disabled:ref.disabled, allDisabled:[...row.querySelectorAll('.mv-sync-controls button')].every(b=>b.disabled),
+        align:document.getElementById('mvSyncAlign').disabled,
+        clear:document.getElementById('mvSyncClear').disabled};
+      state.sync.mode='manual'; refreshSyncPanel();
+      const manual={label:row.querySelector('[data-mv-sync-status]').textContent,
+        disabled:ref.disabled, align:document.getElementById('mvSyncAlign').disabled};
+      state.sync.mode='auto'; refreshSyncPanel();
+      const auto=row.querySelector('[data-mv-sync-status]').textContent;
+      const b=syncStats.get('b'); syncStats.set('b',{...b,playbackRate:1.25,userRateOverride:true});
+      refreshSyncPanel();
+      const override=document.querySelector('[data-mv-sync-row="b"] [data-mv-sync-status]').textContent;
+      syncStats.set('b',b); state.sync.mode='manual'; refreshSyncPanel();
+      return {off,manual,auto,override};})()`);
+    ok(states.off.label === "싱크 꺼짐" && states.off.disabled && states.off.allDisabled &&
+      states.off.align && states.off.clear,
+      `꺼짐은 싱크 조작을 잠근다 (${JSON.stringify(states.off)})`);
+    ok(states.manual.label === "수동 조절 가능" && !states.manual.disabled && !states.manual.align,
+      `수동은 직접 조절할 수 있다 (${JSON.stringify(states.manual)})`);
+    ok(states.auto === "자동 감시 중" && states.override === "사용자 배속 · 자동 제외",
+      `자동 상태와 사용자 배속 제외를 구분한다 (${states.auto}, ${states.override})`);
+  }
+
   console.log("\n[제자리 갱신] 값이 바뀌어도 Element 가 그대로다");
   {
     await ev(`state.sync.manualOffsets.b = 0.3; refreshSyncPanel();`);
@@ -362,6 +392,31 @@ const cleanup = () => {
       await ev(`(()=>{const n=document.querySelector('#mvSyncPop .mv-sync-notice');
       return !n || getComputedStyle(n).display === 'none';})()`);
     ok(gone === true, "비운 안내가 화면에서 사라진다");
+  }
+
+  console.log("\n[적용 중] 확정된 출력값과 컨트롤 위치는 그대로다");
+  {
+    const geometry = () => ev(`(()=>{
+      const row=document.querySelector('[data-mv-sync-row="b"]');
+      const output=row.querySelector('[data-mv-sync-output]').getBoundingClientRect();
+      const next=row.querySelector('[data-mv-sync-offset][data-step="0.1"]').getBoundingClientRect();
+      return {outputX:output.x, outputWidth:output.width, nextX:next.x, nextY:next.y};})()`);
+    const before = await geometry();
+    const beforeText = await ev(`document.querySelector('[data-mv-sync-row="b"] [data-mv-sync-output]').textContent`);
+    await snap();
+    await ev(`pendingSyncCommands.set(999,{channelId:'b',command:'nudge'}); refreshSyncPanel();`);
+    const pending = await geometry();
+    const outputState = await ev(`(()=>{const o=document.querySelector('[data-mv-sync-row="b"] [data-mv-sync-output]');
+      return {text:o.textContent,busy:o.getAttribute('aria-busy')};})()`);
+    const r = await same();
+    ok(r.rowsSame && r.btnsSame, "적용 중에도 행과 버튼 Element 가 유지된다");
+    ok(outputState.text === beforeText && outputState.busy === 'true',
+      `적용 중에는 확정값을 유지하고 상태만 표시한다 (${JSON.stringify(outputState)})`);
+    ok(JSON.stringify(pending) === JSON.stringify(before),
+      `적용 중 상태가 버튼을 밀지 않는다 (${JSON.stringify(before)} -> ${JSON.stringify(pending)})`);
+    await ev(`pendingSyncCommands.delete(999); refreshSyncPanel();`);
+    ok(JSON.stringify(await geometry()) === JSON.stringify(before),
+      "적용 완료 후에도 컨트롤 위치가 그대로다");
   }
 
   console.log("\n[기준 변경] 행을 새로 만들지 않고 표시만 옮긴다");
@@ -486,6 +541,7 @@ const cleanup = () => {
       const row=document.querySelector('[data-mv-sync-row="${id}"]');
       return {
         output: row.querySelector('[data-mv-sync-output]').textContent,
+        busy: row.querySelector('[data-mv-sync-output]').getAttribute('aria-busy')==='true',
         offsetsDisabled: [...row.querySelectorAll('[data-mv-sync-offset]')].map(b=>b.disabled),
         offsetsBusy: [...row.querySelectorAll('[data-mv-sync-offset]')]
           .map(b=>b.getAttribute('aria-disabled')==='true'),
@@ -498,10 +554,12 @@ const cleanup = () => {
   console.log("\n[응답 성공] 적용 중 → 확정, Element·포커스 유지");
   {
     await snap();
+    const beforeOutput = (await rowState("c")).output;
     const c = await clickNudge("c", "-0.1");
     ok(c.sent && c.commandId, `명령이 나갔다 (commandId=${c.commandId})`);
     let st = await rowState("c");
-    ok(st.output.includes("적용 중"), `보내는 즉시 '적용 중' (${st.output})`);
+    ok(st.busy && st.output === beforeOutput,
+      `보내는 즉시 적용 상태만 바뀌고 확정값은 유지된다 (${st.output})`);
     ok(
       st.offsetsBusy.every(Boolean),
       "보류 중에는 ± 버튼이 aria-disabled 로 잠긴다",
@@ -531,7 +589,7 @@ const cleanup = () => {
       st.offset === c.next,
       `성공 응답에서만 보정값이 확정된다 (${st.offset})`,
     );
-    ok(!st.output.includes("적용 중"), `'적용 중' 이 풀린다 (${st.output})`);
+    ok(!st.busy, `응답 뒤 적용 상태가 풀린다 (${st.output})`);
     ok(
       st.offsetsDisabled.every((d) => !d) && st.offsetsBusy.every((d) => !d),
       "± 버튼이 다시 열린다",
@@ -561,7 +619,7 @@ const cleanup = () => {
       st.offset === before,
       `실패하면 보정값을 바꾸지 않는다 (${before} → ${st.offset})`,
     );
-    ok(!st.output.includes("적용 중"), "'적용 중' 이 풀린다");
+    ok(!st.busy, "실패 뒤 적용 상태가 풀린다");
     ok(
       st.offsetsDisabled.every((d) => !d),
       "± 버튼이 다시 열린다",
@@ -582,8 +640,8 @@ const cleanup = () => {
     const c = await clickNudge("c", "0.1");
     ok(c.sent, "명령이 나갔다");
     ok(
-      (await rowState("c")).output.includes("적용 중"),
-      "보내는 즉시 '적용 중'",
+      (await rowState("c")).busy,
+      "보내는 즉시 적용 상태가 켜진다",
     );
     // 실제 타이머(commandTimeoutMs=2초)가 돌게 둔다. 포커스는 버튼에 남아 있다.
     await new Promise((r) => setTimeout(r, 2300));
@@ -595,8 +653,8 @@ const cleanup = () => {
     // ⚠ 예전에는 여기서 renderSync() 를 불렀는데, 포커스가 패널 안에 있어
     //   가드가 렌더를 건너뛰었다. '적용 중' 이 영영 풀리지 않았다.
     ok(
-      !st.output.includes("적용 중"),
-      `타임아웃 뒤 '적용 중' 이 풀린다 (${st.output})`,
+      !st.busy,
+      `타임아웃 뒤 적용 상태가 풀린다 (${st.output})`,
     );
     ok(st.offset === before, "타임아웃은 보정값을 바꾸지 않는다");
     ok(

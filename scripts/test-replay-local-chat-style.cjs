@@ -11,7 +11,6 @@ const content = read("src/content.js");
 const settingsHtml = read("settings.html");
 const settingsUi = read("src/settingsUi.js");
 const watch = read("src/multiviewWatch.js");
-const popup = read("src/multiviewChatPopup.js");
 const checks = [];
 function check(condition, label) {
   assert.ok(condition, label);
@@ -119,14 +118,13 @@ check(/"cheese-vod-local-chat-hide-border",\s*featureFlags\.vodLocalChatHideBord
   "일반 다시보기: content.js 가 숨김 클래스를 붙인다(기본 끔)");
 check(gradient("mv-vod-local-chat").test(mvCss) &&
   /\.mv-vod-chat-row\.is-local \{[\s\S]*?border-color: var\(--mv-vod-local-chat-highlight-border\);/.test(mvCss) &&
-  /html\[data-theme="dark"\]\s*:is\(\.mv-vod-chat-feed, \.mv-chat-popup-vod\)\s*\.mv-vod-chat-row\.is-local/.test(mvCss),
+  /html\[data-theme="dark"\]\s*\.mv-vod-chat-feed\s*\.mv-vod-chat-row\.is-local/.test(mvCss),
   "멀티뷰: 나의 채팅 줄에 그라데이션 배경·보라 테두리선(다크 따로)");
-check(/html\.cheese-vod-local-chat-hide-border\s*:is\(\.mv-vod-chat-feed, \.mv-chat-popup-vod\)\s*\.mv-vod-chat-row\.is-local \{\s*border-color: transparent;/.test(mvCss) &&
-  /html\.cheese-vod-local-chat-hide-bg\s*:is\(\.mv-vod-chat-feed, \.mv-chat-popup-vod\)\s*\.mv-vod-chat-row\.is-local \{\s*background: transparent;/.test(mvCss),
+check(/html\.cheese-vod-local-chat-hide-border\s*\.mv-vod-chat-feed\s*\.mv-vod-chat-row\.is-local \{\s*border-color: transparent;/.test(mvCss) &&
+  /html\.cheese-vod-local-chat-hide-bg\s*\.mv-vod-chat-feed\s*\.mv-vod-chat-row\.is-local \{\s*background: transparent;/.test(mvCss),
   "멀티뷰: 테두리선·배경색을 각각 숨긴다");
-check(/CheeseReplayLocalChat\.watchStyleClasses\(\);/.test(watch) &&
-  /CheeseReplayLocalChat\?\.watchStyleClasses\(\);/.test(popup),
-  "멀티뷰 시청 페이지와 분리 채팅 팝업이 같은 설정을 따른다");
+check(/CheeseReplayLocalChat\.watchStyleClasses\(\);/.test(watch),
+  "멀티뷰 시청 페이지가 같은 설정을 따른다");
 
 // 설정 화면: '다시보기 채팅 입력'의 하위 옵션.
 const parent = settingsHtml.indexOf('data-feature="vodLocalChat"');

@@ -241,7 +241,33 @@
   // 최상위 UI 를 빼는 조건은 팝업 플레이어와 같으므로 아래에서 함께 묶는다.
   // ⚠ 교차 출처라 부모가 프레임 내부를 만질 수 없다. 음소거·화질·채팅 접기는
   //   모두 이 쿼리로 지시받아 프레임 쪽에서 수행한다.
-  const MULTIVIEW_PARAMS = new URLSearchParams(location.search);
+  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는 같은 탭·같은 출처의 sessionStorage 에 칸 주소
+  // 키(cheese-multiview-frame:/live/<id>)로 넘긴다. 주소 쿼리로 넘기면 칸을 열 때마다 치지직
+  // 서버 접속 기록에 남는다. ⚠ iframe 이름(window.name)은 치지직 스크립트가 비워 쓸 수 없었다.
+  // 예전 방식(iframe 이름·주소 쿼리)과 팝업 플레이어 쿼리도 읽는다.
+  const MULTIVIEW_NAME_PREFIX = "cheese-multiview:";
+  const MULTIVIEW_FRAME_STORE_PREFIX = "cheese-multiview-frame:";
+  const MULTIVIEW_PARAMS = (() => {
+    const params = new URLSearchParams(location.search);
+    if (window.top === window) return params;
+    const apply = (raw) => {
+      if (typeof raw !== "string" || !raw) return;
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== "object") return;
+      for (const [key, value] of Object.entries(data)) {
+        if (key.startsWith("cheeseMulti") && typeof value === "string") params.set(key, value);
+      }
+    };
+    try {
+      const name = String(window.name || "");
+      if (name.startsWith(MULTIVIEW_NAME_PREFIX)) apply(name.slice(MULTIVIEW_NAME_PREFIX.length));
+    } catch {}
+    try {
+      apply(sessionStorage.getItem(
+        MULTIVIEW_FRAME_STORE_PREFIX + location.pathname.replace(/\/+$/, "")));
+    } catch {}
+    return params;
+  })();
   const IS_MULTIVIEW_FRAME =
     !IS_TOP_FRAME && MULTIVIEW_PARAMS.get("cheeseMulti") === "1";
   // 채팅 칸(멀티뷰). 채팅 전용 페이지(/live/<id>/chat)라 영상이 없으므로 음소거·
@@ -278,15 +304,29 @@
   const MULTIVIEW_INITIAL_QUALITIES = new Set(["highest", "cap-480", "cap-720"]);
   // 멀티뷰 초기 채팅 접기에 줄 시간. 광고가 끼면 엔진이 이 시각을 뒤로 민다.
   const MULTIVIEW_UI_FOLD_WINDOW_MS = 20000;
-  // 우리 확장 페이지의 정확한 출처. 다른 확장도 chrome-extension:// 이므로
-  // 접두사 비교로는 부족하다.
+  // 부모 화면의 출처. 멀티뷰는 치지직 페이지(/lives) 위에서 띄운다(치지직이 다른 출처의
+  // iframe 표시를 막아서). 예전 방식인 우리 확장 페이지도 받는다. 다른 확장도
+  // chrome-extension:// 이므로 접두사 비교로는 부족하다.
+  const MULTIVIEW_HOSTED_ON_CHZZK = MULTIVIEW_PARAMS.get("cheeseMultiHost") === "chzzk";
   const MULTIVIEW_PARENT_ORIGIN = (() => {
+    if (MULTIVIEW_HOSTED_ON_CHZZK) return "https://chzzk.naver.com";
     try {
       return chrome.runtime.getURL("").replace(/\/$/, "");
     } catch {
       return "";
     }
   })();
+  // ⚠ 부모가 치지직 페이지면 출처만으로는 우리 화면인지 알 수 없다(치지직 스크립트도 같은
+  //   출처다). 부모가 칸마다 넘긴 세션 토큰이 맞는 메시지만 받고, 보낼 때도 붙인다.
+  const MULTIVIEW_TOKEN = (() => {
+    const token = MULTIVIEW_PARAMS.get("cheeseMultiToken") || "";
+    return /^[A-Za-z0-9_-]{16,64}$/.test(token) ? token : "";
+  })();
+  function isMultiviewParentMessage(event) {
+    if (event.source !== window.parent || event.origin !== MULTIVIEW_PARENT_ORIGIN) return false;
+    if (MULTIVIEW_HOSTED_ON_CHZZK) return !!MULTIVIEW_TOKEN && event.data?.token === MULTIVIEW_TOKEN;
+    return true;
+  }
 
   // ⚠ 메인 변경 때 프레임을 다시 로드하지 않으려면 이 값들이 바뀔 수 있어야 한다.
   //   쿼리는 '처음 상태' 일 뿐이고, 이후에는 부모 메시지로 갱신된다.
@@ -305,10 +345,13 @@
   // 역할 정책은 숫자 상한과 분리한다. highest는 상한이 없는 상태가 아니라 생명주기
   // 경계에서 사용 가능한 최고 화질을 적극적으로 다시 선택한다는 뜻이다.
   const multiviewInitialQualityPolicy = MULTIVIEW_PARAMS.get("cheeseMultiQualityPolicy");
-  const multiviewInitialQuality = IS_MULTIVIEW_FRAME &&
+  // 시작 화질 목표. 칸을 띄울 때 정하고, 메인이 바뀌면 부모가 새 역할의 목표로 바꾼다.
+  let multiviewInitialQuality = IS_MULTIVIEW_FRAME &&
       MULTIVIEW_INITIAL_QUALITIES.has(MULTIVIEW_PARAMS.get("cheeseMultiInitialQuality"))
     ? MULTIVIEW_PARAMS.get("cheeseMultiInitialQuality")
     : "none";
+  // 부모가 메인을 바꿀 때마다 늘리는 값. 바뀌면 MAIN 이 새 목표를 한 번 다시 건다.
+  let multiviewQualityRoleToken = 0;
   let multiviewQualityPolicy = IS_MULTIVIEW_FRAME &&
       MULTIVIEW_QUALITY_POLICIES.has(multiviewInitialQualityPolicy)
     ? multiviewInitialQualityPolicy
@@ -2371,7 +2414,7 @@
     clipVault: false, // /clips 헤더의 클립 보관함(즐겨찾기·좋아요) 버튼
     videoVault: false, // /videos·팔로잉 동영상의 다시보기 보관함
     // 다시보기 로컬 채팅 입력(체크=켬, 기본 끔). 일반 다시보기와 멀티뷰 다시보기 채팅
-    // 모두 이 값을 따른다(replayLocalChat.js · multiviewWatch.js · multiviewChatPopup.js).
+    // 모두 이 값을 따른다(replayLocalChat.js · multiviewWatch.js).
     vodLocalChat: false,
     // 위 입력으로 추가된 나의 채팅 줄의 보라 테두리선·배경색 숨김(하위 옵션, 기본 끔).
     vodLocalChatHideBorder: false,
@@ -18759,7 +18802,11 @@
   // 너비 조절 적용/해제(배지 모아 챗 syncChatWidthResize 포팅).
   function applyChatLayout() {
     const aside = findResizableChatAside();
+    // 멀티뷰 칸의 채팅은 늘 접혀 있고 광고 동안만 치지직이 펼친다. 그때 폭은
+    // content.css(광고 중 채팅 폭)가 칸에 맞춰 줄인다. 인라인 !important 폭을 주면 그
+    // 규칙을 이겨 광고 자리가 다시 사라진다.
     const enabled =
+      !IS_MULTIVIEW_FRAME &&
       chatFeatureActive("chatWidthResize") &&
       !isChatStackedLayout(aside) &&
       !!aside;
@@ -19163,8 +19210,9 @@
   // 라이브 시청 중 SPA 로 다른 페이지에 가면 치지직이 플레이어만 PIP(_type_pip_)로
   // 남기고 채팅 aside 는 통째로 언마운트한다(실측: asideAlive=false, chatItems=0).
   // 그래서 '기존 채팅 DOM 을 옮겨 붙이는' 방법은 불가능하고, 채팅 전용 URL
-  // (/live/{id}/chat)을 iframe 으로 새로 띄우는 수밖에 없다. 이 URL 은 X-Frame-Options
-  // 도 frame-ancestors CSP 도 없어 프레이밍이 허용된다(응답 헤더 확인).
+  // (/live/{id}/chat)을 iframe 으로 새로 띄우는 수밖에 없다. 이 URL 의 CSP 는
+  // frame-ancestors 'self' https://*.naver.com 이라(2026-10-01 응답 헤더 확인) 같은 치지직
+  // 페이지 안에서 띄우는 이 iframe 은 허용된다.
   //
   // ⚠ iframe 은 독립 문서라 채팅 소켓이 하나 더 열린다. 다만 라이브로 돌아가면 치지직이
   // 어차피 소켓을 새로 연결하므로 추가 비용은 'PIP 를 띄워 둔 동안'으로 한정된다.
@@ -22319,8 +22367,9 @@
             type,
             channelId: MULTIVIEW_CHANNEL_ID,
             ...(extra || {}),
+            ...(MULTIVIEW_TOKEN ? { token: MULTIVIEW_TOKEN } : {}),
           },
-          // ⚠ "*" 로 보내지 않는다. 우리 확장 페이지에만 간다.
+          // ⚠ "*" 로 보내지 않는다. 우리 멀티뷰 화면의 출처로만 간다.
           MULTIVIEW_PARENT_ORIGIN,
         );
       } catch {}
@@ -22354,9 +22403,8 @@
 
     // 부모 지시 수신. 아무 페이지나 보낸 메시지를 실행하지 않도록 형태를 모두 확인한다.
     window.addEventListener("message", (event) => {
-      if (event.source !== window.parent) return;
-      // ⚠ 우리 확장의 정확한 출처만 받는다(다른 확장도 chrome-extension:// 이다).
-      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
+      // ⚠ 우리 멀티뷰 화면이 보낸 것만 받는다(출처 + 세션 토큰).
+      if (!isMultiviewParentMessage(event)) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
@@ -22405,7 +22453,7 @@
         if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0) return;
         if (syncCommand === "catch-up" &&
             (typeof data.targetDelaySec !== "number" || !Number.isFinite(data.targetDelaySec) ||
-              data.targetDelaySec < MULTIVIEW_SYNC.CATCH_UP.targetSec ||
+              data.targetDelaySec < MULTIVIEW_SYNC.CATCH_UP.minTargetSec ||
               data.targetDelaySec > MULTIVIEW_SYNC.CATCH_UP.limitSec)) return;
         if (syncCommand === "rate" &&
             (typeof data.rate !== "number" || !Number.isFinite(data.rate) ||
@@ -22430,8 +22478,7 @@
           else if (typeof isAdPlaying === "function" && isAdPlaying()) reason = "ad";
           else if (syncCommand === "rate") {
             if (syncRateUserOverride ||
-                (!syncRateOwned &&
-                  Math.abs(video.playbackRate - 1) > MULTIVIEW_SYNC.LIMITS.userRateEpsilon)) {
+                (!syncRateOwned && MULTIVIEW_SYNC.isUserRate(video.playbackRate))) {
               reason = "user-rate";
             } else {
               const previousOwned = syncRateOwned;
@@ -22520,7 +22567,14 @@
         multiviewVolume = v;
       }
 
-      const qualityChanged = incomingQualityPolicy !== multiviewQualityPolicy;
+      let roleChanged = false;
+      if (Number.isSafeInteger(data.qualityRoleToken) && data.qualityRoleToken > multiviewQualityRoleToken &&
+          (data.initialQuality === "none" || MULTIVIEW_INITIAL_QUALITIES.has(data.initialQuality))) {
+        multiviewQualityRoleToken = data.qualityRoleToken;
+        multiviewInitialQuality = data.initialQuality;
+        roleChanged = multiviewInitialQuality !== "none";
+      }
+      const qualityChanged = incomingQualityPolicy !== multiviewQualityPolicy || roleChanged;
       // 부모가 '지금 다시 확인해 달라' 고 한 경우(프레임이 막 준비된 때).
       const forceQualityReconcile = data.reconcileQuality === true;
       multiviewQualityPolicy = incomingQualityPolicy;
@@ -22686,8 +22740,7 @@
     // 부모가 '지금 바로 다시 맞춰라' 고 시킬 때(수동 다시 적용). 답을 돌려주지
     // 않는다 — 부모는 결과를 기다리지 않는다.
     window.addEventListener("message", (event) => {
-      if (event.source !== window.parent) return;
-      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
+      if (!isMultiviewParentMessage(event)) return;
       const data = event.data;
       if (data?.source !== MULTIVIEW_MESSAGE) return;
       if (
@@ -22776,9 +22829,8 @@
     });
 
     window.addEventListener("message", (event) => {
-      if (event.source !== window.parent) return;
-      // ⚠ 우리 확장의 정확한 출처만 받는다.
-      if (event.origin !== MULTIVIEW_PARENT_ORIGIN) return;
+      // ⚠ 우리 멀티뷰 화면이 보낸 것만 받는다(출처 + 세션 토큰).
+      if (!isMultiviewParentMessage(event)) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.source !== MULTIVIEW_MESSAGE) return;
@@ -22806,6 +22858,7 @@
             type: "CHAT_FRAME_READY",
             channelId: MULTIVIEW_CHANNEL_ID,
             generation: MULTIVIEW_CHAT_GENERATION,
+            ...(MULTIVIEW_TOKEN ? { token: MULTIVIEW_TOKEN } : {}),
           },
           MULTIVIEW_PARENT_ORIGIN,
         );
@@ -53613,6 +53666,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         maxQualityCap: resolveMaxQualityCap(),
         multiviewQualityPolicy: IS_MULTIVIEW_FRAME ? multiviewQualityPolicy : "none",
         multiviewInitialQuality: IS_MULTIVIEW_FRAME ? multiviewInitialQuality : "none",
+        multiviewQualityRoleToken: IS_MULTIVIEW_FRAME ? multiviewQualityRoleToken : 0,
         multiviewQualityReconcileToken: IS_MULTIVIEW_FRAME
           ? multiviewQualityReconcileToken : 0,
         maxQualityRespectManual, // 수동 화질 변경 존중(전역)

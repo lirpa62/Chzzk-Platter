@@ -11724,6 +11724,67 @@ html.cheese-popup-player-frame.cheese-multiview-vod-frame
   overflow: hidden !important;
 }
 
+/* 멀티뷰 라이브 칸의 광고 중 채팅 폭.
+   칸의 채팅은 늘 접혀 있고 입장·중간 광고 동안만 치지직이 강제로 펼친다. 펼친 채팅은
+   353px 고정(flex: 0 0 auto)이고 플레이어 열이 나머지를 받아, 354px 칸에서는 광고가
+   그려질 플레이어 열이 0.5px 로 밀려 광고가 보이지 않았다(2026-10-02 실측). 펼쳐진
+   동안 채팅 폭을 칸의 40%(최대 353px)로 줄여 광고 자리를 남긴다. 중간광고 때 채팅 위로
+   옮겨지는 원래 방송(미니플레이어)도 같은 폭·16:9 로 맞춘다.
+   ⚠ 광고를 가리거나 채팅을 접지 않는다. 폭만 나눈다. */
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame) {
+  --cheese-multiview-ad-chat-width: min(353px, 40vw);
+}
+
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  aside#aside-chatting:not([class*="_is_folded_"]) {
+  width: var(--cheese-multiview-ad-chat-width) !important;
+  max-width: var(--cheese-multiview-ad-chat-width) !important;
+  min-width: 0 !important;
+  flex-basis: var(--cheese-multiview-ad-chat-width) !important;
+  overflow: hidden !important;
+}
+
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  #live_player_layout.miniplayer {
+  width: var(--cheese-multiview-ad-chat-width) !important;
+  max-width: var(--cheese-multiview-ad-chat-width) !important;
+  min-width: 0 !important;
+  height: calc(var(--cheese-multiview-ad-chat-width) * 9 / 16) !important;
+  box-sizing: border-box !important;
+}
+
+/* 중간광고 미니플레이어를 채팅(입력창 포함)보다 위에 그린다. 미니플레이어는 DOM 상
+   플레이어 열 안(_player_ > _container_ > _wrapper_)에 있고 fixed 로 채팅 열 위에 뜬다.
+   채팅 aside 가 DOM 에서 뒤에 오므로 쌓임 순서가 있는 채팅 요소가 덮는다. 조상이 쌓임
+   맥락을 만들 수도 있어 그 경로(2026-10-02 실측)를 함께 올린다. 이 경로는 광고 자리
+   (플레이어 열)와 채팅 열이 겹치지 않아 미니플레이어 말고는 채팅을 덮지 않는다. */
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame) #live_player_layout.miniplayer,
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  [class*="_wrapper_"]:has(> #live_player_layout.miniplayer),
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  [class*="_container_"]:has(> [class*="_wrapper_"] > #live_player_layout.miniplayer),
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  [class*="_player_"]:has(
+    > [class*="_container_"] > [class*="_wrapper_"] > #live_player_layout.miniplayer
+  ) {
+  z-index: 1000 !important;
+}
+
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  #live_player_layout.miniplayer
+  :is(
+    .pzp-pc__video,
+    .webplayer-internal-core-shadow,
+    .webplayer-internal-core-source-container,
+    .webplayer-internal-source-shadow,
+    .webplayer-internal-source-wrapper
+  ) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+}
+
 /* ── 팝업 안 우리 버튼 표시 정책 ──
    각 버튼을 옵션으로 켜고 끈다. 숨김은 '표시'만 막는 것이라 기능은 살아 있고
    단축키는 그대로 동작한다. 좁은 창을 고려해 자주 쓰는 셋(믹서·필터·따라잡기)만
@@ -12347,7 +12408,8 @@ html.cheese-chat-badge-hide-on
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   ):not(.cheese-chat-nick-shown)
-  [class*="_container_"]
+  :is(button[class*="_nickname_"], button[class*="_profile_button_"])
+  > [class*="_container_"]
   > [class*="_wrapper_"],
 html.cheese-chat-badge-hide-on
   button[class*="_button_chatting_"]:not(.cheese-chat-nick-shown)

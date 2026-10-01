@@ -1791,11 +1791,68 @@
     win.location.origin !== "https://chzzk.naver.com"
   )
     return;
-  const params = new URLSearchParams(win.location.search);
+  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는 같은 탭·같은 출처의 sessionStorage 에 칸 주소
+  // 키로 넘긴다(⚠ window.name 은 치지직 스크립트가 비운다). 예전 방식(iframe 이름·주소 쿼리)도 읽는다.
+  function multiviewFrameParams() {
+    const params = new URLSearchParams(win.location.search);
+    if (win.top === win) return params;
+    const apply = (raw) => {
+      if (typeof raw !== "string" || !raw) return;
+      const data = JSON.parse(raw);
+      for (const [key, value] of Object.entries(data || {})) {
+        if (key.startsWith("cheeseMulti") && typeof value === "string") params.set(key, value);
+      }
+    };
+    try {
+      const name = String(win.name || "");
+      if (name.startsWith("cheese-multiview:")) apply(name.slice("cheese-multiview:".length));
+    } catch {}
+    try {
+      apply(win.sessionStorage.getItem(
+        "cheese-multiview-frame:" + win.location.pathname.replace(/\/+$/, "")));
+    } catch {}
+    return params;
+  }
+  // ⚠ 예전에는 주소 쿼리만 봐서, 칸 설정이 세션 저장소로 옮겨 간 뒤 채팅 칸에서 켜지지 않았다.
+  const params = multiviewFrameParams();
   if (
     params.get("cheeseMultiChat") !== "1" ||
     !/^\/live\/[0-9a-f]{32}\/chat\/?$/i.test(win.location.pathname)
   )
     return;
-  createRoleHighlighter(win);
+
+  // 배지 모아 챗(별도 확장)이 이 채팅 칸에서 동작하면 우리 것은 양보한다. 이 기능은 그
+  // 확장을 옮겨 온 것이라 둘 다 켜지면 배지 알림 버튼·모아보기·채팅 하이라이트가 두 겹이 된다
+  // (치지직 페이지 위 멀티뷰가 되면서 그 확장도 채팅 칸에 들어온다). 그 확장은 채팅창에
+  // .chzzk-badge-moa-root 를 붙이고, 알림 버튼을 숨겨도 이 뿌리는 남는다.
+  // 다른 확장의 스크립트 변수는 볼 수 없어 DOM 표식으로 판정한다.
+  const BADGE_MOA_ROOT = ".chzzk-badge-moa-root";
+  // ⚠ 계속 감시하지 않는다. 그 확장은 채팅 헤더가 생기면 설정을 읽은 뒤 곧바로(보통 몇 초 안)
+  //   뿌리를 붙이므로, 채팅 칸이 뜬 뒤 이 시간 동안만 확인하고 판정이 나면 멈춘다. 판정 뒤에
+  //   그 확장을 켜고 끈 것은 채팅 칸이 다시 뜰 때(채널 변경·재연결) 반영된다.
+  const BADGE_MOA_CHECK_MS = 1000;
+  const BADGE_MOA_DECIDE_MS = 20000;
+  // ⚠ 바로 켜면 그 확장이 뜨기 전에 우리 버튼이 잠깐 나타났다 사라진다. 이만큼은 기다린다.
+  const BADGE_MOA_GRACE_MS = 2000;
+  const badgeMoaStartedAt = Date.now();
+  let disposeHighlighter = null;
+  let badgeMoaTimer = 0;
+  const stopBadgeMoaCheck = () => {
+    if (badgeMoaTimer) win.clearInterval(badgeMoaTimer);
+    badgeMoaTimer = 0;
+  };
+  const checkBadgeMoa = () => {
+    const elapsed = Date.now() - badgeMoaStartedAt;
+    if (win.document.querySelector(BADGE_MOA_ROOT)) {
+      disposeHighlighter?.();
+      disposeHighlighter = null;
+      stopBadgeMoaCheck();
+      return;
+    }
+    if (!disposeHighlighter && elapsed >= BADGE_MOA_GRACE_MS)
+      disposeHighlighter = createRoleHighlighter(win);
+    if (elapsed >= BADGE_MOA_DECIDE_MS) stopBadgeMoaCheck();
+  };
+  badgeMoaTimer = win.setInterval(checkBadgeMoa, BADGE_MOA_CHECK_MS);
+  win.addEventListener("pagehide", stopBadgeMoaCheck, { once: true });
 })();

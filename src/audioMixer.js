@@ -143,6 +143,7 @@
   let multiviewInitialQualityApplied = false;
   let multiviewInitialGlobalPending = false;
   let multiviewQualityManualOverride = false;
+  let multiviewQualityRoleToken = 0;
   // 플레이어 하단 버튼 좌/우 배치(전역). 버튼별 "left"|"right". 기본은 현재 배치(우측).
   // 오디오 믹서/비디오 필터는 볼륨 컨트롤로 감싸진 특수 배치라 이동 대상에서 제외한다.
   // 하단 버튼 배치: side=각 버튼 소속 그룹, order=그룹 내 순서. content.js 가 정규화해
@@ -360,6 +361,14 @@
     const nextReconcileToken = Number.isSafeInteger(e.data.multiviewQualityReconcileToken) &&
         e.data.multiviewQualityReconcileToken >= 0
       ? e.data.multiviewQualityReconcileToken : 0;
+    const nextRoleToken = Number.isSafeInteger(e.data.multiviewQualityRoleToken) &&
+        e.data.multiviewQualityRoleToken >= 0
+      ? e.data.multiviewQualityRoleToken : 0;
+    // 메인 변경으로 역할이 바뀌었다. 새 역할의 시작 화질을 한 번 다시 건다(같은 목표라도
+    // 다시 건다). 단 이 칸에서 사용자가 직접 고른 화질이 있으면 그 선택을 지킨다.
+    const multiviewRoleChanged = nextRoleToken > multiviewQualityRoleToken &&
+      nextMultiviewInitialQuality !== "none";
+    multiviewQualityRoleToken = Math.max(multiviewQualityRoleToken, nextRoleToken);
     const multiviewPolicyChanged = nextMultiviewQualityPolicy !== multiviewQualityPolicy;
     const multiviewInitialQualityChanged = nextMultiviewInitialQuality !== multiviewInitialQuality;
     const preserveInitialQualityUserChoice = multiviewInitialQuality !== "none" &&
@@ -373,7 +382,7 @@
       nextReconcileToken !== multiviewQualityReconcileToken;
     multiviewQualityPolicy = nextMultiviewQualityPolicy;
     multiviewInitialQuality = nextMultiviewInitialQuality;
-    if (multiviewInitialQualityChanged) {
+    if (multiviewInitialQualityChanged || multiviewRoleChanged) {
       multiviewInitialQualityApplied = multiviewInitialQuality === "none";
       multiviewInitialGlobalPending = false;
     }
@@ -392,7 +401,7 @@
     // ⚠ 안 지우면 '수동 변경 존중' 이 우리가 건 480p 를 사용자 선택으로 오해해
     //   이후 화질 조정을 막는다.
     if (maxQualityCap !== maxQualityCapPrev || multiviewPolicyChanged ||
-        multiviewInitialQualityChanged || multiviewLifecycleChanged) {
+        multiviewInitialQualityChanged || multiviewLifecycleChanged || multiviewRoleChanged) {
       maxQualitySetHeight = 0;
       maxQualityRespectedPage = preserveMultiviewQualityChoice ? currentPageKey : null;
       maxQualityUserTouchedPage = preserveInitialQualityUserChoice ||
@@ -1217,7 +1226,7 @@
       // 영상 API 를 기다리지 않고 바로 스트리머별 믹서 설정을 불러온다.
       if (multiviewSlotId === pageKey) {
         const owner = String(
-          new URLSearchParams(location.search).get("cheeseMultiOwnerChannelId") || "",
+          multiviewFrameParams().get("cheeseMultiOwnerChannelId") || "",
         ).toLowerCase();
         if (/^[0-9a-f]{32}$/.test(owner)) {
           videoChannelCache.set(videoNo, owner);
@@ -3218,8 +3227,30 @@
 
   // 멀티뷰 칸 id. 라이브는 채널 id, 다시보기는 부모가 붙인 'video:<번호>'(주소와 맞을 때만).
   // 부모·content.js 가 쓰는 칸 id(MULTIVIEW_CHANNEL_ID)와 같은 규칙이다.
+  // 멀티뷰 칸 설정. 치지직 페이지 위 멀티뷰는 같은 탭·같은 출처의 sessionStorage 에 칸 주소
+  // 키로 넘긴다(⚠ window.name 은 치지직 스크립트가 비운다). 예전 방식(iframe 이름·주소 쿼리)도 읽는다.
+  function multiviewFrameParams() {
+    const params = new URLSearchParams(window.location.search);
+    if (window.top === window) return params;
+    const apply = (raw) => {
+      if (typeof raw !== "string" || !raw) return;
+      const data = JSON.parse(raw);
+      for (const [key, value] of Object.entries(data || {})) {
+        if (key.startsWith("cheeseMulti") && typeof value === "string") params.set(key, value);
+      }
+    };
+    try {
+      const name = String(window.name || "");
+      if (name.startsWith("cheese-multiview:")) apply(name.slice("cheese-multiview:".length));
+    } catch {}
+    try {
+      apply(window.sessionStorage.getItem(
+        "cheese-multiview-frame:" + window.location.pathname.replace(/\/+$/, "")));
+    } catch {}
+    return params;
+  }
   const multiviewSlotId = (() => {
-    const params = new URLSearchParams(location.search);
+    const params = multiviewFrameParams();
     if (params.get("cheeseMulti") !== "1") return "";
     const liveId = location.pathname.match(/^\/live\/([0-9a-f]{32})/i)?.[1]?.toLowerCase();
     if (liveId) return liveId;

@@ -4811,14 +4811,22 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">라운지 소식 숨김</span>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="라운지 소식 숨김"
+                    >라운지 소식 표시</span
+                  >
                   <span class="settings-item-desc"
                     >헤더 알림 옆의 치지직 라운지 소식 버튼. 공지사항·업데이트
                     등 라운지 게시판의 새 글을 모아 봅니다</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="loungeNews" />
+                  <input
+                    type="checkbox"
+                    data-feature="loungeNews"
+                    data-feature-inverted
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -4899,8 +4907,10 @@
               </li>
               <li class="settings-item" data-new-feature="inbox-community">
                 <label>
-                  <span class="settings-item-name"
-                    >수신함 커뮤니티 소식 숨김</span
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="수신함 커뮤니티 소식 숨김"
+                    >수신함 커뮤니티 소식 표시</span
                   >
                   <span class="settings-item-desc"
                     >치지직 수신함에 알림을 켠 팔로잉 채널의 스트리머 커뮤니티
@@ -4909,7 +4919,11 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="inboxCommunityNews" />
+                  <input
+                    type="checkbox"
+                    data-feature="inboxCommunityNews"
+                    data-feature-inverted
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -5006,7 +5020,11 @@
               </li>
               <li class="settings-item" data-new-feature="inbox-log-power">
                 <label>
-                  <span class="settings-item-name">수신함 통나무파워 숨김</span>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="수신함 통나무파워 숨김"
+                    >수신함 통나무파워 표시</span
+                  >
                   <span class="settings-item-desc"
                     >치지직 수신함에 통나무파워 내역 탭을 추가합니다. 시청
                     보상뿐 아니라 팔로우·후원·구독 선물·승부예측으로 오간 분량도
@@ -5025,7 +5043,11 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="inboxLogPower" />
+                  <input
+                    type="checkbox"
+                    data-feature="inboxLogPower"
+                    data-feature-inverted
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -7866,7 +7888,7 @@
           </section>
           <section class="settings-group" data-panel="multiview" aria-label="채팅창 표시">
             <h2 class="settings-group-title" data-new-feature="multiview-badge-chat">채팅창 표시</h2>
-            <p class="settings-group-desc">역할 배지로 강조되는 채팅의 표시와 모아보기 버튼 동작을 설정합니다. 모아보기 팝업 카드 설정과는 별개입니다.</p>
+            <p class="settings-group-desc">역할 배지로 강조되는 채팅의 표시와 모아보기 버튼 동작을 설정합니다. 모아보기 팝업 카드 설정과는 별개입니다. 배지 모아 챗 확장 프로그램이 동작 중인 라이브 채팅창에서는 그 확장에 맡기고 이 기능을 끕니다.</p>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
@@ -7933,45 +7955,9 @@
           <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
             <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
             <p class="settings-group-desc">
-              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단·채팅 분리 방식을 설정합니다.
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단을 설정합니다.
             </p>
             <ul class="settings-list">
-              <li
-                class="settings-item settings-item-stacked"
-                data-new-feature="multiview-chat-popout-mode"
-              >
-                <div>
-                  <span class="settings-item-name">분리 채팅 방식</span>
-                  <span class="settings-item-desc">
-                    치즈 플래터 팝업은 채팅 상태와 재연결을 제공하고, 치지직 채팅창은 배지 모아 챗 등 다른 채팅 확장 프로그램을 사용할 수 있습니다.
-                  </span>
-                </div>
-                <div
-                  class="settings-segmented settings-segmented-2"
-                  data-multiview-chat-popout-mode
-                  role="radiogroup"
-                  aria-label="분리 채팅 방식"
-                >
-                  <button
-                    type="button"
-                    class="settings-segmented-btn is-active"
-                    data-mv-chat-popout-mode-value="platter"
-                    role="radio"
-                    aria-checked="true"
-                  >
-                    치즈 플래터 팝업
-                  </button>
-                  <button
-                    type="button"
-                    class="settings-segmented-btn"
-                    data-mv-chat-popout-mode-value="native"
-                    role="radio"
-                    aria-checked="false"
-                  >
-                    치지직 채팅창
-                  </button>
-                </div>
-              </li>
               <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
                 <label>
                   <span class="settings-item-name">선택 화면 정렬 기억</span>
@@ -8005,12 +7991,55 @@
               <li class="settings-item" data-new-feature="multiview-live-catch-up">
                 <label>
                   <span class="settings-item-name">라이브 지연 자동 따라잡기</span>
-                  <span class="settings-item-desc">라이브 지연이 8초를 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
+                  <span class="settings-item-desc">라이브 지연이 기준 시간을 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-live-catch-up />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-multiview-live-catch-up-limit-item
+                data-new-feature="multiview-live-catch-up-limit"
+              >
+                <div>
+                  <span class="settings-item-name">└ 따라잡기 기준 시간</span>
+                  <span class="settings-item-desc"
+                    >지연이 이 시간 이상인 칸을 옮깁니다(2~8초, 기본 8초). 낮출수록
+                    실시간에 가깝지만 끊김이 생기기 쉽고, 자동 싱크 칸끼리 간격이 크면
+                    더 자주 옮길 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-osd-row">
+                  <input
+                    type="range"
+                    min="2"
+                    max="8"
+                    step="1"
+                    data-multiview-live-catch-up-limit
+                    aria-label="라이브 지연 따라잡기 기준 시간(초)"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="2"
+                      max="8"
+                      step="1"
+                      inputmode="numeric"
+                      data-multiview-live-catch-up-limit-num
+                      aria-label="라이브 지연 따라잡기 기준 시간 직접 입력(초)"
+                    />
+                    초
+                  </span>
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-multiview-live-catch-up-limit-reset
+                  >
+                    기본값
+                  </button>
+                </div>
               </li>
               <li class="settings-item" data-new-feature="multiview-sync-diagnostics">
                 <label>
