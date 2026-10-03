@@ -7377,19 +7377,30 @@
   }
 
   // 지금 구성을 고르기 화면이 읽을 수 있게 넘겨 둔다(그 화면이 이 id 로 복원한다).
+  // 구성 저장소(세션). 치지직 페이지 위에서는 배경에 맡긴다 — 파이어폭스는 content script 가
+  // 세션 저장소를 읽고 쓰지 못한다(크롬의 setAccessLevel 이 없다). 확장 페이지면 직접 쓴다.
+  async function readHandoff(handoffId) {
+    if (HOSTED_ON_CHZZK) return (await hostApi("setup.get")) || null;
+    const key = `${HANDOFF_PREFIX}:${handoffId}`;
+    return (await chrome.storage.session.get(key))?.[key] || null;
+  }
+
+  async function writeHandoff(handoffId, setup) {
+    if (HOSTED_ON_CHZZK) return hostApi("setup.set", { setup });
+    return chrome.storage.session.set({ [`${HANDOFF_PREFIX}:${handoffId}`]: setup });
+  }
+
   async function saveHandoff() {
     if (!state.handoffId) return;
     try {
-      await chrome.storage.session.set({
-        [`${HANDOFF_PREFIX}:${state.handoffId}`]: {
-          chosen: state.chosen,
-          layoutId: state.layoutId,
-          chatSide: state.chatSide,
-          chatEnabled: state.chatEnabled,
-          mainHighQuality: state.mainHighQuality,
-          startMainMuted: state.startMainMuted,
-          startMainVolume: state.startMainVolume,
-        },
+      await writeHandoff(state.handoffId, {
+        chosen: state.chosen,
+        layoutId: state.layoutId,
+        chatSide: state.chatSide,
+        chatEnabled: state.chatEnabled,
+        mainHighQuality: state.mainHighQuality,
+        startMainMuted: state.startMainMuted,
+        startMainVolume: state.startMainVolume,
       });
     } catch {}
   }
@@ -8783,11 +8794,9 @@
       showEmpty();
       return;
     }
-    const key = `${HANDOFF_PREFIX}:${handoffId}`;
     let stored = null;
     try {
-      const d = await chrome.storage.session.get(key);
-      stored = d?.[key] || null;
+      stored = await readHandoff(handoffId);
     } catch {}
     const setup = validateSetup(stored);
     if (!setup) {
