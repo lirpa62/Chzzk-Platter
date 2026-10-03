@@ -1868,6 +1868,18 @@
     stage.style.flexDirection = direction;
     stage.dataset.chatSide = side;
     renderTopbar();
+    scheduleHandoffSave();
+  }
+
+  // 채널·메인·배치가 바뀌면(모두 applyLayout 을 거친다) 지금 구성을 저장해 둔다. 고르기
+  // 화면이 '같은 구성이 실행 중' 인지 이 값과 비교한다. 자주 불려 잠깐 모아 쓴다.
+  let handoffSaveTimer = 0;
+  function scheduleHandoffSave() {
+    clearTimeout(handoffSaveTimer);
+    handoffSaveTimer = setTimeout(() => {
+      handoffSaveTimer = 0;
+      void saveHandoff();
+    }, 300);
   }
 
   // 메인 변경: 소리·화질 지시만 바꾼다.
@@ -3627,6 +3639,7 @@
       syncRetryAt.delete(`${channelId}:${command}`);
     syncRates.delete(channelId);
     resetLiveCatchUp(channelId);
+    resetVodSync(channelId);
     if (removeOffset) delete state.sync.manualOffsets[channelId];
     if (state.sync.referenceChannelId === channelId) {
       state.sync.referenceChannelId = null;
@@ -3693,6 +3706,9 @@
   // 한 행의 표시 상태. 전체 렌더와 부분 갱신이 같은 계산을 쓰게 한 곳에 둔다.
   // ⚠ 두 곳에서 따로 계산하면 부분 갱신만 stale 해지는 경로가 생긴다.
   function getSyncRowViewState(channelId, now = Date.now()) {
+    const vodScope = vodScopeContext();
+    if (vodScope && vodScope.channelIds.includes(channelId))
+      return vodScopeRowViewState(vodScope, channelId, now);
     const ref = state.sync.referenceChannelId;
     const status = currentStatus(channelId);
     const st = syncStats.get(channelId);
@@ -3724,6 +3740,8 @@
                         ? "기준"
                         : syncReadyLabel(state.sync.mode, st);
     const picking = state.sync.scope === "selected";
+    // 라이브와 섞인 범위의 다시보기는 라이브 보정 대상이 아니다(측정값도 없다).
+    const separateVod = isVideoSlot(channelId);
     const picked = inSyncScope(channelId);
     const nudgePending = syncNudgePending(channelId);
     // 범위 밖 채널은 보정 대상이 아니다. 측정값은 그대로 보여 준다.
@@ -3735,7 +3753,13 @@
       st,
       ref,
       ready,
-      label,
+      label: separateVod ? "라이브와 따로" : label,
+      vod: false,
+      metrics: {
+        delay: `지연 ${fmtSyncSeconds(st?.nativeDelaySec)}`,
+        buffer: `버퍼 ${fmtSyncSeconds(st?.bufferAheadSec)}`,
+        edge: `엣지 ${fmtSyncSeconds(st?.edgeLagSec)}`,
+      },
       picking,
       picked,
       nudgePending,
@@ -3757,7 +3781,35 @@
     };
   }
 
+  // 다시보기만 있는 전체·선택 범위의 행. 라이브 행과 같은 모양으로 돌려준다.
+  function vodScopeRowViewState(context, channelId, now) {
+    const v = getVodGroupRowViewState(context, channelId, now);
+    const controlsOff = state.sync.mode === "off";
+    return {
+      st: v.st,
+      ref: context.referenceChannelId,
+      ready: v.ready,
+      label: v.status,
+      vod: true,
+      metrics: v.metrics,
+      picking: state.sync.scope === "selected",
+      picked: true,
+      nudgePending: v.pending,
+      locked: false,
+      isReference: v.reference,
+      offset: v.offset,
+      rateInfo: v.rate,
+      refDisabled: controlsOff || !v.ready,
+      refBusy: v.reference,
+      offDisabled: controlsOff || !v.ready || !context.referenceChannelId || v.reference,
+      offBusy: v.pending,
+      clearDisabled: controlsOff,
+      clearBusy: v.pending || !v.offset,
+    };
+  }
+
   function getGroupRowViewState(group, channelId, now = Date.now()) {
+    if (isVideoSlot(channelId)) return getVodGroupRowViewState(group, channelId, now);
     const st = syncStats.get(channelId);
     const fresh =
       currentStatus(channelId) === "ready" &&
@@ -3790,6 +3842,11 @@
                     : group.referenceChannelId === channelId
                       ? "기준"
                       : syncReadyLabel(group.mode, st),
+      metrics: {
+        delay: `지연 ${fmtSyncSeconds(st?.nativeDelaySec)}`,
+        buffer: `버퍼 ${fmtSyncSeconds(st?.bufferAheadSec)}`,
+        edge: `엣지 ${fmtSyncSeconds(st?.edgeLagSec)}`,
+      },
       rate: syncRateText(st),
     };
   }
@@ -3924,14 +3981,17 @@
       const align = section.querySelector("[data-mv-group-align]");
       if (align.disabled !== disabled) align.disabled = disabled;
       const warning = section.querySelector(".mv-sync-warning");
-      const warningVisible = group.congested || group.channelIds.length < 2;
+      const mixed = groupMediaKind(group) === "mixed";
+      const warningVisible = group.congested || group.channelIds.length < 2 || mixed;
       const warningHidden = !warningVisible;
       if (warning.hidden !== warningHidden) warning.hidden = warningHidden;
       setText(
         warning,
         group.channelIds.length < 2
           ? "싱크할 채널을 2개 이상 배정해 주세요."
-          : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.",
+          : mixed
+            ? "라이브와 다시보기는 한 그룹에서 맞출 수 없습니다. 그룹을 나눠 주세요."
+            : "연결 지연으로 이 그룹의 자동 보정을 잠시 멈춥니다.",
       );
       setText(
         section.querySelector(".mv-group-reference"),
@@ -3947,9 +4007,9 @@
         row.classList.toggle("is-reference", view.reference);
         setText(row.querySelector("[data-mv-sync-status]"), view.status);
         for (const [kind, value] of [
-          ["delay", `지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}`],
-          ["buffer", `버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}`],
-          ["edge", `엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}`],
+          ["delay", view.metrics.delay],
+          ["buffer", view.metrics.buffer],
+          ["edge", view.metrics.edge],
           ["rate", view.rate.text],
         ])
           setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), value);
@@ -4034,9 +4094,9 @@
               `stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path>` +
               `</svg></button></div>` +
               `<div class="mv-sync-metrics">` +
-              `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(view.st?.nativeDelaySec)}</span>` +
-              `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(view.st?.bufferAheadSec)}</span>` +
-              `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(view.st?.edgeLagSec)}</span>` +
+              `<span data-mv-sync-metric="delay">${esc(view.metrics.delay)}</span>` +
+              `<span data-mv-sync-metric="buffer">${esc(view.metrics.buffer)}</span>` +
+              `<span data-mv-sync-metric="edge">${esc(view.metrics.edge)}</span>` +
               `<span class="mv-custom-tooltip" data-mv-sync-metric="rate" data-tooltip="${esc(view.rate.hint)}">${esc(view.rate.text)}</span></div>` +
               `<div class="mv-sync-controls"><button type="button" data-mv-sync-ref="${esc(id)}"` +
               `${view.ready ? "" : " disabled"}>기준</button>` +
@@ -4060,7 +4120,8 @@
           `<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>` +
           `</svg><span>비우기</span></button></div>` +
           `<div class="mv-sync-actions"><label><input type="checkbox" data-mv-group-auto="${group.id}"> 자동 싱크</label>` +
-          `<button type="button" data-mv-group-align="${group.id}">느린 채널에 맞추기</button>` +
+          `<button type="button" data-mv-group-align="${group.id}">` +
+          `${groupMediaKind(group) === "vod" ? "기준에 맞추기" : "느린 채널에 맞추기"}</button>` +
           `<button type="button" data-mv-group-clear="${group.id}">보정 초기화</button></div>` +
           `<p class="mv-sync-warning" hidden></p><div class="mv-sync-list">${rows}</div></section>`
         );
@@ -4131,8 +4192,10 @@
   }
 
   // 선택 모드에서 그룹이 성립하려면 최소 2채널이 필요하다.
+  // 다시보기만 2개 이상 고른 경우는 다시보기 싱크가 맡으므로 성립한다.
   function syncGroupTooSmall() {
-    return state.sync.scope === "selected" && syncScopeIds().length < 2;
+    return state.sync.scope === "selected" && syncScopeIds().length < 2 &&
+      !vodScopeIds().length;
   }
 
   // 범위에서 빠진 채널은 우리가 잡고 있던 것만 놓는다. 재생 자체는 건드리지
@@ -4177,6 +4240,7 @@
     const panel = $("mvSyncPop");
     if (!panel || panel.hidden) return false;
     if (state.sync.scope === "groups") return patchGroupPanel(now);
+    if (panel.dataset.mvSyncKind !== (vodScopeIds().length ? "vod" : "live")) return false;
     const rows = [...panel.querySelectorAll("[data-mv-sync-row]")];
     // 행 수나 채널이 달라졌으면 구조가 바뀐 것이다 — 전체 렌더에 맡긴다.
     const ids = state.chosen.map((c) => c.channelId);
@@ -4195,7 +4259,7 @@
       $("mvSyncValue"),
       mode === "auto" ? "자동" : mode === "manual" ? "수동" : "꺼짐",
     );
-    const scopeIds = syncScopeIds();
+    const scopeIds = vodScopeIds().length ? vodScopeIds() : syncScopeIds();
     setText(
       panel.querySelector(".mv-sync-scope-count"),
       picking ? `선택 ${scopeIds.length}/${ids.length}` : "전체",
@@ -4221,6 +4285,7 @@
         state.sync.congested,
         "여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.",
       ],
+      ["mixed", syncScopeMixed(), SYNC_MIXED_WARNING],
     ]) {
       const warning = panel.querySelector(`[data-mv-sync-warning="${kind}"]`);
       if (!warning) return false;
@@ -4239,18 +4304,8 @@
         row.querySelector("[data-mv-sync-status]"),
         v.locked ? "제외됨" : v.label,
       );
-      setText(
-        row.querySelector('[data-mv-sync-metric="delay"]'),
-        `지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}`,
-      );
-      setText(
-        row.querySelector('[data-mv-sync-metric="buffer"]'),
-        `버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}`,
-      );
-      setText(
-        row.querySelector('[data-mv-sync-metric="edge"]'),
-        `엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}`,
-      );
+      for (const kind of ["delay", "buffer", "edge"])
+        setText(row.querySelector(`[data-mv-sync-metric="${kind}"]`), v.metrics[kind]);
       const rateEl = row.querySelector('[data-mv-sync-metric="rate"]');
       setText(rateEl, v.rateInfo.text);
       if (rateEl && rateEl.dataset.tooltip !== v.rateInfo.hint)
@@ -4399,6 +4454,9 @@
   }
 
   function selectSyncReference(now = Date.now()) {
+    // 다시보기 범위의 기준은 다시보기 싱크(updateVodLeader)가 정한다. 여기서 라이브 기준으로
+    // 다시 고르면 다시보기 기준이 '범위 밖' 으로 보여 지워진다.
+    if (vodScopeIds().length) return state.sync.referenceChannelId;
     applySyncAlignDelays(now);
     // 기준 채널은 반드시 현재 싱크 그룹 안에서 고른다. 다만 offset rebase 는
     // 아래에서 chosen 전체를 대상으로 한다 — 제외 채널의 상대 보정값을
@@ -4741,6 +4799,311 @@
     refreshSyncPanel();
   }
 
+  // ── 다시보기 그룹 싱크 ─────────────────────────────────────────────────
+  // 다시보기로만 이뤄진 그룹은 실제 방송 시각(liveOpenDate + 재생 위치)으로 맞춘다.
+  // 판단은 multiviewVodSync 가 하고 여기서는 측정값 보관·명령 전송·표시만 한다.
+  // ⚠ 라이브 싱크 경로(sendSync·FRAME_SYNC_STATS)는 다시보기 칸을 받지 않는다. 따로 둔다.
+  // ⚠ 라이브와 다시보기가 섞인 그룹은 맞추지 않는다. 라이브는 지금, 다시보기는 과거라
+  //   같은 방송 시각이 없다. 라이브 칸끼리는 기존 경로가 그대로 맞춘다.
+  const VOD_SYNC = globalThis.CheeseMultiviewVodSync;
+  const SYNC_MIXED_WARNING =
+    "라이브와 다시보기는 함께 맞출 수 없습니다. 다시보기만 고르면 실제 방송 시각으로 맞춥니다.";
+  const VOD_SYNC_COMMAND_TIMEOUT_MS = 2000;
+  // 같은 칸에 같은 명령을 연달아 보내지 않는다(다시 버퍼링하는 동안 측정값이 늦다).
+  const VOD_SYNC_ACTION_COOLDOWN_MS = 2500;
+  const vodSyncStats = new Map(); // channelId → 정리된 측정값
+  const vodSyncRows = new Map(); // channelId → { status, deltaSec, clock }
+  const vodSyncPending = new Map(); // `${channelId}:${action}` → { commandId, timeout }
+  const vodSyncActedAt = new Map(); // `${channelId}:${action}` → 마지막 전송 시각
+  let vodSyncHandled = new Map(); // channelId → 이미 반영한 사용자 조작 시각
+  // 묶음(그룹 id, 전체·선택은 "scope") → 기준 타임라인에 맞춰진 칸. 싱크 중에 새로 들어온
+  // 다시보기는 여기에 들기 전까지 기준이 될 수 없다(기존 칸들을 끌고 가지 않는다).
+  const vodSyncAligned = new Map();
+  let vodSyncCommandSeq = 0;
+
+  function groupMediaKind(group) {
+    const ids = group?.channelIds || [];
+    const videos = ids.filter(isVideoSlot).length;
+    if (!videos) return "live";
+    return videos === ids.length ? "vod" : "mixed";
+  }
+
+  function vodSyncGroups() {
+    if (state.sync.scope !== "groups") return [];
+    return state.sync.groups.filter(
+      (group) => group.channelIds.length >= 2 && groupMediaKind(group) === "vod",
+    );
+  }
+
+  // 전체·선택 범위의 칸(그룹 범위면 빈 배열).
+  function syncScopeChannelIds() {
+    if (state.sync.scope === "groups") return [];
+    const ids = state.chosen.map((c) => c.channelId);
+    if (state.sync.scope !== "selected") return ids;
+    const selected = new Set(state.sync.selectedChannelIds);
+    return ids.filter((id) => selected.has(id));
+  }
+
+  // 전체·선택 범위가 다시보기로만 이뤄졌으면(2개 이상) 그 칸들. 아니면 빈 배열.
+  function vodScopeIds() {
+    const ids = syncScopeChannelIds();
+    return ids.length >= 2 && ids.every(isVideoSlot) ? ids : [];
+  }
+
+  // 범위에 라이브와 다시보기가 함께 있다(함께 맞출 수 없다).
+  function syncScopeMixed() {
+    const ids = syncScopeChannelIds();
+    return ids.some(isVideoSlot) && !ids.every(isVideoSlot);
+  }
+
+  // 전체·선택 범위를 그룹과 같은 모양으로 감싼다. 모드·기준·보정은 state.sync 를 그대로 쓴다.
+  function vodScopeContext() {
+    const channelIds = vodScopeIds();
+    if (!channelIds.length) return null;
+    return {
+      id: "",
+      channelIds,
+      get mode() { return state.sync.mode; },
+      get referenceChannelId() { return state.sync.referenceChannelId; },
+      set referenceChannelId(value) { state.sync.referenceChannelId = value; },
+      get manualOffsets() { return state.sync.manualOffsets; },
+      set manualOffsets(value) { state.sync.manualOffsets = value; },
+    };
+  }
+
+  // 다시보기 싱크를 돌릴 묶음: 다시보기 그룹들 또는 다시보기만 있는 전체·선택 범위.
+  function vodSyncContexts() {
+    const scope = vodScopeContext();
+    return scope ? [scope] : vodSyncGroups();
+  }
+
+  const vodContextName = (context) =>
+    context.id ? `그룹 ${context.id.toUpperCase()}` : "다시보기";
+
+  function postVodSync(channelId, type, extra = {}) {
+    if (!isVideoSlot(channelId) || currentStatus(channelId) !== "ready") return false;
+    const frame = cells.get(channelId)?.querySelector("iframe");
+    if (!frame?.contentWindow) return false;
+    try {
+      frame.contentWindow.postMessage(
+        { source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD, type, channelId, ...extra },
+        CHZZK_ORIGIN,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function requestVodSyncStats() {
+    for (const group of vodSyncContexts()) {
+      for (const id of group.channelIds) postVodSync(id, "REQUEST_FRAME_VOD_SYNC_STATS");
+    }
+  }
+
+  function vodSyncPendingFor(channelId) {
+    return [...vodSyncPending.keys()].some((key) => key.startsWith(`${channelId}:`));
+  }
+
+  // force: 버튼·사용자 조작에 바로 따라갈 때는 쿨다운을 기다리지 않는다.
+  function sendVodSyncAction(channelId, action, currentTime, now, force = false) {
+    const key = `${channelId}:${action}`;
+    if (vodSyncPending.has(key)) return false;
+    if (!force && now - (vodSyncActedAt.get(key) || 0) < VOD_SYNC_ACTION_COOLDOWN_MS) return false;
+    const commandId = ++vodSyncCommandSeq;
+    const extra = action === "seek" ? { commandId, action, currentTime } : { commandId, action };
+    if (!postVodSync(channelId, "APPLY_VOD_SYNC", extra)) return false;
+    vodSyncActedAt.set(key, now);
+    const timeout = window.setTimeout(() => {
+      if (vodSyncPending.get(key)?.commandId === commandId) vodSyncPending.delete(key);
+    }, VOD_SYNC_COMMAND_TIMEOUT_MS);
+    vodSyncPending.set(key, { commandId, timeout });
+    return true;
+  }
+
+  function finishVodSyncAction(channelId, data) {
+    if (!Number.isSafeInteger(data.commandId) || !["seek", "play", "pause"].includes(data.action)) return;
+    const key = `${channelId}:${data.action}`;
+    const entry = vodSyncPending.get(key);
+    if (!entry || entry.commandId !== data.commandId) return;
+    clearTimeout(entry.timeout);
+    vodSyncPending.delete(key);
+  }
+
+  function vodAlignedFor(group) {
+    const key = group.id || "scope";
+    const members = new Set(group.channelIds);
+    const aligned = new Set([...(vodSyncAligned.get(key) || [])].filter((id) => members.has(id)));
+    vodSyncAligned.set(key, aligned);
+    return aligned;
+  }
+
+  // 기준은 사용자가 마지막으로 직접 움직인 칸이다(처음엔 메인, 없으면 첫 칸).
+  // 이미 맞춰진 칸이 있으면 그 칸들 중에서만 고른다.
+  function updateVodLeader(group) {
+    const { leaderId, handled } = VOD_SYNC.chooseLeader(
+      group.channelIds,
+      vodSyncStats,
+      group.referenceChannelId,
+      vodSyncHandled,
+      state.mainId,
+      vodAlignedFor(group),
+    );
+    vodSyncHandled = handled;
+    group.referenceChannelId = leaderId;
+  }
+
+  function runVodSyncPlan(group, now, { threshold, onlyIds = null, force = false } = {}) {
+    const { rows, actions } = VOD_SYNC.plan({
+      memberIds: group.channelIds,
+      statsById: vodSyncStats,
+      leaderId: group.referenceChannelId,
+      offsets: group.manualOffsets,
+      now,
+      threshold: threshold ?? VOD_SYNC.LIMITS.seekThresholdSec,
+      onlyIds,
+    });
+    const aligned = vodAlignedFor(group);
+    for (const [id, row] of rows) {
+      vodSyncRows.set(id, row);
+      if (VOD_SYNC.ALIGNED_STATUSES.includes(row.status)) aligned.add(id);
+    }
+    let sent = 0;
+    for (const item of actions) {
+      if (sendVodSyncAction(item.id, item.action, item.currentTime, now, force)) sent += 1;
+    }
+    return sent;
+  }
+
+  function tickVodSyncGroups(now) {
+    for (const group of vodSyncContexts()) {
+      updateVodLeader(group);
+      // 자동이 아니면 표시만 갱신한다(명령은 보내지 않는다).
+      runVodSyncPlan(group, now, group.mode === "auto" ? {} : { onlyIds: [] });
+    }
+  }
+
+  // 버튼으로 한 번 정밀하게 맞춘다(기준에 맞추기·기준 지정·보정).
+  function alignVodGroup(group, onlyIds = null) {
+    const now = Date.now();
+    if (!VOD_SYNC.usable(vodSyncStats.get(group.referenceChannelId), now)) {
+      syncNotice = `${vodContextName(group)}의 기준 다시보기가 준비되지 않았습니다.`;
+      refreshSyncPanel();
+      return;
+    }
+    const sent = runVodSyncPlan(group, now, {
+      threshold: VOD_SYNC.LIMITS.manualThresholdSec,
+      onlyIds,
+      force: true,
+    });
+    syncNotice = sent
+      ? `${vodContextName(group)}를 기준 방송 시각에 맞췄습니다.`
+      : "맞출 차이가 없거나 잠시 기다려야 합니다.";
+    refreshSyncPanel();
+  }
+
+  function resetVodSync(channelId = null) {
+    for (const [key, entry] of vodSyncPending) {
+      if (channelId !== null && !key.startsWith(`${channelId}:`)) continue;
+      clearTimeout(entry.timeout);
+      vodSyncPending.delete(key);
+    }
+    if (channelId === null) {
+      vodSyncStats.clear();
+      vodSyncRows.clear();
+      vodSyncActedAt.clear();
+      vodSyncAligned.clear();
+      vodSyncHandled = new Map();
+      return;
+    }
+    for (const aligned of vodSyncAligned.values()) aligned.delete(channelId);
+    vodSyncStats.delete(channelId);
+    vodSyncRows.delete(channelId);
+    for (const key of [...vodSyncActedAt.keys()])
+      if (key.startsWith(`${channelId}:`)) vodSyncActedAt.delete(key);
+    vodSyncHandled.delete(channelId);
+  }
+
+  // 사용자가 그룹의 한 칸을 직접 움직였으면 다음 틱을 기다리지 않고 따라가게 한다.
+  function handleVodSyncStats(channelId, stats) {
+    const handledAt = vodSyncHandled.get(channelId) || 0;
+    vodSyncStats.set(channelId, stats);
+    if (stats.userActionAt <= handledAt) return;
+    const group = vodSyncContexts().find((item) => item.channelIds.includes(channelId));
+    if (!group || group.mode !== "auto") return;
+    const now = Date.now();
+    updateVodLeader(group);
+    runVodSyncPlan(group, now, { force: true });
+    refreshSyncPanel();
+  }
+
+  // 기준 지정·칸별 보정·보정 초기화(그룹·전체·선택 범위 공용). 처리했으면 true.
+  function vodReferenceClick(context, channelId) {
+    if (!getVodGroupRowViewState(context, channelId, Date.now()).ready) return;
+    // 자동 싱크 여부는 그대로 두고 기준만 바꾼 뒤 한 번 맞춘다.
+    context.referenceChannelId = channelId;
+    alignVodGroup(context);
+  }
+
+  function vodOffsetClick(context, channelId, step) {
+    const view = getVodGroupRowViewState(context, channelId, Date.now());
+    const next = Math.round(((context.manualOffsets[channelId] || 0) + step) * 10) / 10;
+    if (![-0.5, -0.1, 0.1, 0.5].includes(step) || !view.ready || view.reference ||
+        view.pending || Math.abs(next) > 10) return;
+    context.manualOffsets[channelId] = next;
+    alignVodGroup(context, [channelId]);
+  }
+
+  function vodOffsetClearClick(context, channelId) {
+    if (!context.manualOffsets[channelId] || vodSyncPendingFor(channelId)) return;
+    context.manualOffsets[channelId] = 0;
+    alignVodGroup(context, [channelId]);
+  }
+
+  function vodClearAll(context) {
+    for (const id of context.channelIds) context.manualOffsets[id] = 0;
+    alignVodGroup(context);
+  }
+
+  // 한국 시각 HH:MM:SS. toLocaleTimeString("ko-KR") 은 '13시 6분 40초' 로 길어 행이 넘친다.
+  const fmtBroadcastClock = (ms) =>
+    new Date(ms + 9 * 3600000).toISOString().slice(11, 19);
+
+  function getVodGroupRowViewState(group, channelId, now) {
+    const st = vodSyncStats.get(channelId);
+    const row = vodSyncRows.get(channelId);
+    const kind = groupMediaKind(group);
+    const ready = currentStatus(channelId) === "ready" && kind === "vod" && VOD_SYNC.usable(st, now);
+    const reference = group.referenceChannelId === channelId;
+    let status = row?.status || "측정 대기";
+    if (currentStatus(channelId) === "error") status = "오류";
+    else if (kind === "mixed") status = "라이브와 따로";
+    else if (!VOD_SYNC.fresh(st, now)) status = "측정 대기";
+    else if (group.mode === "manual" && status === "맞추는 중") status = "차이 있음";
+    else if (group.mode !== "auto" && group.mode !== "manual" && ["맞춤", "맞추는 중"].includes(status))
+      status = "싱크 꺼짐";
+    const delta = row?.deltaSec;
+    return {
+      st,
+      offset: group.manualOffsets[channelId] || 0,
+      pending: vodSyncPendingFor(channelId),
+      ready,
+      reference,
+      status,
+      metrics: {
+        delay: row?.clock ? `방송 시각 ${fmtBroadcastClock(row.clock)}` : "방송 시각 -",
+        buffer: reference || delta === null || delta === undefined
+          ? "기준 대비 -"
+          : `기준 대비 ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}초`,
+        edge: "",
+      },
+      rate: {
+        text: !st ? "-" : st.paused ? "일시정지" : "재생 중",
+        hint: "다시보기는 실제 방송 시각(방송 시작 시각 + 재생 위치)으로 맞춥니다.",
+      },
+    };
+  }
+
   function handleGroupSyncClick(target) {
     if (state.sync.scope !== "groups") return false;
     if (target.closest?.("[data-mv-group-reset-all]")) {
@@ -4810,7 +5173,8 @@
       const group = state.sync.groups.find(
         (item) => item.id === align.dataset.mvGroupAlign,
       );
-      if (group) alignSyncGroup(group);
+      if (group && groupMediaKind(group) === "vod") alignVodGroup(group);
+      else if (group) alignSyncGroup(group);
       return true;
     }
     const clear = target.closest?.("[data-mv-group-clear]");
@@ -4818,7 +5182,8 @@
       const group = state.sync.groups.find(
         (item) => item.id === clear.dataset.mvGroupClear,
       );
-      if (group)
+      if (group && groupMediaKind(group) === "vod") vodClearAll(group);
+      else if (group)
         alignSyncGroup(
           group,
           group.channelIds,
@@ -4831,6 +5196,11 @@
     if (ref) {
       const id = ref.dataset.mvSyncRef;
       const group = syncGroupForChannel(id);
+      if (group && groupMediaKind(group) === "vod") {
+        vodReferenceClick(group, id);
+        refreshSyncPanel();
+        return true;
+      }
       if (
         group &&
         group.referenceChannelId !== id &&
@@ -4859,6 +5229,11 @@
       const id = offset.dataset.mvSyncOffset;
       const group = syncGroupForChannel(id);
       const step = Number(offset.dataset.step);
+      if (group && groupMediaKind(group) === "vod") {
+        vodOffsetClick(group, id, step);
+        refreshSyncPanel();
+        return true;
+      }
       if (
         !group ||
         syncNudgePending(id) ||
@@ -4892,6 +5267,10 @@
     if (reset) {
       const id = reset.dataset.mvSyncClear;
       const group = syncGroupForChannel(id);
+      if (group && groupMediaKind(group) === "vod") {
+        vodOffsetClearClick(group, id);
+        return true;
+      }
       if (group && !syncNudgePending(id) && group.manualOffsets[id]) {
         alignSyncGroup(group, [id], { [id]: 0 }, true);
       }
@@ -4912,6 +5291,8 @@
     // 직전 틱까지 받은 측정값으로 판단한다(싱크 보정과 같은 기준).
     tickLiveCatchUp(now);
     if (state.sync.scope === "groups") {
+      requestVodSyncStats();
+      tickVodSyncGroups(now);
       tickSyncGroups(now);
       refreshSyncPanel();
       updateSyncPolling();
@@ -4919,6 +5300,14 @@
     }
     if (stopAutoSyncIfGroupTooSmall()) {
       refreshSyncPanel();
+      return;
+    }
+    // 범위가 다시보기로만 이뤄졌으면 방송 시각으로 맞춘다(라이브 보정은 할 칸이 없다).
+    if (vodScopeIds().length) {
+      requestVodSyncStats();
+      tickVodSyncGroups(now);
+      refreshSyncPanel();
+      updateSyncPolling();
       return;
     }
     if (state.sync.mode !== "auto") resetAllSyncRates();
@@ -5028,6 +5417,7 @@
         const btnAttrs = (disabled, busy) =>
           disabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
         // 방향 설명은 '재생 위치' 이동이다. 배속(재생 속도)과 섞이면 안 된다.
+        const forward = v.vod ? "이후 장면 쪽" : "라이브 쪽";
         const stepBtn = (step, text, dir, side) =>
           `<button type="button" class="mv-custom-tooltip" data-mv-sync-offset="${id}" data-step="${step}" ` +
           `data-tooltip="재생 위치를 ${dir} 이동(${side})" ` +
@@ -5044,18 +5434,18 @@
             : `<strong>${esc(c.channelName)}</strong>`) +
           `<span data-mv-sync-status>${esc(v.locked ? "제외됨" : v.label)}</span></div>` +
           `<div class="mv-sync-metrics">` +
-          `<span data-mv-sync-metric="delay">지연 ${fmtSyncSeconds(v.st?.nativeDelaySec)}</span>` +
-          `<span data-mv-sync-metric="buffer">버퍼 ${fmtSyncSeconds(v.st?.bufferAheadSec)}</span>` +
-          `<span data-mv-sync-metric="edge">엣지 ${fmtSyncSeconds(v.st?.edgeLagSec)}</span>` +
+          `<span data-mv-sync-metric="delay">${esc(v.metrics.delay)}</span>` +
+          `<span data-mv-sync-metric="buffer">${esc(v.metrics.buffer)}</span>` +
+          `<span data-mv-sync-metric="edge">${esc(v.metrics.edge)}</span>` +
           `<span class="mv-custom-tooltip" data-mv-sync-metric="rate" data-tooltip="${esc(v.rateInfo.hint)}">` +
           `${esc(v.rateInfo.text)}</span></div>` +
           `<div class="mv-sync-controls">` +
           `<button type="button" class="mv-custom-tooltip" data-mv-sync-ref="${id}" ` +
-          `data-tooltip="이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다" ` +
+          `data-tooltip="${v.vod ? "이 다시보기의 방송 시각을 기준으로 다른 다시보기를 맞춥니다" : "이 채널의 라이브 지연을 기준으로 다른 채널을 맞춥니다"}" ` +
           `aria-label="${esc(c.channelName)}을 기준 채널로" ` +
           `${btnAttrs(v.refDisabled, v.refBusy)}>기준</button>` +
-          stepBtn("-0.5", "-0.5", "0.5초 앞으로", "라이브 쪽") +
-          stepBtn("-0.1", "-0.1", "0.1초 앞으로", "라이브 쪽") +
+          stepBtn("-0.5", "-0.5", "0.5초 앞으로", forward) +
+          stepBtn("-0.1", "-0.1", "0.1초 앞으로", forward) +
           `<output class="mv-custom-tooltip" data-mv-sync-output aria-label="${esc(c.channelName)} 시간 위치 보정 ` +
           `${offText}" aria-busy="${v.nudgePending}" data-tooltip="시간 위치 보정(재생 속도와 별개)">` +
           `${offText}</output>` +
@@ -5071,8 +5461,11 @@
       })
       .join("");
     const picking = state.sync.scope === "selected";
-    const scopeIds = syncScopeIds();
+    const vodScope = vodScopeIds().length > 0;
+    const scopeIds = vodScope ? vodScopeIds() : syncScopeIds();
     const tooSmall = syncGroupTooSmall();
+    // 라이브/다시보기 전환은 구조 변화다. 제자리 갱신이 이 값을 보고 전체 렌더로 넘긴다.
+    panel.dataset.mvSyncKind = vodScope ? "vod" : "live";
     panel.innerHTML =
       `<div class="mv-sync-scope" role="group" aria-label="싱크 범위">` +
       `<button type="button" data-mv-sync-scope="all"` +
@@ -5094,16 +5487,20 @@
           `aria-pressed="${state.sync.mode === mode}"` +
           `${tooSmall && mode !== "off" ? " disabled" : ""}>${label}</button>`
         ).join("") + `</div>` +
-      `<button type="button" id="mvSyncAlign"${tooSmall || state.sync.mode === "off" ? " disabled" : ""}>느린 채널에 맞추기</button>` +
+      `<button type="button" id="mvSyncAlign"${tooSmall || state.sync.mode === "off" ? " disabled" : ""}>` +
+      `${vodScope ? "기준에 맞추기" : "느린 채널에 맞추기"}</button>` +
       `<button type="button" id="mvSyncClear"${tooSmall || state.sync.mode === "off" ? " disabled" : ""}>보정 초기화</button></div>` +
       `<p class="mv-sync-warning" data-mv-sync-warning="group"${tooSmall ? "" : " hidden"}>싱크할 채널을 2개 이상 선택해 주세요.</p>` +
       `<p class="mv-sync-warning" data-mv-sync-warning="congestion"${state.sync.congested ? "" : " hidden"}>여러 방송의 연결이 지연되고 있습니다. 자동 보정을 잠시 멈춥니다.</p>` +
+      `<p class="mv-sync-warning" data-mv-sync-warning="mixed"${syncScopeMixed() ? "" : " hidden"}>${SYNC_MIXED_WARNING}</p>` +
       // 안내 자리는 늘 만들어 두고 비었을 때만 숨긴다. 없던 자리에 새로 끼워
       // 넣으면 그건 구조 변화라 제자리 갱신이 불가능해진다(첫 클릭이 그 경우다).
       `<p class="mv-sync-notice" role="status"${syncNotice ? "" : " hidden"}>` +
       `${esc(syncNotice)}</p>` +
       `<div class="mv-sync-list">${rows}</div>` +
-      `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다.<br />채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>` +
+      (vodScope
+        ? `<p class="mv-sync-note">다시보기는 실제 방송 시각(방송 시작 시각 + 재생 위치)으로 맞춥니다. 기준은 마지막으로 직접 움직인 다시보기이고, 자동이면 나머지가 이동·재생·일시정지를 따라갑니다.<br />채널별 −/+ 보정은 재생 위치를 옮깁니다. −는 이후 장면 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>`
+        : `<p class="mv-sync-note">재생 속도는 현재 영상의 배속입니다. 1.00×보다 낮으면 느리게, 높으면 빠르게 재생해 싱크를 맞춥니다.<br />채널별 −/+ 보정은 배속이 아니라 재생 위치를 옮깁니다. −는 라이브 쪽(앞으로), +는 과거 쪽(뒤로) 이동합니다.</p>`) +
       `<section class="mv-sync-diagnostics" aria-label="싱크 진단" data-phase="${syncDiagnosticsPhase}"${syncDiagnosticsUi ? "" : " hidden"}>` +
       `<div class="mv-sync-diagnostics-head"><strong>싱크 진단 기록</strong>` +
       `${syncDiagnosticsControlsHtml()}</div>` +
@@ -5960,7 +6357,28 @@
     $("mvQuick").hidden = false;
     clampQuickSize();
     renderQuick();
-    void loadQuickCandidates();
+    // 열 때마다 새로 받는다(제목·시청자 수·방송 상태가 바뀐다). 캐시를 쓰지 않는다.
+    void loadQuickCandidates({ refresh: true });
+    startQuickRefresh();
+  }
+
+  // 열어 둔 동안 팔로잉 목록을 주기적으로 새로 받는다.
+  // ⚠ 페이지를 이어 받는 원천(전체 라이브·검색·다시보기)은 다시 받으면 스크롤로 더 불러온
+  //   목록이 첫 페이지로 줄어든다. 그 원천은 열 때만 새로 받는다.
+  const QUICK_REFRESH_MS = 30000;
+  const QUICK_REFRESH_SOURCES = new Set(["following", "custom"]);
+  let quickRefreshTimer = 0;
+  function startQuickRefresh() {
+    if (quickRefreshTimer) return;
+    quickRefreshTimer = window.setInterval(() => {
+      if ($("mvQuick").hidden) return stopQuickRefresh();
+      if (document.hidden || quickLoading || !QUICK_REFRESH_SOURCES.has(quickSource)) return;
+      void loadQuickCandidates({ refresh: true });
+    }, QUICK_REFRESH_MS);
+  }
+  function stopQuickRefresh() {
+    clearInterval(quickRefreshTimer);
+    quickRefreshTimer = 0;
   }
 
   // 교체 모드를 푼다. 들어온 길에 따라 Quick 을 닫을지가 달라진다.
@@ -6045,6 +6463,7 @@
     if (quickRememberState) saveQuickState();
     quickSortPicker.close();
     $("mvQuick").hidden = true;
+    stopQuickRefresh();
   }
 
   // 상태를 사람이 읽을 수 있는 짧은 말로. 색만으로 구분하지 않는다(글자를 함께 둔다).
@@ -6320,29 +6739,30 @@
 
   // 목록을 가져온다. 전용 팔로잉만 구역(폴더) 배열이고 나머지는 평평한 목록이다.
   // ⚠ 캐시 키를 구분한다. 같은 키에 평평한 목록과 구역 배열을 섞어 담으면 안 된다.
-  async function quickRows(source, keyword) {
+  // force: 캐시·이미 받은 목록을 건너뛰고 첫 페이지를 새로 받는다(패널을 열 때·주기 갱신).
+  async function quickRows(source, keyword, force = false) {
     if (source === "videos") {
       if (isQuickVideoChannelSearchView()) {
         const pager = getQuickVideoSearchPager(keyword);
-        await pager.loadFirst();
+        await pager.loadFirst(force);
         if (pager.error && !pager.rows.length) throw pager.error;
         return pager.rows;
       }
       if (quickVideoChannel) {
         const pager = getQuickVideoPager();
-        await pager.loadFirst();
+        await pager.loadFirst(force);
         if (pager.error && !pager.rows.length) throw pager.error;
         return pager.rows;
       }
       if (quickVideoSource === "platter-search") {
         const pager = getQuickVideoRerankPager(keyword);
-        await pager.loadFirst();
+        await pager.loadFirst(force);
         if (pager.error && !pager.rows.length) throw pager.error;
         return pager.rows;
       }
       const pager = getQuickVideoPager();
       if (!pager) return [];
-      await pager.loadFirst();
+      await pager.loadFirst(force);
       if (pager.error && !pager.rows.length) throw pager.error;
       return pager.rows;
     }
@@ -6357,18 +6777,18 @@
             : source;
     if (source === "live") {
       const pager = getQuickLivePager();
-      await pager.loadFirst();
+      await pager.loadFirst(force);
       if (pager.error && !pager.rows.length) throw pager.error;
       return pager.rows;
     }
     if (source === "search") {
       const pager = getQuickSearchPager(keyword);
-      await pager.loadFirst();
+      await pager.loadFirst(force);
       if (pager.error && !pager.rows.length) throw pager.error;
       return pager.rows;
     }
     const cached = quickCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (!force && cached && cached.expiresAt > Date.now()) return cached.value;
     if (!SOURCES) return source === "custom" ? [] : [];
     const value =
       source === "following"
@@ -6383,7 +6803,17 @@
     return value;
   }
 
-  async function loadQuickCandidates() {
+  // 지금 보이는 후보 목록이 어떤 원천·검색어의 것인지(새로 받을 때 그대로 둘 수 있는지 본다).
+  function quickCandidatesKey() {
+    return [quickSource, quickKeyword, quickVideoSource, quickVideoChannel?.channelId || "",
+      quickVideoChannelView, quickVideoChannelKeyword, quickVideoRerankSearchKeyword].join("|");
+  }
+  let quickCandidatesFor = "";
+  let quickLoading = false;
+
+  // refresh: 같은 목록을 새로 받는다. 이미 그 목록이 그려져 있으면 로딩 화면으로 비우지
+  //   않고 받은 뒤 바꿔 끼운다(받는 사이 깜빡이지 않게). 실패하면 보이던 목록을 둔다.
+  async function loadQuickCandidates({ refresh = false } = {}) {
     const requestId = ++quickRequestId;
     const source = quickSource;
     const keyword = source === "videos"
@@ -6393,17 +6823,25 @@
           ? quickVideoRerankSearchKeyword
           : ""
       : quickKeyword;
-    quickCandidates = null; // 불러오는 중
-    quickLoadError = null;
-    renderQuickCandidates();
+    const key = quickCandidatesKey();
+    const keepShown = refresh && quickCandidates !== null && quickCandidatesFor === key;
+    if (!keepShown) {
+      quickCandidates = null; // 불러오는 중
+      quickLoadError = null;
+      renderQuickCandidates();
+    }
+    quickLoading = true;
     let result = [];
     let error = null;
     try {
-      result = await quickRows(source, keyword);
+      result = await quickRows(source, keyword, refresh);
     } catch (caught) {
       error = caught;
     }
     if (requestId !== quickRequestId) return; // 더 최신 요청이 있다 → 버린다
+    quickLoading = false;
+    if (keepShown && error) return;
+    quickCandidatesFor = key;
     quickLoadError = error;
     if (source === "custom") {
       quickSections = Array.isArray(result) ? result : [];
@@ -7031,6 +7469,12 @@
     if (syncRef) {
       if (state.sync.mode === "off") return;
       const id = syncRef.dataset.mvSyncRef;
+      const vodScope = vodScopeContext();
+      if (vodScope?.channelIds.includes(id)) {
+        if (id !== state.sync.referenceChannelId) vodReferenceClick(vodScope, id);
+        refreshSyncPanel(`[data-mv-sync-ref="${CSS.escape(id)}"]`);
+        return;
+      }
       // 이미 기준인 채널은 다시 처리하지 않는다(버튼은 포커스 유지를 위해
       // disabled 대신 aria-disabled 로 둔다).
       if (
@@ -7053,9 +7497,17 @@
     if (syncOffset) {
       if (state.sync.mode === "off") return;
       const id = syncOffset.dataset.mvSyncOffset;
+      const step = Number(syncOffset.dataset.step);
+      const vodScope = vodScopeContext();
+      if (vodScope?.channelIds.includes(id)) {
+        vodOffsetClick(vodScope, id, step);
+        refreshSyncPanel(
+          `[data-mv-sync-offset="${CSS.escape(id)}"][data-step="${syncOffset.dataset.step}"]`,
+        );
+        return;
+      }
       // 보류 중에는 새 보정을 받지 않는다(버튼은 aria-disabled 로 잠겨 있다).
       if (syncNudgePending(id)) return;
-      const step = Number(syncOffset.dataset.step);
       if (
         !syncEligibleIds().includes(id) ||
         id === state.sync.referenceChannelId ||
@@ -7095,6 +7547,12 @@
     if (syncClear) {
       if (state.sync.mode === "off") return;
       const id = syncClear.dataset.mvSyncClear;
+      const vodScope = vodScopeContext();
+      if (vodScope?.channelIds.includes(id)) {
+        vodOffsetClearClick(vodScope, id);
+        refreshSyncPanel(`[data-mv-sync-clear="${CSS.escape(id)}"]`);
+        return;
+      }
       // 되돌릴 보정이 없거나 보류 중이면 막는다(버튼은 aria-disabled 로 잠겨 있다).
       if (
         !cells.has(id) ||
@@ -7115,6 +7573,11 @@
     if (target.closest?.("#mvSyncAlign")) {
       if (state.sync.mode === "off") return;
       document.activeElement?.blur?.();
+      const vodScope = vodScopeContext();
+      if (vodScope) {
+        alignVodGroup(vodScope);
+        return;
+      }
       requestSyncStats();
       window.setTimeout(() => {
         const next = SYNC.reference(
@@ -7137,6 +7600,11 @@
     if (target.closest?.("#mvSyncClear")) {
       if (state.sync.mode === "off") return;
       document.activeElement?.blur?.();
+      const vodScope = vodScopeContext();
+      if (vodScope) {
+        vodClearAll(vodScope);
+        return;
+      }
       // 현재 범위의 채널만 0 으로 맞춘다. 범위 밖 채널의 보정값은 건드리지 않는다.
       const scopeIds = syncScopeIds();
       alignSync(
@@ -7828,6 +8296,8 @@
     "FRAME_QUALITY_STATE",
     "FRAME_QUALITY_COMMAND_RESULT",
     "FRAME_VOD_CHAT_PLAYBACK",
+    "FRAME_VOD_SYNC_STATS",
+    "FRAME_VOD_SYNC_RESULT",
     "FRAME_AD_STATUS",
   ]);
   window.addEventListener("message", (event) => {
@@ -8072,6 +8542,16 @@
         renderVolume();
       return;
     }
+    if (data.type === "FRAME_VOD_SYNC_STATS") {
+      if (!isVideoSlot(channelId) || currentStatus(channelId) !== "ready") return;
+      const stats = VOD_SYNC.normalize(data.stats);
+      if (stats) handleVodSyncStats(channelId, stats);
+      return;
+    }
+    if (data.type === "FRAME_VOD_SYNC_RESULT") {
+      if (isVideoSlot(channelId)) finishVodSyncAction(channelId, data);
+      return;
+    }
     if (data.type === "FRAME_SYNC_COMMAND_RESULT") {
       if (currentStatus(channelId) === "ready")
         finishSyncCommand(channelId, data);
@@ -8232,6 +8712,7 @@
     syncReadyAt.clear();
     syncRetryAt.clear();
     resetLiveCatchUp();
+    resetVodSync();
     syncCongestion = { active: false, since: 0 };
     state.sync.congested = false;
     if (syncTimer) clearInterval(syncTimer);

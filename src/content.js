@@ -22065,6 +22065,115 @@
       multiviewVodChatVideo = video;
     }
 
+    // ── 다시보기 싱크(멀티뷰 그룹) ───────────────────────────────────────
+    // 다시보기끼리 묶은 그룹을 실제 방송 시각(liveOpenDate + 재생 위치)으로 맞춘다.
+    // 판단은 부모(multiviewVodSync)가 하고, 여기서는 재생 상태를 알리고 명령만 따른다.
+    // 사용자가 이 칸을 직접 움직였는지(클릭·키 입력 직후의 seek·재생·일시정지)도 알려
+    // 부모가 그 칸을 기준으로 삼게 한다. 우리 명령으로 생긴 변화와 자동 재생은 뺀다.
+    const VOD_SYNC_GESTURE_MS = 2500;
+    const VOD_SYNC_COMMAND_QUIET_MS = 2500;
+    // 업로드 영상은 방송 시작 시각이 없어 매번 빈손이다. 자주 다시 묻지 않는다.
+    const VOD_SYNC_OPEN_RETRY_MS = 120000;
+    const isVodSyncFrame = () => /^\/video\/\d+/i.test(location.pathname);
+    let vodSyncVideo = null;
+    let vodSyncGestureAt = 0;
+    let vodSyncCommandUntil = 0;
+    let vodSyncUserActionAt = 0;
+    let vodSyncUserAction = null;
+    let vodSyncOpen = { videoNo: "", at: 0, triedAt: 0 };
+
+    function vodSyncOpenAt() {
+      const videoNo = location.pathname.match(/^\/video\/(\d+)/i)?.[1] || "";
+      if (!videoNo) return 0;
+      const now = Date.now();
+      if (vodSyncOpen.videoNo === videoNo &&
+          (vodSyncOpen.at > 0 || now - vodSyncOpen.triedAt < VOD_SYNC_OPEN_RETRY_MS)) {
+        return vodSyncOpen.at;
+      }
+      vodSyncOpen = { videoNo, at: 0, triedAt: now };
+      void recapVodStartAt(videoNo).then((at) => {
+        if (vodSyncOpen.videoNo !== videoNo || !(Number(at) > 0)) return;
+        vodSyncOpen.at = Number(at);
+        reportVodSyncStats();
+      });
+      return 0;
+    }
+
+    function reportVodSyncStats() {
+      if (!isVodSyncFrame()) return;
+      syncMultiviewVideo();
+      const video = currentVideo;
+      notifyParent("FRAME_VOD_SYNC_STATS", { stats: {
+        currentTime: Number.isFinite(video?.currentTime) ? video.currentTime : null,
+        duration: Number.isFinite(video?.duration) ? video.duration : null,
+        paused: video ? video.paused : true,
+        seeking: video?.seeking === true,
+        readyState: video?.readyState ?? 0,
+        playbackRate: Number.isFinite(video?.playbackRate) ? video.playbackRate : 1,
+        liveOpenAt: vodSyncOpenAt(),
+        adPlaying: typeof isAdPlaying === "function" && isAdPlaying(),
+        userActionAt: vodSyncUserActionAt,
+        userAction: vodSyncUserAction,
+        sampledAt: Date.now(),
+      } });
+    }
+
+    if (isVodSyncFrame()) {
+      const markGesture = () => { vodSyncGestureAt = Date.now(); };
+      for (const type of ["pointerdown", "pointerup", "keydown"])
+        document.addEventListener(type, markGesture, true);
+    }
+
+    const onVodSyncPlaybackEvent = (event) => {
+      const now = Date.now();
+      if (now < vodSyncCommandUntil || now - vodSyncGestureAt > VOD_SYNC_GESTURE_MS) return;
+      vodSyncUserActionAt = now;
+      vodSyncUserAction = event.type === "seeked" ? "seek" : event.type;
+      reportVodSyncStats();
+    };
+
+    function bindVodSyncVideo(video) {
+      if (vodSyncVideo === video) return;
+      for (const type of ["seeked", "play", "pause"])
+        vodSyncVideo?.removeEventListener(type, onVodSyncPlaybackEvent);
+      vodSyncVideo = null;
+      if (!(video instanceof HTMLMediaElement) || !isVodSyncFrame()) return;
+      for (const type of ["seeked", "play", "pause"])
+        video.addEventListener(type, onVodSyncPlaybackEvent);
+      vodSyncVideo = video;
+    }
+
+    function applyVodSyncCommand(data) {
+      if (!Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
+          !["seek", "play", "pause"].includes(data.action)) return;
+      if (data.action === "seek" &&
+          (typeof data.currentTime !== "number" || !Number.isFinite(data.currentTime) ||
+            data.currentTime < 0 || data.currentTime > 1000000)) return;
+      const reply = (applied, reason) => notifyParent("FRAME_VOD_SYNC_RESULT", {
+        commandId: data.commandId, action: data.action, applied, reason,
+      });
+      if (!isVodSyncFrame()) return reply(false, "not-vod");
+      syncMultiviewVideo();
+      const video = currentVideo;
+      if (!video) return reply(false, "no-video");
+      if (typeof isAdPlaying === "function" && isAdPlaying()) return reply(false, "ad");
+      // 이 명령으로 생기는 seeked/play/pause 는 사용자 조작이 아니다.
+      vodSyncCommandUntil = Date.now() + VOD_SYNC_COMMAND_QUIET_MS;
+      try {
+        if (data.action === "seek") {
+          const end = Number.isFinite(video.duration) ? video.duration - 0.25 : data.currentTime;
+          video.currentTime = Math.max(0, Math.min(data.currentTime, end));
+        } else if (data.action === "pause") {
+          video.pause();
+        } else {
+          video.play()?.catch?.(() => {});
+        }
+        reply(true, null);
+      } catch {
+        reply(false, "exception");
+      }
+    }
+
     // 차단을 부모에게 알린 적이 있는지. 있을 때만 해제를 알린다(메시지를 줄인다).
     // ⚠ applyAudioToVideo 가 이 값을 바로 읽으므로 그보다 먼저 선언해 둔다.
     let audioBlockedReported = false;
@@ -22242,6 +22351,7 @@
       currentVideo?.removeEventListener("loadedmetadata", onMultiviewSourceReady);
       currentVideo?.removeEventListener("ended", onMultiviewVideoEnded);
       bindMultiviewVodChatVideo(null);
+      bindVodSyncVideo(null);
       currentVideo = video;
       currentVideoSource = String(video.currentSrc || video.src || "");
       multiviewAdPlaying = typeof isAdPlaying === "function" && isAdPlaying();
@@ -22255,6 +22365,7 @@
       video.addEventListener("loadedmetadata", onMultiviewSourceReady);
       video.addEventListener("ended", onMultiviewVideoEnded);
       bindMultiviewVodChatVideo(video);
+      bindVodSyncVideo(video);
       applyAudioToVideo(video);
       reconcileMultiviewQuality();
       forwardMultiviewMixerCommand({ type: "MIXER_GET_STATE" });
@@ -22275,6 +22386,7 @@
         currentVideo.removeEventListener("loadedmetadata", onMultiviewSourceReady);
         currentVideo.removeEventListener("ended", onMultiviewVideoEnded);
         bindMultiviewVodChatVideo(null);
+        bindVodSyncVideo(null);
         currentVideo = null;
         currentVideoSource = "";
       } else if (currentVideo) applyAudioToVideo(currentVideo);
@@ -22421,6 +22533,14 @@
       }
       if (data.type === "REQUEST_FRAME_SYNC_STATS") {
         reportFrameSyncStats();
+        return;
+      }
+      if (data.type === "REQUEST_FRAME_VOD_SYNC_STATS") {
+        reportVodSyncStats();
+        return;
+      }
+      if (data.type === "APPLY_VOD_SYNC") {
+        applyVodSyncCommand(data);
         return;
       }
       // 자동 싱크 대상이면 플레이어 자체 따라잡기(1.03×)를 멈추게 MAIN 에 전한다.

@@ -120,6 +120,11 @@ const checks = [];
           (window.hostOpens=window.hostOpens||[]).push(msg);
           return {ok:true,tabId:1,windowId:1};
         }
+        if(msg?.type==='MULTIVIEW_HOST_FIND')return {ok:true,host:window.__runningHost||null};
+        if(msg?.type==='MULTIVIEW_HOST_FOCUS'){
+          (window.hostFocuses=window.hostFocuses||[]).push(msg);
+          return {ok:true,tabId:msg.tabId,windowId:2};
+        }
         if(msg?.type!=='MULTIVIEW_API')return {ok:false,reason:'unknown'};
         if(window.__followingAuthFailure&&new URL(msg.url).pathname.endsWith('/following-lives'))
           return {ok:false,reason:'HTTP 401'};
@@ -1123,6 +1128,41 @@ const checks = [];
      window.__handoffId=id;`,
   );
 
+  await test(
+    "같은 구성이 이미 실행 중이면 다시 불러오지 않고 취소·멀티뷰 이동을 묻는다",
+    `const dialog=document.getElementById('mvRunningDialog');
+     const start=document.getElementById('mvStart');
+     const opensBefore=(window.hostOpens||[]).length;
+     window.__runningHost={tabId:7,windowId:2,setupId:window.__handoffId};
+     const saved=JSON.stringify(window.sessionStore['cheeseMultiviewSetup:'+window.__handoffId]);
+     start.click();
+     await wait(100);
+     check(dialog.open,'같은 구성인데 확인 창이 뜨지 않았다');
+     check(dialog.textContent.includes('같은 구성의 멀티뷰가 실행 중입니다'),'확인 창 문구가 없다');
+     const buttons=[...dialog.querySelectorAll('button')].map(b=>b.textContent.trim());
+     check(buttons.join(',')==='취소,멀티뷰 이동','버튼이 취소·멀티뷰 이동이 아니다: '+buttons);
+     dialog.querySelector('button[value="cancel"]').click();
+     await wait(50);
+     check(!dialog.open&&(window.hostOpens||[]).length===opensBefore&&!(window.hostFocuses||[]).length,
+       '취소했는데 멀티뷰를 열거나 옮겼다');
+     check(JSON.stringify(window.sessionStore['cheeseMultiviewSetup:'+window.__handoffId])===saved,
+       '실행 중인 구성 저장값을 덮어썼다');
+     start.click();
+     await wait(100);
+     dialog.querySelector('button[value="move"]').click();
+     await wait(50);
+     check(!dialog.open&&window.hostFocuses?.length===1&&window.hostFocuses[0].tabId===7,
+       '멀티뷰 이동을 눌렀는데 그 탭으로 옮기지 않았다');
+     check((window.hostOpens||[]).length===opensBefore,'멀티뷰 이동인데 새로 불러왔다');
+     // 배치가 다르면 같은 구성이 아니다 → 묻지 않고 그 탭을 새 구성으로 다시 연다.
+     document.querySelector('[data-mv-layout]:not(.is-on)').click();
+     start.click();
+     await wait(150);
+     check(!dialog.open&&(window.hostOpens||[]).length===opensBefore+1,
+       '구성이 다른데 확인 창을 띄우거나 열지 않았다');
+     window.__runningHost=null;`,
+  );
+
   assert.deepEqual(await evaluate("errors"), [], "고르기 화면 조작 중 오류");
   checks.push("고르기 화면 조작 중 오류가 없다");
 
@@ -1261,9 +1301,10 @@ const checks = [];
             tags:i===0?['하나','둘','셋','넷']:['테스트']})),
             page:{next:second?null:{concurrentUserCount:961,liveId:7777}}}};
         }
+        window.__followingCalls=(window.__followingCalls||0)+1;
         return {ok:true,content:{followingList:quickChannels.map(c=>({
           channelId:c.channelId,channel:c,streamer:{openLive:true},
-          liveInfo:{liveTitle:'방송',concurrentUserCount:1,
+          liveInfo:{liveTitle:window.__followingTitle||'방송',concurrentUserCount:window.__followingViewers||1,
             liveCategoryValue:'게임',tags:c.tags||[]}}))}};
       }},
       storage:{session:{
@@ -1336,6 +1377,7 @@ const checks = [];
   await evaluate(readFileSync("src/multiviewLayouts.js", "utf8"));
   await evaluate(readFileSync("src/multiviewTooltip.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSync.js", "utf8"));
+  await evaluate(readFileSync("src/multiviewVodSync.js", "utf8"));
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
   // multiviewWatch.html 과 같은 순서로 싣는다. 빠지면 시청 페이지가 시작하자마자 멈춰
   // 뒤의 검사가 모두 실행되지 않는다(다시보기 로컬 채팅·배지 모아보기·업적 배지 표).
@@ -1512,6 +1554,31 @@ const checks = [];
      check(main && main!=='-','메인 채널 이름이 비어 있다: '+main);
      check(document.getElementById('mvLayoutValue').textContent!=='-','배치 이름이 비어 있다');
      check(document.getElementById('mvSideValue').textContent!=='-','채팅 위치가 비어 있다');`,
+  );
+
+  await test(
+    "채널 관리를 열 때마다 목록을 새로 받는다(캐시 시간 안이어도, 로딩 화면 없이)",
+    `const quick=document.getElementById('mvQuick');
+     const rail=document.getElementById('mvQuickAdd');
+     const back=document.getElementById('mvBack');
+     if(quick.hidden){back.click();await wait(300);}
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(300);
+     back.click();
+     await wait(50);
+     check(quick.hidden,'채널 관리가 닫히지 않았다');
+     const before=window.__followingCalls||0;
+     window.__followingViewers=777;window.__followingTitle='바뀐 방송 제목';
+     back.click();
+     check(!rail.querySelector('.mv-quick-card.is-skeleton')&&rail.querySelector('[data-mv-quick-add]'),
+       '같은 목록을 새로 받는 동안 로딩 화면으로 비웠다');
+     await wait(300);
+     check((window.__followingCalls||0)>before,'다시 열었는데 목록을 새로 받지 않았다');
+     check(rail.textContent.includes('777명')&&rail.textContent.includes('바뀐 방송 제목'),
+       '다시 열었는데 시청자 수·제목이 그대로다');
+     window.__followingViewers=0;window.__followingTitle='';
+     back.click();
+     await wait(50);`,
   );
 
   await test(

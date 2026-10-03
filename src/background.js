@@ -6348,6 +6348,7 @@ const MULTIVIEW_HOST_SCRIPTS = [
   "src/multiviewTooltip.js",
   "src/replayLocalChat.js",
   "src/multiviewVodChat.js",
+  "src/multiviewVodSync.js",
   "src/multiviewWatch.js",
 ];
 const MULTIVIEW_SETUP_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
@@ -6418,7 +6419,63 @@ async function injectMultiviewHost(tabId, info) {
 
 // ⚠ 팝업 창(type: popup)은 macOS 에서 화면 밖·뒤에 떠 보이지 않는 일이 있었다(소리만 났다).
 //   고르기 화면 옆에 일반 새 탭으로 연다.
+//
+// 멀티뷰는 탭 하나만 쓴다(한 탭에 최대 6채널). 이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지
+// 않고 그 탭으로 옮겨 새 구성으로 다시 연다.
+// ⚠ 시작할 때마다 새 탭을 만들면 같은 채널이 두 탭에서 재생돼(한 사람이 시청자 2명) 소리가
+//   겹치고, '고르기 화면 열기' 로 고친 뒤 다시 시작하면 두 탭이 같은 구성 id 의 저장값을
+//   서로 덮어썼다.
+const MULTIVIEW_SETUP_PREFIX = "cheeseMultiviewSetup:";
+
+async function findMultiviewHostTab(hosts) {
+  for (const id of Object.keys(hosts)) {
+    const tab = await chrome.tabs.get(Number(id)).catch(() => null);
+    if (tab && isMultiviewHostUrl(tab.url)) return tab;
+    delete hosts[id];
+  }
+  return null;
+}
+
+async function reuseMultiviewHost(tab, hosts, setupId, theme) {
+  const previous = hosts[tab.id] || {};
+  // 예전 구성이 연 치지직 채팅 독립 창은 새 구성과 맞지 않는다.
+  for (const windowId of Array.isArray(previous.children) ? previous.children : [])
+    chrome.windows.remove(windowId).catch(() => {});
+  hosts[tab.id] = { setupId, theme: theme === "dark" ? "dark" : "light", windowId: tab.windowId, children: [] };
+  await writeMultiviewHosts(hosts);
+  if (previous.setupId && previous.setupId !== setupId)
+    chrome.storage.session.remove(MULTIVIEW_SETUP_PREFIX + previous.setupId).catch(() => {});
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  await chrome.tabs.update(tab.id, { active: true });
+  // 다시 불러오면 로드 완료(onUpdated)에서 새 구성으로 화면을 세운다.
+  await chrome.tabs.reload(tab.id);
+  return { windowId: tab.windowId, tabId: tab.id, reused: true };
+}
+
+// 실행 중인 멀티뷰 탭(고르기 화면이 같은 구성인지 확인할 때 쓴다).
+async function runningMultiviewHost() {
+  const hosts = await readMultiviewHosts();
+  const tab = await findMultiviewHostTab(hosts);
+  await writeMultiviewHosts(hosts); // 닫혔거나 떠난 탭 기록은 지운다
+  return tab ? { tabId: tab.id, windowId: tab.windowId, setupId: hosts[tab.id]?.setupId || "" } : null;
+}
+
+// 다시 불러오지 않고 그 멀티뷰 탭으로 옮긴다.
+async function focusMultiviewHost(tabId) {
+  const hosts = await readMultiviewHosts();
+  if (!hosts[tabId]) throw new Error("not-multiview-host");
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab || !isMultiviewHostUrl(tab.url)) throw new Error("not-multiview-host");
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  await chrome.tabs.update(tab.id, { active: true });
+  return { tabId: tab.id, windowId: tab.windowId };
+}
+
 async function openMultiviewHost(setupId, theme, openerTab) {
+  const existingHosts = await readMultiviewHosts();
+  const existing = await findMultiviewHostTab(existingHosts);
+  if (existing) return reuseMultiviewHost(existing, existingHosts, setupId, theme);
+  await writeMultiviewHosts(existingHosts); // 닫혔거나 떠난 탭 기록은 지운다
   const tab = await chrome.tabs.create({
     url: MULTIVIEW_HOST_URL,
     active: true,
@@ -6447,7 +6504,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   readMultiviewHosts().then((hosts) => {
     if (!hosts[tabId]) return;
+    const setupId = hosts[tabId].setupId;
     delete hosts[tabId];
+    // 닫힌 탭의 구성 저장값도 지운다(세션 저장소에 쌓이지 않게).
+    if (setupId) chrome.storage.session.remove(MULTIVIEW_SETUP_PREFIX + setupId).catch(() => {});
     return writeMultiviewHosts(hosts);
   });
 });
@@ -6543,6 +6603,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
     openMultiviewHost(setupId, message.theme, sender?.tab)
+      .then((result) => sendResponse?.({ ok: true, ...result }))
+      .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message.type === "MULTIVIEW_HOST_FIND" || message.type === "MULTIVIEW_HOST_FOCUS") {
+    // 우리 확장 페이지(고르기 화면)만 부른다.
+    if (!String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
+    const work = message.type === "MULTIVIEW_HOST_FIND"
+      ? runningMultiviewHost().then((host) => ({ host }))
+      : focusMultiviewHost(Number(message.tabId));
+    work
       .then((result) => sendResponse?.({ ok: true, ...result }))
       .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
     return true;

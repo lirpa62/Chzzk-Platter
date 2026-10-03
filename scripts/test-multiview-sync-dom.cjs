@@ -49,6 +49,11 @@ const PIECES = [
   "inSyncScope",
   "syncRateText",
   "syncGroupTooSmall",
+  // 다시보기만 있는 범위 판정(라이브 범위에서는 빈 값이라 기존 경로 그대로).
+  "syncScopeChannelIds",
+  "vodScopeIds",
+  "syncScopeMixed",
+  "vodScopeContext",
   "syncEligibleIds",
   "syncActiveIds",
   // 진단 기록 영역(시작·일시정지·정지 버튼과 상태 글자).
@@ -65,7 +70,8 @@ const PIECES = [
   "finishSyncCommand",
 ]
   .map(sliceFn)
-  .join("\n");
+  .join("\n") +
+  "\n" + SRC.match(/  const SYNC_MIXED_WARNING =\s*"[^"]+";/)[0];
 
 if (!/panel\.innerHTML/.test(PIECES) || !/patchSyncPanel/.test(PIECES)) {
   throw Error("떼어 낸 구간이 싱크 렌더 경로가 아니다");

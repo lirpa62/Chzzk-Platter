@@ -11717,6 +11717,48 @@ html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-r
   overflow: hidden !important;
 }
 
+/* 멀티뷰 채팅 칸의 이모티콘 창 높이.
+   치지직은 이모티콘 창 최대 높이를 '채팅 화면 높이 − 260px' 로 잡는다(2026-10-04 실측:
+   873px → 613px). 채팅을 빈 칸에 두면 채팅이 낮아(263px) 창이 3px 로 눌려 보이지 않았다.
+   치지직 값이 작을 때만 입력창 위 남은 공간(높이 − 140px, 최대 280px)까지 늘린다. 채팅이
+   충분히 높으면 max() 가 치지직 값을 그대로 고른다. 안쪽 목록은 치지직이 스크롤로 둔다. */
+html.cheese-multiview-chat-frame
+  aside#aside-chatting
+  [class*="_area_"]
+  > [class*="_container_"][class*="_emoticon_"] {
+  max-height: max(
+    calc(100vh - 260px),
+    min(calc(100vh - 140px), 280px)
+  ) !important;
+  /* 치지직 기본 100. 같은 입력 영역(_area_) 안의 입력창·도구가 창 위로 비치지 않게 올린다
+     (낮은 채팅에서는 창이 입력 영역을 덮는다). */
+  z-index: 2000 !important;
+}
+
+/* 이모티콘 창은 입력 영역(_area_, z-index 1000)이 만드는 쌓임 맥락 안에 있어 창의 z-index 만
+   올려서는 바깥 요소(채팅 크기 조절 버튼 등)를 이길 수 없다. 창이 열려 있을 때만 입력 영역째
+   올린다(늘 올리면 입력 영역과 겹치는 다른 팝업을 가릴 수 있다). */
+html.cheese-multiview-chat-frame
+  aside#aside-chatting
+  > [class*="_area_"]:has(> [class*="_container_"][class*="_emoticon_"]) {
+  z-index: 2000 !important;
+}
+
+/* 아주 낮은 채팅(360px 이하)은 입력창 위 공간만으로는 제목·카테고리 메뉴(52px)를 빼면
+   목록 칸이 20px 남짓이라 스크롤해도 이모티콘이 보이지 않았다(2026-10-04 실측: 263px 채팅,
+   목록 칸 20px / 내용 142px). 이때만 창을 입력 영역까지 덮도록 아래로 넓힌다. 창을 닫으면
+   입력창이 그대로 보인다. */
+@media (max-height: 360px) {
+  html.cheese-multiview-chat-frame
+    aside#aside-chatting
+    [class*="_area_"]
+    > [class*="_container_"][class*="_emoticon_"] {
+    top: auto !important;
+    bottom: 0 !important;
+    max-height: calc(100vh - 8px) !important;
+  }
+}
+
 /* 다시보기 iframe은 플레이어 section이 자체 스크롤 컨테이너가 되지 않게 한다. */
 html.cheese-popup-player-frame.cheese-multiview-vod-frame
   #layout-body

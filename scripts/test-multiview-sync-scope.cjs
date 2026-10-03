@@ -23,6 +23,8 @@ function sliceFn(name) {
 }
 
 const PIECES = [
+  sliceFn("syncScopeChannelIds"),
+  sliceFn("vodScopeIds"),
   sliceFn("syncScopeIds"),
   sliceFn("inSyncScope"),
   sliceFn("syncActiveIds"),
@@ -46,7 +48,7 @@ function build({ scope = "all", selected = [], chosen, eligible }) {
   const body =
     "function isVideoSlot(id){return state.chosen.some(c=>c.channelId===id&&c.mediaType==='video');}\n" +
     PIECES +
-    "\nreturn { syncScopeIds, inSyncScope, syncActiveIds, syncGroupTooSmall," +
+    "\nreturn { syncScopeIds, vodScopeIds, inSyncScope, syncActiveIds, syncGroupTooSmall," +
     " releaseSyncOwnership };";
   // eslint-disable-next-line no-new-func
   const api = new Function(
@@ -442,7 +444,7 @@ const ALL = ["a", "b", "c", "d"];
 // 8) 같은 자리 교체: 선택 여부만 물려받고 보정값·보류 명령은 남기지 않는다.
 {
   // clearChannelSync 를 원본 그대로 돌린다(교체·제거가 모두 이 경로를 쓴다).
-  const calls = { resetRate: [], cancel: [], catchUp: [] };
+  const calls = { resetRate: [], cancel: [], catchUp: [], vodSync: [] };
   const state = {
     chosen: [{ channelId: "a" }, { channelId: "b" }, { channelId: "c" }],
     sync: {
@@ -475,6 +477,7 @@ const ALL = ["a", "b", "c", "d"];
     "freshSyncChannels",
     "syncGroupForChannel",
     "resetLiveCatchUp",
+    "resetVodSync",
     body,
   )(
     state,
@@ -489,6 +492,7 @@ const ALL = ["a", "b", "c", "d"];
     new Set(["b"]),
     () => null,
     (id) => calls.catchUp.push(id),
+    (id) => calls.vodSync.push(id),
   );
 
   // replaceChannel 이 교체 직전에 하는 판정(원본과 같은 식).
@@ -507,6 +511,7 @@ const ALL = ["a", "b", "c", "d"];
   assert.deepEqual(calls.resetRate, ["b"], "옛 채널의 속도를 되돌리지 않았다");
   assert.deepEqual(calls.cancel, ["b"], "옛 채널의 보류 명령을 버리지 않았다");
   assert.deepEqual(calls.catchUp, ["b"], "옛 채널의 따라잡기 상태를 비우지 않았다");
+  assert.deepEqual(calls.vodSync, ["b"], "옛 채널의 다시보기 싱크 상태를 비우지 않았다");
   assert.equal(maps.syncRates.has("b"), false, "syncRates 에 옛 채널이 남았다");
   assert.equal(maps.syncStats.has("b"), false, "syncStats 에 옛 채널이 남았다");
   assert.equal(
@@ -597,6 +602,9 @@ const ALL = ["a", "b", "c", "d"];
 
   // 원본 함수를 그대로 쓰되, 모듈 스코프 변수만 box 로 바꿔 관찰한다.
   const src =
+    "function isVideoSlot(id){return state.chosen.some(c=>c.channelId===id&&c.mediaType==='video');}\n" +
+    sliceFn("syncScopeChannelIds") +
+    sliceFn("vodScopeIds") +
     sliceFn("syncScopeIds") +
     sliceFn("syncGroupTooSmall") +
     sliceFn("stopAutoSyncIfGroupTooSmall");
@@ -709,6 +717,9 @@ const ALL = ["a", "b", "c", "d"];
     };
     const box = { syncCongestion: { active: false, since: 0 }, syncNotice: "" };
     const src =
+      "function isVideoSlot(id){return state.chosen.some(c=>c.channelId===id&&c.mediaType==='video');}\n" +
+      sliceFn("syncScopeChannelIds") +
+      sliceFn("vodScopeIds") +
       sliceFn("syncScopeIds") +
       sliceFn("syncGroupTooSmall") +
       sliceFn("stopAutoSyncIfGroupTooSmall") +
@@ -1058,8 +1069,11 @@ const ALL = ["a", "b", "c", "d"];
       args.includes(`"${dir}"`),
       `step ${s2} 의 방향이 '${dir}' 가 아니다: ${args}`,
     );
+    // 앞으로 가는 쪽은 라이브 행이면 '라이브 쪽', 다시보기 행이면 '이후 장면 쪽'이다.
     assert.ok(
-      args.includes(`"${side}"`),
+      args.includes(`"${side}"`) ||
+        (side === "라이브 쪽" && /, forward\)$/.test(args) &&
+          /const forward = v\.vod \? "이후 장면 쪽" : "라이브 쪽";/.test(render)),
       `step ${s2} 에 '${side}' 가 없다: ${args}`,
     );
   }

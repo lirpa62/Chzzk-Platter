@@ -851,7 +851,8 @@
   }
 
   // ── 실행 ───────────────────────────────────────────────────────────────
-  // 고른 구성을 세션 저장소로 넘기고 시청 화면을 새 탭에서 연다. 주소에 담기엔
+  // 고른 구성을 세션 저장소로 넘기고 시청 화면을 연다. 멀티뷰 탭이 이미 있으면 배경이 그 탭을
+  // 새 구성으로 다시 열고, 없으면 새 탭을 만든다(멀티뷰는 탭 하나에 최대 6채널). 주소에 담기엔
   // 채널 목록이 길어 세션 저장소를 쓴다.
   async function start() {
     const layout = LAYOUTS.layoutById(state.layoutId);
@@ -866,6 +867,18 @@
       startMainMuted: state.startMainMuted,
       startMainVolume: state.startMainVolume,
     };
+    // 같은 구성의 멀티뷰가 이미 실행 중이면 다시 불러오지 않는다(방송이 처음부터 다시 로드된다).
+    // ⚠ 새 구성을 저장하기 전에 비교한다. '고르기 화면 열기' 로 들어와 같은 id 를 쓰면 저장이
+    //   실행 중인 구성을 덮어써 비교 대상이 사라진다.
+    const running = await runningMultiview();
+    if (running && sameRunningSetup(running.setup, setup)) {
+      if (await askRunningMultiview() !== "move") return;
+      const moved = await chrome.runtime
+        .sendMessage({ type: "MULTIVIEW_HOST_FOCUS", tabId: running.tabId })
+        .catch(() => null);
+      if (moved?.ok) return;
+      // 그 사이 탭이 닫혔다. 평소처럼 새로 연다.
+    }
     // 기존 멀티뷰를 고치는 중이면 그 id 를 이어 쓰고, 새로 시작하면 새 id 를 만든다.
     const handoffId = state.handoffId || newHandoffId();
     try {
@@ -893,6 +906,54 @@
     if (!opened?.ok) {
       alert("멀티뷰 창을 열지 못했습니다." + (opened?.reason ? ` (${opened.reason})` : ""));
     }
+  }
+
+  // 실행 중인 멀티뷰 탭과 그 탭의 지금 구성(시청 화면이 바뀔 때마다 저장한다). 없으면 null.
+  async function runningMultiview() {
+    try {
+      const reply = await chrome.runtime.sendMessage({ type: "MULTIVIEW_HOST_FIND" });
+      const host = reply?.ok ? reply.host : null;
+      if (!host?.setupId) return null;
+      const key = `${HANDOFF_PREFIX}:${host.setupId}`;
+      const setup = (await chrome.storage.session.get(key))?.[key];
+      return setup ? { tabId: host.tabId, setup } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 같은 구성: 같은 채널들, 같은 메인(첫 칸), 같은 배치. 시작 옵션만 바뀌었으면 다시
+  // 불러와 적용해야 하므로 같은 구성으로 보지 않는다. 메인이 아닌 칸의 순서는 보지 않는다.
+  function sameRunningSetup(running, next) {
+    const ids = (setup) =>
+      Array.isArray(setup?.chosen) ? setup.chosen.map((c) => String(c?.channelId || "")) : [];
+    const a = ids(running);
+    const b = ids(next);
+    if (!a.length || a.length !== b.length || a[0] !== b[0]) return false;
+    const rest = new Set(a);
+    return b.every((id) => rest.has(id)) &&
+      String(running?.layoutId || "") === String(next?.layoutId || "") &&
+      String(running?.chatSide || "") === String(next?.chatSide || "") &&
+      (running?.mainHighQuality === true) === (next?.mainHighQuality === true) &&
+      (running?.chatEnabled !== false) === (next?.chatEnabled !== false) &&
+      (running?.startMainMuted === true) === (next?.startMainMuted === true) &&
+      normalizeStartMainVolume(running?.startMainVolume) ===
+        normalizeStartMainVolume(next?.startMainVolume);
+  }
+
+  // 확인 창. "move"(멀티뷰 이동) 또는 "cancel"(취소·Esc).
+  function askRunningMultiview() {
+    const dialog = document.getElementById("mvRunningDialog");
+    if (!dialog?.showModal) return Promise.resolve("cancel");
+    return new Promise((resolve) => {
+      dialog.returnValue = "";
+      dialog.addEventListener(
+        "close",
+        () => resolve(dialog.returnValue === "move" ? "move" : "cancel"),
+        { once: true },
+      );
+      dialog.showModal();
+    });
   }
 
   // ── 이벤트 ─────────────────────────────────────────────────────────────
