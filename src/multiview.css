@@ -1458,6 +1458,58 @@ button.mv-live-more {
   opacity: 0.45;
 }
 
+/* 같은 구성의 멀티뷰가 실행 중일 때 뜨는 확인 창(고르기 화면). */
+.mv-dialog {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+  box-sizing: border-box;
+  color: var(--popup-text, #e9ecef);
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  width: 360px;
+}
+.mv-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.mv-dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+.mv-dialog-desc {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+.mv-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.mv-dialog-button {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+}
+.mv-dialog-button.is-primary {
+  background: var(--popup-brand, #00ffa3);
+  border-color: transparent;
+  color: #fff;
+}
+.mv-dialog-button:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 2px;
+}
+
 /* ── 시청 화면(multiviewWatch.html) ────────────────────────────────── */
 .mv-watch-body {
   display: flex;

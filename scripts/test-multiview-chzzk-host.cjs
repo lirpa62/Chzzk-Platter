@@ -182,6 +182,35 @@ check(/const handoffId = HOSTED_ON_CHZZK\s*\? String\(globalThis\.__cheeseMultiv
 check(!/chrome\.windows\.(?:create|remove|update)\(/.test(watch.replace(/const EXT = HOSTED_ON_CHZZK[\s\S]*?\n {6}\};/, "")),
   "창 API 는 EXT 를 거친다(치지직 페이지 위에서는 배경에 맡긴다)");
 
+// ── 같은 구성 판정(고르기 화면) ────────────────────────────────────────────
+{
+  const setupSrc = read("src/multiview.js");
+  const at = setupSrc.indexOf("  function sameRunningSetup(");
+  const same = new Function(`const normalizeStartMainVolume = (value) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.round(Math.min(1, Math.max(0, value)) * 100) / 100 : 1;
+    ${setupSrc.slice(at, setupSrc.indexOf("\n  }\n", at) + 4)}\nreturn sameRunningSetup;`)();
+  const cfg = (ids, layoutId = "right-2", options = {}) => ({
+    chosen: ids.map((channelId) => ({ channelId })), layoutId,
+    chatSide: "right", mainHighQuality: false, chatEnabled: true,
+    startMainMuted: false, startMainVolume: 1, ...options,
+  });
+  check(same(cfg(["a", "b", "c"]), cfg(["a", "b", "c"])), "같은 채널·메인·배치면 같은 구성");
+  check(same(cfg(["a", "b", "c"]), cfg(["a", "c", "b"])), "메인이 아닌 칸의 순서는 보지 않는다");
+  check(!same(cfg(["a", "b", "c"]), cfg(["b", "a", "c"])), "메인이 다르면 다른 구성");
+  check(!same(cfg(["a", "b", "c"]), cfg(["a", "b", "d"])) && !same(cfg(["a", "b"]), cfg(["a", "b", "c"])),
+    "채널이 다르거나 수가 다르면 다른 구성");
+  check(!same(cfg(["a", "b"]), cfg(["a", "b"], "left-1-0")), "배치가 다르면 다른 구성");
+  for (const options of [
+    { chatSide: "left" }, { mainHighQuality: true }, { chatEnabled: false },
+    { startMainMuted: true }, { startMainVolume: 0.5 },
+  ]) {
+    check(!same(cfg(["a", "b"]), cfg(["a", "b"], "right-2", options)),
+      "시작 옵션이 바뀌면 다른 구성: " + Object.keys(options)[0]);
+  }
+  check(!same(null, cfg(["a", "b"])) && !same(cfg([]), cfg([])), "실행 중 구성을 모르면 같다고 보지 않는다");
+}
+
 // ── 3) 배경(background.js) ────────────────────────────────────────────────
 const background = read("src/background.js");
 const bgSource = between(background, "// ── 멀티뷰(치지직 페이지 위)", "chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {");
@@ -192,6 +221,8 @@ function backgroundContext() {
   let nextWindow = 100;
   let nextTab = 5000;
   const tabUrls = {};
+  const closedTabs = new Set();
+  const tabWindows = {};
   const chrome = {
     runtime: { getURL: (p) => `chrome-extension://ext/${p}` },
     storage: {
@@ -199,6 +230,7 @@ function backgroundContext() {
         setAccessLevel: (value) => calls.push(["setAccessLevel", value]),
         get: async (key) => ({ [key]: session[key] }),
         set: async (values) => Object.assign(session, JSON.parse(JSON.stringify(values))),
+        remove: async (key) => { calls.push(["session.remove", key]); delete session[key]; },
       },
     },
     windows: {
@@ -212,14 +244,19 @@ function backgroundContext() {
       onRemoved: { addListener: (fn) => (listeners.windowRemoved = fn) },
     },
     tabs: {
-      get: async (tabId) => ({ id: tabId, status: "loading",
-        url: tabUrls[tabId] || "https://chzzk.naver.com/lives", windowId: tabId - 1000 }),
+      get: async (tabId) => {
+        if (closedTabs.has(tabId)) throw new Error("No tab with id");
+        return { id: tabId, status: "loading",
+          url: tabUrls[tabId] || "https://chzzk.naver.com/lives", windowId: tabWindows[tabId] ?? tabId - 1000 };
+      },
+      reload: async (tabId) => calls.push(["tabs.reload", tabId]),
       update: async (tabId, options) => calls.push(["tabs.update", tabId, options]),
       query: async () => [],
       create: async (options) => {
         calls.push(["tabs.create", options]);
         const id = nextTab++;
-        return { id, windowId: options.windowId ?? 1, index: options.index ?? 0 };
+        tabWindows[id] = options.windowId ?? 1;
+        return { id, windowId: tabWindows[id], index: options.index ?? 0 };
       },
       sendMessage: async (tabId, message) => calls.push(["tabs.sendMessage", tabId, message]),
       onUpdated: { addListener: (fn) => (listeners.updated = fn) },
@@ -229,8 +266,8 @@ function backgroundContext() {
   };
   const ctx = { chrome, fetch: async () => ({ text: async () => "<html></html>" }), Number, Array, Object, String, JSON, Error, URL };
   vm.createContext(ctx);
-  vm.runInContext(bgSource + "\nthis.out={openMultiviewHost,handleMultiviewHostApi,readMultiviewHosts};", ctx);
-  return { ...ctx.out, calls, listeners, session, tabUrls };
+  vm.runInContext(bgSource + "\nthis.out={openMultiviewHost,handleMultiviewHostApi,readMultiviewHosts,runningMultiviewHost,focusMultiviewHost};", ctx);
+  return { ...ctx.out, calls, listeners, session, tabUrls, closedTabs };
 }
 (async () => {
   const bg = backgroundContext();
@@ -290,6 +327,69 @@ function backgroundContext() {
   check(!(await bg.readMultiviewHosts())[opened.tabId], "그 탭은 멀티뷰 탭 기록에서 지운다");
   check(/message\.type === "MULTIVIEW_OPEN_HOST"[\s\S]{0,200}startsWith\(chrome\.runtime\.getURL\(""\)\)/.test(background),
     "멀티뷰 창 열기는 우리 확장 페이지만 부탁할 수 있다");
+  check(/message\.type === "MULTIVIEW_HOST_FIND" \|\| message\.type === "MULTIVIEW_HOST_FOCUS"\) \{[\s\S]{0,120}startsWith\(chrome\.runtime\.getURL\(""\)\)\) return false;/.test(background),
+    "실행 중인 멀티뷰 확인·이동도 우리 확장 페이지만 부탁할 수 있다");
+  check(/renderTopbar\(\);\s*scheduleHandoffSave\(\);\s*\}/.test(watch) &&
+    /handoffSaveTimer = setTimeout\(\(\) => \{\s*handoffSaveTimer = 0;\s*void saveHandoff\(\);/.test(watch),
+    "시청 화면은 채널·메인·배치가 바뀌면(applyLayout) 지금 구성을 저장해 둔다");
+
+  // 멀티뷰 탭은 하나만 쓴다(한 탭에 최대 6채널). 다시 시작하면 열린 탭을 새 구성으로 다시 연다.
+  {
+    const bg2 = backgroundContext();
+    const count = (name) => bg2.calls.filter(([n]) => n === name).length;
+    const first = await bg2.openMultiviewHost("setup-a", "light", { windowId: 3, index: 1 });
+    bg2.session["cheeseMultiviewSetup:setup-a"] = { chosen: [] };
+    const chat = await bg2.handleMultiviewHostApi({ op: "windows.create",
+      args: { url: "https://chzzk.naver.com/live/x/chat" } }, { tab: { id: first.tabId } });
+    const second = await bg2.openMultiviewHost("setup-b", "dark", { windowId: 3, index: 1 });
+    check(count("tabs.create") === 1 && second.tabId === first.tabId && second.reused === true,
+      "이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지 않는다");
+    check(bg2.calls.some(([n, id]) => n === "tabs.reload" && id === first.tabId) &&
+      bg2.calls.some(([n, id, o]) => n === "tabs.update" && id === first.tabId && o.active === true) &&
+      bg2.calls.some(([n, id, o]) => n === "windows.update" && id === first.windowId && o.focused === true),
+      "그 탭으로 옮겨(창 앞으로) 새 구성으로 다시 연다");
+    let hosts = await bg2.readMultiviewHosts();
+    check(hosts[first.tabId].setupId === "setup-b" && hosts[first.tabId].theme === "dark" &&
+      hosts[first.tabId].children.length === 0, "탭 기록을 새 구성으로 바꾼다");
+    check(bg2.calls.some(([n, id]) => n === "windows.remove" && id === chat.id),
+      "예전 구성이 연 채팅 독립 창은 닫는다");
+    check(bg2.calls.some(([n, key]) => n === "session.remove" && key === "cheeseMultiviewSetup:setup-a"),
+      "바뀐 예전 구성 저장값은 지운다");
+    const removesBefore = count("session.remove");
+    await bg2.openMultiviewHost("setup-b", "dark", null);
+    check(count("tabs.create") === 1 && count("session.remove") === removesBefore,
+      "'고르기 화면 열기' 로 고쳐 같은 구성 id 로 다시 시작해도 그 탭을 다시 연다(저장값은 지우지 않는다)");
+    // 고르기 화면이 같은 구성인지 비교할 수 있게 실행 중인 탭과 구성 id 를 알려 주고,
+    // '멀티뷰 이동' 은 다시 불러오지 않고 그 탭으로만 옮긴다.
+    const running = await bg2.runningMultiviewHost();
+    check(running?.tabId === first.tabId && running.setupId === "setup-b",
+      "실행 중인 멀티뷰 탭과 구성 id 를 알려 준다");
+    const reloadsBefore = count("tabs.reload");
+    await bg2.focusMultiviewHost(first.tabId);
+    check(count("tabs.reload") === reloadsBefore &&
+      bg2.calls.at(-1)[0] === "tabs.update" && bg2.calls.at(-1)[2].active === true,
+      "멀티뷰 이동은 그 탭을 앞으로만 가져온다(다시 불러오지 않는다)");
+    await assert.rejects(bg2.focusMultiviewHost(123456), /not-multiview-host/);
+    checks.push("멀티뷰 탭이 아니면 옮기지 않는다");
+    // 탭을 닫으면 기록과 구성 저장값을 지우고, 다음 시작은 새 탭이다.
+    bg2.closedTabs.add(first.tabId);
+    bg2.listeners.removed(first.tabId);
+    for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    hosts = await bg2.readMultiviewHosts();
+    check(!hosts[first.tabId] &&
+      bg2.calls.some(([n, key]) => n === "session.remove" && key === "cheeseMultiviewSetup:setup-b"),
+      "멀티뷰 탭을 닫으면 기록과 구성 저장값을 지운다");
+    const third = await bg2.openMultiviewHost("setup-c", "light", null);
+    check(count("tabs.create") === 2 && third.tabId !== first.tabId && !third.reused,
+      "열린 멀티뷰 탭이 없으면 새 탭을 연다");
+    check((await bg2.runningMultiviewHost())?.tabId === third.tabId, "닫힌 탭은 실행 중으로 알리지 않는다");
+    // 기록만 남고 실제로는 없는 탭(브라우저가 알림 없이 닫은 경우)은 건너뛴다.
+    bg2.closedTabs.add(third.tabId);
+    const fourth = await bg2.openMultiviewHost("setup-d", "light", null);
+    hosts = await bg2.readMultiviewHosts();
+    check(count("tabs.create") === 3 && !hosts[third.tabId] && hosts[fourth.tabId]?.setupId === "setup-d",
+      "기록만 남은 닫힌 탭은 지우고 새 탭을 연다");
+  }
 
   // ── 4) 화면 세우기(헤드리스 크롬) ──────────────────────────────────────────
   await bootInBrowser();

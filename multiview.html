@@ -238,6 +238,18 @@
       </div>
     </main>
 
+    <!-- 같은 구성의 멀티뷰가 이미 실행 중일 때. 다시 불러오지 않고 그 탭으로 옮길지 고른다. -->
+    <dialog class="mv-dialog" id="mvRunningDialog" aria-labelledby="mvRunningTitle" aria-describedby="mvRunningDesc">
+      <form method="dialog">
+        <h2 class="mv-dialog-title" id="mvRunningTitle">이미 실행 중인 멀티뷰</h2>
+        <p class="mv-dialog-desc" id="mvRunningDesc">같은 구성의 멀티뷰가 실행 중입니다.</p>
+        <div class="mv-dialog-actions">
+          <button type="submit" value="cancel" class="mv-dialog-button">취소</button>
+          <button type="submit" value="move" class="mv-dialog-button is-primary" autofocus>멀티뷰 이동</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- 친밀도 구역 점수 계산에 쓴다(전용 팔로잉 탭에서만 동작). -->
     <script src="src/multiviewTheme.js"></script>
     <script src="src/chatRecapStore.js"></script>

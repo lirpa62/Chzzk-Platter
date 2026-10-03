@@ -181,7 +181,8 @@ assert.equal(S.normalize({ ...stats(2.68), seekableEnd: 102.68 }).absoluteDelayS
   assert.equal(S.targetDelay(skewed, 0), -2, "absolute mode allows negative delays");
 }
 assert.match(watch, /function applySyncAlignDelays\(now = Date\.now\(\)\)[\s\S]*?SYNC\.alignDelays\(/);
-assert.match(watch, /function selectSyncReference\(now = Date\.now\(\)\) \{\s*applySyncAlignDelays\(now\);/);
+// 다시보기만 있는 범위는 다시보기 싱크가 기준을 정하므로 그 경우만 먼저 돌려준다.
+assert.match(watch, /function selectSyncReference\(now = Date\.now\(\)\) \{[^}]*?if \(vodScopeIds\(\)\.length\) return state\.sync\.referenceChannelId;\s*applySyncAlignDelays\(now\);/);
 assert.match(watch, /function selectGroupReference\(group, now = Date\.now\(\)\) \{\s*applySyncAlignDelays\(now\);/);
 assert.match(watch, /absoluteDelaySec: stats\.absoluteDelaySec \?\? null/);
 assert.match(content, /absoluteDelaySec: absoluteSyncDelay\(currentTime, nativeDelaySec, adPlaying, now\)/);

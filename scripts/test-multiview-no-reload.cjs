@@ -173,8 +173,10 @@ console.log("\n[탭 전환] 부모도 프레임도 복귀 시 아무것도 고�
       syncCommands.includes("video.currentTime = target") &&
       syncCommands.includes("target < start + 0.05") &&
       syncCommands.includes("target > end - 0.05") &&
-      (block.match(/video\.currentTime\s*=[^=]/g) || []).length === 1,
-    "재생 위치 변경은 범위를 검증한 싱크 명령에서만 수행한다",
+      (block.match(/video\.currentTime\s*=[^=]/g) || []).length === 2 &&
+      // 다시보기 그룹 싱크 명령도 범위(0~영상 길이)를 검증하고 자른 뒤에만 옮긴다.
+      /function applyVodSyncCommand\(data\)[\s\S]*?data\.currentTime < 0 \|\| data\.currentTime > 1000000[\s\S]*?video\.currentTime = Math\.max\(0, Math\.min\(data\.currentTime, end\)\)/.test(block),
+    "재생 위치 변경은 범위를 검증한 싱크 명령(라이브·다시보기)에서만 수행한다",
   );
 }
 

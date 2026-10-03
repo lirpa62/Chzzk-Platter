@@ -272,13 +272,14 @@ console.log("[채팅 위 영상 높이] 저장·복원");
     path.join(__dirname, "..", "src", "multiviewWatch.js"), "utf8");
   const slice = (from, to) => watch.slice(watch.indexOf(from), watch.indexOf(to, watch.indexOf(from)));
   const apply = slice("function applyChatTopSize(", "function restoreChatSize(");
-  const restore = slice("function restoreChatSize(", "function bindChatResize(");
+  const restore = slice("function restoreChatSize(", "function bindChatResize(") +
+    slice("function applyRestoredChatSize(", "function applyChatSize(");
   const bind = slice("function bindChatTopResize(", "// ── 빠른 채널 관리");
-  ok(/saved\.topH = size;/.test(apply), "손으로 정한 높이를 저장한다");
-  ok(/setChatTopSize\(Math\.round\(Number\(saved\.topH\)\)\)/.test(restore) &&
+  ok(/chatSizeState\.topH = size;\s*persistChatSize\(\);/.test(apply), "손으로 정한 높이를 저장한다");
+  ok(/if \(size\.topH\) setChatTopSize\(size\.topH\);/.test(restore) &&
     !/applyChatTopSize\(/.test(restore),
     "복원은 지금 화면 높이로 잘라 다시 저장하지 않는다(상한은 CSS 가 지킨다)");
-  ok(/addEventListener\("dblclick"/.test(bind) && /delete saved\.topH;/.test(bind) &&
+  ok(/addEventListener\("dblclick"/.test(bind) && /delete chatSizeState\.topH;\s*persistChatSize\(true\);/.test(bind) &&
     /removeProperty\("--mv-chat-top-h"\)/.test(bind),
     "더블클릭하면 저장값을 지우고 자동(16:9) 높이로 돌아간다");
   const grid = L.chatTopStageGrid(L.layoutById("main-chat-top"), "right");
