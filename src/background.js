@@ -6394,8 +6394,18 @@ function isMultiviewHostUrl(url) {
   }
 }
 
+// 새 탭이 아직 처음 주소를 불러오기 전. 파이어폭스는 새 탭을 about:blank 로 먼저 '로드 완료'
+// 라고 알린다. 이때 '다른 페이지로 떠났다' 고 보고 기록을 지우면 정작 /lives 로드가 끝났을 때
+// 화면을 세우지 않았다(파이어폭스에서 /lives 가 그대로였다).
+function isPendingHostTab(tab) {
+  const url = String(tab?.url || "");
+  return !!tab && (url === "" || url === "about:blank");
+}
+
 async function injectMultiviewHost(tabId, info) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return false;
+  if (isPendingHostTab(tab)) return false;
   if (!isMultiviewHostUrl(tab?.url)) {
     const hosts = await readMultiviewHosts();
     if (hosts[tabId]) {
@@ -6430,7 +6440,7 @@ const MULTIVIEW_SETUP_PREFIX = "cheeseMultiviewSetup:";
 async function findMultiviewHostTab(hosts) {
   for (const id of Object.keys(hosts)) {
     const tab = await chrome.tabs.get(Number(id)).catch(() => null);
-    if (tab && isMultiviewHostUrl(tab.url)) return tab;
+    if (tab && (isMultiviewHostUrl(tab.url) || isPendingHostTab(tab))) return tab;
     delete hosts[id];
   }
   return null;
@@ -6447,8 +6457,9 @@ async function reuseMultiviewHost(tab, hosts, setupId, theme) {
     chrome.storage.session.remove(MULTIVIEW_SETUP_PREFIX + previous.setupId).catch(() => {});
   await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   await chrome.tabs.update(tab.id, { active: true });
-  // 다시 불러오면 로드 완료(onUpdated)에서 새 구성으로 화면을 세운다.
-  await chrome.tabs.reload(tab.id);
+  // about:blank 는 /lives 첫 이동 중이다. 여기서 reload 하면 이동을 취소할 수 있다.
+  // 로드가 끝나면 onUpdated 가 최신 구성으로 화면을 세운다.
+  if (!isPendingHostTab(tab)) await chrome.tabs.reload(tab.id);
   return { windowId: tab.windowId, tabId: tab.id, reused: true };
 }
 
@@ -6465,7 +6476,8 @@ async function focusMultiviewHost(tabId) {
   const hosts = await readMultiviewHosts();
   if (!hosts[tabId]) throw new Error("not-multiview-host");
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab || !isMultiviewHostUrl(tab.url)) throw new Error("not-multiview-host");
+  if (!tab || (!isMultiviewHostUrl(tab.url) && !isPendingHostTab(tab)))
+    throw new Error("not-multiview-host");
   await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
   await chrome.tabs.update(tab.id, { active: true });
   return { tabId: tab.id, windowId: tab.windowId };
@@ -6582,6 +6594,20 @@ async function handleMultiviewHostApi(message, sender) {
         return true;
       }
       await chrome.tabs.create({ url: href });
+      return true;
+    }
+    // 시청 화면(content script)의 구성 읽기·쓰기. 파이어폭스는 content script 가 세션 저장소를
+    // 읽지 못한다(setAccessLevel 미지원). 이 탭 자신의 구성 id 만 다룬다.
+    case "setup.get": {
+      const key = MULTIVIEW_SETUP_PREFIX + host.setupId;
+      return (await chrome.storage.session.get(key))?.[key] ?? null;
+    }
+    case "setup.set": {
+      const setup = args.setup;
+      if (!setup || typeof setup !== "object" || Array.isArray(setup) ||
+          !Array.isArray(setup.chosen) || setup.chosen.length > 6 ||
+          JSON.stringify(setup).length > 65536) throw new Error("invalid-setup");
+      await chrome.storage.session.set({ [MULTIVIEW_SETUP_PREFIX + host.setupId]: setup });
       return true;
     }
     default:
