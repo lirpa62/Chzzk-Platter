@@ -345,6 +345,11 @@
         aria-valuemin="100" tabindex="0"></div>
       <aside class="mv-chat" id="mvChat">
         <div class="mv-chat-head">
+          <!-- 빈 칸 채팅일 때만 보인다. 끌어서 다른 칸과 자리를 바꾼다. -->
+          <div class="mv-chat-grip mv-custom-tooltip" id="mvChatGrip" draggable="true"
+            data-tooltip="끌어서 자리 바꾸기" aria-label="채팅 자리 바꾸기">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"></circle><circle cx="15" cy="6" r="1.6"></circle><circle cx="9" cy="12" r="1.6"></circle><circle cx="15" cy="12" r="1.6"></circle><circle cx="9" cy="18" r="1.6"></circle><circle cx="15" cy="18" r="1.6"></circle></svg>
+          </div>
           <div class="mv-chat-title-wrap" id="mvChatTitleWrap">
           <button type="button" class="mv-pop-button mv-chat-title" id="mvChatTitle"
             aria-haspopup="listbox" aria-expanded="false" aria-controls="mvChatTitleList">

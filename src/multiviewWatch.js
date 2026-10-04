@@ -1826,9 +1826,18 @@
     const tracks = inset ? null : LAYOUTS.solveTracks(layout);
     stage.classList.toggle("is-chat-top-layout", layout.chatTop === true);
     stage.classList.toggle("is-chat-inset-layout", inset);
+    const hideChat = stage.classList.contains("is-chat-folded") ||
+      stage.classList.contains("is-chat-popped-out");
+    // 빈 칸 채팅 자리 배정표는 같은 배치·채팅 자리·채널 수에서만 이어 쓴다.
+    const insetKey = inset ? `${layout.id}|${state.chosen.length}` : "";
+    if (insetKey !== chatInsetAreasKey) {
+      chatInsetAreas = null;
+      chatInsetAreasKey = insetKey;
+    }
+    // 채팅을 접거나 분리하면 빈 칸이 다시 비므로 모든 칸이 제 자리로 돌아간다.
+    const areaOf = (slot) => (inset && !hideChat && chatInsetAreas?.[slot]) || slot;
+    $("mvChat").style.gridArea = inset && !hideChat ? areaOf("x") : "";
     if (layout.chatTop || inset) {
-      const hideChat = stage.classList.contains("is-chat-folded") ||
-        stage.classList.contains("is-chat-popped-out");
       const grid = layout.chatTop
         ? LAYOUTS.chatTopStageGrid(layout, side, hideChat)
         : LAYOUTS.chatInsetStageGrid(layout, hideChat);
@@ -1852,7 +1861,7 @@
     orderedChannels().forEach((channel, index) => {
       const cell = cells.get(channel.channelId);
       if (!cell) return;
-      cell.style.gridArea = LAYOUTS.SLOTS[index];
+      cell.style.gridArea = areaOf(LAYOUTS.SLOTS[index]);
       cell.classList.toggle("is-main", index === 0);
       // 2개뿐이면 뺄 수 없다. 왜 안 되는지 알 수 있게 잠그고 이유를 적는다.
       const close = cell.querySelector(".mv-cell-close");
@@ -2126,6 +2135,7 @@
             )
             .join("") +
           (preview.chat ? '<i class="is-chat" style="grid-area:x" aria-hidden="true"></i>' : "") +
+          (preview.handle ? '<i class="is-chat-handle" style="grid-area:z" aria-hidden="true"></i>' : "") +
           `</span><span class="mv-pop-option-label">${esc(l.label)}</span></button>`
         );
       })
@@ -5994,6 +6004,35 @@
   //
   // ⚠ 맨 앞이 메인이다. 메인 자리로 끌어다 놓으면 그 채널이 메인이 되며, 그때만
   //   소리·화질 지시를 다시 보낸다.
+  // ── 빈 칸 채팅 자리 바꾸기 ─────────────────────────────────────────────
+  // 채팅이 빈 칸에 있을 때만 채팅도 다른 칸과 자리를 바꿀 수 있다. 칸 순서(메인 = 첫 칸)는
+  // 건드리지 않고 '자리(슬롯·x) → 실제 격자 영역' 표만 바꾼다. 그래서 채팅과 메인 칸이
+  // 자리를 바꿔도 메인은 그대로이고, 칸끼리 바꾸면 표가 자리 기준이라 위치도 맞게 바뀐다.
+  // 키: 'x'(채팅)·슬롯 글자 → 그 칸이 놓일 격자 영역. 없으면 제 자리.
+  let chatInsetAreas = null;
+  let chatInsetAreasKey = "";
+
+  function chatInsetSwappable() {
+    const stage = $("mvStage");
+    return stage.classList.contains("is-chat-inset-layout") &&
+      !stage.classList.contains("is-chat-folded") &&
+      !stage.classList.contains("is-chat-popped-out");
+  }
+
+  function swapChatInset(channelId) {
+    if (!chatInsetSwappable()) return;
+    const index = orderedChannels().findIndex((c) => c.channelId === channelId);
+    if (index < 0) return;
+    const slot = LAYOUTS.SLOTS[index];
+    const areas = { ...(chatInsetAreas || {}) };
+    const chatArea = areas.x || "x";
+    const slotArea = areas[slot] || slot;
+    areas.x = slotArea;
+    areas[slot] = chatArea;
+    chatInsetAreas = areas;
+    applyLayout();
+  }
+
   function swapCells(fromId, toId) {
     if (!fromId || !toId || fromId === toId) return;
     const order = orderedChannels();
@@ -6011,47 +6050,62 @@
   }
 
   function bindCellDrag() {
+    const stage = $("mvStage");
     const frames = $("mvFrames");
-    if (!frames || frames.dataset.dragBound === "1") return;
-    frames.dataset.dragBound = "1";
+    if (!stage || !frames || stage.dataset.dragBound === "1") return;
+    stage.dataset.dragBound = "1";
+    // 끄는 대상: 칸 id, 또는 빈 칸 채팅이면 "chat".
     let dragId = "";
+    const chat = $("mvChat");
+    // 놓을 수 있는 곳: 칸, 그리고 빈 칸에 있는 채팅.
+    const dropTargetOf = (target) => {
+      const cell = target.closest?.(".mv-cell");
+      if (cell && cell.dataset.channelId !== dragId) return cell;
+      if (dragId !== "chat" && chatInsetSwappable() && target.closest?.("#mvChat")) return chat;
+      return null;
+    };
 
-    frames.addEventListener("dragstart", (event) => {
+    stage.addEventListener("dragstart", (event) => {
       // 손잡이에서 시작한 것만 받는다.
-      if (!event.target.closest?.(".mv-cell-grip")) return;
-      const cell = event.target.closest?.(".mv-cell");
-      if (!cell) return;
-      dragId = cell.dataset.channelId || "";
+      const fromChat = !!event.target.closest?.(".mv-chat-grip") && chatInsetSwappable();
+      const cell = fromChat ? null : event.target.closest?.(".mv-cell-grip") && event.target.closest(".mv-cell");
+      if (!fromChat && !cell) return;
+      dragId = fromChat ? "chat" : cell.dataset.channelId || "";
       event.dataTransfer.effectAllowed = "move";
       // ⚠ iframe 위에서 시작한 드래그는 기본 이미지가 비어 보인다. 칸을 지정한다.
-      event.dataTransfer.setDragImage?.(cell, 20, 20);
-      cell.classList.add("is-dragging");
-      // 끄는 동안만 프레임이 포인터를 먹지 않게 한다(위 CSS 주석 참고).
+      event.dataTransfer.setDragImage?.(fromChat ? chat : cell, 20, 20);
+      (fromChat ? chat : cell).classList.add("is-dragging");
+      // 끄는 동안만 프레임(채팅 포함)이 포인터를 먹지 않게 한다(CSS 주석 참고).
       frames.classList.add("is-dragging");
+      stage.classList.add("is-cell-dragging");
     });
-    frames.addEventListener("dragover", (event) => {
+    stage.addEventListener("dragover", (event) => {
       if (!dragId) return;
-      const over = event.target.closest?.(".mv-cell");
-      if (!over || over.dataset.channelId === dragId) return;
+      const over = dropTargetOf(event.target);
+      if (!over) return;
       event.preventDefault();
       over.classList.add("is-drop-target");
     });
-    frames.addEventListener("dragleave", (event) => {
-      event.target.closest?.(".mv-cell")?.classList.remove("is-drop-target");
+    stage.addEventListener("dragleave", (event) => {
+      (event.target.closest?.(".mv-cell") || event.target.closest?.("#mvChat"))
+        ?.classList.remove("is-drop-target");
     });
-    frames.addEventListener("drop", (event) => {
-      const over = event.target.closest?.(".mv-cell");
-      if (!dragId || !over) return;
+    stage.addEventListener("drop", (event) => {
+      const over = dragId ? dropTargetOf(event.target) : null;
+      if (!over) return;
       event.preventDefault();
-      swapCells(dragId, over.dataset.channelId);
+      if (dragId === "chat") swapChatInset(over.dataset.channelId);
+      else if (over === chat) swapChatInset(dragId);
+      else swapCells(dragId, over.dataset.channelId);
       dragId = "";
     });
     // ⚠ 엉뚱한 곳에 놓거나 취소해도 여기로는 반드시 온다. 표시를 확실히 지운다.
-    frames.addEventListener("dragend", () => {
+    stage.addEventListener("dragend", () => {
       dragId = "";
       frames.classList.remove("is-dragging");
-      for (const cell of frames.querySelectorAll(".mv-cell")) {
-        cell.classList.remove("is-dragging", "is-drop-target");
+      stage.classList.remove("is-cell-dragging");
+      for (const el of [...frames.querySelectorAll(".mv-cell"), chat]) {
+        el?.classList.remove("is-dragging", "is-drop-target");
       }
     });
   }
@@ -7365,13 +7419,14 @@
     renderQuick();
   }
 
-  // 채널 수가 바뀌면 그 수에 맞는 배치로 갈아탄다(지금 배치를 쓸 수 없으면 첫 배치).
+  // 채널 수가 바뀌면 그 수에서 지금과 비슷한 배치로 갈아탄다(LAYOUTS.layoutForCount).
+  // 자동으로 바꾼 기록은 이 탭이 열려 있는 동안만 둔다.
+  const layoutCountBack = new Map();
   function fitLayoutToCount() {
-    const allowed = LAYOUTS.layoutsFor(state.chosen.length);
-    if (!allowed.length) return;
-    if (!allowed.some((l) => l.id === state.layoutId)) {
-      state.layoutId = allowed[0].id;
-      state.chatSide = LAYOUTS.chatSideForSwitch(allowed[0], state.chatSide);
+    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack);
+    if (next) {
+      state.layoutId = next.layoutId;
+      state.chatSide = next.chatSide;
     }
     applyLayout();
   }

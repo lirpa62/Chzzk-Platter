@@ -1025,9 +1025,10 @@ const checks = [];
      for(const p of previews){
        const id=p.dataset.mvLayout;
        const layout=L.layoutById(id);
-       const tracks=L.solveTracks(layout);
+       // 미리보기는 고르기·시청 화면 모두 previewGrid 한 곳에서 계산한다(16:9 트랙, 빈 칸 채팅,
+       // '채팅 위 1' 손잡이 열 포함).
        const box=p.querySelector('.mv-layout-preview');
-       const want=tracks?tracks.columns:layout.columns;
+       const want=L.previewGrid(layout).columns;
        // 브라우저가 fr 값을 반올림해 다시 쓰므로(1.777778fr → 1.77778fr) 숫자로 비교한다.
        const nums=(v)=>String(v).trim().split(/\\s+/).map(x=>parseFloat(x));
        const got=nums(box.style.gridTemplateColumns), exp=nums(want);
@@ -2418,6 +2419,60 @@ const checks = [];
      document.querySelector('[data-mv-set-layout="'+originalId+'"]').click();
      if(stage.dataset.chatSide!==originalSide) setSide(originalSide);
      check(window.frameSrcs.length===before,'빈 칸 채팅 배치 전환으로 프레임을 다시 걸었다');`,
+  );
+
+  await test(
+    "빈 칸 채팅은 끌어서 다른 칸과 자리를 바꿀 수 있다(메인·프레임 그대로)",
+    `const stage=document.getElementById('mvStage');
+     const chat=document.getElementById('mvChat');
+     const grip=document.getElementById('mvChatGrip');
+     const originalId=window.__mvState.layoutId;
+     const originalSide=stage.dataset.chatSide;
+     const before=window.frameSrcs.length;
+     const dt={effectAllowed:'',setDragImage(){}};
+     const fire=(el,type)=>{const e=new Event(type,{bubbles:true,cancelable:true});e.dataTransfer=dt;el.dispatchEvent(e);};
+     const drag=(from,to)=>{fire(from,'dragstart');fire(to,'dragover');fire(to,'drop');fire(from,'dragend');};
+     const rect=(el)=>{const r=el.getBoundingClientRect();return [Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)].join(',');};
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-set-layout="bottom-1-0"]').click();
+     await wait(30);
+     check(stage.classList.contains('is-chat-inset-layout')&&getComputedStyle(grip).display!=='none',
+       '빈 칸 채팅인데 채팅 자리 바꾸기 손잡이가 없다');
+     const main=document.querySelector('.mv-cell.is-main');
+     const aux=document.querySelector('.mv-cell:not(.is-main)');
+     const mainId=main.dataset.channelId;
+     const chatHome=rect(chat), mainHome=rect(main), auxHome=rect(aux);
+     // 채팅을 메인 칸에 놓는다 → 두 자리가 맞바뀌고 메인은 그대로.
+     drag(grip,main);
+     await wait(30);
+     check(rect(chat)===mainHome&&rect(main)===chatHome,'채팅과 메인 칸의 자리가 맞바뀌지 않았다');
+     check(document.querySelector('.mv-cell.is-main').dataset.channelId===mainId,'채팅과 자리를 바꿨는데 메인이 바뀌었다');
+     check(!chat.classList.contains('is-drop-target')&&!stage.classList.contains('is-cell-dragging'),'끌기 표시가 남았다');
+     // 다른 칸의 손잡이를 채팅에 놓는다 → 그 칸과 채팅이 맞바뀐다.
+     drag(aux.querySelector('.mv-cell-grip'),chat);
+     await wait(30);
+     check(rect(aux)===mainHome&&rect(chat)===auxHome&&rect(main)===chatHome,
+       '칸을 채팅에 놓았는데 자리가 맞바뀌지 않았다');
+     // 채팅을 접으면 빈 칸이 다시 비므로 모든 칸이 제 자리로 돌아간다.
+     document.getElementById('mvChatToggle').click();
+     await wait(30);
+     check(rect(main)===mainHome&&rect(aux)===auxHome,'채팅을 접었는데 칸이 제 자리로 돌아가지 않았다');
+     check(getComputedStyle(grip).display==='none'||!grip.offsetParent,'채팅을 접었는데 손잡이가 남았다');
+     document.getElementById('mvChatToggle').click();
+     await wait(30);
+     // 바깥 채팅이면 채팅 손잡이가 없고 칸 자리도 원래대로다.
+     document.querySelector('[data-mv-pop-toggle="side"]').click();
+     document.querySelector('[data-mv-set-side="right"]').click();
+     await wait(30);
+     check(getComputedStyle(grip).display==='none'&&!chat.style.gridArea,'바깥 채팅인데 채팅 손잡이·자리 배정이 남았다');
+     check(window.frameSrcs.length===before,'자리를 바꾸는데 프레임을 다시 걸었다');
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-set-layout="'+originalId+'"]').click();
+     if(stage.dataset.chatSide!==originalSide){
+       document.querySelector('[data-mv-pop-toggle="side"]').click();
+       document.querySelector('[data-mv-set-side="'+originalSide+'"]').click();
+     }
+     await wait(30);`,
   );
 
   await test(

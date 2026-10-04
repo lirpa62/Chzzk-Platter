@@ -769,18 +769,23 @@
     $("mvStart").disabled = state.chosen.length < 2;
   }
 
+  // 채널 수가 바뀌어 배치를 자동으로 바꾼 기록(되돌리면 원래 배치로). 이 화면이 열려 있는 동안만.
+  const layoutCountBack = new Map();
+
   function renderLayouts() {
     const box = $("mvLayoutGrid");
     const list = LAYOUTS.layoutsFor(state.chosen.length);
     if (!list.length) {
       box.innerHTML =
         '<p class="mv-hint">채널을 2개 이상 고르면 배치를 정할 수 있습니다.</p>';
-      state.layoutId = "";
+      // 배치는 지우지 않는다. 다시 2개가 되면 쓰던 2채널 배치로 돌아온다.
       return;
     }
-    if (!list.some((l) => l.id === state.layoutId)) {
-      state.layoutId = list[0].id;
-      state.chatSide = LAYOUTS.chatSideForSwitch(list[0], state.chatSide);
+    // 채널 수가 바뀌면 그 수에서 지금과 비슷한 배치로 간다(LAYOUTS.layoutForCount).
+    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack);
+    if (next) {
+      state.layoutId = next.layoutId;
+      state.chatSide = next.chatSide;
     }
     box.innerHTML = list
       .map((l) => {
@@ -803,6 +808,7 @@
             )
             .join("") +
           (preview.chat ? '<i class="is-chat" style="grid-area:x" aria-hidden="true"></i>' : "") +
+          (preview.handle ? '<i class="is-chat-handle" style="grid-area:z" aria-hidden="true"></i>' : "") +
           `</span><span class="mv-layout-label">${esc(l.label)}</span></button>`
         );
       })
