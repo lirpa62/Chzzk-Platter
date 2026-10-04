@@ -7,7 +7,9 @@ const settingsSource = readFileSync('src/settings.js', 'utf8');
 const settingsHtml = readFileSync('settings.html', 'utf8');
 const contentSource = readFileSync('src/content.js', 'utf8');
 assert.match(settingsHtml, /data-feature="chatHideSendButton"/);
+assert.match(settingsHtml, /data-feature="chatHideInputPlaceholder"/);
 assert.match(contentSource, /chatHideSendButton: false/);
+assert.match(contentSource, /chatHideInputPlaceholder: false/);
 assert.match(contentSource, /cheese-chat-hide-send-button[^\n]*aside#aside-chatting button#send_chat_or_donate/);
 assert.match(settingsSource, /"cheeseMultiviewSetupOptions"/);
 // 분리 채팅 방식은 없앤 설정이다(치지직 페이지 위 멀티뷰는 치지직 채팅창만 쓸 수 있다).
@@ -325,6 +327,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseFeatureHidden.chatHideSendButton===true,'send-button option did not save');
       sendButton.checked=false;sendButton.dispatchEvent(new Event('change',{bubbles:true}));
       check(saved.cheeseFeatureHidden.chatHideSendButton===false,'send-button option did not turn off');
+      const placeholder=document.querySelector('[data-feature="chatHideInputPlaceholder"]');
+      check(placeholder&&!placeholder.checked,'placeholder hiding must default off');
+      placeholder.checked=true;placeholder.dispatchEvent(new Event('change',{bubbles:true}));
+      check(saved.cheeseFeatureHidden.chatHideInputPlaceholder===true,'placeholder option did not save');
       for(const el of document.querySelectorAll('[data-feature-inverted]'))for(const value of [true,false]){
         const old=el.checked;el.checked=CheeseSettingsUi.checkedFromStored(el,value);
         check(CheeseSettingsUi.storedFromChecked(el)===value,'roundtrip failed: '+el.dataset.feature);el.checked=old;
@@ -483,6 +489,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         'full backup omitted cross-origin multiview chat size');
       for(const exported of [regular,full]){
         check(exported.settings.cheeseFeatureHidden?.chatHideSendButton===false,'send-button option missing from backup');
+        check(exported.settings.cheeseFeatureHidden?.chatHideInputPlaceholder===true,'placeholder option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
         check(exported.settings.cheeseMultiviewMainBorder===false,'main border setting missing from export');
@@ -505,7 +512,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       }
       const payload={format:'chzzk-platter-settings',schemaVersion:1,settings:{cheeseMasterEnabled:true,
         cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
-        cheeseFeatureHidden:{...saved.cheeseFeatureHidden,chatHideSendButton:true,vodLocalChat:false},
+        cheeseFeatureHidden:{...saved.cheeseFeatureHidden,chatHideSendButton:true,chatHideInputPlaceholder:false,vodLocalChat:false},
         cheeseMultiviewMainBorder:true,
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
         cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
@@ -523,6 +530,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseMultiviewLiveCatchUpLimit===4,'catch-up limit was not imported');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
       check(saved.cheeseFeatureHidden?.chatHideSendButton===true,'send-button setting was not imported');
+      check(saved.cheeseFeatureHidden?.chatHideInputPlaceholder===false,'placeholder setting was not imported');
       check(saved.cheeseFeatureHidden?.vodLocalChat===false,'local replay chat setting was not imported');
       check(saved.cheeseMultiviewMainBorder===true,'main border setting was not imported');
       check(saved.cheeseMultiviewSetupSortBySource?.following==='name-asc','setup source sort was not imported');

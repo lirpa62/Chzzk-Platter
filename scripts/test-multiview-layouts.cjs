@@ -106,10 +106,13 @@ for (const n of [2, 3, 4, 5, 6]) {
 console.log("\n[추가 배치] 요청한 채널 수별 변형이 모두 있다");
 for (const [count, ids] of [
   [2, ["main-chat-top", "right-1-0", "left-1-0", "bottom-1-0", "bottom-1-2"]],
-  [3, ["top-2-single-0", "top-2-single-1", "top-2-single-2", "bottom-2-single-0", "bottom-2-single-1", "bottom-2-single-2"]],
+  [3, ["top-2-single-0", "top-2-single-1", "top-2-single-2", "bottom-2-single-1",
+    "main-top-chat-top", "main-bottom-chat-top",
+    "tl-1-right-2", "tr-1-left-2"]],
   [4, ["top-2-chat-top", "bottom-2-chat-top"]],
   [5, ["grid-2x3-5", "top-4", "bottom-4", "grid-2x2-chat-top", "right-3-chat-top", "left-3-chat-top", "top-3-chat-top", "bottom-3-chat-top"]],
-  [6, ["grid-2x3-6", "top-5", "bottom-5", "right-4-chat-top", "left-4-chat-top", "top-4-chat-top", "bottom-4-chat-top"]],
+  [6, ["grid-2x3-6", "top-5", "bottom-5", "right-4-chat-top", "left-4-chat-top", "top-4-chat-top", "bottom-4-chat-top",
+    "grid-2-3-chat-top", "grid-3-2-chat-top"]],
 ]) {
   const available = new Set(L.layoutsFor(count).map((layout) => layout.id));
   for (const id of ids) ok(available.has(id), `${count}채널: ${id}`);
@@ -123,7 +126,8 @@ for (const id of ["right-1-1", "right-1-2", "left-1-1", "left-1-2",
   "bottom-1-1", "top-1-0", "top-1-1", "top-1-2",
   "right-2-top-1-0", "right-2-top-1-1", "right-2-top-1-2",
   "right-2-bottom-1-1", "left-2-top-1-0", "left-2-top-1-1", "left-2-top-1-2",
-  "right-2-chat-top", "left-2-chat-top", "left-2-bottom-1-1"]) {
+  "right-2-chat-top", "left-2-chat-top", "left-2-bottom-1-1",
+  "bottom-2-single-0", "bottom-2-single-2"]) {
   ok(L.layoutById(id) === null, `${id}: 삭제된 배치`);
 }
 
@@ -150,12 +154,15 @@ console.log("\n[빈 칸 채팅] 빈 칸이 직사각형 하나로 남는 배치"
     "right-1-0": "right", "left-1-0": "left",
     "bottom-1-0": "right", "bottom-1-2": "left",
     "top-2-single-0": "right", "top-2-single-2": "left",
-    "bottom-2-single-0": "right", "bottom-2-single-2": "left",
+
     "right-2-bottom-1-0": "right", "right-2-bottom-1-2": "left",
     "left-2-bottom-1-0": "right", "left-2-bottom-1-2": "left",
+    "tl-1-right-2": "left", "tr-1-left-2": "right",
+    // 빈 칸이 한 칸 남는 5채널 배치도 빈 칸이 기본이다.
+    "right2-bottom2": "left", "left2-bottom2": "right", "grid-3x2-5": "right", "grid-2x3-5": "right",
   };
-  // 빈 칸이 한 칸뿐이라 바깥이 기본이고 '빈 칸' 은 골라야 쓰는 배치.
-  const outsideDefault = ["grid-3x2-5", "grid-2x3-5", "right2-bottom2", "left2-bottom2"];
+  // 바깥이 기본이고 '빈 칸' 은 골라야 쓰는 배치(지금은 없다).
+  const outsideDefault = [];
   ok(JSON.stringify(L.LAYOUTS.filter((layout) => layout.chatInsetOption).map((layout) => layout.id).sort()) ===
     JSON.stringify([...Object.keys(insetDefault), ...outsideDefault].sort()),
     "빈 칸 채팅을 쓸 수 있는 배치는 위 두 목록뿐이다");
@@ -221,12 +228,177 @@ console.log("\n[빈 칸 채팅] 빈 칸이 직사각형 하나로 남는 배치"
     /const sides = LAYOUTS\.chatSidesFor\(layout\);\s*\$\("mvSidePanel"\)/.test(watch) &&
     /\[LAYOUTS\.CHAT_INSET_SIDE\]: "빈 칸"/.test(watch),
     "시청 화면: 채팅 위치 패널에 '빈 칸' 이 나오고 같은 규칙으로 검증한다");
-  ok((watch.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 2 &&
-    (setup.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 2,
-    "배치를 바꾸는 모든 곳(직접 고르기·채널 수 변경)이 같은 규칙을 쓴다");
+  ok((watch.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 1 &&
+    (setup.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 1 &&
+    (watch.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack\)/g) || []).length === 1 &&
+    (setup.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack\)/g) || []).length === 1 &&
+    !/state\.layoutId = list\[0\]\.id|state\.layoutId = allowed\[0\]\.id|state\.layoutId = ""/.test(watch + setup),
+    "배치를 바꾸는 모든 곳이 같은 규칙을 쓴다(직접 고르기 chatSideForSwitch, 채널 수 변경 layoutForCount)");
   ok((watch.match(/LAYOUTS\.previewGrid\(l\)/g) || []).length === 1 &&
     (setup.match(/LAYOUTS\.previewGrid\(l\)/g) || []).length === 1,
     "고르기 화면과 시청 화면 미리보기가 같은 계산을 쓴다");
+}
+
+console.log("\n[3채널] 위 한쪽 메인 + 반대쪽 보조 2 + 메인 아래 채팅");
+for (const [id, label, areas] of [
+  ["tl-1-right-2", "오른쪽 2 · 메인 위", '"m a" "x b"'],
+  ["tr-1-left-2", "왼쪽 2 · 메인 위", '"a m" "b x"'],
+]) {
+  const layout = L.layoutById(id);
+  ok(layout?.label === label && layout.aux === 2, `${id}: 3채널 '${label}'`);
+  ok(L.chatInsetStageGrid(layout).areas === areas, `${id}: 메인 아래 칸이 채팅 자리(${areas})`);
+  ok(L.stageStyle(layout, "").side === L.CHAT_INSET_SIDE && L.previewGrid(layout).chat,
+    `${id}: 처음부터 채팅이 그 칸에 있고 미리보기에도 그린다`);
+}
+
+console.log("\n[이름·순서] 보조가 있는 쪽으로 묶어 오른쪽 → 왼쪽 → 아래 → 위 → 그리드 → 채팅 위 1");
+{
+  const expected = {
+    2: ["오른쪽 1", "오른쪽 1 · 위", "왼쪽 1", "왼쪽 1 · 위", "아래 1", "아래 1 · 왼쪽", "아래 1 · 오른쪽",
+      "위 1", "메인 + 채팅 위 1"],
+    3: ["오른쪽 2", "오른쪽 2 · 메인 위", "왼쪽 2", "왼쪽 2 · 메인 위", "아래 2", "아래 2 · 메인 가운데",
+      "위 2", "위 2 · 메인 왼쪽", "위 2 · 메인 가운데", "위 2 · 메인 오른쪽",
+      "메인 위 + 채팅 위 1", "메인 아래 + 채팅 위 1"],
+    4: ["오른쪽 3", "오른쪽 2 + 아래 1 · 왼쪽", "오른쪽 2 + 아래 1 · 오른쪽", "왼쪽 3",
+      "왼쪽 2 + 아래 1 · 왼쪽", "왼쪽 2 + 아래 1 · 오른쪽", "아래 3", "위 3", "그리드 2×2",
+      "아래 2 + 채팅 위 1", "위 2 + 채팅 위 1"],
+    5: ["오른쪽 2 + 아래 2", "오른쪽 2×2", "오른쪽 4", "왼쪽 2 + 아래 2", "왼쪽 2×2", "왼쪽 4", "아래 4",
+      "위 4", "그리드 3×2", "그리드 2×3", "오른쪽 3 + 채팅 위 1", "왼쪽 3 + 채팅 위 1", "아래 3 + 채팅 위 1",
+      "위 3 + 채팅 위 1", "그리드 2×2 + 채팅 위 1"],
+    6: ["오른쪽 2 + 아래 3", "오른쪽 5", "왼쪽 2 + 아래 3", "왼쪽 5", "아래 5", "위 5", "그리드 3×2",
+      "그리드 2×3", "오른쪽 4 + 채팅 위 1", "왼쪽 4 + 채팅 위 1", "아래 4 + 채팅 위 1", "위 4 + 채팅 위 1",
+      "그리드 2·3 + 채팅 위 1", "그리드 3·2 + 채팅 위 1"],
+  };
+  for (const [count, labels] of Object.entries(expected)) {
+    const got = L.layoutsFor(Number(count)).map((layout) => layout.label);
+    ok(JSON.stringify(got) === JSON.stringify(labels), `${count}채널 순서·이름: ${got.join(" | ")}`);
+  }
+  // 채널 수가 바뀔 때 고르는 기본 배치(각 목록의 첫 배치)는 그대로다.
+  ok(["right-1", "right-2", "right-3", "right2-bottom2", "right2-bottom3"]
+    .every((id, i) => L.layoutsFor(i + 2)[0].id === id), "채널 수별 기본 배치는 바뀌지 않았다");
+  ok(L.LAYOUTS.every((layout) => !/\S\+|\+\S/.test(layout.label)), "'+' 앞뒤 띄어쓰기를 맞춘다");
+  ok(L.LAYOUTS.every((layout) => [...layout.label].length <= 18),
+    `이름은 18자 이하(가장 긴 이름: ${L.LAYOUTS.map((l) => l.label).sort((a, b) => [...b].length - [...a].length)[0]})`);
+  const src = require("node:fs").readFileSync(path.join(__dirname, "..", "src", "multiviewLayouts.js"), "utf8");
+  const order = [...src.slice(src.indexOf("const LAYOUT_ORDER = ["), src.indexOf("];", src.indexOf("const LAYOUT_ORDER = ["))).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  ok(L.LAYOUTS.every((layout) => order.includes(layout.id)) && order.every((id) => L.layoutById(id)),
+    "모든 배치가 순서표에 있고, 순서표에 없는 배치 id 는 없다");
+  // '채팅 위 1' 은 따로 붙는 채팅 열이라 미리보기에 손잡이를 그려 빈 칸 채팅과 구분한다.
+  for (const layout of L.LAYOUTS.filter((item) => item.chatTop)) {
+    const p = L.previewGrid(layout);
+    const rows = p.areas.split(/(?<=")\s+(?=")/);
+    ok(p.handle && p.chat && rectangular(rows) && rows.every((row) => / z [^ "]+"$/.test(row)) &&
+      p.columns === `${layout.coreColumns} 2px 1fr`, `${layout.id}: 미리보기에 채팅 열 손잡이(z)`);
+  }
+  ok(L.LAYOUTS.filter((item) => item.chatInsetOption).every((layout) => !L.previewGrid(layout).handle),
+    "빈 칸 채팅 배치 미리보기에는 손잡이가 없다");
+  // 이름에는 채팅 위치를 쓰지 않고 미리보기 채팅 칸에 '채팅' 을 적는다(좁으면 쓰지 않는다).
+  ok(L.LAYOUTS.every((layout) => !/채팅 (아래|왼쪽|오른쪽)/.test(layout.label)), "이름에 채팅 위치를 쓰지 않는다");
+  const css = require("node:fs").readFileSync(path.join(__dirname, "..", "src", "multiview.css"), "utf8");
+  ok(/\.mv-layout-preview i\.is-chat \{[^}]*container-type: inline-size;/.test(css) &&
+    /@container \(min-width: 20px\) \{\s*\.mv-layout-preview i\.is-chat::after \{\s*content: "채팅";/.test(css),
+    "미리보기 채팅 칸에 '채팅' 을 적고, 칸이 좁으면 쓰지 않는다");
+}
+
+console.log("\n[3채널 채팅 위 1] 왼쪽 열을 메인·보조 1 이 위아래로 나누고 채팅 열 위에 보조 2");
+for (const [id, label, areas] of [
+  ["main-top-chat-top", "메인 위 + 채팅 위 1", '"m b" "a x"'],
+  ["main-bottom-chat-top", "메인 아래 + 채팅 위 1", '"a b" "m x"'],
+]) {
+  const layout = L.layoutById(id);
+  ok(layout?.label === label && layout.aux === 2 && layout.chatTop && layout.areas.join(" ") === areas &&
+    layout.rows === "1fr 1fr", `${id}: '${label}' (${areas}, 메인·보조 1 같은 크기)`);
+  const [upper, lower] = id === "main-top-chat-top" ? ["m", "a"] : ["a", "m"];
+  const right = L.chatTopStageGrid(layout, "right");
+  const left = L.chatTopStageGrid(layout, "left");
+  const hidden = L.chatTopStageGrid(layout, "right", true);
+  ok(right.areas === `"${upper} z b" "${upper} z y" "${upper} z x" "${lower} z x"` &&
+    left.areas === `"b z ${upper}" "y z ${upper}" "x z ${upper}" "x z ${lower}"`,
+    `${id}: 왼쪽 열은 반씩, 채팅 열은 위 영상·손잡이·채팅으로 나눈다(좌우 대칭)`);
+  ok(/^minmax\(0, min\(var\(--mv-chat-top-h.*calc\(50% - 8px\)\)\) 6px minmax\(0, calc\(50% - .* - 8px\)\) minmax\(0, 1fr\)$/.test(right.rows),
+    `${id}: 채팅 위 영상 높이는 조절하되 절반을 넘지 않는다`);
+  ok(hidden.areas === `"${upper} z b" "${lower} z b"` && hidden.rows === "1fr 1fr",
+    `${id}: 채팅을 숨기면 보조 2 가 채팅 열 전체를 쓴다`);
+}
+
+console.log("\n[채팅 위 1 · 줄 나눔] 격자 줄은 배치 비율대로, 채팅 위 영상은 첫 줄 안에서만");
+for (const [id, share, areas] of [
+  ["grid-2x2-chat-top", "50%", '"m a z d" "m a z y" "m a z x" "b c z x"'],
+  ["grid-2-3-chat-top", "33.3333%", '"m a z e" "m a z y" "m a z x" "m c z x" "b c z x" "b d z x"'],
+  ["grid-3-2-chat-top", "33.3333%", '"a m z e" "a m z y" "a m z x" "c m z x" "c b z x" "d b z x"'],
+]) {
+  const layout = L.layoutById(id);
+  const grid = L.chatTopStageGrid(layout, "right");
+  ok(layout?.chatTopSplit && grid.areas === areas && grid.rows.includes(`calc(${share} - 8px)`) &&
+    grid.rows.endsWith(layout.rows.split(" ").slice(1).map((v) => `minmax(0, ${v})`).join(" ")),
+    `${id}: 첫 줄(${share}) 안에서 위 영상·손잡이·채팅을 나눈다`);
+  ok(L.chatTopStageGrid(layout, "right", true).rows === layout.rows, `${id}: 채팅을 숨기면 배치 비율 그대로`);
+}
+{
+  // 6채널 그리드: 메인·보조 1 은 반씩(2+1 / 1+2), 보조 3 은 3등분(2 / 1+1 / 2).
+  const spans = (id) => {
+    const { spans: s } = L.slotSpans(L.layoutById(id));
+    const fr = L.layoutById(id).rows.split(" ").map(parseFloat);
+    return Object.fromEntries(Object.entries(s).map(([slot, sp]) =>
+      [slot, fr.slice(sp.r0, sp.r1 + 1).reduce((a, b) => a + b, 0)]));
+  };
+  const a = spans("grid-2-3-chat-top");
+  const b = spans("grid-3-2-chat-top");
+  ok(a.m === 3 && a.b === 3 && a.a === 2 && a.c === 2 && a.d === 2 && a.e === 2,
+    "그리드 2·3: 왼쪽 열 메인·보조 1 반씩, 오른쪽 열 보조 3 등분");
+  ok(b.m === 3 && b.b === 3 && b.a === 2 && b.c === 2 && b.d === 2,
+    "그리드 3·2: 왼쪽 열 보조 3 등분, 오른쪽 열 메인·보조 1 반씩");
+}
+
+console.log("\n[채널 수 변경] 지금과 비슷한 배치로 간다");
+{
+  const N = L.COUNT_NEIGHBORS;
+  const count = (id) => L.layoutById(id).aux + 1;
+  ok(L.LAYOUTS.every((layout) => N[layout.id]) && Object.keys(N).every((id) => L.layoutById(id)),
+    "모든 배치가 대응표에 있고, 없는 배치 id 는 없다");
+  ok(L.LAYOUTS.every((layout) => {
+    const [down, up] = N[layout.id];
+    const n = layout.aux + 1;
+    return (n === 2 ? down === null : count(down) === n - 1) && (n === 6 ? up === null : count(up) === n + 1);
+  }), "−1 은 한 채널 적은 배치, +1 은 한 채널 많은 배치(2채널 −, 6채널 + 없음)");
+  const step = (id, n) => L.layoutForCount(id, n, "right")?.layoutId;
+  for (const [from, n, to] of [
+    ["left-3", 5, "left-4"], ["left-3", 3, "left-2"],
+    ["right-1-0", 3, "tl-1-right-2"], ["left-1-0", 3, "tr-1-left-2"],
+    ["grid-2x2", 3, "tl-1-right-2"], ["tl-1-right-2", 4, "grid-2x2"],
+    ["grid-2x2-chat-top", 6, "grid-2-3-chat-top"], ["grid-3-2-chat-top", 5, "grid-2x2-chat-top"],
+    ["right-3-chat-top", 4, "bottom-2-chat-top"], ["left-3-chat-top", 4, "top-2-chat-top"],
+    ["right2-bottom2", 4, "right-2-bottom-1-0"], ["left2-bottom2", 4, "left-2-bottom-1-2"],
+    ["right-2x2", 6, "right2-bottom3"], ["main-chat-top", 3, "main-top-chat-top"],
+    ["bottom-2-chat-top", 3, "main-top-chat-top"],
+    // 두 칸 이상 바뀌면 한 칸씩 따라간다.
+    ["left-1", 5, "left-4"], ["top-5", 2, "top-1"],
+  ]) ok(step(from, n) === to, `${from} → ${n}채널: ${to}`);
+  ok(L.layoutForCount("left-3", 4, "right") === null, "채널 수가 같으면 바꾸지 않는다");
+  ok(step("없는배치", 3) === "right-2" && step("", 4) === "right-3", "지금 배치를 모르면 첫 배치");
+  ok(L.layoutForCount("left-3", 1, "right") === null, "배치가 없는 채널 수면 그대로 둔다");
+
+  // 채팅 자리: 쓸 수 있으면 그대로, 빈 칸이 기본인 배치로 가면 빈 칸.
+  ok(L.layoutForCount("left-3", 5, "bottom").chatSide === "bottom", "새 배치가 허용하면 채팅 자리를 유지한다");
+  ok(L.layoutForCount("left-3", 5, "inset").chatSide === "right", "허용하지 않으면 새 배치의 기본 자리");
+  ok(L.layoutForCount("grid-2x2", 5, "left").chatSide === "inset", "빈 칸이 기본인 배치로 가면 빈 칸");
+
+  // 되돌아가기: 자동으로 바뀐 배치를 그대로 둔 채 채널 수를 되돌리면 원래 배치·채팅 자리로.
+  const back = new Map();
+  const down = L.layoutForCount("right-2x2", 4, "bottom", back);
+  ok(down.layoutId === "right-3", "오른쪽 2×2 → 4채널: 오른쪽 3");
+  const up = L.layoutForCount(down.layoutId, 5, down.chatSide, back);
+  ok(up.layoutId === "right-2x2" && up.chatSide === "bottom", "다시 5채널: 표의 '오른쪽 4' 가 아니라 원래 '오른쪽 2×2'·채팅 자리로");
+  const again = L.layoutForCount(up.layoutId, 4, up.chatSide, back);
+  ok(again.layoutId === "right-3", "되돌아간 뒤 다시 빼도 같은 배치");
+  ok(L.layoutForCount("right-3", 5, "left").layoutId === "right-4", "기록이 없으면 표를 따른다");
+  const chain = new Map();
+  const a4 = L.layoutForCount("grid-3x2", 5, "right", chain);
+  const a3 = L.layoutForCount(a4.layoutId, 4, a4.chatSide, chain);
+  const b4 = L.layoutForCount(a3.layoutId, 5, a3.chatSide, chain);
+  const b5 = L.layoutForCount(b4.layoutId, 6, b4.chatSide, chain);
+  ok(a4.layoutId === "grid-3x2-5" && a3.layoutId === "grid-2x2" && b4.layoutId === "grid-3x2-5" &&
+    b5.layoutId === "grid-3x2", "여러 번 줄였다 늘려도 거꾸로 같은 길로 돌아온다");
 }
 
 console.log("\n[layoutById] 없는 id 는 null");

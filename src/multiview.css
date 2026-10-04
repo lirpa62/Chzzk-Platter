@@ -1286,8 +1286,34 @@ button.mv-live-more {
   background: var(--popup-brand, #00ffa3);
 }
 .mv-layout-preview i.is-chat {
+  align-items: center;
   background: color-mix(in srgb, var(--popup-border, #34383d) 45%, transparent);
   border: 1px solid var(--popup-border, #34383d);
+  box-sizing: border-box;
+  color: var(--popup-muted, #9aa1a9);
+  container-type: inline-size;
+  display: flex;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+/* '채팅 위 1': 영상 격자 옆에 따로 붙는 채팅 열과의 경계(너비 조절 손잡이 자리). */
+.mv-layout-preview i.is-chat-handle {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 1px;
+  opacity: 0.55;
+}
+/* 배치 이름에 채팅 위치를 쓰지 않는다. 미리보기 채팅 칸에 적어 보여 준다. 칸이 글자보다
+   좁으면(열이 많은 '채팅 위 1' 배치) '채' 만 잘려 보이지 않게 아예 쓰지 않는다. */
+@container (min-width: 20px) {
+  .mv-layout-preview i.is-chat::after {
+    content: "채팅";
+    white-space: nowrap;
+  }
 }
 .mv-layout-label {
   font-size: 11px;
@@ -1860,9 +1886,37 @@ button.mv-live-more {
 .mv-frames.is-dragging iframe {
   pointer-events: none;
 }
-.mv-cell.is-drop-target {
+.mv-cell.is-drop-target,
+.mv-chat.is-drop-target {
   outline: 3px dashed var(--popup-brand, #00ffa3);
   outline-offset: -3px;
+}
+.mv-chat.is-dragging {
+  opacity: 0.5;
+}
+/* 칸을 끄는 동안 채팅 프레임도 포인터를 먹지 않게 한다(빈 칸 채팅이 드롭 대상). */
+.mv-stage.is-cell-dragging .mv-chat iframe {
+  pointer-events: none;
+}
+/* 채팅 자리 바꾸기 손잡이. 빈 칸 채팅일 때만 보인다(바깥 채팅·채팅 위 1 은 자리가 따로다). */
+.mv-chat-grip {
+  align-items: center;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: inherit;
+  cursor: grab;
+  display: none;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  width: 22px;
+}
+.mv-chat-grip:active {
+  cursor: grabbing;
+}
+.mv-stage.is-chat-inset-layout:not(.is-chat-folded):not(.is-chat-popped-out) .mv-chat-grip {
+  display: flex;
 }
 
 /* 칸 도구 모음(손잡이 + 제거). 한 곳에 모아 영상을 덜 가린다. */

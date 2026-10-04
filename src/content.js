@@ -2389,6 +2389,7 @@
     chatHidePrediction: false,
     chatHideParty: false, // 채팅 상단 고정 '파티 후원' 진행 패널 숨김
     chatHideSendButton: false, // 일반·멀티뷰 라이브 채팅 입력창의 전송 버튼 숨김
+    chatHideInputPlaceholder: false, // 라이브 채팅 입력창의 '채팅을 입력해주세요 (J)' 안내 문구 숨김
     chatHideDonation: false, // 채팅 스트림의 후원(치즈) 메시지 숨김
     chatHideSubscription: false, // 채팅 스트림의 구독 메시지 숨김
     chatHideMissionMsg: false, // 채팅 스트림의 미션 메시지 숨김
@@ -18099,6 +18100,11 @@
       "cheese-chat-nickname-message-split",
       featureFlags.chatSplitNickname === true,
     );
+    // 채팅 입력창 안내 문구 숨김(content.css 가 본다).
+    document.documentElement.classList.toggle(
+      "cheese-chat-hide-input-placeholder",
+      featureFlags.chatHideInputPlaceholder === true,
+    );
     // 다시보기 로컬 채팅 줄 강조의 테두리선·배경색 숨김(replayLocalChat.css 가 본다).
     document.documentElement.classList.toggle(
       "cheese-vod-local-chat-hide-border",
@@ -18767,6 +18773,36 @@
       return;
     }
     textarea.style.setProperty("height", "40px", "important");
+  }
+
+  // 입력창 높이는 채팅 정리 주기(최소 300ms)를 기다리지 않고 바로 지킨다.
+  // ⚠ 치지직은 입력창에서 포커스가 빠질 때마다 textarea 를 새로 만들어 끼우고, 좁은 채팅
+  //   (실측 262px)에서는 빈 칸인데도 인라인 height:60px !important 를 준다. 정리 주기에
+  //   맡기면 최대 300ms 동안 입력 영역이 20px 커졌다가 돌아왔다(2026-10-04 실측: 133↔153,
+  //   입력창 교체마다 반복). 인라인 !important 라 CSS 로는 이길 수 없어, 교체를 본 그 자리
+  //   (화면을 그리기 전)와 지금 입력창의 style 변경에서 바로 40px 로 되돌린다.
+  let chatInputHeightObserver = null;
+  let chatInputHeightTarget = null;
+  function guardChatInputHeight() {
+    const aside = document.querySelector("aside#aside-chatting");
+    const active = !!aside &&
+      document.documentElement.classList.contains("cheese-chat-width-resize-enabled");
+    const textarea = active ? aside.querySelector("textarea") : null;
+    if (textarea !== chatInputHeightTarget) {
+      chatInputHeightObserver?.disconnect();
+      chatInputHeightTarget = textarea instanceof HTMLTextAreaElement ? textarea : null;
+      if (chatInputHeightTarget) {
+        chatInputHeightObserver ||= new MutationObserver(() => {
+          const owner = chatInputHeightTarget?.closest("aside#aside-chatting");
+          if (owner) normalizeChatInputHeight(owner);
+        });
+        chatInputHeightObserver.observe(chatInputHeightTarget, {
+          attributes: true,
+          attributeFilter: ["style"],
+        });
+      }
+    }
+    if (chatInputHeightTarget) normalizeChatInputHeight(aside);
   }
 
   function resetChatAsideWidth(aside, { preservePopupWidth = false } = {}) {
@@ -23898,12 +23934,15 @@
       ) {
         return;
       }
+      // 입력창 교체는 정리 주기를 기다리지 않는다(위 guardChatInputHeight 설명).
+      guardChatInputHeight();
       scheduleChatTweak();
     });
     for (const t of targets) {
       chatObserver.observe(t, { childList: true, subtree: true });
     }
     chatObservedTargets = targets;
+    guardChatInputHeight(); // 이미 들어와 있는 입력창(방송 입장 직후)도 바로 맞춘다
   }
   let chatObservedTargets = [];
 
@@ -23914,6 +23953,8 @@
       chatObserver = null;
     }
     chatObservedTargets = [];
+    chatInputHeightObserver?.disconnect();
+    chatInputHeightTarget = null;
   }
   let chatTweakRaf = 0;
   let chatHtmlClassObserver = null;
@@ -23954,6 +23995,8 @@
       chatObserver = null;
     }
     chatObservedTargets = [];
+    chatInputHeightObserver?.disconnect();
+    chatInputHeightTarget = null;
     if (chatHtmlClassObserver) {
       chatHtmlClassObserver.disconnect();
       chatHtmlClassObserver = null;
@@ -42938,6 +42981,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (!dragging) return;
       dragging = false;
       followPreviewState.resizing = false;
+      el.classList.remove("is-resizing");
       try {
         handle.releasePointerCapture?.(e.pointerId);
       } catch {}
@@ -42962,6 +43006,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       e.stopPropagation();
       dragging = true;
       followPreviewState.resizing = true;
+      // 끄는 동안 커서가 영상 밖으로 나가도 핸들이 사라지지 않게 한다(CSS 가 본다).
+      el.classList.add("is-resizing");
       clearFollowPreviewCloseTimer();
       startX = e.clientX;
       startW = followPreviewState.width;
