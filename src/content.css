@@ -6596,6 +6596,59 @@ html.cheese-fcln-lock .cheese-modal-scroll-shift {
   white-space: nowrap;
 }
 
+/* 항목별 켜기/끄기. 끈 항목은 지우지 않고 흐리게 둔다. */
+.cheese-live-tag-filter-row.is-off > label:first-child span {
+  opacity: 0.45;
+}
+.cheese-live-tag-filter-row > label.cheese-live-tag-filter-toggle {
+  flex: none;
+  gap: 0;
+  position: relative;
+}
+.cheese-live-tag-filter-toggle input {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+.cheese-live-tag-filter-toggle i {
+  background: rgba(127, 127, 127, 0.35);
+  border-radius: 999px;
+  display: inline-block;
+  height: 18px;
+  position: relative;
+  transition: background 0.15s ease;
+  width: 30px;
+}
+.cheese-live-tag-filter-toggle i::after {
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  content: "";
+  height: 14px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 0.15s ease;
+  width: 14px;
+}
+.cheese-live-tag-filter-toggle input:checked + i {
+  background: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c86f)
+  );
+}
+.cheese-live-tag-filter-toggle input:checked + i::after {
+  transform: translateX(12px);
+}
+.cheese-live-tag-filter-toggle input:focus-visible + i {
+  outline: 2px solid
+    var(
+      --sem-color-content-brand-base,
+      var(--cheese-platter-content-brand-base, #00c86f)
+    );
+  outline-offset: 2px;
+}
+
 .cheese-live-tag-filter-empty {
   margin: 0;
   padding: 24px 18px 30px;

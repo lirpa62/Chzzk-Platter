@@ -1532,8 +1532,8 @@
                     >스크린샷 버튼 표시</span
                   >
                   <span class="settings-item-desc"
-                    >현재 재생 화면을 PNG로 저장하는 버튼입니다. 단축키:
-                    Shift+S</span
+                    >현재 재생 화면을 PNG로 저장하거나 클립보드에 복사하는
+                    버튼입니다. 단축키: Shift+S</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1544,6 +1544,94 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="스크린샷 클립보드 복사"
+                    >└ 스크린샷 버튼 동작</span
+                  >
+                  <span class="settings-item-desc"
+                    >버튼이나 Shift+S 를 눌렀을 때 파일로 저장할지 클립보드에
+                    복사할지 고릅니다. 저장 전 미리보기를 켜면 미리보기 창에서
+                    저장과 복사를 모두 할 수 있습니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-screenshot-action
+                  role="radiogroup"
+                  aria-label="스크린샷 버튼 동작"
+                >
+                  <button
+                    type="button"
+                    data-screenshot-action-value="save"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    파일 저장
+                  </button>
+                  <button
+                    type="button"
+                    data-screenshot-action-value="copy"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    클립보드 복사
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="스크린샷 파일명 형식 스크린샷 이름"
+                    >└ 스크린샷 파일 이름</span
+                  >
+                  <span class="settings-item-desc"
+                    >파일로 저장할 때 쓰는 이름 형식입니다. 아래 항목을 누르면
+                    커서 자리에 들어갑니다. 값이 없는 항목(예: 업로드 영상의
+                    방송 시각)은 앞의 구분자와 함께 빠지고, 항목이 하나도 없으면
+                    기본 형식을 씁니다.</span
+                  >
+                </div>
+                <div class="settings-screenshot-name" data-screenshot-name>
+                  <div class="settings-screenshot-name-row">
+                    <input
+                      type="text"
+                      data-screenshot-name-format
+                      maxlength="200"
+                      spellcheck="false"
+                      autocomplete="off"
+                      aria-label="스크린샷 파일 이름 형식"
+                    />
+                    <button
+                      type="button"
+                      class="settings-order-reset"
+                      data-screenshot-name-reset
+                    >
+                      기본값
+                    </button>
+                  </div>
+                  <div
+                    class="settings-screenshot-name-tokens"
+                    role="group"
+                    aria-label="파일 이름에 넣을 항목"
+                  >
+                    <button type="button" data-screenshot-name-token="채널" title="채널 이름">채널</button>
+                    <button type="button" data-screenshot-name-token="제목" title="방송·영상 제목">제목</button>
+                    <button type="button" data-screenshot-name-token="카테고리" title="방송·영상 카테고리">카테고리</button>
+                    <button type="button" data-screenshot-name-token="날짜" title="찍은 날짜(예: 20261005)">날짜</button>
+                    <button type="button" data-screenshot-name-token="시각" title="찍은 시각(예: 213015)">시각</button>
+                    <button type="button" data-screenshot-name-token="방송시각" title="화면에 나온 장면이 실제로 방송된 날짜_시각. 다시보기는 방송 시작 시각 + 재생 위치">방송 시각</button>
+                  </div>
+                  <p
+                    class="settings-screenshot-name-preview"
+                    data-screenshot-name-preview
+                    aria-live="polite"
+                  ></p>
+                </div>
               </li>
               <li class="settings-item">
                 <label>
@@ -1895,7 +1983,6 @@
                 >
                   <button
                     type="button"
-                    class="settings-segmented-btn"
                     data-mode-value="global"
                     role="radio"
                     aria-checked="true"
@@ -1904,7 +1991,6 @@
                   </button>
                   <button
                     type="button"
-                    class="settings-segmented-btn"
                     data-mode-value="channel"
                     role="radio"
                     aria-checked="false"
@@ -2007,7 +2093,6 @@
                 >
                   <button
                     type="button"
-                    class="settings-segmented-btn"
                     data-gain-mode-value="global"
                     role="radio"
                     aria-checked="true"
@@ -2016,7 +2101,6 @@
                   </button>
                   <button
                     type="button"
-                    class="settings-segmented-btn"
                     data-gain-mode-value="channel"
                     role="radio"
                     aria-checked="false"
@@ -4617,6 +4701,24 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-live-tag-filter-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="팔로잉 라이브 더보기 자동"
+                    >팔로잉 라이브 자동 펼치기</span
+                  >
+                  <span class="settings-item-desc"
+                    >팔로잉 페이지 전체 탭의 '라이브'에서 '더보기'를 누르지 않아도
+                    라이브 중인 채널을 펼쳐 보여 줍니다. 라이브가 많아 버튼이
+                    '전체보기'로 바뀌면 그 버튼은 누르지 않습니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-following-live-auto-expand />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -7609,6 +7711,164 @@
             </p>
           </section>
 
+          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
+            <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
+            <p class="settings-group-desc">
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단을 설정합니다.
+            </p>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
+                <label>
+                  <span class="settings-item-name">선택 화면 정렬 기억</span>
+                  <span class="settings-item-desc">팔로잉·전용 팔로잉·라이브·검색 탭의 마지막 정렬을 복원합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-remember-setup-sort />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">메인 채널 테두리 강조</span>
+                  <span class="settings-item-desc">멀티뷰 시청 화면에서 메인 채널 칸의 초록색 테두리를 표시합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-main-border />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="멀티뷰 칸 크기 조절 너비 높이 경계"
+                    >멀티뷰 칸 사이 크기 조절</span
+                  >
+                  <span class="settings-item-desc"
+                    >시청 화면에서 칸 사이 경계를 끌어 너비·높이를 바꿉니다(경계를
+                    두 번 누르면 원래대로). 끄면 손잡이가 없어지고 기본 비율로
+                    보입니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-track-resize />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 칸 크기 기억</span>
+                  <span class="settings-item-desc"
+                    >바꾼 크기를 언제까지 둘지 고릅니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-multiview-track-memory
+                  role="radiogroup"
+                  aria-label="칸 크기 기억"
+                >
+                  <button
+                    type="button"
+                    data-multiview-track-memory-value="reset"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    배치 바꾸면 초기화
+                  </button>
+                  <button
+                    type="button"
+                    data-multiview-track-memory-value="session"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    이번 시청 동안만
+                  </button>
+                  <button
+                    type="button"
+                    data-multiview-track-memory-value="layout"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    배치별로 기억
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-new-feature="multiview-quick-state">
+                <label>
+                  <span class="settings-item-name">시청 화면 채널 관리 상태 기억</span>
+                  <span class="settings-item-desc">멀티뷰 시청 중 ‘채널 관리’ 버튼으로 여는 패널의 탭·검색어·정렬을 복원합니다. 크기와 위치는 항상 저장합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-remember-quick-state />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="multiview-live-catch-up">
+                <label>
+                  <span class="settings-item-name">라이브 지연 자동 따라잡기</span>
+                  <span class="settings-item-desc">라이브 지연이 기준 시간을 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-live-catch-up />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-multiview-live-catch-up-limit-item
+                data-new-feature="multiview-live-catch-up-limit"
+              >
+                <div>
+                  <span class="settings-item-name">└ 따라잡기 기준 시간</span>
+                  <span class="settings-item-desc"
+                    >지연이 이 시간 이상인 칸을 옮깁니다(2~8초, 기본 8초). 낮출수록
+                    실시간에 가깝지만 끊김이 생기기 쉽고, 자동 싱크 칸끼리 간격이 크면
+                    더 자주 옮길 수 있습니다.</span
+                  >
+                </div>
+                <div class="settings-osd-row">
+                  <input
+                    type="range"
+                    min="2"
+                    max="8"
+                    step="1"
+                    data-multiview-live-catch-up-limit
+                    aria-label="라이브 지연 따라잡기 기준 시간(초)"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="2"
+                      max="8"
+                      step="1"
+                      inputmode="numeric"
+                      data-multiview-live-catch-up-limit-num
+                      aria-label="라이브 지연 따라잡기 기준 시간 직접 입력(초)"
+                    />
+                    초
+                  </span>
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-multiview-live-catch-up-limit-reset
+                  >
+                    기본값
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-new-feature="multiview-sync-diagnostics">
+                <label>
+                  <span class="settings-item-name">싱크 진단 도구 표시</span>
+                  <span class="settings-item-desc">싱크 문제 분석을 위한 기록과 내보내기 도구를 표시합니다.</span>
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-sync-diagnostics-ui />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
           <section
             class="settings-group"
             data-panel="multiview"
@@ -7708,7 +7968,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">되감기 버튼</span>
+                  <span class="settings-item-name">되감기 버튼 (←)</span>
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 되감기 버튼을 표시합니다</span
                   >
@@ -7720,7 +7980,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">앞으로 버튼</span>
+                  <span class="settings-item-name">앞으로 버튼 (→)</span>
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 앞으로 버튼을 표시합니다</span
                   >
@@ -7947,107 +8207,6 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-badge-chat-hide-empty-button />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-            </ul>
-          </section>
-          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
-            <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
-            <p class="settings-group-desc">
-              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단을 설정합니다.
-            </p>
-            <ul class="settings-list">
-              <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
-                <label>
-                  <span class="settings-item-name">선택 화면 정렬 기억</span>
-                  <span class="settings-item-desc">팔로잉·전용 팔로잉·라이브·검색 탭의 마지막 정렬을 복원합니다.</span>
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-multiview-remember-setup-sort />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">메인 채널 테두리 강조</span>
-                  <span class="settings-item-desc">멀티뷰 시청 화면에서 메인 채널 칸의 초록색 테두리를 표시합니다.</span>
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-multiview-main-border />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item" data-new-feature="multiview-quick-state">
-                <label>
-                  <span class="settings-item-name">시청 화면 채널 관리 상태 기억</span>
-                  <span class="settings-item-desc">멀티뷰 시청 중 ‘채널 관리’ 버튼으로 여는 패널의 탭·검색어·정렬을 복원합니다. 크기와 위치는 항상 저장합니다.</span>
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-multiview-remember-quick-state />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item" data-new-feature="multiview-live-catch-up">
-                <label>
-                  <span class="settings-item-name">라이브 지연 자동 따라잡기</span>
-                  <span class="settings-item-desc">라이브 지연이 기준 시간을 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-multiview-live-catch-up />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li
-                class="settings-item settings-item-stacked"
-                data-multiview-live-catch-up-limit-item
-                data-new-feature="multiview-live-catch-up-limit"
-              >
-                <div>
-                  <span class="settings-item-name">└ 따라잡기 기준 시간</span>
-                  <span class="settings-item-desc"
-                    >지연이 이 시간 이상인 칸을 옮깁니다(2~8초, 기본 8초). 낮출수록
-                    실시간에 가깝지만 끊김이 생기기 쉽고, 자동 싱크 칸끼리 간격이 크면
-                    더 자주 옮길 수 있습니다.</span
-                  >
-                </div>
-                <div class="settings-osd-row">
-                  <input
-                    type="range"
-                    min="2"
-                    max="8"
-                    step="1"
-                    data-multiview-live-catch-up-limit
-                    aria-label="라이브 지연 따라잡기 기준 시간(초)"
-                  />
-                  <span class="settings-custom-input">
-                    <input
-                      type="number"
-                      min="2"
-                      max="8"
-                      step="1"
-                      inputmode="numeric"
-                      data-multiview-live-catch-up-limit-num
-                      aria-label="라이브 지연 따라잡기 기준 시간 직접 입력(초)"
-                    />
-                    초
-                  </span>
-                  <button
-                    type="button"
-                    class="settings-order-reset"
-                    data-multiview-live-catch-up-limit-reset
-                  >
-                    기본값
-                  </button>
-                </div>
-              </li>
-              <li class="settings-item" data-new-feature="multiview-sync-diagnostics">
-                <label>
-                  <span class="settings-item-name">싱크 진단 도구 표시</span>
-                  <span class="settings-item-desc">싱크 문제 분석을 위한 기록과 내보내기 도구를 표시합니다.</span>
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-multiview-sync-diagnostics-ui />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -11246,6 +11405,8 @@
     ></div>
     <script src="src/coloris.min.js"></script>
     <script src="src/settingsUi.js"></script>
+    <script src="src/categoryAutocomplete.js"></script>
+    <script src="src/screenshotName.js"></script>
     <script src="src/settings.js"></script>
   </body>
 </html>

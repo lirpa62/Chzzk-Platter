@@ -735,7 +735,7 @@ const checks = [];
      check(document.querySelectorAll('#mvChosenList .mv-chosen-item').length===2,
        '고른 채널이 2개가 아니라 '+
        document.querySelectorAll('#mvChosenList .mv-chosen-item').length+'개');
-     check(/2\\s*\\/\\s*6/.test(document.getElementById('mvChosenCount').textContent),
+     check(/2\\s*\\/\\s*9/.test(document.getElementById('mvChosenCount').textContent),
        '개수 표시 이상: '+document.getElementById('mvChosenCount').textContent);`,
   );
 
@@ -777,16 +777,16 @@ const checks = [];
   );
 
   await test(
-    "6개를 채워도 선택한 카드는 유지되고 미선택 카드만 잠긴다",
+    "9개를 채워도 선택한 카드는 유지되고 미선택 카드만 잠긴다",
     `document.querySelector('[data-mv-source="all"]').click();
      await wait(300);
      const box=document.getElementById('mvChannelList');
-     const extras=[...box.querySelectorAll('.mv-card:not(.is-on)')].slice(0,4)
+     const extras=[...box.querySelectorAll('.mv-card:not(.is-on)')].slice(0,7)
        .map(card=>card.dataset.mvPick);
-     check(extras.length===4,'추가할 카드가 부족하다');
+     check(extras.length===7,'추가할 카드가 부족하다');
      for(const id of extras)box.querySelector('[data-mv-pick="'+id+'"]').click();
-     check(document.getElementById('mvChosenCount').textContent.includes('6 / 6'),
-       '6개 선택 상태가 아니다');
+     check(document.getElementById('mvChosenCount').textContent.includes('9 / 9'),
+       '9개 선택 상태가 아니다');
      for(const id of extras){
        const card=box.querySelector('[data-mv-pick="'+id+'"]');
        check(card.classList.contains('is-on')&&!card.disabled&&
@@ -795,9 +795,9 @@ const checks = [];
      const unpicked=box.querySelector('.mv-card:not(.is-on)');
      check(unpicked?.disabled&&unpicked.classList.contains('is-limit')&&
        !unpicked.querySelector('.mv-card-picked'),
-       '미선택 카드의 6/6 제한 표시가 올바르지 않다');
+       '미선택 카드의 9/9 제한 표시가 올바르지 않다');
      for(const id of extras)box.querySelector('[data-mv-pick="'+id+'"]').click();
-     check(document.getElementById('mvChosenCount').textContent.includes('2 / 6'),
+     check(document.getElementById('mvChosenCount').textContent.includes('2 / 9'),
        '추가한 카드 해제 후 2개로 돌아오지 않았다');
      document.querySelector('[data-mv-source="following"]').click();
      await wait(250);`,
@@ -1049,7 +1049,7 @@ const checks = [];
      clear.click();
      check(document.querySelectorAll('#mvChosenList .mv-chosen-item').length===0,
        '고른 채널 목록이 비워지지 않았다');
-     check(document.getElementById('mvChosenCount').textContent.includes('0 / 6'),
+     check(document.getElementById('mvChosenCount').textContent.includes('0 / 9'),
        '개수 표시가 0으로 갱신되지 않았다');
      check(document.getElementById('mvStart').disabled,'채널이 없는데 시작 버튼이 활성화됐다');
      check(clear.disabled,'비운 뒤 모두 비우기 버튼이 비활성화되지 않았다');

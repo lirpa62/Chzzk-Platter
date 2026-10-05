@@ -40,6 +40,13 @@ for (const key of [
   'cheeseMultiviewMainBorder',
   'cheeseMultiviewSetupSortBySource',
   'cheeseMultiviewRememberSetupSort',
+  'cheeseMultiviewTrackResize',
+  'cheeseMultiviewTrackMemory',
+  'cheeseMultiviewTrackSizes',
+  'cheeseScreenshotAction',
+  'cheeseScreenshotNameFormat',
+  'cheeseLiveTagFiltersDisabled',
+  'cheeseFollowingLiveAutoExpand',
   'cheeseMultiviewBadgeChatButton',
   'cheeseMultiviewBadgeChatHideEmptyButton',
   'cheeseMultiviewBadgeChatHideChatBackground',
@@ -140,6 +147,13 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewSetupSortBySource:{following:'name-desc',all:'recommended'},
         cheeseMultiviewRememberSetupSort:true,
         cheeseMultiviewLiveCatchUpLimit:6,
+        cheeseMultiviewTrackResize:true,
+        cheeseMultiviewTrackMemory:'layout',
+        cheeseMultiviewTrackSizes:{'right-3':{columns:[300,600],rows:[350,550]}},
+        cheeseScreenshotAction:'copy',
+        cheeseScreenshotNameFormat:'{채널}_{날짜}',
+        cheeseLiveTagFiltersDisabled:['game'],
+        cheeseFollowingLiveAutoExpand:true,
         cheeseMultiviewChatSize:{w:430,h:320,topH:240},
         cheeseMultiviewSetupOptions:{mainHighQuality:true,startWithoutChat:false,startMainMuted:true,startMainVolume:0.37},
         cheeseMultiviewChatPopoutMode:'native',
@@ -497,6 +511,16 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(exported.settings.cheeseMultiviewRememberSetupSort===true,'setup sort preference missing from export');
         check(exported.settings.cheeseMultiviewLiveCatchUpLimit===6,
           'catch-up limit missing from export');
+        check(exported.settings.cheeseMultiviewTrackResize===true&&
+          exported.settings.cheeseMultiviewTrackMemory==='layout'&&
+          exported.settings.cheeseMultiviewTrackSizes?.['right-3']?.columns?.[0]===300,
+          'multiview track settings or saved sizes missing from export');
+        check(exported.settings.cheeseScreenshotAction==='copy'&&
+          exported.settings.cheeseScreenshotNameFormat==='{채널}_{날짜}',
+          'screenshot options missing from export');
+        check(exported.settings.cheeseLiveTagFiltersDisabled?.[0]==='game'&&
+          exported.settings.cheeseFollowingLiveAutoExpand===true,
+          'live-filter or following options missing from export');
         check(exported.settings.cheeseMultiviewSetupOptions?.mainHighQuality===true&&
           exported.settings.cheeseMultiviewSetupOptions?.startWithoutChat===false&&
           exported.settings.cheeseMultiviewSetupOptions?.startMainMuted===true&&
@@ -517,6 +541,15 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
         cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
         cheeseMultiviewLiveCatchUpLimit:4},appearance:{multiviewChatSize:{w:720,h:180,topH:210}}};
+      Object.assign(payload.settings, {
+        cheeseMultiviewTrackResize:false,
+        cheeseMultiviewTrackMemory:'session',
+        cheeseMultiviewTrackSizes:{'grid-2x2':{columns:[400,500],rows:[250,300]}},
+        cheeseScreenshotAction:'save',
+        cheeseScreenshotNameFormat:'{제목}_{시각}',
+        cheeseLiveTagFiltersDisabled:['Game'],
+        cheeseFollowingLiveAutoExpand:false,
+      });
       payload.settings.cheeseMultiviewChatPopoutMode='platter';
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
@@ -528,6 +561,13 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseMultiviewChatSize?.w===720&&saved.cheeseMultiviewChatSize?.topH===210,
         'imported chat size did not reach extension storage');
       check(saved.cheeseMultiviewLiveCatchUpLimit===4,'catch-up limit was not imported');
+      check(saved.cheeseMultiviewTrackResize===false&&saved.cheeseMultiviewTrackMemory==='session'&&
+        saved.cheeseMultiviewTrackSizes?.['grid-2x2']?.rows?.[1]===300,
+        'multiview track settings or saved sizes were not imported');
+      check(saved.cheeseScreenshotAction==='save'&&saved.cheeseScreenshotNameFormat==='{제목}_{시각}',
+        'screenshot options were not imported');
+      check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,
+        'live-filter or following options were not imported');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
       check(saved.cheeseFeatureHidden?.chatHideSendButton===true,'send-button setting was not imported');
       check(saved.cheeseFeatureHidden?.chatHideInputPlaceholder===false,'placeholder setting was not imported');

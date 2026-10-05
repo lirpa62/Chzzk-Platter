@@ -10,7 +10,7 @@
 
   const API = "https://api.chzzk.naver.com";
   const LAYOUTS = globalThis.CheeseMultiviewLayouts;
-  const MAX_CHANNELS = 6; // 메인 1 + 보조 5
+  const MAX_CHANNELS = 9; // 메인 1 + 보조 8
   // 목록 캐시 수명. 제목·시청자 수·방송 여부가 바뀌므로 오래 들고 있으면 안 된다.
   // 검색은 입력마다 달라지므로 캐시하지 않는다.
   const LIST_TTL_MS = 20000;
@@ -858,7 +858,7 @@
 
   // ── 실행 ───────────────────────────────────────────────────────────────
   // 고른 구성을 세션 저장소로 넘기고 시청 화면을 연다. 멀티뷰 탭이 이미 있으면 배경이 그 탭을
-  // 새 구성으로 다시 열고, 없으면 새 탭을 만든다(멀티뷰는 탭 하나에 최대 6채널). 주소에 담기엔
+  // 새 구성으로 다시 열고, 없으면 새 탭을 만든다(멀티뷰는 탭 하나에 최대 9채널). 주소에 담기엔
   // 채널 목록이 길어 세션 저장소를 쓴다.
   async function start() {
     const layout = LAYOUTS.layoutById(state.layoutId);

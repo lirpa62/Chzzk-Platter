@@ -2122,6 +2122,8 @@ function debounce(fn, wait) {
 }
 
 elements.query.addEventListener("input", updateSearchResetButtons);
+// @카테고리 를 입력하면 치지직 카테고리 이름을 골라 넣을 수 있게 한다.
+globalThis.CheeseCategoryAutocomplete?.attach(elements.query, { mode: "query" });
 elements.query.addEventListener("input", debounce(handleFilterChange, 120));
 elements.results.addEventListener("click", handleCategoryFilterClick);
 elements.categoryChip.addEventListener("click", () => {

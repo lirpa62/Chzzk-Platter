@@ -310,6 +310,14 @@
 .cheese-screenshot-cancel:hover {
   background: rgba(255, 255, 255, 0.14);
 }
+.cheese-screenshot-copy {
+  color: #00ffa3;
+  background: transparent;
+  border-color: rgba(0, 255, 163, 0.6);
+}
+.cheese-screenshot-copy:hover {
+  background: rgba(0, 255, 163, 0.12);
+}
 .cheese-screenshot-save {
   color: #06121a;
   background: #00ffa3;

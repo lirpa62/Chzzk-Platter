@@ -271,6 +271,8 @@
     "cheeseLiveViewerCountHidden",
     "cheeseLiveTagFilterButton",
     "cheeseLiveTagFilters",
+    "cheeseLiveTagFiltersDisabled",
+    "cheeseFollowingLiveAutoExpand",
     "cheeseLogPowerClickAction",
     "cheeseLogPowerEarningColor",
     "cheeseLogPowerPopupLimit",
@@ -293,6 +295,11 @@
     "cheesePlayerButtonSide",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
+    "cheeseScreenshotAction",
+    "cheeseScreenshotNameFormat",
+    "cheeseMultiviewTrackMemory",
+    "cheeseMultiviewTrackResize",
+    "cheeseMultiviewTrackSizes",
     "cheeseSearchClips",
     "cheeseSearchClipDirectPlay",
     "cheeseSearchClipCandidateLimit",
@@ -5239,6 +5246,8 @@
     ["[data-multiview-remember-setup-sort]", "cheeseMultiviewRememberSetupSort", true],
     ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
     ["[data-multiview-live-catch-up]", "cheeseMultiviewLiveCatchUp", true],
+    ["[data-multiview-track-resize]", "cheeseMultiviewTrackResize", true],
+    ["[data-following-live-auto-expand]", "cheeseFollowingLiveAutoExpand", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;
@@ -5255,6 +5264,9 @@
           on = d?.cheeseMultiviewBadgeChatButton === false;
       } catch {}
       input.checked = on;
+      // 하위 옵션 잠금은 change 때만 다시 계산된다. 저장값을 늦게 채웠으니 지금 맞춘다
+      // (안 맞추면 켜 둔 상위 옵션 아래 하위 옵션이 잠긴 채 흐리게 남는다).
+      settingsDisclosures?.refresh?.();
       if (input === popupPlayerStartWithoutChatInput) {
         reflectPopupPlayerStartWithoutChatDependencies();
       }
@@ -8067,6 +8079,137 @@
   });
   loadScreenshotPreview();
 
+  // 스크린샷 파일 이름 형식. 항목 단추로 커서 자리에 넣고, 예시 이름을 바로 보여 준다.
+  // 규칙은 치지직 페이지와 같은 screenshotName.js 를 쓴다(빈 값 = 기본 형식).
+  const SCREENSHOT_NAME_FORMAT_KEY = "cheeseScreenshotNameFormat";
+  const screenshotNames = globalThis.CheeseScreenshotName;
+  const screenshotNameInput = document.querySelector("[data-screenshot-name-format]");
+  const screenshotNamePreview = document.querySelector("[data-screenshot-name-preview]");
+  let screenshotNameSaveTimer = 0;
+  function renderScreenshotNamePreview() {
+    if (!screenshotNamePreview || !screenshotNames) return;
+    const now = Date.now();
+    const sample = screenshotNames.format(screenshotNameInput?.value, {
+      channel: "치즈채널",
+      title: "오늘의 방송",
+      category: "종합 게임",
+      at: now,
+      broadcastAt: now - 3000,
+    });
+    screenshotNamePreview.textContent = `예: ${sample}.png`;
+  }
+  function saveScreenshotNameFormat() {
+    clearTimeout(screenshotNameSaveTimer);
+    const value = String(screenshotNameInput?.value || "").trim();
+    try {
+      cachedStorageSet({
+        [SCREENSHOT_NAME_FORMAT_KEY]:
+          !screenshotNames || value === screenshotNames.DEFAULT ? "" : value,
+      });
+    } catch {}
+  }
+  screenshotNameInput?.addEventListener("input", () => {
+    renderScreenshotNamePreview();
+    clearTimeout(screenshotNameSaveTimer);
+    screenshotNameSaveTimer = setTimeout(saveScreenshotNameFormat, 400);
+  });
+  screenshotNameInput?.addEventListener("change", saveScreenshotNameFormat);
+  document.querySelectorAll("[data-screenshot-name-token]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!screenshotNameInput) return;
+      const token = `{${button.dataset.screenshotNameToken}}`;
+      const value = screenshotNameInput.value;
+      const start = screenshotNameInput.selectionStart ?? value.length;
+      const end = screenshotNameInput.selectionEnd ?? start;
+      if (value.length - (end - start) + token.length > screenshotNameInput.maxLength) return;
+      screenshotNameInput.value = value.slice(0, start) + token + value.slice(end);
+      screenshotNameInput.focus();
+      screenshotNameInput.setSelectionRange(start + token.length, start + token.length);
+      renderScreenshotNamePreview();
+      saveScreenshotNameFormat();
+    });
+  });
+  document.querySelector("[data-screenshot-name-reset]")?.addEventListener("click", () => {
+    if (!screenshotNameInput || !screenshotNames) return;
+    screenshotNameInput.value = screenshotNames.DEFAULT;
+    renderScreenshotNamePreview();
+    saveScreenshotNameFormat();
+  });
+  void (async () => {
+    let value = "";
+    try {
+      const data = await cachedStorageGet(SCREENSHOT_NAME_FORMAT_KEY);
+      value = typeof data?.[SCREENSHOT_NAME_FORMAT_KEY] === "string" ? data[SCREENSHOT_NAME_FORMAT_KEY] : "";
+    } catch {}
+    if (screenshotNameInput) screenshotNameInput.value = value || screenshotNames?.DEFAULT || "";
+    renderScreenshotNamePreview();
+  })();
+
+  // 멀티뷰 칸 크기 기억: layout=배치별로 기억 | session=이번 시청 동안만 | reset=배치 바꾸면 초기화(기본).
+  const MULTIVIEW_TRACK_MEMORY_KEY = "cheeseMultiviewTrackMemory";
+  const multiviewTrackMemoryButtons = Array.from(
+    document.querySelectorAll("[data-multiview-track-memory-value]"),
+  );
+  const normalizeTrackMemory = (value) =>
+    ["layout", "session", "reset"].includes(value) ? value : "reset";
+  function reflectMultiviewTrackMemory(value) {
+    const mode = normalizeTrackMemory(value);
+    multiviewTrackMemoryButtons.forEach((button) => {
+      const active = button.dataset.multiviewTrackMemoryValue === mode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  multiviewTrackMemoryButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = normalizeTrackMemory(button.dataset.multiviewTrackMemoryValue);
+      reflectMultiviewTrackMemory(mode);
+      try {
+        cachedStorageSet({ [MULTIVIEW_TRACK_MEMORY_KEY]: mode });
+      } catch {}
+    });
+  });
+  void (async () => {
+    let mode = "reset";
+    try {
+      const data = await cachedStorageGet(MULTIVIEW_TRACK_MEMORY_KEY);
+      mode = normalizeTrackMemory(data?.[MULTIVIEW_TRACK_MEMORY_KEY]);
+    } catch {}
+    reflectMultiviewTrackMemory(mode);
+  })();
+
+  // 스크린샷 버튼 동작: 파일 저장(기본) | 클립보드 복사.
+  const SCREENSHOT_ACTION_KEY = "cheeseScreenshotAction";
+  const screenshotActionButtons = Array.from(
+    document.querySelectorAll("[data-screenshot-action-value]"),
+  );
+  const normalizeScreenshotAction = (value) => (value === "copy" ? "copy" : "save");
+  function reflectScreenshotAction(value) {
+    const action = normalizeScreenshotAction(value);
+    screenshotActionButtons.forEach((button) => {
+      const active = button.dataset.screenshotActionValue === action;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  screenshotActionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = normalizeScreenshotAction(button.dataset.screenshotActionValue);
+      reflectScreenshotAction(action);
+      try {
+        cachedStorageSet({ [SCREENSHOT_ACTION_KEY]: action });
+      } catch {}
+    });
+  });
+  void (async () => {
+    let action = "save";
+    try {
+      const data = await cachedStorageGet(SCREENSHOT_ACTION_KEY);
+      action = normalizeScreenshotAction(data?.[SCREENSHOT_ACTION_KEY]);
+    } catch {}
+    reflectScreenshotAction(action);
+  })();
+
   // 스크린샷 대화상자 없이 바로 저장(saveAs 반대). 기본 ON. 단 Whale은 자체 다운로드
   // 확인창이 있어 이 옵션으로 못 없애므로, Whale이면 토글을 비활성화하고 안내한다.
   const SCREENSHOT_DIRECT_SAVE_KEY = "cheeseScreenshotDirectSave";
@@ -10749,6 +10892,8 @@
 
   // ── 전체 방송·팔로잉 라이브 제외 필터 ────────────────────────────────────
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
+  // 꺼 둔 제외 항목(정규화한 키). content.js 와 같은 키.
+  const LIVE_TAG_FILTERS_DISABLED_KEY = "cheeseLiveTagFiltersDisabled";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
   const LIVE_VIEWER_COUNT_POSITION_KEY = "cheeseLiveViewerCountPosition";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
@@ -10761,6 +10906,8 @@
   );
   const liveTagForm = document.querySelector("[data-live-tag-form]");
   const liveTagInput = document.querySelector("[data-live-tag-input]");
+  // 카테고리는 치지직 표시 이름과 정확히 같아야 숨겨진다. 입력 중에 이름을 골라 넣게 한다.
+  globalThis.CheeseCategoryAutocomplete?.attach(liveTagInput, { mode: "filter" });
   const liveTagList = document.querySelector("[data-live-tag-list]");
   const liveTagEmpty = document.querySelector("[data-live-tag-empty]");
   const liveTagBulk = document.querySelector("[data-live-tag-bulk]");
@@ -10773,6 +10920,7 @@
   );
   const liveTagRemoveAll = document.querySelector("[data-live-tag-remove-all]");
   let settingsLiveTagFilters = [];
+  let settingsLiveTagDisabled = new Set();
   const settingsLiveTagSelected = new Set();
 
   const LIVE_VIEWER_COUNT_POSITIONS = new Set([
@@ -10839,6 +10987,16 @@
     return sanitizeLiveTagFilters(String(value || "").split(/[,\n]+/));
   }
 
+  // 꺼 둔 키 중 목록에 남아 있는 것만 둔다.
+  function sanitizeLiveTagFiltersDisabled(value, filters = settingsLiveTagFilters) {
+    const present = new Set(filters.map(normalizeLiveTagFilter));
+    return new Set(
+      (Array.isArray(value) ? value : [])
+        .map(normalizeLiveTagFilter)
+        .filter((key) => key && present.has(key)),
+    );
+  }
+
   function renderSettingsLiveTagFilters() {
     if (!liveTagList) return;
     const existing = new Set(
@@ -10851,13 +11009,20 @@
     liveTagList.innerHTML = settingsLiveTagFilters
       .map((tag, index) => {
         const key = normalizeLiveTagFilter(tag);
+        const on = !settingsLiveTagDisabled.has(key);
         return `
-          <li class="settings-live-tag-row">
+          <li class="settings-live-tag-row${on ? "" : " is-off"}">
             <label>
               <input type="checkbox" data-live-tag-select="${index}" ${
                 settingsLiveTagSelected.has(key) ? "checked" : ""
               }>
               <span>${escapeHtml(tag)}</span>
+            </label>
+            <label class="settings-live-tag-toggle" title="${on ? "적용 중 · 눌러서 끄기" : "꺼 둠 · 눌러서 켜기"}">
+              <input type="checkbox" role="switch" data-live-tag-toggle="${index}" ${
+                on ? "checked" : ""
+              } aria-label="${escapeHtml(tag)} 제외 적용">
+              <i aria-hidden="true"></i>
             </label>
             <button type="button" data-live-tag-remove="${index}" aria-label="${escapeHtml(
               tag,
@@ -10893,8 +11058,12 @@
 
   function saveSettingsLiveTagFilters(next) {
     settingsLiveTagFilters = sanitizeLiveTagFilters(next);
+    settingsLiveTagDisabled = sanitizeLiveTagFiltersDisabled([...settingsLiveTagDisabled]);
     renderSettingsLiveTagFilters();
-    cachedStorageSet({ [LIVE_TAG_FILTERS_KEY]: settingsLiveTagFilters });
+    cachedStorageSet({
+      [LIVE_TAG_FILTERS_KEY]: settingsLiveTagFilters,
+      [LIVE_TAG_FILTERS_DISABLED_KEY]: [...settingsLiveTagDisabled],
+    });
   }
 
   liveTagFilterButtonInput?.addEventListener("change", () => {
@@ -10919,12 +11088,26 @@
       liveTagInput?.focus();
       return;
     }
+    // 꺼 둔 항목을 다시 추가하면 켠다.
+    added.forEach((tag) => settingsLiveTagDisabled.delete(normalizeLiveTagFilter(tag)));
     saveSettingsLiveTagFilters([...settingsLiveTagFilters, ...added]);
     if (liveTagInput) liveTagInput.value = "";
     liveTagInput?.focus();
   });
 
   liveTagList?.addEventListener("change", (event) => {
+    // 항목을 지우지 않고 켜고 끈다.
+    const toggle = event.target.closest?.("[data-live-tag-toggle]");
+    if (toggle) {
+      const key = normalizeLiveTagFilter(
+        settingsLiveTagFilters[Number(toggle.dataset.liveTagToggle)],
+      );
+      if (!key) return;
+      if (toggle.checked) settingsLiveTagDisabled.delete(key);
+      else settingsLiveTagDisabled.add(key);
+      saveSettingsLiveTagFilters(settingsLiveTagFilters);
+      return;
+    }
     const checkbox = event.target.closest?.("[data-live-tag-select]");
     if (!checkbox) return;
     const tag = settingsLiveTagFilters[Number(checkbox.dataset.liveTagSelect)];
@@ -10985,6 +11168,7 @@
     try {
       const data = await cachedStorageGet([
         LIVE_TAG_FILTERS_KEY,
+        LIVE_TAG_FILTERS_DISABLED_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
         LIVE_VIEWER_COUNT_POSITION_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
@@ -10992,6 +11176,9 @@
       ]);
       settingsLiveTagFilters = sanitizeLiveTagFilters(
         data?.[LIVE_TAG_FILTERS_KEY],
+      );
+      settingsLiveTagDisabled = sanitizeLiveTagFiltersDisabled(
+        data?.[LIVE_TAG_FILTERS_DISABLED_KEY],
       );
       if (liveTagFilterButtonInput) {
         liveTagFilterButtonInput.checked =
@@ -11009,6 +11196,7 @@
       }
     } catch {
       settingsLiveTagFilters = [];
+      settingsLiveTagDisabled = new Set();
       if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = false;
       reflectLiveViewerCountPosition("native");
     }
@@ -11018,9 +11206,16 @@
   if (chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes[LIVE_TAG_FILTERS_KEY]) {
-        settingsLiveTagFilters = sanitizeLiveTagFilters(
-          changes[LIVE_TAG_FILTERS_KEY].newValue,
+      if (changes[LIVE_TAG_FILTERS_KEY] || changes[LIVE_TAG_FILTERS_DISABLED_KEY]) {
+        if (changes[LIVE_TAG_FILTERS_KEY]) {
+          settingsLiveTagFilters = sanitizeLiveTagFilters(
+            changes[LIVE_TAG_FILTERS_KEY].newValue,
+          );
+        }
+        settingsLiveTagDisabled = sanitizeLiveTagFiltersDisabled(
+          changes[LIVE_TAG_FILTERS_DISABLED_KEY]
+            ? changes[LIVE_TAG_FILTERS_DISABLED_KEY].newValue
+            : [...settingsLiveTagDisabled],
         );
         renderSettingsLiveTagFilters();
       }
@@ -11217,9 +11412,51 @@
     return typeof value;
   }
 
+  function normalizeTransferMultiviewTrackSizes(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const entries = Object.entries(value);
+    if (entries.length > 100) return undefined;
+    const sizes = {};
+    for (const [id, entry] of entries) {
+      if (!/^[a-z0-9-]{1,80}$/.test(id) || id === "constructor" || id === "prototype" ||
+          !entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const clean = {};
+      for (const axis of ["columns", "rows"]) {
+        const tracks = entry[axis];
+        if (Array.isArray(tracks) && tracks.length >= 2 && tracks.length <= 12 &&
+            tracks.every((size) => typeof size === "number" && Number.isFinite(size) && size > 0 && size <= 10000)) {
+          clean[axis] = tracks;
+        }
+      }
+      if (Object.keys(clean).length) sizes[id] = clean;
+    }
+    return entries.length && !Object.keys(sizes).length ? undefined : sizes;
+  }
+
   function normalizeImportedSettingValue(key, value) {
     if (key === MULTIVIEW_CHAT_SIZE_KEY) {
       return normalizeTransferMultiviewChatSize(value) || undefined;
+    }
+    if (key === "cheeseMultiviewTrackSizes") {
+      return normalizeTransferMultiviewTrackSizes(value);
+    }
+    if (key === "cheeseMultiviewTrackMemory") {
+      return ["reset", "session", "layout"].includes(value) ? value : undefined;
+    }
+    if (key === "cheeseScreenshotAction") {
+      return value === "save" || value === "copy" ? value : undefined;
+    }
+    if (key === "cheeseScreenshotNameFormat") {
+      return typeof value === "string" && value.length <= 200 ? value : undefined;
+    }
+    if (key === "cheeseMultiviewTrackResize" || key === "cheeseFollowingLiveAutoExpand") {
+      return typeof value === "boolean" ? value : undefined;
+    }
+    if (key === "cheeseLiveTagFiltersDisabled") {
+      return Array.isArray(value) && value.length <= 500
+        ? [...new Set(value.filter((tag) => typeof tag === "string" && tag.length <= 200)
+          .map(normalizeLiveTagFilter).filter(Boolean))]
+        : undefined;
     }
     if (key === "cheeseMultiviewSetupOptions") {
       if (!value || typeof value !== "object" || Array.isArray(value)) {

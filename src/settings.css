@@ -541,6 +541,8 @@ html.settings-tab-view .settings-resizer {
   padding-left: 34px;
   /* 행 자체에는 배경·테두리를 두지 않는다(아래 ::before 가 담당). */
   background: transparent;
+  /* ::before 를 행 안에서 맨 뒤로 보낸다(z-index: -1 이 행 밖으로 나가지 않게). */
+  isolation: isolate;
 }
 
 /* 선 + 배경을 함께 그린다. left 가 선의 위치이자 배경의 시작점이다. */
@@ -554,6 +556,9 @@ html.settings-tab-view .settings-resizer {
   border-left: 4px solid var(--popup-accent, #03c75a);
   background: color-mix(in srgb, var(--popup-soft-bg) 60%, transparent);
   pointer-events: none;
+  /* ⚠ 절대 위치라 그대로 두면 버튼·입력칸 위에 그려져 반투명 배경이 그것들을 회색으로
+     물들인다(하위 옵션의 세그먼트 버튼이 상위 옵션 버튼과 달라 보였다). 내용 뒤로 보낸다. */
+  z-index: -1;
 }
 
 /* 형제 자식 사이 구분선. 자식이 여럿일 때 어디서 한 항목이 끝나는지 보여 준다.
@@ -876,6 +881,58 @@ html.settings-tab-view .settings-item-desc {
   width: 100%;
 }
 
+/* 스크린샷 파일 이름 형식: 입력칸 + 기본값, 항목 단추, 예시 이름 */
+.settings-screenshot-name {
+  display: grid;
+  gap: 8px;
+}
+.settings-screenshot-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.settings-screenshot-name-row input {
+  min-width: 0;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--popup-border);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--popup-surface);
+  color: var(--popup-fg);
+  font-size: 0.75rem;
+}
+.settings-screenshot-name-row input:focus {
+  border-color: var(--popup-brand-strong);
+}
+.settings-screenshot-name-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.settings-screenshot-name-tokens button {
+  padding: 4px 10px;
+  border: 1px solid var(--popup-brand);
+  border-radius: 999px;
+  background: var(--popup-help-bg);
+  color: var(--popup-brand-strong);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.settings-screenshot-name-tokens button:hover {
+  background: var(--popup-brand);
+  color: #fff;
+}
+.settings-screenshot-name-preview {
+  margin: 0;
+  color: var(--popup-muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
 .settings-live-tag-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1016,6 +1073,52 @@ html.settings-tab-view .settings-item-desc {
   background: transparent;
   color: var(--popup-muted);
   cursor: pointer;
+}
+
+/* 항목별 켜기/끄기. 끈 항목은 지우지 않고 흐리게 둔다. */
+.settings-live-tag-row.is-off > label:first-child span {
+  opacity: 0.45;
+}
+.settings-live-tag-row > label.settings-live-tag-toggle {
+  flex: none;
+  gap: 0;
+  position: relative;
+}
+.settings-live-tag-toggle input {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+.settings-live-tag-toggle i {
+  background: var(--popup-border, rgba(127, 127, 127, 0.35));
+  border-radius: 999px;
+  display: inline-block;
+  height: 18px;
+  position: relative;
+  transition: background 0.15s ease;
+  width: 30px;
+}
+.settings-live-tag-toggle i::after {
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  content: "";
+  height: 14px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 0.15s ease;
+  width: 14px;
+}
+.settings-live-tag-toggle input:checked + i {
+  background: var(--popup-brand-strong);
+}
+.settings-live-tag-toggle input:checked + i::after {
+  transform: translateX(12px);
+}
+.settings-live-tag-toggle input:focus-visible + i {
+  outline: 2px solid var(--popup-brand-strong);
+  outline-offset: 2px;
 }
 
 .settings-live-tag-row > button:hover {
@@ -1412,17 +1515,13 @@ html.settings-tab-view .settings-item-desc {
   flex-direction: column;
 }
 
-.settings-item [data-mixer-global-default-mode],
 .settings-item [data-mixer-global-gain-default],
-.settings-item [data-mixer-global-gain-default-mode],
 .settings-item [data-video-filter-global-default-mode],
 .settings-item [data-embed-clip-gain-min],
 .settings-item [data-embed-clip-gain-max],
 .settings-item [data-embed-clip-default-gain],
-.settings-item [data-chat-time-format],
 .settings-item [data-cf-group-placement],
 .settings-item [data-popup-player-audio],
-.settings-item [data-chat-os-position],
 .settings-item [data-chat-recap-retention],
 .settings-item [data-clip-vault-limit-usage],
 .settings-item [data-fp-color-reset],
@@ -1451,7 +1550,10 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has(#rootToFollowingLogoMode),
 .settings-item:has(#chatRecapClickAction),
 .settings-item:has(#settingsTabOrderList),
-.settings-item:has([data-update-notice-mode]) {
+.settings-item:has([data-update-notice-mode]),
+.settings-item:has([data-screenshot-action]),
+.settings-item:has([data-multiview-track-memory]),
+.settings-item:has([data-screenshot-name]) {
   flex-direction: column;
 }
 
@@ -1499,6 +1601,13 @@ html.settings-tab-view .settings-item-desc {
 .settings-segmented[data-cf-star-favorites],
 .settings-segmented[data-cf-star-groups],
 .settings-segmented[data-cf-star-following],
+.settings-segmented[data-screenshot-action],
+.settings-segmented[data-multiview-track-memory],
+.settings-segmented[data-mixer-global-default-mode],
+.settings-segmented[data-mixer-global-gain-default-mode],
+.settings-segmented[data-chat-time-format],
+.settings-segmented[data-chat-os-position],
+.settings-item [data-screenshot-name],
 .settings-item [data-update-notice-mode],
 .settings-item [data-affinity-order],
 .settings-item [data-cf-section-order],
@@ -1640,6 +1749,12 @@ html.settings-tab-view .settings-item-desc {
 }
 
 #logPowerClickAction [data-logpower-click] {
+  word-break: keep-all;
+  justify-content: center;
+}
+
+/* 칸 크기 기억: 좁을 때 단어 중간에서 줄을 바꾸지 않는다(배지 클릭 동작과 같게). */
+.settings-segmented[data-multiview-track-memory] button {
   word-break: keep-all;
   justify-content: center;
 }

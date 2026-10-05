@@ -1930,8 +1930,10 @@ button.mv-live-more {
   transition: opacity 0.12s ease;
   z-index: 3;
 }
+/* ⚠ :focus-within 이면 마우스로 누른 단추(크게 보기·원래 크기로 등)에 포커스가 남아 마우스를
+   치워도 도구 모음이 계속 보였다. 키보드로 옮겨 온 포커스(:focus-visible)일 때만 보인다. */
 .mv-cell:hover .mv-cell-tools,
-.mv-cell-tools:focus-within {
+.mv-cell-tools:has(:focus-visible) {
   opacity: 1;
 }
 .mv-cell-close {
@@ -1973,10 +1975,71 @@ button.mv-live-more {
   outline: 2px solid #bda2ff;
   outline-offset: 2px;
 }
+/* 도구 모음 줄 높이(24px, 실측)에 맞춘 정사각형. */
+.mv-cell-expand {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+.mv-cell-expand:hover,
+.mv-cell-expand[aria-pressed="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand, #00ffa3);
+}
+.mv-cell-expand:focus-visible {
+  outline: 2px solid var(--popup-brand, #00ffa3);
+  outline-offset: 2px;
+}
+.mv-cell-expand-off,
+.mv-cell-expand[aria-pressed="true"] .mv-cell-expand-on {
+  display: none;
+}
+.mv-cell-expand[aria-pressed="true"] .mv-cell-expand-off {
+  display: block;
+}
 @media (hover: none), (pointer: coarse) {
-  .mv-cell-tools {
+  .mv-cell-tools,
+  .mv-cell-lead {
     opacity: 1;
   }
+  /* ⚠ 기본 .mv-cell-main 규칙이 이 뒤에 있어 우선순위를 높인다. */
+  .mv-cell .mv-cell-main {
+    pointer-events: auto;
+  }
+}
+
+/* 한 칸 크게 보기: 칸을 옮기지 않고 영상 영역 위에 겹쳐 띄운다.
+   일반 배치는 기준이 프레임 래퍼(mvFramesFit, position:relative)라 그 전체를 덮는다.
+   채팅 위 1·빈 칸 채팅은 프레임 래퍼가 display:contents 라 기준이 스테이지 Grid 이고,
+   칸의 grid-area(expandedArea)가 채팅 열을 뺀 영역을 정한다.
+   ⚠ z-index 는 채널 관리 패널(5)보다 낮게 둔다. */
+.mv-cell.is-expanded {
+  inset: 0;
+  position: absolute;
+  z-index: 4;
+}
+/* 정확 배치(is-exact)에서도 크게 본 칸은 안쪽 상자가 16:9 를 지킨다. */
+.mv-frames.is-exact .mv-cell.is-expanded .mv-cell-inner {
+  height: min(100%, (100cqw * 9 / 16));
+  width: min(100%, (100cqh * 16 / 9));
+}
+/* 가려진 칸의 단추·안내가 크게 본 칸 위로 비치지 않게 한다(영상은 그대로 재생). */
+.mv-stage.has-expanded-cell .mv-cell:not(.is-expanded) > :not(.mv-cell-inner) {
+  visibility: hidden;
+}
+/* 크게 보는 동안에는 자리 바꾸기를 하지 않는다(다른 칸이 가려져 있다). */
+.mv-cell.is-expanded .mv-cell-grip {
+  display: none;
 }
 /* 상태 덮개의 단추 줄. */
 .mv-cell-status-actions {
@@ -1987,6 +2050,33 @@ button.mv-live-more {
 }
 
 /* 칸 안 '메인으로' 버튼: 평소엔 숨고 칸에 마우스를 올리면 나타난다. */
+/* 칸 왼쪽 위 묶음: 자리 바꾸기 손잡이 + '메인으로'. 손잡이를 끌려다 '메인으로'를 누르지
+   않게 사이를 띄운다. 기본은 가로, 칸이 좁아 오른쪽 위 도구 모음과 겹치면 세로(아래 컨테이너
+   쿼리). 칸에 마우스를 올리면 나타난다. */
+.mv-cell-lead {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  left: 8px;
+  opacity: 0;
+  position: absolute;
+  top: 8px;
+  transition: opacity 0.12s ease;
+  z-index: 3;
+}
+.mv-cell:hover .mv-cell-lead,
+.mv-cell-lead:has(:focus-visible) {
+  opacity: 1;
+}
+/* 가로로 놓으면 오른쪽 위 도구 모음과 겹치는 좁은 칸. 실측(맥 기본 글꼴): 왼쪽 묶음 107px +
+   도구 모음 90px + 양쪽 여백 16px = 213px. 윈도우 글꼴 등 여유를 두고 240px 이하에서 세로. */
+@container (max-width: 240px) {
+  .mv-cell-lead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
 .mv-cell-main {
   align-items: center;
   background: rgba(0, 0, 0, 0.66);
@@ -1998,17 +2088,12 @@ button.mv-live-more {
   font: inherit;
   font-size: 11px;
   gap: 4px;
-  left: 8px;
-  opacity: 0;
   padding: 5px 8px;
+  /* 보이지 않을 때 눌리지 않게 한다(손잡이는 지금처럼 늘 끌 수 있다). */
   pointer-events: none;
-  position: absolute;
-  top: 8px;
-  transition: opacity 0.12s ease;
-  z-index: 2;
 }
-.mv-cell:hover .mv-cell-main {
-  opacity: 1;
+.mv-cell:hover .mv-cell-main,
+.mv-cell-lead:has(:focus-visible) .mv-cell-main {
   pointer-events: auto;
 }
 .mv-cell-main:hover {
@@ -4272,6 +4357,70 @@ html[data-theme="dark"]
 .mv-frames.is-exact .mv-cell-inner {
   height: 100%;
   width: 100%;
+}
+/* 칸 크기를 사용자가 바꾸면 칸이 16:9 가 아닐 수 있다. 상자는 다시 칸 안에서 16:9 를 지킨다.
+   ⚠ 위 is-exact 규칙보다 뒤에 와야 이긴다. */
+.mv-frames.is-exact.has-custom-tracks .mv-cell-inner {
+  height: min(100%, (100cqw * 9 / 16));
+  width: min(100%, (100cqh * 16 / 9));
+}
+
+/* 칸 사이 경계 손잡이(끌어서 너비·높이 조절, 두 번 눌러 원래대로). 칸 위에 얇게 겹친다.
+   ⚠ z-index 는 크게 본 칸(4)·채널 관리(5)보다 낮게. */
+.mv-track-handles {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 3;
+}
+.mv-track-handle {
+  pointer-events: auto;
+  position: absolute;
+  touch-action: none;
+}
+.mv-track-handle[data-axis="columns"] {
+  cursor: col-resize;
+  transform: translateX(-50%);
+  width: 10px;
+}
+.mv-track-handle[data-axis="rows"] {
+  cursor: row-resize;
+  height: 10px;
+  transform: translateY(-50%);
+}
+.mv-track-handle::after {
+  background: var(--popup-brand, #00ffa3);
+  border-radius: 2px;
+  content: "";
+  opacity: 0;
+  position: absolute;
+  transition: opacity 0.12s ease;
+}
+.mv-track-handle[data-axis="columns"]::after {
+  bottom: 0;
+  left: 4px;
+  top: 0;
+  width: 2px;
+}
+.mv-track-handle[data-axis="rows"]::after {
+  height: 2px;
+  left: 0;
+  right: 0;
+  top: 4px;
+}
+.mv-track-handle:hover::after,
+.mv-track-handle.is-dragging::after {
+  opacity: 0.9;
+}
+.mv-stage:is(.has-expanded-cell, .is-cell-dragging) .mv-track-handles {
+  display: none;
+}
+/* 끄는 동안 iframe 이 포인터를 가로채지 않게 한다. */
+.mv-stage.is-track-resizing iframe {
+  pointer-events: none;
+}
+.mv-stage.is-track-resizing {
+  user-select: none;
 }
 .mv-cell iframe {
   border: 0;

@@ -74,6 +74,13 @@ const guardSrc = content.slice(guardAt, content.indexOf("  function resetChatAsi
   await ev(`(()=>{
     document.documentElement.classList.add('cheese-chat-width-resize-enabled');
     document.body.innerHTML='<aside id="aside-chatting"><div class="_list_"></div><div class="_area_"><div class="_container_"></div></div></aside>';
+    // 멀티뷰 칸 여부·다시보기 번호·채팅 접힘(content.js 와 같은 판정). 아래에서 바꿔 본다.
+    window.__mv={frame:false,videoNo:''};
+    Object.defineProperty(window,'IS_MULTIVIEW_FRAME',{get:()=>window.__mv.frame});
+    Object.defineProperty(window,'multiviewVideoNo',{get:()=>window.__mv.videoNo});
+    ${sliceFn("isChatFolded")}
+    function getLiveChatAside(){return document.querySelector('aside#aside-chatting');}
+    window.__errors=[]; window.addEventListener('error',e=>window.__errors.push(e.message));
     ${sliceFn("normalizeChatInputHeight")}
     ${guardSrc}
     window.__guard=guardChatInputHeight;
@@ -114,6 +121,23 @@ const guardSrc = content.slice(guardAt, content.indexOf("  function resetChatAsi
     document.documentElement.classList.remove('cheese-chat-width-resize-enabled');
     chzzkSwap('60px'); return nextFrameHeight(); })()`);
   check(off === "60px", "채팅 너비 조절을 쓰지 않으면(기본 폭) 손대지 않는다");
+
+  // 멀티뷰 라이브 칸: 채팅 폭 조절은 꺼져 있지만, 광고로 펼쳐진 채팅의 입력창이 좁아
+  // 안내 문구가 접히면 치지직이 80px 까지 키운다(2026-10-05 실측). 펼쳐진 동안 40px.
+  const mvOpen = await ev(`(async()=>{ window.__mv.frame=true; chzzkSwap('80px'); return nextFrameHeight(); })()`);
+  check(mvOpen === "40px", "멀티뷰 라이브 칸: 광고로 펼쳐진 채팅의 빈 입력창은 40px");
+  const mvFolded = await ev(`(async()=>{ document.querySelector('aside').classList.add('_is_folded_x1');
+    chzzkSwap('80px'); return nextFrameHeight(); })()`);
+  check(mvFolded === "80px", "멀티뷰 칸에서 채팅이 접혀 있으면 손대지 않는다");
+  const mvVod = await ev(`(async()=>{ document.querySelector('aside').classList.remove('_is_folded_x1');
+    window.__mv.videoNo='123'; chzzkSwap('80px'); return nextFrameHeight(); })()`);
+  check(mvVod === "80px", "멀티뷰 다시보기 칸은 손대지 않는다");
+  check(JSON.stringify(await ev(`window.__errors`)) === "[]", "감시 중 오류가 없다");
+  await ev(`window.__mv.frame=false; window.__mv.videoNo='';`);
+  check(/function watchMultiviewAdChatInput\(\) \{\s*if \(isMultiviewReplay\(\)\) return;[\s\S]{0,400}adChatInputObserver = new MutationObserver\(\(\) => guardChatInputHeight\(\)\);\s*adChatInputObserver\.observe\(aside, \{\s*attributes: true,\s*attributeFilter: \["class"\],\s*childList: true,\s*subtree: true,/.test(content) &&
+    /multiviewReconcileTimer = 0;\s*watchMultiviewAdChatInput\(\);/.test(content) &&
+    /bootTimer = window\.setInterval\(\(\) => \{\s*watchMultiviewAdChatInput\(\);/.test(content),
+    "멀티뷰 라이브 칸은 채팅창(aside)만 따로 지켜본다(펼침·입력창 교체), 칸 화면 정리 때 붙인다");
 
   check(/isChatStreamMutation\(mutation\),?\s*\)\s*\) \{\s*return;\s*\}\s*\/\/[^\n]*\n\s*guardChatInputHeight\(\);\s*scheduleChatTweak\(\);/.test(content) &&
     /chatObservedTargets = targets;\s*guardChatInputHeight\(\);/.test(content),
