@@ -208,6 +208,16 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(tab.classList.contains('has-new-feature')&&tab.querySelector('.settings-tab-new-badge'),'multiview tab NEW badge missing');
       check(title.classList.contains('is-new-feature'),'multiview group NEW badge missing');
       check(quality.classList.contains('is-new-feature'),'new quality target badge missing');
+      for (const [id, control] of [
+        ['screenshot-action', '[data-screenshot-action]'],
+        ['screenshot-name-format', '[data-screenshot-name-format]'],
+        ['following-live-auto-expand', '[data-following-live-auto-expand]'],
+        ['multiview-track-resize', '[data-multiview-track-resize]'],
+        ['multiview-track-memory', '[data-multiview-track-memory]'],
+      ]) {
+        const item=document.querySelector('[data-new-feature="'+id+'"]');
+        check(item?.matches('.settings-item.is-new-feature')&&item.contains(document.querySelector(control)),id+' NEW badge missing');
+      }
       tab.click();
       check(tab.classList.contains('has-new-feature'),'NEW badge cleared before settings were viewed');
       document.querySelector('[data-tab="player"]').click();
