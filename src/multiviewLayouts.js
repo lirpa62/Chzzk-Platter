@@ -254,7 +254,8 @@
     },
   ];
 
-  const SLOTS = ["m", "a", "b", "c", "d", "e"];
+  // 메인 + 보조 최대 8(9채널). x·y·z 는 채팅·손잡이 자리라 슬롯으로 쓰지 않는다.
+  const SLOTS = ["m", "a", "b", "c", "d", "e", "f", "g", "h"];
   const POSITIONS = ["왼쪽", "가운데", "오른쪽"];
   const VERTICAL_POSITIONS = ["위", "가운데", "아래"];
   const SIDES = { right: "오른쪽", left: "왼쪽", top: "위", bottom: "아래" };
@@ -409,22 +410,110 @@
       areas: ['"m a"', '"b c"', '"d e"'], chat: ["right", "left"] },
   );
 
+  // 7~9채널 그리드.
+  // 3×2·2×3 아래 줄 한 칸(왼쪽/오른쪽) + 남는 칸에 채팅(빈 칸 채팅).
+  // ⚠ 7채널 '그리드 2×4 + 빈 칸 채팅' 은 '그리드 2×3 + 아래 1 · 왼쪽' 과 같은 모양이라 따로 두지 않는다.
+  // '그리드 2×3 + 아래 1 · 오른쪽' 은 지웠다.
+  for (const [base, rows, positions] of [
+    ["3x2", [["m", "a", "b"], ["c", "d", "e"]], [0, 2]],
+    ["2x3", [["m", "a"], ["b", "c"], ["d", "e"]], [0]],
+  ]) {
+    for (const position of positions) {
+      const strip = Array(rows[0].length).fill(".");
+      strip[position === 0 ? 0 : strip.length - 1] = "f";
+      const grid = [...rows, strip];
+      LAYOUTS.push({
+        id: `grid-${base}-bottom-1-${position}`,
+        label: `그리드 ${base.replace("x", "×")} + 아래 1 · ${POSITIONS[position]}`,
+        aux: 6,
+        columns: `repeat(${grid[0].length}, 1fr)`,
+        rows: `repeat(${grid.length}, 1fr)`,
+        ...chatInsetLayout(grid),
+        flexible: true,
+      });
+    }
+  }
+  LAYOUTS.push(
+    { id: "grid-3x3-8", label: "그리드 3×3", aux: 7,
+      columns: "repeat(3, 1fr)", rows: "repeat(3, 1fr)",
+      ...chatInsetLayout([["m", "a", "b"], ["c", "d", "e"], ["f", "g", "."]]), flexible: true },
+    { id: "grid-2x4", label: "그리드 2×4", aux: 7,
+      columns: "1fr 1fr", rows: "repeat(4, 1fr)",
+      areas: ['"m a"', '"b c"', '"d e"', '"f g"'], chat: ["right", "left"] },
+    { id: "grid-3x3", label: "그리드 3×3", aux: 8,
+      columns: "repeat(3, 1fr)", rows: "repeat(3, 1fr)",
+      areas: ['"m a b"', '"c d e"', '"f g h"'], chat: ["right", "left"] },
+  );
+
   // 채팅 열의 첫 행에 마지막 보조 채널을 둔다. x는 그 아래 채팅 패널 자리다.
   // 영상 칸은 언제나 mvFrames 안에 남겨 iframe 재로드 없이 Grid 상에서만 이동한다.
-  function addChatTop(base, id = `${base.id}-chat-top`) {
-    const videoSlot = SLOTS[base.aux + 1];
-    const rows = base.areas.length === 1 ? [base.areas[0], base.areas[0]] : base.areas;
-    const areas = rows.map((row, index) => {
+  // 줄 크기 목록(fr 숫자). "repeat(4, 1fr)" 도 풀어 쓴다.
+  function trackFractions(tracks) {
+    return tracks
+      .replace(/repeat\((\d+),\s*([^)]+)\)/g, (_, n, track) => Array(Number(n)).fill(track.trim()).join(" "))
+      .trim().split(/\s+/).map((value) => parseFloat(value));
+  }
+
+  // 격자의 실제 줄. 칸 경계가 없는 이웃 줄(모든 칸이 두 줄에 걸친다)은 하나로 합친다.
+  // share: 전체 높이에 대한 비율. dropLast: 마지막 열(채팅 열)은 빼고 본다.
+  function macroRows(areas, rows, dropLast = false) {
+    const fr = trackFractions(rows);
+    const merged = [];
+    areas.forEach((row, index) => {
       const cells = row.replace(/"/g, "").trim().split(/\s+/);
-      return areaRow([...cells, index === 0 ? videoSlot : "x"]);
+      if (dropLast) cells.pop();
+      const last = merged[merged.length - 1];
+      if (last && last.cells.join(" ") === cells.join(" ")) last.fr += fr[index];
+      else merged.push({ cells, fr: fr[index] });
     });
+    const total = merged.reduce((sum, row) => sum + row.fr, 0);
+    return merged.map((row) => ({ cells: row.cells, share: row.fr / total }));
+  }
+
+  // 줄 경계에 extra(0~1) 경계를 더해 나눈 구간들. 각 구간: 그 자리의 칸, 시작·끝 비율.
+  function splitRows(macro, extra) {
+    const round = (value) => Math.round(value * 1e6) / 1e6;
+    const lines = [0];
+    for (const row of macro) lines.push(round(lines[lines.length - 1] + row.share));
+    const all = [...new Set([...lines, ...extra.map(round)])].sort((a, b) => a - b);
+    const parts = [];
+    for (let i = 0; i + 1 < all.length; i += 1) {
+      const mid = (all[i] + all[i + 1]) / 2;
+      const at = lines.findIndex((line, index) => index > 0 && mid < line) - 1;
+      parts.push({ cells: macro[at].cells, start: all[i], end: all[i + 1] });
+    }
+    return parts;
+  }
+
+  // 비율 → fr(12 를 곱해 1/2·1/3·1/4·1/6 이 정수로 나온다).
+  const fraction = (share) => `${Math.round(share * 12 * 1e4) / 1e4}fr`;
+
+  // videos: 채팅 열 위에 쌓는 영상 수(1 또는 2).
+  // 영상이 둘이면 미리보기용 격자(areas/rows)는 격자 줄에 1/4·1/2 경계를 더해 채팅 열을
+  // [영상 1/4][영상 1/4][채팅 1/2]로 그린다. 실제 화면은 chatTopStageGrid 가 따로 짠다.
+  function addChatTop(base, id = null, videos = 1) {
+    id ||= `${base.id}-chat-top${videos > 1 ? `-${videos}` : ""}`;
+    const videoSlots = SLOTS.slice(base.aux + 1, base.aux + 1 + videos);
+    let rows = base.areas.length === 1 ? [base.areas[0], base.areas[0]] : base.areas;
+    let tracks = rows.length === base.areas.length ? base.rows : "1fr 1fr";
+    let areas = rows.map((row, index) => {
+      const cells = row.replace(/"/g, "").trim().split(/\s+/);
+      return areaRow([...cells, videoSlots[index] || "x"]);
+    });
+    if (videos === 2) {
+      const parts = splitRows(macroRows(base.areas, base.rows), [0.25, 0.5]);
+      areas = parts.map((part) =>
+        areaRow([...part.cells, part.end <= 0.25 ? videoSlots[0] : part.end <= 0.5 ? videoSlots[1] : "x"]));
+      tracks = parts.map((part) => fraction(part.end - part.start)).join(" ");
+    }
     LAYOUTS.push({
       id,
-      label: `${base.label} + 채팅 위 1`,
-      aux: base.aux + 1,
+      label: `${base.label} + 채팅 위 ${videos}`,
+      aux: base.aux + videos,
+      ...(videos > 1 ? { chatTopVideos: videos } : {}),
       columns: `${base.columns} 1fr`,
       coreColumns: base.columns,
-      rows: rows.length === base.areas.length ? base.rows : "1fr 1fr",
+      rows: tracks,
       areas,
       chat: ["right", "left"],
       chatTop: true,
@@ -449,10 +538,25 @@
   }
   // 6채널: 한 열은 메인·보조 1 을 반씩, 다른 열은 보조 3 을 3등분, 채팅 열 위에 보조 1.
   // 줄 2:1:1:2 로 두 열의 경계(1/2, 1/3·2/3)를 모두 담는다. 열 3:2 면 칸이 16:9 에 가깝다.
-  addChatTop({ id: "grid-2-3", label: "그리드 2·3", aux: 4, columns: "3fr 2fr",
-    rows: "2fr 1fr 1fr 2fr", areas: ['"m a"', '"m c"', '"b c"', '"b d"'], split: true });
-  addChatTop({ id: "grid-3-2", label: "그리드 3·2", aux: 4, columns: "2fr 3fr",
-    rows: "2fr 1fr 1fr 2fr", areas: ['"a m"', '"c m"', '"c b"', '"d b"'], split: true });
+  const grid23 = { id: "grid-2-3", label: "그리드 2·3", aux: 4, columns: "3fr 2fr",
+    rows: "2fr 1fr 1fr 2fr", areas: ['"m a"', '"m c"', '"b c"', '"b d"'], split: true };
+  const grid32 = { id: "grid-3-2", label: "그리드 3·2", aux: 4, columns: "2fr 3fr",
+    rows: "2fr 1fr 1fr 2fr", areas: ['"a m"', '"c m"', '"c b"', '"d b"'], split: true };
+  addChatTop(grid23);
+  addChatTop(grid32);
+  // 7채널: 그리드 3×2 / 3·3(두 열에 3칸씩) + 채팅 위 1. 8채널: 그리드 3·3 + 채팅 위 2.
+  addChatTop({ ...LAYOUTS.find((layout) => layout.id === "grid-3x2"), split: true });
+  const grid33 = { id: "grid-3-3", label: "그리드 3·3", aux: 5, columns: "1fr 1fr",
+    rows: "1fr 1fr 1fr", areas: ['"m a"', '"b c"', '"d e"'], split: true };
+  addChatTop(grid33);
+  addChatTop(grid33, "grid-3-3-chat-top-2", 2);
+  // 채팅 열 위에 영상 둘(4~7채널).
+  for (const id of ["bottom-1", "right-2", "left-2", "bottom-2", "top-2",
+    "right-3", "left-3", "bottom-3", "top-3", "grid-2x2"]) {
+    addChatTop(LAYOUTS.find((layout) => layout.id === id), null, 2);
+  }
+  addChatTop(grid23, null, 2);
+  addChatTop(grid32, null, 2);
 
   // 빈 칸이 한 칸 남는 5채널 배치도 빈 칸 채팅이 기본이다(바깥 자리는 채팅 위치 메뉴에서 고른다).
   // 빈 칸 채팅 배치에서 채널을 늘려 이 배치로 오면 빈 칸이 이어지고, 미리보기도 기본 자리를
@@ -478,16 +582,25 @@
     // 4채널
     "right-3", "right-2-bottom-1-0", "right-2-bottom-1-2",
     "left-3", "left-2-bottom-1-0", "left-2-bottom-1-2",
-    "bottom-3", "top-3", "grid-2x2", "bottom-2-chat-top", "top-2-chat-top",
+    "bottom-3", "top-3", "grid-2x2", "bottom-2-chat-top", "top-2-chat-top", "bottom-1-chat-top-2",
     // 5채널
     "right2-bottom2", "right-2x2", "right-4", "left2-bottom2", "left-2x2", "left-4",
     "bottom-4", "top-4", "grid-3x2-5", "grid-2x3-5",
     "right-3-chat-top", "left-3-chat-top", "bottom-3-chat-top", "top-3-chat-top", "grid-2x2-chat-top",
+    "right-2-chat-top-2", "left-2-chat-top-2", "bottom-2-chat-top-2", "top-2-chat-top-2",
     // 6채널
     "right2-bottom3", "right-5", "left2-bottom3", "left-5", "bottom-5", "top-5",
     "grid-3x2", "grid-2x3-6",
     "right-4-chat-top", "left-4-chat-top", "bottom-4-chat-top", "top-4-chat-top",
     "grid-2-3-chat-top", "grid-3-2-chat-top",
+    "right-3-chat-top-2", "left-3-chat-top-2", "bottom-3-chat-top-2", "top-3-chat-top-2", "grid-2x2-chat-top-2",
+    // 7채널
+    "grid-3x2-bottom-1-0", "grid-3x2-bottom-1-2", "grid-2x3-bottom-1-0",
+    "grid-3-3-chat-top", "grid-3x2-chat-top", "grid-2-3-chat-top-2", "grid-3-2-chat-top-2",
+    // 8채널
+    "grid-3x3-8", "grid-2x4", "grid-3-3-chat-top-2",
+    // 9채널
+    "grid-3x3",
   ];
   {
     const rank = new Map(LAYOUT_ORDER.map((id, index) => [id, index]));
@@ -584,21 +697,49 @@
     "bottom-3-chat-top": ["bottom-2-chat-top", "bottom-4-chat-top"],
     "top-3-chat-top": ["top-2-chat-top", "top-4-chat-top"],
     "grid-2x2-chat-top": ["grid-2x2", "grid-2-3-chat-top"],
-    // 6채널
-    "right2-bottom3": ["right2-bottom2", null],
-    "left2-bottom3": ["left2-bottom2", null],
-    "right-5": ["right-4", null],
-    "left-5": ["left-4", null],
-    "bottom-5": ["bottom-4", null],
-    "top-5": ["top-4", null],
-    "grid-3x2": ["grid-3x2-5", null],
-    "grid-2x3-6": ["grid-2x3-5", null],
-    "right-4-chat-top": ["right-3-chat-top", null],
-    "left-4-chat-top": ["left-3-chat-top", null],
-    "bottom-4-chat-top": ["bottom-3-chat-top", null],
-    "top-4-chat-top": ["top-3-chat-top", null],
-    "grid-2-3-chat-top": ["grid-2x2-chat-top", null],
-    "grid-3-2-chat-top": ["grid-2x2-chat-top", null],
+    // 6채널. 7채널부터는 그리드뿐이라 보조가 있는 쪽 대신 빈 칸·채팅 방식을 잇는다.
+    "right2-bottom3": ["right2-bottom2", "grid-3x2-bottom-1-0"],
+    "left2-bottom3": ["left2-bottom2", "grid-3x2-bottom-1-2"],
+    "right-5": ["right-4", "grid-3x2-bottom-1-0"],
+    "left-5": ["left-4", "grid-3x2-bottom-1-2"],
+    "bottom-5": ["bottom-4", "grid-3x2-bottom-1-0"],
+    "top-5": ["top-4", "grid-3x2-bottom-1-0"],
+    // 그리드 3×2·2×3 은 여섯 칸을 그대로 두고 새 채널을 채팅 위에 올린다.
+    "grid-3x2": ["grid-3x2-5", "grid-3x2-chat-top"],
+    "grid-2x3-6": ["grid-2x3-5", "grid-3-3-chat-top"],
+    "right-4-chat-top": ["right-3-chat-top", "grid-3-3-chat-top"],
+    "left-4-chat-top": ["left-3-chat-top", "grid-3-3-chat-top"],
+    "bottom-4-chat-top": ["bottom-3-chat-top", "grid-3x2-chat-top"],
+    "top-4-chat-top": ["top-3-chat-top", "grid-3x2-chat-top"],
+    "grid-2-3-chat-top": ["grid-2x2-chat-top", "grid-3-3-chat-top"],
+    "grid-3-2-chat-top": ["grid-2x2-chat-top", "grid-3-3-chat-top"],
+    // 7채널
+    "grid-3x2-bottom-1-0": ["grid-3x2", "grid-3x3-8"],
+    "grid-3x2-bottom-1-2": ["grid-3x2", "grid-3x3-8"],
+    "grid-2x3-bottom-1-0": ["grid-2x3-6", "grid-2x4"],
+    "grid-3-3-chat-top": ["grid-2-3-chat-top", "grid-3-3-chat-top-2"],
+    "grid-3x2-chat-top": ["grid-3x2", "grid-3x3-8"],
+    // 8채널. 3×3 에서 줄이면 빈 칸이 같은 오른쪽 아래에 남는다.
+    "grid-3x3-8": ["grid-3x2-bottom-1-0", "grid-3x3"],
+    "grid-2x4": ["grid-2x3-bottom-1-0", "grid-3x3"],
+    "grid-3-3-chat-top-2": ["grid-3-3-chat-top", "grid-3x3"],
+    // 9채널
+    "grid-3x3": ["grid-3x3-8", null],
+    // 채팅 위 2. 줄이면 채팅 열 영상 하나를 빼고(격자는 그대로) 채팅 위 1 로 간다.
+    // '오른쪽·왼쪽 2 + 채팅 위 1' 은 지웠으므로 그 둘은 채팅 위 2 를 지키는 '아래 1 + 채팅 위 2' 로.
+    "bottom-1-chat-top-2": ["main-top-chat-top", "bottom-2-chat-top-2"],
+    "right-2-chat-top-2": ["bottom-1-chat-top-2", "right-3-chat-top-2"],
+    "left-2-chat-top-2": ["bottom-1-chat-top-2", "left-3-chat-top-2"],
+    "bottom-2-chat-top-2": ["bottom-2-chat-top", "bottom-3-chat-top-2"],
+    "top-2-chat-top-2": ["top-2-chat-top", "top-3-chat-top-2"],
+    // 늘리면 보조 3 열이 같은 쪽에 남는 그리드 2·3 / 3·2 로.
+    "right-3-chat-top-2": ["right-3-chat-top", "grid-2-3-chat-top-2"],
+    "left-3-chat-top-2": ["left-3-chat-top", "grid-3-2-chat-top-2"],
+    "bottom-3-chat-top-2": ["bottom-3-chat-top", "grid-3x2-chat-top"],
+    "top-3-chat-top-2": ["top-3-chat-top", "grid-3x2-chat-top"],
+    "grid-2x2-chat-top-2": ["grid-2x2-chat-top", "grid-2-3-chat-top-2"],
+    "grid-2-3-chat-top-2": ["grid-2-3-chat-top", "grid-3-3-chat-top-2"],
+    "grid-3-2-chat-top-2": ["grid-3-2-chat-top", "grid-3-3-chat-top-2"],
   };
 
   // 채널 수가 바뀌었을 때 갈 배치와 채팅 자리. 바꿀 필요가 없거나 갈 배치가 없으면 null.
@@ -655,6 +796,51 @@
     const columns = left
       ? `${chatWidth} 6px ${layout.coreColumns}`
       : `${layout.coreColumns} 6px ${chatWidth}`;
+    if (layout.chatTopVideos === 2) {
+      // 채팅 열: [영상 f][영상 g][손잡이][채팅]. 영상 높이 T 는 손잡이로 정하고 둘이 같다.
+      // 격자 줄(칸 경계가 있는 줄만)과 채팅 열 경계가 섞여도 순서가 바뀌지 않게 T 를 묶는다.
+      //  · 첫 줄이 40% 이상이면 영상 둘·손잡이를 첫 줄 안에 둔다: T ≤ (첫 줄 − 12px) / 2.
+      //  · 아니면 g 가 첫 줄 경계를 넘어 둘째 줄 안에서 끝난다:
+      //    첫 줄 / 2 ≤ T ≤ min(첫 줄 − 8px, (두 줄 − 12px) / 2).
+      // 줄 간격(2px)·손잡이(6px)를 빼서 맞춘다.
+      const [first, second] = SLOTS.slice(layout.aux - 1, layout.aux + 1);
+      const macro = macroRows(layout.areas, layout.rows, true);
+      const row = (cells, edge) => areaRow(left ? [edge, "z", ...cells] : [...cells, "z", edge]);
+      const pct = (share) => `${Math.round(share * 1e6) / 1e4}%`;
+      const rest = (rows) => rows.map((item) => `minmax(0, ${fraction(item.share)})`);
+      if (hideChat) {
+        // 채팅 열을 영상 둘이 반씩 쓴다(격자 줄에 1/2 경계를 더한다).
+        const parts = splitRows(macro, [0.5]);
+        return {
+          areas: parts.map((part) => row(part.cells, part.end <= 0.5 ? first : second)).join(" "),
+          columns,
+          rows: parts.map((part) => `minmax(0, ${fraction(part.end - part.start)})`).join(" "),
+        };
+      }
+      const height = "var(--mv-chat-top-h, calc(min(var(--mv-chat-w, 370px), 60vw) * 9 / 16))";
+      const s1 = pct(macro[0].share);
+      if (macro[0].share >= 0.4) {
+        const top = `min(${height}, calc((${s1} - 12px) / 2))`;
+        const after = rest(macro.slice(1));
+        return {
+          areas: [row(macro[0].cells, first), row(macro[0].cells, second), row(macro[0].cells, "y"),
+            row(macro[0].cells, "x"), ...macro.slice(1).map((item) => row(item.cells, "x"))].join(" "),
+          columns,
+          rows: [`minmax(0, ${top})`, `minmax(0, ${top})`, "6px",
+            after.length ? `minmax(0, calc(${s1} - 2 * ${top} - 12px))` : "minmax(0, 1fr)", ...after].join(" "),
+        };
+      }
+      const s12 = pct(macro[0].share + macro[1].share);
+      const top = `clamp(calc(${s1} / 2), ${height}, min(calc(${s1} - 8px), calc((${s12} - 12px) / 2)))`;
+      const after = rest(macro.slice(2));
+      return {
+        areas: [row(macro[0].cells, first), row(macro[0].cells, second), row(macro[1].cells, second),
+          row(macro[1].cells, "y"), row(macro[1].cells, "x"), ...macro.slice(2).map((item) => row(item.cells, "x"))].join(" "),
+        columns,
+        rows: [`minmax(0, ${top})`, `minmax(0, calc(${s1} - ${top} - 2px))`, `minmax(0, calc(2 * ${top} - ${s1}))`,
+          "6px", after.length ? `minmax(0, calc(${s12} - 2 * ${top} - 10px))` : "minmax(0, 1fr)", ...after].join(" "),
+      };
+    }
     if (layout.chatTopSplit) {
       // 격자 줄은 배치 비율 그대로 두고, 채팅 열의 위 영상(높이 조절)은 격자 첫 줄 안에서만
       // 나눈다. 줄: [위 영상] [손잡이] [첫 줄 나머지] [나머지 격자 줄...]. 위 영상은 첫 줄을
@@ -689,6 +875,62 @@
       rows: hideChat ? layout.rows :
         `minmax(0, min(var(--mv-chat-top-h, calc(min(var(--mv-chat-w, 370px), 60vw) * 9 / 16)), calc(100% - 160px))) 6px repeat(${layout.areas.length - 1}, minmax(0, 1fr))`,
     };
+  }
+
+  // 한 칸 크게 보기가 덮을 영상 영역(스테이지 Grid 의 grid-area). 채팅은 덮지 않는다.
+  // 일반 배치는 null — 칸이 프레임 래퍼(mvFramesFit) 전체를 덮는다(Grid 밖 기준).
+  // 채팅 위 1 은 채팅 열(손잡이 z 포함)을 뺀 격자, 채팅을 접거나 분리하면 채팅 열의 영상까지.
+  // 빈 칸 채팅은 채팅이 격자 안에 있어 격자 전체를 덮는다.
+  function expandedArea(layout, side, hideChat = false) {
+    if (!layout?.chatTop && !usesChatInset(layout, side)) return null;
+    if (!layout.chatTop || hideChat) return "1 / 1 / -1 / -1";
+    const core = layout.areas[0].replace(/"/g, "").trim().split(/\s+/).length - 1;
+    return side === "left" ? "1 / 3 / -1 / -1" : `1 / 1 / -1 / ${core + 1}`;
+  }
+
+  // ── 칸 크기 조절(경계 끌기) ──
+  // 조절하는 격자: 일반 배치는 프레임 격자의 열·행, 빈 칸 채팅은 스테이지 격자의 열·행,
+  // 채팅 위 배치는 채팅 열을 뺀 격자 열만(행은 채팅 열 위 영상 높이와 맞물려 있다).
+  function resizableAxes(layout) {
+    if (!layout) return [];
+    return layout.chatTop ? ["columns"] : ["columns", "rows"];
+  }
+
+  // 크기를 조절할 격자의 칸 배치표(행마다 칸 이름 배열). 채팅 위 배치는 채팅 열을 뺀다.
+  // inset: 빈 칸 채팅을 쓰는지, hideChat: 채팅을 접었거나 분리했는지.
+  function resizeGrid(layout, inset = false, hideChat = false) {
+    const rows = inset ? chatInsetStageGrid(layout, hideChat).areas.split(/(?<=")\s+(?=")/) : layout.areas;
+    return rows.map((row) => {
+      const cells = row.replace(/"/g, "").trim().split(/\s+/);
+      return layout.chatTop ? cells.slice(0, -1) : cells;
+    });
+  }
+
+  // 끌 수 있는 경계. 이웃한 두 열(행) 사이에서 칸이 바뀌는 곳만 경계다.
+  // 반환: [{ index(앞 트랙 번호), edges: [{ line(가로지르는 행·열 번호), a, b(양쪽 칸 이름) }] }]
+  // 빈 칸('.')끼리 맞닿은 곳은 경계가 아니다.
+  function trackBoundaries(grid, axis) {
+    const rows = grid.length;
+    const cols = grid[0]?.length || 0;
+    const tracks = axis === "columns" ? cols : rows;
+    const lines = axis === "columns" ? rows : cols;
+    const at = (track, line) => (axis === "columns" ? grid[line][track] : grid[track][line]);
+    const out = [];
+    for (let index = 0; index + 1 < tracks; index += 1) {
+      const edges = [];
+      for (let line = 0; line < lines; line += 1) {
+        const a = at(index, line);
+        const b = at(index + 1, line);
+        if (a !== b && !(a === "." && b === ".")) edges.push({ line, a, b });
+      }
+      if (edges.length) out.push({ index, edges });
+    }
+    return out;
+  }
+
+  // 사용자 크기(fr 비율 배열) → grid-template 값.
+  function trackTemplate(sizes) {
+    return sizes.map((value) => `minmax(0, ${Math.round(value * 1e4) / 1e4}fr)`).join(" ");
   }
 
   // 빈 칸(. 또는 x)을 채팅 자리로 쓴다. 채팅을 접거나 분리하면 다시 빈 칸이다.
@@ -805,6 +1047,11 @@
     stageStyle,
     chatTopStageGrid,
     chatInsetStageGrid,
+    expandedArea,
+    resizableAxes,
+    resizeGrid,
+    trackBoundaries,
+    trackTemplate,
     slotSpans,
     solveTracks,
   };

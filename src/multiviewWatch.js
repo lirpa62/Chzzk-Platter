@@ -93,9 +93,11 @@
   }
   const HASH_RE = /^[0-9a-f]{32}$/i;
   const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
+  // 멀티뷰 탭 하나에 담는 최대 채널 수(메인 1 + 보조 8). 고르기 화면(multiview.js)과 같다.
+  const MAX_CHANNELS = 9;
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
   const FRAME_READY_TIMEOUT_MS = 20000;
-  // 4개 이상일 때만 아주 짧게 시차를 준다. 동시에 6개를 붙이면 초기 요청이 몰린다.
+  // 4개 이상일 때만 아주 짧게 시차를 준다. 동시에 여러 개를 붙이면 초기 요청이 몰린다.
   const FRAME_STAGGER_MS = 100;
   const FRAME_STAGGER_MIN_COUNT = 4;
 
@@ -1678,7 +1680,7 @@
   function ensureCells() {
     const frames = $("mvFrames");
     const ordered = orderedChannels();
-    // 4개 이상이면 아주 짧은 시차를 준다. 6개를 한 번에 붙이면 초기 요청이 몰려
+    // 4개 이상이면 아주 짧은 시차를 준다. 여러 개를 한 번에 붙이면 초기 요청이 몰려
     // CPU·네트워크가 튄다. 2~3개는 체감될 만큼 느려지지 않도록 시차를 두지 않는다.
     const stagger =
       ordered.length >= FRAME_STAGGER_MIN_COUNT ? FRAME_STAGGER_MS : 0;
@@ -1771,15 +1773,36 @@
         '<rect width="18" height="18" x="3" y="3" rx="2"></rect>' +
         '<path d="M3 9h18"></path><path d="M9 21V9"></path></svg>' +
         "<span>메인으로</span>";
-      // ⚠ 손잡이만 draggable 이다. 제거 단추가 드래그 시작점이 되면 안 된다.
-      tools.appendChild(grip);
+      // 이 칸만 영상 영역 전체로 크게 본다(채팅은 그대로). 다시 누르거나 Esc 로 돌아간다.
+      const expand = document.createElement("button");
+      expand.type = "button";
+      expand.className = "mv-cell-expand mv-custom-tooltip";
+      expand.dataset.mvExpand = channel.channelId;
+      // lucide maximize-2 / minimize-2.
+      expand.innerHTML =
+        '<svg class="mv-cell-expand-on" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+        'aria-hidden="true"><path d="M15 3h6v6"></path><path d="m21 3-7 7"></path>' +
+        '<path d="m3 21 7-7"></path><path d="M9 21H3v-6"></path></svg>' +
+        '<svg class="mv-cell-expand-off" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+        'aria-hidden="true"><path d="m14 10 7-7"></path><path d="M20 10h-6V4"></path>' +
+        '<path d="m3 21 7-7"></path><path d="M4 14h6v6"></path></svg>';
+      // 왼쪽 위: 자리 바꾸기 손잡이 위, '메인으로' 아래. 끌려다 '메인으로'를 잘못 누르지
+      // 않게 세로로 놓고 사이를 띄운다(오른쪽 위 도구 모음과도 떨어뜨린다).
+      const lead = document.createElement("div");
+      lead.className = "mv-cell-lead";
+      // ⚠ 손잡이만 draggable 이다. 다른 단추가 드래그 시작점이 되면 안 된다.
+      lead.appendChild(grip);
+      lead.appendChild(promote);
+      tools.appendChild(expand);
       tools.appendChild(change);
       tools.appendChild(close);
       cell.appendChild(box);
       cell.appendChild(overlay);
       cell.appendChild(widePrompt);
       cell.appendChild(tools);
-      cell.appendChild(promote);
+      cell.appendChild(lead);
       cells.set(channel.channelId, cell);
       frames.appendChild(cell);
       setCellStatus(channel.channelId, "loading");
@@ -1811,19 +1834,388 @@
     return main ? [main, ...rest] : state.chosen.slice();
   }
 
+  // 한 칸 크게 보기. 칸(iframe)은 옮기지 않고 영상 영역 위에 겹쳐 띄운다(옮기면 재생이 다시
+  // 시작된다). 가려진 칸도 그대로 재생하고 소리·화질도 바꾸지 않는다. 채널이 빠지면 풀린다.
+  // 이 탭이 열려 있는 동안만 기억한다.
+  let expandedChannelId = "";
+  function setExpanded(channelId) {
+    expandedChannelId = channelId && cells.has(channelId) ? channelId : "";
+    applyLayout();
+  }
+
+  function applyExpandedCell(layout, side, hideChat) {
+    if (expandedChannelId && !state.chosen.some((c) => c.channelId === expandedChannelId))
+      expandedChannelId = "";
+    // 일반 배치는 칸이 프레임 래퍼 전체를 덮고(CSS), 채팅 위 1·빈 칸 채팅은 스테이지 Grid 에서
+    // 채팅 열을 뺀 영역을 덮는다.
+    const area = LAYOUTS.expandedArea(layout, side, hideChat);
+    $("mvStage").classList.toggle("has-expanded-cell", Boolean(expandedChannelId));
+    for (const [channelId, cell] of cells) {
+      const on = channelId === expandedChannelId;
+      cell.classList.toggle("is-expanded", on);
+      if (on && area) cell.style.gridArea = area;
+      const button = cell.querySelector(".mv-cell-expand");
+      if (!button) continue;
+      const label = on ? "원래 크기로 (Esc)" : "크게 보기";
+      button.dataset.tooltip = label;
+      button.setAttribute("aria-label", `${channelName(channelId)} ${label}`);
+      button.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  // ── 칸 크기 조절(칸 사이 경계 끌기) ──────────────────────────────────────
+  // 칸 사이 경계에 손잡이를 띄워 끌면 이웃한 두 줄(열·행)의 크기를 서로 주고받는다.
+  // 일반·빈 칸 채팅 배치는 열·행, 채팅 위 배치는 열만(LAYOUTS.resizableAxes). 칸이 16:9 가
+  // 아니게 되면 영상은 칸 안에서 16:9 를 지키고 남는 자리는 검은 여백이 된다.
+  // 손잡이를 두 번 누르면 그 배치의 원래 비율로 돌아간다.
+  // 기억(설정 > 멀티뷰): reset=배치를 바꾸면 초기화(기본) | session=이 탭에서 배치별로 |
+  // layout=배치별로 저장(다음 시청에도).
+  // 설정 > 멀티뷰 '멀티뷰 칸 사이 크기 조절'(기본 켜짐). 끄면 손잡이가 없고 기본 비율로 보인다
+  // (기억해 둔 크기는 지우지 않아 다시 켜면 그대로).
+  const TRACK_RESIZE_KEY = "cheeseMultiviewTrackResize";
+  let trackResizeEnabled = true;
+  const TRACK_MEMORY_KEY = "cheeseMultiviewTrackMemory";
+  const TRACK_SIZES_KEY = "cheeseMultiviewTrackSizes";
+  const TRACK_MEMORY_MODES = ["reset", "session", "layout"];
+  let trackMemory = "reset";
+  let trackSizes = new Map(); // layoutId → { columns?: number[], rows?: number[] }
+  let trackSizesLayoutId = ""; // reset 모드: 지금 크기가 속한 배치
+  let trackDrag = null;
+
+  const validTrackSizes = (value) =>
+    Array.isArray(value) && value.length >= 2 && value.every((v) => Number.isFinite(v) && v > 0);
+
+  function storedTrackSizes(raw) {
+    const map = new Map();
+    for (const [id, entry] of Object.entries(raw && typeof raw === "object" ? raw : {})) {
+      if (!LAYOUTS.layoutById(id)) continue;
+      const clean = {};
+      if (validTrackSizes(entry?.columns)) clean.columns = entry.columns;
+      if (validTrackSizes(entry?.rows)) clean.rows = entry.rows;
+      if (clean.columns || clean.rows) map.set(id, clean);
+    }
+    return map;
+  }
+
+  function saveTrackSizes() {
+    if (trackMemory !== "layout") return;
+    try {
+      void chrome.storage?.local?.set({ [TRACK_SIZES_KEY]: Object.fromEntries(trackSizes) })?.catch?.(() => {});
+    } catch {}
+  }
+
+  function applyTrackMemorySetting(value, stored) {
+    trackMemory = TRACK_MEMORY_MODES.includes(value) ? value : "reset";
+    if (trackMemory === "layout") {
+      // 저장해 둔 크기를 쓰되, 이번 탭에서 이미 바꾼 배치는 지금 크기를 남긴다.
+      const saved = storedTrackSizes(stored);
+      for (const [id, entry] of trackSizes) saved.set(id, entry);
+      trackSizes = saved;
+      saveTrackSizes();
+    } else if (trackMemory === "reset") {
+      const current = trackSizes.get(state.layoutId);
+      trackSizes = new Map(current ? [[state.layoutId, current]] : []);
+      trackSizesLayoutId = state.layoutId;
+    }
+    if (LAYOUTS.layoutById(state.layoutId)) applyLayout();
+  }
+
+  void chrome.storage?.local
+    ?.get([TRACK_RESIZE_KEY, TRACK_MEMORY_KEY, TRACK_SIZES_KEY])
+    ?.then((data) => {
+      trackResizeEnabled = data[TRACK_RESIZE_KEY] !== false;
+      applyTrackMemorySetting(data[TRACK_MEMORY_KEY], data[TRACK_SIZES_KEY]);
+    })
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[TRACK_RESIZE_KEY]) {
+      trackResizeEnabled = changes[TRACK_RESIZE_KEY].newValue !== false;
+      if (LAYOUTS.layoutById(state.layoutId)) applyLayout();
+    }
+    if (!changes[TRACK_MEMORY_KEY]) return;
+    void chrome.storage.local.get(TRACK_SIZES_KEY)
+      .then((data) => applyTrackMemorySetting(changes[TRACK_MEMORY_KEY].newValue, data[TRACK_SIZES_KEY]))
+      .catch(() => applyTrackMemorySetting(changes[TRACK_MEMORY_KEY].newValue, null));
+  });
+
+  // 이 배치에 지금 쓸 사용자 크기. 트랙 수가 맞지 않으면(배치가 바뀐 경우) 버린다.
+  function customTracksFor(layout, grid) {
+    if (!trackResizeEnabled) return {};
+    if (trackMemory === "reset" && trackSizesLayoutId !== layout.id) {
+      trackSizes.clear();
+      trackSizesLayoutId = layout.id;
+    }
+    const entry = trackSizes.get(layout.id);
+    if (!entry) return {};
+    const axes = LAYOUTS.resizableAxes(layout);
+    const out = {};
+    if (axes.includes("columns") && entry.columns?.length === grid[0].length) out.columns = entry.columns;
+    if (axes.includes("rows") && entry.rows?.length === grid.length) out.rows = entry.rows;
+    return out;
+  }
+
+  // 배치의 격자 템플릿을 스테이지(채팅 위·빈 칸 채팅) 또는 프레임 격자(일반)에 쓴다.
+  // 끄는 동안에도 이것만 다시 불러 크기를 바꾼다. 반환: 크기를 조절하는 격자 요소.
+  function applyGridTemplates(layout, side, inset, hideChat) {
+    const frames = $("mvFrames");
+    const stage = $("mvStage");
+    const tracks = inset ? null : LAYOUTS.solveTracks(layout);
+    const custom = customTracksFor(layout, LAYOUTS.resizeGrid(layout, inset, hideChat));
+    if (layout.chatTop || inset) {
+      const grid = layout.chatTop
+        ? LAYOUTS.chatTopStageGrid(
+          custom.columns ? { ...layout, coreColumns: LAYOUTS.trackTemplate(custom.columns) } : layout,
+          side,
+          hideChat,
+        )
+        : LAYOUTS.chatInsetStageGrid(layout, hideChat);
+      stage.style.gridTemplateColumns = inset && custom.columns ? LAYOUTS.trackTemplate(custom.columns) : grid.columns;
+      stage.style.gridTemplateRows = inset && custom.rows ? LAYOUTS.trackTemplate(custom.rows) : grid.rows;
+      stage.style.gridTemplateAreas = grid.areas;
+      frames.style.gridTemplateColumns = "";
+      frames.style.gridTemplateRows = "";
+      frames.style.gridTemplateAreas = "";
+    } else {
+      stage.style.gridTemplateColumns = "";
+      stage.style.gridTemplateRows = "";
+      stage.style.gridTemplateAreas = "";
+      frames.style.gridTemplateColumns = custom.columns
+        ? LAYOUTS.trackTemplate(custom.columns) : tracks ? tracks.columns : layout.columns;
+      frames.style.gridTemplateRows = custom.rows
+        ? LAYOUTS.trackTemplate(custom.rows) : tracks ? tracks.rows : layout.rows;
+      frames.style.gridTemplateAreas = layout.areas.join(" ");
+    }
+    frames.style.setProperty("--mv-ratio", tracks ? String(tracks.ratio) : "");
+    frames.classList.toggle("is-exact", Boolean(tracks));
+    // 사용자 크기면 칸이 16:9 가 아닐 수 있다. 영상 상자가 칸 안에서 16:9 를 지키게 한다.
+    frames.classList.toggle("has-custom-tracks", Boolean(custom.columns || custom.rows));
+    return layout.chatTop || inset ? stage : frames;
+  }
+
+  // 손잡이 위치는 실제 칸의 화면 위치로 정한다(채팅 위 배치는 행이 채팅 열과 섞여 있어
+  // 격자 줄로는 알 수 없다). 경계마다 맞닿은 두 칸이 겹치는 구간에 손잡이를 둔다.
+  let trackHandleFrame = 0;
+  function scheduleTrackHandles() {
+    if (trackHandleFrame) return;
+    trackHandleFrame = requestAnimationFrame(() => {
+      trackHandleFrame = 0;
+      renderTrackHandles();
+    });
+  }
+
+  function trackLayoutContext() {
+    const layout = LAYOUTS.layoutById(state.layoutId);
+    if (!layout) return null;
+    const stage = $("mvStage");
+    const { side } = LAYOUTS.stageStyle(layout, state.chatSide);
+    const inset = LAYOUTS.usesChatInset(layout, side);
+    const hideChat = stage.classList.contains("is-chat-folded") ||
+      stage.classList.contains("is-chat-popped-out");
+    return { layout, side, inset, hideChat, grid: LAYOUTS.resizeGrid(layout, inset, hideChat) };
+  }
+
+  // 손잡이 자리 목록: [{ axis, index, at, from, to }](스테이지 기준 px).
+  function trackHandleSpans() {
+    const ctx = trackLayoutContext();
+    if (!ctx || !trackResizeEnabled) return [];
+    const stage = $("mvStage");
+    const elementOf = new Map();
+    for (const cell of cells.values()) {
+      if (cell.style.gridArea) elementOf.set(cell.style.gridArea.split("/")[0].trim(), cell);
+    }
+    if (ctx.inset && !ctx.hideChat) elementOf.set("x", $("mvChat"));
+    const base = stage.getBoundingClientRect();
+    const out = [];
+    for (const axis of LAYOUTS.resizableAxes(ctx.layout)) {
+      const vertical = axis === "columns";
+      for (const boundary of LAYOUTS.trackBoundaries(ctx.grid, axis)) {
+        const spans = [];
+        for (const edge of boundary.edges) {
+          const a = elementOf.get(edge.a)?.getBoundingClientRect();
+          const b = elementOf.get(edge.b)?.getBoundingClientRect();
+          if (!a && !b) continue;
+          const at = vertical
+            ? a && b ? (a.right + b.left) / 2 : a ? a.right + 1 : b.left - 1
+            : a && b ? (a.bottom + b.top) / 2 : a ? a.bottom + 1 : b.top - 1;
+          const from = vertical ? Math.max(a?.top ?? -Infinity, b?.top ?? -Infinity) : Math.max(a?.left ?? -Infinity, b?.left ?? -Infinity);
+          const to = vertical ? Math.min(a?.bottom ?? Infinity, b?.bottom ?? Infinity) : Math.min(a?.right ?? Infinity, b?.right ?? Infinity);
+          if (!(to > from)) continue;
+          const last = spans[spans.length - 1];
+          if (last && Math.abs(last.at - at) < 2 && from - last.to < 8) last.to = Math.max(last.to, to);
+          else spans.push({ at, from, to });
+        }
+        for (const span of spans) {
+          out.push({
+            axis,
+            index: boundary.index,
+            at: span.at - (vertical ? base.left : base.top),
+            from: span.from - (vertical ? base.top : base.left),
+            to: span.to - (vertical ? base.top : base.left),
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  // 값이 바뀐 속성만 쓴다(같은 값을 다시 써도 스타일 재계산이 일어난다).
+  function placeTrackHandle(handle, span) {
+    const set = (prop, value) => {
+      const text = `${Math.round(value * 10) / 10}px`;
+      if (handle.style[prop] !== text) handle.style[prop] = text;
+    };
+    if (span.axis === "columns") {
+      set("left", span.at);
+      set("top", span.from);
+      set("height", span.to - span.from);
+    } else {
+      set("top", span.at);
+      set("left", span.from);
+      set("width", span.to - span.from);
+    }
+  }
+
+  function renderTrackHandles() {
+    const stage = $("mvStage");
+    let box = $("mvTrackHandles");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "mvTrackHandles";
+      box.className = "mv-track-handles";
+      stage.appendChild(box);
+    }
+    const spans = trackHandleSpans();
+    const current = [...box.children];
+    // 끄는 동안에는 잡은 손잡이를 지우면 포인터 캡처가 끊긴다. 같은 손잡이들의 자리만 옮긴다.
+    const same = current.length === spans.length && current.every((handle, i) =>
+      handle.dataset.axis === spans[i].axis && Number(handle.dataset.index) === spans[i].index);
+    if (same || trackDrag) {
+      if (same) current.forEach((handle, i) => placeTrackHandle(handle, spans[i]));
+      return;
+    }
+    box.textContent = "";
+    for (const span of spans) {
+      const vertical = span.axis === "columns";
+      const handle = document.createElement("div");
+      handle.className = "mv-track-handle";
+      handle.dataset.axis = span.axis;
+      handle.dataset.index = String(span.index);
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-orientation", vertical ? "vertical" : "horizontal");
+      handle.setAttribute("aria-label", vertical ? "칸 너비 조절" : "칸 높이 조절");
+      handle.title = "끌어서 크기 조절 · 두 번 눌러 원래대로";
+      placeTrackHandle(handle, span);
+      box.appendChild(handle);
+    }
+  }
+
+  // 지금 격자의 트랙 크기(px). 채팅 위 배치는 채팅 열(왼쪽이면 앞의 두 줄)을 뺀다.
+  function currentTrackSizes(target, ctx, axis) {
+    const style = getComputedStyle(target);
+    const sizes = (axis === "columns" ? style.gridTemplateColumns : style.gridTemplateRows)
+      .split(/\s+/).map((value) => parseFloat(value)).filter((value) => Number.isFinite(value));
+    const count = axis === "columns" ? ctx.grid[0].length : ctx.grid.length;
+    const offset = ctx.layout.chatTop && ctx.side === "left" ? 2 : 0;
+    const core = sizes.slice(offset, offset + count);
+    return core.length === count ? core : null;
+  }
+
+  function startTrackDrag(event) {
+    const handle = event.target.closest?.(".mv-track-handle");
+    if (!handle || event.button !== 0) return;
+    const ctx = trackLayoutContext();
+    if (!ctx) return;
+    const axis = handle.dataset.axis;
+    const index = Number(handle.dataset.index);
+    const target = ctx.layout.chatTop || ctx.inset ? $("mvStage") : $("mvFrames");
+    const sizes = currentTrackSizes(target, ctx, axis);
+    if (!sizes || !(index >= 0 && index + 1 < sizes.length)) return;
+    event.preventDefault();
+    const a0 = sizes[index];
+    const b0 = sizes[index + 1];
+    // 한 칸이 사라지지 않게 둘 중 작은 쪽도 두 줄 합의 10%(최소 48px)는 남긴다.
+    const min = Math.max(48, (a0 + b0) * 0.1);
+    trackDrag = {
+      ctx, axis, index, sizes, a0, b0, min,
+      start: axis === "columns" ? event.clientX : event.clientY,
+    };
+    handle.classList.add("is-dragging");
+    try {
+      handle.setPointerCapture?.(event.pointerId);
+    } catch {}
+    $("mvStage").classList.add("is-track-resizing");
+    // 포인터 이벤트는 화면 갱신보다 자주 올 수 있다(고주사율 마우스). 격자를 바꾸면 칸의
+    // iframe 이 모두 다시 배치되므로 프레임마다 한 번만 반영한다.
+    let pendingPos = null;
+    let moveFrame = 0;
+    const move = (moveEvent) => {
+      if (!trackDrag) return;
+      pendingPos = trackDrag.axis === "columns" ? moveEvent.clientX : moveEvent.clientY;
+      if (!moveFrame) moveFrame = requestAnimationFrame(flush);
+    };
+    const flush = () => {
+      moveFrame = 0;
+      if (!trackDrag || pendingPos === null) return;
+      const pos = pendingPos;
+      pendingPos = null;
+      const delta = Math.max(trackDrag.min - trackDrag.a0, Math.min(trackDrag.b0 - trackDrag.min, pos - trackDrag.start));
+      const next = trackDrag.sizes.slice();
+      next[trackDrag.index] = trackDrag.a0 + delta;
+      next[trackDrag.index + 1] = trackDrag.b0 - delta;
+      const entry = { ...trackSizes.get(trackDrag.ctx.layout.id), [trackDrag.axis]: next };
+      trackSizes.set(trackDrag.ctx.layout.id, entry);
+      trackSizesLayoutId = trackDrag.ctx.layout.id;
+      applyGridTemplates(trackDrag.ctx.layout, trackDrag.ctx.side, trackDrag.ctx.inset, trackDrag.ctx.hideChat);
+      renderTrackHandles(); // 손잡이가 경계를 따라오게 바로 옮긴다
+    };
+    // 창 밖에서 놓거나 창을 떠나 pointerup 이 오지 않아도 끝낸다. 안 끝내면 iframe 이
+    // 포인터를 못 받은 채(플레이어 조작 불가) 남고 손잡이도 굳는다.
+    const end = () => {
+      if (!trackDrag) return;
+      if (moveFrame) cancelAnimationFrame(moveFrame);
+      moveFrame = 0;
+      if (pendingPos !== null) flush();
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      handle.removeEventListener("lostpointercapture", end);
+      window.removeEventListener("blur", end);
+      handle.classList.remove("is-dragging");
+      $("mvStage").classList.remove("is-track-resizing");
+      trackDrag = null;
+      saveTrackSizes();
+      scheduleTrackHandles();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    handle.addEventListener("lostpointercapture", end);
+    window.addEventListener("blur", end);
+  }
+
+  function resetTrackSizes(event) {
+    if (!event.target.closest?.(".mv-track-handle")) return;
+    trackSizes.delete(state.layoutId);
+    saveTrackSizes();
+    applyLayout();
+  }
+
+  $("mvStage")?.addEventListener("pointerdown", startTrackDrag);
+  $("mvStage")?.addEventListener("dblclick", resetTrackSizes);
+  window.addEventListener("resize", scheduleTrackHandles);
+
   function applyLayout() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     if (!layout) return;
-    const frames = $("mvFrames");
     const stage = $("mvStage");
     const { direction, side } = LAYOUTS.stageStyle(layout, state.chatSide);
     state.chatSide = side;
     // 레터박스를 없애려면 칸 자체가 16:9 여야 한다. 그렇게 되는 트랙 크기를 풀어
     // 쓰고, 격자 전체도 그때 필요한 가로:세로로 묶는다(남는 자리는 격자 바깥에서
     // 한 번만 생긴다). 해가 없는 배치(오른쪽+아래 등)는 기존 fr 값으로 돌아간다.
-    // 빈 칸 채팅은 칸이 스테이지를 채우므로 16:9 트랙을 쓰지 않는다.
+    // 빈 칸 채팅은 칸이 스테이지를 채우므로 16:9 트랙을 쓰지 않는다(applyGridTemplates).
     const inset = LAYOUTS.usesChatInset(layout, side);
-    const tracks = inset ? null : LAYOUTS.solveTracks(layout);
     stage.classList.toggle("is-chat-top-layout", layout.chatTop === true);
     stage.classList.toggle("is-chat-inset-layout", inset);
     const hideChat = stage.classList.contains("is-chat-folded") ||
@@ -1837,26 +2229,7 @@
     // 채팅을 접거나 분리하면 빈 칸이 다시 비므로 모든 칸이 제 자리로 돌아간다.
     const areaOf = (slot) => (inset && !hideChat && chatInsetAreas?.[slot]) || slot;
     $("mvChat").style.gridArea = inset && !hideChat ? areaOf("x") : "";
-    if (layout.chatTop || inset) {
-      const grid = layout.chatTop
-        ? LAYOUTS.chatTopStageGrid(layout, side, hideChat)
-        : LAYOUTS.chatInsetStageGrid(layout, hideChat);
-      stage.style.gridTemplateColumns = grid.columns;
-      stage.style.gridTemplateRows = grid.rows;
-      stage.style.gridTemplateAreas = grid.areas;
-      frames.style.gridTemplateColumns = "";
-      frames.style.gridTemplateRows = "";
-      frames.style.gridTemplateAreas = "";
-    } else {
-      stage.style.gridTemplateColumns = "";
-      stage.style.gridTemplateRows = "";
-      stage.style.gridTemplateAreas = "";
-      frames.style.gridTemplateColumns = tracks ? tracks.columns : layout.columns;
-      frames.style.gridTemplateRows = tracks ? tracks.rows : layout.rows;
-      frames.style.gridTemplateAreas = layout.areas.join(" ");
-    }
-    frames.style.setProperty("--mv-ratio", tracks ? String(tracks.ratio) : "");
-    frames.classList.toggle("is-exact", Boolean(tracks));
+    applyGridTemplates(layout, side, inset, hideChat);
 
     orderedChannels().forEach((channel, index) => {
       const cell = cells.get(channel.channelId);
@@ -1874,10 +2247,13 @@
       }
     });
 
+    applyExpandedCell(layout, side, hideChat);
+
     stage.style.flexDirection = direction;
     stage.dataset.chatSide = side;
     renderTopbar();
     scheduleHandoffSave();
+    scheduleTrackHandles();
   }
 
   // 채널·메인·배치가 바뀌면(모두 applyLayout 을 거친다) 지금 구성을 저장해 둔다. 고르기
@@ -5976,7 +6352,7 @@
         seen.add(c.channelId);
         return true;
       })
-      .slice(0, 6);
+      .slice(0, MAX_CHANNELS);
     if (chosen.length < 2) return null;
 
     // 배치는 '지금 채널 수에 허용되는 것' 중에서만 고른다. 어긋나면 첫 배치로.
@@ -6269,6 +6645,15 @@
     });
   }
 
+  // 손잡이 위치(스테이지 위에서부터, 줄 간격 뺀 값) → 채팅 위 영상 한 개의 높이.
+  // '채팅 위 2' 는 두 영상이 같은 높이를 쓰고 그 사이에 줄 간격이 하나 더 있다.
+  function chatTopSizeAt(y) {
+    const videos = LAYOUTS.layoutById(state.layoutId)?.chatTopVideos || 1;
+    if (videos === 1) return y;
+    const gap = parseFloat(getComputedStyle($("mvStage")).rowGap) || 0;
+    return (y - gap * (videos - 1)) / videos;
+  }
+
   function bindChatTopResize() {
     const handle = $("mvChatTopResize");
     if (!handle) return;
@@ -6282,7 +6667,7 @@
     });
     handle.addEventListener("pointermove", (event) => {
       if (!dragging) return;
-      applyChatTopSize(event.clientY - $("mvStage").getBoundingClientRect().top);
+      applyChatTopSize(chatTopSizeAt(event.clientY - $("mvStage").getBoundingClientRect().top));
     });
     const stop = (event) => {
       if (!dragging) return;
@@ -6299,7 +6684,7 @@
       const stage = $("mvStage");
       const gap = parseFloat(getComputedStyle(stage).rowGap) || 0;
       const top = handle.getBoundingClientRect().top - stage.getBoundingClientRect().top - gap;
-      applyChatTopSize(top + (event.key === "ArrowDown" ? 20 : -20));
+      applyChatTopSize(chatTopSizeAt(top + (event.key === "ArrowDown" ? 20 : -20)));
       event.preventDefault();
     });
     // 더블클릭: 손으로 정한 높이를 지우고 채팅 폭의 16:9 높이로 돌아간다.
@@ -7159,7 +7544,7 @@
         source === "following" ||
         (source === "custom" && (mode === "recent" || mode === "oldest")),
     )).filter((row) => row.mediaType === "channel" || !have.has(row.channelId));
-    const full = !quickReplaceId && state.chosen.length >= 6;
+    const full = !quickReplaceId && state.chosen.length >= MAX_CHANNELS;
     let next = null;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
       const row = rows[index];
@@ -7321,7 +7706,7 @@
       return;
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
-    const full = !quickReplaceId && state.chosen.length >= 6;
+    const full = !quickReplaceId && state.chosen.length >= MAX_CHANNELS;
     box.innerHTML = rest.map((r) => r.mediaType === "channel"
       ? quickVideoChannelCard(r)
       : quickCard(r, full)).join("");
@@ -7407,7 +7792,7 @@
 
   // 채널 더하기: 새 칸만 만든다(기존 칸은 건드리지 않는다).
   function addChannel(channelId) {
-    if (state.chosen.length >= 6) return;
+    if (state.chosen.length >= MAX_CHANNELS) return;
     const found = quickCandidates?.find((r) => r.channelId === channelId);
     if (!found || cells.has(channelId)) return;
     state.chosen = [...state.chosen, { ...found }];
@@ -7854,6 +8239,12 @@
       });
       return;
     }
+    const expand = target.closest?.("[data-mv-expand]");
+    if (expand) {
+      const id = expand.dataset.mvExpand;
+      setExpanded(expandedChannelId === id ? "" : id);
+      return;
+    }
     const close = target.closest?.("[data-mv-close]");
     if (close) {
       // 기존 경로를 그대로 쓴다(삭제 로직을 새로 만들지 않는다).
@@ -8110,6 +8501,8 @@
     observer.observe($("mvQuickAdd"));
     observer.observe($("mvFramesFit"));
     observer.observe($("mvStage"));
+    // 채팅 폭·채팅 위 영상 높이를 바꾸면 스테이지 크기는 그대로여도 칸이 움직인다.
+    new ResizeObserver(scheduleTrackHandles).observe($("mvChat"));
   } else {
     window.addEventListener(
       "resize",
@@ -8340,8 +8733,12 @@
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    // 열린 패널이 있으면 그것만 닫는다. 아무것도 없을 때 크게 보기를 푼다.
+    const panelOpen = !$("mvQuick").hidden ||
+      Boolean(document.querySelector("[data-mv-pop] .mv-pop-panel:not([hidden])"));
     closePopovers(null);
     closeQuick();
+    if (!panelOpen && expandedChannelId) setExpanded("");
   });
 
   // 프레임이 보내는 상태 신호.

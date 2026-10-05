@@ -59,7 +59,7 @@ test("capture snapshots the frame and name once, ignores busy clicks, and passes
   class Video { videoWidth = 1920; videoHeight = 1080; }
   const video = new Video(), downloads = [];
   let name = "first";
-  Object.assign(h.context, { HTMLVideoElement: Video, screenshotPreviewOn: false,
+  Object.assign(h.context, { HTMLVideoElement: Video, screenshotPreviewOn: false, screenshotActionMode: "save",
     screenshotBaseName: () => name, showScreenshotToast: () => assert.fail("unexpected toast"),
     downloadScreenshot: (...args) => downloads.push(args), onScreenshotSaved: () => {},
   });

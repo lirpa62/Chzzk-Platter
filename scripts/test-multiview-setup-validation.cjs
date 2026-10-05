@@ -36,7 +36,7 @@ function validateSetup(raw) {
       seen.add(c.channelId);
       return true;
     })
-    .slice(0, 6);
+    .slice(0, 9);
   if (chosen.length < 2) return null;
   const allowed = L.layoutsFor(chosen.length);
   if (!allowed.length) return null;
@@ -187,9 +187,9 @@ console.log("\n[정리] 중복·초과를 걸러낸다");
 const dup = validateSetup({ chosen: [ch(A), ch(A), ch(B), ch(C)] });
 ok(dup?.chosen.length === 3, "중복 channelId 를 하나만 남긴다");
 const many = validateSetup({
-  chosen: Array.from({ length: 9 }, (_, i) => ch(id(i))),
+  chosen: Array.from({ length: 10 }, (_, i) => ch(id(i))),
 });
-ok(many === null || many.chosen.length <= 6, "6개를 넘지 않는다");
+ok(many?.chosen.length === 9, "10개를 받아도 9개까지만 남긴다");
 const upper = validateSetup({
   chosen: [ch(A.toUpperCase()), ch(B)],
 });

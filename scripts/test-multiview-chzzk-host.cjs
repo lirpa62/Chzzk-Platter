@@ -329,11 +329,11 @@ function backgroundContext() {
     "멀티뷰 창 열기는 우리 확장 페이지만 부탁할 수 있다");
   check(/message\.type === "MULTIVIEW_HOST_FIND" \|\| message\.type === "MULTIVIEW_HOST_FOCUS"\) \{[\s\S]{0,120}startsWith\(chrome\.runtime\.getURL\(""\)\)\) return false;/.test(background),
     "실행 중인 멀티뷰 확인·이동도 우리 확장 페이지만 부탁할 수 있다");
-  check(/renderTopbar\(\);\s*scheduleHandoffSave\(\);\s*\}/.test(watch) &&
+  check(/renderTopbar\(\);\s*scheduleHandoffSave\(\);\s*(?:scheduleTrackHandles\(\);\s*)?\}/.test(watch) &&
     /handoffSaveTimer = setTimeout\(\(\) => \{\s*handoffSaveTimer = 0;\s*void saveHandoff\(\);/.test(watch),
     "시청 화면은 채널·메인·배치가 바뀌면(applyLayout) 지금 구성을 저장해 둔다");
 
-  // 멀티뷰 탭은 하나만 쓴다(한 탭에 최대 6채널). 다시 시작하면 열린 탭을 새 구성으로 다시 연다.
+  // 멀티뷰 탭은 하나만 쓴다(한 탭에 최대 9채널). 다시 시작하면 열린 탭을 새 구성으로 다시 연다.
   {
     const bg2 = backgroundContext();
     const count = (name) => bg2.calls.filter(([n]) => n === name).length;
@@ -370,9 +370,12 @@ function backgroundContext() {
       await hostApi("setup.set", { setup: { chosen: [{ channelId: "y" }], layoutId: "left-1" } });
       check(bg2.session["cheeseMultiviewSetup:setup-b"]?.layoutId === "left-1",
         "시청 화면은 배경을 통해 자기 구성을 저장한다");
-      await assert.rejects(hostApi("setup.set", { setup: { chosen: new Array(7).fill({}) } }), /invalid-setup/);
+      await hostApi("setup.set", { setup: { chosen: new Array(9).fill({}) } });
+      check(bg2.session["cheeseMultiviewSetup:setup-b"]?.chosen.length === 9,
+        "9채널 구성도 시청 탭에서 저장할 수 있다");
+      await assert.rejects(hostApi("setup.set", { setup: { chosen: new Array(10).fill({}) } }), /invalid-setup/);
       await assert.rejects(hostApi("setup.set", { setup: "x" }), /invalid-setup/);
-      checks.push("모양이 이상한 구성(7칸 이상 등)은 저장하지 않는다");
+      checks.push("모양이 이상한 구성(10칸 이상 등)은 저장하지 않는다");
       await assert.rejects(hostApi("setup.get", {}, 999), /not-multiview-host/);
       checks.push("멀티뷰 탭이 아니면 구성을 읽고 쓰지 못한다");
       const watchSrc = read("src/multiviewWatch.js");

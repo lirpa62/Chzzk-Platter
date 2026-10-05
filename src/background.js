@@ -6430,7 +6430,7 @@ async function injectMultiviewHost(tabId, info) {
 // ⚠ 팝업 창(type: popup)은 macOS 에서 화면 밖·뒤에 떠 보이지 않는 일이 있었다(소리만 났다).
 //   고르기 화면 옆에 일반 새 탭으로 연다.
 //
-// 멀티뷰는 탭 하나만 쓴다(한 탭에 최대 6채널). 이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지
+// 멀티뷰는 탭 하나만 쓴다(한 탭에 최대 9채널). 이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지
 // 않고 그 탭으로 옮겨 새 구성으로 다시 연다.
 // ⚠ 시작할 때마다 새 탭을 만들면 같은 채널이 두 탭에서 재생돼(한 사람이 시청자 2명) 소리가
 //   겹치고, '고르기 화면 열기' 로 고친 뒤 다시 시작하면 두 탭이 같은 구성 id 의 저장값을
@@ -6605,7 +6605,7 @@ async function handleMultiviewHostApi(message, sender) {
     case "setup.set": {
       const setup = args.setup;
       if (!setup || typeof setup !== "object" || Array.isArray(setup) ||
-          !Array.isArray(setup.chosen) || setup.chosen.length > 6 ||
+          !Array.isArray(setup.chosen) || setup.chosen.length > 9 ||
           JSON.stringify(setup).length > 65536) throw new Error("invalid-setup");
       await chrome.storage.session.set({ [MULTIVIEW_SETUP_PREFIX + host.setupId]: setup });
       return true;

@@ -841,6 +841,15 @@
   // 스크린샷 저장 전 미리보기(저장/취소 확인) 표시 여부(전역, 기본 OFF=즉시 다운로드).
   const SCREENSHOT_PREVIEW_KEY = "cheeseScreenshotPreview";
   let screenshotPreview = false;
+  // 스크린샷 버튼(Shift+S) 동작: "save"=파일 저장(기본) | "copy"=클립보드 복사.
+  const SCREENSHOT_ACTION_KEY = "cheeseScreenshotAction";
+  let screenshotAction = "save";
+  const normalizeScreenshotAction = (value) => (value === "copy" ? "copy" : "save");
+  // 스크린샷 파일 이름 형식(screenshotName.js 의 항목). 비면 플레이어 스크립트가 기본 형식을 쓴다.
+  const SCREENSHOT_NAME_FORMAT_KEY = "cheeseScreenshotNameFormat";
+  let screenshotNameFormat = "";
+  const normalizeScreenshotNameFormat = (value) =>
+    typeof value === "string" ? value.slice(0, 200) : "";
   // 스크린샷을 브라우저 다운로드 대화상자 없이 바로 저장할지(전역, 기본 ON=바로 저장).
   // OFF면 '다른 이름으로 저장' 대화상자를 띄운다(saveAs). Whale은 자체 확인창이 있어
   // 이 옵션과 무관하며 settings에서 비활성화된다.
@@ -3333,6 +3342,13 @@
     shell
       .querySelector(".cheese-search-input")
       .addEventListener("input", updateQueryResetButton);
+    // @카테고리 를 입력하면 치지직 카테고리 이름을 골라 넣을 수 있게 한다.
+    if (config.inputPlaceholder.includes("@카테고리")) {
+      globalThis.CheeseCategoryAutocomplete?.attach(
+        shell.querySelector(".cheese-search-input"),
+        { mode: "query" },
+      );
+    }
     shell
       .querySelector(".cheese-search-input")
       .addEventListener("input", debounce(handleFilterChange, 160));
@@ -18785,8 +18801,12 @@
   let chatInputHeightTarget = null;
   function guardChatInputHeight() {
     const aside = document.querySelector("aside#aside-chatting");
-    const active = !!aside &&
-      document.documentElement.classList.contains("cheese-chat-width-resize-enabled");
+    // 멀티뷰 라이브 칸은 채팅 폭 조절이 꺼져 있지만, 광고 동안 펼쳐진 채팅에서 같은 문제가
+    // 난다(아래 watchMultiviewAdChatInput). 펼쳐져 있을 때만 지킨다.
+    const active = !!aside && (
+      document.documentElement.classList.contains("cheese-chat-width-resize-enabled") ||
+      (IS_MULTIVIEW_FRAME && !multiviewVideoNo && !isChatFolded(aside))
+    );
     const textarea = active ? aside.querySelector("textarea") : null;
     if (textarea !== chatInputHeightTarget) {
       chatInputHeightObserver?.disconnect();
@@ -22828,11 +22848,37 @@
       } catch {}
     }
 
+    // ── 광고로 펼쳐진 채팅의 입력창 높이 ──
+    // 광고 동안 치지직이 칸의 채팅을 강제로 펼치면 채팅이 칸의 40%(실측 178px)로 좁아지고,
+    // 같은 줄 단추들 때문에 입력창이 37px 까지 줄어 안내 문구가 다섯 줄로 접혔다. 치지직은
+    // 입력창을 최대 높이(60px, 인라인 80px)로 키워 채팅 아래가 높아졌다(2026-10-05 실측).
+    // 일반 페이지의 입력창 높이 보정(guardChatInputHeight: 비었고 포커스가 없으면 40px)을
+    // 채팅이 펼쳐진 동안에만 건다. 칸은 채팅 감시를 끄므로(CHAT_DOM_WATCH_OFF) 채팅창(aside)
+    // 하나만 따로 본다. 접혀 있으면 확인만 하고 끝난다.
+    let adChatInputObserver = null;
+    let adChatInputAside = null;
+    function watchMultiviewAdChatInput() {
+      if (isMultiviewReplay()) return;
+      const aside = getLiveChatAside();
+      if (!aside || aside === adChatInputAside) return;
+      adChatInputObserver?.disconnect();
+      adChatInputAside = aside;
+      adChatInputObserver = new MutationObserver(() => guardChatInputHeight());
+      adChatInputObserver.observe(aside, {
+        attributes: true,
+        attributeFilter: ["class"],
+        childList: true,
+        subtree: true,
+      });
+      guardChatInputHeight();
+    }
+
     let multiviewReconcileTimer = 0;
     function scheduleMultiviewUiReconcile(delay = 0) {
       clearTimeout(multiviewReconcileTimer);
       multiviewReconcileTimer = window.setTimeout(() => {
         multiviewReconcileTimer = 0;
+        watchMultiviewAdChatInput();
         ensureMultiviewChatFold();
         requestMultiviewWideEnsure();
         window.setTimeout(reportMultiviewAdState, 150);
@@ -22860,6 +22906,7 @@
       bootStartedAt = Date.now();
       bootStableCount = 0;
       bootTimer = window.setInterval(() => {
+        watchMultiviewAdChatInput();
         const chatOk = ensureMultiviewChatFold();
         requestMultiviewWideEnsure();
         // 넓은 화면은 MAIN world 가 맡으므로 여기서는 채팅만 안정 판정에 쓴다.
@@ -35950,6 +35997,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // /lives 및 /following?tab=ALL|LIVE 카드의 태그와 카테고리 표시명을 읽어,
   // 사용자가 저장한 값과 정확히 일치하는 카드를 숨긴다.
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
+  // 꺼 둔 제외 항목(정규화한 키). 목록(LIVE_TAG_FILTERS_KEY)은 그대로 두고 따로 저장해
+  // 예전 버전도 목록을 그대로 읽는다(꺼 둔 항목까지 숨길 뿐 깨지지 않는다).
+  const LIVE_TAG_FILTERS_DISABLED_KEY = "cheeseLiveTagFiltersDisabled";
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
   const LIVE_VIEWER_COUNT_POSITION_KEY = "cheeseLiveViewerCountPosition";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
@@ -35987,6 +36037,13 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     LIVE_VIEWER_COUNT_HIDDEN_BADGE_CLASS,
   ];
   let liveTagFilters = [];
+  let liveTagFiltersDisabled = new Set();
+  // 팔로잉 전체 탭의 '라이브' 더보기 자동 펼치기(옵션, 기본 OFF).
+  const FOLLOWING_LIVE_AUTO_EXPAND_KEY = "cheeseFollowingLiveAutoExpand";
+  let followingLiveAutoExpand = false;
+  // 버튼마다 누른 횟수와 그때의 카드 수(진전이 있을 때만 같은 버튼을 다시 누른다).
+  const followingLiveExpandClicked = new WeakMap();
+  const FOLLOWING_LIVE_EXPAND_MAX_CLICKS = 3;
   let liveTagFilterButtonOn = false;
   let liveViewerCountPosition = "native";
   let liveTagFilterPaginationFrame = 0;
@@ -36048,6 +36105,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     return sanitizeLiveTagFilters(String(value || "").split(/[,\n]+/));
   }
 
+  // 꺼 둔 키 중 목록에 남아 있는 것만 둔다.
+  function sanitizeLiveTagFiltersDisabled(value, filters = liveTagFilters) {
+    const present = new Set(filters.map(normalizeLiveTagFilter));
+    return new Set(
+      (Array.isArray(value) ? value : [])
+        .map(normalizeLiveTagFilter)
+        .filter((key) => key && present.has(key)),
+    );
+  }
+
+  function activeLiveTagFilters() {
+    return liveTagFilters.filter(
+      (tag) => !liveTagFiltersDisabled.has(normalizeLiveTagFilter(tag)),
+    );
+  }
+
   function normalizeLiveViewerCountPosition(value) {
     return LIVE_VIEWER_COUNT_POSITIONS.has(value) ? value : "native";
   }
@@ -36101,7 +36174,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function updateLiveTagFilterButton(button) {
     if (!button) return;
-    const count = liveTagFilters.length;
+    // 꺼 둔 항목은 세지 않는다(지금 숨기는 데 쓰는 항목 수).
+    const count = activeLiveTagFilters().length;
     button.innerHTML = `${LIVE_TAG_FILTER_ICON}<span>제외 필터 추가</span>${
       count ? `<em class="cheese-live-tag-filter-count">${count}</em>` : ""
     }`;
@@ -36190,6 +36264,35 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const visibleKey = normalizeLiveTagFilter(visibleValue?.textContent);
     if (visibleKey) values.push(visibleKey);
     return values;
+  }
+
+  // 팔로잉 전체 탭의 '라이브' 섹션은 화면 폭에 맞는 개수만 보여 준다(실측: 1352px 6개,
+  // 1969px 10개). 아래 '더보기'(aria-expanded=false)를 누르면 더 펼쳐지고, 라이브가 적으면
+  // 한 번에 끝나 버튼이 사라진다('접기' 없음, 프로그램 클릭도 동작 — 2026-10-05 실측).
+  // 라이브가 많으면 최대 두 번 누른 뒤 그 버튼이 '전체보기'(라이브 탭으로 이동)로 바뀐다.
+  // 그 버튼은 누르지 않는다 — 글자가 '더보기'일 때만 누른다.
+  // 같은 버튼은 카드가 늘어난 경우에만 다시 누른다(반응이 없으면 그만, 버튼당 최대 3번).
+  // 치지직이 목록을 다시 그려 새 버튼이 생기면 처음부터 다시 센다.
+  // ⚠ 헤더의 '전체보기'는 aria-expanded 가 없어 처음부터 대상이 아니다.
+  function expandFollowingLiveSection() {
+    if (!followingLiveAutoExpand || !IS_TOP_FRAME) return;
+    if ((location.pathname.replace(/\/+$/, "") || "/") !== "/following") return;
+    const section = document
+      .querySelector('[data-nlog-area="following_live.item"]')
+      ?.closest("section");
+    if (!section) return;
+    const button = [
+      ...section.querySelectorAll('button[aria-expanded="false"]'),
+    ].find((item) => !item.closest('[class*="_header_"]'));
+    const label = button?.textContent || "";
+    if (!button || !label.includes("더보기") || label.includes("전체보기")) return;
+    const cards = section.querySelectorAll(
+      '[data-nlog-area="following_live.item"]',
+    ).length;
+    const last = followingLiveExpandClicked.get(button);
+    if (last && (last.clicks >= FOLLOWING_LIVE_EXPAND_MAX_CLICKS || cards <= last.cards)) return;
+    followingLiveExpandClicked.set(button, { clicks: (last?.clicks || 0) + 1, cards });
+    button.click();
   }
 
   function clearHiddenLiveTagFilterCards() {
@@ -36308,8 +36411,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   function applyLiveTagFilters() {
     const kind = getLiveTagFilterPageKind();
     clearHiddenLiveTagFilterCards();
-    if (!kind || !liveTagFilters.length) return;
-    const filterSet = new Set(liveTagFilters.map(normalizeLiveTagFilter));
+    const active = activeLiveTagFilters();
+    if (!kind || !active.length) return;
+    const filterSet = new Set(active.map(normalizeLiveTagFilter));
     const scope =
       document.querySelector("#layout-body") ||
       document.querySelector("main") ||
@@ -36691,14 +36795,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     list.innerHTML = liveTagFilters
       .map((tag, index) => {
-        const checked = liveTagFilterSelected.has(normalizeLiveTagFilter(tag));
+        const key = normalizeLiveTagFilter(tag);
+        const checked = liveTagFilterSelected.has(key);
+        const on = !liveTagFiltersDisabled.has(key);
         return `
-        <li class="cheese-live-tag-filter-row">
+        <li class="cheese-live-tag-filter-row${on ? "" : " is-off"}">
           <label>
             <input type="checkbox" data-live-tag-filter-select="${index}" ${
               checked ? "checked" : ""
             }>
             <span>${escapeHtml(tag)}</span>
+          </label>
+          <label class="cheese-live-tag-filter-toggle" title="${on ? "적용 중 · 눌러서 끄기" : "꺼 둠 · 눌러서 켜기"}">
+            <input type="checkbox" role="switch" data-live-tag-filter-toggle="${index}" ${
+              on ? "checked" : ""
+            } aria-label="${escapeHtml(tag)} 제외 적용">
+            <i aria-hidden="true"></i>
           </label>
           <button type="button" data-live-tag-filter-remove="${index}" aria-label="제외 항목 삭제" title="삭제">
             ${LIVE_TAG_FILTER_TRASH_ICON}
@@ -36723,19 +36835,33 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function saveLiveTagFilters(next) {
     liveTagFilters = sanitizeLiveTagFilters(next);
+    liveTagFiltersDisabled = sanitizeLiveTagFiltersDisabled([...liveTagFiltersDisabled]);
     renderLiveTagFilterModal();
     updateLiveTagFilterButton(
       document.querySelector(`.${LIVE_TAG_FILTER_BUTTON_CLASS}`),
     );
     applyLiveTagFilters();
     try {
-      chrome.storage?.local?.set({ [LIVE_TAG_FILTERS_KEY]: liveTagFilters });
+      chrome.storage?.local?.set({
+        [LIVE_TAG_FILTERS_KEY]: liveTagFilters,
+        [LIVE_TAG_FILTERS_DISABLED_KEY]: [...liveTagFiltersDisabled],
+      });
     } catch {}
+  }
+
+  // 항목을 지우지 않고 켜고 끈다.
+  function setLiveTagFilterEnabled(tag, on) {
+    const key = normalizeLiveTagFilter(tag);
+    if (!key) return;
+    if (on) liveTagFiltersDisabled.delete(key);
+    else liveTagFiltersDisabled.add(key);
+    saveLiveTagFilters(liveTagFilters);
   }
 
   function closeLiveTagFilterModal(restoreFocus = true) {
     const overlay = document.getElementById(LIVE_TAG_FILTER_MODAL_ID);
     if (!overlay) return;
+    overlay.__cheeseDetachCategoryAutocomplete?.();
     overlay.remove();
     unlockModalScroll("cheese-live-tag-filter-lock");
     if (restoreFocus && liveTagFilterRestoreFocus?.isConnected) {
@@ -36786,6 +36912,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     lockModalScroll("cheese-live-tag-filter-lock");
 
     const input = overlay.querySelector("[data-live-tag-filter-input]");
+    // 카테고리는 치지직 표시 이름과 정확히 같아야 숨겨진다. 입력 중에 이름을 골라 넣게 한다.
+    const detachCategoryAutocomplete =
+      globalThis.CheeseCategoryAutocomplete?.attach(input, { mode: "filter" });
+    overlay.__cheeseDetachCategoryAutocomplete = detachCategoryAutocomplete;
     overlay
       .querySelector("[data-live-tag-filter-close]")
       ?.addEventListener("click", () => closeLiveTagFilterModal());
@@ -36810,6 +36940,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           input?.focus();
           return;
         }
+        // 꺼 둔 항목을 다시 추가하면 켠다.
+        added.forEach((tag) => liveTagFiltersDisabled.delete(normalizeLiveTagFilter(tag)));
         saveLiveTagFilters([...liveTagFilters, ...added]);
         if (input) input.value = "";
         input?.focus();
@@ -36817,6 +36949,12 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     overlay
       .querySelector("[data-live-tag-filter-list]")
       ?.addEventListener("change", (event) => {
+        const toggle = event.target.closest?.("[data-live-tag-filter-toggle]");
+        if (toggle) {
+          const tag = liveTagFilters[Number(toggle.dataset.liveTagFilterToggle)];
+          if (tag) setLiveTagFilterEnabled(tag, toggle.checked);
+          return;
+        }
         const checkbox = event.target.closest?.(
           "[data-live-tag-filter-select]",
         );
@@ -36881,13 +37019,19 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     try {
       const data = await getBootData([
         LIVE_TAG_FILTERS_KEY,
+        LIVE_TAG_FILTERS_DISABLED_KEY,
+        FOLLOWING_LIVE_AUTO_EXPAND_KEY,
         LIVE_TAG_FILTER_BUTTON_KEY,
         LIVE_VIEWER_COUNT_POSITION_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
         LIVE_VIEWER_COUNT_HIDDEN_KEY,
       ]);
       liveTagFilters = sanitizeLiveTagFilters(data?.[LIVE_TAG_FILTERS_KEY]);
+      liveTagFiltersDisabled = sanitizeLiveTagFiltersDisabled(
+        data?.[LIVE_TAG_FILTERS_DISABLED_KEY],
+      );
       liveTagFilterButtonOn = data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
+      followingLiveAutoExpand = data?.[FOLLOWING_LIVE_AUTO_EXPAND_KEY] === true;
       const hasStoredPosition = LIVE_VIEWER_COUNT_POSITIONS.has(
         data?.[LIVE_VIEWER_COUNT_POSITION_KEY],
       );
@@ -36904,6 +37048,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       }
     } catch {
       liveTagFilters = [];
+      liveTagFiltersDisabled = new Set();
       liveTagFilterButtonOn = false;
       liveViewerCountPosition = "native";
     }
@@ -36917,6 +37062,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (
         area !== "local" ||
         (!changes[LIVE_TAG_FILTERS_KEY] &&
+          !changes[LIVE_TAG_FILTERS_DISABLED_KEY] &&
+          !changes[FOLLOWING_LIVE_AUTO_EXPAND_KEY] &&
           !changes[LIVE_TAG_FILTER_BUTTON_KEY] &&
           !changes[LIVE_VIEWER_COUNT_POSITION_KEY])
       ) {
@@ -36926,6 +37073,18 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         liveTagFilters = sanitizeLiveTagFilters(
           changes[LIVE_TAG_FILTERS_KEY].newValue,
         );
+      }
+      if (changes[LIVE_TAG_FILTERS_DISABLED_KEY]) {
+        liveTagFiltersDisabled = sanitizeLiveTagFiltersDisabled(
+          changes[LIVE_TAG_FILTERS_DISABLED_KEY].newValue,
+        );
+      } else if (changes[LIVE_TAG_FILTERS_KEY]) {
+        liveTagFiltersDisabled = sanitizeLiveTagFiltersDisabled([...liveTagFiltersDisabled]);
+      }
+      if (changes[FOLLOWING_LIVE_AUTO_EXPAND_KEY]) {
+        followingLiveAutoExpand =
+          changes[FOLLOWING_LIVE_AUTO_EXPAND_KEY].newValue === true;
+        expandFollowingLiveSection();
       }
       if (changes[LIVE_TAG_FILTER_BUTTON_KEY]) {
         liveTagFilterButtonOn =
@@ -53875,6 +54034,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         actionOverlayPos, // OSD 종류별 표시/위치(볼륨/되감기/앞으로)
         gainPct, // 게인 조절 % 표시(전역)
         screenshotPreview, // 스크린샷 저장 전 미리보기(전역)
+        screenshotAction, // 스크린샷 버튼 동작(save | copy)
+        screenshotNameFormat, // 스크린샷 파일 이름 형식
         mixerGlobalDefaultMode, // 전역 기본값 재방문 동작(global | channel)
         mixerGlobalGainDefaultMode, // 전역 게인 재방문 동작(global | channel)
         videoFilterGlobalDefaultMode, // 필터 전역 기본값 재방문 동작
@@ -53979,6 +54140,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     AD_MINI_UNMUTE_KEY,
     AD_MINI_KEEP_MUTED_KEY,
     SCREENSHOT_PREVIEW_KEY,
+    SCREENSHOT_ACTION_KEY,
+    SCREENSHOT_NAME_FORMAT_KEY,
     SCREENSHOT_DIRECT_SAVE_KEY,
     AUTO_RELOAD_ON_ERROR_KEY,
     AUTO_RELOAD_ON_RELIVE_KEY,
@@ -54078,6 +54241,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       CHAT_RECAP_CLICK_DELAY_KEY,
       LIVE_TAG_FILTER_BUTTON_KEY,
       LIVE_TAG_FILTERS_KEY,
+      LIVE_TAG_FILTERS_DISABLED_KEY,
+      FOLLOWING_LIVE_AUTO_EXPAND_KEY,
       LIVE_VIEWER_COUNT_POSITION_KEY,
       LIVE_VIEWER_COUNT_INLINE_KEY,
       LIVE_VIEWER_COUNT_HIDDEN_KEY,
@@ -54162,6 +54327,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       globalScrollTopFabOn = data?.[GLOBAL_SCROLL_TOP_FAB_KEY] === true;
       applyGlobalScrollTopFabSetting();
       screenshotPreview = data?.[SCREENSHOT_PREVIEW_KEY] === true; // 기본 OFF
+      screenshotAction = normalizeScreenshotAction(data?.[SCREENSHOT_ACTION_KEY]); // 기본 저장
+      screenshotNameFormat = normalizeScreenshotNameFormat(data?.[SCREENSHOT_NAME_FORMAT_KEY]);
       screenshotDirectSave = data?.[SCREENSHOT_DIRECT_SAVE_KEY] !== false; // 기본 ON
       autoReloadOnError = data?.[AUTO_RELOAD_ON_ERROR_KEY] === true; // 기본 OFF
       autoReloadOnRelive = data?.[AUTO_RELOAD_ON_RELIVE_KEY] === true; // 기본 OFF
@@ -54882,6 +55049,14 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       if (changes[SCREENSHOT_PREVIEW_KEY]) {
         screenshotPreview = changes[SCREENSHOT_PREVIEW_KEY].newValue === true;
       }
+      if (changes[SCREENSHOT_ACTION_KEY]) {
+        screenshotAction = normalizeScreenshotAction(changes[SCREENSHOT_ACTION_KEY].newValue);
+      }
+      if (changes[SCREENSHOT_NAME_FORMAT_KEY]) {
+        screenshotNameFormat = normalizeScreenshotNameFormat(
+          changes[SCREENSHOT_NAME_FORMAT_KEY].newValue,
+        );
+      }
       if (changes[SCREENSHOT_DIRECT_SAVE_KEY]) {
         screenshotDirectSave =
           changes[SCREENSHOT_DIRECT_SAVE_KEY].newValue !== false;
@@ -55556,6 +55731,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[WHEEL_VOLUME_STEP_KEY] ||
         changes[GAIN_PCT_KEY] ||
         changes[SCREENSHOT_PREVIEW_KEY] ||
+        changes[SCREENSHOT_ACTION_KEY] ||
+        changes[SCREENSHOT_NAME_FORMAT_KEY] ||
         changes[MIXER_GLOBAL_DEFAULT_MODE_KEY] ||
         changes[MIXER_GLOBAL_GAIN_DEFAULT_MODE_KEY] ||
         changes[VIDEO_FILTER_GLOBAL_DEFAULT_MODE_KEY] ||
@@ -56119,6 +56296,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       ensureVideoVaultDetailButton(); // 다시보기 상세 액션 영역의 보관함 버튼 보장
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
       applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
+      expandFollowingLiveSection(); // 팔로잉 전체 탭 '라이브' 더보기 자동 펼치기(옵션 시)
       applyLiveViewerCountPlacement(); // 라이브 카드 시청자 수 위치 옵션 적용
       applyChannelProfileRadius(); // 새로 렌더된 채널 프로필에 사용자 모서리 설정 적용
       ensureFollowCleanupButton(); // following?tab=CHANNEL 목록 앞 '팔로잉 정리' 버튼 보장

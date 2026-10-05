@@ -132,6 +132,8 @@
   };
   let gainPctOn = true; // 게인 조절 시 % 표시(전역, 기본 ON)
   let screenshotPreviewOn = false; // 스크린샷 저장 전 미리보기(전역, 기본 OFF)
+  let screenshotActionMode = "save"; // 스크린샷 버튼 동작: "save"=파일 저장(기본) | "copy"=클립보드 복사
+  let screenshotNameFormat = ""; // 스크린샷 파일 이름 형식(비면 screenshotName.js 기본 형식)
   let maxQualityAuto = false; // 시청 시 최대 화질 자동 고정(전역, 기본 OFF)
   let maxQualityRespectManual = true; // 수동 화질 변경 시 존중(전역, 기본 ON)
   // 화질 상한(px height). 멀티뷰 프레임처럼 작은 칸에서 고화질이 낭비일 때 쓴다.
@@ -348,6 +350,8 @@
     gainPctOn = e.data.gainPct !== false;
     // 스크린샷 저장 전 미리보기(전역, 기본 OFF). 켜면 모달로 저장/취소 확인.
     screenshotPreviewOn = e.data.screenshotPreview === true;
+    screenshotActionMode = e.data.screenshotAction === "copy" ? "copy" : "save";
+    screenshotNameFormat = typeof e.data.screenshotNameFormat === "string" ? e.data.screenshotNameFormat : "";
     // 최대 화질 자동 고정(전역, 기본 OFF) + 수동 변경 존중(기본 ON). 켜지면 즉시 시도.
     const maxQualityAutoPrev = maxQualityAuto;
     maxQualityAuto = e.data.maxQualityAuto === true;
@@ -7033,13 +7037,90 @@
     return cleaned || "chzzk";
   }
 
-  // document.title(치지직: "제목 - 채널명" 등)에서 접미사를 걷어내 기본 파일명으로 쓴다.
-  function screenshotBaseName() {
-    const t = (document.title || "").replace(/\s*-\s*치지직\s*$/, "").trim();
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    return sanitizeScreenshotName(`${t || "chzzk"}_${ts}`);
+  // ── 스크린샷 파일 이름 ──
+  // 형식은 설정에서 정한다(screenshotName.js: {채널}{제목}{카테고리}{날짜}{시각}{방송시각}).
+  // 채널·제목·카테고리·방송 시작 시각은 치지직 API 로 받아 1분 동안 다시 쓴다. 못 받거나
+  // 늦으면(1.5초) 제목 자리에 페이지 제목을 넣는다(예전 이름과 같은 값).
+  const SCREENSHOT_META_TTL_MS = 60000;
+  const SCREENSHOT_META_TIMEOUT_MS = 1500;
+  const screenshotMetaCache = new Map();
+
+  function screenshotPageRef() {
+    const match = /^\/(live|video)\/([^/?#]+)/.exec(location.pathname);
+    return match ? { kind: match[1], id: decodeURIComponent(match[2]) } : null;
+  }
+
+  // 치지직 날짜 문자열("2026-10-04 20:00:20")은 한국 시각이다.
+  function parseChzzkKstDate(value) {
+    const text = String(value || "").trim();
+    if (!text) return 0;
+    const at = /T/.test(text)
+      ? new Date(text.replace(/([+-]\d{2})(\d{2})$/, "$1:$2")).getTime()
+      : new Date(`${text.replace(" ", "T")}+09:00`).getTime();
+    return Number.isFinite(at) ? at : 0;
+  }
+
+  function fetchScreenshotMeta(ref) {
+    if (!ref) return Promise.resolve(null);
+    const key = `${ref.kind}:${ref.id}`;
+    const hit = screenshotMetaCache.get(key);
+    if (hit && hit.expiresAt > Date.now()) return hit.promise;
+    const live = ref.kind === "live";
+    const url = live
+      ? `https://api.chzzk.naver.com/service/v3/channels/${encodeURIComponent(ref.id)}/live-detail`
+      : `https://api.chzzk.naver.com/service/v2/videos/${encodeURIComponent(ref.id)}`;
+    const promise = fetch(url, { credentials: "include", headers: { accept: "application/json" } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        const c = json?.content;
+        if (!c) return null;
+        return {
+          channel: String(c.channel?.channelName || ""),
+          title: String((live ? c.liveTitle : c.videoTitle) || ""),
+          category: String((live ? c.liveCategoryValue : c.videoCategoryValue) || ""),
+          // 라이브는 방송 시작, 다시보기는 라이브 당시 실제 방송 시작(업로드 영상은 없다).
+          openAt: parseChzzkKstDate(live ? c.openDate : c.liveOpenDate),
+        };
+      })
+      .catch(() => null)
+      .then((meta) => {
+        if (!meta) screenshotMetaCache.delete(key); // 실패는 다음 스크린샷 때 다시 받는다
+        return meta;
+      });
+    screenshotMetaCache.set(key, { promise, expiresAt: Date.now() + SCREENSHOT_META_TTL_MS });
+    return promise;
+  }
+
+  // 찍는 순간의 값(시각·지연·재생 위치·페이지)을 바로 잡아 두고, 채널 정보만 기다려 이름을 만든다.
+  // 반환: Promise<파일 이름(확장자 제외)>.
+  function screenshotBaseName(video = null) {
+    const at = Date.now();
+    const ref = screenshotPageRef();
+    const latency = ref?.kind === "live" ? getLiveLatencySeconds() : null;
+    const position = ref?.kind === "video" && video ? Number(video.currentTime) : NaN;
+    const pageTitle = (document.title || "").replace(/\s*-\s*치지직\s*$/, "").trim();
+    const formatText = screenshotNameFormat;
+    let timer = 0;
+    const timeout = new Promise((resolve) => {
+      timer = window.setTimeout(() => resolve(null), SCREENSHOT_META_TIMEOUT_MS);
+    });
+    return Promise.race([fetchScreenshotMeta(ref), timeout]).then((meta) => {
+      window.clearTimeout(timer);
+      const broadcastAt = ref?.kind === "live"
+        ? at - (Number.isFinite(latency) ? latency * 1000 : 0)
+        : meta?.openAt && Number.isFinite(position) ? meta.openAt + position * 1000 : 0;
+      const values = {
+        channel: meta?.channel || "",
+        title: meta?.title || pageTitle,
+        category: meta?.category || "",
+        at,
+        broadcastAt,
+      };
+      const names = globalThis.CheeseScreenshotName;
+      return sanitizeScreenshotName(
+        names ? names.format(formatText, values) : `${values.title || "chzzk"}_${at}`,
+      );
+    });
   }
 
   // 저장 결과 콜백을 reqId로 매칭(content 브릿지 → background chrome.downloads).
@@ -7138,8 +7219,11 @@
       return;
     }
     screenshotCaptureBusy = true;
-    const name = screenshotBaseName();
     const preview = screenshotPreviewOn;
+    // 이름은 누른 순간의 값으로 만든다(복사는 이름이 필요 없다).
+    const namePromise = !preview && screenshotActionMode === "copy"
+      ? null
+      : Promise.resolve(screenshotBaseName(video));
     const canvas = document.createElement("canvas");
     try {
       canvas.width = video.videoWidth;
@@ -7147,7 +7231,13 @@
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("no 2d context");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      if (!preview && screenshotActionMode === "copy") {
+        // 인코딩을 기다리기 전에 복사를 시작해야 클릭(사용자 조작) 판정이 살아 있다.
+        await copyScreenshot(encodeScreenshotCanvas(canvas));
+        return;
+      }
       const blob = await encodeScreenshotCanvas(canvas);
+      const name = await namePromise;
       if (preview) {
         openScreenshotPreview(blob, name);
       } else {
@@ -7160,6 +7250,29 @@
       canvas.height = 0;
       screenshotCaptureBusy = false;
     }
+  }
+
+  // 스크린샷을 클립보드에 PNG 로 복사한다. 브라우저는 클릭·키 입력 직후에만 허용한다.
+  // ClipboardItem 에 인코딩 Promise 를 그대로 넘기면 기다리는 동안에도 그 판정이 유지된다.
+  // Promise 를 받지 못하는 브라우저는 인코딩이 끝난 Blob 으로 다시 쓴다.
+  async function copyScreenshot(blobPromise) {
+    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function") {
+      showScreenshotToast(false, "이 브라우저는 이미지 복사를 지원하지 않아요");
+      return false;
+    }
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blobPromise })]);
+    } catch {
+      try {
+        const blob = await blobPromise;
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      } catch {
+        showScreenshotToast(false, "클립보드에 복사할 수 없어요");
+        return false;
+      }
+    }
+    showScreenshotToast(true, "클립보드에 복사했어요");
+    return true;
   }
 
   // 실패 사유를 짧게 안내하되 알 수 없는 오류 코드는 진단을 위해 그대로 노출한다.
@@ -7357,6 +7470,7 @@
         <span class="cheese-screenshot-output-size"></span>
         <div class="cheese-screenshot-action-buttons">
           <button type="button" class="cheese-screenshot-cancel">취소</button>
+          <button type="button" class="cheese-screenshot-copy">복사</button>
           <button type="button" class="cheese-screenshot-save">저장</button>
         </div>
       </div>`;
@@ -7370,6 +7484,7 @@
     const cropSize = win.querySelector(".cheese-screenshot-crop-size");
     const outputSize = win.querySelector(".cheese-screenshot-output-size");
     const saveButton = win.querySelector(".cheese-screenshot-save");
+    const copyButton = win.querySelector(".cheese-screenshot-copy");
     let cropEnabled = false;
     let crop = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
 
@@ -7401,6 +7516,7 @@
       cropReset.hidden = !cropEnabled;
       cropSelection.hidden = !cropEnabled;
       saveButton.textContent = cropEnabled ? "선택 영역 저장" : "저장";
+      copyButton.textContent = cropEnabled ? "선택 영역 복사" : "복사";
       renderCropSelection();
       if (cropEnabled) cropSelection.focus({ preventScroll: true });
     }
@@ -7527,6 +7643,23 @@
     win
       .querySelector(".cheese-screenshot-cancel")
       .addEventListener("click", () => closeScreenshotPreview());
+    // 복사: 잘라내기 중이면 선택 영역을 복사한다. 성공하면 저장처럼 창을 닫는다.
+    copyButton.addEventListener("click", async () => {
+      if (copyButton.disabled) return;
+      copyButton.disabled = true;
+      let output;
+      try {
+        output = cropEnabled ? cropScreenshotBlob(image, crop) : Promise.resolve(blob);
+      } catch {
+        showScreenshotToast(false, "선택 영역을 만들 수 없어요");
+        copyButton.disabled = false;
+        return;
+      }
+      const ok = await copyScreenshot(output);
+      if (!win.isConnected) return;
+      if (ok) closeScreenshotPreview(true);
+      else copyButton.disabled = false;
+    });
     saveButton.addEventListener("click", async () => {
       if (saveButton.disabled) return;
       saveButton.disabled = true;
