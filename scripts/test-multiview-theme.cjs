@@ -106,6 +106,11 @@ const call = (me, p = {}, s) =>
         console.log("  ⚠ 아이콘이 둘 다 보이거나 둘 다 숨겨짐");
         bad++;
       }
+      // 단추는 바꿀 테마를 보인다: 라이트면 달, 다크면 해.
+      if ((s.theme === "dark") !== (s.sun !== "none")) {
+        console.log("  ⚠ 라이트에서는 달, 다크에서는 해가 보여야 한다");
+        bad++;
+      }
     }
     if (parsed[0].bg === parsed[1].bg) {
       console.log("  ⚠ 배경색이 안 바뀜");

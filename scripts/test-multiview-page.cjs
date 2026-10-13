@@ -3118,6 +3118,80 @@ const checks = [];
      Date.now=realNow;`,
   );
 
+
+  await test(
+    "메인만 듣기 중 보조 칸 플레이어에서 사용자가 볼륨을 올리면 그 채널을 듣는다",
+    `const st=window.__mvState;
+     // 준비된(재생 중인) 보조 칸만 메시지를 받는다(끝난 칸은 무시한다).
+     const subs=[...document.querySelectorAll('.mv-cell')].filter(cell=>!cell.classList.contains('is-main')&&cell.dataset.status==='ready');
+     const sub=subs[0];
+     const other=subs[1];
+     check(sub,'준비된 보조 칸이 없다: '+[...document.querySelectorAll('.mv-cell')].map(c=>c.dataset.status).join());
+     const send=(cell,volume,user)=>{
+       const event=new MessageEvent('message',{origin:'https://chzzk.naver.com',data:{
+         source:'cheese-platter-multiview',type:'FRAME_AUDIO_STATE',channelId:cell.dataset.channelId,volume,user}});
+       Object.defineProperty(event,'source',{value:cell.querySelector('iframe').contentWindow});
+       window.dispatchEvent(event);
+     };
+     // 프레임으로 나가는 지시를 엿본다(끝나면 원래대로 돌려 다음 테스트에 영향을 주지 않는다).
+     const restores=[];
+     for(const f of document.querySelectorAll('.mv-cell iframe')){
+       const win=f.contentWindow;
+       if(win.__patched) continue;
+       const original=win.postMessage;
+       win.postMessage=(m,...rest)=>{(window.sentMsgs||(window.sentMsgs=[])).push(m);return original.call(win,m,...rest);};
+       restores.push(()=>{win.postMessage=original;});
+     }
+     document.getElementById('mvVolumeBtn').click();
+     await wait(80);
+     const focus=()=>document.getElementById('mvVolFocus');
+     if(!st.audioFocusMode){ focus().click(); await wait(50); }
+     check(st.audioFocusMode===true,'메인만 듣기를 켜지 못했다');
+     window.sentMsgs=[];
+     // 치지직이 스스로 볼륨을 되돌린 것(사용자 조작 아님)은 음소거를 풀지 않는다.
+     send(sub,0.3,false);
+     await wait(50);
+     check(st.audioFocusMode===true,'사용자 조작이 아닌 볼륨 변경으로 메인만 듣기가 꺼졌다');
+     window.sentMsgs=[];
+     // 사용자가 보조 칸 플레이어에서 볼륨을 올렸다.
+     send(sub,0.4,true);
+     await wait(80);
+     check(st.audioFocusMode===false && !focus().checked,'메인만 듣기가 꺼지지 않았다: '+JSON.stringify({master:st.masterMuted,masterVol:st.masterVolume,status:sub.dataset.status,sub:sub.dataset.channelId===st.mainId}));
+     const toSub=window.sentMsgs.filter(m=>m.type==='SET_MULTIVIEW_STATE'&&m.channelId===sub.dataset.channelId);
+     check(toSub.length>0 && toSub.at(-1).muted===false,'볼륨을 올린 보조 칸의 음소거가 풀리지 않았다: '+JSON.stringify(toSub.at(-1)));
+     const icon=document.querySelector('[data-mv-vol-mute="'+sub.dataset.channelId+'"]');
+     check(icon && icon.getAttribute('aria-pressed')!=='true' && !/음소거 해제/.test(icon.getAttribute('aria-label')||''),
+       '볼륨 패널에 그 채널이 음소거로 남았다: '+(icon&&icon.outerHTML.slice(0,160)));
+     if(other){
+       const toOther=window.sentMsgs.filter(m=>m.type==='SET_MULTIVIEW_STATE'&&m.channelId===other.dataset.channelId);
+       check(!toOther.length || toOther.at(-1).muted===true,'건드리지 않은 다른 보조 칸까지 소리가 났다');
+     }
+     // 음소거된 칸에서 슬라이더를 0 위치에서 잡으면: 볼륨 0 보고 → 음소거 해제 보고.
+     // 끌기 시작할 때 100% 로 튀면 안 된다(실측: 지시 volume 1.000).
+     // 앞 단계에서 이미 바꾼 칸(sub)으로 하고 끝나면 그 볼륨으로 돌려, 다른 칸은 건드리지 않는다.
+     focus().click();
+     await wait(50);
+     check(st.audioFocusMode===true,'메인만 듣기를 다시 켜지 못했다');
+     window.sentMsgs=[];
+     send(sub,0,true);
+     const unmute=new MessageEvent('message',{origin:'https://chzzk.naver.com',data:{
+       source:'cheese-platter-multiview',type:'FRAME_USER_MUTE',channelId:sub.dataset.channelId,muted:false}});
+     Object.defineProperty(unmute,'source',{value:sub.querySelector('iframe').contentWindow});
+     window.dispatchEvent(unmute);
+     await wait(80);
+     const grabbed=window.sentMsgs.filter(m=>m.type==='SET_MULTIVIEW_STATE'&&m.channelId===sub.dataset.channelId);
+     check(grabbed.length>0 && grabbed.at(-1).muted===false && grabbed.at(-1).volume<0.01,
+       '슬라이더를 0 에서 잡았는데 다른 볼륨으로 지시했다: '+JSON.stringify(grabbed.at(-1)));
+     check(st.audioFocusMode===false,'슬라이더를 잡았는데 메인만 듣기가 꺼지지 않았다');
+     send(sub,0.4,true);
+     await wait(50);
+     // 다음 테스트를 위해 되돌린다.
+     focus().click();
+     await wait(50);
+     document.getElementById('mvVolumeBtn').click();
+     await wait(50);
+     restores.forEach((restore)=>restore());`,
+  );
   await test(
     "방송 종료 신호를 받으면 칸을 지우지 않고 안내만 띄운다",
     `const videoSrcs=()=>window.frameSrcs.filter(s=>s.includes('cheeseMulti=1'));

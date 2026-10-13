@@ -232,7 +232,7 @@ function navigationHarness() {
     document: { hidden: false, addEventListener: (type, fn, options) => listeners.push({ owner: "document", type, fn, options }) },
     window: { addEventListener: (type, fn, options) => listeners.push({ owner: "window", type, fn, options }) },
     location: { pathname: "/live/start" }, Date: { now: () => now },
-    customFollowDragId: "", popupPlayerDragging: false, followPreviewSuppressedChannelId: "",
+    customFollowDragId: "", popupPlayerDragging: false, isSidebarResizeLocked: () => false, followPreviewSuppressedChannelId: "",
     followPreviewLastScrollAt: 0, FOLLOW_PREVIEW_SCROLL_QUIET_MS: 100, FOLLOW_PREVIEW_HOVER_DELAY_MS: 100,
     setTimeout: (fn) => { timers.set(++next, fn); return next; },
     clearFollowPreviewOpenTimer: () => { timers.delete(state.openTimer); state.openTimer = 0; },

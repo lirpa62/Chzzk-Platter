@@ -71,14 +71,18 @@ const rule = (selector) => {
   return replayCss.slice(start, replayCss.indexOf("}", start));
 };
 const contentRule = rule("aside#vod-aside .cheese-replay-local-chat-content");
-check(/padding: 4px 6px;/.test(contentRule) && /line-height: 20px;/.test(contentRule) &&
+// 줄 높이는 글자 배율 변수로 둔다(기본 20px, test-replay-local-chat-font-scale 이 실제 값을 잰다).
+check(/padding: 4px 6px;/.test(contentRule) && /line-height: var\(--cheese-replay-local-chat-line\);/.test(contentRule) &&
+  /--cheese-replay-local-chat-line: calc\(20px \* var\(--cheese-replay-local-chat-scale\)\);/.test(rule("aside#vod-aside .cheese-replay-local-chat-message")) &&
   /word-break: break-all;/.test(contentRule) && /overflow: hidden;/.test(contentRule),
   "메시지 상자: 여백 4px 6px · 줄 높이 20px · 단어 끊기가 치지직과 같다");
 check(/margin-bottom: 3px;/.test(rule("aside#vod-aside .cheese-replay-local-chat-message")),
   "줄 간격 3px 이 치지직과 같다");
 const identityRule = rule("aside#vod-aside .cheese-replay-local-chat-identity");
 check(/margin: -2px 4px -2px 0;/.test(identityRule) && /padding: 2px 4px 2px 2px;/.test(identityRule) &&
-  /vertical-align: top;/.test(identityRule), "닉네임 묶음 여백이 치지직과 같다");
+  /vertical-align: var\(--cheese-replay-local-chat-identity-align\);/.test(identityRule) &&
+  /--cheese-replay-local-chat-identity-align: top;/.test(rule("aside#vod-aside .cheese-replay-local-chat-message")),
+  "닉네임 묶음 여백이 치지직과 같다(정렬은 기본 top, 배율이 걸리면 middle)");
 check(/gap: 4px;/.test(rule("aside#vod-aside .cheese-replay-local-chat-badges")) &&
   /margin-right: 4px;/.test(rule("aside#vod-aside .cheese-replay-local-chat-badges")),
   "배지 묶음 간격이 치지직과 같다");

@@ -43,6 +43,15 @@ textarea {
   justify-content: space-between;
 }
 /* 테마 전환 버튼(두 화면 공용). 지금 테마의 반대 아이콘만 보여 준다. */
+/* 치지직 페이지 위 멀티뷰: 숨겨 둔 치지직 앱이 html 에 color-scheme 을 인라인으로 줄 수
+   있다(치지직 테마). 스크롤바·입력 요소는 멀티뷰 테마를 따른다. */
+html[data-cheese-multiview-host][data-theme="dark"] {
+  color-scheme: dark !important;
+}
+html[data-cheese-multiview-host]:not([data-theme="dark"]) {
+  color-scheme: light !important;
+}
+
 .mv-theme-toggle {
   align-items: center;
   background: none;
@@ -59,14 +68,15 @@ textarea {
   border-color: var(--popup-brand, #00ffa3);
   color: var(--popup-brand-strong, #00ffa3);
 }
-.mv-theme-toggle .mv-theme-moon {
+/* 단추는 바꿀 테마를 보인다(aria-label 과 같다): 라이트면 달, 다크면 해. */
+.mv-theme-toggle .mv-theme-sun {
   display: none;
 }
 :root[data-theme="dark"] .mv-theme-toggle .mv-theme-sun {
-  display: none;
+  display: inline;
 }
 :root[data-theme="dark"] .mv-theme-toggle .mv-theme-moon {
-  display: inline;
+  display: none;
 }
 
 .mv-setup-head h1 {
@@ -1562,16 +1572,113 @@ button.mv-live-more {
   flex: 0 1 auto;
   min-width: 0;
 }
-/* 좁아지면 라벨(메인 채널/채팅/…)을 감추고 값만 남겨 버튼 수를 유지한다. */
-@media (max-width: 900px) {
-  .mv-topbar {
-    flex-wrap: wrap;
-  }
-  .mv-pop-label {
+/* 창이 좁아질 때 단계별로 줄인다(막대는 창 전체 폭이라 화면 폭으로 나눈다).
+   ⚠ 예전에는 900px 에서 한 번 줄였다. 그보다 넓은 1000~1300px 에서 버튼 글자가 줄지
+   못해 이웃 버튼과 겹치고('채팅' 값 위로 '메인 따라가기'), '채널 관리'가 두 줄로 꺾였다.
+   - 버튼은 칸 폭만큼 줄고 값은 말줄임한다(.mv-pop·버튼·값의 min-width: 0).
+   - 1단계(1480px): 라벨 대신 아이콘(숨긴 라벨은 툴팁으로, data-tooltip-icon-only).
+   - 2단계(1180px): 값 없이도 알 수 있는 버튼(채팅 위치·스트림 정보·채널별 화질)과 '메인 따라가기'·
+     '채널 관리'는 아이콘만.
+   - 3단계(960px): 배치도 아이콘만, 남은 값은 더 짧게.
+   - 그래도 모자라면(720px 이하) 마지막에만 줄을 바꾼다 — 겹치지 않게. */
+.mv-pop {
+  display: flex;
+  min-width: 0;
+}
+.mv-topbar .mv-pop-button {
+  min-width: 0;
+}
+.mv-topbar .mv-pop-value {
+  min-width: 0;
+}
+/* 줄어드는 것은 긴 값(채널 이름·배치)뿐이다. 짧은 값(볼륨 60%·싱크 꺼짐)과 아이콘 버튼,
+   통나무파워는 제 폭을 지킨다 — 줄면 '6…'처럼 읽을 수 없게 잘렸다. */
+.mv-topbar > .mv-pop:not([data-mv-pop="main"]):not([data-mv-pop="chat"]):not([data-mv-pop="layout"]),
+.mv-topbar > .mv-logpower {
+  flex-shrink: 0;
+}
+/* 메인 채널·채팅은 아이콘과 이름 몇 글자는 남긴다(그보다 좁으면 아래 줄바꿈 단계로). */
+.mv-topbar > .mv-pop[data-mv-pop="main"],
+.mv-topbar > .mv-pop[data-mv-pop="chat"] {
+  min-width: 64px;
+}
+.mv-pop-icon,
+.mv-topbar-icon {
+  align-self: center;
+  display: none;
+  flex: none;
+}
+/* 아이콘은 글자 줄 높이(14px)에 맞춘다. 15px 이면 아이콘만 남은 버튼이 1px 높아져
+   막대의 버튼 높이가 들쭉날쭉했다. */
+.mv-pop-icon svg,
+.mv-topbar-icon svg {
+  height: 14px;
+  width: 14px;
+}
+.mv-chat-follow,
+.mv-topbar-back {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+.mv-topbar-back {
+  flex: none;
+}
+@media (max-width: 1480px) {
+  .mv-topbar .mv-pop-label {
     display: none;
   }
+  .mv-topbar .mv-pop-icon {
+    display: inline-flex;
+  }
   .mv-pop-button {
+    align-items: center;
+  }
+  .mv-logpower-name {
+    display: none;
+  }
+}
+@media (max-width: 1180px) {
+  .mv-pop[data-mv-pop="side"] .mv-pop-value,
+  .mv-pop[data-mv-pop="stats"] .mv-pop-value,
+  .mv-pop[data-mv-pop="quality"] .mv-pop-value,
+  .mv-chat-follow .mv-topbar-text,
+  .mv-topbar-back .mv-topbar-text {
+    display: none;
+  }
+  .mv-chat-follow .mv-topbar-icon,
+  .mv-topbar-back .mv-topbar-icon {
+    display: inline-flex;
+  }
+  .mv-chat-follow,
+  .mv-topbar-back {
+    padding: 6px 8px;
+  }
+  .mv-topbar .mv-pop-button {
+    max-width: 160px;
+  }
+}
+@media (max-width: 960px) {
+  /* ⚠ 좌우 여백(8px)은 줄이지 않는다. 펼침 패널이 버튼 왼쪽에 맞춰 열려, 줄이면 좁은
+     화면에서 패널이 화면 가장자리에 붙는다. */
+  .mv-topbar {
+    gap: 4px;
+  }
+  .mv-pop[data-mv-pop="layout"] .mv-pop-value {
+    display: none;
+  }
+  .mv-topbar > .mv-pop[data-mv-pop="layout"] {
+    flex-shrink: 0;
+  }
+  .mv-topbar .mv-pop-button {
     max-width: 120px;
+    padding: 6px 8px;
+  }
+}
+@media (max-width: 720px) {
+  .mv-topbar {
+    flex-wrap: wrap;
   }
 }
 .mv-topbar-back {
@@ -1585,6 +1692,54 @@ button.mv-live-more {
   margin-left: auto;
   padding: 6px 10px;
 }
+/* 적립 중인 통나무파워(채팅창 배지와 같은 구성: 아이콘 · 채널 · 보유량 · 적립 중/타이머). */
+.mv-logpower {
+  align-items: center;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  color: inherit;
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-size: 12px;
+  gap: 4px;
+  margin-left: auto;
+  min-width: 0;
+  /* 주변 버튼(.mv-pop-button·채널 관리)과 같은 여백이라 높이(28px)가 같다. */
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+.mv-logpower[hidden] {
+  display: none;
+}
+.mv-logpower > svg {
+  color: var(--popup-brand-strong, #008f2d);
+  flex: none;
+}
+.mv-logpower-name {
+  max-width: 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mv-logpower-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.mv-logpower-state {
+  align-items: center;
+  color: var(--popup-brand-strong, #008f2d);
+  display: inline-flex;
+  font-variant-numeric: tabular-nums;
+  gap: 2px;
+}
+.mv-logpower-state svg {
+  flex: none;
+}
+/* 보이면 '채널 관리'를 오른쪽으로 미는 일은 이 칩이 맡는다. */
+.mv-logpower:not([hidden]) + .mv-topbar-back {
+  margin-left: 0;
+}
+
 .mv-topbar-back:hover {
   background: var(--popup-hover, rgba(127, 127, 127, 0.14));
 }
@@ -1680,6 +1835,18 @@ button.mv-live-more {
 .mv-pop-panel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(110px, 1fr));
+}
+/* 세로 화면(창이 세로로 길다)일 때 배치 목록을 '세로 화면'·'가로 화면'으로 나누는 머리말.
+   고르기 화면(.mv-layout-grid)과 시청 화면 배치 팝오버(.mv-pop-panel-grid) 공용. */
+.mv-layout-group-label {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  padding: 6px 4px 2px;
+}
+.mv-layout-group-label:first-child {
+  padding-top: 2px;
 }
 
 .mv-pop-option {

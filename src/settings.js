@@ -131,6 +131,9 @@
     "cheeseChatTimeColors",
     "cheeseChatOsIcons",
     "cheeseChatOsIconPosition",
+    "cheeseChatDonationTools",
+    "cheeseChatTimeSeekOffset",
+    "cheeseWatchTime",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowingLiveSortRemember",
@@ -140,7 +143,7 @@
     "cheeseVodChatGraphAutoCollect",
     "cheeseVodChatGraphColors",
     // 방장·매니저·파트너 채팅(설정 화면에서 켜고, 봇 목록도 여기서 관리한다).
-    "cheeseVodRoleChatOn",
+    "cheeseVodRoleChatEnabled",
     "cheeseVodRoleChatBots",
     // 접힌 사이드바에서 사각 프로필로 볼 채널(설정의 '캐릭터 선택창'에서 고른다).
     "cheeseFollowSquareChannels",
@@ -191,6 +194,7 @@
     "cheeseMultiviewQuickState",
     "cheeseMultiviewQuickPosition",
     "cheeseMultiviewMainBorder",
+    "cheeseMultiviewLogPower",
     "cheeseMultiviewSetupSortBySource",
     "cheeseMultiviewRememberSetupSort",
     "cheeseMultiviewSetupOptions",
@@ -253,6 +257,7 @@
     "cheeseFollowGroupOfflineOverrides",
     "cheeseFollowPreviewSize",
     "cheeseChatWidth",
+    "cheeseSidebarWidth",
     "cheeseChatFoldState",
     "cheeseCommentFeatureEnabled",
     "cheeseCommentMarkersEnabled",
@@ -293,6 +298,8 @@
     "cheeseMixerGlobalDefaultMode",
     "cheeseMixerGlobalGainDefaultMode",
     "cheesePlayerButtonSide",
+    "cheesePlayerButtonCompact",
+    "cheeseChatTimeSize",
     "cheeseScreenshotDirectSave",
     "cheeseScreenshotPreview",
     "cheeseScreenshotAction",
@@ -1097,6 +1104,29 @@
     window.open(url, "_blank", "noopener");
   });
 
+  // 시청 시간 기록: 켜고 끄기(기본 꺼짐) + 통계 화면 열기.
+  const WATCH_TIME_ENABLED_KEY = "cheeseWatchTime";
+  const watchTimeToggle = document.querySelector("[data-watch-time-enabled]");
+  void (async () => {
+    try {
+      const data = await cachedStorageGet(WATCH_TIME_ENABLED_KEY);
+      if (watchTimeToggle) watchTimeToggle.checked = data?.[WATCH_TIME_ENABLED_KEY] === true;
+    } catch {}
+  })();
+  watchTimeToggle?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [WATCH_TIME_ENABLED_KEY]: watchTimeToggle.checked });
+    } catch {}
+  });
+  document.getElementById("openWatchTime")?.addEventListener("click", () => {
+    const url = chrome.runtime.getURL("watchTime.html");
+    if (chrome.tabs?.create) {
+      chrome.tabs.create({ url });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
+  });
+
   // 통나무파워 획득 내역을 새 탭으로 연다(수신함 탭·채팅 팝업과 같은 페이지).
   document.getElementById("openLogStats")?.addEventListener("click", () => {
     const url = chrome.runtime.getURL("logPowerStats.html");
@@ -1624,6 +1654,13 @@
       button.disabled = disabled;
     });
     chatTimeFormatItem?.classList.toggle("is-locked", disabled);
+    // 시간 글자 크기도 같은 조건으로 잠근다. ⚠ 이 함수는 아래 크기 설정 코드보다 먼저
+    //   불릴 수 있어(TDZ) 캡처 변수 대신 DOM 에서 직접 찾는다.
+    for (const sel of ["[data-chat-time-size]", "[data-chat-time-size-num]", "[data-chat-time-size-reset]"]) {
+      const el = document.querySelector(sel);
+      if (el) el.disabled = disabled;
+    }
+    document.querySelector("[data-chat-time-size-item]")?.classList.toggle("is-locked", disabled);
     reflectChatTimeColors();
   }
 
@@ -4595,6 +4632,48 @@
     cwfRender();
   })();
 
+  // ── 채팅 시간 글자 크기(메시지 글자 대비 %, 70~130, 기본 85) ─────────────────
+  // 슬라이더와 숫자 입력이 같은 값을 공유한다. content.js 가 CSS 변수로 내려 채팅 폰트
+  // 크기 배율과 곱한다. 채팅 시간 표시가 꺼져 있으면 잠근다(reflectChatTimeFormatAvailability).
+  const CHAT_TIME_SIZE_KEY = "cheeseChatTimeSize";
+  const CHAT_TIME_SIZE_DEFAULT = 85;
+  const chatTimeSizeRange = document.querySelector("[data-chat-time-size]");
+  const chatTimeSizeNum = document.querySelector("[data-chat-time-size-num]");
+  const chatTimeSizeReset = document.querySelector("[data-chat-time-size-reset]");
+
+  function normalizeChatTimeSize(value) {
+    if (value == null || value === "") return CHAT_TIME_SIZE_DEFAULT;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return CHAT_TIME_SIZE_DEFAULT;
+    return Math.min(130, Math.max(70, Math.round(n / 5) * 5));
+  }
+
+  function reflectChatTimeSize(value) {
+    const v = normalizeChatTimeSize(value);
+    if (chatTimeSizeRange) chatTimeSizeRange.value = String(v);
+    if (chatTimeSizeNum) chatTimeSizeNum.value = String(v);
+  }
+
+  function saveChatTimeSize(value) {
+    const v = normalizeChatTimeSize(value);
+    reflectChatTimeSize(v);
+    try {
+      cachedStorageSet({ [CHAT_TIME_SIZE_KEY]: v });
+    } catch {}
+  }
+
+  chatTimeSizeRange?.addEventListener("input", () => saveChatTimeSize(chatTimeSizeRange.value));
+  chatTimeSizeNum?.addEventListener("change", () => saveChatTimeSize(chatTimeSizeNum.value));
+  chatTimeSizeReset?.addEventListener("click", () => saveChatTimeSize(CHAT_TIME_SIZE_DEFAULT));
+  (async () => {
+    let v = CHAT_TIME_SIZE_DEFAULT;
+    try {
+      const data = await cachedStorageGet(CHAT_TIME_SIZE_KEY);
+      if (data?.[CHAT_TIME_SIZE_KEY] != null) v = data[CHAT_TIME_SIZE_KEY];
+    } catch {}
+    reflectChatTimeSize(v);
+  })();
+
   // ── 되감기 바 위치(px, 기본 60) ───────────────────────────────────────────
   // 슬라이더와 숫자 입력이 같은 값을 공유한다. 되감기 바 표시가 꺼져 있으면 잠근다.
   const LIVE_SEEK_BAR_BOTTOM_KEY = "cheeseLiveSeekBarBottom";
@@ -5243,11 +5322,14 @@
     ["[data-multiview-badge-chat-hide-pill-button]", "cheeseMultiviewBadgeChatHidePillButton", false],
     ["[data-multiview-remember-quick-state]", "cheeseMultiviewRememberQuickState", false],
     ["[data-multiview-main-border]", "cheeseMultiviewMainBorder", true],
+    ["[data-multiview-log-power]", "cheeseMultiviewLogPower", true],
     ["[data-multiview-remember-setup-sort]", "cheeseMultiviewRememberSetupSort", true],
     ["[data-multiview-sync-diagnostics-ui]", "cheeseMultiviewSyncDiagnosticsUi", false],
     ["[data-multiview-live-catch-up]", "cheeseMultiviewLiveCatchUp", true],
     ["[data-multiview-track-resize]", "cheeseMultiviewTrackResize", true],
     ["[data-following-live-auto-expand]", "cheeseFollowingLiveAutoExpand", false],
+    // 자동 따라잡기. 플레이어 버튼 우클릭 메뉴와 같은 키(content.js 가 열린 치지직 탭에 전한다).
+    ["[data-live-auto-sync]", "cheeseAudioMixer.autoSync", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;
@@ -8178,6 +8260,72 @@
     reflectMultiviewTrackMemory(mode);
   })();
 
+  // 다시보기 채팅 시간 클릭 이동 위치(채팅 시점보다 몇 초 앞). 0 | 3(기본) | 5 | 10.
+  const CHAT_TIME_SEEK_OFFSET_KEY = "cheeseChatTimeSeekOffset";
+  const chatTimeSeekOffsetButtons = Array.from(
+    document.querySelectorAll("[data-chat-time-seek-offset-value]"),
+  );
+  const normalizeChatTimeSeekOffset = (value) =>
+    [0, 3, 5, 10].includes(Number(value)) ? Number(value) : 3;
+  function reflectChatTimeSeekOffset(value) {
+    const offset = normalizeChatTimeSeekOffset(value);
+    chatTimeSeekOffsetButtons.forEach((button) => {
+      const active = Number(button.dataset.chatTimeSeekOffsetValue) === offset;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  chatTimeSeekOffsetButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const offset = normalizeChatTimeSeekOffset(button.dataset.chatTimeSeekOffsetValue);
+      reflectChatTimeSeekOffset(offset);
+      try {
+        cachedStorageSet({ [CHAT_TIME_SEEK_OFFSET_KEY]: offset });
+      } catch {}
+    });
+  });
+  void (async () => {
+    let offset = 3;
+    try {
+      const data = await cachedStorageGet(CHAT_TIME_SEEK_OFFSET_KEY);
+      offset = normalizeChatTimeSeekOffset(data?.[CHAT_TIME_SEEK_OFFSET_KEY]);
+    } catch {}
+    reflectChatTimeSeekOffset(offset);
+  })();
+
+  // 채팅 입력창 후원 도구: 모두 표시(기본) | '후원하기' 문구 숨김 | 후원 버튼 숨김 | 모두 숨김.
+  const CHAT_DONATION_TOOLS_KEY = "cheeseChatDonationTools";
+  const chatDonationToolsButtons = Array.from(
+    document.querySelectorAll("[data-chat-donation-tools-value]"),
+  );
+  const normalizeChatDonationTools = (value) =>
+    ["hide-text", "hide-buttons", "hide-all"].includes(value) ? value : "show";
+  function reflectChatDonationTools(value) {
+    const mode = normalizeChatDonationTools(value);
+    chatDonationToolsButtons.forEach((button) => {
+      const active = button.dataset.chatDonationToolsValue === mode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+  }
+  chatDonationToolsButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = normalizeChatDonationTools(button.dataset.chatDonationToolsValue);
+      reflectChatDonationTools(mode);
+      try {
+        cachedStorageSet({ [CHAT_DONATION_TOOLS_KEY]: mode });
+      } catch {}
+    });
+  });
+  void (async () => {
+    let mode = "show";
+    try {
+      const data = await cachedStorageGet(CHAT_DONATION_TOOLS_KEY);
+      mode = normalizeChatDonationTools(data?.[CHAT_DONATION_TOOLS_KEY]);
+    } catch {}
+    reflectChatDonationTools(mode);
+  })();
+
   // 스크린샷 버튼 동작: 파일 저장(기본) | 클립보드 복사.
   const SCREENSHOT_ACTION_KEY = "cheeseScreenshotAction";
   const screenshotActionButtons = Array.from(
@@ -9283,7 +9431,7 @@
     document.querySelectorAll("[data-card-live-preview-position]"),
   );
   function normalizeCardLivePreviewPosition(value) {
-    return value === "left" || value === "right" ? value : "auto";
+    return ["left", "right", "top", "bottom"].includes(value) ? value : "auto";
   }
   function reflectCardLivePreviewPosition(value) {
     const position = normalizeCardLivePreviewPosition(value);
@@ -9949,8 +10097,9 @@
   vodChatGraphInput?.addEventListener("change", syncVodChatGraphAutoLock);
   loadVodChatGraphAuto();
 
-  // ── 방장·매니저 채팅(기본 ON) + 제외할 봇 목록 ─────────────────────────────
-  const VOD_ROLE_CHAT_KEY = "cheeseVodRoleChatOn";
+  // ── 방장·매니저 채팅(기본 OFF) + 제외할 봇 목록 ────────────────────────────
+  // ⚠ 예전 키(cheeseVodRoleChatOn, 기본 켜짐)에서 바꿨다. content.js 와 같은 키.
+  const VOD_ROLE_CHAT_KEY = "cheeseVodRoleChatEnabled";
   const VOD_ROLE_BOTS_KEY = "cheeseVodRoleChatBots";
   // ⚠ content.js 와 같은 값을 유지해야 한다(설정을 한 번도 건드리지 않은 이용자와
   //   '기본값으로'를 누른 이용자가 같은 목록을 보게 된다).
@@ -10031,13 +10180,13 @@
   }
 
   async function loadVodRoleChat() {
-    let on = true;
+    let on = false;
     try {
       const data = await cachedStorageGet([
         VOD_ROLE_CHAT_KEY,
         VOD_ROLE_BOTS_KEY,
       ]);
-      on = data?.[VOD_ROLE_CHAT_KEY] !== false; // 기본 ON
+      on = data?.[VOD_ROLE_CHAT_KEY] === true; // 기본 OFF
       const stored = data?.[VOD_ROLE_BOTS_KEY];
       // ⚠ 빈 배열은 '전부 지웠다'는 뜻이라 기본값으로 되돌리지 않는다.
       roleBots = Array.isArray(stored)
@@ -11295,9 +11444,19 @@
     "chatRecapHistoryRevisionV1",
     "chatRecapNewVideosV1",
     "cheeseChatRecapPodiumAchievements",
+    "cheeseWatchTimeDays",
+    "cheeseWatchTimeChannels",
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
-    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32}|cheeseVodTitleChangesV1:\d+)$/i;
+    /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32}|cheeseVodTitleChangesV1:\d+|cheeseWatchTime:\d{4}-\d{2}-\d{2})$/i;
+  const WATCH_TIME_CHART_TYPE_KEY = "cheeseWatchTimeChartType";
+  function normalizeWatchTimeChartType(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    return {
+      main: value.main === "line" ? "line" : "bar",
+      detail: value.detail === "line" ? "line" : "bar",
+    };
+  }
   const isSettingsFullDataKey = (key) =>
     SETTINGS_FULL_DATA_KEYS.has(key) ||
     CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
@@ -11443,6 +11602,27 @@
     if (key === "cheeseMultiviewTrackMemory") {
       return ["reset", "session", "layout"].includes(value) ? value : undefined;
     }
+    if (key === "cheeseChatTimeSize") {
+      return typeof value === "number" && Number.isInteger(value) &&
+        value >= 70 && value <= 130 && value % 5 === 0 ? value : undefined;
+    }
+    if (key === "cheeseChatTimeSeekOffset") {
+      return [0, 3, 5, 10].includes(value) ? value : undefined;
+    }
+    if (key === "cheeseChatDonationTools") {
+      return ["show", "hide-text", "hide-buttons", "hide-all"].includes(value)
+        ? value : undefined;
+    }
+    if (key === "cheeseSidebarWidth") {
+      return typeof value === "number" && Number.isInteger(value) &&
+        value >= 240 && value <= 360 ? value : undefined;
+    }
+    if (key === "cheesePlayerButtonCompact") {
+      return Array.isArray(value) && value.length <= PLAYER_COMPACT_KEYS.length &&
+        value.every((item) => typeof item === "string")
+        ? [...new Set(value.filter((item) => PLAYER_COMPACT_KEYS.includes(item)))]
+        : undefined;
+    }
     if (key === "cheeseScreenshotAction") {
       return value === "save" || value === "copy" ? value : undefined;
     }
@@ -11521,6 +11701,9 @@
     }
     if (
       key === "cheeseAudioMixer.autoSync" ||
+      key === "cheeseWatchTime" ||
+      key === "cheeseMultiviewLogPower" ||
+      key === "cheeseVodRoleChatEnabled" ||
       key === "cheeseVideoFilter.autoSharpen" ||
       key === EMBED_CLIP_MIXER_DEFAULT_PRESET_ENABLED_KEY ||
       key === EMBED_CLIP_MIXER_DEFAULT_GAIN_ENABLED_KEY ||
@@ -11657,6 +11840,42 @@
       return undefined;
     }
     return cloned;
+  }
+
+  function normalizeWatchTimeFullData(key, value) {
+    if (key === "cheeseWatchTimeDays") {
+      return Array.isArray(value) && value.length <= 20000 &&
+        value.every((day) => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day))
+        ? [...new Set(value)].sort() : undefined;
+    }
+    if (key === "cheeseWatchTimeChannels") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+      const entries = Object.entries(value);
+      if (entries.length > 10000) return undefined;
+      const channels = {};
+      for (const [id, raw] of entries) {
+        if (!/^[0-9a-f]{32}$/i.test(id) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+        channels[id] = {
+          name: String(raw.name || "").slice(0, 200),
+          image: String(raw.image || "").slice(0, 2000),
+          verified: raw.verified === true,
+          at: Number.isFinite(raw.at) && raw.at >= 0 ? raw.at : 0,
+        };
+      }
+      return channels;
+    }
+    if (/^cheeseWatchTime:\d{4}-\d{2}-\d{2}$/.test(key)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+      const entries = Object.entries(value);
+      if (entries.length > 10000) return undefined;
+      const shard = {};
+      for (const [bucket, seconds] of entries) {
+        if (/^[0-9a-z-]{1,10}\|[0-9a-f]{32}\|[lvr]$/.test(bucket) &&
+            Number.isSafeInteger(seconds) && seconds >= 0) shard[bucket] = seconds;
+      }
+      return shard;
+    }
+    return cloneSafeTransferValue(value);
   }
 
   function normalizeTransferClipVault(vault) {
@@ -11896,6 +12115,12 @@
   async function exportSettings(includeUserData, button) {
     if (button) button.disabled = true;
     try {
+      let watchTimeChartType = null;
+      try {
+        watchTimeChartType = normalizeWatchTimeChartType(
+          JSON.parse(localStorage.getItem(WATCH_TIME_CHART_TYPE_KEY) || "null"),
+        );
+      } catch {}
       const settings = await chrome.storage.local.get(
         Array.from(SETTINGS_TRANSFER_KEYS),
       );
@@ -11917,6 +12142,7 @@
               ? "dark"
               : "light",
           multiviewChatSize: chatSize,
+          watchTimeChartType,
         },
       };
       if (includeUserData) {
@@ -11926,7 +12152,7 @@
         const storage = {};
         Object.entries(snapshot).forEach(([key, value]) => {
           if (!isSettingsFullDataKey(key)) return;
-          const cloned = cloneSafeTransferValue(value);
+          const cloned = normalizeWatchTimeFullData(key, value);
           if (cloned !== undefined) storage[key] = cloned;
         });
         payload.userData = {
@@ -11994,7 +12220,7 @@
           const normalized =
             key === CLIP_VAULT_KEY
               ? normalizeTransferClipVault(value)
-              : cloneSafeTransferValue(value);
+              : normalizeWatchTimeFullData(key, value);
           if (normalized !== undefined && normalized !== null) {
             imported[key] = normalized;
           }
@@ -12041,7 +12267,7 @@
           const normalized =
             key === CLIP_VAULT_KEY
               ? normalizeTransferClipVault(value)
-              : cloneSafeTransferValue(value);
+              : normalizeWatchTimeFullData(key, value);
           if (normalized !== undefined && normalized !== null) {
             imported[key] = normalized;
           }
@@ -12158,6 +12384,12 @@
       if (theme === "dark" || theme === "light") {
         localStorage.setItem(THEME_STORAGE_KEY, theme);
         applyTheme(theme);
+      }
+      const watchTimeChartType = normalizeWatchTimeChartType(
+        payload?.appearance?.watchTimeChartType,
+      );
+      if (watchTimeChartType) {
+        localStorage.setItem(WATCH_TIME_CHART_TYPE_KEY, JSON.stringify(watchTimeChartType));
       }
       const multiviewChatSize = imported[MULTIVIEW_CHAT_SIZE_KEY];
       if (multiviewChatSize) {
@@ -13395,8 +13627,58 @@
       ["pzp-pc__fullscreen-button", "전체 화면"],
     ],
   };
+  // '좁을 때 숨김': 플레이어 하단 버튼이 한 줄에 다 들어가지 않을 때, 표시한 버튼을
+  // 오른쪽 끝부터 모자란 만큼 숨긴다(content.js compactPlayerBar). 치즈 플래터 버튼만.
+  // 믹서·필터는 이동할 수 없는 칩이지만 우리 버튼이라 표시할 수 있다.
+  const PLAYER_BUTTON_COMPACT_KEY = "cheesePlayerButtonCompact";
+  const PLAYER_COMPACT_NATIVE = {
+    "cheese-audio-mixer-control": "audioMixer",
+    "cheese-video-filter-control": "videoFilter",
+  };
+  const PLAYER_COMPACT_KEYS = [...PLAYER_BTN_KEYS, "audioMixer", "videoFilter"];
+  // 눈 아이콘 = 좁을 때도 보임(기본). 끄면(눈 가림) '좁을 때 숨김'.
+  const PLAYER_COMPACT_SVG = (paths) =>
+    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"` +
+    ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  const PLAYER_COMPACT_ICON_SHOWN = PLAYER_COMPACT_SVG(
+    `<path d="M2.1 12.3a1 1 0 0 1 0-.6C3.5 7.9 7.4 5 12 5s8.5 2.9 9.9 6.7a1 1 0 0 1 0 .6C20.5 16.1 16.6 19 12 19s-8.5-2.9-9.9-6.7"/>` +
+      `<circle cx="12" cy="12" r="3"/>`,
+  );
+  const PLAYER_COMPACT_ICON_HIDDEN = PLAYER_COMPACT_SVG(
+    `<path d="M10.7 5.1A10 10 0 0 1 12 5c4.6 0 8.3 3 9.7 7a10.6 10.6 0 0 1-2.2 3.4"/>` +
+      `<path d="M6.6 6.6A10.6 10.6 0 0 0 2.3 12c1.4 4 5.1 7 9.7 7a9.9 9.9 0 0 0 5.4-1.6"/>` +
+      `<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/>`,
+  );
   const buttonOrderRoot = document.querySelector("[data-player-button-order]");
   if (buttonOrderRoot) {
+    let compactKeys = new Set();
+    // 저장값이 없으면 오른쪽 그룹에 놓인 내 버튼이 기본으로 '좁을 때 숨김'이다(content.js 와
+    // 같은 규칙). 칩을 옮기면 기본값도 따라가고, 눈 아이콘을 한 번 누르면 목록을 저장한다.
+    let compactIsDefault = true;
+    function defaultCompactKeys() {
+      return new Set(PLAYER_BTN_KEYS.filter((k) => slot[k]?.grp !== "left"));
+    }
+    // aria-pressed = '좁을 때도 표시' 가 켜져 있는가(눈 아이콘). 끄면 좁을 때 숨김.
+    function compactToggleState(button, compact) {
+      const label = button.dataset.compactLabel || "";
+      button.setAttribute("aria-pressed", String(!compact));
+      button.dataset.compact = String(compact);
+      button.title = compact
+        ? "좁을 때 숨김 — 누르면 좁아도 표시"
+        : "좁아도 표시 — 누르면 좁을 때 숨김";
+      button.setAttribute("aria-label", `${label} 좁을 때도 표시`);
+      button.innerHTML = compact ? PLAYER_COMPACT_ICON_HIDDEN : PLAYER_COMPACT_ICON_SHOWN;
+    }
+    function compactToggle(key, label) {
+      const compact = compactKeys.has(key);
+      return (
+        `<button type="button" class="settings-order-compact" data-compact-key="${key}"` +
+        ` data-compact-label="${label}" data-compact="${compact}" draggable="false"` +
+        ` aria-pressed="${!compact}" aria-label="${label} 좁을 때도 표시"` +
+        ` title="${compact ? "좁을 때 숨김 — 누르면 좁아도 표시" : "좁아도 표시 — 누르면 좁을 때 숨김"}">` +
+        `${compact ? PLAYER_COMPACT_ICON_HIDDEN : PLAYER_COMPACT_ICON_SHOWN}</button>`
+      );
+    }
     const listLeft = buttonOrderRoot.querySelector('[data-order-list="left"]');
     const listRight = buttonOrderRoot.querySelector(
       '[data-order-list="right"]',
@@ -13510,9 +13792,11 @@
       if (VOD_ONLY_KEYS.has(key)) li.classList.add("settings-order-vod");
       li.draggable = true;
       li.dataset.btnKey = key;
+      li.classList.toggle("is-compact", compactKeys.has(key));
       li.innerHTML =
         `<span class="settings-order-grip" aria-hidden="true">⠿</span>` +
-        `<span class="settings-order-label">${PLAYER_BTN_LABELS[key]}</span>`;
+        `<span class="settings-order-label">${PLAYER_BTN_LABELS[key]}</span>` +
+        compactToggle(key, PLAYER_BTN_LABELS[key]);
       return li;
     }
 
@@ -13526,6 +13810,11 @@
       else li.dataset.nativeAnchor = cls;
       li.setAttribute("aria-disabled", "true");
       li.innerHTML = `<span class="settings-order-label">${label}</span>`;
+      const compactKey = PLAYER_COMPACT_NATIVE[cls];
+      if (compactKey) {
+        li.classList.toggle("is-compact", compactKeys.has(compactKey));
+        li.insertAdjacentHTML("beforeend", compactToggle(compactKey, label));
+      }
       return li;
     }
 
@@ -13546,6 +13835,7 @@
     }
 
     function render() {
+      if (compactIsDefault) compactKeys = defaultCompactKeys();
       renderList(listLeft, "left");
       renderList(listRight, "right");
     }
@@ -13586,6 +13876,8 @@
           [PLAYER_BUTTON_SIDE_KEY]: { side, order, slot },
         });
       } catch {}
+      // 기본값이면 옮긴 그룹에 맞춰 눈 아이콘을 다시 그린다.
+      if (compactIsDefault) render();
     }
 
     // ── HTML5 드래그: 목록 내 재정렬 + 좌↔우 이동 ──
@@ -13704,6 +13996,26 @@
       });
     }
 
+    // 칩 안의 눈 아이콘: 끄면 '좁을 때 숨김', 다시 켜면 좁아도 표시.
+    buttonOrderRoot.addEventListener("click", (e) => {
+      const toggle = e.target.closest?.("[data-compact-key]");
+      if (!toggle) return;
+      e.preventDefault();
+      const key = toggle.dataset.compactKey;
+      if (!PLAYER_COMPACT_KEYS.includes(key)) return;
+      compactIsDefault = false;
+      if (compactKeys.has(key)) compactKeys.delete(key);
+      else compactKeys.add(key);
+      const compact = compactKeys.has(key);
+      compactToggleState(toggle, compact);
+      toggle.closest(".settings-order-item")?.classList.toggle("is-compact", compact);
+      try {
+        cachedStorageSet({
+          [PLAYER_BUTTON_COMPACT_KEY]: PLAYER_COMPACT_KEYS.filter((k) => compactKeys.has(k)),
+        });
+      } catch {}
+    });
+
     // 초기 로드.
     (async () => {
       try {
@@ -13711,6 +14023,14 @@
         const st = toState(d?.[PLAYER_BUTTON_SIDE_KEY]);
         order = st.order;
         slot = st.slot;
+      } catch {}
+      try {
+        const c = await cachedStorageGet(PLAYER_BUTTON_COMPACT_KEY);
+        const saved = c?.[PLAYER_BUTTON_COMPACT_KEY];
+        compactIsDefault = !Array.isArray(saved);
+        if (!compactIsDefault) {
+          compactKeys = new Set(PLAYER_COMPACT_KEYS.filter((k) => saved.includes(k)));
+        }
       } catch {}
       render();
     })();

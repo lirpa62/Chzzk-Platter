@@ -397,8 +397,8 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
 }
 
 /* 5-1. 확장프로그램이 주입한 시간 표시(.cheese-chat-time) — 자체 font-size(0.85em)가
-   스케일되지 않은 컨테이너 기준으로 계산돼 안 커진다. 메시지 텍스트(14px)의 0.85배를
-   배율에 곱해 직접 지정한다. */
+   스케일되지 않은 컨테이너 기준으로 계산돼 안 커진다. 메시지 텍스트(14px)에 시간 글자
+   비율(설정 '└ 시간 글자 크기', 기본 0.85)과 배율을 곱해 직접 지정한다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
@@ -411,7 +411,9 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-enabled
   )
   [class*="_chatting_message_"]
   .cheese-chat-time {
-  font-size: calc(14px * 0.85 * var(--cheese-chat-font-scale)) !important;
+  font-size: calc(
+    14px * var(--cheese-chat-time-size, 0.85) * var(--cheese-chat-font-scale)
+  ) !important;
   line-height: calc(14px * var(--cheese-chat-font-scale) * 1.4) !important;
 }
 

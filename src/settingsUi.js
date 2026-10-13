@@ -74,6 +74,7 @@
     ["[data-vod-chat-graph-auto]", "[data-vod-chat-graph-auto-collect]"],
     ["[data-vod-role-chat]", "[data-role-bot-row]"],
     ['[data-feature="vodSeekButtons"]', '[data-feature="vodGlobalArrowSeek"]'],
+    ['[data-feature="chatHideInputPlaceholder"]', '[data-feature="chatInputLatencyPlaceholder"]'],
     ['[data-feature="vodLocalChat"]', '[data-feature="vodLocalChatHideBorder"], [data-feature="vodLocalChatHideBackground"]'],
     ['[data-feature="commentTimestamp"]', "#commentTsClickAction"],
     ["#commentTsClickAction", "[data-comment-ts-click-delay]"],
@@ -106,7 +107,9 @@
     ["[data-channel-profile-radius-enabled]", "[data-channel-profile-radius]"],
     ["[data-channel-live-profile-custom]", "[data-channel-live-profile-angle]"],
     ["[data-root-to-following]", "#rootToFollowingLogoMode"],
-    ['[data-feature="chatShowTime"]', "[data-chat-time-format], [data-chat-time-color-enabled]"],
+    ['[data-feature="chatWidthResize"]', "[data-chat-button-wrap]"],
+    ['[data-feature="chatShowTime"]', '[data-chat-time-format], [data-chat-time-size], [data-chat-time-color-enabled], [data-feature="chatTimeSeek"]'],
+    ['[data-feature="chatTimeSeek"]', "[data-chat-time-seek-offset]"],
     ['[data-feature="chatShowOsIcon"]', "[data-chat-os-position], [data-chat-os-image-input]"],
     ["[data-chat-history]", "[data-chat-history-limit]"],
     ["[data-chat-recap-enabled]", "[data-chat-recap-retention], [data-recap-manage-list]"],
@@ -503,6 +506,7 @@
   const TAB_ACTIONS = [
     ["chat", "#openChatRecap"],
     ["logpower", "#openLogStats"],
+    ["player", "#openWatchTime"],
   ];
 
   // ⚠ 그룹 제목이 '섹션마다 하나'인 탭과 '한 섹션 안에 여러 개'인 탭이 섞여 있다

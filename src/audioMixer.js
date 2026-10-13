@@ -275,6 +275,10 @@
     featureFlags.tabMute = f.tabMute === true;
     featureFlags.screenshotButton = f.screenshotButton === true;
     featureFlags.speedButton = f.speedButton === true;
+    // 채팅 입력창 안내 문구 숨김 > 지연 시간 표시. 부모 옵션이 꺼져 있으면 쓰지 않는다.
+    latencyPlaceholderOn =
+      f.chatHideInputPlaceholder === true && f.chatInputLatencyPlaceholder === true;
+    applyLatencyPlaceholder();
     // 오디오 믹서 '항상 켜기'(전역). 켜져 있으면 첫 사용자 제스처 이후 자동 활성화.
     const mixerAlwaysOnPrev = mixerAlwaysOn;
     mixerAlwaysOn = e.data.mixerAlwaysOn === true;
@@ -6143,14 +6147,82 @@
   }
 
   // 라이브 지연(초). _getLiveLatency()는 ms를 반환한다. core를 받으면 재사용.
+  // 마지막으로 잰 값과 시각을 남긴다(채팅 입력창 지연 표시가 따라잡기 버튼이 막 잰 값을
+  // 다시 쓴다 — findCorePlayer 의 React 트리 탐색을 1초에 두 번 하지 않게).
+  let lastLiveLatencyValue = null;
+  let lastLiveLatencyAt = 0;
   function getLiveLatencySeconds(core = null) {
+    let value = null;
     try {
       const c = core || findCorePlayer();
       const ms = c?.srcObject?._getLiveLatency?.();
-      return Number.isFinite(ms) ? ms / 1000 : null;
-    } catch {
-      return null;
+      value = Number.isFinite(ms) ? ms / 1000 : null;
+    } catch {}
+    lastLiveLatencyValue = value;
+    lastLiveLatencyAt = Date.now();
+    return value;
+  }
+
+  // ── 채팅 입력창 안내 문구 자리에 라이브 지연 ─────────────────────────────────
+  // '채팅 입력창 안내 문구 숨김'의 하위 옵션. 숨긴 '채팅을 입력해주세요 (J)' 대신 지금 지연을
+  // 안내 문구(placeholder)로 보인다. 값은 실시간 따라잡기 버튼과 같은 플레이어 지연이다.
+  // 원래 문구는 속성에 보관했다가 끄면 되돌린다. 치지직은 입력창을 자주 새로 만들므로 1초
+  // 마다 지금 입력창에 다시 건다. content.css 는 이 속성이 붙은 입력창의 문구는 숨기지 않고,
+  // content.js 의 입력창 찾기는 이 속성으로도 입력창을 알아본다(문구에 '채팅'이 없다).
+  const LATENCY_PLACEHOLDER_ATTR = "data-cheese-latency-placeholder";
+  let latencyPlaceholderOn = false;
+  let latencyPlaceholderTimer = 0;
+  let latencyPlaceholderApplied = false; // 되돌릴 입력창이 있을 때만 문서를 찾는다
+
+  function restoreLatencyPlaceholders() {
+    if (!latencyPlaceholderApplied) return;
+    latencyPlaceholderApplied = false;
+    document.querySelectorAll(`textarea[${LATENCY_PLACEHOLDER_ATTR}]`).forEach((textarea) => {
+      textarea.placeholder = textarea.getAttribute(LATENCY_PLACEHOLDER_ATTR) || "";
+      textarea.removeAttribute(LATENCY_PLACEHOLDER_ATTR);
+    });
+  }
+
+  function updateLatencyPlaceholder() {
+    if (document.hidden) return;
+    // 멀티뷰 영상 칸은 채팅을 접어 두므로 쓰지 않는다(칸마다 1초 작업이 곱해진다).
+    const textarea = location.pathname.startsWith("/live/") && !multiviewSlotId
+      ? document.querySelector("aside#aside-chatting textarea")
+      : null;
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      restoreLatencyPlaceholders();
+      return;
     }
+    // 글을 쓰는 중이면 안내 문구가 안 보이므로 재지 않는다.
+    if (textarea.value) return;
+    // 따라잡기 버튼이 1.5초 안에 잰 값이 있으면 그대로 쓴다.
+    // 영상이 없는 채팅 전용 화면(팝업 채팅·멀티뷰 채팅 칸)은 지연을 잴 수 없어 그대로 둔다.
+    const latency = Date.now() - lastLiveLatencyAt < 1500
+      ? lastLiveLatencyValue
+      : getLiveLatencySeconds();
+    if (!Number.isFinite(latency)) {
+      restoreLatencyPlaceholders();
+      return;
+    }
+    latencyPlaceholderApplied = true;
+    if (!textarea.hasAttribute(LATENCY_PLACEHOLDER_ATTR)) {
+      textarea.setAttribute(LATENCY_PLACEHOLDER_ATTR, textarea.placeholder || "");
+    }
+    const text = `지연 ${formatLatency(Math.max(0, latency))}`;
+    if (textarea.placeholder !== text) textarea.placeholder = text;
+  }
+
+  function applyLatencyPlaceholder() {
+    if (!latencyPlaceholderOn) {
+      if (latencyPlaceholderTimer) {
+        window.clearInterval(latencyPlaceholderTimer);
+        latencyPlaceholderTimer = 0;
+      }
+      restoreLatencyPlaceholders();
+      return;
+    }
+    latencyPlaceholderTimer ||= window.setInterval(updateLatencyPlaceholder, 1000);
+    updateLatencyPlaceholder();
   }
 
   // 라이브 엣지로 즉시 점프(타임머신으로 멀리 과거에 있을 때 1.5배속은 비현실적).

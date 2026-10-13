@@ -445,6 +445,61 @@
       areas: ['"m a b"', '"c d e"', '"f g h"'], chat: ["right", "left"] },
   );
 
+  // ── 세로 화면(창 높이 > 너비, 세로로 돌린 모니터 등) 배치 ──
+  // portrait: 세로 화면에서만 목록에 보인다. 채팅은 아래가 기본(세로 화면은 아래가 넓다).
+  // portraitFit: 가로용이지만 세로 화면 묶음에도 넣는 기존 배치(지금은 없다). 세로
+  //   화면에서는 이 둘을 '세로 화면' 묶음으로 목록 맨 위에 올린다(layoutsFor). 방향이
+  //   바뀌어도 쓰던 배치는 그대로 둔다 — 목록만 바뀐다.
+  // 칸 비율: 전체 폭 칸과 절반 폭 칸의 높이를 2:1 로 두면 모두 16:9 다.
+  const PORTRAIT_CHAT = ["bottom", "right", "left"];
+  LAYOUTS.push(
+    { id: "portrait-2", label: "세로 2단", aux: 1, portrait: true,
+      columns: "1fr", rows: "1fr 1fr", areas: ['"m"', '"a"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-3", label: "세로 3단", aux: 2, portrait: true,
+      columns: "1fr", rows: "repeat(3, 1fr)", areas: ['"m"', '"a"', '"b"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-2-bottom-2", label: "세로 2단 + 아래 2", aux: 3, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 1fr", areas: ['"m m"', '"a a"', '"b c"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-4", label: "세로 4단", aux: 3, portrait: true,
+      columns: "1fr", rows: "repeat(4, 1fr)", areas: ['"m"', '"a"', '"b"', '"c"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-main-2x2", label: "세로 메인 + 그리드 2×2", aux: 4, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 1fr 1fr", areas: ['"m m"', '"a b"', '"c d"'], chat: PORTRAIT_CHAT, flexible: true },
+    // 아래 3칸(1/3 폭)은 전체 폭 줄과 높이 3:1, 절반 폭 칸은 2:1 이면 모든 칸이 16:9 다.
+    { id: "portrait-2-bottom-3", label: "세로 2단 + 아래 3", aux: 4, portrait: true,
+      columns: "repeat(3, 1fr)", rows: "3fr 3fr 1fr", areas: ['"m m m"', '"a a a"', '"b c d"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-3-bottom-2", label: "세로 3단 + 아래 2", aux: 4, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 2fr 1fr", areas: ['"m m"', '"a a"', '"b b"', '"c d"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-2-grid-2x2", label: "세로 2단 + 그리드 2×2", aux: 5, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 1fr 1fr", areas: ['"m m"', '"a a"', '"b c"', '"d e"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-3-bottom-3", label: "세로 3단 + 아래 3", aux: 5, portrait: true,
+      columns: "repeat(3, 1fr)", rows: "3fr 3fr 3fr 1fr", areas: ['"m m m"', '"a a a"', '"b b b"', '"c d e"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-4-bottom-2", label: "세로 4단 + 아래 2", aux: 5, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 2fr 2fr 1fr", areas: ['"m m"', '"a a"', '"b b"', '"c c"', '"d e"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-main-2x3", label: "세로 메인 + 그리드 2×3", aux: 6, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 1fr 1fr 1fr", areas: ['"m m"', '"a b"', '"c d"', '"e f"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-3-grid-2x2", label: "세로 3단 + 그리드 2×2", aux: 6, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 2fr 1fr 1fr", areas: ['"m m"', '"a a"', '"b b"', '"c d"', '"e f"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-2-grid-2x3", label: "세로 2단 + 그리드 2×3", aux: 7, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 2fr 1fr 1fr 1fr", areas: ['"m m"', '"a a"', '"b c"', '"d e"', '"f g"'], chat: PORTRAIT_CHAT, flexible: true },
+    { id: "portrait-main-2x4", label: "세로 메인 + 그리드 2×4", aux: 8, portrait: true,
+      columns: "1fr 1fr", rows: "2fr 1fr 1fr 1fr 1fr", areas: ['"m m"', '"a b"', '"c d"', '"e f"', '"g h"'], chat: PORTRAIT_CHAT, flexible: true },
+  );
+  // 세로 화면 묶음의 순서(채널 수별, 사용자 승인 표). 앞의 것이 세로 화면에서 채널 수를 바꿀 때의
+  // 기본 배치다. 세로 전용이 아닌 것(그리드 2×4)은 portraitFit 으로 표시한다.
+  const PORTRAIT_ORDER = [
+    "portrait-2",
+    "portrait-3",
+    "portrait-2-bottom-2", "portrait-4",
+    "portrait-main-2x2", "portrait-2-bottom-3", "portrait-3-bottom-2",
+    "portrait-2-grid-2x2", "portrait-3-bottom-3", "portrait-4-bottom-2",
+    "portrait-main-2x3", "portrait-3-grid-2x2",
+    "portrait-2-grid-2x3",
+    "portrait-main-2x4",
+  ];
+  for (const id of PORTRAIT_ORDER) {
+    const layout = LAYOUTS.find((item) => item.id === id);
+    if (layout && !layout.portrait) layout.portraitFit = true;
+  }
+
   // 채팅 열의 첫 행에 마지막 보조 채널을 둔다. x는 그 아래 채팅 패널 자리다.
   // 영상 칸은 언제나 mvFrames 안에 남겨 iframe 재로드 없이 Grid 상에서만 이동한다.
   // 줄 크기 목록(fr 숫자). "repeat(4, 1fr)" 도 풀어 쓴다.
@@ -544,6 +599,12 @@
     rows: "2fr 1fr 1fr 2fr", areas: ['"a m"', '"c m"', '"c b"', '"d b"'], split: true };
   addChatTop(grid23);
   addChatTop(grid32);
+  // 5채널: 같은 격자(한 열 2칸·다른 열 3칸)를 채팅 열 없이. 두 열의 칸 비율이 같아(열 3:2,
+  // 칸 높이 1/2·1/3) 무대가 넓으면 다섯 칸 모두 16:9 에 가깝다.
+  for (const grid of [grid23, grid32]) {
+    const { split, ...layout } = grid;
+    LAYOUTS.push({ ...layout, chat: ["right", "left"], flexible: true });
+  }
   // 7채널: 그리드 3×2 / 3·3(두 열에 3칸씩) + 채팅 위 1. 8채널: 그리드 3·3 + 채팅 위 2.
   addChatTop({ ...LAYOUTS.find((layout) => layout.id === "grid-3x2"), split: true });
   const grid33 = { id: "grid-3-3", label: "그리드 3·3", aux: 5, columns: "1fr 1fr",
@@ -573,34 +634,38 @@
   const LAYOUT_ORDER = [
     // 2채널
     "right-1", "right-1-0", "left-1", "left-1-0", "bottom-1", "bottom-1-0", "bottom-1-2",
-    "top-1", "main-chat-top",
+    "top-1", "main-chat-top", "portrait-2",
     // 3채널
     "right-2", "tl-1-right-2", "left-2", "tr-1-left-2",
     "bottom-2", "bottom-2-single-1",
     "top-2", "top-2-single-0", "top-2-single-1", "top-2-single-2",
-    "main-top-chat-top", "main-bottom-chat-top",
+    "main-top-chat-top", "main-bottom-chat-top", "portrait-3",
     // 4채널
     "right-3", "right-2-bottom-1-0", "right-2-bottom-1-2",
     "left-3", "left-2-bottom-1-0", "left-2-bottom-1-2",
     "bottom-3", "top-3", "grid-2x2", "bottom-2-chat-top", "top-2-chat-top", "bottom-1-chat-top-2",
+    "portrait-2-bottom-2", "portrait-4",
     // 5채널
     "right2-bottom2", "right-2x2", "right-4", "left2-bottom2", "left-2x2", "left-4",
-    "bottom-4", "top-4", "grid-3x2-5", "grid-2x3-5",
+    "bottom-4", "top-4", "grid-3x2-5", "grid-2x3-5", "grid-2-3", "grid-3-2",
     "right-3-chat-top", "left-3-chat-top", "bottom-3-chat-top", "top-3-chat-top", "grid-2x2-chat-top",
     "right-2-chat-top-2", "left-2-chat-top-2", "bottom-2-chat-top-2", "top-2-chat-top-2",
+    "portrait-main-2x2", "portrait-2-bottom-3", "portrait-3-bottom-2",
     // 6채널
     "right2-bottom3", "right-5", "left2-bottom3", "left-5", "bottom-5", "top-5",
     "grid-3x2", "grid-2x3-6",
     "right-4-chat-top", "left-4-chat-top", "bottom-4-chat-top", "top-4-chat-top",
     "grid-2-3-chat-top", "grid-3-2-chat-top",
     "right-3-chat-top-2", "left-3-chat-top-2", "bottom-3-chat-top-2", "top-3-chat-top-2", "grid-2x2-chat-top-2",
+    "portrait-2-grid-2x2", "portrait-3-bottom-3", "portrait-4-bottom-2",
     // 7채널
     "grid-3x2-bottom-1-0", "grid-3x2-bottom-1-2", "grid-2x3-bottom-1-0",
     "grid-3-3-chat-top", "grid-3x2-chat-top", "grid-2-3-chat-top-2", "grid-3-2-chat-top-2",
+    "portrait-main-2x3", "portrait-3-grid-2x2",
     // 8채널
-    "grid-3x3-8", "grid-2x4", "grid-3-3-chat-top-2",
+    "grid-3x3-8", "grid-2x4", "grid-3-3-chat-top-2", "portrait-2-grid-2x3",
     // 9채널
-    "grid-3x3",
+    "grid-3x3", "portrait-main-2x4",
   ];
   {
     const rank = new Map(LAYOUT_ORDER.map((id, index) => [id, index]));
@@ -632,9 +697,22 @@
   }
 
   // 고른 채널 수(메인 포함)에 맞는 배치만 돌려준다.
-  function layoutsFor(count) {
+  // portrait: 세로 화면이면 '세로 화면' 묶음(PORTRAIT_ORDER 순)을 맨 앞에 두고 나머지를 잇는다.
+  //   가로 화면에서는 세로 전용 배치를 뺀다(지금 쓰는 배치 keepId 는 남긴다).
+  // all: 방향과 상관없이 그 채널 수의 모든 배치(저장값 복원·채널 수 변경에 쓴다).
+  function layoutsFor(count, { portrait = false, keepId = "", all = false } = {}) {
     const aux = Math.max(0, Number(count) - 1);
-    return LAYOUTS.filter((l) => l.aux === aux);
+    const list = LAYOUTS.filter((l) => l.aux === aux);
+    if (all) return list;
+    if (!portrait) return list.filter((l) => !l.portrait || l.id === keepId);
+    const rank = new Map(PORTRAIT_ORDER.map((id, index) => [id, index]));
+    const group = list.filter((l) => rank.has(l.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id));
+    return [...group, ...list.filter((l) => !rank.has(l.id))];
+  }
+
+  // 세로 화면 묶음인가(목록에서 '세로 화면' 머리말을 붙일 때).
+  function isPortraitGroup(layout) {
+    return Boolean(layout?.portrait || layout?.portraitFit);
   }
 
   function layoutById(id) {
@@ -692,6 +770,24 @@
     "top-4": ["top-3", "top-5"],
     "grid-3x2-5": ["grid-2x2", "grid-3x2"],
     "grid-2x3-5": ["grid-2x2", "grid-2x3-6"],
+    // 세로 전용 배치(가로 화면에서도 쓰던 배치를 이을 때). 세로 화면에서는 PORTRAIT_NEIGHBORS.
+    "portrait-2": [null, "portrait-3"],
+    "portrait-3": ["portrait-2", "portrait-4"],
+    "portrait-2-bottom-2": ["portrait-3", "portrait-2-bottom-3"],
+    "portrait-4": ["portrait-3", "portrait-main-2x2"],
+    "portrait-main-2x2": ["portrait-2-bottom-2", "portrait-2-grid-2x2"],
+    "portrait-2-bottom-3": ["portrait-2-bottom-2", "portrait-3-bottom-3"],
+    "portrait-3-bottom-2": ["portrait-2-bottom-2", "portrait-4-bottom-2"],
+    "portrait-2-grid-2x2": ["portrait-main-2x2", "portrait-main-2x3"],
+    "portrait-3-bottom-3": ["portrait-2-bottom-3", "portrait-3-grid-2x2"],
+    "portrait-4-bottom-2": ["portrait-3-bottom-2", "portrait-3-grid-2x2"],
+    "portrait-main-2x3": ["portrait-2-grid-2x2", "portrait-2-grid-2x3"],
+    "portrait-3-grid-2x2": ["portrait-3-bottom-3", "portrait-2-grid-2x3"],
+    "portrait-2-grid-2x3": ["portrait-main-2x3", "portrait-main-2x4"],
+    "portrait-main-2x4": ["portrait-2-grid-2x3", null],
+    // 다섯 칸을 그대로 두고 새 채널을 채팅 위에 올린다.
+    "grid-2-3": ["grid-2x2", "grid-2-3-chat-top"],
+    "grid-3-2": ["grid-2x2", "grid-3-2-chat-top"],
     "right-3-chat-top": ["bottom-2-chat-top", "right-4-chat-top"],
     "left-3-chat-top": ["top-2-chat-top", "left-4-chat-top"],
     "bottom-3-chat-top": ["bottom-2-chat-top", "bottom-4-chat-top"],
@@ -742,11 +838,30 @@
     "grid-3-2-chat-top-2": ["grid-3-2-chat-top", "grid-3-3-chat-top-2"],
   };
 
+  // 세로 화면에서 채널 수가 바뀔 때 갈 배치. [채널 −1, 채널 +1]. 세로 화면 묶음끼리 잇는다.
+  const PORTRAIT_NEIGHBORS = {
+    "portrait-2": [null, "portrait-3"],
+    "portrait-3": ["portrait-2", "portrait-4"],
+    "portrait-2-bottom-2": ["portrait-3", "portrait-2-bottom-3"],
+    "portrait-4": ["portrait-3", "portrait-main-2x2"],
+    "portrait-main-2x2": ["portrait-2-bottom-2", "portrait-2-grid-2x2"],
+    "portrait-2-bottom-3": ["portrait-2-bottom-2", "portrait-3-bottom-3"],
+    "portrait-3-bottom-2": ["portrait-2-bottom-2", "portrait-4-bottom-2"],
+    "portrait-2-grid-2x2": ["portrait-main-2x2", "portrait-main-2x3"],
+    "portrait-3-bottom-3": ["portrait-2-bottom-3", "portrait-3-grid-2x2"],
+    "portrait-4-bottom-2": ["portrait-3-bottom-2", "portrait-3-grid-2x2"],
+    "portrait-main-2x3": ["portrait-2-grid-2x2", "portrait-2-grid-2x3"],
+    "portrait-3-grid-2x2": ["portrait-3-bottom-3", "portrait-2-grid-2x3"],
+    "portrait-2-grid-2x3": ["portrait-main-2x3", "portrait-main-2x4"],
+    "portrait-main-2x4": ["portrait-2-grid-2x3", null],
+  };
+
   // 채널 수가 바뀌었을 때 갈 배치와 채팅 자리. 바꿀 필요가 없거나 갈 배치가 없으면 null.
   // back: 자동으로 바꾼 기록(부르는 쪽이 들고 있는 Map). 바뀐 배치를 그대로 둔 채 채널 수를
   //   되돌리면 원래 배치·채팅 자리로 돌아간다. 그 밖에는 COUNT_NEIGHBORS 를 한 칸씩 따라간다.
-  function layoutForCount(currentId, count, chatSide, back = null) {
-    const allowed = layoutsFor(count);
+  function layoutForCount(currentId, count, chatSide, back = null, { portrait = false } = {}) {
+    // 세로 전용 배치도 갈 수 있다(쓰던 배치가 세로 전용이면 방향과 상관없이 잇는다).
+    const allowed = layoutsFor(count, { all: true });
     if (!allowed.length) return null;
     const from = layoutById(currentId);
     if (from && from.aux === allowed[0].aux) return null;
@@ -758,13 +873,18 @@
       target = remembered;
       side = chatSidesFor(target).includes(memo.chatSide) ? memo.chatSide : null;
     } else if (from) {
+      // 세로 화면이거나 세로 전용 배치를 쓰는 중이면 세로 배치끼리 잇는다.
+      const portraitWalk = portrait || from.portrait === true;
       let id = from.id;
       for (let aux = from.aux; id && aux !== allowed[0].aux; aux += aux < allowed[0].aux ? 1 : -1) {
-        id = COUNT_NEIGHBORS[id]?.[aux < allowed[0].aux ? 1 : 0] || null;
+        const step = aux < allowed[0].aux ? 1 : 0;
+        id = (portraitWalk && PORTRAIT_NEIGHBORS[id]?.[step]) || COUNT_NEIGHBORS[id]?.[step] || null;
       }
       target = allowed.find((l) => l.id === id) || null;
+      // 가로 화면에서 세로 전용 배치로 넘어가는 건 쓰던 배치가 세로 전용일 때뿐이다.
+      if (target?.portrait && !portraitWalk) target = null;
     }
-    target ||= allowed[0];
+    target ||= layoutsFor(count, { portrait })[0];
     side ||= chatSideForSwitch(target, chatSide);
     if (back && from) back.set(`${target.id}>${from.aux + 1}`, { layoutId: from.id, chatSide });
     return { layoutId: target.id, chatSide: side };
@@ -971,7 +1091,10 @@
   //   16:9 조건에서 열 너비를 역산한다. N 행을 병합한 칸은 너비가 (16/9)*N 이다.
   //   해가 없으면 null 을 돌려주고, 부르는 쪽이 기존 fr 값으로 넘어간다.
   function solveTracks(layout) {
-    if (layout.chatTop) return null;
+    // ⚠ 세로 전용 배치는 칸 안에서 16:9 로 맞춘다(격자 비율을 풀지 않는다). 한 열로 쌓는
+    //   배치(세로 2·3·4단)는 풀 수는 있지만 줄 사이 간격을 빼지 않은 비율이라, 줄이 늘수록
+    //   칸이 16:9 에서 벗어났다(실측 4단 1.786).
+    if (layout.chatTop || layout.portrait) return null;
     const { spans, rows, cols } = slotSpans(layout);
     const R = 16 / 9;
     const widths = new Array(cols).fill(null);
@@ -1041,6 +1164,8 @@
     chatSideForSwitch,
     previewGrid,
     layoutsFor,
+    isPortraitGroup,
+    PORTRAIT_ORDER,
     layoutById,
     COUNT_NEIGHBORS,
     layoutForCount,

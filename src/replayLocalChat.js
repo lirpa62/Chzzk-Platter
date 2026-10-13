@@ -241,12 +241,31 @@
     const container = input.closest(
       ".cheese-replay-local-chat-input-container, .mv-vod-chat-compose-input-container",
     );
+    // ⚠ 크롬은 빈 입력창의 scrollHeight 에 안내 문구까지 넣어 잰다. 채팅창이 좁아 안내 문구가
+    //   접히면 빈 입력창이 40·60px 로 커졌다(광고 중 잠금 문구는 길어 보통 폭에서도). 비어
+    //   있으면 한 줄로 두고(안내 문구는 한 줄을 넘으면 잘린다), 글자가 있을 때만 내용에 맞춘다.
     const resizeInput = () => {
+      if (!input.value) {
+        input.style.height = "20px";
+        input.style.overflowY = "hidden";
+        return;
+      }
       input.style.height = "auto";
       const height = Math.max(20, Math.min(input.scrollHeight, 60));
       input.style.height = `${height}px`;
       input.style.overflowY = input.scrollHeight > 60 ? "auto" : "hidden";
     };
+    // 글자가 있는 채로 채팅창 폭이 바뀌면 줄 수가 달라진다. 폭이 바뀔 때 다시 맞춘다.
+    let lastWidth = 0;
+    const widthObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver(([entry]) => {
+        const width = Math.round(entry?.contentRect?.width || 0);
+        if (width === lastWidth) return;
+        lastWidth = width;
+        resizeInput();
+      })
+      : null;
+    widthObserver?.observe(input);
     let blocked = false;
     const placeholder = input.placeholder;
     const update = () => {
@@ -313,6 +332,7 @@
     document.addEventListener("keydown", onShortcut, true);
     update();
     return () => {
+      widthObserver?.disconnect();
       input.removeEventListener("input", update);
       input.removeEventListener("keydown", onKeydown);
       input.removeEventListener("focus", onFocus);
@@ -834,7 +854,40 @@
           span.className = "cheese-chat-time";
           identity.parentNode.insertBefore(span, identity);
         }
+        // 시간을 누르면 그 장면으로 옮긴다(chatTimestamp.js 가 이 속성을 본다).
+        const playerMs = String(Math.round(message.at * 1000));
+        if (span.dataset.chatPlayerMs !== playerMs) span.dataset.chatPlayerMs = playerMs;
         if (span.textContent !== text) span.textContent = text;
+      }
+    }
+
+    // 치지직 채팅 글자 크기 설정은 치지직 줄(_chatting_message_ 의 부모)에 _scale_NNN_ 클래스로
+    // 붙는다(chatTimestamp.js readChatOsNativeScale 과 같은 판정). 로컬 줄에는 그 클래스가 없어
+    // 글자 크기가 그대로였다. 옆 치지직 줄에서 읽어 CSS 변수로 옮긴다. 치지직 줄이 하나도
+    // 없으면 마지막 값을 유지한다.
+    let nativeScale = "1";
+    function readNativeScale(list) {
+      const message = list.querySelector(
+        `${ROW_SELECTOR}:not([${LOCAL_ROW_ATTR}]) [class*='_chatting_message_']`,
+      );
+      if (!message) return null;
+      for (const element of [message.parentElement, message]) {
+        for (const name of element?.classList || []) {
+          const percent = Number(name.match(/(?:^|_)scale_(\d+)(?:_|$)/)?.[1]);
+          if (percent >= 50 && percent <= 300) return String(percent / 100);
+        }
+      }
+      return "1";
+    }
+
+    function syncNativeScale() {
+      nativeScale = readNativeScale(activeList) ?? nativeScale;
+      for (const row of rowElements.values()) {
+        if (row.style.getPropertyValue("--cheese-replay-local-chat-native-scale") !== nativeScale) {
+          row.style.setProperty("--cheese-replay-local-chat-native-scale", nativeScale);
+          // 배율이 걸리면 치지직 줄처럼 세로 가운데 정렬로 바꾼다(replayLocalChat.css).
+          row.classList.toggle("is-native-scaled", nativeScale !== "1");
+        }
       }
     }
 
@@ -870,6 +923,7 @@
         reversed: getComputedStyle(activeList).flexDirection === "column-reverse",
       });
       applyLocalTimes(visible);
+      syncNativeScale();
       const pendingRow = rowElements.get(pendingRevealMessageId);
       if (pendingRow?.parentElement === activeList) {
         clearReplayScrollLockTimer();
@@ -994,8 +1048,16 @@
       }, 200);
     }
 
+    // ⚠ 이 스크립트는 치지직 모든 페이지에 실린다(manifest). /video/* 에만 실으면 홈·목록에서
+    //   눌러 SPA 로 들어간 다시보기에는 스크립트가 없어 입력창이 생기지 않았다(새로고침해야
+    //   나왔다). 라이브 페이지는 채팅으로 문서가 쉬지 않고 바뀌므로, 다시보기가 아니면
+    //   한 번 정리만 하고 바로 끝낸다.
     const pageObserver = new MutationObserver(() => {
       if (!enabled) return;
+      if (!routeVideoNo()) {
+        if (activeVideoNo) syncPage();
+        return;
+      }
       scheduleAvailabilityCheck();
       if (!activeAside?.isConnected || !activeList?.isConnected ||
           routeVideoNo() !== activeVideoNo) syncPage();
@@ -1014,13 +1076,17 @@
       removeRows();
       composer?.[COMPOSER_DISPOSE]?.();
     }, { once: true });
-    document.addEventListener("seeking", () => {
+    // 다시보기 채팅에 붙어 있을 때만 일한다(라이브 영상의 timeupdate 등에 매번 반응하지 않게).
+    const whileAttached = (fn) => () => {
+      if (enabled && activeList) fn();
+    };
+    document.addEventListener("seeking", whileAttached(() => {
       resetReplayScrollForSeek();
       scheduleReconcile();
-    }, true);
-    document.addEventListener("seeked", resetReplayScrollForSeek, true);
-    document.addEventListener("seeked", scheduleReconcile, true);
-    document.addEventListener("timeupdate", scheduleReconcile, true);
+    }), true);
+    document.addEventListener("seeked", whileAttached(resetReplayScrollForSeek), true);
+    document.addEventListener("seeked", whileAttached(scheduleReconcile), true);
+    document.addEventListener("timeupdate", whileAttached(scheduleReconcile), true);
 
     // content.js(격리 월드)가 보내는 기능 플래그. null 은 '아직 저장값을 못 읽음'.
     let flagsReceived = false;

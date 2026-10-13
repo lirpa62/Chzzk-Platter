@@ -350,7 +350,7 @@ console.log("\n[볼륨 protocol] 범위를 검증하고 video.volume 에만 건�
     "video.volume 에 적용한다",
   );
   ok(
-    /Number\.isFinite\(video\.volume\) && video\.volume >= 0 && video\.volume <= 1\)\s*notifyParent\("FRAME_AUDIO_STATE",\s*\{\s*volume:\s*video\.volume\s*\}\)/.test(content),
+    /Number\.isFinite\(video\.volume\) && video\.volume >= 0 && video\.volume <= 1\)\s*notifyParent\("FRAME_AUDIO_STATE",\s*\{\s*volume:\s*video\.volume,\s*user: Date\.now\(\) - lastTrustedAudioInputAt < TRUSTED_AUDIO_INPUT_WINDOW_MS,\s*\}\)/.test(content),
     "플레이어의 실제 볼륨을 부모에 보고한다",
   );
   ok(

@@ -41,6 +41,7 @@ class FakeElement {
   }
 
   matches(selector) {
+    if (selector === ":focus-visible") return this.focusVisible === true;
     return selector.startsWith("button,");
   }
 
@@ -95,5 +96,27 @@ assert.equal(tooltip.hidden, true, "목록 갱신 중 위치 계산이 발생해
 listeners.get("pointerout")({ target: button, relatedTarget: {} });
 listeners.get("pointerover")({ target: button, relatedTarget: null });
 assert.equal(tooltip.hidden, false, "버튼을 벗어난 뒤 다시 진입하면 툴팁을 표시한다");
+
+// 크게 보기: 누른 뒤 칸 플레이어(iframe)에서 돌아온 포커스로 focusin 이 한 번 더 와도
+// 닫아 둔 툴팁('원래 크기로')을 다시 열지 않는다(마우스 포커스는 :focus-visible 아님).
+const expand = new FakeElement({ "data-tooltip": "크게 보기" });
+listeners.get("pointerover")({ target: expand, relatedTarget: null });
+listeners.get("focusin")({ target: expand });
+listeners.get("pointerup")({ target: expand });
+listeners.get("click")({ target: expand });
+expand.setAttribute("data-tooltip", "원래 크기로 (Esc)");
+listeners.get("focusin")({ target: expand });
+assert.equal(tooltip.hidden, true, "누른 뒤 마우스 포커스로 다시 오는 focusin 은 툴팁을 열지 않는다");
+listeners.get("pointerout")({ target: expand, relatedTarget: {} });
+assert.equal(tooltip.hidden, true, "마우스가 떠나면 닫힌 채로 남는다");
+
+// 키보드로 옮긴 포커스(:focus-visible)는 예전처럼 툴팁을 띄운다.
+const keyboardButton = new FakeElement({ "data-tooltip": "메인으로" });
+keyboardButton.focusVisible = true;
+listeners.get("focusin")({ target: keyboardButton });
+assert.equal(tooltip.hidden, false, "키보드 포커스에는 툴팁을 띄운다");
+assert.equal(tooltip.textContent, "메인으로");
+listeners.get("focusout")({ target: keyboardButton, relatedTarget: null });
+assert.equal(tooltip.hidden, true, "키보드 포커스가 떠나면 닫는다");
 
 console.log("multiview tooltip tests passed");

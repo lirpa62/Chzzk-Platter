@@ -107,8 +107,21 @@
       refresh();
     }
   });
+  // 키보드로 옮긴 포커스인가(:focus-visible). 마우스로 눌러 생긴 포커스는 호버가 맡는다.
+  function keyboardFocus(target) {
+    try {
+      return target.matches(":focus-visible");
+    } catch {
+      return true; // 판별할 수 없는 브라우저는 예전처럼 띄운다
+    }
+  }
+
   document.addEventListener("focusin", (event) => {
     const target = tooltipTarget(event.target);
+    // ⚠ 마우스 포커스에도 띄우면, 칸 플레이어(iframe)에 있던 포커스가 버튼으로 돌아올 때
+    //   클릭이 끝난 뒤 focusin 이 한 번 더 와서 닫아 둔(dismissed) 툴팁을 다시 열었다.
+    //   크게 보기를 누르면 바뀐 이름('원래 크기로')이 마우스를 치운 뒤에도 남았다.
+    if (target && !keyboardFocus(target)) return;
     if (target && target !== focused && target === dismissed) dismissed = null;
     focused = target;
     refresh();

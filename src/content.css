@@ -5856,11 +5856,35 @@ html.cheese-channel-profile-radius-enabled
   ) !important;
 }
 
+/* 펼친 목록도 사진을 링 중앙에 둔다. 아바타에는 치지직 프로필 클래스를 그대로 붙여 링 모양을
+   맞추는데, 그러면 치지직의 호버 규칙(테두리 두께)도 함께 걸린다. 사진 크기는 위에서 26px 로
+   고정해 두었으므로 테두리가 두꺼워진 만큼 사진이 오른쪽 아래로 밀렸다. 링 안쪽 기준으로
+   붙여 두면 테두리가 바뀌어도 가운데에 남는다. 폴백 링(cheese-cf-profile)은 치지직 클래스가
+   아니라 그대로 둔다. */
+#sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-avatar:not(.cheese-cf-profile) {
+  position: relative;
+}
+#sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-avatar:not(.cheese-cf-profile)
+  > img {
+  box-sizing: border-box !important;
+  position: absolute !important;
+  top: 3px !important;
+  left: 3px !important;
+  width: calc(100% - 6px) !important;
+  height: calc(100% - 6px) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
 /* 접힌 목록은 네이티브 프로필의 패딩/호버 규칙과 무관하게 사진을 링 중앙에 둔다.
    모서리 옵션의 100% 이미지 크기 규칙도 여기서는 덮어써야 사방 간격이 같다. */
-#sidebar:not([class*="_is_expanded_"])
-  #cheese-custom-follow
-  .cheese-cf-avatar {
+#sidebar:not([class*="_is_expanded_"]) #cheese-custom-follow .cheese-cf-avatar {
   position: relative;
 }
 #sidebar:not([class*="_is_expanded_"])
@@ -6220,11 +6244,21 @@ html.cheese-cf-favstar
   display: none !important;
 }
 
-/* 마지막 카드가 제외 대상이면 치지직의 무한 스크롤 관찰 지점까지 사라진다.
-   해당 카드에만 레이아웃을 차지하지 않는 1px 관찰 지점을 남긴다. */
+/* 치지직의 다음 묶음 감지 지점(끝에서 10번째 카드 안의 빈 div)이 든 카드가 제외 대상이면
+   감지 지점까지 사라진다. 그 카드만 레이아웃을 차지하지 않는 1px 관찰 지점으로 남겨
+   목록 맨 아래에 둔다(content.js preserveLiveTagFilterPaginationAnchors).
+   ⚠ 자리를 정하지 않으면 absolute 의 기본 자리는 flex·grid 목록의 맨 위다. */
+.cheese-live-tag-filter-anchor-list {
+  position: relative !important;
+}
+
 .cheese-live-tag-filter-hidden.cheese-live-tag-filter-pagination-anchor,
 [data-cheese-live-tag-filter-hidden="1"].cheese-live-tag-filter-pagination-anchor {
   position: absolute !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: 0 !important;
+  left: 0 !important;
   display: block !important;
   box-sizing: border-box !important;
   width: 1px !important;
@@ -8046,7 +8080,9 @@ html.cheese-channel-live-profile-custom
   transition: opacity 0.15s ease;
 }
 
-#cheese-follow-preview .cheese-follow-preview-body:hover .cheese-follow-preview-resize,
+#cheese-follow-preview
+  .cheese-follow-preview-body:hover
+  .cheese-follow-preview-resize,
 #cheese-follow-preview.is-resizing .cheese-follow-preview-resize {
   opacity: 1;
 }
@@ -8416,6 +8452,53 @@ aside#vod-aside
   max-width: 100%;
 }
 
+/* 채팅 입력창 후원 도구 줄: '후원하기' 문구만 숨김(치즈 아이콘은 남아 그대로 누를 수 있다) /
+   후원 아이콘 버튼 묶음 숨김 / 모두 숨김(두 클래스를 함께 붙인다). 설정 - 채팅. 글자는 font-size 0 으로 지운다
+   (아이콘은 width/height 속성이 있어 그대로다). 통나무파워 배지는 '후원하기' 글자로 자리를
+   찾으므로 글자 노드는 지우지 않는다. */
+html.cheese-chat-donation-hide-text
+  aside#aside-chatting
+  [class*="_tools_"]
+  button[class*="_donation_text_"] {
+  font-size: 0 !important;
+  gap: 0 !important;
+}
+html.cheese-chat-donation-hide-buttons
+  aside#aside-chatting
+  [class*="_tools_"]
+  [class*="_donation_"]
+  > [class*="_action_"] {
+  display: none !important;
+}
+
+/* 채팅 입력창 시청자 수(후원 도구 줄 첫 자식, content.js applyChatViewerCount). */
+#cheese-chat-viewer-count {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 16px;
+  padding: 14px 4px;
+  margin-right: 2px;
+  border-radius: 5px;
+  color: var(
+    --sem-color-content-neutral-cool-strong,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#cheese-chat-viewer-count[hidden] {
+  display: none;
+}
+#cheese-chat-viewer-count:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+}
+
 /* 보유 통나무파워 배지(채팅 입력창 부근 후원 도구 줄). con-chzzk 스타일 동일. */
 #cheese-logpower-badge {
   position: relative;
@@ -8503,7 +8586,8 @@ aside#vod-aside
 }
 
 /* 툴팁("통나무 파워") — hover 시 위쪽에 표시. con-chzzk 동일. */
-#cheese-logpower-badge .tooltip-text {
+#cheese-logpower-badge .tooltip-text,
+#cheese-chat-viewer-count .tooltip-text {
   visibility: hidden;
   width: 120px;
   background-color: var(
@@ -8561,7 +8645,8 @@ aside#vod-aside
   display: none;
 }
 
-#cheese-logpower-badge:hover .tooltip-text {
+#cheese-logpower-badge:hover .tooltip-text,
+#cheese-chat-viewer-count:hover .tooltip-text {
   visibility: visible;
   opacity: 1;
 }
@@ -8582,10 +8667,11 @@ img.cheese-blind-emoji {
 }
 
 /* 채팅 시간 표시(chatTimestamp.js가 닉네임 앞에 삽입하는 시간 span).
-   폰트 크기 조절 시 배율 보정은 chatFontScale.css가 처리한다. */
+   폰트 크기 조절 시 배율 보정은 chatFontScale.css가 처리한다.
+   --cheese-chat-time-size: 메시지 글자 대비 비율(설정 '└ 시간 글자 크기', 기본 0.85). */
 .cheese-chat-time {
   margin-right: 4px;
-  font-size: 0.85em;
+  font-size: calc(1em * var(--cheese-chat-time-size, 0.85));
   color: var(
     --sem-color-content-neutral-cool-base,
     var(--cheese-platter-content-neutral-cool-base)
@@ -8593,6 +8679,14 @@ img.cheese-blind-emoji {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* 다시보기 채팅 시간 클릭 이동(설정 시). 누를 수 있는 시간만(영상 위치가 있는 것). */
+html.cheese-chat-time-seek aside#vod-aside .cheese-chat-time[data-chat-player-ms] {
+  cursor: pointer;
+}
+html.cheese-chat-time-seek aside#vod-aside .cheese-chat-time[data-chat-player-ms]:hover {
+  text-decoration: underline;
 }
 
 html.cheese-chat-time-custom-color .cheese-chat-time {
@@ -8633,16 +8727,22 @@ html.cheese-chat-nickname-message-split
   justify-content: center;
   box-sizing: border-box;
   width: calc(
-    12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+    12.88px * var(--cheese-chat-font-scale, 1) *
+      var(--cheese-chat-os-native-scale, 1)
   );
   height: calc(
-    12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+    12.88px * var(--cheese-chat-font-scale, 1) *
+      var(--cheese-chat-os-native-scale, 1)
   );
   margin-right: calc(
-    4px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1)
+    4px * var(--cheese-chat-font-scale, 1) *
+      var(--cheese-chat-os-native-scale, 1)
   );
   flex: 0 0
-    calc(12.88px * var(--cheese-chat-font-scale, 1) * var(--cheese-chat-os-native-scale, 1));
+    calc(
+      12.88px * var(--cheese-chat-font-scale, 1) *
+        var(--cheese-chat-os-native-scale, 1)
+    );
   vertical-align: -0.12em;
   overflow: hidden;
   color: var(
@@ -8734,6 +8834,23 @@ html.cheese-chat-left-position
   max-width: 100% !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
+}
+
+/* 프로필 팝오버의 '연속 후원중' ⓘ 툴팁이 열리면 치지직은 내용 영역을 좌우로 60px 씩
+   넓힌다(음수 margin + 같은 만큼 padding, 실측 333→453px, 안쪽 293px 유지). 위
+   max-width:100% 가 넓힌 폭만 막으면 늘어난 padding 이 안쪽을 깎아 내용이 좁아진다
+   (실측 284px 칸에서 244→124px). 닉네임 아래 배지 툴팁도 처음 한 프레임은 배지 안에
+   role="tooltip" 으로 그려지고 치지직이 그 순간 배지 위치를 재므로, 그때 하트 배지가
+   다음 줄로 밀린 자리(41px 아래·22px 왼쪽)에 툴팁이 떴다. 툴팁이 있는 동안은 폭을 막지 않는다. */
+html.cheese-chat-width-resize-enabled
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"]
+  [id="popup_contents"]:has([role="tooltip"]),
+html.cheese-chat-left-position
+  :is(aside#aside-chatting, aside#vod-aside)
+  [role="alertdialog"]
+  [id="popup_contents"]:has([role="tooltip"]) {
+  max-width: none !important;
 }
 
 /* 채팅 왼쪽 배치 시: 닉네임 프로필 팝오버([role="alertdialog"])와 닉네임 메뉴 팝오버가
@@ -11773,9 +11890,11 @@ html.cheese-popup-player-frame
 
 /* 멀티뷰 iframe 루트는 스크롤하지 않는다. 콘텐츠 목록은 각 패널 내부에서 스크롤한다. */
 html.cheese-popup-player-frame.cheese-multiview-frame.cheese-multiview-no-root-scroll,
-html.cheese-popup-player-frame.cheese-multiview-frame.cheese-multiview-no-root-scroll body,
+html.cheese-popup-player-frame.cheese-multiview-frame.cheese-multiview-no-root-scroll
+  body,
 html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-root-scroll,
-html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-root-scroll body {
+html.cheese-popup-player-frame.cheese-multiview-chat-frame.cheese-multiview-no-root-scroll
+  body {
   overflow: hidden !important;
 }
 
@@ -11862,14 +11981,19 @@ html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
    채팅 aside 가 DOM 에서 뒤에 오므로 쌓임 순서가 있는 채팅 요소가 덮는다. 조상이 쌓임
    맥락을 만들 수도 있어 그 경로(2026-10-02 실측)를 함께 올린다. 이 경로는 광고 자리
    (플레이어 열)와 채팅 열이 겹치지 않아 미니플레이어 말고는 채팅을 덮지 않는다. */
-html.cheese-multiview-frame:not(.cheese-multiview-vod-frame) #live_player_layout.miniplayer,
+html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
+  #live_player_layout.miniplayer,
 html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
   [class*="_wrapper_"]:has(> #live_player_layout.miniplayer),
 html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
-  [class*="_container_"]:has(> [class*="_wrapper_"] > #live_player_layout.miniplayer),
+  [class*="_container_"]:has(
+    > [class*="_wrapper_"] > #live_player_layout.miniplayer
+  ),
 html.cheese-multiview-frame:not(.cheese-multiview-vod-frame)
   [class*="_player_"]:has(
-    > [class*="_container_"] > [class*="_wrapper_"] > #live_player_layout.miniplayer
+    > [class*="_container_"]
+      > [class*="_wrapper_"]
+      > #live_player_layout.miniplayer
   ) {
   z-index: 1000 !important;
 }
@@ -11967,6 +12091,13 @@ html.cheese-player-hide-liveRewind
   .cheese-live-rewind-button:not(.cheese-vod-seek-button),
 html.cheese-player-hide-liveRewind
   .cheese-live-forward-button:not(.cheese-vod-seek-button) {
+  display: none !important;
+}
+
+/* 좁은 플레이어: '좁을 때 숨김'으로 고른 버튼 중 한 줄에 안 들어가는 만큼만 숨긴다
+   (content.js compactPlayerBar 가 오른쪽 끝부터 하나씩 붙인다). */
+.pzp-pc__bottom-buttons-left > .cheese-player-compact-hidden,
+.pzp-pc__bottom-buttons-right > .cheese-player-compact-hidden {
   display: none !important;
 }
 
@@ -14789,6 +14920,51 @@ img.cheese-recap-emoji {
   display: none;
 }
 
+/* '사용 중인 프로필' 팝업 안 시청 시간 화면(내 채팅 기록 화면과 같은 틀). */
+.cheese-watch-time-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 4px 0 10px;
+  width: 100%;
+}
+.cheese-watch-time-table th,
+.cheese-watch-time-table td {
+  border-bottom: 1px solid
+    var(--sem-color-border-neutral-weaker, rgba(127, 127, 127, 0.2));
+  padding: 6px 4px;
+  text-align: right;
+  white-space: nowrap;
+}
+.cheese-watch-time-table th[scope="row"],
+.cheese-watch-time-table thead th:first-child {
+  text-align: left;
+}
+.cheese-watch-time-table thead th {
+  font-weight: 600;
+  opacity: 0.7;
+}
+.cheese-watch-time-table .is-total th,
+.cheese-watch-time-table .is-total td {
+  border-bottom: 0;
+  font-weight: 700;
+}
+.cheese-watch-time-caption {
+  font-size: 12px;
+  margin: 0 0 4px;
+  opacity: 0.7;
+}
+.cheese-watch-time-days {
+  font-size: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cheese-watch-time-days li {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
 /* 기간·키워드·스트리머로 로컬 채팅 기록을 찾는 독립 창. */
 .cheese-recap-search-window {
   background: var(--sem-color-background-neutral-base, #fff);
@@ -16972,7 +17148,11 @@ html.cheese-chat-emoticon-hide-on
 /* 라이브 채팅 입력창의 '채팅을 입력해주세요 (J)' 안내 문구 숨김(옵션). 글자만 투명하게 해
    입력창 높이·자리는 그대로 두고, 입력과 J 단축키도 그대로 동작한다. 일반·팝업·멀티뷰
    채팅 모두 aside#aside-chatting 이다. */
-html.cheese-chat-hide-input-placeholder aside#aside-chatting textarea::placeholder {
+/* 하위 옵션 '지연 시간 표시'가 문구를 지연으로 바꾼 입력창(audioMixer.js 가
+   data-cheese-latency-placeholder 를 붙인다)은 숨기지 않는다. */
+html.cheese-chat-hide-input-placeholder
+  aside#aside-chatting
+  textarea:not([data-cheese-latency-placeholder])::placeholder {
   color: transparent !important;
   opacity: 0 !important;
 }

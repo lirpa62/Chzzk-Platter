@@ -75,7 +75,13 @@ assert.equal(makeScrollCase({ flexDirection: "column", top: 0, rowTop: 350 }), 1
 const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
 const regularReplayScript = manifest.content_scripts.find((entry) =>
   entry.js?.includes("src/replayLocalChat.js"));
-assert.deepEqual(Array.from(regularReplayScript.matches), ["https://chzzk.naver.com/video/*"]);
+// 모든 치지직 페이지에 싣는다. /video/* 만이면 홈·목록에서 SPA 로 들어간 다시보기에는 스크립트가
+// 없어 입력창이 생기지 않았다(새로고침해야 나왔다).
+assert.deepEqual(Array.from(regularReplayScript.matches), ["https://chzzk.naver.com/*"]);
+assert.match(source, /if \(!routeVideoNo\(\)\) \{\s*if \(activeVideoNo\) syncPage\(\);\s*return;\s*\}\s*scheduleAvailabilityCheck\(\);/,
+  "다시보기가 아닌 페이지(라이브 등)에서는 문서 변화마다 일하지 않는다");
+assert.match(source, /document\.addEventListener\("timeupdate", whileAttached\(scheduleReconcile\), true\);/,
+  "라이브 영상의 timeupdate 에는 다시보기 채팅에 붙어 있을 때만 반응한다");
 assert.equal(regularReplayScript.all_frames, false);
 assert.ok(regularReplayScript.css.includes("src/replayLocalChat.css"));
 assert.match(source, /cheese-replay-local-chat-input-container/);
@@ -108,7 +114,7 @@ for (const html of [watchHtml]) {
 const localChatCss = fs.readFileSync("src/replayLocalChat.css", "utf8");
 // 치지직 다시보기 채팅 줄(_chatting_message_)과 같은 여백(실측 4px 6px).
 assert.match(localChatCss, /\.cheese-replay-local-chat-content \{[^}]*padding: 4px 6px;/s);
-assert.match(localChatCss, /\.cheese-replay-local-chat-badge\s*\{[^}]*border-radius: 0;[^}]*height: 18px;[^}]*width: 18px/s);
+assert.match(localChatCss, /\.cheese-replay-local-chat-badge\s*\{[^}]*border-radius: 0;[^}]*height: calc\(18px \* var\(--cheese-replay-local-chat-scale\)\);[^}]*width: calc\(18px \* var\(--cheese-replay-local-chat-scale\)\)/s);
 assert.match(localChatCss, /\.cheese-replay-local-chat-input\s*\{[^}]*height: 20px;[^}]*padding: 0;/s);
 assert.match(localChatCss, /\.cheese-replay-local-chat-input:focus::placeholder/);
 assert.match(localChatCss, /--cheese-replay-local-chat-surface-neutral-base: #e1e1e5/);

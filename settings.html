@@ -856,9 +856,9 @@
                     class="settings-item-desc"
                     data-settings-summary="선택한 최대 화질 이하에서 가장 높은 화질로 자동 고정합니다."
                     >라이브·다시보기 시청 시 선택한 최대 화질 이하에서 가장 높은
-                    화질로 자동 고정합니다. 원본 해상도가 화면 해상도에 가까워지면
-                    RTX VSR의 업스케일 조건을 충족하지 않아 VSR 표시가 꺼질 수
-                    있습니다</span
+                    화질로 자동 고정합니다. 원본 해상도가 화면 해상도에
+                    가까워지면 RTX VSR의 업스케일 조건을 충족하지 않아 VSR
+                    표시가 꺼질 수 있습니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -866,7 +866,11 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-max-quality-target-row data-new-feature="max-quality-target">
+              <li
+                class="settings-item"
+                data-max-quality-target-row
+                data-new-feature="max-quality-target"
+              >
                 <div>
                   <span class="settings-item-name">└ 최대 화질</span>
                   <span class="settings-item-desc"
@@ -886,7 +890,9 @@
                     aria-expanded="false"
                   >
                     <span data-max-quality-target-label>최고 화질</span>
-                    <span class="settings-popover-caret" aria-hidden="true">▾</span>
+                    <span class="settings-popover-caret" aria-hidden="true"
+                      >▾</span
+                    >
                   </button>
                   <ul
                     class="settings-popover-list"
@@ -896,10 +902,24 @@
                     hidden
                   >
                     <li role="presentation">
-                      <button type="button" role="option" data-value="highest" aria-selected="true">최고 화질</button>
+                      <button
+                        type="button"
+                        role="option"
+                        data-value="highest"
+                        aria-selected="true"
+                      >
+                        최고 화질
+                      </button>
                     </li>
                     <li role="presentation">
-                      <button type="button" role="option" data-value="720" aria-selected="false">720p</button>
+                      <button
+                        type="button"
+                        role="option"
+                        data-value="720"
+                        aria-selected="false"
+                      >
+                        720p
+                      </button>
                     </li>
                   </ul>
                 </div>
@@ -910,7 +930,8 @@
                     >└ 수동으로 화질을 바꾸면 존중</span
                   >
                   <span class="settings-item-desc"
-                    >시청 중 직접 화질을 바꾸면 그 영상 동안 자동 고정을 멈춥니다</span
+                    >시청 중 직접 화질을 바꾸면 그 영상 동안 자동 고정을
+                    멈춥니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -1087,19 +1108,22 @@
               </li>
               <li
                 class="settings-item settings-item-stacked"
-                data-new-feature="player-button-order-vod"
+                data-new-feature="player-button-compact"
               >
                 <div>
                   <span class="settings-item-name">버튼 순서·위치</span>
                   <span
                     class="settings-item-desc"
-                    data-settings-summary="플레이어 하단 버튼의 좌우 그룹과 순서를 바꿉니다."
+                    data-settings-summary="플레이어 하단 버튼의 좌우 그룹과 순서를 바꾸고, 좁을 때 숨길 버튼을 고릅니다."
                     >플레이어 하단 버튼을 왼쪽/오른쪽 그룹으로 나누고 드래그로
                     순서를 바꿉니다. 회색 칩은 이동할 수 없는 기본
                     버튼(재생·볼륨·클립·PIP·설정 등)으로 내 버튼을 그 사이사이로
                     끌어 넣을 수 있습니다. 초록빛 칩은 다시보기에서만 나타나는
                     버튼이며 그중 댓글 타임스탬프와 내 채팅 기록은 오른쪽에만
-                    놓을 수 있습니다</span
+                    놓을 수 있습니다. 칩의 눈 아이콘을 끄면 플레이어가 좁아
+                    버튼이 한 줄에 다 들어가지 않을 때 그 버튼을 오른쪽 끝부터
+                    모자란 만큼 숨깁니다(기본: 오른쪽 그룹의 내 버튼은
+                    꺼짐)</span
                   >
                 </div>
                 <div class="settings-button-order" data-player-button-order>
@@ -1545,7 +1569,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item settings-item-stacked" data-new-feature="screenshot-action">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="screenshot-action"
+              >
                 <div>
                   <span
                     class="settings-item-name"
@@ -1582,7 +1609,10 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item settings-item-stacked" data-new-feature="screenshot-name-format">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="screenshot-name-format"
+              >
                 <div>
                   <span
                     class="settings-item-name"
@@ -1619,12 +1649,48 @@
                     role="group"
                     aria-label="파일 이름에 넣을 항목"
                   >
-                    <button type="button" data-screenshot-name-token="채널" title="채널 이름">채널</button>
-                    <button type="button" data-screenshot-name-token="제목" title="방송·영상 제목">제목</button>
-                    <button type="button" data-screenshot-name-token="카테고리" title="방송·영상 카테고리">카테고리</button>
-                    <button type="button" data-screenshot-name-token="날짜" title="찍은 날짜(예: 20261005)">날짜</button>
-                    <button type="button" data-screenshot-name-token="시각" title="찍은 시각(예: 213015)">시각</button>
-                    <button type="button" data-screenshot-name-token="방송시각" title="화면에 나온 장면이 실제로 방송된 날짜_시각. 다시보기는 방송 시작 시각 + 재생 위치">방송 시각</button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="채널"
+                      title="채널 이름"
+                    >
+                      채널
+                    </button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="제목"
+                      title="방송·영상 제목"
+                    >
+                      제목
+                    </button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="카테고리"
+                      title="방송·영상 카테고리"
+                    >
+                      카테고리
+                    </button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="날짜"
+                      title="찍은 날짜(예: 20261005)"
+                    >
+                      날짜
+                    </button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="시각"
+                      title="찍은 시각(예: 213015)"
+                    >
+                      시각
+                    </button>
+                    <button
+                      type="button"
+                      data-screenshot-name-token="방송시각"
+                      title="화면에 나온 장면이 실제로 방송된 날짜_시각. 다시보기는 방송 시작 시각 + 재생 위치"
+                    >
+                      방송 시각
+                    </button>
                   </div>
                   <p
                     class="settings-screenshot-name-preview"
@@ -2533,7 +2599,30 @@
             data-panel="player"
             aria-label="실시간 따라잡기"
           >
-            <h2 class="settings-group-title">실시간 따라잡기 민감도</h2>
+            <h2 class="settings-group-title">실시간 따라잡기</h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="실시간 따라잡기 자동 지연"
+                    >자동 따라잡기</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브 지연이 아래 민감도의 '시작' 값을 넘으면 자동으로
+                    따라잡습니다. 플레이어의 실시간 따라잡기 버튼을 우클릭해서도
+                    켜고 끌 수 있습니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-live-auto-sync />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              실시간 따라잡기 민감도
+            </h2>
             <div
               class="settings-segmented settings-segmented-4"
               id="syncPreset"
@@ -2762,6 +2851,66 @@
 
           <section
             class="settings-group"
+            data-panel="player"
+            aria-label="시청 기록"
+          >
+            <h2 class="settings-group-title">시청 기록</h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="watch-time">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="시청 시간 시청시간 누적 시청 기록 통계"
+                    >시청 시간 기록</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="채널별 시청 시간을 이 브라우저에 기록합니다. 외부로 전송하지 않습니다."
+                    >영상이 실제로 재생된 시간을 채널별로 이 브라우저에
+                    기록합니다. 라이브·다시보기·라디오와 로그인·비로그인을 따로
+                    세고, 탭이 보이거나 소리가 날 때만 셉니다(음소거여도 보이면
+                    셉니다). 멀티뷰는 칸마다 셉니다. '사용 중인 프로필'과 아래
+                    통계에서 볼 수 있으며 외부로 전송하지 않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-watch-time-enabled />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              채널별·기간별 시청 시간과 날짜별 그래프, 많이 본 채널의 추세를 볼
+              수 있습니다. 기록을 꺼도 지금까지 쌓인 기록은 볼 수 있습니다.
+            </p>
+            <button
+              type="button"
+              class="settings-open-stats"
+              id="openWatchTime"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 3h6v6" />
+                <path d="M10 14 21 3" />
+                <path
+                  d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                />
+              </svg>
+              시청 시간 열기
+            </button>
+          </section>
+
+          <section
+            class="settings-group"
             data-panel="vod"
             aria-label="다시보기 기능"
           >
@@ -2791,9 +2940,9 @@
                     class="settings-item-desc"
                     data-settings-summary="다시보기 채팅창에 이 기기에만 보이는 채팅을 입력합니다."
                     >다시보기 채팅창 아래에 입력창을 추가합니다. 입력한 채팅은
-                    재생 시간에 맞춰 채팅 사이에 표시되며, 실제 채팅으로 전송되지
-                    않고 이 기기에만 보입니다. 일반 다시보기와 멀티뷰 다시보기
-                    채팅창에 함께 적용됩니다</span
+                    재생 시간에 맞춰 채팅 사이에 표시되며, 실제 채팅으로
+                    전송되지 않고 이 기기에만 보입니다. 일반 다시보기와 멀티뷰
+                    다시보기 채팅창에 함께 적용됩니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -2812,7 +2961,10 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="vodLocalChatHideBorder" />
+                  <input
+                    type="checkbox"
+                    data-feature="vodLocalChatHideBorder"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2827,7 +2979,10 @@
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="vodLocalChatHideBackground" />
+                  <input
+                    type="checkbox"
+                    data-feature="vodLocalChatHideBackground"
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -2955,7 +3110,7 @@
                     파트너(인증 마크)가 남긴 채팅을 시간순으로 보여줍니다.
                     공지나 진행 안내를 따라가기 좋습니다. 채팅 활성도와 따로
                     모으고 따로 저장하므로 한쪽을 다시 모아도 다른 쪽은
-                    그대로입니다(기본 켜짐)</span
+                    그대로입니다(기본 꺼짐)</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -3405,23 +3560,39 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">다시보기 검색 숨김</span>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="다시보기 검색 숨김"
+                    >다시보기 검색 표시</span
+                  >
                   <span class="settings-item-desc"
                     >다시보기 목록 검색 화면</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="searchVideos" />
+                  <input
+                    type="checkbox"
+                    data-feature="searchVideos"
+                    data-feature-inverted
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">클립 검색 숨김</span>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="클립 검색 숨김"
+                    >클립 검색 표시</span
+                  >
                   <span class="settings-item-desc">클립 목록 검색 화면</span>
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="searchClips" />
+                  <input
+                    type="checkbox"
+                    data-feature="searchClips"
+                    data-feature-inverted
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -4704,7 +4875,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="following-live-auto-expand">
+              <li
+                class="settings-item"
+                data-new-feature="following-live-auto-expand"
+              >
                 <label>
                   <span
                     class="settings-item-name"
@@ -4712,9 +4886,9 @@
                     >팔로잉 라이브 자동 펼치기</span
                   >
                   <span class="settings-item-desc"
-                    >팔로잉 페이지 전체 탭의 '라이브'에서 '더보기'를 누르지 않아도
-                    라이브 중인 채널을 펼쳐 보여 줍니다. 라이브가 많아 버튼이
-                    '전체보기'로 바뀌면 그 버튼은 누르지 않습니다.</span
+                    >팔로잉 페이지 전체 탭의 '라이브'에서 '더보기'를 누르지
+                    않아도 라이브 중인 채널을 펼쳐 보여 줍니다. 라이브가 많아
+                    버튼이 '전체보기'로 바뀌면 그 버튼은 누르지 않습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -5127,21 +5301,24 @@
                     data-settings-search-aliases="수신함 통나무파워 숨김"
                     >수신함 통나무파워 표시</span
                   >
-                  <span class="settings-item-desc"
-                    >치지직 수신함에 통나무파워 내역 탭을 추가합니다. 시청
-                    보상뿐 아니라 팔로우·후원·구독 선물·승부예측으로 오간 분량도
-                    함께 기록합니다</span
-                  >
-                  <span class="settings-item-desc"
-                    >⚠ 치지직에는 획득 내역을 주는 기능이 없어 확장이 직접 본
-                    것만 남습니다. 시청·팔로우 보상은
-                    <b>통나무파워 자동 획득</b>이 켜져 있어야 기록되고 후원·구독
-                    선물·승부예측은 설정과 무관하게 기록됩니다.</span
-                  >
-                  <span class="settings-item-desc"
-                    >다른 기기에서 받은 분량은 알 수 없습니다. 내역 페이지의
-                    <b>보유량 맞추기</b>로 차이를 '기타'로 채울 수
-                    있습니다.</span
+                  <!-- 설명이 길어 요약만 보이고 (i) 를 누르면 펼친다(settingsUi 가 변환). -->
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="치지직 수신함에 통나무파워 내역 탭을 추가합니다."
+                    ><span
+                      >시청 보상뿐 아니라 팔로우·후원·구독 선물·승부예측으로
+                      오간 분량도 함께 기록합니다.</span
+                    ><span
+                      >⚠ 치지직에는 획득 내역을 주는 기능이 없어 확장이 직접 본
+                      것만 남습니다. 시청·팔로우 보상은
+                      <b>통나무파워 자동 획득</b>이 켜져 있어야 기록되고
+                      후원·구독 선물·승부예측은 설정과 무관하게
+                      기록됩니다.</span
+                    ><span
+                      >다른 기기에서 받은 분량은 알 수 없습니다. 내역 페이지의
+                      <b>보유량 맞추기</b>로 차이를 '기타'로 채울 수
+                      있습니다.</span
+                    ></span
                   >
                 </label>
                 <label class="settings-switch">
@@ -5348,6 +5525,20 @@
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-feature="sidebarPush" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="sidebar-resize">
+                <label>
+                  <span class="settings-item-name">사이드바 너비 조절</span>
+                  <span class="settings-item-desc"
+                    >펼친 사이드바 가장자리를 끌어 240~360px로 넓힙니다. 창 폭
+                    1200px 이상에서만 동작하고, 가장자리를 더블클릭하면 기본
+                    너비로 돌아갑니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sidebarResize" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -7711,16 +7902,27 @@
             </p>
           </section>
 
-          <section class="settings-group" data-panel="multiview" aria-label="멀티뷰 화면별 설정">
+          <section
+            class="settings-group"
+            data-panel="multiview"
+            aria-label="멀티뷰 화면별 설정"
+          >
             <h2 class="settings-group-title">멀티뷰 화면별 설정</h2>
             <p class="settings-group-desc">
-              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연 따라잡기·싱크 진단을 설정합니다.
+              채널 선택 화면의 정렬 기억과 시청 화면의 채널 관리 패널·지연
+              따라잡기·싱크 진단을 설정합니다.
             </p>
             <ul class="settings-list">
-              <li class="settings-item" data-new-feature="multiview-setup-sort-memory">
+              <li
+                class="settings-item"
+                data-new-feature="multiview-setup-sort-memory"
+              >
                 <label>
                   <span class="settings-item-name">선택 화면 정렬 기억</span>
-                  <span class="settings-item-desc">팔로잉·전용 팔로잉·라이브·검색 탭의 마지막 정렬을 복원합니다.</span>
+                  <span class="settings-item-desc"
+                    >팔로잉·전용 팔로잉·라이브·검색 탭의 마지막 정렬을
+                    복원합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-remember-setup-sort />
@@ -7730,14 +7932,37 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">메인 채널 테두리 강조</span>
-                  <span class="settings-item-desc">멀티뷰 시청 화면에서 메인 채널 칸의 초록색 테두리를 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >멀티뷰 시청 화면에서 메인 채널 칸의 초록색 테두리를
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-main-border />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="multiview-track-resize">
+              <li class="settings-item" data-new-feature="multiview-log-power">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="멀티뷰 통나무파워 적립 표시 헤더"
+                    >헤더에 통나무파워 적립 표시</span
+                  >
+                  <span class="settings-item-desc"
+                    >멀티뷰 시청 화면 위쪽 막대에 지금 적립 중인 채널과 보유량,
+                    1시간 보상 타이머를 보여 줍니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-multiview-log-power />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="multiview-track-resize"
+              >
                 <label>
                   <span
                     class="settings-item-name"
@@ -7745,9 +7970,9 @@
                     >멀티뷰 칸 사이 크기 조절</span
                   >
                   <span class="settings-item-desc"
-                    >시청 화면에서 칸 사이 경계를 끌어 너비·높이를 바꿉니다(경계를
-                    두 번 누르면 원래대로). 끄면 손잡이가 없어지고 기본 비율로
-                    보입니다.</span
+                    >시청 화면에서 칸 사이 경계를 끌어 너비·높이를
+                    바꿉니다(경계를 두 번 누르면 원래대로). 끄면 손잡이가
+                    없어지고 기본 비율로 보입니다.</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -7755,7 +7980,10 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item settings-item-stacked" data-new-feature="multiview-track-memory">
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="multiview-track-memory"
+              >
                 <div>
                   <span class="settings-item-name">└ 칸 크기 기억</span>
                   <span class="settings-item-desc"
@@ -7794,20 +8022,38 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item" data-new-feature="multiview-quick-state">
+              <li
+                class="settings-item"
+                data-new-feature="multiview-quick-state"
+              >
                 <label>
-                  <span class="settings-item-name">시청 화면 채널 관리 상태 기억</span>
-                  <span class="settings-item-desc">멀티뷰 시청 중 ‘채널 관리’ 버튼으로 여는 패널의 탭·검색어·정렬을 복원합니다. 크기와 위치는 항상 저장합니다.</span>
+                  <span class="settings-item-name"
+                    >시청 화면 채널 관리 상태 기억</span
+                  >
+                  <span class="settings-item-desc"
+                    >멀티뷰 시청 중 ‘채널 관리’ 버튼으로 여는 패널의
+                    탭·검색어·정렬을 복원합니다. 크기와 위치는 항상
+                    저장합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-remember-quick-state />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="multiview-live-catch-up">
+              <li
+                class="settings-item"
+                data-new-feature="multiview-live-catch-up"
+              >
                 <label>
-                  <span class="settings-item-name">라이브 지연 자동 따라잡기</span>
-                  <span class="settings-item-desc">라이브 지연이 기준 시간을 넘은 칸을 실시간 쪽으로 옮깁니다. 시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은 칸은 옮기지 않습니다.</span>
+                  <span class="settings-item-name"
+                    >라이브 지연 자동 따라잡기</span
+                  >
+                  <span class="settings-item-desc"
+                    >라이브 지연이 기준 시간을 넘은 칸을 실시간 쪽으로 옮깁니다.
+                    시청 탭으로 돌아왔을 때 밀린 칸도 바로 맞춥니다. 직접 되감은
+                    칸은 옮기지 않습니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-live-catch-up />
@@ -7822,9 +8068,9 @@
                 <div>
                   <span class="settings-item-name">└ 따라잡기 기준 시간</span>
                   <span class="settings-item-desc"
-                    >지연이 이 시간 이상인 칸을 옮깁니다(2~8초, 기본 8초). 낮출수록
-                    실시간에 가깝지만 끊김이 생기기 쉽고, 자동 싱크 칸끼리 간격이 크면
-                    더 자주 옮길 수 있습니다.</span
+                    >지연이 이 시간 이상인 칸을 옮깁니다(2~8초, 기본 8초).
+                    낮출수록 실시간에 가깝지만 끊김이 생기기 쉽고, 자동 싱크
+                    칸끼리 간격이 크면 더 자주 옮길 수 있습니다.</span
                   >
                 </div>
                 <div class="settings-osd-row">
@@ -7857,10 +8103,16 @@
                   </button>
                 </div>
               </li>
-              <li class="settings-item" data-new-feature="multiview-sync-diagnostics">
+              <li
+                class="settings-item"
+                data-new-feature="multiview-sync-diagnostics"
+              >
                 <label>
                   <span class="settings-item-name">싱크 진단 도구 표시</span>
-                  <span class="settings-item-desc">싱크 문제 분석을 위한 기록과 내보내기 도구를 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >싱크 문제 분석을 위한 기록과 내보내기 도구를
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-sync-diagnostics-ui />
@@ -7874,7 +8126,12 @@
             data-panel="multiview"
             aria-label="멀티뷰 버튼"
           >
-            <h2 class="settings-group-title" data-new-feature="multiview-player-controls">멀티뷰 버튼</h2>
+            <h2
+              class="settings-group-title"
+              data-new-feature="multiview-player-controls"
+            >
+              멀티뷰 버튼
+            </h2>
             <p class="settings-group-desc">
               멀티뷰 화면의 버튼 표시입니다. 팝업 플레이어 설정과 따로 관리되며,
               화면이 작아 기본값은 오디오 믹서만 켜져 있습니다.
@@ -7882,8 +8139,13 @@
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">끈 버튼은 단축키도 끄기</span>
-                  <span class="settings-item-desc">멀티뷰에서 표시하지 않는 버튼의 기능과 단축키도 끕니다. 되감기 바가 켜져 있으면 방향키 탐색은 유지됩니다.</span>
+                  <span class="settings-item-name"
+                    >끈 버튼은 단축키도 끄기</span
+                  >
+                  <span class="settings-item-desc"
+                    >멀티뷰에서 표시하지 않는 버튼의 기능과 단축키도 끕니다.
+                    되감기 바가 켜져 있으면 방향키 탐색은 유지됩니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-disable-hidden />
@@ -7920,7 +8182,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">실시간 따라잡기 버튼 (Shift + F)</span>
+                  <span class="settings-item-name"
+                    >실시간 따라잡기 버튼 (Shift + F)</span
+                  >
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 실시간 따라잡기 버튼을 표시합니다</span
                   >
@@ -7944,7 +8208,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">스트림 정보 버튼 (Shift + I)</span>
+                  <span class="settings-item-name"
+                    >스트림 정보 버튼 (Shift + I)</span
+                  >
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 스트림 정보 버튼을 표시합니다</span
                   >
@@ -7956,7 +8222,9 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">스크린샷 버튼 (Shift + S)</span>
+                  <span class="settings-item-name"
+                    >스크린샷 버튼 (Shift + S)</span
+                  >
                   <span class="settings-item-desc"
                     >멀티뷰 화면에 스크린샷 버튼을 표시합니다</span
                   >
@@ -7997,15 +8265,24 @@
             data-panel="multiview"
             aria-label="멀티뷰 다시보기 플레이어"
           >
-            <h2 class="settings-group-title" data-new-feature="multiview-vod-player-controls">멀티뷰 다시보기 플레이어</h2>
+            <h2
+              class="settings-group-title"
+              data-new-feature="multiview-vod-player-controls"
+            >
+              멀티뷰 다시보기 플레이어
+            </h2>
             <p class="settings-group-desc">
-              다시보기 칸의 재생바 버튼을 표시합니다. 내 채팅 기록은 채팅 리캡이 켜져 있어야 사용할 수 있습니다.
+              다시보기 칸의 재생바 버튼을 표시합니다. 내 채팅 기록은 채팅 리캡이
+              켜져 있어야 사용할 수 있습니다.
             </p>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">재생 속도</span>
-                  <span class="settings-item-desc">멀티뷰 다시보기 플레이어에 재생 속도 버튼을 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >멀티뷰 다시보기 플레이어에 재생 속도 버튼을
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-vod-speed />
@@ -8015,7 +8292,10 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">댓글 타임스탬프</span>
-                  <span class="settings-item-desc">멀티뷰 다시보기 플레이어에 댓글 타임스탬프 버튼을 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >멀티뷰 다시보기 플레이어에 댓글 타임스탬프 버튼을
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-vod-timestamps />
@@ -8025,7 +8305,10 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">내 채팅 기록</span>
-                  <span class="settings-item-desc">채팅 리캡이 켜진 경우 멀티뷰 다시보기 플레이어에 내 채팅 기록 버튼을 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >채팅 리캡이 켜진 경우 멀티뷰 다시보기 플레이어에 내 채팅
+                    기록 버튼을 표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-vod-my-chat />
@@ -8035,7 +8318,10 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">채팅 활성도</span>
-                  <span class="settings-item-desc">다시보기 채팅 활성도 기능이 켜진 경우 버튼을 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >다시보기 채팅 활성도 기능이 켜진 경우 버튼을
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-vod-chat-graph />
@@ -8044,8 +8330,13 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">방장·매니저·파트너 채팅</span>
-                  <span class="settings-item-desc">방장·매니저·파트너 채팅 기능이 켜진 경우 버튼을 표시합니다.</span>
+                  <span class="settings-item-name"
+                    >방장·매니저·파트너 채팅</span
+                  >
+                  <span class="settings-item-desc"
+                    >방장·매니저·파트너 채팅 기능이 켜진 경우 버튼을
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-vod-role-chat />
@@ -8054,9 +8345,20 @@
               </li>
             </ul>
           </section>
-          <section class="settings-group" data-panel="multiview" aria-label="모아보기 팝업">
-            <h2 class="settings-group-title" data-new-feature="multiview-badge-chat">모아보기 팝업</h2>
-            <p class="settings-group-desc">멀티뷰 라이브·다시보기 배지 채팅 팝업의 표시 방식을 설정합니다.</p>
+          <section
+            class="settings-group"
+            data-panel="multiview"
+            aria-label="모아보기 팝업"
+          >
+            <h2
+              class="settings-group-title"
+              data-new-feature="multiview-badge-chat"
+            >
+              모아보기 팝업
+            </h2>
+            <p class="settings-group-desc">
+              멀티뷰 라이브·다시보기 배지 채팅 팝업의 표시 방식을 설정합니다.
+            </p>
             <ul class="settings-list">
               <li
                 class="settings-item settings-item-stacked"
@@ -8065,7 +8367,8 @@
                 <div>
                   <span class="settings-item-name">보기 방식</span>
                   <span class="settings-item-desc">
-                    한줄보기는 시간·닉네임·채팅을 한 줄로 이어 보여 주고, 블록보기는 닉네임과 시간 아래에 채팅을 보여 줍니다.
+                    한줄보기는 시간·닉네임·채팅을 한 줄로 이어 보여 주고,
+                    블록보기는 닉네임과 시간 아래에 채팅을 보여 줍니다.
                   </span>
                 </div>
                 <div
@@ -8097,83 +8400,146 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">역할 배지만 표시</span>
-                  <span class="settings-item-desc">모아보기 팝업의 닉네임 옆에 방장·매니저·운영자·파트너 배지만 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >모아보기 팝업의 닉네임 옆에 방장·매니저·운영자·파트너
+                    배지만 표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-role-badges-only />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-role-badges-only
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">항상 펼침</span>
-                  <span class="settings-item-desc">역할 배지 채팅이 있으면 모아보기 팝업을 자동으로 열고 닫히지 않게 합니다. 배지 알림 버튼 숨김과 함께 사용할 수 없습니다.</span>
+                  <span class="settings-item-desc"
+                    >역할 배지 채팅이 있으면 모아보기 팝업을 자동으로 열고
+                    닫히지 않게 합니다. 배지 알림 버튼 숨김과 함께 사용할 수
+                    없습니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-keep-popup-open />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-keep-popup-open
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">메시지 배경 숨기기</span>
-                  <span class="settings-item-desc">팝업 패널은 유지하고 일반 채팅 메시지 카드의 배경만 숨깁니다. 특수 메시지 배경은 유지됩니다.</span>
+                  <span class="settings-item-desc"
+                    >팝업 패널은 유지하고 일반 채팅 메시지 카드의 배경만
+                    숨깁니다. 특수 메시지 배경은 유지됩니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-popup-background />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-popup-background
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">메시지 테두리 숨기기</span>
-                  <span class="settings-item-desc">팝업 패널은 유지하고 각 채팅 메시지 카드의 테두리만 숨깁니다.</span>
+                  <span class="settings-item-desc"
+                    >팝업 패널은 유지하고 각 채팅 메시지 카드의 테두리만
+                    숨깁니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-popup-border />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-popup-border
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">팝업 채팅 시간 숨기기</span>
-                  <span class="settings-item-desc">모아보기 팝업의 각 채팅에 표시되는 시간을 숨깁니다.</span>
+                  <span class="settings-item-desc"
+                    >모아보기 팝업의 각 채팅에 표시되는 시간을 숨깁니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-popup-time />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-popup-time
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
             </ul>
           </section>
-          <section class="settings-group" data-panel="multiview" aria-label="채팅창 표시">
-            <h2 class="settings-group-title" data-new-feature="multiview-badge-chat">채팅창 표시</h2>
-            <p class="settings-group-desc">역할 배지로 강조되는 채팅의 표시와 모아보기 버튼 동작을 설정합니다. 모아보기 팝업 카드 설정과는 별개입니다. 배지 모아 챗 확장 프로그램이 동작 중인 라이브 채팅창에서는 그 확장에 맡기고 이 기능을 끕니다.</p>
+          <section
+            class="settings-group"
+            data-panel="multiview"
+            aria-label="채팅창 표시"
+          >
+            <h2
+              class="settings-group-title"
+              data-new-feature="multiview-badge-chat"
+            >
+              채팅창 표시
+            </h2>
+            <p class="settings-group-desc">
+              역할 배지로 강조되는 채팅의 표시와 모아보기 버튼 동작을
+              설정합니다. 모아보기 팝업 카드 설정과는 별개입니다. 배지 모아 챗
+              확장 프로그램이 동작 중인 라이브 채팅창에서는 그 확장에 맡기고 이
+              기능을 끕니다.
+            </p>
             <ul class="settings-list">
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">하이라이트 배경색 숨기기</span>
-                  <span class="settings-item-desc">멀티뷰 라이브·다시보기 채팅창에서 방장·매니저·운영자·파트너 채팅의 강조 배경만 숨깁니다.</span>
+                  <span class="settings-item-name"
+                    >하이라이트 배경색 숨기기</span
+                  >
+                  <span class="settings-item-desc"
+                    >멀티뷰 라이브·다시보기 채팅창에서 방장·매니저·운영자·파트너
+                    채팅의 강조 배경만 숨깁니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-chat-background />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-chat-background
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">하이라이트 테두리선 숨기기</span>
-                  <span class="settings-item-desc">멀티뷰 라이브·다시보기 채팅창에서 역할 배지 채팅에 표시되는 강조 테두리만 숨깁니다.</span>
+                  <span class="settings-item-name"
+                    >하이라이트 테두리선 숨기기</span
+                  >
+                  <span class="settings-item-desc"
+                    >멀티뷰 라이브·다시보기 채팅창에서 역할 배지 채팅에 표시되는
+                    강조 테두리만 숨깁니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-chat-border />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-chat-border
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">새 채팅 반짝임 사용</span>
-                  <span class="settings-item-desc">새 역할 배지 채팅이 도착하면 알림 버튼을 잠시 강조합니다.</span>
+                  <span class="settings-item-desc"
+                    >새 역할 배지 채팅이 도착하면 알림 버튼을 잠시
+                    강조합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-multiview-badge-chat-pill-glow />
@@ -8183,30 +8549,50 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">알림 버튼 간단히 표시</span>
-                  <span class="settings-item-desc">닉네임과 역할 배지 대신 채팅 아이콘과 읽지 않은 채팅 수만 표시합니다.</span>
+                  <span class="settings-item-desc"
+                    >닉네임과 역할 배지 대신 채팅 아이콘과 읽지 않은 채팅 수만
+                    표시합니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-compact-pill />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-compact-pill
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">배지 알림 버튼 숨김</span>
-                  <span class="settings-item-desc">라이브·다시보기 채팅창의 배지 알림 버튼을 숨깁니다. 모아보기 팝업을 직접 열 수 없습니다.</span>
+                  <span class="settings-item-desc"
+                    >라이브·다시보기 채팅창의 배지 알림 버튼을 숨깁니다.
+                    모아보기 팝업을 직접 열 수 없습니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-pill-button />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-pill-button
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">새 채팅이 없을 때 버튼 숨기기</span>
-                  <span class="settings-item-desc">읽지 않은 역할 배지 채팅이 없으면 모아보기 버튼을 숨깁니다.</span>
+                  <span class="settings-item-name"
+                    >새 채팅이 없을 때 버튼 숨기기</span
+                  >
+                  <span class="settings-item-desc"
+                    >읽지 않은 역할 배지 채팅이 없으면 모아보기 버튼을
+                    숨깁니다.</span
+                  >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-multiview-badge-chat-hide-empty-button />
+                  <input
+                    type="checkbox"
+                    data-multiview-badge-chat-hide-empty-button
+                  />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -8241,16 +8627,19 @@
               <li
                 class="settings-item settings-item-stacked"
                 data-card-live-preview-position-item
+                data-new-feature="card-preview-vertical"
               >
                 <div>
                   <span class="settings-item-name">└ 미리보기 표시 위치</span>
                   <span class="settings-item-desc"
                     >선택한 방향을 우선하되 화면 경계를 벗어나면 반대편이나 더
-                    넓은 쪽으로 자동 배치합니다</span
+                    넓은 쪽으로 자동 배치합니다. 자동은 좌우에 다 들어가지
+                    않으면 (창을 좁게 쓸 때 가운데 카드 등) 위·아래 중 크게
+                    보이는 쪽에 띄웁니다</span
                   >
                 </div>
                 <div
-                  class="settings-segmented settings-segmented-3"
+                  class="settings-segmented settings-segmented-5"
                   id="cardLivePreviewPosition"
                   role="radiogroup"
                   aria-label="카드 미리보기 표시 위치"
@@ -8278,6 +8667,22 @@
                     aria-checked="false"
                   >
                     오른쪽 우선
+                  </button>
+                  <button
+                    type="button"
+                    data-card-live-preview-position="top"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    위 우선
+                  </button>
+                  <button
+                    type="button"
+                    data-card-live-preview-position="bottom"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    아래 우선
                   </button>
                 </div>
               </li>
@@ -8650,10 +9055,11 @@
                   <span
                     class="settings-item-desc"
                     data-settings-summary="채널에 마우스를 올리면 방송 이력을 툴팁으로 보여줍니다."
-                    >팔로잉 목록, 채널, 검색에서 채널 이미지 또는 이름 영역에
-                    마우스를 올리면 최근 방송일·팔로우 시작일·첫 방송일·총 방송
-                    시간을 툴팁으로 보여줍니다. 전용 팔로잉 목록에서는 라이브
-                    미리보기가 꺼져 있을 때 표시됩니다</span
+                    >팔로잉 목록, 사이드바 팔로잉·전용 팔로잉의 오프라인 채널,
+                    채널, 검색에서 채널 이미지 또는 이름 영역에 마우스를 올리면
+                    최근 방송일·팔로우 시작일·첫 방송일·총 방송 시간을 툴팁으로
+                    보여줍니다. 전용 팔로잉의 라이브 채널은 라이브 미리보기가
+                    꺼져 있을 때 표시됩니다</span
                   >
                 </label>
                 <label class="settings-switch">
@@ -8867,16 +9273,125 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
-              <li class="settings-item" data-new-feature="chat-hide-input-placeholder">
+              <li
+                class="settings-item"
+                data-new-feature="chat-hide-input-placeholder"
+              >
                 <label>
-                  <span class="settings-item-name">채팅 입력창 안내 문구 숨김</span>
+                  <span class="settings-item-name"
+                    >채팅 입력창 안내 문구 숨김</span
+                  >
                   <span class="settings-item-desc"
                     >일반·팝업·멀티뷰 라이브 채팅 입력창의 '채팅을 입력해주세요
                     (J)' 문구. 입력과 J 단축키는 그대로 동작합니다</span
                   >
                 </label>
                 <label class="settings-switch">
-                  <input type="checkbox" data-feature="chatHideInputPlaceholder" />
+                  <input
+                    type="checkbox"
+                    data-feature="chatHideInputPlaceholder"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item"
+                data-new-feature="chat-input-latency-placeholder"
+              >
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="지연 시간 안내 문구 placeholder"
+                    >└ 지연 시간 표시</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="숨긴 안내 문구 자리에 지금 라이브 지연을 보여 줍니다."
+                    >숨긴 안내 문구 자리에 '지연 6.3초'처럼 지금 라이브 지연을
+                    보여 줍니다. 영상이 있는 라이브 화면에서만 표시됩니다(채팅만
+                    띄운 팝업·멀티뷰 채팅 칸 제외)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="chatInputLatencyPlaceholder"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="chat-donation-tools"
+              >
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="후원하기 문구 숨김 후원 버튼 숨김 후원 도구"
+                    >채팅 입력창 후원 도구</span
+                  >
+                  <span class="settings-item-desc"
+                    >채팅 입력창 아래 '후원하기' 문구나 그 옆 후원 아이콘
+                    버튼들을 숨깁니다. 문구를 숨겨도(모두 숨김 포함) 치즈
+                    아이콘을 눌러 후원할 수 있습니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-chat-donation-tools
+                  role="radiogroup"
+                  aria-label="채팅 입력창 후원 도구"
+                >
+                  <button
+                    type="button"
+                    data-chat-donation-tools-value="show"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    모두 표시
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-donation-tools-value="hide-text"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    '후원하기' 문구 숨김
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-donation-tools-value="hide-buttons"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    후원 버튼 숨김
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-donation-tools-value="hide-all"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    모두 숨김
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-new-feature="chat-viewer-count">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="시청자 수 시청자수"
+                    >채팅 입력창 시청자 수 표시</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="채팅 입력창 아래 후원 도구 줄 맨 앞에 현재 시청자 수를 보여 줍니다."
+                    >채팅 입력창 아래 후원 도구 줄 맨 앞에 지금 시청자 수를 보여
+                    줍니다(30초마다 갱신)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatViewerCount" />
                   <i aria-hidden="true"></i>
                 </label>
               </li>
@@ -8972,7 +9487,7 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name">채팅 버튼 줄바꿈</span>
+                  <span class="settings-item-name">└ 채팅 버튼 줄바꿈</span>
                   <span class="settings-item-desc"
                     >너비를 좁게 조절하면 채팅 버튼이 후원 버튼 다음 줄로
                     줄바꿈됩니다(끄면 한 줄 유지)</span
@@ -9107,6 +9622,54 @@
                 </div>
               </li>
               <li
+                class="settings-item settings-item-stacked"
+                data-chat-time-size-item
+                data-new-feature="chat-time-size"
+              >
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="채팅 시간 폰트 크기 시간 글씨 크기"
+                    >└ 시간 글자 크기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="채팅 시간 글자를 메시지 글자 대비 몇 %로 표시할지 정합니다."
+                    >메시지 글자 대비 비율입니다(70~130%, 기본 85%). 채팅 폰트
+                    크기를 바꾸면 이 비율대로 함께 커지고 작아집니다</span
+                  >
+                </div>
+                <div class="settings-osd-row">
+                  <input
+                    type="range"
+                    min="70"
+                    max="130"
+                    step="5"
+                    data-chat-time-size
+                    aria-label="채팅 시간 글자 크기(%)"
+                  />
+                  <span class="settings-custom-input">
+                    <input
+                      type="number"
+                      min="70"
+                      max="130"
+                      step="5"
+                      inputmode="numeric"
+                      data-chat-time-size-num
+                      aria-label="채팅 시간 글자 크기 직접 입력(%)"
+                    />
+                    %
+                  </span>
+                  <button
+                    type="button"
+                    class="settings-order-reset"
+                    data-chat-time-size-reset
+                  >
+                    기본값
+                  </button>
+                </div>
+              </li>
+              <li
                 class="settings-item settings-item-stacked settings-chat-time-color-item"
                 data-chat-time-color-item
               >
@@ -9163,6 +9726,77 @@
                     data-chat-time-color-reset
                   >
                     기본값
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item" data-new-feature="chat-time-seek">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="채팅 시간 클릭 이동 다시보기 장면 이동 타임스탬프"
+                    >└ 시간을 누르면 그 장면으로 이동</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기 채팅의 시간을 누르면 그 채팅을 쓴 장면으로 영상을 옮깁니다."
+                    >다시보기 채팅의 시간을 누르면 그 채팅을 쓴 영상 위치로
+                    옮깁니다. 표시된 시간은 실제 시각이고, 마우스를 올리면 옮길
+                    영상 위치가 보입니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chatTimeSeek" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="chat-time-seek"
+              >
+                <div>
+                  <span class="settings-item-name">└ 이동 위치</span>
+                  <span class="settings-item-desc"
+                    >채팅은 장면을 보고 몇 초 뒤에 쓰입니다. 채팅을 쓴 시점보다
+                    몇 초 앞으로 옮길지 고릅니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-chat-time-seek-offset
+                  role="radiogroup"
+                  aria-label="채팅 시간 클릭 이동 위치"
+                >
+                  <button
+                    type="button"
+                    data-chat-time-seek-offset-value="0"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    채팅 시점
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-time-seek-offset-value="3"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    3초 앞
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-time-seek-offset-value="5"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    5초 앞
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-time-seek-offset-value="10"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    10초 앞
                   </button>
                 </div>
               </li>

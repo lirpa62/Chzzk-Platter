@@ -433,6 +433,60 @@ test("header peek keeps fill-screen height anchored to the hidden layout", () =>
   assert.equal(h.context.getStableFillScreenTop(replacementBox), 135);
 });
 
+test("fill-screen top is never anchored to a header-visible layout", () => {
+  // 실측: 헤더 숨김을 끈 채(헤더가 자리를 차지, top 60) 잰 좌표가 기준으로 남아, 헤더 숨김을
+  // 켜도(top 0) 높이가 1020(화면 1080)에 묶이고 아래 60px 에 방제가 보였다.
+  class Box {}
+  const box = new Box();
+  box.id = "live_player_layout";
+  let top = 60;
+  let headerBottom = 60;
+  let peek = false;
+  box.getBoundingClientRect = () => ({ top });
+  const header = {
+    classList: { contains: (name) => peek && name === "cheese-header-peek" },
+    getBoundingClientRect: () => ({ bottom: headerBottom }),
+  };
+  const featureFlags = { headerAutoHide: false };
+  const h = clockContext({
+    HTMLElement: Box,
+    featureFlags,
+    headerOffsetPx: 0,
+    getFillScreenTarget: () => ({ box }),
+    location: { pathname: "/live/channel-id" },
+    document: { getElementById: (id) => (id === "header" ? header : null) },
+  });
+  vm.runInContext(section(content,
+    '  let fillScreenTopReferenceKey = "";',
+    "  function captureInlineStyleProperties("), h.context);
+  const reference = () => vm.runInContext("fillScreenTopReference", h.context);
+
+  // 헤더 숨김 꺼짐: 지금 좌표를 쓰지만 기준으로 남기지 않는다.
+  assert.equal(h.context.getStableFillScreenTop(box), 60);
+  assert.equal(reference(), null);
+  // 헤더 숨김을 켰지만 CSS 적용 전(헤더가 아직 자리를 차지): 저장하지 않는다.
+  featureFlags.headerAutoHide = true;
+  assert.equal(h.context.getStableFillScreenTop(box), 60);
+  h.context.lockFillScreenTopForHeaderTransition();
+  assert.equal(reference(), null);
+  // CSS 적용(헤더가 위로 숨고 콘텐츠가 헤더 자리를 회수): 그 좌표를 기준으로 잡는다.
+  headerBottom = 0;
+  top = 0;
+  assert.equal(h.context.getStableFillScreenTop(box), 0);
+  assert.equal(reference(), 0);
+  // peek 는 오버레이라 영상이 움직이지 않는다. 일시적으로 밀려도 기준은 그대로.
+  peek = true;
+  headerBottom = 60;
+  h.context.lockFillScreenTopForHeaderTransition();
+  top = 35;
+  assert.equal(h.context.getStableFillScreenTop(box), 0);
+  // 다시 끄면 실제 좌표를 따른다.
+  featureFlags.headerAutoHide = false;
+  peek = false;
+  top = 60;
+  assert.equal(h.context.getStableFillScreenTop(box), 60);
+});
+
 test("fill-screen top follows real layout changes when header auto-hide is off", () => {
   class Box {}
   const box = new Box();

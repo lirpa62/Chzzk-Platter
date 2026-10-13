@@ -1328,10 +1328,12 @@
   }
 
   // 닉네임 앞에 회색 시간 span을 삽입한다. 이미 있으면 현재 설정 형식으로 갱신한다.
-  function applyTimestamp(row, epochMs) {
+  // playerMs: 다시보기면 그 채팅을 쓴 영상 위치(ms). 시간을 누르면 그곳으로 옮긴다.
+  function applyTimestamp(row, epochMs, playerMs = null) {
     row.setAttribute(CHAT_HISTORY_EPOCH_ATTR, String(epochMs));
     const existing = row.querySelector(":scope .cheese-chat-time");
     if (existing) {
+      setChatTimePlayerMs(existing, playerMs);
       const epochText = String(epochMs);
       const formatted = formatChatTimestamp(epochMs);
       if (existing.dataset.chatEpochMs !== epochText) {
@@ -1349,9 +1351,71 @@
     const span = document.createElement("span");
     span.className = "cheese-chat-time";
     span.dataset.chatEpochMs = String(epochMs);
+    setChatTimePlayerMs(span, playerMs);
     span.textContent = formatChatTimestamp(epochMs);
     nicknameBtn.parentNode.insertBefore(span, nicknameBtn);
     return true;
+  }
+
+  function setChatTimePlayerMs(span, playerMs) {
+    if (playerMs == null) {
+      if (span.dataset.chatPlayerMs != null) delete span.dataset.chatPlayerMs;
+    } else if (span.dataset.chatPlayerMs !== String(playerMs)) {
+      span.dataset.chatPlayerMs = String(playerMs);
+    }
+  }
+
+  // ── 다시보기 채팅 시간 클릭 이동(설정 - 채팅 시간 표시 > 시간을 누르면 그 장면으로 이동) ──
+  // 시간 글자에 적어 둔 영상 위치(data-chat-player-ms)로 옮긴다. 내 다시보기 채팅 줄
+  // (replayLocalChat.js)도 같은 속성을 단다. 채팅은 장면을 보고 몇 초 뒤에 쓰이므로
+  // 고른 만큼 앞으로 옮긴다. 표시된 시간은 실제 시각이라 툴팁으로 영상 위치를 알린다.
+  // ⚠ 감시자를 두지 않는다. 문서에서 클릭·마우스 올림 하나씩만 받는다(캡처 단계라 치지직
+  //   행의 클릭 동작보다 먼저 받아 막는다).
+  let chatTimeSeekOn = false;
+  let chatTimeSeekOffset = 3;
+  function chatTimeSeekTarget(node) {
+    if (!chatTimeSeekOn || !location.pathname.startsWith("/video/")) return null;
+    const span = node instanceof Element
+      ? node.closest(".cheese-chat-time[data-chat-player-ms]")
+      : null;
+    if (!span || !span.closest("aside#vod-aside")) return null;
+    const ms = Number(span.dataset.chatPlayerMs);
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    return { span, seconds: Math.max(0, ms / 1000 - chatTimeSeekOffset) };
+  }
+  function formatVideoPosition(seconds) {
+    const total = Math.floor(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, "0");
+    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  }
+  document.addEventListener("click", (event) => {
+    const hit = chatTimeSeekTarget(event.target);
+    if (!hit) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const video =
+      document.querySelector("#player_layout video") || document.querySelector("video");
+    if (!(video instanceof HTMLVideoElement)) return;
+    video.currentTime = hit.seconds;
+    video.play?.()?.catch?.(() => {});
+  }, true);
+  document.addEventListener("mouseover", (event) => {
+    const hit = chatTimeSeekTarget(event.target);
+    if (!hit) return;
+    const title = `영상 ${formatVideoPosition(hit.seconds)}로 이동`;
+    if (hit.span.title !== title) hit.span.title = title;
+  }, true);
+  function setChatTimeSeek(on, offset) {
+    const next = on === true;
+    chatTimeSeekOffset = [0, 3, 5, 10].includes(Number(offset)) ? Number(offset) : 3;
+    if (chatTimeSeekOn && !next) {
+      // 끄면 마우스를 올렸을 때 단 안내를 걷는다.
+      document.querySelectorAll(".cheese-chat-time[data-chat-player-ms][title]")
+        .forEach((span) => span.removeAttribute("title"));
+    }
+    chatTimeSeekOn = next;
   }
 
   function removeAllTimestamps() {
@@ -1922,7 +1986,10 @@
     let done = true;
     if (showChatTimestamp && !moaTimeActive) {
       const epoch = readChatEpochMs(chatMessage);
-      if (!epoch || !applyTimestamp(row, epoch)) {
+      const playerMs = location.pathname.startsWith("/video/")
+        ? readVodPlayerMessageTime(chatMessage)
+        : null;
+      if (!epoch || !applyTimestamp(row, epoch, playerMs)) {
         done = false;
       }
     }
@@ -2600,6 +2667,7 @@
     setChatOsIconPosition(e.data.chatOsIconPosition);
     // 체크=표시(true)면 각 기능 ON. (data-feature지만 '숨김'이 아니라 '켬' 의미)
     setShowChatTimestamp(f.chatShowTime === true);
+    setChatTimeSeek(f.chatShowTime === true && f.chatTimeSeek === true, e.data.chatTimeSeekOffset);
     setShowChatOsIcon(f.chatShowOsIcon === true);
     setHideChatNickname(f.chatHideNickname === true);
     setHideChatBadge(f.chatHideBadge === true);
