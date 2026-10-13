@@ -146,6 +146,10 @@ html.cheese-chat-hide-send-button
 
 .cheese-replay-local-chat-input::placeholder {
   color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
+  /* 좁을 때 안내 문구를 한 줄로 줄인다(지원하는 브라우저). 높이는 스크립트가 한 줄로 둔다. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cheese-replay-local-chat-input:focus::placeholder {
@@ -196,9 +200,42 @@ html.cheese-chat-hide-send-button
    _nickname_ 묶음 margin -2px 0, padding 2px 4px 2px 2px, 오른쪽 4px
    배지 묶음 gap 4px, margin-right 4px, 배지 18px / 닉네임 굵기 500, 한 줄 말줄임 */
 aside#vod-aside .cheese-replay-local-chat-message {
+  /* 글자 배율. 치지직 채팅 글자 크기(옆 치지직 줄의 _scale_ 클래스를 replayLocalChat.js 가
+     옮겨 준다)를 따르고, 채팅 폰트 크기 조절(우리·배지 모아 챗)이 켜져 있으면 그 배율을
+     따른다. 그때 줄높이는 chatFontScale.css 처럼 14px × 배율 × 1.4 다. */
+  --cheese-replay-local-chat-scale: var(--cheese-replay-local-chat-native-scale, 1);
+  --cheese-replay-local-chat-line: calc(20px * var(--cheese-replay-local-chat-scale));
+  /* 배율이 걸리면 치지직 줄은 닉네임 묶음·메시지를 세로 가운데로 맞추고 닉네임 글자 줄높이를
+     글자 × 1.2 로 둔다(chatFontScale.css 1-2·1-3, 실측). 배율이 없으면 원래 정렬. */
+  --cheese-replay-local-chat-identity-align: top;
+  --cheese-replay-local-chat-text-align: baseline;
+  --cheese-replay-local-chat-nickname-line: var(--cheese-replay-local-chat-line);
   box-sizing: border-box;
   color: var(--cheese-replay-local-chat-content-neutral-cool-strong);
   margin-bottom: 3px;
+}
+
+html.cheese-chat-font-scale-enabled aside#vod-aside .cheese-replay-local-chat-message {
+  --cheese-replay-local-chat-scale: var(--cheese-chat-font-scale, 1);
+  --cheese-replay-local-chat-line: calc(14px * var(--cheese-replay-local-chat-scale) * 1.4);
+  --cheese-replay-local-chat-identity-align: middle;
+  --cheese-replay-local-chat-text-align: middle;
+  --cheese-replay-local-chat-nickname-line: calc(14px * var(--cheese-replay-local-chat-scale) * 1.2);
+}
+
+html.chzzk-badge-moa-chat-font-scale-enabled aside#vod-aside .cheese-replay-local-chat-message {
+  --cheese-replay-local-chat-scale: var(--chzzk-badge-moa-chat-font-scale, 1);
+  --cheese-replay-local-chat-line: calc(14px * var(--cheese-replay-local-chat-scale) * 1.4);
+  --cheese-replay-local-chat-identity-align: middle;
+  --cheese-replay-local-chat-text-align: middle;
+  --cheese-replay-local-chat-nickname-line: calc(14px * var(--cheese-replay-local-chat-scale) * 1.2);
+}
+
+/* 치지직 채팅 글자 크기 설정(_scale_NNN_)만 걸린 경우. 줄높이는 치지직 값(20px × 배율)을 둔다. */
+aside#vod-aside .cheese-replay-local-chat-message.is-native-scaled {
+  --cheese-replay-local-chat-identity-align: middle;
+  --cheese-replay-local-chat-text-align: middle;
+  --cheese-replay-local-chat-nickname-line: calc(14px * var(--cheese-replay-local-chat-scale) * 1.2);
 }
 
 aside#vod-aside .cheese-replay-local-chat-content {
@@ -212,7 +249,10 @@ aside#vod-aside .cheese-replay-local-chat-content {
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--cheese-replay-local-chat-highlight-border);
   contain: layout;
-  line-height: 20px;
+  /* 치지직 줄처럼 상자 글자는 14px 로 두고(세로 가운데 정렬의 기준), 시간·닉네임·메시지에
+     배율을 직접 준다. */
+  font-size: 14px;
+  line-height: var(--cheese-replay-local-chat-line);
   overflow: hidden;
   padding: 4px 6px;
   text-align: left;
@@ -232,12 +272,13 @@ html.cheese-vod-local-chat-hide-bg aside#vod-aside .cheese-replay-local-chat-con
 aside#vod-aside .cheese-replay-local-chat-identity {
   align-items: center;
   display: inline-flex;
-  line-height: 20px;
+  font-size: calc(14px * var(--cheese-replay-local-chat-scale));
+  line-height: var(--cheese-replay-local-chat-nickname-line);
   margin: -2px 4px -2px 0;
   max-width: 100%;
   min-width: 0;
   padding: 2px 4px 2px 2px;
-  vertical-align: top;
+  vertical-align: var(--cheese-replay-local-chat-identity-align);
 }
 
 aside#vod-aside .cheese-replay-local-chat-badges {
@@ -253,9 +294,9 @@ aside#vod-aside .cheese-replay-local-chat-badge {
   border-radius: 0;
   display: block;
   flex: none;
-  height: 18px;
+  height: calc(18px * var(--cheese-replay-local-chat-scale));
   object-fit: cover;
-  width: 18px;
+  width: calc(18px * var(--cheese-replay-local-chat-scale));
 }
 
 aside#vod-aside .cheese-replay-local-chat-nickname {
@@ -278,6 +319,15 @@ aside#vod-aside .cheese-replay-local-chat-nickname-text {
 }
 
 aside#vod-aside .cheese-replay-local-chat-text {
+  font-size: calc(14px * var(--cheese-replay-local-chat-scale));
+  vertical-align: var(--cheese-replay-local-chat-text-align);
   /* Shift+Enter 줄바꿈을 살린다. */
   white-space: pre-wrap;
+}
+
+/* 시간은 content.css 의 0.85em 이 상자(14px) 기준이 되므로 배율을 직접 준다(chatFontScale.css 5-1). */
+aside#vod-aside .cheese-replay-local-chat-content > .cheese-chat-time {
+  font-size: calc(
+    14px * var(--cheese-chat-time-size, 0.85) * var(--cheese-replay-local-chat-scale)
+  );
 }

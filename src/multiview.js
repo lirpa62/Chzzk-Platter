@@ -772,9 +772,22 @@
   // 채널 수가 바뀌어 배치를 자동으로 바꾼 기록(되돌리면 원래 배치로). 이 화면이 열려 있는 동안만.
   const layoutCountBack = new Map();
 
+  // 세로 화면: 창 높이가 너비보다 크다(세로로 돌린 모니터 등). 방향이 바뀌면 배치 목록만
+  // 다시 그린다(고른 배치는 그대로).
+  const portraitQuery = window.matchMedia?.("(orientation: portrait)");
+  function isPortraitWindow() {
+    // 시작 중 먼저 불려도 되게 매번 창에 묻는다.
+    return window.matchMedia?.("(orientation: portrait)")?.matches === true;
+  }
+  portraitQuery?.addEventListener?.("change", () => {
+    if ($("mvLayoutGrid")) renderLayouts();
+  });
+
   function renderLayouts() {
     const box = $("mvLayoutGrid");
-    const list = LAYOUTS.layoutsFor(state.chosen.length);
+    // 세로 화면(창이 세로로 길다)이면 '세로 화면' 묶음을 맨 위에 둔다(시청 화면과 같다).
+    const portrait = isPortraitWindow();
+    const list = LAYOUTS.layoutsFor(state.chosen.length, { portrait, keepId: state.layoutId });
     if (!list.length) {
       box.innerHTML =
         '<p class="mv-hint">채널을 2개 이상 고르면 배치를 정할 수 있습니다.</p>';
@@ -782,18 +795,24 @@
       return;
     }
     // 채널 수가 바뀌면 그 수에서 지금과 비슷한 배치로 간다(LAYOUTS.layoutForCount).
-    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack);
+    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack,
+      { portrait });
     if (next) {
       state.layoutId = next.layoutId;
       state.chatSide = next.chatSide;
     }
+    let lastGroup = "";
     box.innerHTML = list
       .map((l) => {
+        const group = portrait ? (LAYOUTS.isPortraitGroup(l) ? "세로 화면" : "가로 화면") : "";
+        const heading = group && group !== lastGroup
+          ? `<div class="mv-layout-group-label" role="presentation">${group}</div>` : "";
+        lastGroup = group;
         // ⚠ 미리보기도 시청 화면과 같은 트랙 계산을 써야 한다. l.columns 를 그대로
         //   쓰면 '오른쪽 1' 이 3:1 로 보이지만 실제로는 모든 칸을 16:9 로 맞추느라
         //   1:1 이 되어, 고르기 전후의 모양이 달라진다.
         const preview = LAYOUTS.previewGrid(l);
-        return (
+        return heading + (
           `<button type="button" class="mv-layout${l.id === state.layoutId ? " is-on" : ""}" ` +
           `data-mv-layout="${esc(l.id)}" role="radio" ` +
           `aria-checked="${l.id === state.layoutId}">` +

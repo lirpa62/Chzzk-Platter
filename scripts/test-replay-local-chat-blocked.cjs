@@ -78,7 +78,7 @@ check(sent.join() === "광고 전에 쓰던 글", "풀린 뒤에는 쓰던 글�
 // 연결 상태.
 check(/activeAside\.querySelector\("\[class\*='_loading_image_'\]"\)/.test(source),
   "치지직 채팅창의 로딩 표시(_loading_image_)로 판정한다");
-check(/const pageObserver = new MutationObserver\(\(\) => \{\s*if \(!enabled\) return;\s*scheduleAvailabilityCheck\(\);/.test(source) &&
+check(/const pageObserver = new MutationObserver\(\(\) => \{\s*if \(!enabled\) return;\s*if \(!routeVideoNo\(\)\) \{[^}]*\}\s*scheduleAvailabilityCheck\(\);/.test(source) &&
   /availabilityTimer = window\.setTimeout\(\(\) => \{[\s\S]*?\}, 200\);/.test(source),
   "문서가 바뀔 때 0.2초에 한 번으로 묶어 확인한다");
 check(/container\.append\(composer\);[\s\S]{0,120}updateComposerAvailability\(\);/.test(source),

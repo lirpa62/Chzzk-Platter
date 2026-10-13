@@ -88,14 +88,16 @@ const call = (method, params = {}, sessionId) =>
   await ev(readFileSync(join(ROOT, "src/multiviewLayouts.js"), "utf8"));
 
   // 배치별로 칸을 직접 구성해 비율을 잰다(iframe 없이 상자만).
-  const out = await ev(`(()=>{
+  // 세로 화면 전용 배치(portrait)는 세로 창(900×1600)에서 잰다 — 가로 창에서는 4단이면
+  // 칸이 157px 로 작아져 1px 반올림만으로 허용 오차를 넘는다(그렇게 쓰는 배치가 아니다).
+  const measureAt = (portrait) => ev(`(()=>{
     const L=CheeseMultiviewLayouts;
     const frames=document.getElementById('mvFrames');
     const stage=document.getElementById('mvStage');
     const chat=document.getElementById('mvChat');
     const res=[];
     // '빈 칸' 채팅을 고를 수 있는 배치는 바깥·빈 칸 두 모드를 모두 잰다(applyLayout 과 같은 분기).
-    const variants=L.LAYOUTS.flatMap(layout=>layout.chatInsetOption
+    const variants=L.LAYOUTS.filter(layout=>Boolean(layout.portrait)===${portrait}).flatMap(layout=>layout.chatInsetOption
       ?[[layout,L.chatSidesFor(layout).find(side=>side!==L.CHAT_INSET_SIDE)],[layout,L.CHAT_INSET_SIDE]]
       :[[layout,'']]);
     for(const [layout,wanted] of variants){
@@ -165,6 +167,14 @@ const call = (method, params = {}, sessionId) =>
     }
     return res;
   })()`);
+  const out = await measureAt(false);
+  await cmd("Emulation.setDeviceMetricsOverride", {
+    width: 900,
+    height: 1600,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  out.push(...(await measureAt(true)));
 
   const TARGET = 16 / 9;
   // ⚠ 허용 오차는 칸 높이에 반비례한다. 렌더가 서브픽셀에서 반올림되므로 작은

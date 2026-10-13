@@ -2133,12 +2133,13 @@
   // 기본 OFF). 켜면 카드 호버가 팔로잉 미리보기와 동일한 패널을 띄운다. content.js 전용.
   const CARD_LIVE_PREVIEW_KEY = "cheeseCardLivePreview";
   let cardLivePreviewOn = false;
-  // 라이브 탐색 카드의 별도 미리보기 배치 선호도. auto는 기존처럼 사이드바 반대편을
-  // 우선하고, left/right는 해당 방향을 우선한다. 어느 모드든 화면 경계에서는 자동 반전.
+  // 라이브 탐색 카드의 별도 미리보기 배치 선호도. auto는 사이드바 반대편 좌우를 우선하되
+  // 좌우에 저장 크기가 안 들어가면 위·아래 중 크게 보이는 쪽을 쓴다. left/right는 그
+  // 좌우를, top/bottom은 위·아래를 우선한다. 어느 모드든 화면 경계에서는 자동 반전.
   const CARD_LIVE_PREVIEW_POSITION_KEY = "cheeseCardLivePreviewPosition";
   let cardLivePreviewPosition = "auto";
   function normalizeCardLivePreviewPosition(value) {
-    return value === "left" || value === "right" ? value : "auto";
+    return ["left", "right", "top", "bottom"].includes(value) ? value : "auto";
   }
   // 채널 다시보기 목록 카드(_information_) 호버 시 등록일/방송 시작 추정 시각 툴팁(전역, 기본
   // ON). content.js 전용. 카드 videoNo로 /service/v2/videos/<no>를 fetch·캐시한다.
@@ -2399,6 +2400,8 @@
     chatHideParty: false, // 채팅 상단 고정 '파티 후원' 진행 패널 숨김
     chatHideSendButton: false, // 일반·멀티뷰 라이브 채팅 입력창의 전송 버튼 숨김
     chatHideInputPlaceholder: false, // 라이브 채팅 입력창의 '채팅을 입력해주세요 (J)' 안내 문구 숨김
+    chatInputLatencyPlaceholder: false, // └ 숨긴 안내 문구 자리에 라이브 지연 표시(audioMixer.js)
+    chatViewerCount: false, // 채팅 입력창 후원 도구 줄 앞에 현재 시청자 수
     chatHideDonation: false, // 채팅 스트림의 후원(치즈) 메시지 숨김
     chatHideSubscription: false, // 채팅 스트림의 구독 메시지 숨김
     chatHideMissionMsg: false, // 채팅 스트림의 미션 메시지 숨김
@@ -2406,6 +2409,7 @@
     chatLeftPosition: false,
     chatAutoHide: false,
     chatShowTime: false, // 채팅 메시지에 시간 표시(MAIN world chatTimestamp.js)
+    chatTimeSeek: false, // └ 다시보기 채팅 시간을 누르면 그 장면으로 이동(chatTimestamp.js)
     chatShowOsIcon: false, // 채팅 작성 기기(PC/AOS/IOS) 아이콘 표시(chatTimestamp.js)
     chatHideNickname: false, // 채팅 닉네임 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
     chatHideBadge: false, // 채팅 배지 숨김(방장·매니저·파트너 제외, chatTimestamp.js)
@@ -2498,6 +2502,7 @@
     sbFollowGroupLiveFirst: false, // 그룹에서 방송 중 채널을 오프라인 채널보다 먼저 표시
     sbFollowCustomExcludeLogpowerHidden: false, // 통나무파워 지우개로 지운 채널을 전용목록에서 제외
     sidebarPush: false, // 사이드바 펼침 시 오버레이 대신 콘텐츠를 밀어내 공간 차지
+    sidebarResize: false, // 펼친 사이드바 너비 조절(240~360px, 창 폭 1200px 이상)
   };
   // 통나무파워 지우개로 지운 채널(hiddenChannels) 캐시 — 전용목록 필터용. onChanged 로 갱신.
   let logpowerHiddenChannelsCache = new Set();
@@ -7966,7 +7971,7 @@
   function findLogPowerInputArea() {
     const ta = [
       ...document.querySelectorAll(
-        "aside#aside-chatting textarea[class*='_input_'], aside#aside-chatting textarea[placeholder*='채팅']",
+        "aside#aside-chatting textarea[class*='_input_'], aside#aside-chatting textarea[placeholder*='채팅'], aside#aside-chatting textarea[data-cheese-latency-placeholder]",
       ),
     ].find((candidate) => !isInsideChatModal(candidate));
     if (!ta) return null;
@@ -8637,6 +8642,100 @@
     }
   }
 
+  // ── 채팅 입력창 시청자 수 ───────────────────────────────────────────────────
+  // 후원 도구 줄(통나무파워 배지와 같은 _donation_ 묶음)의 첫 자식으로 지금 시청자 수를
+  // 보인다. 값은 live-status 의 concurrentUserCount 를 30초마다 읽는다(보이는 탭에서만).
+  // 치지직이 입력 영역을 새로 그리면 init 이 다시 붙인다.
+  const CHAT_VIEWER_COUNT_ID = "cheese-chat-viewer-count";
+  const CHAT_VIEWER_COUNT_POLL_MS = 30000;
+  let chatViewerCountChannelId = "";
+  let chatViewerCountValue = null; // 방송 중이 아니거나 아직 모르면 null
+  let chatViewerCountAt = 0;
+  let chatViewerCountRequest = 0;
+  let chatViewerCountTimer = 0;
+
+  function renderChatViewerCount() {
+    const badge = document.getElementById(CHAT_VIEWER_COUNT_ID);
+    if (!badge) return;
+    const hidden = chatViewerCountValue == null;
+    if (badge.hidden !== hidden) badge.hidden = hidden;
+    if (hidden) return;
+    const text = chatViewerCountValue.toLocaleString("ko-KR");
+    const value = badge.querySelector(".cheese-chat-viewer-count-value");
+    if (value && value.textContent !== text) value.textContent = text;
+  }
+
+  async function refreshChatViewerCount() {
+    const channelId = chatViewerCountChannelId;
+    if (!channelId) return;
+    const request = ++chatViewerCountRequest;
+    chatViewerCountAt = Date.now();
+    try {
+      const res = await fetch(
+        `https://api.chzzk.naver.com/polling/v3.1/channels/${encodeURIComponent(channelId)}/live-status`,
+        { credentials: "include", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) return; // 실패면 직전 값을 둔다
+      const content = (await res.json())?.content;
+      if (request !== chatViewerCountRequest || channelId !== chatViewerCountChannelId) return;
+      const count = Number(content?.concurrentUserCount);
+      chatViewerCountValue = content?.status === "OPEN" && Number.isFinite(count) && count >= 0
+        ? count : null;
+      renderChatViewerCount();
+    } catch {}
+  }
+
+  function stopChatViewerCount() {
+    if (chatViewerCountTimer) {
+      window.clearInterval(chatViewerCountTimer);
+      chatViewerCountTimer = 0;
+    }
+    chatViewerCountChannelId = "";
+    chatViewerCountValue = null;
+    chatViewerCountAt = 0;
+    chatViewerCountRequest++;
+    document.getElementById(CHAT_VIEWER_COUNT_ID)?.remove();
+  }
+
+  function applyChatViewerCount() {
+    const channelId = getCurrentLiveChannelId();
+    // 멀티뷰 영상 칸은 채팅을 접어 둔다(칸마다 30초 요청이 곱해진다). 채팅 칸은 표시한다.
+    if (!featureFlags.chatViewerCount || !channelId || IS_MULTIVIEW_FRAME) {
+      if (chatViewerCountChannelId || document.getElementById(CHAT_VIEWER_COUNT_ID)) stopChatViewerCount();
+      return;
+    }
+    if (channelId !== chatViewerCountChannelId) {
+      chatViewerCountChannelId = channelId;
+      chatViewerCountValue = null;
+      chatViewerCountAt = 0;
+    }
+    let badge = document.getElementById(CHAT_VIEWER_COUNT_ID);
+    // 이미 후원 도구 줄 맨 앞에 붙어 있으면 다시 찾지 않는다. 찾기(findLogPowerHost)는
+    // 채팅창의 버튼을 모두 훑는데, init 은 1초에 여러 번 돈다. 치지직이 입력 영역을 새로
+    // 그리면 배지가 옛 줄과 함께 떨어져 나가 다시 찾게 된다.
+    if (badge?.parentElement?.firstChild !== badge) {
+      const host = findLogPowerHost();
+      // 채팅을 접어 붙일 곳이 없으면 묻지도 않는다(아래 타이머도 배지가 있을 때만 묻는다).
+      if (!host) return;
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.id = CHAT_VIEWER_COUNT_ID;
+        badge.className = "cheese-chat-viewer-count";
+        badge.hidden = true;
+        badge.innerHTML =
+          `<svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6.5" r="3.25" stroke="currentColor" stroke-width="1.7"/><path d="M3.75 16.25c.6-3.1 3.2-5 6.25-5s5.65 1.9 6.25 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>` +
+          `<b class="cheese-chat-viewer-count-value"></b>` +
+          `<span class="tooltip-text">현재 시청자 수</span>`;
+      }
+      host.insertBefore(badge, host.firstChild);
+      renderChatViewerCount();
+    }
+    if (Date.now() - chatViewerCountAt >= CHAT_VIEWER_COUNT_POLL_MS) void refreshChatViewerCount();
+    chatViewerCountTimer ||= window.setInterval(() => {
+      if (!document.hidden && document.getElementById(CHAT_VIEWER_COUNT_ID)) void refreshChatViewerCount();
+    }, CHAT_VIEWER_COUNT_POLL_MS);
+  }
+
   // 토글/페이지 전환에 따라 표시·타이머 보장. init에서 호출.
   function applyLogPowerBadge() {
     const channelId = getCurrentLiveChannelId();
@@ -8651,6 +8750,7 @@
       }
       removeLogPowerBadge();
       logPowerChannelId = "";
+      reportMultiviewLogPower();
       return;
     }
     // 다른 확장이 이미 통나무파워 배지를 넣고 있으면 우리 배지는 양보한다. 배지만 접고,
@@ -9536,7 +9636,45 @@
   // ── 표시 통합 ──────────────────────────────────────────────────────────────
   // 적립 active / 1시간 타이머 잔여로 progress·timer 슬롯 토글. 타이머가 보이면
   // progress는 숨긴다(con-chzzk 동일).
+  // 멀티뷰 칸이면 이 채널의 적립 상태를 시청 화면에 알린다(헤더에 적립 중인 채널을 띄운다).
+  // 칸의 채팅이 접혀 배지가 없어도 보내야 하므로 배지 확인보다 먼저 부른다. 같은 상태는
+  // 다시 보내지 않는다(1시간 타이머가 매초 이 함수를 부른다). 남은 시간은 시청 화면이
+  // 종료 시각으로 센다.
+  let multiviewLogPowerSent = "";
+  function reportMultiviewLogPower() {
+    if (!IS_MULTIVIEW_FRAME || window.parent === window || !multiviewLiveChannelId) return;
+    const channelId = getCurrentLiveChannelId();
+    const on = !!channelId && featureFlags.chatLogPower && !logPowerRadioPaused;
+    const active = on &&
+      logPowerWatchActive &&
+      logPowerWatchActiveChannelId === channelId &&
+      (logPowerWatchActiveUntil === 0 || logPowerWatchActiveUntil > Date.now());
+    const hourEndsAt = on && logPowerHourChannelId === channelId &&
+      logPowerHourEndsAt > Date.now() ? logPowerHourEndsAt : 0;
+    const amount = on && logPowerCachedAmount != null && logPowerCacheHref === location.href
+      ? logPowerCachedAmount : null;
+    const logPower = {
+      active,
+      activeUntil: active ? logPowerWatchActiveUntil : 0,
+      amount,
+      hourEndsAt,
+    };
+    const key = JSON.stringify(logPower);
+    if (key === multiviewLogPowerSent) return;
+    multiviewLogPowerSent = key;
+    try {
+      window.parent.postMessage({
+        source: MULTIVIEW_MESSAGE,
+        type: "FRAME_LOG_POWER",
+        channelId: MULTIVIEW_CHANNEL_ID,
+        logPower,
+        ...(MULTIVIEW_TOKEN ? { token: MULTIVIEW_TOKEN } : {}),
+      }, MULTIVIEW_PARENT_ORIGIN);
+    } catch {}
+  }
+
   function updateLogPowerIndicators() {
+    reportMultiviewLogPower();
     const badge = document.getElementById(LOGPOWER_BADGE_ID);
     if (!badge) return;
     const channelId = getCurrentLiveChannelId();
@@ -10499,7 +10637,9 @@
   //   그래서 '캐시가 있을 때만'을 기본으로 두고, 전수 수집은 따로 켜게 나눈다.
   const CHAT_GRAPH_AUTO_KEY = "cheeseVodChatGraphAuto";
   const CHAT_GRAPH_AUTO_COLLECT_KEY = "cheeseVodChatGraphAutoCollect";
-  const ROLE_CHAT_ON_KEY = "cheeseVodRoleChatOn";
+  // 기본 꺼짐. ⚠ 예전 키(cheeseVodRoleChatOn, 기본 켜짐)에서 바꿨다 — 이미 켜 둔 사람도
+  //   한 번 꺼진 상태로 시작한다. 예전 키는 RETIRED_CLICK_OPTION_KEYS 가 지운다.
+  const ROLE_CHAT_ON_KEY = "cheeseVodRoleChatEnabled";
   const ROLE_CHAT_MAX_PAGES = 1500;
   const ROLE_CHAT_BOTS_KEY = "cheeseVodRoleChatBots";
   const CHAT_GRAPH_LAYER_CLASS = "cheese-chat-graph-layer";
@@ -10534,7 +10674,7 @@
   let chatGraphOn = false; // 설정(기본 OFF). 켜면 버튼만 나타난다.
   let chatGraphAuto = false; // 자동 표시(캐시가 있을 때)
   let chatGraphAutoCollect = false; // 캐시가 없어도 자동 수집
-  let vodRoleChatOn = true; // 방장·매니저 채팅 타임라인
+  let vodRoleChatOn = false; // 방장·매니저 채팅 타임라인(기본 꺼짐)
   // 방장·매니저·파트너 채팅 패널(별도 버튼으로 연다).
   let roleChatOpenPanel = null;
   let roleChatOpenVideoNo = "";
@@ -16183,6 +16323,120 @@
     window.setTimeout(tick, 60);
   });
 
+  // ── '사용 중인 프로필' 팝업에 이 채널 시청 시간 줄 ─────────────────────────
+  // 내 채팅 줄(ensureRecapProfileRow)과 같은 자리·모양. '보기'를 누르면 팝업 안에서
+  // 로그인/비로그인 × 라이브/다시보기/라디오와 최근 기록을 보이고, 통계 화면을 연다.
+  const WATCH_TIME_ROW_CLASS = "cheese-watch-time-profile-row";
+
+  function showWatchTimeInDialog(dlg, channelId, summary) {
+    if (!dlg || dlg.querySelector(`.${RECAP_VIEW_CLASS}`)) return;
+    const contents = dlg.querySelector("#popup_contents") || dlg;
+    for (const child of [...contents.children]) {
+      if (child.hidden) continue;
+      child.hidden = true;
+      child.setAttribute("data-cheese-recap-hidden", "1");
+    }
+    const fmt = (seconds) => (seconds > 0 ? WATCH_TIME_STORE.formatDuration(seconds) : "-");
+    const view = document.createElement("div");
+    view.className = `${RECAP_VIEW_CLASS} cheese-watch-time-view`;
+    // 로그인/비로그인을 나눠 본다(같은 채널이라도 따로 센다).
+    const rows = ["live", "vod", "radio"].map((mode) => {
+      const login = WATCH_TIME_STORE.aggregate(summary.shards, { channelId, login: "login", modes: [mode] }).total;
+      const guest = WATCH_TIME_STORE.aggregate(summary.shards, { channelId, login: "guest", modes: [mode] }).total;
+      return `<tr><th scope="row">${WATCH_TIME_STORE.MODE_LABELS[mode]}</th><td>${fmt(login)}</td><td>${fmt(guest)}</td><td>${fmt(login + guest)}</td></tr>`;
+    }).join("");
+    const days = Object.keys(summary.byDay).sort();
+    const recent = days.slice(-7).reverse().map((date) =>
+      `<li><span>${escapeHtml(date)}</span><b>${fmt(summary.byDay[date].total)}</b></li>`).join("");
+    view.innerHTML = `
+      <div class="${RECAP_VIEW_CLASS}-head">
+        <button type="button" data-watch-time-back aria-label="뒤로가기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M15 5 8 12l7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <strong>시청 시간 ${fmt(summary.total)}</strong>
+        <button type="button" data-watch-time-open title="채널별·기간별 시청 시간 통계">통계</button>
+      </div>
+      <table class="cheese-watch-time-table">
+        <thead><tr><th scope="col"></th><th scope="col">로그인</th><th scope="col">비로그인</th><th scope="col">합계</th></tr></thead>
+        <tbody>${rows}
+          <tr class="is-total"><th scope="row">합계</th><td>${fmt(summary.login)}</td><td>${fmt(summary.guest)}</td><td>${fmt(summary.total)}</td></tr>
+        </tbody>
+      </table>
+      <p class="cheese-watch-time-caption">최근 기록${days.length ? ` · 처음 기록 ${escapeHtml(days[0])}` : ""}</p>
+      <ul class="cheese-watch-time-days">${recent || "<li><span>기록이 없습니다.</span></li>"}</ul>`;
+    contents.append(view);
+    view.querySelector("[data-watch-time-back]")?.addEventListener("click", () => restoreProfileDialog(dlg));
+    view.querySelector("[data-watch-time-open]")?.addEventListener("click", () => {
+      window.open(`${chrome.runtime.getURL("watchTime.html")}?channel=${encodeURIComponent(channelId)}`, "_blank");
+    });
+  }
+
+  async function ensureWatchTimeProfileRow() {
+    if (!watchTimeOn || !WATCH_TIME_STORE) return;
+    const dlg = findProfileDialog();
+    if (!dlg || dlg.querySelector(`.${WATCH_TIME_ROW_CLASS}`)) return;
+    const rows = [...dlg.querySelectorAll("[class*='_row_']")]
+      .filter((row) => !row.classList.contains(RECAP_DIALOG_ROW_CLASS));
+    const sample = rows[rows.length - 1];
+    const wrapper = sample?.parentElement;
+    const channelId = currentLiveChannelId().toLowerCase();
+    if (!wrapper || !channelId) return;
+    const row = document.createElement("div");
+    // 형제 줄의 클래스를 그대로 써서 치지직 줄과 생김새가 같다(내 채팅 줄과 같은 방식).
+    row.className = `${sample.className} ${RECAP_DIALOG_ROW_CLASS} ${WATCH_TIME_ROW_CLASS}`;
+    row.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="flex:none">
+        <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span data-recap-count>이 채널 시청 시간 <span data-recap-count-value>…</span></span>
+      <button type="button" data-watch-time-more class="${RECAP_DIALOG_ROW_CLASS}-more" hidden>보기</button>`;
+    // 내 채팅 줄 다음, 없으면 통나무파워 박스 앞, 그것도 없으면 묶음 끝.
+    const recapRow = wrapper.querySelector(`.${RECAP_DIALOG_ROW_CLASS}:not(.${WATCH_TIME_ROW_CLASS})`);
+    const power = wrapper.querySelector("[class*='_power_wrapper_']");
+    if (recapRow) recapRow.after(row);
+    else if (power) wrapper.insertBefore(row, power);
+    else wrapper.append(row);
+
+    let summary = null;
+    try {
+      const shards = await WATCH_TIME_STORE.loadShards((keys) => chrome.storage.local.get(keys));
+      summary = { ...WATCH_TIME_STORE.aggregate(shards, { channelId }), shards };
+    } catch {}
+    if (!row.isConnected) return;
+    const value = row.querySelector("[data-recap-count-value]");
+    if (value) value.textContent = summary?.total ? WATCH_TIME_STORE.formatDuration(summary.total) : "없음";
+    const more = row.querySelector("[data-watch-time-more]");
+    if (more && summary?.total) {
+      more.hidden = false;
+      more.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showWatchTimeInDialog(dlg, channelId, summary);
+      });
+    }
+  }
+
+  // 프로필 버튼을 누르면 치지직이 팝업을 그린다 → 그 직후 줄을 끼워 넣는다(내 채팅 줄과 같다).
+  document.addEventListener("click", (e) => {
+    if (!watchTimeOn) return;
+    const btn = e.target?.closest?.(
+      "aside#aside-chatting button[class*='_setting_button_']",
+    );
+    if (!btn || !btn.querySelector("[class*='_profile_']")) return;
+    let tries = 0;
+    const tick = () => {
+      if (++tries > 12) return;
+      void ensureWatchTimeProfileRow();
+      if (!findProfileDialog()?.querySelector(`.${WATCH_TIME_ROW_CLASS}`)) {
+        window.setTimeout(tick, 100);
+      }
+    };
+    window.setTimeout(tick, 80);
+  });
+
   function closeChatRecapPanel() {
     clearChatRecapClickDelayTimer();
     stopChatRecapPanelTimeTracker();
@@ -18121,6 +18375,12 @@
       "cheese-chat-hide-input-placeholder",
       featureFlags.chatHideInputPlaceholder === true,
     );
+    applyChatDonationToolsClass();
+    // 다시보기 채팅 시간 클릭 이동(시간 표시가 켜져 있을 때만). 손가락 커서·밑줄은 CSS.
+    document.documentElement.classList.toggle(
+      "cheese-chat-time-seek",
+      featureFlags.chatShowTime === true && featureFlags.chatTimeSeek === true,
+    );
     // 다시보기 로컬 채팅 줄 강조의 테두리선·배경색 숨김(replayLocalChat.css 가 본다).
     document.documentElement.classList.toggle(
       "cheese-vod-local-chat-hide-border",
@@ -18198,9 +18458,49 @@
   let chatFontScaleValue = CHAT_FONT_SCALE_DEFAULT;
   // 채팅 시간 표시 형식. MAIN world(chatTimestamp.js)에 전달한다.
   const CHAT_TIME_FORMAT_KEY = "cheeseChatTimeFormat";
+  // 채팅 시간 글자 크기: 메시지 글자 대비 %(70~130, 5 단위, 기본 85). CSS 변수로 내려
+  // 채팅 폰트 크기 배율과 곱한다(chatFontScale.css 5-1, replayLocalChat.css).
+  const CHAT_TIME_SIZE_KEY = "cheeseChatTimeSize";
+  const CHAT_TIME_SIZE_DEFAULT = 85;
+  let chatTimeSize = CHAT_TIME_SIZE_DEFAULT;
+  function normalizeChatTimeSize(value) {
+    if (value == null || value === "") return CHAT_TIME_SIZE_DEFAULT;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return CHAT_TIME_SIZE_DEFAULT;
+    return Math.min(130, Math.max(70, Math.round(n / 5) * 5));
+  }
+  function applyChatTimeSize() {
+    const root = document.documentElement;
+    if (!root) return;
+    if (chatTimeSize === CHAT_TIME_SIZE_DEFAULT) {
+      root.style.removeProperty("--cheese-chat-time-size");
+    } else {
+      root.style.setProperty("--cheese-chat-time-size", String(chatTimeSize / 100));
+    }
+  }
   let chatTimeFormat = "24h";
   function normalizeChatTimeFormat(value) {
     return value === "12h-en" || value === "12h-ko" ? value : "24h";
+  }
+  // 채팅 입력창 후원 도구 줄: show | hide-text('후원하기' 문구만) | hide-buttons(후원 아이콘
+  // 버튼 묶음) | hide-all(둘 다 — 치즈 아이콘은 남아 후원할 수 있다). content.css 가 루트
+  // 클래스를 본다.
+  const CHAT_DONATION_TOOLS_KEY = "cheeseChatDonationTools";
+  let chatDonationTools = "show";
+  function normalizeChatDonationTools(value) {
+    return ["hide-text", "hide-buttons", "hide-all"].includes(value) ? value : "show";
+  }
+  function applyChatDonationToolsClass() {
+    const root = document.documentElement;
+    const all = chatDonationTools === "hide-all";
+    root.classList.toggle("cheese-chat-donation-hide-text", all || chatDonationTools === "hide-text");
+    root.classList.toggle("cheese-chat-donation-hide-buttons", all || chatDonationTools === "hide-buttons");
+  }
+  // 다시보기 채팅 시간 클릭 이동: 채팅 시점보다 몇 초 앞으로 옮길지(0 | 3 | 5 | 10).
+  const CHAT_TIME_SEEK_OFFSET_KEY = "cheeseChatTimeSeekOffset";
+  let chatTimeSeekOffset = 3;
+  function normalizeChatTimeSeekOffset(value) {
+    return [0, 3, 5, 10].includes(Number(value)) ? Number(value) : 3;
   }
   const CHAT_OS_ICONS_KEY = "cheeseChatOsIcons";
   const CHAT_OS_ICON_POSITION_KEY = "cheeseChatOsIconPosition";
@@ -18772,14 +19072,27 @@
   // 빈 채팅 입력 textarea의 height를 40px로 강제(배지 모아 챗 동일). 폭이 좁아지면
   // placeholder가 줄바꿈되며 입력창 높이가 늘어나는 문제를 막는다. 입력 중/포커스
   // 상태면 건드리지 않는다.
+  // ⚠ 다시보기 채팅창(vod-aside)에는 치지직 입력창이 없고 우리 '다시보기 채팅 입력'
+  //   (replayLocalChat.js)만 있다. 안내 문구에 '채팅'이 들어 있어 치지직 입력창으로 잘못 잡혀
+  //   빈 입력창이 40px !important 로 고정됐다(폭과 상관없이). 그 입력창은 높이를 스스로 맞추니
+  //   여기서는 치지직 입력창만 찾는다.
+  const NATIVE_CHAT_TEXTAREA =
+    "textarea:not(.cheese-replay-local-chat-input):not(.mv-vod-chat-compose-input)";
+  function findNativeChatTextarea(aside) {
+    return (
+      aside.querySelector(`${NATIVE_CHAT_TEXTAREA}[placeholder*='채팅을 입력해주세요']`) ||
+      aside.querySelector(`${NATIVE_CHAT_TEXTAREA}[class*='_input_']`) ||
+      aside.querySelector(`${NATIVE_CHAT_TEXTAREA}[placeholder*='채팅']`) ||
+      // 안내 문구 자리에 지연을 띄운 입력창(audioMixer.js)은 문구에 '채팅'이 없다.
+      aside.querySelector(`${NATIVE_CHAT_TEXTAREA}[data-cheese-latency-placeholder]`)
+    );
+  }
   function normalizeChatInputHeight(aside) {
     if (!(aside instanceof HTMLElement)) return;
-    const textarea =
-      aside.querySelector("textarea[placeholder*='채팅을 입력해주세요']") ||
-      aside.querySelector("textarea[class*='_input_']") ||
-      aside.querySelector("textarea[placeholder*='채팅']");
+    const textarea = findNativeChatTextarea(aside);
     if (!(textarea instanceof HTMLTextAreaElement)) return;
-    if (!String(textarea.placeholder || "").includes("채팅")) return;
+    if (!String(textarea.placeholder || "").includes("채팅") &&
+        !textarea.hasAttribute("data-cheese-latency-placeholder")) return;
     if (String(textarea.value || "").length > 0) return;
     if (document.activeElement === textarea) return;
     if (
@@ -18807,7 +19120,7 @@
       document.documentElement.classList.contains("cheese-chat-width-resize-enabled") ||
       (IS_MULTIVIEW_FRAME && !multiviewVideoNo && !isChatFolded(aside))
     );
-    const textarea = active ? aside.querySelector("textarea") : null;
+    const textarea = active ? aside.querySelector(NATIVE_CHAT_TEXTAREA) : null;
     if (textarea !== chatInputHeightTarget) {
       chatInputHeightObserver?.disconnect();
       chatInputHeightTarget = textarea instanceof HTMLTextAreaElement ? textarea : null;
@@ -18834,10 +19147,7 @@
     // auto-grow가 마지막 계산값(max-height 60px에 걸린 값)으로 height를 채워 60px로
     // 고정돼 버린다(빈 상태인데도). 그래서 빈/비포커스면 기본 40px로 명시 복원하되,
     // !important는 빼서 입력/포커스 시 치지직이 정상적으로 다시 키울 수 있게 둔다.
-    const textarea =
-      aside.querySelector("textarea[placeholder*='채팅을 입력해주세요']") ||
-      aside.querySelector("textarea[class*='_input_']") ||
-      aside.querySelector("textarea[placeholder*='채팅']");
+    const textarea = findNativeChatTextarea(aside);
     if (textarea instanceof HTMLTextAreaElement) {
       const empty = String(textarea.value || "").length === 0;
       const focused = document.activeElement === textarea;
@@ -20314,6 +20624,35 @@
     return `${pathname}|${boxId}|${headerOffset}`;
   }
 
+  // 헤더 자동 숨김 CSS(헤더를 fixed 오버레이로 띄우고 콘텐츠가 헤더 자리 60px 를 회수)가
+  // 실제로 적용됐는지. 헤더가 위로 숨어 있거나 peek 클래스로 떠 있으면 적용된 상태다.
+  // 적용 전(설정을 켠 직후 등)에는 치지직 원래 배치라 영상이 헤더 높이만큼 아래에 있다.
+  // ⚠ HEADER_PEEK_CLASS 는 이 함수보다 뒤에 const 로 선언돼 TDZ 를 피해 문자열을 쓴다.
+  function isHeaderAutoHideLayoutApplied() {
+    const header = document.getElementById?.("header");
+    if (!header) return true;
+    if (header.classList?.contains("cheese-header-peek")) return true;
+    const offset = typeof headerOffsetPx !== "undefined" ? headerOffsetPx : 0;
+    return header.getBoundingClientRect().bottom <= offset + 1;
+  }
+
+  // 헤더 자동 숨김 배치에서 잰 좌표만 기준으로 저장한다.
+  // ⚠ 헤더가 자리를 차지한 배치의 좌표(실측 top 60)가 기준으로 남으면, 헤더를 숨겨도
+  //   (top 0) 영상 높이가 1020(화면 1080)에 묶여 아래 60px 에 방제가 보이고 좌우
+  //   레터박스도 줄지 않았다. 헤더 숨김을 끈 채 잰 값이 켠 뒤에도 남던 경로다.
+  function rememberFillScreenTop(box) {
+    const referenceKey = getFillScreenTopReferenceKey(box);
+    if (fillScreenTopReferenceKey !== referenceKey) {
+      fillScreenTopReferenceKey = referenceKey;
+      fillScreenTopReference = null;
+    }
+    const measured = Math.max(0, box.getBoundingClientRect().top);
+    if (!Number.isFinite(fillScreenTopReference) && isHeaderAutoHideLayoutApplied()) {
+      fillScreenTopReference = measured;
+    }
+    return measured;
+  }
+
   // 헤더 표시 전환 직전에 숨김 상태의 영상 상단 좌표를 확보한다. 같은 페이지에서는
   // 치지직의 일시적인 플레이어 이동이나 DOM 교체로 이 기준을 다시 측정하지 않는다.
   function lockFillScreenTopForHeaderTransition() {
@@ -20321,29 +20660,18 @@
     const target = getFillScreenTarget();
     const box = target?.box instanceof HTMLElement ? target.box : target?.el;
     if (!(box instanceof HTMLElement)) return;
-    const measured = Math.max(0, box.getBoundingClientRect().top);
-    const referenceKey = getFillScreenTopReferenceKey(box);
-    if (
-      fillScreenTopReferenceKey !== referenceKey ||
-      !Number.isFinite(fillScreenTopReference)
-    ) {
-      fillScreenTopReferenceKey = referenceKey;
-      fillScreenTopReference = measured;
-    }
+    rememberFillScreenTop(box);
   }
 
   function getStableFillScreenTop(videoBox) {
-    const measured = Math.max(0, videoBox.getBoundingClientRect().top);
-    const referenceKey = getFillScreenTopReferenceKey(videoBox);
     if (!featureFlags.headerAutoHide) {
-      fillScreenTopReferenceKey = referenceKey;
-      fillScreenTopReference = measured;
-      return measured;
+      // 헤더가 자리를 차지한 지금 좌표를 그대로 쓰되, 자동 숨김 기준으로는 남기지 않는다.
+      clearFillScreenTopReference();
+      return Math.max(0, videoBox.getBoundingClientRect().top);
     }
-    if (fillScreenTopReferenceKey !== referenceKey) {
-      fillScreenTopReferenceKey = referenceKey;
-      fillScreenTopReference = measured;
-    }
+    const measured = rememberFillScreenTop(videoBox);
+    // 기준이 아직 없으면(자동 숨김 CSS 적용 전) 저장하지 않고 지금 좌표를 쓴다. init 이
+    // DOM 변화마다 화면 채우기를 다시 부르므로 CSS 가 적용된 뒤 기준이 잡힌다.
     return Number.isFinite(fillScreenTopReference)
       ? fillScreenTopReference
       : measured;
@@ -22285,8 +22613,13 @@
       const video = event.currentTarget;
       if (!(video instanceof HTMLMediaElement)) return;
       if (multiviewMuted && !video.muted) muteOverriddenByUser = true;
+      // user: 방금 이 칸에서 사용자가 소리를 조작했는가. 부모는 이때만 '이 채널을 듣겠다'로
+      // 본다(치지직이 초기화·화질 전환 중 스스로 볼륨을 되돌리는 것은 사용자 뜻이 아니다).
       if (Number.isFinite(video.volume) && video.volume >= 0 && video.volume <= 1)
-        notifyParent("FRAME_AUDIO_STATE", { volume: video.volume });
+        notifyParent("FRAME_AUDIO_STATE", {
+          volume: video.volume,
+          user: Date.now() - lastTrustedAudioInputAt < TRUSTED_AUDIO_INPUT_WINDOW_MS,
+        });
       // 플레이어에서 직접 음소거를 켜거나 끈 경우. 부모의 볼륨 패널이 따라가도록 알린다.
       if (
         video.muted !== multiviewMuted &&
@@ -22474,6 +22807,29 @@
     };
 
     // 사용자가 소리 관련 조작을 하면 그 의사를 기록한다.
+    // ⚠ 볼륨 막대를 끌거나(누르는 순간) 플레이어 위에서 휠로 볼륨을 바꾸는 것도 사용자 조작이다.
+    //   예전에는 클릭·키만 셌다 — '메인만 듣기' 중 보조 칸 플레이어에서 볼륨을 올려도 부모가
+    //   그 칸을 계속 음소거로 알았다.
+    const VOLUME_CONTROL_SELECTOR =
+      ".pzp-pc-volume-button, .pzp-volume-button, .pzp-pc-volume, .pzp-pc-volume-slider, .pzp-volume-slider";
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.isTrusted && event.target?.closest?.(VOLUME_CONTROL_SELECTOR)) {
+          lastTrustedAudioInputAt = Date.now();
+        }
+      },
+      true,
+    );
+    document.addEventListener(
+      "wheel",
+      (event) => {
+        if (event.isTrusted && event.target?.closest?.("#live_player_layout, #player_layout, .pzp")) {
+          lastTrustedAudioInputAt = Date.now();
+        }
+      },
+      { capture: true, passive: true },
+    );
     document.addEventListener(
       "click",
       (event) => {
@@ -24310,6 +24666,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     const css = rules.join("\n");
     if (style.textContent !== css) style.textContent = css;
     applySidebarSections();
+    applySidebarResize(); // 폭을 먼저 정해야 밀어내기가 그 폭을 잰다
     applySidebarPush();
   }
 
@@ -24384,6 +24741,220 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       `div#layout-body { ${side}: ${width}px !important;` +
       ` transition: padding 0.2s ease !important; }`;
     if (style.textContent !== css) style.textContent = css;
+  }
+
+  // ── 사이드바 너비 조절(펼친 상태에서 넓히기만) ─────────────────────────────
+  // 펼친 폭(240px)은 사이드바 자신의 규칙 하나(_is_expanded_ { width: 240px })에서 나오고
+  // 안쪽 요소는 모두 따라 넓어진다(실측: 100px 넓혀도 안 따라온 요소 0개). 그래서 사이드바
+  // 폭만 덮어쓴다. 좁히기는 안쪽이 240px 기준이라 막는다. 창 폭 1199px 이하(치지직이
+  // 펼침을 어두운 배경 오버레이로 바꾼다)와 접힘(아이콘 폭)은 건드리지 않는다.
+  // 끄는 동안엔 사이드바 폭만 바꾸고, 놓을 때 밀어내기 여백·채팅 최대 폭·화면 채우기를
+  // 한 번에 다시 맞춘다. 끄는 내내 본문을 다시 배치하면 플레이어 크기가 계속 바뀐다.
+  // 밀어내기를 켜면 본문이 좁아져 /lives 카드가 작아진다(열 수는 치지직이 창 폭으로
+  // 정한다, 실측). 360px 에서 약 10% — 열 수는 보정하지 않는다.
+  const SIDEBAR_WIDTH_KEY = "cheeseSidebarWidth";
+  const SIDEBAR_WIDTH_MIN = 240;
+  const SIDEBAR_WIDTH_MAX = 360;
+  const SIDEBAR_RESIZE_MIN_VIEWPORT = 1200;
+  const SIDEBAR_RESIZER_CLASS = "cheese-sidebar-width-resizer";
+  const SIDEBAR_RESIZE_STYLE_ID = "cheese-sidebar-resize-style";
+  let sidebarWidthValue = 0; // 0 = 조절 전(치지직 기본 폭)
+  let sidebarResizeFrame = 0;
+  let sidebarResizeFinishTimer = 0;
+  // 조절하는 동안(+놓은 직후 잠깐)은 사이드바 미리보기·툴팁을 열지 않는다. 놓을 때 본문
+  // 여백이 바뀌면 브라우저가 커서 아래 요소에 호버를 다시 보내 미리보기가 바로 뜰 수 있다.
+  const SIDEBAR_RESIZE_HOVER_LOCK_MS = 350;
+  let sidebarResizeDragging = false;
+  let sidebarResizeLockUntil = 0;
+
+  function isSidebarResizeLocked() {
+    return sidebarResizeDragging || Date.now() < sidebarResizeLockUntil;
+  }
+
+  // 잡는 순간 떠 있던 호버 UI 를 닫는다(고정한 미리보기는 사용자가 둔 것이라 남긴다).
+  function closeSidebarHoverUiForResize() {
+    if (!followPreviewState.pinned) closeFollowPreview();
+    if (followChannelTooltipState.hoverTimer) {
+      clearTimeout(followChannelTooltipState.hoverTimer);
+      followChannelTooltipState.hoverTimer = 0;
+    }
+    followChannelTooltipState.hoverAnchor = null;
+    hideFollowChannelTooltip();
+  }
+
+  function clampSidebarWidth(value) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, n));
+  }
+
+  function isSidebarResizeActive() {
+    return (
+      featureFlags.sidebarResize &&
+      !featureFlags.sidebar &&
+      !IS_MULTIVIEW_FRAME &&
+      !!document.getElementById("sidebar")
+    );
+  }
+
+  function buildSidebarResizeCss(width) {
+    const edge = featureFlags.sidebarRight ? "left" : "right";
+    const handle = `aside#sidebar .${SIDEBAR_RESIZER_CLASS}`;
+    const wide = `@media (min-width: ${SIDEBAR_RESIZE_MIN_VIEWPORT}px)`;
+    return [
+      width
+        ? `${wide} { aside#sidebar[class*="_is_expanded_"] { width: ${width}px !important; } }`
+        : "",
+      `${handle} { display: none; }`,
+      `${wide} {
+  aside#sidebar[class*="_is_expanded_"] .${SIDEBAR_RESIZER_CLASS} {
+    display: block; position: absolute; top: 0; bottom: 0; ${edge}: 0;
+    width: 6px; z-index: 5; cursor: col-resize; touch-action: none;
+  }
+}`,
+      `${handle}::before {
+  content: ""; position: absolute; top: 10px; bottom: 10px; ${edge}: 0;
+  width: 2px; border-radius: 999px; background: rgba(93, 191, 255, 0);
+  transition: background-color 0.16s ease;
+}`,
+      `${handle}:hover::before, html.cheese-sidebar-resizing ${handle}::before {
+  background: rgba(93, 191, 255, 0.72);
+}`,
+      `html.cheese-sidebar-resizing, html.cheese-sidebar-resizing * {
+  cursor: col-resize !important; user-select: none !important;
+}`,
+      // 끄는 동안 커서가 지나가는 사이드바 항목·본문 카드에 호버가 걸리지 않게 한다
+      // (치지직 자체 툴팁·카드 미리보기 포함). 끌기는 document 에서 받으므로 영향 없다.
+      `html.cheese-sidebar-resizing aside#sidebar > :not(.${SIDEBAR_RESIZER_CLASS}),
+html.cheese-sidebar-resizing div#layout-body {
+  pointer-events: none !important;
+}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function writeSidebarResizeCss() {
+    const style = document.getElementById(SIDEBAR_RESIZE_STYLE_ID);
+    if (!style) return;
+    const css = buildSidebarResizeCss(clampSidebarWidth(sidebarWidthValue));
+    if (style.textContent !== css) style.textContent = css;
+  }
+
+  // 멱등: 사이드바 옵저버가 DOM 변화마다 부른다(손잡이를 넣는 것도 변화라 한 번 더 온다).
+  function applySidebarResize() {
+    const sidebar = document.getElementById("sidebar");
+    let style = document.getElementById(SIDEBAR_RESIZE_STYLE_ID);
+    if (!isSidebarResizeActive()) {
+      style?.remove();
+      sidebar?.querySelector(`.${SIDEBAR_RESIZER_CLASS}`)?.remove();
+      document.documentElement.classList.remove("cheese-sidebar-resizing");
+      return;
+    }
+    if (!style) {
+      style = document.createElement("style");
+      style.id = SIDEBAR_RESIZE_STYLE_ID;
+      (document.head || document.documentElement).appendChild(style);
+    }
+    writeSidebarResizeCss();
+    if (!sidebar.querySelector(`:scope > .${SIDEBAR_RESIZER_CLASS}`)) {
+      const handle = document.createElement("div");
+      handle.className = SIDEBAR_RESIZER_CLASS;
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-orientation", "vertical");
+      handle.setAttribute("aria-label", "사이드바 너비 조절");
+      handle.title = "사이드바 너비 조절 (더블클릭: 기본 너비)";
+      handle.setAttribute("aria-valuemin", String(SIDEBAR_WIDTH_MIN));
+      handle.setAttribute("aria-valuemax", String(SIDEBAR_WIDTH_MAX));
+      sidebar.appendChild(handle);
+      bindSidebarResizer(handle);
+    }
+  }
+
+  // 놓은 뒤: 사이드바 폭 → 밀어내기 여백 → (여백 전환 0.2s 뒤) 채팅 최대 폭·화면 채우기.
+  function finishSidebarResize() {
+    writeSidebarResizeCss();
+    applySidebarPush();
+    if (sidebarResizeFinishTimer) clearTimeout(sidebarResizeFinishTimer);
+    sidebarResizeFinishTimer = window.setTimeout(() => {
+      sidebarResizeFinishTimer = 0;
+      applyChatLayout();
+      applyFillScreen();
+      scheduleSearchSectionTopFabSync();
+    }, 260);
+  }
+
+  function saveSidebarWidth() {
+    try {
+      chrome.storage?.local?.set({ [SIDEBAR_WIDTH_KEY]: sidebarWidthValue });
+    } catch {}
+  }
+
+  function bindSidebarResizer(handle) {
+    let active = false;
+    let moved = false;
+    let startX = 0;
+    let startW = SIDEBAR_WIDTH_MIN;
+    const onMove = (e) => {
+      if (!active) return;
+      e.preventDefault();
+      // 오른쪽 배치면 손잡이가 왼쪽 가장자리라 왼쪽으로 끌수록 넓어진다.
+      const direction = featureFlags.sidebarRight ? -1 : 1;
+      const next = clampSidebarWidth(startW + (e.clientX - startX) * direction);
+      // 제자리 pointermove 도 온다 — 폭이 실제로 바뀌어야 끈 것으로 본다.
+      if (!moved && next === startW) return;
+      moved = true;
+      if (next === sidebarWidthValue) return;
+      sidebarWidthValue = next;
+      handle.setAttribute("aria-valuenow", String(next));
+      if (sidebarResizeFrame) return;
+      sidebarResizeFrame = requestAnimationFrame(() => {
+        sidebarResizeFrame = 0;
+        writeSidebarResizeCss();
+      });
+    };
+    const onUp = () => {
+      if (!active) return;
+      active = false;
+      sidebarResizeDragging = false;
+      sidebarResizeLockUntil = Date.now() + SIDEBAR_RESIZE_HOVER_LOCK_MS;
+      document.documentElement.classList.remove("cheese-sidebar-resizing");
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.removeEventListener("pointercancel", onUp, true);
+      // 누르기만 하고 놓으면 저장하지 않는다(기본 폭이 240 으로 굳지 않게).
+      if (!moved) return;
+      saveSidebarWidth();
+      finishSidebarResize();
+    };
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      // 사이드바 채널 끌기(팝업 플레이어)·호버 미리보기로 이어지지 않게 여기서 끊는다.
+      e.preventDefault();
+      e.stopPropagation();
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      active = true;
+      moved = false;
+      sidebarResizeDragging = true;
+      closeSidebarHoverUiForResize();
+      startX = e.clientX;
+      startW = clampSidebarWidth(sidebar.getBoundingClientRect().width) || SIDEBAR_WIDTH_MIN;
+      document.documentElement.classList.add("cheese-sidebar-resizing");
+      document.addEventListener("pointermove", onMove, true);
+      document.addEventListener("pointerup", onUp, true);
+      document.addEventListener("pointercancel", onUp, true);
+    });
+    handle.addEventListener("click", (e) => e.stopPropagation());
+    handle.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      sidebarWidthValue = 0;
+      sidebarResizeLockUntil = Date.now() + SIDEBAR_RESIZE_HOVER_LOCK_MS;
+      handle.removeAttribute("aria-valuenow");
+      saveSidebarWidth();
+      finishSidebarResize();
+    });
   }
 
   // ── 헤더 자동 숨김(상단 호버존에서 슬라이드 표시) ───────────────────────────
@@ -27003,6 +27574,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         const cur = document.getElementById("sidebar");
         if (!cur) return;
         applySidebarSections();
+        applySidebarResize(); // 사이드바가 다시 그려지면 손잡이를 다시 붙인다
         ensureHeaderFollowNav();
         handleSidebarExpandTransition(cur);
         scheduleSearchSectionTopFabSync();
@@ -27030,6 +27602,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     ensureSidebarMultiview();
     // 옵저버 부착 시점(페이지 이동으로 새 사이드바 등장 등)에 이미 펼쳐진 상태일 수
     // 있다 → 여기서 측정해 반영한다(attach당 1회라 콜백처럼 반복되지 않음).
+    applySidebarResize();
     applySidebarPush();
     // ⚠ 처음부터 펼쳐진 채로 들어오면 한 번의 측정으로는 부족하다. 그 시점엔 폭이
     //   아직 아이콘 폭(80px 이하)이거나 0 이라 applySidebarPush 가 스타일을 비우고
@@ -36009,6 +36582,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const LIVE_TAG_FILTER_HIDDEN_CLASS = "cheese-live-tag-filter-hidden";
   const LIVE_TAG_FILTER_PAGINATION_CLASS =
     "cheese-live-tag-filter-pagination-anchor";
+  // 관찰 지점을 둔 목록. 관찰 지점을 목록 맨 아래에 두기 위한 기준점이 된다.
+  const LIVE_TAG_FILTER_ANCHOR_LIST_CLASS = "cheese-live-tag-filter-anchor-list";
   const LIVE_VIEWER_COUNT_INLINE_CLASS = "cheese-live-viewer-count-inline";
   const LIVE_VIEWER_COUNT_INLINE_BADGE_CLASS =
     "cheese-live-viewer-count-inline-badge";
@@ -36047,6 +36622,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   let liveTagFilterButtonOn = false;
   let liveViewerCountPosition = "native";
   let liveTagFilterPaginationFrame = 0;
+  // 가짜 scroll 을 이미 보낸 관찰 지점. 필터는 페이지를 보정할 때마다 다시 걸리므로 같은
+  // 지점이면 다시 보내지 않는다(그때마다 페이지의 scroll 처리가 깨어났다). 떨어져 나간
+  // 카드를 붙잡지 않게 WeakSet 으로 둔다.
+  const liveTagFilterPaginationNotified = new WeakSet();
   const liveTagFilterSelected = new Set();
   let liveTagFilterRestoreFocus = null;
 
@@ -36297,6 +36876,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
 
   function clearHiddenLiveTagFilterCards() {
     document
+      .querySelectorAll(`.${LIVE_TAG_FILTER_ANCHOR_LIST_CLASS}`)
+      .forEach((list) => list.classList.remove(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS));
+    document
       .querySelectorAll(
         `.${LIVE_TAG_FILTER_HIDDEN_CLASS}, [data-cheese-live-tag-filter-hidden]`,
       )
@@ -36358,26 +36940,45 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     card.classList.add(LIVE_TAG_FILTER_HIDDEN_CLASS);
   }
 
+  // 치지직 라이브 목록의 다음 묶음 감지 지점(2026-10-09 실측): 끝에서 10번째 카드의 첫
+  // 자식으로 빈 <div style="position:absolute; left:0"> 를 두고, 이 div 가 화면에 들어오면
+  // 다음 묶음을 부른다. 클래스가 없고 자식이 없다.
+  function isLivePaginationSentinel(element) {
+    return element.tagName === "DIV" && !element.getAttribute("class") &&
+      !element.firstElementChild && element.style.position === "absolute";
+  }
+
+  // ⚠ 감지 지점이 든 카드를 숨기면(display:none) 그 div 가 영영 화면에 들어오지 않아 다음
+  //   묶음을 부르지 않았다. 어느 카드에 들어가느냐(정렬·필터)에 따라 될 때도 안 될 때도
+  //   있었다. 그 카드는 1px 관찰 지점으로 남겨 목록 맨 아래에 둔다(보이는 카드가 끝나는
+  //   곳에서 부른다). 예전에는 마지막 카드만 남겼고, absolute 의 기본 자리가 flex·grid
+  //   목록에서는 맨 위라 스크롤을 내리면 화면 밖에 있었다. 감지 지점을 못 찾는 빌드를
+  //   위해 숨긴 마지막 카드도 함께 남긴다.
   function preserveLiveTagFilterPaginationAnchors(hiddenCards) {
-    const parents = new Set(
-      [...hiddenCards].map((card) => card.parentElement).filter(Boolean),
-    );
+    const lastCards = new Map();
     let lastAnchor = null;
-    for (const parent of parents) {
-      const cards = [...parent.children].filter(
-        (child) =>
-          child.tagName === "LI" && child.querySelector?.('a[href^="/live/"]'),
-      );
-      const lastCard = cards.at(-1);
-      if (!lastCard || !hiddenCards.has(lastCard)) continue;
-      lastCard.classList.add(LIVE_TAG_FILTER_PAGINATION_CLASS);
-      lastAnchor = lastCard;
+    for (const card of hiddenCards) {
+      const parent = card.parentElement;
+      if (!parent) continue;
+      if (!lastCards.has(parent)) {
+        lastCards.set(parent, [...parent.children].filter(
+          (child) =>
+            child.tagName === "LI" && child.querySelector?.('a[href^="/live/"]'),
+        ).at(-1));
+      }
+      const sentinel = [...card.children].some(isLivePaginationSentinel);
+      if (!sentinel && lastCards.get(parent) !== card) continue;
+      card.classList.add(LIVE_TAG_FILTER_PAGINATION_CLASS);
+      parent.classList.add(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS);
+      lastAnchor = card;
     }
     return lastAnchor;
   }
 
   function scheduleLiveTagFilterPaginationCheck(lastHiddenCard) {
     if (liveTagFilterPaginationFrame || !lastHiddenCard) return;
+    if (liveTagFilterPaginationNotified.has(lastHiddenCard)) return;
+    liveTagFilterPaginationNotified.add(lastHiddenCard);
     liveTagFilterPaginationFrame = requestAnimationFrame(() => {
       liveTagFilterPaginationFrame = 0;
       if (
@@ -42297,11 +42898,44 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 오른쪽) 우선, 우측이 좁을 때만 넓은 쪽으로 둔다.
     const isHeaderFollow =
       anchor.classList?.contains?.("cheese-header-follow-item") === true;
+    // 카드 미리보기의 자동·위·아래는 위·아래까지 후보로 본다(chooseCardPreviewPlacement).
+    if (anchorKind === "card" && !["left", "right"].includes(cardLivePreviewPosition)) {
+      const placement = chooseCardPreviewPlacement({
+        rect: r,
+        vw,
+        vh,
+        desiredWidth: followPreviewState.width,
+        extraHeight: followPreviewHideHeader ? 0 : 44,
+        position: cardLivePreviewPosition,
+        sidebarRight: featureFlags.sidebarRight === true,
+      });
+      const w = placement.width;
+      el.style.width = `${w}px`;
+      el.style.height = "";
+      applyFollowPreviewWidthClass(el, w);
+      const totalH = el.offsetHeight || Math.round((w * 9) / 16) + 44;
+      let left;
+      let top;
+      if (placement.side === "left" || placement.side === "right") {
+        left = placement.side === "left" ? r.left - w - GAP : r.right + GAP;
+        top = r.top + r.height / 2 - totalH / 2;
+      } else {
+        // 위·아래는 카드 가운데에 맞춘다.
+        left = r.left + r.width / 2 - w / 2;
+        top = placement.side === "below" ? r.bottom + GAP : r.top - GAP - totalH;
+      }
+      left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
+      top = Math.max(EDGE, Math.min(top, vh - totalH - EDGE));
+      el.classList.toggle("is-left", placement.side === "left");
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      return;
+    }
+
     let side; // true=좌측(is-left)
     if (anchorKind === "card") {
-      const preferredLeft =
-        cardLivePreviewPosition === "left" ||
-        (cardLivePreviewPosition === "auto" && featureFlags.sidebarRight);
+      // 여기는 '왼쪽 우선'·'오른쪽 우선'만 온다(좌우 안에서만 고른다).
+      const preferredLeft = cardLivePreviewPosition === "left";
       const preferredSpace = preferredLeft ? leftSpace : rightSpace;
       const oppositeSpace = preferredLeft ? rightSpace : leftSpace;
       const maxViewportWidth = Math.max(0, vw - EDGE * 2);
@@ -42339,6 +42973,38 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     el.classList.toggle("is-left", side);
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
+  }
+
+  // 카드 미리보기를 둘 방향(auto·top·bottom). 브라우저 창을 화면 절반으로 쓰면 카드가 한
+  // 줄에 3장이라 가운데 카드는 양옆에 카드 한 장 폭밖에 없어, 좌우에만 두면 최소 크기로
+  // 줄어 아주 작았다. 위·아래도 후보로 두고 저장 크기가 그대로 들어가는 첫 방향(선호
+  // 순서)을, 어디에도 안 들어가면 가장 크게 보이는 방향을 고른다. 위·아래는 영상 16:9 에
+  // 머리줄 높이(extraHeight)를 더해 높이를 맞춘다.
+  function chooseCardPreviewPlacement({
+    rect, vw, vh, desiredWidth, extraHeight, position, sidebarRight,
+  }) {
+    const GAP = 10;
+    const EDGE = 8;
+    const maxWidth = Math.max(0, vw - EDGE * 2);
+    const desired = Math.min(desiredWidth, maxWidth);
+    const across = (space) => Math.max(0, Math.min(desired, Math.floor(space)));
+    const stacked = (space) =>
+      Math.max(0, Math.min(desired, Math.floor(((space - extraHeight) * 16) / 9)));
+    const widths = {
+      right: across(vw - rect.right - GAP - EDGE),
+      left: across(rect.left - GAP - EDGE),
+      below: stacked(vh - rect.bottom - GAP - EDGE),
+      above: stacked(rect.top - GAP - EDGE),
+    };
+    const sides = sidebarRight ? ["left", "right"] : ["right", "left"];
+    const order = position === "top"
+      ? ["above", "below", ...sides]
+      : position === "bottom"
+        ? ["below", "above", ...sides]
+        : [...sides, "below", "above"];
+    const side = order.find((name) => widths[name] >= desired) ||
+      order.reduce((best, name) => (widths[name] > widths[best] ? name : best), order[0]);
+    return { side, width: Math.max(FOLLOW_PREVIEW_MIN_W, widths[side]) };
   }
 
   // 미리보기 시작: m3u8 받아 video에 연결(네이티브 우선, 폴백 hls.js).
@@ -43237,6 +43903,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     if (customFollowDragId) return;
     // 팝업 플레이어용 드래그 중에도 열지 않는다(끌던 항목의 호버로 함께 재생되던 문제).
     if (popupPlayerDragging) return;
+    // 사이드바 너비를 조절하는 중(과 놓은 직후)에도 열지 않는다.
+    if (isSidebarResizeLocked()) return;
     // 드래그/고정 중엔 다른 채널로 전환하지 않는다.
     if (followPreviewState.resizing || followPreviewState.pinned) return;
     const found = getFollowPreviewAnchor(e.target);
@@ -43346,6 +44014,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   // 메인 콘텐츠 영역(내부 스크롤 컨테이너)이라 사이드바 밖이므로, 이 옵션에선 모든 스크롤을
   // 기록해 '스크롤 중 카드를 스치면 미리보기가 바로 뜨는' 것을 막는다(휠 음량 지연과 유사).
   function onFollowPreviewScroll(e) {
+    // ⚠ 스크립트가 보낸 scroll 은 무시한다. 제외 필터가 다음 묶음 불러오기를 돕느라
+    //   window·document·html·body 에 가짜 scroll 을 보내는데(scheduleLiveTagFilter
+    //   PaginationCheck), 이것에 반응해 카드·사이드바 미리보기가 열리자마자 닫혔다
+    //   (팔로잉 LIVE 실측: 열림 → 0.3초 뒤 #document/html/body scroll → 닫힘).
+    if (!e.isTrusted) return;
     const t = e.target;
     const relevant =
       cardLivePreviewOn ||
@@ -44534,17 +45207,36 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     //    툴팁(방송일 등)을 쓴다 — cfLive 플래그로 showFollowChannelTooltip 이 분기한다.
     // 순서 편집 중인 그룹의 항목에는 툴팁도 띄우지 않는다(미리보기와 같은 이유).
     if (isCustomFollowSortingTarget(target)) return null;
-    if (!followPreviewOn || followPreviewHideHeader) {
-      const cfItem = target?.closest?.(".cheese-cf-item");
-      if (cfItem) {
-        const id = cfItem.dataset?.channelId || "";
-        if (/^[a-f0-9]{32}$/i.test(id))
-          return {
-            anchor: cfItem,
-            channelId: id,
-            cfLive: cfItem.dataset?.live === "1",
-          };
+    // ⚠ 오프라인 채널은 미리보기가 뜨지 않는다. 미리보기 옵션과 관계없이 정보 툴팁을 띄운다
+    //   (예전에는 미리보기가 켜져 있으면 오프라인까지 툴팁을 생략해 아무것도 뜨지 않았다).
+    const cfItem = target?.closest?.(".cheese-cf-item");
+    if (cfItem) {
+      const id = cfItem.dataset?.channelId || "";
+      const cfLive = cfItem.dataset?.live === "1";
+      if (
+        /^[a-f0-9]{32}$/i.test(id) &&
+        (!cfLive || !followPreviewOn || followPreviewHideHeader)
+      ) {
+        return { anchor: cfItem, channelId: id, cfLive };
       }
+      return null;
+    }
+    // 0-1) 사이드바 팔로잉 목록(치지직 목록)의 오프라인 채널. 라이브 채널은 라이브 미리보기와
+    //      치지직 툴팁이 맡는다.
+    const sidebarItem = target?.closest?.('aside#sidebar nav[class*="_section_"] li');
+    if (sidebarItem && !sidebarItem.closest("#cheese-custom-follow") &&
+        !sidebarItem.querySelector("#cheese-custom-follow, .cheese-cf-item")) {
+      const nav = sidebarItem.closest('nav[class*="_section_"]');
+      if (!nav || !getSidebarNavLabel(nav).includes("팔로") || isLiveFollowItem(sidebarItem))
+        return null;
+      // 오프라인 항목은 /live/ 가 아니라 채널 홈(/<채널ID>)으로 이어진다.
+      const id = getFollowItemChannelId(sidebarItem) ||
+        [...sidebarItem.querySelectorAll('a[href^="/"]')]
+          .map(getFollowTooltipChannelIdFromAnchor)
+          .find(Boolean);
+      return /^[a-f0-9]{32}$/i.test(id || "")
+        ? { anchor: sidebarItem, channelId: id, cfLive: false }
+        : null;
     }
     // 1) 팔로잉 목록.
     const listTarget = findFollowingChannelTooltipAnchor(target);
@@ -44677,6 +45369,16 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
     left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
     let top = r.top;
+    // 사이드바를 접으면 치지직이 항목 오른쪽에 채널 이름 툴팁을 띄운다. 같은 자리라 겹치므로
+    // 떠 있으면 그 아래에 붙인다(우리 툴팁에는 채널 이름이 없다).
+    const nativeTip = sidebar && !anchor.classList?.contains("cheese-cf-item")
+      ? anchor.querySelector?.('[class*="_tooltip_"]')
+      : null;
+    const nativeRect = nativeTip?.getBoundingClientRect?.();
+    if (nativeRect && nativeRect.width > 0 && nativeRect.height > 0 &&
+        getComputedStyle(nativeTip).visibility !== "hidden") {
+      top = nativeRect.bottom + 6;
+    }
     if (top + h > window.innerHeight - 8)
       top = Math.max(8, window.innerHeight - h - 8);
     tip.style.left = `${Math.round(left)}px`;
@@ -44753,6 +45455,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
   const FOLLOW_CHANNEL_TOOLTIP_HOVER_DELAY_MS = 250;
   function onFollowChannelMouseOver(e) {
     if (!followChannelTooltipOn) return;
+    if (isSidebarResizeLocked()) return; // 사이드바 너비 조절 중
+
     const found = followChannelAnchorFromTarget(e.target);
     if (!found) return;
     followChannelTooltipState.hoverAnchor = found.anchor;
@@ -46417,8 +47121,11 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         CHAT_RECAP_ENABLED_KEY,
         CHAT_RECAP_RETENTION_KEY,
         CHAT_RECAP_PLAYER_BUTTON_HIDDEN_KEY,
+        WATCH_TIME_ENABLED_KEY,
       ]);
       followerExactOn = data?.[FOLLOWER_EXACT_KEY] === true; // 기본 OFF
+      watchTimeOn = data?.[WATCH_TIME_ENABLED_KEY] === true; // 기본 OFF
+      applyWatchTime();
       // 차단 이모티콘 목록. 플래그 전달 전에 채워야 첫 방송부터 적용된다.
       await loadChatBlockedEmoticons();
       chatHistoryOn = data?.[CHAT_HISTORY_ENABLED_KEY] === true;
@@ -47471,6 +48178,113 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     await recapVodChannelPromise;
     recapVodChannelPromise = null;
   }
+
+  // ══ 시청 시간 기록(설정 - 채팅 보조 기능 > 시청 시간 기록, 기본 꺼짐) ══════
+  // 플레이어가 실제로 재생되는 시간을 채널·종류(라이브/다시보기/라디오)·계정(로그인/비로그인)
+  // 별로 센다. 저장 형식은 src/watchTimeStore.js, 쓰기는 배경(CHEESE_WATCH_TIME_ADD).
+  // 세는 조건: 영상이 실제로 나아가고(멈춤·버퍼링 제외) 탭이 보이거나 소리가 날 때.
+  //   음소거여도 보이면 센다. 멀티뷰 칸은 칸마다 따로 센다(칸도 이 스크립트가 돈다).
+  // ⚠ 감시자를 두지 않는다. 1초 타이머 하나로 재생 위치만 읽는다. 탭이 뒤에 있으면
+  //   크롬이 타이머를 1분 간격까지 늦추므로, 그 사이 '실제로 나아간 재생 시간'(배속을
+  //   감안)과 흐른 시간 중 작은 쪽만 센다 — 잠자기·멈춤 동안을 세지 않는다.
+  const WATCH_TIME_STORE = globalThis.CheeseWatchTimeStore;
+  const WATCH_TIME_ENABLED_KEY = "cheeseWatchTime";
+  const WATCH_TIME_TICK_MS = 1000;
+  const WATCH_TIME_FLUSH_MS = 60000;
+  const WATCH_TIME_MAX_GAP_S = 70;
+  let watchTimeOn = false;
+  let watchTimeTimer = 0;
+  let watchTimeLast = null; // { video, sample, at, position }
+  let watchTimeFlushedAt = 0;
+  const watchTimePending = new Map(); // "shard\nkey" → 초
+
+  function watchTimeVideo() {
+    return document.querySelector("#live_player_layout video, #player_layout video");
+  }
+
+  // 지금 세야 할 채널·종류. 세지 않을 때는 null.
+  function watchTimeSample(video) {
+    if (!(video instanceof HTMLVideoElement)) return null;
+    if (video.paused || video.ended || video.readyState < 2) return null;
+    const audible = !video.muted && video.volume > 0;
+    if (document.visibilityState !== "visible" && !audible) return null;
+    const live = currentLiveChannelId();
+    let channelId = live ? live.toLowerCase() : "";
+    if (!channelId) {
+      const videoNo = getCurrentVideoNo();
+      if (!videoNo) return null;
+      if (recapVodChannel.videoNo !== videoNo || !recapVodChannel.channelId) {
+        void ensureRecapVodChannel(); // 다시보기 채널은 경로에 없다(조회해 둔다)
+        return null;
+      }
+      channelId = recapVodChannel.channelId;
+    }
+    // 라디오(소리만) 모드는 영상 크기가 0 이다(실측, isRadioModeActive 와 같은 판정).
+    const mode = !(video.videoWidth > 0) ? "radio" : live ? "live" : "vod";
+    return { channelId, mode };
+  }
+
+  function tickWatchTime() {
+    const now = Date.now();
+    const video = watchTimeVideo();
+    const sample = watchTimeSample(video);
+    const last = watchTimeLast;
+    if (sample && last && last.video === video && last.sample.channelId === sample.channelId &&
+        last.sample.mode === sample.mode) {
+      const wall = (now - last.at) / 1000;
+      const advanced = (video.currentTime - last.position) / Math.max(0.25, video.playbackRate || 1);
+      const seconds = wall <= WATCH_TIME_MAX_GAP_S ? Math.min(wall, Math.max(0, advanced)) : 0;
+      if (seconds > 0) {
+        const target = WATCH_TIME_STORE?.bucket({
+          at: now, accountId: currentClipVaultAccountId(), ...sample,
+        });
+        if (target) {
+          const id = `${target.shard}\n${target.key}`;
+          watchTimePending.set(id, (watchTimePending.get(id) || 0) + seconds);
+        }
+      }
+    }
+    watchTimeLast = sample ? { video, sample, at: now, position: video.currentTime } : null;
+    if (now - watchTimeFlushedAt >= WATCH_TIME_FLUSH_MS) flushWatchTime();
+  }
+
+  function flushWatchTime() {
+    watchTimeFlushedAt = Date.now();
+    if (!watchTimePending.size) return;
+    const entries = [...watchTimePending].map(([id, seconds]) => {
+      const [shard, key] = id.split("\n");
+      return { shard, key, seconds: Math.round(seconds * 10) / 10 };
+    }).filter((entry) => entry.seconds > 0);
+    watchTimePending.clear();
+    if (!entries.length) return;
+    try {
+      chrome.runtime.sendMessage({ type: "CHEESE_WATCH_TIME_ADD", entries }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch {}
+  }
+
+  function applyWatchTime() {
+    const on = watchTimeOn && location.hostname === "chzzk.naver.com" && !!WATCH_TIME_STORE;
+    if (on) {
+      watchTimeTimer ||= window.setInterval(tickWatchTime, WATCH_TIME_TICK_MS);
+      watchTimeFlushedAt ||= Date.now();
+      return;
+    }
+    if (watchTimeTimer) {
+      window.clearInterval(watchTimeTimer);
+      watchTimeTimer = 0;
+    }
+    watchTimeLast = null;
+    flushWatchTime();
+  }
+  // 탭을 숨기거나 떠날 때 모아 둔 것을 바로 보낸다(숨긴 탭은 타이머가 늦어진다).
+  document.addEventListener("visibilitychange", () => {
+    if (watchTimeOn && document.visibilityState === "hidden") flushWatchTime();
+  });
+  window.addEventListener("pagehide", () => {
+    if (watchTimeOn) flushWatchTime();
+  });
 
   // ── 채팅 리캡 저장 ────────────────────────────────────────────────────────
   // 월별로 청크를 나눈다. 한 키에 몰면 읽고 쓸 때마다 전체를 직렬화해야 한다.
@@ -53891,6 +54705,139 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     }
   }
 
+  // ── 좁은 플레이어에서 고른 버튼 숨기기 ─────────────────────────────────────
+  // 설정 '버튼 순서·위치' 에서 '좁을 때 숨김' 으로 표시한 치즈 플래터 버튼만, 하단 버튼이
+  // 한 줄에 다 들어가지 않을 때 오른쪽 끝부터 모자란 만큼 하나씩 숨긴다. 치지직 기본
+  // 버튼은 건드리지 않는다. 버튼 줄이 넘치는 방식(겹침·잘림)과 상관없이 판정하려고,
+  // 두 묶음 안 버튼들의 실제 폭 합을 버튼 줄 폭과 비교한다.
+  const PLAYER_BUTTON_COMPACT_KEY = "cheesePlayerButtonCompact";
+  const PLAYER_COMPACT_BUTTON_CLASSES = {
+    audioMixer: "cheese-audio-mixer-control",
+    videoFilter: "cheese-video-filter-control",
+    rewind: "cheese-live-rewind-button",
+    sync: "cheese-live-sync-button",
+    forward: "cheese-live-forward-button",
+    speed: "cheese-speed-control",
+    commentTs: "cheese-search-comment-timestamp-button",
+    chatRecap: "cheese-chat-recap-button",
+    tabMute: "cheese-tab-mute-button",
+    screenshot: "cheese-screenshot-button",
+    streamStats: "cheese-stream-stats-button",
+  };
+  const PLAYER_COMPACT_HIDDEN_CLASS = "cheese-player-compact-hidden";
+  // 저장값이 없으면(눈 아이콘을 한 번도 안 건드림) 오른쪽 그룹에 놓인 내 버튼을 숨김
+  // 대상으로 본다(기본값). 아이콘을 한 번 누르면 그때부터 저장된 목록만 쓴다.
+  let playerCompactSaved = null;
+  let playerCompactKeys = [];
+  let playerCompactFrame = 0;
+  let playerCompactResizeObserver = null;
+  let playerCompactMutationObserver = null;
+  const playerCompactObserved = new WeakSet();
+
+  function normalizePlayerCompactKeys(value) {
+    if (!Array.isArray(value)) return null; // 저장값 없음 = 기본값
+    return Object.keys(PLAYER_COMPACT_BUTTON_CLASSES).filter((key) => value.includes(key));
+  }
+
+  function refreshPlayerCompactKeys() {
+    playerCompactKeys =
+      playerCompactSaved ??
+      PLAYER_BUTTON_KEYS.filter((key) => playerButtonSide?.side?.[key] !== "left");
+  }
+
+  // 요소가 차지하는 가로 폭(바깥 여백 포함). 숨겨진(display:none) 요소는 0.
+  function playerCompactOuterWidth(el) {
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.position === "absolute" || cs.position === "fixed") return 0;
+    return el.getBoundingClientRect().width + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
+  }
+
+  // 묶음이 원래 필요한 폭: 안쪽 버튼 폭 합 + 버튼 사이 간격 + 묶음 안쪽 여백.
+  function playerCompactGroupWidth(group) {
+    const cs = getComputedStyle(group);
+    if (cs.display === "none") return 0;
+    const items = [...group.children].filter((el) => playerCompactOuterWidth(el) > 0);
+    const gap = parseFloat(cs.columnGap) || 0;
+    return (
+      items.reduce((sum, el) => sum + playerCompactOuterWidth(el), 0) +
+      gap * Math.max(0, items.length - 1) +
+      (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) +
+      (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0)
+    );
+  }
+
+  function compactPlayerBar(bar, left, right) {
+    // 지난번 숨김을 풀고 다시 잰다. 같은 프레임 안이라 화면에는 깜빡이지 않는다.
+    for (const el of bar.querySelectorAll(`.${PLAYER_COMPACT_HIDDEN_CLASS}`)) {
+      el.classList.remove(PLAYER_COMPACT_HIDDEN_CLASS);
+    }
+    if (!playerCompactKeys.length) return;
+    const marked = [];
+    for (const group of [left, right]) {
+      for (const key of playerCompactKeys) {
+        for (const el of group.querySelectorAll(`:scope > .${PLAYER_COMPACT_BUTTON_CLASSES[key]}`)) {
+          if (playerCompactOuterWidth(el) > 0) marked.push(el);
+        }
+      }
+    }
+    if (!marked.length) return;
+    const bcs = getComputedStyle(bar);
+    const available = bar.clientWidth - (parseFloat(bcs.paddingLeft) || 0) - (parseFloat(bcs.paddingRight) || 0);
+    if (!(available > 0)) return;
+    const others = [...bar.children]
+      .filter((el) => el !== left && el !== right)
+      .reduce((sum, el) => sum + playerCompactOuterWidth(el), 0);
+    const barGap = parseFloat(bcs.columnGap) || 0;
+    const leftGap = parseFloat(getComputedStyle(left).columnGap) || 0;
+    const rightGap = parseFloat(getComputedStyle(right).columnGap) || 0;
+    let overflow = playerCompactGroupWidth(left) + playerCompactGroupWidth(right) + others + barGap - available;
+    if (overflow <= 0.5) return;
+    // 오른쪽 끝(화면에서 가장 오른쪽)부터 하나씩.
+    const widths = new Map(marked.map((el) => [el, playerCompactOuterWidth(el)]));
+    marked.sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left);
+    for (const el of marked) {
+      el.classList.add(PLAYER_COMPACT_HIDDEN_CLASS);
+      overflow -= widths.get(el) + (left.contains(el) ? leftGap : rightGap);
+      if (overflow <= 0.5) break;
+    }
+  }
+
+  function compactPlayerControls() {
+    playerCompactFrame = 0;
+    for (const left of document.querySelectorAll(".pzp-pc__bottom-buttons-left")) {
+      const bar = left.parentElement;
+      const right = bar?.querySelector(":scope > .pzp-pc__bottom-buttons-right");
+      if (bar && right) compactPlayerBar(bar, left, right);
+    }
+  }
+
+  function schedulePlayerCompact() {
+    if (playerCompactFrame) return;
+    playerCompactFrame = requestAnimationFrame(compactPlayerControls);
+  }
+
+  // 버튼 줄·두 묶음의 크기 변화(창·채팅 폭·전체 화면·볼륨 슬라이더 펼침)와 버튼 추가/교체를
+  // 지켜본다. 숨김은 class 변경이라 childList 감시에 다시 걸리지 않는다.
+  function ensurePlayerCompactObservers() {
+    if (!playerCompactKeys.length) {
+      if (document.querySelector(`.${PLAYER_COMPACT_HIDDEN_CLASS}`)) schedulePlayerCompact();
+      return;
+    }
+    let added = false;
+    for (const left of document.querySelectorAll(".pzp-pc__bottom-buttons-left")) {
+      const bar = left.parentElement;
+      const right = bar?.querySelector(":scope > .pzp-pc__bottom-buttons-right");
+      if (!bar || !right || playerCompactObserved.has(bar)) continue;
+      playerCompactObserved.add(bar);
+      playerCompactResizeObserver ||= new ResizeObserver(schedulePlayerCompact);
+      playerCompactMutationObserver ||= new MutationObserver(schedulePlayerCompact);
+      for (const el of [bar, left, right]) playerCompactResizeObserver.observe(el);
+      for (const el of [left, right]) playerCompactMutationObserver.observe(el, { childList: true });
+      added = true;
+    }
+    if (added) schedulePlayerCompact();
+  }
+
   // 차단 항목은 두 형태다(MAIN 월드와 같은 규칙).
   //  - 영숫자 키: 이모티콘 창 alt 에서 얻은 "d_42" 같은 이름
   //  - "url:https://..." : 채팅 스트림 이미지에는 alt 가 없어 URL 로 식별한다
@@ -54069,6 +55016,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatTimeFormat, // 24h | 12h-en(AM/PM) | 12h-ko(오전/오후)
         chatOsCustomIcons, // {PC,AOS,IOS}: 정제된 사용자 SVG/WebP(없으면 기본 아이콘)
         chatOsIconPosition, // before | after (채팅 시간 기준)
+        chatTimeSeekOffset, // 다시보기 채팅 시간 클릭 이동: 채팅 시점보다 몇 초 앞
       },
       BRIDGE_ORIGIN,
     );
@@ -54125,12 +55073,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     CLIP_EDITOR_BOUNDARY_STEP_KEY,
     CLIP_EDITOR_BOUNDARY_OUTER_STEP_KEY,
     CHAT_WIDTH_KEY,
+    SIDEBAR_WIDTH_KEY,
+    PLAYER_BUTTON_COMPACT_KEY,
     CHAT_FONT_SCALE_KEY,
     CHAT_FONT_SCALE_SPECIAL_KEY,
     CHAT_TIME_FORMAT_KEY,
+    CHAT_TIME_SIZE_KEY,
     CHAT_TIME_COLORS_KEY,
     CHAT_OS_ICONS_KEY,
     CHAT_OS_ICON_POSITION_KEY,
+    CHAT_DONATION_TOOLS_KEY,
+    CHAT_TIME_SEEK_OFFSET_KEY,
     CHAT_BUTTON_WRAP_KEY,
     LOGPOWER_CLICK_ACTION_KEY,
     LOGPOWER_PROGRESS_MODE_KEY,
@@ -54302,6 +55255,9 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     // 다시보기 채팅으로 방송 시작 시각을 보정하던 캐시. liveOpenDate 가 실제
     // 시작 시각임이 확인돼 보정 자체를 걷어냈다(저장된 값도 정리한다).
     "cheeseVodChatTimeCorrections",
+    // 방장·매니저·파트너 채팅의 예전 켜짐 키(기본 켜짐). 기본 꺼짐으로 바꾸며 새 키
+    // (cheeseVodRoleChatEnabled)로 옮겼다 — 켜 두었던 사람도 꺼진 상태로 시작한다.
+    "cheeseVodRoleChatOn",
     "cheeseMixerBeginner",
     "cheeseMixerClickActivate",
     "cheeseMixerClickNoPanel",
@@ -54516,14 +55472,22 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       );
       const cw = Number(data?.[CHAT_WIDTH_KEY]);
       chatWidthValue = Number.isFinite(cw) ? cw : 0;
+      sidebarWidthValue = clampSidebarWidth(data?.[SIDEBAR_WIDTH_KEY]);
+      playerCompactSaved = normalizePlayerCompactKeys(data?.[PLAYER_BUTTON_COMPACT_KEY]);
+      refreshPlayerCompactKeys();
+      ensurePlayerCompactObservers();
       chatFontScaleValue = normalizeChatFontScale(data?.[CHAT_FONT_SCALE_KEY]);
       chatFontScaleSpecial = data?.[CHAT_FONT_SCALE_SPECIAL_KEY] === true;
       chatTimeFormat = normalizeChatTimeFormat(data?.[CHAT_TIME_FORMAT_KEY]);
+      chatTimeSize = normalizeChatTimeSize(data?.[CHAT_TIME_SIZE_KEY]);
+      applyChatTimeSize();
       chatTimeColors = normalizeChatTimeColors(data?.[CHAT_TIME_COLORS_KEY]);
       chatOsCustomIcons = normalizeChatOsCustomIcons(data?.[CHAT_OS_ICONS_KEY]);
       chatOsIconPosition = normalizeChatOsIconPosition(
         data?.[CHAT_OS_ICON_POSITION_KEY],
       );
+      chatDonationTools = normalizeChatDonationTools(data?.[CHAT_DONATION_TOOLS_KEY]);
+      chatTimeSeekOffset = normalizeChatTimeSeekOffset(data?.[CHAT_TIME_SEEK_OFFSET_KEY]);
       chatButtonWrap = data?.[CHAT_BUTTON_WRAP_KEY] !== false; // 미설정/true=ON
       applyFeatureFlags(data?.[FEATURE_HIDDEN_KEY]); // 내부에서 broadcast
     } catch {
@@ -54949,6 +55913,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[PLAYER_BUTTON_SIDE_KEY].newValue,
         );
         broadcastFeatureFlags(); // MAIN world(믹서/필터)로 즉시 전달 → 버튼 재배치
+        // 기본값(오른쪽 그룹 버튼)은 배치를 따라간다.
+        refreshPlayerCompactKeys();
+        ensurePlayerCompactObservers();
+        schedulePlayerCompact();
       }
       if (changes[AD_MINI_KEEP_MUTED_KEY]) {
         adMiniplayerKeepMuted =
@@ -55130,6 +56098,20 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatWidthValue = Number.isFinite(v) ? v : 0;
         applyChatLayout();
       }
+      if (changes[PLAYER_BUTTON_COMPACT_KEY]) {
+        playerCompactSaved = normalizePlayerCompactKeys(changes[PLAYER_BUTTON_COMPACT_KEY].newValue);
+        refreshPlayerCompactKeys();
+        ensurePlayerCompactObservers();
+        schedulePlayerCompact();
+      }
+      // 다른 탭에서 바꾼 사이드바 폭(끄는 중인 이 탭은 이미 같은 값이다).
+      if (changes[SIDEBAR_WIDTH_KEY]) {
+        const next = clampSidebarWidth(changes[SIDEBAR_WIDTH_KEY].newValue);
+        if (next !== sidebarWidthValue) {
+          sidebarWidthValue = next;
+          if (isSidebarResizeActive()) finishSidebarResize();
+        }
+      }
       if (changes[CHAT_FONT_SCALE_KEY]) {
         chatFontScaleValue = normalizeChatFontScale(
           changes[CHAT_FONT_SCALE_KEY].newValue,
@@ -55146,6 +56128,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           changes[CHAT_TIME_FORMAT_KEY].newValue,
         );
       }
+      if (changes[CHAT_TIME_SIZE_KEY]) {
+        chatTimeSize = normalizeChatTimeSize(changes[CHAT_TIME_SIZE_KEY].newValue);
+        applyChatTimeSize();
+      }
       if (changes[CHAT_OS_ICONS_KEY]) {
         chatOsCustomIcons = normalizeChatOsCustomIcons(
           changes[CHAT_OS_ICONS_KEY].newValue,
@@ -55155,6 +56141,17 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatOsIconPosition = normalizeChatOsIconPosition(
           changes[CHAT_OS_ICON_POSITION_KEY].newValue,
         );
+      }
+      if (changes[CHAT_TIME_SEEK_OFFSET_KEY]) {
+        chatTimeSeekOffset = normalizeChatTimeSeekOffset(
+          changes[CHAT_TIME_SEEK_OFFSET_KEY].newValue,
+        );
+      }
+      if (changes[CHAT_DONATION_TOOLS_KEY]) {
+        chatDonationTools = normalizeChatDonationTools(
+          changes[CHAT_DONATION_TOOLS_KEY].newValue,
+        );
+        applyChatDonationToolsClass();
       }
       if (changes[CHAT_TIME_COLORS_KEY]) {
         chatTimeColors = normalizeChatTimeColors(
@@ -55628,7 +56625,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         chatGraphAutoTriedVideo = "";
       }
       if (changes[ROLE_CHAT_ON_KEY]) {
-        vodRoleChatOn = changes[ROLE_CHAT_ON_KEY].newValue !== false;
+        vodRoleChatOn = changes[ROLE_CHAT_ON_KEY].newValue === true;
         // 끄면 버튼과 열려 있던 패널을 즉시 정리한다.
         applyRoleChatButtonVisibility();
       }
@@ -55742,6 +56739,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
         changes[CHAT_TIME_FORMAT_KEY] ||
         changes[CHAT_OS_ICONS_KEY] ||
         changes[CHAT_OS_ICON_POSITION_KEY] ||
+        changes[CHAT_TIME_SEEK_OFFSET_KEY] ||
         changes[SEEK_STEP_KEY] ||
         changes[CLIP_EDITOR_ARROW_STEP_KEY] ||
         changes[CLIP_EDITOR_SHIFT_STEP_KEY] ||
@@ -55937,6 +56935,10 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
           .getElementById(HEADER_FOLLOW_CONTAINER_ID)
           ?.removeAttribute("data-sig");
         ensureHeaderFollowNav();
+      }
+      if (changes[WATCH_TIME_ENABLED_KEY]) {
+        watchTimeOn = changes[WATCH_TIME_ENABLED_KEY].newValue === true;
+        applyWatchTime();
       }
       if (changes[CHAT_RECAP_ENABLED_KEY]) {
         chatRecapOn = changes[CHAT_RECAP_ENABLED_KEY].newValue === true;
@@ -56233,7 +57235,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
       chatGraphOn = data?.[CHAT_GRAPH_ENABLED_KEY] === true; // 기본 OFF
       chatGraphAuto = data?.[CHAT_GRAPH_AUTO_KEY] === true; // 기본 OFF
       chatGraphAutoCollect = data?.[CHAT_GRAPH_AUTO_COLLECT_KEY] === true;
-      vodRoleChatOn = data?.[ROLE_CHAT_ON_KEY] !== false; // 기본 ON
+      vodRoleChatOn = data?.[ROLE_CHAT_ON_KEY] === true; // 기본 OFF
       applyVodRoleChatBots(data?.[ROLE_CHAT_BOTS_KEY]);
       vodTitleChangesOn = data?.[VOD_TITLE_CHANGES_KEY] === true; // 기본 OFF
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
@@ -56312,6 +57314,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyPopupPlayerInitialChatFold(); // 새 팝업을 채팅 없이 시작(옵션 시, 초기 네이티브 접힘 안정화)
     ensureFillScreenPlayerObserver(); // 중간광고 miniplayer 전환 감지(화면 채우기 원복/재적용)
     applyFillScreen(); // 화면 채우기: main 높이 조절로 영상 좌우 레터박스 최소화
+    ensurePlayerCompactObservers(); // 좁은 플레이어에서 고른 버튼 숨기기
     applyAdMiniplayerUnmute(); // 중간광고 미니플레이어 음소거 해제(옵션 시)
     applyPopupPlayerMute(); // 팝업 플레이어 프레임이면 소리 정책(음소거) 적용
     // applyRootToFollowing 은 여기서 부르지 않는다 — init 은 저장값 로드(비동기)보다 먼저
@@ -56323,6 +57326,7 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     applyVodMoreLayout(); // 다시보기 '영상 더보기' 정보 영역 배치/숨김
     applyVodPlayerShift(); // 접힘 시 영상을 오른쪽으로(빈칸을 왼쪽으로)
     applyLogPowerBadge(); // 현재 채널 보유 통나무파워 배지(라이브 + 토글 시)
+    applyChatViewerCount(); // 채팅 입력창 후원 도구 줄 앞 시청자 수(옵션 시)
     ensureLogPowerRadioWatch(); // 라디오 전환 즉시 감지(video resize)
     applyLogPowerRadioGuard(); // 라디오 모드 전환 시 적립 표시/타이머 즉시 정지
     applyLogPowerAutoClaim(); // 통나무파워 자동 획득(라이브 + 토글 시)
@@ -56987,6 +57991,8 @@ div#layout-body [class*="_list_"][style*="top"]:has(> [role="tablist"]) {
     "resize",
     debounce(() => {
       applyChatStackedClass();
+      // 창 폭이 1200px 를 넘나들면 조절 폭이 켜지고 꺼진다 → 밀어내기 여백을 다시 잰다.
+      if (featureFlags.sidebarResize) applySidebarPush();
       applyFillScreen();
       applyLiveViewerCountPlacement();
       scheduleScrollTopButtonUpdate();

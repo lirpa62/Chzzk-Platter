@@ -31,6 +31,7 @@ function makeParent({ masterMuted = false, audioFocusMode = false, audio = {} } 
       chosen: [{ channelId: "main" }, { channelId: "sub1" }, { channelId: "sub2" }],
     },
     channelAudio: new Map(Object.entries(audio)),
+    PLAYER_VOLUME_FRESH_MS: 1000,
     postState: (id) => posted.push(id),
     clearAudioNotice() {},
     renderVolume() {},
@@ -93,6 +94,21 @@ function makeParent({ masterMuted = false, audioFocusMode = false, audio = {} } 
   const p = makeParent({ audio: { sub1: { volume: 0, muted: true, muteTouched: false } } });
   p.adoptFrameUserMute("sub1", false);
   check(p.audioOf("sub1").volume === 1, "음량이 0 이면 풀 때 100% 로 올린다");
+}
+
+// 6) 음소거된 칸에서 슬라이더를 잡으면 치지직이 손잡이 위치(0)부터 시작한다. 방금 플레이어에서
+//    정한 0 은 올리지 않는다(실측: 끌기 시작할 때마다 100% 로 튀었다).
+{
+  const p = makeParent({
+    audioFocusMode: true,
+    audio: { sub1: { volume: 0, muted: true, muteTouched: false, playerVolumeAt: Date.now() } },
+  });
+  p.adoptFrameUserMute("sub1", false);
+  check(p.audioOf("sub1").volume === 0 && p.effectiveMuted("sub1") === false && p.state.audioFocusMode === false,
+    "방금 플레이어에서 정한 0 은 100% 로 올리지 않고, 음소거·메인만 듣기는 푼다");
+  const stale = makeParent({ audio: { sub1: { volume: 0, muted: true, muteTouched: false, playerVolumeAt: Date.now() - 5000 } } });
+  stale.adoptFrameUserMute("sub1", false);
+  check(stale.audioOf("sub1").volume === 1, "오래전에 정한 0 은 전처럼 들리게 올린다");
 }
 
 // ── 프레임: 사용자 조작 직후의 음소거 변화만 알린다 ─────────────────────

@@ -326,6 +326,7 @@ test("unchanged indicators do not rewrite hidden/class attributes on every timer
     getCurrentLiveChannelId: () => "A", logPowerHourChannelId: "A", logPowerHourEndsAt: Date.now() + 60000,
     logPowerWatchActiveUntil: 0, logPowerWatchActive: true, logPowerWatchActiveChannelId: "A",
     logPowerTimerMode: "badge", logPowerProgressMode: "badge", logPowerEarningColor: true,
+    reportMultiviewLogPower: () => {}, // 멀티뷰 칸 보고(test-multiview-log-power 가 따로 본다)
   });
   vm.runInContext(part("  function updateLogPowerIndicators()", "  // ── 1시간 보상 획득 토스트"), context);
   context.updateLogPowerIndicators();

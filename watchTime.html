@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 시청 시간 기록</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/watchTime.css" />
+  </head>
+  <body>
+    <main class="wt-shell">
+      <header class="wt-header">
+        <div>
+          <h1>시청 시간 기록</h1>
+          <p class="wt-subtitle">
+            영상이 실제로 재생된 시간을 채널별로 셉니다. 탭이 보이거나 소리가 날
+            때만 세고, 멀티뷰는 칸마다 따로 셉니다. 기록은 이 브라우저에만
+            저장됩니다.
+          </p>
+        </div>
+        <div class="wt-header-actions">
+          <button type="button" class="wt-button" id="wtRefresh">새로고침</button>
+          <button type="button" class="wt-button wt-icon-button" id="wtTheme" aria-label="라이트/다크 모드 전환"></button>
+        </div>
+      </header>
+
+      <section class="wt-filters" aria-label="보기 조건">
+        <div class="wt-filter">
+          <span class="wt-filter-label">기간</span>
+          <div class="wt-segmented" role="radiogroup" aria-label="기간" id="wtRange">
+            <button type="button" role="radio" data-range="today">오늘</button>
+            <button type="button" role="radio" data-range="7">7일</button>
+            <button type="button" role="radio" data-range="30">30일</button>
+            <button type="button" role="radio" data-range="month">이번 달</button>
+            <button type="button" role="radio" data-range="year">올해</button>
+            <button type="button" role="radio" data-range="all">전체</button>
+            <button type="button" role="radio" data-range="custom">직접</button>
+          </div>
+          <!-- 다른 화면(검색·통나무파워 내역)과 같은 달력(popup.css 의 popup-calendar). -->
+          <span class="wt-custom-range" id="wtCustomRange" hidden>
+            <span class="popup-date-picker wt-picker" data-wt-picker="from"></span>
+            <span aria-hidden="true">~</span>
+            <span class="popup-date-picker wt-picker" data-wt-picker="to"></span>
+          </span>
+        </div>
+        <div class="wt-filter">
+          <span class="wt-filter-label">계정</span>
+          <div class="wt-segmented" role="radiogroup" aria-label="계정" id="wtLogin">
+            <button type="button" role="radio" data-login="all">전체</button>
+            <button type="button" role="radio" data-login="login">로그인</button>
+            <button type="button" role="radio" data-login="guest">비로그인</button>
+          </div>
+        </div>
+        <div class="wt-filter">
+          <span class="wt-filter-label">종류</span>
+          <div class="wt-checks" id="wtModes">
+            <label><input type="checkbox" data-mode="live" checked /><i class="wt-dot is-live"></i>라이브</label>
+            <label><input type="checkbox" data-mode="vod" checked /><i class="wt-dot is-vod"></i>다시보기</label>
+            <label><input type="checkbox" data-mode="radio" checked /><i class="wt-dot is-radio"></i>라디오</label>
+          </div>
+        </div>
+      </section>
+
+      <p class="wt-empty" id="wtDisabled" hidden>
+        시청 시간 기록이 꺼져 있습니다. 설정 - 플레이어 - 시청 기록에서 '시청 시간 기록'을 켜면 이때부터 셉니다.
+      </p>
+
+      <section class="wt-cards" aria-label="요약">
+        <div class="wt-card"><span>총 시청 시간</span><b id="wtTotal">-</b><small id="wtTotalSplit"></small></div>
+        <div class="wt-card"><span>본 채널</span><b id="wtChannels">-</b></div>
+        <div class="wt-card"><span>기록한 날 평균</span><b id="wtAverage">-</b><small id="wtDays"></small></div>
+        <div class="wt-card"><span>가장 많이 본 채널</span><b id="wtTop">-</b><small id="wtTopTime"></small></div>
+      </section>
+
+      <section class="wt-panel" aria-labelledby="wtChartTitle">
+        <div class="wt-panel-head">
+          <h2 id="wtChartTitle">날짜별</h2>
+          <div class="wt-segmented wt-chart-type" role="radiogroup" aria-label="날짜별 그래프 모양" data-chart-type="main">
+            <button type="button" role="radio" data-chart-type-value="bar">막대</button>
+            <button type="button" role="radio" data-chart-type-value="line">꺾은선</button>
+          </div>
+        </div>
+        <p class="wt-chart-note" id="wtChartNote" hidden>꺾은선은 많이 본 채널 5개와 전체 합계를 보여 줍니다.</p>
+        <div class="wt-chart" id="wtChart"></div>
+      </section>
+
+      <div class="wt-columns">
+        <section class="wt-panel" aria-labelledby="wtChannelTitle">
+          <h2 id="wtChannelTitle">채널별</h2>
+          <div class="wt-table-wrap">
+            <table class="wt-table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">채널</th>
+                  <th scope="col">시청 시간</th>
+                  <th scope="col">라이브 · 다시보기 · 라디오</th>
+                  <th scope="col">로그인</th>
+                  <th scope="col">비로그인</th>
+                </tr>
+              </thead>
+              <tbody id="wtChannelRows"></tbody>
+            </table>
+          </div>
+          <p class="wt-empty" id="wtEmpty" hidden>이 조건에 맞는 기록이 없습니다.</p>
+        </section>
+
+        <section class="wt-panel wt-detail" id="wtDetail" aria-labelledby="wtDetailTitle" hidden>
+          <div class="wt-detail-head">
+            <img class="wt-avatar" id="wtDetailAvatar" alt="" />
+            <h2 id="wtDetailTitle">채널</h2>
+            <button type="button" class="wt-button" id="wtDetailClose" aria-label="채널 상세 닫기">닫기</button>
+          </div>
+          <table class="wt-table wt-split">
+            <thead><tr><th scope="col"></th><th scope="col">로그인</th><th scope="col">비로그인</th><th scope="col">합계</th></tr></thead>
+            <tbody id="wtDetailSplit"></tbody>
+          </table>
+          <div class="wt-panel-head">
+            <h3>날짜별</h3>
+            <div class="wt-segmented wt-chart-type" role="radiogroup" aria-label="채널 날짜별 그래프 모양" data-chart-type="detail">
+            <button type="button" role="radio" data-chart-type-value="bar">막대</button>
+            <button type="button" role="radio" data-chart-type-value="line">꺾은선</button>
+          </div>
+          </div>
+          <div class="wt-chart wt-chart-small" id="wtDetailChart"></div>
+          <ul class="wt-days" id="wtDetailDays"></ul>
+          <button type="button" class="wt-button wt-danger" id="wtDetailDelete">이 채널 기록 지우기</button>
+        </section>
+      </div>
+
+      <footer class="wt-footer">
+        <button type="button" class="wt-button wt-danger" id="wtClearAll">전체 기록 지우기</button>
+      </footer>
+    </main>
+    <script src="src/chart.min.js"></script>
+    <script src="src/watchTimeStore.js"></script>
+    <script src="src/watchTime.js"></script>
+  </body>
+</html>

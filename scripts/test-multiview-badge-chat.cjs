@@ -10,7 +10,8 @@ const watch = fs.readFileSync(path.join(root, "src/multiviewWatch.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "src/multiview.css"), "utf8");
 const html = fs.readFileSync(path.join(root, "multiviewWatch.html"), "utf8");
 const settingsJs = fs.readFileSync(path.join(root, "src/settings.js"), "utf8");
-const settingsHtml = fs.readFileSync(path.join(root, "settings.html"), "utf8");
+// 설정 문구는 줄바꿈 위치가 바뀌어도(포맷터 등) 같은 문장으로 본다 — 공백을 하나로 접는다.
+const settingsHtml = (fs.readFileSync(path.join(root, "settings.html"), "utf8")).replace(/\s+/g, " ");
 
 assert.equal(badgeChat.classifyBadgeRole(["https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"]), "streamer");
 assert.equal(badgeChat.classifyBadgeRole(["https://ssl.pstatic.net/static/nng/glive/icon/manager.png"]), "manager");

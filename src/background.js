@@ -194,6 +194,58 @@ try {
     .catch(() => {});
 } catch {}
 
+const LIVE_SEEK_BUTTONS_HIDDEN_ONCE_KEY = "cheeseLiveSeekButtonsHiddenOnce";
+const FEATURE_HIDDEN_STORAGE_KEY = "cheeseFeatureHidden";
+const PLAYER_BUTTON_SIDE_STORAGE_KEY = "cheesePlayerButtonSide";
+
+async function hideLiveSeekButtonsOnce(reason) {
+  const stored = await chrome.storage.local.get([
+    LIVE_SEEK_BUTTONS_HIDDEN_ONCE_KEY,
+    FEATURE_HIDDEN_STORAGE_KEY,
+    PLAYER_BUTTON_SIDE_STORAGE_KEY,
+  ]);
+  if (stored?.[LIVE_SEEK_BUTTONS_HIDDEN_ONCE_KEY] === true) return;
+  const update = { [LIVE_SEEK_BUTTONS_HIDDEN_ONCE_KEY]: true };
+  if (reason === "update" && stored?.[PLAYER_BUTTON_SIDE_STORAGE_KEY] == null) {
+    const flags = stored?.[FEATURE_HIDDEN_STORAGE_KEY];
+    // 숨김 플래그(true=숨김). 되감기·앞으로는 liveRewind 하나가 함께 다룬다.
+    update[FEATURE_HIDDEN_STORAGE_KEY] = {
+      ...(flags && typeof flags === "object" ? flags : {}),
+      liveSync: true,
+      liveRewind: true,
+    };
+  }
+  await chrome.storage.local.set(update);
+}
+
+// 새 설치에서만 꺼 두는 옵션: 수신함 통나무파워 표시, 통나무파워 지우개, 헤더 바로가기
+// 4개(전체 방송·인기 클립·카테고리·팔로잉). 이미 저장된 값(설정 불러오기 등)은 건드리지 않는다.
+async function applyFreshInstallDefaults() {
+  const stored = await chrome.storage.local.get([
+    FEATURE_HIDDEN_STORAGE_KEY,
+    "cheeseLogPowerEraser",
+    "cheeseHeaderNav",
+  ]);
+  const update = {};
+  const flags = stored?.[FEATURE_HIDDEN_STORAGE_KEY];
+  const flagObject = flags && typeof flags === "object" ? flags : {};
+  if (typeof flagObject.inboxLogPower !== "boolean") {
+    // 숨김 플래그(true=숨김). 설정 화면에는 '수신함 통나무파워 표시' 로 뒤집어 보인다.
+    update[FEATURE_HIDDEN_STORAGE_KEY] = { ...flagObject, inboxLogPower: true };
+  }
+  if (typeof stored?.cheeseLogPowerEraser !== "boolean") {
+    update.cheeseLogPowerEraser = false;
+  }
+  const nav = stored?.cheeseHeaderNav;
+  const navObject = nav && typeof nav === "object" ? nav : {};
+  const navOff = {};
+  for (const key of ["hdrLives", "hdrClips", "hdrCategory", "hdrFollowing"]) {
+    if (typeof navObject[key] !== "boolean") navOff[key] = false;
+  }
+  if (Object.keys(navOff).length) update.cheeseHeaderNav = { ...navObject, ...navOff };
+  if (Object.keys(update).length) await chrome.storage.local.set(update);
+}
+
 async function clearLegacyChatHistory() {
   try {
     const all = await chrome.storage.local.get(null);
@@ -234,6 +286,27 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     }
   } catch (error) {
     console.warn("새 기능 표시 상태를 기록하지 못했습니다.", error);
+  }
+
+  // 실시간 따라잡기·라이브 되감기/앞으로 버튼은 지금 기본 숨김이지만, 예전 기본값(표시)이
+  // 저장된 기존 이용자에게는 계속 보였다. 버튼 순서·위치를 바꾼 적이 없는(=이 버튼을 따로
+  // 챙기지 않은) 이용자는 한 번 숨김으로 바꾼다. 한 번만 한다 — 그 뒤에 다시 켜면 유지된다.
+  // 신규 설치는 이미 기본 숨김이라 표시만 남긴다(안 남기면 설치 후 켠 버튼을 다음
+  // 업데이트에서 꺼 버린다).
+  try {
+    await hideLiveSeekButtonsOnce(details.reason);
+  } catch (error) {
+    console.warn("되감기·따라잡기 버튼 기본값을 바꾸지 못했습니다.", error);
+  }
+
+  // 새 설치만 꺼짐으로 시작하는 옵션. 코드의 미설정 기본값(켜짐)은 그대로 둬서, 저장값이
+  // 없는 기존 이용자는 지금처럼 켜진 채 남는다.
+  if (details.reason === "install") {
+    try {
+      await applyFreshInstallDefaults();
+    } catch (error) {
+      console.warn("새 설치 기본값을 기록하지 못했습니다.", error);
+    }
   }
 
   // 예전 버전은 제외 필터 버튼의 미설정 기본값이 ON이었다. 저장값이 없는 기존 사용자는
@@ -6615,8 +6688,121 @@ async function handleMultiviewHostApi(message, sender) {
   }
 }
 
+// ── 시청 시간 기록(src/watchTimeStore.js 형식) ──────────────────────────────
+// 탭·멀티뷰 칸마다 내용 스크립트가 1분마다 모은 초를 보낸다. 여러 곳이 같은 날짜 키를
+// 동시에 고치면 서로 덮어쓰므로 여기서 한 줄로 세워 더한다. 형식은 키 모양만 확인하고
+// 초를 더하기만 한다(저장 형식은 watchTimeStore.js 가 정한다).
+// 받은 것은 잠깐 모아 한 번에 쓴다 — 저장할 때마다 바뀐 값이 열린 탭마다 전달된다.
+const WATCH_TIME_SHARD_RE = /^cheeseWatchTime:\d{4}-\d{2}-\d{2}$/;
+const WATCH_TIME_KEY_RE = /^[0-9a-z-]{1,10}\|[0-9a-f]{32}\|[lvr]$/;
+const WATCH_TIME_FLUSH_MS = 5000;
+const WATCH_TIME_DAYS_KEY = "cheeseWatchTimeDays";
+const watchTimePending = new Map(); // shard → Map(key → 초)
+let watchTimeFlushTimer = 0;
+let watchTimeWriting = Promise.resolve();
+
+function flushWatchTime() {
+  watchTimeFlushTimer = 0;
+  if (!watchTimePending.size) return watchTimeWriting;
+  const batch = new Map(watchTimePending);
+  watchTimePending.clear();
+  watchTimeWriting = watchTimeWriting.catch(() => {}).then(async () => {
+    const shards = [...batch.keys()];
+    const data = await chrome.storage.local.get([...shards, WATCH_TIME_DAYS_KEY]);
+    const next = {};
+    // 기록한 날짜 목록. 읽는 쪽이 저장소 전체(get(null))를 읽지 않게 한다.
+    const days = new Set(Array.isArray(data[WATCH_TIME_DAYS_KEY]) ? data[WATCH_TIME_DAYS_KEY] : []);
+    const dayCount = days.size;
+    for (const shard of shards) days.add(shard.slice("cheeseWatchTime:".length));
+    if (days.size !== dayCount) next[WATCH_TIME_DAYS_KEY] = [...days].sort();
+    for (const [shard, entries] of batch) {
+      const current = data[shard] && typeof data[shard] === "object" ? data[shard] : {};
+      for (const [key, seconds] of entries) {
+        current[key] = Math.round(((Number(current[key]) || 0) + seconds) * 10) / 10;
+      }
+      next[shard] = current;
+    }
+    await chrome.storage.local.set(next);
+  });
+  return watchTimeWriting;
+}
+
+// channelId 를 비우면 전부 지운다.
+function deleteWatchTime(channelId) {
+  // 아직 쓰지 않은 것 중 지울 대상만 버린다(다른 채널 것은 남긴다).
+  for (const [shard, entries] of watchTimePending) {
+    for (const key of entries.keys()) {
+      if (!channelId || key.split("|")[1] === channelId) entries.delete(key);
+    }
+    if (!entries.size) watchTimePending.delete(shard);
+  }
+  watchTimeWriting = watchTimeWriting.catch(() => {}).then(async () => {
+    const index = await chrome.storage.local.get(WATCH_TIME_DAYS_KEY);
+    const days = Array.isArray(index[WATCH_TIME_DAYS_KEY]) ? index[WATCH_TIME_DAYS_KEY] : [];
+    const shards = days.map((day) => `cheeseWatchTime:${day}`);
+    if (!channelId) {
+      await chrome.storage.local.remove([...shards, WATCH_TIME_DAYS_KEY]);
+      return;
+    }
+    const data = await chrome.storage.local.get(shards);
+    const next = {};
+    const emptied = [];
+    for (const shard of shards) {
+      const current = data[shard];
+      if (!current || typeof current !== "object") continue;
+      const kept = Object.fromEntries(
+        Object.entries(current).filter(([key]) => key.split("|")[1] !== channelId),
+      );
+      if (Object.keys(kept).length === Object.keys(current).length) continue;
+      if (Object.keys(kept).length) next[shard] = kept;
+      else emptied.push(shard);
+    }
+    if (emptied.length) {
+      next[WATCH_TIME_DAYS_KEY] = days.filter((day) => !emptied.includes(`cheeseWatchTime:${day}`));
+      await chrome.storage.local.remove(emptied);
+    }
+    if (Object.keys(next).length) await chrome.storage.local.set(next);
+  });
+  return watchTimeWriting;
+}
+
+function addWatchTime(entries) {
+  let added = 0;
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const seconds = Number(entry?.seconds);
+    if (!WATCH_TIME_SHARD_RE.test(entry?.shard) || !WATCH_TIME_KEY_RE.test(entry?.key) ||
+        !(seconds > 0) || seconds > 3600) continue;
+    let shard = watchTimePending.get(entry.shard);
+    if (!shard) watchTimePending.set(entry.shard, (shard = new Map()));
+    shard.set(entry.key, (shard.get(entry.key) || 0) + seconds);
+    added++;
+  }
+  if (added && !watchTimeFlushTimer) {
+    watchTimeFlushTimer = setTimeout(flushWatchTime, WATCH_TIME_FLUSH_MS);
+  }
+  return added;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
+    return false;
+  }
+
+  if (message.type === "CHEESE_WATCH_TIME_DELETE") {
+    // 시청 시간 화면(확장 페이지)에서만. 쓰기와 같은 줄에 세워 지운 뒤 되살아나지 않게 한다.
+    if (!String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
+    const channelId = String(message.channelId || "").toLowerCase();
+    if (channelId && !/^[0-9a-f]{32}$/.test(channelId)) return false;
+    deleteWatchTime(channelId)
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message.type === "CHEESE_WATCH_TIME_ADD") {
+    // 치지직 페이지(탭·멀티뷰 칸)에서만 받는다.
+    if (!/^https:\/\/chzzk\.naver\.com\//.test(String(sender?.url || sender?.origin || ""))) return false;
+    sendResponse?.({ ok: addWatchTime(message.entries) > 0 });
     return false;
   }
 

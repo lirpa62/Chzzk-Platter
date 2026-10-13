@@ -324,6 +324,10 @@
   // 칸 안의 치지직 플레이어에서 사용자가 직접 음소거를 켜거나 끈 경우(FRAME_USER_MUTE).
   // ⚠ 예전에는 프레임이 볼륨 값만 알려, 플레이어에서 음소거를 풀어도 볼륨 패널은 계속
   //   음소거로 보였다. 부모 상태를 실제 소리에 맞춘다.
+  // 칸 플레이어에서 사용자가 볼륨을 정한 직후로 보는 시간. 이 안에 들어온 '음소거 해제' 는
+  // 같은 조작(슬라이더를 잡아 끌기 시작)의 일부다.
+  const PLAYER_VOLUME_FRESH_MS = 1000;
+
   function adoptFrameUserMute(channelId, muted) {
     if (effectiveMuted(channelId) === muted) return;
     const audio = audioOf(channelId);
@@ -347,7 +351,12 @@
     // 같이 '메인만 듣기' 를 끈다.
     if (state.audioFocusMode && channelId !== state.mainId) state.audioFocusMode = false;
     audio.muted = false;
-    if (audio.volume === 0) audio.volume = 1;
+    // 볼륨 0 인 채널을 스피커 아이콘으로 풀면 들리게 올린다(패널 음소거 버튼과 같다).
+    // ⚠ 단, 방금 플레이어에서 사용자가 0 을 정했다면 올리지 않는다. 음소거된 칸에서
+    //   슬라이더를 잡으면 치지직이 음소거를 풀며 손잡이 위치(0)부터 시작하는데, 그 0 을
+    //   100% 로 올려 끌기 시작할 때마다 100% 로 튀었다(실측: volume 0 → 지시 1.000).
+    const playerJustSetVolume = Date.now() - (audio.playerVolumeAt || 0) < PLAYER_VOLUME_FRESH_MS;
+    if (audio.volume === 0 && !playerJustSetVolume) audio.volume = 1;
     postAllAudio();
     renderVolume();
     syncAllVolumeButtons();
@@ -2431,6 +2440,18 @@
     $("mvChatTitle").setAttribute("aria-expanded", "true");
   }
 
+  // 세로 화면: 창 높이가 너비보다 크다(세로로 돌린 모니터, 길쭉하게 줄인 창). 방향이 바뀌면
+  // 배치 목록만 다시 그린다 — 쓰던 배치는 그대로 둔다.
+  const portraitQuery = window.matchMedia?.("(orientation: portrait)");
+  function isPortraitWindow() {
+    // 시작 중 먼저 불려도 되게 매번 창에 묻는다.
+    return window.matchMedia?.("(orientation: portrait)")?.matches === true;
+  }
+  // ⚠ 시청 화면이 아직 서지 않았으면(막대가 숨겨져 있음) 그리지 않는다 — 배치·채널 상태가 없다.
+  portraitQuery?.addEventListener?.("change", () => {
+    if ($("mvTopbar") && !$("mvTopbar").hidden && LAYOUTS.layoutById(state.layoutId)) renderTopbar();
+  });
+
   function renderTopbar() {
     const layout = LAYOUTS.layoutById(state.layoutId);
     $("mvMainValue").textContent = channelName(state.mainId);
@@ -2441,6 +2462,11 @@
       : "미지원";
     $("mvSideValue").textContent = SIDE_LABEL[state.chatSide] || "-";
     $("mvLayoutValue").textContent = layout?.label || "-";
+    // 좁은 창에서는 라벨과 값을 숨기고 아이콘만 남으므로 이름을 따로 준다(multiview.css).
+    document.querySelector('[data-mv-pop-toggle="side"]')
+      ?.setAttribute("aria-label", `채팅 위치 ${SIDE_LABEL[state.chatSide] || ""}`.trim());
+    document.querySelector('[data-mv-pop-toggle="layout"]')
+      ?.setAttribute("aria-label", `배치 ${layout?.label || ""}`.trim());
     renderChatTitle();
     $("mvChatTitle").disabled = availableChatChannels().length === 0;
     reflectChatPopoutButton();
@@ -2492,11 +2518,18 @@
       ).join("");
     // 배치는 지금 채널 수에 맞는 것만. 이름만으로는 모양이 안 그려지므로 작은
     // 미리보기를 함께 둔다(고르기 화면과 같은 트랙 계산을 쓴다).
-    $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length)
+    // 세로 화면(창이 세로로 길다)이면 '세로 화면' 묶음을 맨 위에 둔다.
+    const portrait = isPortraitWindow();
+    let lastGroup = "";
+    $("mvLayoutPanel").innerHTML = LAYOUTS.layoutsFor(state.chosen.length, { portrait, keepId: state.layoutId })
       .map((l) => {
         const on = l.id === state.layoutId;
         const preview = LAYOUTS.previewGrid(l);
-        return (
+        const group = portrait ? (LAYOUTS.isPortraitGroup(l) ? "세로 화면" : "가로 화면") : "";
+        const heading = group && group !== lastGroup
+          ? `<div class="mv-layout-group-label" role="presentation">${group}</div>` : "";
+        lastGroup = group;
+        return heading + (
           `<button type="button" role="option" aria-selected="${on}"` +
           ` class="mv-pop-option mv-pop-option-layout${on ? " is-on" : ""}"` +
           ` data-mv-set-layout="${esc(l.id)}">` +
@@ -2602,6 +2635,7 @@
     qualityFeedback.delete(channelId);
     clearChannelMixer(channelId);
     clearChannelSync(channelId, true);
+    clearChannelLogPower(channelId);
   }
 
   function normalizeMixerSnapshot(raw) {
@@ -6356,7 +6390,8 @@
     if (chosen.length < 2) return null;
 
     // 배치는 '지금 채널 수에 허용되는 것' 중에서만 고른다. 어긋나면 첫 배치로.
-    const allowed = LAYOUTS.layoutsFor(chosen.length);
+    // 세로 전용 배치도 받는다(창 방향이 바뀌어도 쓰던 배치는 그대로 둔다).
+    const allowed = LAYOUTS.layoutsFor(chosen.length, { all: true });
     if (!allowed.length) return null;
     const layout = allowed.find((l) => l.id === raw.layoutId) || allowed[0];
     // 채팅 위 영상 배치는 좌/우만 가능하므로 저장된 아래쪽 위치도 정규화한다.
@@ -7808,7 +7843,8 @@
   // 자동으로 바꾼 기록은 이 탭이 열려 있는 동안만 둔다.
   const layoutCountBack = new Map();
   function fitLayoutToCount() {
-    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack);
+    const next = LAYOUTS.layoutForCount(state.layoutId, state.chosen.length, state.chatSide, layoutCountBack,
+      { portrait: isPortraitWindow() });
     if (next) {
       state.layoutId = next.layoutId;
       state.chatSide = next.chatSide;
@@ -8741,6 +8777,102 @@
     if (!panelOpen && expandedChannelId) setExpanded("");
   });
 
+  // ── 통나무파워 적립 표시(헤더) ────────────────────────────────────────────
+  // 라이브 칸의 content.js 가 그 채널의 적립 상태(FRAME_LOG_POWER)를 보낸다. 시청 적립은
+  // 한 번에 한 채널만 확인되므로(background 가 적립이 확인된 채널 외의 상태를 정리한다)
+  // 적립 중인 채널 하나만 보여 주고, 없으면 숨긴다. 1시간 보상 타이머는 종료 시각으로
+  // 여기서 센다(칸은 상태가 바뀔 때만 보낸다).
+  const logPowerByChannel = new Map();
+  let logPowerTicker = 0;
+  // 설정 - 멀티뷰 화면별 설정 > 헤더에 통나무파워 적립 표시(기본 켬).
+  const LOG_POWER_HEADER_KEY = "cheeseMultiviewLogPower";
+  let logPowerHeaderOn = true;
+  void chrome.storage?.local
+    ?.get(LOG_POWER_HEADER_KEY)
+    ?.then((data) => {
+      logPowerHeaderOn = data[LOG_POWER_HEADER_KEY] !== false;
+      renderLogPower();
+    })
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local" || !changes[LOG_POWER_HEADER_KEY]) return;
+    logPowerHeaderOn = changes[LOG_POWER_HEADER_KEY].newValue !== false;
+    renderLogPower();
+  });
+
+  function normalizeLogPower(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.active !== "boolean") return null;
+    const time = (value) => (Number.isFinite(value) && value > 0 ? value : 0);
+    return {
+      active: raw.active,
+      activeUntil: time(raw.activeUntil),
+      amount: Number.isFinite(raw.amount) && raw.amount >= 0 ? raw.amount : null,
+      hourEndsAt: time(raw.hourEndsAt),
+    };
+  }
+
+  function clearChannelLogPower(channelId) {
+    if (logPowerByChannel.delete(channelId)) renderLogPower();
+  }
+
+  // 적립 중인 칸. 둘 이상이면(확인 직후 잠깐) 적립 만료가 가장 늦은(가장 최근에 확인된) 칸.
+  function earningLogPower(now) {
+    let best = null;
+    for (const [channelId, logPower] of logPowerByChannel) {
+      if (!cells.has(channelId) || isVideoSlot(channelId) || !logPower.active) continue;
+      const until = logPower.activeUntil || Infinity;
+      if (until <= now) continue;
+      if (!best || until > best.until) best = { channelId, logPower, until };
+    }
+    return best;
+  }
+
+  // 1만 미만은 그대로, 이상은 만/억 단위 소수 한 자리(채팅창 배지와 같다).
+  function formatCompactPower(value) {
+    const n = Number(value) || 0;
+    if (n < 10000) return n.toLocaleString("ko-KR");
+    const [unit, suffix] = n >= 100000000 ? [100000000, "억"] : [10000, "만"];
+    return `${(Math.floor((n / unit) * 10) / 10).toFixed(1).replace(/\.0$/, "")}${suffix}`;
+  }
+
+  function formatLogPowerTimer(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  function renderLogPower() {
+    const chip = $("mvLogPower");
+    if (!chip) return;
+    const now = Date.now();
+    const earning = logPowerHeaderOn ? earningLogPower(now) : null;
+    if (chip.hidden !== !earning) chip.hidden = !earning;
+    if (!earning) {
+      clearInterval(logPowerTicker);
+      logPowerTicker = 0;
+      return;
+    }
+    const { channelId, logPower } = earning;
+    const name = channelName(channelId);
+    const amount = logPower.amount == null ? "-" : formatCompactPower(logPower.amount);
+    // 채팅창 배지처럼 1시간 보상 타이머가 돌면 '적립 중' 대신 남은 시간을 보인다.
+    const timer = logPower.hourEndsAt > now ? formatLogPowerTimer(logPower.hourEndsAt - now) : "";
+    const setText = (id, text) => {
+      const el = $(id);
+      if (el && el.textContent !== text) el.textContent = text;
+    };
+    setText("mvLogPowerName", name);
+    setText("mvLogPowerAmount", amount);
+    setText("mvLogPowerState", timer || "적립 중");
+    const tooltip = [
+      `${name} 통나무파워 적립 중`,
+      logPower.amount == null ? "" : `보유 ${logPower.amount.toLocaleString("ko-KR")}`,
+      timer ? `다음 1시간 보상까지 ${timer}` : "",
+    ].filter(Boolean).join("\n");
+    if (chip.dataset.tooltip !== tooltip) chip.dataset.tooltip = tooltip;
+    // 남은 시간과 적립 만료를 1초마다 다시 본다. 숨기면 멈춘다.
+    logPowerTicker ||= setInterval(renderLogPower, 1000);
+  }
+
   // 프레임이 보내는 상태 신호.
   // 검증 순서: 형태 → 출처 → 이름 → 타입 → 채널 → 그 채널의 프레임에서 왔는지.
   const FRAME_MESSAGE_TYPES = new Set([
@@ -8762,6 +8894,7 @@
     "FRAME_VOD_SYNC_STATS",
     "FRAME_VOD_SYNC_RESULT",
     "FRAME_AD_STATUS",
+    "FRAME_LOG_POWER",
   ]);
   window.addEventListener("message", (event) => {
     if (!isTrustedFrameMessage(event)) return;
@@ -8775,6 +8908,15 @@
     //   보내는 것을 막는다.
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame || event.source !== frame.contentWindow) return;
+
+    if (data.type === "FRAME_LOG_POWER") {
+      if (isVideoSlot(channelId)) return;
+      const logPower = normalizeLogPower(data.logPower);
+      if (!logPower) return;
+      logPowerByChannel.set(channelId, logPower);
+      renderLogPower();
+      return;
+    }
 
     if (data.type === "FRAME_AD_STATUS") {
       if (
@@ -8940,12 +9082,27 @@
         return;
       }
       audio.volume = Math.min(1, Math.max(0, data.volume / state.masterVolume));
+      if (data.user === true) audio.playerVolumeAt = Date.now();
       const slider = [...document.querySelectorAll("[data-mv-vol-channel]")].find(
         (element) => element.dataset.mvVolChannel === channelId,
       );
       if (slider) {
         slider.value = String(Math.round(audio.volume * 100));
         slider.parentElement?.querySelector(".mv-vol-pct")?.replaceChildren(pct(audio.volume));
+      }
+      // 칸 플레이어에서 사용자가 소리를 올렸다면 그 채널을 듣겠다는 뜻이다. 볼륨 패널
+      // 슬라이더와 같이 음소거를 풀고, 보조 채널이면 '메인만 듣기' 도 끈다.
+      // ⚠ 예전에는 볼륨 값만 받아, 패널에는 계속 음소거 아이콘이 남고 '메인만 듣기' 를 끄면
+      //   그 채널이 이전 음소거 상태로 돌아가 소리가 꺼졌다.
+      if (data.user === true && audio.volume > 0 && effectiveMuted(channelId) && !state.masterMuted) {
+        audio.muted = false;
+        audio.muteTouched = true;
+        if (state.audioFocusMode && channelId !== state.mainId) state.audioFocusMode = false;
+        clearAudioNotice(channelId);
+        postAllAudio();
+        renderVolume();
+        syncAllVolumeButtons();
+        return;
       }
       syncVolumeButton(channelId);
       syncVolumePanelButton();

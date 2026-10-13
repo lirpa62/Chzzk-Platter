@@ -81,6 +81,7 @@ const guardSrc = content.slice(guardAt, content.indexOf("  function resetChatAsi
     ${sliceFn("isChatFolded")}
     function getLiveChatAside(){return document.querySelector('aside#aside-chatting');}
     window.__errors=[]; window.addEventListener('error',e=>window.__errors.push(e.message));
+    ${content.slice(content.indexOf("  const NATIVE_CHAT_TEXTAREA ="), content.indexOf("  function normalizeChatInputHeight("))}
     ${sliceFn("normalizeChatInputHeight")}
     ${guardSrc}
     window.__guard=guardChatInputHeight;

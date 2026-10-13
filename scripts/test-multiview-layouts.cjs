@@ -236,8 +236,9 @@ console.log("\n[빈 칸 채팅] 빈 칸이 직사각형 하나로 남는 배치"
     "시청 화면: 채팅 위치 패널에 '빈 칸' 이 나오고 같은 규칙으로 검증한다");
   ok((watch.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 1 &&
     (setup.match(/LAYOUTS\.chatSideForSwitch\(/g) || []).length === 1 &&
-    (watch.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack\)/g) || []).length === 1 &&
-    (setup.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack\)/g) || []).length === 1 &&
+    // 세로 화면이면 세로 배치끼리 잇도록 방향을 함께 넘긴다.
+    (watch.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack,\s*\{ portrait/g) || []).length === 1 &&
+    (setup.match(/LAYOUTS\.layoutForCount\(state\.layoutId, state\.chosen\.length, state\.chatSide, layoutCountBack,\s*\{ portrait/g) || []).length === 1 &&
     !/state\.layoutId = list\[0\]\.id|state\.layoutId = allowed\[0\]\.id|state\.layoutId = ""/.test(watch + setup),
     "배치를 바꾸는 모든 곳이 같은 규칙을 쓴다(직접 고르기 chatSideForSwitch, 채널 수 변경 layoutForCount)");
   ok((watch.match(/LAYOUTS\.previewGrid\(l\)/g) || []).length === 1 &&
@@ -269,7 +270,7 @@ console.log("\n[이름·순서] 보조가 있는 쪽으로 묶어 오른쪽 → 
       "왼쪽 2 + 아래 1 · 왼쪽", "왼쪽 2 + 아래 1 · 오른쪽", "아래 3", "위 3", "그리드 2×2",
       "아래 2 + 채팅 위 1", "위 2 + 채팅 위 1", "아래 1 + 채팅 위 2"],
     5: ["오른쪽 2 + 아래 2", "오른쪽 2×2", "오른쪽 4", "왼쪽 2 + 아래 2", "왼쪽 2×2", "왼쪽 4", "아래 4",
-      "위 4", "그리드 3×2", "그리드 2×3", "오른쪽 3 + 채팅 위 1", "왼쪽 3 + 채팅 위 1", "아래 3 + 채팅 위 1",
+      "위 4", "그리드 3×2", "그리드 2×3", "그리드 2·3", "그리드 3·2", "오른쪽 3 + 채팅 위 1", "왼쪽 3 + 채팅 위 1", "아래 3 + 채팅 위 1",
       "위 3 + 채팅 위 1", "그리드 2×2 + 채팅 위 1",
       "오른쪽 2 + 채팅 위 2", "왼쪽 2 + 채팅 위 2", "아래 2 + 채팅 위 2", "위 2 + 채팅 위 2"],
     6: ["오른쪽 2 + 아래 3", "오른쪽 5", "왼쪽 2 + 아래 3", "왼쪽 5", "아래 5", "위 5", "그리드 3×2",
@@ -448,6 +449,9 @@ console.log("\n[채널 수 변경] 지금과 비슷한 배치로 간다");
     ["right-1-0", 3, "tl-1-right-2"], ["left-1-0", 3, "tr-1-left-2"],
     ["grid-2x2", 3, "tl-1-right-2"], ["tl-1-right-2", 4, "grid-2x2"],
     ["grid-2x2-chat-top", 6, "grid-2-3-chat-top"], ["grid-3-2-chat-top", 5, "grid-2x2-chat-top"],
+    // 5채널 그리드 2·3 / 3·2: 다섯 칸을 그대로 두고 늘리면 채팅 위에 올린다.
+    ["grid-2-3", 6, "grid-2-3-chat-top"], ["grid-3-2", 6, "grid-3-2-chat-top"],
+    ["grid-2-3", 4, "grid-2x2"], ["grid-3-2", 4, "grid-2x2"],
     ["right-3-chat-top", 4, "bottom-2-chat-top"], ["left-3-chat-top", 4, "top-2-chat-top"],
     ["right2-bottom2", 4, "right-2-bottom-1-0"], ["left2-bottom2", 4, "left-2-bottom-1-2"],
     ["right-2x2", 6, "right2-bottom3"], ["main-chat-top", 3, "main-top-chat-top"],

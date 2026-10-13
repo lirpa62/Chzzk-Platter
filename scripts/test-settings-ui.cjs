@@ -25,7 +25,7 @@ for (const key of [
   'cheeseEmbedClipMixerDefaultGainEnabled',
   'cheeseEmbedClipMixerGain',
   // 설정 화면에서 켜고 끄는데 전송 목록에는 빠져 있던 키들(내보내기·불러오기 누락).
-  'cheeseVodRoleChatOn',
+  'cheeseVodRoleChatEnabled',
   'cheeseVodRoleChatBots',
   'cheeseFollowSquareChannels',
   // 리캡 페이지에서 고르는 값이라 설정 화면에는 없지만 내보내기에는 들어가야 한다.
@@ -43,6 +43,13 @@ for (const key of [
   'cheeseMultiviewTrackResize',
   'cheeseMultiviewTrackMemory',
   'cheeseMultiviewTrackSizes',
+  'cheeseMultiviewLogPower',
+  'cheeseSidebarWidth',
+  'cheesePlayerButtonCompact',
+  'cheeseChatTimeSize',
+  'cheeseChatTimeSeekOffset',
+  'cheeseChatDonationTools',
+  'cheeseWatchTime',
   'cheeseScreenshotAction',
   'cheeseScreenshotNameFormat',
   'cheeseLiveTagFiltersDisabled',
@@ -129,7 +136,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320,topH:240})]]);
+      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320,topH:240})],['cheeseWatchTimeChartType',JSON.stringify({main:'line',detail:'bar'})]]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
       window.downloadedBlobs=[];
       URL.createObjectURL=blob=>{downloadedBlobs.push(blob);return 'blob:fixture'};
@@ -154,6 +161,17 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseScreenshotNameFormat:'{채널}_{날짜}',
         cheeseLiveTagFiltersDisabled:['game'],
         cheeseFollowingLiveAutoExpand:true,
+        cheeseWatchTime:true,
+        cheeseChatTimeSize:90,
+        cheeseChatTimeSeekOffset:5,
+        cheeseChatDonationTools:'hide-text',
+        cheeseSidebarWidth:300,
+        cheesePlayerButtonCompact:['audioMixer'],
+        cheeseMultiviewLogPower:false,
+        cheeseVodRoleChatEnabled:true,
+        cheeseWatchTimeDays:['2026-10-13'],
+        cheeseWatchTimeChannels:{'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{name:'테스트 채널',image:'',verified:false,at:1}},
+        'cheeseWatchTime:2026-10-13':{'-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|l':3600},
         cheeseMultiviewChatSize:{w:430,h:320,topH:240},
         cheeseMultiviewSetupOptions:{mainHighQuality:true,startWithoutChat:false,startMainMuted:true,startMainVolume:0.37},
         cheeseMultiviewChatPopoutMode:'native',
@@ -172,7 +190,12 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         'audioMixer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{userDisabled:true}};
       window.writes=[];
       window.chrome={runtime:{getURL:p=>'https://fixture.invalid/'+p,getManifest:()=>({version:'1.0.0'}),sendMessage:(m,cb)=>{cb?.({ok:true});return Promise.resolve({ok:true});}},
-        storage:{local:{get:async()=>structuredClone(saved),set:obj=>{writes.push(structuredClone(obj));Object.assign(saved,obj);return Promise.resolve();},remove:async()=>{},getKeys:async()=>Object.keys(saved)},onChanged:{addListener:()=>{}}},
+        storage:{local:{get:async keys=>{
+          if(keys==null) return structuredClone(saved);
+          if(typeof keys==='string') keys=[keys];
+          if(Array.isArray(keys)) return Object.fromEntries(keys.filter(key=>Object.hasOwn(saved,key)).map(key=>[key,structuredClone(saved[key])]));
+          return Object.assign({},keys,Object.fromEntries(Object.keys(keys).filter(key=>Object.hasOwn(saved,key)).map(key=>[key,structuredClone(saved[key])])));
+        },set:obj=>{writes.push(structuredClone(obj));Object.assign(saved,obj);return Promise.resolve();},remove:async()=>{},getKeys:async()=>Object.keys(saved)},onChanged:{addListener:()=>{}}},
         tabs:{query:(q,cb)=>{cb?.([]);return Promise.resolve([]);},create:()=>{}}};
     `);
     for(const file of ['src/popup.css','src/settings.css']){
@@ -294,6 +317,21 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(row('[data-comment-ts-click-delay]').querySelector('.settings-search-path').textContent.includes('타임스탬프'),'comment delay wrong parent');
       check(row('[data-chat-recap-click-delay]').querySelector('.settings-search-path').textContent.includes('내 채팅 기록'),'recap delay wrong parent');
       const hidden=row('[data-update-notice-duration]');hidden.hidden=true;search('볼륨');search('');check(hidden.hidden,'availability hidden overwritten');
+    `);
+    await test('inbox log power long description folds behind info button',`
+      search('');
+      const r=row('[data-feature="inboxLogPower"]');
+      const visible=[...r.querySelectorAll(':scope > label > .settings-item-desc')].map(el=>el.textContent.trim());
+      check(visible.length===1&&visible[0]==='치지직 수신함에 통나무파워 내역 탭을 추가합니다.','summary only: '+JSON.stringify(visible));
+      const btn=r.querySelector('.settings-item-name [data-settings-info]');
+      const panel=r.querySelector('[data-settings-info-panel]');
+      check(btn&&panel&&panel.hidden&&panel.querySelectorAll(':scope > span').length===3,'info button and hidden 3-paragraph panel');
+      btn.click();
+      check(!panel.hidden&&btn.getAttribute('aria-expanded')==='true','info panel did not open');
+      btn.click();
+      search('보유량 맞추기');
+      check(shown(r),'detail text not searchable');
+      search('');
     `);
     await test('all branch-labelled options have a parent path',`
       search('└');
@@ -495,7 +533,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const shot=await command('Page.captureScreenshot',{format:'png'});
       writeFileSync(join(tmpdir(),`cheese-settings-disclosure-${open?'open':'closed'}.png`),Buffer.from(shot.data,'base64'));
     }
-    await test('multiview chat size is included in settings and full backup and imports safely',`
+    await test('new settings and watch-time data export and import safely',`
       const exportPayload=async selector=>{
         const before=downloadedBlobs.length;
         document.querySelector(selector).click();
@@ -511,7 +549,20 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         'settings export omitted cross-origin multiview chat size');
       check(JSON.stringify(full.settings.cheeseMultiviewChatSize)==='{"w":430,"h":320,"topH":240}',
         'full backup omitted cross-origin multiview chat size');
+      check(regular.appearance.watchTimeChartType?.main==='line'&&full.appearance.watchTimeChartType?.detail==='bar',
+        'watch-time chart preference missing from export');
+      check(!regular.userData&&!Object.hasOwn(regular.settings,'cheeseWatchTimeDays'),
+        'settings-only export included watch-time history');
+      check(full.userData?.storage?.cheeseWatchTimeDays?.[0]==='2026-10-13'&&
+        full.userData.storage['cheeseWatchTime:2026-10-13']?.['-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|l']===3600&&
+        full.userData.storage.cheeseWatchTimeChannels?.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?.name==='테스트 채널',
+        'full backup omitted watch-time history or channel metadata');
       for(const exported of [regular,full]){
+        check(exported.settings.cheeseWatchTime===true&&exported.settings.cheeseChatTimeSize===90&&
+          exported.settings.cheeseChatTimeSeekOffset===5&&exported.settings.cheeseChatDonationTools==='hide-text'&&
+          exported.settings.cheeseSidebarWidth===300&&exported.settings.cheesePlayerButtonCompact?.[0]==='audioMixer'&&
+          exported.settings.cheeseMultiviewLogPower===false&&exported.settings.cheeseVodRoleChatEnabled===true,
+          'new settings missing from export');
         check(exported.settings.cheeseFeatureHidden?.chatHideSendButton===false,'send-button option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.chatHideInputPlaceholder===true,'placeholder option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
@@ -557,9 +608,21 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewTrackSizes:{'grid-2x2':{columns:[400,500],rows:[250,300]}},
         cheeseScreenshotAction:'save',
         cheeseScreenshotNameFormat:'{제목}_{시각}',
+        cheeseWatchTime:false,
+        cheeseChatTimeSize:95,
+        cheeseChatTimeSeekOffset:10,
+        cheeseChatDonationTools:'hide-buttons',
+        cheeseSidebarWidth:320,
+        cheesePlayerButtonCompact:['videoFilter'],
+        cheeseMultiviewLogPower:true,
+        cheeseVodRoleChatEnabled:false,
         cheeseLiveTagFiltersDisabled:['Game'],
         cheeseFollowingLiveAutoExpand:false,
       });
+      payload.appearance.watchTimeChartType={main:'bar',detail:'line'};
+      payload.userData={storage:{cheeseWatchTimeDays:['2026-10-12'],
+        'cheeseWatchTime:2026-10-12':{'-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|v':1800},
+        cheeseWatchTimeChannels:{'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{name:'복원 채널',image:'',verified:true,at:2}}}};
       payload.settings.cheeseMultiviewChatPopoutMode='platter';
       const input=document.querySelector('[data-settings-import-file]');
       Object.defineProperty(input,'files',{configurable:true,value:[new File([JSON.stringify(payload)],'settings.json',{type:'application/json'})]});
@@ -576,6 +639,17 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         'multiview track settings or saved sizes were not imported');
       check(saved.cheeseScreenshotAction==='save'&&saved.cheeseScreenshotNameFormat==='{제목}_{시각}',
         'screenshot options were not imported');
+      check(saved.cheeseWatchTime===false&&saved.cheeseChatTimeSize===95&&
+        saved.cheeseChatTimeSeekOffset===10&&saved.cheeseChatDonationTools==='hide-buttons'&&
+        saved.cheeseSidebarWidth===320&&saved.cheesePlayerButtonCompact?.[0]==='videoFilter'&&
+        saved.cheeseMultiviewLogPower===true&&saved.cheeseVodRoleChatEnabled===false,
+        'new settings were not imported');
+      check(saved.cheeseWatchTimeDays?.[0]==='2026-10-12'&&
+        saved['cheeseWatchTime:2026-10-12']?.['-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|v']===1800&&
+        saved.cheeseWatchTimeChannels?.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?.name==='복원 채널',
+        'watch-time full backup data was not imported');
+      check(JSON.parse(localStorage.getItem('cheeseWatchTimeChartType')).detail==='line',
+        'watch-time chart preference was not imported');
       check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,
         'live-filter or following options were not imported');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');
