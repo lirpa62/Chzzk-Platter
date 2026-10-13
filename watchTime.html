@@ -74,14 +74,7 @@
       </section>
 
       <section class="wt-panel" aria-labelledby="wtChartTitle">
-        <div class="wt-panel-head">
-          <h2 id="wtChartTitle">날짜별</h2>
-          <div class="wt-segmented wt-chart-type" role="radiogroup" aria-label="날짜별 그래프 모양" data-chart-type="main">
-            <button type="button" role="radio" data-chart-type-value="bar">막대</button>
-            <button type="button" role="radio" data-chart-type-value="line">꺾은선</button>
-          </div>
-        </div>
-        <p class="wt-chart-note" id="wtChartNote" hidden>꺾은선은 많이 본 채널 5개와 전체 합계를 보여 줍니다.</p>
+        <h2 id="wtChartTitle">날짜별</h2>
         <div class="wt-chart" id="wtChart"></div>
       </section>
 
@@ -105,35 +98,30 @@
           </div>
           <p class="wt-empty" id="wtEmpty" hidden>이 조건에 맞는 기록이 없습니다.</p>
         </section>
-
-        <section class="wt-panel wt-detail" id="wtDetail" aria-labelledby="wtDetailTitle" hidden>
-          <div class="wt-detail-head">
-            <img class="wt-avatar" id="wtDetailAvatar" alt="" />
-            <h2 id="wtDetailTitle">채널</h2>
-            <button type="button" class="wt-button" id="wtDetailClose" aria-label="채널 상세 닫기">닫기</button>
-          </div>
-          <table class="wt-table wt-split">
-            <thead><tr><th scope="col"></th><th scope="col">로그인</th><th scope="col">비로그인</th><th scope="col">합계</th></tr></thead>
-            <tbody id="wtDetailSplit"></tbody>
-          </table>
-          <div class="wt-panel-head">
-            <h3>날짜별</h3>
-            <div class="wt-segmented wt-chart-type" role="radiogroup" aria-label="채널 날짜별 그래프 모양" data-chart-type="detail">
-            <button type="button" role="radio" data-chart-type-value="bar">막대</button>
-            <button type="button" role="radio" data-chart-type-value="line">꺾은선</button>
-          </div>
-          </div>
-          <div class="wt-chart wt-chart-small" id="wtDetailChart"></div>
-          <ul class="wt-days" id="wtDetailDays"></ul>
-          <button type="button" class="wt-button wt-danger" id="wtDetailDelete">이 채널 기록 지우기</button>
-        </section>
       </div>
+
+      <!-- 채널 상세: 누른 채널 행 근처에 떠 있는 창(watchTime.js placeDetail). -->
+      <section class="wt-panel wt-detail" id="wtDetail" role="dialog" aria-labelledby="wtDetailTitle" tabindex="-1" hidden>
+        <div class="wt-detail-head">
+          <img class="wt-avatar" id="wtDetailAvatar" alt="" />
+          <h2 id="wtDetailTitle">채널</h2>
+          <button type="button" class="wt-button" id="wtDetailClose" aria-label="채널 상세 닫기">닫기</button>
+        </div>
+        <table class="wt-table wt-split">
+          <thead><tr><th scope="col"></th><th scope="col">로그인</th><th scope="col">비로그인</th><th scope="col">합계</th></tr></thead>
+          <tbody id="wtDetailSplit"></tbody>
+        </table>
+        <h3>날짜별</h3>
+        <div class="wt-chart wt-chart-small" id="wtDetailChart"></div>
+        <ul class="wt-days" id="wtDetailDays"></ul>
+        <button type="button" class="wt-button wt-danger" id="wtDetailDelete">이 채널 기록 지우기</button>
+      </section>
 
       <footer class="wt-footer">
         <button type="button" class="wt-button wt-danger" id="wtClearAll">전체 기록 지우기</button>
       </footer>
     </main>
-    <script src="src/chart.min.js"></script>
+    <div class="wt-chart-tip" id="wtChartTip" role="tooltip" hidden></div>
     <script src="src/watchTimeStore.js"></script>
     <script src="src/watchTime.js"></script>
   </body>
