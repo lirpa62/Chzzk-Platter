@@ -167,43 +167,74 @@ const STORAGE = {
     const linked = await view();
     check(linked.detail === "채널B" && linked.total === "4시간", "'사용 중인 프로필'의 통계 단추(?channel=)는 그 채널 상세를 전체 기간으로 연다");
 
-    // 꺾은선: 위쪽은 많이 본 채널 5개 + 전체, 채널 상세는 종류별 + 합계. 고른 모양은 기억한다.
-    const line = await ev(`(async () => {
-      document.querySelector('[data-chart-type="main"] [data-chart-type-value="line"]').click();
-      document.querySelector('#wtChannelRows tr[data-channel="${A}"]').click();
-      document.querySelector('[data-chart-type="detail"] [data-chart-type-value="line"]').click();
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const main = Chart.getChart(document.querySelector('#wtChart canvas'));
-      const detail = Chart.getChart(document.querySelector('#wtDetailChart canvas'));
-      const out = {
-        main: main?.data.datasets.map((d) => d.label),
-        mainPoints: main?.data.datasets[0].data.reduce((a, b) => a + b, 0),
-        detail: detail?.data.datasets.map((d) => d.label),
-        note: !document.getElementById('wtChartNote').hidden,
-        saved: localStorage.getItem('cheeseWatchTimeChartType'),
-        height: Math.round(document.querySelector('#wtChart canvas').getBoundingClientRect().height),
-      };
-      document.querySelector('[data-chart-type="main"] [data-chart-type-value="bar"]').click();
-      out.back = !document.querySelector('#wtChart canvas') && document.querySelectorAll('#wtChart .wt-bar').length > 0 &&
-        !Chart.getChart(document.querySelector('#wtDetailChart canvas')) === false;
+    // 그래프는 막대만(꺾은선은 가시성이 낮아 뺐다). 모양 고르기·Chart.js 도 없다.
+    check(await ev(`!document.querySelector('[data-chart-type], #wtChartNote, script[src*="chart.min.js"], #wtChart canvas')`),
+      "꺾은선·그래프 모양 고르기가 없다(막대만)");
+
+    // 가장 많이 본 채널: 이름 앞에 프로필 사진.
+    const topAvatar = await ev(`(() => { const img = document.querySelector('#wtTop img.wt-avatar');
+      return { src: img?.getAttribute('src'), before: !!img && img.compareDocumentPosition(document.querySelector('#wtTop .wt-name')) === Node.DOCUMENT_POSITION_FOLLOWING }; })()`);
+    check(/\?type=f120_120_na$/.test(topAvatar.src || "") && topAvatar.before, `가장 많이 본 채널 이름 앞에 프로필 사진 ${JSON.stringify(topAvatar)}`);
+
+    // 막대 툴팁: 브라우저 title 대신 페이지 툴팁(날짜·합계·종류별).
+    const tip = await ev(`(async () => {
+      const bars = [...document.querySelectorAll('#wtChart .wt-bar')];
+      const bar = bars.find((el) => Number(el.dataset.tipTotal) > 0);
+      bar.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+      const el = document.getElementById('wtChartTip');
+      const box = el.getBoundingClientRect();
+      const fill = bar.querySelector('.wt-bar-fill').getBoundingClientRect();
+      const out = { titles: bars.filter((b) => b.hasAttribute('title')).length, shown: !el.hidden,
+        head: el.querySelector('strong')?.textContent, total: el.querySelector('.wt-chart-tip-total')?.textContent,
+        modes: [...el.querySelectorAll('li')].map((li) => li.textContent), dots: el.querySelectorAll('li .wt-dot').length,
+        near: Math.abs((box.left + box.width / 2) - (fill.left + fill.width / 2)) < 2 || box.left <= 8 };
+      document.getElementById('wtChart').dispatchEvent(new PointerEvent('pointerleave'));
+      out.hiddenAfter = el.hidden;
       return out;
     })()`);
-    check(JSON.stringify(line.main) === JSON.stringify(["전체", "채널B", "채널A"]) && line.mainPoints === 14400 &&
-      JSON.stringify(line.detail) === JSON.stringify(["합계", "라이브", "다시보기", "라디오"]) && line.note && line.height > 100,
-      `꺾은선: 위쪽은 많이 본 채널 + 전체, 채널 상세는 종류별 + 합계 ${JSON.stringify(line)}`);
-    check(line.saved === JSON.stringify({ main: "line", detail: "line" }) && line.back,
-      "그래프 모양은 위쪽·상세를 따로 기억하고, 막대로 되돌리면 꺾은선을 치운다");
+    check(tip.titles === 0 && tip.shown && /^\d{4}-\d{2}-\d{2}/.test(tip.head || "") && tip.total && tip.modes.length > 0 &&
+      tip.dots === tip.modes.length && tip.near && tip.hiddenAfter,
+      `막대에 올리면 페이지 툴팁(날짜·합계·종류별 색 점), 벗어나면 닫힘 ${JSON.stringify(tip)}`);
+
+    // 채널 상세: 누른 행 근처에 떠 있는 창. 바깥을 누르거나 Esc 로 닫는다.
+    const floating = await ev(`(async () => {
+      document.querySelector('#wtChannelRows tr[data-channel="${A}"]').click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // 목록은 다시 그려지므로 누른 뒤 행을 다시 찾는다.
+      const row = document.querySelector('#wtChannelRows tr[data-channel="${A}"]');
+      const panel = document.getElementById('wtDetail');
+      const r = row.getBoundingClientRect();
+      const p = panel.getBoundingClientRect();
+      const out = { shown: !panel.hidden, position: getComputedStyle(panel).position, side: panel.dataset.side,
+        gap: Math.round(panel.dataset.side === 'above' ? r.top - p.bottom : p.top - r.bottom),
+        inView: p.left >= 0 && p.right <= document.documentElement.clientWidth,
+        selected: row.classList.contains('is-selected'),
+        outsideGrid: !document.querySelector('.wt-columns').contains(panel) };
+      document.getElementById('wtTotal').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      out.closedOutside = panel.hidden;
+      document.querySelector('#wtChannelRows tr[data-channel="${A}"]').click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      out.closedEsc = panel.hidden;
+      out.focusBack = document.activeElement?.dataset?.channel === '${A}';
+      return out;
+    })()`);
+    check(floating.shown && floating.position === "absolute" && floating.outsideGrid && floating.selected &&
+      floating.gap >= 0 && floating.gap <= 12 && floating.inView,
+      `채널을 누르면 그 행 바로 옆(아래/위)에 떠 있는 상세 창 ${JSON.stringify(floating)}`);
+    check(floating.closedOutside && floating.closedEsc && floating.focusBack,
+      "상세 창은 바깥을 누르거나 Esc 로 닫고, Esc 면 그 행으로 포커스를 돌려준다");
     if (process.env.WATCH_TIME_SHOTS) {
-      await ev(`document.querySelector('[data-chart-type="main"] [data-chart-type-value="line"]').click()`);
       for (const theme of ["light", "dark"]) {
-        await ev(`document.documentElement.dataset.theme = '${theme}'; document.getElementById('wtTheme').click(); document.getElementById('wtTheme').click()`);
+        await ev(`(() => { document.documentElement.dataset.theme = '${theme}';
+          document.querySelector('#wtChannelRows tr[data-channel="${A}"]').click();
+          const bar = [...document.querySelectorAll('#wtChart .wt-bar')].find((el) => Number(el.dataset.tipTotal) > 0);
+          bar.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); return true; })()`);
         await new Promise((resolve) => setTimeout(resolve, 150));
         const shot = await call("Page.captureScreenshot", { format: "png" }, sessionId);
-        writeFileSync(path.join(process.env.WATCH_TIME_SHOTS, `watch-time-line-${theme}.png`), Buffer.from(shot.data, "base64"));
+        writeFileSync(path.join(process.env.WATCH_TIME_SHOTS, `watch-time-floating-${theme}.png`), Buffer.from(shot.data, "base64"));
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
       }
-      await ev(`document.querySelector('[data-chart-type="main"] [data-chart-type-value="bar"]').click()`);
     }
-    await ev(`document.querySelector('[data-chart-type="detail"] [data-chart-type-value="bar"]').click()`);
 
     // 직접 기간: 공용 달력으로 고른다.
     await ev(`document.querySelector('[data-range="custom"]').click()`);

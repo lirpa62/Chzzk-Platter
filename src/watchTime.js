@@ -85,6 +85,12 @@
       (state.meta[id]?.verified ? '<i class="wt-mark" aria-hidden="true"></i><span class="wt-a11y">인증 마크</span>' : "");
   }
 
+  function avatarHtml(id, className = "wt-avatar") {
+    return channelImage(id)
+      ? `<img class="${className}" src="${esc(channelImage(id))}" alt="" loading="lazy" />`
+      : `<span class="${className}"></span>`;
+  }
+
   // scale: 0~1, 막대 길이(날짜별 상세에서 가장 많이 본 날 대비).
   function stackBar(totals, scale = 1) {
     const sum = MODES.reduce((acc, mode) => acc + totals[mode], 0);
@@ -119,7 +125,9 @@
     $("wtChannels").textContent = `${channels.length.toLocaleString("ko-KR")}개`;
     $("wtAverage").textContent = days.length ? fmt(result.total / days.length) : "-";
     $("wtDays").textContent = days.length ? `${days.length.toLocaleString("ko-KR")}일 기록` : "";
-    $("wtTop").innerHTML = channels.length ? channelNameHtml(channels[0][0]) : "-";
+    $("wtTop").innerHTML = channels.length
+      ? `${avatarHtml(channels[0][0], "wt-avatar wt-avatar-top")}<span class="wt-name-wrap">${channelNameHtml(channels[0][0])}</span>`
+      : "-";
     $("wtTopTime").textContent = channels.length ? fmt(channels[0][1].total) : "";
 
     state.chartDays = result.byDay;
@@ -128,7 +136,7 @@
     $("wtChannelRows").innerHTML = channels.map(([id, totals], index) => `
       <tr data-channel="${esc(id)}" class="${id === state.channelId ? "is-selected" : ""}" tabindex="0">
         <td>${index + 1}</td>
-        <td class="wt-channel-cell">${channelImage(id) ? `<img class="wt-avatar" src="${esc(channelImage(id))}" alt="" loading="lazy" />` : '<span class="wt-avatar"></span>'}<span class="wt-name-wrap">${channelNameHtml(id)}</span></td>
+        <td class="wt-channel-cell">${avatarHtml(id)}<span class="wt-name-wrap">${channelNameHtml(id)}</span></td>
         <td><b>${fmt(totals.total)}</b><small>${result.total ? Math.round((totals.total / result.total) * 1000) / 10 : 0}%</small></td>
         <td>${stackBar(totals)}</td>
         <td>${fmtOrDash(totals.login)}</td>
@@ -198,17 +206,10 @@
     return { from, to, width, empty: !from || !to || from > to };
   }
 
-  // 막대/꺾은선 공용 정리. 꺾은선 차트(Chart.js)는 다시 그리기 전에 치운다.
-  const lineCharts = new WeakMap();
-  function clearChart(chart) {
-    lineCharts.get(chart)?.destroy();
-    lineCharts.delete(chart);
-    chart.classList.remove("is-line");
-  }
-
+  // 막대마다 툴팁에 쓸 값을 data-* 로 남긴다(브라우저 title 툴팁 대신 #wtChartTip).
   function renderChart(chart, byDay, range = rangeBounds()) {
     if (!chart) return;
-    clearChart(chart);
+    hideChartTip();
     const { from, to, width, empty } = chartFrame(chart, byDay, range);
     if (empty) {
       chart.innerHTML = '<p class="wt-empty">기록이 없습니다.</p>';
@@ -220,10 +221,10 @@
     chart.dataset.unit = unit;
     chart.innerHTML = [...buckets].map(([key, b], index) => {
       const label = bucketLabel(unit, key);
-      const title = `${unit === "week" ? `${key} 주` : key} · ${fmt(b.total)}` +
-        (b.total ? `\n${MODES.filter((m) => b[m]).map((m) => `${STORE.MODE_LABELS[m]} ${fmt(b[m])}`).join("\n")}` : "");
+      const modes = MODES.filter((m) => b[m]).map((m) => `${m}:${b[m]}`).join(",");
       return `
-      <div class="wt-bar${index % every ? " is-quiet" : ""}" title="${esc(title)}">
+      <div class="wt-bar${index % every ? " is-quiet" : ""}" data-tip-title="${esc(unit === "week" ? `${key} 주` : key)}"
+        data-tip-total="${b.total}" data-tip-modes="${modes}" aria-label="${esc(`${key} ${fmt(b.total)}`)}">
         <span class="wt-bar-fill">${MODES.map((mode) => b[mode]
           ? `<i class="is-${mode}" style="height:${(b[mode] / max) * 100}%"></i>` : "").join("")}</span>
         <span class="wt-bar-label">${esc(label)}</span>
@@ -231,150 +232,89 @@
     }).join("");
   }
 
-  // ── 꺾은선(Chart.js, 채팅 리캡·통나무파워 내역과 같은 라이브러리) ──
-  // series: [{ label, byDay, field, color, bold }] — 같은 기간·같은 단위(일/주/달)로 맞춘다.
-  const cssVar = (name, fallback) =>
-    getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-  const LINE_COLORS = ["--wt-line-1", "--wt-line-2", "--wt-line-3", "--wt-line-4", "--wt-line-5"];
-
-  function renderLineChart(chart, byDay, series, range = rangeBounds()) {
-    if (!chart) return;
-    if (typeof Chart !== "function") {
-      renderChart(chart, byDay, range); // 라이브러리를 못 불렀으면 막대로
-      return;
-    }
-    clearChart(chart);
-    const { from, to, width, empty } = chartFrame(chart, byDay, range);
-    if (empty || !series.length) {
-      chart.innerHTML = '<p class="wt-empty">기록이 없습니다.</p>';
-      return;
-    }
-    const prepared = series.map((item) => ({ ...item, ...chartBuckets(item.byDay, from, to, width) }));
-    const { unit, buckets } = prepared[0];
-    chart.dataset.unit = unit;
-    chart.classList.add("is-line");
-    chart.innerHTML = '<canvas role="img"></canvas>';
-    const canvas = chart.querySelector("canvas");
-    canvas.setAttribute("aria-label", `${series.map((item) => item.label).join(", ")} 시청 시간 추세`);
-    const max = Math.max(1, ...prepared.flatMap((item) => [...item.buckets.values()].map((b) => b[item.field])));
-    const inHours = max >= 3600;
-    // 눈금은 딱 떨어지는 값으로: 시간 단위면 30분의 배수, 아니면 5분의 배수(4칸 안팎).
-    const unitStep = inHours ? 1800 : 300;
-    const stepSize = Math.max(unitStep, Math.ceil(max / 4 / unitStep) * unitStep);
-    const grid = cssVar("--popup-border", "#d8dade");
-    const muted = cssVar("--popup-muted", "#7e7f85");
-    const text = cssVar("--popup-text", "#26262c");
-    lineCharts.set(chart, new Chart(canvas, {
-      type: "line",
-      data: {
-        labels: [...buckets.keys()].map((key) => bucketLabel(unit, key)),
-        datasets: prepared.map((item) => ({
-          label: item.label,
-          data: [...item.buckets.values()].map((b) => b[item.field]),
-          borderColor: item.color,
-          backgroundColor: item.color,
-          borderWidth: item.bold ? 3 : 2,
-          borderDash: item.dash ? [5, 4] : [],
-          // monotone: 곡선이 0 아래로 내려갔다 오지 않게 한다.
-          cubicInterpolationMode: "monotone",
-          pointRadius: buckets.size > 31 ? 0 : 2,
-          pointHoverRadius: 4,
-        })),
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: "index", intersect: false },
-        scales: {
-          x: { ticks: { color: muted, autoSkip: true, maxRotation: 0 }, grid: { color: grid } },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              color: muted,
-              stepSize,
-              callback: (value) => (inHours ? `${Math.round((value / 3600) * 10) / 10}시간` : `${Math.round(value / 60)}분`),
-              // (30분 배수라 소수점은 .5 만 나온다)
-            },
-            grid: { color: grid },
-          },
-        },
-        plugins: {
-          legend: { labels: { color: text, boxWidth: 12, boxHeight: 2 } },
-          tooltip: {
-            callbacks: {
-              title: (items) => {
-                const key = [...buckets.keys()][items[0]?.dataIndex] || "";
-                return unit === "week" ? `${key} 주` : key;
-              },
-              label: (item) => ` ${item.dataset.label} ${fmt(Number(item.parsed.y) || 0)}`,
-            },
-          },
-        },
-      },
-    }));
+  // ── 막대 툴팁(페이지 스타일). 날짜, 합계, 종류별 시간(색 점)을 보인다. ──
+  const chartTip = $("wtChartTip");
+  let chartTipBar = null;
+  function hideChartTip() {
+    chartTipBar = null;
+    if (chartTip) chartTip.hidden = true;
   }
-
-  // 그래프 모양(막대/꺾은선). 위쪽과 채널 상세를 따로 기억한다(기본 막대).
-  const CHART_TYPE_KEY = "cheeseWatchTimeChartType";
-  const chartType = { main: "bar", detail: "bar" };
-  try {
-    const saved = JSON.parse(localStorage.getItem(CHART_TYPE_KEY) || "{}");
-    for (const key of ["main", "detail"]) if (saved?.[key] === "line") chartType[key] = "line";
-  } catch {}
-
-  function paintChartTypes() {
-    for (const group of document.querySelectorAll("[data-chart-type]")) {
-      for (const button of group.querySelectorAll("[data-chart-type-value]")) {
-        const on = button.dataset.chartTypeValue === chartType[group.dataset.chartType];
-        button.classList.toggle("is-active", on);
-        button.setAttribute("aria-checked", String(on));
-      }
+  function showChartTip(bar) {
+    if (!chartTip) return;
+    if (bar !== chartTipBar) {
+      chartTipBar = bar;
+      const total = Number(bar.dataset.tipTotal) || 0;
+      const rows = String(bar.dataset.tipModes || "").split(",").filter(Boolean).map((pair) => {
+        const [mode, seconds] = pair.split(":");
+        return MODES.includes(mode)
+          ? `<li><i class="wt-dot is-${mode}"></i><span>${STORE.MODE_LABELS[mode]}</span><b>${fmt(Number(seconds) || 0)}</b></li>`
+          : "";
+      }).join("");
+      chartTip.innerHTML =
+        `<strong>${esc(bar.dataset.tipTitle || "")}</strong>` +
+        `<span class="wt-chart-tip-total">${total ? fmt(total) : "기록 없음"}</span>` +
+        (rows ? `<ul>${rows}</ul>` : "");
     }
-    $("wtChartNote").hidden = chartType.main !== "line";
+    chartTip.hidden = false;
+    // 막대 위 가운데. 화면 밖으로 나가면 안쪽으로 당기고, 위가 모자라면 아래로.
+    const rect = bar.querySelector(".wt-bar-fill")?.getBoundingClientRect() || bar.getBoundingClientRect();
+    const tip = chartTip.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - tip.width / 2,
+      document.documentElement.clientWidth - tip.width - margin));
+    let top = rect.top - tip.height - margin;
+    if (top < margin) top = rect.bottom + margin;
+    chartTip.style.left = `${Math.round(left)}px`;
+    chartTip.style.top = `${Math.round(top)}px`;
   }
+  for (const chart of [$("wtChart"), $("wtDetailChart")]) {
+    chart?.addEventListener("pointerover", (event) => {
+      const bar = event.target.closest?.(".wt-bar");
+      if (bar) showChartTip(bar);
+    });
+    chart?.addEventListener("pointerleave", hideChartTip);
+  }
+  document.addEventListener("scroll", hideChartTip, true);
 
-  // 위쪽: 막대는 종류별로 쌓고, 꺾은선은 많이 본 채널 5개 + 전체 합계.
   function drawMainChart() {
-    const chart = $("wtChart");
-    const byDay = state.chartDays || {};
-    if (chartType.main !== "line") {
-      renderChart(chart, byDay);
-      return;
-    }
-    const range = rangeBounds();
-    const top = (state.chartChannels || []).slice(0, 5);
-    renderLineChart(chart, byDay, [
-      { label: "전체", byDay, field: "total", color: cssVar("--popup-text", "#26262c"), bold: true, dash: true },
-      ...top.map(([id], index) => ({
-        label: channelName(id),
-        byDay: STORE.aggregate(state.shards, filter({ channelId: id })).byDay,
-        field: "total",
-        color: cssVar(LINE_COLORS[index], "#888"),
-      })),
-    ], range);
+    renderChart($("wtChart"), state.chartDays || {});
   }
 
-  // 채널 상세: 막대는 종류별로 쌓고, 꺾은선은 라이브·다시보기·라디오 + 합계.
   function drawDetailChart() {
-    const chart = $("wtDetailChart");
-    const byDay = state.detailDays || {};
-    if (chartType.detail !== "line") {
-      renderChart(chart, byDay);
-      return;
-    }
-    renderLineChart(chart, byDay, [
-      { label: "합계", byDay, field: "total", color: cssVar("--popup-text", "#26262c"), bold: true, dash: true },
-      ...state.modes.map((mode) => ({
-        label: STORE.MODE_LABELS[mode], byDay, field: mode, color: cssVar(`--wt-${mode}`, "#888"),
-      })),
-    ]);
+    renderChart($("wtDetailChart"), state.detailDays || {});
+  }
+
+  // 채널 상세를 누른 행 바로 아래에 띄운다. 아래 화면이 모자라고 위가 더 넓으면 위로.
+  // 문서 좌표로 두므로 스크롤하면 행과 함께 움직인다.
+  function placeDetail() {
+    const panel = $("wtDetail");
+    const id = state.channelId;
+    const row = id ? [...$("wtChannelRows").querySelectorAll("tr[data-channel]")]
+      .find((tr) => tr.dataset.channel === id) : null;
+    if (panel.hidden || !row) return;
+    const rect = row.getBoundingClientRect();
+    const table = $("wtChannelRows").closest(".wt-panel").getBoundingClientRect();
+    const margin = 8;
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+    const width = panel.offsetWidth;
+    const height = panel.offsetHeight;
+    // 표 오른쪽 끝에 맞추되 화면 안으로.
+    const left = Math.max(margin, Math.min(table.right - width, viewportWidth - width - margin));
+    const below = viewportHeight - rect.bottom - margin;
+    const above = rect.top - margin;
+    const top = height > below && above > below ? rect.top - height - 6 : rect.bottom + 6;
+    panel.dataset.side = top < rect.top ? "above" : "below";
+    panel.style.left = `${Math.round(left + window.scrollX)}px`;
+    panel.style.top = `${Math.round(Math.max(margin, top) + window.scrollY)}px`;
   }
 
   function renderDetail() {
     const panel = $("wtDetail");
     const id = state.channelId;
-    if (!id) {
+    const inList = id && [...$("wtChannelRows").querySelectorAll("tr[data-channel]")].some((tr) => tr.dataset.channel === id);
+    // 지금 조건의 목록에 없는 채널이면(걸러졌으면) 창을 닫아 둔다.
+    if (!id || !inList) {
       panel.hidden = true;
       return;
     }
@@ -400,6 +340,17 @@
     $("wtDetailDays").innerHTML = days.length
       ? days.map((date) => `<li><span>${esc(date)}</span><span class="wt-stack-track">${stackBar(result.byDay[date], result.byDay[date].total / longest)}</span><b>${fmt(result.byDay[date].total)}</b></li>`).join("")
       : '<li class="wt-empty">이 조건에 맞는 기록이 없습니다.</li>';
+    placeDetail();
+  }
+
+  function closeDetail({ focusRow = false } = {}) {
+    const id = state.channelId;
+    if (!id) return;
+    state.channelId = "";
+    render();
+    if (focusRow) {
+      [...$("wtChannelRows").querySelectorAll("tr[data-channel]")].find((tr) => tr.dataset.channel === id)?.focus();
+    }
   }
 
   // 채널 이름·사진은 치지직 채널 정보로 채운다(7일 캐시). 한 번에 4개씩.
@@ -578,7 +529,9 @@
     if (!event.target.closest?.("[data-wt-picker]")) closePickers(null);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closePickers(null);
+    if (event.key !== "Escape") return;
+    closePickers(null);
+    if (!$("wtDetail").hidden) closeDetail({ focusRow: true });
   });
   $("wtLogin").addEventListener("click", (event) => {
     const button = event.target.closest("[data-login]");
@@ -595,7 +548,7 @@
     if (!row) return;
     state.channelId = row.dataset.channel === state.channelId ? "" : row.dataset.channel;
     render();
-    if (state.channelId) $("wtDetail").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (state.channelId) $("wtDetail").focus({ preventScroll: true });
   };
   $("wtChannelRows").addEventListener("click", pickRow);
   $("wtChannelRows").addEventListener("keydown", (event) => {
@@ -604,9 +557,12 @@
       pickRow(event);
     }
   });
-  $("wtDetailClose").addEventListener("click", () => {
-    state.channelId = "";
-    render();
+  $("wtDetailClose").addEventListener("click", () => closeDetail({ focusRow: true }));
+  // 바깥(행·창이 아닌 곳)을 누르면 닫는다. 달력 등 다른 떠 있는 것은 각자 처리한다.
+  document.addEventListener("pointerdown", (event) => {
+    if ($("wtDetail").hidden) return;
+    if (event.target.closest?.("#wtDetail, #wtChannelRows tr[data-channel]")) return;
+    closeDetail();
   });
   $("wtDetailDelete").addEventListener("click", async () => {
     const id = state.channelId;
@@ -653,24 +609,7 @@
       localStorage.setItem(THEME_KEY, next);
     } catch {}
     paintThemeButton();
-    // 꺾은선 색은 테마 변수에서 읽는다 → 다시 그린다.
-    if (state.chartDays) drawMainChart();
-    if (state.channelId && state.detailDays) drawDetailChart();
   });
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest?.("[data-chart-type-value]");
-    if (!button) return;
-    const key = button.closest("[data-chart-type]")?.dataset.chartType;
-    if (!key) return;
-    chartType[key] = button.dataset.chartTypeValue === "line" ? "line" : "bar";
-    try {
-      localStorage.setItem(CHART_TYPE_KEY, JSON.stringify(chartType));
-    } catch {}
-    paintChartTypes();
-    if (key === "main") drawMainChart();
-    else drawDetailChart();
-  });
-
   // 창 폭이 바뀌면 그래프만 다시 그린다(막대 단위·날짜 글자 간격이 폭을 따른다).
   if (typeof ResizeObserver === "function") {
     let frame = 0;
@@ -686,11 +625,13 @@
       frame = requestAnimationFrame(() => {
         if (state.chartDays) drawMainChart();
         if (state.channelId && state.detailDays) drawDetailChart();
+        placeDetail();
       });
     });
     observer.observe($("wtChart"));
     observer.observe($("wtDetailChart"));
   }
+  window.addEventListener("resize", placeDetail);
 
   // 보는 동안 쌓이는 기록을 따라간다(배경이 몇 초마다 묶어 쓴다).
   let reloadTimer = 0;
@@ -708,7 +649,10 @@
     state.range = "all";
   }
   paintThemeButton();
-  paintChartTypes();
+  // 꺾은선 그래프를 없애며 남은 모양 저장값을 지운다.
+  try {
+    localStorage.removeItem("cheeseWatchTimeChartType");
+  } catch {}
   renderPickers();
   void load();
 })();

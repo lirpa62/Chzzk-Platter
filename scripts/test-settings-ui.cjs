@@ -136,7 +136,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
     await evaluate('document.documentElement.innerHTML = '+JSON.stringify(readFileSync('settings.html','utf8')));
     await evaluate(`document.querySelectorAll('script,link').forEach(el=>el.remove());
       window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320,topH:240})],['cheeseWatchTimeChartType',JSON.stringify({main:'line',detail:'bar'})]]);
+      const preferences=new Map([['cheeseSettingsLastTab','chat'],['cheeseSettingsRememberTab','1'],['cheeseSettingsRememberExpanded','1'],['cheeseMultiviewChatSize',JSON.stringify({w:430,h:320,topH:240})]]);
       Object.defineProperty(window,'localStorage',{value:{getItem:k=>preferences.get(k)||null,setItem:(k,v)=>preferences.set(k,String(v)),removeItem:k=>preferences.delete(k)}});
       window.downloadedBlobs=[];
       URL.createObjectURL=blob=>{downloadedBlobs.push(blob);return 'blob:fixture'};
@@ -549,8 +549,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         'settings export omitted cross-origin multiview chat size');
       check(JSON.stringify(full.settings.cheeseMultiviewChatSize)==='{"w":430,"h":320,"topH":240}',
         'full backup omitted cross-origin multiview chat size');
-      check(regular.appearance.watchTimeChartType?.main==='line'&&full.appearance.watchTimeChartType?.detail==='bar',
-        'watch-time chart preference missing from export');
+      check(!Object.hasOwn(regular.appearance,'watchTimeChartType')&&
+        !Object.hasOwn(full.appearance,'watchTimeChartType'),'removed chart preference is still exported');
       check(!regular.userData&&!Object.hasOwn(regular.settings,'cheeseWatchTimeDays'),
         'settings-only export included watch-time history');
       check(full.userData?.storage?.cheeseWatchTimeDays?.[0]==='2026-10-13'&&
@@ -648,8 +648,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         saved['cheeseWatchTime:2026-10-12']?.['-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|v']===1800&&
         saved.cheeseWatchTimeChannels?.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?.name==='복원 채널',
         'watch-time full backup data was not imported');
-      check(JSON.parse(localStorage.getItem('cheeseWatchTimeChartType')).detail==='line',
-        'watch-time chart preference was not imported');
+      check(localStorage.getItem('cheeseWatchTimeChartType')===null,
+        'removed watch-time chart preference was imported');
       check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,
         'live-filter or following options were not imported');
       check(saved.cheeseMultiviewQuickPosition?.width===700,'multiview panel geometry was not imported');

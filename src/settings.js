@@ -11449,14 +11449,6 @@
   ]);
   const CHAT_RECAP_FULL_DATA_KEY_PATTERN =
     /^(?:chatRecap:[0-9a-f]{32}:[0-9a-f]{32}:\d{4}-\d{2}(?::part:\d+)?|chatRecapCatalog:[0-9a-f]{32}|chatRecapVodChatStatsV1:[0-9a-f]{32}:[0-9a-f]{32}|cheeseVodTitleChangesV1:\d+|cheeseWatchTime:\d{4}-\d{2}-\d{2})$/i;
-  const WATCH_TIME_CHART_TYPE_KEY = "cheeseWatchTimeChartType";
-  function normalizeWatchTimeChartType(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    return {
-      main: value.main === "line" ? "line" : "bar",
-      detail: value.detail === "line" ? "line" : "bar",
-    };
-  }
   const isSettingsFullDataKey = (key) =>
     SETTINGS_FULL_DATA_KEYS.has(key) ||
     CHAT_RECAP_FULL_DATA_KEY_PATTERN.test(key);
@@ -12115,12 +12107,6 @@
   async function exportSettings(includeUserData, button) {
     if (button) button.disabled = true;
     try {
-      let watchTimeChartType = null;
-      try {
-        watchTimeChartType = normalizeWatchTimeChartType(
-          JSON.parse(localStorage.getItem(WATCH_TIME_CHART_TYPE_KEY) || "null"),
-        );
-      } catch {}
       const settings = await chrome.storage.local.get(
         Array.from(SETTINGS_TRANSFER_KEYS),
       );
@@ -12142,7 +12128,6 @@
               ? "dark"
               : "light",
           multiviewChatSize: chatSize,
-          watchTimeChartType,
         },
       };
       if (includeUserData) {
@@ -12384,12 +12369,6 @@
       if (theme === "dark" || theme === "light") {
         localStorage.setItem(THEME_STORAGE_KEY, theme);
         applyTheme(theme);
-      }
-      const watchTimeChartType = normalizeWatchTimeChartType(
-        payload?.appearance?.watchTimeChartType,
-      );
-      if (watchTimeChartType) {
-        localStorage.setItem(WATCH_TIME_CHART_TYPE_KEY, JSON.stringify(watchTimeChartType));
       }
       const multiviewChatSize = imported[MULTIVIEW_CHAT_SIZE_KEY];
       if (multiviewChatSize) {
